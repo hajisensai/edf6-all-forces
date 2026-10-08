@@ -133,9 +133,14 @@ def check_damage(root: str) -> None:
     radio = body(code_only(read(root, 'src/airstrike.cpp')), 'std::uintptr_t __fastcall RadioStartHook(')
     if 'if(!InSession() || IsPlayer(owner))SupportCallAt(' not in radio:
         fail("src/airstrike.cpp RadioStartHook: a remote radio replay can submit a duplicate support request")
-    dispatch = body(code_only(read(root, 'src/support_dispatch.cpp')), 'bool Spawn(')
-    if not before(dispatch, 'RegisterSupportObject(vehicle,unit.netId)', 'NpcBoardCrew('):
-        fail('support hulls must register the host-issued native identity before assigning real crew')
+    support = code_only(read(root, 'src/support_dispatch.cpp'))
+    dispatch = body(support, 'bool Spawn(')
+    if 'RegisterSupportObject(vehicle,unit.netId)' not in dispatch or 'HoldSupportSoldier(object,true)' not in dispatch or \
+            'NpcBoardCrew(' in dispatch or 'FollowSupportSoldier(' in dispatch:
+        fail('support spawn must register native IDs and hold new crew without emitting cross-channel boarding or follow work')
+    tick = body(support, 'void SupportDispatchTick(')
+    if not before(tick, 'SupportTransactionActive(deployed.id)', 'Assign(deployed)'):
+        fail('crew assignment must wait for all-peer spawn acknowledgment')
     for rel, call in (('src/vehicleram.cpp', 'ImpactDamage('), ('src/drill.cpp', 'DrillCharge('), ('src/emc.cpp', 'EmcFire(')):
         if call not in code_only(read(root, rel)):
             fail(f'{rel}: no longer deals its damage through {call} (ShellMake\'s gate): gate the new path too')
