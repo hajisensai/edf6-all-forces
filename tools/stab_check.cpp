@@ -279,6 +279,24 @@ void Stops() {
     Expect(most>g[1].hi-0.5f*kDeg && least<g[1].lo+0.5f*kDeg,"stops: it rides them (the reference not wound up past them)",least/kDeg,most/kDeg);
     std::printf("stops -10..+5 deg under a 12 deg pitching hull: the axis went %.2f..%.2f deg\n",least/kDeg,most/kDeg);
 }
+
+void NativeReadbackContract() {
+    const stab::Frame previous=HullAt(Drive{},0);
+    const stab::Frame current=stab::Turned(previous,0.2f*kDeg);
+    const stab::Stops limits[2]={stab::StopsOf(-stab::kPi,stab::kPi),stab::StopsOf(-1.0f,1.0f)};
+    const float start[2]={0.3f,0.0f};
+    stab::Hold h{};float out[2];
+    stab::Step(h,limits,start,start,0.5f*kDeg,previous,previous,kMbt,out);
+    const float measured=start[0]-0.3f*kDeg;
+    const float before[2]={measured,0},after[2]={measured+0.02f*kDeg,0.01f*kDeg};
+    stab::Readback(h,limits[0],0,start[0],measured);
+    Expect(std::memcmp(h.last.r,previous.r,sizeof(previous.r))==0 && std::memcmp(h.seen.r,previous.r,sizeof(previous.r))==0,
+           "native readback reconciles local actuator state without replacing the previous parent basis");
+    stab::Step(h,limits,before,after,0.5f*kDeg,current,current,kMbt,out);
+    Expect(std::fabs(h.shift[0]+0.2f*kDeg*stab::Gain(kMbt))<1e-6f,
+           "physical tracking lag, hull turn and player input coexist without double correction",h.shift[0]/kDeg);
+    Expect(std::fabs(out[1]-after[1])<1e-6f,"a yaw readback does not rewrite the pitch motor command");
+}
 }  // namespace
 
 int main() {
@@ -289,6 +307,7 @@ int main() {
     Gunner(false);
     WrongSign();
     Stops();
+    NativeReadbackContract();
     std::printf(failures ? "%d FAILED\n" : "all passed\n",failures);
     return failures ? 1 : 0;
 }

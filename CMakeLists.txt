@@ -237,6 +237,10 @@ set_target_properties(exhaust_pose_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${
 add_executable(stab_check EXCLUDE_FROM_ALL tools/stab_check.cpp)
 target_compile_options(stab_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(stab_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+add_executable(stab_native_readback_test EXCLUDE_FROM_ALL tests/stab_native_readback_test.cpp)
+target_include_directories(stab_native_readback_test PRIVATE src common)
+target_link_libraries(stab_native_readback_test PRIVATE edf6common)
+target_compile_options(stab_native_readback_test PRIVATE /W4 /WX /utf-8 /permissive-)
 
 # The Proteus rework's rules (src/proteus_logic.h: the stances and their stagger, the directional shield's heat, the barrier,
 # the salvo's cooldown, the step height) offline (tools/proteus_check.cpp). Not part of the plugin build:
@@ -471,6 +475,9 @@ add_test(NAME pn COMMAND pn_test)
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
     nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check hover_lift_check view_clip_check npc_ai_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
+add_dependencies(offline_checks stab_native_readback_test)
+add_test(NAME stab_native_readback COMMAND stab_native_readback_test "${EDF6_NATIVE_DLL}")
+set_tests_properties(stab_native_readback PROPERTIES SKIP_RETURN_CODE 77)
 add_dependencies(offline_checks turret_cam_runtime_check)
 add_dependencies(offline_checks highcam_input_test)
 foreach(check IN LISTS EDF6_OFFLINE_CHECKS)
