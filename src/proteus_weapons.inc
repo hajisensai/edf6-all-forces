@@ -38,7 +38,7 @@ void QueueWeapons(Unit& u,unsigned char* v,bool driver,const unsigned char* seat
 void __fastcall ProteusEmptyWeapon(void* weapon) {
     bool pair=false;
     __try {
-        if(ok && Cfg().enabled && Cfg().proteus)for(auto& u:units) {
+        if(ok && userOk && nextUser && Cfg().enabled && Cfg().proteus)for(auto& u:units) {
             auto v=const_cast<unsigned char*>(static_cast<const unsigned char*>(u.ref.obj));
             if(!u.ref.Is(v) || !ActiveOf(v) || v[kDead] || !u.closed || SeatCount(v)<kProteusSeats)continue;
             RefreshWeapons(u,v);

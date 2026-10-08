@@ -787,7 +787,7 @@ void FollowCannon(void* aim) noexcept {
         if(aim!=right)continue;
         if(SeatRider(SeatAt(v,kRightSeat))!=Rider::none)continue; // never overwrite an existing real right-seat rider
         const bool driverCannon=driverAim && Cfg().proteusDriverGun && DriverCannonFree(v);
-        if(!driverCannon && !edf::LivingSoldierInSeat(image,SeatAt(v,kLeftSeat)))continue;
+        if(!driverCannon && (!userOk || !nextUser || !edf::LivingSoldierInSeat(image,SeatAt(v,kLeftSeat))))continue;
         const unsigned source=driverCannon ? 0 : kLeftSeat;
         const auto left=seataim::Object(SeatAt(v,source));
         seataim::Follow(left,right,[](unsigned char* axis) noexcept {
@@ -861,6 +861,17 @@ const void* __fastcall UserHook(void* iface,const void* weapon) noexcept {
     return nextUser(iface,weapon);
 }
 
+// Pairing may only activate a right cannon after this hook establishes its current operator. A signature or
+// chain failure leaves the native empty-seat callback in charge, rather than firing as the seat's LAST rider.
+bool InstallProteusUser() noexcept {
+    userOk=false;
+    if(!Matches(kUserSig.rva,kUserSig.bytes,kUserSig.size))return false;
+    void* next=nullptr;
+    if(!edf::ChainVtableSlot(reinterpret_cast<void**>(image+kUserSlotRva),reinterpret_cast<void*>(&UserHook),&next))return false;
+    nextUser=reinterpret_cast<UserFn>(next);
+    userOk=true;return true;
+}
+
 // Whether the soldier searching (`f`) is on the zone's side and `cand` is an enemy the zone puts first.
 bool Priority(const unsigned char* f,const unsigned char* cand,float* weight) noexcept {
     AcquireSRWLockShared(&zoneLock);
@@ -915,7 +926,7 @@ const unsigned char* ProteusSightWeapon(const unsigned char* vehicle,unsigned se
         if(seat==0) {
             bool ready=false;ProteusRoundsReady(&ready,nullptr);
             if(!ready || !Cfg().proteusDriverGun || u->st.mode!=proteus::Mode::deployed || !DriverCannonFree(vehicle))return nullptr;
-        } else if(seat!=kLeftSeat || !edf::LivingSoldierInSeat(image,SeatAt(const_cast<unsigned char*>(vehicle),kLeftSeat)) ||
+        } else if(!userOk || !nextUser || seat!=kLeftSeat || !edf::LivingSoldierInSeat(image,SeatAt(const_cast<unsigned char*>(vehicle),kLeftSeat)) ||
                   SeatRider(SeatAt(const_cast<unsigned char*>(vehicle),kRightSeat))!=Rider::none)return nullptr;
         unsigned char* holder=nullptr;
         return SeatWeapon(const_cast<unsigned char*>(vehicle),kRightSeat,&holder);
@@ -982,12 +993,7 @@ bool InstallProteus() noexcept {
             std::memcpy(&rel,image+kDamageCall+1,4);
             damageThunk=image+kDamageCall+5+rel;
         }
-        if(Matches(kUserSig.rva,kUserSig.bytes,kUserSig.size)) {
-            void** const slot=reinterpret_cast<void**>(image+kUserSlotRva);
-            void* next=nullptr;
-            userOk=edf::ChainVtableSlot(slot,reinterpret_cast<void*>(&UserHook),&next);
-            if(userOk)nextUser=reinterpret_cast<UserFn>(next);
-        }
+        InstallProteusUser();
         fieldOk=AllMatch(kFieldSigs,sizeof(kFieldSigs)/sizeof(kFieldSigs[0]),"the field");
         if(AllMatch(kSearchSigs,sizeof(kSearchSigs)/sizeof(kSearchSigs[0]),"the allies' priority")) {
             void** const slot=reinterpret_cast<void**>(image+kSearchSlotRva);

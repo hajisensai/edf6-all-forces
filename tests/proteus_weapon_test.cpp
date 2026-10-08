@@ -26,7 +26,7 @@ void InitWeapon(unsigned char* w,unsigned i) {
     Put<float>(w,kRate,1);Put<float>(w,kSpread,1);
 }
 void Setup(bool native){
-    ok=true;config.proteus=true;config.proteusDriverGun=true;config.proteusFieldRadius=0;roundsReady=true;
+    ok=userOk=true;config.proteus=true;config.proteusDriverGun=true;config.proteusFieldRadius=0;roundsReady=true;
     Put<void*>(vehicle,0,image+kVtBig);Put<void*>(vehicle,kSelfCtrl,ctrl);Put<void*>(vehicle,kSeats,seats);Put<std::uint64_t>(vehicle,kSeatCount,4);
     Put<float>(vehicle,kHpMax,7500);Put<float>(vehicle,kHp,7500);Put<int>(ctrl,8,1);Put<int>(ctrl,12,2);Put<int>(weaponCtrl,8,1);
     Put<void*>(human,0,image+kVtRanger);Put<void*>(human,kSelfCtrl,ctrl);Put<float>(human,kHp,100);
@@ -139,6 +139,29 @@ void Native(){
     const auto patchedEmpty=reinterpret_cast<WeaponEnableFn>(image+0x6302B7+At<std::int32_t>(image,0x6302B3));
     config.enabled=false;right[0x13E]=1;patchedEmpty(right);
     Check(!right[0x13E],"real patched callback thunk delegates stock disable when plugin is off");
+    config.enabled=true;
+    Put<void*>(seats+kSeatStride,kSeatRider,human);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,ctrl);
+    const auto actualNext=nextUser;
+    auto userSlot=reinterpret_cast<void**>(image+kUserSlotRva);
+    void* originalUser=*userSlot;
+    // All post-pose/empty hooks are already installed in this private real DLL. Fail ONLY operator installation.
+    DWORD protection=0;VirtualProtect(image+kUserFn,1,PAGE_EXECUTE_READWRITE,&protection);
+    const auto savedByte=image[kUserFn];image[kUserFn]=0xCC;
+    Check(!InstallProteusUser() && !userOk,"actual operator signature mismatch disables pairing eligibility");
+    right[0x13E]=1;right[kPull]=0;left[kPull]=1;patchedEmpty(right);
+    Check(!right[0x13E] && !right[kPull] && !ProteusSightWeapon(vehicle,1),
+          "signature failure with successful other hooks cannot activate/pull/advertise paired cannon");
+    image[kUserFn]=savedByte;VirtualProtect(image+kUserFn,1,protection,&protection);
+    Check(edf::PatchVtableSlot(userSlot,originalUser,nullptr),"private fixture empties operator slot to force real chain failure");
+    Check(!InstallProteusUser() && !userOk,"actual operator chain failure disables pairing eligibility");
+    right[0x13E]=1;right[kPull]=0;patchedEmpty(right);
+    Check(!right[0x13E] && !right[kPull],"chain failure with successful empty/post hooks still delegates stock disable");
+    Check(edf::PatchVtableSlot(userSlot,nullptr,originalUser),"private fixture restores native operator slot");
+    Check(InstallProteusUser() && userOk && nextUser==actualNext,"successful real operator installation enables pairing");
+    right[kPull]=0;patchedEmpty(right);
+    Check(right[0x13E] && right[kPull] && UserHook(vehicle+kUserIface,right)==human+0x120,
+          "pair activation resumes only with verified current-operator continuation");
+
 
 }
 }

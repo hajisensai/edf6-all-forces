@@ -167,3 +167,5 @@ EDF.dll TimeDateStamp 0x678CCB46，地址都是 RVA。H = 反汇编里直接看�
 炮口读取执行原版 `0x6969A0` 于私有 0xF0 字节 muzzle 副本；这样涵盖 mode 0 武器矩阵、mode 1 骨矩阵及 mode 2 FireVector，且不改 live muzzle 的发射缓存。驾驶准线使用此炮口、直射弹实际 960 m/s 和地形交点；右炮达限位时显示实际方向，不显示相机中心的虚构命中。左炮手同时看到左右两根实体炮的路径。导弹架独立跟随驾驶员，不再因左炮手有人而停止跟随；标记偏离当前真实导弹架 15 度以上时取消齐射，避免任意侧向发射。齐射仍使用原有 IFC 弹道求解，未把间接弹改为制导弹。
 
 验证：`proteus_weapon_test` 生产夹具覆盖后置刷新、队列去重/失效和驾驶准线；加 EDF.dll 路径运行原生模式会以 `DONT_RESOLVE_DLL_REFERENCES` 私有映射真实 DLL，仅解析 CRT math imports，执行原版使用者、激活/停用、拉扳机、ready gate、三种炮口模式，并在私有映像执行生产安装器/跳板。没有启动游戏或写入安装。双机及实际渲染操作未验证。
+
+配对是 fail-closed 的：`userOk && nextUser` 必须成立才允许右炮跟随左炮手、展示配对射线及执行原生 active/pull。`0x62D950` 签名不符或 operator slot 链接失败时，empty 包装继续调用原生停用，防止旧 LAST rider 取得本帧炮弹归属。真实 DLL 夹具在其它挂点已成功的情况下分别破坏签名、清空 vtable slot 强制链失败，检查两种负路径均不激活、不 pull；恢复并成功安装 operator 后才重新允许配对。
