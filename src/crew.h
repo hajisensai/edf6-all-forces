@@ -746,6 +746,7 @@ bool InstallSightZoom() noexcept;
 void SightZoomFrame(unsigned char* vehicle,unsigned seat,bool padButton) noexcept;
 void SightZoomStock(unsigned char* vehicle) noexcept;
 float SightZoomNow(const void* vehicle) noexcept;
+bool SightZoomMounted(const void* vehicle=nullptr) noexcept; // active physical optic; turret input stays native
 // Current validated seat/weapon fire-control surface; none when unavailable or another camera owns the view.
 sightzoom::Kind SightZoomView(const void* vehicle=nullptr) noexcept;
 void ResetSightZoom() noexcept;

@@ -3,8 +3,9 @@
 // 6x -> 1x while the player sits at a vehicle's gun. How the game zooms (docs/zoom-re.md, H): the player's camera
 // (CharacterGhostCamera, slot 4 0xF86A0) sets its vertical field of view every frame from its zoom (cam+0x410: the
 // soldier's scope, 1 riding): cam+0x24 = (pi/4) / zoom, and builds the projection and the culling frustum from that;
-// sightzoom.cpp retracts its previous FOV write before the next original step, then divides the original result by
-// the seat's magnification. This also restores the no-target branch, which does not rewrite FOV. Pure arithmetic:
+// A scope requires a real model-authored optic anchor for the selected weapon. sightzoom.cpp sets cam+0x220 to
+// that eye and the actual bore direction as well as changing FOV. It retracts its own matrix and FOV before the next
+// original step, including the no-target branch. An armed vehicle alone is not proof of an installed optic. Arithmetic:
 // tools/gunsight_check.cpp; production hook and seat lifecycle: tests/sightzoom_test.cpp.
 #pragma once
 #include <cmath>
