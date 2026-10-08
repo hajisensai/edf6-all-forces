@@ -58,8 +58,6 @@ void __fastcall RideHook(void* object,bool spawned) noexcept {
     e->prepared=false;e->prepareAttempted=false;
     EnsureInputs();
     PrepareIntent(*e,v);
-    if(NpcDriver(v) && SeatRider(SeatAt(v,0))!=Rider::dummy)e->dispatched=true;
-
 }
 }
 
@@ -93,9 +91,12 @@ void MissionCrewVehicleFrame(unsigned char* v) noexcept {
     Entry* e=Observe(v);if(!e)return;
     if(tick)tick(v);
     // Handles a mission already running when the plugin initialized, without disturbing its route.
-    for(unsigned i=0;i<SeatCount(v);++i)if(SeatRider(SeatAt(v,i))==Rider::dummy)e->requested=true;
-    if(e->requested && !e->dispatched && PrepareIntent(*e,v) && factory && OnlineMaySeatNpc(v))
-        e->dispatched=factory(v,e->restored);
+    bool legacy=false;
+    for(unsigned i=0;i<SeatCount(v);++i)legacy=legacy || SeatRider(SeatAt(v,i))==Rider::dummy;
+    if(legacy)e->requested=true;
+    if(!e->requested || e->dispatched || !PrepareIntent(*e,v))return;
+    if(!legacy && NpcDriver(v)){e->dispatched=true;return;}
+    if(factory && OnlineMaySeatNpc(v))e->dispatched=factory(v,e->restored);
 }
 
 unsigned char* MissionVehicleById(const unsigned char* id) noexcept {

@@ -9,7 +9,8 @@ void EnsureInputs() noexcept {}
 bool nativeReady=true,setupWorks=true;int preparations=0;
 bool RealDriverNativeReady() noexcept {return nativeReady;}
 bool PrepareNpcVehicle(unsigned char*,bool) noexcept {++preparations;return setupWorks;}
-bool NpcDriver(const unsigned char*) noexcept {return false;}
+bool alreadyCrewed=false;
+bool NpcDriver(const unsigned char*) noexcept {return alreadyCrewed;}
 bool OnlineMaySeatNpc(const void*) noexcept {return true;}
 }
 namespace {
@@ -66,5 +67,10 @@ int main() {
  Check(requests==1 && preparations==1,"EDF5 BVM or snapshot Dummy is native AI intent even without slot50 interception");
  MissionCrewVehicleFrame(vehicle);
  Check(requests==1,"observed legacy rider is migrated once rather than recreating crew every frame");
+ ResetMissionCrew();requests=preparations=0;alreadyCrewed=true;nativeReady=false;
+ Put<void*>(legacySeat,kSeatRiderCtrl,nullptr);call(vehicle,true);MissionCrewVehicleFrame(vehicle);
+ Check(!entries[0].dispatched && preparations==0,"an existing real pilot does not discard deferred native setup");
+ nativeReady=true;MissionCrewVehicleFrame(vehicle);
+ Check(entries[0].dispatched && preparations==1 && requests==0,"existing real crew keeps its identity after deferred setup");
  VirtualFree(image,0,MEM_RELEASE);std::printf("mission_crew: %d checks passed\n",checks);
 }
