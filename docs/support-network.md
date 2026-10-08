@@ -13,6 +13,10 @@ planner supplies the fixed catalog resource IDs, target, and every aircraft,
 ground vehicle and real human's matrix. It may return pending while incremental
 navigation runs. `deriveId` wraps `DeriveSupportSoldierNetId` with a live registered
 host player anchor; it must not generate an ID from a player slot or raw address.
+The same hooks provide `ReadMissionParticipants` and
+`MissionParticipantGateReady`. The latter must be true only after the native
+upper creation gate has installed; Coop independently requires its safe creation
+call-site gate before exposing a usable support transport.
 
 Online UI requests contain only a catalog ID and finite target. The host checks
 the current room, requester membership, request watermark, rate and outstanding
@@ -57,12 +61,25 @@ Callback tokens are separate process-monotonic 64-bit identities and never reset
 with the wire epoch; a late failure callback cannot cancel a new transaction that
 reuses wire slot 1. Both dispatchers retain tokens as keys, not array indexes.
 
-The current transport supplies an EOS room roster rather than a proven frozen
-current-mission participant set. Consequently a roster/readiness change suspends
-further calls until explicit mission reset. Existing actors are retained, but this
-is not late-join actor/seat catchup and must not be presented as such. Determining
-which lobby members actually participate in the current mission remains necessary
-before ordinary lobby churn can safely reopen the support protocol.
+`EDF6AF_GetMissionParticipants` publishes an atomic frozen current-world PUID
+set and local world epoch. It is sealed only after the native all-team visitor
+finds every expected player Soldier (including dead players); split-screen PUIDs
+are deduplicated only after that completeness check. A new lobby user is not a
+world player. Coop validates and routes only this frozen subset, so a lobby-only
+join or leave does not change the support generation or ACK quorum. A genuine
+participant link/identity/host failure still suspends new requests and retains
+existing actors until explicit mission reset; it does not erase occupied hulls.
+
+Admission is checked before native player allocation. Coop guards the verified
+null-safe call at `1DC525`; AF guards the `22B626` call to the upper weak-result
+constructor. Both call the same `SupportMissionPlayerAllowed` policy: before
+sealing, ordinary initial player creation proceeds; after sealing, the dynamic
+User roster resolves only the requested mission index's PUID, which must be in
+the frozen actual-world set. A new lobby member therefore waits for the next
+mission, while existing players may respawn. Neither `591130` nor `5A3F90` is
+globally made to return null, since another original caller dereferences that
+result. No mid-world actor/seat catchup is claimed or substituted with invisible
+local-only actors.
 
 The host-internal `SubmitPreparedSupportPlan` handles existing mission vehicles
 through the same protocol. It accepts reserved catalog 1023 and exactly one
@@ -73,7 +90,7 @@ this reserved catalog. An active migration for the same vehicle is deduplicated.
 To replace a dead/failed crew, report failure for its previous transaction first;
 the cancelled record permits a fresh transaction with new derived human IDs.
 
-The v1 limits are 1024 remote peers, 16 units per deployment, and 128 transactions
+The protocol v2 limits are 1024 remote peers, 16 units per deployment, and 128 transactions
 per mission epoch. Cancelled records remain tombstones; they are not evicted to
 make room for replayed IDs. Player requests are limited to one per two seconds,
 and only one transaction plans or commits at a time. Existing live support may
@@ -90,10 +107,10 @@ dynamic-ABI bridge against a local recording provider, including generation race
 and teardown. The main DLL is compiled with MSVC `/W4 /WX`.
 
 The companion transport additionally tests real localhost UDP reliability and
-ordering. Its v1 readiness requires the complete current Epic room roster to
-match authenticated direct peers with the same extension profile. Virtual rejoin
-and rooms with direct-only members outside that roster remain unavailable rather
-than spawning local-only support. No game process, game installation writes,
+ordering. Its readiness requires every frozen current-world participant to match
+authenticated direct peers with the `af-support/2` profile. Lobby-only users are
+excluded. Virtual rejoin and participants whose identity/profile cannot be
+verified remain unavailable rather than spawning local-only support. No game process, game installation writes,
 injection, real-game physics, native movement convergence or two-machine gameplay
 test was performed for this implementation. Native ID creation/registration and
 crew/entry adapters have their own private-image tests; these do not establish a

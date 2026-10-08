@@ -3,7 +3,7 @@
 #include <array>
 
 namespace crew::support_net {
-constexpr std::uint32_t kMagic=0x54525053,kVersion=1;
+constexpr std::uint32_t kMagic=0x54525053,kVersion=2;
 enum class Kind : std::uint32_t { hello=1,welcome,request,begin,unit,prepare,ready,commit,result,cancel,activate,activated };
 struct Message {
     Kind kind=Kind::hello;

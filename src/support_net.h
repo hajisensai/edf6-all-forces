@@ -25,6 +25,8 @@ struct Hooks {
     bool (*spawn)(std::uint64_t,const Plan&,bool remote) noexcept=nullptr;
     void (*destroy)(std::uint64_t) noexcept=nullptr;
     bool (*deriveId)(std::uint32_t,unsigned char*) noexcept=nullptr;
+    bool (*participants)(void**,std::uint32_t,std::uint32_t*,std::uint32_t*) noexcept=nullptr;
+    bool (*admissionReady)() noexcept=nullptr;
 };
 bool ValidPlan(const Plan& plan,bool requireIds=true) noexcept;
 } // namespace support_net
@@ -35,6 +37,10 @@ void SupportNetTick() noexcept;
 void ResetSupportNet() noexcept;
 void ReportSupportFailure(std::uint64_t transaction) noexcept;
 bool SupportTransactionActive(std::uint64_t transaction) noexcept;
+// Called before native player construction once this world has sealed its
+// actual participant PUIDs. A newly joined lobby member waits for the next world.
+bool SupportParticipantAllowed(void* puid) noexcept;
+bool SupportMissionPlayerAllowed(int missionIndex) noexcept;
 // Host-internal mission vehicle migration. Existing-vehicle units carry their
 // canonical registered ID and are resolved, never created or destroyed.
 std::uint64_t SubmitPreparedSupportPlan(const SupportPlan& plan) noexcept;

@@ -10,12 +10,18 @@
 namespace fixture {
 ULONGLONG tick=10000;
 bool installed=true,ready=true,host=true,online=true,stale=false;
+bool gateReady=false;
+unsigned actors=0,expectedActors=0;
+const char* actorPuids[4]={"host","client","host","lobby-only"};
 std::uint64_t generation=1;
 unsigned spawnCount=0,destroyCount=0,sendCount=0,peerCount=0;
 EDF6CoopPeer Peer(const char* id) { EDF6CoopPeer p{};strcpy_s(p.id,id);return p; }
 struct Packet { EDF6CoopPeer sender;unsigned char bytes[176]; };
 std::deque<Packet> incoming;
-HMODULE WINAPI Module(LPCWSTR name) { return installed && !wcscmp(name,L"EDF6Coop.dll") ? reinterpret_cast<HMODULE>(1) : nullptr; }
+HMODULE WINAPI Module(LPCWSTR name) {
+    if(!wcscmp(name,L"EOSSDK-Win64-Shipping.dll"))return reinterpret_cast<HMODULE>(2);
+    return installed && !wcscmp(name,L"EDF6Coop.dll") ? reinterpret_cast<HMODULE>(1) : nullptr;
+}
 ULONGLONG WINAPI Clock() { return tick; }
 FARPROC WINAPI Proc(HMODULE,LPCSTR);
 }
@@ -57,7 +63,27 @@ std::uint32_t EDF6COOP_CALL Api(std::uint32_t version,std::uint32_t size,EDF6Coo
     if(version!=1 || size!=sizeof(*out))return 0;
     *out={sizeof(*out),1,&Snapshot,&Member,&Send,&Poll};return 1;
 }
-FARPROC WINAPI Proc(HMODULE,LPCSTR name) { return !std::strcmp(name,"EDF6CoopGetExtensionApi") ? reinterpret_cast<FARPROC>(&Api) : nullptr; }
+int __cdecl PuidToString(void* id,char* out,std::int32_t* length) {
+    const char* text=static_cast<const char*>(id);const auto needed=static_cast<std::int32_t>(std::strlen(text)+1);
+    if(*length<needed)return 1;std::memcpy(out,text,needed);*length=needed;return 0;
+}
+std::uint32_t __cdecl ResolvePlayer(std::int32_t index,EDF6CoopPeer* out) {
+    if(index<0 || index>2)return 0;*out=Peer(index==0 ? "host" : index==1 ? "client" : "lobby-only");return 1;
+}
+std::uint32_t __cdecl TransportGateReady() { return 1; }
+FARPROC WINAPI Proc(HMODULE,LPCSTR name) {
+    if(!std::strcmp(name,"EDF6CoopGetExtensionApi"))return reinterpret_cast<FARPROC>(&Api);
+    if(!std::strcmp(name,"EOS_ProductUserId_ToString"))return reinterpret_cast<FARPROC>(&PuidToString);
+    if(!std::strcmp(name,"EDF6Coop_ResolveMissionPlayerPuid"))return reinterpret_cast<FARPROC>(&ResolvePlayer);
+    if(!std::strcmp(name,"EDF6Coop_MissionAdmissionReady"))return reinterpret_cast<FARPROC>(&TransportGateReady);
+    return nullptr;
+}
+bool Participants(void** out,std::uint32_t capacity,std::uint32_t* count,std::uint32_t* expected) noexcept {
+    if(actors>capacity)return false;
+    for(unsigned i=0;i<actors;++i)out[i]=const_cast<char*>(actorPuids[i]);
+    *count=actors;*expected=expectedActors;return true;
+}
+bool AdmissionReady() noexcept { return gateReady; }
 PlanResult PlanCall(std::uint32_t id,const float* target,Plan* plan) noexcept {
     *plan={};plan->catalogId=id;plan->count=1;std::memcpy(plan->target,target,12);
     auto& u=plan->units[0];u.resourceId=1;u.matrix[0]=u.matrix[5]=u.matrix[10]=u.matrix[15]=1;return PlanResult::ready;
@@ -67,6 +93,28 @@ bool Spawn(std::uint64_t,const Plan&,bool remote) noexcept { Check(!remote,"host
 void Destroy(std::uint64_t) noexcept { ++destroyCount; }
 bool Derive(std::uint32_t ordinal,unsigned char* bytes) noexcept { std::memset(bytes,0,32);bytes[12]=5;std::memcpy(bytes+4,&ordinal,4);return true; }
 void Step() { tick+=100;crew::SupportNetTick(); }
+void WorldParticipants() {
+    installed=true;online=true;ready=false;actors=2;expectedActors=3;gateReady=false;
+    crew::ConfigureSupportNet({&PlanCall,&Validate,&Spawn,&Destroy,&Derive,&Participants,&AdmissionReady});
+    EDF6AFMissionParticipants state{};
+    Check(crew::SupportMissionPlayerAllowed(2),"initial mission creation remains allowed before roster seal");
+    Step();Check(EDF6AF_GetMissionParticipants(1,sizeof(state),&state) && !state.ready,"unverified native admission gate cannot publish ready world");
+    gateReady=true;tick+=300;Step();EDF6AF_GetMissionParticipants(1,sizeof(state),&state);
+    Check(!state.ready,"partial player construction cannot become ACK quorum");
+    actors=3;tick+=300;Step();EDF6AF_GetMissionParticipants(1,sizeof(state),&state);
+    Check(state.ready && state.participantCount==2 && !std::strcmp(state.participants[0].id,"client"),"complete native world deduplicates split-screen PUIDs");
+    const auto epoch=state.worldEpoch;
+    Check(crew::SupportMissionPlayerAllowed(0) && crew::SupportMissionPlayerAllowed(1),"existing mission players may respawn");
+    Check(!crew::SupportMissionPlayerAllowed(2),"lobby-only player cannot enter sealed current world");
+    Check(!crew::SupportMissionPlayerAllowed(99),"failed pre-create identity read fails closed");
+    actors=0;tick+=300;Step();EDF6AF_GetMissionParticipants(1,sizeof(state),&state);
+    Check(state.ready && state.participantCount==2 && state.worldEpoch==epoch,"death/removal observations cannot redefine frozen quorum");
+    Check(!EDF6AF_GetMissionParticipants(2,sizeof(state),&state),"world snapshot ABI rejects unsupported version");
+    crew::ResetSupportNet();actors=4;expectedActors=4;tick+=300;Step();EDF6AF_GetMissionParticipants(1,sizeof(state),&state);
+    Check(state.ready && state.participantCount==3 && state.worldEpoch!=epoch && crew::SupportMissionPlayerAllowed(2),
+        "next explicit mission admits prior lobby-only player into new frozen world");
+    crew::ResetSupportNet();
+}
 }
 int main() {
     using namespace fixture;
@@ -90,5 +138,6 @@ int main() {
     installed=true;peerCount=0;generation++;tick+=1000;Step();
     online=false;Step();Check(!crew::SubmitSupportRequest(1,at,note,256),"offline never sends multiplayer requests");
     crew::ResetSupportNet();
+    WorldParticipants();
     std::printf("support runtime bridge: %d checks passed\n",checks);
 }

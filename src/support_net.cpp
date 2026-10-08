@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cwchar>
+#include <algorithm>
 
 namespace crew {
 namespace {
@@ -15,8 +16,60 @@ EDF6CoopExtensionApi api{};
 EDF6CoopSnapshot snapshot{};
 EDF6CoopPeer peers[support_net::kMaxPeers+1]{};
 HMODULE module=nullptr;
+using AdmissionReadyFn=std::uint32_t(__cdecl*)();
+AdmissionReadyFn transportAdmissionReady=nullptr;
 bool running=false,blockedUntilMission=false;
 ULONGLONG nextResolve=0,lastTick=~0ULL;
+SRWLOCK worldLock=SRWLOCK_INIT;
+EDF6AFMissionParticipants world{};
+bool worldFrozen=false;
+std::uint64_t worldSerial=0;
+ULONGLONG nextWorldRead=0;
+
+bool PuidText(void* puid,EDF6CoopPeer& out) noexcept {
+    out={};
+    const HMODULE eos=GetModuleHandleW(L"EOSSDK-Win64-Shipping.dll");
+    if(!puid || !eos)return false;
+    using Convert=int(__cdecl*)(void*,char*,std::int32_t*);
+    const auto convert=reinterpret_cast<Convert>(GetProcAddress(eos,"EOS_ProductUserId_ToString"));
+    if(!convert)return false;
+    std::int32_t length=sizeof(out.id);
+    __try {return convert(puid,out.id,&length)==0 && length>1 && length<=sizeof(out.id) &&
+        out.id[0] && std::memchr(out.id,0,sizeof(out.id));}
+    __except(EXCEPTION_EXECUTE_HANDLER){out={};return false;}
+}
+void ResetWorld() noexcept {
+    AcquireSRWLockExclusive(&worldLock);
+    world={};world.size=sizeof(world);worldFrozen=false;
+    if(worldSerial!=UINT64_MAX)world.worldEpoch=++worldSerial;
+    ReleaseSRWLockExclusive(&worldLock);nextWorldRead=0;
+}
+void WorldTick(ULONGLONG now) noexcept {
+    if(!hooks.participants || !hooks.admissionReady || !hooks.admissionReady() ||
+       !world.worldEpoch || now<nextWorldRead)return;
+    nextWorldRead=now+250;
+    // Only the game thread writes worldFrozen. Once sealed, deaths, respawns,
+    // team changes and lobby churn do not redefine current-world membership.
+    if(worldFrozen)return;
+    void* puids[support_net::kMaxPeers]{};
+    std::uint32_t count=0,expected=0;
+    if(!hooks.participants(puids,support_net::kMaxPeers,&count,&expected) ||
+       !expected || expected>support_net::kMaxPeers || count!=expected)return;
+    EDF6AFMissionParticipants next{};next.size=sizeof(next);next.worldEpoch=world.worldEpoch;
+    for(std::uint32_t i=0;i<count;++i)if(!PuidText(puids[i],next.participants[i]))return;
+    auto less=[](const EDF6CoopPeer& a,const EDF6CoopPeer& b){return std::strcmp(a.id,b.id)<0;};
+    auto equal=[](const EDF6CoopPeer& a,const EDF6CoopPeer& b){return std::strcmp(a.id,b.id)==0;};
+    std::sort(next.participants,next.participants+count,less);
+    const auto end=std::unique(next.participants,next.participants+count,equal);
+    next.participantCount=static_cast<std::uint32_t>(end-next.participants);
+    // Split-screen humans share a PUID, but all expected native player actors
+    // must have existed before deduplicating them into a network ACK quorum.
+    for(std::uint32_t i=next.participantCount;i<count;++i)next.participants[i]={};
+    next.ready=1;
+    AcquireSRWLockExclusive(&worldLock);world=next;worldFrozen=true;ReleaseSRWLockExclusive(&worldLock);
+    Log("SUPPORT world participants sealed: actors=%u peers=%u epoch=%llu",count,next.participantCount,
+        static_cast<unsigned long long>(next.worldEpoch));
+}
 
 std::uint64_t Nonce(void*) noexcept {
     unsigned lo=0,hi=0;if(rand_s(&lo) || rand_s(&hi))return 0;
@@ -33,13 +86,15 @@ bool PeerValid(const EDF6CoopPeer& peer) noexcept {
 }
 bool Resolve(ULONGLONG now) noexcept {
     const HMODULE current=GetModuleHandleW(L"EDF6Coop.dll");
-    if(current && current==module && api.snapshot)return true;
-    api={};module=nullptr;
+    if(current && current==module && api.snapshot)return transportAdmissionReady && transportAdmissionReady()!=0;
+    api={};module=nullptr;transportAdmissionReady=nullptr;
     if(now<nextResolve)return false;nextResolve=now+1000;
     if(!current)return false;
     const auto get=reinterpret_cast<EDF6CoopGetExtensionApiFn>(GetProcAddress(current,"EDF6CoopGetExtensionApi"));
+    transportAdmissionReady=reinterpret_cast<AdmissionReadyFn>(GetProcAddress(current,"EDF6Coop_MissionAdmissionReady"));
     if(!get || !get(EDF6COOP_EXTENSION_VERSION,sizeof(api),&api) || api.size!=sizeof(api) ||
-       api.version!=EDF6COOP_EXTENSION_VERSION || !api.snapshot || !api.peer || !api.send || !api.poll) {
+       api.version!=EDF6COOP_EXTENSION_VERSION || !api.snapshot || !api.peer || !api.send || !api.poll ||
+       !transportAdmissionReady || !transportAdmissionReady() || !GetProcAddress(current,"EDF6Coop_ResolveMissionPlayerPuid")) {
         api={};return false;
     }
     module=current;return true;
@@ -69,7 +124,7 @@ void ConfigureSupportNet(const support_net::Hooks& configured) noexcept {
     session.Configure({nullptr,&Send,&Nonce,hooks});
 }
 void ResetSupportNet() noexcept {
-    session.Stop();running=false;blockedUntilMission=false;snapshot={};lastTick=~0ULL;
+    session.Stop();running=false;blockedUntilMission=false;snapshot={};lastTick=~0ULL;ResetWorld();
 }
 void SuspendSupportNet() noexcept {
     session.Suspend();running=false;blockedUntilMission=true;
@@ -78,6 +133,7 @@ void SuspendSupportNet() noexcept {
 void SupportNetTick() noexcept {
     const ULONGLONG now=GetTickCount64();
     if(lastTick==now)return;lastTick=now;
+    if(InSession())WorldTick(now);
     if(blockedUntilMission)return;
     if(!Cfg().enabled || !InSession() || !Resolve(now)) {if(running)SuspendSupportNet();return;}
     EDF6CoopSnapshot next{};next.size=sizeof(next);
@@ -118,12 +174,52 @@ void ReportSupportFailure(std::uint64_t transaction) noexcept {
     }
 }
 bool SupportTransactionActive(std::uint64_t transaction) noexcept { return session.IsActive(transaction); }
+bool SupportParticipantAllowed(void* puid) noexcept {
+    AcquireSRWLockShared(&worldLock);
+    const bool frozen=worldFrozen;ReleaseSRWLockShared(&worldLock);
+    if(!frozen)return true;
+    EDF6CoopPeer peer;if(!PuidText(puid,peer))return false;
+    AcquireSRWLockShared(&worldLock);
+    bool allowed=!worldFrozen;
+    for(std::uint32_t i=0;worldFrozen && i<world.participantCount;++i)
+        allowed=allowed || !std::strcmp(peer.id,world.participants[i].id);
+    ReleaseSRWLockShared(&worldLock);return allowed;
+}
+std::uint32_t GetMissionParticipants(std::uint32_t version,std::uint32_t size,EDF6AFMissionParticipants* out) noexcept {
+    if(!out || version!=EDF6AF_MISSION_PARTICIPANTS_VERSION || size!=sizeof(*out))return 0;
+    AcquireSRWLockShared(&worldLock);*out=world;ReleaseSRWLockShared(&worldLock);
+    return 1;
+}
+std::uint32_t AllowMissionPlayer(std::int32_t index) noexcept {
+    AcquireSRWLockShared(&worldLock);const bool frozen=worldFrozen;ReleaseSRWLockShared(&worldLock);
+    if(!frozen)return 1;
+    EDF6CoopPeer peer{};
+    const HMODULE coop=GetModuleHandleW(L"EDF6Coop.dll");
+    using ResolvePlayer=std::uint32_t(__cdecl*)(std::int32_t,EDF6CoopPeer*);
+    const auto resolve=coop ? reinterpret_cast<ResolvePlayer>(GetProcAddress(coop,"EDF6Coop_ResolveMissionPlayerPuid")) : nullptr;
+    bool allowed=false;
+    if(index>=0 && resolve && resolve(index,&peer) && PeerValid(peer)) {
+        AcquireSRWLockShared(&worldLock);
+        for(std::uint32_t i=0;i<world.participantCount;++i)allowed=allowed || !std::strcmp(peer.id,world.participants[i].id);
+        ReleaseSRWLockShared(&worldLock);
+    }
+    if(!allowed)Log("SUPPORT admission: mission player %d waits until the next mission (not in sealed world)",index);
+    return allowed ? 1u : 0u;
+}
+bool SupportMissionPlayerAllowed(int index) noexcept { return AllowMissionPlayer(index)!=0; }
 std::uint64_t SubmitPreparedSupportPlan(const SupportPlan& plan) noexcept {
     SupportNetTick();
     return running && OnlineHostOnly() ? session.SubmitPrepared(plan,GetTickCount64()) : 0;
 }
 } // namespace crew
 
-// The transport advertises af-support/1 only when this production protocol is
+// The transport advertises af-support/2 only when this production protocol is
 // actually loaded, not merely when the older room-isolation marker exists.
-extern "C" __declspec(dllexport) std::uint32_t __cdecl EDF6AF_SupportProtocolVersion() noexcept { return 1; }
+extern "C" __declspec(dllexport) std::uint32_t __cdecl EDF6AF_SupportProtocolVersion() noexcept { return 2; }
+extern "C" __declspec(dllexport) std::uint32_t __cdecl EDF6AF_GetMissionParticipants(
+    std::uint32_t version,std::uint32_t size,EDF6AFMissionParticipants* out) noexcept {
+    return crew::GetMissionParticipants(version,size,out);
+}
+extern "C" __declspec(dllexport) std::uint32_t __cdecl EDF6AF_AllowMissionPlayer(std::int32_t index) noexcept {
+    return crew::AllowMissionPlayer(index);
+}
