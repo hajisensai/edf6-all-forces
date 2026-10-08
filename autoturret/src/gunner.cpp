@@ -1,5 +1,5 @@
 // Tank gunners: the side guns of the Titan (Vehicle404_Tank) and of the Ranger's gunner-seat tanks
-// (Vehicle403_Tank) aim themselves, and an unmanned side gun also fires.
+// (Vehicle403_Tank): real NPC occupants aim/fire; players receive optional aim assistance.
 //
 // Seat 0 is the driver's (the main cannon); every other seat with a gun of its own (a weapon holder and
 // an aim controller) is a gunner seat, each driving its gun through the same VehicleWeaponAim the flak
@@ -9,12 +9,9 @@
 // every seat's turn input unconditionally. Hooking slot 55 and rewriting the gunner seats after the stock
 // code aims them.
 //
-// Who is in a seat is the test common/seat.cpp makes for both plugins (edf::SeatRider): the
-// DummyVehicleRider of an NPC-crewed vehicle and an NPC soldier count as AI crew, a pad-driven human as a
-// player, and a rider another machine runs (online) as remote.
-//   player in the seat  -> auto-aim only (GunnerAssist); the trigger stays theirs, the stick takes over
-//   no player, crewed   -> aim and fire (GunnerAI): player-driven or NPC-driven tanks alike
-//   nobody aboard       -> left alone
+// The shared seat contract rejects DummyVehicleRider, unknown objects, dead humans
+// and expired references. Each seat is controlled by its own occupant's machine.
+// Local players retain their trigger and optional GunnerAssist; empty seats stay idle.
 //
 // The aim is closed on the real barrel: every frame the muzzle frame is rebuilt from its bone's
 // world rows and the muzzle's local matrix (the transform fire-time 0x6969A0 runs), so the aim does
@@ -51,47 +48,30 @@ constexpr std::size_t kWeaponAmmo=0xBE8;
 using TriggerFn=void(__fastcall*)(void*);
 VehicleInputFn next403=nullptr,next404=nullptr;
 
-// Weapon user: the vehicle's interface at +0x120 answers who operates one of its weapons (0x62D950,
-// slot 11 of that interface's vtable): the rider of the seat holding it, else the seat's +0x300
-// object, else null. Every weapon step asks it, and the fire step (0x690BB0, and the spawn 0x690CC0)
-// refuses a null answer, as well as one with bit 0 of +8 set (an object another machine runs). An
-// empty gunner seat answers null, so its gun could never fire. With GunnerAI on, such a gun is
-// operated by whoever operates the driver's gun: a local driver fires it here, a remote driver's
-// machine fires it there. The driver's own gun answering null stays null.
+// The native operator lookup stays authoritative. Empty/dummy/dead side seats
+// cannot borrow another seat's driver through the historical LocalOperator fallback.
 constexpr unsigned kUserIface403Vtable=0x17D9238,kUserIface404Vtable=0x17D96F0,kWeaponUser=0x62D950;
 constexpr std::size_t kUserIface=0x120,kUserSlot=0x58/8;
 using UserFn=const void*(__fastcall*)(void*,const void*);
-UserFn nextUser[2]{};   // 403, 404
-
-// An operator (a rider's network object, rider+0x120) another machine runs: bit 0 of its +8.
-bool RemoteUser(const void* user) noexcept {
-    const auto u=static_cast<const unsigned char*>(user);
-    return Readable(u,edf::kNetFlags+1) && (u[edf::kNetFlags]&1)!=0;
-}
-
-// An empty gunner seat's gun is operated by the first seat (the driver's first) whose operator this
-// machine runs: a remote driver's machine would fire it there, and an unmodded one never does, so a
-// local NPC or player aboard takes it instead.
-// The first seat's operator this machine runs, for an empty seat's `weapon`; nullptr with none. Under __try:
-// the seats are read between Readable's look and the read (its cached answer may be a frame old).
-const void* LocalOperator(UserFn next,void* iface,const void* weapon) noexcept {
+UserFn nextUser[2]{};
+bool RealWeaponSeat(void* iface,const void* weapon) noexcept {
     __try {
         const auto vehicle=static_cast<unsigned char*>(iface)-kUserIface;
-        const unsigned count=edf::SeatCount(vehicle);
-        for(unsigned s=0;s<count;++s) {
-            const auto gun=SeatGun(edf::SeatAt(vehicle,s));
-            if(!gun || gun==weapon)continue;
-            const auto other=next(iface,gun);
-            if(other && !RemoteUser(other))return other;
+        for(unsigned s=0;s<edf::SeatCount(vehicle);++s) {
+            const auto seat=edf::SeatAt(vehicle,s);
+            const auto holders=At<const unsigned char* const*>(seat,kSeatWeapons);
+            const auto count=At<std::uint64_t>(seat,kSeatWeaponCount);
+            if(count>16 || !Readable(holders,count*8))continue;
+            for(std::uint64_t i=0;i<count;++i)
+                if(Readable(holders[i],kHolderWeapon+8) && At<const void*>(holders[i],kHolderWeapon)==weapon)
+                    return s==0 || edf::LivingSoldierInSeat(image,seat);
         }
-    } __except(EXCEPTION_EXECUTE_HANDLER) {}
-    return nullptr;
+        return true; // not a seat weapon: preserve the native result
+    } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
-
 template<int I> const void* __fastcall WeaponUser(void* iface,const void* weapon) {
-    const auto user=nextUser[I](iface,weapon);
-    if(user || !cfg.enabled || !cfg.gunnerAi)return user;
-    return LocalOperator(nextUser[I],iface,weapon);
+    if(!RealWeaponSeat(iface,weapon))return nullptr;
+    return nextUser[I](iface,weapon);
 }
 
 enum class Crew { none, ai, player, remote };   // remote: a rider another machine runs
@@ -127,9 +107,44 @@ bool AllFinite(const float* v,int n) noexcept {
 
 Crew SeatCrew(const unsigned char* seat) noexcept {
     const edf::Rider rider=edf::SeatRider(image,seat);
-    if(rider==edf::Rider::none)return Crew::none;
+    if(rider==edf::Rider::none || !edf::LivingSoldierInSeat(image,seat))return Crew::none;
     if(edf::RemoteRider(At<const unsigned char*>(seat,edf::kSeatRider)))return Crew::remote;   // its own machine aims it
     return rider==edf::Rider::player ? Crew::player : Crew::ai;
+}
+
+// Only trigger latches raised here are released. Run before stock input so a
+// newly seated human can write its own fresh input afterwards. Holder/control
+// identity prevents clearing an unrelated weapon after a respawn or replacement.
+struct GunnerPull { const unsigned char* vehicle; const void* vehicleCtrl; unsigned seat;
+                    unsigned char* holder; const void* ctrl; unsigned char* weapon; };
+GunnerPull ownedPulls[128]{};
+void ReleaseGunnerPulls(const void* vehicle) noexcept {
+    for(auto& p:ownedPulls) {
+        if(!p.weapon || (vehicle && p.vehicle!=vehicle))continue;
+        __try {
+            if(Readable(p.vehicle,kSelfCtrl+8) && At<const void*>(p.vehicle,kSelfCtrl)==p.vehicleCtrl &&
+               Readable(p.holder,kTriggerWeapon+8) && At<const void*>(p.holder,kTriggerCtrl)==p.ctrl &&
+               At<const void*>(p.holder,kTriggerWeapon)==p.weapon && Readable(p.ctrl,12) && At<int>(p.ctrl,8)>0 &&
+               Readable(p.weapon,kWeaponFire+1,true) && p.weapon[kWeaponFire]==1)p.weapon[kWeaponFire]=0;
+        } __except(EXCEPTION_EXECUTE_HANDLER) {}
+        p=GunnerPull{};
+    }
+}
+bool PullOwned(unsigned char* vehicle,unsigned seat,unsigned char* holder) noexcept {
+    if(!cfg.enabled || !cfg.gunnerAi || seat>=edf::SeatCount(vehicle) || SeatCrew(edf::SeatAt(vehicle,seat))!=Crew::ai)return false;
+    const auto ctrl=At<const void*>(holder,kTriggerCtrl);
+    const auto weapon=At<unsigned char*>(holder,kTriggerWeapon);
+    if(!Readable(ctrl,12) || At<int>(ctrl,8)<=0 || !Readable(weapon,kWeaponFire+1,true))return false;
+    GunnerPull* record=nullptr;
+    for(auto& p:ownedPulls) {
+        if(p.weapon && (!Readable(p.vehicle,kSelfCtrl+8) || At<const void*>(p.vehicle,kSelfCtrl)!=p.vehicleCtrl))p=GunnerPull{};
+        if(p.weapon==weapon){record=&p;break;}
+        if(!record && !p.weapon)record=&p;
+    }
+    if(!record)return false;
+    if(!weapon[kWeaponFire])*record={vehicle,At<const void*>(vehicle,kSelfCtrl),seat,holder,ctrl,weapon};
+    reinterpret_cast<TriggerFn>(image+kPullTrigger)(holder);
+    return true;
 }
 
 // The barrel: the mean of the gun's muzzles (the Titan's side cannons have two).
@@ -366,7 +381,7 @@ void SteerSeat(unsigned char* vehicle,unsigned s,Crew crew,float down,const Near
         // A pull the weapon has not read by the next frame means this gun is not being updated.
         if(track.firing && gun.weapon[kWeaponFire])++track.stale;
         ++track.pulls;
-        reinterpret_cast<TriggerFn>(image+kPullTrigger)(gun.trigger);
+        PullOwned(vehicle,s,static_cast<unsigned char*>(gun.trigger));
     }
     track.firing=fire;
     if(cfg.debug && now-track.loggedAt>500) {
@@ -380,7 +395,7 @@ void SteerSeat(unsigned char* vehicle,unsigned s,Crew crew,float down,const Near
 }
 
 // The seat's second weapon (holder 1): the Titan M2/M3 side missiles (Weapon_VehicleShoot,
-// MissileBullet01, LockonType 1). The game locks them itself, NPC or empty seat alike (the lock tick
+// MissileBullet01, LockonType 1). The game locks them itself (the lock tick
 // 0x6963A0 in every weapon update), along the main turret's yaw (they hang on smorkG_l/r under
 // cannon_main), and a pull fires as many rounds as there are locks (0x690C48: burst = +0xC68), then
 // cools 720 frames; with no lock the fire step returns at once (0x690C3D). So an AI seat pulls only
@@ -395,6 +410,7 @@ constexpr ULONGLONG kMissileSettleMs=600,kMissileHoldMs=4000;
 
 void FireMissiles(unsigned char* vehicle,unsigned s,Track& m) noexcept {
     const auto seat=edf::SeatAt(vehicle,s);
+    if(SeatCrew(seat)!=Crew::ai || !cfg.gunnerAi)return;
     const auto holders=At<const unsigned char* const*>(seat,kSeatWeapons);
     if(At<std::uint64_t>(seat,kSeatWeaponCount)<2 || !Readable(holders,16) || !Readable(holders[1],kHolderWeapon+8))return;
     const auto weapon=At<const unsigned char*>(holders[1],kHolderWeapon);
@@ -414,7 +430,7 @@ void FireMissiles(unsigned char* vehicle,unsigned s,Track& m) noexcept {
     if(locked!=m.locks){m.locksGrewAt=now;if(!m.locks)m.locksFirstAt=now;m.locks=locked;}
     const auto full=static_cast<std::uint64_t>(At<std::int32_t>(weapon,kLockMax));
     if(locked<full && now-m.locksGrewAt<kMissileSettleMs && now-m.locksFirstAt<kMissileHoldMs)return;
-    reinterpret_cast<TriggerFn>(image+kPullTrigger)(trigger);
+    PullOwned(vehicle,s,trigger);
     if(cfg.debug)Log("GUNNER v=%p seat=%u missiles: %llu locked (of %llu), ammo=%d",vehicle,s,
                      static_cast<unsigned long long>(locked),static_cast<unsigned long long>(full),At<std::int32_t>(weapon,kWeaponAmmo));
     m.locks=0;m.locksFirstAt=0;
@@ -432,7 +448,7 @@ void DriverFrame(unsigned char* vehicle) noexcept {
     PublishAim(vehicle,false,locked,locked ? world : nullptr,nullptr,nullptr,nullptr,nullptr,0.0f);
 }
 
-bool Wanted(Crew c) noexcept { return c==Crew::player ? cfg.gunnerAssist : c!=Crew::remote && cfg.gunnerAi; }
+bool Wanted(Crew c) noexcept { return c==Crew::player ? cfg.gunnerAssist : c==Crew::ai && cfg.gunnerAi; }
 
 // Debug: say once per vehicle why it has no gunners to steer.
 void LogSkip(const unsigned char* vehicle,const char* why) noexcept {
@@ -444,10 +460,9 @@ void LogSkip(const unsigned char* vehicle,const char* why) noexcept {
 // Online, the stock vehicle update (slot 51 0x672AD0 -> 0x62E6C0, every frame while in a session, 0x7748F0) hands
 // every gunner seat that is empty, or whose rider another machine runs, to the network: 0x5FBA20 sets its aim's
 // +0xC0, and the aim step (0x5FBDA0, from slot 4) then turns it by the network's input (+0xB0, which nothing on
-// the host writes) instead of the seat's turn input (vehicle +0x2AA0): an empty seat this plugin steers stood still
-// whenever the player hosted a co-op game. A seat whose rider this machine runs gets 0x5FB880 instead (the stock
-// call at 0x62E72B): its turn input applies. So a seat steered here, of a vehicle whose driver this machine runs,
-// gets the same, each frame before its input is written (the update sets the flag again at its end).
+// the host writes) instead of the seat's turn input (vehicle +0x2AA0). A real seat occupant whose machine runs
+// here gets 0x5FB880 instead (stock call 0x62E72B). Apply it only for an admitted local occupant, independently
+// of the driver's authority, before writing the local aim inputs.
 constexpr std::size_t kAimNetwork=0xC0;
 constexpr unsigned kAimLocal=0x5FB880;
 void TakeFromNetwork(const unsigned char* vehicle,unsigned s,unsigned char* seat) noexcept {
@@ -479,17 +494,16 @@ void Gunners(unsigned char* vehicle) noexcept {
         any=any || (gunner[s] && Wanted(crew[s]));
     }
     if(!crewed){LogSkip(vehicle,"nobody aboard");return;}   // a parked tank stays quiet
-    if(!any)return;
     // The player driving (seat 0, the main cannon, which is theirs): their lock is what the gunners fight; the
     // readout shows it (no mode: their gun is not the plugin's).
     if(crew[0]==Crew::player)DriverFrame(vehicle);
+    if(!any)return;
     Nearby nearby;
     ScanEnemies(vehicle,cfg.gunnerRange+kMuzzleReach,nearby);
     const float down=Down(vehicle);
-    const bool local=crew[0]!=Crew::remote;   // its driver this machine's (or none): its seats are this machine's to turn
     for(unsigned s=1;s<count;++s) {
-        if(!gunner[s] || !Wanted(crew[s]))continue;   // an empty gunner seat is wanted: the AI crews it
-        if(local)TakeFromNetwork(vehicle,s,edf::SeatAt(vehicle,s));
+        if(!gunner[s] || !Wanted(crew[s]))continue;
+        TakeFromNetwork(vehicle,s,edf::SeatAt(vehicle,s)); // authority belongs to this occupant, not the driver
         Track* track=TrackFor(vehicle,s,crew[s]==Crew::player);
         if(!track)continue;
         SteerSeat(vehicle,s,crew[s]==Crew::player ? Crew::player : Crew::ai,down,nearby,*track);
@@ -507,8 +521,8 @@ void Run(void* vehicle) noexcept {
 // The stock input runs first in both: it zeroes or fills every seat's turn input and handles the
 // riders' own triggers; the gunners only overwrite the gunner seats after it. Slot 55 with all four
 // register arguments (edf::VehicleInputFn), as EDF6VehicleCrew's hook on the same slot forwards them.
-void __fastcall Hook403(void* vehicle,std::uintptr_t hasInput,void* r8,void* r9) { next403(vehicle,hasInput,r8,r9);Run(vehicle); }
-void __fastcall Hook404(void* vehicle,std::uintptr_t hasInput,void* r8,void* r9) { next404(vehicle,hasInput,r8,r9);Run(vehicle); }
+void __fastcall Hook403(void* vehicle,std::uintptr_t hasInput,void* r8,void* r9) { ReleaseGunnerPulls(vehicle);next403(vehicle,hasInput,r8,r9);Run(vehicle); }
+void __fastcall Hook404(void* vehicle,std::uintptr_t hasInput,void* r8,void* r9) { ReleaseGunnerPulls(vehicle);next404(vehicle,hasInput,r8,r9);Run(vehicle); }
 
 struct Signature { std::size_t rva; unsigned char bytes[27]; std::size_t size; };
 
