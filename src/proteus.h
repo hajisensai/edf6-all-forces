@@ -14,6 +14,11 @@ bool ProteusReady() noexcept;                     // InstallProteus found the re
 // 0x547C30 for every object): subcarrier.cpp's check of that call takes it as intact, whichever installs first.
 bool ProteusDamageThunk(const void* target) noexcept;
 bool IsProteus(const void* vehicle) noexcept;     // a VehicleBigBegaruta (the Proteus, V614_PROTEUS_MK2* / VEHICLE407_BIGBEGARUTA*)
+// The actual right cannon borrowed by the driver (0), or paired with the left gunner (1). No synthetic holder.
+const unsigned char* ProteusSightWeapon(const unsigned char* vehicle,unsigned seat) noexcept;
+struct StockArm;
+// Custom driver's straight round, with its real physical bore and 960 m/s flight (not the stock weapon's ammo).
+bool ProteusDriverSight(const unsigned char* vehicle,StockArm* out) noexcept;
 // Engine slots 2/3 still drive the weapons; empty closed slots are not public seats.
 unsigned ProteusVisibleSeats(const unsigned char* vehicle,unsigned count) noexcept;
 // Every vehicle's input (crew.cpp InputHook), before the seat switch and before the plugin's Enabled test: a Proteus a

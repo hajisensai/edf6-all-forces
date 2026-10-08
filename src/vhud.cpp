@@ -278,6 +278,16 @@ void StockHudFrame(unsigned char* v) noexcept {
             Arm(w,!r.heli && a.coFired,a,w==sight && !(HighCamOn(v) || TurretCamHighTransition(v)));
             if(!r.aimOk && a.aimed){std::memcpy(r.aim,a.bore,12);r.aimOk=true;}
         }
+    // Proteus seat 0 owns no stock holder. Its custom gun borrows the physical right cannon; never substitute
+    // the stock cannon's speed/ammo for that custom round. Seat 1 also shows the paired right barrel's path.
+    if(r.seat==0 && !r.arms && ProteusDriverSight(v,&r.arm[0])) {
+        r.arms=1;r.sight=0;r.aimOk=true;std::memcpy(r.aim,r.arm[0].bore,12);
+    } else if(r.seat==1 && r.arms<kStockArms) {
+        if(const auto paired=ProteusSightWeapon(v,r.seat)) {
+            auto& a=r.arm[r.arms++];a.physicalOnly=true;a.coFired=true;
+            Arm(paired,true,a,false);
+        }
+    }
     r.selected=pickedArm>=0 ? pickedArm : storeArm;
     FuelGauge(v,&r.fuel);
     Threats(v,r);

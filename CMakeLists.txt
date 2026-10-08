@@ -947,3 +947,13 @@ target_compile_options(camera_payload_lifecycle_test PRIVATE /W4 /WX /utf-8 /per
 target_link_options(camera_payload_lifecycle_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks camera_payload_lifecycle_test)
 add_test(NAME camera_payload_lifecycle COMMAND camera_payload_lifecycle_test)
+# Proteus original weapon callbacks and post-pose firing; native mode maps EDF.dll without DllMain.
+add_executable(proteus_weapon_test EXCLUDE_FROM_ALL tests/proteus_weapon_test.cpp)
+target_include_directories(proteus_weapon_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(proteus_weapon_test PRIVATE edf6common user32)
+target_compile_options(proteus_weapon_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+target_link_options(proteus_weapon_test PRIVATE /OPT:REF)
+add_dependencies(offline_checks proteus_weapon_test)
+add_test(NAME proteus_weapon COMMAND proteus_weapon_test)
+add_test(NAME proteus_weapon_native COMMAND proteus_weapon_test "${EDF6_NATIVE_DLL}")
+set_tests_properties(proteus_weapon_native PROPERTIES SKIP_RETURN_CODE 77)

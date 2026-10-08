@@ -9,7 +9,7 @@ Config config{};ULONGLONG now=3600000,frame=1;
 unsigned char vehicle[0x3000]{},seats[4*kSeatStride]{},human[0x400]{},ctrl[16]{};
 unsigned char* observerHuman=human;
 int failures=0,checks=0,gunShots=0,salvoShots=0;
-bool netSession=false,netAuthority=true;
+bool netSession=false,netAuthority=true,roundsReady=false;
 const void* localNpcAuthority=nullptr;
 std::int32_t netDriver=42;
 int controlSends=0,defenseSends=0;
@@ -17,6 +17,11 @@ proteus_net::State lastControl,lastDefense;
 float lastFrom[3]{},lastAt[3]{};bool roundSucceeds=true;
 unsigned char* testPoseBones=nullptr;
 void Check(bool pass,const char* what){++checks;if(!pass){++failures;std::printf("FAIL %s\n",what);}}
+void __fastcall FakeMuzzle(void* raw,const void* matrix){
+    unsigned char w[edf::kWeaponMatrix+64]{};std::memcpy(w+edf::kWeaponMatrix,matrix,64);
+    float pos[3],dir[3];edf::MuzzleFrame(w,static_cast<const unsigned char*>(raw),pos,dir);
+    std::memcpy(static_cast<unsigned char*>(raw)+0x80,pos,12);std::memcpy(static_cast<unsigned char*>(raw)+0x70,dir,12);
+}
 void Tick(){++frame;now+=100;ProteusFrame(vehicle);}
 }
 const Config& Cfg() noexcept{return config;}
@@ -39,7 +44,7 @@ bool CameraRay(float*,float*) noexcept{return false;}
 bool VisitEnemies(const unsigned char*,EnemyVisitor,void*) noexcept{return true;}
 float MapRay(const float*,const float*,float*) noexcept{return -1.0f;}
 unsigned char* PlayerHuman() noexcept{return observerHuman;}
-void ProteusRoundsReady(bool* gun,bool* salvo) noexcept{if(gun)*gun=false;if(salvo)*salvo=false;}
+void ProteusRoundsReady(bool* gun,bool* salvo) noexcept{if(gun)*gun=roundsReady;if(salvo)*salvo=roundsReady;}
 unsigned char* BoneRecord506(const unsigned char*,const wchar_t* name) noexcept{
     if(!testPoseBones)return nullptr;
     if(!std::wcscmp(name,L"pile_l"))return testPoseBones+36*kBoneStride;
@@ -64,6 +69,8 @@ int main(){
           At<const void*>(image,kProteusPoseSlot)==reinterpret_cast<const void*>(&ProteusPoseHook),
           "production install chains only the actual BigBegaruta pose slot");
     Check(!InstallProteusPose(),"unexpected already-hooked pose slot is not blindly overwritten");
+    buildMuzzle=&FakeMuzzle;
+    Put<void*>(human,0,image+kVtRanger);Put<float>(human,kHp,100);
     ok=true;config.debug=false;config.proteusDriverGun=false;config.proteusFieldRadius=0;
     Put<const void*>(vehicle,0,image+kVtBig);Put<void*>(vehicle,kSelfCtrl,ctrl);Put<void*>(vehicle,kSeats,seats);Put<std::uint64_t>(vehicle,kSeatCount,4);
     Put<float>(vehicle,kWalk,10);Put<float>(vehicle,kWalkEase,0.1f);Put<float>(vehicle,kTurn,0.2f);Put<float>(vehicle,kJump,8);Put<float>(vehicle,kStepNormal,0.76f);
@@ -85,6 +92,7 @@ int main(){
     Check(At<float>(vehicle,kWalk)==0 && At<float>(vehicle,kJump)==0,"deployed leg and jump parameters change in real object");
     // Both riders are local. Seat 0 must keep controlling the vehicle while PlayerHuman observes seat 1.
     alignas(16) unsigned char gunnerHuman[0x400]{},gunnerCtrl[16]{};
+    Put<void*>(gunnerHuman,0,image+kVtRanger);Put<float>(gunnerHuman,kHp,100);
     gunnerHuman[edf::kHumanPlayer]=1;Put<void*>(gunnerHuman,edf::kHumanPad,gunnerHuman);Put<int>(gunnerCtrl,8,1);
     Put<void*>(seats+kSeatStride,kSeatRider,gunnerHuman);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,gunnerCtrl);
     seats[kSeatStride+kSeatPad]=0;observerHuman=gunnerHuman;
@@ -143,6 +151,9 @@ int main(){
     Put<void*>(seats+kSeatStride,kSeatRider,nullptr);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,nullptr);
     fire.mark=human;fire.markAt[2]=200;fire.salvoLeft=2;Salvo(fire,vehicle,now,config);
     Check(salvoShots==1 && fire.salvoLeft==1 && lastFrom[0]==-3,"salvo creates a round from actual tube and consumes one on success");
+    fire.markAt[0]=100;fire.markAt[2]=100;Salvo(fire,vehicle,now+2000,config);
+    Check(salvoShots==1 && fire.salvoLeft==0,"sideways mark outside physical launcher cone cannot create a sideways salvo");
+    fire.salvoLeft=1;fire.markAt[0]=0;
     fire.markAt[2]=-200;Salvo(fire,vehicle,now+2000,config);
     Check(salvoShots==1 && fire.salvoLeft==0,"target behind launcher cannot fire through its hull");
     fire.markAt[2]=200;fire.salvoLeft=2;roundSucceeds=false;Salvo(fire,vehicle,now+4000,config);

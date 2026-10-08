@@ -111,7 +111,7 @@ int main(){
     Check(!ActiveOf(vehicle) && !Shield(vehicle,hit,&was),"destroyed vehicle cannot resurrect protection from a packet");
     vehicle[kDead]=0;
     alignas(16) unsigned char realNpc[0x400]{},npcControl[16]{};
-    Put<void*>(realNpc,0,image+kVtRanger);Put<std::uint16_t>(realNpc,0x128,2);Put<int>(npcControl,8,1);
+    Put<void*>(realNpc,0,image+kVtRanger);Put<float>(realNpc,kHp,100);Put<std::uint16_t>(realNpc,0x128,2);Put<int>(npcControl,8,1);
     Put<void*>(seats+kSeatStride,kSeatRider,realNpc);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,npcControl);
     Check(LocalGunner(vehicle),"host-owned real NPC gunner may operate the paired native cannon on the host replica");
     Put<std::uint16_t>(realNpc,0x128,1);Check(!LocalGunner(vehicle),"remote copy of that NPC cannot trigger another paired shot");
