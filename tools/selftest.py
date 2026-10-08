@@ -49,6 +49,7 @@ import gen_stores  # noqa: E402
 import installer  # noqa: E402
 import ledger  # noqa: E402
 import make_artillery  # noqa: E402
+import make_edf5_campaign as e5c  # noqa: E402
 import make_jets  # noqa: E402
 import make_katyusha  # noqa: E402
 import modfiles  # noqa: E402
@@ -3323,6 +3324,8 @@ def pack_install_upgrade_uninstall() -> None:
                 ledger.Ledger(game).put(gen.OWNER, 'OBJECT/EDF6TR_FAKE.SGO', b'range object')
                 return []
             enter(patched(gen, install=mission, grand_battle=lambda plan: plan))
+            enter(patched(e5c, build=lambda game: _e5c_stub()))   # its own install / remove / check run for real
+            enter(patched(e5c.modfiles, refuse_while_running=lambda *a, **k: None))   # the real game may be open
             for group in buildcache.GROUPS:
                 made = (b'mac', {'FAKE_PIECE.MAC': b'piece'}) if group == 'bigmap' else \
                     {f'OBJECT/EDF6VC_FAKE_{group.upper()}.SGO': group.encode()}
@@ -3335,7 +3338,8 @@ def pack_install_upgrade_uninstall() -> None:
             with contextlib.redirect_stdout(io.StringIO()):
                 _pack_bundle(bundle, b'v1 ')
                 answers[:] = ['y']   # AT_C: back up the other mod's file and replace it
-                installer.install(game)
+                installer.install(game, campaign_requested=True)
+                assert e5c.enabled(game), 'explicit campaign opt-in was not installed'
                 assert not answers, 'install did not ask before replacing the other mod\'s AT_C'
                 for name in _cmake_plugins():
                     assert _read(os.path.join(plugins, name + '.dll')) == b'v1 ' + name.encode(), f'{name}.dll not installed'
@@ -3352,6 +3356,7 @@ def pack_install_upgrade_uninstall() -> None:
                 # The upgrade: new DLLs, a setting the new ini adds.
                 _pack_bundle(bundle, b'v2 ', {'EDF6AutoTurret': '\r\n; new in v2\r\nNewTurretKey=5\r\n'})
                 installer.install(game)
+                assert e5c.enabled(game), 'ordinary update lost the campaign opt-in'
                 assert _read(os.path.join(plugins, 'EDF6AutoTurret.dll')) == b'v2 EDF6AutoTurret'
                 at_text = _read(os.path.join(plugins, 'EDF6AutoTurret.ini')).decode()
                 assert 'Gain=7.5' in at_text and 'NewTurretKey=5' in at_text and installer.ADDED_HEADER in at_text
@@ -4694,6 +4699,288 @@ def soft_edge_wired() -> None:
 def installer_recovery_regressions() -> None:
     from test_installer_recovery import run_checks
     run_checks()
+
+
+# ---------------------------------------------------------------- the EDF5 campaign (tools/make_edf5_campaign.py)
+
+
+def _e5c_stub() -> tuple[dict[str, bytes], int, dict]:
+    """make_edf5_campaign.build on a stand-in game (no Root.cpk to read): a file per list, 147 rows before."""
+    return {rel: f'stub {rel}'.encode() for rel in e5c.FILES}, 147, {'rows': [], 'skipped': []}
+
+
+def _e5c_have_game() -> bool:
+    import rootcpk
+    return os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk'))
+
+
+def _e5c_real() -> tuple[object, set[str]]:
+    import rootcpk
+    game = rootcpk.Game(rootcpk.DEFAULT_GAME)
+    return game, e5c.map_names(rootcpk.DEFAULT_GAME, game)
+
+
+@contextlib.contextmanager
+def _e5c_game() -> Iterator[tuple[str, object]]:
+    """A stand-in game directory whose Root.cpk reads are the real game's (and the game counted as closed)."""
+    game, maps = _e5c_real()
+    with tempfile.TemporaryDirectory(prefix='edf6vc-e5c-') as root, \
+            patched(e5c, map_names=lambda _root, _game: maps), \
+            patched(e5c.rootcpk, Game=lambda _root: game), \
+            patched(e5c.modfiles, refuse_while_running=lambda *a, **k: None):
+        yield root, game
+
+
+def _e5c_refuses(root: str, why: str) -> None:
+    try:
+        e5c.build(root)
+    except e5c.Refused:
+        return
+    raise AssertionError(f'appended to {why}')
+
+
+@test
+def edf5_campaign_build() -> None:
+    """The appended list from the real Root.cpk: stock rows untouched (row 0 gains the first EDF5 row as a successor),
+    every row 11 members with the 11th named flags (EDF.dll reads it by name), successors in range, one text row per
+    list row in every language, a thumbnail per row, under the save's 512 missions per mode."""
+    import mdb
+    import rootcpk
+    import sgo
+    if not _e5c_have_game():   # the real data: a developer's machine (CI has no game)
+        return
+    files, base, p = e5c.build(rootcpk.DEFAULT_GAME)
+    rows = dsgo.parse(files[e5c.LIST]).root.get('table').items
+    stock = dsgo.parse(rootcpk.default().read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO')).root.get('table').items
+    assert base == len(stock) == 147 and len(rows) == base + len(p['rows']) < 512, (base, len(rows))
+    assert len([r for r in p['rows'] if r['group'] == 'main']) == 110, 'every EDF5 story mission'
+    assert {x[1] for x in p['skipped']} == {'DLC/DM015', 'DLC/DM018', 'DLC/DM019', 'DLC/DM020'}, p['skipped']
+    for a, b in zip(rows[1:base], stock[1:]):
+        assert dsgo.dump(a) == dsgo.dump(b), a.items[2]
+    first, stock_first = dsgo.dump(rows[0]), dsgo.dump(stock[0])
+    assert first['items'][3] == {'items': [1.0, float(base)], 'names': {}}
+    first['items'][3] = stock_first['items'][3]
+    assert first == stock_first, 'row 0 changed beyond its successors'
+    assert rows[base - 1].items[3].items == [float(base)]
+    for i, r in enumerate(rows):
+        assert len(r.items) == 11 and r.names == {10: 'flags'}, i
+        assert all(int(x) < len(rows) for x in r.items[3].items) or i == len(rows) - 1, i
+    for r in rows[base:]:
+        assert r.items[1].startswith('app:/Mission/EDF5_OLD_SCRIPT/') and r.items[10] == 8.0
+        rootcpk.default().read(r.items[1].split('app:/', 1)[1], 'MISSION.BVM')
+    for rel in e5c.TXT.values():
+        assert len(sgo.read(files[rel])[1]['table']) == len(rows), rel
+    names = {f.name for f in mdb.rab_read(files[e5c.IMAGE]).files}
+    assert all(e5c.thumb_name(r.items[2]) in names for r in rows)
+    assert dsgo.compact(dsgo.parse(files[e5c.LIST])) == files[e5c.LIST]
+
+
+@test
+def edf5_campaign_install_remove() -> None:
+    """Over another mod's list: install keeps what it replaced, a second install appends once, removal puts the other
+    mod's files back byte for byte (and deletes the ones that were not there), the ini row count follows; a file
+    changed by someone since is left alone, and its manifest entry (what it replaced) with it."""
+    if not _e5c_have_game():
+        return
+    with _e5c_game() as (root, game):
+        other_list = game.read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO')
+        modfiles.atomic_write(e5c.rel_path(root, e5c.LIST), other_list)
+        ini = os.path.join(root, 'Mods', e5c.INI)
+        modfiles.atomic_write(ini, b'[VehicleCrew]\nEnabled=1\n')
+        first = e5c.build(root)
+        e5c.install(root, first)
+        assert 'EDF5CampaignRows=147' in open(ini, encoding='utf-8').read()
+        assert all('also' not in e for e in e5c.load_manifest(root)['files'].values()), 'the final manifest'
+        assert e5c.check(root)
+        again = e5c.build(root)
+        assert again[0] == first[0], 'a second install appended again'
+        e5c.install(root, again)
+        done, kept = e5c.remove(root)
+        assert not kept and len(done) == len(e5c.FILES)
+        assert modfiles.read(e5c.rel_path(root, e5c.LIST)) == other_list, "the other mod's list not put back"
+        assert all(modfiles.read(e5c.rel_path(root, rel)) is None for rel in e5c.FILES if rel != e5c.LIST)
+        assert 'EDF5CampaignRows=0' in open(ini, encoding='utf-8').read()
+        assert not e5c.installed(root) and e5c.check(root), 'not installed is a valid state'
+        e5c.install(root, e5c.build(root))
+        modfiles.atomic_write(e5c.rel_path(root, e5c.IMAGE), b'someone else')
+        assert not e5c.check(root)
+        done, kept = e5c.remove(root)
+        assert kept == [e5c.rel_path(root, e5c.IMAGE)] and modfiles.read(kept[0]) == b'someone else'
+        assert list(e5c.load_manifest(root)['files']) == [e5c.IMAGE], 'the changed file\'s record dropped'
+        os.remove(e5c.rel_path(root, e5c.IMAGE))
+        os.remove(os.path.join(root, 'Mods', e5c.MANIFEST))
+        # the list itself changed by someone: it stays, and so does the plugin's row count
+        e5c.install(root, e5c.build(root))
+        modfiles.atomic_write(e5c.rel_path(root, e5c.LIST), b'someone else')
+        e5c.remove(root)
+        assert 'EDF5CampaignRows=147' in open(ini, encoding='utf-8').read(), 'row count zeroed under a kept list'
+
+
+@test
+def edf5_campaign_interrupted_reinstall() -> None:
+    """An update whose files differ from the installed ones, cut short after the manifest: the next install neither
+    refuses nor loses the other mod's list it replaced, and removal still puts that back (review of f8be221: the
+    manifest held only the new hashes, so the old files read as someone else's)."""
+    if not _e5c_have_game():
+        return
+    with _e5c_game() as (root, game):
+        other_list = game.read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO')
+        modfiles.atomic_write(e5c.rel_path(root, e5c.LIST), other_list)
+        e5c.install(root, e5c.build(root))
+        real_plan = e5c.plan
+        shorter = lambda r: {**real_plan(r), 'rows': real_plan(r)['rows'][:-1]}   # an update that writes other bytes
+        with patched(e5c, plan=shorter):
+            update = e5c.build(root)
+        with patched(e5c.modfiles, atomic_write=_failing_write('MISSION/MISSIONLIST.OFFLINE.TXT.CN.SGO')):
+            try:
+                e5c.install(root, update)
+            except OSError:
+                pass
+            else:
+                raise AssertionError('the failing write did not fail')
+        files, base, _ = e5c.build(root)   # neither refused nor appended to the old rows
+        assert base == 147 and len(dsgo.parse(files[e5c.LIST]).root.get('table').items) == 147 + len(real_plan(root)['rows'])
+        done, kept = e5c.remove(root)
+        assert not kept, kept
+        assert modfiles.read(e5c.rel_path(root, e5c.LIST)) == other_list, "the other mod's list lost"
+
+
+@test
+def edf5_campaign_refusals() -> None:
+    """Rows are the save's indices: a list whose stock rows were reordered or that is shorter, one that is not DSGO,
+    one that already has EDF5 rows this tool did not leave, and a text table one row short all refuse (nothing
+    written) instead of stopping the installer."""
+    import sgo
+    if not _e5c_have_game():
+        return
+    with _e5c_game() as (root, game):
+        stock = game.read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO')
+        doc = dsgo.parse(stock)
+        t = doc.root.get('table').items
+        t[1], t[2] = t[2], t[1]
+        modfiles.atomic_write(e5c.rel_path(root, e5c.LIST), dsgo.write(doc))
+        _e5c_refuses(root, 'reordered stock rows')
+        doc = dsgo.parse(stock)
+        doc.root.get('table').items.pop()
+        modfiles.atomic_write(e5c.rel_path(root, e5c.LIST), dsgo.write(doc))
+        _e5c_refuses(root, 'a list shorter than the stock one')
+        modfiles.atomic_write(e5c.rel_path(root, e5c.LIST), b'not a list')
+        _e5c_refuses(root, 'a list that is not DSGO')
+        modfiles.atomic_write(e5c.rel_path(root, e5c.LIST), _e5c_with_edf5_rows())
+        _e5c_refuses(root, 'EDF5 rows with no manifest')
+        os.remove(e5c.rel_path(root, e5c.LIST))
+        ver, members = sgo.read(game.read('MISSION', 'MISSIONLIST.OFFLINE.TXT.EN.SGO'))
+        members['table'].pop()
+        modfiles.atomic_write(e5c.rel_path(root, e5c.TXT['EN']), sgo.write_depth_first(ver, members))
+        _e5c_refuses(root, 'a text table one row short')
+
+
+@test
+def edf5_campaign_save_capacity() -> None:
+    """A third-party appended list may fill the 512-slot save: refuse 513 before writing, accept exactly 512."""
+    import sgo
+    if not _e5c_have_game():
+        return
+    with _e5c_game() as (root, game):
+        p = e5c.plan(root)
+        stock = game.read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO')
+        for total in (513, 512):
+            base = total - len(p['rows'])
+            doc = dsgo.parse(stock)
+            rows = doc.root.get('table').items
+            for i in range(len(rows), base):
+                row = dsgo.Node([float(i), f'app:/Mission/ThirdParty/M{i}', f'ThirdParty/M{i}',
+                                 dsgo.Node([float(i + 1)]), float(i), 0.0, 0.0, 0.0, e5c.BGM, 0.5, 8.0], {10: 'flags'})
+                rows.append(row)
+            modfiles.atomic_write(e5c.rel_path(root, e5c.LIST), dsgo.compact(doc))
+            for lang, rel in e5c.TXT.items():
+                ver, text = sgo.read(game.read('MISSION', f'MISSIONLIST.OFFLINE.TXT.{lang}.SGO'))
+                text['table'] += [['third-party', 'brief']] * (base - len(text['table']))
+                modfiles.atomic_write(e5c.rel_path(root, rel), sgo.write_depth_first(ver, text))
+            if total > 512:
+                _e5c_refuses(root, '513 missions overflowing the native save')
+                assert not e5c.installed(root), 'refusal wrote a manifest'
+            else:
+                built, count, _ = e5c.build(root)
+                result = dsgo.parse(built[e5c.LIST]).root.get('table').items
+                assert len(result) == 512 and count == base
+                assert result[-1].items[3].items == [], 'the terminal row points past the end'
+        with patched(e5c, plan=lambda _: {'rows': [], 'skipped': []}):
+            _e5c_refuses(root, 'an empty campaign unlocking a nonexistent row')
+
+
+def _e5c_with_edf5_rows() -> bytes:
+    """The appended list as another tool might have left it: built here, written without a manifest."""
+    with tempfile.TemporaryDirectory(prefix='edf6vc-e5c-other-') as other:
+        return e5c.build(other)[0][e5c.LIST]
+
+
+# Every call in EDF.dll to the list's row count (0xE0650) and the story's progress (0xD7B60), each placed: the
+# plugin caps the length calls and replaces the progress calls; the rest need the real count (src/edf5campaign.cpp).
+_E5C_UNCAPPED = {
+    0x92E8A: 'bounds check before setting a clear bit (EDF5 rows are recorded too)',
+    0x9CFC0: 'a loop over every row',
+    0xAC1BE: 'bounds check of a mission picked (its progress then goes through the replaced 0xD7B60)',
+    0xAEEC8: 'a loop over every row setting clear bits',
+    0xBC20D: 'a debug print "%ls:%d/%d"',
+    0xD7B74: 'inside 0xD7B60 (its 4 callers are replaced)',
+    0xD7BA3: 'inside 0xD7B60 (its 4 callers are replaced)',
+    0xD8664: 'clamps an index to count-1 (0xD8650)',
+    0xD8683: 'clamps an index to count-1 (0xD8650)',
+    0xDF8A4: 'the save initialisation loop (512 slots)',
+    0x70F6CC: 'ProceedNextMission: the successor must be < count',
+    0x8A2124: 'mission select', 0x8A2BCF: 'mission select', 0x8A372B: 'mission select', 0x8A3A59: 'mission select',
+    0x8A3C35: 'mission select', 0x8A3DBB: 'mission select',
+    0x8D3FAA: 'leading run of cleared rows (147 with EDF6 cleared, with or without the campaign)',
+    0x8EE26D: 'the list window, current +-5', 0x912408: 'the list window, current +-5',
+}
+
+
+@test
+def edf5_campaign_plugin_sites() -> None:
+    """The plugin's call sites are each still a stock rel32 call to their target in EDF.dll, and every call to either
+    target is placed (capped, replaced or named in _E5C_UNCAPPED): a missed one is how the progress scale was
+    first overlooked (review of f8be221)."""
+    import rootcpk
+    code = src('src/edf5campaign.cpp')
+
+    def listed(name: str) -> list[int]:
+        body = re.sub(r'//[^\n]*', '', code.split(f'{name}[]=', 1)[1].split('}', 1)[0])
+        return [int(x, 16) for x in re.findall(r'0x([0-9A-Fa-f]+)', body)]
+    rows, progress = listed('kRowSites'), listed('kProgressSites')
+    assert sorted(rows) == sorted([0x70EDB7, 0xDF9B8, 0x92EBD, 0xDCD3B, 0xDD108, 0xD8586, 0x7480F6]), rows
+    assert sorted(progress) == sorted([0xD7B25, 0xD7C77, 0xD8140, 0xD8860]), progress
+    assert not set(rows) & set(_E5C_UNCAPPED)
+    if not _e5c_have_game():
+        return
+    import pefile
+    pe = pefile.PE(os.path.join(rootcpk.DEFAULT_GAME, 'EDF.dll'), fast_load=True)
+    img = pe.get_memory_mapped_image()
+    text = next(s for s in pe.sections if s.Name.startswith(b'.text'))
+    lo, hi = text.VirtualAddress, text.VirtualAddress + text.Misc_VirtualSize
+
+    def callers(target: int) -> set[int]:
+        out = set()
+        at = img.find(b'\xe8', lo)
+        while 0 <= at < hi - 5:
+            if at + 5 + int.from_bytes(img[at + 1:at + 5], 'little', signed=True) == target:
+                out.add(at)
+            at = img.find(b'\xe8', at + 1)
+        return out
+    assert callers(0xE0650) == set(rows) | set(_E5C_UNCAPPED), sorted(hex(x) for x in callers(0xE0650) ^ (set(rows) | set(_E5C_UNCAPPED)))
+    assert callers(0xD7B60) == set(progress)
+
+
+@test
+def edf5_campaign_shipped() -> None:
+    """Both the frozen installer and source-tools archive must carry the campaign's required text."""
+    rel = src('tools/build_release.py')
+    assert '"edf5campaign", "missions.json")}{seps}edf5campaign' in rel
+    assert "os.path.join(sys._MEIPASS, 'edf5campaign', 'missions.json')" in src('tools/make_edf5_campaign.py')
+    assert os.path.isfile(os.path.join(ROOT, 'edf5campaign', 'missions.json'))
+    workflow = src('.github/workflows/build.yml')
+    assert re.search(r'foreach \(\$f in git [^\n]*ls-files [^\n)]*\bedf5campaign\b', workflow), \
+        'source-tools archive omits the campaign text required by make_edf5_campaign.TEXT'
 
 
 def main() -> int:
