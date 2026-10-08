@@ -921,3 +921,6 @@ target_include_directories(command_native_dispatch_test PRIVATE src common third
 target_compile_options(command_native_dispatch_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
 target_link_options(command_native_dispatch_test PRIVATE /OPT:REF)
 add_test(NAME command_native_dispatch COMMAND command_native_dispatch_test)
+
+add_test(NAME weapon_style_data COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/weapon_style_data_check.py")
+set_tests_properties(weapon_style_data PROPERTIES SKIP_RETURN_CODE 77)

@@ -7,7 +7,9 @@
 #include <cstdint>
 
 namespace crew {
-enum class StoreRole { air, ground, bomb, rocket };
+// Preserve native store role ids 0..3; special actions have their own semantics,
+// rather than borrowing bomb merely to get an aiming-point cross.
+enum class StoreRole { air, ground, bomb, rocket, gun, drone, charge };
 struct StoreSpec {
     const wchar_t* prefix;   // its weapon files' names: prefix + rounds + ".SGO" (vcobjects.store_file)
     const char* name;        // shown in the cockpit

@@ -54,7 +54,7 @@ struct WordEntry { const char* id; Tx text; };
 inline constexpr WordEntry kWords[]={
     // a round's class (rounds.cpp kClasses, vhud.cpp ArmOf)
     {"GUN",Tx::wordGun},{"CANNON",Tx::wordCannon},{"MSL",Tx::wordMissile},{"RKT",Tx::wordRocket},{"GREN",Tx::wordGrenade},
-    {"LASER",Tx::wordLaser},{"HLASER",Tx::wordHomingLaser},{"BEAM",Tx::wordBeam},{"FLAME",Tx::wordFlame},{"ACID",Tx::wordAcid},
+    {"LASER",Tx::wordLaser},{"HLASER",Tx::wordHomingLaser},{"BEAM",Tx::wordBeam},{"MASER",Tx::wordMaser},{"FLAME",Tx::wordFlame},{"ACID",Tx::wordAcid},
     {"NAPALM",Tx::wordNapalm},{"WPN",Tx::wordWeapon},{"ROCKETS",Tx::wordRocketPods},
     // a plugin unit's kind (jet_internal.h kKinds, hud.cpp HudSee, ground.cpp, heli.cpp kHeliTypes)
     {"strike",Tx::kindStrike},{"fighter",Tx::kindFighter},{"interceptor",Tx::kindInterceptor},{"multirole",Tx::kindMultirole},

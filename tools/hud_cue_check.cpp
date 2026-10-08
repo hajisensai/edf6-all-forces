@@ -41,6 +41,10 @@ int main() {
     Check(StoreIconOf("CANNON",2)==StoreIcon::gun && StoreIconOf("GATLING",2)==StoreIcon::gun,"the gunship's side guns: rounds");
     Check(StoreIconOf("NEW",1)==StoreIcon::agm && StoreIconOf("NEW",2)==StoreIcon::bomb && StoreIconOf("NEW",3)==StoreIcon::rocket &&
           StoreIconOf(nullptr,0)==StoreIcon::aam,"by role");
+    Check(StoreIconOf("DRONES",5)==StoreIcon::drone,"drone deployment gets aircraft icon, not bomb");
+    Check(StoreIconOf("SHELLS",4)==StoreIcon::gun && StoreIconOf("CHARGE",6)==StoreIcon::charge,"special gun and detonation roles retain their semantics");
+    Check(ArmIconOf(1,false,1)==StoreIcon::energy && ArmIconOf(1,false,2)==StoreIcon::energy && ArmIconOf(1,false,3)==StoreIcon::energy,
+          "laser, beam and maser are not drawn as machine-gun ammunition");
     // The stock rounds (vhud.h RoundKind: none 0, arc 1, rocket 2, homing 3).
     Check(ArmIconOf(1,false)==StoreIcon::gun && ArmIconOf(0,false)==StoreIcon::gun,"a gun's rounds");
     Check(ArmIconOf(2,false)==StoreIcon::rocket,"rockets");

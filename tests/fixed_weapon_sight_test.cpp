@@ -99,6 +99,32 @@ void Run(){
     Put<float>(f.weapon,edf::kWeaponAmmoOwnerMove,1);Put<float>(f.weapon,edf::kWeaponOwnerVel,12);StockArm moving{};Arm(f.weapon,true,moving);
     Check(moving.at[0]>sky.at[0]+50,"physical path retains inherited vehicle velocity");
     Put<std::uint64_t>(f.weapon,edf::kMuzzleCount,0);StockArm absent{};Arm(f.weapon,true,absent);Check(!absent.aimed&&!absent.paths,"missing muzzle has no fictitious point");
+    // Feed production ReadRound with checked factory RTTI, then production Arm/GunMarkOf.
+    const auto named=[&](unsigned vt,const char* name,unsigned scratch) {
+        Put<void*>(image,vt-8,image+scratch);Put<unsigned>(image+scratch,0xC,scratch+0x40);
+        strcpy_s(reinterpret_cast<char*>(image+scratch+0x50),100,name);
+    };
+    named(0x179ECA8,".?AVFactory@EfsExposureBullet@@",0x10000);
+    named(0x179FC60,".?AVFactory@LaserBullet01@@",0x10200);
+    named(0x17A3E90,".?AVFactory@SolidBullet01@@",0x10400);
+    named(0x17E5E40,".?AVWeapon_VehicleMaser@@",0x10600);
+    InstallRounds();
+    unsigned char factory[16]{};Put<void*>(f.weapon,0x7F8,factory);Put<std::uint64_t>(f.weapon,edf::kMuzzleCount,2);
+    Put<float>(f.weapon,edf::kWeaponAmmoOwnerMove,0);Put<float>(f.weapon,edf::kWeaponAmmoGravity,0);
+    Put<float>(f.weapon,edf::kWeaponAmmoSpeed,10);Put<int>(f.weapon,edf::kWeaponAmmoAlive,30);
+    Put<void*>(factory,0,image+0x179ECA8);StockArm nixBeam{};nixBeam.physicalOnly=false;Arm(f.weapon,true,nixBeam);
+    Check(nixBeam.style==WeaponStyle::beam && nixBeam.paths==2 && nixBeam.ladder.ticks==0 && !nixBeam.ranged,
+          "Nix EfsExposure beam retains real muzzle endpoints without ballistic ladder or target lead");
+    Put<void*>(factory,0,image+0x179FC60);StockArm laser{};laser.physicalOnly=false;Arm(f.weapon,true,laser);
+    Check(laser.style==WeaponStyle::laser && laser.paths==2 && laser.ladder.ticks==0 && !laser.ranged,
+          "native LaserBullet gun has energy semantics and no artificial drop marks");
+    Put<void*>(factory,0,image+0x17A3E90);Put<void*>(f.weapon,0,image+0x17E5E40);
+    StockArm maser{};maser.physicalOnly=false;Arm(f.weapon,true,maser);
+    Check(maser.style==WeaponStyle::maser && !std::strcmp(maser.label,"MASER") && maser.ladder.ticks==0,
+          "actual Weapon_VehicleMaser wins over SolidBullet carrier class and does not become a machine gun");
+    Put<void*>(f.weapon,0,nullptr);StockArm ordinary{};ordinary.physicalOnly=false;Arm(f.weapon,true,ordinary);
+    Check(ordinary.style==WeaponStyle::projectile && !std::strcmp(ordinary.label,"GUN") && ordinary.ladder.ticks>0,
+          "ordinary SolidBullet gun retains its genuine gun semantics and range ladder");
     image=nullptr;
 }
 }}

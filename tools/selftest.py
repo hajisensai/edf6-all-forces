@@ -2434,7 +2434,7 @@ def gunship_cannon_round() -> None:
         m = re.search(rf'k{cpp}Speed=([\d.]+)f', bay)
         assert m and float(m.group(1)) == gun.speed * 60.0, f'src/jet_bay.cpp k{cpp}Speed (m/s) is the round\'s speed a frame'
         assert f'OBJECT/{gun.file}' in make_jets.names(), gun.file
-        assert '{L"","' + name + '",StoreRole::bomb' in board, f'src/playerjet_board.inc kSpecials {name}'
+        assert '{L"","' + name + '",StoreRole::gun' in board, f'src/playerjet_board.inc kSpecials {name}'
         assert gun.file in readme, f'README.md: {gun.file}'
     assert make_jets.SIDE_GUNS == (make_jets.CANNON, make_jets.GATLING), 'src/jet_bay.cpp kSideGuns\' order'
     assert re.search(r'kSideGuns\[\]=\{\s*\{kCannonSgo,kCannonFile,[^}]*\},\s*\{kGatlingSgo,kGatlingFile,', bay), 'kSideGuns in that order'

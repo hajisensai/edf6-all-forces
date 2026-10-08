@@ -121,7 +121,7 @@ void RangeTarget(const unsigned char* v,const StockHudReadout& r,const float* ey
 void GunMarkOf(const unsigned char* w,const RoundModel& m,const float* pos,const float* dir,StockArm& a) noexcept {
     roundaim::Round round{};
     float shooter[3];
-    if(a.physicalOnly || m.lobbed || !ArcRoundOf(w,m,&round,shooter))return;
+    if(a.physicalOnly || EnergyWeapon(m.style) || m.lobbed || !ArcRoundOf(w,m,&round,shooter))return;
     a.ladder=gunsight::Of(round,pos,dir,shooter);
     const roundaim::GunMark g=roundaim::GunSight(round,pos,dir,shooter,a.hit,a.at,a.flight*60.0f,target.ok ? target.at : nullptr,
                                                  target.vel);
@@ -144,7 +144,7 @@ void Arm(const unsigned char* w,bool aim,StockArm& a,bool rangeTarget=true) noex
     a.ammoMax=WeaponStatusOk() ? At<std::int32_t>(w,kAmmoMax) : -1;
     if(WeaponStatusOk())Reload(w,a);
     else{a.reload=1.0f;a.reloadSec=-1.0f;a.canReload=true;}
-    a.kind=m.kind;a.lobbed=m.lobbed;
+    a.kind=m.kind;a.style=m.style;a.lobbed=m.lobbed;
     a.lofted=At<std::int32_t>(w,edf::kWeaponMark)==edf::kMarkLofted;
     if(a.lofted)strncpy_s(a.label,"ROCKETS",_TRUNCATE);
     if(!aim || a.lofted || m.kind==RoundKind::none)return;

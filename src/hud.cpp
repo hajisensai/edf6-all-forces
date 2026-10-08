@@ -1090,6 +1090,17 @@ void StoreGlyph(void* drawer,void* ctx,float cx,float cy,float k,hudcue::StoreIc
         seg(12.0f,-6.0f,12.0f,6.0f,1.6f);seg(-14.0f,-2.0f,12.0f,-2.0f,0.8f);seg(-14.0f,2.0f,12.0f,2.0f,0.8f);
         for(const float v:kRows3)tri(12.0f,v*1.0f,16.0f,v*1.0f,1.4f);
         break;
+    case StoreIcon::drone: // deployed aircraft, not a falling munition
+        seg(-14.0f,0.0f,14.0f,0.0f,2.5f);tri(6.0f,0.0f,17.0f,0.0f,2.5f);
+        tri(2.0f,0.0f,-8.0f,-8.0f,3.0f);tri(2.0f,0.0f,-8.0f,8.0f,3.0f);
+        seg(-12.0f,-4.0f,-12.0f,4.0f,2.0f);break;
+    case StoreIcon::energy: // emitter and parallel beam rays
+        box(-15.0f,-5.0f,-8.0f,5.0f);
+        for(const float r:kRows3)seg(-7.0f,r*3.0f,16.0f,r*3.0f,r==0.0f ? 2.0f : 1.0f);
+        break;
+    case StoreIcon::charge: // detonation action
+        seg(-12.0f,-6.0f,12.0f,6.0f,1.6f);seg(-12.0f,6.0f,12.0f,-6.0f,1.6f);
+        seg(0.0f,-9.0f,0.0f,9.0f,1.6f);seg(-16.0f,0.0f,16.0f,0.0f,1.6f);break;
     case StoreIcon::gun:   // the gun's rounds: three bullets
         for(const float r:kRows3){const float v=r*1.125f;box(-10.0f,v-1.4f,2.0f,v+1.4f);tri(2.0f,v,7.0f,v,1.4f);box(-12.0f,v-1.6f,-10.5f,v+1.6f);}
         break;
@@ -2450,7 +2461,7 @@ void GunReticle(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
             }
         }
     }
-    LadderTicks(drawer,ctx,text,vp,width,height,s,a.ladder,cx,cy+c*0.85f,lines,at);
+    if(!EnergyWeapon(a.style))LadderTicks(drawer,ctx,text,vp,width,height,s,a.ladder,cx,cy+c*0.85f,lines,at);
     const float over=cy-16.0f*s,note=kLineScale*0.85f;
     Label(text,lines,at,cx-in,over,2,note,kHud,L"%ls",name);
     const float measured=a.ranged ? a.targetRange : a.range;
@@ -2602,7 +2613,7 @@ void ProteusMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,
 int SightGun(const StockHudReadout& r,bool leadGun) noexcept {
     const auto sights=[&](int i){
         const StockArm& a=r.arm[i];
-        return a.aimed && !a.physicalOnly && !a.lofted && !a.lobbed && a.kind==RoundKind::arc && a.ladder.ticks>0 && !(i==0 && leadGun);
+        return a.aimed && !a.physicalOnly && !a.lofted && !a.lobbed && a.kind==RoundKind::arc && (EnergyWeapon(a.style) || a.ladder.ticks>0) && !(i==0 && leadGun);
     };
     return r.sight>=0 && r.sight<r.arms && r.sight<kStockArms && sights(r.sight) ? r.sight : -1;
 }
@@ -2863,7 +2874,7 @@ int StockCells(const StockHudReadout& r,LoadCell* cells) noexcept {
         Line l{};
         ArmLine(l,r.arm[i],false);
         LoadCell& c=cells[n++];
-        c.icon=hudcue::ArmIconOf(static_cast<int>(r.arm[i].kind),r.arm[i].lobbed);
+        c.icon=hudcue::ArmIconOf(static_cast<int>(r.arm[i].kind),r.arm[i].lobbed,static_cast<int>(r.arm[i].style));
         c.picked=i==r.selected;
         if(r.arm[i].name[0]) {
             if(r.arm[i].ammo<=0 && r.arm[i].canReload)_snwprintf_s(c.text,_countof(c.text),_TRUNCATE,L"%ls  %ls",r.arm[i].name,l.text);
