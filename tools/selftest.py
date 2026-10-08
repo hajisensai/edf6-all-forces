@@ -2058,7 +2058,7 @@ def embedded_seat_aim_wired() -> None:
 def proteus_wired() -> None:
     """The Proteus rework (src/proteus.cpp, src/proteus_logic.h, README 普罗透斯, docs/proteus-re.md): every Proteus* key the
     ini ships is read, range-checked (all but the three switches), and documented in README.md; the class crew.cpp chains
-    for it (VehicleBigBegaruta, its own slot 55 now, 0 before) is the one proteus.cpp reworks; it is built (its own
+    for it (VehicleBigBegaruta, its native player update slot 4) is the one proteus.cpp reworks; it is built (its own
     target_sources line) with its offline check, which includes the rules' header alone; every EDF.dll address it checks is
     in docs/proteus-re.md; the mission's reset, the per-frame step (before the plugin-off return: it gives the stock numbers
     back), the install, the turret camera's lift, the shells' preload and the EDF6AutoTurret link (one export name, both
@@ -2093,11 +2093,19 @@ def proteus_wired() -> None:
     # The stock launcher is the salvo's only while the salvo can be fired and its seat is closed, decided each frame after
     # the seats; what is given back is what was taken.
     step = code.split('void Frame(unsigned char* v)', 1)[1].split('\n}', 1)[0]
-    assert step.index('TwoSeats(*u,v);') < step.index('Guns(*u,salvoReady,c);'), 'Guns after the seats'
+    assert step.index('TwoSeats(*u,v,LocalGunner(v));') < step.index('Guns(*u,salvoReady,c);'), 'Guns after ownership-aware seats'
+    gunner = code.split('bool LocalGunner(', 1)[1].split('\n}\n', 1)[0]
+    assert 'Rider::none || rider==Rider::dummy' in gunner and 'IsOnlineAuthority(object)' in gunner, \
+        'only the real gunner owner may pull the paired cannon'
     assert 'const bool hold=salvo && u.closed;' in code and 'Put<float>(m,kRate,u.rate[kLauncherSeat]);' in code
     give = code.split('void GiveBack(Unit& u', 1)[1].split('\n}', 1)[0]
     assert 'Put<float>(w,kRate,u.rate[s]);Put<float>(w,kSpread,u.spread[s]);' in give and '1.0f' not in give
-    assert 'u.active && u.ref.Is(v)' in code and 'u.ref.obj==' not in code, 'a Proteus unit by its live object, not its address'
+    lookup = code.split('Unit* UnitOf(', 1)[1].split('\n}\n', 1)[0]
+    active = code.split('Unit* ActiveOf(', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(u.ref.Is(v))return &u;' in lookup and 'if(u.ref.Is(v))' in active, \
+        'lookup and active consumers must validate the complete ObjRef; address reuse only selects a free slot'
+    assert 'ControlFresh(u,v,GameMs())' in active and 'u.active && !u.net.remote' in active, \
+        'replicas require fresh control; the local active path cannot consume stale remote state'
     # A Proteus no player has ridden is not crewed (the helicopters' rule, crew.cpp Crew).
     assert 'if(!st.playerAt)return;' in crew, 'every unused parked vehicle waits for its first player driver'
     assert 'kProteusHoldCountdown*0.5f' in src('src/vehsound.cpp') and 'kHoldCountdown=kProteusHoldCountdown' in code
@@ -3342,11 +3350,17 @@ def pack_install_upgrade_uninstall() -> None:
         mods = os.path.join(game, 'Mods')
         old_data = {rel: b'old ' + data for rel, data in AT_FILES.items() if rel != 'WEAPON/AT_C.SGO'}
         texts = describe.Texts({}, {})
+        text_modes: list[bool] = []
+
+        def build_texts_stub(files, mods, *, proteus: bool = False):
+            text_modes.append(proteus)
+            return texts
+
         answers: list[str] = []
         with contextlib.ExitStack() as stack:
             enter = stack.enter_context
             enter(patched(at_build, build_files=lambda legacy=False: old_data, _refuse_while_running=lambda mods: None,
-                          build_texts=lambda files, mods: texts))
+                          build_texts=build_texts_stub))
             with contextlib.redirect_stdout(io.StringIO()):
                 at_build.install(mods, text=True, force=False)   # the player's earlier build.py install
             enter(patched(at_build, build_files=_at_build_files))
@@ -3409,6 +3423,8 @@ def pack_install_upgrade_uninstall() -> None:
                     modfiles.atomic_write(os.path.join(plugins, 'EDF6AutoTurret' + name), b'log')
                 answers[:] = ['1']
                 installer.uninstall(game)
+        assert text_modes and not text_modes[0] and any(text_modes[1:]), \
+            'the old standalone install has no Proteus text; pack installs must request it explicitly'
         left = _tree(game)
         assert left == foreign, f'uninstall left {sorted(set(left) - set(foreign))}, changed ' \
             f'{sorted(r for r in foreign if left.get(r) != foreign[r])}'
@@ -4534,14 +4550,19 @@ def npc_ai_wired() -> None:
     for key in ('NpcLaneWidth', 'NpcLaneLength', 'NpcFlankDeg', 'NpcEngageShare', 'NpcDangerRange', 'NpcGrabRange', 'NpcCrowd',
                 'NpcRollSec', 'NpcRetreatHp', 'NpcLeash', 'TankPostHold', 'TankReverseMax'):
         assert f'Fix("{key}"' in plugin, f'{key} is range-checked'
-    # The tanks' post (§8): seat 0's stick written before the stock input reads it; a route's tank and a remote room's
-    # client left alone; its keys shipped and documented.
+    # The tanks' post (§8): seat 0's stick written before stock input; script routes relinquish our post, and only
+    # the real driver's authority writes it (that may be a client). Keys stay shipped and documented.
     post = src('src/npcpost.cpp')
     hook = crew.split('template<int I> void __fastcall InputHook(', 1)[1].split('\n}', 1)[0]
     assert hook.index('Guarded(kStepNpcPost,&NpcPostInput,') < hook.index('nextInput[I](vehicle,hasInput,a3,a4);')
     body = post.split('void NpcPostInput(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'if(At<const void*>(v,kRoute))' in body and 'if(!OnlineHostOnly())return;' in body
+    assert 'if(At<const void*>(v,kRoute)){DropPending(v);Relinquish(v);return;}' in body, \
+        'a script route must discard the queued waypoint and relinquish the plugin post'
+    assert 'if(!IsOnlineAuthority(v))return;' in body, 'the real driver owner, not a hard-coded host, controls the post'
     assert body.index('StockDriving(v,f,*p)') < body.index('Write(v,f,*p,c0,c1);')
+    move_to = code.split('void MoveTo(', 1)[1].split('\n}\n', 1)[0]
+    assert 'GroundNavigate(soldier->navigation,pos,to,stop,ms,waypoint)!=npc::navigation::Result::moving' in move_to
+    assert move_to.index('{Stand(h);return;}') < move_to.index('Move(h,dir,'), 'blocked/pending routes wait instead of walking through walls'
     # Every family (2026-10-07): the mechs' turn-on-spot constant, the Barga by its stock walk, and the plugin's own
     # last write never read as the stock AI driving, taken back when the drive ends.
     assert 'f==Family::mech ? kMechTurnOnSpot : kTurnOnSpot' in body and '(image+kBargaWalk)(v,block,point,1.0f,' in body
@@ -4584,11 +4605,17 @@ def npc_ai_wired() -> None:
     assert 'mapcmd::Decide(g.sel.n,p,allowed,point,pointOk,NpcMarked())' in mapc
     for key, default in (('NpcMarkKey', '81'), ('NpcMarkCone', '8')):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
-    # Boarding (§7): never seat 0; one strong reference taken before RideVehicle (it lets one go at 0x57690D); only a
-    # seated soldier kicked off; the gunners only on a vehicle whose slot 70 is the stock seat fire, before its input.
+    # Boarding (§7): real soldiers may drive seat 0 only through the verified native driver path; one strong reference
+    # is taken before RideVehicle (callee-consumed). Existing riders/reservations and ownership stay protected.
     board = code.split('bool BoardSquad(unsigned char* top,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'for(unsigned k=1;' in board, 'seat 0 stays the NPC driver\'s'
+    assert 'AssignBoard(v,m[i],ms)' in board, 'squad boarding uses the shared real-seat allocator'
+    assign = code.split('bool AssignBoard(', 1)[1].split('\n}\n', 1)[0]
+    assert 'for(unsigned k=0;' in assign and 'Reserved(v,k,ms)' in assign and '!SeatTakes(v,k,h)' in assign
+    assert '!IsOnlineAuthority(h)' in assign and '!OnlineMaySeatNpc(v)' in assign
+    takes_seat = code.split('bool SeatTakes(', 1)[1].split('\n}\n', 1)[0]
+    assert 'SeatRider(seat)!=Rider::none' in takes_seat and '(i==0 && !RealDriverNativeReady())' in takes_seat
     ride = code.split('bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert ride.index('s.boardSeat==0 && !PrepareNpcVehicle(v,false)') < ride.index('(image+kRideVehicle)(h,&ref,s.boardSeat)')
     assert ride.index('_InterlockedIncrement(') < ride.index('(image+kRideVehicle)(h,&ref,s.boardSeat)')
     off = code.split('bool DismountSquad(unsigned char* top) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'At<const void*>(seat,kSeatRider)!=m[i]' in off and 'kSeatKick' in off
