@@ -235,3 +235,29 @@ def redirect(data: bytes) -> tuple[bytes, tuple[str, ...]]:
             ref[0] = 'app:/object/' + output(spec).lower()
             return (dsgo.write(doc) if doc else sgo.write(version, m)), ('OBJECT/'+output(spec),)
     return data, ()
+
+
+def model_path(data: bytes) -> str | None:
+    doc = dsgo.parse(data) if data[:4] == b'DSGO' else None
+    try:
+        if doc:
+            return doc.root.get('animation_model').items[0].items[0]
+        return sgo.read(data)[1]['animation_model'][0][0]
+    except (KeyError, TypeError, AttributeError):
+        return None
+
+
+def restore_path(data: bytes, path: str | None = None) -> bytes:
+    """Undo only our model redirect; preserve every current non-model field."""
+    current = model_path(data)
+    spec = next((s for s in MODELS if current and current.lower() == 'app:/object/'+output(s).lower()), None)
+    if spec is None:
+        return data
+    path = path or 'app:/object/'+spec.stem.lower()+'.mrab'
+    if data[:4] == b'DSGO':
+        doc = dsgo.parse(data)
+        doc.root.get('animation_model').items[0].items[0] = path
+        return dsgo.write(doc)
+    version, m = sgo.read(data)
+    m['animation_model'][0][0] = path
+    return sgo.write(version, m)

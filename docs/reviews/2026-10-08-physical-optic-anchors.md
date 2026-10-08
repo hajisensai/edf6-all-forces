@@ -38,3 +38,12 @@
 - MAB 定位点 `6BAE43` 读取父骨名，`6BAE86` 调用 `11002A0` 按名字查当前索引，`6BAEE0` 取得新记录。没有把旧 MDB 数字索引当作新模型索引复用。
 
 这些是对支持版本真实 DLL 的静态指令核查，不是完整 CAS 动画或游戏渲染重放。
+## 安装与共享 writer 合同
+
+`tools/make_optics.py` 提供 `build_models(root)`（仅 4 个唯一 MRAB，可缓存）与 `build_stock_redirects(root)`（每轮读取当前可变 SGO，不生成模型）。`install_models` 和 `install_stock_redirects` 分阶段安装，只清理各自文件类，避免互删；完整 `build/install` 保留 CLI 兼容。模型先装、消费者后装，使用 `.edf6vc_optics.json` 写前日志，覆盖前备份，卸载恢复可中断重入。
+
+SGO 安装只对当前 bytes 的 model path 操作，不用旧备份重盖其它 writer 字段。卸载也只逆向自己的 model path；无其他变化时恢复原始字节，有后来改动时保留字段及当前其它 owners，并刷新 ledger SHA。改用自制模型的 SGO 不重定向；原路径 loose MRAB 与真实几何合同不同则明确拒绝，不替换它。另一消费者仍引用的 marker 模型保留。
+
+`vehicle_optics_check.py --game` 已通过真实 SGO+DSGO 的两轮共享写入：505/601 使用实际 `make_stock_stores.derived_vehicle` 增加挂载，并两轮改变耐久；每轮光学处理都保留全部新武器/参数，缓存模型安装不删 SGO。卸载后新字段仍在，model path 返回原模型，stockstores owner 与 SHA 一致。另有写入/恢复中断、已有修改文件、外来模型、分阶段清理的临时目录测试。所有写入只在临时目录。
+
+实际游戏开镜画面仍未验收；骨骼、原生矩阵与射线检查不等于完整游戏验证。installer/cache/发布包及下游派生生成器接线由 integration owner 统一完成。
