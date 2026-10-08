@@ -41,6 +41,10 @@ void __fastcall Visit(Visitor* v,const unsigned char* object) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){v->failed=true;}
 }
 const void* const kVisitorVtable[]={reinterpret_cast<const void*>(&Ignore),reinterpret_cast<const void*>(&Visit)};
+bool IndicesInRange(const Visitor& visitor,unsigned expected) noexcept {
+    for(unsigned i=0;i<visitor.count;++i)if(visitor.indices[i]>=expected)return false;
+    return true;
+}
 }
 
 bool ReadMissionParticipants(void** puids,unsigned capacity,unsigned* count,unsigned* expectedPlayers) noexcept {
@@ -58,7 +62,7 @@ bool ReadMissionParticipants(void** puids,unsigned capacity,unsigned* count,unsi
         Visitor visitor{kVisitorVtable,puids,capacity,0,false,{},{}};
         reinterpret_cast<WalkFn>(image+kEnumAllTeams)(mgr,&visitor);
         // Snapshot invalidated by scene replacement or a mission-count change during native traversal.
-        if(visitor.failed || At<void*>(image,kTeamManager)!=mgr || At<const void*>(image,kGameStatus)!=status ||
+        if(visitor.failed || !IndicesInRange(visitor,expected) || At<void*>(image,kTeamManager)!=mgr || At<const void*>(image,kGameStatus)!=status ||
            At<unsigned>(status,0x14FF8)!=expected)return false;
         *count=visitor.count;*expectedPlayers=expected;
         return true;

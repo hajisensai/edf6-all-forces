@@ -22,8 +22,9 @@ are ignored, duplicate mission indices with different actors invalidate the snap
 `ReadMissionParticipants` returns the actual actor count and the native mission-start
 expected count at `*(EDF+20B2890)+14FF8`. Capacity exhaustion, unreadable bound User,
 or a manager/status/count change during traversal fails with both counts cleared.
-An actor whose index exceeds the initial expected count is still observed; the owner can
-detect an unauthorized current-world entrant instead of silently excluding it.
+An actor whose index exceeds the expected range invalidates the entire snapshot. Together
+with unique mission indices, a matching actor count then proves coverage of every index
+from zero through expected count minus one; indices such as `{0,9}` cannot seal a two-player world.
 
 No pointer/address serves as an epoch. The support transport must reset its frozen cohort
 from the genuine MissionStart/ResetScene lifecycle and allocate its own epoch. Manager

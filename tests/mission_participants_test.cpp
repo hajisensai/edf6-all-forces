@@ -36,6 +36,11 @@ int main() {
     Check(limited.failed,"insufficient capacity does not silently truncate quorum");
     Visitor collision{kVisitorVtable,puids,8,0,false,{},{}};Visit(&collision,actor[0]);Put<int>(user[1],0x48,0);Visit(&collision,actor[1]);
     Check(collision.failed,"duplicate mission indices invalidate ambiguous roster");
+    Visitor wrongRange{kVisitorVtable,puids,8,0,false,{},{}};
+    Put<int>(user[1],0x48,9);Visit(&wrongRange,actor[0]);Visit(&wrongRange,actor[1]);
+    Check(wrongRange.count==2 && !IndicesInRange(wrongRange,2),"expected two actors cannot seal indices zero and nine");
+    wrongRange.indices[1]=1;
+    Check(IndicesInRange(wrongRange,2),"unique in-range indices cover the expected world when counts match");
     unsigned count=9,expected=9;
     Check(!ReadMissionParticipants(nullptr,8,&count,&expected) && !count && !expected,"failure clears output counts");
     std::printf("mission_participants_test: %d checks passed\n",checks);
