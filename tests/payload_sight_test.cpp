@@ -32,7 +32,7 @@ bool AiGunner(const unsigned char*,const unsigned char*) noexcept { return false
 void Log(const char*,...) noexcept {}
 bool IsFuelTank(const unsigned char* w) noexcept { return w[0x100]==3; }
 bool IsLoadoutWeapon(const unsigned char* w) noexcept { return w[0x100]==2; }
-bool IsStoreWeapon(const unsigned char*) noexcept { return false; }
+bool IsStoreWeapon(const unsigned char* w) noexcept { return w[0x100]==2; }
 const StoreSpec* sightStoreSpec=nullptr;
 const StoreSpec* StoreOf(const unsigned char* w) noexcept { return w && w[0x100]==2 ? sightStoreSpec : nullptr; }
 const wchar_t* WeaponFile(const unsigned char* w,std::size_t* n) noexcept {

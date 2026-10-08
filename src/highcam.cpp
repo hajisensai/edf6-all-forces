@@ -81,7 +81,7 @@ void Publish(bool on,bool keys,const void* v) noexcept {
 
 void Off(const char* why) noexcept {
     if(cam.on)Log("HIGHCAM v=%p off (%s)",cam.v,why);
-    cam.on=false;
+    cam.on=false;cam.ref=ObjRef{};cam.v=nullptr;cam.held=true;
     Publish(false,true,nullptr);
 }
 
@@ -97,12 +97,12 @@ bool Pressed(const unsigned char* seat,bool keys) noexcept {
 
 void HighCamFrame(unsigned char* v) noexcept {
     const Config& c=Cfg();
-    const bool mine=cam.ref.Is(v);
+    const bool mine=cam.v==v;
     if(!c.enabled || !c.highCam || SeatCount(v)==0){if(mine)Off(c.enabled ? "HighCam=0" : "plugin off");return;}
     const unsigned char* seat=SeatAt(v,0);
     const bool driven=!v[kDead] && SeatRider(seat)==Rider::player && At<const void*>(seat,kSeatRider)==PlayerHuman() && Offered(v,seat);
     if(!driven){if(mine)Off(v[kDead] ? "the vehicle is wrecked" : "the player got out, or the view is not offered");return;}
-    if(!mine) {   // a vehicle the player has just taken
+    if(!mine || !cam.ref.Is(v)) {   // a vehicle the player has just taken
         cam.ref=ObjRef::Of(v);cam.v=v;cam.on=false;cam.held=true;   // a key held while boarding is no press
         Log("HIGHCAM v=%p: the high view is offered (class %d); %s (key 0x%X, pad button 0x%X)",v,c.highCamClass,cam.want ? "on" : "off",
             c.highCamKey,c.highCamButton);
@@ -127,7 +127,9 @@ bool HighCamOn(const void* vehicle) noexcept {
     AcquireSRWLockShared(&cueLock);
     const Cue c=cue;
     ReleaseSRWLockShared(&cueLock);
-    return c.v==vehicle && c.on && c.at && GetTickCount64()-c.at<=kCueMs;
+    // Mode is latched; only the HUD cue expires. Slow frames read this before republishing their cue.
+    // Owner/configuration exits explicitly revoke it, independently of draw freshness.
+    return c.v==vehicle && c.on;
 }
 
 bool PlayerHighCam(bool* on,bool* keys) noexcept {

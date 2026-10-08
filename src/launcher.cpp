@@ -33,16 +33,21 @@ constexpr float kNoReach=1e9f;          // RoundImpact: the round's life alone e
 
 LauncherReadout latest{};
 ULONGLONG latestMs=0;
+const void* latestVehicle=nullptr;
 
 // The seat's launcher marked kMarkLofted, or nullptr.
-const unsigned char* LoftedLauncher(const unsigned char* seat) noexcept {
+const unsigned char* LoftedLauncher(const unsigned char* vehicle,const unsigned char* seat) noexcept {
+    const auto selected=PayloadSightPicked(vehicle,0);
+    if(!selected)return nullptr;
     const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
     const auto count=At<std::uint64_t>(seat,kSeatWeaponCount);
-    if(!count || count>8 || !Readable(holders,count*8))return nullptr;
+    if(!count || count>16 || !Readable(holders,count*8))return nullptr;
     for(std::uint64_t i=0;i<count;++i) {
         if(!Readable(holders[i],kHolderWeapon+8))continue;
+        const auto ctrl=At<const unsigned char*>(holders[i],kHolderCtrl);
+        if(!Readable(ctrl,12) || At<std::int32_t>(ctrl,8)<=0)continue;
         const auto w=At<const unsigned char*>(holders[i],kHolderWeapon);
-        if(Readable(w,edf::kWeaponAccuracyScale+4) && At<std::int32_t>(w,edf::kWeaponMark)==edf::kMarkLofted)return w;
+        if(w==selected && Readable(w,edf::kWeaponAccuracyScale+4) && At<std::int32_t>(w,edf::kWeaponMark)==edf::kMarkLofted)return w;
     }
     return nullptr;
 }
@@ -163,11 +168,17 @@ bool RoundImpact(const float* pos,const float* vel,const float* drop,int frames,
 }
 
 void LauncherFrame(unsigned char* v) noexcept {
-    if(v[kDead] || SeatCount(v)==0)return;
+    const auto clear=[&](bool local) {
+        if(local || latestVehicle==v) {
+            SetLauncherLoft(v,false,0.0f);
+            latest=LauncherReadout{};latestMs=0;latestVehicle=nullptr;
+        }
+    };
+    if(!Cfg().enabled || v[kDead] || SeatCount(v)==0){clear(false);return;}
     const auto seat=SeatAt(v,0);
-    if(SeatRider(seat)!=Rider::player)return;
-    const unsigned char* weapon=LoftedLauncher(seat);
-    if(!weapon)return;
+    if(SeatRider(seat)!=Rider::player || At<const void*>(seat,kSeatRider)!=PlayerHuman()){clear(false);return;}
+    const unsigned char* weapon=LoftedLauncher(v,seat);
+    if(!weapon){clear(true);return;}
     float want=0.0f,sight=0.0f;
     // The high camera observes the real rail's projectile. Feeding that observation back into LoftWant would
     // override the player's native pitch and move the rail again as the camera blends. Release the held loft;
@@ -183,19 +194,19 @@ void LauncherFrame(unsigned char* v) noexcept {
             Log("LAUNCHER v=%p no solve: muzzles=%llu (at most %llu read) gravity/speed/life unreadable otherwise",v,
                 static_cast<unsigned long long>(At<std::uint64_t>(weapon,edf::kMuzzleCount)),static_cast<unsigned long long>(kMostMuzzles));
         }
-        return;
+        clear(true);return;
     }
-    latest=r;latestMs=GameMs();
+    latest=r;latestMs=GameMs();latestVehicle=v;
     DebugLog(v,weapon,r,aim,want,sight);
 }
 
 bool PlayerLauncher(LauncherReadout* out) noexcept {
-    if(!latestMs || GameMs()-latestMs>kFreshMs)return false;
+    if(!Cfg().enabled || !latestMs || GameMs()-latestMs>kFreshMs)return false;
     *out=latest;
     return true;
 }
 
 void ResetLauncher() noexcept {
-    latest=LauncherReadout{};latestMs=0;
+    latest=LauncherReadout{};latestMs=0;latestVehicle=nullptr;
 }
 }  // namespace crew

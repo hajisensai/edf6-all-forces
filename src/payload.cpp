@@ -15,7 +15,7 @@
 //    plugin has not read which (`other`: a mech's arms, each on a control of its own).
 //  - The stores (ini StockVehicleStores, or the older StockHeliStores; tools/make_stock_stores.py hangs them on the
 //    requests of the tanks, the flak, the missile launcher, the Grape, the bikes and the helicopters, holders after the
-//    stock ones that stores.cpp builds): the plugin's weapons (EDF6VC_*, IsLoadoutWeapon) on the seat ride one stock
+//    stock ones that stores.cpp builds): catalogued stores (IsStoreWeapon) on the seat ride one stock
 //    control, the seat's second one when a stock weapon is on it (the helicopters' missile, the Titan's gatling), else
 //    its first (the gun). The jets' switch (PlayerJetSwitchKey R, pad LB) goes round that control's stock weapon and the
 //    stores as the player jets' does (playerjet.cpp Stores): its press to the next with rounds, one spent for good (no
@@ -203,7 +203,8 @@ std::int64_t HolderIndex(const unsigned char* v,const unsigned char* h) noexcept
 // `weapons`: the seat's stock weapons (its stores left out).
 PayloadFire FireOf(Class c,unsigned seat,std::int64_t holder,const unsigned char* w,int weapons) noexcept {
     const std::int64_t s=static_cast<std::int64_t>(seat);
-    if(IsLoadoutWeapon(w))return PayloadFire::store;
+    // EDF6VC_ also names native drill/Katyusha/Proteus weapons. Only catalogued add-on stores are redirectable.
+    if(IsStoreWeapon(w))return PayloadFire::store;
     switch(c) {
         case Class::heli506: return holder==0 || holder==1 ? PayloadFire::primary : holder==2 ? PayloadFire::secondary : PayloadFire::other;
         case Class::heli409: return holder==0 ? PayloadFire::primary : holder==1 ? PayloadFire::secondary : PayloadFire::other;
@@ -241,7 +242,7 @@ int ReadSeat(unsigned char* v,unsigned seat,Class c,unsigned char** ws,PayloadRe
         ws[count++]=w;
     }
     int stock=0;
-    for(int i=0;i<count;++i)stock+=IsLoadoutWeapon(ws[i]) ? 0 : 1;
+    for(int i=0;i<count;++i)stock+=IsStoreWeapon(ws[i]) ? 0 : 1;
     for(int i=0;i<count;++i) {
         PayloadEntry& e=r.entry[i];
         e=PayloadEntry{};

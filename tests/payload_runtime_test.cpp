@@ -18,7 +18,7 @@ bool AiGunner(const unsigned char*,const unsigned char* s) noexcept { return aut
 void Log(const char*,...) noexcept {}
 bool IsFuelTank(const unsigned char* w) noexcept { return w[0x100]==3; }
 bool IsLoadoutWeapon(const unsigned char* w) noexcept { return w[0x100]==2; }
-bool IsStoreWeapon(const unsigned char*) noexcept { return false; }
+bool IsStoreWeapon(const unsigned char* w) noexcept { return w[0x100]==2; }
 const StoreSpec airSpec{L"AA", "AA", StoreRole::air,0,0},groundSpec{L"AG", "AG", StoreRole::ground,0,0};
 const StoreSpec* StoreOf(const unsigned char* w) noexcept { return w[0x101]==1 ? &airSpec : w[0x101]==2 ? &groundSpec : nullptr; }
 int fileQueries=0;
