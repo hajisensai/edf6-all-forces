@@ -35,9 +35,9 @@
 // tub; a jump takes them off too. An NPC: while the player drives, the nearest friendly soldier within
 // SidecarNpcRange (the team manager's walk of the player's friends, the same walk the board prompt makes: 0x5E11D0)
 // is put in the sidecar and fights from it with their own weapons; the player getting off the saddle lets them go.
-// The bike with the player in the sidecar and nobody on the saddle is driven by the plugin: the player's left stick
-// pushed sends it the way the camera looks (its drive block, the stock input's: throttle and steering; the
-// steering's sign learned from how the heading turns). Its level: a bike with a sidecar must not lean. The chassis'
+// With a real local NPC on the saddle, the sidecar player's left stick sends that driver the camera direction.
+// An empty saddle is never driven, and a player on the saddle retains native control. The
+// steering sign is learned from how the heading turns. Its level: a bike with a sidecar must not lean. The chassis'
 // angular velocity the car step sets (setAngVel at 0x6746C6, physics.cpp ChassisSetAngVel) loses its roll part,
 // replaced by a rate that brings the roll back to level (SidecarLevel): no lean in a turn, no falling over.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
@@ -46,6 +46,7 @@
 #include "exit_ground.h"
 #include "heli.h"
 #include "memory.h"
+#include "online_authority.h"
 #include <atomic>
 #include <cmath>
 
@@ -104,7 +105,7 @@ constexpr ULONGLONG kGoneMs=500;        // a bike whose input has not run this l
 constexpr float kPi=3.14159265f;
 // The level (SidecarLevel): the roll rate set is -kLevelGain x the roll (1/s), at most kLevelRate rad/s.
 constexpr float kLevelGain=6.0f,kLevelRate=3.0f;
-// The plugin's driving (the player in the sidecar, nobody on the saddle): the stick pushed past kStickOn sends the
+// The real NPC driver's assistance (the player in the sidecar): the stick pushed past kStickOn sends the
 // bike the way the camera looks; steering kSteerGain per rad of heading off, full throttle under kSlowTurn off.
 constexpr float kStickOn=0.3f,kSteerGain=1.5f,kSlowTurn=1.75f,kSlowThrottle=0.35f;
 constexpr int kSteerVotes=12;           // turns seen against the steering before its sign is flipped
@@ -125,7 +126,9 @@ struct Sidecar {
     float order;ULONGLONG orderFrame;
     int steerSign,votes,pedal;    // pedal: the drive block's float the throttle goes in (0 or 1: [0] or [4])
     float prevHeading,lastSteer;bool prevValid,driving,stalled;
+    ObjRef driveRider;float driveValues[2];int drivePedal;bool driveWritten;
 };
+void ReleaseDrive(Sidecar& s,unsigned char* v) noexcept;
 Sidecar sidecars[kMaxSidecars]{};
 // The board button that took the player into the sidecar or out of it, until they let go of it: while held it is taken
 // off them (a button held over the next frames would take them straight off again, or onto the saddle).
@@ -236,6 +239,7 @@ void Warp(unsigned char* human,const float* pos) noexcept {
 const char* Who(const Sidecar& s) noexcept { return s.gunnerPlayer ? "the player" : "an NPC"; }
 
 void Let(Sidecar& s,const unsigned char* v,const char* why) noexcept {
+    ReleaseDrive(s,const_cast<unsigned char*>(v));
     Log("SIDECAR v=%p %s off the sidecar: %s",v,Who(s),why);
     if(!s.gunnerPlayer)s.npcReleased=true;
     s.gunner=ObjRef{};s.gunnerPlayer=false;s.driving=false;
@@ -345,10 +349,31 @@ void Follow(const Sidecar& s,unsigned char* h) noexcept {
     reinterpret_cast<AddStepFn>(image+kAddStep)(h+kHumanCtrl,step);
 }
 
-// The player in the sidecar, nobody on the saddle: the bike driven the way the camera looks while the stick is
-// pushed (`order`, from MoveIntent this frame), else let roll. The drive block's steering is [8]; the throttle the
-// float `pedal` picks ([0] first, the other after a stall). The steering's sign is learned from the heading's turn.
+// Reclaim only values last written by this sidecar controller. A player taking the saddle,
+// another rider, or a new bike at the same address always keeps its own input unchanged.
+void ReleaseDrive(Sidecar& s,unsigned char* v) noexcept {
+    if(!s.driveWritten)return;
+    if(Readable(v,kDriveBlock+12,true) && s.ref.Is(v) && SeatCount(v)>0) {
+        const auto* seat=SeatAt(v,0);
+        const auto* rider=At<const void*>(seat,kSeatRider);
+        if(!AnyPlayerIn(seat) && (SeatRider(seat)==Rider::none || s.driveRider.Is(rider))) {
+            float* block=reinterpret_cast<float*>(v+kDriveBlock);
+            if(block[s.drivePedal]==s.driveValues[0])block[s.drivePedal]=0;
+            if(block[2]==s.driveValues[1])block[2]=0;
+        }
+    }
+    s.driveWritten=false;s.driveRider=ObjRef{};
+}
+
+// A real local NPC driver follows the sidecar passenger's directional command. The passenger's
+// hand weapons and on-foot state remain untouched; no one on the saddle means no driving assistance.
 void Drive(Sidecar& s,unsigned char* v) noexcept {
+    ReleaseDrive(s,v);
+    const auto* seat=SeatCount(v)>0 ? SeatAt(v,0) : nullptr;
+    if(!Cfg().sidecar || !driveOk || v[kDead] || !s.gunner || !s.gunnerPlayer || !seat ||
+       SeatRider(seat)!=Rider::other || AnyPlayerIn(seat) || !NpcDriver(v) || !OnlineRunsHere(v)) {
+        s.driving=false;s.lastSteer=0;s.throttleAt=0;return;
+    }
     float* block=reinterpret_cast<float*>(v+kDriveBlock);
     const float* f=Row(v,2);
     const float heading=std::atan2(f[0],f[2]);
@@ -365,14 +390,15 @@ void Drive(Sidecar& s,unsigned char* v) noexcept {
     s.prevHeading=heading;s.prevValid=true;
     float eye[3],look[3];
     const bool ordered=s.orderFrame+1>=GameFrame() && s.order>kStickOn && CameraRay(eye,look) && look[0]*look[0]+look[2]*look[2]>1e-4f;
-    if(!ordered){s.lastSteer=0.0f;s.throttleAt=0;if(s.driving){s.driving=false;Log("SIDECAR v=%p the plugin's driver stops",v);}return;}
-    if(!s.driving){s.driving=true;Log("SIDECAR v=%p the plugin drives for the player in the sidecar",v);}
+    if(!ordered){s.lastSteer=0.0f;s.throttleAt=0;if(s.driving){s.driving=false;Log("SIDECAR v=%p the real driver's passenger assist stops",v);}return;}
+    if(!s.driving){s.driving=true;Log("SIDECAR v=%p real NPC driver follows the sidecar passenger",v);}
     const float off=Wrap(std::atan2(look[0],look[2])-heading);
     const float steer=Clamp(kSteerGain*off,-1.0f,1.0f);
     const float throttle=(std::fabs(off)>kSlowTurn ? kSlowThrottle : 1.0f)*Clamp(s.order,0.0f,1.0f);
     block[s.pedal]=throttle;
     block[2]=steer*static_cast<float>(s.steerSign);
-    s.lastSteer=steer;
+    s.lastSteer=steer;s.driveRider=ObjRef::Of(At<const void*>(seat,kSeatRider));
+    s.drivePedal=s.pedal;s.driveValues[0]=block[s.pedal];s.driveValues[1]=block[2];s.driveWritten=true;
     const ULONGLONG ms=GameMs();
     if(throttle<0.9f || std::fabs(speed)>kStallSpeed){s.throttleAt=0;s.stalled=false;return;}
     if(!s.throttleAt)s.throttleAt=ms;
@@ -480,14 +506,9 @@ void SidecarFrame(unsigned char* v) noexcept {
         const std::int32_t team=player.at && ms-player.at<2000 ? player.team : At<std::int32_t>(v,kTeam);
         if(auto npc=NearestSquadmate(v,team))Take(s,v,npc,false);
     }
-    // The player in the sidecar: the plugin is their driver. A stock NPC driver left on the saddle (crewed while the
-    // bike stood empty) would drive after the player, who sits on the bike itself: it gets off (the stock kick, as
-    // crew.cpp's bump does; never from inside the team walk FindSeat runs in: here, from the vehicle's own input).
-    if(s.gunner && s.gunnerPlayer && driver==Rider::dummy && driveOk) {
-        reinterpret_cast<void(__fastcall*)(void*,void*)>(image+kSeatKick)(v,SeatAt(v,0));
-        Log("SIDECAR v=%p its NPC driver got off: the plugin drives for the player in the sidecar",v);
-    } else if(s.gunner && s.gunnerPlayer && driver==Rider::none && driveOk)Drive(s,v);
-    else if(s.driving){s.driving=false;s.lastSteer=0.0f;}
+    // The passenger supplies orders only to an actual local NPC driver; no fabricated driver,
+    // no kicking an existing rider, and no passenger input overwriting another player's controls.
+    Drive(s,v);
     PublishPassenger(s);
     LogState(s,v,ms);
 }
