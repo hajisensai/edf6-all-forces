@@ -4,6 +4,9 @@
 #include <cstdlib>
 #include <initializer_list>
 namespace crew {
+void MissionCrewVehicleFrame(unsigned char*) noexcept {}
+void ResetMissionCrew() noexcept {}
+bool InstallMissionCrewHooks(const unsigned*,std::size_t) noexcept { return true; }
 bool NpcCanYieldSeat(const unsigned char*) noexcept { return false; }
 bool NpcMoveSeat(unsigned char*,unsigned,int) noexcept { return false; }
 unsigned char* image=nullptr;PlayerFix player{};

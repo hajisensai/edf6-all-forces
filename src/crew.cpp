@@ -21,6 +21,7 @@
 // per-frame input for kStaleMs (gone): a full table takes on no new vehicle rather than drop a live one.
 #include "crew.h"
 #include "boarding_entrance.h"
+#include "mission_crew.h"
 #include "exit_ground.h"
 #include "body506.h"
 #include "game_clock.h"
@@ -538,6 +539,7 @@ float Distance2(const unsigned char* vehicle,const float* pos) noexcept {
 }
 
 void Crew(unsigned char* vehicle,int cls) noexcept {
+    MissionCrewVehicleFrame(vehicle);
     if(!Readable(vehicle,kSeatCount+8,true) || vehicle[kDead])return;
     const auto now=GameMs();
     const unsigned count=SeatCount(vehicle);
@@ -860,6 +862,11 @@ bool InstallCrew() noexcept {
     // Without the game's SetTeam the plugin does not change a team at all (SetObjectTeam): no crew.
     setTeamOk=Matches(kSetTeam,kSetTeamSig,sizeof(kSetTeamSig));
     if(!setTeamOk){Log("HOOK crew: SetTeam not as expected: crew off");return false;}
+    unsigned crewTables[kClassCount]{};
+    for(int i=0;i<kClassCount;++i)crewTables[i]=kClasses[i].vtable;
+    if(!InstallMissionCrewHooks(crewTables,kClassCount)) {
+        Log("HOOK mission crew: could not replace all stock RideAi slots");return false;
+    }
     // A class whose slot 49 is not its own stock FindSeat (another plugin's) is left alone, seats and input
     // both. The prompt visitor not stock costs only the prompt's part (on-foot prompt for an NPC's seat, the
     // on-foot player fix, the reaps with the player on foot); the board button still bumps.
@@ -949,6 +956,7 @@ const char* VehicleClassName(const void* vehicle) noexcept {
 
 // A new mission (mission.cpp MissionStart): the last mission's vehicles are gone, their lines with them.
 void ResetCrew() noexcept {
+    ResetMissionCrew();
     exitWatch=ExitWatch{};
     for(auto& s:states)s=State{};
     fullLoggedAt=0;

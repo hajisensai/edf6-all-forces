@@ -7,11 +7,16 @@ unsigned char* image=nullptr;
 void Log(const char*,...) noexcept {}
 }
 namespace {
-int checks=0,clears=0,setups=0;
+int checks=0,clears=0,setups=0,boards=0,exits=0;
 unsigned char* owned=nullptr;
 bool Owns(unsigned char* seat) noexcept { return seat==owned; }
 void __fastcall Clear(void* input) { ++clears;std::memset(input,0,0x2A); }
 void __fastcall Apply(void*,void*) { ++setups; }
+void __fastcall Board(void*) { ++boards; }
+void __fastcall Exit(void*) { ++exits; }
+void Jump(unsigned char* at,void* fn) {
+    at[0]=0x48;at[1]=0xB8;crew::Put<void*>(at,2,fn);at[10]=0xFF;at[11]=0xE0;
+}
 void Check(bool ok,const char* why) {
     ++checks;if(!ok){std::fprintf(stderr,"FAIL %s\n",why);std::exit(1);}
 }
@@ -28,6 +33,8 @@ int wmain(int argc,wchar_t** argv) {
         std::memcpy(image+kClearInput,kClearSig,sizeof(kClearSig));
         std::memcpy(image+kReadSetup,kReadSetupSig,sizeof(kReadSetupSig));
         std::memcpy(image+0x6330F0,kPathFlagSig,sizeof(kPathFlagSig));
+        std::memcpy(image+kAnnounceBoard,kBoardSig,sizeof(kBoardSig));
+        std::memcpy(image+kAnnounceExit,kExitSig,sizeof(kExitSig));
     }
     Check(!InstallRealDriverNative(nullptr),"missing ownership policy rejected");
     Check(InstallRealDriverNative(&Owns),"checked native call patched");
@@ -50,6 +57,21 @@ int wmain(int argc,wchar_t** argv) {
     Check(weapon[0x8B6]==0 && At<std::uint32_t>(path,0x68)==0x120,"native NPC weapon and path flags applied");
     Check(At<int>(vehicle,0xE30)==2,"existing snapshot mode is preserved");
     if(!native) {
+        Jump(image+kAnnounceBoard,reinterpret_cast<void*>(&Board));
+        Jump(image+kAnnounceExit,reinterpret_cast<void*>(&Exit));
+        unsigned char human[0x1830]{},ctrl[16]{};
+        Put<LONG>(ctrl,8,1);Put<void*>(human,0x1540,seat);Put<void*>(human,0x1550,ctrl);
+        Check(AnnounceNpcBoarding(human) && boards==1,"local NPC announces successful ride");
+        Check(!AnnounceNpcDismount(human) && exits==0,"still seated NPC cannot announce exit");
+        human[0x128]=1;
+        Check(!AnnounceNpcBoarding(human) && boards==1,"remote NPC cannot echo board");
+        Put<void*>(human,0x1540,nullptr);Put<void*>(human,0x1550,nullptr);
+        Check(!AnnounceNpcDismount(human) && exits==0,"remote NPC cannot echo exit");
+        human[0x128]=0;
+        Check(AnnounceNpcDismount(human) && exits==1,"local completed exit announces native message");
+        human[kHumanPlayer]=1;
+        Check(!AnnounceNpcDismount(human) && exits==1,"player remains owned by native input path");
+        Check(!AnnounceNpcBoarding(nullptr) && !AnnounceNpcDismount(nullptr),"null human rejected");
         // Fixture only for external setup parser; invokes production setup/apply path.
         const unsigned char ret[]={0xC3};std::memcpy(image+kReadSetup,ret,1);
         void* vtable[47]{};vtable[46]=reinterpret_cast<void*>(&Apply);Put<void*>(vehicle,0,vtable);

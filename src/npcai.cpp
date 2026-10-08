@@ -843,6 +843,7 @@ bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {
     _InterlockedIncrement(reinterpret_cast<volatile long*>(ctrl+8));
     SharedRef ref{v,ctrl};
     reinterpret_cast<RideFn>(image+kRideVehicle)(h,&ref,s.boardSeat);
+    if(!HumanOnFoot(h))AnnounceNpcBoarding(h);
     Log("NPCAI soldier %p boards v=%p seat %d: %s",h,v,s.boardSeat,HumanOnFoot(h) ? "refused by the stock ride" : "seated");
     s.boardV=ObjRef{};
     return true;
@@ -1589,6 +1590,7 @@ bool DismountSquad(unsigned char* top) noexcept {
         if(!v || !seat || !Readable(seat,kSeatRiderCtrl+8) || At<const void*>(seat,kSeatRider)!=m[i])continue;
         if(!OnlineMaySeatNpc(v))continue;   // NPC riders come and go where they may be seated (online_authority.h)
         reinterpret_cast<void(__fastcall*)(void*,void*)>(image+kSeatKick)(v,seat);
+        AnnounceNpcDismount(m[i]);
         ++off;
     }
     Log("NPCAI squad %p dismounts: %d off",top,off);
@@ -1644,6 +1646,7 @@ bool NpcMoveSeat(unsigned char* v,unsigned from,int to) noexcept {
     auto* h=At<unsigned char*>(seat,kSeatRider);
     if(to<0) {
         reinterpret_cast<void(__fastcall*)(void*,void*)>(image+kSeatKick)(v,seat);
+        if(SeatRider(seat)==Rider::none)AnnounceNpcDismount(h);
         return SeatRider(seat)==Rider::none;
     }
     if(static_cast<unsigned>(to)>=SeatCount(v) || !SeatTakes(v,static_cast<unsigned>(to),h))return false;
@@ -1652,7 +1655,17 @@ bool NpcMoveSeat(unsigned char* v,unsigned from,int to) noexcept {
     _InterlockedIncrement(reinterpret_cast<volatile long*>(ctrl+8));
     SharedRef ref{v,ctrl};
     reinterpret_cast<RideFn>(image+kRideVehicle)(h,&ref,to);
-    return SeatRider(seat)==Rider::none && At<const void*>(SeatAt(v,static_cast<unsigned>(to)),kSeatRider)==h;
+    const bool moved=SeatRider(seat)==Rider::none && At<const void*>(SeatAt(v,static_cast<unsigned>(to)),kSeatRider)==h;
+    if(moved)AnnounceNpcBoarding(h);
+    return moved;
+}
+
+bool NpcReleaseVehicleCrew(unsigned char* v) noexcept {
+    if(!v || !Readable(v,kSeatCount+8) || !OnlineMaySeatNpc(v))return false;
+    bool released=false;
+    for(unsigned i=0;i<SeatCount(v);++i)
+        if(NpcCanYieldSeat(SeatAt(v,i)))released=NpcMoveSeat(v,i,-1) || released;
+    return released;
 }
 
 bool NpcDriver(const unsigned char* v) noexcept {

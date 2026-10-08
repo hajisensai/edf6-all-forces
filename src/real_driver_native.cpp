@@ -6,6 +6,9 @@ namespace crew {
 namespace {
 constexpr unsigned kClearCall=0x573A8A,kClearInput=0x62C120;
 constexpr unsigned kReadSetup=0x62D6E0,kSetupDtors=0x1765220;
+constexpr unsigned kAnnounceBoard=0x5763E0,kAnnounceExit=0x576310;
+constexpr unsigned char kBoardSig[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C,0x24,0x18,0x56,0x57,0x41,0x56,0x48,0x81};
+constexpr unsigned char kExitSig[]={0x48,0x89,0x5C,0x24,0x10,0x57,0x48,0x81,0xEC,0x30,6,0,0};
 constexpr unsigned char kClearContext[]={
     0x48,0x8B,0x8E,0x40,0x15,0,0,0x48,0x81,0xC1,0xC0,2,0,0,0xE8,0x91,0x86,0x0B,0,
     0x8B,0x86,0x8C,0x15,0,0};
@@ -57,7 +60,9 @@ bool InstallRealDriverNative(NpcSeatInputOwnedFn ownsSeatInput) noexcept {
         matches=Matches(kClearCall-14,kClearContext,sizeof(kClearContext)) &&
             Matches(kClearInput,kClearSig,sizeof(kClearSig)) &&
             Matches(kReadSetup,kReadSetupSig,sizeof(kReadSetupSig)) &&
-            Matches(0x6330F0,kPathFlagSig,sizeof(kPathFlagSig));
+            Matches(0x6330F0,kPathFlagSig,sizeof(kPathFlagSig)) &&
+            Matches(kAnnounceBoard,kBoardSig,sizeof(kBoardSig)) &&
+            Matches(kAnnounceExit,kExitSig,sizeof(kExitSig));
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
     if(!matches){Log("Real NPC driver off: native profile mismatch");return false;}
     nextClear=reinterpret_cast<ClearFn>(image+kClearInput);
@@ -71,6 +76,32 @@ bool InstallRealDriverNative(NpcSeatInputOwnedFn ownsSeatInput) noexcept {
 }
 
 bool RealDriverNativeReady() noexcept { return ready; }
+
+namespace {
+bool LocalNpc(unsigned char* human) noexcept {
+    return ready && human && Readable(human,0x1828) &&
+        !At<void*>(human,kHumanPad) && !human[kHumanPlayer] && !(human[0x128]&1);
+}
+}
+
+bool AnnounceNpcBoarding(unsigned char* human) noexcept {
+    if(!LocalNpc(human) || !At<void*>(human,0x1540))return false;
+    auto ctrl=At<unsigned char*>(human,0x1550);
+    if(!ctrl || !Readable(ctrl,12) || At<LONG>(ctrl,8)<=0)return false;
+    // 5763E0 has no player-only gate: it accepts any local registered Human,
+    // then emits vehicle reference id, seat index and ++human->rideSequence.
+    reinterpret_cast<ClearFn>(image+kAnnounceBoard)(human);
+    return true;
+}
+
+bool AnnounceNpcDismount(unsigned char* human) noexcept {
+    // SeatKick's 10000015 handler 5701B0 clears riding state and applies exit
+    // placement but does not announce it. Unlike 5763E0, 576310 has no remote
+    // owner guard, so this wrapper must reject remote NPC copies itself.
+    if(!LocalNpc(human) || At<void*>(human,0x1540) || At<void*>(human,0x1550))return false;
+    reinterpret_cast<ClearFn>(image+kAnnounceExit)(human);
+    return true;
+}
 
 bool PrepareNpcVehicle(unsigned char* vehicle,bool spawned) noexcept {
     if(!ready || !vehicle || !Readable(vehicle,0xE20))return false;
