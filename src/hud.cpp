@@ -3552,9 +3552,9 @@ void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,
                                   {MapKind::enemy,kMapLarge,Tx::legendLargeEnemy},{MapKind::enemyAir,kMapLarge,Tx::legendLargeEnemyAir},
                                   {MapKind::marker,0,Tx::legendObjective}};
     MapCommandReadout commands{};
-    const int squads=PlayerMapCommands(&commands) ? std::min(commands.squads,9) : 0;
+    const int squads=PlayerMapCommands(&commands) ? (commands.squads<9 ? commands.squads : 9) : 0;
     float y=(squads>0 ? 56.0f+22.0f*static_cast<float>(squads+1)+22.0f : 70.0f)*s;
-    MapUiBox(drawer,ctx,8.0f*s,y-14.0f*s,std::min(340.0f*s,width*0.44f),y+14.0f*22.0f*s+14.0f*s,lines,*at);
+    MapUiBox(drawer,ctx,8.0f*s,y-14.0f*s,std::fmin(340.0f*s,width*0.44f),y+14.0f*22.0f*s+14.0f*s,lines,*at);
     const int legendFirst=*at;
     Arc(drawer,ctx,40.0f*s,y,8.0f*s,0.0f,kTurn,2.0f*s,16,kWhite);
     Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendYou));
@@ -3575,7 +3575,7 @@ void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,
     y+=22.0f*s;
     MapBrackets(drawer,ctx,40.0f*s,y,9.0f*s,2.0f*s,kAmber);
     Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendNearestEnemy));
-    for(int i=legendFirst;i<*at;++i)MapFitLabel(text,lines[i],60.0f*s,std::min(330.0f*s,width*0.44f-10.0f*s));
+    for(int i=legendFirst;i<*at;++i)MapFitLabel(text,lines[i],60.0f*s,std::fmin(330.0f*s,width*0.44f-10.0f*s));
 }
 
 void NpcMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept;
