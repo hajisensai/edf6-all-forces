@@ -23,10 +23,14 @@ unsigned char weapon[0x1000]{},secondWeapon[0x1000]{},holder[0x100]{},secondHold
 const unsigned char* holders[2]={holder,secondHolder};
 const unsigned char* pickedWeapon=nullptr;
 float originalFov=sightzoom::kBaseFov;
+const float thirdPerson[16]={1,0,0,0,0,1,0,0,0,0,1,0,25,12,-20,1};
 int checks=0,failures=0;
 void Check(bool ok,const char* name){++checks;if(!ok){++failures;std::printf("FAIL %s\n",name);}}
 void __fastcall Original(void* cam,void*) {
-    if(originalWrites)*reinterpret_cast<float*>(static_cast<unsigned char*>(cam)+kCamFov)=originalFov;
+    if(originalWrites) {
+        *reinterpret_cast<float*>(static_cast<unsigned char*>(cam)+kCamFov)=originalFov;
+        std::memcpy(static_cast<unsigned char*>(cam)+kCamMatrix,thirdPerson,sizeof(thirdPerson));
+    }
 }
 float* __fastcall LookFixture(float* m,const float* d) {
     std::memset(m,0,16*sizeof(float));m[0]=1;m[5]=1;m[10]=1;m[15]=1;
@@ -66,6 +70,7 @@ void Setup() {
     Put<const void*>(seats,kSeatWeapons,holders);Put<std::uint64_t>(seats,kSeatWeaponCount,1);
     Put<void*>(camera,kCamTarget,human);Put<void*>(camera,kCamTargetRef,human);
     Put<float>(camera,kCamFov,originalFov);
+    std::memcpy(camera+kCamMatrix,thirdPerson,sizeof(thirdPerson));
 }
 void Button(unsigned short mask){Put<unsigned short>(seats,kSeatButtons,mask);SightZoomStock(vehicle);}
 void Zoom(){Button(0);Button(0x80);Check(SightZoomNow(vehicle)==3.0f,"pad release/press selects 3x");}
@@ -192,7 +197,7 @@ int wmain(int argc,wchar_t** argv){
     Fov();Check(At<float>(camera,kCamMatrix+48)==4 && At<float>(camera,kCamMatrix+52)==5 && At<float>(camera,kCamMatrix+56)==6,
                 "scope eye uses physical optic bone, not third-person camera or muzzle");
     Check(SightZoomMounted(vehicle),"active physical view asks turret input to stay native");
-    originalWrites=false;ResetSightZoom();Fov();Check(At<float>(camera,kCamMatrix+48)==0,"leaving restores untouched original world matrix");
+    originalWrites=false;ResetSightZoom();Fov();Check(std::memcmp(camera+kCamMatrix,thirdPerson,sizeof(thirdPerson))==0,"leaving restores untouched original world matrix");
     Setup();opticPresent=false;Button(0);Button(0x80);
     Check(SightZoomNow(vehicle)==1 && !SightZoomMounted(vehicle),"an armed vehicle without an installed optic cannot merely magnify third-person view");
     Setup();Put<int>(bones+3*weaponmount::kStride,weaponmount::kParent,0);Button(0);Button(0x80);
@@ -213,14 +218,14 @@ int wmain(int argc,wchar_t** argv){
           "flight and mech fire control never stack a generic scope mask");
     Setup();extraOptic=true;Button(0);Button(0x80);Check(!SightZoomMounted(vehicle) && SightZoomNow(vehicle)==1,"ambiguous same-mount optics fail closed");
     Setup();Zoom();Fov();opticPresent=false;originalWrites=false;Fov();
-    Check(At<float>(camera,kCamMatrix+48)==0 && At<float>(camera,kCamFov)==originalFov,"losing installed lens restores camera and FOV immediately");
+    Check(std::memcmp(camera+kCamMatrix,thirdPerson,sizeof(thirdPerson))==0 && At<float>(camera,kCamFov)==originalFov,"losing installed lens restores camera and FOV immediately");
     if(native) {
         for(const auto& d: {std::array<float,3>{0,0,1},std::array<float,3>{1,0,0},std::array<float,3>{0.3f,0.4f,0.8660254f}}) {
             Setup();std::memcpy(muzzleDirection,d.data(),12);Zoom();Fov();
             const auto m=reinterpret_cast<const float*>(camera+kCamMatrix);
             Check(std::fabs(m[8]*d[0]+m[9]*d[1]+m[10]*d[2]-1.0f)<1e-5f,"real native camera basis follows selected barrel direction");
             Check(m[12]==4 && m[13]==5 && m[14]==6,"native camera eye is the tagged physical optic");
-            originalWrites=false;ResetSightZoom();Fov();Check(At<float>(camera,kCamMatrix+48)==0,"native view restores on exit");
+            originalWrites=false;ResetSightZoom();Fov();Check(std::memcmp(camera+kCamMatrix,thirdPerson,sizeof(thirdPerson))==0,"native view restores on exit");
         }
         FreeLibrary(native);
     }
