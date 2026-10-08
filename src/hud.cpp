@@ -3535,6 +3535,8 @@ void MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float
     constexpr int n=mapbtn::kCount;
     static const Tx kOrders[]={Tx::orderGuard,Tx::orderFollow,Tx::orderRelease,Tx::orderEngage,Tx::orderFocus,Tx::orderBoard,
                                Tx::orderDismount,Tx::orderDismiss,Tx::orderRecruit};
+    static const Order kCommandOrder[]={Order::guard,Order::follow,Order::none,Order::engage,Order::focus,
+        Order::board,Order::dismount,Order::dismiss,Order::recruit};
     static const wchar_t kKeys[n]={L'G',L'V',L'X',L'J',L'H',L'B',L'N',L'K',L'U',L'T',L'P',L'L',L'Y',L'O',L'[',L']',L'C'};
     static_assert(sizeof(kOrders)/sizeof(kOrders[0])==static_cast<std::size_t>(Id::formation),"an order a button");
     wchar_t name[n][64];
@@ -3564,8 +3566,9 @@ void MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float
     float rects[n*4];int ids[n];int placed=0;
     for(int i=0;i<n;++i) {
         if(!(r[i].x1>r[i].x0))continue;   // no room for its row
-        const bool order=i<static_cast<int>(Id::sweep);
-        const bool enabled=order ? c.allowed && c.selected>0 : true;
+        const bool command=i<static_cast<int>(Id::formation),squadTool=i>=static_cast<int>(Id::formation) && i<static_cast<int>(Id::sweep);
+        const bool enabled=command ? (c.allowed && (c.allowedOrders&(1u<<static_cast<unsigned>(kCommandOrder[i])))) ||
+            (i==static_cast<int>(Id::guard) && c.guardArmed) : squadTool ? c.allowed && c.selectedSquads>0 : true;
         const bool lit=(i==static_cast<int>(Id::guard) && c.guardArmed) || (i==static_cast<int>(Id::sweep) && c.sweepOn) ||
                        (i==static_cast<int>(Id::health) && c.healthOn) || (i==static_cast<int>(Id::supportCall) && c.supportArmed);
         Rect(drawer,ctx,r[i].x0,r[i].y0,r[i].x1,r[i].y1,lit ? kBtnLit : kBtnFill);
@@ -3575,7 +3578,7 @@ void MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float
         Seg(drawer,ctx,r[i].x1,r[i].y1,r[i].x0,r[i].y1,t,edge);Seg(drawer,ctx,r[i].x0,r[i].y1,r[i].x0,r[i].y0,t,edge);
         Label(text,lines,at,(r[i].x0+r[i].x1)*0.5f,(r[i].y0+r[i].y1)*0.5f,1,scale,enabled ? kWhite : kMapOrderDim,L"%ls  %lc",name[i],kKeys[i]);
         if(*at>0)MapFitLabel(text,lines[*at-1],r[i].x0+kBtnPad*s,r[i].x1-kBtnPad*s);
-        rects[placed*4]=r[i].x0;rects[placed*4+1]=r[i].y0;rects[placed*4+2]=r[i].x1;rects[placed*4+3]=r[i].y1;ids[placed]=i;
+        rects[placed*4]=r[i].x0;rects[placed*4+1]=r[i].y0;rects[placed*4+2]=r[i].x1;rects[placed*4+3]=r[i].y1;ids[placed]=enabled ? i : -1;
         ++placed;
     }
     MapCommandButtons(rects,ids,placed);
