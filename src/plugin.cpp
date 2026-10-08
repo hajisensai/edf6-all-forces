@@ -15,6 +15,7 @@
 #include "PluginAPI.h"
 #pragma warning(pop)
 #include "crew.h"
+#include "mod_room.h"
 #include "lockon.h"
 #include "hudscale.h"
 #include "hudtext.h"
@@ -881,6 +882,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     CheckPauseFlag();       // the game's pause flag (the game clock and the HUD stop with it): read only
     // Then the installs, in dependency order. From the first patch on the plugin stays loaded whatever fails
     // after (true below): the loader unloading the DLL would leave patched slots pointing at unloaded code.
+    Log("ROOM isolation=%d",InstallModRoom());
     InstallBody506();       // the one 506 physics hook: before the jets, the carrier and the player jets
     InstallBulletPass();    // the bullets' candidate hook: the jets' wingmen and the sidecar's passengers, whatever the heli profile
     if(heli) {
