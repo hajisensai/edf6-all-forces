@@ -7,7 +7,7 @@
 //    by a seat's frame within kCueMs: when the player gets out, the vehicle is wrecked or gone, SightZoom or the plugin
 //    is switched off, the view is restored on the next camera step, including its no-target branch.
 //  - A new seat or vehicle starts at 1x; a new mission too (ResetSightZoom).
-//  - On a pad the button is R3 by default; where the high view is offered (highcam.cpp, R3 too) the high view keeps it.
+//  - Shared pad bindings belong to the high view or the Sazabi's hard lock; zoom remains available on a separate binding.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "layout.h"
@@ -141,7 +141,9 @@ void SightZoomStock(unsigned char* v) noexcept {
     const unsigned n=SeatCount(v);
     for(unsigned i=0;i<n;++i) {
         if(SeatRider(SeatAt(v,i))!=Rider::player || At<const void*>(SeatAt(v,i),kSeatRider)!=PlayerHuman())continue;
-        SightZoomFrame(v,i,!(i==0 && HighCamOffered(v) && (Cfg().highCamButton & Cfg().sightZoomButton)!=0));
+        const bool reserved=i==0 && ((HighCamOffered(v) && (Cfg().highCamButton & Cfg().sightZoomButton)!=0) ||
+            (Cfg().sazabi && IsSazabi(v) && (Cfg().sazabiLockButton & Cfg().sightZoomButton)!=0));
+        SightZoomFrame(v,i,!reserved);
         return;
     }
     if(toggle.ref.Is(v))ResetSightZoom();

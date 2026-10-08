@@ -7,6 +7,7 @@
 #include <cstring>
 #include "edf/layout.h"
 #include "edf/patch.h"
+#include "gunsight.h"
 #include "stores.h"
 #include "edf/seat.h"
 
@@ -974,6 +975,7 @@ struct HeliSightReadout {
     int lock;
     float armBore[3],armAt[3],armRange,lockProgress,lockRange;
     const char* armLabel;
+    gunsight::Ladder ladder;     // the gun's range ladder (gunsight.h; no ticks: none), under its boresight
 };
 bool PlayerHeliOwnSight(const void* vehicle) noexcept;
 void HeliSightFrame(unsigned char* vehicle) noexcept;

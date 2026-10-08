@@ -105,6 +105,10 @@ bool SolveGun(const unsigned char* const* guns,int n,HeliSightReadout& r) noexce
     r.hit=RoundImpact(pos,vel,drop,round.alive,r.pipper,&took);
     if(!r.hit)sight::RoundAfter(pos,vel,drop,static_cast<float>(round.alive),r.pipper);
     r.range=vec::Dist(pos,r.pipper);
+    // Its range ladder: the same round (the inherited velocity already in m/frame: as a shooter at 60x it with all of it kept).
+    const roundaim::Round ladder{round.speed,{drop[0],drop[1],drop[2]},1.0f,round.alive};
+    const float shooter[3]={owner[0]*60.0f,owner[1]*60.0f,owner[2]*60.0f};
+    r.ladder=gunsight::Of(ladder,pos,dir,shooter);
     r.gun=true;
     return true;
 }

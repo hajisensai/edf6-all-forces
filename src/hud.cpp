@@ -22,6 +22,7 @@
 #include "crew.h"
 #include "formation.h"
 #include "map_buttons.h"
+#include "scopeview.h"
 #include "boarding_entrance.h"
 #include "gear.h"
 #include "hudscale.h"
@@ -1291,6 +1292,33 @@ void GunSight(void* drawer,void* ctx,const float* vp,float width,float height,fl
 // boresight with MSL and the range it locks within; the rockets' mark a hollow diamond where their path (flown as the
 // game flies them: vhud.h RoundLands) meets the map with its label (RKT, GREN...) and distance (none met: a dim one on
 // their boresight).
+// A gun's range ladder (gunsight.h) under its aim point (cx, top): a tick where a round fired now is when it has
+// gone that far over the ground (kLadderApart from the one above at least: closer ones left out), a thin line down
+// through them, each numbered (hundreds of metres; metres for a short gun's 50 m steps) where there is room for it.
+constexpr float kLadderTick=9.0f,kLadderApart=4.0f,kLabelApart=16.0f;   // px at 1080
+void LadderTicks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const gunsight::Ladder& l,
+                 float cx,float top,Line* lines,int* at) noexcept {
+    const float t=2.0f*s;
+    float last=top,lastX=cx,labelled=-1e9f;
+    bool any=false;
+    for(int k=0;k<l.ticks;++k) {
+        float lx,ly;
+        if(!sight::ToScreen(vp,l.at[k],1.0f,width,height,&lx,&ly))continue;
+        if(ly<last+kLadderApart*s)continue;
+        const float h=kLadderTick*s;
+        Seg(drawer,ctx,lx-h,ly,lx+h,ly,t,kHud);
+        const int metres=static_cast<int>(std::lround(l.range[k]));
+        if(ly>=labelled+kLabelApart*s) {   // its number where there is room for it (a tick too near the last one's: none)
+            if(l.step>=100.0f && metres%100!=0)   // a 250 m step: 2.5, 7.5 hundreds, not 2, 7
+                Label(text,lines,at,lx-h-5.0f*s,ly,2,kLineScale*0.7f,kHud,L"%.1f",metres/100.0);
+            else Label(text,lines,at,lx-h-5.0f*s,ly,2,kLineScale*0.7f,kHud,L"%d",l.step>=100.0f ? metres/100 : metres);
+            labelled=ly;
+        }
+        if(any)Seg(drawer,ctx,lastX,last,lx,ly,1.0f*s,kHudDim);
+        last=ly;lastX=lx;any=true;
+    }
+}
+
 constexpr float kMissileRing=34.0f,kRocketMark=11.0f;   // px at 1080 lines
 void RocketDiamond(void* drawer,void* ctx,float x,float y,float s,const float* rgba) noexcept {
     const float r=kRocketMark*s,t=2.0f*s;
@@ -1304,6 +1332,9 @@ void HeliGunSight(void* drawer,void* ctx,Text* text,const float* vp,float width,
     if(h.gun) {
         const float* c=h.hit ? kHud : kHudDim;
         Boresight(drawer,ctx,vp,width,height,s,h.bore);
+        float bx,by;
+        if(h.ladder.ticks>0 && sight::ToScreen(vp,h.bore,0.0f,width,height,&bx,&by))   // its range ladder under the cross
+            LadderTicks(drawer,ctx,text,vp,width,height,s,h.ladder,bx,by+12.0f*s,lines,at);
         if(Pipper(drawer,ctx,vp,width,height,s,h.pipper,c,&x,&y))
             Label(text,lines,at,x+(kPipper+8.0f)*s,y,0,note,c,L"%d m",static_cast<int>(std::lround(h.range)));
     }
@@ -2283,10 +2314,10 @@ void ArmName(const StockArm& a,bool selected,wchar_t* out,std::size_t size) noex
 // fired now is when it has gone that far over the ground (labelled in hundreds of metres, or metres for a short
 // gun's 50 m steps; a tick too near the last labelled one unlabelled), ticks too close to the one above left out; over the left stadia the gun, over the right its
 // rangefinder (the map hit or the ranged target: the pipper's `range`). The pipper and the lead mark stay StockMark's.
-constexpr float kChevron=14.0f,kStadiaIn=26.0f,kStadiaOut=112.0f,kLadderTick=9.0f,kLadderApart=4.0f,kLabelApart=16.0f;   // px at 1080
+constexpr float kChevron=14.0f,kStadiaIn=26.0f,kStadiaOut=112.0f;   // px at 1080
 constexpr float kMilTick=5.0f,kMilApart=8.0f;   // mils a tick; px they must be apart to be drawn
 void GunReticle(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockArm& a,
-                const wchar_t* name,float zoom,Line* lines,int* at) noexcept {
+                const wchar_t* name,Line* lines,int* at) noexcept {
     float cx,cy;
     if(!sight::ToScreen(vp,a.bore,0.0f,width,height,&cx,&cy))return;
     const float t=2.0f*s,c=kChevron*s;
@@ -2311,37 +2342,18 @@ void GunReticle(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
             }
         }
     }
-    // The ladder.
-    float last=cy+c*0.85f,lastX=cx,labelled=-1e9f;
-    bool any=false;
-    for(int k=0;k<a.ladder.ticks;++k) {
-        float lx,ly;
-        if(!sight::ToScreen(vp,a.ladder.at[k],1.0f,width,height,&lx,&ly))continue;
-        if(ly<last+kLadderApart*s)continue;
-        const float h=kLadderTick*s;
-        Seg(drawer,ctx,lx-h,ly,lx+h,ly,t,kHud);
-        const int metres=static_cast<int>(std::lround(a.ladder.range[k]));
-        if(ly>=labelled+kLabelApart*s) {   // its number where there is room for it (a tick too near the last one's: none)
-            if(a.ladder.step>=100.0f && metres%100!=0)
-                Label(text,lines,at,lx-h-5.0f*s,ly,2,kLineScale*0.7f,kHud,L"%.1f",metres/100.0);
-            else Label(text,lines,at,lx-h-5.0f*s,ly,2,kLineScale*0.7f,kHud,L"%d",a.ladder.step>=100.0f ? metres/100 : metres);
-            labelled=ly;
-        }
-        if(any)Seg(drawer,ctx,lastX,last,lx,ly,1.0f*s,kHudDim);
-        last=ly;lastX=lx;any=true;
-    }
+    LadderTicks(drawer,ctx,text,vp,width,height,s,a.ladder,cx,cy+c*0.85f,lines,at);
     const float over=cy-16.0f*s,note=kLineScale*0.85f;
-    if(zoom>1.0f)Label(text,lines,at,cx-in,over,2,note,kHud,L"%ls  %.0fx",name,zoom);
-    else Label(text,lines,at,cx-in,over,2,note,kHud,L"%ls",name);
+    Label(text,lines,at,cx-in,over,2,note,kHud,L"%ls",name);
     if(a.range>0.0f && (a.hit || a.ranged))
         Label(text,lines,at,cx+in,over,0,note,a.ranged && !a.inReach ? kHudDim : kHud,Tr(Tx::sightRange),static_cast<int>(std::lround(a.range)));
     else Label(text,lines,at,cx+in,over,0,note,kHudDim,L"%ls",Tr(Tx::sightNoRange));
 }
 
 // `reticle`: this gun's sight is GunReticle (the seat's sight gun: StockMarks), its pipper unlabelled (the reticle
-// reads its range); `zoom` the sight's magnification.
+// reads its range).
 void StockMark(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockArm& a,const wchar_t* name,
-               bool reticle,float zoom,Line* lines,int* at) noexcept {
+               bool reticle,Line* lines,int* at) noexcept {
     float x,y;
     const float note=kLineScale*0.85f;
     const int metres=static_cast<int>(std::lround(a.range));
@@ -2365,7 +2377,7 @@ void StockMark(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     }
     if(a.ranged) {
         const float* c=a.inReach ? kHud : kHudDim;
-        if(reticle)GunReticle(drawer,ctx,text,vp,width,height,s,a,name,zoom,lines,at);
+        if(reticle)GunReticle(drawer,ctx,text,vp,width,height,s,a,name,lines,at);
         else Boresight(drawer,ctx,vp,width,height,s,a.bore);
         LeadMark(drawer,ctx,vp,width,height,s,a.lead,c);
         if(Pipper(drawer,ctx,vp,width,height,s,a.at,c,&x,&y) && !reticle)
@@ -2378,7 +2390,7 @@ void StockMark(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
         return;
     }
     if(reticle) {
-        GunReticle(drawer,ctx,text,vp,width,height,s,a,name,zoom,lines,at);
+        GunReticle(drawer,ctx,text,vp,width,height,s,a,name,lines,at);
         if(a.hit)Pipper(drawer,ctx,vp,width,height,s,a.at,kHud,&x,&y);
         return;
     }
@@ -2526,7 +2538,7 @@ void StockMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
         if(twin)continue;
         wchar_t name[32];
         ArmName(a,i==r.selected,name,_countof(name));
-        StockMark(drawer,ctx,text,vp,width,height,s,a,name,i==sightGun,r.zoom,lines,at);
+        StockMark(drawer,ctx,text,vp,width,height,s,a,name,i==sightGun,lines,at);
     }
 }
 
@@ -3587,6 +3599,38 @@ void NpcPingHud(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
 
 }  // namespace
 
+// A magnified sight's picture (scopeview.h; sightzoom.cpp): while the sight is magnified the screen outside its field
+// dark; a round field for an optical sight with its rim and three posts (left, right, under: the aim stays clear), the
+// magnification inside its left edge; the gunship gunner's a 4:3 sensor with its edge (GunnerMarks names its zoom).
+alignas(16) const float kScopeDark[4]={0.0f,0.0f,0.0f,0.86f};
+alignas(16) const float kScopeRim[4]={0.55f,0.62f,0.55f,0.75f};
+void Quad4(void* drawer,void* ctx,const scopeview::Quad& q,const float* rgba) noexcept {
+    alignas(16) const float m[16]={1.0f,0.0f,0.0f,0.0f, 0.0f,1.0f,0.0f,0.0f, 0.0f,0.0f,1.0f,0.0f, 0.0f,0.0f,0.0f,1.0f};
+    alignas(16) const float v[12]={q.x[0],q.y[0],0.0f, q.x[1],q.y[1],0.0f, q.x[2],q.y[2],0.0f, q.x[3],q.y[3],0.0f};
+    reinterpret_cast<QuadFn>(image+kQuad)(drawer,ctx,m,rgba,kStrip,v,4,nullptr);
+}
+void ScopeShade(void* drawer,void* ctx,Text* text,float width,float height,float s,float zoom,bool sensor,Line* lines,int* at) noexcept {
+    const float cx=width*0.5f,cy=height*0.5f;
+    if(sensor) {
+        scopeview::Quad b[4];
+        scopeview::RectBands(width,height,b);
+        for(const auto& q:b)Quad4(drawer,ctx,q,kScopeDark);
+        float hx,hy;
+        scopeview::RectHalf(width,height,&hx,&hy);
+        const float t=2.0f*s;
+        Seg(drawer,ctx,cx-hx,cy-hy,cx+hx,cy-hy,t,kScopeRim);Seg(drawer,ctx,cx-hx,cy+hy,cx+hx,cy+hy,t,kScopeRim);
+        Seg(drawer,ctx,cx-hx,cy-hy,cx-hx,cy+hy,t,kScopeRim);Seg(drawer,ctx,cx+hx,cy-hy,cx+hx,cy+hy,t,kScopeRim);
+        return;
+    }
+    const float r=scopeview::Radius(width,height),out=scopeview::Reach(width,height,cx,cy);
+    for(int i=0;i<scopeview::kSides;++i)Quad4(drawer,ctx,scopeview::RingPiece(i,cx,cy,r,out),kScopeDark);
+    Arc(drawer,ctx,cx,cy,r,0.0f,kTurn,3.0f*s,scopeview::kSides,kScopeRim);
+    const float post=4.0f*s,inner=r*0.62f;
+    Seg(drawer,ctx,cx-r,cy,cx-inner,cy,post,kScopeRim);Seg(drawer,ctx,cx+inner,cy,cx+r,cy,post,kScopeRim);
+    Seg(drawer,ctx,cx,cy+inner,cx,cy+r,post,kScopeRim);
+    Label(text,lines,at,cx-r+18.0f*s,cy-22.0f*s,0,kLineScale,kScopeRim,L"%.0fx",zoom);
+}
+
 void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierPanel* panels,int count) noexcept {
     // The aim's view (CameraRay) stays the game's while the map's camera shows: the turret, the launcher and the sights
     // hold where the player left them.
@@ -3619,6 +3663,11 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         // view they were not made for. Nothing, like the stock HUD (its switch held until the camera is back).
         if(MapOwnsView()){FreeText(text);return;}
         const ULONGLONG now=GetTickCount64();
+        {   // the magnified sight's picture first: every mark over it
+            const Snapshot& z=Latest();
+            const float zoom=SightZoomNow(nullptr);
+            if(zoom>1.0f && now-z.tick<=kFreshMs)ScopeShade(drawer,ctx,t,width,height,s,zoom,z.gunner && !z.cockpit,lines,&at);
+        }
         for(int i=0;i<count && i<3;++i)CarrierBars(drawer,ctx,t,viewProj,width,height,s,panels[i],lines,&at,now);
         const Snapshot& snap=Latest();
         // A switch the player makes shows for a moment (hud_cue.h Change, kSwitchMs): the picked store (forgotten while no

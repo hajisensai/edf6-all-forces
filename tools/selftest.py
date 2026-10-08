@@ -1030,6 +1030,15 @@ def sight_zoom_wired() -> None:
     assert 'sightzoom::Rate(' in src('src/turretcam.cpp')
     assert 'ResetSightZoom();' in src('src/mission.cpp')
     assert 'src/sightzoom.cpp' in src('CMakeLists.txt')
+    # The magnified sight's picture (src/scopeview.h): drawn first in HudDraw (every mark over it) whenever the sight is
+    # magnified, the gunship gunner's a sensor rectangle; its offline check under CTest; the heli gun's ladder.
+    hud = src('src/hud.cpp')
+    draw = hud.split('void HudDraw(const float* viewProj,', 1)[1]
+    assert draw.index('ScopeShade(drawer,ctx,t,width,height,s,zoom,z.gunner && !z.cockpit') < draw.index('CarrierBars(')
+    assert 'LadderTicks(drawer,ctx,text,vp,width,height,s,h.ladder,' in hud and 'r.ladder=gunsight::Of(' in src('src/helisight.cpp')
+    cmake = src('CMakeLists.txt')
+    assert 'EXCLUDE_FROM_ALL tools/scopeview_check.cpp' in cmake and 'scopeview_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
+    assert 'scopeview.h' in readme
 
 
 BOHR_STOCK_AMMO_ALIVE = 100.0   # V603_FLAK_GLGUN01_DLC_{L,R}.SGO AmmoAlive in the stock Root.cpk
