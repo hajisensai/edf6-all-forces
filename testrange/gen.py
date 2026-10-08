@@ -948,6 +948,10 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
         held.add(ledger.key(rel))
     for f in sorted({JETS[n].file for n in jets if JETS[n].file}):
         held.add(_need_model(led, game, f))
+        if f in jet_models.ANIMATIONS:
+            rel = f'OBJECT/{jet_models.ANIMATIONS[f]}'
+            led.put(OWNER, rel, jet_models.animation(game, f))
+            held.add(ledger.key(rel))
     if jets:
         for name, data in jet_guns(game).items():
             led.put(OWNER, f'WEAPON/{name}', data)

@@ -244,6 +244,8 @@ def build(root: str) -> dict[str, bytes]:
     out[f'OBJECT/{MODEL_FILE}'] = jet_models.elevon_archive(game)   # the elevon bomber, grounded
     for name, data in jet_models.build(game).items():
         out[f'OBJECT/{name}'] = data
+    for model, name in jet_models.ANIMATIONS.items():
+        out[f'OBJECT/{name}'] = jet_models.animation(game, model)
     jet_models.check_nozzles(game)   # the plugin's flames (src/booster.cpp kJetNozzles) on these models' exits
     import primer_fighter_model   # the Primer fighter's own model (not a jet_models recipe)
     arc = primer_fighter_model.build(game)
@@ -323,7 +325,7 @@ def names() -> list[str]:
     """Every path under Mods this tool writes (whether or not installed)."""
     import aircraft_collision
     objects = [*FILES, *BOMBERS, GUNSHIP_FILE, *IMPACT_FILES, *(g.file for g in SIDE_GUNS), *HELIS, MEDIC_HELI_FILE, MODEL_FILE, *MODEL_FILES,
-               *vc.PORTAL_LASER_FILES, *aircraft_collision.FILES.values()]
+               *vc.PORTAL_LASER_FILES, *aircraft_collision.FILES.values(), *jet_models.ANIMATIONS.values()]
     return [f'OBJECT/{n}' for n in objects] + [f'WEAPON/{n}' for n in (*vc.JET_WEAPON_FILES, MEDIC_GUN_FILE)]
 
 

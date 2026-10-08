@@ -113,6 +113,51 @@ class GameAssets(unittest.TestCase):
         from rootcpk import default
         cls.game = default()
 
+    def test_absolute_heli_animation_no_longer_lifts_aircraft_skin(self):
+        from cas_pose import CasPose
+        import model_view
+        import numpy as np
+        old = CasPose(self.game.read('OBJECT', 'V506_HELI.CAS'))
+        for key in jet_models.ANIMATIONS:
+            md = jet_models._model_of(self.game, key)
+            new = CasPose(jet_models.animation(self.game, key))
+            def local_pose(pose):
+                result = {}
+                for t in next(c for c in pose.clips if c.name == 'default').tracks:
+                    i = md.bone_index(t.name)
+                    if i >= 0 and t.translation >= 0:
+                        local = list(md.bones[i].local)
+                        local[12:15] = pose.translation(t.translation)
+                        result[t.name] = local
+                return result
+            bind = model_view.geometry(md, {}, [])[0]
+            before = model_view.geometry(md, {}, [], local_pose(old))[0]
+            after = model_view.geometry(md, {}, [], local_pose(new))[0]
+            self.assertGreater(float(np.min(before[:, 1]) - np.min(bind[:, 1])), 1.63)
+            self.assertLess(float(np.max(np.abs(after - bind))), 0.00001)
+            # No change to additive translation, rotation/scale, state graph,
+            # track names or key streams: only the default body's base moves.
+            changed = {i for i, (a, b) in enumerate(zip(old.data, new.data)) if a != b}
+            body = next(t for c in old.clips if c.name == 'default' for t in c.tracks if t.name == 'body')
+            allowed = set(range(old.points + body.translation*48, old.points + body.translation*48 + 12))
+            self.assertTrue(changed and changed <= allowed)
+            self.assertEqual(len(old.data), len(new.data))
+            print(key, 'skin low y:', float(np.min(before[:, 1])), '->', float(np.min(after[:, 1])))
+
+    def test_standalone_range_keeps_retargeted_animation(self):
+        import tempfile
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'testrange'))
+        import gen
+        import sgo
+        with tempfile.TemporaryDirectory(prefix='edf-carrier-cas-') as tmp:
+            name = gen.parked_name('edf6tr_jet_carrier_mission')
+            gen._write_derived(tmp, self.game, {name})
+            objects = Path(tmp) / 'Mods' / 'OBJECT'
+            m = sgo.read((objects / (name.upper() + '.SGO')).read_bytes())[1]
+            cas = objects / m['animation_model'][1].split('/')[-1].upper()
+            self.assertEqual(cas.read_bytes(), jet_models.animation(self.game, 'EDF6VC_CARRIER.MRAB'))
+
     def test_carrier_door_is_reachable_beside_hull_not_wingtip(self):
         import vcobjects as vc
         import sgo
@@ -184,6 +229,10 @@ class GameAssets(unittest.TestCase):
                 self.assertEqual(m['ragdoll'][0].lower(), 'app:/object/ragdoll_v506_heli.shkt')
                 continue
             self.assertEqual(m['ragdoll'][0].lower(), 'app:/object/'+ac.FILES[key].lower())
+            if key in jet_models.ANIMATIONS:
+                cas = jet_models.ANIMATIONS[key]
+                self.assertEqual(m['animation_model'][1].lower(), 'app:/object/'+cas.lower())
+                self.assertIn('OBJECT/'+cas, out)
             self.assertIn('OBJECT/'+ac.FILES[key], out)
             # Geometry/frame must not depend on whether a human or the AI owns it.
             values = [[vc._value(v) for v in row] for row in m['heli_rigid_body'][:2]]

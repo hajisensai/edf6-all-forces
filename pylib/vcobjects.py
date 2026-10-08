@@ -1047,7 +1047,9 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     mab = model[2]
     for at, old in JET_MAB_BONES:
         mab = sgo.replace_utf16(mab, at, old, anchor)
-    m['animation_model'] = [list(JET_MODEL if model_ref is None else model_ref), jet.cas or model[1], mab]
+    cas = jet.cas or ('app:/object/' + jet_models.ANIMATIONS[jet.file].lower()
+                      if jet.file in jet_models.ANIMATIONS else model[1])
+    m['animation_model'] = [list(JET_MODEL if model_ref is None else model_ref), cas, mab]
     m['animation_model_bone_mapping'] = [root, body]
     bones = {'body', 'rotor', 'tailRotor'}
     m['vehicle_weapon_setting'] = with_fuel([[b, 0] for b in (jet.weapon_bones or (anchor,) * len(jet.weapons))], [anchor, -1])
