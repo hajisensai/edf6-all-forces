@@ -3395,7 +3395,7 @@ void MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float
     constexpr int n=mapbtn::kCount;
     static const Tx kOrders[]={Tx::orderGuard,Tx::orderFollow,Tx::orderRelease,Tx::orderEngage,Tx::orderFocus,Tx::orderBoard,
                                Tx::orderDismount,Tx::orderDismiss,Tx::orderRecruit};
-    static const wchar_t kKeys[n]={L'G',L'V',L'X',L'J',L'H',L'B',L'N',L'K',L'U',L'T',L'P',L'L',L'Y',L'O'};
+    static const wchar_t kKeys[n]={L'G',L'V',L'X',L'J',L'H',L'B',L'N',L'K',L'U',L'T',L'P',L'L',L'Y',L'O',L'[',L']',L'C'};
     static_assert(sizeof(kOrders)/sizeof(kOrders[0])==static_cast<std::size_t>(Id::formation),"an order a button");
     wchar_t name[n][64];
     for(int i=0;i<static_cast<int>(Id::formation);++i)_snwprintf_s(name[i],64,_TRUNCATE,L"%ls",Tr(kOrders[i]));
@@ -3404,6 +3404,9 @@ void MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float
     _snwprintf_s(name[static_cast<int>(Id::merge)],64,_TRUNCATE,L"%ls",Tr(Tx::btnMerge));
     _snwprintf_s(name[static_cast<int>(Id::sweep)],64,_TRUNCATE,L"%ls",Tr(c.sweepOn ? Tx::btnSweepStop : Tx::btnSweep));
     _snwprintf_s(name[static_cast<int>(Id::health)],64,_TRUNCATE,L"%ls",Tr(c.healthOn ? Tx::btnHealthOn : Tx::btnHealthOff));
+    _snwprintf_s(name[static_cast<int>(Id::supportPrev)],64,_TRUNCATE,L"上一支援");
+    _snwprintf_s(name[static_cast<int>(Id::supportNext)],64,_TRUNCATE,L"下一支援");
+    _snwprintf_s(name[static_cast<int>(Id::supportCall)],64,_TRUNCATE,L"%ls %ls",c.supportArmed ? L"取消" : L"呼叫",c.supportName);
     const float scale=kLineScale*0.7f;
     float w[n];
     for(int i=0;i<n;++i) {
@@ -3421,7 +3424,7 @@ void MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float
         const bool order=i<static_cast<int>(Id::sweep);
         const bool enabled=order ? c.allowed && c.selected>0 : true;
         const bool lit=(i==static_cast<int>(Id::guard) && c.guardArmed) || (i==static_cast<int>(Id::sweep) && c.sweepOn) ||
-                       (i==static_cast<int>(Id::health) && c.healthOn);
+                       (i==static_cast<int>(Id::health) && c.healthOn) || (i==static_cast<int>(Id::supportCall) && c.supportArmed);
         Rect(drawer,ctx,r[i].x0,r[i].y0,r[i].x1,r[i].y1,lit ? kBtnLit : kBtnFill);
         const float* edge=enabled ? kMapOrder : kMapOrderDim;
         const float t=1.5f*s;

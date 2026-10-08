@@ -12,6 +12,13 @@ SHORT Down(int key) noexcept { return key>=0 && key<256 && keys[key] ? static_ca
 #include <cstdio>
 
 namespace crew {
+int SupportCallCount() noexcept { return 3; }
+const wchar_t* SupportCallName(int) noexcept { return L"Support"; }
+int supportCalls=0,supportChosen=-1;float supportTarget[3]{};
+bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept {
+    ++supportCalls;supportChosen=index;std::memcpy(supportTarget,target,12);
+    _snwprintf_s(note,capacity,_TRUNCATE,L"support received");return true;
+}
 unsigned char* image=nullptr;
 void Log(const char*,...) noexcept {}
 bool InSession() noexcept { return false; }
@@ -363,11 +370,28 @@ void CameraIsolation() noexcept {
     maphud::Step(r,&first,1,false,&shown);
     Check(!maphud::Hides(r,&first,1),"closing map restores owning camera follower gauge");
 }
+void SupportInput() noexcept {
+    ResetMapCommands();view=View{};config=Config{};supportCalls=0;supportChosen=-1;
+    std::memset(inputstub::keys,0,sizeof(inputstub::keys));
+    MapCmdInput in{};in.front=true;in.usingPad=true;in.eye[1]=100.0f;in.look[0]=80;in.look[2]=120;
+    float centre[3]{};MapCommandFrame(in,centre);
+    inputstub::keys[VK_OEM_6]=true;MapCommandFrame(in,centre);
+    Check(game.supportPick==1 && !supportCalls,"catalog choice does not dispatch a unit");
+    MapCommandFrame(in,centre);Check(game.supportPick==1,"holding next advances once");
+    inputstub::keys[VK_OEM_6]=false;inputstub::keys['C']=true;MapCommandFrame(in,centre);
+    Check(supportCalls==1 && supportChosen==1 && std::fabs(supportTarget[0]-80)<0.01f && std::fabs(supportTarget[2]-120)<0.01f,
+          "C dispatches chosen support to map ground without selected units");
+    MapCommandFrame(in,centre);Check(supportCalls==1,"holding call does not spawn every frame");
+    MapCommandReadout read{};Check(PlayerMapCommands(&read) && read.supportName[0] && read.noteFresh,"support result published for HUD");
+    game.supportArmed=true;SuspendMapCommands();Check(!game.supportArmed,"closing map cancels pending support placement");
+    std::memset(inputstub::keys,0,sizeof(inputstub::keys));ResetMapCommands();
+}
 }  // namespace
 }  // namespace crew
 int main() {
     crew::UnitLifetime();crew::PointerAndInput();crew::CameraIsolation();crew::FormationKey();crew::ButtonClicks();
     crew::FocusButtonPreservesMark();crew::MarkFromMap();crew::MarkLifetimeAndConfig();
+    crew::SupportInput();
     std::printf("map_command_runtime_check: %d checks, %d failed\n",crew::cases,crew::failures);
     return crew::failures ? 1 : 0;
 }

@@ -10,6 +10,7 @@ enum class Id : int {
     guard, follow, release, engage, focus, board, dismount, dismiss, recruit,   // the orders (Order's)
     formation, split, merge,                                                   // the squads' shape and fireteams
     sweep, health,                                                             // the box sweep, its health-box switch
+    supportPrev, supportNext, supportCall,                                    // catalog and click-to-call
     count
 };
 constexpr int kCount=static_cast<int>(Id::count);

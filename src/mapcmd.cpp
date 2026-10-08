@@ -29,6 +29,7 @@
 #include "memory.h"
 #include "map_cam.h"
 #include "npc_mark.h"
+#include "support_call.h"
 #include <Xinput.h>
 #include <algorithm>
 #include <atomic>
@@ -52,7 +53,7 @@ enum class Owner : std::uint8_t { heli, jet, ground, squad, tank };
 struct Entry { CommandUnit u; Owner owner; };
 
 struct Keys { bool tab,shift,ctrl,guard,follow,release,left,padNext,padGuard,padFollow,padRelease,
-             engage,focus,board,dismount,dismiss,recruit,mark,formation,split,merge,sweep,health,digit[9]; };
+             engage,focus,board,dismount,dismiss,recruit,mark,formation,split,merge,sweep,health,digit[9],supportPrev,supportNext,supportCall; };
 
 // --- The game thread's own ---
 struct Game {
@@ -69,6 +70,8 @@ struct Game {
     ULONGLONG noteAt;
     int button;                 // the button a click let go on this frame (mapbtn::Id), -1 none
     bool guardArmed,guardClick; // the guard button clicked: the next click on the ground (guardClick) is its point
+    int supportPick;
+    bool supportArmed,supportClick;
     ObjRef hover;               // original identity under the pointer; never recaptured from a cached address
     float hoverAt[3];
     bool eat,eatWas;            // the mark key's press took the enemy under the pointer: not the map's (MapCommandEats)
@@ -153,6 +156,7 @@ Keys ReadKeys(const MapCmdInput& in) noexcept {
         k.engage=Down('J');k.focus=Down('H');k.board=Down('B');k.dismount=Down('N');k.dismiss=Down('K');k.recruit=Down('U');k.formation=Down('T');k.split=Down('P');k.merge=Down('L');k.sweep=Down('Y');k.health=Down('O');
         k.mark=Cfg().npcMarkKey>0 && Down(Cfg().npcMarkKey);
         for(int d=0;d<9;++d)k.digit[d]=Down('1'+d);
+        k.supportPrev=Down(VK_OEM_4);k.supportNext=Down(VK_OEM_6);k.supportCall=Down('C');
     }
     if(in.pad) {
         const WORD b=in.buttons;
@@ -250,6 +254,7 @@ void Pointer(Game& g,const MapCmdInput& in,const Keys& k,const View* v) noexcept
     const bool click=(g.boxing && !box) || (g.pressing && g.moved<kClickMove);
     const int hit=click && !g.boxing ? mapbtn::Hit(v->button,v->buttons,g.pointer.x,g.pointer.y) : -1;
     if(hit>=0)g.button=v->id[hit];   // a button: not a unit's click
+    else if(click && g.supportArmed && !g.boxing)g.supportClick=true;
     else if(click && g.guardArmed && !g.boxing)g.guardClick=true;   // the armed guard's point
     else if(box)mapcmd::Box(g.sel,marks,n,g.bx,g.by,g.pointer.x,g.pointer.y,k.shift);
     else if(click)mapcmd::Click(g.sel,marks,n,g.pointer.x,g.pointer.y,kClickRadius*s,k.shift);
@@ -421,6 +426,8 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     std::memcpy(r.hoverAt,g.hoverAt,12);
     std::memcpy(r.note,g.note,sizeof(r.note));
     r.sweepOn=NpcSweepOn();r.healthOn=NpcPickupHealthOn();r.guardArmed=g.guardArmed;r.march=NpcMarchShape();
+    r.supportArmed=g.supportArmed;
+    _snwprintf_s(r.supportName,_countof(r.supportName),_TRUNCATE,L"%ls",SupportCallName(g.supportPick));
     r.noteFresh=g.noteAt && GetTickCount64()-g.noteAt<=kNoteMs;
     readoutAt=GetTickCount64();
     ReleaseSRWLockExclusive(&lock);
@@ -439,7 +446,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     // The first frame after a gap (the map just opened): what is held now is no press (the key that opened it, a key
     // held from before), the pointer at the centre.
     if(now-g.frameAt>kFreshMs) {
-        g.was=k;g.boxing=g.pressing=false;g.guardArmed=false;npcmark::Assign(g.hover,{});
+        g.was=k;g.boxing=g.pressing=false;g.guardArmed=g.supportArmed=false;npcmark::Assign(g.hover,{});
         g.pointer=mapcmd::PointerPosition{};
     }
     g.frameAt=now;
@@ -450,13 +457,27 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     in.usingPad=mapcmd::UsingPad(in.usingPad,mouseOrKey,padPress);
     const void* ids[kCmdUnits];
     Refresh(g,ids);
-    g.button=-1;g.guardClick=false;
+    g.button=-1;g.guardClick=g.supportClick=false;
     Pointer(g,in,k,haveView ? &v : nullptr);
     using mapbtn::Id;
     const auto clicked=[&](Id b){return g.button==static_cast<int>(b);};
     if(clicked(Id::guard)) {   // armed: the next click on the ground; clicked again: not
+        g.supportArmed=false;
         g.guardArmed=!g.guardArmed;
         if(g.guardArmed)Note(g,L"%ls",hudtext::Tr(hudtext::Tx::cmdGuardArmed));
+    }
+    const int supportCount=SupportCallCount();
+    if(supportCount>0) {
+        const bool previous=clicked(Id::supportPrev) || (k.supportPrev && !g.was.supportPrev);
+        const bool following=clicked(Id::supportNext) || (k.supportNext && !g.was.supportNext);
+        if(previous || following) {
+            g.supportPick=(g.supportPick+(previous ? -1 : 1)+supportCount)%supportCount;
+            Note(g,L"支援：%ls",SupportCallName(g.supportPick));
+        }
+        if(clicked(Id::supportCall)) {
+            g.guardArmed=false;g.supportArmed=!g.supportArmed;
+            if(g.supportArmed)Note(g,L"选择地图上的支援目的地（再次点击呼叫取消）");
+        }
     }
     Hover(g,in,haveView ? &v : nullptr);
     boxingNow.store(g.boxing);
@@ -491,10 +512,16 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
                merge=(k.merge && !g.was.merge) || clicked(Id::merge),sweep=(k.sweep && !g.was.sweep) || clicked(Id::sweep),
                health=(k.health && !g.was.health) || clicked(Id::health);
     const bool markPress=k.mark && !g.was.mark;
+    const bool supportPress=g.supportClick || (k.supportCall && !g.was.supportCall);
     g.was=k;
     float point[3];
     const bool pointOk=TargetPoint(g,in,haveView ? &v : nullptr,point);
     const bool allowed=!InSession();
+    if(supportPress) {
+        g.supportArmed=false;
+        if(pointOk){SupportCallAt(g.supportPick,point,g.note,_countof(g.note));g.noteAt=GetTickCount64();}
+        else Note(g,L"无法确定支援目的地");
+    }
     using hudtext::Tr;
     using hudtext::Tx;
     // The enemy under the pointer: the mark key marks it (or lets it go), the focus order marks it first.
@@ -560,7 +587,7 @@ void SuspendMapCommands() noexcept {
     // Closing the map ends a hover/press even if reopened inside kFreshMs. Keep the user's selection.
     Game& g=game;
     npcmark::Assign(g.hover,{});npcmark::Assign(g.eatHover,{});
-    g.frameAt=0;g.eat=g.eatWas=false;g.boxing=g.pressing=false;g.guardArmed=g.guardClick=false;g.button=-1;
+    g.frameAt=0;g.eat=g.eatWas=false;g.boxing=g.pressing=false;g.guardArmed=g.guardClick=false;g.supportArmed=g.supportClick=false;g.button=-1;
     boxingNow.store(false);
     AcquireSRWLockExclusive(&viewLock);view.at=0;view.buttons=0;ReleaseSRWLockExclusive(&viewLock);
     AcquireSRWLockExclusive(&lock);readoutAt=0;ReleaseSRWLockExclusive(&lock);

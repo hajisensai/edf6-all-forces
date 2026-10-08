@@ -8,6 +8,11 @@ namespace crew {
 unsigned char* image=nullptr;
 Config config{};
 PlayerFix player{};
+PlayArea MapPlayArea() noexcept { return {{-1500,-1500},{1500,1500},true,0,true}; }
+float MapRay(const float* from,const float* to,float* hit) noexcept {
+    if(to[1]<from[1] && to[1]<0 && from[1]>0){hit[0]=from[0];hit[1]=0;hit[2]=from[2];return 0.5f;}
+    return -1;
+}
 bool testOnline=true;
 const Config& Cfg() noexcept { return config; }
 bool InSession() noexcept { return testOnline; }
