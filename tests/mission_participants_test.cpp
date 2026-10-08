@@ -1,0 +1,42 @@
+#include "../src/mission_participants.cpp"
+#include <cstdio>
+#include <cstdlib>
+
+namespace crew {
+unsigned char* image=nullptr;
+bool IsSoldierClass(const void* o) noexcept { return At<unsigned>(o,0)==0x534F4C44; }
+}
+namespace {
+int checks=0;
+void Check(bool ok,const char* what){++checks;if(!ok){std::fprintf(stderr,"FAIL %s\n",what);std::exit(1);}}
+}
+int main() {
+    using namespace crew;using namespace mission_participants;
+    unsigned char actor[5][0x1EE0]{},user[5][0x50]{},ctrl[5][16]{};
+    void* puids[8]{};Visitor visitor{kVisitorVtable,puids,8,0,false,{},{}};
+    for(unsigned i=0;i<5;++i) {
+        Put<unsigned>(actor[i],0,0x534F4C44);Put<void*>(actor[i],0x1ED0,user[i]);Put<void*>(actor[i],0x1ED8,ctrl[i]);
+        Put<LONG>(ctrl[i],8,1);Put<int>(user[i],0x48,static_cast<int>(i));Put<void*>(user[i],0x18,user[i]);
+    }
+    Put<unsigned char>(actor[1],kDead,1); // a downed, revivable player remains in the current world
+    Put<int>(actor[1],kTeam,5);Put<int>(actor[2],kTeam,1);
+    Visit(&visitor,actor[0]);Visit(&visitor,actor[1]);Visit(&visitor,actor[2]);
+    Check(!visitor.failed && visitor.count==3,"dead players and actors in any team are retained");
+    Visit(&visitor,actor[1]);Check(visitor.count==3,"same actor visited twice is counted once");
+    Put<void*>(user[3],0x18,user[0]);Visit(&visitor,actor[3]);
+    Check(visitor.count==4 && puids[3]==puids[0],"split-screen actor count retains duplicate PUID");
+    Put<int>(user[4],0x48,-1);Visit(&visitor,actor[4]);Check(visitor.count==4,"lobby-only user excluded");
+    Put<int>(user[4],0x48,4);Put<unsigned char>(actor[4],0x18,4);Visit(&visitor,actor[4]);
+    Check(visitor.count==4,"scene-deleted actor excluded independently of death");
+    Put<unsigned char>(actor[4],0x18,0);Put<void*>(actor[4],0x1ED0,nullptr);Visit(&visitor,actor[4]);
+    Check(visitor.count==4,"NPC without a User excluded");
+    Put<void*>(actor[4],0x1ED0,user[4]);Put<LONG>(ctrl[4],8,0);Visit(&visitor,actor[4]);
+    Check(visitor.failed,"broken bound User invalidates snapshot");
+    Visitor limited{kVisitorVtable,puids,1,0,false,{},{}};Visit(&limited,actor[0]);Visit(&limited,actor[1]);
+    Check(limited.failed,"insufficient capacity does not silently truncate quorum");
+    Visitor collision{kVisitorVtable,puids,8,0,false,{},{}};Visit(&collision,actor[0]);Put<int>(user[1],0x48,0);Visit(&collision,actor[1]);
+    Check(collision.failed,"duplicate mission indices invalidate ambiguous roster");
+    unsigned count=9,expected=9;
+    Check(!ReadMissionParticipants(nullptr,8,&count,&expected) && !count && !expected,"failure clears output counts");
+    std::printf("mission_participants_test: %d checks passed\n",checks);
+}
