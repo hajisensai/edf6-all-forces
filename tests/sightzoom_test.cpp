@@ -10,7 +10,7 @@ Config config{};
 unsigned char vehicle[0x1200]{},otherVehicle[0x1200]{},seats[2*kSeatStride]{},human[0x1600]{},otherHuman[0x1600]{};
 unsigned char camera[0x500]{},otherCamera[0x500]{},vehicleCtrl[16]{},humanCtrl[16]{},otherCtrl[16]{};
 unsigned char* playerHuman=human;
-bool mapKeys=false,mapView=false,highView=false,originalWrites=true,sazabiVehicle=false;
+bool mapKeys=false,mapView=false,highView=false,originalWrites=true,sazabiVehicle=false,paused=false;
 bool highActive=false,highReturning=false,heliVehicle=false,aircraft=false,gunship=false,fuel=false,knownRound=true,hud=true;
 RoundKind roundKind=RoundKind::arc;
 WeaponStyle roundStyle=WeaponStyle::projectile;
@@ -39,7 +39,7 @@ float* __fastcall LookFixture(float* m,const float* d) {
 void Setup() {
     ResetSightZoom();applied=Applied{};config=Config{};installed=true;nextCamStep=&Original;opticLookTo=testedLookTo ? testedLookTo : &LookFixture;opticPresent=true;extraOptic=false;
     muzzleDirection[0]=muzzleDirection[1]=0;muzzleDirection[2]=1;
-    mapKeys=false;mapView=false;highView=false;sazabiVehicle=false;originalWrites=true;originalFov=sightzoom::kBaseFov;playerHuman=human;
+    mapKeys=false;mapView=false;highView=false;sazabiVehicle=false;paused=false;originalWrites=true;originalFov=sightzoom::kBaseFov;playerHuman=human;
     highActive=highReturning=heliVehicle=aircraft=gunship=fuel=lobbed=false;knownRound=hud=true;roundKind=RoundKind::arc;roundStyle=WeaponStyle::projectile;pickedWeapon=nullptr;
     std::memset(weapon,0,sizeof(weapon));std::memset(secondWeapon,0,sizeof(secondWeapon));
     Put<void*>(holder,kHolderWeapon,weapon);Put<void*>(secondHolder,kHolderWeapon,secondWeapon);
@@ -83,6 +83,7 @@ unsigned char* BoneRecord506(const unsigned char*,const wchar_t* name) noexcept 
 const Config& Cfg() noexcept{return config;}
 void Log(const char*,...) noexcept{}
 unsigned char* PlayerHuman() noexcept{return playerHuman;}
+bool GamePaused() noexcept{return paused;}
 bool MapHoldsKeys() noexcept{return mapKeys;}
 bool MapOwnsView() noexcept{return mapView;}
 bool HighCamOffered(unsigned char*) noexcept{return highView;}
@@ -169,8 +170,14 @@ int wmain(int argc,wchar_t** argv){
     CamStepHook(otherCamera,nullptr);Check(At<float>(otherCamera,kCamFov)==originalFov,"second local camera is unchanged");
     Setup();Zoom();Fov();originalWrites=false;Put<float>(camera,kCamFov,0.6f);mapView=true;
     Check(Fov()==0.6f,"a later camera owner's write is preserved");
-    Setup();Zoom();AcquireSRWLockExclusive(&cueLock);cue.at=GetTickCount64()-kCueMs-1;ReleaseSRWLockExclusive(&cueLock);
-    Check(SightZoomNow(vehicle)==1,"stale cue rejected");
+    Setup();Zoom();paused=true;Sleep(230);Fov();
+    Check(SightZoomNow(vehicle)==3 && SightZoomMounted(vehicle),"pause past the old wall TTL retains the same physical optic owner");
+    Button(0x80);paused=false;Button(0x80);Check(toggle.step==1,"menu-held zoom button is not replayed on resume");
+    Button(0);Button(0x80);Check(toggle.step==2,"new post-pause press still changes zoom");
+    Setup();Zoom();Sleep(230);Button(0);
+    Check(toggle.step==1 && SightZoomNow(vehicle)==3,"slow input frames do not reset the owner's scope choice");
+    Put<void*>(seats,kSeatRiderCtrl,nullptr);
+    Check(SightZoomNow(vehicle)==1,"identity loss still revokes scope immediately without a timeout");
     Setup();highView=true;Button(0);Button(0x80);Check(SightZoomNow(vehicle)==1,"high view keeps shared R3");
     Setup();highView=true;config.highCamButton=0x40;Zoom();Check(toggle.step==1,"separately bound high view leaves zoom button available");
     Setup();sazabiVehicle=true;Button(0);Button(0x80);Check(toggle.step==0,"Sazabi hard lock keeps shared R3 without also zooming");

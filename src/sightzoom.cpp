@@ -5,7 +5,7 @@
 // Its FOV and world matrix writes are retracted before the next step only while they remain our own values.
 //  - Only the player's own camera (its target the player's soldier, as map.cpp tells it), only while they ride (the
 //    soldier's vehicle, +0x1550), never while the map or the Tempest's TV holds the view; the magnification published
-//    by a seat's frame within kCueMs: when the player gets out, the vehicle is wrecked or gone, SightZoom or the plugin
+//    by the same live seat owner: when the player gets out, the vehicle is wrecked or gone, SightZoom or the plugin
 //    is switched off, the view is restored on the next camera step, including its no-target branch.
 //  - A new seat or vehicle starts at 1x; a new mission too (ResetSightZoom).
 //  - Shared pad bindings belong to the high view or the Sazabi's hard lock; zoom remains available on a separate binding.
@@ -28,7 +28,6 @@ const unsigned char kFovWriteCode[]={0xF3,0x0F,0x10,0x05,0x12,0xD1,0x66,0x01,0xF
 const unsigned char kCamStepCode[]={0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57,0x41,0x56,0x41,0x57,0x48,0x81,0xEC,0x90};
 // The seat's input (docs/stores-re.md §4): 1 = a pad (0 keyboard and mouse), the pad's button bits.
 constexpr std::size_t kSeatPad=0x2B0,kSeatButtons=0x2E8;
-constexpr ULONGLONG kCueMs=200;
 constexpr std::size_t kCamMatrix=0x220;
 constexpr unsigned kLookTo=0x4E220;
 const unsigned char kLookToCode[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x81,0xEC,0x90,0x00,0x00,0x00,0x0F,0x10,0x0A};
@@ -40,10 +39,10 @@ CamStepFn nextCamStep=nullptr;
 bool installed=false;
 
 struct Capability { sightzoom::Kind kind; const void* weapon; bool mounted=false; };
-struct Toggle { ObjRef ref,human; const void* v; unsigned seat; int step; bool held; ULONGLONG at; Capability sight; };
+struct Toggle { ObjRef ref,human; const void* v; unsigned seat; int step; bool held; Capability sight; };
 Toggle toggle{};
 // Publish the entire seat identity together: a camera must not combine another seat's zoom and timestamp.
-struct Cue { ObjRef vehicle,human; unsigned seat; float zoom; ULONGLONG at; Capability sight; };
+struct Cue { ObjRef vehicle,human; unsigned seat; float zoom; Capability sight; };
 Cue cue{};
 SRWLOCK cueLock=SRWLOCK_INIT;
 // Camera-thread state only. The original step may leave FOV untouched when its target expires.
@@ -97,7 +96,7 @@ Cue Snapshot() noexcept {
 }
 
 bool Current(const Cue& c) noexcept {
-    if(!Cfg().enabled || !Cfg().sightZoom || !c.at || GetTickCount64()-c.at>kCueMs)return false;
+    if(!Cfg().enabled || !Cfg().sightZoom || !c.vehicle)return false;
     const unsigned char* human=PlayerHuman();
     if(!human || !c.human.Is(human) || human[kDead])return false;
     const auto ctrl=At<const unsigned char*>(human,kHumanVehicleCtrl);
@@ -118,7 +117,7 @@ bool KeyHeld(int vk) noexcept {
 }
 
 void Publish(unsigned char* v,unsigned seat,float zoom) noexcept {
-    const Cue next{ObjRef::Of(v),ObjRef::Of(PlayerHuman()),seat,zoom,GetTickCount64(),toggle.sight};
+    const Cue next{ObjRef::Of(v),ObjRef::Of(PlayerHuman()),seat,zoom,toggle.sight};
     AcquireSRWLockExclusive(&cueLock);
     cue=next;
     ReleaseSRWLockExclusive(&cueLock);
@@ -188,13 +187,13 @@ void SightZoomFrame(unsigned char* v,unsigned seat,bool padButton) noexcept {
     if(SeatRider(s)!=Rider::player || At<const void*>(s,kSeatRider)!=PlayerHuman())return;
     const Capability sight=SeatCapability(v,seat);
     if(sight.kind==sightzoom::Kind::none){ResetSightZoom();return;}
-    const ULONGLONG now=GetTickCount64();
-    // A seat just taken (another one, or this one again after a break): 1x, a key held while boarding no press.
-    if(!toggle.ref.Is(v) || !toggle.human.Is(PlayerHuman()) || toggle.seat!=seat || now-toggle.at>kCueMs ||
+    // A seat just taken: 1x, a key held while boarding no press. Wall time is not
+    // ownership: pausing or a slow frame cannot erase the player's scope choice.
+    if(!toggle.ref.Is(v) || !toggle.human.Is(PlayerHuman()) || toggle.seat!=seat ||
        toggle.sight.kind!=sight.kind || toggle.sight.weapon!=sight.weapon)
-        toggle=Toggle{ObjRef::Of(v),ObjRef::Of(PlayerHuman()),v,seat,0,true,now,sight};
-    toggle.at=now;
+        toggle=Toggle{ObjRef::Of(v),ObjRef::Of(PlayerHuman()),v,seat,0,true,sight};
     if(!sightzoom::Magnifies(sight.kind) || !sight.mounted){toggle.step=0;toggle.held=true;Publish(v,seat,1.0f);return;}
+    if(GamePaused()){toggle.held=true;Publish(v,seat,sightzoom::At(toggle.step));return;}
     const bool keys=At<unsigned char>(s,kSeatPad)==0;
     const bool down=keys ? KeyHeld(c.sightZoomKey)
                          : padButton && c.sightZoomButton && (At<std::uint16_t>(s,kSeatButtons)&static_cast<std::uint16_t>(c.sightZoomButton))!=0;
