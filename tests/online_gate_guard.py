@@ -185,7 +185,7 @@ def check_calls(root: str) -> None:
     code = code_only(read(root, 'src/airstrike.cpp'))
     dispatch = code_only(read(root, 'src/support_dispatch.cpp'))
     request = body(dispatch, 'bool SupportCallAt(')
-    if 'else if(InSession())return SubmitSupportRequest(' not in request:
+    if not before(request, 'else if(InSession())', 'SubmitSupportRequest(') or not before(request, 'SubmitSupportRequest(', 'else if(offlinePending)'):
         fail('online support must go through the reliable host-planned deployment protocol')
     spawn = body(dispatch, 'bool Spawn(')
     if 'unit.matrix' not in spawn or 'PlanAirSupport(' in spawn or 'player.pos' in spawn:

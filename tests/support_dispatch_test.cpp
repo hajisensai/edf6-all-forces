@@ -66,7 +66,13 @@ bool ReadMissionParticipants(void**,unsigned,unsigned*,unsigned*) noexcept {retu
 void ConfigureSupportNet(const support_net::Hooks& hooks) noexcept {
     configuredHooks=hooks;++netConfigured;gateBeforeNetwork=gatesInstalled>0;creationSeen=false;
 }
-bool SubmitSupportRequest(int,const float*,wchar_t*,std::size_t) noexcept {++netRequests;return true;}
+bool submitReady=true;unsigned noticeRequest=0;
+bool SubmitSupportRequest(int,const float*,wchar_t* note,std::size_t size) noexcept {
+    ++netRequests;
+    if(!submitReady){_snwprintf_s(note,size,_TRUNCATE,L"联机扩展尚未就绪");return false;}
+    if(configuredHooks.notice)configuredHooks.notice(++noticeRequest,support_net::RequestStatus::accepted);
+    _snwprintf_s(note,size,_TRUNCATE,L"request queued");return true;
+}
 void SupportNetTick() noexcept {}
 void ResetSupportNet() noexcept {creationSeen=false;}
 bool ValidateMissionCrewPlan(const SupportPlan&) noexcept {return false;}
@@ -150,5 +156,34 @@ int main() {
         Destroy(20);
         check(!deleted && !held && !deployments[0].used,"cancel preserves occupied hull and real crew, releases their holds, and drops deployment ownership");
     }
+    ResetSupportDispatch();testOnline=true;submitReady=true;
+    SupportCallAt(0,target,note,128);const auto firstRequest=noticeRequest;
+    check(configuredHooks.notice!=nullptr,"local request status callback is wired");
+    Status(L"other peer planning");SupportCallStatus(note,128);
+    check(std::wcsstr(note,L"等待房主")!=nullptr,"accepted means waiting and is not overwritten by another peer's planner");
+    configuredHooks.notice(firstRequest,support_net::RequestStatus::refused);
+    Status(L"other peer deployment active");SupportCallStatus(note,128);
+    check(std::wcsstr(note,L"房主拒绝")!=nullptr,"local refusal is persistent despite unrelated host deployment progress");
+    configuredHooks.notice(firstRequest,support_net::RequestStatus::active);SupportCallStatus(note,128);
+    check(std::wcsstr(note,L"房主拒绝")!=nullptr,"late active cannot reopen the same rejected request");
+    SupportCallAt(0,target,note,128);const auto secondRequest=noticeRequest;
+    configuredHooks.notice(firstRequest,support_net::RequestStatus::cancelled);SupportCallStatus(note,128);
+    check(std::wcsstr(note,L"等待房主")!=nullptr,"old cancellation cannot overwrite a newer local request");
+    configuredHooks.notice(secondRequest,support_net::RequestStatus::active);SupportCallStatus(note,128);
+    check(std::wcsstr(note,L"全员对象确认")!=nullptr,"active reports object confirmation rather than claiming arrival");
+    submitReady=false;check(!SupportCallAt(0,target,note,128),"pre-id transport refusal returns failure");
+    SupportCallStatus(note,128);
+    check(std::wcsstr(note,L"联机扩展尚未就绪")!=nullptr,"new pre-id refusal clears the previous active result");
+    configuredHooks.notice(secondRequest,support_net::RequestStatus::cancelled);SupportCallStatus(note,128);
+    check(std::wcsstr(note,L"联机扩展尚未就绪")!=nullptr,"older allocated request cannot cover the newest unallocated attempt");
+    submitReady=true;SupportCallAt(0,target,note,128);
+    configuredHooks.notice(noticeRequest,support_net::RequestStatus::timeout);SupportCallStatus(note,128);
+    check(std::wcsstr(note,L"请求超时")!=nullptr,"timeout is visible instead of waiting forever");
+    SupportCallAt(0,target,note,128);
+    configuredHooks.notice(noticeRequest,support_net::RequestStatus::interrupted);SupportCallStatus(note,128);
+    check(std::wcsstr(note,L"会话中断")!=nullptr,"interrupted session has a distinct terminal message");
+    testOnline=false;SupportCallAt(0,target,note,128);SupportCallStatus(note,128);
+    check(std::wcsstr(note,L"正在安排")!=nullptr && !localRequest.shown,"offline request restores its detailed planner channel");
+    ResetSupportDispatch();SupportCallStatus(note,128);check(!note[0],"mission reset clears old request notices");
     std::printf("support_dispatch_test: %d checks passed\n",checks);
 }

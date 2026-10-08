@@ -45,9 +45,36 @@ struct Deployment {
 Deployment deployments[kDeployments]{};
 bool offlinePending=false;std::uint64_t nextOffline=1;ULONGLONG callAt=0;
 wchar_t status[128]{};
+struct LocalRequest {
+    bool shown=false,acceptNotices=false,hasNotice=false;
+    std::uint32_t id=0;
+    support_net::RequestStatus state=support_net::RequestStatus::accepted;
+    wchar_t text[128]{};
+};
+LocalRequest localRequest{};
 bool configured=false;
 ULONGLONG dispatchFrame=~ULONGLONG{0};
 void Status(const wchar_t* text) noexcept {_snwprintf_s(status,_countof(status),_TRUNCATE,L"%ls",text);}
+void RequestNotice(std::uint32_t request,support_net::RequestStatus state) noexcept {
+    using support_net::RequestStatus;
+    if(!localRequest.acceptNotices || !request || request<localRequest.id)return;
+    if(request==localRequest.id && localRequest.hasNotice) {
+        if(localRequest.state>=RequestStatus::refused)return;
+        if(localRequest.state==RequestStatus::active && state==RequestStatus::accepted)return;
+    }
+    const wchar_t* text=nullptr;
+    switch(state) {
+    case RequestStatus::accepted:text=L"本机支援请求已受理，等待房主及全员确认";break;
+    case RequestStatus::active:text=L"本机支援已获全员对象确认，开始部署";break;
+    case RequestStatus::refused:text=L"房主拒绝了本机支援请求：环境、资源或当前部署条件不满足";break;
+    case RequestStatus::timeout:text=L"本机支援请求超时：未及时获得房主及全员确认";break;
+    case RequestStatus::cancelled:text=L"本机这次支援部署已取消";break;
+    case RequestStatus::interrupted:text=L"联机会话中断，本机支援请求未完成";break;
+    }
+    if(!text)return;
+    localRequest.id=request;localRequest.state=state;localRequest.shown=localRequest.hasNotice=true;
+    _snwprintf_s(localRequest.text,_countof(localRequest.text),_TRUNCATE,L"%ls",text);
+}
 int AirCount() noexcept {return SupportAirCallCount();}
 int GroundStart() noexcept {return AirCount()+2;}
 bool GroundCatalog(std::uint32_t id,SupportVehicleKind& kind,SupportCrewMode& mode) noexcept {
@@ -282,7 +309,7 @@ void Configure() noexcept {
     ConfigureSupportNet({Plan,Validate,Spawn,Destroy,
         [](std::uint32_t ordinal,unsigned char* out) noexcept {
             return OnlineHostOnly() && DeriveSupportSoldierNetId(PlayerHuman(),ordinal,out);
-        },&ReadMissionParticipants,&MissionParticipantGateReady,&MissionParticipantCreationsMatch});
+        },&ReadMissionParticipants,&MissionParticipantGateReady,&MissionParticipantCreationsMatch,&RequestNotice});
     InstallMissionCrewSupport();configured=true;
 }
 }
@@ -297,9 +324,22 @@ const wchar_t* SupportCallName(int index) noexcept {
 }
 bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept {
     if(!note || !capacity)return false;
+    // Clear even when Submit refuses before allocating a request id. That attempt must not retain
+    // the previous request's successful/failed notice. Offline calls use their detailed local status.
+    localRequest={};note[0]=0;
     Configure();bool accepted=false;
     if(!Cfg().enabled || !target || index<0 || index>=SupportCallCount())Status(L"支援请求不可用");
-    else if(InSession())return SubmitSupportRequest(index,target,note,capacity);
+    else if(InSession()) {
+        localRequest.acceptNotices=true;
+        accepted=SubmitSupportRequest(index,target,note,capacity);
+        if(!accepted || !localRequest.hasNotice) {
+            localRequest.shown=true;localRequest.acceptNotices=accepted;localRequest.hasNotice=false;
+            _snwprintf_s(localRequest.text,_countof(localRequest.text),_TRUNCATE,L"%ls",
+                note[0] ? note : accepted ? L"本机支援请求已排队，等待房主确认" : L"本机支援请求未受理");
+        }
+        _snwprintf_s(note,capacity,_TRUNCATE,L"%ls",localRequest.text);
+        return accepted;
+    }
     else if(offlinePending)Status(L"上一项支援仍在核实入场路线");
     else if(callAt && GameMs()-callAt<kCallCooldown)Status(L"支援调度冷却中（30 秒）");
     else {
@@ -308,7 +348,9 @@ bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capac
     }
     _snwprintf_s(note,capacity,_TRUNCATE,L"%ls",status);return accepted;
 }
-void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept {if(out && capacity)_snwprintf_s(out,capacity,_TRUNCATE,L"%ls",status);}
+void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept {
+    if(out && capacity)_snwprintf_s(out,capacity,_TRUNCATE,L"%ls",localRequest.shown ? localRequest.text : status);
+}
 void SupportDispatchTick() noexcept {
     if(dispatchFrame==GameFrame())return;
     dispatchFrame=GameFrame();
@@ -406,6 +448,7 @@ void SupportDispatchTick() noexcept {
 void ResetSupportDispatch() noexcept {
     // Mission reset invalidates the old objects; do not delete through last mission's borrowed pointers.
     planning={};for(auto& row:deployments)row={};offlinePending=false;callAt=0;nextOffline=1;status[0]=0;
+    localRequest={};
     dispatchFrame=~ULONGLONG{0};
     ResetMissionCrewSupport();
     ResetSupportNet();
