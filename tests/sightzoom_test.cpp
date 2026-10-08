@@ -9,7 +9,7 @@ Config config{};
 unsigned char vehicle[0x800]{},otherVehicle[0x800]{},seats[2*kSeatStride]{},human[0x1600]{},otherHuman[0x1600]{};
 unsigned char camera[0x500]{},otherCamera[0x500]{},vehicleCtrl[16]{},humanCtrl[16]{},otherCtrl[16]{};
 unsigned char* playerHuman=human;
-bool mapKeys=false,mapView=false,highView=false,originalWrites=true;
+bool mapKeys=false,mapView=false,highView=false,originalWrites=true,sazabiVehicle=false;
 float originalFov=sightzoom::kBaseFov;
 int checks=0,failures=0;
 void Check(bool ok,const char* name){++checks;if(!ok){++failures;std::printf("FAIL %s\n",name);}}
@@ -18,7 +18,7 @@ void __fastcall Original(void* cam,void*) {
 }
 void Setup() {
     ResetSightZoom();applied=Applied{};config=Config{};installed=true;nextCamStep=&Original;
-    mapKeys=false;mapView=false;highView=false;originalWrites=true;originalFov=sightzoom::kBaseFov;playerHuman=human;
+    mapKeys=false;mapView=false;highView=false;sazabiVehicle=false;originalWrites=true;originalFov=sightzoom::kBaseFov;playerHuman=human;
     std::memset(vehicle,0,sizeof(vehicle));std::memset(otherVehicle,0,sizeof(otherVehicle));std::memset(seats,0,sizeof(seats));
     std::memset(human,0,sizeof(human));std::memset(otherHuman,0,sizeof(otherHuman));std::memset(camera,0,sizeof(camera));
     Put<int>(vehicleCtrl,8,1);Put<int>(humanCtrl,8,1);Put<int>(otherCtrl,8,1);
@@ -41,6 +41,7 @@ unsigned char* PlayerHuman() noexcept{return playerHuman;}
 bool MapHoldsKeys() noexcept{return mapKeys;}
 bool MapOwnsView() noexcept{return mapView;}
 bool HighCamOffered(unsigned char*) noexcept{return highView;}
+bool IsSazabi(const void*) noexcept{return sazabiVehicle;}
 }
 int main(){
     using namespace crew;
@@ -80,6 +81,11 @@ int main(){
     Check(SightZoomNow(vehicle)==1,"stale cue rejected");
     Setup();highView=true;Button(0);Button(0x80);Check(SightZoomNow(vehicle)==1,"high view keeps shared R3");
     Setup();highView=true;config.highCamButton=0x40;Zoom();Check(toggle.step==1,"separately bound high view leaves zoom button available");
+    Setup();sazabiVehicle=true;Button(0);Button(0x80);Check(toggle.step==0,"Sazabi hard lock keeps shared R3 without also zooming");
+    Setup();sazabiVehicle=true;config.sightZoomButton=0x40;Button(0);Button(0x40);
+    Check(toggle.step==1,"a separate Sazabi zoom binding remains usable");
+    Setup();sazabiVehicle=true;config.sazabiLockButton=0;Zoom();Check(toggle.step==1,"disabled hard-lock binding releases R3 to zoom");
+    Setup();sazabiVehicle=true;config.sazabi=false;Zoom();Check(toggle.step==1,"inactive Sazabi controller does not reserve R3");
     Setup();Zoom();playerHuman=otherHuman;Put<void*>(otherHuman,kHumanVehicleCtrl,vehicleCtrl);
     Put<void*>(otherHuman,kHumanVehicleCtrl-8,vehicle);Put<void*>(seats,kSeatRider,otherHuman);Put<void*>(seats,kSeatRiderCtrl,otherCtrl);
     Button(0);Check(toggle.step==0,"another tracked human in the same seat starts at 1x");
