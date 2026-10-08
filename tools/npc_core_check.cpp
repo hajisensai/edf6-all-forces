@@ -25,6 +25,8 @@ bool AnnounceNpcBoarding(unsigned char*) noexcept { return true; }
 bool AnnounceNpcDismount(unsigned char*) noexcept { return true; }
 unsigned char* image=nullptr;
 PlayerFix player{};
+const void* heldSupportActor=nullptr;
+bool SupportSoldierHeld(const void* h) noexcept {return h && h==heldSupportActor;}
 namespace {
 Config config{};
 ULONGLONG now=1000,frame=1;
@@ -94,7 +96,7 @@ const void* FollowedBy(const void* self) { const void* to=none;for(int i=0;i<fol
 void __fastcall RideRec(void*,SharedRef* ref,int) { --*reinterpret_cast<int*>(static_cast<unsigned char*>(ref->ctrl)+8);++rides; }
 void Jump(unsigned rva,const void* to) { auto p=image+rva;p[0]=0x48;p[1]=0xB8;std::memcpy(p+2,&to,8);p[10]=0xFF;p[11]=0xE0; }
 void Reset() {
-    ResetNpcAi();config=Config{};now=1000;frame=1;sessionOn=false;host=true;door=true;wall=false;follows=rides=0;
+    heldSupportActor=nullptr;ResetNpcAi();config=Config{};now=1000;frame=1;sessionOn=false;host=true;door=true;wall=false;follows=rides=0;
     std::memset(human,0,sizeof(human));std::memset(dead,0,sizeof(dead));std::memset(other,0,sizeof(other));
     std::memset(vehicle,0,sizeof(vehicle));std::memset(seats,0,sizeof(seats));std::memset(ctrl,0,sizeof(ctrl));
     for(auto p : {human,dead,other}) { Put<void*>(p,0,image+kSoldiers[0].vtable);Put<int>(p,kTeam,kTeamFriend); }

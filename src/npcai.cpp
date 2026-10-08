@@ -28,6 +28,7 @@
 #include "npc_mark.h"
 #include "online_authority.h"
 #include "real_driver_native.h"
+#include "support_soldier.h"
 #include "vhud.h"
 #include <cmath>
 #include <cstdio>
@@ -913,7 +914,12 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
 void Think(unsigned char* h,int cls) noexcept {
     if(IsAnyPlayer(h) || h[kDead] || !IsOnlineAuthority(h))return;   // only the NPCs whose AI this machine runs (online_authority.h)
     const std::int32_t team=At<std::int32_t>(h,kTeam);
-    if(team!=0 && team!=kTeamFriend)return;
+    if(team!=0 && team!=kTeamFriend) {
+        // An explicitly assigned mission crew may follow its vehicle's scripted faction change.
+        // Only complete that already-authorized boarding; do not take over ordinary enemy AI.
+        for(auto& s:soldiers)if(s.ref.Is(h) && s.boardV){Board(s,h,Pos(h),GameMs());break;}
+        return;
+    }
     const ULONGLONG ms=GameMs();
     SeeFrame(h);
     if(world.frame!=GameFrame())Gather(team);   // 0 and 2 have the same enemies (TeamManager's table, docs/swarm-team-re.md)
@@ -1085,6 +1091,13 @@ void GiveBackDismissed(unsigned char* h) noexcept {
 }
 
 template<int I> void __fastcall ThinkHook(void* human,const float* dt) {
+    if(SupportSoldierHeld(human)) {
+        // The actor exists on this peer, but native movement/fire/boarding must wait until every
+        // peer acknowledges creation. Clear intent only; native physics and transforms remain intact.
+        auto* h=static_cast<unsigned char*>(human);
+        std::memset(h+kMoveX,0,0x35);Put<float>(h,kMoveW,1.0f);
+        return;
+    }
     if(ok && dismissedCount && !(Cfg().enabled && Cfg().customNpcAi)) {
         __try { GiveBackDismissed(static_cast<unsigned char*>(human)); } __except(Fault(GetExceptionInformation())) {}
     }
@@ -1552,7 +1565,7 @@ int SeatPriority(const unsigned char* v,unsigned seat) noexcept {
 }
 
 bool AssignBoard(unsigned char* v,unsigned char* h,ULONGLONG ms) noexcept {
-    if(!HumanOnFoot(h) || !IsOnlineAuthority(h) || !OnlineMaySeatNpc(v) ||
+    if(!HumanOnFoot(h) || SupportSoldierHeld(h) || !IsOnlineAuthority(h) || !OnlineMaySeatNpc(v) ||
        npc::Scripted(ControlOf(h,RootLeader(h))))return false;
     Soldier* const s=Entry(h,ms);
     if(!s || s->boardV)return false;
@@ -1658,6 +1671,25 @@ bool NpcMoveSeat(unsigned char* v,unsigned from,int to) noexcept {
     const bool moved=SeatRider(seat)==Rider::none && At<const void*>(SeatAt(v,static_cast<unsigned>(to)),kSeatRider)==h;
     if(moved)AnnounceNpcBoarding(h);
     return moved;
+}
+
+bool NpcRestoreMissionSeat(unsigned char* v,unsigned char* h) noexcept {
+    if(!rideOk || !v || !IsSoldierClass(h) || IsAnyPlayer(h) || h[kDead] ||
+       !OnlineMaySeatNpc(v) || !IsOnlineAuthority(h) || At<const void*>(h,kHumanRiding)!=v)return false;
+    const auto* current=At<const unsigned char*>(h,kHumanSeat);
+    for(unsigned i=0;i<SeatCount(v);++i) {
+        auto* seat=SeatAt(v,i);
+        // Never dereference an old seat pointer after a reallocation. Same-seat RideVehicle still
+        // calls SeatRide before its early return, so it can repair a cleared snapshot seat in place.
+        if(seat!=current || !SeatTakes(v,i,h))continue;
+        auto* ctrl=At<unsigned char*>(v,kSelfCtrl);
+        if(!ctrl || At<std::int32_t>(ctrl,8)<=0)return false;
+        _InterlockedIncrement(reinterpret_cast<volatile long*>(ctrl+8));
+        SharedRef ref{v,ctrl};reinterpret_cast<RideFn>(image+kRideVehicle)(h,&ref,static_cast<int>(i));
+        if(At<const void*>(seat,kSeatRider)!=h)return false;
+        AnnounceNpcBoarding(h);return true;
+    }
+    return false;
 }
 
 bool NpcReleaseVehicleCrew(unsigned char* v) noexcept {

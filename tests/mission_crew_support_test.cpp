@@ -5,13 +5,16 @@ namespace crew {
 unsigned char* image=nullptr;
 namespace {
 unsigned char vehicle[0x1000]{},seats[2*edf::kSeatStride]{},vctrl[16]{},people[15][0x1800]{},pctrl[15][16]{};
-bool sessionFlag=false,ready=true;int spawned=0,deleted=0,boards=0,releases=0,retries=0,failAt=0;
+bool sessionFlag=false,ready=true,active=true;int unholds=0;int spawned=0,deleted=0,boards=0,releases=0,retries=0,failAt=0;
 std::uint64_t submitted=0;
 }
 bool InstallMissionCrewTeam(MissionCrewTeamFn) noexcept {return true;}
 void SetObjectTeam(unsigned char* p,std::int32_t team) noexcept {Put<int>(p,kTeam,team);}
 bool InSession() noexcept {return sessionFlag;}
 bool OnlineHostOnly() noexcept {return true;}
+bool SupportTransactionActive(std::uint64_t) noexcept {return active;}
+bool HoldSupportSoldier(const ObjRef&,bool held) noexcept {if(!held)++unholds;return true;}
+bool NpcRestoreMissionSeat(unsigned char*,unsigned char*) noexcept {return true;}
 bool SupportSoldiersReady() noexcept {return ready;}
 bool ReadNativeObjectId(const unsigned char* p,unsigned char* id) noexcept {std::memset(id,0,32);id[0]=p==vehicle ? 5 : 6;return true;}
 unsigned char* MissionVehicleById(const unsigned char* id) noexcept {return id && id[0]==5 && !vehicle[kDead] ? vehicle : nullptr;}
@@ -32,7 +35,7 @@ std::uint64_t SubmitPreparedSupportPlan(const SupportPlan&) noexcept {return ++s
 namespace {
 int checks=0;
 void Check(bool b,const char* what){++checks;if(!b){std::fprintf(stderr,"FAIL %s\n",what);std::exit(1);}}
-void Reset(){using namespace crew;ResetMissionCrewSupport();teamReady=true;spawned=deleted=boards=releases=retries=failAt=0;sessionFlag=false;ready=true;
+void Reset(){using namespace crew;ResetMissionCrewSupport();teamReady=true;spawned=deleted=boards=releases=retries=failAt=0;sessionFlag=false;ready=true;active=true;unholds=0;
  std::memset(vehicle,0,sizeof(vehicle));std::memset(seats,0,sizeof(seats));std::memset(people,0,sizeof(people));
  Put<void*>(vehicle,kSelfCtrl,vctrl);Put<int>(vctrl,8,1);Put<void*>(vehicle,kSeats,seats);Put<std::uint64_t>(vehicle,kSeatCount,2);
  for(unsigned i=0;i<2;++i){Put<unsigned>(seats+i*edf::kSeatStride,0x30,1);Put<unsigned>(seats+i*edf::kSeatStride,0x34,1);}
@@ -60,6 +63,13 @@ int main(){using namespace crew;image=static_cast<unsigned char*>(VirtualAlloc(n
  Check(boards==before,"dismounted real soldier is not forced back into vehicle every frame");
  TeamChanged(vehicle,1);
  Check(At<int>(people[1],kTeam)==1 && At<int>(people[0],kTeam)!=1,"script team follows current crew but not dismounted soldiers");
+ Reset();sessionFlag=true;Build(vehicle,&p);active=false;
+ Check(ApplyMissionCrewPlan(9,p,false) && boards==0 && unholds==0,"host keeps actors held before all-peer activation");
+ active=true;Tick(vehicle);
+ Check(boards==2 && unholds==2,"all-peer active barrier releases crew before native boarding");
+ Reset();sessionFlag=true;Build(vehicle,&p);active=false;ApplyMissionCrewPlan(10,p,true);
+ Check(unholds==0,"remote actor remains held before reliable activation");active=true;Tick(vehicle);
+ Check(unholds==2 && boards==0,"remote activation releases hold without generating seat messages");
  VirtualFree(image,0,MEM_RELEASE);std::printf("mission_crew_support: %d checks passed\n",checks);
 }
 

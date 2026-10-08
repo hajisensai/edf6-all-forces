@@ -12,7 +12,7 @@
 namespace crew {
 namespace {
 constexpr unsigned kSoldier=1,kLeader=2;
-struct Deployment { std::uint64_t transaction; ObjRef vehicle; ObjRef crew[15]; unsigned count; bool applied,remote; bool boarded[15]; };
+struct Deployment { std::uint64_t transaction; ObjRef vehicle; ObjRef crew[15]; unsigned count; bool applied,remote,restorePending; bool boarded[15]; };
 Deployment deployments[128]{};
 bool teamReady=false;
 std::uint64_t nextOffline=0x8000000000000000ULL;
@@ -46,8 +46,15 @@ bool Build(unsigned char* v,SupportPlan* out) noexcept {
 }
 
 void BoardPending(Deployment& d) noexcept {
-    if(!d.applied || d.remote || !Alive(d.vehicle))return;
+    if(!d.applied || !Alive(d.vehicle) || (InSession() && !SupportTransactionActive(d.transaction)))return;
+    for(unsigned i=0;i<d.count;++i)if(Alive(d.crew[i]))HoldSupportSoldier(d.crew[i],false);
+    if(d.remote)return;
     auto* v=static_cast<unsigned char*>(const_cast<void*>(d.vehicle.obj));
+    if(d.restorePending) {
+        for(unsigned i=0;i<d.count;++i)if(Alive(d.crew[i]))
+            NpcRestoreMissionSeat(v,static_cast<unsigned char*>(const_cast<void*>(d.crew[i].obj)));
+        d.restorePending=false;
+    }
     unsigned char* humans[15]{};int n=0;
     for(unsigned i=0;i<d.count;++i)if(Alive(d.crew[i])) {
         auto* h=static_cast<unsigned char*>(const_cast<void*>(d.crew[i].obj));
@@ -88,7 +95,10 @@ bool Apply(std::uint64_t tx,const SupportPlan& plan,bool remote,unsigned char* v
 
 bool Request(unsigned char* v,bool restored) noexcept {
     for(auto& d:deployments)if(d.transaction && d.vehicle.Is(v)) {
-        if(d.applied){if(restored)for(auto& seated:d.boarded)seated=false;BoardPending(d);return true;}
+        if(d.applied){
+            d.restorePending=d.restorePending || restored;
+            BoardPending(d);return true;
+        }
         return true; // the same unified network transaction is still being prepared
     }
     SupportPlan plan;if(!Build(v,&plan))return false;

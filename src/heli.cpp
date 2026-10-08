@@ -2839,13 +2839,18 @@ void HeliReap(const void* self) noexcept {
             auto v=static_cast<unsigned char*>(const_cast<void*>(h.ref.obj));
             const ObjRef ref=h.ref;
             const bool flown=GameFrame()-h.seenFrame<=kAliveFrames;
-            h=Heli{};
             // Only the same object, alive: flown just now (its input ran: it was there), and still the object
             // it was then. One shot down, taken over or gone meanwhile is the game's to clean up.
-            if(!flown || !Readable(v,kSeats+8) || v[kDead] || (v[kObjFlags]&kObjDeleted) || !ref.Is(v) || !IsHelicopter(v))continue;
-            bool aboard=false;
-            for(unsigned i=0;i<SeatCount(v);++i)aboard=aboard || SeatRider(SeatAt(v,i))==Rider::player;
-            if(aboard)continue;   // the player took it: theirs now (the entry is gone, it flies as any NPC heli)
+            if(!flown || !Readable(v,kSeats+8) || v[kDead] || (v[kObjFlags]&kObjDeleted) || !ref.Is(v) || !IsHelicopter(v)){h=Heli{};continue;}
+            bool playerAboard=false,realCrew=false;
+            for(unsigned i=0;i<SeatCount(v);++i) {
+                const auto* seat=SeatAt(v,i);
+                playerAboard=playerAboard || AnyPlayerIn(seat);
+                realCrew=realCrew || SeatRider(seat)==Rider::other;
+            }
+            if(playerAboard){h=Heli{};continue;}
+            if(realCrew)continue; // retain the complete flight state; never delete under real occupants
+            h=Heli{};
             if(SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::dummy)reinterpret_cast<KickFn>(image+kSeatKick)(v,SeatAt(v,0));
             reinterpret_cast<DeleteFn>(image+kDelete)(v);
             Log("HELI v=%p gone (deleted)",v);

@@ -769,3 +769,6 @@ add_test(NAME mission_crew_team_fixture COMMAND mission_crew_team_test)
 if(EXISTS "${EDF6_NATIVE_DLL}")
     add_test(NAME mission_crew_team_dll COMMAND mission_crew_team_test "${EDF6_NATIVE_DLL}")
 endif()
+
+add_test(NAME npc_reseat_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_reseat_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(npc_reseat_native PROPERTIES SKIP_RETURN_CODE 77)

@@ -18,6 +18,8 @@ bool NpcCanYieldSeat(const unsigned char* seat) noexcept;
 bool NpcMoveSeat(unsigned char* vehicle,unsigned from,int to) noexcept;
 // Delivery complete: native dismount of commandable local real NPCs, no deletion or teleport.
 bool NpcReleaseVehicleCrew(unsigned char* vehicle) noexcept;
+// Repair a cleared snapshot seat only when the real human still references that exact current seat.
+bool NpcRestoreMissionSeat(unsigned char* vehicle,unsigned char* human) noexcept;
 // A new mission (mission.cpp MissionStart): the last mission's soldiers are gone.
 void ResetNpcAi() noexcept;
 // Whether `human` is one of the four soldier classes (AssultSoldier, PaleWing, HeavyArmor, Engineer).

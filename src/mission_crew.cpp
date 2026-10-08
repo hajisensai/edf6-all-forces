@@ -44,7 +44,8 @@ void __fastcall RideHook(void* object,bool spawned) noexcept {
     // participating vtables are hooked, so a restore can never manufacture a Dummy again.
     Put<int>(v,0xE30,1);
     if(NpcDriver(v) && SeatRider(SeatAt(v,0))!=Rider::dummy)return;
-    e->requested=true;e->dispatched=false;e->restored=!spawned;
+    e->restored=e->requested || e->dispatched;
+    e->requested=true;e->dispatched=false;
 }
 }
 

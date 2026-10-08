@@ -11,6 +11,8 @@ void __fastcall RideMoveRec(void* h,SharedRef* ref,int index) {
     Put<void*>(h,kHumanSeat,dest);Put<void*>(h,kHumanRiding,ref->obj);
     --*reinterpret_cast<int*>(static_cast<unsigned char*>(ref->ctrl)+8);++rides;
 }
+int originalThinks=0;
+void __fastcall ThinkRecord(void*,const float*) {++originalThinks;}
 void CrewSetup() {
     Reset();config.scriptNpcSettleSec=0;
     Put<void*>(human,kLeader,nullptr);Put<void*>(human,kSelfCtrl,human+0x2100);
@@ -72,6 +74,21 @@ int main() {
     Expect(!OwnsNpcSeatInput(SeatAt(vehicle,1)),"gunner seat does not retain driver input policy");
     human[edf::kHumanPlayer]=1;Put<void*>(human,edf::kHumanPad,human);
     Expect(!NpcMoveSeat(vehicle,1,0),"human cannot be moved by NPC yield path");
+    CrewSetup();heldSupportActor=human;world.friends=1;
+    Expect(!NpcRequestCrew(vehicle),"held deployment actor cannot be recruited by a different vehicle");
+    CrewSetup();nextThink[0]=&ThinkRecord;heldSupportActor=human;originalThinks=0;
+    Put<float>(human,kMoveX,1);human[kTrigger]=1;ThinkHook<0>(human,nullptr);
+    Expect(originalThinks==0 && At<float>(human,kMoveX)==0 && human[kTrigger]==0,
+           "held support actor cannot run native AI, move or shoot before all peers exist");
+    heldSupportActor=nullptr;ThinkHook<0>(human,nullptr);
+    Expect(originalThinks==1,"activated support actor resumes native AI");
+    CrewSetup();Put<void*>(human,kHumanSeat,seats);Put<void*>(human,kHumanRiding,vehicle);
+    Jump(kRideVehicle,reinterpret_cast<const void*>(&RideMoveRec));
+    Expect(NpcRestoreMissionSeat(vehicle,human) && At<void*>(seats,kSeatRider)==human,
+           "matched snapshot seat is restored through native Human ride without new actor");
+    CrewSetup();Put<void*>(human,kHumanSeat,seats+1);Put<void*>(human,kHumanRiding,vehicle);
+    Expect(!NpcRestoreMissionSeat(vehicle,human) && rides==0,
+           "unknown stale seat pointer is never passed into native exit or restore");
     VirtualFree(image,0,MEM_RELEASE);
     std::printf("real_npc_crew: %d failures\n",failures);
     return failures ? 1 : 0;

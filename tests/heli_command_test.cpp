@@ -109,6 +109,14 @@ int main() {
     check(gunnerQueries==0,"online door gunners stay off if native aim bridge could not install");
     gunnerSession=false;CrewDoorGuns(vehicle);
     check(gunnerQueries==2,"offline door gunners do not require the network aim bridge");
+    remotePilot[edf::kHumanPlayer]=0;Put<std::uint16_t>(remotePilot,0x128,2);
+    h.ref=ObjRef::Of(vehicle);h.seenFrame=GameFrame();h.reap=true;h.top=37.0f;deleteOk=true;
+    HeliReap(nullptr);
+    check(h.ref.Is(vehicle) && h.reap && h.top==37.0f,
+          "withdrawal never deletes a helicopter under real NPCs or erases their flight state");
+    remotePilot[edf::kHumanPlayer]=1;Put<std::uint16_t>(remotePilot,0x128,1);
+    HeliReap(nullptr);
+    check(!h.ref,"player takeover releases called flight ownership without deleting aircraft");
     std::printf("heli_command_test: %d checks passed\n",checks);
     return 0;
 }
