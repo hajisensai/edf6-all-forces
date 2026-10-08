@@ -23,9 +23,11 @@ struct PayloadEntry {
     PayloadFire fire;
     bool picked;               // the one the secondary fires now (a seat whose secondary has stores to switch)
     bool homing;               // it locks on (LockonType 1)
+    bool selectable;           // a live choice in the R/LB cycle; independent primary guns remain read-only
 };
 // The local player's seat on a stock vehicle (a plugin aircraft has the cockpit readout, PlayerJetHud, instead).
 struct PayloadReadout {
+    std::uint64_t selectionToken; // opaque current player/vehicle/seat/holder snapshot identity; 0 means no clickable choices
     int seat,seats;            // the seat they sit in, of how many
     int count;                 // entries (the fuel tank, which every seat lists, left out)
     int picked;                // the entry the secondary fires, -1 when the seat has no stores to switch between
@@ -37,6 +39,10 @@ struct PayloadReadout {
 void PayloadFrame(unsigned char* vehicle) noexcept;    // every vehicle's input, after the stock step
 // The last readout (a frame old at most), false with the player in no stock vehicle's seat.
 bool PlayerPayload(PayloadReadout* out) noexcept;
+// UI thread: queue a choice from the exact drawn snapshot. True means queued, not yet applied.
+// Does not read game objects or fire. Caller must route only an explicit mouse UI (currently map M).
+// PayloadFrame revalidates identity, topology, live holder and availability, including while the map owns keys.
+bool RequestPayloadSelection(std::uint64_t selectionToken,int seat,int entry) noexcept;
 // The weapon the secondary fires now on `vehicle` when its seat's stores are switched (helisight.cpp's mark follows
 // it), else nullptr: the stock weapon stands.
 unsigned char* PayloadPicked(const void* vehicle) noexcept;

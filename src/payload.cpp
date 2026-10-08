@@ -65,6 +65,64 @@ SightPick sightPick{};
 PayloadReadout latest{};
 ULONGLONG latestMs=0;
 
+// UI request transport: only immutable numbers cross threads. Native identities are
+// kept on the game thread and compared again before a queued selection is applied.
+struct ChoiceIdentity { const void* weapon; const void* holder; const void* ctrl; PayloadFire fire; bool selectable; };
+struct ChoiceContext {
+    ObjRef vehicle,human; const void* seatObject; int seat,count; Class kind; bool enabled;
+    ChoiceIdentity entry[kMostPayload]; std::uint64_t token;
+};
+ChoiceContext choiceContext{};
+std::uint64_t nextChoiceToken=0; // never reset across missions: delayed UI clicks cannot alias a new snapshot
+struct ChoiceRequest { std::uint64_t token; int seat,entry; ULONGLONG posted; };
+struct ChoicePublication { std::uint64_t token; int seat,count; bool selectable[kMostPayload]; ULONGLONG at; };
+SRWLOCK choiceLock=SRWLOCK_INIT;
+ChoiceRequest choiceRequest{};
+ChoicePublication choicePublication{};
+void ClearChoiceContext(const void* vehicle=nullptr) noexcept {
+    if(vehicle && choiceContext.vehicle.obj!=vehicle)return;
+    choiceContext=ChoiceContext{};
+    AcquireSRWLockExclusive(&choiceLock);
+    choiceRequest=ChoiceRequest{};choicePublication=ChoicePublication{};
+    ReleaseSRWLockExclusive(&choiceLock);
+}
+void PublishChoices(unsigned char* v,unsigned char* const* ws,PayloadReadout& r) noexcept {
+    ChoiceContext next{};
+    next.vehicle=ObjRef::Of(v);next.human=ObjRef::Of(PlayerHuman());next.seat=r.seat;
+    next.seatObject=SeatAt(v,static_cast<unsigned>(r.seat));next.count=r.count;next.kind=ClassOf(v);
+    const auto holders=At<unsigned char* const*>(next.seatObject,kSeatWeapons);
+    const auto count=At<std::uint64_t>(next.seatObject,kSeatWeaponCount);
+    bool same=choiceContext.vehicle.Is(v) && choiceContext.human.Is(PlayerHuman()) && choiceContext.seat==next.seat &&
+              choiceContext.seatObject==next.seatObject && choiceContext.count==next.count && choiceContext.kind==next.kind;
+    for(int i=0;i<r.count;++i) {
+        auto& e=next.entry[i];e.weapon=ws[i];e.fire=r.entry[i].fire;e.selectable=r.entry[i].selectable;
+        next.enabled=next.enabled || e.selectable;
+        if(count<=16 && Readable(holders,count*8))for(std::uint64_t h=0;h<count;++h)
+            if(Readable(holders[h],kHolderWeapon+8) && At<const void*>(holders[h],kHolderWeapon)==ws[i]) {
+                e.holder=holders[h];e.ctrl=At<const void*>(holders[h],kHolderCtrl);break;
+            }
+        const auto& old=choiceContext.entry[i];
+        same=same && e.weapon==old.weapon && e.holder==old.holder && e.ctrl==old.ctrl && e.fire==old.fire && e.selectable==old.selectable;
+    }
+    same=same && next.enabled==choiceContext.enabled;
+    if(!same){if(++nextChoiceToken==0)++nextChoiceToken;next.token=nextChoiceToken;}
+    else next.token=choiceContext.token;
+    choiceContext=next;
+    r.selectionToken=next.enabled ? next.token : 0;
+    AcquireSRWLockExclusive(&choiceLock);
+    choicePublication=ChoicePublication{};choicePublication.token=r.selectionToken;choicePublication.seat=r.seat;
+    choicePublication.count=r.count;choicePublication.at=GetTickCount64();
+    for(int i=0;i<r.count;++i)choicePublication.selectable[i]=r.entry[i].selectable;
+    ReleaseSRWLockExclusive(&choiceLock);
+}
+int ConsumeChoice(const PayloadReadout& r) noexcept {
+    AcquireSRWLockExclusive(&choiceLock);
+    const auto request=choiceRequest;choiceRequest=ChoiceRequest{};
+    ReleaseSRWLockExclusive(&choiceLock);
+    return request.token && request.token==r.selectionToken && request.seat==r.seat && request.entry>=0 && request.entry<r.count &&
+        GetTickCount64()-request.posted<=kFreshMs && r.entry[request.entry].selectable ? request.entry : -1;
+}
+
 Pick* PickFor(const void* v,unsigned seat,ULONGLONG ms) noexcept {
     Pick* slot=nullptr;
     for(auto& p:picks) {
@@ -231,13 +289,18 @@ const unsigned char kPullCode[]={0x48,0x8B,0x41,0x08,0x48,0x85,0xC0,0x74,0x11,0x
 bool pullOk=false;
 
 // The store switch on the player's seat (see the top). `ws` the seat's weapons, `r` their entries.
-bool Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* const* ws,PayloadReadout& r) noexcept {
+bool Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* const* ws,PayloadReadout& r,bool* uiChoice) noexcept {
+    *uiChoice=false;
     PayloadFire ride=PayloadFire::primary;
     for(int i=0;i<r.count;++i)if(r.entry[i].fire==PayloadFire::secondary)ride=PayloadFire::secondary;
     int stock[kMostPayload],ns=0,list[kMostPayload],n=0;
     for(int i=0;i<r.count;++i)if(r.entry[i].fire==ride)stock[ns++]=i;
     if(ns)list[n++]=stock[0];   // that control's stock weapon(s): one choice (the 603's pair fire together)
     for(int i=0;i<r.count;++i)if(r.entry[i].fire==PayloadFire::store)list[n++]=i;
+    const bool enabled=Cfg().enabled && pullOk && Cfg().stockStores && ns>0 && n>=2;
+    if(enabled)for(int k=0;k<n;++k)r.entry[list[k]].selectable=!Spent(ws[list[k]]);
+    PublishChoices(v,ws,r);
+    const int requested=ConsumeChoice(r);
     const bool keys=At<unsigned char>(seat,kSeatPad)==0;
     // During a map hold follow the physical key only to drain its edge; do not replay it on close.
     const int vk=Cfg().playerJetSwitchKey;
@@ -245,7 +308,7 @@ bool Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* co
         (At<std::uint16_t>(seat,kSeatButtons)&kButtonLB)!=0;
     const bool press=!MapHoldsKeys() && down && !p.held;
     p.held=down;
-    if(!pullOk || !Cfg().stockStores || ns==0 || n<2){p.weapon=nullptr;return pullOk && Cfg().stockStores && ns>0 && press;}
+    if(!enabled){p.weapon=nullptr;return Cfg().enabled && pullOk && Cfg().stockStores && ns>0 && press;}
     int at=0;
     for(int k=0;k<n;++k)if(ws[list[k]]==p.weapon)at=k;
     if(!p.weapon || ws[list[at]]!=p.weapon)at=0;
@@ -254,7 +317,12 @@ bool Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* co
         for(int k=0;k<n;++k)Log("PAYLOAD v=%p %s %d: %ls (%d rounds)%s",v,ride==PayloadFire::secondary ? "secondary" : "primary",k,
                                 r.entry[list[k]].name,r.entry[list[k]].rounds,k==at ? " [picked]" : "");
     }
-    if(press || Spent(ws[list[at]])) {
+    int requestedAt=-1;
+    for(int k=0;k<n;++k)if(list[k]==requested)requestedAt=k;
+    if(requestedAt>=0) {
+        if(at!=requestedAt){ClearWeaponLock(ws[list[at]]);ClearWeaponLock(ws[list[requestedAt]]);}
+        at=requestedAt;*uiChoice=true;
+    } else if(press || Spent(ws[list[at]])) {
         const int was=at;
         for(int k=1;k<=n;++k) {
             const int next=(at+k)%n;
@@ -268,14 +336,14 @@ bool Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* co
     r.picked=list[at];r.choices=n;r.switchButton=kButtonLB;
     if(at>0)for(int k=0;k<ns && p.redirects<kMostPayload;++k)p.from[p.redirects++]=ws[stock[k]];
     Lock(p.weapon);
-    return press;
+    return press || *uiChoice;
 }
 }  // namespace
 
 void PayloadFrame(unsigned char* v) noexcept {
-    if(v[kDead] || BodyOf(v)!=PluginBody::none){ClearRedirect(v);return;}
+    if(v[kDead] || BodyOf(v)!=PluginBody::none){ClearRedirect(v);ClearChoiceContext(v);return;}
     const int seat=PlayerSeatOf(v);
-    if(seat<0){if(sightPick.vehicle.Is(v))sightPick=SightPick{};return;}
+    if(seat<0){if(sightPick.vehicle.Is(v))sightPick=SightPick{};ClearChoiceContext(v);return;}
     const ULONGLONG ms=GameMs();
     Pick* const p=PickFor(v,static_cast<unsigned>(seat),ms);
     if(!p)return;
@@ -298,7 +366,9 @@ void PayloadFrame(unsigned char* v) noexcept {
         if(takeover)p->weapon=nullptr;
     }
     p->redirects=0;
-    const bool chose=Switch(v,s,*p,ws,r);
+    bool uiChoice=false;
+    const bool chose=Switch(v,s,*p,ws,r,&uiChoice);
+    if(uiChoice && MapHoldsKeys())sightPick.control=PayloadFire::store;
     if(!MapHoldsKeys()) {
         // Same-frame trigger edges prefer the primary. Explicit R/LB selection aims the selected payload without firing.
         if(primary && !sightPick.primaryHeld)sightPick.control=PayloadFire::primary;
@@ -375,6 +445,17 @@ bool PlayerPayload(PayloadReadout* out) noexcept {
     return true;
 }
 
+bool RequestPayloadSelection(std::uint64_t token,int seat,int entry) noexcept {
+    if(!token || seat<0 || entry<0 || entry>=kMostPayload)return false;
+    const ULONGLONG now=GetTickCount64();
+    AcquireSRWLockExclusive(&choiceLock);
+    const bool valid=token==choicePublication.token && seat==choicePublication.seat && entry<choicePublication.count &&
+        choicePublication.selectable[entry] && now-choicePublication.at<=kFreshMs;
+    if(valid)choiceRequest=ChoiceRequest{token,seat,entry,now};
+    ReleaseSRWLockExclusive(&choiceLock);
+    return valid;
+}
+
 unsigned char* PayloadPicked(const void* vehicle) noexcept {
     const Pick* const p=FindPick(vehicle);
     return p && p->weapon && GameMs()-p->seen<=kFreshMs ? p->weapon : nullptr;
@@ -427,6 +508,7 @@ bool InstallPayload() noexcept {
 }
 
 void ResetPayload() noexcept {
+    ClearChoiceContext();
     ClearRedirect(nullptr);
     for(auto& p:picks)p=Pick{};
     latest=PayloadReadout{};latestMs=0;

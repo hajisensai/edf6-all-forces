@@ -850,3 +850,11 @@ add_executable(ground_navigation_runtime_test tests/ground_navigation_runtime_te
 target_include_directories(ground_navigation_runtime_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_compile_options(ground_navigation_runtime_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME ground_navigation_runtime COMMAND ground_navigation_runtime_test)
+
+add_executable(payload_click_test EXCLUDE_FROM_ALL tests/payload_click_test.cpp)
+target_include_directories(payload_click_test PRIVATE src common)
+target_link_libraries(payload_click_test PRIVATE edf6common user32)
+target_compile_options(payload_click_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+target_link_options(payload_click_test PRIVATE /OPT:REF)
+add_dependencies(offline_checks payload_click_test)
+add_test(NAME payload_click COMMAND payload_click_test)
