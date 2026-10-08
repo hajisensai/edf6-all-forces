@@ -112,6 +112,7 @@ struct MapCommandReadout {
     float hoverAt[3];          // its lock point
     bool supportArmed;
     wchar_t supportName[64];
+    wchar_t supportStatus[128];
 };
 bool PlayerMapCommands(MapCommandReadout* out) noexcept;
 }  // namespace crew

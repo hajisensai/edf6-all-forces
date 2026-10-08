@@ -12,6 +12,7 @@ SHORT Down(int key) noexcept { return key>=0 && key<256 && keys[key] ? static_ca
 #include <cstdio>
 
 namespace crew {
+void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept {if(out && capacity)out[0]=0;}
 int SupportCallCount() noexcept { return 3; }
 const wchar_t* SupportCallName(int) noexcept { return L"Support"; }
 int supportCalls=0,supportChosen=-1;float supportTarget[3]{};

@@ -15,6 +15,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/gunnerrecoil.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/map.cpp)
 # The map's NPC commands (src/mapcmd.cpp, src/mapcmd_logic.h).
 target_sources(EDF6VehicleCrew PRIVATE src/mapcmd.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/support_dispatch.cpp)
 # The EMC's charged beam (src/emc.cpp, src/emc_plan.h).
 target_sources(EDF6VehicleCrew PRIVATE src/emc.cpp)
 # The Proteus rework (its own line too).
@@ -406,6 +407,10 @@ add_test(NAME call_pick COMMAND call_pick_test)
 add_executable(support_entry_test tests/support_entry_test.cpp)
 target_compile_options(support_entry_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME support_entry COMMAND support_entry_test)
+add_executable(support_dispatch_test EXCLUDE_FROM_ALL tests/support_dispatch_test.cpp)
+target_link_libraries(support_dispatch_test PRIVATE edf6common)
+target_compile_options(support_dispatch_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME support_dispatch COMMAND support_dispatch_test)
 # The remote gunner's recoil on the vehicle's authority (src/gunnerrecoil.cpp) against a stand-in EDF.dll.
 add_executable(gunner_recoil_test tests/gunner_recoil_test.cpp)
 target_link_libraries(gunner_recoil_test PRIVATE edf6common)
@@ -478,6 +483,7 @@ add_executable(map_command_runtime_check EXCLUDE_FROM_ALL tools/map_command_runt
 target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
 target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks map_command_runtime_check)
+add_dependencies(offline_checks support_dispatch_test)
 add_test(NAME map_command_runtime COMMAND map_command_runtime_check)
 add_test(NAME jet_player_rotor_suite COMMAND jet_obstacle_sim --player-rotor-suite)
 add_test(NAME jet_ground_settle COMMAND jet_obstacle_sim --ground-settle-suite)

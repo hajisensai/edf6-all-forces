@@ -27,5 +27,7 @@ int main() {
     check(AirRoute(area,target,observer,preferred,150,clear,tower,route)==Refusal::none && route.from[1]==400,"tall corridor terrain raises arrival");
     const PlayArea tiny{{-100,-100},{100,100},true,0,true};
     check(AirRoute(tiny,target,observer,preferred,150,clear,ground,route)==Refusal::noEntry,"no short journey on tiny arena");
+    const float outside[3]={2000,0,0};
+    check(AirRoute(area,outside,observer,preferred,150,clear,ground,route)==Refusal::noEntry,"map pointer past the usable area cannot order support into the void");
     std::printf("support_entry_test: %d checks passed\n",checks);
 }

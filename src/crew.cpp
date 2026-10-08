@@ -766,6 +766,7 @@ void FrameTick() noexcept {
     GuardedTick(kStepHudPublish,&HudPublish);
     GuardedTick(kStepUnderground,&BigWorldProbe);
     GuardedTick(kStepUnderground,&PlayAreaTick);   // the walls where the map's ground ends (playarea.cpp)
+    GuardedTick(kStepRescue,&SupportDispatchTick);
     GuardedTick(kStepPlayerJet,&PlayerEjectTick);
     GuardedTick(kStepView,&ViewTick);
     GuardedTick(kStepBoarding,&BoardingTick);

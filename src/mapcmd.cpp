@@ -428,6 +428,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     r.sweepOn=NpcSweepOn();r.healthOn=NpcPickupHealthOn();r.guardArmed=g.guardArmed;r.march=NpcMarchShape();
     r.supportArmed=g.supportArmed;
     _snwprintf_s(r.supportName,_countof(r.supportName),_TRUNCATE,L"%ls",SupportCallName(g.supportPick));
+    SupportCallStatus(r.supportStatus,_countof(r.supportStatus));
     r.noteFresh=g.noteAt && GetTickCount64()-g.noteAt<=kNoteMs;
     readoutAt=GetTickCount64();
     ReleaseSRWLockExclusive(&lock);
@@ -451,7 +452,8 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     }
     g.frameAt=now;
     const bool mouseOrKey=(in.mouse && (in.dx!=0.0f || in.dy!=0.0f)) || (k.left && !g.was.left) ||
-        (k.tab && !g.was.tab) || (k.guard && !g.was.guard) || (k.follow && !g.was.follow) || (k.release && !g.was.release);
+        (k.tab && !g.was.tab) || (k.guard && !g.was.guard) || (k.follow && !g.was.follow) || (k.release && !g.was.release) ||
+        (k.supportCall && !g.was.supportCall) || (k.supportPrev && !g.was.supportPrev) || (k.supportNext && !g.was.supportNext);
     const bool padPress=(k.padNext && !g.was.padNext) || (k.padGuard && !g.was.padGuard) ||
         (k.padFollow && !g.was.padFollow) || (k.padRelease && !g.was.padRelease);
     in.usingPad=mapcmd::UsingPad(in.usingPad,mouseOrKey,padPress);

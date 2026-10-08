@@ -791,6 +791,8 @@ void ResetStabilizer() noexcept;
 // airstrike.cpp
 bool InstallAirstrikes() noexcept;
 void CallPick(int step,wchar_t* out,std::size_t size) noexcept;   // airstrike.cpp
+void SupportDispatchTick() noexcept;
+void ResetSupportDispatch() noexcept;
 
 // subcarrier.cpp: the submarine carrier (潜水母艦, docs/subcarrier-re.md), a 506 body from EDF6VC_SUB_CARRIER.SGO
 // (tools/make_sub.py) driven by the plugin: it sits surfaced, follows the player at a ship's pace, turns its bow

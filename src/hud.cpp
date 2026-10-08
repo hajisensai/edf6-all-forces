@@ -3417,7 +3417,9 @@ void MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float
         w[i]=(text ? probe.w : static_cast<float>(wcslen(probe.text))*9.0f*s)+2.0f*kBtnPad*s;
     }
     mapbtn::Rect r[n]{};
-    mapbtn::Flow(w,n,width,height-kBtnBottom*s,kBtnRowH*s,kBtnGap*s,kBtnMargin*s,r);
+    const int buttonRows=mapbtn::Flow(w,n,width,height-kBtnBottom*s,kBtnRowH*s,kBtnGap*s,kBtnMargin*s,r);
+    if(c.supportStatus[0])Label(text,lines,at,width*0.5f,height-(kBtnBottom+static_cast<float>(buttonRows)*(kBtnRowH+kBtnGap)+14.0f)*s,
+        1,scale,kWhite,L"%ls",c.supportStatus);
     float rects[n*4];int ids[n];int placed=0;
     for(int i=0;i<n;++i) {
         if(!(r[i].x1>r[i].x0))continue;   // no room for its row

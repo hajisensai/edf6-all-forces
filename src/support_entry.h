@@ -20,6 +20,7 @@ Refusal AirRoute(const PlayArea& area,const float* target,const float* observer,
                  float altitude,Clear clear,Height height,Route& route) noexcept {
     if(!area.ground || !std::isfinite(target[0]+target[1]+target[2]) ||
        !(area.hi[0]-area.lo[0]>2*kEntryInset && area.hi[1]-area.lo[1]>2*kEntryInset))return Refusal::noArea;
+    if(target[0]<area.lo[0] || target[0]>area.hi[0] || target[2]<area.lo[1] || target[2]>area.hi[1])return Refusal::noEntry;
     const float cx=(area.lo[0]+area.hi[0])*0.5f,cz=(area.lo[1]+area.hi[1])*0.5f;
     const float edges[8][2]={{area.lo[0]+kEntryInset,cz},{area.hi[0]-kEntryInset,cz},
                            {cx,area.lo[1]+kEntryInset},{cx,area.hi[1]-kEntryInset},

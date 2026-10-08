@@ -13,6 +13,8 @@ float MapRay(const float* from,const float* to,float* hit) noexcept {
     if(to[1]<from[1] && to[1]<0 && from[1]>0){hit[0]=from[0];hit[1]=0;hit[2]=from[2];return 0.5f;}
     return -1;
 }
+bool MapGroundNear(float,float,float,float* out,bool) noexcept {*out=0;return true;}
+bool SupportCallAt(int,const float*,wchar_t*,std::size_t) noexcept {return false;}
 bool testOnline=true;
 const Config& Cfg() noexcept { return config; }
 bool InSession() noexcept { return testOnline; }

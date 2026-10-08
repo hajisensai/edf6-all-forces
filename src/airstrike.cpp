@@ -42,6 +42,7 @@
 #include "crew.h"
 #include "call_net.h"
 #include "support_call.h"
+#include "support_aircraft.h"
 #include "support_entry.h"
 #include "jet_internal.h"   // FaultLog
 #include "memory.h"
@@ -58,9 +59,7 @@ constexpr std::size_t kIfcPlanes=0x80,kStartForward=0x40,kStartTarget=0x50;   //
 constexpr unsigned kBomberInit=0x5AABB0,kRadioBomber=0x2B924E,kMissionBomber=0x5B4423;
 constexpr unsigned kPlaneUpdateSlot=0x17D3A30+5*8,kPlaneUpdate=0x5AB240,kDelete=0x118A1B0;
 constexpr std::size_t kPlaneVelocity=0xB80,kPlaneModel=0x660;   // model instance embedded (0x5AB2E3)
-constexpr float kAboveTarget=150.0f,kWingSpacing=70.0f,kWingStep=15.0f;
-constexpr float kHeliSpacing=40.0f;
-constexpr float kSubAhead=1000.0f;   // the 1664 m hull (half 832) clear of the caller
+constexpr float kAboveTarget=150.0f;
 // Ownership (docs/loadout-re.md 8): the game status, its weapon table (cfg = GS+0x130, the table loaded
 // once cfg+0x188 is set) and per row a record of 12 bytes, u32 flags (bit0 owned, bit2 NEW) and 8 star
 // bytes, 0x800 of them.
@@ -144,8 +143,7 @@ struct Throw { std::uint32_t markBits; ThrownDrone drone; DWORD fuelSec; const c
 // The in-mission pick (CallPick, overlay.cpp's keys): -1 = each weapon's own call; otherwise only local players'
 // call weapons bring kCalls[picked]. This UI preference is not carried in the native radio-call message.
 std::atomic<int> picked{-1};
-ULONGLONG mapCallAt=0;
-support::Refusal launchRefusal=support::Refusal::none;
+
 
 // Whether `data` holds `id` as a whole NUL-terminated UTF-16LE string (the table's id column).
 bool HoldsId(const unsigned char* data,std::size_t size,const wchar_t* id) noexcept {
@@ -264,23 +262,6 @@ bool __fastcall SeedSendHook(void* message,std::uint64_t seed,unsigned char* wea
     return reinterpret_cast<WriteU64Fn>(image+kWriteU64)(message,sent);
 }
 
-// Where a call comes in from (LaunchCall's `dir`). Offline from behind the target as the player sees it (origin/main).
-// Online along the call's heading (`forward`: the forward row of the matrix the call state builds from +0x1650, which
-// message 9 carries), so every machine that replays the call launches it from the same points; each machine's own player
-// stands somewhere else.
-void CallDirection(const float* target,const float* forward,float* dir) noexcept {
-    dir[0]=0.0f;dir[1]=0.0f;dir[2]=1.0f;
-    if(InSession()) {
-        const float l=std::sqrt(forward[0]*forward[0]+forward[2]*forward[2]);
-        if(std::isfinite(l) && l>0.1f){dir[0]=forward[0]/l;dir[2]=forward[2]/l;}
-        return;
-    }
-    if(player.at && GameMs()-player.at<10000) {
-        const float dx=target[0]-player.pos[0],dz=target[2]-player.pos[2],l=std::sqrt(dx*dx+dz*dz);
-        if(l>5.0f){dir[0]=dx/l;dir[2]=dz/l;}
-    }
-}
-
 bool OpenSky(const float* target) noexcept {
     const float from[3]={target[0],target[1]+2.0f,target[2]},to[3]={target[0],target[1]+3000.0f,target[2]};
     float hit[3];return MapRay(from,to,hit)<0.0f;
@@ -293,53 +274,13 @@ bool EntryHeight(float x,float z,float level,float& out) noexcept {
 }
 bool EntryClear(const float* from,const float* to) noexcept {
     // Five rays cover the centre and a 50 m envelope rather than a point-size aircraft.
-    constexpr float offsets[5][3]={{0,0,0},{25,0,0},{-25,0,0},{0,25,0},{0,-25,0}};
+    constexpr float offsets[7][3]={{0,0,0},{45,0,0},{-45,0,0},{0,45,0},{0,-45,0},{0,0,45},{0,0,-45}};
     for(const auto& offset:offsets) {
         const float a[3]={from[0]+offset[0],from[1]+offset[1],from[2]+offset[2]};
         const float b[3]={to[0]+offset[0],to[1]+offset[1],to[2]+offset[2]};
         float hit[3];if(MapRay(a,b,hit)>=0.0f)return false;
     }
     return true;
-}
-
-// A real approach from a measured map edge, never a fixed distance beside the caller. The returned
-// points remain inside the physical world so flight boundary code does not teleport or pin the arrival.
-int LaunchCall(const Call& c,const float* target,const float* forward) noexcept {
-    launchRefusal=support::Refusal::none;
-    float dir[3];
-    CallDirection(target,forward,dir);
-    if(c.brings==Brings::sub) {
-        // This static 1664 m model has no verified travel/deployment animation. Do not materialise it
-        // near the caller and present that as an arrival.
-        launchRefusal=support::Refusal::unsupported;return 0;
-    }
-    if(!OpenSky(target)){launchRefusal=support::Refusal::noSky;return 0;}
-    const bool heli=c.brings==Brings::helis;
-    support::Route route;
-    // Online all replicas rank identical points against the transmitted target, not their own player.
-    const float* observer=InSession() ? target : player.pos;
-    launchRefusal=support::AirRoute(MapPlayArea(),target,observer,dir,
-        heli ? std::fmax(Cfg().heliHeight,60.0f) : kAboveTarget,EntryClear,EntryHeight,route);
-    if(launchRefusal!=support::Refusal::none)return 0;
-    std::memcpy(dir,route.heading,12);
-    const float side[3]={dir[2],0,-dir[0]},spacing=heli ? kHeliSpacing : kWingSpacing;
-    int launched=0;
-    for(int i=0;i<c.count;++i) {
-        const float off=(static_cast<float>(i)-static_cast<float>(c.count-1)*0.5f)*spacing;
-        const float from[3]={route.from[0]+side[0]*off,route.from[1]+kWingStep*static_cast<float>(i),route.from[2]+side[2]*off};
-        const auto area=MapPlayArea();
-        if(from[0]<area.lo[0] || from[0]>area.hi[0] || from[2]<area.lo[1] || from[2]>area.hi[1])continue;
-        if(!heli) {
-            launched+=JetLaunch(*c.role,from,dir,target,c.fuelSec,&kRadioSource,c.follow) ? 1 : 0;
-            continue;
-        }
-        unsigned char* const v=HeliLaunch(*c.body,from,dir);
-        if(!v)continue;
-        HeliCalled(v,!c.follow,target,c.fuelSec);
-        ++launched;
-    }
-    Log("AIRSTRIKE call: %d/%d %s at (%.0f,%.0f,%.0f), fuel %lus",launched,c.count,c.name,target[0],target[1],target[2],c.fuelSec);
-    return launched;
 }
 
 // The Air Raider's bomber call (redirected call at kRadioCall): IFC_Start(ifc = weapon+0x1660, params).
@@ -351,14 +292,16 @@ std::uintptr_t __fastcall RadioStartHook(void* ifc,const void* params) {
         const auto owner=At<const unsigned char*>(params,0);   // params+0: owner weak pointer (docs/airstrike-re.md section 2)
         const Call* const c=CallOf(ifc,owner);
         const float* target=reinterpret_cast<const float*>(static_cast<const unsigned char*>(params)+kStartTarget);
-        const float* forward=reinterpret_cast<const float*>(static_cast<const unsigned char*>(params)+kStartForward);
         if(c && std::isfinite(target[0]+target[1]+target[2])) {
             const online::CopyOwner was=SetSpawnOwner(CopyOwnerOfCaller(owner));   // its copies are the caller's (online_authority.h)
-            const int launched=LaunchCall(*c,target,forward);
+            wchar_t note[128]{};
+            // The radio callback is replayed for remote players too. Only the actual caller submits
+            // one request; the support protocol commits the host-selected entry on every peer.
+            if(!InSession() || IsPlayer(owner))SupportCallAt(static_cast<int>(c-kCalls),target,note,_countof(note));
             SetSpawnOwner(was);
             // A refused custom support must not silently turn into stock bombers (especially underground).
             Put<std::int32_t>(ifc,kIfcPlanes,0);
-            if(!launched)Log("AIRSTRIKE call refused: %d",static_cast<int>(launchRefusal));
+            Log("AIRSTRIKE queued support: %ls",note);
         }
     } __except(FaultLog("AIRSTRIKE radio call (its bombers fly)",GetExceptionInformation())) { SetSpawnOwner(online::kCopyHost); }
     return result;
@@ -680,32 +623,57 @@ void CallPick(int step,wchar_t* out,std::size_t size) noexcept {
     Log("CALLS pick %d: %s",p,p<0 ? "each its own" : kCalls[p].name);
 }
 
-int SupportCallCount() noexcept { return kCallCount; }
-const wchar_t* SupportCallName(int index) noexcept {
+bool SupportAircraftSpec(int catalog,SupportAircraft* out) noexcept {
+    if(!out || catalog<0 || catalog>=kCallCount || kCalls[catalog].brings==Brings::sub)return false;
+    const auto& c=kCalls[catalog];
+    *out={c.role ? static_cast<int>(*c.role) : -1,c.body ? static_cast<int>(*c.body) : -1,
+          c.count,c.fuelSec,c.follow};
+    return true;
+}
+int SupportAirCallCount() noexcept { return kCallCount; }
+const wchar_t* SupportAirCallName(int index) noexcept {
     return index>=0 && index<kCallCount ? kCallLabels[index] : L"支援";
 }
-bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept {
-    if(!note || !capacity)return false;
-    auto refuse=[&](const wchar_t* why){_snwprintf_s(note,capacity,_TRUNCATE,L"%ls",why);return false;};
-    if(!Cfg().enabled || !Cfg().jetAirRaider)return refuse(L"空中支援未启用");
-    if(InSession())return refuse(L"联机请使用支援呼叫武器；地图呼叫尚未同步");
-    if(index<0 || index>=kCallCount || !target)return refuse(L"无效的支援请求");
-    const auto now=GameMs();
-    if(mapCallAt && now-mapCallAt<30000)return refuse(L"支援调度冷却中（30 秒）");
-    const float forward[3]={0,0,1};
-    const int count=LaunchCall(kCalls[index],target,forward);
-    if(count>0) {
-        mapCallAt=now;
-        _snwprintf_s(note,capacity,_TRUNCATE,L"%ls：%d 支援单位从地图边缘入场",SupportCallName(index),count);
+support::Refusal PlanAirSupport(int catalog,const float* target,const float* observer,support::Route* route) noexcept {
+    SupportAircraft spec;
+    if(!route || !SupportAircraftSpec(catalog,&spec))return support::Refusal::unsupported;
+    if(!OpenSky(target))return support::Refusal::noSky;
+    float direction[3]={0,0,1};
+    // Host chooses the entire plan once. Peers receive its explicit matrices.
+    if(observer) {
+        const float x=target[0]-observer[0],z=target[2]-observer[2],d=std::hypot(x,z);
+        if(d>0.1f){direction[0]=x/d;direction[2]=z/d;}
+    }
+    const auto entry=[&](const float* from,const float* to) noexcept {
+        if(!EntryClear(from,to))return false;
+        float floor;
+        if(!MapGroundNear(from[0],from[2],target[1],&floor,true))return false;
+        const float center[3]={from[0],floor,from[2]};
+        if(!OpenSky(center))return false;
+        // A manned aircraft starts on a clear, level ground pad/runway, with real crew walking aboard.
+        // No assumption that a roof or a point-size opening is an airfield.
+        const float dx=to[0]-from[0],dz=to[2]-from[2],d=std::hypot(dx,dz);
+        if(d<1)return false;
+        const float length=(spec.heli>=0 ? 40.0f : 220.0f)+static_cast<float>(spec.count-1)*65.0f;
+        const float halfWidth=spec.heli>=0 ? 18.0f : 45.0f;
+        for(int step=0;step<=11;++step)for(int lane=-1;lane<=1;++lane) {
+            const float along=length*static_cast<float>(step)/11.0f;
+            const float x=from[0]+dx/d*along+dz/d*halfWidth*static_cast<float>(lane);
+            const float z=from[2]+dz/d*along-dx/d*halfWidth*static_cast<float>(lane);
+            float ground;
+            if(!MapGroundNear(x,z,floor,&ground,true) || std::fabs(ground-floor)>0.5f)return false;
+            const float a[3]={x,ground+0.2f,z},b[3]={x,ground+25.0f,z};float hit[3];
+            if(MapRay(a,b,hit)>=0.0f)return false;
+        }
         return true;
-    }
-    switch(launchRefusal) {
-    case support::Refusal::noArea: return refuse(L"尚未测得可用地图边缘，无法安排入口");
-    case support::Refusal::noSky: return refuse(L"此处没有开放天空，无法呼叫航空支援");
-    case support::Refusal::noEntry: return refuse(L"找不到有足够净空的远端入场路线");
-    case support::Refusal::unsupported: return refuse(L"该单位尚无可用的实际入场方式");
-    default: return refuse(L"支援无法出发：资源、机组或单位名额不足");
-    }
+    };
+    const auto result=support::AirRoute(MapPlayArea(),target,observer,direction,
+        spec.heli>=0 ? std::fmax(Cfg().heliHeight,60.0f) : kAboveTarget,entry,EntryHeight,*route);
+    if(result!=support::Refusal::none)return result;
+    float ground;
+    if(!MapGroundNear(route->from[0],route->from[2],target[1],&ground,true))return support::Refusal::noEntry;
+    route->from[1]=ground;
+    return support::Refusal::none;
 }
 
 bool InstallAirstrikes() noexcept {
@@ -744,6 +712,5 @@ void ResetAirstrikes() noexcept {
     for(auto& h:held)h=Held{};
     for(auto& b:bombs)b=Bomb{};
     bombCount=0;
-    mapCallAt=0;
 }
 }  // namespace crew
