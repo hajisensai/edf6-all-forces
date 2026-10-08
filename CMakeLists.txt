@@ -687,6 +687,8 @@ add_test(NAME aircraft_locator_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_S
 set_tests_properties(aircraft_locator_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME medic_native_heal COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/medic_native_heal_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(medic_native_heal PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME heli_yaw_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/heli_yaw_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(heli_yaw_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME katyusha_native_rack COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/katyusha_native_rack_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(katyusha_native_rack PROPERTIES SKIP_RETURN_CODE 77)
 

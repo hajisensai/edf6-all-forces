@@ -5,10 +5,9 @@
 //    stock's -LX moves it right for LX > 0, docs/player-jet-re.md §2);
 //  - horizontal: a frame v = d v + b (k (lateral row0 + forward row2) - d v), d 0.999, b and k as PlayerAssist makes them
 //    for PlayerHeliStopSec 1 at the 506's stock top speed (18.5 m/s); nothing horizontal on the ground;
-//  - yaw: the turn rate eases to the input times the heli's max yaw rate (veh+0x1634, slot 57: heli-input-re.md §2) over
-//    kYawLag s (the logs: 45-70 deg/s at full, ~0.8 s behind the input); with every stock heli's positive max yaw rate +
-//    grows a (the stock writes -RX: the mouse to the right turns it right, a falling). The "max yaw < 0" scenarios give
-//    the stand-in a negative one: the turn's sign then comes from the craft, not from the pilot's law;
+//  - yaw: +0x1604 eases toward maxAngle*input, then the angular spring asks for angle*spring*60 rad/s.
+//    The body blends its angular velocity separately (native audit: tests/heli_yaw_native_audit.py).
+//    Positive input grows a; the "max yaw < 0" scenario verifies the native parameter's sign;
 //  - vertical (aircraft-re.md "垂直", M): the rotor eases to the throttle at 0.001 of the gap a frame up, 0.0007 down, never
 //    under the idle 0.13; a frame vy = lerp(1, 0.95, t) vy + rotor L - g / 60, t = (rotor - idle) / (hover - idle) within
 //    0..1, L such that the hover rotor 0.288 holds it (all of it climbs ~8 m/s, at idle it falls undamped); the ground at
@@ -24,20 +23,18 @@
 
 namespace {
 using namespace crew;
-// heli.cpp's gains (kBrakeGain, kClimbGain / kHoverLearn / kRotorGain, kYawDamp / kYawFeed) and AimFly's constants.
-constexpr float kBrakeGain=0.12f,kYawDamp=1.2f,kYawFeed=1.1f,kPlayerClimb=6.0f,kPi=3.14159265f;
+// heli.cpp's gains (kBrakeGain, kClimbGain / kHoverLearn / kRotorGain) and AimFly's constants.
+constexpr float kBrakeGain=0.12f,kPlayerClimb=6.0f,kPi=3.14159265f;
 constexpr aim::RotorGains kGains{0.08f,0.03f,4.0f};
 // The stand-in stock heli (see the top).
-// kYawMost: the max yaw rate heli.cpp PlayerYawTune gives it (ini HeliYawRate 50 deg/s, with the NPC's smoothing whose
-// lag the logs measured, kYawLag).
-constexpr float kDamp=0.999f,kTop=18.5f,kStopFrames=60.0f,kYawMost=50.0f*3.14159265f/180.0f,kYawLag=0.8f,kDt=1.0f/60.0f;
+// Brute's slow native angular response; kYawMost is the requested player turn rate.
+constexpr float kDamp=0.999f,kTop=18.5f,kStopFrames=60.0f,kYawMost=50.0f*3.14159265f/180.0f,kYawBlend=0.005f,kSpring=0.15f,kAngularBlend=0.025f,kDt=1.0f/60.0f;
 // The screen: the camera rides behind the nose (docs/camera-re.md 3b: the seat's anchors on the heli), so the aim's
 // mark stays on the screen while it is at most kScreenYaw off the nose (MoveOnScreen in the game).
 constexpr float kScreenYaw=0.55f;
 constexpr float kHover=0.288f,kIdle=0.13f,kFall=9.8f/60.0f,kLift=kFall/kHover,kHoverDamp=0.95f;
 
-struct Heli { float pos[3],vel[3],a,yawRate,rotor,maxYaw; };
-bool stockYawLaw=false;   // the old law (the NPC's StockYaw) for the comparison in FollowsTheMouse
+struct Heli { float pos[3],vel[3],a,yawRate,rotor,maxYaw; float yawOffset=0.0f; };
 float Wrap(float a) noexcept {
     while(a>kPi)a-=2.0f*kPi;
     while(a<-kPi)a+=2.0f*kPi;
@@ -53,7 +50,8 @@ void Step(Heli& h,const Inputs& in) noexcept {
         const float want=k*(in.lateral*right[i]+in.forward*fwd[i]);
         h.vel[i]=kDamp*h.vel[i]+blend*(want-kDamp*h.vel[i]);
     } else h.vel[0]=h.vel[2]=0.0f;
-    h.yawRate+=(h.maxYaw*in.yaw-h.yawRate)*(kDt/kYawLag);
+    h.yawOffset+=(h.maxYaw*in.yaw-h.yawOffset)*kYawBlend;
+    h.yawRate+=(h.yawOffset*kSpring*60.0f-h.yawRate)*kAngularBlend;
     if(!ground)h.a+=h.yawRate*kDt;
     h.rotor+=(in.throttle>h.rotor ? 0.001f : 0.0007f)*(in.throttle-h.rotor);
     if(h.rotor<kIdle)h.rotor=kIdle;
@@ -94,8 +92,7 @@ Inputs Fly(Pilot& p,const Heli& h,const Hand& hand,float t,int frame) noexcept {
     while(off>kPi)off-=2*kPi;
     while(off<-kPi)off+=2*kPi;
     p.yawRate+=((h.a-p.yawPrev)/kDt-p.yawRate)*0.3f;p.yawPrev=h.a;
-    in.yaw=(stockYawLaw ? aim::StockYaw(off,p.yawRate,0.0f,kYawDamp,kYawFeed) : aim::PlayerYaw(off,p.yawRate,std::fabs(h.maxYaw)))*
-           aim::YawSign(h.maxYaw);   // the craft's param, read
+    in.yaw=aim::PlayerYawInput(off,p.yawRate,kYawMost,h.maxYaw,h.yawOffset,kYawBlend,kSpring);
     const bool learn=p.hold.holding && std::fabs(p.hold.y-h.pos[1])<6.0f;
     in.throttle=aim::StockThrottle(w.climb,h.vel[1],h.rotor,&p.hover,learn,kDt,kGains);
     return in;
@@ -130,11 +127,9 @@ bool Run(const Scenario& sc) noexcept {
 // The mouse swept right and kept going (1 unit a frame for 4 s, aim::kPerUnit 0.05 rad a unit), held at the screen's
 // edge as the game does, the heli at a hover: the turn rate it keeps from 2 s to 4 s. The user (2026-10-06): "the mouse
 // moves and nothing changes, it does not follow the mouse"; their log had the 506 turning 5-17 deg/s. Pushed on, the
-// heading must turn at kFollowShare of the craft's max yaw rate or more, and the old law (the NPC's StockYaw, damped on
-// the turn itself) must not: that is what was wrong.
+// heading must turn at kFollowShare of the requested player turn rate or more.
 constexpr float kFollowShare=0.8f;
-float SweepRate(bool stockLaw) noexcept {
-    stockYawLaw=stockLaw;
+float SweepRate() noexcept {
     Heli h{{0.0f,50.0f,0.0f},{0.0f,0.0f,0.0f},0.0f,0.0f,kHover,kYawMost};
     Pilot p{};
     p.aim[2]=1.0f;p.hover=kHover;p.groundAt=-10.0f;
@@ -145,14 +140,13 @@ float SweepRate(bool stockLaw) noexcept {
         if(f==frames/2)at2=h.a;
         Step(h,Fly(p,h,sweep,static_cast<float>(f)*kDt,f));
     }
-    stockYawLaw=false;
     return -(h.a-at2)/2.0f;   // rad/s, + to the right
 }
 bool FollowsTheMouse() noexcept {
-    const float now=SweepRate(false),old=SweepRate(true),want=kFollowShare*kYawMost;
-    const bool ok=now>=want && old<want;
-    std::printf("%-26s %-34s turns %.1f deg/s (want >= %.0f, its most %.0f); old law %.1f deg/s  %s\n","mouse swept right 4 s",
-                "the heading follows the mouse",now*180.0f/kPi,want*180.0f/kPi,kYawMost*180.0f/kPi,old*180.0f/kPi,ok ? "ok" : "WRONG");
+    const float now=SweepRate(),want=kFollowShare*kYawMost;
+    const bool ok=now>=want;
+    std::printf("%-26s %-34s turns %.1f deg/s (want >= %.0f, its most %.0f); native lag/spring  %s\n","mouse swept right 4 s",
+                "the heading follows the mouse",now*180.0f/kPi,want*180.0f/kPi,kYawMost*180.0f/kPi,ok ? "ok" : "WRONG");
     return ok;
 }
 
