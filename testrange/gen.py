@@ -18,10 +18,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 sys.path.insert(0, os.path.join(HERE, '..', 'tools'))   # the ground vehicles' builders (GROUND_MISSION)
 import jet_models  # noqa: E402
+import dsgo  # noqa: E402
 import ledger  # noqa: E402
 import recoil  # noqa: E402
 import rmpa  # noqa: E402
 import sazabi_model  # noqa: E402
+import sgo  # noqa: E402
 # The generated jets and vehicles are shared with tools/make_jets.py and tools/make_sub.py (pylib/vcobjects.py).
 from vcobjects import (DEFAULT_GAME, SAZABI_JET, JET_ELEVON_FILE, JET_ELEVON_MODEL, JETS, PARKED_KINDS, Game,  # noqa: E402,F401
                        as_mission_sgo, jet_guns, jet_sgo, object_dir, parked_name, weapon_dir)
@@ -880,6 +882,32 @@ def _with_player_recoil(game: Game, sgo_name: str, data: bytes) -> bytes:
     return data if mounts is None else recoil.align_data(data, mounts, sgo_name)[0]
 
 
+def _with_player_heli_motion(game: Game, sgo_name: str, data: bytes) -> bytes:
+    """Give placed helis their matching request's flight parameters, not the OBJECT template's defaults.
+
+    The Heron template is only 8.39 km/h (k=80, b=.0003, d=.99); its real YG10E request is
+    74.94 km/h (k=90, b=.003). Keep the range's durability, fuel and weapons unchanged.
+    """
+    if sgo_name not in PLAYER_CALLS or '_heli' not in sgo_name:
+        return data
+    call = sgo.load(data=game.read('WEAPON', PLAYER_CALLS[sgo_name] + '.SGO'))
+    delivery = call['Ammo_CustomParameter'][4]
+    # The DLC Eros uses the same flight law as the standard Eros whose guns it carries.
+    stock = DERIVED[sgo_name].removesuffix('_EDF6BENEFITS').lower()
+    if not isinstance(delivery, list) or len(delivery) != 4 or delivery[2].lower() != f'app:/object/{stock}.sgo':
+        raise ValueError(f'{sgo_name}: helicopter request targets another vehicle')
+    motion = delivery[3][1]
+    if not isinstance(motion, list) or len(motion) != 7 or not all(isinstance(v, (int, float)) and math.isfinite(v) for v in motion):
+        raise ValueError(f'{sgo_name}: invalid helicopter flight parameters')
+    if data[:4] == b'DSGO':
+        doc = dsgo.parse(data)
+        doc.root.get('mission_setup').items[1] = dsgo.Node(motion)
+        return dsgo.write(doc)
+    version, members = sgo.read(data)
+    members['mission_setup'][1] = motion
+    return sgo.write_depth_first(version, members)
+
+
 def vehicle_sgo(game: Game, sgo_name: str, jet_model: list[str] | None = None) -> bytes:
     """The SGO bytes the mission will load for this vehicle (generated ones are made here)."""
     if sgo_name in JETS:
@@ -892,7 +920,8 @@ def vehicle_sgo(game: Game, sgo_name: str, jet_model: list[str] | None = None) -
         return _with_player_recoil(game, sgo_name, data)
     stock = DERIVED.get(sgo_name)
     if stock:
-        return _with_player_recoil(game, sgo_name, as_mission_sgo(game.read('OBJECT', stock + '.SGO')))
+        data = _with_player_heli_motion(game, sgo_name, as_mission_sgo(game.read('OBJECT', stock + '.SGO')))
+        return _with_player_recoil(game, sgo_name, data)
     return game.read('OBJECT', sgo_name.upper() + '.SGO')
 
 

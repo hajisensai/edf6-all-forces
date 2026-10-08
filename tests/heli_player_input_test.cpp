@@ -158,6 +158,50 @@ int main() {
     Pilot& pilot=pilots[0];pilot=Pilot{};pilot.ref=ObjRef::Of(inputVehicle);pilot.lastMs=inputTime;
     pilot.aim[2]=1.0f;pilot.hover=0.424f;
     const float pos[3]={0.0f,0.0f,0.0f},forward[3]={0.0f,0.0f,1.0f},right[3]={-1.0f,0.0f,0.0f};
+    // Actual Root.cpk Heron YG10E request parameters (AWEAPON371) and N9 Eros. Exercise the production
+    // controller through full acceleration/braking, including the original high-damping failure.
+    for(float damp:{0.99f,0.999f}) {
+        const float gain=damp<0.995f ? 90.0f : 80.0f,blend=damp<0.995f ? 0.003f : 0.0003f;
+        const float top=blend*gain/(1.0f-damp*(1.0f-blend));
+        Put<float>(inputVehicle,kSpeedGain,gain);Put<float>(inputVehicle,kBlend,blend);Put<float>(inputVehicle,kDamp,damp);
+        PlayerAssist(inputVehicle);
+        Check(std::fabs(PlayerTop(inputVehicle)-top)<0.01f,"player assist preserves the request's actual top speed");
+        pilot.hold={};pilot.vel[0]=pilot.vel[1]=pilot.vel[2]=0.0f;
+        Put<float>(inputSeat,kSeatLY,-1.0f);
+        for(int frame=0;frame<600;++frame) {
+            AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
+            const float desired=At<float>(inputVehicle,kSpeedGain)*At<float>(inputVehicle,kInForward);
+            pilot.vel[2]=damp*pilot.vel[2]+At<float>(inputVehicle,kBlend)*(desired-damp*pilot.vel[2]);
+        }
+        Check(std::fabs(pilot.hold.speed-top)<0.01f && std::fabs(pilot.vel[2]-top)<0.05f,
+              "held W reaches the real helicopter top speed through the native velocity law");
+        Put<float>(inputSeat,kSeatLY,0.0f);
+        AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
+        Put<float>(inputSeat,kSeatLY,1.0f);
+        for(int frame=0;frame<600;++frame) {
+            AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
+            const float desired=At<float>(inputVehicle,kSpeedGain)*At<float>(inputVehicle,kInForward);
+            pilot.vel[2]=damp*pilot.vel[2]+At<float>(inputVehicle,kBlend)*(desired-damp*pilot.vel[2]);
+        }
+        Check(pilot.hold.speed==0.0f && std::fabs(pilot.vel[2])<0.05f,"held S brakes to hover without reversing");
+        Put<float>(inputVehicle,kInThrottle,0.75f);
+        AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,true,0.0f,1.0f/60.0f,inputTime);
+        Check(pilot.hold.speed==0.0f && At<float>(inputVehicle,kInForward)==0.0f && At<float>(inputVehicle,kInThrottle)==0.75f,
+              "grounded controller leaves the native takeoff throttle and clears forward motion");
+        pilot.groundAt=0;AssistOff(inputVehicle);
+        Check(At<float>(inputVehicle,kSpeedGain)==gain && At<float>(inputVehicle,kBlend)==blend,"leaving restores request parameters");
+        Heli npc{},replica{};
+        inputConfig.heliSpeed=25.0f;inputConfig.heliAgility=4.0f;
+        Tune(npc,inputVehicle);Tune(replica,inputVehicle);
+        const float tuned=npc.params[1]*npc.params[0]/(1.0f-damp*(1.0f-npc.params[1]));
+        Check(std::fabs(tuned-25.0f)<0.01f && npc.top==25.0f,"NPC speed tuning remains valid with high native damping");
+        Check(std::memcmp(npc.params,replica.params,sizeof(npc.params))==0,"replica derives the same physics parameters as authority");
+        inputConfig.heliSpeed=0.0f;Tune(npc,inputVehicle);
+        Check(std::fabs(npc.top-top)<0.01f,"disabled NPC speed tuning reports actual stock speed rather than a fixed estimate");
+    }
+    inputConfig.heliSpeed=25.0f;
+    pilot.hold={};pilot.vel[0]=pilot.vel[1]=pilot.vel[2]=0.0f;
+    Put<float>(inputVehicle,kSpeedGain,20.0f);Put<float>(inputVehicle,kBlend,1.0f);
     // Stock slot 55 has already copied W into movement input. Production AimFly replaces the movement setpoint,
     // then the attitude hook supplies level pitch while keeping the original movement block for translation.
     Put<float>(inputSeat,kSeatLY,-1.0f);

@@ -2243,11 +2243,15 @@ void Tune(Heli& h,const unsigned char* v) noexcept {
     h.params[0]=k;h.params[1]=b;h.params[2]=yaw;h.params[3]=smooth;
     std::memcpy(h.stock,h.params,sizeof(h.stock));
     const float frames=Cfg().heliAgility*60.0f,stockTop=b*k/denom;
+    h.top=stockTop;h.stopDecel=kStopShare*stockTop*denom*60.0f;
     if(Cfg().heliSpeed>stockTop && frames>=30.0f) {
-        const float blend=1.0f-(1.0f-1.0f/frames)/d;   // 1-d*(1-blend) = 1/frames
+        // A strongly damped heli (Heron: d=.99) cannot coast for HeliAgility=4 s with a positive
+        // blend. Keep its quicker stock response instead of abandoning the requested speed.
+        const float useFrames=std::fmin(frames,1.0f/denom);
+        const float blend=1.0f-(1.0f-1.0f/useFrames)/d;   // 1-d*(1-blend) = 1/useFrames
         if(blend>0.0f && blend<1.0f) {
-            h.params[1]=blend;h.params[0]=Cfg().heliSpeed/(frames*blend);
-            h.top=Cfg().heliSpeed;h.stopDecel=kStopShare*h.top/Cfg().heliAgility;h.tuned=true;
+            h.params[1]=blend;h.params[0]=Cfg().heliSpeed/(useFrames*blend);
+            h.top=Cfg().heliSpeed;h.stopDecel=kStopShare*h.top*60.0f/useFrames;h.tuned=true;
         }
     }
     const float yawWant=Cfg().heliYawRate*kPi/180.0f;
