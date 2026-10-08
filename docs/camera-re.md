@@ -387,3 +387,16 @@ EDF.dll TimeDateStamp 0x678CCB46，地址都是 RVA。H = 静态确认，L = 推
 - 副炮另修两处真实对象访问：`VehicleWeaponAim` 内嵌于 seat+0xE0，网络交还与可瞄准检查都不能解引用成 vtable。全圆偏航跨 ±π 时也必须归一化目标、误差和前馈，不能按有限俯仰轴裁掉目标。
 
 离线 `tests/stab_interpolation_test.cpp` 覆盖补偿、反向与跨 ±π 的 330 个插值采样，并确认马达 rate 未被补偿污染；`tests/gunner_aim_object_test.cpp` 直接调用生产副炮函数，在只读 vtable 夹具上验证原生 handoff 指向内嵌对象，以及车后目标跨全圆边界仍可达。没有启动或操控游戏，视觉抖动消失仍需用户实机复测。
+
+
+### 俯瞰弹着点与相机碰撞锚点（2026-10-08）
+
+PR91 的真实弹着点正好位于碰撞面上。`0xFC095` 调用 `0xF6760`：当 look/desired-look 距离小于10米时先查 desired-look→look，再总是查 look→eye。原 `Place` 把实际弹着点同时写进 look 与 desired-look，于是先产生位于地表的零长查询，后一个查询又从同一碰撞面开始。起点命中时按 `hit + normal * cam[0x528]` 修正位置；`0xF5058` 把该距离初始化为 0.1 米。第二段可把 eye 压到落点上方0.1米，朝向变−90°；两点重合时 `0x4E220` 返回单位矩阵。不能把它误判成车辆锚点把镜头拉回，也不是 FOV 或上轮模式 TTL。
+
+俯瞰 `Place` 现在仅把碰撞用 look 沿真实 focus→eye 方向退让此原生距离，eye 和 `Shared.focus` 不变。新 pivot 与实际落点同轴，因此无其他障碍修正时真实落点仍在画面中心；正常原生碰撞仍运行。构造器默认值新增签名检查。普通炮塔、自由观察、Proteus常规镜头不使用此退让，也没有新增滤波。
+
+回归按 Aim → TurretCamFrame → LauncherFrame → Camera → 两段碰撞修正顺序执行，使用与生成器相同的双管榴弹/喀秋莎弹速、重力和寿命。两种高视角稳定性在旧代码失败，修复后通过；物理焦点与零输入始终保持。边界查询是控制的碰撞回复，不能称为已观测到实际 Havok 的起点命中。用户日志21:05与21:07的 high=1一直稳定，而相机约−52.1/−90/0°跳变，与此原生路径一致。
+
+另新增 `TurretCamReadout::aimValid`，只有当前有效且可转炮塔的普通鼠标命令点才置真；物理落点、俯瞰焦点、丢失的相机目标均不能冒充鼠标指向圈。
+
+`tests/highcam_collision_native_audit.py` 对当前EDF.dll完整F6760函数SHA、三个外部边界入口、时间戳与call graph做前置检查，在私有PE映像执行原函数；只替代场景查询、过滤mask与安全cookie边界，不运行DllMain或游戏。40项检查/20次原生执行覆盖地表t=0退化，以及生产0.1米pivot退让在平地、斜面、平移坐标下的稳定性；缺原生文件返回77。

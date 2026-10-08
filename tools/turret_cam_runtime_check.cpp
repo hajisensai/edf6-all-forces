@@ -72,6 +72,20 @@ void Check(bool value,const char* name) {
 void Matrix(void* to,float x=0,float y=0,float z=0) {
     const float m[16]={1,0,0,0,0,1,0,0,0,0,1,0,x,y,z,1};std::memcpy(to,m,sizeof(m));
 }
+float* __fastcall CameraPoint(const void*,float* rows) { Matrix(rows,0,5,-20);return rows; }
+// Query boundary reproduces F6760: native collision pivot, not a vehicle anchor.
+// The native audit executes the same routine privately with these boundary responses.
+void NativeCameraClip(float* eye,float* look,const float* desired,float floor,float margin,int policy) {
+    bool firstHit=false;
+    const auto hit=[&](const float* from,int query,float* corrected) {
+        const bool surface=from[1]<=floor+1e-4f;
+        const bool yes=(query==0 ? policy==2 && surface : policy!=0 && (surface || firstHit));
+        if(yes){corrected[0]=from[0];corrected[1]=floor+margin;corrected[2]=from[2];}
+        return yes;
+    };
+    if(vec::Dist(look,desired)<10)firstHit=hit(desired,0,look);
+    hit(look,1,eye);
+}
 const float* __fastcall Gravity(void*) { static float g[4]={0,-9.8f,0,0};return g; }
 void __fastcall UnexpectedAim(void*,const float*) { Unexpected(); }
 struct Weapon {
@@ -229,6 +243,47 @@ void Run() {
     TurretCamFrame(vehicle);Check(cameraReads==0&&!shared.decoupled,"frame sampler stays off the mounted optic ray");
     mountedOptic=false;owner=0;TurretCamFrame(vehicle);Aim(seat,input,command);
     Check(cameraReads>0 && shared.view,"leaving optic reinitializes the regular view from current camera state");
+    // Full input -> sampled real projectile -> launcher -> camera target -> native collision order.
+    // Only the original camera-locator accessor and the collision query outcomes are stand-ins.
+    unsigned char pointJump[14]={0xff,0x25,0,0,0,0};const auto pointFn=reinterpret_cast<std::uintptr_t>(&CameraPoint);
+    std::memcpy(pointJump+6,&pointFn,8);DWORD protection=0;VirtualProtect(image+kPoint,14,PAGE_EXECUTE_READWRITE,&protection);
+    std::memcpy(image+kPoint,pointJump,14);FlushInstructionCache(GetCurrentProcess(),image+kPoint,14);
+    mountedOptic=false;localHuman=human;lookOk=true;nextAim=&UnexpectedAim;highOn=true;terrain=true;floorY=0;
+    config.highCamHeight=45;config.highCamBack=35;config.highCamPitch=40;
+    Put<float>(seat,kSeatAim+kAimAxes,-tcam::kPi);Put<float>(seat,kSeatAim+kAimAxes+4,tcam::kPi);
+    Put<float>(vehicle,kObjCamLook+4,2);Put<float>(vehicle,kObjCamEye+4,5);Put<float>(vehicle,kObjCamEye+8,-20);
+    for(bool launcher:{false,true}) {
+        ResetTurretCam();lookOk=true;selectedGun=primary.data;game=GameSide{};
+        Put<int>(primary.data,edf::kWeaponMark,launcher ? edf::kMarkLofted : 0);
+        Put<float>(primary.data,edf::kWeaponAmmoSpeed,launcher ? 2.f : 4.f);
+        Put<int>(primary.data,edf::kWeaponAmmoAlive,launcher ? 1500 : 1200);Matrix(primary.bone+edf::kBoneRows,-4,8,10);
+        unsigned char camera[0x700]{};Put<float>(camera,0x528,.1f);
+        Put<float>(camera,kCamEye+4,5);Put<float>(camera,kCamEye+8,-20);Put<float>(camera,kCamLook+4,2);
+        bool stable=true,realFocus=true,inputUnchanged=true;
+        const float wantPitch=-std::atan2(45.f,35.f);
+        for(int frameIndex=0;frameIndex<90;++frameIndex) {
+            const float quietInput[2]{};float output[2]{};Aim(seat,quietInput,output); // native input/aim stage
+            inputUnchanged=inputUnchanged && output[0]==0 && output[1]==0;
+            TurretCamFrame(vehicle);if(launcher)LauncherFrame(vehicle);
+            realFocus=realFocus && shared.focusValid && shared.focusHit && std::fabs(shared.focus[1])<1e-4f;
+            float targets[20]{};targets[1]=2;Camera(seat,targets,camera);
+            auto eye=reinterpret_cast<float*>(camera+kCamEye);auto look=reinterpret_cast<float*>(camera+kCamLook);
+            NativeCameraClip(eye,look,targets,floorY,At<float>(camera,0x528),frameIndex%3);
+            const float delta[3]={look[0]-eye[0],look[1]-eye[1],look[2]-eye[2]};
+            const float pitch=vec::Len(delta)<1e-6f ? 0 : tcam::PitchOf(delta);
+            if(frameIndex>20)stable=stable && std::fabs(pitch-wantPitch)<1e-4f;
+        }
+        Check(inputUnchanged,"high camera closed loop never generates native gun input from observation");
+        Check(realFocus,"collision pivot must not change the real ballistic terrain focus");
+        Check(stable,launcher ? "Katyusha high camera remains stable after native surface collision" : "twin artillery high camera remains stable after native surface collision");
+    }
+    Shared intent=shared;intent.high=false;intent.decoupled=true;intent.physicalOnly=false;
+    const float commandPoint[3]={0,3,250};
+    Readout(seat,intent,false,commandPoint,false,true);Check(out.r.aimValid,"valid normal mouse intent is published independently of hit/on-target status");
+    Readout(seat,intent,false,commandPoint,false,false);Check(!out.r.aimValid,"missing current camera target cannot publish stale mouse intent");
+    intent.physicalOnly=true;Readout(seat,intent,false,commandPoint,false,true);Check(!out.r.aimValid,"fixed gun physical endpoint is not a movable command circle");
+    intent.physicalOnly=false;intent.high=true;Readout(seat,intent,false,commandPoint,false,true);Check(!out.r.aimValid,"high camera ballistic focus is not mouse intent");
+    DWORD ignored=0;VirtualProtect(image+kPoint,14,protection,&ignored);
     image=nullptr;
 }
 }  // namespace

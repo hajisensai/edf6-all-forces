@@ -968,3 +968,6 @@ set_tests_properties(proteus_weapon_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME vehicle_optics_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/vehicle_optics_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(vehicle_optics_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME optic_install_integration COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/optic_install_integration_test.py")
+
+add_test(NAME highcam_collision_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/highcam_collision_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(highcam_collision_native PROPERTIES SKIP_RETURN_CODE 77)
