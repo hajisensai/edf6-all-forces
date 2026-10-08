@@ -1,13 +1,20 @@
-// Accounts come from one secret, ACCOUNTS = "user:password:role,user2:password2:role" (role tester or dev).
+// Accounts come from one secret, ACCOUNTS = "user:password:role[:group],..." (role tester or dev). The group decides
+// whose level proposals and outline an account sees (src/plan.js); no group = the shared ungrouped one.
 // The browser keeps a signed cookie user.expiry.hmac; scripts and the installer send HTTP Basic.
+
+export const GROUP = /^[\p{L}\p{N}_-]{0,32}$/u;
 
 export function parseAccounts(text) {
   const out = new Map();
   for (const part of String(text).split(',')) {
-    const [user, pass, role] = part.trim().split(':');
-    if (user && pass) out.set(user, { user, pass, role: role === 'dev' ? 'dev' : 'tester' });
+    const [user, pass, role, group = ''] = part.trim().split(':');
+    if (user && pass) out.set(user, { user, pass, role: role === 'dev' ? 'dev' : 'tester', group: GROUP.test(group) ? group : '' });
   }
   return out;
+}
+
+function who(a) {
+  return { user: a.user, role: a.role, group: a.group };
 }
 
 function same(a, b) {
@@ -20,7 +27,7 @@ function same(a, b) {
 
 export function checkLogin(accounts, user, pass) {
   const a = accounts.get(user);
-  return a && same(a.pass, pass) ? { user: a.user, role: a.role } : null;
+  return a && same(a.pass, pass) ? who(a) : null;
 }
 
 export function basicUser(header) {
@@ -53,5 +60,5 @@ export async function readSession(cookieHeader, secret, accounts, now = Date.now
   if (!user || !expires || !sig || Number(expires) < now) return null;
   const a = accounts.get(decodeURIComponent(user));
   if (!a || !same(sig, await hmac(secret + '|' + a.pass, `${user}.${expires}`))) return null;
-  return { user: a.user, role: a.role };
+  return who(a);
 }

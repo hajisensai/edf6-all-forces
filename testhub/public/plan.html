@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>全军出击关卡策划</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main>
+  <header class="top">
+    <h1>EDF 全军出击 · 关卡策划</h1>
+    <nav><a href="/">测试</a> · <b>关卡策划</b></nav>
+    <span class="me"><span id="me"></span> · <a href="/logout">退出</a></span>
+  </header>
+  <p id="groupBar" class="row hide"><label for="group" class="inline">查看哪个组</label><select id="group"></select></p>
+  <p id="error" class="err hide"></p>
+
+  <section>
+    <h2>1. 关卡大纲</h2>
+    <p class="muted">
+      原版关卡按游戏里的顺序排（EDF6 在前，EDF5 战役在后），可以移动，不能删除。新关卡要先在下面写一条「新关卡」意见，再放进大纲。
+      轮回分隔线下面的关卡算下一个轮回。同组的人看到和改的是同一份大纲。
+    </p>
+    <div class="row tools">
+      <button class="btn ghost" id="addLoop" type="button">插入轮回分隔线</button>
+      <select id="newPick"></select>
+      <button class="btn ghost" id="addNew" type="button">把这个新关卡放进大纲</button>
+      <input type="text" id="filter" placeholder="筛选：关卡名或编号">
+    </div>
+    <p id="pending" class="pending hide"><span id="pendingText"></span> <button class="btn ghost" id="cancel" type="button">取消</button></p>
+    <ol id="outline" class="outline"></ol>
+  </section>
+
+  <section>
+    <h2 id="formTitle">2. 写意见</h2>
+    <form id="form">
+      <div class="choices">
+        <label><input type="radio" name="kind" value="edit" checked>修改原版关卡</label>
+        <label><input type="radio" name="kind" value="new">新关卡</label>
+      </div>
+      <div id="missionRow">
+        <label for="mission">哪一关</label>
+        <select id="mission"></select>
+      </div>
+      <label for="ptitle">标题</label>
+      <input type="text" id="ptitle" maxlength="100" required placeholder="一句话说清楚，例：第 3 波蚂蚁改成从背后出来">
+      <label for="pbody">具体想法</label>
+      <textarea id="pbody" maxlength="10000" placeholder="什么时候出什么怪、从哪来、干什么、为什么这么改……纯文字就行。"></textarea>
+      <p class="row"><button class="btn" id="send" type="submit">提交</button>
+        <button class="btn ghost hide" id="cancelEdit" type="button">取消编辑</button><span id="sendState" class="muted"></span></p>
+    </form>
+  </section>
+
+  <section>
+    <h2>3. 大家的意见</h2>
+    <div class="row tools">
+      <select id="show"></select>
+    </div>
+    <div id="proposals" class="muted">加载中……</div>
+  </section>
+</main>
+<script src="/plan.js"></script>
+</body>
+</html>

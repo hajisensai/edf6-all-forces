@@ -52,3 +52,24 @@ progress { width: 100%; }
 .err { color: var(--bad); }
 .hide { display: none; }
 .hash, .files a, .report .muted { overflow-wrap: anywhere; word-break: break-all; }
+header.top nav { font-size: 14px; }
+label.inline { display: inline; margin: 0; }
+.tools { margin: 8px 0; }
+.tools input[type=text], .tools select { width: auto; flex: 1 1 200px; }
+.btn.small { padding: 3px 9px; font-size: 13px; }
+select.small { width: auto; padding: 2px 6px; font-size: 13px; }
+.pending { border: 1px dashed var(--accent); border-radius: 7px; padding: 6px 10px; }
+.outline { list-style: none; padding: 0; margin: 8px 0 0; }
+.outline li { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; padding: 6px 4px; border-top: 1px solid var(--line); }
+.outline li .acts { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+.outline .seq { min-width: 2.5em; color: var(--muted); font-variant-numeric: tabular-nums; }
+.outline .loop { background: var(--code); font-weight: 600; color: var(--warn); border-radius: 6px; }
+.outline .new { background: color-mix(in srgb, var(--ok) 10%, transparent); }
+.outline .slot { border-top: 0; padding: 2px 4px; }
+.tag { display: inline-block; font-size: 12px; padding: 0 6px; border-radius: 4px; background: var(--code); color: var(--muted); }
+.tag.new { color: var(--ok); } .tag.edit { color: var(--accent); }
+.bad { color: var(--bad); font-size: 13px; }
+.report h3 { font-size: 15px; margin: 6px 0 0; overflow-wrap: anywhere; }
+.reply { border-left: 3px solid var(--line); padding: 2px 10px; margin: 6px 0; }
+.replyBox { min-height: 44px; flex: 1 1 260px; width: auto; }
+.p-open { color: var(--info); } .p-accepted { color: var(--warn); } .p-done { color: var(--ok); } .p-rejected { color: var(--muted); }
