@@ -2,7 +2,7 @@
 src/payload.cpp, src/stores.cpp, docs/stock-payload-re.md §4). The user, 2026-10-07: "给载具应有的多种挂载增加多种挂载。
 例如原版坦克、aa车、直升机等" "应该有的都得有，比如导弹车". What each stock vehicle should carry besides its own (LOADOUTS):
 
-  tanks (Blacker 505, Varius 601) and the Grape    a coaxial machine gun and gun-launched AGM-114s, from the main gun
+  tanks (Blacker 505, Varius 601) and the Grape    gun-launched AGM-114s, from the main gun
   Epsilon railgun 403                              AGM-114s from the railgun (its two gunners keep their machine guns)
   Titan 404                                        AGM-114s on the driver's second control, beside the front gatling
   Naegling missile launcher 402                    AIM-120 for air defence, AGM-65 for armour, a Hydra 70 pod
@@ -10,9 +10,9 @@ src/payload.cpp, src/stores.cpp, docs/stock-payload-re.md §4). The user, 2026-1
   Freed bikes 503 / 613                            a Hydra 70 pod
   N9 Eros 506 / Heron 602 / Nereid 409             a Hydra 70 pod, AGM-114s and AIM-9X beside the stock missile
 
-The stores are the jets' (pylib/vcobjects.py STORES, the files tools/make_jets.py writes) and one file of this tool's:
-EDF6VC_COAX_MG.SGO, the 403's machine gun under the plugin's name (src/stores.cpp IsLoadoutWeapon tells the stores by
-their EDF6VC_ files). Each hangs on the bone and seat of the stock holder it fires beside (Mount.like): the switch
+The stores are the jets' (pylib/vcobjects.py STORES, the files tools/make_jets.py writes).
+The old invented coaxial gun is removed: these models have no independent machine-gun mount.
+The original 403/Titan machine guns stay on their existing stock mounts. Each hangs on the bone and seat of the stock holder it fires beside (Mount.like): the switch
 (PlayerJetSwitchKey R, pad LB) goes round that holder's control's stock weapon and the stores, and that control fires
 the one picked (src/payload.cpp). Into <game>/Mods:
 
@@ -21,7 +21,6 @@ the one picked (src/payload.cpp). Into <game>/Mods:
   Mods/WEAPON/<REQUEST>.SGO                 each stock request (Root.cpk WEAPON) that brings one of them: the same file
                                             with that vehicle, its weapon list the stores after the stock ones, and the
                                             stores among the files it preloads
-  Mods/WEAPON/EDF6VC_COAX_MG.SGO            the coaxial machine gun
 
 Only these copies change: the stock vehicles keep their files (a mission's own vehicles, another mod's requests that
 name them are as they were), and the weapon table is not touched (the requests keep their names and rows). A request
@@ -58,7 +57,6 @@ OWNER = 'stockstores'   # pylib/ledger.py
 INI_KEY = 'StockVehicleStores'
 INI_KEYS = (INI_KEY, 'StockHeliStores')   # the older key (the helicopters alone, before 2026-10-07) still turns it on
 COAX_MG = 'EDF6VC_COAX_MG.SGO'
-COAX_STOCK = 'V_403TANK_MACHINEGUN.SGO'
 
 
 @dataclass(frozen=True)
@@ -73,12 +71,13 @@ def _store(kind: str, rounds: int, like: int) -> Mount:
     return Mount(vc.store_file(kind, rounds), like)
 
 
-# The per-weapon parameters of a store's entry in the weapon list: the recoil (two numbers, or a named one) the stock
-# lists give each weapon; a missile or rocket pod none, the machine gun the 403's own.
-PARAMS: dict[str, list] = {COAX_MG: ['AimRecoil', [0.0, 0.0026000000070780516]]}
+# All added stores are recoilless rockets/missiles. Keep the BodyRecoil variant,
+# even at zero strength: the 505/601/Car callbacks require that variant and
+# dereference its payload without a null check. The 403's named AimRecoil is
+# exclusive to its existing gunner mounts (slot 48 branches on the seat index).
 NO_RECOIL = [0.0, 0.0]
 
-_TANK = (Mount(COAX_MG, 0), _store('AGM_L', 4, 0))
+_TANK = (_store('AGM_L', 4, 0),)
 _HELI = (_store('RKT', 19, 2), _store('AGM_L', 4, 2), _store('AAM_S', 2, 2))   # beside the 506's missile (holder 2)
 LOADOUTS: dict[str, tuple[Mount, ...]] = {
     'V506_HELI': _HELI,
@@ -130,7 +129,9 @@ def store_files() -> list[str]:
 
 
 def _params(m: Mount) -> list:
-    return copy.deepcopy(PARAMS.get(m.weapon, NO_RECOIL))
+    if m.weapon == COAX_MG:
+        raise ValueError('旧同轴机枪没有独立模型挂点；不可重新挂到主炮口')
+    return copy.deepcopy(NO_RECOIL)
 
 
 def _node(v: object) -> object:
@@ -302,8 +303,11 @@ def check(files: dict[str, bytes], rows: dict[str, int]) -> None:
         assert len(weapons) == rows[stem] + len(LOADOUTS[stem]), (rel, len(weapons))
         assert vehicle in holders or not holders, (rel, vehicle)
         assert [w[0] for w in weapons[rows[stem]:]] == store_paths(stem), rel
+        for w in weapons[rows[stem]:]:
+            assert w[1] == NO_RECOIL, (rel, 'added stores require zero BodyRecoil', w)
         assert entry[2] in d['resource'] and all(p in d['resource'] for p in store_paths(stem)), rel
     assert all(m.weapon.upper().startswith('EDF6VC_') for load in LOADOUTS.values() for m in load)
+    assert all(m.weapon != COAX_MG for load in LOADOUTS.values() for m in load), 'no independent coaxial-gun mount'
 
 
 def requests(game: vc.Game) -> list[str]:
@@ -349,8 +353,6 @@ def build(root: str, overlay: dict[str, bytes] | None = None
         stems.add(stem)
     for stem in sorted(stems):
         out[f'OBJECT/{derived_name(stem)}'] = derived_vehicle(game, stem)
-    if any(m.weapon == COAX_MG for stem in stems for m in LOADOUTS[stem]):
-        out[f'WEAPON/{COAX_MG}'] = game.read('WEAPON', COAX_STOCK)
     check({**out, **handed}, rows)
     return out, skipped, handed
 
