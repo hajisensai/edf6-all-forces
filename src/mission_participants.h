@@ -9,4 +9,9 @@ struct ObjRef;
 // Failure clears both counts: never use a truncated/partially loaded roster as a quorum.
 bool ReadMissionParticipants(void** puids,unsigned capacity,unsigned* count,unsigned* expectedPlayers) noexcept;
 bool MissionParticipantCreationsMatch(const ObjRef* createdByIndex,unsigned expectedPlayers) noexcept;
+// Native Network_SetLocation state, usable from plugin initialization onward:
+// 0 booting, 1 boot complete, 2 lobby menu, 3 room menu, 4 playing, 5 loading.
+// Root MainScript sets 5 BEFORE loading and 3 AFTER scene release + Network_Session_End.
+// May be read from EOS or game thread: atomic aligned volatile state/lock loads and manager identity recheck.
+bool ReadNativeMissionLocation(unsigned* location) noexcept;
 }

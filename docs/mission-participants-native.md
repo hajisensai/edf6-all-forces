@@ -81,3 +81,30 @@ prove that a new-world actor replaced a previous scene's lingering actor.
 
 These are private fixtures, not a real EOS room, complete player constructor, scene
 transition, death/revival game session or live multiplayer validation.
+
+## Verified loading and return-to-room state
+
+The actual installed `MAINSCRIPT/MAINSCRIPT.AS` has a `PlayMission_Common()` sequence:
+
+1. `Network_SetLocation(GAME_LOADING)` before synchronization/resource loading and `Mission()`.
+2. `Mission()` retry loop, then scene resource release, result processing, and `Network_Session_End()`.
+3. `Network_SetLocation(MENU_ROOM)` after session end. Initial Room/Lobby routines also explicitly set
+   `MENU_ROOM`/`MENU_LOBBY`; this is available before the first mission preload.
+
+`MAINSCRIPT/COMMONTYPES.H` defines `NetworkLocation`: booting 0, boot complete 1,
+lobby menu 2, room menu 3, playing 4, loading 5. The script registration at `71E0B2`
+binds `void Network_SetLocation(int)` to native `70F500`. That method takes state in
+EDX, obtains `*(EDF+20B2AC8)` at `70F51A`, locks `manager+1644`, writes `manager+1640`
+at `70F566`, then releases the lock.
+
+`ReadNativeMissionLocation` checks these exact load/store signatures, performs aligned
+volatile reads of the global manager pointer, lock and state, and rechecks lock/pointer
+before returning. A locked, unreadable or unknown value fails closed; it never calls the
+setter or writes game state. It can be polled from the EOS thread without enumerating
+actor registries. It supplies native location only: playing does not imply a sealed
+support cohort; menu states and loading transitions must update the transport's own
+admission state and invalidate old rosters/epochs appropriately.
+
+The native audit executes `70F500` in a private mapping with an uncontended fake manager
+for all six values and reads the real Root scripts to assert the enum and the load/return
+ordering. Together with the previous three native checks, that is ten native/script checks.

@@ -67,4 +67,34 @@ print('PASS native upper caller accepts empty weak output without dereferencing 
 ptr(C.addressof(weak),C.addressof(actors[0]));ptr(C.addressof(weak)+8,C.addressof(ctrl));C.c_long.from_buffer(ctrl,8).value=1
 assert consume(C.addressof(weak))==C.addressof(actors[0]) and C.c_long.from_buffer(ctrl,8).value==2
 print('PASS native upper caller preserves successful weak lock and increments its strong count once')
-print('3 native checks passed; no live scene, EOS or constructor execution')
+
+# The actual AS-bound Network_SetLocation(void* context,int location) stores its EDX value
+# under the network manager's spin lock. An uncontended private manager needs no imports.
+assert pe.get_data(0x70F51A,7)==bytes.fromhex('488b35a7359a01')
+assert pe.get_data(0x70F566,6)==bytes.fromhex('89ae40160000')
+network=C.create_string_buffer(0x1650)
+old=C.c_uint();assert k.VirtualProtect(base+0x20B2AC8,8,4,C.byref(old))
+ptr(base+0x20B2AC8,C.addressof(network))
+set_location=C.WINFUNCTYPE(None,C.c_void_p,C.c_int)(base+0x70F500)
+for phase in range(6):
+    set_location(None,phase)
+    assert C.c_uint32.from_buffer(network,0x1640).value==phase
+    assert C.c_long.from_buffer(network,0x1644).value==0
+print('PASS native Network_SetLocation: all six states stored exactly and lock released')
+root=a.edf_dll.parent/'Root.cpk'
+if root.is_file():
+    sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'pylib'))
+    from rootcpk import Game
+    game=Game(str(root.parent))
+    script=game.read('MAINSCRIPT','MAINSCRIPT.AS').decode('utf-8',errors='replace')
+    types=game.read('MAINSCRIPT','COMMONTYPES.H').decode('utf-8',errors='replace')
+    common=script.split('int PlayMission_Common()',1)[1].split('string PlayMission_Offline()',1)[0]
+    assert common.index('Network_SetLocation(GAME_LOADING)')<common.index('result = Mission()')
+    assert common.index('result = Mission()')<common.index('Network_Session_End()')<common.index('Network_SetLocation(MENU_ROOM)')
+    names=('BOOTING = 0','BOOT_COMPLETE','MENU_LOBBY','MENU_ROOM','GAME_PLAYING','GAME_LOADING')
+    enum=types.split('enum NetworkLocation',1)[1].split('};',1)[0]
+    assert sorted(enum.index(name) for name in names)==[enum.index(name) for name in names]
+    print('PASS actual Root MainScript: loading before Mission, room only after session end; native enum 0..5')
+else:
+    raise RuntimeError('Root.cpk required to verify mission-end and location enum semantics')
+print('10 native/script checks passed; no live scene, EOS or constructor execution')

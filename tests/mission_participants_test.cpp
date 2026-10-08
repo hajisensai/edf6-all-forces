@@ -54,5 +54,21 @@ int main() {
     Check(!MissionParticipantCreationsMatch(nullptr,2),"missing creation ledger rejected");
     unsigned count=9,expected=9;
     Check(!ReadMissionParticipants(nullptr,8,&count,&expected) && !count && !expected,"failure clears output counts");
+    image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x20C0000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
+    Check(image!=nullptr,"private native-location image");
+    std::memcpy(image+kLocationSetter+0x1A,kLocationLoad,sizeof(kLocationLoad));
+    std::memcpy(image+kLocationSetter+0x66,kLocationStore,sizeof(kLocationStore));
+    unsigned char network[0x1650]{};Put<void*>(image,kNetworkManager,network);
+    for(unsigned phase=0;phase<=5;++phase) {
+        Put<unsigned>(network,0x1640,phase);unsigned observed=99;
+        Check(ReadNativeMissionLocation(&observed) && observed==phase,"native boot/lobby/room/playing/loading state read exactly");
+    }
+    Put<LONG>(network,0x1644,-1);unsigned observed=99;
+    Check(!ReadNativeMissionLocation(&observed) && observed==99,"in-progress native state write is not advertised");
+    Put<LONG>(network,0x1644,0);Put<unsigned>(network,0x1640,6);
+    Check(!ReadNativeMissionLocation(&observed),"unknown location cannot be treated as lobby");
+    image[kLocationSetter+0x66]^=1;
+    Check(!ReadNativeMissionLocation(&observed),"unsupported setter layout fails closed");
+    VirtualFree(image,0,MEM_RELEASE);
     std::printf("mission_participants_test: %d checks passed\n",checks);
 }

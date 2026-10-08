@@ -5,6 +5,9 @@
 namespace crew {
 namespace mission_participants {
 constexpr unsigned kEnumAllTeams=0x5E0C80,kTeamManager=0x20B2978,kGameStatus=0x20B2890;
+constexpr unsigned kLocationSetter=0x70F500,kNetworkManager=0x20B2AC8;
+constexpr unsigned char kLocationLoad[]={0x48,0x8B,0x35,0xA7,0x35,0x9A,0x01}; // 70F51A: global network manager
+constexpr unsigned char kLocationStore[]={0x89,0xAE,0x40,0x16,0,0}; // 70F566: state from EDX/EBP
 constexpr unsigned kMaxActors=1024;
 constexpr unsigned char kEnumSignature[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C,0x24,0x18,0x56,0x57,0x41,0x56,0x48,0x83};
 using WalkFn=void(__fastcall*)(void*,void*);
@@ -85,5 +88,24 @@ bool MissionParticipantCreationsMatch(const ObjRef* created,unsigned expected) n
     unsigned count=0,nativeExpected=0;
     return ReadMissionParticipantsChecked(puids,expected,&count,&nativeExpected,created,expected) &&
         count==expected && nativeExpected==expected;
+}
+bool ReadNativeMissionLocation(unsigned* location) noexcept {
+    using namespace mission_participants;
+    if(!location)return false;
+    __try {
+        if(!Matches(kLocationSetter+0x1A,kLocationLoad,sizeof(kLocationLoad)) ||
+           !Matches(kLocationSetter+0x66,kLocationStore,sizeof(kLocationStore)))return false;
+        const auto managerSlot=reinterpret_cast<const unsigned char* const volatile*>(image+kNetworkManager);
+        const auto mgr=*managerSlot;
+        if(!Readable(mgr,0x1648))return false;
+        const auto lock=reinterpret_cast<const volatile LONG*>(mgr+0x1644);
+        const auto state=reinterpret_cast<const volatile unsigned*>(mgr+0x1640);
+        // Aligned x64 loads are atomic. Volatile prevents folding/reordering the lock and identity
+        // observations when the EOS thread polls while the game thread calls Network_SetLocation.
+        if(*lock!=0)return false;
+        const unsigned value=*state;
+        if(value>5 || *lock!=0 || *managerSlot!=mgr)return false;
+        *location=value;return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 }
