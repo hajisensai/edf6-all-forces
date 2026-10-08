@@ -3568,7 +3568,7 @@ void MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float
         if(!(r[i].x1>r[i].x0))continue;   // no room for its row
         const bool command=i<static_cast<int>(Id::formation),squadTool=i>=static_cast<int>(Id::formation) && i<static_cast<int>(Id::sweep);
         const bool enabled=command ? (c.allowed && (c.allowedOrders&(1u<<static_cast<unsigned>(kCommandOrder[i])))) ||
-            (i==static_cast<int>(Id::guard) && c.guardArmed) : squadTool ? c.allowed && c.selectedSquads>0 : true;
+            (i==static_cast<int>(Id::guard) && c.guardArmed) : squadTool ? c.allowed && c.squadToolsAllowed && c.selectedSquads>0 : true;
         const bool lit=(i==static_cast<int>(Id::guard) && c.guardArmed) || (i==static_cast<int>(Id::sweep) && c.sweepOn) ||
                        (i==static_cast<int>(Id::health) && c.healthOn) || (i==static_cast<int>(Id::supportCall) && c.supportArmed);
         Rect(drawer,ctx,r[i].x0,r[i].y0,r[i].x1,r[i].y1,lit ? kBtnLit : kBtnFill);

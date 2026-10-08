@@ -349,7 +349,7 @@ void Dot(float x,float y,float z,std::uint8_t flags) {
 }
 // The map at `height` m, looking `pitchDeg` down along heading `yawDeg`, round a player at the origin with the squad,
 // two tanks, a heli, a jet, a carrier, a spread of enemies (some airborne) and two objective markers.
-void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pitchDeg,float yawDeg,bool pad,int squadCount=4,int width=1920,float uiScale=1.0f,bool payload=false,bool vehicleOnly=false) {
+void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pitchDeg,float yawDeg,bool pad,int squadCount=4,int width=1920,float uiScale=1.0f,bool payload=false,bool vehicleOnly=false,bool online=false) {
     const float previousScale=config.hudScale;config.hudScale=uiScale;
     hasMapPayload=payload;sceneMapPayload=PayloadReadout{};
     if(payload){sceneMapPayload.count=kMostPayload;sceneMapPayload.selectionToken=111;sceneMapPayload.seat=1;
@@ -385,7 +385,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     // 30 m apart; the heli guarding the same point (helis share its orbit); the jet following the player; a box being
     // dragged (Ctrl + left drag) round the crawlers to the pointer; the last command's word.
     sceneCmd=MapCommandReadout{};
-    sceneCmd.allowed=true;sceneCmd.allowedOrders=(1u<<9)-1;sceneCmd.selectedSquads=1;sceneCmd.pointOk=true;sceneCmd.pointer=!pad;
+    sceneCmd.allowed=true;sceneCmd.allowedOrders=(1u<<9)-1;sceneCmd.selectedSquads=1;sceneCmd.squadToolsAllowed=!online;sceneCmd.pointOk=true;sceneCmd.pointer=!pad;
     sceneCmd.px=1250.0f;sceneCmd.py=560.0f;sceneCmd.boxing=!pad;sceneCmd.bx=820.0f;sceneCmd.by=360.0f;
     auto cmdUnit=[](const float* pos,bool air,const char* name,Order order,const float* at,bool selected){
         CmdMark& c=sceneCmd.unit[sceneCmd.count++];
@@ -488,6 +488,16 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         const SquadRow& r=sceneCmd.squad[i];wchar_t kind[32],status[32];
         hudtext::WordTo(r.name,kind,_countof(kind));MapSquadStatus(r,status,_countof(status));
         Line expected{};Format(expected,L"%d  %ls x%d   %ls   %ls",i+1,kind,r.alive,status,MapOrderWord(r.now.order));shown(expected.text);
+    }
+    if(online && !pad) {
+        bool board=false;
+        for(int i=0;i<sceneButtons;++i) {
+            board=board || sceneButtonId[i]==static_cast<int>(mapbtn::Id::board);
+            if(sceneButtonId[i]>=static_cast<int>(mapbtn::Id::formation) && sceneButtonId[i]<=static_cast<int>(mapbtn::Id::merge)) {
+                ++textFailed;std::puts("FAIL unsupported online squad editor is clickable");
+            }
+        }
+        if(!board){++textFailed;std::puts("FAIL online basic boarding command was hidden");}
     }
     if(vehicleOnly) {
         for(int i=0;i<sceneButtons;++i)if(sceneButtonId[i]==static_cast<int>(mapbtn::Id::board) || sceneButtonId[i]==static_cast<int>(mapbtn::Id::engage)) {
@@ -1514,6 +1524,7 @@ int Scenes(const std::wstring& dir) {
     MapScene(dir,L"map_clickable_payload_narrow",700.0f,60.0f,20.0f,false,9,960,1.75f,true);
     MapScene(dir,L"map_clickable_payload_4x3",700.0f,60.0f,20.0f,false,9,1440,2.0f,true);
     MapScene(dir,L"map_vehicle_only_controls",700.0f,60.0f,20.0f,false,9,1440,1.5f,true,true);
+    MapScene(dir,L"map_online_controls",700.0f,60.0f,20.0f,false,9,1920,1.0f,true,false,true);
     StockTank(ground);
     failed+=!MapDrawsMapAlone(ground,sceneStock.hull);
     hasStock=false;

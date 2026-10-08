@@ -4160,7 +4160,7 @@ def map_commands_wired() -> None:
     assert 'const float* leader=r.cmd.order==Order::guard ? r.cmd.at : hasLeader ? player.pos : nullptr;' in ground
     cmd = heli.split('bool HeliCommand(const void* vehicle,const Command& c)', 1)[1].split('\n}\n', 1)[0]
     assert 'h->guard=true;' in cmd and 'h->orbitSet=false;' in cmd and 'h->guard=h->ownGuard;' in cmd
-    for key in ('Ctrl', 'Shift', 'Tab', 'G', 'V', 'X', 'OFFLINE ONLY', '框选'):
+    for key in ('Ctrl', 'Shift', 'Tab', 'G', 'V', 'X', '联机指令', '框选'):
         assert key in readme, key
     assert '指挥 NPC' in readme
 
