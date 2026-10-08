@@ -172,11 +172,11 @@ class GameAssets(unittest.TestCase):
             x, y, z = struct.unpack_from('<3f', mab, at)
             self.assertAlmostEqual(x, hull[1][0] + vc.DOOR_OUT, places=3)
             self.assertLess(x, full[1][0] - 20)
-            self.assertAlmostEqual(y, -full[1][1], places=3)
-            self.assertAlmostEqual(z, 1.8, places=3)
-            # The doorway is in mdl's frame, while model/collision samples are
-            # in the hull frame. Applying the true full centre returns y=0.
-            self.assertAlmostEqual(y + full[0][1], 0, places=3)
+            self.assertAlmostEqual(y, full[0][1] - full[1][1], places=3)
+            self.assertAlmostEqual(z, full[0][2] + 1.8, places=3)
+            # Model update receives the origin AFTER native phase 1 removes
+            # the physics centre. Subtracting the half-height again buries it.
+            self.assertAlmostEqual(y, 0, places=3)
 
     def test_low_wings_keep_door_outside_the_wings(self):
         import vcobjects as vc

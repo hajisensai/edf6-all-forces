@@ -64,9 +64,11 @@ class Jet:
     # stock heli's rig fitted by seat_camera: a jet's camera must see over the plane, a mech's looks past its shoulder at
     # its back (place_seat_camera / check_seat_camera).
     seat_camera: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None
-    # Where the MAB's locators (door, seat camera) are measured from (mdl_at): False, the collision box's centre (every
-    # jet's `mdl`, DoorLog); True, the model's origin (the Sazabi's `mdl` lands at its soles: its frames log, 2026-10-07).
-    locators_on_origin: bool = False
+    # MAB locators are measured from the render/model origin: native phase 1
+    # subtracts the physics centre before SetModelWorld. InputHook sees the
+    # temporary centre; a DoorLog relative to object position cannot distinguish
+    # these phases. False remains an explicit centre-frame override for callers.
+    locators_on_origin: bool = True
 
 
 # Jets (src/jet.cpp, docs/jet-model-re.md): the V506 heli body (rigid body, HP, weapons, crash) with the
@@ -623,12 +625,12 @@ def on_origin(box) -> list[list[float]]:
 # was 4.9 m in from its fuselage box's side at the ground (no prompt anywhere round it: 「空母缺少登机口」, 2026-10-05),
 # a player jet's 10 m in from its whole-model box. move_door puts it where the stock heli has its own: on the ground,
 # DOOR_OUT m outside the box's right side (+x, the V506's side), at the stock door's z (within the box's length).
-# `mdl` is the vehicle's position, the collision box's centre (seat_camera: the DOOR log, 2026-10-06), not the model's
-# origin as first thought (§12 put the door at y 0 on `mdl`: 8.52 m over the ground on the carrier, 1.38 m on the
-# fighter; the carrier was boarded only through the plugin's own board hook, the stock prompt found no door in reach).
-# So the door is placed in the box's own frame: at its bottom (-hy: the ground it stands on, a box reaching under its
-# model's origin included, once it has landed), DOOR_OUT m outside its right side (hx), at the stock door's z within its
-# length (docs/player-jet-re.md §15). Its radius makes it reachable from DOOR_STEP m across the ground, from the human's
+# Native 652630 subtracts the rigid centre, then 62E7D0 -> 1100B90 sets mdl's world
+# to that model origin. A door on the box bottom therefore has local y=cy-hy,
+# not -hy. The old centre assumption buried the carrier's door by 8.516 m; the
+# native callback/model/locator regression executes the full coordinate chain.
+# The door is DOOR_OUT outside the accessible right side, at the stock z within
+# its length. Its radius makes it reachable from DOOR_STEP across the ground, from the human's
 # feet or HUMAN_HEIGHT over them (which of the two its position is, is not settled). The stock radius is never cut.
 # With a mesh-derived compound, a high wing's full-span box no longer blocks a person under it. walkup_box moves
 # that doorway beside the fuselage only after checking the entire approach against the actual collision cells.
@@ -789,17 +791,11 @@ def check_door(data: bytes, mdl=None, access_box=None) -> None:
 
 
 # The seat camera (docs/camera-re.md §3b, docs/player-jet-re.md §14). Riding, the game's camera is seat 0's MAB camera
-# locator (the eye, vehicle_riding_position[0][2][0], `カメラ１`) looking at the locator its own SGO names LookTarget
-# (`カメラ１注目`); both hang on the V506's root bone `mdl`. On a 506 `mdl` is the vehicle's position, the collision box's
-# centre (heli_rigid_body[0]), not the model's origin: the game logged the parked carrier's door, a locator on `mdl` at
-# (30.30, 0, 1.8), at exactly (30.30, -0.00, 1.80) from its centre (crew.cpp DoorLog, 2026-10-06 14:56:51), the fighter's
-# (8.65, 0, 1.8) the same, while the drawn model's mesh bone is 1.38 / 2.12 m under it (booster.cpp FLAME): the model's
-# origin is the centre less heli_rigid_body[0]. The stock rig (eye (0, 5.4, -14.45), look (0, 2.75, 1.1) off `mdl`) was
-# made for the 13.6 m heli; on the 77 m, 17 m high carrier it is 8.5 m over the model's origin, its eye inside the hull
-# (the user, 2026-10-06: 「空母的视角在空母底下」). seat_camera keeps the stock rig wherever its eye is outside the model
-# (every other jet) and otherwise scales it with the model: the stock rig in the heli's model frame (its box centre plus
-# the offsets) times the model's length over the heli's, so the camera frames the plane as the stock camera frames the
-# heli; check_camera re-reads it.
+# locator (the eye, vehicle_riding_position[0][2][0], `カメラ１`) looking at its LookTarget
+# (`カメラ１注目`); both hang on `mdl`, the model origin after native phase 1.
+# The stock rig (eye (0,5.4,-14.45), look (0,2.75,1.1)) is inside the 77 m carrier.
+# Keep an outside stock eye, otherwise scale the original rig by model length.
+# fit_camera/check_camera use the same explicit locator frame as the door.
 CAMERA_LOOK_KEY = 'LookTarget'
 Bounds = tuple[tuple[float, float, float], tuple[float, float, float]]   # (min xyz, max xyz) in the model's frame
 
@@ -862,14 +858,18 @@ def seat_camera(eye, look, centre, bounds: Bounds, heli: Bounds, heli_centre) ->
             [round(s * (heli_centre[i] + look[i]) - centre[i], 3) for i in range(3)])
 
 
-def fit_camera(m: dict, box, bounds: Bounds, heli: Bounds, heli_centre) -> None:
+def fit_camera(m: dict, box, bounds: Bounds, heli: Bounds, heli_centre, mdl=None) -> None:
     """`m` (a jet SGO's values, collision box `box` [centre, half extents], model `bounds`) with its seat camera moved by
     seat_camera."""
     mab = bytearray(m['animation_model'][2])
     eye_name, look_name = camera_names(m)
     (eye_at, _), (look_at, _) = mab_locator(bytes(mab), eye_name), mab_locator(bytes(mab), look_name)
     eye, look = struct.unpack_from('<3f', mab, eye_at), struct.unpack_from('<3f', mab, look_at)
-    fit = seat_camera(eye, look, box[0], bounds, heli, heli_centre)
+    # mdl is a render/model-space locator, after 652630 subtracts the rigid
+    # centre. The stock helicopter's mdl uses the same origin convention.
+    origin = box[0] if mdl is None else mdl
+    stock_origin = heli_centre if mdl is None else (0.0, 0.0, 0.0)
+    fit = seat_camera(eye, look, origin, bounds, heli, stock_origin)
     if fit is None:
         return
     struct.pack_into('<3f', mab, eye_at, *fit[0])
@@ -877,12 +877,12 @@ def fit_camera(m: dict, box, bounds: Bounds, heli: Bounds, heli_centre) -> None:
     m['animation_model'][2] = bytes(mab)
 
 
-def check_camera(data: bytes, bounds: Bounds) -> tuple[list[float], list[float]]:
+def check_camera(data: bytes, bounds: Bounds, mdl=None) -> tuple[list[float], list[float]]:
     """Re-read a jet SGO and raise CameraError unless its seat camera (on `mdl`, at its collision box's centre) sees its
     model (`bounds`, model frame) from outside (sight_problem). Returns (eye, look) in the model's frame."""
     _, m = sgo.read(data)
     mab = m['animation_model'][2]
-    centre = [float(_value(v)) for v in m['heli_rigid_body'][0]]
+    centre = [float(_value(v)) for v in m['heli_rigid_body'][0]] if mdl is None else list(mdl)
     eye_name, look_name = camera_names(m)
     pts = []
     for name in (eye_name, look_name):
@@ -1076,7 +1076,7 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
         bounds = jet_models.model_bounds(game, jet.file or jet.box_model)
         heli = jet_models.heli_bounds(game)
         if jet.seat_camera is None:
-            fit_camera(m, box, bounds, heli, [_value(v) for v in rb[0]])
+            fit_camera(m, box, bounds, heli, [_value(v) for v in rb[0]], mdl_at(jet))
         else:
             place_seat_camera(m, box, jet.seat_camera, mdl_at(jet))
     rag = m['ragdoll']
@@ -1099,7 +1099,7 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     if door:
         check_door(out, mdl_at(jet), access_box)
         if jet.seat_camera is None:
-            check_camera(out, bounds)
+            check_camera(out, bounds, mdl_at(jet))
         else:
             check_seat_camera(out, bounds, jet.seat_camera, mdl_at(jet))
     return out

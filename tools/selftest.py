@@ -1915,7 +1915,9 @@ def jet_door_on_the_ground_beside_its_box() -> None:
     # The Sazabi's `mdl` lands at its model's origin, its soles, not at its box's centre 12.8 m over them (its frames
     # log, 2026-10-07: written from the centre, the door was 12.8 m underground): the same point, from the origin.
     assert vc.JETS[vc.SAZABI_JET].locators_on_origin and vc.mdl_at(vc.JETS[vc.SAZABI_JET]) == (0.0, 0.0, 0.0)
-    assert all(vc.mdl_at(j) is None for n, j in vc.JETS.items() if n != vc.SAZABI_JET), 'the jets keep the centre'
+    assert all(vc.mdl_at(j) == (0.0, 0.0, 0.0) for j in vc.JETS.values()), 'native model update uses the model origin'
+    at, r = vc.door_point(carrier, (2.15, 0.0, 1.8), 1.8, (0.0, 0.0, 0.0))
+    assert at == [30.303, 0.0, -1.309] and r == 1.8, 'a full-span carrier door is not buried by its half-height'
     at, r = vc.door_point([[0.0, 12.805, -1.395], [10.805, 12.805, 13.715]], (2.15, 0.0, 1.8), 1.8, (0.0, 0.0, 0.0))
     assert at == [11.405, 0.0, 0.405], at
 
