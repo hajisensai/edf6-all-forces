@@ -281,7 +281,8 @@ void Session::Tick(std::uint64_t now) noexcept {
             }
             continue;
         }
-        if(t.phase!=Phase::empty && t.phase!=Phase::active && t.phase!=Phase::cancelled && now-t.since>20000) {
+        const std::uint64_t timeout=t.phase==Phase::planning ? 120000 : 20000;
+        if(t.phase!=Phase::empty && t.phase!=Phase::active && t.phase!=Phase::cancelled && now-t.since>timeout) {
             Failed(id);continue;
         }
         if(host_ && Ready())Advance(id,now);

@@ -137,6 +137,8 @@ void Failure() {
     {Room r(3);r.dropTo=2;r.dropKind=Kind::unit;r.Submit();r.Settle();for(const auto& n:r.nodes)Check(n->spawns==0,"missing unit cannot commit partial plan");}
     {Room r(3);r.dropTo=2;r.dropKind=Kind::commit;r.Submit();r.Settle();r.Step(21000);r.Settle();for(const auto& n:r.nodes)Check(!n->active[1],"missing result times out and destroys all copies");}
     {Room r(2);r.nodes[0]->pending=true;r.Submit();r.Settle();Check(r.nodes[0]->plans>1 && !r.nodes[0]->spawns,"incremental navigation stays pending");r.nodes[0]->pending=false;r.Settle();Check(r.nodes[0]->spawns==1,"pending navigation can complete");}
+    {Room r(2);r.nodes[0]->pending=true;r.Submit();r.Settle();r.Step(30000);r.nodes[0]->pending=false;r.Settle();Check(r.nodes[0]->spawns==1,"terrain planner can take longer than network ACK deadline");}
+    {Room r(2);r.nodes[0]->pending=true;r.Submit();r.Settle();r.Step(121000);r.nodes[0]->pending=false;r.Settle();Check(!r.nodes[0]->spawns,"terrain planner has finite 120-second deadline");}
     {Room r(3);r.Submit();r.Settle();r.failTo=2;r.failKind=Kind::cancel;
         r.With(0);r.nodes[0]->session->Failed(1);r.Settle();Check(r.nodes[2]->active[1],"fixture rejects initial cancel enqueue");
         r.failTo=999;r.Step(1100);r.Settle();for(const auto& n:r.nodes)Check(!n->active[1],"cancel retries until all peers acknowledge rollback");}

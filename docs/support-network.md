@@ -39,7 +39,8 @@ in the transport generation, readiness, mission, host or roster destroys the
 previous support ledger. The host changes the shared epoch when a member enters a
 new mission; periodic challenge handshakes recover a temporarily failed welcome
 enqueue. Old-epoch packets and committed/cancelled replays cannot recreate units.
-Pending transactions time out after 20 seconds. IDs use the native derivation with
+Host terrain planning has a 120-second deadline; network prepare/commit phases
+time out after 20 seconds. IDs use the native derivation with
 monotonic ordinals in `[0x40000000,0x80000000)`; ordinals are never reset across
 mission/roster changes and fail closed at exhaustion. Native hash space remains
 the game's own finite identity space, not a mathematical collision guarantee.
