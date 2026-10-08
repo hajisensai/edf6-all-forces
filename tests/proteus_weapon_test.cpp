@@ -7,7 +7,8 @@ using namespace crew;
 alignas(16) unsigned char left[0x1600]{},right[0x1600]{},launcher[0x1600]{},holders[3][0x48]{},weaponCtrl[16]{};
 alignas(16) unsigned char muzzles[2*edf::kMuzzleStride]{},bone[0x100]{},oldRider[0x400]{},oldCtrl[16]{};
 unsigned char* lists[3][1]={{holders[0]},{holders[1]},{holders[2]}};
-int posts=0,activated=0,deactivated=0;
+int posts=0,activated=0,deactivated=0,axesApplied=0;
+void __fastcall AxisApplied(void*,bool){++axesApplied;}
 void __fastcall OnActive(void*){++activated;}
 void __fastcall OnEmpty(void*){++deactivated;}
 bool __fastcall Ready(void*){return true;}
@@ -16,7 +17,7 @@ void __fastcall FakeDisable(void* w){static_cast<unsigned char*>(w)[0x13E]=0;OnE
 void __fastcall FakePull(void* h){At<unsigned char*>(h,kHolderWeapon)[kPull]=1;}
 const void* __fastcall FakeUser(void*,const void* w){return w==left ? human+0x120 : oldRider+0x120;}
 void __fastcall FakePost(void*,const float*){++posts;Put<float>(bone,edf::kBoneRows+48,100);}
-void Jump(unsigned rva,void* target){unsigned char b[]={0x48,0xB8,0,0,0,0,0,0,0,0xFF,0xE0};std::memcpy(b+2,&target,8);std::memcpy(image+rva,b,sizeof(b));}
+void Jump(unsigned rva,void* target){unsigned char b[12]={0x48,0xB8};b[10]=0xFF;b[11]=0xE0;std::memcpy(b+2,&target,8);std::memcpy(image+rva,b,sizeof(b));}
 void InitWeapon(unsigned char* w,unsigned i) {
     Put<void*>(holders[i],kHolderCtrl,weaponCtrl);Put<void*>(holders[i],kHolderWeapon,w);
     auto seat=SeatAt(vehicle,i+1);Put<void*>(seat,kSeatWeapons,lists[i]);Put<std::uint64_t>(seat,kSeatWeaponCount,1);
@@ -47,7 +48,27 @@ void Setup(bool native){
     auto u=UnitOf(vehicle,true);u->active=u->closed=true;u->st.mode=proteus::Mode::deployed;RefreshWeapons(*u,vehicle);
 }
 void Lifecycle(){
-    auto& u=*UnitOf(vehicle,false);Put<float>(seats,kSeatFire,1);
+    auto& u=*UnitOf(vehicle,false);
+    Jump(kAxisApply,reinterpret_cast<void*>(&AxisApplied));
+    for(unsigned i=0;i<4;++i)for(int axis=0;axis<2;++axis){
+        auto a=seataim::Object(SeatAt(vehicle,i))+edf::kAimAxes+axis*edf::kAxisStride;
+        Put<float>(a,edf::kAxisMin,-.2f);Put<float>(a,edf::kAxisMax,.2f);Put<float>(a,edf::kAxisAngle,i==0 ? .3f : -.1f);
+    }
+    FollowCannon(seataim::Object(SeatAt(vehicle,kRightSeat)));
+    Check(At<float>(seataim::Object(SeatAt(vehicle,kRightSeat)),edf::kAimAxes+edf::kAxisAngle)==.2f && axesApplied==2,
+          "driver control updates both actual cannon axes and obeys destination stops");
+    Put<void*>(seats+kSeatStride,kSeatRider,human);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,ctrl);
+    FollowCannon(seataim::Object(SeatAt(vehicle,kRightSeat)));
+    FollowCannon(seataim::Object(SeatAt(vehicle,kLauncherSeat)));
+    Check(At<float>(seataim::Object(SeatAt(vehicle,kRightSeat)),edf::kAimAxes+edf::kAxisAngle)==-.1f &&
+          At<float>(seataim::Object(SeatAt(vehicle,kLauncherSeat)),edf::kAimAxes+edf::kAxisAngle)==.2f,
+          "gunner owns paired cannons while driver independently aims the salvo launcher");
+    Put<void*>(seats+2*kSeatStride,kSeatRider,human);Put<void*>(seats+2*kSeatStride,kSeatRiderCtrl,ctrl);
+    const int applied=axesApplied;FollowCannon(seataim::Object(SeatAt(vehicle,kRightSeat)));
+    Check(axesApplied==applied,"actual right occupant prevents paired or driver aim override");
+    Put<void*>(seats+kSeatStride,kSeatRider,nullptr);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,nullptr);
+    Put<void*>(seats+2*kSeatStride,kSeatRider,nullptr);Put<void*>(seats+2*kSeatStride,kSeatRiderCtrl,nullptr);
+Put<float>(seats,kSeatFire,1);
     QueueWeapons(u,vehicle,true,seats);Check(gunShots==0,"slot4 only queues, never fires from old pose");
     ProteusWeaponPost(vehicle,nullptr);
     Check(posts==1 && gunShots==1 && lastFrom[0]==97,"post wrapper fires once after the original refreshed physical muzzle");
