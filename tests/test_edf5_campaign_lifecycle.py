@@ -63,13 +63,100 @@ class CampaignLifecycleTests(unittest.TestCase):
             stack.enter_context(redirect_stdout(io.StringIO()))
             yield build
 
-    def test_default_install_does_not_opt_in(self) -> None:
+    def test_default_install_enables_campaign(self) -> None:
         campaign.remove(self.root)
+        with self.pack() as build:
+            installer.install(self.root)
+            build.assert_called_once_with(self.root)
+        self.assertTrue(campaign.enabled(self.root))
+        self.assertTrue(campaign.check(self.root))
+
+    def test_explicit_enable_replaces_opt_out(self) -> None:
+        campaign.remove(self.root, remember_disabled=True)
+        self.assertFalse(campaign.wanted(self.root))
+        with self.pack() as build:
+            installer.install(self.root, campaign_requested=True)
+            self.assertTrue(campaign.wanted(self.root))
+            installer.install(self.root)
+            self.assertEqual(build.call_count, 2)
+
+    def test_refused_explicit_enable_preserves_opt_out(self) -> None:
+        campaign.remove(self.root, remember_disabled=True)
+        with self.pack(), patch.object(campaign, 'build', side_effect=campaign.Refused('foreign list')):
+            installer.install(self.root, campaign_requested=True)
+        self.assertFalse(campaign.wanted(self.root))
+        self.assertFalse(campaign.enabled(self.root))
+
+    def test_interrupted_enable_is_repaired_by_normal_update(self) -> None:
+        campaign.remove(self.root, remember_disabled=True)
+        write = modfiles.atomic_write
+
+        def fail_text(path: str, data: bytes) -> None:
+            if path == campaign.rel_path(self.root, campaign.TXT['CN']):
+                raise OSError('disk full')
+            write(path, data)
+
+        with patch.object(modfiles, 'atomic_write', side_effect=fail_text), self.assertRaises(OSError):
+            campaign.install(self.root, (self.files, 147, {}))
+        self.assertTrue(campaign.wanted(self.root))
+        self.assertFalse(campaign.check(self.root))
+        with self.pack() as build:
+            installer.install(self.root)
+            build.assert_called_once_with(self.root)
+        self.assertTrue(campaign.check(self.root))
+
+    def test_interrupted_disable_finishes_on_normal_update(self) -> None:
+        remove = os.remove
+
+        def fail_image(path: str) -> None:
+            if path == campaign.rel_path(self.root, campaign.IMAGE):
+                raise OSError('disk unavailable')
+            remove(path)
+
+        with patch.object(os, 'remove', side_effect=fail_image), self.assertRaises(OSError):
+            campaign.remove(self.root, remember_disabled=True)
+        self.assertFalse(campaign.wanted(self.root))
+        self.assertFalse(campaign.check(self.root))
         with self.pack() as build:
             installer.install(self.root)
             build.assert_not_called()
         self.assertFalse(campaign.enabled(self.root))
-        self.assertFalse(Path(campaign.rel_path(self.root, campaign.LIST)).exists())
+        self.assertTrue(campaign.check(self.root))
+
+    def test_changed_list_blocks_interrupted_disable_recovery(self) -> None:
+        modfiles.atomic_write(os.path.join(self.root, 'Mods', campaign.DISABLED), b'disabled')
+        modfiles.atomic_write(campaign.rel_path(self.root, campaign.LIST), b'foreign changed list')
+        with self.pack() as build, patch.object(installer, 'install_plugin') as plugin, \
+                self.assertRaises(campaign.Refused):
+            installer.install(self.root)
+        build.assert_not_called()
+        plugin.assert_not_called()
+        self.assertTrue(all(Path(campaign.rel_path(self.root, rel)).exists() for rel in campaign.FILES))
+
+    def test_interrupted_disable_recognizes_already_restored_originals(self) -> None:
+        campaign.remove(self.root)
+        originals = {rel: b'foreign original ' + rel.encode() for rel in campaign.FILES}
+        for rel, data in originals.items():
+            modfiles.atomic_write(campaign.rel_path(self.root, rel), data)
+        campaign.install(self.root, (self.files, 147, {}))
+        write = modfiles.atomic_write
+
+        def fail_image(path: str, data: bytes) -> None:
+            if path == campaign.rel_path(self.root, campaign.IMAGE):
+                raise OSError('disk unavailable')
+            write(path, data)
+
+        with patch.object(modfiles, 'atomic_write', side_effect=fail_image), self.assertRaises(OSError):
+            campaign.remove(self.root, remember_disabled=True)
+        self.assertEqual(modfiles.read(campaign.rel_path(self.root, campaign.LIST)), originals[campaign.LIST])
+        self.assertFalse(campaign.removal_blocked(self.root))
+        with self.pack() as build:
+            installer.install(self.root)
+            build.assert_not_called()
+        self.assertFalse(campaign.enabled(self.root))
+        self.assertFalse(campaign.installed(self.root))
+        for rel, data in originals.items():
+            self.assertEqual(modfiles.read(campaign.rel_path(self.root, rel)), data)
 
     def test_explicit_opt_in_and_normal_update_preserve_enabled_campaign(self) -> None:
         campaign.remove(self.root)
@@ -127,6 +214,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         with patch.object(installer, 'ask', return_value='2'):
             self.assertEqual(installer.manage_campaign(self.root), 1)
         self.assertTrue(campaign.enabled(self.root))
+        self.assertTrue(campaign.wanted(self.root))
         self.assertTrue(all(Path(campaign.rel_path(self.root, rel)).exists() for rel in campaign.FILES))
 
     def test_changed_list_preserves_all_dependencies_and_recovery_records(self) -> None:
