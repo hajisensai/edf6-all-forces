@@ -2,8 +2,9 @@
 
   python -B tools/make_level_list.py [GAME_DIR]
 
-EDF6's offline list (MISSION/MISSIONLIST.OFFLINE.LIST.SGO, 147 rows, its SC/JA titles) and then EDF5's campaign
-in the order tools/make_edf5_campaign.py appends it (main, DLC1, DLC2; titles from edf5campaign/missions.json).
+EDF5's campaign (main, DLC1, DLC2 in the order tools/make_edf5_campaign.py appends it; titles from
+edf5campaign/missions.json) and then EDF6's offline list (MISSION/MISSIONLIST.OFFLINE.LIST.SGO, 147 rows, its SC/JA
+titles): the plan reads the two games in story order. In the game's list EDF5 comes after EDF6; `n` keeps that.
 Each entry:
   key     'EDF6/M001', 'EDF5/M001', 'EDF5/DLC/DM011': the two games' folders share names, so the game is in the key
   series  EDF6 / EDF5 / EDF5 DLC1 / EDF5 DLC2
@@ -64,7 +65,7 @@ def edf5_rows(root: str, first: int) -> list[dict[str, object]]:
 
 def build(root: str) -> list[dict[str, object]]:
     six = edf6_rows(rootcpk.Game(root))
-    return six + edf5_rows(root, len(six) + 1)
+    return edf5_rows(root, len(six) + 1) + six
 
 
 def main(argv: list[str]) -> int:
