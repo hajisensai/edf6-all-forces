@@ -13,6 +13,7 @@ constexpr unsigned char kUpperBytes[]={0x40,0x55,0x53,0x56,0x57,0x41,0x54,0x41,0
 using UpperFn=ObjRef*(__fastcall*)(void*,ObjRef*,const float*,int,int,int,int,bool,int,void*);
 UpperFn original=nullptr;
 MissionParticipantAdmission admission=nullptr;
+MissionPlayerCreated observer=nullptr;
 bool ready=false;
 ObjRef* __fastcall UpperHook(void* context,ObjRef* out,const float* matrix,int index,
                             int a5,int a6,int a7,bool a8,int a9,void* a10) noexcept {
@@ -23,16 +24,24 @@ ObjRef* __fastcall UpperHook(void* context,ObjRef* out,const float* matrix,int i
         if(out)*out=ObjRef{};
         return out;
     }
-    return original(context,out,matrix,index,a5,a6,a7,a8,a9,a10);
+    ObjRef* result=original(context,out,matrix,index,a5,a6,a7,a8,a9,a10);
+    if(ready && InSession() && observer && index>=0) {
+        __try {
+            if(Readable(result,sizeof(ObjRef)) && result->obj && Readable(result->ctrl,16) &&
+               At<LONG>(result->ctrl,8)>0 && Readable(result->obj,kSelfCtrl+8) && result->Is(result->obj) &&
+               !(At<unsigned char>(result->obj,0x18)&4))observer(index,*result);
+        } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    }
+    return result;
 }
 }
-bool InstallMissionParticipantGate(MissionParticipantAdmission allowed) noexcept {
+bool InstallMissionParticipantGate(MissionParticipantAdmission allowed,MissionPlayerCreated created) noexcept {
     using namespace mission_admission;
     if(!allowed)return false;
-    if(ready){admission=allowed;return true;}
+    if(ready){admission=allowed;observer=created;return true;}
     __try {
         if(!Matches(kUpperCall,kCallerBytes,sizeof(kCallerBytes)) || !Matches(kUpperCreate,kUpperBytes,sizeof(kUpperBytes)))return false;
-        original=reinterpret_cast<UpperFn>(image+kUpperCreate);admission=allowed;
+        original=reinterpret_cast<UpperFn>(image+kUpperCreate);admission=allowed;observer=created;
         bool changed=false;
         ready=RedirectCall(image+kUpperCall,image+kUpperCreate,reinterpret_cast<void*>(&UpperHook),changed) && changed;
     } __except(EXCEPTION_EXECUTE_HANDLER){ready=false;}

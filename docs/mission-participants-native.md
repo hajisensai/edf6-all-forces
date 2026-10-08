@@ -60,6 +60,13 @@ the transport cache, EOS resolver, or its reset semantics.
 cooperating module separately protects the safe `1DC525` path. Online support must not
 advertise full admission readiness until **both** guards and the resolver are available.
 
+The install API optionally receives a `MissionPlayerCreated(index,const ObjRef&)` observer.
+It runs only after a successful online native return with a live, matching weak identity.
+Denied, empty, expired, scene-deleted and offline results are not observed. The transport
+can record actual actors created since its Reset and require every enumerated mission
+index to match those identities before sealing; a pre-creation callback alone cannot
+prove that a new-world actor replaced a previous scene's lingering actor.
+
 ## Executed evidence
 
 - `mission_participants_test`: production visitor, 10 checks covering dead/other-team
