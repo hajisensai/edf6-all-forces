@@ -25,6 +25,8 @@
 #include "map_buttons.h"
 #include "hudtext.h"
 #include "npcai.h"
+#include "npc_command.h"
+#include "online_authority.h"
 #include "layout.h"
 #include "memory.h"
 #include "map_cam.h"
@@ -82,6 +84,9 @@ struct Game {
     struct UiHit { UiKind kind=UiKind::none;int id=-1;ObjRef identity{};std::uint64_t token=0;int seat=-1,entry=-1; };
     UiHit uiPress{};
     bool uiLeft=false,uiRight=false,rowPicked=false,suppressLeft=false,suppressRight=false;
+    ObjRef requester{},focus{};
+    NpcCommandReason failure=NpcCommandReason::none;
+    unsigned affected=0;
 };
 Game game{};
 std::atomic<bool> boxingNow{false};
@@ -134,12 +139,17 @@ void RememberSelection(Game& g) noexcept {
     for(int i=0;i<kCmdUnits;++i)g.selected[i]=i<g.sel.n ? ObjRef::Of(g.sel.id[i]) : ObjRef{};
 }
 
-bool Give(const Entry& e,const Command& c) noexcept {
+bool Give(Game& g,const Entry& e,const Command& c) noexcept {
     switch(e.owner) {
     case Owner::heli: return HeliCommand(e.u.v,c);
     case Owner::jet: return JetCommand(e.u.v,c);
     case Owner::ground: return GroundCommand(e.u.v,c);
-    case Owner::squad: return SquadCommand(e.u.v,c);
+    case Owner::squad: {
+        const auto result=NpcSquadCommandForRequester(ObjRef::Of(e.u.v),c,g.requester,g.focus);
+        if(!result.Accepted())g.failure=result.reason;
+        else g.affected+=result.affected;
+        return result.Accepted();
+    }
     case Owner::tank: return TankCommand(e.u.v,c);
     }
     return false;
@@ -214,6 +224,27 @@ bool Takes(const Entry& e,Order o) noexcept {
     if(e.owner==Owner::tank)return o==Order::guard || o==Order::none;
     return mapcmd::VehicleOrder(o);
 }
+
+const wchar_t* CommandFailureText(NpcCommandReason why) noexcept {
+    using hudtext::Tx;using hudtext::Tr;using Reason=NpcCommandReason;
+    switch(why) {
+    case Reason::disabled:return Tr(Tx::cmdNpcDisabled);
+    case Reason::invalidRequester:return Tr(Tx::cmdNpcRequester);
+    case Reason::notFound:case Reason::notLeader:case Reason::stale:return Tr(Tx::cmdNpcStale);
+    case Reason::notAuthority:return Tr(Tx::cmdNpcAuthority);
+    case Reason::notOwner:return Tr(Tx::cmdNpcOwner);
+    case Reason::scripted:return Tr(Tx::cmdNpcScript);
+    case Reason::notFriendly:return Tr(Tx::cmdNpcFriendly);
+    case Reason::cooldown:return Tr(Tx::cmdNpcCooldown);
+    case Reason::noTarget:return Tr(Tx::cmdNpcTarget);
+    case Reason::noVehicle:return Tr(Tx::cmdNpcNoVehicle);
+    case Reason::noSeat:return Tr(Tx::cmdNpcNoSeat);
+    case Reason::boardingUnavailable:return Tr(Tx::cmdNpcBoardOff);
+    case Reason::unsupported:return Tr(Tx::cmdNpcUnsupported);
+    default:return Tr(Tx::cmdNpcFailed);
+    }
+}
+
 
 void Note(Game& g,const wchar_t* format,...) noexcept {
     va_list a;va_start(a,format);
@@ -311,7 +342,7 @@ void Pointer(Game& g,const MapCmdInput& in,const Keys& k,const View* v) noexcept
     if(k.left || !g.was.left)return;
     if(g.uiLeft) {
         if(g.moved<kClickMove && SameUi(g.uiPress,UiAt(*v,g.pointer.x,g.pointer.y)))UiClick(g,g.uiPress,k.shift);
-        g.uiLeft=false;g.uiPress={};g.boxing=g.pressing=false;pointerCaptured.store(g.uiRight);return;
+        g.uiLeft=false;g.uiPress={};g.boxing=g.pressing=false;pointerCaptured.store(g.uiRight || (g.suppressRight && k.right));return;
     }
     mapcmd::Mark marks[kCmdUnits];const int n=Marks(g,*v,in,marks);
     const bool box=g.boxing && (std::fabs(g.pointer.x-g.bx)>=kClickBox*s || std::fabs(g.pointer.y-g.by)>=kClickBox*s);
@@ -377,6 +408,7 @@ void Refresh(Game& g,const void** ids) noexcept {
 // The command to every selected unit; a guard's formation round the point (helis sharing one orbit stay on it).
 int Issue(Game& g,const Command& cmd,int* skipped) noexcept {
     int k=0;
+    g.failure=NpcCommandReason::none;g.affected=0;
     *skipped=0;
     for(int i=0;i<g.count;++i)k+=g.sel.Has(g.list[i].u.v) && Takes(g.list[i],cmd.order) ? 1 : 0;
     const bool share=HeliSharesPost();
@@ -384,13 +416,14 @@ int Issue(Game& g,const Command& cmd,int* skipped) noexcept {
     for(int i=0;i<g.count;++i) {
         Entry& e=g.list[i];
         if(!g.sel.Has(e.u.v))continue;
-        if(!Takes(e,cmd.order)){++*skipped;continue;}
+        if(!Takes(e,cmd.order)){g.failure=e.u.locked ? NpcCommandReason::scripted : NpcCommandReason::unsupported;++*skipped;continue;}
+        if(!IsOnlineAuthority(e.u.v)){g.failure=NpcCommandReason::notAuthority;++*skipped;continue;}
         Command c=cmd;
         if(cmd.order==Order::guard && !(e.owner==Owner::heli && share)) {
             mapcmd::Formation(slot++,k,cmd.at,kFormationSpacing,c.at);
             c.at[1]=GroundAt(c.at[0],c.at[2],cmd.at[1]);
         }
-        if(!Give(e,c)){++*skipped;continue;}
+        if(!Give(g,e,c)){if(g.failure==NpcCommandReason::none)g.failure=NpcCommandReason::failed;++*skipped;continue;}
         e.u.now=c;
         ++given;
     }
@@ -500,6 +533,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
 
 bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     Game& g=game;
+    g.requester=in.requester.obj ? in.requester : ObjRef::Of(PlayerHuman());
     const ULONGLONG now=GetTickCount64();
     const Keys k=ReadKeys(in);
     View v{};
@@ -581,7 +615,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     g.was=k;
     float point[3];
     const bool pointOk=TargetPoint(g,in,haveView ? &v : nullptr,point);
-    const bool allowed=!InSession();
+    const bool allowed=Cfg().enabled;
     if(supportPress) {
         g.supportArmed=false;
         if(pointOk){SupportCallAt(g.supportPick,point,g.note,_countof(g.note));g.noteAt=GetTickCount64();}
@@ -593,6 +627,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     if(markPress && g.eat && npcmark::Enabled() && npcmark::Alive(g.eatHover))
         Note(g,L"%ls",Tr(NpcMarkEnemy(g.eatHover.obj,g.eatAt,true) ? Tx::cmdMarked : Tx::cmdUnmarked));
     if(p.focus && npcmark::Alive(g.hover) && allowed && g.sel.n)NpcMarkEnemy(g.hover.obj,g.hoverAt,false);
+    g.focus=NpcMarkedIdentity();
     const mapcmd::Step s=mapcmd::Decide(g.sel.n,p,allowed,point,pointOk,NpcMarked());
     if(s.why==mapcmd::Refusal::online)Note(g,L"%ls",Tr(Tx::cmdOfflineOnly));
     else if(s.why==mapcmd::Refusal::noUnit && g.count)Note(g,Tr(Tx::cmdSelectFirst),in.usingPad ? L"X" : Tr(Tx::cmdSelectHowMouse));
@@ -604,13 +639,15 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         const int given=Issue(g,s.cmd,&skipped);
         wchar_t tail[40]{};
         if(skipped)_snwprintf_s(tail,_countof(tail),_TRUNCATE,Tr(Tx::cmdCannot),skipped);
-        if(s.cmd.order==Order::guard)Note(g,Tr(Tx::cmdGuardResult),OrderText(s.cmd.order),s.cmd.at[0],s.cmd.at[2],given,tail);
+        if(!given && g.failure!=NpcCommandReason::none)Note(g,L"%ls",CommandFailureText(g.failure));
+        else if(s.cmd.order==Order::board)Note(g,Tr(Tx::cmdBoardAssigned),g.affected,tail);
+        else if(s.cmd.order==Order::guard)Note(g,Tr(Tx::cmdGuardResult),OrderText(s.cmd.order),s.cmd.at[0],s.cmd.at[2],given,tail);
         else Note(g,Tr(Tx::cmdOrderResult),OrderText(s.cmd.order),given,tail);
         Log("MAPCMD %s (%.0f,%.0f,%.0f) to %d selected: %d of %d units took it",OrderName(s.cmd.order),s.cmd.at[0],s.cmd.at[1],s.cmd.at[2],
             g.sel.n,given,g.count);
     }
-    if(formation)Formation(g,allowed);
-    if(split || merge)Teams(g,allowed,split);
+    if(formation)Formation(g,allowed && !InSession());
+    if(split || merge)Teams(g,allowed && !InSession(),split);
     if(sweep)Sweep(g);
     if(health)Health(g);
     RememberSelection(g);
@@ -695,8 +732,8 @@ bool MapCommandEats(bool front) noexcept {
 }
 
 int MapCommandGuardAt(const float* at) noexcept {
-    if(InSession())return -2;
     Game& g=game;
+    g.requester=ObjRef::Of(PlayerHuman());g.focus={};
     const void* ids[kCmdUnits];
     Refresh(g,ids);
     if(!g.sel.n)return -1;

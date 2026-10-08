@@ -24,6 +24,12 @@ int payloadRequests=0,payloadSeat=-1,payloadEntry=-1;std::uint64_t payloadToken=
 bool RequestPayloadSelection(std::uint64_t token,int seat,int entry) noexcept {
     ++payloadRequests;payloadToken=token;payloadSeat=seat;payloadEntry=entry;return true;
 }
+unsigned char* PlayerHuman() noexcept {return nullptr;}
+bool IsOnlineAuthority(const void*) noexcept {return true;}
+ObjRef NpcMarkedIdentity() noexcept {return {};}
+NpcCommandResult NpcSquadCommandForRequester(const ObjRef& id,const mapcmd::Command& command,const ObjRef&,const ObjRef&) noexcept {
+    return SquadCommand(id.obj,command) ? NpcCommandResult{NpcCommandReason::none,1} : NpcCommandResult{NpcCommandReason::failed,0};
+}
 unsigned char* image=nullptr;
 bool NpcDriver(const unsigned char* v) noexcept {
     if(!v || !SeatCount(v))return false;
@@ -126,6 +132,8 @@ void UnitLifetime() noexcept {
     Check(!ReadCommandUnit(ref,"test",Command{},false,&unit),"player takeover rejected before next NPC input");
     Put<const void*>(rider,0,image+edf::kDummyRiderVtable);
     Check(ReadCommandUnit(ref,"test",Command{},false,&unit),"NPC unit sampled again");
+    Put<const void*>(rider,0,image+0x17CDF28);Put<unsigned char>(rider,edf::kHumanPlayer,0);Put<void*>(rider,edf::kHumanPad,nullptr);
+    Check(ReadCommandUnit(ref,"real NPC",Command{},false,&unit),"vehicle with a real soldier driver stays visible and commandable after dummy removal");
     DWORD old=0;
     const bool protectedPage=VirtualProtect(vehicle,4096,PAGE_NOACCESS,&old)!=FALSE;
     Check(protectedPage,"make formerly live unit inaccessible");

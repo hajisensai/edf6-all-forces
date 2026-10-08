@@ -19,6 +19,7 @@
 // one with no identity), as the stock AI writes only theirs; the block goes to the other machines the way the stock AI's
 // does (§2.1).
 #include "crew.h"
+#include "npc_command.h"
 #include "layout.h"
 #include "memory.h"
 #include "formation.h"
@@ -690,7 +691,7 @@ bool FallBack(Soldier& sol,unsigned char* h,const float* pos,const Served& serve
 constexpr int kMaxSquads=64;
 constexpr ULONGLONG kSquadSeenMs=500;
 constexpr ULONGLONG kDismissedGoneMs=60000;
-constexpr ULONGLONG kOrderSeenMs=100;         // an order goes only to a squad counted within this (alive then)   // a dismissed squad nobody counted this long: its soldiers are gone
+constexpr ULONGLONG kOrderSeenMs=kSquadSeenMs; // same freshness interval as visible/selectable squad rows
 constexpr std::size_t kAutoFollow=0x540;
 struct Squad {
     ObjRef top;
@@ -707,6 +708,7 @@ struct Squad {
     bool routeActive=false,routeCancelled=false;
     float routePoint[3]{},routeArrival=1.0f;
     npc::Lead routeLead{};
+    ObjRef commandFocus{}; // one squad's explicit attack target; never another player's global marker
 };
 Squad squads[kMaxSquads]{};
 npc::Cooldowns<kMaxSquads> cooldowns;
@@ -823,7 +825,7 @@ bool SeatTakes(const unsigned char* v,unsigned i,const unsigned char* h) noexcep
 // Walks to its seat's riding point and boards there; false once the order is over (done, gone, timed out).
 bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {
     auto v=static_cast<unsigned char*>(const_cast<void*>(s.boardV.obj));
-    if(!s.boardV.Is(v) || v[kDead] || ms-s.boardAt>kBoardMs || s.boardSeat<0 || static_cast<unsigned>(s.boardSeat)>=SeatCount(v) ||
+    if(!v || !Readable(v,kSeatCount+8) || !s.boardV.Is(v) || v[kDead] || ms-s.boardAt>kBoardMs || s.boardSeat<0 || static_cast<unsigned>(s.boardSeat)>=SeatCount(v) ||
        !IsOnlineAuthority(h) || !OnlineMaySeatNpc(v) || !SeatTakes(v,static_cast<unsigned>(s.boardSeat),h)) {
         Log("NPCAI soldier %p: board order dropped (%s)",h,ms-s.boardAt>kBoardMs ? "too long" : "the seat or the vehicle is gone");
         s.boardV=ObjRef{};
@@ -878,10 +880,14 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     const float engage=npc::EngageRange(a.arm,a.n,Cfg().npcEngageShare);
     Pick t=engage>0.0f ? PickTarget(s,eye,anchor,o.leash+engage) : Pick{nullptr,0.0f};
     // The mark first (§6.3): always for a squad told to focus on it, else when within its reach plus its leash.
-    if(const Enemy* m=MarkedEnemy()) {
+    const Enemy* commandTarget=nullptr;
+    if(q && q->cmd.order==Order::focus && q->commandFocus) {
+        for(int i=0;i<world.enemies;++i)if(q->commandFocus.Is(world.enemy[i].object)){commandTarget=&world.enemy[i];break;}
+    }
+    if(const Enemy* m=commandTarget ? commandTarget : MarkedEnemy()) {
         float reach=0.0f;
         for(int i=0;i<a.n;++i)if(a.arm[i].reach>reach)reach=a.arm[i].reach;
-        const bool focus=q && q->cmd.order==Order::focus;
+        const bool focus=commandTarget!=nullptr;
         if(focus || npc::MarkInReach(eye,m->aim,reach,o.leash))t=Pick{m,npc::Dist(eye,m->aim)};
     }
     s.target=t.e ? ObjRef::Of(t.e->object) : ObjRef{};
@@ -1237,12 +1243,16 @@ int SquadRows(SquadRow* out,int most) noexcept {
 namespace {
 // The squad's soldiers: its top and its followers down the tree (live ones, on foot or riding), at most `most`.
 int Members(unsigned char* top,unsigned char** out,int most) noexcept {
+    if(!top || !out || most<=0)return 0;
     int n=0;
     out[n++]=top;
     for(int i=0;i<n && n<most;++i) {
         unsigned char* f[kMaxSquad];
         const int k=Followers(out[i],f,kMaxSquad);
-        for(int j=0;j<k && n<most;++j)out[n++]=f[j];
+        for(int j=0;j<k && n<most;++j) {
+            bool present=false;for(int used=0;used<n;++used)present=present || out[used]==f[j];
+            if(!present)out[n++]=f[j];
+        }
     }
     return n;
 }
@@ -1553,30 +1563,53 @@ int CancelBoarding(unsigned char* top) noexcept {
 // The vehicle a squad boards: the one the player rides when it has a seat for them, else the nearest friendly vehicle
 // within kBoardFar of the top with one.
 constexpr float kBoardFar=150.0f;
-unsigned char* BoardTarget(const unsigned char* top) noexcept {
-    unsigned char* const me=PlayerHuman();
-    if(me && !HumanOnFoot(me)) {
-        const auto v=At<unsigned char*>(me,kHumanRiding);
-        if(v && Readable(v,kDead+1) && !v[kDead]) {
-            for(unsigned i=0;i<SeatCount(v);++i)if(SeatTakes(v,i,top))return v;
+bool Reserved(const unsigned char* v,unsigned seat,ULONGLONG ms,const void* except=nullptr) noexcept;
+bool FriendlyVehicle(const unsigned char* v,const unsigned char* member) noexcept {
+    const int team=At<int>(v,kTeam),soldier=At<int>(member,kTeam);
+    return team==soldier || ((soldier==0 || soldier==kTeamFriend) && (team==0 || team==kTeamFriend || team==kTeamVehicle));
+}
+float BoardDistance(unsigned char* v,unsigned char* const* members,int count,ULONGLONG ms) noexcept {
+    if(!v || !Readable(v,kSeatCount+8) || v[kDead] || !OnlineMaySeatNpc(v))return -1;
+    float nearest=kBoardFar+1;
+    for(int m=0;m<count;++m) {
+        auto* h=members[m];
+        if(!HumanOnFoot(h) || SupportSoldierHeld(h) || !IsOnlineAuthority(h) ||
+           npc::Scripted(ControlOf(h,RootLeader(h))) || !FriendlyVehicle(v,h))continue;
+        for(unsigned seat=0;seat<SeatCount(v);++seat) {
+            if(!SeatTakes(v,seat,h) || Reserved(v,seat,ms,h))continue;
+            float point[3],reach;
+            if(!SeatPoint(v,seat,point,&reach) || !std::isfinite(reach) || reach<=0)continue;
+            const float distance=npc::Dist(Pos(h),point);if(distance<nearest)nearest=distance;
         }
     }
-    unsigned char* best=nullptr;float bestD=kBoardFar;
+    return nearest<=kBoardFar ? nearest : -1;
+}
+unsigned char* BoardTarget(unsigned char* top,const unsigned char* requester,ULONGLONG ms,bool* sawVehicle=nullptr) noexcept {
+    unsigned char* members[kMaxSquad];const int count=Members(top,members,kMaxSquad);
+    if(sawVehicle)*sawVehicle=false;
+    if(requester && !HumanOnFoot(requester)) {
+        auto* v=At<unsigned char*>(requester,kHumanRiding);
+        if(v && Readable(v,kSeatCount+8) && !v[kDead]) {
+            if(sawVehicle)*sawVehicle=true;
+            if(BoardDistance(v,members,count,ms)>=0)return v;
+        }
+    }
+    unsigned char* best=nullptr;float bestD=kBoardFar+1;
     for(int i=0;i<world.friends;++i) {
-        const auto o=static_cast<unsigned char*>(const_cast<void*>(world.frObject[i]));
-        if(!KnownVehicle(o) || o[kDead])continue;
-        const float d=npc::Horiz(Pos(top),Pos(o));
-        if(d>=bestD)continue;
-        for(unsigned k=0;k<SeatCount(o);++k)if(SeatTakes(o,k,top)){best=o;bestD=d;break;}
+        auto* object=static_cast<unsigned char*>(const_cast<void*>(world.frObject[i]));
+        if(!object || !Readable(object,kSeatCount+8) || !KnownVehicle(object) || object[kDead])continue;
+        if(sawVehicle)*sawVehicle=true;
+        const float distance=BoardDistance(object,members,count,ms);
+        if(distance>=0 && distance<bestD){best=object;bestD=distance;}
     }
     return best;
 }
 
 // Pending walkers reserve their seats across squads and automatic recruitment. Stale/dead/reused
 // soldiers cannot reserve a seat, and a seat occupied before arrival cancels the pending order.
-bool Reserved(const unsigned char* v,unsigned seat,ULONGLONG ms) noexcept {
+bool Reserved(const unsigned char* v,unsigned seat,ULONGLONG ms,const void* except) noexcept {
     for(const auto& s:soldiers)
-        if(s.boardV.Is(v) && s.boardSeat==static_cast<int>(seat) && ms-s.boardAt<=kBoardMs &&
+        if(s.ref.obj!=except && s.boardV.Is(v) && s.boardSeat==static_cast<int>(seat) && ms-s.boardAt<=kBoardMs &&
            Readable(s.ref.obj,kDead+1) && s.ref.Is(s.ref.obj) && !At<unsigned char>(s.ref.obj,kDead))return true;
     return false;
 }
@@ -1589,9 +1622,11 @@ bool AssignBoard(unsigned char* v,unsigned char* h,ULONGLONG ms) noexcept {
     if(!HumanOnFoot(h) || SupportSoldierHeld(h) || !IsOnlineAuthority(h) || !OnlineMaySeatNpc(v) ||
        npc::Scripted(ControlOf(h,RootLeader(h))))return false;
     Soldier* const s=Entry(h,ms);
-    if(!s || s->boardV)return false;
+    if(!s)return false;
+    if(s->boardV) return s->boardV.Is(v) && s->boardSeat>=0 && static_cast<unsigned>(s->boardSeat)<SeatCount(v) &&
+        ms-s->boardAt<=kBoardMs && SeatTakes(v,static_cast<unsigned>(s->boardSeat),h);
     for(int priority=0;priority<3;++priority)for(unsigned k=0;k<SeatCount(v) && k<edf::kMaxSeats;++k) {
-        if(SeatPriority(v,k)!=priority || Reserved(v,k,ms) || !SeatTakes(v,k,h))continue;
+        if(SeatPriority(v,k)!=priority || Reserved(v,k,ms,h) || !SeatTakes(v,k,h))continue;
         s->seen=ms;s->boardV=ObjRef::Of(v);s->boardSeat=static_cast<int>(k);s->boardAt=ms;
         return true;
     }
@@ -1599,26 +1634,31 @@ bool AssignBoard(unsigned char* v,unsigned char* h,ULONGLONG ms) noexcept {
 }
 
 // Driver first, then actual armed seats, then passengers. Assignment never creates a rider.
-bool BoardSquad(unsigned char* top,ULONGLONG ms) noexcept {
-    unsigned char* const v=BoardTarget(top);
+bool BoardSquad(unsigned char* top,ULONGLONG ms,const unsigned char* requester=nullptr,int* affected=nullptr,NpcCommandReason* why=nullptr) noexcept {
+    bool saw=false;
+    unsigned char* const v=BoardTarget(top,requester ? requester : PlayerHuman(),ms,&saw);
+    if(affected)*affected=0;
+    if(why)*why=saw ? NpcCommandReason::noSeat : NpcCommandReason::noVehicle;
     if(!v){Log("NPCAI squad %p: no friendly vehicle with a seat for it within %.0f m",top,kBoardFar);return false;}
     unsigned char* m[kMaxSquad];
     const int n=Members(top,m,kMaxSquad);
     int given=0;
     for(int i=0;i<n;++i)given+=AssignBoard(v,m[i],ms);
     Log("NPCAI squad %p boards v=%p: %d of %d members have a seat",top,v,given,n);
+    if(affected)*affected=given;
+    if(given && why)*why=NpcCommandReason::none;
     return given>0;
 }
 
 // Every riding member off (SeatKick: the get-off message, a real soldier lands and walks on; a dummy rider would die,
 // so only soldiers are kicked). Also cancels members still walking to a seat; false when neither applied.
-bool DismountSquad(unsigned char* top) noexcept {
+bool DismountSquad(unsigned char* top,int* affected=nullptr) noexcept {
     const int cancelled=CancelBoarding(top);
     unsigned char* m[kMaxSquad];
     const int n=Members(top,m,kMaxSquad);
     int off=0;
     for(int i=0;i<n;++i) {
-        if(HumanOnFoot(m[i]))continue;
+        if(HumanOnFoot(m[i]) || !IsOnlineAuthority(m[i]) || npc::Scripted(ControlOf(m[i],RootLeader(m[i]))))continue;
         const auto v=At<unsigned char*>(m[i],kHumanRiding);
         const auto seat=At<unsigned char*>(m[i],kHumanSeat);
         if(!v || !seat || !Readable(seat,kSeatRiderCtrl+8) || At<const void*>(seat,kSeatRider)!=m[i])continue;
@@ -1628,6 +1668,7 @@ bool DismountSquad(unsigned char* top) noexcept {
         ++off;
     }
     Log("NPCAI squad %p dismounts: %d off",top,off);
+    if(affected)*affected=off+cancelled;
     return off>0 || cancelled>0;
 }
 }  // namespace
@@ -1848,11 +1889,11 @@ bool PlayerFormationCue(FormationCue* out) noexcept {
 }
 
 namespace {
-void GuardOrder(Squad& q,const Command& c) noexcept {
+void GuardOrder(Squad& q,const Command& c,const unsigned char* requester=nullptr) noexcept {
     q.cmd=c;q.cmdLead=npc::LeadOf(q.control);
     const auto g=npc::formation::FromInt(Cfg().npcGuardFormation);
     if(q.guardShape==npc::formation::Shape::stock)q.guardShape=npc::formation::GuardShape(g) ? g : npc::formation::Shape::stock;
-    float dir[3];const auto* me=PlayerHuman();
+    float dir[3];const auto* me=requester ? requester : PlayerHuman();
     if(me && npc::HorizDir(Pos(me),c.at,dir)){q.guardFwd[0]=dir[0];q.guardFwd[1]=dir[2];}
     else{q.guardFwd[0]=0;q.guardFwd[1]=1;}
 }
@@ -1886,61 +1927,103 @@ bool NpcFinishSquadRoute(unsigned char* leader,const float* destination) noexcep
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
-bool SquadCommand(const void* leader,const Command& c) noexcept {
-    if(!ok || !Cfg().enabled || !Cfg().customNpcAi || InSession())return false;
+namespace {
+NpcCommandResult lastCommand{};
+NpcCommandResult CommandResult(NpcCommandReason reason,unsigned affected=0) noexcept {
+    lastCommand={reason,affected};return lastCommand;
+}
+bool CommandActor(const ObjRef& ref,bool playerActor) noexcept {
+    const auto* h=static_cast<const unsigned char*>(ref.obj);
+    return h && Readable(h,kHumanVehicleCtrl+8) && ref.Is(h) && !h[kDead] && !(h[kObjectFlags]&4) &&
+        IsSoldierClass(h) && (playerActor ? IsAnyPlayer(h) : !IsAnyPlayer(h));
+}
+struct CommandFocusCheck { ObjRef wanted;bool found=false;float at[3]{}; };
+void SeeCommandFocus(void* context,const void* object,const float* aim) noexcept {
+    auto& check=*static_cast<CommandFocusCheck*>(context);
+    if(object==check.wanted.obj && Readable(object,kSelfCtrl+8) && check.wanted.Is(object)) {
+        check.found=true;std::memcpy(check.at,aim,12);
+    }
+}
+}
+NpcCommandResult LastNpcCommandResult() noexcept {return lastCommand;}
+ObjRef NpcMarkedIdentity() noexcept {return npcmark::Enabled() && MarkAlive() ? mark.obj : ObjRef{};}
+NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd::Command& c,
+    const ObjRef& requester,const ObjRef& focus) noexcept {
+    using Reason=NpcCommandReason;
     __try {
+        if(!ok || !Cfg().enabled || !Cfg().customNpcAi || !followOk)return CommandResult(Reason::disabled);
+        if((InSession() || requester.obj) && !CommandActor(requester,true))return CommandResult(Reason::invalidRequester);
+        if(!CommandActor(selected,false))return CommandResult(Reason::notFound);
+        auto* top=static_cast<unsigned char*>(const_cast<void*>(selected.obj));
+        const auto* caller=static_cast<const unsigned char*>(requester.obj);
+        if(TopNpc(top)!=top)return CommandResult(Reason::notLeader);
+        if(!IsOnlineAuthority(top))return CommandResult(Reason::notAuthority);
+        const int team=At<int>(top,kTeam),callerTeam=caller ? At<int>(caller,kTeam) : player.team;
+        if((team!=0 && team!=kTeamFriend) || (caller && callerTeam!=0 && callerTeam!=kTeamFriend))return CommandResult(Reason::notFriendly);
+        const auto* root=RootLeader(top);
+        if(root && IsAnyPlayer(root) && root!=caller)return CommandResult(Reason::notOwner);
+        const auto control=ControlOf(top,root);
+        if(npc::Scripted(control))return CommandResult(Reason::scripted);
         const ULONGLONG ms=GameMs();
-        Squad* const q=FindSquad(leader);
-        if(!q || ms-q->seen>kOrderSeenMs || npc::Scripted(q->control) || !followOk)return false;
-        auto top=static_cast<unsigned char*>(const_cast<void*>(leader));
-        if(!q->top.Is(top) || top[kDead] || !IsSoldierClass(top))return false;
-        const bool recruited=q->control==npc::Control::recruited;
+        Squad* const q=FindSquad(top);
+        if(!q || !q->top.Is(top) || ms-q->seen>kOrderSeenMs)return CommandResult(Reason::stale);
+        q->control=control;
+        const bool recruited=control==npc::Control::recruited;
+        unsigned char* members[kMaxSquad];const int count=Members(top,members,kMaxSquad);
+        int affected=count;
+        if(c.order==Order::guard || c.order==Order::engage || c.order==Order::focus) {
+            affected=0;
+            for(int i=0;i<count;++i)if(HumanOnFoot(members[i]) && IsOnlineAuthority(members[i]) &&
+                !npc::Scripted(ControlOf(members[i],RootLeader(members[i]))))++affected;
+            if(!affected)return CommandResult(Reason::unsupported); // select the ridden vehicle to command its driver
+        }
         switch(c.order) {
-        case Order::guard: {
-            GuardOrder(*q,c);
-            break;
-        }
+        case Order::guard:
+            if(!std::isfinite(c.at[0]+c.at[1]+c.at[2]))return CommandResult(Reason::noTarget);
+            GuardOrder(*q,c,caller);break;
         case Order::engage:
-        case Order::focus:   // the mark (mapcmd refuses it with none)
-            q->cmd=c;q->cmdLead=npc::LeadOf(q->control);std::memcpy(q->cmd.at,Pos(top),12);
-            break;
-        case Order::none:
-            q->cmd=Command{Order::none,{0.0f,0.0f,0.0f}};
-            break;
-        case Order::follow:
-        case Order::recruit: {
-            q->cmd=Command{Order::none,{0.0f,0.0f,0.0f}};
-            if(recruited)break;
-            unsigned char* const me=PlayerHuman();
-            if(!me || q->dismissed)return false;
-            Follow(top,me);
-            Log("NPCAI squad %p recruited by command",top);
-            break;
+            q->cmd=c;q->cmdLead=npc::LeadOf(control);std::memcpy(q->cmd.at,Pos(top),12);break;
+        case Order::focus: {
+            if(!focus.obj || !Readable(focus.obj,kDead+1) || static_cast<const unsigned char*>(focus.obj)[kDead])return CommandResult(Reason::noTarget);
+            CommandFocusCheck checked{focus};VisitEnemiesOf(caller ? callerTeam : team,&SeeCommandFocus,&checked);
+            if(!checked.found)return CommandResult(Reason::noTarget);
+            q->cmd=c;q->cmdLead=npc::LeadOf(control);std::memcpy(q->cmd.at,checked.at,12);q->commandFocus=focus;break;
         }
+        case Order::none:q->cmd={};break;
+        case Order::follow:
+        case Order::recruit:
+            if(!caller)return CommandResult(Reason::invalidRequester);
+            if(q->dismissed)return CommandResult(Reason::cooldown);
+            if(!recruited)Follow(top,const_cast<unsigned char*>(caller));
+            q->cmd={};break;
         case Order::dismiss:
-            if(!recruited)return false;
-            q->autoFollow=top[kAutoFollow];top[kAutoFollow]=0;
-            Follow(top,nullptr);
+            if(!recruited)return CommandResult(Reason::notOwner);
+            q->autoFollow=top[kAutoFollow];top[kAutoFollow]=0;Follow(top,nullptr);
             cooldowns.Start(SquadKey(top),ms,static_cast<std::uint64_t>(Cfg().npcRecruitCooldownSec*1000.0f));
             q->dismissed=true;++dismissedCount;
-            // It holds where it was let go, as its own squad: the guard is the plugin's lead's, so the player recruiting it
-            // again after the cooldown (the stock walk-up) drops it and the squad follows them.
-            q->cmd=Command{Order::guard,{0.0f,0.0f,0.0f}};q->cmdLead=npc::Lead::own;std::memcpy(q->cmd.at,Pos(top),12);
-            Log("NPCAI squad %p dismissed: it holds here, recruitable again in %.0f s",top,Cfg().npcRecruitCooldownSec);
-            break;
-        case Order::board:
-            if(!Cfg().npcBoarding || !rideOk || !BoardSquad(top,ms))return false;
-            break;
-        case Order::dismount:
-            if(!Cfg().npcBoarding || !DismountSquad(top))return false;
-            break;
-        default:
-            return false;
+            q->cmd={Order::guard,{Pos(top)[0],Pos(top)[1],Pos(top)[2]}};q->cmdLead=npc::Lead::own;break;
+        case Order::board: {
+            if(!Cfg().npcBoarding || !rideOk)return CommandResult(Reason::boardingUnavailable);
+            Reason why=Reason::noVehicle;
+            if(!BoardSquad(top,ms,caller,&affected,&why))return CommandResult(why);break;
         }
+        case Order::dismount:
+            if(!Cfg().npcBoarding || !rideOk)return CommandResult(Reason::boardingUnavailable);
+            if(!DismountSquad(top,&affected))return CommandResult(Reason::noSeat);break;
+        default:return CommandResult(Reason::unsupported);
+        }
+        if(c.order!=Order::focus)q->commandFocus={};
         if(c.order!=Order::board)CancelBoarding(top);
-        q->routeActive=false;q->routeCancelled=true; // an explicit user order takes ownership from ingress
-        return true;
-    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+        q->routeActive=false;q->routeCancelled=true;
+        return CommandResult(Reason::none,static_cast<unsigned>(affected));
+    } __except(EXCEPTION_EXECUTE_HANDLER){return CommandResult(Reason::failed);}
+}
+bool SquadCommand(const void* leader,const Command& c) noexcept {
+    __try {
+        const auto result=NpcSquadCommandForRequester(ObjRef::Of(leader),c,ObjRef::Of(PlayerHuman()),
+            c.order==Order::focus && MarkAlive() ? mark.obj : ObjRef{});
+        return result.Accepted();
+    } __except(EXCEPTION_EXECUTE_HANDLER){CommandResult(NpcCommandReason::failed);return false;}
 }
 
 namespace {

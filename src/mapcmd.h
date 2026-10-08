@@ -60,6 +60,7 @@ struct MapCmdInput {
     WORD buttons;
     float dx,dy;
     float eye[3],look[3];
+    ObjRef requester{}; // the player owning this map viewport, supplied by map.cpp
 };
 // True when the map should centre on `centre` (a unit just selected by Tab / pad X). Updates in.usingPad to the
 // source of this frame's command or pointer input so the map keeps the same mode next frame. Game thread.
@@ -88,7 +89,7 @@ void SuspendMapCommands() noexcept;
 // thread.
 bool MapCommandEats(bool front) noexcept;
 // npcai.cpp, the mark key on foot with no enemy near the screen's centre: the units selected on the map guard `at` (as G
-// on the map, in a formation round it). How many took it; -1 none selected, -2 online (InSession). Game thread.
+// on the map, in a formation round it). How many accepted it; -1 none selected. Authority is checked per unit.
 int MapCommandGuardAt(const float* at) noexcept;
 
 // What the draw shows (hud.cpp MapScreen): the commandable units, the selection, the pointer and its box, the point,

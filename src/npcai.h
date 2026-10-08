@@ -3,6 +3,7 @@
 #include <cstdint>
 
 namespace crew {
+struct ObjRef;
 // The soldier classes' Think (vtable slot 7) wrapped, chained after any other plugin's: once, from EnsureInputs
 // (every plugin loaded by then). False when the intent block's code is not as read (the AI stays stock).
 bool InstallNpcAi() noexcept;
@@ -31,6 +32,7 @@ bool NpcPrepareSquadRoute(unsigned char* leader,const float* waypoint,float arri
 bool NpcFinishSquadRoute(unsigned char* leader,const float* destination) noexcept;
 // An enemy is marked now (the Q mark, §6.3; the focus order needs one).
 bool NpcMarked() noexcept;
+ObjRef NpcMarkedIdentity() noexcept; // copied game-thread identity for an explicit per-squad focus command
 // The mark for the HUD (draw thread): where it is; false with none (or none published lately).
 bool NpcMarkReadout(float* at) noexcept;
 // The squads' formations (formation.h): the map's T on a selected squad cycles a guarding squad's defence

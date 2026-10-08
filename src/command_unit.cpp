@@ -10,7 +10,7 @@ bool CommandVehicleLive(const ObjRef& ref) noexcept {
     __try {
         auto* v=static_cast<unsigned char*>(const_cast<void*>(ref.obj));
         return v && Readable(v,kSeatCount+8) && !v[kDead] && ref.Is(v) && SeatCount(v)>0 &&
-               SeatRider(SeatAt(v,0))==Rider::dummy;
+               NpcDriver(v);
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 bool ReadCommandUnit(const ObjRef& ref,const char* name,const Command& cmd,bool air,CommandUnit* out) noexcept {

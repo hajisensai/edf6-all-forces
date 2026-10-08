@@ -21,7 +21,8 @@ namespace crew {
 bool InstallRealDriverNative(NpcSeatInputOwnedFn) noexcept { return true; }
 bool RealDriverNativeReady() noexcept { return true; }
 bool PrepareNpcVehicle(unsigned char*,bool) noexcept { return true; }
-bool AnnounceNpcBoarding(unsigned char*) noexcept { return true; }
+int announcedBoards=0;
+bool AnnounceNpcBoarding(unsigned char*) noexcept { ++announcedBoards;return true; }
 bool AnnounceNpcDismount(unsigned char*) noexcept { return true; }
 unsigned char* image=nullptr;
 PlayerFix player{};
@@ -32,6 +33,7 @@ Config config{};
 ULONGLONG now=1000,frame=1;
 bool sessionOn=false,host=true,door=true;
 bool wall=false;
+bool flatFloor=false,completeRide=false;
 bool mapHeld=true,rayOn=false;
 const void* markEnemy=nullptr;
 int pointOrders=0;
@@ -93,10 +95,17 @@ void __fastcall FollowRec(void* self,void* leader,bool) {
 // Whom `self` was last made to follow (nullptr none; `none` when it was not re-parented).
 const void* none=reinterpret_cast<const void*>(1);
 const void* FollowedBy(const void* self) { const void* to=none;for(int i=0;i<follows && i<16;++i)if(followSelf[i]==self)to=followTo[i];return to; }
-void __fastcall RideRec(void*,SharedRef* ref,int) { --*reinterpret_cast<int*>(static_cast<unsigned char*>(ref->ctrl)+8);++rides; }
+void __fastcall RideRec(void* actor,SharedRef* ref,int slot) {
+    --*reinterpret_cast<int*>(static_cast<unsigned char*>(ref->ctrl)+8);++rides;
+    if(completeRide) {
+        auto* h=static_cast<unsigned char*>(actor);auto* v=static_cast<unsigned char*>(ref->obj);auto* seat=SeatAt(v,static_cast<unsigned>(slot));
+        Put<void*>(h,kHumanRiding,v);Put<void*>(h,kHumanVehicleCtrl,ref->ctrl);Put<void*>(h,kHumanSeat,seat);
+        Put<void*>(seat,kSeatRider,h);Put<const void*>(seat,kSeatRiderCtrl,At<const void*>(h,kSelfCtrl));
+    }
+}
 void Jump(unsigned rva,const void* to) { auto p=image+rva;p[0]=0x48;p[1]=0xB8;std::memcpy(p+2,&to,8);p[10]=0xFF;p[11]=0xE0; }
 void Reset() {
-    heldSupportActor=nullptr;ResetNpcAi();config=Config{};now=1000;frame=1;sessionOn=false;host=true;door=true;wall=false;follows=rides=0;
+    heldSupportActor=nullptr;playerObj=nullptr;ResetNpcAi();config=Config{};now=1000;frame=1;sessionOn=false;host=true;door=true;wall=false;flatFloor=completeRide=false;follows=rides=announcedBoards=0;
     std::memset(human,0,sizeof(human));std::memset(dead,0,sizeof(dead));std::memset(other,0,sizeof(other));
     std::memset(vehicle,0,sizeof(vehicle));std::memset(seats,0,sizeof(seats));std::memset(ctrl,0,sizeof(ctrl));
     for(auto p : {human,dead,other}) { Put<void*>(p,0,image+kSoldiers[0].vtable);Put<int>(p,kTeam,kTeamFriend); }
@@ -121,7 +130,9 @@ bool OnlineHostOnly() noexcept { return !sessionOn || host; }
 bool IsOnlineAuthority(const void* o) noexcept {
     return online::Authority(online::Facts{sessionOn,true,host,At<std::uint16_t>(o,0x128),false,false,o==vehicle ? vehicleCopyOwner : online::kCopyHost,0});
 }
-bool OnlineMaySeatNpc(const void*) noexcept { return !sessionOn || host; }
+bool OnlineMaySeatNpc(const void* v) noexcept {
+    return online::MaySeatNpc(online::Facts{sessionOn,true,host,At<std::uint16_t>(v,0x128),true,false,online::kCopyHost,0});
+}
 unsigned char* PlayerHuman() noexcept { return playerObj; }
 bool CameraRay(float* eye,float* dir) noexcept {
     if(!rayOn)return false;
@@ -145,7 +156,10 @@ float MapFloorRay(const float* a,const float* b,float* at) noexcept {
     at[0]=a[0];at[1]=0;at[2]=a[2];return a[1];
 }
 #else
-float MapFloorRay(const float*,const float*,float* at) noexcept { at[0]=at[1]=0;at[2]=30;return rayOn ? 30.0f : -1.0f; }
+float MapFloorRay(const float* a,const float* b,float* at) noexcept {
+    if(flatFloor){if(a[1]<0 || b[1]>0)return -1;at[0]=a[0];at[1]=0;at[2]=a[2];return a[1];}
+    at[0]=at[1]=0;at[2]=30;return rayOn ? 30.0f : -1.0f;
+}
 #endif
 Sea SeaAt(float,float,float*) noexcept { return Sea::land; }
 int MapCommandGuardAt(const float*) noexcept { ++pointOrders;return 1; }
@@ -245,7 +259,7 @@ int main() {
     Expect(human[kAutoFollow]==1 && dismissedCount==0,"the successor restores recruitment when the inherited cooldown expires");
     Reset();Put<void*>(human,kLeader,nullptr);Squad* q=SeeSquad(human,human,0,npc::Control::free,now);
     sessionOn=true;Expect(!SquadCommand(human,Command{Order::guard,{10,0,0}}) && q->cmd.order==Order::none,
-                       "direct squad commands are rejected online");
+                       "online squad commands require a real requesting player");
     sessionOn=false;config.enabled=false;
     Expect(!SquadCommand(human,Command{Order::guard,{10,0,0}}),"direct squad commands respect the total switch");
     // A soldier another machine runs exists only online (its NetworkObject flags +0x128 bit 0): the host does not reorganize it.
@@ -261,7 +275,8 @@ int main() {
     Expect(SquadCommand(human,Command{Order::guard,{10,0,0}}) && !walking->boardV,
            "a new guard order replaces the earlier walk-to-seat order");
     // A panel order lives only under the lead it was given in (npc::LeadOf).
-    Reset();Put<void*>(human,kLeader,nullptr);q=SeeSquad(human,human,0,npc::Control::recruited,now);
+    Reset();playerObj=other;Put<unsigned char>(other,kHumanPlayer,1);Put<void*>(other,kHumanPad,other);
+    Put<void*>(human,kLeader,other);q=SeeSquad(human,human,0,npc::Control::recruited,now);
     Expect(SquadCommand(human,Command{Order::dismiss,{}}) && q->cmd.order==Order::guard,"a dismissed squad holds where it was let go");
     ++frame;++now;SeeSquad(human,human,0,npc::Control::free,now);
     Expect(q->cmd.order==Order::guard,"the dismissal's hold stays while the squad is its own");
@@ -275,12 +290,110 @@ int main() {
     Expect(q->cmd.order==Order::guard,"a squad gaining or losing members keeps its order (still its own lead)");
     ++frame;++now;SeeSquad(human,human,0,npc::Control::recruited,now);
     Expect(q->cmd.order==Order::none,"a guarding squad the player walks up to and recruits follows them, as the panel says");
-    Reset();Put<void*>(human,kLeader,nullptr);q=SeeSquad(human,human,0,npc::Control::recruited,now);
+    Reset();playerObj=other;Put<unsigned char>(other,kHumanPlayer,1);Put<void*>(other,kHumanPad,other);
+    Put<void*>(human,kLeader,other);q=SeeSquad(human,human,0,npc::Control::recruited,now);
     Expect(SquadCommand(human,Command{Order::guard,{10,0,0}}),"a recruited squad takes a guard order");
     ++frame;++now;SeeSquad(human,human,0,npc::Control::recruited,now);
     Expect(q->cmd.order==Order::guard,"a recruited squad told to guard keeps guarding while the player still leads it");
     ++frame;++now;SeeSquad(human,human,0,npc::Control::script,now);
     Expect(q->cmd.order==Order::none,"a script taking the squad drops the player's order");
+    // Commands use physical ownership and one consistent visible/dispatch freshness window.
+    {
+        Reset();Put<void*>(human,kLeader,nullptr);playerObj=other;
+        Put<unsigned char>(other,kHumanPlayer,1);Put<void*>(other,kHumanPad,other);Put<int>(other,kTeam,0);
+        auto* commandSquad=SeeSquad(human,human,0,npc::Control::free,now);
+        now+=300;
+        auto result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::guard,{40,0,0}},ObjRef::Of(other),{});
+        Expect(result.Accepted() && commandSquad->cmd.order==Order::guard,"a still-visible 300ms squad accepts a command instead of the old 100ms rejection");
+        now+=201;
+        result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::engage,{}},ObjRef::Of(other),{});
+        Expect(result.reason==NpcCommandReason::stale && commandSquad->cmd.order==Order::guard,"expired selection refuses without changing the last real order");
+        ++frame;SeeSquad(human,human,0,npc::Control::free,now);sessionOn=true;
+        result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::engage,{}},ObjRef::Of(other),{});
+        Expect(result.Accepted() && commandSquad->cmd.order==Order::engage,"online AI authority executes engage for the real requesting player");
+        Put<unsigned char>(human,edf::kRiderNet+edf::kNetFlags,1);
+        result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::guard,{0,0,0}},ObjRef::Of(other),{});
+        Expect(result.reason==NpcCommandReason::notAuthority && commandSquad->cmd.order==Order::engage,"a replica cannot pretend to execute a command");
+        Put<unsigned char>(human,edf::kRiderNet+edf::kNetFlags,0);
+        Put<void*>(human,kLeader,other);dead[kDead]=0;Put<unsigned char>(dead,kHumanPlayer,1);Put<void*>(dead,kHumanPad,dead);Put<int>(dead,kTeam,0);
+        result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::follow,{}},ObjRef::Of(dead),{});
+        Expect(result.reason==NpcCommandReason::notOwner && At<void*>(human,kLeader)==other,"another player cannot steal a recruited squad");
+        Put<void*>(human,kLeader,nullptr);int before=follows;
+        result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::recruit,{}},ObjRef::Of(dead),{});
+        Expect(result.Accepted() && follows==before+1 && At<void*>(human,kLeader)==dead,"host recruit follows the explicit requester, never host PlayerHuman");
+        Put<void*>(human,kRoute,other);
+        result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::engage,{}},ObjRef::Of(dead),{});
+        Expect(result.reason==NpcCommandReason::scripted,"live script control blocks commandeering even when the row was previously free");
+    }
+    // Leader class is not the whole squad: a Wing Diver can lead a Ranger who may occupy the driver seat.
+    {
+        Reset();Put<void*>(human,kLeader,nullptr);playerObj=other;
+        Put<unsigned char>(other,kHumanPlayer,1);Put<void*>(other,kHumanPad,other);Put<int>(other,kTeam,0);
+        dead[kDead]=0;unsigned char childCtrl[0x10]{};Put<long>(childCtrl,8,1);Put<void*>(dead,kSelfCtrl,childCtrl);
+        Put<unsigned>(human,kHumanMask,2);Put<unsigned>(dead,kHumanMask,1);Put<void*>(dead,kLeader,human);
+        Put<void*>(human,kFollowers,head);Put<void*>(head,0,node);Put<void*>(node,0,head);Put<void*>(node,0x10,dead);
+        Put<unsigned>(seats,kSeatClass,1);Put<unsigned>(seats,kSeatEnable,1);Put<int>(vehicle,kTeam,0);
+        Put<float>(vehicle,kPosition,1000);world.friends=1;world.frObject[0]=vehicle;
+        SeeSquad(human,human,0,npc::Control::free,now);sessionOn=true;
+        auto result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::board,{}},ObjRef::Of(other),{});
+        auto* child=Entry(dead,now);
+        Expect(result.Accepted() && result.affected==1 && child->boardV.Is(vehicle) && child->boardSeat==0,
+            "mixed squad boards a compatible member via nearby entrance even when leader class cannot ride and body centre is far");
+        const auto assignedAt=child->boardAt;++now;
+        result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::board,{}},ObjRef::Of(other),{});
+        Expect(result.Accepted() && child->boardAt==assignedAt,"an already valid boarding assignment is not reported as failure or restarted");
+        completeRide=true;Board(*child,dead,Pos(dead),now);
+        Expect(rides==1 && announcedBoards==1 && At<void*>(dead,kHumanRiding)==vehicle && At<void*>(seats,kSeatRider)==dead,
+            "accepted online command reaches real Board/native Ride entry and announces the completed seat transition");
+    }
+    // A guest pilots its own vehicle while the host owns the NPCs boarding the gunner seats.
+    {
+        Reset();sessionOn=true;host=true;playerObj=other;
+        Put<unsigned char>(other,kHumanPlayer,1);Put<void*>(other,kHumanPad,other);Put<int>(other,kTeam,0);
+        dead[kDead]=0;Put<unsigned char>(dead,kHumanPlayer,1);Put<void*>(dead,kHumanPad,dead);Put<int>(dead,kTeam,0);
+        Put<unsigned char>(dead,edf::kRiderNet+edf::kNetFlags,1);unsigned char guestCtrl[0x10]{},npcCtrl[0x10]{};
+        Put<long>(guestCtrl,8,1);Put<long>(npcCtrl,8,1);Put<void*>(dead,kSelfCtrl,guestCtrl);Put<void*>(human,kSelfCtrl,npcCtrl);
+        Put<unsigned char>(vehicle,edf::kRiderNet+edf::kNetFlags,1);Put<int>(vehicle,kTeam,0);
+        Put<void*>(dead,kHumanRiding,vehicle);Put<void*>(dead,kHumanVehicleCtrl,ctrl);Put<void*>(dead,kHumanSeat,seats);
+        Put<void*>(seats,kSeatRider,dead);Put<void*>(seats,kSeatRiderCtrl,guestCtrl);
+        Put<unsigned>(seats,kSeatClass,1);Put<unsigned>(seats,kSeatEnable,1);
+        Put<void*>(human,kLeader,dead);SeeSquad(human,human,0,npc::Control::recruited,now);
+        Expect(!IsOnlineAuthority(vehicle) && IsOnlineAuthority(human) && OnlineMaySeatNpc(vehicle),
+            "real authority policy allows host NPC boarding despite guest vehicle authority");
+        auto result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::board,{}},ObjRef::Of(dead),{});
+        auto* boarding=Entry(human,now);
+        Expect(result.Accepted() && boarding->boardV.Is(vehicle) && boarding->boardSeat==1 && world.friends==0,
+            "host uses requester's ridden vehicle and its free passenger slot, not host PlayerHuman or its vehicle list");
+        completeRide=true;Board(*boarding,human,Pos(human),now);
+        Expect(rides==1 && announcedBoards==1 && At<void*>(seats,kSeatRider)==dead &&
+            At<void*>(seats+edf::kSeatStride,kSeatRider)==human,
+            "native boarding and announcement put host NPC in guest vehicle without kicking its driver");
+    }
+    // Actual guard and attack behavior, not merely an accepted boolean or a recorded map event.
+    {
+        Reset();Put<void*>(human,kLeader,nullptr);playerObj=other;
+        Put<unsigned char>(other,kHumanPlayer,1);Put<void*>(other,kHumanPad,other);Put<int>(other,kTeam,0);
+        auto* commandSquad=SeeSquad(human,human,0,npc::Control::free,now);flatFloor=true;config.npcEvade=false;
+        Put<unsigned>(human,kControlMask,kMaskMove);Arms available;available.n=1;available.arm[0]=npc::Arm{100,0,10,false,true,false};
+        auto* soldier=Entry(human,now);soldier->control=npc::Control::free;
+        auto result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::guard,{40,0,0}},ObjRef::Of(other),{});
+        const float eyePoint[3]={0,1.5f,0};Plan behavior{};
+        for(int tick=0;tick<100 && At<float>(human,kMoveX)==0;++tick) {
+            now+=16;++frame;world.frame=frame;behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
+        }
+        Expect(result.Accepted() && std::strcmp(behavior.move,"at its post")==0 && At<float>(human,kMoveX)>0,
+            "guard command runs production MoveTo/navigation and writes actual movement intent");
+        unsigned char enemy[0x300]{},enemyCtrl[0x10]{};Put<void*>(enemy,kSelfCtrl,enemyCtrl);Put<long>(enemyCtrl,8,1);
+        world.enemies=1;world.enemy[0]=Enemy{enemy,{0,0,20},1};++frame;SeeSquad(human,human,0,npc::Control::free,now);
+        result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::engage,{}},ObjRef::Of(other),{});
+        behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
+        Expect(result.Accepted() && soldier->target.Is(enemy) && std::strcmp(behavior.move,"combat spot")==0,
+            "engage command enters actual production target acquisition and combat movement");
+        markEnemy=enemy;
+        result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::focus,{}},ObjRef::Of(other),ObjRef::Of(enemy));
+        Expect(result.Accepted() && commandSquad->commandFocus.Is(enemy) && !NpcMarked(),
+            "requester's explicit attack target belongs to that squad and does not replace host's global marker");
+    }
     // The player a soldier fights for is the one who recruited its squad, whichever machine's (this harness's
     // PlayerHuman is nullptr: `other` stands for another machine's player).
     Reset();Put<float>(other,kPosition,300.0f);Put<float>(other,kPosition+8,40.0f);
