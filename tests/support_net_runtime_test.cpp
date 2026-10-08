@@ -97,6 +97,9 @@ void WorldParticipants() {
     installed=true;online=true;ready=false;actors=2;expectedActors=3;gateReady=false;
     crew::ConfigureSupportNet({&PlanCall,&Validate,&Spawn,&Destroy,&Derive,&Participants,&AdmissionReady});
     EDF6AFMissionParticipants state{};
+    gateReady=true;actors=3;Step();EDF6AF_GetMissionParticipants(1,sizeof(state),&state);
+    Check(!state.ready,"preload cannot seal leftover actors before player creation begins");
+    gateReady=false;actors=2;
     Check(crew::SupportMissionPlayerAllowed(2),"initial mission creation remains allowed before roster seal");
     Step();Check(EDF6AF_GetMissionParticipants(1,sizeof(state),&state) && !state.ready,"unverified native admission gate cannot publish ready world");
     gateReady=true;tick+=300;Step();EDF6AF_GetMissionParticipants(1,sizeof(state),&state);
@@ -110,7 +113,8 @@ void WorldParticipants() {
     actors=0;tick+=300;Step();EDF6AF_GetMissionParticipants(1,sizeof(state),&state);
     Check(state.ready && state.participantCount==2 && state.worldEpoch==epoch,"death/removal observations cannot redefine frozen quorum");
     Check(!EDF6AF_GetMissionParticipants(2,sizeof(state),&state),"world snapshot ABI rejects unsupported version");
-    crew::ResetSupportNet();actors=4;expectedActors=4;tick+=300;Step();EDF6AF_GetMissionParticipants(1,sizeof(state),&state);
+    crew::ResetSupportNet();actors=4;expectedActors=4;crew::SupportMissionPlayerAllowed(0);
+    tick+=300;Step();EDF6AF_GetMissionParticipants(1,sizeof(state),&state);
     Check(state.ready && state.participantCount==3 && state.worldEpoch!=epoch && crew::SupportMissionPlayerAllowed(2),
         "next explicit mission admits prior lobby-only player into new frozen world");
     crew::ResetSupportNet();

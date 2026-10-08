@@ -22,7 +22,7 @@ bool running=false,blockedUntilMission=false;
 ULONGLONG nextResolve=0,lastTick=~0ULL;
 SRWLOCK worldLock=SRWLOCK_INIT;
 EDF6AFMissionParticipants world{};
-bool worldFrozen=false;
+bool worldFrozen=false,worldCreationSeen=false;
 std::uint64_t worldSerial=0;
 ULONGLONG nextWorldRead=0;
 
@@ -40,13 +40,13 @@ bool PuidText(void* puid,EDF6CoopPeer& out) noexcept {
 }
 void ResetWorld() noexcept {
     AcquireSRWLockExclusive(&worldLock);
-    world={};world.size=sizeof(world);worldFrozen=false;
+    world={};world.size=sizeof(world);worldFrozen=false;worldCreationSeen=false;
     if(worldSerial!=UINT64_MAX)world.worldEpoch=++worldSerial;
     ReleaseSRWLockExclusive(&worldLock);nextWorldRead=0;
 }
 void WorldTick(ULONGLONG now) noexcept {
     if(!hooks.participants || !hooks.admissionReady || !hooks.admissionReady() ||
-       !world.worldEpoch || now<nextWorldRead)return;
+       !world.worldEpoch || !worldCreationSeen || now<nextWorldRead)return;
     nextWorldRead=now+250;
     // Only the game thread writes worldFrozen. Once sealed, deaths, respawns,
     // team changes and lobby churn do not redefine current-world membership.
@@ -192,7 +192,12 @@ std::uint32_t GetMissionParticipants(std::uint32_t version,std::uint32_t size,ED
 }
 std::uint32_t AllowMissionPlayer(std::int32_t index) noexcept {
     AcquireSRWLockShared(&worldLock);const bool frozen=worldFrozen;ReleaseSRWLockShared(&worldLock);
-    if(!frozen)return 1;
+    if(!frozen) {
+        // MissionStart runs during preload. Do not seal a leftover old-world
+        // actor table before this lifetime actually starts creating players.
+        if(index>=0) {AcquireSRWLockExclusive(&worldLock);worldCreationSeen=true;ReleaseSRWLockExclusive(&worldLock);}
+        return 1;
+    }
     EDF6CoopPeer peer{};
     const HMODULE coop=GetModuleHandleW(L"EDF6Coop.dll");
     using ResolvePlayer=std::uint32_t(__cdecl*)(std::int32_t,EDF6CoopPeer*);

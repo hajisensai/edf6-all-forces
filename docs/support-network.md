@@ -64,7 +64,9 @@ reuses wire slot 1. Both dispatchers retain tokens as keys, not array indexes.
 `EDF6AF_GetMissionParticipants` publishes an atomic frozen current-world PUID
 set and local world epoch. It is sealed only after the native all-team visitor
 finds every expected player Soldier (including dead players); split-screen PUIDs
-are deduplicated only after that completeness check. A new lobby user is not a
+are deduplicated only after that completeness check. The lifetime must also have
+observed player creation begin, so preload cannot seal the previous world actors.
+A new lobby user is not a
 world player. Coop validates and routes only this frozen subset, so a lobby-only
 join or leave does not change the support generation or ACK quorum. A genuine
 participant link/identity/host failure still suspends new requests and retains
@@ -75,11 +77,14 @@ null-safe call at `1DC525`; AF guards the `22B626` call to the upper weak-result
 constructor. Both call the same `SupportMissionPlayerAllowed` policy: before
 sealing, ordinary initial player creation proceeds; after sealing, the dynamic
 User roster resolves only the requested mission index's PUID, which must be in
-the frozen actual-world set. A new lobby member therefore waits for the next
-mission, while existing players may respawn. Neither `591130` nor `5A3F90` is
+the frozen actual-world set. On a sealed machine, a new lobby member's actor is
+refused for this mission, while existing players may respawn. Neither `591130` nor `5A3F90` is
 globally made to return null, since another original caller dereferences that
-result. No mid-world actor/seat catchup is claimed or substituted with invisible
-local-only actors.
+result. A fresh joiner's own first world is not sealed yet; these local guards
+alone do not prove that the joiner cannot load the host's already running world.
+That requires a verified upper mission-entry rule or trusted host world policy
+before entry. No mid-world actor/seat catchup is claimed or substituted with
+invisible local-only actors.
 
 The host-internal `SubmitPreparedSupportPlan` handles existing mission vehicles
 through the same protocol. It accepts reserved catalog 1023 and exactly one
