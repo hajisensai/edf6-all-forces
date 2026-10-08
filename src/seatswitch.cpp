@@ -223,7 +223,7 @@ int SeatOf(unsigned char* v,const unsigned char* human) noexcept {
 
 void Publish(unsigned char* v,const unsigned char* human,bool keys,bool locked,const Rider_& r,ULONGLONG ms) noexcept {
     SeatPrompt p{};
-    const unsigned count=SeatCount(v);
+    const unsigned count=ProteusVisibleSeats(v,SeatCount(v));
     p.seats=static_cast<int>(count);p.at=SeatOf(v,human);p.keys=keys;p.locked=locked;
     p.aircraft=IsHelicopter(v) || BodyOf(v)!=PluginBody::none;
     p.refused=ms<r.refusedUntil ? r.refused : -1;

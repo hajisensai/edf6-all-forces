@@ -505,7 +505,7 @@ void DoorLog(const unsigned char* v,const unsigned char* human,bool prompt) noex
     doorLogged[doorLoggedNext++%kDoorLogged]=v;
     ToFrame(v,at,door);
     const float g[3]={hp[0]-at[0],hp[1]-at[1],hp[2]-at[2]};
-    Log("DOOR v=%p seat 0's door at (%.2f,%.2f,%.2f) from its centre (its frame), reach %.2f m; the player at "
+    Log("DOOR v=%p seat 0's door at (%.2f,%.2f,%.2f) from object frame, reach %.2f m; the player at "
         "(%.2f,%.2f,%.2f), %.2f m from the door; the stock prompt %s",v,door[0],door[1],door[2],reach,who[0],who[1],
         who[2],std::sqrt(g[0]*g[0]+g[1]*g[1]+g[2]*g[2]),prompt ? "shows" : "does not show");
 }
