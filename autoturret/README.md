@@ -47,7 +47,7 @@ already out-damages the same-level Barrias TZ4 but has well under half its durab
 In a gun position the plugin aims (the Kepler, Bohr and howitzer turrets; the Titan's and the Ranger tanks' gunner
 seats; driving those tanks you get the lock too):
 
-- **Two modes**, switched with **Z** (pad: none by default, since L3 is EDF6VehicleCrew's free look; ini `AimModeKey` / `AimModeButton`, the starting one `AimMode`):
+- **Two modes**, switched with **V** (pad: none by default, since L3 is EDF6VehicleCrew's free look; ini `AimModeKey` / `AimModeButton`, the starting one `AimMode`):
   - **Auto-aim** (default, as before): the turret turns itself onto the target, leading it on the round's arc.
   - **Lead circle**: the turret is yours alone; the HUD draws a green **lead circle**: put the gun's line through its
     centre and the round meets the target where the target will be (the gun's real round speed and drop, the target's
@@ -63,7 +63,7 @@ seats; driving those tanks you get the lock too):
   it; the AI gunners of the same vehicle take it first when they can reach it. It goes when the target dies or stops
   being lockable, gets 1.5x the lock range away, or you leave the seat. Unlocked, the auto-aim picks its own targets as
   before and the lead circle shows on its pick.
-- Two lines low on the screen (EDF6VehicleCrew's `TurretAimHud=1`): whether auto-aim is on or off (green `AUTO-AIM ON`; amber `AUTO-AIM OFF (LEAD CIRCLE)`), and under it the switch key (`[Z] auto-aim off` / `on`; on a pad with no `AimModeButton` set, a hint to set one) and the lock key (red while locked). Pressing the switch key shows the new state in large letters over the screen's middle for about 1.5 s.
+- Two lines low on the screen (EDF6VehicleCrew's `TurretAimHud=1`): whether auto-aim is on or off (green `AUTO-AIM ON`; amber `AUTO-AIM OFF (LEAD CIRCLE)`), and under it the switch key (`[V] auto-aim off` / `on`; on a pad with no `AimModeButton` set, a hint to set one) and the lock key (red while locked). Pressing the switch key shows the new state in large letters over the screen's middle for about 1.5 s.
 - **With EDF6VehicleCrew's turret camera** (its `DecoupledTurretCam=1`, the default: the mouse / right stick turns the
   camera and your turret follows the screen's centre), the gun you sit at is the camera's by default: this plugin never
   turns it onto a target of its own picking. In auto-aim it turns it onto **your lock** only (lock with Q / X); the
@@ -153,3 +153,6 @@ Keplers will not behave the same for everyone. Have every player install it. Rev
 MIT, see [LICENSE](LICENSE). Bundled: `third_party/EDFModLoader/PluginAPI.h` at the repository root (MIT) and,
 in `pylib/` at the repository root, `cpk.py` / `crilayla.py` (CPK / CRILAYLA readers from EDF6MultiSlot by
 momotori01, public domain, `pylib/LICENSE.edf6-cpk`).
+
+
+With current VehicleCrew, Z belongs to a valid vehicle sight. A legacy colliding AimModeKey=Z uses V for auto-aim without rewriting the ini; the HUD shows the effective key and SIGHT/AUTO conflict hint. A conflicting pad mode button is left unbound. In overhead observation, its return blend, and an active physical scope, AutoTurret does not turn the player's gun (locked or unlocked). Entering/exiting a scope does not change the selected auto-aim mode. NPC gunner behavior is unchanged.

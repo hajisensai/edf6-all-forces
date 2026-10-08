@@ -67,7 +67,8 @@ const unsigned char kAimStepCode[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24
 // point {locator, bone} at +0x208, the look-at's at +0x218; a bone's world rows at +0xB0 (translation +0xE0).
 constexpr std::size_t kSeatCamType=0x200,kSeatCamEye=0x208,kSeatCamLook=0x218,kPointBone=0x8,kBoneOrigin=0xE0;
 // The camera: its eased eye and look-at (state 2).
-constexpr std::size_t kCamEye=0x630,kCamLook=0x640;
+constexpr std::size_t kCamEye=0x630,kCamLook=0x640,kCamCollisionMargin=0x528;
+const unsigned char kCollisionMarginCode[]={0xC7,0x87,0x28,0x05,0,0,0xCD,0xCC,0xCC,0x3D}; // F5058: 0.1 m
 // game_object_camera_setting as the object holds it (0x54DDF0): look-at, eye, in its frame.
 constexpr std::size_t kObjCamLook=0x170,kObjCamEye=0x180;
 // The seat's input (docs/stores-re.md §4): 1 = a pad, its button bits; the rider's aim stick (0x572DF0 writes it, the
@@ -310,9 +311,11 @@ bool Steer(const unsigned char* seat,const Steering& s,const float* want,float* 
     return tcam::SteerAxes(game.steer,want,s.held,s.hull,axes,reinterpret_cast<const float*>(seat+kSeatAim+kAimParams),kOnTarget,in);
 }
 
-void Readout(const unsigned char* seat,const Shared& s,bool on,const float* holdAt,bool ballistic) noexcept {
+void Readout(const unsigned char* seat,const Shared& s,bool on,const float* holdAt,bool ballistic,bool commandValid=false) noexcept {
     TurretCamReadout r{};
     r.physicalOnly=s.physicalOnly;
+    r.aimValid=commandValid && s.decoupled && !s.physicalOnly && !s.high &&
+               std::isfinite(holdAt[0]) && std::isfinite(holdAt[1]) && std::isfinite(holdAt[2]);
     r.decoupled=s.decoupled;r.freeLook=s.free || s.returning;r.high=s.high;r.onTarget=on;
     const unsigned char* gun=Gun(s.v,seat);
     float muzzle[3],dir[3];
@@ -471,7 +474,7 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
     ReleaseSRWLockExclusive(&lock);
     if(foreign!=game.foreign && c.debug)Log("TURRETCAM the aim's input is %s",foreign ? "another hand's (the turret is theirs, the view the rider's)" : "the rider's again");
     game.foreign=foreign;
-    if(s.decoupled || s.free || s.returning)Readout(seat,s,on,target,ballistic);
+    if(s.decoupled || s.free || s.returning)Readout(seat,s,on,target,ballistic,game.hasAim || hold);
 }
 
 void __fastcall AimHook(void* aim,const float* in) {
@@ -513,7 +516,21 @@ bool AuthoredRig(const unsigned char* v,tcam::Rig* rig,float* base) noexcept {
     return true;
 }
 
-void Place(float* lookOut,float* eyeOut,unsigned char* cam,const float* eye,const float* look) noexcept {
+void Place(float* lookOut,float* eyeOut,unsigned char* cam,const float* eye,const float* focus,bool surfaceFocus=false) noexcept {
+    float collisionLook[3];std::memcpy(collisionLook,focus,12);
+    if(surfaceFocus) {
+        // F6760 queries desired-look -> look, then look -> eye. A ballistic intersection lies ON a collider;
+        // a zero-distance hit can collapse eye and look before native LookTo (0/-90 degree snapping).
+        // Move only the collision pivot toward the eye by the native retreat margin. The real projectile
+        // focus stays unchanged and collinear, so it still projects to the same optical centre.
+        float towardEye[3]={eye[0]-focus[0],eye[1]-focus[1],eye[2]-focus[2]};
+        const float distance=vec::Len(towardEye),margin=At<float>(cam,kCamCollisionMargin);
+        if(distance>1e-5f && std::isfinite(margin) && margin>0.0f) {
+            const float share=std::fmin(margin,distance*0.5f)/distance;
+            for(int i=0;i<3;++i)collisionLook[i]+=towardEye[i]*share;
+        }
+    }
+    const float* look=collisionLook;
     std::memcpy(lookOut,look,12);lookOut[3]=1.0f;
     std::memcpy(eyeOut,eye,12);eyeOut[3]=1.0f;
     float* camEye=reinterpret_cast<float*>(cam+kCamEye);
@@ -631,7 +648,7 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
     for(int i=0;i<3;++i)if(!std::isfinite(eye[i]) || !std::isfinite(look[i]))return;
     PublishObservation(seat,point || camSide.carry>0.0f);
     std::memcpy(camSide.eye,eye,12);std::memcpy(camSide.look,look,12);
-    Place(lookTarget,lookTarget+16,cam,eye,look);   // lookTarget+16 floats = out+0x70: the eye's target
+    Place(lookTarget,lookTarget+16,cam,eye,look,point);   // lookTarget+16 floats = out+0x70: the eye's target
 }
 
 float* __fastcall LookHook(const void* point,float* lookOut,unsigned char* cam) {
@@ -653,7 +670,7 @@ float* __fastcall LookHook(const void* point,float* lookOut,unsigned char* cam) 
 // The look-at fetch's redirect (the camera) and the AddSe aim step's chain (the turret, and the gun stabilizer's way
 // in: stab.cpp StabStep) go in apart: either one's code changed leaves the other in.
 bool InstallLook() noexcept {
-    if(!Matches(kLookSite,kLookSiteCode,sizeof(kLookSiteCode))) {
+    if(!Matches(kLookSite,kLookSiteCode,sizeof(kLookSiteCode)) || !Matches(0xF5058,kCollisionMarginCode,sizeof(kCollisionMarginCode))) {
         Log("TURRETCAM the riding camera's code changed: the stock vehicle cameras (no turret camera, no high view)");
         return false;
     }

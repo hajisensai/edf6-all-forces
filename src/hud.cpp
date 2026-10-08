@@ -129,6 +129,7 @@ struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool
                   bool launcher; LauncherReadout launch; bool heliSight; HeliSightReadout heliAim;
                   bool gunner; GunnerReadout gun; bool highCam,highCamOn,highCamKeys; bool heliFly; PlayerHeliReadout heliHud;
                   bool turret; edf::aimlink::TurretReadoutV1 turretAim;
+                  bool mountedOptic,turretBinding; edf::aimlink::ModeBindingV1 binding;
                   bool stock; StockHudReadout stockHud;
                   bool payload; PayloadReadout payloadHud;
                   bool warned; Warnings warn;
@@ -680,23 +681,24 @@ void SeatLine(Text* text,float width,float height,const SeatPrompt& p,Line* line
     l.x=(width-l.w)*0.5f;l.y=height*0.82f;
 }
 
-// The turret camera (turretcam.cpp): while the turret has not come onto the point the view sends it to, a hollow
-// square where its gun points (where its round would be at that point's range); looking round (free look), a cyan
-// cross on the point it holds. The rest is a vehicle HUD's to draw (TurretCamReadout). `square` false: the stock
-// vehicles' HUD is up and its gun's boresight and pipper already show where the gun is against the screen's centre
-// (one gun, one mark).
+void Arc(void* drawer,void* ctx,float cx,float cy,float r,float from,float span,float t,int sides,const float* rgba) noexcept;
+
+// The controller's validated mouse command is an open circle; free look holds it in cyan.
+// The actual gun/impact is a separate mark. Stock HUD already supplies that mark, so
+// `square` only requests the legacy barrel-deviation square when that HUD is absent.
 void TurretMark(void* drawer,void* ctx,const float* vp,float width,float height,float s,const TurretCamReadout& r,bool square) noexcept {
-    if(r.physicalOnly)return;
+    if(r.physicalOnly || r.high)return;
     float sx,sy;
-    if(square && !r.onTarget && sight::ToScreen(vp,r.gun,1.0f,width,height,&sx,&sy)) {
+    // r.aim is the controller's validated mouse command/held point. Never use the
+    // physical barrel endpoint r.gun as a surrogate mouse cursor.
+    if(r.aimValid && (r.decoupled || r.freeLook) && sight::ToScreen(vp,r.aim,1.0f,width,height,&sx,&sy))
+        Arc(drawer,ctx,sx,sy,14.0f*s,0.0f,6.283185307f,2.0f*s,28,r.freeLook ? kCyan : kWhite);
+    if(square && r.aimValid && !r.onTarget && sight::ToScreen(vp,r.gun,1.0f,width,height,&sx,&sy)) {
         const float h=9.0f*s,t=2.0f*s;
         Rect(drawer,ctx,sx-h,sy-h,sx+h,sy-h+t,kWhite);Rect(drawer,ctx,sx-h,sy+h-t,sx+h,sy+h,kWhite);
         Rect(drawer,ctx,sx-h,sy-h,sx-h+t,sy+h,kWhite);Rect(drawer,ctx,sx+h-t,sy-h,sx+h,sy+h,kWhite);
     }
-    if(r.freeLook && sight::ToScreen(vp,r.aim,1.0f,width,height,&sx,&sy)) {
-        const float h=7.0f*s,t=2.0f*s;
-        Rect(drawer,ctx,sx-h,sy-t*0.5f,sx+h,sy+t*0.5f,kCyan);Rect(drawer,ctx,sx-t*0.5f,sy-h,sx+t*0.5f,sy+h,kCyan);
-    }
+
 }
 
 // The gunship's gun with the player at it (playerjet_crew.inc, README 炮舰机): the cross where a round of the picked gun
@@ -2320,7 +2322,7 @@ void Binding(bool keys,int key,int button,wchar_t* out,int size) noexcept {
     else ButtonName(button,out,size);
 }
 void TurretAimMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,
-                    const edf::aimlink::TurretReadoutV1& r,bool flipped,Line* lines,int* at) noexcept {
+                    const edf::aimlink::TurretReadoutV1& r,bool flipped,Line* lines,int* at,const edf::aimlink::ModeBindingV1* binding=nullptr,float controlsBottom=-1.0f) noexcept {
     namespace link=edf::aimlink;
     float x,y;
     if(r.lock!=link::Lock::none)LockAt(drawer,ctx,vp,width,height,s,r.lock==link::Lock::locked ? 2 : 1,r.at,r.lockProgress,&x,&y);
@@ -2359,8 +2361,18 @@ void TurretAimMarks(void* drawer,void* ctx,Text* text,const float* vp,float widt
         const std::size_t n=wcslen(keys);
         std::swprintf(keys+n,128-n,Tr(Tx::lockKey),n ? L"   " : L"",lock,Tr(r.lock==link::Lock::none ? Tx::lockWord : Tx::nextWord));
     }
-    Label(text,lines,at,width*0.5f,height*0.875f,1,kLineScale,colour,L"%ls",state);
-    Label(text,lines,at,width*0.5f,height*0.905f,1,kLineScale*0.85f,r.lock==link::Lock::locked ? kRed : kWhite,L"%ls",keys);
+    if(binding && binding->conflict) {
+        wchar_t requested[32],effective[32];
+        Binding(binding->keys,binding->requested,binding->requested,requested,32);
+        if(binding->effective>0)Binding(binding->keys,binding->effective,binding->effective,effective,32);
+        else wcscpy_s(effective,L"--");
+        const std::size_t n=wcslen(keys);
+        std::swprintf(keys+n,128-n,Tr(Tx::aimSightBinding),requested,effective);
+    }
+    const float keysY=controlsBottom>=0.0f ? controlsBottom : height*0.905f;
+    const float stateY=controlsBottom>=0.0f ? controlsBottom-32.0f*s : height*0.875f;
+    Label(text,lines,at,width*0.5f,stateY,1,kLineScale,colour,L"%ls",state);
+    Label(text,lines,at,width*0.5f,keysY,1,kLineScale*0.85f,r.lock==link::Lock::locked ? kRed : kWhite,L"%ls",keys);
     if(!flipped || !r.ownGun)return;
     const float by=height*0.30f;
     Label(text,lines,at,width*0.5f,by,1,kTitleScale,colour,L"%ls",Tr(circle ? Tx::autoAimOffBanner : Tx::autoAimOn));
@@ -3025,6 +3037,7 @@ void HudPublish() noexcept {
     s.gunner=PlayerGunnerHud(&s.gun);
     s.highCam=PlayerHighCam(&s.highCamOn,&s.highCamKeys);
     s.turret=PlayerTurretAim(&s.turretAim);
+    s.mountedOptic=SightZoomMounted(nullptr);s.turretBinding=PlayerTurretBinding(&s.binding);
     s.payload=PlayerPayload(&s.payloadHud);
     s.stock=PlayerStockHud(&s.stockHud);   // the stock vehicles' HUD (StockVehicleHud; a heli's stores)
     s.warned=WarnLatest(&s.warn);   // the aircraft's warnings (warn.cpp WarnTick, this frame's: it runs first)
@@ -3883,15 +3896,17 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(MapOwnsView()){FreeText(text);return;}
         const ULONGLONG now=GetTickCount64();
         const sightzoom::Kind sightKind=SightZoomView();
+        const float sightMagnification=SightZoomNow(nullptr);
+        const sightzoom::Mask sightMask=sightzoom::MaskOf(sightKind);
+        const bool scopeOverlay=sightMagnification>1.0f && sightMask!=sightzoom::Mask::none;
         {   // A validated seat/weapon chooses the mask. Aircraft/mechs keep their own HUD; overhead has no optic.
             const Snapshot& z=Latest();
-            const float zoom=SightZoomNow(nullptr);
-            const sightzoom::Mask mask=sightzoom::MaskOf(sightKind);
-            if(zoom>1.0f && mask!=sightzoom::Mask::none && now-z.tick<=kFreshMs)
-                ScopeShade(drawer,ctx,t,width,height,s,zoom,mask==sightzoom::Mask::sensor,lines,&at);
+            if(scopeOverlay && now-z.tick<=kFreshMs)
+                ScopeShade(drawer,ctx,t,width,height,s,sightMagnification,sightMask==sightzoom::Mask::sensor,lines,&at);
         }
         for(int i=0;i<count && i<3;++i)CarrierBars(drawer,ctx,t,viewProj,width,height,s,panels[i],lines,&at,now);
         const Snapshot& snap=Latest();
+        const bool mountedOptic=snap.mountedOptic || scopeOverlay; // also cover the first paint before next HUD publication
         // A switch the player makes shows for a moment (hud_cue.h Change, kSwitchMs): the picked store (forgotten while no
         // aircraft's stores show, so boarding shows none) and EDF6AutoTurret's aim mode.
         static hudcue::Change storePick{},aimMode{};
@@ -3961,14 +3976,24 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(now-snap.tick<=kFreshMs && snap.highCam && !snap.cockpit)HighCamHint(t,width,height,s,snap.highCamOn,snap.highCamKeys,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.seats)SeatLine(t,width,height,snap.seatPrompt,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.entrance)EntranceMark(drawer,ctx,t,viewProj,width,height,s,snap.boardingEntrance,lines,&at);
-        if(fresh && snap.turretCamOk && !snap.cockpit && !launcherSight && !overhead && !gunnerSight && !mechSight)
+        if(fresh && snap.turretCamOk && !mountedOptic && !snap.cockpit && !launcherSight && !overhead && !gunnerSight && !mechSight)
             TurretMark(drawer,ctx,viewProj,width,height,s,snap.turretCam,!stockHud);
         if(gunnerSight)GunnerMarks(drawer,ctx,t,viewProj,width,height,s,snap.gun,lines,&at);
-        if(fresh && snap.turret && !snap.cockpit && !(physicalSight && snap.turretAim.ownGun) && (!stockHud || stockPick==0) && !launcherSight && !overhead && !gunnerSight && !mechSight)
-            TurretAimMarks(drawer,ctx,t,viewProj,width,height,s,snap.turretAim,aimFlipped,lines,&at);
+        const bool showTurretOverlay=fresh && snap.turret && !mountedOptic && !snap.cockpit && !(physicalSight && snap.turretAim.ownGun) && (!stockHud || stockPick==0) && !launcherSight && !overhead && !gunnerSight && !mechSight;
+        if(showTurretOverlay) {
+            float controlsBottom=-1.0f;
+            if(stockHud) {
+                LoadCell cells[kStockArms];const int n=StockCells(snap.stockHud,cells);Line keys{};
+                if(snap.payload)AircraftControls(keys,snap.payloadHud.keys,snap.payloadHud.choices,snap.payloadHud.switchButton,0,false,false);
+                const auto dock=LoadoutDockOf(t,width,height,s,cells,n,keys.text[0] ? 1 : 0);
+                controlsBottom=dock.top-20.0f*s;
+            }
+            TurretAimMarks(drawer,ctx,t,viewProj,width,height,s,snap.turretAim,aimFlipped,lines,&at,
+                           snap.turretBinding ? &snap.binding : nullptr,controlsBottom);
+        }
         if(stockHud) {
             const StockExtras x{fresh && snap.nix ? &snap.nixTorso : nullptr,fresh && snap.drill ? &snap.drillCue : nullptr,
-                                !physicalSight && stockPick==0 && snap.turret && snap.turretAim.ownGun && snap.turretAim.mode==edf::aimlink::Mode::leadCircle && snap.turretAim.lead,
+                                showTurretOverlay && !physicalSight && stockPick==0 && snap.turretAim.ownGun && snap.turretAim.mode==edf::aimlink::Mode::leadCircle && snap.turretAim.lead,
                                 fresh && snap.emc ? &snap.emcCue : nullptr,
                                 fresh && snap.proteus ? &snap.proteusRo : nullptr,overhead};
             StockDockHud(drawer,ctx,t,viewProj,width,height,s,snap.stockHud,x,snap.payload ? &snap.payloadHud : nullptr,

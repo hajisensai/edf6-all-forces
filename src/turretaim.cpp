@@ -5,12 +5,15 @@
 // other works as before.
 #include "crew.h"
 #include "turretaim.h"
+#include "memory.h"
 
 namespace crew {
 namespace {
 edf::aimlink::TurretReadoutFn turretReadout=nullptr;
 edf::aimlink::SeatQueryFn turretSteers=nullptr;
 edf::aimlink::AwareFn turretAware=nullptr;
+edf::aimlink::ModeBindingFn turretBinding=nullptr;
+ULONGLONG bindingTried=0;
 ULONGLONG turretTried=0,steersTried=0,awareTried=0;
 }  // namespace
 
@@ -22,6 +25,19 @@ bool AutoTurretReadout(edf::aimlink::TurretReadoutV1* out) noexcept {
 
 bool PlayerTurretAim(edf::aimlink::TurretReadoutV1* out) noexcept {
     return Cfg().enabled && Cfg().turretAimHud && AutoTurretReadout(out);
+}
+
+bool PlayerTurretBinding(edf::aimlink::ModeBindingV1* out) noexcept {
+    namespace link=edf::aimlink;
+    const auto fn=link::Resolve(link::kTurretDll,link::kModeBinding,turretBinding,bindingTried);
+    return Cfg().enabled && Cfg().turretAimHud && fn && fn(out);
+}
+
+bool CurrentTurretPlayer(const void* object,unsigned index) noexcept {
+    const auto v=static_cast<unsigned char*>(const_cast<void*>(object));
+    if(!Readable(v,kSeatCount+8) || v[kDead] || index>=SeatCount(v))return false;
+    const auto seat=SeatAt(v,index);
+    return SeatRider(seat)==Rider::player && At<const void*>(seat,kSeatRider)==PlayerHuman();
 }
 
 int AutoTurretSteers(const void* vehicle,unsigned seat) noexcept {
@@ -62,4 +78,19 @@ extern "C" __declspec(dllexport) float __cdecl EDF6VehicleCrew_MapRayV1(const fl
     if(!a || !b || !hit)return -1.0f;
     __try { return crew::MapRay(a,b,hit); }
     __except(EXCEPTION_EXECUTE_HANDLER){return -1.0f;}
+}
+
+// Reserve a configured sight binding before the first press, not only while zoomed.
+extern "C" __declspec(dllexport) bool __cdecl EDF6VehicleCrew_SightBindingV1(const void* vehicle,unsigned seat,bool keys,int binding) {
+    using namespace crew;
+    __try {
+        if(!Cfg().enabled || !Cfg().sightZoom || binding<=0 || !CurrentTurretPlayer(vehicle,seat))return false;
+        if(binding!=(keys ? Cfg().sightZoomKey : Cfg().sightZoomButton))return false;
+        return SightZoomCanMount(vehicle,seat);
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+extern "C" __declspec(dllexport) bool __cdecl EDF6VehicleCrew_TurretObserverV1(const void* vehicle,unsigned seat) {
+    using namespace crew;
+    __try {return Cfg().enabled && CurrentTurretPlayer(vehicle,seat) && (HighCamOn(vehicle) || TurretCamHighTransition(vehicle) || SightZoomMounted(vehicle));}
+    __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

@@ -63,7 +63,7 @@ struct Config {
     // it and lock the target nearest the view (virtual-key codes, pad button bits; 0 = none), the lock's cone (deg off
     // the view) and range (m, 0 = the gun's), how long a held lock binding takes to let the lock go.
     int aimMode=0;
-    int modeKey=0x5A,modeButton=0;      // Z; no pad button (L3 is EDF6VehicleCrew's FreeLookButton in the same seats)
+    int modeKey=0x56,modeButton=0;      // V; no pad button (L3 is EDF6VehicleCrew's FreeLookButton in the same seats)
     int lockKey=0x51,lockButton=0x04;   // Q, X (the jets' next-target bindings)
     float lockCone=20.0f;
     float lockRange=0.0f;
@@ -232,6 +232,8 @@ bool LeadCircle() noexcept;
 // EDF6VehicleCrew's turret camera turns `vehicle`'s seat `seat` after the player's view (common/edf/aimlink.h
 // CameraTurret); false without that plugin (or an older one): the player's gun is this plugin's as in V1.
 bool CameraTurret(const unsigned char* vehicle,unsigned seat) noexcept;
+bool ObservesTurret(const unsigned char* vehicle,unsigned seat) noexcept;
+edf::aimlink::PlayerGun PlayerControlRule(const unsigned char* vehicle,unsigned seat,bool lead,bool locked) noexcept;
 // EDF6VehicleCrew's gun stabilizer holds `vehicle`'s seat `seat` (common/edf/aimlink.h V3): `held` the axes it holds the
 // gun at this frame with no input (steer from these), `hull` the hull's part of that since the last frame (AxisInput's).
 // False (the plugin absent, older, or the seat not held): `held` = `axes` (the axes as they are), `hull` 0.

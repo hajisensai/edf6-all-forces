@@ -1073,7 +1073,7 @@ def sight_zoom_wired() -> None:
     # magnified, the gunship gunner's a sensor rectangle; its offline check under CTest; the heli gun's ladder.
     hud = src('src/hud.cpp')
     draw = hud.split('void HudDraw(const float* viewProj,', 1)[1]
-    assert draw.index('ScopeShade(drawer,ctx,t,width,height,s,zoom,mask==sightzoom::Mask::sensor') < draw.index('CarrierBars(')
+    assert draw.index('ScopeShade(') < draw.index('CarrierBars(')
     assert 'sightzoom::MaskOf(sightKind)' in draw and 'SightZoomView()' in draw
     assert 'SeatCapability(v,seat)' in code and 'HighCamOn(v) || TurretCamHighTransition(v)' in code
     assert 'LadderTicks(drawer,ctx,text,vp,width,height,s,h.ladder,' in hud and 'r.ladder=gunsight::Of(' in src('src/helisight.cpp')
@@ -1415,16 +1415,16 @@ def turret_aim_wired() -> None:
     steer = at.split('float Steer(', 1)[1].split('\n}\n', 1)[0]
     put = steer.find('Put<float>(vehicle,kTurn')
     assert 0 <= steer.find('if(!rule.steer)return flight;') < put < steer.find('track->steered=Frame();'), 'Steer: the rule gates the turn'
-    assert 'PlayerGunRule(CameraTurret(vehicle,0),LeadCircle(),only!=nullptr)' in steer
+    assert 'PlayerControlRule(vehicle,0,LeadCircle(),only!=nullptr)' in steer
     gunner = src('autoturret/src/gunner.cpp')
     seat = gunner.split('void SteerSeat(', 1)[1].split('\n}\n', 1)[0]
     put = seat.find('Put<float>(vehicle,kTurn')
     assert 0 <= seat.find('if(!rule.steer)return;') < put < seat.find('track.steered=autoturret::Frame();'), 'SteerSeat: the rule gates the turn'
-    assert 'PlayerGunRule(CameraTurret(vehicle,s),LeadCircle(),only!=nullptr)' in seat
+    assert 'PlayerControlRule(vehicle,s,LeadCircle(),only!=nullptr)' in seat
     link = src('common/edf/aimlink.h')
     names = dict(re.findall(r'constexpr char (k\w+)\[\]="(\w+)";', link))
     assert set(names) == {'kViewRay', 'kMapRay', 'kTurretReadout', 'kCameraTurret', 'kSteers', 'kStabilizer', 'kStabilizerAware', 'kPriorityZone',
-                          'kInputHeld'}, names   # kPriorityZone: proteus_wired; kInputHeld: map_wired
+                          'kInputHeld', 'kSightBinding', 'kTurretObserver', 'kModeBinding'}, names   # kPriorityZone: proteus_wired; kInputHeld: map_wired
     assert names['kCameraTurret'].endswith('V2') and names['kSteers'].endswith('V2'), names
     assert names['kStabilizer'].endswith('V3') and names['kStabilizerAware'].endswith('V3'), names
     assert f'bool __cdecl {names["kStabilizer"]}(' in src('src/stab.cpp') and f'bool __cdecl {names["kStabilizerAware"]}(' in at
@@ -4389,7 +4389,7 @@ def hud_switch_cues_wired() -> None:
     and the mode line were, and their offline checks run (tools/hud_cue_check.cpp, hud_view's TurretLayoutApart)."""
     hud, cmake, view = src('src/hud.cpp'), src('CMakeLists.txt'), src('tools/hud_view.cpp')
     for call in ('CockpitStrip(drawer,ctx,t,width,height,s,snap.jet,storeSwitched,', 'JetCells(snap.jet,cells)',
-                 'StockCells(snap.stockHud,cells)', 'snap.turretAim,aimFlipped,lines,&at)'):
+                 'StockCells(snap.stockHud,cells)', 'snap.turretAim,aimFlipped,lines,&at,'):
         assert call in hud, call
     assert 'StoresText(stores,_countof(stores),j,false);' in hud and 'Tx::autoAimOn' in hud and 'Tx::autoAimOffCircle' in hud
     table = src('src/hudtext.inc')

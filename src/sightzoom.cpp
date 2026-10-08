@@ -220,6 +220,13 @@ void SightZoomStock(unsigned char* v) noexcept {
     if(toggle.ref.Is(v))ResetSightZoom();
 }
 
+bool SightZoomCanMount(const void* vehicle,unsigned seat) noexcept {
+    if(MapOwnsView())return false;
+    const Cue c=Snapshot();
+    __try { return c.vehicle.obj==vehicle && c.seat==seat && c.sight.mounted && Current(c); }
+    __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
 bool SightZoomMounted(const void* vehicle) noexcept {
     if(MapOwnsView())return false;
     const Cue c=Snapshot();

@@ -197,6 +197,28 @@ int main() {
     Check(PlanAirSupport(0,supportTarget,observer,&route)==support::Refusal::noEntry,"unknown water geometry cannot authorize ground deployment of aircraft");
     supportSea=Sea::land;
     Check(PlanAirSupport(16,supportTarget,observer,&route)==support::Refusal::unsupported,"stationary submarine model cannot fake a physical entry");
+    // Installation against a private image with the supported native bomber signatures. A restored
+    // legacy takeover installs successfully here and mutates these bytes/vtable, failing this check.
+    image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2000000,MEM_RESERVE|MEM_COMMIT,PAGE_EXECUTE_READWRITE));
+    Check(image!=nullptr,"private native-profile fixture allocated");
+    constexpr unsigned bomberInit=0x5AABB0,radioBomber=0x2B924E,missionBomber=0x5B4423;
+    constexpr unsigned planeUpdate=0x5AB240,planeSlot=0x17D3A30+5*8;
+    const unsigned char initSignature[]={0x48,0x8B,0xC4,0x55,0x53,0x56,0x57,0x41,0x54,0x41,0x55,0x41};
+    const unsigned char radioSignature[]={0xE8,0x5D,0x19,0x2F,0x00,0x90,0x48,0x8B,0x4D,0x18};
+    const unsigned char missionSignature[]={0xE8,0x88,0x67,0xFF,0xFF,0x90,0xBB,0xFF,0xFF,0xFF};
+    const unsigned char updateSignature[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89};
+    std::memcpy(image+bomberInit,initSignature,sizeof(initSignature));
+    std::memcpy(image+radioBomber,radioSignature,sizeof(radioSignature));
+    std::memcpy(image+missionBomber,missionSignature,sizeof(missionSignature));
+    std::memcpy(image+planeUpdate,updateSignature,sizeof(updateSignature));
+    Put<void*>(image,planeSlot,image+planeUpdate);
+    InstallAirstrikes();
+    Check(At<void*>(image,planeSlot)==image+planeUpdate,"native bomber update is never intercepted or held awaiting an empty substitute");
+    Check(std::memcmp(image+radioBomber,radioSignature,sizeof(radioSignature))==0,
+          "Air Raider native payload construction remains untouched");
+    Check(std::memcmp(image+missionBomber,missionSignature,sizeof(missionSignature))==0,
+          "mission-script native payload construction remains untouched");
+    VirtualFree(image,0,MEM_RELEASE);image=nullptr;
     std::printf("call picker: %d checks passed\n",checks);
     return 0;
 }

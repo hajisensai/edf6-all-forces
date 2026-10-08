@@ -44,6 +44,7 @@ struct Pilot {
     const void* target;         // the lock (an enemy object) and its weak-this; since when
     const void* targetCtrl;
     ULONGLONG lockedAt;
+    int modeBound=-1;bool modeKeys=false;
     bool modeHeld,lockHeld,lockLong;   // the bindings as last read; lockLong: this press already let the lock go
     ULONGLONG lockDownAt;
     ULONGLONG seenFrame;
@@ -63,6 +64,10 @@ link::MapRayFn mapRay=nullptr;
 link::SeatQueryFn cameraTurret=nullptr;
 link::StabilizerFn stabilizer=nullptr;
 link::InputHeldFn inputHeld=nullptr;
+link::BindingReservedFn sightBinding=nullptr;
+link::SeatQueryFn turretObserver=nullptr;
+ULONGLONG bindingTried=0,observerTried=0;
+link::ModeBindingV1 modeBinding{};
 ULONGLONG viewTried=0,mapTried=0,cameraTried=0,stabTried=0,heldTried=0;
 
 // EDF6VehicleCrew's map view holds the keys (aimlink.h InputHeldV1): Q turns the map there, not the lock.
@@ -78,6 +83,18 @@ bool KeyHeld(int vk) noexcept {
 bool Held(const unsigned char* seat,bool keys,int vk,int button) noexcept {
     if(keys)return KeyHeld(vk);
     return button>0 && (At<std::uint16_t>(seat,edf::kSeatButtons)&static_cast<std::uint16_t>(button))!=0;
+}
+
+bool Reserved(const void* vehicle,unsigned seat,bool keys,int binding) noexcept {
+    const auto fn=link::Resolve(link::kCrewDll,link::kSightBinding,sightBinding,bindingTried);
+    return binding>0 && fn && fn(vehicle,seat,keys,binding);
+}
+int EffectiveModeBinding(const void* vehicle,unsigned seat,bool keys) noexcept {
+    const int requested=keys ? cfg.modeKey : cfg.modeButton;
+    if(!Reserved(vehicle,seat,keys,requested))return requested;
+    // Migrate a legacy colliding keyboard binding without rewriting the user's ini.
+    // Pad has no universally unoccupied spare control: report it unbound instead.
+    return keys && requested!=0x56 && !Reserved(vehicle,seat,true,0x56) ? 0x56 : 0;
 }
 
 const char* ModeName() noexcept { return mode==link::Mode::leadCircle ? "lead circle" : "auto-aim"; }
@@ -187,7 +204,9 @@ void PilotFrame(const unsigned char* vehicle,unsigned seatIndex,const unsigned c
     pilot.seenFrame=Frame();
     pilot.range=cfg.lockRange>0.0f ? cfg.lockRange : range;
     pilot.keys=At<std::uint8_t>(seat,edf::kSeatPad)==0;
-    const bool modeDown=Held(seat,pilot.keys,cfg.modeKey,cfg.modeButton);
+    const int effective=EffectiveModeBinding(vehicle,seatIndex,pilot.keys);
+    const bool modeDown=Held(seat,pilot.keys,pilot.keys ? effective : 0,pilot.keys ? 0 : effective);
+    if(pilot.modeBound!=effective || pilot.modeKeys!=pilot.keys){pilot.modeHeld=modeDown;pilot.modeBound=effective;pilot.modeKeys=pilot.keys;}
     if(modeDown && !pilot.modeHeld) {
         mode=mode==link::Mode::autoAim ? link::Mode::leadCircle : link::Mode::autoAim;
         Log("PILOT v=%p seat=%u: %s (%s)",vehicle,seatIndex,ModeName(),pilot.keys ? "key" : "pad button");
@@ -212,8 +231,18 @@ const void* Designated(const unsigned char* vehicle,float* world) noexcept {
 
 bool LeadCircle() noexcept { return mode==link::Mode::leadCircle; }
 
+bool ObservesTurret(const unsigned char* vehicle,unsigned seat) noexcept {
+    const auto fn=link::Resolve(link::kCrewDll,link::kTurretObserver,turretObserver,observerTried);
+    return fn && fn(vehicle,seat);
+}
+
 bool CameraTurret(const unsigned char* vehicle,unsigned seat) noexcept {
     return link::Resolve(link::kCrewDll,link::kCameraTurret,cameraTurret,cameraTried) && cameraTurret(vehicle,seat);
+}
+
+edf::aimlink::PlayerGun PlayerControlRule(const unsigned char* vehicle,unsigned seat,bool lead,bool locked) noexcept {
+    if(ObservesTurret(vehicle,seat))return {false,false};
+    return link::PlayerGunRule(CameraTurret(vehicle,seat),lead,locked);
 }
 
 bool Stabilized(const unsigned char* vehicle,unsigned seat,const float* axes,float* held,float* hull) noexcept {
@@ -252,7 +281,10 @@ void PublishAim(const unsigned char* vehicle,bool ownGun,const void* target,cons
                 const Shot* shot,const float* vel,float life) noexcept {
     link::TurretReadoutV1 r{};
     r.mode=mode;r.keys=pilot.keys;r.ownGun=ownGun;
-    r.modeKey=cfg.modeKey;r.lockKey=cfg.lockKey;r.modeButton=cfg.modeButton;r.lockButton=cfg.lockButton;
+    const int effective=EffectiveModeBinding(vehicle,pilot.seat,pilot.keys);
+    const int requested=pilot.keys ? cfg.modeKey : cfg.modeButton;
+    r.modeKey=pilot.keys ? effective : cfg.modeKey;r.lockKey=cfg.lockKey;
+    r.modeButton=pilot.keys ? cfg.modeButton : effective;r.lockButton=cfg.lockButton;
     float locked[3];
     if(Designated(vehicle,locked)) {
         const ULONGLONG held=GetTickCount64()-pilot.lockedAt;
@@ -273,7 +305,7 @@ void PublishAim(const unsigned char* vehicle,bool ownGun,const void* target,cons
         }
     }
     AcquireSRWLockExclusive(&readoutLock);
-    readout=r;readoutAt=GetTickCount64();
+    readout=r;readoutAt=GetTickCount64();modeBinding={requested!=effective,pilot.keys,requested,effective};
     ReleaseSRWLockExclusive(&readoutLock);
 }
 
@@ -293,4 +325,13 @@ extern "C" __declspec(dllexport) bool __cdecl EDF6AutoTurret_TurretReadoutV1(edf
     if(fresh)*out=readout;
     ReleaseSRWLockShared(&readoutLock);
     return fresh;
+}
+
+extern "C" __declspec(dllexport) bool __cdecl EDF6AutoTurret_ModeBindingV1(edf::aimlink::ModeBindingV1* out) {
+    using namespace autoturret;
+    if(!out)return false;
+    AcquireSRWLockShared(&readoutLock);
+    const bool fresh=readoutAt && GetTickCount64()-readoutAt<=kReadoutMs;
+    if(fresh)*out=modeBinding;
+    ReleaseSRWLockShared(&readoutLock);return fresh;
 }

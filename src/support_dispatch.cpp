@@ -138,9 +138,11 @@ unsigned AirCrew(const SupportAircraft& spec) noexcept {
 }
 support_net::PlanResult Plan(std::uint32_t catalog,const float* target,SupportPlan* out) noexcept {
     using support_net::PlanResult;
-    if(!out || !target || catalog>=static_cast<unsigned>(SupportCallCount()) || !SupportSoldiersReady() || !Cfg().customNpcAi) {
-        Status(L"支援兵员资源不可用");return PlanResult::refused;
+    if(!out || !target || catalog>=static_cast<unsigned>(SupportCallCount())) {
+        Status(L"支援请求或目标无效");return PlanResult::refused;
     }
+    if(!Cfg().customNpcAi){Status(L"NPC 指挥功能未启用，无法调度支援机组");return PlanResult::refused;}
+    if(!SupportSoldiersReady()){Status(SupportSoldierFailureText());return PlanResult::refused;}
     if(!planning.active || planning.catalog!=catalog || std::memcmp(planning.target,target,12)!=0) {
         planning={};planning.active=true;planning.catalog=catalog;std::memcpy(planning.target,target,12);
     }

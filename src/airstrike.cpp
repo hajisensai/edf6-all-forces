@@ -1,22 +1,13 @@
-// Airstrike takeovers (docs/mission-airstrike-re.md): the bombers the game flies past on rails become jets
-// the plugin flies (jet.cpp), which drop the bombers' own bombs, can be shot down, and stay on as strike
-// jets for their sortie.
-//  - Every bomber: both calls of BombingPlane_Init (0x5AABB0) are redirected, the Air Raider's bomber
-//    call (from its IndirectFireControl's step, 0x2B924E) and the missions' strafing planes
-//    (DemoAirStrike's ctor, 0x5B4423: RM034A/B, M116, M118). After the stock init the plugin launches a
-//    bomber jet where the plane starts, along its heading, carrying its payload (JetLaunchBomber: the
-//    same bombs, damage, spread, seed and owner, released from the jet). At its first update (its
-//    vtable's slot 5), before it moves or drops a thing, the plane is hidden as its own last state hides
-//    it (0x5AB9A0: stopped, drawn no more, off the radar), and from then on not updated; it is deleted once
-//    its jet's bay is gone (JetHolds), as the stock plane deletes itself once its bombs are. The call's
-//    target marker lasts as long as its planes (deleting the plane at once took it down before a bomb
-//    fell), and the DemoAirStrike deletes itself once its plane is gone.
+// Aircraft support uses the shared deployment transaction: verified entry, real crew, all-peer ACK,
+// actual boarding, then takeoff. Stock RadioContact / mission BombingPlane objects retain their native
+// init, update, payload and cleanup. Replacing them through Launch() would create an airborne empty
+// hull: recruiting nearby soldiers cannot staff an aircraft already outside the map at flight height.
 //  - The Air Raider's call weapons (tools/call_weapons.py: EDF6VC_CALL_*, KM6 bomber calls told apart by
 //    their AmmoHitSizeAdjust, weapon+0x8C4, kCalls' marks): at the call (its one call of IFC_Start,
 //    0x6A8DFB) the plugin launches that call's jets or helis instead of its bombers, which it keeps home
 //    (the call's plane count, ifc+0x80, set to 0 after IFC_Start: the call is spent, its state machine
 //    goes back to idle). A guard call works round its marker, a follow call round the player. Each
-//    modded machine does this when it replays the call; online from the call's own heading (message 9's). The local
+//    caller submits once; the host sends the verified entry and actors through support_net. The local
 //    picker changes only a local player's call; online the pick goes out in the call's seed (call_net.h,
 //    SeedSendHook) and every machine, the caller's too, replays that pick (docs/online-re.md sections 1, 9, 11).
 //  - The call weapons are owned from the start (docs/loadout-re.md section 8): before the game's own
@@ -34,8 +25,8 @@
 //    its update runs, so the stock patroller never starts. A drone that cannot be launched leaves the stock bomb as
 //    it is. Only the thrower's game: in an online game the others see the stock patroller (their copy's owner is no
 //    local player). Kills are the drone's (an NPC friend's), as a call's jets' are.
-// When no jet can be launched (the jet SGOs missing or not preloaded this mission) the stock bombers fly;
-// without the plugin the call weapons are plain KM6 calls (still owned: the bit is in the save), the thrown drones
+// Refused custom support does not fall back to a stock strike that could violate mission restrictions.
+// Without the plugin the call weapons are plain KM6 calls (still owned: the bit is in the save), the thrown drones
 // plain Patrollers.
 // The other scripted strikes (DemoIndirectFire, gunship fire, missiles, satellite laser) are shells out
 // of the sky with no plane to take over, and stay stock.
@@ -56,9 +47,7 @@ namespace crew {
 namespace {
 constexpr unsigned kIfcStart=0x2B5DA0,kRadioCall=0x6A8DFB;
 constexpr std::size_t kIfcPlanes=0x80,kStartForward=0x40,kStartTarget=0x50;   // IFC_Start's params: its matrix's rows
-constexpr unsigned kBomberInit=0x5AABB0,kRadioBomber=0x2B924E,kMissionBomber=0x5B4423;
-constexpr unsigned kPlaneUpdateSlot=0x17D3A30+5*8,kPlaneUpdate=0x5AB240,kDelete=0x118A1B0;
-constexpr std::size_t kPlaneVelocity=0xB80,kPlaneModel=0x660;   // model instance embedded (0x5AB2E3)
+constexpr unsigned kDelete=0x118A1B0;
 constexpr float kAboveTarget=150.0f;
 // Ownership (docs/loadout-re.md 8): the game status, its weapon table (cfg = GS+0x130, the table loaded
 // once cfg+0x188 is set) and per row a record of 12 bytes, u32 flags (bit0 owned, bit2 NEW) and 8 star
@@ -84,43 +73,8 @@ const unsigned char kWriteU64Sig[]={0x4C,0x8B,0xC1,0x48,0x8D,0x82,0xFF,0xFF,0xFF
 const unsigned char kIfcStartSig[]={0x48,0x89,0x5C,0x24,0x18,0x56,0x57,0x41,0x56,0x48,0x83,0xEC,0x60,0x48,0x8B,0x05};
 // call IFC_Start; then the caller marks the call active and copies the plane count (+0x16E0 -> +0x16E4)
 const unsigned char kRadioCallSig[]={0xE8,0xA0,0xCF,0xC0,0xFF,0xC6,0x87,0xEC,0x16,0x00,0x00,0x01,0x8B,0x87,0xE0,0x16};
-const unsigned char kBomberInitSig[]={0x48,0x8B,0xC4,0x55,0x53,0x56,0x57,0x41,0x54,0x41,0x55,0x41};
-const unsigned char kRadioBomberSig[]={0xE8,0x5D,0x19,0x2F,0x00,0x90,0x48,0x8B,0x4D,0x18};
-const unsigned char kMissionBomberSig[]={0xE8,0x88,0x67,0xFF,0xFF,0x90,0xBB,0xFF,0xFF,0xFF};
-const unsigned char kPlaneUpdateSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89};
-
 using IfcStartFn=std::uintptr_t(__fastcall*)(void*,const void*);
-// BombingPlane_Init(plane, &target, &owner weak, damage, spread, speed a frame, target_adjust,
-// target_distance, &bombing_plane_param, seed)
-using BomberInitFn=void(__fastcall*)(unsigned char*,const float*,const void*,float,float,float,float,float,const void*,std::int32_t);
-using PlaneUpdateFn=void(__fastcall*)(unsigned char*,const void*);
 using DeleteFn=void(*)(void*);
-PlaneUpdateFn nextPlaneUpdate=nullptr;
-
-// Launch sources (JetLaunch): an Air Raider's call (its jets and bombers), a mission's strike.
-const char kRadioSource='r',kMissionSource='m';   // distinct values: identical constants may be folded
-
-// Bombers whose jets fly instead, by their weak-this control block: hidden at their first update, deleted
-// once the jet lets go of them (JetHolds), or kHoldMaxMs after. As many as jets can fly (jet.cpp
-// kMaxJets); with none free the bomber is not taken over and flies stock. (A ring of 32 overwrote held
-// planes with more than 32 jets bombing: the overwritten plane was updated again, opened its own bay and
-// dropped its bombs a second time, unseen.)
-struct Held { const void* ctrl; ULONGLONG since; bool hidden; };
-constexpr int kMaxHeld=64;
-Held held[kMaxHeld]{};
-constexpr ULONGLONG kHoldMaxMs=180000;
-// An entry past kHoldMaxMs (and a margin) is free: its plane, still updated, was deleted at kHoldMaxMs, or
-// is gone (the mission ended) without an update to delete it.
-constexpr ULONGLONG kHeldStaleMs=kHoldMaxMs+10000;
-
-Held* FreeHeld(ULONGLONG ms) noexcept {
-    for(auto& h:held)if(!h.ctrl || ms-h.since>kHeldStaleMs)return &h;
-    return nullptr;
-}
-// The plane's last state's entry (0x5AB9A0): speed 0, its draw component off (0x6C04B0(plane+0x5C0, 0)),
-// off the radar (0x54DDB0).
-constexpr unsigned kPlaneHide=0x6C04B0,kPlaneUnlist=0x54DDB0;
-constexpr std::size_t kPlaneSpeed=0xB90,kPlaneDraw=0x5C0;
 
 // The call weapons, made from one table (tools/calls.py): tools/call_weapons.py writes their weapon rows and
 // SGOs, tools/gen_calls.py writes calls.inc below (CI checks it is current). Per role a guard call (round its
@@ -305,65 +259,6 @@ std::uintptr_t __fastcall RadioStartHook(void* ifc,const void* params) {
         }
     } __except(FaultLog("AIRSTRIKE radio call (its bombers fly)",GetExceptionInformation())) { SetSpawnOwner(online::kCopyHost); }
     return result;
-}
-
-// After the stock init of `plane`: its jet, and the plane doomed (see the file comment).
-void TakeOver(const char* who,unsigned char* plane,const float* target,const BombLoad& load,const void* source) noexcept {
-    __try {
-        const float* from=reinterpret_cast<const float*>(plane+kPosition);
-        const float* heading=reinterpret_cast<const float*>(plane+kPlaneVelocity);
-        const JetBody body=BomberBody(plane+kPlaneModel);
-        const void* const ctrl=At<const void*>(plane,kSelfCtrl);
-        const ULONGLONG ms=GameMs();
-        Held* const h=FreeHeld(ms);
-        if(!h){Log("AIRSTRIKE %s bomber %p: %d bombers held, it flies stock",who,plane,kMaxHeld);return;}
-        if(!ctrl || !std::isfinite(target[0]+target[1]+target[2]) || !JetLaunchBomber(from,heading,target,load,Cfg().jetSortieSec,source,body,ctrl))return;
-        *h=Held{ctrl,ms,false};
-        Log("AIRSTRIKE %s bomber %p (%s model): its jet drops the bombs",who,plane,
-            body==JetBody::bomber401 ? "bomber401" : body==JetBody::bomber501_2 ? "bomber501_2" : "bomber501 / unknown");
-    } __except(FaultLog("AIRSTRIKE takeover (the bomber flies stock)",GetExceptionInformation())) {}
-}
-
-void __fastcall RadioBomberHook(unsigned char* plane,const float* target,const void* owner,float damage,float spread,
-                                float speed,float adjust,float reach,const void* param,std::int32_t seed) {
-    reinterpret_cast<BomberInitFn>(image+kBomberInit)(plane,target,owner,damage,spread,speed,adjust,reach,param,seed);
-    if(Cfg().enabled && Cfg().jetAirRaider)TakeOver("air raider",plane,target,BombLoad{owner,damage,spread,speed,adjust,reach,param,seed},&kRadioSource);
-}
-
-void __fastcall MissionBomberHook(unsigned char* plane,const float* target,const void* owner,float damage,float spread,
-                                  float speed,float adjust,float reach,const void* param,std::int32_t seed) {
-    reinterpret_cast<BomberInitFn>(image+kBomberInit)(plane,target,owner,damage,spread,speed,adjust,reach,param,seed);
-    if(Cfg().enabled && Cfg().jetMissionStrike)TakeOver("mission",plane,target,BombLoad{owner,damage,spread,speed,adjust,reach,param,seed},&kMissionSource);
-}
-
-// BombingPlane slot 5 (update), for a held plane: hidden and left as it is while its jet holds it, then
-// deleted. Returns whether the plane is held (its stock update must not run). A fault in here counts as held:
-// handing a taken-over plane back to its stock update would fly it again and drop its bombs a second time.
-bool HeldStep(unsigned char* plane) noexcept {
-    __try {
-        const void* const ctrl=At<const void*>(plane,kSelfCtrl);
-        for(auto& h:held) {
-            if(!ctrl || h.ctrl!=ctrl)continue;
-            if(!h.hidden) {
-                h.hidden=true;
-                Put<float>(plane,kPlaneSpeed,0.0f);
-                reinterpret_cast<void(__fastcall*)(void*,std::uint8_t)>(image+kPlaneHide)(plane+kPlaneDraw,0);
-                reinterpret_cast<void(__fastcall*)(void*)>(image+kPlaneUnlist)(plane);
-            }
-            const ULONGLONG ms=GameMs();
-            if(JetHolds(ctrl) && ms-h.since<kHoldMaxMs)return true;
-            Log("AIRSTRIKE bomber %p let go after %.1f s: deleted",plane,static_cast<float>(ms-h.since)*0.001f);
-            h=Held{};
-            reinterpret_cast<DeleteFn>(image+kDelete)(plane);
-            return true;
-        }
-        return false;
-    } __except(FaultLog("AIRSTRIKE plane update (kept as taken over)",GetExceptionInformation())) { return true; }
-}
-
-void __fastcall PlaneUpdateHook(unsigned char* plane,const void* frame) {
-    if(HeldStep(plane))return;
-    nextPlaneUpdate(plane,frame);
 }
 
 // --- Thrown drones (see the file comment) ---
@@ -604,13 +499,6 @@ bool InstallPickSend() noexcept {
     return ok;
 }
 
-bool Redirect(unsigned site,const unsigned char* sig,std::size_t size,void* hook,const char* name) noexcept {
-    if(!Matches(site,sig,size)){Log("AIRSTRIKE %s: profile mismatch",name);return false;}
-    bool changed=false;
-    const bool ok=RedirectCall(image+site,image+kBomberInit,hook,changed);
-    if(!ok && changed)Log("AIRSTRIKE %s half patched",name);
-    return ok;
-}
 }  // namespace
 
 // One step through "each its own" and kCalls; `out` gets the banner text.
@@ -682,37 +570,24 @@ support::Refusal PlanAirSupport(int catalog,const float* target,const float* obs
 bool InstallAirstrikes() noexcept {
     CheckCallTable();
     __try {
-        bool calls=false,radio=false,mission=false;
+        bool calls=false;
         const bool owned=InstallOwnership();
         if(Matches(kIfcStart,kIfcStartSig,sizeof(kIfcStartSig)) && Matches(kRadioCall,kRadioCallSig,sizeof(kRadioCallSig))) {
             bool changed=false;
             calls=RedirectCall(image+kRadioCall,image+kIfcStart,reinterpret_cast<void*>(&RadioStartHook),changed);
             if(!calls && changed)Log("AIRSTRIKE radio call half patched");
         } else Log("AIRSTRIKE bomber call: profile mismatch");
-        // The plane update first: a bomber taken over must never fly.
-        const auto slot=reinterpret_cast<void**>(image+kPlaneUpdateSlot);
-        bool update=false;
-        if(Matches(kBomberInit,kBomberInitSig,sizeof(kBomberInitSig)) && Matches(kPlaneUpdate,kPlaneUpdateSig,sizeof(kPlaneUpdateSig)) && *slot) {
-            void* const current=*slot;
-            if(current!=image+kPlaneUpdate)Log("AIRSTRIKE plane update: chaining onto %p (another plugin)",current);
-            nextPlaneUpdate=reinterpret_cast<PlaneUpdateFn>(current);
-            update=PatchVtableSlot(slot,current,reinterpret_cast<void*>(&PlaneUpdateHook));
-        } else Log("AIRSTRIKE bomber: profile mismatch");
-        if(update) {
-            radio=Redirect(kRadioBomber,kRadioBomberSig,sizeof(kRadioBomberSig),reinterpret_cast<void*>(&RadioBomberHook),"air raider bomber");
-            mission=Redirect(kMissionBomber,kMissionBomberSig,sizeof(kMissionBomberSig),reinterpret_cast<void*>(&MissionBomberHook),"mission bomber");
-        }
+        // Native bombers are not crewed support vehicles. Leave both native callsites and the
+        // update vtable untouched so their original payload/timeline cannot be suppressed.
         const bool throws=InstallThrows();
         const bool pickSend=calls && InstallPickSend();
-        Log("HOOK airstrikes calls=%d owned=%d airRaiderBombers=%d missionBombers=%d throws=%d pickSend=%d",calls,owned,radio,mission,
-            throws,pickSend);
-        return calls || radio || mission || throws;
+        Log("HOOK airstrikes calls=%d owned=%d stockBombers=native throws=%d pickSend=%d",calls,owned,throws,pickSend);
+        return calls || throws;
     } __except(FaultLog("AIRSTRIKE install",GetExceptionInformation())){return false;}
 }
-// A new mission (mission.cpp MissionStart): the held bombers and the thrown bombs were the last mission's (their
+// A new mission (mission.cpp MissionStart): the thrown bombs were the last mission's (their
 // addresses may be the new mission's objects'): forgotten, nothing of them touched. The call pick stays.
 void ResetAirstrikes() noexcept {
-    for(auto& h:held)h=Held{};
     for(auto& b:bombs)b=Bomb{};
     bombCount=0;
 }

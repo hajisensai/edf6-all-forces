@@ -20,6 +20,9 @@ never chooses a point beside the player or adjusts arbitrary terrain heights.
 
 - `11945E0(objectManager, matrix, path, InitParamBase)` creates the scene-owned object.
   InitParamBase is aligned 16, size `30h`, vtable `1762068`, remaining bytes zero.
+  **The matrix itself must also be 16-byte aligned.** InitParam's alignment does not
+  align the separate pointer. Spawn copies the caller's 16 floats into an aligned local
+  matrix before crossing this native boundary; wire/Plan layouts are unchanged.
 - `54EE70(object,2,true)` registers the friendly team; `54E740(object,1.0)` uses the
   stock mission difficulty adjustment. No direct HP or weapon-parameter writes.
 - `CreateFriend` writes `object+540` for recruitment. Its `RideAi` call only applies
@@ -88,3 +91,52 @@ This does **not** execute the complete Soldier constructor, physics, weapon rend
 resource loader completion, or a real two-machine session. A constructor SEH fault disables
 further spawning for this process; a partial engine object not returned by a faulting
 constructor cannot be recovered by this wrapper and remains a runtime verification risk.
+
+## Observed creation fault: unaligned Plan matrix
+
+The supplied session logged module installation (`SUPPORT soldiers=1`) at 20:54:33,
+then the first soldier creation exception at 20:54:58. The installation log is not a
+successful creation or completed resource preload. The old log omitted stage/address,
+so it cannot alone distinguish a constructor fault from a later team/level failure.
+
+The deterministic ABI defect is independently reproduced against the installed EDF.dll:
+
+- `support_net::Unit.matrix` follows two uint32 fields (offset 8) and is only float-aligned.
+  In an aligned `Plan`, `units` starts at offset 20, so every matrix has address mod16 4 or 12.
+- `1194854` assigns the incoming pointer verbatim to `InitParam+8`; the remaining
+  `1194858..119486A` instructions fill resource, SGO and temporary shared-output pointers.
+- Ranger factory `54FE50 → 54FF10 → 58D020 → 56A5C0 → 545670 → 1189C00` reaches the
+  common SceneObject constructor. `1189CAC` loads `InitParam+8`; `1189CB0/CB7/CBF/CCA`
+  load the four matrix rows using **MOVAPS**, which faults on the unaligned source.
+- The four-argument CreateFn and 0x30 InitParamBase match the original CreateFriend path.
+  SetTeam uses RCX/object, EDX/team and R8B/children; SetLevel uses RCX/object and XMM1/float,
+  also matching `1D8A6D` and `1D8A99`. Expanding InitParam or inventing a new constructor
+  signature would not fix the matrix alignment contract.
+
+`support_soldier_create_native_test` uses the real Plan layout and exact native
+CreateObject parameter-wiring instructions, then executes the original SceneObject
+constructor from its entry through all four matrix loads. Only after those loads does
+the private mapping jump to the original epilogue, bypassing resource/ownership/world
+initialization. The real `52710` initializer and matrix instructions are not mocked.
+A vectored handler records only the exact expected native `1189CB0` access violation
+and resumes at that epilogue for the negative controls.
+
+All 16 old Plan matrices generate that actual MOVAPS fault. The production
+`ApplySupportSoldierSpawn` aligned-copy path generates none and preserves all 16 floats,
+for both ordinary and leader resources: **153 checks pass**. The fixture intentionally
+returns null after this boundary and never fabricates a successfully constructed Soldier.
+This is not complete world/weapon/AI initialization or a live-game retest.
+
+Fault logging now records create/identity/team/level/recruit/network stage, exception code,
+native offset, access address, source alignment and returned object. Post-construction
+faults are setup failures rather than mislabeled creation failures. Fail-closed behavior
+remains: `119486E` increments the manager's construction depth before the factory call,
+and `119487D` decrements only after normal return. An old constructor exception may leave
+native partial state; clearing the disabled flag and retrying in that process is not safe.
+
+The first native exception cause is retained for the process lifetime: constructor faults
+remain `create`, post-construction faults `setup`, preload faults `mission`. Readiness,
+later requests and mission reset do not turn it into an unsupported-profile error or clear
+the stop flag. The user-facing diagnostic names the failed stage and requires restarting
+the game. A normal null creation without an exception remains an ordinary creation failure
+and does not acquire this process-wide stop/restart diagnosis.

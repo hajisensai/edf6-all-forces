@@ -170,6 +170,10 @@ int wmain(int argc,wchar_t** argv){
     CamStepHook(otherCamera,nullptr);Check(At<float>(otherCamera,kCamFov)==originalFov,"second local camera is unchanged");
     Setup();Zoom();Fov();originalWrites=false;Put<float>(camera,kCamFov,0.6f);mapView=true;
     Check(Fov()==0.6f,"a later camera owner's write is preserved");
+    Setup();Button(0);
+    Check(SightZoomCanMount(vehicle,0) && !SightZoomMounted(vehicle) && SightZoomNow(vehicle)==1,"binding reservation sees actual installed optic before its first zoom press");
+    Check(!SightZoomCanMount(vehicle,1) && !SightZoomCanMount(otherVehicle,0),"real optic availability is bound to exact current vehicle and seat");
+    opticPresent=false;Check(!SightZoomCanMount(vehicle,0),"lost physical lens immediately releases binding despite old optical-kind cue");
     Setup();Zoom();paused=true;Sleep(230);Fov();
     Check(SightZoomNow(vehicle)==3 && SightZoomMounted(vehicle),"pause past the old wall TTL retains the same physical optic owner");
     Button(0x80);paused=false;Button(0x80);Check(toggle.step==1,"menu-held zoom button is not replayed on resume");

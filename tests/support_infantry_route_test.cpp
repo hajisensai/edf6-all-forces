@@ -23,6 +23,7 @@ unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float*) noexc
 bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*) noexcept{return false;}
 bool DeleteSupportAircraft(const ObjRef&) noexcept{return false;}
 bool SupportSoldiersReady() noexcept{return true;}
+const wchar_t* SupportSoldierFailureText() noexcept{return L"";}
 bool ApplySupportSoldierSpawn(const float*,bool,const unsigned char*,ObjRef*) noexcept{return false;}
 bool DeriveSupportSoldierNetId(const void*,unsigned,unsigned char*) noexcept{return false;}
 bool RegisterSupportObject(const void*,const unsigned char*) noexcept{return false;}
