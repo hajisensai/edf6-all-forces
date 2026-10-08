@@ -15,7 +15,7 @@ struct Hooked { unsigned vtable; RideFn original; };
 Hooked hooks[64]{};std::size_t hookCount=0;
 bool installed=false;
 MissionCrewFactoryFn factory=nullptr;MissionVehicleIdFn readId=nullptr;MissionCrewTickFn tick=nullptr;
-struct Entry { ObjRef vehicle; bool requested,dispatched,restored; };
+struct Entry { ObjRef vehicle; bool requested,dispatched,restored,spawned,prepared,prepareAttempted; };
 Entry entries[256]{};
 
 Entry* Observe(unsigned char* v) noexcept {
@@ -28,6 +28,18 @@ Entry* Observe(unsigned char* v) noexcept {
     *free=Entry{};free->vehicle=ObjRef::Of(v);return free;
 }
 
+bool PrepareIntent(Entry& e,unsigned char* v) noexcept {
+    if(e.prepared)return true;
+    // Installation can finish after a script's one-shot RideAi call. Preserve that intent until
+    // the native adapter is ready, but never retry a native setup fault on every vehicle frame.
+    if(e.prepareAttempted || !RealDriverNativeReady())return false;
+    e.prepareAttempted=true;
+    e.prepared=PrepareNpcVehicle(v,e.spawned);
+    if(e.prepared)Put<int>(v,0xE30,1);
+    else Log("MISSION CREW v=%p: native AI intent retained, vehicle setup failed",v);
+    return e.prepared;
+}
+
 void __fastcall RideHook(void* object,bool spawned) noexcept {
     auto* v=static_cast<unsigned char*>(object);
     if(!Cfg().enabled) {
@@ -36,16 +48,18 @@ void __fastcall RideHook(void* object,bool spawned) noexcept {
         }
         return;
     }
-    EnsureInputs(); // original scripts can create a vehicle before the first per-frame input
-    if(!installed || !PrepareNpcVehicle(v,spawned))return;
+    if(!installed)return;
     Entry* e=Observe(v);
     if(!e)return;
-    // Native scripts and snapshot restore both use slot 50. Keep that origin mode only once all
-    // participating vtables are hooked, so a restore can never manufacture a Dummy again.
-    Put<int>(v,0xE30,1);
-    if(NpcDriver(v) && SeatRider(SeatAt(v,0))!=Rider::dummy)return;
+    // Source of truth: an actual native RideAi invocation, not the vehicle's location, route,
+    // model or team. Ordinary player calls / map objects with no AI request never set this.
     e->restored=e->requested || e->dispatched;
-    e->requested=true;e->dispatched=false;
+    e->requested=true;e->dispatched=false;e->spawned=spawned;
+    e->prepared=false;e->prepareAttempted=false;
+    EnsureInputs();
+    PrepareIntent(*e,v);
+    if(NpcDriver(v) && SeatRider(SeatAt(v,0))!=Rider::dummy)e->dispatched=true;
+
 }
 }
 
@@ -80,7 +94,8 @@ void MissionCrewVehicleFrame(unsigned char* v) noexcept {
     if(tick)tick(v);
     // Handles a mission already running when the plugin initialized, without disturbing its route.
     for(unsigned i=0;i<SeatCount(v);++i)if(SeatRider(SeatAt(v,i))==Rider::dummy)e->requested=true;
-    if(e->requested && !e->dispatched && factory && OnlineMaySeatNpc(v))e->dispatched=factory(v,e->restored);
+    if(e->requested && !e->dispatched && PrepareIntent(*e,v) && factory && OnlineMaySeatNpc(v))
+        e->dispatched=factory(v,e->restored);
 }
 
 unsigned char* MissionVehicleById(const unsigned char* id) noexcept {
