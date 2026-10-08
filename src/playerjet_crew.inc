@@ -94,15 +94,17 @@ void GunnerBoarded(unsigned char* v) noexcept {
     Log("GUNNER v=%p the player at the gun, its pilot seat %s",v,NpcDriver(v) ? "an NPC's" : "empty");
 }
 
-// The gunship never without a pilot under the player at its gun: an empty pilot seat gets the stock RideAi, once (a
-// failure is logged, not retried); its flight resumes from where it is.
+// An empty pilot seat requests a real soldier once. Flight resumes only after a real pilot actually boards.
 void EnsurePilot(unsigned char* v) noexcept {
-    if(SeatRider(SeatAt(v,0))!=Rider::none){gunner.pilotTried=false;return;}
+    if(SeatRider(SeatAt(v,0))!=Rider::none){
+        if(gunner.pilotTried && CrewedPilot(v))jet::ResumeNpc(v,gunner.vel);
+        gunner.pilotTried=false;return;
+    }
     if(gunner.pilotTried)return;
     gunner.pilotTried=true;
     SeatNpcRider(v,false);   // the plugin's aircraft: an unregistered copy, its own here (online_authority.h)
-    const bool seated=NpcDriver(v);
-    Log("GUNNER v=%p no one at the stick: %s",v,seated ? "an NPC pilot seated" : "the stock RideAi seated no one");
+    const bool seated=CrewedPilot(v);
+    Log("GUNNER v=%p no one at the stick: %s",v,seated ? "an NPC pilot seated" : "no real pilot aboard yet");
     if(seated)jet::ResumeNpc(v,gunner.vel);
 }
 

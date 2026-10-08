@@ -1565,12 +1565,8 @@ def every_boardable_aircraft_requested() -> None:
 
 @test
 def every_boardable_aircraft_caught() -> None:
-    """Whatever the player ejects from has a catch jet (src/playerjet_kinds.h kCatchFiles, each row's catchWith, the
-    user, 2026-10-06: 「我在天上好像还是没来接我」 after a multirole crashed under them): a jet's SGO the installer writes
-    (tools/make_jets.py FILES) with its mark and a seat every class takes, its own kind's requested twin when there is one
-    (pylib/vcobjects.py REQUEST_KINDS), else a player jet; always a wing (the catch flies in as one: AutoFly). Every catch
-    SGO is preloaded at the mission's start (src/playerjet.cpp PreloadPlayerJets over kCatchFiles) and is the one table
-    SpawnCatchJet makes from; the jet left does not take the catch away (playerjet_board.inc Left)."""
+    """Boardable asset/catch-kind metadata stays valid, but rescue now selects an existing real-piloted aircraft.
+    The legacy catch asset table is retained for installed-resource compatibility; no airframe is spawned in the air."""
     head = src('src/playerjet_kinds.h')
     order = re.search(r'enum CatchWith : int \{(.*?)\};', head, re.S).group(1).replace(' ', '').replace('\n', '').split(',')
     assert order[0] == 'kCatchNone=-1', order
@@ -1608,9 +1604,8 @@ def every_boardable_aircraft_caught() -> None:
     preload = jets[jets.index('void PreloadPlayerJets()'):]
     preload = preload[:preload.index('\n}\n')]
     assert 'i<pjet::kCatchFileCount' in preload and 'kPreloadFn)(mgr,f.sgo' in preload, 'PreloadPlayerJets: not every catch SGO'
-    spawn = jets[jets.index('unsigned char* SpawnCatchJet('):]
-    spawn = spawn[:spawn.index('\n}\n')]
-    assert 'pjet::kCatchFiles[which]' in spawn and 'playerJetPreloaded[which]' in spawn, 'SpawnCatchJet: not the catch table'
+    assert 'SpawnCatchJet(' not in jets and 'CatchChoice(p)' in jets, 'catch must select an existing crewed aircraft'
+    assert '!CrewedPilot(v)' in jets, 'catch/AutoFly must stop when its real pilot is lost'
     assert 'kPlayerJetFiles' not in jets and 'bail.mark' not in jets, 'a second catch table / the old mark'
     board = src('src/playerjet_board.inc')
     left = board[board.index('void Left('):]

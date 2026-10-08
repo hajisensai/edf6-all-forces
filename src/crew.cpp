@@ -1,17 +1,17 @@
 // NPC crews for friendly vehicles, and the player bumping them out.
 //
 // Auto-crew recruits existing real soldiers through NpcRequestCrew. They walk to the native entry
-// and use Human::RideVehicle; no DummyVehicleRider is created. Original mission-script Dummies
-// retain their native task lifecycle. Vehicle AI and the helicopter controller accept real drivers.
+// and use Human::RideVehicle; no DummyVehicleRider is created. Original mission vehicle slots are
+// intercepted by mission_crew and receive real support actors while keeping the vehicle's script and route.
 //
 // Bump: the stock code never lets anyone board an occupied seat. The on-foot prompt (0x62DCB0) and
 // the board button (vehicle slot 49, 0x633B80 -> 0x6346D0) both skip a seat whose rider's use count
 // is non-zero, and RideVehicle (0x5765E0) only flags an occupant to leave and then fails. So:
 //   prompt: hide the NPC rider of each NPC-held seat (null its control block for one call) and ask
 //           the stock check again;
-//   board:  the same check per seat; on a hit the NPC moves to a free gunner seat (seat + clear,
-//           neither tells the rider anything) or, with none free, is kicked (it dies), and the stock
-//           slot 49 then reserves the now-free seat for the player.
+//   board:  the same check per seat; a real NPC yields through Human's native seat transition,
+//           or dismounts alive when none is free, before slot 49 reserves the seat for the player.
+//           The raw seat/clear fallback is only for legacy Dummy objects awaiting migration.
 // Team: RideAi puts the vehicle on its NPC rider's team (2), and the stock seat check (0x6346D0) only
 // lets a human board a vehicle of their own team or the unowned team 5. A vehicle crewed here keeps
 // the team it had before (State::ownTeam): both checks run with it, and the bump gives it back.
@@ -570,9 +570,8 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     // A player jet waits for the player, and so does one of the plugin's aircraft the player holds (playerjet.cpp).
     // A sidecar bike with the player in its sidecar is driven for them by the plugin (sidecar.cpp): no NPC driver.
     if(driver || !Cfg().autoCrew || IsPlayerJet(vehicle) || PlayerJetHolds(vehicle) || SidecarHoldsPlayer(vehicle) || IsPrimerVehicle(vehicle)){st.emptySince=0;return;}
-    // Online, a registered vehicle gets its NPC driver on the host only (online_authority.h): a DummyVehicleRider has no
-    // network identity, so a client that seated one would take the vehicle for its own and send its pose against the
-    // host's (docs/online-re.md sections 3.4, 5). A client's copy is driven by what the host's copy replicates.
+    // Online, the host coordinates recruitment for registered vehicles. Real soldiers keep their native
+    // network identities and announce boarding; each vehicle copy follows the resulting native authority.
     if(!OnlineMaySeatNpc(vehicle)){st.emptySince=0;return;}
     if(!st.emptySince)st.emptySince=now;
     // Every first-use parked vehicle belongs to the waiting player, not only helicopters/Proteus.

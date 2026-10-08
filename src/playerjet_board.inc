@@ -50,13 +50,13 @@ void MirrorEntry(const PJet& j,const unsigned char* v) noexcept {
     if(jet::Jet* e=jet::FindJet(v))std::memcpy(e->m.vel,j.vel,12);
 }
 
-// Its NPC pilot flies it again (seated by the stock RideAi when the seat is empty): jet.cpp goes on with its call.
+// An actual pilot resumes its call; an empty seat only requests existing soldiers to walk aboard.
 void HandBack(PJet& j,unsigned char* v,const char* why) noexcept {
     j.keep=false;j.hail=PJet::Hail{};j.autopilot=false;j.active=false;j.steered=false;j.orbiting=false;
     if(catchFlight.v==v)catchFlight=CatchFlight{};
     if(SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::none && !v[kDead])SeatNpcRider(v,false);
-    jet::ResumeNpc(v,j.vel);
-    Log("PJET v=%p back to its NPC pilot: %s",v,why);
+    if(CrewedPilot(v)){jet::ResumeNpc(v,j.vel);Log("PJET v=%p back to its real NPC pilot: %s",v,why);}
+    else Log("PJET v=%p has no local real pilot after hand-back: no autonomous flight",v);
 }
 
 void Boarded(PJet& j,unsigned char* v,const float* pos,float clear) noexcept {
@@ -81,20 +81,15 @@ void Left(PJet& j,unsigned char* v,float clear,bool alive,bool eject) noexcept {
     (void)clear;
     if(!j.board)return;
     j.steered=false;j.orbiting=false;
-    // Ejected, the catch (playerjet.cpp Catch) makes its row's catch jet (playerjet_kinds.h catchWith: its own kind's
-    // requested twin, else a player jet) unless this one comes back for them itself (below). It used to be no jet at all
-    // (bail.mark 0: only the player jets' SGOs could be made), so one shot down under them left them to the parachute
-    // (2026-10-06, a multirole crashed 859 m up: "nobody came for me").
-    // Destroyed: its wreck is the game's. `alive` is only that its object can still be read (PlayerJetFrame's kDead
-    // branch leaves a shot-down jet readable): a dead one neither waits, nor catches the parachute, nor flies on. Its
-    // entry is let go of (Forget): the catch is a new object with an entry of its own (PlayerJetFrame Make, Boarded).
+    // A live real pilot can bring this aircraft back; otherwise Catch may select another already
+    // crewed aircraft. A destroyed or abandoned aircraft never creates an empty rescue twin.
     if(!alive || v[kDead]) {
-        if(eject)Log("PJET v=%p lost under the player: the catch makes a jet for them",v);
+        if(eject)Log("PJET v=%p lost under the player: the catch searches for a crewed aircraft",v);
         j=PJet{};
         return;
     }
     if(j.phase!=Phase::air){j.keep=true;Log("PJET v=%p left on the ground: it waits there for the player",v);return;}
-    if(eject && j.board->frame==pjet::Airframe::wing && Cfg().playerJetCatch) {
+    if(eject && j.board->frame==pjet::Airframe::wing && Cfg().playerJetCatch && CrewedPilot(v)) {
         // The jet itself comes back for them (Catch: it steers in under the parachute, presses the board button).
         const float* pos=reinterpret_cast<const float*>(v+kPosition);
         const float speed=std::fmax(Len(j.vel),j.kind->rotate+kCatchOver);
@@ -108,7 +103,7 @@ void Left(PJet& j,unsigned char* v,float clear,bool alive,bool eject) noexcept {
         Log("PJET v=%p left in the air: it comes back to catch the player",v);
         return;
     }
-    // A rotor craft (or the catch off): its NPC flies it on; ejected, the catch makes a wing for them (catchWith).
+    // Resume only with an actual pilot; otherwise leave the aircraft without autonomous control.
     HandBack(j,v,"the player left it in the air");
 }
 
@@ -705,12 +700,28 @@ jet::Jet* HailChoice(const float* p,const void* skip,float* dist) noexcept {
     for(auto& e:jet::jets) {
         if(!e.ref || e.reap || e.mode==jet::Mode::withdraw || e.drone.blastAt || !jet::Alive(e.ref))continue;
         unsigned char* const v=e.Vehicle();
-        if(v==skip || v[kDead] || At<std::int32_t>(v,kTeam)!=jet::kTeamFriend || SeatCount(v)==0 || SeatRider(SeatAt(v,0))!=Rider::dummy ||
+        if(v==skip || v[kDead] || At<std::int32_t>(v,kTeam)!=jet::kTeamFriend || !CrewedPilot(v) ||
            !BoardRowOf(v) || Held(v))continue;
         const float d=vec::Dist(reinterpret_cast<const float*>(v+kPosition),p);
         if(d<bestD){bestD=d;best=&e;}
     }
     if(dist)*dist=bestD;
+    return best;
+}
+
+jet::Jet* CatchChoice(const float* p) noexcept {
+    jet::Jet* best=nullptr;float bestD=kHailRange;
+    for(auto& e:jet::jets) {
+        if(!e.ref || e.reap || e.mode==jet::Mode::withdraw || e.drone.blastAt || !jet::Alive(e.ref))continue;
+        auto* v=e.Vehicle();
+        const auto* row=BoardRowOf(v);
+        if(v[kDead] || !CrewedPilot(v) || At<std::int32_t>(v,kTeam)!=jet::kTeamFriend ||
+           !row || row->frame!=pjet::Airframe::wing || Held(v))continue;
+        bool human=false;for(unsigned i=0;i<SeatCount(v);++i)human=human || AnyPlayerIn(SeatAt(v,i));
+        if(human)continue;
+        const float d=vec::Dist(reinterpret_cast<const float*>(v+kPosition),p);
+        if(d<bestD){bestD=d;best=&e;}
+    }
     return best;
 }
 
