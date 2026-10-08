@@ -43,6 +43,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         import call_weapons
         import gen
         import make_bigmap
+        import make_optics
         import make_stock_stores
         import rootcpk
         plugins = {name: (b'new plugin', f'[{section}]\nStockVehicleStores=0\nEDF5CampaignRows=0\n'.encode())
@@ -55,7 +56,8 @@ class CampaignLifecycleTests(unittest.TestCase):
             for module, name, value in ((rootcpk, 'use', None), (call_weapons, 'recover', False),
                                         (call_weapons, 'install', []), (gen, 'install', []),
                                         (gen, 'target_range', None), (make_stock_stores, 'wanted', False),
-                                        (make_stock_stores, 'remove', ([], [])), (make_bigmap, 'set_big_world', None)):
+                                        (make_stock_stores, 'remove', ([], [])), (make_bigmap, 'set_big_world', None),
+                                        (make_optics, 'build_stock_redirects', {})):
                 stack.enter_context(patch.object(module, name, return_value=value))
             stack.enter_context(patch.object(buildcache, 'Cache'))
             build = stack.enter_context(patch.object(campaign, 'build', return_value=(
