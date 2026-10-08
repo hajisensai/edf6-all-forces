@@ -14,7 +14,7 @@ using RideFn=void(__fastcall*)(void*,bool);
 struct Hooked { unsigned vtable; RideFn original; };
 Hooked hooks[64]{};std::size_t hookCount=0;
 bool installed=false;
-MissionCrewFactoryFn factory=nullptr;MissionVehicleIdFn readId=nullptr;
+MissionCrewFactoryFn factory=nullptr;MissionVehicleIdFn readId=nullptr;MissionCrewTickFn tick=nullptr;
 struct Entry { ObjRef vehicle; bool requested,dispatched,restored; };
 Entry entries[256]{};
 
@@ -48,7 +48,8 @@ void __fastcall RideHook(void* object,bool spawned) noexcept {
 }
 }
 
-void ConfigureMissionCrew(MissionCrewFactoryFn f,MissionVehicleIdFn ids) noexcept {factory=f;readId=ids;}
+void ConfigureMissionCrew(MissionCrewFactoryFn f,MissionVehicleIdFn ids,MissionCrewTickFn step) noexcept {factory=f;readId=ids;tick=step;}
+void RetryMissionCrew(unsigned char* v) noexcept {if(Entry* e=Observe(v))e->dispatched=false;}
 
 bool InstallMissionCrewHooks(const unsigned* tables,std::size_t count) noexcept {
     if(installed)return true;
@@ -75,6 +76,7 @@ bool InstallMissionCrewHooks(const unsigned* tables,std::size_t count) noexcept 
 void MissionCrewVehicleFrame(unsigned char* v) noexcept {
     if(!installed || !Cfg().enabled || !v || v[kDead])return;
     Entry* e=Observe(v);if(!e)return;
+    if(tick)tick(v);
     // Handles a mission already running when the plugin initialized, without disturbing its route.
     for(unsigned i=0;i<SeatCount(v);++i)if(SeatRider(SeatAt(v,i))==Rider::dummy)e->requested=true;
     if(e->requested && !e->dispatched && factory && OnlineMaySeatNpc(v))e->dispatched=factory(v,e->restored);
