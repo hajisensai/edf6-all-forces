@@ -29,6 +29,7 @@ sys.path.insert(0, HERE)
 import dsgo  # noqa: E402
 import make_edf5_campaign as edf5  # noqa: E402
 import rootcpk  # noqa: E402
+import sgo  # noqa: E402
 
 MISSIONS = os.path.join(HERE, '..', 'testhub', 'src', 'missions.json')
 OUT = os.path.join(HERE, '..', 'tmp', 'digests')
@@ -52,6 +53,59 @@ def voices(game: rootcpk.Game) -> Voices:
 def say(vid: str, table: Voices) -> str:
     who, text = table[vid]
     return f'{who}：「{text}」'
+
+
+# ------------------------------------------------------------------ names
+
+# The soldier classes and the game's own text for their class (TEXTTABLE SoldierType_*): soldiers carry no kill
+# counter, so their class is the only name the game gives them.
+SOLDIER_CLASSES = {'AssultSoldier': 'Ranger', 'PaleWing': 'WingDiver', 'HeavyArmor': 'Fencer', 'Engineer': 'AirRaider'}
+
+
+class Names:
+    """Simplified Chinese names the game itself gives (nothing here is translated by us):
+    - an enemy: its OBJECT/<name>.SGO `game_object_kill_counter` X -> ETC/TEXTTABLE_STEAM.SC.TXT_SGO 'StatusInfo_' + X
+      ('侵略生物α击破数', the kill statistics) without its '击破数': the species, so variants share a name;
+    - a soldier (or a named character of a soldier class): its `xgs_scene_object_class` -> SoldierType_*, as '兵种：…';
+    - a map: the game has no map names, so the first mission (in the plan's order) that loads it, said as such.
+    Objects are spread over Root.cpk, Chunk01.cpk and Chunk02.cpk."""
+
+    def __init__(self, root: str) -> None:
+        self.archives = [rootcpk.Game(root, a) for a in ('Root.cpk', 'Chunk01.cpk', 'Chunk02.cpk')
+                         if os.path.isfile(os.path.join(root, a))]
+        self.text: dict = sgo.read(self.archives[0].read('ETC', 'TEXTTABLE_STEAM.SC.TXT_SGO'))[1]
+        self.cache: dict[str, str | None] = {}
+        self.map_first: dict[str, str] = {}
+
+    def _object(self, name: str) -> dict:
+        for g in self.archives:
+            try:
+                data = g.read('OBJECT', name + '.SGO')
+            except KeyError:
+                continue
+            if data[:4] == b'DSGO':
+                r = dsgo.parse(data).root
+                return {r.names.get(i): x for i, x in enumerate(r.items)}
+            return sgo.read(data)[1]
+        return {}
+
+    def object(self, name: str) -> str | None:
+        key = name.lower()
+        if key not in self.cache:
+            info = self._object(name)
+            counter, cls = info.get('game_object_kill_counter'), info.get('xgs_scene_object_class')
+            text = self.text.get(f'StatusInfo_{counter}') if counter else None
+            soldier = self.text.get(f'SoldierType_{SOLDIER_CLASSES[cls]}') if cls in SOLDIER_CLASSES else None
+            self.cache[key] = (str(text).removesuffix('击破数') if text else None) or (f'兵种：{soldier}' if soldier else None)
+        return self.cache[key]
+
+    def label(self, name: str) -> str:
+        sc = self.object(name)
+        return f'{name}（{sc}）' if sc else name
+
+    def map(self, name: str) -> str:
+        first = self.map_first.get(name.lower())
+        return f'{name}（游戏里没有地图名；最早用到它的任务：《{first}》）' if first else name
 
 
 # ------------------------------------------------------------------ EDF6 scripts
@@ -327,16 +381,20 @@ def count_text(c: Count) -> str:
     return '，'.join(p for p in parts if p)
 
 
-def summary(text: str) -> list[str]:
+AC_MAP = re.compile(r'\bMap\(\s*"app:/map/([^"]+?)\.mac"\s*,\s*"([^"]*)"', flags=re.I)
+NAME_NOTE = '（括号里是游戏自己的叫法：敌人取自击破统计，同一种类的变体同名；士兵和角色给的是兵种；游戏没给名字的保留原名）'
+
+
+def summary(text: str, names: Names) -> list[str]:
     """The map and every object the live script creates or spawns (with how many), before the event walk."""
-    maps = sorted(set(re.findall(r'\bMap\(\s*"app:/map/([^"]+?)\.mac"\s*,\s*"([^"]*)"', text, flags=re.I)))
+    maps = sorted(set(AC_MAP.findall(text)))
     counts = spawn_counts(text)
     others = sorted({o for o in re.findall(r'"app:/object/([^"]+?)\.sgo"', text, flags=re.I)} - counts.keys(), key=str.lower)
-    out = ['地图：' + ('、'.join(f'{m}（{w}）' for m, w in maps) or '（无）'), '',
-           '出场对象（数量是脚本里每一处刷出相加；按难度分支、循环没有展开，只作参考）：']
-    out += [f'    {o}  {count_text(c)}' for o, c in sorted(counts.items(), key=lambda kv: kv[0].lower())] or ['    （无）']
+    out = ['地图：' + ('、'.join(f'{names.map(m)}，{w}' for m, w in maps) or '（无）'), '',
+           '出场对象（数量是脚本里每一处刷出相加；按难度分支、循环没有展开，只作参考）：', '  ' + NAME_NOTE]
+    out += [f'    {names.label(o)}  {count_text(c)}' for o, c in sorted(counts.items(), key=lambda kv: kv[0].lower())] or ['    （无）']
     if others:
-        out.append('其它引用到的对象（预载、特效、变量里的写法等，数量不明）：' + '、'.join(others))
+        out.append('其它引用到的对象（预载、特效、变量里的写法等，数量不明）：' + '、'.join(names.label(o) for o in others))
     return out + ['']
 
 
@@ -406,24 +464,24 @@ def statement_lines(s: str, pad: str, table: Voices, dead: bool) -> list[str]:
     return [mark + pad + readable(s.rstrip('{').rstrip())] + [mark + pad + '    ' + say(vid, table) for vid in said]
 
 
-def digest_ac(text: str, table: Voices) -> str:
+def digest_ac(text: str, table: Voices, names: Names) -> str:
     text = mark_block_comments(text)
-    names = {int(n): v for n, v in re.findall(r'internal_GetEventState\((\d+)\)\.SetName\("([^"]*)"\)', text)}
+    events = {int(n): v for n, v in re.findall(r'internal_GetEventState\((\d+)\)\.SetName\("([^"]*)"\)', text)}
     fns = functions(text)
     # An event's links are registered in its usercode and also in its wrapper (__XXXX_game_event / Main), which
     # starts some of them as soon as the event runs.
     parts = {n: [part(fns.get(f, ''), table) for f in (
         ('Main', 'Main_usercode') if n == 0 else (f'__{n:04X}_game_event', f'__{n:04X}_game_event_usercode')
-    ) + (f'__{n:04X}_voice_event_usercode',)] for n in sorted(names)}
+    ) + (f'__{n:04X}_voice_event_usercode',)] for n in sorted(events)}
     live = re.sub(r'^\s*//.*$', '', text, flags=re.M)
     started = {int(h, 16) for h, *_ in EVENT.findall(live)}   # anything in the live script that starts it
-    out: list[str] = summary(live)
+    out: list[str] = summary(live, names)
     for n, ps in parts.items():
-        block = [f'■ [{n}] {names[n]}' + ('（脚本里没有任何地方触发它，可能是废案）' if n and n not in started else '')]
+        block = [f'■ [{n}] {events[n]}' + ('（脚本里没有任何地方触发它，可能是废案）' if n and n not in started else '')]
         lines = [x for p in ps for x in p.lines]
         block += [indent(x, '    ') for x in lines] if lines else ['    （没有动作）']
         for ln in [x for p in ps for x in p.links]:
-            head = f'  → [{ln.target}] {names.get(ln.target, ln.name)}'
+            head = f'  → [{ln.target}] {events.get(ln.target, ln.name)}'
             conds = [c for c in ln.conds if not c.startswith(('//', DEAD))]
             notes = [c for c in ln.conds if c.startswith('//')]
             dropped = [c for c in ln.conds if c.startswith(DEAD)]
@@ -443,19 +501,24 @@ def indent(line: str, by: str) -> str:
 
 # ------------------------------------------------------------------ EDF5 scripts
 
-def digest_bvm(bvm: bytes, table: Voices) -> str:
+def bvm_maps(bvm: bytes) -> list[str]:
+    return [re.sub(r'^app:/map/|\.mac$', '', s, flags=re.I) for s in edf5.utf16_strings(bvm) if s.lower().startswith('app:/map/')]
+
+
+def digest_bvm(bvm: bytes, table: Voices, names: Names) -> str:
     strings = edf5.utf16_strings(bvm)
-    maps = [s for s in strings if s.lower().startswith('app:/map/')]
-    objects = sorted({re.sub(r'^app:/object/|\.sgo$', '', s, flags=re.I) for s in strings if s.lower().startswith('app:/object/')})
+    objects = sorted({re.sub(r'^app:/object/|\.sgo$', '', s, flags=re.I) for s in strings if s.lower().startswith('app:/object/')},
+                     key=str.lower)
     music = [s for s in strings if s.startswith('BGM_')]
     lines, seen = [], set()
     for s in strings:
         if s in table and s not in seen:
             seen.add(s)
             lines.append(say(s, table))
-    out = ['（EDF5 的脚本是编译过的字节码，看不到事件和触发条件；下面是脚本里出现的东西。台词按脚本字符串表的顺序，不一定是播放顺序。）', '',
-           '地图：' + ('、'.join(re.sub(r'^app:/map/|\.mac$', '', m, flags=re.I) for m in maps) or '（无）'),
-           '音乐：' + ('、'.join(music) or '（无）'), '', '出场对象：'] + ['    ' + o for o in objects] + ['', '台词：'] + ['    ' + x for x in lines]
+    out = ['（EDF5 的脚本是编译过的字节码，看不到事件和触发条件，也读不出刷怪数量；下面是脚本里出现的东西。台词按脚本字符串表的顺序，不一定是播放顺序。）', '',
+           '地图：' + ('、'.join(names.map(m) for m in bvm_maps(bvm)) or '（无）'),
+           '音乐：' + ('、'.join(music) or '（无）'), '', '出场对象：', '  ' + NAME_NOTE]
+    out += ['    ' + names.label(o) for o in objects] + ['', '台词：'] + ['    ' + x for x in lines]
     return '\n'.join(out)
 
 
@@ -466,25 +529,38 @@ def header(m: dict) -> str:
     return title + '\n' + '=' * 40 + '\n\n'
 
 
+def script(game: rootcpk.Game, key: str) -> str | bytes | None:
+    """An EDF6 mission's MISSION.AC text or an EDF5 one's MISSION.BVM bytes; None when Root.cpk lacks it."""
+    series, rel = key.split('/', 1)
+    try:
+        if series == 'EDF6':
+            return game.read(f'MISSION/EDF6/{rel}', 'MISSION.AC').decode('utf-8-sig')
+        return game.read(f'MISSION/{edf5.SCRIPTS}/{rel}', 'MISSION.BVM')
+    except KeyError:
+        return None
+
+
 def build(root: str, out: str, only: set[str]) -> int:
     game = rootcpk.Game(root)
     table = voices(game)
+    names = Names(root)
     with open(MISSIONS, encoding='utf-8') as f:
         missions = json.load(f)
+    scripts = {m['key']: script(game, m['key']) for m in missions}
+    for m in missions:   # every map's first mission in the plan's order (the game has no map names)
+        s = scripts[m['key']]
+        for map_name in ([x for x, _ in AC_MAP.findall(s)] if isinstance(s, str) else bvm_maps(s) if s else []):
+            names.map_first.setdefault(map_name.lower(), f'{m["series"]} {m["key"].split("/")[-1]} {m["sc"]}')
     os.makedirs(out, exist_ok=True)
     index: dict[str, str] = {}
     for m in missions:
         if only and m['key'] not in only:
             continue
-        series, rel = m['key'].split('/', 1)
-        try:
-            if series == 'EDF6':
-                text = digest_ac(game.read(f'MISSION/EDF6/{rel}', 'MISSION.AC').decode('utf-8-sig'), table)
-            else:
-                text = digest_bvm(game.read(f'MISSION/{edf5.SCRIPTS}/{rel}', 'MISSION.BVM'), table)
-        except KeyError:
+        s = scripts[m['key']]
+        if s is None:
             print(f'跳过 {m["key"]}：Root.cpk 里没有它的脚本')
             continue
+        text = digest_ac(s, table, names) if isinstance(s, str) else digest_bvm(s, table, names)
         name = m['key'].replace('/', '_') + '.txt'
         with open(os.path.join(out, name), 'w', encoding='utf-8', newline='\n') as f:
             f.write(header(m) + text)
