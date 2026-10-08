@@ -113,7 +113,9 @@ FACTORS = {
 # Statements that are the event editor's scaffolding or loading/lighting detail, not the mission's content.
 NOISE = re.compile(r'^(::|internal_|__|IsBoolState|Mutex_|WaitVoice\(\)|g_soldiers\s*=\s*GetTalkers|Preload|WaitPreload|'
                    r'BeginLoading|EndLoading|Online_WaitStart|EventLightTool\b|tool\.|const uint32 MAX_EVENT_ID|'
-                   r'return;$|\w+_usercode\(\);|if\(\s*::)')
+                   r'\w+_usercode\(\);|if\(\s*::__\w+_data\.m_counter\b)')
+# Only the editor's own guard (`if( ::__XXXX_data.m_counter != 1 ) return;`) goes: a script's own `if (...) return;`
+# is a condition the reader needs.
 # Dropped ideas (code switched off, debug-only placeholder text, superseded dialogue, events nothing starts) are
 # kept but marked: a digest line starting with DEAD is shown greyed on the site.
 DEAD = '⊘ '
@@ -123,7 +125,8 @@ DEBUG_TEXT = re.compile(r'^DebugMessageW\(\s*"([^"]*)"')
 SHOW = re.compile(r'(^|\.)(AppealAnimation\w*|SetAiObjectDirection_\w+|ClearAiObjectDirection|LookCameraTo\w+|CloseUi|'
                   r'SetCharacterRandomTalk|EnableAiRandomTalk|DisableAiRandomTalk|TalkBegin|TalkEnd|EnvFadeAnimation)\s*\(')
 # A // comment that is code switched off rather than a note.
-CODE_COMMENT = re.compile(r'^//\s*([\w.:\[\]]+\s*(\(|=[^=])|.*;\s*(//.*)?$)')
+CODE_COMMENT = re.compile(r'^//\s*([A-Za-z_:][A-Za-z0-9_.:\[\]]*\s*(\(|=[^=])|[A-Za-z_:].*;\s*(//.*)?$)', re.ASCII)
+# ASCII identifiers only: a Japanese note like `// 増援(2波目)` or `// 敵数=10` is a note, not switched-off code.
 SPEECH = re.compile(r'^(Speak_\w+|RadioVoice|Talk_\w+)\s*\(')
 NUM_F = re.compile(r'\b(\d+(?:\.\d+)?)f\b')
 DROP_COMMENTS = re.compile(r'^//\s*(\[e2d_section_data\]|ゲーム進行スクリプト|音声スクリプト|-{5,})')

@@ -335,7 +335,7 @@ def _pull(hub: Hub, since: int, out: str) -> None:
 # Players' text, as printed for the developer (and the agent reading the terminal): control characters (ANSI
 # escapes too), direction overrides and zero-width characters out, then fenced with a random marker the text cannot
 # know, so nothing a player wrote can pass for the tool's own output or for instructions.
-_INVISIBLE = re.compile('[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff\ufff9-\ufffb]')
+_INVISIBLE = re.compile('[\x00-\x08\x0b-\x1f\x7f-\x9f\xad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufe00-\ufe0f\ufeff\ufff9-\ufffb\U000e0000-\U000e007f\U000e0100-\U000e01ef]')
 
 
 def _clean(text: object) -> str:
@@ -432,6 +432,8 @@ def main(argv: list[str]) -> int:
     p.add_argument('--notes', default='')
     p.add_argument('--commit', default='')
     a = ap.parse_args(argv)
+    # Players write emoji and the like; a pipe on a Chinese Windows console is GBK and would die on the first one.
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     hub = hub_for_dev()
     if a.cmd == 'state':
         _print_state(hub.get_json('/api/state'))

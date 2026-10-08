@@ -14,9 +14,12 @@ export const PSTATUS = ['open', 'accepted', 'done', 'rejected'];
 export const LIMIT = { title: 100, body: 10000, reply: 4000, note: 60, proposals: 3000, replies: 500, digest: 1 << 20 };
 export const RATE = [[10 * 60e3, 60], [864e5, 600]];   // [window ms, writes] per account
 
-// C0/C1 controls except \t \n, zero-width and direction marks/overrides/isolates, word joiner .. invisible
-// operators, BOM, interlinear annotation: invisible characters that reorder or hide text.
-const INVISIBLE = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\uFFF9-\uFFFB]/gu;
+// Invisible characters that hide, reorder or smuggle text: C0/C1 controls except \t \n, soft hyphen, Arabic
+// letter mark, Mongolian vowel separator, zero-width and direction marks, line/paragraph separators, bidi
+// embeddings/overrides/isolates, word joiner .. invisible operators, variation selectors, BOM, interlinear
+// annotation, tag characters (ASCII smuggling: text a model reads and a screen does not show) and the
+// supplementary variation selectors.
+const INVISIBLE = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u00AD\u061C\u180E\u200B-\u200F\u2028-\u202E\u2060-\u2069\uFE00-\uFE0F\uFEFF\uFFF9-\uFFFB\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/gu;
 
 export function clean(value, max) {
   const text = String(value ?? '').normalize('NFC').replace(/\r\n?/g, '\n').replace(INVISIBLE, '')
@@ -30,6 +33,13 @@ export function scope(me, asked) {
   const g = asked == null ? '' : String(asked);
   if (!GROUP.test(g)) throw new HttpError(400, 'bad group');
   return g;
+}
+
+// An id from a request: a whole number, else a 400 (not NaN bound into SQL).
+export function int(value) {
+  const n = typeof value === 'string' && value.trim() ? Number(value) : value;
+  if (!Number.isSafeInteger(n)) throw new HttpError(400, 'bad id');
+  return n;
 }
 
 // A sort key strictly between two neighbours (null = no neighbour on that side); null when the gap has worn out
@@ -90,12 +100,12 @@ export class Plan {
     if (!b.id) {
       if (!KINDS.includes(b.kind)) throw new HttpError(400, 'kind must be new or edit');
       const mission = b.kind === 'edit' ? this.mission(b.mission) : null;
-      const n = await this.db.prepare('SELECT COUNT(*) AS n FROM proposals WHERE grp = ?1').bind(grp).first();
-      if (n.n >= LIMIT.proposals) throw new HttpError(409, '这个组的意见已经太多了，请先清理');
       await this.charge();
-      const row = await this.db.prepare(
-        'INSERT INTO proposals (grp, kind, mission, title, body, author, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7) RETURNING id',
-      ).bind(grp, b.kind, mission, title, text, this.me.user, now).first();
+      const row = await this.db.prepare(   // the cap is checked in the insert itself
+        `INSERT INTO proposals (grp, kind, mission, title, body, author, created_at, updated_at) SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7
+         WHERE (SELECT COUNT(*) FROM proposals WHERE grp = ?1) < ?8 RETURNING id`,
+      ).bind(grp, b.kind, mission, title, text, this.me.user, now, LIMIT.proposals).first();
+      if (!row) throw new HttpError(409, '这个组的意见已经太多了，请先清理');
       return { id: row.id };
     }
     const p = await this.ownProposal(grp, b.id);
@@ -129,18 +139,19 @@ export class Plan {
     const p = await this.proposal(grp, b.proposal_id);
     const text = clean(b.body, LIMIT.reply);
     if (!text) throw new HttpError(400, '回复不能为空');
-    const n = await this.db.prepare('SELECT COUNT(*) AS n FROM proposal_replies WHERE proposal_id = ?1').bind(p.id).first();
-    if (n.n >= LIMIT.replies) throw new HttpError(409, '这条意见的回复已经太多了');
     await this.charge();
-    const row = await this.db.prepare('INSERT INTO proposal_replies (proposal_id, author, body, at) VALUES (?1, ?2, ?3, ?4) RETURNING id')
-      .bind(p.id, this.me.user, text, Date.now()).first();
+    const row = await this.db.prepare(
+      `INSERT INTO proposal_replies (proposal_id, author, body, at) SELECT ?1, ?2, ?3, ?4
+       WHERE (SELECT COUNT(*) FROM proposal_replies WHERE proposal_id = ?1) < ?5 RETURNING id`,
+    ).bind(p.id, this.me.user, text, Date.now(), LIMIT.replies).first();
+    if (!row) throw new HttpError(409, '这条意见的回复已经太多了');
     return { id: row.id };
   }
 
   async deleteReply(grp, b) {
     const r = await this.db.prepare(
       'SELECT r.id, r.author FROM proposal_replies r JOIN proposals p ON p.id = r.proposal_id WHERE r.id = ?1 AND p.grp = ?2',
-    ).bind(Number(b.id), grp).first();
+    ).bind(int(b.id), grp).first();
     if (!r) throw new HttpError(404, 'no such reply');
     if (r.author !== this.me.user && !this.dev) throw new HttpError(403, '只能删自己的回复');
     await this.charge();
@@ -178,7 +189,7 @@ export class Plan {
 
   async move(grp, b) {
     const row = await this.row(grp, b.id);
-    if (b.after != null && Number(b.after) === row.id) return { ok: true };
+    if (b.after != null && int(b.after) === row.id) return { ok: true };
     await this.charge();
     const sort = await this.place(grp, b.after, row.id);
     await this.db.prepare('UPDATE outline SET sort = ?2 WHERE id = ?1').bind(row.id, sort).run();
@@ -206,7 +217,7 @@ export class Plan {
     for (let pass = 0; pass < 2; pass++) {
       let prev = null;
       if (after != null) {
-        const a = await this.db.prepare('SELECT sort FROM outline WHERE id = ?1 AND grp = ?2').bind(Number(after), grp).first();
+        const a = await this.db.prepare('SELECT sort FROM outline WHERE id = ?1 AND grp = ?2').bind(int(after), grp).first();
         if (!a) throw new HttpError(404, '要放的位置不存在了（大纲可能刚被别人改过），请刷新');
         prev = a.sort;
       }
@@ -251,7 +262,7 @@ export class Plan {
   }
 
   async proposal(grp, id) {
-    const p = await this.db.prepare('SELECT * FROM proposals WHERE id = ?1 AND grp = ?2').bind(Number(id), grp).first();
+    const p = await this.db.prepare('SELECT * FROM proposals WHERE id = ?1 AND grp = ?2').bind(int(id), grp).first();
     if (!p) throw new HttpError(404, 'no such proposal');
     return p;
   }
@@ -263,22 +274,24 @@ export class Plan {
   }
 
   async row(grp, id) {
-    const r = await this.db.prepare('SELECT * FROM outline WHERE id = ?1 AND grp = ?2').bind(Number(id), grp).first();
+    const r = await this.db.prepare('SELECT * FROM outline WHERE id = ?1 AND grp = ?2').bind(int(id), grp).first();
     if (!r) throw new HttpError(404, '大纲里没有这一行（可能刚被别人改过），请刷新');
     return r;
   }
 
   // Counts a write against the account's rate limits, or refuses it.
+  // The count and the write are one statement (D1 runs statements one at a time), so concurrent requests cannot
+  // all pass the check before any of them is counted.
   async charge() {
     const now = Date.now();
-    for (const [win, max] of RATE) {
-      const c = await this.db.prepare('SELECT COUNT(*) AS n FROM write_log WHERE author = ?1 AND at > ?2').bind(this.me.user, now - win).first();
-      if (c.n >= max) throw new HttpError(429, '操作太频繁了，请过一会儿再试');
-    }
-    await this.db.batch([
-      this.db.prepare('INSERT INTO write_log (author, at) VALUES (?1, ?2)').bind(this.me.user, now),
-      this.db.prepare('DELETE FROM write_log WHERE author = ?1 AND at < ?2').bind(this.me.user, now - 2 * 864e5),
-    ]);
+    const [[w1, m1], [w2, m2]] = RATE;
+    const r = await this.db.prepare(
+      `INSERT INTO write_log (author, at) SELECT ?1, ?2
+       WHERE (SELECT COUNT(*) FROM write_log WHERE author = ?1 AND at > ?3) < ?4
+         AND (SELECT COUNT(*) FROM write_log WHERE author = ?1 AND at > ?5) < ?6`,
+    ).bind(this.me.user, now, now - w1, m1, now - w2, m2).run();
+    if (!r.meta.changes) throw new HttpError(429, '操作太频繁了，请过一会儿再试');
+    await this.db.prepare('DELETE FROM write_log WHERE author = ?1 AND at < ?2').bind(this.me.user, now - 2 * 864e5).run();
   }
 }
 

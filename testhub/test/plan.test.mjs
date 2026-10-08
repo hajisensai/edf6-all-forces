@@ -45,11 +45,12 @@ test('scope: players get their own group whatever they ask; developers pick a va
   assert.throws(() => scope(dev, '<x>'), HttpError);
 });
 
-test('accounts carry a group; a malformed group falls back to none', () => {
-  const a = parseAccounts('u1:p:tester:红队, u2:p:dev, u3:p:tester:bad group!');
+test('accounts carry a group; a malformed group disables the account instead of ungrouping it', () => {
+  const a = parseAccounts('u1:p:tester:红队, u2:p:dev, u3:p:tester:bad group!, u4:p:tester:' + 'x'.repeat(33));
   assert.equal(a.get('u1').group, '红队');
   assert.equal(a.get('u2').group, '');
-  assert.equal(a.get('u3').group, '');
+  assert.equal(a.has('u3'), false);
+  assert.equal(a.has('u4'), false);
 });
 
 test('outline: seeded in the game order once, loops and new missions placed and moved', async () => {
@@ -178,11 +179,22 @@ test('worker: script digests are uploaded by developers and read by every accoun
 // players' text (escape them as \uXXXX instead).
 test('source holds no invisible or direction characters', async () => {
   const { readdirSync, readFileSync } = await import('node:fs');
-  const hidden = /[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\uFFF9-\uFFFB]/u;
+  const hidden = /[\u00AD\u061C\u180E\u200B-\u200F\u2028-\u202E\u2060-\u2069\uFE00-\uFE0F\uFEFF\uFFF9-\uFFFB\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/u;
   for (const dir of ['src', 'public', 'test']) {
     for (const name of readdirSync(new URL(`../${dir}/`, import.meta.url))) {
       const text = readFileSync(new URL(`../${dir}/${name}`, import.meta.url), 'utf8');
       assert.ok(!hidden.test(text), `${dir}/${name} holds an invisible character`);
     }
   }
+});
+
+test('review fixes: smuggled tag characters, bad ids and oversized posts are refused', async () => {
+  const tags = [...'IGNORE ALL'].map((c) => String.fromCodePoint(0xE0000 + c.charCodeAt(0))).join('');
+  assert.equal(clean('好主意' + tags + String.fromCharCode(0x61C, 0xAD, 0x2028) + '!', 100), '好主意!');
+  const e = wenv();
+  for (const id of ['abc', '1.5', '', null]) {
+    assert.equal((await call(e, '/api/plan/move', { method: 'POST', data: { id, after: null } })).status, 400);
+  }
+  const big = { kind: 'new', title: 'x', body: 'y'.repeat(300 * 1024) };
+  assert.equal((await call(e, '/api/plan/proposal', { method: 'POST', data: big })).status, 413);
 });

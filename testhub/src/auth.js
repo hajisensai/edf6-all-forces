@@ -8,7 +8,11 @@ export function parseAccounts(text) {
   const out = new Map();
   for (const part of String(text).split(',')) {
     const [user, pass, role, group = ''] = part.trim().split(':');
-    if (user && pass) out.set(user, { user, pass, role: role === 'dev' ? 'dev' : 'tester', group: GROUP.test(group) ? group : '' });
+    if (!user || !pass) continue;
+    // A mistyped group must not land the account in the shared ungrouped one (it would see that group's text):
+    // the account is left out until the secret is fixed.
+    if (!GROUP.test(group)) { console.error(`ACCOUNTS: ${user} has a bad group name, account disabled`); continue; }
+    out.set(user, { user, pass, role: role === 'dev' ? 'dev' : 'tester', group });
   }
   return out;
 }
