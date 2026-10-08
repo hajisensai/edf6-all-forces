@@ -109,7 +109,13 @@ int SpawnFault(Body b,const EXCEPTION_POINTERS* e) noexcept {
 }
 
 unsigned char* CreateJet(Body b,const float* m,InitParam* param) noexcept {
-    __try { return reinterpret_cast<CreateObjectFn>(image+kCreateObject)(At<void*>(image,kObjectMgr),m,Row(b).sgo,param); }
+    __try {
+        // Network plans store ordinary floats. SceneObject's constructor loads
+        // four matrix rows with MOVAPS, regardless of the incoming ABI's type.
+        alignas(16) float nativeMatrix[16];
+        std::memcpy(nativeMatrix,m,sizeof(nativeMatrix));
+        return reinterpret_cast<CreateObjectFn>(image+kCreateObject)(At<void*>(image,kObjectMgr),nativeMatrix,Row(b).sgo,param);
+    }
     __except(SpawnFault(b,GetExceptionInformation())) { return nullptr; }
 }
 }  // namespace
