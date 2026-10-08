@@ -8,7 +8,7 @@ EDFModLoader 插件，只支持 EDF.dll TimeDateStamp `0x678CCB46`（当前 Stea
 | 插件 | 目录 | 做什么 |
 |---|---|---|
 | `EDF6VehicleCrew` | `src/` | NPC 开载具 / 开直升机，玩家随时顶替（本文下面全部内容） |
-| `EDF6AutoTurret` | `autoturret/` | 防空车（KG6 克卜勒系）改高射炮并自瞄、玻尔斯对地自瞄；泰坦和带炮手座坦克的两门副炮自瞄，炮手座没人时自动开火（算驾驶员的）；关卡里 NPC 开的防空车换成 mod 版防空车，NPC 泰坦补上副炮，关卡里的坦克开炮时有和玩家版一样的车体后坐力。说明见 [autoturret/README.zh-CN.md](autoturret/README.zh-CN.md) |
+| `EDF6AutoTurret` | `autoturret/` | 防空车（KG6 克卜勒系）改高射炮并自瞄、玻尔斯对地自瞄；泰坦和带炮手座坦克的副炮由席位上的真实 NPC 操作，无人席不自动开火；关卡里 NPC 开的防空车换成 mod 版防空车，NPC 泰坦补上副炮，关卡里的坦克开炮时有和玩家版一样的车体后坐力。说明见 [autoturret/README.zh-CN.md](autoturret/README.zh-CN.md) |
 
 **发布包（安装器）两个插件都装**：`EDF6VehicleCrew安装器.exe` 里打包了 `EDF6VehicleCrew.dll` / `.ini` 和 `EDF6AutoTurret.dll` / `.ini`，
 选 1 时连同 `EDF6AutoTurret` 的武器 / 载具数据一起装好，选 2 卸载时一起去掉，选 5 检查（见「安装 / 卸载」）。
@@ -35,7 +35,7 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
    - 机甲 Begaruta / Nix（以及普罗透斯）和巴尔加原版**有** AI，但插件以前挂错了每帧入口（挂在只有 AI 才会跑的 AI 任务上；巴尔加根本没挂），所以你开过下车后从不派 NPC，换座位、M 地图也对它们无效（2026-10-07 用户：「所有载具都要支持 ai」）。现在改挂它们的每帧更新：会派 NPC 驾驶、换座后 NPC 接手，平时原地转向敌人开火，M 地图里显示为「机甲」，下「守点」命令就走过去（机甲用和坦克同一套写法，巴尔加用游戏自己的走路函数）。**未实机验证**，有问题请开 `Debug=1` 回传 `NPCPOST` 行。
 2. **玩家顶替 NPC**：原版不允许玩家坐已有人的座位。插件放开了这一限制，所以 NPC 坐着的载具也会照常出现上车提示，按上车键就能坐进去：
    - 被顶下的 NPC 优先挪到空的副座/炮手位；挪到炮手位后会用那个座位的炮瞄准开火（`NpcGunners`，见下）；
-   - 没有空位时真实士兵按原生流程下车并继续存在；原版任务 Dummy 保留原游戏处理。
+   - 没有空位时真实士兵按原生流程下车并继续存在；原任务载具的机组也按任务阵营、等级和生命周期创建真实士兵，保留车辆初始化和脚本路线。
    - 玩家下车后，过 `CrewDelayMs` 又会有 NPC 来开这台车。
 3. **NPC 开直升机**：游戏本身没有直升机驾驶 AI（静态分析结论见 `docs/heli-input-re.md`），NPC 坐上直升机后由插件来飞：
    - **跟随**：保持在玩家旁 `HeliFollow` 米、头顶 `HeliHeight` 米处；
