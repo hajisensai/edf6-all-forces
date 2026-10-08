@@ -74,6 +74,18 @@ bool Gate(bool replicated=false) noexcept {
     if((InSession() && !replicated) || (!replicated && !OnlineHostOnly())){failure=SupportSpawnFailure::onlineReplication;return false;}
     return true;
 }
+int SpawnFault(const char* stage,const EXCEPTION_POINTERS* error,const float* requested,const float* nativeMatrix,const void* soldier) noexcept {
+    const auto record=error->ExceptionRecord;
+    const auto address=reinterpret_cast<std::uintptr_t>(record->ExceptionAddress);
+    const auto base=reinterpret_cast<std::uintptr_t>(image);
+    const auto rva=address>=base ? address-base : 0;
+    const auto access=record->NumberParameters>=2 ? record->ExceptionInformation[1] : 0;
+    Log("SUPPORT soldier fault stage=%s code=%08lX at=%p EDF+%llX access=%p requestedMatrix=%p mod16=%u nativeMatrix=%p mod16=%u object=%p; spawning disabled for this process",
+        stage,record->ExceptionCode,record->ExceptionAddress,static_cast<unsigned long long>(rva),reinterpret_cast<const void*>(access),requested,
+        static_cast<unsigned>(reinterpret_cast<std::uintptr_t>(requested)&15u),nativeMatrix,
+        static_cast<unsigned>(reinterpret_cast<std::uintptr_t>(nativeMatrix)&15u),soldier);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
 bool Spawn(const float* matrix,bool leader,ObjRef* out,const unsigned char* netId=nullptr) noexcept {
     *out=ObjRef{};
     if(!Gate(netId!=nullptr))return false;
@@ -84,10 +96,18 @@ bool Spawn(const float* matrix,bool leader,ObjRef* out,const unsigned char* netI
     Owned* entry=FreeEntry();
     if(!entry){failure=SupportSpawnFailure::capacity;return false;}
     unsigned char* soldier=nullptr;
+    const char* volatile stage="create";
+    const float* volatile nativeInput=nullptr;
     __try {
+        // CreateObject stores this pointer verbatim at InitParam+8. SceneObject's constructor
+        // 1189CB0..1189CCE uses MOVAPS for all four rows. Wire/Plan Unit.matrix is only float-aligned.
+        alignas(16) float nativeMatrix[16];
+        std::memcpy(nativeMatrix,matrix,sizeof(nativeMatrix));
+        nativeInput=nativeMatrix;
         InitParam init{image+kInitVtable,{}};
-        soldier=create(missionManager,matrix,kBodies[leader ? 1 : 0],&init);
+        soldier=create(missionManager,nativeMatrix,kBodies[leader ? 1 : 0],&init);
         if(!soldier){failure=SupportSpawnFailure::create;return false;}
+        stage="identity";
         const auto ctrl=At<unsigned char*>(soldier,kSelfCtrl);
         if(!IsSoldierClass(soldier) || IsAnyPlayer(soldier) || !Readable(ctrl,16) || At<LONG>(ctrl,8)<=0) {
             failure=SupportSpawnFailure::wrongClass;destroy(soldier);return false;
@@ -95,26 +115,29 @@ bool Spawn(const float* matrix,bool leader,ObjRef* out,const unsigned char* netI
         // Retain only the weak count. The scene manager owns the actual soldier, exactly as CreateFriend.
         InterlockedIncrement(reinterpret_cast<volatile LONG*>(ctrl+0xC));
         *entry=Owned{ObjRef::Of(soldier),epoch,true};
+        stage="team";
         team(soldier,2,true);
+        stage="level";
         level(soldier,1.0f); // native difficulty scaling, not direct HP/weapon manipulation
+        stage="recruit";
         Put<unsigned char>(soldier,0x540,1); // stock CreateFriend's recruitable flag
         if(At<int>(soldier,edf::kTeam)!=2){failure=SupportSpawnFailure::setup;destroy(soldier);ReleaseWeak(*entry);return false;}
         if(netId) {
+            stage="network";
             if(!RegisterSupportObject(soldier,netId)) {
                 failure=SupportSpawnFailure::setup;destroy(soldier);ReleaseWeak(*entry);return false;
             }
         }
         *out=entry->ref;
         return true;
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
+    } __except(SpawnFault(stage,GetExceptionInformation(),matrix,nativeInput,soldier)) {
         // A constructor fault may leave a partial object in the engine. Never retry that profile this process.
-        faulted=true;failure=SupportSpawnFailure::create;
+        faulted=true;failure=soldier ? SupportSpawnFailure::setup : SupportSpawnFailure::create;
     }
     if(soldier) {
         __try { destroy(soldier); } __except(EXCEPTION_EXECUTE_HANDLER) {}
     }
     if(entry->ref)ReleaseWeak(*entry);
-    Log("SUPPORT soldier creation fault: spawning disabled for this process");
     return false;
 }
 }

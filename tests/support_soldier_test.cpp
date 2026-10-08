@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include "../src/support_net.h"
 
 namespace crew {
 unsigned char* image=nullptr;
@@ -24,6 +25,7 @@ unsigned char* __fastcall Create(void*,const float* m,const wchar_t* path,suppor
     if(made==failAt)return nullptr;
     const int i=made++;
     initGood=initGood && init->vtable==image+support_native::kInitVtable;
+    initGood=initGood && (reinterpret_cast<std::uintptr_t>(m)&15u)==0;
     for(unsigned char c:init->rest)initGood=initGood && c==0;
     initGood=initGood && (wcscmp(path,support_native::kBodies[0])==0 || wcscmp(path,support_native::kBodies[1])==0);
     auto* o=objects[i];auto* c=controls[i];std::memset(o,0,sizeof objects[i]);std::memset(c,0,16);
@@ -58,6 +60,15 @@ int main() {
     Check(image!=nullptr,"private image");
     float poses[12][16]{};
     for(int i=0;i<12;++i){poses[i][0]=poses[i][5]=poses[i][10]=poses[i][15]=1;poses[i][12]=float(i*2);}
+    Setup();alignas(16) support_net::Plan wirePlan{};
+    for(unsigned i=0;i<support_net::kMaxUnits;++i) {
+        std::memcpy(wirePlan.units[i].matrix,poses[i%12],sizeof poses[0]);
+        ObjRef spawned;
+        Check(ApplySupportSoldierSpawn(wirePlan.units[i].matrix,i%4==0,nullptr,&spawned) && initGood,
+              "normal and leader wire matrices reach native CreateObject 16-aligned");
+        Check(std::memcmp(static_cast<const unsigned char*>(spawned.obj)+kPosition,wirePlan.units[i].matrix+12,12)==0,
+              "aligned native copy preserves requested position exactly");
+    }
     Setup();Check(preloads==2 && SupportSoldiersReady(),"two Root resources queued for current mission");
     ObjRef one;Check(SpawnSupportSoldier(poses[0],&one) && initGood,"native InitParam and fixed real resource");
     Check(At<LONG>(one.ctrl,8)==1 && At<LONG>(one.ctrl,12)==2,"retain weak only, scene owns strong");
