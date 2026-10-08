@@ -6,6 +6,7 @@ namespace crew {
 unsigned char* image=nullptr;Config config{};PlayerFix player{{0,0,0},2,1};
 const Config& Cfg() noexcept {return config;}
 bool testOnline=false;ULONGLONG now=1000;
+support::Policy SupportMissionPolicy() noexcept {return {support::Environment::normal,false};}
 bool InSession() noexcept {return testOnline;}
 bool OnlineHostOnly() noexcept {return true;}
 ULONGLONG GameMs() noexcept {return now;}

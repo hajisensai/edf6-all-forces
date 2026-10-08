@@ -3,6 +3,7 @@
 #include "crew.h"
 #include "support_call.h"
 #include "support_aircraft.h"
+#include "support_policy.h"
 #include "support_soldier.h"
 #include "support_spawn.h"
 #include "support_net.h"
@@ -89,6 +90,9 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,SupportPl
     }
     SupportPlan plan{};plan.catalogId=catalog;std::memcpy(plan.target,target,12);
     if(catalog<static_cast<unsigned>(AirCount())) {
+        if(!support::Allowed(SupportMissionPolicy(),support::Capability::air)) {
+            Status(L"本关限制外部航空支援，或处于地下环境");return PlanResult::refused;
+        }
         SupportAircraft spec;support::Route route;
         if(!SupportAircraftSpec(static_cast<int>(catalog),&spec)) {Status(L"该单位尚无可用的实际入场方式");return PlanResult::refused;}
         if(!Cfg().jetAirRaider || !Cfg().npcBoarding || (spec.heli>=0 ? !Cfg().heliPilot : !Cfg().jetPilot)) {
@@ -123,6 +127,9 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,SupportPl
        !Foot(entry[0],entry[2],target[1],entry[1]))return nextEdge();
     SupportVehicleKind kind{};SupportCrewMode mode{};const bool vehicle=GroundCatalog(catalog,kind,mode);
     const auto* spec=vehicle ? SupportVehicleInfo(kind) : nullptr;
+    if(vehicle && !support::Allowed(SupportMissionPolicy(),spec && spec->wasteland ? support::Capability::civilianGround : support::Capability::militaryGround)) {
+        Status(L"本关限制外部军事支援；可选择步兵或民用轻卡");return PlanResult::refused;
+    }
     if(vehicle && (!spec || !Cfg().npcBoarding || !SupportVehicleReady(kind,mode))){Status(L"该车辆的资源或交付能力不可用");return PlanResult::refused;}
     npc::navigation::Profile profile{};profile.cell=4.0f;
     if(spec){profile.radius=std::hypot(spec->halfWidth,spec->halfLength);profile.height=spec->height;}
@@ -152,6 +159,9 @@ bool Validate(const SupportPlan& plan) noexcept {
     if(!support_net::ValidPlan(plan,false) || plan.catalogId>=static_cast<unsigned>(SupportCallCount()) || !SupportSoldiersReady())return false;
     SupportAircraft aircraft;SupportVehicleKind kind{};SupportCrewMode mode{};
     const bool air=plan.catalogId<static_cast<unsigned>(AirCount()),ground=GroundCatalog(plan.catalogId,kind,mode);
+    const auto capability=air ? support::Capability::air : ground ?
+        (SupportVehicleInfo(kind)->wasteland ? support::Capability::civilianGround : support::Capability::militaryGround) : support::Capability::infantry;
+    if(!support::Allowed(SupportMissionPolicy(),capability))return false;
     if(air && !SupportAircraftSpec(static_cast<int>(plan.catalogId),&aircraft))return false;
     if(ground && !SupportVehicleReady(kind,mode))return false;
     if(air) {
