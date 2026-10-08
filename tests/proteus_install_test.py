@@ -11,6 +11,7 @@ import ledger
 import modfiles
 import make_proteus as mp
 import sgo
+from test_proteus_assets import fixture as cas_fixture
 
 HOST = 'V614_PROTEUS_MK2'
 MODEL, CAS = f'OBJECT/EDF6VC_{HOST}.MRAB', f'OBJECT/EDF6VC_{HOST}.CAS'
@@ -30,7 +31,7 @@ class Transaction(unittest.TestCase):
         self.owner = patch.object(ledger, 'OWNERS', tuple(set(ledger.OWNERS) | {mp.OWNER}))
         self.owner.start(); self.addCleanup(self.owner.stop)
         self.original = stock(12345)
-        self.files = {VEHICLE: mp.redirect(stock())[0], MODEL: b'new model', CAS: b'new animation'}
+        self.files = {VEHICLE: mp.redirect(stock())[0], MODEL: b'new model', CAS: mp.proteus_model.animation(cas_fixture())}
         self.write(VEHICLE, self.original)
 
     def path(self, rel): return Path(self.root, 'Mods', *rel.split('/'))

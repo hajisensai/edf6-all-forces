@@ -578,6 +578,9 @@ add_test(NAME proteus_assets COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR
 add_test(NAME proteus_text COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_text_test.py")
 add_test(NAME proteus_install COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_install_test.py")
 add_test(NAME proteus_range COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_range_test.py")
+add_test(NAME proteus_cas_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_cas_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(proteus_cas_native PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME proteus_cas_upgrade COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_cas_upgrade_test.py")
 add_test(NAME vehicle_shapes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_vehicle_model_shapes.py")
 add_test(NAME aircraft_collision COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/aircraft_collision_check.py")
 

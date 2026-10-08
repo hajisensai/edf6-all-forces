@@ -34,10 +34,19 @@ def fixture() -> bytes:
 
 
 class AnimationTests(unittest.TestCase):
+    def test_channel_alignment_for_every_source_tail_residue(self) -> None:
+        # Real stock files end at residues 4 and 8; the old synthetic fixture
+        # ended at 0 and therefore hid the faulty four-byte padding on CI.
+        for residue in range(16):
+            with self.subTest(residue=residue):
+                source = fixture() + bytes(residue)
+                self.check_extension(source, pm.animation(source))
+
     def check_extension(self, source: bytes, target: bytes) -> None:
         old, new = cas_pose.CasPose(source), cas_pose.CasPose(target)
         self.assertEqual(new.names, old.names + pm.SHIELD_BONES)
         self.assertEqual(new.channel_count, old.channel_count + 1)
+        self.assertEqual(new.points % 16, 0, 'native CANM SIMD channel rows need 16-byte alignment')
         for i in range(old.channel_count):
             a, b = old.points + i * 48, new.points + i * 48
             self.assertEqual(source[a:a + 32], target[b:b + 32])
@@ -46,6 +55,8 @@ class AnimationTests(unittest.TestCase):
             self.assertEqual(a + off_a if off_a else 0, b + off_b if off_b else 0)
         for before, after in zip(old.clips, new.clips):
             self.assertEqual(before.name, after.name)
+            self.assertEqual(source[before.at:before.at+20], target[after.at:after.at+20],
+                             'loop flag, duration, step and frame count remain native values')
             self.assertEqual(len(after.tracks), len(before.tracks) + 36)
             for a, b in zip(before.tracks, after.tracks):
                 self.assertEqual(source[a.at:a.at + 8], target[b.at:b.at + 8])
