@@ -3301,6 +3301,26 @@ void MapUnits(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
     if(p.dx!=0.0f || p.dy!=0.0f)Tri(drawer,ctx,p.ix-p.dx*5.0f*s,p.iy-p.dy*5.0f*s,p.ix+p.dx*20.0f*s,p.iy+p.dy*20.0f*s,7.0f*s,kWhite);
 }
 
+// Map panels share a viewport-fitted scale and publish the exact opaque UI regions.
+// Text is drawn in a final batch: remove earlier world labels under each panel before that batch.
+float mapUiPanels[16*4]{};int mapUiPanelCount=0;
+void MapUiBox(void* drawer,void* ctx,float x0,float y0,float x1,float y1,Line* lines,int prior) noexcept {
+    for(int i=0;i<prior;++i) {
+        auto& line=lines[i];
+        if(line.x<x1 && line.x+line.w>x0 && line.y<y1 && line.y+line.h>y0)line.text[0]=0;
+    }
+    Rect(drawer,ctx,x0,y0,x1,y1,kMapBand);
+    if(mapUiPanelCount<16) {
+        auto* r=mapUiPanels+4*mapUiPanelCount++;r[0]=x0;r[1]=y0;r[2]=x1;r[3]=y1;
+    }
+}
+void MapFitLabel(Text* text,Line& row,float left,float right) noexcept {
+    if(!text || !(row.w>right-left))return;
+    const float mid=row.y+row.h*0.5f;
+    row.scale*=std::fmax(0.01f,(right-left)/row.w);MeasureAll(*text,&row,1);
+    row.x=std::fmax(left,std::fmin(row.x,right-row.w));row.y=mid-row.h*0.5f;
+}
+
 // The NPC commands (mapcmd.cpp, README 地图 → 指挥 NPC): the mouse pointer (where G sends the selection; with a pad a
 // crosshair at the screen's centre) and the box being dragged from it, each commandable unit ringed (white brackets:
 // selected), a guard order's line from the unit to its point (its slot of the formation) and a ring there, FOLLOW under a
@@ -3361,18 +3381,14 @@ void MapSquadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool pa
     for(int i=first;i<*at;++i) {
         Line& row=lines[i];row.scale=kLineScale*0.7f;row.w=row.h=0;
         if(text)MeasureAll(*text,&row,1);
-        const float most=std::fmin(520.0f*s,width-32.0f*s);
+        const float most=std::fmin(520.0f*s,width*0.46f-32.0f*s);
         if(row.w>most && text){row.scale*=most/row.w;MeasureAll(*text,&row,1);}
         row.x=x0;row.y=top+rowH*static_cast<float>(i-first);
         panelW=std::fmax(panelW,row.w);
     }
     const float left=x0-8.0f*s,right=x0+panelW+8.0f*s,bottom=top+rowH*static_cast<float>(rows+1)+4.0f*s;
-    // Text is batched after all panels. Occlude earlier world/grid labels here too, or they would print over the panel.
-    for(int i=0;i<first;++i) {
-        Line& under=lines[i];
-        if(under.x<right && under.x+under.w>left && under.y<bottom && under.y+under.h>top-6.0f*s)under.text[0]=0;
-    }
-    Rect(drawer,ctx,left,top-6.0f*s,right,bottom,kMapBand);
+    MapUiBox(drawer,ctx,left,top-6.0f*s,right,bottom,lines,first);
+
 }
 
 // The map's command buttons (map_buttons.h; the user, 2026-10-08: "the M map should do all of it, best by clicking the
@@ -3413,6 +3429,7 @@ void MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float
     }
     mapbtn::Rect r[n]{};
     const int buttonRows=mapbtn::Flow(w,n,width,height-kBtnBottom*s,kBtnRowH*s,kBtnGap*s,kBtnMargin*s,r);
+    MapUiBox(drawer,ctx,0,height-(kBtnBottom+static_cast<float>(buttonRows)*(kBtnRowH+kBtnGap)+32.0f)*s,width,height,lines,*at);
     if(c.supportStatus[0])Label(text,lines,at,width*0.5f,height-(kBtnBottom+static_cast<float>(buttonRows)*(kBtnRowH+kBtnGap)+14.0f)*s,
         1,scale,kWhite,L"%ls",c.supportStatus);
     float rects[n*4];int ids[n];int placed=0;
@@ -3428,6 +3445,7 @@ void MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float
         Seg(drawer,ctx,r[i].x0,r[i].y0,r[i].x1,r[i].y0,t,edge);Seg(drawer,ctx,r[i].x1,r[i].y0,r[i].x1,r[i].y1,t,edge);
         Seg(drawer,ctx,r[i].x1,r[i].y1,r[i].x0,r[i].y1,t,edge);Seg(drawer,ctx,r[i].x0,r[i].y1,r[i].x0,r[i].y0,t,edge);
         Label(text,lines,at,(r[i].x0+r[i].x1)*0.5f,(r[i].y0+r[i].y1)*0.5f,1,scale,enabled ? kWhite : kMapOrderDim,L"%ls  %lc",name[i],kKeys[i]);
+        if(*at>0)MapFitLabel(text,lines[*at-1],r[i].x0+kBtnPad*s,r[i].x1-kBtnPad*s);
         rects[placed*4]=r[i].x0;rects[placed*4+1]=r[i].y0;rects[placed*4+2]=r[i].x1;rects[placed*4+3]=r[i].y1;ids[placed]=i;
         ++placed;
     }
@@ -3513,8 +3531,9 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
 
 // The legend (left), the title and the keys (top and bottom bands).
 void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
-    Rect(drawer,ctx,0.0f,0.0f,width,46.0f*s,kMapBand);
-    Rect(drawer,ctx,0.0f,height-46.0f*s,width,height,kMapBand);
+    MapUiBox(drawer,ctx,0,0,width,46.0f*s,lines,*at);
+    MapUiBox(drawer,ctx,0,height-46.0f*s,width,height,lines,*at);
+    const int bandsFirst=*at;
     wchar_t h[24],g[24];
     MapDistance(h,_countof(h),m.height);MapDistance(g,_countof(g),mapcam::GridStep(m.height));
     wchar_t follow[32]=L"";
@@ -3525,32 +3544,38 @@ void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,
         wchar_t key[32];KeyName(m.mapKey,key,32);
         Label(text,lines,at,width*0.5f,height-23.0f*s,1,kLineScale*0.8f,kWhite,Tr(Tx::mapMouseKeys),key);
     }
+    for(int i=bandsFirst;i<*at;++i)MapFitLabel(text,lines[i],16.0f*s,width-16.0f*s);
     struct Entry { MapKind kind; std::uint8_t flags; Tx name; };
     static const Entry kLegend[]={{MapKind::squad,0,Tx::legendSquad},{MapKind::ally,0,Tx::legendFriendly},{MapKind::vehicle,0,Tx::legendVehicle},
                                   {MapKind::air,0,Tx::legendAircraft},{MapKind::air,kMapRotor,Tx::legendHelicopter},
                                   {MapKind::vehicle,kMapEmpty,Tx::legendEmpty},{MapKind::carrier,0,Tx::legendCarrier},
                                   {MapKind::enemy,kMapLarge,Tx::legendLargeEnemy},{MapKind::enemyAir,kMapLarge,Tx::legendLargeEnemyAir},
                                   {MapKind::marker,0,Tx::legendObjective}};
-    float y=height*0.30f;
+    MapCommandReadout commands{};
+    const int squads=PlayerMapCommands(&commands) ? std::min(commands.squads,9) : 0;
+    float y=(squads>0 ? 56.0f+22.0f*static_cast<float>(squads+1)+22.0f : 70.0f)*s;
+    MapUiBox(drawer,ctx,8.0f*s,y-14.0f*s,std::min(340.0f*s,width*0.44f),y+14.0f*22.0f*s+14.0f*s,lines,*at);
+    const int legendFirst=*at;
     Arc(drawer,ctx,40.0f*s,y,8.0f*s,0.0f,kTurn,2.0f*s,16,kWhite);
     Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendYou));
     for(const Entry& e:kLegend) {
-        y+=28.0f*s;
+        y+=22.0f*s;
         MapIcon(drawer,ctx,40.0f*s,y,s,e.kind,e.flags,0.0f,0.0f,-1.0f,1.0f);
         Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(e.name));
     }
-    y+=28.0f*s;
+    y+=22.0f*s;
     MapDot1(drawer,ctx,40.0f*s,y,s,0,kMapEnemy);
     Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendEnemy));
-    y+=28.0f*s;
+    y+=22.0f*s;
     MapDot1(drawer,ctx,40.0f*s,y,s,kMapFlying,kMapEnemy);
     Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendEnemyFlying));
-    y+=28.0f*s;
+    y+=22.0f*s;
     MapBrackets(drawer,ctx,40.0f*s,y,9.0f*s,2.0f*s,kMapEnemy);
     Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendLock));
-    y+=28.0f*s;
+    y+=22.0f*s;
     MapBrackets(drawer,ctx,40.0f*s,y,9.0f*s,2.0f*s,kAmber);
     Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendNearestEnemy));
+    for(int i=legendFirst;i<*at;++i)MapFitLabel(text,lines[i],60.0f*s,std::min(330.0f*s,width*0.44f-10.0f*s));
 }
 
 void NpcMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept;
@@ -3559,12 +3584,15 @@ void NpcMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
 bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
     static MapReadout m;   // the draw thread's (too big for its stack)
     if(!PlayerMap(&m))return false;
+    s=std::fmin(s,std::fmin(width/960.0f,height/1080.0f));
+    if(text)text->s=s;
+    mapUiPanelCount=0;
     MapGrid(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapUnits(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapCommandView(vp,width,height);   // the commands' box, clicks and pointer are found on this view
-    MapCommands(drawer,ctx,text,vp,width,height,s,m,lines,at);
     NpcMarkHud(drawer,ctx,text,vp,width,height,s,lines,at);   // which enemy the NPCs are set on, on the map too
     MapScale(drawer,ctx,text,vp,width,height,s,m,lines,at);
+    MapCommands(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapCompass(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapText(drawer,ctx,text,width,height,s,m,lines,at);
     return true;
