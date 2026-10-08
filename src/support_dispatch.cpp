@@ -14,6 +14,7 @@
 #include "npcai.h"
 #include "online_authority.h"
 #include "memory.h"
+#include "hudtext.h"
 #include <cwchar>
 #include <cstring>
 
@@ -32,18 +33,25 @@ constexpr std::uint32_t kSoldier=kSupportRangerResource,kLeader=kSupportLeaderRe
 constexpr int kDeployments=16;
 constexpr ULONGLONG kBoardLimit=120000,kCallCooldown=30000;
 constexpr float kVehicleWaypointRadius=1.5f,kVehicleDriverHold=1.0f,kVehicleArrival=5.0f;
+constexpr float kInfantryWaypointRadius=1.5f,kInfantryRouteStop=1.0f,kInfantryArrival=3.0f;
+static_assert(kInfantryRouteStop<kInfantryWaypointRadius,"leader must advance before quiet movement stops");
 static_assert(kVehicleDriverHold<kVehicleWaypointRadius,"a route must advance before its driver stops");
 struct Planning {
     bool active=false;std::uint32_t catalog=0;float target[3]{};
     int edge=0;npc::navigation::State navigation{};
 };
 Planning planning{};
+struct InfantryRoute {
+    npc::navigation::State navigation{};
+    bool given=false,done=false,released=false;
+};
 struct Deployment {
     bool used=false,remote=false,started=false,delivered=false,networked=false,assigned=false;
     std::uint64_t id=0;ULONGLONG born=0;
     SupportPlan plan{};ObjRef objects[support_net::kMaxUnits]{};
     npc::navigation::State navigation{};
     float vehicleSample[3]{};ULONGLONG vehicleSampleAt=0;
+    InfantryRoute infantry[3]{}; // one bounded coarse route per leader, not per follower
 };
 Deployment deployments[kDeployments]{};
 bool offlinePending=false;std::uint64_t nextOffline=1;ULONGLONG callAt=0;
@@ -80,6 +88,12 @@ void RequestNotice(std::uint32_t request,support_net::RequestStatus state) noexc
 }
 int AirCount() noexcept {return SupportAirCallCount();}
 int GroundStart() noexcept {return AirCount()+2;}
+bool InfantryCatalog(std::uint32_t catalog) noexcept {
+    return catalog==static_cast<unsigned>(AirCount()) || catalog==static_cast<unsigned>(AirCount()+1);
+}
+npc::navigation::Profile InfantryRouteProfile() noexcept {
+    npc::navigation::Profile profile;profile.cell=4;profile.waypointRadius=kInfantryWaypointRadius;return profile;
+}
 bool GroundCatalog(std::uint32_t id,SupportVehicleKind& kind,SupportCrewMode& mode) noexcept {
     const int index=static_cast<int>(id)-GroundStart();
     if(index<0 || index>=kSupportVehicleCount*2)return false;
@@ -173,7 +187,7 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,SupportPl
         Status(L"本关限制外部军事支援；可选择步兵或民用轻卡");return PlanResult::refused;
     }
     if(vehicle && (!spec || !Cfg().npcBoarding || !SupportVehicleReady(kind,mode))){Status(L"该车辆的资源或交付能力不可用");return PlanResult::refused;}
-    npc::navigation::Profile profile{};profile.cell=4.0f;
+    auto profile=InfantryRouteProfile();
     if(spec)profile=VehicleRouteProfile(*spec);
     float waypoint[3];
     const auto path=GroundNavigate(planning.navigation,entry,target,2.0f,GameMs(),waypoint,profile);
@@ -416,7 +430,8 @@ void SupportDispatchTick() noexcept {
                     started=ActivateSupportAircraft(object,spec,deployed.plan.target) && started;
                 } else if(resource>=kVehicle)started=NpcPrepareVehicleRoutePost(object,
                     reinterpret_cast<const float*>(object+kPosition),kVehicleDriverHold) && started;
-                else if(resource==kLeader)started=SquadCommand(object,Command{Order::guard,{deployed.plan.target[0],deployed.plan.target[1],deployed.plan.target[2]}}) && started;
+                else if(resource==kLeader)started=NpcPrepareSquadRoute(object,
+                    reinterpret_cast<const float*>(object+kPosition),kInfantryRouteStop) && started;
             }
             if(started){deployed.started=true;Status(L"支援已出发，正在沿路线入场");}
         }
@@ -448,6 +463,30 @@ void SupportDispatchTick() noexcept {
                 }
                 deployed.delivered=true;Status(mode==SupportCrewMode::unmanned ? L"空车已到达交付点，司机已下车" : L"支援车辆已抵达目的地");
             } else NpcPrepareVehicleRoutePost(vehicle,position,kVehicleDriverHold); // wait for a verified route; never drive through the obstacle
+        } else if(InfantryCatalog(deployed.plan.catalogId)) {
+            int leader=0;bool complete=true,released=false;
+            for(unsigned i=0;i<deployed.plan.count;++i)if(deployed.plan.units[i].resourceId==kLeader && leader<3) {
+                auto& route=deployed.infantry[leader++];
+                if(!route.done) {
+                    auto* object=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[i].obj));
+                    const auto* position=reinterpret_cast<const float*>(object+kPosition);float waypoint[3];
+                    const auto path=GroundNavigate(route.navigation,position,deployed.plan.target,kInfantryArrival,GameMs(),waypoint,InfantryRouteProfile());
+                    if(path==npc::navigation::Result::arrived) {
+                        route.done=NpcFinishSquadRoute(object,deployed.plan.target);
+                    } else {
+                        // Pending/blocked requests hold only quiet movement; combat and native follower
+                        // links stay owned by npcai. Never issue a far ordinary guard or reset AI per frame.
+                        const bool accepted=NpcPrepareSquadRoute(object,path==npc::navigation::Result::moving ? waypoint : position,kInfantryRouteStop);
+                        if(accepted)route.given=true;
+                        else if(route.given){route.done=route.released=true;}
+                    }
+                }
+                complete=complete && route.done;released=released || route.released;
+            }
+            if(complete && leader>0) {
+                deployed.delivered=true;
+                Status(hudtext::Tr(released ? hudtext::Tx::supportInfantryTransferred : hudtext::Tx::supportInfantryArrived));
+            }
         } else {
             bool arrived=true;
             for(unsigned i=0;i<deployed.plan.count;++i)if(!deployed.plan.units[i].role) {

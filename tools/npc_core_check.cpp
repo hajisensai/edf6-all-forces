@@ -139,7 +139,14 @@ bool SeatPoint(const unsigned char*,unsigned,float* at,float* reach) noexcept {
 bool VisitEnemiesOf(std::int32_t,EnemyVisitor visit,void* ctx) noexcept {
     if(markEnemy){const float at[3]={0,0,20};visit(ctx,markEnemy,at);}return true;
 }
+#ifdef SUPPORT_INFANTRY_NATIVE_TEST
+float MapFloorRay(const float* a,const float* b,float* at) noexcept {
+    if(a[1]<0 || b[1]>0)return -1;
+    at[0]=a[0];at[1]=0;at[2]=a[2];return a[1];
+}
+#else
 float MapFloorRay(const float*,const float*,float* at) noexcept { at[0]=at[1]=0;at[2]=30;return rayOn ? 30.0f : -1.0f; }
+#endif
 Sea SeaAt(float,float,float*) noexcept { return Sea::land; }
 int MapCommandGuardAt(const float*) noexcept { ++pointOrders;return 1; }
 // The lock registry's valid lock points whatever their lockable flag (the marked enemy out of sight): `lockAt` for `lockOf`.
@@ -160,6 +167,7 @@ bool VisitEnemies(const unsigned char*,EnemyVisitor visit,void* ctx) noexcept {
     return true;
 }
 }
+#ifndef SUPPORT_INFANTRY_NATIVE_TEST
 int main() {
     using namespace crew;
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2200000,MEM_RESERVE|MEM_COMMIT,PAGE_EXECUTE_READWRITE));
@@ -481,3 +489,4 @@ int main() {
     }
     VirtualFree(image,0,MEM_RELEASE);return failures ? 1 : 0;
 }
+#endif

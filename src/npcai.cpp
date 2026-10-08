@@ -704,6 +704,9 @@ struct Squad {
     npc::ScriptWatch script;   // the end of a script's control over it (§4.4)
     npc::formation::Shape guardShape;   // its defence on a guard point (formation.h; the ini's NpcGuardFormation)
     float guardFwd[2];         // the way the guard faces: from where the player gave it towards the point
+    bool routeActive=false,routeCancelled=false;
+    float routePoint[3]{},routeArrival=1.0f;
+    npc::Lead routeLead{};
 };
 Squad squads[kMaxSquads]{};
 npc::Cooldowns<kMaxSquads> cooldowns;
@@ -748,6 +751,9 @@ Squad* SeeSquad(unsigned char* top,const unsigned char* h,int cls,npc::Control c
         // Its control from its top's own fields (the top may be another machine's soldier, whose Think does not get here).
         const unsigned char* const root=RootLeader(top);
         q->control=h==top ? control : ControlOf(top,root);
+        if(q->routeActive && (npc::Scripted(q->control) || npc::LeadOf(q->control)!=q->routeLead)) {
+            q->routeActive=false;q->routeCancelled=true;
+        }
         if(q->cmd.order!=Order::none && npc::LeadOf(q->control)!=q->cmdLead) {
             Log("NPCAI squad %p: led by %s now, its order dropped",top,ControlName(q->control));
             q->cmd=Command{Order::none,{0.0f,0.0f,0.0f}};
@@ -776,6 +782,7 @@ struct Orders { const float* anchor; float leash; bool hold; };
 Orders OrdersOf(const Squad* q,const float* anchor) noexcept {
     Orders o{anchor,Cfg().npcLeash,false};
     if(!q)return o;
+    if(q->routeActive){o.anchor=Pos(static_cast<const unsigned char*>(q->top.obj));return o;}
     if(q->cmd.order==Order::guard){o.anchor=q->cmd.at;o.leash=Cfg().npcGuardRadius;o.hold=true;}
     else if(q->cmd.order==Order::engage || q->cmd.order==Order::focus){o.anchor=q->cmd.at;o.leash=Cfg().npcFreeRange;}
     return o;
@@ -904,6 +911,13 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     float out[3];
     if(world.lane && npc::LaneEscape(world.laneOf,pos,out)){Move(h,out,1.0f);p.move="out of the lane";return p;}
     if(s.pickUnit && s.pickFrame==GameFrame() && PickUp(s,h,pos)){p.move="to a box";return p;}
+    if(!t.e && q && q->routeActive) {
+        // The route is only the leader's quiet movement. Never apply guard-radius/formation offsets
+        // to its short waypoint, or rewrite followers' native leader links and follow inputs.
+        if(q->top.Is(h)){MoveTo(h,pos,q->routePoint,q->routeArrival);p.move="support route";}
+        else p.move="support follow";
+        return p;
+    }
     if(!t.e && FormationMove(s,h,pos,q,root,ms,&p.move))return p;
     if(t.e) {
         Spot(s,pos,t.e->aim,anchor,served.at,engage,o.leash,ms);
@@ -1832,6 +1846,45 @@ bool PlayerFormationCue(FormationCue* out) noexcept {
     return true;
 }
 
+namespace {
+void GuardOrder(Squad& q,const Command& c) noexcept {
+    q.cmd=c;q.cmdLead=npc::LeadOf(q.control);
+    const auto g=npc::formation::FromInt(Cfg().npcGuardFormation);
+    if(q.guardShape==npc::formation::Shape::stock)q.guardShape=npc::formation::GuardShape(g) ? g : npc::formation::Shape::stock;
+    float dir[3];const auto* me=PlayerHuman();
+    if(me && npc::HorizDir(Pos(me),c.at,dir)){q.guardFwd[0]=dir[0];q.guardFwd[1]=dir[2];}
+    else{q.guardFwd[0]=0;q.guardFwd[1]=1;}
+}
+Squad* SupportRouteOwner(unsigned char* top) noexcept {
+    if(!ok || !Cfg().enabled || !Cfg().customNpcAi || !followOk || !top ||
+       !Readable(top,kHumanVehicleCtrl+8) || !IsSoldierClass(top) || IsAnyPlayer(top) || top[kDead] ||
+       !IsOnlineAuthority(top) || !HumanOnFoot(top) || TopNpc(top)!=top || SupportSoldierHeld(top))return nullptr;
+    Squad* const q=FindSquad(top);
+    if(!q || GameMs()-q->seen>kOrderSeenMs || !q->top.Is(top) || q->routeCancelled ||
+       npc::Scripted(ControlOf(top,RootLeader(top))) || (!q->routeActive && q->cmd.order!=Order::none))return nullptr;
+    return q;
+}
+}
+bool NpcPrepareSquadRoute(unsigned char* leader,const float* waypoint,float arrivalRadius) noexcept {
+    __try {
+        Squad* const q=SupportRouteOwner(leader);
+        if(!q || !waypoint || !std::isfinite(waypoint[0]+waypoint[1]+waypoint[2]) ||
+           !std::isfinite(arrivalRadius) || arrivalRadius<=0 || arrivalRadius>10 || npc::Horiz(Pos(leader),waypoint)>32)return false;
+        if(!q->routeActive)q->routeLead=npc::LeadOf(q->control);
+        q->routeActive=true;q->routeArrival=arrivalRadius;std::memcpy(q->routePoint,waypoint,12);
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+bool NpcFinishSquadRoute(unsigned char* leader,const float* destination) noexcept {
+    __try {
+        Squad* const q=SupportRouteOwner(leader);
+        if(!q || !q->routeActive || !destination || !std::isfinite(destination[0]+destination[1]+destination[2]) ||
+           npc::Horiz(Pos(leader),destination)>32)return false;
+        GuardOrder(*q,Command{Order::guard,{destination[0],destination[1],destination[2]}});
+        q->routeActive=false;return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
 bool SquadCommand(const void* leader,const Command& c) noexcept {
     if(!ok || !Cfg().enabled || !Cfg().customNpcAi || InSession())return false;
     __try {
@@ -1843,13 +1896,7 @@ bool SquadCommand(const void* leader,const Command& c) noexcept {
         const bool recruited=q->control==npc::Control::recruited;
         switch(c.order) {
         case Order::guard: {
-            q->cmd=c;q->cmdLead=npc::LeadOf(q->control);
-            const npc::formation::Shape g=npc::formation::FromInt(Cfg().npcGuardFormation);
-            if(q->guardShape==npc::formation::Shape::stock)q->guardShape=npc::formation::GuardShape(g) ? g : npc::formation::Shape::stock;
-            float dir[3];
-            unsigned char* const me=PlayerHuman();
-            if(me && npc::HorizDir(Pos(me),c.at,dir)){q->guardFwd[0]=dir[0];q->guardFwd[1]=dir[2];}
-            else{q->guardFwd[0]=0.0f;q->guardFwd[1]=1.0f;}
+            GuardOrder(*q,c);
             break;
         }
         case Order::engage:
@@ -1890,6 +1937,7 @@ bool SquadCommand(const void* leader,const Command& c) noexcept {
             return false;
         }
         if(c.order!=Order::board)CancelBoarding(top);
+        q->routeActive=false;q->routeCancelled=true; // an explicit user order takes ownership from ingress
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

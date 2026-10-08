@@ -420,3 +420,5 @@ HUDTEXT(btnSupportCancel,L"CANCEL %ls",L"取消 %ls",L"取消 %ls",L"%ls を取�
 HUDTEXT(cmdSupportPicked,L"SUPPORT: %ls",L"支援：%ls",L"支援：%ls",L"支援：%ls")
 HUDTEXT(cmdSupportPlace,L"Choose a destination on the map (click CALL again to cancel)",L"选择地图上的支援目的地（再次点击呼叫取消）",L"選擇地圖上的支援目的地（再次點擊呼叫取消）",L"地図上で支援先を選択（再度要請を押すと取消）")
 HUDTEXT(cmdSupportNoPoint,L"No support destination found",L"无法确定支援目的地",L"無法確定支援目的地",L"支援先を確認できません")
+HUDTEXT(supportInfantryTransferred,L"Infantry support is now under its new squad orders",L"步兵支援已交由新的小队命令控制",L"步兵支援已交由新的小隊命令控制",L"歩兵支援は新しい部隊命令に従います")
+HUDTEXT(supportInfantryArrived,L"Infantry support has arrived and is guarding the destination",L"步兵支援已抵达并守卫目的地",L"步兵支援已抵達並守衛目的地",L"歩兵支援が到着し目的地を警戒しています")

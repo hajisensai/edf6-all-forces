@@ -24,6 +24,11 @@ bool NpcRestoreMissionSeat(unsigned char* vehicle,unsigned char* human) noexcept
 void ResetNpcAi() noexcept;
 // Whether `human` is one of the four soldier classes (AssultSoldier, PaleWing, HeavyArmor, Engineer).
 bool IsSoldierClass(const void* human) noexcept;
+// Authority-only support ingress: an exact, short leader waypoint. Followers keep native follow;
+// combat/evade/boarding stay ahead of the route. Updating it never clears target or combat state.
+bool NpcPrepareSquadRoute(unsigned char* leader,const float* waypoint,float arrivalRadius) noexcept;
+// End ingress with the usual guard behavior, including the configured defensive formation.
+bool NpcFinishSquadRoute(unsigned char* leader,const float* destination) noexcept;
 // An enemy is marked now (the Q mark, §6.3; the focus order needs one).
 bool NpcMarked() noexcept;
 // The mark for the HUD (draw thread): where it is; false with none (or none published lately).

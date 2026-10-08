@@ -13,7 +13,7 @@ ULONGLONG GameMs() noexcept {return fixtureMs;}
 std::uint64_t GameFrame() noexcept {return fixtureMs;}
 void Log(const char*,...) noexcept {}
 unsigned char objects[32][0x3000]{},controls[32][32]{},seats[32][edf::kSeatStride*3]{};
-int made=0,deleted=0,boardRequests=0,activated=0,orders=0,followed=0,netRequests=0,releases=0;
+int made=0,deleted=0,boardRequests=0,activated=0,orders=0,followed=0,netRequests=0,releases=0,routeOrders=0;
 int held=0;bool transactionActive=false;
 bool SupportTransactionActive(std::uint64_t) noexcept {return transactionActive;}
 bool HoldSupportSoldier(const ObjRef&,bool hold) noexcept {held+=hold ? 1 : -1;return true;}
@@ -92,6 +92,8 @@ bool NpcPrepareVehicleRoutePost(unsigned char*,const float*,float) noexcept {ret
 #endif
 bool NpcReleaseVehicleCrew(unsigned char*) noexcept {++releases;return true;}
 bool SquadCommand(const void*,const Command&) noexcept {++orders;return true;}
+bool NpcPrepareSquadRoute(unsigned char*,const float*,float) noexcept {++routeOrders;return true;}
+bool NpcFinishSquadRoute(unsigned char*,const float*) noexcept {return true;}
 bool HeliCommand(const void*,const Command&) noexcept {return true;}
 bool JetCommand(const void*,const Command&) noexcept {return true;}
 PlayArea MapPlayArea() noexcept {return {{-1500,-1500},{1500,1500},true,0,true};}
@@ -144,7 +146,7 @@ int main() {
     SupportCallAt(21,target,note,128);SupportDispatchTick();
     check(!made && offlinePending,"infantry waits for full ground route before creation");
     routeResult=npc::navigation::Result::moving;++fixtureMs;SupportDispatchTick();
-    check(made==4 && followed==3 && orders==1,"verified infantry entry creates real squad with three native followers and route order");
+    check(made==4 && followed==3 && routeOrders>0 && orders==0,"verified infantry entry creates real squad with three native followers and a short-route order");
     ResetSupportDispatch();made=0;routeResult=npc::navigation::Result::pending;
     SupportCallAt(21,target,note,128);testOnline=true;SupportDispatchTick();
     check(!offlinePending && !made,"entering an online session cancels an uncommitted offline request");
