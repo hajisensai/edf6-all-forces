@@ -28,7 +28,7 @@ DeriveFn deriveId=nullptr;
 bool profile=false,preloaded=false,faulted=false;
 void* missionManager=nullptr;
 SupportSpawnFailure failure=SupportSpawnFailure::none;
-struct Owned { ObjRef ref; unsigned epoch=0; };
+struct Owned { ObjRef ref; unsigned epoch=0; bool held=false; };
 constexpr unsigned kOwnedLimit=96;
 Owned owned[kOwnedLimit]{};
 unsigned epoch=0;
@@ -94,7 +94,7 @@ bool Spawn(const float* matrix,bool leader,ObjRef* out,const unsigned char* netI
         }
         // Retain only the weak count. The scene manager owns the actual soldier, exactly as CreateFriend.
         InterlockedIncrement(reinterpret_cast<volatile LONG*>(ctrl+0xC));
-        *entry=Owned{ObjRef::Of(soldier),epoch};
+        *entry=Owned{ObjRef::Of(soldier),epoch,true};
         team(soldier,2,true);
         level(soldier,1.0f); // native difficulty scaling, not direct HP/weapon manipulation
         Put<unsigned char>(soldier,0x540,1); // stock CreateFriend's recruitable flag
@@ -165,6 +165,26 @@ void PreloadSupportSoldiers() noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){preloaded=false;faulted=true;}
 }
 bool SupportSoldiersReady() noexcept { return support_native::Gate(true); }
+bool HoldSupportSoldier(const ObjRef& soldier,bool held) noexcept {
+    using namespace support_native;
+    if(!soldier || !missionManager || At<void*>(image,kObjectManager)!=missionManager)return false;
+    __try {
+        for(auto& entry:owned)if(entry.epoch==epoch && entry.ref.obj==soldier.obj && entry.ref.ctrl==soldier.ctrl &&
+                                Live(entry) && !At<unsigned char>(entry.ref.obj,kDead)) {
+            entry.held=held;return true;
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    return false;
+}
+bool SupportSoldierHeld(const void* soldier) noexcept {
+    using namespace support_native;
+    if(!soldier || !missionManager || At<void*>(image,kObjectManager)!=missionManager)return false;
+    __try {
+        for(const auto& entry:owned)if(entry.epoch==epoch && entry.ref.obj==soldier && entry.held && Live(entry) &&
+                                      !At<unsigned char>(entry.ref.obj,kDead))return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    return false;
+}
 SupportSpawnFailure SupportSoldierLastFailure() noexcept { return support_native::failure; }
 const wchar_t* SupportSoldierFailureText() noexcept {
     switch(support_native::failure) {

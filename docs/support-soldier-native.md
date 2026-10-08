@@ -40,6 +40,13 @@ rejects online use. The authenticated reliable spawn receiver invokes
 epoch validation, canonical resource validation, authorization and duplicate suppression.
 Passing null ID is supported offline, including a single leader resource.
 
+Every successfully created soldier starts with its owned registry `held=true` before
+the function returns. The NPC Think hook must consume `SupportSoldierHeld` to suppress
+stock AI and clear input while retaining normal physics. Only an authenticated transaction's
+Active step may call `HoldSupportSoldier(identity,false)` before follow/boarding commands.
+The registry rejects arbitrary mission NPCs, dead/expired/reused identities and old scenes;
+mission reset removes all holds. Offline callers also explicitly activate their new soldiers.
+
 `DeriveSupportSoldierNetId` reads the registered anchor's `+130` network control block,
 then its `+8` entry, and calls `776790(out32,entry,ordinal)`:
 

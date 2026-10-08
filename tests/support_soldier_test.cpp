@@ -61,8 +61,21 @@ int main() {
     Setup();Check(preloads==2 && SupportSoldiersReady(),"two Root resources queued for current mission");
     ObjRef one;Check(SpawnSupportSoldier(poses[0],&one) && initGood,"native InitParam and fixed real resource");
     Check(At<LONG>(one.ctrl,8)==1 && At<LONG>(one.ctrl,12)==2,"retain weak only, scene owns strong");
+    Check(SupportSoldierHeld(one.obj),"new soldiers start held before network Active");
+    Check(HoldSupportSoldier(one,false) && !SupportSoldierHeld(one.obj),"Active can release its exact soldier identity");
+    Check(HoldSupportSoldier(one,true) && SupportSoldierHeld(one.obj),"same owned soldier can be held again");
+    Check(!HoldSupportSoldier(ObjRef{objects[1],controls[1]},true) && !SupportSoldierHeld(objects[1]),"arbitrary mission NPC cannot be held");
+    Put<unsigned char>(objects[0],kDead,1);
+    Check(!HoldSupportSoldier(one,true) && !SupportSoldierHeld(one.obj),"dead soldier does not keep an AI hold");Put<unsigned char>(objects[0],kDead,0);
+    Put<LONG>(controls[0],8,0);
+    Check(!HoldSupportSoldier(one,false) && !SupportSoldierHeld(one.obj),"expired weak identity rejected before object access");Put<LONG>(controls[0],8,1);
+    Put<void*>(objects[0],kSelfCtrl,controls[1]);Put<LONG>(controls[1],8,1);
+    Check(!SupportSoldierHeld(objects[0]) && !HoldSupportSoldier(one,false) && !HoldSupportSoldier(ObjRef::Of(objects[0]),true),
+          "reused address with another control block does not inherit ownership or hold");
+    Put<void*>(objects[0],kSelfCtrl,controls[0]);
     Check(!DeleteSupportSoldier(ObjRef{objects[1],controls[1]}),"cannot delete arbitrary NPC");
     Check(DeleteSupportSoldier(one) && deleted==1 && At<LONG>(one.ctrl,12)==1,"owned rollback returns weak count");
+    Check(!SupportSoldierHeld(one.obj) && !HoldSupportSoldier(one,true),"deleted entry cannot be held");
     Check(!DeleteSupportSoldier(one),"rollback idempotent");
     Setup();SupportSquad squad;
     Check(SpawnSupportSquad(SupportSquadKind::rangerPlatoon,poses[0],12,&squad),"platoon transaction succeeds");
@@ -76,6 +89,7 @@ int main() {
     ResetSupportSoldiers();Check(deleted==0,"new mission never calls delete into previous scene");
     for(int i=0;i<12;++i)Check(At<LONG>(controls[i],12)==1,"mission reset releases each retained weak once");
     Check(!DeleteSupportSoldier(squad.members[0]),"stale mission handle rejected");
+    Check(!SupportSoldierHeld(squad.members[0].obj) && !HoldSupportSoldier(squad.members[0],true),"mission reset clears holds and ownership");
     Setup();failAt=2;Check(!SpawnSupportSquad(SupportSquadKind::rangerSquad,poses[0],4,&squad),"partial batch fails");
     Check(deleted==2 && squad.count==0 && SupportSoldierLastFailure()==SupportSpawnFailure::create,"partial batch rolls back all members");
     Setup();wrong=true;Check(!SpawnSupportSoldier(poses[0],&one) && deleted==1,"wrong class is deleted");
@@ -91,6 +105,7 @@ int main() {
     Check(!RegisterSupportObject(one.obj,id),"registered object cannot be registered twice");
     host=false;Check(ApplySupportSoldierSpawn(poses[1],false,id,&one),"client applies same canonical soldier event");
     Check(At<unsigned>(one.obj,0x128)==1 && At<LONG>(one.ctrl,12)==2,"client native remote owner and balanced weak");
+    Check(SupportSoldierHeld(one.obj),"client replica also held pending all-peer Active");
     Put<unsigned>(id,0xC,0);const int before=made;
     Check(!ApplySupportSoldierSpawn(poses[2],false,id,&one) && made==before,"playerSample identity type rejected before allocation");Put<unsigned>(id,0xC,5);
     registerGood=false;Check(!ApplySupportSoldierSpawn(poses[2],false,id,&one) && deleted==1,"failed registration rolls back");

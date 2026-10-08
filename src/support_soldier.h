@@ -18,6 +18,10 @@ bool InstallSupportSoldiers() noexcept;
 void PreloadSupportSoldiers() noexcept;
 void ResetSupportSoldiers() noexcept;
 bool SupportSoldiersReady() noexcept;
+// Game thread: every newly created soldier is held until its support transaction becomes Active.
+// The NPC Think hook consumes this query to suppress AI intent, without freezing physics or teleporting.
+bool HoldSupportSoldier(const ObjRef& soldier,bool held) noexcept;
+bool SupportSoldierHeld(const void* soldier) noexcept;
 SupportSpawnFailure SupportSoldierLastFailure() noexcept;
 const wchar_t* SupportSoldierFailureText() noexcept;
 // Game thread, after the mission's WaitPreload. Caller supplies a checked entry/transport-exit matrix.
