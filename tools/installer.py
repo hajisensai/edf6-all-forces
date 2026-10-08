@@ -349,7 +349,7 @@ def install_autoturret(game: str, files: dict[str, bytes], force: bool) -> None:
     import build as at_build
     print('写入 EDF6AutoTurret 的车辆数据（防空车、玻尔斯、关卡防空车、NPC 泰坦副炮和它们的武器说明行；'
           '记录在 Mods/.edf6at_data.json）……')
-    at_build.install(os.path.join(game, 'Mods'), text=True, force=force, files=files)
+    at_build.install(os.path.join(game, 'Mods'), text=True, force=force, files=files, proteus=True)
 
 
 def remove_autoturret(game: str) -> None:
@@ -388,6 +388,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     import make_jets
     import make_katyusha
     import make_sazabi
+    import make_proteus
     import make_stock_stores
     import make_sidecar
     import make_sub
@@ -426,6 +427,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
         stock = files, skipped
     sidecar = build_asset(cache, make_sidecar, '边三轮摩托')
     sazabi = build_asset(cache, make_sazabi, '沙扎比（模型生成约 1.5 分钟）')
+    proteus = build_asset(cache, make_proteus, '普罗透斯支撑桩和护盾模型')
     bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
     campaign = None
     if campaign_requested or make_edf5_campaign.wanted(game):
@@ -448,7 +450,8 @@ def install(game: str, campaign_requested: bool = False) -> None:
             (make_drill.install(game, drill) if drill is not None else []) + \
             (make_emc.install(game, emc) if emc is not None else []) + \
             (make_sidecar.install(game, sidecar) if sidecar is not None else []) + \
-            (make_sazabi.install(game, sazabi) if sazabi is not None else []):
+            (make_sazabi.install(game, sazabi) if sazabi is not None else []) + \
+            (make_proteus.install(game, proteus) if proteus is not None else []):
         print('写入', path)
     if stock is not None:   # after make_jets: the stores' weapon files are its
         files, skipped = stock
@@ -477,7 +480,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     else:
         make_bigmap.set_big_world(game, make_bigmap.world_half(1))
     for group, files in (('jets', jets), ('sub', sub), ('katyusha', katyusha), ('artillery', artillery),
-                         ('chute', chute), ('drill', drill), ('emc', emc), ('sidecar', sidecar), ('sazabi', sazabi)):
+                         ('chute', chute), ('drill', drill), ('emc', emc), ('sidecar', sidecar), ('sazabi', sazabi), ('proteus', proteus)):
         if files is not None:
             cache.record(group, files)
     if bigmap is not None:
@@ -489,6 +492,8 @@ def install(game: str, campaign_requested: bool = False) -> None:
     for line in gen.install(game, gen.target_range(gen.Plan())):
         print('  ', line)
     print('\n安装完成。启动游戏即可。')
+    print('联机请同时更新配套 EDF Coop：全军出击房间仅对兼容的 MOD 玩家开放。')
+    print('本次模型、挂载和测试场资源已重新生成；更新时请运行安装器，不要只替换 DLL。')
 
 
 def uninstall_stock_stores(game: str) -> None:
@@ -519,6 +524,7 @@ def uninstall(game: str) -> None:
     import make_jets
     import make_katyusha
     import make_sazabi
+    import make_proteus
     import make_stock_stores
     import make_sidecar
     import make_sub
@@ -542,7 +548,7 @@ def uninstall(game: str) -> None:
             print('已取消，没有删除任何文件。')
             return
         remove_autoturret(game)
-        for remove in (make_stock_stores.remove, make_sazabi.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove,
+        for remove in (make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:

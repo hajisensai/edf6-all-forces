@@ -3,8 +3,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 
 namespace crew {
+bool NpcDriver(const unsigned char* v) noexcept { return v && SeatCount(v)>0 && SeatRider(SeatAt(const_cast<unsigned char*>(v),0))==Rider::dummy; }
+
 unsigned char* image=nullptr;
 Config config{};
 ULONGLONG now=1000;
@@ -13,6 +16,7 @@ const Config& Cfg() noexcept { return config; }
 ULONGLONG GameMs() noexcept { return now; }
 bool InSession() noexcept { return sessionOn; }
 bool OnlineHostOnly() noexcept { return !sessionOn || host; }
+bool IsOnlineAuthority(const void*) noexcept { return !sessionOn || host; }
 void Log(const char*,...) noexcept {}
 }
 namespace {
@@ -103,6 +107,47 @@ int main() {
     Check(At<float>(mseat,0x2C0)==0 && At<float>(mseat,0x2C4)==0 && !posts[0].active,"back on its post: the stick taken back");
     Put<float>(m,kPosition+8,-40);Put<float>(mseat,0x2C0,0.7f);++now;NpcPostInput(m);
     Check(At<float>(mseat,0x2C0)==0.7f && At<float>(mseat,0x2C4)==0,"the stock AI's own turn owns the frame");
+    ResetNpcPosts();Put<void*>(mseat,kSeatRiderCtrl,nullptr);
+    const float arrival[3]={0,0,120};
+    Check(NpcPrepareVehiclePost(m,arrival),"support arrival accepted before its real driver boards");
+    ++now;NpcPostInput(m);
+    Check(pendingPosts[0].ref.Is(m),"empty vehicle keeps its pending arrival without moving");
+    Put<void*>(mseat,kSeatRiderCtrl,mctrl);Put<float>(mseat,0x2C0,0);Put<float>(mseat,0x2C4,0);
+    ++now;NpcPostInput(m);
+    Check(!pendingPosts[0].ref && posts[0].at[2]==120 && posts[0].commanded,
+          "arrival transfers to vehicle controller only once crew is seated");
+    ResetNpcPosts();Check(!pendingPosts[0].ref,"new mission drops pending support destinations");
+    // Production reproduction: a 4 m grid waypoint falls inside the ordinary 6 m guard hold.
+    ResetNpcPosts();config.tankPostHold=6.0f;sessionOn=false;host=true;
+    Put<float>(v,kPosition,0);Put<float>(v,kPosition+8,0);Put<void*>(v,0x4A8,nullptr);
+    const float gridPoint[3]={0,0,4};
+    Check(NpcPrepareVehiclePost(v,gridPoint),"ordinary post request accepted");neutral();NpcPostInput(v);
+    Check(At<float>(seat,0x2C4)==0,"ordinary six metre guard radius is preserved");
+    Check(NpcPrepareVehicleRoutePost(v,gridPoint,1.0f),"route supplies its own one metre arrival radius");neutral();NpcPostInput(v);
+    const float routeThrottle=At<float>(seat,0x2C4);
+    Check(routeThrottle<0 && routeThrottle>=-0.5f,"four metre route edge produces slow forward throttle");
+    Put<float>(v,kPosition+8,2.6f);neutral();NpcPostInput(v);
+    Check(At<float>(seat,0x2C4)<0,"driver continues inside planner 1.5m advancement radius until next waypoint arrives");
+    Put<float>(v,kPosition+8,3.1f);++now;NpcPostInput(v);
+    Check(At<float>(seat,0x2C4)==0 && !posts[0].active,"route stops and releases its throttle within explicit radius");
+    Put<float>(v,kPosition+8,0);Check(NpcPrepareVehicleRoutePost(v,gridPoint,0.25f),"narrow route arrival is also explicit");neutral();NpcPostInput(v);
+    Check(At<float>(seat,0x2C4)<0,"legacy 0.45m planner can use smaller 0.25m driver radius");
+    const float stationary[3]={0,0,0};Check(NpcPrepareVehicleRoutePost(v,stationary,1.0f),"route waiting request uses current point");
+    ++now;NpcPostInput(v);Check(At<float>(seat,0x2C4)==0,"route wait removes prior throttle before any new path is accepted");
+    Check(!NpcPrepareVehicleRoutePost(v,gridPoint,0) && !NpcPrepareVehicleRoutePost(v,gridPoint,-1) &&
+          !NpcPrepareVehicleRoutePost(v,gridPoint,std::numeric_limits<float>::quiet_NaN()),"invalid route radius rejected");
+    Check(NpcPrepareVehicleRoutePost(v,gridPoint,1.0f),"pending route queued before user guard");
+    Check(NpcPostCommand(v,gridPoint),"explicit user guard overrides route mode");neutral();NpcPostInput(v);
+    Check(posts[0].routeArrival==0 && At<float>(seat,0x2C4)==0 && !pendingPosts[0].ref,
+          "user guard restores six metre hold and removes a queued old route");
+    Check(NpcPrepareVehicleRoutePost(v,gridPoint,1.0f),"route queued before driver changes");
+    Put<void*>(rider,0,nullptr);rider[edf::kHumanPlayer]=1;Put<std::uint16_t>(rider,0x128,1);
+    Put<float>(seat,0x2C4,0.73f);++now;NpcPostInput(v);
+    Check(At<float>(seat,0x2C4)==0.73f && !pendingPosts[0].ref,"player takeover preserves human input and cancels pending route");
+    Check(!NpcPrepareVehicleRoutePost(v,gridPoint,1.0f),"route producer cannot enqueue more waypoints under player control");
+    rider[edf::kHumanPlayer]=0;Put<std::uint16_t>(rider,0x128,0);Put<void*>(rider,0,image+edf::kDummyRiderVtable);
+    neutral();NpcPostInput(v);
+    Check(posts[0].routeArrival==0 && At<float>(seat,0x2C4)==0,"new NPC after takeover does not resume stale route");
     VirtualFree(image,0,MEM_RELEASE);
     std::printf("npc_post_test: %d checks passed\n",checks);
 }

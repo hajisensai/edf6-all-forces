@@ -9,8 +9,8 @@ with every stock mesh taken out and the OBJ in their place:
     kept at that size (SCALE 1: the user, 2026-10-06, "把钻头车放大一点"; it was 0.8, 6.0 x 3.8 x 4.6 m, to match the
     Blacker's 6.8 x 3.2 m collision shapes): its hull 7.4 x 4.8 x 5.7 m over those shapes (the ragdoll's are the
     physics, kept the Blacker's: the hull's sides sink ~0.8 m into a wall before the shapes meet it, its nose ~0.3 m),
-    the drill 4.7 m long in front of it (docs/drill-re.md §2);
-  - the hull rigidly on the Blacker's `body` bone, the drill (every triangle past DRILL_SPLIT_Z) rigidly on the stock
+    the complete drill 6.55 m long, including the widest rear fluted section (docs/drill-re.md §9);
+  - the hull rigidly on the Blacker's `body` bone, the drill (whole connected pieces reaching past DRILL_SPLIT_Z) rigidly on the stock
     bone SPIN_BONE (`catapi_body`, the track rig's root), moved to the drill's axis at its base with the model's axes
     and made a leaf of `body` (its track children handed to `body`, their binds unchanged), so the plugin
     (src/drill.cpp) spins it by turning its local matrix about Z. Why a stock bone: the drawn pose reaches only the
@@ -63,17 +63,17 @@ AXES: tuple[om.Vec3, om.Vec3, om.Vec3] = ((0.0, 0.0, 1.0), (0.0, 1.0, 0.0), (-1.
 SCALE = 1.0
 OFFSET_Z = 0.25
 CONVERSION = om.Conversion(AXES, SCALE, (0.0, 0.0, OFFSET_Z))
-DRILL_SPLIT_Z = 4.5 * SCALE + OFFSET_Z      # the OBJ has no geometry between its hull (x <= 3.6) and its drill (x >= 4.7)
+DRILL_SPLIT_Z = 4.5 * SCALE + OFFSET_Z      # selects drill components by their front, never cuts a component in half
 DRILL_BONE, DRILL_PARENT = 'edf6vc_drill', 'body'
 # The stock bone the drill's geometry rides and the plugin turns (src/drill.cpp kSpinBone; see the module docstring).
 SPIN_BONE = 'catapi_body'
 # The drill's length and base radius as built (src/drill.cpp kDrillLength / kDrillRadius; tools/selftest.py holds them
 # equal; check() holds the geometry to them).
-DRILL_LENGTH, DRILL_RADIUS = 4.71, 1.21
+DRILL_LENGTH, DRILL_RADIUS = 6.55, 1.55
 # Its base in the model (= the vehicle's frame: x, y up, z forward; src/drill.cpp kDrillBaseY / kDrillBaseZ, the
 # contact probes' axis) and its rotational repeat: the mesh maps onto itself turned 1/DRILL_FOLDS of a turn (its
 # flutes; src/drill.cpp kSpinRepeat caps the drawn turn a frame under it, docs/drill-re.md §4).
-DRILL_BASE = (0.0, 4.21, 5.18)
+DRILL_BASE = (0.0, 4.21, 3.35)
 DRILL_FOLDS = 16
 # The model's vertex positions are half floats: 4..8 m from the origin one step is 1/256 m, so a stored vertex is up
 # to half of that off where the OBJ put it in each axis, ~0.003 m off the axis radially. check() holds the drill's
@@ -115,14 +115,16 @@ def member(rab, name: str):  # noqa: ANN001, ANN201 - mdb.Rab / RabFile
 # ------------------------------------------------------------------------------------------ geometry
 
 def split(parts: list[om.Part]) -> tuple[list[om.Part], list[om.Part]]:
-    """(hull parts, drill parts): a triangle with every corner past DRILL_SPLIT_Z is the drill's."""
+    """Whole connected pieces reaching in front of the hull belong to the drill.
+
+    The widest rear cone spans z=3.346..5.266 (flute-tip radius 1.551), crossing the old per-triangle cut at 4.75. Cutting its
+    triangles left most of that fluted segment on body while the front four cones and tip spun. The source has six
+    separate rotational pieces, so preserve their connectivity rather than slicing the cone at an arbitrary plane.
+    """
     hull, drill = [], []
     for p in parts:
-        cut = om.split_part(p, lambda t: all(v[2] > DRILL_SPLIT_Z for v in t))
-        if False in cut:
-            hull.append(cut[False])
-        if True in cut:
-            drill.append(cut[True])
+        for component in om.components(p):
+            (drill if component.box()[1][2] > DRILL_SPLIT_Z else hull).append(component)
     return hull, drill
 
 
@@ -317,7 +319,7 @@ def check(arc: bytes, host_bones: list[str] | None = None) -> None:
     inserted under `body`; the drill's geometry skinned to SPIN_BONE alone (a childless bone under `body`, at
     DRILL_BASE with the model's axes, like the marker DRILL_BONE, which carries no geometry), inside the cylinder of
     DRILL_RADIUS round its +Z from its origin to DRILL_LENGTH; every other vertex (the hull) on `body`, behind the
-    drill (but for the drive shaft into the drill's base, inside its radius) and over the ground: nothing of the hull
+    component selection plane and over the ground: nothing of the hull
     turns with the drill and nothing of the drill stays on the hull."""
     rab = rab_read(arc)
     _req(rab_write(rab) == arc, 'archive does not round-trip')
@@ -367,9 +369,7 @@ def check(arc: bytes, host_bones: list[str] | None = None) -> None:
                 _req(rr <= DRILL_RADIUS + STORED_STEP and -STORED_STEP <= p[2] - origin[2] <= DRILL_LENGTH + 0.05,
                      f'{tag}: drill vertex {p} outside its cylinder')
             else:
-                # the drive shaft reaches from the hull into the drill's base: it stays on the hull, inside the drill
-                shaft = math.hypot(p[0] - origin[0], p[1] - origin[1]) <= DRILL_RADIUS and p[2] <= origin[2] + 0.1
-                _req(bone == body and (p[2] < DRILL_SPLIT_Z + 1e-3 or shaft), f'{tag}: vertex {p} on bone {bone}')
+                _req(bone == body and p[2] < DRILL_SPLIT_Z + 1e-3, f'{tag}: vertex {p} on bone {bone}')
                 hull_lo = min(hull_lo, p[1])
     _req(drill_pts > 1000 and -0.01 <= hull_lo < 0.05, f'{drill_pts} drill vertices, hull bottom {hull_lo:.3f}')
     for m in md.materials:

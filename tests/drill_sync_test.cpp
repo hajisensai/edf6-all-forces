@@ -10,6 +10,7 @@ Config config{};
 ULONGLONG now=1000,frameNow=1;
 bool session=true,authority=false;
 int sent=0,charges=0,jets=0;
+float jetAt[3]{},jetVelocity[3]{};
 std::int32_t driver=42;
 drill_net::State lastSent;
 unsigned char spin[0x110]{},parentBone[0x110]{},markerBone[0x110]{};
@@ -19,7 +20,9 @@ ULONGLONG GameMs() noexcept { return now; }
 ULONGLONG GameFrame() noexcept { return frameNow; }
 float GameStep(ULONGLONG ms) noexcept { return static_cast<float>(ms)/1000.0f; }
 bool DrillCharge(const unsigned char*,const float*,const float*,float) noexcept { ++charges;return true; }
-void FlareFlames(const unsigned char*,const float (*)[3],const float (*)[3],int count,ULONGLONG) noexcept { jets=count; }
+void FlareFlames(const unsigned char*,const float (*at)[3],const float (*vel)[3],int count,ULONGLONG) noexcept {
+    jets=count;if(count){std::memcpy(jetAt,at[0],12);std::memcpy(jetVelocity,vel[0],12);}
+}
 float MapRay(const float*,const float*,float*) noexcept { return -1.0f; }
 bool VisitEnemies(const unsigned char*,EnemyVisitor,void*) noexcept { return false; }
 bool MapHoldsKeys() noexcept { return true; }
@@ -96,5 +99,28 @@ int main() {
     Put<const void*>(vehicle,0,image);s.sequence=2;s.phase=drill_net::Phase::home;DrillNetReceived(vehicle,s);
     Check(d->flight==Flight::out,"wrong vehicle class cannot receive drill state");
     ResetDrills();Check(!drills[0].ref,"mission reset discards network watermarks with object state");
+    // The return must rotate the actual drill, not just move its flame to the old nose. Use the production
+    // half-turn, bone pose and jet functions, including the exactly opposite start that defeats linear blending.
+    Drill returning{};returning.flight=Flight::back;returning.backAt=now;
+    returning.pos[1]=kDrillBaseY;returning.pos[2]=kDrillBaseZ+200;
+    returning.axis[2]=returning.dir[2]=1;returning.parent=parentBone;returning.rec=spin;
+    for(int i=0;i<32;++i){now+=16;FlyBack(vehicle,returning,1.0f/60.0f,now);}
+    Check(returning.axis[2]<-0.99f && std::fabs(Len(returning.axis)-1)<1e-5f,"full drill reverses nose-first toward the hull");
+    Check(PoseFlight(vehicle,returning) && At<float>(spin,kBoneLocal+10*4)<-0.99f,"return axis reaches the drawn bone");
+    Jet(vehicle,returning,now);
+    Check(std::memcmp(jetAt,returning.pos,12)==0 && jetVelocity[2]<0,"return flame remains at the drill rear and shares its reversed axis");
+    float lastForward=-1;
+    for(int i=0;i<1000 && returning.flight!=Flight::home;++i) {
+        lastForward=returning.axis[2];now+=16;FlyBack(vehicle,returning,1.0f/60.0f,now);
+    }
+    Check(returning.flight==Flight::home && lastForward>0.95f,"return aligns with the socket before docking");
+    // Remote presentation receives the same nose axis; no separate velocity-only flame rotation on that side.
+    Put<const void*>(vehicle,0,image+kVt505);session=true;authority=false;driver=42;
+    s.sender=99;s.sequence=1;s.controller=42;s.phase=drill_net::Phase::back;
+    s.axis[2]=-1;s.dir[2]=1;s.pos[2]=100;s.speed=60;
+    DrillNetReceived(vehicle,s);++frameNow;DrillFrame(vehicle);
+    Check(At<float>(spin,kBoneLocal+10*4)<-0.99f && jetVelocity[2]<0 && jetAt[2]==s.pos[2],"remote return poses both drill and rear flame with the same axis");
+    Drill publishing{};publishing.keys=false;Publish(publishing);DrillCue published{};
+    Check(PlayerDrillCue(&published) && !published.keys,"HUD cue preserves actual pad input mode");
     std::printf("drill_sync_test: %d checks passed\n",checks);
 }

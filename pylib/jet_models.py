@@ -80,6 +80,21 @@ MODELS: dict[str, Recipe] = {
     'EDF6VC_DRONE.MRAB': Recipe('PD607_DRONE_AIRSTRIKE.MRAB', 'pd607_Drone_airstrike.mdb', 3.0, root='mdl', level='body',
                                 skids='pd607'),
 }
+# These models share V506's bone names but not its 1.637 m elevated body bind.
+# A copied absolute CAS default pose would lift the entire skinned aircraft.
+ANIMATIONS = {'EDF6VC_CARRIER.MRAB': 'EDF6VC_CARRIER.CAS', 'EDF6VC_DRONE.MRAB': 'EDF6VC_DRONE.CAS'}
+
+
+def animation(game, file: str) -> bytes:  # noqa: ANN001 - rootcpk.Game
+    """V506's state graph/additive rotor clips with absolute translations retargeted to this model."""
+    from cas_pose import retarget
+    if file not in ANIMATIONS:
+        raise ValueError(f'no aircraft CAS recipe for {file}')
+    stock = mdb_read(next(f for f in rab_read(game.read('OBJECT', 'V506_HELI.MRAB')).files
+                          if f.name.lower() == 'v506_heli.mdb').data)
+    return retarget(game.read('OBJECT', 'V506_HELI.CAS'), stock, _model_of(game, file), {'default'})
+
+
 # The submarine carrier (tools/make_sub.py, docs/subcarrier-re.md): the mission object EV603_MARINE's model,
 # at its size in the missions (x 1: 1664 m long, 355 m wide, hull bottom to main deck 360 m). Its `body` is bound turned (x -> y, y -> z, z -> x) like the
 # drone's. Kept out of MODELS so tools/make_jets.py does not write it; build(game, SUB_MODELS) does.

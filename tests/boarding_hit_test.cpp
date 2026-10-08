@@ -11,8 +11,10 @@ void Log(const char*,...) noexcept {}
 ULONGLONG GameMs() noexcept { return 3600000; }
 unsigned char* PlayerHuman() noexcept { return nullptr; }
 int VehicleClassOf(const void* object) noexcept { return At<std::uintptr_t>(object,0)==1 ? 0 : -1; }
-bool IsJet(const void*) noexcept { return false; }
-bool IsSub(const void*) noexcept { return false; }
+bool testJet=false,testSub=false,testFlightSupported=false;
+bool IsJet(const void*) noexcept { return testJet; }
+bool PlayerJetBoardingSupported(const void*) noexcept { return testFlightSupported; }
+bool IsSub(const void*) noexcept { return testSub; }
 bool HumanOnFoot(const unsigned char*) noexcept { return true; }
 bool BoardButtonReady() noexcept { return false; }
 void PressBoardButtonBumping(unsigned char*) noexcept {}
@@ -82,6 +84,30 @@ int main() {
     Check(damageCalls==7 && !ask.vehicle,"missing hit record keeps stock damage");
     Put<const float*>(core,kHitRecords,contact);config.enabled=false;HitDamageHook(damage,target,info);
     Check(damageCalls==8 && !ask.vehicle,"disabled plugin keeps stock damage");
+    config.enabled=true;
+    for(std::uint32_t tag=kTagBits;tag<=kTagBits+3u;++tag) {
+        ResetBoarding();shooter.store(human);Put<std::uint32_t>(core,kColorAlpha,tag);
+        HitDamageHook(damage,target,info);
+        Check(ask.vehicle==vehicle,"each class's reserved tag requests boarding");
+    }
+    ResetBoarding();shooter.store(human);Put<std::uint32_t>(core,kColorAlpha,kTagBits+4u);
+    HitDamageHook(damage,target,info);
+    Check(!ask.vehicle,"the next unused color tag remains an ordinary round");
+    alignas(16) unsigned char seat[kSeatStride]{};
+    Put<const void*>(vehicle,kSeats,seat);Put<std::uint64_t>(vehicle,kSeatCount,1);
+    Put<std::int32_t>(vehicle,kTeam,kTeamVehicle);
+    testJet=true;testFlightSupported=true;
+    StartBoarding(human,vehicle,GameMs());
+    Check(boarding.ref.obj==vehicle,"boarding gun accepts a supported NPC aircraft after a real hit");
+    ResetBoarding();testFlightSupported=false;
+    StartBoarding(human,vehicle,GameMs());
+    Check(!boarding.ref,"aircraft without player flight controls remains refused");
+    testFlightSupported=true;testSub=true;
+    StartBoarding(human,vehicle,GameMs());
+    Check(!boarding.ref,"submarine carrier without player controls remains refused");
+    testSub=false;Put<std::int32_t>(vehicle,kTeam,1);
+    StartBoarding(human,vehicle,GameMs());
+    Check(!boarding.ref,"enemy aircraft remains refused even with player flight controls");
     std::printf("boarding hit: %d checks passed\n",checks);
     return 0;
 }

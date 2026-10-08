@@ -320,7 +320,7 @@ void Drive(Mech& m,unsigned char* v,ULONGLONG ms) noexcept {
     m.feetClear=FeetClear(m);
     // who drives it: the player in seat 0, or an NPC crew.cpp seated (sazabi_pilot.inc); a change of driver boards anew
     const Rider rider=SeatCount(v)>0 ? SeatRider(SeatAt(v,0)) : Rider::none;
-    const bool driven=rider==Rider::player || rider==Rider::dummy,npc=rider==Rider::dummy;
+    const bool npc=NpcDriver(v),driven=rider==Rider::player || npc;
     if(m.driven && (!driven || m.npc!=npc))Leave(m,v,true,m.npc ? "the NPC got out" : "got out");
     if(!driven) {
         RootFrame(m,v);

@@ -4,6 +4,8 @@
 #include <cstdlib>
 #include <initializer_list>
 namespace crew {
+bool PrepareNpcVehicle(unsigned char*,bool) noexcept { return true; }
+bool NpcRequestCrew(unsigned char*,bool) noexcept { return false; }
 unsigned char imageBytes[1]{};
 unsigned char* image=imageBytes;
 bool InSession() noexcept { return true; }

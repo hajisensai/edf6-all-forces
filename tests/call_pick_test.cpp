@@ -8,6 +8,17 @@ namespace crew {
 unsigned char* image=nullptr;
 Config config{};
 PlayerFix player{};
+bool supportSky=true,supportGround=true,supportMeasured=true;
+Sea supportSea=Sea::land;
+Sea SeaAt(float,float,float* surface) noexcept {*surface=1;return supportSea;}
+PlayArea MapPlayArea() noexcept { return {{-1500,-1500},{1500,1500},supportMeasured,0,true}; }
+float MapRay(const float* from,const float* to,float* hit) noexcept {
+    if(!supportSky && from[1]<10 && to[1]>10){hit[0]=from[0];hit[1]=10;hit[2]=from[2];return 0.5f;}
+    if(to[1]<from[1] && to[1]<0 && from[1]>0){hit[0]=from[0];hit[1]=0;hit[2]=from[2];return 0.5f;}
+    return -1;
+}
+bool MapGroundNear(float,float,float,float* out,bool) noexcept {*out=0;return supportGround;}
+bool SupportCallAt(int,const float*,wchar_t*,std::size_t) noexcept {return false;}
 bool testOnline=true;
 const Config& Cfg() noexcept { return config; }
 bool InSession() noexcept { return testOnline; }
@@ -170,6 +181,22 @@ int main() {
     Put<float>(weapon,kWeaponHitSize,1.0f);
     Put<std::uint64_t>(weapon,kWeaponRxSeed,callnet::Encode(0ull,3));
     Check(CallOf(ifc,remote)==nullptr,"a stock call is never converted, whatever its seed carries");
+    const float supportTarget[3]={0,0,0},observer[3]={0,0,100};support::Route route;
+    Check(PlanAirSupport(0,supportTarget,observer,&route)==support::Refusal::none && route.from[1]==0,
+          "production entry planner prepares a real ground runway, not an airborne spawn");
+    supportSky=false;
+    Check(PlanAirSupport(0,supportTarget,observer,&route)==support::Refusal::noSky,"a roof above the destination refuses air support");
+    supportSky=true;supportGround=false;
+    Check(PlanAirSupport(0,supportTarget,observer,&route)==support::Refusal::noEntry,"air corridor alone cannot substitute for a landing pad");
+    supportGround=true;supportMeasured=false;
+    Check(PlanAirSupport(0,supportTarget,observer,&route)==support::Refusal::noArea,"unmeasured bounds cannot be used as actual entry ground");
+    supportMeasured=true;
+    supportSea=Sea::water;
+    Check(PlanAirSupport(0,supportTarget,observer,&route)==support::Refusal::noEntry,"a flat seabed cannot be used as an aircraft runway");
+    supportSea=Sea::unknown;
+    Check(PlanAirSupport(0,supportTarget,observer,&route)==support::Refusal::noEntry,"unknown water geometry cannot authorize ground deployment of aircraft");
+    supportSea=Sea::land;
+    Check(PlanAirSupport(16,supportTarget,observer,&route)==support::Refusal::unsupported,"stationary submarine model cannot fake a physical entry");
     std::printf("call picker: %d checks passed\n",checks);
     return 0;
 }

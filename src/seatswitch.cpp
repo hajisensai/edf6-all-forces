@@ -113,7 +113,7 @@ SeatHolder HolderOf(const unsigned char* seat,const unsigned char* human) noexce
         case Rider::none: return SeatHolder::empty;
         case Rider::dummy: return SeatHolder::npc;
         case Rider::player: return At<const unsigned char*>(seat,kSeatRider)==human ? SeatHolder::you : SeatHolder::other;
-        default: return SeatHolder::other;
+        default: return NpcCanYieldSeat(seat) ? SeatHolder::npc : SeatHolder::other;
     }
 }
 
@@ -223,7 +223,7 @@ int SeatOf(unsigned char* v,const unsigned char* human) noexcept {
 
 void Publish(unsigned char* v,const unsigned char* human,bool keys,bool locked,const Rider_& r,ULONGLONG ms) noexcept {
     SeatPrompt p{};
-    const unsigned count=SeatCount(v);
+    const unsigned count=ProteusVisibleSeats(v,SeatCount(v));
     p.seats=static_cast<int>(count);p.at=SeatOf(v,human);p.keys=keys;p.locked=locked;
     p.aircraft=IsHelicopter(v) || BodyOf(v)!=PluginBody::none;
     p.refused=ms<r.refusedUntil ? r.refused : -1;

@@ -110,6 +110,9 @@ struct MapCommandReadout {
     int march;                 // the march's formation (formation.h Shape)
     bool hover;                // an enemy under the pointer (the screen centre with a pad): Q marks it, H focuses on it
     float hoverAt[3];          // its lock point
+    bool supportArmed;
+    wchar_t supportName[64];
+    wchar_t supportStatus[128];
 };
 bool PlayerMapCommands(MapCommandReadout* out) noexcept;
 }  // namespace crew

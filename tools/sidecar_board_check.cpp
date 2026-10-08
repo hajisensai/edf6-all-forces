@@ -16,7 +16,7 @@ unsigned char humanRef[16]{},otherRef[16]{},bikeRef[16]{},newRef[16]{};
 constexpr std::size_t kFixtureFoot=0x780;  // separate physics pose: +0x90 really is stale at MoveIntent
 unsigned char riderCtrl[0x10]{};
 const void* boardingOnly=nullptr;
-bool doorReadable=true;
+bool doorReadable=true,driverAuthority=true,driverLook=false;
 float doorReach=2.3f;
 int warps=0,failures=0;
 float floorAt=exitground::kNoFloor;   // MapGroundNear's floor (kNoFloor: none)
@@ -52,7 +52,7 @@ void HumanAt(float x,float y,float z) {
     std::memcpy(human+kFixtureFoot,p,12);
 }
 void Reset() {
-    ResetSidecars();warps=0;doorReadable=true;doorReach=2.3f;boardingOnly=nullptr;
+    ResetSidecars();warps=0;doorReadable=true;driverAuthority=true;driverLook=false;doorReach=2.3f;boardingOnly=nullptr;
     std::memset(human,0,sizeof(human));std::memset(bike,0,sizeof(bike));std::memset(second,0,sizeof(second));
     std::memset(otherHuman,0,sizeof(otherHuman));damageCalls=0;
     Put<void*>(human,kSelfCtrl,humanRef);Put<void*>(otherHuman,kSelfCtrl,otherRef);Put<void*>(bike,kSelfCtrl,bikeRef);
@@ -111,7 +111,14 @@ const void* BoardingOnly() noexcept { return boardingOnly; }
 void Log(const char*,...) noexcept {}
 ULONGLONG GameMs() noexcept { return 3600000; }
 ULONGLONG GameFrame() noexcept { return 1; }
-bool CameraRay(float*,float*) noexcept { return false; }
+bool OnlineRunsHere(const void*) noexcept {return driverAuthority;}
+bool NpcDriver(const unsigned char* v) noexcept {
+    const auto* driverSeat=SeatCount(v)>0 ? SeatAt(const_cast<unsigned char*>(v),0) : nullptr;
+    const auto* rider=driverSeat ? At<const unsigned char*>(driverSeat,kSeatRider) : nullptr;
+    return driverSeat && SeatRider(driverSeat)==Rider::other && rider && !rider[kDead] && !AnyPlayerIn(driverSeat) &&
+           At<const void*>(rider,0)==image+kSoldierVts[0];
+}
+bool CameraRay(float* eye,float* look) noexcept {eye[0]=eye[1]=eye[2]=0;look[0]=look[1]=0;look[2]=1;return driverLook;}
 bool MapGroundNear(float,float,float,float* h,bool) noexcept {
     if(floorAt==exitground::kNoFloor)return false;
     *h=floorAt;return true;
@@ -279,6 +286,34 @@ int main() {
     Expect(SidecarPassengers()==0,"the mission's reset leaves no passenger");
     Reset();Take(sidecars[0],bike,human,true);Put<int>(humanRef,8,0);
     Expect(!SidecarBulletPass(human,bike,humanRef),"an expired projectile owner is not protected despite matching addresses");
+    Reset();Take(sidecars[0],bike,human,true);driveOk=true;driverLook=true;
+    Sidecar& driving=sidecars[0];driving.order=1;driving.orderFrame=GameFrame();
+    auto* driveBlock=reinterpret_cast<float*>(bike+kDriveBlock);
+    human[0xD70]=1;
+    Drive(driving,bike);
+    Expect(driveBlock[0]==0 && driveBlock[1]==0 && driveBlock[2]==0,"empty saddle never receives passenger driving input");
+    Expect(driving.gunner.Is(human) && human[0xD70]==1,"empty saddle does not suppress sidecar passenger weapons");
+    Put<void*>(seat,kSeatRider,otherHuman);Put<void*>(seat,kSeatRiderCtrl,otherRef);
+    Put<void*>(otherHuman,0,image+edf::kDummyRiderVtable);Drive(driving,bike);
+    Expect(!driving.driveWritten,"legacy Dummy cannot act as sidecar driver");
+    otherHuman[edf::kHumanPlayer]=0;Put<void*>(otherHuman,kHumanPad,nullptr);Put<void*>(otherHuman,0,image+kSoldierVts[0]);
+    Drive(driving,bike);
+    Expect(driveBlock[0]>0 && driving.driveWritten,"real local NPC driver receives passenger command");
+    driveBlock[1]=.61f;driving.order=0;Drive(driving,bike);
+    Expect(driveBlock[0]==0 && driveBlock[2]==0,"releasing passenger command releases only its last drive inputs");
+    Expect(driveBlock[1]==.61f,"releasing drive assist preserves the other native pedal channel");
+    driving.order=1;Drive(driving,bike);Put<void*>(seat,kSeatRiderCtrl,nullptr);Drive(driving,bike);
+    Expect(driveBlock[0]==0 && !driving.driveWritten,"driver dismount releases stale passenger throttle");
+    Put<void*>(seat,kSeatRiderCtrl,otherRef);driverAuthority=false;Drive(driving,bike);
+    Expect(!driving.driveWritten && driveBlock[0]==0,"another machine's NPC driver is not controlled locally");
+    driverAuthority=true;Drive(driving,bike);otherHuman[edf::kHumanPlayer]=1;Put<void*>(otherHuman,kHumanPad,otherHuman);
+    driveBlock[0]=.73f;Drive(driving,bike);
+    Expect(driveBlock[0]==.73f && !driving.driveWritten,"human driver keeps native throttle when taking saddle");
+    otherHuman[edf::kHumanPlayer]=0;Put<void*>(otherHuman,kHumanPad,nullptr);Drive(driving,bike);
+    config.sidecar=false;Drive(driving,bike);
+    Expect(driveBlock[0]==0 && driving.gunner.Is(human),"disabling assist releases input without rewriting passenger weapon state");
+    config.sidecar=true;Drive(driving,bike);otherHuman[kDead]=1;Drive(driving,bike);
+    Expect(driveBlock[0]==0 && !driving.driveWritten,"a dead real driver cannot leave autonomous throttle running");
     // Riding along (the stutter, 2026-10-06): the held gunner moves with the bike in each physics step, with no
     // warps, straight and in a turn, slow and fast; the old carried velocity (zeroed on the ground) left them behind
     // to be warped back every 0.25 m.

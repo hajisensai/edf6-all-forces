@@ -65,7 +65,11 @@ const unsigned char kDieSig[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x20
 const unsigned char kFindPartSig[]={0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x6C,0x24,0x20,0x56,0x48,0x83,0xEC,0x50};
 
 // 0x656E90's only shape creation call. rdi is vehicle+0x1580 (its movement
-// object), after the SGO movement/mark has been loaded. The ragdoll was already
+// object). Only heli_movement has been loaded here: ctor 0x64E501 zeros
+// movement+0xAC (vehicle+0x162C), and 0x6574F0 writes only +0x90..+0xA8 before
+// 0x64E9B6 calls 0x656E90. The mission_setup mark arrives AFTER construction.
+// Consequently this hook must identify the generated shape by its unique tag,
+// never by BodyMark / kSpeedGain. The ragdoll was already
 // constructed by VehicleBase; its part records are the ones the crash step
 // 0x650119 reads (+0x1398, stride 0xC0, body wrapper +0x50).
 constexpr std::size_t kShapeCall=0x65713C,kMakeBox=0x11A63F0,kGetShape=0x11B15E0;
@@ -80,18 +84,12 @@ using RefFn=void(*)(void*);
 
 void* AirframeShape(unsigned char* v) noexcept {
     __try {
-        if(!Readable(v,kSpeedGain+4))return nullptr;
+        if(!Readable(v,0x13B0))return nullptr;
         // Construction still has HelicopterBase's vtable: the derived 506
         // vtable is only assigned by 0x61B5B2 AFTER this constructor returns.
         // BodyOf/BodyMark intentionally reject that intermediate identity.
         const auto vt=At<const unsigned char*>(v,0);
         if(vt!=image+kHelicopterBase && vt!=image+kHeli506)return nullptr;
-        const float mark=At<float>(v,kSpeedGain);
-        bool aircraft=false;
-        for(const auto& r:kMarks)
-            if((r.body==PluginBody::jet || r.body==PluginBody::playerJet) && mark>=r.first && mark<=r.last)
-                aircraft=true;
-        if(!aircraft)return nullptr;
         // BindDependency indexes model-side names; use the same fuselage names
         // as FixBodyPart506. The userData tag guards old packs/Primer creatures:
         // never substitute an unconverted stock helicopter ragdoll for the box.

@@ -14,6 +14,8 @@ bool ProteusReady() noexcept;                     // InstallProteus found the re
 // 0x547C30 for every object): subcarrier.cpp's check of that call takes it as intact, whichever installs first.
 bool ProteusDamageThunk(const void* target) noexcept;
 bool IsProteus(const void* vehicle) noexcept;     // a VehicleBigBegaruta (the Proteus, V614_PROTEUS_MK2* / VEHICLE407_BIGBEGARUTA*)
+// Engine slots 2/3 still drive the weapons; empty closed slots are not public seats.
+unsigned ProteusVisibleSeats(const unsigned char* vehicle,unsigned count) noexcept;
 // Every vehicle's input (crew.cpp InputHook), before the seat switch and before the plugin's Enabled test: a Proteus a
 // local player rides is reworked, one they left gets its stock numbers back (the plugin off too: it gives everything
 // back then). Before the seat switch on purpose: the seats it closes (their class masks) are closed by the time the seat

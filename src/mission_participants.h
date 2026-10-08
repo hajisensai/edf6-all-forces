@@ -1,0 +1,18 @@
+#pragma once
+
+namespace crew {
+struct ObjRef;
+// Game thread only. Enumerates actual Soldier actors in all seven native team registries,
+// including dead players. Returned EOS ProductUserId handles are borrowed for this snapshot.
+// count is ACTOR count (split-screen users may share a PUID); expectedPlayers is the native
+// mission-start count, not EOS lobby membership. The caller decides when a snapshot is complete.
+// Failure clears both counts: never use a truncated/partially loaded roster as a quorum.
+bool ReadMissionParticipants(void** puids,unsigned capacity,unsigned* count,unsigned* expectedPlayers) noexcept;
+bool MissionParticipantCreationsMatch(const ObjRef* createdByIndex,unsigned expectedPlayers) noexcept;
+// Native Network_SetLocation state, usable from plugin initialization onward:
+// 0 booting, 1 boot complete, 2 lobby menu, 3 room menu, 4 playing, 5 loading.
+// Root MainScript sets 5 BEFORE loading and 3 AFTER scene release + Network_Session_End.
+// May be read from EOS or game thread: atomic aligned volatile state/lock loads and manager identity recheck.
+// Before EML_Load, locally identifies an already loaded supported EDF.dll without setting crew::image.
+bool ReadNativeMissionLocation(unsigned* location) noexcept;
+}

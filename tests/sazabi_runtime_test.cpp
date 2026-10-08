@@ -3,6 +3,8 @@
 #include <cstdio>
 
 namespace crew {
+bool NpcDriver(const unsigned char* v) noexcept { return v && SeatCount(v)>0 && SeatRider(SeatAt(const_cast<unsigned char*>(v),0))==Rider::dummy; }
+
 unsigned char* image=nullptr;
 Config config{};
 bool netSession=false,netAuthority=true;

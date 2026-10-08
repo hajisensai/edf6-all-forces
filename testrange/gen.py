@@ -18,10 +18,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 sys.path.insert(0, os.path.join(HERE, '..', 'tools'))   # the ground vehicles' builders (GROUND_MISSION)
 import jet_models  # noqa: E402
+import dsgo  # noqa: E402
 import ledger  # noqa: E402
 import recoil  # noqa: E402
 import rmpa  # noqa: E402
 import sazabi_model  # noqa: E402
+import sgo  # noqa: E402
 # The generated jets and vehicles are shared with tools/make_jets.py and tools/make_sub.py (pylib/vcobjects.py).
 from vcobjects import (DEFAULT_GAME, SAZABI_JET, JET_ELEVON_FILE, JET_ELEVON_MODEL, JETS, PARKED_KINDS, Game,  # noqa: E402,F401
                        as_mission_sgo, jet_guns, jet_sgo, object_dir, parked_name, weapon_dir)
@@ -133,7 +135,12 @@ VEHICLES: list[tuple[str, str]] = [
 # Vehicles the range generates into Mods/OBJECT (name -> stock SGO it is made from). The DERIVED_PREFIX
 # marks them as ours: install/uninstall only ever touch files with it.
 DERIVED_PREFIX = 'edf6tr_'
+# Keep saved-plan/UI stock IDs stable; only the script's actual resource names
+# are private, so uninstalling a range never overwrites a loose stock SGO.
+PROTEUS_MISSION = {name: DERIVED_PREFIX + name for name in
+                   ('v614_proteus_mk2_mission', 'vehicle407_bigbegaruta_mission')}
 DERIVED: dict[str, str] = {
+    **{private: source.upper() for source, private in PROTEUS_MISSION.items()},
     'edf6tr_katyusha_mission': 'EDF6VC_KATYUSHA',     # GROUND_MISSION: made from our own SGO, not a stock one
     'edf6tr_artillery_mission': 'EDF6VC_ARTILLERY',
     'edf6tr_drill_mission': 'EDF6VC_DRILL',
@@ -361,6 +368,11 @@ def placements(plan: Plan) -> list[tuple[str, bool]]:
               [(s, not (s in JETS and (JETS[s].player or JETS[s].parked))) for s, n in plan.friends.items()
                for _ in range(max(0, n))])
     return [c for c in chosen if c[0] not in BIG] + [c for c in chosen if c[0] in BIG]
+
+
+def mission_vehicle(name: str) -> str:
+    """Actual script resource, independent of the stable plan/spacing identity."""
+    return PROTEUS_MISSION.get(name, name)
 
 
 def small_count(plan: Plan) -> int:
@@ -595,7 +607,7 @@ def script(plan: Plan, lay: Layout) -> str:
     targets = w.enemy == TARGET
     flying = next((f for s, _, f in ENEMIES if s == w.enemy), False)
     grand = plan.scenario == GRAND
-    preload = sorted({f'app:/object/{s}.sgo' for s, _ in chosen} | ({f'app:/object/{w.enemy}.sgo'} if w.enabled else set())
+    preload = sorted({f'app:/object/{mission_vehicle(s)}.sgo' for s, _ in chosen} | ({f'app:/object/{w.enemy}.sgo'} if w.enabled else set())
                      | ({f'app:/object/{AIR_ENEMY}.sgo'} if air.enabled else set())
                      | ({s for s, _ in GRAND_SHIPS} | set(GRAND_GROUND) | set(GRAND_AIR) | set(GRAND_SOLDIERS) | {GRAND_BEARER}
                         if grand else set()))
@@ -664,7 +676,7 @@ def script(plan: Plan, lay: Layout) -> str:
     # The player's own vehicles first, all at once: only the NPC ones wait.
     friends = 0
     for sgo, npc, point in sorted(placed, key=lambda e: bool(e[1])):
-        path = _q('app:/object/' + sgo + '.sgo')
+        path = _q('app:/object/' + mission_vehicle(sgo) + '.sgo')
         if npc:   # last argument: does it join the player's squad (no: the plugin flies/drives it)
             if friends and friends % SPAWN_BATCH == 0:
                 lines.append(f'\tWait({SPAWN_GAP:.2f});')
@@ -880,10 +892,39 @@ def _with_player_recoil(game: Game, sgo_name: str, data: bytes) -> bytes:
     return data if mounts is None else recoil.align_data(data, mounts, sgo_name)[0]
 
 
+def _with_player_heli_motion(game: Game, sgo_name: str, data: bytes) -> bytes:
+    """Give placed helis their matching request's flight parameters, not the OBJECT template's defaults.
+
+    The Heron template is only 8.39 km/h (k=80, b=.0003, d=.99); its real YG10E request is
+    74.94 km/h (k=90, b=.003). Keep the range's durability, fuel and weapons unchanged.
+    """
+    if sgo_name not in PLAYER_CALLS or '_heli' not in sgo_name:
+        return data
+    call = sgo.load(data=game.read('WEAPON', PLAYER_CALLS[sgo_name] + '.SGO'))
+    delivery = call['Ammo_CustomParameter'][4]
+    # The DLC Eros uses the same flight law as the standard Eros whose guns it carries.
+    stock = DERIVED[sgo_name].removesuffix('_EDF6BENEFITS').lower()
+    if not isinstance(delivery, list) or len(delivery) != 4 or delivery[2].lower() != f'app:/object/{stock}.sgo':
+        raise ValueError(f'{sgo_name}: helicopter request targets another vehicle')
+    motion = delivery[3][1]
+    if not isinstance(motion, list) or len(motion) != 7 or not all(isinstance(v, (int, float)) and math.isfinite(v) for v in motion):
+        raise ValueError(f'{sgo_name}: invalid helicopter flight parameters')
+    if data[:4] == b'DSGO':
+        doc = dsgo.parse(data)
+        doc.root.get('mission_setup').items[1] = dsgo.Node(motion)
+        return dsgo.write(doc)
+    version, members = sgo.read(data)
+    members['mission_setup'][1] = motion
+    return sgo.write_depth_first(version, members)
+
+
 def vehicle_sgo(game: Game, sgo_name: str, jet_model: list[str] | None = None) -> bytes:
     """The SGO bytes the mission will load for this vehicle (generated ones are made here)."""
     if sgo_name in JETS:
         return jet_sgo(game, sgo_name, jet_model)
+    if sgo_name in PROTEUS_MISSION.values():
+        import make_proteus
+        return make_proteus.redirect(game.read('OBJECT', DERIVED[sgo_name] + '.SGO'))[0]
     if sgo_name in GROUND_MISSION:
         import importlib
         data = importlib.import_module(GROUND_MISSION[sgo_name]).vehicle_sgo(game)
@@ -892,7 +933,8 @@ def vehicle_sgo(game: Game, sgo_name: str, jet_model: list[str] | None = None) -
         return _with_player_recoil(game, sgo_name, data)
     stock = DERIVED.get(sgo_name)
     if stock:
-        return _with_player_recoil(game, sgo_name, as_mission_sgo(game.read('OBJECT', stock + '.SGO')))
+        data = _with_player_heli_motion(game, sgo_name, as_mission_sgo(game.read('OBJECT', stock + '.SGO')))
+        return _with_player_recoil(game, sgo_name, data)
     return game.read('OBJECT', sgo_name.upper() + '.SGO')
 
 
@@ -919,6 +961,10 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
         held.add(ledger.key(rel))
     for f in sorted({JETS[n].file for n in jets if JETS[n].file}):
         held.add(_need_model(led, game, f))
+        if f in jet_models.ANIMATIONS:
+            rel = f'OBJECT/{jet_models.ANIMATIONS[f]}'
+            led.put(OWNER, rel, jet_models.animation(game, f))
+            held.add(ledger.key(rel))
     if jets:
         for name, data in jet_guns(game).items():
             led.put(OWNER, f'WEAPON/{name}', data)
@@ -951,9 +997,42 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
             led.put(OWNER, rel, aircraft_collision.build(game, key))
             held.add(ledger.key(rel))
     for name in sorted(wanted):
-        led.put(OWNER, f'OBJECT/{name.upper()}.SGO', vehicle_sgo(game, name, JET_ELEVON_MODEL if elevons else None))
-    led.release(OWNER, sorted(before - held))
+        rel = f'OBJECT/{name.upper()}.SGO'
+        changed_proteus = name in PROTEUS_MISSION.values() and led.changed(rel)
+        if changed_proteus:
+            # Retain the original ledger fingerprint so a later uninstall still
+            # recognizes this file as somebody else's edit.
+            with open(led.disk(rel), 'rb') as file:
+                data = file.read()
+        else:
+            data = vehicle_sgo(game, name, JET_ELEVON_MODEL if elevons else None)
+        if name in PROTEUS_MISSION.values():
+            import make_proteus
+            data, needs = make_proteus.range_vehicle(led, game, data, OWNER)
+            held.update(ledger.key(rel) for rel in needs)
+        if not changed_proteus:
+            led.put(OWNER, rel, data)
+    _release_derived(led, before - held)
     _remove_legacy(game_root, keep=wanted)
+
+
+def _release_derived(led: ledger.Ledger, rels: set[str]) -> tuple[list[str], list[str]]:
+    """An edited Proteus consumer keeps its model schema and ledger record.
+
+    Keeping the record also protects it from the pre-ledger prefix cleanup.
+    """
+    protected = set()
+    for private in PROTEUS_MISSION.values():
+        rel = f'OBJECT/{private.upper()}.SGO'
+        if rel in rels and led.changed(rel):
+            protected.add(rel)
+            # An edit may switch between the two models, so retain the resource
+            # group rather than assuming it still refers to its original host.
+            for source in PROTEUS_MISSION:
+                host = source.upper().removesuffix('_MISSION')
+                protected.update(f'OBJECT/EDF6VC_{host}.{ext}' for ext in ('MRAB', 'CAS'))
+    deleted, kept = led.release(OWNER, sorted(rels - protected))
+    return deleted, kept + [led.disk(rel) for rel in sorted(protected) if os.path.isfile(led.disk(rel))]
 
 
 def _need_model(led: ledger.Ledger, game: Game, file: str) -> str:
@@ -1009,7 +1088,7 @@ def spawned(plan: Plan) -> set[str]:
     placed ones checked for a mission_setup: a script that creates an SGO the game cannot find ends the game (2026-10-05
     10:40, dump EDF6.exe.79680: the grand battle's CreateFriend of the enemy fighter, never written, faulted in the
     game's own error stop)."""
-    names = {x for x, _ in placements(plan)}
+    names = {mission_vehicle(x) for x, _ in placements(plan)}
     if plan.air.enabled:
         names.add(AIR_ENEMY)
     if plan.scenario == GRAND:
@@ -1060,7 +1139,8 @@ def install(game_root: str, plan: Plan) -> list[str]:
 def uninstall(game_root: str) -> bool:
     """Removes the range's missions and releases its files: generated vehicles, and the models and guns no other
     tool needs (pylib/ledger.py)."""
-    deleted, _ = ledger.Ledger(game_root).release(OWNER)
+    led = ledger.Ledger(game_root)
+    deleted, _ = _release_derived(led, set(led.owned_by(OWNER)))
     return any([_remove(game_root, x.mission) for x in SLOTS] + [_remove_legacy(game_root), bool(deleted)])
 
 

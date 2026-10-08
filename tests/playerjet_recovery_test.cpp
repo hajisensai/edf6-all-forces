@@ -4,16 +4,18 @@
 #include <cstdlib>
 
 namespace crew {
+bool AiGunner(const unsigned char*,const unsigned char*) noexcept { return false; }
+bool NpcDriver(const unsigned char* v) noexcept { return v && SeatCount(v)>0 && SeatRider(SeatAt(const_cast<unsigned char*>(v),0))==Rider::other; }
+
 bool ReadRound(const unsigned char*,RoundModel*) noexcept {return false;}
 bool RoundLands(const unsigned char*,const RoundModel&,const float*,const float*,float,float*,float*) noexcept {return false;}
 float SightZoomNow(const void*) noexcept {return 1.0f;}
 void SightZoomFrame(unsigned char*,unsigned,bool) noexcept {}
 unsigned char* image=nullptr;
+bool recoveryAuthority=true,rescueChoiceScenario=false;int crewRequests=0,npcResumes=0;
+bool OnlineRunsHere(const void*) noexcept {return recoveryAuthority;}
 // Offline (online_authority.h): an NPC rider may be seated, through the vehicle's own RideAi.
-bool SeatNpcRider(unsigned char* v,bool spawned) noexcept {
-    reinterpret_cast<void(__fastcall* const*)(void*,bool)>(At<void* const*>(v,0))[kSlotRideAi](v,spawned);
-    return true;
-}
+bool SeatNpcRider(unsigned char*,bool) noexcept {++crewRequests;return false;}
 Config recoveryConfig{};
 PlayerFix player{};
 ULONGLONG recoveryTime=10000;
@@ -32,6 +34,7 @@ ULONGLONG GameFrame() noexcept { return recoveryTime/16; }
 float GameStep(ULONGLONG) noexcept { return 1.0f/60.0f; }
 void Log(const char*,...) noexcept {}
 bool MapHoldsKeys() noexcept { return false; }
+const void* BoardingOnly() noexcept {return nullptr;}
 bool GearDown(const void*) noexcept { return testGearDown; }
 float GearDragShare(const void*) noexcept { return 0.0f; }
 GearState GearStep(unsigned char*,bool,float,bool) noexcept { return GearState{}; }
@@ -65,8 +68,8 @@ void SetObjectTeam(unsigned char*,std::int32_t) noexcept { MissingRecoveryDepend
 float ShieldBlock(const unsigned char*,float*) noexcept { MissingRecoveryDependency();return 0.0f; }
 bool JetMotionProps(void*) noexcept { MissingRecoveryDependency();return false; }
 JetBody BomberBody(const unsigned char*) noexcept { MissingRecoveryDependency();return JetBody{}; }
-PluginBody BodyOf(const void*) noexcept { MissingRecoveryDependency();return PluginBody{}; }
-float BodyMark(const void*) noexcept { if(!ramScenario)MissingRecoveryDependency();return ramMass.mark; }
+PluginBody BodyOf(const void*) noexcept {if(rescueChoiceScenario)return PluginBody::jet;MissingRecoveryDependency();return PluginBody{};}
+float BodyMark(const void*) noexcept {if(rescueChoiceScenario)return pjet::MarkOf(jet::Body::fighter);if(!ramScenario)MissingRecoveryDependency();return ramMass.mark;}
 bool Body506Ok() noexcept { MissingRecoveryDependency();return false; }
 bool ImpactDamage(const unsigned char*,const float*,float damage,float) noexcept {
     if(!ramScenario)MissingRecoveryDependency();
@@ -111,7 +114,7 @@ bool ModFileThere(const wchar_t*) noexcept { MissingRecoveryDependency();return 
 bool LockingOn(const void*) noexcept { MissingRecoveryDependency();return false; }
 int BreakLocks(const void*,float) noexcept { MissingRecoveryDependency();return 0; }
 int LockersOf(const void*,float (*)[3],int) noexcept { MissingRecoveryDependency();return 0; }
-bool Alive(const ObjRef&) noexcept { MissingRecoveryDependency();return false; }
+bool Alive(const ObjRef& r) noexcept {return r && r.Is(r.obj) && !At<unsigned char>(r.obj,kDead);}
 Jet* FindJet(const unsigned char*) noexcept { MissingRecoveryDependency();return nullptr; }
 void HoldOffGround(Jet&,const float*,float,float,ULONGLONG,float) noexcept { MissingRecoveryDependency(); }
 void Hover(Jet&,const Kind&,const unsigned char*,const float*,const float*,const float*,float,float,float,float,bool) noexcept { MissingRecoveryDependency(); }
@@ -132,7 +135,7 @@ bool SideGunReady(SideGun) noexcept { MissingRecoveryDependency();return false; 
 float SideGunWait(const unsigned char*,SideGun,ULONGLONG) noexcept { MissingRecoveryDependency();return 0.0f; }
 float SideGunReach(SideGun) noexcept { MissingRecoveryDependency();return 0.0f; }
 float ShellReach() noexcept { MissingRecoveryDependency();return 0.0f; }
-void ResumeNpc(unsigned char*,const float*) noexcept { MissingRecoveryDependency(); }
+void ResumeNpc(unsigned char*,const float*) noexcept {++npcResumes;}
 Jet* Adopt(unsigned char*) noexcept { MissingRecoveryDependency();return nullptr; }
 }
 }
@@ -143,7 +146,7 @@ int checks=0;
 void Check(bool ok,const char* what) {
     ++checks;if(!ok){std::fprintf(stderr,"FAIL: %s\n",what);std::exit(1);}
 }
-alignas(16) unsigned char recoveryVehicle[0x3000]{},recoveryCtrl[0x20]{},recoveryHuman[0x1600]{};
+alignas(16) unsigned char recoveryVehicle[0x3000]{},recoveryCtrl[0x20]{},recoveryHuman[0x1600]{},recoverySeat[edf::kSeatStride]{},recoveryPilot[0x500]{};
 void ResetJet(PJet& j) {
     j=PJet{};j.vehicle=recoveryVehicle;j.ref=ObjRef::Of(recoveryVehicle);j.kind=&kKinds[0];j.phase=Phase::air;
     j.driven=true;j.fresh=true;j.vel[2]=55.0f;j.vel[1]=-3.0f;
@@ -197,6 +200,25 @@ int main() {
     Check(std::fabs(FloorClear(j,recoveryVehicle,bodyPos,8.5f))<0.001f,"a large wing touching its bottom is at zero clearance");
     Check(FloorClear(j,recoveryVehicle,bodyPos,kNoGround)==kNoGround,"missing ground remains missing");
 
+    Put<void*>(recoveryVehicle,kSeats,recoverySeat);Put<std::uint64_t>(recoveryVehicle,kSeatCount,1);
+    Put<void*>(recoverySeat,kSeatRider,recoveryPilot);Put<void*>(recoverySeat,kSeatRiderCtrl,recoveryCtrl);
+    rescueChoiceScenario=true;j=PJet{};jet::jets[0].ref=ObjRef::Of(recoveryVehicle);
+    Put<int>(recoveryVehicle,kTeam,jet::kTeamFriend);
+    const float origin[3]={0,0,0};
+    Check(CatchChoice(origin)==&jet::jets[0] && HailChoice(origin,nullptr,nullptr)==&jet::jets[0],
+          "existing real-piloted aircraft is eligible for catch and hail");
+    recoveryAuthority=false;
+    Check(!CatchChoice(origin) && !HailChoice(origin,nullptr,nullptr),"another machine's real pilot is not locally commandeered");
+    recoveryAuthority=true;Put<void*>(recoverySeat,kSeatRiderCtrl,nullptr);
+    Check(!CatchChoice(origin) && !HailChoice(origin,nullptr,nullptr),"uncrewed aircraft never offered for catch or hail");
+    ResetJet(j);j.board=&pjet::kBoardable[0];npcResumes=crewRequests=0;
+    HandBack(j,recoveryVehicle,"test empty handback");
+    Check(npcResumes==0 && crewRequests==1,"handback requests real crew but does not resume empty aircraft");
+    gunner.pilotTried=false;EnsurePilot(recoveryVehicle);
+    Check(npcResumes==0,"gunner waiting for a real pilot does not resume flight");
+    Put<void*>(recoverySeat,kSeatRiderCtrl,recoveryCtrl);EnsurePilot(recoveryVehicle);
+    Check(npcResumes==1,"a real pilot who actually boarded completes delayed handback");
+    jet::jets[0]=jet::Jet{};rescueChoiceScenario=false;
     // Descending parachute and an offset native door: repeated production Catch -> AutoFly physics steps must put
     // the door in reach, not leave it six metres ahead. Begin with the body centre near the human but the door far.
     ResetJet(j);j.autopilot=true;j.driven=false;j.vel[0]=j.vel[2]=0.0f;j.vel[1]=-6.0f;
@@ -218,6 +240,21 @@ int main() {
     for(int i=0;i<3;++i){catchFlight.target[i]=body[i];catchFlight.drift[i]=humanVelocity[i];j.vel[i]=30.0f;}
     AutoFly(j,recoveryVehicle,body,1.0f/60.0f,recoveryTime);
     Check(vec::Dist(j.vel,humanVelocity)<0.001f,"zero catch error still replaces stale velocity with parachute drift");
+    const float pilotVelocity[3]={j.vel[0],j.vel[1],j.vel[2]};
+    Put<void*>(recoverySeat,kSeatRiderCtrl,nullptr);
+    AutoFly(j,recoveryVehicle,body,1.0f/60.0f,recoveryTime);
+    Check(!j.autopilot && !j.active && vec::Dist(j.vel,pilotVelocity)==0,
+          "empty pilot seat cannot continue catch guidance or invent acceleration");
+    Catch(recoveryHuman,recoveryTime);
+    Check(!bail.caught && !catchFlight.v && bail.state==Eject::chute,
+          "pilot loss cancels only the catch and keeps the parachute active");
+    bail.catchWith=pjet::kCatchPlayerFighter;bail.at=recoveryTime-kCatchAfterMs-1;
+    Catch(recoveryHuman,recoveryTime);
+    Check(!bail.caught && bail.state==Eject::chute,
+          "no crewed rescue aircraft means no aircraft is spawned in the air");
+    Put<void*>(recoverySeat,kSeatRiderCtrl,recoveryCtrl);
+    bail.caught=ObjRef::Of(recoveryVehicle);bail.caughtAt=recoveryTime;
+    catchFlight=CatchFlight{recoveryVehicle,{0,300,0},150.0f,{0,-6,0},{0,0,1}};
     testDoor=false;const int presses=boardPresses;Catch(recoveryHuman,recoveryTime);
     Check(!catchFlight.hasDoor && boardPresses==presses,"an unreadable door never falls back to boarding by body centre");
     Check(vec::Dist(catchFlight.target,human)>kCatchBelow-0.001f && vec::Dist(catchFlight.target,human)<kCatchBelow+0.001f &&

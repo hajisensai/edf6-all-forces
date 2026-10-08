@@ -7,10 +7,13 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
 #include "online_authority.h"
+#include "support_aircraft.h"
+#include "real_driver_native.h"
 #include <cstdio>
 #include <cwchar>
 
 namespace crew {
+bool NpcDriver(const unsigned char* vehicle) noexcept;
 namespace jet {
 namespace {
 // The preload manager *(image+kPreloadMgr), the object manager *(image+kObjectMgr), CreateObject(manager,
@@ -231,8 +234,71 @@ void ResetFlights() noexcept {
 
 using namespace jet;
 
+namespace {
+ObjRef supportAircraft[32]{};
+Body SupportBody(const SupportAircraft& spec) noexcept {
+    if(spec.heli>=0)return spec.heli==static_cast<int>(HeliBody::brute410) ? Body::heli410 :
+        spec.heli==static_cast<int>(HeliBody::medic410) ? Body::heliMedic : Body::heli506;
+    return kLaunchRows[spec.jet].body;
+}
+}
+
+unsigned char* PrepareSupportAircraft(const SupportAircraft& spec,const float* matrix) noexcept {
+    if(!matrix || (spec.heli<0 && (spec.jet<0 || spec.jet>=kLaunchCount)))return nullptr;
+    const Body body=SupportBody(spec);
+    if(!spawnOk || !Preloaded(body) || !At<void*>(image,kObjectMgr))return nullptr;
+    ObjRef* slot=nullptr;
+    for(auto& ref:supportAircraft)if(!ref || !Alive(ref)){slot=&ref;break;}
+    if(!slot)return nullptr;
+    InitParam param{image+kInitParamVtable,{}};
+    unsigned char* const vehicle=CreateJet(body,matrix,&param);
+    if(!vehicle)return nullptr;
+    if(bodyPartOk)FixBodyPart506(vehicle,"SUPPORT");
+    SetJetTeam(vehicle,kTeamFriend);LevelVehicle(vehicle);
+    if(!PrepareNpcVehicle(vehicle,true)) {
+        reinterpret_cast<DeleteFn>(image+kDelete)(vehicle);return nullptr;
+    }
+    const BodyRow& row=Row(body);Role role{};
+    const bool valid=row.mark>0 ? IsJetVehicle(vehicle,&role,nullptr) && role==row.role :
+        IsHelicopter(vehicle) && !IsJetVehicle(vehicle,nullptr,nullptr);
+    if(!valid){reinterpret_cast<DeleteFn>(image+kDelete)(vehicle);return nullptr;}
+    *slot=ObjRef::Of(vehicle);
+    NoteLocalCopy(vehicle,nullptr);
+    return vehicle;
+}
+
+bool ActivateSupportAircraft(unsigned char* vehicle,const SupportAircraft& spec,const float* target) noexcept {
+    // Only the actual pilot authorizes takeoff; an empty seat/Dummy never passes this gate.
+    if(!vehicle || !target || !NpcDriver(vehicle))return false;
+    if(spec.heli>=0) {
+        HeliCalled(vehicle,!spec.follow,target,spec.fuelSeconds);
+        return HeliCommand(vehicle,Command{Order::guard,{target[0],target[1],target[2]}});
+    }
+    Jet* entry=FindJet(vehicle);
+    if(!entry)entry=NewEntry(vehicle,GameMs());
+    if(!entry)return false;
+    entry->launched=true;entry->mode=Mode::takeoff;entry->escort=spec.follow;
+    std::memcpy(entry->anchor,target,12);entry->fuelMs=static_cast<ULONGLONG>(spec.fuelSeconds)*1000;
+    JoinFlight(*entry,FlightFor(&supportAircraft,GameMs()));
+    ApplyMapCommand(*entry,Command{Order::guard,{target[0],target[1],target[2]}},GameMs());
+    return true;
+}
+
+bool DeleteSupportAircraft(const ObjRef& ref) noexcept {
+    for(auto& own:supportAircraft)if(own.obj==ref.obj && own.ctrl==ref.ctrl && own.obj) {
+        if(Alive(own)) {
+            auto* vehicle=static_cast<unsigned char*>(const_cast<void*>(own.obj));
+            for(unsigned seat=0;seat<SeatCount(vehicle);++seat)if(AnyPlayerIn(SeatAt(vehicle,seat)))return false;
+            reinterpret_cast<DeleteFn>(image+kDelete)(vehicle);
+        }
+        own={};return true;
+    }
+    return false;
+}
+
 // Every flag is cleared first: a body not preloaded for this mission is never spawned (the stock planes come).
 void PreloadJets() noexcept {
+    for(auto& ref:supportAircraft)ref={};
     for(auto& p:preloaded)p=false;
     ResetShells();
     if(!spawnOk)return;

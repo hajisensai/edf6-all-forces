@@ -32,6 +32,7 @@
 #include "map_marks.h"
 #include "map_camera_state.h"
 #include "map_stock_hud.h"
+#include "playarea.h"
 #include "memory.h"
 #include "turretaim.h"
 #include "tvguide.h"
@@ -663,6 +664,10 @@ TvInput TvRead(const unsigned char* human) noexcept {
 bool __fastcall MapHumanFrame(unsigned char* human) noexcept {
     __try {
         if(!human || !human[kHumanPlayer] || !IsPlayer(human))return false;
+        // Support must progress on foot with no vehicles in the mission, and after the map closes.
+        SeeFrame(human);
+        PlayAreaTick();
+        SupportDispatchTick();
         const bool open=Frame(human);
         NpcMarkFrame(human,open && game.open);
         return TvFrame(human,open && game.open,TvRead(human)) || open;

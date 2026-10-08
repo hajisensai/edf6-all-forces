@@ -460,10 +460,13 @@ def calls_table_consistent() -> None:
 def boarding_tag_in_plugin() -> None:
     """The boarding gun's tag: src/boarding.cpp compares the bits call_weapons.gun_tag writes (1 + mark ulps)."""
     guns = [c for c in calls.CALLS if c.brings == 'gun']
-    assert len(guns) == 1, 'one boarding gun'
+    assert len(guns) == 4 and len({c.gun for c in guns}) == 4, 'one native gun per class'
+    assert {c.mark for c in guns} == {7301, 7302, 7303, 7304}, 'one reserved collision tag per class'
+    assert 'bits>=kTagBits && bits<=kTagBits+3u' in src('src/boarding.cpp')
     bits = re.search(r'kTagBits=0x3F800000u\+(\d+)u;', src('src/boarding.cpp'))
     assert bits and int(bits.group(1)) == int(guns[0].mark) == guns[0].mark, "src/boarding.cpp kTagBits is not the gun's mark"
     assert cw.gun_tag_bits(guns[0].mark) == 0x3F800000 + int(guns[0].mark)
+    assert [c.gun for c in guns] == ['aWeapon081', 'pWeapon127', 'eWeapon120', 'hCannon01']
     assert '#include' in src('src/boarding.cpp') and 'src/boarding.cpp' in src('CMakeLists.txt')
 
 
@@ -479,6 +482,9 @@ def boarding_debug_gun_parameters_and_text() -> None:
         curves[key] = [base, float(i + 10), 0.5, 2.0, 1.0]
         root.set(key, dsgo.Node(curves[key].copy()))
     root.set('AmmoAlive', 40.0)
+    for key in cw.GUN_SCALARS:
+        if key not in root.names.values():
+            root.set(key, 0.0)
     root.set('FireRecoil', 3.0)
     root.set('AmmoColor', dsgo.Node([0.25, 0.5, 0.75, 1.0]))
     template = dsgo.write(dsgo.Document(root, []))
@@ -503,6 +509,39 @@ def boarding_debug_gun_parameters_and_text() -> None:
         changed = cw._text_row(row, gun, lang, gun=cw.gun_stats(template))
         assert [st.items[2].items[0] for st in changed.items[2].items] == expected, lang
         assert changed.items[2].items[-1] == damage, 'damage and its star parameters stay unchanged'
+
+
+@test
+def boarding_all_classes_stock_resources() -> None:
+    """When Root.cpk is available, generate actual class-native weapons and every locale's menu rows."""
+    import rootcpk
+    if not os.path.isfile(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    game = rootcpk.DEFAULT_GAME
+    rows = cw._rows(dsgo.parse(cw.stock(game, cw.TABLE)), cw.TABLE)
+    ids = [r.items[0] for r in rows]
+    expected = [('aWeapon081', 2, 'Weapon_BasicShoot'),
+                ('pWeapon127', 104, 'Weapon_PreChargeShoot'),
+                ('eWeapon120', 303, 'Weapon_BasicShoot'),
+                ('hCannon01', 204, 'Weapon_HeavyShoot')]
+    guns = [c for c in calls.CALLS if c.brings == 'gun']
+    for call, (name, category, weapon_class) in zip(guns, expected):
+        template = cw.stock(game, f'WEAPON/{name.upper()}.SGO')
+        original = dsgo.parse(template).root
+        weapon = dsgo.parse(cw.gun_sgo(template, call)).root
+        index = ids.index(name)
+        row = cw._table_row(rows[index], call)
+        assert row.items[2] == category and row.items[0] == call.id
+        assert weapon.get('xgs_scene_object_class') == weapon_class
+        for key in ('animation_model', 'ModelConstraint', 'Sight_animation_model'):
+            assert dsgo.to_py(weapon.get(key)) == dsgo.to_py(original.get(key)), (call.id, key)
+        assert weapon.get('AmmoClass') == 'SolidBullet01'
+        assert weapon.get('AmmoExplosion') == weapon.get('AmmoGravityFactor') == 0
+        assert weapon.get('SecondaryFire_Type') == 1
+        assert weapon.get('Ammo_CustomParameter').items == []
+        for lang, rel in zip(cw.LANGS, cw.TEXTS):
+            texts = cw._rows(dsgo.parse(cw.stock(game, rel)), rel)
+            cw._text_row(texts[index], call, lang, gun=cw.gun_stats(template))
 
 
 @test
@@ -834,7 +873,7 @@ def drill_copies_agree() -> None:
     m = re.search(r'kBoxHalfX=([\d.]+)f', d)
     assert m and 2 * float(m.group(1)) <= make_drill.HULL_WIDTH + 1e-6, 'the contact box is no wider than the hull'
     m = re.search(r'kHullFront=([\d.]+)f,kChargeFrom=([\d.]+)f', d)
-    assert m and float(m.group(1)) < drill_model.DRILL_BASE[2] and float(m.group(2)) >= 3.4, m and m.groups()
+    assert m and float(m.group(1)) < drill_model.DRILL_BASE[2] + drill_model.DRILL_LENGTH and float(m.group(2)) >= 3.4, m and m.groups()
     m = re.search(r'kDrillLength=([\d.]+)f,kDrillRadius=([\d.]+)f', d)
     assert m and (float(m.group(1)), float(m.group(2))) == (drill_model.DRILL_LENGTH, drill_model.DRILL_RADIUS), m and m.groups()
     m = re.search(r'kDrillBaseY=([\d.]+)f,kDrillBaseZ=([\d.]+)f', d)
@@ -1034,7 +1073,9 @@ def sight_zoom_wired() -> None:
     # magnified, the gunship gunner's a sensor rectangle; its offline check under CTest; the heli gun's ladder.
     hud = src('src/hud.cpp')
     draw = hud.split('void HudDraw(const float* viewProj,', 1)[1]
-    assert draw.index('ScopeShade(drawer,ctx,t,width,height,s,zoom,z.gunner && !z.cockpit') < draw.index('CarrierBars(')
+    assert draw.index('ScopeShade(drawer,ctx,t,width,height,s,zoom,mask==sightzoom::Mask::sensor') < draw.index('CarrierBars(')
+    assert 'sightzoom::MaskOf(sightKind)' in draw and 'SightZoomView()' in draw
+    assert 'SeatCapability(v,seat)' in code and 'HighCamOn(v) || TurretCamHighTransition(v)' in code
     assert 'LadderTicks(drawer,ctx,text,vp,width,height,s,h.ladder,' in hud and 'r.ladder=gunsight::Of(' in src('src/helisight.cpp')
     cmake = src('CMakeLists.txt')
     assert 'EXCLUDE_FROM_ALL tools/scopeview_check.cpp' in cmake and 'scopeview_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
@@ -1524,12 +1565,8 @@ def every_boardable_aircraft_requested() -> None:
 
 @test
 def every_boardable_aircraft_caught() -> None:
-    """Whatever the player ejects from has a catch jet (src/playerjet_kinds.h kCatchFiles, each row's catchWith, the
-    user, 2026-10-06: 「我在天上好像还是没来接我」 after a multirole crashed under them): a jet's SGO the installer writes
-    (tools/make_jets.py FILES) with its mark and a seat every class takes, its own kind's requested twin when there is one
-    (pylib/vcobjects.py REQUEST_KINDS), else a player jet; always a wing (the catch flies in as one: AutoFly). Every catch
-    SGO is preloaded at the mission's start (src/playerjet.cpp PreloadPlayerJets over kCatchFiles) and is the one table
-    SpawnCatchJet makes from; the jet left does not take the catch away (playerjet_board.inc Left)."""
+    """Boardable asset/catch-kind metadata stays valid, but rescue now selects an existing real-piloted aircraft.
+    The legacy catch asset table is retained for installed-resource compatibility; no airframe is spawned in the air."""
     head = src('src/playerjet_kinds.h')
     order = re.search(r'enum CatchWith : int \{(.*?)\};', head, re.S).group(1).replace(' ', '').replace('\n', '').split(',')
     assert order[0] == 'kCatchNone=-1', order
@@ -1567,9 +1604,8 @@ def every_boardable_aircraft_caught() -> None:
     preload = jets[jets.index('void PreloadPlayerJets()'):]
     preload = preload[:preload.index('\n}\n')]
     assert 'i<pjet::kCatchFileCount' in preload and 'kPreloadFn)(mgr,f.sgo' in preload, 'PreloadPlayerJets: not every catch SGO'
-    spawn = jets[jets.index('unsigned char* SpawnCatchJet('):]
-    spawn = spawn[:spawn.index('\n}\n')]
-    assert 'pjet::kCatchFiles[which]' in spawn and 'playerJetPreloaded[which]' in spawn, 'SpawnCatchJet: not the catch table'
+    assert 'SpawnCatchJet(' not in jets and 'CatchChoice(p)' in jets, 'catch must select an existing crewed aircraft'
+    assert '!CrewedPilot(v)' in jets, 'catch/AutoFly must stop when its real pilot is lost'
     assert 'kPlayerJetFiles' not in jets and 'bail.mark' not in jets, 'a second catch table / the old mark'
     board = src('src/playerjet_board.inc')
     left = board[board.index('void Left('):]
@@ -1874,7 +1910,9 @@ def jet_door_on_the_ground_beside_its_box() -> None:
     # The Sazabi's `mdl` lands at its model's origin, its soles, not at its box's centre 12.8 m over them (its frames
     # log, 2026-10-07: written from the centre, the door was 12.8 m underground): the same point, from the origin.
     assert vc.JETS[vc.SAZABI_JET].locators_on_origin and vc.mdl_at(vc.JETS[vc.SAZABI_JET]) == (0.0, 0.0, 0.0)
-    assert all(vc.mdl_at(j) is None for n, j in vc.JETS.items() if n != vc.SAZABI_JET), 'the jets keep the centre'
+    assert all(vc.mdl_at(j) == (0.0, 0.0, 0.0) for j in vc.JETS.values()), 'native model update uses the model origin'
+    at, r = vc.door_point(carrier, (2.15, 0.0, 1.8), 1.8, (0.0, 0.0, 0.0))
+    assert at == [30.303, 0.0, -1.309] and r == 1.8, 'a full-span carrier door is not buried by its half-height'
     at, r = vc.door_point([[0.0, 12.805, -1.395], [10.805, 12.805, 13.715]], (2.15, 0.0, 1.8), 1.8, (0.0, 0.0, 0.0))
     assert at == [11.405, 0.0, 0.405], at
 
@@ -2015,7 +2053,7 @@ def embedded_seat_aim_wired() -> None:
 def proteus_wired() -> None:
     """The Proteus rework (src/proteus.cpp, src/proteus_logic.h, README 普罗透斯, docs/proteus-re.md): every Proteus* key the
     ini ships is read, range-checked (all but the three switches), and documented in README.md; the class crew.cpp chains
-    for it (VehicleBigBegaruta, its own slot 55 now, 0 before) is the one proteus.cpp reworks; it is built (its own
+    for it (VehicleBigBegaruta, its native player update slot 4) is the one proteus.cpp reworks; it is built (its own
     target_sources line) with its offline check, which includes the rules' header alone; every EDF.dll address it checks is
     in docs/proteus-re.md; the mission's reset, the per-frame step (before the plugin-off return: it gives the stock numbers
     back), the install, the turret camera's lift, the shells' preload and the EDF6AutoTurret link (one export name, both
@@ -2050,11 +2088,19 @@ def proteus_wired() -> None:
     # The stock launcher is the salvo's only while the salvo can be fired and its seat is closed, decided each frame after
     # the seats; what is given back is what was taken.
     step = code.split('void Frame(unsigned char* v)', 1)[1].split('\n}', 1)[0]
-    assert step.index('TwoSeats(*u,v);') < step.index('Guns(*u,salvoReady,c);'), 'Guns after the seats'
+    assert step.index('TwoSeats(*u,v,LocalGunner(v));') < step.index('Guns(*u,salvoReady,c);'), 'Guns after ownership-aware seats'
+    gunner = code.split('bool LocalGunner(', 1)[1].split('\n}\n', 1)[0]
+    assert 'Rider::none || rider==Rider::dummy' in gunner and 'IsOnlineAuthority(object)' in gunner, \
+        'only the real gunner owner may pull the paired cannon'
     assert 'const bool hold=salvo && u.closed;' in code and 'Put<float>(m,kRate,u.rate[kLauncherSeat]);' in code
     give = code.split('void GiveBack(Unit& u', 1)[1].split('\n}', 1)[0]
     assert 'Put<float>(w,kRate,u.rate[s]);Put<float>(w,kSpread,u.spread[s]);' in give and '1.0f' not in give
-    assert 'u.active && u.ref.Is(v)' in code and 'u.ref.obj==' not in code, 'a Proteus unit by its live object, not its address'
+    lookup = code.split('Unit* UnitOf(', 1)[1].split('\n}\n', 1)[0]
+    active = code.split('Unit* ActiveOf(', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(u.ref.Is(v))return &u;' in lookup and 'if(u.ref.Is(v))' in active, \
+        'lookup and active consumers must validate the complete ObjRef; address reuse only selects a free slot'
+    assert 'ControlFresh(u,v,GameMs())' in active and 'u.active && !u.net.remote' in active, \
+        'replicas require fresh control; the local active path cannot consume stale remote state'
     # A Proteus no player has ridden is not crewed (the helicopters' rule, crew.cpp Crew).
     assert 'if(!st.playerAt)return;' in crew, 'every unused parked vehicle waits for its first player driver'
     assert 'kProteusHoldCountdown*0.5f' in src('src/vehsound.cpp') and 'kHoldCountdown=kProteusHoldCountdown' in code
@@ -3299,11 +3345,17 @@ def pack_install_upgrade_uninstall() -> None:
         mods = os.path.join(game, 'Mods')
         old_data = {rel: b'old ' + data for rel, data in AT_FILES.items() if rel != 'WEAPON/AT_C.SGO'}
         texts = describe.Texts({}, {})
+        text_modes: list[bool] = []
+
+        def build_texts_stub(files, mods, *, proteus: bool = False):
+            text_modes.append(proteus)
+            return texts
+
         answers: list[str] = []
         with contextlib.ExitStack() as stack:
             enter = stack.enter_context
             enter(patched(at_build, build_files=lambda legacy=False: old_data, _refuse_while_running=lambda mods: None,
-                          build_texts=lambda files, mods: texts))
+                          build_texts=build_texts_stub))
             with contextlib.redirect_stdout(io.StringIO()):
                 at_build.install(mods, text=True, force=False)   # the player's earlier build.py install
             enter(patched(at_build, build_files=_at_build_files))
@@ -3366,6 +3418,8 @@ def pack_install_upgrade_uninstall() -> None:
                     modfiles.atomic_write(os.path.join(plugins, 'EDF6AutoTurret' + name), b'log')
                 answers[:] = ['1']
                 installer.uninstall(game)
+        assert text_modes and not text_modes[0] and any(text_modes[1:]), \
+            'the old standalone install has no Proteus text; pack installs must request it explicitly'
         left = _tree(game)
         assert left == foreign, f'uninstall left {sorted(set(left) - set(foreign))}, changed ' \
             f'{sorted(r for r in foreign if left.get(r) != foreign[r])}'
@@ -4491,14 +4545,19 @@ def npc_ai_wired() -> None:
     for key in ('NpcLaneWidth', 'NpcLaneLength', 'NpcFlankDeg', 'NpcEngageShare', 'NpcDangerRange', 'NpcGrabRange', 'NpcCrowd',
                 'NpcRollSec', 'NpcRetreatHp', 'NpcLeash', 'TankPostHold', 'TankReverseMax'):
         assert f'Fix("{key}"' in plugin, f'{key} is range-checked'
-    # The tanks' post (§8): seat 0's stick written before the stock input reads it; a route's tank and a remote room's
-    # client left alone; its keys shipped and documented.
+    # The tanks' post (§8): seat 0's stick written before stock input; script routes relinquish our post, and only
+    # the real driver's authority writes it (that may be a client). Keys stay shipped and documented.
     post = src('src/npcpost.cpp')
     hook = crew.split('template<int I> void __fastcall InputHook(', 1)[1].split('\n}', 1)[0]
     assert hook.index('Guarded(kStepNpcPost,&NpcPostInput,') < hook.index('nextInput[I](vehicle,hasInput,a3,a4);')
     body = post.split('void NpcPostInput(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'if(At<const void*>(v,kRoute))' in body and 'if(!OnlineHostOnly())return;' in body
+    assert 'if(At<const void*>(v,kRoute)){DropPending(v);Relinquish(v);return;}' in body, \
+        'a script route must discard the queued waypoint and relinquish the plugin post'
+    assert 'if(!IsOnlineAuthority(v))return;' in body, 'the real driver owner, not a hard-coded host, controls the post'
     assert body.index('StockDriving(v,f,*p)') < body.index('Write(v,f,*p,c0,c1);')
+    move_to = code.split('void MoveTo(', 1)[1].split('\n}\n', 1)[0]
+    assert 'GroundNavigate(soldier->navigation,pos,to,stop,ms,waypoint)!=npc::navigation::Result::moving' in move_to
+    assert move_to.index('{Stand(h);return;}') < move_to.index('Move(h,dir,'), 'blocked/pending routes wait instead of walking through walls'
     # Every family (2026-10-07): the mechs' turn-on-spot constant, the Barga by its stock walk, and the plugin's own
     # last write never read as the stock AI driving, taken back when the drive ends.
     assert 'f==Family::mech ? kMechTurnOnSpot : kTurnOnSpot' in body and '(image+kBargaWalk)(v,block,point,1.0f,' in body
@@ -4541,11 +4600,17 @@ def npc_ai_wired() -> None:
     assert 'mapcmd::Decide(g.sel.n,p,allowed,point,pointOk,NpcMarked())' in mapc
     for key, default in (('NpcMarkKey', '81'), ('NpcMarkCone', '8')):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
-    # Boarding (§7): never seat 0; one strong reference taken before RideVehicle (it lets one go at 0x57690D); only a
-    # seated soldier kicked off; the gunners only on a vehicle whose slot 70 is the stock seat fire, before its input.
+    # Boarding (§7): real soldiers may drive seat 0 only through the verified native driver path; one strong reference
+    # is taken before RideVehicle (callee-consumed). Existing riders/reservations and ownership stay protected.
     board = code.split('bool BoardSquad(unsigned char* top,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'for(unsigned k=1;' in board, 'seat 0 stays the NPC driver\'s'
+    assert 'AssignBoard(v,m[i],ms)' in board, 'squad boarding uses the shared real-seat allocator'
+    assign = code.split('bool AssignBoard(', 1)[1].split('\n}\n', 1)[0]
+    assert 'for(unsigned k=0;' in assign and 'Reserved(v,k,ms)' in assign and '!SeatTakes(v,k,h)' in assign
+    assert '!IsOnlineAuthority(h)' in assign and '!OnlineMaySeatNpc(v)' in assign
+    takes_seat = code.split('bool SeatTakes(', 1)[1].split('\n}\n', 1)[0]
+    assert 'SeatRider(seat)!=Rider::none' in takes_seat and '(i==0 && !RealDriverNativeReady())' in takes_seat
     ride = code.split('bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert ride.index('s.boardSeat==0 && !PrepareNpcVehicle(v,false)') < ride.index('(image+kRideVehicle)(h,&ref,s.boardSeat)')
     assert ride.index('_InterlockedIncrement(') < ride.index('(image+kRideVehicle)(h,&ref,s.boardSeat)')
     off = code.split('bool DismountSquad(unsigned char* top) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'At<const void*>(seat,kSeatRider)!=m[i]' in off and 'kSeatKick' in off

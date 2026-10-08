@@ -52,7 +52,7 @@ struct Config {
     bool contact=true;         // burst the moment a round sticks to something or stops
     float burstVisual=2.5f;    // burst effect size as a multiple of the stock one (AmmoExplosion/5)
     // Tank gunners (gunner.cpp): the side guns of the Titan and the Ranger's gunner-seat tanks
-    bool gunnerAi=true;        // an empty gunner seat aims and fires its gun by itself
+    bool gunnerAi=true;        // a real living NPC gunner aims and fires its own weapon
     bool gunnerAssist=true;    // a player in a gunner seat gets the auto-aim (keeps the trigger)
     float gunnerRange=300.0f;  // metres; never farther than the gun's own range
     float gunnerCone=0.02f;    // rad; the AI fires once the barrel is this close to the aim (or the target's size)

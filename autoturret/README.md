@@ -13,9 +13,9 @@ It has two parts:
   round's ballistic arc and drives the turret with feed-forward so rounds stop trailing crossing
   targets. Flak rounds get a time fuse at the target's range, a proximity fuse and a contact fuse.
   Hold the aim stick to aim by hand; let go and the turret takes over again.
-  It also crews the **side guns of the Titan and of the Ranger's gunner-seat tanks**: an empty
-  gunner seat (or one an NPC sits in) aims and fires its gun by itself, on player- and NPC-driven
-  tanks alike; a player in a gunner seat gets the auto-aim and keeps the trigger. This part needs
+  It also assists the **side guns of the Titan and of the Ranger's gunner-seat tanks**: a living
+  NPC soldier in the actual gunner seat aims and fires on its own machine. Empty seats and dummy
+  riders never fire; a player in a gunner seat gets optional auto-aim and keeps the trigger. This part needs
   no weapon files and works on the stock vehicles.
 - **Weapon data** overriding the stock vehicles' own files. No weapon rows are added. The
   vehicles' descriptions in `WEAPONTEXT` are rewritten with the new numbers; only their own rows
@@ -32,8 +32,8 @@ It has two parts:
 | Keplers the missions place (NPC-crewed, and the boardable mission ones) | The modded KG6 Kepler: its flak guns (in place of the NPC Keplers' own 1-damage guns), durability x2 on top of the mission's own multiplier, the fast turret. |
 | KG6 Kepler YF-HV (DLC) | Auto-aim only; keeps its high-velocity solid shot, durability and turret. |
 | KG7 Bohr, Bohr B (DLC) | Auto-aim in ground mode: ground targets first, lobbed rounds aimed on their arc, stock impact fuse. Durability x2, blast 4 m -> 6 m, and the blasts now wreck buildings. |
-| Titan (all, incl. DLC side cannons) | Plugin only: both side cannons aim themselves; with no player in a gunner seat they also fire, as the driver's (player or NPC). Main cannon untouched. |
-| NPC Titan (e.g. mission 64) | Data: the stock NPC Titan has empty side-cannon mounts; `build.py` gives it the player Titan's two side cannons, which the plugin then aims and fires. |
+| Titan (all, incl. DLC side cannons) | Plugin only: living NPC gunners aim and fire their own side cannons; human gunners keep their trigger. Empty/dummy seats stay idle. Main cannon untouched. |
+| NPC Titan (e.g. mission 64) | Data: the stock NPC Titan has empty side-cannon mounts; `build.py` gives it the player Titan's two side cannons, which the plugin aims and fires only while real NPC gunners occupy them. |
 | Tanks and bikes the missions place (NPC Titan, Epsilon, Blacker, Varius, Naegling; boardable Titan, Blacker, Freed bikes) | Data: the stock mission files zero the body recoil (the hull pushed back and rocked on a shot) the player's calls have; `build.py` gives every gun mount the recoil of the same gun in the player's call (`tools/npc_recoil.py`, `docs/recoil-re.md`). |
 | Ranger tanks with gunner seats (Vehicle403) | Plugin only: both side machine guns, as above. Single-seat tanks (Air Raider's, Vehicle601) have no side guns. |
 | Katyusha rocket truck (EDF6VehicleCrew's vehicle, `tools/make_katyusha.py`) | Plugin only, **NPC crews only**: its launcher carries the lofted mark (7303): ground targets first, on the **high arc** (the root above 45 deg); the low one only when the high one is past the launcher's 80 deg elevation stop (a target too close). A Katyusha the player rides is left alone (`PlayerLofted`): the camera follows the seat's aim axes, so steering them turned the player's view to the sky; the player aims with the camera and EDF6VehicleCrew lifts only the launcher's bone onto the arc (`src/katyusha.cpp`). |
@@ -138,13 +138,11 @@ turns itself off if the game has changed (the weapon data keeps working without 
 built by `build.py` before 0.3.0 still works with this plugin, which then patches the game's
 fire check as the old one did; rerun `build.py install` to replace it.
 
-The tank gunners were tested on the Titan (NPC driver, both gunner seats empty): both side
-cannons fired at ants, 40 -> 28 rounds. The Ranger tanks' side guns have not been tested against
-live enemies yet; send a `Debug=1` log if a side gun misbehaves. The stock game leaves an empty
-gunner seat's gun silent because the gun asks the vehicle who operates it and an empty seat answers
-no one; the plugin answers with the driver (see the re-notes). The input hooks chain onto whatever
-another plugin (e.g. EDF6VehicleCrew) put in the same slot, so load order does not matter. In co-op, a remote
-player in a gunner seat may look like an empty seat to your machine, so set `GunnerAI=0` online.
+Tank side guns require living real occupants. DummyVehicleRider is not a soldier, and the native
+operator lookup no longer borrows a driver from another seat. Remote NPC/player copies are not
+steered or fired locally; human aim assistance remains optional through `GunnerAssist`. This
+change passed production-code offline regressions, but has not been retested in live gameplay
+or on two machines. Input hooks still chain with other plugins on the same slot.
 
 Online play is untested. The mod adds no weapon rows, so players without it never meet a row they
 do not have; but each machine simulates the vehicles from its own files, so in a mixed lobby the

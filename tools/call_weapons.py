@@ -376,7 +376,9 @@ def throw_sgo(template: bytes, call: Call) -> bytes:
 # it hits, src/boarding.cpp); no spread, no recoil; 999 rounds a magazine, reloaded
 # in a frame, 10 shots a second (the stock bolt waits 90 frames).
 GUN_CURVES = {'AmmoSpeed': 750.0, 'FireAccuracy': 0.0, 'AmmoCount': 999.0, 'ReloadTime': 1.0, 'FireInterval': 6.0}
-GUN_SCALARS = {'AmmoAlive': 2.0, 'FireRecoil': 0.0}
+GUN_SCALARS = {'AmmoAlive': 2.0, 'FireRecoil': 0.0, 'AmmoExplosion': 0.0,
+               'AmmoGravityFactor': 0.0, 'AmmoIsPenetration': 0.0, 'AmmoOwnerMove': 0.0,
+               'FireCount': 1.0, 'FireBurstCount': 1.0}
 FPS = 60.0   # the menu shows m/frame as m/s, frames as seconds
 
 
@@ -404,8 +406,20 @@ def gun_sgo(template: bytes, call: Call) -> bytes:
     doc = dsgo.parse(template)
     r = doc.root
     r.set(GUN_TAG, gun_tag(r.get(GUN_TAG), call.mark))
+    # Each class retains its model/animation, weapon class and sight. Use a direct-hit solid
+    # round: the Wing Diver lightning and Raider limpet have different collision/damage paths.
+    r.set('AmmoClass', 'SolidBullet01')
+    r.set('AmmoModel', 0.0)
+    r.set('Ammo_CustomParameter', Node([]))
+    if call.gun == 'eWeapon120':
+        r.set('SecondaryFire_Type', 1.0)
+        r.set('SecondaryFire_Parameter', 5.5)
     for key, base in GUN_CURVES.items():
-        r.get(key).items[0] = float(base)
+        field = r.get(key)
+        if isinstance(field, Node):
+            field.items[0] = float(base)
+        else:
+            r.set(key, float(base))
     for key, value in GUN_SCALARS.items():
         r.set(key, float(value))
     for lang in LANGS:
@@ -456,9 +470,17 @@ def gun_stats(template: bytes) -> list[tuple[float, list, float]]:
     r = dsgo.parse(template).root
     out = []
     for key, base in GUN_CURVES.items():
-        curve = [float(x) for x in r.get(key).items]
+        value = r.get(key)
+        if not isinstance(value, Node):
+            continue
+        curve = [float(x) for x in value.items]
         for f in (1.0, FPS, 1.0 / FPS):
             out.append((curve[0] * f, curve[1:-1], float(base) * f))
+    for key, base in GUN_SCALARS.items():
+        value = r.get(key)
+        if isinstance(value, Node):
+            curve = [float(x) for x in value.items]
+            out.append((curve[0], curve[1:-1], float(base)))
     speed = [float(x) for x in r.get('AmmoSpeed').items]
     out.append((speed[0] * float(r.get('AmmoAlive')), speed[1:-1], GUN_CURVES['AmmoSpeed'] * GUN_SCALARS['AmmoAlive']))
     return out

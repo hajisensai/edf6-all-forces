@@ -80,50 +80,17 @@ inline Rig High(float height,float back,float pitchDeg) noexcept {
 
 constexpr float kPitchMost=80.0f*kPi/180.0f,kViewMost=85.0f*kPi/180.0f;
 
-// The high view's aim (README 高视角; the user, 2026-10-06): a point on the ground the mouse moves, not a pitch. As a
-// pitch it went wrong two ways: toggling swung the screen's centre (and the turret after it) 28 deg onto another point,
-// and a far shot looked along the ground from 45 m (600 m: -3.7 deg), where a frame of stick moved the point hundreds of
-// metres and a little more lost it over the horizon. So the high view holds `yaw` (the bearing from the hull's origin,
-// the view's heading) and `range` (m, level from the origin), the point `dy` m over the origin's height (the ground
-// point's own when taken: a hill keeps its height). The stick turns the bearing as it turns any view and moves the range
-// by a share of it (HighTurn: about 10 m a frame of full stick at 600 m), between kHighMinRange and kHighMaxRange:
-// the view can never look past the ground.
-constexpr float kHighMinRange=10.0f,kHighMaxRange=1500.0f;
-constexpr float kHighRangeStep=3.0f,kHighRangeShare=0.012f;   // m a frame of full stick: 3 m + 1.2 % of the range
-// The line of sight to the point never shallower than this: far off, the eye goes up (the view looks down onto the
-// point instead of along the ground).
-constexpr float kHighMinSight=25.0f*kPi/180.0f;
-struct HighAim { float yaw,range,dy; };
-
-// The high aim at world point `p` from the hull's origin (`yaw` kept when p is over the origin).
-inline HighAim HighAimAt(const float* origin,const float* p,float yaw) noexcept {
-    const float d[3]={p[0]-origin[0],0.0f,p[2]-origin[2]};
-    const float level=std::sqrt(d[0]*d[0]+d[2]*d[2]);
-    return HighAim{level>1e-3f ? YawOf(d) : yaw,vec::Clamp(level,kHighMinRange,kHighMaxRange),p[1]-origin[1]};
-}
-// The point itself.
-inline void HighPoint(const float* origin,const HighAim& a,float* p) noexcept {
-    float fwd[3],right[3];
-    Flat(a.yaw,fwd,right);
-    p[0]=origin[0]+fwd[0]*a.range;p[1]=origin[1]+a.dy;p[2]=origin[2]+fwd[2]*a.range;
-}
-// The camera: the eye `back` m behind the origin along the bearing and `height` m over it, raised so that its line to
-// the point is no shallower than kHighMinSight; it looks at the point (the screen's centre is on it).
-inline void HighPlace(const float* origin,const HighAim& a,float height,float back,float* eye,float* look) noexcept {
-    float fwd[3],right[3];
-    Flat(a.yaw,fwd,right);
-    HighPoint(origin,a,look);
-    const float level=a.range+back,least=a.dy+level*std::tan(kHighMinSight);
-    const float h=std::fmax(height,least);
-    eye[0]=origin[0]-fwd[0]*back;eye[1]=origin[1]+h;eye[2]=origin[2]-fwd[2]*back;
-}
-// The range a frame of input `in` (-1..1; positive lowers a view: brings the point nearer) moves it.
-inline float HighRangeStep(float range) noexcept { return kHighRangeStep+kHighRangeShare*range; }
-// A frame of stick: `yawIn` turns the bearing by `rate` as a view turns (positive: the heading falls), `rangeIn` moves the
-// point in (positive) or out.
-inline void HighTurn(HighAim& a,float yawIn,float rangeIn,float rate) noexcept {
-    a.yaw=Wrap(a.yaw-yawIn*rate);
-    a.range=vec::Clamp(a.range-rangeIn*HighRangeStep(a.range),kHighMinRange,kHighMaxRange);
+// Observe the actual projectile endpoint, keeping its exact position even at point-blank range, beyond the old
+// ground cursor's range limit, or above/below the hull. The eye orbits the endpoint, so distant shots do not lift the
+// camera hundreds of metres above the vehicle. Free look only orbits this point; it never commands the gun.
+inline void ImpactPlace(const float* origin,const float* point,float fallbackYaw,float height,float back,
+                        float orbitYaw,float orbitPitch,float* eye,float* look) noexcept {
+    const float delta[3]={point[0]-origin[0],0.0f,point[2]-origin[2]};
+    const float yaw=(vec::Dot(delta,delta)>1e-6f ? YawOf(delta) : fallbackYaw)+orbitYaw;
+    const float radius=std::fmax(1.0f,std::sqrt(height*height+back*back));
+    const float pitch=vec::Clamp(std::atan2(height,back)+orbitPitch,15.0f*kPi/180.0f,kViewMost);
+    float d[3];Dir(yaw,-pitch,d);
+    for(int i=0;i<3;++i){look[i]=point[i];eye[i]=point[i]-d[i]*radius;}
 }
 
 // The view (yaw, pitch) of rig `r` whose screen's centre goes through world point `p` (the high view handing back: the

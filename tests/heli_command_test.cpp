@@ -5,6 +5,8 @@
 #include <cstdlib>
 
 namespace crew {
+bool NpcDriver(const unsigned char* v) noexcept { return v && SeatCount(v)>0 && SeatRider(SeatAt(const_cast<unsigned char*>(v),0))==Rider::dummy; }
+
 unsigned char* image=nullptr;
 // Offline (online_authority.h): no session, every heli run here, the copies' owner unchanged.
 bool gunnerFixture=false,gunnerSession=false,gunnerReady=true;
@@ -18,6 +20,11 @@ const Config& Cfg() noexcept { return commandConfig; }
 ULONGLONG GameMs() noexcept { return 10000; }
 ULONGLONG GameFrame() noexcept { return 600; }
 void Log(const char*,...) noexcept {}
+const wchar_t* WeaponFile(const unsigned char*,std::size_t* length) noexcept {
+    constexpr wchar_t file[]=L"V_410HELI_GATLING01.SGO";
+    *length=sizeof(file)/sizeof(file[0])-1;
+    return L"V_410HELI_GATLING01.SGO";
+}
 bool CommandVehicleLive(const ObjRef& r) noexcept { return static_cast<bool>(r); }
 // Fail closed if this command-only scenario reaches any unavailable game service.
 void MissingDependency() noexcept { void(*volatile stop)()=std::abort;stop(); }
@@ -107,6 +114,14 @@ int main() {
     check(gunnerQueries==0,"online door gunners stay off if native aim bridge could not install");
     gunnerSession=false;CrewDoorGuns(vehicle);
     check(gunnerQueries==2,"offline door gunners do not require the network aim bridge");
+    remotePilot[edf::kHumanPlayer]=0;Put<std::uint16_t>(remotePilot,0x128,2);
+    h.ref=ObjRef::Of(vehicle);h.seenFrame=GameFrame();h.reap=true;h.top=37.0f;deleteOk=true;
+    HeliReap(nullptr);
+    check(h.ref.Is(vehicle) && h.reap && h.top==37.0f,
+          "withdrawal never deletes a helicopter under real NPCs or erases their flight state");
+    remotePilot[edf::kHumanPlayer]=1;Put<std::uint16_t>(remotePilot,0x128,1);
+    HeliReap(nullptr);
+    check(!h.ref,"player takeover releases called flight ownership without deleting aircraft");
     std::printf("heli_command_test: %d checks passed\n",checks);
     return 0;
 }

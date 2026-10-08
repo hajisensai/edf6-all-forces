@@ -95,11 +95,11 @@ def check_rvas(root: str, files: list[str]) -> None:
 
 def check_ride_ai(root: str, files: list[str]) -> None:
     for rel in files:
-        if '[kSlotRideAi]' in code_only(read(root, rel)) and rel != 'src/online_authority.cpp':
+        if '[kSlotRideAi]' in code_only(read(root, rel)) :
             fail(f'{rel}: calls the stock RideAi itself; seat NPC riders through SeatNpcRider (online_authority.h)')
     seat = body(code_only(read(root, 'src/online_authority.cpp')), 'bool SeatNpcRider(')
-    if not before(seat, 'OnlineMaySeatNpc(', '[kSlotRideAi]'):
-        fail('src/online_authority.cpp SeatNpcRider: RideAi is not behind OnlineMaySeatNpc')
+    if not before(seat, 'OnlineMaySeatNpc(', 'NpcRequestCrew('):
+        fail('src/online_authority.cpp SeatNpcRider: real crew recruitment is not behind OnlineMaySeatNpc')
     crew = body(code_only(read(root, 'src/crew.cpp')), 'void Crew(unsigned char* vehicle,int cls)')
     if not before(crew, 'OnlineMaySeatNpc(vehicle)', 'SeatNpcRider('):
         fail('src/crew.cpp Crew: AutoCrew seats a driver without asking OnlineMaySeatNpc first')
@@ -131,8 +131,16 @@ def check_damage(root: str) -> None:
         if 'NoteLocalCopy(v,' not in body(code_only(read(root, rel)), fn):
             fail(f'{rel} {fn}: a copy is made without its owner recorded (its damage would count on the host only)')
     radio = body(code_only(read(root, 'src/airstrike.cpp')), 'std::uintptr_t __fastcall RadioStartHook(')
-    if not before(radio, 'SetSpawnOwner(CopyOwnerOfCaller(owner))', 'LaunchCall('):
-        fail("src/airstrike.cpp RadioStartHook: the call's copies are not made as its caller's")
+    if 'if(!InSession() || IsPlayer(owner))SupportCallAt(' not in radio:
+        fail("src/airstrike.cpp RadioStartHook: a remote radio replay can submit a duplicate support request")
+    support = code_only(read(root, 'src/support_dispatch.cpp'))
+    dispatch = body(support, 'bool Spawn(')
+    if 'RegisterSupportObject(vehicle,unit.netId)' not in dispatch or 'HoldSupportSoldier(object,true)' not in dispatch or \
+            'NpcBoardCrew(' in dispatch or 'FollowSupportSoldier(' in dispatch:
+        fail('support spawn must register native IDs and hold new crew without emitting cross-channel boarding or follow work')
+    tick = body(support, 'void SupportDispatchTick(')
+    if not before(tick, 'SupportTransactionActive(deployed.id)', 'Assign(deployed)'):
+        fail('crew assignment must wait for all-peer spawn acknowledgment')
     for rel, call in (('src/vehicleram.cpp', 'ImpactDamage('), ('src/drill.cpp', 'DrillCharge('), ('src/emc.cpp', 'EmcFire(')):
         if call not in code_only(read(root, rel)):
             fail(f'{rel}: no longer deals its damage through {call} (ShellMake\'s gate): gate the new path too')
@@ -175,16 +183,17 @@ def check_frames(root: str) -> None:
 
 def check_calls(root: str) -> None:
     code = code_only(read(root, 'src/airstrike.cpp'))
-    launch = body(code, 'int LaunchCall(')
-    if 'player.' in launch or 'CallDirection(' not in launch:
-        fail("src/airstrike.cpp LaunchCall: its direction is not CallDirection's (online: the call's own heading)")
+    dispatch = code_only(read(root, 'src/support_dispatch.cpp'))
+    request = body(dispatch, 'bool SupportCallAt(')
+    if not before(request, 'else if(InSession())', 'SubmitSupportRequest(') or not before(request, 'SubmitSupportRequest(', 'else if(offlinePending)'):
+        fail('online support must go through the reliable host-planned deployment protocol')
+    spawn = body(dispatch, 'bool Spawn(')
+    if 'unit.matrix' not in spawn or 'PlanAirSupport(' in spawn or 'player.pos' in spawn:
+        fail('peers must apply explicit support matrices, never recalculate entry against their own player')
     call_of = body(code, 'const Call* CallOf(')
     remote = re.search(r'if\(InSession\(\) && edf::RemoteRider\(owner\)\) \{(.*?)\}', call_of, re.S)
     if not remote or 'callnet::Decode(' not in remote.group(1) or call_of.count('callnet::Decode(') != 1:
         fail('src/airstrike.cpp CallOf: a pick is decoded outside a call received from another machine')
-    direction = body(code, 'void CallDirection(')
-    if not before(direction, 'if(InSession())', 'player.'):
-        fail("src/airstrike.cpp CallDirection: offline the call no longer comes from behind as the player sees it")
     if 'Put<std::uint64_t>(weapon,kWeaponSeed,sent)' not in body(code, 'bool __fastcall SeedSendHook('):
         fail("src/airstrike.cpp SeedSendHook: the caller does not keep the seed it sent")
     if 'InstallPickSend()' not in body(code, 'bool InstallAirstrikes()'):

@@ -33,6 +33,7 @@
 // all of them at the mission's start (ResetJets), with nothing of the last mission's touched.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
+#include "online_authority.h"
 #include <intrin.h>
 
 namespace crew {
@@ -566,6 +567,7 @@ Rider Aboard(unsigned char* v) noexcept {
         const Rider s=SeatRider(SeatAt(v,i));
         if(AnyPlayerIn(SeatAt(v,i)))return Rider::player;   // a player of any machine: never deleted under them
         if(s==Rider::dummy)r=s;
+        else if(s==Rider::other)return s; // a real soldier aboard must never be deleted with the aircraft
     }
     return r;
 }
@@ -610,6 +612,7 @@ void JetReap(const void* self) noexcept {
 // orders are dropped (they work round the carrier again); a bomber whose run is not over flies it again. Mode: as it
 // was when withdrawing, bombing or going back to its carrier, else patrol (takeoff off the ground).
 void jet::ResumeNpc(unsigned char* v,const float* vel) noexcept {
+    if(!NpcDriver(v) || SeatRider(SeatAt(v,0))!=Rider::other || !OnlineRunsHere(v))return;
     const ULONGLONG ms=GameMs();
     Jet* const j=FindJet(v);
     if(!j)return;   // its first frame with its pilot makes the entry (CrewPlaced)

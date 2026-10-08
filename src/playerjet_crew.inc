@@ -61,7 +61,7 @@ bool GroundSight(float* out) noexcept {
 // The NPC at the gun under the player at the stick (see the file comment).
 void CrewGunner(const PJet& j,unsigned char* v,float dt,ULONGLONG ms) noexcept {
     if(!j.board || j.board->arm!=pjet::Arm::shells || j.phase!=Phase::air || SeatCount(v)<=kGunnerSeat ||
-       SeatRider(SeatAt(v,kGunnerSeat))!=Rider::dummy)return;
+       !AiGunner(v,SeatAt(v,kGunnerSeat)))return;
     jet::CrewShell(v,dt,ms);
 }
 
@@ -77,7 +77,7 @@ void GunnerLeft(bool alive,const char* how) noexcept {
         EjectStart(t,v,live);
         bail.catchWith=pjet::kCatchNone;
     }
-    if(live && SeatRider(SeatAt(v,0))==Rider::dummy && At<std::int32_t>(v,kTeam)!=jet::kTeamFriend)
+    if(live && NpcDriver(v) && At<std::int32_t>(v,kTeam)!=jet::kTeamFriend)
         SetObjectTeam(v,jet::kTeamFriend);
     Log("GUNNER v=%p the player left the gun: %s (%.0f m over the ground)%s",v,how,gunner.clear==kNoGround ? -1.0f : gunner.clear,
         high ? ": out under the parachute" : "");
@@ -91,18 +91,20 @@ void GunnerBoarded(unsigned char* v) noexcept {
     // Called down for them, or left parked by them: its NPC pilot takes it back (seated if the seat is empty) and flies
     // its call on from here (jet.cpp ResumeNpc: off the ground it takes off).
     if(PJet* j=Find(v);j && j->board && (j->hail.phase!=kHailNone || j->keep || j->autopilot))HandBack(*j,v,"the player took its gun");
-    Log("GUNNER v=%p the player at the gun, its pilot seat %s",v,SeatRider(SeatAt(v,0))==Rider::dummy ? "an NPC's" : "empty");
+    Log("GUNNER v=%p the player at the gun, its pilot seat %s",v,NpcDriver(v) ? "an NPC's" : "empty");
 }
 
-// The gunship never without a pilot under the player at its gun: an empty pilot seat gets the stock RideAi, once (a
-// failure is logged, not retried); its flight resumes from where it is.
+// An empty pilot seat requests a real soldier once. Flight resumes only after a real pilot actually boards.
 void EnsurePilot(unsigned char* v) noexcept {
-    if(SeatRider(SeatAt(v,0))!=Rider::none){gunner.pilotTried=false;return;}
+    if(SeatRider(SeatAt(v,0))!=Rider::none){
+        if(gunner.pilotTried && CrewedPilot(v))jet::ResumeNpc(v,gunner.vel);
+        gunner.pilotTried=false;return;
+    }
     if(gunner.pilotTried)return;
     gunner.pilotTried=true;
     SeatNpcRider(v,false);   // the plugin's aircraft: an unregistered copy, its own here (online_authority.h)
-    const bool seated=SeatRider(SeatAt(v,0))==Rider::dummy;
-    Log("GUNNER v=%p no one at the stick: %s",v,seated ? "an NPC pilot seated" : "the stock RideAi seated no one");
+    const bool seated=CrewedPilot(v);
+    Log("GUNNER v=%p no one at the stick: %s",v,seated ? "an NPC pilot seated" : "no real pilot aboard yet");
     if(seated)jet::ResumeNpc(v,gunner.vel);
 }
 

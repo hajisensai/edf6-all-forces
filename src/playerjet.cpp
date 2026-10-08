@@ -299,6 +299,11 @@ struct PJet {
 void Boarded(PJet& j,unsigned char* v,const float* pos,float clear) noexcept;
 void Left(PJet& j,unsigned char* v,float clear,bool alive,bool eject) noexcept;
 void HandBack(PJet& j,unsigned char* v,const char* why) noexcept;
+jet::Jet* CatchChoice(const float* pos) noexcept;
+bool CrewedPilot(const unsigned char* v) noexcept {
+    return v && SeatCount(v)>0 && SeatRider(SeatAt(const_cast<unsigned char*>(v),0))==Rider::other && NpcDriver(v) && OnlineRunsHere(v);
+}
+
 float RestOver(const unsigned char* v,const float* pos) noexcept;
 float FloorClear(const PJet& j,const unsigned char* v,const float* pos,float clear) noexcept;
 void Forget(const unsigned char* v) noexcept;
@@ -1228,16 +1233,11 @@ constexpr ULONGLONG kEjectWaitMs=2000,kChuteMostMs=180000;
 constexpr float kChuteLand=1.5f;
 constexpr ULONGLONG kChuteCutAfterMs=500;
 enum class Eject { none, pending, chute };
-// The catch (Cfg().playerJetCatch; the user: "don't wait till they land, catch them in the air"; 2026-10-05: "it
-// should fly in from outside"): kCatchAfterMs into the parachute, with the player kCatchClear over the ground, a jet
-// of the kind they left (its SGO, preloaded at the mission's start: PreloadPlayerJets), empty and on nobody's team at
-// the mission's level (LevelVehicle), is made kCatchFrom back along the old heading and flown in by the plugin
-// (AutoFly: the player jet's own flight model, steered by the mouse aim's law at a point kCatchBelow under the
-// player led by their drift, at least kCatchFloor over the ground); its last kCatchHoming m it makes straight for
-// that point. Within kCatchReach of the player the board button is pressed for them; boarded, it is theirs at the
-// speed it flew in. kCatchMostMs without them aboard, it is given up (it flies on, empty, and comes down).
+// The catch selects an already present friendly aircraft with a live real pilot and local authority.
+// It guides that aircraft to the native boarding door; without one the existing parachute continues.
+// Aircraft are never created in the air as a substitute for a missing pilot or rescue service.
 constexpr ULONGLONG kCatchAfterMs=4000,kCatchMostMs=45000;
-constexpr float kCatchClear=40.0f,kCatchBelow=2.0f,kCatchOver=40.0f,kCatchFrom=1500.0f,kCatchFloor=30.0f;
+constexpr float kCatchClear=40.0f,kCatchBelow=2.0f,kCatchOver=40.0f,kCatchFloor=30.0f;
 constexpr float kCatchHoming=250.0f;
 struct Bailout {
     Eject state; ULONGLONG at; float carry[2],vy;
@@ -1281,50 +1281,6 @@ constexpr unsigned kPreloadFn=0x7A3780,kCreateObjectFn=0x11945E0,kInitParamVt=0x
 constexpr std::size_t kPreloadMgrAt=0x20B29A8,kObjectMgrAt=0x20B2958;
 struct alignas(16) SpawnParam { const void* vtable; unsigned char rest[0x28]; };
 
-// The SGO's mission_setup applied with no AI aboard (the catch jet stays empty for the player): the first half of
-// RideAi(true) (0x633030): 0x62D6E0(vehicle, &setup) reads it, the vehicle's slot 46 applies it (the jet mark, its
-// weapons, the heli parameters), the setup's variant destroyed through its type's entry (*(image+0x1765220)[type]).
-// Without it the catch jet had mark 0: no kind, no autopilot, it fell like a stone (2026-10-05 13:34 / 13:52, "PJET
-// catch jet ... frame: no kind (mark 0, body 0)").
-constexpr unsigned kReadSetup=0x62D6E0,kSetupDtors=0x1765220;
-constexpr std::size_t kSlotApplySetup=46,kSetupType=0x10;
-const unsigned char kReadSetupSig[]={0x48,0x89,0x5C,0x24,0x18,0x56,0x57,0x41,0x56,0x48,0x83,0xEC,0x40,0x48,0x8B,0xDA};
-void MissionSetup(unsigned char* v) noexcept {
-    __try {
-        if(!Matches(kReadSetup,kReadSetupSig,sizeof(kReadSetupSig))){Log("PJET catch: mission setup profile mismatch");return;}
-        alignas(16) unsigned char setup[0x40]{};
-        alignas(16) unsigned char scratch[0x40]{};
-        reinterpret_cast<void(__fastcall*)(void*,void*)>(image+kReadSetup)(v,setup);
-        reinterpret_cast<void(__fastcall* const*)(void*,void*)>(At<void* const*>(v,0))[kSlotApplySetup](v,setup);
-        const std::uint16_t type=At<std::uint16_t>(setup,kSetupType);
-        if(type!=0xFFFF)reinterpret_cast<void(__fastcall* const*)(void*,void*)>(image+kSetupDtors)[type](setup,scratch);
-        Log("PJET catch: mission setup applied (mark %.0f)",BodyMark(v));
-    } __except(EXCEPTION_EXECUTE_HANDLER){Log("PJET catch: the game faulted applying the mission setup");}
-}
-
-// The catch's jet `which` (pjet::kCatchFiles) at `m`, empty, on nobody's team; nullptr (said why) when it cannot be made.
-unsigned char* SpawnCatchJet(int which,const float* m) noexcept {
-    if(which<0 || which>=pjet::kCatchFileCount){Log("PJET catch: no catch jet for what they left");return nullptr;}
-    const pjet::CatchFile& f=pjet::kCatchFiles[which];
-    if(!playerJetPreloaded[which] || !jet::SpawnReady() || !At<void*>(image,kObjectMgrAt)) {
-        Log("PJET catch: %ls (%s) not preloaded this mission%s",f.file,f.name,
-            f.player || (Cfg().playerJetAll && Cfg().playerJetCatch) ? " (not installed?)" : " (PlayerJetAll / PlayerJetCatch were off at its start)");
-        return nullptr;
-    }
-    SpawnParam param{image+kInitParamVt,{}};
-    unsigned char* v=nullptr;
-    __try {
-        v=reinterpret_cast<unsigned char*(*)(void*,const float*,const wchar_t*,SpawnParam*)>(image+kCreateObjectFn)(
-            At<void*>(image,kObjectMgrAt),m,f.sgo,&param);
-    } __except(EXCEPTION_EXECUTE_HANDLER){playerJetPreloaded[which]=false;Log("PJET catch: the game faulted building %ls: off",f.file);return nullptr;}
-    if(!v)return nullptr;
-    FixBodyPart506(v,"PJET");
-    MissionSetup(v);
-    SetObjectTeam(v,kTeamVehicle);
-    LevelVehicle(v);
-    return v;
-}
-
 void Catch(unsigned char* h,ULONGLONG ms) noexcept {
     const float* p=reinterpret_cast<const float*>(h+kPosition);
     const float* hv=reinterpret_cast<const float*>(h+kHumanVel);
@@ -1336,36 +1292,27 @@ void Catch(unsigned char* h,ULONGLONG ms) noexcept {
             Log("PJET catch: too low (%.0f m), the parachute goes on",clear);
             return;
         }
-        float f[3]={bail.heading[0],0.0f,bail.heading[2]};
+        // The rescue aircraft must already exist with a real pilot. No empty catch airframe is
+        // materialized behind the player, and the abandoned pilot seat is never an AI controller.
+        jet::Jet* const rescue=CatchChoice(p);
+        bail.catchWith=pjet::kCatchNone;
+        if(!rescue){Log("PJET catch: no existing crewed aircraft available; parachute continues");return;}
+        unsigned char* const v=rescue->Vehicle();
+        float f[3]={rescue->m.vel[0],0.0f,rescue->m.vel[2]};
+        if(!Normalize(f)){const auto* basis=reinterpret_cast<const float*>(v+kMatrix);f[0]=basis[8];f[2]=basis[10];}
         if(!Normalize(f)){f[0]=0.0f;f[2]=1.0f;}
-        float at[3]={p[0]-f[0]*kCatchFrom,p[1],p[2]-f[2]*kCatchFrom};
-        const float under=GroundClearance(at);
-        if(under!=kNoGround && under<kCatchFloor*2.0f)at[1]+=kCatchFloor*2.0f-under;
-        alignas(16) const float m[16]={f[2],0,-f[0],0, 0,1,0,0, f[0],0,f[2],0, at[0],at[1],at[2],1};
-        const int which=bail.catchWith;
-        bail.catchWith=pjet::kCatchNone;   // one try: a jet made, or none could be (said why)
-        unsigned char* const v=SpawnCatchJet(which,m);
-        if(!v)return;
-        Log("PJET catch: making %ls (%s) for the %s they left: %s",pjet::kCatchFiles[which].file,pjet::kCatchFiles[which].name,
-            bail.left ? bail.left : "jet",bail.catchWhy ? bail.catchWhy : "");
         const Kind* const k=KindOf(v);
-        const float speed=std::fmax(bail.speed,(k ? k->rotate : 75.0f)+kCatchOver);
+        const float speed=std::fmax(Len(rescue->m.vel),(k ? k->rotate : 75.0f)+kCatchOver);
         catchFlight=CatchFlight{v,{p[0],p[1]-kCatchBelow,p[2]},speed,{hv[0],hv[1],hv[2]},{f[0],0.0f,f[2]}};
-        catchReachAt=0;
-        bail.caught=ObjRef::Of(v);bail.caughtAt=ms;
-        Log("PJET catch: v=%p made %.0f m out at (%.0f,%.0f,%.0f), flying in at %.0f m/s to the player at (%.0f,%.0f,%.0f)",v,kCatchFrom,
-            at[0],at[1],at[2],speed,p[0],p[1],p[2]);
+        catchReachAt=0;bail.caught=ObjRef::Of(v);bail.caughtAt=ms;
+        Log("PJET catch: existing crewed aircraft %p sent to the parachuting player",v);
         return;
     }
     unsigned char* const v=const_cast<unsigned char*>(static_cast<const unsigned char*>(bail.caught.obj));
-    if(!bail.caught.Is(v) || v[kDead]) {
-        if(bail.self && bail.catchWith!=pjet::kCatchNone) {   // the jet they left, lost on its way back: one is made (above)
-            Log("PJET catch: the %s coming back for them is gone: another jet is made",bail.left ? bail.left : "jet");
-            Forget(v);   // its wreck the game's: not held for the player (jet.cpp JetFrame takes it again)
-            bail.caught=ObjRef{};bail.self=false;catchFlight=CatchFlight{};
-            return;
-        }
-        Log("PJET catch: the jet is gone");Forget(v);BailEnd("the catch jet is gone");return;
+    if(!bail.caught.Is(v) || v[kDead] || !CrewedPilot(v)) {
+        Log("PJET catch: aircraft or real pilot unavailable; parachute continues");
+        Forget(v);bail.caught=ObjRef{};bail.self=false;catchFlight=CatchFlight{};
+        return;
     }
     if(ms-bail.caughtAt>kCatchMostMs) {
         Log("PJET catch: given up, the player not aboard in %.0f s",static_cast<float>(kCatchMostMs)*0.001f);
@@ -1646,6 +1593,7 @@ float Measure(PJet& j,const float* pos,ULONGLONG ms) noexcept {
 // or one whose seat cannot be read) it is the flight all the way, its terrain, stall and crash with it: never a frame
 // without one, its velocity left as it was.
 void AutoFly(PJet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) noexcept {
+    if(!CrewedPilot(v)){j.autopilot=false;j.active=false;return;}
     if(!j.autopilot) {
         j.autopilot=true;j.driven=false;j.phase=Phase::air;j.hasUp=false;
         const float* m=reinterpret_cast<const float*>(v+kMatrix);
@@ -1697,7 +1645,7 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
     const bool wet=j.wetFrame && j.wetFrame+1>=GameFrame();   // a water message this frame or the last
     const bool driven=SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::player;
     if(!driven && catchFlight.v==v && !v[kDead]){AutoFly(j,v,pos,dt,ms);return;}
-    if(!driven && j.hail.phase!=kHailNone && !v[kDead]){HailFly(j,v,pos,dt,ms);return;}   // called down for the player
+    if(!driven && j.hail.phase!=kHailNone && !v[kDead] && CrewedPilot(v)){HailFly(j,v,pos,dt,ms);return;}   // called down for the player
     if(!driven) {
         if(j.autopilot){j.autopilot=false;j.active=false;if(j.board)HandBack(j,v,"the catch is over");}
         if(j.driven && AboardElsewhere(v,0))Moved(j,v);
@@ -1907,6 +1855,11 @@ bool PlayerJetHailHint(const float* from,float* at,float* distance,bool* coming)
         std::memcpy(at,e->Vehicle()+kPosition,12);*distance=d;*coming=false;
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+bool PlayerJetBoardingSupported(const void* vehicle) noexcept {
+    __try { return BoardingSupported(static_cast<const unsigned char*>(vehicle)); }
+    __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
 bool PlayerJetBoardable(const void* vehicle) noexcept {

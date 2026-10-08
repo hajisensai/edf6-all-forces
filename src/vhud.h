@@ -48,8 +48,9 @@ bool KnownVehicle(const void* vehicle) noexcept;
 // (seat+0xC8, the order the HUD lists them in), -1 for none. Not called for a few frames: no selection is shown.
 void SetStockSelectedStore(const void* vehicle,unsigned seat,int store) noexcept;
 
-constexpr int kStockArms=6,kStockThreats=6;
+constexpr int kStockArms=8,kStockThreats=6;
 struct StockArm {
+    wchar_t name[32];            // installed weapon name, not just its projectile category
     char label[12];
     std::int32_t ammo,ammoMax;   // rounds left and the magazine (AmmoCount)
     float reload;                // 0..1 share reloaded while it reloads (ammo 0); 1 not reloading
@@ -77,7 +78,8 @@ struct StockHudReadout {
     float zoom;                  // the sight's magnification (sightzoom.cpp SightZoomNow: 1 none)
     int stab;                    // the seat's gun stabilizer (stab.cpp StabState): 1 holding, 2 outrun by the hull, 0 none
     FuelReading fuel;            // its fuel tank (a bike's; a heli's is HeliStrip's, PlayerHeliReadout), not among the arms
-    int arms,selected;           // selected: SetStockSelectedStore's (-1 none)
+    int arms,selected;           // selected: secondary payload/list selection (-1 none)
+    int sight=-1;               // independently selected actual primary/secondary fire-control weapon
     StockArm arm[kStockArms];
     int threats;                 // 2 a missile homing on it, 1 a jet's lock (missile.cpp, jet.cpp: as the jets' threat ring)
     float threatAt[kStockThreats][3];

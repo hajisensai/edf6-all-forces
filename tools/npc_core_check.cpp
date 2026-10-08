@@ -18,8 +18,15 @@ DWORD Process(HWND,LPDWORD pid) noexcept { *pid=GetCurrentProcessId();return 1; 
 #include <initializer_list>
 
 namespace crew {
+bool InstallRealDriverNative(NpcSeatInputOwnedFn) noexcept { return true; }
+bool RealDriverNativeReady() noexcept { return true; }
+bool PrepareNpcVehicle(unsigned char*,bool) noexcept { return true; }
+bool AnnounceNpcBoarding(unsigned char*) noexcept { return true; }
+bool AnnounceNpcDismount(unsigned char*) noexcept { return true; }
 unsigned char* image=nullptr;
 PlayerFix player{};
+const void* heldSupportActor=nullptr;
+bool SupportSoldierHeld(const void* h) noexcept {return h && h==heldSupportActor;}
 namespace {
 Config config{};
 ULONGLONG now=1000,frame=1;
@@ -89,7 +96,7 @@ const void* FollowedBy(const void* self) { const void* to=none;for(int i=0;i<fol
 void __fastcall RideRec(void*,SharedRef* ref,int) { --*reinterpret_cast<int*>(static_cast<unsigned char*>(ref->ctrl)+8);++rides; }
 void Jump(unsigned rva,const void* to) { auto p=image+rva;p[0]=0x48;p[1]=0xB8;std::memcpy(p+2,&to,8);p[10]=0xFF;p[11]=0xE0; }
 void Reset() {
-    ResetNpcAi();config=Config{};now=1000;frame=1;sessionOn=false;host=true;door=true;wall=false;follows=rides=0;
+    heldSupportActor=nullptr;ResetNpcAi();config=Config{};now=1000;frame=1;sessionOn=false;host=true;door=true;wall=false;follows=rides=0;
     std::memset(human,0,sizeof(human));std::memset(dead,0,sizeof(dead));std::memset(other,0,sizeof(other));
     std::memset(vehicle,0,sizeof(vehicle));std::memset(seats,0,sizeof(seats));std::memset(ctrl,0,sizeof(ctrl));
     for(auto p : {human,dead,other}) { Put<void*>(p,0,image+kSoldiers[0].vtable);Put<int>(p,kTeam,kTeamFriend); }
@@ -132,16 +139,35 @@ bool SeatPoint(const unsigned char*,unsigned,float* at,float* reach) noexcept {
 bool VisitEnemiesOf(std::int32_t,EnemyVisitor visit,void* ctx) noexcept {
     if(markEnemy){const float at[3]={0,0,20};visit(ctx,markEnemy,at);}return true;
 }
+#ifdef SUPPORT_INFANTRY_NATIVE_TEST
+float MapFloorRay(const float* a,const float* b,float* at) noexcept {
+    if(a[1]<0 || b[1]>0)return -1;
+    at[0]=a[0];at[1]=0;at[2]=a[2];return a[1];
+}
+#else
 float MapFloorRay(const float*,const float*,float* at) noexcept { at[0]=at[1]=0;at[2]=30;return rayOn ? 30.0f : -1.0f; }
+#endif
+Sea SeaAt(float,float,float*) noexcept { return Sea::land; }
 int MapCommandGuardAt(const float*) noexcept { ++pointOrders;return 1; }
 // The lock registry's valid lock points whatever their lockable flag (the marked enemy out of sight): `lockAt` for `lockOf`.
 const void* lockOf=nullptr;float lockAt[3]{};
 bool VisitLockPoints(EnemyVisitor visit,void* ctx) noexcept { if(lockOf)visit(ctx,lockOf,lockAt);return true; }
+unsigned char* chosenGunnerWeapon=nullptr;
+bool suppressGunnerChoice=false;
+PayloadFire chosenGunnerFire=PayloadFire::primary;
+unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float,bool,PayloadFire* fire) noexcept {
+    if(fire)*fire=chosenGunnerFire;
+    if(suppressGunnerChoice)return nullptr;
+    if(chosenGunnerWeapon)return chosenGunnerWeapon;
+    const auto list=At<unsigned char**>(SeatAt(v,seat),kSeatWeapons);
+    return list && At<std::uint64_t>(SeatAt(v,seat),kSeatWeaponCount) ? At<unsigned char*>(list[0],kHolderWeapon) : nullptr;
+}
 bool VisitEnemies(const unsigned char*,EnemyVisitor visit,void* ctx) noexcept {
     if(gunnerEnemy){const float aim[3]={0,0,20};visit(ctx,gunnerEnemy,aim);}
     return true;
 }
 }
+#ifndef SUPPORT_INFANTRY_NATIVE_TEST
 int main() {
     using namespace crew;
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2200000,MEM_RESERVE|MEM_COMMIT,PAGE_EXECUTE_READWRITE));
@@ -463,3 +489,4 @@ int main() {
     }
     VirtualFree(image,0,MEM_RELEASE);return failures ? 1 : 0;
 }
+#endif

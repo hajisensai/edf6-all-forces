@@ -3,6 +3,14 @@
 #include <cstdlib>
 
 namespace crew {
+void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept {if(out && capacity)out[0]=0;}
+int SupportCallCount() noexcept { return 3; }
+const wchar_t* SupportCallName(int) noexcept { return L"Support"; }
+int supportCalls=0,supportChosen=-1;float supportTarget[3]{};
+bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept {
+    ++supportCalls;supportChosen=index;std::memcpy(supportTarget,target,12);
+    _snwprintf_s(note,capacity,_TRUNCATE,L"support received");return true;
+}
 unsigned char* image=nullptr;
 void Log(const char*,...) noexcept {}
 bool InSession() noexcept { return false; }

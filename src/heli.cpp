@@ -45,6 +45,7 @@
 #include "roundaim.h"
 #include "edf/weapon.h"
 #include "warn.h"
+#include "retired_loadout.h"
 #include <cmath>
 
 namespace crew {
@@ -699,7 +700,12 @@ void __fastcall MedicShotHook(unsigned char* weapon,unsigned muzzle,void* overri
     // RideAi 0x6330C9 and later script setup 0x632DA0 clear +8B6 even on healing guns. Both the blast filter
     // and HP handler need its GDI bit 0x20. The common local/replay shot entry repairs it before parameter copying.
     // Weapon semantics are independent of AI/aim settings and network ownership; positive guns stay untouched.
-    __try { RestoreMedicPermission(weapon); }
+    __try {
+        // Old requests can survive a DLL-only upgrade. Reject the retired plugin
+        // weapon before either local or replay fire sets native recoil +BD4.
+        if(RetiredLoadout(weapon)){ReportRetiredLoadout();return;}
+        RestoreMedicPermission(weapon);
+    }
     __except(EXCEPTION_EXECUTE_HANDLER) {}
     medicShotNext(weapon,muzzle,overrideParam,counter,replay);
 }
@@ -2243,11 +2249,15 @@ void Tune(Heli& h,const unsigned char* v) noexcept {
     h.params[0]=k;h.params[1]=b;h.params[2]=yaw;h.params[3]=smooth;
     std::memcpy(h.stock,h.params,sizeof(h.stock));
     const float frames=Cfg().heliAgility*60.0f,stockTop=b*k/denom;
+    h.top=stockTop;h.stopDecel=kStopShare*stockTop*denom*60.0f;
     if(Cfg().heliSpeed>stockTop && frames>=30.0f) {
-        const float blend=1.0f-(1.0f-1.0f/frames)/d;   // 1-d*(1-blend) = 1/frames
+        // A strongly damped heli (Heron: d=.99) cannot coast for HeliAgility=4 s with a positive
+        // blend. Keep its quicker stock response instead of abandoning the requested speed.
+        const float useFrames=std::fmin(frames,1.0f/denom);
+        const float blend=1.0f-(1.0f-1.0f/useFrames)/d;   // 1-d*(1-blend) = 1/useFrames
         if(blend>0.0f && blend<1.0f) {
-            h.params[1]=blend;h.params[0]=Cfg().heliSpeed/(frames*blend);
-            h.top=Cfg().heliSpeed;h.stopDecel=kStopShare*h.top/Cfg().heliAgility;h.tuned=true;
+            h.params[1]=blend;h.params[0]=Cfg().heliSpeed/(useFrames*blend);
+            h.top=Cfg().heliSpeed;h.stopDecel=kStopShare*h.top*60.0f/useFrames;h.tuned=true;
         }
     }
     const float yawWant=Cfg().heliYawRate*kPi/180.0f;
@@ -2674,7 +2684,7 @@ Heli* ReplicaOf(unsigned char* v,ULONGLONG ms) noexcept {
 // authority's): no player of any machine at its stick.
 bool Replica(unsigned char* v) noexcept {
     const Rider r=SeatRider(SeatAt(v,0));
-    return (r==Rider::none || r==Rider::dummy) && !OnlineRunsHere(v);
+    return (r==Rider::none || NpcDriver(v)) && !OnlineRunsHere(v);
 }
 
 // Its replica record's params back, the record dropped: it is run here again (or by a player).
@@ -2709,7 +2719,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     const bool stockHeli=!IsJet(vehicle) && !IsSub(vehicle) && !IsPlayerJet(vehicle) && !IsSazabi(vehicle) && TypeOf(vehicle);
     // NPC gunners have their own firing authority. A remote player pilot must not suppress host/local NPC door
     // gunners; the native weapon messages replicate their shots. NPC pilots already call DoorGun through Fly.
-    if(stockHeli && SeatCount(vehicle)>0 && SeatRider(SeatAt(vehicle,0))!=Rider::dummy)CrewDoorGuns(vehicle);
+    if(stockHeli && SeatCount(vehicle)>0 && !NpcDriver(vehicle))CrewDoorGuns(vehicle);
     // Online, a stock heli another machine runs is flown there: here it flies on the stick it sends (Replay).
     if(stockHeli && SeatCount(vehicle)>0 && Replica(vehicle)) {
         if(Heli* h=Find(vehicle))Restore(*h,vehicle);
@@ -2718,7 +2728,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
         return;
     }
     ReplicaOff(vehicle);
-    if(SeatCount(vehicle)==0 || SeatRider(SeatAt(vehicle,0))!=Rider::dummy) {   // only NPC pilots
+    if(!NpcDriver(vehicle)) {   // only NPC pilots
         if(Heli* h=Find(vehicle))Restore(*h,vehicle);
         if(stockHeli && SeatCount(vehicle)>0 && SeatRider(SeatAt(vehicle,0))==Rider::player) {
             PlayerAssist(vehicle);PlayerHeli(vehicle);
@@ -2835,13 +2845,18 @@ void HeliReap(const void* self) noexcept {
             auto v=static_cast<unsigned char*>(const_cast<void*>(h.ref.obj));
             const ObjRef ref=h.ref;
             const bool flown=GameFrame()-h.seenFrame<=kAliveFrames;
-            h=Heli{};
             // Only the same object, alive: flown just now (its input ran: it was there), and still the object
             // it was then. One shot down, taken over or gone meanwhile is the game's to clean up.
-            if(!flown || !Readable(v,kSeats+8) || v[kDead] || (v[kObjFlags]&kObjDeleted) || !ref.Is(v) || !IsHelicopter(v))continue;
-            bool aboard=false;
-            for(unsigned i=0;i<SeatCount(v);++i)aboard=aboard || SeatRider(SeatAt(v,i))==Rider::player;
-            if(aboard)continue;   // the player took it: theirs now (the entry is gone, it flies as any NPC heli)
+            if(!flown || !Readable(v,kSeats+8) || v[kDead] || (v[kObjFlags]&kObjDeleted) || !ref.Is(v) || !IsHelicopter(v)){h=Heli{};continue;}
+            bool playerAboard=false,realCrew=false;
+            for(unsigned i=0;i<SeatCount(v);++i) {
+                const auto* seat=SeatAt(v,i);
+                playerAboard=playerAboard || AnyPlayerIn(seat);
+                realCrew=realCrew || SeatRider(seat)==Rider::other;
+            }
+            if(playerAboard){h=Heli{};continue;}
+            if(realCrew)continue; // retain the complete flight state; never delete under real occupants
+            h=Heli{};
             if(SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::dummy)reinterpret_cast<KickFn>(image+kSeatKick)(v,SeatAt(v,0));
             reinterpret_cast<DeleteFn>(image+kDelete)(v);
             Log("HELI v=%p gone (deleted)",v);

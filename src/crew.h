@@ -8,6 +8,7 @@
 #include "edf/layout.h"
 #include "edf/patch.h"
 #include "gunsight.h"
+#include "sightzoom.h"
 #include "stores.h"
 #include "edf/seat.h"
 
@@ -17,7 +18,7 @@ extern unsigned char* image;
 struct Config {
     bool enabled=true;
     bool debug=true;
-    bool autoCrew=true;        // an empty friendly vehicle gets an NPC driver (the stock RideAi)
+    bool autoCrew=true;        // an eligible empty friendly vehicle recruits an existing soldier to walk aboard
     DWORD crewDelayMs=3000;    // ...after it has stood empty this long
     float crewRange=600.0f;    // metres from the player; 0 = any distance
     bool bump=true;            // the player can board a seat an NPC holds
@@ -667,7 +668,7 @@ void DrillFrame(unsigned char* vehicle) noexcept;
 void ResetDrills() noexcept;
 // The local player's drill (hud.cpp): its RPM, the top RPM, whether it touches something now, whether it is launched
 // (flying) and on its way back (returning). False with none.
-struct DrillCue { float rpm,maxRpm,heat; bool touching,overheated,flying=false,returning=false; };
+struct DrillCue { float rpm,maxRpm,heat; bool touching,overheated,flying=false,returning=false,keys=true; };
 bool PlayerDrillCue(DrillCue* out) noexcept;
 
 // jet_bay.cpp: the EMC's rounds (emc.cpp; pylib/vcobjects.py EMC_*, tools/make_emc.py), DemoIndirectFire objects owned
@@ -729,6 +730,7 @@ bool SidecarLevelHooked() noexcept;
 void HighCamFrame(unsigned char* vehicle) noexcept;
 bool PlayerHighCam(bool* on,bool* keys) noexcept;
 bool HighCamOn(const void* vehicle) noexcept;   // turretcam.cpp: the high view is on in `vehicle` now
+bool TurretCamHighTransition(const void* vehicle) noexcept; // includes the return from overhead to the normal camera
 // The seat holds an indirect-fire weapon (the Katyusha's rockets, the howitzer's shells: lofted or ground marked, rounds
 // living 10 s or more): its high view (HighCamClass 1) and no gun stabilizer (stab.cpp: it fires from a halt).
 bool IndirectFireSeat(const unsigned char* seat) noexcept;
@@ -744,6 +746,8 @@ bool InstallSightZoom() noexcept;
 void SightZoomFrame(unsigned char* vehicle,unsigned seat,bool padButton) noexcept;
 void SightZoomStock(unsigned char* vehicle) noexcept;
 float SightZoomNow(const void* vehicle) noexcept;
+// Current validated seat/weapon fire-control surface; none when unavailable or another camera owns the view.
+sightzoom::Kind SightZoomView(const void* vehicle=nullptr) noexcept;
 void ResetSightZoom() noexcept;
 
 // turretcam.cpp: the turret camera (README 炮塔镜头, docs/camera-re.md §3b, §5). InstallTurretCam at load (the riding
@@ -787,6 +791,8 @@ void ResetStabilizer() noexcept;
 // airstrike.cpp
 bool InstallAirstrikes() noexcept;
 void CallPick(int step,wchar_t* out,std::size_t size) noexcept;   // airstrike.cpp
+void SupportDispatchTick() noexcept;
+void ResetSupportDispatch() noexcept;
 
 // subcarrier.cpp: the submarine carrier (潜水母艦, docs/subcarrier-re.md), a 506 body from EDF6VC_SUB_CARRIER.SGO
 // (tools/make_sub.py) driven by the plugin: it sits surfaced, follows the player at a ship's pace, turns its bow
@@ -851,6 +857,7 @@ bool PlayerGunnerHud(GunnerReadout* out) noexcept;
 int VehicleClassOf(const void* object) noexcept;
 // The boarding gun (boarding.cpp): a real friendly hit suppresses damage and asks the game thread to board the
 // vehicle. Broadphase candidates alone never request boarding; FrameTick handles the pending actual hit.
+bool PlayerJetBoardingSupported(const void* vehicle) noexcept; // aircraft controls, without the on-foot reach/speed gate
 void BoardingTick() noexcept;
 bool InstallBoarding() noexcept;   // after CheckHeliProfile (the board button)
 void ResetBoarding() noexcept;

@@ -8,6 +8,9 @@ namespace edf {
 // soldier, another machine's player, a rider that cannot be read).
 enum class Rider { none, dummy, player, other };
 Rider SeatRider(const unsigned char* image,const unsigned char* seat) noexcept;
+// A live real soldier/player occupying this seat. Rejects DummyVehicleRider, unknown
+// object classes, dead/zero-HP humans and expired occupant references.
+bool LivingSoldierInSeat(const unsigned char* image,const unsigned char* seat) noexcept;
 /// A human driven by a pad on this machine (pad set and the player-controlled flag on, and not another machine's
 // player copied here: RemoteRider).
 bool IsPlayer(const unsigned char* human) noexcept;

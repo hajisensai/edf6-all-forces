@@ -1038,7 +1038,7 @@ void EntranceMark(void* drawer,void* ctx,Text* text,const float* vp,float width,
 constexpr unsigned long long kSwitchMs=1500;   // a switch's banner (the store's, EDF6AutoTurret's aim mode's)
 constexpr float kCellW=112.0f,kCellH=48.0f;   // px at 1080 lines: a strip's cell
 constexpr float kRows3[]={-4.0f,0.0f,4.0f};   // a glyph's three rows (the pod's rockets, the gun's rounds)
-struct LoadCell { hudcue::StoreIcon icon; wchar_t text[40]; const float* rgba; bool picked; };
+struct LoadCell { hudcue::StoreIcon icon; wchar_t text[64]; const float* rgba; bool picked; };
 
 // A store's silhouette round (cx, cy), the nose to the right, `k` px a unit (some 36 x 14 units).
 void StoreGlyph(void* drawer,void* ctx,float cx,float cy,float k,hudcue::StoreIcon icon,const float* rgba) noexcept {
@@ -1087,6 +1087,14 @@ float LoadoutStrip(void* drawer,void* ctx,Text* text,float width,float y,float s
     for(int i=0;i<n;++i) {   // the texts first: their widths size the cells
         line[i]=*at;
         Label(text,lines,at,0.0f,y+37.0f*s,1,kLineScale*0.75f,cells[i].rgba,L"%ls",cells[i].text);
+        if(text && line[i]<*at) {
+            Line& l=lines[line[i]];
+            const float limit=width/static_cast<float>(n)-32.0f*s;
+            if(limit>0.0f && l.w>limit) {
+                l.scale*=limit/l.w*0.95f;MeasureAll(*text,&l,1);
+                l.y=y+37.0f*s-l.h*0.5f;
+            }
+        }
         const float tw=line[i]<*at ? lines[line[i]].w : 0.0f;
         w[i]=tw+16.0f*s>kCellW*s ? tw+16.0f*s : kCellW*s;
         total+=w[i];
@@ -1828,6 +1836,13 @@ const wchar_t* DrillState(const DrillCue& c) noexcept {
     if(c.flying)return Tr(c.returning ? Tx::drillReturning : Tx::drillLaunched);
     return c.touching && c.rpm>0.0f ? Tr(Tx::drilling) : nullptr;
 }
+void DrillLaunchHint(Line& line,const DrillCue& c) noexcept {
+    if(!Cfg().drillLaunch)return;
+    wchar_t binding[64];
+    if(c.keys)KeyName(Cfg().drillLaunchKey,binding,_countof(binding));
+    else SeatButtonName(Cfg().drillLaunchButton,binding,_countof(binding));
+    Append(line,L"    ");Append(line,Tr(Tx::drillLaunchHint),binding);
+}
 void DrillPanel(void* drawer,void* ctx,Text* text,float width,float height,float s,const DrillCue& c,Line* lines,int* at) noexcept {
     if(*at>=kMaxLines || !(c.maxRpm>0.0f))return;
     Line& l=lines[(*at)++];
@@ -1836,6 +1851,7 @@ void DrillPanel(void* drawer,void* ctx,Text* text,float width,float height,float
     wchar_t state[32]=L"";
     if(const wchar_t* const word=DrillState(c))std::swprintf(state,32,L"    %ls",word);
     Format(l,Tr(Tx::drillLine),static_cast<int>(std::lround(c.rpm)),static_cast<int>(std::lround(heat*100.0f)),state);
+    DrillLaunchHint(l,c);
     l.scale=kTitleScale;
     l.rgba=c.overheated ? kRed : top ? kGreen : share>0.0f ? kAmber : kCyan;
     l.w=l.h=0.0f;
@@ -2407,7 +2423,7 @@ void StockMark(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
 // (a line in the block instead of DrillPanel), the EMC's charged beam (a line and its bar: emc.cpp), and whether
 // EDF6AutoTurret's lead circle is on the seat's own gun (the
 // seat's first weapon, the one its aim turns: then the circle and its bore cross are that gun's marks, not a pipper).
-struct StockExtras { const NixTorso* nix; const DrillCue* drill; bool leadGun; const EmcCue* emc; const ProteusReadout* proteus; };
+struct StockExtras { const NixTorso* nix; const DrillCue* drill; bool leadGun; const EmcCue* emc; const ProteusReadout* proteus; bool high=false; };
 // --- The Proteus (proteus.cpp; README 普罗透斯): its part of the stock vehicle HUD. In the block (StockBlock) up to five
 // lines with a bar under some: the stance (and the stagger's progress), the shield (deployed its heat), the barrier, the
 // salvo (its cooldown, the mark's range), the field (its allies) and the driver's gun; the bindings named where the
@@ -2517,18 +2533,25 @@ int SightGun(const StockHudReadout& r,bool leadGun) noexcept {
         const StockArm& a=r.arm[i];
         return a.aimed && !a.lofted && !a.lobbed && a.kind==RoundKind::arc && a.ladder.ticks>0 && !(i==0 && leadGun);
     };
-    if(r.selected>=0 && r.selected<r.arms && r.selected<kStockArms && sights(r.selected))return r.selected;
-    for(int i=0;i<r.arms && i<kStockArms;++i)
-        if(sights(i))return i;
-    return -1;
+    return r.sight>=0 && r.sight<r.arms && r.sight<kStockArms && sights(r.sight) ? r.sight : -1;
 }
 
 void StockMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockHudReadout& r,
                 const StockExtras& x,Line* lines,int* at) noexcept {
-    const int sightGun=SightGun(r,x.leadGun);
+    const int sightGun=x.high ? -1 : SightGun(r,x.leadGun);
+    // One selected weapon owns the fire-control marks. A missile/rocket selection must not leave the main gun's
+    // optical reticle underneath it; lofted launchers have their dedicated impact/spread marks.
+    const int selected=r.sight>=0 && r.sight<r.arms && r.sight<kStockArms ? r.sight : -1;
     for(int i=0;i<r.arms && i<kStockArms;++i) {
+        if(i!=selected)continue;
         const StockArm& a=r.arm[i];
         if(!a.aimed || a.lofted)continue;
+        if(x.high) {
+            float sx,sy;
+            if(a.hit && ImpactCross(drawer,ctx,vp,width,height,s,a.at,&sx,&sy))
+                Label(text,lines,at,sx,sy+26.0f*s,1,kLineScale*0.85f,kYellow,L"%.0f m   %.1f s",a.range,a.flight);
+            continue;
+        }
         if(i==0 && x.leadGun && a.kind!=RoundKind::homing)continue;   // the lead circle's gun
         bool twin=false;
         for(int k=0;k<i && !twin && i!=r.selected;++k) {
@@ -2680,6 +2703,7 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
         wchar_t state[32]=L"";
         if(const wchar_t* const word=DrillState(c))std::swprintf(state,32,L"  %ls",word);
         Format(*drill,Tr(Tx::drillLineShort),static_cast<int>(std::lround(c.rpm)),static_cast<int>(std::lround(Unit(c.heat)*100.0f)),state);
+        DrillLaunchHint(*drill,c);
         drill->scale=kLineScale*0.85f;
         drill->rgba=c.overheated ? kRed : c.heat>=0.7f ? HeatColour(Unit(c.heat),false) : share>=0.99f ? kGreen : share>0.0f ? kAmber : kCyan;
     }
@@ -2771,7 +2795,8 @@ int StockCells(const StockHudReadout& r,LoadCell* cells) noexcept {
         LoadCell& c=cells[n++];
         c.icon=hudcue::ArmIconOf(static_cast<int>(r.arm[i].kind),r.arm[i].lobbed);
         c.picked=i==r.selected;
-        wcsncpy_s(c.text,_countof(c.text),l.text,_TRUNCATE);
+        if(r.arm[i].name[0])_snwprintf_s(c.text,_countof(c.text),_TRUNCATE,L"%ls %d/%d",r.arm[i].name,r.arm[i].ammo,r.arm[i].ammoMax);
+        else wcsncpy_s(c.text,_countof(c.text),l.text,_TRUNCATE);
         c.rgba=c.picked && l.rgba==kHud ? kCyan : l.rgba;
     }
     return n;
@@ -3365,7 +3390,7 @@ void MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float
     constexpr int n=mapbtn::kCount;
     static const Tx kOrders[]={Tx::orderGuard,Tx::orderFollow,Tx::orderRelease,Tx::orderEngage,Tx::orderFocus,Tx::orderBoard,
                                Tx::orderDismount,Tx::orderDismiss,Tx::orderRecruit};
-    static const wchar_t kKeys[n]={L'G',L'V',L'X',L'J',L'H',L'B',L'N',L'K',L'U',L'T',L'P',L'L',L'Y',L'O'};
+    static const wchar_t kKeys[n]={L'G',L'V',L'X',L'J',L'H',L'B',L'N',L'K',L'U',L'T',L'P',L'L',L'Y',L'O',L'[',L']',L'C'};
     static_assert(sizeof(kOrders)/sizeof(kOrders[0])==static_cast<std::size_t>(Id::formation),"an order a button");
     wchar_t name[n][64];
     for(int i=0;i<static_cast<int>(Id::formation);++i)_snwprintf_s(name[i],64,_TRUNCATE,L"%ls",Tr(kOrders[i]));
@@ -3374,6 +3399,9 @@ void MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float
     _snwprintf_s(name[static_cast<int>(Id::merge)],64,_TRUNCATE,L"%ls",Tr(Tx::btnMerge));
     _snwprintf_s(name[static_cast<int>(Id::sweep)],64,_TRUNCATE,L"%ls",Tr(c.sweepOn ? Tx::btnSweepStop : Tx::btnSweep));
     _snwprintf_s(name[static_cast<int>(Id::health)],64,_TRUNCATE,L"%ls",Tr(c.healthOn ? Tx::btnHealthOn : Tx::btnHealthOff));
+    _snwprintf_s(name[static_cast<int>(Id::supportPrev)],64,_TRUNCATE,L"%ls",Tr(Tx::btnSupportPrev));
+    _snwprintf_s(name[static_cast<int>(Id::supportNext)],64,_TRUNCATE,L"%ls",Tr(Tx::btnSupportNext));
+    _snwprintf_s(name[static_cast<int>(Id::supportCall)],64,_TRUNCATE,Tr(c.supportArmed ? Tx::btnSupportCancel : Tx::btnSupportCall),c.supportName);
     const float scale=kLineScale*0.7f;
     float w[n];
     for(int i=0;i<n;++i) {
@@ -3384,14 +3412,16 @@ void MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float
         w[i]=(text ? probe.w : static_cast<float>(wcslen(probe.text))*9.0f*s)+2.0f*kBtnPad*s;
     }
     mapbtn::Rect r[n]{};
-    mapbtn::Flow(w,n,width,height-kBtnBottom*s,kBtnRowH*s,kBtnGap*s,kBtnMargin*s,r);
+    const int buttonRows=mapbtn::Flow(w,n,width,height-kBtnBottom*s,kBtnRowH*s,kBtnGap*s,kBtnMargin*s,r);
+    if(c.supportStatus[0])Label(text,lines,at,width*0.5f,height-(kBtnBottom+static_cast<float>(buttonRows)*(kBtnRowH+kBtnGap)+14.0f)*s,
+        1,scale,kWhite,L"%ls",c.supportStatus);
     float rects[n*4];int ids[n];int placed=0;
     for(int i=0;i<n;++i) {
         if(!(r[i].x1>r[i].x0))continue;   // no room for its row
         const bool order=i<static_cast<int>(Id::sweep);
         const bool enabled=order ? c.allowed && c.selected>0 : true;
         const bool lit=(i==static_cast<int>(Id::guard) && c.guardArmed) || (i==static_cast<int>(Id::sweep) && c.sweepOn) ||
-                       (i==static_cast<int>(Id::health) && c.healthOn);
+                       (i==static_cast<int>(Id::health) && c.healthOn) || (i==static_cast<int>(Id::supportCall) && c.supportArmed);
         Rect(drawer,ctx,r[i].x0,r[i].y0,r[i].x1,r[i].y1,lit ? kBtnLit : kBtnFill);
         const float* edge=enabled ? kMapOrder : kMapOrderDim;
         const float t=1.5f*s;
@@ -3663,19 +3693,22 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         // view they were not made for. Nothing, like the stock HUD (its switch held until the camera is back).
         if(MapOwnsView()){FreeText(text);return;}
         const ULONGLONG now=GetTickCount64();
-        {   // the magnified sight's picture first: every mark over it
+        const sightzoom::Kind sightKind=SightZoomView();
+        {   // A validated seat/weapon chooses the mask. Aircraft/mechs keep their own HUD; overhead has no optic.
             const Snapshot& z=Latest();
             const float zoom=SightZoomNow(nullptr);
-            if(zoom>1.0f && now-z.tick<=kFreshMs)ScopeShade(drawer,ctx,t,width,height,s,zoom,z.gunner && !z.cockpit,lines,&at);
+            const sightzoom::Mask mask=sightzoom::MaskOf(sightKind);
+            if(zoom>1.0f && mask!=sightzoom::Mask::none && now-z.tick<=kFreshMs)
+                ScopeShade(drawer,ctx,t,width,height,s,zoom,mask==sightzoom::Mask::sensor,lines,&at);
         }
         for(int i=0;i<count && i<3;++i)CarrierBars(drawer,ctx,t,viewProj,width,height,s,panels[i],lines,&at,now);
         const Snapshot& snap=Latest();
         // A switch the player makes shows for a moment (hud_cue.h Change, kSwitchMs): the picked store (forgotten while no
         // aircraft's stores show, so boarding shows none) and EDF6AutoTurret's aim mode.
         static hudcue::Change storePick{},aimMode{};
-        const bool fresh=now-snap.tick<=kFreshMs,storesShown=fresh && (snap.cockpit || snap.heliFly);
+        const bool fresh=now-snap.tick<=kFreshMs,storesShown=fresh && (snap.cockpit || snap.heliFly || snap.stock);
         if(!storesShown)storePick.seen=false;
-        const int picked=snap.cockpit ? snap.jet.store : snap.stock && snap.stockHud.heli ? snap.stockHud.selected : -1;
+        const int picked=snap.cockpit ? snap.jet.store : snap.stock ? snap.stockHud.selected : -1;
         const bool storeSwitched=storesShown && hudcue::Changed(storePick,picked,now,kSwitchMs);
         const bool aimFlipped=fresh && snap.turret && hudcue::Changed(aimMode,static_cast<int>(snap.turretAim.mode),now,kSwitchMs);
         const bool rotorHud=snap.cockpit && snap.jet.rotor && Cfg().heliFlightHud;   // a rotor craft: the helicopter HUD
@@ -3726,20 +3759,41 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(now-snap.tick<=kSazabiCueMs && snap.sazabi && !snap.cockpit) {   // the Sazabi's own HUD (it is no stock vehicle)
             SazabiHud(drawer,ctx,t,viewProj,width,height,s,snap.sazabiCue,lines,&at);
         }
-        if(now-snap.tick<=kFreshMs && snap.heliSight && !snap.cockpit)HeliGunSight(drawer,ctx,t,viewProj,width,height,s,snap.heliAim,lines,&at);
-        if(now-snap.tick<=kFreshMs && snap.launcher)LauncherMarks(drawer,ctx,t,viewProj,width,height,s,snap.launch,lines,&at);
+        const bool gunnerSight=fresh && snap.gunner && !snap.cockpit;
+        const bool mechSight=fresh && snap.sazabi && !snap.cockpit;
+        const bool overhead=fresh && ((snap.highCam && snap.highCamOn) || sightKind==sightzoom::Kind::indirect);
+        const int stockPick=stockHud ? snap.stockHud.sight : -1;
+        const bool launcherSight=stockHud && stockPick>=0 && stockPick<snap.stockHud.arms && snap.stockHud.arm[stockPick].lofted;
+        if(fresh && snap.heliSight && !snap.cockpit && !gunnerSight && !mechSight)
+            HeliGunSight(drawer,ctx,t,viewProj,width,height,s,snap.heliAim,lines,&at);
+        if(fresh && snap.launcher && launcherSight)LauncherMarks(drawer,ctx,t,viewProj,width,height,s,snap.launch,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.highCam && !snap.cockpit)HighCamHint(t,width,height,s,snap.highCamOn,snap.highCamKeys,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.seats)SeatLine(t,width,height,snap.seatPrompt,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.entrance)EntranceMark(drawer,ctx,t,viewProj,width,height,s,snap.boardingEntrance,lines,&at);
-        if(now-snap.tick<=kFreshMs && snap.turretCamOk && !snap.cockpit)TurretMark(drawer,ctx,viewProj,width,height,s,snap.turretCam,!stockHud);
-        if(now-snap.tick<=kFreshMs && snap.gunner && !snap.cockpit)GunnerMarks(drawer,ctx,t,viewProj,width,height,s,snap.gun,lines,&at);
-        if(now-snap.tick<=kFreshMs && snap.turret && !snap.cockpit)TurretAimMarks(drawer,ctx,t,viewProj,width,height,s,snap.turretAim,aimFlipped,lines,&at);
+        if(fresh && snap.turretCamOk && !snap.cockpit && !launcherSight && !overhead && !gunnerSight && !mechSight)
+            TurretMark(drawer,ctx,viewProj,width,height,s,snap.turretCam,!stockHud);
+        if(gunnerSight)GunnerMarks(drawer,ctx,t,viewProj,width,height,s,snap.gun,lines,&at);
+        if(fresh && snap.turret && !snap.cockpit && (!stockHud || stockPick==0) && !launcherSight && !overhead && !gunnerSight && !mechSight)
+            TurretAimMarks(drawer,ctx,t,viewProj,width,height,s,snap.turretAim,aimFlipped,lines,&at);
         if(stockHud) {
             const StockExtras x{fresh && snap.nix ? &snap.nixTorso : nullptr,fresh && snap.drill ? &snap.drillCue : nullptr,
-                                snap.turret && snap.turretAim.ownGun && snap.turretAim.mode==edf::aimlink::Mode::leadCircle && snap.turretAim.lead,
+                                stockPick==0 && snap.turret && snap.turretAim.ownGun && snap.turretAim.mode==edf::aimlink::Mode::leadCircle && snap.turretAim.lead,
                                 fresh && snap.emc ? &snap.emcCue : nullptr,
-                                fresh && snap.proteus ? &snap.proteusRo : nullptr};
+                                fresh && snap.proteus ? &snap.proteusRo : nullptr,overhead};
             StockVehicleHud(drawer,ctx,t,viewProj,width,height,s,snap.stockHud,x,lines,&at);
+            LoadCell cells[kStockArms];
+            const int n=StockCells(snap.stockHud,cells);
+            const int first=n>4 ? 4 : n;
+            const float y=height-110.0f*s-(n>4 ? kCellH*s : 0.0f);
+            LoadoutStrip(drawer,ctx,t,width,y,s,cells,first,lines,&at);
+            if(n>4)LoadoutStrip(drawer,ctx,t,width,y+kCellH*s,s,cells+4,n-4,lines,&at);
+            if(snap.payload) {
+                Line controls{};
+                AircraftControls(controls,snap.payloadHud.keys,snap.payloadHud.choices,snap.payloadHud.switchButton,0,false,false);
+                if(controls.text[0])Label(t,lines,&at,width*0.5f,y-24.0f*s,1,kLineScale*0.75f,kHud,L"%ls",controls.text);
+            }
+            if(storeSwitched && snap.stockHud.selected>=0 && snap.stockHud.selected<n)
+                LoadoutBanner(drawer,ctx,t,width,y-35.0f*s,s,cells[snap.stockHud.selected],lines,&at);
         }
         NpcMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         FormationBanner(t,width,height,s,lines,&at);

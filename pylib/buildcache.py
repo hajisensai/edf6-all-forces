@@ -20,7 +20,7 @@ from modfiles import atomic_write, sha256, sha256_file
 
 MANIFEST = '.edf6vc_builds.json'
 RECIPES = 'asset_recipes.json'
-GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'chute', 'drill', 'emc', 'sidecar', 'bigmap', 'sazabi')
+GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'chute', 'drill', 'emc', 'sidecar', 'bigmap', 'sazabi', 'proteus')
 MODEL_INPUTS = {'artillery': 'twin_tank', 'drill': 'drill_tank', 'sazabi': 'sazabi'}
 
 

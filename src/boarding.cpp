@@ -18,7 +18,7 @@
 //     Bump: the NPC moves to a free gunner seat or gets off). Seated, the player stays where the stock ride put them;
 //     a press that seated nobody puts their position back.
 // Only the local player's rounds, only vehicles of the board-able classes (crew.cpp kClasses) and not the plugin's
-// NPC jets or submarine carriers (their pilot is never bumped, crew.cpp), only the player's side, the friends' and
+// aircraft without player flight controls or submarine carriers, only the player's side, the friends' and
 // nobody's (an enemy's vehicle takes the round as the stock game has it).
 // Static RE and what is still to be seen in game: docs/boarding-re.md.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
@@ -80,7 +80,10 @@ bool TaggedOk() noexcept {
 }
 
 // Whether the round of this core is a boarding gun's.
-bool Tagged(const unsigned char* core) noexcept { return At<std::uint32_t>(core,kColorAlpha)==kTagBits; }
+bool Tagged(const unsigned char* core) noexcept {
+    const auto bits=At<std::uint32_t>(core,kColorAlpha);
+    return bits>=kTagBits && bits<=kTagBits+3u; // Ranger, Wing Diver, Air Raider, Fencer
+}
 
 bool Friendly(std::int32_t team,std::int32_t playerTeam) noexcept {
     return team==playerTeam || team==kTeamVehicle || team==kTeamFriend;
@@ -126,7 +129,7 @@ void StartBoarding(unsigned char* human,unsigned char* v,ULONGLONG ms) noexcept 
     const std::int32_t team=At<std::int32_t>(v,kTeam),playerTeam=At<std::int32_t>(human,kTeam);
     const char* refused=nullptr;
     if(VehicleClassOf(v)<0 || v[kDead])refused="not a board-able vehicle any more";
-    else if(IsJet(v) || IsSub(v))refused="an NPC jet or a submarine carrier (its pilot is never bumped)";
+    else if(IsSub(v) || (IsJet(v) && !PlayerJetBoardingSupported(v)))refused="this aircraft has no player flight controls";
     else if(!Friendly(team,playerTeam))refused="not on the player's side";
     else if(!HumanOnFoot(human))refused="the player is in a vehicle";
     else if(SeatCount(v)==0)refused="no seats";

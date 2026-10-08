@@ -10,6 +10,8 @@
 #include "memory.h"
 #include "playarea.h"
 #include "sazabi_sound.h"
+#include "support_spawn.h"
+#include "support_soldier.h"
 #include <iterator>
 
 namespace crew {
@@ -58,6 +60,7 @@ void MissionStart() noexcept {
     ResetNpcAi();
     ResetNpcPosts();
     ResetAirstrikes();
+    ResetSupportDispatch();
     ResetJets();
     ResetBoosters();
     ResetShields();
@@ -97,6 +100,8 @@ void MissionStart() noexcept {
     PreloadPlayerJets();   // ...and the player jets, for the catch after an ejection (playerjet.cpp)
     PreloadSub();    // ...and the submarine carrier (subcarrier.cpp)
     PreloadLaser();  // ...and the teleportation ships' portal laser (carrierlaser.cpp)
+    PreloadSupportVehicles(); // stock ground support hulls; no dummy crew created by initialization
+    PreloadSupportSoldiers(); // original real NPC resources, before the game's preload wait
     EnsureInputs();  // every plugin has loaded by now: the per-frame hooks chain onto theirs
     Log("MISSION start: per-object state dropped, resources preloaded");
     LogMemory("mission start");

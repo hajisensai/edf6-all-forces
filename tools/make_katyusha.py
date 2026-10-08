@@ -66,7 +66,8 @@ MARK_LOFTED = 7303.0
 # The launcher's elevation stop, degrees up: car_base_constraint_data's Rocketcannon_main hinge limit [1, -stop, 0]
 # (pitch negative-up; the Naegling's -50 lifts the rack 50 deg, the V603 flak's [1, -60, 5] is its aim axis
 # -1.047..0.087 rad, autoturret/docs/re-notes.md). 80 deg leaves the high arc 1/3..1 of the most range; the rack
-# swung there stays 0.36 m over the truck bed (pylib/katyusha_model.py build_model: the rack's pivot is at its rear).
+# swung there stays at least 0.14 m over the actual truck deck, including loading travel
+# (pylib/katyusha_model.py build_model: the turntable sits on the deck, its pivot is at the rear).
 # One copy, the model's: its telescopic ram is built for this stroke (katyusha_model.check_ram holds it together
 # from 0 up to it).
 PITCH_STOP_DEG = katyusha_model.PITCH_STOP_DEG

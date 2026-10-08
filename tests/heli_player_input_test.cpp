@@ -7,6 +7,8 @@
 #include <initializer_list>
 
 namespace crew {
+bool NpcDriver(const unsigned char* v) noexcept { return v && SeatCount(v)>0 && SeatRider(SeatAt(const_cast<unsigned char*>(v),0))==Rider::dummy; }
+
 unsigned char* image=nullptr;
 // Offline (online_authority.h): no session, every heli run here, the copies' owner unchanged.
 bool InSession() noexcept { return false; }
@@ -15,11 +17,19 @@ online::CopyOwner SetSpawnOwner(online::CopyOwner owner) noexcept { return owner
 Config inputConfig{};
 ULONGLONG inputTime=10000;
 bool testView=false;
+const wchar_t* shotFile=L"EDF6VC_MEDIC_GUN.SGO";
+std::size_t shotFileLength=std::wcslen(shotFile);
+int fileQueries=0,obsoleteWarnings=0;
+const wchar_t* WeaponFile(const unsigned char*,std::size_t* length) noexcept {
+    ++fileQueries;*length=shotFileLength;return shotFile;
+}
 float inputVP[16]{};
 const Config& Cfg() noexcept { return inputConfig; }
 ULONGLONG GameMs() noexcept { return inputTime; }
 bool MapHoldsKeys() noexcept { return false; }
-void Log(const char*,...) noexcept {}
+void Log(const char* format,...) noexcept {
+    if(std::strstr(format,"obsolete EDF6VC_COAX_MG.SGO"))++obsoleteWarnings;
+}
 bool LastViewProj(float* out) noexcept {
     if(testView)std::memcpy(out,inputVP,sizeof(inputVP));
     return testView;
@@ -97,6 +107,7 @@ void __fastcall StockMedicShot(unsigned char* weapon,unsigned muzzle,void* overr
     Check(weapon==medicWeapon && muzzle==3 && overrideParam==(replay ? inputSeat : nullptr) && counter==&shotCounter,
           "shot forwards all register arguments unchanged");
     ++shotCalls;shotReplay=replay;shotPermission=weapon[kWeaponFriendlyDamage];
+    Put<int>(weapon,0xBD4,1); // Native fire's recoil marker, reached only if the hook permits the shot.
 }
 
 void CheckMedicPermission() {
@@ -118,6 +129,25 @@ void CheckMedicPermission() {
         Check(shotPermission==1,"permission restored before local or replay parameter consumption");
     }
     Check(shotCalls==2,"native shot called exactly once per invocation");
+    const int before=shotCalls;
+    for(const wchar_t* file:{L"EDF6VC_COAX_MG.SGO",L"edf6vc_coax_mg.sgo"})for(bool replay:{false,true}) {
+        shotFile=file;shotFileLength=std::wcslen(file);Put<int>(medicWeapon,0xBD4,0);
+        reinterpret_cast<MedicShotFn>(image+kMedicShot)(medicWeapon,3,replay ? inputSeat : nullptr,&shotCounter,replay);
+        Check(shotCalls==before && At<int>(medicWeapon,0xBD4)==0,"retired local/replay shot cannot reach native recoil marker");
+    }
+    Check(obsoleteWarnings==1,"old data prompts one installer-regeneration diagnostic");
+    for(const wchar_t* file:{L"V_403TANK_MACHINEGUN.SGO",L"EDF6VC_COAX_MG.SGO.NEW",L"OTHER_COAX_MG.SGO"}) {
+        shotFile=file;shotFileLength=std::wcslen(file);
+        for(bool replay:{false,true}) {
+            const int oldCalls=shotCalls;Put<int>(medicWeapon,0xBD4,0);
+            reinterpret_cast<MedicShotFn>(image+kMedicShot)(medicWeapon,3,replay ? inputSeat : nullptr,&shotCounter,replay);
+            Check(shotCalls==oldCalls+1 && At<int>(medicWeapon,0xBD4)==1,"stock and other custom machine guns retain local/replay fire");
+        }
+    }
+    shotFile=L"EDF6VC_COAX_MG.SGO";shotFileLength=std::wcslen(shotFile)-1;
+    Check(!RetiredLoadout(medicWeapon),"a truncated resource name is not the retired file");
+    shotFile=L"EDF6VC_MEDIC_GUN.SGO";shotFileLength=std::wcslen(shotFile);
+    Check(fileQueries>0,"shot guard consults the actual resource-file adapter");
     for(float damage:{150.0f,0.0f,std::numeric_limits<float>::quiet_NaN(),-std::numeric_limits<float>::infinity()}) {
         Put<float>(medicWeapon,kWeaponDamage,damage);medicWeapon[kWeaponFriendlyDamage]=0;
         MedicShotHook(medicWeapon,3,nullptr,&shotCounter,false);
@@ -158,6 +188,50 @@ int main() {
     Pilot& pilot=pilots[0];pilot=Pilot{};pilot.ref=ObjRef::Of(inputVehicle);pilot.lastMs=inputTime;
     pilot.aim[2]=1.0f;pilot.hover=0.424f;
     const float pos[3]={0.0f,0.0f,0.0f},forward[3]={0.0f,0.0f,1.0f},right[3]={-1.0f,0.0f,0.0f};
+    // Actual Root.cpk Heron YG10E request parameters (AWEAPON371) and N9 Eros. Exercise the production
+    // controller through full acceleration/braking, including the original high-damping failure.
+    for(float damp:{0.99f,0.999f}) {
+        const float gain=damp<0.995f ? 90.0f : 80.0f,blend=damp<0.995f ? 0.003f : 0.0003f;
+        const float top=blend*gain/(1.0f-damp*(1.0f-blend));
+        Put<float>(inputVehicle,kSpeedGain,gain);Put<float>(inputVehicle,kBlend,blend);Put<float>(inputVehicle,kDamp,damp);
+        PlayerAssist(inputVehicle);
+        Check(std::fabs(PlayerTop(inputVehicle)-top)<0.01f,"player assist preserves the request's actual top speed");
+        pilot.hold={};pilot.vel[0]=pilot.vel[1]=pilot.vel[2]=0.0f;
+        Put<float>(inputSeat,kSeatLY,-1.0f);
+        for(int frame=0;frame<600;++frame) {
+            AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
+            const float desired=At<float>(inputVehicle,kSpeedGain)*At<float>(inputVehicle,kInForward);
+            pilot.vel[2]=damp*pilot.vel[2]+At<float>(inputVehicle,kBlend)*(desired-damp*pilot.vel[2]);
+        }
+        Check(std::fabs(pilot.hold.speed-top)<0.01f && std::fabs(pilot.vel[2]-top)<0.05f,
+              "held W reaches the real helicopter top speed through the native velocity law");
+        Put<float>(inputSeat,kSeatLY,0.0f);
+        AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
+        Put<float>(inputSeat,kSeatLY,1.0f);
+        for(int frame=0;frame<600;++frame) {
+            AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
+            const float desired=At<float>(inputVehicle,kSpeedGain)*At<float>(inputVehicle,kInForward);
+            pilot.vel[2]=damp*pilot.vel[2]+At<float>(inputVehicle,kBlend)*(desired-damp*pilot.vel[2]);
+        }
+        Check(pilot.hold.speed==0.0f && std::fabs(pilot.vel[2])<0.05f,"held S brakes to hover without reversing");
+        Put<float>(inputVehicle,kInThrottle,0.75f);
+        AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,true,0.0f,1.0f/60.0f,inputTime);
+        Check(pilot.hold.speed==0.0f && At<float>(inputVehicle,kInForward)==0.0f && At<float>(inputVehicle,kInThrottle)==0.75f,
+              "grounded controller leaves the native takeoff throttle and clears forward motion");
+        pilot.groundAt=0;AssistOff(inputVehicle);
+        Check(At<float>(inputVehicle,kSpeedGain)==gain && At<float>(inputVehicle,kBlend)==blend,"leaving restores request parameters");
+        Heli npc{},replica{};
+        inputConfig.heliSpeed=25.0f;inputConfig.heliAgility=4.0f;
+        Tune(npc,inputVehicle);Tune(replica,inputVehicle);
+        const float tuned=npc.params[1]*npc.params[0]/(1.0f-damp*(1.0f-npc.params[1]));
+        Check(std::fabs(tuned-25.0f)<0.01f && npc.top==25.0f,"NPC speed tuning remains valid with high native damping");
+        Check(std::memcmp(npc.params,replica.params,sizeof(npc.params))==0,"replica derives the same physics parameters as authority");
+        inputConfig.heliSpeed=0.0f;Tune(npc,inputVehicle);
+        Check(std::fabs(npc.top-top)<0.01f,"disabled NPC speed tuning reports actual stock speed rather than a fixed estimate");
+    }
+    inputConfig.heliSpeed=25.0f;
+    pilot.hold={};pilot.vel[0]=pilot.vel[1]=pilot.vel[2]=0.0f;
+    Put<float>(inputVehicle,kSpeedGain,20.0f);Put<float>(inputVehicle,kBlend,1.0f);
     // Stock slot 55 has already copied W into movement input. Production AimFly replaces the movement setpoint,
     // then the attitude hook supplies level pitch while keeping the original movement block for translation.
     Put<float>(inputSeat,kSeatLY,-1.0f);
