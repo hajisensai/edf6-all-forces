@@ -15,14 +15,15 @@ constexpr float kRound=0.46f;     // the round field's radius: this share of the
 constexpr float kRectHigh=0.40f;  // the sensor's half height: this share of the screen's height (its width 4:3, held to the screen)
 constexpr float kPi=3.14159265f;
 
-// Four corners of a strip quad (hud.cpp's quads: triangles 0 1 2 and 1 2 3).
+// Four corners of a strip quad (hud.cpp's kStrip=5: triangles 0 1 2 and 2 1 3, alternating strip order).
 struct Quad { float x[4],y[4]; };
 
 inline float Radius(float w,float h) noexcept { return kRound*(w<h ? w : h); }
-// Past the screen's farthest corner from (cx, cy), with a margin.
+// The OUTER POLYGON, not only its vertices, must pass the farthest screen corner. Each straight edge is only
+// out*cos(pi/kSides) from the centre; choose the vertex radius so even that edge has four pixels of clearance.
 inline float Reach(float w,float h,float cx,float cy) noexcept {
     const float dx=cx>w-cx ? cx : w-cx,dy=cy>h-cy ? cy : h-cy;
-    return std::sqrt(dx*dx+dy*dy)+4.0f;
+    return (std::sqrt(dx*dx+dy*dy)+4.0f)/std::cos(kPi/kSides);
 }
 // Ring piece `i` of kSides, from radius r out to `out` round (cx, cy).
 inline Quad RingPiece(int i,float cx,float cy,float r,float out) noexcept {
@@ -34,7 +35,7 @@ inline Quad RingPiece(int i,float cx,float cy,float r,float out) noexcept {
 inline void RectHalf(float w,float h,float* hx,float* hy) noexcept {
     *hy=kRectHigh*h;
     *hx=*hy*4.0f/3.0f;
-    if(*hx>0.48f*w)*hx=0.48f*w;
+    if(*hx>0.48f*w){*hx=0.48f*w;*hy=*hx*3.0f/4.0f;} // fit narrow/split-screen viewports without squeezing the sensor
 }
 // The four dark bands round the sensor's field (above, under, left, right).
 inline void RectBands(float w,float h,Quad* out) noexcept {
@@ -52,7 +53,7 @@ inline bool InTri(float ax,float ay,float bx,float by,float cx,float cy,float px
     return !(neg && pos);
 }
 inline bool Inside(const Quad& q,float px,float py) noexcept {
-    return InTri(q.x[0],q.y[0],q.x[1],q.y[1],q.x[2],q.y[2],px,py) || InTri(q.x[1],q.y[1],q.x[2],q.y[2],q.x[3],q.y[3],px,py);
+    return InTri(q.x[0],q.y[0],q.x[1],q.y[1],q.x[2],q.y[2],px,py) || InTri(q.x[2],q.y[2],q.x[1],q.y[1],q.x[3],q.y[3],px,py);
 }
 }  // namespace scopeview
 }  // namespace crew
