@@ -77,6 +77,8 @@ constexpr std::size_t kSeatPad=0x2B0,kSeatButtons=0x2E8,kSeatStick=0x2D0;
 constexpr float kForeign=0.02f;                // the aim's input this far off the rider's stick: another hand steers it
 constexpr float kMinTraverse=0.17f;            // rad of yaw stops: less is no turret
 constexpr float kAimFar=800.0f,kSightFar=3000.0f;
+constexpr float kGroundProbe=1000.0f;          // m above and below the hull the high view's ground point is looked for
+constexpr float kFocusSearch=2.0f*kSightFar;   // m (3D): how far the high view's landing is looked for (ShotFocus)
 using tcam::kViewMost;
 constexpr float kReturnRate=0.25f,kReturnDone=0.005f;   // the free look's swing back: share a frame, done within (rad)
 constexpr float kRigEase=0.12f;                // a frame, the rig's move between its shapes (normal / high)
@@ -178,16 +180,36 @@ const unsigned char* Gun(const unsigned char* vehicle,const unsigned char* seat)
 
 // Same shot model and muzzle transform as the vehicle HUD. No camera ray participates in this prediction.
 // RoundLands also returns the flight endpoint on a miss; an unreadable/guided model uses the actual bore path.
+// The observed point is the landing while it is within reach, else the ground under where the shot ends, at most
+// kSightFar (kAimFar for a round with no model: the bore line) across the ground: tcam::HighFocus. The landing is looked
+// for out to kFocusSearch, twice that cap: the search is a 3D sphere checked a segment of frames at a time, so a round
+// leaving it in the air (a howitzer's shell crosses 3 km hundreds of metres up) is then past the cap across the ground
+// and the view stays at the cap, not stepping back by the round's height and the segment. Never a point in the
+// air: the ground's height there by a map ray straight down (kGroundProbe m above and below the hull), the hull's own
+// height with none.
 void ShotFocus(Shared& s) noexcept {
     s.focusValid=false;s.focusHit=false;
     const auto gun=Gun(s.v,s.seat);
     float muzzle[3],dir[3];
     if(!gun || !edf::MeanMuzzle(gun,64,muzzle,dir) || !vec::Normalize(dir))return;
-    for(int i=0;i<3;++i)s.focus[i]=muzzle[i]+dir[i]*kAimFar;
+    float end[3];
+    for(int i=0;i<3;++i)end[i]=muzzle[i]+dir[i]*kAimFar;
+    float most=kAimFar;
     RoundModel model{};
     if(ReadRound(gun,&model) && model.kind!=RoundKind::none && model.kind!=RoundKind::homing) {
         float flight=0.0f;
-        s.focusHit=RoundLands(gun,model,muzzle,dir,kSightFar,s.focus,&flight);
+        s.focusHit=RoundLands(gun,model,muzzle,dir,kFocusSearch,end,&flight);
+        most=kSightFar;
+    }
+    for(float v:end)if(!std::isfinite(v))return;
+    const float* origin=reinterpret_cast<const float*>(s.v+kMatrix)+12;
+    tcam::HighFocus(muzzle,dir,s.focusHit,end,most,origin[1],s.focus);
+    if(!(s.focusHit && tcam::AcrossDistance(muzzle,end)<=most)) {
+        s.focusHit=false;   // not the landing: no on-target claim for it
+        const float top=std::fmax(origin[1],muzzle[1])+kGroundProbe;
+        const float from[3]={s.focus[0],top,s.focus[2]},to[3]={s.focus[0],origin[1]-kGroundProbe,s.focus[2]};
+        float hit[3];
+        if(MapRay(from,to,hit)>=0.0f && std::isfinite(hit[1]))s.focus[1]=hit[1];
     }
     for(float v:s.focus)if(!std::isfinite(v))return;
     s.focusValid=true;
