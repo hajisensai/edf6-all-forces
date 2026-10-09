@@ -60,8 +60,8 @@ bool MissionParticipantCreationsMatch(const ObjRef*,unsigned) noexcept{return tr
 bool ReadMissionParticipants(void**,unsigned,unsigned*,unsigned*) noexcept{return true;}
 namespace support_net {bool ValidPlan(const Plan& p,bool) noexcept{return p.count>0&&p.count<=kMaxUnits;}}
 bool NpcPrepareVehicleRoutePost(unsigned char*,const float*,float) noexcept{return false;}
-bool HeliCommand(const void*,const Command&) noexcept{return false;}
-bool JetCommand(const void*,const Command&) noexcept{return false;}
+bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept{return false;}
+bool JetCommand(const void*,const Command&,const ObjRef&) noexcept{return false;}
 PlayArea MapPlayArea() noexcept{return {{-930,-930},{930,930},true,0,true};}
 bool MapGroundNear(float,float,float,float* y,bool) noexcept{*y=0;return true;}
 }

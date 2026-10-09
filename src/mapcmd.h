@@ -39,8 +39,9 @@ int JetCommandUnits(CommandUnit* out,int most) noexcept;
 int GroundCommandUnits(CommandUnit* out,int most) noexcept;
 // ...and a command given to one of them: false when `v` is not one of its units now. Order::none releases it (back to
 // what it did before any command). Game thread.
-bool HeliCommand(const void* v,const Command& c) noexcept;
-bool JetCommand(const void* v,const Command& c) noexcept;
+// `focus`: a focus order's target (the enemy the player marked, as a squad's); the aircraft take it (mapcmd::AirOrder).
+bool HeliCommand(const void* v,const Command& c,const ObjRef& focus={}) noexcept;
+bool JetCommand(const void* v,const Command& c,const ObjRef& focus={}) noexcept;
 bool GroundCommand(const void* v,const Command& c) noexcept;
 // npcai.cpp: the NPC soldiers' squads (one unit a squad, its leader's address; docs/npc-ai-design.md §5, §6), every one
 // the frame saw (a script's too, locked), and an order to one.

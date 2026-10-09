@@ -450,6 +450,9 @@ struct Heli {
     bool cmdMoving;
     bool ownGuard;
     float ownPost[3],ownHold[3];
+    // A map focus order's target (HeliCommand: the enemy the player marked): engaged before any other, wherever it is,
+    // its post and order kept; let go once it is no longer among its targets (PickTarget) or another order comes.
+    ObjRef focus;
 };
 Heli helis[16]{};
 constexpr ULONGLONG kStaleMs=2000;   // a heli flown every frame; one not flown this long is gone (or not NPC-flown)
@@ -772,7 +775,11 @@ bool PickTarget(Heli& h,const unsigned char* v,const float* around,const float* 
     const ULONGLONG now=GameMs();
     const float speed=std::sqrt(Dot2(h.vel,h.vel));
     float best=0.0f,bestAim[3]{};const void* bestObject=nullptr;
+    bool focusSeen=false;
     ForEachTarget(h.medic,v,[&](const void* object,const float* a,float extra) noexcept {
+        if(focusSeen)return;
+        // The map's focus order (Heli::focus): this one, past its post's range and before any other.
+        if(h.focus.Is(object)){focusSeen=true;bestObject=object;std::memcpy(bestAim,a,12);return;}
         const float d[3]={a[0]-around[0],a[1]-around[1],a[2]-around[2]};
         const bool current=h.target.Is(object);
         if((!current || h.cmd.order!=Order::none) && d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>range*range)return;
@@ -786,6 +793,10 @@ bool PickTarget(Heli& h,const unsigned char* v,const float* around,const float* 
         if(std::sqrt(Dot2(f,f))<minHoriz)score+=kTooClose;
         if(!bestObject || score<best){best=score;bestObject=object;std::memcpy(bestAim,a,12);}
     });
+    if(h.focus && !focusSeen) {
+        Log("HELI v=%p focus target %p no longer among its targets: back to its order",v,h.focus.obj);
+        h.focus={};
+    }
     if(!bestObject)return false;
     if(!h.target.Is(bestObject))h.targetAt=now;
     h.target=ObjRef::Of(bestObject);std::memcpy(aim,bestAim,12);
@@ -1793,7 +1804,7 @@ bool SenseFrame(Heli& h,unsigned char* v,bool playerAboard,Sense& s) noexcept {
     const bool medic=Medic(v);
     if(medic!=h.medic)Log("HELI v=%p %s",v,medic ? "medic: its door guns heal, it aims at hurt friends" : "no longer a medic");
     h.medic=medic;
-    const bool moving=CommandMoving(h,pos,anchor);
+    const bool moving=!h.focus && CommandMoving(h,pos,anchor);   // a focus order: at it first
     s.engage=!moving && !s.rescuing && !h.leaving && PickTarget(h,v,anchor,pos,pick,s.aim);
     if(s.engage) {
         TrackVelocity(h.tgtPrev,h.tgtVel,s.aim,dt,40.0f,!Same(h.tracked,h.target));
@@ -1854,7 +1865,7 @@ bool SenseFrame(Heli& h,unsigned char* v,bool playerAboard,Sense& s) noexcept {
     s.aimRange=s.range<kRunAim ? s.range : kRunAim;
     s.rocketsLeft=s.arms.rockets && s.arms.rocketAmmo>0;
     // A guard heli circles its post (GuardOrbit); the engaged 410 too, round a centre moved toward the target.
-    s.guardOrbit=h.guard && !h.leaving && !s.rescuing && Cfg().heliGuardRadius>0.0f;
+    s.guardOrbit=h.guard && !h.focus && !h.leaving && !s.rescuing && Cfg().heliGuardRadius>0.0f;   // focused: round its target
     // Aim only once the nose has come round: with the target behind, the dip stick flew it away.
     s.bearingOff=s.engage ? Wrap(std::atan2(s.lead[0]-pos[0],s.lead[2]-pos[2])-s.heading) : kPi;
     return true;
@@ -2836,16 +2847,29 @@ bool HeliSharesPost() noexcept { return Cfg().heliGuardRadius>0.0f; }   // Guard
 int HeliCommandUnits(CommandUnit* out,int most) noexcept {
     int n=0;
     for(const auto& h:helis)
-        if(n<most && Commandable(h) && ReadCommandUnit(h.ref,h.type ? h.type->name : "heli",h.cmd,true,&out[n]))++n;
+        if(n<most && Commandable(h) &&
+           ReadCommandUnit(h.ref,h.type ? h.type->name : "heli",h.focus ? Command{Order::focus,{0.0f,0.0f,0.0f}} : h.cmd,true,&out[n]))++n;
     return n;
 }
 
 // guard: the post moved to the point (its guard orbit round it, HeliGuardRadius out; HeliHeight over it with the orbit
 // off), as a guard call's; follow: no post (it follows the player, Fly's escort / orbit); none: the call's own back.
-bool HeliCommand(const void* vehicle,const Command& c) noexcept {
+bool HeliCommand(const void* vehicle,const Command& c,const ObjRef& focus) noexcept {
     __try {
         Heli* const h=Find(vehicle);
         if(!h || !Commandable(*h))return false;
+        // focus: the marked enemy engaged first (Heli::focus), its post and order kept; a medic's guns heal (none), and
+        // the enemy must be one of its targets now (as npcai.cpp checks a squad's focus).
+        if(c.order==Order::focus) {
+            if(!focus || h->medic)return false;
+            bool seen=false;
+            ForEachEnemy(static_cast<const unsigned char*>(vehicle),[&](const void* object,const float*) noexcept { seen=seen || focus.Is(object); });
+            if(!seen)return false;
+            h->focus=focus;h->target=ObjRef{};h->tracked=ObjRef{};h->circleUntil=0;h->extend=false;
+            Log("HELI v=%p map command: focus %p",vehicle,focus.obj);
+            return true;
+        }
+        h->focus={};
         if(h->cmd.order==Order::none) {
             h->ownGuard=h->guard;
             std::memcpy(h->ownPost,h->post,12);std::memcpy(h->ownHold,h->hold,12);

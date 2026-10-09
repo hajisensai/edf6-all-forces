@@ -521,6 +521,9 @@ add_test(NAME jet_attack_runs COMMAND jet_obstacle_sim --selftest --out "${CMAKE
 # The NPC flyers' soft edge (src/airbound.h): its rules (airbound_check) and the jets' real flight code flown at the play
 # edge (jet_obstacle_sim --edge-suite).
 add_test(NAME jet_edge_suite COMMAND jet_obstacle_sim --edge-suite WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
+# Ground attack runs on a stock-size map, whose soft box is narrower than the strike's own run (jet_obstacle_sim
+# --strike-room-suite; the 2026-10-09 log's multirole jets that never fired).
+add_test(NAME jet_strike_room COMMAND jet_obstacle_sim --strike-room-suite --out "${CMAKE_BINARY_DIR}")
 # The play area's walls (src/playarea.h: the ground's edge found by map rays, the walls' turn), a jet flown out at them
 # offline (tools/play_area_check.cpp). Not part of the plugin build:
 # cmake --build build --target play_area_check && build\play_area_check.exe

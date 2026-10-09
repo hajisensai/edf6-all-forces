@@ -157,8 +157,8 @@ bool Give(Game& g,const Entry& e,const Command& order) noexcept {
     // A vehicle's module keeps one point (its post / anchor): a move or an attack-move reaches it as a guard of it.
     const Command c=e.owner==Owner::squad ? order : Command{mapcmd::VehicleCommandOf(order.order),{order.at[0],order.at[1],order.at[2]}};
     switch(e.owner) {
-    case Owner::heli: return HeliCommand(e.u.v,c);
-    case Owner::jet: return JetCommand(e.u.v,c);
+    case Owner::heli: return HeliCommand(e.u.v,c,g.focus);
+    case Owner::jet: return JetCommand(e.u.v,c,g.focus);
     case Owner::ground: return GroundCommand(e.u.v,c);
     case Owner::squad: {
         const auto result=NpcSquadCommandForRequester(ObjRef::Of(e.u.v),c,g.requester,g.focus);
@@ -241,6 +241,7 @@ bool Takes(const Entry& e,Order o) noexcept {
         return true;
     }
     if(e.owner==Owner::tank)return o==Order::none || mapcmd::PointOrder(o);
+    if(e.owner==Owner::heli || e.owner==Owner::jet)return mapcmd::AirOrder(o);
     return mapcmd::VehicleOrder(o);
 }
 

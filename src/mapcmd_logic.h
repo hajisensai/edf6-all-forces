@@ -34,6 +34,9 @@ inline bool PointOrder(Order o) noexcept { return o==Order::guard || o==Order::m
 inline bool VehicleOrder(Order o) noexcept { return o==Order::none || o==Order::follow || PointOrder(o); }
 // A vehicle's modules know one point order (their post / anchor): move and attack-move reach it as guard.
 inline Order VehicleCommandOf(Order o) noexcept { return PointOrder(o) ? Order::guard : o; }
+// Whether an aircraft unit (heli, jet) takes `o`: a vehicle's orders and focus fire on the marked enemy (the user,
+// 2026-10-09: "飞机没办法指定攻击目标"; jet.cpp / heli.cpp JetCommand / HeliCommand take it as a squad's focus).
+inline bool AirOrder(Order o) noexcept { return VehicleOrder(o) || o==Order::focus; }
 struct Command { Order order; float at[3]; };   // at: the point of a point order (on the ground)
 
 // --- The squads' moves under an order (npcai.cpp Drive), the player's command over the soldiers' own fight ---
