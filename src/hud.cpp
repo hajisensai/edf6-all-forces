@@ -32,6 +32,7 @@
 #include "hudtext.h"
 #include "layout.h"
 #include "memory.h"
+#include "player_view.h"
 #include "sight.h"
 #include "turretaim.h"
 #include "vecmath.h"
@@ -3070,7 +3071,20 @@ void KeepViewProj(const float* viewProj) noexcept {
     std::memcpy(lastViewProj,viewProj,sizeof(lastViewProj));hasViewProj=true;
     ReleaseSRWLockExclusive(&viewLock);
 }
+pview::Store playerViews{};   // under viewLock
 }  // namespace
+
+void KeepPlayerViewProj(const void* camera,const float* viewProj) noexcept {
+    if(!camera || !viewProj || MapOwnsView())return;   // as KeepViewProj: the map's camera is not the aim's view
+    const void* ref=nullptr;const void* soldier=nullptr;
+    __try {
+        if(!Readable(camera,0x368))return;
+        ref=At<const void*>(camera,0x350);soldier=At<const void*>(camera,0x360);   // map.cpp kCamTargetRef / kCamTarget
+    } __except(EXCEPTION_EXECUTE_HANDLER){return;}
+    AcquireSRWLockExclusive(&viewLock);
+    playerViews.Keep(ref,soldier,viewProj,GetTickCount64());
+    ReleaseSRWLockExclusive(&viewLock);
+}
 
 bool LastViewProj(float* out) noexcept {
     AcquireSRWLockShared(&viewLock);
@@ -3092,9 +3106,10 @@ void RowTimes(const float* h,const float* m,float* out) noexcept {
 
 // The camera's eye and its look through the screen's centre, from the last frame's view-projection (row vectors,
 // hud.cpp): the eye is where clip w is 0 with x and y (0, 0, 1, 0) x VP^-1), a point ahead the centre at mid depth.
-bool CameraRay(float* eye,float* dir) noexcept {
-    float vp[16],inv[16];
-    if(!LastViewProj(vp) || !Invert4(vp,inv))return false;
+namespace {
+bool RayOf(const float* vp,float* eye,float* dir) noexcept {
+    float inv[16];
+    if(!Invert4(vp,inv))return false;
     const float atEye[4]={0.0f,0.0f,1.0f,0.0f},ahead[4]={0.0f,0.0f,0.5f,1.0f};
     float e[4],a[4];
     RowTimes(atEye,inv,e);RowTimes(ahead,inv,a);
@@ -3104,6 +3119,18 @@ bool CameraRay(float* eye,float* dir) noexcept {
     const float probe[4]={eye[0]+dir[0]*100.0f,eye[1]+dir[1]*100.0f,eye[2]+dir[2]*100.0f,1.0f};
     float c[4];RowTimes(probe,vp,c);
     return c[3]>0.0f && std::isfinite(eye[0]+eye[1]+eye[2]);
+}
+}  // namespace
+bool CameraRay(float* eye,float* dir) noexcept {
+    float vp[16];
+    return LastViewProj(vp) && RayOf(vp,eye,dir);
+}
+bool CameraRayOf(const void* human,float* eye,float* dir) noexcept {
+    float vp[16];
+    AcquireSRWLockShared(&viewLock);
+    const bool ok=playerViews.Find(human,GetTickCount64(),vp);
+    ReleaseSRWLockShared(&viewLock);
+    return ok && RayOf(vp,eye,dir);
 }
 
 // --- The map view's marks (map.cpp; README 地图, docs/camera-re.md §8): drawn over the real world the map's camera

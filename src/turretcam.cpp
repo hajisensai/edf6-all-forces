@@ -215,7 +215,9 @@ const unsigned char* TurretGun(const unsigned char* vehicle,const unsigned char*
 // height with none.
 void ShotFocus(Shared& s) noexcept {
     s.focusValid=false;s.focusHit=false;
-    const auto gun=Gun(s.v,s.seat);
+    // The turret's gun (TurretGun), the one the turret is laid by: after the hull gatling's right trigger the overhead
+    // point must still be the cannon's, or the view handed back on leaving it (tcam::AimAt) puts the cannon off it.
+    const auto gun=TurretGun(s.v,s.seat);
     float muzzle[3],dir[3];
     if(!gun || !edf::MeanMuzzle(gun,64,muzzle,dir) || !vec::Normalize(dir))return;
     float end[3];

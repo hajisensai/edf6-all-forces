@@ -37,11 +37,12 @@ SpotCastFn stockSpot=nullptr;
 // ray. On foot, another soldier, the map's view or no camera yet: the stock arguments.
 bool SpotFromView(const unsigned char* soldier,float* origin,float* dir) noexcept {
     __try {
-        if(!Cfg().enabled || !soldier || soldier!=PlayerHuman() || !IsPlayer(soldier) || MapOwnsView())return false;
+        // Any local player (split screen's 2P too), with the view drawn for that soldier's own camera; none drawn: stock.
+        if(!Cfg().enabled || !soldier || !IsPlayer(soldier) || MapOwnsView())return false;
         const auto ctrl=At<const unsigned char*>(soldier,kSoldierVehicleCtrl);
         if(!ctrl || !Readable(ctrl,12) || At<std::int32_t>(ctrl,8)==0)return false;
         float eye[3],look[3];
-        return CameraRay(eye,look) && spotray::NativeArgs(eye,look,origin,dir);
+        return CameraRayOf(soldier,eye,look) && spotray::NativeArgs(eye,look,origin,dir);
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 void __fastcall SpotHook(void* soldier,const float* origin,const float* dir) {
