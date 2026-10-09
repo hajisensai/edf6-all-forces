@@ -20,7 +20,8 @@ int AutoTurretStabAware() noexcept;
 // turns (turretcam.cpp TurretGun). True: auto-aim holds a lock, `point` is where `gun`'s round meets it (the turret
 // camera steers onto it in place of the screen's centre); false: the view steers (no peer, the lead circle, no lock).
 bool PlayerTurretLead(const void* vehicle,unsigned seat,const void* gun,float* point) noexcept;
-// The stock spot (原版 Q 标记) cast by the local player from a vehicle goes along the camera actually drawn, not the stock
-// riding camera's locators (src/spot_ray.h): at load, the call 0x59B75C redirected (checked; else left stock).
+// The stock spot (原版 Q 标记) cast by a local player: not cast at all with VanillaSpot=0 (the default; the custom Q of
+// qmark.cpp replaces it), else from a vehicle along the camera actually drawn, not the stock riding camera's locators
+// (src/spot_ray.h): at load, the call 0x59B75C redirected (checked; else left stock).
 bool InstallSpotRay() noexcept;
 }  // namespace crew

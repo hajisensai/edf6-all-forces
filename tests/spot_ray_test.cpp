@@ -1,5 +1,7 @@
-// The stock spot (原版 Q 标记) from a vehicle on the production src/turretaim.cpp hook (src/spot_ray.h): the native cast
-// 0x5A1120 is a recorder; the soldier is stand-in memory. The local player riding gets the camera actually drawn (the
+// The stock spot (原版 Q 标记) on the production src/turretaim.cpp hook (src/spot_ray.h): the native cast 0x5A1120 is a
+// recorder; the soldier is stand-in memory. VanillaSpot=0 (the default): a local player's spot is never cast (the custom Q,
+// qmark.cpp, replaces it; the user, 2026-10-10), an NPC's / another machine's soldier's still is; the plugin off: stock.
+// VanillaSpot=1: the local player riding gets the camera actually drawn (the
 // segment 0x5A1120 casts starts on the eye and runs through the screen's centre); on foot, another soldier, the map's view
 // and no camera keep the stock arguments untouched (fb 2026-10-09 aim #3: "那个指向像是玩家默认视角指向的q").
 #include "../src/turretaim.cpp"
@@ -59,6 +61,7 @@ float OffSegment(float t) {
 
 int main() {
     stockSpot=&Recorder;testConfig.enabled=true;
+    Check(!Config{}.vanillaSpot,"VanillaSpot defaults to 0: the stock spot is off after an upgrade");
     alignas(16) unsigned char soldier[0x1600]{},other[0x1600]{},ctrl[16]{};
     human=soldier;
     soldier[edf::kHumanPlayer]=1;edf::Put<void*>(soldier,edf::kHumanPad,soldier);
@@ -66,6 +69,18 @@ int main() {
     edf::Put<int>(ctrl,8,1);
     alignas(16) const float stockOrigin[4]={3,4,5,1},stockDir[4]={0,0,1,0};
     const auto stockKept=[&](const void* who){return casts>0 && gotSoldier==who && std::memcmp(gotOrigin,stockOrigin,16)==0 && std::memcmp(gotDir,stockDir,16)==0;};
+    {   // VanillaSpot=0: no cast for a local player, on foot or riding, whatever the camera; an NPC's goes through.
+        alignas(16) unsigned char npc[0x1600]{};
+        casts=0;SpotHook(soldier,stockOrigin,stockDir);Check(casts==0,"VanillaSpot=0: a local player's spot on foot is not cast");
+        edf::Put<void*>(soldier,0x1550,ctrl);
+        casts=0;SpotHook(soldier,stockOrigin,stockDir);Check(casts==0,"VanillaSpot=0: a local player's spot riding is not cast");
+        casts=0;SpotHook(other,stockOrigin,stockDir);Check(casts==0,"VanillaSpot=0: 2P's spot is not cast either");
+        casts=0;SpotHook(npc,stockOrigin,stockDir);Check(stockKept(npc),"VanillaSpot=0: a soldier no local player drives: stock");
+        testConfig.enabled=false;casts=0;SpotHook(soldier,stockOrigin,stockDir);
+        Check(stockKept(soldier),"VanillaSpot=0 with the plugin off: the stock spot as it was");
+        testConfig.enabled=true;edf::Put<void*>(soldier,0x1550,nullptr);
+    }
+    testConfig.vanillaSpot=true;   // the stock spot asked back: the drawn camera's ray, as before
     // On foot: the stock spot as it was.
     SpotHook(soldier,stockOrigin,stockDir);Check(stockKept(soldier),"on foot: the stock eye and aim untouched");
     // Riding (soldier+0x1550's control block alive, the stock test): the drawn camera.

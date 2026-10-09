@@ -298,6 +298,8 @@ struct Config {
                                     // there) work their guns: ground vehicles (npcai.cpp), the 410's doors under a player pilot
     int npcMarkKey=0x51;            // ...on foot: marks the enemy nearest the screen's centre for the NPCs ('Q'; 0: off)
     float npcMarkCone=8.0f;         // ...within this many degrees of the centre
+    float qmarkPointSec=15.0f;      // the Q mark on the ground (no enemy aimed at) stays this many s (qmark.cpp)
+    bool vanillaSpot=false;         // the stock spot (原版 Q, SpotEffect): false = the local players' is not cast (turretaim.cpp)
     int npcFormation=0;             // the recruited squads' march round the player (formation.h Shape: 0 stock, 1 column...)
     int npcFormationKey=0x54;       // ...on foot: cycles it ('T'; 0: off; the map's T on a selected squad too)
     float npcFormationSpacing=5.0f; // ...m between soldiers
