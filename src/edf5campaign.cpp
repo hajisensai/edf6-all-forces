@@ -10,11 +10,16 @@
 // game's own handling of a mode. EDF5CampaignContent=0 (no packs installed): the native answer alone.
 // The test range (testrange/gen.py) is a mission pack of its own too, no longer laid over RM015: an offline and an
 // online mode sharing one content id, TestRangeContent (0: not installed), owned through the same hook.
+// Another plugin may have redirected a site first (EDF6Coop logs the lobby join's 0x8EC659 and loads before us, by
+// name): its call is chained, ours asking it instead of 0xD92B0. A site redirected inside EDF.dll is another build.
 #include "crew.h"
 #include "memory.h"
+#include "edf/host.h"
 #include <cstdint>
 #include <cstring>
+#include <array>
 #include <iterator>
+#include <utility>
 
 namespace crew {
 namespace {
@@ -35,6 +40,7 @@ constexpr unsigned kSites[]={
     0x91A655,   // (0x91A600)
 };
 bool campaignReady=false;
+OwnedFn prior[std::size(kSites)]{};   // what each site called before us: 0xD92B0, or another plugin's hook of it
 
 // first: the EDF5 packs' first id, range: the test range's id (each 0 when not installed).
 constexpr bool Ours(int id,int first,int range) noexcept {
@@ -43,31 +49,47 @@ constexpr bool Ours(int id,int first,int range) noexcept {
 static_assert(Ours(3,3,0) && Ours(5,3,0) && !Ours(6,3,0) && !Ours(2,3,0) && !Ours(0,0,0) && !Ours(3,0,0));
 static_assert(Ours(7,3,7) && !Ours(6,3,7) && Ours(4,0,4) && !Ours(0,0,0) && !Ours(5,0,4));
 
-bool __fastcall OwnedHook(std::uintptr_t mgr,int id) {
-    if(reinterpret_cast<OwnedFn>(image+kOwned)(mgr,id))return true;
+// One hook per site, each asking what that site called before (so a chained plugin still sees every call).
+template<std::size_t I> bool __fastcall OwnedHook(std::uintptr_t mgr,int id) {
+    if(prior[I](mgr,id))return true;
     return campaignReady && Ours(id,Cfg().edf5CampaignContent,Cfg().testRangeContent);
 }
+template<std::size_t... I> constexpr auto Hooks(std::index_sequence<I...>) { return std::array<OwnedFn,sizeof...(I)>{&OwnedHook<I>...}; }
+constexpr auto kHooks=Hooks(std::make_index_sequence<std::size(kSites)>{});
 
-bool Calls(unsigned site,unsigned target) noexcept {
-    const unsigned char* p=image+site;
-    if(!Readable(p,5) || p[0]!=0xE8)return false;
+// The rel32 call's target at `site`, nullptr when it is no call.
+unsigned char* CallTarget(unsigned site) noexcept {
+    unsigned char* p=image+site;
+    if(!Readable(p,5) || p[0]!=0xE8)return nullptr;
     std::int32_t rel;
     std::memcpy(&rel,p+1,4);
-    return p+5+rel==image+target;
+    return p+5+rel;
+}
+// The native lookup, or another plugin's redirect of it (outside EDF.dll); not a different call inside it.
+bool Chainable(const unsigned char* target) noexcept {
+    return target && (target==image+kOwned || target<image || target>=image+edf::kImageSize);
 }
 }  // namespace
 
 // All or nothing: a pack enabled in the dialog but refused where another call asks is worse than stock.
 bool InstallEdf5Campaign() noexcept {
-    if(campaignReady)return true;
+    // Once: after a partial install our own thunks would look like another plugin's redirect (chained to itself).
+    static bool tried=false;
+    if(tried)return campaignReady;
+    tried=true;
     if(!Matches(kOwned,kOwnedSig,sizeof(kOwnedSig))){Log("HOOK edf5 campaign=0 (EDF+%#x does not match)",kOwned);return false;}
-    for(unsigned site:kSites)
-        if(!Calls(site,kOwned)){Log("HOOK edf5 campaign=0 (EDF+%#x is no call to EDF+%#x)",site,kOwned);return false;}
+    unsigned char* targets[std::size(kSites)]{};
+    for(std::size_t i=0;i<std::size(kSites);++i) {
+        targets[i]=CallTarget(kSites[i]);
+        if(!Chainable(targets[i])){Log("HOOK edf5 campaign=0 (EDF+%#x is no call to EDF+%#x)",kSites[i],kOwned);return false;}
+    }
     int done=0;
-    for(unsigned site:kSites) {
+    for(std::size_t i=0;i<std::size(kSites);++i) {
+        prior[i]=reinterpret_cast<OwnedFn>(targets[i]);
+        if(targets[i]!=image+kOwned)Log("EDF5 call site %#x already redirected (another plugin): chained",kSites[i]);
         bool changed=false;
-        if(RedirectCall(image+site,image+kOwned,reinterpret_cast<void*>(&OwnedHook),changed))++done;
-        else Log("EDF5 call site %#x %s",site,changed ? "half patched" : "not patched");
+        if(RedirectCall(image+kSites[i],targets[i],reinterpret_cast<void*>(kHooks[i]),changed))++done;
+        else Log("EDF5 call site %#x %s",kSites[i],changed ? "half patched" : "not patched");
     }
     // A near-thunk allocation/protection failure can occur after earlier calls were redirected. Keep those
     // redirected calls on the native answer until every call is installed, including a half-written call.
