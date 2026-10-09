@@ -96,7 +96,14 @@ void Session::ClearTransactions() noexcept {
     nextTransaction_=0;requests_.fill(0);lastRequestAt_.fill(0);nextRequest_=0;
     replies_.fill(Reply{});localReply_={};
 }
-void Session::Stop() noexcept { ClearTransactions();running_=false;suspended_=false;epoch_=0;challenge_=0;challenges_.fill(0);peerMissions_.fill(0); }
+void Session::Stop() noexcept {
+    ClearTransactions();running_=false;suspended_=false;epoch_=0;challenge_=0;challenges_.fill(0);peerMissions_.fill(0);peerCaps_.fill(0);
+}
+bool Session::PeersHave(std::uint32_t caps) const noexcept {
+    if(!host_)return true;
+    for(std::uint32_t i=1;i<=peers_;++i)if((peerCaps_[i]&caps)!=caps)return false;
+    return true;
+}
 bool Session::HasSpawned() const noexcept {
     for(const auto& t:transactions_)if(t.spawned && t.phase!=Phase::cancelled)return true;
     return false;
@@ -258,7 +265,7 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
     if(!running_ || !peer || peer>peers_ || !ValidMessage(m))return;
     if(host_ && m.kind==Kind::hello) {
         if(m.request<peerMissions_[peer] || (m.request==peerMissions_[peer] && challenges_[peer]!=m.challenge))return;
-        peerMissions_[peer]=m.request;
+        peerMissions_[peer]=m.request;peerCaps_[peer]=m.index;
         if(challenges_[peer] && challenges_[peer]!=m.challenge) {
             if(HasSpawned()){Suspend();return;}
             if(epochSerial_==UINT32_MAX){Stop();return;}
@@ -333,7 +340,7 @@ void Session::Tick(std::uint64_t now) noexcept {
     // Keep the challenge alive after establishment too: a welcome whose local
     // enqueue failed during another member's mission reset must be recoverable.
     if(!host_ && now-lastHello_>=1000) {
-        Message m;m.kind=Kind::hello;m.challenge=challenge_;m.request=missionSerial_;Send(hostPeer_,m);lastHello_=now;
+        Message m;m.kind=Kind::hello;m.challenge=challenge_;m.request=missionSerial_;m.index=kCapabilities;Send(hostPeer_,m);lastHello_=now;
     }
     for(std::uint32_t id=1;id<=kMaxTransactions;++id) {
         auto& t=transactions_[id-1];

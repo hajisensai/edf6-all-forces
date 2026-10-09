@@ -153,8 +153,20 @@ unsigned AirCrew(const SupportAircraft& spec) noexcept {
 }
 // The aircraft one call brings: the configured number (SupportAircraftCount_<key>) or the call's own, never past the
 // plan's 16 units (each aircraft with its real crew).
+// Whether this plan may use the configuration's weapons and aircraft counts: every peer of the session accepts them
+// (support_net.h SupportPeersAcceptVariants). Otherwise an older peer's Validate refuses the plan mid-transaction
+// with no reason anyone sees, so the host plans its protocol v2 plan and says why (once a request, logged).
+bool legacyNoticed=false;
+bool UseConfiguredLoadout() noexcept {
+    if(SupportPeersAcceptVariants())return true;
+    if(!legacyNoticed) {
+        legacyNoticed=true;
+        Log("SUPPORT plan: a peer runs an older All Forces (no soldier-weapon capability): rifles and default aircraft counts");
+    }
+    return false;
+}
 int AircraftCount(std::uint32_t catalog,const SupportAircraft& spec,unsigned group) noexcept {
-    const int chosen=catalog<static_cast<unsigned>(kSupportConfigUnits) ? SupportCfg().aircraft[catalog] : 0;
+    const int chosen=catalog<static_cast<unsigned>(kSupportConfigUnits) && UseConfiguredLoadout() ? SupportCfg().aircraft[catalog] : 0;
     const int most=static_cast<int>(support_net::kMaxUnits/group);
     const int wanted=chosen>0 ? chosen : spec.count;
     return wanted<1 ? 1 : wanted>most ? most : wanted;
@@ -162,6 +174,7 @@ int AircraftCount(std::uint32_t catalog,const SupportAircraft& spec,unsigned gro
 // The infantry's resources (configured weapons, support_config.h): member i of a 4 / 12-person request.
 std::uint32_t InfantryResource(bool platoon,unsigned i) noexcept {
     const auto& c=SupportCfg();
+    if(!UseConfiguredLoadout())return i%4==0 ? kSupportLeaderResource : kSupportRangerResource;
     if(i%4==0)return SupportSoldierResource(c.leader,true);
     return SupportSoldierResource(platoon ? c.platoon[(i/4)%3] : c.squad,false);
 }
@@ -178,6 +191,7 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,SupportPl
     if(!SupportSoldiersReady()){Refuse(catalog,"support soldiers not ready",SupportSoldierFailureText());return PlanResult::refused;}
     if(!planning.active || planning.catalog!=catalog || std::memcmp(planning.target,target,12)!=0) {
         planning={};planning.active=true;planning.catalog=catalog;std::memcpy(planning.target,target,12);
+        legacyNoticed=false;
     }
     SupportPlan plan{};plan.catalogId=catalog;std::memcpy(plan.target,target,12);
     if(catalog<static_cast<unsigned>(AirCount())) {
@@ -199,7 +213,7 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,SupportPl
             return PlanResult::refused;
         }
         // Aircraft are queued along a verified entry strip, not created above the destination.
-        const auto crew=SupportSoldierResource(SupportCfg().aircraftCrew,false);
+        const auto crew=UseConfiguredLoadout() ? SupportSoldierResource(SupportCfg().aircraftCrew,false) : kSupportRangerResource;
         for(int i=0;i<spec.count;++i) {
             float at[3]={route.from[0]+route.heading[0]*static_cast<float>(i)*65.0f,route.from[1],
                          route.from[2]+route.heading[2]*static_cast<float>(i)*65.0f};
@@ -258,7 +272,8 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,SupportPl
         entry[1]+=0.1f;
         if(!AddUnit(plan,kVehicle+static_cast<unsigned>(kind),0,entry,heading) ||
            !AddCrew(plan,1,entry,heading,mode==SupportCrewMode::unmanned ? 1u : spec->seats,spec->halfWidth,
-                    SupportSoldierResource(SupportCfg().vehicleCrew,false),0.55f))return nextEdge("no level ground for the crew");
+                    UseConfiguredLoadout() ? SupportSoldierResource(SupportCfg().vehicleCrew,false) : kSupportRangerResource,0.55f))
+            return nextEdge("no level ground for the crew");
     } else {
         const bool platoon=catalog!=static_cast<unsigned>(AirCount());
         const unsigned count=platoon ? 12u : 4u;
@@ -505,7 +520,12 @@ SupportReadiness SupportCallReadiness() noexcept {
     return {SupportReady::ready,0};
 }
 void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept {
-    if(out && capacity)_snwprintf_s(out,capacity,_TRUNCATE,L"%ls",localRequest.shown ? localRequest.text : status);
+    if(!out || !capacity)return;
+    // The last plan fell back for an older peer: said beside every later status of it (why the configured weapons and
+    // counts did not come), until the next request or mission.
+    if(legacyNoticed)_snwprintf_s(out,capacity,_TRUNCATE,L"%ls（%ls）",localRequest.shown ? localRequest.text : status,
+                                  hudtext::Tr(hudtext::Tx::supportLegacyPeers));
+    else _snwprintf_s(out,capacity,_TRUNCATE,L"%ls",localRequest.shown ? localRequest.text : status);
 }
 void SupportDispatchTick() noexcept {
     if(dispatchFrame==GameFrame())return;
@@ -638,6 +658,7 @@ void SupportDispatchTick() noexcept {
 void ResetSupportDispatch() noexcept {
     // Mission reset invalidates the old objects; do not delete through last mission's borrowed pointers.
     planning={};for(auto& row:deployments)row={};offlinePending=false;callAt=0;nextOffline=1;status[0]=0;configNoticeShown=false;
+    legacyNoticed=false;
     localRequest={};
     dispatchFrame=~ULONGLONG{0};
     ResetMissionCrewSupport();

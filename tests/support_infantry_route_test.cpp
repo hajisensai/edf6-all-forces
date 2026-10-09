@@ -44,6 +44,7 @@ void SupportNetTick() noexcept{}
 void ResetSupportNet() noexcept{}
 void ReportSupportFailure(std::uint64_t) noexcept{}
 bool SupportTransactionActive(std::uint64_t) noexcept{return supportSessionActive;}
+bool SupportPeersAcceptVariants() noexcept{return true;}
 bool ValidateMissionCrewPlan(const SupportPlan&) noexcept{return false;}
 bool ApplyMissionCrewPlan(std::uint64_t,const SupportPlan&,bool) noexcept{return false;}
 void DestroyMissionCrewPlan(std::uint64_t) noexcept{}

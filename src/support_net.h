@@ -41,6 +41,10 @@ void SupportNetTick() noexcept;
 void ResetSupportNet() noexcept;
 void ReportSupportFailure(std::uint64_t transaction) noexcept;
 bool SupportTransactionActive(std::uint64_t transaction) noexcept;
+// Whether every peer of the running support session accepts configured soldier weapons and aircraft counts
+// (support_protocol.h kCapSoldierVariants); true offline / with no session. The host's planner falls back to the
+// protocol v2 plan (rifles, each call's own number of aircraft) otherwise, and says so.
+bool SupportPeersAcceptVariants() noexcept;
 // Requester ownership: native EOS PUID must equal the authenticated transport
 // sender and belong to the sealed current-world participant set.
 bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) noexcept;

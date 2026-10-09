@@ -96,3 +96,9 @@
 - 根因：审计用 `LoadLibraryExW(..., DONT_RESOLVE_DLL_REFERENCES)` 私有映射 EDF.dll，加载器不建隐式 TLS、CRT 启动不运行。`776AB0` 的 CRC 表是 MSVC 线程安全局部静态：经 `gs:[58h][_tls_index]`（`_tls_index` RVA 213A670，映射中恒为 0）读本线程 `_Init_thread_epoch`，实际读到的是 Python 进程自己 TLS 槽 0 偏移 20h 的任意值。值“够大”时跳过构建、用全零 CRC 表算出非原生的哈希（测试照样通过）；值“偏小”时进入 `_Init_thread_header`，调用未解析的 `EnterCriticalSection` IAT 槽——槽里是导入名 RVA `0x1F52128`，正是各组看到的 access violation 地址。与并发无关，取决于进程里那块 TLS 内容。
 - 修法（只改测试夹具，不放宽、不重试）：按加载器/CRT 的职责为私有映像准备它用到的部分——从映像自己的 TLS 模板建 TLS 块、解析 KERNEL32 导入、初始化 CRT 线程安全静态用的临界区与事件；调用时由一段机器码 thunk 在原生代码内部临时把 `gs:[58h]` 换成映像的 TLS 数组、返回前换回（不能在 Python 里换：CPython 3.13 的线程状态本身用隐式 TLS，ctypes 调用路径就会读它）。新增断言：原生静态初始化真的建出了标准 CRC-32 表、并把 epoch 写回了该 TLS 块。
 - 验证：并发 3 路 × 5 轮共 15 次全部通过；此前单跑也会挂。
+
+## 附：新旧版本混房（整合审查【中】，另一提交）
+- 问题：配置武器使用新兵员资源号（如大队默认 rocket 0x201、sniper 0x401），旧版客户端的 `Validate` 只认 1/2，而线上协议版本没变：新房主 + 旧客户端呼叫大队时，旧客户端在事务中途拒绝，界面只显示“未受理/取消”，原因不可见；配置的飞机架数同理（旧 `Validate` 要求等于默认架数）。
+- 取舍：不提升 `EDF6AF_SupportProtocolVersion`/线上 `kVersion`。配套 EDF6Coop 只认 `version()==2` 和 `af-support/2`，提升会让整个扩展传输失效、所有联机支援都不可用；提升线上版本则旧新双方互相丢包，只能看到“联机支援尚未就绪”，同样看不到原因。改为**能力协商**：客户端在 hello 的 `index` 字段宣告 `kCapSoldierVariants`（v2 线格式不变，旧房主的同一校验接受、忽略该字段；旧客户端发 0）。房主 `Session::PeersHave` 只有在本局所有对端都宣告该能力时才按配置的武器/架数规划；否则回退为协议 v2 的计划（步枪资源号 1/2、各呼叫默认架数），支援照常出动，并在房主 HUD（`hudtext.inc supportLegacyPeers`）和日志（`SUPPORT plan: a peer runs an older All Forces ...`）说明“房间里有旧版，本次兵员用步枪、默认架数”。同版本房间行为不变。
+- 限制：提示显示在规划的房主机器上；若请求者是另一台新版客户端，它只看到受理/出动状态，看不到回退原因（旧客户端也无从显示新文字）。
+- 测试：`support_protocol_test` Capabilities（能力 hello 在 v2 线格式往返、线版本仍为 2；全新房间 PeersHave 为真；含旧客户端的房间握手照常、PeersHave 为假且 v2 计划被所有端接受并生成；对端更新后以最新 hello 为准）；`support_dispatch_test`（旧对端时大队/小队为步枪 2/1、飞机为默认架数和步枪机组、整个计划只含 v2 资源号、HUD 含说明、关卡重置后清除）。

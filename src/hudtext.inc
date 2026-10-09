@@ -467,6 +467,7 @@ HUDTEXT(cmdNpcNetworkInterrupted,L"This command lost its mission/session context
 HUDTEXT(cmdNpcNetworkUnavailable,L"Authority command transport is not available yet",L"权威端联机指挥尚未就绪，请确认双方版本与本关同步",L"權威端連線指揮尚未就緒，請確認雙方版本與本關同步",L"通信指揮の準備が未完了です。バージョンと同期を確認してください")
 HUDTEXT(cmdNpcNetworkLimit,L"Select at most 16 remote squads; no partial batch was sent",L"一次最多选择 16 个远端小队，本次未截断发送",L"一次最多選擇 16 個遠端小隊，本次未截斷傳送",L"遠隔部隊は一度に16部隊までです。一部だけの送信は行いません")
 HUDTEXT(supportInfantryTransferred,L"Infantry support is now under its new squad orders",L"步兵支援已交由新的小队命令控制",L"步兵支援已交由新的小隊命令控制",L"歩兵支援は新しい部隊命令に従います")
+HUDTEXT(supportLegacyPeers,L"Support: an older All Forces in the room, so rifles and the call's own aircraft count this time",L"支援：房间里有旧版全军出击，本次兵员用步枪、飞机按默认架数（武器/架数配置未同步）",L"支援：房間裡有舊版全軍出擊，本次兵員用步槍、飛機按預設架數（武器/架數設定未同步）",L"支援：旧版の全軍出撃の参加者がいるため、今回は小銃と既定の機数で出撃します")
 HUDTEXT(supportInfantryArrived,L"Infantry support has arrived and is guarding the destination",L"步兵支援已抵达并守卫目的地",L"步兵支援已抵達並守衛目的地",L"歩兵支援が到着し目的地を警戒しています")
 
 HUDTEXT(mapPayloadTitle,L"LOADOUT - click bright rows to select",L"挂载：点击亮色条目切换",L"掛載：點擊亮色項目切換",L"兵装：明るい行をクリックして選択")
