@@ -368,6 +368,11 @@ def release_imports() -> None:
     assert not missing, f'tools/build_release.py: hidden imports missing {missing}'
     excluded = rel.split("cmd += ['--exclude-module', mod]", 1)[0].rsplit('for mod in ', 1)[1]
     assert "'PIL'" not in excluded, 'procedural model textures require Pillow in the released installer'
+    # and installed where the exe is built: build_release refuses without it, CI installs it
+    bundled = rel.split('BUNDLED = ', 1)[1].split('\n', 1)[0]
+    assert "'PIL'" in bundled and "'numpy'" in bundled, 'build_release.BUNDLED: numpy and Pillow'
+    ci = src('.github/workflows/build.yml')
+    assert re.search(r'pip install [^\n]*\bnumpy pillow\b', ci), 'CI installs numpy and pillow before the installer is built'
 
 
 @test
@@ -5002,7 +5007,7 @@ def edf5_campaign_range_pack() -> None:
     packs), each a copy of the stock story mode of its kind; one row each, row 0 (open from the start), no successor,
     naming the range's folder with RM015's row values (flags 8: the Air Raider's requests arrive; the ruined world's
     rows do not); texts and thumbnails per kind, the mode names in every text table. Without the campaign it is the
-    only pack, with the first free id; and the stock story's lists are never written."""
+    only pack, at the same id (a room's mode is its content id); and the stock story's lists are never written."""
     import mdb
     import rootcpk
     import sgo
@@ -5012,7 +5017,7 @@ def edf5_campaign_range_pack() -> None:
     stock = sgo.plain(sgo.read(game.read('DEFAULTPACKAGE', 'CONFIG.SGO'))[1]['ModeList'])
     rm015 = next(r for r in dsgo.parse(game.read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO')).root.get('table').items
                  if r.items[2] == 'EDF6/RM015')
-    for campaign, want in ((True, e5c.Contents(3, 6)), (False, e5c.Contents(0, 3))):
+    for campaign, want in ((True, e5c.Contents(3, 6)), (False, e5c.Contents(0, 6))):
         files, content, _ = e5c.build(rootcpk.DEFAULT_GAME, campaign=campaign)
         assert content == want, (campaign, content)
         assert set(files) == {e5c.CONFIG, *e5c.TEXTS.values(),

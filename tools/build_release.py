@@ -111,9 +111,25 @@ def plugin_data() -> list[str]:
     return [name + ext for name, _ in installer.PLUGINS for ext in installer.PLUGIN_FILES]
 
 
+# Third-party packages the installer imports at run time: PyInstaller bundles what this Python has, and a missing
+# one is not an error to it. Without Pillow the frozen installer died generating the jets (procmesh.albedos,
+# ModuleNotFoundError: PIL) on every release built by CI from 2026-10-05 on.
+BUNDLED = (('numpy', 'numpy'), ('PIL', 'pillow'))
+
+
+def check_bundled() -> None:
+    """Fails the build when a package of BUNDLED is not installed in this Python."""
+    import importlib.util
+    missing = [pip for mod, pip in BUNDLED if importlib.util.find_spec(mod) is None]
+    if missing:
+        raise SystemExit(f'build_release: {", ".join(missing)} not installed in {sys.executable}; the installer needs '
+                         f'it at run time (python -m pip install {" ".join(missing)})')
+
+
 def build_exe(name: str) -> str:
     """name: the zip's name without .zip, bundled as plugin/build_info.json (the installer shows it, and its
     menu 3 compares it with the test site's newest build)."""
+    check_bundled()
     seps = os.pathsep
     os.makedirs(WORK, exist_ok=True)
     info = os.path.join(WORK, 'build_info.json')
