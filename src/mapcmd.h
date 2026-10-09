@@ -108,7 +108,7 @@ constexpr std::uint8_t kCmdOwnerHeli=0,kCmdOwnerJet=1,kCmdOwnerGround=2;
 struct CmdMark { float pos[3]; Command now; bool selected,air,locked; std::uint8_t owner; char name[24]; };
 // The support catalog as the map's bar shows it (copied on the game thread: the draw reads no support state).
 constexpr int kMapSupports=48;
-struct MapSupportEntry { wchar_t name[40]; SupportIcon icon; };
+struct MapSupportEntry { wchar_t name[40]; SupportIcon icon; SupportVariant variant; };
 struct MapCommandReadout {
     bool allowed;              // command framework enabled; each target still validates authority and execution
     bool all;                  // every unit selected (more than one)

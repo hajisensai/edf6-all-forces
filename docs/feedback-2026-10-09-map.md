@@ -38,7 +38,7 @@ M 地图把「坐在载具里的士兵」当作一支步行的自由小队来画
 ### 修法（只改地图 UI 与调用接口，不改支援后端逻辑）
 
 - **支援栏**（`hud.cpp MapSupportBar`，纯布局 `map_buttons.h GroupSupport / Column`）：地图左侧、小队面板下方一列。目录名按「·」前的部分分组（`截击机·守点 / ·跟随` 一行），每行一个矢量图标 + 名称，变体在行右端做成小图标块（守点=盾、跟随=箭头、有人=人头、空车交付=空框）。点行或块 = 武装这项支援（亮起），下一次左键点地图就是目的地，右键取消；标题行显示调度状态（冷却 N 秒 / 调度中 / 不可用，不可用时整列变暗）；鼠标悬停显示完整名称和用法。键盘 `[` `]` `C` 照旧。
-- **支援的调用接口**（`src/support_call.h`，实现在 `support_dispatch.cpp` 末尾，只读）：`SupportCallIcon(index)`（按 `SupportAircraftSpec` 的机型 / 步兵 / 地面车种给图标种类）、`SupportCallReadiness()`（读 `SupportCallAt` 本来就查的 `offlinePending` / `callAt` 冷却 / 联机，不改任何状态）。
+- **支援的调用接口**（`src/support_call.h`，实现在 `support_dispatch.cpp` 末尾，只读）：`SupportCallIcon(index)`（按 `SupportAircraftSpec` 的机型 / 步兵 / 地面车种给图标种类）、`SupportCallVariant(index)`（守点 / 跟随取自 `SupportAircraftSpec.follow`，有人 / 空车交付取自地面目录的 `SupportCrewMode`；变体图标不靠匹配目录文字，HUD 源码里不留字面文字，`selftest hud_text_localized`）、`SupportCallReadiness()`（读 `SupportCallAt` 本来就查的 `offlinePending` / `callAt` 冷却 / 联机，不改任何状态）。
 - **命令卡**（`hud.cpp MapButtons`）：按钮 = 图标 + 短词，**只显示当前选中单位能执行的命令**（`mapbtn::Shown`，没选中时只剩「拾取箱子」「回复箱」），按键与完整说明移到悬停提示（`MapTipSet / MapTipDraw`，最后画、盖在最上面）。
 - **精简**：底部按键说明从两行并成一行（没选中时是一句操作提示）；图例收成右下角「图例 ▾」小标签，悬停展开。
 - 文字行上限 `kMaxLines` 96 → 160（地图的面板、命令卡、支援栏、提示全在同一帧）。

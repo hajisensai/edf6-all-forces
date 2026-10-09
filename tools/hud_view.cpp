@@ -445,7 +445,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         {L"坦克·空车交付",SupportIcon::tank},{L"装甲运兵车·有人",SupportIcon::apc},{L"装甲运兵车·空车交付",SupportIcon::apc},
         {L"民用轻卡·有人",SupportIcon::truck},{L"民用轻卡·空车交付",SupportIcon::truck}};
     sceneCmd.supports=static_cast<int>(sizeof(kCatalog)/sizeof(kCatalog[0]));
-    for(int i=0;i<sceneCmd.supports;++i){wcscpy_s(sceneCmd.support[i].name,kCatalog[i].name);sceneCmd.support[i].icon=kCatalog[i].icon;}
+    for(int i=0;i<sceneCmd.supports;++i){wcscpy_s(sceneCmd.support[i].name,kCatalog[i].name);sceneCmd.support[i].icon=kCatalog[i].icon;const wchar_t* v=mapbtn::VariantOf(kCatalog[i].name);sceneCmd.support[i].variant=!v ? SupportVariant::none : std::wcscmp(v,L"守点")==0 ? SupportVariant::guard : std::wcscmp(v,L"跟随")==0 ? SupportVariant::follow : std::wcscmp(v,L"有人")==0 ? SupportVariant::crewed : SupportVariant::empty;}
     sceneCmd.supportArmed=payload ? 3 : -1;sceneCmd.supportPick=3;
     sceneCmd.supportReady=payload ? SupportReadiness{SupportReady::cooldown,17} : SupportReadiness{SupportReady::ready,0};
     if(payload)wcscpy_s(sceneCmd.supportStatus,L"Support route ready - select a visible entry on the map");

@@ -619,7 +619,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     r.supports=(std::min)(SupportCallCount(),kMapSupports);
     for(int i=0;i<r.supports;++i) {
         _snwprintf_s(r.support[i].name,_countof(r.support[i].name),_TRUNCATE,L"%ls",SupportCallName(i));
-        r.support[i].icon=SupportCallIcon(i);
+        r.support[i].icon=SupportCallIcon(i);r.support[i].variant=SupportCallVariant(i);
     }
     r.supportReady=SupportCallReadiness();
     SupportCallStatus(r.supportStatus,_countof(r.supportStatus));

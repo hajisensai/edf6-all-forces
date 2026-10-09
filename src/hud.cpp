@@ -3664,18 +3664,17 @@ void MapSupportIcon(void* d,void* c,SupportIcon icon,float x,float y,float h,flo
         break;
     }
 }
-// A variant chip's icon (the catalog's word after the "·"): guarding a point, following the player, a crew aboard, an
-// empty vehicle delivered; any other: its first character.
-void MapVariantIcon(void* d,void* c,Text* text,const wchar_t* variant,float x,float y,float h,float s,const float* rgba,
-                    Line* lines,int* at) noexcept {
-    if(!variant)return;
-    if(std::wcsstr(variant,L"守")){MapOrderIcon(d,c,mapbtn::Id::guard,x,y,h,s,rgba);return;}       // 守
-    if(std::wcsstr(variant,L"跟")){MapOrderIcon(d,c,mapbtn::Id::follow,x,y,h,s,rgba);return;}      // 跟
-    if(std::wcsstr(variant,L"空")){MapBox(d,c,x,y,h*0.4f,1.6f*s,rgba);return;}                     // 空
-    if(std::wcsstr(variant,L"有人")) {                                                          // 有人
-        Arc(d,c,x,y-h*0.15f,h*0.18f,0.0f,kTurn,1.6f*s,8,rgba);Seg(d,c,x-h*0.3f,y+h*0.35f,x+h*0.3f,y+h*0.35f,1.6f*s,rgba);return;
+// A variant chip's icon (support_call.h SupportCallVariant: the catalog's own data, never its words): guarding a point,
+// following the player, a crew aboard, an empty vehicle delivered.
+void MapVariantIcon(void* d,void* c,SupportVariant variant,float x,float y,float h,float s,const float* rgba) noexcept {
+    switch(variant) {
+    case SupportVariant::guard: MapOrderIcon(d,c,mapbtn::Id::guard,x,y,h,s,rgba);break;
+    case SupportVariant::follow: MapOrderIcon(d,c,mapbtn::Id::follow,x,y,h,s,rgba);break;
+    case SupportVariant::empty: MapBox(d,c,x,y,h*0.4f,1.6f*s,rgba);break;
+    case SupportVariant::crewed:
+        Arc(d,c,x,y-h*0.15f,h*0.18f,0.0f,kTurn,1.6f*s,8,rgba);Seg(d,c,x-h*0.3f,y+h*0.35f,x+h*0.3f,y+h*0.35f,1.6f*s,rgba);break;
+    case SupportVariant::none: Rect(d,c,x-h*0.12f,y-h*0.12f,x+h*0.12f,y+h*0.12f,rgba);break;
     }
-    Label(text,lines,at,x,y,1,kLineScale*0.6f,rgba,L"%lc",variant[0]);
 }
 
 // The command card (map_buttons.h; the user, 2026-10-09: "可以参考各大rts游戏"): an icon and a short word for each order
@@ -3698,7 +3697,7 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
     const std::uint32_t orders=c.allowed && c.selected>0 ? c.allowedOrders : 0u;
     const bool tools=c.allowed && c.squadToolsAllowed && c.selectedSquads>0;
     const float scale=kLineScale*0.7f;
-    int ids[n];float w[n];int shown=0;
+    int shownIds[n];float w[n];int shown=0;
     const wchar_t* word[n]{};
     for(int i=0;i<n;++i) {
         const Id b=static_cast<Id>(i);
@@ -3707,16 +3706,16 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
         Line probe{};Format(probe,L"%ls",word[shown]);probe.scale=scale;
         if(text)MeasureAll(*text,&probe,1);
         const float textW=text ? probe.w : static_cast<float>(wcslen(probe.text))*9.0f*s;
-        w[shown]=(2.0f*kBtnPad+kBtnIcon+6.0f)*s+textW;ids[shown++]=i;
+        w[shown]=(2.0f*kBtnPad+kBtnIcon+6.0f)*s+textW;shownIds[shown++]=i;
     }
     mapbtn::Rect r[n]{};
     const int rows=mapbtn::Flow(w,shown,width,height-kBtnBottom*s,kBtnRowH*s,kBtnGap*s,kBtnMargin*s,r);
     if(rows>0)MapUiBox(drawer,ctx,0,height-(kBtnBottom+static_cast<float>(rows)*(kBtnRowH+kBtnGap)+8.0f)*s,width,height-104.0f*s,lines,*at);
-    float rects[n*4];int placed=0,placedIds[n];
+    float rects[n*4];int placed=0,ids[n];
     for(int k=0;k<shown;++k) {
         const mapbtn::Rect& q=r[k];
         if(!(q.x1>q.x0))continue;   // no room for its row
-        const Id b=static_cast<Id>(ids[k]);
+        const Id b=static_cast<Id>(shownIds[k]);
         const bool lit=(c.armedOrder && mapbtn::IsOrder(b) && mapbtn::Arms(b) && c.armed==mapbtn::OrderOf(b)) ||
                        (b==Id::sweep && c.sweepOn) || (b==Id::health && c.healthOn);
         const bool hover=c.pointer && c.px>=q.x0 && c.px<q.x1 && c.py>=q.y0 && c.py<q.y1;
@@ -3734,11 +3733,11 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
         else if(b==Id::health)_snwprintf_s(full,_countof(full),_TRUNCATE,L"%ls",Tr(c.healthOn ? Tx::btnHealthOn : Tx::btnHealthOff));
         else _snwprintf_s(full,_countof(full),_TRUNCATE,L"%ls",word[k]);
         if(b==Id::move)MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::tipRightClick),full);
-        else if(mapbtn::Arms(b))MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::tipArms),full,kKey[ids[k]]);
-        else MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::tipKey),full,kKey[ids[k]]);
-        rects[placed*4]=q.x0;rects[placed*4+1]=q.y0;rects[placed*4+2]=q.x1;rects[placed*4+3]=q.y1;placedIds[placed++]=ids[k];
+        else if(mapbtn::Arms(b))MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::tipArms),full,kKey[shownIds[k]]);
+        else MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::tipKey),full,kKey[shownIds[k]]);
+        rects[placed*4]=q.x0;rects[placed*4+1]=q.y0;rects[placed*4+2]=q.x1;rects[placed*4+3]=q.y1;ids[placed++]=shownIds[k];
     }
-    MapCommandButtons(rects,placedIds,placed);
+    MapCommandButtons(rects,ids,placed);
     return rows;
 }
 
@@ -3786,8 +3785,9 @@ void MapSupportBar(void* drawer,void* ctx,Text* text,float width,float s,float t
         if(lit || hover)Rect(drawer,ctx,q.x0,q.y0,q.x1,q.y1,lit ? kBtnLit : kMapBoxFill);
         const float mid=(q.y0+q.y1)*0.5f;
         MapSupportIcon(drawer,ctx,c.support[g.first].icon,q.x0+(4.0f+kSupIcon*0.5f)*s,mid,kSupIcon*s,s,tint);
-        wchar_t base[40];const int len=mapbtn::BaseLength(names[g.first]);
-        _snwprintf_s(base,_countof(base),_TRUNCATE,L"%.*ls",len,names[g.first]);
+        wchar_t base[40]{};   // the name before its "·" (map_buttons.h BaseLength)
+        const int most=static_cast<int>(_countof(base))-1,len=mapbtn::BaseLength(names[g.first])<most ? mapbtn::BaseLength(names[g.first]) : most;
+        std::wmemcpy(base,names[g.first],static_cast<std::size_t>(len));
         const float textRight=g.count>1 ? chip[g.first].x0-4.0f*s : q.x1-4.0f*s;
         Label(text,lines,at,q.x0+(8.0f+kSupIcon)*s,mid,0,kLineScale*0.7f,tint,L"%ls",base);
         if(*at>0)MapFitLabel(text,lines[*at-1],q.x0+(8.0f+kSupIcon)*s,textRight);
@@ -3806,7 +3806,7 @@ void MapSupportBar(void* drawer,void* ctx,Text* text,float width,float s,float t
             const float t=1.2f*s;const float* edge=lit ? kWhite : kMapOrderDim;
             Seg(drawer,ctx,q.x0,q.y0,q.x1,q.y0,t,edge);Seg(drawer,ctx,q.x1,q.y0,q.x1,q.y1,t,edge);
             Seg(drawer,ctx,q.x1,q.y1,q.x0,q.y1,t,edge);Seg(drawer,ctx,q.x0,q.y1,q.x0,q.y0,t,edge);
-            MapVariantIcon(drawer,ctx,text,mapbtn::VariantOf(names[e]),(q.x0+q.x1)*0.5f,(q.y0+q.y1)*0.5f,(q.y1-q.y0)*0.8f,s,tint,lines,at);
+            MapVariantIcon(drawer,ctx,c.support[e].variant,(q.x0+q.x1)*0.5f,(q.y0+q.y1)*0.5f,(q.y1-q.y0)*0.8f,s,tint);
             MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::supportTip),names[e]);
             hit(q,e);
         }
