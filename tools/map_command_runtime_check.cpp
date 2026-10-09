@@ -64,8 +64,8 @@ bool MapGroundNear(float,float,float level,float* out,bool) noexcept {*out=level
 int HeliCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int JetCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int GroundCommandUnits(CommandUnit*,int) noexcept { return 0; }
-bool HeliCommand(const void*,const Command&) noexcept { return false; }
-bool JetCommand(const void*,const Command&) noexcept { return false; }
+bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }
+bool JetCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }
 bool GroundCommand(const void*,const Command&) noexcept { return false; }
 bool HeliSharesPost() noexcept { return true; }
 // One stand-in squad (when `squadOn`), its last order; the enemies the lock registry would list; the mark npcai.cpp keeps.

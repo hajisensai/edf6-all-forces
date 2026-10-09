@@ -442,15 +442,34 @@ int JetCommandUnits(CommandUnit* out,int most) noexcept {
     __try {
         const ULONGLONG ms=GameMs();
         for(const auto& j:jets)
-            if(n<most && Commandable(j,ms) && ReadCommandUnit(j.ref,KindOf(j).name,j.cmd,true,&out[n]))++n;
+            if(n<most && Commandable(j,ms) &&
+               ReadCommandUnit(j.ref,KindOf(j).name,j.focus ? Command{Order::focus,{0.0f,0.0f,0.0f}} : j.cmd,true,&out[n]))++n;
     } __except(EXCEPTION_EXECUTE_HANDLER){}
     return n;
 }
 
-bool JetCommand(const void* vehicle,const Command& c) noexcept {
+namespace {
+// Whether `focus` is among the enemies of jet `v` now (a focus order's target, as npcai.cpp checks a squad's).
+struct FocusSeen { ObjRef focus; bool seen; };
+void SeeFocus(void* ctx,const void* object,const float*) noexcept {
+    auto& f=*static_cast<FocusSeen*>(ctx);
+    if(f.focus.Is(object))f.seen=true;
+}
+}  // namespace
+
+// The map's orders (mapcmd.cpp Give). guard / follow / release: ApplyMapCommand. focus: `focus` (the enemy the player
+// marked) attacked first, its order kept (ApplyMapFocus); refused when that is no enemy of it now.
+bool JetCommand(const void* vehicle,const Command& c,const ObjRef& focus) noexcept {
     __try {
         Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle));
         if(!j || !Commandable(*j,GameMs()))return false;
+        if(c.order==Order::focus) {
+            FocusSeen seen{focus,false};
+            if(!focus || !VisitEnemies(j->Vehicle(),&SeeFocus,&seen) || !seen.seen)return false;
+            ApplyMapFocus(*j,focus,GameMs());
+            Log("JET v=%p map command: focus %p",vehicle,focus.obj);
+            return true;
+        }
         ApplyMapCommand(*j,c,GameMs());
         Log("JET v=%p map command: %s (%.0f,%.0f,%.0f)",vehicle,c.order==Order::guard ? "guard" : c.order==Order::follow ? "follow" : "release",
             c.at[0],c.at[1],c.at[2]);
@@ -518,7 +537,7 @@ void JetFrame(unsigned char* v) noexcept {
 
     // The target and its motion.
     const float targetRange=ordered ? kOrderRange : j->reach>0.0f ? j->reach : TargetRange(kind);
-    const bool moving=MapCommandMoving(*j,pos,anchor,targetRange);
+    const bool moving=!j->focus && MapCommandMoving(*j,pos,anchor,targetRange);   // a focus order: at it first
     if(!moving && j->mode!=Mode::withdraw && j->mode!=Mode::takeoff && j->mode!=Mode::recover)PickTarget(*j,v,pos,anchor,targetRange,dt,ms);
     else j->t.target=nullptr;
     if(j->t.target){const float to[3]={j->t.aim[0]-pos[0],j->t.aim[1]-pos[1],j->t.aim[2]-pos[2]};PickStore(arms,j->t.flyer,Len(to));}

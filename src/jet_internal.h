@@ -308,6 +308,9 @@ struct Aim {
     ULONGLONG trackFrame;    // GameFrame of tgtPrev (PickTarget: the velocity from one frame's move only)
     ULONGLONG seenTarget;    // game ms it last had a target
     float out[3];            // extend / run-out / crank direction
+    float outRun;            // m from the target its extend flies out to (Strike: PlanExtend, the room it has)
+    float outAt[3];          // a teardrop extend's turn point (outTear): beside the line out, outRun along it
+    bool outTear;            // its extend is a teardrop to outAt (a box too small to fly straight out and round)
     ULONGLONG missileAt;     // its last missile salvo
     ULONGLONG lockAt;        // game ms the nose came onto the target within kMissileCone (0: not on it)
     ULONGLONG lockSeen;      // standing off with missiles: game ms the lock list last held a target (0: not)
@@ -441,6 +444,10 @@ struct Jet {
     PrimerState primer;
     bool cmdMoving=false;       // reach a new map order before taking another target
     Command cmd{};              // a map command (JetCommand, mapcmd.cpp): what it works round instead (jet.cpp JetFrame)
+    // A map focus order's target (JetCommand: the enemy the player marked, as a squad's focus takes it): attacked before
+    // any other, wherever in the play area, past its order's range and its way to its order's point; let go once it is no
+    // longer among the enemies (dead, gone: PickTarget) or another order comes. Its point and its order stay as they were.
+    ObjRef focus{};
     unsigned char* Vehicle() const noexcept { return static_cast<unsigned char*>(const_cast<void*>(ref.obj)); }
 };
 constexpr int kMaxJets=64,kPatrolRings=6;
@@ -450,7 +457,17 @@ inline int IndexOf(const Jet& j) noexcept { return static_cast<int>(&j-jets); }
 
 // Retargeting abandons an old attack but preserves ammunition cooldowns and lifecycle flight modes.
 inline void ApplyMapCommand(Jet& j,const Command& cmd,ULONGLONG ms) noexcept {
-    j.cmd=cmd;j.cmdMoving=cmd.order!=Order::none;
+    j.cmd=cmd;j.cmdMoving=cmd.order!=Order::none;j.focus={};
+    j.t.target=nullptr;j.t.trackFrame=0;j.t.lockAt=0;j.t.lockSeen=0;
+    j.carrier.stationFor=nullptr;j.carrier.evadeUntil=0;
+    if(j.mode!=Mode::takeoff && j.mode!=Mode::withdraw && j.mode!=Mode::recover && j.mode!=Mode::bomb)
+        {j.mode=Mode::patrol;j.modeAt=ms;}
+}
+
+// A map focus order: `target` attacked first (Jet::focus); the order and the point it works round are kept. The attack it
+// flew is abandoned as a new order's is (ApplyMapCommand).
+inline void ApplyMapFocus(Jet& j,const ObjRef& target,ULONGLONG ms) noexcept {
+    j.focus=target;
     j.t.target=nullptr;j.t.trackFrame=0;j.t.lockAt=0;j.t.lockSeen=0;
     j.carrier.stationFor=nullptr;j.carrier.evadeUntil=0;
     if(j.mode!=Mode::takeoff && j.mode!=Mode::withdraw && j.mode!=Mode::recover && j.mode!=Mode::bomb)
@@ -527,6 +544,8 @@ void Guard(Jet& j,const float* pos,float clear,float* want,ULONGLONG ms) noexcep
 airbound::Box JetSoftBox(const Jet& j,float* band=nullptr) noexcept;
 // m/s: the most a wing of kind `k` flies inside a play area of half size `half` (turns that fit it; jet_flight.cpp).
 float TightSpeed(const Kind& k,float half) noexcept;
+// m: its turn's radius at `speed` with its stores' `mass` (the g its thrust holds, kTurnWide).
+float TurnRadiusOf(const Kind& k,float mass,float speed) noexcept;
 // The anchor it works round, put inside its soft box less its patrol circle (`room` holds the copy when it moved).
 const float* SoftAnchor(const Jet& j,const float* anchor,float* room) noexcept;
 void HoldOffGround(Jet& j,const float* pos,float clear,float dt,ULONGLONG ms,float rest=0.0f) noexcept;

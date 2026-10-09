@@ -101,6 +101,10 @@ int main() {
     check(HeliCommand(vehicle,Command{Order::follow,{}}),"follow accepted");
     const float leader[3]={1000,0,1000};
     check(CommandMoving(h,pos,leader),"follow first joins the player instead of retaining its old fight");
+    // The map's focus order (2026-10-09): nothing marked, refused; a focus held is let go by the next order.
+    check(!HeliCommand(vehicle,Command{Order::focus,{}},ObjRef{}),"focus with no marked enemy is refused");
+    h.focus=ObjRef::Of(enemy);
+    check(HeliCommand(vehicle,Command{Order::follow,{}}) && !h.focus,"another order lets the focus target go");
     // Enhanced door gunners are independent of local pilot controls; the online aim hook is required online only.
     alignas(16) unsigned char gunSeats[3*edf::kSeatStride]{},remotePilot[0x500]{};
     image=reinterpret_cast<unsigned char*>(0x10000000);

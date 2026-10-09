@@ -76,8 +76,8 @@ int GroundCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int TankCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int SquadCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int SquadRows(SquadRow*,int,SquadTally* tally) noexcept { if(tally)*tally=SquadTally{};return 0; }
-bool HeliCommand(const void*,const Command&) noexcept { return false; }
-bool JetCommand(const void*,const Command&) noexcept { return false; }
+bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }
+bool JetCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }
 bool GroundCommand(const void*,const Command&) noexcept { return false; }
 bool TankCommand(const void*,const Command&) noexcept { return false; }
 bool SquadCommand(const void*,const Command&) noexcept { return false; }

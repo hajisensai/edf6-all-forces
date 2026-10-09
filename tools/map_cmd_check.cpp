@@ -237,6 +237,8 @@ int main() {
     Check(Decide(1,off,true,point,true).cmd.order==Order::dismount,"dismount");
     Check(VehicleOrder(Order::guard) && VehicleOrder(Order::follow) && VehicleOrder(Order::none),"vehicles: guard, follow, release");
     Check(!VehicleOrder(Order::engage) && !VehicleOrder(Order::dismiss) && !VehicleOrder(Order::board),"vehicles: no squad orders");
+    Check(!VehicleOrder(Order::focus) && AirOrder(Order::focus) && AirOrder(Order::guard) && AirOrder(Order::none) &&
+          !AirOrder(Order::engage) && !AirOrder(Order::board),"aircraft: a vehicle's orders and focus fire, no other squad order");
 
     // --- The formation.
     float out[3];

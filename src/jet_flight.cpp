@@ -568,7 +568,15 @@ void SoftEdge(Jet& j,const float* pos,float* want) noexcept {
     float band=0.0f;
     const airbound::Box soft=JetSoftBox(j,&band);
     const bool was=j.m.edgeBack;
-    airbound::KeepIn(soft,pos,j.m.vel,r,react,want,&j.m.edgeBack,&j.m.edgeTurn);
+    // A gun dive at a point on the ground inside the soft box keeps its line: it ends at that point (Strike pulls out
+    // gunClose short of it), and the band past the soft line holds its turn's reach (JetSoftBox), so the pull-out turns
+    // back inside the play edge as any turn there does. Bent by the edge (eased off outward, or levelled flying back in)
+    // the nose never came onto the lead: on a stock map (soft box +-960 m, the target's whole run within the edge's ease)
+    // three called multirole jets dived 64 times in 4 minutes with the nose 15-60 deg off it and fired no gun (2026-10-09
+    // log). The edge's state still follows the jet (KeepIn on a copy); the pull-out is the edge's again.
+    float kept[3]={want[0],want[1],want[2]};
+    const bool dive=j.mode==Mode::dive && j.t.target && !j.t.flyer && airbound::Depth(soft,j.t.aim)>=0.0f;
+    airbound::KeepIn(soft,pos,j.m.vel,r,react,dive ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);
     if(j.m.edgeBack!=was)
         Log("JET v=%p %s the soft edge at (%.0f,%.0f): soft x %.0f..%.0f z %.0f..%.0f, band %.0f, %.0f m/s%s",j.Vehicle(),
             was ? "back inside" : "past",pos[0],pos[2],soft.lo[0],soft.hi[0],soft.lo[1],soft.hi[1],band,s,was ? "" : ": back in first");

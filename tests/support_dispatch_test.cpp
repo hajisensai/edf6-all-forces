@@ -123,8 +123,8 @@ bool NpcReleaseVehicleCrew(unsigned char*) noexcept {++releases;return true;}
 bool SquadCommand(const void*,const Command&) noexcept {++orders;return true;}
 bool NpcPrepareSquadRoute(unsigned char*,const float*,float) noexcept {++routeOrders;return true;}
 bool NpcFinishSquadRoute(unsigned char*,const float*) noexcept {return true;}
-bool HeliCommand(const void*,const Command&) noexcept {return true;}
-bool JetCommand(const void*,const Command&) noexcept {return true;}
+bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept {return true;}
+bool JetCommand(const void*,const Command&,const ObjRef&) noexcept {return true;}
 PlayArea MapPlayArea() noexcept {return {{-1500,-1500},{1500,1500},true,0,true};}
 bool MapGroundNear(float,float,float,float* y,bool) noexcept {*y=0;return terrain;}
 #ifndef SUPPORT_ROUTE_NATIVE_TEST
