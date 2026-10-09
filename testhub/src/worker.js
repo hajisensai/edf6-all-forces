@@ -4,33 +4,44 @@
 //  - the developer's replies sit under each report.
 // Everything is behind a login (ACCOUNTS secret); scripts and the installer use HTTP Basic instead of the cookie.
 import { parseAccounts, checkLogin, makeSession, readSession, basicUser } from './auth.js';
+import { HttpError, json, body } from './http.js';
+import { planRoute } from './plan.js';
+import MISSIONS from './missions.json' with { type: 'json' };
 
 const MAX_UPLOAD = 95 * 1024 * 1024;        // the Workers request limit is 100 MB
 const RESULTS = ['pass', 'fail', 'new', 'info'];
 const STATUSES = ['todo', 'verify', 'pass', 'fail', 'closed'];
-const PUBLIC_ASSETS = new Set(['/login.html', '/style.css']);
+const PUBLIC_ASSETS = new Set(['/login.html', '/login.js', '/style.css']);
 const SESSION_DAYS = 60;
 
 export default {
   async fetch(request, env) {
     try {
-      return await route(request, env);
+      return secured(await route(request, env));
     } catch (e) {
-      if (e instanceof HttpError) return json({ error: e.message }, e.status);
+      if (e instanceof HttpError) return secured(json({ error: e.message }, e.status));
       console.error(e && e.stack || e);
-      return json({ error: 'internal error' }, 500);
+      return secured(json({ error: 'internal error' }, 500));
     }
   },
 };
 
-class HttpError extends Error {
-  constructor(status, message) { super(message); this.status = status; }
-}
+// Every response: no framing, no sniffing, no referrer leaving the site, and for pages only the site's own script and style (no
+// inline script at all, so text a player wrote can never run even if some page forgot to treat it as text).
+const SECURITY = {
+  'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; "
+    + "form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+  'x-content-type-options': 'nosniff',
+  // same-origin, not no-referrer: under no-referrer the browser sends `Origin: null` with its own form posts (the
+  // login), which the cross-site check below would refuse.
+  'referrer-policy': 'same-origin',
+  'x-frame-options': 'DENY',
+};
 
-function json(body, status = 200, headers = {}) {
-  return new Response(JSON.stringify(body), {
-    status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers },
-  });
+function secured(response) {
+  const out = new Response(response.body, response);
+  for (const [k, v] of Object.entries(SECURITY)) out.headers.set(k, v);
+  return out;
 }
 
 async function who(request, env, accounts) {
@@ -45,6 +56,10 @@ async function route(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
   const method = request.method;
+
+  // Writes come from this site's own pages or from scripts (no Origin): a page elsewhere cannot post here.
+  const origin = request.headers.get('origin');
+  if (method !== 'GET' && method !== 'HEAD' && origin && origin !== url.origin) throw new HttpError(403, 'cross-site request');
 
   if (path === '/login' && method === 'POST') return login(request, env, accounts);
   if (path === '/logout') return redirect('/login.html', { 'set-cookie': 's=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax' });
@@ -67,8 +82,16 @@ async function route(request, env) {
   if (path === '/api/case' && method === 'POST') { need(dev); return json(await saveCase(request, env)); }
   if (path === '/api/build' && method === 'PUT') { need(dev); return json(await putBuild(request, env, url)); }
   if (path === '/api/reports' && method === 'GET') { need(dev); return json(await reportsSince(env, Number(url.searchParams.get('since') || 0))); }
+  if (path === '/api/plan' || path.startsWith('/api/plan/')) {
+    const out = await planRoute(request, env, me, MISSIONS, groupsOf(accounts), path, url);
+    if (out) return json(out);
+  }
   if (method === 'GET') return env.ASSETS.fetch(path === '/' ? new Request(new URL('/index.html', url), request) : request);
   throw new HttpError(404, 'not found');
+}
+
+function groupsOf(accounts) {
+  return [...new Set([...accounts.values()].map((a) => a.group))].sort();
 }
 
 function redirect(to, headers = {}) {
@@ -92,7 +115,7 @@ async function state(env, me) {
     env.DB.prepare('SELECT * FROM reports ORDER BY id DESC LIMIT 200').all(),
     env.DB.prepare('SELECT id, report_id, name, size FROM files WHERE report_id >= (SELECT COALESCE(MIN(id),0) FROM (SELECT id FROM reports ORDER BY id DESC LIMIT 200))').all(),
   ]);
-  return { me: { user: me.user, role: me.role }, builds: builds.results, cases: cases.results, reports: attach(reports.results, files.results) };
+  return { me: { user: me.user, role: me.role, group: me.group }, builds: builds.results, cases: cases.results, reports: attach(reports.results, files.results) };
 }
 
 function attach(reports, files) {
@@ -172,10 +195,6 @@ async function report(request, env, me) {
     await env.DB.prepare("UPDATE cases SET status = 'fail', updated_at = ?2 WHERE id = ?1").bind(caseId, Date.now()).run();
   }
   return { id: row.id, files: files.length };
-}
-
-async function body(request) {
-  try { return await request.json(); } catch { throw new HttpError(400, 'JSON body expected'); }
 }
 
 async function reply(request, env) {

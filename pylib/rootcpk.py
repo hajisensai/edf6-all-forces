@@ -17,11 +17,12 @@ DEFAULT_GAME = gamedir.find_or_dev()
 
 
 class Game:
-    """Read-only view of the game's Root.cpk."""
+    """Read-only view of the game's Root.cpk (or another of its archives: Chunk01.cpk / Chunk02.cpk hold more of the
+    objects)."""
 
-    def __init__(self, root: str) -> None:
+    def __init__(self, root: str, archive: str = 'Root.cpk') -> None:
         self.root = root
-        self.cpk = cpk.Cpk(os.path.join(root, 'Root.cpk'))
+        self.cpk = cpk.Cpk(os.path.join(root, archive))
 
     def _key(self, folder: str, name: str) -> tuple[str, str]:
         for k in self.cpk.index:
