@@ -53,4 +53,54 @@ Refusal AirRoute(const PlayArea& area,const float* target,const float* observer,
     }
     return found ? Refusal::none : Refusal::noEntry;
 }
+
+// Ground support must prove a complete route with the bounded planner (ground_navigation.h: +-256 cells round its
+// origin, kNodes nodes) before anything is created. A stock map's edges stand 1100-1700 m from a central target, past
+// that bound: every edge search ran out of nodes after ~1 min of planning and the request was refused (2026-10-09:
+// nothing came, online or not). So the entries are candidates on rings round the target, inside the measured play
+// area, still kMinJourney from the target and kObserverClear from the caller, within the planner's reach.
+constexpr float kGroundRings[]={650.0f,800.0f,950.0f};
+constexpr int kGroundRingCount=static_cast<int>(sizeof(kGroundRings)/sizeof(kGroundRings[0]));
+constexpr int kGroundBearings=8,kGroundEntryMost=kGroundRingCount*kGroundBearings;
+constexpr float kGroundPlanCell=4.0f;   // the support route profiles' cell (support_dispatch.cpp)
+static_assert(kGroundRings[kGroundRingCount-1]+kEntryInset<256*kGroundPlanCell,"every ring entry within the planner's square");
+static_assert(kGroundRings[0]>=kMinJourney,"a visible journey from every entry");
+struct GroundEntries { float at[kGroundEntryMost][2]{}; int count=0; };
+// Valid candidates, nearest ring first and within a ring the farthest from the caller first (less pop-in).
+inline GroundEntries GroundEntryCandidates(const PlayArea& area,const float* target,const float* observer) noexcept {
+    GroundEntries out;
+    if(!area.ground || !std::isfinite(target[0]+target[2]))return out;
+    for(int ring=0;ring<kGroundRingCount;++ring) {
+        const int first=out.count;
+        for(int b=0;b<kGroundBearings;++b) {
+            const float a=6.28318531f*static_cast<float>(b)/kGroundBearings;
+            const float p[3]={target[0]+std::cos(a)*kGroundRings[ring],target[1],target[2]+std::sin(a)*kGroundRings[ring]};
+            if(p[0]<area.lo[0]+kEntryInset || p[0]>area.hi[0]-kEntryInset || p[2]<area.lo[1]+kEntryInset || p[2]>area.hi[1]-kEntryInset)continue;
+            if(observer && FlatDistance(p,observer)<kObserverClear)continue;
+            out.at[out.count][0]=p[0];out.at[out.count][1]=p[2];++out.count;
+        }
+        // Stable insertion sort of this ring: farther from the caller first.
+        for(int i=first+1;i<out.count;++i)for(int j=i;j>first;--j) {
+            const float pj[3]={out.at[j][0],0,out.at[j][1]},pk[3]={out.at[j-1][0],0,out.at[j-1][1]};
+            if(!observer || FlatDistance(pj,observer)<=FlatDistance(pk,observer))break;
+            for(int k=0;k<2;++k){const float t=out.at[j][k];out.at[j][k]=out.at[j-1][k];out.at[j-1][k]=t;}
+        }
+    }
+    return out;
+}
+
+// A runway / landing pad for a manned aircraft starting on the ground: the same rule a wing's landing strip uses
+// (playerjet_board.inc StripCost: within 4 m of its start, 1.5 m between neighbouring samples ~25 m apart). The old
+// 0.5 m over 220 x 90 m demanded a billiard table no real map edge offers. `height(i)` the ground of sample i of
+// `count` along one lane; false when a sample has no ground.
+constexpr float kRunwayRise=4.0f,kRunwayStepRise=1.5f;
+template<class Height> bool RunwayLaneLevel(int count,float start,Height height) noexcept {
+    float last=start;
+    for(int i=0;i<count;++i) {
+        float g;
+        if(!height(i,g) || !std::isfinite(g) || std::fabs(g-start)>kRunwayRise || std::fabs(g-last)>kRunwayStepRise)return false;
+        last=g;
+    }
+    return true;
+}
 } // namespace crew::support

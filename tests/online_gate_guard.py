@@ -134,7 +134,7 @@ def check_damage(root: str) -> None:
     if 'if(!InSession() || IsPlayer(owner))SupportCallAt(' not in radio:
         fail("src/airstrike.cpp RadioStartHook: a remote radio replay can submit a duplicate support request")
     support = code_only(read(root, 'src/support_dispatch.cpp'))
-    dispatch = body(support, 'bool Spawn(')
+    dispatch = body(support, 'bool SpawnDeployment(')
     if 'RegisterSupportObject(vehicle,unit.netId)' not in dispatch or 'HoldSupportSoldier(object,true)' not in dispatch or \
             'NpcBoardCrew(' in dispatch or 'FollowSupportSoldier(' in dispatch:
         fail('support spawn must register native IDs and hold new crew without emitting cross-channel boarding or follow work')
@@ -185,9 +185,12 @@ def check_calls(root: str) -> None:
     code = code_only(read(root, 'src/airstrike.cpp'))
     dispatch = code_only(read(root, 'src/support_dispatch.cpp'))
     request = body(dispatch, 'bool SupportCallAt(')
-    if not before(request, 'else if(InSession())', 'SubmitSupportRequest(') or not before(request, 'SubmitSupportRequest(', 'else if(offlinePending)'):
+    if not before(request, 'else if(InSession() && !LocalAuthority())', 'SubmitSupportRequest(') or             not before(request, 'SubmitSupportRequest(', 'else if(offlinePending)'):
         fail('online support must go through the reliable host-planned deployment protocol')
-    spawn = body(dispatch, 'bool Spawn(')
+    # The only local deployment in a session: the host of a world with no other participant (no peer to replicate to).
+    if 'bool LocalAuthority() noexcept {return !InSession() || SupportSoloHostWorld();}' not in dispatch:
+        fail('a local support deployment in a session must be limited to the host of a one-participant world')
+    spawn = body(dispatch, 'bool SpawnDeployment(')
     if 'unit.matrix' not in spawn or 'PlanAirSupport(' in spawn or 'player.pos' in spawn:
         fail('peers must apply explicit support matrices, never recalculate entry against their own player')
     call_of = body(code, 'const Call* CallOf(')

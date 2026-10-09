@@ -50,6 +50,7 @@
 #include "playerjet_kinds.h"
 #include "pjet_catch.h"
 #include "pjet_handling.h"
+#include "hail_glide.h"
 #include "vecmath.h"
 #include "warn.h"
 #include <cmath>

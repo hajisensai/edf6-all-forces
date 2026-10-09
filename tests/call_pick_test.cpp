@@ -17,7 +17,13 @@ float MapRay(const float* from,const float* to,float* hit) noexcept {
     if(to[1]<from[1] && to[1]<0 && from[1]>0){hit[0]=from[0];hit[1]=0;hit[2]=from[2];return 0.5f;}
     return -1;
 }
-bool MapGroundNear(float,float,float,float* out,bool) noexcept {*out=0;return supportGround;}
+// Ground height under (x, z): flat by default; `supportSlope` m per m rising from the map's centre (every runway
+// starts at an edge heading for the target, so it climbs that grade); `supportStep` a ledge every 30 m outward.
+float supportSlope=0,supportStep=0;
+bool MapGroundNear(float x,float z,float,float* out,bool) noexcept {
+    const float r=std::sqrt(x*x+z*z);
+    *out=r*supportSlope+(static_cast<int>(r/30.0f)%2 ? supportStep : 0.0f);return supportGround;
+}
 bool SupportCallAt(int,const float*,wchar_t*,std::size_t) noexcept {return false;}
 bool testOnline=true;
 const Config& Cfg() noexcept { return config; }
@@ -182,21 +188,30 @@ int main() {
     Put<std::uint64_t>(weapon,kWeaponRxSeed,callnet::Encode(0ull,3));
     Check(CallOf(ifc,remote)==nullptr,"a stock call is never converted, whatever its seed carries");
     const float supportTarget[3]={0,0,0},observer[3]={0,0,100};support::Route route;
-    Check(PlanAirSupport(0,supportTarget,observer,&route)==support::Refusal::none && route.from[1]==0,
+    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::none && route.from[1]==0,
           "production entry planner prepares a real ground runway, not an airborne spawn");
     supportSky=false;
-    Check(PlanAirSupport(0,supportTarget,observer,&route)==support::Refusal::noSky,"a roof above the destination refuses air support");
+    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::noSky,"a roof above the destination refuses air support");
     supportSky=true;supportGround=false;
-    Check(PlanAirSupport(0,supportTarget,observer,&route)==support::Refusal::noEntry,"air corridor alone cannot substitute for a landing pad");
+    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::noEntry,"air corridor alone cannot substitute for a landing pad");
     supportGround=true;supportMeasured=false;
-    Check(PlanAirSupport(0,supportTarget,observer,&route)==support::Refusal::noArea,"unmeasured bounds cannot be used as actual entry ground");
+    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::noArea,"unmeasured bounds cannot be used as actual entry ground");
     supportMeasured=true;
     supportSea=Sea::water;
-    Check(PlanAirSupport(0,supportTarget,observer,&route)==support::Refusal::noEntry,"a flat seabed cannot be used as an aircraft runway");
+    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::noEntry,"a flat seabed cannot be used as an aircraft runway");
     supportSea=Sea::unknown;
-    Check(PlanAirSupport(0,supportTarget,observer,&route)==support::Refusal::noEntry,"unknown water geometry cannot authorize ground deployment of aircraft");
+    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::noEntry,"unknown water geometry cannot authorize ground deployment of aircraft");
     supportSea=Sea::land;
-    Check(PlanAirSupport(16,supportTarget,observer,&route)==support::Refusal::unsupported,"stationary submarine model cannot fake a physical entry");
+    // A real map edge is never a billiard table (2026-10-09: no air support ever came). The runway rule is the landing
+    // strip's: a gentle grade passes, a ledge or a steep hillside does not.
+    supportSlope=0.01f;   // 1 %: ~2.6 m over the whole 260 m
+    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::none,"a gently sloping real edge is a usable runway");
+    supportSlope=0.05f;   // 5 %: far past 4 m within the strip
+    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::noEntry,"a hillside is no runway");
+    supportSlope=0;supportStep=2.0f;
+    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::noEntry,"a 2 m ledge across the strip is no runway");
+    supportStep=0;
+    Check(PlanAirSupport(16,supportTarget,observer,&route,0)==support::Refusal::unsupported,"stationary submarine model cannot fake a physical entry");
     // Installation against a private image with the supported native bomber signatures. A restored
     // legacy takeover installs successfully here and mutates these bytes/vtable, failing this check.
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2000000,MEM_RESERVE|MEM_COMMIT,PAGE_EXECUTE_READWRITE));

@@ -1,4 +1,5 @@
 #include "support_soldier.h"
+#include "support_call.h"
 #include "memory.h"
 #include "online_authority.h"
 #include <cmath>
@@ -10,7 +11,19 @@ constexpr unsigned kInitVtable=0x1762068;
 constexpr unsigned kRegister=0x781950,kDeriveId=0x776790;
 constexpr std::size_t kNetworkManager=0x20B2AC8;
 constexpr std::size_t kObjectManager=0x20B2958,kPreloadManager=0x20B29A8;
-constexpr const wchar_t* kBodies[]={L"app:/object/N601_COMMON_RANGER_AF.sgo",L"app:/object/N601_COMMON_RANGER_AF_LEADER.sgo"};
+// The stock Ranger templates, [weapon][leader] in SupportWeapon order (support_call.h): one class, model and CAS, each
+// its own stock AI weapon (tests/support_soldier_native_audit.py reads them all from Root.cpk).
+constexpr const wchar_t* kBodies[kSupportWeaponCount][2]={
+    {L"app:/object/N601_COMMON_RANGER_AF.sgo",L"app:/object/N601_COMMON_RANGER_AF_LEADER.sgo"},
+    {L"app:/object/N601_COMMON_RANGER_FL.sgo",L"app:/object/N601_COMMON_RANGER_FL_LEADER.sgo"},
+    {L"app:/object/N601_COMMON_RANGER_RL.sgo",L"app:/object/N601_COMMON_RANGER_RL_LEADER.sgo"},
+    {L"app:/object/N601_COMMON_RANGER_SG.sgo",L"app:/object/N601_COMMON_RANGER_SG_LEADER.sgo"},
+    {L"app:/object/N601_COMMON_RANGER_SN.sgo",L"app:/object/N601_COMMON_RANGER_SN_LEADER.sgo"},
+};
+const wchar_t* Body(std::uint32_t resource) noexcept {
+    return IsSupportSoldierResource(resource) ?
+        kBodies[static_cast<int>(SupportSoldierWeapon(resource))][IsSupportLeaderResource(resource) ? 1 : 0] : nullptr;
+}
 struct alignas(16) InitParam { const void* vtable; unsigned char rest[0x28]; };
 static_assert(sizeof(InitParam)==0x30);
 using CreateFn=unsigned char*(__fastcall*)(void*,const float*,const wchar_t*,InitParam*);
@@ -69,7 +82,9 @@ bool Matrix(const float* m) noexcept {
     const float determinant=m[0]*(m[5]*m[10]-m[6]*m[9])-m[1]*(m[4]*m[10]-m[6]*m[8])+m[2]*(m[4]*m[9]-m[5]*m[8]);
     return determinant>0.99f;
 }
-bool Gate(bool replicated=false) noexcept {
+// `local`: an unregistered soldier this machine may own alone: offline, or the host of a world with no other
+// participant (support_dispatch.cpp LocalAuthority). Clients never create a local damaging copy.
+bool Gate(bool replicated=false,bool local=false) noexcept {
     if(faulted){failure=firstFault;return false;}
     failure=SupportSpawnFailure::none;
     if(!Cfg().enabled){failure=SupportSpawnFailure::disabled;return false;}
@@ -77,7 +92,7 @@ bool Gate(bool replicated=false) noexcept {
     if(!preloaded || !missionManager || At<void*>(image,kObjectManager)!=missionManager){failure=SupportSpawnFailure::mission;return false;}
     // CreateObject does not replicate creation. Until a reliable, ID-bound spawn event is installed,
     // registering just a host object would create an invisible client NPC and is deliberately rejected.
-    if((InSession() && !replicated) || (!replicated && !OnlineHostOnly())){failure=SupportSpawnFailure::onlineReplication;return false;}
+    if(!replicated && ((InSession() && !local) || !OnlineHostOnly())){failure=SupportSpawnFailure::onlineReplication;return false;}
     return true;
 }
 int SpawnFault(const char* stage,const EXCEPTION_POINTERS* error,const float* requested,const float* nativeMatrix,const void* soldier) noexcept {
@@ -92,9 +107,11 @@ int SpawnFault(const char* stage,const EXCEPTION_POINTERS* error,const float* re
         static_cast<unsigned>(reinterpret_cast<std::uintptr_t>(nativeMatrix)&15u),soldier);
     return EXCEPTION_EXECUTE_HANDLER;
 }
-bool Spawn(const float* matrix,bool leader,ObjRef* out,const unsigned char* netId=nullptr) noexcept {
+bool Spawn(const float* matrix,std::uint32_t resource,ObjRef* out,const unsigned char* netId=nullptr,bool local=false) noexcept {
     *out=ObjRef{};
-    if(!Gate(netId!=nullptr))return false;
+    if(!Gate(netId!=nullptr,local))return false;
+    const wchar_t* const body=Body(resource);
+    if(!body){failure=SupportSpawnFailure::transform;return false;}
     if(netId && (!InSession() || !Readable(netId,32) || At<unsigned>(netId,0xC)!=5 || !registerObject || !At<void*>(image,kNetworkManager))) {
         failure=SupportSpawnFailure::onlineReplication;return false;
     }
@@ -111,7 +128,7 @@ bool Spawn(const float* matrix,bool leader,ObjRef* out,const unsigned char* netI
         std::memcpy(nativeMatrix,matrix,sizeof(nativeMatrix));
         nativeInput=nativeMatrix;
         InitParam init{image+kInitVtable,{}};
-        soldier=create(missionManager,nativeMatrix,kBodies[leader ? 1 : 0],&init);
+        soldier=create(missionManager,nativeMatrix,body,&init);
         if(!soldier){failure=SupportSpawnFailure::create;return false;}
         stage="identity";
         const auto ctrl=At<unsigned char*>(soldier,kSelfCtrl);
@@ -189,7 +206,7 @@ void PreloadSupportSoldiers() noexcept {
         void* mgr=At<void*>(image,kPreloadManager);
         missionManager=At<void*>(image,kObjectManager);
         if(!mgr || !missionManager)return;
-        for(const wchar_t* path:kBodies)preload(mgr,path,2,-1);
+        for(const auto& pair:kBodies)for(const wchar_t* path:pair)preload(mgr,path,2,-1);
         preloaded=true;
     } __except(SpawnFault("preload",GetExceptionInformation(),nullptr,nullptr,nullptr)) {
         preloaded=false;RecordFault(SupportSpawnFailure::mission);
@@ -242,11 +259,15 @@ const wchar_t* SupportSoldierFailureText() noexcept {
 }
 bool SpawnSupportSoldier(const float* matrix,ObjRef* out) noexcept {
     if(!out)return false;
-    return support_native::Spawn(matrix,false,out);
+    return support_native::Spawn(matrix,kSupportRangerResource,out);
 }
 bool ApplySupportSoldierSpawn(const float* matrix,bool leader,const unsigned char* id,ObjRef* out) noexcept {
     if(!out)return false;
-    return support_native::Spawn(matrix,leader,out,id);
+    return support_native::Spawn(matrix,leader ? kSupportLeaderResource : kSupportRangerResource,out,id);
+}
+bool ApplySupportSoldierResource(const float* matrix,std::uint32_t resource,const unsigned char* id,bool local,ObjRef* out) noexcept {
+    if(!out)return false;
+    return support_native::Spawn(matrix,resource,out,id,local && !id);
 }
 bool RegisterSupportObject(const void* object,const unsigned char* id) noexcept {
     using namespace support_native;
@@ -330,7 +351,7 @@ bool SpawnSupportSquad(SupportSquadKind kind,const float* matrices,unsigned coun
     for(unsigned i=0;i<count;++i)if(!Matrix(matrices+16*i)){failure=SupportSpawnFailure::transform;return false;}
     for(unsigned i=0;i<count;++i) {
         const bool leader=i%4==0;
-        if(!Spawn(matrices+16*i,leader,&out->members[i]))break;
+        if(!Spawn(matrices+16*i,leader ? kSupportLeaderResource : kSupportRangerResource,&out->members[i]))break;
         ++out->count;
         if(leader)out->leaders[out->leaderCount++]=out->members[i];
         else {

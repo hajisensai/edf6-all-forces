@@ -519,12 +519,18 @@ bool SupportAircraftSpec(int catalog,SupportAircraft* out) noexcept {
     return true;
 }
 int SupportAirCallCount() noexcept { return kCallCount; }
+// The call's configuration key: its weapon row id without EDF6VC_CALL_ (INTERCEPTOR, HELI_F, ...).
+const wchar_t* SupportAirCallKey(int index) noexcept {
+    constexpr std::size_t prefix=12;   // L"EDF6VC_CALL_"
+    return index>=0 && index<kCallCount && std::wcslen(kCalls[index].id)>prefix ? kCalls[index].id+prefix : nullptr;
+}
 const wchar_t* SupportAirCallName(int index) noexcept {
     return index>=0 && index<kCallCount ? kCallLabels[index] : L"支援";
 }
-support::Refusal PlanAirSupport(int catalog,const float* target,const float* observer,support::Route* route) noexcept {
+support::Refusal PlanAirSupport(int catalog,const float* target,const float* observer,support::Route* route,int count) noexcept {
     SupportAircraft spec;
     if(!route || !SupportAircraftSpec(catalog,&spec))return support::Refusal::unsupported;
+    if(count>0)spec.count=count;
     if(!OpenSky(target))return support::Refusal::noSky;
     float direction[3]={0,0,1};
     // Host chooses the entire plan once. Peers receive its explicit matrices.
@@ -544,17 +550,22 @@ support::Refusal PlanAirSupport(int catalog,const float* target,const float* obs
         if(d<1)return false;
         const float length=(spec.heli>=0 ? 40.0f : 220.0f)+static_cast<float>(spec.count-1)*65.0f;
         const float halfWidth=spec.heli>=0 ? 18.0f : 45.0f;
-        for(int step=0;step<=11;++step)for(int lane=-1;lane<=1;++lane) {
-            const float along=length*static_cast<float>(step)/11.0f;
-            const float x=from[0]+dx/d*along+dz/d*halfWidth*static_cast<float>(lane);
-            const float z=from[2]+dz/d*along-dx/d*halfWidth*static_cast<float>(lane);
-            float ground;
-            if(!MapGroundNear(x,z,floor,&ground,true) || std::fabs(ground-floor)>0.5f)return false;
-            // Map collision rays see the seabed, not the water surface. A level seabed is no runway.
-            float surface=0.0f;const Sea sea=SeaAt(x,z,&surface);
-            if(sea==Sea::unknown || (sea==Sea::water && (!std::isfinite(surface) || surface>ground)))return false;
-            const float a[3]={x,ground+0.2f,z},b[3]={x,ground+25.0f,z};float hit[3];
-            if(MapRay(a,b,hit)>=0.0f)return false;
+        // Sampled every ~20 m along three lanes (centre and both wing tips); the level rule is the landing strip's
+        // (support_entry.h RunwayLaneLevel), not a 0.5 m billiard table nothing on a real map edge passes.
+        const int samples=12;
+        for(int lane=-1;lane<=1;++lane) {
+            const bool level=support::RunwayLaneLevel(samples,floor,[&](int step,float& ground) noexcept {
+                const float along=length*static_cast<float>(step)/static_cast<float>(samples-1);
+                const float x=from[0]+dx/d*along+dz/d*halfWidth*static_cast<float>(lane);
+                const float z=from[2]+dz/d*along-dx/d*halfWidth*static_cast<float>(lane);
+                if(!MapGroundNear(x,z,floor,&ground,true))return false;
+                // Map collision rays see the seabed, not the water surface. A level seabed is no runway.
+                float surface=0.0f;const Sea sea=SeaAt(x,z,&surface);
+                if(sea==Sea::unknown || (sea==Sea::water && (!std::isfinite(surface) || surface>ground)))return false;
+                const float a[3]={x,ground+0.2f,z},b[3]={x,ground+25.0f,z};float hit[3];
+                return MapRay(a,b,hit)<0.0f;
+            });
+            if(!level)return false;
         }
         return true;
     };

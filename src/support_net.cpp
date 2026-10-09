@@ -30,6 +30,14 @@ std::uint64_t worldSerial=1;
 std::uint32_t worldPhase=0;
 ObjRef worldCreated[support_net::kMaxPeers]{};
 ULONGLONG nextWorldRead=0;
+// Why the transport is (not) usable, logged once a change: an online request refused as "not ready" has its cause in
+// the log (the 2026-10-09 report had none).
+const char* transportState="";
+void NoteTransport(const char* state) noexcept {
+    if(std::strcmp(state,transportState)==0)return;
+    transportState=state;
+    Log("SUPPORT NET transport: %s",state);
+}
 
 bool PuidText(void* puid,EDF6CoopPeer& out) noexcept {
     out={};
@@ -102,15 +110,20 @@ bool PeerValid(const EDF6CoopPeer& peer) noexcept {
 }
 bool Resolve(ULONGLONG now) noexcept {
     const HMODULE current=GetModuleHandleW(L"EDF6Coop.dll");
-    if(current && current==module && api.snapshot)return transportAdmissionReady && transportAdmissionReady()!=0;
+    if(current && current==module && api.snapshot) {
+        const bool gate=transportAdmissionReady && transportAdmissionReady()!=0;
+        if(!gate)NoteTransport("EDF6Coop mission admission gate not ready");
+        return gate;
+    }
     api={};module=nullptr;transportAdmissionReady=nullptr;
     if(now<nextResolve)return false;nextResolve=now+1000;
-    if(!current)return false;
+    if(!current){NoteTransport("no EDF6Coop.dll loaded (map support online needs the companion EDF6Coop on every player)");return false;}
     const auto get=reinterpret_cast<EDF6CoopGetExtensionApiFn>(GetProcAddress(current,"EDF6CoopGetExtensionApi"));
     transportAdmissionReady=reinterpret_cast<AdmissionReadyFn>(GetProcAddress(current,"EDF6Coop_MissionAdmissionReady"));
     if(!get || !get(EDF6COOP_EXTENSION_VERSION,sizeof(api),&api) || api.size!=sizeof(api) ||
        api.version!=EDF6COOP_EXTENSION_VERSION || !api.snapshot || !api.peer || !api.send || !api.poll ||
        !transportAdmissionReady || !transportAdmissionReady() || !GetProcAddress(current,"EDF6Coop_ResolveMissionPlayerPuid")) {
+        NoteTransport("EDF6Coop present but without a ready af-support extension (older EDF6Coop, or its admission gate is off)");
         api={};return false;
     }
     module=current;return true;
@@ -154,11 +167,20 @@ void SupportNetTick() noexcept {
     if(lastTick==now)return;lastTick=now;
     if(InSession())WorldTick(now);
     if(blockedUntilMission)return;
-    if(!Cfg().enabled || !InSession() || !Resolve(now)) {if(running)SuspendSupportNet();return;}
+    if(!Cfg().enabled || !InSession() || !Resolve(now)) {
+        if(!InSession())NoteTransport("offline");
+        if(running)SuspendSupportNet();
+        return;
+    }
     EDF6CoopSnapshot next{};next.size=sizeof(next);
-    if(!api.snapshot(&next) || !next.ready || next.size!=sizeof(next)) {if(running)SuspendSupportNet();return;}
+    if(!api.snapshot(&next) || !next.ready || next.size!=sizeof(next)) {
+        NoteTransport("EDF6Coop extension room not ready (direct link, every participant's af-support/2 marker, or the sealed world)");
+        if(running)SuspendSupportNet();
+        return;
+    }
     if(running && snapshot.generation!=next.generation){SuspendSupportNet();return;}
-    if(!running && !Start(next,now))return;
+    if(!running && !Start(next,now)){NoteTransport("EDF6Coop snapshot rejected (peer list / host identity)");return;}
+    NoteTransport(next.isHost ? "ready (host)" : "ready (client)");
     CommandContext(now);
     // Never spawn on the DirectNet worker. The map/crew game-thread frame owns
     // both deserialization and the native create/register/destroy callbacks.
@@ -249,6 +271,13 @@ std::uint32_t AllowMissionPlayer(std::int32_t index) noexcept {
     return allowed ? 1u : 0u;
 }
 bool SupportMissionPlayerAllowed(int index) noexcept { return AllowMissionPlayer(index)!=0; }
+bool SupportSoloHostWorld() noexcept {
+    if(!InSession() || !OnlineHostOnly())return false;
+    AcquireSRWLockShared(&worldLock);
+    const bool solo=worldFrozen && world.ready && world.participantCount==1;
+    ReleaseSRWLockShared(&worldLock);
+    return solo;
+}
 void NoteSupportMissionPlayerCreated(int index,const ObjRef& object) noexcept {
     if(index<0 || static_cast<unsigned>(index)>=support_net::kMaxPeers || !object.obj || !object.ctrl)return;
     AcquireSRWLockExclusive(&worldLock);

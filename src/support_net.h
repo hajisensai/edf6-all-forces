@@ -48,6 +48,10 @@ bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) no
 // actual participant PUIDs. A newly joined lobby member waits for the next world.
 bool SupportParticipantAllowed(void* puid) noexcept;
 bool SupportMissionPlayerAllowed(int missionIndex) noexcept;
+// This machine hosts a session whose sealed current world has exactly one participant (split-screen players share
+// it): this host. No peer exists to replicate to, and a lobby member joining later waits for the next world
+// (SupportMissionPlayerAllowed), so the host may deploy support locally without the EDF6Coop transport.
+bool SupportSoloHostWorld() noexcept;
 void NoteSupportMissionPlayerCreated(int missionIndex,const ObjRef& object) noexcept;
 // Only a verified native return-to-lobby transition may call this; readiness
 // loss, a disappeared actor, and InSession() are not evidence of a lobby.
