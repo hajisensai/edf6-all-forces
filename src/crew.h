@@ -289,6 +289,8 @@ struct Config {
     float npcRollSec=2.5f;          // ...s between two rolls
     float npcRetreatHp=0.3f;        // ...under this share of their HP they fall back behind the player (0: never)
     float npcLeash=40.0f;           // ...m from their anchor (the player they follow, their leader, their post) they go to fight
+    float transportAutoRange=200.0f; // a paired squad's point order farther than this (m) goes by its transport (transport.cpp)
+           // ...m from their anchor (the player they follow, their leader, their post) they go to fight
     bool npcSquadSuccession=true;   // ...a squad whose leader dies gets a new one (or joins another), not split up
     int npcSquadMin=2;              // ...fewer left than this: it joins the nearest squad with room
     int npcSquadMax=8;              // ...a squad takes in others up to this many
