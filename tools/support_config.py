@@ -81,10 +81,12 @@ def _line(lines: list[str], key: str) -> int | None:
 
 
 def get(text: str, key: str) -> str:
+    """The value as the plugin reads it (GetPrivateProfileString): trimmed, no inline comment taken off (';' is one of
+    SupportDisabled's separators there)."""
     i = _line(text.splitlines(), key)
     if i is None:
         return DEFAULTS.get(key, '')
-    return text.splitlines()[i].split('=', 1)[1].split(';', 1)[0].strip()
+    return text.splitlines()[i].split('=', 1)[1].strip()
 
 
 def put(text: str, key: str, value: str) -> str:
@@ -107,7 +109,10 @@ def put(text: str, key: str, value: str) -> str:
 
 
 def disabled(text: str) -> list[str]:
-    return [k for k in (p.upper() for p in re.split(r'[,，;、\s]+', get(text, 'SupportDisabled')) if p) if k in UNIT_KEYS]
+    """The units the plugin disables (src/support_config.cpp Tokens): separated by , ， ; 、 and trimmed; spaces inside
+    a token make it an unknown unit there, so not one here."""
+    parts = (p.strip().upper() for p in re.split(r'[,，;、]', get(text, 'SupportDisabled')))
+    return [k for k in parts if k in UNIT_KEYS]
 
 
 def summary(text: str) -> str:
