@@ -535,19 +535,23 @@ void Ram(const PJet& j,unsigned char* v,const RamHit& hit) noexcept {
         hit.closing,RamMass(j,v)*0.001f,damage,j.kind->ram,dealt ? "" : " (not dealt: no charge this mission, or no mass for this kind)");
 }
 
-// A hard hit: `sink` m/s into the ground, `speed` over it, `banked` wings too steep. Damage (see kCrashBase). `ram`:
-// what it rammed (not the ground, not the water): the enemies round it take RamDamage within its kind's reach. At
-// most one a kCrashMs.
-void Crash(PJet& j,unsigned char* v,float sink,float speed,bool banked,ULONGLONG ms,const RamHit* ram) noexcept {
+// The speed a touch at `speed` m/s has past what its kind takes (kCrashPerSpeed's): over its landMax.
+float PastLanding(const PJet& j,float speed) noexcept { return speed>j.kind->landMax ? speed-j.kind->landMax : 0.0f; }
+
+// A hard hit: `sink` m/s into the ground, `speed` m/s it went, `past` m/s of that over what it takes (a touch: PastLanding;
+// a ram: the closing speed, all of it), `banked` wings too steep. Damage (see kCrashBase). `ram`: what it rammed (not the
+// ground, not the water): the enemies round it take RamDamage within its kind's reach. At most one a kCrashMs.
+// Until 2026-10-09 a ram passed closing + landMax as its `speed`: the damage was the closing speed's, but the log said
+// "speed 158 m/s" for a 33 m/s hit (the multirole's landMax 125).
+void Crash(PJet& j,unsigned char* v,float sink,float speed,float past,bool banked,ULONGLONG ms,const RamHit* ram) noexcept {
     if(ms-j.crashAt<kCrashMs)return;
     j.crashAt=ms;
     const float hpMax=At<float>(v,kHpMax),hp=At<float>(v,kHp);
-    const float share=Clamp(kCrashBase+kCrashPerSink*(sink>kLandSink ? sink-kLandSink : 0.0f)+
-                            kCrashPerSpeed*(speed>j.kind->landMax ? speed-j.kind->landMax : 0.0f)+(banked ? kBankCrash : 0.0f),
-                            kCrashBase,kCrashMax);
+    const float share=Clamp(kCrashBase+kCrashPerSink*(sink>kLandSink ? sink-kLandSink : 0.0f)+kCrashPerSpeed*past+
+                            (banked ? kBankCrash : 0.0f),kCrashBase,kCrashMax);
     const float taken=share*(hpMax>0.0f ? hpMax : 1000.0f),left=hp-taken;
-    Log("PJET v=%p crash: sink %.1f m/s, speed %.0f m/s%s: %.0f%% of max HP, hp %.0f -> %.0f",v,sink,speed,banked ? ", banked" : "",
-        share*100.0f,hp,left>0.0f ? left : 0.0f);
+    Log("PJET v=%p crash: sink %.1f m/s, speed %.0f m/s, %.0f m/s past what it takes%s: %.0f%% of max HP, hp %.0f -> %.0f",v,sink,
+        speed,past,banked ? ", banked" : "",share*100.0f,hp,left>0.0f ? left : 0.0f);
     if(ram && Cfg().playerJetRamDamage>0.0f)Ram(j,v,*ram);
     if(left<=0.0f){Kill(j,v,"crashed");return;}
     Put<float>(v,kHp,left);
@@ -576,7 +580,11 @@ void Ground(PJet& j,const unsigned char* v,const Stick& s,float clear,float dt) 
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
     float nose[3]={m[8],0.0f,m[10]};
     if(!Normalize(nose)){nose[0]=0.0f;nose[2]=1.0f;}
-    float speed=Dot(j.vel,nose);
+    // The plane its wheels stand on is the body's own up (its contacts set its pitch and roll).
+    float up[3]={m[4],m[5],m[6]},ahead[3],along[3];
+    if(!Normalize(up) || up[1]<0.5f){up[0]=0.0f;up[1]=1.0f;up[2]=0.0f;}
+    if(!handling::AlongPlane(nose,up,ahead))std::memcpy(ahead,nose,12);
+    float speed=handling::RollSpeed(j.vel,ahead);   // along that plane, as it was sent (not along the level nose)
     if(speed<0.0f)speed=0.0f;
     const float want=j.throttle*k.top;
     const bool belly=!GearDown(v);   // on its belly (gear.cpp): it slides to a stop, no thrust, no steering, no takeoff
@@ -587,13 +595,7 @@ void Ground(PJet& j,const unsigned char* v,const Stick& s,float clear,float dt) 
     const float rate=belly ? 0.0f : kTaxiTurn*(speed>kTaxiFull ? kTaxiFull/speed : 1.0f)*(speed>0.5f || s.throttle>0.0f ? 1.0f : 0.0f);
     const float a=-s.turn*rate*dt,co=std::cos(a),si=std::sin(a);
     const float turned[3]={nose[0]*co+nose[2]*si,0.0f,nose[2]*co-nose[0]*si};
-    // The plane its wheels stand on is the body's own up (its contacts set its pitch and roll).
-    float up[3]={m[4],m[5],m[6]},along[3];
-    if(!Normalize(up) || up[1]<0.5f){up[0]=0.0f;up[1]=1.0f;up[2]=0.0f;}
-    std::memcpy(along,turned,12);
-    const float lift=Dot(along,up);
-    for(int i=0;i<3;++i)along[i]-=up[i]*lift;   // its nose along that plane
-    if(!Normalize(along))std::memcpy(along,turned,12);
+    if(!handling::AlongPlane(turned,up,along))std::memcpy(along,turned,12);   // its nose along that plane
     const float yaw=a/dt;   // the turn about the up (a heading angle a grows about +Y: turned = nose turned by a)
     for(int i=0;i<3;++i){j.vel[i]=along[i]*speed;j.omega[i]=up[i]*yaw;}
     if(!belly && j.throttle>0.02f && speed>=k.rotate && (s.pitch>0.2f || (speed>=k.rotate+kAutoRotate && j.throttle>=kAutoThrottle))) {
@@ -601,8 +603,10 @@ void Ground(PJet& j,const unsigned char* v,const Stick& s,float clear,float dt) 
         Log("PJET v=%p takeoff at %.0f m/s (throttle %.2f, stick %.2f)",v,speed,j.throttle,s.pitch);
         return;
     }
-    if(clear!=kNoGround && clear>kOffGround) {   // rolled off an edge: flying (or falling to minAir)
+    // Rolled off an edge fast enough to fly (pjet_handling.h RollsIntoAir); slower it stays on its contacts and falls.
+    if(handling::RollsIntoAir(clear,kNoGround,kOffGround,speed,kStallFloor)) {
         j.phase=Phase::air;j.hasAim=false;
+        if(j.fresh)j.vel[1]=j.measured[1];   // its path's rise or fall is the body's (the contacts'), not its wheels' plane's
         Log("PJET v=%p off the ground at %.0f m/s (%.0f m over it)",v,speed,clear);
         return;
     }
@@ -622,7 +626,7 @@ void Landed(PJet& j) noexcept {
 // on its belly to a stop (Ground) until the gear is down.
 void BellyLanding(PJet& j,unsigned char* v,float sink,float speed,ULONGLONG ms) noexcept {
     Log("PJET v=%p belly landing at %.0f m/s, sink %.1f m/s: the gear is not down",v,speed,sink);
-    Crash(j,v,sink,speed,false,ms,nullptr);
+    Crash(j,v,sink,speed,PastLanding(j,speed),false,ms,nullptr);
     Landed(j);
 }
 
@@ -639,7 +643,7 @@ void Touch(PJet& j,unsigned char* v,float speed,bool water,ULONGLONG ms) noexcep
         return;
     }
     if(water)Log("PJET v=%p hit the water at %.0f m/s, sink %.1f m/s",v,speed,sink);
-    Crash(j,v,sink,speed,banked,ms,nullptr);
+    Crash(j,v,sink,speed,PastLanding(j,speed),banked,ms,nullptr);
 }
 
 void ReconcileGround(PJet& j,unsigned char* v,float clear,bool water,bool wet,ULONGLONG ms) noexcept {
@@ -944,7 +948,7 @@ void Blocked(PJet& j,unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
     ram.closing=sent-made;
     // Held back by an enemy it just flew into (EnemyRam): that one already took its blast.
     const bool rammedEnemy=j.enemyRamAt && ms-j.enemyRamAt<kCrashMs;
-    Crash(j,v,0.0f,sent-made+j.kind->landMax,false,ms,rammedEnemy ? nullptr : &ram);
+    Crash(j,v,0.0f,sent,ram.closing,false,ms,rammedEnemy ? nullptr : &ram);
     if(!j.active)return;
     if(j.phase!=Phase::air){j.vel[0]=j.vel[2]=0.0f;return;}
     for(int i=0;i<3;i+=2)j.vel[i]=-j.vel[i];
@@ -1652,7 +1656,7 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
         if(j.autopilot){j.autopilot=false;j.active=false;if(j.board)HandBack(j,v,"the catch is over");}
         if(j.driven && AboardElsewhere(v,0))Moved(j,v);
         else if(j.driven)Leave(j,v,FloorClear(j,v,pos,GroundClearance(pos)),true,"got out");
-        if(wet)Crash(j,v,0.0f,0.0f,false,ms,nullptr);   // empty and afloat: it breaks up
+        if(wet)Crash(j,v,0.0f,0.0f,0.0f,false,ms,nullptr);   // empty and afloat: it breaks up
         return;
     }
     bool water=false;
@@ -1688,7 +1692,7 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
         else Air(j,v,s,pos,clear,water,dt,ms);
     } else {
         Ground(j,v,s,clear,dt);
-        if(water || wet)Crash(j,v,0.0f,Len(j.vel),false,ms,nullptr);   // afloat: it breaks up, one crash a kCrashMs
+        if(water || wet)Crash(j,v,0.0f,Len(j.vel),PastLanding(j,Len(j.vel)),false,ms,nullptr);   // afloat: it breaks up, one crash a kCrashMs
     }
     // Parked too: held still on its contacts (the stock step pulled it level against its gear), as long as the solver's
     // velocity can be read (pjet_handling.h Drives).
@@ -1715,7 +1719,7 @@ bool PlayerJetBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
     JetMotionProps(body);
     // A shield hit as a building's (shield.cpp): its speed across the face gone, and the crash Blocked would give.
     if(const float lost=ShieldBlock(v,j->vel);lost>0.0f && j->phase==Phase::air)
-        Crash(*j,v,0.0f,lost+j->kind->landMax,false,GameMs(),nullptr);
+        Crash(*j,v,0.0f,lost,lost,false,GameMs(),nullptr);
     // On the ground its contacts keep the solver's motion across it and its pitch and roll (`lin` / `ang` come in as the
     // solver left them: body506.cpp PhysicsHook); in the air the flight's is the whole of it.
     if(j->phase!=Phase::air) {
