@@ -23,6 +23,14 @@ constexpr bool IsSupportLeaderResource(std::uint32_t id) noexcept {
 constexpr SupportWeapon SupportSoldierWeapon(std::uint32_t id) noexcept {
     return IsSupportSoldierResource(id) ? static_cast<SupportWeapon>(id>>8) : SupportWeapon::rifle;
 }
+// An aircraft created in the air at the plan's matrix, its real crew created inside it and seated at once (2026-10-09,
+// the user: "空中支援不是场外飞进来吗，不需要真起飞吧"). kSupportAircraftResource + catalog is the older plan of a host
+// before this: the hull on a runway, its crew walking aboard (still applied as it was, for such a host).
+inline constexpr std::uint32_t kSupportAirborneOffset=0x8000;
+constexpr bool IsSupportAirborneAircraft(std::uint32_t id) noexcept {
+    return id>=kSupportAircraftResource+kSupportAirborneOffset && id<kSupportVehicleResource;
+}
+constexpr bool IsSupportAircraft(std::uint32_t id) noexcept { return id>=kSupportAircraftResource && id<kSupportVehicleResource; }
 static_assert(SupportSoldierResource(SupportWeapon::rifle,false)==kSupportRangerResource &&
               SupportSoldierResource(SupportWeapon::rifle,true)==kSupportLeaderResource,"protocol v2 rifle ids unchanged");
 static_assert(SupportSoldierResource(SupportWeapon::sniper,true)<kSupportAircraftResource,"soldiers stay below hulls");

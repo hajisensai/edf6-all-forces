@@ -12,18 +12,20 @@ bool supportSky=true,supportGround=true,supportMeasured=true;
 Sea supportSea=Sea::land;
 Sea SeaAt(float,float,float* surface) noexcept {*surface=1;return supportSea;}
 PlayArea MapPlayArea() noexcept { return {{-1500,-1500},{1500,1500},supportMeasured,0,true}; }
+// Ground height under (x, z): flat by default; `supportSlope` m per m rising from the map's centre; `supportStep` a
+// ledge every 30 m outward (no flat ground anywhere). Vertical rays meet that same ground.
+float supportSlope=0,supportStep=0;
+float SupportGround(float x,float z) noexcept {
+    const float r=std::sqrt(x*x+z*z);
+    return r*supportSlope+(static_cast<int>(r/30.0f)%2 ? supportStep : 0.0f);
+}
 float MapRay(const float* from,const float* to,float* hit) noexcept {
     if(!supportSky && from[1]<10 && to[1]>10){hit[0]=from[0];hit[1]=10;hit[2]=from[2];return 0.5f;}
-    if(to[1]<from[1] && to[1]<0 && from[1]>0){hit[0]=from[0];hit[1]=0;hit[2]=from[2];return 0.5f;}
+    const float g=SupportGround(from[0],from[2]);
+    if(to[1]<from[1] && to[1]<g && from[1]>g){hit[0]=from[0];hit[1]=g;hit[2]=from[2];return 0.5f;}
     return -1;
 }
-// Ground height under (x, z): flat by default; `supportSlope` m per m rising from the map's centre (every runway
-// starts at an edge heading for the target, so it climbs that grade); `supportStep` a ledge every 30 m outward.
-float supportSlope=0,supportStep=0;
-bool MapGroundNear(float x,float z,float,float* out,bool) noexcept {
-    const float r=std::sqrt(x*x+z*z);
-    *out=r*supportSlope+(static_cast<int>(r/30.0f)%2 ? supportStep : 0.0f);return supportGround;
-}
+bool MapGroundNear(float x,float z,float,float* out,bool) noexcept {*out=SupportGround(x,z);return supportGround;}
 bool SupportCallAt(int,const float*,wchar_t*,std::size_t) noexcept {return false;}
 bool testOnline=true;
 const Config& Cfg() noexcept { return config; }
@@ -188,29 +190,19 @@ int main() {
     Put<std::uint64_t>(weapon,kWeaponRxSeed,callnet::Encode(0ull,3));
     Check(CallOf(ifc,remote)==nullptr,"a stock call is never converted, whatever its seed carries");
     const float supportTarget[3]={0,0,0},observer[3]={0,0,100};support::Route route;
-    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::none && route.from[1]==0,
-          "production entry planner prepares a real ground runway, not an airborne spawn");
+    // 2026-10-09: air support is made in the air at the edge and flies in; no runway, no ground for a crew.
+    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::none && route.from[1]>=150,
+          "production entry planner puts the aircraft in the air at the route's height");
+    supportSlope=0.05f;supportStep=2.0f;   // a hillside of ledges: no flat ground anywhere
+    Check(PlanAirSupport(0,supportTarget,observer,&route,4)==support::Refusal::none,"air support needs no flat ground at all");
+    {float slot[3];support::AirFormationSlot(route,3,1.0f,slot);float g=0;MapGroundNear(slot[0],slot[2],0,&g,true);
+     Check(slot[1]>=g+75.0f,"every formation slot stands over its own ground");}
+    supportSlope=0;supportStep=0;
     supportSky=false;
     Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::noSky,"a roof above the destination refuses air support");
-    supportSky=true;supportGround=false;
-    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::noEntry,"air corridor alone cannot substitute for a landing pad");
-    supportGround=true;supportMeasured=false;
-    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::noArea,"unmeasured bounds cannot be used as actual entry ground");
+    supportSky=true;supportMeasured=false;
+    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::noArea,"unmeasured bounds cannot be used as an entry");
     supportMeasured=true;
-    supportSea=Sea::water;
-    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::noEntry,"a flat seabed cannot be used as an aircraft runway");
-    supportSea=Sea::unknown;
-    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::noEntry,"unknown water geometry cannot authorize ground deployment of aircraft");
-    supportSea=Sea::land;
-    // A real map edge is never a billiard table (2026-10-09: no air support ever came). The runway rule is the landing
-    // strip's: a gentle grade passes, a ledge or a steep hillside does not.
-    supportSlope=0.01f;   // 1 %: ~2.6 m over the whole 260 m
-    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::none,"a gently sloping real edge is a usable runway");
-    supportSlope=0.05f;   // 5 %: far past 4 m within the strip
-    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::noEntry,"a hillside is no runway");
-    supportSlope=0;supportStep=2.0f;
-    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::noEntry,"a 2 m ledge across the strip is no runway");
-    supportStep=0;
     Check(PlanAirSupport(16,supportTarget,observer,&route,0)==support::Refusal::unsupported,"stationary submarine model cannot fake a physical entry");
     // Installation against a private image with the supported native bomber signatures. A restored
     // legacy takeover installs successfully here and mutates these bytes/vtable, failing this check.

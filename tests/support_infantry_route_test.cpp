@@ -23,11 +23,13 @@ bool SupportSoloHostWorld() noexcept{return false;}
 bool SupportAircraftSpec(int,SupportAircraft*) noexcept{return false;}
 support::Refusal PlanAirSupport(int,const float*,const float*,support::Route*,int) noexcept{return support::Refusal::unsupported;}
 unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float*) noexcept{return nullptr;}
-bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*) noexcept{return false;}
+bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool) noexcept{return false;}
 bool DeleteSupportAircraft(const ObjRef&) noexcept{return false;}
 bool SupportSoldiersReady() noexcept{return true;}
 const wchar_t* SupportSoldierFailureText() noexcept{return L"";}
 bool ApplySupportSoldierResource(const float*,std::uint32_t,const unsigned char*,bool,ObjRef*) noexcept{return false;}
+bool CreateSupportSoldierUnregistered(const float*,std::uint32_t,const unsigned char*,bool,ObjRef*) noexcept{return false;}
+bool SupportPeersAcceptAirborne() noexcept{return true;}
 bool DeriveSupportSoldierNetId(const void*,unsigned,unsigned char*) noexcept{return false;}
 bool RegisterSupportObject(const void*,const unsigned char*) noexcept{return false;}
 bool FollowSupportSoldier(const ObjRef& who,const ObjRef& leader) noexcept {

@@ -538,44 +538,29 @@ support::Refusal PlanAirSupport(int catalog,const float* target,const float* obs
         const float x=target[0]-observer[0],z=target[2]-observer[2],d=std::hypot(x,z);
         if(d>0.1f){direction[0]=x/d;direction[2]=z/d;}
     }
+    // Air support is created in the air at the route's entry and flies in (2026-10-09, the user: it comes from off
+    // the field; no takeoff). The route (support::AirRoute) already stands its entry over the highest ground of the
+    // whole line plus the altitude; here every aircraft's formation slot (support::AirFormationSlot) must lie inside
+    // the measured area, over its own ground by that altitude, and have the full-size corridor (EntryClear) clear to
+    // its own end over the target.
+    const PlayArea area=MapPlayArea();
+    const float altitude=spec.heli>=0 ? std::fmax(Cfg().heliHeight,60.0f) : kAboveTarget;
+    const float spacing=spec.heli>=0 ? 0.6f : 1.0f;
     const auto entry=[&](const float* from,const float* to) noexcept {
-        if(!EntryClear(from,to))return false;
-        float floor;
-        if(!MapGroundNear(from[0],from[2],target[1],&floor,true))return false;
-        const float center[3]={from[0],floor,from[2]};
-        if(!OpenSky(center))return false;
-        // A manned aircraft starts on a clear, level ground pad/runway, with real crew walking aboard.
-        // No assumption that a roof or a point-size opening is an airfield.
         const float dx=to[0]-from[0],dz=to[2]-from[2],d=std::hypot(dx,dz);
         if(d<1)return false;
-        const float length=(spec.heli>=0 ? 40.0f : 220.0f)+static_cast<float>(spec.count-1)*65.0f;
-        const float halfWidth=spec.heli>=0 ? 18.0f : 45.0f;
-        // Sampled every ~20 m along three lanes (centre and both wing tips); the level rule is the landing strip's
-        // (support_entry.h RunwayLaneLevel), not a 0.5 m billiard table nothing on a real map edge passes.
-        const int samples=12;
-        for(int lane=-1;lane<=1;++lane) {
-            const bool level=support::RunwayLaneLevel(samples,floor,[&](int step,float& ground) noexcept {
-                const float along=length*static_cast<float>(step)/static_cast<float>(samples-1);
-                const float x=from[0]+dx/d*along+dz/d*halfWidth*static_cast<float>(lane);
-                const float z=from[2]+dz/d*along-dx/d*halfWidth*static_cast<float>(lane);
-                if(!MapGroundNear(x,z,floor,&ground,true))return false;
-                // Map collision rays see the seabed, not the water surface. A level seabed is no runway.
-                float surface=0.0f;const Sea sea=SeaAt(x,z,&surface);
-                if(sea==Sea::unknown || (sea==Sea::water && (!std::isfinite(surface) || surface>ground)))return false;
-                const float a[3]={x,ground+0.2f,z},b[3]={x,ground+25.0f,z};float hit[3];
-                return MapRay(a,b,hit)<0.0f;
-            });
-            if(!level)return false;
+        support::Route lead{{from[0],from[1],from[2]},{dx/d,0.0f,dz/d}};
+        for(int i=0;i<spec.count;++i) {
+            float at[3];support::AirFormationSlot(lead,i,spacing,at);
+            if(at[0]<area.lo[0] || at[0]>area.hi[0] || at[2]<area.lo[1] || at[2]>area.hi[1])return false;
+            float ground;
+            if(EntryHeight(at[0],at[2],target[1],ground) && ground+altitude*0.5f>at[1])return false;   // over its own ground too
+            const float end[3]={at[0]+dx,at[1],at[2]+dz};
+            if(!EntryClear(at,end))return false;
         }
         return true;
     };
-    const auto result=support::AirRoute(MapPlayArea(),target,observer,direction,
-        spec.heli>=0 ? std::fmax(Cfg().heliHeight,60.0f) : kAboveTarget,entry,EntryHeight,*route);
-    if(result!=support::Refusal::none)return result;
-    float ground;
-    if(!MapGroundNear(route->from[0],route->from[2],target[1],&ground,true))return support::Refusal::noEntry;
-    route->from[1]=ground;
-    return support::Refusal::none;
+    return support::AirRoute(area,target,observer,direction,altitude,entry,EntryHeight,*route);
 }
 
 bool InstallAirstrikes() noexcept {

@@ -8,7 +8,9 @@ constexpr std::uint32_t kMagic=0x54525053,kVersion=2;
 // host ignores the field, ValidMessage bounds it below kMaxUnits). kCapSoldierVariants: its Validate accepts the
 // support_call.h soldier weapon resources ((weapon << 8) | role) and a configured number of aircraft. A host plans
 // those only when every peer announced it (Session::PeersHave); otherwise rifles and each call's own number.
-constexpr std::uint32_t kCapSoldierVariants=1u,kCapabilities=kCapSoldierVariants;
+// kCapAirborneAir: it applies support_call.h airborne aircraft (created in the air, crew seated at once). A host
+// plans air support only when every peer has it (an older peer would make the hull empty and its crew mid-air).
+constexpr std::uint32_t kCapSoldierVariants=1u,kCapAirborneAir=2u,kCapabilities=kCapSoldierVariants|kCapAirborneAir;
 static_assert(kCapabilities<kMaxUnits,"hello.index carries the capability bits");
 enum class Kind : std::uint32_t { hello=1,welcome,request,begin,unit,prepare,ready,commit,result,cancel,activate,activated,requestStatus };
 struct Message {

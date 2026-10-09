@@ -1748,6 +1748,30 @@ int NpcBoardCrew(unsigned char* v,unsigned char* const* humans,int count) noexce
     return assigned;
 }
 
+// A support aircraft created in the air (support_dispatch.cpp): its new real crew, made inside it in the same frame, take
+// their seats at once through the stock RideVehicle (no walk: they start aboard; never RideAi, no Dummy). Done on every
+// machine for its own copies before they are registered, so no native ride event crosses the network before peers
+// know the objects. The first soldier takes the driver's seat. Returns how many are seated.
+int NpcSeatCrewNow(unsigned char* v,unsigned char* const* humans,int count) noexcept {
+    if(!ok || !rideOk || !Cfg().enabled || !v || !Readable(v,kSeatCount+8) || v[kDead] || !humans || count<=0 ||
+       !OnlineMaySeatNpc(v))return 0;
+    auto* ctrl=At<unsigned char*>(v,kSelfCtrl);
+    if(!ctrl || At<std::int32_t>(ctrl,8)<=0)return 0;
+    int seated=0;
+    for(int i=0;i<count;++i) {
+        auto* h=humans[i];
+        if(!IsSoldierClass(h) || IsAnyPlayer(h) || h[kDead])continue;
+        int seat=-1;
+        for(unsigned k=0;k<SeatCount(v) && seat<0;++k)if(SeatTakes(v,k,h))seat=static_cast<int>(k);
+        if(seat<0 || (seat==0 && !PrepareNpcVehicle(v,true)))continue;
+        _InterlockedIncrement(reinterpret_cast<volatile long*>(ctrl+8));
+        SharedRef ref{v,ctrl};
+        reinterpret_cast<RideFn>(image+kRideVehicle)(h,&ref,seat);
+        if(At<const void*>(SeatAt(v,static_cast<unsigned>(seat)),kSeatRider)==h)++seated;
+    }
+    return seated;
+}
+
 // Recruit only real, already registered soldiers from the world's friendly roster. A request is
 // asynchronous: they walk to the native entry point and RideVehicle consumes its shared_ptr there.
 bool NpcRequestCrew(unsigned char* v,bool /*spawned*/) noexcept {

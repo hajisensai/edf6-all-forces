@@ -273,7 +273,7 @@ unsigned char* PrepareSupportAircraft(const SupportAircraft& spec,const float* m
     return vehicle;
 }
 
-bool ActivateSupportAircraft(unsigned char* vehicle,const SupportAircraft& spec,const float* target) noexcept {
+bool ActivateSupportAircraft(unsigned char* vehicle,const SupportAircraft& spec,const float* target,bool airborne) noexcept {
     // Only the actual pilot authorizes takeoff; an empty seat/Dummy never passes this gate.
     if(!vehicle || !target || !NpcDriver(vehicle))return false;
     if(spec.heli>=0) {
@@ -283,7 +283,12 @@ bool ActivateSupportAircraft(unsigned char* vehicle,const SupportAircraft& spec,
     Jet* entry=FindJet(vehicle);
     if(!entry)entry=NewEntry(vehicle,GameMs());
     if(!entry)return false;
-    entry->launched=true;entry->mode=Mode::takeoff;entry->escort=spec.follow;
+    entry->launched=true;entry->mode=airborne ? Mode::patrol : Mode::takeoff;entry->escort=spec.follow;
+    if(airborne) {   // Launch's start: already flying along its nose at its kind's cruise (never a stall, never a drop)
+        const float* m=reinterpret_cast<const float*>(vehicle+kMatrix);
+        const float cruise=KindOf(Row(SupportBody(spec)).role).cruise;
+        for(int i=0;i<3;++i)entry->m.vel[i]=m[8+i]*cruise;
+    }
     std::memcpy(entry->anchor,target,12);entry->fuelMs=static_cast<ULONGLONG>(spec.fuelSeconds)*1000;
     JoinFlight(*entry,FlightFor(&supportAircraft,GameMs()));
     ApplyMapCommand(*entry,Command{Order::guard,{target[0],target[1],target[2]}},GameMs());

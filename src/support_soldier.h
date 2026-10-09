@@ -35,6 +35,10 @@ bool ApplySupportSoldierSpawn(const float* worldMatrix,bool leader,const unsigne
 // machine alone owns, allowed offline and to the host of a world with no other participant; clients never.
 bool ApplySupportSoldierResource(const float* worldMatrix,std::uint32_t resource,const unsigned char* nativeNetId32,
                                  bool local,ObjRef* out) noexcept;
+// The same, but an ID-bearing soldier is not registered yet: the caller seats it first (a crew made aboard an aircraft
+// in the air) and then registers it with RegisterSupportObject(soldier, id); on failure it deletes it.
+bool CreateSupportSoldierUnregistered(const float* worldMatrix,std::uint32_t resource,const unsigned char* nativeNetId32,
+                                      bool local,ObjRef* out) noexcept;
 bool DeriveSupportSoldierNetId(const void* registeredAnchor,unsigned ordinal,unsigned char* out32) noexcept;
 // Register a freshly created canonical support object (soldier/aircraft/ground vehicle) on this peer.
 // Never call twice; the reliable spawn transaction owns validation and rollback on failure.

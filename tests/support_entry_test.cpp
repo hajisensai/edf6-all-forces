@@ -50,11 +50,18 @@ int main() {
     const auto few=GroundEntryCandidates(corner,edge,nullptr);
     for(int i=0;i<few.count;++i)check(few.at[i][0]<=670 && few.at[i][1]<=670,"no entry past a near map edge");
     check(GroundEntryCandidates(unknown,centre,caller).count==0,"no measured area: no entries");
-    // Runway level rule (the landing strip's), against the old 0.5 m billiard table.
-    const auto lane=[](float grade,float step){return [=](int i,float& g){g=grade*20.0f*static_cast<float>(i)+(i==6 ? step : 0.0f);return true;};};
-    check(RunwayLaneLevel(12,0,lane(0.01f,0)),"a 1 % grade over 220 m is a runway");
-    check(!RunwayLaneLevel(12,0,lane(0.05f,0)),"a 5 % hillside is not");
-    check(!RunwayLaneLevel(12,0,lane(0,2.0f)),"a 2 m ledge is not");
-    check(!RunwayLaneLevel(12,0,[](int,float&){return false;}),"no ground under a sample is not");
+    // Air formation (2026-10-09: created in the air at the edge): line abreast, alternating sides, all at the route's
+    // height, none behind the entry (that would be outside the measured area).
+    const Route lead{{-1400,400,0},{1,0,0}};
+    float slots[8][3];
+    for(int i=0;i<8;++i)AirFormationSlot(lead,i,1.0f,slots[i]);
+    check(slots[0][0]==-1400 && slots[0][1]==400 && slots[0][2]==0,"slot 0 is the lead at the entry");
+    for(int i=1;i<8;++i) {
+        check(slots[i][1]==400 && slots[i][0]==-1400 && std::fabs(slots[i][2])>=kFormationSide-0.01f,"every other slot abreast, same height, never behind");
+        for(int k=0;k<i;++k)check(std::fabs(slots[i][2]-slots[k][2])>=kFormationSide-0.01f,"slots kFormationSide apart (no two aircraft made in one place)");
+    }
+    check(slots[1][2]*slots[2][2]<0,"the line alternates sides");
+    float close[3];AirFormationSlot(lead,1,0.6f,close);
+    check(std::fabs(close[2])<std::fabs(slots[1][2]),"helicopters fly closer");
     std::printf("support_entry_test: %d checks passed\n",checks);
 }
