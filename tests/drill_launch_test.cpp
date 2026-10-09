@@ -1,7 +1,7 @@
 // The launched drill (2026-10-09 feedback, docs/feedback-2026-10-09-ground.md) through the production DrillInput /
 // DrillFrame with fake vehicle memory: it bites a ground enemy on its way OUT (its reach is the hull's box carried
 // along, not a cylinder round an axis 4.21 m up), its spin is the launch's and never the trigger's, and the weapon's
-// live round count says whether the drill is on the hull (1) or launched (0).
+// live round count stays at its one drill (1), launched or not, whatever takes a round off it.
 #include "../src/drill.cpp"
 #include <cstdio>
 #include <cstdlib>
@@ -86,7 +86,7 @@ int main() {
     frame(false,true);
     Check(d->flight==Flight::out,"the launch button sends the drill out");
     Check(d->rpm==config.drillMaxRpm,"launched without the trigger: the jet spins it at the top at once");
-    Check(At<std::int32_t>(weapon,kWeaponAmmo)==0,"launched: the round is away");
+    Check(At<std::int32_t>(weapon,kWeaponAmmo)==1,"launched: the count stays 1 (no EMPTY / NO AMMO, the fire gate open)");
     // Out: the trigger pulled and let go every other frame changes neither its RPM nor its turn a frame.
     int outBites=0;
     float lastAngle=d->angle;
@@ -106,7 +106,9 @@ int main() {
     // Back to the hull: caught, the round shows again.
     enemyThere=false;
     for(int i=0;i<2000 && d->flight!=Flight::home;++i)frame(false,false);
-    Check(d->flight==Flight::home && At<std::int32_t>(weapon,kWeaponAmmo)==1,"caught: the round is back on the hull");
+    Check(d->flight==Flight::home && At<std::int32_t>(weapon,kWeaponAmmo)==1,"caught: the count is 1");
+    Put<std::int32_t>(weapon,kWeaponAmmo,0);frame(false,false);   // an NPC's AI fired the bit: never reloads by itself
+    Check(At<std::int32_t>(weapon,kWeaponAmmo)==1,"a round taken off the bit is put back the next frame");
     // An enemy well clear of the drill's reach (6 m aside) is not bitten in flight.
     Put<float>(enemy,kPosition,6.0f);enemyLock[0]=6.0f;enemyThere=true;
     frame(false,true);

@@ -14,7 +14,9 @@
 //    才合理". A command driven to its end (Hold::full: the input at +-1, the controller wants the far side of a big error)
 //    while the hull turns the same way would otherwise have the stabilizer turn the axis back by the hull's turn (it
 //    holds the reference, which only the command moves): the gun would slew at the drive's top in the WORLD whatever
-//    the hull did. So in that case the counter-turn is not made and the reference moves on with the gun (Step): the axis
+//    the hull did. So in that case the counter-turn is not made and the reference is put on the gun (Step: on the axis'
+//    angle after the command, so the step it lets go of the full command holds the gun where it is, not where a
+//    reference trailing it by the hull's rate x lag would pull it back to, and Held shows the gun as it is): the axis
 //    turns at the command's own rate on the hull, the gun at that plus the hull's turn in the world. Turning against
 //    the command, the hull's turn needs more than the drive has: the axis turns at its top and the gun is carried off
 //    (dragged by `slip`). Not driven to its end (close to the aim, holding), the stabilizer holds the line as before.
@@ -165,7 +167,7 @@ inline void Step(Hold& h,const Stops* stops,const float* before,const float* aft
         if(total>most)c=most-own;
         else if(total<-most)c=-most-own;
         if(h.full[i]*own>0.0f && h.full[i]*c<0.0f) {   // a full slew the hull helps: its turn adds (see the top)
-            t[i]=Keep(stops[i],t[i]-c);moved=true;c=0.0f;
+            t[i]=after[i];moved=true;c=0.0f;
         }
         out[i]=Keep(stops[i],after[i]+c);
         h.shift[i]=Diff(stops[i],out[i],after[i]);
