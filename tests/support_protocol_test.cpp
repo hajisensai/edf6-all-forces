@@ -131,10 +131,12 @@ void Capabilities() {
     Check(bytes[4]==2 && bytes[5]==0,"wire version stays 2: older peers keep talking");
     {Room r(3);r.With(0);
      Check(r.nodes[0]->session->PeersHave(kCapSoldierVariants),"every new peer announced soldier variants");
+     Check(r.nodes[0]->session->PeersHave(kCapSoldierVariants|kCapAirborneAir),"and airborne air support");
      r.With(1);Check(r.nodes[1]->session->PeersHave(kCapSoldierVariants),"a client is never asked: true");}
     {Room r(3);r.legacyNode=2;r.With(2);r.nodes[2]->session->Stop();r.nodes[2]->session->Start(false,2,1,r.now);r.Settle();
      Check(r.nodes[0]->session->Ready(),"an older client still completes the handshake");
      Check(!r.nodes[0]->session->PeersHave(kCapSoldierVariants),"host knows one peer lacks soldier variants");
+     Check(!r.nodes[0]->session->PeersHave(kCapAirborneAir),"host knows one peer cannot make air support in the air");
      Check(r.Submit(),"mixed room request");r.Settle();
      for(const auto& n:r.nodes)Check(n->spawns==1,"mixed room: the v2 plan (rifles) passes the older peer's Validate");}
     {Room r(2);r.legacyNode=1;r.With(1);r.nodes[1]->session->Stop();r.nodes[1]->session->Start(false,1,1,r.now);r.Settle();

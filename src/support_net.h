@@ -45,6 +45,9 @@ bool SupportTransactionActive(std::uint64_t transaction) noexcept;
 // (support_protocol.h kCapSoldierVariants); true offline / with no session. The host's planner falls back to the
 // protocol v2 plan (rifles, each call's own number of aircraft) otherwise, and says so.
 bool SupportPeersAcceptVariants() noexcept;
+// Whether every peer applies air support created in the air (kCapAirborneAir); true offline / with no session. Without
+// it the host refuses air support with a reason: no peer may have its hull on the ground while another's flies.
+bool SupportPeersAcceptAirborne() noexcept;
 // Requester ownership: native EOS PUID must equal the authenticated transport
 // sender and belong to the sealed current-world participant set.
 bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) noexcept;

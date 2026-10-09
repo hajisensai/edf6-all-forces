@@ -22,6 +22,7 @@
 namespace crew {
 // Implemented by the real-crew adapter; no imaginary rider participates in deployment.
 int NpcBoardCrew(unsigned char*,unsigned char* const*,int) noexcept;
+int NpcSeatCrewNow(unsigned char*,unsigned char* const*,int) noexcept;
 bool NpcPrepareVehicleRoutePost(unsigned char*,const float*,float) noexcept;
 bool NpcReleaseVehicleCrew(unsigned char*) noexcept;
 bool RegisterSupportObject(const void*,const unsigned char*) noexcept;
@@ -136,8 +137,7 @@ bool AddUnit(SupportPlan& plan,std::uint32_t resource,std::uint32_t parent,const
     if(plan.count>=support_net::kMaxUnits)return false;
     auto& unit=plan.units[plan.count++];unit={};unit.resourceId=resource;unit.role=parent;Matrix(at,heading,unit.matrix);return true;
 }
-// The real crew gather beside their hull. `rise`: how far their ground may lie from the hull's (a ground vehicle's
-// crew stand on its own level; an aircraft's walk over the runway's own allowance, support_entry.h kRunwayRise).
+// The real crew gather beside their ground vehicle, on its own level (`rise`).
 bool AddCrew(SupportPlan& plan,unsigned parent,const float* entry,const float* heading,unsigned count,float width,
              std::uint32_t resource,float rise) noexcept {
     for(unsigned i=0;i<count;++i) {
@@ -205,29 +205,33 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,SupportPl
         if(!Cfg().jetAirRaider || !Cfg().npcBoarding || (spec.heli>=0 ? !Cfg().heliPilot : !Cfg().jetPilot)) {
             Refuse(catalog,"JetAirRaider/NpcBoarding/HeliPilot/JetPilot off",L"航空支援或真实机组驾驶功能未启用");return PlanResult::refused;
         }
+        // Every peer must create it in the air the same way (support_protocol.h kCapAirborneAir): an older peer would
+        // make the hull empty and its crew falling, so such a room is told why instead.
+        if(!SupportPeersAcceptAirborne()) {
+            Refuse(catalog,"a peer runs an older All Forces without airborne air support",hudtext::Tr(hudtext::Tx::supportAirNeedsUpdate));
+            return PlanResult::refused;
+        }
         spec.count=AircraftCount(catalog,spec,1+AirCrew(spec));
         const auto refusal=PlanAirSupport(static_cast<int>(catalog),target,player.pos,&route,spec.count);
         if(refusal!=support::Refusal::none) {
             if(refusal==support::Refusal::noSky)Refuse(catalog,"no open sky over the target",L"此处没有开放天空，航空支援无法进入");
-            else Refuse(catalog,"no level runway / pad at any map edge",L"找不到可用的场外跑道或直升机起降点");
+            else Refuse(catalog,"no clear air corridor from any map edge",L"从地图边缘到目标没有净空的空中航线");
             return PlanResult::refused;
         }
-        // Aircraft are queued along a verified entry strip, not created above the destination.
+        // Created in the air at the edge, in formation, flying in (support_entry.h AirFormationSlot); the real crew are
+        // made inside their aircraft (the same matrix) and seated at once at spawn.
         const auto crew=UseConfiguredLoadout() ? SupportSoldierResource(SupportCfg().aircraftCrew,false) : kSupportRangerResource;
+        const float spacing=spec.heli>=0 ? 0.6f : 1.0f;
         for(int i=0;i<spec.count;++i) {
-            float at[3]={route.from[0]+route.heading[0]*static_cast<float>(i)*65.0f,route.from[1],
-                         route.from[2]+route.heading[2]*static_cast<float>(i)*65.0f};
-            if(!Foot(at[0],at[2],route.from[1],at[1],25)){Refuse(catalog,"aircraft stand not clear",L"场外起降点上空不净空");return PlanResult::refused;}
-            at[1]+=0.1f;
+            float at[3];support::AirFormationSlot(route,i,spacing,at);
             const unsigned parent=plan.count+1;
-            if(!AddUnit(plan,kAircraft+catalog,0,at,route.heading) ||
-               !AddCrew(plan,parent,at,route.heading,AirCrew(spec),spec.heli>=0 ? 18.0f : 45.0f,crew,support::kRunwayRise)) {
-                Refuse(catalog,"no dry level ground for the real crew beside the aircraft",L"飞机旁没有可供真实机组集合的地面");
-                return PlanResult::refused;
+            if(!AddUnit(plan,kAircraft+kSupportAirborneOffset+catalog,0,at,route.heading)){Refuse(catalog,"plan full",L"支援单位过多");return PlanResult::refused;}
+            for(unsigned c=0;c<AirCrew(spec);++c)if(!AddUnit(plan,crew,parent,at,route.heading)) {
+                Refuse(catalog,"plan full",L"支援单位过多");return PlanResult::refused;
             }
         }
-        Log("SUPPORT plan catalog=%u ready: %d aircraft at (%.0f,%.0f,%.0f), %u units",catalog,spec.count,
-            route.from[0],route.from[1],route.from[2],plan.count);
+        Log("SUPPORT plan catalog=%u ready: %d aircraft in the air at (%.0f,%.0f,%.0f) heading (%.2f,%.2f), %u units",catalog,spec.count,
+            route.from[0],route.from[1],route.from[2],route.heading[0],route.heading[2],plan.count);
         *out=plan;planning.active=false;return PlanResult::ready;
     }
     const auto area=MapPlayArea();
@@ -306,7 +310,11 @@ bool Validate(const SupportPlan& plan) noexcept {
         if(!plan.count || plan.count%group)return false;
         for(unsigned i=0;i<plan.count;++i) {
             const auto& unit=plan.units[i];
-            if(i%group==0) {if(unit.resourceId!=kAircraft+plan.catalogId || unit.role)return false;}
+            // This version's airborne hull, or an older host's runway hull (applied as that host planned it).
+            if(i%group==0) {
+                if((unit.resourceId!=kAircraft+kSupportAirborneOffset+plan.catalogId && unit.resourceId!=kAircraft+plan.catalogId) ||
+                   unit.role || plan.units[0].resourceId!=unit.resourceId)return false;
+            }
             else if(!member(unit.resourceId) || unit.role!=i-i%group+1)return false;
         }
     } else if(ground) {
@@ -324,7 +332,8 @@ bool Validate(const SupportPlan& plan) noexcept {
         const auto& unit=plan.units[i];
         if(unit.role && (unit.role>i || plan.units[unit.role-1].resourceId<kAircraft))return false;
         if(IsSupportSoldierResource(unit.resourceId))continue;
-        if(unit.resourceId==kAircraft+plan.catalogId && plan.catalogId<static_cast<unsigned>(AirCount()))continue;
+        if((unit.resourceId==kAircraft+plan.catalogId || unit.resourceId==kAircraft+kSupportAirborneOffset+plan.catalogId) &&
+           plan.catalogId<static_cast<unsigned>(AirCount()))continue;
         if(unit.resourceId>=kVehicle && unit.resourceId<kVehicle+kSupportVehicleCount &&
            GroundCatalog(plan.catalogId,kind,mode) && unit.resourceId==kVehicle+static_cast<unsigned>(kind))continue;
         return false;
@@ -366,6 +375,34 @@ void Destroy(std::uint64_t id) noexcept {
 }
 // `networked`: a committed support_net transaction (registered IDs on every peer); else this machine's own
 // deployment (LocalAuthority): unregistered objects only it simulates.
+// Airborne aircraft of a just created deployment: each one's real crew (made inside it, unregistered) take their seats
+// at once (NpcSeatCrewNow, the stock RideVehicle), then hull and crew are registered (networked) and, where the flight is
+// run (not a remote copy), it flies on at once: a hull in the air must not wait for the all-peer barrier unflown. The
+// held crew's AI and any native ride/follow work still wait for Active (Assign).
+bool BoardAirborne(Deployment& deployed,bool networked) noexcept {
+    const auto& plan=deployed.plan;
+    for(unsigned i=0;i<plan.count;++i) {
+        if(!IsSupportAirborneAircraft(plan.units[i].resourceId))continue;
+        auto* vehicle=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[i].obj));
+        unsigned char* crew[support_net::kMaxUnits];int count=0;
+        for(unsigned k=0;k<plan.count;++k)if(plan.units[k].role==i+1)crew[count++]=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[k].obj));
+        const int seated=NpcSeatCrewNow(vehicle,crew,count);
+        if(seated!=count) {
+            Log("SUPPORT spawn %llu: %d of %d crew seated in aircraft %u",static_cast<unsigned long long>(deployed.id),seated,count,i);
+            return false;
+        }
+        if(networked) {
+            if(!RegisterSupportObject(vehicle,plan.units[i].netId))return false;
+            for(unsigned k=0;k<plan.count;++k)if(plan.units[k].role==i+1 && !RegisterSupportObject(deployed.objects[k].obj,plan.units[k].netId))return false;
+        }
+        if(!deployed.remote) {
+            SupportAircraft spec;
+            if(!SupportAircraftSpec(static_cast<int>(plan.catalogId),&spec) || !ActivateSupportAircraft(vehicle,spec,plan.target,true))return false;
+            deployed.started=true;
+        }
+    }
+    return true;
+}
 bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool networked) noexcept {
     if(!Validate(plan))return false;
     Deployment* deployed=nullptr;for(auto& row:deployments)if(!row.used){deployed=&row;break;}
@@ -373,8 +410,12 @@ bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool n
     deployed->used=true;deployed->id=id;deployed->plan=plan;deployed->remote=remote;deployed->born=GameMs();deployed->networked=networked;
     for(unsigned i=0;i<plan.count;++i) {
         const auto& unit=plan.units[i];ObjRef object;
+        // An airborne aircraft's crew: made unregistered, seated below, then registered (no ride event before peers
+        // know the objects); every other soldier as before.
+        const bool aboard=unit.role && IsSupportAirborneAircraft(plan.units[unit.role-1].resourceId);
         if(unit.resourceId<kAircraft) {
-            if(!ApplySupportSoldierResource(unit.matrix,unit.resourceId,networked ? unit.netId : nullptr,!networked,&object)) {
+            if(!(aboard ? CreateSupportSoldierUnregistered : ApplySupportSoldierResource)(unit.matrix,unit.resourceId,
+                    networked ? unit.netId : nullptr,!networked,&object)) {
                 Log("SUPPORT spawn %llu: soldier %u (resource %X) not created",static_cast<unsigned long long>(id),i,unit.resourceId);
                 Destroy(id);return false;
             }
@@ -394,13 +435,16 @@ bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool n
                 Destroy(id);return false;
             }
             object=ObjRef::Of(vehicle);deployed->objects[i]=object;
-            if(networked && !RegisterSupportObject(vehicle,unit.netId)){Destroy(id);return false;}
+            if(networked && !IsSupportAirborneAircraft(unit.resourceId) && !RegisterSupportObject(vehicle,unit.netId)){Destroy(id);return false;}
         }
         deployed->objects[i]=object;
     }
+    if(!BoardAirborne(*deployed,networked)){Destroy(id);return false;}
     Log("SUPPORT spawn %llu: catalog %u, %u units created (%s)",static_cast<unsigned long long>(id),plan.catalogId,plan.count,
         networked ? "networked" : InSession() ? "host of a one-player world" : "offline");
-    Status(networked ? L"支援已在入口集结，等待所有玩家确认对象" : L"支援已在入口集结，真实机组正在登车");return true;
+    if(deployed->started)Status(L"空中支援已从场外空中入场，正在飞往目标");
+    else Status(networked ? L"支援已在入口集结，等待所有玩家确认对象" : L"支援已在入口集结，真实机组正在登车");
+    return true;
 }
 bool Spawn(std::uint64_t id,const SupportPlan& plan,bool remote) noexcept {
     if(plan.catalogId==support_net::kMissionCrewCatalog)return ApplyMissionCrewPlan(id,plan,remote);
@@ -416,7 +460,7 @@ bool Assign(Deployment& deployed) noexcept {
         const auto& unit=plan.units[i];
         if(IsSupportLeaderResource(unit.resourceId)){leader=deployed.objects[i];continue;}
         if(IsSupportSoldierResource(unit.resourceId) && !unit.role && leader && !FollowSupportSoldier(deployed.objects[i],leader))return false;
-        if(unit.resourceId<kAircraft || deployed.remote)continue;
+        if(unit.resourceId<kAircraft || deployed.remote || IsSupportAirborneAircraft(unit.resourceId))continue;   // aboard already
         unsigned char* crew[support_net::kMaxUnits];int count=0;
         for(unsigned k=0;k<plan.count;++k)if(plan.units[k].role==i+1)crew[count++]=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[k].obj));
         if(NpcBoardCrew(static_cast<unsigned char*>(const_cast<void*>(deployed.objects[i].obj)),crew,count)!=count)return false;
@@ -578,7 +622,7 @@ void SupportDispatchTick() noexcept {
                 auto* object=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[i].obj));
                 if(resource>=kAircraft && resource<kVehicle) {
                     SupportAircraft spec;SupportAircraftSpec(static_cast<int>(deployed.plan.catalogId),&spec);
-                    started=ActivateSupportAircraft(object,spec,deployed.plan.target) && started;
+                    started=ActivateSupportAircraft(object,spec,deployed.plan.target,false) && started;   // an older host's runway hull
                 } else if(resource>=kVehicle)started=NpcPrepareVehicleRoutePost(object,
                     reinterpret_cast<const float*>(object+kPosition),kVehicleDriverHold) && started;
                 else if(IsSupportLeaderResource(resource))started=NpcPrepareSquadRoute(object,

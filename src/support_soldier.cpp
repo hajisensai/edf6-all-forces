@@ -107,7 +107,8 @@ int SpawnFault(const char* stage,const EXCEPTION_POINTERS* error,const float* re
         static_cast<unsigned>(reinterpret_cast<std::uintptr_t>(nativeMatrix)&15u),soldier);
     return EXCEPTION_EXECUTE_HANDLER;
 }
-bool Spawn(const float* matrix,std::uint32_t resource,ObjRef* out,const unsigned char* netId=nullptr,bool local=false) noexcept {
+bool Spawn(const float* matrix,std::uint32_t resource,ObjRef* out,const unsigned char* netId=nullptr,bool local=false,
+           bool registerNow=true) noexcept {
     *out=ObjRef{};
     if(!Gate(netId!=nullptr,local))return false;
     const wchar_t* const body=Body(resource);
@@ -145,7 +146,7 @@ bool Spawn(const float* matrix,std::uint32_t resource,ObjRef* out,const unsigned
         stage="recruit";
         Put<unsigned char>(soldier,0x540,1); // stock CreateFriend's recruitable flag
         if(At<int>(soldier,edf::kTeam)!=2){failure=SupportSpawnFailure::setup;destroy(soldier);ReleaseWeak(*entry);return false;}
-        if(netId) {
+        if(netId && registerNow) {
             stage="network";
             if(!RegisterSupportObject(soldier,netId)) {
                 failure=SupportSpawnFailure::setup;destroy(soldier);ReleaseWeak(*entry);return false;
@@ -268,6 +269,10 @@ bool ApplySupportSoldierSpawn(const float* matrix,bool leader,const unsigned cha
 bool ApplySupportSoldierResource(const float* matrix,std::uint32_t resource,const unsigned char* id,bool local,ObjRef* out) noexcept {
     if(!out)return false;
     return support_native::Spawn(matrix,resource,out,id,local && !id);
+}
+bool CreateSupportSoldierUnregistered(const float* matrix,std::uint32_t resource,const unsigned char* id,bool local,ObjRef* out) noexcept {
+    if(!out)return false;
+    return support_native::Spawn(matrix,resource,out,id,local && !id,false);
 }
 bool RegisterSupportObject(const void* object,const unsigned char* id) noexcept {
     using namespace support_native;

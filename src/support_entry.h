@@ -89,18 +89,15 @@ inline GroundEntries GroundEntryCandidates(const PlayArea& area,const float* tar
     return out;
 }
 
-// A runway / landing pad for a manned aircraft starting on the ground: the same rule a wing's landing strip uses
-// (playerjet_board.inc StripCost: within 4 m of its start, 1.5 m between neighbouring samples ~25 m apart). The old
-// 0.5 m over 220 x 90 m demanded a billiard table no real map edge offers. `height(i)` the ground of sample i of
-// `count` along one lane; false when a sample has no ground.
-constexpr float kRunwayRise=4.0f,kRunwayStepRise=1.5f;
-template<class Height> bool RunwayLaneLevel(int count,float start,Height height) noexcept {
-    float last=start;
-    for(int i=0;i<count;++i) {
-        float g;
-        if(!height(i,g) || !std::isfinite(g) || std::fabs(g-start)>kRunwayRise || std::fabs(g-last)>kRunwayStepRise)return false;
-        last=g;
-    }
-    return true;
+// Air support flies in from the edge (2026-10-09): created in the air at the entry, at the route's height. Several
+// aircraft of one call fly line abreast there: slot 0 the lead at the entry, then alternately left / right of it,
+// kFormationSide apart across the heading, level with it. Not behind it: the entry already stands kEntryInset inside the
+// measured area, a slot behind it would be made outside. `spacing` scales the interval (helicopters fly closer).
+constexpr float kFormationSide=70.0f;
+inline void AirFormationSlot(const Route& route,int slot,float spacing,float* out) noexcept {
+    const int pair=(slot+1)/2;
+    const float side=slot==0 ? 0.0f : (slot%2 ? 1.0f : -1.0f)*static_cast<float>(pair)*kFormationSide*spacing;
+    const float hx=route.heading[0],hz=route.heading[2];
+    out[0]=route.from[0]+hz*side;out[1]=route.from[1];out[2]=route.from[2]-hx*side;
 }
 } // namespace crew::support

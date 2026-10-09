@@ -131,6 +131,12 @@ int main() {
     Check(!ApplySupportSoldierResource(poses[2],SupportSoldierResource(SupportWeapon::rifle,false),nullptr,true,&one) && made==was,
           "a client never creates a local damaging soldier, whatever it asks");}host=true;
     unsigned char id[32]{};Put<unsigned>(id,0xC,5);Put<unsigned>(id,4,0xE0000001);
+    // An airborne aircraft's crew (support_dispatch.cpp BoardAirborne): made with its ID but unregistered, seated, then
+    // registered by the dispatcher.
+    {ObjRef crew;
+     Check(CreateSupportSoldierUnregistered(poses[3],SupportSoldierResource(SupportWeapon::rifle,false),id,false,&crew) &&
+           At<unsigned>(crew.obj,0x128)==0,"crew made with its ID is not registered before it is seated");
+     Check(RegisterSupportObject(crew.obj,id) && At<unsigned>(crew.obj,0x128)==2,"the dispatcher registers it afterwards");}
     Check(ApplySupportSoldierSpawn(poses[0],false,id,&one),"host applies authenticated event and native registration");
     Check(At<unsigned>(one.obj,0x128)==2 && At<LONG>(one.ctrl,12)==2,"host native owner and weak consumption");
     Check(!RegisterSupportObject(one.obj,id),"registered object cannot be registered twice");
