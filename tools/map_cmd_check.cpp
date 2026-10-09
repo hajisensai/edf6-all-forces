@@ -147,6 +147,19 @@ int main() {
     Check(Click(s,marks,4,150.0f,110.0f,22.0f,false)==nullptr,"a unit behind the eye is never clicked");
     const Mark close[]={{&a,100.0f,100.0f,true},{&b,112.0f,100.0f,true}};
     Check(Click(s,close,2,109.0f,100.0f,22.0f,false)==&b,"two in reach: the nearer");
+    // The squad panel's order and fold (the user, 2026-10-09: "小队太多了…看不过来"; 37 squads in that mission).
+    {
+        Check(SquadRank(true,false,false)<SquadRank(false,false,false) && SquadRank(false,false,false)<SquadRank(false,false,true) &&
+              SquadRank(false,false,true)<SquadRank(false,true,false) && SquadRank(true,true,true)==SquadRank(false,true,false),
+              "the panel's order: the player's, the free, the riding, a script's");
+        const int few[]={0,1,1,2,3,3};
+        Check(SquadRowsShown(few,6,false,16)==3 && SquadRowsShown(few,6,true,16)==6 && SquadRowsShown(few,6,true,4)==4,
+              "folded: the ones on foot that take orders; open: all (up to the rows published)");
+        int many[14];for(int& r:many)r=1;
+        Check(SquadRowsShown(many,14,false,16)==kSquadRowsFolded && SquadRowsShown(many,14,true,16)==14,"folded: at most the number keys' nine");
+        const int none[]={2,3};
+        Check(SquadRowsShown(none,2,false,16)==0,"nothing commandable on foot: folded shows none, all in the summary");
+    }
     // Shown but not picked (Mark::pick; the user, 2026-10-09: a box of 30 units none of which took the order; a tank's
     // crew squad selected with the tank): the box passes over them, a click on one leaves the selection as it was.
     {

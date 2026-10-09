@@ -32,6 +32,7 @@
 #include "real_driver_native.h"
 #include "support_soldier.h"
 #include "vhud.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -1334,15 +1335,19 @@ int SquadCommandUnits(CommandUnit* out,int most) noexcept {
     return n;
 }
 
-int SquadRows(SquadRow* out,int most) noexcept {
+// The panel's rows, every squad listed, sorted by mapcmd::SquadRank (stable: the slots' order within a rank), the first
+// `most` copied out. Sorted here, once, so the number keys (mapcmd.cpp) and the panel (hud.cpp) agree on the order.
+int SquadRows(SquadRow* out,int most,SquadTally* tally) noexcept {
+    if(tally)*tally=SquadTally{};
     if(!ok || !Cfg().customNpcAi)return 0;
     const ULONGLONG ms=GameMs();
+    static SquadRow all[kMaxSquads*2];   // the game thread's (too big for its stack)
     int n=0;
     RefreshCommandSnapshots();
-    for(int i=0;i<kMaxSquads && n<most;++i) {
+    for(int i=0;i<kMaxSquads;++i) {
         const Squad& q=squads[i];
         if(!Live(q,ms) || (InSession() && !IsOnlineAuthority(q.top.obj)))continue;
-        SquadRow& r=out[n++];
+        SquadRow& r=all[n++];r={};
         r.leader=q.top.obj;
         r.identity=q.top;
         std::snprintf(r.name,sizeof(r.name),"%s",kClassWords[q.cls]);
@@ -1351,13 +1356,23 @@ int SquadRows(SquadRow* out,int most) noexcept {
         r.alive=q.alive>0 ? q.alive : 1;
         r.cooldown=q.dismissed ? static_cast<int>((cooldowns.Left(SquadKey(q.top.obj),ms)+999)/1000) : 0;
         r.now=q.cmd;r.locked=npc::Scripted(q.control);r.riding=SquadRiding(q);
+        r.rank=mapcmd::SquadRank(q.control==npc::Control::recruited,r.locked,r.riding);
     }
-    for(int i=0;i<remoteSquadCount && n<most;++i) {
-        const auto& q=remoteSquads[i];auto& row=out[n++];row={};
+    for(int i=0;i<remoteSquadCount && n<kMaxSquads*2;++i) {
+        const auto& q=remoteSquads[i];auto& row=all[n++];row={};
         row.leader=q.top.obj;row.identity=q.top;row.alive=q.alive;row.locked=npc::Scripted(q.control);
+        row.riding=!HumanOnFoot(static_cast<const unsigned char*>(q.top.obj));
         std::snprintf(row.name,sizeof(row.name),"%s",kClassWords[q.cls]);std::snprintf(row.status,sizeof(row.status),"%s",row.locked ? "SCRIPT" : "REMOTE");
+        row.rank=mapcmd::SquadRank(q.control==npc::Control::recruited,row.locked,row.riding);
     }
-    return n;
+    std::stable_sort(all,all+n,[](const SquadRow& a,const SquadRow& b){ return a.rank<b.rank; });
+    if(tally) {
+        tally->total=n;
+        for(int i=0;i<n;++i){tally->riding+=all[i].rank==2;tally->scripted+=all[i].rank==3;}
+    }
+    const int k=n<most ? n : most;
+    for(int i=0;i<k;++i)out[i]=all[i];
+    return k;
 }
 
 namespace {

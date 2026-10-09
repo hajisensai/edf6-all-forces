@@ -3545,13 +3545,21 @@ void MapSquadStatus(const SquadRow& r,wchar_t* out,std::size_t size) noexcept {
     if(std::strncmp(r.status,"WAIT ",5)==0)_snwprintf_s(out,size,_TRUNCATE,Tr(Tx::squadWait),r.cooldown);
     else hudtext::WordTo(r.status,out,size);
 }
-void MapSquadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool pad,const MapCommandReadout& c,Line* lines,int* at) noexcept {
-    if(c.squads<=0){MapCommandSquadButtons(nullptr,nullptr,0);return;}
-    // Top left, under the title band and over the legend (which starts some 270 px down at 1080 lines); the compass
-    // has the top right.
+// The panel's rows (the user, 2026-10-09: "小队太多了吧，怎么处理合适，感觉看不过来"): sorted by SquadRank (the player's,
+// the free ones, riding, a script's), folded to the ones on foot that take orders (at most 9: the number keys), the rest
+// summed in a row that opens it (mapcmd_logic.h SquadRowsShown). Its bottom (px), for what goes under it; `top` none.
+float MapSquadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool pad,const MapCommandReadout& c,Line* lines,int* at) noexcept {
     const float x0=16.0f*s,rowH=22.0f*s,top=56.0f*s;
-    const int rows=c.squads<9 ? c.squads : 9;
-    if(*at+rows+1>kMaxLines){MapCommandSquadButtons(nullptr,nullptr,0);return;}
+    if(c.squads<=0){MapCommandSquadButtons(nullptr,nullptr,0);MapCommandSquadFold(nullptr);return top;}
+    // Top left, under the title band and over the legend; the compass has the top right.
+    int ranks[16];
+    const int listed=c.squads<16 ? c.squads : 16;
+    for(int i=0;i<listed;++i)ranks[i]=c.squad[i].rank;
+    const int rows=mapcmd::SquadRowsShown(ranks,listed,c.squadOpen,16);
+    const int foldedRows=mapcmd::SquadRowsShown(ranks,listed,false,16);
+    const int total=c.squadTally.total>listed ? c.squadTally.total : listed;
+    const bool fold=c.squadOpen ? foldedRows<total : rows<total;
+    if(*at+rows+2>kMaxLines){MapCommandSquadButtons(nullptr,nullptr,0);MapCommandSquadFold(nullptr);return top;}
     const int first=*at;
     Line& title=lines[(*at)++];Format(title,L"%ls",Tr(pad ? Tx::squadTitle : Tx::squadTitleKeys));
     title.rgba=kMapOrder;
@@ -3559,9 +3567,15 @@ void MapSquadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool pa
         const SquadRow& r=c.squad[i];
         const float* tint=r.locked ? kMapLocked : c.squadSelected[i] ? kWhite : kMapOrder;
         wchar_t key[4]=L" ";
-        if(i<9)_snwprintf_s(key,_countof(key),_TRUNCATE,L"%d",i+1);
+        if(i<mapcmd::kSquadRowsFolded)_snwprintf_s(key,_countof(key),_TRUNCATE,L"%d",i+1);
         wchar_t name[32],status[32];hudtext::WordTo(r.name,name,_countof(name));MapSquadStatus(r,status,_countof(status));
         Line& row=lines[(*at)++];Format(row,L"%ls  %ls x%d   %ls   %ls",key,name,r.alive,status,MapOrderWord(r.now.order));row.rgba=tint;
+    }
+    if(fold) {
+        Line& more=lines[(*at)++];
+        if(c.squadOpen)Format(more,L"%ls",Tr(Tx::squadFold));
+        else Format(more,Tr(Tx::squadMore),total-rows,c.squadTally.riding,c.squadTally.scripted);
+        more.rgba=kMapOrderDim;
     }
     float panelW=0.0f;
     for(int i=first;i<*at;++i) {
@@ -3572,9 +3586,10 @@ void MapSquadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool pa
         row.x=x0;row.y=top+rowH*static_cast<float>(i-first);
         panelW=std::fmax(panelW,row.w);
     }
-    const float left=x0-8.0f*s,right=x0+panelW+8.0f*s,bottom=top+rowH*static_cast<float>(rows+1)+4.0f*s;
+    const int drawn=*at-first;   // the title, the rows, the summary
+    const float left=x0-8.0f*s,right=x0+panelW+8.0f*s,bottom=top+rowH*static_cast<float>(drawn)+4.0f*s;
     MapUiBox(drawer,ctx,left,top-6.0f*s,right,bottom,lines,first);
-    float rects[9*4]{};ObjRef identities[9]{};
+    float rects[16*4]{};ObjRef identities[16]{};
     for(int i=0;i<rows;++i) {
         const auto& row=lines[first+i+1];auto* hit=rects+i*4;
         hit[0]=left;hit[1]=row.y;hit[2]=right;hit[3]=row.y+rowH;
@@ -3583,7 +3598,13 @@ void MapSquadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool pa
             Rect(drawer,ctx,left,hit[1],right,hit[3],kMapBoxFill);
     }
     MapCommandSquadButtons(pad ? nullptr : rects,pad ? nullptr : identities,pad ? 0 : rows);
-
+    if(fold && !pad) {
+        const auto& row=lines[first+rows+1];
+        const float hit[4]={left,row.y,right,row.y+rowH};
+        if(c.pointer && c.px>=left && c.px<right && c.py>=hit[1] && c.py<hit[3])Rect(drawer,ctx,left,hit[1],right,hit[3],kMapBoxFill);
+        MapCommandSquadFold(hit);
+    } else MapCommandSquadFold(nullptr);
+    return bottom;
 }
 
 // A map-only interactive loadout keeps left-click firing and camera aim untouched outside M.
@@ -3896,7 +3917,7 @@ void MapSupportBar(void* drawer,void* ctx,Text* text,float width,float s,float t
 void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
     static MapCommandReadout c;   // the draw thread's (too big for its stack)
     if(!PlayerMapCommands(&c)){
-        MapCommandButtons(nullptr,nullptr,0);MapCommandSquadButtons(nullptr,nullptr,0);
+        MapCommandButtons(nullptr,nullptr,0);MapCommandSquadButtons(nullptr,nullptr,0);MapCommandSquadFold(nullptr);
         MapCommandPayloadButtons(nullptr,0,0,nullptr,0);MapCommandSupportButtons(nullptr,nullptr,0);return;
     }
     const float* tint=c.allowed && c.pickable ? kMapOrder : kMapOrderDim;
@@ -3954,12 +3975,11 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
             Label(text,lines,at,ux,uy-28.0f*s,1,kLineScale*0.7f,kWhite,L"%ls",one);
         }
     }
-    MapSquadPanel(drawer,ctx,text,width,s,m.pad,c,lines,at);
+    const float panelBottom=MapSquadPanel(drawer,ctx,text,width,s,m.pad,c,lines,at);
     MapPayloadPanel(drawer,ctx,text,width,s,m.pad,c,lines,at);
     const int buttonRows=MapButtons(drawer,ctx,text,width,height,s,m.pad,c,lines,at);
     // The support bar under the squad panel (its rows and the gap under them), down to the command card.
-    const int squads=c.squads<9 ? c.squads : 9;
-    const float barTop=(squads>0 ? 56.0f+22.0f*static_cast<float>(squads+1)+14.0f : 56.0f)*s;
+    const float barTop=c.squads>0 ? panelBottom+10.0f*s : panelBottom;
     const float barBottom=height-(kBtnBottom+static_cast<float>(buttonRows)*(kBtnRowH+kBtnGap)+40.0f)*s;
     MapSupportBar(drawer,ctx,text,width,s,barTop,barBottom,m.pad,c,lines,at);
     // The band over the map's keys: what is selected and what to do with it (one line; the keys are in the tooltips).
@@ -4047,7 +4067,7 @@ void NpcMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
 bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
     static MapReadout m;   // the draw thread's (too big for its stack)
     if(!PlayerMap(&m)){
-        MapCommandButtons(nullptr,nullptr,0);MapCommandSquadButtons(nullptr,nullptr,0);
+        MapCommandButtons(nullptr,nullptr,0);MapCommandSquadButtons(nullptr,nullptr,0);MapCommandSquadFold(nullptr);
         MapCommandPayloadButtons(nullptr,0,0,nullptr,0);MapCommandSupportButtons(nullptr,nullptr,0);MapCommandUiPanels(nullptr,0);return false;
     }
     s=hudscale::FitMap(s,width,height);

@@ -414,6 +414,12 @@ HUDTEXT(sweepOn,L"FETCHING BOXES: %d LEFT, %d IN   [%ls] call back",L"拾取箱�
 HUDTEXT(sweepDone,L"BOXES FETCHED: %d",L"拾取结束：捡到 %d 个",L"拾取結束：撿到 %d 個",L"回収終了：%d 個")
 HUDTEXT(formationCue,L"FORMATION: %ls   [%ls]",L"编队：%ls   [%ls]",L"編隊：%ls   [%ls]",L"隊形：%ls   [%ls]")
 HUDTEXT(squadWait,L"WAIT %d s",L"等待 %d 秒",L"等待 %d 秒",L"待機 %d 秒")
+// The squad panel's summary row (hud.cpp MapSquadPanel; the user, 2026-10-09: "小队太多了吧…感觉看不过来"): folded, the
+// squads not listed (how many of them ride a vehicle, how many a script drives); open, the row that folds it again.
+HUDTEXT(squadMore,L"+%d MORE (%d riding, %d scripted): click to list",L"另有 %d 支（乘车 %d，脚本 %d）：点击展开",
+        L"另有 %d 支（乘車 %d，腳本 %d）：點擊展開",L"他 %d 部隊（搭乗 %d、指示中 %d）：クリックで表示")
+HUDTEXT(squadFold,L"Click to fold: only the squads that take orders",L"点击收起：只列可指挥的小队",L"點擊收起：只列可指揮的小隊",
+        L"クリックでたたむ：指揮できる分隊のみ")
 HUDTEXT(npcMark,L"MARK",L"标记",L"標記",L"マーク")
 HUDTEXT(npcMarkRange,L"MARK %.0f m",L"标记 %.0f m",L"標記 %.0f m",L"マーク %.0f m")
 // The mark key on foot with no enemy near the centre (npcai.cpp SendToPoint): the units selected on the map sent there.

@@ -83,6 +83,7 @@ struct Game {
     int armedSupport=-1;
     bool armedClick=false;
     int supportPick;
+    bool panelOpen=false;       // the squad panel opened past its commandable rows (mapcmd_logic.h SquadRowsShown)
     bool rpressing=false,rOnUi=false;float rmoved=0.0f; // a right press (a click unless it moves kClickMove), begun on UI
     bool rightClick=false,rightOnUi=false;               // ...let go without a drag this frame
     ObjRef hover;               // original identity under the pointer; never recaptured from a cached address
@@ -90,7 +91,7 @@ struct Game {
     bool eat,eatWas;            // the mark key's press took the enemy under the pointer: not the map's (MapCommandEats)
     ObjRef eatHover;            // ...that enemy's original identity, its lock point
     float eatAt[3];
-    enum class UiKind : std::uint8_t { none,command,squad,payload,support,panel };
+    enum class UiKind : std::uint8_t { none,command,squad,payload,support,panel,fold };
     struct UiHit { UiKind kind=UiKind::none;int id=-1;ObjRef identity{};std::uint64_t token=0;int seat=-1,entry=-1; };
     UiHit uiPress{};
     bool uiLeft=false,uiRight=false,rowPicked=false,suppressLeft=false,suppressRight=false;
@@ -115,6 +116,7 @@ struct View {
     mapbtn::Rect squad[kUiItems]{},payload[kUiItems]{},panel[kUiItems]{},support[kMapSupports]{};
     int supportEntry[kMapSupports]{};
     ObjRef squadIdentity[kUiItems]{};
+    bool folds=false;mapbtn::Rect fold{};   // the squad panel's summary row
     std::uint64_t payloadToken=0;int payloadSeat=-1,payloadEntry[kUiItems]{};
 };
 View view{};
@@ -325,6 +327,7 @@ Game::UiHit UiAt(const View& v,float x,float y) noexcept {
     if(i>=0){hit.kind=Game::UiKind::command;hit.id=v.id[i];return hit;}
     i=mapbtn::Hit(v.squad,v.squads,x,y);
     if(i>=0){hit.kind=Game::UiKind::squad;hit.identity=v.squadIdentity[i];return hit;}
+    if(v.folds && mapbtn::Hit(&v.fold,1,x,y)>=0){hit.kind=Game::UiKind::fold;return hit;}
     i=mapbtn::Hit(v.payload,v.payloads,x,y);
     if(i>=0){hit.kind=Game::UiKind::payload;hit.token=v.payloadToken;hit.seat=v.payloadSeat;hit.entry=v.payloadEntry[i];return hit;}
     i=mapbtn::Hit(v.support,v.supports,x,y);
@@ -342,6 +345,7 @@ void Arm(Game& g,bool order,Order o,int support) noexcept {
 }
 void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
     if(hit.kind==Game::UiKind::command){g.button=hit.id;return;}
+    if(hit.kind==Game::UiKind::fold){g.panelOpen=!g.panelOpen;return;}
     if(hit.kind==Game::UiKind::support) {   // its row or chip: armed (again: disarmed)
         const bool again=g.armedSupport==hit.entry;
         Arm(g,false,Order::none,again ? -1 : hit.entry);
@@ -618,7 +622,8 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     // The game's memory is read before the lock is taken: a fault in a read (a unit gone between its listing and here)
     // must not leave the lock held, which would block the draw thread for good.
     SquadRow rows[16]{};
-    const int squads=SquadRows(rows,16);
+    SquadTally tally{};
+    const int squads=SquadRows(rows,16,&tally);
     const void* pickable[kCmdUnits];
     const int pickCount=PickedIds(g,pickable);
     AcquireSRWLockExclusive(&lock);
@@ -643,7 +648,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
         m.owner=e.owner==Owner::heli ? kCmdOwnerHeli : e.owner==Owner::jet ? kCmdOwnerJet : kCmdOwnerGround;
         std::snprintf(m.name,sizeof(m.name),"%s",e.u.name ? e.u.name : "?");
     }
-    r.squads=squads;
+    r.squads=squads;r.squadTally=tally;r.squadOpen=g.panelOpen;
     std::memcpy(r.squad,rows,sizeof(rows));
     for(int i=0;i<r.squads;++i)r.squadSelected[i]=g.sel.Has(r.squad[i].leader);
     r.hover=static_cast<bool>(g.hover);
@@ -722,11 +727,16 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         mapcmd::Cycle(g.sel,pickable,PickedIds(g,pickable),next ? 1 : -1);
         picked=g.sel.n==1;
     }
-    // The number keys pick a squad of the panel (its rows in SquadRows' order; Shift adds or takes out).
+    // The number keys pick a squad of the panel: its rows shown (SquadRows' order, folded or open: mapcmd_logic.h
+    // SquadRowsShown); Shift adds or takes out. A script's squad says why instead.
     SquadRow rows[9];
-    const int rowCount=SquadRows(rows,9);
+    const int listed=SquadRows(rows,9);
+    int ranks[9];
+    for(int d=0;d<listed;++d)ranks[d]=rows[d].rank;
+    const int rowCount=mapcmd::SquadRowsShown(ranks,listed,g.panelOpen,9);
     for(int d=0;d<rowCount;++d) {
         if(!k.digit[d] || g.was.digit[d])continue;
+        if(rows[d].locked){Note(g,L"%ls",CommandFailureText(NpcCommandReason::scripted));continue;}
         if(!k.shift)g.sel.Clear();
         if(k.shift && g.sel.Has(rows[d].leader))g.sel.Remove(rows[d].leader);
         else g.sel.Add(rows[d].leader);
@@ -819,7 +829,7 @@ void ResetMapCommands() noexcept {
 
 void MapCommandView(const float* viewProj,float width,float height) noexcept {
     AcquireSRWLockExclusive(&viewLock);
-    if(view.w!=width || view.h!=height)view.buttons=view.squads=view.payloads=view.panels=view.supports=0;
+    if(view.w!=width || view.h!=height){view.buttons=view.squads=view.payloads=view.panels=view.supports=0;view.folds=false;}
     std::memcpy(view.vp,viewProj,sizeof(view.vp));view.w=width;view.h=height;view.at=GetTickCount64();
     ReleaseSRWLockExclusive(&viewLock);
 }
@@ -849,6 +859,12 @@ void MapCommandSquadButtons(const float* rects,const ObjRef* identities,int n) n
     for(int i=0;i<n;++i){view.squad[i]={rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};view.squadIdentity[i]=identities[i];}
     ReleaseSRWLockExclusive(&viewLock);
 }
+void MapCommandSquadFold(const float* rect) noexcept {
+    AcquireSRWLockExclusive(&viewLock);
+    view.folds=rect!=nullptr;
+    if(rect)view.fold={rect[0],rect[1],rect[2],rect[3]};
+    ReleaseSRWLockExclusive(&viewLock);
+}
 void MapCommandPayloadButtons(const float* rects,std::uint64_t token,int seat,const int* entries,int n) noexcept {
     n=rects && entries && token && seat>=0 ? (std::max)(0,(std::min)(n,kUiItems)) : 0;
     AcquireSRWLockExclusive(&viewLock);view.payloads=n;view.payloadToken=token;view.payloadSeat=seat;
@@ -869,7 +885,7 @@ void SuspendMapCommands() noexcept {
     g.frameAt=0;g.eat=g.eatWas=false;g.boxing=g.pressing=g.rpressing=false;Arm(g,false,Order::none,-1);g.armedClick=g.rightClick=false;
     g.button=-1;g.uiLeft=g.uiRight=false;g.uiPress={};
     boxingNow.store(false);pointerCaptured.store(false);
-    AcquireSRWLockExclusive(&viewLock);view.at=0;view.buttons=view.squads=view.payloads=view.panels=view.supports=0;ReleaseSRWLockExclusive(&viewLock);
+    AcquireSRWLockExclusive(&viewLock);view.at=0;view.buttons=view.squads=view.payloads=view.panels=view.supports=0;view.folds=false;ReleaseSRWLockExclusive(&viewLock);
     AcquireSRWLockExclusive(&lock);readoutAt=0;ReleaseSRWLockExclusive(&lock);
 }
 

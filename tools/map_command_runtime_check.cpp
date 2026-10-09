@@ -79,7 +79,7 @@ int SquadCommandUnits(CommandUnit* out,int most) noexcept {
     return 1;
 }
 int TankCommandUnits(CommandUnit*,int) noexcept {return 0;}
-int SquadRows(SquadRow*,int) noexcept {return 0;}
+int SquadRows(SquadRow*,int,SquadTally* tally) noexcept {if(tally)*tally=SquadTally{};return 0;}
 bool SquadCommand(const void* leader,const Command& c) noexcept {
     if(leader!=squadObj)return false;
     squadGot=c;++squadOrders;
@@ -507,6 +507,15 @@ void PickOnlyCommandable() noexcept {
     Check(!game.sel.n,"Tab passes over a riding squad (its vehicle is the unit)");
     squadRiding=false;tab();
     Check(game.sel.Has(squadObj),"Tab picks a squad on foot that takes orders");
+    // The squad panel's summary row: a click opens the panel (published), another folds it.
+    const float foldRow[4]={600,400,680,420};
+    MapCommandUiPanels(panel,1);MapCommandSquadFold(foldRow);
+    in.dx=(640.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(410.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
+    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
+    Check(game.panelOpen && PlayerMapCommands(&r) && r.squadOpen,"the summary row opens the squad panel");
+    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
+    Check(!game.panelOpen,"clicked again: folded");
+    MapCommandSquadFold(nullptr);MapCommandUiPanels(nullptr,0);
     std::memset(inputstub::keys,0,sizeof(inputstub::keys));squadOn=false;ResetMapCommands();
 }
 // RTS (the user, 2026-10-09): the right button let go on the map without a drag moves the selection there, on an enemy

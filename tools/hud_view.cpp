@@ -214,7 +214,8 @@ void MapCommandButtons(const float* r,const int* ids,int n) noexcept {
     for(int i=0;i<n;++i){for(int k=0;k<4;++k)sceneButton[i][k]=r[i*4+k];sceneButtonId[i]=ids[i];}
 }
 float sceneUiPanels[16][4]{};int sceneUiCount=0;
-float sceneSquadButtons[9][4]{};int sceneSquadButtonCount=0;
+float sceneSquadButtons[16][4]{};int sceneSquadButtonCount=0;
+float sceneSquadFold[4]{};bool sceneSquadFoldOn=false;
 float scenePayloadButtons[kMostPayload][4]{};int scenePayloadButtonCount=0;
 void MapCommandUiPanels(const float* r,int n) noexcept {
     sceneUiCount=n;for(int i=0;i<n;++i)std::memcpy(sceneUiPanels[i],r+i*4,16);
@@ -222,6 +223,7 @@ void MapCommandUiPanels(const float* r,int n) noexcept {
 void MapCommandSquadButtons(const float* r,const ObjRef*,int n) noexcept {
     sceneSquadButtonCount=n;for(int i=0;i<n;++i)std::memcpy(sceneSquadButtons[i],r+i*4,16);
 }
+void MapCommandSquadFold(const float* r) noexcept { sceneSquadFoldOn=r!=nullptr;if(r)std::memcpy(sceneSquadFold,r,16); }
 void MapCommandPayloadButtons(const float* r,std::uint64_t,int,const int*,int n) noexcept {
     scenePayloadButtonCount=n;for(int i=0;i<n;++i)std::memcpy(scenePayloadButtons[i],r+i*4,16);
 }
@@ -437,7 +439,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     auto row=[](const char* name,int alive,const char* status,Order order,bool locked,bool selected){
         SquadRow& r=sceneCmd.squad[sceneCmd.squads];
         std::snprintf(r.name,sizeof(r.name),"%s",name);std::snprintf(r.status,sizeof(r.status),"%s",status);
-        r.alive=alive;r.now.order=order;r.locked=locked;
+        r.alive=alive;r.now.order=order;r.locked=locked;r.rank=mapcmd::SquadRank(std::strcmp(status,"RECRUITED")==0,locked,false);
         sceneCmd.squadSelected[sceneCmd.squads++]=selected;
     };
     row("RANGER",4,"RECRUITED",Order::guard,false,true);
@@ -466,6 +468,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         row("RANGER",4,"FREE",Order::recruit,false,false);
         for(int i=0;i<sceneCmd.count;++i)sceneCmd.unit[i].selected=i==sceneCmd.count-3;
         sceneCmd.selected=1;
+        sceneCmd.squadOpen=true;   // opened: every row, a script's too, and the row that folds it
     }
     std::swprintf(sceneCmd.note,_countof(sceneCmd.note),Tr(Tx::cmdGuardResult),Tr(Tx::orderGuard),60.0,420.0,2,L"");
     if(vehicleOnly) {
@@ -475,6 +478,12 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         sceneCmd.allowedOrders=(1u<<static_cast<unsigned>(Order::guard))|(1u<<static_cast<unsigned>(Order::none))|(1u<<static_cast<unsigned>(Order::follow))|
                                (1u<<static_cast<unsigned>(Order::move))|(1u<<static_cast<unsigned>(Order::attackMove));
     }
+    // The rows as npcai.cpp SquadRows gives them: sorted by rank (stable), a script's last; the tally of them all.
+    for(int i=1;i<sceneCmd.squads;++i)for(int j=i;j>0 && sceneCmd.squad[j].rank<sceneCmd.squad[j-1].rank;--j) {
+        std::swap(sceneCmd.squad[j],sceneCmd.squad[j-1]);std::swap(sceneCmd.squadSelected[j],sceneCmd.squadSelected[j-1]);
+    }
+    sceneCmd.squadTally=SquadTally{};sceneCmd.squadTally.total=sceneCmd.squads;
+    for(int i=0;i<sceneCmd.squads;++i)sceneCmd.squadTally.scripted+=sceneCmd.squad[i].rank==3;
     sceneCmd.noteFresh=true;
     hasMap=true;
     const std::wstring path=dir+L"\\"+name+L".txt";
@@ -537,11 +546,27 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
             if(own!=1){++textFailed;std::printf("FAIL map button %d: %d labels in it\n",sceneButtonId[i],own);}
         }
     }
+    // The squad panel (the user, 2026-10-09: "小队太多了…看不过来"): folded, the rows on foot that take orders, the rest
+    // (a script's) in the summary row that opens it; open, every row and the row that folds it.
+    int ranks[16];
+    for(int i=0;i<sceneCmd.squads;++i)ranks[i]=sceneCmd.squad[i].rank;
+    const int listedRows=mapcmd::SquadRowsShown(ranks,sceneCmd.squads,sceneCmd.squadOpen,16);
+    const int foldedRows=mapcmd::SquadRowsShown(ranks,sceneCmd.squads,false,16);
+    const bool summary=sceneCmd.squadOpen ? foldedRows<sceneCmd.squads : listedRows<sceneCmd.squads;
     for(int i=0;i<sceneCmd.squads;++i) {
         const SquadRow& r=sceneCmd.squad[i];wchar_t kind[32],status[32];
         hudtext::WordTo(r.name,kind,_countof(kind));MapSquadStatus(r,status,_countof(status));
-        Line expected{};Format(expected,L"%d  %ls x%d   %ls   %ls",i+1,kind,r.alive,status,MapOrderWord(r.now.order));shown(expected.text);
+        Line expected{};Format(expected,L"%d  %ls x%d   %ls   %ls",i+1,kind,r.alive,status,MapOrderWord(r.now.order));
+        if(i<listedRows)shown(expected.text);
+        else for(const Drew& d:drew)if(d.text==expected.text){++textFailed;std::printf("FAIL folded squad row shown: %s\n",Narrow(d.text).c_str());}
     }
+    if(summary) {
+        Line more{};
+        if(sceneCmd.squadOpen)Format(more,L"%ls",Tr(Tx::squadFold));
+        else Format(more,Tr(Tx::squadMore),sceneCmd.squads-listedRows,sceneCmd.squadTally.riding,sceneCmd.squadTally.scripted);
+        shown(more.text);
+    }
+    if(sceneSquadFoldOn!=(summary && !pad)){++textFailed;std::puts("FAIL map squad summary row clickable");}
     if(online && !pad) {
         bool board=false;
         for(int i=0;i<sceneButtons;++i) {
@@ -557,7 +582,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
             ++textFailed;std::puts("FAIL unsupported vehicle order is clickable");
         }
     }
-    if(sceneSquadButtonCount!=(pad ? 0 : (sceneCmd.squads<9 ? sceneCmd.squads : 9))) {++textFailed;std::puts("FAIL map squad clickable rows");}
+    if(sceneSquadButtonCount!=(pad ? 0 : listedRows)) {++textFailed;std::puts("FAIL map squad clickable rows");}
     if(scenePayloadButtonCount!=(payload && !pad ? 6 : 0)){++textFailed;std::puts("FAIL map payload clickable rows");}
     for(std::size_t i=0;i<drew.size();++i) {
         const auto& a=drew[i];if(a.text.empty())continue;bool panelText=false;

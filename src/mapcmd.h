@@ -53,8 +53,12 @@ bool TankCommand(const void* v,const Command& c) noexcept;
 struct SquadRow { const void* leader; char name[24]; char status[16]; int alive; int cooldown; Command now; bool locked;
     ObjRef identity{}; // game-thread snapshot; the draw passes this unchanged, never recaptures from leader
     bool riding=false; // its soldiers seated in a vehicle (status RIDING, no recruitment offered)
+    int rank=1;        // mapcmd::SquadRank: the panel's order (the rows come sorted by it)
 };
-int SquadRows(SquadRow* out,int most) noexcept;
+// Every squad listed, the ones riding and the ones a script drives (the folded panel's summary row).
+struct SquadTally { int total=0,riding=0,scripted=0; };
+// The squads' rows in mapcmd::SquadRank order (stable), at most `most`; how many. `tally` (may be null): all of them.
+int SquadRows(SquadRow* out,int most,SquadTally* tally=nullptr) noexcept;
 bool HeliSharesPost() noexcept;   // heli.cpp: guard helis on one post share its orbit (HeliGuardRadius > 0)
 
 // The map's input a frame (map.cpp Frame, the map open): the game window in front, a pad read (its buttons), the last
@@ -81,6 +85,7 @@ void MapCommandSupportButtons(const float* rects,const int* entries,int n) noexc
 // Draw-thread hitboxes: four floats per rectangle (x0,y0,x1,y1), published every draw.
 // Pass n=0 when a panel is absent. These calls copy snapshots and never read game objects.
 void MapCommandSquadButtons(const float* rects,const ObjRef* identities,int n) noexcept; // up to 16 rows
+void MapCommandSquadFold(const float* rect) noexcept; // the panel's summary row (opens / folds it); null: none
 void MapCommandPayloadButtons(const float* rects,std::uint64_t token,int seat,const int* entries,int n) noexcept; // up to 16
 void MapCommandUiPanels(const float* rects,int n) noexcept; // up to 16 complete background rectangles
 // Game thread, after MapCommandFrame and before map camera steering. A press begun on UI stays
@@ -128,7 +133,9 @@ struct MapCommandReadout {
     CmdMark unit[kCmdUnits];
     wchar_t note[80];          // the last command's result or refusal
     bool noteFresh;
-    int squads;                // the squad panel (number keys 1-9 pick a row)
+    int squads;                // the squad panel's rows (sorted: mapcmd::SquadRank; number keys 1-9 pick a shown one)
+    SquadTally squadTally{};   // every squad, for the folded panel's summary row
+    bool squadOpen=false;      // the panel opened past its commandable rows (its summary row clicked)
     SquadRow squad[16];
     bool squadSelected[16];
     bool sweepOn,healthOn;     // the box sweep going; health boxes for hurt soldiers (npcai.cpp)

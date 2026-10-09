@@ -74,6 +74,19 @@ inline bool OffersRecruit(bool ownedByPlayer,bool scripted,bool dismissed,bool r
     return !ownedByPlayer && !scripted && !dismissed && !riding;
 }
 
+// --- The squad panel (the user, 2026-10-09: "小队太多了吧，怎么处理合适，感觉看不过来"; the log's mission had 37) ---
+// Rows in the order a commander wants them (npcai.cpp SquadRows sorts by it, stable): the player's own squads, the free
+// ones it may command or recruit, the ones riding a vehicle (their vehicles are the map's units), a script's last.
+inline int SquadRank(bool recruited,bool scripted,bool riding) noexcept { return scripted ? 3 : riding ? 2 : recruited ? 0 : 1; }
+inline constexpr int kSquadRowsFolded=9;   // the number keys' reach
+// The rows shown (a prefix of the sorted rows `rank`): folded (the default) the ones on foot that take orders (rank
+// 0-1), at most kSquadRowsFolded, the rest summed in one row that opens the panel; open, all of them (up to `most`).
+inline int SquadRowsShown(const int* rank,int n,bool open,int most) noexcept {
+    int k=0;
+    while(k<n && k<most && (open || (rank[k]<=1 && k<kSquadRowsFolded)))++k;
+    return k;
+}
+
 // --- Where a unit's mark is drawn and clicked ---
 // On its body (the user, 2026-10-09: "这个图标为什么要在npc的竖直顶上。直接在npc身上不好吗"): a soldier's or a ground
 // vehicle's position is at its feet, so the mark is kBodyLift m up from it (a soldier's middle); a flying unit's on it.
