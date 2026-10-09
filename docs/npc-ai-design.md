@@ -214,7 +214,9 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 > - 射线 `QMarkRay`：镜头眼点（`CameraRayOf(human)`）穿过鼠标瞄准点——直升机鼠标瞄准飞行 `PlayerHeliHud().f.aim`（`f.aiming`）、旋翼机 `PlayerJetHud().heli.aim`、战斗机 `PlayerJetHud().aim`（`aiming`），这些是 HUD 方框所画的世界点（机体前方 800 m）；其余（步行、炮手、炮塔镜头：鼠标直接转镜头）屏幕中心（`src/qmark_ray.h`）。
 > - 地点标记 `QMarkSetPoint`，保留 `QMarkPointSec`；HUD `QMarkHud` 画自己的（琥珀）和队友的（按玩家槽位上色、`玩家N`）敌人菱形 / 地点圈，地图视图同一函数。
 > - 联机：`src/qmark_protocol.h`（`QMRK` v1，128 字节，能力位 `kCapEnemy|kCapPoint`）经 support_net 的 EDF6Coop 扩展通道点对点广播「状态」（变化即发，平时 1 s、有敌人标记时 250 毫秒一次保活）；收方按发送序号去重、3.5 s 静默即清除；敌人按原生网络 ID（`ReadNativeObjectId`）用一次全队伍遍历（`ResolveMarkIdentities`）找到本机对象并取其锁定点，找不到时画在对方发来的位置；标记者槽位只在其原生 PUID 等于认证发送者时才显示。旧版插件收到 `QMRK` 时支援解析器因魔数不符直接丢弃。
-> - 提示音：`jetaudio` 的 one-shot 片段 `mark_own` / `mark_team` / `mark_off`（`vsynth.h` 合成，可用 DLL 旁 WAV 替换），音量 `QMarkVolume`。
+> - 提示音：`jetaudio` 的 one-shot 片段 `mark_own` / `mark_team` / `mark_off`（`vsynth.h` 合成，可用 DLL 旁 WAV 替换），音量 `QMarkVolume`。主动取消（`QMarkPlay(off)`）累加 `letGo` 计数随状态发出（能力位 `kCapLetGo`），收方计数变化才响 `mark_off`；目标死亡 / 消失导致的清除计数不变，不响。
+> - NPC：队友的敌人标记（`QMarkTeamEnemies`，本机已找到且存活的）与本机标记同权；`NearestMark(from)` 取离该 NPC（炮手：载具）最近的被标记敌人，平局本机优先，再按原 `MarkInReach` 判定。只在运行这些 NPC 的机器上起作用（AI 本来只跑权威机器的 NPC）。
+> - 标记者名字：`src/player_name.cpp` 调用原版名字标签的来源 `0x784830`（与 `0x7FFBD0` 完全相同的调用方式：士兵 `+0x1ED0` user / `+0x1ED8` 控制块，先加一个强引用交给被调方释放，空 `std::wstring` 收结果，`0x3D3C0` 释放），`tests/player_name_native_audit.py` 钉住；只在标记者 PUID 与认证发送者一致时才读名字，读不到回退「玩家N」。
 
 - 地图关着、游戏在前台时按 `NpcMarkKey`（默认 Q，0x51）：取瞄准点（`QMarkRay`）`NpcMarkCone` 度内最近的敌人锁定点（与普罗透斯 `Mark` 同法），再按一次同一目标取消，对着别的敌人按则换目标。HUD 画标记框。
 - 按键在玩家自己的每帧（`map.cpp MapHumanFrame` → `NpcMarkFrame`）读，不在士兵 Think 里，所以任务里没有友军士兵时也有效；地图打开期间也照常记录「按住」，地图里的一次按下关地图后不会再触发。
