@@ -79,6 +79,7 @@ JetBody BomberBody(const unsigned char*) noexcept { MissingRecoveryDependency();
 PluginBody BodyOf(const void*) noexcept {if(rescueChoiceScenario)return PluginBody::jet;MissingRecoveryDependency();return PluginBody{};}
 float BodyMark(const void*) noexcept {if(rescueChoiceScenario)return pjet::MarkOf(jet::Body::fighter);if(!ramScenario)MissingRecoveryDependency();return ramMass.mark;}
 bool Body506Ok() noexcept { MissingRecoveryDependency();return false; }
+bool Body506ReadsSolver() noexcept { MissingRecoveryDependency();return false; }
 bool ImpactDamage(const unsigned char*,const float*,float damage,float) noexcept {
     if(!ramScenario)MissingRecoveryDependency();
     ++ramBlasts;ramDamage=damage;return true;

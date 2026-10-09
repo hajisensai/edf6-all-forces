@@ -530,8 +530,7 @@ int PlayerRotorSuite() {
 // clearance (playerjet FloorClear, `rest` its position over its bottom: the carrier's 8.516 m) standing on the ground,
 // its bottom a few cm under a bump or over it, settling or still: never thrown up (the user, 2026-10-07: "the aircraft
 // shake on the ground": it read its bottom under a bump as sunk and climbed at kFloorClimb). Its position truly under
-// the surface still climbs out. And pjet_handling.h GroundUp: level ground straight up, a slope followed, the steep
-// capped.
+// the surface still climbs out. (The wing on the ground: tools/ground_contact_check.cpp, pjet_handling.h GroundContact.)
 int GroundSettleSuite() {
     config=Config{};
     int failures=0,cases=0;
@@ -560,15 +559,6 @@ int GroundSettleSuite() {
         HoldOffGround(j,pos,-0.5f,kDt,0);
         check(j.m.vel[1]>=79.0f,"NPC: position 0.5 m under (rest 0) -> climbs out",-0.5f,j.m.vel[1]);
     }
-    const float nose[3]={0.0f,0.0f,1.0f},side[3]={-1.0f,0.0f,0.0f};
-    float up[3];
-    handling::GroundUp(0.0f,0.0f,0.0f,0.0f,3.0f,nose,side,0.35f,up);
-    check(std::fabs(up[1]-1.0f)<1e-5f,"GroundUp: level ground -> straight up",up[1],1.0f);
-    const float rise=std::tan(0.0873f)*3.0f;   // a 5 deg slope up ahead
-    handling::GroundUp(rise,-rise,0.0f,0.0f,3.0f,nose,side,0.35f,up);
-    check(std::fabs(std::acos(up[1])-0.0873f)<1e-3f && up[2]<0.0f,"GroundUp: 5 deg up ahead -> tilted back 5 deg",std::acos(up[1]),0.0873f);
-    handling::GroundUp(0.0f,0.0f,3.0f,-3.0f,3.0f,nose,side,0.35f,up);
-    check(std::fabs(std::acos(up[1])-0.35f)<1e-3f,"GroundUp: 45 deg across -> capped at 0.35 rad",std::acos(up[1]),0.35f);
     std::printf("ground settle suite: %d cases, %d failed\n",cases,failures);
     return failures ? 1 : 0;
 }

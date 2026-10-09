@@ -110,11 +110,8 @@ constexpr float kDeadZone=0.08f;
 constexpr float kTaxiTurn=0.8f;        // rad/s: the slowest taxi turn rate (the nose wheel), less fast
 constexpr float kTaxiFull=25.0f;       // ...from this ground speed on (rate times kTaxiFull / speed)
 constexpr float kGroundBrake=12.0f;    // m/s^2 rolling with the throttle closed
-constexpr float kParkSpeed=0.5f;       // below this, throttle closed: parked (the stock code holds it)
+constexpr float kParkSpeed=0.5f;       // below this, throttle closed: parked (held still on its contacts: GroundContact)
 constexpr float kBellyBrake=10.0f;     // m/s^2 sliding on its belly (gear.cpp: landed with the gear not down)
-// The floor's slope a wing on the ground follows (Ground, pjet_handling.h GroundUp): its heights kGroundSpan m ahead,
-// behind and to either side of its centre; a slope over kGroundTilt rad is no runway (the contacts alone take that).
-constexpr float kGroundSpan=3.0f,kGroundTilt=0.35f;
 // The plane's own up (PJet::up), carried along its path: the roll rotates it about the nose at its kind's PathRoll; let go
 // it returns to the bank the turn stick asks for (its kind's TurnBank at full, a coordinated turn: Air), at most
 // kLevelRate, unless the pitch stick is held (kLevelPull: pulled through the top it loops, as in Ace Combat) or it points
@@ -569,25 +566,10 @@ void Lever(PJet& j,const unsigned char* v,const Stick& s,float dt) noexcept {
     }
 }
 
-// The floor's up under a wing on the ground at `pos`, its level nose `nose` (pjet_handling.h GroundUp): straight up
-// where a probe finds no floor (water, the map's edge).
-void GroundUpAt(const float* pos,const float* nose,float* up) noexcept {
-    const float side[3]={-nose[2],0.0f,nose[0]};
-    const float* const dirs[2]={nose,side};
-    float h[4];
-    for(int d=0;d<2;++d)
-        for(int e=0;e<2;++e) {
-            const float s=e ? -kGroundSpan : kGroundSpan;
-            const float p[3]={pos[0]+dirs[d][0]*s,pos[1],pos[2]+dirs[d][2]*s};
-            const float clear=GroundClearance(p);
-            if(clear==kNoGround){up[0]=0.0f;up[1]=1.0f;up[2]=0.0f;return;}
-            h[d*2+e]=p[1]-clear;
-        }
-    handling::GroundUp(h[0],h[1],h[2],h[3],kGroundSpan,nose,side,kGroundTilt,up);
-}
-
-// On the ground: it rolls along its nose (along the slope under it), turns at the nose wheel's rate, speeds up with the throttle
-// and brakes with it closed; it lifts off at its rotate speed with the stick back, or kAutoRotate faster.
+// On the ground: it rolls along its nose (along the plane its wheels stand on), turns at the nose wheel's rate, speeds up
+// with the throttle and brakes with it closed; it lifts off at its rotate speed with the stick back, or kAutoRotate
+// faster. Its velocity along the ground and its yaw are the plugin's; across the ground and its pitch and roll its
+// contacts' (PlayerJetBodyStep, pjet_handling.h GroundContact): parked it is held still on them.
 void Ground(PJet& j,const unsigned char* v,const Stick& s,float clear,float dt) noexcept {
     const Kind& k=*j.kind;
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
@@ -604,16 +586,15 @@ void Ground(PJet& j,const unsigned char* v,const Stick& s,float clear,float dt) 
     const float rate=belly ? 0.0f : kTaxiTurn*(speed>kTaxiFull ? kTaxiFull/speed : 1.0f)*(speed>0.5f || s.throttle>0.0f ? 1.0f : 0.0f);
     const float a=-s.turn*rate*dt,co=std::cos(a),si=std::sin(a);
     const float turned[3]={nose[0]*co+nose[2]*si,0.0f,nose[2]*co-nose[0]*si};
-    const float vy=j.measured[1]<0.0f ? (j.measured[1]>-30.0f ? j.measured[1] : -30.0f) : 0.0f;
-    for(int i=0;i<3;i+=2)j.vel[i]=turned[i]*speed;
-    j.vel[1]=vy;
-    float up[3],along[3];
-    GroundUpAt(reinterpret_cast<const float*>(v+kPosition),turned,up);
+    // The plane its wheels stand on is the body's own up (its contacts set its pitch and roll).
+    float up[3]={m[4],m[5],m[6]},along[3];
+    if(!Normalize(up) || up[1]<0.5f){up[0]=0.0f;up[1]=1.0f;up[2]=0.0f;}
     std::memcpy(along,turned,12);
     const float lift=Dot(along,up);
-    for(int i=0;i<3;++i)along[i]-=up[i]*lift;   // its nose along the slope
+    for(int i=0;i<3;++i)along[i]-=up[i]*lift;   // its nose along that plane
     if(!Normalize(along))std::memcpy(along,turned,12);
-    BodyAttitude(v,along,up,kAttGain,k.roll,j.omega);
+    const float yaw=a/dt;   // the turn about the up (a heading angle a grows about +Y: turned = nose turned by a)
+    for(int i=0;i<3;++i){j.vel[i]=along[i]*speed;j.omega[i]=up[i]*yaw;}
     if(!belly && j.throttle>0.02f && speed>=k.rotate && (s.pitch>0.2f || (speed>=k.rotate+kAutoRotate && j.throttle>=kAutoThrottle))) {
         j.phase=Phase::air;j.vel[1]=kLiftOffClimb;j.hasAim=false;
         Log("PJET v=%p takeoff at %.0f m/s (throttle %.2f, stick %.2f)",v,speed,j.throttle,s.pitch);
@@ -1708,7 +1689,7 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
         Ground(j,v,s,clear,dt);
         if(water || wet)Crash(j,v,0.0f,Len(j.vel),false,ms,nullptr);   // afloat: it breaks up, one crash a kCrashMs
     }
-    j.active=j.phase!=Phase::parked && !v[kDead];
+    j.active=!v[kDead];   // parked too: held still on its contacts (the stock step pulled it level against its gear)
     std::memcpy(j.sent,j.vel,12);
     MirrorEntry(j,v);
     Elevons(j,v,s.pitch,s.roll,dt);
@@ -1732,7 +1713,12 @@ bool PlayerJetBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
     // A shield hit as a building's (shield.cpp): its speed across the face gone, and the crash Blocked would give.
     if(const float lost=ShieldBlock(v,j->vel);lost>0.0f && j->phase==Phase::air)
         Crash(*j,v,0.0f,lost+j->kind->landMax,false,GameMs(),nullptr);
-    for(int i=0;i<3;++i){lin[i]=j->vel[i];ang[i]=j->omega[i];}
+    // On the ground its contacts keep the solver's motion across it and its pitch and roll (`lin` / `ang` come in as the
+    // solver left them: body506.cpp PhysicsHook); in the air the flight's is the whole of it.
+    if(j->phase!=Phase::air && Body506ReadsSolver()) {
+        const float* m=reinterpret_cast<const float*>(v+kMatrix);
+        handling::GroundContact(m+4,j->vel,j->omega,lin,ang);
+    } else for(int i=0;i<3;++i){lin[i]=j->vel[i];ang[i]=j->omega[i];}
     return true;
 }
 

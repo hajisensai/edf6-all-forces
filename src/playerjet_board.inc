@@ -287,7 +287,8 @@ float FloorClear(const PJet& j,const unsigned char* v,const float* pos,float cle
 // those bounds) or the mouse (as the jets' aim: kAimPerUnit a unit). Either way its heading goes no more than kHoverLead
 // ahead of its nose. jet_flight.cpp's Hover flies it there (its thrust, its response, its lean: the NPC's
 // own rotor flight), HoldOffGround keeps it off the floor, the carrier's nacelles follow its thrust. Touching down
-// faster than its landMax is a crash; set down still with nothing asked, it is parked (the stock body holds it).
+// faster than its landMax is a crash; set down still with nothing asked, it is parked (held still on its contacts:
+// PlayerJetBodyStep's GroundContact, not the stock step that pulled it level against them).
 constexpr float kHoverCruise=0.6f,kHoverYawMin=0.6f,kHoverYawMax=2.0f,kHoverLead=0.8f,kHoverClimbShare=0.4f;
 constexpr float kSettle=2.0f,kSettleShare=0.8f;   // m/s, 1/s
 constexpr std::uint16_t kButtonL3=0x40;
@@ -323,7 +324,7 @@ void HoverDone(PJet& j,jet::Jet& e,const jet::Kind& k,unsigned char* v,const flo
     } else j.phase=Phase::air;
     std::memcpy(j.vel,e.m.vel,12);std::memcpy(j.omega,e.m.omega,12);
     j.load=1.0f;j.stall=false;j.clear=clear;j.climb=j.vel[1];
-    j.active=j.phase!=Phase::parked && !v[kDead];
+    j.active=!v[kDead];
     std::memcpy(j.sent,j.vel,12);
 }
 
