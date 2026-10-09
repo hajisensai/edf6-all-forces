@@ -57,7 +57,10 @@ seats; driving those tanks you get the lock too):
 - **Lock by look**: **Q** (pad: X, the jets' next-target button; ini `LockKey` / `LockButton`) locks the enemy **nearest
   the screen's centre**: within `LockCone` (20 deg) of the view, within `LockRange` (0 = the gun's range), not behind
   terrain or a building (while EDF6VehicleCrew's map is open, Q turns the map: this plugin reads none of its keys then).
-  Press again for the next one out from the centre, round to the nearest after the last. **Hold**
+  Pressed again with the crosshair still on the locked one, or without moving the view: the next one out from the
+  centre, round to the nearest after the last; with the crosshair moved onto another enemy, that one (since 2026-10-09;
+  it used to count on from the old lock). The lock range counts from the vehicle (it counted from the camera, 37 m
+  behind a Titan), and a tank driver's is the main gun's range (it was the gunners' 300 m). **Hold**
   it (`LockClearMs`, 0.6 s) to let the lock go. Locked: a yellow square closing in while it settles (~0.4 s), then the
   jets' red diamond; auto-aim fights **that target only** (it waits when the gun cannot reach it); the lead circle is on
   it; the AI gunners of the same vehicle take it first when they can reach it. It goes when the target dies or stops
@@ -69,7 +72,12 @@ seats; driving those tanks you get the lock too):
   turns it onto a target of its own picking. In auto-aim it turns it onto **your lock** only (lock with Q / X); the
   camera stays yours meanwhile, and when the lock goes the turret follows the view again. In the lead-circle mode it
   never turns it. The stick is the camera's there, so it is never read as you dragging the gun (`DragDeadzone` does
-  not apply to that seat). The two plugins tell each other who turns which seat (`common/edf/aimlink.h` V2); without
+  not apply to that seat). Since 2026-10-09 this holds for the driver's seat of **every ground vehicle** (`common/edf/aimlink.h` V4): the flak,
+  the Titan's / Ranger tanks' driver and every other tank share one V, one Q, one lock rule and one lead (this
+  plugin's `designate.cpp`), and EDF6VehicleCrew's turret camera turns the turret onto the lead point; a tank
+  driver's main gun is auto-aimed too (it used to hand the lock to the gunners only). The flak differs only by its
+  mark's row in `common/edf/weapon.h` `kGunRoles` (air targets first) and its fuses. The two plugins tell each other
+  who turns which seat (`common/edf/aimlink.h` V2 / V4); without
   EDF6VehicleCrew, with its turret camera off, or with an EDF6VehicleCrew older than that link, everything here works
   as described above (auto-aim on its own pick, the stick dragging the gun). The flak's time fuse still bursts at the
   tracked target's range either way. NPC gunners are unchanged.

@@ -121,7 +121,7 @@ int main() {
     Press(tank,cannon,0x56);
     Check(!LeadCircle(),"V again: AUTO back, symmetric");
     // Three enemies 200 m out; the crosshair on A.
-    enemyCount=3;SetEnemy(0,0,0,200);SetEnemy(1,30,0,200);SetEnemy(2,-60,0,200);
+    enemyCount=3;SetEnemy(0,0,0,200);SetEnemy(1,30,0,200);SetEnemy(2,70,0,200);   // from B: A nearer than C, so the old rule (the one after A) took C
     Look(0,0,200);Press(tank,cannon,0x51);
     Check(Designated(tank.v,nullptr)==objects[0],"Q locks the enemy under the crosshair");
     Look(30,0,200);Press(tank,cannon,0x51);

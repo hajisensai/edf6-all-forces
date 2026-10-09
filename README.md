@@ -368,7 +368,7 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
 `python tools/selftest.py` 是安装链的自测（CI 里跑）；改了 `tools/calls.py` 后运行 `python tools/gen_calls.py` 重新生成 `src/calls.inc` 并一起提交。
 
 - 与 `EDF6AutoTurret` 共存：两边都 hook 了坦克的第 55 槽，本插件会串在它后面，也就是先执行它、再执行本插件，所以加载顺序无所谓。
-- 炮塔的锁定框和预瞄圈（ini `TurretAimHud=1`）：坐在 EDF6AutoTurret 瞄准的炮位上（克卜勒、玻尔斯、自行榴弹炮的炮塔，泰坦和游骑兵坦克的炮手座 / 驾驶座）时，本插件画出它的锁定（黄色收缩方框、红色菱形，和战斗机一样）、预瞄圈模式下的绿色预瞄圈和炮口指向的白色十字、距离和飞行时间，屏幕下方两行写**自动瞄准是开还是关**和按键：绿色 `AUTO-AIM ON` = 自瞄开着（炮塔自己瞄），橙色 `AUTO-AIM OFF (LEAD CIRCLE)` = 自瞄关了、改用预瞄圈（炮塔归你）；下一行是切换键（键鼠默认 **Z**，ini `AimModeKey`；手柄默认不绑定，要在 `EDF6AutoTurret.ini` 设 `AimModeButton`，没设时这一行会提示）和锁定键（Q / 手柄 X）。按切换键的那一刻，屏幕中上方会出现约 1.5 秒的大字横幅 `AUTO-AIM ON` 或 `AUTO-AIM OFF - LEAD CIRCLE`。只有坐在 EDF6AutoTurret 管的炮位上才有这两行（其它载具没有自动瞄准可切换）（用法见 [autoturret/README.zh-CN.md](autoturret/README.zh-CN.md)「玩家的炮塔」）。反过来，本插件把镜头视线和地图射线提供给它，它的「锁定离屏幕中心最近、看得见的敌人」靠这两样。两个插件互相按导出函数名查找（`common/edf/aimlink.h`），缺哪个都不影响另一个。
+- 炮塔的锁定框和预瞄圈（ini `TurretAimHud=1`）：坐在 EDF6AutoTurret 瞄准的炮位上（克卜勒、玻尔斯、自行榴弹炮的炮塔，泰坦和游骑兵坦克的炮手座 / 驾驶座）时，本插件画出它的锁定（黄色收缩方框、红色菱形，和战斗机一样）、预瞄圈模式下的绿色预瞄圈和炮口指向的白色十字、距离和飞行时间，屏幕下方两行写**自动瞄准是开还是关**和按键：绿色 `AUTO-AIM ON` = 自瞄开着（炮塔自己瞄），橙色 `AUTO-AIM OFF (LEAD CIRCLE)` = 自瞄关了、改用预瞄圈（炮塔归你）；下一行是切换键（键鼠默认 **V**，ini `AimModeKey`；旧 ini 写 Z 时让给瞄具、实际用 V；手柄默认不绑定，要在 `EDF6AutoTurret.ini` 设 `AimModeButton`，没设时这一行会提示）和锁定键（Q / 手柄 X）。按切换键的那一刻，屏幕中上方会出现约 1.5 秒的大字横幅 `AUTO-AIM ON` 或 `AUTO-AIM OFF - LEAD CIRCLE`。坐在 EDF6AutoTurret 管的炮位上、或驾驶任何由炮塔镜头接管的地面载具时有这两行（2026-10-09 起所有地面载具驾驶座同一套自瞄：`common/edf/aimlink.h` V4，见 `docs/feedback-2026-10-09-aim.md`）（用法见 [autoturret/README.zh-CN.md](autoturret/README.zh-CN.md)「玩家的炮塔」）。反过来，本插件把镜头视线和地图射线提供给它，它的「锁定离屏幕中心最近、看得见的敌人」靠这两样。两个插件互相按导出函数名查找（`common/edf/aimlink.h`），缺哪个都不影响另一个。
 
 ## 原版问题修正：分裂导弹撞上大目标前不分裂
 
