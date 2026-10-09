@@ -5163,6 +5163,76 @@ def edf5_campaign_shipped() -> None:
         'source-tools archive omits the campaign text required by make_edf5_campaign.TEXT'
 
 
+
+def _utf(name: str, columns: list[tuple[str, str]], rows: list[dict]) -> bytes:
+    """A minimal unmasked @UTF table: every column per-row (storage 0x50), kinds 'str' / 'I' / 'Q'."""
+    import struct
+    codes = {'I': 4, 'Q': 6, 'str': 0xA}
+    strings = bytearray(b'<NULL>\0')
+    at: dict[str, int] = {}
+
+    def text(s: str) -> int:
+        if s not in at:
+            at[s] = len(strings)
+            strings.extend(s.encode() + b'\0')
+        return at[s]
+
+    described = b''.join(struct.pack('>BI', 0x50 | codes[k], text(c)) for c, k in columns)
+    packed = bytearray()
+    for row in rows:
+        for c, k in columns:
+            packed += struct.pack('>I', text(row[c])) if k == 'str' else struct.pack('>' + k, row[c])
+    width = len(packed) // max(len(rows), 1)
+    rows_at = 0x18 + len(described)
+    strings_at = rows_at + len(packed)
+    name_at = text(name)
+    body = struct.pack('>IIIIHHI', rows_at, strings_at, strings_at + len(strings), name_at, len(columns), width,
+                       len(rows)) + described + bytes(packed) + bytes(strings)
+    return b'@UTF' + struct.pack('>I', len(body)) + body
+
+
+@test
+def cpk_offsets_count_from_the_header_sector() -> None:
+    """EDF5 / EDF4.1 (and EDF6's DX11.cpk) keep the table of contents at the end of the archive: file offsets still
+    count from the end of the 0x800-byte header sector, never from TocOffset."""
+    import struct
+    import tempfile
+    import cpk
+    payload = b'SSA\0 fixture file'
+    toc_at = cpk.HEADER_SECTOR + 0x40 + len(payload)
+    header = _utf('CpkHeader', [('TocOffset', 'Q'), ('ContentOffset', 'Q')],
+                  [{'TocOffset': toc_at, 'ContentOffset': cpk.HEADER_SECTOR + 0x40}])
+    toc = _utf('CpkTocInfo', [('DirName', 'str'), ('FileName', 'str'), ('FileOffset', 'Q'), ('FileSize', 'I'),
+                              ('ExtractSize', 'I')],
+               [{'DirName': 'WEAPON', 'FileName': 'X.RAB', 'FileOffset': 0x40, 'FileSize': len(payload),
+                 'ExtractSize': len(payload)}])
+    blob = bytearray(b'@CPK' + bytes(4) + struct.pack('<Q', len(header)) + header)
+    blob += bytes(cpk.HEADER_SECTOR + 0x40 - len(blob)) + payload
+    assert len(blob) == toc_at
+    blob += b'TOC ' + bytes(4) + struct.pack('<Q', len(toc)) + toc
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, 'Root.cpk')
+        with open(path, 'wb') as f:
+            f.write(blob)
+        assert cpk.Cpk(path).read('WEAPON', 'X.RAB') == payload
+
+
+@test
+def cpk_reads_compressed_entries_of_every_installed_archive() -> None:
+    """Real data where present: a compressed entry of each EDF6 / EDF5 / EDF4.1 archive decompresses. EDF6's DX11.cpk
+    and every EDF5 / EDF4.1 archive failed with 'not CRILAYLA data' while the base was TocOffset."""
+    import rootcpk
+    steam = os.path.dirname(rootcpk.DEFAULT_GAME)
+    games = [rootcpk.DEFAULT_GAME] + [os.path.join(steam, n) for n in ('EARTH DEFENSE FORCE 5', 'Earth Defense Force 4.1')]
+    for root in games:
+        for archive in ('Root.cpk', 'DX11.cpk'):
+            if not os.path.isfile(os.path.join(root, archive)):
+                continue
+            game = rootcpk.Game(root, archive)
+            entry = next(e for e in game.cpk.entries if int(e['ExtractSize']) != int(e['FileSize']))
+            data = game.read(entry['DirName'], entry['FileName'])
+            assert len(data) == int(entry['ExtractSize']), f'{root}/{archive} {entry["FileName"]}'
+
 def main() -> int:
     import rootcpk
     game = rootcpk.DEFAULT_GAME
