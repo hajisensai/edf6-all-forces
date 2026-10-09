@@ -31,6 +31,10 @@ bool SpawnSupportSoldier(const float* worldMatrix,ObjRef* out) noexcept;
 // Reliable support-network receiver only: the caller authenticates epoch/host/spec and de-duplicates IDs.
 // NativeNetId is 32 bytes, generated identically on every peer; the game assigns host ownership itself.
 bool ApplySupportSoldierSpawn(const float* worldMatrix,bool leader,const unsigned char* nativeNetId32,ObjRef* out) noexcept;
+// The same for any support_call.h soldier resource (its stock weapon variant). `local` (no ID): a soldier this
+// machine alone owns, allowed offline and to the host of a world with no other participant; clients never.
+bool ApplySupportSoldierResource(const float* worldMatrix,std::uint32_t resource,const unsigned char* nativeNetId32,
+                                 bool local,ObjRef* out) noexcept;
 bool DeriveSupportSoldierNetId(const void* registeredAnchor,unsigned ordinal,unsigned char* out32) noexcept;
 // Register a freshly created canonical support object (soldier/aircraft/ground vehicle) on this peer.
 // Never call twice; the reliable spawn transaction owns validation and rollback on failure.

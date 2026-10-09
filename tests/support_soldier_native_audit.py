@@ -115,10 +115,18 @@ for is_host in (True,False):
     print('PASS native registration:', 'host' if is_host else 'client', 'owner, returned ID, balanced temporary refs, one consumed weak')
 
 g=Game(str(a.edf_dll.parent))
-for name in ('N601_COMMON_RANGER_AF.SGO','N601_COMMON_RANGER_AF_LEADER.SGO'):
+# Every weapon template support_soldier.cpp kBodies creates (support_call.h SupportWeapon order): one class, model, CAS.
+import re
+source=(Path(__file__).resolve().parents[1]/'src'/'support_soldier.cpp').read_text(encoding='utf-8')
+bodies=re.findall(r'L"app:/object/(N601_COMMON_RANGER_\w+)\.sgo"',source)
+assert len(bodies)==10,bodies
+weapons={'AF':'AiSoldierRifle01','FL':'AiSoldierFlameThrower01','RL':'AiSoldierRocketLauncher01','SG':'AiSoldierShotgun01',
+         'SN':'AiSoldierSniperRifle02'}
+for body in bodies:
+    name=body+'.SGO'
     r=dsgo.to_py(dsgo.parse(g.read('OBJECT',name)).root)
     assert r['xgs_scene_object_class']=='AssultSoldier'
-    assert r['soldier_load_weapon']==['app:/weapon/AiSoldierRifle01.sgo']
+    assert r['soldier_load_weapon']==['app:/weapon/%s.sgo'%weapons[body.split('_')[3]]],(name,r['soldier_load_weapon'])
     assert r['animation_model'][1]=='app:/Object/EDF6ArmySoldier.cas'
     assert r['soldier_weapon_slot'] and r['soldier_config']
     for path in (r['animation_model'][0][0],r['animation_model'][1],r['soldier_load_weapon'][0]):

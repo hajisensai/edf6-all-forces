@@ -3,6 +3,7 @@
 #include "crew.h"
 #include "support_call.h"
 #include "support_aircraft.h"
+#include "support_config.h"
 #include "support_policy.h"
 #include "support_soldier.h"
 #include "support_spawn.h"
@@ -34,11 +35,13 @@ constexpr int kDeployments=16;
 constexpr ULONGLONG kBoardLimit=120000,kCallCooldown=30000;
 constexpr float kVehicleWaypointRadius=1.5f,kVehicleDriverHold=1.0f,kVehicleArrival=5.0f;
 constexpr float kInfantryWaypointRadius=1.5f,kInfantryRouteStop=1.0f,kInfantryArrival=3.0f;
+constexpr int kPlanCallsPerFrame=3;
 static_assert(kInfantryRouteStop<kInfantryWaypointRadius,"leader must advance before quiet movement stops");
 static_assert(kVehicleDriverHold<kVehicleWaypointRadius,"a route must advance before its driver stops");
 struct Planning {
     bool active=false;std::uint32_t catalog=0;float target[3]{};
     int edge=0;npc::navigation::State navigation{};
+    bool entriesMade=false;support::GroundEntries entries{};   // fixed at the request: the caller moves on meanwhile
 };
 Planning planning{};
 struct InfantryRoute {
@@ -55,7 +58,7 @@ struct Deployment {
 };
 Deployment deployments[kDeployments]{};
 bool offlinePending=false;std::uint64_t nextOffline=1;ULONGLONG callAt=0;
-wchar_t status[128]{};
+wchar_t status[160]{};
 struct LocalRequest {
     bool shown=false,acceptNotices=false,hasNotice=false;
     std::uint32_t id=0;
@@ -63,9 +66,18 @@ struct LocalRequest {
     wchar_t text[128]{};
 };
 LocalRequest localRequest{};
-bool configured=false;
+bool configured=false,configNoticeShown=false;
 ULONGLONG dispatchFrame=~ULONGLONG{0};
 void Status(const wchar_t* text) noexcept {_snwprintf_s(status,_countof(status),_TRUNCATE,L"%ls",text);}
+// A refusal: shown, and logged with an ASCII cause (the log is not wide; the 2026-10-09 report had no trace at all
+// of why nothing came).
+void Refuse(std::uint32_t catalog,const char* cause,const wchar_t* text) noexcept {
+    Status(text);
+    Log("SUPPORT plan catalog=%u refused: %s",catalog,cause);
+}
+// Whether this machine itself may create and own the deployment: offline, or the host of a world whose only actual
+// participant it is (support_net.h SupportSoloHostWorld). Otherwise the request goes through the host's transaction.
+bool LocalAuthority() noexcept {return !InSession() || SupportSoloHostWorld();}
 void RequestNotice(std::uint32_t request,support_net::RequestStatus state) noexcept {
     using support_net::RequestStatus;
     if(!localRequest.acceptNotices || !request || request<localRequest.id)return;
@@ -124,91 +136,140 @@ bool AddUnit(SupportPlan& plan,std::uint32_t resource,std::uint32_t parent,const
     if(plan.count>=support_net::kMaxUnits)return false;
     auto& unit=plan.units[plan.count++];unit={};unit.resourceId=resource;unit.role=parent;Matrix(at,heading,unit.matrix);return true;
 }
-bool AddCrew(SupportPlan& plan,unsigned parent,const float* entry,const float* heading,unsigned count,float width) noexcept {
+// The real crew gather beside their hull. `rise`: how far their ground may lie from the hull's (a ground vehicle's
+// crew stand on its own level; an aircraft's walk over the runway's own allowance, support_entry.h kRunwayRise).
+bool AddCrew(SupportPlan& plan,unsigned parent,const float* entry,const float* heading,unsigned count,float width,
+             std::uint32_t resource,float rise) noexcept {
     for(unsigned i=0;i<count;++i) {
         const float side=width+2.0f,back=-3.0f-static_cast<float>(i)*2.0f;
         float at[3]={entry[0]+heading[2]*side+heading[0]*back,entry[1],entry[2]-heading[0]*side+heading[2]*back};
-        if(!Foot(at[0],at[2],entry[1],at[1]) || std::fabs(at[1]-entry[1])>0.55f)return false;
-        if(!AddUnit(plan,kSoldier,parent,at,heading))return false;
+        if(!Foot(at[0],at[2],entry[1],at[1]) || std::fabs(at[1]-entry[1])>rise)return false;
+        if(!AddUnit(plan,resource,parent,at,heading))return false;
     }
     return true;
 }
 unsigned AirCrew(const SupportAircraft& spec) noexcept {
     return spec.heli==static_cast<int>(HeliBody::brute410) || spec.heli==static_cast<int>(HeliBody::medic410) ? 3u : 1u;
 }
+// The aircraft one call brings: the configured number (SupportAircraftCount_<key>) or the call's own, never past the
+// plan's 16 units (each aircraft with its real crew).
+int AircraftCount(std::uint32_t catalog,const SupportAircraft& spec,unsigned group) noexcept {
+    const int chosen=catalog<static_cast<unsigned>(kSupportConfigUnits) ? SupportCfg().aircraft[catalog] : 0;
+    const int most=static_cast<int>(support_net::kMaxUnits/group);
+    const int wanted=chosen>0 ? chosen : spec.count;
+    return wanted<1 ? 1 : wanted>most ? most : wanted;
+}
+// The infantry's resources (configured weapons, support_config.h): member i of a 4 / 12-person request.
+std::uint32_t InfantryResource(bool platoon,unsigned i) noexcept {
+    const auto& c=SupportCfg();
+    if(i%4==0)return SupportSoldierResource(c.leader,true);
+    return SupportSoldierResource(platoon ? c.platoon[(i/4)%3] : c.squad,false);
+}
 support_net::PlanResult Plan(std::uint32_t catalog,const float* target,SupportPlan* out) noexcept {
     using support_net::PlanResult;
     if(!out || !target || catalog>=static_cast<unsigned>(SupportCallCount())) {
-        Status(L"支援请求或目标无效");return PlanResult::refused;
+        Refuse(catalog,"invalid request or target",L"支援请求或目标无效");return PlanResult::refused;
     }
-    if(!Cfg().customNpcAi){Status(L"NPC 指挥功能未启用，无法调度支援机组");return PlanResult::refused;}
-    if(!SupportSoldiersReady()){Status(SupportSoldierFailureText());return PlanResult::refused;}
+    if(!SupportCfg().Enabled(static_cast<int>(catalog))) {
+        Refuse(catalog,"disabled by SupportDisabled in EDF6VehicleCrew.ini",L"该支援单位已在配置中停用（EDF6VehicleCrew.ini SupportDisabled）");
+        return PlanResult::refused;
+    }
+    if(!Cfg().customNpcAi){Refuse(catalog,"CustomNpcAi=0",L"NPC 指挥功能未启用，无法调度支援机组");return PlanResult::refused;}
+    if(!SupportSoldiersReady()){Refuse(catalog,"support soldiers not ready",SupportSoldierFailureText());return PlanResult::refused;}
     if(!planning.active || planning.catalog!=catalog || std::memcmp(planning.target,target,12)!=0) {
         planning={};planning.active=true;planning.catalog=catalog;std::memcpy(planning.target,target,12);
     }
     SupportPlan plan{};plan.catalogId=catalog;std::memcpy(plan.target,target,12);
     if(catalog<static_cast<unsigned>(AirCount())) {
         if(!support::Allowed(SupportMissionPolicy(),support::Capability::air)) {
-            Status(L"本关限制外部航空支援，或处于地下环境");return PlanResult::refused;
+            Refuse(catalog,"mission forbids external air support or underground",L"本关限制外部航空支援，或处于地下环境");return PlanResult::refused;
         }
         SupportAircraft spec;support::Route route;
-        if(!SupportAircraftSpec(static_cast<int>(catalog),&spec)) {Status(L"该单位尚无可用的实际入场方式");return PlanResult::refused;}
-        if(!Cfg().jetAirRaider || !Cfg().npcBoarding || (spec.heli>=0 ? !Cfg().heliPilot : !Cfg().jetPilot)) {
-            Status(L"航空支援或真实机组驾驶功能未启用");return PlanResult::refused;
+        if(!SupportAircraftSpec(static_cast<int>(catalog),&spec)) {
+            Refuse(catalog,"no verified entry for this unit",L"该单位尚无可用的实际入场方式");return PlanResult::refused;
         }
-        const auto refusal=PlanAirSupport(static_cast<int>(catalog),target,player.pos,&route);
+        if(!Cfg().jetAirRaider || !Cfg().npcBoarding || (spec.heli>=0 ? !Cfg().heliPilot : !Cfg().jetPilot)) {
+            Refuse(catalog,"JetAirRaider/NpcBoarding/HeliPilot/JetPilot off",L"航空支援或真实机组驾驶功能未启用");return PlanResult::refused;
+        }
+        spec.count=AircraftCount(catalog,spec,1+AirCrew(spec));
+        const auto refusal=PlanAirSupport(static_cast<int>(catalog),target,player.pos,&route,spec.count);
         if(refusal!=support::Refusal::none) {
-            Status(refusal==support::Refusal::noSky ? L"此处没有开放天空，航空支援无法进入" : L"找不到可用的场外跑道或直升机起降点");
+            if(refusal==support::Refusal::noSky)Refuse(catalog,"no open sky over the target",L"此处没有开放天空，航空支援无法进入");
+            else Refuse(catalog,"no level runway / pad at any map edge",L"找不到可用的场外跑道或直升机起降点");
             return PlanResult::refused;
         }
         // Aircraft are queued along a verified entry strip, not created above the destination.
+        const auto crew=SupportSoldierResource(SupportCfg().aircraftCrew,false);
         for(int i=0;i<spec.count;++i) {
             float at[3]={route.from[0]+route.heading[0]*static_cast<float>(i)*65.0f,route.from[1],
                          route.from[2]+route.heading[2]*static_cast<float>(i)*65.0f};
-            if(!Foot(at[0],at[2],route.from[1],at[1],25))return PlanResult::refused;
+            if(!Foot(at[0],at[2],route.from[1],at[1],25)){Refuse(catalog,"aircraft stand not clear",L"场外起降点上空不净空");return PlanResult::refused;}
             at[1]+=0.1f;
             const unsigned parent=plan.count+1;
             if(!AddUnit(plan,kAircraft+catalog,0,at,route.heading) ||
-               !AddCrew(plan,parent,at,route.heading,AirCrew(spec),spec.heli>=0 ? 18.0f : 45.0f))return PlanResult::refused;
+               !AddCrew(plan,parent,at,route.heading,AirCrew(spec),spec.heli>=0 ? 18.0f : 45.0f,crew,support::kRunwayRise)) {
+                Refuse(catalog,"no dry level ground for the real crew beside the aircraft",L"飞机旁没有可供真实机组集合的地面");
+                return PlanResult::refused;
+            }
         }
+        Log("SUPPORT plan catalog=%u ready: %d aircraft at (%.0f,%.0f,%.0f), %u units",catalog,spec.count,
+            route.from[0],route.from[1],route.from[2],plan.count);
         *out=plan;planning.active=false;return PlanResult::ready;
     }
     const auto area=MapPlayArea();
-    if(!area.ground){Status(L"地图入口尚未测定");return PlanResult::refused;}
-    const float cx=(area.lo[0]+area.hi[0])*0.5f,cz=(area.lo[1]+area.hi[1])*0.5f;
-    const float edges[8][2]={{area.lo[0]+30,cz},{area.hi[0]-30,cz},{cx,area.lo[1]+30},{cx,area.hi[1]-30},
-        {area.lo[0]+30,area.lo[1]+30},{area.hi[0]-30,area.lo[1]+30},{area.lo[0]+30,area.hi[1]-30},{area.hi[0]-30,area.hi[1]-30}};
-    if(planning.edge>=8){Status(L"找不到与目的地连通的地图边缘入口");return PlanResult::refused;}
-    float entry[3]={edges[planning.edge][0],target[1],edges[planning.edge][1]};
-    const auto nextEdge=[&]() {++planning.edge;planning.navigation={};return PlanResult::pending;};
-    if(support::FlatDistance(entry,target)<600 || support::FlatDistance(entry,player.pos)<800 ||
-       !Foot(entry[0],entry[2],target[1],entry[1]))return nextEdge();
+    if(!area.ground){Refuse(catalog,"play area not measured yet",L"地图入口尚未测定");return PlanResult::refused;}
     SupportVehicleKind kind{};SupportCrewMode mode{};const bool vehicle=GroundCatalog(catalog,kind,mode);
     const auto* spec=vehicle ? SupportVehicleInfo(kind) : nullptr;
     if(vehicle && !support::Allowed(SupportMissionPolicy(),spec && spec->wasteland ? support::Capability::civilianGround : support::Capability::militaryGround)) {
-        Status(L"本关限制外部军事支援；可选择步兵或民用轻卡");return PlanResult::refused;
+        Refuse(catalog,"mission forbids external military support",L"本关限制外部军事支援；可选择步兵或民用轻卡");return PlanResult::refused;
     }
-    if(vehicle && (!spec || !Cfg().npcBoarding || !SupportVehicleReady(kind,mode))){Status(L"该车辆的资源或交付能力不可用");return PlanResult::refused;}
+    if(vehicle && (!spec || !Cfg().npcBoarding || !SupportVehicleReady(kind,mode))) {
+        Refuse(catalog,"vehicle resource not preloaded / NpcBoarding off",L"该车辆的资源或交付能力不可用");return PlanResult::refused;
+    }
+    // Entry candidates round the target within the route planner's reach (support_entry.h GroundEntryCandidates),
+    // fixed when the request starts so a caller walking on cannot reshuffle the ones already tried.
+    if(!planning.entriesMade) {
+        planning.entries=support::GroundEntryCandidates(area,target,player.pos);planning.entriesMade=true;
+        Log("SUPPORT plan catalog=%u: %d ground entry candidates round (%.0f,%.0f,%.0f)",catalog,planning.entries.count,target[0],target[1],target[2]);
+    }
+    if(planning.edge>=planning.entries.count) {
+        Refuse(catalog,"no entry candidate connected to the target by a verified route",L"找不到与目的地连通的支援入口（周围 650-950 米内无可达路线）");
+        return PlanResult::refused;
+    }
+    float entry[3]={planning.entries.at[planning.edge][0],target[1],planning.entries.at[planning.edge][1]};
+    const auto nextEdge=[&](const char* why) {
+        Log("SUPPORT plan catalog=%u entry %d (%.0f,%.0f) rejected: %s",catalog,planning.edge,entry[0],entry[2],why);
+        ++planning.edge;planning.navigation={};return PlanResult::pending;
+    };
+    if(!Foot(entry[0],entry[2],target[1],entry[1]))return nextEdge("no dry standable ground");
     auto profile=InfantryRouteProfile();
     if(spec)profile=VehicleRouteProfile(*spec);
     float waypoint[3];
-    const auto path=GroundNavigate(planning.navigation,entry,target,2.0f,GameMs(),waypoint,profile);
+    // A request plans across frames. It may take a few route steps a frame (each GroundNavigate call yields after
+    // four edges); the navigator's shared per-frame query budget still bounds the work and keeps the NPCs' share.
+    auto path=npc::navigation::Result::pending;
+    for(int call=0;call<kPlanCallsPerFrame && path==npc::navigation::Result::pending;++call)
+        path=GroundNavigate(planning.navigation,entry,target,2.0f,GameMs(),waypoint,profile);
     if(path==npc::navigation::Result::pending){Status(L"正在核实支援入口及可达路线");return PlanResult::pending;}
-    if(path==npc::navigation::Result::blocked)return nextEdge();
+    if(path==npc::navigation::Result::blocked)return nextEdge("no route to the target");
     const float distance=support::FlatDistance(entry,target);
     const float heading[3]={(target[0]-entry[0])/distance,0,(target[2]-entry[2])/distance};
     if(vehicle) {
         entry[1]+=0.1f;
         if(!AddUnit(plan,kVehicle+static_cast<unsigned>(kind),0,entry,heading) ||
-           !AddCrew(plan,1,entry,heading,mode==SupportCrewMode::unmanned ? 1u : spec->seats,spec->halfWidth))return nextEdge();
+           !AddCrew(plan,1,entry,heading,mode==SupportCrewMode::unmanned ? 1u : spec->seats,spec->halfWidth,
+                    SupportSoldierResource(SupportCfg().vehicleCrew,false),0.55f))return nextEdge("no level ground for the crew");
     } else {
-        const unsigned count=catalog==static_cast<unsigned>(AirCount()) ? 4u : 12u;
+        const bool platoon=catalog!=static_cast<unsigned>(AirCount());
+        const unsigned count=platoon ? 12u : 4u;
         for(unsigned i=0;i<count;++i) {
             float at[3]={entry[0]+static_cast<float>(i%4)*2.0f,entry[1],entry[2]+static_cast<float>(i/4)*2.0f};
-            if(!Foot(at[0],at[2],entry[1],at[1]) || std::fabs(at[1]-entry[1])>0.55f)return nextEdge();
-            if(!AddUnit(plan,i%4 ? kSoldier : kLeader,0,at,heading))return nextEdge();
+            if(!Foot(at[0],at[2],entry[1],at[1]) || std::fabs(at[1]-entry[1])>0.55f)return nextEdge("no level ground for the squad");
+            if(!AddUnit(plan,InfantryResource(platoon,i),0,at,heading))return nextEdge("plan full");
         }
     }
+    Log("SUPPORT plan catalog=%u ready: entry (%.0f,%.0f,%.0f), %.0f m to the target, %u units",catalog,entry[0],entry[1],entry[2],
+        distance,plan.count);
     *out=plan;planning.active=false;return PlanResult::ready;
 }
 
@@ -222,28 +283,32 @@ bool Validate(const SupportPlan& plan) noexcept {
     if(!support::Allowed(SupportMissionPolicy(),capability))return false;
     if(air && !SupportAircraftSpec(static_cast<int>(plan.catalogId),&aircraft))return false;
     if(ground && !SupportVehicleReady(kind,mode))return false;
+    // Weapons and the number of aircraft are the host's configuration: a peer checks the structure and that every
+    // soldier is one of the stock templates, never against its own ini.
+    const auto member=[](std::uint32_t id) noexcept {return IsSupportSoldierResource(id) && !IsSupportLeaderResource(id);};
     if(air) {
         const unsigned group=1+AirCrew(aircraft);
-        if(plan.count!=static_cast<unsigned>(aircraft.count)*group)return false;
+        if(!plan.count || plan.count%group)return false;
         for(unsigned i=0;i<plan.count;++i) {
             const auto& unit=plan.units[i];
             if(i%group==0) {if(unit.resourceId!=kAircraft+plan.catalogId || unit.role)return false;}
-            else if(unit.resourceId!=kSoldier || unit.role!=i-i%group+1)return false;
+            else if(!member(unit.resourceId) || unit.role!=i-i%group+1)return false;
         }
     } else if(ground) {
         const unsigned crew=mode==SupportCrewMode::unmanned ? 1u : SupportVehicleInfo(kind)->seats;
         if(plan.count!=crew+1 || plan.units[0].role || plan.units[0].resourceId!=kVehicle+static_cast<unsigned>(kind))return false;
-        for(unsigned i=1;i<plan.count;++i)if(plan.units[i].resourceId!=kSoldier || plan.units[i].role!=1)return false;
+        for(unsigned i=1;i<plan.count;++i)if(!member(plan.units[i].resourceId) || plan.units[i].role!=1)return false;
     } else {
         const unsigned expected=plan.catalogId==static_cast<unsigned>(AirCount()) ? 4u : 12u;
         if(plan.count!=expected)return false;
         for(unsigned i=0;i<expected;++i)
-            if(plan.units[i].role || plan.units[i].resourceId!=(i%4 ? kSoldier : kLeader))return false;
+            if(plan.units[i].role || !IsSupportSoldierResource(plan.units[i].resourceId) ||
+               IsSupportLeaderResource(plan.units[i].resourceId)!=(i%4==0))return false;
     }
     for(unsigned i=0;i<plan.count;++i) {
         const auto& unit=plan.units[i];
         if(unit.role && (unit.role>i || plan.units[unit.role-1].resourceId<kAircraft))return false;
-        if(unit.resourceId==kSoldier || unit.resourceId==kLeader)continue;
+        if(IsSupportSoldierResource(unit.resourceId))continue;
         if(unit.resourceId==kAircraft+plan.catalogId && plan.catalogId<static_cast<unsigned>(AirCount()))continue;
         if(unit.resourceId>=kVehicle && unit.resourceId<kVehicle+kSupportVehicleCount &&
            GroundCatalog(plan.catalogId,kind,mode) && unit.resourceId==kVehicle+static_cast<unsigned>(kind))continue;
@@ -284,16 +349,20 @@ void Destroy(std::uint64_t id) noexcept {
     }
     DestroyMissionCrewPlan(id);
 }
-bool Spawn(std::uint64_t id,const SupportPlan& plan,bool remote) noexcept {
-    if(plan.catalogId==support_net::kMissionCrewCatalog)return ApplyMissionCrewPlan(id,plan,remote);
+// `networked`: a committed support_net transaction (registered IDs on every peer); else this machine's own
+// deployment (LocalAuthority): unregistered objects only it simulates.
+bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool networked) noexcept {
     if(!Validate(plan))return false;
     Deployment* deployed=nullptr;for(auto& row:deployments)if(!row.used){deployed=&row;break;}
     if(!deployed)return false;
-    deployed->used=true;deployed->id=id;deployed->plan=plan;deployed->remote=remote;deployed->born=GameMs();deployed->networked=InSession();
+    deployed->used=true;deployed->id=id;deployed->plan=plan;deployed->remote=remote;deployed->born=GameMs();deployed->networked=networked;
     for(unsigned i=0;i<plan.count;++i) {
         const auto& unit=plan.units[i];ObjRef object;
         if(unit.resourceId<kAircraft) {
-            if(!ApplySupportSoldierSpawn(unit.matrix,unit.resourceId==kLeader,InSession() ? unit.netId : nullptr,&object)){Destroy(id);return false;}
+            if(!ApplySupportSoldierResource(unit.matrix,unit.resourceId,networked ? unit.netId : nullptr,!networked,&object)) {
+                Log("SUPPORT spawn %llu: soldier %u (resource %X) not created",static_cast<unsigned long long>(id),i,unit.resourceId);
+                Destroy(id);return false;
+            }
             deployed->objects[i]=object;
             if(!HoldSupportSoldier(object,true)){Destroy(id);return false;}
         } else {
@@ -305,13 +374,22 @@ bool Spawn(std::uint64_t id,const SupportPlan& plan,bool remote) noexcept {
                 SupportVehicleKind kind{};SupportCrewMode mode{};
                 if(GroundCatalog(plan.catalogId,kind,mode))vehicle=SpawnSupportVehicle(kind,mode,unit.matrix+12,unit.matrix+8,nullptr);
             }
-            if(!vehicle){Destroy(id);return false;}
+            if(!vehicle) {
+                Log("SUPPORT spawn %llu: hull %u (resource %X) not created",static_cast<unsigned long long>(id),i,unit.resourceId);
+                Destroy(id);return false;
+            }
             object=ObjRef::Of(vehicle);deployed->objects[i]=object;
-            if(InSession() && !RegisterSupportObject(vehicle,unit.netId)){Destroy(id);return false;}
+            if(networked && !RegisterSupportObject(vehicle,unit.netId)){Destroy(id);return false;}
         }
         deployed->objects[i]=object;
     }
-    Status(L"支援已在入口集结，等待所有玩家确认对象");return true;
+    Log("SUPPORT spawn %llu: catalog %u, %u units created (%s)",static_cast<unsigned long long>(id),plan.catalogId,plan.count,
+        networked ? "networked" : InSession() ? "host of a one-player world" : "offline");
+    Status(networked ? L"支援已在入口集结，等待所有玩家确认对象" : L"支援已在入口集结，真实机组正在登车");return true;
+}
+bool Spawn(std::uint64_t id,const SupportPlan& plan,bool remote) noexcept {
+    if(plan.catalogId==support_net::kMissionCrewCatalog)return ApplyMissionCrewPlan(id,plan,remote);
+    return SpawnDeployment(id,plan,remote,InSession());
 }
 bool Assign(Deployment& deployed) noexcept {
     const auto& plan=deployed.plan;ObjRef leader;
@@ -321,8 +399,8 @@ bool Assign(Deployment& deployed) noexcept {
         if(!HoldSupportSoldier(deployed.objects[i],false))return false;
     for(unsigned i=0;i<plan.count;++i) {
         const auto& unit=plan.units[i];
-        if(unit.resourceId==kLeader){leader=deployed.objects[i];continue;}
-        if(unit.resourceId==kSoldier && !unit.role && leader && !FollowSupportSoldier(deployed.objects[i],leader))return false;
+        if(IsSupportLeaderResource(unit.resourceId)){leader=deployed.objects[i];continue;}
+        if(IsSupportSoldierResource(unit.resourceId) && !unit.role && leader && !FollowSupportSoldier(deployed.objects[i],leader))return false;
         if(unit.resourceId<kAircraft || deployed.remote)continue;
         unsigned char* crew[support_net::kMaxUnits];int count=0;
         for(unsigned k=0;k<plan.count;++k)if(plan.units[k].role==i+1)crew[count++]=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[k].obj));
@@ -341,6 +419,15 @@ void Configure() noexcept {
 }
 }
 int SupportCallCount() noexcept {return AirCount()+2+kSupportVehicleCount*2;}
+const wchar_t* SupportCallKey(int index) noexcept {
+    if(index<0)return nullptr;
+    if(index<AirCount())return SupportAirCallKey(index);
+    static const wchar_t* keys[]={L"SQUAD",L"PLATOON",L"TANK_CREWED",L"TANK_DELIVERY",L"TRANSPORT_CREWED",L"TRANSPORT_DELIVERY",
+                                  L"TRUCK_CREWED",L"TRUCK_DELIVERY"};
+    static_assert(sizeof(keys)/sizeof(keys[0])==2+kSupportVehicleCount*2,"one key per infantry and ground entry");
+    const int rest=index-AirCount();
+    return rest<static_cast<int>(sizeof(keys)/sizeof(keys[0])) ? keys[rest] : nullptr;
+}
 const wchar_t* SupportCallName(int index) noexcept {
     if(index<AirCount())return SupportAirCallName(index);
     if(index==AirCount())return L"步兵小队（4人）";
@@ -356,7 +443,12 @@ bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capac
     localRequest={};note[0]=0;
     Configure();bool accepted=false;
     if(!Cfg().enabled || !target || index<0 || index>=SupportCallCount())Status(L"支援请求不可用");
-    else if(InSession()) {
+    else if(!SupportCfg().Enabled(index)) {
+        // Known before any request leaves this machine: the host would refuse it with no detail.
+        Refuse(static_cast<std::uint32_t>(index),"disabled by SupportDisabled in EDF6VehicleCrew.ini",
+               L"该支援单位已在配置中停用（EDF6VehicleCrew.ini SupportDisabled / 安装器菜单 7）");
+    }
+    else if(InSession() && !LocalAuthority()) {
         localRequest.acceptNotices=true;
         accepted=SubmitSupportRequest(index,target,note,capacity);
         if(!accepted || !localRequest.hasNotice) {
@@ -372,6 +464,13 @@ bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capac
     else {
         planning={};planning.active=true;planning.catalog=static_cast<unsigned>(index);std::memcpy(planning.target,target,12);
         offlinePending=true;accepted=true;Status(L"正在安排支援入口及路线");
+        Log("SUPPORT request catalog=%d accepted here (%s)",index,InSession() ? "host of a one-player world" : "offline");
+    }
+    if(SupportCfg().problems[0] && !configNoticeShown) {
+        // An invalid setting is said once a mission (the default it fell back to is used; the log has it too).
+        configNoticeShown=true;
+        const std::size_t used=std::wcslen(status);
+        _snwprintf_s(status+used,_countof(status)-used,_TRUNCATE,L"（支援配置有误：%ls）",SupportCfg().problems);
     }
     _snwprintf_s(note,capacity,_TRUNCATE,L"%ls",status);return accepted;
 }
@@ -382,14 +481,14 @@ void SupportDispatchTick() noexcept {
     if(dispatchFrame==GameFrame())return;
     dispatchFrame=GameFrame();
     Configure();SupportNetTick();
-    if(InSession() && offlinePending){offlinePending=false;planning.active=false;Status(L"已取消离线请求，请通过房主重新调度");}
+    if(offlinePending && !LocalAuthority()){offlinePending=false;planning.active=false;Status(L"已取消离线请求，请通过房主重新调度");}
     if(offlinePending) {
         SupportPlan plan;
         const auto result=Plan(planning.catalog,planning.target,&plan);
         if(result!=support_net::PlanResult::pending) {
             offlinePending=false;
             if(result==support_net::PlanResult::ready) {
-                if(Spawn(nextOffline++,plan,false))callAt=GameMs();else Status(L"支援资源、真实机组或席位分配失败");
+                if(SpawnDeployment(nextOffline++,plan,false,false))callAt=GameMs();else Status(L"支援资源、真实机组或席位分配失败");
             }
         }
     }
@@ -432,7 +531,7 @@ void SupportDispatchTick() noexcept {
                     started=ActivateSupportAircraft(object,spec,deployed.plan.target) && started;
                 } else if(resource>=kVehicle)started=NpcPrepareVehicleRoutePost(object,
                     reinterpret_cast<const float*>(object+kPosition),kVehicleDriverHold) && started;
-                else if(resource==kLeader)started=NpcPrepareSquadRoute(object,
+                else if(IsSupportLeaderResource(resource))started=NpcPrepareSquadRoute(object,
                     reinterpret_cast<const float*>(object+kPosition),kInfantryRouteStop) && started;
             }
             if(started){deployed.started=true;Status(L"支援已出发，正在沿路线入场");}
@@ -467,7 +566,7 @@ void SupportDispatchTick() noexcept {
             } else NpcPrepareVehicleRoutePost(vehicle,position,kVehicleDriverHold); // wait for a verified route; never drive through the obstacle
         } else if(InfantryCatalog(deployed.plan.catalogId)) {
             int leader=0;bool complete=true,released=false;
-            for(unsigned i=0;i<deployed.plan.count;++i)if(deployed.plan.units[i].resourceId==kLeader && leader<3) {
+            for(unsigned i=0;i<deployed.plan.count;++i)if(IsSupportLeaderResource(deployed.plan.units[i].resourceId) && leader<3) {
                 auto& route=deployed.infantry[leader++];
                 if(!route.done) {
                     auto* object=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[i].obj));
@@ -508,7 +607,7 @@ void SupportDispatchTick() noexcept {
 }
 void ResetSupportDispatch() noexcept {
     // Mission reset invalidates the old objects; do not delete through last mission's borrowed pointers.
-    planning={};for(auto& row:deployments)row={};offlinePending=false;callAt=0;nextOffline=1;status[0]=0;
+    planning={};for(auto& row:deployments)row={};offlinePending=false;callAt=0;nextOffline=1;status[0]=0;configNoticeShown=false;
     localRequest={};
     dispatchFrame=~ULONGLONG{0};
     ResetMissionCrewSupport();

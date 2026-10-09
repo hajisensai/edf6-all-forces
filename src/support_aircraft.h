@@ -10,8 +10,10 @@ struct SupportAircraft {
 };
 int SupportAirCallCount() noexcept;
 const wchar_t* SupportAirCallName(int index) noexcept;
+const wchar_t* SupportAirCallKey(int index) noexcept;
 bool SupportAircraftSpec(int catalog,SupportAircraft* out) noexcept;
-support::Refusal PlanAirSupport(int catalog,const float* target,const float* observer,support::Route* route) noexcept;
+// `count`: the aircraft this call brings (the configured number); the runway / pad must hold them all.
+support::Refusal PlanAirSupport(int catalog,const float* target,const float* observer,support::Route* route,int count) noexcept;
 // Prepare at a validated landing strip/pad with empty seats. Activation never creates a rider.
 unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float* matrix) noexcept;
 bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float* target) noexcept;

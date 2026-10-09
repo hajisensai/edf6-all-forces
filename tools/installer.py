@@ -30,6 +30,8 @@ row numbers saves use), EDF6AutoTurret's vehicle data and the generated objects 
 
 Menu 3 downloads the newest build from the test site, menu 4 sends the logs back to it (tools/testhub.py;
 the site itself is testhub/), menu 5 checks what is installed (check: reads only, the game may be running).
+Menu 7 edits the map support's out-of-mission configuration in the player's EDF6VehicleCrew.ini (tools/support_config.py):
+which support units can be called, their real crews' stock weapons, how many aircraft a call brings.
 """
 from __future__ import annotations
 
@@ -726,17 +728,43 @@ def manage_campaign(game: str) -> int:
     return 0
 
 
+def manage_support(game: str) -> int:
+    """Menu 7: the map support's out-of-mission configuration (tools/support_config.py, the plugin's src/support_config.h)
+    in the player's EDF6VehicleCrew.ini: callable units, their crews' weapons, aircraft counts. The plugin rereads the
+    ini on save, so the game may even be running."""
+    import support_config
+    path = os.path.join(game, 'Mods', 'Plugins', PLUGIN + '.ini')
+    if not os.path.isfile(path):
+        print('还没有安装插件（找不到 EDF6VehicleCrew.ini），请先选 1 安装。')
+        return 1
+    with open(path, 'rb') as f:
+        raw = f.read()
+    bom = raw.startswith(b'\xef\xbb\xbf')
+    text = (raw[3:] if bom else raw).decode('utf-8', errors='replace')
+    edited = support_config.edit(text, ask)
+    if edited == text:
+        print('没有改动。')
+        return 0
+    modfiles.atomic_write(path, (b'\xef\xbb\xbf' if bom else b'') + edited.encode('utf-8'))
+    print(f'已保存 {path}：下一次在地图呼叫支援时生效。')
+    return 0
+
+
 def main(argv: list[str]) -> int:
     print(f'== {PLUGIN} 安装程序 {build_name()} ==\n')
     mode = argv[0] if argv else ''
-    if mode not in ('install', 'uninstall', 'update', 'logs', 'check', 'campaign'):
-        pick = ask('输入 1 安装 / 更新，2 卸载，3 下载最新测试版，4 回传日志给开发者，5 检查安装状态，6 管理 EDF5 实验战役，回车退出：')
-        mode = {'1': 'install', '2': 'uninstall', '3': 'update', '4': 'logs', '5': 'check', '6': 'campaign'}.get(pick, '')
+    if mode not in ('install', 'uninstall', 'update', 'logs', 'check', 'campaign', 'support'):
+        pick = ask('输入 1 安装 / 更新，2 卸载，3 下载最新测试版，4 回传日志给开发者，5 检查安装状态，6 管理 EDF5 实验战役，'
+                   '7 配置地图支援（可呼叫单位 / 兵员武器 / 架数），回车退出：')
+        mode = {'1': 'install', '2': 'uninstall', '3': 'update', '4': 'logs', '5': 'check', '6': 'campaign', '7': 'support'}.get(pick, '')
         if not mode:
             return 0
     if mode == 'check':   # reads only: the game may be running
         game = pick_game()
         return 1 if not game else 0 if check(game) else 1
+    if mode == 'support':   # edits one ini the plugin rereads on save: the game may be running
+        game = pick_game()
+        return 1 if not game else manage_support(game)
     if mode in ('update', 'logs'):
         import testhub
         try:

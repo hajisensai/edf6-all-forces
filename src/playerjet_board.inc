@@ -23,8 +23,9 @@
 //    withdrawal stand: no deletion, no autopilot of its call under the player.
 
 constexpr float kBoardClear=12.0f,kBoardSpeed=8.0f;   // m over the ground, m/s: the most it may be boarded at
-constexpr int kHailNone=0,kHailPlan=1,kHailFerry=2,kHailFinal=3,kHailRoll=4,kHailRotor=5,kHailWait=6;
-const char* const kHailNames[]={"none","plan","ferry","final","roll","rotor","wait"};
+// kHailInbound: the ferry's second leg, from the outer point along the final's line (hail_glide.h FerryGoal).
+constexpr int kHailNone=0,kHailPlan=1,kHailFerry=2,kHailFinal=3,kHailRoll=4,kHailRotor=5,kHailWait=6,kHailInbound=7;
+const char* const kHailNames[]={"none","plan","ferry","final","roll","rotor","wait","inbound"};
 constexpr ULONGLONG kHailWaitMs=90000,kHailMostMs=240000;
 constexpr int kHailTries=3;
 constexpr float kHailRange=6000.0f;   // m: the farthest one it calls
@@ -488,14 +489,24 @@ void PlanStrip(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
         h.stop[2]);
 }
 
-// A wing flown at `goal` at `want` m/s by the aim's law (Air on the autopilot: the catch's way), never down under
-// kCatchFloor over the ground but on the final; above `want` + kAirbrakeOver the airbrake.
+// A wing flown at `goal` at `want` m/s by the aim's law (Air on the autopilot: the catch's way), its descent within
+// the hail's envelope (hail_glide.h LimitAim: no steeper than a glide, a ground margin it keeps at its sink, wings
+// level and up first when that margin runs out); above `want` + kAirbrakeOver the airbrake.
 constexpr float kAirbrakeOver=15.0f,kSpeedGain=0.03f;
+// The sideways lift its wing holds a level turn with now (hail_glide.h LevelTurnLateral), m/s^2.
+float HailLateral(const PJet& j) noexcept {
+    const Kind& k=*j.kind;
+    const float speed=Len(j.vel),wing=speed<k.corner ? (speed/k.corner)*(speed/k.corner) : 1.0f;
+    const float mass=j.burden.mass>1.0f ? j.burden.mass : 1.0f;
+    return hail::LevelTurnLateral(k.maxG*kG*wing/mass);
+}
 void SteerAt(PJet& j,unsigned char* v,const float* pos,const float* goal,float want,bool final,float clear,bool water,float dt,
              ULONGLONG ms) noexcept {
     const Kind& k=*j.kind;
     float to[3]={goal[0]-pos[0],goal[1]-pos[1],goal[2]-pos[2]};
-    if(!final && clear!=kNoGround && clear<kCatchFloor && to[1]<0.0f)to[1]=0.0f;
+    hail::LimitAim(to,j.vel,clear,clear!=kNoGround,final);
+    // ... and no tighter a turn than the wing holds level (a 2 g gunship banked past 80 deg for a goal behind it).
+    hail::LimitTurn(to,j.vel,HailLateral(j),kSteer*Cfg().playerJetAimGain);
     if(!Normalize(to))std::memcpy(to,j.aim,12);
     std::memcpy(j.aim,to,12);j.hasAim=true;
     const float speed=Len(j.vel);
@@ -525,13 +536,21 @@ void Approach(PJet& j,unsigned char* v,const float* pos,float clear,bool water,f
     const float entry[3]={h.touch[0]-d[0]*kFinal,h.touch[1]+kStripHigh+kFinal*kGlide,h.touch[2]-d[2]*kFinal};
     const float rel[3]={pos[0]-h.touch[0],0.0f,pos[2]-h.touch[2]};
     const float along=rel[0]*d[0]+rel[2]*d[2],side=std::fabs(rel[0]*d[2]-rel[2]*d[0]);
-    if(h.phase==kHailFerry) {
-        const float out=vec::Flat(pos,entry),lead=Clamp(out*0.5f,0.0f,2000.0f);
-        const float goal[3]={entry[0]-d[0]*lead,entry[1],entry[2]-d[2]*lead};
+    if(h.phase==kHailFerry || h.phase==kHailInbound) {
+        // Out behind the entry first, then inbound along the line (hail_glide.h FerryGoal): never at the entry itself,
+        // where it arrived misaligned with no room left but a reversal at the final's height.
+        const float out=vec::Flat(pos,entry);
+        float goal[3];
         float track[3]={j.vel[0],0.0f,j.vel[2]};
         Normalize(track);
+        bool inbound=h.phase==kHailInbound;
+        hail::FerryGoal(pos,track,entry,d,hail::TurnRadius(Len(j.vel),HailLateral(j)),inbound,goal);
+        if(inbound!=(h.phase==kHailInbound)){h.phase=inbound ? kHailInbound : kHailFerry;Log("PJET hail v=%p: %s",v,kHailNames[h.phase]);}
         SteerAt(j,v,pos,goal,k.rotate+kApproachOver*4.0f,false,clear,water,dt,ms);
-        if(out<kFinalOn && Dot(track,d)>kFinalAlign){h.phase=kHailFinal;h.at=ms;Log("PJET hail v=%p: on the final",v);}
+        // Onto the final only on its slope and line too (hail_glide.h FinalReady): else it goes round.
+        if(out<kFinalOn && Dot(track,d)>kFinalAlign && hail::FinalReady(pos,entry,d,kMissHigh,kMissLow,kMissSide)) {
+            h.phase=kHailFinal;h.at=ms;Log("PJET hail v=%p: on the final",v);
+        }
         return;
     }
     const float glide=h.touch[1]+kStripHigh-along*kGlide;   // the slope's height here (along < 0 before the touchdown)
@@ -542,7 +561,10 @@ void Approach(PJet& j,unsigned char* v,const float* pos,float clear,bool water,f
         return;
     }
     const float ahead=along+kFinalLead;
-    const float goal[3]={h.touch[0]+d[0]*ahead,h.touch[1]+(ahead<0.0f ? kStripHigh-ahead*kGlide : -2.0f),h.touch[2]+d[2]*ahead};
+    // The aim stays on the glide line through the touchdown (it meets the ground kStripHigh / kGlide past the touch
+    // point, kGlide x its speed of sink): aimed flat at 2 m under the strip from 450 m out it floated past kMissPast
+    // and went round (tools/hail_glide_check.cpp).
+    const float goal[3]={h.touch[0]+d[0]*ahead,h.touch[1]+kStripHigh-ahead*kGlide,h.touch[2]+d[2]*ahead};
     SteerAt(j,v,pos,goal,k.rotate+kApproachOver,true,clear,water,dt,ms);
 }
 
@@ -644,6 +666,7 @@ void HailFly(PJet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) no
         return;
     }
     case kHailFerry:
+    case kHailInbound:
     case kHailFinal:
         Approach(j,v,pos,clear,water,dt,ms);
         return;

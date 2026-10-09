@@ -17,6 +17,7 @@
 #include "crew.h"
 #include "mod_room.h"
 #include "support_soldier.h"
+#include "support_config.h"
 #include "lockon.h"
 #include "hudscale.h"
 #include "hudtext.h"
@@ -712,6 +713,7 @@ void LoadConfig() noexcept {
         n.tempestTv,n.tempestTvMouseSpeed,n.tempestTvBoost);
     Config* const fresh=new(std::nothrow) Config(n);
     if(fresh)published.store(fresh,std::memory_order_release);
+    LoadSupportConfig(iniPath);   // support_config.h: callable units and their crews' weapons, validated
 }
 
 }  // namespace

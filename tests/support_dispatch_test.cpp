@@ -1,5 +1,6 @@
 // Execute the production dispatch/boarding lifecycle using inert stand-ins for EDF objects.
 #include "../src/support_dispatch.cpp"
+#include "../src/support_config.cpp"
 #include <cstdio>
 #include <cstdlib>
 namespace crew {
@@ -32,11 +33,19 @@ ObjRef Make(bool vehicle=false) noexcept {
 unsigned char* PlayerHuman() noexcept {return objects[31];}
 int SupportAirCallCount() noexcept {return 21;}
 const wchar_t* SupportAirCallName(int) noexcept {return L"Heli";}
+const wchar_t* airKeys[21]={L"INTERCEPTOR",L"INTERCEPTOR_F",L"STRIKE",L"STRIKE_F",L"MULTIROLE",L"MULTIROLE_F",L"FIGHTER",L"FIGHTER_F",
+    L"CARRIER",L"CARRIER_F",L"HELI",L"HELI_F",L"BLAST_CARRIER",L"BLAST_CARRIER_F",L"DOLL_CARRIER",L"DOLL_CARRIER_F",L"SUB",
+    L"GUNSHIP",L"GUNSHIP_F",L"MEDIC_HELI",L"MEDIC_HELI_F"};
+const wchar_t* SupportAirCallKey(int index) noexcept {return index>=0 && index<21 ? airKeys[index] : nullptr;}
+bool soloHost=false;
+bool SupportSoloHostWorld() noexcept {return soloHost;}
 bool SupportAircraftSpec(int id,SupportAircraft* out) noexcept {
     if(id<0 || id>=21 || id==16)return false;
     *out={-1,static_cast<int>(HeliBody::eros506),1,300,false};return true;
 }
-support::Refusal PlanAirSupport(int,const float*,const float*,support::Route* route) noexcept {
+int plannedAircraft=0;
+support::Refusal PlanAirSupport(int,const float*,const float*,support::Route* route,int count) noexcept {
+    plannedAircraft=count;
     *route={{-1400,0,0},{1,0,0}};return terrain ? support::Refusal::none : support::Refusal::noEntry;
 }
 unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float* matrix) noexcept {
@@ -48,13 +57,17 @@ bool DeleteSupportAircraft(const ObjRef& ref) noexcept {if(ref)++deleted;return 
 bool SupportSoldiersReady() noexcept {return allReady;}
 const wchar_t* soldierFailure=L"支援兵员创建发生异常，本局已停用";
 const wchar_t* SupportSoldierFailureText() noexcept {return soldierFailure;}
-bool ApplySupportSoldierSpawn(const float* matrix,bool,const unsigned char*,ObjRef* out) noexcept {
-    if(nativeFail)return false;*out=Make();std::memcpy(static_cast<unsigned char*>(const_cast<void*>(out->obj))+kPosition,matrix+12,12);return true;
+std::uint32_t lastResources[16]{};int resourceCount=0;bool lastLocal=false;const unsigned char* lastId=nullptr;
+bool ApplySupportSoldierResource(const float* matrix,std::uint32_t resource,const unsigned char* id,bool local,ObjRef* out) noexcept {
+    if(nativeFail)return false;
+    if(resourceCount<16)lastResources[resourceCount++]=resource;lastLocal=local;lastId=id;
+    *out=Make();std::memcpy(static_cast<unsigned char*>(const_cast<void*>(out->obj))+kPosition,matrix+12,12);return true;
 }
 bool DeriveSupportSoldierNetId(const void*,unsigned,unsigned char*) noexcept {return true;}
 bool FollowSupportSoldier(const ObjRef&,const ObjRef&) noexcept {++followed;return true;}
 bool DeleteSupportSoldier(const ObjRef& ref) noexcept {if(ref)++deleted;return true;}
-bool RegisterSupportObject(const void*,const unsigned char*) noexcept {return true;}
+int registered=0;
+bool RegisterSupportObject(const void*,const unsigned char*) noexcept {++registered;return true;}
 bool SupportVehicleReady(SupportVehicleKind,SupportCrewMode) noexcept {return true;}
 unsigned char* SpawnSupportVehicle(SupportVehicleKind,SupportCrewMode,const float*,const float*,const void*) noexcept {return nullptr;}
 bool DeleteSupportVehicle(unsigned char*) noexcept {++deleted;return true;}
@@ -220,6 +233,43 @@ int main() {
     waterSurface=0.2f;check(Foot(0,0,0,footY),"shallow wading matches the navigation allowance");
     terrainSea=Sea::unknown;check(!Foot(0,0,0,footY),"unknown water state is not treated as a safe entry");
     terrainSea=Sea::land;
+    // 2026-10-09: the host of a world with no other participant deploys locally (no EDF6Coop transport needed, no peer
+    // to replicate to); any other online machine still requests through the host.
+    ResetSupportDispatch();testOnline=true;soloHost=true;made=0;netRequests=0;registered=0;resourceCount=0;fixtureMs+=40000;
+    check(SupportCallAt(0,target,note,128) && netRequests==0 && offlinePending,"solo-world host plans locally, no transport request");
+    SupportDispatchTick();
+    check(made==2 && registered==0 && lastLocal && lastId==nullptr && !deployments[0].networked,
+          "solo-world host creates unregistered local support: no ID, no native registration, no all-peer barrier");
+    soloHost=false;ResetSupportDispatch();netRequests=0;
+    check(SupportCallAt(0,target,note,128) && netRequests==1,"a host with other participants still uses the reliable protocol");
+    testOnline=false;
+    // Out-of-mission configuration (support_config.h), read from a real ini as plugin.cpp does.
+    wchar_t ini[MAX_PATH];GetTempPathW(MAX_PATH,ini);wcscat_s(ini,L"edf6_support_dispatch_test.ini");
+    FILE* f=nullptr;_wfopen_s(&f,ini,L"wb");check(f!=nullptr,"config ini written");
+    const char text[]="[VehicleCrew]\r\nSupportDisabled=FIGHTER\r\nSupportSquadWeapon=shotgun\r\nSupportSquadLeaderWeapon=sniper\r\n"
+                      "SupportPlatoonWeapons=flame,rocket,rifle\r\nSupportAircraftCrewWeapon=rocket\r\nSupportAircraftCount_HELI=3\r\n";
+    std::fwrite(text,1,sizeof(text)-1,f);std::fclose(f);
+    LoadSupportConfig(ini);DeleteFileW(ini);
+    ResetSupportDispatch();made=0;fixtureMs+=40000;
+    check(!SupportCallAt(6,target,note,128) && std::wcsstr(note,L"已在配置中停用") && !offlinePending && !made,
+          "a unit disabled in the ini is refused with its reason before any planning");
+    ResetSupportDispatch();made=0;resourceCount=0;routeResult=npc::navigation::Result::moving;
+    check(SupportCallAt(21,target,note,128),"squad request accepted");SupportDispatchTick();
+    check(made==4 && resourceCount==4 && lastResources[0]==SupportSoldierResource(SupportWeapon::sniper,true) &&
+          lastResources[1]==SupportSoldierResource(SupportWeapon::shotgun,false) && lastResources[3]==SupportSoldierResource(SupportWeapon::shotgun,false),
+          "the configured squad leader and member weapons are the soldiers actually created");
+    ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
+    SupportCallAt(22,target,note,128);SupportDispatchTick();
+    check(made==12 && lastResources[0]==SupportSoldierResource(SupportWeapon::sniper,true) &&
+          lastResources[1]==SupportSoldierResource(SupportWeapon::flame,false) && lastResources[5]==SupportSoldierResource(SupportWeapon::rocket,false) &&
+          lastResources[9]==SupportSoldierResource(SupportWeapon::rifle,false),"each platoon squad gets its configured weapon");
+    ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
+    SupportCallAt(10,target,note,128);SupportDispatchTick();   // the stub's aircraft: one pilot each
+    check(plannedAircraft==3 && made==6 && lastResources[0]==SupportSoldierResource(SupportWeapon::rocket,false),
+          "the configured aircraft count reaches the runway planner and the crew carry the configured weapon");
+    SupportPlan hostPlan=deployments[0].plan;
+    check(Validate(hostPlan),"a peer accepts the host's configured weapons and count (structure, not its own ini)");
+    hostPlan.units[1].resourceId=0x503;check(!Validate(hostPlan),"a non-template soldier resource is refused");
     std::printf("support_dispatch_test: %d checks passed\n",checks);
 }
 #endif
