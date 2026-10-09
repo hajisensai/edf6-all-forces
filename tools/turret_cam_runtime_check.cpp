@@ -297,16 +297,16 @@ void Run() {
     // Titan's right trigger picks its hull gatling (`front_gun` on `body`). The turret, its camera and the mouse command
     // stay the turret gun's; the pick stays the HUD's.
     {
-        Weapon hull(0,3,0);
-        Put<void*>(hull.holder,0x18,vehicleBones);Put<void*>(hull.data,0xE88,vehicleBones);Put<void*>(hull.data,0xF40,hull.bone);
-        Put<void*>(hull.data,weaponmount::kWeaponModel+0x10,hull.bone);Put<int>(hull.data,weaponmount::kWeaponModel+0x20,1);
-        Put<int>(hull.bone,0xC,0);Put<int>(hull.bone,0x10,-1);
-        unsigned char* three[]={primary.holder,hull.holder,picked.holder};
+        Weapon hullGun(0,3,0);
+        Put<void*>(hullGun.holder,0x18,vehicleBones);Put<void*>(hullGun.data,0xE88,vehicleBones);Put<void*>(hullGun.data,0xF40,hullGun.bone);
+        Put<void*>(hullGun.data,weaponmount::kWeaponModel+0x10,hullGun.bone);Put<int>(hullGun.data,weaponmount::kWeaponModel+0x20,1);
+        Put<int>(hullGun.bone,0xC,0);Put<int>(hullGun.bone,0x10,-1);
+        unsigned char* three[]={primary.holder,hullGun.holder,picked.holder};
         Put<void*>(seat,kSeatWeapons,three);Put<std::uint64_t>(seat,kSeatWeaponCount,3);
         Put<int>(primary.data,edf::kWeaponMark,0);Put<int>(primary.data,kWeaponLockon,0);
         ResetTurretCam();lookOk=true;nextAim=&UnexpectedAim;config.decoupledTurretCam=true;highOn=false;mountedOptic=false;
         Put<float>(seat,kSeatAim+kAimAxes,-tcam::kPi);Put<float>(seat,kSeatAim+kAimAxes+4,tcam::kPi);
-        selectedGun=hull.data;TurretCamFrame(vehicle);
+        selectedGun=hullGun.data;TurretCamFrame(vehicle);
         Check(TurretGun(vehicle,seat)==primary.data,"a hull gun pick leaves the turret to the seat's articulated gun");
         Check(TurretCamServes(vehicle) && shared.decoupled && !shared.physicalOnly,"the hull gun pick keeps the turret camera decoupled");
         Check(leadGun==primary.data,"auto-aim is asked with the turret's gun, not the hull gun");
@@ -314,9 +314,9 @@ void Run() {
         Check(shared.decoupled && !shared.physicalOnly && TurretGun(vehicle,seat)==primary.data,"back on the cannon: the same, symmetric");
         selectedGun=picked.data;TurretCamFrame(vehicle);
         Check(TurretGun(vehicle,seat)==picked.data,"an articulated pick turns the turret by its own bore");
-        unsigned char* only[]={hull.holder};Put<void*>(seat,kSeatWeapons,only);Put<std::uint64_t>(seat,kSeatWeaponCount,1);
-        selectedGun=hull.data;TurretCamFrame(vehicle);
-        Check(TurretGun(vehicle,seat)==hull.data && shared.physicalOnly,"a seat with a fixed gun alone stays physical-only");
+        unsigned char* only[]={hullGun.holder};Put<void*>(seat,kSeatWeapons,only);Put<std::uint64_t>(seat,kSeatWeaponCount,1);
+        selectedGun=hullGun.data;TurretCamFrame(vehicle);
+        Check(TurretGun(vehicle,seat)==hullGun.data && shared.physicalOnly,"a seat with a fixed gun alone stays physical-only");
         Put<void*>(seat,kSeatWeapons,three);Put<std::uint64_t>(seat,kSeatWeaponCount,3);
         // The lock's lead replaces the screen's centre (aimlink.h V4); asked every frame, also through the high view.
         selectedGun=primary.data;leadOn=true;leadPoint[0]=12;leadPoint[1]=3;leadPoint[2]=400;
