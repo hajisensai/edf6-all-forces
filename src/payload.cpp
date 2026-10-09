@@ -432,11 +432,11 @@ unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float distance,bo
         const float blast=At<float>(w,0x8B0);
         if(!std::isfinite(blast) || (blast>0.0f && distance<=blast*2.0f))continue;
         const StoreSpec* const spec=StoreOf(w);
-        const auto mark=At<std::int32_t>(w,edf::kWeaponMark);
+        const edf::GunRole role=edf::RoleOf(At<std::int32_t>(w,edf::kWeaponMark));   // EDF6AutoTurret's table too
         if(spec && ((airborne && (spec->role==StoreRole::ground || spec->role==StoreRole::bomb || spec->role==StoreRole::rocket)) ||
                     (!airborne && spec->role==StoreRole::air)))continue;
-        if(airborne && (m.lobbed || mark==edf::kMarkGround || mark==edf::kMarkLofted))continue;
-        if(!airborne && mark==edf::kMarkAir)continue;
+        if(airborne && (m.lobbed || role.prefer==edf::Prefer::ground))continue;
+        if(!airborne && role.prefer==edf::Prefer::air)continue;
         // Guided fire at long range, direct fire close up, splash against ground targets.
         float rank=m.kind==RoundKind::homing ? (distance>150.0f ? 4.0f : 2.0f) : airborne ? 3.0f : blast>0.0f ? 3.5f : 2.5f;
         if(ws[i]==previous)rank+=0.1f;

@@ -987,3 +987,11 @@ target_compile_options(autoturret_binding_test PRIVATE /W4 /WX /utf-8 /permissiv
 target_link_options(autoturret_binding_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks autoturret_binding_test)
 add_test(NAME autoturret_binding COMMAND autoturret_binding_test)
+# The one player turret aim (aimlink.h V4) on production designate.cpp: keys, lock rule, lead, flak and tank alike.
+add_executable(player_aim_test EXCLUDE_FROM_ALL tests/player_aim_test.cpp)
+target_include_directories(player_aim_test PRIVATE common)
+target_link_libraries(player_aim_test PRIVATE edf6common user32)
+target_compile_options(player_aim_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+target_link_options(player_aim_test PRIVATE /OPT:REF)
+add_dependencies(offline_checks player_aim_test)
+add_test(NAME player_aim COMMAND player_aim_test)

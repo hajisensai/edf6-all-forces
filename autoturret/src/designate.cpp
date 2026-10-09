@@ -36,6 +36,7 @@ constexpr float kLostRange=1.5f;       // a lock beyond this many lock ranges fr
 constexpr float kSeeSlack=3.0f;        // m: a map hit this short of the target's point still sees it (it stands on the ground)
 constexpr int kMostCandidates=64,kMostRays=24;
 constexpr float kDegree=0.0174532925f;
+constexpr float kNoRange=1000.0f;     // m: the lock range of a gun whose reach is not read
 
 struct Pilot {
     const void* vehicle;        // the vehicle and seat the player is at (and the vehicle's weak-this, a new one at the address is another)
@@ -50,6 +51,10 @@ struct Pilot {
     ULONGLONG seenFrame;
     float range;                // the lock range (m)
     bool keys;
+    const void* spot;           // the enemy nearest the view at the last lock press (aim::LockPick's sameSpot)
+    const void* velTarget;      // the lock whose motion lockVel is (m/frame, smoothed over the frames it is held)
+    float lockLast[3],lockVel[3];
+    int lockFrames;
 };
 Pilot pilot{};
 link::Mode mode=link::Mode::autoAim;
@@ -59,6 +64,9 @@ SRWLOCK readoutLock=SRWLOCK_INIT;
 link::TurretReadoutV1 readout{};
 ULONGLONG readoutAt=0;
 
+ULONGLONG publishedFrame=0;      // the frame and vehicle of the last PublishAim (the PlayerAimV4 export publishes once)
+const void* publishedVehicle=nullptr;
+
 link::ViewRayFn viewRay=nullptr;
 link::MapRayFn mapRay=nullptr;
 link::SeatQueryFn cameraTurret=nullptr;
@@ -66,6 +74,8 @@ link::StabilizerFn stabilizer=nullptr;
 link::InputHeldFn inputHeld=nullptr;
 link::BindingReservedFn sightBinding=nullptr;
 link::SeatQueryFn turretObserver=nullptr;
+link::SeatQueryFn aimsTurret=nullptr;
+ULONGLONG aimsTried=0;
 ULONGLONG bindingTried=0,observerTried=0;
 link::ModeBindingV1 modeBinding{};
 ULONGLONG viewTried=0,mapTried=0,cameraTried=0,stabTried=0,heldTried=0;
@@ -136,7 +146,7 @@ bool Sees(const float* eye,const float* p,float distance) noexcept {
 }
 
 // A lock press: the enemies in the cone round the view within the lock range, nearest the view first, those the eye
-// sees; the pick aim::NextPick makes among them. Nothing in sight: the lock stays as it is.
+// sees; the pick aim::LockPick makes among them (the crosshair's first). Nothing in sight: the lock stays as it is.
 void Cycle(const unsigned char* vehicle,const float* muzzle,const float* bore) noexcept {
     float eye[3],dir[3];
     View(vehicle,muzzle,bore,eye,dir);
@@ -147,12 +157,16 @@ void Cycle(const unsigned char* vehicle,const float* muzzle,const float* bore) n
     int n=0,count=0;
     const Enemy* world=World(&count);
     const float cone=cfg.lockCone*kDegree;
+    const float* origin=reinterpret_cast<const float*>(vehicle+kPosition);
     for(int i=0;i<count;++i) {
         const Enemy& e=world[i];
         if(e.object==vehicle || relation[e.team]!=kEnemyRelation)continue;
         float distance;
         const float angle=aim::OffView(eye,dir,e.pos,&distance);
-        if(angle>cone || distance>pilot.range)continue;
+        // The lock range from the vehicle, as Check lets it go: the eye may sit tens of metres behind it (the Titan's
+        // camera 37 m), which took the far end of the range off what the crosshair was on.
+        const float off[3]={e.pos[0]-origin[0],e.pos[1]-origin[1],e.pos[2]-origin[2]};
+        if(angle>cone || Dot(off,off)>pilot.range*pilot.range)continue;
         int at=0;
         while(at<n && c[at].object!=e.object)++at;
         if(at<n){if(angle<c[at].angle){c[at].angle=angle;c[at].distance=distance;std::memcpy(c[at].pos,e.pos,12);}continue;}
@@ -166,8 +180,9 @@ void Cycle(const unsigned char* vehicle,const float* muzzle,const float* bore) n
         if(c[i].object==pilot.target)current=visible;
         seen[visible++]=c[i].object;
     }
-    const int pick=aim::NextPick(visible,current);
-    if(pick<0){Log("LOCK v=%p seat=%u: no enemy in sight (%d in the %.0f deg cone)",vehicle,pilot.seat,n,cfg.lockCone);return;}
+    const int pick=aim::LockPick(visible,current,visible>0 && seen[0]==pilot.spot);
+    pilot.spot=visible>0 ? seen[0] : nullptr;
+    if(pick<0){Log("LOCK v=%p seat=%u: no enemy in sight (%d in the %.0f deg cone, %.0f m)",vehicle,pilot.seat,n,cfg.lockCone,pilot.range);return;}
     if(seen[pick]==pilot.target)return;   // the only one in sight is the one locked
     pilot.target=seen[pick];
     pilot.targetCtrl=At<const void*>(pilot.target,kSelfCtrl);
@@ -187,6 +202,23 @@ void Check(const unsigned char* vehicle) noexcept {
 }
 
 bool Fresh() noexcept { return pilot.vehicle && Frame()<=pilot.seenFrame+kPilotFrames; }
+
+// The lock's motion, a frame at a time (PilotFrame runs once a game frame): its first lock point's step, smoothed as the
+// aim's own tracks are (plugin.cpp Lead), for the lead of a turret the camera steers (PlayerAimV4) and the HUD's circle.
+void TrackLock() noexcept {
+    const Enemy* e=pilot.target ? PointOf(pilot.target) : nullptr;
+    if(!e || pilot.velTarget!=pilot.target) {
+        pilot.velTarget=e ? pilot.target : nullptr;pilot.lockFrames=0;std::memset(pilot.lockVel,0,sizeof(pilot.lockVel));
+        if(e)std::memcpy(pilot.lockLast,e->pos,12);
+        return;
+    }
+    for(int i=0;i<3;++i) {
+        const float step=e->pos[i]-pilot.lockLast[i];
+        pilot.lockVel[i]=pilot.lockFrames ? pilot.lockVel[i]+0.3f*(step-pilot.lockVel[i]) : step;
+    }
+    ++pilot.lockFrames;
+    std::memcpy(pilot.lockLast,e->pos,12);
+}
 }  // namespace
 
 void PilotFrame(const unsigned char* vehicle,unsigned seatIndex,const unsigned char* seat,const float* muzzle,const float* bore,float range) noexcept {
@@ -202,7 +234,7 @@ void PilotFrame(const unsigned char* vehicle,unsigned seatIndex,const unsigned c
             cfg.lockKey ? "on" : "off",cfg.lockButton,cfg.modeKey ? "on" : "off",cfg.modeButton);
     }
     pilot.seenFrame=Frame();
-    pilot.range=cfg.lockRange>0.0f ? cfg.lockRange : range;
+    pilot.range=cfg.lockRange>0.0f ? cfg.lockRange : range>0.0f ? range : kNoRange;
     pilot.keys=At<std::uint8_t>(seat,edf::kSeatPad)==0;
     const int effective=EffectiveModeBinding(vehicle,seatIndex,pilot.keys);
     const bool modeDown=Held(seat,pilot.keys,pilot.keys ? effective : 0,pilot.keys ? 0 : effective);
@@ -218,6 +250,7 @@ void PilotFrame(const unsigned char* vehicle,unsigned seatIndex,const unsigned c
     if(!lockDown && pilot.lockHeld && !pilot.lockLong)Cycle(vehicle,muzzle,bore);   // a short press: on its release
     pilot.lockHeld=lockDown;
     Check(vehicle);
+    TrackLock();
 }
 
 const void* Designated(const unsigned char* vehicle,float* world) noexcept {
@@ -234,6 +267,10 @@ bool LeadCircle() noexcept { return mode==link::Mode::leadCircle; }
 bool ObservesTurret(const unsigned char* vehicle,unsigned seat) noexcept {
     const auto fn=link::Resolve(link::kCrewDll,link::kTurretObserver,turretObserver,observerTried);
     return fn && fn(vehicle,seat);
+}
+
+bool CrewAims(const unsigned char* vehicle,unsigned seat) noexcept {
+    return link::Resolve(link::kCrewDll,link::kAimsTurret,aimsTurret,aimsTried) && aimsTurret(vehicle,seat);
 }
 
 bool CameraTurret(const unsigned char* vehicle,unsigned seat) noexcept {
@@ -304,6 +341,7 @@ void PublishAim(const unsigned char* vehicle,bool ownGun,const void* target,cons
             r.flight=frames/60.0f;r.inReach=life<=0.0f || frames<=life;r.lead=std::isfinite(r.range);
         }
     }
+    publishedFrame=Frame();publishedVehicle=vehicle;
     AcquireSRWLockExclusive(&readoutLock);
     readout=r;readoutAt=GetTickCount64();modeBinding={requested!=effective,pilot.keys,requested,effective};
     ReleaseSRWLockExclusive(&readoutLock);
@@ -334,4 +372,55 @@ extern "C" __declspec(dllexport) bool __cdecl EDF6AutoTurret_ModeBindingV1(edf::
     const bool fresh=readoutAt && GetTickCount64()-readoutAt<=kReadoutMs;
     if(fresh)*out=modeBinding;
     ReleaseSRWLockShared(&readoutLock);return fresh;
+}
+
+namespace autoturret {
+namespace {
+// The PlayerAimV4 export's work (aimlink.h V4): the seat's bindings and lock kept up once this frame (its own input hook
+// may have done it already: the flak, a 403 / 404 tank), the readout published for the gun EDF6VehicleCrew's turret
+// camera turns (once a frame), and in AUTO with a lock the point where that gun's round meets the lock: aim::LeadSolve,
+// the same lead as the flak's circle, against the lock's own motion (TrackLock).
+bool PlayerAim(const unsigned char* v,unsigned s,const unsigned char* gun,edf::aimlink::PlayerAimV4* out) noexcept {
+    ReloadConfigIfChanged();
+    if(!image || !cfg.enabled || !v || !Readable(v,edf::kSeatCount+8) || v[kDead] || s>=edf::SeatCount(v))return false;
+    const auto seat=edf::SeatAt(const_cast<unsigned char*>(v),s);
+    if(edf::SeatRider(image,seat)!=edf::Rider::player)return false;
+    SeeVehicleOnce(v);
+    Shot shot{};
+    float muzzle[3],bore[3],life=0.0f,reach=0.0f;
+    const bool barrel=gun && Readable(gun,kAmmoGravity+4) && Readable(gun+edf::kWeaponMatrix,0x40) && edf::MeanMuzzle(gun,64,muzzle,bore);
+    if(barrel) {
+        shot.speed=At<float>(gun,kAmmoSpeed);
+        const float gravity=At<float>(gun,kAmmoGravity);
+        if(std::isfinite(gravity) && gravity>0.0f)shot.drop=gravity*Down(v)/kFramesPerSecondSq;
+        life=static_cast<float>(At<std::int32_t>(gun,kAmmoAlive));
+        reach=shot.speed*life;
+        if(!std::isfinite(reach) || reach<0.0f)reach=0.0f;
+    }
+    if(!(pilot.vehicle==v && pilot.seat==s && pilot.ctrl==At<const void*>(v,kSelfCtrl) && pilot.seenFrame==Frame()))
+        PilotFrame(v,s,seat,barrel ? muzzle : nullptr,barrel ? bore : nullptr,reach);
+    out->mode=mode;
+    float world[3];
+    const void* target=Designated(v,world);
+    if(publishedFrame!=Frame() || publishedVehicle!=v)
+        PublishAim(v,true,target,target ? world : nullptr,barrel ? muzzle : nullptr,barrel ? bore : nullptr,barrel ? &shot : nullptr,
+                   target ? pilot.lockVel : nullptr,life);
+    const auto rule=edf::aimlink::PlayerGunRule(true,LeadCircle(),target!=nullptr);
+    if(!rule.steer || !barrel || ObservesTurret(v,s))return true;
+    float dir[3],frames=0.0f;
+    if(!(shot.speed>0.0f)){std::memcpy(out->point,world,12);out->steer=true;return true;}   // no round speed read: at the lock
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    out->steer=aim::LeadSolve(m,muzzle,world,pilot.lockVel,shot.speed,shot.drop,out->point,dir,&frames) && (life<=0.0f || frames<=life);
+    return true;
+}
+}  // namespace
+}  // namespace autoturret
+
+// EDF6VehicleCrew's turret camera asks once a game frame for the seat it serves (common/edf/aimlink.h V4).
+extern "C" __declspec(dllexport) bool __cdecl EDF6AutoTurret_PlayerAimV4(const void* vehicle,unsigned seat,const void* gun,
+                                                                         edf::aimlink::PlayerAimV4* out) {
+    if(!out)return false;
+    *out=edf::aimlink::PlayerAimV4{};
+    __try { return autoturret::PlayerAim(static_cast<const unsigned char*>(vehicle),seat,static_cast<const unsigned char*>(gun),out); }
+    __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

@@ -1424,8 +1424,16 @@ def turret_aim_wired() -> None:
     link = src('common/edf/aimlink.h')
     names = dict(re.findall(r'constexpr char (k\w+)\[\]="(\w+)";', link))
     assert set(names) == {'kViewRay', 'kMapRay', 'kTurretReadout', 'kCameraTurret', 'kSteers', 'kStabilizer', 'kStabilizerAware', 'kPriorityZone',
-                          'kInputHeld', 'kSightBinding', 'kTurretObserver', 'kModeBinding'}, names   # kPriorityZone: proteus_wired; kInputHeld: map_wired
+                          'kInputHeld', 'kSightBinding', 'kTurretObserver', 'kModeBinding', 'kPlayerAim', 'kAimsTurret'}, names   # kPriorityZone: proteus_wired; kInputHeld: map_wired
     assert names['kCameraTurret'].endswith('V2') and names['kSteers'].endswith('V2'), names
+    # V4, the one player turret aim (2026-10-09): EDF6AutoTurret answers it, EDF6VehicleCrew's turret camera asks it every
+    # frame and says it steers; the flak's own Steer and the tank driver's frame then leave the turret to the camera.
+    assert names['kPlayerAim'].endswith('V4') and names['kAimsTurret'].endswith('V4'), names
+    assert f'bool __cdecl {names["kPlayerAim"]}(' in src('autoturret/src/designate.cpp')
+    assert f'bool __cdecl {names["kAimsTurret"]}(' in src('src/turretaim.cpp')
+    assert 'PlayerTurretLead(v,0,TurretGun(v,seat),lead)' in src('src/turretcam.cpp'), 'turretcam.cpp: the camera asks V4'
+    assert 'if(pilot && CrewAims(vehicle,0))rule=edf::aimlink::PlayerGun{false,false};' in steer, 'Steer: the camera is the hand'
+    assert 'if(CrewAims(vehicle,0))return;' in gunner.split('void DriverFrame(', 1)[1].split('\n}\n', 1)[0], 'DriverFrame: V4 publishes'
     assert names['kStabilizer'].endswith('V3') and names['kStabilizerAware'].endswith('V3'), names
     assert f'bool __cdecl {names["kStabilizer"]}(' in src('src/stab.cpp') and f'bool __cdecl {names["kStabilizerAware"]}(' in at
     # The rule itself: with the camera, only a lock in AUTO steers and the stick never drags; without, V1.

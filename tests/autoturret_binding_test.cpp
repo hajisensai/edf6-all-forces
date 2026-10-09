@@ -19,6 +19,9 @@ namespace autoturret {
 unsigned char* image=nullptr;Config cfg{};
 void Log(const char*,...) noexcept{}
 void SeeVehicle(const void*) noexcept{}
+void SeeVehicleOnce(const void*) noexcept{}
+void ReloadConfigIfChanged() noexcept{}
+float Down(const unsigned char*) noexcept{return 0;}
 ULONGLONG Frame() noexcept{return 1;}
 bool Same(const void*,const void*) noexcept{return false;}
 const Enemy* World(int* count) noexcept{*count=0;return nullptr;}
