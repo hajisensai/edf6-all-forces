@@ -6,6 +6,8 @@ namespace crew {
 void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept {if(out && capacity)out[0]=0;}
 int SupportCallCount() noexcept { return 3; }
 const wchar_t* SupportCallName(int) noexcept { return L"Support"; }
+SupportIcon SupportCallIcon(int) noexcept { return SupportIcon::jet; }
+SupportReadiness SupportCallReadiness() noexcept { return {SupportReady::ready,0}; }
 int supportCalls=0,supportChosen=-1;float supportTarget[3]{};
 bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept {
     ++supportCalls;supportChosen=index;std::memcpy(supportTarget,target,12);

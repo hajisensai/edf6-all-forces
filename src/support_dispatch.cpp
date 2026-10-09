@@ -375,6 +375,29 @@ bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capac
     }
     _snwprintf_s(note,capacity,_TRUNCATE,L"%ls",status);return accepted;
 }
+SupportIcon SupportCallIcon(int index) noexcept {
+    SupportAircraft spec;
+    if(index<AirCount()) {
+        if(!SupportAircraftSpec(index,&spec))return SupportIcon::sub;
+        if(spec.heli>=0)return SupportIcon::heli;
+        const auto role=static_cast<JetRole>(spec.jet);
+        if(role==JetRole::gunship)return SupportIcon::gunship;
+        return role==JetRole::carrier || role==JetRole::blastCarrier || role==JetRole::dollCarrier ? SupportIcon::carrier : SupportIcon::jet;
+    }
+    if(InfantryCatalog(static_cast<std::uint32_t>(index)))return index==AirCount() ? SupportIcon::squad : SupportIcon::platoon;
+    SupportVehicleKind kind{};SupportCrewMode mode{};
+    if(!GroundCatalog(static_cast<std::uint32_t>(index),kind,mode))return SupportIcon::squad;
+    return kind==SupportVehicleKind::tank ? SupportIcon::tank : kind==SupportVehicleKind::transport ? SupportIcon::apc : SupportIcon::truck;
+}
+SupportReadiness SupportCallReadiness() noexcept {
+    // The same tests SupportCallAt makes before it plans, read without asking: online the host decides.
+    if(!Cfg().enabled)return {SupportReady::off,0};
+    if(InSession())return {SupportReady::ready,0};
+    if(offlinePending)return {SupportReady::planning,0};
+    const ULONGLONG now=GameMs();
+    if(callAt && now-callAt<kCallCooldown)return {SupportReady::cooldown,static_cast<int>((kCallCooldown-(now-callAt)+999)/1000)};
+    return {SupportReady::ready,0};
+}
 void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept {
     if(out && capacity)_snwprintf_s(out,capacity,_TRUNCATE,L"%ls",localRequest.shown ? localRequest.text : status);
 }

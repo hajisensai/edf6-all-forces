@@ -67,6 +67,41 @@ inline void Zoom(View& v,float notches) noexcept {
     v.height=Clamp(v.height*std::pow(kNotchZoom,notches),kMinHeight,kMaxHeight);
 }
 
+// The ground the view may look at and look from (the user, 2026-10-09: "m里面视角出了地图边界以后会一闪一闪的"): the
+// map's real ground (playarea.h, where a map ray still finds ground), widened to hold the player. Past it the game
+// has no ground of its own, only far-only scenery its far pass draws from 500 m out (view_clip.h) and nothing its
+// visibility was made for: a camera put there shows the void and that scenery cut and flashing as it moves. The
+// view's one bound, kept by Keep after every write of the focus (follow, pan, drag, a unit centred), not eased:
+//  - the focus is inside the bounds;
+//  - the eye (behind the focus by height / tan(pitch)) is inside them too where they are wide enough for both: the
+//    focus moves in by the eye's overshoot, never past the far edge. Where they are not (zoomed far out over a small
+//    map), the focus is kept and the eye stays out.
+// Keep is idempotent (a kept view is kept as it is), so nothing is pulled back and forth between two frames.
+struct Bounds { float lo[2],hi[2]; };   // [0]: x, [1]: z
+inline Bounds Around(Bounds b,const float* me) noexcept {
+    for(int i=0;i<2;++i) {
+        const float v=me[i==0 ? 0 : 2];
+        if(!std::isfinite(v))continue;
+        if(v<b.lo[i])b.lo[i]=v;
+        if(v>b.hi[i])b.hi[i]=v;
+    }
+    return b;
+}
+inline void Keep(View& v,const Bounds& b) noexcept {
+    float f[3];Forward(v.yaw,f);
+    const float back=v.height/std::tan(v.pitch);
+    for(int i=0;i<2;++i) {
+        const int k=i==0 ? 0 : 2;
+        if(!(b.lo[i]<=b.hi[i]) || !std::isfinite(v.focus[k]))continue;
+        float at=Clamp(v.focus[k],b.lo[i],b.hi[i]);
+        const float eye=at-f[k]*back;
+        // The eye's overshoot along this axis moves the focus the same way back in, as far as the focus may go.
+        if(eye<b.lo[i])at=Clamp(at+(b.lo[i]-eye),b.lo[i],b.hi[i]);
+        else if(eye>b.hi[i])at=Clamp(at-(eye-b.hi[i]),b.lo[i],b.hi[i]);
+        v.focus[k]=at;
+    }
+}
+
 // A pin's stem (map.cpp's marks, hud.cpp MapPin): this share of the view distance tall, so it reads the same at 200 m and
 // at 3 km; taller the steeper the view (a vertical stem seen from straight over it is foreshortened to nothing), at
 // most 1 / kPinCosLeast of it.

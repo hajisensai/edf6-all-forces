@@ -144,6 +144,59 @@ int main() {
         for(float h=kMinHeight;h<=kMaxHeight;h+=10.0f){const float s=GridStep(h);Check(s>=last,"grid step monotone",h,s);last=s;}
         Check(GridStep(kMinHeight)==50.0f && GridStep(kMaxHeight)==1000.0f,"grid steps at the ends",GridStep(kMinHeight),GridStep(kMaxHeight));
     }
+    // The view's bounds (the user, 2026-10-09: "m里面视角出了地图边界以后会一闪一闪的"): every view kept over the map's
+    // ground -- the focus inside, the eye inside too where the bounds hold both -- and a kept view kept as it is: a pan
+    // pushed against an edge frame after frame, a zoom out and in, a turn: never back and forth between two frames.
+    {
+        const Bounds map{{-1500.0f,-1200.0f},{1500.0f,1800.0f}};
+        auto inside=[&](const View& v,bool eye){
+            float e[3],l[3];Place(v,e,l);
+            const float* p=eye ? e : v.focus;
+            return p[0]>=map.lo[0]-0.01f && p[0]<=map.hi[0]+0.01f && p[2]>=map.lo[1]-0.01f && p[2]<=map.hi[1]+0.01f;
+        };
+        int views=0;
+        for(float h=kMinHeight;h<=kMaxHeight;h*=1.5f)
+            for(float pitch=kMinPitch;pitch<=kMaxPitch;pitch+=0.25f)
+                for(float yaw=-3.1f;yaw<=3.1f;yaw+=0.7f)
+                    for(float x=-4000.0f;x<=4000.0f;x+=1300.0f)
+                        for(float z=-4000.0f;z<=4000.0f;z+=1300.0f) {
+                            View v{{x,10.0f,z},yaw,pitch,h};
+                            Keep(v,map);++views;
+                            Check(inside(v,false),"the focus kept on the map",v.focus[0],v.focus[2]);
+                            const float back=h/std::tan(pitch);
+                            if(back<1490.0f)Check(inside(v,true),"the eye kept over the map where the bounds hold both",back,yaw);
+                            View again=v;Keep(again,map);
+                            Check(Near(again.focus[0],v.focus[0],0.05f) && Near(again.focus[2],v.focus[2],0.05f),"a kept view is kept",
+                                  again.focus[0]-v.focus[0],again.focus[2]-v.focus[2]);
+                            Check(again.focus[1]==v.focus[1] && again.yaw==v.yaw && again.height==v.height,"only the focus x, z moved");
+                        }
+        Check(views>1000,"views kept",views);cases+=views;
+        // A pan pushed against the edge every frame, then let go: the focus stays put at the edge, frame after frame.
+        View v{{1400.0f,0.0f,0.0f},kPi*0.5f,kStartPitch,kStartHeight};   // looking along +x, towards the edge
+        float prev[2]={0.0f,0.0f};int moved=0,reversed=0;float lastStep=0.0f;
+        for(int frame=0;frame<240;++frame) {
+            if(frame<180)Pan(v,1.0f,0.0f,1.0f/60.0f);
+            Keep(v,map);
+            if(frame>0) {
+                const float step=v.focus[0]-prev[0];
+                if(std::fabs(step)>1e-3f)++moved;
+                if(step*lastStep<-1e-6f)++reversed;
+                lastStep=step;
+            }
+            prev[0]=v.focus[0];prev[1]=v.focus[2];
+        }
+        Check(reversed==0,"pushed against the edge: never back and forth",reversed);
+        Check(v.focus[0]<=map.hi[0]+0.01f,"pushed against the edge: on the map",v.focus[0]);
+        Check(moved<=180,"let go at the edge: still",moved);
+        // The player off the map (a jet past the edge): the bounds widen to hold them, so following them is not pulled
+        // back to the edge (a follow and a bound fighting each frame).
+        const float me[3]={2600.0f,300.0f,-50.0f};
+        const Bounds wide=Around(map,me);
+        Check(wide.hi[0]==2600.0f && wide.lo[0]==map.lo[0] && wide.lo[1]==map.lo[1] && wide.hi[1]==map.hi[1],"the bounds widened to hold the player");
+        View follow{{me[0],0.0f,me[2]},0.0f,kStartPitch,kStartHeight};
+        Keep(follow,wide);
+        Check(Near(follow.focus[0],me[0],0.01f) && Near(follow.focus[2],me[2],0.01f),"following a player off the map: on them",follow.focus[0]);
+    }
     std::printf("%d views checked: %s\n",cases,failures ? "FAILED" : "all ok");
     return failures ? 1 : 0;
 }

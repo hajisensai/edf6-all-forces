@@ -38,7 +38,7 @@ void Execute(void*,const char* sender,const command_net::Request& request,comman
         NpcCommandResult result{NpcCommandReason::unsupported,0};
         auto command=request.command;
         bool ground=true;
-        if(command.order==mapcmd::Order::guard) {
+        if(mapcmd::PointOrder(command.order)) {
             const auto total=request.formationTotal ? request.formationTotal : request.count;
             const auto slot=request.formationTotal ? request.formationSlots[i] : i;
             mapcmd::Formation(static_cast<int>(slot),static_cast<int>(total),request.command.at,mapcmd::kFormationSpacing,command.at);

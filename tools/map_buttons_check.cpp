@@ -1,4 +1,4 @@
-// The map's command buttons (src/map_buttons.h) checked offline: laid out at 16:9, 21:9, 4:3 and a narrow split
+// The map's command card and support bar (src/map_buttons.h) checked offline. The card: laid out at 16:9, 21:9, 4:3 and a narrow split
 // screen, with labels of every width the languages give: none overlapping, all on the screen (within the margin),
 // in their order (left to right, row by row upwards), each row centred; a button wider than the row shrunk to it;
 // a click on a button finds it and only it, a click in the gap between two finds none; no room for a row: fewer rows.
@@ -6,6 +6,7 @@
 #include "../src/map_buttons.h"
 #include <cmath>
 #include <cstdio>
+#include <cwchar>
 
 namespace {
 using namespace mapbtn;
@@ -20,9 +21,9 @@ void Check(bool ok,const char* what,double a=0.0,double b=0.0) {
 void Layouts() {
     const float screens[][2]={{1920.0f,1080.0f},{2520.0f,1080.0f},{1440.0f,1080.0f},{960.0f,1080.0f},{640.0f,1080.0f}};
     const float widths[][kCount]={
-        {80,90,90,90,110,90,100,90,90,120,80,80,150,190,120,120,320},     // English-ish
-        {70,70,70,70,70,70,70,70,70,90,70,70,120,170,100,100,280},        // Chinese-ish
-        {300,40,40,40,40,40,40,40,40,40,40,40,40,700,150,150,600},        // odd ones: one very long
+        {80,110,90,90,90,110,90,100,90,90,120,80,80,150,190,120},     // English-ish
+        {70,90,70,70,70,70,70,70,70,70,90,70,70,120,170,100},         // Chinese-ish
+        {300,40,40,40,40,40,40,40,40,40,40,40,40,700,150,150},        // odd ones: one very long
     };
     for(const auto& sc:screens)for(const auto& w:widths) {
         Rect r[kCount];
@@ -64,10 +65,74 @@ void Layouts() {
     Rect r[kCount];
     Check(Flow(w,kCount,1920.0f,100.0f,30.0f,6.0f,16.0f,r)==2,"a short screen: as many rows as fit",Flow(w,kCount,1920.0f,100.0f,30.0f,6.0f,16.0f,r));
 }
+// The card's buttons: their orders, which arm a click, which are shown for a selection.
+void Card() {
+    using mapcmd::Order;
+    Check(OrderOf(Id::move)==Order::move && OrderOf(Id::attackMove)==Order::attackMove && OrderOf(Id::release)==Order::none &&
+          OrderOf(Id::recruit)==Order::recruit && OrderOf(Id::sweep)==Order::none,"each order button's order");
+    Check(Arms(Id::move) && Arms(Id::attackMove) && Arms(Id::guard) && !Arms(Id::follow) && !Arms(Id::release) && !Arms(Id::sweep),
+          "the point orders' buttons arm a click on the map, the others act at once");
+    const std::uint32_t vehicle=(1u<<static_cast<unsigned>(Order::none))|(1u<<static_cast<unsigned>(Order::guard))|
+                                (1u<<static_cast<unsigned>(Order::move))|(1u<<static_cast<unsigned>(Order::attackMove));
+    int shown=0,squadOnly=0;
+    for(int i=0;i<kCount;++i) {
+        const Id b=static_cast<Id>(i);
+        shown+=Shown(b,vehicle,false);
+        squadOnly+=Shown(b,vehicle,false) && (b==Id::recruit || b==Id::board || b==Id::formation || b==Id::split);
+    }
+    Check(shown==6 && !squadOnly,"a vehicle selected: its four orders, the sweep and its switch; no squad order or tool",shown);
+    int idle=0;
+    for(int i=0;i<kCount;++i)idle+=Shown(static_cast<Id>(i),0u,false);
+    Check(idle==2 && Shown(Id::sweep,0u,false) && Shown(Id::health,0u,false),"nothing selected: the sweep and its switch alone",idle);
+    Check(Shown(Id::formation,0u,true) && Shown(Id::merge,0u,true),"squads selected: their tools");
+}
+
+// The support bar: the catalog's names grouped by what is before their "·" (support_dispatch.cpp SupportCallName order),
+// the rows laid out top-down with their chips at the right, a click on a chip its entry, on the row its own.
+void Support() {
+    const wchar_t* const names[]={L"截击机·守点",L"截击机·跟随",L"对地攻击机·守点",L"对地攻击机·跟随",L"潜水母舰支援",
+                                  L"炮舰机·守点",L"炮舰机·跟随",L"步兵小队（4人）",L"步兵大队（12人）",L"坦克·有人",L"坦克·空车交付",
+                                  L"装甲运兵车·有人",L"装甲运兵车·空车交付"};
+    constexpr int n=static_cast<int>(sizeof(names)/sizeof(names[0]));
+    Group g[n];
+    const int rows=GroupSupport(names,n,g,n);
+    Check(rows==8,"13 entries: 8 kinds of support",rows);
+    Check(g[0].first==0 && g[0].count==2 && g[2].first==4 && g[2].count==1 && g[4].count==1 && g[5].count==1 && g[7].first==11 && g[7].count==2,
+          "pairs by their name before the dot; a name with none alone");
+    Check(BaseLength(names[0])==3 && std::wcscmp(VariantOf(names[1]),L"跟随")==0 && !VariantOf(names[4]),"base and variant words");
+    const wchar_t* const lone[]={L"甲",L"甲"};   // no dot: never merged even when equal
+    Group lg[2];
+    Check(GroupSupport(lone,2,lg,2)==2,"names with no dot are rows of their own");
+    Rect row[n]{},chip[n]{};
+    const float x0=12.0f,x1=250.0f,top=300.0f,rowH=26.0f,gap=3.0f,inset=4.0f;
+    const int placed=Column(g,rows,x0,x1,top,1000.0f,rowH,gap,inset,row,chip);
+    Check(placed==rows,"every row placed with room",placed);
+    bool apart=true,inside=true,order=true;
+    for(int r=0;r<placed;++r) {
+        inside=inside && row[r].x0==x0 && row[r].x1==x1 && row[r].y1-row[r].y0==rowH;
+        if(r)order=order && row[r].y0>=row[r-1].y1+gap-0.01f;
+        for(int e=g[r].first;e<g[r].first+g[r].count;++e) {
+            inside=inside && chip[e].x0>=row[r].x0 && chip[e].x1<=row[r].x1 && chip[e].y0>=row[r].y0 && chip[e].y1<=row[r].y1;
+            for(int f=g[r].first;f<e;++f)apart=apart && !(chip[e].x0<chip[f].x1 && chip[f].x0<chip[e].x1);
+        }
+    }
+    Check(inside,"rows full width, chips inside their rows");Check(apart,"a row's chips apart");Check(order,"rows top-down, a gap apart");
+    // The hit list as hud.cpp hands it over: the chips first, then each row's part left of its chips.
+    Rect hits[2*n];int entry[2*n],k=0;
+    for(int r=0;r<placed;++r)if(g[r].count>1)for(int e=g[r].first;e<g[r].first+g[r].count;++e){hits[k]=chip[e];entry[k++]=e;}
+    for(int r=0;r<placed;++r){Rect body=row[r];if(g[r].count>1)body.x1=chip[g[r].first].x0-4.0f;hits[k]=body;entry[k++]=g[r].first;}
+    const int onChip=Hit(hits,k,(chip[1].x0+chip[1].x1)*0.5f,(chip[1].y0+chip[1].y1)*0.5f);
+    Check(onChip>=0 && entry[onChip]==1,"a click on the follow chip of the first row: that entry");
+    const int onRow=Hit(hits,k,x0+20.0f,(row[2].y0+row[2].y1)*0.5f);
+    Check(onRow>=0 && entry[onRow]==4,"a click on a lone row: its entry");
+    Check(Hit(hits,k,x0+20.0f,row[0].y1+gap*0.5f)<0,"a click in the gap between rows: none");
+    // Not enough room: the rows that fit.
+    Check(Column(g,rows,x0,x1,top,top+3.0f*(rowH+gap),rowH,gap,inset,row,chip)==3,"a short column: the rows that fit");
+}
 }  // namespace
 
 int main() {
-    Layouts();
+    Layouts();Card();Support();
     std::printf(failures ? "map_buttons_check: %d of %d FAILED\n" : "map_buttons_check: all %d ok\n",failures ? failures : cases,cases);
     return failures ? 1 : 0;
 }

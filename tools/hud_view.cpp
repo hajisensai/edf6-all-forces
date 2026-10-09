@@ -225,6 +225,11 @@ void MapCommandSquadButtons(const float* r,const ObjRef*,int n) noexcept {
 void MapCommandPayloadButtons(const float* r,std::uint64_t,int,const int*,int n) noexcept {
     scenePayloadButtonCount=n;for(int i=0;i<n;++i)std::memcpy(scenePayloadButtons[i],r+i*4,16);
 }
+// The support bar's rows and chips as drawn (hud.cpp MapSupportBar).
+float sceneSupportHits[kMapSupports*2][4]{};int sceneSupportEntry[kMapSupports*2]{},sceneSupportHitCount=0;
+void MapCommandSupportButtons(const float* r,const int* entries,int n) noexcept {
+    sceneSupportHitCount=n;for(int i=0;i<n;++i){std::memcpy(sceneSupportHits[i],r+i*4,16);sceneSupportEntry[i]=entries[i];}
+}
 bool GearHudLatest(GearHud* g) noexcept {
     if(!hasJet || sceneJet.rotor)return false;
     *g=GearHud{};g->shown=true;g->at[0]=g->at[1]=g->at[2]=1.0f;g->warn=(sceneWarn.on>>kWarnGear&1u)!=0;g->tick=sceneTick;
@@ -394,7 +399,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     // 30 m apart; the heli guarding the same point (helis share its orbit); the jet following the player; a box being
     // dragged (Ctrl + left drag) round the crawlers to the pointer; the last command's word.
     sceneCmd=MapCommandReadout{};
-    sceneCmd.allowed=true;sceneCmd.allowedOrders=(1u<<9)-1;sceneCmd.selectedSquads=1;sceneCmd.squadToolsAllowed=!online;sceneCmd.pointOk=true;sceneCmd.pointer=!pad;
+    sceneCmd.allowed=true;sceneCmd.allowedOrders=(1u<<(static_cast<unsigned>(mapcmd::kLastOrder)+1))-1;sceneCmd.selectedSquads=1;sceneCmd.squadToolsAllowed=!online;sceneCmd.pointOk=true;sceneCmd.pointer=!pad;
     sceneCmd.px=1250.0f;sceneCmd.py=560.0f;sceneCmd.boxing=!pad;sceneCmd.bx=820.0f;sceneCmd.by=360.0f;
     auto cmdUnit=[](const float* pos,bool air,const char* name,Order order,const float* at,bool selected){
         CmdMark& c=sceneCmd.unit[sceneCmd.count++];
@@ -431,8 +436,19 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     row("RANGER",6,"SCRIPT",Order::none,true,false);
     row("AIR RAIDER",3,"WAIT 42s",Order::guard,false,false);
     sceneCmd.squad[sceneCmd.squads-1].cooldown=42;
-    if(payload){wcscpy_s(sceneCmd.supportName,L"SUPPORT AIRCRAFT LONG DISPLAY NAME");
-        wcscpy_s(sceneCmd.supportStatus,L"Support route ready - select a visible entry on the map");}
+    // The support catalog as support_dispatch.cpp names it (its air calls in pairs, the infantry, the ground pairs).
+    static const struct { const wchar_t* name; SupportIcon icon; } kCatalog[]={
+        {L"截击机·守点",SupportIcon::jet},{L"截击机·跟随",SupportIcon::jet},{L"无人机母舰·守点",SupportIcon::carrier},
+        {L"无人机母舰·跟随",SupportIcon::carrier},{L"武装直升机·守点",SupportIcon::heli},{L"武装直升机·跟随",SupportIcon::heli},
+        {L"潜水母舰支援",SupportIcon::sub},{L"炮舰机·守点",SupportIcon::gunship},{L"炮舰机·跟随",SupportIcon::gunship},
+        {L"步兵小队（4人）",SupportIcon::squad},{L"步兵大队（12人）",SupportIcon::platoon},{L"坦克·有人",SupportIcon::tank},
+        {L"坦克·空车交付",SupportIcon::tank},{L"装甲运兵车·有人",SupportIcon::apc},{L"装甲运兵车·空车交付",SupportIcon::apc},
+        {L"民用轻卡·有人",SupportIcon::truck},{L"民用轻卡·空车交付",SupportIcon::truck}};
+    sceneCmd.supports=static_cast<int>(sizeof(kCatalog)/sizeof(kCatalog[0]));
+    for(int i=0;i<sceneCmd.supports;++i){wcscpy_s(sceneCmd.support[i].name,kCatalog[i].name);sceneCmd.support[i].icon=kCatalog[i].icon;}
+    sceneCmd.supportArmed=payload ? 3 : -1;sceneCmd.supportPick=3;
+    sceneCmd.supportReady=payload ? SupportReadiness{SupportReady::cooldown,17} : SupportReadiness{SupportReady::ready,0};
+    if(payload)wcscpy_s(sceneCmd.supportStatus,L"Support route ready - select a visible entry on the map");
     if(squadCount==9) {
         row("WING DIVER",12,"RECRUITED",Order::focus,false,false);
         row("AIR RAIDER",8,"ESCORT",Order::board,true,false);
@@ -447,7 +463,8 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         for(int i=0;i<sceneCmd.count;++i)sceneCmd.unit[i].selected=i==2;
         for(bool& selected:sceneCmd.squadSelected)selected=false;
         sceneCmd.selected=1;sceneCmd.selectedSquads=0;
-        sceneCmd.allowedOrders=(1u<<static_cast<unsigned>(Order::guard))|(1u<<static_cast<unsigned>(Order::none))|(1u<<static_cast<unsigned>(Order::follow));
+        sceneCmd.allowedOrders=(1u<<static_cast<unsigned>(Order::guard))|(1u<<static_cast<unsigned>(Order::none))|(1u<<static_cast<unsigned>(Order::follow))|
+                               (1u<<static_cast<unsigned>(Order::move))|(1u<<static_cast<unsigned>(Order::attackMove));
     }
     sceneCmd.noteFresh=true;
     hasMap=true;
@@ -473,12 +490,30 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         if(found!=1){++textFailed;std::printf("FAIL squad text missing or repeated: %s\n",Narrow(wanted).c_str());}
     };
     shown(Tr(pad ? Tx::squadTitle : Tx::squadTitleKeys),true);
-    if(!pad)shown(Tr(Tx::squadKeys));
-    // The command buttons (mouse only): every one placed, on the screen, and no text but its own label in it.
+    // The command buttons (mouse only): the ones the selection takes placed, on the screen, and no text but its own
+    // label in it.
     if(pad) {
         if(sceneButtons){++textFailed;std::printf("FAIL map buttons with a pad: %d\n",sceneButtons);}
+        if(sceneSupportHitCount){++textFailed;std::printf("FAIL support bar clickable with a pad: %d\n",sceneSupportHitCount);}
     } else {
-        if(sceneButtons!=mapbtn::kCount){++textFailed;std::printf("FAIL map buttons: %d of %d placed\n",sceneButtons,mapbtn::kCount);}
+        int wanted=0;
+        for(int i=0;i<mapbtn::kCount;++i)
+            wanted+=mapbtn::Shown(static_cast<mapbtn::Id>(i),sceneCmd.selected>0 ? sceneCmd.allowedOrders : 0u,
+                                   sceneCmd.squadToolsAllowed && sceneCmd.selectedSquads>0);
+        if(sceneButtons!=wanted){++textFailed;std::printf("FAIL map buttons: %d of %d placed\n",sceneButtons,wanted);}
+        // The support bar: a row (and its chips) for every kind of support, every entry reachable by a click.
+        bool reach[kMapSupports]{};
+        for(int i=0;i<sceneSupportHitCount;++i) {
+            const float* b=sceneSupportHits[i];
+            if(b[0]<0.0f || b[2]>static_cast<float>(width) || b[1]<0.0f || b[3]>1080.0f){++textFailed;std::printf("FAIL support hit %d off the screen\n",i);}
+            if(sceneSupportEntry[i]>=0 && sceneSupportEntry[i]<kMapSupports)reach[sceneSupportEntry[i]]=true;
+            for(int k=0;k<sceneButtons;++k) {
+                const float* q=sceneButton[k];
+                if(b[0]<q[2] && q[0]<b[2] && b[1]<q[3] && q[1]<b[3]){++textFailed;std::printf("FAIL support bar under button %d\n",sceneButtonId[k]);}
+            }
+        }
+        int reached=0;for(int i=0;i<sceneCmd.supports;++i)reached+=reach[i];
+        if(reached!=sceneCmd.supports){++textFailed;std::printf("FAIL support entries clickable: %d of %d\n",reached,sceneCmd.supports);}
         for(int i=0;i<sceneButtons;++i) {
             const float* b=sceneButton[i];
             if(b[0]<0.0f || b[2]>static_cast<float>(width) || b[1]<0.0f || b[3]>1080.0f){++textFailed;std::printf("FAIL map button %d off the screen\n",i);}
