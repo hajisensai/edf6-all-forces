@@ -12,9 +12,15 @@
 // placed off the field in the hook with an offset measured on the game thread sat 12.8 m too low.
 // The rig (tools: camview/rig.png in the preview folder, 2026-10-07): its pivot kViewUp m over the soles (mid-height),
 // the eye kViewBack m behind it along the aim, kViewSide m to the right and kViewRise m up: the whole 25.6 m mech in view
-// left of the centre, level, 20 deg up and 20 deg down; never under kViewFloor m over the ground under the mech.
+// left of the centre, level, 20 deg up and 20 deg down.
+// The boom (Boom, the game thread, each frame: the map's rays): from the pivot out to the side, then back along the aim
+// to the eye; a hill, a building or the ground in the way shortens it to kViewMargin short of what it meets (at once),
+// a clear way lets it out again at kViewOut a second; the eye never under kViewFloor m over the ground under the eye
+// itself. (The user, 2026-10-09: 「视角有可能会进到地底」: it only kept clear of the ground under the mech, so a slope behind
+// it, a building, or the aim pitched up (the eye swung 20 m under the soles) put the camera in the ground.)
 
 constexpr float kViewUp=14.8f,kViewBack=45.0f,kViewSide=11.0f,kViewRise=1.0f,kViewFloor=3.0f;
+constexpr float kViewMargin=2.0f,kViewLeast=8.0f,kViewOut=3.0f;
 constexpr ULONGLONG kViewFresh=250;   // ms: a published view older than this is no longer the Sazabi's (the stock camera)
 constexpr ULONGLONG kCentredMs=200;   // ms: the hook placed the camera this recently: the HUD's reticle is the centre
 
@@ -23,7 +29,8 @@ struct View {
     const unsigned char* vehicle=nullptr;
     const unsigned char* seat=nullptr;
     float yaw=0.0f,pitch=0.0f;   // the mech's heading, the aim's pitch (rad; forward = (sin yaw, 0, cos yaw))
-    float floor=-1e9f;           // the ground's height under the mech (world y)
+    float side=kViewSide,back=kViewBack;   // the boom as the map leaves it (Boom)
+    float floor=-1e9f;           // the lowest the eye may be (world y: kViewFloor over the ground under the eye)
     ULONGLONG ms=0;
 };
 SRWLOCK viewLock=SRWLOCK_INIT;
@@ -38,8 +45,34 @@ void ViewRay(const View& w,const float* origin,float* eye,float* dir) noexcept {
     const float cp=std::cos(w.pitch);
     dir[0]=std::sin(w.yaw)*cp;dir[1]=std::sin(w.pitch);dir[2]=std::cos(w.yaw)*cp;
     const float right[3]={-std::cos(w.yaw),0.0f,std::sin(w.yaw)};
-    for(int k=0;k<3;++k)eye[k]=origin[k]+(k==1 ? kViewUp+kViewRise : 0.0f)-dir[k]*kViewBack+right[k]*kViewSide;
-    eye[1]=std::fmax(eye[1],w.floor+kViewFloor);
+    for(int k=0;k<3;++k)eye[k]=origin[k]+(k==1 ? kViewUp+kViewRise : 0.0f)-dir[k]*w.back+right[k]*w.side;
+    eye[1]=std::fmax(eye[1],w.floor);
+}
+
+// The boom for this frame (the game thread: the map's rays are its own), kept in the mech for ViewOf.
+void Boom(Mech& m,float dt) noexcept {
+    if(!m.rootOk)return;
+    if(!(m.viewBack>0.0f)){m.viewBack=kViewBack;m.viewSide=kViewSide;}
+    const float* o=m.root+12;
+    const float cp=std::cos(m.aimPitch);
+    const float dir[3]={std::sin(m.heading)*cp,std::sin(m.aimPitch),std::cos(m.heading)*cp};
+    const float right[3]={-std::cos(m.heading),0.0f,std::sin(m.heading)};
+    const float pivot[3]={o[0],o[1]+kViewUp+kViewRise,o[2]};
+    float hit[3],to[3];
+    for(int k=0;k<3;++k)to[k]=pivot[k]+right[k]*kViewSide;
+    float d=MapRay(pivot,to,hit);
+    const float side=d>=0.0f ? std::fmax(0.0f,d-kViewMargin) : kViewSide;
+    float from[3];
+    for(int k=0;k<3;++k){from[k]=pivot[k]+right[k]*side;to[k]=from[k]-dir[k]*kViewBack;}
+    d=MapRay(from,to,hit);
+    const float back=d>=0.0f ? std::fmax(kViewLeast,d-kViewMargin) : kViewBack;
+    // in at once (never through the wall), out again eased (no pumping on rough ground)
+    m.viewSide=side<m.viewSide ? side : m.viewSide+(side-m.viewSide)*std::fmin(1.0f,kViewOut*dt);
+    m.viewBack=back<m.viewBack ? back : m.viewBack+(back-m.viewBack)*std::fmin(1.0f,kViewOut*dt);
+    float eye[3];
+    for(int k=0;k<3;++k)eye[k]=pivot[k]+right[k]*m.viewSide-dir[k]*m.viewBack;
+    const float clear=GroundClearance(eye);   // under the ground it is negative: the surface over it
+    m.viewFloor=clear!=kNoGround ? eye[1]-clear+kViewFloor : o[1]-(m.fl.air && m.feetClear!=kNoGround ? m.feetClear : 0.0f)+kViewFloor;
 }
 
 // The view of `m` now (no vehicle or seat): its heading, its aim's pitch, the ground under it.
@@ -47,7 +80,8 @@ View ViewOf(const Mech& m) noexcept {
     View w;
     w.yaw=m.heading;w.pitch=m.aimPitch;
     if(!m.rootOk)return w;
-    w.floor=m.root[13]-(m.fl.air && m.feetClear!=kNoGround ? m.feetClear : 0.0f);
+    if(m.viewBack>0.0f){w.back=m.viewBack;w.side=m.viewSide;w.floor=m.viewFloor;}
+    else w.floor=m.root[13]-(m.fl.air && m.feetClear!=kNoGround ? m.feetClear : 0.0f)+kViewFloor;
     return w;
 }
 
