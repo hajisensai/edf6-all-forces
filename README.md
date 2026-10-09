@@ -506,6 +506,23 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 - 发键前都会确认 EDF6 在前台，不在就拒绝发键。启动前会等 Steam 的 `RunningAppID` 清零（刚退出时立刻再启动会被 Steam 拒绝）。
 - 退出走 Alt+F4 对话框：标题菜单里用左方向键、任务中只认 A 键切到「是」，按截图确认选中了才回车；没退成会在 summary 里写明。
 
+## 调试召唤（默认关闭）
+
+测试用的小工具：任务里凭空召唤载具、插件的飞机、敌人和友军士兵（2026-10-09 用户：「给我加一个调试工具，在地图里面凭空召唤载具、敌人之类的，默认关闭这个工具」）。
+
+- **打开**：把 `EDF6VehicleCrew.ini` 里的 `DebugSpawn=0` 改成 `1`，**下一关**生效（预载在进关时做）。默认 0：插件不预载、不读这几个键、不画任何东西，和没有这个工具一样。老版本升级时安装器补进来的也是 `DebugSpawn=0`。
+- **按键**（都能在 ini 里改，虚拟键码）：**F8** 打开 / 关闭菜单（`DebugSpawnKey`）；菜单打开时 **F5 / F6** 上一项 / 下一项、**F7** 换分类、**F9** 召唤选中的那一项（`DebugSpawnPrevKey` / `DebugSpawnNextKey` / `DebugSpawnCategoryKey` / `DebugSpawnSpawnKey`）。菜单关着时 F5~F7、F9 不归插件管。地图（M）打开时不读这些键。
+- **菜单**画在屏幕左侧（插件自己的 HUD 文字，独占全屏也看得到）：当前分类、选中项（`>`；现在召唤不了的显示「现在不可用」）、按键提示；召唤后约 4 秒显示结果（菜单关着时显示在屏幕下方）。
+- **放在哪**：准星指向的地面 / 建筑上（`DebugSpawnRange` 米以内，默认 500）；指向天空、太远，或者就在脚下 10 米以内时，放在你镜头朝向的前方 `DebugSpawnDistance` 米（默认 30）的地面上。载具车头朝外，敌人和士兵面朝你。
+- **分类**：
+  - **载具**（空车、己方阵营，自己上去开）：布莱克战车 505、坦克 403、大型坦克 404、防空车 603、EMC 510、巴尔加炮 605、救援装甲车 507、轻卡车 512、摩托 503 / 613、机甲 Begaruta 504、大型机甲 407、Nix G 612、Proteus 614、旧型机甲 608、巨型机甲 Balam 515。都是原版任务放置用的 `_MISSION` 版本（带 `mission_setup`，武器按任务配置），生成路径和地面支援的空车交付相同（`CreateObject` → `mission_setup` → 己方阵营 → 原版难度缩放）。
+  - **飞机**（插件的，按呼叫来的那样由 NPC 驾驶、护卫你，燃料耗尽 / 受损后自己撤离）：对地攻击机、制空战斗机、截击机、多用途战斗机、空中航母、自爆无人机母舰、人偶无人机母舰、炮舰机、机炮无人机、直升机 Eros 506 / Brute 410、医疗直升机。要 `JetPilot=1` 且安装器装了对应机体（没装的机种按 `JetLaunch` 原有规则换成同类或战斗机）；直升机可以上去顶替 NPC 自己开。
+  - **敌人**（敌方阵营，生成即进入战斗状态）：巨蚁、巨蚁（EDF6）、巨蜘蛛、蜘蛛（轻）、母体（女王巨蚁）、巨蜂、蛙兵、装甲蛙兵、火星人、金色 UFO、帝国 UFO、小龙、训练靶子。步骤和任务脚本的 `CreateEnemy` 相同（静态逆向 `0x1AD220 → 0x1D8900`：生成 → 敌方阵营 → 难度缩放 → 激活），飞行的敌人在地面上方 20~30 米出现。
+  - **友军士兵**：游骑兵（步枪 / 火焰 / 火箭 / 霰弹 / 狙击），即地面支援用的原版 Ranger NPC，生成后可以招募。
+- **限制**：只能单机用，联机时拒绝（插件直接生成的对象不会同步到别人的游戏里）。召唤的敌人计入敌方数量，任务里「消灭全部敌人」的条件会等它们被消灭。打开后每关多预载 29 种原版载具 / 敌人，进关稍慢、多占一些内存。原生生成出错的那一项在本次游戏里停用（日志写明），不会反复重试。
+- **日志**：每次召唤写一行 `DEBUGSPAWN`（成功：对象地址、位置、朝向、阵营；失败：原因，例如未预载、联机、`JetPilot=0`、类型检查不通过）；进关时写 `DEBUGSPAWN on: … preloaded`。
+- 离线检查：`debug_spawn_test`（菜单状态机、按键、放置点、目录）、`debug_spawn_ini`（默认关闭、升级后仍关闭、按键不与其它设置冲突）、`debug_spawn_resources`（对照本机 EDF.dll / Root.cpk 核对原生签名和每个 SGO；没装游戏时跳过）。逆向依据见 `docs/debug-spawn.md`。
+
 ## 源码
 
 - `src/plugin.cpp`：入口、配置、日志、代码签名检查。
@@ -525,6 +542,7 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 - `src/primer.cpp`：星导者生物（敌人：百足龙虫、蜻蜓空优机，`docs/primer-plan.md`）；`src/primer_pose.h` 它们的骨骼动作（插件和离线模拟 `tools/primer_pose_sim.cpp` 共用）；`pylib/centipede_model.py`、`pylib/dragonfly_model.py` 模型（`pylib/procmesh.py` 共用的生成器）；`pylib/model_view.py` 离线看模型。
 - `src/jet.cpp`：战斗机飞控与运行时生成；`src/airstrike.cpp`：空袭接管与呼叫武器（`src/calls.inc` 由 `tools/gen_calls.py` 生成）；`tools/make_jets.py`：生成战斗机 SGO（`pylib/vcobjects.py`）。
 - `src/boarding.cpp`：登车狙击枪（`docs/boarding-re.md`）。
+- `src/debug_spawn.cpp`：调试召唤（ini `DebugSpawn`，默认关闭；目录、菜单和放置点在 `src/debug_spawn.h`，逆向依据 `docs/debug-spawn.md`）。
 - `src/loadout.cpp`：测试场强制装备（`docs/loadout-re.md` 是逆向笔记，`docs/weapons.csv` 是武器 ID 表）。
 - `docs/re-notes.md`：上车门槛与座位函数的逆向笔记；`docs/heli-input-re.md`：直升机输入块的逆向笔记。
 - 构建：`build.cmd`（MSVC x64 + Ninja，RelWithDebInfo），产物输出到 `build/Mods/Plugins/`。

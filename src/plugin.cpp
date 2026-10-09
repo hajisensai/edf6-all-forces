@@ -234,6 +234,13 @@ void Validate(Config& n) noexcept {
     n.mapKey=static_cast<int>(FixInt("MapKey",n.mapKey,0,254));
     n.mapButton=static_cast<int>(FixInt("MapButton",n.mapButton,0,0xFFFF));
     if(n.mapViewDistance!=0.0f)Fix("MapViewDistance",n.mapViewDistance,1000.0f,10000.0f);
+    n.debugSpawnKey=static_cast<int>(FixInt("DebugSpawnKey",n.debugSpawnKey,0,254));
+    n.debugSpawnPrevKey=static_cast<int>(FixInt("DebugSpawnPrevKey",n.debugSpawnPrevKey,0,254));
+    n.debugSpawnNextKey=static_cast<int>(FixInt("DebugSpawnNextKey",n.debugSpawnNextKey,0,254));
+    n.debugSpawnCategoryKey=static_cast<int>(FixInt("DebugSpawnCategoryKey",n.debugSpawnCategoryKey,0,254));
+    n.debugSpawnSpawnKey=static_cast<int>(FixInt("DebugSpawnSpawnKey",n.debugSpawnSpawnKey,0,254));
+    Fix("DebugSpawnRange",n.debugSpawnRange,20.0f,3000.0f);
+    Fix("DebugSpawnDistance",n.debugSpawnDistance,10.0f,500.0f);
     n.proteusModeKey=static_cast<int>(FixInt("ProteusModeKey",n.proteusModeKey,0,254));
     n.proteusModeButton=static_cast<int>(FixInt("ProteusModeButton",n.proteusModeButton,0,255));
     n.proteusShieldKey=static_cast<int>(FixInt("ProteusShieldKey",n.proteusShieldKey,0,254));
@@ -523,6 +530,14 @@ void LoadConfig() noexcept {
     n.mapKey=ReadInt(L"MapKey",static_cast<DWORD>(n.mapKey));
     n.mapButton=ReadInt(L"MapButton",static_cast<DWORD>(n.mapButton));
     n.mapViewDistance=ReadFloat(L"MapViewDistance",n.mapViewDistance);
+    n.debugSpawn=ReadBool(L"DebugSpawn",n.debugSpawn);   // off unless the ini says 1 (an old ini without it: off)
+    n.debugSpawnKey=ReadInt(L"DebugSpawnKey",static_cast<DWORD>(n.debugSpawnKey));
+    n.debugSpawnPrevKey=ReadInt(L"DebugSpawnPrevKey",static_cast<DWORD>(n.debugSpawnPrevKey));
+    n.debugSpawnNextKey=ReadInt(L"DebugSpawnNextKey",static_cast<DWORD>(n.debugSpawnNextKey));
+    n.debugSpawnCategoryKey=ReadInt(L"DebugSpawnCategoryKey",static_cast<DWORD>(n.debugSpawnCategoryKey));
+    n.debugSpawnSpawnKey=ReadInt(L"DebugSpawnSpawnKey",static_cast<DWORD>(n.debugSpawnSpawnKey));
+    n.debugSpawnRange=ReadFloat(L"DebugSpawnRange",n.debugSpawnRange);
+    n.debugSpawnDistance=ReadFloat(L"DebugSpawnDistance",n.debugSpawnDistance);
     // StockVehicleStores, or the older StockHeliStores (the helicopters alone before 2026-10-07) still set to 1
     n.stockStores=ReadBool(L"StockVehicleStores",n.stockStores) || ReadBool(L"StockHeliStores",false);
     n.seatSwitch=ReadBool(L"SeatSwitch",n.seatSwitch);
@@ -674,6 +689,9 @@ void LoadConfig() noexcept {
     Log("CONFIG sightZoom=%d key=0x%X button=0x%X",n.sightZoom,n.sightZoomKey,n.sightZoomButton);
     Log("CONFIG nixTorsoTwist=%d",n.nixTorsoTwist);
     Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f",n.map,n.mapKey,n.mapButton,n.mapViewDistance);
+    Log("CONFIG debugSpawn=%d keys menu=0x%X prev=0x%X next=0x%X category=0x%X spawn=0x%X range=%.0f distance=%.0f",n.debugSpawn,
+        n.debugSpawnKey,n.debugSpawnPrevKey,n.debugSpawnNextKey,n.debugSpawnCategoryKey,n.debugSpawnSpawnKey,n.debugSpawnRange,
+        n.debugSpawnDistance);
     Log("CONFIG stockStores=%d seatSwitch=%d nextKey=0x%X numberKeys=%d button=0x%X pilot=%d online=%d list=%d",n.stockStores,n.seatSwitch,
         n.seatNextKey,n.seatNumberKeys,n.seatButton,n.seatPilot,n.seatSwitchOnline,n.seatList);
     Log("CONFIG proteus=%d keys mode=0x%X/0x%X shield=0x%X/0x%X launcher=0x%X twoSeats=%d walk x%.2f turn x%.2f step %.1fm shieldSlow %.2f",

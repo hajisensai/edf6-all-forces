@@ -53,6 +53,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/support_soldier.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/npc_gunner_aim.cpp src/real_driver_native.cpp src/mission_crew.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/command_unit.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/support_spawn.cpp)
+# The debug spawn tool (ini DebugSpawn, off by default; src/debug_spawn.h, docs/debug-spawn.md).
+target_sources(EDF6VehicleCrew PRIVATE src/debug_spawn.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
@@ -399,6 +401,10 @@ add_executable(support_spawn_test tests/support_spawn_test.cpp)
 target_include_directories(support_spawn_test PRIVATE common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_compile_options(support_spawn_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME support_spawn COMMAND support_spawn_test)
+# The debug spawn tool's catalog, menu and placement (src/debug_spawn.h) offline.
+add_executable(debug_spawn_test tests/debug_spawn_test.cpp)
+target_compile_options(debug_spawn_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME debug_spawn COMMAND debug_spawn_test)
 add_executable(sightzoom_test tests/sightzoom_test.cpp)
 target_link_libraries(sightzoom_test PRIVATE edf6common)
 target_compile_options(sightzoom_test PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -496,6 +502,12 @@ set_tests_properties(support_config_ini PROPERTIES ENVIRONMENT PYTHONIOENCODING=
 add_test(NAME support_resources COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/support_resource_audit.py")
 set_tests_properties(support_resources PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME online_gate_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/online_gate_guard.py")
+# The debug spawn tool ships off and an upgraded ini keeps it off; its natives and stock SGOs against the installed game
+# (skip 77 without it).
+add_test(NAME debug_spawn_ini COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/debug_spawn_ini_test.py")
+set_tests_properties(debug_spawn_ini PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+add_test(NAME debug_spawn_resources COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/debug_spawn_resource_audit.py")
+set_tests_properties(debug_spawn_resources PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 # Proportional navigation (src/pn.h) against the stock pure pursuit at the same turn limit.
 add_executable(pn_test tests/pn_test.cpp)
 target_compile_options(pn_test PRIVATE /W4 /WX /utf-8 /permissive-)
