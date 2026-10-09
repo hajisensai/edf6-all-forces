@@ -51,6 +51,11 @@ int main() {
     Check(Mark(Seen{false,false,false,false,true,false},&kind,&flags) && kind==MapKind::squad,"squad");
     Check(Mark(Seen{false,false,false,false,false,false},&kind,&flags) && kind==MapKind::ally,"friendly soldier");
     Check(!Mark(Seen{false,false,false,false,false,true},&kind,&flags),"team 5 non-vehicle: no mark");
+    // A soldier seated in a vehicle (the user, 2026-10-09: "载具上的npc还标着可以招募的标记"): its vehicle's mark is the
+    // crew's, no soldier mark of its own, whichever team; a vehicle is marked as before.
+    Check(!Mark(Seen{false,false,false,false,true,false,true},&kind,&flags),"a squad soldier riding: no mark of its own");
+    Check(!Mark(Seen{false,false,false,false,false,false,true},&kind,&flags),"a friendly soldier riding: no mark of its own");
+    Check(Mark(Seen{true,false,false,false,true,false,true},&kind,&flags) && kind==MapKind::vehicle,"a vehicle: marked whatever the flag");
     // On the ground or flying.
     Check(mm::Landed(100.0f,98.5f) && mm::Landed(100.0f,100.0f),"parked: landed");
     Check(!mm::Landed(140.0f,100.0f),"40 m up: flying");

@@ -418,6 +418,46 @@ int main() {
         Expect(At<long>(enemyCtrl,12)==2,"squad focus pins the borrowed RPC target identity between frames");
         NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::engage,{}},ObjRef::Of(other),{});
         Expect(At<long>(enemyCtrl,12)==1 && !commandSquad->commandFocus,"replacing focus releases exactly its weak identity reference");
+        // The player's move over the soldier's own fight (the user, 2026-10-09: "如果npc在打怪，就没办法移动了"): an enemy
+        // close by takes a guard's soldier into its dodge / combat spot, never a move order's; an attack-move fights
+        // what is in reach and walks on with nothing; the top at its place turns either into a guard of the point.
+        config.npcEvade=true;world.enemies=1;world.enemy[0]=Enemy{enemy,{0,0,4},1};
+        auto fights=[](const char* m){return std::strcmp(m,"combat spot")==0 || std::strcmp(m,"back off")==0 ||
+                                             std::strcmp(m,"side-step")==0 || std::strcmp(m,"roll")==0;};
+        result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::guard,{40,0,0}},ObjRef::Of(other),{});
+        behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
+        Expect(result.Accepted() && fights(behavior.move),"under a guard order an enemy close by takes the soldier's moves");
+        result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::move,{40,0,0}},ObjRef::Of(other),{});
+        behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
+        Expect(result.Accepted() && std::strcmp(behavior.move,"move order")==0 && soldier->target.Is(enemy),
+               "a move order walks on through the fight, still turned on its target");
+        Expect(commandSquad->cmd.order==Order::move,"on the way: still a move");
+        result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::attackMove,{40,0,0}},ObjRef::Of(other),{});
+        behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
+        Expect(result.Accepted() && fights(behavior.move),"an attack-move fights the enemy in reach on its way");
+        world.enemies=0;
+        behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
+        Expect(std::strcmp(behavior.move,"attack-move")==0,"an attack-move with nothing in reach walks on to its point");
+        const float there[3]={38.0f,0.0f,1.0f};
+        behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,there,commandSquad,now);
+        Expect(commandSquad->cmd.order==Order::guard && commandSquad->cmd.at[0]==40.0f,"at its point the attack-move is a guard of it");
+        NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::move,{40,0,0}},ObjRef::Of(other),{});
+        behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,there,commandSquad,now);
+        Expect(commandSquad->cmd.order==Order::guard,"at its point the move is a guard of it");
+        config.npcEvade=false;
+        // A squad seated in a vehicle: no recruitment out of it, no map point order for its soldiers.
+        Put<void*>(human,kHumanRiding,vehicle);Put<void*>(human,kHumanVehicleCtrl,ctrl);Put<long>(ctrl,8,1);
+        const bool seated=!HumanOnFoot(human);
+        if(seated) {
+            result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::recruit,{}},ObjRef::Of(other),{});
+            Expect(result.reason==NpcCommandReason::riding,"a seated squad is not recruited out of its vehicle");
+            Expect(!SquadRecruitable(*commandSquad) && std::strcmp(StatusOf(*commandSquad,now,nullptr,0),"RIDING")==0,
+                   "a seated squad: no recruitment offered, its status RIDING");
+            result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::move,{40,0,0}},ObjRef::Of(other),{});
+            Expect(!result.Accepted(),"a seated squad's soldiers take no map move (its vehicle does)");
+        } else Expect(false,"the stand-in ride makes the soldier seated");
+        Put<void*>(human,kHumanRiding,nullptr);Put<void*>(human,kHumanVehicleCtrl,nullptr);
+        Expect(SquadRecruitable(*commandSquad),"on foot again, a free squad: recruitment offered");
     }
     // The player a soldier fights for is the one who recruited its squad, whichever machine's (this harness's
     // PlayerHuman is nullptr: `other` stands for another machine's player).

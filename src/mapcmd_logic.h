@@ -8,9 +8,10 @@
 //  - The selection (the user, 2026-10-06: "操作 需要一个框选吧"): a set of units. Ctrl + left drag boxes them in (Shift
 //    adds), a left click (no drag) picks the unit under the pointer (Shift adds / takes it out) or, on empty ground,
 //    clears; Tab / Shift+Tab (pad X) step through one unit at a time in a stable order and then ALL, wrapping.
-//  - A command goes to every selected unit: guard (go to the point and fight round it), follow (the player), release
-//    (back to what the unit did before any command). One a frame; refused with no selection, with no point (guard) or
-//    online. Several units sent to one point stand round it in a formation (Formation), not on one spot.
+//  - A command goes to every selected unit: guard (go to the point and fight round it), move / attack-move (go there,
+//    then guard it), follow (the player), release (back to what the unit did before any command). One a frame; refused
+//    with no selection, with no point (a point order) or online. Several units sent to one point stand round it in a
+//    formation (Formation), not on one spot.
 #pragma once
 #include <cmath>
 #include <cstdint>
@@ -22,10 +23,58 @@ inline constexpr unsigned kMaxFormationUnits=96;
 // The squads' own (docs/npc-ai-design.md §6.2): engage (fight freely round where it stands, a wider reach), focus (every
 // member on the marked enemy), board / dismount (the nearest friendly vehicle with room), dismiss (no longer the
 // player's: it stays where it is and may not be recruited again for a while), recruit (the player's now).
-enum class Order : std::uint8_t { none, guard, follow, engage, focus, board, dismount, dismiss, recruit };
-// Whether a vehicle unit (heli, jet, crawler, tank) takes `o`: guard, follow and release only; the squads take all.
-inline bool VehicleOrder(Order o) noexcept { return o==Order::none || o==Order::guard || o==Order::follow; }
-struct Command { Order order; float at[3]; };   // at: the guard's point (on the ground)
+// The RTS moves (the user, 2026-10-09: "m里面没办法让npc移动攻击，只有守点，如果npc在打怪，就没办法移动了"): move (go to
+// the point whatever it is fighting, firing on the way, and guard it once there), attack-move (go there fighting what it
+// meets on the way, then guard it). Appended: the values are the map command wire's (command_protocol.cpp).
+enum class Order : std::uint8_t { none, guard, follow, engage, focus, board, dismount, dismiss, recruit, move, attackMove };
+inline constexpr Order kLastOrder=Order::attackMove;
+// The orders that take the ground point under the pointer (and stand round it in a formation).
+inline bool PointOrder(Order o) noexcept { return o==Order::guard || o==Order::move || o==Order::attackMove; }
+// Whether a vehicle unit (heli, jet, crawler, tank) takes `o`: the point orders, follow and release; the squads take all.
+inline bool VehicleOrder(Order o) noexcept { return o==Order::none || o==Order::follow || PointOrder(o); }
+// A vehicle's modules know one point order (their post / anchor): move and attack-move reach it as guard.
+inline Order VehicleCommandOf(Order o) noexcept { return PointOrder(o) ? Order::guard : o; }
+struct Command { Order order; float at[3]; };   // at: the point of a point order (on the ground)
+
+// --- The squads' moves under an order (npcai.cpp Drive), the player's command over the soldiers' own fight ---
+//  - forced (move): every member walks to its place by the point before anything of its own (dodging, falling back
+//    hurt, its combat spot); it still turns on and fires at what is in reach as it goes;
+//  - fightFirst (attack-move): a member with a target fights it where it is (its combat spot round itself), with none it
+//    walks on to the point;
+//  - neither: the order's anchor as before (guard holds its point's radius, engage / focus their reach).
+struct Pursuit { bool forced,fightFirst; };
+inline Pursuit PursuitOf(Order o) noexcept { return Pursuit{o==Order::move,o==Order::attackMove}; }
+// A move / attack-move whose squad has reached its point (its top within `radius`, level) is a guard of that point from
+// then on: the members hold round it and fight what comes, as a guard order does. Others stay as they are.
+inline Order Arrive(Order o,float distance,float radius) noexcept {
+    return (o==Order::move || o==Order::attackMove) && distance<=radius ? Order::guard : o;
+}
+// The right mouse button let go without a drag on the map (RTS): with units selected, an enemy under the pointer is
+// attacked (focus fire on it), else the ground under it is the move's point; nothing selected or nothing there: none
+// (Order::none with `issue` false). An armed button's targeting is cancelled by it instead (mapcmd.cpp).
+struct RightClick { bool issue; Order order; };
+inline RightClick RightClickOrder(int selected,bool enemyUnder,bool pointOk) noexcept {
+    if(selected<=0)return RightClick{false,Order::none};
+    if(enemyUnder)return RightClick{true,Order::focus};
+    return RightClick{pointOk,Order::move};
+}
+
+// --- A squad's recruitment on the map ---
+// A squad the map offers to recruit (its RECRUIT order lit, its panel row "free"): on foot and nobody's (no player's,
+// no script's), not cooling down from a dismissal. A squad riding a vehicle (the plugin's real crews, a support's
+// soldiers) is that vehicle's crew: no recruitment is offered for it (the user, 2026-10-09: "载具上的npc还标着可以招募
+// 的标记"), its vehicle is the unit the map commands.
+inline bool OffersRecruit(bool ownedByPlayer,bool scripted,bool dismissed,bool riding) noexcept {
+    return !ownedByPlayer && !scripted && !dismissed && !riding;
+}
+
+// --- Where a unit's mark is drawn and clicked ---
+// On its body (the user, 2026-10-09: "这个图标为什么要在npc的竖直顶上。直接在npc身上不好吗"): a soldier's or a ground
+// vehicle's position is at its feet, so the mark is kBodyLift m up from it (a soldier's middle); a flying unit's on it.
+inline constexpr float kBodyLift=1.2f;
+inline void BodyPoint(const float* pos,bool air,float* out) noexcept {
+    out[0]=pos[0];out[1]=pos[1]+(air ? 0.0f : kBodyLift);out[2]=pos[2];
+}
 
 // --- The screen and the ground ---
 // The ray eye + t dir (t > 0) meeting the level plane at height y: true with `hit`.
@@ -179,7 +228,7 @@ inline const void* Click(Selection& s,const Mark* m,int n,float x,float y,float 
 
 // --- The keys ---
 // The keys' presses this frame (edges).
-struct Press { bool next,prev,guard,follow,release,engage,focus,board,dismount,dismiss,recruit; };
+struct Press { bool next,prev,guard,follow,release,engage,focus,board,dismount,dismiss,recruit,move,attackMove; };
 enum class Refusal : std::uint8_t { none, noUnit, noPoint, online, noMark };
 // What a frame's presses come to: a command to the selection (issue), or why not (why). The cycle (next / prev) has
 // already moved the selection (Cycle).
@@ -187,7 +236,9 @@ struct Step { bool issue; Command cmd; Refusal why; };
 
 // The order a frame's presses give (one at a time, in this order of precedence); false with none pressed.
 inline bool Wanted(const Press& p,Order* o) noexcept {
-    if(p.guard)*o=Order::guard;
+    if(p.move)*o=Order::move;
+    else if(p.attackMove)*o=Order::attackMove;
+    else if(p.guard)*o=Order::guard;
     else if(p.follow)*o=Order::follow;
     else if(p.release)*o=Order::none;
     else if(p.engage)*o=Order::engage;
@@ -207,11 +258,11 @@ inline Step Decide(int selected,const Press& p,bool allowed,const float* point,b
     if(!Wanted(p,&want))return s;
     if(!allowed)s.why=Refusal::online;
     else if(selected<=0)s.why=Refusal::noUnit;
-    else if(want==Order::guard && !pointOk)s.why=Refusal::noPoint;
+    else if(PointOrder(want) && !pointOk)s.why=Refusal::noPoint;
     else if(want==Order::focus && !marked)s.why=Refusal::noMark;
     if(s.why!=Refusal::none)return s;
     s.issue=true;s.cmd.order=want;
-    if(want==Order::guard)for(int i=0;i<3;++i)s.cmd.at[i]=point[i];
+    if(PointOrder(want))for(int i=0;i<3;++i)s.cmd.at[i]=point[i];
     return s;
 }
 

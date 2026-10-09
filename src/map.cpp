@@ -257,6 +257,13 @@ float GroundAt(float x,float z,float y) noexcept {
     float h;
     return MapGroundNear(x,z,y,&h) ? h : y;
 }
+// The view's bounds (map_cam.h Keep): the map's real ground (playarea.h: its walls stand kVoidMargin inside where a map
+// ray still finds ground; the physics square until the measure is in), widened to hold the player (`me`).
+mapcam::Bounds ViewBounds(const float* me) noexcept {
+    const PlayArea a=MapPlayArea();
+    const float out=a.ground ? area::kVoidMargin : 0.0f;
+    return mapcam::Around(mapcam::Bounds{{a.lo[0]-out,a.lo[1]-out},{a.hi[0]+out,a.hi[1]+out}},me);
+}
 // The top of everything under (x, z) (the camera stays over it, a cave's roof too), else `fallback`.
 float TopAt(float x,float z,float fallback) noexcept {
     const float top[3]={x,fallback+4000.0f,z},bottom[3]={x,fallback-4000.0f,z};
@@ -294,7 +301,7 @@ void __fastcall WalkVisit(void* self,void* object) noexcept {
         if(!o || o==w.self || o==w.ride || !Readable(o,kHp+4) || o[kDead])return;
         const bool vehicle=KnownVehicle(o);
         const mapmarks::Seen seen{vehicle,vehicle && IsSub(o),vehicle && (IsJet(o) || IsPlayerJet(o)),vehicle && IsHelicopter(o),
-                                  At<std::int32_t>(o,kTeam)==w.team,w.nobodys};
+                                  At<std::int32_t>(o,kTeam)==w.team,w.nobodys,!vehicle && Body(o)!=o};
         MapKind kind;
         std::uint8_t flags;
         if(!mapmarks::FriendlyMark(seen,&kind,&flags))return;
@@ -623,6 +630,8 @@ bool Frame(unsigned char* human) noexcept {
     const float* me=PosOf(Body(human));
     LearnMapNormals(me);   // once: which side a map hit's normal faces (map_floor.h), for the cave floors below
     if(game.follow){v.focus[0]=me[0];v.focus[2]=me[2];}
+    const mapcam::Bounds bounds=ViewBounds(me);
+    mapcam::Keep(v,bounds);
     // The ground under the focus, eased: following, the player's own level (a cave's floor, not its roof); panned, the
     // level the focus is on.
     v.focus[1]+=(GroundAt(v.focus[0],v.focus[2],game.follow ? me[1] : v.focus[1])-v.focus[1])*0.2f;
@@ -641,6 +650,7 @@ bool Frame(unsigned char* human) noexcept {
     game.pad=in.usingPad;
     // Pointer capture must be established before this frame's camera drag, including the first press.
     Steer(human,dt,front,pad ? &padState : nullptr);
+    mapcam::Keep(v,bounds);   // the pan, the drag, the turn and the zoom and a unit centred: still over the map
     PumpPayloadUi(human);
     mapcam::Place(v,eye,look);
     const float movedUnder=TopAt(eye[0],eye[2],eye[1]-v.height);

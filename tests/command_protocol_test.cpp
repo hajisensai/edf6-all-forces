@@ -52,7 +52,7 @@ void Codec() {
     Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.request.count==16,"full canonical command packet round trip");
     Check(Owned(bytes,sizeof(bytes)),"separate magic can route without a second poll");
     for(unsigned i=0;i<sizeof(bytes);++i)Check(!Decode(bytes,i,copy),"truncated packet rejected");
-    bytes[4]=3;Check(Owned(bytes,sizeof(bytes)) && !Decode(bytes,sizeof(bytes),copy),"newer command version consumed but never executed");
+    bytes[4]=static_cast<unsigned char>(kVersion+1);Check(Owned(bytes,sizeof(bytes)) && !Decode(bytes,sizeof(bytes),copy),"newer command version consumed but never executed");
     m.request.units[0][20]=1;Check(!Encode(m,bytes,sizeof(bytes)),"dirty native identity padding rejected");m.request.units[0][20]=0;
     std::memcpy(m.request.units[1],m.request.units[0],32);Check(!Encode(m,bytes,sizeof(bytes)),"duplicate unit cannot execute twice");
     m.request=Make(1);m.request.command.at[1]=std::numeric_limits<float>::infinity();Check(!Encode(m,bytes,sizeof(bytes)),"nonfinite guard point refused");
@@ -61,6 +61,26 @@ void Codec() {
     Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.request.formationSlots[1]==4,"mixed-selection global formation indices round trip");
     m.request.formationSlots[1]=1;Check(!Encode(m,bytes,sizeof(bytes)),"duplicate formation slot rejected");
     m.request.formationTotal=97;Check(!Encode(m,bytes,sizeof(bytes)),"formation total bounded to map selection capacity");
+    // Version 3: the RTS orders carry their formation slots as guard does; nothing past the last order decodes.
+    for(auto order:{mapcmd::Order::move,mapcmd::Order::attackMove}) {
+        m.request=Make(2,order);m.request.formationTotal=3;m.request.formationSlots[0]=0;m.request.formationSlots[1]=2;
+        Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.request.command.order==order &&
+              copy.request.formationSlots[1]==2,"a move / attack-move with its global formation slots round trips");
+    }
+    m.request=Make(2,mapcmd::Order::follow);m.request.formationTotal=3;m.request.formationSlots[1]=2;
+    Check(!Encode(m,bytes,sizeof(bytes)),"formation slots only on point orders");
+    m.request=Make(1);Check(Encode(m,bytes,sizeof(bytes)),"a guard encodes");
+    {   // The order is the ninth word (magic, version, kind, reserved, epoch x2, sequence, count, order).
+        constexpr std::size_t kOrderAt=32;Message out;
+        const std::uint32_t last=static_cast<std::uint32_t>(mapcmd::kLastOrder),past=last+1;
+        unsigned char edit[kWireSize];std::memcpy(edit,bytes,sizeof(edit));
+        std::uint32_t was;std::memcpy(&was,edit+kOrderAt,4);
+        Check(was==static_cast<std::uint32_t>(mapcmd::Order::guard),"the order word where the codec writes it");
+        std::memcpy(edit+kOrderAt,&last,4);
+        Check(Decode(edit,sizeof(edit),out) && out.request.command.order==mapcmd::kLastOrder,"the last order (attack-move) decodes");
+        std::memcpy(edit+kOrderAt,&past,4);
+        Check(!Decode(edit,sizeof(edit),out),"an order past the last one is not decoded");
+    }
 }
 void Protocol() {
     Room r;Check(r.nodes[1]->session->Ready(),"host command capability negotiated on current support epoch");
