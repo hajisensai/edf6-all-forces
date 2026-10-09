@@ -555,9 +555,10 @@ SupportVariant SupportCallVariant(int index) noexcept {
     return mode==SupportCrewMode::unmanned ? SupportVariant::empty : SupportVariant::crewed;
 }
 SupportReadiness SupportCallReadiness() noexcept {
-    // The same tests SupportCallAt makes before it plans, read without asking: online the host decides.
+    // The same tests SupportCallAt makes before it plans, read without asking: a guest's host decides (the host of a
+    // one-player world plans here, through the same pending plan and cooldown as offline).
     if(!Cfg().enabled)return {SupportReady::off,0};
-    if(InSession())return {SupportReady::ready,0};
+    if(InSession() && !LocalAuthority())return {SupportReady::ready,0};
     if(offlinePending)return {SupportReady::planning,0};
     const ULONGLONG now=GameMs();
     if(callAt && now-callAt<kCallCooldown)return {SupportReady::cooldown,static_cast<int>((kCallCooldown-(now-callAt)+999)/1000)};
