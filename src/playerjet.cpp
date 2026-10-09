@@ -291,6 +291,8 @@ struct PJet {
         int cand;                // the strip search's next candidate
         float best;              // ...the best one's cost so far (0: none)
         float bestStop[3],bestDir[3];
+        float room,bestRoom;     // a wing's approach (hail_glide.h PlanPattern): the outer point's room in the map
+        bool cramped;            // a strip was found but its approach did not fit the map (the hand-back's reason)
     } hail;
 };
 // playerjet_board.inc (any of the plugin's aircraft under the player): what the flight steps above call.

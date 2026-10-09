@@ -25,6 +25,7 @@ bool IsHelicopter(const void*) noexcept {UnexpectedWorldCall();}
 float MapRay(const float*,const float*,float*) noexcept {UnexpectedWorldCall();}
 void HeliCalled(unsigned char*,bool,const float*,DWORD) noexcept {UnexpectedWorldCall();}
 bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept {UnexpectedWorldCall();}
+bool HeliLeft(const void*) noexcept {UnexpectedWorldCall();}
 bool ProteusReady() noexcept {UnexpectedWorldCall();}
 bool NpcDriver(const unsigned char*) noexcept {UnexpectedWorldCall();}
 bool SeatNpcRider(unsigned char*,bool) noexcept {UnexpectedWorldCall();}

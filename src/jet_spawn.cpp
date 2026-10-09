@@ -307,6 +307,20 @@ bool DeleteSupportAircraft(const ObjRef& ref) noexcept {
     return false;
 }
 
+bool SupportAircraftOwned(const void* vehicle) noexcept {
+    for(const auto& own:supportAircraft)if(own && own.obj==vehicle && Alive(own))return true;
+    return false;
+}
+
+bool SupportAircraftLeft(const ObjRef& ref) noexcept {
+    bool owned=false;
+    for(const auto& own:supportAircraft)owned=owned || (own && own.obj==ref.obj && own.ctrl==ref.ctrl && Alive(own));
+    if(!owned)return false;
+    if(HeliLeft(ref.obj))return true;
+    const Jet* j=FindJet(static_cast<const unsigned char*>(ref.obj));
+    return j && j->reap;
+}
+
 // Every flag is cleared first: a body not preloaded for this mission is never spawned (the stock planes come).
 void PreloadJets() noexcept {
     for(auto& ref:supportAircraft)ref={};

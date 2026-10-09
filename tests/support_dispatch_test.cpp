@@ -59,6 +59,8 @@ bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,
 bool peersAirborne=true;
 bool SupportPeersAcceptAirborne() noexcept {return peersAirborne;}
 bool DeleteSupportAircraft(const ObjRef& ref) noexcept {if(ref)++deleted;return true;}
+bool aircraftLeft=false;
+bool SupportAircraftLeft(const ObjRef&) noexcept {return aircraftLeft;}
 bool SupportSoldiersReady() noexcept {return allReady;}
 const wchar_t* soldierFailure=L"支援兵员创建发生异常，本局已停用";
 const wchar_t* SupportSoldierFailureText() noexcept {return soldierFailure;}
@@ -125,13 +127,15 @@ bool NpcPrepareSquadRoute(unsigned char*,const float*,float) noexcept {++routeOr
 bool NpcFinishSquadRoute(unsigned char*,const float*) noexcept {return true;}
 bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept {return true;}
 bool JetCommand(const void*,const Command&,const ObjRef&) noexcept {return true;}
+bool areaMeasured=true;
+bool PlayAreaMeasured() noexcept {return areaMeasured;}
 PlayArea MapPlayArea() noexcept {return {{-1500,-1500},{1500,1500},true,0,true};}
 bool MapGroundNear(float,float,float,float* y,bool) noexcept {*y=0;return terrain;}
 #ifndef SUPPORT_ROUTE_NATIVE_TEST
 float MapRay(const float*,const float*,float*) noexcept {return -1;}
 #endif
 #ifndef SUPPORT_ROUTE_NATIVE_TEST
-npc::navigation::Result GroundNavigate(npc::navigation::State&,const float* from,const float*,float,std::uint64_t,float* waypoint,npc::navigation::Profile) noexcept {
+npc::navigation::Result GroundNavigate(npc::navigation::RouteState&,const float* from,const float*,float,std::uint64_t,float* waypoint,npc::navigation::Profile) noexcept {
     std::memcpy(waypoint,from,12);return routeResult;
 }
 #endif
@@ -161,6 +165,18 @@ int main() {
     check(IsSupportAirborneAircraft(deployments[0].plan.units[0].resourceId),"the plan marks the hull airborne");
     fixtureMs+=100;SupportDispatchTick();
     fixtureMs+=100;SupportDispatchTick();check(activated==1,"activation is once, not every frame");
+    // 2026-10-09 16:59: out of fuel, two support helis flew off and hung at the map's edge for the rest of the mission
+    // (the plugin's reaps never delete under real soldiers). Its owner retires it: crew first, the hull once settled.
+    check(deleted==0,"a flying support aircraft is never retired");
+    aircraftLeft=true;fixtureMs+=1;SupportDispatchTick();
+    check(deleted==1 && deployments[0].used,"left: the dispatcher deletes the real crew it made, the hull not yet");
+    fixtureMs+=1;SupportDispatchTick();
+    check(deleted==1,"the hull waits for the game to take it as empty (a delete before that leaves it in team 5's set)");
+    Put<std::int32_t>(objects[0],kTeam,kTeamVehicle);fixtureMs+=1;SupportDispatchTick();
+    check(deleted==2,"once empty (team 5) the hull is deleted");
+    objects[0][kDead]=1;objects[1][kDead]=1;fixtureMs+=1;SupportDispatchTick();
+    check(deleted==2 && !deployments[0].used,"gone: nothing deleted twice, the deployment row is free");
+    aircraftLeft=false;
     auto invalid=deployments[0].plan;invalid.units[1].role=0;
     check(!Validate(invalid),"a manifest cannot detach the specified crew from its aircraft");
     invalid=deployments[0].plan;invalid.count=1;
@@ -169,7 +185,15 @@ int main() {
     ResetSupportDispatch();made=deleted=boardRequests=activated=0;terrain=false;fixtureMs+=40000;
     check(SupportCallAt(0,target,note,128),"invalid terrain request can be queued for explicit validation");
     SupportDispatchTick();check(!made && !offlinePending,"no safe entry refuses without spawning at target");
-    ResetSupportDispatch();terrain=true;nativeFail=true;
+    // 2026-10-09 16:52:26: an air call made 50 ms before the play area was measured was refused ("no clear air corridor"),
+    // the same call worked later. Until the area is in, a request waits; then it is planned as usual.
+    ResetSupportDispatch();terrain=true;areaMeasured=false;made=0;
+    check(SupportCallAt(0,target,note,128),"a call before the area is measured is queued");
+    SupportDispatchTick();fixtureMs+=16;SupportDispatchTick();
+    check(!made && offlinePending && SupportCallReadiness().state==SupportReady::planning,"it waits (dispatching), never refused for it");
+    areaMeasured=true;fixtureMs+=16;SupportDispatchTick();
+    check(made==2 && !offlinePending,"once the area is in, the same request is planned and flies in");
+    ResetSupportDispatch();terrain=true;nativeFail=true;made=deleted=0;
     SupportCallAt(0,target,note,128);SupportDispatchTick();
     check(made==1 && deleted==1 && !deployments[0].used,"partial crew construction rolls the hull back");
     ResetSupportDispatch();nativeFail=false;made=deleted=0;
