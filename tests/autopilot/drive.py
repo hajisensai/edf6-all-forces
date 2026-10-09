@@ -23,6 +23,10 @@ background"). For measurements, e.g. the big map's memory against the stock test
           --shots DIR      the game window's picture into DIR every 15 s of the mission (PrintWindow)
           --key SPEC@S[:MS] hold SPEC (as `key` takes it) S seconds into the mission for MS ms (default 1000),
                            with a picture just before and after when --shots is given (repeatable)
+          --place SRC=DEST  SRC put at <game>/Mods/DEST for the run (e.g. a build's EDF6VehicleCrew.dll over the
+                           installed one, or an SGO the build needs); the original bytes are kept and put back
+                           byte for byte afterwards (repeatable)
+          --ini KEY=VALUE  KEY set in EDF6VehicleCrew.ini [VehicleCrew] for the run, the ini put back afterwards
         Every run also watches the desktop (DesktopWatch): the foreground window's process, the cursor clip and the
         cursor every 20 ms, and once in the mission the real cursor moved 40 px to see that nothing pulls it back;
         the counts are printed at the end (all must be 0).
@@ -47,6 +51,7 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 import gamedir  # noqa: E402
+TOOLS = os.path.join(ROOT, 'tools')   # tools/support_config.py (the ini's own editor)
 
 NAME = 'EDF6Autopilot'
 DEFAULT_MISSION = 'range'   # the test range's mission pack (no longer laid over RM015)
@@ -56,7 +61,9 @@ KEYS = {'enter': 0x0D, 'esc': 0x1B, 'space': 0x20, 'left': 0x25, 'up': 0x26, 'ri
         # the autopilot's virtual pad (0x100 + XInput button bit; 0x110 / 0x111 the triggers)
         'pad_up': 0x100, 'pad_down': 0x101, 'pad_left': 0x102, 'pad_right': 0x103, 'pad_ls': 0x106, 'pad_rs': 0x107,
         'pad_lb': 0x108, 'pad_rb': 0x109, 'pad_a': 0x10C, 'pad_b': 0x10D, 'pad_x': 0x10E, 'pad_y': 0x10F,
-        'pad_lt': 0x110, 'pad_rt': 0x111}
+        'pad_lt': 0x110, 'pad_rt': 0x111,
+        # its left stick pushed all the way (the autopilot's PadState: up, down, right, left)
+        'stick_up': 0x112, 'stick_down': 0x113, 'stick_right': 0x114, 'stick_left': 0x115}
 user32 = ctypes.WinDLL('user32', use_last_error=True)
 gdi32 = ctypes.WinDLL('gdi32')
 # ctypes otherwise defaults to C int, truncating Win64 HWND/HDC/HGDIOBJ values.
@@ -286,6 +293,69 @@ def place_loadout(game: str, source: str) -> tuple[str, bytes]:
     return path, payload
 
 
+class Placement:
+    """A file of the game's Mods put there for one run (`--place`, `--ini`): the bytes it had before (None: it did not
+    exist) are kept here and in `<plugins>/EDF6Autopilot.placed/` (so a crashed driver leaves them recoverable), and put
+    back afterwards byte for byte, only while the file still holds what this run wrote."""
+
+    def __init__(self, game: str, dest: str, payload: bytes) -> None:
+        self.path = os.path.join(game, 'Mods', dest)
+        self.payload = payload
+        self.original: bytes | None = None
+        if os.path.exists(self.path):
+            with open(self.path, 'rb') as f:
+                self.original = f.read()
+            keep = os.path.join(plugins(game), NAME + '.placed', dest.replace('/', '__').replace('\\', '__'))
+            os.makedirs(os.path.dirname(keep), exist_ok=True)
+            with open(keep, 'xb') as f:
+                f.write(self.original)
+            self.kept = keep
+        else:
+            self.kept = None
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        with open(self.path, 'wb') as f:
+            f.write(payload)
+        print('placed', dest, 'over the original' if self.original is not None else '(new)')
+
+    def restore(self) -> None:
+        try:
+            with open(self.path, 'rb') as f:
+                now = f.read()
+        except FileNotFoundError:
+            now = None
+        if now != self.payload:
+            print('changed by someone else during the run: left as it is:', self.path)
+            return
+        if self.original is None:
+            os.remove(self.path)
+            print('removed', self.path)
+        else:
+            with open(self.path, 'wb') as f:
+                f.write(self.original)
+            print('restored', self.path, 'byte for byte')
+        if self.kept:
+            os.remove(self.kept)
+            try:
+                os.rmdir(os.path.dirname(self.kept))
+            except OSError:
+                pass
+
+
+def ini_with(game: str, settings: tuple[str, ...]) -> bytes:
+    """EDF6VehicleCrew.ini with `KEY=VALUE` settings set in [VehicleCrew] (tools/support_config.put), its encoding kept."""
+    if TOOLS not in sys.path:
+        sys.path.insert(0, TOOLS)
+    import support_config
+    with open(os.path.join(plugins(game), 'EDF6VehicleCrew.ini'), 'rb') as f:
+        raw = f.read()
+    bom = raw.startswith(b'\xef\xbb\xbf')
+    text = raw[3 if bom else 0:].decode('utf-8')
+    for setting in settings:
+        key, _, value = setting.partition('=')
+        text = support_config.put(text, key.strip(), value.strip())
+    return (b'\xef\xbb\xbf' if bom else b'') + text.encode('utf-8')
+
+
 def remove_loadout(path: str, payload: bytes) -> None:
     """The run's loadout removed, only while it is still the one this run wrote."""
     try:
@@ -433,13 +503,20 @@ def commit_of(row: str) -> float:
 
 def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None, *,
         extra: tuple[str, ...] = (), loadout: str | None = None, shots: str | None = None,
-        keys: tuple[tuple[str, float, int], ...] = ()) -> int:
+        keys: tuple[tuple[str, float, int], ...] = (), place: tuple[str, ...] = (), ini: tuple[str, ...] = ()) -> int:
     install(game)
     placed: tuple[str, bytes] | None = None
+    placements: list[Placement] = []
     watch = DesktopWatch().start()
     try:
         if loadout:
             placed = place_loadout(game, loadout)
+        for item in place:
+            source, _, dest = item.partition('=')
+            with open(source, 'rb') as f:
+                placements.append(Placement(game, dest, f.read()))
+        if ini:
+            placements.append(Placement(game, 'Plugins/EDF6VehicleCrew.ini', ini_with(game, ini)))
         command(game, '\n'.join([f'mission {mission} {difficulty}', *extra]))
         launch()
         if not wait_for(game, 'PlayMission_Offline', 240):
@@ -499,6 +576,8 @@ def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None
                 print('log kept at', keep)
         finally:
             if not game_pids():
+                for p in reversed(placements):
+                    p.restore()
                 if placed:
                     remove_loadout(*placed)
                 uninstall(game)
@@ -536,16 +615,26 @@ def run_options(argv: list[str]) -> tuple[list[str], dict]:
     args: list[str] = []
     extra: list[str] = []
     keys: list[tuple[str, float, int]] = []
-    options: dict = {'extra': (), 'loadout': None, 'shots': None, 'keys': ()}
+    place: list[str] = []
+    ini: list[str] = []
+    options: dict = {'extra': (), 'loadout': None, 'shots': None, 'keys': (), 'place': (), 'ini': ()}
     i = 0
     while i < len(argv):
-        if argv[i] in ('--cmd', '--loadout', '--shots', '--key'):
+        if argv[i] in ('--cmd', '--loadout', '--shots', '--key', '--place', '--ini'):
             if i + 1 >= len(argv):
                 raise SystemExit(argv[i] + ' needs a value')
             if argv[i] == '--cmd':
                 extra.append(argv[i + 1])
             elif argv[i] == '--key':
                 keys.append(key_option(argv[i + 1]))
+            elif argv[i] == '--place':
+                if '=' not in argv[i + 1]:
+                    raise SystemExit('--place wants SOURCE=DEST (DEST under Mods, e.g. Plugins/EDF6VehicleCrew.dll)')
+                place.append(argv[i + 1])
+            elif argv[i] == '--ini':
+                if '=' not in argv[i + 1]:
+                    raise SystemExit('--ini wants KEY=VALUE')
+                ini.append(argv[i + 1])
             else:
                 options[argv[i][2:]] = argv[i + 1]
             i += 2
@@ -554,6 +643,8 @@ def run_options(argv: list[str]) -> tuple[list[str], dict]:
             i += 1
     options['extra'] = tuple(extra)
     options['keys'] = tuple(keys)
+    options['place'] = tuple(place)
+    options['ini'] = tuple(ini)
     return args, options
 
 

@@ -130,7 +130,7 @@ class DriverTest(unittest.TestCase):
         with patch.object(drive.gamedir, 'find_or_dev', return_value=self.game), \
              patch.object(drive, 'run', return_value=0) as run:
             self.assertEqual(drive.main(['run']), 0)
-        none = {'extra': (), 'loadout': None, 'shots': None, 'keys': ()}
+        none = {'extra': (), 'loadout': None, 'shots': None, 'keys': (), 'place': (), 'ini': ()}
         run.assert_called_once_with(self.game, 'range', 1, 45, None, **none)
         with patch.object(drive.gamedir, 'find_or_dev', return_value=self.game), \
              patch.object(drive, 'run', return_value=0) as run:
@@ -144,7 +144,8 @@ class DriverTest(unittest.TestCase):
                                          '--loadout', 'x.ini', '--cmd', 'mem', '--shots', 'shots',
                                          '--key', '57@25:5000', '--key', 'enter@30']), 0)
         run.assert_called_once_with(self.game, 'RM015', 1, 90, 'out.log', extra=('probe airdrop', 'mem'),
-                                    loadout='x.ini', shots='shots', keys=(('57', 25.0, 5000), ('enter', 30.0, 1000)))
+                                    loadout='x.ini', shots='shots', keys=(('57', 25.0, 5000), ('enter', 30.0, 1000)),
+                                    place=(), ini=())
         with self.assertRaises(SystemExit):
             drive.run_options(['--key', '57'])
         with self.assertRaises(SystemExit):
@@ -177,6 +178,42 @@ class DriverTest(unittest.TestCase):
         launch.assert_not_called()
         self.assertEqual((self.plugins / drive.LOADOUT).read_bytes(), b'the test range')
         self.assertEqual([p.name for p in self.plugins.iterdir()], [drive.LOADOUT])
+
+    def test_placed_files_are_put_back_byte_for_byte(self):
+        dll = self.plugins / 'EDF6VehicleCrew.dll'
+        dll.write_bytes(b'installed plugin')
+        ini = self.plugins / 'EDF6VehicleCrew.ini'
+        ini.write_bytes(b'\xef\xbb\xbf; comment\r\n[VehicleCrew]\r\nEnabled=1\r\n')
+        build = self.root / 'build.dll'
+        build.write_bytes(b'our build')
+        sgo = self.root / 'X.SGO'
+        sgo.write_bytes(b'sgo')
+        seen = []
+        def launch():
+            seen.append((dll.read_bytes(), ini.read_bytes(), (self.plugins.parent / 'OBJECT' / 'X.SGO').read_bytes()))
+        with patch.object(drive, 'launch', side_effect=launch), patch.object(drive, 'wait_for', return_value=False):
+            drive.run(self.game, 'RM015', 1, 0, None, place=(f'{build}=Plugins/EDF6VehicleCrew.dll', f'{sgo}=OBJECT/X.SGO'),
+                      ini=('AirdropTest=2',))
+        self.assertEqual(seen[0][0], b'our build')
+        self.assertEqual(seen[0][1], b'\xef\xbb\xbf; comment\r\n[VehicleCrew]\r\nEnabled=1\r\nAirdropTest=2\r\n')
+        self.assertEqual(seen[0][2], b'sgo')
+        self.assertEqual(dll.read_bytes(), b'installed plugin')
+        self.assertEqual(ini.read_bytes(), b'\xef\xbb\xbf; comment\r\n[VehicleCrew]\r\nEnabled=1\r\n')
+        self.assertFalse((self.plugins.parent / 'OBJECT' / 'X.SGO').exists())
+        self.assertEqual(sorted(p.name for p in self.plugins.iterdir()), ['EDF6VehicleCrew.dll', 'EDF6VehicleCrew.ini'])
+
+    def test_placed_file_changed_by_someone_else_is_left(self):
+        dll = self.plugins / 'EDF6VehicleCrew.dll'
+        dll.write_bytes(b'installed plugin')
+        build = self.root / 'build.dll'
+        build.write_bytes(b'our build')
+        def launch():
+            dll.write_bytes(b'another session')
+        with patch.object(drive, 'launch', side_effect=launch), patch.object(drive, 'wait_for', return_value=False):
+            drive.run(self.game, 'RM015', 1, 0, None, place=(f'{build}=Plugins/EDF6VehicleCrew.dll',))
+        self.assertEqual(dll.read_bytes(), b'another session')
+        kept = self.plugins / (drive.NAME + '.placed') / 'Plugins__EDF6VehicleCrew.dll'
+        self.assertEqual(kept.read_bytes(), b'installed plugin')
 
     def test_loadout_changed_during_the_run_is_left(self):
         source = self.root / 'load.ini'

@@ -104,8 +104,8 @@ SupportIcon SupportCallIcon(int index) noexcept;
 // Which of its kind's variants an entry is (the bar's chip icon): an aircraft guarding the mark or following the player,
 // a ground vehicle crewed or delivered empty; none for the ones with no variants (the infantry, the submarine carrier).
 // The transports' (support_dispatch.cpp TransportCatalog): a squad or a platoon flown in (the row: a helicopter assault, a
-// paratroop drop).
-enum class SupportVariant : std::uint8_t { none, guard, follow, crewed, empty, squad, platoon };
+// paratroop drop). The container airdrops' (AirdropCatalog): the vehicle the plane drops (the row: the plane).
+enum class SupportVariant : std::uint8_t { none, guard, follow, crewed, empty, squad, platoon, tank, apc, truck };
 SupportVariant SupportCallVariant(int index) noexcept;
 enum class SupportReady : std::uint8_t { ready, planning, cooldown, off };
 struct SupportReadiness { SupportReady state; int seconds; };   // seconds: the cooldown left
