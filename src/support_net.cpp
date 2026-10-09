@@ -196,16 +196,23 @@ void VersionTick(bool online) noexcept {
     if(n==versionShown)return;
     versionShown=n;
     using hudtext::Tr;using hudtext::Tx;
+    // Two lines: who is older or newer, then what does not work in this room because of it.
     wchar_t text[200]{},features[120]{};
     Features(n.missing,n.command,features,_countof(features));
     switch(n.kind) {
     case versionnote::Kind::none: break;
-    case versionnote::Kind::hostOlder: _snwprintf_s(text,_TRUNCATE,Tr(Tx::versionHostOlder),features);break;
+    case versionnote::Kind::hostOlder: _snwprintf_s(text,_TRUNCATE,L"%ls",Tr(Tx::versionHostOlder));break;
     case versionnote::Kind::selfOlder: _snwprintf_s(text,_TRUNCATE,L"%ls",Tr(Tx::versionSelfOlder));break;
-    case versionnote::Kind::peersOlder: _snwprintf_s(text,_TRUNCATE,Tr(Tx::versionPeersOlder),static_cast<int>(n.count),features);break;
+    case versionnote::Kind::peersOlder: _snwprintf_s(text,_TRUNCATE,Tr(Tx::versionPeersOlder),static_cast<int>(n.count));break;
     case versionnote::Kind::peersNewer: _snwprintf_s(text,_TRUNCATE,Tr(Tx::versionPeersNewer),static_cast<int>(n.count));break;
-    case versionnote::Kind::roomOlder: _snwprintf_s(text,_TRUNCATE,Tr(Tx::versionRoomOlder),features);break;
+    case versionnote::Kind::roomOlder: _snwprintf_s(text,_TRUNCATE,L"%ls",Tr(Tx::versionRoomOlder));break;
     case versionnote::Kind::commandOnly: _snwprintf_s(text,_TRUNCATE,L"%ls",Tr(Tx::versionCommandOnly));break;
+    }
+    if(n.kind!=versionnote::Kind::none && n.kind!=versionnote::Kind::selfOlder && n.kind!=versionnote::Kind::peersNewer) {
+        const std::size_t used=std::wcslen(text);
+        _snwprintf_s(text+used,_countof(text)-used,_TRUNCATE,L"\n");
+        const std::size_t more=std::wcslen(text);
+        _snwprintf_s(text+more,_countof(text)-more,_TRUNCATE,Tr(Tx::versionUnavailable),features);
     }
     Log("SUPPORT NET builds: kind=%d host=%d mine=0x%X hostKnown=%d hostCaps=0x%X roomBehind=%d peersBehind=%u missing=0x%X ahead=%u "
         "commandPeers=%u%s",static_cast<int>(n.kind),s.host,s.mine,s.hostKnown,s.hostCaps,s.roomBehind,s.peersBehind,s.peersMissing,

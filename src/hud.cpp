@@ -4126,7 +4126,11 @@ void RescueCueBanner(Text* text,float width,float height,float s,Line* lines,int
 void VersionBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
     wchar_t line[200];
     if(!SupportVersionCue(line,_countof(line)))return;
+    // Who, then (after a '\n') what does not work here.
+    wchar_t* second=std::wcschr(line,L'\n');
+    if(second)*second++=0;
     Label(text,lines,at,width*0.5f,height*0.5f+286.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",line);
+    if(second && *second)Label(text,lines,at,width*0.5f,height*0.5f+314.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",second);
 }
 // The mark key on foot with no enemy near the centre (npcai.cpp SendToPoint): a ring where it points, for a moment, and
 // what came of it (the selected units sent there, how many; none selected; online).

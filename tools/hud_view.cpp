@@ -210,8 +210,8 @@ bool sceneRescueOn=false;RescueCue sceneRescue{};
 bool PlayerRescueCue(RescueCue* o) noexcept { if(sceneRescueOn)*o=sceneRescue;return sceneRescueOn; }
 // The room's builds differ (support_net.cpp SupportVersionCue): on in the version_banner scene, under the rescue's line.
 bool sceneVersionOn=false;wchar_t sceneVersion[200]{};
-bool SupportVersionCue(wchar_t* out,std::size_t capacity) noexcept {
-    if(sceneVersionOn)_snwprintf_s(out,capacity,_TRUNCATE,L"%ls",sceneVersion);
+bool SupportVersionCue(wchar_t* line,std::size_t capacity) noexcept {
+    if(sceneVersionOn)_snwprintf_s(line,capacity,_TRUNCATE,L"%ls",sceneVersion);
     return sceneVersionOn;
 }
 bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
@@ -1785,13 +1785,18 @@ int Scenes(const std::wstring& dir) {
         _snwprintf_s(features,_TRUNCATE,L"%ls%ls%ls%ls%ls%ls%ls",hudtext::Tr(hudtext::Tx::versionFeatRescue),hudtext::Tr(hudtext::Tx::versionListSep),
                      hudtext::Tr(hudtext::Tx::versionFeatAir),hudtext::Tr(hudtext::Tx::versionListSep),hudtext::Tr(hudtext::Tx::versionFeatLoadout),
                      hudtext::Tr(hudtext::Tx::versionListSep),hudtext::Tr(hudtext::Tx::versionFeatCommand));
-        _snwprintf_s(sceneVersion,_TRUNCATE,hudtext::Tr(hudtext::Tx::versionPeersOlder),2,features);
+        wchar_t who[120],what[160];
+        _snwprintf_s(who,_TRUNCATE,hudtext::Tr(hudtext::Tx::versionPeersOlder),2);
+        _snwprintf_s(what,_TRUNCATE,hudtext::Tr(hudtext::Tx::versionUnavailable),features);
+        _snwprintf_s(sceneVersion,_TRUNCATE,L"%ls\n%ls",who,what);
         sceneVersionOn=true;
         Scene(dir,L"version_banner",ground);
         bool shown=false,clear=true;
         for(std::size_t i=0;i<drew.size();++i) {
             const Drew& p=drew[i];
-            if(p.text==sceneVersion)shown=shown || (p.x0>=0.0f && p.x1<=1920.0f && p.y1<=1080.0f);
+            const bool mine=p.text==who || p.text==what;
+            if(mine && !(p.x0>=0.0f && p.x1<=1920.0f && p.y1<=1080.0f))clear=false;   // every line of it on screen
+            if(p.text==what)shown=true;
             for(std::size_t k=i+1;k<drew.size();++k) {
                 const Drew& q=drew[k];
                 if(!p.text.empty() && !q.text.empty() && p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1)clear=false;
