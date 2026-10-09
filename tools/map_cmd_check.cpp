@@ -147,6 +147,32 @@ int main() {
     Check(Click(s,marks,4,150.0f,110.0f,22.0f,false)==nullptr,"a unit behind the eye is never clicked");
     const Mark close[]={{&a,100.0f,100.0f,true},{&b,112.0f,100.0f,true}};
     Check(Click(s,close,2,109.0f,100.0f,22.0f,false)==&b,"two in reach: the nearer");
+    // The squad panel's order and fold (the user, 2026-10-09: "小队太多了…看不过来"; 37 squads in that mission).
+    {
+        Check(SquadRank(true,false,false)<SquadRank(false,false,false) && SquadRank(false,false,false)<SquadRank(false,false,true) &&
+              SquadRank(false,false,true)<SquadRank(false,true,false) && SquadRank(true,true,true)==SquadRank(false,true,false),
+              "the panel's order: the player's, the free, the riding, a script's");
+        const int few[]={0,1,1,2,3,3};
+        Check(SquadRowsShown(few,6,false,16)==3 && SquadRowsShown(few,6,true,16)==6 && SquadRowsShown(few,6,true,4)==4,
+              "folded: the ones on foot that take orders; open: all (up to the rows published)");
+        int many[14];for(int& r:many)r=1;
+        Check(SquadRowsShown(many,14,false,16)==kSquadRowsFolded && SquadRowsShown(many,14,true,16)==14,"folded: at most the number keys' nine");
+        const int none[]={2,3};
+        Check(SquadRowsShown(none,2,false,16)==0,"nothing commandable on foot: folded shows none, all in the summary");
+    }
+    // Shown but not picked (Mark::pick; the user, 2026-10-09: a box of 30 units none of which took the order; a tank's
+    // crew squad selected with the tank): the box passes over them, a click on one leaves the selection as it was.
+    {
+        int tank=0,crew=0,script=0;
+        const Mark field[]={{&tank,200.0f,200.0f,true,true},{&crew,201.0f,199.0f,true,false},{&script,260.0f,220.0f,true,false}};
+        s.Clear();Box(s,field,3,150.0f,150.0f,300.0f,300.0f,false);
+        Check(one(s,&tank),"a box over a tank and its riding crew and a script's squad: the tank alone",s.n);
+        Check(Click(s,field,3,260.0f,220.0f,22.0f,false)==&script && one(s,&tank),"a click on a script's squad: named, the selection kept");
+        s.Clear();
+        Check(Click(s,field,3,203.0f,198.0f,22.0f,false)==&tank && one(s,&tank),"a click on the crew over its tank: the tank");
+        const Mark alone[]={{&crew,201.0f,199.0f,true,false}};
+        Check(Click(s,alone,1,203.0f,198.0f,22.0f,false)==&crew && one(s,&tank),"a click on a riding crew alone: named, not picked");
+    }
     // The enemy under the pointer (mapcmd.cpp Hover): an enemy has a mark at its lock point and one up its pin; either
     // under the pointer finds it, behind the eye never, out of reach none.
     const Mark foes[]={{&a,400.0f,300.0f,true},{&a,400.0f,240.0f,true},{&b,600.0f,300.0f,true},{&b,600.0f,240.0f,false}};
@@ -329,6 +355,12 @@ int main() {
         Check(!PursuitOf(Order::attackMove).forced && PursuitOf(Order::attackMove).fightFirst,"attack-move: fights first, then walks on");
         Check(!PursuitOf(Order::guard).forced && !PursuitOf(Order::guard).fightFirst && !PursuitOf(Order::engage).forced,
               "guard and engage: the soldier's own fight as before");
+        {   // Pursues: a move always walks; an attack-move walks with no target or one farther than `close`
+            const auto mv=PursuitOf(Order::move),atk=PursuitOf(Order::attackMove),gd=PursuitOf(Order::guard);
+            Check(Pursues(mv,true,1.0f,15.0f) && Pursues(mv,false,0.0f,15.0f),"move: walks whatever it fights");
+            Check(Pursues(atk,false,0.0f,15.0f) && Pursues(atk,true,30.0f,15.0f),"attack-move: walks on firing past a far target");
+            Check(!Pursues(atk,true,15.0f,15.0f) && !Pursues(atk,true,4.0f,15.0f),"attack-move: stops for an enemy pressing on it");
+            Check(!Pursues(gd,false,0.0f,15.0f) && !Pursues(gd,true,40.0f,15.0f),"guard: never pursues");        }
         Check(Arrive(Order::move,5.0f,6.0f)==Order::guard && Arrive(Order::attackMove,6.0f,6.0f)==Order::guard,"at the point: a guard of it");
         Check(Arrive(Order::move,6.5f,6.0f)==Order::move && Arrive(Order::guard,0.0f,6.0f)==Order::guard &&
               Arrive(Order::follow,0.0f,6.0f)==Order::follow,"not there yet / other orders: unchanged");

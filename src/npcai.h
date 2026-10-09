@@ -40,6 +40,12 @@ bool NpcMarkReadout(float* at) noexcept;
 // player's recruited squads (CycleMarchFormation: the new shape). The HUD's banner: the march's shape, shown a
 // moment after it changes (wall clock), and the key that cycles it.
 int CycleGuardFormation(const void* leader) noexcept;
+// The map's formation menu (the user, 2026-10-09: "这个编队应该点击以后展开选择里面的东西"): a guarding squad's defence
+// set to `shape` (formation.h kGuard; -1 it guards nothing, -2 it takes no orders / no such defence), its defence now
+// (the same codes); the march set to `shape` (formation.h kMarch; -2 no such march).
+int SetGuardFormation(const void* leader,int shape) noexcept;
+int NpcGuardShape(const void* leader) noexcept;
+int SetMarchFormation(int shape) noexcept;
 // Fireteams (the map's P and L): split a squad in two (the soldiers moved to the new one, -1 when it cannot be), put
 // squad `from` under squad `into`'s top (false when either takes no orders or the two are more than a squad holds).
 int SplitSquad(const void* leader) noexcept;

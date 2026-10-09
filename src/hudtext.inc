@@ -230,7 +230,9 @@ HUDTEXT(hullRow,L"HULL %d / %d",L"耐久 %d / %d",L"耐久 %d / %d",L"耐久 %d 
 // --- The map (map.cpp, mapcmd.cpp) ---
 HUDTEXT(orderFollow,L"FOLLOW",L"跟随",L"跟隨",L"追従")
 HUDTEXT(orderGuard,L"GUARD",L"守点",L"守點",L"防衛")
-HUDTEXT(orderRelease,L"RELEASE",L"解除",L"解除",L"解除")
+// RELEASE: the unit's order dropped, back to what it did before any (not "dismiss": 2026-10-09 the user took the two
+// for one, "解散解除…是不是重叠了").
+HUDTEXT(orderRelease,L"CLEAR ORDER",L"取消命令",L"取消命令",L"命令取消")
 HUDTEXT(selectedAll,L"SELECTED ALL %d",L"已选全部 %d",L"已選全部 %d",L"全員選択 %d")
 HUDTEXT(selectedOne,L"SELECTED 1 / %d: %ls",L"已选 1 / %d：%ls",L"已選 1 / %d：%ls",L"選択 1 / %d：%ls")
 HUDTEXT(selectedSome,L"SELECTED %d / %d",L"已选 %d / %d",L"已選 %d / %d",L"選択 %d / %d")
@@ -332,11 +334,11 @@ HUDTEXT(controlFlaresKeyboard,L"[keyboard %ls] flares",L"[键盘 %ls] 热诱弹"
 
 // NPC squads and their map orders; identifiers are localized through hudtext::Word.
 HUDTEXT(virtualKey,L"VK 0x%X",L"键码 0x%X",L"鍵碼 0x%X",L"キーコード 0x%X")
-HUDTEXT(orderEngage,L"ENGAGE",L"交战",L"交戰",L"交戦")
+HUDTEXT(orderEngage,L"ENGAGE AT WILL",L"自由交战",L"自由交戰",L"自由交戦")
 HUDTEXT(orderFocus,L"FOCUS FIRE",L"集火",L"集火",L"集中攻撃")
 HUDTEXT(orderBoard,L"BOARD",L"上车",L"上車",L"搭乗")
 HUDTEXT(orderDismount,L"DISMOUNT",L"下车",L"下車",L"降車")
-HUDTEXT(orderDismiss,L"DISMISS",L"解散",L"解散",L"解散")
+HUDTEXT(orderDismiss,L"DISMISS",L"离队",L"離隊",L"離脱")
 HUDTEXT(orderRecruit,L"RECRUIT",L"招募",L"招募",L"加入指示")
 // The RTS moves (mapcmd_logic.h Order::move / attackMove; hud.cpp MapButtons, mapcmd.cpp).
 HUDTEXT(orderMove,L"MOVE",L"移动",L"移動",L"移動")
@@ -414,6 +416,16 @@ HUDTEXT(sweepOn,L"FETCHING BOXES: %d LEFT, %d IN   [%ls] call back",L"拾取箱�
 HUDTEXT(sweepDone,L"BOXES FETCHED: %d",L"拾取结束：捡到 %d 个",L"拾取結束：撿到 %d 個",L"回収終了：%d 個")
 HUDTEXT(formationCue,L"FORMATION: %ls   [%ls]",L"编队：%ls   [%ls]",L"編隊：%ls   [%ls]",L"隊形：%ls   [%ls]")
 HUDTEXT(squadWait,L"WAIT %d s",L"等待 %d 秒",L"等待 %d 秒",L"待機 %d 秒")
+// The squad panel's summary row (hud.cpp MapSquadPanel; the user, 2026-10-09: "小队太多了吧…感觉看不过来"): folded, the
+// squads not listed (how many of them ride a vehicle, how many a script drives); open, the row that folds it again.
+HUDTEXT(squadMore,L"+%d MORE (%d riding, %d scripted): click to list",L"另有 %d 支（乘车 %d，脚本 %d）：点击展开",
+        L"另有 %d 支（乘車 %d，腳本 %d）：點擊展開",L"他 %d 部隊（搭乗 %d、指示中 %d）：クリックで表示")
+// The formation menu's two sections (hud.cpp MapButtons): the march of the squads following the player, the defence of
+// the ones on a guard point.
+HUDTEXT(menuMarch,L"MARCH",L"行军",L"行軍",L"行軍")
+HUDTEXT(menuDefence,L"DEFENCE",L"守点",L"守點",L"防衛")
+HUDTEXT(squadFold,L"Click to fold: only the squads that take orders",L"点击收起：只列可指挥的小队",L"點擊收起：只列可指揮的小隊",
+        L"クリックでたたむ：指揮できる分隊のみ")
 HUDTEXT(npcMark,L"MARK",L"标记",L"標記",L"マーク")
 HUDTEXT(npcMarkRange,L"MARK %.0f m",L"标记 %.0f m",L"標記 %.0f m",L"マーク %.0f m")
 // The mark key on foot with no enemy near the centre (npcai.cpp SendToPoint): the units selected on the map sent there.

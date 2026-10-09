@@ -32,6 +32,7 @@
 #include "real_driver_native.h"
 #include "support_soldier.h"
 #include "vhud.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -492,11 +493,26 @@ void Move(unsigned char* h,const float* dir,float magnitude) noexcept {
     Put<float>(h,kMoveX,x);Put<float>(h,kMoveY,0.0f);Put<float>(h,kMoveZ,z);Put<float>(h,kMoveW,1.0f);
 }
 void Stand(unsigned char* h) noexcept { Put<float>(h,kMoveX,0.0f);Put<float>(h,kMoveY,0.0f);Put<float>(h,kMoveZ,0.0f);Put<float>(h,kMoveW,1.0f); }
+// A soldier's route (the user, 2026-10-09: under a move order a squad stood still for 40 s):
+//  - in legs of kRouteHorizon m (ground_navigation.h Profile::horizon): it walks the first leg while the next is searched
+//    from its end, instead of standing until the whole route (a few edges a frame under the shared budget) is found;
+//  - from the floor under it: a soldier in the air (a Wing Diver flying, anyone mid-jump) has no ground at its own
+//    height for a route's first edge, so every search from there failed (the log's Wing Divers, 20-30 m up, never moved).
+constexpr float kRouteHorizon=48.0f;
+constexpr float kAirborneProbe=80.0f;   // m under the soldier the floor its route starts from is looked for
+npc::navigation::Profile SoldierRoute() noexcept { npc::navigation::Profile p;p.horizon=kRouteHorizon;return p; }
+void RouteStart(const float* pos,float* from) noexcept {
+    from[0]=pos[0];from[1]=pos[1];from[2]=pos[2];
+    const float above[3]={pos[0],pos[1]+0.3f,pos[2]},below[3]={pos[0],pos[1]-kAirborneProbe,pos[2]};
+    float floor[3];
+    if(MapFloorRay(above,below,floor)>=0.0f && std::isfinite(floor[1]) && floor[1]<pos[1])from[1]=floor[1];
+}
 void MoveTo(unsigned char* h,const float* pos,const float* to,float stop) noexcept {
     const ULONGLONG ms=GameMs();
     Soldier* const soldier=Entry(h,ms);
-    float waypoint[3],dir[3];
-    if(!soldier || GroundNavigate(soldier->navigation,pos,to,stop,ms,waypoint)!=npc::navigation::Result::moving ||
+    float waypoint[3],dir[3],from[3];
+    RouteStart(pos,from);
+    if(!soldier || GroundNavigate(soldier->navigation,from,to,stop,ms,waypoint,SoldierRoute())!=npc::navigation::Result::moving ||
        !npc::HorizDir(pos,waypoint,dir)){Stand(h);return;}
     const float d=npc::Horiz(pos,waypoint);
     Move(h,dir,d/6.0f+0.3f);
@@ -875,10 +891,18 @@ bool PickUp(Soldier& s,unsigned char* h,const float* pos) noexcept;
 // order's point (its formation slot, else the point itself) -- the player's command, over its own dodging, falling
 // back and combat spot (Drive takes this first; its look and trigger stay on its target). Its squad's top there: the
 // order is a guard of the point from then on (mapcmd_logic.h Arrive), the squad holds it and fights what comes.
+// On the way the members keep with their top while it is still kPointFollow m from the point (one long route searched a
+// squad, not one a soldier: the shared per-frame search budget is what kept them standing), and take their places by
+// the point once it is near.
 constexpr float kPointArrive=6.0f;   // m: the top this near its place has reached the order's point
+constexpr float kPointFollow=30.0f,kTopKeep=5.0f;
 bool Pursue(Soldier& s,unsigned char* h,const float* pos,Squad* q,const unsigned char* root,ULONGLONG ms,const char** move) noexcept {
     float left=0.0f;
-    if(!FormationMove(s,h,pos,q,root,ms,move,&left)) {
+    const auto* top=static_cast<const unsigned char*>(q->top.obj);
+    if(!q->top.Is(h) && top && !top[kDead] && HumanOnFoot(top) && npc::Horiz(Pos(top),q->cmd.at)>kPointFollow) {
+        left=npc::Horiz(pos,q->cmd.at);
+        MoveTo(h,pos,Pos(top),kTopKeep);
+    } else if(!FormationMove(s,h,pos,q,root,ms,move,&left)) {
         left=npc::Horiz(pos,q->cmd.at);
         MoveTo(h,pos,q->cmd.at,Cfg().npcGuardRadius*0.5f);
     }
@@ -937,9 +961,10 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
         Veto(h,StockTarget(h),eye,a);
     }
     if(!(mask&kMaskMove))return p;
-    // Its moves, the first that applies: the player's move order before anything of its own; an attack-move's once it
-    // has nothing to fight.
-    if((pursuit.forced || (pursuit.fightFirst && !t.e)) && Pursue(s,h,pos,q,root,ms,&p.move))return p;
+    // Its moves, the first that applies: the player's move order before anything of its own; an attack-move's unless an
+    // enemy presses on it (mapcmd_logic.h Pursues: it fires on the way either way).
+    if(mapcmd::Pursues(pursuit,t.e!=nullptr,t.e ? npc::Horiz(pos,t.e->aim) : 0.0f,Cfg().npcDangerRange) &&
+       Pursue(s,h,pos,q,root,ms,&p.move))return p;
     if(Evade(s,h,c,pos,ms,&p.move))return p;
     if(s.boardV && Board(s,h,pos,ms)){p.move="to its seat";return p;}
     if(FallBack(s,h,pos,served,ms)){p.move="fall back";return p;}
@@ -1296,7 +1321,7 @@ int SquadCommandUnits(CommandUnit* out,int most) noexcept {
         if(!Live(q,ms) || (InSession() && !IsOnlineAuthority(q.top.obj)))continue;
         std::snprintf(squadNames[n],sizeof(squadNames[n]),"%s x%d",kClassWords[q.cls],q.alive>0 ? q.alive : 1);
         out[n]=CommandUnit{q.top.obj,squadNames[n],q.cmd,false,{},npc::Scripted(q.control),StatusOf(q,ms,status[n],sizeof(status[n])),
-                           SquadRiding(q),SquadRecruitable(q)};
+                           SquadRiding(q),SquadRecruitable(q),q.control==npc::Control::recruited};
         std::memcpy(out[n++].pos,static_cast<const unsigned char*>(q.top.obj)+kPosition,12);
     }
     for(int i=0;i<remoteSquadCount && n<most && n<kMaxSquads*2;++i) {
@@ -1304,21 +1329,26 @@ int SquadCommandUnits(CommandUnit* out,int most) noexcept {
         std::snprintf(squadNames[n],sizeof(squadNames[n]),"%s x%d",kClassWords[q.cls],q.alive);
         const bool riding=!HumanOnFoot(static_cast<const unsigned char*>(q.top.obj));
         out[n]={q.top.obj,squadNames[n],{},false,{},npc::Scripted(q.control),"REMOTE",riding,
-                mapcmd::OffersRecruit(q.control==npc::Control::recruited,npc::Scripted(q.control),false,riding)};
+                mapcmd::OffersRecruit(q.control==npc::Control::recruited,npc::Scripted(q.control),false,riding),
+                q.control==npc::Control::recruited};
         std::memcpy(out[n++].pos,q.pos,12);
     }
     return n;
 }
 
-int SquadRows(SquadRow* out,int most) noexcept {
+// The panel's rows, every squad listed, sorted by mapcmd::SquadRank (stable: the slots' order within a rank), the first
+// `most` copied out. Sorted here, once, so the number keys (mapcmd.cpp) and the panel (hud.cpp) agree on the order.
+int SquadRows(SquadRow* out,int most,SquadTally* tally) noexcept {
+    if(tally)*tally=SquadTally{};
     if(!ok || !Cfg().customNpcAi)return 0;
     const ULONGLONG ms=GameMs();
+    static SquadRow all[kMaxSquads*2];   // the game thread's (too big for its stack)
     int n=0;
     RefreshCommandSnapshots();
-    for(int i=0;i<kMaxSquads && n<most;++i) {
+    for(int i=0;i<kMaxSquads;++i) {
         const Squad& q=squads[i];
         if(!Live(q,ms) || (InSession() && !IsOnlineAuthority(q.top.obj)))continue;
-        SquadRow& r=out[n++];
+        SquadRow& r=all[n++];r={};
         r.leader=q.top.obj;
         r.identity=q.top;
         std::snprintf(r.name,sizeof(r.name),"%s",kClassWords[q.cls]);
@@ -1327,13 +1357,23 @@ int SquadRows(SquadRow* out,int most) noexcept {
         r.alive=q.alive>0 ? q.alive : 1;
         r.cooldown=q.dismissed ? static_cast<int>((cooldowns.Left(SquadKey(q.top.obj),ms)+999)/1000) : 0;
         r.now=q.cmd;r.locked=npc::Scripted(q.control);r.riding=SquadRiding(q);
+        r.rank=mapcmd::SquadRank(q.control==npc::Control::recruited,r.locked,r.riding);
     }
-    for(int i=0;i<remoteSquadCount && n<most;++i) {
-        const auto& q=remoteSquads[i];auto& row=out[n++];row={};
+    for(int i=0;i<remoteSquadCount && n<kMaxSquads*2;++i) {
+        const auto& q=remoteSquads[i];auto& row=all[n++];row={};
         row.leader=q.top.obj;row.identity=q.top;row.alive=q.alive;row.locked=npc::Scripted(q.control);
+        row.riding=!HumanOnFoot(static_cast<const unsigned char*>(q.top.obj));
         std::snprintf(row.name,sizeof(row.name),"%s",kClassWords[q.cls]);std::snprintf(row.status,sizeof(row.status),"%s",row.locked ? "SCRIPT" : "REMOTE");
+        row.rank=mapcmd::SquadRank(q.control==npc::Control::recruited,row.locked,row.riding);
     }
-    return n;
+    std::stable_sort(all,all+n,[](const SquadRow& a,const SquadRow& b){ return a.rank<b.rank; });
+    if(tally) {
+        tally->total=n;
+        for(int i=0;i<n;++i){tally->riding+=all[i].rank==2;tally->scripted+=all[i].rank==3;}
+    }
+    const int k=n<most ? n : most;
+    for(int i=0;i<k;++i)out[i]=all[i];
+    return k;
 }
 
 namespace {
@@ -1956,20 +1996,46 @@ bool MergeSquads(const void* into,const void* from) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
-int CycleGuardFormation(const void* leader) noexcept {
-    if(!ok || !Cfg().enabled || !Cfg().customNpcAi || InSession())return -2;
+// A guarding squad's defence (the shape from the map's formation menu or T's cycle): the shape, -1 when it guards
+// nothing, -2 when it takes no orders or `shape` is no defence (formation.h kGuard).
+Squad* GuardingSquad(const void* leader,int* why) noexcept {
+    *why=-2;
+    if(!ok || !Cfg().enabled || !Cfg().customNpcAi || InSession())return nullptr;
     Squad* const q=FindSquad(leader);
-    if(!q || npc::Scripted(q->control))return -2;
-    if(q->cmd.order!=Order::guard)return -1;
-    q->guardShape=npc::formation::Next(q->guardShape,true);
+    if(!q || npc::Scripted(q->control))return nullptr;
+    *why=-1;
+    return q->cmd.order==Order::guard ? q : nullptr;
+}
+int SetGuardFormation(const void* leader,int shape) noexcept {
+    int why;
+    Squad* const q=GuardingSquad(leader,&why);
+    if(!q)return why;
+    const npc::formation::Shape s=npc::formation::FromInt(shape);
+    if(!npc::formation::GuardShape(s) || static_cast<int>(s)!=shape)return -2;
+    q->guardShape=s;
     Log("NPCAI squad %p guard formation: %s",leader,npc::formation::Name(q->guardShape));
     return static_cast<int>(q->guardShape);
 }
+int CycleGuardFormation(const void* leader) noexcept {
+    int why;
+    const Squad* const q=GuardingSquad(leader,&why);
+    return q ? SetGuardFormation(leader,static_cast<int>(npc::formation::Next(q->guardShape,true))) : why;
+}
+int NpcGuardShape(const void* leader) noexcept {
+    int why;
+    const Squad* const q=GuardingSquad(leader,&why);
+    return q ? static_cast<int>(q->guardShape) : why;
+}
 
-int CycleMarchFormation() noexcept {
-    const npc::formation::Shape s=npc::formation::Next(MarchShape(),false);
+// The march of the player's recruited squads: `shape` (formation.h kMarch), the shape now; -2 when it is no march.
+int SetMarchFormation(int shape) noexcept {
+    const npc::formation::Shape s=npc::formation::FromInt(shape);
+    if(!npc::formation::MarchShape(s) || static_cast<int>(s)!=shape)return -2;
     SetMarchShape(s,"the map");
     return static_cast<int>(s);
+}
+int CycleMarchFormation() noexcept {
+    return SetMarchFormation(static_cast<int>(npc::formation::Next(MarchShape(),false)));
 }
 
 constexpr ULONGLONG kSweepEndMs=3000;

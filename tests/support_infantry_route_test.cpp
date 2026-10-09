@@ -114,14 +114,18 @@ int main() {
     Check(d.used && !d.started && !FindSquad(units[0]),"first activation waits for initial Think registration without rolling back new actors");
     Tick();Tick();Check(d.started && FindSquad(units[0])->routeActive,"online authority starts route once native squad is known");
     Check(follows==3 && At<void*>(units[1],kNpcLeaderOffset)==units[0],"support preserves real native follower links");
-    auto* fine=Entry(units[0],npcFixtureMs);bool ordinaryLongFailed=false;
-    for(int i=0;i<2200 && !ordinaryLongFailed;++i) {
+    // Ordinary MoveTo on the same direct 900 m order: before 2026-10-09 its whole-route search ran out of its bounds and
+    // the soldier stood (the map's long move orders stood for most of a minute). Now it walks a first leg under its
+    // horizon (ground_navigation.h Profile::horizon) on the same 2 m cell and node bound -- never the whole route at once.
+    auto* fine=Entry(units[0],npcFixtureMs);bool ordinaryLongMoving=false;
+    for(int i=0;i<2200 && !ordinaryLongMoving;++i) {
         npcFixtureMs+=16;++frame;world.frame=frame;
         MoveTo(units[0],Pos(units[0]),d.plan.target,kInfantryRouteStop);
-        ordinaryLongFailed=fine->navigation.failed;
+        ordinaryLongMoving=At<float>(units[0],kMoveX)!=0.0f || At<float>(units[0],kMoveZ)!=0.0f;
     }
-    Check(ordinaryLongFailed && fine->navigation.profile.cell==2 && At<float>(units[0],kMoveX)==0,
-        "negative control: ordinary MoveTo cannot navigate the same direct 900m order within its unchanged bounds");
+    Check(ordinaryLongMoving && fine->navigation.partial && !fine->navigation.failed && fine->navigation.profile.cell==2 &&
+          fine->navigation.profile.horizon>0.0f && fine->navigation.length<npc::navigation::kPath,
+        "ordinary MoveTo walks the same direct 900m order in legs: a first leg under its horizon, not the whole route");
     fine->navigation={};
     Think(units[0],0); // the isolated negative-control loop did not run the normal Think registration
     const auto originalNodeLimit=npc::navigation::kNodes;

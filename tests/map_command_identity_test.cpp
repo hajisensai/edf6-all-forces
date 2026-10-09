@@ -51,6 +51,9 @@ bool InSession() noexcept { return mapOnline; }
 bool NpcMarked() noexcept { return false; }
 int CycleGuardFormation(const void*) noexcept {return -2;}
 int CycleMarchFormation() noexcept {return 0;}
+int SetGuardFormation(const void*,int) noexcept {return -2;}
+int NpcGuardShape(const void*) noexcept {return -2;}
+int SetMarchFormation(int) noexcept {return -2;}
 int SplitSquad(const void*) noexcept {return -1;}
 bool MergeSquads(const void*,const void*) noexcept {return false;}
 bool NpcSweepToggle(const void* const*,int) noexcept {return false;}
@@ -72,7 +75,7 @@ int JetCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int GroundCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int TankCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int SquadCommandUnits(CommandUnit*,int) noexcept { return 0; }
-int SquadRows(SquadRow*,int) noexcept { return 0; }
+int SquadRows(SquadRow*,int,SquadTally* tally) noexcept { if(tally)*tally=SquadTally{};return 0; }
 bool HeliCommand(const void*,const Command&) noexcept { return false; }
 bool JetCommand(const void*,const Command&) noexcept { return false; }
 bool GroundCommand(const void*,const Command&) noexcept { return false; }

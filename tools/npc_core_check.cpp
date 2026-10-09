@@ -434,7 +434,13 @@ int main() {
         Expect(commandSquad->cmd.order==Order::move,"on the way: still a move");
         result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::attackMove,{40,0,0}},ObjRef::Of(other),{});
         behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
-        Expect(result.Accepted() && fights(behavior.move),"an attack-move fights the enemy in reach on its way");
+        Expect(result.Accepted() && fights(behavior.move),"an attack-move fights the enemy pressing on it (within NpcDangerRange)");
+        // The user, 2026-10-09: "移动攻击的优先级好像不对，不能让他边走边打吗": an enemy in reach but not pressing on it
+        // keeps it walking, turned on and firing at it (before: it stopped at its combat spot for any target).
+        world.enemy[0]=Enemy{enemy,{0,0,30},1};
+        behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
+        Expect(std::strcmp(behavior.move,"attack-move")==0 && soldier->target.Is(enemy),
+               "an attack-move walks on, on its target, past an enemy in reach that does not press on it");
         world.enemies=0;
         behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
         Expect(std::strcmp(behavior.move,"attack-move")==0,"an attack-move with nothing in reach walks on to its point");
