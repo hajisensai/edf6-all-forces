@@ -1972,7 +1972,9 @@ def heli_sight_after_aim_lines() -> None:
         assert call in plugin.split('void LoadConfig() noexcept {', 1)[1].split('\n}\n', 1)[0], f'LoadConfig does not hand the ini to {path}'
     sys.path.insert(0, os.path.join(ROOT, 'tools'))
     import support_config
-    suffixes = {'SupportAircraftCount_': support_config.UNIT_KEYS}
+    import support_loadout
+    suffixes = {'SupportAircraftCount_': support_config.UNIT_KEYS, 'SupportPreset_': tuple(support_loadout.SEATS)}
+    example = {'SupportAircraftCount_': r'\d', 'SupportPreset_': r'[a-z]'}   # a count; a soldier kind
 
     def read(key: str) -> bool:
         if f'L"{key}"' in plugin or any(f'L"{key}"' in m for m in modules.values()):
@@ -1987,7 +1989,7 @@ def heli_sight_after_aim_lines() -> None:
         for key in re.findall(r'L"(Support\w+?)"', text):
             assert re.search(rf'^{key}=', ini, re.M), f'{path} reads {key}, the shipped ini lacks it'
         for prefix in re.findall(r'L"(\w+_)%ls"', text):
-            assert prefix in suffixes and re.search(rf'{prefix}[A-Z_]+=\d', ini), f'{path} reads {prefix}<key>: no shipped example'
+            assert prefix in suffixes and re.search(rf'{prefix}[A-Z_]+={example[prefix]}', ini), f'{path} reads {prefix}<key>: no shipped example'
 
 
 
@@ -3460,6 +3462,11 @@ def pack_install_upgrade_uninstall() -> None:
             enter(patched(importlib.import_module('make_stock_stores'),
                           build=lambda game, overlay=None: (dict(stores), [], {}),
                           store_files=lambda: []))   # the fake make_jets writes no store weapons to need
+            # the out-of-game loadouts' files (tools/support_loadout.py): written after the plugin's ini, gone with uninstall 1
+            loadout = {'OBJECT/EDF6VC_SUPPORT_TANK_AP.SGO': b'ap tank'}
+            built_from: list[str] = []
+            enter(patched(importlib.import_module('support_loadout'),
+                          build=lambda game, text: (built_from.append(text), dict(loadout))[1]))
             with contextlib.redirect_stdout(io.StringIO()):
                 _pack_bundle(bundle, b'v1 ')
                 answers[:] = ['y']   # AT_C: back up the other mod's file and replace it
@@ -3476,6 +3483,9 @@ def pack_install_upgrade_uninstall() -> None:
                 assert installer.check(game), 'check fails right after install'
                 for rel, data in stores.items():
                     assert _read(os.path.join(mods, *rel.split('/'))) == data, f'stores file {rel} not installed'
+                for rel, data in loadout.items():
+                    assert _read(os.path.join(mods, *rel.split('/'))) == data, f'loadout file {rel} not installed'
+                assert built_from and '[VehicleCrew]' in built_from[-1], 'the loadouts are built from the installed ini'
                 modfiles.atomic_write(os.path.join(plugins, 'EDF6AutoTurret.dll'), b'old autoturret, EML6_Load only')
                 assert not installer.check(game), 'check passes an old EDF6AutoTurret.dll'
                 # The upgrade: new DLLs, a setting the new ini adds.

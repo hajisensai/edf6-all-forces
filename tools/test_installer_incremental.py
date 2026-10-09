@@ -166,6 +166,9 @@ class IncrementalTests(unittest.TestCase):
             stack.enter_context(patch.object(rootcpk, 'use', lambda root: None))
             shared = stack.enter_context(patch.object(call_weapons, 'install'))
             mission = stack.enter_context(patch.object(gen, 'install', return_value=[]))
+            import support_loadout   # no Root.cpk here: its files stand in; its install (skip unchanged) runs for real
+            loadout = stack.enter_context(patch.object(support_loadout, 'build',
+                                                       return_value={'OBJECT/EDF6VC_SUPPORT_TANK_AP.SGO': b'ap tank'}))
             stack.enter_context(patch.object(make_stock_stores, 'remove', lambda g: ([], [])))
             import make_edf5_campaign   # no Root.cpk here to append to: its files stand in, its install runs for real
             stack.enter_context(patch.object(make_edf5_campaign, 'build', lambda g, campaign=True, test_range=True: (
@@ -192,6 +195,7 @@ class IncrementalTests(unittest.TestCase):
             installer.install(str(self.game))
             self.assertTrue(all(b.call_count == 1 for b in builders.values()))
             self.assertEqual(timestamps, {p: p.stat().st_mtime_ns for p in paths})
+            self.assertEqual(loadout.call_count, 2)   # rebuilt from the ini each time, written only the first
             self.assertEqual(shared.call_count, 2)  # mutable shared weapon table always checked/installed
             (self.game / 'Mods/OBJECT/CHUTE.SGO').unlink()
             installer.install(str(self.game))

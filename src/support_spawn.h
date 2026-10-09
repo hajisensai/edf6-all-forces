@@ -2,6 +2,7 @@
 // never invents an entry, teleports towards the destination, or substitutes another vehicle.
 #pragma once
 #include <cstdint>
+#include "support_loadout.h"
 
 namespace crew {
 enum class SupportVehicleKind : std::uint8_t { tank, transport, civilianTruck, count };
@@ -41,12 +42,16 @@ constexpr bool SupportVehicleEnvironmentAllowed(SupportVehicleKind kind,SupportE
 // Called on the mission's preload thread; clears last mission's readiness before native preloads.
 void PreloadSupportVehicles() noexcept;
 bool SupportVehicleReady(SupportVehicleKind kind,SupportCrewMode mode) noexcept;
+// Whether a support tank can come with `round` (support_loadout.h SupportTankRounds): HE is the stock hull; AP needs
+// Mods/OBJECT/EDF6VC_SUPPORT_TANK_AP.SGO (tools/support_loadout.py), found and preloaded at this mission's start.
+bool SupportTankRoundReady(TankRound round) noexcept;
 // Creates and initializes an EMPTY hull at the already verified entry, sets friend team and records
 // its copy owner (owner is the parent; otherwise inherits SetSpawnOwner, as jet::Launch). Caller then
 // registers its native network identity, boards real humans and starts its validated route; non-null is not a
 // crew/delivery success. No RideAi / DummyVehicleRider participates in initialization.
+// `round`: a tank's gun (SupportTankRoundReady); not ready, or another kind: the stock hull.
 unsigned char* SpawnSupportVehicle(SupportVehicleKind kind,SupportCrewMode mode,const float* entry,
-                                   const float* heading,const void* owner) noexcept;
+                                   const float* heading,const void* owner,TankRound round=TankRound::he) noexcept;
 // Rollback only a hull returned above, while the caller still owns its live reference, before delivery.
 bool DeleteSupportVehicle(unsigned char* vehicle) noexcept;
 }  // namespace crew

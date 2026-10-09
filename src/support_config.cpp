@@ -73,7 +73,7 @@ static int KeyIndexOf(SupportKeyOf keyOf,int units,const wchar_t* key) noexcept 
     return -1;
 }
 
-SupportConfig ParseSupportConfig(SupportIniRead read,void* context,SupportKeyOf keyOf,int units) noexcept {
+SupportConfig ParseSupportConfig(SupportIniRead read,void* context,SupportKeyOf keyOf,int units,SupportSeatsOf seatsOf) noexcept {
     SupportConfig c;
     if(!read)return c;
     if(units>kSupportConfigUnits)units=kSupportConfigUnits;
@@ -130,6 +130,25 @@ SupportConfig ParseSupportConfig(SupportIniRead read,void* context,SupportKeyOf 
             Problem(c,key,value,fallback);
         }
     }
+    // SupportPreset_<key> (support_loadout.h): a seated entry's soldiers and colours; a bad one keeps the entry's own load.
+    for(int i=0;keyOf && i<units;++i) {
+        const wchar_t* unit=keyOf(i);
+        if(!unit)continue;
+        wchar_t key[96],why[96];
+        _snwprintf_s(key,_TRUNCATE,L"SupportPreset_%ls",unit);
+        if(!read(context,key,text,std::size(text)))continue;
+        if(!ParseSupportPreset(text,seatsOf ? seatsOf(i) : kSupportLoadoutMost,&c.preset[i],why,std::size(why))) {
+            wchar_t fallback[128];_snwprintf_s(fallback,_TRUNCATE,L"该单位自己的兵员（%ls）",why);
+            Problem(c,key,text,fallback);
+        }
+    }
+    if(read(context,L"SupportTankRounds",text,std::size(text))) {
+        wchar_t why[96];
+        if(!ParseRoundMix(text,&c.tankRounds,why,std::size(why))) {
+            wchar_t fallback[128];_snwprintf_s(fallback,_TRUNCATE,L"全部 HE（原版主炮；%ls）",why);
+            Problem(c,L"SupportTankRounds",text,fallback);
+        }
+    }
     return c;
 }
 
@@ -146,14 +165,22 @@ std::size_t ReadIni(void* context,const wchar_t* key,wchar_t* out,std::size_t ca
 void LoadSupportConfig(const wchar_t* iniPath) noexcept {
     if(!iniPath)return;
     IniFile ini{iniPath};
-    auto* next=new(std::nothrow) SupportConfig(ParseSupportConfig(&ReadIni,&ini,&SupportCallKey,SupportCallCount()));
+    auto* next=new(std::nothrow) SupportConfig(ParseSupportConfig(&ReadIni,&ini,&SupportCallKey,SupportCallCount(),&SupportCallSeats));
     if(!next)return;
-    char problems[512]{};
+    char problems[1024]{};   // UTF-8 of SupportConfig::problems (256 wide, up to 3 bytes each)
     if(next->problems[0])WideCharToMultiByte(CP_UTF8,0,next->problems,-1,problems,sizeof(problems),nullptr,nullptr);
-    Log("CONFIG support disabled=%016llX squad=%ls leader=%ls platoon=%ls/%ls/%ls vehicleCrew=%ls aircraftCrew=%ls%s%s",
+    int presets=0,looks=0;
+    for(const auto& p:next->preset) {
+        if(p.count>0)++presets;
+        for(int i=0;i<p.count;++i)if(p.look[i].On())++looks;
+    }
+    Log("CONFIG support disabled=%016llX squad=%ls leader=%ls platoon=%ls/%ls/%ls vehicleCrew=%ls aircraftCrew=%ls "
+        "presets=%d (coloured soldiers %d) tankRounds=%s/%d%s%s",
         static_cast<unsigned long long>(next->disabled),SupportWeaponName(next->squad),SupportWeaponName(next->leader),
         SupportWeaponName(next->platoon[0]),SupportWeaponName(next->platoon[1]),SupportWeaponName(next->platoon[2]),
-        SupportWeaponName(next->vehicleCrew),SupportWeaponName(next->aircraftCrew),problems[0] ? " INVALID: " : "",problems);
+        SupportWeaponName(next->vehicleCrew),SupportWeaponName(next->aircraftCrew),presets,looks,
+        next->tankRounds.count ? next->tankRounds.ratio ? "ratio" : "list" : "stockHE",next->tankRounds.count,
+        problems[0] ? " INVALID: " : "",problems);
     publishedSupport.store(next,std::memory_order_release);
 }
 const SupportConfig& SupportCfg() noexcept { return *publishedSupport.load(std::memory_order_acquire); }

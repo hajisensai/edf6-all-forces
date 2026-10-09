@@ -104,6 +104,7 @@ void MissionStart() noexcept {
     PreloadLaser();  // ...and the teleportation ships' portal laser (carrierlaser.cpp)
     PreloadSupportVehicles(); // stock ground support hulls; no dummy crew created by initialization
     PreloadSupportSoldiers(); // original real NPC resources, before the game's preload wait
+    PreloadSupportLooks();    // ...and the out-of-game presets' coloured soldiers that are generated (support_loadout.h)
     EnsureInputs();  // every plugin has loaded by now: the per-frame hooks chain onto theirs
     Log("MISSION start: per-object state dropped, resources preloaded");
     LogMemory("mission start");

@@ -48,7 +48,11 @@ bool FollowSupportSoldier(const ObjRef& who,const ObjRef& leader) noexcept {
 bool DeleteSupportSoldier(const ObjRef&) noexcept{return false;}
 bool HoldSupportSoldier(const ObjRef&,bool) noexcept{return true;}
 bool SupportVehicleReady(SupportVehicleKind,SupportCrewMode) noexcept{return false;}
-unsigned char* SpawnSupportVehicle(SupportVehicleKind,SupportCrewMode,const float*,const float*,const void*) noexcept{return nullptr;}
+unsigned char* SpawnSupportVehicle(SupportVehicleKind,SupportCrewMode,const float*,const float*,const void*,TankRound) noexcept{return nullptr;}
+bool SupportTankRoundReady(TankRound) noexcept{return false;}
+std::uint32_t SupportSoldierWithLook(std::uint32_t resource,const SupportLook&) noexcept{return resource;}
+bool PreloadSupportLook(SupportWeapon,bool,const SupportLook&) noexcept{return false;}
+namespace jet {bool ModFileThere(const wchar_t*) noexcept{return false;}}
 bool DeleteSupportVehicle(unsigned char*) noexcept{return false;}
 void ConfigureSupportNet(const support_net::Hooks&) noexcept{}
 bool SubmitSupportRequest(int,const float*,wchar_t*,std::size_t,std::uint64_t) noexcept{return false;}

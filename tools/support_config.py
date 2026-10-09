@@ -131,7 +131,8 @@ def edit(text: str, ask) -> str:
     """The menu: `ask(prompt) -> str` until an empty answer. Returns the edited text (validated values only)."""
     while True:
         print(summary(text))
-        pick = ask('输入编号切换开/关；w 改兵员武器；p 改大队三个小队武器；c 改飞机架数；r 恢复默认；回车保存并返回：').strip().lower()
+        pick = ask('输入编号切换开/关；w 改兵员武器；p 改大队三个小队武器；c 改飞机架数；'
+                   'l 编辑支援预设（编组 / 每人兵种 / 颜色 / 坦克弹种）；r 恢复默认；回车保存并返回：').strip().lower()
         if not pick:
             return text
         try:
@@ -155,6 +156,9 @@ def edit(text: str, ask) -> str:
                 if key not in AIR_KEYS:
                     raise Invalid(f'“{key}”不是空中单位')
                 text = put(text, 'SupportAircraftCount_' + key, aircraft_count(ask(f'架数（0-{AIRCRAFT_MOST}，0 = 默认）：')))
+            elif pick == 'l':   # the out-of-game loadouts (tools/support_loadout.py, src/support_loadout.h)
+                import support_loadout
+                text = support_loadout.edit(text, ask)
             elif pick == 'r':
                 for key, value in DEFAULTS.items():
                     text = put(text, key, value)

@@ -113,7 +113,19 @@ bool DeleteSupportSoldier(const ObjRef& ref) noexcept {if(ref)++deleted;return t
 int registered=0;
 bool RegisterSupportObject(const void*,const unsigned char*) noexcept {++registered;if(!seatNow)++registeredBeforeSeat;return true;}
 bool SupportVehicleReady(SupportVehicleKind,SupportCrewMode) noexcept {return true;}
-unsigned char* SpawnSupportVehicle(SupportVehicleKind,SupportCrewMode,const float*,const float*,const void*) noexcept {return nullptr;}
+TankRound lastRound=TankRound::he;bool apReady=false,lookReady=false;
+unsigned char* SpawnSupportVehicle(SupportVehicleKind,SupportCrewMode,const float*,const float*,const void*,TankRound round) noexcept {
+    lastRound=round;return nullptr;
+}
+bool SupportTankRoundReady(TankRound round) noexcept {return round==TankRound::he || apReady;}
+// support_soldier.cpp's look table: every look "preloaded" as entry 1 when lookReady.
+std::uint32_t SupportSoldierWithLook(std::uint32_t resource,const SupportLook& look) noexcept {
+    return lookReady && look.On() ? resource|(1u<<kSupportLookShift) : resource;
+}
+int looksQueued=0;
+bool PreloadSupportLook(SupportWeapon,bool,const SupportLook&) noexcept {++looksQueued;return true;}
+bool lookFiles=true;
+namespace jet {bool ModFileThere(const wchar_t*) noexcept {return lookFiles;}}
 bool DeleteSupportVehicle(unsigned char*) noexcept {++deleted;return true;}
 support_net::Hooks configuredHooks{};int netConfigured=0,gatesInstalled=0;
 bool creationSeen=false,gateBeforeNetwork=false;
@@ -518,6 +530,78 @@ int main() {
         check(Validate(apc),"a crewed APC: driver and a composed squad of passengers");
         apc.units[1].resourceId=kLeader;check(!Validate(apc),"its driver is a member, never a leader");
         apc.units[1].resourceId=kSoldier;apc.count=7;apc.units[6]=apc.units[5];check(!Validate(apc),"six aboard a five-seat APC is refused");
+    }
+    {
+        // Out-of-game loadouts (support_loadout.h, docs/feature-2026-10-09-loadout-editor.md), from a real ini.
+        wchar_t path[MAX_PATH];GetTempPathW(MAX_PATH,path);wcscat_s(path,L"edf6_support_loadout_test.ini");
+        FILE* out=nullptr;_wfopen_s(&out,path,L"wb");check(out!=nullptr,"loadout ini written");
+        const char loadText[]="[VehicleCrew]\r\nSupportPreset_SQUAD=lance@1E3A8A*2,cannon,rifle@X:FFFFFF\r\n"
+                              "SupportPreset_TANK_CREWED=rifle\r\nSupportTankRounds=AP:1,HE:1\r\n";
+        std::fwrite(loadText,1,sizeof(loadText)-1,out);std::fclose(out);
+        LoadSupportConfig(path);DeleteFileW(path);
+        const auto& c=SupportCfg();
+        check(c.preset[21].count==4 && c.preset[21].kind[0]==SupportWeapon::wingLance && c.preset[21].look[0].primary==0x1E3A8A &&
+              c.preset[21].kind[2]==SupportWeapon::fencerCannon && !c.preset[21].look[2].On() && c.preset[21].look[3].secondary==0xFFFFFF,
+              "SupportPreset_SQUAD read with its kinds and colours");
+        check(c.preset[GroundStart()].count==0 && std::wcsstr(c.problems,L"SupportPreset_TANK_CREWED")!=nullptr,
+              "a preset on a tank (no seats) is refused and named");
+        check(c.tankRounds.ratio && c.tankRounds.count==2,"SupportTankRounds read as a ratio");
+        looksQueued=0;PreloadSupportLooks();
+        check(looksQueued==3,"mission start queues the three coloured soldiers' templates");
+        lookFiles=false;looksQueued=0;PreloadSupportLooks();
+        check(looksQueued==0,"a coloured soldier whose file is missing is not queued (logged, stock)");
+        lookFiles=true;
+        SupportLoadout p{};
+        check(SupportCallPreset(21,&p) && p.count==4 && p.soldier[1]==SupportWeapon::wingLance && p.soldier[3]==SupportWeapon::rifle,
+              "the preset is the composition panel's start");
+        // A call as it is (a radio weapon) brings the preset, offline with the looks.
+        lookReady=true;peersNew=true;ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
+        routeResult=npc::navigation::Result::moving;
+        check(SupportCallAt(21,target,note,128),"a preset squad call queued");SupportDispatchTick();
+        const auto look=[](std::uint32_t r) noexcept {return r|(1u<<kSupportLookShift);};
+        check(made==4 && lastResources[0]==look(SupportSoldierResource(SupportWeapon::wingLance,true)) &&
+              lastResources[1]==look(SupportSoldierResource(SupportWeapon::wingLance,false)) &&
+              lastResources[2]==SupportSoldierResource(SupportWeapon::fencerCannon,false) &&
+              lastResources[3]==look(SupportSoldierResource(SupportWeapon::rifle,false)) && Validate(deployments[0].plan),
+              "offline: the preset's soldiers, the coloured ones with their look, the uncoloured stock");
+        // The panel changed seat 2: that seat comes stock, the others keep their colours.
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
+        SupportLoadout changed=PresetLoadout(c.preset[21]);changed.soldier[1]=SupportWeapon::sniper;
+        check(SupportCallComposedAt(21,target,&changed,note,128),"a changed preset queued");SupportDispatchTick();
+        check(lastResources[0]==look(SupportSoldierResource(SupportWeapon::wingLance,true)) &&
+              lastResources[1]==SupportSoldierResource(SupportWeapon::sniper,false),"a seat changed on the panel comes stock");
+        // Not generated / not preloaded: stock look, same soldiers.
+        lookReady=false;ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
+        SupportCallAt(21,target,note,128);SupportDispatchTick();
+        check(made==4 && lastResources[0]==SupportSoldierResource(SupportWeapon::wingLance,true),"no generated look: the stock template");
+        // Another machine's plan never carries a look (no capability bit to agree on it).
+        SupportPlan coloured=deployments[0].plan;coloured.units[0].resourceId=look(coloured.units[0].resourceId);
+        check(Validate(coloured),"this machine's own plan may carry a look");
+        testOnline=true;soloHost=false;check(!Validate(coloured),"a plan with a look is refused in a room with peers");
+        testOnline=false;ResetSupportDispatch();
+        // The tanks' rounds: AP:1,HE:1 alternates over the tanks deployed this mission, AP first.
+        const auto tank=static_cast<std::uint32_t>(GroundStart());
+        apReady=true;SupportPlan plan{};routeResult=npc::navigation::Result::moving;
+        check(Plan(tank,target,0,&plan)==support_net::PlanResult::ready && plan.units[0].resourceId==kVehicle+(1u<<8) &&
+              Validate(plan) && HullRound(plan.units[0].resourceId,SupportVehicleKind::tank)==TankRound::ap,"the first tank: AP");
+        tanksCalled=1;plan={};
+        check(Plan(tank,target,0,&plan)==support_net::PlanResult::ready && plan.units[0].resourceId==kVehicle,"the second tank: HE (stock)");
+        tanksCalled=2;plan={};
+        check(Plan(tank+1,target,0,&plan)==support_net::PlanResult::ready && plan.units[0].resourceId==kVehicle+(1u<<8),
+              "the third (an empty delivery tank counts too): AP");
+        apReady=false;tanksCalled=0;plan={};
+        check(Plan(tank,target,0,&plan)==support_net::PlanResult::ready && plan.units[0].resourceId==kVehicle,
+              "AP file not installed: stock HE (logged)");
+        apReady=true;testOnline=true;soloHost=true;plan={};
+        check(Plan(tank,target,0,&plan)==support_net::PlanResult::ready && plan.units[0].resourceId==kVehicle+(1u<<8),
+              "the host of a one-player world: AP");
+        SupportPlan ap=plan;soloHost=false;
+        check(!Validate(ap) && HullRound(ap.units[0].resourceId,SupportVehicleKind::tank)==TankRound::he,
+              "a peer in the room: an AP hull id is refused (stock is what it would make)");
+        soloHost=true;
+        check(!GroundHullOk(kVehicle+1u+(1u<<8),SupportVehicleKind::transport),"a round on an APC is refused");
+        testOnline=false;soloHost=false;apReady=false;ResetSupportDispatch();
+        check(tanksCalled==0,"a new mission counts its tanks from the first");
     }
     std::printf("support_dispatch_test: %d checks passed\n",checks);
 }

@@ -1,5 +1,6 @@
 #pragma once
 #include "crew.h"
+#include "support_loadout.h"
 
 namespace crew {
 enum class SupportSquadKind { rangerSquad, rangerPlatoon };
@@ -18,6 +19,13 @@ bool InstallSupportSoldiers() noexcept;
 void PreloadSupportSoldiers() noexcept;
 void ResetSupportSoldiers() noexcept;
 bool SupportSoldiersReady() noexcept;
+// `resource` with the look bits of `look` (support_call.h) when this mission preloaded that coloured template, else
+// `resource` (logged): the planner's way to a coloured soldier (support_dispatch.cpp ComposedResource).
+std::uint32_t SupportSoldierWithLook(std::uint32_t resource,const SupportLook& look) noexcept;
+// After PreloadSupportSoldiers, at the mission's start: queue one coloured template (support_loadout.h SupportLookFile; the
+// caller checked the generated file is there). False: not queued (no preload this mission, a fault, or the
+// kSupportLooksMost distinct looks already taken); that soldier comes stock.
+bool PreloadSupportLook(SupportWeapon kind,bool leader,const SupportLook& look) noexcept;
 // Game thread: every newly created soldier is held until its support transaction becomes Active.
 // The NPC Think hook consumes this query to suppress AI intent, without freezing physics or teleporting.
 bool HoldSupportSoldier(const ObjRef& soldier,bool held) noexcept;

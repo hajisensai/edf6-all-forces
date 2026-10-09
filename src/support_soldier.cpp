@@ -3,6 +3,7 @@
 #include "memory.h"
 #include "online_authority.h"
 #include <cmath>
+#include <iterator>
 
 namespace crew {
 namespace support_native {
@@ -30,9 +31,22 @@ constexpr const wchar_t* kBodies[kSupportWeaponCount][2]={
     {L"app:/object/N607_AIHEAVYARMOR_SP.sgo",L"app:/object/N607_AIHEAVYARMOR_SP_LEADER.sgo"},
     {L"app:/object/N607_AIHEAVYARMOR_SSG.sgo",L"app:/object/N607_AIHEAVYARMOR_SSG_LEADER.sgo"},
 };
+// This mission's soldier looks (support_loadout.h): the coloured templates PreloadSupportLook queued after the stock ones
+// (support_dispatch.cpp PreloadSupportLooks: the presets' looks whose generated file is there). A resource's look bits
+// index it (support_call.h SupportSoldierLook); a look not here comes stock.
+struct LookRow { SupportWeapon kind=SupportWeapon::rifle; bool leader=false,ready=false; SupportLook look{}; wchar_t path[96]{}; };
+LookRow looks[kSupportLooksMost]{};
+unsigned lookCount=0;
+const LookRow* LookOf(std::uint32_t resource) noexcept {
+    const unsigned look=SupportSoldierLook(resource);
+    if(!look || look>lookCount)return nullptr;
+    const auto& row=looks[look-1];
+    return row.ready && row.kind==SupportSoldierWeapon(resource) && row.leader==IsSupportLeaderResource(resource) ? &row : nullptr;
+}
 const wchar_t* Body(std::uint32_t resource) noexcept {
-    return IsSupportSoldierResource(resource) ?
-        kBodies[static_cast<int>(SupportSoldierWeapon(resource))][IsSupportLeaderResource(resource) ? 1 : 0] : nullptr;
+    if(!IsSupportSoldierResource(resource))return nullptr;
+    if(const auto* row=LookOf(resource))return row->path;
+    return kBodies[static_cast<int>(SupportSoldierWeapon(resource))][IsSupportLeaderResource(resource) ? 1 : 0];
 }
 struct alignas(16) InitParam { const void* vtable; unsigned char rest[0x28]; };
 static_assert(sizeof(InitParam)==0x30);
@@ -205,7 +219,7 @@ bool InstallSupportSoldiers() noexcept {
 }
 void ResetSupportSoldiers() noexcept {
     using namespace support_native;
-    preloaded=false;missionManager=nullptr;++epoch;
+    preloaded=false;missionManager=nullptr;++epoch;lookCount=0;
     // Mission teardown owns deletion. Release retained weak blocks only; no call into a previous scene.
     for(auto& entry:owned)ReleaseWeak(entry);
 }
@@ -224,6 +238,35 @@ void PreloadSupportSoldiers() noexcept {
     }
 }
 bool SupportSoldiersReady() noexcept { return support_native::Gate(true); }
+bool PreloadSupportLook(SupportWeapon kind,bool leader,const SupportLook& look) noexcept {
+    using namespace support_native;
+    if(!look.On() || static_cast<int>(kind)>=kSupportWeaponCount || !preloaded || faulted)return false;
+    for(unsigned k=0;k<lookCount;++k)if(looks[k].kind==kind && looks[k].leader==leader && looks[k].look==look)return looks[k].ready;
+    if(lookCount>=kSupportLooksMost)return false;
+    auto& row=looks[lookCount++];row=LookRow{};row.kind=kind;row.leader=leader;row.look=look;
+    if(!SupportLookFile(kind,leader,look,row.path,std::size(row.path),true))return false;
+    __try {
+        void* mgr=At<void*>(image,kPreloadManager);
+        if(!mgr)return false;
+        preload(mgr,row.path,2,-1);row.ready=true;
+    } __except(SpawnFault("preload look",GetExceptionInformation(),nullptr,nullptr,nullptr)) {
+        RecordFault(SupportSpawnFailure::mission);
+    }
+    return row.ready;
+}
+std::uint32_t SupportSoldierWithLook(std::uint32_t resource,const SupportLook& look) noexcept {
+    using namespace support_native;
+    if(!IsSupportSoldierResource(resource) || !look.On())return resource;
+    const auto base=resource&~(0xFu<<kSupportLookShift);
+    const auto kind=SupportSoldierWeapon(base);const bool leader=IsSupportLeaderResource(base);
+    for(unsigned k=0;k<lookCount;++k)if(looks[k].kind==kind && looks[k].leader==leader && looks[k].look==look) {
+        if(looks[k].ready)return base|((k+1)<<kSupportLookShift);
+        break;
+    }
+    wchar_t file[96];SupportLookFile(kind,leader,look,file,std::size(file));
+    Log("SUPPORT look %ls not preloaded this mission (generated after it started, or missing): stock look",file);
+    return base;
+}
 bool HoldSupportSoldier(const ObjRef& soldier,bool held) noexcept {
     using namespace support_native;
     if(!soldier || !missionManager || At<void*>(image,kObjectManager)!=missionManager)return false;
