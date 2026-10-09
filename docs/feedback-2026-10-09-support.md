@@ -91,3 +91,8 @@
 
 ## 构建与测试
 `cmake --build build -j 4`、`--target offline_checks`、`ctest -j 3`：见提交说明。
+
+## 附：`support_soldier_native` 偶发 access violation（另一提交）
+- 根因：审计用 `LoadLibraryExW(..., DONT_RESOLVE_DLL_REFERENCES)` 私有映射 EDF.dll，加载器不建隐式 TLS、CRT 启动不运行。`776AB0` 的 CRC 表是 MSVC 线程安全局部静态：经 `gs:[58h][_tls_index]`（`_tls_index` RVA 213A670，映射中恒为 0）读本线程 `_Init_thread_epoch`，实际读到的是 Python 进程自己 TLS 槽 0 偏移 20h 的任意值。值“够大”时跳过构建、用全零 CRC 表算出非原生的哈希（测试照样通过）；值“偏小”时进入 `_Init_thread_header`，调用未解析的 `EnterCriticalSection` IAT 槽——槽里是导入名 RVA `0x1F52128`，正是各组看到的 access violation 地址。与并发无关，取决于进程里那块 TLS 内容。
+- 修法（只改测试夹具，不放宽、不重试）：按加载器/CRT 的职责为私有映像准备它用到的部分——从映像自己的 TLS 模板建 TLS 块、解析 KERNEL32 导入、初始化 CRT 线程安全静态用的临界区与事件；调用时由一段机器码 thunk 在原生代码内部临时把 `gs:[58h]` 换成映像的 TLS 数组、返回前换回（不能在 Python 里换：CPython 3.13 的线程状态本身用隐式 TLS，ctypes 调用路径就会读它）。新增断言：原生静态初始化真的建出了标准 CRC-32 表、并把 epoch 写回了该 TLS 块。
+- 验证：并发 3 路 × 5 轮共 15 次全部通过；此前单跑也会挂。
