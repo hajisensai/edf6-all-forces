@@ -1109,8 +1109,9 @@ def spawned(plan: Plan) -> set[str]:
 
 
 def install(game_root: str, plan: Plan) -> list[str]:
-    """Writes the range's mission (its pack registered first when missing) and takes a range out of the story's
-    missions it used to replace (LEGACY_SLOTS). Refuses to touch a folder another mod put there."""
+    """Writes the range's mission (its pack registered last, when missing: a failure leaves a folder no mode names,
+    never a mode naming a folder that is not there) and takes a range out of the story's missions it used to replace
+    (LEGACY_SLOTS). Refuses to touch a folder another mod put there."""
     out = mission_dir(game_root, RANGE_MISSION)
     if os.path.isdir(out) and os.listdir(out) and not ours(game_root, RANGE_MISSION):
         raise RuntimeError(f'{out} 已有别的 mod 的文件，不覆盖。请先手动处理。')
@@ -1135,7 +1136,6 @@ def install(game_root: str, plan: Plan) -> list[str]:
         raise RuntimeError('没有星导者生物的机体（Mods/OBJECT/EDF6VC_CENTIPEDE / _DRAGONFLY.SGO）：先运行 EDF6VehicleCrew 安装器选「安装」')
     for mission in LEGACY_SLOTS:   # the story's missions back first, whether or not the pack can be registered
         _remove(game_root, mission)
-    register_pack(game_root)
     os.makedirs(out, exist_ok=True)
     _write_derived(game_root, game, {x for x in spawned(plan) if x in DERIVED},
                    PRIMER_FILES if primer else ())
@@ -1149,6 +1149,7 @@ def install(game_root: str, plan: Plan) -> list[str]:
         f.write(points_file)
     with open(os.path.join(out, MARKER), 'w', encoding='utf-8') as f:
         f.write('EDF6 测试场（EDF6VehicleCrew/testrange）：「测试场」任务包的关卡。删除本目录即删除测试场关卡。\n')
+    register_pack(game_root)
     return [f'{p.name}: {s}{"（NPC 驾驶）" if npc else ""}' for s, npc, p in placed]
 
 

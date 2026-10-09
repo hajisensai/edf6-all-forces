@@ -531,8 +531,11 @@ def install(game: str, campaign_requested: bool = False) -> None:
                                 **{f'MAP/{name}': data for name, data in pieces.items()}})
     cache.save()  # assets succeeded: a later mission failure must not force expensive regeneration
     print('写入测试场关卡（「EDF6VehicleCrew 测试场」任务包的唯一一关；只有靶子，没有敌人；联机时大家要有同样的关卡和物体）……')
-    for line in gen.install(game, gen.target_range(gen.Plan())):
-        print('  ', line)
+    if make_edf5_campaign.range_installed(game):
+        for line in gen.install(game, gen.target_range(gen.Plan())):
+            print('  ', line)
+    else:   # build_packs refused it (said why above): the mode table and the range as they were
+        print('！ 测试场任务包这次没有注册（原因见上），测试场保持原样；补齐上面缺的资源后再运行安装器。')
     print('\n安装完成。启动游戏即可。')
     print('联机请同时更新配套 EDF Coop：全军出击房间仅对兼容的 MOD 玩家开放。')
     print('本次模型、挂载、实体瞄具和测试场资源已校验并安装；更新时请运行安装器，不要只替换 DLL。')

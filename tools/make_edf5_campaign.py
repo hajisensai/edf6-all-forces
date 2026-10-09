@@ -411,7 +411,9 @@ def ours_in(table: list) -> list[str]:
 
 def pack_config(data: bytes, packs: tuple[Pack, ...] = PACKS) -> tuple[bytes, dict[str, int]]:
     """config.sgo with the packs' modes appended (the modes before them untouched) and each pack's content id (by
-    tag): after every id in the table, in the order given."""
+    tag): after every id in the table, each pack at its fixed place in (*PACKS, RANGE) whichever packs are given. A
+    room's mode is its content id: the test range's must not move to the EDF5 story's when a player opted out of the
+    campaign (the host on M01, the guest on the range)."""
     ver, members = sgo.read(data)
     table = modes(members)
     ours_there = ours_in(table)
@@ -427,10 +429,11 @@ def pack_config(data: bytes, packs: tuple[Pack, ...] = PACKS) -> tuple[bytes, di
         if 0 not in stock[kind]:
             raise Refused(f'CONFIG.SGO 里没有{"在线" if kind == ONLINE else "离线"}剧情模式：不知道任务包按什么取难度参数。')
     ids = {}
-    for k, pack in enumerate(packs):
-        ids[pack.tag] = content + k
+    slots = {p.tag: k for k, p in enumerate((*PACKS, RANGE))}
+    for pack in packs:
+        ids[pack.tag] = content + slots[pack.tag]
         for kind in pack.kinds:
-            table.append(mode_entry(stock[kind].get(pack.like, stock[kind][0]), pack, content + k, kind))
+            table.append(mode_entry(stock[kind].get(pack.like, stock[kind][0]), pack, ids[pack.tag], kind))
     return sgo.write_depth_first(ver, members), ids
 
 

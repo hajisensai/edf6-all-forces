@@ -289,13 +289,13 @@ class App(tk.Tk):
         self._refresh_status()
 
     def uninstall(self) -> None:
-        weapons.remove_loadout(self.game.get())
         try:
             removed = gen.uninstall(self.game.get())
         except Exception as e:  # shown to the user as-is (the game running, a mode table changed by another tool)
             messagebox.showerror(TITLE, str(e))
             self._refresh_status()
             return
+        weapons.remove_loadout(self.game.get())   # after the range: a failed uninstall keeps the loadout it shows
         messagebox.showinfo(TITLE, f'已删除测试场关卡和「{PACK}」任务包，强制装备已关闭。' if removed
                             else '没装过测试场；强制装备已关闭。')
         self._refresh_status()

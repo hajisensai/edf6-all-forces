@@ -16,6 +16,7 @@ sys.path[:0] = [str(ROOT / p) for p in ('tools', 'pylib', 'testrange', 'autoturr
 import installer
 import make_edf5_campaign as campaign
 import modfiles
+import sgo
 
 
 class CampaignLifecycleTests(unittest.TestCase):
@@ -38,11 +39,11 @@ class CampaignLifecycleTests(unittest.TestCase):
 
     def built(self, with_campaign: bool = True, test_range: bool = True, files: dict[str, bytes] | None = None) -> tuple:
         """make_edf5_campaign.build's result for these packs over stand-in files (no Root.cpk here): the tables, each
-        chosen pack's files, the ids the real build gives (EDF5's from 3, the range's after them)."""
+        chosen pack's files, the ids the real build gives (EDF5's 3..5, the range's 6 with or without them)."""
         files = self.files if files is None else files
         packs = (*(campaign.PACKS if with_campaign else ()), *((campaign.RANGE,) if test_range else ()))
         rels = {campaign.CONFIG, *campaign.TEXTS.values(), *(f for pack in packs for f in pack.files())}
-        ids = campaign.Contents(3 if with_campaign else 0, (6 if with_campaign else 3) if test_range else 0)
+        ids = campaign.Contents(3 if with_campaign else 0, 6 if test_range else 0)
         # In build()'s order: the mode table first.
         return {rel: files[rel] for rel in campaign.FILES if rel in rels}, ids, {'rows': [], 'skipped': []}
 
@@ -213,7 +214,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         self.assertFalse(campaign.enabled(self.root))
         self.assertTrue(campaign.range_installed(self.root))
         self.assertIn('EDF5CampaignContent=0', self.ini.read_text())
-        self.assertIn('TestRangeContent=3', self.ini.read_text())
+        self.assertIn('TestRangeContent=6', self.ini.read_text())   # the range keeps its id without the campaign
         with self.pack() as build:
             installer.install(self.root)
             build.assert_called_once_with(self.root, campaign=False)
@@ -415,6 +416,22 @@ class CampaignLifecycleTests(unittest.TestCase):
             self.assertEqual(set(p.desc), set(campaign.LANGS))
         for field in ('title', 'brief'):
             self.assertEqual(set(campaign.RANGE_ROW[field]), set(campaign.LANGS))
+
+    def test_content_ids_do_not_depend_on_the_packs_installed(self) -> None:
+        """A room's mode is its content id: the range's is the same whether or not the player has the EDF5 campaign
+        (a guest who opted out joins the host's range, not the story's M01), and the campaign's stay 3..5."""
+        def stock(content: int, online: int) -> list:
+            return ['STORY', 'DESC', 0, 0, 0, f'M{content}{online}.MST', ['app:/mission/missionlist.sgo'], 0, online,
+                    content, online]
+        config = sgo.write_depth_first(0, {'ModeList': [stock(c, o) for c in (0, 1, 2) for o in (0, 1)]})
+        _, full = campaign.pack_config(config, (*campaign.PACKS, campaign.RANGE))
+        _, alone = campaign.pack_config(config, (campaign.RANGE,))
+        _, story = campaign.pack_config(config, campaign.PACKS)
+        self.assertEqual([full[p.tag] for p in campaign.PACKS], [3, 4, 5])
+        self.assertEqual(alone, {campaign.RANGE.tag: full[campaign.RANGE.tag]})
+        self.assertEqual(story, {p.tag: full[p.tag] for p in campaign.PACKS})
+        table = campaign.modes(sgo.read(campaign.pack_config(config, (campaign.RANGE,))[0])[1])
+        self.assertEqual({int(e[campaign.M_CONTENT]) for e in table[6:]}, {full[campaign.RANGE.tag]})
 
     def test_range_pack_and_mission_go_together(self) -> None:
         """testrange/gen.py: the pack is registered with the mission and taken out before it (a pack naming a missing
