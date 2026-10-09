@@ -19,8 +19,10 @@ void Log(const char*,...) noexcept {}
 bool IsFuelTank(const unsigned char* w) noexcept { return w[0x100]==3; }
 bool IsLoadoutWeapon(const unsigned char* w) noexcept { return w[0x100]==2; }
 bool IsStoreWeapon(const unsigned char* w) noexcept { return w[0x100]==2; }
-const StoreSpec airSpec{L"AA", "AA", StoreRole::air,0,0},groundSpec{L"AG", "AG", StoreRole::ground,0,0};
-const StoreSpec* StoreOf(const unsigned char* w) noexcept { return w[0x101]==1 ? &airSpec : w[0x101]==2 ? &groundSpec : nullptr; }
+const StoreSpec airSpec{L"AA", "AA", StoreRole::air,0,0},groundSpec{L"AG", "AG", StoreRole::ground,0,0},gunSpec{L"HP", "HP", StoreRole::gun,0,0};
+const StoreSpec* StoreOf(const unsigned char* w) noexcept {
+    return w[0x101]==1 ? &airSpec : w[0x101]==2 ? &groundSpec : w[0x101]==3 ? &gunSpec : nullptr;
+}
 int fileQueries=0;
 const wchar_t* WeaponFile(const unsigned char* w,std::size_t* n) noexcept {
     ++fileQueries;const auto file=At<const wchar_t*>(w,0x08);*n=file ? std::wcslen(file) : 0;return file;
@@ -28,7 +30,8 @@ const wchar_t* WeaponFile(const unsigned char* w,std::size_t* n) noexcept {
 void ClearWeaponLock(unsigned char*) noexcept {}
 int WeaponLock(const unsigned char*,float*,float*) noexcept { return 0; }
 bool ReadRound(const unsigned char* w,RoundModel* m) noexcept {
-    *m={};m->kind=w[0x101] ? RoundKind::homing : RoundKind::arc;m->speed=2;m->alive=300;return true;
+    // 3: a catalogued gun round of the grenade class (the flak's HE proximity), 4: a stock grenade round
+    *m={};m->kind=w[0x101]==1 || w[0x101]==2 ? RoundKind::homing : RoundKind::arc;m->lobbed=w[0x101]>=3;m->speed=2;m->alive=300;return true;
 }
 namespace audio { void LockTone(int,float) noexcept {} }
 }
@@ -108,6 +111,12 @@ int main() {
     check(fileQueries>0,"selection queries real resource filenames");
     Put<std::uint64_t>(SeatAt(vehicles[0],0),kSeatWeaponCount,1);PayloadFrame(vehicles[0]);
     check(PlayerPayload(&readout) && readout.count==1 && readout.choices==0,"vehicle without additional mounts has no invented switch choices");
+    // The flak's HE proximity round (StoreRole::gun) flies the grenade class: aimed at aircraft all the same;
+    // a lobbed round that is no catalogued gun round is not.
+    Put<int>(weapons[1][0],kWeaponAmmo,0);weapons[1][1][0x101]=3;
+    check(NpcPayloadSelect(vehicles[1],0,400,true)==weapons[1][1],"gun-role proximity HE is used against aircraft");
+    weapons[1][1][0x101]=4;
+    check(!NpcPayloadSelect(vehicles[1],0,400,true),"a lobbed round that is no gun store stays off aircraft");
     ResetPayload();check(!PayloadPicked(vehicles[0]),"mission reset clears choices");
     VirtualFree(image,0,MEM_RELEASE);std::printf("payload runtime: %d checks, %d failures\n",checks,fail);return fail ? 1 : 0;
 }

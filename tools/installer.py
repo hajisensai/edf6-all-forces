@@ -448,7 +448,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
     campaign = None
     if campaign_requested or make_edf5_campaign.wanted(game):
-        print('生成可选实验 EDF5 战役（追加离线任务；原始 BVM 脚本尚未逐关验证，缺少资源的 4 关不会安装）……')
+        print('生成可选实验 EDF5 战役（本篇、DLC1、DLC2 三个独立任务包；原始 BVM 脚本尚未逐关验证，缺少资源的 4 关不会安装）……')
         try:
             campaign = make_edf5_campaign.build(game)
         except make_edf5_campaign.Refused as e:
@@ -492,11 +492,10 @@ def install(game: str, campaign_requested: bool = False) -> None:
         print('写入', path)
     for name, section in PLUGINS:
         install_plugin(game, *plugins[name], name, section)
-    if campaign is not None:   # after the plugin's ini: it sets EDF5CampaignRows there
+    if campaign is not None:   # after the plugin's ini: it sets EDF5CampaignContent there
         for path in make_edf5_campaign.install(game, campaign):
             print('写入', path)
-        print(f'EDF5 战役：{len(campaign[2]["rows"])} 关接在离线任务列表第 {campaign[1]} 关之后'
-              f'（打完 EDF6 第一关 M000B 后解锁）')
+        print(make_edf5_campaign.summary(campaign))
         for group, path, why in campaign[2]['skipped']:
             print('  跳过', group, path, why)
     if bigmap is not None:
@@ -567,7 +566,7 @@ def uninstall(game: str) -> None:
         return
     import make_edf5_campaign
     if make_edf5_campaign.removal_blocked(game):
-        print('已取消卸载：EDF5 战役任务列表被其他工具改过，不能安全撤回；保留任务文本和插件以免选关崩溃。')
+        print('已取消卸载：EDF5 战役的模式表（CONFIG.SGO）或旧版任务列表被其他工具改过，不能安全撤回；保留任务文件和插件以免读档崩溃。')
         return
     if choice == '1':   # the call weapons point at the generated SGOs: those go only with the rows
         if not retire_weapons(game):
@@ -587,11 +586,10 @@ def uninstall(game: str) -> None:
         uninstall_stock_stores(game)
     if gen.uninstall(game):
         print('删除测试场关卡')
-    # with 2 too: without the plugin the appended rows would move the ending past M152 and the clear ratio to 257 rows
+    # with 2 too: without the plugin the packs would stay listed as content the player does not own
     import make_edf5_campaign
     if make_edf5_campaign.installed(game):
-        print('EDF5 战役：任务列表还原成安装前的样子（存档里 EDF5 任务的通关记录还在，重新安装后照旧显示）。')
-        print('  如果存档最后停在一个 EDF5 任务上，选关游标会回到第一关。')
+        print('EDF5 战役：模式表、文本表还原成安装前的样子，删除 3 个任务包的任务列表（各任务包的存档 DEFP_E5*.MST 留着，重新安装后照旧显示）。')
         done, kept = make_edf5_campaign.remove(game)
         for path in done:
             print('还原', path)
@@ -706,7 +704,7 @@ def send_logs() -> int:
 def manage_campaign(game: str) -> int:
     """Menu 6: explicit experimental campaign opt-in or removal, without uninstalling the plugins."""
     import make_edf5_campaign
-    print('EDF5 战役默认开启：普通安装 / 更新会在离线任务列表末尾追加任务；手动停用后保留停用选择。')
+    print('EDF5 战役默认开启：普通安装 / 更新会加上 EDF5 本篇、DLC1、DLC2 三个独立任务包（离线模式的「任务包」里选）；手动停用后保留停用选择。')
     print('原始 BVM 脚本尚未逐关验证，不能保证所有任务可以正常游玩；缺少资源的 4 关不会安装。')
     print('当前状态：' + ('已启用' if make_edf5_campaign.enabled(game) else '未启用'))
     choice = ask('输入 1 启用 / 更新实验战役（同时更新插件），2 停用战役（保留插件），其它 = 取消：')
@@ -720,7 +718,7 @@ def manage_campaign(game: str) -> int:
         for path in kept:
             print('保留（之后被别的工具改过）', path)
         if make_edf5_campaign.enabled(game):
-            print('未能停用：任务列表被其他工具改过，已保留它依赖的文本、图片和插件。')
+            print('未能停用：模式表或旧版任务列表被其他工具改过，已保留它依赖的任务文件和插件。')
             return 1
         print('EDF5 战役已停用，后续普通更新不会重新启用。')
     return 0

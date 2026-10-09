@@ -435,7 +435,10 @@ unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float distance,bo
         const auto mark=At<std::int32_t>(w,edf::kWeaponMark);
         if(spec && ((airborne && (spec->role==StoreRole::ground || spec->role==StoreRole::bomb || spec->role==StoreRole::rocket)) ||
                     (!airborne && spec->role==StoreRole::air)))continue;
-        if(airborne && (m.lobbed || mark==edf::kMarkGround || mark==edf::kMarkLofted))continue;
+        // A catalogued gun round (StoreRole::gun, vcobjects.Shell) is a direct-fire round whatever class carries it: the
+        // flak's proximity HE flies the stock grenade class (rounds.cpp calls it lobbed) and is meant for aircraft.
+        const bool lobbed=m.lobbed && !(spec && spec->role==StoreRole::gun);
+        if(airborne && (lobbed || mark==edf::kMarkGround || mark==edf::kMarkLofted))continue;
         if(!airborne && mark==edf::kMarkAir)continue;
         // Guided fire at long range, direct fire close up, splash against ground targets.
         float rank=m.kind==RoundKind::homing ? (distance>150.0f ? 4.0f : 2.0f) : airborne ? 3.0f : blast>0.0f ? 3.5f : 2.5f;

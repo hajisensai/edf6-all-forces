@@ -1,16 +1,22 @@
 """Stores for the stock vehicles (ini StockVehicleStores, or the older StockHeliStores; on by default since 2026-10-07;
 src/payload.cpp, src/stores.cpp, docs/stock-payload-re.md §4). The user, 2026-10-07: "给载具应有的多种挂载增加多种挂载。
-例如原版坦克、aa车、直升机等" "应该有的都得有，比如导弹车". What each stock vehicle should carry besides its own (LOADOUTS):
+例如原版坦克、aa车、直升机等" "应该有的都得有，比如导弹车"; 2026-10-09: "我要各种载具要有应有的挂载（符合设定的，例如坦克
+应该有ap和he，甚至炮射导弹如应有的话）". What each stock vehicle should carry besides its own (LOADOUTS, by CATEGORIES; the
+inventory of every vehicle and why each gets what it gets: docs/feedback-2026-10-09-loadcamp.md):
 
-  tanks (Blacker 505, Varius 601) and the Grape    gun-launched AGM-114s, from the main gun
-  Epsilon railgun 403                              AGM-114s from the railgun (its two gunners keep their machine guns)
+  main battle tanks (Blacker 505, Varius 601)      APFSDS and HE rounds and a gun-launched LAHAT, from the main gun
+  the Grape 401 (an infantry fighting vehicle)     AP and HE autocannon belts and AGM-114s, from its cannon
+  Epsilon railgun 403                              AGM-114s from the railgun (a railgun fires slugs only: no HE round;
+                                                   its two gunners keep their machine guns)
   Titan 404                                        AGM-114s on the driver's second control, beside the front gatling
   Naegling missile launcher 402                    AIM-120 for air defence, AGM-65 for armour, a Hydra 70 pod
-  Kepler / Volus flak 603                          AIM-9X and AIM-120 surface-to-air missiles beside the guns
+  Kepler / Volus flak 603                          HE proximity rounds, AIM-9X and AIM-120 surface-to-air missiles
   Freed bikes 503 / 613                            a Hydra 70 pod
   N9 Eros 506 / Heron 602 / Nereid 409             a Hydra 70 pod, AGM-114s and AIM-9X beside the stock missile
 
-The stores are the jets' (pylib/vcobjects.py STORES, the files tools/make_jets.py writes).
+The stores are pylib/vcobjects.py STORES: the jets' missiles and rockets (the files tools/make_jets.py writes, recorded
+here as needed) and the rounds no jet carries (the gun rounds, vcobjects.Shell: the stock vehicle round of that kind
+and tier renamed; the LAHAT), which this tool writes itself (Mods/WEAPON/EDF6VC_<KIND>_<rounds>.SGO).
 The old invented coaxial gun is removed: these models have no independent machine-gun mount.
 The original 403/Titan machine guns stay on their existing stock mounts. Each hangs on the bone and seat of the stock holder it fires beside (Mount.like): the switch
 (PlayerJetSwitchKey R, pad LB) goes round that holder's control's stock weapon and the stores, and that control fires
@@ -72,36 +78,69 @@ def _store(kind: str, rounds: int, like: int) -> Mount:
     return Mount(vc.store_file(kind, rounds), like)
 
 
-# All added stores are recoilless rockets/missiles. Keep the BodyRecoil variant,
-# even at zero strength: the 505/601/Car callbacks require that variant and
-# dereference its payload without a null check. The 403's named AimRecoil is
-# exclusive to its existing gunner mounts (slot 48 branches on the seat index).
+# Rockets and missiles are recoilless. Keep the BodyRecoil variant, even at zero
+# strength: the 505/601/Car callbacks require that variant and dereference its
+# payload without a null check. A gun round (vcobjects.Shell) recoils as the stock
+# gun it fires from: it takes that holder's own BodyRecoil pair from the request.
+# The 403's named AimRecoil is exclusive to its existing gunner mounts (slot 48
+# branches on the seat index): it is never copied (_params takes a pair of numbers
+# only, anything else is NO_RECOIL).
 NO_RECOIL = [0.0, 0.0]
 
-_TANK = (_store('AGM_L', 4, 0),)
+# What each kind of stock vehicle carries (a tank's 20 + 20 rounds beside its stock 25-30, an autocannon's belts beside
+# its stock 240-800, the flak's beside its stock 1000-1500). The category names the setting it follows:
+# tests/test_stock_store_loadouts.py holds every vehicle of LOADOUTS to its category's kinds.
+_MBT = (_store('AP', 20, 0), _store('HE', 20, 0), _store('GLM', 4, 0))
+_IFV = (_store('AC_AP', 150, 0), _store('AC_HE', 150, 0), _store('AGM_L', 4, 0))
+_FLAK = (_store('FLAK_HE', 500, 0), _store('AAM_S', 2, 0), _store('AAM_M', 4, 0))
+_LAUNCHER = (_store('AAM_M', 4, 0), _store('AGM', 2, 0), _store('RKT', 19, 0))
+_BIKE = (_store('RKT', 19, 0),)
 _HELI = (_store('RKT', 19, 2), _store('AGM_L', 4, 2), _store('AAM_S', 2, 2))   # beside the 506's missile (holder 2)
-LOADOUTS: dict[str, tuple[Mount, ...]] = {
-    'V506_HELI': _HELI,
-    'V506_HELI_EDF6BENEFITS': _HELI,
-    'V602_HELI': _HELI,
-    'VEHICLE409_HELI': (_store('RKT', 19, 1), _store('AGM_L', 4, 1), _store('AAM_S', 2, 1)),   # its missile: holder 1
-    'V505_TANK': _TANK,
-    'V505_TANK_EDF4': _TANK,
-    'V505_TANK_EDF5': _TANK,
-    'V505_TANK_EDF6BENEFITS': _TANK,
-    'V505_TANK_MPACK2': _TANK,
-    'V601_TANK': _TANK,
-    'VEHICLE401_STRIKER': _TANK,
-    'VEHICLE401_STRIKER_MPACK2': _TANK,
-    'VEHICLE403_TANK': (_store('AGM_L', 4, 0),),
-    'VEHICLE404_BIGTANK': (_store('AGM_L', 4, 3),),   # the driver's front gatling (holder 3): his second control
-    'VEHICLE402_ROCKET': (_store('AAM_M', 4, 0), _store('AGM', 2, 0), _store('RKT', 19, 0)),
-    'V402_ROCKET_EDF6BENEFITS': (_store('AAM_M', 4, 0), _store('AGM', 2, 0), _store('RKT', 19, 0)),
-    'V603_FLAK': (_store('AAM_S', 2, 0), _store('AAM_M', 4, 0)),
-    'V503_BIKE': (_store('RKT', 19, 0),),
-    'V503_BIKE_EDF6BENEFITS': (_store('RKT', 19, 0),),
-    'V503_BIKE_OMEGAZ': (_store('RKT', 19, 0),),
-    'V613_BIKE': (_store('RKT', 19, 0),),
+CATEGORIES: dict[str, str] = {
+    'V506_HELI': 'heli', 'V506_HELI_EDF6BENEFITS': 'heli', 'V602_HELI': 'heli', 'VEHICLE409_HELI': 'heli',
+    'V505_TANK': 'mbt', 'V505_TANK_EDF4': 'mbt', 'V505_TANK_EDF5': 'mbt', 'V505_TANK_EDF6BENEFITS': 'mbt',
+    'V505_TANK_MPACK2': 'mbt', 'V601_TANK': 'mbt',
+    'VEHICLE401_STRIKER': 'ifv', 'VEHICLE401_STRIKER_MPACK2': 'ifv',
+    'VEHICLE403_TANK': 'railgun', 'VEHICLE404_BIGTANK': 'superheavy',
+    'VEHICLE402_ROCKET': 'launcher', 'V402_ROCKET_EDF6BENEFITS': 'launcher',
+    'V603_FLAK': 'flak',
+    'V503_BIKE': 'bike', 'V503_BIKE_EDF6BENEFITS': 'bike', 'V503_BIKE_OMEGAZ': 'bike', 'V613_BIKE': 'bike',
+}
+_BY_CATEGORY: dict[str, tuple[Mount, ...]] = {
+    'mbt': _MBT, 'ifv': _IFV, 'flak': _FLAK, 'launcher': _LAUNCHER, 'bike': _BIKE, 'heli': _HELI,
+    'railgun': (_store('AGM_L', 4, 0),),
+    'superheavy': (_store('AGM_L', 4, 3),),   # the driver's front gatling (holder 3): his second control
+}
+LOADOUTS: dict[str, tuple[Mount, ...]] = {stem: _BY_CATEGORY[c] for stem, c in CATEGORIES.items()}
+LOADOUTS['VEHICLE409_HELI'] = (_store('RKT', 19, 1), _store('AGM_L', 4, 1), _store('AAM_S', 2, 1))   # its missile: holder 1
+# What each category must carry (tests/test_stock_store_loadouts.py): store kinds, or roles ('role:<role>').
+REQUIRED: dict[str, tuple[str, ...]] = {
+    'mbt': ('AP', 'HE', 'GLM'),                          # AP, HE and the gun-launched missile
+    'ifv': ('AC_AP', 'AC_HE', 'role:ground'),            # the autocannon's two belts and an anti-tank missile
+    'flak': ('FLAK_HE', 'role:air'),                     # HE proximity rounds, surface-to-air missiles
+    'launcher': ('role:air', 'role:ground', 'role:rocket'),
+    'heli': ('role:rocket', 'role:ground', 'role:air'),
+    'bike': ('role:rocket',),
+    'railgun': ('role:ground',),
+    'superheavy': ('role:ground',),
+}
+# Every other vehicle a stock request brings, and why it gets no stores (tests/test_stock_store_loadouts.py, with the
+# game: every vehicle is in LOADOUTS or here).
+NOT_LOADED: dict[str, str] = {
+    **{s: '机甲（Vehicle504_begaruta）：武器固定在双手，每只手一个键；插件不为该类补造挂点' for s in (
+        'V504_BEGARUTA', 'V504_BEGARUTA_BLUE', 'V504_BEGARUTA_GOLD', 'V504_BEGARUTA_PINK', 'V504_BEGARUTA_RED',
+        'V608_OLDROBOT')},
+    **{s: '救护车（Vehicle507_Rescuetank）：没有武器' for s in ('V507_RESCUETANK', 'V507_RESCUETANK_MPACK2',
+                                                       'V507_RESCUETANK_SIAWASE')},
+    'V510_MASER': 'EMC（Vehicle510_Maser）：唯一武器是原子光线炮，插件不为该类补造挂点',
+    'V512_KEITRUCK_BGP': '轻卡车：没有武器',
+    **{s: '巨型机器人（Vehicle501_FortressRobo）：武器固定在双臂' for s in (
+        'V515_RETROBALAM', 'V515_RETROBALAM_GRAY', 'V515_RETROBALAM_GREEN', 'V605_BARGA_CANNON')},
+    'V607_ROBOTRUCK': '机器人卡车（Vehicle607_RoboTruck）：火焰喷射器与导弹在双臂，插件不为该类补造挂点',
+    **{s: '机甲 Nix（Vehicle612_nix）：武器固定在双臂' for s in ('V612_NIX', 'V612_NIX_BLACK', 'V612_NIX_RED')},
+    'V614_PROTEUS_MK2_CALL': 'Proteus（VehicleBigBegaruta）：自带武器由 make_proteus / proteus.cpp 管理',
+    'VEHICLE410_HELI': '410 直升机（VehicleHelicopter410）：插件不为该类补造挂点（stores.cpp kBuilds 没有它）',
+    'VEHICLE502_GROUNDROBO': '深渊爬行者（Vehicle502_GroundRobo）：三件武器各有一个键，插件不为该类补造挂点',
 }
 # The vehicle classes src/stores.cpp builds the extra holders of (its kBuilds, and the 506's loop): a stem of another
 # class would get holders with no weapon.
@@ -125,14 +164,46 @@ def store_paths(stem: str) -> list[str]:
 
 
 def store_files() -> list[str]:
-    """The jets' store weapons the loadouts use (make_jets writes them)."""
+    """Every store weapon the loadouts use."""
     return sorted({m.weapon for load in LOADOUTS.values() for m in load if m.weapon != COAX_MG})
 
 
-def _params(m: Mount) -> list:
+def jet_store_files() -> list[str]:
+    """The loadouts' store weapons make_jets writes (the jets carry them too): recorded here as needed."""
+    return [f for f in store_files() if f in vc.STORE_FILES]
+
+
+def own_store_files() -> list[str]:
+    """The loadouts' store weapons no jet carries (the gun rounds, the LAHAT): this tool writes them."""
+    return [f for f in store_files() if f not in vc.STORE_FILES]
+
+
+def is_shell(weapon: str) -> bool:
+    """Whether store weapon file `weapon` is a gun round (vcobjects.Shell)."""
+    got = vc.store_of(_path('weapon', weapon))
+    return got is not None and isinstance(vc.STORES[got[0]].weapon, vc.Shell)
+
+
+def _is_body_recoil(v: object) -> bool:
+    return (isinstance(v, list) and len(v) == 2
+            and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in v))
+
+
+def _params(m: Mount, beside: object = None) -> list:
+    """A store's per-weapon parameters in a weapon list: a missile's or rocket's NO_RECOIL; a gun round's the BodyRecoil
+    pair of the stock weapon it fires beside (`beside`, as Python lists), NO_RECOIL when that is no such pair."""
     if m.weapon == COAX_MG:
         raise ValueError('旧同轴机枪没有独立模型挂点；不可重新挂到主炮口')
+    if is_shell(m.weapon) and _is_body_recoil(beside):
+        return [float(x) for x in beside]
     return copy.deepcopy(NO_RECOIL)
+
+
+def _entry_params(entry: object) -> object:
+    """The per-weapon parameters (item 1) of a weapon list entry, as Python lists; None for an empty holder."""
+    if isinstance(entry, dsgo.Node):
+        entry = dsgo.to_py(entry)
+    return entry[1] if isinstance(entry, list) and len(entry) > 1 else None
 
 
 def _node(v: object) -> object:
@@ -174,7 +245,7 @@ def _derived_sgo(data: bytes, stem: str) -> bytes:
     for mount in LOADOUTS[stem]:
         rows.append(copy.deepcopy(rows[mount.like]))
         for weapons in own[-1:]:
-            weapons.append([_path('weapon', mount.weapon), _params(mount)])
+            weapons.append([_path('weapon', mount.weapon), _params(mount, _entry_params(weapons[mount.like]))])
     return sgo.write(version, m)
 
 
@@ -191,7 +262,8 @@ def _derived_dsgo(data: bytes, stem: str) -> bytes:
     for mount in LOADOUTS[stem]:
         rows.items.append(copy.deepcopy(rows.items[mount.like]))
         for weapons in own[-1:]:
-            weapons.items.append(dsgo.Node([_path('weapon', mount.weapon), _node(_params(mount))]))
+            weapons.items.append(dsgo.Node([_path('weapon', mount.weapon),
+                                            _node(_params(mount, _entry_params(weapons.items[mount.like])))]))
     return dsgo.write(doc)
 
 
@@ -272,7 +344,8 @@ def request_sgo(data: bytes, name: str, rows: dict[str, int]) -> tuple[bytes, st
     old_vehicle = entry.items[2]
     entry.items[2] = _path('object', derived_name(stem))
     for mount in LOADOUTS[stem]:
-        weapons.items.append(dsgo.Node([_path('weapon', mount.weapon), _node(_params(mount))]))
+        weapons.items.append(dsgo.Node([_path('weapon', mount.weapon),
+                                        _node(_params(mount, _entry_params(weapons.items[mount.like])))]))
     res = doc.root.get('resource')
     items = [entry.items[2] if isinstance(r, str) and r.lower() == old_vehicle.lower() else r for r in res.items]
     res.items[:] = items + [p for p in store_paths(stem) if p not in items]
@@ -294,7 +367,13 @@ def check(files: dict[str, bytes], rows: dict[str, int]) -> None:
         for k, mount in enumerate(LOADOUTS[stem]):
             assert got[rows[stem] + k] == got[mount.like], (rel, k)
         holders[rel.split('/')[-1].lower()] = len(got)
+    own = {f'WEAPON/{f}'.upper() for f in own_store_files()}
     for rel, data in files.items():
+        if rel.upper() in own:
+            kind, rounds = vc.store_of(_path('weapon', rel.split('/')[-1]))
+            got = dsgo.to_py(dsgo.parse(data).root)
+            assert got.get('AmmoCount') == float(rounds), (rel, got.get('AmmoCount'))
+            continue
         if not rel.startswith('WEAPON/') or rel.upper().endswith(COAX_MG):
             continue
         d = dsgo.to_py(dsgo.parse(data).root)
@@ -306,8 +385,9 @@ def check(files: dict[str, bytes], rows: dict[str, int]) -> None:
         assert len(weapons) == rows[stem] + len(LOADOUTS[stem]), (rel, len(weapons))
         assert vehicle in holders or not holders, (rel, vehicle)
         assert [w[0] for w in weapons[rows[stem]:]] == store_paths(stem), rel
-        for w in weapons[rows[stem]:]:
-            assert w[1] == NO_RECOIL, (rel, 'added stores require zero BodyRecoil', w)
+        for mount, w in zip(LOADOUTS[stem], weapons[rows[stem]:]):
+            want = _params(mount, _entry_params(weapons[mount.like]))
+            assert _is_body_recoil(w[1]) and w[1] == want, (rel, 'added stores require the BodyRecoil pair', w, want)
         assert entry[2] in d['resource'] and all(p in d['resource'] for p in store_paths(stem)), rel
     assert all(m.weapon.upper().startswith('EDF6VC_') for load in LOADOUTS.values() for m in load)
     assert all(m.weapon != COAX_MG for load in LOADOUTS.values() for m in load), 'no independent coaxial-gun mount'
@@ -356,6 +436,12 @@ def build(root: str, overlay: dict[str, bytes] | None = None
         stems.add(stem)
     for stem in sorted(stems):
         out[f'OBJECT/{derived_name(stem)}'] = derived_vehicle(game, stem)
+    for f in own_store_files():   # the rounds no jet carries: this tool's (never over another's file)
+        rel = f'WEAPON/{f}'
+        if os.path.isfile(led.disk(rel)) and OWNER not in led.owners(rel):
+            skipped.append(rel)
+            continue
+        out[rel] = vc.store_sgo(game, f)
     check({**out, **handed}, rows)
     return out, skipped, handed
 
@@ -364,7 +450,7 @@ def install(root: str, files: dict[str, bytes]) -> list[str]:
     """Writes `files` (build) as this tool's; what it wrote before and does not now is released (the stock request
     comes back). The store weapons must be installed (make_jets): recorded as needed."""
     led = ledger.Ledger(root)
-    for f in store_files():
+    for f in jet_store_files():
         led.need(OWNER, f'WEAPON/{f}')
     before = set(led.owned_by(OWNER))
     import make_optics
@@ -384,7 +470,7 @@ def install(root: str, files: dict[str, bytes]) -> list[str]:
             dependencies.update(ledger.key(dep) for dep in needs)
         if not changed_object:
             paths.append(led.put(OWNER, rel, data))
-    keep = {ledger.key(rel) for rel in files} | {ledger.key(f'WEAPON/{f}') for f in store_files()} | dependencies
+    keep = {ledger.key(rel) for rel in files} | {ledger.key(f'WEAPON/{f}') for f in jet_store_files()} | dependencies
     obsolete = before - keep
     led.release(OWNER, sorted(obsolete - _held_outputs(root, led, list(obsolete))))
     return paths

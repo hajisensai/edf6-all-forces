@@ -8,6 +8,12 @@ inline constexpr StoreSpec kStores[]={
     {L"EDF6VC_ESSM_","RIM-162 ESSM",StoreRole::air,0.0f,0.0000f},
     {L"EDF6VC_MK82_","Mk 82",StoreRole::bomb,230.0f,0.0150f},
     {L"EDF6VC_RKT_","Hydra 70",StoreRole::rocket,32.0f,0.0015f},
+    {L"EDF6VC_AP_","APFSDS",StoreRole::gun,0.0f,0.0000f},
+    {L"EDF6VC_HE_","HE",StoreRole::gun,0.0f,0.0000f},
+    {L"EDF6VC_GLM_","LAHAT",StoreRole::ground,0.0f,0.0000f},
+    {L"EDF6VC_AC_AP_","AP belt",StoreRole::gun,0.0f,0.0000f},
+    {L"EDF6VC_AC_HE_","HE belt",StoreRole::gun,0.0f,0.0000f},
+    {L"EDF6VC_FLAK_HE_","HE-PROX",StoreRole::gun,0.0f,0.0000f},
 };
 inline constexpr JetMass kJetMasses[]={
     {7001.0f,22000.0f,1500.0f},
