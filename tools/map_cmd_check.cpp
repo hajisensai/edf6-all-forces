@@ -147,6 +147,19 @@ int main() {
     Check(Click(s,marks,4,150.0f,110.0f,22.0f,false)==nullptr,"a unit behind the eye is never clicked");
     const Mark close[]={{&a,100.0f,100.0f,true},{&b,112.0f,100.0f,true}};
     Check(Click(s,close,2,109.0f,100.0f,22.0f,false)==&b,"two in reach: the nearer");
+    // Shown but not picked (Mark::pick; the user, 2026-10-09: a box of 30 units none of which took the order; a tank's
+    // crew squad selected with the tank): the box passes over them, a click on one leaves the selection as it was.
+    {
+        int tank=0,crew=0,script=0;
+        const Mark field[]={{&tank,200.0f,200.0f,true,true},{&crew,201.0f,199.0f,true,false},{&script,260.0f,220.0f,true,false}};
+        s.Clear();Box(s,field,3,150.0f,150.0f,300.0f,300.0f,false);
+        Check(one(s,&tank),"a box over a tank and its riding crew and a script's squad: the tank alone",s.n);
+        Check(Click(s,field,3,260.0f,220.0f,22.0f,false)==&script && one(s,&tank),"a click on a script's squad: named, the selection kept");
+        s.Clear();
+        Check(Click(s,field,3,203.0f,198.0f,22.0f,false)==&tank && one(s,&tank),"a click on the crew over its tank: the tank");
+        const Mark alone[]={{&crew,201.0f,199.0f,true,false}};
+        Check(Click(s,alone,1,203.0f,198.0f,22.0f,false)==&crew && one(s,&tank),"a click on a riding crew alone: named, not picked");
+    }
     // The enemy under the pointer (mapcmd.cpp Hover): an enemy has a mark at its lock point and one up its pin; either
     // under the pointer finds it, behind the eye never, out of reach none.
     const Mark foes[]={{&a,400.0f,300.0f,true},{&a,400.0f,240.0f,true},{&b,600.0f,300.0f,true},{&b,600.0f,240.0f,false}};

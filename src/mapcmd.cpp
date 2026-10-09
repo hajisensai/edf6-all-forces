@@ -97,6 +97,8 @@ struct Game {
     ObjRef requester{},focus{};
     NpcCommandReason failure=NpcCommandReason::none;
     unsigned affected=0;
+    // The last command's units that did not take it, by why (the log: "0 of 32 units took it" said nothing of why).
+    int skipScript=0,skipRiding=0,skipCannot=0,skipRemote=0,skipFailed=0;
     std::uint32_t networkRequest=0;unsigned networkQueued=0;
     Order networkOrder=Order::none;
     wchar_t networkMessage[128]{};
@@ -243,7 +245,31 @@ bool Takes(const Entry& e,Order o) noexcept {
     if(e.owner==Owner::tank)return o==Order::none || mapcmd::PointOrder(o);
     return mapcmd::VehicleOrder(o);
 }
+// Whether the map's box, click and Tab take `e` (mapcmd_logic.h Mark::pick): not a squad a script drives (it takes no
+// order at all), not a squad riding a vehicle (its vehicle is the unit on the map; its row in the panel picks it).
+bool Picked(const Entry& e) noexcept { return !e.u.locked && !(e.owner==Owner::squad && e.u.riding); }
+// Why `e` is not picked, for the note (CommandFailureText).
+NpcCommandReason NotPicked(const Entry& e) noexcept { return e.u.locked ? NpcCommandReason::scripted : NpcCommandReason::riding; }
+// The units the box, click and Tab take (their identities, in the list's order); how many.
+int PickedIds(const Game& g,const void** out) noexcept {
+    int n=0;
+    for(int i=0;i<g.count;++i)if(Picked(g.list[i]))out[n++]=g.list[i].u.v;
+    return n;
+}
+const Entry* EntryOf(const Game& g,const void* id) noexcept {
+    for(int i=0;i<g.count;++i)if(g.list[i].u.v==id)return &g.list[i];
+    return nullptr;
+}
 
+// The log's word for the last refusal (npc_command.h NpcCommandReason).
+const char* ReasonName(NpcCommandReason why) noexcept {
+    static const char* const kNames[]={"none","invalid requester","not found","not a leader","not its authority","not its owner",
+        "scripted","not friendly","cooling down","no target","no seat","unsupported","failed","disabled","stale",
+        "boarding unavailable","no vehicle","riding"};
+    static_assert(sizeof(kNames)/sizeof(kNames[0])==static_cast<std::size_t>(NpcCommandReason::count),"a name a reason");
+    const auto i=static_cast<std::size_t>(why);
+    return i<sizeof(kNames)/sizeof(kNames[0]) ? kNames[i] : "?";
+}
 const wchar_t* CommandFailureText(NpcCommandReason why) noexcept {
     using hudtext::Tx;using hudtext::Tr;using Reason=NpcCommandReason;
     switch(why) {
@@ -287,7 +313,7 @@ int Marks(const Game& g,const View& v,mapcmd::Mark* out) noexcept {
     for(int i=0;i<g.count;++i) {
         const Entry& e=g.list[i];
         float p[3];mapcmd::BodyPoint(e.u.pos,e.u.air,p);
-        out[i]=mapcmd::Mark{e.u.v,0.0f,0.0f,false};
+        out[i]=mapcmd::Mark{e.u.v,0.0f,0.0f,false,Picked(e)};
         out[i].on=mapcmd::Project(v.vp,p,v.w,v.h,&out[i].x,&out[i].y);
     }
     return g.count;
@@ -331,6 +357,8 @@ void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
     // its raw address or reinterpret a row number after sort/recruitment changes the next snapshot.
     for(int i=0;i<g.count;++i)if(g.list[i].owner==Owner::squad && g.list[i].u.v==hit.identity.obj) {
         if(!Readable(hit.identity.obj,kSelfCtrl+sizeof(void*)) || !hit.identity.Is(hit.identity.obj))return;
+        // A script's squad takes no order: its row says why instead of selecting it (a riding one is picked here).
+        if(g.list[i].u.locked){Note(g,L"%ls",CommandFailureText(NpcCommandReason::scripted));return;}
         if(!shift)g.sel.Clear();
         if(shift && g.sel.Has(hit.identity.obj))g.sel.Remove(hit.identity.obj);else g.sel.Add(hit.identity.obj);
         g.rowPicked=g.sel.n==1;return;
@@ -386,7 +414,10 @@ void Pointer(Game& g,const MapCmdInput& in,const Keys& k,const View* v) noexcept
     if(click && UiAt(*v,g.pointer.x,g.pointer.y).kind!=Game::UiKind::none){} // release over UI never selects what is underneath
     else if(click && (g.armedOrder || g.armedSupport>=0) && !g.boxing)g.armedClick=true;
     else if(box)mapcmd::Box(g.sel,marks,n,g.bx,g.by,g.pointer.x,g.pointer.y,k.shift);
-    else if(click)mapcmd::Click(g.sel,marks,n,g.pointer.x,g.pointer.y,kClickRadius*s,k.shift);
+    else if(click) {
+        const Entry* hit=EntryOf(g,mapcmd::Click(g.sel,marks,n,g.pointer.x,g.pointer.y,kClickRadius*s,k.shift));
+        if(hit && !Picked(*hit))Note(g,L"%ls",CommandFailureText(NotPicked(*hit)));
+    }
     g.boxing=g.pressing=false;
 }
 
@@ -462,6 +493,7 @@ void CommandNetworkReply(Game& g) noexcept {
 int Issue(Game& g,const Command& cmd,int* skipped) noexcept {
     int k=0;
     g.failure=NpcCommandReason::none;g.affected=0;
+    g.skipScript=g.skipRiding=g.skipCannot=g.skipRemote=g.skipFailed=0;
     g.networkQueued=0;g.networkMessage[0]=0;
     *skipped=0;
     for(int i=0;i<g.count;++i)k+=g.sel.Has(g.list[i].u.v) && Takes(g.list[i],cmd.order) ? 1 : 0;
@@ -493,22 +525,23 @@ int Issue(Game& g,const Command& cmd,int* skipped) noexcept {
         if(!g.sel.Has(e.u.v))continue;
         if(!Takes(e,cmd.order)) {
             g.failure=e.u.locked ? NpcCommandReason::scripted : e.u.riding ? NpcCommandReason::riding : NpcCommandReason::unsupported;
+            ++(e.u.locked ? g.skipScript : e.u.riding ? g.skipRiding : g.skipCannot);
             ++*skipped;continue;
         }
         if(!IsOnlineAuthority(e.u.v)) {
             if(e.owner==Owner::squad && g.networkQueued)continue;
-            g.failure=NpcCommandReason::notAuthority;++*skipped;continue;
+            g.failure=NpcCommandReason::notAuthority;++g.skipRemote;++*skipped;continue;
         }
         Command c=cmd;
         if(mapcmd::PointOrder(cmd.order) && !(e.owner==Owner::heli && share)) {
             mapcmd::Formation(static_cast<int>(slots[i]),k,cmd.at,mapcmd::kFormationSpacing,c.at);
             float ground;
             if(!MapGroundNear(c.at[0],c.at[2],cmd.at[1],&ground,true) || !std::isfinite(ground)) {
-                g.failure=NpcCommandReason::noTarget;++*skipped;continue;
+                g.failure=NpcCommandReason::noTarget;++g.skipFailed;++*skipped;continue;
             }
             c.at[1]=ground;
         }
-        if(!Give(g,e,c)){if(g.failure==NpcCommandReason::none)g.failure=NpcCommandReason::failed;++*skipped;continue;}
+        if(!Give(g,e,c)){if(g.failure==NpcCommandReason::none)g.failure=NpcCommandReason::failed;++g.skipFailed;++*skipped;continue;}
         e.u.now=c;
         ++given;
     }
@@ -586,9 +619,11 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     // must not leave the lock held, which would block the draw thread for good.
     SquadRow rows[16]{};
     const int squads=SquadRows(rows,16);
+    const void* pickable[kCmdUnits];
+    const int pickCount=PickedIds(g,pickable);
     AcquireSRWLockExclusive(&lock);
     MapCommandReadout& r=readout;
-    r.allowed=allowed;r.all=mapcmd::IsAll(g.sel,g.count);r.selected=g.sel.n;r.pointOk=pointOk;
+    r.allowed=allowed;r.all=mapcmd::IsAll(g.sel,pickCount);r.pickable=pickCount;r.selected=g.sel.n;r.pointOk=pointOk;
     r.allowedOrders=0;r.selectedSquads=0;
     r.squadToolsAllowed=!InSession();
     for(int i=0;i<g.count;++i)if(g.sel.Has(g.list[i].u.v)) {
@@ -604,7 +639,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
         const Entry& e=g.list[i];
         CmdMark& m=r.unit[i];
         std::memcpy(m.pos,e.u.pos,12);
-        m.now=e.u.now;m.air=e.u.air;m.selected=g.sel.Has(e.u.v);m.locked=e.u.locked;
+        m.now=e.u.now;m.air=e.u.air;m.selected=g.sel.Has(e.u.v);m.locked=e.u.locked;m.riding=e.owner==Owner::squad && e.u.riding;
         m.owner=e.owner==Owner::heli ? kCmdOwnerHeli : e.owner==Owner::jet ? kCmdOwnerJet : kCmdOwnerGround;
         std::snprintf(m.name,sizeof(m.name),"%s",e.u.name ? e.u.name : "?");
     }
@@ -683,7 +718,8 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     const bool next=(k.tab && !g.was.tab && !k.shift) || (k.padNext && !g.was.padNext),prev=k.tab && !g.was.tab && k.shift;
     bool picked=g.rowPicked;
     if(next || prev) {
-        mapcmd::Cycle(g.sel,ids,g.count,next ? 1 : -1);
+        const void* pickable[kCmdUnits];
+        mapcmd::Cycle(g.sel,pickable,PickedIds(g,pickable),next ? 1 : -1);
         picked=g.sel.n==1;
     }
     // The number keys pick a squad of the panel (its rows in SquadRows' order; Shift adds or takes out).
@@ -755,8 +791,9 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         else if(s.cmd.order==Order::board)Note(g,Tr(Tx::cmdBoardAssigned),g.affected,tail);
         else if(mapcmd::PointOrder(s.cmd.order))Note(g,Tr(Tx::cmdGuardResult),OrderText(s.cmd.order),s.cmd.at[0],s.cmd.at[2],given,tail);
         else Note(g,Tr(Tx::cmdOrderResult),OrderText(s.cmd.order),given,tail);
-        Log("MAPCMD %s (%.0f,%.0f,%.0f) to %d selected: %d of %d units took it",OrderName(s.cmd.order),s.cmd.at[0],s.cmd.at[1],s.cmd.at[2],
-            g.sel.n,given,g.count);
+        Log("MAPCMD %s (%.0f,%.0f,%.0f) to %d selected: %d of %d units took it; not: %d script, %d riding, %d cannot take it, "
+            "%d another machine's, %d refused (%s)",OrderName(s.cmd.order),s.cmd.at[0],s.cmd.at[1],s.cmd.at[2],g.sel.n,given,g.count,
+            g.skipScript,g.skipRiding,g.skipCannot,g.skipRemote,g.skipFailed,ReasonName(g.failure));
     }
     if(formation)Formation(g,allowed && !InSession());
     if(split || merge)Teams(g,allowed && !InSession(),split);

@@ -433,6 +433,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     cmdUnit(sq3,false,"RANGER x6",Order::none,nullptr,false);
     for(int i=sceneCmd.count-3;i<sceneCmd.count;++i)sceneCmd.unit[i].owner=kCmdOwnerGround;
     sceneCmd.unit[sceneCmd.count-1].locked=true;
+    sceneCmd.pickable=sceneCmd.count-1;   // the script's squad is shown, not picked
     auto row=[](const char* name,int alive,const char* status,Order order,bool locked,bool selected){
         SquadRow& r=sceneCmd.squad[sceneCmd.squads];
         std::snprintf(r.name,sizeof(r.name),"%s",name);std::snprintf(r.status,sizeof(r.status),"%s",status);

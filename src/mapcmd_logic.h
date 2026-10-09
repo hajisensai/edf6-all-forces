@@ -171,8 +171,12 @@ struct Selection {
     void Remove(const void* v) noexcept { for(int i=0;i<n;++i)if(id[i]==v){id[i]=id[--n];return;} }
     void Clear() noexcept { n=0; }
 };
-// A unit as the selection sees it: its id and where its icon is on the screen (`on`: in front of the eye).
-struct Mark { const void* id; float x,y; bool on; };
+// A unit as the selection sees it: its id and where its icon is on the screen (`on`: in front of the eye). `pick`: the
+// map's box, click and cycle take it. A squad a mission script drives and a squad riding a vehicle are shown but not
+// picked (the user, 2026-10-09: "总有一些我不能指挥的" -- a box over the field took 30 units of which none took an
+// order; "坦克上的应该不能统一框选…怎么我在操作坦克还能操作里面的人" -- the crew's squad sits on its vehicle's icon and
+// came along in every box). A riding squad is still picked from the squad panel (its row), for its dismount.
+struct Mark { const void* id; float x,y; bool on; bool pick=true; };
 
 inline int IndexOf(const void* const* ids,int n,const void* id) noexcept {
     for(int i=0;i<n;++i)if(ids[i]==id)return i;
@@ -205,7 +209,7 @@ inline void Cycle(Selection& s,const void* const* ids,int n,int step) noexcept {
 inline void Box(Selection& s,const Mark* m,int n,float x0,float y0,float x1,float y1,bool add) noexcept {
     const float lx=x0<x1 ? x0 : x1,hx=x0<x1 ? x1 : x0,ly=y0<y1 ? y0 : y1,hy=y0<y1 ? y1 : y0;
     if(!add)s.Clear();
-    for(int i=0;i<n;++i)if(m[i].on && m[i].x>=lx && m[i].x<=hx && m[i].y>=ly && m[i].y<=hy)s.Add(m[i].id);
+    for(int i=0;i<n;++i)if(m[i].on && m[i].pick && m[i].x>=lx && m[i].x<=hx && m[i].y>=ly && m[i].y<=hy)s.Add(m[i].id);
 }
 
 // The mark on the screen nearest (x, y) within `radius` px: its index, or -1. A unit's icon under a click, the enemy under
@@ -222,9 +226,21 @@ inline int Nearest(const Mark* m,int n,float x,float y,float radius) noexcept {
 }
 
 // A click at (x, y): the unit whose icon is nearest within `radius` px becomes the selection (`add`, Shift: it is added,
-// or taken out when it is in); none there clears it (Shift: left as it is). The unit clicked, or nullptr.
+// or taken out when it is in); none there clears it (Shift: left as it is). A unit not picked (`pick` false) leaves the
+// selection as it is: the caller says why it takes no order. The unit clicked, or nullptr.
+// A picked unit in reach wins over one not picked nearer (a crew's squad sits on its vehicle's icon).
 inline const void* Click(Selection& s,const Mark* m,int n,float x,float y,float radius,bool add) noexcept {
-    const int i=Nearest(m,n,x,y,radius);
+    int i=-1;
+    float bestD2=radius*radius;
+    for(int k=0;k<n;++k) {
+        if(!m[k].on || !m[k].pick)continue;
+        const float dx=m[k].x-x,dy=m[k].y-y,d2=dx*dx+dy*dy;
+        if(d2<=bestD2){bestD2=d2;i=k;}
+    }
+    if(i<0) {
+        const int other=Nearest(m,n,x,y,radius);
+        if(other>=0)return m[other].id;
+    }
     const void* best=i>=0 ? m[i].id : nullptr;
     if(!add)s.Clear();
     if(best && add && s.Has(best))s.Remove(best);

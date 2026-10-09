@@ -105,7 +105,8 @@ constexpr int kCmdUnits=static_cast<int>(mapcmd::kMaxFormationUnits);
 // A unit's mark: `name` its kind as the plugin names it (a jet's role, a heli's type, CRAWLER: hud.cpp shows it in the
 // HUD's language, hudtext.h Word), `owner` whose unit it is (the HUD names a heli's and a jet's so).
 constexpr std::uint8_t kCmdOwnerHeli=0,kCmdOwnerJet=1,kCmdOwnerGround=2;
-struct CmdMark { float pos[3]; Command now; bool selected,air,locked; std::uint8_t owner; char name[24]; };
+// `riding`: a squad seated in a vehicle (drawn only when picked from its panel row: its vehicle's mark stands for it).
+struct CmdMark { float pos[3]; Command now; bool selected,air,locked; std::uint8_t owner; char name[24]; bool riding=false; };
 // The support catalog as the map's bar shows it (copied on the game thread: the draw reads no support state).
 constexpr int kMapSupports=48;
 struct MapSupportEntry { wchar_t name[40]; SupportIcon icon; SupportVariant variant; };
@@ -123,6 +124,7 @@ struct MapCommandReadout {
     bool boxing;               // a box being dragged from (bx, by) to the pointer
     float bx,by;
     int count;
+    int pickable=0;            // of them, the ones the box / click / Tab take (no script's squad, no riding squad)
     CmdMark unit[kCmdUnits];
     wchar_t note[80];          // the last command's result or refusal
     bool noteFresh;

@@ -3899,7 +3899,7 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
         MapCommandButtons(nullptr,nullptr,0);MapCommandSquadButtons(nullptr,nullptr,0);
         MapCommandPayloadButtons(nullptr,0,0,nullptr,0);MapCommandSupportButtons(nullptr,nullptr,0);return;
     }
-    const float* tint=c.allowed && c.count ? kMapOrder : kMapOrderDim;
+    const float* tint=c.allowed && c.pickable ? kMapOrder : kMapOrderDim;
     // Where a point order goes: the pointer (a ring and a cross), or with a pad the crosshair at the centre; an armed
     // point order or support call in its colour.
     const float* aim=c.armedOrder ? (c.armed==Order::attackMove ? kAmber : kWhite) : c.supportArmed>=0 ? kGreen : tint;
@@ -3923,6 +3923,7 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     wchar_t one[64]{};
     for(int i=0;i<c.count && i<kCmdUnits;++i) {
         const CmdMark& u=c.unit[i];
+        if(u.riding && !u.selected)continue;   // its vehicle's mark stands for it (picked only from its panel row)
         // On the unit's body (mapcmd_logic.h BodyPoint; the user, 2026-10-09: "直接在npc身上不好吗"), where a click takes it.
         float body[3],ux=0.0f,uy=0.0f,ud=0.0f;
         mapcmd::BodyPoint(u.pos,u.air,body);
@@ -3967,10 +3968,10 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     const int footerFirst=*at;
     wchar_t sel[64];
     if(c.all)_snwprintf_s(sel,_countof(sel),_TRUNCATE,Tr(Tx::selectedAll),c.selected);
-    else if(c.selected==1 && one[0])_snwprintf_s(sel,_countof(sel),_TRUNCATE,Tr(Tx::selectedOne),c.count,one);
-    else _snwprintf_s(sel,_countof(sel),_TRUNCATE,Tr(Tx::selectedSome),c.selected,c.count);
+    else if(c.selected==1 && one[0])_snwprintf_s(sel,_countof(sel),_TRUNCATE,Tr(Tx::selectedOne),c.pickable,one);
+    else _snwprintf_s(sel,_countof(sel),_TRUNCATE,Tr(Tx::selectedSome),c.selected,c.pickable);
     if(!c.allowed)Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kAmber,L"%ls",Tr(Tx::npcOfflineOnly));
-    else if(!c.count)Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::npcNone));
+    else if(!c.pickable)Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::npcNone));
     else if(!c.selected && !m.pad)Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::cmdHintSelect));
     else Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kWhite,Tr(m.pad ? Tx::npcPadKeys : Tx::npcMouseKeys),sel);
     if(c.noteFresh)Label(text,lines,at,width*0.5f,height-124.0f*s,1,kLineScale*0.8f,kAmber,L"%ls",c.note);
