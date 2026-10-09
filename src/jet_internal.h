@@ -538,7 +538,9 @@ void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const fl
 // A wing's step toward `want` at `speed`: the path, the body's attitude onto it, its pose (elevons).
 void Wing(Jet& j,const Kind& k,unsigned char* v,const float* pos,float clear,const float* nose,float* want,float speed,float dt,
           ULONGLONG ms) noexcept;
-void Thrusters(Jet& j,const Kind& k,unsigned char* v,float dt,ULONGLONG ms) noexcept;
+// `clear`: the bottom's clearance over the ground (playerjet FloorClear); near it the nacelles keep over it
+// (nacelle_reach.h). The NPCs' carriers keep kMinAlt * 2 over the ground: none.
+void Thrusters(Jet& j,const Kind& k,unsigned char* v,float dt,ULONGLONG ms,float clear=1e9f) noexcept;
 void ResetWalls() noexcept;
 constexpr float kHoverClimb=12.0f;     // m/s up or down at the most
 constexpr float kHoverLeave=500.0f;    // m: leaving, it heads this far along its way out

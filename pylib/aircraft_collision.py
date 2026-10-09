@@ -262,3 +262,33 @@ def build(game, key):
 
 def assets(game):
     return {name: build(game, key) for key, name in FILES.items()}
+
+
+# The carrier's nacelles (src/nacelle_reach.h, jet_flight.cpp Thrusters): the collision is the grounded bind pose, its
+# bottom the model origin's plane, but the plugin tilts the four nacelles about their X (HingePose: local Y' = co Y + si Z,
+# Z' = -si Y + co Z) from 0 to -NACELLE_BACK; the front pair then reaches 5.2 m under that plane. Their lowest model y
+# every NACELLE_STEP degrees, so the plugin keeps them over the ground under it.
+NACELLE_MODEL = 'EDF6VC_CARRIER.MRAB'
+NACELLE_STEP, NACELLE_BACK = 5, 110
+NACELLES = {'front': 'boosterF_l', 'back': 'boosterB_l'}
+
+
+def nacelle_lowest(game, key=NACELLE_MODEL):
+    """{'front'|'back': [lowest model y at tilt 0, -5, ... -NACELLE_BACK degrees]} of the nacelle's skinned vertices."""
+    md = jet_models._model_of(game, key)
+    world = bind_world(md)
+    out = {}
+    for side, bone in NACELLES.items():
+        i = next(k for k, b in enumerate(md.bones) if md.name_of(b.name) == bone)
+        piv = world[i][12:15]
+        rows = [world[i][4*r:4*r+3] for r in range(3)]
+        pts = jet_models.bind_positions(md, {i})
+        local = [[sum((p[c]-piv[c])*rows[r][c] for c in range(3)) for r in range(3)] for p in pts]
+        lows = []
+        for deg in range(0, -NACELLE_BACK-1, -NACELLE_STEP):
+            a = math.radians(deg)
+            co, si = math.cos(a), math.sin(a)
+            y = [co*rows[1][k]+si*rows[2][k] for k in range(3)], [-si*rows[1][k]+co*rows[2][k] for k in range(3)]
+            lows.append(min(piv[1]+d[0]*rows[0][1]+d[1]*y[0][1]+d[2]*y[1][1] for d in local))
+        out[side] = lows
+    return out

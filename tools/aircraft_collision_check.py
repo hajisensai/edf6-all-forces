@@ -214,6 +214,27 @@ class GameAssets(unittest.TestCase):
                     self.assertTrue(any(contains(b, p) for b in boxes))
                 print(f'{ac.FILES[key]}: {len(boxes)} hulls, {len(points)} surface samples, {len(data)} bytes')
 
+    def test_nacelle_reach_table_is_the_model(self):
+        """src/nacelle_reach.h holds the carrier nacelles' lowest points as the model has them (to 1 cm)."""
+        import re
+        src = open(os.path.join(os.path.dirname(__file__), '..', 'src', 'nacelle_reach.h'), encoding='utf-8').read()
+        table = {k: [float(x) for x in re.findall(r'(-?[0-9.]+)f', re.search(k + r'\[kCount\]=\{(.*?)\};', src, re.S).group(1))]
+                 for k in ('kFront', 'kBack')}
+        count = int(re.search(r'kCount=(\d+);', src).group(1))
+        step = float(re.search(r'kStep=([0-9.]+)f\*', src).group(1))
+        back = float(re.search(r'kMostBack=([0-9.]+)f;', src).group(1))
+        got = ac.nacelle_lowest(self.game)
+        self.assertEqual(step, ac.NACELLE_STEP)
+        self.assertEqual(count, ac.NACELLE_BACK // ac.NACELLE_STEP + 1)
+        self.assertAlmostEqual(back, ac.NACELLE_BACK * 3.14159265 / 180.0, delta=0.005)
+        for side, key in (('front', 'kFront'), ('back', 'kBack')):
+            self.assertEqual(len(table[key]), count)
+            for a, b in zip(table[key], got[side]):
+                self.assertAlmostEqual(a, b, delta=0.01)
+        # The reason the table exists: the front pair hangs under the collision's bottom plane, the back pair never.
+        self.assertLess(min(got['front']), -5.0)
+        self.assertGreater(min(got['back']), 2.5)
+
     def test_generated_sgos_use_same_shapes_for_every_owner(self):
         import make_jets
         import vcobjects as vc

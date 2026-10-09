@@ -314,7 +314,7 @@ void HoverTo(jet::Jet& e,const jet::Kind& k,const unsigned char* v,const float* 
 // still on the ground with nothing asked (`still`).
 void HoverDone(PJet& j,jet::Jet& e,const jet::Kind& k,unsigned char* v,const float* pos,float clear,bool still,float dt,ULONGLONG ms) noexcept {
     jet::HoldOffGround(e,pos,clear,dt,ms,RestOver(v,pos));   // `clear` is its bottom's (FloorClear)
-    if(k.pose==jet::Pose::thrusters)jet::Thrusters(e,k,v,dt,ms);
+    if(k.pose==jet::Pose::thrusters)jet::Thrusters(e,k,v,dt,ms,clear==kNoGround ? 1e9f : clear);
     jet::DollFrame(jet::IndexOf(e),v,clear);
     const bool down=clear!=kNoGround && clear<kTouch;
     if(down && still && Len(e.m.vel)<1.5f) {
@@ -354,7 +354,10 @@ void HoverAim(PJet& j,unsigned char* v,const Stick& s,const float* pos,float nos
     KeepAimOnScreen(j,v,level,was);
     const bool grounded=clear!=kNoGround && clear<kTouch;
     const aim::Keys keys{s.ly<-0.3f ? 1.0f : s.ly>0.3f ? -1.0f : 0.0f,s.lx,s.ascend-(down ? 1.0f : 0.0f)};
-    const aim::Want w=aim::Fly(j.hover,j.aim,level,pos,j.measured,keys,k.cruise,HoverClimb(k),grounded,grounded,
+    // Its own velocity (Hover's), not the measured one: touching the ground the solver's push out is in that, and the
+    // height the hold took on letting go (h.y = y + vy kHoldLead) rose with every bounce: the carrier let down on the
+    // ground was thrown back up to a height it then held (the user, 2026-10-09: 「我都撞地上了，还会把空母往天上弹」).
+    const aim::Want w=aim::Fly(j.hover,j.aim,level,pos,e->m.vel,keys,k.cruise,HoverClimb(k),grounded,grounded,
                                clear==kNoGround ? -1.0f : clear,dt);
     std::memcpy(want,w.vel,12);*vz=w.climb;
     j.yaw=std::atan2(w.face[0],w.face[2]);

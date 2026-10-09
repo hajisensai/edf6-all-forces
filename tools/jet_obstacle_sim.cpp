@@ -39,6 +39,8 @@
 #include "../src/jet_pullout.h"
 #include "../src/stores.h"
 #include "../src/pjet_handling.h"
+#include "../src/nacelle_reach.h"
+#include "../src/heliaim.h"
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -558,6 +560,60 @@ int GroundSettleSuite() {
         const float pos[3]={0.0f,-0.5f,0.0f};
         HoldOffGround(j,pos,-0.5f,kDt,0);
         check(j.m.vel[1]>=79.0f,"NPC: position 0.5 m under (rest 0) -> climbs out",-0.5f,j.m.vel[1]);
+    }
+    {
+        // The look-ahead from its bottom (the user, 2026-10-09: the carrier let down onto what it met): a carrier's bottom
+        // 5.8 m over flat ground, sliding 30 m/s on and sinking 10 m/s toward a block whose top (5.5 m) is 0.5 m ahead.
+        // The ray from its position (14.3 m) saw nothing of it and left the sink as it was; from its bottom it meets the
+        // block's side and stops the sink. An NPC (rest 0) is as before.
+        boxes.push_back(Box{{0.5f,0.0f,-20.0f},{20.0f,5.5f,20.0f}});
+        Jet j{};
+        j.m.vel[0]=30.0f;j.m.vel[1]=-10.0f;
+        const float pos[3]={0.0f,rest+5.8f,0.0f};
+        HoldOffGround(j,pos,5.8f,kDt,0,rest);
+        check(j.m.vel[1]>=0.0f,"carrier sinking toward a block ahead -> sink stopped",-10.0f,j.m.vel[1]);
+        Jet n{};
+        n.m.vel[0]=30.0f;n.m.vel[1]=-10.0f;
+        const float npos[3]={0.0f,5.8f,0.0f};
+        HoldOffGround(n,npos,5.8f,kDt,0);
+        check(n.m.vel[1]>=0.0f,"NPC (rest 0) the same block -> sink stopped as before",-10.0f,n.m.vel[1]);
+        boxes.pop_back();
+    }
+    {
+        // The carrier's nacelles over the ground (nacelle_reach.h): far up they tilt all the way; standing on the ground
+        // the front pair stops where its lowest point meets the bottom's plane, the back pair (never under 2.8 m) is free.
+        const float high=nacelle::MostTilt(nacelle::kFront,-60.0f,-nacelle::kMostBack);
+        check(high==-nacelle::kMostBack,"nacelles 60 m up -> tilt all the way",high,-nacelle::kMostBack);
+        const float front=nacelle::MostTilt(nacelle::kFront,0.0f,-nacelle::kMostBack),back=nacelle::MostTilt(nacelle::kBack,0.0f,-nacelle::kMostBack);
+        check(front<-0.5f && front>-0.62f && nacelle::Lowest(nacelle::kFront,front)>=0.0f && nacelle::Lowest(nacelle::kFront,front-0.02f)<0.0f,
+              "on the ground -> front nacelles stop at the bottom's plane",front,nacelle::Lowest(nacelle::kFront,front));
+        check(back==-nacelle::kMostBack,"on the ground -> back nacelles free",back,-nacelle::kMostBack);
+        const float low=nacelle::MostTilt(nacelle::kFront,-3.0f,-nacelle::kMostBack);
+        check(nacelle::Lowest(nacelle::kFront,low)>=-3.0f && low<front,"3 m up -> further, its lowest over the ground",low,
+              nacelle::Lowest(nacelle::kFront,low));
+        // Over the whole range: never a tilt whose nacelle reaches under the ground, for every height to 6 m.
+        bool under=false;
+        for(float c=0.0f;c<=6.0f;c+=0.25f) {
+            const float most=nacelle::MostTilt(nacelle::kFront,-c,-nacelle::kMostBack);
+            for(float at=0.0f;at>=most;at-=0.01f)under=under || nacelle::Lowest(nacelle::kFront,at)< -c-1e-4f;
+        }
+        check(!under,"0-6 m up -> no tilt on the way reaches under the ground",0.0f,under ? 1.0f : 0.0f);
+    }
+    {
+        // The mouse-aim flight's height hold on a bounce (playerjet_board.inc HoverAim): the carrier let down on the ground
+        // (grounded: nothing held), the solver throws it 4 m up at 30 m/s; the next frame it is off the ground and the hold
+        // takes a height. From the flight's own velocity (sinking 1 m/s, what HoverAim passes now) it holds where it is;
+        // from the measured one (the bounce's 30 m/s, what it passed) it held 15 m higher and climbed there.
+        const float level[3]={0.0f,0.0f,1.0f},pos[3]={0.0f,rest+4.0f,0.0f};
+        const float own[3]={0.0f,-1.0f,0.0f},measured[3]={0.0f,30.0f,0.0f};
+        const aim::Keys none{0.0f,0.0f,0.0f};
+        aim::Hold now{},was{};
+        aim::Fly(now,level,level,pos,own,none,60.0f,12.0f,true,true,0.0f,kDt);
+        aim::Fly(was,level,level,pos,measured,none,60.0f,12.0f,true,true,0.0f,kDt);
+        const aim::Want a=aim::Fly(now,level,level,pos,own,none,60.0f,12.0f,false,false,4.0f,kDt);
+        const aim::Want b=aim::Fly(was,level,level,pos,measured,none,60.0f,12.0f,false,false,4.0f,kDt);
+        check(a.climb<=0.0f && now.y<=pos[1],"bounced off the ground -> holds where it is (own velocity)",now.y-pos[1],a.climb);
+        check(b.climb>0.0f && was.y>pos[1]+10.0f,"...the measured bounce would hold it 15 m up (the old input)",was.y-pos[1],b.climb);
     }
     std::printf("ground settle suite: %d cases, %d failed\n",cases,failures);
     return failures ? 1 : 0;
