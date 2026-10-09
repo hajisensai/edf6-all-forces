@@ -45,6 +45,13 @@ for header in ('SupportSquadWeapon', 'SupportPlatoonWeapons', 'SupportDisabled')
 
 text = '[VehicleCrew]\r\nEnabled=1\r\nSupportDisabled=FIGHTER\r\n\r\n[Other]\r\nSupportDisabled=SQUAD\r\n'
 check(sc.disabled(text) == ['FIGHTER'], 'only [VehicleCrew] is read')
+# Read as the plugin reads it: ';' separates (no inline comment), spaces do not.
+hand = '[VehicleCrew]\r\nSupportDisabled=SQUAD;TANK_CREWED 、 FIGHTER\r\nSupportSquadWeapon=rocket ;x\r\n'
+check(sc.disabled(hand) == ['SQUAD', 'TANK_CREWED', 'FIGHTER'], "';' and '、' separate SupportDisabled, as in the plugin")
+check(sc.disabled('[VehicleCrew]\r\nSupportDisabled=SQUAD TANK_CREWED\r\n') == [], 'a space does not separate')
+check(sc.get(hand, 'SupportSquadWeapon') == 'rocket ;x', 'no inline comment taken off (the plugin rejects this value)')
+toggled = sc.edit(hand, lambda _p, a=iter(['1', '1', '']): next(a))
+check(sorted(sc.disabled(toggled)) == ['FIGHTER', 'SQUAD', 'TANK_CREWED'], 'a toggle round trip keeps every hand-written unit')
 out = sc.put(text, 'SupportSquadWeapon', 'rocket')
 check('SupportSquadWeapon=rocket\r\n\r\n[Other]' in out and out.endswith('\r\n') and '\n' not in out.replace('\r\n', ''),
       'a new key goes at the end of its own section, keeping CRLF')

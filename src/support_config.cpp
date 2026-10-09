@@ -99,11 +99,11 @@ SupportConfig ParseSupportConfig(SupportIniRead read,void* context,SupportKeyOf 
     ReadWeapon(read,context,c,L"SupportAircraftCrewWeapon",c.aircraftCrew);
     if(read(context,L"SupportPlatoonWeapons",text,std::size(text))) {
         SupportWeapon three[3]{};int n=0;bool valid=true;
-        Tokens(text,[&](const wchar_t* token) noexcept {
+        if(!Tokens(text,[&](const wchar_t* token) noexcept {
             SupportWeapon w;
-            if(n>=3 || !ParseSupportWeapon(token,&w)){valid=false;return false;}
+            if(n>=3 || !ParseSupportWeapon(token,&w))return false;
             three[n++]=w;return true;
-        });
+        }))valid=false;   // a bad, fourth or over-long token
         if(valid && n==3)for(int i=0;i<3;++i)c.platoon[i]=three[i];
         else if(n || !valid) {
             wchar_t fallback[64];
