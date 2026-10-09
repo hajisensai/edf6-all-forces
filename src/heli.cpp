@@ -458,6 +458,9 @@ struct Heli {
     // on it (Mode::land there, staying down); it follows nobody and engages nothing meanwhile. `grounded`: last frame's.
     bool ferry,ferryLand,grounded;
     float ferryAt[3];
+    // A squad's transport (HeliKeep, transport.cpp): it stays theirs until WITHDRAW; out of fuel or ammo (its door guns
+    // are the squad's to fire) it does not leave on its own, only badly damaged.
+    bool keep;
 };
 Heli helis[16]{};
 constexpr float kFerryLandNear=80.0f;   // m (level) from its landing point a ferry starts down
@@ -1495,7 +1498,7 @@ void StartLeave(Heli& h,const float* pos,const float* fwd,const char* why) noexc
 // the door guns DoorGun read just now all empty (once any was seen loaded), fuel, damage. No remembered
 // weapon is read again: one that was not read through the vehicle just now does not count.
 const char* LeaveReason(const Heli& h,const unsigned char* v,const Loadout& l) noexcept {
-    if(GameMs()>=h.leaveAt)return "out of fuel";
+    if(!h.keep && GameMs()>=h.leaveAt)return "out of fuel";
     const float hp=At<float>(v,kHp),hpMax=At<float>(v,kHpMax);
     if(hpMax>0.0f && hp<hpMax*kLeaveHp)return "damaged";
     bool armed=false;
@@ -1504,7 +1507,7 @@ const char* LeaveReason(const Heli& h,const unsigned char* v,const Loadout& l) n
         if(h.arms[i].weapon && h.arms[i].full>0 && l.ammo[i]>=0){armed=true;left+=l.ammo[i];}
     for(const auto& d:h.doors)
         if(d.weapon && d.full>0 && GameFrame()-d.ammoFrame<=kAliveFrames){armed=true;left+=d.ammo>0 ? d.ammo : 0;}
-    return armed && left==0 ? "out of ammo" : nullptr;
+    return !h.keep && armed && left==0 ? "out of ammo" : nullptr;
 }
 
 // ---- Sea rescue (docs/rescue-re.md) ----
@@ -2924,6 +2927,11 @@ bool HeliFerry(const void* vehicle,const float* at,bool land) noexcept {
         if(!same)Log("HELI v=%p ferry to (%.0f,%.0f,%.0f)%s",vehicle,at[0],at[1],at[2],land ? ", landing there" : "");
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+bool HeliKeep(const void* vehicle) noexcept {
+    Heli* const h=Find(vehicle);
+    if(h && !h->keep){h->keep=true;Log("HELI v=%p a squad's transport now: it stays until withdrawn",vehicle);}
+    return h!=nullptr;
 }
 bool HeliGrounded(const void* vehicle) noexcept {
     const Heli* const h=Find(vehicle);

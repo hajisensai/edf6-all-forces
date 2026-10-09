@@ -335,6 +335,7 @@ bool TransportPair(const void* top,const void* vehicle) noexcept {
         if(!p)for(auto& row:pairs)if(!row.top || !Live(row.top) || !Live(row.vehicle)){p=&row;break;}
         if(!p){Log("TRANSPORT pairs full (%d): squad %p not paired",kPairs,top);return false;}
         p->top=ObjRef::Of(top);p->vehicle=ObjRef::Of(vehicle);
+        if(IsHelicopter(vehicle))HeliKeep(vehicle);   // theirs until WITHDRAW (no leaving for fuel or ammo)
         Log("TRANSPORT squad %p paired with v=%p (%s)",top,vehicle,IsHelicopter(vehicle) ? "heli" : "ground");
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}

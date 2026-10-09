@@ -50,6 +50,8 @@ bool HeliFerry(const void* v,const float* at,bool land) noexcept {
     ++ferries;ferryOn=true;ferryLand=land;std::memcpy(ferryAt,at,12);return true;
 }
 bool HeliGrounded(const void* v) noexcept {return v==heli.m && heliGround;}
+int kept=0;
+bool HeliKeep(const void* v) noexcept {if(v==heli.m)++kept;return v==heli.m;}
 bool HeliCommand(const void* v,const Command& c,const ObjRef&) noexcept {if(v==heli.m){++heliGuards;lastHeliCommand=c;}return v==heli.m;}
 bool NpcPrepareVehicleRoutePost(unsigned char* v,const float* at,float) noexcept {
     if(v!=truck.m)return false;
@@ -207,6 +209,7 @@ void HeliAssault() {
     const float target[3]={0,0,0};
     Check(TransportDeliver(heli.m,tops,2,target),"a helicopter assault handed over (two squads aboard)");
     Check(TransportOf(soldier[1].m)==heli.m,"both paired with it");
+    Check(kept>0,"its helicopter kept for them (no leaving for fuel or ammo)");
     bool landedFirst=true;
     for(int i=0;i<40000 && !(Done(soldier[0].m) && Done(soldier[1].m));++i) {
         Step();

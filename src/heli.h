@@ -71,6 +71,8 @@ bool HeliLeft(const void* vehicle) noexcept;
 // stood on the ground last frame. Sent off now (StartLeave; deleted out there, its crew by support_dispatch.cpp Retire).
 bool HeliFerry(const void* vehicle,const float* at,bool land) noexcept;
 bool HeliGrounded(const void* vehicle) noexcept;
+// A squad's transport now: no leaving for fuel or ammo (only badly damaged, or on WITHDRAW).
+bool HeliKeep(const void* vehicle) noexcept;
 bool HeliStartLeaving(const void* vehicle) noexcept;
 // Where a vehicle weapon's barrel is and points (the mean of its muzzles' frames).
 bool GunBarrel(const unsigned char* v,const unsigned char* weapon,float* pos,float* dir) noexcept;
