@@ -325,7 +325,7 @@ void HoverDone(PJet& j,jet::Jet& e,const jet::Kind& k,unsigned char* v,const flo
     } else j.phase=Phase::air;
     std::memcpy(j.vel,e.m.vel,12);std::memcpy(j.omega,e.m.omega,12);
     j.load=1.0f;j.stall=false;j.clear=clear;j.climb=j.vel[1];
-    j.active=!v[kDead];
+    j.active=!v[kDead] && handling::Drives(j.phase==Phase::parked,Body506ReadsSolver());
     std::memcpy(j.sent,j.vel,12);
 }
 

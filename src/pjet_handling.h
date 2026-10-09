@@ -73,6 +73,20 @@ inline void GroundContact(const float* up,const float* vel,const float* omega,fl
     for(int i=0;i<3;++i){lin[i]=vel[i]+n[i]*(sn-vn);ang[i]=ang[i]+n[i]*(wn-an);}
 }
 
+// Without the solver's velocity (body506.cpp: its getters' code not as expected, Body506ReadsSolver false) the plugin
+// cannot leave the normal motion to the contacts: writing its own whole, a parked craft's 0 every frame cancelled the
+// gravity, and over ground that fell away (a crater, the edge of a roof) it hung in the air. Then:
+//  - a parked craft is the stock step's again (Drives false; it falls and settles as it always did);
+//  - a rolling one keeps the measured motion along the normal (its fall, `measured`, m/s) with the plugin's along the
+//    ground and its spin (GroundFallback), the pitch and roll unchanged: it follows the ground down.
+constexpr bool Drives(bool parked,bool readsSolver) noexcept { return !parked || readsSolver; }
+inline void GroundFallback(const float* up,const float* vel,const float* omega,const float* measured,float* lin,float* ang) noexcept {
+    float solver[3]={measured[0],measured[1],measured[2]},spin[3]={0.0f,0.0f,0.0f};
+    if(!std::isfinite(solver[0]+solver[1]+solver[2])){solver[0]=solver[1]=solver[2]=0.0f;}
+    GroundContact(up,vel,omega,solver,spin);
+    for(int i=0;i<3;++i){lin[i]=solver[i];ang[i]=spin[i];}
+}
+
 inline float AimRoll(float pathRoll,float off) noexcept {
     const float lo=std::fmin(kLevelRate,pathRoll),t=Clamp(off/kAimRollFull,0.0f,1.0f);
     return lo+(pathRoll-lo)*t;
