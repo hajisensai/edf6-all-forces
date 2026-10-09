@@ -674,6 +674,20 @@ void SelectionCapabilityMask() noexcept {
         "tank selection enables only its post's point orders (guard, move, attack-move as its post) and release");
     selection.list[0].owner=Owner::squad;selection.list[0].u.locked=true;Publish(selection,true,true,point,true);PlayerMapCommands(&r);
     Check(!r.allowedOrders && !r.selectedSquads,"script locked squad exposes no executable buttons");
+    // The card shows no order that would only be refused (the user, 2026-10-09: "解散解除交战集火是不是重叠了").
+    const auto has=[&](Order o){return (r.allowedOrders&(1u<<static_cast<unsigned>(o)))!=0;};
+    selection.list[0].u.locked=false;selection.list[0].u.recruitable=true;marked=nullptr;
+    Publish(selection,true,true,point,true);PlayerMapCommands(&r);
+    Check(has(Order::recruit) && !has(Order::dismiss) && has(Order::board) && !has(Order::dismount) && !has(Order::focus) && has(Order::none),
+          "a free squad on foot: recruit, no dismiss; board, no dismount; no focus with nothing marked; clear order");
+    selection.list[0].u.recruitable=false;selection.list[0].u.recruited=true;
+    static int foe=0;marked=&foe;
+    Publish(selection,true,true,point,true);PlayerMapCommands(&r);
+    Check(!has(Order::recruit) && has(Order::dismiss) && has(Order::focus),"the player's squad: dismiss, not recruit; focus with an enemy marked");
+    selection.list[0].u.riding=true;
+    Publish(selection,true,true,point,true);PlayerMapCommands(&r);
+    Check(has(Order::dismount) && !has(Order::board) && !has(Order::move),"a riding squad: dismount, not board, no point order");
+    marked=nullptr;
 }
 }  // namespace
 }  // namespace crew

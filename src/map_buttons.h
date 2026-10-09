@@ -22,6 +22,10 @@ enum class Id : int {
     count
 };
 constexpr int kCount=static_cast<int>(Id::count);
+// The card's order (the user, 2026-10-09: "解散解除交战集火是不是重叠了"): moving, fighting, vehicles, membership, then
+// the squads' tools; CLEAR ORDER (release) last among the orders, apart from DISMISS it was mistaken for.
+constexpr Id kCardOrder[kCount]={Id::move,Id::attackMove,Id::guard,Id::follow,Id::engage,Id::focus,Id::board,Id::dismount,
+                                 Id::recruit,Id::dismiss,Id::release,Id::formation,Id::split,Id::merge,Id::sweep,Id::health};
 constexpr int kOrders=static_cast<int>(Id::formation);
 struct Rect { float x0,y0,x1,y1; };
 

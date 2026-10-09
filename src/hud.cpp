@@ -3838,8 +3838,8 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
     const float scale=kLineScale*0.7f;
     int shownIds[n];float w[n];int shown=0;
     const wchar_t* word[n]{};
-    for(int i=0;i<n;++i) {
-        const Id b=static_cast<Id>(i);
+    for(const Id b:mapbtn::kCardOrder) {
+        const int i=static_cast<int>(b);
         if(!mapbtn::Shown(b,orders,tools))continue;
         word[shown]=b==Id::sweep && c.sweepOn ? Tr(Tx::btnSweepStop) : Tr(kWord[i]);
         Line probe{};Format(probe,L"%ls",word[shown]);probe.scale=scale;

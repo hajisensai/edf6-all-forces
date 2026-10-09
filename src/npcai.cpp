@@ -1321,7 +1321,7 @@ int SquadCommandUnits(CommandUnit* out,int most) noexcept {
         if(!Live(q,ms) || (InSession() && !IsOnlineAuthority(q.top.obj)))continue;
         std::snprintf(squadNames[n],sizeof(squadNames[n]),"%s x%d",kClassWords[q.cls],q.alive>0 ? q.alive : 1);
         out[n]=CommandUnit{q.top.obj,squadNames[n],q.cmd,false,{},npc::Scripted(q.control),StatusOf(q,ms,status[n],sizeof(status[n])),
-                           SquadRiding(q),SquadRecruitable(q)};
+                           SquadRiding(q),SquadRecruitable(q),q.control==npc::Control::recruited};
         std::memcpy(out[n++].pos,static_cast<const unsigned char*>(q.top.obj)+kPosition,12);
     }
     for(int i=0;i<remoteSquadCount && n<most && n<kMaxSquads*2;++i) {
@@ -1329,7 +1329,8 @@ int SquadCommandUnits(CommandUnit* out,int most) noexcept {
         std::snprintf(squadNames[n],sizeof(squadNames[n]),"%s x%d",kClassWords[q.cls],q.alive);
         const bool riding=!HumanOnFoot(static_cast<const unsigned char*>(q.top.obj));
         out[n]={q.top.obj,squadNames[n],{},false,{},npc::Scripted(q.control),"REMOTE",riding,
-                mapcmd::OffersRecruit(q.control==npc::Control::recruited,npc::Scripted(q.control),false,riding)};
+                mapcmd::OffersRecruit(q.control==npc::Control::recruited,npc::Scripted(q.control),false,riding),
+                q.control==npc::Control::recruited};
         std::memcpy(out[n++].pos,q.pos,12);
     }
     return n;

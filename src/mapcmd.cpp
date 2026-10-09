@@ -238,11 +238,16 @@ const wchar_t* OrderText(Order o) noexcept {
 }
 // Whether `e` takes order `o` at all: a locked squad (a script's) none, a vehicle only the point orders / follow /
 // release, a tank no follow (it keeps a post); a squad riding a vehicle no recruitment and no point order (its vehicle
-// takes those), a squad recruitment is not offered for no RECRUIT (mapcmd::OffersRecruit, npcai.cpp).
+// takes those), a squad recruitment is not offered for no RECRUIT (mapcmd::OffersRecruit, npcai.cpp). The card shows
+// no order that would only be refused (the user, 2026-10-09: "解散解除交战集火是不是重叠了"): DISMISS for the player's
+// own squads alone (recruit and dismiss never both), BOARD on foot, DISMOUNT riding.
 bool Takes(const Entry& e,Order o) noexcept {
     if(e.u.locked)return false;
     if(e.owner==Owner::squad) {
         if(o==Order::recruit)return e.u.recruitable;
+        if(o==Order::dismiss)return e.u.recruited;
+        if(o==Order::board)return !e.u.riding;
+        if(o==Order::dismount)return e.u.riding;
         if(e.u.riding)return o!=Order::follow && o!=Order::engage && o!=Order::focus && !mapcmd::PointOrder(o);
         return true;
     }
@@ -659,6 +664,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     const int squads=SquadRows(rows,16,&tally);
     const void* pickable[kCmdUnits];
     const int pickCount=PickedIds(g,pickable);
+    const bool marked=NpcMarked();
     AcquireSRWLockExclusive(&lock);
     MapCommandReadout& r=readout;
     r.allowed=allowed;r.all=mapcmd::IsAll(g.sel,pickCount);r.pickable=pickCount;r.selected=g.sel.n;r.pointOk=pointOk;
@@ -670,6 +676,8 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
         if(allowed)for(unsigned order=0;order<=static_cast<unsigned>(mapcmd::kLastOrder);++order)
             if(Takes(entry,static_cast<Order>(order)))r.allowedOrders|=std::uint32_t{1}<<order;
     }
+    // FOCUS FIRE's button with an enemy marked (Q, or the right button on one: that gives the order itself).
+    if(!marked)r.allowedOrders&=~(std::uint32_t{1}<<static_cast<unsigned>(Order::focus));
     std::memcpy(r.point,point,12);
     r.pointer=pointer;r.px=g.pointer.x;r.py=g.pointer.y;r.boxing=pointer && g.boxing;r.bx=g.bx;r.by=g.by;
     r.count=g.count;

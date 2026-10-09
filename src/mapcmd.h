@@ -28,8 +28,9 @@ inline bool AirCommandTransit(const Command& cmd,bool& moving,const float* pos,c
 // `v` is an identity only outside the owning module; positions are copied while the object is verified live.
 // `riding`: a squad whose soldiers are seated in a vehicle (its vehicle is the unit that takes the point orders; it is
 // offered no recruitment: mapcmd::OffersRecruit). `recruitable`: the map offers RECRUIT for it now.
+// `recruited`: a squad the player recruited (the only kind DISMISS lets go: npcai.cpp answers others "not its owner").
 struct CommandUnit { const void* v; const char* name; Command now; bool air; float pos[3]{}; bool locked=false; const char* status=nullptr;
-    bool riding=false; bool recruitable=false; };
+    bool riding=false; bool recruitable=false; bool recruited=false; };
 bool CommandVehicleLive(const ObjRef& ref) noexcept;
 bool ReadCommandUnit(const ObjRef& ref,const char* name,const Command& cmd,bool air,CommandUnit* out) noexcept;
 // Each module's units that take a command now (live, flown or driven by the plugin's NPC, not withdrawing), at most
