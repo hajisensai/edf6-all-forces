@@ -14,6 +14,22 @@ spec = importlib.util.spec_from_file_location('autopilot_drive', Path(__file__).
 drive = importlib.util.module_from_spec(spec)
 with patch.object(ctypes, 'WinDLL', side_effect=lambda *a, **k: Mock()):
     spec.loader.exec_module(drive)
+REAL_WATCH = drive.DesktopWatch
+
+
+class QuietWatch:
+    """DesktopWatch without its sampling thread (user32 is a Mock here)."""
+    def start(self):
+        return self
+
+    def stop(self):
+        pass
+
+    def nudge(self):
+        return 'nudged'
+
+    def report(self):
+        return 'desktop: quiet'
 
 
 class DriverTest(unittest.TestCase):
@@ -33,6 +49,9 @@ class DriverTest(unittest.TestCase):
         self.pid_patch = patch.object(drive, 'game_pids', return_value=[])
         self.pids = self.pid_patch.start()
         self.addCleanup(self.pid_patch.stop)
+        self.watch_patch = patch.object(drive, 'DesktopWatch', QuietWatch)
+        self.watch_patch.start()
+        self.addCleanup(self.watch_patch.stop)
 
     def path(self, ext):
         return self.plugins / (drive.NAME + ext)
@@ -233,6 +252,31 @@ class DriverTest(unittest.TestCase):
             drive.launch()
         start.assert_called_once_with('steam://rungameid/2291060')
         u.PostMessageW.assert_not_called()
+
+    def test_nudge_tells_a_pulled_cursor_from_a_free_one(self):
+        def fake_user32(pull):
+            u = Mock()
+            at = {'x': 100, 'y': 200}
+
+            def get(p):
+                p._obj.x, p._obj.y = (999, 999) if pull and (at['x'], at['y']) == (140, 240) else (at['x'], at['y'])
+                return 1
+
+            def put(x, y):
+                at['x'], at['y'] = x, y
+                return 1
+            u.GetCursorPos.side_effect = get
+            u.SetCursorPos.side_effect = put
+            u.GetSystemMetrics.side_effect = lambda i: {76: 0, 77: 0, 78: 1920, 79: 1080}[i]
+            return u, at
+        for pull, word in ((False, 'stayed there'), (True, 'moved away in 100/100')):
+            with self.subTest(pull=pull):
+                u, at = fake_user32(pull)
+                with patch.object(drive, 'user32', u), patch.object(drive.time, 'sleep'):
+                    verdict = REAL_WATCH.__new__(REAL_WATCH)
+                    verdict.nudges = []
+                    self.assertIn(word, verdict.nudge())
+                self.assertEqual((at['x'], at['y']), (100, 200))   # put back where it was
 
     def test_process_query_failure_is_not_game_closed(self):
         self.pid_patch.stop()

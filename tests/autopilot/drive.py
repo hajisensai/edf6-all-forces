@@ -20,6 +20,9 @@ background"). For measurements, e.g. the big map's memory against the stock test
                            installed EDF6VehicleCrew at the player's creation; the file must not exist already, and
                            is removed again afterwards), e.g. tests/autopilot/loadouts/airraider_grape.ini
           --shots DIR      the game window's picture into DIR every 15 s of the mission (PrintWindow)
+        Every run also watches the desktop (DesktopWatch): the foreground window's process, the cursor clip and the
+        cursor every 20 ms, and once in the mission the real cursor moved 40 px to see that nothing pulls it back;
+        the counts are printed at the end (all must be 0).
   python tests/autopilot/drive.py hide               the window off screen and at the back again
   python tests/autopilot/drive.py uninstall          remove the plugin, its keys file and its log (game closed)
 
@@ -35,6 +38,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -63,6 +67,9 @@ for lib, name, result, args in (
                                     ctypes.c_int, ctypes.c_int, wt.UINT]),
     (user32, 'SetForegroundWindow', wt.BOOL, [wt.HWND]),
     (user32, 'PrintWindow', wt.BOOL, [wt.HWND, wt.HDC, wt.UINT]),
+    (user32, 'GetCursorPos', wt.BOOL, [ctypes.POINTER(wt.POINT)]),
+    (user32, 'SetCursorPos', wt.BOOL, [ctypes.c_int, ctypes.c_int]),
+    (user32, 'GetClipCursor', wt.BOOL, [ctypes.POINTER(wt.RECT)]),
     (gdi32, 'CreateCompatibleDC', wt.HDC, [wt.HDC]),
     (gdi32, 'CreateCompatibleBitmap', wt.HBITMAP, [wt.HDC, ctypes.c_int, ctypes.c_int]),
     (gdi32, 'SelectObject', wt.HGDIOBJ, [wt.HDC, wt.HGDIOBJ]),
@@ -107,6 +114,71 @@ def hide(hwnd: int) -> None:
     """Off screen past the right of the desktop, at the bottom of the z-order, without activating it."""
     left = user32.GetSystemMetrics(76) + user32.GetSystemMetrics(78) + 200   # SM_XVIRTUALSCREEN + SM_CXVIRTUALSCREEN
     user32.SetWindowPos(hwnd, 1, left, 0, 0, 0, 0x0001 | 0x0010)   # HWND_BOTTOM, SWP_NOSIZE | SWP_NOACTIVATE
+
+
+class DesktopWatch:
+    """What a background run does to the user's desktop, sampled every 20 ms from outside the game: the foreground
+    window's process, the cursor clip and the cursor. `nudge()` moves the real cursor 40 px and back and tells whether
+    something pulled it meanwhile (2026-10-10: the game recentred the user's mouse every frame)."""
+
+    def __init__(self) -> None:
+        self.samples = 0
+        self.game_foreground = 0      # samples with an EDF6.exe window in the foreground
+        self.clipped = 0              # samples with the cursor clipped to less than the whole desktop
+        self.at_right_edge = 0        # samples with the cursor on the desktop's right edge (where an off-screen centre clamps)
+        self.nudges: list[str] = []
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+
+    def start(self) -> 'DesktopWatch':
+        self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(5)
+
+    def _loop(self) -> None:
+        left, top = user32.GetSystemMetrics(76), user32.GetSystemMetrics(77)
+        right, bottom = left + user32.GetSystemMetrics(78), top + user32.GetSystemMetrics(79)
+        while not self._stop.is_set():
+            pids = set(game_pids()) if self.samples % 50 == 0 else getattr(self, '_pids', set())
+            self._pids = pids
+            pid = wt.DWORD()
+            user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), ctypes.byref(pid))
+            clip, pos = wt.RECT(), wt.POINT()
+            user32.GetClipCursor(ctypes.byref(clip))
+            user32.GetCursorPos(ctypes.byref(pos))
+            self.samples += 1
+            self.game_foreground += pid.value in pids
+            self.clipped += (clip.left, clip.top, clip.right, clip.bottom) != (left, top, right, bottom)
+            self.at_right_edge += pos.x >= right - 1
+            time.sleep(0.02)
+
+    def nudge(self) -> str:
+        start = wt.POINT()
+        user32.GetCursorPos(ctypes.byref(start))
+        # 40 px towards the desktop's middle (a target past the edge would be clamped by Windows, not by a pull)
+        middle = (user32.GetSystemMetrics(76) + user32.GetSystemMetrics(78) // 2,
+                  user32.GetSystemMetrics(77) + user32.GetSystemMetrics(79) // 2)
+        target = (start.x + (40 if start.x < middle[0] else -40), start.y + (40 if start.y < middle[1] else -40))
+        user32.SetCursorPos(*target)
+        moved = []
+        for _ in range(100):   # 2 s
+            time.sleep(0.02)
+            now = wt.POINT()
+            user32.GetCursorPos(ctypes.byref(now))
+            if (now.x, now.y) != target:
+                moved.append((now.x, now.y))
+        user32.SetCursorPos(start.x, start.y)
+        verdict = (f'cursor set to {target}, stayed there for 2 s' if not moved else
+                   f'cursor set to {target}, moved away in {len(moved)}/100 samples (first {moved[0]})')
+        self.nudges.append(verdict)
+        return verdict
+
+    def report(self) -> str:
+        return (f'desktop over {self.samples} samples: game in the foreground {self.game_foreground}, cursor clipped '
+                f'{self.clipped}, cursor on the right edge {self.at_right_edge}; nudges: {self.nudges or "none"}')
 
 
 SESSION_EXTS = ('.dll', '.keys', '.log', '.cmd', '.keys.tmp', '.cmd.tmp')
@@ -323,6 +395,7 @@ def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None
         extra: tuple[str, ...] = (), loadout: str | None = None, shots: str | None = None) -> int:
     install(game)
     placed: tuple[str, bytes] | None = None
+    watch = DesktopWatch().start()
     try:
         if loadout:
             placed = place_loadout(game, loadout)
@@ -335,14 +408,18 @@ def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None
         start = time.time()
         end = start + seconds
         next_shot = start + 15
-        while time.time() < end:
+        nudge_at = start + min(20, seconds / 2)
+        while (now := time.time()) < end:
             if not game_pids():
                 print('the game exited before the observation period ended')
                 return 1
-            if shots and time.time() >= next_shot:
+            if nudge_at and now >= nudge_at:
+                print('real mouse check:', watch.nudge())
+                nudge_at = 0
+            if shots and now >= next_shot:
                 os.makedirs(shots, exist_ok=True)
                 try:
-                    shot(os.path.join(shots, f'{int(time.time() - start):04d}s.png'))
+                    shot(os.path.join(shots, f'{int(now - start):04d}s.png'))
                 except (RuntimeError, AssertionError) as e:
                     print('no picture:', e)
                 next_shot += 15
@@ -369,6 +446,8 @@ def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None
             return 1
         return 0
     finally:
+        watch.stop()
+        print(watch.report())
         try:
             if keep and os.path.exists(os.path.join(plugins(game), NAME + '.log')):
                 shutil.copyfile(os.path.join(plugins(game), NAME + '.log'), keep)
