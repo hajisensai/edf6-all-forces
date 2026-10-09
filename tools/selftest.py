@@ -2672,8 +2672,8 @@ def stock_gun_sight_ranged() -> None:
 @test
 def stock_gauges_wired() -> None:
     """The stock weapon gauges (src/stockgauge.cpp; the user, 2026-10-06: "删掉原版挂载和油料显示"): its ini key is read,
-    shipped and documented; it is installed at load and only through the gauge's update slot (no draw call skipped); the
-    HUD's publish says what it covers; every EDF.dll address it checks is in docs/hud-re.md §9; the fuel tank is no
+    shipped and documented; it is installed at load and only through the gauges' update slots (the weapon gauge's and
+    the armor gauge's slot 1; no draw call skipped); the HUD's publish says what it covers; every EDF.dll address it checks is in docs/hud-re.md §9; the fuel tank is no
     weapon in the stock HUD's arms and is read where the stock FUEL panel was, LOW FUEL its warning."""
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
     assert 'L"HideStockGauges"' in plugin and re.search(r'^HideStockGauges=1', ini, re.M) and 'HideStockGauges' in readme
@@ -2681,7 +2681,12 @@ def stock_gauges_wired() -> None:
     cmake = src('CMakeLists.txt')
     assert 'src/stockgauge.cpp' in cmake.split('add_library(EDF6VehicleCrew', 1)[1].split(')', 1)[0]
     gauge = src('src/stockgauge.cpp')
-    assert gauge.count('PatchVtableSlot(') == 1 and 'RedirectCall' not in gauge, 'stockgauge.cpp: the update slot only'
+    # Only update slots (vtable slot 1) are chained, never a draw call skipped: the weapon gauge's (HUiHudWeapon) and,
+    # 2026-10-09 ("上了载具以后，可以把原版的左上角的血条hud隐藏吧"), the armor gauge's (HUiHudPowerGuage).
+    patched = re.findall(r'PatchVtableSlot\(reinterpret_cast<void\*\*>\(image\+(\w+)\)', gauge)
+    assert gauge.count('PatchVtableSlot(') == 2 and sorted(patched) == ['kArmorUpdateSlot', 'kUpdateSlot'] \
+        and 'RedirectCall' not in gauge, f'stockgauge.cpp: the two gauges\' update slots only ({patched})'
+    assert 'kUpdateSlot=kGaugeVtable+1*8' in gauge and 'kArmorUpdateSlot=kArmorVtable+1*8' in gauge, 'stockgauge.cpp: slot 1 (update)'
     doc = src('docs/hud-re.md').split('## 9.', 1)[1]
     rvas = set(re.findall(r'\b0x[0-9A-F]{6,7}\b', gauge))
     missing = sorted(r for r in rvas if f'`{r}`' not in doc and f'`{r} ' not in doc and r not in doc)
