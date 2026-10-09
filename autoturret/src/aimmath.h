@@ -19,11 +19,16 @@ inline float OffView(const float* eye,const float* dir,const float* p,float* dis
     return std::acos(c<-1.0f ? -1.0f : c>1.0f ? 1.0f : c);
 }
 
-// A lock press over the targets in sight, sorted nearest the view first: the nearest, or with one already locked (at
-// `current` in that order) the next one out, round to the nearest after the last. -1 with none in sight.
-inline int NextPick(int count,int current) noexcept {
+// A lock press over the targets in sight, sorted nearest the view first ("看哪锁哪"): the one nearest the screen's
+// centre, unless that one is the lock already (`current` == 0): then the next one out. `sameSpot`: the nearest is the one
+// that was nearest at the last press (the view has not moved on): the presses step on from the lock (`current`), round
+// to the nearest after the last, through a crowd. (Until 2026-10-09 every press stepped on from wherever the old lock
+// stood in that order: with the view moved onto another enemy, a press took the one after the old lock, not the one
+// under the crosshair. The user: "标记的东西和实际鼠标指向不符".) -1 with none in sight.
+inline int LockPick(int count,int current,bool sameSpot) noexcept {
     if(count<=0)return -1;
-    return current<0 ? 0 : (current+1)%count;
+    if(sameSpot && current>=0)return (current+1)%count;
+    return current==0 ? 1%count : 0;
 }
 
 // The lead solution from a gun's `muzzle` (world) for a round leaving at `speed` m/frame and falling `drop` m/frame^2

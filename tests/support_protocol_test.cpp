@@ -30,7 +30,7 @@ struct Room {
     std::deque<Packet> packets;
     std::vector<Packet> history;
     std::uint64_t now=10000;
-    unsigned failTo=999,dropTo=999;
+    unsigned failTo=999,dropTo=999,legacyNode=999;   // legacyNode: an older build, its hello announces no capability
     Kind failKind=Kind::cancel,dropKind=Kind::cancel;
     explicit Room(unsigned count);
     unsigned Peer(unsigned node,unsigned global) const { return global<node ? global+1 : global; }
@@ -60,7 +60,8 @@ bool Send(void* ctx,std::uint32_t peer,const Message& message) noexcept {
     auto& node=*static_cast<Node*>(ctx);auto& room=*node.room;const auto dst=room.Global(node.id,peer);
     if(dst==room.failTo && message.kind==room.failKind)return false;
     unsigned char wire[kWireSize];Message decoded;
-    if(!Encode(message,wire,sizeof(wire)) || !Decode(wire,sizeof(wire),decoded))return false;
+    Message sent=message;if(node.id==room.legacyNode && sent.kind==Kind::hello)sent.index=0;   // protocol v2 before capabilities
+    if(!Encode(sent,wire,sizeof(wire)) || !Decode(wire,sizeof(wire),decoded))return false;
     Packet p{node.id,dst,decoded};room.packets.push_back(p);room.history.push_back(p);return true;
 }
 std::uint64_t Nonce(void* ctx) noexcept { return ++static_cast<Node*>(ctx)->nonce; }
@@ -119,6 +120,28 @@ void Codec() {
     m.unit.matrix[0]=2;Check(!Encode(m,bytes,sizeof(bytes)),"nonrigid matrix rejected");
     m.unit.matrix[0]=1;m.unit.netId[12]=4;Check(!Encode(m,bytes,sizeof(bytes)),"wrong native identity type rejected");
     m.unit.netId[12]=5;m.unit.netId[20]=1;Check(!Encode(m,bytes,sizeof(bytes)),"native padding cannot carry uninitialized memory");
+}
+// 2026-10-09 (review): configured weapons are new soldier resources an older peer's Validate refuses mid-transaction.
+// Peers announce kCapSoldierVariants in their hello's index; the wire stays v2 both ways.
+void Capabilities() {
+    Message hello;hello.kind=Kind::hello;hello.challenge=7;hello.request=1;hello.index=kCapabilities;
+    unsigned char bytes[kWireSize];Message out;
+    Check(Encode(hello,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) && out.index==kCapabilities,
+          "a capability hello round-trips on the unchanged v2 wire (an older host's same bounds accept it)");
+    Check(bytes[4]==2 && bytes[5]==0,"wire version stays 2: older peers keep talking");
+    {Room r(3);r.With(0);
+     Check(r.nodes[0]->session->PeersHave(kCapSoldierVariants),"every new peer announced soldier variants");
+     Check(r.nodes[0]->session->PeersHave(kCapSoldierVariants|kCapAirborneAir),"and airborne air support");
+     r.With(1);Check(r.nodes[1]->session->PeersHave(kCapSoldierVariants),"a client is never asked: true");}
+    {Room r(3);r.legacyNode=2;r.With(2);r.nodes[2]->session->Stop();r.nodes[2]->session->Start(false,2,1,r.now);r.Settle();
+     Check(r.nodes[0]->session->Ready(),"an older client still completes the handshake");
+     Check(!r.nodes[0]->session->PeersHave(kCapSoldierVariants),"host knows one peer lacks soldier variants");
+     Check(!r.nodes[0]->session->PeersHave(kCapAirborneAir),"host knows one peer cannot make air support in the air");
+     Check(r.Submit(),"mixed room request");r.Settle();
+     for(const auto& n:r.nodes)Check(n->spawns==1,"mixed room: the v2 plan (rifles) passes the older peer's Validate");}
+    {Room r(2);r.legacyNode=1;r.With(1);r.nodes[1]->session->Stop();r.nodes[1]->session->Start(false,1,1,r.now);r.Settle();
+     r.legacyNode=999;r.Step(1100);r.Settle();
+     Check(r.nodes[0]->session->PeersHave(kCapSoldierVariants),"a peer's latest hello decides (an updated peer rejoining)");}
 }
 void Success() {
     Room r(3);for(const auto& n:r.nodes)Check(n->session->Ready(),"authenticated handshake ready");
@@ -227,4 +250,4 @@ void RequestOutcomes() {
     Check(newer.nodes[1]->notices.back()==std::make_pair(2u,RequestStatus::active),"previous transaction cancel cannot be misreported as the newer request outcome");
 }
 }
-int main() { Codec();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();std::printf("support protocol: %d checks passed\n",checks); }
+int main() { Codec();Capabilities();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();std::printf("support protocol: %d checks passed\n",checks); }

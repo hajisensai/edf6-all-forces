@@ -11,20 +11,25 @@
 #undef now
 #undef Plan
 #include "../src/support_dispatch.cpp"
+#include "../src/support_config.cpp"
 #include <memory>
 namespace crew {
 namespace {bool supportSessionActive=true;}
 support::Policy SupportMissionPolicy() noexcept {return {support::Environment::normal,false};}
 int SupportAirCallCount() noexcept{return 21;}
 const wchar_t* SupportAirCallName(int) noexcept{return L"air";}
+const wchar_t* SupportAirCallKey(int) noexcept{return L"AIR";}
+bool SupportSoloHostWorld() noexcept{return false;}
 bool SupportAircraftSpec(int,SupportAircraft*) noexcept{return false;}
-support::Refusal PlanAirSupport(int,const float*,const float*,support::Route*) noexcept{return support::Refusal::unsupported;}
+support::Refusal PlanAirSupport(int,const float*,const float*,support::Route*,int) noexcept{return support::Refusal::unsupported;}
 unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float*) noexcept{return nullptr;}
-bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*) noexcept{return false;}
+bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool) noexcept{return false;}
 bool DeleteSupportAircraft(const ObjRef&) noexcept{return false;}
 bool SupportSoldiersReady() noexcept{return true;}
 const wchar_t* SupportSoldierFailureText() noexcept{return L"";}
-bool ApplySupportSoldierSpawn(const float*,bool,const unsigned char*,ObjRef*) noexcept{return false;}
+bool ApplySupportSoldierResource(const float*,std::uint32_t,const unsigned char*,bool,ObjRef*) noexcept{return false;}
+bool CreateSupportSoldierUnregistered(const float*,std::uint32_t,const unsigned char*,bool,ObjRef*) noexcept{return false;}
+bool SupportPeersAcceptAirborne() noexcept{return true;}
 bool DeriveSupportSoldierNetId(const void*,unsigned,unsigned char*) noexcept{return false;}
 bool RegisterSupportObject(const void*,const unsigned char*) noexcept{return false;}
 bool FollowSupportSoldier(const ObjRef& who,const ObjRef& leader) noexcept {
@@ -41,6 +46,7 @@ void SupportNetTick() noexcept{}
 void ResetSupportNet() noexcept{}
 void ReportSupportFailure(std::uint64_t) noexcept{}
 bool SupportTransactionActive(std::uint64_t) noexcept{return supportSessionActive;}
+bool SupportPeersAcceptVariants() noexcept{return true;}
 bool ValidateMissionCrewPlan(const SupportPlan&) noexcept{return false;}
 bool ApplyMissionCrewPlan(std::uint64_t,const SupportPlan&,bool) noexcept{return false;}
 void DestroyMissionCrewPlan(std::uint64_t) noexcept{}

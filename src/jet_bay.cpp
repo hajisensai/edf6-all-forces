@@ -110,7 +110,7 @@ SideGunSpec kSideGuns[]={
 };
 static_assert(sizeof(kSideGuns)/sizeof(kSideGuns[0])==static_cast<std::size_t>(SideGun::count),"jet::SideGun's order");
 SideGunSpec& GunOf(SideGun g) noexcept { return kSideGuns[static_cast<int>(g)]; }
-bool& cannonReady=kSideGuns[0].ready;     // the Proteus fires the cannon's round too (ProteusGunRound)
+bool& cannonReady=kSideGuns[0].ready;
 // Impact charges (ImpactDamage): tools/make_jets.py's EDF6VC_IMPACT_*.SGO, the gunship round made a one-round,
 // no-wait GrenadeBullet01 that bursts at the end of its kImpact life (or on what it meets first), its blast
 // radius the charge's (indirect_fire_param #9 AmmoExplosion): a blast's radius is the SGO's, so one charge per
@@ -156,9 +156,10 @@ const EmcFile kEmcFiles[]={
     {L"app:/object/edf6vc_sz_mega.sgo",L"EDF6VC_SZ_MEGA.SGO","Sazabi mega particle cannon"},
     {L"app:/object/edf6vc_sz_charge.sgo",L"EDF6VC_SZ_CHARGE.SGO","Sazabi charge"},
     {L"app:/object/edf6vc_sz_funnel.sgo",L"EDF6VC_SZ_FUNNEL.SGO","Sazabi funnel beam"},
+    {L"app:/object/edf6vc_proteus_shield.sgo",L"EDF6VC_PROTEUS_SHIELD.SGO","Proteus shield"},   // tools/make_proteus.py
 };
 constexpr int kEmcCount=static_cast<int>(sizeof(kEmcFiles)/sizeof(kEmcFiles[0]));
-static_assert(kEmcCount==static_cast<int>(EmcRound::szFunnel)+1,"kEmcFiles is indexed by EmcRound");
+static_assert(kEmcCount==static_cast<int>(EmcRound::proteusShield)+1,"kEmcFiles is indexed by EmcRound");
 bool emcReady[kEmcCount]{};               // preloaded this mission (PreloadShells)
 // The IFC's own copy of the round's AmmoSize (#7) and AmmoExplosion (#9), as its config 0x2B5F40 writes them (r14 = the
 // IFC: 0x2B6A15 movss [r14+0x100],xmm0; 0x2B68C5 movss [r14+0xF0],xmm0; docs/carrier-laser-re.md §3): a round takes its
@@ -568,8 +569,8 @@ bool InstallBay(bool spawnOk) noexcept {
     return bayOk;
 }
 
-void PreloadShells(void* mgr,bool gunship,bool proteus) noexcept {
-    gunshipReady=shellsOk && (gunship || proteus);
+void PreloadShells(void* mgr,bool gunship) noexcept {
+    gunshipReady=shellsOk && gunship;
     if(gunshipReady)reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kGunshipSgo,2,-1);
     for(auto& gun:kSideGuns) {   // each side gun whose round is installed; one from before the gun: the guns it had
         gun.ready=gunshipReady && ModFileThere(gun.file);
@@ -593,8 +594,8 @@ void PreloadShells(void* mgr,bool gunship,bool proteus) noexcept {
         if(n>0)at+=n;
     }
     ++missionCount;
-    Log("JET preload gunship shells=%d cannon=%d gatling=%d (gunship %d, Proteus %d) impact charges (m) %s drill charge %d emc beam %d sight %d break %d blast %d sazabi mega %d charge %d funnel %d",gunshipReady,cannonReady,GunOf(SideGun::gatling).ready,gunship,proteus,charges,drillReady,
-        emcReady[0],emcReady[1],emcReady[2],emcReady[3],emcReady[4],emcReady[5],emcReady[6]);
+    Log("JET preload gunship shells=%d cannon=%d gatling=%d (gunship %d) impact charges (m) %s drill charge %d emc beam %d sight %d break %d blast %d sazabi mega %d charge %d funnel %d proteus shield %d",gunshipReady,cannonReady,GunOf(SideGun::gatling).ready,gunship,charges,drillReady,
+        emcReady[0],emcReady[1],emcReady[2],emcReady[3],emcReady[4],emcReady[5],emcReady[6],emcReady[7]);
 }
 
 void ResetShells() noexcept {
@@ -670,27 +671,6 @@ bool ImpactDamage(const unsigned char* by,const float* at,float damage,float rad
     if(fired && Cfg().debug)Log("JET impact by %p at (%.0f,%.0f,%.0f): %.0f damage, %.0f m charge (asked %.0f m)",by,at[0],at[1],at[2],damage,
                               kCharges[c].radius,radius);
     return fired;
-}
-// The Proteus's driver's gun (proteus.cpp): a round of the gunship's cannon, straight from `from` at `at`.
-bool ProteusGunRound(const unsigned char* by,const float* from,const float* at,float damage) noexcept {
-    if(!by || !from || !at || !std::isfinite(from[0]+from[1]+from[2]+at[0]+at[1]+at[2]) || !std::isfinite(damage) || damage<=0.0f)return false;
-    return Shell(kCannonSgo,cannonReady,by,from,at,damage,true,"Proteus gun");
-}
-// The Proteus's salvo (proteus.cpp): a round of the gunship's shells, on the arc its IFC solves onto `at`.
-bool ProteusSalvoRound(const unsigned char* by,const float* from,const float* at,float damage) noexcept {
-    if(!by || !from || !at || !std::isfinite(from[0]+from[1]+from[2]+at[0]+at[1]+at[2]) || !std::isfinite(damage) || damage<=0.0f)return false;
-    // The off-screen gunship uses a 10 m collision sphere. The Proteus's actual missile is 1.6 m
-    // (Root.cpk V_407BIGBEGARUTA_MISSILE: AmmoSize 1.6, AmmoHitSizeAdjust 1).
-    // Set the private IFC before its first step; damage and explosion radius stay unchanged.
-    if(!ifcAmmoOk)return false;
-    unsigned char* const o=ShellMake(kGunshipSgo,gunshipReady,by,from,at,damage,false,"Proteus salvo");
-    if(!o)return false;
-    Put<float>(o+kDemoIfc,kIfcAmmoSize,1.6f);
-    return true;
-}
-void ProteusRoundsReady(bool* gun,bool* salvo) noexcept {
-    if(gun)*gun=cannonReady && shellsOk;
-    if(salvo)*salvo=gunshipReady && shellsOk && ifcAmmoOk;
 }
 // A bite of the drill tank's drill (drill.cpp): the drill charge fired by `by` straight from `from` (the drill's base)
 // at `at` (what it touches) with `damage`; its team's enemies hurt, its kills, the map's buildings and rocks too.

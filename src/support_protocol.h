@@ -4,6 +4,14 @@
 
 namespace crew::support_net {
 constexpr std::uint32_t kMagic=0x54525053,kVersion=2;
+// Capabilities a peer announces in its hello's `index` (wire v2 unchanged: an older peer sends 0 there and an older
+// host ignores the field, ValidMessage bounds it below kMaxUnits). kCapSoldierVariants: its Validate accepts the
+// support_call.h soldier weapon resources ((weapon << 8) | role) and a configured number of aircraft. A host plans
+// those only when every peer announced it (Session::PeersHave); otherwise rifles and each call's own number.
+// kCapAirborneAir: it applies support_call.h airborne aircraft (created in the air, crew seated at once). A host
+// plans air support only when every peer has it (an older peer would make the hull empty and its crew mid-air).
+constexpr std::uint32_t kCapSoldierVariants=1u,kCapAirborneAir=2u,kCapabilities=kCapSoldierVariants|kCapAirborneAir;
+static_assert(kCapabilities<kMaxUnits,"hello.index carries the capability bits");
 enum class Kind : std::uint32_t { hello=1,welcome,request,begin,unit,prepare,ready,commit,result,cancel,activate,activated,requestStatus };
 struct Message {
     Kind kind=Kind::hello;
@@ -40,6 +48,9 @@ public:
     bool Ready() const noexcept;
     std::uint64_t Epoch() const noexcept { return epoch_; }
     std::uint32_t ActiveCount() const noexcept;
+    // Host: whether every peer of this session announced all of `caps` in its current hello (no peer: true).
+    // A client is never asked to plan: true.
+    bool PeersHave(std::uint32_t caps) const noexcept;
 private:
     enum class Phase { empty,planning,assembling,prepared,spawning,active,cancelled };
     struct Transaction {
@@ -67,6 +78,7 @@ private:
     std::array<std::uint64_t,kMaxPeers+1> challenges_{},lastRequestAt_{};
     std::array<std::uint32_t,kMaxPeers+1> requests_{};
     std::array<std::uint32_t,kMaxPeers+1> peerMissions_{};
+    std::array<std::uint32_t,kMaxPeers+1> peerCaps_{};
     struct Reply { std::uint32_t request=0;RequestStatus status=RequestStatus::accepted;bool dirty=false; };
     std::array<Reply,kMaxPeers+1> replies_{};
     Reply localReply_{};

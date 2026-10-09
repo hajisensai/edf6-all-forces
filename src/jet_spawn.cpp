@@ -273,7 +273,7 @@ unsigned char* PrepareSupportAircraft(const SupportAircraft& spec,const float* m
     return vehicle;
 }
 
-bool ActivateSupportAircraft(unsigned char* vehicle,const SupportAircraft& spec,const float* target) noexcept {
+bool ActivateSupportAircraft(unsigned char* vehicle,const SupportAircraft& spec,const float* target,bool airborne) noexcept {
     // Only the actual pilot authorizes takeoff; an empty seat/Dummy never passes this gate.
     if(!vehicle || !target || !NpcDriver(vehicle))return false;
     if(spec.heli>=0) {
@@ -283,7 +283,12 @@ bool ActivateSupportAircraft(unsigned char* vehicle,const SupportAircraft& spec,
     Jet* entry=FindJet(vehicle);
     if(!entry)entry=NewEntry(vehicle,GameMs());
     if(!entry)return false;
-    entry->launched=true;entry->mode=Mode::takeoff;entry->escort=spec.follow;
+    entry->launched=true;entry->mode=airborne ? Mode::patrol : Mode::takeoff;entry->escort=spec.follow;
+    if(airborne) {   // Launch's start: already flying along its nose at its kind's cruise (never a stall, never a drop)
+        const float* m=reinterpret_cast<const float*>(vehicle+kMatrix);
+        const float cruise=KindOf(Row(SupportBody(spec)).role).cruise;
+        for(int i=0;i<3;++i)entry->m.vel[i]=m[8+i]*cruise;
+    }
     std::memcpy(entry->anchor,target,12);entry->fuelMs=static_cast<ULONGLONG>(spec.fuelSeconds)*1000;
     JoinFlight(*entry,FlightFor(&supportAircraft,GameMs()));
     ApplyMapCommand(*entry,Command{Order::guard,{target[0],target[1],target[2]}},GameMs());
@@ -328,10 +333,9 @@ void PreloadJets() noexcept {
         // The doll drones' dolls (as the Recruiter's weapon SGO has its doll preloaded, its `resource`).
         const bool dolls=PreloadDolls(mgr,Preloaded(Body::doll));
         Log("JET preload %s (dolls %d)",line,dolls);
-        // The gunship's shells (GunshipFire), with its body; the impact charges.
-        // ...and for the Proteus's gun and salvo (proteus.cpp) whenever its rework's code checked out at load, whatever the
-        // ini says now: a Proteus may be called any time, and ProteusRework (or Enabled) may be switched on mid-mission.
-        PreloadShells(mgr,Preloaded(Body::gunship),ProteusReady());
+        // The gunship's shells (GunshipFire), with its body; the impact charges; the EMC / Sazabi rounds and the Proteus's
+        // shield whenever their files are installed (a Proteus may be called any time, ProteusRework switched on mid-mission).
+        PreloadShells(mgr,Preloaded(Body::gunship));
     } __except(FaultLog("JET preload (nothing preloaded)",GetExceptionInformation())) {
         for(auto& p:preloaded)p=false;
         ResetShells();

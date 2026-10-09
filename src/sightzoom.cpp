@@ -62,29 +62,43 @@ Capability SeatCapability(const unsigned char* v,unsigned index) noexcept {
     if(!n || n>16 || !Readable(holders,n*sizeof(void*)))return {};
     const unsigned char* picked=PayloadSightPicked(v,index);
     if(!picked)return {}; // no live fire-control weapon, not a request to fall back to an arbitrary holder
-    Capability selected{};
-    for(std::uint64_t i=0;i<n;++i) {
-        if(!Readable(holders[i],kHolderWeapon+8))continue;
-        const auto weapon=At<const unsigned char*>(holders[i],kHolderWeapon);
-        if(weapon!=picked)continue;
+    const bool observing=HighCamOn(v) || TurretCamHighTransition(v);
+    const auto of=[&](const unsigned char* weapon) noexcept -> Capability {
         RoundModel round{};float muzzle[3],direction[3];
         if(!Readable(weapon,edf::kWeaponAmmoGravity+4) || IsFuelTank(weapon) || !ReadRound(weapon,&round) ||
-           !round.rtti || round.kind==RoundKind::none || !edf::MeanMuzzle(weapon,64,muzzle,direction))continue;
-        if(!std::isfinite(muzzle[0]+muzzle[1]+muzzle[2]+direction[0]+direction[1]+direction[2]))continue;
+           !round.rtti || round.kind==RoundKind::none || !edf::MeanMuzzle(weapon,64,muzzle,direction))return {};
+        if(!std::isfinite(muzzle[0]+muzzle[1]+muzzle[2]+direction[0]+direction[1]+direction[2]))return {};
         const int mark=At<std::int32_t>(weapon,edf::kWeaponMark);
         const bool indirect=!EnergyWeapon(round.style) && ((round.lobbed && round.alive>=600) || mark==edf::kMarkLofted ||
             (round.kind==RoundKind::arc && mark==edf::kMarkGround && round.alive>=600));
-        const Kind kind=indirect ? Kind::indirect : aircraft || (heli && index==0) ? Kind::flight :
-            EnergyWeapon(round.style) ? Kind::sensor : round.kind==RoundKind::homing ? Kind::missile : round.kind==RoundKind::rocket || round.lobbed ? Kind::rocket : Kind::optical;
-        const Capability found{kind,weapon};
-        selected=found;break;
-    }
-    Capability found=selected;
-    if(found.kind!=Kind::none && (HighCamOn(v) || TurretCamHighTransition(v)))found.kind=Kind::indirect;
-    if(sightzoom::Magnifies(found.kind) && found.weapon) {
-        optic::Pose pose;
-        found.mounted=optic::Mounted(v,seat,static_cast<const unsigned char*>(found.weapon),&pose);
-    }
+        Capability found{indirect ? Kind::indirect : aircraft || (heli && index==0) ? Kind::flight :
+            EnergyWeapon(round.style) ? Kind::sensor : round.kind==RoundKind::homing ? Kind::missile : round.kind==RoundKind::rocket || round.lobbed ? Kind::rocket : Kind::optical,weapon};
+        if(observing)found.kind=Kind::indirect;
+        if(sightzoom::Magnifies(found.kind)) {
+            optic::Pose pose;
+            found.mounted=optic::Mounted(v,seat,weapon,&pose);
+        }
+        return found;
+    };
+    const auto live=[&](std::uint64_t i) noexcept -> const unsigned char* {
+        if(!Readable(holders[i],kHolderWeapon+8))return nullptr;
+        const auto ctrl=At<const unsigned char*>(holders[i],kHolderCtrl);
+        return Readable(ctrl,12) && At<std::int32_t>(ctrl,8)>0 ? At<const unsigned char*>(holders[i],kHolderWeapon) : nullptr;
+    };
+    Capability found{};
+    for(std::uint64_t i=0;i<n;++i)if(holders[i] && Readable(holders[i],kHolderWeapon+8) &&
+                                    At<const unsigned char*>(holders[i],kHolderWeapon)==picked){found=of(picked);break;}
+    // The fire-control pick without an optic of its own (the Titan's hull gatling on the right trigger, 2026-10-09: "按了右
+    // 键使用机枪以后，自瞄和瞄具等都无法使用了"): the seat's sight is still there; the first live weapon of the same seat
+    // whose model carries a mounted optic owns the scope, so the scope, and the sight key reserved for it
+    // (turretaim.cpp EDF6VehicleCrew_SightBindingV1), do not come and go with the trigger last pulled.
+    if(!observing && found.kind!=Kind::none && !found.mounted && sightzoom::Magnifies(found.kind))
+        for(std::uint64_t i=0;i<n;++i) {
+            const unsigned char* const weapon=live(i);
+            if(!weapon || weapon==picked)continue;
+            const Capability other=of(weapon);
+            if(other.mounted){found=other;break;}
+        }
     return found;
 }
 

@@ -19,6 +19,10 @@ using vec::Cross;using vec::Dot;using vec::Len;
 constexpr unsigned kHeli506=0x17DB238,kPhysics506=0x61B710;
 constexpr std::size_t kSlotPhysics=57,kSlotMessage=9,kSpeedGain=0x162C,kBody=0x1650;
 constexpr unsigned kSetLinearVelocity=0x11B18F0,kSetAngularVelocity=0x11B1760;
+// The body's velocity as the solver left it (physics.cpp's probe reads the same): (body) -> m/s, (body, out) -> rad/s.
+constexpr unsigned kGetLinearVelocity=0x11B1300,kGetAngularVelocity=0x11B1060;
+const unsigned char kGetLinSig[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0x81,0x00,0x01,0x00,0x00,0x48,0x8B,0xD9};
+const unsigned char kGetAngSig[]={0x48,0x89,0x5C,0x24,0x18,0x57,0x48,0x83,0xEC,0x40};
 // The 506's message handler (docs/subcarrier-re.md §8.1): it takes the water message itself, the rest goes to the
 // vehicle handler 0x62ECB0, which runs the death step 0x6329B0 for 0x1000000F (docs/player-jet-re.md §4).
 constexpr unsigned kMessage506=0x652E70,kVehicleDie=0x6329B0;
@@ -43,12 +47,14 @@ constexpr MarkRange kMarks[]={
 using PhysicsFn=void(__fastcall*)(void*);
 using MessageFn=bool(__fastcall*)(void*,std::uint32_t,void*);
 using SetVecFn=void(*)(void*,const float*);
+using GetVecFn=const float*(*)(void*);
+using GetVecOutFn=const float*(*)(void*,float*);
 using StepFn=bool(*)(unsigned char*,float*,float*) noexcept;
 using OwnerMessageFn=bool(*)(unsigned char*,std::uint32_t,void*,MessageRestore*) noexcept;
 using FindPartFn=std::int32_t(__fastcall*)(void*,const wchar_t*);
 PhysicsFn nextPhysics=nullptr;
 MessageFn nextMessage=nullptr;
-bool physicsOk=false,messageOk=false,dieOk=false,bodyPartOk=false;
+bool physicsOk=false,messageOk=false,dieOk=false,bodyPartOk=false,solverReadOk=false;
 bool airframeOk=false;
 // The death message's data: the vehicle handler's 0x1000000F case reads only the vehicle (0x6329B0(vehicle));
 // zeros, not garbage, should anything read it.
@@ -177,7 +183,23 @@ OwnerMessageFn MessageOwner(PluginBody body) noexcept {
     }
 }
 
+// The step's `lin` / `ang` come in as the solver left the body (read before the stock step writes its own): a step
+// that keeps some of it (a player jet on the ground: pjet_handling.h GroundContact) has it; the others write it whole.
+void ReadBody(const unsigned char* v,float* lin,float* ang) noexcept {
+    const auto body=At<void*>(v,kBody);
+    if(!body)return;
+    const float* const l=reinterpret_cast<GetVecFn>(image+kGetLinearVelocity)(body);
+    alignas(16) float a[4]{};
+    const float* const w=reinterpret_cast<GetVecOutFn>(image+kGetAngularVelocity)(body,a);
+    for(int i=0;i<3;++i){lin[i]=l ? l[i] : 0.0f;ang[i]=w ? w[i] : 0.0f;}
+}
+
 void __fastcall PhysicsHook(void* vehicle) {
+    alignas(16) float lin[4]{},ang[4]{};
+    __try {
+        const auto v=static_cast<const unsigned char*>(vehicle);
+        if(solverReadOk && StepOf(BodyOf(v)))ReadBody(v,lin,ang);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {std::memset(lin,0,sizeof(lin));std::memset(ang,0,sizeof(ang));}
     nextPhysics(vehicle);
     __try {
         auto v=static_cast<unsigned char*>(vehicle);
@@ -187,7 +209,6 @@ void __fastcall PhysicsHook(void* vehicle) {
         if(At<std::int32_t>(v,kBodyPart)==-1 && BodyOf(v)!=PluginBody::none)FixBodyPart506(v,"BODY506");
         const StepFn step=StepOf(BodyOf(v));
         if(!step)return;
-        alignas(16) float lin[4]{},ang[4]{};
         if(!step(v,lin,ang))return;
         const auto body=At<void*>(v,kBody);
         if(!body)return;
@@ -252,6 +273,7 @@ PluginBody BodyOf(const void* vehicle) noexcept {
 }
 
 bool Body506Ok() noexcept { return physicsOk; }
+bool Body506ReadsSolver() noexcept { return physicsOk && solverReadOk; }
 bool Body506MessageOk() noexcept { return messageOk; }
 bool Die506Ok() noexcept { return dieOk; }
 bool BodyPartOk() noexcept { return bodyPartOk; }
@@ -366,6 +388,8 @@ bool InstallBody506() noexcept {
         void* const current=*slot;
         if(current!=image+kPhysics506)Log("BODY506 physics: chaining onto %p (another plugin)",current);
         nextPhysics=reinterpret_cast<PhysicsFn>(current);
+        solverReadOk=Matches(kGetLinearVelocity,kGetLinSig,sizeof(kGetLinSig)) && Matches(kGetAngularVelocity,kGetAngSig,sizeof(kGetAngSig));
+        if(!solverReadOk)Log("BODY506 velocity getters: unexpected EDF.dll code: a player jet on the ground is driven whole, not on its contacts");
         physicsOk=PatchVtableSlot(slot,current,reinterpret_cast<void*>(&PhysicsHook));
         messageOk=physicsOk && InstallMessages();
         // The death goes through the 506's own message slot (hooked or not) to the stock handler.

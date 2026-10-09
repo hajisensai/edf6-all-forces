@@ -30,6 +30,8 @@ row numbers saves use), EDF6AutoTurret's vehicle data and the generated objects 
 
 Menu 3 downloads the newest build from the test site, menu 4 sends the logs back to it (tools/testhub.py;
 the site itself is testhub/), menu 5 checks what is installed (check: reads only, the game may be running).
+Menu 7 edits the map support's out-of-mission configuration in the player's EDF6VehicleCrew.ini (tools/support_config.py):
+which support units can be called, their real crews' stock weapons, how many aircraft a call brings.
 """
 from __future__ import annotations
 
@@ -444,11 +446,11 @@ def install(game: str, campaign_requested: bool = False) -> None:
         stock = files, skipped
     sidecar = build_asset(cache, make_sidecar, '边三轮摩托')
     sazabi = build_asset(cache, make_sazabi, '沙扎比（模型生成约 1.5 分钟）')
-    proteus = build_asset(cache, make_proteus, '普罗透斯支撑桩和护盾模型')
+    proteus = build_asset(cache, make_proteus, '普罗透斯护盾（原版空袭兵电磁碉堡墙；同时撤销旧版生成的模型）')
     bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
     campaign = None
     if campaign_requested or make_edf5_campaign.wanted(game):
-        print('生成可选实验 EDF5 战役（追加离线任务；原始 BVM 脚本尚未逐关验证，缺少资源的 4 关不会安装）……')
+        print('生成可选实验 EDF5 战役（本篇、DLC1、DLC2 三个独立任务包；原始 BVM 脚本尚未逐关验证，缺少资源的 4 关不会安装）……')
         try:
             campaign = make_edf5_campaign.build(game)
         except make_edf5_campaign.Refused as e:
@@ -492,11 +494,10 @@ def install(game: str, campaign_requested: bool = False) -> None:
         print('写入', path)
     for name, section in PLUGINS:
         install_plugin(game, *plugins[name], name, section)
-    if campaign is not None:   # after the plugin's ini: it sets EDF5CampaignRows there
+    if campaign is not None:   # after the plugin's ini: it sets EDF5CampaignContent there
         for path in make_edf5_campaign.install(game, campaign):
             print('写入', path)
-        print(f'EDF5 战役：{len(campaign[2]["rows"])} 关接在离线任务列表第 {campaign[1]} 关之后'
-              f'（打完 EDF6 第一关 M000B 后解锁）')
+        print(make_edf5_campaign.summary(campaign))
         for group, path, why in campaign[2]['skipped']:
             print('  跳过', group, path, why)
     if bigmap is not None:
@@ -567,7 +568,7 @@ def uninstall(game: str) -> None:
         return
     import make_edf5_campaign
     if make_edf5_campaign.removal_blocked(game):
-        print('已取消卸载：EDF5 战役任务列表被其他工具改过，不能安全撤回；保留任务文本和插件以免选关崩溃。')
+        print('已取消卸载：EDF5 战役的模式表（CONFIG.SGO）或旧版任务列表被其他工具改过，不能安全撤回；保留任务文件和插件以免读档崩溃。')
         return
     if choice == '1':   # the call weapons point at the generated SGOs: those go only with the rows
         if not retire_weapons(game):
@@ -587,11 +588,10 @@ def uninstall(game: str) -> None:
         uninstall_stock_stores(game)
     if gen.uninstall(game):
         print('删除测试场关卡')
-    # with 2 too: without the plugin the appended rows would move the ending past M152 and the clear ratio to 257 rows
+    # with 2 too: without the plugin the packs would stay listed as content the player does not own
     import make_edf5_campaign
     if make_edf5_campaign.installed(game):
-        print('EDF5 战役：任务列表还原成安装前的样子（存档里 EDF5 任务的通关记录还在，重新安装后照旧显示）。')
-        print('  如果存档最后停在一个 EDF5 任务上，选关游标会回到第一关。')
+        print('EDF5 战役：模式表、文本表还原成安装前的样子，删除 3 个任务包的任务列表（各任务包的存档 DEFP_E5*.MST 留着，重新安装后照旧显示）。')
         done, kept = make_edf5_campaign.remove(game)
         for path in done:
             print('还原', path)
@@ -706,7 +706,7 @@ def send_logs() -> int:
 def manage_campaign(game: str) -> int:
     """Menu 6: explicit experimental campaign opt-in or removal, without uninstalling the plugins."""
     import make_edf5_campaign
-    print('EDF5 战役默认开启：普通安装 / 更新会在离线任务列表末尾追加任务；手动停用后保留停用选择。')
+    print('EDF5 战役默认开启：普通安装 / 更新会加上 EDF5 本篇、DLC1、DLC2 三个独立任务包（离线模式的「任务包」里选）；手动停用后保留停用选择。')
     print('原始 BVM 脚本尚未逐关验证，不能保证所有任务可以正常游玩；缺少资源的 4 关不会安装。')
     print('当前状态：' + ('已启用' if make_edf5_campaign.enabled(game) else '未启用'))
     choice = ask('输入 1 启用 / 更新实验战役（同时更新插件），2 停用战役（保留插件），其它 = 取消：')
@@ -720,23 +720,49 @@ def manage_campaign(game: str) -> int:
         for path in kept:
             print('保留（之后被别的工具改过）', path)
         if make_edf5_campaign.enabled(game):
-            print('未能停用：任务列表被其他工具改过，已保留它依赖的文本、图片和插件。')
+            print('未能停用：模式表或旧版任务列表被其他工具改过，已保留它依赖的任务文件和插件。')
             return 1
         print('EDF5 战役已停用，后续普通更新不会重新启用。')
+    return 0
+
+
+def manage_support(game: str) -> int:
+    """Menu 7: the map support's out-of-mission configuration (tools/support_config.py, the plugin's src/support_config.h)
+    in the player's EDF6VehicleCrew.ini: callable units, their crews' weapons, aircraft counts. The plugin rereads the
+    ini on save, so the game may even be running."""
+    import support_config
+    path = os.path.join(game, 'Mods', 'Plugins', PLUGIN + '.ini')
+    if not os.path.isfile(path):
+        print('还没有安装插件（找不到 EDF6VehicleCrew.ini），请先选 1 安装。')
+        return 1
+    with open(path, 'rb') as f:
+        raw = f.read()
+    bom = raw.startswith(b'\xef\xbb\xbf')
+    text = (raw[3:] if bom else raw).decode('utf-8', errors='replace')
+    edited = support_config.edit(text, ask)
+    if edited == text:
+        print('没有改动。')
+        return 0
+    modfiles.atomic_write(path, (b'\xef\xbb\xbf' if bom else b'') + edited.encode('utf-8'))
+    print(f'已保存 {path}：下一次在地图呼叫支援时生效。')
     return 0
 
 
 def main(argv: list[str]) -> int:
     print(f'== {PLUGIN} 安装程序 {build_name()} ==\n')
     mode = argv[0] if argv else ''
-    if mode not in ('install', 'uninstall', 'update', 'logs', 'check', 'campaign'):
-        pick = ask('输入 1 安装 / 更新，2 卸载，3 下载最新测试版，4 回传日志给开发者，5 检查安装状态，6 管理 EDF5 实验战役，回车退出：')
-        mode = {'1': 'install', '2': 'uninstall', '3': 'update', '4': 'logs', '5': 'check', '6': 'campaign'}.get(pick, '')
+    if mode not in ('install', 'uninstall', 'update', 'logs', 'check', 'campaign', 'support'):
+        pick = ask('输入 1 安装 / 更新，2 卸载，3 下载最新测试版，4 回传日志给开发者，5 检查安装状态，6 管理 EDF5 实验战役，'
+                   '7 配置地图支援（可呼叫单位 / 兵员武器 / 架数），回车退出：')
+        mode = {'1': 'install', '2': 'uninstall', '3': 'update', '4': 'logs', '5': 'check', '6': 'campaign', '7': 'support'}.get(pick, '')
         if not mode:
             return 0
     if mode == 'check':   # reads only: the game may be running
         game = pick_game()
         return 1 if not game else 0 if check(game) else 1
+    if mode == 'support':   # edits one ini the plugin rereads on save: the game may be running
+        game = pick_game()
+        return 1 if not game else manage_support(game)
     if mode in ('update', 'logs'):
         import testhub
         try:

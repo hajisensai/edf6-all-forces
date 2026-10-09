@@ -1,203 +1,134 @@
-// Production control lifecycle plus optional execution of the real EDF weapon callbacks in a private mapping.
+// The production Proteus weapons and shield against the real EDF.dll (argv[1]), mapped privately with
+// DONT_RESOLVE_DLL_REFERENCES: no DllMain, no game initialiser; only the CRT math imports the native code reaches are
+// bound. The real functions run on fixture objects: the weapon user lookup 0x62D950, activation 0x68F8E0, the holder
+// pull 0x62C000 and the ready gate 0x6912F0, the patched empty-seat callback, the BarrierBullet01 hit handler
+// 0x2913B0; the installers patch / chain the real slots. Without argv[1] it runs the fake-image fixture's checks.
 #define main PreviousProteusFrameChecks
 #include "proteus_frame_test.cpp"
 #undef main
 namespace {
 using namespace crew;
-alignas(16) unsigned char left[0x1600]{},right[0x1600]{},launcher[0x1600]{},holders[3][0x48]{},weaponCtrl[16]{};
-alignas(16) unsigned char muzzles[2*edf::kMuzzleStride]{},bone[0x100]{},oldRider[0x400]{},oldCtrl[16]{};
-unsigned char* lists[3][1]={{holders[0]},{holders[1]},{holders[2]}};
-int posts=0,activated=0,deactivated=0,axesApplied=0;
-void __fastcall AxisApplied(void*,bool){++axesApplied;}
-void __fastcall OnActive(void*){++activated;}
-void __fastcall OnEmpty(void*){++deactivated;}
+alignas(16) unsigned char oldRider[0x400]{},oldCtrl[16]{};
+int onActive=0,onEmpty=0;
+void __fastcall OnActive(void*){++onActive;}
+void __fastcall OnEmpty(void*){++onEmpty;}
 bool __fastcall Ready(void*){return true;}
-void __fastcall FakeEnable(void* w){static_cast<unsigned char*>(w)[0x13E]=1;OnActive(w);}
-void __fastcall FakeDisable(void* w){static_cast<unsigned char*>(w)[0x13E]=0;OnEmpty(w);}
-void __fastcall FakePull(void* h){At<unsigned char*>(h,kHolderWeapon)[kPull]=1;}
-const void* __fastcall FakeUser(void*,const void* w){return w==left ? human+0x120 : oldRider+0x120;}
-void __fastcall FakePost(void*,const float*){++posts;Put<float>(bone,edf::kBoneRows+48,100);}
-void Jump(unsigned rva,void* target){unsigned char b[12]={0x48,0xB8};b[10]=0xFF;b[11]=0xE0;std::memcpy(b+2,&target,8);std::memcpy(image+rva,b,sizeof(b));}
-void InitWeapon(unsigned char* w,unsigned i) {
-    Put<void*>(holders[i],kHolderCtrl,weaponCtrl);Put<void*>(holders[i],kHolderWeapon,w);
-    auto seat=SeatAt(vehicle,i+1);Put<void*>(seat,kSeatWeapons,lists[i]);Put<std::uint64_t>(seat,kSeatWeaponCount,1);
-    Put<void*>(w,edf::kMuzzles,muzzles);Put<std::uint64_t>(w,edf::kMuzzleCount,2);
-    proteus::pose::Identity(reinterpret_cast<float*>(w+edf::kWeaponMatrix));
-    Put<float>(w,kRate,1);Put<float>(w,kSpread,1);
-}
-void Setup(bool native){
-    ok=userOk=true;config.proteus=true;config.proteusDriverGun=true;config.proteusFieldRadius=0;roundsReady=true;
-    Put<void*>(vehicle,0,image+kVtBig);Put<void*>(vehicle,kSelfCtrl,ctrl);Put<void*>(vehicle,kSeats,seats);Put<std::uint64_t>(vehicle,kSeatCount,4);
-    Put<float>(vehicle,kHpMax,7500);Put<float>(vehicle,kHp,7500);Put<int>(ctrl,8,1);Put<int>(ctrl,12,2);Put<int>(weaponCtrl,8,1);
-    Put<void*>(human,0,image+kVtRanger);Put<void*>(human,kSelfCtrl,ctrl);Put<float>(human,kHp,100);
-    human[edf::kHumanPlayer]=1;Put<void*>(human,edf::kHumanPad,human);Put<std::uint16_t>(human,0x128,2);
-    Put<void*>(seats,kSeatRider,human);Put<void*>(seats,kSeatRiderCtrl,ctrl);
-    InitWeapon(left,0);InitWeapon(right,1);InitWeapon(launcher,2);
-    proteus::pose::Identity(reinterpret_cast<float*>(bone+edf::kBoneRows));
-    for(int i=0;i<2;++i){
-        auto m=muzzles+i*edf::kMuzzleStride;Put<void*>(m,0,bone);Put<int>(m,edf::kMuzzleMode,1);
-        proteus::pose::Identity(reinterpret_cast<float*>(m+edf::kMuzzleLocal));
-        Put<float>(m,edf::kMuzzleLocal+48,i ? 3.0f : -3.0f);Put<float>(m,edf::kMuzzleLocal+52,10);Put<float>(m,edf::kMuzzleLocal+56,9);
-    }
-    nextWeaponPost=reinterpret_cast<void*>(&FakePost);
-    nativeEmpty=native ? reinterpret_cast<WeaponEnableFn>(image+0x690230) : &FakeDisable;
-    nativeActive=native ? reinterpret_cast<WeaponEnableFn>(image+0x68F8E0) : &FakeEnable;
-    nextUser=native ? reinterpret_cast<UserFn>(image+kUserFn) : &FakeUser;
-    buildMuzzle=native ? reinterpret_cast<BuildMuzzleFn>(image+kNativeMuzzle) : &FakeMuzzle;
-    if(!native)Jump(kPullFn,reinterpret_cast<void*>(&FakePull));
-    auto u=UnitOf(vehicle,true);u->active=u->closed=true;u->st.mode=proteus::Mode::deployed;RefreshWeapons(*u,vehicle);
-}
-void Lifecycle(){
-    auto& u=*UnitOf(vehicle,false);
-    Jump(kAxisApply,reinterpret_cast<void*>(&AxisApplied));
-    for(unsigned i=0;i<4;++i)for(int axis=0;axis<2;++axis){
-        auto a=seataim::Object(SeatAt(vehicle,i))+edf::kAimAxes+axis*edf::kAxisStride;
-        Put<float>(a,edf::kAxisMin,-.2f);Put<float>(a,edf::kAxisMax,.2f);Put<float>(a,edf::kAxisAngle,i==0 ? .3f : -.1f);
-    }
-    FollowCannon(seataim::Object(SeatAt(vehicle,kRightSeat)));
-    Check(At<float>(seataim::Object(SeatAt(vehicle,kRightSeat)),edf::kAimAxes+edf::kAxisAngle)==.2f && axesApplied==2,
-          "driver control updates both actual cannon axes and obeys destination stops");
-    Put<void*>(seats+kSeatStride,kSeatRider,human);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,ctrl);
-    FollowCannon(seataim::Object(SeatAt(vehicle,kRightSeat)));
-    FollowCannon(seataim::Object(SeatAt(vehicle,kLauncherSeat)));
-    Check(At<float>(seataim::Object(SeatAt(vehicle,kRightSeat)),edf::kAimAxes+edf::kAxisAngle)==-.1f &&
-          At<float>(seataim::Object(SeatAt(vehicle,kLauncherSeat)),edf::kAimAxes+edf::kAxisAngle)==.2f,
-          "gunner owns paired cannons while driver independently aims the salvo launcher");
-    Put<void*>(seats+2*kSeatStride,kSeatRider,human);Put<void*>(seats+2*kSeatStride,kSeatRiderCtrl,ctrl);
-    const int applied=axesApplied;FollowCannon(seataim::Object(SeatAt(vehicle,kRightSeat)));
-    Check(axesApplied==applied,"actual right occupant prevents paired or driver aim override");
-    Put<void*>(seats+kSeatStride,kSeatRider,nullptr);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,nullptr);
-    Put<void*>(seats+2*kSeatStride,kSeatRider,nullptr);Put<void*>(seats+2*kSeatStride,kSeatRiderCtrl,nullptr);
-Put<float>(seats,kSeatFire,1);
-    QueueWeapons(u,vehicle,true,seats);Check(gunShots==0,"slot4 only queues, never fires from old pose");
-    ProteusWeaponPost(vehicle,nullptr);
-    Check(posts==1 && gunShots==1 && lastFrom[0]==97,"post wrapper fires once after the original refreshed physical muzzle");
-    ProteusWeaponPost(vehicle,nullptr);Check(posts==2 && gunShots==1,"original post still chains but duplicate callback cannot double fire");
-    StockArm sight{};Check(ProteusSightWeapon(vehicle,0)==right && ProteusDriverSight(vehicle,&sight),"driver without a stock holder exposes actual right-cannon sight");
-    Check(sight.aimed && sight.physicalOnly && sight.paths==1 && sight.bore[2]==1 && std::fabs(sight.flight-2000.0f/960)<1e-4f && sight.at[0]==lastAt[0],
-        "driver bore/impact matches shot and uses custom round speed, not stock cannon speed");
-    auto arm=&u;
-    for(int reason=0;reason<7;++reason){
-        ++frame;now+=1000;u.salvoLeft=2;u.mark=human;u.markAt[2]=200;QueueWeapons(u,vehicle,true,seats);
-        if(reason==0)Put<void*>(seats,kSeatRider,nullptr);
-        if(reason==1)human[kDead]=1;
-        if(reason==2)config.enabled=false;
-        if(reason==3)vehicle[kDead]=1;
-        if(reason==4)u.net.remote=true;
-        if(reason==5)++frame;
-        if(reason==6)Put<void*>(human,kSelfCtrl,oldCtrl);
-        FlushWeapons(vehicle);
-        Check(gunShots==1 && salvoShots==0 && !u.queuedDriver && u.salvoLeft==0,"departure/death/disabled/remote/stale frame/reused rider cancels pending fire and salvo");
-        Put<void*>(seats,kSeatRider,human);human[kDead]=0;vehicle[kDead]=0;config.enabled=true;u.net.remote=false;Put<void*>(human,kSelfCtrl,ctrl);
-    }
-    u.st.mode=proteus::Mode::deployed;u.closed=true;u.active=true;
-    ++frame;QueueWeapons(u,vehicle,true,seats);ResetProteus();FlushWeapons(vehicle);
-    Check(!arm->queuedDriver && gunShots==1,"mission reset retires queued fire");
-}
-void Native(){
-    auto& u=*UnitOf(vehicle,false);
+
+void Native() {
+    Setup();
+    nativeEmpty=reinterpret_cast<WeaponEnableFn>(image+kNativeEmpty);
+    nativeActive=reinterpret_cast<WeaponEnableFn>(image+kNativeActive);
+    nextUser=reinterpret_cast<UserFn>(image+kUserFn);
+    Tick();
+    Unit& u=*UnitOf(vehicle,false);
+    u.st.mode=proteus::Mode::deployed;
+    // A weapon object the real activation / ready gate accept (their vtable slots and view).
     static void* vt[30]{};vt[14]=reinterpret_cast<void*>(&OnActive);vt[15]=reinterpret_cast<void*>(&OnEmpty);vt[26]=reinterpret_cast<void*>(&Ready);
-    unsigned char view[0x58]{},slot[0x28]{},prop[0x60]{};int index=0;
-    Put<void*>(right,0,vt);right[0x7F0]=1;Put<void*>(right,0x120,vehicle);
-    Put<void*>(right,0x1528,view);Put<std::uint64_t>(view,0x18,1);Put<void*>(view,8,&index);Put<void*>(view,0x28,slot);Put<void*>(slot,0,prop);
-    Put<void*>(seats+kSeatStride,kSeatRider,human);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,ctrl);
-    Put<void*>(seats+2*kSeatStride,0x300,oldRider);Put<void*>(seats+2*kSeatStride,0x308,oldCtrl);Put<int>(oldCtrl,8,1);Put<int>(oldCtrl,12,2);
-    Check(nextUser(vehicle+kUserIface,right)==oldRider+0x120,"real 62D950 returns stale last rider for empty right seat");
-    Check(UserHook(vehicle+kUserIface,right)==human+0x120,"production operator overrides stale native result with current left soldier");
-    Check(At<int>(ctrl,8)==1 && At<int>(ctrl,12)==2 && At<int>(oldCtrl,8)==1 && At<int>(oldCtrl,12)==2,"operator lookup balances real native weak references");
-    left[kPull]=1;ProteusEmptyWeapon(right);
-    const auto ready=reinterpret_cast<bool(__fastcall*)(void*)>(image+0x6912F0);
-    Check(right[0x13E]==1 && right[kPull]==1 && activated==1 && ready(right),"native activate plus holder pull passes real ready gate for empty paired cannon");
-    right[kPull]=0;netSession=true;Put<std::uint16_t>(human,0x128,1);ProteusEmptyWeapon(right);
-    Check(!right[kPull],"remote left gunner never creates second native trigger");
-    netSession=false;Put<std::uint16_t>(human,0x128,2);
-    Put<void*>(seats+2*kSeatStride,kSeatRider,oldRider);Put<void*>(seats+2*kSeatStride,kSeatRiderCtrl,oldCtrl);
-    Check(UserHook(vehicle+kUserIface,right)==oldRider+0x120,"occupied right seat keeps its genuine native operator");
-    Put<void*>(seats+2*kSeatStride,kSeatRider,nullptr);Put<void*>(seats+2*kSeatStride,kSeatRiderCtrl,nullptr);
-    human[kDead]=1;ProteusEmptyWeapon(right);
-    Check(!right[0x13E] && !ready(right) && !UserHook(vehicle+kUserIface,right),"dead left soldier stops both native activation and operator");human[kDead]=0;
-    ProteusEmptyWeapon(right);config.enabled=false;ProteusEmptyWeapon(right);
-    Check(!right[0x13E] && deactivated==2,"disabled rework delegates actual native empty-seat deactivation");config.enabled=true;
-    Put<void*>(seats+kSeatStride,kSeatRider,nullptr);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,nullptr);
-    float p[3],d[3];
-    for(int mode=0;mode<3;++mode){
-        Put<int>(muzzles,edf::kMuzzleMode,mode);Put<float>(muzzles,0xD0,1);Put<float>(muzzles,0xD4,0);Put<float>(muzzles,0xD8,0);Put<float>(muzzles,0xDC,0);
-        unsigned char saved[edf::kMuzzleStride];std::memcpy(saved,muzzles,sizeof(saved));
-        Check(RoundFrom(u,kRightSeat,0,p,d) && p[0]==-3 && p[1]==10 && p[2]==9,"production muzzle reads native firing matrix for all 3 orientation modes");
-        Check(std::memcmp(saved,muzzles,sizeof(saved))==0,"muzzle getter does not mutate native shot cache");
-        if(mode==2)Check(std::fabs(d[0]-1)<1e-5f && std::fabs(d[2])<1e-5f,"native mode2 FireVector is honored instead of incorrect bone-forward fallback");
+    static unsigned char view[0x58]{},slot[0x28]{},prop[0x60]{};static int index=0;
+    unsigned char* const mounts[]={cannonL,cannonR,launcherW};
+    for(unsigned char* w:mounts) {
+        Put<void*>(w,0,vt);w[0x7F0]=1;Put<void*>(w,0x120,vehicle);
+        Put<void*>(w,0x1528,view);
     }
-    Put<int>(muzzles,edf::kMuzzleMode,1);
-    // The LEA's original target and native phase order, not a copied C++ implementation.
+    Put<std::uint64_t>(view,0x18,1);Put<void*>(view,8,&index);Put<void*>(view,0x28,slot);Put<void*>(slot,0,prop);
+    // The real user lookup names the empty right seat's stale LAST rider; the borrowing driver overrides it.
+    Put<void*>(seats+2*kSeatStride,0x300,oldRider);Put<void*>(seats+2*kSeatStride,0x308,oldCtrl);Put<int>(oldCtrl,8,1);Put<int>(oldCtrl,12,2);
+    Check(nextUser(vehicle+kUserIface,cannonR)==oldRider+0x120,"real 62D950 returns the stale last rider of the empty right seat");
+    Check(UserHook(vehicle+kUserIface,cannonR)==human+0x120,"the production user hook names the borrowing driver instead");
+    Check(At<int>(oldCtrl,8)==1 && At<int>(oldCtrl,12)==2,"the native lookup balanced its weak references");
+    // Real activation, pull and ready gate for a driver-borrowed cannon.
+    const auto ready=reinterpret_cast<bool(__fastcall*)(void*)>(image+0x6912F0);
+    Put<float>(seats,kSeatFire,1);ProteusEmptyWeapon(cannonR);
+    Check(cannonR[0x13E]==1 && cannonR[kPull]==1 && onActive==1 && ready(cannonR),
+          "real activation plus holder pull pass the real ready gate for the driver's cannon");
+    Put<float>(seats,kSeatFire,0);cannonR[kPull]=0;
+    Put<float>(seats,kSeatFire2,1);ProteusEmptyWeapon(launcherW);
+    Check(launcherW[0x13E]==1 && launcherW[kPull]==1 && ready(launcherW),"the driver's second trigger readies and pulls the real launcher (deployed)");
+    Put<float>(seats,kSeatFire2,0);launcherW[kPull]=0;
+    u.st.mode=proteus::Mode::walk;ProteusEmptyWeapon(launcherW);
+    Check(!launcherW[0x13E] && !ready(launcherW) && onEmpty>=1,"walking: the real empty callback idles the launcher");
+    u.st.mode=proteus::Mode::deployed;
+    human[kDead]=1;ProteusEmptyWeapon(cannonR);
+    Check(!cannonR[0x13E] && !ready(cannonR) && !UserHook(vehicle+kUserIface,cannonR),"a dead driver: real stock deactivation, no operator");
+    human[kDead]=0;
+    // The installers on the real slots and code.
     std::int32_t rel=At<std::int32_t>(image,0x6302B3);
-    Check(image+0x6302B7+rel==image+0x690230 && At<const void*>(image,kWeaponPostSlot)==image+0x644910 &&
+    Check(image+0x6302B7+rel==image+kNativeEmpty && At<const void*>(image,kWeaponPostSlot)==image+0x644910 &&
           image[0x644910]==0xE9 && image+0x644915+At<std::int32_t>(image,0x644911)==image+0x630250,
-          "verified actual Big slot5 tail-jump and native empty callback target");
+          "the real BigBegaruta slot 5 tail-jumps to 0x630250 whose empty callback LEA names 0x690230");
     Check(InstallProteusWeapons() && nextWeaponPost==image+0x644910 &&
-          At<const void*>(image,kWeaponPostSlot)==reinterpret_cast<void*>(&ProteusWeaponPost),
-          "production installer chains genuine Big slot5 in private DLL mapping");
+          At<const void*>(image,kWeaponPostSlot)==reinterpret_cast<void*>(&ProteusWeaponPost),"the weapon phase chains the real slot 5");
     const auto patchedEmpty=reinterpret_cast<WeaponEnableFn>(image+0x6302B7+At<std::int32_t>(image,0x6302B3));
-    config.enabled=false;right[0x13E]=1;patchedEmpty(right);
-    Check(!right[0x13E],"real patched callback thunk delegates stock disable when plugin is off");
-    config.enabled=true;
-    Put<void*>(seats+kSeatStride,kSeatRider,human);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,ctrl);
-    const auto actualNext=nextUser;
+    config.enabled=false;cannonR[0x13E]=1;patchedEmpty(cannonR);
+    Check(!cannonR[0x13E],"the real patched callback delegates the stock deactivation when the plugin is off");
+    config.enabled=true;Put<float>(seats,kSeatFire,1);cannonR[kPull]=0;patchedEmpty(cannonR);
+    Check(cannonR[0x13E] && cannonR[kPull],"the real patched callback activates and pulls a borrowed cannon");
+    Put<float>(seats,kSeatFire,0);
+    // A failed user hook leaves every mount to the stock callback.
     auto userSlot=reinterpret_cast<void**>(image+kUserSlotRva);
-    void* originalUser=*userSlot;
-    // All post-pose/empty hooks are already installed in this private real DLL. Fail ONLY operator installation.
     DWORD protection=0;VirtualProtect(image+kUserFn,1,PAGE_EXECUTE_READWRITE,&protection);
-    const auto savedByte=image[kUserFn];image[kUserFn]=0xCC;
-    Check(!InstallProteusUser() && !userOk,"actual operator signature mismatch disables pairing eligibility");
-    right[0x13E]=1;right[kPull]=0;left[kPull]=1;patchedEmpty(right);
-    Check(!right[0x13E] && !right[kPull] && !ProteusSightWeapon(vehicle,1),
-          "signature failure with successful other hooks cannot activate/pull/advertise paired cannon");
-    image[kUserFn]=savedByte;VirtualProtect(image+kUserFn,1,protection,&protection);
-    Check(edf::PatchVtableSlot(userSlot,originalUser,nullptr),"private fixture empties operator slot to force real chain failure");
-    Check(!InstallProteusUser() && !userOk,"actual operator chain failure disables pairing eligibility");
-    right[0x13E]=1;right[kPull]=0;patchedEmpty(right);
-    Check(!right[0x13E] && !right[kPull],"chain failure with successful empty/post hooks still delegates stock disable");
-    Check(edf::PatchVtableSlot(userSlot,nullptr,originalUser),"private fixture restores native operator slot");
-    Check(InstallProteusUser() && userOk && nextUser==actualNext,"successful real operator installation enables pairing");
-    right[kPull]=0;patchedEmpty(right);
-    Check(right[0x13E] && right[kPull] && UserHook(vehicle+kUserIface,right)==human+0x120,
-          "pair activation resumes only with verified current-operator continuation");
-
-
-}
+    const auto saved=image[kUserFn];image[kUserFn]=0xCC;
+    Check(!InstallProteusUser() && !userOk,"a user lookup not as expected disables borrowing");
+    cannonR[0x13E]=1;Put<float>(seats,kSeatFire,1);cannonR[kPull]=0;patchedEmpty(cannonR);
+    Check(!cannonR[0x13E] && !cannonR[kPull],"without the user hook the stock empty callback stays in charge");
+    image[kUserFn]=saved;VirtualProtect(image+kUserFn,1,protection,&protection);
+    Check(InstallProteusUser() && userOk && At<const void*>(image,kUserSlotRva)==reinterpret_cast<void*>(&UserHook) &&
+          reinterpret_cast<const unsigned char*>(nextUser)==image+kUserFn,"the user hook chains the real BigBegaruta slot");
+    (void)userSlot;
+    Put<float>(seats,kSeatFire,0);
+    // The shield: the real BarrierBullet01 code it rests on, and its real hit handler draining the HP the shield reads.
+    Check(InstallProteusBarrier() && barrierOk && At<const void*>(image,kBarrierUpdateSlot)==reinterpret_cast<void*>(&BarrierHook) &&
+          nextBarrierUpdate==image+kBarrierUpdate,"the real barrier's code matches; its update slot is chained");
+    Check(At<float>(image,0x17A46C8)==0.0872f && static_cast<int>(kBarrierArcDeg*kPi/180.0f/At<float>(image,0x17A46C8))==kBarrierSegmentCount,
+          "the claim's segment count is the real ctor's (arc / its 0x17A46C8 step)");
+    u.st.shieldOn=true;u.st.shield=1;u.st.broken=false;u.st.mode=proteus::Mode::walk;Tick();
+    alignas(16) static unsigned char barrier[0x1600];
+    FreshBarrier(barrier,vehicle,kBarrierSegmentCount);BarrierStep(barrier);
+    const float full=config.proteusBarrier*7500;
+    Check(u.barrier.obj==barrier && At<float>(barrier,kBarrierHp)==full,"(the raised barrier is claimed)");
+    alignas(16) unsigned char msg[0x80]{};Put<float>(msg,0x50,900.0f);
+    const auto hit=reinterpret_cast<bool(__fastcall*)(void*,std::uint32_t,void*)>(image+0x2913B0);
+    Check(hit(barrier,0x10000000,msg) && At<float>(barrier,kBarrierHp)==full-900,"the real hit handler takes a hit off the barrier's HP");
+    BarrierStep(barrier);
+    Check(std::fabs(u.st.shield-(full-900)/full)<1e-5f && u.st.quiet==0,"the shield reads the HP the game left");
+    msg[0x60]=0x40;Put<float>(msg,0x50,5000.0f);hit(barrier,0x10000000,msg);
+    Check(At<float>(barrier,kBarrierHp)==full-900,"a replayed (0x40) hit is not taken twice by the real handler");
+    msg[0x60]=0;hit(barrier,0x10000000,msg);BarrierStep(barrier);
+    Check(u.st.broken && At<float>(barrier,kBarrierHp)<=0 && !u.barrier.obj,"the real handler breaks it; the shield is broken");
 }
 LONG CALLBACK NativeFault(EXCEPTION_POINTERS* p){
     std::printf("native fault code=%lx rva=%llx access=%llx\n",p->ExceptionRecord->ExceptionCode,
         static_cast<unsigned long long>(p->ContextRecord->Rip-reinterpret_cast<std::uintptr_t>(crew::image)),
         static_cast<unsigned long long>(p->ExceptionRecord->ExceptionInformation[1]));return EXCEPTION_CONTINUE_SEARCH;
 }
-int main(int argc,char** argv){
-    std::setvbuf(stdout,nullptr,_IONBF,0);SetErrorMode(SEM_NOGPFAULTERRORBOX);AddVectoredExceptionHandler(1,&NativeFault);
-    const bool native=argc>1;
-    if(native){image=reinterpret_cast<unsigned char*>(LoadLibraryExA(argv[1],nullptr,DONT_RESOLVE_DLL_REFERENCES));if(!image){std::puts("EDF.dll unavailable");return 77;}}
-    else image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2200000,MEM_RESERVE|MEM_COMMIT,PAGE_EXECUTE_READWRITE));
-    if(!image)return 2;
-    if(native){
-        // Only resolve the native muzzle builder's CRT math imports; no game initializer or DllMain runs.
-        const auto dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(image);
-        const auto nt=reinterpret_cast<const IMAGE_NT_HEADERS64*>(image+dos->e_lfanew);
-        if(nt->FileHeader.TimeDateStamp!=0x678CCB46)return 77;
-        auto imp=reinterpret_cast<const IMAGE_IMPORT_DESCRIPTOR*>(image+nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
-        for(;imp->Name;++imp) {
-            const auto name=reinterpret_cast<const char*>(image+imp->Name);
-            if(std::strcmp(name,"api-ms-win-crt-math-l1-1-0.dll"))continue;
-            const auto lib=LoadLibraryA(name);if(!lib)return 2;
-            auto src=reinterpret_cast<const IMAGE_THUNK_DATA64*>(image+imp->OriginalFirstThunk);
-            auto dst=reinterpret_cast<IMAGE_THUNK_DATA64*>(image+imp->FirstThunk);
-            for(;src->u1.AddressOfData;++src,++dst) {
-                if(IMAGE_SNAP_BY_ORDINAL64(src->u1.Ordinal))return 2;
-                const auto entry=reinterpret_cast<const IMAGE_IMPORT_BY_NAME*>(image+src->u1.AddressOfData);
-                const auto proc=GetProcAddress(lib,reinterpret_cast<const char*>(entry->Name));if(!proc)return 2;
-                DWORD old=0;VirtualProtect(dst,sizeof(*dst),PAGE_READWRITE,&old);dst->u1.Function=reinterpret_cast<ULONGLONG>(proc);VirtualProtect(dst,sizeof(*dst),old,&old);
-            }
+bool BindMath() {
+    const auto dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(image);
+    const auto nt=reinterpret_cast<const IMAGE_NT_HEADERS64*>(image+dos->e_lfanew);
+    if(nt->FileHeader.TimeDateStamp!=0x678CCB46)return false;
+    auto imp=reinterpret_cast<const IMAGE_IMPORT_DESCRIPTOR*>(image+nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+    for(;imp->Name;++imp) {
+        const auto name=reinterpret_cast<const char*>(image+imp->Name);
+        if(std::strcmp(name,"api-ms-win-crt-math-l1-1-0.dll"))continue;
+        const auto lib=LoadLibraryA(name);if(!lib)return false;
+        auto src=reinterpret_cast<const IMAGE_THUNK_DATA64*>(image+imp->OriginalFirstThunk);
+        auto dst=reinterpret_cast<IMAGE_THUNK_DATA64*>(image+imp->FirstThunk);
+        for(;src->u1.AddressOfData;++src,++dst) {
+            if(IMAGE_SNAP_BY_ORDINAL64(src->u1.Ordinal))return false;
+            const auto entry=reinterpret_cast<const IMAGE_IMPORT_BY_NAME*>(image+src->u1.AddressOfData);
+            const auto proc=GetProcAddress(lib,reinterpret_cast<const char*>(entry->Name));if(!proc)return false;
+            DWORD old=0;VirtualProtect(dst,sizeof(*dst),PAGE_READWRITE,&old);dst->u1.Function=reinterpret_cast<ULONGLONG>(proc);VirtualProtect(dst,sizeof(*dst),old,&old);
         }
     }
-    Setup(native);
-    if(native)Native();else Lifecycle();
-    std::printf("proteus_weapon_test %s: %d checks, %d failures\n",native ? "native" : "production",checks,failures);
+    return true;
+}
+}  // namespace
+int main(int argc,char** argv){
+    std::setvbuf(stdout,nullptr,_IONBF,0);SetErrorMode(SEM_NOGPFAULTERRORBOX);AddVectoredExceptionHandler(1,&NativeFault);
+    if(argc<=1)return PreviousProteusFrameChecks();
+    image=reinterpret_cast<unsigned char*>(LoadLibraryExA(argv[1],nullptr,DONT_RESOLVE_DLL_REFERENCES));
+    if(!image){std::puts("EDF.dll unavailable");return 77;}
+    if(!BindMath())return 77;
+    Native();
+    std::printf("proteus_weapon_test native: %d checks, %d failures\n",checks,failures);
     return failures ? 1 : 0;
 }

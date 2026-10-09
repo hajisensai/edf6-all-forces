@@ -19,6 +19,9 @@ namespace autoturret {
 unsigned char* image=nullptr;Config cfg{};
 void Log(const char*,...) noexcept{}
 void SeeVehicle(const void*) noexcept{}
+void SeeVehicleOnce(const void*) noexcept{}
+void ReloadConfigIfChanged() noexcept{}
+float Down(const unsigned char*) noexcept{return 0;}
 ULONGLONG Frame() noexcept{return 1;}
 bool Same(const void*,const void*) noexcept{return false;}
 const Enemy* World(int* count) noexcept{*count=0;return nullptr;}
@@ -37,6 +40,9 @@ bool HighCamOn(const void*) noexcept{return observer;}
 bool TurretCamHighTransition(const void*) noexcept{return transition;}
 bool TurretCamTurret(const void*,unsigned) noexcept{return true;}
 bool CameraRay(float*,float*) noexcept{return false;}
+bool MapOwnsView() noexcept{return false;}
+bool CameraRayOf(const void*,float*,float*) noexcept{return false;}
+void Log(const char*,...) noexcept{}
 float MapRay(const float*,const float*,float*) noexcept{return -1;}
 }
 extern "C" bool __cdecl EDF6VehicleCrew_SightBindingV1(const void*,unsigned,bool,int);

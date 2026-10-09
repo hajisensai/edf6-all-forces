@@ -29,5 +29,39 @@ int main() {
     check(AirRoute(tiny,target,observer,preferred,150,clear,ground,route)==Refusal::noEntry,"no short journey on tiny arena");
     const float outside[3]={2000,0,0};
     check(AirRoute(area,outside,observer,preferred,150,clear,ground,route)==Refusal::noEntry,"map pointer past the usable area cannot order support into the void");
+    // Ground entries (2026-10-09): a stock map's edges lie 1100-1700 m from a central target, past the route planner's
+    // +-1024 m square, so every edge was refused. Candidates are rings within its reach.
+    const PlayArea stock{{-1600,-1600},{1597,1597},true,0,true};
+    const float centre[3]={71,24,455},caller[3]={71,24,455};
+    const auto entries=GroundEntryCandidates(stock,centre,caller);
+    check(entries.count>=kGroundBearings,"a central target on a stock map has ground entry candidates");
+    for(int i=0;i<entries.count;++i) {
+        const float p[3]={entries.at[i][0],0,entries.at[i][1]};
+        check(FlatDistance(p,centre)>=kMinJourney && FlatDistance(p,caller)>=kObserverClear,"every entry: a journey, out of the caller's sight");
+        check(std::fabs(p[0]-centre[0])<256*kGroundPlanCell && std::fabs(p[2]-centre[2])<256*kGroundPlanCell,
+              "every entry inside the planner's square round it");
+        check(p[0]>=stock.lo[0]+kEntryInset && p[0]<=stock.hi[0]-kEntryInset && p[2]>=stock.lo[1]+kEntryInset && p[2]<=stock.hi[1]-kEntryInset,
+              "every entry inside the measured play area");
+    }
+    const float east[3]={900,0,0};const auto away=GroundEntryCandidates(stock,centre,east);
+    const float first[3]={away.at[0][0],0,away.at[0][1]},second[3]={away.at[1][0],0,away.at[1][1]};
+    check(away.count>0 && FlatDistance(first,east)>=FlatDistance(second,east),"within a ring the farthest from the caller is tried first");
+    const PlayArea corner{{-700,-700},{700,700},true,0,true};const float edge[3]={650,0,650};
+    const auto few=GroundEntryCandidates(corner,edge,nullptr);
+    for(int i=0;i<few.count;++i)check(few.at[i][0]<=670 && few.at[i][1]<=670,"no entry past a near map edge");
+    check(GroundEntryCandidates(unknown,centre,caller).count==0,"no measured area: no entries");
+    // Air formation (2026-10-09: created in the air at the edge): line abreast, alternating sides, all at the route's
+    // height, none behind the entry (that would be outside the measured area).
+    const Route lead{{-1400,400,0},{1,0,0}};
+    float slots[8][3];
+    for(int i=0;i<8;++i)AirFormationSlot(lead,i,1.0f,slots[i]);
+    check(slots[0][0]==-1400 && slots[0][1]==400 && slots[0][2]==0,"slot 0 is the lead at the entry");
+    for(int i=1;i<8;++i) {
+        check(slots[i][1]==400 && slots[i][0]==-1400 && std::fabs(slots[i][2])>=kFormationSide-0.01f,"every other slot abreast, same height, never behind");
+        for(int k=0;k<i;++k)check(std::fabs(slots[i][2]-slots[k][2])>=kFormationSide-0.01f,"slots kFormationSide apart (no two aircraft made in one place)");
+    }
+    check(slots[1][2]*slots[2][2]<0,"the line alternates sides");
+    float close[3];AirFormationSlot(lead,1,0.6f,close);
+    check(std::fabs(close[2])<std::fabs(slots[1][2]),"helicopters fly closer");
     std::printf("support_entry_test: %d checks passed\n",checks);
 }

@@ -34,7 +34,7 @@ bool CanonicalId(const unsigned char* id,bool allowEmpty) noexcept {
     if(!id)return false;for(unsigned i=20;i<24;++i)if(id[i])return false;return allowEmpty || !Empty(id);
 }
 bool ValidRequest(const Request& r) noexcept {
-    if(!r.count || r.count>kCommandNetUnits || r.command.order>mapcmd::Order::recruit || !CanonicalId(r.requester))return false;
+    if(!r.count || r.count>kCommandNetUnits || r.command.order>mapcmd::kLastOrder || !CanonicalId(r.requester))return false;
     for(float f:r.command.at)if(!std::isfinite(f) || std::fabs(f)>1.0e6f)return false;
     if(r.command.order==mapcmd::Order::focus) {if(!CanonicalId(r.focus) || !std::memcmp(r.focus,r.requester,32))return false;}
     else if(!Empty(r.focus))return false;
@@ -45,7 +45,7 @@ bool ValidRequest(const Request& r) noexcept {
     }
     for(std::uint32_t i=r.count;i<kCommandNetUnits;++i)if(!Empty(r.units[i]))return false;
     if(r.formationTotal) {
-        if(r.command.order!=mapcmd::Order::guard || r.formationTotal<r.count || r.formationTotal>mapcmd::kMaxFormationUnits)return false;
+        if(!mapcmd::PointOrder(r.command.order) || r.formationTotal<r.count || r.formationTotal>mapcmd::kMaxFormationUnits)return false;
         for(std::uint32_t i=0;i<r.count;++i) {
             if(r.formationSlots[i]>=r.formationTotal)return false;
             for(std::uint32_t j=0;j<i;++j)if(r.formationSlots[i]==r.formationSlots[j])return false;
@@ -70,7 +70,7 @@ bool Decode(const void* bytes,std::size_t size,Message& out) noexcept {
     auto p=static_cast<const unsigned char*>(bytes);if(U32(p)!=kMagic || U32(p)!=kVersion)return false;
     Message m;m.kind=static_cast<Kind>(U32(p));if(U32(p))return false;
     m.epoch=U32(p);m.epoch|=static_cast<std::uint64_t>(U32(p))<<32;m.sequence=U32(p);m.request.count=U32(p);
-    const auto order=U32(p);if(order>static_cast<std::uint32_t>(mapcmd::Order::recruit))return false;
+    const auto order=U32(p);if(order>static_cast<std::uint32_t>(mapcmd::kLastOrder))return false;
     m.request.command.order=static_cast<mapcmd::Order>(order);m.rpc=static_cast<Rpc>(U32(p));
     for(float& f:m.request.command.at){const auto bits=U32(p);std::memcpy(&f,&bits,4);}if(U32(p))return false;
     std::memcpy(m.request.requester,p,32);p+=32;std::memcpy(m.request.focus,p,32);p+=32;

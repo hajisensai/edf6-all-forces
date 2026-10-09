@@ -19,11 +19,19 @@
 // publishes lists that vehicle's weapons (and can draw text). The gauge's own player (its owner, cast to SoldierBase as
 // the update casts it) must be in that vehicle: a second local player's gauge is left alone.
 //
+// The armor gauge (the user, 2026-10-09: "上了载具以后，可以把原版的左上角的血条hud隐藏吧，我们已经有自制的hud了";
+// docs/hud-re.md §9.3): HUiHudPowerGuage (vtable 0x17FCC98; the player's armor and the vehicle's durability, top left)
+// is hidden as one layout while the same cover holds for its player (the HUD of ours lists the vehicle they ride, and
+// draws its durability), by its root node's shown flag: stock_armor_hud.h. Its update (slot 1, 0x827010) is chained and
+// the flag written after it, on its own thread: no draw call skipped, nothing else in the layout touched. The player's
+// own armor goes with it while they ride (one layout: the vehicle's bar is drawn on the same root); on foot it is back.
+//
 // The fuel tank: every heli (HelicopterBase slot 46 0x6530E0: +0x1690), the 503 bike (+0x29B0) and the 511 (+0x2B00)
 // have a FuelTank {+0 on, +4 capacity, +8 left, +0xC burn a unit of rotor or throttle} (made by 0x5EFA70, burnt by
 // 0x5EF8E0: left -= |input| x burn a frame); the fuel weapon v_fuel01 (AmmoCount 1) is how the stock gauge shows it.
 #include "crew.h"
 #include "memory.h"
+#include "stock_armor_hud.h"
 #include <cmath>
 #include <cwchar>
 #include <iterator>
@@ -59,6 +67,24 @@ const Sig kGaugeSigs[]={{kUpdate,kUpdateSig,sizeof(kUpdateSig)},{0x832BAE,kCastS
     {0x832D00,kUnlistSig,sizeof(kUnlistSig)},{0x831A96,kDirtySig,sizeof(kDirtySig)},{0x831BB4,kPanelsSig,sizeof(kPanelsSig)},
     {0x832348,kHideSig,sizeof(kHideSig)}};
 
+// HUiHudPowerGuage: its update (slot 1) and what the hold reads. Its constructor (0x825250) sets the vtable (0x825290)
+// and looks up Guage_Root through the HUiHud base (0x825438: call 0x816080, which stores the node at +0x788 (0x816101),
+// a weak reference: its control block at +0x790); the update casts the same owner the weapon gauge's does (+0x778,
+// 0x827082); a layout node's constructor shows it (+0x1F8 = 1, 0x7E999C).
+constexpr unsigned kArmorVtable=0x17FCC98,kArmorUpdateSlot=kArmorVtable+1*8,kArmorUpdate=0x827010;
+constexpr std::size_t kHudRoot=0x788,kHudRootCtrl=0x790,kNodeShown=0x1F8;
+const unsigned char kArmorUpdateSig[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x08,0x48,0x89,0x70,0x10,0x48,0x89,0x78,0x18,0x55};
+const unsigned char kArmorVtableSig[]={0x48,0x8D,0x05,0x01,0x7A,0xFD,0x00};   // 0x825290: lea rax, [0x17FCC98]
+const unsigned char kArmorRootCallSig[]={0xE8,0x43,0x0C,0xFF,0xFF};           // 0x825438: call 0x816080
+const unsigned char kRootNameSig[]={0x48,0x8D,0x15,0x2A,0x25,0xFE,0x00};      // 0x8160C7: lea rdx, L"Guage_Root"
+const unsigned char kRootStoreSig[]={0x48,0x89,0x93,0x88,0x07,0x00,0x00};     // 0x816101: mov [rbx+0x788], rdx
+const unsigned char kArmorOwnerSig[]={0x4C,0x8B,0x97,0x78,0x07,0x00,0x00};    // 0x827082: mov r10, [rdi+0x778]
+const unsigned char kNodeShowSig[]={0xC6,0x87,0xF8,0x01,0x00,0x00,0x01};      // 0x7E999C: mov byte [rdi+0x1F8], 1
+const Sig kArmorSigs[]={{kArmorUpdate,kArmorUpdateSig,sizeof(kArmorUpdateSig)},{0x825290,kArmorVtableSig,sizeof(kArmorVtableSig)},
+    {0x825438,kArmorRootCallSig,sizeof(kArmorRootCallSig)},{0x8160C7,kRootNameSig,sizeof(kRootNameSig)},
+    {0x816101,kRootStoreSig,sizeof(kRootStoreSig)},{0x827082,kArmorOwnerSig,sizeof(kArmorOwnerSig)},
+    {0x7E999C,kNodeShowSig,sizeof(kNodeShowSig)}};
+
 // The FuelTank: made (0x5EFA70: +8 = +4 = capacity, +0xC = burn, +0 = 1), burnt (0x5EF8E0), and where each class keeps it.
 constexpr std::size_t kTankOn=0x0,kTankCapacity=0x4,kTankLeft=0x8;
 constexpr std::size_t kHeliTank=0x1690,kBike503Tank=0x29B0,kBike511Tank=0x2B00;
@@ -79,8 +105,19 @@ constexpr float kBurnSmoothSec=2.0f;   // the burn's smoothing (a frame's decrem
 
 using UpdateFn=void(__fastcall*)(unsigned char*,void*);
 using CastFn=void*(__cdecl*)(void*,long,void*,void*,int);
-UpdateFn nextUpdate=nullptr;
-bool gaugeOk=false,fuelOk=false;
+UpdateFn nextUpdate=nullptr,nextArmor=nullptr;
+bool gaugeOk=false,fuelOk=false,armorOk=false;
+
+// The armor gauges' holds (stock_armor_hud.h), in the mission `armorGeneration` (ResetStockGauges begins another).
+maphud::Record armorHolds[armorhud::kGauges]{};
+std::uint64_t armorGeneration=1;
+
+// What the hidden armor gauge showed (stock_armor_hud.h Readout), for hud.cpp: written by ArmorHook (the gauge's thread)
+// while it holds the HUD's player's gauge hidden, its soldier and the wall time with it.
+constexpr std::size_t kObjectHp=0x2F8,kObjectHpMost=0x2F4;   // a soldier's armor, a vehicle's durability (layout.h kHp)
+constexpr ULONGLONG kArmorFreshMs=250;
+SRWLOCK armorLock=SRWLOCK_INIT;
+struct ArmorShown { const void* soldier; ULONGLONG at; armorhud::Readout r; } armorShown{};
 
 // The vehicle whose weapons our HUD lists (SetStockGaugeCover), by its object and its weak-this control block.
 SRWLOCK coverLock=SRWLOCK_INIT;
@@ -91,7 +128,7 @@ struct Gauge { const unsigned char* gauge; const void* seat; bool hidden; };
 Gauge gauges[4]{};
 
 // The gauge's player in a vehicle: their seat and the vehicle (object, control block).
-struct Ride { const void* seat; const void* vehicle; const void* ctrl; };
+struct Ride { const void* seat; const void* vehicle; const void* ctrl; const unsigned char* soldier; };
 
 Gauge* GaugeOf(const unsigned char* g) noexcept {
     Gauge* free=nullptr;
@@ -113,7 +150,7 @@ bool RideOf(const unsigned char* g,Ride* r) noexcept {
         if(!soldier)return false;
         const auto ctrl=At<const unsigned char*>(soldier,kSoldierVehicleCtrl);
         if(!ctrl || At<std::int32_t>(ctrl,kUses)==0)return false;
-        *r=Ride{At<const void*>(soldier,kSoldierSeat),At<const void*>(soldier,kSoldierVehicle),ctrl};
+        *r=Ride{At<const void*>(soldier,kSoldierSeat),At<const void*>(soldier,kSoldierVehicle),ctrl,soldier};
         return r->vehicle!=nullptr;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
@@ -152,6 +189,32 @@ void __fastcall UpdateHook(unsigned char* g,void* context) {
     } else if(relist)g[kGaugeDirty]=1;
 }
 
+// The armor gauge's update, its layout's root held hidden while covered (see the top).
+void __fastcall ArmorHook(unsigned char* g,void* context) {
+    nextArmor(g,context);
+    Ride r{};
+    // Only the HUD's own player's (PlayerHuman: the one whose armor hud.cpp then shows in its place); a second local
+    // player's gauge stays, its armor shown nowhere else.
+    const bool hide=RideOf(g,&r) && Covered(r) && r.soldier==PlayerHuman();
+    __try {
+        const auto ctrl=At<const unsigned char*>(g,kHudRootCtrl);
+        unsigned char* const root=At<unsigned char*>(g,kHudRoot);
+        if(!root || !ctrl || At<std::int32_t>(ctrl,kUses)==0)return;   // no layout (yet, or any more): nothing shown
+        const bool was=[&]{ for(const auto& h:armorHolds)if(h.hidden && h.cam==g)return true; return false; }();
+        const bool now=armorhud::Step(armorHolds,g,armorGeneration,hide,root+kNodeShown);
+        if(now!=was)Log("GAUGE %p: the stock armor gauge %s",g,now ? "hidden (our HUD shows the vehicle the player rides)" : "shown again");
+        // Its numbers to our HUD while it is hidden; taken back when it shows again.
+        armorhud::Readout shown{};
+        const bool give=now && armorhud::Publish(true,At<float>(r.soldier,kObjectHp),At<float>(r.soldier,kObjectHpMost),
+            Readable(r.vehicle,kObjectHp+4) ? At<float>(r.vehicle,kObjectHp) : 0.0f,
+            Readable(r.vehicle,kObjectHp+4) ? At<float>(r.vehicle,kObjectHpMost) : 0.0f,&shown);
+        AcquireSRWLockExclusive(&armorLock);
+        if(give)armorShown=ArmorShown{r.soldier,GetTickCount64(),shown};
+        else if(armorShown.soldier==r.soldier || (was && !now))armorShown=ArmorShown{};
+        ReleaseSRWLockExclusive(&armorLock);
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+}
+
 bool AllMatch(const Sig* sigs,std::size_t n) noexcept {
     for(std::size_t i=0;i<n;++i)if(!Matches(sigs[i].rva,sigs[i].bytes,sigs[i].size))return false;
     return true;
@@ -183,9 +246,26 @@ bool IsFuelTank(const unsigned char* w) noexcept {
     return f && n>=6 && _wcsnicmp(f,L"V_FUEL",6)==0;
 }
 
+namespace {
+// The armor gauge's update chained (its own signatures: off alone when they differ).
+bool InstallArmorGauge() noexcept {
+    if(!AllMatch(kArmorSigs,std::size(kArmorSigs)) || !Readable(image+kArmorUpdateSlot,8)) {
+        Log("HOOK stockgauge armor=0: the stock armor gauge's code is not as expected (it stays as it is)");
+        return false;
+    }
+    void* const current=*reinterpret_cast<void**>(image+kArmorUpdateSlot);
+    if(current!=image+kArmorUpdate)Log("HOOK stockgauge: the armor gauge chaining onto %p (another plugin)",current);
+    nextArmor=reinterpret_cast<UpdateFn>(current);
+    armorOk=PatchVtableSlot(reinterpret_cast<void**>(image+kArmorUpdateSlot),current,reinterpret_cast<void*>(&ArmorHook));
+    Log("HOOK stockgauge armor=%d (the stock armor gauge hidden while our HUD shows the vehicle ridden)",armorOk);
+    return armorOk;
+}
+}  // namespace
+
 bool InstallStockGauges() noexcept {
     fuelOk=AllMatch(kFuelSigs,std::size(kFuelSigs));
     Log("HOOK stockgauge fuel=%d (the fuel tanks read where the FUEL gauge showed them)",fuelOk);
+    InstallArmorGauge();
     if(!AllMatch(kGaugeSigs,std::size(kGaugeSigs)) || !Readable(image+kUpdateSlot,8)) {
         Log("HOOK stockgauge gauge=0: the stock weapon gauge's code is not as expected (it stays as it is)");
         return false;
@@ -211,9 +291,23 @@ void SetStockGaugeCover(bool lists) noexcept {
     ReleaseSRWLockExclusive(&coverLock);
 }
 
+bool PlayerStockArmor(armorhud::Readout* out) noexcept {
+    const void* const human=PlayerHuman();
+    AcquireSRWLockShared(&armorLock);
+    const ArmorShown a=armorShown;
+    ReleaseSRWLockShared(&armorLock);
+    if(!armorOk || !human || a.soldier!=human || GetTickCount64()-a.at>kArmorFreshMs)return false;
+    *out=a.r;
+    return true;
+}
+
 void ResetStockGauges() noexcept {
     for(auto& e:gauges)e=Gauge{};   // a gauge gone with the last mission while its player rode
     for(auto& b:burns)b=Burn{};
+    ++armorGeneration;
+    AcquireSRWLockExclusive(&armorLock);
+    armorShown=ArmorShown{};
+    ReleaseSRWLockExclusive(&armorLock);   // the armor gauges' holds are the last mission's now (stock_armor_hud.h): never written blind
     SetStockGaugeCover(false);
 }
 

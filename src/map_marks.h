@@ -9,7 +9,9 @@
 //    "飞机没和载具一样在地图显示").
 //  - A walked object's mark: a vehicle class the plugin knows is the carrier, an aircraft (kMapRotor: a helicopter) or a
 //    ground vehicle; from team 5 flagged kMapEmpty (nobody in it: a seat to take). Any other object is a soldier: the
-//    squad on the player's own team, else another friendly; team 5 holds no soldiers (nothing marked).
+//    squad on the player's own team, else another friendly; team 5 holds no soldiers (nothing marked). A soldier seated
+//    in a vehicle is not marked of its own (the user, 2026-10-09: "载具上的npc还标着可以招募的标记"): its vehicle's mark
+//    stands for the crew, a squad mark on top of it read as a soldier on foot to be recruited.
 #pragma once
 #include "map.h"
 #include <cstdint>
@@ -30,12 +32,13 @@ struct Seen {
     bool heli;       // a helicopter (heli.cpp IsHelicopter: the stock ones and the plugin's rotor craft)
     bool ownTeam;    // on the player's own team
     bool nobodys;    // found by team 5's walk
+    bool riding;     // a soldier seated in a vehicle (its ride alive): the vehicle's mark is the crew's
 };
 // Its mark: false with none; else its kind and flags.
 constexpr bool FriendlyMark(const Seen& o,MapKind* kind,std::uint8_t* flags) noexcept {
     *flags=o.nobodys ? kMapEmpty : 0;
     if(!o.vehicle) {
-        if(o.nobodys)return false;
+        if(o.nobodys || o.riding)return false;
         *kind=o.ownTeam ? MapKind::squad : MapKind::ally;
         return true;
     }

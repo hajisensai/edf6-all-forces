@@ -1,5 +1,6 @@
 // Execute the production dispatch/boarding lifecycle using inert stand-ins for EDF objects.
 #include "../src/support_dispatch.cpp"
+#include "../src/support_config.cpp"
 #include <cstdio>
 #include <cstdlib>
 namespace crew {
@@ -16,6 +17,8 @@ unsigned char objects[32][0x3000]{},controls[32][32]{},seats[32][edf::kSeatStrid
 int made=0,deleted=0,boardRequests=0,activated=0,orders=0,followed=0,netRequests=0,releases=0,routeOrders=0;
 int held=0;bool transactionActive=false;
 bool SupportTransactionActive(std::uint64_t) noexcept {return transactionActive;}
+bool peersNew=true;
+bool SupportPeersAcceptVariants() noexcept {return peersNew;}
 bool HoldSupportSoldier(const ObjRef&,bool hold) noexcept {held+=hold ? 1 : -1;return true;}
 bool allReady=true,terrain=true,nativeFail=false;
 #ifndef SUPPORT_ROUTE_NATIVE_TEST
@@ -32,29 +35,53 @@ ObjRef Make(bool vehicle=false) noexcept {
 unsigned char* PlayerHuman() noexcept {return objects[31];}
 int SupportAirCallCount() noexcept {return 21;}
 const wchar_t* SupportAirCallName(int) noexcept {return L"Heli";}
+const wchar_t* airKeys[21]={L"INTERCEPTOR",L"INTERCEPTOR_F",L"STRIKE",L"STRIKE_F",L"MULTIROLE",L"MULTIROLE_F",L"FIGHTER",L"FIGHTER_F",
+    L"CARRIER",L"CARRIER_F",L"HELI",L"HELI_F",L"BLAST_CARRIER",L"BLAST_CARRIER_F",L"DOLL_CARRIER",L"DOLL_CARRIER_F",L"SUB",
+    L"GUNSHIP",L"GUNSHIP_F",L"MEDIC_HELI",L"MEDIC_HELI_F"};
+const wchar_t* SupportAirCallKey(int index) noexcept {return index>=0 && index<21 ? airKeys[index] : nullptr;}
+bool soloHost=false;
+bool SupportSoloHostWorld() noexcept {return soloHost;}
 bool SupportAircraftSpec(int id,SupportAircraft* out) noexcept {
     if(id<0 || id>=21 || id==16)return false;
     *out={-1,static_cast<int>(HeliBody::eros506),1,300,false};return true;
 }
-support::Refusal PlanAirSupport(int,const float*,const float*,support::Route* route) noexcept {
-    *route={{-1400,0,0},{1,0,0}};return terrain ? support::Refusal::none : support::Refusal::noEntry;
+int plannedAircraft=0;
+support::Refusal PlanAirSupport(int,const float*,const float*,support::Route* route,int count) noexcept {
+    plannedAircraft=count;
+    *route={{-1400,150,0},{1,0,0}};return terrain ? support::Refusal::none : support::Refusal::noEntry;
 }
 unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float* matrix) noexcept {
     auto ref=Make(true);std::memcpy(static_cast<unsigned char*>(const_cast<void*>(ref.obj))+kPosition,matrix+12,12);
     return static_cast<unsigned char*>(const_cast<void*>(ref.obj));
 }
-bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*) noexcept {++activated;return true;}
+bool lastAirborne=false;
+bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool airborne) noexcept {++activated;lastAirborne=airborne;return true;}
+bool peersAirborne=true;
+bool SupportPeersAcceptAirborne() noexcept {return peersAirborne;}
 bool DeleteSupportAircraft(const ObjRef& ref) noexcept {if(ref)++deleted;return true;}
 bool SupportSoldiersReady() noexcept {return allReady;}
 const wchar_t* soldierFailure=L"支援兵员创建发生异常，本局已停用";
 const wchar_t* SupportSoldierFailureText() noexcept {return soldierFailure;}
-bool ApplySupportSoldierSpawn(const float* matrix,bool,const unsigned char*,ObjRef* out) noexcept {
-    if(nativeFail)return false;*out=Make();std::memcpy(static_cast<unsigned char*>(const_cast<void*>(out->obj))+kPosition,matrix+12,12);return true;
+std::uint32_t lastResources[16]{};int resourceCount=0;bool lastLocal=false;const unsigned char* lastId=nullptr;
+bool ApplySupportSoldierResource(const float* matrix,std::uint32_t resource,const unsigned char* id,bool local,ObjRef* out) noexcept {
+    if(nativeFail)return false;
+    if(resourceCount<16)lastResources[resourceCount++]=resource;lastLocal=local;lastId=id;
+    *out=Make();std::memcpy(static_cast<unsigned char*>(const_cast<void*>(out->obj))+kPosition,matrix+12,12);return true;
+}
+bool CreateSupportSoldierUnregistered(const float* matrix,std::uint32_t resource,const unsigned char* id,bool local,ObjRef* out) noexcept {
+    return ApplySupportSoldierResource(matrix,resource,id,local,out);
+}
+int seatNow=0,registeredBeforeSeat=0;bool seatFail=false;
+int NpcSeatCrewNow(unsigned char* v,unsigned char* const* crew,int count) noexcept {
+    ++seatNow;if(seatFail)return 0;
+    for(int i=0;i<count && i<3;++i)Put<const void*>(SeatAt(v,static_cast<unsigned>(i)),kSeatRider,crew[i]);
+    return count;
 }
 bool DeriveSupportSoldierNetId(const void*,unsigned,unsigned char*) noexcept {return true;}
 bool FollowSupportSoldier(const ObjRef&,const ObjRef&) noexcept {++followed;return true;}
 bool DeleteSupportSoldier(const ObjRef& ref) noexcept {if(ref)++deleted;return true;}
-bool RegisterSupportObject(const void*,const unsigned char*) noexcept {return true;}
+int registered=0;
+bool RegisterSupportObject(const void*,const unsigned char*) noexcept {++registered;if(!seatNow)++registeredBeforeSeat;return true;}
 bool SupportVehicleReady(SupportVehicleKind,SupportCrewMode) noexcept {return true;}
 unsigned char* SpawnSupportVehicle(SupportVehicleKind,SupportCrewMode,const float*,const float*,const void*) noexcept {return nullptr;}
 bool DeleteSupportVehicle(unsigned char*) noexcept {++deleted;return true;}
@@ -124,12 +151,16 @@ int main() {
     check(SupportCallAt(0,target,note,128) && made==0,"request only queues: no objects materialise on click");
     SupportDispatchTick();
     check(creationSeen && netConfigured==1,"first frame does not reset creation observations already collected during mission start");
-    check(made==2 && boardRequests==1 && activated==0,"hull and genuine crew requested at entry, waiting for actual boarding");
-    check(At<float>(objects[0],kPosition)==-1400,"hull starts at planned edge, not target or caller");
-    fixtureMs+=100;SupportDispatchTick();check(activated==0,"assignment alone cannot authorize flight");
-    Put<const void*>(seats[0],kSeatRider,objects[1]);
-    fixtureMs+=100;SupportDispatchTick();check(activated==1,"only actual native seat occupancy starts aircraft ingress");
-    fixtureMs+=100;SupportDispatchTick();check(activated==1,"ingress activation is once, not every frame");
+    // 2026-10-09: air support flies in from the edge. Created in the air, its real crew made inside it and seated at
+    // once, the flight on at spawn: no runway, no walk aboard, no takeoff.
+    check(made==2 && boardRequests==0 && seatNow==1 && activated==1 && lastAirborne,
+          "hull and real crew created, crew seated at once, airborne flight starts at spawn");
+    check(At<float>(objects[0],kPosition)==-1400 && At<float>(objects[0],kPosition+4)==150,"hull starts in the air at the planned edge");
+    check(At<float>(objects[1],kPosition+4)==150 && At<const void*>(seats[0],kSeatRider)==objects[1],
+          "the real soldier is made inside its aircraft and sits in the driver's seat at spawn");
+    check(IsSupportAirborneAircraft(deployments[0].plan.units[0].resourceId),"the plan marks the hull airborne");
+    fixtureMs+=100;SupportDispatchTick();
+    fixtureMs+=100;SupportDispatchTick();check(activated==1,"activation is once, not every frame");
     auto invalid=deployments[0].plan;invalid.units[1].role=0;
     check(!Validate(invalid),"a manifest cannot detach the specified crew from its aircraft");
     invalid=deployments[0].plan;invalid.count=1;
@@ -142,8 +173,9 @@ int main() {
     SupportCallAt(0,target,note,128);SupportDispatchTick();
     check(made==1 && deleted==1 && !deployments[0].used,"partial crew construction rolls the hull back");
     ResetSupportDispatch();nativeFail=false;made=deleted=0;
-    SupportCallAt(0,target,note,128);SupportDispatchTick();fixtureMs+=120001;SupportDispatchTick();
-    check(deleted==2 && !deployments[0].used,"boarding timeout removes its real crew and hull as one deployment");
+    seatFail=true;activated=0;
+    SupportCallAt(0,target,note,128);SupportDispatchTick();seatFail=false;
+    check(deleted==2 && !deployments[0].used && activated==0,"a crew that cannot take its seats removes crew and hull before any flight");
     ResetSupportDispatch();nativeFail=false;made=deleted=0;routeResult=npc::navigation::Result::pending;
     SupportCallAt(21,target,note,128);SupportDispatchTick();
     check(!made && offlinePending,"infantry waits for full ground route before creation");
@@ -154,12 +186,29 @@ int main() {
     check(!offlinePending && !made,"entering an online session cancels an uncommitted offline request");
     ResetSupportDispatch();testOnline=true;made=0;
     check(SupportCallAt(0,target,note,128) && netRequests==1 && !made,"online click uses reliable request rather than local spawn");
-    ResetSupportDispatch();made=boardRequests=0;held=0;SupportPlan networkPlan;
+    ResetSupportDispatch();made=boardRequests=0;held=0;seatNow=0;registered=0;registeredBeforeSeat=0;activated=0;SupportPlan networkPlan;
     check(Plan(0,target,&networkPlan)==support_net::PlanResult::ready && Spawn(10,networkPlan,false),"committed online plan creates registered stand-ins");
+    check(seatNow==1 && registered==2 && registeredBeforeSeat==0,"airborne hull and crew are registered only after the crew is seated");
+    check(activated==1,"the host flies its airborne copy at once: a hull in the air never waits unflown for the barrier");
     SupportDispatchTick();
     check(held==1 && boardRequests==0 && !deployments[0].assigned,"spawn before all-peer ACK holds native AI and emits no boarding request");
     transactionActive=true;++fixtureMs;SupportDispatchTick();
-    check(held==0 && boardRequests==1 && deployments[0].assigned,"all-peer active barrier releases held crew and starts boarding exactly once");
+    check(held==0 && boardRequests==0 && deployments[0].assigned,"all-peer active barrier releases held crew; nobody walks aboard");
+    {const int before=activated;const auto seated=seatNow;
+     check(Spawn(11,networkPlan,true) && seatNow==seated+1 && activated==before,"a peer's copy seats its crew identically but never flies it");}
+    // A room with an older peer (no kCapAirborneAir): refused with its reason, never half in the air.
+    peersAirborne=false;made=0;
+    check(Plan(0,target,&networkPlan)==support_net::PlanResult::refused && !made,"older peer: air support refused before anything exists");
+    SupportCallStatus(note,128);
+    check(std::wcsstr(note,hudtext::Tr(hudtext::Tx::supportAirNeedsUpdate))!=nullptr,"older peer: the HUD says why");
+    peersAirborne=true;
+    // An older host's runway plan (kAircraft + catalog) is applied as that host planned it: hull, crew walking aboard.
+    {SupportPlan legacy;check(Plan(0,target,&legacy)==support_net::PlanResult::ready,"plan for the legacy fixture");
+     legacy.units[0].resourceId=kSupportAircraftResource+legacy.catalogId;
+     check(Validate(legacy),"an older host's runway plan still validates");
+     ResetSupportDispatch();transactionActive=false;boardRequests=0;activated=0;seatNow=0;
+     check(SpawnDeployment(30,legacy,false,false) && seatNow==0 && activated==0,"legacy hull: no seating at spawn, no flight yet");
+     SupportDispatchTick();check(boardRequests==1,"legacy hull: its crew walks aboard as before");}
     // Rollback must respect a real player's independent boarding action, on either machine.
     for(bool remotePlayer:{false,true}) {
         ResetSupportDispatch();made=deleted=held=0;transactionActive=false;
@@ -220,6 +269,60 @@ int main() {
     waterSurface=0.2f;check(Foot(0,0,0,footY),"shallow wading matches the navigation allowance");
     terrainSea=Sea::unknown;check(!Foot(0,0,0,footY),"unknown water state is not treated as a safe entry");
     terrainSea=Sea::land;
+    // 2026-10-09: the host of a world with no other participant deploys locally (no EDF6Coop transport needed, no peer
+    // to replicate to); any other online machine still requests through the host.
+    ResetSupportDispatch();testOnline=true;soloHost=true;made=0;netRequests=0;registered=0;resourceCount=0;fixtureMs+=40000;
+    check(SupportCallAt(0,target,note,128) && netRequests==0 && offlinePending,"solo-world host plans locally, no transport request");
+    SupportDispatchTick();
+    check(made==2 && registered==0 && lastLocal && lastId==nullptr && !deployments[0].networked,
+          "solo-world host creates unregistered local support: no ID, no native registration, no all-peer barrier");
+    soloHost=false;ResetSupportDispatch();netRequests=0;
+    check(SupportCallAt(0,target,note,128) && netRequests==1,"a host with other participants still uses the reliable protocol");
+    testOnline=false;
+    // Out-of-mission configuration (support_config.h), read from a real ini as plugin.cpp does.
+    wchar_t ini[MAX_PATH];GetTempPathW(MAX_PATH,ini);wcscat_s(ini,L"edf6_support_dispatch_test.ini");
+    FILE* f=nullptr;_wfopen_s(&f,ini,L"wb");check(f!=nullptr,"config ini written");
+    const char text[]="[VehicleCrew]\r\nSupportDisabled=FIGHTER\r\nSupportSquadWeapon=shotgun\r\nSupportSquadLeaderWeapon=sniper\r\n"
+                      "SupportPlatoonWeapons=flame,rocket,rifle\r\nSupportAircraftCrewWeapon=rocket\r\nSupportAircraftCount_HELI=3\r\n";
+    std::fwrite(text,1,sizeof(text)-1,f);std::fclose(f);
+    LoadSupportConfig(ini);DeleteFileW(ini);
+    ResetSupportDispatch();made=0;fixtureMs+=40000;
+    check(!SupportCallAt(6,target,note,128) && std::wcsstr(note,L"已在配置中停用") && !offlinePending && !made,
+          "a unit disabled in the ini is refused with its reason before any planning");
+    ResetSupportDispatch();made=0;resourceCount=0;routeResult=npc::navigation::Result::moving;
+    check(SupportCallAt(21,target,note,128),"squad request accepted");SupportDispatchTick();
+    check(made==4 && resourceCount==4 && lastResources[0]==SupportSoldierResource(SupportWeapon::sniper,true) &&
+          lastResources[1]==SupportSoldierResource(SupportWeapon::shotgun,false) && lastResources[3]==SupportSoldierResource(SupportWeapon::shotgun,false),
+          "the configured squad leader and member weapons are the soldiers actually created");
+    ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
+    SupportCallAt(22,target,note,128);SupportDispatchTick();
+    check(made==12 && lastResources[0]==SupportSoldierResource(SupportWeapon::sniper,true) &&
+          lastResources[1]==SupportSoldierResource(SupportWeapon::flame,false) && lastResources[5]==SupportSoldierResource(SupportWeapon::rocket,false) &&
+          lastResources[9]==SupportSoldierResource(SupportWeapon::rifle,false),"each platoon squad gets its configured weapon");
+    ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
+    SupportCallAt(10,target,note,128);SupportDispatchTick();   // the stub's aircraft: one pilot each
+    check(plannedAircraft==3 && made==6 && lastResources[0]==SupportSoldierResource(SupportWeapon::rocket,false),
+          "the configured aircraft count reaches the runway planner and the crew carry the configured weapon");
+    SupportPlan hostPlan=deployments[0].plan;
+    check(Validate(hostPlan),"a peer accepts the host's configured weapons and count (structure, not its own ini)");
+    hostPlan.units[1].resourceId=0x503;check(!Validate(hostPlan),"a non-template soldier resource is refused");
+    // A room with an older All Forces peer (no kCapSoldierVariants): the host plans the protocol v2 plan an older
+    // Validate accepts (rifles, each call's own aircraft count) and says why, instead of a silent mid-transaction refusal.
+    peersNew=false;
+    ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;routeResult=npc::navigation::Result::moving;
+    SupportCallAt(21,target,note,128);SupportDispatchTick();
+    bool rifles=made==4;for(int i=0;i<resourceCount;++i)rifles=rifles && lastResources[i]==(i%4 ? kSupportRangerResource : kSupportLeaderResource);
+    SupportCallStatus(note,128);
+    check(rifles && std::wcsstr(note,hudtext::Tr(hudtext::Tx::supportLegacyPeers))!=nullptr,
+          "older peer: rifle leader/members (ids 2/1) and the HUD says the configured weapons were not synchronised");
+    ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
+    SupportCallAt(10,target,note,128);SupportDispatchTick();
+    check(plannedAircraft==1 && made==2 && lastResources[0]==kSupportRangerResource,"older peer: the call's own aircraft count, rifle crew");
+    const auto old=deployments[0].plan;bool v2=true;
+    for(unsigned i=0;i<old.count;++i)v2=v2 && (old.units[i].resourceId>=kSupportAircraftResource || old.units[i].resourceId<=2);
+    check(v2,"the whole plan uses only resources a protocol v2 Validate knows");
+    peersNew=true;ResetSupportDispatch();SupportCallStatus(note,128);
+    check(!std::wcsstr(note,hudtext::Tr(hudtext::Tx::supportLegacyPeers)),"the older-peer notice ends with the mission");
     std::printf("support_dispatch_test: %d checks passed\n",checks);
 }
 #endif

@@ -224,6 +224,18 @@ int wmain(int argc,wchar_t** argv){
     Check(SightZoomNow(vehicle)==1,"new selected weapon cannot inherit old weapon magnification");
     Button(0);Check(toggle.step==0,"new weapon begins at normal field of view");
     Setup();pickedWeapon=secondWeapon;Button(0);Button(0x80);Check(SightZoomNow(vehicle)==1,"stale selection outside this seat does not borrow another gun optic");
+    // 2026-10-09 (fb aim #2): the Titan's right trigger picks its hull gatling (holder on the hull root, no optic of its
+    // own). The seat's turret optic stays the scope's, through a pick and back, and so does the key reserved for it.
+    Setup();Put<std::uint64_t>(seats,kSeatWeaponCount,2);Put<void*>(holder,kHolderCtrl,vehicleCtrl);Put<void*>(secondHolder,kHolderCtrl,vehicleCtrl);
+    Put<void*>(secondHolder,weaponmount::kHolderBone,bones);
+    pickedWeapon=secondWeapon;Zoom();
+    Check(SightZoomMounted(vehicle) && SightZoomCanMount(vehicle,0),"hull gun pick keeps the seat's turret optic and its key");
+    pickedWeapon=weapon;Button(0);Check(SightZoomNow(vehicle)==3,"switching back to the cannon keeps the same optic and zoom");
+    pickedWeapon=secondWeapon;Button(0);Check(SightZoomNow(vehicle)==3 && SightZoomCanMount(vehicle,0),"switching to the gatling again is symmetric, no lost scope");
+    Setup();Put<std::uint64_t>(seats,kSeatWeaponCount,2);Put<void*>(holder,kHolderCtrl,nullptr);Put<void*>(secondHolder,kHolderCtrl,vehicleCtrl);
+    Put<void*>(secondHolder,weaponmount::kHolderBone,bones);pickedWeapon=secondWeapon;
+    Button(0);Button(0x80);Check(SightZoomNow(vehicle)==1,"a dead holder's optic is never borrowed");
+    Put<void*>(secondHolder,kHolderCtrl,nullptr);   // Setup leaves the holders' controls as they are
     Setup();Zoom();hud=false;Check(Fov()==originalFov,"failed sight renderer cannot leave a zoomed camera");
     Check(sightzoom::MaskOf(sightzoom::Kind::flight)==sightzoom::Mask::none && sightzoom::MaskOf(sightzoom::Kind::mech)==sightzoom::Mask::none,
           "flight and mech fire control never stack a generic scope mask");

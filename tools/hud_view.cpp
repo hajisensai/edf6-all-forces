@@ -225,6 +225,11 @@ void MapCommandSquadButtons(const float* r,const ObjRef*,int n) noexcept {
 void MapCommandPayloadButtons(const float* r,std::uint64_t,int,const int*,int n) noexcept {
     scenePayloadButtonCount=n;for(int i=0;i<n;++i)std::memcpy(scenePayloadButtons[i],r+i*4,16);
 }
+// The support bar's rows and chips as drawn (hud.cpp MapSupportBar).
+float sceneSupportHits[kMapSupports*2][4]{};int sceneSupportEntry[kMapSupports*2]{},sceneSupportHitCount=0;
+void MapCommandSupportButtons(const float* r,const int* entries,int n) noexcept {
+    sceneSupportHitCount=n;for(int i=0;i<n;++i){std::memcpy(sceneSupportHits[i],r+i*4,16);sceneSupportEntry[i]=entries[i];}
+}
 bool GearHudLatest(GearHud* g) noexcept {
     if(!hasJet || sceneJet.rotor)return false;
     *g=GearHud{};g->shown=true;g->at[0]=g->at[1]=g->at[2]=1.0f;g->warn=(sceneWarn.on>>kWarnGear&1u)!=0;g->tick=sceneTick;
@@ -239,6 +244,14 @@ bool JetHud(const void*,JetHudInfo*) noexcept { return false; }
 bool HeliFuel(const void*,float*) noexcept { return false; }
 bool gaugeCovered=false;
 void SetStockGaugeCover(bool covered) noexcept { gaugeCovered=covered; }
+// stockgauge.cpp's armor readout: given exactly while the cover HudPublish just set hides the stock armor gauge
+// (HideStockGauges, Enabled), the numbers through the production armorhud::Publish (no number when they do not read).
+bool armorReads=false;
+float sceneArmor=1350.0f,sceneArmorMost=1600.0f,sceneHull=51205.0f,sceneHullMost=81929.0f;
+bool PlayerStockArmor(armorhud::Readout* o) noexcept {
+    return gaugeCovered && config.hideStockGauges && config.enabled && armorReads &&
+           armorhud::Publish(true,sceneArmor,sceneArmorMost,sceneHull,sceneHullMost,o);
+}
 }  // namespace crew
 
 using namespace crew;
@@ -394,7 +407,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     // 30 m apart; the heli guarding the same point (helis share its orbit); the jet following the player; a box being
     // dragged (Ctrl + left drag) round the crawlers to the pointer; the last command's word.
     sceneCmd=MapCommandReadout{};
-    sceneCmd.allowed=true;sceneCmd.allowedOrders=(1u<<9)-1;sceneCmd.selectedSquads=1;sceneCmd.squadToolsAllowed=!online;sceneCmd.pointOk=true;sceneCmd.pointer=!pad;
+    sceneCmd.allowed=true;sceneCmd.allowedOrders=(1u<<(static_cast<unsigned>(mapcmd::kLastOrder)+1))-1;sceneCmd.selectedSquads=1;sceneCmd.squadToolsAllowed=!online;sceneCmd.pointOk=true;sceneCmd.pointer=!pad;
     sceneCmd.px=1250.0f;sceneCmd.py=560.0f;sceneCmd.boxing=!pad;sceneCmd.bx=820.0f;sceneCmd.by=360.0f;
     auto cmdUnit=[](const float* pos,bool air,const char* name,Order order,const float* at,bool selected){
         CmdMark& c=sceneCmd.unit[sceneCmd.count++];
@@ -431,8 +444,19 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     row("RANGER",6,"SCRIPT",Order::none,true,false);
     row("AIR RAIDER",3,"WAIT 42s",Order::guard,false,false);
     sceneCmd.squad[sceneCmd.squads-1].cooldown=42;
-    if(payload){wcscpy_s(sceneCmd.supportName,L"SUPPORT AIRCRAFT LONG DISPLAY NAME");
-        wcscpy_s(sceneCmd.supportStatus,L"Support route ready - select a visible entry on the map");}
+    // The support catalog as support_dispatch.cpp names it (its air calls in pairs, the infantry, the ground pairs).
+    static const struct { const wchar_t* name; SupportIcon icon; } kCatalog[]={
+        {L"截击机·守点",SupportIcon::jet},{L"截击机·跟随",SupportIcon::jet},{L"无人机母舰·守点",SupportIcon::carrier},
+        {L"无人机母舰·跟随",SupportIcon::carrier},{L"武装直升机·守点",SupportIcon::heli},{L"武装直升机·跟随",SupportIcon::heli},
+        {L"潜水母舰支援",SupportIcon::sub},{L"炮舰机·守点",SupportIcon::gunship},{L"炮舰机·跟随",SupportIcon::gunship},
+        {L"步兵小队（4人）",SupportIcon::squad},{L"步兵大队（12人）",SupportIcon::platoon},{L"坦克·有人",SupportIcon::tank},
+        {L"坦克·空车交付",SupportIcon::tank},{L"装甲运兵车·有人",SupportIcon::apc},{L"装甲运兵车·空车交付",SupportIcon::apc},
+        {L"民用轻卡·有人",SupportIcon::truck},{L"民用轻卡·空车交付",SupportIcon::truck}};
+    sceneCmd.supports=static_cast<int>(sizeof(kCatalog)/sizeof(kCatalog[0]));
+    for(int i=0;i<sceneCmd.supports;++i){wcscpy_s(sceneCmd.support[i].name,kCatalog[i].name);sceneCmd.support[i].icon=kCatalog[i].icon;const wchar_t* v=mapbtn::VariantOf(kCatalog[i].name);sceneCmd.support[i].variant=!v ? SupportVariant::none : std::wcscmp(v,L"守点")==0 ? SupportVariant::guard : std::wcscmp(v,L"跟随")==0 ? SupportVariant::follow : std::wcscmp(v,L"有人")==0 ? SupportVariant::crewed : SupportVariant::empty;}
+    sceneCmd.supportArmed=payload ? 3 : -1;sceneCmd.supportPick=3;
+    sceneCmd.supportReady=payload ? SupportReadiness{SupportReady::cooldown,17} : SupportReadiness{SupportReady::ready,0};
+    if(payload)wcscpy_s(sceneCmd.supportStatus,L"Support route ready - select a visible entry on the map");
     if(squadCount==9) {
         row("WING DIVER",12,"RECRUITED",Order::focus,false,false);
         row("AIR RAIDER",8,"ESCORT",Order::board,true,false);
@@ -447,7 +471,8 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         for(int i=0;i<sceneCmd.count;++i)sceneCmd.unit[i].selected=i==2;
         for(bool& selected:sceneCmd.squadSelected)selected=false;
         sceneCmd.selected=1;sceneCmd.selectedSquads=0;
-        sceneCmd.allowedOrders=(1u<<static_cast<unsigned>(Order::guard))|(1u<<static_cast<unsigned>(Order::none))|(1u<<static_cast<unsigned>(Order::follow));
+        sceneCmd.allowedOrders=(1u<<static_cast<unsigned>(Order::guard))|(1u<<static_cast<unsigned>(Order::none))|(1u<<static_cast<unsigned>(Order::follow))|
+                               (1u<<static_cast<unsigned>(Order::move))|(1u<<static_cast<unsigned>(Order::attackMove));
     }
     sceneCmd.noteFresh=true;
     hasMap=true;
@@ -473,12 +498,30 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         if(found!=1){++textFailed;std::printf("FAIL squad text missing or repeated: %s\n",Narrow(wanted).c_str());}
     };
     shown(Tr(pad ? Tx::squadTitle : Tx::squadTitleKeys),true);
-    if(!pad)shown(Tr(Tx::squadKeys));
-    // The command buttons (mouse only): every one placed, on the screen, and no text but its own label in it.
+    // The command buttons (mouse only): the ones the selection takes placed, on the screen, and no text but its own
+    // label in it.
     if(pad) {
         if(sceneButtons){++textFailed;std::printf("FAIL map buttons with a pad: %d\n",sceneButtons);}
+        if(sceneSupportHitCount){++textFailed;std::printf("FAIL support bar clickable with a pad: %d\n",sceneSupportHitCount);}
     } else {
-        if(sceneButtons!=mapbtn::kCount){++textFailed;std::printf("FAIL map buttons: %d of %d placed\n",sceneButtons,mapbtn::kCount);}
+        int wanted=0;
+        for(int i=0;i<mapbtn::kCount;++i)
+            wanted+=mapbtn::Shown(static_cast<mapbtn::Id>(i),sceneCmd.selected>0 ? sceneCmd.allowedOrders : 0u,
+                                   sceneCmd.squadToolsAllowed && sceneCmd.selectedSquads>0);
+        if(sceneButtons!=wanted){++textFailed;std::printf("FAIL map buttons: %d of %d placed\n",sceneButtons,wanted);}
+        // The support bar: a row (and its chips) for every kind of support, every entry reachable by a click.
+        bool reach[kMapSupports]{};
+        for(int i=0;i<sceneSupportHitCount;++i) {
+            const float* b=sceneSupportHits[i];
+            if(b[0]<0.0f || b[2]>static_cast<float>(width) || b[1]<0.0f || b[3]>1080.0f){++textFailed;std::printf("FAIL support hit %d off the screen\n",i);}
+            if(sceneSupportEntry[i]>=0 && sceneSupportEntry[i]<kMapSupports)reach[sceneSupportEntry[i]]=true;
+            for(int k=0;k<sceneButtons;++k) {
+                const float* q=sceneButton[k];
+                if(b[0]<q[2] && q[0]<b[2] && b[1]<q[3] && q[1]<b[3]){++textFailed;std::printf("FAIL support bar under button %d\n",sceneButtonId[k]);}
+            }
+        }
+        int reached=0;for(int i=0;i<sceneCmd.supports;++i)reached+=reach[i];
+        if(reached!=sceneCmd.supports){++textFailed;std::printf("FAIL support entries clickable: %d of %d\n",reached,sceneCmd.supports);}
         for(int i=0;i<sceneButtons;++i) {
             const float* b=sceneButton[i];
             if(b[0]<0.0f || b[2]>static_cast<float>(width) || b[1]<0.0f || b[3]>1080.0f){++textFailed;std::printf("FAIL map button %d off the screen\n",i);}
@@ -740,6 +783,10 @@ void StockTank(const float* pos) {
         StockArm& a=sceneStock.arm[i];a.physicalOnly=false;
         strcpy_s(a.label,names[i]);a.ammo=10-i;a.ammoMax=10;a.reload=1.0f;a.reloadSec=-1.0f;a.canReload=true;a.kind=RoundKind::arc;
     }
+    // Their sights as vhud.cpp classifies them (reticle.h): the main gun's, the coaxial MG's ring, the missile's gate.
+    sceneStock.arm[0].reticle=reticle::Style::cannon;sceneStock.arm[0].shell=reticle::Shell::ap;sceneStock.arm[0].roundSpeed=810.0f;
+    sceneStock.arm[1].reticle=reticle::Style::autocannon;sceneStock.arm[1].shell=reticle::Shell::ap;sceneStock.arm[1].roundSpeed=360.0f;
+    sceneStock.arm[2].reticle=reticle::Style::missile;
     sceneStock.threats=2;
     sceneStock.threatKind[0]=2;sceneStock.threatAt[0][0]=pos[0]-600.0f;sceneStock.threatAt[0][1]=pos[1]+80.0f;sceneStock.threatAt[0][2]=pos[2]+900.0f;
     sceneStock.threatKind[1]=1;sceneStock.threatAt[1][0]=pos[0]+1500.0f;sceneStock.threatAt[1][1]=pos[1]+300.0f;sceneStock.threatAt[1][2]=pos[2]-800.0f;
@@ -806,6 +853,74 @@ int TankSightScenes(const std::wstring& dir,const float* ground) {
     failed+=!(half250 && half750);
     std::printf("%s  250 m ladder labels preserve half hundreds\n",half250 && half750 ? "ok  " : "FAIL");
     sceneFov=55.0f;sceneStock.zoom=1.0f;sceneZoom=1.0f;
+    StockTank(ground);
+    return failed;
+}
+
+// Each sight style (src/reticle.h) on the seat's sight gun, with the real numbers of a weapon that gets it (Root.cpk
+// SGO, tools/reticle_check.cpp kWeapons): AmmoSpeed m/frame, the gravity factor, AmmoAlive. Drawn at the game's view
+// and with the scope at 3x (a mock: only the 403/404/505/601 carry a model-authored optic in game, optic_mount.h).
+// Checked: the sight's own words (the round, the flak rings' km/h) are drawn, no two texts overlap, SightGun owns it;
+// the zoomed scope carries the style's posts (reticle.h Spec: the scope's ring pieces stay kSides).
+int SightStyleScenes(const std::wstring& dir,const float* ground) {
+    struct Case {
+        const wchar_t* name; reticle::Style style; reticle::Shell shell; const char* label;
+        float speed,gravity; int alive; const wchar_t* words[3];
+    };
+    const Case cases[]={
+        {L"sight_cannon_ap",reticle::Style::cannon,reticle::Shell::ap,"CANNON",22.5f,0.5f,150,{L"AP",nullptr}},          // V_403TANK_CANNON02
+        {L"sight_cannon_he",reticle::Style::cannon,reticle::Shell::he,"CANNON",11.0f,0.25f,600,{L"HE",nullptr}},         // V_505TANK_CANNON04L
+        {L"sight_precision",reticle::Style::precision,reticle::Shell::ap,"GUN",20.0f,1.0f,60,{nullptr}},                 // V_502_GROUNDROBO_SNIPE01
+        {L"sight_autocannon",reticle::Style::autocannon,reticle::Shell::he,"CANNON",4.0f,0.5f,150,{L"HE",nullptr}},      // V_401STRIKER_CANNON
+        {L"sight_machinegun",reticle::Style::autocannon,reticle::Shell::ap,"GUN",6.0f,0.0f,35,{L"AP",nullptr}},          // V_403TANK_MACHINEGUN
+        {L"sight_flak",reticle::Style::flak,reticle::Shell::ap,"GUN",6.0f,0.75f,60,{L"AA",L"90",L"180"}},                // V603_FLAK_GUN02
+        {L"sight_energy",reticle::Style::energy,reticle::Shell::beam,"LASER",120.0f,0.0f,8,{L"BEAM",nullptr}},           // V_612_A_LASERRIFLE_DLC2
+    };
+    int failed=0;
+    for(const Case& c:cases)for(int zoomed=0;zoomed<2;++zoomed) {
+        StockTank(ground);sceneStock.threats=0;
+        StockArm& a=sceneStock.arm[0];
+        strcpy_s(a.label,c.label);
+        a.reticle=c.style;a.shell=c.shell;a.roundSpeed=c.speed*60.0f;
+        a.style=c.shell==reticle::Shell::beam ? WeaponStyle::laser : WeaponStyle::projectile;
+        const float muzzle[3]={ground[0],ground[1]+2.6f,ground[2]+4.0f};
+        float bore[3]={0.0f,0.004f,1.0f};vec::Normalize(bore);
+        const roundaim::Round round{c.speed,{0.0f,-9.8f*c.gravity/3600.0f,0.0f},0.0f,c.alive};
+        const float still[3]={0.0f,0.0f,0.0f};
+        a.aimed=a.hit=true;a.kind=RoundKind::arc;std::memcpy(a.bore,bore,12);
+        a.ladder=c.shell==reticle::Shell::beam ? gunsight::Ladder{} : gunsight::Of(round,muzzle,bore,still);
+        a.at[0]=muzzle[0];a.at[1]=ground[1];a.at[2]=muzzle[2]+300.0f;a.range=300.0f;a.flight=300.0f/(c.speed*60.0f);
+        sceneZoom=zoomed ? 3.0f : 1.0f;sceneFov=55.0f/sceneZoom;sceneStock.zoom=sceneZoom;sceneSight=sightzoom::Kind::optical;
+        hasMountedOptic=zoomed!=0;
+        const std::wstring name=std::wstring(c.name)+(zoomed ? L"_zoom" : L"");
+        scopePieces=0;Scene(dir,name.c_str(),ground);
+        bool words=true,apart=true;
+        for(const wchar_t* w:c.words) {
+            if(!w)break;
+            bool found=false;
+            for(const Drew& d:drew)found=found || d.text==w;
+            if(!found){words=false;std::printf("      missing: %ls\n",w);}
+        }
+        for(std::size_t i=0;i<drew.size();++i)
+            for(std::size_t k=i+1;k<drew.size();++k) {
+                const Drew& p=drew[i];const Drew& q=drew[k];
+                if(p.text.empty() || q.text.empty())continue;
+                if(p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1){apart=false;std::printf("      overlap: %ls / %ls\n",p.text.c_str(),q.text.c_str());}
+            }
+        const bool owned=SightGun(sceneStock,false)==0;
+        const bool scope=zoomed ? scopePieces==scopeview::kSides : scopePieces==0;
+        const bool ok=words && apart && owned && scope;
+        failed+=!ok;
+        std::printf("%s  %ls: its words %d, no text overlapping %d, sight gun %d, scope quads %d\n",ok ? "ok  " : "FAIL",name.c_str(),words,apart,
+                    owned,scopePieces);
+    }
+    // A flamethrower, a grenade launcher: no gun sight (their impact marks only).
+    StockTank(ground);
+    sceneStock.arm[0].reticle=reticle::Style::none;sceneStock.arm[0].aimed=true;sceneStock.arm[0].ladder.ticks=1;
+    const bool none=SightGun(sceneStock,false)==-1;
+    failed+=!none;
+    std::printf("%s  a weapon without a sight (flamethrower, grenades) gets no gun reticle\n",none ? "ok  " : "FAIL");
+    sceneFov=55.0f;sceneZoom=1.0f;sceneStock.zoom=1.0f;hasMountedOptic=false;
     StockTank(ground);
     return failed;
 }
@@ -1193,6 +1308,83 @@ void SazabiSceneAt(const std::wstring& dir,const wchar_t* name,const float* pos,
     SetScreen(1920,1080);
     std::printf("%ls\n",path.c_str());
 }
+// The stock armor gauge's numbers in our HUD (the user, 2026-10-09: "让护甲显示在咱们的hud不就行了"; stockgauge.cpp hides
+// the gauge, hud.cpp ArmorPanel / StockBlock show its numbers): in each covered vehicle (a stock tank: in its block under
+// the hull's bar; a jet, a rotor craft, a stock heli, the Sazabi: the panel at the top left with the hull's line), at
+// 16:9, 21:9, 1280 and a split screen's half (960): the armor's line drawn once, on the screen, clear of every other
+// line; never drawn on foot, with HideStockGauges=0 or when the numbers do not read (the gauge then shows: not hidden);
+// red at the stock gauge's low mark (0.25 of the most, 0x827723) and not above it.
+int ArmorDrawn(const wchar_t* scene,bool want,bool hull) {
+    wchar_t armor[128],hullText[128];
+    std::swprintf(armor,128,Tr(Tx::armorRow),static_cast<int>(std::lround(sceneArmor)),static_cast<int>(std::lround(sceneArmorMost)));
+    std::swprintf(hullText,128,Tr(Tx::hullRow),static_cast<int>(std::lround(sceneHull)),static_cast<int>(std::lround(sceneHullMost)));
+    int failed=0,found=0,hulls=0;
+    for(std::size_t i=0;i<drew.size();++i) {
+        const bool isArmor=drew[i].text==armor,isHull=drew[i].text==hullText;
+        found+=isArmor;hulls+=isHull;
+        if(!isArmor && !isHull)continue;
+        const Drew& a=drew[i];
+        for(std::size_t k=0;k<drew.size();++k) {
+            const Drew& b=drew[k];
+            if(k==i || b.text.find_first_not_of(L' ')==std::wstring::npos)continue;
+            if(a.x0<b.x1 && b.x0<a.x1 && a.y0<b.y1 && b.y0<a.y1) {
+                ++failed;std::printf("FAIL armor %ls: \"%s\" overlaps \"%s\"\n",scene,Narrow(a.text).c_str(),Narrow(b.text).c_str());
+            }
+        }
+    }
+    if(found!=(want ? 1 : 0)){++failed;std::printf("FAIL armor %ls: the armor line drawn %d times (want %d)\n",scene,found,want ? 1 : 0);}
+    if(hulls!=(want && hull ? 1 : 0)){++failed;std::printf("FAIL armor %ls: the hull line drawn %d times\n",scene,hulls);}
+    std::printf("%s  armor %s %ls: %s\n",failed ? "FAIL" : "ok",hudtext::Name(hudtext::InUse()),scene,want ? (hull ? "armor + hull, apart" : "armor in the block, apart") : "not drawn");
+    return failed;
+}
+
+int ArmorScenes(const std::wstring& dir,const float* ground,const float* pos) {
+    int failed=0;
+    // The low mark as the stock gauge sets it (+0xB01 at or under 0.25), and the colours that follow it.
+    armorhud::Durability d{};
+    Line l{};
+    failed+=!(armorhud::Read(400.0f,1600.0f,&d) && d.low);
+    DurabilityLine(l,Tx::armorRow,d,nullptr);failed+=l.rgba!=kRed || DurabilityFill(d,true)!=kRed;
+    failed+=!(armorhud::Read(401.0f,1600.0f,&d) && !d.low);
+    DurabilityLine(l,Tx::armorRow,d,nullptr);failed+=l.rgba!=kHud || DurabilityFill(d,true)!=kHud;
+    failed+=armorhud::Read(100.0f,0.0f,&d) || armorhud::Read(std::nanf(""),1600.0f,&d);   // no number made up
+    armorReads=true;
+    // A stock tank: its block (StockVehicleHud), the armor under the hull's bar.
+    hasJet=hasHeli=hasWarn=hasSazabi=false;hasStock=true;
+    StockTank(ground);
+    for(int w:{1920,2520,1280,960}) {
+        wchar_t name[64];std::swprintf(name,64,L"armor_stock_tank_%d",w);
+        Prime(ground,w);Scene(dir,name,ground,w);failed+=ArmorDrawn(name,true,false);
+    }
+    sceneArmor=380.0f;Scene(dir,L"armor_stock_tank_low",ground);failed+=ArmorDrawn(L"armor_stock_tank_low",true,false);sceneArmor=1350.0f;
+    config.hideStockGauges=false;Scene(dir,L"armor_stock_tank_gauge_kept",ground);failed+=ArmorDrawn(L"armor_stock_tank_gauge_kept",false,false);
+    config.hideStockGauges=true;
+    armorReads=false;Scene(dir,L"armor_unread",ground);failed+=ArmorDrawn(L"armor_unread",false,false);armorReads=true;
+    // On foot: nothing covered, nothing drawn.
+    hasStock=false;Scene(dir,L"armor_on_foot",ground);failed+=ArmorDrawn(L"armor_on_foot",false,false);
+    // A jet and a rotor craft (no durability of their own on our HUD): the panel, with the hull's line.
+    hasJet=true;sceneJet.rotor=false;sceneJet.hasImpact=false;config.playerJetFlightHud=true;
+    for(int w:{1920,960}) {
+        wchar_t name[64];std::swprintf(name,64,L"armor_jet_%d",w);
+        Prime(pos,w);Scene(dir,name,pos,w);failed+=ArmorDrawn(name,true,true);
+    }
+    sceneJet.rotor=true;config.heliFlightHud=true;
+    Scene(dir,L"armor_rotor",pos);failed+=ArmorDrawn(L"armor_rotor",true,true);
+    // A stock heli with its stores on the helicopter HUD's strip.
+    hasJet=false;hasHeli=true;hasStock=true;
+    StockTank(pos);sceneStock.heli=true;sceneStock.arms=1;sceneStock.threats=0;strcpy_s(sceneStock.arm[0].label,"MSL");
+    Scene(dir,L"armor_stock_heli",pos);failed+=ArmorDrawn(L"armor_stock_heli",true,true);
+    hasHeli=hasStock=false;
+    // The Sazabi's own HUD (as SazabiScenes left it).
+    hasSazabi=true;
+    for(int w:{1920,1280}) {
+        wchar_t name[64];std::swprintf(name,64,L"armor_sazabi_%d",w);
+        Scene(dir,name,ground,w);failed+=ArmorDrawn(name,true,true);
+    }
+    hasSazabi=false;armorReads=false;
+    return failed;
+}
+
 int SazabiScenes(const std::wstring& dir,const float* pos) {
     hasSazabi=true;
     const float noseWas[3]={sceneHeli.sym.nose[0],sceneHeli.sym.nose[1],sceneHeli.sym.nose[2]};
@@ -1455,6 +1647,7 @@ int Scenes(const std::wstring& dir) {
     Scene(dir,L"ground_stores_eight",ground);
     sceneStock=savedStock;
     sceneStock.arm[0].style=WeaponStyle::beam;strcpy_s(sceneStock.arm[0].label,"BEAM");sceneStock.arm[0].ladder.ticks=0;
+    sceneStock.arm[0].reticle=reticle::Style::energy;sceneStock.arm[0].shell=reticle::Shell::beam;
     sceneStock.arm[0].ranged=false;sceneStock.arm[0].physicalOnly=false;sceneStock.sight=0;
     sceneStock.arm[0].aimed=true;sceneStock.arm[0].bore[2]=1.0f;sceneStock.arm[0].hit=true;sceneStock.arm[0].range=90.0f;
     failed+=SightGun(sceneStock,false)!=0; // energy reticle does not need a bogus ballistic ladder to exist
@@ -1465,6 +1658,7 @@ int Scenes(const std::wstring& dir) {
     Scene(dir,L"emc_atomic_ray",ground);
     sceneStock=savedStock;
     failed+=TankSightScenes(dir,ground);
+    failed+=SightStyleScenes(dir,ground);
     failed+=GunshipSightScenes(dir,ground);
     failed+=ZoomScenes(dir,ground);
     failed+=FireControlScenes(dir,ground);
@@ -1590,13 +1784,12 @@ int Scenes(const std::wstring& dir) {
     std::memcpy(sceneProteus.pos,ground,12);sceneProteus.hull[2]=1.0f;
     sceneProteus.driver=true;sceneProteus.keys=true;sceneProteus.mode=proteus::Mode::walk;sceneProteus.stagger=1.0f;
     sceneProteus.shieldOn=sceneProteus.shieldUp=true;sceneProteus.priority=true;sceneProteus.shieldHalfArc=60.0f*kDeg;
-    sceneProteus.barrier=1.0f;sceneProteus.barrierHp=3300.0f;sceneProteus.salvoArmed=true;sceneProteus.salvoCooldown=30.0f;
+    sceneProteus.shield=1.0f;sceneProteus.shieldHp=3300.0f;sceneProteus.shieldReady=true;
     sceneProteus.modeKey=0x54;sceneProteus.modeButton=0x20;sceneProteus.shieldKey=0x42;sceneProteus.shieldButton=0x10;
-    sceneProteus.markKey=0x51;sceneProteus.markButton=0x04;sceneProteus.salvoKey=0x02;
+    sceneProteus.launcherKey=0x02;
     Scene(dir,L"stock_proteus_walk",ground);
     sceneProteus.mode=proteus::Mode::deployed;sceneProteus.dirShield=true;sceneProteus.priority=false;sceneProteus.heat=0.74f;
-    sceneProteus.barrier=0.42f;sceneProteus.marked=true;sceneProteus.markAt[0]=-120.0f;sceneProteus.markAt[1]=8.0f;sceneProteus.markAt[2]=420.0f;
-    sceneProteus.markRange=437.0f;sceneProteus.salvoWait=12.4f;sceneProteus.gun=true;sceneProteus.fieldRadius=60.0f;sceneProteus.allies=5;
+    sceneProteus.shield=0.42f;sceneProteus.launcher=true;sceneProteus.fieldRadius=60.0f;sceneProteus.allies=5;
     sceneProteus.ringCount=kProteusRing;
     for(int i=0;i<kProteusRing;++i) {
         const float a=2.0f*3.14159265f*static_cast<float>(i)/static_cast<float>(kProteusRing);
@@ -1610,6 +1803,7 @@ int Scenes(const std::wstring& dir) {
     hasProteus=false;
     hasStock=false;
     failed+=SazabiScenes(dir,ground);
+    failed+=ArmorScenes(dir,ground,pos);
     // The next language's run begins as this one did: EDF6AutoTurret's mode last seen as auto-aim, and seen long enough
     // ago that no switch's banner (hud_cue.h Changed, a wall-clock kSwitchMs) carries over into its turret scenes.
     hasStock=hasTurret=true;

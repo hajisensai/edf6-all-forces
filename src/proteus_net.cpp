@@ -30,18 +30,21 @@ bool RegisteredWeak(const unsigned char* weak) noexcept {
     return rider && c && Readable(c,16) && At<long>(c,8)>0 && Readable(rider,0x12A) &&
         (At<std::uint16_t>(rider,0x128)&3)!=0;
 }
-bool Peek(void* reader,proteus_net::State& out,bool& valid) {
+// Ours (the tag and magic): `valid` a decodable state of this version; `foreign` the version of another build's block.
+bool Peek(void* reader,proteus_net::State& out,bool& valid,std::uint32_t* foreign=nullptr) {
     std::int64_t mark=0;
     Fn<void(__fastcall*)(void*,std::int64_t*)>(kMark)(reader,&mark);
     const bool tag=Fn<std::int64_t(__fastcall*)(void*)>(kReadValue)(reader)==proteus_net::kTag;
     bool ours=false;
     valid=false;
+    if(foreign)*foreign=0;
     if(tag) {
         Stream block;
         if(Fn<bool(__fastcall*)(void*,void*)>(kReadBlock)(reader,block.bytes)) {
             const auto size=At<std::size_t>(block.bytes,0x5F0);
             ours=size>=4 && At<std::uint32_t>(block.bytes,0x10)==proteus_net::kMagic;
             valid=ours && proteus_net::Decode(block.bytes+0x10,size,out);
+            if(ours && foreign)*foreign=proteus_net::ForeignVersion(block.bytes+0x10,size);
         }
     }
     Fn<void(__fastcall*)(void*,std::int64_t)>(kRewind)(reader,mark);
@@ -50,8 +53,12 @@ bool Peek(void* reader,proteus_net::State& out,bool& valid) {
 void __fastcall Receive(unsigned char* net,void* reader) {
     proteus_net::State state;
     bool valid=false;
-    if(reader && Peek(reader,state,valid)) {
-        if(valid && ready && Cfg().enabled && Cfg().proteus && InSession())ProteusNetReceived(net-kNet,state);
+    std::uint32_t foreign=0;
+    if(reader && Peek(reader,state,valid,&foreign)) {
+        if(ready && Cfg().enabled && Cfg().proteus && InSession()) {
+            if(valid)ProteusNetReceived(net-kNet,state);
+            else if(foreign)ProteusNetIncompatible(net-kNet,foreign);
+        }
         return;
     }
     reinterpret_cast<ReceiveFn>(nextReceive)(net,reader);

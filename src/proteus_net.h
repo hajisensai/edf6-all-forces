@@ -1,12 +1,13 @@
-// Proteus object events: driver-owned control/pose and target-owner-owned barrier accounting are separate streams.
+// Proteus object events: driver-owned control/pose and target-owner-owned shield HP are separate streams. Version 2
+// (2026-10-09): `barrier` is the native shield's HP share, kBroken its broken lock; version 1 packets are refused.
 #pragma once
 #include "drill_net.h"
 #include "proteus_logic.h"
 namespace crew::proteus_net {
 constexpr std::int8_t kTag=15;
-constexpr std::uint32_t kMagic=0x544E5250,kVersion=1;
+constexpr std::uint32_t kMagic=0x544E5250,kVersion=2;
 enum class Kind : std::uint32_t { control,defense };
-constexpr std::uint32_t kActive=1,kShieldOn=2,kOverheated=4,kTwoSeats=8,kFlags=15;
+constexpr std::uint32_t kActive=1,kShieldOn=2,kOverheated=4,kTwoSeats=8,kBroken=16,kFlags=31;
 struct State {
     std::uint32_t magic=kMagic,version=kVersion;
     std::uint64_t sender=0;
@@ -36,6 +37,12 @@ inline bool Valid(const State& s) noexcept {
         s.fieldDefense>=0 && s.fieldDefense<=1 && s.fieldAttack>=0 && s.fieldAttack<=100 && s.fieldFireRate>=1 && s.fieldFireRate<=100 &&
         s.fieldEnergy>=0 && s.fieldEnergy<=1.0e6f && s.fieldPower>=0 && s.fieldPower<=1.0e6f;
 }
+// A block of ours (the magic) from another build of the rework (its version not this one's): 0 when it is not.
+inline std::uint32_t ForeignVersion(const void* bytes,std::size_t size) noexcept {
+    if(!bytes || size<8)return 0;
+    std::uint32_t head[2];std::memcpy(head,bytes,sizeof(head));
+    return head[0]==kMagic && head[1]!=kVersion ? (head[1] ? head[1] : 0xFFFFFFFFu) : 0;
+}
 inline bool Decode(const void* bytes,std::size_t size,State& out) noexcept {
     if(!bytes || size!=sizeof(State))return false;State s;std::memcpy(&s,bytes,sizeof(s));
     if(!Valid(s))return false;out=s;return true;
@@ -56,4 +63,7 @@ bool ProteusNetSend(unsigned char*,proteus_net::State) noexcept;
 std::int32_t ProteusNetController(unsigned char*) noexcept;
 std::int32_t ProteusNetReference(const void*) noexcept;
 void ProteusNetReceived(unsigned char*,const proteus_net::State&) noexcept;
+// A peer sent a Proteus packet of another protocol version for this vehicle: it runs another build of the rework,
+// so this machine gives this Proteus back to the stock behaviour (proteus.cpp Incompatible).
+void ProteusNetIncompatible(unsigned char*,std::uint32_t version) noexcept;
 }

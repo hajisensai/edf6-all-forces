@@ -9,10 +9,17 @@
 //    its pitch puts the eye `height` up and `back` behind; headings grow turning right;
 //  - who turns the turret (Foreign: EDF6AutoTurret's V2 answer decides, else V1's guess off the stick) and whether the
 //    round's arc or the bore line goes through the view point (BallisticAim: the arc only for a real hit outside the
-//    lead-circle mode).
+//    lead-circle mode);
+//  - the high view's observed point (tcam::HighFocus, as turretcam.cpp ShotFocus feeds it: the round flown by
+//    rounds::FirstHit over flat ground, the ground found under a point that is not the landing) over the gun's whole
+//    elevation range, for the Katyusha, the howitzer and a flat gun: never in the air, never farther than the round's
+//    reach or 3 km, continuous (the largest change between neighbouring elevations shrinks with the step: no jump), and
+//    one-peaked (growing up to the farthest angle, falling after it). The flat gun's old observation (the shot's end
+//    where it was) is checked to put the view over 100 m up, as the user's log had it (2409 m away at 2 deg up).
 // Exit code 1 when one fails. Built on request only:
 // cmake --build build --target turret_cam_check && build\turret_cam_check.exe
 #include "../src/turretcam.h"
+#include "../src/rounds.h"
 #include <cmath>
 #include <cstdio>
 #include <initializer_list>
@@ -187,7 +194,88 @@ void HighView() {
     std::printf("high view: %d real endpoint/free-look placements\n",cases);
 }
 
+// --- the high view's observed point (tcam::HighFocus) ---
+// A gun: AmmoSpeed (m/frame), AmmoGravityFactor, AmmoAlive (frames); its muzzle `up` m over flat ground (y = 0).
+struct Gun { const char* name; float speed,factor; int alive; float up; };
+constexpr float kGravity=14.7f,kSightFar=3000.0f,kSegment=15;   // turretcam.cpp (its search: twice kSightFar) / rounds.cpp's
+
+float FlatRay(const float* a,const float* b,float* hit) {
+    if(!(a[1]>=0.0f) || !(b[1]<0.0f))return -1.0f;
+    const float t=a[1]/(a[1]-b[1]);
+    for(int i=0;i<3;++i)hit[i]=a[i]+(b[i]-a[i])*t;
+    float d[3]={hit[0]-a[0],hit[1]-a[1],hit[2]-a[2]};
+    return std::sqrt(vec::Dot(d,d));
+}
+
+// What ShotFocus observes for `g` fired at `elev` rad (heading +Z), and the old observation (the shot's end as it was).
+struct Seen { float across,y,oldY; };
+Seen Observe(const Gun& g,float elev) {
+    const float muzzle[3]={0.0f,g.up,0.0f},dir[3]={0.0f,std::sin(elev),std::cos(elev)};
+    rounds::Arc arc{};
+    for(int i=0;i<3;++i){arc.vel[i]=dir[i]*g.speed;arc.drop[i]=0.0f;}
+    arc.drop[1]=-kGravity*g.factor/3600.0f;
+    float hit[3],end[3],took=0.0f;
+    const bool landed=rounds::FirstHit(arc,muzzle,g.alive,static_cast<int>(kSegment),2.0f*kSightFar,&FlatRay,hit,end,&took);
+    const float* at=landed ? hit : end;
+    float out[3];
+    tcam::HighFocus(muzzle,dir,landed,at,kSightFar,0.0f,out);
+    if(!(landed && tcam::AcrossDistance(muzzle,at)<=kSightFar)) {   // ShotFocus: the ground straight under it
+        const float from[3]={out[0],g.up+1000.0f,out[2]},to[3]={out[0],-1000.0f,out[2]};
+        float down[3];
+        if(FlatRay(from,to,down)>=0.0f)out[1]=down[1];
+    }
+    return Seen{tcam::AcrossDistance(muzzle,out),out[1],at[1]};
+}
+
+// The largest change of the observed distance between neighbouring elevations `step` deg apart over [lo, hi] deg.
+float WorstStep(const Gun& g,float lo,float hi,float step) {
+    float worst=0.0f,last=Observe(g,lo*kDeg).across;
+    for(float e=lo+step;e<=hi+1e-4f;e+=step) {
+        const float d=Observe(g,e*kDeg).across;
+        worst=std::fmax(worst,std::fabs(d-last));
+        last=d;
+    }
+    return worst;
+}
+
+void HighFocusSweep() {
+    const Gun guns[]={{"Katyusha",2.0f,1.0f,1500,3.0f},{"howitzer",4.0f,1.0f,1200,3.5f},{"flat gun",20.0f,0.5f,120,4.0f}};
+    constexpr float kLo=-30.0f,kHi=85.0f,kStep=0.01f,kSlack=1.0f;   // deg; m (the 15-frame chord's own error)
+    for(const Gun& g:guns) {
+        const float reach=std::fmin(kSightFar,g.speed*static_cast<float>(g.alive));
+        float most=0.0f,peakAt=kLo,highestOld=-1e9f;
+        bool aired=false,over=false;
+        for(float e=kLo;e<=kHi+1e-4f;e+=kStep) {
+            const Seen s=Observe(g,e*kDeg);
+            aired=aired || std::fabs(s.y)>1e-3f;
+            over=over || s.across>reach+kSlack;
+            if(s.across>most){most=s.across;peakAt=e;}
+            highestOld=std::fmax(highestOld,s.oldY);
+        }
+        Expect(!aired,"high view: the observed point is on the ground at every elevation");
+        Expect(!over,"high view: never farther than the round's reach or 3 km",most,reach);
+        // One peak: growing up to the farthest angle, falling after it.
+        bool rising=true,falling=true;
+        float last=Observe(g,kLo*kDeg).across;
+        for(float e=kLo+kStep;e<=kHi+1e-4f;e+=kStep) {
+            const float d=Observe(g,e*kDeg).across;
+            if(e<=peakAt && d<last-kSlack)rising=false;
+            if(e>peakAt && d>last+kSlack)falling=false;
+            last=d;
+        }
+        Expect(rising,"high view: the distance grows with the elevation up to the farthest angle",peakAt);
+        Expect(falling,"high view: past the farthest angle it only falls",peakAt);
+        // No jump: a quarter of the step gives (about) a quarter of the largest change; a jump would stay as large.
+        const float coarse=WorstStep(g,kLo,kHi,0.04f),fine=WorstStep(g,kLo,kHi,0.01f);
+        Expect(fine<=0.5f*coarse+kSlack,"high view: continuous in the elevation (no jump)",coarse,fine);
+        std::printf("high view %s: farthest %.0f m at %.1f deg (reach %.0f m), largest change %.1f m / 0.04 deg, %.1f m / 0.01 deg;"
+                    " the old observation up to %.0f m high\n",g.name,most,peakAt,reach,coarse,fine,highestOld);
+        if(g.speed>10.0f)Expect(highestOld>100.0f,"the flat gun's old observation was in the air (the user's log)",highestOld);
+    }
+}
+
 int main() {
+    HighFocusSweep();
     Owners();
     Steps();
     Ends();

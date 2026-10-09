@@ -631,7 +631,7 @@ def store_looks() -> None:
     preloads exactly that model, keeps the template's contact sphere and every other value of the build without the look;
     the Sazabi's shield missile (its look the template's) is that build byte for byte."""
     import make_stock_stores as mss
-    looks = {kind: s.weapon.look for kind, s in vc.STORES.items()}
+    looks = {kind: s.weapon.look for kind, s in vc.STORES.items() if not isinstance(s.weapon, vc.Shell)}   # a gun round flies its template's
     every = [*looks.values(), vc.SAZABI_MISSILE.weapon.look]
     for look in every:
         assert look.model in vc.STORE_MODELS and look.path == f'app:/WEAPON/{look.model}.rab', look
@@ -651,7 +651,7 @@ def store_looks() -> None:
     beside: dict[tuple[str, int], list[str]] = {}
     for stem, mounts in mss.LOADOUTS.items():
         for m in mounts:
-            if kind(m.weapon):
+            if kind(m.weapon) in looks:
                 beside.setdefault((stem, m.like), []).append(looks[kind(m.weapon)].model)
     for where, models in beside.items():
         apart(where, models)
@@ -840,9 +840,11 @@ def hand_copies_agree() -> None:
     files = set(re.findall(r'L"(EDF6VC_(?!CALL_)[A-Z0-9_]+\.SGO)"', jet_src))
     sgos = set(re.findall(r'L"app:/object/(edf6vc_[a-z0-9_]+\.sgo)"', jet_src))
     assert files and {f.lower() for f in files} == sgos, 'src/jet*: the file names and the app:/object paths disagree'
-    # the drill's: tools/make_drill.py; the EMC's: tools/make_emc.py; the Sazabi's beams: tools/make_sazabi.py
+    # the drill's: tools/make_drill.py; the EMC's: tools/make_emc.py; the Sazabi's beams: tools/make_sazabi.py; the
+    # Proteus's shield: tools/make_proteus.py
+    import make_proteus
     written = ({n.split('/', 1)[1] for n in make_jets.names()} | {vc.DRILL_CHARGE_FILE} | set(vc.EMC_FILES)
-               | set(vc.SAZABI_ROUND_FILES))
+               | set(vc.SAZABI_ROUND_FILES) | {make_proteus.SHIELD_FILE.split('/', 1)[1]})
     assert files <= written, f'src/jet* loads files tools/make_jets.py does not write: {sorted(files - written)}'
 
 
@@ -917,7 +919,7 @@ def emc_copies_agree() -> None:
     bay, plan, emc = src('src/jet_bay.cpp'), src('src/emc_plan.h'), src('src/emc.cpp')
     files = re.findall(r'\{L"app:/object/(edf6vc_emc_[a-z_]+\.sgo)",L"(EDF6VC_EMC_[A-Z_]+\.SGO)"', bay)
     assert [f for _, f in files] == list(vc.EMC_FILES) and all(s == f.lower() for s, f in files), files
-    assert re.search(r'enum class EmcRound \{ beam, sight, breakCharge, blast, szMega, szCharge, szFunnel \};',
+    assert re.search(r'enum class EmcRound \{ beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield \};',
                      src('src/crew.h')), 'src/crew.h EmcRound'
     # after the EMC's, the Sazabi's beams (src/sazabi_arms.inc), in EmcRound's order: the files tools/make_sazabi.py writes
     sz_files = re.findall(r'\{L"app:/object/(edf6vc_sz_[a-z_]+\.sgo)",L"(EDF6VC_SZ_[A-Z_]+\.SGO)"', bay)
@@ -1424,8 +1426,16 @@ def turret_aim_wired() -> None:
     link = src('common/edf/aimlink.h')
     names = dict(re.findall(r'constexpr char (k\w+)\[\]="(\w+)";', link))
     assert set(names) == {'kViewRay', 'kMapRay', 'kTurretReadout', 'kCameraTurret', 'kSteers', 'kStabilizer', 'kStabilizerAware', 'kPriorityZone',
-                          'kInputHeld', 'kSightBinding', 'kTurretObserver', 'kModeBinding'}, names   # kPriorityZone: proteus_wired; kInputHeld: map_wired
+                          'kInputHeld', 'kSightBinding', 'kTurretObserver', 'kModeBinding', 'kPlayerAim', 'kAimsTurret'}, names   # kPriorityZone: proteus_wired; kInputHeld: map_wired
     assert names['kCameraTurret'].endswith('V2') and names['kSteers'].endswith('V2'), names
+    # V4, the one player turret aim (2026-10-09): EDF6AutoTurret answers it, EDF6VehicleCrew's turret camera asks it every
+    # frame and says it steers; the flak's own Steer and the tank driver's frame then leave the turret to the camera.
+    assert names['kPlayerAim'].endswith('V4') and names['kAimsTurret'].endswith('V4'), names
+    assert f'bool __cdecl {names["kPlayerAim"]}(' in src('autoturret/src/designate.cpp')
+    assert f'bool __cdecl {names["kAimsTurret"]}(' in src('src/turretaim.cpp')
+    assert 'PlayerTurretLead(v,0,TurretGun(v,seat),lead)' in src('src/turretcam.cpp'), 'turretcam.cpp: the camera asks V4'
+    assert 'if(pilot && CrewAims(vehicle,0))rule=edf::aimlink::PlayerGun{false,false};' in steer, 'Steer: the camera is the hand'
+    assert 'if(CrewAims(vehicle,0))return;' in gunner.split('void DriverFrame(', 1)[1].split('\n}\n', 1)[0], 'DriverFrame: V4 publishes'
     assert names['kStabilizer'].endswith('V3') and names['kStabilizerAware'].endswith('V3'), names
     assert f'bool __cdecl {names["kStabilizer"]}(' in src('src/stab.cpp') and f'bool __cdecl {names["kStabilizerAware"]}(' in at
     # The rule itself: with the camera, only a lock in AUTO steers and the stick never drags; without, V1.
@@ -1931,11 +1941,19 @@ def boarding_an_empty_aircraft_makes_its_entry() -> None:
     assert 'if(!e){j.active=false;return;}' in hover, 'HoverStep no longer needs the entry: revisit jet::Adopt'
 
 
+# The configuration modules src/plugin.cpp's LoadConfig hands EDF6VehicleCrew.ini to, and the call that does it.
+INI_MODULES = {'src/support_config.cpp': 'LoadSupportConfig(iniPath);'}
+
+
 @test
 def heli_sight_after_aim_lines() -> None:
     """The stock heli's gun sight (src/helisight.cpp) draws for the guns whose aim line AimLines hid this frame
     (HiddenAimGuns), so the input hook runs it after AimLines; AimLines hides the player's line for it
-    (PlayerHeliOwnSight); its ini key is read, shipped and documented; every key the ini ships is read."""
+    (PlayerHeliOwnSight); its ini key is read, shipped and documented; every key the ini ships is read.
+    "Read" means: by src/plugin.cpp (L"Key"), or by a configuration module plugin.cpp's LoadConfig hands the same ini
+    to (INI_MODULES: src/support_config.cpp, LoadSupportConfig(iniPath)). A module's suffixed keys (Prefix_<suffix>, read
+    as L"Prefix_%ls") count when the module reads that prefix and the suffix is one of its keys (tools/support_config.py
+    UNIT_KEYS for SupportAircraftCount_); every key a module reads is shipped in the ini, the suffixed ones as an example."""
     crew = src('src/crew.cpp')
     hook = crew.split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
     lines, sight = hook.find('&AimLines,'), hook.find('&HeliSightFrame,')
@@ -1944,8 +1962,27 @@ def heli_sight_after_aim_lines() -> None:
     assert 'PlayerHeliOwnSight(vehicle)' in aim, 'src/crew.cpp AimLines: the heli sight hides the player\'s line'
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
     assert re.search(r'^PlayerHeliGunSight=1', ini, re.M) and 'PlayerHeliGunSight' in readme
-    unread = [k for k in re.findall(r'^([A-Za-z]\w*)=', ini, re.M) if f'L"{k}"' not in plugin]
-    assert not unread, f'EDF6VehicleCrew.ini keys src/plugin.cpp never reads: {unread}'
+    modules = {path: src(path) for path, call in INI_MODULES.items()}
+    for path, call in INI_MODULES.items():
+        assert call in plugin.split('void LoadConfig() noexcept {', 1)[1].split('\n}\n', 1)[0], f'LoadConfig does not hand the ini to {path}'
+    sys.path.insert(0, os.path.join(ROOT, 'tools'))
+    import support_config
+    suffixes = {'SupportAircraftCount_': support_config.UNIT_KEYS}
+
+    def read(key: str) -> bool:
+        if f'L"{key}"' in plugin or any(f'L"{key}"' in m for m in modules.values()):
+            return True
+        for prefix, known in suffixes.items():
+            if key.startswith(prefix) and key[len(prefix):] in known:
+                return any(f'L"{prefix}%ls"' in m for m in modules.values())
+        return False
+    unread = [k for k in re.findall(r'^([A-Za-z]\w*)=', ini, re.M) if not read(k)]
+    assert not unread, f'EDF6VehicleCrew.ini keys neither src/plugin.cpp nor {list(INI_MODULES)} read: {unread}'
+    for path, text in modules.items():
+        for key in re.findall(r'L"(Support\w+?)"', text):
+            assert re.search(rf'^{key}=', ini, re.M), f'{path} reads {key}, the shipped ini lacks it'
+        for prefix in re.findall(r'L"(\w+_)%ls"', text):
+            assert prefix in suffixes and re.search(rf'{prefix}[A-Z_]+=\d', ini), f'{path} reads {prefix}<key>: no shipped example'
 
 
 
@@ -1953,8 +1990,10 @@ def heli_sight_after_aim_lines() -> None:
 def heli_mouse_aim_wired() -> None:
     """The helicopters' mouse-aim flight (src/heliaim.h) and HUD: their ini keys are read, shipped and documented, the
     lever they replaced (HeliMousePitch) is shipped no more and an old ini's is said ignored; the stock heli the player
-    flies and the NPC pilot write the input block through the same stick, throttle and yaw law (heli.cpp Steer and
-    AimFly), and the rotor craft fly the same aim::Fly (playerjet_board.inc HoverAim)."""
+    flies and the NPC pilot write the horizontal input through the same stick law (heli.cpp Steer and AimFly, StockStick);
+    since 2026-10-09 the player's heli flies the War Thunder instructor (aim::Instructor: W / S the collective, the nose
+    pitch the cyclic) with its own collective (aim::CollectiveThrottle: the stock vertical law inverted, on the rotor
+    PlayerMouseTune quickens) while the NPC keeps StockThrottle; the rotor craft still fly aim::Fly (HoverAim)."""
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
     for key in ('HeliMouseAim', 'HeliFlightHud'):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=1', ini, re.M) and key in readme, key
@@ -1963,20 +2002,33 @@ def heli_mouse_aim_wired() -> None:
     heli, board = src('src/heli.cpp'), src('src/playerjet_board.inc')
     steer = heli.split('Control Steer(', 1)[1].split('\n}\n', 1)[0]
     fly = heli.split('void AimFly(', 1)[1].split('\n}\n', 1)[0]
-    for law in ('aim::StockStick(', 'aim::StockThrottle('):
-        assert law in steer and law in fly, law
+    assert 'aim::StockStick(' in steer and 'aim::StockStick(' in fly, 'aim::StockStick('
+    assert 'aim::StockThrottle(' in steer and 'aim::CollectiveThrottle(' in fly and 'aim::StockThrottle(' not in fly
+    assert 'aim::Instructor(' in fly and 'aim::Fly(' not in fly, 'heli.cpp AimFly: the instructor, not the rotor craft law'
     # The yaw is the one law apart (2026-10-06, the user: the mouse did not turn the heli): the NPC damps its turn
     # (StockYaw), the player compensates the native angle-state lag/spring (PlayerYawInput).
     assert 'aim::StockYaw(' in steer and 'aim::PlayerYawInput(' in fly and 'aim::StockYaw(' not in fly
     assert 'aim::MoveOnScreen(' in fly, 'heli.cpp AimFly: the mouse kept on the screen axis by axis'
     player = heli.split('void PlayerHeli(', 1)[1].split('\n}\n', 1)[0]
-    assert 'PlayerYawTune(v,' in player and 'kMaxYaw,a.yaw' in heli.split('void AssistOff(', 1)[1].split('\n}\n', 1)[0]
+    off = heli.split('void AssistOff(', 1)[1].split('\n}\n', 1)[0]
+    assert 'PlayerMouseTune(v,' in player and 'kMaxYaw,a.yaw' in off
+    assert 'kRotorUp,a.rotorUp' in off and 'kRotorDown,a.rotorDown' in off and 'kTiltSmooth,a.tilt' in off, 'AssistOff: the rotor / tilt back'
+    attitude = heli.split('void __fastcall PlayerAttitudeHook(', 1)[1].split('\n}\n', 1)[0]
+    assert 'own[0]=roll;own[2]=pitch;' in attitude, 'PlayerAttitudeHook: the instructor\'s pitch and coordinated roll'
     # The hover rotor from the lift as it is in memory (heliaim.h HoverRotor), not the old 70 the 602 clamped to 1.0 on.
     assert 'kStockLift' not in heli and heli.count('aim::HoverRotor(') >= 3
     hud = src('src/hud.cpp').split('void HeliStrip(', 1)[1].split('\n}\n', 1)[0]
     assert 'Tx::heliKeysAir' in hud and 'KeyName(Cfg().playerJetBrakeKey' in hud, 'hud.cpp HeliStrip: the keys spelt out'
-    assert 'SPACE: up' in src('src/hudtext.inc').split('HUDTEXT(heliKeysAir,', 1)[1].split('\n', 1)[0]
-    assert 'aim::Fly(' in fly and 'aim::Fly(' in board.split('void HoverAim(', 1)[1].split('\n}\n', 1)[0]
+    # The stock heli's keys (f.collective) are the instructor's: W / S up and down, the nose down forward; the rotor
+    # craft's stay the speed setpoint's.
+    assert 'f.collective ? Tx::heliKeysInstructor : Tx::heliKeysAir' in hud and 'Tx::heliKeysInstructorLanded' in hud
+    texts = src('src/hudtext.inc')
+    assert 'SPACE: up' in texts.split('HUDTEXT(heliKeysAir,', 1)[1].split('\n', 1)[0]
+    instructor = texts.split('HUDTEXT(heliKeysInstructor,', 1)[1].split('\n', 1)[0]
+    assert 'W / S: up / down' in instructor and 'down: forward' in instructor, instructor
+    assert 'HOLD W / SPACE' in texts.split('HUDTEXT(heliKeysInstructorLanded,', 1)[1].split('\n', 1)[0]
+    assert 'f.collective=p.flying' in heli, 'heli.cpp PublishHud: the stock heli says its keys are the instructor\'s'
+    assert 'aim::Fly(' in board.split('void HoverAim(', 1)[1].split('\n}\n', 1)[0]
 
 
 @test
@@ -2034,41 +2086,43 @@ def nix_torso_wired() -> None:
 
 @test
 def embedded_seat_aim_wired() -> None:
-    """The live-layout fixture is used by Nix and Proteus; paired bone mapping
-    runs after the stock right-seat step, not from the unordered AI task."""
-    nix, proteus, plugin = src('src/nix.cpp'), src('src/proteus.cpp'), src('src/plugin.cpp')
+    """The live-layout fixture is used by Nix and Proteus; a Proteus mount another seat borrows turns to that seat's aim
+    before the stock slot 5 poses the model (so the muzzles the slot copies into the weapon are the borrowed aim's)."""
+    nix, weapons = src('src/nix.cpp'), src('src/proteus_weapons.inc')
     player_aim = nix.split('unsigned char* PlayerAim(', 1)[1].split('\n}\n', 1)[0]
     assert 'seataim::Object(seat)' in player_aim and 'At<unsigned char*>(seat,kSeatAim)' not in player_aim
-    two = proteus.split('void TwoSeats(', 1)[1].split('\n}\n', 1)[0]
-    assert 'kAimAxes' not in two, 'the AI task must not write unmapped cannon angles'
-    hook = proteus.split('void __fastcall AimHook(', 1)[1].split('\n}\n', 1)[0]
-    assert hook.index('reinterpret_cast<AimFn>(nextAim[I])(aim,input)') < hook.index('FollowCannon(aim)')
-    assert 'hooks[i],&nextAim[i]' in proteus, 'publish the continuation before installing its hook'
-    assert 'seataim::Follow(left,right' in proteus and '(axis,true)' in proteus
-    assert plugin.index('InstallTurretCam();') < plugin.index('InstallStabilizer();') < plugin.index('InstallProteus();')
+    aim = weapons.split('void AimBorrowed(', 1)[1].split('\n}\n', 1)[0]
+    assert 'seataim::Follow(seataim::Object(SeatAt(v,static_cast<unsigned>(op))),seataim::Object(SeatAt(v,seat))' in aim
+    assert '(axis,true)' in aim, 'each changed axis is applied to its bones as the stock axis step does'
+    post = weapons.split('void __fastcall ProteusWeaponPost(', 1)[1].split('\n}\n', 1)[0]
+    assert post.index('AimBorrowed(') < post.index('nextWeaponPost)(object,step)'), 'aim before the stock pose and muzzle copy'
     assert 'add_executable(seat_aim_check' in src('CMakeLists.txt')
 
 
 @test
 def proteus_wired() -> None:
-    """The Proteus rework (src/proteus.cpp, src/proteus_logic.h, README 普罗透斯, docs/proteus-re.md): every Proteus* key the
-    ini ships is read, range-checked (all but the three switches), and documented in README.md; the class crew.cpp chains
-    for it (VehicleBigBegaruta, its native player update slot 4) is the one proteus.cpp reworks; it is built (its own
-    target_sources line) with its offline check, which includes the rules' header alone; every EDF.dll address it checks is
-    in docs/proteus-re.md; the mission's reset, the per-frame step (before the plugin-off return: it gives the stock numbers
-    back), the install, the turret camera's lift, the shells' preload and the EDF6AutoTurret link (one export name, both
-    turret pickers weighed) are wired; the HUD's layout check covers it. With the game present: every VehicleBigBegaruta SGO
-    has the 5 m foot radius and the 7500 durability the code takes as constants, four seats, and the 50 deg walkable slope
-    whose 1.2 m step README.md quotes."""
+    """The Proteus rework (src/proteus.cpp and its .inc files, src/proteus_logic.h, README 普罗透斯, docs/proteus-re.md):
+    every Proteus* key the ini ships is read, range-checked (all but the two switches), and documented in README.md; the
+    class crew.cpp chains for it (VehicleBigBegaruta, its native player update slot 4) is the one proteus.cpp reworks; it
+    is built (its own target_sources line) with its offline check, which includes the rules' header alone; every EDF.dll
+    address it checks is in docs/proteus-re.md; the mission's reset, the per-frame step (before the plugin-off return: it
+    gives the stock numbers back), the install, the turret camera's lift, the shield's SGO (the EMC table's last round,
+    preloaded with the others) and the EDF6AutoTurret link (one export name, both turret pickers weighed) are wired; the
+    weapons are the stock mounts only (no custom rounds, no damage hook); the HUD's layout check covers it. With the game
+    present: every VehicleBigBegaruta SGO has the 5 m foot radius the code takes as a constant and four seats, and the
+    50 deg walkable slope whose 1.2 m step README.md quotes."""
     import math
     import rootcpk
     plugin, ini, readme, doc = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md'), src('docs/proteus-re.md')
     code, crew, cmake, check = src('src/proteus.cpp'), src('src/crew.cpp'), src('CMakeLists.txt'), src('tools/proteus_check.cpp')
+    weapons, shield = src('src/proteus_weapons.inc'), src('src/proteus_shield.inc')
     keys = re.findall(r'^(Proteus\w+)=', ini, re.M)
-    assert len(keys) >= 40 and 'ProteusRework' in keys, keys
+    assert len(keys) >= 30 and 'ProteusRework' in keys, keys
+    for gone in ('ProteusMarkKey', 'ProteusDriverGun', 'ProteusSalvoCount', 'ProteusShieldArc', 'ProteusShieldBlock'):
+        assert gone not in keys and f'L"{gone}"' not in plugin, f'{gone} was retired with the custom rounds / panel shield'
     for key in keys:
         assert f'L"{key}"' in plugin and key in readme, key
-        if key not in ('ProteusRework', 'ProteusTwoSeats', 'ProteusDriverGun'):
+        if key not in ('ProteusRework', 'ProteusTwoSeats'):
             assert f'Fix("{key}"' in plugin or f'FixInt("{key}"' in plugin, f'{key} is not range-checked'
     vt = re.search(r'kVtBig=(0x[0-9A-F]+)', code).group(1)
     assert re.search(rf'\{{{vt},0x644350,"BigBegaruta",kFindSeat,4\}}', crew), 'crew.cpp must chain the Proteus player update'
@@ -2078,23 +2132,22 @@ def proteus_wired() -> None:
     rvas = set()
     for block in re.findall(r'const Sig k\w+\[\]=\{(.*?)\n\};', code, re.S):
         rvas.update(re.findall(r'\{(0x[0-9A-F]+),\{', block))
-    assert len(rvas) >= 20, rvas
+    rvas.update(re.findall(r'Matches\((0x[0-9A-F]+),', shield + weapons))
+    rvas.update(re.findall(r'k\w+=(0x[0-9A-F]{6,7})', shield + weapons))
+    assert len(rvas) >= 25, rvas
     for rva in sorted(rvas):
-        assert rva in doc, f'docs/proteus-re.md does not mention {rva}'
+        assert rva.upper().replace('0X', '0x') in doc or rva in doc, f'docs/proteus-re.md does not mention {rva}'
     assert 'ResetProteus();' in src('src/mission.cpp') and 'InstallProteus();' in plugin
     frame = crew.split('void __fastcall InputHook', 1)[1]
     assert frame.index('&ProteusFrame') < disabled_return_offset(frame), 'the Proteus step must run with the plugin off'
     assert frame.index('&ProteusFrame') < frame.index('&SeatSwitchFrame'), 'the seats it closes are closed before the seat switch asks'
-    # The stock launcher is the salvo's only while the salvo can be fired and its seat is closed, decided each frame after
-    # the seats; what is given back is what was taken.
     step = code.split('void Frame(unsigned char* v)', 1)[1].split('\n}', 1)[0]
-    assert step.index('TwoSeats(*u,v,LocalGunner(v));') < step.index('Guns(*u,salvoReady,c);'), 'Guns after ownership-aware seats'
+    assert step.index('Seats(*u,v,c.proteusTwoSeats,true);') < step.index('Guns(*u,c);') < step.index('BarrierFrame(*u,v);')
     gunner = code.split('bool LocalGunner(', 1)[1].split('\n}\n', 1)[0]
-    assert 'Rider::none || rider==Rider::dummy' in gunner and 'IsOnlineAuthority(object)' in gunner, \
-        'only the real gunner owner may pull the paired cannon'
-    assert 'const bool hold=salvo && u.closed;' in code and 'Put<float>(m,kRate,u.rate[kLauncherSeat]);' in code
+    assert 'LivingSoldierInSeat(image,seat)' in gunner and 'IsOnlineAuthority(' in gunner, 'only a real local gunner fires here'
     give = code.split('void GiveBack(Unit& u', 1)[1].split('\n}', 1)[0]
-    assert 'Put<float>(w,kRate,u.rate[s]);Put<float>(w,kSpread,u.spread[s]);' in give and '1.0f' not in give
+    assert 'DropBarrier(u,why);' in give and 'OpenSeats(u,v);' in give and 'GunsBack(u);' in give
+    assert 'Put<float>(a.weapon,kRate,a.rate);Put<float>(a.weapon,kSpread,a.spread);' in weapons, 'what is given back is what was taken'
     lookup = code.split('Unit* UnitOf(', 1)[1].split('\n}\n', 1)[0]
     active = code.split('Unit* ActiveOf(', 1)[1].split('\n}\n', 1)[0]
     assert 'if(u.ref.Is(v))return &u;' in lookup and 'if(u.ref.Is(v))' in active, \
@@ -2103,14 +2156,21 @@ def proteus_wired() -> None:
         'replicas require fresh control; the local active path cannot consume stale remote state'
     # A Proteus no player has ridden is not crewed (the helicopters' rule, crew.cpp Crew).
     assert 'if(!st.playerAt)return;' in crew, 'every unused parked vehicle waits for its first player driver'
-    assert 'kProteusHoldCountdown*0.5f' in src('src/vehsound.cpp') and 'kHoldCountdown=kProteusHoldCountdown' in code
-    # The damage call both read: the carrier's check takes the Proteus's redirect as intact (no install order between them).
-    sub = src('src/subcarrier.cpp')
-    sigs = sub.split('const Sig kDamageSigs[]={', 1)[1].split('};', 1)[0]
-    assert '{0x54A586,' not in sigs and 'return to==image+kDamageTarget || ProteusDamageThunk(to);' in sub
-    assert 'damageOk=Body506MessageOk() && DamageCallReaches();' in sub and 'damageThunk=image+kDamageCall+5+rel;' in code
+    # The stock weapons only: no custom rounds, no damage-call redirect, the stock damage path untouched.
+    for gone in ('ProteusGunRound', 'ProteusSalvoRound', 'ProteusRoundsReady', 'ProteusDamageThunk', 'kProteusHoldCountdown'):
+        for rel in ('src/crew.h', 'src/jet_bay.cpp', 'src/proteus.cpp', 'src/proteus.h', 'src/subcarrier.cpp', 'src/vehsound.cpp'):
+            assert gone not in src(rel), f'{gone} in {rel}'
+    assert 'return to==image+kDamageTarget;' in src('src/subcarrier.cpp')
+    assert '0x54A586' not in code and 'RedirectCall' not in code
+    # The shield: the stock barrier round raised through the EMC table (preloaded whenever its file is installed).
+    bay = src('src/jet_bay.cpp')
+    assert 'L"app:/object/edf6vc_proteus_shield.sgo",L"EDF6VC_PROTEUS_SHIELD.SGO"' in bay
+    assert 'static_assert(kEmcCount==static_cast<int>(EmcRound::proteusShield)+1' in bay
+    assert 'PreloadShells(mgr,Preloaded(Body::gunship));' in src('src/jet_spawn.cpp')
+    assert 'EmcFire(EmcRound::proteusShield,v,p,at,1.0f)' in shield
+    assert "SHIELD_FILE = 'OBJECT/EDF6VC_PROTEUS_SHIELD.SGO'" in src('tools/make_proteus.py')
     assert 'ProteusViewLift(' in src('src/turretcam.cpp')
-    assert 'PreloadShells(mgr,Preloaded(Body::gunship),ProteusReady());' in src('src/jet_spawn.cpp') and 'gunship || proteus' in src('src/jet_bay.cpp')
+    assert 'ProteusBorrowedWeapons(v,r.seat,' in src('src/vhud.cpp')
     link = src('common/edf/aimlink.h')
     name = re.search(r'kPriorityZone\[\]="(\w+)"', link).group(1)
     assert f'extern "C" __declspec(dllexport) bool __cdecl {name}(' in code, name
@@ -2118,7 +2178,6 @@ def proteus_wired() -> None:
     assert 'distance*PriorityWeight(*e)' in src('autoturret/src/plugin.cpp') and 'distance*PriorityWeight(e)' in src('autoturret/src/gunner.cpp')
     assert 'StockLayoutApart(1920,&sceneProteus)' in src('tools/hud_view.cpp')
     foot = float(re.search(r'kFootRadius=([0-9.]+)f', code).group(1))
-    durability = float(re.search(r'kDurability=([0-9.]+)f', code).group(1))
     assert abs(foot * (1.0 - math.sin(math.radians(50.0))) - 1.17) < 0.01 and '1.2 米' in readme
     if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
         import sgo
@@ -2132,7 +2191,6 @@ def proteus_wired() -> None:
                 continue
             seen += 1
             assert v['begaruta_rigid_body'][1] == foot and v['begaruta_rigid_body'][3] == 50.0, (name, v['begaruta_rigid_body'])
-            assert v['game_object_durability'] == durability, name
             assert len(v['vehicle_riding_position']) == 4, name
         assert seen >= 8, seen
 
@@ -2672,8 +2730,8 @@ def stock_gun_sight_ranged() -> None:
 @test
 def stock_gauges_wired() -> None:
     """The stock weapon gauges (src/stockgauge.cpp; the user, 2026-10-06: "删掉原版挂载和油料显示"): its ini key is read,
-    shipped and documented; it is installed at load and only through the gauge's update slot (no draw call skipped); the
-    HUD's publish says what it covers; every EDF.dll address it checks is in docs/hud-re.md §9; the fuel tank is no
+    shipped and documented; it is installed at load and only through the gauges' update slots (the weapon gauge's and
+    the armor gauge's slot 1; no draw call skipped); the HUD's publish says what it covers; every EDF.dll address it checks is in docs/hud-re.md §9; the fuel tank is no
     weapon in the stock HUD's arms and is read where the stock FUEL panel was, LOW FUEL its warning."""
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
     assert 'L"HideStockGauges"' in plugin and re.search(r'^HideStockGauges=1', ini, re.M) and 'HideStockGauges' in readme
@@ -2681,7 +2739,12 @@ def stock_gauges_wired() -> None:
     cmake = src('CMakeLists.txt')
     assert 'src/stockgauge.cpp' in cmake.split('add_library(EDF6VehicleCrew', 1)[1].split(')', 1)[0]
     gauge = src('src/stockgauge.cpp')
-    assert gauge.count('PatchVtableSlot(') == 1 and 'RedirectCall' not in gauge, 'stockgauge.cpp: the update slot only'
+    # Only update slots (vtable slot 1) are chained, never a draw call skipped: the weapon gauge's (HUiHudWeapon) and,
+    # 2026-10-09 ("上了载具以后，可以把原版的左上角的血条hud隐藏吧"), the armor gauge's (HUiHudPowerGuage).
+    patched = re.findall(r'PatchVtableSlot\(reinterpret_cast<void\*\*>\(image\+(\w+)\)', gauge)
+    assert gauge.count('PatchVtableSlot(') == 2 and sorted(patched) == ['kArmorUpdateSlot', 'kUpdateSlot'] \
+        and 'RedirectCall' not in gauge, f'stockgauge.cpp: the two gauges\' update slots only ({patched})'
+    assert 'kUpdateSlot=kGaugeVtable+1*8' in gauge and 'kArmorUpdateSlot=kArmorVtable+1*8' in gauge, 'stockgauge.cpp: slot 1 (update)'
     doc = src('docs/hud-re.md').split('## 9.', 1)[1]
     rvas = set(re.findall(r'\b0x[0-9A-F]{6,7}\b', gauge))
     missing = sorted(r for r in rvas if f'`{r}`' not in doc and f'`{r} ' not in doc and r not in doc)
@@ -3923,7 +3986,7 @@ def stock_payload_and_seats_wired() -> None:
     steps that read who sits where and picks the store before the heli sight marks it; the HUD's struct is the header's;
     playerjet.cpp tells a move between the gunship's seats from getting out; the installer step (tools/make_stock_stores.py)
     is opt-in (off in the shipped ini), installed after the jets' store weapons, removed, bundled and a ledger owner, and
-    its stores are store weapons make_jets writes and src/stores.inc knows."""
+    its stores are store weapons src/stores.inc knows, each written by make_jets (the jets carry it) or by itself."""
     import make_stock_stores as mss
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
     keys = ('StockVehicleStores', 'SeatSwitch', 'SeatNextKey', 'SeatNumberKeys', 'SeatButton', 'SeatPilot', 'SeatSwitchOnline', 'SeatList')
@@ -3968,8 +4031,9 @@ def stock_payload_and_seats_wired() -> None:
     assert inst.index('make_jets.install(game, jets)') < inst.index('make_stock_stores.install(game, files)'), 'stores after the jets'
     assert 'make_stock_stores.remove' in inst and "'make_stock_stores'" in src('tools/build_release.py')
     stores_inc = src('src/stores.inc')
+    assert set(mss.jet_store_files()) <= set(vc.STORE_FILES) and not set(mss.own_store_files()) & set(vc.STORE_FILES)
+    assert set(mss.jet_store_files()) | set(mss.own_store_files()) == set(mss.store_files())
     for f in mss.store_files():
-        assert f in vc.STORE_FILES, f'{f}: make_jets does not write it'
         kind = vc.store_of('app:/weapon/' + f.lower())[0]
         assert f'L"EDF6VC_{kind}_"' in stores_inc, f'{f}: src/stores.inc does not know its kind'
     # The seat switch's offsets agree with the RE notes.
@@ -4782,8 +4846,8 @@ def installer_recovery_regressions() -> None:
 
 
 def _e5c_stub() -> tuple[dict[str, bytes], int, dict]:
-    """make_edf5_campaign.build on a stand-in game (no Root.cpk to read): a file per list, 147 rows before."""
-    return {rel: f'stub {rel}'.encode() for rel in e5c.FILES}, 147, {'rows': [], 'skipped': []}
+    """make_edf5_campaign.build on a stand-in game (no Root.cpk to read): a file each, the packs' content from 3."""
+    return {rel: f'stub {rel}'.encode() for rel in e5c.FILES}, 3, {'rows': [], 'skipped': []}
 
 
 def _e5c_have_game() -> bool:
@@ -4813,221 +4877,191 @@ def _e5c_refuses(root: str, why: str) -> None:
         e5c.build(root)
     except e5c.Refused:
         return
-    raise AssertionError(f'appended to {why}')
+    raise AssertionError(f'installed over {why}')
 
 
 @test
 def edf5_campaign_build() -> None:
-    """The appended list from the real Root.cpk: stock rows untouched (row 0 gains the first EDF5 row as a successor),
-    every row 11 members with the 11th named flags (EDF.dll reads it by name), successors in range, one text row per
-    list row in every language, a thumbnail per row, under the save's 512 missions per mode."""
+    """The three packs from the real Root.cpk: the mode table gets three offline modes after the stock six (those
+    untouched), each with a content id of its own after every stock one, its own save file and its own list / five
+    texts / thumbnails, the texts one row per list row, every row 11 members with the 11th named flags (EDF.dll reads it
+    by name), successors chained and in range; every language's text table names the three modes. EDF6's own offline
+    list is not written."""
     import mdb
     import rootcpk
     import sgo
     if not _e5c_have_game():   # the real data: a developer's machine (CI has no game)
         return
-    files, base, p = e5c.build(rootcpk.DEFAULT_GAME)
-    rows = dsgo.parse(files[e5c.LIST]).root.get('table').items
-    stock = dsgo.parse(rootcpk.default().read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO')).root.get('table').items
-    assert base == len(stock) == 147 and len(rows) == base + len(p['rows']) < 512, (base, len(rows))
-    assert len([r for r in p['rows'] if r['group'] == 'main']) == 110, 'every EDF5 story mission'
+    files, content, p = e5c.build(rootcpk.DEFAULT_GAME)
+    assert not set(files) & set(e5c.LEGACY), 'EDF6\'s own offline list written'
+    assert set(files) == set(e5c.FILES)
+    stock = sgo.plain(sgo.read(rootcpk.default().read('DEFAULTPACKAGE', 'CONFIG.SGO'))[1]['ModeList'])
+    modes = sgo.plain(sgo.read(files[e5c.CONFIG])[1]['ModeList'])
+    assert modes[:len(stock)] == stock and len(modes) == len(stock) + 3, 'the stock modes changed'
+    assert content == 3 == max(m[e5c.M_CONTENT] for m in stock) + 1
+    packs = modes[len(stock):]
+    assert [m[e5c.M_CONTENT] for m in packs] == [3, 4, 5]
+    assert all(m[e5c.M_ONLINE] == 0 and m[e5c.M_TYPE] == 0 for m in packs), 'a pack that is not offline'
+    assert len({m[e5c.M_MST].upper() for m in modes}) == len(stock) // 2 + 3, 'a pack sharing a save file'
+    assert len({(m[e5c.M_TYPE], m[e5c.M_CONTENT]) for m in modes}) == len(modes), 'GetModeNo(type, content) ambiguous'
+    for m, pack in zip(packs, e5c.PACKS):
+        like = next(s for s in stock if s[e5c.M_CONTENT] == pack.like and s[e5c.M_TYPE] == 0)
+        assert m[7] == like[7] and m[11:] == like[11:], 'the difficulty ranges are not the matching stock mode\'s'
+        assert m[e5c.M_FILES] == pack.paths() and m[e5c.M_NAME] == pack.name_key and m[e5c.M_DESC] == pack.desc_key
+    for lang, rel in e5c.TEXTS.items():
+        base = sgo.read(rootcpk.default().read('ETC', f'TEXTTABLE_STEAM.{lang}.TXT_SGO'))[1]
+        text = sgo.read(files[rel])[1]
+        assert {k: v for k, v in text.items() if k in base} == base, (rel, 'stock text changed')
+        for pack in e5c.PACKS:
+            assert text[pack.name_key] == pack.name[lang] and text[pack.desc_key] == pack.desc[lang], rel
+    counts = {pack.group: 0 for pack in e5c.PACKS}
+    for pack in e5c.PACKS:
+        rows = dsgo.parse(files[pack.list]).root.get('table').items
+        counts[pack.group] = len(rows)
+        assert 0 < len(rows) <= 512
+        for i, r in enumerate(rows):
+            assert len(r.items) == 11 and r.names == {10: 'flags'} and r.items[0] == float(i), (pack.tag, i)
+            assert r.items[3].items == ([float(i + 1)] if i + 1 < len(rows) else []), (pack.tag, i)
+            assert r.items[1].startswith('app:/Mission/EDF5_OLD_SCRIPT/') and r.items[10] == 8.0
+            rootcpk.default().read(r.items[1].split('app:/', 1)[1], 'MISSION.BVM')
+        for rel in pack.txt.values():
+            assert len(sgo.read(files[rel])[1]['table']) == len(rows), rel
+        names = [f.name for f in mdb.rab_read(files[pack.image]).files]
+        assert names == [e5c.thumb_name(r.items[2]) for r in rows], pack.tag
+        assert dsgo.compact(dsgo.parse(files[pack.list])) == files[pack.list]
+    assert counts == {'main': 110, 'dlc1': 11, 'dlc2': 14}, counts
     assert {x[1] for x in p['skipped']} == {'DLC/DM015', 'DLC/DM018', 'DLC/DM019', 'DLC/DM020'}, p['skipped']
-    for a, b in zip(rows[1:base], stock[1:]):
-        assert dsgo.dump(a) == dsgo.dump(b), a.items[2]
-    first, stock_first = dsgo.dump(rows[0]), dsgo.dump(stock[0])
-    assert first['items'][3] == {'items': [1.0, float(base)], 'names': {}}
-    first['items'][3] = stock_first['items'][3]
-    assert first == stock_first, 'row 0 changed beyond its successors'
-    assert rows[base - 1].items[3].items == [float(base)]
-    for i, r in enumerate(rows):
-        assert len(r.items) == 11 and r.names == {10: 'flags'}, i
-        assert all(int(x) < len(rows) for x in r.items[3].items) or i == len(rows) - 1, i
-    for r in rows[base:]:
-        assert r.items[1].startswith('app:/Mission/EDF5_OLD_SCRIPT/') and r.items[10] == 8.0
-        rootcpk.default().read(r.items[1].split('app:/', 1)[1], 'MISSION.BVM')
-    for rel in e5c.TXT.values():
-        assert len(sgo.read(files[rel])[1]['table']) == len(rows), rel
-    names = {f.name for f in mdb.rab_read(files[e5c.IMAGE]).files}
-    assert all(e5c.thumb_name(r.items[2]) in names for r in rows)
-    assert dsgo.compact(dsgo.parse(files[e5c.LIST])) == files[e5c.LIST]
 
 
 @test
 def edf5_campaign_install_remove() -> None:
-    """Over another mod's list: install keeps what it replaced, a second install appends once, removal puts the other
-    mod's files back byte for byte (and deletes the ones that were not there), the ini row count follows; a file
-    changed by someone since is left alone, and its manifest entry (what it replaced) with it."""
+    """Over another mod's mode table: install keeps what it replaced, a second install adds the packs once, removal
+    puts the other mod's files back byte for byte (and deletes the ones that were not there), the ini content id
+    follows; a file changed by someone since is left alone, and its manifest entry (what it replaced) with it."""
+    import copy
+    import sgo
     if not _e5c_have_game():
         return
     with _e5c_game() as (root, game):
-        other_list = game.read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO')
-        modfiles.atomic_write(e5c.rel_path(root, e5c.LIST), other_list)
+        other = game.read('DEFAULTPACKAGE', 'CONFIG.SGO')
+        ver, members = sgo.read(other)
+        members['ModeList'].append(copy.deepcopy(members['ModeList'][2]))   # another mod's mode, content 1 again
+        members['ModeList'][-1][e5c.M_CONTENT] = 7
+        members['ModeList'][-1][e5c.M_MST] = 'MOD1.MST'
+        other = sgo.write_depth_first(ver, members)
+        modfiles.atomic_write(e5c.rel_path(root, e5c.CONFIG), other)
         ini = os.path.join(root, 'Mods', e5c.INI)
         modfiles.atomic_write(ini, b'[VehicleCrew]\nEnabled=1\n')
         first = e5c.build(root)
+        assert first[1] == 8, 'the packs\' content ids collide with the other mod\'s'
         e5c.install(root, first)
-        assert 'EDF5CampaignRows=147' in open(ini, encoding='utf-8').read()
+        assert 'EDF5CampaignContent=8' in open(ini, encoding='utf-8').read()
         assert all('also' not in e for e in e5c.load_manifest(root)['files'].values()), 'the final manifest'
         assert e5c.check(root)
         again = e5c.build(root)
-        assert again[0] == first[0], 'a second install appended again'
+        assert again[0] == first[0], 'a second install added the packs again'
         e5c.install(root, again)
         done, kept = e5c.remove(root)
         assert not kept and len(done) == len(e5c.FILES)
-        assert modfiles.read(e5c.rel_path(root, e5c.LIST)) == other_list, "the other mod's list not put back"
-        assert all(modfiles.read(e5c.rel_path(root, rel)) is None for rel in e5c.FILES if rel != e5c.LIST)
-        assert 'EDF5CampaignRows=0' in open(ini, encoding='utf-8').read()
+        assert modfiles.read(e5c.rel_path(root, e5c.CONFIG)) == other, "the other mod's mode table not put back"
+        assert all(modfiles.read(e5c.rel_path(root, rel)) is None for rel in e5c.FILES if rel != e5c.CONFIG)
+        assert 'EDF5CampaignContent=0' in open(ini, encoding='utf-8').read()
         assert not e5c.installed(root) and e5c.check(root), 'not installed is a valid state'
         e5c.install(root, e5c.build(root))
-        modfiles.atomic_write(e5c.rel_path(root, e5c.IMAGE), b'someone else')
+        image = e5c.PACKS[0].image
+        modfiles.atomic_write(e5c.rel_path(root, image), b'someone else')
         assert not e5c.check(root)
         done, kept = e5c.remove(root)
-        assert kept == [e5c.rel_path(root, e5c.IMAGE)] and modfiles.read(kept[0]) == b'someone else'
-        assert list(e5c.load_manifest(root)['files']) == [e5c.IMAGE], 'the changed file\'s record dropped'
-        os.remove(e5c.rel_path(root, e5c.IMAGE))
+        assert kept == [e5c.rel_path(root, image)] and modfiles.read(kept[0]) == b'someone else'
+        assert list(e5c.load_manifest(root)['files']) == [image], 'the changed file\'s record dropped'
+        os.remove(e5c.rel_path(root, image))
         os.remove(os.path.join(root, 'Mods', e5c.MANIFEST))
-        # the list itself changed by someone: it stays, and so does the plugin's row count
+        # the mode table itself changed by someone: everything stays, and so does the plugin's content id
         e5c.install(root, e5c.build(root))
-        modfiles.atomic_write(e5c.rel_path(root, e5c.LIST), b'someone else')
+        modfiles.atomic_write(e5c.rel_path(root, e5c.CONFIG), b'someone else')
         e5c.remove(root)
-        assert 'EDF5CampaignRows=147' in open(ini, encoding='utf-8').read(), 'row count zeroed under a kept list'
+        assert 'EDF5CampaignContent=8' in open(ini, encoding='utf-8').read(), 'content id zeroed under a kept table'
+        assert all(os.path.isfile(e5c.rel_path(root, rel)) for rel in e5c.FILES)
 
 
 @test
 def edf5_campaign_interrupted_reinstall() -> None:
     """An update whose files differ from the installed ones, cut short after the manifest: the next install neither
-    refuses nor loses the other mod's list it replaced, and removal still puts that back (review of f8be221: the
-    manifest held only the new hashes, so the old files read as someone else's)."""
+    refuses nor loses the other mod's mode table it replaced, and removal still puts that back (review of f8be221:
+    the manifest held only the new hashes, so the old files read as someone else's)."""
     if not _e5c_have_game():
         return
     with _e5c_game() as (root, game):
-        other_list = game.read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO')
-        modfiles.atomic_write(e5c.rel_path(root, e5c.LIST), other_list)
+        other = game.read('DEFAULTPACKAGE', 'CONFIG.SGO')
+        modfiles.atomic_write(e5c.rel_path(root, e5c.CONFIG), other)
         e5c.install(root, e5c.build(root))
         real_plan = e5c.plan
         shorter = lambda r: {**real_plan(r), 'rows': real_plan(r)['rows'][:-1]}   # an update that writes other bytes
         with patched(e5c, plan=shorter):
             update = e5c.build(root)
-        with patched(e5c.modfiles, atomic_write=_failing_write('MISSION/MISSIONLIST.OFFLINE.TXT.CN.SGO')):
+        with patched(e5c.modfiles, atomic_write=_failing_write(e5c.PACKS[0].txt['CN'])):
             try:
                 e5c.install(root, update)
             except OSError:
                 pass
             else:
                 raise AssertionError('the failing write did not fail')
-        files, base, _ = e5c.build(root)   # neither refused nor appended to the old rows
-        assert base == 147 and len(dsgo.parse(files[e5c.LIST]).root.get('table').items) == 147 + len(real_plan(root)['rows'])
+        files, content, _ = e5c.build(root)   # neither refused nor added to the half-written table
+        assert content == 3 and files[e5c.CONFIG] == e5c.build(root)[0][e5c.CONFIG]
         done, kept = e5c.remove(root)
         assert not kept, kept
-        assert modfiles.read(e5c.rel_path(root, e5c.LIST)) == other_list, "the other mod's list lost"
+        assert modfiles.read(e5c.rel_path(root, e5c.CONFIG)) == other, "the other mod's mode table lost"
 
 
 @test
 def edf5_campaign_refusals() -> None:
-    """Rows are the save's indices: a list whose stock rows were reordered or that is shorter, one that is not DSGO,
-    one that already has EDF5 rows this tool did not leave, and a text table one row short all refuse (nothing
-    written) instead of stopping the installer."""
+    """A mode table that is not SGO, one that already has EDF5 pack modes this tool did not leave, one whose save files
+    collide, and the older version's appended list changed by someone since all refuse (nothing written) instead of
+    stopping the installer; an empty pack is not installed."""
+    import base64
     import sgo
     if not _e5c_have_game():
         return
     with _e5c_game() as (root, game):
-        stock = game.read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO')
-        doc = dsgo.parse(stock)
-        t = doc.root.get('table').items
-        t[1], t[2] = t[2], t[1]
-        modfiles.atomic_write(e5c.rel_path(root, e5c.LIST), dsgo.write(doc))
-        _e5c_refuses(root, 'reordered stock rows')
-        doc = dsgo.parse(stock)
-        doc.root.get('table').items.pop()
-        modfiles.atomic_write(e5c.rel_path(root, e5c.LIST), dsgo.write(doc))
-        _e5c_refuses(root, 'a list shorter than the stock one')
-        modfiles.atomic_write(e5c.rel_path(root, e5c.LIST), b'not a list')
-        _e5c_refuses(root, 'a list that is not DSGO')
-        modfiles.atomic_write(e5c.rel_path(root, e5c.LIST), _e5c_with_edf5_rows())
-        _e5c_refuses(root, 'EDF5 rows with no manifest')
-        os.remove(e5c.rel_path(root, e5c.LIST))
-        ver, members = sgo.read(game.read('MISSION', 'MISSIONLIST.OFFLINE.TXT.EN.SGO'))
-        members['table'].pop()
-        modfiles.atomic_write(e5c.rel_path(root, e5c.TXT['EN']), sgo.write_depth_first(ver, members))
-        _e5c_refuses(root, 'a text table one row short')
+        modfiles.atomic_write(e5c.rel_path(root, e5c.CONFIG), b'not a table')
+        _e5c_refuses(root, 'a mode table that is not SGO')
+        with tempfile.TemporaryDirectory(prefix='edf6vc-e5c-other-') as other:
+            left = e5c.build(other)[0][e5c.CONFIG]   # as another tool might have left it, without a manifest
+        modfiles.atomic_write(e5c.rel_path(root, e5c.CONFIG), left)
+        _e5c_refuses(root, 'EDF5 pack modes with no manifest')
+        ver, members = sgo.read(game.read('DEFAULTPACKAGE', 'CONFIG.SGO'))
+        members['ModeList'][0][e5c.M_MST] = e5c.PACKS[1].mst
+        modfiles.atomic_write(e5c.rel_path(root, e5c.CONFIG), sgo.write_depth_first(ver, members))
+        _e5c_refuses(root, 'a save file a pack would share')
+        os.remove(e5c.rel_path(root, e5c.CONFIG))
+        list_rel = e5c.LEGACY_LIST
+        modfiles.atomic_write(e5c.rel_path(root, list_rel), b'appended')
+        modfiles.save_json(os.path.join(root, 'Mods', e5c.MANIFEST), {'version': 1, 'rows': 147, 'files': {
+            list_rel: {'sha': modfiles.sha256(b'appended'), 'original': base64.b64encode(b'stock').decode()}}})
+        modfiles.atomic_write(e5c.rel_path(root, list_rel), b'changed since')
+        _e5c_refuses(root, 'the older version\'s list changed by someone')
+        os.remove(e5c.rel_path(root, list_rel))
+        os.remove(os.path.join(root, 'Mods', e5c.MANIFEST))
+        real_plan = e5c.plan
+        with patched(e5c, plan=lambda r: {**real_plan(r), 'rows': [x for x in real_plan(r)['rows'] if x['group'] != 'dlc2']}):
+            _e5c_refuses(root, 'an empty pack')
+        assert not e5c.installed(root), 'a refusal wrote a manifest'
 
 
-@test
-def edf5_campaign_save_capacity() -> None:
-    """A third-party appended list may fill the 512-slot save: refuse 513 before writing, accept exactly 512."""
-    import sgo
-    if not _e5c_have_game():
-        return
-    with _e5c_game() as (root, game):
-        p = e5c.plan(root)
-        stock = game.read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO')
-        for total in (513, 512):
-            base = total - len(p['rows'])
-            doc = dsgo.parse(stock)
-            rows = doc.root.get('table').items
-            for i in range(len(rows), base):
-                row = dsgo.Node([float(i), f'app:/Mission/ThirdParty/M{i}', f'ThirdParty/M{i}',
-                                 dsgo.Node([float(i + 1)]), float(i), 0.0, 0.0, 0.0, e5c.BGM, 0.5, 8.0], {10: 'flags'})
-                rows.append(row)
-            modfiles.atomic_write(e5c.rel_path(root, e5c.LIST), dsgo.compact(doc))
-            for lang, rel in e5c.TXT.items():
-                ver, text = sgo.read(game.read('MISSION', f'MISSIONLIST.OFFLINE.TXT.{lang}.SGO'))
-                text['table'] += [['third-party', 'brief']] * (base - len(text['table']))
-                modfiles.atomic_write(e5c.rel_path(root, rel), sgo.write_depth_first(ver, text))
-            if total > 512:
-                _e5c_refuses(root, '513 missions overflowing the native save')
-                assert not e5c.installed(root), 'refusal wrote a manifest'
-            else:
-                built, count, _ = e5c.build(root)
-                result = dsgo.parse(built[e5c.LIST]).root.get('table').items
-                assert len(result) == 512 and count == base
-                assert result[-1].items[3].items == [], 'the terminal row points past the end'
-        with patched(e5c, plan=lambda _: {'rows': [], 'skipped': []}):
-            _e5c_refuses(root, 'an empty campaign unlocking a nonexistent row')
-
-
-def _e5c_with_edf5_rows() -> bytes:
-    """The appended list as another tool might have left it: built here, written without a manifest."""
-    with tempfile.TemporaryDirectory(prefix='edf6vc-e5c-other-') as other:
-        return e5c.build(other)[0][e5c.LIST]
-
-
-# Every call in EDF.dll to the list's row count (0xE0650) and the story's progress (0xD7B60), each placed: the
-# plugin caps the length calls and replaces the progress calls; the rest need the real count (src/edf5campaign.cpp).
-_E5C_UNCAPPED = {
-    0x92E8A: 'bounds check before setting a clear bit (EDF5 rows are recorded too)',
-    0x9CFC0: 'a loop over every row',
-    0xAC1BE: 'bounds check of a mission picked (its progress then goes through the replaced 0xD7B60)',
-    0xAEEC8: 'a loop over every row setting clear bits',
-    0xBC20D: 'a debug print "%ls:%d/%d"',
-    0xD7B74: 'inside 0xD7B60 (its 4 callers are replaced)',
-    0xD7BA3: 'inside 0xD7B60 (its 4 callers are replaced)',
-    0xD8664: 'clamps an index to count-1 (0xD8650)',
-    0xD8683: 'clamps an index to count-1 (0xD8650)',
-    0xDF8A4: 'the save initialisation loop (512 slots)',
-    0x70F6CC: 'ProceedNextMission: the successor must be < count',
-    0x8A2124: 'mission select', 0x8A2BCF: 'mission select', 0x8A372B: 'mission select', 0x8A3A59: 'mission select',
-    0x8A3C35: 'mission select', 0x8A3DBB: 'mission select',
-    0x8D3FAA: 'leading run of cleared rows (147 with EDF6 cleared, with or without the campaign)',
-    0x8EE26D: 'the list window, current +-5', 0x912408: 'the list window, current +-5',
-}
+# Every call in EDF.dll to the owned-content lookup (0xD92B0) goes through the plugin (src/edf5campaign.cpp): one
+# missed, a pack enabled in the dialog could be refused where that call asks.
+_E5C_OWNED_SITES = [0x8BEF48, 0x8B5188, 0x8EC659, 0x8F64A1, 0x8FD963, 0x90069B, 0x91A655]
 
 
 @test
 def edf5_campaign_plugin_sites() -> None:
-    """The plugin's call sites are each still a stock rel32 call to their target in EDF.dll, and every call to either
-    target is placed (capped, replaced or named in _E5C_UNCAPPED): a missed one is how the progress scale was
-    first overlooked (review of f8be221)."""
+    """The plugin's call sites are each still a stock rel32 call to the owned-content lookup in EDF.dll, and they are
+    every call to it."""
     import rootcpk
     code = src('src/edf5campaign.cpp')
-
-    def listed(name: str) -> list[int]:
-        body = re.sub(r'//[^\n]*', '', code.split(f'{name}[]=', 1)[1].split('}', 1)[0])
-        return [int(x, 16) for x in re.findall(r'0x([0-9A-Fa-f]+)', body)]
-    rows, progress = listed('kRowSites'), listed('kProgressSites')
-    assert sorted(rows) == sorted([0x70EDB7, 0xDF9B8, 0x92EBD, 0xDCD3B, 0xDD108, 0xD8586, 0x7480F6]), rows
-    assert sorted(progress) == sorted([0xD7B25, 0xD7C77, 0xD8140, 0xD8860]), progress
-    assert not set(rows) & set(_E5C_UNCAPPED)
+    body = re.sub(r'//[^\n]*', '', code.split('kSites[]=', 1)[1].split('}', 1)[0])
+    sites = [int(x, 16) for x in re.findall(r'0x([0-9A-Fa-f]+)', body)]
+    assert sorted(sites) == sorted(_E5C_OWNED_SITES), [hex(x) for x in sites]
     if not _e5c_have_game():
         return
     import pefile
@@ -5044,8 +5078,7 @@ def edf5_campaign_plugin_sites() -> None:
                 out.add(at)
             at = img.find(b'\xe8', at + 1)
         return out
-    assert callers(0xE0650) == set(rows) | set(_E5C_UNCAPPED), sorted(hex(x) for x in callers(0xE0650) ^ (set(rows) | set(_E5C_UNCAPPED)))
-    assert callers(0xD7B60) == set(progress)
+    assert callers(0xD92B0) == set(sites), sorted(hex(x) for x in callers(0xD92B0) ^ set(sites))
 
 
 @test

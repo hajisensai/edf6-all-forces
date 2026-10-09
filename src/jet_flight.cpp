@@ -6,6 +6,7 @@
 #include "gear.h"
 #include "jet_pullout.h"
 #include "hover_lift.h"
+#include "nacelle_reach.h"
 #include <cwchar>
 
 namespace crew {
@@ -77,7 +78,8 @@ const wchar_t* const kElevonNames[2]={L"elevon_L",L"elevon_R"};
 // that thrust in the body (-90 deg hovering, toward 0 flying forward, past -90 braking), within
 // [-kThrustBack, 0], at most kThrustRate; turning, the nacelles on either side tilt kThrustYaw apart (a
 // tilt-rotor's yaw in the hover).
-constexpr float kThrustBack=1.92f,kThrustRate=0.8f,kThrustYaw=0.25f;
+constexpr float kThrustBack=nacelle::kMostBack,kThrustRate=0.8f,kThrustYaw=0.25f;
+constexpr float kNacelleFar=50.0f;   // m: a bottom this far over the ground leaves the nacelles free (they reach 5.2 m)
 const wchar_t* const kThrusterNames[4]={L"boosterF_l",L"boosterF_r",L"boosterB_l",L"boosterB_r"};
 // The Primer fighter's wings (Flap): both beat kFlapAmplitude rad about their bones' local X (the model's forward)
 // kFlapHz times a second, faster (up to kFlapHzMost) the more it climbs or speeds up; each downstroke lifts it
@@ -322,7 +324,7 @@ void Withdraw(Jet& j,const char* why,ULONGLONG ms) noexcept {
 // (local +z) turned theta about X, is (0, -sin theta, cos theta) in the body: theta = atan2(-up, forward). Its
 // yaw: a nacelle at body x tilted forward pushes the body round its up by -x times that (r x F), so to turn at
 // the yaw rate the body is told (omega . up) each nacelle tilts -sign(x) of kThrustYaw forward.
-void Thrusters(Jet& j,const Kind& k,unsigned char* v,float dt,ULONGLONG ms) noexcept {
+void Thrusters(Jet& j,const Kind& k,unsigned char* v,float dt,ULONGLONG ms,float clear) noexcept {
     if(!FindSurfaces(j,v,kThrusterNames,4,"thrusters"))return;
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
     float u[3]={m[4],m[5],m[6]},f[3]={m[8],m[9],m[10]};
@@ -334,6 +336,8 @@ void Thrusters(Jet& j,const Kind& k,unsigned char* v,float dt,ULONGLONG ms) noex
     for(int i=0;i<4;++i) {
         const float side=j.surf.bind[i][12]>=0.0f ? 1.0f : -1.0f;   // the nacelle's x in the body
         want[i]=Clamp(tilt-side*yaw,-kThrustBack,0.0f);
+        // Near the ground no further than keeps it over the ground (nacelle_reach.h; F_l, F_r the front pair).
+        if(clear<kNacelleFar)want[i]=std::fmax(want[i],nacelle::MostTilt(i<2 ? nacelle::kFront : nacelle::kBack,-clear,-kThrustBack));
     }
     PoseSurfaces(j,want,kThrustRate,dt,"thrusters");
     CarrierFlames(v,j.surf.rec,Clamp(Len(j.m.thrust)/kG,0.5f,1.0f),ms);   // the stock Booster flame on each nozzle
@@ -674,9 +678,12 @@ void HoldOffGround(Jet& j,const float* pos,float clear,float dt,ULONGLONG ms,flo
     float floorY=mo.groundY,need=kFloorClimb;
     if(!under) {
         if(mo.vel[1]>=0.0f)return;
-        const float end[3]={pos[0]+mo.vel[0]*dt*kFloorSweep,pos[1]+mo.vel[1]*dt*kFloorSweep-kFloorGap,pos[2]+mo.vel[2]*dt*kFloorSweep};
+        // Along its track from its bottom (`rest` under its position), what it meets in the position's units (+ rest): from
+        // the position it met only what rose to its centre, and that was taken for its bottom's floor (rest m too low).
+        const float from[3]={pos[0],pos[1]-rest,pos[2]};
+        const float end[3]={from[0]+mo.vel[0]*dt*kFloorSweep,from[1]+mo.vel[1]*dt*kFloorSweep-kFloorGap,from[2]+mo.vel[2]*dt*kFloorSweep};
         float hit[3];
-        if(MapRay(pos,end,hit)>=0.0f && hit[1]>floorY && hit[1]<pos[1])floorY=hit[1];
+        if(MapRay(from,end,hit)>=0.0f && hit[1]+rest>floorY && hit[1]<from[1])floorY=hit[1]+rest;
         need=(floorY+kFloorGap-pos[1])/dt;
         if(need>0.0f)need=0.0f;
     }

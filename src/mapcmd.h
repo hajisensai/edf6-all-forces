@@ -7,6 +7,7 @@
 #pragma once
 #include <Windows.h>
 #include "mapcmd_logic.h"
+#include "support_call.h"
 
 namespace crew {
 using mapcmd::Command;
@@ -25,7 +26,10 @@ inline bool AirCommandTransit(const Command& cmd,bool& moving,const float* pos,c
 // A unit an AI module takes map commands for: the vehicle, a short name for the map, the command it stands under,
 // whether it flies (its icon is on it; a ground unit's is up its pin).
 // `v` is an identity only outside the owning module; positions are copied while the object is verified live.
-struct CommandUnit { const void* v; const char* name; Command now; bool air; float pos[3]{}; bool locked=false; const char* status=nullptr; };
+// `riding`: a squad whose soldiers are seated in a vehicle (its vehicle is the unit that takes the point orders; it is
+// offered no recruitment: mapcmd::OffersRecruit). `recruitable`: the map offers RECRUIT for it now.
+struct CommandUnit { const void* v; const char* name; Command now; bool air; float pos[3]{}; bool locked=false; const char* status=nullptr;
+    bool riding=false; bool recruitable=false; };
 bool CommandVehicleLive(const ObjRef& ref) noexcept;
 bool ReadCommandUnit(const ObjRef& ref,const char* name,const Command& cmd,bool air,CommandUnit* out) noexcept;
 // Each module's units that take a command now (live, flown or driven by the plugin's NPC, not withdrawing), at most
@@ -48,6 +52,7 @@ bool TankCommand(const void* v,const Command& c) noexcept;
 // The panel's row of a squad (hud.cpp MapCommands): its members alive, the seconds left of its dismissal's cooldown.
 struct SquadRow { const void* leader; char name[24]; char status[16]; int alive; int cooldown; Command now; bool locked;
     ObjRef identity{}; // game-thread snapshot; the draw passes this unchanged, never recaptures from leader
+    bool riding=false; // its soldiers seated in a vehicle (status RIDING, no recruitment offered)
 };
 int SquadRows(SquadRow* out,int most) noexcept;
 bool HeliSharesPost() noexcept;   // heli.cpp: guard helis on one post share its orbit (HeliGuardRadius > 0)
@@ -71,6 +76,8 @@ void ResetMapCommands() noexcept;   // map.cpp ResetMap: a new mission (the sele
 void MapCommandView(const float* viewProj,float width,float height) noexcept;
 // hud.cpp: the command buttons as drawn this frame (map_buttons.h; `id` each one's mapbtn::Id), for the clicks.
 void MapCommandButtons(const float* rects,const int* ids,int n) noexcept;
+// hud.cpp: the support bar's rows and chips as drawn (`entries` each one's catalog index), for the clicks. Up to 48.
+void MapCommandSupportButtons(const float* rects,const int* entries,int n) noexcept;
 // Draw-thread hitboxes: four floats per rectangle (x0,y0,x1,y1), published every draw.
 // Pass n=0 when a panel is absent. These calls copy snapshots and never read game objects.
 void MapCommandSquadButtons(const float* rects,const ObjRef* identities,int n) noexcept; // up to 16 rows
@@ -99,6 +106,9 @@ constexpr int kCmdUnits=static_cast<int>(mapcmd::kMaxFormationUnits);
 // HUD's language, hudtext.h Word), `owner` whose unit it is (the HUD names a heli's and a jet's so).
 constexpr std::uint8_t kCmdOwnerHeli=0,kCmdOwnerJet=1,kCmdOwnerGround=2;
 struct CmdMark { float pos[3]; Command now; bool selected,air,locked; std::uint8_t owner; char name[24]; };
+// The support catalog as the map's bar shows it (copied on the game thread: the draw reads no support state).
+constexpr int kMapSupports=48;
+struct MapSupportEntry { wchar_t name[40]; SupportIcon icon; SupportVariant variant; };
 struct MapCommandReadout {
     bool allowed;              // command framework enabled; each target still validates authority and execution
     bool all;                  // every unit selected (more than one)
@@ -120,12 +130,16 @@ struct MapCommandReadout {
     SquadRow squad[16];
     bool squadSelected[16];
     bool sweepOn,healthOn;     // the box sweep going; health boxes for hurt soldiers (npcai.cpp)
-    bool guardArmed;           // the guard button clicked: the next click on the ground is its point
+    Order armed;               // a point order's button (or Z) clicked: the next left click on the ground is its point
+    bool armedOrder;           // ...armed (Order::none with it false)
     int march;                 // the march's formation (formation.h Shape)
     bool hover;                // an enemy under the pointer (the screen centre with a pad): Q marks it, H focuses on it
     float hoverAt[3];          // its lock point
-    bool supportArmed;
-    wchar_t supportName[64];
+    int supportArmed;          // the support call armed by its bar (or C): the next left click is its point; -1 none
+    int supportPick;           // the call [ / ] picked (C arms it)
+    int supports;              // the catalog, in its order
+    MapSupportEntry support[kMapSupports];
+    SupportReadiness supportReady;
     wchar_t supportStatus[128];
 };
 bool PlayerMapCommands(MapCommandReadout* out) noexcept;

@@ -332,9 +332,24 @@ fd  (0x38 字节): +0x00..+0x14 = mgr+0x80..+0x94 的 6 个 float；+0x18 = 1；
 
 签名（`InstallStockGauges`，任一不符就不挂钩、原版不变）：`0x832B30` 函数头、`0x832BAE` 的 cast 调用（两个类型描述符）、`0x832C48` 载具分支、`0x832C85` 座位读取、`0x832CB2` 列表缓冲、`0x832D00` 下车清表、`0x831A96` 脏标记、`0x831BB4` 按个数显示、`0x832348` 隐藏剩余面板。
 
-### 9.3 护甲 / 载具耐久条为什么保留
+### 9.3 护甲 / 载具耐久条（2026-10-09 起坐车时隐藏）
 
-`HUiHudPowerGuage`（`lyt_HudPowerGuage01.sgo`）：`layout_tree` 是 `Guage_Root → PowerGuage(PowText, DefText) / PowerGuage_Secondary / PowerGuage01_Vehicle(TextVehicle)`，同一块仪表里既有玩家自己的护甲也有载具耐久。载具的条不是一个布局节点：布局函数 `0x8277B0` 把 `载具 HP / 最大 HP` 作为参数 `bar_vehicle`、`V_Base`、`V_scale` 写到 `+0x950` 节点上（H）；`+0x950` 是构造时从 `PowerGuage01_Vehicle`（`+0x940`）的 `+0x98` 取来的，按布局树应是它的父节点 `Guage_Root`（M）；数字在 `TextVehicle`（`+0x960`，H）。只隐藏 `PowerGuage01_Vehicle` 去不掉那条（L），动 `Guage_Root` 会连玩家护甲一起藏掉。插件 HUD 只有 `StockBlock`（和 `PlayerJetFlightHud=0` 的旧座舱面板）显示载具 HP，玩家护甲则没有替代，所以这块仪表一律保留。
+`HUiHudPowerGuage`（`lyt_HudPowerGuage01.sgo`）：`layout_tree` 是 `Guage_Root → PowerGuage(PowText, DefText) / PowerGuage_Secondary / PowerGuage01_Vehicle(TextVehicle)`，同一块仪表里既有玩家自己的护甲也有载具耐久。载具的条不是一个布局节点：布局函数 `0x8277B0` 把 `载具 HP / 最大 HP` 作为参数 `bar_vehicle`、`V_Base`、`V_scale` 写到 `+0x950` 节点上（H）；`+0x950` 是构造时从 `PowerGuage01_Vehicle`（`+0x940`）的 `+0x98` 取来的，按布局树应是它的父节点 `Guage_Root`（M）；数字在 `TextVehicle`（`+0x960`，H）。只隐藏 `PowerGuage01_Vehicle` 去不掉那条（L），动 `Guage_Root` 会连玩家护甲一起藏掉。插件 HUD 只有 `StockBlock`（和 `PlayerJetFlightHud=0` 的旧座舱面板）显示载具 HP，玩家护甲则没有替代，所以这块仪表一律保留。（以上是 2026-10-06 保留它的理由。）
+
+2026-10-09 用户：「上了载具以后，可以把原版的左上角的血条hud隐藏吧，我们已经有自制的hud了」。改为坐车且插件 HUD 覆盖所乘载具时整块隐藏（玩家护甲一起，下车即恢复）：
+
+| 项 | 内容 | 可信度 |
+|---|---|---|
+| 类 | `HUiHudPowerGuage` vtable `0x17FCC98`（构造 `0x825250`，`0x825290` 写 vtable）；第 1 槽更新 `0x827010`，第 2 槽布局 `0x826250`；拥有者 `+0x778` / `+0x780` 与武器栏同一基类字段（`0x827082`） | H |
+| 根节点 | HUiHud 基类 `0x816080` 按名字 `Guage_Root` 找节点存到对象 `+0x788`（弱引用，控制块 `+0x790`，`0x816101`）；构造在 `0x825438` 调它。基类更新尾 `0x816AE0` 把对象 `+0x7A0..+0x7D0` 的矩阵写到这个节点 `+0x170`（根节点的变换） | H |
+| 显示标记 | 布局节点 `+0x1F8`：节点构造 `0x7E999C` 置 1；武器栏布局用它藏面板（`0x832348` 写 0）。全 .text 扫 `+0x1F8` 写入：护甲仪表自己的代码（`0x823260..0x827B40`）和 HUiHud 基类更新都不写 | 写入者 H；根节点为 0 时整个子树不画 M（由武器栏面板的子文字随面板消失类推，未实机） |
+| 插件 | `stockgauge.cpp ArmorHook` 串在第 1 槽后：与武器栏同一覆盖判据（`SetStockGaugeCover` + 仪表拥有者所乘载具），按住时根节点 `+0x1F8 = 0`；记录用 `map_stock_hud.h` 的 `maphud::Record`（每块仪表一条，`src/stock_armor_hud.h` 选槽），放开时写回按住前的值；换关 `ResetStockGauges` 推进代数，旧记录不再盲写 | 设计 |
+
+签名（`InstallStockGauges` 内的 `InstallArmorGauge`，任一不符只关这一项）：`0x827010` 函数头、`0x825290`、`0x825438`、`0x8160C7`（`Guage_Root` 字符串）、`0x816101`、`0x827082`、`0x7E999C`。离线 `tools/armor_hud_check.cpp`（上车 / 换座 / 下车 / 被毁 / 开关 / 换关同地址 / 双人 / 旧记录让位）。
+
+插件 HUD 代显（2026-10-09 追加，用户：「让护甲显示在咱们的hud不就行了」）：仪表自己的数据源是拥有者士兵 `+0x2F8` / `+0x2F4`（更新 `0x827126` 求比值写 `+0xAEC`；布局 `0x826A83` / `0x826A9C` 取整显示），载具耐久是载具 `+0x2F8` / `+0x2F4`（布局 `0x8277B0`），低护甲：`0x827723` 比值 ≤ `0x1765A14` 处的 0.25 时置 `+0xB01`（H）。`ArmorHook` 只在按住隐藏时把这几个数发布给 `hud.cpp`（`armorhud::Publish`，`PlayerStockArmor`）：`StockBlock` 车体条下一行 ARMOR；没有车体耐久行的飞行 HUD / 沙扎比在左上画 `ArmorPanel`（HULL + ARMOR）。只对插件 HUD 的玩家（`PlayerHuman`）隐藏与代显。
+
+**需实机确认**：坐车时左上角护甲 + 耐久条整块消失、下车恢复；`HideStockGauges=0` 时保留；地图打开 / 过场（镜头 `+0x200`）与本隐藏叠加后关地图仍按坐车状态。
 
 ### 9.4 油箱（FuelTank）
 

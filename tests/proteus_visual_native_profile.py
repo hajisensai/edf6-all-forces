@@ -1,4 +1,5 @@
-"""Read-only EDF.dll profile plus private native bone composition, no game entrypoint."""
+"""Read-only EDF.dll profile plus private native bone composition (the support piles' pose, src/proteus_visual.inc), no
+game entrypoint."""
 import ctypes as C
 from pathlib import Path
 import struct
@@ -41,14 +42,13 @@ put(bones + 0x110 + 8, '<B', 1); put(bones + 0x110 + 0x10, '<i', 0)
 root = identity.copy(); root[12:15] = [10.,20.,30.]
 put(world, '<16f', *root)
 compose = C.WINFUNCTYPE(None, C.c_void_p, C.c_void_p)(module + 0x1100B90)
-for visible in [False, True, False]:
-    panel = identity.copy()
-    if not visible:
-        panel[0] = panel[5] = panel[10] = 0.
-    put(bones + 0x110 + 0x70, '<16f', *panel)
+for drop in [0.0, -1.365234375, 0.0]:   # bind, the Mk2 pile driven down by its retraction, bind again
+    pile = identity.copy()
+    pile[13] = drop
+    put(bones + 0x110 + 0x70, '<16f', *pile)
     compose(inst, world)
     result = matrix(bones + 0x110 + 0xB0)
-    assert result[12:15] == tuple(root[12:15])
-    assert result[0] == result[5] == result[10] == float(visible)
+    assert result[12] == root[12] and result[14] == root[14] and abs(result[13] - (root[13] + drop)) < 1e-6
+    assert result[0] == result[5] == result[10] == 1.0
 assert C.c_ubyte.from_address(inst + 0xB0).value == 1  # native palette dirtied
-print('proteus_visual_native_profile: original pose entry, SetWorld ABI and native hide/show/hide composition passed')
+print('proteus_visual_native_profile: original pose entry, SetWorld ABI and native pile local -> world composition passed')

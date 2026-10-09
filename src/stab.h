@@ -9,6 +9,17 @@
 //    residual: the error grows with the hull's turn rate, `lag` s of it), never turning the axis faster in total than
 //    the turret's own top rate (the stock params' top, rad/frame) and never past its stops. Past `slip` rad off (the hull
 //    turns faster than the drive), the reference is dragged along: the gun lags, then catches up once the hull calms.
+//  - The drive's top rate is the turret's own, against the HULL (the stops and the rate are the axis', which is an
+//    angle on the hull), and the hull carries the turret with it: the user, 2026-10-09, "炮塔旋转速度应该叠加底座旋转速度
+//    才合理". A command driven to its end (Hold::full: the input at +-1, the controller wants the far side of a big error)
+//    while the hull turns the same way would otherwise have the stabilizer turn the axis back by the hull's turn (it
+//    holds the reference, which only the command moves): the gun would slew at the drive's top in the WORLD whatever
+//    the hull did. So in that case the counter-turn is not made and the reference is put on the gun (Step: on the axis'
+//    angle after the command, so the step it lets go of the full command holds the gun where it is, not where a
+//    reference trailing it by the hull's rate x lag would pull it back to, and Held shows the gun as it is): the axis
+//    turns at the command's own rate on the hull, the gun at that plus the hull's turn in the world. Turning against
+//    the command, the hull's turn needs more than the drive has: the axis turns at its top and the gun is carried off
+//    (dragged by `slip`). Not driven to its end (close to the aim, holding), the stabilizer holds the line as before.
 //  - Which hull the drawn gun is seen in is measured, not assumed (Probe): the muzzle bones of the last pose against
 //    the axes as they were then, under each hypothesis (the gun's mount: the hull, or the hull turned by seat 0's yaw
 //    axis, a gun on the main turret; the pose's hull: the aim step's own, or the next step's, the hull having moved on
@@ -114,6 +125,8 @@ struct Hold {
     float shift[2];   // what the last step added to the axes past the stock step (rad, the aim's senses)
     float error;      // rad the gun is off the reference after the last step (both axes' larger)
     bool slipping;    // the reference was dragged (the drive could not keep up)
+    float full[2];    // per axis, the command's input this step at its end: +1 / -1 (the sign of its turn), else 0;
+                      // set by the owner before each Step (see the top: the hull's turn adds to a full slew)
 };
 
 // A native velocity-joint readback replaces its previous target with the measured angle before the
@@ -153,6 +166,9 @@ inline void Step(Hold& h,const Stops* stops,const float* before,const float* aft
         const float total=own+c,most=top>0.0f ? top : 0.0f;
         if(total>most)c=most-own;
         else if(total<-most)c=-most-own;
+        if(h.full[i]*own>0.0f && h.full[i]*c<0.0f) {   // a full slew the hull helps: its turn adds (see the top)
+            t[i]=after[i];moved=true;c=0.0f;
+        }
         out[i]=Keep(stops[i],after[i]+c);
         h.shift[i]=Diff(stops[i],out[i],after[i]);
         float left=Diff(stops[i],t[i],out[i]);

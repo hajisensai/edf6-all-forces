@@ -71,8 +71,8 @@ unsigned char* __fastcall NativeCreateBoundary(void* mgr,const float* matrix,con
     ++calls;seenMatrix=matrix;
     Check(mgr==manager,"native CreateObject manager retained");
     Check(init->vtable==image+support_native::kInitVtable,"native InitParamBase vtable retained");
-    leaderPath=wcscmp(path,support_native::kBodies[1])==0;
-    Check(leaderPath || wcscmp(path,support_native::kBodies[0])==0,"canonical leader/member resource retained");
+    leaderPath=wcscmp(path,support_native::kBodies[0][1])==0;
+    Check(leaderPath || wcscmp(path,support_native::kBodies[0][0])==0,"canonical leader/member resource retained");
     boundary(object,matrix,init,mgr);
     // Deliberately stop after the real native boundary; this fixture does not fabricate a completed Soldier.
     return nullptr;

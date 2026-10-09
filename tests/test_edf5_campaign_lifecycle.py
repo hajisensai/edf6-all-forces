@@ -32,9 +32,9 @@ class CampaignLifecycleTests(unittest.TestCase):
         running.start()
         self.addCleanup(running.stop)
         self.ini = Path(self.root, 'Mods', campaign.INI)
-        modfiles.atomic_write(str(self.ini), b'[VehicleCrew]\nEDF5CampaignRows=0\n')
+        modfiles.atomic_write(str(self.ini), b'[VehicleCrew]\nEDF5CampaignContent=0\n')
         self.files = {rel: b'old ' + rel.encode() for rel in campaign.FILES}
-        campaign.install(self.root, (self.files, 147, {}))
+        campaign.install(self.root, (self.files, 3, {}))
 
     @contextmanager
     def pack(self):
@@ -46,7 +46,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         import make_optics
         import make_stock_stores
         import rootcpk
-        plugins = {name: (b'new plugin', f'[{section}]\nStockVehicleStores=0\nEDF5CampaignRows=0\n'.encode())
+        plugins = {name: (b'new plugin', f'[{section}]\nStockVehicleStores=0\nEDF5CampaignContent=0\n'.encode())
                    for name, section in installer.PLUGINS}
         with ExitStack() as stack:
             for name, value in {'check_loader': None, 'plugin_files': plugins, 'stack_weapons': {},
@@ -61,7 +61,7 @@ class CampaignLifecycleTests(unittest.TestCase):
                 stack.enter_context(patch.object(module, name, return_value=value))
             stack.enter_context(patch.object(buildcache, 'Cache'))
             build = stack.enter_context(patch.object(campaign, 'build', return_value=(
-                self.files, 147, {'rows': [object()], 'skipped': []})))
+                self.files, 3, {'rows': [], 'skipped': []})))
             stack.enter_context(redirect_stdout(io.StringIO()))
             yield build
 
@@ -94,12 +94,12 @@ class CampaignLifecycleTests(unittest.TestCase):
         write = modfiles.atomic_write
 
         def fail_text(path: str, data: bytes) -> None:
-            if path == campaign.rel_path(self.root, campaign.TXT['CN']):
+            if path == campaign.rel_path(self.root, campaign.TEXTS['CN']):
                 raise OSError('disk full')
             write(path, data)
 
         with patch.object(modfiles, 'atomic_write', side_effect=fail_text), self.assertRaises(OSError):
-            campaign.install(self.root, (self.files, 147, {}))
+            campaign.install(self.root, (self.files, 3, {}))
         self.assertTrue(campaign.wanted(self.root))
         self.assertFalse(campaign.check(self.root))
         with self.pack() as build:
@@ -111,7 +111,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         remove = os.remove
 
         def fail_image(path: str) -> None:
-            if path == campaign.rel_path(self.root, campaign.IMAGE):
+            if path == campaign.rel_path(self.root, campaign.PACKS[0].image):
                 raise OSError('disk unavailable')
             remove(path)
 
@@ -127,7 +127,7 @@ class CampaignLifecycleTests(unittest.TestCase):
 
     def test_changed_list_blocks_interrupted_disable_recovery(self) -> None:
         modfiles.atomic_write(os.path.join(self.root, 'Mods', campaign.DISABLED), b'disabled')
-        modfiles.atomic_write(campaign.rel_path(self.root, campaign.LIST), b'foreign changed list')
+        modfiles.atomic_write(campaign.rel_path(self.root, campaign.CONFIG), b'foreign changed list')
         with self.pack() as build, patch.object(installer, 'install_plugin') as plugin, \
                 self.assertRaises(campaign.Refused):
             installer.install(self.root)
@@ -140,17 +140,17 @@ class CampaignLifecycleTests(unittest.TestCase):
         originals = {rel: b'foreign original ' + rel.encode() for rel in campaign.FILES}
         for rel, data in originals.items():
             modfiles.atomic_write(campaign.rel_path(self.root, rel), data)
-        campaign.install(self.root, (self.files, 147, {}))
+        campaign.install(self.root, (self.files, 3, {}))
         write = modfiles.atomic_write
 
         def fail_image(path: str, data: bytes) -> None:
-            if path == campaign.rel_path(self.root, campaign.IMAGE):
+            if path == campaign.rel_path(self.root, campaign.PACKS[0].image):
                 raise OSError('disk unavailable')
             write(path, data)
 
         with patch.object(modfiles, 'atomic_write', side_effect=fail_image), self.assertRaises(OSError):
             campaign.remove(self.root, remember_disabled=True)
-        self.assertEqual(modfiles.read(campaign.rel_path(self.root, campaign.LIST)), originals[campaign.LIST])
+        self.assertEqual(modfiles.read(campaign.rel_path(self.root, campaign.CONFIG)), originals[campaign.CONFIG])
         self.assertFalse(campaign.removal_blocked(self.root))
         with self.pack() as build:
             installer.install(self.root)
@@ -198,7 +198,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         self.assertFalse(campaign.enabled(self.root))
 
     def test_disabled_foreign_image_residue_is_not_enabled_or_unhealthy(self) -> None:
-        image = campaign.rel_path(self.root, campaign.IMAGE)
+        image = campaign.rel_path(self.root, campaign.PACKS[0].image)
         modfiles.atomic_write(image, b'foreign image')
         with patch.object(installer, 'ask', return_value='2'):
             self.assertEqual(installer.manage_campaign(self.root), 0)
@@ -212,7 +212,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         self.assertFalse(campaign.enabled(self.root))
 
     def test_disable_changed_list_reports_failure_and_preserves_dependencies(self) -> None:
-        modfiles.atomic_write(campaign.rel_path(self.root, campaign.LIST), b'foreign appended list')
+        modfiles.atomic_write(campaign.rel_path(self.root, campaign.CONFIG), b'foreign appended list')
         with patch.object(installer, 'ask', return_value='2'):
             self.assertEqual(installer.manage_campaign(self.root), 1)
         self.assertTrue(campaign.enabled(self.root))
@@ -220,7 +220,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         self.assertTrue(all(Path(campaign.rel_path(self.root, rel)).exists() for rel in campaign.FILES))
 
     def test_changed_list_preserves_all_dependencies_and_recovery_records(self) -> None:
-        modfiles.atomic_write(campaign.rel_path(self.root, campaign.LIST), b'foreign list retaining appended rows')
+        modfiles.atomic_write(campaign.rel_path(self.root, campaign.CONFIG), b'foreign list retaining appended rows')
         before = {rel: modfiles.read(campaign.rel_path(self.root, rel)) for rel in campaign.FILES}
         manifest = campaign.load_manifest(self.root)
         done, kept = campaign.remove(self.root)
@@ -229,11 +229,11 @@ class CampaignLifecycleTests(unittest.TestCase):
         self.assertEqual(campaign.load_manifest(self.root), manifest)
         for rel, data in before.items():
             self.assertEqual(modfiles.read(campaign.rel_path(self.root, rel)), data)
-        self.assertIn('EDF5CampaignRows=147', self.ini.read_text())
+        self.assertIn('EDF5CampaignContent=3', self.ini.read_text())
 
     def test_pack_uninstall_stops_before_any_other_removal(self) -> None:
         import rootcpk
-        modfiles.atomic_write(campaign.rel_path(self.root, campaign.LIST), b'foreign appended list')
+        modfiles.atomic_write(campaign.rel_path(self.root, campaign.CONFIG), b'foreign appended list')
         for choice in ('1', '2'):
             with self.subTest(choice=choice), patch.object(installer, 'ask', return_value=choice), \
                     patch.object(rootcpk, 'use'), patch.object(installer, 'retire_weapons') as retire, \
@@ -249,64 +249,137 @@ class CampaignLifecycleTests(unittest.TestCase):
         actual = modfiles.atomic_write
 
         def fail_first_text(path: str, data: bytes) -> None:
-            if path == campaign.rel_path(self.root, campaign.TXT['CN']):
+            if path == campaign.rel_path(self.root, campaign.TEXTS['CN']):
                 raise OSError('interrupted')
             actual(path, data)
 
         with patch.object(modfiles, 'atomic_write', fail_first_text):
             with self.assertRaisesRegex(OSError, 'interrupted'):
-                campaign.install(self.root, (new, 147, {}))
-        self.assertEqual(modfiles.read(campaign.rel_path(self.root, campaign.LIST)), new[campaign.LIST])
-        self.assertEqual(modfiles.read(campaign.rel_path(self.root, campaign.TXT['CN'])), self.files[campaign.TXT['CN']])
+                campaign.install(self.root, (new, 3, {}))
+        self.assertEqual(modfiles.read(campaign.rel_path(self.root, campaign.CONFIG)), new[campaign.CONFIG])
+        self.assertEqual(modfiles.read(campaign.rel_path(self.root, campaign.TEXTS['CN'])), self.files[campaign.TEXTS['CN']])
         self.assertFalse(campaign.check(self.root))
-        campaign.install(self.root, (new, 147, {}))
+        campaign.install(self.root, (new, 3, {}))
         self.assertTrue(campaign.check(self.root))
         self.assertFalse(campaign.removal_blocked(self.root))
         self.assertFalse(campaign.remove(self.root)[1])
 
     def test_pending_manifest_is_not_healthy_even_with_all_new_files(self) -> None:
         manifest = campaign.load_manifest(self.root)
-        manifest['files'][campaign.LIST]['also'] = ['previous-hash']
+        manifest['files'][campaign.CONFIG]['also'] = ['previous-hash']
         modfiles.save_json(os.path.join(self.root, 'Mods', campaign.MANIFEST), manifest)
         self.assertFalse(campaign.check(self.root))
 
-    def assert_actual_rows(self, rows: int) -> None:
-        lines, key, _ = campaign.row_setting(self.ini.read_text())
+    def assert_actual_content(self, value: int) -> None:
+        lines, key, _ = campaign.key_setting(self.ini.read_text(), campaign.INI_KEY)
         self.assertIsNotNone(key)
-        self.assertEqual(int(lines[key].split('=', 1)[1]), rows)
+        self.assertEqual(int(lines[key].split('=', 1)[1]), value)
         if sys.platform == 'win32':
             read = ctypes.windll.kernel32.GetPrivateProfileIntW
             read.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_int, ctypes.c_wchar_p]
             read.restype = ctypes.c_uint
-            self.assertEqual(read('VehicleCrew', 'EDF5CampaignRows', 0, str(self.ini)), rows)
+            self.assertEqual(read('VehicleCrew', 'EDF5CampaignContent', 0, str(self.ini)), value)
 
     def test_case_whitespace_and_other_section_match_win32(self) -> None:
-        self.ini.write_text('[vehiclecrew]\n edf5campaignrows = 0\n[Other]\nEDF5CampaignRows=99\n', encoding='utf-8')
-        campaign.set_rows(self.root, 147)
-        self.assert_actual_rows(147)
-        self.assertIn('[Other]\nEDF5CampaignRows=99', self.ini.read_text())
+        self.ini.write_text('[vehiclecrew]\n edf5campaigncontent = 0\n[Other]\nEDF5CampaignContent=99\n', encoding='utf-8')
+        campaign.set_content(self.root, 3)
+        self.assert_actual_content(3)
+        self.assertIn('[Other]\nEDF5CampaignContent=99', self.ini.read_text())
         self.assertTrue(campaign.check(self.root))
 
     def test_missing_key_inserted_in_vehiclecrew_section(self) -> None:
         self.ini.write_text('[VehicleCrew]\nEnabled=1\n[Other]\nEnabled=1\n', encoding='utf-8')
-        campaign.set_rows(self.root, 147)
-        self.assert_actual_rows(147)
-        self.assertLess(self.ini.read_text().index('EDF5CampaignRows=147'), self.ini.read_text().index('[Other]'))
+        campaign.set_content(self.root, 3)
+        self.assert_actual_content(3)
+        self.assertLess(self.ini.read_text().index('EDF5CampaignContent=3'), self.ini.read_text().index('[Other]'))
 
     def test_missing_section_added(self) -> None:
-        self.ini.write_text('[Other]\nEDF5CampaignRows=99\n', encoding='utf-8')
+        self.ini.write_text('[Other]\nEDF5CampaignContent=99\n', encoding='utf-8')
         self.assertFalse(campaign.check(self.root))
-        campaign.set_rows(self.root, 147)
-        self.assert_actual_rows(147)
+        campaign.set_content(self.root, 3)
+        self.assert_actual_content(3)
         self.assertTrue(campaign.check(self.root))
 
     def test_normal_remove_resets_actual_key_and_releases_files(self) -> None:
-        self.ini.write_text('[vehiclecrew]\n edf5campaignrows = 147\n[Other]\nEnabled=1\n', encoding='utf-8')
+        self.ini.write_text('[vehiclecrew]\n edf5campaigncontent = 3\n[Other]\nEnabled=1\n', encoding='utf-8')
         done, kept = campaign.remove(self.root)
         self.assertEqual(len(done), len(campaign.FILES))
         self.assertEqual(kept, [])
-        self.assert_actual_rows(0)
+        self.assert_actual_content(0)
         self.assertFalse(campaign.installed(self.root))
+
+
+    def legacy_install(self, foreign: bool) -> dict[str, bytes]:
+        """The 2026-10-07 version's install: EDF6's offline list, texts and thumbnails replaced (over another mod's
+        files when `foreign`), its manifest (version 1) and row cap."""
+        import base64
+        campaign.remove(self.root)
+        originals = {rel: b'foreign ' + rel.encode() for rel in campaign.LEGACY} if foreign else {}
+        files = {}
+        for rel in campaign.LEGACY:
+            data = b'appended ' + rel.encode()
+            modfiles.atomic_write(campaign.rel_path(self.root, rel), data)
+            original = originals.get(rel)
+            files[rel] = {'sha': modfiles.sha256(data),
+                          'original': None if original is None else base64.b64encode(original).decode('ascii')}
+        modfiles.save_json(os.path.join(self.root, 'Mods', campaign.MANIFEST), {'version': 1, 'rows': 147, 'files': files})
+        self.ini.write_text('[VehicleCrew]\nEDF5CampaignRows=147\n', encoding='utf-8')
+        return originals
+
+    def test_upgrade_puts_the_appended_list_back(self) -> None:
+        for foreign in (False, True):
+            with self.subTest(foreign=foreign):
+                originals = self.legacy_install(foreign)
+                self.assertTrue(campaign.enabled(self.root))
+                self.assertFalse(campaign.check(self.root), 'the old version is not a healthy install')
+                campaign.install(self.root, (self.files, 3, {}))
+                for rel in campaign.LEGACY:
+                    self.assertEqual(modfiles.read(campaign.rel_path(self.root, rel)), originals.get(rel))
+                manifest = campaign.load_manifest(self.root)
+                self.assertEqual(sorted(manifest['files']), sorted(campaign.FILES))
+                self.assertEqual((manifest['version'], manifest['content']), (2, 3))
+                text = self.ini.read_text()
+                self.assertIn('EDF5CampaignContent=3', text)
+                self.assertIn('EDF5CampaignRows=0', text, 'the old row cap left in force')
+                self.assertTrue(campaign.check(self.root))
+
+    def test_interrupted_upgrade_still_puts_the_appended_list_back(self) -> None:
+        originals = self.legacy_install(True)
+        write = modfiles.atomic_write
+
+        def fail_text(path: str, data: bytes) -> None:
+            if path == campaign.rel_path(self.root, campaign.TEXTS['CN']):
+                raise OSError('disk full')
+            write(path, data)
+
+        with patch.object(modfiles, 'atomic_write', side_effect=fail_text), self.assertRaises(OSError):
+            campaign.install(self.root, (self.files, 3, {}))
+        self.assertTrue(set(campaign.LEGACY) <= set(campaign.load_manifest(self.root)['files']), 'what to put back lost')
+        campaign.install(self.root, (self.files, 3, {}))
+        for rel in campaign.LEGACY:
+            self.assertEqual(modfiles.read(campaign.rel_path(self.root, rel)), originals[rel])
+        self.assertTrue(campaign.check(self.root))
+
+    def test_changed_appended_list_refuses_upgrade_and_removal(self) -> None:
+        self.legacy_install(False)
+        modfiles.atomic_write(campaign.rel_path(self.root, campaign.LEGACY_LIST), b'someone else appended more')
+        with self.assertRaises(campaign.Refused):
+            campaign.build(self.root)
+        self.assertTrue(campaign.removal_blocked(self.root))
+        done, kept = campaign.remove(self.root)
+        self.assertEqual(done, [])
+        self.assertEqual(len(kept), len(campaign.LEGACY))
+
+    def test_packs_have_their_own_files_and_saves(self) -> None:
+        names = [f for p in campaign.PACKS for f in p.files()]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertEqual(len({p.mst.upper() for p in campaign.PACKS}), 3)
+        self.assertFalse({p.mst.upper() for p in campaign.PACKS} & {'M00.MST', 'DLC1.MST', 'DLC2.MST'})
+        self.assertFalse(set(names) & set(campaign.LEGACY), 'a pack writes EDF6 own offline list')
+        self.assertEqual([p.group for p in campaign.PACKS], ['main', 'dlc1', 'dlc2'])
+        for p in campaign.PACKS:
+            self.assertEqual(set(p.name), set(campaign.LANGS))
+            self.assertEqual(set(p.desc), set(campaign.LANGS))
 
 
 if __name__ == '__main__':

@@ -308,6 +308,50 @@ int main() {
         Check(!mapfloor::Near(top,bottom,0.0f,Normals::own,empty,&h),"ground: none (off the world)");
     }
 
+    // --- The RTS orders (the user, 2026-10-09): move and attack-move take the pointer's point as guard does; the right
+    // button's order; what a move does over the soldiers' own fight (Pursuit) and that it ends as a guard of its point.
+    {
+        Press move{};move.move=true;
+        st=Decide(2,move,true,point,true);
+        Check(st.issue && st.cmd.order==Order::move && st.cmd.at[0]==10.0f && st.cmd.at[2]==-30.0f,"move: the pointer's point");
+        Check(!Decide(2,move,true,point,false).issue && Decide(2,move,true,point,false).why==Refusal::noPoint,"move with no ground: refused");
+        Press am{};am.attackMove=true;am.guard=true;
+        Check(Decide(1,am,true,point,true).cmd.order==Order::attackMove,"attack-move before guard (one order a frame)");
+        Check(PointOrder(Order::guard) && PointOrder(Order::move) && PointOrder(Order::attackMove) && !PointOrder(Order::focus) &&
+              !PointOrder(Order::follow),"the point orders");
+        Check(VehicleOrder(Order::move) && VehicleOrder(Order::attackMove) && VehicleCommandOf(Order::move)==Order::guard &&
+              VehicleCommandOf(Order::attackMove)==Order::guard && VehicleCommandOf(Order::follow)==Order::follow,
+              "a vehicle takes a move / attack-move as its post's guard");
+        Check(static_cast<int>(kLastOrder)==static_cast<int>(Order::attackMove) && static_cast<int>(Order::recruit)==8,
+              "the wire's order values: recruit stays 8, the new ones after it");
+        // The command's priority over the soldier's own fight.
+        Check(PursuitOf(Order::move).forced && !PursuitOf(Order::move).fightFirst,"move: forced, before its dodge / combat spot");
+        Check(!PursuitOf(Order::attackMove).forced && PursuitOf(Order::attackMove).fightFirst,"attack-move: fights first, then walks on");
+        Check(!PursuitOf(Order::guard).forced && !PursuitOf(Order::guard).fightFirst && !PursuitOf(Order::engage).forced,
+              "guard and engage: the soldier's own fight as before");
+        Check(Arrive(Order::move,5.0f,6.0f)==Order::guard && Arrive(Order::attackMove,6.0f,6.0f)==Order::guard,"at the point: a guard of it");
+        Check(Arrive(Order::move,6.5f,6.0f)==Order::move && Arrive(Order::guard,0.0f,6.0f)==Order::guard &&
+              Arrive(Order::follow,0.0f,6.0f)==Order::follow,"not there yet / other orders: unchanged");
+        // The right button let go on the map.
+        Check(!RightClickOrder(0,true,true).issue && !RightClickOrder(0,false,true).issue,"nothing selected: nothing");
+        Check(RightClickOrder(3,false,true).issue && RightClickOrder(3,false,true).order==Order::move,"on the ground: move there");
+        Check(RightClickOrder(1,true,false).issue && RightClickOrder(1,true,false).order==Order::focus,"on an enemy: attack it");
+        Check(!RightClickOrder(2,false,false).issue,"no ground under it: nothing");
+        // Recruitment offered: nobody's, on foot, not cooling down.
+        Check(OffersRecruit(false,false,false,false),"a free squad on foot: offered");
+        Check(!OffersRecruit(false,false,false,true),"riding a vehicle: not offered");
+        Check(!OffersRecruit(true,false,false,false) && !OffersRecruit(false,true,false,false) && !OffersRecruit(false,false,true,false),
+              "the player's own, a script's, a dismissed one: not offered");
+        // The mark on the body: a ground unit's kBodyLift m up from its feet, a flying one's on it; never the pin's top.
+        const float feet[3]={5.0f,20.0f,-7.0f};float mark[3];
+        BodyPoint(feet,false,mark);
+        Check(mark[0]==5.0f && Near(mark[1],20.0f+kBodyLift,1e-4f) && mark[2]==-7.0f,"a soldier's mark at its middle");
+        BodyPoint(feet,true,mark);
+        Check(mark[1]==20.0f,"an aircraft's on it");
+        const float pinTop=mapcam::PinHeight(800.0f,mapcam::kStartPitch);
+        Check(kBodyLift<pinTop*0.1f,"the body point far below where the pin's icon stood",pinTop);
+    }
+
     std::printf("map_cmd_check: %d cases, %d failures\n",cases,failures);
     return failures ? 1 : 0;
 }

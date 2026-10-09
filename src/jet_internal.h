@@ -538,7 +538,9 @@ void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const fl
 // A wing's step toward `want` at `speed`: the path, the body's attitude onto it, its pose (elevons).
 void Wing(Jet& j,const Kind& k,unsigned char* v,const float* pos,float clear,const float* nose,float* want,float speed,float dt,
           ULONGLONG ms) noexcept;
-void Thrusters(Jet& j,const Kind& k,unsigned char* v,float dt,ULONGLONG ms) noexcept;
+// `clear`: the bottom's clearance over the ground (playerjet FloorClear); near it the nacelles keep over it
+// (nacelle_reach.h). The NPCs' carriers keep kMinAlt * 2 over the ground: none.
+void Thrusters(Jet& j,const Kind& k,unsigned char* v,float dt,ULONGLONG ms,float clear=1e9f) noexcept;
 void ResetWalls() noexcept;
 constexpr float kHoverClimb=12.0f;     // m/s up or down at the most
 constexpr float kHoverLeave=500.0f;    // m: leaving, it heads this far along its way out
@@ -614,7 +616,7 @@ void BayFrame(Jet& j,const float* pos) noexcept;
 void BayFree(unsigned char*& ifc) noexcept;
 void GunshipFire(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms) noexcept;
 bool InstallBay(bool spawnOk) noexcept;
-void PreloadShells(void* mgr,bool gunship,bool proteus) noexcept;   // the gunship's shells (with its body), the impact charges
+void PreloadShells(void* mgr,bool gunship) noexcept;   // the gunship's shells (with its body), the impact charges
 void ResetShells() noexcept;
 // The player's aircraft (playerjet_board.inc): a bay's bombs left (0: no bay, or it is open already); the bay opened
 // with its first bomb on `at`, the carpet laid along `vel` at its speed (false: none); a frame of the open bay; the

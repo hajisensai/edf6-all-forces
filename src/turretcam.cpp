@@ -77,6 +77,8 @@ constexpr std::size_t kSeatPad=0x2B0,kSeatButtons=0x2E8,kSeatStick=0x2D0;
 constexpr float kForeign=0.02f;                // the aim's input this far off the rider's stick: another hand steers it
 constexpr float kMinTraverse=0.17f;            // rad of yaw stops: less is no turret
 constexpr float kAimFar=800.0f,kSightFar=3000.0f;
+constexpr float kGroundProbe=1000.0f;          // m above and below the hull the high view's ground point is looked for
+constexpr float kFocusSearch=2.0f*kSightFar;   // m (3D): how far the high view's landing is looked for (ShotFocus)
 using tcam::kViewMost;
 constexpr float kReturnRate=0.25f,kReturnDone=0.005f;   // the free look's swing back: share a frame, done within (rad)
 constexpr float kRigEase=0.12f;                // a frame, the rig's move between its shapes (normal / high)
@@ -176,18 +178,66 @@ const unsigned char* Gun(const unsigned char* vehicle,const unsigned char* seat)
     return nullptr;
 }
 
+// The gun the seat's turret turns (2026-10-09, the user: "按了右键使用机枪以后，自瞄和瞄具等都无法使用了。需要按左键发射主
+// 炮才能恢复"): whether the camera is decoupled, what the turret is steered by and the mouse command belong to the seat's
+// articulated turret, not to whichever trigger fired last. The fire-control pick (Gun) when its mount turns with both of
+// the seat's axes; otherwise the first live weapon of the seat that does (the Titan's hull `front_gun` hangs on `body`,
+// its cannon under `cannon_main`: the right trigger must not take the turret off the view); with none, the pick itself
+// (a fixed or single-axis gun stays physical-only, as before). No pick (the seat has no usable weapon): none.
+const unsigned char* TurretGun(const unsigned char* vehicle,const unsigned char* seat) noexcept {
+    const unsigned char* picked=Gun(vehicle,seat);
+    if(!picked)return nullptr;
+    const auto turns=[&](const unsigned char* w) noexcept {
+        const auto f=weaponmount::OfWeapon(vehicle,seat,w);
+        return f.known && f.yaw && f.pitch;
+    };
+    if(turns(picked))return picked;
+    const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
+    const auto count=At<std::uint64_t>(seat,kSeatWeaponCount);
+    for(std::uint64_t i=0;i<count && i<16;++i) {
+        if(!Readable(holders[i],kHolderWeapon+8))continue;
+        const auto ctrl=At<const unsigned char*>(holders[i],kHolderCtrl);
+        if(!Readable(ctrl,12) || At<std::int32_t>(ctrl,8)<=0)continue;
+        const auto w=At<const unsigned char*>(holders[i],kHolderWeapon);
+        if(w!=picked && Readable(w,edf::kWeaponAccuracyScale+4) && At<std::uint64_t>(w,edf::kMuzzleCount)>0 && turns(w))return w;
+    }
+    return picked;
+}
+
 // Same shot model and muzzle transform as the vehicle HUD. No camera ray participates in this prediction.
 // RoundLands also returns the flight endpoint on a miss; an unreadable/guided model uses the actual bore path.
+// The observed point is the landing while it is within reach, else the ground under where the shot ends, at most
+// kSightFar (kAimFar for a round with no model: the bore line) across the ground: tcam::HighFocus. The landing is looked
+// for out to kFocusSearch, twice that cap: the search is a 3D sphere checked a segment of frames at a time, so a round
+// leaving it in the air (a howitzer's shell crosses 3 km hundreds of metres up) is then past the cap across the ground
+// and the view stays at the cap, not stepping back by the round's height and the segment. Never a point in the
+// air: the ground's height there by a map ray straight down (kGroundProbe m above and below the hull), the hull's own
+// height with none.
 void ShotFocus(Shared& s) noexcept {
     s.focusValid=false;s.focusHit=false;
-    const auto gun=Gun(s.v,s.seat);
+    // The turret's gun (TurretGun), the one the turret is laid by: after the hull gatling's right trigger the overhead
+    // point must still be the cannon's, or the view handed back on leaving it (tcam::AimAt) puts the cannon off it.
+    const auto gun=TurretGun(s.v,s.seat);
     float muzzle[3],dir[3];
     if(!gun || !edf::MeanMuzzle(gun,64,muzzle,dir) || !vec::Normalize(dir))return;
-    for(int i=0;i<3;++i)s.focus[i]=muzzle[i]+dir[i]*kAimFar;
+    float end[3];
+    for(int i=0;i<3;++i)end[i]=muzzle[i]+dir[i]*kAimFar;
+    float most=kAimFar;
     RoundModel model{};
     if(ReadRound(gun,&model) && model.kind!=RoundKind::none && model.kind!=RoundKind::homing) {
         float flight=0.0f;
-        s.focusHit=RoundLands(gun,model,muzzle,dir,kSightFar,s.focus,&flight);
+        s.focusHit=RoundLands(gun,model,muzzle,dir,kFocusSearch,end,&flight);
+        most=kSightFar;
+    }
+    for(float v:end)if(!std::isfinite(v))return;
+    const float* origin=reinterpret_cast<const float*>(s.v+kMatrix)+12;
+    tcam::HighFocus(muzzle,dir,s.focusHit,end,most,origin[1],s.focus);
+    if(!(s.focusHit && tcam::AcrossDistance(muzzle,end)<=most)) {
+        s.focusHit=false;   // not the landing: no on-target claim for it
+        const float top=std::fmax(origin[1],muzzle[1])+kGroundProbe;
+        const float from[3]={s.focus[0],top,s.focus[2]},to[3]={s.focus[0],origin[1]-kGroundProbe,s.focus[2]};
+        float hit[3];
+        if(MapRay(from,to,hit)>=0.0f && std::isfinite(hit[1]))s.focus[1]=hit[1];
     }
     for(float v:s.focus)if(!std::isfinite(v))return;
     s.focusValid=true;
@@ -226,7 +276,9 @@ bool AimPoint(float* p,bool* hit) noexcept {
 // EDF6AutoTurret's lead-circle mode on the player's own gun (its readout: common/edf/aimlink.h).
 bool LeadCircleOn() noexcept {
     edf::aimlink::TurretReadoutV1 r{};
-    return AutoTurretReadout(&r) && r.ownGun && r.mode==edf::aimlink::Mode::leadCircle;
+    // Only while a circle is there (a target and its solve): with none, the screen's centre takes the arc as in AUTO (a
+    // tank's driver seat is the player's own gun since aimlink.h V4 and must not lose its drop compensation to a mode).
+    return AutoTurretReadout(&r) && r.ownGun && r.mode==edf::aimlink::Mode::leadCircle && r.target && r.lead;
 }
 
 bool FreeHeld(const unsigned char* seat) noexcept {
@@ -269,7 +321,7 @@ bool TurretPivot(const unsigned char* seat,const float* muzzle,float* pivot) noe
 // `ballistic` the low arc for a gun whose rounds drop (a lofted launcher's arc is katyusha.cpp's: it gets the line), else
 // the bore line (turretcam.h BallisticAim).
 bool Wants(const unsigned char* seat,const float* frame,const float* p,bool ballistic,float* want) noexcept {
-    const unsigned char* gun=Gun(shared.v,seat);
+    const unsigned char* gun=TurretGun(shared.v,seat);
     float muzzle[3],dir[3];
     if(!gun || !edf::MeanMuzzle(gun,16,muzzle,dir))return false;
     float pivot[3],origin[3];
@@ -317,7 +369,7 @@ void Readout(const unsigned char* seat,const Shared& s,bool on,const float* hold
     r.aimValid=commandValid && s.decoupled && !s.physicalOnly && !s.high &&
                std::isfinite(holdAt[0]) && std::isfinite(holdAt[1]) && std::isfinite(holdAt[2]);
     r.decoupled=s.decoupled;r.freeLook=s.free || s.returning;r.high=s.high;r.onTarget=on;
-    const unsigned char* gun=Gun(s.v,seat);
+    const unsigned char* gun=TurretGun(s.v,seat);
     float muzzle[3],dir[3];
     if(!gun || !edf::MeanMuzzle(gun,64,muzzle,dir))return;
     std::memcpy(r.aim,holdAt,12);
@@ -729,7 +781,12 @@ void TurretCamFrame(unsigned char* v) noexcept {
     ReleaseSRWLockShared(&lock);
     const bool mounted=!high && SightZoomMounted(v);
     game.hasAim=!high && !observing && !mounted && AimPoint(game.aim,&game.aimHit);
-    const auto freedom=weaponmount::OfWeapon(v,seat,Gun(shared.v,seat));
+    // The one player turret aim (aimlink.h V4, turretaim.cpp): asked every frame so its bindings and lock stay current
+    // through the high view and the optic too; in AUTO with a lock the turret goes to where the round meets the target,
+    // through the same arc solve (Wants) as the screen's centre, the view staying the player's.
+    float lead[3];
+    if(PlayerTurretLead(v,0,TurretGun(v,seat),lead) && game.hasAim){std::memcpy(game.aim,lead,12);game.aimHit=true;}
+    const auto freedom=weaponmount::OfWeapon(v,seat,TurretGun(shared.v,seat));
     AcquireSRWLockExclusive(&lock);
     shared.seat=seat;shared.seenMs=GameMs();
     shared.physicalOnly=!(freedom.known && freedom.yaw && freedom.pitch);

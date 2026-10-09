@@ -223,21 +223,17 @@ struct Config {
     bool seatList=true;             // the seats line shown the whole ride in a vehicle with more than one seat (who holds
                                     // which), not only a moment after boarding / a move; with SeatSwitch off and online too
     // proteus.cpp: the Proteus rework (README 普罗透斯, docs/proteus-re.md), while a local player rides one.
-    bool proteus=true;              // two stances (walk / deployed), two seats, shields, the field, the salvo; off: the stock Proteus
+    bool proteus=true;              // two stances (walk / deployed), two seats, the stock barrier as its shield, the field; off: the stock Proteus
     int proteusModeKey=0x54;        // ...the driver's stance key ('T'; a Windows virtual-key code, 0: none)
     int proteusModeButton=0x20;     // ...and pad button (the seat's button bits, docs/stores-re.md §4: 0x20 RB; 0 none)
     int proteusShieldKey=0x42;      // ...the shield's switch ('B')
     int proteusShieldButton=0x10;   // ...(0x10 LB)
-    int proteusMarkKey=0x51;        // ...marks the enemy nearest the screen's centre ('Q')
-    int proteusMarkButton=0x04;     // ...(0x04 X)
-    int proteusSalvoKey=0x02;       // ...calls the salvo (VK_RBUTTON; on a pad the second trigger, LT)
+    int proteusSalvoKey=0x02;       // ...deployed, the driver fires the stock missile launcher (VK_RBUTTON; on a pad the second trigger, LT)
     bool proteusTwoSeats=true;      // ...two seats: the driver and the gunner (both cannons); the other two closed
     float proteusWalkSpeed=1.6f;    // ...walking: the legs' speed (and their pick-up) x the stock
     float proteusWalkTurn=1.3f;     // ...their turn x the stock
     float proteusStepHeight=2.6f;   // ...the step it climbs (m; the stock 1.2)
-    float proteusShieldSlow=0.5f;   // ...the front shield up: the legs at this share
-    float proteusShieldArc=120.0f;  // ...a shield's arc (deg, round the hull's nose)
-    float proteusShieldBlock=1.0f;  // ...the share of a hit inside it a shield stops
+    float proteusShieldSlow=0.5f;   // ...walking with the shield up: the legs at this share
     float proteusWalkGunRate=0.7f;  // ...walking: the cannons' rate x the stock
     float proteusWalkGunSpread=1.8f;// ...and their spread x the stock
     float proteusDeploySec=1.5f;    // ...the stagger deploying (s)
@@ -246,11 +242,11 @@ struct Config {
     float proteusDeployGunRate=1.8f;// ...deployed: the cannons' rate x the stock
     float proteusDeployGunSpread=0.35f;// ...and their spread x the stock
     float proteusViewLift=12.0f;    // ...deployed: the camera raised by this (m)
-    float proteusHeatSec=12.0f;     // ...the directional shield: up from cold to overheated (s)
+    float proteusHeatSec=12.0f;     // ...deployed, the shield standing: up from cold to overheated (s)
     float proteusCoolSec=6.0f;      // ...down from overheated to cold
-    float proteusResumeHeat=0.3f;   // ...overheated, up again once cooled to this share
-    float proteusBarrier=0.3f;      // ...deployed: its own barrier's HP, a share of its max HP
-    float proteusBarrierRegenSec=40.0f;// ...refilled from empty in this (s)
+    float proteusResumeHeat=0.3f;   // ...overheated / broken, up again once cooled / refilled to this share
+    float proteusBarrier=0.3f;      // ...the shield's (the stock barrier's) HP, a share of the Proteus's max HP
+    float proteusBarrierRegenSec=40.0f;// ...refilled from empty in this (s), while down
     float proteusBarrierDelaySec=4.0f; // ...after this long without a hit
     float proteusFieldRadius=60.0f; // ...deployed: the field's radius (m; 0: no field)
     float proteusFieldDefense=0.3f; // ...allies in it take this much less damage (share)
@@ -258,17 +254,10 @@ struct Config {
     float proteusFieldFireRate=1.2f;// ...their weapons fire this much faster
     float proteusFieldEnergy=0.05f; // ...a Wing Diver's energy refills this share of the max a second more
     float proteusFieldPower=25.0f;  // ...an Air Raider's calls charge this many points a second more
-    bool proteusDriverGun=true;     // ...deployed: the driver fires an autocannon (the gunship's 40 mm round)
-    float proteusGunRate=4.0f;      // ...its rounds a second
-    float proteusGunDamage=45.0f;   // ...a round's damage at the base tier (times the Proteus's tier)
-    int proteusSalvoCount=12;       // ...the salvo: its rounds
-    float proteusSalvoDamage=150.0f;// ...a round's damage at the base tier
-    float proteusSalvoCooldownSec=30.0f;// ...its cooldown (s)
-    float proteusSalvoRange=1500.0f;// ...the farthest mark it goes at (m)
-    float proteusPriority=0.3f;     // ...the front shield up: the allies weigh enemies near it or after it this share of their distance (1: off)
+    float proteusPriority=0.3f;     // ...walking with the shield up: the allies weigh enemies near it or after it this share of their distance (1: off)
     float proteusPriorityRadius=100.0f;// ...within this of it (m)
     bool terrainShare=true;         // every placement of one terrain piece drawn from one decode (fieldshare.cpp), from the game's start
-    int edf5CampaignRows=0;          // the offline list's rows before the EDF5 campaign's (edf5campaign.cpp; 0 = no cap): the story's end and clear ratio
+    int edf5CampaignContent=0;       // the EDF5 mission packs' first content id (edf5campaign.cpp; 0 = none installed): owned like a DLC
     float bigWorld=0.0f;            // the physics world +-this many m instead of +-3000 (bigworld.cpp), from the game's start;
                                     // 0: stock. At 10000 parked vehicles fell through the ground (2026-10-04): an experiment
     // The flyers' soft edge (airbound.h): the band inside the play edge where the NPC jets and helis turn back.
@@ -401,6 +390,10 @@ inline float WorldHalf() noexcept { return Cfg().bigWorld>3000.0f ? Cfg().bigWor
 bool LastViewProj(float* out) noexcept;
 // The camera's eye and its unit look through the screen's centre, from LastViewProj (hud.cpp); false: no camera yet.
 bool CameraRay(float* eye,float* dir) noexcept;
+// Split screen: each local player's own view (player_view.h). KeepPlayerViewProj from each HUD pass with the camera it
+// draws for (subcarrier.cpp GaugeHook); CameraRayOf the ray of the view last drawn for `human`, false with none fresh.
+void KeepPlayerViewProj(const void* camera,const float* viewProj) noexcept;
+bool CameraRayOf(const void* human,float* eye,float* dir) noexcept;
 // A bigger physics world and the map pieces' log (bigworld.cpp): at load, before any mission.
 bool InstallBigWorld() noexcept;
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
@@ -591,6 +584,7 @@ PluginBody BodyOf(const void* vehicle) noexcept;
 float BodyMark(const void* vehicle) noexcept;      // the mark of a 506 body, 0 for anything else
 bool InstallBody506() noexcept;                    // before InstallJets / InstallSub / InstallPlayerJets
 bool Body506Ok() noexcept;                         // the physics hook is in
+bool Body506ReadsSolver() noexcept;                // ...and it reads the solver's velocity before the stock step (GroundContact)
 bool JetBodyStep(unsigned char* v,float* lin,float* ang) noexcept;        // jet.cpp
 bool SubBodyStep(unsigned char* v,float* lin,float* ang) noexcept;        // subcarrier.cpp
 bool PlayerJetBodyStep(unsigned char* v,float* lin,float* ang) noexcept;  // playerjet.cpp
@@ -652,12 +646,6 @@ void ResetVehicleRams() noexcept;
 // jet_bay.cpp: a bite of the drill tank's drill: its charge fired by `by` straight from `from` at `at` with `damage`
 // (its side's enemies, its kills, the map's buildings and rocks). False when not fired (not preloaded this mission).
 bool DrillCharge(const unsigned char* by,const float* from,const float* at,float damage) noexcept;
-// jet_bay.cpp: the Proteus's rounds (proteus.cpp): the driver's gun a round of the gunship's cannon (EDF6VC_GUNSHIP_CANNON.SGO)
-// straight from `from` at `at`; the salvo a round of the gunship's shells (DEMOGUNSHIPFIREE25) on its arc onto `at`; fired by
-// `by` (its team, its kills). False when not fired (not preloaded this mission). ProteusRoundsReady: which are (either may be null).
-bool ProteusGunRound(const unsigned char* by,const float* from,const float* at,float damage) noexcept;
-bool ProteusSalvoRound(const unsigned char* by,const float* from,const float* at,float damage) noexcept;
-void ProteusRoundsReady(bool* gun,bool* salvo) noexcept;
 
 // drill.cpp: the drill tank (EDF6VC_DRILL.SGO, docs/drill-re.md). DrillInput before the stock input (the player's
 // trigger taken for the drill), DrillFrame after it (spin, pose, bites).
@@ -675,8 +663,9 @@ bool PlayerDrillCue(DrillCue* out) noexcept;
 // by the EMC (its team: its side's enemies hurt, its kills, friends spared): the beam, the charge's glow (sight), the
 // break charge fired at each building on the beam's line, the blast at its end. Ready: preloaded this mission.
 // The Sazabi's beams are made and fired the same way (sazabi.cpp; pylib/vcobjects.py SAZABI_ROUND_FILES): the mega
-// particle cannon's beam, its charge's glow at the chest, a funnel's burst.
-enum class EmcRound { beam, sight, breakCharge, blast, szMega, szCharge, szFunnel };
+// particle cannon's beam, its charge's glow at the chest, a funnel's burst. The Proteus's shield is raised the same way
+// (proteus_shield.inc; tools/make_proteus.py): one BarrierBullet01, the stock Air Raider's electromagnetic barrier.
+enum class EmcRound { beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield };
 struct RoundObj { unsigned char* obj; const void* ctrl; };   // an object and its weak-this control block (none: obj null)
 bool EmcRoundReady(EmcRound kind) noexcept;
 RoundObj EmcFire(EmcRound kind,const unsigned char* by,const float* from,const float* at,float damage) noexcept;
@@ -899,6 +888,7 @@ enum class Gpws : std::uint8_t { none, sinkRate, terrain, pullUp };
 struct HeliFlight {
     float vel[3],speed,clear,climb,hp,hpMax,setSpeed,top,aim[3],rotor,hover;
     bool ground,landed,keys,aiming,holding;
+    bool collective;   // W / S are the collective (a stock heli's instructor, heliaim.h), not a speed setpoint
     Gpws gpws;
     float impactIn;
 };

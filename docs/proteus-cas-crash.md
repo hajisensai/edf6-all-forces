@@ -1,5 +1,7 @@
 # 2026-10-08 进入地图崩溃：Proteus CAS 对齐
 
+> **历史记录（2026-10-09 已被重做取代）**：本文所述的插件弹 / 私有模型已删除，见 `docs/proteus-re.md` 与 `docs/feedback-2026-10-09-proteus.md`。
+
 用户转储 `EDF6.exe.105920.dmp` 的故障指令为 EDF.dll RVA `0x1160620`：
 `movaps xmm0,[rbx]`。这里读取动画通道中直接存储的四元数，要求地址按 16 字节对齐。
 转储的 RBX 为 `0x2339AC0E074`（余 4），Windows 报告读取地址 `0xFFFFFFFFFFFFFFFF`。

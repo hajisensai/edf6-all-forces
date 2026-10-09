@@ -31,6 +31,12 @@ unsigned char* PayloadPicked(const void*) noexcept { return nullptr; } // legacy
 unsigned char* PayloadSightPicked(const void*,unsigned) noexcept { return selectedGun; }
 int owner=0;
 int AutoTurretSteers(const void*,unsigned) noexcept { return owner; }
+// The one player turret aim (turretaim.cpp PlayerTurretLead, aimlink.h V4) as the camera asks it: every frame, with the
+// gun the turret turns; `leadOn` the peer's answer (AUTO with a lock), `leadPoint` where the round meets the lock.
+int leadAsks=0;bool leadOn=false;float leadPoint[3]{};const void* leadGun=nullptr;
+bool PlayerTurretLead(const void*,unsigned,const void* gun,float* point) noexcept {
+    ++leadAsks;leadGun=gun;if(leadOn)std::memcpy(point,leadPoint,12);return leadOn;
+}
 bool AutoTurretReadout(edf::aimlink::TurretReadoutV1*) noexcept { return false; }
 bool StabHeld(const void*,float*,float*,float*) noexcept { return false; }
 float SightZoomNow(const void*) noexcept { return 1.0f; }
@@ -135,10 +141,20 @@ void Run() {
     float first[3];std::memcpy(first,shared.focus,12);
     Put<float>(picked.data,edf::kWeaponAmmoOwnerMove,1);Put<float>(picked.data,edf::kWeaponOwnerVel,24);
     ShotFocus(shared);Check(shared.focus[0]>first[0]+50,"production predictor retains launcher's inherited motion");
-    terrain=false;Put<int>(picked.data,edf::kWeaponAmmoAlive,30);ShotFocus(shared);
-    Check(shared.focusValid && !shared.focusHit && shared.focus[1]>20,"no hit retains actual airborne lifetime endpoint");
+    // No landing (2026-10-09, the user: "稍微远就跳到了指数级别的距离"): the ground under where the shot ends, within its
+    // reach, never its point in the air (that put the view hundreds of metres up and away); no ground found: the hull's.
+    const float* hull=reinterpret_cast<const float*>(vehicle+kMatrix)+12;
+    const auto across=[&]{ return std::sqrt((shared.focus[0]-hull[0])*(shared.focus[0]-hull[0])+(shared.focus[2]-hull[2])*(shared.focus[2]-hull[2])); };
+    Put<int>(picked.data,edf::kWeaponAmmoAlive,30);ShotFocus(shared);
+    float airborne[3];std::memcpy(airborne,shared.focus,12);
+    Check(shared.focusValid && !shared.focusHit && std::fabs(shared.focus[1]-floorY)<0.001f,"no landing: the ground under the shot's end");
+    terrain=false;ShotFocus(shared);
+    Check(shared.focusValid && !shared.focusHit && std::fabs(shared.focus[1]-hull[1])<0.001f && across()>20 && across()<=kSightFar,
+          "no landing, no ground found: the hull's height, never the shot's end in the air");
+    Check(std::fabs(shared.focus[0]-airborne[0])<0.001f && std::fabs(shared.focus[2]-airborne[2])<0.001f,"the same point across the ground either way");
     Put<int>(picked.data,kWeaponLockon,kHoming);ShotFocus(shared);
-    Check(shared.focusValid && !shared.focusHit && shared.focus[1]>500,"guided/unpredictable shot falls back along real rail, not ground");
+    Check(shared.focusValid && !shared.focusHit && std::fabs(shared.focus[1]-hull[1])<0.001f && across()<=kAimFar+1,
+          "guided/unpredictable shot: under the real rail within kAimFar, not up in the air");
     Put<int>(picked.data,kWeaponLockon,0);
     for(bool coupled:{false,true}) {
         shared.decoupled=!coupled;shared.high=true;game=GameSide{};
@@ -276,6 +292,48 @@ void Run() {
         Check(inputUnchanged,"high camera closed loop never generates native gun input from observation");
         Check(realFocus,"collision pivot must not change the real ballistic terrain focus");
         Check(stable,launcher ? "Katyusha high camera remains stable after native surface collision" : "twin artillery high camera remains stable after native surface collision");
+    }
+    // 2026-10-09 (fb aim #2, the user: "按了右键使用机枪以后，自瞄和瞄具等都无法使用了。需要按左键发射主炮才能恢复"): the
+    // Titan's right trigger picks its hull gatling (`front_gun` on `body`). The turret, its camera and the mouse command
+    // stay the turret gun's; the pick stays the HUD's.
+    {
+        Weapon hullGun(0,3,0);
+        Put<void*>(hullGun.holder,0x18,vehicleBones);Put<void*>(hullGun.data,0xE88,vehicleBones);Put<void*>(hullGun.data,0xF40,hullGun.bone);
+        Put<void*>(hullGun.data,weaponmount::kWeaponModel+0x10,hullGun.bone);Put<int>(hullGun.data,weaponmount::kWeaponModel+0x20,1);
+        Put<int>(hullGun.bone,0xC,0);Put<int>(hullGun.bone,0x10,-1);
+        unsigned char* three[]={primary.holder,hullGun.holder,picked.holder};
+        Put<void*>(seat,kSeatWeapons,three);Put<std::uint64_t>(seat,kSeatWeaponCount,3);
+        Put<int>(primary.data,edf::kWeaponMark,0);Put<int>(primary.data,kWeaponLockon,0);
+        ResetTurretCam();lookOk=true;nextAim=&UnexpectedAim;config.decoupledTurretCam=true;highOn=false;mountedOptic=false;
+        Put<float>(seat,kSeatAim+kAimAxes,-tcam::kPi);Put<float>(seat,kSeatAim+kAimAxes+4,tcam::kPi);
+        selectedGun=hullGun.data;TurretCamFrame(vehicle);
+        Check(TurretGun(vehicle,seat)==primary.data,"a hull gun pick leaves the turret to the seat's articulated gun");
+        Check(TurretCamServes(vehicle) && shared.decoupled && !shared.physicalOnly,"the hull gun pick keeps the turret camera decoupled");
+        Check(leadGun==primary.data,"auto-aim is asked with the turret's gun, not the hull gun");
+        selectedGun=primary.data;TurretCamFrame(vehicle);
+        Check(shared.decoupled && !shared.physicalOnly && TurretGun(vehicle,seat)==primary.data,"back on the cannon: the same, symmetric");
+        // The overhead view observes the turret's gun too (integration review): after the hull gun's trigger its point is
+        // the cannon's, the one the view is handed back onto.
+        terrain=true;floorY=-25.0f;
+        selectedGun=primary.data;ShotFocus(shared);const float cannonFocus[3]={shared.focus[0],shared.focus[1],shared.focus[2]};
+        const bool cannonValid=shared.focusValid;
+        selectedGun=hullGun.data;ShotFocus(shared);
+        Check(cannonValid && shared.focusValid && vec::Dist(shared.focus,cannonFocus)<1e-3f,"hull gun pick: the overhead point is the cannon's");
+        selectedGun=picked.data;TurretCamFrame(vehicle);
+        Check(TurretGun(vehicle,seat)==picked.data,"an articulated pick turns the turret by its own bore");
+        unsigned char* only[]={hullGun.holder};Put<void*>(seat,kSeatWeapons,only);Put<std::uint64_t>(seat,kSeatWeaponCount,1);
+        selectedGun=hullGun.data;TurretCamFrame(vehicle);
+        Check(TurretGun(vehicle,seat)==hullGun.data && shared.physicalOnly,"a seat with a fixed gun alone stays physical-only");
+        Put<void*>(seat,kSeatWeapons,three);Put<std::uint64_t>(seat,kSeatWeaponCount,3);
+        // The lock's lead replaces the screen's centre (aimlink.h V4); asked every frame, also through the high view.
+        selectedGun=primary.data;leadOn=true;leadPoint[0]=12;leadPoint[1]=3;leadPoint[2]=400;
+        TurretCamFrame(vehicle);
+        Check(game.hasAim && game.aimHit && game.aim[0]==12 && game.aim[2]==400,"AUTO with a lock: the turret goes to the lead point");
+        leadOn=false;TurretCamFrame(vehicle);
+        Check(game.hasAim && !(game.aim[0]==12 && game.aim[2]==400),"no lock: the screen's centre again");
+        const int asked=leadAsks;highOn=true;TurretCamFrame(vehicle);
+        Check(leadAsks==asked+1 && !game.hasAim,"the high view still asks (the lock is kept) but steers nothing");
+        highOn=false;Put<void*>(seat,kSeatWeapons,holders);Put<std::uint64_t>(seat,kSeatWeaponCount,2);
     }
     Shared intent=shared;intent.high=false;intent.decoupled=true;intent.physicalOnly=false;
     const float commandPoint[3]={0,3,250};

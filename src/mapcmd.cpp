@@ -12,6 +12,10 @@
 //    fights what comes within its range of it, circles / patrols it; several stand round it in a formation
 //    (mapcmd_logic.h Formation; guard helis share one orbit round the point instead: heli.cpp GuardOrbit spaces them).
 //    V (pad RB): follow the player; X (pad LB): release (back to what it did before any command).
+//  - RTS (the user, 2026-10-09): the right button let go without a drag (a right drag still turns the map) gives the
+//    selection a move to the ground under the pointer, or, on an enemy, focus fire on it (mapcmd_logic.h
+//    RightClickOrder); Z an attack-move there. A point order's button (move, attack-move, guard) or a support's row arms
+//    the next left click on the map as its point; the right button cancels that instead.
 //  - an enemy under the pointer (the user, 2026-10-07: "应该在地图里面也能按q标记"): the mark key (NpcMarkKey, Q) marks it
 //    for the NPCs (npcai.cpp NpcMarkEnemy; the same one again: let go) instead of turning the map, and H (focus fire)
 //    marks it and sends the selected squads at it in one press. With no enemy under the pointer Q turns the map and H
@@ -57,7 +61,7 @@ enum class Owner : std::uint8_t { heli, jet, ground, squad, tank };
 struct Entry { CommandUnit u; Owner owner; };
 
 struct Keys { bool tab,shift,ctrl,guard,follow,release,left,right,padNext,padGuard,padFollow,padRelease,
-             engage,focus,board,dismount,dismiss,recruit,mark,formation,split,merge,sweep,health,digit[9],supportPrev,supportNext,supportCall; };
+             engage,focus,board,dismount,dismiss,recruit,attackMove,mark,formation,split,merge,sweep,health,digit[9],supportPrev,supportNext,supportCall; };
 
 // --- The game thread's own ---
 struct Game {
@@ -73,15 +77,20 @@ struct Game {
     wchar_t note[80];
     ULONGLONG noteAt;
     int button;                 // the button a click let go on this frame (mapbtn::Id), -1 none
-    bool guardArmed,guardClick; // the guard button clicked: the next click on the ground (guardClick) is its point
+    // What the next left click on the ground is (one at a time: arming one disarms the other): a point order's point
+    // (its button), a support call's point (its bar's row or chip); `armedClick` that click this frame.
+    bool armedOrder=false;Order armed=Order::none;
+    int armedSupport=-1;
+    bool armedClick=false;
     int supportPick;
-    bool supportArmed,supportClick;
+    bool rpressing=false,rOnUi=false;float rmoved=0.0f; // a right press (a click unless it moves kClickMove), begun on UI
+    bool rightClick=false,rightOnUi=false;               // ...let go without a drag this frame
     ObjRef hover;               // original identity under the pointer; never recaptured from a cached address
     float hoverAt[3];
     bool eat,eatWas;            // the mark key's press took the enemy under the pointer: not the map's (MapCommandEats)
     ObjRef eatHover;            // ...that enemy's original identity, its lock point
     float eatAt[3];
-    enum class UiKind : std::uint8_t { none,command,squad,payload,panel };
+    enum class UiKind : std::uint8_t { none,command,squad,payload,support,panel };
     struct UiHit { UiKind kind=UiKind::none;int id=-1;ObjRef identity{};std::uint64_t token=0;int seat=-1,entry=-1; };
     UiHit uiPress{};
     bool uiLeft=false,uiRight=false,rowPicked=false,suppressLeft=false,suppressRight=false;
@@ -100,8 +109,9 @@ std::atomic<bool> pointerCaptured{false};
 constexpr int kUiItems=16;
 struct View {
     float vp[16],w,h; ULONGLONG at; int buttons; mapbtn::Rect button[mapbtn::kCount]; int id[mapbtn::kCount];
-    int squads=0,payloads=0,panels=0;
-    mapbtn::Rect squad[kUiItems]{},payload[kUiItems]{},panel[kUiItems]{};
+    int squads=0,payloads=0,panels=0,supports=0;
+    mapbtn::Rect squad[kUiItems]{},payload[kUiItems]{},panel[kUiItems]{},support[kMapSupports]{};
+    int supportEntry[kMapSupports]{};
     ObjRef squadIdentity[kUiItems]{};
     std::uint64_t payloadToken=0;int payloadSeat=-1,payloadEntry[kUiItems]{};
 };
@@ -143,7 +153,9 @@ void RememberSelection(Game& g) noexcept {
     for(int i=0;i<kCmdUnits;++i)g.selected[i]=i<g.sel.n ? ObjRef::Of(g.sel.id[i]) : ObjRef{};
 }
 
-bool Give(Game& g,const Entry& e,const Command& c) noexcept {
+bool Give(Game& g,const Entry& e,const Command& order) noexcept {
+    // A vehicle's module keeps one point (its post / anchor): a move or an attack-move reaches it as a guard of it.
+    const Command c=e.owner==Owner::squad ? order : Command{mapcmd::VehicleCommandOf(order.order),{order.at[0],order.at[1],order.at[2]}};
     switch(e.owner) {
     case Owner::heli: return HeliCommand(e.u.v,c);
     case Owner::jet: return JetCommand(e.u.v,c);
@@ -174,6 +186,7 @@ Keys ReadKeys(const MapCmdInput& in) noexcept {
         k.guard=Down('G');k.follow=Down('V');k.release=Down('X');k.left=Down(VK_LBUTTON);k.right=Down(VK_RBUTTON);
         // The squads' orders (§6.1): keys the map's own camera does not use (WASD QE RF are its pan / turn / tilt).
         k.engage=Down('J');k.focus=Down('H');k.board=Down('B');k.dismount=Down('N');k.dismiss=Down('K');k.recruit=Down('U');k.formation=Down('T');k.split=Down('P');k.merge=Down('L');k.sweep=Down('Y');k.health=Down('O');
+        k.attackMove=Down('Z');
         k.mark=Cfg().npcMarkKey>0 && Down(Cfg().npcMarkKey);
         for(int d=0;d<9;++d)k.digit[d]=Down('1'+d);
         k.supportPrev=Down(VK_OEM_4);k.supportNext=Down(VK_OEM_6);k.supportCall=Down('C');
@@ -196,6 +209,8 @@ const char* OrderName(Order o) noexcept {
     case Order::dismount: return "DISMOUNT";
     case Order::dismiss: return "DISMISS";
     case Order::recruit: return "RECRUIT";
+    case Order::move: return "MOVE";
+    case Order::attackMove: return "ATTACK-MOVE";
     default: return "RELEASE";
     }
 }
@@ -210,15 +225,22 @@ const wchar_t* OrderText(Order o) noexcept {
     case Order::dismount: return hudtext::Tr(Tx::orderDismount);
     case Order::dismiss: return hudtext::Tr(Tx::orderDismiss);
     case Order::recruit: return hudtext::Tr(Tx::orderRecruit);
+    case Order::move: return hudtext::Tr(Tx::orderMove);
+    case Order::attackMove: return hudtext::Tr(Tx::orderAttackMove);
     default: return hudtext::Tr(Tx::orderRelease);
     }
 }
-// Whether `e` takes order `o` at all: a locked squad (a script's) none, a vehicle only guard / follow / release, a tank
-// no follow (it keeps a post).
+// Whether `e` takes order `o` at all: a locked squad (a script's) none, a vehicle only the point orders / follow /
+// release, a tank no follow (it keeps a post); a squad riding a vehicle no recruitment and no point order (its vehicle
+// takes those), a squad recruitment is not offered for no RECRUIT (mapcmd::OffersRecruit, npcai.cpp).
 bool Takes(const Entry& e,Order o) noexcept {
     if(e.u.locked)return false;
-    if(e.owner==Owner::squad)return true;
-    if(e.owner==Owner::tank)return o==Order::guard || o==Order::none;
+    if(e.owner==Owner::squad) {
+        if(o==Order::recruit)return e.u.recruitable;
+        if(e.u.riding)return o!=Order::follow && o!=Order::engage && o!=Order::focus && !mapcmd::PointOrder(o);
+        return true;
+    }
+    if(e.owner==Owner::tank)return o==Order::none || mapcmd::PointOrder(o);
     return mapcmd::VehicleOrder(o);
 }
 
@@ -238,6 +260,7 @@ const wchar_t* CommandFailureText(NpcCommandReason why) noexcept {
     case Reason::noSeat:return Tr(Tx::cmdNpcNoSeat);
     case Reason::boardingUnavailable:return Tr(Tx::cmdNpcBoardOff);
     case Reason::unsupported:return Tr(Tx::cmdNpcUnsupported);
+    case Reason::riding:return Tr(Tx::cmdNpcRiding);
     default:return Tr(Tx::cmdNpcFailed);
     }
 }
@@ -250,7 +273,7 @@ void Note(Game& g,const wchar_t* format,...) noexcept {
     g.noteAt=GetTickCount64();
 }
 
-// How tall a ground icon's pin stands in the camera of `in` (hud.cpp MapPin).
+// How tall a large enemy's pin stands in the camera of `in` (hud.cpp MapPin).
 float PinOf(const MapCmdInput& in) noexcept {
     const float d[3]={in.look[0]-in.eye[0],in.look[1]-in.eye[1],in.look[2]-in.eye[2]};
     const float dist=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
@@ -258,13 +281,12 @@ float PinOf(const MapCmdInput& in) noexcept {
     return mapcam::PinHeight(dist,pitch);
 }
 
-// The units' icons on the screen of view `v` (a ground unit's at the top of its pin, as hud.cpp MapPin draws it).
-int Marks(const Game& g,const View& v,const MapCmdInput& in,mapcmd::Mark* out) noexcept {
-    const float pin=PinOf(in);
+// The units' marks on the screen of view `v`: on their bodies (mapcmd_logic.h BodyPoint), as hud.cpp MapCommands draws
+// them.
+int Marks(const Game& g,const View& v,mapcmd::Mark* out) noexcept {
     for(int i=0;i<g.count;++i) {
         const Entry& e=g.list[i];
-        float p[3];std::memcpy(p,e.u.pos,12);
-        if(!e.u.air)p[1]+=pin;
+        float p[3];mapcmd::BodyPoint(e.u.pos,e.u.air,p);
         out[i]=mapcmd::Mark{e.u.v,0.0f,0.0f,false};
         out[i].on=mapcmd::Project(v.vp,p,v.w,v.h,&out[i].x,&out[i].y);
     }
@@ -279,6 +301,8 @@ Game::UiHit UiAt(const View& v,float x,float y) noexcept {
     if(i>=0){hit.kind=Game::UiKind::squad;hit.identity=v.squadIdentity[i];return hit;}
     i=mapbtn::Hit(v.payload,v.payloads,x,y);
     if(i>=0){hit.kind=Game::UiKind::payload;hit.token=v.payloadToken;hit.seat=v.payloadSeat;hit.entry=v.payloadEntry[i];return hit;}
+    i=mapbtn::Hit(v.support,v.supports,x,y);
+    if(i>=0){hit.kind=Game::UiKind::support;hit.entry=v.supportEntry[i];return hit;}
     if(mapbtn::Hit(v.panel,v.panels,x,y)>=0)hit.kind=Game::UiKind::panel;
     return hit;
 }
@@ -286,8 +310,18 @@ bool SameUi(const Game::UiHit& a,const Game::UiHit& b) noexcept {
     return a.kind==b.kind && a.id==b.id && a.identity.obj==b.identity.obj && a.identity.ctrl==b.identity.ctrl &&
         a.token==b.token && a.seat==b.seat && a.entry==b.entry;
 }
+// One thing armed at a time: a point order or a support call (`order` false: the support `support`, -1 nothing).
+void Arm(Game& g,bool order,Order o,int support) noexcept {
+    g.armedOrder=order;g.armed=order ? o : Order::none;g.armedSupport=order ? -1 : support;
+}
 void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
     if(hit.kind==Game::UiKind::command){g.button=hit.id;return;}
+    if(hit.kind==Game::UiKind::support) {   // its row or chip: armed (again: disarmed)
+        const bool again=g.armedSupport==hit.entry;
+        Arm(g,false,Order::none,again ? -1 : hit.entry);
+        if(!again){g.supportPick=hit.entry;Note(g,hudtext::Tr(hudtext::Tx::cmdSupportArmed),SupportCallName(hit.entry));}
+        return;
+    }
     if(hit.kind==Game::UiKind::payload) {
         const bool queued=RequestPayloadSelection(hit.token,hit.seat,hit.entry);
         Note(g,L"%ls",hudtext::Tr(queued ? hudtext::Tx::cmdPayloadQueued : hudtext::Tx::cmdPayloadStale));return;
@@ -307,13 +341,13 @@ void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
 // until release outside the panel; a changed identity/token between press and release cancels action.
 void Pointer(Game& g,const MapCmdInput& in,const Keys& k,const View* v) noexcept {
     if(!in.front) {
-        g.boxing=g.pressing=g.uiLeft=g.uiRight=false;g.uiPress={};
+        g.boxing=g.pressing=g.uiLeft=g.uiRight=g.rpressing=false;g.uiPress={};
         g.suppressLeft=g.suppressRight=true;pointerCaptured.store(false);return;
     }
     if(!k.left)g.suppressLeft=false;
     if(!k.right)g.suppressRight=false;
     if(!v) {
-        g.boxing=g.pressing=g.uiLeft=g.uiRight=false;g.uiPress={};
+        g.boxing=g.pressing=g.uiLeft=g.uiRight=g.rpressing=false;g.uiPress={};
         g.suppressLeft=g.suppressLeft || k.left;g.suppressRight=g.suppressRight || k.right;
         pointerCaptured.store((g.suppressLeft && k.left) || (g.suppressRight && k.right));return;
     }
@@ -327,7 +361,12 @@ void Pointer(Game& g,const MapCmdInput& in,const Keys& k,const View* v) noexcept
         g.pointer.y=mapcam::Clamp(g.pointer.y+in.dy*kPointerGain*s,0.0f,v->h-1.0f);
     }
     if(in.mouse && (g.pressing || g.uiLeft))g.moved+=std::fabs(in.dx)+std::fabs(in.dy);
-    if(k.right && !g.was.right && !g.suppressRight)g.uiRight=UiAt(*v,g.pointer.x,g.pointer.y).kind!=Game::UiKind::none;
+    if(in.mouse && g.rpressing)g.rmoved+=std::fabs(in.dx)+std::fabs(in.dy);
+    if(k.right && !g.was.right && !g.suppressRight) {
+        g.uiRight=UiAt(*v,g.pointer.x,g.pointer.y).kind!=Game::UiKind::none;
+        g.rpressing=true;g.rOnUi=g.uiRight;g.rmoved=0.0f;   // a click unless it turns the map (a drag)
+    }
+    if(!k.right && g.was.right && g.rpressing){g.rightClick=g.rmoved<kClickMove;g.rightOnUi=g.rOnUi;g.rpressing=false;}
     if(!k.right)g.uiRight=false;
     if(k.left && !g.was.left && !g.suppressLeft) {
         g.uiPress=UiAt(*v,g.pointer.x,g.pointer.y);g.uiLeft=g.uiPress.kind!=Game::UiKind::none;g.moved=0;
@@ -341,12 +380,11 @@ void Pointer(Game& g,const MapCmdInput& in,const Keys& k,const View* v) noexcept
         if(g.moved<kClickMove && SameUi(g.uiPress,UiAt(*v,g.pointer.x,g.pointer.y)))UiClick(g,g.uiPress,k.shift);
         g.uiLeft=false;g.uiPress={};g.boxing=g.pressing=false;pointerCaptured.store(g.uiRight || (g.suppressRight && k.right));return;
     }
-    mapcmd::Mark marks[kCmdUnits];const int n=Marks(g,*v,in,marks);
+    mapcmd::Mark marks[kCmdUnits];const int n=Marks(g,*v,marks);
     const bool box=g.boxing && (std::fabs(g.pointer.x-g.bx)>=kClickBox*s || std::fabs(g.pointer.y-g.by)>=kClickBox*s);
     const bool click=(g.boxing && !box) || (g.pressing && g.moved<kClickMove);
     if(click && UiAt(*v,g.pointer.x,g.pointer.y).kind!=Game::UiKind::none){} // release over UI never selects what is underneath
-    else if(click && g.supportArmed && !g.boxing)g.supportClick=true;
-    else if(click && g.guardArmed && !g.boxing)g.guardClick=true;
+    else if(click && (g.armedOrder || g.armedSupport>=0) && !g.boxing)g.armedClick=true;
     else if(box)mapcmd::Box(g.sel,marks,n,g.bx,g.by,g.pointer.x,g.pointer.y,k.shift);
     else if(click)mapcmd::Click(g.sel,marks,n,g.pointer.x,g.pointer.y,kClickRadius*s,k.shift);
     g.boxing=g.pressing=false;
@@ -420,7 +458,7 @@ void CommandNetworkReply(Game& g) noexcept {
     g.networkRequest=0;
 }
 
-// The command to every selected unit; a guard's formation round the point (helis sharing one orbit stay on it).
+// The command to every selected unit; a point order's formation round the point (helis sharing one orbit stay on it).
 int Issue(Game& g,const Command& cmd,int* skipped) noexcept {
     int k=0;
     g.failure=NpcCommandReason::none;g.affected=0;
@@ -446,20 +484,23 @@ int Issue(Game& g,const Command& cmd,int* skipped) noexcept {
     }
     if(remotes) {
         const auto request=SubmitMapCommand(g.requester,remote,remotes,cmd,g.focus,g.networkMessage,_countof(g.networkMessage),
-            cmd.order==Order::guard ? remoteSlots : nullptr,cmd.order==Order::guard ? static_cast<std::uint32_t>(k) : 0);
+            mapcmd::PointOrder(cmd.order) ? remoteSlots : nullptr,mapcmd::PointOrder(cmd.order) ? static_cast<std::uint32_t>(k) : 0);
         if(request){g.networkRequest=request;g.networkQueued=remotes;g.networkOrder=cmd.order;}
     }
     int given=0;
     for(int i=0;i<g.count;++i) {
         Entry& e=g.list[i];
         if(!g.sel.Has(e.u.v))continue;
-        if(!Takes(e,cmd.order)){g.failure=e.u.locked ? NpcCommandReason::scripted : NpcCommandReason::unsupported;++*skipped;continue;}
+        if(!Takes(e,cmd.order)) {
+            g.failure=e.u.locked ? NpcCommandReason::scripted : e.u.riding ? NpcCommandReason::riding : NpcCommandReason::unsupported;
+            ++*skipped;continue;
+        }
         if(!IsOnlineAuthority(e.u.v)) {
             if(e.owner==Owner::squad && g.networkQueued)continue;
             g.failure=NpcCommandReason::notAuthority;++*skipped;continue;
         }
         Command c=cmd;
-        if(cmd.order==Order::guard && !(e.owner==Owner::heli && share)) {
+        if(mapcmd::PointOrder(cmd.order) && !(e.owner==Owner::heli && share)) {
             mapcmd::Formation(static_cast<int>(slots[i]),k,cmd.at,mapcmd::kFormationSpacing,c.at);
             float ground;
             if(!MapGroundNear(c.at[0],c.at[2],cmd.at[1],&ground,true) || !std::isfinite(ground)) {
@@ -553,7 +594,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     for(int i=0;i<g.count;++i)if(g.sel.Has(g.list[i].u.v)) {
         const auto& entry=g.list[i];
         if(entry.owner==Owner::squad && !entry.u.locked)++r.selectedSquads;
-        if(allowed)for(unsigned order=0;order<=static_cast<unsigned>(Order::recruit);++order)
+        if(allowed)for(unsigned order=0;order<=static_cast<unsigned>(mapcmd::kLastOrder);++order)
             if(Takes(entry,static_cast<Order>(order)))r.allowedOrders|=std::uint32_t{1}<<order;
     }
     std::memcpy(r.point,point,12);
@@ -573,9 +614,14 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     r.hover=static_cast<bool>(g.hover);
     std::memcpy(r.hoverAt,g.hoverAt,12);
     std::memcpy(r.note,g.note,sizeof(r.note));
-    r.sweepOn=NpcSweepOn();r.healthOn=NpcPickupHealthOn();r.guardArmed=g.guardArmed;r.march=NpcMarchShape();
-    r.supportArmed=g.supportArmed;
-    _snwprintf_s(r.supportName,_countof(r.supportName),_TRUNCATE,L"%ls",SupportCallName(g.supportPick));
+    r.sweepOn=NpcSweepOn();r.healthOn=NpcPickupHealthOn();r.march=NpcMarchShape();
+    r.armedOrder=g.armedOrder;r.armed=g.armed;r.supportArmed=g.armedSupport;r.supportPick=g.supportPick;
+    r.supports=(std::min)(SupportCallCount(),kMapSupports);
+    for(int i=0;i<r.supports;++i) {
+        _snwprintf_s(r.support[i].name,_countof(r.support[i].name),_TRUNCATE,L"%ls",SupportCallName(i));
+        r.support[i].icon=SupportCallIcon(i);r.support[i].variant=SupportCallVariant(i);
+    }
+    r.supportReady=SupportCallReadiness();
     SupportCallStatus(r.supportStatus,_countof(r.supportStatus));
     r.noteFresh=g.noteAt && GetTickCount64()-g.noteAt<=kNoteMs;
     readoutAt=GetTickCount64();
@@ -597,38 +643,39 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     // The first frame after a gap (the map just opened): what is held now is no press (the key that opened it, a key
     // held from before), the pointer at the centre.
     if(now-g.frameAt>kFreshMs) {
-        g.was=k;g.boxing=g.pressing=g.uiLeft=g.uiRight=false;g.uiPress={};pointerCaptured.store(false);g.guardArmed=g.supportArmed=false;npcmark::Assign(g.hover,{});
+        g.was=k;g.boxing=g.pressing=g.uiLeft=g.uiRight=g.rpressing=false;g.uiPress={};pointerCaptured.store(false);Arm(g,false,Order::none,-1);
+        npcmark::Assign(g.hover,{});
         g.pointer=mapcmd::PointerPosition{};
     }
     g.frameAt=now;
-    const bool mouseOrKey=(in.mouse && (in.dx!=0.0f || in.dy!=0.0f)) || (k.left && !g.was.left) ||
+    const bool mouseOrKey=(in.mouse && (in.dx!=0.0f || in.dy!=0.0f)) || (k.left && !g.was.left) || (k.right && !g.was.right) ||
         (k.tab && !g.was.tab) || (k.guard && !g.was.guard) || (k.follow && !g.was.follow) || (k.release && !g.was.release) ||
+        (k.attackMove && !g.was.attackMove) ||
         (k.supportCall && !g.was.supportCall) || (k.supportPrev && !g.was.supportPrev) || (k.supportNext && !g.was.supportNext);
     const bool padPress=(k.padNext && !g.was.padNext) || (k.padGuard && !g.was.padGuard) ||
         (k.padFollow && !g.was.padFollow) || (k.padRelease && !g.was.padRelease);
     in.usingPad=mapcmd::UsingPad(in.usingPad,mouseOrKey,padPress);
     const void* ids[kCmdUnits];
     Refresh(g,ids);
-    g.button=-1;g.guardClick=g.supportClick=false;g.rowPicked=false;
+    g.button=-1;g.armedClick=g.rightClick=g.rightOnUi=false;g.rowPicked=false;
     Pointer(g,in,k,haveView ? &v : nullptr);
     using mapbtn::Id;
     const auto clicked=[&](Id b){return g.button==static_cast<int>(b);};
-    if(clicked(Id::guard)) {   // armed: the next click on the ground; clicked again: not
-        g.supportArmed=false;
-        g.guardArmed=!g.guardArmed;
-        if(g.guardArmed)Note(g,L"%ls",hudtext::Tr(hudtext::Tx::cmdGuardArmed));
+    // A point order's button: armed for the next click on the ground; clicked again (or the right button): not.
+    if(g.button>=0 && mapbtn::Arms(static_cast<Id>(g.button))) {
+        const Order o=mapbtn::OrderOf(static_cast<Id>(g.button));
+        const bool again=g.armedOrder && g.armed==o;
+        Arm(g,!again,o,-1);
+        if(!again)Note(g,hudtext::Tr(hudtext::Tx::cmdOrderArmed),OrderText(o));
     }
+    const bool cancel=g.rightClick && (g.armedOrder || g.armedSupport>=0);   // RTS: the right button leaves the targeting
+    if(cancel){Arm(g,false,Order::none,-1);g.rightClick=false;Note(g,L"%ls",hudtext::Tr(hudtext::Tx::cmdArmCancelled));}
     const int supportCount=SupportCallCount();
     if(supportCount>0) {
-        const bool previous=clicked(Id::supportPrev) || (k.supportPrev && !g.was.supportPrev);
-        const bool following=clicked(Id::supportNext) || (k.supportNext && !g.was.supportNext);
+        const bool previous=k.supportPrev && !g.was.supportPrev,following=k.supportNext && !g.was.supportNext;
         if(previous || following) {
             g.supportPick=(g.supportPick+(previous ? -1 : 1)+supportCount)%supportCount;
             Note(g,hudtext::Tr(hudtext::Tx::cmdSupportPicked),SupportCallName(g.supportPick));
-        }
-        if(clicked(Id::supportCall)) {
-            g.guardArmed=false;g.supportArmed=!g.supportArmed;
-            if(g.supportArmed)Note(g,L"%ls",hudtext::Tr(hudtext::Tx::cmdSupportPlace));
         }
     }
     Hover(g,in,haveView ? &v : nullptr);
@@ -654,9 +701,19 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
                           (k.follow && !g.was.follow) || (k.padFollow && !g.was.padFollow),
                           (k.release && !g.was.release) || (k.padRelease && !g.was.padRelease),
                           k.engage && !g.was.engage,k.focus && !g.was.focus,k.board && !g.was.board,
-                          k.dismount && !g.was.dismount,k.dismiss && !g.was.dismiss,k.recruit && !g.was.recruit};
-    p.guard=p.guard || g.guardClick;
-    if(g.guardClick)g.guardArmed=false;
+                          k.dismount && !g.was.dismount,k.dismiss && !g.was.dismiss,k.recruit && !g.was.recruit,
+                          false,k.attackMove && !g.was.attackMove};
+    // The armed point order's click on the ground: that order there (disarmed).
+    int supportAt=-1;
+    if(g.armedClick && g.armedOrder) {
+        p.move=p.move || g.armed==Order::move;p.attackMove=p.attackMove || g.armed==Order::attackMove;p.guard=p.guard || g.armed==Order::guard;
+        Arm(g,false,Order::none,-1);
+    } else if(g.armedClick && g.armedSupport>=0){supportAt=g.armedSupport;Arm(g,false,Order::none,-1);}
+    // The right button let go on the map (RTS): a move to the ground there, or focus fire on the enemy under it.
+    const mapcmd::RightClick right=mapcmd::RightClickOrder(g.rightClick && !g.rightOnUi ? g.sel.n : 0,npcmark::Alive(g.hover),true);
+    p.move=p.move || (right.issue && right.order==Order::move);
+    const bool rightFocus=right.issue && right.order==Order::focus;
+    p.focus=p.focus || rightFocus;
     p.follow=p.follow || clicked(Id::follow);p.release=p.release || clicked(Id::release);p.engage=p.engage || clicked(Id::engage);
     p.focus=p.focus || clicked(Id::focus);p.board=p.board || clicked(Id::board);p.dismount=p.dismount || clicked(Id::dismount);
     p.dismiss=p.dismiss || clicked(Id::dismiss);p.recruit=p.recruit || clicked(Id::recruit);
@@ -664,14 +721,13 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
                merge=(k.merge && !g.was.merge) || clicked(Id::merge),sweep=(k.sweep && !g.was.sweep) || clicked(Id::sweep),
                health=(k.health && !g.was.health) || clicked(Id::health);
     const bool markPress=k.mark && !g.was.mark;
-    const bool supportPress=g.supportClick || (k.supportCall && !g.was.supportCall);
+    if(supportAt<0 && k.supportCall && !g.was.supportCall)supportAt=g.supportPick;   // C: the picked call at the pointer
     g.was=k;
     float point[3];
     const bool pointOk=TargetPoint(g,in,haveView ? &v : nullptr,point);
     const bool allowed=Cfg().enabled;
-    if(supportPress) {
-        g.supportArmed=false;
-        if(pointOk){SupportCallAt(g.supportPick,point,g.note,_countof(g.note));g.noteAt=GetTickCount64();}
+    if(supportAt>=0) {
+        if(pointOk){SupportCallAt(supportAt,point,g.note,_countof(g.note));g.noteAt=GetTickCount64();}
         else Note(g,L"%ls",hudtext::Tr(hudtext::Tx::cmdSupportNoPoint));
     }
     using hudtext::Tr;
@@ -680,6 +736,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     if(markPress && g.eat && npcmark::Enabled() && npcmark::Alive(g.eatHover))
         Note(g,L"%ls",Tr(NpcMarkEnemy(g.eatHover.obj,g.eatAt,true) ? Tx::cmdMarked : Tx::cmdUnmarked));
     if(p.focus && npcmark::Alive(g.hover) && allowed && g.sel.n)NpcMarkEnemy(g.hover.obj,g.hoverAt,false);
+    else if(rightFocus)p.focus=false;   // the enemy left between the press and here: no focus on an older mark
     g.focus=NpcMarkedIdentity();
     const mapcmd::Step s=mapcmd::Decide(g.sel.n,p,allowed,point,pointOk,NpcMarked());
     if(s.why==mapcmd::Refusal::online)Note(g,L"%ls",Tr(Tx::cmdOfflineOnly));
@@ -696,7 +753,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         else if(!given && g.networkMessage[0])Note(g,L"%ls",g.networkMessage);
         else if(!given && g.failure!=NpcCommandReason::none)Note(g,L"%ls",CommandFailureText(g.failure));
         else if(s.cmd.order==Order::board)Note(g,Tr(Tx::cmdBoardAssigned),g.affected,tail);
-        else if(s.cmd.order==Order::guard)Note(g,Tr(Tx::cmdGuardResult),OrderText(s.cmd.order),s.cmd.at[0],s.cmd.at[2],given,tail);
+        else if(mapcmd::PointOrder(s.cmd.order))Note(g,Tr(Tx::cmdGuardResult),OrderText(s.cmd.order),s.cmd.at[0],s.cmd.at[2],given,tail);
         else Note(g,Tr(Tx::cmdOrderResult),OrderText(s.cmd.order),given,tail);
         Log("MAPCMD %s (%.0f,%.0f,%.0f) to %d selected: %d of %d units took it",OrderName(s.cmd.order),s.cmd.at[0],s.cmd.at[1],s.cmd.at[2],
             g.sel.n,given,g.count);
@@ -725,7 +782,7 @@ void ResetMapCommands() noexcept {
 
 void MapCommandView(const float* viewProj,float width,float height) noexcept {
     AcquireSRWLockExclusive(&viewLock);
-    if(view.w!=width || view.h!=height)view.buttons=view.squads=view.payloads=view.panels=0;
+    if(view.w!=width || view.h!=height)view.buttons=view.squads=view.payloads=view.panels=view.supports=0;
     std::memcpy(view.vp,viewProj,sizeof(view.vp));view.w=width;view.h=height;view.at=GetTickCount64();
     ReleaseSRWLockExclusive(&viewLock);
 }
@@ -736,6 +793,13 @@ void MapCommandButtons(const float* rects,const int* ids,int n) noexcept {
     AcquireSRWLockExclusive(&viewLock);
     view.buttons=n;
     for(int i=0;i<n;++i){view.button[i]=mapbtn::Rect{rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};view.id[i]=ids[i];}
+    ReleaseSRWLockExclusive(&viewLock);
+}
+
+void MapCommandSupportButtons(const float* rects,const int* entries,int n) noexcept {
+    n=rects && entries ? (std::max)(0,(std::min)(n,kMapSupports)) : 0;
+    AcquireSRWLockExclusive(&viewLock);view.supports=n;
+    for(int i=0;i<n;++i){view.support[i]={rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};view.supportEntry[i]=entries[i];}
     ReleaseSRWLockExclusive(&viewLock);
 }
 
@@ -765,9 +829,10 @@ void SuspendMapCommands() noexcept {
     // Closing the map ends a hover/press even if reopened inside kFreshMs. Keep the user's selection.
     Game& g=game;
     npcmark::Assign(g.hover,{});npcmark::Assign(g.eatHover,{});
-    g.frameAt=0;g.eat=g.eatWas=false;g.boxing=g.pressing=false;g.guardArmed=g.guardClick=false;g.supportArmed=g.supportClick=false;g.button=-1;g.uiLeft=g.uiRight=false;g.uiPress={};
+    g.frameAt=0;g.eat=g.eatWas=false;g.boxing=g.pressing=g.rpressing=false;Arm(g,false,Order::none,-1);g.armedClick=g.rightClick=false;
+    g.button=-1;g.uiLeft=g.uiRight=false;g.uiPress={};
     boxingNow.store(false);pointerCaptured.store(false);
-    AcquireSRWLockExclusive(&viewLock);view.at=0;view.buttons=view.squads=view.payloads=view.panels=0;ReleaseSRWLockExclusive(&viewLock);
+    AcquireSRWLockExclusive(&viewLock);view.at=0;view.buttons=view.squads=view.payloads=view.panels=view.supports=0;ReleaseSRWLockExclusive(&viewLock);
     AcquireSRWLockExclusive(&lock);readoutAt=0;ReleaseSRWLockExclusive(&lock);
 }
 

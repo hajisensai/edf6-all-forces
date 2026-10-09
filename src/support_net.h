@@ -41,6 +41,13 @@ void SupportNetTick() noexcept;
 void ResetSupportNet() noexcept;
 void ReportSupportFailure(std::uint64_t transaction) noexcept;
 bool SupportTransactionActive(std::uint64_t transaction) noexcept;
+// Whether every peer of the running support session accepts configured soldier weapons and aircraft counts
+// (support_protocol.h kCapSoldierVariants); true offline / with no session. The host's planner falls back to the
+// protocol v2 plan (rifles, each call's own number of aircraft) otherwise, and says so.
+bool SupportPeersAcceptVariants() noexcept;
+// Whether every peer applies air support created in the air (kCapAirborneAir); true offline / with no session. Without
+// it the host refuses air support with a reason: no peer may have its hull on the ground while another's flies.
+bool SupportPeersAcceptAirborne() noexcept;
 // Requester ownership: native EOS PUID must equal the authenticated transport
 // sender and belong to the sealed current-world participant set.
 bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) noexcept;
@@ -48,6 +55,10 @@ bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) no
 // actual participant PUIDs. A newly joined lobby member waits for the next world.
 bool SupportParticipantAllowed(void* puid) noexcept;
 bool SupportMissionPlayerAllowed(int missionIndex) noexcept;
+// This machine hosts a session whose sealed current world has exactly one participant (split-screen players share
+// it): this host. No peer exists to replicate to, and a lobby member joining later waits for the next world
+// (SupportMissionPlayerAllowed), so the host may deploy support locally without the EDF6Coop transport.
+bool SupportSoloHostWorld() noexcept;
 void NoteSupportMissionPlayerCreated(int missionIndex,const ObjRef& object) noexcept;
 // Only a verified native return-to-lobby transition may call this; readiness
 // loss, a disappeared actor, and InSession() are not evidence of a lobby.

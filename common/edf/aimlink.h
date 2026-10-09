@@ -108,6 +108,25 @@ inline float PriorityWeight(const PriorityZoneV1& z,const float* pos,const void*
 using InputHeldFn=bool(__cdecl*)();
 constexpr char kInputHeld[]="EDF6VehicleCrew_InputHeldV1";
 
+// V4, one player turret aim for every ground vehicle (2026-10-09, the user: "v键自瞄按了没反应" in a Titan's driver seat,
+// "防空车的自瞄好像是单独写的，统一一下代码和操作体验"). EDF6AutoTurret's designate.cpp is the only reader of the player's
+// mode and lock bindings (V, Q / pad X), their lock rule and their lead; EDF6VehicleCrew's turret camera is the only hand
+// on a decoupled player turret, the flak's, a tank's driver's and any other ground vehicle's alike:
+//  - PlayerAim (EDF6AutoTurret), asked once a game frame by EDF6VehicleCrew for the seat its turret camera serves, of any
+//    vehicle class (its own hooks see only the flak and the 403 / 404 tanks): it keeps that seat's bindings and lock up
+//    (once a frame, its own hook's frame or this call), publishes TurretReadoutV1 for it (the player's gun its own), and
+//    answers `steer` with `point`, the place the round of `gun` meets the locked target (aimmath.h LeadSolve), while the
+//    mode is AUTO and the lock is there (PlayerGunRule's camera branch); false: no such seat, or the plugin is off.
+//  - AimsTurret (EDF6VehicleCrew): it steers `vehicle`'s seat `seat` onto PlayerAim's point (the turret camera serves it,
+//    decoupled). EDF6AutoTurret then never writes that seat's turn input itself (the camera is the one hand), and the
+//    driver's seat of a gunner tank is the player's own gun (TurretReadoutV1::ownGun).
+// Either export missing (an older peer): V2 / V3 behaviour (EDF6AutoTurret steers a camera turret onto the lock itself,
+// the tank driver's lock is the gunners' only).
+struct PlayerAimV4 { Mode mode; bool steer; float point[3]; };
+using PlayerAimFn=bool(__cdecl*)(const void* vehicle,unsigned seat,const void* gun,PlayerAimV4* out);
+constexpr char kPlayerAim[]="EDF6AutoTurret_PlayerAimV4";
+constexpr char kAimsTurret[]="EDF6VehicleCrew_AimsTurretV4";
+
 // What EDF6AutoTurret does with the player's own gun in a frame (a pure rule: tools/turret_lead_check.cpp checks it):
 // `steer` it turns the gun onto its target, `drag` a stick past DragDeadzone is the player aiming by hand (the target
 // let go). `cameraTurret` the camera turns the gun (CameraTurret above), `lead` the lead-circle mode, `locked` the

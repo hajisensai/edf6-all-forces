@@ -14,8 +14,8 @@
 //     offline);
 //  5. the riding action begun again (0x551C30(human +0x1150, {0x56C9F0, 0}, 0), 0x56D7CC: the new seat's pose and
 //     camera) and human +0x3F0 = (seat +0x2B4 == 3) (0x56D7D1; the leave 0x56FE80 clears it).
-// The next-seat key (F, pad B) takes the next empty seat round the vehicle; a number key takes that seat, and an NPC in
-// it changes places with the player (crew.cpp MoveRider, the bump's move: as the gunship's crew do, the pilot to the
+// The next-seat key (F, pad B) takes the next seat round the vehicle the player may take (an empty one, or one whose NPC
+// changes places with them: seat_switch_logic.h); a number key takes that seat, and an NPC in it changes places with the player (crew.cpp MoveRider, the bump's move: as the gunship's crew do, the pilot to the
 // gun, the gunner to the stick). Another player's seat, one their class may not sit in (the seat's class mask
 // +0x30 & +0x34 against human +0x31C, CanRideSeat 0x6346FC) are refused, shown a moment. Out of a stock helicopter's
 // pilot seat the stock RideAi seats an NPC pilot (ini SeatPilot; heli.cpp then flies it with the player aboard: it
@@ -32,6 +32,7 @@
 #include "memory.h"
 #include "online_authority.h"
 #include "npcai.h"
+#include "seat_switch_logic.h"
 #include "stores.h"
 #include <cstring>
 #include <cwchar>
@@ -40,7 +41,8 @@ namespace crew {
 namespace {
 constexpr std::size_t kHumanSeat=0x1540,kHumanRideBlend=0x15B0,kHumanRideBlend2=0x15B8,kHumanRideWeight=0x15BC;
 constexpr std::size_t kHumanActions=0x1150,kHumanSeatFlag=0x3F0,kHumanClass=0x31C;
-constexpr std::size_t kSeatClassMask=0x30,kSeatClassOn=0x34,kSeatKeyRow=0x2B4,kSeatPad=0x2B0,kSeatButtons=0x2E8;
+constexpr std::size_t kSeatClassMask=0x30,kSeatClassOn=0x34,kSeatKeyRow=0x2B4;
+using seatsw::kSeatPad;using seatsw::kSeatButtons;
 // The seat's input block (docs/heli-input-re.md §4): left stick +0x2C0 (x, y, 0, 1), right stick +0x2D0, the analog
 // triggers +0x2E0 / +0x2E4, the buttons' word +0x2E8.
 constexpr std::size_t kSeatLeft=0x2C0,kSeatRight=0x2D0,kSeatTriggers=0x2E0;
@@ -78,11 +80,12 @@ using SetActionFn=void(__fastcall*)(void*,const void*,std::int64_t);
 using ReserveFn=void(__fastcall*)(void*,void*,void*);
 using ClearFn=void(__fastcall*)(void*,void*);
 
-// Per local player (split screen: two): the vehicle they sit in, the keys down last frame, what the prompt shows.
+// Per local player (split screen: two): the vehicle they sit in, the keys down last frame (each key's own state, the
+// keyboard's and the pad button's apart: seat_switch_logic.h), what the prompt shows.
 constexpr int kNumberKeys=9;
 struct Rider_ {
     ObjRef human,vehicle;
-    bool nextHeld,numberHeld[kNumberKeys];
+    bool nextKeyHeld,nextPadHeld,numberHeld[kNumberKeys];
     ULONGLONG promptUntil,refusedUntil,seen;
     int refused;
 };
@@ -144,9 +147,11 @@ void ZeroInput(unsigned char* seat) noexcept {
     Put<std::uint16_t>(seat,kSeatButtons,0);
 }
 
-// The player into `seat` (steps 2-5 of the top).
-void Take(unsigned char* v,unsigned char* human,unsigned char* seat) noexcept {
+// The player into `seat` (steps 2-5 of the top), the seat given the rider's input mode and buttons `in` (their own
+// state: seat_switch_logic.h) until their own step writes them there.
+void Take(unsigned char* v,unsigned char* human,unsigned char* seat,const seatsw::RiderInput& in) noexcept {
     reinterpret_cast<ReserveFn>(image+kReserve)(v,human,seat);
+    seatsw::CarryRiderInput(in,seat);
     Put<unsigned char*>(human,kHumanSeat,seat);
     Put<std::uint64_t>(human,kHumanRideBlend,0);Put<std::int32_t>(human,kHumanRideBlend2,0);Put<float>(human,kHumanRideWeight,1.0f);
     reinterpret_cast<AnnounceFn>(image+kAnnounce)(human);
@@ -161,11 +166,13 @@ bool Move(unsigned char* v,unsigned char* human,unsigned from,unsigned to,bool n
     unsigned char* const fromSeat=SeatAt(v,from);
     unsigned char* const toSeat=SeatAt(v,to);
     bool moved=false;
+    seatsw::RiderInput in{};
     __try {
+        in=seatsw::ReadRiderInput(fromSeat);   // before the leave zeroes its buttons
         reinterpret_cast<ClearFn>(image+kClear)(v,fromSeat);
         if(!npc || MoveRider(v,to,from)) {
             ZeroInput(fromSeat);
-            Take(v,human,toSeat);
+            Take(v,human,toSeat,in);
             moved=true;
         } else reinterpret_cast<ReserveFn>(image+kReserve)(v,human,fromSeat);   // the NPC stays: the player in their own seat again
     } __except(EXCEPTION_EXECUTE_HANDLER) {
@@ -174,7 +181,7 @@ bool Move(unsigned char* v,unsigned char* human,unsigned from,unsigned to,bool n
         __try {
             back=SeatRider(toSeat)==Rider::player && At<const unsigned char*>(toSeat,kSeatRider)==human ? toSeat :
                  SeatRider(fromSeat)==Rider::none ? fromSeat : SeatRider(toSeat)==Rider::none ? toSeat : nullptr;
-            if(back)Take(v,human,back);
+            if(back)Take(v,human,back,in);
         } __except(EXCEPTION_EXECUTE_HANDLER){back=nullptr;}
         Log("SEAT v=%p the move %u -> %u faulted: the player %s",v,from,to,back==toSeat ? "in the new seat" : back ? "back in their own" :
             "could not be seated again");
@@ -204,14 +211,10 @@ bool MayTake(unsigned char* v,const unsigned char* human,unsigned to,SeatHolder 
     return BodyOf(v)==PluginBody::none || to!=0 || PlayerJetBoardable(v);   // the gunship's stick: where it may be boarded
 }
 
-// The seat a press asks for, -1 none: `number` 0..8 a number key, -1 the next-seat key.
+// The seat a press asks for, -1 none: `number` 0..8 a number key, -1 the next-seat key (seat_switch_logic.h: round every
+// seat the player may take now, an NPC's too).
 int Wanted(unsigned char* v,const unsigned char* human,unsigned at,int number,unsigned count) noexcept {
-    if(number>=0)return static_cast<unsigned>(number)<count && static_cast<unsigned>(number)!=at ? number : -1;
-    for(unsigned k=1;k<count;++k) {
-        const unsigned to=(at+k)%count;
-        if(HolderOf(SeatAt(v,to),human)==SeatHolder::empty && MayTake(v,human,to,SeatHolder::empty))return static_cast<int>(to);
-    }
-    return -1;
+    return seatsw::Wanted(count,at,number,[&](unsigned to){ return MayTake(v,human,to,HolderOf(SeatAt(v,to),human)); });
 }
 
 // The seat `human` sits in now, -1 none.
@@ -254,14 +257,16 @@ bool Frame(unsigned char* v,unsigned char* human,unsigned at,ULONGLONG ms) noexc
     const unsigned count=SeatCount(v);
     const unsigned char* const seat=SeatAt(v,at);
     const bool keys=At<unsigned char>(seat,kSeatPad)==0;
-    const bool nextDown=keys ? KeyDown(Cfg().seatNextKey) : Cfg().seatButton>0 && (At<std::uint16_t>(seat,kSeatButtons)&Cfg().seatButton)!=0;
-    const bool next=nextDown && !r->nextHeld;
-    r->nextHeld=nextDown;
+    // Each key's edge on the key itself, every frame; which of them counts goes by the seat's input mode.
+    const bool keyDown=KeyDown(Cfg().seatNextKey);
+    const bool padDown=Cfg().seatButton>0 && (At<std::uint16_t>(seat,kSeatButtons)&Cfg().seatButton)!=0;
+    const bool keyPress=seatsw::Press(r->nextKeyHeld,keyDown),padPress=seatsw::Press(r->nextPadHeld,padDown);
+    const bool nextDown=keys ? keyDown : padDown;
+    const bool next=keys ? keyPress : padPress;
     int number=-1;
     for(int k=0;k<kNumberKeys;++k) {
-        const bool down=keys && Cfg().seatNumberKeys && static_cast<unsigned>(k)<count && KeyDown('1'+k);
-        if(down && !r->numberHeld[k] && number<0)number=k;
-        r->numberHeld[k]=down;
+        const bool press=seatsw::Press(r->numberHeld[k],Cfg().seatNumberKeys && KeyDown('1'+k));
+        if(press && keys && static_cast<unsigned>(k)<count && number<0)number=k;
     }
     if(nextDown && r->promptUntil<ms+kPromptMs/2)r->promptUntil=ms+kPromptMs/2;   // held: the seats shown
     bool moved=false;

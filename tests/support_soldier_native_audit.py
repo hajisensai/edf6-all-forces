@@ -8,6 +8,16 @@ The real registration function 781950 is also executed with recording manager/
 network-interface/ID-store/logging stubs: its own host selection, weak argument
 consumption and returned ID address remain native. No actual network is opened.
 This is not a complete Soldier constructor/world/AI or multiplayer end-to-end test.
+
+The mapping is made with DONT_RESOLVE_DLL_REFERENCES, so neither the loader's implicit TLS for EDF.dll nor its CRT
+start-up runs. 776AB0's CRC table is a thread-safe local static (MSVC magic static): it reads the thread's
+_Init_thread_epoch through gs:[58h][_tls_index] (_tls_index RVA 213A670) and, while the table is not built,
+_Init_thread_header enters the CRT's critical section (RVA 213A638, KERNEL32 imports). Unprepared, the epoch came
+from whatever the host process keeps in its own TLS slot 0: a value that, depending on the run, either skipped the
+build (a zero CRC table) or entered the uninitialised CRT path through an unresolved import and faulted
+(access violation at 0x1F52128, the import's name RVA; ctest -j 3 and single runs alike). PrivateImageRuntime
+provides exactly those loader/CRT pieces, deterministically: the image's TLS block from its own template, its
+KERNEL32 imports, the critical section and event __scrt_initialize_thread_safe_statics would create.
 """
 import argparse
 import ctypes as C
@@ -35,7 +45,54 @@ k.LoadLibraryExW.argtypes=[C.c_wchar_p,C.c_void_p,C.c_uint]
 k.LoadLibraryExW.restype=C.c_void_p
 base=k.LoadLibraryExW(str(a.edf_dll.resolve()),None,1)
 assert base
-derive=C.WINFUNCTYPE(C.c_void_p,C.c_void_p,C.c_void_p,C.c_uint32)(base+0x776790)
+# --- What the loader and the CRT would have provided for the code paths executed here (see the module comment).
+IMAGE_BASE=pe.OPTIONAL_HEADER.ImageBase
+TLS_INDEX,STATICS_LOCK,STATICS_EVENT=0x213A670,0x213A638,0x213A630
+CRC_TABLE=0x20B2BE0   # 776E48: lea rbx,[rip+...] -> the magic static's 256 dwords
+k.GetProcAddress.argtypes=[C.c_void_p,C.c_char_p];k.GetProcAddress.restype=C.c_void_p
+k.GetModuleHandleW.argtypes=[C.c_wchar_p];k.GetModuleHandleW.restype=C.c_void_p
+k.VirtualProtect.argtypes=[C.c_void_p,C.c_size_t,C.c_uint,C.POINTER(C.c_uint)]
+k.CreateEventW.argtypes=[C.c_void_p,C.c_int,C.c_int,C.c_wchar_p];k.CreateEventW.restype=C.c_void_p
+k.InitializeCriticalSection.argtypes=[C.c_void_p]
+def writable(at,size):
+    old=C.c_uint();assert k.VirtualProtect(at,size,0x04,C.byref(old))
+pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_IMPORT'],pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_TLS']])
+kernel32=k.GetModuleHandleW('kernel32.dll')
+for d in pe.DIRECTORY_ENTRY_IMPORT:
+    if d.dll.lower()!=b'kernel32.dll':continue
+    for imp in d.imports:
+        fn=k.GetProcAddress(kernel32,imp.name) if imp.name else None
+        if fn:
+            slot=base+imp.address-IMAGE_BASE;writable(slot,8);C.c_void_p.from_address(slot).value=fn
+tls=pe.DIRECTORY_ENTRY_TLS.struct
+assert tls.AddressOfIndex-IMAGE_BASE==TLS_INDEX
+template=C.string_at(base+tls.StartAddressOfRawData-IMAGE_BASE,tls.EndAddressOfRawData-tls.StartAddressOfRawData)
+assert C.c_int32.from_buffer_copy(template,0x20).value==-0x80000000,'the template _Init_thread_epoch starts at INT_MIN'
+tls_block=C.create_string_buffer(template+bytes(tls.SizeOfZeroFill)+bytes(16),len(template)+tls.SizeOfZeroFill+16)
+tls_array=(C.c_void_p*1)(C.addressof(tls_block))
+C.c_uint32.from_address(base+TLS_INDEX).value=0
+k.InitializeCriticalSection(base+STATICS_LOCK)
+event=k.CreateEventW(None,True,False,None);assert event
+C.c_void_p.from_address(base+STATICS_EVENT).value=event
+# The image's TLS array is this thread's (TEB+58h, gs:[58h]) only inside native code: a thunk swaps it in, calls,
+# and swaps the interpreter's back. Swapping it from Python is not possible: the interpreter's own implicit TLS
+# (CPython 3.13's thread state) is read in ctypes' call path itself.
+k.VirtualAlloc.argtypes=[C.c_void_p,C.c_size_t,C.c_uint,C.c_uint];k.VirtualAlloc.restype=C.c_void_p
+def private_image_thunk(target):
+    code=(b'\x53'                                   # push rbx (rsp 16-aligned again)
+          b'\x48\x83\xEC\x20'                         # sub rsp,20h (shadow space)
+          b'\x65\x48\x8B\x1C\x25\x58\x00\x00\x00'          # mov rbx,gs:[58h]  (the interpreter's TLS array)
+          b'\x48\xB8'+C.addressof(tls_array).to_bytes(8,'little')+   # mov rax,image TLS array
+          b'\x65\x48\x89\x04\x25\x58\x00\x00\x00'          # mov gs:[58h],rax
+          b'\x48\xB8'+target.to_bytes(8,'little')+       # mov rax,target
+          b'\xFF\xD0'                                  # call rax (rcx/rdx/r8/r9 untouched)
+          b'\x65\x48\x89\x1C\x25\x58\x00\x00\x00'          # mov gs:[58h],rbx
+          b'\x48\x83\xC4\x20\x5B\xC3')                   # add rsp,20h; pop rbx; ret
+    page=k.VirtualAlloc(None,len(code),0x3000,0x40);assert page
+    C.memmove(page,code,len(code))
+    return page
+derive_native=private_image_thunk(base+0x776790)
+derive=C.WINFUNCTYPE(C.c_void_p,C.c_void_p,C.c_void_p,C.c_uint32)(derive_native)
 parent=C.create_string_buffer(0x48)
 for i in range(0x20):parent[8+i]=bytes([i+1])
 before=bytes(parent)
@@ -49,7 +106,10 @@ for ordinal in (0,1,65535,65536,0x7FFFFFFF,0xE0000001,0xFFFFFFFF):
     assert C.c_uint32.from_buffer(out,12).value==5
     assert bytes(out) not in seen
     seen.add(bytes(out));checks+=1
-print('PASS native child IDs: deterministic, full uint32 ordinals, distinct sample IDs, parent unchanged')
+table=(C.c_uint32*256).from_address(base+CRC_TABLE)
+assert table[0]==0 and table[1]==0x77073096 and table[255]==0x2D02EF8D,'the native magic static built the real CRC-32 table'
+assert C.c_int32.from_buffer(tls_block,0x20).value!=-0x80000000,'_Init_thread_footer published the epoch to this TLS block'
+print('PASS native child IDs: deterministic, full uint32 ordinals, distinct sample IDs, parent unchanged; native CRC static initialised')
 padding=C.create_string_buffer(bytes([0xA5])*32,32)
 derive(C.addressof(padding),C.addressof(parent),1)
 assert bytes(padding)[20:24]==bytes([0xA5])*4, 'native padding contract changed'
@@ -115,10 +175,18 @@ for is_host in (True,False):
     print('PASS native registration:', 'host' if is_host else 'client', 'owner, returned ID, balanced temporary refs, one consumed weak')
 
 g=Game(str(a.edf_dll.parent))
-for name in ('N601_COMMON_RANGER_AF.SGO','N601_COMMON_RANGER_AF_LEADER.SGO'):
+# Every weapon template support_soldier.cpp kBodies creates (support_call.h SupportWeapon order): one class, model, CAS.
+import re
+source=(Path(__file__).resolve().parents[1]/'src'/'support_soldier.cpp').read_text(encoding='utf-8')
+bodies=re.findall(r'L"app:/object/(N601_COMMON_RANGER_\w+)\.sgo"',source)
+assert len(bodies)==10,bodies
+weapons={'AF':'AiSoldierRifle01','FL':'AiSoldierFlameThrower01','RL':'AiSoldierRocketLauncher01','SG':'AiSoldierShotgun01',
+         'SN':'AiSoldierSniperRifle02'}
+for body in bodies:
+    name=body+'.SGO'
     r=dsgo.to_py(dsgo.parse(g.read('OBJECT',name)).root)
     assert r['xgs_scene_object_class']=='AssultSoldier'
-    assert r['soldier_load_weapon']==['app:/weapon/AiSoldierRifle01.sgo']
+    assert r['soldier_load_weapon']==['app:/weapon/%s.sgo'%weapons[body.split('_')[3]]],(name,r['soldier_load_weapon'])
     assert r['animation_model'][1]=='app:/Object/EDF6ArmySoldier.cas'
     assert r['soldier_weapon_slot'] and r['soldier_config']
     for path in (r['animation_model'][0][0],r['animation_model'][1],r['soldier_load_weapon'][0]):

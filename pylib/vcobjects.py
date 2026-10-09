@@ -204,15 +204,38 @@ class Bomb:
 
 
 @dataclass(frozen=True)
+class Shell:
+    """A gun's round for a stock vehicle (the user, 2026-10-09: 「坦克应该有ap和he」「机炮车 AP/HE」「防空车高爆近炸」): a
+    stock vehicle weapon of that kind made a store, its numbers the stock weapon's own (the game's own round of that class
+    and tier: AP the penetrating high-velocity body, HE the bursting one), only AmmoCount (the load in the file name) and
+    `extra` changed. `ammo_class` is the template's AmmoClass, checked on the player's Root.cpk (ValueError otherwise):
+    the kind of round is the template's, not a guess."""
+    template: str           # Root.cpk WEAPON file
+    ammo_class: str         # its AmmoClass
+    kind: str               # 'ap' (no blast, penetrating) or 'he' (a blast radius)
+    extra: tuple[tuple[str, float], ...] = ()
+
+    def params(self, rounds: int) -> dict[str, float]:
+        return {'AmmoCount': float(rounds), **dict(self.extra)}
+
+
+@dataclass(frozen=True)
 class Store:
     """What a jet carries besides its guns (STORES): its weapon, its role for the plugin (src/stores.h StoreRole: air
-    and ground missiles, bombs), and what one round adds to the jet: its mass and its drag (a share of the clean jet's
-    parasitic drag, with its pylon)."""
+    and ground missiles, bombs, rockets, a gun's rounds), and what one round adds to the jet: its mass and its drag (a
+    share of the clean jet's parasitic drag, with its pylon; 0 for the stock vehicles' rounds, nothing weighs them).
+    `names`: the weapon's name.<lang> rows (the stock HUD shows the game language's, weapon +0x1B0); a language not
+    listed (and the cockpit) shows `name`."""
     name: str               # shown in the cockpit (and the weapon's name.* rows)
-    role: str               # 'air', 'ground', 'bomb', 'rocket'
+    role: str               # 'air', 'ground', 'bomb', 'rocket', 'gun'
     mass: float             # kg a round
     drag: float             # a round's share of the clean jet's drag
-    weapon: Missile | Bomb
+    weapon: Missile | Bomb | Shell
+    names: tuple[tuple[str, str], ...] = ()
+
+
+def _local(en: str, ja: str, cn: str, sc: str, kr: str) -> tuple[tuple[str, str], ...]:
+    return (('en', en), ('ja', ja), ('cn', cn), ('sc', sc), ('kr', kr))
 
 
 STORES: dict[str, Store] = {
@@ -248,6 +271,37 @@ STORES: dict[str, Store] = {
     'RKT': Store('Hydra 70', 'rocket', 32.0, 0.0015, Missile('Hydra 70', Look('bullet_rocket', 1.4), burn=1.1, top=740.0,
                  accel=650.0, max_g=1.0, nav=1.0, life=6.0, damage=250.0, blast=6.0, lock_range=0.0, lock_cone=0.3, lock_time=0.0,
                  burst=4.0, burst_gap=4.0, interval=20.0, eject=0.6, guided=False)),
+    # --- the stock vehicles' rounds (tools/make_stock_stores.py LOADOUTS; docs/feedback-2026-10-09-loadcamp.md) ---
+    # A main battle tank's armour-piercing round: the Blacker A's 90 mm smooth-bore round (V_505TANK_CANNON01S:
+    # SolidBullet01Rail, 18 m a frame = 1080 m/s, a tenth of gravity, penetrating, no blast, 350): the stock A series.
+    'AP': Store('APFSDS', 'gun', 0.0, 0.0, Shell('V_505TANK_CANNON01S.SGO', 'SolidBullet01Rail', 'ap'),
+                _local('APFSDS', 'APFSDS（徹甲弾）', 'APFSDS（穿甲彈）', 'APFSDS（穿甲弹）', 'APFSDS（철갑탄）')),
+    # Its high-explosive round: the Blacker E's 105 mm round (V_505TANK_CANNON01: RocketBullet01, 3 m a frame rising to
+    # its top speed, full gravity, an 8 m blast, 350): the stock E series.
+    'HE': Store('HE', 'gun', 0.0, 0.0, Shell('V_505TANK_CANNON01.SGO', 'RocketBullet01', 'he'),
+                _local('HE', 'HE（榴弾）', 'HE（高爆彈）', 'HE（高爆弹）', 'HE（고폭탄）')),
+    # A gun-launched anti-tank missile (LAHAT class: 105/120 mm, 0.975 m, 13 kg, semi-active laser, subsonic, about
+    # 8 km): from the tank's own barrel, kicked out at 120 m/s, its motor to 300 m/s. Its warhead a tandem HEAT smaller
+    # than the Hellfire's (800 here): 600, a 6 m blast; its lock as the Hellfire's. 0.975 m of the tail-finned icbm01:
+    # body 0.09, fins 0.23 (real 0.105).
+    'GLM': Store('LAHAT', 'ground', 0.0, 0.0, Missile('LAHAT', Look('bullet_icbm01', 0.975), burn=2.5, top=300.0, accel=180.0,
+                 max_g=15.0, nav=3.0, life=15.0, damage=600.0, blast=6.0, lock_range=1200.0, lock_cone=0.3, lock_time=30.0,
+                 interval=90.0, eject=2.0),
+                 _local('LAHAT (gun-launched ATGM)', 'LAHAT（砲発射ミサイル）', 'LAHAT（炮射導彈）', 'LAHAT（炮射导弹）',
+                        'LAHAT（포발사 미사일）')),
+    # An infantry fighting vehicle's autocannon belts (the Grape): its AP the Grape's own smooth-bore round
+    # (V_401STRIKER_CANNONS01: SolidBullet01, penetrating, 40), its HE the Grape's own bursting round
+    # (V_401STRIKER_CANNON: RocketBullet01, a 5 m blast, 32).
+    'AC_AP': Store('AP belt', 'gun', 0.0, 0.0, Shell('V_401STRIKER_CANNONS01.SGO', 'SolidBullet01', 'ap'),
+                   _local('AP belt', 'AP弾帯（徹甲）', 'AP彈鏈（穿甲）', 'AP弹链（穿甲）', 'AP 탄띠（철갑）')),
+    'AC_HE': Store('HE belt', 'gun', 0.0, 0.0, Shell('V_401STRIKER_CANNON.SGO', 'RocketBullet01', 'he'),
+                   _local('HE belt', 'HE弾帯（榴弾）', 'HE彈鏈（高爆）', 'HE弹链（高爆）', 'HE 탄띠（고폭）')),
+    # The flak's high-explosive proximity round: the stock Volus' anti-aircraft explosive gun round
+    # (V603_FLAK_GLGUN01_DLC_L: GrenadeBullet01_MapNoDamage, 300 m/s, a 4 m blast, 9). Its contact sphere is 4 m
+    # (AmmoSize 4 x AmmoHitSizeAdjust 1, docs/carrier-laser-re.md §3): passing within 4 m of an aircraft sets it off, a
+    # proximity fuse in effect; it does not harm the map.
+    'FLAK_HE': Store('HE-PROX', 'gun', 0.0, 0.0, Shell('V603_FLAK_GLGUN01_DLC_L.SGO', 'GrenadeBullet01_MapNoDamage', 'he'),
+                     _local('HE proximity', '近接信管榴弾', '近炸引信高爆彈', '近炸引信高爆弹', '근접신관 고폭탄')),
 }
 JET_MISSILE_STOCK, JET_BOMB_STOCK = JET_MISSILE_STOCK, 'V_409HELI_BOMB01.SGO'
 
@@ -1230,20 +1284,51 @@ def jet_guns(game: Game) -> dict[str, bytes]:
             r.set(key, value)
         out[name] = dsgo.write(doc)
     for name in STORE_FILES:
-        kind, rounds = store_of(_weapon(name))
-        store = STORES[kind]
-        if isinstance(store.weapon, Bomb):
-            out[name] = _bomb_sgo(game, store, rounds)
-        else:
-            out[name] = _missile_sgo(game, store, rounds)
+        out[name] = store_sgo(game, name)
     return out
 
 
-def _named(r, name: str) -> None:
-    """Every name.* row of a weapon: the store's name (the stock HUD shows the weapon's, weapon +0x1B0)."""
+def store_sgo(game: Game, name: str) -> bytes:
+    """The store weapon file `name` (store_file: EDF6VC_<KIND>_<rounds>.SGO) built on this Root.cpk: a missile, a bomb
+    or a stock vehicle's round (Shell)."""
+    got = store_of(_weapon(name))
+    if got is None:
+        raise ValueError(f'{name} 不是挂载武器文件')
+    kind, rounds = got
+    store = STORES[kind]
+    if isinstance(store.weapon, Bomb):
+        return _bomb_sgo(game, store, rounds)
+    if isinstance(store.weapon, Shell):
+        return _shell_sgo(game, store, rounds)
+    return _missile_sgo(game, store, rounds)
+
+
+def _named(r, name: str | Store) -> None:
+    """Every name.* row of a weapon: the store's name (the stock HUD shows the weapon's, weapon +0x1B0), in the row's
+    language where the store has one (Store.names)."""
+    local = dict(name.names) if isinstance(name, Store) else {}
+    plain = name.name if isinstance(name, Store) else name
     for key in list(r.names.values()):
         if key.startswith('name.'):
-            r.set(key, name)
+            r.set(key, local.get(key[5:].lower(), plain))
+
+
+def _shell_sgo(game: Game, store: Store, rounds: int) -> bytes:
+    """A stock vehicle's round (Shell): its template as it is, but its load and `extra`, and its name."""
+    shell = store.weapon
+    doc = dsgo.parse(game.read('WEAPON', shell.template))
+    r = doc.root
+    if r.get('AmmoClass') != shell.ammo_class:
+        raise ValueError(f'{shell.template} 的弹类是 {r.get("AmmoClass")}，不是 {shell.ammo_class}')
+    blast = r.get('AmmoExplosion')
+    if (shell.kind == 'ap') != (not blast) or (shell.kind == 'ap' and r.get('AmmoIsPenetration') != 1.0):
+        raise ValueError(f'{shell.template}: {shell.kind} 弹应{"穿透且无爆炸" if shell.kind == "ap" else "有爆炸半径"}')
+    for key, value in shell.params(rounds).items():
+        if r.get(key) is None:
+            raise ValueError(f'{shell.template} 缺少 {key}')
+        r.set(key, value)
+    _named(r, store)
+    return dsgo.write(doc)
 
 
 def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
@@ -1267,7 +1352,7 @@ def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
             cp.items[i] = value
     cone.items[0] = cone.items[1] = missile.lock_cone
     _look(game, r, missile.look, JET_MISSILE_STOCK)
-    _named(r, store.name)
+    _named(r, store)
     return dsgo.write(doc)
 
 
@@ -1285,7 +1370,7 @@ def _bomb_sgo(game: Game, store: Store, rounds: int) -> bytes:
             raise ValueError(f'{JET_BOMB_STOCK} 缺少 {key}')
         r.set(key, value)
     _look(game, r, bomb.look, JET_BOMB_STOCK)
-    _named(r, store.name)
+    _named(r, store)
     return dsgo.write(doc)
 
 

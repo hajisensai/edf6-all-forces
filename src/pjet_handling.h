@@ -53,21 +53,38 @@ inline float TurnBank(float maxG,float corner,float minAir,float top) noexcept {
 inline float AimShare(float off) noexcept { return Clamp(off/kAimFine,kAimFineLeast,1.0f); }
 // rad/s it banks toward the aim's lift at `off` rad from it: from the gentle levelling rate on the aim to the path's
 // roll kAimRollFull off.
-// The ground's up under a wing rolling on it (playerjet.cpp Ground), from the floor's heights `fore` / `aft` along its
-// level unit `nose` and `right` / `left` along the level unit `side`, `span` m either side of its centre. The body
-// follows the slope its wheels stand on: held level on uneven ground it was turned against its contacts every physics
-// step and shook (the user, 2026-10-07: "the aircraft shake on the ground"). Tilted at most `most` rad: a steeper
-// floor than that is no runway (a rock, a wall's foot), the contacts alone have that.
-inline void GroundUp(float fore,float aft,float right,float left,float span,const float* nose,const float* side,float most,
-                     float* up) noexcept {
-    const float gf=(fore-aft)/(2.0f*span),gs=(right-left)/(2.0f*span);   // the rise a metre along nose / side
-    float n[3];
-    for(int i=0;i<3;++i)n[i]=-gf*nose[i]-gs*side[i];
-    n[1]+=1.0f;
-    const float h=std::sqrt(n[0]*n[0]+n[2]*n[2]);
-    if(h>std::tan(most)*n[1]){const float k=std::tan(most)*n[1]/h;n[0]*=k;n[2]*=k;}
+// On the ground (rolling or parked, playerjet.cpp Ground; a rotor craft set down) the airframe's contacts own its motion
+// along the ground's normal and its pitch and roll; the plugin owns only its motion along the ground and its yaw.
+// `lin` / `ang` come in as the solver left them (body506.cpp PhysicsHook reads them before the stock step) and go out
+// as the body's velocity: the plugin's `vel` across the normal `up` (the body's own up row: its contacts' plane) with
+// the solver's along it, the solver's spin across it with the plugin's `omega` about it.
+// The user (2026-10-09): 「飞机没起飞的时候，会在地上一抖一抖的」. Before, every frame overwrote the whole velocity and
+// spin: rolling, a vertical velocity of min(0, measured) (the solver's push out dropped, its push in fed back) and a spin
+// onto a 6 m probe plane that is not its wheels' (8 m apart); parked, the stock heli step pulled it level against its
+// gear (0x654E0F: any contact zeroes the attitude target; 0x6CE8D0's spring at 9/s). Either pressed a wheel into the
+// ground for the solver to push it back out, the next frame again (tools/ground_contact_check.cpp).
+inline void GroundContact(const float* up,const float* vel,const float* omega,float* lin,float* ang) noexcept {
+    float n[3]={up[0],up[1],up[2]};
     const float l=std::sqrt(n[0]*n[0]+n[1]*n[1]+n[2]*n[2]);
-    for(int i=0;i<3;++i)up[i]=n[i]/l;
+    if(!(l>1e-3f) || !std::isfinite(l)){n[0]=0.0f;n[1]=1.0f;n[2]=0.0f;}
+    else for(float& c:n)c/=l;
+    const float vn=vel[0]*n[0]+vel[1]*n[1]+vel[2]*n[2],sn=lin[0]*n[0]+lin[1]*n[1]+lin[2]*n[2];
+    const float wn=omega[0]*n[0]+omega[1]*n[1]+omega[2]*n[2],an=ang[0]*n[0]+ang[1]*n[1]+ang[2]*n[2];
+    for(int i=0;i<3;++i){lin[i]=vel[i]+n[i]*(sn-vn);ang[i]=ang[i]+n[i]*(wn-an);}
+}
+
+// Without the solver's velocity (body506.cpp: its getters' code not as expected, Body506ReadsSolver false) the plugin
+// cannot leave the normal motion to the contacts: writing its own whole, a parked craft's 0 every frame cancelled the
+// gravity, and over ground that fell away (a crater, the edge of a roof) it hung in the air. Then:
+//  - a parked craft is the stock step's again (Drives false; it falls and settles as it always did);
+//  - a rolling one keeps the measured motion along the normal (its fall, `measured`, m/s) with the plugin's along the
+//    ground and its spin (GroundFallback), the pitch and roll unchanged: it follows the ground down.
+constexpr bool Drives(bool parked,bool readsSolver) noexcept { return !parked || readsSolver; }
+inline void GroundFallback(const float* up,const float* vel,const float* omega,const float* measured,float* lin,float* ang) noexcept {
+    float solver[3]={measured[0],measured[1],measured[2]},spin[3]={0.0f,0.0f,0.0f};
+    if(!std::isfinite(solver[0]+solver[1]+solver[2])){solver[0]=solver[1]=solver[2]=0.0f;}
+    GroundContact(up,vel,omega,solver,spin);
+    for(int i=0;i<3;++i){lin[i]=solver[i];ang[i]=spin[i];}
 }
 
 inline float AimRoll(float pathRoll,float off) noexcept {

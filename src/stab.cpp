@@ -241,7 +241,11 @@ void __fastcall ReadbackHook(void* aim,int axis,int bone,float measuredJoint) no
 }
 
 // After the stock step of a seat's aim: the probe fed, the gun held (see the top).
-void Hold(Entry& e,unsigned char* aim,const float* before) noexcept {
+// The command's input at its end, by axis (stab::Hold::full): +-1 for an input of magnitude kFullInput or more.
+constexpr float kFullInput=0.999f;
+float FullOf(float in) noexcept { return in>=kFullInput ? 1.0f : in<=-kFullInput ? -1.0f : 0.0f; }
+
+void Hold(Entry& e,unsigned char* aim,const float* before,const float* in) noexcept {
     const unsigned char* seat=aim-kSeatAim;
     const ULONGLONG frame=GameFrame();
     const bool consecutive=e.stepFrame+1==frame;
@@ -280,6 +284,7 @@ void Hold(Entry& e,unsigned char* aim,const float* before) noexcept {
     const stab::Stops stops[2]={StopsAt(aim,0),StopsAt(aim,1)};
     const float top=At<float>(aim,kAimParams+8);
     float out[2];
+    e.hold.full[0]=FullOf(in[0]);e.hold.full[1]=FullOf(in[1]);   // the hull's turn adds to a full slew (stab.h)
     stab::Step(e.hold,stops,before,after,std::isfinite(top) ? std::fabs(top) : 0.0f,mount,seen,*PerfOf(e.v,e.seat,e.cls),out);
     e.active=true;
     for(int i=0;i<2;++i) {
@@ -297,7 +302,7 @@ void StepHook(void* aim,const float* in,AimStepFn next) noexcept {
     const float before[2]={AxisOf(a,0)[2],AxisOf(a,1)[2]};
     next(aim,in);
     __try {
-        Hold(*e,a,before);
+        Hold(*e,a,before,in);
         e->before[0]=before[0];e->before[1]=before[1];e->stepFrame=GameFrame();
     } __except(EXCEPTION_EXECUTE_HANDLER){Off(*e);}
 }

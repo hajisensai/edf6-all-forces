@@ -18,6 +18,7 @@ namespace {
 using namespace crew;
 alignas(16) unsigned char objects[32][0x2100]{},controls[32][16]{};
 int made=0,deleted=0,preloads=0,failAt=-1,checks=0;
+const wchar_t* lastPath=nullptr;
 bool wrong=false,initGood=true,registerGood=true;
 unsigned char registeredId[32]{};
 void Check(bool ok,const char* what){++checks;if(!ok){std::fprintf(stderr,"FAIL %s\n",what);std::exit(1);}}
@@ -27,7 +28,9 @@ unsigned char* __fastcall Create(void*,const float* m,const wchar_t* path,suppor
     initGood=initGood && init->vtable==image+support_native::kInitVtable;
     initGood=initGood && (reinterpret_cast<std::uintptr_t>(m)&15u)==0;
     for(unsigned char c:init->rest)initGood=initGood && c==0;
-    initGood=initGood && (wcscmp(path,support_native::kBodies[0])==0 || wcscmp(path,support_native::kBodies[1])==0);
+    bool stock=false;
+    for(const auto& pair:support_native::kBodies)for(const wchar_t* body:pair)stock=stock || wcscmp(path,body)==0;
+    initGood=initGood && stock;lastPath=path;
     auto* o=objects[i];auto* c=controls[i];std::memset(o,0,sizeof objects[i]);std::memset(c,0,16);
     Put<unsigned>(o,0,wrong ? 0 : 0x534F4C44);Put<void*>(o,0x28,o);Put<void*>(o,0x30,c);
     Put<LONG>(c,8,1);Put<LONG>(c,12,1);std::memcpy(o+0x90,m+12,12);
@@ -75,7 +78,7 @@ int main() {
         Check(std::memcmp(static_cast<const unsigned char*>(spawned.obj)+kPosition,wirePlan.units[i].matrix+12,12)==0,
               "aligned native copy preserves requested position exactly");
     }
-    Setup();Check(preloads==2 && SupportSoldiersReady(),"two Root resources queued for current mission");
+    Setup();Check(preloads==10 && SupportSoldiersReady(),"all five stock Ranger weapon templates (member and leader) queued");
     ObjRef one;Check(SpawnSupportSoldier(poses[0],&one) && initGood,"native InitParam and fixed real resource");
     Check(At<LONG>(one.ctrl,8)==1 && At<LONG>(one.ctrl,12)==2,"retain weak only, scene owns strong");
     Check(SupportSoldierHeld(one.obj),"new soldiers start held before network Active");
@@ -116,7 +119,24 @@ int main() {
     Check(!SpawnSupportSoldier(poses[0],&one) && made==0,"changed scene manager requires new preload");
     Setup();session=true;Check(SupportSoldiersReady(),"online resources ready for authenticated Apply");
     Check(!SpawnSupportSoldier(poses[0],&one) && made==0,"online direct creation blocked without replication");
+    // The host of a one-participant world deploys its own, unregistered soldiers (support_dispatch.cpp LocalAuthority).
+    Check(ApplySupportSoldierResource(poses[0],SupportSoldierResource(SupportWeapon::rocket,true),nullptr,true,&one) &&
+          lastPath && wcscmp(lastPath,L"app:/object/N601_COMMON_RANGER_RL_LEADER.sgo")==0 && At<unsigned>(one.obj,0x128)==0,
+          "host-local soldier: the configured stock rocket leader, never registered");
+    Check(ApplySupportSoldierResource(poses[1],SupportSoldierResource(SupportWeapon::sniper,false),nullptr,true,&one) &&
+          wcscmp(lastPath,L"app:/object/N601_COMMON_RANGER_SN.sgo")==0,"each weapon variant creates its own stock template");
+    {const int was=made;
+     Check(!ApplySupportSoldierResource(poses[1],0x502,nullptr,true,&one) && made==was,"an unknown soldier resource creates nothing");}
+    host=false;{const int was=made;
+    Check(!ApplySupportSoldierResource(poses[2],SupportSoldierResource(SupportWeapon::rifle,false),nullptr,true,&one) && made==was,
+          "a client never creates a local damaging soldier, whatever it asks");}host=true;
     unsigned char id[32]{};Put<unsigned>(id,0xC,5);Put<unsigned>(id,4,0xE0000001);
+    // An airborne aircraft's crew (support_dispatch.cpp BoardAirborne): made with its ID but unregistered, seated, then
+    // registered by the dispatcher.
+    {ObjRef crew;
+     Check(CreateSupportSoldierUnregistered(poses[3],SupportSoldierResource(SupportWeapon::rifle,false),id,false,&crew) &&
+           At<unsigned>(crew.obj,0x128)==0,"crew made with its ID is not registered before it is seated");
+     Check(RegisterSupportObject(crew.obj,id) && At<unsigned>(crew.obj,0x128)==2,"the dispatcher registers it afterwards");}
     Check(ApplySupportSoldierSpawn(poses[0],false,id,&one),"host applies authenticated event and native registration");
     Check(At<unsigned>(one.obj,0x128)==2 && At<LONG>(one.ctrl,12)==2,"host native owner and weak consumption");
     Check(!RegisterSupportObject(one.obj,id),"registered object cannot be registered twice");

@@ -93,6 +93,32 @@ inline void ImpactPlace(const float* origin,const float* point,float fallbackYaw
     for(int i=0;i<3;++i){look[i]=point[i];eye[i]=point[i]-d[i]*radius;}
 }
 
+// The point the high view observes (the user, 2026-10-09: "这个俯瞰视角有问题，计算明显不对，稍微远就跳到了指数级别的
+// 距离"): the shot's real landing `at` (`landed`) while it is within `most` m of the muzzle across the ground; otherwise
+// (the round's life ends in the air, it passes the search's reach, or it lands farther) the ground point under where the
+// shot ends, `most` m at the farthest, along the shot's heading (the bore's when it goes straight up or down), at the
+// ground's height there `ground`. Before, an unlanded shot's end was observed where it was: a flat gun raised a few
+// degrees put the view on a point hundreds of metres up and up to its whole life's flight away (the log: 122 m at 0.4 deg
+// down, 2409 m in the air at 2 deg up). Now the observed distance across the ground is never over the round's own reach
+// or `most`, the point is never in the air, and over flat ground the distance is continuous in the gun's elevation
+// (where a shot stops landing it lands at its life's end: the same point) and grows with it up to the arc's farthest
+// angle (tools/turret_cam_check.cpp sweeps it). The landing's distance still grows as height / tan(depression) for a flat
+// gun near the level: that is where its rounds go.
+inline float AcrossDistance(const float* a,const float* b) noexcept {
+    const float dx=b[0]-a[0],dz=b[2]-a[2];
+    return std::sqrt(dx*dx+dz*dz);
+}
+inline void HighFocus(const float* muzzle,const float* dir,bool landed,const float* at,float most,float ground,float* out) noexcept {
+    const float d=AcrossDistance(muzzle,at);
+    if(landed && d<=most){for(int i=0;i<3;++i)out[i]=at[i];return;}
+    float h[2]={at[0]-muzzle[0],at[2]-muzzle[2]};
+    float len=d;
+    if(!(len>1e-3f)){h[0]=dir[0];h[1]=dir[2];len=std::sqrt(h[0]*h[0]+h[1]*h[1]);}
+    if(!(len>1e-6f)){h[0]=0.0f;h[1]=1.0f;len=1.0f;}
+    const float r=std::fmin(d,most);
+    out[0]=muzzle[0]+h[0]/len*r;out[1]=ground;out[2]=muzzle[2]+h[1]/len*r;
+}
+
 // The view (yaw, pitch) of rig `r` whose screen's centre goes through world point `p` (the high view handing back: the
 // normal view comes back on the point the high one was on). The centre's line goes through O, raised with the eye when
 // the eye would be under O + rise (Place); found by going round a few times (O turns with the heading, the raise

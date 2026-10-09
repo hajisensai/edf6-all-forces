@@ -5,7 +5,10 @@
 //    air target crossing, closing and climbing, the Titan's side cannon (4 m/frame, gravity factor 2) at a ground target
 //    driving, from a level vehicle and one tilted on a slope (the drop is along its own down, as the aim models it).
 //    Out of reach: false.
-//  - NextPick: the nearest first, then each next one out, round to the nearest after the last; none: -1.
+//  - LockPick ("看哪锁哪", 2026-10-09): the one nearest the crosshair; the next one out only when that one is the lock
+//    already or the view has not moved since the last press (then round, through a crowd); none: -1.
+//  - The mark table (common/edf/weapon.h kGunRoles): the one place the flak's anti-air and the Bohr's / Katyusha's
+//    ground roles differ from an unmarked tank gun.
 //  - OffView: the angle off the view and the distance.
 //  - The player's gun's owner (common/edf/aimlink.h PlayerGunRule, the user 2026-10-06): with EDF6VehicleCrew's turret
 //    camera on the seat the gun follows the view and the plugin turns it only onto a lock in AUTO, never reading the
@@ -93,9 +96,19 @@ int main() {
         float a[3],d[3],n;
         Check(!aim::LeadSolve(m,muzzle,distant,none,4.0f,2.0f*kGravity,a,d,&n),"out of reach: no solution");
     }
-    Check(aim::NextPick(3,-1)==0 && aim::NextPick(3,0)==1 && aim::NextPick(3,1)==2 && aim::NextPick(3,2)==0,
-          "NextPick: the nearest, then each next one out, round");
-    Check(aim::NextPick(0,-1)==-1 && aim::NextPick(1,0)==0,"NextPick: none in sight, the only one");
+    Check(aim::LockPick(3,-1,false)==0,"LockPick: no lock yet, the one under the crosshair");
+    Check(aim::LockPick(3,2,false)==0 && aim::LockPick(3,1,false)==0,
+          "LockPick: the view moved onto another enemy, the press takes it, not the one after the old lock");
+    Check(aim::LockPick(3,0,false)==1,"LockPick: the one under the crosshair is the lock already: the next one out");
+    Check(aim::LockPick(3,1,true)==2 && aim::LockPick(3,2,true)==0,"LockPick: pressing on over the same spot steps through, round");
+    Check(aim::LockPick(0,-1,false)==-1 && aim::LockPick(1,0,false)==0 && aim::LockPick(1,0,true)==0,"LockPick: none in sight, the only one");
+    {
+        using edf::RoleOf;using edf::Prefer;
+        Check(RoleOf(edf::kMarkAir).prefer==Prefer::air && !RoleOf(edf::kMarkAir).lofted,"role table: the flak takes air targets first, low arc");
+        Check(RoleOf(edf::kMarkGround).prefer==Prefer::ground && !RoleOf(edf::kMarkGround).lofted,"role table: the Bohr takes ground first, low arc");
+        Check(RoleOf(edf::kMarkLofted).prefer==Prefer::ground && RoleOf(edf::kMarkLofted).lofted,"role table: the Katyusha lobs at the ground");
+        Check(RoleOf(0).prefer==Prefer::any && !RoleOf(0).lofted && RoleOf(1).prefer==Prefer::any,"role table: an unmarked gun has no preference");
+    }
     {
         const float eye[3]={0.0f,0.0f,0.0f},dir[3]={0.0f,0.0f,1.0f},p[3]={100.0f,0.0f,100.0f};
         float distance;

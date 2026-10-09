@@ -17,7 +17,9 @@
 #include "crew.h"
 #include "mod_room.h"
 #include "support_soldier.h"
+#include "support_config.h"
 #include "lockon.h"
+#include "turretaim.h"
 #include "hudscale.h"
 #include "hudtext.h"
 #include "gunnerrecoil.h"
@@ -236,15 +238,11 @@ void Validate(Config& n) noexcept {
     n.proteusModeButton=static_cast<int>(FixInt("ProteusModeButton",n.proteusModeButton,0,255));
     n.proteusShieldKey=static_cast<int>(FixInt("ProteusShieldKey",n.proteusShieldKey,0,254));
     n.proteusShieldButton=static_cast<int>(FixInt("ProteusShieldButton",n.proteusShieldButton,0,255));
-    n.proteusMarkKey=static_cast<int>(FixInt("ProteusMarkKey",n.proteusMarkKey,0,254));
-    n.proteusMarkButton=static_cast<int>(FixInt("ProteusMarkButton",n.proteusMarkButton,0,255));
     n.proteusSalvoKey=static_cast<int>(FixInt("ProteusSalvoKey",n.proteusSalvoKey,0,254));
     Fix("ProteusWalkSpeed",n.proteusWalkSpeed,0.2f,4.0f);
     Fix("ProteusWalkTurn",n.proteusWalkTurn,0.2f,4.0f);
     Fix("ProteusStepHeight",n.proteusStepHeight,0.0f,4.0f);   // 4 m: the walkable test's floor (StepNormal 0.2 on the 5 m foot)
     Fix("ProteusShieldSlow",n.proteusShieldSlow,0.0f,1.0f);
-    Fix("ProteusShieldArc",n.proteusShieldArc,10.0f,360.0f);
-    Fix("ProteusShieldBlock",n.proteusShieldBlock,0.0f,1.0f);
     Fix("ProteusWalkGunRate",n.proteusWalkGunRate,0.1f,5.0f);
     Fix("ProteusWalkGunSpread",n.proteusWalkGunSpread,0.0f,10.0f);
     Fix("ProteusDeploySec",n.proteusDeploySec,0.0f,10.0f);
@@ -265,12 +263,6 @@ void Validate(Config& n) noexcept {
     Fix("ProteusFieldFireRate",n.proteusFieldFireRate,1.0f,5.0f);
     Fix("ProteusFieldEnergy",n.proteusFieldEnergy,0.0f,1.0f);
     Fix("ProteusFieldPower",n.proteusFieldPower,0.0f,10000.0f);
-    Fix("ProteusGunRate",n.proteusGunRate,0.0f,20.0f);
-    Fix("ProteusGunDamage",n.proteusGunDamage,0.0f,1.0e6f);
-    n.proteusSalvoCount=static_cast<int>(FixInt("ProteusSalvoCount",n.proteusSalvoCount,1,60));
-    Fix("ProteusSalvoDamage",n.proteusSalvoDamage,0.0f,1.0e6f);
-    Fix("ProteusSalvoCooldownSec",n.proteusSalvoCooldownSec,0.0f,3600.0f);
-    Fix("ProteusSalvoRange",n.proteusSalvoRange,100.0f,1800.0f);   // the gunship shell's reach (jet_bay.cpp kGunshipReach)
     Fix("ProteusPriority",n.proteusPriority,0.05f,1.0f);
     Fix("ProteusPriorityRadius",n.proteusPriorityRadius,0.0f,1000.0f);
     Fix("PrimerHpScale",n.primerHpScale,0.05f,100.0f);
@@ -476,7 +468,7 @@ void LoadConfig() noexcept {
     n.vehicleMissileVolume=ReadFloat(L"VehicleMissileVolume",n.vehicleMissileVolume);
     n.bigWorld=ReadFloat(L"BigWorld",n.bigWorld);
     n.terrainShare=ReadBool(L"TerrainShare",n.terrainShare);
-    n.edf5CampaignRows=FixInt("EDF5CampaignRows",ReadInt(L"EDF5CampaignRows",n.edf5CampaignRows),0,512);
+    n.edf5CampaignContent=FixInt("EDF5CampaignContent",ReadInt(L"EDF5CampaignContent",n.edf5CampaignContent),0,65535);
     n.airSoftEdge=ReadFloat(L"AirSoftEdge",n.airSoftEdge);
     n.airSoftTurns=ReadFloat(L"AirSoftTurns",n.airSoftTurns);
     n.airSoftCeil=ReadFloat(L"AirSoftCeil",n.airSoftCeil);
@@ -544,16 +536,12 @@ void LoadConfig() noexcept {
     n.proteusModeButton=ReadInt(L"ProteusModeButton",static_cast<DWORD>(n.proteusModeButton));
     n.proteusShieldKey=ReadInt(L"ProteusShieldKey",static_cast<DWORD>(n.proteusShieldKey));
     n.proteusShieldButton=ReadInt(L"ProteusShieldButton",static_cast<DWORD>(n.proteusShieldButton));
-    n.proteusMarkKey=ReadInt(L"ProteusMarkKey",static_cast<DWORD>(n.proteusMarkKey));
-    n.proteusMarkButton=ReadInt(L"ProteusMarkButton",static_cast<DWORD>(n.proteusMarkButton));
     n.proteusSalvoKey=ReadInt(L"ProteusSalvoKey",static_cast<DWORD>(n.proteusSalvoKey));
     n.proteusTwoSeats=ReadBool(L"ProteusTwoSeats",n.proteusTwoSeats);
     n.proteusWalkSpeed=ReadFloat(L"ProteusWalkSpeed",n.proteusWalkSpeed);
     n.proteusWalkTurn=ReadFloat(L"ProteusWalkTurn",n.proteusWalkTurn);
     n.proteusStepHeight=ReadFloat(L"ProteusStepHeight",n.proteusStepHeight);
     n.proteusShieldSlow=ReadFloat(L"ProteusShieldSlow",n.proteusShieldSlow);
-    n.proteusShieldArc=ReadFloat(L"ProteusShieldArc",n.proteusShieldArc);
-    n.proteusShieldBlock=ReadFloat(L"ProteusShieldBlock",n.proteusShieldBlock);
     n.proteusWalkGunRate=ReadFloat(L"ProteusWalkGunRate",n.proteusWalkGunRate);
     n.proteusWalkGunSpread=ReadFloat(L"ProteusWalkGunSpread",n.proteusWalkGunSpread);
     n.proteusDeploySec=ReadFloat(L"ProteusDeploySec",n.proteusDeploySec);
@@ -574,13 +562,6 @@ void LoadConfig() noexcept {
     n.proteusFieldFireRate=ReadFloat(L"ProteusFieldFireRate",n.proteusFieldFireRate);
     n.proteusFieldEnergy=ReadFloat(L"ProteusFieldEnergy",n.proteusFieldEnergy);
     n.proteusFieldPower=ReadFloat(L"ProteusFieldPower",n.proteusFieldPower);
-    n.proteusDriverGun=ReadBool(L"ProteusDriverGun",n.proteusDriverGun);
-    n.proteusGunRate=ReadFloat(L"ProteusGunRate",n.proteusGunRate);
-    n.proteusGunDamage=ReadFloat(L"ProteusGunDamage",n.proteusGunDamage);
-    n.proteusSalvoCount=ReadInt(L"ProteusSalvoCount",static_cast<DWORD>(n.proteusSalvoCount));
-    n.proteusSalvoDamage=ReadFloat(L"ProteusSalvoDamage",n.proteusSalvoDamage);
-    n.proteusSalvoCooldownSec=ReadFloat(L"ProteusSalvoCooldownSec",n.proteusSalvoCooldownSec);
-    n.proteusSalvoRange=ReadFloat(L"ProteusSalvoRange",n.proteusSalvoRange);
     n.proteusPriority=ReadFloat(L"ProteusPriority",n.proteusPriority);
     n.proteusPriorityRadius=ReadFloat(L"ProteusPriorityRadius",n.proteusPriorityRadius);
     n.primer=ReadBool(L"Primer",n.primer);
@@ -694,15 +675,14 @@ void LoadConfig() noexcept {
     Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f",n.map,n.mapKey,n.mapButton,n.mapViewDistance);
     Log("CONFIG stockStores=%d seatSwitch=%d nextKey=0x%X numberKeys=%d button=0x%X pilot=%d online=%d list=%d",n.stockStores,n.seatSwitch,
         n.seatNextKey,n.seatNumberKeys,n.seatButton,n.seatPilot,n.seatSwitchOnline,n.seatList);
-    Log("CONFIG proteus=%d keys mode=0x%X/0x%X shield=0x%X/0x%X mark=0x%X/0x%X salvo=0x%X twoSeats=%d walk x%.2f turn x%.2f step %.1fm shieldSlow %.2f arc %.0f block %.2f",
-        n.proteus,n.proteusModeKey,n.proteusModeButton,n.proteusShieldKey,n.proteusShieldButton,n.proteusMarkKey,n.proteusMarkButton,n.proteusSalvoKey,
-        n.proteusTwoSeats,n.proteusWalkSpeed,n.proteusWalkTurn,n.proteusStepHeight,n.proteusShieldSlow,n.proteusShieldArc,n.proteusShieldBlock);
+    Log("CONFIG proteus=%d keys mode=0x%X/0x%X shield=0x%X/0x%X launcher=0x%X twoSeats=%d walk x%.2f turn x%.2f step %.1fm shieldSlow %.2f",
+        n.proteus,n.proteusModeKey,n.proteusModeButton,n.proteusShieldKey,n.proteusShieldButton,n.proteusSalvoKey,
+        n.proteusTwoSeats,n.proteusWalkSpeed,n.proteusWalkTurn,n.proteusStepHeight,n.proteusShieldSlow);
     Log("CONFIG proteus guns walk x%.2f/x%.2f deployed x%.2f/x%.2f stagger %.1f/%.1fs deployTurn %.2f lift %.0fm heat %.0f/%.0fs resume %.2f barrier %.2f regen %.0fs delay %.0fs",
         n.proteusWalkGunRate,n.proteusWalkGunSpread,n.proteusDeployGunRate,n.proteusDeployGunSpread,n.proteusDeploySec,n.proteusStowSec,n.proteusDeployTurn,
         n.proteusViewLift,n.proteusHeatSec,n.proteusCoolSec,n.proteusResumeHeat,n.proteusBarrier,n.proteusBarrierRegenSec,n.proteusBarrierDelaySec);
-    Log("CONFIG proteus field %.0fm defense %.2f attack %.2f fireRate %.2f energy %.2f power %.0f; gun=%d %.1f/s %.0f; salvo %d x %.0f cooldown %.0fs range %.0f; priority %.2f within %.0fm",
-        n.proteusFieldRadius,n.proteusFieldDefense,n.proteusFieldAttack,n.proteusFieldFireRate,n.proteusFieldEnergy,n.proteusFieldPower,n.proteusDriverGun,
-        n.proteusGunRate,n.proteusGunDamage,n.proteusSalvoCount,n.proteusSalvoDamage,n.proteusSalvoCooldownSec,n.proteusSalvoRange,n.proteusPriority,
+    Log("CONFIG proteus field %.0fm defense %.2f attack %.2f fireRate %.2f energy %.2f power %.0f; priority %.2f within %.0fm",
+        n.proteusFieldRadius,n.proteusFieldDefense,n.proteusFieldAttack,n.proteusFieldFireRate,n.proteusFieldEnergy,n.proteusFieldPower,n.proteusPriority,
         n.proteusPriorityRadius);
     Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d boardingGun=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard,n.boardingGun);
     Log("CONFIG carrierLaser=%d damage=%.0f break=%.2f",n.carrierLaser,n.carrierLaserDamage,n.carrierLaserBreak);
@@ -712,6 +692,7 @@ void LoadConfig() noexcept {
         n.tempestTv,n.tempestTvMouseSpeed,n.tempestTvBoost);
     Config* const fresh=new(std::nothrow) Config(n);
     if(fresh)published.store(fresh,std::memory_order_release);
+    LoadSupportConfig(iniPath);   // support_config.h: callable units and their crews' weapons, validated
 }
 
 }  // namespace
@@ -901,8 +882,9 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallKatyusha();      // the Katyusha's launcher pose: the arc onto the camera's ground point, the telescopic ram
     InstallNix();           // the Nix's torso twist: its own update (slot 4) chained, apart from the crews' input slot
     InstallTurretCam();     // the riding camera of a turret (decoupled from it, free look, the high view's placement)
+    InstallSpotRay();       // the stock spot (Q) from a vehicle: along the camera actually drawn (turretaim.cpp)
     InstallStabilizer();    // the gun stabilizer, after the aim steps the turret camera chains (it runs from its hook)
-    InstallProteus();       // chain both aims after the turret camera and plain-aim stabilizer hooks
+    InstallProteus();       // the Proteus rework: its weapon mounts, shield barrier, piles and field
     InstallMap();           // the map view (the player's camera overhead, their input held while it is open)
     InstallSightZoom();     // a vehicle gun's sight magnified (the same camera step, chained after the map's)
     InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp), the sidecar's level hook
@@ -914,7 +896,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallRounds();        // the stock vehicles' and helis' impact points: the rounds as the game flies them
     InstallStockGauges();   // the stock weapon gauge where our HUD lists the weapons, the fuel tanks it showed
     InstallGlyphLock();     // the game's own text, wrong or missing characters (glyphs.cpp)
-    InstallEdf5Campaign();  // the EDF5 campaign's rows left out of the story's end and clear ratio (edf5campaign.cpp)
+    InstallEdf5Campaign();  // the EDF5 campaign's mission packs owned (edf5campaign.cpp)
     InstallJetSound();
     InstallVehicleSound();  // the ground vehicles' engines, turrets, loaders and main guns (vehsound.cpp)
     InstallMissiles();

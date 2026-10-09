@@ -94,6 +94,10 @@ constexpr float kStopDecel=1.2f,kStopLag=1.5f;
 // top/agility: 1.06 m/s^2 for the stock 506, close to the measured kStopDecel). The yaw rate limit is
 // raised to heliYawRate where lower, and its smoothing to kTunedYawSmooth.
 constexpr std::size_t kDamp=0x1614,kSpeedGain=0x162C,kBlend=0x1630,kMaxYaw=0x1634,kYawSmooth=0x1638;
+// The vertical damping (heli_movement [0][2]), the tilt smoothing (vehicle_setup[1][6]) and the rotor's up / down rates
+// (heli_roter [1] / [2], R+4 / R+8 of the rotor at +0x1BC8: 0x656744 / 0x656770), its idle (R+0xC, 0x651EE1):
+// docs/aircraft-re.md §1.
+constexpr std::size_t kVertDamp=0x1618,kTiltSmooth=0x1644,kRotorUp=0x1BCC,kRotorDown=0x1BD0,kRotorIdle=0x1BD4;
 constexpr float kTunedYawSmooth=0.005f,kStopShare=0.8f;
 // Attack: strafing runs. The guns are fixed along the nose, the nose dips 35 deg * forward stick, and
 // steady forward stick s flies the heli at kTopSpeed * s, so the dip and the speed are one control. Hovering
@@ -2308,9 +2312,9 @@ namespace {
 // slides on. The heli's own params made to settle over PlayerHeliStopSec instead, as Tune does for the NPC (the game's
 // own velocity law, nothing written to the velocity): blend from 1-d*(1-blend) = 1/frames, k keeping its stock top
 // speed (b k / (1-d (1-b))). Written every frame the player flies it (as Fly does), the stock ones back as they get off.
-// The yaw (the mouse-aim flight's, PlayerYawTune): the heli's own max yaw rate and smoothing are kept with the speed
-// params and put back as the player gets off.
-struct Assist { ObjRef ref; float k,b,yaw,smooth; ULONGLONG seen; bool said,yawSaid; };
+// The mouse-aim flight's own params (PlayerMouseTune): the heli's max yaw rate and smoothing, its rotor's up / down
+// rates and its tilt smoothing are kept with the speed params and put back as the player gets off (or takes a pad).
+struct Assist { ObjRef ref; float k,b,yaw,smooth,rotorUp,rotorDown,tilt; ULONGLONG seen; bool said,yawSaid; };
 Assist assists[8];
 constexpr ULONGLONG kAssistStaleMs=2000;
 
@@ -2318,6 +2322,7 @@ void AssistOff(unsigned char* v) noexcept {
     for(auto& a:assists) {
         if(!a.ref.Is(v))continue;
         Put<float>(v,kSpeedGain,a.k);Put<float>(v,kBlend,a.b);Put<float>(v,kMaxYaw,a.yaw);Put<float>(v,kYawSmooth,a.smooth);
+        Put<float>(v,kRotorUp,a.rotorUp);Put<float>(v,kRotorDown,a.rotorDown);Put<float>(v,kTiltSmooth,a.tilt);
         a=Assist{};
         Log("HELI v=%p the player is off: its own speed and yaw params back",v);
     }
@@ -2332,21 +2337,37 @@ Assist* AssistOf(unsigned char* v) noexcept {
     if(!a) {
         for(auto& x:assists)if(!a && (!x.ref || ms-x.seen>kAssistStaleMs))a=&x;
         if(!a)return nullptr;
-        *a=Assist{ObjRef::Of(v),At<float>(v,kSpeedGain),At<float>(v,kBlend),At<float>(v,kMaxYaw),At<float>(v,kYawSmooth),ms,false,false};
+        *a=Assist{ObjRef::Of(v),At<float>(v,kSpeedGain),At<float>(v,kBlend),At<float>(v,kMaxYaw),At<float>(v,kYawSmooth),
+                  At<float>(v,kRotorUp),At<float>(v,kRotorDown),At<float>(v,kTiltSmooth),ms,false,false};
     }
     a->seen=ms;
     return a;
 }
 
-// Give mouse flight enough native angle authority/smoothing to track its rate command (AimFly inverts
-// that angle-state lag). +1634 is NOT rad/s: the native spring converts the angle to angular velocity.
-// HeliYawRate remains the player's desired rate limit; stock pad flight restores the original parameters.
-void PlayerYawTune(unsigned char* v,bool mouse) noexcept {
+// The instructor's actuators (AimFly), each at least as quick as it needs and put back with the pad (or off):
+//  - yaw: enough native angle authority/smoothing to track its rate command (AimFly inverts that angle-state lag).
+//    +1634 is NOT rad/s: the native spring converts the angle to angular velocity. HeliYawRate remains the player's
+//    desired rate limit;
+//  - the rotor's up / down rates (0x656744 / 0x656770: rotor += rate (throttle - rotor) a frame) to aim::kPlayerRotorRate:
+//    the stock 0.001 / 0.0007 lag the collective by 17 / 24 s, and no throttle can make up for it (heliaim.h
+//    CollectiveThrottle; heli_aim_check's "before" rows porpoise +-10 m for 40 s after one climb);
+//  - the tilt smoothing (+0x1644, pitch = lerp(pitch, maxTilt x input, it) 0x654E69) to kPlayerTiltSmooth: the stock
+//    0.005 a frame lagged the nose 3 s behind the mouse. The tilt is only the attitude: the motion is the velocity law's.
+constexpr float kPlayerTiltSmooth=0.05f;
+float AtLeast(float stock,float want) noexcept { return std::isfinite(stock) && stock>want ? stock : want; }
+void PlayerMouseTune(unsigned char* v,bool mouse) noexcept {
     Assist* const a=AssistOf(v);
     if(!a)return;
     const float yaw=a->yaw,smooth=a->smooth,want=Cfg().heliYawRate*kPi/180.0f;
-    if(!std::isfinite(yaw+smooth))return;
-    if(!mouse || !(want>std::fabs(yaw))){Put<float>(v,kMaxYaw,yaw);Put<float>(v,kYawSmooth,smooth);return;}
+    if(!std::isfinite(yaw+smooth+a->rotorUp+a->rotorDown+a->tilt))return;
+    if(!mouse) {
+        Put<float>(v,kMaxYaw,yaw);Put<float>(v,kYawSmooth,smooth);
+        Put<float>(v,kRotorUp,a->rotorUp);Put<float>(v,kRotorDown,a->rotorDown);Put<float>(v,kTiltSmooth,a->tilt);
+        return;
+    }
+    Put<float>(v,kRotorUp,AtLeast(a->rotorUp,aim::kPlayerRotorRate));Put<float>(v,kRotorDown,AtLeast(a->rotorDown,aim::kPlayerRotorRate));
+    Put<float>(v,kTiltSmooth,AtLeast(a->tilt,kPlayerTiltSmooth));
+    if(!(want>std::fabs(yaw))){Put<float>(v,kMaxYaw,yaw);Put<float>(v,kYawSmooth,smooth);return;}
     Put<float>(v,kMaxYaw,want*aim::YawSign(yaw));Put<float>(v,kYawSmooth,smooth<kTunedYawSmooth ? kTunedYawSmooth : smooth);
     if(!a->yawSaid && (a->yawSaid=true))
         Log("HELI v=%p player turn limit %.0f deg/s: native angle authority %.0f deg, smoothing %.4f (its own %.0f deg, %.4f)",v,
@@ -2371,20 +2392,21 @@ void PlayerAssist(unsigned char* v) noexcept {
 }
 
 // ---- The player at the stick of a stock helicopter: the mouse-aim flight and the helicopter HUD's readout ----
-// The mouse-aim flight (ini HeliMouseAim, heliaim.h; keyboard and mouse only: a pad keeps the stock control): the stock
-// input (slot 55) copies LX, the trigger, LY and RX to the heli and never RY, so the mouse's Y only ever moved the camera
-// (heli-input-re.md §2, §4). After it (HeliFrame runs in its post-hook, crew.cpp InputHook, so slot 57 reads this frame's
-// values) the input block is written from what aim::Fly asks, through the NPC pilot's own law (Steer's StockStick,
-// StockThrottle and StockYaw). PlayerAttitudeHook substitutes the mouse's pitch only for the attitude calculation;
-// the forward value remains the speed controller's for translation. The lateral drives the
-// sidestep, the yaw the turn onto the aim's heading (+ grows the heading angle with a positive max yaw rate, aim::YawSign:
-// the stock writes -RX and the mouse to the right turns the heli right, docs/player-jet-re.md §2), the throttle the rotor
-// for the climb (the height held with the rotor that holds it, learned as the NPC's is, from the takeoff cue's stock hover
-// speed on). PlayerAssist's settle runs first: with the setpoint at 0 it stops within PlayerHeliStopSec. On the ground
-// (OnGround: contact bit 1 with the map under it, not perched on a body) nothing horizontal and the stock throttle (Space
-// lifts it off, as before), and for kLiftOffMs after it no horizontal stick and no speed set (the NPC's lift-off).
-// The descend key is the brake key (ini PlayerJetBrakeKey): the stock keyboard has none, letting go of Space only spun
-// the rotor down.
+// The mouse-aim flight (ini HeliMouseAim, heliaim.h's instructor; keyboard and mouse only: a pad keeps the stock control):
+// the stock input (slot 55) copies LX, the trigger, LY and RX to the heli and never RY, so the mouse's Y only ever moved
+// the camera (heli-input-re.md §2, §4). After it (HeliFrame runs in its post-hook, crew.cpp InputHook, so slot 57 reads
+// this frame's values) the input block is written in three layers:
+//  1. the attitude wanted (aim::Instructor): the aim's heading and pitch, the cyclic's forward speed for that pitch, the
+//     A / D slide, the collective's climb (W / S, Space, the brake key; let go: the height held);
+//  2. the attitude controller: the yaw onto the aim's heading through the native yaw lag's inverse (aim::PlayerYawInput;
+//     + grows the heading angle with a positive max yaw rate, aim::YawSign), the pitch the aim's (PlayerAttitudeHook
+//     hands it to the attitude function alone), the roll the slide's plus a coordinated turn's bank (aim::BankInput);
+//  3. the native input block: forward / lateral the velocity law's stick (aim::StockStick: the stock heli flies its
+//     velocity directly, docs/aircraft-re.md §2), the throttle the collective through the rotor lag's inverse
+//     (aim::CollectiveThrottle), on the actuators PlayerMouseTune quickens.
+// PlayerAssist's settle runs first: let go of the pitch the heli stops within PlayerHeliStopSec. On the ground (OnGround:
+// contact bit 1 with the map under it, not perched on a body) nothing horizontal and the stock throttle, W or Space
+// spinning it up to lift off; for kLiftOffMs after it no horizontal stick (the NPC's lift-off).
 // The readout (PlayerHeliHud) is gathered while the mouse flies it, the HUD (ini HeliFlightHud) is on or the warnings are
 // heard (ini WarnAudio, warn.cpp): the mouse's aim is drawn whenever it flies, the HUD around it only with HeliFlightHud.
 constexpr std::size_t kSeatPad=0x2B0,kSeatLX=0x2C0,kSeatLY=0x2C4,kSeatRX=0x2D0,kSeatRY=0x2D4,kSeatAscend=0x2E0;   // §4
@@ -2403,6 +2425,8 @@ struct Pilot {
     aim::Hold hold;
     float hover;                       // the rotor that holds its height (learned, StockThrottle)
     float prevHeading,yawRate;
+    float prevFwd[3],turn;             // the level nose last frame; its turn toward row 0 (rad/s, BankInput)
+    float pitchIn,rollIn;              // the attitude the controller asks this frame (PlayerAttitudeHook's pitch / roll input)
     bool flying;                       // the mouse-aim flight wrote its input last frame (logged as it changes)
 };
 Pilot pilots[4];
@@ -2419,7 +2443,8 @@ const unsigned char kPlayerYawConvertSig[]={0xF3,0x41,0x0F,0x59,0xD1,0xF3,0x0F,0
 using PlayerAttitudeFn=void(__fastcall*)(unsigned char*,void*,const float*,const unsigned char*);
 PlayerAttitudeFn playerAttitudeNext=nullptr;
 
-bool PlayerPitch(const unsigned char* attitude,float* pitch) noexcept {
+// This frame's attitude input of the local mouse pilot of the heli whose attitude block is `attitude` (AimFly's).
+bool PlayerAttitudeInput(const unsigned char* attitude,float* pitch,float* roll) noexcept {
     if(!Cfg().enabled || !Cfg().heliMouseAim)return false;
     for(const auto& p:pilots) {
         const auto v=static_cast<const unsigned char*>(p.ref.obj);
@@ -2428,7 +2453,7 @@ bool PlayerPitch(const unsigned char* attitude,float* pitch) noexcept {
         const auto seat=SeatAt(const_cast<unsigned char*>(v),0);
         if(SeatRider(seat)!=Rider::player || At<unsigned char>(seat,kSeatPad)!=0)return false;
         if(edf::RemoteRider(At<const unsigned char*>(seat,kSeatRider)))return false;
-        *pitch=aim::PitchInput(p.aim,At<float>(v,kPlayerMaxTilt));
+        *pitch=p.pitchIn;*roll=p.rollIn;
         return true;
     }
     return false;
@@ -2438,9 +2463,9 @@ void __fastcall PlayerAttitudeHook(unsigned char* attitude,void* body,const floa
     alignas(16) float own[5];
     const float* use=input;
     __try {
-        float pitch=0.0f;
-        if(input && PlayerPitch(attitude,&pitch)) {
-            std::memcpy(own,input,sizeof(own));own[2]=pitch;use=own;
+        float pitch=0.0f,roll=0.0f;
+        if(input && PlayerAttitudeInput(attitude,&pitch,&roll)) {
+            std::memcpy(own,input,sizeof(own));own[0]=roll;own[2]=pitch;use=own;
         }
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
     playerAttitudeNext(attitude,body,use,contact);
@@ -2475,7 +2500,7 @@ Pilot* PilotOf(unsigned char* v,const float* fwd,ULONGLONG ms) noexcept {
     for(auto& x:pilots)if(!p && (!x.ref || x.ref.Is(v) || ms-x.seen>kAssistStaleMs))p=&x;
     if(!p)return nullptr;
     *p=Pilot{};p->ref=ObjRef::Of(v);p->lastMs=p->seen=ms;
-    std::memcpy(p->aim,fwd,12);
+    std::memcpy(p->aim,fwd,12);std::memcpy(p->prevFwd,fwd,12);
     const float lift=At<float>(v,kLiftPerRotor),mass=At<float>(v,kLiftMass);   // the takeoff cue's hover speed
     p->hover=aim::HoverRotor(lift,mass);
     p->prevHeading=std::atan2(fwd[0],fwd[2]);
@@ -2500,47 +2525,62 @@ float SeatAxis(const unsigned char* seat,std::size_t at) noexcept {
     return std::isfinite(x) ? Clamp(x,-1.0f,1.0f) : 0.0f;
 }
 
-// The mouse-aim flight's frame (see the top): the aim moved, the want, the input block written.
+// The mouse-aim flight's frame (see the top): the aim moved, the attitude wanted, the attitude controller, the input block.
 void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos,const float* fwd,const float* right,bool grounded,
             float clear,float dt,ULONGLONG ms) noexcept {
-    const float ly=SeatAxis(seat,kSeatLY),ry=SeatAxis(seat,kSeatRY);
-    const aim::Keys keys{ly<-0.3f ? 1.0f : ly>0.3f ? -1.0f : 0.0f,SeatAxis(seat,kSeatLX),
-                         (At<float>(seat,kSeatAscend)>0.5f ? 1.0f : 0.0f)-(KeyDown(Cfg().playerJetBrakeKey) ? 1.0f : 0.0f)};
+    const float ly=SeatAxis(seat,kSeatLY),ry=SeatAxis(seat,kSeatRY),side=SeatAxis(seat,kSeatLX);
+    // The collective: W / S (the stock's -LY: W gives LY < 0), Space (the stock ascend) and the brake key.
+    const float vert=Clamp((ly<-0.3f ? 1.0f : ly>0.3f ? -1.0f : 0.0f)+(At<float>(seat,kSeatAscend)>0.5f ? 1.0f : 0.0f)-
+                           (KeyDown(Cfg().playerJetBrakeKey) ? 1.0f : 0.0f),-1.0f,1.0f);
     const float mx=SeatAxis(seat,kSeatRX),my=Cfg().playerJetInvertPitch ? ry : -ry,k=aim::kPerUnit*Cfg().playerJetMouseSpeed;
     float vp[16];
     if(LastViewProj(vp)) {
         // A level nose can itself be outside a downward-looking camera. Recover toward the actual view centre,
-        // not that same invisible nose, when the user moves the mouse; no mouse must not introduce a new descent.
+        // not that same invisible nose, when the user moves the mouse; no mouse must not introduce a new pitch.
         float centre[3]={fwd[0],fwd[1],fwd[2]},eye[3],view[3];
         if(CameraRay(eye,view))aim::ViewCentreAim(pos,eye,view,kPlayerMark,centre);
         const bool visible=aim::OnScreen(vp,pos,p.aim,kPlayerMark,kAimOnScreen);
         if(visible || mx!=0.0f || my!=0.0f)aim::MoveOnScreen(vp,pos,p.aim,mx,my,k,centre,kPlayerMark,kAimOnScreen);
     } else aim::Move(p.aim,mx,my,k);
-    const float top=PlayerTop(v);
+    const float top=PlayerTop(v),maxTilt=At<float>(v,kPlayerMaxTilt);
     if(grounded)p.groundAt=ms;
-    const bool lifting=ms-p.groundAt<kLiftOffMs;   // the NPC's lift-off: straight up, nothing horizontal (and no setpoint)
-    const aim::Want w=aim::Fly(p.hold,p.aim,fwd,pos,p.vel,keys,top,kPlayerClimb,grounded,lifting,clear,dt);
+    const bool lifting=ms-p.groundAt<kLiftOffMs;   // the NPC's lift-off: straight up, nothing horizontal
+    // 1. The attitude wanted.
+    float pitch=0.0f;
+    const aim::Want w=aim::Instructor(p.hold,p.aim,fwd,pos,p.vel,vert,side,top,kPlayerClimb,maxTilt,grounded,lifting,clear,&pitch);
+    // 3. (the velocity first: the roll is built on its lateral) The cyclic's stick for the velocity.
     float forward=0.0f,lateral=0.0f;
     aim::StockStick(w.vel,p.vel,top,kBrakeGain,fwd,right,&forward,&lateral);
     if(lifting)forward=lateral=0.0f;
+    // 2. The attitude controller. The native yaw channel is a lagged heading offset, not a rate: compensate its current
+    // state and the native spring conversion (aim::PlayerYawInput). The pitch the aim's; the roll the slide's plus the
+    // turn's bank (the nose's turn toward row 0, measured, times the forward speed).
     const float heading=std::atan2(fwd[0],fwd[2]);
-    // The native yaw channel is a lagged heading offset, not a rate. Compensate its current state and
-    // the native spring conversion before writing input; see aim::PlayerYawInput.
     const float maxYaw=At<float>(v,kMaxYaw);
     const float spring=At<float>(v,kPlayerYawSpring),blend=At<float>(v,kYawSmooth),state=At<float>(v,kPlayerYawState);
     const float rateLimit=Cfg().heliYawRate>0.0f ? Cfg().heliYawRate*kPi/180.0f : std::fabs(maxYaw)*spring*60.0f;
     const float yaw=aim::PlayerYawInput(Wrap(std::atan2(w.face[0],w.face[2])-heading),p.yawRate,rateLimit,maxYaw,state,blend,spring);
+    const float turnNow=((fwd[0]-p.prevFwd[0])*right[0]+(fwd[2]-p.prevFwd[2])*right[2])/dt;
+    std::memcpy(p.prevFwd,fwd,12);
+    if(std::isfinite(turnNow))p.turn+=(turnNow-p.turn)*0.3f;
+    const float along=p.vel[0]*fwd[0]+p.vel[2]*fwd[2];
+    p.pitchIn=maxTilt>1e-3f ? Clamp(-pitch/maxTilt,-1.0f,1.0f) : 0.0f;
+    p.rollIn=grounded ? lateral : Clamp(lateral+aim::BankInput(along,p.turn,maxTilt),-1.0f,1.0f);
     Put<float>(v,kInLateral,lateral);Put<float>(v,kInForward,forward);Put<float>(v,kInW,1.0f);Put<float>(v,kInYaw,yaw);
-    if(!grounded) {   // on the ground the stock throttle (the ascend key) lifts it off
+    // 3. The collective. On the ground the stock throttle (Space) stands, W spins the rotor up too.
+    if(!grounded) {
         const bool learn=p.hold.holding && std::fabs(p.hold.y-pos[1])<6.0f;
-        Put<float>(v,kInThrottle,aim::StockThrottle(w.climb,p.vel[1],At<float>(v,kRotor),&p.hover,learn,dt,kRotorGains));
-    }
-    if(!p.flying)Log("HELI v=%p the mouse-aim flight: top %.1f m/s, hover rotor %.3f",v,top,p.hover);
+        const aim::Rotor rotor{At<float>(v,kLiftPerRotor),At<float>(v,kVertDamp),At<float>(v,kRotorIdle),At<float>(v,kRotorUp),
+                               At<float>(v,kRotorDown)};
+        Put<float>(v,kInThrottle,aim::CollectiveThrottle(w.climb,p.vel[1],At<float>(v,kRotor),&p.hover,learn,dt,rotor));
+    } else if(vert>0.0f)Put<float>(v,kInThrottle,1.0f);
+    if(!p.flying)Log("HELI v=%p the mouse-aim flight (instructor): top %.1f m/s, hover rotor %.3f, max tilt %.0f deg",v,top,p.hover,
+                     maxTilt*180.0f/kPi);
     if(Cfg().debug && ms-p.inputLogAt>=1000) {
         p.inputLogAt=ms;
-        Log("HELI INPUT v=%p keys mouse=(%.3f,%.3f) fore=%.1f set=%.2f aim=(%.3f,%.3f,%.3f) pitch=%.3f move=%.3f yaw=%.3f "
-            "rate=%.3f state=%.4f ground=%d lift=%d",v,mx,my,keys.fore,p.hold.speed,p.aim[0],p.aim[1],p.aim[2],
-            aim::PitchInput(p.aim,At<float>(v,kPlayerMaxTilt)),forward,yaw,p.yawRate,state,grounded,lifting);
+        Log("HELI INPUT v=%p mouse=(%.3f,%.3f) vert=%.0f side=%.2f set=%.2f climb=%.2f aim=(%.3f,%.3f,%.3f) pitch=%.3f roll=%.3f "
+            "move=%.3f yaw=%.3f rate=%.3f turn=%.3f state=%.4f ground=%d lift=%d",v,mx,my,vert,side,p.hold.speed,w.climb,p.aim[0],
+            p.aim[1],p.aim[2],p.pitchIn,p.rollIn,forward,yaw,p.yawRate,p.turn,state,grounded,lifting);
     }
     p.flying=true;
 }
@@ -2556,7 +2596,7 @@ void PublishHud(const Pilot& p,unsigned char* v,const float* pos,bool grounded,f
     f.speed=std::sqrt(p.vel[0]*p.vel[0]+p.vel[2]*p.vel[2]);
     f.ground=clear!=kNoGround;f.clear=f.ground ? clear : pos[1];f.climb=p.vel[1];
     f.hp=At<float>(v,kHp);f.hpMax=At<float>(v,kHpMax);
-    f.keys=keys;f.aiming=p.flying;f.holding=p.flying && p.hold.holding;f.landed=grounded;
+    f.keys=keys;f.aiming=p.flying;f.collective=p.flying;f.holding=p.flying && p.hold.holding;f.landed=grounded;
     f.setSpeed=p.hold.speed;f.top=PlayerTop(v);
     // The ground-proximity warning (warn.cpp), off the ground: sinking faster than the descent key's kPlayerClimb (plus
     // kGpwsSlack) onto the ground, or the path into something standing higher than it.
@@ -2642,7 +2682,7 @@ void PlayerHeli(unsigned char* v) noexcept {
     const unsigned char* seat=SeatAt(v,0);
     const bool keys=At<unsigned char>(seat,kSeatPad)==0;
     const bool mouse=Cfg().heliMouseAim && keys && playerAttitudeNext;
-    PlayerYawTune(v,mouse);
+    PlayerMouseTune(v,mouse);
     if(mouse)AimFly(*p,v,seat,pos,fwd,right,grounded,clear==kNoGround ? -1.0f : clear,dt,ms);
     else {
         if(p->flying)Log("HELI v=%p the mouse-aim flight off: the stock input flies it",v);

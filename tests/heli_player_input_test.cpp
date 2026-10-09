@@ -217,37 +217,55 @@ int main() {
     pilot.aim[0]=pilot.aim[1]=0.0f;pilot.aim[2]=1.0f;pilot.yawRate=0.0f;
     Put<float>(inputVehicle,kMaxYaw,1.0f);Put<float>(inputVehicle,kYawSmooth,0.005f);Put<float>(inputVehicle,0x1604,0.0f);
     // Actual Root.cpk Heron YG10E request parameters (AWEAPON371) and N9 Eros. Exercise the production
-    // controller through full acceleration/braking, including the original high-damping failure.
+    // controller through full acceleration/braking, including the original high-damping failure. The instructor's
+    // cyclic: the aim pitched down the full tilt flies the top speed, level it stops.
+    const float fullTilt=At<float>(inputVehicle,kPlayerMaxTilt);
+    const auto pitchAim=[&](float el){pilot.aim[0]=0.0f;pilot.aim[1]=std::sin(el);pilot.aim[2]=std::cos(el);};
+    // The stock actuators the player's frames quicken (PlayerMouseTune) and put back.
+    Put<float>(inputVehicle,kRotorUp,0.001f);Put<float>(inputVehicle,kRotorDown,0.0007f);Put<float>(inputVehicle,kTiltSmooth,0.005f);
+    Put<float>(inputVehicle,kLiftPerRotor,34.0f/60.0f);Put<float>(inputVehicle,kVertDamp,0.95f);Put<float>(inputVehicle,kRotorIdle,0.13f);
     for(float damp:{0.99f,0.999f}) {
         const float gain=damp<0.995f ? 90.0f : 80.0f,blend=damp<0.995f ? 0.003f : 0.0003f;
         const float top=blend*gain/(1.0f-damp*(1.0f-blend));
         Put<float>(inputVehicle,kSpeedGain,gain);Put<float>(inputVehicle,kBlend,blend);Put<float>(inputVehicle,kDamp,damp);
         PlayerAssist(inputVehicle);
+        PlayerMouseTune(inputVehicle,true);
+        Check(At<float>(inputVehicle,kRotorUp)==aim::kPlayerRotorRate && At<float>(inputVehicle,kRotorDown)==aim::kPlayerRotorRate &&
+              At<float>(inputVehicle,kTiltSmooth)==kPlayerTiltSmooth,"mouse flight quickens the rotor and the tilt");
         Check(std::fabs(PlayerTop(inputVehicle)-top)<0.01f,"player assist preserves the request's actual top speed");
         pilot.hold={};pilot.vel[0]=pilot.vel[1]=pilot.vel[2]=0.0f;
-        Put<float>(inputSeat,kSeatLY,-1.0f);
+        pitchAim(-fullTilt);
         for(int frame=0;frame<600;++frame) {
             AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
             const float desired=At<float>(inputVehicle,kSpeedGain)*At<float>(inputVehicle,kInForward);
             pilot.vel[2]=damp*pilot.vel[2]+At<float>(inputVehicle,kBlend)*(desired-damp*pilot.vel[2]);
         }
         Check(std::fabs(pilot.hold.speed-top)<0.01f && std::fabs(pilot.vel[2]-top)<0.05f,
-              "held W reaches the real helicopter top speed through the native velocity law");
-        Put<float>(inputSeat,kSeatLY,0.0f);
-        AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
-        Put<float>(inputSeat,kSeatLY,1.0f);
+              "nose down the full tilt reaches the real helicopter top speed through the native velocity law");
+        pitchAim(0.0f);
         for(int frame=0;frame<600;++frame) {
             AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
             const float desired=At<float>(inputVehicle,kSpeedGain)*At<float>(inputVehicle,kInForward);
             pilot.vel[2]=damp*pilot.vel[2]+At<float>(inputVehicle,kBlend)*(desired-damp*pilot.vel[2]);
         }
-        Check(pilot.hold.speed==0.0f && std::fabs(pilot.vel[2])<0.05f,"held S brakes to hover without reversing");
-        Put<float>(inputVehicle,kInThrottle,0.75f);
+        Check(pilot.hold.speed==0.0f && std::fabs(pilot.vel[2])<0.05f,"a level nose brakes to hover without reversing");
+        Put<float>(inputSeat,kSeatLY,1.0f);Put<float>(inputVehicle,kInThrottle,0.75f);
+        pitchAim(-fullTilt);
         AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,true,0.0f,1.0f/60.0f,inputTime);
         Check(pilot.hold.speed==0.0f && At<float>(inputVehicle,kInForward)==0.0f && At<float>(inputVehicle,kInThrottle)==0.75f,
               "grounded controller leaves the native takeoff throttle and clears forward motion");
+        Put<float>(inputSeat,kSeatLY,-1.0f);
+        AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,true,0.0f,1.0f/60.0f,inputTime);
+        Check(At<float>(inputVehicle,kInThrottle)==1.0f && At<float>(inputVehicle,kInForward)==0.0f,"W on the ground spins the rotor up to lift off");
+        Put<float>(inputSeat,kSeatLY,0.0f);pitchAim(0.0f);
+        PlayerMouseTune(inputVehicle,false);
+        Check(At<float>(inputVehicle,kRotorUp)==0.001f && At<float>(inputVehicle,kRotorDown)==0.0007f &&
+              At<float>(inputVehicle,kTiltSmooth)==0.005f,"a pad puts the stock rotor and tilt back");
+        PlayerMouseTune(inputVehicle,true);
         pilot.groundAt=0;AssistOff(inputVehicle);
         Check(At<float>(inputVehicle,kSpeedGain)==gain && At<float>(inputVehicle,kBlend)==blend,"leaving restores request parameters");
+        Check(At<float>(inputVehicle,kRotorUp)==0.001f && At<float>(inputVehicle,kRotorDown)==0.0007f &&
+              At<float>(inputVehicle,kTiltSmooth)==0.005f,"leaving restores the stock rotor and tilt");
         Heli npc{},replica{};
         inputConfig.heliSpeed=25.0f;inputConfig.heliAgility=4.0f;
         Tune(npc,inputVehicle);Tune(replica,inputVehicle);
@@ -260,31 +278,42 @@ int main() {
     inputConfig.heliSpeed=25.0f;
     pilot.hold={};pilot.vel[0]=pilot.vel[1]=pilot.vel[2]=0.0f;
     Put<float>(inputVehicle,kSpeedGain,20.0f);Put<float>(inputVehicle,kBlend,1.0f);
-    // Stock slot 55 has already copied W into movement input. Production AimFly replaces the movement setpoint,
-    // then the attitude hook supplies level pitch while keeping the original movement block for translation.
+    // Stock slot 55 has already copied W into movement input. Production AimFly replaces the movement setpoint with the
+    // cyclic's (the aim level: none) and W is the collective; the attitude hook gets the aim's pitch.
     Put<float>(inputSeat,kSeatLY,-1.0f);
+    const float throttleLevel=0.424f;Put<float>(inputVehicle,kRotor,throttleLevel);
     AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
     float* movement=reinterpret_cast<float*>(inputVehicle+kInLateral);
-    const float before=movement[2];
     unsigned char contact=0;
     PlayerAttitudeHook(inputVehicle+kHeadRight,inputVehicle,movement,&contact);
-    Check(before>0.0f && movement[2]==before && recordedInput[2]==0.0f,"W increases speed without pitching the nose");
-    Check(recordedInput[0]==movement[0] && recordedInput[1]==movement[1] && recordedInput[3]==movement[3] &&
-          recordedInput[4]==movement[4],"only attitude pitch changes, other input channels are preserved");
+    Check(pilot.hold.speed==0.0f && movement[2]==0.0f && recordedInput[2]==0.0f && At<float>(inputVehicle,kInThrottle)>throttleLevel,
+          "W raises the collective without pitching the nose or moving forward");
+    Check(recordedInput[1]==movement[1] && recordedInput[3]==movement[3] && recordedInput[4]==movement[4],
+          "throttle, w and yaw reach the attitude function unchanged");
     Put<float>(inputSeat,kSeatLY,0.0f);Put<float>(inputSeat,kSeatRY,-1.0f);
-    const float speedSet=pilot.hold.speed;
-    AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
+    for(int frame=0;frame<3;++frame)AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
     PlayerAttitudeHook(inputVehicle+kHeadRight,inputVehicle,movement,&contact);
-    Check(pilot.aim[1]>0.0f && recordedInput[2]<0.0f && pilot.hold.speed==speedSet,"mouse up raises the nose without changing forward speed");
-    const float mousePitch=recordedInput[2];
-    Put<float>(inputSeat,kSeatLY,1.0f);Put<float>(inputSeat,kSeatRY,0.0f);
-    AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
+    Check(pilot.aim[1]>0.0f && recordedInput[2]<0.0f && pilot.hold.speed<0.0f && movement[2]<0.0f,
+          "mouse up raises the nose and the cyclic backs off");
+    Put<float>(inputSeat,kSeatRY,1.0f);
+    for(int frame=0;frame<6;++frame)AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
     PlayerAttitudeHook(inputVehicle+kHeadRight,inputVehicle,movement,&contact);
-    Check(pilot.hold.speed<speedSet && recordedInput[2]==mousePitch,"S lowers the speed setpoint without changing mouse pitch");
-    Put<float>(inputSeat,kSeatLY,0.0f);Put<float>(inputSeat,kSeatRY,1.0f);
-    for(int frame=0;frame<2;++frame)AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
+    Check(pilot.aim[1]<0.0f && recordedInput[2]>0.0f && pilot.hold.speed>0.0f && movement[2]>0.0f,
+          "mouse down lowers the nose through the stock pitch sign and the cyclic flies forward");
+    // A coordinated turn: flying forward with the nose turning toward row 0 (a slide's way), the roll the attitude gets is
+    // the lateral plus the bank into the turn; the movement's lateral stays the velocity law's.
+    Put<float>(inputSeat,kSeatRY,0.0f);
+    pilot.vel[2]=15.0f;pilot.turn=0.0f;
+    const float turned=0.02f;   // rad a frame toward row 0 (right = (-1, 0, 0) here)
+    const float swung[3]={-std::sin(turned),0.0f,std::cos(turned)};
+    for(int frame=0;frame<20;++frame) {
+        pilot.prevFwd[0]=0.0f;pilot.prevFwd[1]=0.0f;pilot.prevFwd[2]=1.0f;
+        AimFly(pilot,inputVehicle,inputSeat,pos,swung,right,false,100.0f,1.0f/60.0f,inputTime);
+    }
     PlayerAttitudeHook(inputVehicle+kHeadRight,inputVehicle,movement,&contact);
-    Check(pilot.aim[1]<0.0f && recordedInput[2]>0.0f,"mouse down lowers the nose through the stock pitch sign");
+    Check(pilot.turn>0.5f && recordedInput[0]>movement[0]+0.1f,"turning toward row 0 banks the way a slide there rolls it");
+    pilot.vel[2]=0.0f;pilot.turn=0.0f;std::memcpy(pilot.prevFwd,forward,12);
+    pitchAim(0.0f);
 
     inputSeat[kSeatPad]=1;CheckPassThrough("pad control retains stock pitch");inputSeat[kSeatPad]=0;
     inputHuman[kHumanPlayer]=0;CheckPassThrough("NPC/non-player control retains stock pitch");inputHuman[kHumanPlayer]=1;

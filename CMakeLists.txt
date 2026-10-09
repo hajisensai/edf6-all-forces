@@ -18,6 +18,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/map.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/mapcmd.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/support_dispatch.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/support_policy.cpp)
+# Out-of-mission support configuration: callable units and their crews' stock weapons (src/support_config.h).
+target_sources(EDF6VehicleCrew PRIVATE src/support_config.cpp)
 # The EMC's charged beam (src/emc.cpp, src/emc_plan.h).
 target_sources(EDF6VehicleCrew PRIVATE src/emc.cpp)
 # The Proteus rework (its own line too).
@@ -82,6 +84,12 @@ set_target_properties(sidecar_board_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "$
 add_executable(hover_lift_check EXCLUDE_FROM_ALL tools/hover_lift_check.cpp)
 target_compile_options(hover_lift_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(hover_lift_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+# A player aircraft on the ground on its contacts (tools/ground_contact_check.cpp, src/pjet_handling.h GroundContact):
+# cmake --build build --target ground_contact_check && build\ground_contact_check.exe
+add_executable(ground_contact_check EXCLUDE_FROM_ALL tools/ground_contact_check.cpp)
+target_compile_options(ground_contact_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(ground_contact_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # The boardable aircraft's flight numbers checked offline (tools/pjet_kinds.cpp); not part of the plugin build:
 # cmake --build build --target pjet_kinds && build\pjet_kinds.exe
@@ -197,6 +205,11 @@ set_target_properties(formation_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMA
 add_executable(gunsight_check EXCLUDE_FROM_ALL tools/gunsight_check.cpp)
 target_compile_options(gunsight_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(gunsight_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The sights' styles by weapon (src/reticle.h): which style each real vehicle weapon gets and each style's geometry,
+# offline (tools/reticle_check.cpp). Not part of the plugin build: cmake --build build --target reticle_check && build\reticle_check.exe
+add_executable(reticle_check EXCLUDE_FROM_ALL tools/reticle_check.cpp)
+target_compile_options(reticle_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(reticle_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # The turret camera's rig and turret command (src/turretcam.h) against the stock aim axis step, offline
 # (tools/turret_cam_check.cpp). Not part of the plugin build:
@@ -242,8 +255,8 @@ target_include_directories(stab_native_readback_test PRIVATE src common)
 target_link_libraries(stab_native_readback_test PRIVATE edf6common)
 target_compile_options(stab_native_readback_test PRIVATE /W4 /WX /utf-8 /permissive-)
 
-# The Proteus rework's rules (src/proteus_logic.h: the stances and their stagger, the directional shield's heat, the barrier,
-# the salvo's cooldown, the step height) offline (tools/proteus_check.cpp). Not part of the plugin build:
+# The Proteus rework's rules (src/proteus_logic.h: the stances and their stagger, the shield's heat / HP / break / refill,
+# who operates each stock weapon mount, the step height) offline (tools/proteus_check.cpp). Not part of the plugin build:
 # cmake --build build --target proteus_check && build\proteus_check.exe
 # The flyers' soft edge's rules offline (tools/airbound_check.cpp, src/airbound.h). Not part of the plugin build.
 add_executable(airbound_check EXCLUDE_FROM_ALL tools/airbound_check.cpp)
@@ -415,6 +428,10 @@ add_test(NAME call_pick COMMAND call_pick_test)
 add_executable(support_entry_test tests/support_entry_test.cpp)
 target_compile_options(support_entry_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME support_entry COMMAND support_entry_test)
+# The support configuration's parse and validation, and the ini it really reads (src/support_config.cpp).
+add_executable(support_config_test tests/support_config_test.cpp)
+target_compile_options(support_config_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME support_config COMMAND support_config_test)
 add_executable(support_policy_test EXCLUDE_FROM_ALL tests/support_policy_test.cpp)
 target_link_libraries(support_policy_test PRIVATE edf6common)
 target_compile_options(support_policy_test PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -443,6 +460,15 @@ add_executable(map_hud_check EXCLUDE_FROM_ALL tools/map_hud_check.cpp)
 target_compile_options(map_hud_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(map_hud_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+# The stock armor gauge hidden while riding (src/stock_armor_hud.h) and the seat switch's presses and next seat
+# (src/seat_switch_logic.h), checked off the game.
+add_executable(armor_hud_check EXCLUDE_FROM_ALL tools/armor_hud_check.cpp)
+target_compile_options(armor_hud_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(armor_hud_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+add_executable(seat_switch_check EXCLUDE_FROM_ALL tools/seat_switch_check.cpp)
+target_compile_options(seat_switch_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(seat_switch_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
 add_executable(grape_turret_check EXCLUDE_FROM_ALL tools/grape_turret_check.cpp)
 target_compile_options(grape_turret_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(grape_turret_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
@@ -463,6 +489,10 @@ add_executable(drill_net_test tests/drill_net_test.cpp)
 target_compile_options(drill_net_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME drill_net COMMAND drill_net_test)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+# The installer's support menu (tools/support_config.py) against the plugin's keys and weapons, and its ini edits.
+add_test(NAME support_config_ini COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/support_config_ini_test.py")
+# The menu prints Chinese: UTF-8 like the workflow's other Python steps, not the runner's cp1252 console.
+set_tests_properties(support_config_ini PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME support_resources COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/support_resource_audit.py")
 set_tests_properties(support_resources PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME online_gate_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/online_gate_guard.py")
@@ -473,7 +503,7 @@ add_test(NAME pn COMMAND pn_test)
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
-    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check hover_lift_check view_clip_check npc_ai_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check)
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check hover_lift_check view_clip_check npc_ai_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 add_dependencies(offline_checks stab_native_readback_test)
 add_test(NAME stab_native_readback COMMAND stab_native_readback_test "${EDF6_NATIVE_DLL}")
@@ -502,6 +532,13 @@ add_dependencies(offline_checks play_area_check)
 add_test(NAME play_area_check COMMAND play_area_check)
 add_dependencies(offline_checks pjet_turn_sim)
 add_test(NAME pjet_turn_check COMMAND pjet_turn_sim --check)
+# The hail's approach flown offline: the logged crashes (legacy law) against src/hail_glide.h, and a sweep.
+add_executable(hail_glide_check EXCLUDE_FROM_ALL tools/hail_glide_check.cpp)
+target_include_directories(hail_glide_check PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_compile_options(hail_glide_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(hail_glide_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+add_dependencies(offline_checks hail_glide_check)
+add_test(NAME hail_glide COMMAND hail_glide_check)
 
 add_executable(map_command_runtime_check EXCLUDE_FROM_ALL tools/map_command_runtime_check.cpp)
 target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
@@ -561,12 +598,6 @@ add_executable(proteus_net_native_test EXCLUDE_FROM_ALL tests/proteus_net_native
 target_include_directories(proteus_net_native_test PRIVATE src common)
 target_link_libraries(proteus_net_native_test PRIVATE edf6common user32)
 target_compile_options(proteus_net_native_test PRIVATE /W4 /WX /utf-8 /permissive-)
-add_library(proteus_damage_gate_bridge MODULE EXCLUDE_FROM_ALL tests/proteus_damage_gate_bridge.cpp)
-target_compile_options(proteus_damage_gate_bridge PRIVATE /W4 /WX /utf-8 /permissive-)
-add_dependencies(offline_checks proteus_damage_gate_bridge)
-add_test(NAME proteus_damage_gate_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_damage_native_audit.py"
-    --gate-dll "$<TARGET_FILE:proteus_damage_gate_bridge>")
-set_tests_properties(proteus_damage_gate_native PROPERTIES SKIP_RETURN_CODE 77)
 target_link_libraries(gunner_aim_object_test PRIVATE edf6common)
 target_link_libraries(heli_player_input_test PRIVATE edf6common user32)
 add_executable(jetsound_check EXCLUDE_FROM_ALL tools/jetsound_check.cpp)
@@ -579,15 +610,11 @@ add_test(NAME heli_request_setup COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE
 # The Begaruta family (Proteus too) chains its per-frame slot 4; with the game present, against EDF.dll.
 add_test(NAME begaruta_family_profile COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/begaruta_family_native_profile_test.py")
 add_test(NAME proteus_visual_profile COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_visual_native_profile.py")
-add_test(NAME proteus_round_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_round_native_audit.py")
-set_tests_properties(proteus_visual_profile proteus_round_native PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(proteus_visual_profile PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME proteus_assets COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_proteus_assets.py")
 add_test(NAME proteus_text COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_text_test.py")
 add_test(NAME proteus_install COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_install_test.py")
 add_test(NAME proteus_range COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_range_test.py")
-add_test(NAME proteus_cas_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_cas_native_audit.py" "${EDF6_NATIVE_DLL}")
-set_tests_properties(proteus_cas_native PROPERTIES SKIP_RETURN_CODE 77)
-add_test(NAME proteus_cas_upgrade COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_cas_upgrade_test.py")
 add_test(NAME vehicle_shapes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_vehicle_model_shapes.py")
 add_test(NAME aircraft_collision COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/aircraft_collision_check.py")
 
@@ -631,6 +658,13 @@ target_compile_options(drill_sync_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
 target_link_options(drill_sync_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks drill_net_test drill_sync_test)
 add_test(NAME drill_sync COMMAND drill_sync_test)
+add_executable(drill_launch_test EXCLUDE_FROM_ALL tests/drill_launch_test.cpp)
+target_link_libraries(drill_launch_test PRIVATE edf6common user32)
+target_include_directories(drill_launch_test PRIVATE src common)
+target_compile_options(drill_launch_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+target_link_options(drill_launch_test PRIVATE /OPT:REF)
+add_dependencies(offline_checks drill_launch_test)
+add_test(NAME drill_launch COMMAND drill_launch_test)
 add_executable(drill_hud_binding_test EXCLUDE_FROM_ALL tests/drill_hud_binding_test.cpp)
 target_include_directories(drill_hud_binding_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(drill_hud_binding_test PRIVATE edf6common)
@@ -850,6 +884,7 @@ set_tests_properties(npc_reseat_native PROPERTIES SKIP_RETURN_CODE 77)
 # Integration checks for observed native crashes, real assets and mission participation.
 target_sources(EDF6VehicleCrew PRIVATE src/mission_participants.cpp src/mission_participant_gate.cpp)
 add_test(NAME stock_store_recoil COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_stock_store_recoil.py")
+add_test(NAME stock_store_loadouts COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_stock_store_loadouts.py")
 add_test(NAME stock_store_recoil_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/stock_store_recoil_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(stock_store_recoil_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME katyusha_mount COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/katyusha_mount_check.py" "${EDF6_GAME_DIR}")
@@ -962,7 +997,7 @@ target_compile_options(camera_payload_lifecycle_test PRIVATE /W4 /WX /utf-8 /per
 target_link_options(camera_payload_lifecycle_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks camera_payload_lifecycle_test)
 add_test(NAME camera_payload_lifecycle COMMAND camera_payload_lifecycle_test)
-# Proteus original weapon callbacks and post-pose firing; native mode maps EDF.dll without DllMain.
+# The Proteus's borrowed stock weapon mounts and native shield barrier; native mode maps EDF.dll without DllMain.
 add_executable(proteus_weapon_test EXCLUDE_FROM_ALL tests/proteus_weapon_test.cpp)
 target_include_directories(proteus_weapon_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(proteus_weapon_test PRIVATE edf6common user32)
@@ -975,6 +1010,8 @@ set_tests_properties(proteus_weapon_native PROPERTIES SKIP_RETURN_CODE 77)
 
 add_test(NAME vehicle_optics_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/vehicle_optics_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(vehicle_optics_native PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME sight_data_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/sight_data_audit.py" --game "${EDF6_GAME_DIR}")
+set_tests_properties(sight_data_audit PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME optic_install_integration COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/optic_install_integration_test.py")
 
 add_test(NAME highcam_collision_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/highcam_collision_native_audit.py" "${EDF6_NATIVE_DLL}")
@@ -987,3 +1024,21 @@ target_compile_options(autoturret_binding_test PRIVATE /W4 /WX /utf-8 /permissiv
 target_link_options(autoturret_binding_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks autoturret_binding_test)
 add_test(NAME autoturret_binding COMMAND autoturret_binding_test)
+# The one player turret aim (aimlink.h V4) on production designate.cpp: keys, lock rule, lead, flak and tank alike.
+add_executable(player_aim_test EXCLUDE_FROM_ALL tests/player_aim_test.cpp)
+target_include_directories(player_aim_test PRIVATE common)
+target_link_libraries(player_aim_test PRIVATE edf6common user32)
+target_compile_options(player_aim_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+target_link_options(player_aim_test PRIVATE /OPT:REF)
+add_dependencies(offline_checks player_aim_test)
+add_test(NAME player_aim COMMAND player_aim_test)
+# The stock spot (Q) from a vehicle along the drawn camera (src/spot_ray.h): production hook, pure math, native contract.
+add_executable(spot_ray_test EXCLUDE_FROM_ALL tests/spot_ray_test.cpp)
+target_include_directories(spot_ray_test PRIVATE src common)
+target_link_libraries(spot_ray_test PRIVATE edf6common user32)
+target_compile_options(spot_ray_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+target_link_options(spot_ray_test PRIVATE /OPT:REF)
+add_dependencies(offline_checks spot_ray_test)
+add_test(NAME spot_ray COMMAND spot_ray_test)
+add_test(NAME spot_ray_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/spot_ray_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(spot_ray_native PROPERTIES SKIP_RETURN_CODE 77)

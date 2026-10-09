@@ -4,7 +4,9 @@
 #include <Windows.h>
 #include <cstdint>
 #include "gunsight.h"
+#include "reticle.h"
 #include "roundaim.h"
+#include "stock_armor_hud.h"
 
 namespace crew {
 // --- rounds.cpp: a weapon's round as the game will fly it ---
@@ -75,6 +77,9 @@ struct StockArm {
     int lock;                    // homing: 2 locked / 1 locking (lockProgress) on `at`, 0 none (LockonRange `range`)
     float lockProgress;
     gunsight::Ladder ladder;     // a direct-fire arc gun's range ladder (gunsight.h; no ticks: none), hud.cpp GunReticle
+    reticle::Style reticle=reticle::Style::none;   // its sight's style (reticle.h Classify, from the weapon's own data)
+    reticle::Shell shell=reticle::Shell::none;     // its round as the sight names it (AP / HE / BEAM)
+    float roundSpeed=0.0f;       // m/s: AmmoSpeed x 60 (the flak sight's lead rings)
 };
 struct StockHudReadout {
     char kind[16];
@@ -111,6 +116,10 @@ bool InstallStockGauges() noexcept;
 // panels (a weapon a panel, the fuel tank's FUEL too) are taken off the screen for that vehicle, put back when it stops.
 void SetStockGaugeCover(bool lists) noexcept;
 void ResetStockGauges() noexcept;   // mission.cpp MissionStart
+// hud.cpp HudPublish: the HUD's player's armor (and the vehicle's durability) while their stock armor gauge is held
+// hidden (stock_armor_hud.h: given by the hold itself, so it is shown exactly while the stock one is not). False when
+// it is not hidden, or the numbers do not read.
+bool PlayerStockArmor(armorhud::Readout* out) noexcept;
 // The fuel tank of `vehicle` (a helicopter's, the 506 bodies' of the plugin's aircraft, the 503 / 511 bikes'), its burn
 // measured over the game clock; game thread. False (out->ok false) with no tank or the reads off.
 bool FuelGauge(const void* vehicle,FuelReading* out) noexcept;

@@ -1,9 +1,9 @@
-// Native mission count/progress and production hooks on a private EDF.dll mapping. Never starts the game.
+// The mission packs' ownership hook on a private EDF.dll mapping: the native owned-content lookup (0xD92B0) run
+// on a fixture of the owned set, and every patched call site. Never starts the game.
 #include "../src/crew.h"
 #include "../src/memory.h"
 #include <cstdio>
 #include <cstdlib>
-#include <cmath>
 namespace crew {
 int redirectCount=0,failAt=0;
 bool CampaignTestRedirect(unsigned char* at,void* expected,void* replacement,bool& changed) noexcept {
@@ -25,24 +25,21 @@ int checks=0;
 void Check(bool ok,const char* why) {
     ++checks;if(!ok){std::fprintf(stderr,"FAIL: %s\n",why);std::exit(1);}
 }
-bool Near(float a,float b){return std::fabs(a-b)<0.00001f;}
-// The native list accessor follows list+F0 -> index vector and parsed node -> child count.
+// mgr+0xE0: the owned contents, an MSVC std::set<int>: head {+0 left, +8 root, +0x10 right, +0x19 isnil}, nodes
+// {+0 left, +8 parent, +0x10 right, +0x19 isnil 0, +0x1C key}. What 0xDBB50 leaves without add-ons: {0}.
 struct Fixture {
-    alignas(16) unsigned char manager[0x240]{},document[0x40]{},node[0x30]{},table[0x60]{};
-    unsigned index=0;
-    Fixture(int rows,unsigned current) {
+    alignas(16) unsigned char manager[0x100]{},head[0x20]{},zero[0x20]{};
+    Fixture() {
         using crew::Put;
-        Put<void*>(manager,0x220,document);Put<void*>(document,8,&index);
-        Put<std::uint64_t>(document,0x18,1);Put<void*>(document,0x28,node);Put<void*>(node,0,table);
-        Set(rows,current);
+        Put<void*>(manager,0xE0,head);
+        Put<void*>(head,0,zero);Put<void*>(head,8,zero);Put<void*>(head,0x10,zero);head[0x19]=1;
+        Put<void*>(zero,0,head);Put<void*>(zero,8,head);Put<void*>(zero,0x10,head);zero[0x19]=0;Put<int>(zero,0x1C,0);
     }
-    void Set(int rows,unsigned current){crew::Put<int>(table,0x58,rows);crew::Put<unsigned>(manager,0x48,current);}
     std::uintptr_t Mgr(){return reinterpret_cast<std::uintptr_t>(manager);}
-    std::uintptr_t List(){return Mgr()+0x130;}
 };
-template<class Fn> Fn Patched(unsigned site) {
+crew::OwnedFn Patched(unsigned site) {
     const auto rel=crew::At<std::int32_t>(crew::image+site,1);
-    return reinterpret_cast<Fn>(crew::image+site+5+rel);
+    return reinterpret_cast<crew::OwnedFn>(crew::image+site+5+rel);
 }
 }
 int main(int argc,char** argv) {
@@ -54,31 +51,27 @@ int main(int argc,char** argv) {
     Check(image!=nullptr,"private DLL mapped without its entrypoint");
     const auto nt=reinterpret_cast<IMAGE_NT_HEADERS64*>(image+reinterpret_cast<IMAGE_DOS_HEADER*>(image)->e_lfanew);
     Check(nt->FileHeader.TimeDateStamp==0x678CCB46 && nt->OptionalHeader.SizeOfImage==0x22CE000,"supported game profile");
-    Fixture f(282,73);
-    const auto nativeRows=reinterpret_cast<RowsFn>(image+kRows);
-    const auto nativeProgress=reinterpret_cast<ProgressFn>(image+kProgress);
-    Check(nativeRows(f.List())==282 && Near(nativeProgress(f.Mgr()),73.0f/281.0f),"actual native count/progress baseline");
-    config.edf5CampaignRows=147;
+    Fixture f;
+    const auto native=reinterpret_cast<OwnedFn>(image+kOwned);
+    Check(native(f.Mgr(),0) && !native(f.Mgr(),1) && !native(f.Mgr(),3),"native lookup: the story owned, nothing else");
+    config.edf5CampaignContent=3;
     failAt=argc>2 ? std::atoi(argv[2]) : 0;
     if(failAt) {
-        Check(!InstallEdf5Campaign() && !campaignReady,"failed call leaves campaign inactive");
-        for(const auto& g:kGroups)for(std::size_t i=0;i<g.count;++i) {
-            if(g.target==kRows)Check(Patched<RowsFn>(g.sites[i])(f.List())==282,"partial row hook keeps native result");
-            else Check(Near(Patched<ProgressFn>(g.sites[i])(f.Mgr()),73.0f/281.0f),"partial progress hook keeps native result");
-        }
+        Check(!InstallEdf5Campaign() && !campaignReady,"failed call leaves the campaign inactive");
+        for(unsigned site:kSites)
+            Check(Patched(site)(f.Mgr(),0) && !Patched(site)(f.Mgr(),3),"partial install keeps the native answer");
     } else {
         Check(InstallEdf5Campaign() && InstallEdf5Campaign(),"all calls installed, re-entry is idempotent");
-        for(unsigned site:kRowSites)Check(Patched<RowsFn>(site)(f.List())==147,"every patched row caller caps story");
-        for(unsigned site:kProgressSites)Check(Near(Patched<ProgressFn>(site)(f.Mgr()),0.5f),"every progress caller keeps EDF6 scale");
-        Check(nativeRows(f.List())==282,"unpatched selection/save accessor sees campaign rows");
-        f.Set(282,147);Check(Near(ProgressHook(f.Mgr()),0),"first campaign row starts at zero");
-        f.Set(282,281);Check(Near(ProgressHook(f.Mgr()),1),"last campaign row reaches one");
-        f.Set(147,73);Check(RowsHook(f.List())==147 && Near(ProgressHook(f.Mgr()),nativeProgress(f.Mgr())),"online stock list unchanged");
-        f.Set(40,20);Check(RowsHook(f.List())==40 && Near(ProgressHook(f.Mgr()),nativeProgress(f.Mgr())),"DLC mode unchanged");
-        f.Set(1,0);Check(Near(ProgressHook(f.Mgr()),0),"single-row list stays native");
-        f.Set(0,0);Check(Near(ProgressHook(f.Mgr()),0),"empty list stays native");
-        f.Set(282,73);config.edf5CampaignRows=0;
-        Check(RowsHook(f.List())==282 && Near(ProgressHook(f.Mgr()),nativeProgress(f.Mgr())),"no installed campaign leaves behavior native");
+        for(unsigned site:kSites) {
+            const auto owned=Patched(site);
+            Check(owned(f.Mgr(),0),"the story stays owned");
+            Check(!owned(f.Mgr(),1) && !owned(f.Mgr(),2),"the DLCs stay as the platform says");
+            Check(owned(f.Mgr(),3) && owned(f.Mgr(),4) && owned(f.Mgr(),5),"all three packs owned");
+            Check(!owned(f.Mgr(),6),"no content past the packs");
+        }
+        Check(!native(f.Mgr(),3),"the native lookup itself unchanged");
+        config.edf5CampaignContent=0;
+        Check(!Patched(kSites[0])(f.Mgr(),3) && Patched(kSites[0])(f.Mgr(),0),"no packs installed: native answer");
     }
     std::printf("edf5_campaign_native_test: %d checks passed (injected failure %d)\n",checks,failAt);
 }
