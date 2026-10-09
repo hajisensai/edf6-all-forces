@@ -37,6 +37,8 @@ bool SupportAircraftReady(const SupportAircraft&) noexcept{return false;}
 bool TransportDeliver(const void*,const void* const*,int,const float*) noexcept{return false;}
 bool TransportParadrop(const void*,const float*) noexcept{return false;}
 bool JetFerry(const void*,const float*) noexcept{return false;}
+bool AirdropReady(SupportVehicleKind) noexcept{return false;}
+bool AirdropBegin(const void*,SupportVehicleKind,const float*) noexcept{return false;}
 bool JetWithdrawNow(const void*,const char*) noexcept{return false;}
 bool HeliStartLeaving(const void*) noexcept{return false;}
 bool IsHelicopter(const void*) noexcept{return false;}

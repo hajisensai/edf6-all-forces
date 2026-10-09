@@ -36,7 +36,7 @@ ground = re.search(r'static const wchar_t\* keys\[\]=\{([^}]*)\}', dispatch).gro
 check(tuple(re.findall(r'L"(\w+)"', ground)) == sc.GROUND_KEYS, 'ground / infantry keys equal SupportCallKey\'s')
 flown = tuple(c.id[len(calls.ID_PREFIX):] for c in calls.CALLS if c.flown)
 check(flown == sc.AIR_KEYS, 'air keys: the flown calls in calls.py order (airstrike.cpp SupportAirCallKey)')
-check(len(sc.LABELS) == len(sc.UNIT_KEYS) == 33, 'one label per catalog entry')
+check(len(sc.LABELS) == len(sc.UNIT_KEYS) == 36, 'one label per catalog entry')
 ini = read('EDF6VehicleCrew.ini')
 for key, value in sc.DEFAULTS.items():
     check(sc.get(ini, key) == value, f'shipped ini {key} = the default {value!r}')

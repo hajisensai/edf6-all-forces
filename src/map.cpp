@@ -28,6 +28,7 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "transport.h"
+#include "airdrop.h"
 #include "layout.h"
 #include "map_cam.h"
 #include "map_marks.h"
@@ -687,6 +688,7 @@ bool __fastcall MapHumanFrame(unsigned char* human) noexcept {
         PlayAreaTick();
         SupportDispatchTick();
         TransportTick();   // the squads' transports (transport.cpp), after the deliveries that start them
+        AirdropTick();     // the transport planes' containers (airdrop.cpp): held under them, let go over their points
         const bool open=Frame(human);
         NpcMarkFrame(human,open && game.open);
         return TvFrame(human,open && game.open,TvRead(human)) || open;

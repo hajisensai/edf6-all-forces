@@ -53,7 +53,7 @@
 - `npcai.cpp NpcSeatCrewNow`（只用于「生成即入座」）在每个入座成功的座位上写 `Quiet`。步行上车（`NpcBoardCrew`）、下车照常发声。
 - 签名守卫：`0x632AC6`（`mov ecx,[rsi+0x620]; shl al,cl; test [rsi+0x628],al`）与 `0x62F1AA`（`mov [rsi+0x628],dx; mov ecx,[rsi+0x620]; shl ax,cl`）字节不符时不写，日志 `NPCAI vehicle seat events not as read`，行为退回原来（有声音），不会写错内存。
 
-## 3. 运输机空投载具（澄清需求，本轮**未实现**，只做了逆向）
+## 3. 运输机空投载具（澄清需求，本轮**未实现**，只做了逆向；后续已实现为直升机投送：docs/airdrop-vehicle-re.md）
 
 原版有现成的空中投送链（`docs/online-re.md` §2.3、`docs/player-jet-re.md` §13.1）：载具请求 Weapon_Sub → 信号弹 → **Transporter508**（slot 50 `0x5E5070` 生成集装箱）→ **Transporter_Container**（V509 集装箱）→ 落地卸车态 `0x5E8C00` 按集装箱 `+0xB80` 的 SGO 路径 `CreateObject` 载具（`0x5E8FDC`），`SetTeam(veh,5,1)`，`veh+0x67C = container+0xBA0`，然后删除集装箱。本轮新查到：
 

@@ -3775,7 +3775,7 @@ void MapSupportIcon(void* d,void* c,SupportIcon icon,float x,float y,float h,flo
     }
 }
 // A variant chip's icon (support_call.h SupportCallVariant: the catalog's own data, never its words): guarding a point,
-// following the player, a crew aboard, an empty vehicle delivered.
+// following the player, a crew aboard, an empty vehicle delivered, the vehicle a plane drops.
 void MapVariantIcon(void* d,void* c,SupportVariant variant,float x,float y,float h,float s,const float* rgba) noexcept {
     switch(variant) {
     case SupportVariant::guard: MapOrderIcon(d,c,mapbtn::Id::guard,x,y,h,s,rgba);break;
@@ -3785,6 +3785,9 @@ void MapVariantIcon(void* d,void* c,SupportVariant variant,float x,float y,float
         Arc(d,c,x,y-h*0.15f,h*0.18f,0.0f,kTurn,1.6f*s,8,rgba);Seg(d,c,x-h*0.3f,y+h*0.35f,x+h*0.3f,y+h*0.35f,1.6f*s,rgba);break;
     case SupportVariant::squad: MapSupportIcon(d,c,SupportIcon::squad,x,y,h,s,rgba);break;
     case SupportVariant::platoon: MapSupportIcon(d,c,SupportIcon::platoon,x,y,h,s,rgba);break;
+    case SupportVariant::tank: MapSupportIcon(d,c,SupportIcon::tank,x,y,h,s,rgba);break;
+    case SupportVariant::apc: MapSupportIcon(d,c,SupportIcon::apc,x,y,h,s,rgba);break;
+    case SupportVariant::truck: MapSupportIcon(d,c,SupportIcon::truck,x,y,h,s,rgba);break;
     case SupportVariant::none: Rect(d,c,x-h*0.12f,y-h*0.12f,x+h*0.12f,y+h*0.12f,rgba);break;
     }
 }

@@ -17,6 +17,7 @@
 #include "crew.h"
 #include "mod_room.h"
 #include "support_soldier.h"
+#include "airdrop.h"
 #include "support_config.h"
 #include "lockon.h"
 #include "turretaim.h"
@@ -443,6 +444,8 @@ void LoadConfig() noexcept {
     n.sazabiCannonDamage=ReadFloat(L"SazabiCannonDamage",n.sazabiCannonDamage);
     n.sazabiFunnelDamage=ReadFloat(L"SazabiFunnelDamage",n.sazabiFunnelDamage);
     n.sazabiTestBoard=ReadBool(L"SazabiTestBoard",n.sazabiTestBoard);
+    n.airdropTest=static_cast<int>(FixInt("AirdropTest",ReadInt(L"AirdropTest",static_cast<DWORD>(n.airdropTest)),0,3));
+    if(n.airdropTest)Log("CONFIG AirdropTest=%d (tests only): a container airdrop asked once a mission",n.airdropTest);
     n.playerJetRollScale=ReadFloat(L"PlayerJetRollScale",n.playerJetRollScale);
     n.playerJetAimGain=ReadFloat(L"PlayerJetAimGain",n.playerJetAimGain);
     n.playerRotorLift=ReadFloat(L"PlayerRotorLift",n.playerRotorLift);
@@ -877,6 +880,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
         InstallSub();
     } else Log("JET / SUB off: they are flown from the heli pilot's frame, which is off");
     InstallBoarding();      // after the heli profile's board button check
+    Log("AIRDROP container step watched=%d",InstallAirdrop());   // the transport planes' container airdrops
     InstallPlayerJets();    // its frame is the vehicles' own input; it needs only the 506 physics hook
     InstallSazabi();        // the same: the 506 physics hook and the vehicles' own input
     InstallVehicleRam();    // the ground vehicles' ram (its charges are the jets' impact charges: jet_bay.cpp)

@@ -18,6 +18,7 @@
 #include "hudtext.h"
 #include "transport.h"
 #include "support_variants.h"
+#include "airdrop.h"
 #include <cwchar>
 #include <cstring>
 #include <new>
@@ -151,12 +152,34 @@ bool TransportSpec(std::uint32_t id,SupportAircraft* out) noexcept {
     *out=spec;return true;
 }
 unsigned TransportRiders(bool platoon) noexcept {return platoon ? 12u : 4u;}
+// The container airdrops (airdrop.cpp; the user, 2026-10-09: "运输机还要能空投载具"): one entry per ground support
+// vehicle, after the transports (every older index, ini key and wire value stands). The transport helicopter carries the
+// game's own container (the stock Air Raider request's) to the point, hovers over it, lets it go and leaves; the
+// container makes the vehicle, empty, where it lands. One helicopter, one container, one vehicle. The plan: the
+// helicopter and its pilot. (The transport plane was tried first: on its ~600 m turn it never came over the point.)
+constexpr int kAirdropEntries=kSupportVehicleCount;
+int AirdropStart() noexcept {return TransportStart()+kTransportEntries;}
+bool AirdropCatalog(std::uint32_t id,SupportVehicleKind& kind) noexcept {
+    const int k=static_cast<int>(id)-AirdropStart();
+    if(k<0 || k>=kAirdropEntries)return false;
+    kind=static_cast<SupportVehicleKind>(k);return true;
+}
+// Its helicopter: the air assault's hull (EDF6VC_HELI_TRANSPORT), one, ten minutes' fuel (it leaves once the container
+// is let go).
+bool AirdropSpec(std::uint32_t id,SupportAircraft* out) noexcept {
+    SupportVehicleKind kind{};
+    if(!out || !AirdropCatalog(id,kind))return false;
+    SupportAircraft spec{};
+    spec.count=1;spec.fuelSeconds=600u;spec.heli=static_cast<int>(HeliBody::transport410);
+    *out=spec;return true;
+}
 // The riders a transport hull seats (tools/make_jets.py: the helicopter's two door gunners and ten passengers, the
 // plane's twelve passengers): a composed load fills up to these.
 constexpr unsigned kTransportSeats=12;
 // The aircraft of an entry: an air call's, or a transport's.
 bool AircraftSpecOf(std::uint32_t id,SupportAircraft* out) noexcept {
-    return id<static_cast<unsigned>(AirCount()) ? SupportAircraftSpec(static_cast<int>(id),out) : TransportSpec(id,out);
+    return id<static_cast<unsigned>(AirCount()) ? SupportAircraftSpec(static_cast<int>(id),out) :
+           TransportSpec(id,out) || AirdropSpec(id,out);
 }
 // Whether `soldier` sits in a seat of `hull` now.
 bool Seated(const unsigned char* hull,const ObjRef& soldier) noexcept {
@@ -417,6 +440,43 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
             route.heading[2],riders);
         *out=plan;planning.active=false;return PlanResult::ready;
     }
+    if(SupportVehicleKind kind{};AirdropCatalog(catalog,kind)) {
+        const auto* spec=SupportVehicleInfo(kind);
+        if(!support::Allowed(SupportMissionPolicy(),support::Capability::air) ||
+           !support::Allowed(SupportMissionPolicy(),spec->wasteland ? support::Capability::civilianGround : support::Capability::militaryGround)) {
+            Refuse(catalog,"mission forbids external air support or this vehicle",L"本关限制外部航空支援或该车辆");return PlanResult::refused;
+        }
+        // The stock container registers its vehicle on the room's network when in a session (0x5E91D7), from an
+        // identity derived from its carrier's: the plugin's plane has none (docs/airdrop-vehicle-re.md section 4).
+        if(InSession()) {
+            Refuse(catalog,"container airdrops are offline only",L"运输机投送载具目前只能在单人（离线）任务中使用");return PlanResult::refused;
+        }
+        SupportAircraft air;AirdropSpec(catalog,&air);support::Route route;
+        if(!Cfg().npcBoarding || !Cfg().heliPilot) {
+            Refuse(catalog,"NpcBoarding/HeliPilot off",L"真实机组驾驶或登乘功能未启用，无法空运");return PlanResult::refused;
+        }
+        if(!SupportAircraftReady(air)) {
+            Refuse(catalog,"EDF6VC_HELI_TRANSPORT.SGO not installed / preloaded",L"运输直升机资源未安装：请用安装器重新安装");
+            return PlanResult::refused;
+        }
+        if(!AirdropReady(kind)) {
+            Refuse(catalog,"container or vehicle not preloaded / airdrop profile off",L"集装箱或该车辆的资源不可用，无法投送");
+            return PlanResult::refused;
+        }
+        const auto refusal=PlanAirSupportFor(air,target,player.pos,&route,1);
+        if(refusal!=support::Refusal::none) {
+            if(refusal==support::Refusal::noSky)Refuse(catalog,"no open sky over the target",L"此处没有开放天空，运输直升机无法进入");
+            else if(refusal==support::Refusal::noArea)Refuse(catalog,"the measured play area is too small for an entry",L"本图场地过小，无法安排空中入场");
+            else Refuse(catalog,"no clear air corridor from any map edge",L"从地图边缘到目标没有净空的空中航线");
+            return PlanResult::refused;
+        }
+        const auto crew=UseConfiguredLoadout() ? SupportSoldierResource(SupportCfg().aircraftCrew,false) : kSupportRangerResource;
+        if(!AddUnit(plan,kAircraft+kSupportAirborneOffset+catalog,0,route.from,route.heading) ||
+           !AddUnit(plan,crew,1,route.from,route.heading)){Refuse(catalog,"plan full",L"支援单位过多");return PlanResult::refused;}
+        Log("SUPPORT plan catalog=%u ready: a transport helicopter carrying a container (%ls) in the air at (%.0f,%.0f,%.0f) heading "
+            "(%.2f,%.2f)",catalog,spec->sgo,route.from[0],route.from[1],route.from[2],route.heading[0],route.heading[2]);
+        *out=plan;planning.active=false;return PlanResult::ready;
+    }
     const auto area=MapPlayArea();
     SupportVehicleKind kind{};SupportCrewMode mode{};const bool vehicle=GroundCatalog(catalog,kind,mode);
     const auto* spec=vehicle ? SupportVehicleInfo(kind) : nullptr;
@@ -521,6 +581,12 @@ bool Validate(const SupportPlan& plan) noexcept {
             if(plan.units[i].role!=1 || !IsSupportSoldierResource(plan.units[i].resourceId) ||
                IsSupportLeaderResource(plan.units[i].resourceId)!=((i-2)%4==0))return false;
         return true;
+    }
+    if(SupportVehicleKind dropped{};AirdropCatalog(plan.catalogId,dropped)) {
+        // Its helicopter and its pilot (made inside it, role 1): the container is made by its owner when it flies in.
+        if(!support::Allowed(SupportMissionPolicy(),support::Capability::air))return false;
+        return plan.count==2 && !plan.units[0].role && plan.units[0].resourceId==kAircraft+kSupportAirborneOffset+plan.catalogId &&
+               member(plan.units[1].resourceId) && plan.units[1].role==1;
     }
     if(!support::Allowed(SupportMissionPolicy(),capability))return false;
     if(air && !SupportAircraftSpec(static_cast<int>(plan.catalogId),&aircraft))return false;
@@ -787,6 +853,20 @@ bool Assign(Deployment& deployed) noexcept {
         Status(plane ? L"运输机已入场，将在目标上空空降" : L"运输直升机已入场，将在目标附近降落放下小队");
         return true;
     }
+    if(SupportVehicleKind kind{};AirdropCatalog(plan.catalogId,kind)) {
+        // The helicopter flies to the point carrying the container (airdrop.cpp), hovers, lets it go there and leaves.
+        if(!deployed.remote) {
+            auto* hull=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[0].obj));
+            if(!AirdropBegin(hull,kind,plan.target)) {
+                Log("SUPPORT deployment %llu: no container to carry: the helicopter leaves",static_cast<unsigned long long>(deployed.id));
+                HeliStartLeaving(hull);
+                Status(L"运输直升机未能挂载集装箱，已返航");
+            } else Status(L"运输直升机已入场，将在目标上空投下载具");
+            deployed.delivered=true;
+        }
+        deployed.assigned=true;
+        return true;
+    }
     deployed.assigned=true;Status(L"全员已确认，真实机组正在登车");return true;
 }
 void Configure() noexcept {
@@ -822,13 +902,15 @@ bool SupportWithdrawVehicle(const void* vehicle) noexcept {
         return false;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
-int SupportCallCount() noexcept {return AirCount()+2+kSupportVehicleCount*2+kTransportEntries;}
+int SupportCallCount() noexcept {return AirCount()+2+kSupportVehicleCount*2+kTransportEntries+kAirdropEntries;}
 const wchar_t* SupportCallKey(int index) noexcept {
     if(index<0)return nullptr;
     if(index<AirCount())return SupportAirCallKey(index);
     static const wchar_t* keys[]={L"SQUAD",L"PLATOON",L"TANK_CREWED",L"TANK_DELIVERY",L"TRANSPORT_CREWED",L"TRANSPORT_DELIVERY",
-                                  L"TRUCK_CREWED",L"TRUCK_DELIVERY",L"SQUAD_HELI",L"PLATOON_HELI",L"SQUAD_AIRDROP",L"PLATOON_AIRDROP"};
-    static_assert(sizeof(keys)/sizeof(keys[0])==2+kSupportVehicleCount*2+kTransportEntries,"one key per infantry, ground and transport entry");
+                                  L"TRUCK_CREWED",L"TRUCK_DELIVERY",L"SQUAD_HELI",L"PLATOON_HELI",L"SQUAD_AIRDROP",L"PLATOON_AIRDROP",
+                                  L"TANK_AIRDROP",L"TRANSPORT_AIRDROP",L"TRUCK_AIRDROP"};
+    static_assert(sizeof(keys)/sizeof(keys[0])==2+kSupportVehicleCount*2+kTransportEntries+kAirdropEntries,
+                  "one key per infantry, ground, transport and airdrop entry");
     const int rest=index-AirCount();
     return rest<static_cast<int>(sizeof(keys)/sizeof(keys[0])) ? keys[rest] : nullptr;
 }
@@ -842,7 +924,11 @@ const wchar_t* SupportCallName(int index) noexcept {
     if(ground>=0 && ground<6)return labels[ground];
     static const wchar_t* transports[kTransportEntries]={L"直升机机降·小队（4人）",L"直升机机降·大队（12人）",L"运输机空降·小队（4人）",
                                                          L"运输机空降·大队（12人）"};
-    const int t=index-TransportStart();return t>=0 && t<kTransportEntries ? transports[t] : L"支援";
+    const int t=index-TransportStart();
+    if(t>=0 && t<kTransportEntries)return transports[t];
+    // One row, "直升机投送", its vehicles the chips (map_buttons.h GroupSupport groups by the part before "·").
+    static const wchar_t* airdrops[kAirdropEntries]={L"直升机投送·坦克",L"直升机投送·装甲运兵车",L"直升机投送·民用轻卡"};
+    const int a=index-AirdropStart();return a>=0 && a<kAirdropEntries ? airdrops[a] : L"支援";
 }
 int SupportCallSeats(int index) noexcept {
     if(index<0 || index>=SupportCallCount())return 0;
@@ -934,6 +1020,7 @@ SupportIcon SupportCallIcon(int index) noexcept {
     }
     if(InfantryCatalog(static_cast<std::uint32_t>(index)))return index==AirCount() ? SupportIcon::squad : SupportIcon::platoon;
     if(bool platoon=false,plane=false;TransportCatalog(static_cast<std::uint32_t>(index),platoon,plane))return plane ? SupportIcon::jet : SupportIcon::heli;
+    if(SupportVehicleKind dropped{};AirdropCatalog(static_cast<std::uint32_t>(index),dropped))return SupportIcon::heli;   // the carrier
     SupportVehicleKind kind{};SupportCrewMode mode{};
     if(!GroundCatalog(static_cast<std::uint32_t>(index),kind,mode))return SupportIcon::squad;
     return kind==SupportVehicleKind::tank ? SupportIcon::tank : kind==SupportVehicleKind::transport ? SupportIcon::apc : SupportIcon::truck;
@@ -943,6 +1030,9 @@ SupportVariant SupportCallVariant(int index) noexcept {
     if(index<AirCount())return SupportAircraftSpec(index,&spec) ? (spec.follow ? SupportVariant::follow : SupportVariant::guard) : SupportVariant::none;
     if(bool platoon=false,plane=false;TransportCatalog(static_cast<std::uint32_t>(index),platoon,plane))
         return platoon ? SupportVariant::platoon : SupportVariant::squad;
+    if(SupportVehicleKind dropped{};AirdropCatalog(static_cast<std::uint32_t>(index),dropped))
+        return dropped==SupportVehicleKind::tank ? SupportVariant::tank : dropped==SupportVehicleKind::transport ? SupportVariant::apc :
+               SupportVariant::truck;
     SupportVehicleKind kind{};SupportCrewMode mode{};
     if(!GroundCatalog(static_cast<std::uint32_t>(index),kind,mode))return SupportVariant::none;
     return mode==SupportCrewMode::unmanned ? SupportVariant::empty : SupportVariant::crewed;
@@ -970,10 +1060,36 @@ void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept {
         _snwprintf_s(out+used,capacity-used,_TRUNCATE,L"（%ls）",variantNote);
     }
 }
+// AirdropTest (tests only, tests/autopilot): once a mission, kAirdropTestMs after the play area is measured, the airdrop
+// entry asked as the map's support bar asks it, kAirdropTestAhead m from the player towards the play area's middle (a
+// point by the map's edge is hovered short of: airdrop_logic.h ReleaseNow).
+constexpr ULONGLONG kAirdropTestMs=8000;
+constexpr float kAirdropTestAhead=40.0f;
+ULONGLONG airdropTestSince=0;bool airdropTestAsked=false;
+void AirdropTestCall() noexcept {
+    if(!Cfg().airdropTest || airdropTestAsked || !PlayAreaMeasured() || !player.at)return;
+    const ULONGLONG now=GameMs();
+    if(!airdropTestSince){airdropTestSince=now;return;}
+    if(now-airdropTestSince<kAirdropTestMs)return;
+    airdropTestAsked=true;
+    const auto area=MapPlayArea();
+    float dx=(area.lo[0]+area.hi[0])*0.5f-player.pos[0],dz=(area.lo[1]+area.hi[1])*0.5f-player.pos[2];
+    const float len=std::sqrt(dx*dx+dz*dz);
+    if(len>1.0f){dx/=len;dz/=len;}else{dx=1.0f;dz=0.0f;}
+    const float target[3]={player.pos[0]+kAirdropTestAhead*dx,player.pos[1],player.pos[2]+kAirdropTestAhead*dz};
+    const int index=AirdropStart()+Cfg().airdropTest-1;
+    wchar_t note[128]{};
+    const bool asked=SupportCallAt(index,target,note,_countof(note));
+    // The key, not the name: the log is narrow and %ls of Chinese text fails its whole line (the note is the HUD's).
+    Log("SUPPORT AirdropTest: %ls asked at (%.0f,%.0f,%.0f), %.0f m from the player: %s",SupportCallKey(index),target[0],
+        target[1],target[2],kAirdropTestAhead,asked ? "accepted" : "refused");
+}
+
 void SupportDispatchTick() noexcept {
     if(dispatchFrame==GameFrame())return;
     dispatchFrame=GameFrame();
     Configure();SupportNetTick();
+    AirdropTestCall();
     if(offlinePending && !LocalAuthority()){offlinePending=false;planning.active=false;Status(L"已取消离线请求，请通过房主重新调度");}
     if(offlinePending) {
         SupportPlan plan;
@@ -1115,6 +1231,7 @@ void SupportDispatchTick() noexcept {
     }
 }
 void ResetSupportDispatch() noexcept {
+    airdropTestSince=0;airdropTestAsked=false;
     // Mission reset invalidates the old objects; do not delete through last mission's borrowed pointers.
     Renew(planning);for(auto& row:deployments)Renew(row);offlinePending=false;callAt=0;nextOffline=1;status[0]=0;configNoticeShown=false;
     legacyNoticed=false;loadoutNoticed=false;variantNote[0]=0;

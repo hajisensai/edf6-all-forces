@@ -133,6 +133,8 @@ struct Config {
     float sazabiCannonDamage=300.0f;   // a mega particle beam's round at full charge (90 rounds a beam, 5 beams)
     float sazabiFunnelDamage=500.0f;   // a funnel beam's round (6 rounds a shot)
     bool sazabiTestBoard=false;     // tests (testrange/run_test.py): the player put into the first empty Sazabi seen
+    int airdropTest=0;              // tests (tests/autopilot): 1-3 = a container airdrop of the tank / APC / truck asked
+                                    // once a mission near the player, then the player put into what it brings
     bool heliMouseAim=true;         // a heli or rotor craft the player flies on the keyboard and mouse: the mouse-aim flight (heliaim.h; off: the stock / keys)
     bool heliFlightHud=true;        // ...and the helicopter HUD (hud.cpp HeliHud) in place of the takeoff panel / the jet cockpit (off: those)
     float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take its kinetic energy's damage times this (0: none)

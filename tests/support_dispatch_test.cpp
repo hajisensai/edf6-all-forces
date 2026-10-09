@@ -5,6 +5,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include "../src/map_buttons.h"
 #include <cstdio>
 #include <cstdlib>
 namespace crew {
@@ -74,6 +75,12 @@ bool TransportParadrop(const void*,const float*) noexcept {++paradrops;return tr
 bool JetFerry(const void*,const float*) noexcept {++ferries;return true;}
 bool JetWithdrawNow(const void*,const char*) noexcept {++jetWithdrawals;return true;}
 bool HeliStartLeaving(const void*) noexcept {++heliLeaves;return true;}
+// The container airdrops (airdrop.cpp).
+int airdrops=0;bool airdropReady=true,airdropTakes=true;SupportVehicleKind lastAirdrop{};const void* airdropPlane=nullptr;
+bool AirdropReady(SupportVehicleKind) noexcept {return airdropReady;}
+bool AirdropBegin(const void* plane,SupportVehicleKind kind,const float*) noexcept {
+    ++airdrops;lastAirdrop=kind;airdropPlane=plane;return airdropTakes;
+}
 bool IsHelicopter(const void*) noexcept {return heliHull;}
 #ifndef SUPPORT_ROUTE_NATIVE_TEST
 bool NpcDriver(const unsigned char*) noexcept {return driverAboard;}
@@ -396,7 +403,7 @@ int main() {
     check(!std::wcsstr(note,hudtext::Tr(hudtext::Tx::supportLegacyPeers)),"the older-peer notice ends with the mission");
     // The transports (transport.cpp; the user, 2026-10-09: "飞机和直升机应该也有运输机", "飞机就空降"): four entries after the
     // ground ones, every older index and key as it was; a hull in the air, its pilot and the soldiers made inside it.
-    check(SupportCallCount()==33 && !std::wcscmp(SupportCallKey(28),L"TRUCK_DELIVERY") && !std::wcscmp(SupportCallKey(29),L"SQUAD_HELI") &&
+    check(SupportCallCount()==36 && !std::wcscmp(SupportCallKey(28),L"TRUCK_DELIVERY") && !std::wcscmp(SupportCallKey(29),L"SQUAD_HELI") &&
           !std::wcscmp(SupportCallKey(32),L"PLATOON_AIRDROP"),"the transports appended: every older index and key stands");
     check(SupportCallIcon(29)==SupportIcon::heli && SupportCallIcon(31)==SupportIcon::jet && SupportCallVariant(30)==SupportVariant::platoon &&
           SupportCallVariant(31)==SupportVariant::squad,
@@ -431,6 +438,47 @@ int main() {
     SupportCallAt(29,target,note,128);SupportDispatchTick();
     check(!made && !offlinePending,"a peer without the transports: refused before anything is made");
     peersTransports=true;
+    // The container airdrops (airdrop.cpp; the user, 2026-10-09: "运输机还要能空投载具"): one entry per ground vehicle
+    // after the transports, one row (the plane) with the vehicles as its chips.
+    check(!std::wcscmp(SupportCallKey(33),L"TANK_AIRDROP") && !std::wcscmp(SupportCallKey(34),L"TRANSPORT_AIRDROP") &&
+          !std::wcscmp(SupportCallKey(35),L"TRUCK_AIRDROP") && !SupportCallKey(36),"three airdrop entries appended after the transports");
+    check(SupportCallIcon(33)==SupportIcon::heli && SupportCallVariant(33)==SupportVariant::tank &&
+          SupportCallVariant(34)==SupportVariant::apc && SupportCallVariant(35)==SupportVariant::truck,
+          "the airdrop row: the helicopter, its chips the tank, the APC, the truck");
+    {
+        const wchar_t* names[3]={SupportCallName(33),SupportCallName(34),SupportCallName(35)};
+        mapbtn::Group groups[3]{};
+        check(mapbtn::GroupSupport(names,3,groups,3)==1 && groups[0].count==3,"the three airdrops are one row of the bar");
+    }
+    check(SupportCallSeats(33)==0 && !SupportCallPreset(34,nullptr),"an airdrop has no seats to compose (the vehicle comes empty)");
+    ResetSupportDispatch();made=airdrops=ferries=heliLeaves=0;fixtureMs+=40000;
+    check(SupportCallAt(34,target,note,128),"an APC airdrop queued");
+    SupportDispatchTick();
+    {
+        const SupportPlan drop=deployments[0].plan;
+        check(made==2 && drop.count==2 && lastPrepared.heli==static_cast<int>(HeliBody::transport410) && !ferries && airdrops==1 &&
+              lastAirdrop==SupportVehicleKind::transport && airdropPlane==objects[0] && !heliLeaves,
+              "an airdrop: the transport helicopter and its pilot, handed to airdrop.cpp with the APC's container");
+        check(Validate(drop),"its plan is valid");
+        SupportPlan wrong=drop;wrong.count=3;wrong.units[2]=wrong.units[1];check(!Validate(wrong),"no riders in an airdrop plan");
+        wrong=drop;wrong.units[0].resourceId=kSupportAircraftResource+kSupportAirborneOffset+33;check(!Validate(wrong),"another airdrop's helicopter is refused");
+        wrong=drop;wrong.units[1].role=0;check(!Validate(wrong),"a pilot detached from its helicopter is refused");
+    }
+    ResetSupportDispatch();made=airdrops=ferries=heliLeaves=0;airdropTakes=false;fixtureMs+=40000;
+    SupportCallAt(33,target,note,128);SupportDispatchTick();
+    check(airdrops==1 && heliLeaves==1,"no container made: the helicopter is sent off, not left at the point");
+    airdropTakes=true;
+    ResetSupportDispatch();made=airdrops=0;airdropReady=false;fixtureMs+=40000;
+    SupportCallAt(35,target,note,128);SupportDispatchTick();SupportCallStatus(note,128);
+    check(!made && !airdrops && std::wcsstr(note,L"集装箱"),"the container or the vehicle not preloaded: refused with why, nothing made");
+    airdropReady=true;
+    ResetSupportDispatch();made=airdrops=0;testOnline=true;
+    {
+        SupportPlan plan{};
+        check(Plan(33,target,0,&plan)==support_net::PlanResult::refused && !made && !airdrops,
+              "in a session: refused (the stock container registers its vehicle on the room's network)");
+    }
+    testOnline=false;heliLeaves=0;
     // Retired with its soldiers got off: only the pilot still aboard is deleted (Retire), never the ones fighting on.
     ResetSupportDispatch();made=deleted=0;fixtureMs+=40000;
     SupportCallAt(29,target,note,128);SupportDispatchTick();
