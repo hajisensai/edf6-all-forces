@@ -94,7 +94,7 @@ bool NetworkFrame(Unit& u,unsigned char* v,bool live,int playerSeat,ULONGLONG ms
 }
 void ReceiveNetwork(Unit& u,unsigned char* v,const proteus_net::State& s,ULONGLONG ms) noexcept {
     u.net.networked=true;u.seen=ms;
-    if(s.kind==proteus_net::Kind::defense){ApplyDefense(u,s);return;}   // never pilot input: a driver takes its owner's count
+    if(s.kind==proteus_net::Kind::defense){ApplyDefense(u,s);u.net.defenseAt=ms;return;}   // never pilot input: a driver takes its owner's count
     if(!u.net.remote || u.net.epoch!=s.controller)GiveBack(u,v,"replicated driver state");
     u.net.remote=true;u.net.haveControl=true;u.net.epoch=s.controller;u.net.receivedAt=ms;u.net.control=s;
     ApplyControl(u,s);

@@ -63,6 +63,7 @@ constexpr unsigned kTeamWalk=0x5E11D0,kTeamManager=0x20B2978;
 constexpr unsigned kSearchSlotRva=0x17D24C8,kSearchFn=0x598C50;
 constexpr std::size_t kSearcher=0x8,kSearchBest=0x10,kSearchFound=0x18,kEnemyTarget=0x518;
 constexpr ULONGLONG kStaleMs=1500,kLogMs=2000,kRingMs=500,kReadoutMs=250;
+constexpr ULONGLONG kDefenseSilentMs=3000;   // the owner sends its count every 250 ms: this long without one is no v2 owner
 constexpr float kPi=3.14159265f;
 constexpr int kMaxUnits=4;
 
@@ -114,6 +115,12 @@ struct NetState {
     bool networked=false,remote=false,haveControl=false,defenseDirty=false;
     std::int32_t epoch=-1;
     ULONGLONG receivedAt=0,sentAt=0,defenseSentAt=0;
+    ULONGLONG defenseAt=0;             // the owner's last shield count received here
+    ULONGLONG activeAt=0;              // this machine's control of the rework began
+    // A peer runs another build of the rework (a packet of another version, or as the local driver no shield count
+    // from the owner within kDefenseSilentMs): this Proteus stays stock on this machine until the session or mission
+    // ends, so the two machines never disagree on a wall or on borrowed weapons.
+    bool incompatible=false;
 };
 // One stock weapon mount as the rework holds it (proteus_logic.h kMounts' order).
 struct Arm {
@@ -213,6 +220,7 @@ Unit* UnitOf(const void* v,bool make) noexcept {
 // The active unit of the vehicle (game thread: the hooks the game calls on it).
 Unit* ActiveOf(const void* v) noexcept {
     for(auto& u:units)if(u.ref.Is(v)) {
+        if(u.net.incompatible)return nullptr;
         if(RegisteredProteus(v) && !IsOnlineAuthority(v))
             return u.net.remote && ControlFresh(u,v,GameMs()) && (u.net.control.flags&proteus_net::kActive) ? &u : nullptr;
         if(u.net.networked && u.net.epoch!=ProteusNetController(const_cast<unsigned char*>(static_cast<const unsigned char*>(v))))return nullptr;
@@ -228,6 +236,7 @@ Unit* ActiveOf(const void* v) noexcept {
 // --- giving back ---
 void RefreshFieldWrites() noexcept;
 void OpenSeats(Unit& u,unsigned char* v) noexcept;
+void Incompatible(Unit& u,unsigned char* v,std::uint32_t version) noexcept;
 void GiveBack(Unit& u,unsigned char* v,const char* why) noexcept {
     DropBarrier(u,why);
     if(!u.active)return;
@@ -486,6 +495,12 @@ void Frame(unsigned char* v) noexcept {
     Unit* const u=UnitOf(v,live && (playerSeat>=0 || RegisteredProteus(v)));
     if(!u)return;
     const ULONGLONG ms=GameMs();
+    if(u->net.incompatible && !RegisteredProteus(v))u->net.incompatible=false;   // out of the session: ours again
+    if(u->net.incompatible) {
+        GiveBack(*u,v,"a peer runs another build of the Proteus rework");
+        DropZone(v);u->seen=ms;
+        return;
+    }
     if(NetworkFrame(*u,v,live,playerSeat,ms))return;
     if(!live || !anyPlayer) {
         const bool wasActive=u->active;
@@ -497,7 +512,7 @@ void Frame(unsigned char* v) noexcept {
     }
     if(u->frame==GameFrame())return;
     u->frame=GameFrame();
-    if(!u->active)Take(*u,v,ms,playerSeat);
+    if(!u->active){Take(*u,v,ms,playerSeat);u->net.activeAt=ms;}
     u->seen=ms;u->playerSeat=static_cast<unsigned>(playerSeat);
     RefreshWeapons(*u,v);
     const float dt=vec::Clamp(static_cast<float>(ms-u->lastMs)*0.001f,0.0f,0.1f);
@@ -531,6 +546,24 @@ void Frame(unsigned char* v) noexcept {
     DebugLog(*u,v);
     SendDefense(*u,v,ms);
     SendControl(*u,v,ms,o.modeChanged || in.shield);
+    // The local driver of a Proteus another machine owns hears that owner's shield count every 250 ms when the owner
+    // runs this build; silence means it does not (an older rework, or none): back to stock here.
+    if(u->net.networked && !DefenseOwner(v)) {
+        const ULONGLONG since=u->net.defenseAt>u->net.activeAt ? u->net.defenseAt : u->net.activeAt;
+        if(ms>since && ms-since>kDefenseSilentMs)Incompatible(*u,v,0);
+    }
+}
+
+// A peer runs another build of the rework (`version` its packets', 0: the owner's count never came): stock here.
+void Incompatible(Unit& u,unsigned char* v,std::uint32_t version) noexcept {
+    if(!u.net.incompatible) {
+        if(version)Log("PROTEUS v=%p: a peer sends Proteus protocol version %u (this build %u): stock Proteus here this session",v,version,proteus_net::kVersion);
+        else Log("PROTEUS v=%p: no shield count from the Proteus's owner in %llu ms: it runs another build (this one %u); stock Proteus here",
+                 v,kDefenseSilentMs,proteus_net::kVersion);
+    }
+    u.net.incompatible=true;
+    GiveBack(u,v,"a peer runs another build of the Proteus rework");
+    DropZone(v);
 }
 
 // --- the allies' priority (the soldiers' target search) ---
@@ -675,6 +708,11 @@ void ResetProteus() noexcept {
     AcquireSRWLockExclusive(&readoutLock);
     out=Out{};
     ReleaseSRWLockExclusive(&readoutLock);
+}
+void ProteusNetIncompatible(unsigned char* v,std::uint32_t version) noexcept {
+    if(!ok || !Cfg().enabled || !Cfg().proteus || !IsProteus(v) || v[kDead] || !RegisteredProteus(v))return;
+    Unit* u=UnitOf(v,true);if(!u)return;
+    Incompatible(*u,v,version);
 }
 void ProteusNetReceived(unsigned char* v,const proteus_net::State& s) noexcept {
     if(!ok || !Cfg().enabled || !Cfg().proteus || !IsProteus(v) || v[kDead] || !RegisteredProteus(v))return;

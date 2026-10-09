@@ -34,7 +34,9 @@ assert receive.index('Kind::defense') < receive.index('ApplyControl('), 'a defen
 
 step = body(shield, 'void BarrierStep(')
 assert step.index('DefenseOwner(v)') < step.index('proteus::Sense('), 'the barrier HP is the shield HP only on its owner'
-assert 'Put<float>(b,kBarrierHp,u->st.shield*u->barrier.full)' in step, 'a copy shows the owner count'
+copy = step[step.index('hp=u->st.shield*u->barrier.full;'):]
+assert copy.index('hp=u->st.shield*u->barrier.full;') < copy.index('Put<float>(b,kBarrierHp,hp)') < copy.index('if(hp>0.0f'), \
+    'a copy shows the owner count and decides on it, not on its own local hits'
 assert 'kBarrierNoEcho' in body(shield, 'void KillBarrier('), 'a dropped local barrier is never broadcast'
 
 empty = body(weapons, 'void __fastcall ProteusEmptyWeapon(')
@@ -46,6 +48,14 @@ assert 'FieldOwnedHere(o)' in body(source, 'void __fastcall FieldVisit(')
 assert 'std::fmin(taken,1-p.defense)' in field and 'extra-t.extraGiven' in field and 'energy-t.energyGiven' in field
 assert 'RestoreFieldMultiplier' in body(field, 'void RefreshFieldWrites(')
 assert 'contribution.source.Is(v)' in field, 'reused source slots must not retain old field identity'
+
+# Mixed builds: another version's packet is reported, never decoded; an incompatible Proteus is stock here.
+transport = code_only((root / 'src/proteus_net.cpp').read_text(encoding='utf-8'))
+receive_hook = body(transport, 'void __fastcall Receive(')
+assert receive_hook.index('if(valid)ProteusNetReceived(') < receive_hook.index('else if(foreign)ProteusNetIncompatible(')
+assert 'if(u.net.incompatible)return nullptr;' in body(source, 'Unit* ActiveOf(')
+assert frame.index('u->net.incompatible') < frame.index('NetworkFrame('), 'an incompatible Proteus never runs the rework'
+assert 'kDefenseSilentMs' in frame and 'Incompatible(*u,v,0)' in frame, 'a local driver that hears no owner count goes stock'
 
 vhud = code_only((root / 'src/vhud.cpp').read_text(encoding='utf-8'))
 assert 'ProteusBorrowedWeapons(v,r.seat,' in vhud, 'the seat HUD lists the stock mounts the seat borrows'

@@ -125,12 +125,15 @@ void BarrierStep(unsigned char* b) noexcept {
     const bool keep=u && u->ref.Is(v) && ActiveOf(v)==u && proteus::ShieldUp(u->st) && !At<unsigned char>(b,kBarrierStuck) &&
                     !(At<unsigned char>(b,kBarrierFlags)&1) && u->barrier.full>0.0f;
     if(keep) {
-        const float hp=At<float>(b,kBarrierHp);
+        float hp=At<float>(b,kBarrierHp);
         if(DefenseOwner(v)) {   // the hits settle here: its HP is the shield's
             const float before=u->st.shield;
             proteus::Sense(u->st,hp/u->barrier.full);
             if(u->st.shield!=before)u->net.defenseDirty=true;
-        } else if(std::fabs(hp-u->st.shield*u->barrier.full)>0.5f)Put<float>(b,kBarrierHp,u->st.shield*u->barrier.full);
+        } else {                // a copy: the owner's count, whatever this copy's wall caught locally
+            hp=u->st.shield*u->barrier.full;
+            if(std::fabs(At<float>(b,kBarrierHp)-hp)>0.5f)Put<float>(b,kBarrierHp,hp);
+        }
         if(hp>0.0f && proteus::ShieldUp(u->st)) {
             u->barrier.seenFrame=GameFrame();
             alignas(16) float m[16];BarrierMatrix(*u,v,m);
