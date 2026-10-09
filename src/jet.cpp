@@ -538,6 +538,16 @@ void JetFrame(unsigned char* v) noexcept {
     const Kind& kind=KindOf(*j);
     Arms arms=ReadArms(v);
     j->burden=BurdenOf(BodyMark(v),arms.stores,arms.storeCount);
+    {
+        int air=0,ground=0;
+        for(int i=0;i<arms.storeCount;++i) {
+            const auto r=arms.stores[i].spec->role;
+            const int left=arms.stores[i].ammo>0 ? arms.stores[i].ammo : 0;
+            if(r==StoreRole::air)air+=left;
+            else if(r==StoreRole::ground || r==StoreRole::bomb || r==StoreRole::rocket)ground+=left;
+        }
+        j->loadPrefer=LoadoutPrefer(kind.prefer,air,ground);j->loadSet=true;
+    }
     const bool follow=player.at && ms-player.at<10000;
     // A drone works round its carrier, a launched jet round its strike point, a placed one guards the
     // player. Each withdraws away from the player (`viewer`), so it is deleted out of their sight.

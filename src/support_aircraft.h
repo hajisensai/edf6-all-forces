@@ -21,7 +21,9 @@ support::Refusal PlanAirSupportFor(SupportAircraft spec,const float* target,cons
 // Whether its hull can be made this mission (its SGO installed and preloaded: jet_spawn.cpp PreloadJets).
 bool SupportAircraftReady(const SupportAircraft&) noexcept;
 // Creates the hull at `matrix` (in the air, or a legacy plan's runway) with empty seats. Activation never creates a rider.
-unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float* matrix) noexcept;
+// `variant`: the body's loaded copy (support_loadout.h VehicleVariantFile, app:/object/ path) preloaded this mission
+// (support_variants.h); nullptr: the stock body. It must come up as the same role, as the stock body must.
+unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float* matrix,const wchar_t* variant=nullptr) noexcept;
 // Its seated real pilot authorizes the flight. `airborne`: it is in the air already: it flies on at once, a wing at its
 // kind's cruise along its nose (jet_spawn.cpp Launch's start), a helicopter with its rotor turning (HeliCalled); else
 // (a legacy plan's hull on the ground) it takes off.

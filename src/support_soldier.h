@@ -1,6 +1,5 @@
 #pragma once
 #include "crew.h"
-#include "support_loadout.h"
 
 namespace crew {
 enum class SupportSquadKind { rangerSquad, rangerPlatoon };
@@ -19,13 +18,6 @@ bool InstallSupportSoldiers() noexcept;
 void PreloadSupportSoldiers() noexcept;
 void ResetSupportSoldiers() noexcept;
 bool SupportSoldiersReady() noexcept;
-// `resource` with the look bits of `look` (support_call.h) when this mission preloaded that coloured template, else
-// `resource` (logged): the planner's way to a coloured soldier (support_dispatch.cpp ComposedResource).
-std::uint32_t SupportSoldierWithLook(std::uint32_t resource,const SupportLook& look) noexcept;
-// After PreloadSupportSoldiers, at the mission's start: queue one coloured template (support_loadout.h SupportLookFile; the
-// caller checked the generated file is there). False: not queued (no preload this mission, a fault, or the
-// kSupportLooksMost distinct looks already taken); that soldier comes stock.
-bool PreloadSupportLook(SupportWeapon kind,bool leader,const SupportLook& look) noexcept;
 // Game thread: every newly created soldier is held until its support transaction becomes Active.
 // The NPC Think hook consumes this query to suppress AI intent, without freezing physics or teleporting.
 bool HoldSupportSoldier(const ObjRef& soldier,bool held) noexcept;
@@ -41,12 +33,14 @@ bool SpawnSupportSoldier(const float* worldMatrix,ObjRef* out) noexcept;
 bool ApplySupportSoldierSpawn(const float* worldMatrix,bool leader,const unsigned char* nativeNetId32,ObjRef* out) noexcept;
 // The same for any support_call.h soldier resource (its stock weapon variant). `local` (no ID): a soldier this
 // machine alone owns, allowed offline and to the host of a world with no other participant; clients never.
+// `look`: a coloured copy of its template (support_loadout.h SupportLookFile, app:/object/ path) preloaded this mission
+// (support_variants.h); nullptr: the stock template.
 bool ApplySupportSoldierResource(const float* worldMatrix,std::uint32_t resource,const unsigned char* nativeNetId32,
-                                 bool local,ObjRef* out) noexcept;
+                                 bool local,ObjRef* out,const wchar_t* look=nullptr) noexcept;
 // The same, but an ID-bearing soldier is not registered yet: the caller seats it first (a crew made aboard an aircraft
 // in the air) and then registers it with RegisterSupportObject(soldier, id); on failure it deletes it.
 bool CreateSupportSoldierUnregistered(const float* worldMatrix,std::uint32_t resource,const unsigned char* nativeNetId32,
-                                      bool local,ObjRef* out) noexcept;
+                                      bool local,ObjRef* out,const wchar_t* look=nullptr) noexcept;
 bool DeriveSupportSoldierNetId(const void* registeredAnchor,unsigned ordinal,unsigned char* out32) noexcept;
 // Register a freshly created canonical support object (soldier/aircraft/ground vehicle) on this peer.
 // Never call twice; the reliable spawn transaction owns validation and rollback on failure.

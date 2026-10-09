@@ -32,8 +32,9 @@ Menu 3 downloads the newest build from the test site, menu 4 sends the logs back
 the site itself is testhub/), menu 5 checks what is installed (check: reads only, the game may be running).
 Menu 7 edits the map support's out-of-mission configuration in the player's EDF6VehicleCrew.ini (tools/support_config.py):
 which support units can be called, their real crews' stock weapons, how many aircraft a call brings; its `l` edits the
-out-of-game loadouts (tools/support_loadout.py: each seated call's soldiers, their colours, the support tanks' rounds) and,
-with the game closed, writes the files those need (coloured soldier templates, the AP tank). Install writes them too.
+out-of-game loadouts (tools/support_loadout.py: each seated call's soldiers and their colours, each support tank's and jet's
+pylons) and, with the game closed, writes the files those need (and the ones an online host's presets needed here: the
+plugin's pending list). Install writes them too.
 """
 from __future__ import annotations
 
@@ -63,7 +64,7 @@ PLUGINS = ((PLUGIN, SECTION), ('EDF6AutoTurret', 'AutoTurret'))
 PLUGIN_FILES = ('.dll', '.ini')            # shipped
 # What a plugin writes beside itself: its log, the log rotated away (src/plugin.cpp RotateLog), the Primers' trace
 # (src/primer.cpp TraceFile, ini PrimerTrace).
-PLUGIN_RUNTIME = ('.log', '.log.1', '.primer.csv')
+PLUGIN_RUNTIME = ('.log', '.log.1', '.primer.csv', '.variants_pending.txt')
 ADDED_HEADER = '; ---- 新版本新增的设置（安装器补入，默认值）----'
 # Settings whose shipped default became on (the user, 2026-10-07: "还有什么默认是关的，都打开，都装mod了，肯定要打开啊"):
 # key -> (the old default, the new one). An existing ini still holding the old default gets the new one, once: the
@@ -759,22 +760,25 @@ def manage_campaign(game: str) -> int:
 
 
 def write_loadout_files(game: str) -> bool:
-    """The out-of-game loadouts' generated files (tools/support_loadout.py) for the installed ini: the presets' coloured
-    soldiers and the AP support tank. False (said why) when they cannot be made: the plugin then sends those soldiers /
-    tanks stock and logs it; everything else is unaffected."""
+    """The out-of-game loadouts' generated files (tools/support_loadout.py) for the installed ini and for the names the
+    plugin listed as missing in an online room (Mods/Plugins/EDF6VehicleCrew.variants_pending.txt): coloured soldiers,
+    loaded tanks and jets, the pylon weapons they carry. False (said why) when they cannot be made: the plugin then sends
+    those soldiers / vehicles stock and logs it; everything else is unaffected."""
     import support_loadout
     path = os.path.join(game, 'Mods', 'Plugins', PLUGIN + '.ini')
     try:
         with open(path, 'rb') as f:
             raw = f.read()
         text = (raw[3:] if raw.startswith(b'\xef\xbb\xbf') else raw).decode('utf-8', errors='replace')
-        files = support_loadout.build(game, text)
+        files = support_loadout.build(game, text, pending=support_loadout.read_pending(game))
     except (OSError, ValueError, KeyError, AssertionError) as e:
-        print(f'！ 支援预设的文件没有生成（带颜色的士兵、AP 坦克将按原版出动，插件日志会说明）：{e}')
+        print(f'！ 支援预设的文件没有生成（带颜色的士兵、配了挂载的载具将按原版出动，插件日志会说明）：{e}')
         return False
-    print('生成支援预设用的文件（带颜色的士兵模板、AP 支援坦克；只读 Root.cpk）……')
+    print('生成支援预设用的文件（带颜色的士兵模板、配了挂载的坦克 / 战机；只读 Root.cpk）……')
     for written in support_loadout.install(game, files):
         print('写入', written)
+    for name in support_loadout.clear_pending(game, files):
+        print('已生成联机时房主预设需要、本机缺少的文件', name)
     return True
 
 
@@ -800,7 +804,7 @@ def manage_support(game: str) -> int:
     # The presets' colours and the AP tank need generated files, read at a mission's start: written only with the game
     # closed (the installer never writes game files under a running game).
     if modfiles.game_running():
-        print('游戏正在运行：带颜色的士兵模板 / AP 坦克文件没有生成。退出游戏后再进菜单 7 保存一次（或选 1 安装）即可；'
+        print('游戏正在运行：带颜色的士兵模板 / 配了挂载的载具文件没有生成。退出游戏后再进菜单 7 保存一次（或选 1 安装）即可；'
               '在那之前这些士兵 / 坦克按原版出动（兵种、编组照常生效）。')
     else:
         write_loadout_files(game)

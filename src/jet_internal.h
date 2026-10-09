@@ -412,6 +412,14 @@ struct ShellState {
     GunClock guns[static_cast<int>(SideGun::count)];
 };
 
+// The targets a jet goes for by what its stores can strike (the user, 2026-10-09: loads made before the battle, "飞机可以
+// 全带炸弹，或者全带导弹"): with rounds left only in air-to-air stores, flying targets first; only in ground ones (air-to-
+// ground missiles, bombs, rockets), ground targets first; mixed, none, or all spent: its kind's own (Kind::prefer). Every
+// stock load keeps its kind's (the fighter's and the interceptor's are air-to-air, the strike jet's and the multirole's
+// mixed), so this changes only a load the player chose (a fighter loaded with bombs now goes for the ground).
+constexpr Prefer LoadoutPrefer(Prefer kind,int airRounds,int groundRounds) noexcept {
+    return airRounds>0 && groundRounds<=0 ? Prefer::air : groundRounds>0 && airRounds<=0 ? Prefer::ground : kind;
+}
 struct Jet {
     ObjRef ref;              // the vehicle: address and weak-this control block, on which a weak reference is
                              // held while the entry is (HoldRef): the block outlives the object, so a destroyed
@@ -422,6 +430,8 @@ struct Jet {
     ULONGLONG lastStep;   // GameMs of the last frame step (GameStep)
     float anchor[3];         // where it patrols when there is no player
     bool reap;               // withdrawn: delete from another object's update (JetReap)
+    bool loadSet;            // loadPrefer read this frame from its stores (jet.cpp; else its kind's preference)
+    Prefer loadPrefer;       // LoadoutPrefer of its stores
     const char* why;         // why it withdrew
     ULONGLONG emptyFrame;    // the game frame its rider was put off for the reap (JetReap: the delete waits for it), 0 none
     bool launched;           // made by JetLaunch: anchor is its strike point

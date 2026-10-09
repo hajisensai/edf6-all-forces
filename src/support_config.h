@@ -9,7 +9,7 @@
 //   SupportAircraftCrewWeapon=rifle     the real crews of the called aircraft
 //   SupportAircraftCount_<KEY>=n        aircraft one call brings (0: the call's own number)
 //   SupportPreset_<KEY>=rifle@1E3A8A*2,rocket   a seated entry's soldiers, colours (support_loadout.h)
-//   SupportTankRounds=AP:1,HE:1         the support tanks' main gun, per tank (support_loadout.h)
+//   SupportVehicle_<KEY>=HE,AP:25       a tank's / jet's pylons before the battle (support_loadout.h)
 // Weapons: rifle / flame / rocket / shotgun / sniper (or 步枪 / 火焰 / 火箭 / 霰弹 / 狙击): the stock Ranger templates'
 // own AI weapons (support_call.h SupportWeapon). An invalid value keeps the default and is reported (Problems).
 #pragma once
@@ -28,7 +28,7 @@ struct SupportConfig {
     SupportWeapon vehicleCrew=SupportWeapon::rifle,aircraftCrew=SupportWeapon::rifle;
     std::uint8_t aircraft[kSupportConfigUnits]{};   // 0: the call's own count
     SupportPreset preset[kSupportConfigUnits]{};    // SupportPreset_<key>; count 0: the entry's own load
-    RoundMix tankRounds{};                          // SupportTankRounds; count 0: every tank HE (stock)
+    VehicleLoadout vehicle[kSupportConfigUnits]{};  // SupportVehicle_<key>; body none: the vehicle as it always came
     wchar_t problems[256]{};                   // the invalid settings, for the HUD and the log; empty: none
     bool Enabled(int catalog) const noexcept {
         return catalog<0 || catalog>=kSupportConfigUnits || !((disabled>>catalog)&1u);

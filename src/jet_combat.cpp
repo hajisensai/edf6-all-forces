@@ -127,7 +127,7 @@ void VisitTarget(void* ctx,const void* object,const float* p) noexcept {
     const float f[3]={p[0]-k.pos[0],p[1]-k.pos[1],p[2]-k.pos[2]};
     float score=Len(f);
     if(object==k.j->t.target)score=score*kKeepScale-kKeepTarget;
-    const Prefer prefer=KindOf(*k.j).prefer;
+    const Prefer prefer=k.j->loadSet ? k.j->loadPrefer : KindOf(*k.j).prefer;   // its stores' (jet.cpp, LoadoutPrefer)
     if(prefer!=Prefer::any && flyer!=(prefer==Prefer::air))score+=2000.0f;   // the other kind: only with none of its own
     if(!k.best || score<k.score){k.best=object;k.score=score;std::memcpy(k.aim,p,12);k.flyer=flyer;}
 }

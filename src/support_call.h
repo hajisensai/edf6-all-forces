@@ -27,22 +27,15 @@ inline constexpr std::uint32_t kSupportRangerResource=1,kSupportLeaderResource=2
 constexpr std::uint32_t SupportSoldierResource(SupportWeapon weapon,bool leader) noexcept {
     return (static_cast<std::uint32_t>(weapon)<<8) | (leader ? kSupportLeaderResource : kSupportRangerResource);
 }
-// Bits 12-15 of a soldier id: its look (support_loadout.h SupportLook), 0 = the stock template, n = entry n-1 of this
-// machine's mission look table (support_soldier.cpp SupportSoldierWithLook). Only a plan this machine alone deploys
-// carries one (support_dispatch.cpp LocalAuthority): no capability bit is left to tell a peer (support_protocol.h).
-inline constexpr unsigned kSupportLookShift=12,kSupportLooksMost=15;
 constexpr bool IsSupportSoldierResource(std::uint32_t id) noexcept {
     return ((id&0xFFu)==kSupportRangerResource || (id&0xFFu)==kSupportLeaderResource) &&
-           id<kSupportAircraftResource && ((id>>8)&0xFu)<static_cast<std::uint32_t>(kSupportWeaponCount);
-}
-constexpr unsigned SupportSoldierLook(std::uint32_t id) noexcept {
-    return IsSupportSoldierResource(id) ? (id>>kSupportLookShift)&0xFu : 0u;
+           (id>>8)<static_cast<std::uint32_t>(kSupportWeaponCount);
 }
 constexpr bool IsSupportLeaderResource(std::uint32_t id) noexcept {
     return IsSupportSoldierResource(id) && (id&0xFFu)==kSupportLeaderResource;
 }
 constexpr SupportWeapon SupportSoldierWeapon(std::uint32_t id) noexcept {
-    return IsSupportSoldierResource(id) ? static_cast<SupportWeapon>((id>>8)&0xFu) : SupportWeapon::rifle;
+    return IsSupportSoldierResource(id) ? static_cast<SupportWeapon>(id>>8) : SupportWeapon::rifle;
 }
 // An aircraft created in the air at the plan's matrix, its real crew created inside it and seated at once (2026-10-09,
 // the user: "空中支援不是场外飞进来吗，不需要真起飞吧"). kSupportAircraftResource + catalog is the older plan of a host
@@ -103,9 +96,6 @@ const wchar_t* SupportCallKey(int index) noexcept;
 bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept;
 void SupportDispatchTick() noexcept;
 void ResetSupportDispatch() noexcept;
-// Mission start, after PreloadSupportSoldiers: queue the coloured soldiers of the out-of-game presets (support_loadout.h)
-// whose generated file is in Mods/OBJECT; each missing one is logged and comes stock.
-void PreloadSupportLooks() noexcept;
 void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept;
 // What the map's support bar shows of the catalog (hud.cpp MapSupportBar): an entry's icon, and whether a call can be
 // asked for now (one dispatcher serves every entry: a request still being planned, its cooldown after a delivery).

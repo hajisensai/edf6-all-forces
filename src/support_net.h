@@ -11,6 +11,10 @@ struct Unit {
     std::uint32_t resourceId=0,role=0; // role: parent vehicle index + 1, zero for independent infantry/vehicle
     float matrix[16]{};
     unsigned char netId[32]{};
+    // support_loadout.h: a soldier's look or a vehicle's pylons (kVariantApplied: made from that file). On the wire in the
+    // unit message's `challenge`, which a unit message never used (an older peer reads it and ignores it; a host plans
+    // one only when every peer announced kExtVariants, support_protocol.h).
+    std::uint64_t variant=0;
 };
 struct Plan {
     std::uint32_t catalogId=0,count=0;
@@ -31,6 +35,9 @@ struct Hooks {
     bool (*admissionReady)() noexcept=nullptr;
     bool (*createdMatches)(const ObjRef*,std::uint32_t) noexcept=nullptr;
     void (*notice)(std::uint32_t,RequestStatus) noexcept=nullptr;
+    // This machine's hello extension (support_protocol.h kExtVariants) and the Bloom filter of the variant files it has
+    // preloaded this mission (support_loadout.h BloomAdd); nullptr: none (an older build's hello: 0 and empty).
+    void (*variants)(std::uint32_t* ext,unsigned char* bloom32) noexcept=nullptr;
 };
 bool ValidPlan(const Plan& plan,bool requireIds=true) noexcept;
 } // namespace support_net
@@ -52,6 +59,11 @@ bool SupportPeersAcceptAirborne() noexcept;
 bool SupportPeersAcceptTransports() noexcept;
 // Host: whether every peer takes a composed load (support_protocol.h kCapLoadout); offline / no peer: true.
 bool SupportPeersAcceptLoadout() noexcept;
+// Host: whether every peer applies plan unit variants (support_protocol.h kExtVariants) and has the variant file of
+// hash `hash` (support_loadout.h VariantHash) preloaded, by its last hello; offline / no peer: true.
+bool SupportPeersHaveVariantFile(std::uint64_t hash) noexcept;
+// Host: whether every peer applies unit variants at all (an older build's do not); offline / no peer: true.
+bool SupportPeersApplyVariants() noexcept;
 // Requester ownership: native EOS PUID must equal the authenticated transport
 // sender and belong to the sealed current-world participant set.
 bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) noexcept;

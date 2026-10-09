@@ -168,7 +168,7 @@ class IncrementalTests(unittest.TestCase):
             mission = stack.enter_context(patch.object(gen, 'install', return_value=[]))
             import support_loadout   # no Root.cpk here: its files stand in; its install (skip unchanged) runs for real
             loadout = stack.enter_context(patch.object(support_loadout, 'build',
-                                                       return_value={'OBJECT/EDF6VC_SUPPORT_TANK_AP.SGO': b'ap tank'}))
+                                                       return_value={'OBJECT/EDF6VC_LO_TANK_4000000000000C81.SGO': b'loaded tank'}))
             stack.enter_context(patch.object(make_stock_stores, 'remove', lambda g: ([], [])))
             import make_edf5_campaign   # no Root.cpk here to append to: its files stand in, its install runs for real
             stack.enter_context(patch.object(make_edf5_campaign, 'build', lambda g, campaign=True, test_range=True: (

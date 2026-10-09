@@ -225,6 +225,10 @@ bool SupportPeersAcceptVariants() noexcept { return !running || session.PeersHav
 bool SupportPeersAcceptAirborne() noexcept { return !running || session.PeersHave(support_net::kCapAirborneAir); }
 bool SupportPeersAcceptTransports() noexcept { return !running || session.PeersHave(support_net::kCapTransports); }
 bool SupportPeersAcceptLoadout() noexcept { return !running || session.PeersHave(support_net::kCapLoadout); }
+bool SupportPeersHaveVariantFile(std::uint64_t hash) noexcept {
+    return !running || session.PeersHaveVariant(support_net::kExtVariants,hash);
+}
+bool SupportPeersApplyVariants() noexcept { return !running || session.PeersHaveVariant(support_net::kExtVariants,0); }
 bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) noexcept {
     if(!authenticatedPuid || !std::memchr(authenticatedPuid,0,65))return false;
     EDF6CoopPeer peer;

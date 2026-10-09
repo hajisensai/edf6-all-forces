@@ -22,13 +22,13 @@ const wchar_t* SupportAirCallKey(int) noexcept{return L"AIR";}
 bool SupportSoloHostWorld() noexcept{return false;}
 bool SupportAircraftSpec(int,SupportAircraft*) noexcept{return false;}
 support::Refusal PlanAirSupport(int,const float*,const float*,support::Route*,int) noexcept{return support::Refusal::unsupported;}
-unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float*) noexcept{return nullptr;}
+unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float*,const wchar_t*) noexcept{return nullptr;}
 bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool) noexcept{return false;}
 bool DeleteSupportAircraft(const ObjRef&) noexcept{return false;}
 bool SupportSoldiersReady() noexcept{return true;}
 const wchar_t* SupportSoldierFailureText() noexcept{return L"";}
-bool ApplySupportSoldierResource(const float*,std::uint32_t,const unsigned char*,bool,ObjRef*) noexcept{return false;}
-bool CreateSupportSoldierUnregistered(const float*,std::uint32_t,const unsigned char*,bool,ObjRef*) noexcept{return false;}
+bool ApplySupportSoldierResource(const float*,std::uint32_t,const unsigned char*,bool,ObjRef*,const wchar_t*) noexcept{return false;}
+bool CreateSupportSoldierUnregistered(const float*,std::uint32_t,const unsigned char*,bool,ObjRef*,const wchar_t*) noexcept{return false;}
 bool SupportPeersAcceptAirborne() noexcept{return true;}
 bool SupportPeersAcceptTransports() noexcept{return true;}
 bool SupportPeersAcceptLoadout() noexcept{return true;}
@@ -48,11 +48,12 @@ bool FollowSupportSoldier(const ObjRef& who,const ObjRef& leader) noexcept {
 bool DeleteSupportSoldier(const ObjRef&) noexcept{return false;}
 bool HoldSupportSoldier(const ObjRef&,bool) noexcept{return true;}
 bool SupportVehicleReady(SupportVehicleKind,SupportCrewMode) noexcept{return false;}
-unsigned char* SpawnSupportVehicle(SupportVehicleKind,SupportCrewMode,const float*,const float*,const void*,TankRound) noexcept{return nullptr;}
-bool SupportTankRoundReady(TankRound) noexcept{return false;}
-std::uint32_t SupportSoldierWithLook(std::uint32_t resource,const SupportLook&) noexcept{return resource;}
-bool PreloadSupportLook(SupportWeapon,bool,const SupportLook&) noexcept{return false;}
-namespace jet {bool ModFileThere(const wchar_t*) noexcept{return false;}}
+unsigned char* SpawnSupportVehicle(SupportVehicleKind,SupportCrewMode,const float*,const float*,const void*,const wchar_t*) noexcept{return nullptr;}
+bool SupportVariantReady(const wchar_t*) noexcept{return false;}
+void NoteMissingVariant(const wchar_t*,const char*) noexcept{}
+void SupportVariantHello(std::uint32_t*,unsigned char*) noexcept{}
+bool SupportPeersApplyVariants() noexcept{return true;}
+bool SupportPeersHaveVariantFile(std::uint64_t) noexcept{return true;}
 bool DeleteSupportVehicle(unsigned char*) noexcept{return false;}
 void ConfigureSupportNet(const support_net::Hooks&) noexcept{}
 bool SubmitSupportRequest(int,const float*,wchar_t*,std::size_t,std::uint64_t) noexcept{return false;}

@@ -7,8 +7,9 @@
 #include <limits>
 
 namespace fixture {
-bool signatures=true,failSetup=false,badClass=false,occupied=false,apFile=false,apBadClass=false;
+bool signatures=true,failSetup=false,badClass=false,occupied=false,variantBadClass=false;
 const wchar_t* lastPath=nullptr;
+const wchar_t* const kLoaded=L"app:/object/edf6vc_lo_tank_4000000000000c81.sgo";
 int checks=0,preloads=0,makes=0,applies=0,disposals=0,deletes=0,teams=0,levels=0,owners=0;
 alignas(16) unsigned char object[0x2000]{},seats[5*edf::kSeatStride]{};
 const void* expectedOwner=nullptr;
@@ -31,10 +32,10 @@ unsigned char* Create(void*,const float* matrix,const wchar_t* path,crew::InitPa
     Check(param->vtable==crew::image+crew::kInitVtable,"native init parameter");
     for(int i=0;i<3;++i)lastPosition[i]=matrix[12+i];
     lastPath=path;
-    // The generated AP tank is the stock tank's class and seats (tools/support_loadout.py copies V505_TANK_MISSION).
-    const bool ap=std::wcscmp(path,crew::kSupportTankApPath)==0;
-    for(const auto& row:crew::kSupportVehicles)if(std::wcscmp(path,row.sgo)==0 || (ap && &row==&crew::kSupportVehicles[0])) {
-        edf::Put<const void*>(object,0,crew::image+row.vtable+(badClass || (ap && apBadClass) ? 8 : 0));
+    // A loaded tank (support_loadout.h VehicleVariantFile): the stock tank's class and seats, holders past the stock one.
+    const bool loaded=std::wcscmp(path,kLoaded)==0;
+    for(const auto& row:crew::kSupportVehicles)if(std::wcscmp(path,row.sgo)==0 || (loaded && &row==&crew::kSupportVehicles[0])) {
+        edf::Put<const void*>(object,0,crew::image+row.vtable+(badClass || (loaded && variantBadClass) ? 8 : 0));
         edf::Put<unsigned>(object,edf::kSeatCount,row.seats);
         edf::Put<unsigned char*>(object,edf::kSeats,seats);
         edf::Put<const void*>(object,edf::kSelfCtrl,seats+makes);
@@ -58,7 +59,6 @@ Rider SeatRider(const unsigned char*,const unsigned char*) noexcept { return fix
 namespace crew {
 unsigned char* image=nullptr;
 void Log(const char*,...) noexcept {}
-namespace jet { bool ModFileThere(const wchar_t* file) noexcept { return fixture::apFile && std::wcscmp(file,kSupportTankApFile)==0; } }
 void NoteLocalCopy(const void* v,const void* owner) noexcept {
     fixture::Check(v==fixture::object && owner==fixture::expectedOwner,"copy owner recorded");
     fixture::Check(fixture::applies>0 && fixture::teams>0 && fixture::levels>0,"owner recorded after setup/team/level");
@@ -97,40 +97,28 @@ int main() {
     fixture::occupied=true;Check(!DeleteSupportVehicle(v),"occupied hull not deleted by rollback");
     fixture::occupied=false;Check(DeleteSupportVehicle(v) && fixture::deletes==1,"empty owned hull rollback");
     Check(!DeleteSupportVehicle(v),"rollback idempotent");
-    // SupportTankRounds' AP tank (support_loadout.h): only with its generated file, preloaded at the mission's start.
-    Check(SupportTankRoundReady(TankRound::he) && !SupportTankRoundReady(TankRound::ap),"no AP file: HE only");
-    const int makesBefore=fixture::makes;
-    Check(!SpawnSupportVehicle(tank,manned,at,forward,nullptr,TankRound::ap) && fixture::makes==makesBefore,
-          "an AP tank without its file is refused before any creation (never a silent other gun)");
-    fixture::apFile=true;PreloadSupportVehicles();
-    Check(fixture::preloads==3+4 && SupportTankRoundReady(TankRound::ap),"AP file there: preloaded with the stock three");
-    v=SpawnSupportVehicle(tank,manned,at,forward,nullptr,TankRound::ap);
-    Check(v && std::wcscmp(fixture::lastPath,kSupportTankApPath)==0,"AP tank created from the generated SGO");
-    Check(DeleteSupportVehicle(v),"AP tank rollback");
-    v=SpawnSupportVehicle(tank,manned,at,forward,nullptr,TankRound::he);
-    Check(v && std::wcscmp(fixture::lastPath,kSupportVehicles[0].sgo)==0,"HE tank is the stock V505_TANK_MISSION");
-    Check(DeleteSupportVehicle(v),"HE tank rollback");
-    v=SpawnSupportVehicle(SupportVehicleKind::transport,manned,at,forward,nullptr,TankRound::ap);
-    Check(v && std::wcscmp(fixture::lastPath,kSupportVehicles[1].sgo)==0,"a round is a tank's only: the APC stays stock");
-    Check(DeleteSupportVehicle(v),"APC rollback");
-    fixture::apBadClass=true;
-    Check(!SpawnSupportVehicle(tank,manned,at,forward,nullptr,TankRound::ap),"an AP hull of the wrong class is refused");
-    Check(!SupportTankRoundReady(TankRound::ap) && SupportTankRoundReady(TankRound::he),"a bad AP file disables AP only");
-    fixture::apBadClass=false;PreloadSupportVehicles();
-    Check(!SupportTankRoundReady(TankRound::ap),"a bad AP file stays off across missions (until restart)");
-    fixture::apFile=false;
+    // A loaded tank (SupportVehicle_<key>): made from its generated file, checked as the stock hull is.
+    v=SpawnSupportVehicle(tank,manned,at,forward,nullptr,fixture::kLoaded);
+    Check(v && !std::wcscmp(fixture::lastPath,fixture::kLoaded),"a loaded tank is made from its own file");
+    Check(DeleteSupportVehicle(v),"loaded tank rollback");
+    fixture::variantBadClass=true;
+    Check(!SpawnSupportVehicle(tank,manned,at,forward,nullptr,fixture::kLoaded),"a loaded file of another class is refused");
+    Check(SupportVehicleReady(tank,manned),"a bad loaded file refuses itself only: the stock tank stays callable");
+    fixture::variantBadClass=false;
+    v=SpawnSupportVehicle(tank,manned,at,forward,nullptr);
+    Check(v && !std::wcscmp(fixture::lastPath,kSupportVehicles[0].sgo),"no variant: the stock V505_TANK_MISSION");
+    Check(DeleteSupportVehicle(v),"stock tank rollback");
     fixture::failSetup=true;
     Check(!SpawnSupportVehicle(tank,manned,at,forward,nullptr),"setup fault cannot return partial hull");
-    Check(fixture::disposals==5 && fixture::deletes==6 && fixture::owners==4,"setup fault disposes variant and hull before ownership");
+    Check(fixture::disposals==4 && fixture::deletes==5 && fixture::owners==3,"setup fault disposes variant and hull before ownership");
     PreloadSupportVehicles();Check(!SupportVehicleReady(tank,manned),"faulted resource stays disabled across mission reset");
-    Check(!SupportTankRoundReady(TankRound::he),"no stock tank: no HE tank either");
     fixture::failSetup=false;
     v=SpawnSupportVehicle(SupportVehicleKind::civilianTruck,SupportCrewMode::unmanned,at,forward,nullptr);
     Check(v && SeatCount(v)==5,"empty-delivery mode creates same real five-seat hull, no dummy");
     Check(DeleteSupportVehicle(v),"truck rollback");
     fixture::badClass=true;
     Check(!SpawnSupportVehicle(SupportVehicleKind::transport,manned,at,forward,nullptr),"wrong class rejected and deleted");
-    Check(fixture::deletes==8,"wrong class rollback once");
+    Check(fixture::deletes==7,"wrong class rollback once");
     fixture::signatures=false;PreloadSupportVehicles();
     Check(!SupportVehicleReady(SupportVehicleKind::civilianTruck,manned),"profile mismatch clears old mission readiness");
     Check(SupportVehicleEnvironmentAllowed(tank,SupportEnvironment::underground),"underground vehicle decision belongs to real route geometry");

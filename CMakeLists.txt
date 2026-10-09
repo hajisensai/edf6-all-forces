@@ -55,6 +55,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/support_soldier.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/npc_gunner_aim.cpp src/real_driver_native.cpp src/mission_crew.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/command_unit.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/support_spawn.cpp)
+# The generated variant files (coloured soldiers, loaded vehicles) a mission preloads (src/support_variants.h).
+target_sources(EDF6VehicleCrew PRIVATE src/support_variants.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)

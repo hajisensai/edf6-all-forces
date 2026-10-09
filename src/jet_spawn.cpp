@@ -108,13 +108,13 @@ int SpawnFault(Body b,const EXCEPTION_POINTERS* e) noexcept {
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
-unsigned char* CreateJet(Body b,const float* m,InitParam* param) noexcept {
+unsigned char* CreateJet(Body b,const float* m,InitParam* param,const wchar_t* sgo=nullptr) noexcept {
     __try {
         // Network plans store ordinary floats. SceneObject's constructor loads
         // four matrix rows with MOVAPS, regardless of the incoming ABI's type.
         alignas(16) float nativeMatrix[16];
         std::memcpy(nativeMatrix,m,sizeof(nativeMatrix));
-        return reinterpret_cast<CreateObjectFn>(image+kCreateObject)(At<void*>(image,kObjectMgr),nativeMatrix,Row(b).sgo,param);
+        return reinterpret_cast<CreateObjectFn>(image+kCreateObject)(At<void*>(image,kObjectMgr),nativeMatrix,sgo ? sgo : Row(b).sgo,param);
     }
     __except(SpawnFault(b,GetExceptionInformation())) { return nullptr; }
 }
@@ -256,7 +256,7 @@ bool SupportSpecValid(const SupportAircraft& spec) noexcept {
 }
 }
 
-unsigned char* PrepareSupportAircraft(const SupportAircraft& spec,const float* matrix) noexcept {
+unsigned char* PrepareSupportAircraft(const SupportAircraft& spec,const float* matrix,const wchar_t* variant) noexcept {
     if(!matrix || !SupportSpecValid(spec))return nullptr;
     const Body body=SupportBody(spec);
     if(!spawnOk || !Preloaded(body) || !At<void*>(image,kObjectMgr))return nullptr;
@@ -264,7 +264,7 @@ unsigned char* PrepareSupportAircraft(const SupportAircraft& spec,const float* m
     for(auto& ref:supportAircraft)if(!ref || !Alive(ref)){slot=&ref;break;}
     if(!slot)return nullptr;
     InitParam param{image+kInitParamVtable,{}};
-    unsigned char* const vehicle=CreateJet(body,matrix,&param);
+    unsigned char* const vehicle=CreateJet(body,matrix,&param,variant);
     if(!vehicle)return nullptr;
     if(bodyPartOk)FixBodyPart506(vehicle,"SUPPORT");
     SetJetTeam(vehicle,kTeamFriend);LevelVehicle(vehicle);

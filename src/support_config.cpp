@@ -142,11 +142,16 @@ SupportConfig ParseSupportConfig(SupportIniRead read,void* context,SupportKeyOf 
             Problem(c,key,text,fallback);
         }
     }
-    if(read(context,L"SupportTankRounds",text,std::size(text))) {
-        wchar_t why[96];
-        if(!ParseRoundMix(text,&c.tankRounds,why,std::size(why))) {
-            wchar_t fallback[128];_snwprintf_s(fallback,_TRUNCATE,L"全部 HE（原版主炮；%ls）",why);
-            Problem(c,L"SupportTankRounds",text,fallback);
+    // SupportVehicle_<key> (support_loadout.h): the pylons of an entry's tank or jets; a bad one keeps the stock vehicle.
+    for(int i=0;keyOf && i<units;++i) {
+        const wchar_t* unit=keyOf(i);
+        if(!unit)continue;
+        wchar_t key[96],why[160];
+        _snwprintf_s(key,_TRUNCATE,L"SupportVehicle_%ls",unit);
+        if(!read(context,key,text,std::size(text)))continue;
+        if(!ParseVehicleLoadout(text,VehicleBodyOfKey(unit),&c.vehicle[i],why,std::size(why))) {
+            wchar_t fallback[192];_snwprintf_s(fallback,_TRUNCATE,L"原版挂载（%ls）",why);
+            Problem(c,key,text,fallback);
         }
     }
     return c;
@@ -169,17 +174,18 @@ void LoadSupportConfig(const wchar_t* iniPath) noexcept {
     if(!next)return;
     char problems[1024]{};   // UTF-8 of SupportConfig::problems (256 wide, up to 3 bytes each)
     if(next->problems[0])WideCharToMultiByte(CP_UTF8,0,next->problems,-1,problems,sizeof(problems),nullptr,nullptr);
-    int presets=0,looks=0;
+    int presets=0,looks=0,vehicles=0;
     for(const auto& p:next->preset) {
         if(p.count>0)++presets;
         for(int i=0;i<p.count;++i)if(p.look[i].On())++looks;
     }
+    for(const auto& v:next->vehicle)vehicles+=v.On();
     Log("CONFIG support disabled=%016llX squad=%ls leader=%ls platoon=%ls/%ls/%ls vehicleCrew=%ls aircraftCrew=%ls "
-        "presets=%d (coloured soldiers %d) tankRounds=%s/%d%s%s",
+        "presets=%d (coloured soldiers %d) vehicle loadouts=%d%s%s",
         static_cast<unsigned long long>(next->disabled),SupportWeaponName(next->squad),SupportWeaponName(next->leader),
         SupportWeaponName(next->platoon[0]),SupportWeaponName(next->platoon[1]),SupportWeaponName(next->platoon[2]),
         SupportWeaponName(next->vehicleCrew),SupportWeaponName(next->aircraftCrew),presets,looks,
-        next->tankRounds.count ? next->tankRounds.ratio ? "ratio" : "list" : "stockHE",next->tankRounds.count,
+        vehicles,
         problems[0] ? " INVALID: " : "",problems);
     publishedSupport.store(next,std::memory_order_release);
 }

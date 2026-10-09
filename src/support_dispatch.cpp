@@ -17,6 +17,7 @@
 #include "memory.h"
 #include "hudtext.h"
 #include "transport.h"
+#include "support_variants.h"
 #include <cwchar>
 #include <cstring>
 #include <new>
@@ -216,48 +217,64 @@ bool UseConfiguredLoadout() noexcept {
     }
     return false;
 }
-// Out-of-game loadouts (support_loadout.h; docs/feature-2026-10-09-loadout-editor.md). A soldier's colours and a tank's AP
-// gun are generated files this machine alone has checked (preloaded at mission start), and the hello's capability bits
-// are all taken (support_protocol.h kCapabilities < kMaxUnits), so a peer cannot be asked whether it has them: they go
-// only into a plan this machine alone deploys (LocalAuthority). Otherwise stock, logged.
-unsigned tanksCalled=0;   // support tanks this machine deployed this mission: the k of SupportTankRounds
-std::uint32_t ComposedResource(std::uint32_t catalog,const SupportLoadout& load,int i) noexcept {
-    const auto resource=SupportLoadoutResource(load,i);
-    if(catalog>=static_cast<unsigned>(kSupportConfigUnits))return resource;
+// Out-of-game loadouts (support_loadout.h; docs/feature-2026-10-09-loadout-editor.md): a soldier's colours and a vehicle's
+// pylons are generated files (support_variants.h). A plan unit carries what it was meant to be (Unit::variant) and
+// whether it is made so (kVariantApplied): only when this machine has the file and, online, every peer applies variants
+// and has that file by its hello (support_protocol.h kExtVariants). Otherwise the unit is stock and says what it wanted,
+// so a peer without the file lists it for its installer (NoteMissingVariant). Each stock fallback is logged and said once
+// a request beside the support status (variantNote).
+wchar_t variantNote[192]{};
+void NoteVariant(const wchar_t* text,const wchar_t* file) noexcept {
+    if(!variantNote[0])_snwprintf_s(variantNote,_countof(variantNote),_TRUNCATE,text,file);
+}
+std::uint64_t DecideVariant(std::uint32_t catalog,const wchar_t* file,std::uint64_t wanted) noexcept {
+    if(!wanted || !file || !*file)return 0;
+    if(!SupportVariantReady(file)) {
+        NoteMissingVariant(file,"this machine's own preset");
+        NoteVariant(L"预设文件 %ls 还没生成：本次按原版出动（退出游戏后运行安装器菜单 7 保存即可生成）",file);
+        return wanted;
+    }
+    if(!SupportPeersApplyVariants()) {
+        Log("SUPPORT plan catalog=%u: %ls stock: a peer runs an older All Forces (no unit variants)",catalog,file);
+        NoteVariant(L"房间里有旧版全军出击：%ls 本次按原版出动（全员更新后生效）",file);
+        return wanted;
+    }
+    if(!SupportPeersHaveVariantFile(VariantHash(file))) {
+        Log("SUPPORT plan catalog=%u: %ls stock: a peer does not have that file (it lists it for its installer)",catalog,file);
+        NoteVariant(L"房间里有人还没有 %ls：本次按原版出动；对方退出游戏后运行安装器菜单 7 即可自动生成",file);
+        return wanted;
+    }
+    return wanted|kVariantApplied;
+}
+// Soldier `i` of a composed load: its preset colours (PresetLookFor) as a variant of `resource`'s template.
+std::uint64_t SoldierVariant(std::uint32_t catalog,const SupportLoadout& load,int i,std::uint32_t resource) noexcept {
+    if(catalog>=static_cast<unsigned>(kSupportConfigUnits))return 0;
     const auto look=PresetLookFor(SupportCfg().preset[catalog],load,i);
-    if(!look.On())return resource;
-    if(!LocalAuthority()) {
-        Log("SUPPORT plan catalog=%u: soldier %d keeps the stock look (a peer is in the room: colours are not shared)",catalog,i);
-        return resource;
-    }
-    return SupportSoldierWithLook(resource,look);
+    if(!look.On())return 0;
+    wchar_t file[96];
+    if(!SupportLookFile(SupportSoldierWeapon(resource),IsSupportLeaderResource(resource),look,file,_countof(file)))return 0;
+    return DecideVariant(catalog,file,LookVariant(look));
 }
-TankRound PlanTankRound(std::uint32_t catalog) noexcept {
-    const auto round=PickRound(SupportCfg().tankRounds,tanksCalled);
-    if(round==TankRound::he)return round;
-    const wchar_t* name=kTankRoundNames[static_cast<int>(round)].name;
-    if(!LocalAuthority()) {
-        Log("SUPPORT plan catalog=%u: tank %u of the mission wants %ls (SupportTankRounds) but a peer is in the room: stock HE",
-            catalog,tanksCalled+1,name);
-        return TankRound::he;
-    }
-    if(!SupportTankRoundReady(round)) {
-        Log("SUPPORT plan catalog=%u: tank %u wants %ls but %ls is not installed / preloaded (installer menu 7 or 1): stock HE",
-            catalog,tanksCalled+1,name,kSupportTankApFile);
-        return TankRound::he;
-    }
-    Log("SUPPORT plan catalog=%u: tank %u of the mission takes %ls (SupportTankRounds)",catalog,tanksCalled+1,name);
-    return round;
+// The entry's tank / jets: its SupportVehicle_<key> pylons as a variant of the hull.
+std::uint64_t HullVariant(std::uint32_t catalog) noexcept {
+    if(catalog>=static_cast<unsigned>(kSupportConfigUnits))return 0;
+    const auto& l=SupportCfg().vehicle[catalog];
+    if(!l.On() || l.body!=VehicleBodyOfKey(SupportCallKey(static_cast<int>(catalog))))return 0;
+    wchar_t file[96];
+    if(!VehicleVariantFile(l,file,_countof(file)))return 0;
+    return DecideVariant(catalog,file,LoadoutVariant(l));
 }
-// A ground plan's hull id: kVehicle + kind, a support tank's round in bits 8+ (only in a plan of this machine's own).
-bool GroundHullOk(std::uint32_t id,SupportVehicleKind kind) noexcept {
-    const auto base=kVehicle+static_cast<unsigned>(kind);
-    if(id==base)return true;
-    if(kind!=SupportVehicleKind::tank || id<base || (id-base)&0xFFu || !LocalAuthority())return false;
-    return ((id-base)>>8)<static_cast<unsigned>(TankRound::count);
-}
-TankRound HullRound(std::uint32_t id,SupportVehicleKind kind) noexcept {
-    return GroundHullOk(id,kind) ? static_cast<TankRound>((id-kVehicle-static_cast<unsigned>(kind))>>8) : TankRound::he;
+// The file of a plan unit's variant (look or pylons; `path`: the CreateObject spelling), or false: none it can be.
+bool VariantFile(const SupportPlan& plan,const support_net::Unit& unit,wchar_t* out,std::size_t capacity,bool path) noexcept {
+    if(!unit.variant)return false;
+    if(IsSupportSoldierResource(unit.resourceId)) {
+        SupportLook look;
+        return LookOfVariant(unit.variant,&look) &&
+            SupportLookFile(SupportSoldierWeapon(unit.resourceId),IsSupportLeaderResource(unit.resourceId),look,out,capacity,path)>0;
+    }
+    const VehicleBody body=VehicleBodyOfKey(SupportCallKey(static_cast<int>(plan.catalogId)));
+    VehicleLoadout l;
+    return !unit.role && unit.resourceId>=kAircraft && LoadoutOfVariant(unit.variant,body,&l) && VehicleVariantFile(l,out,capacity,path)>0;
 }
 int AircraftCount(std::uint32_t catalog,const SupportAircraft& spec,unsigned group) noexcept {
     const int chosen=catalog<static_cast<unsigned>(kSupportConfigUnits) && UseConfiguredLoadout() ? SupportCfg().aircraft[catalog] : 0;
@@ -312,7 +329,7 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
     if(!MapPlayArea().ground){Refuse(catalog,"no ground found round the map's centre",L"无法测定本图的地面范围，无法规划支援入口");return PlanResult::refused;}
     if(!planning.active || planning.catalog!=catalog || std::memcmp(planning.target,target,12)!=0 || planning.loadout!=loadout) {
         Renew(planning);planning.active=true;planning.catalog=catalog;std::memcpy(planning.target,target,12);planning.loadout=loadout;
-        legacyNoticed=false;loadoutNoticed=false;
+        legacyNoticed=false;loadoutNoticed=false;variantNote[0]=0;
     }
     ComposeOnce(catalog);
     const bool composed=planning.composed;const SupportLoadout& load=planning.load;
@@ -350,6 +367,7 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
             float at[3];support::AirFormationSlot(route,i,spacing,at);
             const unsigned parent=plan.count+1;
             if(!AddUnit(plan,kAircraft+kSupportAirborneOffset+catalog,0,at,route.heading)){Refuse(catalog,"plan full",L"支援单位过多");return PlanResult::refused;}
+            plan.units[plan.count-1].variant=HullVariant(catalog);   // its pylons (SupportVehicle_<key>)
             for(unsigned c=0;c<AirCrew(spec);++c)if(!AddUnit(plan,crew,parent,at,route.heading)) {
                 Refuse(catalog,"plan full",L"支援单位过多");return PlanResult::refused;
             }
@@ -387,10 +405,13 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
         if(!AddUnit(plan,kAircraft+kSupportAirborneOffset+catalog,0,route.from,route.heading) ||
            !AddUnit(plan,crew,1,route.from,route.heading)){Refuse(catalog,"plan full",L"支援单位过多");return PlanResult::refused;}
         const unsigned riders=composed ? static_cast<unsigned>(load.count) : TransportRiders(platoon);
-        for(unsigned i=0;i<riders;++i)
-            if(!AddUnit(plan,composed ? ComposedResource(catalog,load,static_cast<int>(i)) : InfantryResource(platoon,i),1,route.from,route.heading)) {
+        for(unsigned i=0;i<riders;++i) {
+            const auto resource=composed ? SupportLoadoutResource(load,static_cast<int>(i)) : InfantryResource(platoon,i);
+            if(!AddUnit(plan,resource,1,route.from,route.heading)) {
                 Refuse(catalog,"plan full",L"支援单位过多");return PlanResult::refused;
             }
+            if(composed)plan.units[plan.count-1].variant=SoldierVariant(catalog,load,static_cast<int>(i),resource);
+        }
         Log("SUPPORT plan catalog=%u ready: a transport %s in the air at (%.0f,%.0f,%.0f) heading (%.2f,%.2f), %u soldiers aboard",catalog,
             plane ? "plane (paratroop drop)" : "helicopter (air assault)",route.from[0],route.from[1],route.from[2],route.heading[0],
             route.heading[2],riders);
@@ -440,21 +461,23 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
         std::uint32_t crew[support_net::kMaxUnits];unsigned count=mode==SupportCrewMode::unmanned ? 1u : spec->seats;
         if(mode==SupportCrewMode::soldiers && composed)count=1+static_cast<unsigned>(load.count);
         if(count>support_net::kMaxUnits-1)count=support_net::kMaxUnits-1;
-        for(unsigned i=0;i<count;++i)crew[i]=i>0 && composed ? ComposedResource(catalog,load,static_cast<int>(i-1)) : driver;
-        // A support tank's gun (SupportTankRounds): its round in the hull id, read back at spawn (HullRound).
-        const auto hull=kVehicle+static_cast<unsigned>(kind)+
-            (kind==SupportVehicleKind::tank ? static_cast<unsigned>(PlanTankRound(catalog))<<8 : 0u);
-        if(!AddUnit(plan,hull,0,entry,heading) ||
+        for(unsigned i=0;i<count;++i)crew[i]=i>0 && composed ? SupportLoadoutResource(load,static_cast<int>(i-1)) : driver;
+        if(!AddUnit(plan,kVehicle+static_cast<unsigned>(kind),0,entry,heading) ||
            !AddCrew(plan,1,entry,heading,count,spec->halfWidth,crew,0.55f))
             return nextEdge("no level ground for the crew");
+        // The hull's pylons (SupportVehicle_<key>), the passengers' colours (unit 1 is the driver, 2.. the composed load).
+        plan.units[plan.count-count-1].variant=HullVariant(catalog);
+        for(unsigned i=1;composed && i<count;++i)
+            plan.units[plan.count-count+i].variant=SoldierVariant(catalog,load,static_cast<int>(i-1),crew[i]);
     } else {
         const bool platoon=catalog!=static_cast<unsigned>(AirCount());
         const unsigned count=composed ? static_cast<unsigned>(load.count) : platoon ? 12u : 4u;
         for(unsigned i=0;i<count;++i) {
             float at[3]={entry[0]+static_cast<float>(i%4)*2.0f,entry[1],entry[2]+static_cast<float>(i/4)*2.0f};
             if(!Foot(at[0],at[2],entry[1],at[1]) || std::fabs(at[1]-entry[1])>0.55f)return nextEdge("no level ground for the squad");
-            if(!AddUnit(plan,composed ? ComposedResource(catalog,load,static_cast<int>(i)) : InfantryResource(platoon,i),0,at,heading))
-                return nextEdge("plan full");
+            const auto resource=composed ? SupportLoadoutResource(load,static_cast<int>(i)) : InfantryResource(platoon,i);
+            if(!AddUnit(plan,resource,0,at,heading))return nextEdge("plan full");
+            if(composed)plan.units[plan.count-1].variant=SoldierVariant(catalog,load,static_cast<int>(i),resource);
         }
     }
     Log("SUPPORT plan catalog=%u ready: entry (%.0f,%.0f,%.0f), %.0f m to the target, %u units",catalog,entry[0],entry[1],entry[2],
@@ -470,8 +493,24 @@ bool Validate(const SupportPlan& plan) noexcept {
     const auto capability=air ? support::Capability::air : ground ?
         (SupportVehicleInfo(kind)->wasteland ? support::Capability::civilianGround : support::Capability::militaryGround) : support::Capability::infantry;
     const auto member=[](std::uint32_t id) noexcept {return IsSupportSoldierResource(id) && !IsSupportLeaderResource(id);};
-    // A soldier's look (support_call.h) indexes this machine's own look table: never in a plan another machine made.
-    for(unsigned i=0;i<plan.count;++i)if(SupportSoldierLook(plan.units[i].resourceId) && !LocalAuthority())return false;
+    // Unit variants (support_loadout.h): a look on a soldier, pylons on the entry's own hull, each one that decodes. A hull
+    // made from its loaded file must have it here: another weapon list than the host's would not be the same vehicle (a
+    // soldier's colours alone may come stock: the same class, weapon and AI). The missing file goes on the pending list.
+    for(unsigned i=0;i<plan.count;++i) {
+        const auto& unit=plan.units[i];
+        if(!unit.variant)continue;
+        wchar_t file[96];
+        if(!VariantFile(plan,unit,file,_countof(file),false)) {
+            Log("SUPPORT validate catalog=%u: unit %u variant %016llX does not decode for it",plan.catalogId,i,
+                static_cast<unsigned long long>(unit.variant));
+            return false;
+        }
+        if((unit.variant&kVariantApplied) && !IsSupportSoldierResource(unit.resourceId) && !SupportVariantReady(file)) {
+            NoteMissingVariant(file,"the host's plan");
+            NoteVariant(L"房主的载具预设需要 %ls，本机没有：本次支援未出动；退出游戏后运行安装器菜单 7 即可生成",file);
+            return false;
+        }
+    }
     if(bool platoon=false,plane=false;TransportCatalog(plan.catalogId,platoon,plane)) {
         // Its hull, its pilot, the soldiers aboard (a leader every four): all made inside the hull (role 1).
         if(!support::Allowed(SupportMissionPolicy(),support::Capability::air))return false;
@@ -505,7 +544,7 @@ bool Validate(const SupportPlan& plan) noexcept {
         // composed load of passengers: any soldier, a leader every four after the driver).
         const unsigned rows=SupportVehicleInfo(kind)->seats;
         if((mode==SupportCrewMode::unmanned ? plan.count!=2 : plan.count<2 || plan.count>rows+1) || plan.units[0].role ||
-           !GroundHullOk(plan.units[0].resourceId,kind))return false;
+           plan.units[0].resourceId!=kVehicle+static_cast<unsigned>(kind))return false;
         if(!member(plan.units[1].resourceId) || plan.units[1].role!=1)return false;
         for(unsigned i=2;i<plan.count;++i)if(!IsSupportSoldierResource(plan.units[i].resourceId) || plan.units[i].role!=1)return false;
     } else {
@@ -521,7 +560,8 @@ bool Validate(const SupportPlan& plan) noexcept {
         if(IsSupportSoldierResource(unit.resourceId))continue;
         if((unit.resourceId==kAircraft+plan.catalogId || unit.resourceId==kAircraft+kSupportAirborneOffset+plan.catalogId) &&
            plan.catalogId<static_cast<unsigned>(AirCount()))continue;
-        if(unit.resourceId>=kVehicle && GroundCatalog(plan.catalogId,kind,mode) && GroundHullOk(unit.resourceId,kind))continue;
+        if(unit.resourceId>=kVehicle && unit.resourceId<kVehicle+kSupportVehicleCount &&
+           GroundCatalog(plan.catalogId,kind,mode) && unit.resourceId==kVehicle+static_cast<unsigned>(kind))continue;
         return false;
     }
     return true;
@@ -669,9 +709,16 @@ bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool n
         // An airborne aircraft's crew: made unregistered, seated below, then registered (no ride event before peers
         // know the objects); every other soldier as before.
         const bool aboard=unit.role && IsSupportAirborneAircraft(plan.units[unit.role-1].resourceId);
+        // The unit's variant file (Validate decoded it): made from it when applied and here; a wanted one this machine
+        // lacks goes on its pending list (the host's preset), a soldier whose applied look is missing here comes stock.
+        wchar_t file[96]{},path[128]{};
+        const bool hasVariant=VariantFile(plan,unit,file,_countof(file),false) && VariantFile(plan,unit,path,_countof(path),true);
+        const bool here=hasVariant && SupportVariantReady(file);
+        if(hasVariant && !here)NoteMissingVariant(file,remote ? "the host's preset" : "this machine's own preset");
+        const wchar_t* const made=here && (unit.variant&kVariantApplied) ? path : nullptr;
         if(unit.resourceId<kAircraft) {
             if(!(aboard ? CreateSupportSoldierUnregistered : ApplySupportSoldierResource)(unit.matrix,unit.resourceId,
-                    networked ? unit.netId : nullptr,!networked,&object)) {
+                    networked ? unit.netId : nullptr,!networked,&object,made)) {
                 Log("SUPPORT spawn %llu: soldier %u (resource %X) not created",static_cast<unsigned long long>(id),i,unit.resourceId);
                 Destroy(id);return false;
             }
@@ -681,13 +728,10 @@ bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool n
             unsigned char* vehicle=nullptr;
             if(unit.resourceId<kVehicle) {
                 SupportAircraft spec;
-                if(AircraftSpecOf(plan.catalogId,&spec))vehicle=PrepareSupportAircraft(spec,unit.matrix);
+                if(AircraftSpecOf(plan.catalogId,&spec))vehicle=PrepareSupportAircraft(spec,unit.matrix,made);
             } else {
                 SupportVehicleKind kind{};SupportCrewMode mode{};
-                if(GroundCatalog(plan.catalogId,kind,mode)) {
-                    vehicle=SpawnSupportVehicle(kind,mode,unit.matrix+12,unit.matrix+8,nullptr,HullRound(unit.resourceId,kind));
-                    if(vehicle && kind==SupportVehicleKind::tank && !remote)++tanksCalled;
-                }
+                if(GroundCatalog(plan.catalogId,kind,mode))vehicle=SpawnSupportVehicle(kind,mode,unit.matrix+12,unit.matrix+8,nullptr,made);
             }
             if(!vehicle) {
                 Log("SUPPORT spawn %llu: hull %u (resource %X) not created",static_cast<unsigned long long>(id),i,unit.resourceId);
@@ -751,7 +795,7 @@ void Configure() noexcept {
     ConfigureSupportNet({Plan,Validate,Spawn,Destroy,
         [](std::uint32_t ordinal,unsigned char* out) noexcept {
             return OnlineHostOnly() && DeriveSupportSoldierNetId(PlayerHuman(),ordinal,out);
-        },&ReadMissionParticipants,&MissionParticipantGateReady,&MissionParticipantCreationsMatch,&RequestNotice});
+        },&ReadMissionParticipants,&MissionParticipantGateReady,&MissionParticipantCreationsMatch,&RequestNotice,&SupportVariantHello});
     InstallMissionCrewSupport();configured=true;
 }
 }
@@ -920,6 +964,11 @@ void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept {
     if(legacyNoticed || loadoutNoticed)_snwprintf_s(out,capacity,_TRUNCATE,L"%ls（%ls）",localRequest.shown ? localRequest.text : status,
                                   hudtext::Tr(loadoutNoticed ? hudtext::Tx::supportLoadoutLegacyPeers : hudtext::Tx::supportLegacyPeers));
     else _snwprintf_s(out,capacity,_TRUNCATE,L"%ls",localRequest.shown ? localRequest.text : status);
+    // A preset's colours or pylons that came stock (DecideVariant): said beside it too, until the next request or mission.
+    if(variantNote[0]) {
+        const std::size_t used=std::wcslen(out);
+        _snwprintf_s(out+used,capacity-used,_TRUNCATE,L"（%ls）",variantNote);
+    }
 }
 void SupportDispatchTick() noexcept {
     if(dispatchFrame==GameFrame())return;
@@ -1065,29 +1114,10 @@ void SupportDispatchTick() noexcept {
         }
     }
 }
-void PreloadSupportLooks() noexcept {
-    int queued=0,missing=0;
-    const auto& c=SupportCfg();
-    for(int unit=0;unit<kSupportConfigUnits;++unit)for(int i=0;i<c.preset[unit].count;++i) {
-        const auto& p=c.preset[unit];
-        if(!p.look[i].On())continue;
-        wchar_t file[96];
-        if(!SupportLookFile(p.kind[i],i%4==0,p.look[i],file,_countof(file)))continue;
-        if(!jet::ModFileThere(file)) {
-            ++missing;
-            Log("SUPPORT look %ls (SupportPreset_%ls soldier %d) not generated (installer menu 7 saves it with the game closed): stock look",
-                file,SupportCallKey(unit) ? SupportCallKey(unit) : L"?",i+1);
-            continue;
-        }
-        if(PreloadSupportLook(p.kind[i],i%4==0,p.look[i]))++queued;
-        else Log("SUPPORT look %ls not queued (soldier preload off, or more than %u distinct looks): stock look",file,kSupportLooksMost);
-    }
-    if(queued || missing)Log("SUPPORT looks: %d coloured soldiers ready, %d missing their file",queued,missing);
-}
 void ResetSupportDispatch() noexcept {
     // Mission reset invalidates the old objects; do not delete through last mission's borrowed pointers.
     Renew(planning);for(auto& row:deployments)Renew(row);offlinePending=false;callAt=0;nextOffline=1;status[0]=0;configNoticeShown=false;
-    legacyNoticed=false;loadoutNoticed=false;tanksCalled=0;
+    legacyNoticed=false;loadoutNoticed=false;variantNote[0]=0;
     localRequest={};
     dispatchFrame=~ULONGLONG{0};
     ResetMissionCrewSupport();

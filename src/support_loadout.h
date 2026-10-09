@@ -1,23 +1,28 @@
-// Out-of-game support loadouts (the user, 2026-10-09: "在游戏外可以编辑小组，还有载具、npc的挂载，npc的外观颜色等。例如可以给
-// 我叫的坦克全选ap弹，也可以一半ap一半he"). Pure text logic, no Windows or game: tests/support_loadout_test.cpp runs it
-// offline, tools/support_loadout.py (the installer's editor and the SGO generator) mirrors it and
-// tests/support_loadout_ini_test.py keeps the two equal. Feasibility and evidence: docs/feature-2026-10-09-loadout-editor.md.
+// Out-of-game support loadouts (the user, 2026-10-09: "在游戏外可以编辑小组，还有载具、npc的挂载，npc的外观颜色等";
+// corrected the same day: "我说的是战前配置载具的挂载分布。比如我飞机可以全带炸弹，或者全带导弹，或者带机炮"). Pure logic, no
+// Windows or game: tests/support_loadout_test.cpp runs it offline, tools/support_loadout.py (the installer's editor and
+// the SGO generator) mirrors it and tests/support_loadout_ini_test.py keeps the two equal. Feasibility and evidence:
+// docs/feature-2026-10-09-loadout-editor.md.
 //
 // EDF6VehicleCrew.ini [VehicleCrew], the one source of truth (the plugin rereads it on every save):
-//   SupportPreset_<KEY>=rifle@1E3A8A*2,rocket,sniper     a seated entry's soldiers in seat order (a leader every four):
-//       kind            one of kSupportKindNames (the 14 stock AI templates: 5 Ranger, 5 Wing Diver, 4 Fencer weapons)
-//       @RRGGBB         its primary colour (soldier_color change_color0), @RRGGBB:RRGGBB primary and secondary
-//                       (change_color1); X for a colour left stock (@X:FFFFFF). No @: the stock look.
-//       *n              n soldiers of that spec (1-12)
-//     Empty or absent: the entry's own load (the ini weapons). More than the entry's seats, or malformed: refused, the own
-//     load, and the problem named (HUD and log).
-//   SupportTankRounds=AP            every support tank's main gun (TANK_CREWED and TANK_DELIVERY): AP or HE
-//   SupportTankRounds=AP,HE,HE      a list: the k-th tank called this mission takes entry k (repeating)
-//   SupportTankRounds=AP:1,HE:1     a ratio: tanks interleave to stay as close to it as whole tanks can (AP,HE,AP,HE...)
-//     Empty or absent: HE (the stock V505_TANK_MISSION, as before).
-// A colour and an AP gun need a generated SGO (tools/support_loadout.py writes Mods/OBJECT/<SupportLookFile> and
-// EDF6VC_SUPPORT_TANK_AP.SGO). Missing, or a peer in the room (no capability bit is left: support_protocol.h), the soldier /
-// tank comes stock, logged; the kinds and the composition themselves are networked (kCapLoadout).
+//   SupportPreset_<KEY>=rifle@1E3A8A*2,rocket,sniper   a seated entry's soldiers in seat order (a leader every four):
+//       kind      one of kSupportKindNames (the 14 stock AI templates: 5 Ranger, 5 Wing Diver, 4 Fencer weapons)
+//       @RRGGBB   its primary colour (soldier_color change_color0); @RRGGBB:RRGGBB primary and secondary (change_color1);
+//                 X a colour left stock (@X:FFFFFF). No @: the stock look.
+//       *n        n soldiers of that spec (1-12)
+//   SupportVehicle_<KEY>=...                            the vehicle's pylons, before the battle (kVehicleKeys):
+//       a tank (TANK_CREWED / TANK_DELIVERY): its main gun HE or AP, then the rounds it carries besides, each a pylon:
+//           HE,AP:25          the stock 105 mm howitzer's 25 HE and 25 APFSDS beside it (half and half)
+//           AP,AP:20,GLM:4    the 90 mm smooth-bore's 30 AP, 20 more, 4 gun-launched missiles
+//       a jet (STRIKE, FIGHTER, INTERCEPTOR, MULTIROLE, each guard and _F follow): its pylons, the guns always aboard:
+//           MK82:6,MK82:6     all bombs        AAM_M:4,AAM_S:2   all missiles        GUNS   the guns alone
+//     Empty or absent: the vehicle as it always came. A malformed value: refused whole, the stock vehicle, the problem named.
+// A pylon is STORE:rounds, STORE one of kLoadStores (the stores the plugin already flies and fires: pylib/vcobjects.py
+// STORES), rounds one of kRoundCounts. A coloured soldier and a loaded vehicle are generated SGOs whose names say what
+// they are (SupportLookFile, VehicleVariantFile): the installer writes them, a peer missing one writes its name to its
+// pending list and its installer makes it from the name alone. Online they are shared through each unit's 64-bit
+// variant (support_net.h Unit::variant, sent in the unit message's unused `challenge`) and each peer's hello (an
+// extension word and a Bloom filter of the files it has, in the hello's unused unit fields): support_protocol.h.
 #pragma once
 #include "support_call.h"
 #include <cstddef>
@@ -118,13 +123,13 @@ inline bool ParseSupportKind(const wchar_t* a,const wchar_t* b,SupportWeapon* ou
     for(const auto& k:kSupportKindNames)if(loadout_detail::Same(a,b,k.name)){*out=k.kind;return true;}
     return false;
 }
-// `text` (one SupportPreset_<KEY> value) into *out. `seats`: the entry's (SupportCallSeats; 0 = no seats, so any preset is
+// `text` (one SupportPreset_<KEY> value) into *out. `seatCount`: the entry's (SupportCallSeats; 0 = no seats, so any preset is
 // refused). False with *out empty and `why` naming the fault; an empty text is true with count 0.
-inline bool ParseSupportPreset(const wchar_t* text,int seats,SupportPreset* out,wchar_t* why,std::size_t whyCapacity) noexcept {
+inline bool ParseSupportPreset(const wchar_t* text,int seatCount,SupportPreset* out,wchar_t* why,std::size_t whyCapacity) noexcept {
     using namespace loadout_detail;
     SupportPreset p{};
     if(why && whyCapacity)why[0]=0;
-    bool ok=Tokens(text,[&](const wchar_t* a,const wchar_t* b) noexcept {
+    bool parsed=Tokens(text,[&](const wchar_t* a,const wchar_t* b) noexcept {
         const wchar_t* star=Find(a,b,L'*');
         const wchar_t* at=Find(a,star,L'@');
         SupportWeapon kind;
@@ -142,13 +147,13 @@ inline bool ParseSupportPreset(const wchar_t* text,int seats,SupportPreset* out,
         for(int i=0;i<n;++i){p.kind[p.count]=kind;p.look[p.count]=look;++p.count;}
         return true;
     });
-    if(ok && p.count>0 && p.count>seats) {
-        ok=false;
-        if(seats<=0)Say(why,whyCapacity,L"该单位没有可编组的座位");
+    if(parsed && p.count>0 && p.count>seatCount) {
+        parsed=false;
+        if(seatCount<=0)Say(why,whyCapacity,L"该单位没有可编组的座位");
         else Say(why,whyCapacity,L"人数超过该单位的座位数");
     }
-    if(out)*out=ok ? p : SupportPreset{};
-    return ok;
+    if(out)*out=parsed ? p : SupportPreset{};
+    return parsed;
 }
 constexpr SupportLoadout PresetLoadout(const SupportPreset& p) noexcept {
     SupportLoadout l{};
@@ -162,106 +167,228 @@ constexpr SupportLook PresetLookFor(const SupportPreset& p,const SupportLoadout&
     return i>=0 && i<p.count && i<load.count && load.soldier[i]==p.kind[i] ? p.look[i] : SupportLook{};
 }
 
-// --- The support tank's main gun ---
-// HE: the stock V505_TANK_MISSION (its mission_setup gun is v_505tank_cannon01, the Blacker E1's 105 mm howitzer:
-// RocketBullet01, an 8 m blast). AP: EDF6VC_SUPPORT_TANK_AP.SGO, the same hull with the Blacker A1's mount (EWEAPON419:
-// v_505tank_cannon01s, the 90 mm smooth-bore: SolidBullet01Rail, penetrating, no blast).
-enum class TankRound : std::uint8_t { he, ap, count };
-struct TankRoundName { TankRound round; const wchar_t* name; const wchar_t* label; };
-inline constexpr TankRoundName kTankRoundNames[]={{TankRound::he,L"HE",L"榴弹（原版）"},{TankRound::ap,L"AP",L"穿甲"}};
-static_assert(sizeof(kTankRoundNames)/sizeof(kTankRoundNames[0])==static_cast<std::size_t>(TankRound::count),"one name per round");
-inline constexpr int kRoundMixMost=16;
-inline constexpr unsigned kRoundWeightMost=1000;
-struct RoundMix {
-    int count=0;          // 0: every tank HE (stock)
-    bool ratio=false;     // weights (AP:1,HE:1) rather than a per-tank list (AP,HE,HE)
-    TankRound round[kRoundMixMost]{};
-    unsigned weight[kRoundMixMost]{};
+// --- Vehicle pylons ---
+// The stores a pylon may carry (pylib/vcobjects.py STORES: the files EDF6VC_<NAME>_<rounds>.SGO the plugin already
+// knows, src/stores.inc kStores), a code each (1..15, 0 = none) for the 64-bit variant. `jet` / `tank`: whom it may go on
+// (a jet fires its missiles, rockets and bombs itself, src/jet_combat.cpp; a tank's rounds and its gun-launched missile
+// ride its main gun's control, src/payload.cpp).
+enum class LoadRole : std::uint8_t { air, ground, bomb, rocket, gun };
+struct LoadStore { std::uint8_t code; const wchar_t* name; const wchar_t* label; LoadRole role; bool jet,tank; };
+inline constexpr LoadStore kLoadStores[]={
+    {1,L"AAM_S",L"AIM-9X 近程空空导弹",LoadRole::air,true,false},
+    {2,L"AAM_M",L"AIM-120 中程空空导弹",LoadRole::air,true,false},
+    {3,L"AAM_L",L"AIM-54 远程空空导弹",LoadRole::air,true,false},
+    {4,L"AGM",L"AGM-65 空地导弹",LoadRole::ground,true,false},
+    {5,L"AGM_L",L"AGM-114 轻型空地导弹",LoadRole::ground,true,false},
+    {6,L"MK82",L"Mk 82 炸弹",LoadRole::bomb,true,false},
+    {7,L"RKT",L"Hydra 70 火箭巢",LoadRole::rocket,true,false},
+    {8,L"AP",L"APFSDS 穿甲弹",LoadRole::gun,false,true},
+    {9,L"HE",L"HE 榴弹",LoadRole::gun,false,true},
+    {10,L"GLM",L"LAHAT 炮射导弹",LoadRole::ground,false,true},
 };
-inline bool ParseTankRound(const wchar_t* a,const wchar_t* b,TankRound* out) noexcept {
-    loadout_detail::Trim(a,b);
-    for(const auto& r:kTankRoundNames)if(loadout_detail::Same(a,b,r.name)){*out=r.round;return true;}
-    return false;
+inline constexpr int kLoadStoreCount=static_cast<int>(sizeof(kLoadStores)/sizeof(kLoadStores[0]));
+// The round counts a pylon may hold, a 4-bit code each (the store file is EDF6VC_<NAME>_<count>.SGO).
+inline constexpr int kRoundCounts[16]={1,2,3,4,5,6,8,10,12,15,19,20,25,30,38,40};
+constexpr int RoundCode(int rounds) noexcept {
+    for(int i=0;i<16;++i)if(kRoundCounts[i]==rounds)return i;
+    return -1;
 }
-// List: ROUND[*n],... (n repeats; at most kRoundMixMost tanks a cycle). Ratio: ROUND:weight,... with every token
-// weighted (1..1000, a trailing % allowed). False with *out empty and `why` set.
-inline bool ParseRoundMix(const wchar_t* text,RoundMix* out,wchar_t* why,std::size_t whyCapacity) noexcept {
-    using namespace loadout_detail;
-    RoundMix m{};int weighted=0,plain=0;
-    if(why && whyCapacity)why[0]=0;
-    bool ok=Tokens(text,[&](const wchar_t* a,const wchar_t* b) noexcept {
-        const wchar_t* colon=Find(a,b,L':');
-        const wchar_t* star=Find(a,colon,L'*');
-        TankRound round;
-        if(!ParseTankRound(a,star,&round)){Say(why,whyCapacity,L"未知弹种（AP / HE）：",a,star);return false;}
-        if(colon<b) {
-            const wchar_t* end=b;
-            if(end>colon+1 && end[-1]==L'%')--end;
-            int w=0;
-            if(star<colon || !Count(colon+1,end,static_cast<int>(kRoundWeightMost),&w)){Say(why,whyCapacity,L"比例应为 弹种:1 到 1000：",a,b);return false;}
-            if(m.count>=kRoundMixMost){Say(why,whyCapacity,L"弹种项过多（最多 16 项）");return false;}
-            m.round[m.count]=round;m.weight[m.count]=static_cast<unsigned>(w);++m.count;++weighted;return true;
-        }
-        int n=1;
-        if(star<b && !Count(star+1,b,kRoundMixMost,&n)){Say(why,whyCapacity,L"重复次数应为 *1 到 *16：",star,b);return false;}
-        if(m.count+n>kRoundMixMost){Say(why,whyCapacity,L"逐车列表过长（一轮最多 16 辆）");return false;}
-        for(int i=0;i<n;++i){m.round[m.count]=round;m.weight[m.count]=1;++m.count;}
-        ++plain;return true;
-    });
-    if(ok && weighted && plain){ok=false;Say(why,whyCapacity,L"不能混用逐车列表与比例（要么 AP,HE,HE，要么 AP:1,HE:2）");}
-    m.ratio=weighted>0;
-    if(out)*out=ok ? m : RoundMix{};
-    return ok;
-}
-// The round of the k-th tank (0-based) this mission. A list repeats; a ratio picks, at each tank, the round furthest
-// below its share so far ((k+1)·w − W·given, ties to the earlier token): after any number of tanks every round is within
-// one tank of its share, and 1:1 alternates starting with the first named.
-inline TankRound PickRound(const RoundMix& m,unsigned k) noexcept {
-    if(m.count<=0)return TankRound::he;
-    if(!m.ratio)return m.round[k%static_cast<unsigned>(m.count)];
-    long long total=0;
-    for(int i=0;i<m.count;++i)total+=m.weight[i];
-    long long given[kRoundMixMost]{};
-    int pick=0;
-    for(unsigned step=0;step<=k;++step) {
-        long long best=0;pick=-1;
-        for(int i=0;i<m.count;++i) {
-            const long long deficit=static_cast<long long>(step+1)*m.weight[i]-total*given[i];
-            if(pick<0 || deficit>best){best=deficit;pick=i;}
-        }
-        ++given[pick];
-    }
-    return m.round[pick];
+constexpr const LoadStore* LoadStoreOf(int code) noexcept {
+    for(const auto& s:kLoadStores)if(s.code==code)return &s;
+    return nullptr;
 }
 
-// --- Generated files (tools/support_loadout.py writes them; the plugin derives the same names) ---
-inline constexpr const wchar_t* kSupportTankApFile=L"EDF6VC_SUPPORT_TANK_AP.SGO";
-inline constexpr const wchar_t* kSupportTankApPath=L"app:/object/edf6vc_support_tank_ap.sgo";
+// The vehicles a support entry brings that take pylons, and what they are made from: the support tank (the stock
+// V505_TANK_MISSION, src/support_spawn.h; the plugin builds its holders past the stock one, src/stores.cpp) and the
+// plugin's jets (tools/make_jets.py: the guns L / R, the stores, the fuel tank fourth). The helicopters are not offered:
+// their NPC pilot fires only the stock holders (src/heli.cpp kStoreHolder), pylons past those would never fire.
+enum class VehicleBody : std::uint8_t { none, tank, strike, fighter, interceptor, multirole };
+// `most` pylons: a tank's stock gun and 4 (src/payload.h kMostPayload 8 a seat), a jet's 5 (its guns L / R, the fuel tank
+// and 5 make 8 holders: src/jet_combat.cpp ReadArms reads at most 8, src/stores.h kMostStores 7 stores).
+struct VehicleBodyRow { VehicleBody body; const wchar_t* name; const wchar_t* base; int most; bool tank; };
+inline constexpr VehicleBodyRow kVehicleBodies[]={
+    {VehicleBody::tank,L"TANK",L"V505_TANK_MISSION.SGO",4,true},
+    {VehicleBody::strike,L"STRIKE",L"EDF6VC_JET_STRIKE.SGO",5,false},
+    {VehicleBody::fighter,L"FIGHTER",L"EDF6VC_JET_FIGHTER.SGO",5,false},
+    {VehicleBody::interceptor,L"INTERCEPTOR",L"EDF6VC_JET_INTERCEPTOR.SGO",5,false},
+    {VehicleBody::multirole,L"MULTIROLE",L"EDF6VC_JET_MULTIROLE.SGO",5,false},
+};
+constexpr const VehicleBodyRow* VehicleBodyOf(VehicleBody b) noexcept {
+    for(const auto& r:kVehicleBodies)if(r.body==b)return &r;
+    return nullptr;
+}
+// The catalog keys whose vehicle takes a SupportVehicle_<KEY> (support_dispatch.cpp SupportCallKey, airstrike.cpp's calls).
+struct VehicleKey { const wchar_t* key; VehicleBody body; };
+inline constexpr VehicleKey kVehicleKeys[]={
+    {L"TANK_CREWED",VehicleBody::tank},{L"TANK_DELIVERY",VehicleBody::tank},
+    {L"STRIKE",VehicleBody::strike},{L"STRIKE_F",VehicleBody::strike},
+    {L"FIGHTER",VehicleBody::fighter},{L"FIGHTER_F",VehicleBody::fighter},
+    {L"INTERCEPTOR",VehicleBody::interceptor},{L"INTERCEPTOR_F",VehicleBody::interceptor},
+    {L"MULTIROLE",VehicleBody::multirole},{L"MULTIROLE_F",VehicleBody::multirole},
+};
+inline VehicleBody VehicleBodyOfKey(const wchar_t* key) noexcept {
+    if(!key)return VehicleBody::none;
+    for(const auto& k:kVehicleKeys)if(!_wcsicmp(k.key,key))return k.body;
+    return VehicleBody::none;
+}
+
+inline constexpr int kPylonsMost=7;
+struct VehicleLoadout {
+    VehicleBody body=VehicleBody::none;   // none: no loadout (the vehicle as it always came)
+    bool apGun=false;                     // a tank's main gun: the 90 mm smooth-bore (AP) rather than the howitzer (HE)
+    int count=0;                          // pylons
+    std::uint8_t store[kPylonsMost]{};    // kLoadStores code
+    std::uint8_t rounds[kPylonsMost]{};   // kRoundCounts code
+    constexpr bool On() const noexcept { return body!=VehicleBody::none; }
+};
+// `text` (one SupportVehicle_<KEY> value) for `body`. Empty: true, no loadout. False: *out none, `why` says why.
+inline bool ParseVehicleLoadout(const wchar_t* text,VehicleBody body,VehicleLoadout* out,wchar_t* why,std::size_t whyCapacity) noexcept {
+    using namespace loadout_detail;
+    VehicleLoadout l{};
+    if(why && whyCapacity)why[0]=0;
+    const VehicleBodyRow* row=VehicleBodyOf(body);
+    int tokens=0;bool guns=false,gun=false;
+    bool parsed=Tokens(text,[&](const wchar_t* a,const wchar_t* b) noexcept {
+        ++tokens;
+        if(!row){Say(why,whyCapacity,L"该单位没有可配置的挂点");return false;}
+        if(guns){Say(why,whyCapacity,L"GUNS 表示只带机炮，不能再写挂载");return false;}
+        if(!row->tank && Same(a,b,L"GUNS")){guns=true;return true;}
+        if(row->tank && tokens==1) {
+            if(Same(a,b,L"HE") || Same(a,b,L"AP")){gun=true;l.apGun=Same(a,b,L"AP");return true;}
+            Say(why,whyCapacity,L"坦克的第一项是主炮 HE 或 AP：",a,b);return false;
+        }
+        const wchar_t* colon=Find(a,b,L':');
+        const wchar_t *na=a,*nb=colon;Trim(na,nb);
+        const LoadStore* store=nullptr;
+        for(const auto& s:kLoadStores)if(Same(na,nb,s.name))store=&s;
+        if(!store || !(row->tank ? store->tank : store->jet)) {
+            Say(why,whyCapacity,row->tank ? L"坦克可挂：AP / HE / GLM，不能挂：" : L"飞机可挂：AAM_S / AAM_M / AAM_L / AGM / AGM_L / MK82 / RKT，不能挂：",na,nb);
+            return false;
+        }
+        int n=0;
+        if(colon>=b || !Count(colon+1,b,99,&n) || RoundCode(n)<0) {
+            Say(why,whyCapacity,L"挂点写成 名称:数量，数量可选 1 2 3 4 5 6 8 10 12 15 19 20 25 30 38 40：",a,b);return false;
+        }
+        if(l.count>=row->most){Say(why,whyCapacity,row->tank ? L"坦克最多 4 个挂点" : L"飞机最多 5 个挂点");return false;}
+        l.store[l.count]=store->code;l.rounds[l.count]=static_cast<std::uint8_t>(RoundCode(n));++l.count;
+        return true;
+    });
+    if(parsed && tokens && row && row->tank && !gun){parsed=false;Say(why,whyCapacity,L"坦克的第一项是主炮 HE 或 AP");}
+    if(parsed && tokens)l.body=body;
+    if(out)*out=parsed ? l : VehicleLoadout{};
+    return parsed;
+}
+
+// --- The 64-bit variant of a plan unit (support_net.h Unit::variant) ---
+// Bit 63: applied (the unit is made from the variant's file; clear: the host only tells what it wanted, the unit is
+// stock, a peer without the file writes it to its pending list). Bit 62: a vehicle loadout (else a soldier look).
+// A look: bit 0 primary set, bit 1 secondary set, bits 2-25 primary, 26-49 secondary. A loadout: bits 0-2 pylons,
+// bit 3 the tank's AP gun, bits 4-59 a pylon a byte (store code, then the round code in the high nibble).
+inline constexpr std::uint64_t kVariantApplied=1ull<<63,kVariantVehicle=1ull<<62;
+constexpr std::uint64_t LookVariant(const SupportLook& l) noexcept {
+    if(!l.On())return 0;
+    std::uint64_t v=0;
+    if(l.primary!=kStockColour)v|=1ull|(static_cast<std::uint64_t>(l.primary&0xFFFFFF)<<2);
+    if(l.secondary!=kStockColour)v|=2ull|(static_cast<std::uint64_t>(l.secondary&0xFFFFFF)<<26);
+    return v;
+}
+constexpr bool LookOfVariant(std::uint64_t v,SupportLook* out) noexcept {
+    const std::uint64_t bits=v&~kVariantApplied;
+    if(!bits || (bits&kVariantVehicle) || (bits>>50))return false;
+    SupportLook l;
+    if(bits&1ull)l.primary=static_cast<std::int32_t>((bits>>2)&0xFFFFFF);
+    else if((bits>>2)&0xFFFFFF)return false;
+    if(bits&2ull)l.secondary=static_cast<std::int32_t>((bits>>26)&0xFFFFFF);
+    else if((bits>>26)&0xFFFFFF)return false;
+    if(!l.On())return false;
+    if(out)*out=l;
+    return true;
+}
+constexpr std::uint64_t LoadoutVariant(const VehicleLoadout& l) noexcept {
+    if(!l.On() || l.count<0 || l.count>kPylonsMost)return 0;
+    std::uint64_t v=kVariantVehicle|static_cast<std::uint64_t>(l.count)|(l.apGun ? 8ull : 0ull);
+    for(int i=0;i<l.count;++i)
+        v|=static_cast<std::uint64_t>((l.store[i]&0xF)|((l.rounds[i]&0xF)<<4))<<(4+8*i);
+    return v;
+}
+// Back into a loadout for `body` (whatever a peer sent: every field checked as the parser would).
+inline bool LoadoutOfVariant(std::uint64_t v,VehicleBody body,VehicleLoadout* out) noexcept {
+    const std::uint64_t bits=v&~kVariantApplied;
+    const VehicleBodyRow* row=VehicleBodyOf(body);
+    if(!row || !(bits&kVariantVehicle) || ((bits>>60)&3u))return false;
+    VehicleLoadout l{};l.body=body;l.count=static_cast<int>(bits&7u);l.apGun=(bits&8u)!=0;
+    if(l.count>row->most || (l.apGun && !row->tank))return false;
+    for(int i=0;i<kPylonsMost;++i) {
+        const auto byte=static_cast<std::uint8_t>((bits>>(4+8*i))&0xFFu);
+        if(i>=l.count){if(byte)return false;continue;}
+        const LoadStore* s=LoadStoreOf(byte&0xF);
+        if(!s || !(row->tank ? s->tank : s->jet))return false;
+        l.store[i]=byte&0xF;l.rounds[i]=byte>>4;
+    }
+    if(out)*out=l;
+    return true;
+}
+
+// --- Generated files (tools/support_loadout.py writes them, from the name alone; the plugin derives the same names) ---
+namespace loadout_detail {
+struct Name {
+    wchar_t buf[96];std::size_t n=0;
+    void Put(wchar_t c) noexcept {if(n+1<sizeof(buf)/sizeof(buf[0]))buf[n++]=c;}
+    void Puts(const wchar_t* s) noexcept {for(;*s;++s)Put(*s);}
+    void HexOf(std::uint64_t v,int digits) noexcept {for(int s=(digits-1)*4;s>=0;s-=4)Put(L"0123456789ABCDEF"[(v>>s)&0xF]);}
+    std::size_t Out(wchar_t* out,std::size_t capacity,bool path) noexcept {
+        buf[n]=0;
+        const wchar_t* prefix=path ? L"app:/object/" : L"";
+        const std::size_t total=std::wcslen(prefix)+n;
+        if(!out || !capacity)return 0;
+        if(total+1>capacity){out[0]=0;return 0;}
+        std::size_t o=0;
+        for(const wchar_t* s=prefix;*s;++s)out[o++]=*s;
+        for(std::size_t i=0;i<n;++i)out[o++]=path ? static_cast<wchar_t>(std::towlower(buf[i])) : buf[i];
+        out[o]=0;
+        return o;
+    }
+};
+}  // namespace loadout_detail
 // EDF6VC_NPC_<KIND>[_L]_<PRIMARY|X>_<SECONDARY|X>.SGO, e.g. EDF6VC_NPC_RIFLE_L_1E3A8A_X.SGO: the stock template of that
 // kind (its _LEADER for a leader) with its soldier_color entries recoloured. `path`: the CreateObject spelling instead
 // (app:/object/<lower case>). Returns the length, 0 when it does not fit.
 inline std::size_t SupportLookFile(SupportWeapon kind,bool leader,const SupportLook& look,wchar_t* out,std::size_t capacity,
                                    bool path=false) noexcept {
-    if(!out || !capacity)return 0;
-    wchar_t buf[96];std::size_t n=0;
-    const auto put=[&](wchar_t c) noexcept {if(n+1<sizeof(buf)/sizeof(buf[0]))buf[n++]=c;};
-    const auto puts=[&](const wchar_t* s) noexcept {for(;*s;++s)put(*s);};
-    const auto colour=[&](std::int32_t v) noexcept {
-        if(v==kStockColour){put(L'X');return;}
-        for(int shift=20;shift>=0;shift-=4)put(L"0123456789ABCDEF"[(v>>shift)&0xF]);
-    };
-    puts(L"EDF6VC_NPC_");
-    for(const wchar_t* s=SupportKindIniName(kind);*s;++s)put(static_cast<wchar_t>(std::towupper(*s)));
-    if(leader)puts(L"_L");
-    put(L'_');colour(look.primary);put(L'_');colour(look.secondary);puts(L".SGO");
-    buf[n]=0;
-    const wchar_t* prefix=path ? L"app:/object/" : L"";
-    const std::size_t total=std::wcslen(prefix)+n;
-    if(total+1>capacity){out[0]=0;return 0;}
-    std::size_t o=0;
-    for(const wchar_t* s=prefix;*s;++s)out[o++]=*s;
-    for(std::size_t i=0;i<n;++i)out[o++]=path ? static_cast<wchar_t>(std::towlower(buf[i])) : buf[i];
-    out[o]=0;
-    return o;
+    loadout_detail::Name n;
+    const auto colour=[&](std::int32_t v) noexcept {if(v==kStockColour)n.Put(L'X');else n.HexOf(static_cast<std::uint64_t>(v),6);};
+    n.Puts(L"EDF6VC_NPC_");
+    for(const wchar_t* s=SupportKindIniName(kind);*s;++s)n.Put(static_cast<wchar_t>(std::towupper(*s)));
+    if(leader)n.Puts(L"_L");
+    n.Put(L'_');colour(look.primary);n.Put(L'_');colour(look.secondary);n.Puts(L".SGO");
+    return n.Out(out,capacity,path);
+}
+// EDF6VC_LO_<BODY>_<the variant in 16 hex digits, applied bit clear>.SGO: the body's base SGO with these pylons.
+inline std::size_t VehicleVariantFile(const VehicleLoadout& l,wchar_t* out,std::size_t capacity,bool path=false) noexcept {
+    const VehicleBodyRow* row=VehicleBodyOf(l.body);
+    const std::uint64_t v=LoadoutVariant(l);
+    if(!row || !v){if(out && capacity)out[0]=0;return 0;}
+    loadout_detail::Name n;
+    n.Puts(L"EDF6VC_LO_");n.Puts(row->name);n.Put(L'_');n.HexOf(v,16);n.Puts(L".SGO");
+    return n.Out(out,capacity,path);
+}
+
+// --- Which variant files a peer has (its hello's Bloom filter: 256 bits, three probes) ---
+// FNV-1a 64 of the file name, upper case (the plugin and the installer write upper-case names; Windows matches either).
+inline std::uint64_t VariantHash(const wchar_t* file) noexcept {
+    std::uint64_t h=1469598103934665603ull;
+    for(;file && *file;++file) {
+        const auto c=static_cast<std::uint32_t>(std::towupper(*file));
+        h^=c&0xFFu;h*=1099511628211ull;h^=(c>>8)&0xFFu;h*=1099511628211ull;
+    }
+    return h;
+}
+inline constexpr std::size_t kVariantBloomBytes=32;
+inline void BloomAdd(unsigned char* bloom,std::uint64_t hash) noexcept {
+    for(int k=0;k<3;++k){const auto bit=(hash>>(k*8))&0xFFu;bloom[bit>>3]|=static_cast<unsigned char>(1u<<(bit&7u));}
+}
+inline bool BloomHas(const unsigned char* bloom,std::uint64_t hash) noexcept {
+    for(int k=0;k<3;++k){const auto bit=(hash>>(k*8))&0xFFu;if(!(bloom[bit>>3]&(1u<<(bit&7u))))return false;}
+    return true;
 }
 }  // namespace crew

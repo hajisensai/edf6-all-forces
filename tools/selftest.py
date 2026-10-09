@@ -1973,8 +1973,9 @@ def heli_sight_after_aim_lines() -> None:
     sys.path.insert(0, os.path.join(ROOT, 'tools'))
     import support_config
     import support_loadout
-    suffixes = {'SupportAircraftCount_': support_config.UNIT_KEYS, 'SupportPreset_': tuple(support_loadout.SEATS)}
-    example = {'SupportAircraftCount_': r'\d', 'SupportPreset_': r'[a-z]'}   # a count; a soldier kind
+    suffixes = {'SupportAircraftCount_': support_config.UNIT_KEYS, 'SupportPreset_': tuple(support_loadout.SEATS),
+                'SupportVehicle_': tuple(support_loadout.VEHICLE_KEYS)}
+    example = {'SupportAircraftCount_': r'\d', 'SupportPreset_': r'[a-z]', 'SupportVehicle_': r'[A-Z]'}   # a count; a kind; a gun
 
     def read(key: str) -> bool:
         if f'L"{key}"' in plugin or any(f'L"{key}"' in m for m in modules.values()):
@@ -3463,10 +3464,10 @@ def pack_install_upgrade_uninstall() -> None:
                           build=lambda game, overlay=None: (dict(stores), [], {}),
                           store_files=lambda: []))   # the fake make_jets writes no store weapons to need
             # the out-of-game loadouts' files (tools/support_loadout.py): written after the plugin's ini, gone with uninstall 1
-            loadout = {'OBJECT/EDF6VC_SUPPORT_TANK_AP.SGO': b'ap tank'}
+            loadout = {'OBJECT/EDF6VC_LO_TANK_4000000000000C81.SGO': b'loaded tank'}
             built_from: list[str] = []
             enter(patched(importlib.import_module('support_loadout'),
-                          build=lambda game, text: (built_from.append(text), dict(loadout))[1]))
+                          build=lambda game, text, pending=(): (built_from.append(text), dict(loadout))[1]))
             with contextlib.redirect_stdout(io.StringIO()):
                 _pack_bundle(bundle, b'v1 ')
                 answers[:] = ['y']   # AT_C: back up the other mod's file and replace it

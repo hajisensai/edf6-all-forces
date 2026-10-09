@@ -1,4 +1,5 @@
 #include "../src/support_protocol.h"
+#include "../src/support_loadout.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -18,6 +19,8 @@ struct Node {
     bool reject=false,failSpawn=false,pending=false,refusePlan=false;
     unsigned spawns=0,destroys=0,plans=0;
     std::uint64_t loadout=0;   // the last plan call's composed load (support_call.h PackSupportLoadout)
+    std::uint64_t variant=0;   // given to every planned unit (support_net.h Unit::variant)
+    std::uint32_t ext=kExtVariants;unsigned char bloom[32]{};   // its hello's extension (support_variants.h)
     std::uint64_t nonce=0;
     bool active[kMaxTransactions+1]{};
     Plan last{};
@@ -61,7 +64,8 @@ bool Send(void* ctx,std::uint32_t peer,const Message& message) noexcept {
     auto& node=*static_cast<Node*>(ctx);auto& room=*node.room;const auto dst=room.Global(node.id,peer);
     if(dst==room.failTo && message.kind==room.failKind)return false;
     unsigned char wire[kWireSize];Message decoded;
-    Message sent=message;if(node.id==room.legacyNode && sent.kind==Kind::hello)sent.index=0;   // protocol v2 before capabilities
+    Message sent=message;
+    if(node.id==room.legacyNode && sent.kind==Kind::hello){sent.index=0;sent.unit=Unit{};}   // protocol v2 before capabilities
     if(!Encode(sent,wire,sizeof(wire)) || !Decode(wire,sizeof(wire),decoded))return false;
     Packet p{node.id,dst,decoded};room.packets.push_back(p);room.history.push_back(p);return true;
 }
@@ -72,7 +76,7 @@ PlanResult PlanCall(std::uint32_t catalog,const float* at,std::uint64_t loadout,
     if(current->pending)return PlanResult::pending;
     *p=Plan{};p->catalogId=catalog;p->count=16;std::memcpy(p->target,at,sizeof(p->target));
     for(unsigned i=0;i<p->count;++i) {
-        auto& u=p->units[i];u.resourceId=i%2+1;
+        auto& u=p->units[i];u.resourceId=i%2+1;u.variant=current->variant;
         u.matrix[0]=u.matrix[5]=u.matrix[10]=u.matrix[15]=1;
         u.matrix[12]=at[0]+static_cast<float>(i);u.matrix[13]=at[1];u.matrix[14]=at[2];
     }
@@ -93,11 +97,12 @@ bool Derive(std::uint32_t ordinal,unsigned char* out) noexcept {
     std::memcpy(out+24,&ordinal,4);return true;
 }
 void Notice(std::uint32_t request,RequestStatus status) noexcept { current->notices.emplace_back(request,status); }
+void Hello(std::uint32_t* ext,unsigned char* bloom) noexcept { *ext=current->ext;std::memcpy(bloom,current->bloom,32); }
 Room::Room(unsigned count) {
     for(unsigned i=0;i<count;++i) {
         auto n=std::make_unique<Node>();n->id=i;n->room=this;n->nonce=100000+1000*i;
         Backend b{n.get(),&Send,&Nonce,{&PlanCall,&Validate,&Spawn,&Destroy,&Derive}};
-        b.hooks.notice=&Notice;
+        b.hooks.notice=&Notice;b.hooks.variants=&Hello;
         n->session->Configure(b);nodes.push_back(std::move(n));
     }
     for(unsigned i=0;i<count;++i){With(i);current->session->Start(i==0,count-1,i==0 ? 0 : Peer(i,0),now);}
@@ -264,4 +269,36 @@ void RequestOutcomes() {
     Check(newer.nodes[1]->notices.back()==std::make_pair(2u,RequestStatus::active),"previous transaction cancel cannot be misreported as the newer request outcome");
 }
 }
-int main() { Codec();Capabilities();Loadout();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();std::printf("support protocol: %d checks passed\n",checks); }
+// 2026-10-09 (the user: colours and loaded vehicles must work online). The hello's `index` has no capability bit left, so
+// the extension rides in the hello's unit (never read for a hello): resourceId the extension word, netId a Bloom filter of
+// the variant files the peer has; a unit's variant rides in the unit message's unused `challenge`. Older builds: zeros.
+void Variants() {
+    using crew::BloomAdd;using crew::VariantHash;
+    const std::uint64_t a=VariantHash(L"EDF6VC_NPC_RIFLE_L_1E3A8A_X.SGO"),b=VariantHash(L"EDF6VC_LO_TANK_4000000000000C81.SGO");
+    Message hello;hello.kind=Kind::hello;hello.challenge=7;hello.request=1;hello.index=kCapabilities;
+    hello.unit.resourceId=kExtVariants;BloomAdd(hello.unit.netId,a);
+    unsigned char bytes[kWireSize];Message out;
+    Check(Encode(hello,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) && out.unit.resourceId==kExtVariants &&
+          !std::memcmp(out.unit.netId,hello.unit.netId,32),"the hello's extension and filter round-trip on the v2 wire");
+    Message unit;unit.kind=Kind::unit;unit.epoch=22;unit.transaction=1;unit.unit.resourceId=1;
+    unit.unit.matrix[0]=unit.unit.matrix[5]=unit.unit.matrix[10]=unit.unit.matrix[15]=1;Derive(0x40000001,unit.unit.netId);
+    unit.challenge=0xC000000000000C81ull;
+    Check(Encode(unit,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) && out.challenge==unit.challenge,
+          "a unit message carries its variant in `challenge`");
+    {Room r(3);
+     BloomAdd(r.nodes[1]->bloom,a);BloomAdd(r.nodes[1]->bloom,b);BloomAdd(r.nodes[2]->bloom,a);r.Step(1100);r.Settle();
+     const auto& host=*r.nodes[0]->session;
+     Check(host.PeersHaveVariant(kExtVariants,0),"every peer applies variants");
+     Check(host.PeersHaveVariant(kExtVariants,a),"every peer has the coloured soldier's file");
+     Check(!host.PeersHaveVariant(kExtVariants,b),"one peer lacks the tank's file: the host plans it stock");
+     Check(r.nodes[1]->session->PeersHaveVariant(kExtVariants,b),"a client is never asked: true");
+     BloomAdd(r.nodes[2]->bloom,b);r.Step(1100);r.Settle();
+     Check(host.PeersHaveVariant(kExtVariants,b),"a peer's next hello (after its installer made the file) decides");
+     r.nodes[0]->variant=0xC000000000000C81ull;Check(r.Submit(),"a request");r.Settle();
+     for(const auto& n:r.nodes)Check(n->spawns==1 && n->last.units[0].variant==0xC000000000000C81ull &&
+                                    n->last.units[15].variant==0xC000000000000C81ull,"every peer's plan has the host's unit variants");}
+    {Room r(3);r.legacyNode=2;r.With(2);r.nodes[2]->session->Stop();r.nodes[2]->session->Start(false,2,1,r.now);r.Settle();
+     Check(!r.nodes[0]->session->PeersHaveVariant(kExtVariants,0),"an older peer announces no extension: no variants for the room");
+     Check(r.nodes[0]->session->Ready(),"and still completes the handshake");}
+}
+int main() { Codec();Capabilities();Variants();Loadout();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();std::printf("support protocol: %d checks passed\n",checks); }
