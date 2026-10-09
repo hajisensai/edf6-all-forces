@@ -361,6 +361,35 @@ void HullAddsToDrive() {
     Expect(withOld.peak<=top*1.02f,"(the old model capped the world rate at the drive's top)",withOld.peak,top);
     Expect(against.at2>away,"hull turning against it faster than the drive: the gun is carried off",against.at2/kDeg,away/kDeg);
     Expect(snake.on>=0 && snake.late<0.5f*kDeg,"world point, slaloming hull: the gun settles on it",snake.late/kDeg);
+    // The full slew let go: the hull turning the same way at 0.3 rad/s under a full command for a second, then the hull
+    // stopped and the command 0 (the stock step turns nothing). The gun stays where the slew left it, no pull back.
+    // The hull turning to + heading helps a + command here (the gun keeps no error: the counter-turn was not made).
+    const stab::Stops st[2]={stab::StopsOf(-stab::kPi,stab::kPi),stab::StopsOf(-1.0f,0.3f)};
+    stab::Hold hold{};
+    float axes[2]={0.0f,0.0f},out[2];
+    const float step=top/60.0f;
+    stab::Step(hold,st,axes,axes,step,Hull(0.0f,0.0f,0.0f),Hull(0.0f,0.0f,0.0f),kMbt,out);
+    bool helped=true;
+    float heading=0.0f;
+    for(int f=1;f<=60;++f) {
+        heading+=0.3f/60.0f;
+        const stab::Frame h=Hull(heading,0.0f,0.0f);
+        const float before[2]={axes[0],axes[1]},after[2]={axes[0]+step,axes[1]};
+        hold.full[0]=1.0f;hold.full[1]=0.0f;
+        stab::Step(hold,st,before,after,step,h,h,kMbt,out);
+        helped=helped && out[0]==after[0] && hold.shift[0]==0.0f && !hold.slipping && hold.error<1e-6f;
+        axes[0]=out[0];axes[1]=out[1];
+    }
+    hold.full[0]=0.0f;
+    const stab::Frame h=Hull(heading,0.0f,0.0f);
+    stab::Step(hold,st,axes,axes,step,h,h,kMbt,out);
+    float held[2],part[2];
+    const bool seen=stab::Held(hold,st,h,axes,held,part);
+    std::printf("full slew let go: the step after moves the axis %.6f deg; the look ahead shows it %.6f deg off\n",
+                (out[0]-axes[0])/kDeg,(held[0]-axes[0])/kDeg);
+    Expect(helped,"(the hull's turn did help the full slew: no counter-turn)");
+    Expect(std::fabs(out[0]-axes[0])<1e-6f,"full slew let go: no pull back toward a trailing reference",(out[0]-axes[0])/kDeg);
+    Expect(seen && std::fabs(held[0]-axes[0])<1e-6f,"full slew let go: the look ahead holds the gun as it is",(held[0]-axes[0])/kDeg);
 }
 }  // namespace
 

@@ -727,15 +727,20 @@ void Publish(const Drill& d) noexcept {
 
 // The drill's one round (the user, 2026-10-09: "钻头为什么有25的弹药"): the weapon is the Blacker's cannon made to fire
 // nothing (tools/make_drill.py BIT), whose stock magazine of 25 the HUDs showed. Its AmmoCount is 1 (the one drill),
-// and its live count (weapon +0xBE8, layout.h kWeaponAmmo, what the stock gauge and vhud.cpp read) says whether the
-// drill is on the hull: 1 at home, 0 while it is launched, 1 again once caught. Every copy writes it from the flight
-// it shows (an NPC's AI that pulls the bit's trigger empties nothing that stays empty: the drill is home).
-void ShowRound(unsigned char* v,const Drill& d) noexcept {
+// and its live count (weapon +0xBE8, layout.h kWeaponAmmo, what the stock gauge and vhud.cpp read) is kept at that 1:
+// an NPC driver's AI that pulls the bit's trigger (0x69820E takes a round) would otherwise empty it for good (the bit's
+// ReloadTime is -1: +0x20C = -1, and the weapon's update skips its whole reload block on a negative one, 0x693B2F), and
+// the HUDs would call the drill tank EMPTY / NO AMMO. Whether the drill is away is the drill line's (LAUNCHED /
+// RETURNING), not the count's: a count of 0 while it flies would raise that same NO AMMO warning (hud.cpp: every arm
+// at 0 that cannot reload) and shut the weapon's fire gate (0x693FC6), with nothing gained. (No other effect of a 0
+// was found: the reload block is skipped either way; the other readers of +0xBE8 outside the weapon class, 0x567811 and
+// 0x5A1F75, walk a soldier's own weapons, human +0x1970 / +0x1980, not a vehicle's.)
+void KeepRound(unsigned char* v) noexcept {
     const unsigned char* seat=SeatAt(v,0);
     const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
     if(!At<std::uint64_t>(seat,kSeatWeaponCount) || !Readable(holders,8) || !Readable(holders[0],kHolderWeapon+8))return;
     const auto w=At<unsigned char*>(holders[0],kHolderWeapon);
-    if(Readable(w,kWeaponAmmo+4))Put<std::int32_t>(w,kWeaponAmmo,d.flight==Flight::home ? 1 : 0);
+    if(Readable(w,kWeaponAmmo+4) && At<std::int32_t>(w,kWeaponAmmo)!=1)Put<std::int32_t>(w,kWeaponAmmo,1);
 }
 
 // Every copy poses the same drill; only the current vehicle authority integrates its path and tests contacts.
@@ -813,7 +818,7 @@ void DrillFrame(unsigned char* v) noexcept {
             Jet(v,*d,ms);
             if(!PoseFlight(v,*d))Catch(v,*d,ms,"no remote pose");
         } else PoseHome(*d);
-        ShowRound(v,*d);
+        KeepRound(v);
         return;
     }
     if(d->launchAsked) {
@@ -847,7 +852,7 @@ void DrillFrame(unsigned char* v) noexcept {
     }
     if(d->rpm>0.0f || d->flight!=Flight::home)LogPose(v,*d,ms);
     if(d->player)Publish(*d);
-    ShowRound(v,*d);
+    KeepRound(v);
     SendState(v,*d,ms);
 }
 

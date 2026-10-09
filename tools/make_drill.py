@@ -67,7 +67,7 @@ HALF_VIEW = 28.0             # deg: what must be in view lies within this of the
                              # vertical field of view is not measured: L; ~60 deg is assumed)
 # The bit: the cannon's shot made a nothing (with the plugin the trigger never reaches it; an NPC's AI may fire it).
 # AmmoCount 1: the one drill (the stock cannon's magazine of 25 showed on the HUDs, 2026-10-09 "钻头为什么有25的弹药");
-# the plugin keeps the live count at 1 while the drill is on the hull and 0 while it is launched (src/drill.cpp ShowRound).
+# the plugin keeps the live count at 1 (src/drill.cpp KeepRound; LAUNCHED / RETURNING is the HUD's drill line).
 BIT = {'AmmoCount': 1.0, 'AmmoDamage': 0.0, 'AmmoExplosion': 0.0, 'AmmoAlive': 1.0, 'AmmoSpeed': 0.01, 'AmmoSize': 0.01,
        'AmmoHitImpulseAdjust': 0.0, 'FireRecoil': 0.0, 'AmmoColor': [0.0, 0.0, 0.0, 0.0]}
 SILENT = ('FireSe', 'AmmoHitSe')            # their volume (entry 2) 0
