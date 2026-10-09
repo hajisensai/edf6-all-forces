@@ -10,6 +10,7 @@
 //  - two local players' gauges are held apart; old missions' holds give their records up to new gauges.
 // Exit code 1 when one fails. cmake --build build --target armor_hud_check && build\armor_hud_check.exe
 #include "../src/stock_armor_hud.h"
+#include <cmath>
 #include <cstdio>
 
 namespace {
@@ -75,12 +76,30 @@ void TwoPlayersAndOldHolds() {
            "the first gets out: only theirs shown");
     Expect(!armorhud::Step(holds,&p2,2,false,p2.root+kShown) && p2.root[kShown]==1,"the second gets out: shown");
 }
+// The numbers our HUD shows in the gauge's place (armorhud::Publish / Read; the user, 2026-10-09: "让护甲显示在咱们的hud
+// 不就行了"): only while the gauge is held hidden, never a made-up number, low at the stock gauge's own mark (0.25).
+void Numbers() {
+    armorhud::Readout r{};
+    Expect(!armorhud::Publish(false,1350.0f,1600.0f,500.0f,800.0f,&r),"the gauge shown: no readout of ours (never both)");
+    Expect(armorhud::Publish(true,1350.0f,1600.0f,500.0f,800.0f,&r) && r.armor.hp==1350.0f && r.armor.most==1600.0f &&
+           r.hasHull && r.hull.hp==500.0f && r.hull.most==800.0f,"the gauge hidden: its armor and the vehicle's durability");
+    Expect(!r.armor.low && std::fabs(r.armor.share-1350.0f/1600.0f)<1e-6f,"1350 / 1600: not low");
+    Expect(armorhud::Publish(true,400.0f,1600.0f,0.0f,0.0f,&r) && r.armor.low && !r.hasHull,"400 / 1600 (0.25): low; no vehicle numbers: no hull");
+    Expect(armorhud::Publish(true,401.0f,1600.0f,1.0f,1.0f,&r) && !r.armor.low,"401 / 1600: just over the mark");
+    Expect(armorhud::Publish(true,-5.0f,1600.0f,1.0f,1.0f,&r) && r.armor.hp==0.0f && r.armor.low,"below 0 shown as 0, low");
+    Expect(armorhud::Publish(true,2000.0f,1600.0f,1.0f,1.0f,&r) && r.armor.share==1.0f,"over the most: a full bar");
+    const float nan=std::nanf("");
+    Expect(!armorhud::Publish(true,1350.0f,0.0f,1.0f,1.0f,&r),"no most: nothing shown");
+    Expect(!armorhud::Publish(true,nan,1600.0f,1.0f,1.0f,&r),"an unreadable armor: nothing shown");
+    Expect(armorhud::Publish(true,1350.0f,1600.0f,nan,800.0f,&r) && !r.hasHull,"an unreadable hull: the armor alone");
+}
 }  // namespace
 
 int main() {
     Ride();
     Missions();
     TwoPlayersAndOldHolds();
+    Numbers();
     std::printf(failures ? "%d of %d FAILED\n" : "all %d passed\n",failures ? failures : checks,checks);
     return failures ? 1 : 0;
 }

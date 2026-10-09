@@ -5,6 +5,7 @@
 #include <cstdint>
 #include "gunsight.h"
 #include "roundaim.h"
+#include "stock_armor_hud.h"
 
 namespace crew {
 // --- rounds.cpp: a weapon's round as the game will fly it ---
@@ -111,6 +112,10 @@ bool InstallStockGauges() noexcept;
 // panels (a weapon a panel, the fuel tank's FUEL too) are taken off the screen for that vehicle, put back when it stops.
 void SetStockGaugeCover(bool lists) noexcept;
 void ResetStockGauges() noexcept;   // mission.cpp MissionStart
+// hud.cpp HudPublish: the HUD's player's armor (and the vehicle's durability) while their stock armor gauge is held
+// hidden (stock_armor_hud.h: given by the hold itself, so it is shown exactly while the stock one is not). False when
+// it is not hidden, or the numbers do not read.
+bool PlayerStockArmor(armorhud::Readout* out) noexcept;
 // The fuel tank of `vehicle` (a helicopter's, the 506 bodies' of the plugin's aircraft, the 503 / 511 bikes'), its burn
 // measured over the game clock; game thread. False (out->ok false) with no tank or the reads off.
 bool FuelGauge(const void* vehicle,FuelReading* out) noexcept;
