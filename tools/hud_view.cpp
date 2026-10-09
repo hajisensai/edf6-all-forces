@@ -200,11 +200,11 @@ bool PlayerMapCommands(MapCommandReadout* o) noexcept { if(hasMap)*o=sceneCmd;re
 bool sceneMarkOn=false;float sceneMark[3]{};
 bool NpcMarkReadout(float* at) noexcept { if(sceneMarkOn)std::memcpy(at,sceneMark,12);return sceneMarkOn; }
 // The Q marks (qmark.cpp) with it: ours on that enemy, a teammate's (P2) on another one, a teammate's (P3) point.
-int QMarkViews(QMarkView* out,int max) noexcept {
+int QMarkViews(QMarkView* to,int max) noexcept {
     if(!sceneMarkOn || max<3)return 0;
-    out[0]=QMarkView{true,true,-1,{sceneMark[0],sceneMark[1],sceneMark[2]}};
-    out[1]=QMarkView{false,true,1,{sceneMark[0]-60.0f,sceneMark[1]+4.0f,sceneMark[2]+40.0f}};
-    out[2]=QMarkView{false,false,2,{sceneMark[0]+45.0f,sceneMark[1]-6.0f,sceneMark[2]-60.0f}};
+    to[0]=QMarkView{true,true,-1,{sceneMark[0],sceneMark[1],sceneMark[2]}};
+    to[1]=QMarkView{false,true,1,{sceneMark[0]-60.0f,sceneMark[1]+4.0f,sceneMark[2]+40.0f}};
+    to[2]=QMarkView{false,false,2,{sceneMark[0]+45.0f,sceneMark[1]-6.0f,sceneMark[2]-60.0f}};
     return 3;
 }
 // The squads' formation banner (npcai.cpp PlayerFormationCue): on in the npc_formation scene.

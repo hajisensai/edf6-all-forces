@@ -416,7 +416,7 @@ HUDTEXT(formationCue,L"FORMATION: %ls   [%ls]",L"编队：%ls   [%ls]",L"編隊�
 HUDTEXT(squadWait,L"WAIT %d s",L"等待 %d 秒",L"等待 %d 秒",L"待機 %d 秒")
 HUDTEXT(npcMark,L"MARK",L"标记",L"標記",L"マーク")
 HUDTEXT(npcMarkRange,L"MARK %.0f m",L"标记 %.0f m",L"標記 %.0f m",L"マーク %.0f m")
-HUDTEXT(qmarkPlayer,L"P%d %.0f m",L"P%d %.0f m",L"P%d %.0f m",L"P%d %.0f m")
+HUDTEXT(qmarkPlayer,L"P%d %.0f m",L"玩家%d %.0f m",L"玩家%d %.0f m",L"プレイヤー%d %.0f m")
 HUDTEXT(qmarkAlly,L"ALLY %.0f m",L"队友 %.0f m",L"隊友 %.0f m",L"味方 %.0f m")
 // The mark key on foot with no enemy near the centre (npcai.cpp SendToPoint): the units selected on the map sent there.
 HUDTEXT(npcPingSent,L"MOVE HERE: %d UNIT(S)",L"前往此处：%d 个单位",L"前往此處：%d 個單位",L"ここへ移動：%d ユニット")

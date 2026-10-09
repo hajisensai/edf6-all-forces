@@ -18,7 +18,7 @@ Config config{};
 unsigned char humanMem[0x400]{},enemyMem[0x400]{},enemyCtrl[0x20]{};
 float camEye[3]={0,10,0},camDir[3]={0,0,1};
 bool haveCamera=true;
-PlayerJetReadout jet{};bool jetOn=false;
+PlayerJetReadout jetHud{};bool jetHudOn=false;
 PlayerHeliReadout heli{};bool heliOn=false;
 // This machine's mark (npcai.cpp's).
 bool ownEnemy=false;float ownAt[3]={5,0,300};
@@ -45,7 +45,7 @@ bool CameraRayOf(const void* who,float* eye,float* dir) noexcept {
     std::memcpy(eye,camEye,12);std::memcpy(dir,camDir,12);return true;
 }
 bool CameraRay(float*,float*) noexcept { return false; }
-bool PlayerJetHud(PlayerJetReadout* out) noexcept { if(jetOn)*out=jet;return jetOn; }
+bool PlayerJetHud(PlayerJetReadout* out) noexcept { if(jetHudOn)*out=jetHud;return jetHudOn; }
 bool PlayerHeliHud(PlayerHeliReadout* out) noexcept { if(heliOn)*out=heli;return heliOn; }
 bool ReadNativeObjectId(const unsigned char* object,unsigned char* out) noexcept {
     if(object==humanMem){std::memcpy(out,kPlayerId,32);return true;}
@@ -104,20 +104,20 @@ void RayChecks() {
     Check(QMarkRay(humanMem,eye,dir) && Angle(dir,toHeli)<1e-4f,"a stock heli's mouse-aim flight: through its FLY square, not the centre");
     heli.f.aiming=false;
     Check(QMarkRay(humanMem,eye,dir) && Angle(dir,camDir)<1e-4f,"a stock heli not mouse-flown: the centre");
-    jetOn=true;jet.rotor=false;jet.aiming=true;jet.aim[0]=-300;jet.aim[1]=110;jet.aim[2]=700;
+    jetHudOn=true;jetHud.rotor=false;jetHud.aiming=true;jetHud.aim[0]=-300;jetHud.aim[1]=110;jetHud.aim[2]=700;
     const float toJet[3]={-300,100,700};
     Check(QMarkRay(humanMem,eye,dir) && Angle(dir,toJet)<1e-4f,"a fighter's mouse aim: through its aim square");
-    jet.rotor=true;jet.aiming=false;jet.heli.aiming=true;jet.heli.aim[0]=0;jet.heli.aim[1]=410;jet.heli.aim[2]=400;
+    jetHud.rotor=true;jetHud.aiming=false;jetHud.heli.aiming=true;jetHud.heli.aim[0]=0;jetHud.heli.aim[1]=410;jetHud.heli.aim[2]=400;
     const float toRotor[3]={0,400,400};
     Check(QMarkRay(humanMem,eye,dir) && Angle(dir,toRotor)<1e-4f,"a rotor craft's mouse-aim flight: through its FLY square");
-    jet.heli.aiming=false;
+    jetHud.heli.aiming=false;
     Check(QMarkRay(humanMem,eye,dir) && Angle(dir,camDir)<1e-4f,"a rotor craft flown by the keys: the centre");
-    jet.rotor=false;jet.aiming=true;jet.aim[0]=0;jet.aim[1]=10;jet.aim[2]=-500;   // behind the camera (a look back)
+    jetHud.rotor=false;jetHud.aiming=true;jetHud.aim[0]=0;jetHud.aim[1]=10;jetHud.aim[2]=-500;   // behind the camera (a look back)
     Check(QMarkRay(humanMem,eye,dir) && Angle(dir,camDir)<1e-4f,"an aim point behind the camera: the centre");
-    jetOn=heliOn=false;
+    jetHudOn=heliOn=false;
     Check(!QMarkRay(&enemyMem[0],eye,dir),"no camera drawn for that soldier: no ray");
     haveCamera=false;Check(!QMarkRay(humanMem,eye,dir),"no camera yet: no ray");haveCamera=true;
-    const float c[3]={0,0,2},aim[3]={0,0,0.5f};
+    const float c[3]={0,0,2},aim[3]={camEye[0],camEye[1],camEye[2]+0.5f};
     Check(qmark::AimRay(camEye,c,nullptr,dir) && dir[2]==1.0f,"AimRay: no aim, the centre normalized");
     Check(qmark::AimRay(camEye,c,aim,dir) && dir[2]==1.0f,"AimRay: an aim point under a metre off the eye, the centre");
 }
@@ -168,6 +168,8 @@ void WireChecks() {
 }
 
 void ShareChecks() {
+    // The production clock (GetTickCount64): the times handed in are its, as support_net.cpp hands them.
+    const ULONGLONG T=GetTickCount64()-1000;   // every time below at or before the clock's now, within kSilentMs of it
     config.enabled=true;config.npcMarkKey=0x51;config.qmarkVolume=0.8f;config.qmarkPointSec=15.0f;
     Put<void*>(enemyMem,kSelfCtrl,enemyCtrl);Put<const void*>(enemyMem,kSelf,enemyMem);Put<long>(enemyCtrl,8,1);Put<long>(enemyCtrl,0xC,1);
     ResetQMarks();
@@ -187,31 +189,31 @@ void ShareChecks() {
     config.qmarkVolume=0.0f;QMarkPlay(QMarkCue::own);Frame();Check(played[audio::kClipMarkOwn]==1,"QMarkVolume=0: silent");
     config.qmarkVolume=0.8f;
     // Online: sent to every peer.
-    sends=0;UpdateQMarkNetwork(true,2,&Send,10000);
+    sends=0;UpdateQMarkNetwork(true,2,&Send,T);
     qmark_net::State d;
     Check(sends==2 && sentTo[0]==1 && sentTo[1]==2,"online: this machine's marks to every peer");
     Check(qmark_net::Decode(sent,sizeof(sent),d) && !std::memcmp(d.marker,kPlayerId,32) && d.enemy && !std::memcmp(d.target,kEnemyId,32) &&
           d.point && d.pointAt[2]==20.0f && d.pointLeftMs>0,"the state sent: the marker, the enemy by its native ID, the point and its time");
-    sends=0;UpdateQMarkNetwork(true,2,&Send,10010);Check(sends==0,"not again within the gap");
-    UpdateQMarkNetwork(true,2,&Send,10000+qmark_net::kEnemyKeepMs);Check(sends==2,"the enemy's position again on its keepalive");
+    sends=0;UpdateQMarkNetwork(true,2,&Send,T+10);Check(sends==0,"not again within the gap");
+    UpdateQMarkNetwork(true,2,&Send,T+qmark_net::kEnemyKeepMs);Check(sends==2,"the enemy's position again on its keepalive");
     // A teammate's.
     unsigned char b[qmark_net::kWireSize];
     std::memset(played,0,sizeof(played));resolves=0;
-    Check(TeamBytes(b,1,true,false) && ReceiveQMarkNetwork(1,senderPuid,b,sizeof(b),10300),"a teammate's state: taken");
+    Check(TeamBytes(b,1,true,false) && ReceiveQMarkNetwork(1,senderPuid,b,sizeof(b),T+300),"a teammate's state: taken");
     Frame();n=Views(v);
     bool team=false;
     for(int i=0;i<n;++i)if(!v[i].own && v[i].enemy)team=v[i].slot==2 && v[i].at[2]==500.0f;
     Check(team,"the teammate's enemy found here by its ID, at its lock point here, with its player's slot");
     Check(played[audio::kClipMarkTeam]==1,"a teammate marked: the team cue");
-    Check(TeamBytes(b,2,true,false) && ReceiveQMarkNetwork(1,senderPuid,b,sizeof(b),10400),"the same mark again");
+    Check(TeamBytes(b,2,true,false) && ReceiveQMarkNetwork(1,senderPuid,b,sizeof(b),T+400),"the same mark again");
     Frame();Check(played[audio::kClipMarkTeam]==1 && resolves==1,"the same mark: no cue, not looked for again");
-    Check(TeamBytes(b,3,true,true) && ReceiveQMarkNetwork(1,senderPuid,b,sizeof(b),10500),"its point too");
+    Check(TeamBytes(b,3,true,true) && ReceiveQMarkNetwork(1,senderPuid,b,sizeof(b),T+500),"its point too");
     Frame();n=Views(v);
     bool teamPoint=false;
     for(int i=0;i<n;++i)if(!v[i].own && !v[i].enemy)teamPoint=v[i].slot==2 && v[i].at[0]==-50.0f;
     Check(teamPoint && played[audio::kClipMarkTeam]==2,"the teammate's point shown, its cue");
     // Another peer claiming the same player: shown, but not as that player.
-    Check(TeamBytes(b,1,true,false,88) && ReceiveQMarkNetwork(2,"0003ffff",b,sizeof(b),10600),"another peer's state");
+    Check(TeamBytes(b,1,true,false,88) && ReceiveQMarkNetwork(2,"0003ffff",b,sizeof(b),T+600),"another peer's state");
     Frame();n=Views(v);
     int unknown=0;for(int i=0;i<n;++i)unknown+=!v[i].own && v[i].slot<0;
     Check(unknown==1,"a marker that is not its sender's player: no slot (ALLY)");
@@ -221,29 +223,29 @@ void ShareChecks() {
     Check(teamEnemies==0,"the teammates' enemy dead here: their marks of it not shown");
     enemyMem[kDead]=0;
     // Not found here (not registered yet): shown where its marker sent it.
-    ResetQMarkNetwork();UpdateQMarkNetwork(true,2,&Send,20000);resolveEnemy=false;
-    Check(TeamBytes(b,1,true,false) && ReceiveQMarkNetwork(1,senderPuid,b,sizeof(b),20010),"a teammate's enemy not in this world");
+    ResetQMarkNetwork();UpdateQMarkNetwork(true,2,&Send,T+700);resolveEnemy=false;
+    Check(TeamBytes(b,1,true,false) && ReceiveQMarkNetwork(1,senderPuid,b,sizeof(b),T+710),"a teammate's enemy not in this world");
     Frame();n=Views(v);team=false;
     for(int i=0;i<n;++i)if(!v[i].own && v[i].enemy)team=v[i].at[2]==3.0f;
     Check(team,"shown at the position its marker sent");
     resolveEnemy=true;
     // What is not ours.
     unsigned char other[qmark_net::kWireSize]{};other[0]='S';
-    Check(!ReceiveQMarkNetwork(1,senderPuid,other,sizeof(other),20100),"another magic: left to the support / command parsers");
+    Check(!ReceiveQMarkNetwork(1,senderPuid,other,sizeof(other),T+800),"another magic: left to the support / command parsers");
     TeamBytes(b,9,true,false);b[4]=2;
     std::memset(played,0,sizeof(played));
-    Check(ReceiveQMarkNetwork(1,senderPuid,b,sizeof(b),20200),"a newer version: ours, dropped");
+    Check(ReceiveQMarkNetwork(1,senderPuid,b,sizeof(b),T+810),"a newer version: ours, dropped");
     Frame();Check(played[audio::kClipMarkTeam]==0,"...no cue for it");
-    Check(TeamBytes(b,10,true,false) && ReceiveQMarkNetwork(9,senderPuid,b,sizeof(b),20300),"a peer past the room: dropped");
+    Check(TeamBytes(b,10,true,false) && ReceiveQMarkNetwork(9,senderPuid,b,sizeof(b),T+820),"a peer past the room: dropped");
     // The teammate silent: gone.
-    Frame();ResetQMarkNetwork();UpdateQMarkNetwork(true,2,&Send,30000);
-    Check(TeamBytes(b,1,true,false) && ReceiveQMarkNetwork(1,senderPuid,b,sizeof(b),30000),"heard");
+    Frame();ResetQMarkNetwork();UpdateQMarkNetwork(true,2,&Send,T+900);
+    Check(TeamBytes(b,1,true,false) && ReceiveQMarkNetwork(1,senderPuid,b,sizeof(b),T+900),"heard");
     Frame();n=Views(v);int seen=0;for(int i=0;i<n;++i)seen+=!v[i].own;
     Check(seen==1,"its mark shown");
     // Room gone, the plugin off.
-    UpdateQMarkNetwork(false,0,&Send,30100);Frame();n=Views(v);seen=0;for(int i=0;i<n;++i)seen+=!v[i].own;
+    UpdateQMarkNetwork(false,0,&Send,T+950);Frame();n=Views(v);seen=0;for(int i=0;i<n;++i)seen+=!v[i].own;
     Check(seen==0,"the room gone: the teammates' marks gone");
-    config.npcMarkKey=0;sends=0;UpdateQMarkNetwork(true,2,&Send,40000);Frame();
+    config.npcMarkKey=0;sends=0;UpdateQMarkNetwork(true,2,&Send,T+1000);Frame();
     Check(sends==0 && Views(v)==0,"the key off (NpcMarkKey=0): nothing marked, shown or sent");
     config.npcMarkKey=0x51;
     ResetQMarks();ownEnemy=false;Frame();Check(Views(v)==0,"a new mission: no marks");

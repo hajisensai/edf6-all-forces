@@ -355,7 +355,7 @@ void MarkLifetimeAndConfig() noexcept {
         if(scenario==2)foe[0x18]=4;
         if(scenario==3)Put<long>(control,8,0);
         if(scenario==4)Check(VirtualProtect(foe,4096,PAGE_NOACCESS,&protect)!=FALSE,"protect a removed hover target");
-        if(scenario==5)config.customNpcAi=false;
+        if(scenario==5)config.npcMarkKey=0;   // the Q mark off (it no longer hangs on the custom NPC AI: qmark.h)
         if(scenario==6)config.enabled=false;
         if(scenario==7) {
             game.sel.Add(squadObj);
@@ -383,11 +383,12 @@ void MarkLifetimeAndConfig() noexcept {
     MapCommandFrame(in,centre);
     Check(!markCalls,"replacement after latching is not marked");
 
-    // With NPC AI off, even a current registry entry must not be offered as Q/H's target.
-    for(bool disabled:{false,true}) {
+    // With the Q mark off (the plugin off, or NpcMarkKey=0), even a current registry entry must not be offered as Q/H's
+    // target. (The custom NPC AI off no longer turns it off: the Q mark replaces the stock spot, qmark.h.)
+    for(bool keyOff:{false,true}) {
         ResetMapCommands();view=View{};config=Config{};marked=nullptr;markCalls=0;
         std::memset(inputstub::keys,0,sizeof(inputstub::keys));
-        config.customNpcAi=!disabled;config.enabled=disabled;
+        config.customNpcAi=false;config.enabled=keyOff;config.npcMarkKey=keyOff ? 0 : 0x51;
         stubEnemyCount=1;
         MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
         inputstub::keys['Q']=true;inputstub::keys['H']=true;
