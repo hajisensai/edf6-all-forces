@@ -16,6 +16,10 @@ void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept;
 // asked for now (one dispatcher serves every entry: a request still being planned, its cooldown after a delivery).
 enum class SupportIcon : std::uint8_t { jet, heli, carrier, gunship, sub, squad, platoon, tank, apc, truck };
 SupportIcon SupportCallIcon(int index) noexcept;
+// Which of its kind's variants an entry is (the bar's chip icon): an aircraft guarding the mark or following the player,
+// a ground vehicle crewed or delivered empty; none for the ones with no variants (the infantry, the submarine carrier).
+enum class SupportVariant : std::uint8_t { none, guard, follow, crewed, empty };
+SupportVariant SupportCallVariant(int index) noexcept;
 enum class SupportReady : std::uint8_t { ready, planning, cooldown, off };
 struct SupportReadiness { SupportReady state; int seconds; };   // seconds: the cooldown left
 SupportReadiness SupportCallReadiness() noexcept;

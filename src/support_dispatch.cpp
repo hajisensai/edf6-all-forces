@@ -389,6 +389,13 @@ SupportIcon SupportCallIcon(int index) noexcept {
     if(!GroundCatalog(static_cast<std::uint32_t>(index),kind,mode))return SupportIcon::squad;
     return kind==SupportVehicleKind::tank ? SupportIcon::tank : kind==SupportVehicleKind::transport ? SupportIcon::apc : SupportIcon::truck;
 }
+SupportVariant SupportCallVariant(int index) noexcept {
+    SupportAircraft spec;
+    if(index<AirCount())return SupportAircraftSpec(index,&spec) ? (spec.follow ? SupportVariant::follow : SupportVariant::guard) : SupportVariant::none;
+    SupportVehicleKind kind{};SupportCrewMode mode{};
+    if(!GroundCatalog(static_cast<std::uint32_t>(index),kind,mode))return SupportVariant::none;
+    return mode==SupportCrewMode::unmanned ? SupportVariant::empty : SupportVariant::crewed;
+}
 SupportReadiness SupportCallReadiness() noexcept {
     // The same tests SupportCallAt makes before it plans, read without asking: online the host decides.
     if(!Cfg().enabled)return {SupportReady::off,0};
