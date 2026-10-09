@@ -33,6 +33,8 @@ inline bool AirCommandTransit(const Command& cmd,bool& moving,const float* pos,c
 struct CommandUnit { const void* v; const char* name; Command now; bool air; float pos[3]{}; bool locked=false; const char* status=nullptr;
     bool riding=false; bool recruitable=false; bool recruited=false;
     bool transport=false; // a squad paired with a transport (transport.cpp): it takes point orders aboard and WITHDRAW
+    const void* vehicle=nullptr; // a riding squad's vehicle (its top's): a DISMOUNT / DISMOUNT ALL given to that vehicle is its
+    bool carries=false;          // a vehicle unit with a riding squad that takes orders aboard (mapcmd.cpp List): it takes them
 };
 bool CommandVehicleLive(const ObjRef& ref) noexcept;
 bool ReadCommandUnit(const ObjRef& ref,const char* name,const Command& cmd,bool air,CommandUnit* out) noexcept;

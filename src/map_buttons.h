@@ -18,16 +18,20 @@ namespace mapbtn {
 enum class Id : int {
     move, attackMove, guard, follow, release, engage, focus, board, dismount, dismiss, recruit,   // the orders
     withdraw,                                                                                    // ...a squad's transport sent off
+    dismountAll,                                                                                 // ...every rider off, its crew too
     formation, split, merge,                                                                     // the squads' shape and fireteams
     sweep, health,                                                                               // the box sweep, its health-box switch
     count
 };
 constexpr int kCount=static_cast<int>(Id::count);
-// The card's order (the user, 2026-10-09: "解散解除交战集火是不是重叠了"): moving, fighting, vehicles, membership, then
-// the squads' tools; CLEAR ORDER (release) last among the orders, apart from DISMISS it was mistaken for.
-constexpr Id kCardOrder[kCount]={Id::move,Id::attackMove,Id::guard,Id::follow,Id::engage,Id::focus,Id::board,Id::dismount,
-                                 Id::withdraw,Id::recruit,Id::dismiss,Id::release,Id::formation,Id::split,Id::merge,Id::sweep,
-                                 Id::health};
+// The card's order (the user, 2026-10-09: "解散解除交战集火是不是重叠了"; "看看还有什么指令能砍一砍…感觉还是有点复杂了"):
+// moving, vehicles, membership, STOP, then the squads' tools. Not on it (their keys and orders stay, the wire's values
+// unchanged): GUARD (an attack-move turns into one at its point; G gives an attack-move), ENGAGE AT WILL (an attack-move
+// on the spot), FOCUS FIRE (the right button on an enemy, or H). RECRUIT and DISMISS never both show (mapcmd.cpp Takes):
+// one button that reads as the squad's state. STOP (release) apart from DISMISS it was mistaken for.
+constexpr Id kCardOrder[]={Id::move,Id::attackMove,Id::follow,Id::board,Id::dismount,Id::dismountAll,Id::withdraw,Id::recruit,
+                           Id::dismiss,Id::release,Id::formation,Id::split,Id::merge,Id::sweep,Id::health};
+constexpr int kCardCount=static_cast<int>(sizeof(kCardOrder)/sizeof(kCardOrder[0]));
 constexpr int kOrders=static_cast<int>(Id::formation);
 struct Rect { float x0,y0,x1,y1; };
 
@@ -35,16 +39,23 @@ struct Rect { float x0,y0,x1,y1; };
 inline mapcmd::Order OrderOf(Id b) noexcept {
     using mapcmd::Order;
     static const Order kOrder[kOrders]={Order::move,Order::attackMove,Order::guard,Order::follow,Order::none,Order::engage,
-                                         Order::focus,Order::board,Order::dismount,Order::dismiss,Order::recruit,Order::withdraw};
+                                         Order::focus,Order::board,Order::dismount,Order::dismiss,Order::recruit,Order::withdraw,
+                                         Order::dismountAll};
     const int i=static_cast<int>(b);
     return i>=0 && i<kOrders ? kOrder[i] : Order::none;
 }
 inline bool IsOrder(Id b) noexcept { return static_cast<int>(b)>=0 && static_cast<int>(b)<kOrders; }
+// Whether `b` is a button of the card at all (GUARD, ENGAGE AT WILL and FOCUS FIRE are orders with no button).
+inline bool OnCard(Id b) noexcept {
+    for(const Id c:kCardOrder)if(c==b)return true;
+    return false;
+}
 // An order button arms a click on the map (its point) instead of acting at once.
 inline bool Arms(Id b) noexcept { return IsOrder(b) && mapcmd::PointOrder(OrderOf(b)); }
 // Shown on the card: an order the selection takes (`allowedOrders`: Order bits), a squad tool with squads selected,
 // the sweep and its switch always (they work on the recruited squads with nothing selected).
 inline bool Shown(Id b,std::uint32_t allowedOrders,bool squadTools) noexcept {
+    if(!OnCard(b))return false;
     if(IsOrder(b))return (allowedOrders&(1u<<static_cast<unsigned>(OrderOf(b))))!=0;
     if(b==Id::sweep || b==Id::health)return true;
     return squadTools;

@@ -232,7 +232,7 @@ HUDTEXT(orderFollow,L"FOLLOW",L"跟随",L"跟隨",L"追従")
 HUDTEXT(orderGuard,L"GUARD",L"守点",L"守點",L"防衛")
 // RELEASE: the unit's order dropped, back to what it did before any (not "dismiss": 2026-10-09 the user took the two
 // for one, "解散解除…是不是重叠了").
-HUDTEXT(orderRelease,L"CLEAR ORDER",L"取消命令",L"取消命令",L"命令取消")
+HUDTEXT(orderRelease,L"STOP",L"停止",L"停止",L"停止")
 HUDTEXT(selectedAll,L"SELECTED ALL %d",L"已选全部 %d",L"已選全部 %d",L"全員選択 %d")
 HUDTEXT(selectedOne,L"SELECTED 1 / %d: %ls",L"已选 1 / %d：%ls",L"已選 1 / %d：%ls",L"選択 1 / %d：%ls")
 HUDTEXT(selectedSome,L"SELECTED %d / %d",L"已选 %d / %d",L"已選 %d / %d",L"選択 %d / %d")
@@ -338,6 +338,11 @@ HUDTEXT(orderEngage,L"ENGAGE AT WILL",L"自由交战",L"自由交戰",L"自由�
 HUDTEXT(orderFocus,L"FOCUS FIRE",L"集火",L"集火",L"集中攻撃")
 HUDTEXT(orderBoard,L"BOARD",L"上车",L"上車",L"搭乗")
 HUDTEXT(orderDismount,L"DISMOUNT",L"下车",L"下車",L"降車")
+// DISMOUNT ALL (the user, 2026-10-09: "下车是除了驾驶员，炮手等操作席都下车。全体下车是全部人").
+HUDTEXT(orderDismountAll,L"ALL OUT",L"全体下车",L"全體下車",L"全員降車")
+HUDTEXT(cmdNpcNoPassengers,L"Nobody on a passenger seat (the driver and gunners stay aboard: use ALL OUT)",
+        L"没有乘客座上的人（驾驶员与炮手留在车上：要全部下车请用「全体下车」）",L"沒有乘客座上的人（駕駛員與砲手留在車上：要全部下車請用「全體下車」）",
+        L"乗客席に誰もいない（運転手と射手は残る：全員降ろすには「全員降車」）")
 HUDTEXT(orderDismiss,L"DISMISS",L"离队",L"離隊",L"離脱")
 HUDTEXT(orderRecruit,L"RECRUIT",L"招募",L"招募",L"加入指示")
 // The RTS moves (mapcmd_logic.h Order::move / attackMove; hud.cpp MapButtons, mapcmd.cpp).

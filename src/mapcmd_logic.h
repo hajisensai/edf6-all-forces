@@ -26,10 +26,18 @@ inline constexpr unsigned kMaxFormationUnits=96;
 // The RTS moves (the user, 2026-10-09: "m里面没办法让npc移动攻击，只有守点，如果npc在打怪，就没办法移动了"): move (go to
 // the point whatever it is fighting, firing on the way, and guard it once there), attack-move (go there fighting what it
 // meets on the way, then guard it). withdraw (transport_logic.h, the user 2026-10-09: "卡车之类的运输载具改成断剑那种操作方式"):
-// a paired squad's transport leaves the field (a support vehicle: removed once out). Appended: the values are the map
-// command wire's (command_protocol.cpp).
-enum class Order : std::uint8_t { none, guard, follow, engage, focus, board, dismount, dismiss, recruit, move, attackMove, withdraw };
-inline constexpr Order kLastOrder=Order::withdraw;
+// a paired squad's transport leaves the field (a support vehicle: removed once out). dismount / dismountAll (the user,
+// 2026-10-09: "下车是除了驾驶员，炮手等操作席都下车。全体下车是全部人"): DISMOUNT takes the squad's soldiers off the
+// passenger seats only (its driver and gunners keep the vehicle going: LeavesSeat), DISMOUNT ALL every one of them.
+// Appended: the values are the map command wire's (command_protocol.cpp).
+enum class Order : std::uint8_t { none, guard, follow, engage, focus, board, dismount, dismiss, recruit, move, attackMove, withdraw,
+                                  dismountAll };
+inline constexpr Order kLastOrder=Order::dismountAll;
+// The seats a dismount empties, by the seat's role (npcai.cpp SeatPriority: 0 the driver's, 1 an armed seat, 2 a
+// passenger's): DISMOUNT the passengers', DISMOUNT ALL every one.
+inline constexpr int kSeatDriver=0,kSeatGunner=1,kSeatPassenger=2;
+inline bool LeavesSeat(int seatRole,bool all) noexcept { return all || seatRole>=kSeatPassenger; }
+inline bool DismountOrder(Order o) noexcept { return o==Order::dismount || o==Order::dismountAll; }
 // The orders that take the ground point under the pointer (and stand round it in a formation).
 inline bool PointOrder(Order o) noexcept { return o==Order::guard || o==Order::move || o==Order::attackMove; }
 // Whether a vehicle unit (heli, jet, crawler, tank) takes `o`: the point orders, follow and release; the squads take all.
@@ -42,19 +50,28 @@ inline bool AirOrder(Order o) noexcept { return VehicleOrder(o) || o==Order::foc
 struct Command { Order order; float at[3]; };   // at: the point of a point order (on the ground)
 
 // --- The squads' moves under an order (npcai.cpp Drive), the player's command over the soldiers' own fight ---
-//  - forced (move): every member walks to its place by the point before anything of its own (dodging, falling back
-//    hurt, its combat spot); it still turns on and fires at what is in reach as it goes;
-//  - fightFirst (attack-move): walks on to the point firing at what it has in reach, as a move does; only a target
-//    within `close` m (the danger range: an enemy pressing on it) stops it there to fight with its own moves (dodging,
-//    its combat spot). Before 2026-10-09 any target stopped it, so a squad met by a far enemy stood on its combat spot
-//    and never came (the user: "这个移动攻击的优先级好像不对，不能让他边走边打吗");
+// The user, 2026-10-09: "一个移动攻击是全消灭再走。一个移动攻击是先走次要消灭" -- the two RTS moves:
+//  - forced (move, right click): every member walks to its place by the point before anything of its own (dodging,
+//    falling back hurt, its combat spot); it still turns on and fires at what is in reach as it goes;
+//  - fightFirst (attack-move, Z / G): the squad stops where it meets enemies and fights them with its own moves
+//    (dodging, its combat spot) until the ground round it is clear, then walks on. The squad holds as one
+//    (AttackMoveHolds), not each soldier on its own target, so it does not string out between those fighting and
+//    those walking on;
 //  - neither: the order's anchor as before (guard holds its point's radius, engage / focus their reach).
 struct Pursuit { bool forced,fightFirst; };
 inline Pursuit PursuitOf(Order o) noexcept { return Pursuit{o==Order::move,o==Order::attackMove}; }
-// Whether a member walks on to the order's point this frame (npcai.cpp Drive), its target (if any) `targetDistance` m off.
-inline bool Pursues(Pursuit p,bool target,float targetDistance,float close) noexcept {
-    return p.forced || (p.fightFirst && (!target || !(targetDistance<=close)));
+// An attack-move's squad holds to fight while any member had a target last frame or this one (`target`: what it looks
+// for round itself, its leash plus its weapons' reach) -- the ground round it is clear when none has. A target none of
+// them can shoot at (behind a wall, out of every weapon's reach) would hold it for ever: so it holds only while it fights,
+// `sinceShot` ms since any member last fired, or for `grace` ms from the hold's start for the first shot. A squad past
+// that walks on (firing on the way as a move does) and holds again at its next shot.
+inline constexpr unsigned long long kAttackMoveGraceMs=8000;
+inline bool AttackMoveHolds(bool target,unsigned long long sinceHold,unsigned long long sinceShot,
+                            unsigned long long grace=kAttackMoveGraceMs) noexcept {
+    return target && (sinceHold<grace || sinceShot<grace);
 }
+// Whether a member walks on to the order's point this frame (npcai.cpp Drive); `holds`: its squad's AttackMoveHolds.
+inline bool Pursues(Pursuit p,bool holds) noexcept { return p.forced || (p.fightFirst && !holds); }
 // A move / attack-move whose squad has reached its point (its top within `radius`, level) is a guard of that point from
 // then on: the members hold round it and fight what comes, as a guard order does. Others stay as they are.
 inline Order Arrive(Order o,float distance,float radius) noexcept {
@@ -268,7 +285,9 @@ inline const void* Click(Selection& s,const Mark* m,int n,float x,float y,float 
 
 // --- The keys ---
 // The keys' presses this frame (edges).
-struct Press { bool next,prev,guard,follow,release,engage,focus,board,dismount,dismiss,recruit,move,attackMove; };
+// guard (G, pad Y) is an attack-move since 2026-10-09 (the user: "看看还有什么指令能砍一砍"): an attack-move turns
+// into a guard of its point once there, so the two buttons were one; the key is kept.
+struct Press { bool next,prev,guard,follow,release,engage,focus,board,dismount,dismiss,recruit,move,attackMove,dismountAll,withdraw; };
 enum class Refusal : std::uint8_t { none, noUnit, noPoint, online, noMark };
 // What a frame's presses come to: a command to the selection (issue), or why not (why). The cycle (next / prev) has
 // already moved the selection (Cycle).
@@ -277,16 +296,17 @@ struct Step { bool issue; Command cmd; Refusal why; };
 // The order a frame's presses give (one at a time, in this order of precedence); false with none pressed.
 inline bool Wanted(const Press& p,Order* o) noexcept {
     if(p.move)*o=Order::move;
-    else if(p.attackMove)*o=Order::attackMove;
-    else if(p.guard)*o=Order::guard;
+    else if(p.attackMove || p.guard)*o=Order::attackMove;
     else if(p.follow)*o=Order::follow;
     else if(p.release)*o=Order::none;
     else if(p.engage)*o=Order::engage;
     else if(p.focus)*o=Order::focus;
     else if(p.board)*o=Order::board;
+    else if(p.dismountAll)*o=Order::dismountAll;
     else if(p.dismount)*o=Order::dismount;
     else if(p.dismiss)*o=Order::dismiss;
     else if(p.recruit)*o=Order::recruit;
+    else if(p.withdraw)*o=Order::withdraw;
     else return false;
     return true;
 }

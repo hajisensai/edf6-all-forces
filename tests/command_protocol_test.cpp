@@ -66,7 +66,13 @@ void Codec() {
     m.request=Make(1,mapcmd::Order::withdraw);
     Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.request.command.order==mapcmd::Order::withdraw,
           "WITHDRAW round trips");
-    Check(kVersion==4,"the wire is version 4 (WITHDRAW): an older peer refuses it instead of misreading it");
+    // Version 5: DISMOUNT ALL (DISMOUNT now leaves the driver and the gunners aboard) and the noPassengers refusal.
+    m.request=Make(1,mapcmd::Order::dismountAll);
+    Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.request.command.order==mapcmd::Order::dismountAll,
+          "DISMOUNT ALL round trips");
+    Check(static_cast<int>(mapcmd::Order::dismountAll)==12 && mapcmd::kLastOrder==mapcmd::Order::dismountAll,
+          "DISMOUNT ALL is appended (12): the older orders keep their wire values");
+    Check(kVersion==5,"the wire is version 5 (DISMOUNT ALL): an older peer refuses it instead of misreading it");
     for(auto order:{mapcmd::Order::move,mapcmd::Order::attackMove}) {
         m.request=Make(2,order);m.request.formationTotal=3;m.request.formationSlots[0]=0;m.request.formationSlots[1]=2;
         Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.request.command.order==order &&

@@ -211,7 +211,10 @@ int main() {
     st=Decide(1,follow,true,point,false);
     Check(st.issue && st.cmd.order==Order::follow,"follow needs no point");
     st=Decide(3,guard,true,point,true);
-    Check(st.issue && st.cmd.order==Order::guard && st.cmd.at[0]==10.0f && st.cmd.at[1]==2.0f && st.cmd.at[2]==-30.0f,"guard: the pointer's point");
+    // G (and pad Y) give an attack-move since 2026-10-09: it turns into a guard of its point once there (the GUARD button
+    // went from the card, the user: "看看还有什么指令能砍一砍").
+    Check(st.issue && st.cmd.order==Order::attackMove && st.cmd.at[0]==10.0f && st.cmd.at[1]==2.0f && st.cmd.at[2]==-30.0f,
+          "G: an attack-move to the pointer's point");
     st=Decide(3,release,true,point,true);
     Check(st.issue && st.cmd.order==Order::none,"release");
     st=Decide(3,none,true,point,true);
@@ -235,6 +238,17 @@ int main() {
     Check(Decide(1,board,true,point,true).cmd.order==Order::board,"board");
     Press off{};off.dismount=true;
     Check(Decide(1,off,true,point,true).cmd.order==Order::dismount,"dismount");
+    Press allOff{};allOff.dismountAll=true;allOff.dismount=true;
+    Check(Decide(1,allOff,true,point,true).cmd.order==Order::dismountAll,"ALL OUT before DISMOUNT (Shift+N sets only it)");
+    Press away{};away.withdraw=true;
+    Check(Decide(1,away,true,point,false).issue && Decide(1,away,true,point,false).cmd.order==Order::withdraw,
+          "the WITHDRAW button gives its order (no point)");
+    // Which seats a dismount empties (the user, 2026-10-09: "下车是除了驾驶员，炮手等操作席都下车。全体下车是全部人").
+    Check(!LeavesSeat(kSeatDriver,false) && !LeavesSeat(kSeatGunner,false) && LeavesSeat(kSeatPassenger,false),
+          "DISMOUNT: the passengers off, the driver and the gunners stay");
+    Check(LeavesSeat(kSeatDriver,true) && LeavesSeat(kSeatGunner,true) && LeavesSeat(kSeatPassenger,true),"ALL OUT: every seat");
+    Check(DismountOrder(Order::dismount) && DismountOrder(Order::dismountAll) && !DismountOrder(Order::board) &&
+          !VehicleOrder(Order::dismountAll) && !PointOrder(Order::dismountAll),"the dismounts: no point, no vehicle's own order");
     Check(VehicleOrder(Order::guard) && VehicleOrder(Order::follow) && VehicleOrder(Order::none),"vehicles: guard, follow, release");
     Check(!VehicleOrder(Order::engage) && !VehicleOrder(Order::dismiss) && !VehicleOrder(Order::board),"vehicles: no squad orders");
     Check(!VehicleOrder(Order::focus) && AirOrder(Order::focus) && AirOrder(Order::guard) && AirOrder(Order::none) &&
@@ -344,15 +358,15 @@ int main() {
         Check(st.issue && st.cmd.order==Order::move && st.cmd.at[0]==10.0f && st.cmd.at[2]==-30.0f,"move: the pointer's point");
         Check(!Decide(2,move,true,point,false).issue && Decide(2,move,true,point,false).why==Refusal::noPoint,"move with no ground: refused");
         Press am{};am.attackMove=true;am.guard=true;
-        Check(Decide(1,am,true,point,true).cmd.order==Order::attackMove,"attack-move before guard (one order a frame)");
+        Check(Decide(1,am,true,point,true).cmd.order==Order::attackMove,"attack-move and G together: one attack-move");
         Check(PointOrder(Order::guard) && PointOrder(Order::move) && PointOrder(Order::attackMove) && !PointOrder(Order::focus) &&
               !PointOrder(Order::follow),"the point orders");
         Check(VehicleOrder(Order::move) && VehicleOrder(Order::attackMove) && VehicleCommandOf(Order::move)==Order::guard &&
               VehicleCommandOf(Order::attackMove)==Order::guard && VehicleCommandOf(Order::follow)==Order::follow,
               "a vehicle takes a move / attack-move as its post's guard");
-        Check(static_cast<int>(kLastOrder)==static_cast<int>(Order::withdraw) && static_cast<int>(Order::recruit)==8 &&
-              static_cast<int>(Order::attackMove)==10 && static_cast<int>(Order::withdraw)==11,
-              "the wire's order values: recruit stays 8, the new ones after it (move, attack-move, withdraw)");
+        Check(static_cast<int>(kLastOrder)==static_cast<int>(Order::dismountAll) && static_cast<int>(Order::recruit)==8 &&
+              static_cast<int>(Order::attackMove)==10 && static_cast<int>(Order::withdraw)==11 && static_cast<int>(Order::dismountAll)==12,
+              "the wire's order values: recruit stays 8, the new ones after it (move, attack-move, withdraw, dismount all)");
         Check(!VehicleOrder(Order::withdraw) && !AirOrder(Order::withdraw) && !PointOrder(Order::withdraw),
               "withdraw: a squad's transport order, no vehicle's own and no point");
         // The command's priority over the soldier's own fight.
@@ -360,12 +374,19 @@ int main() {
         Check(!PursuitOf(Order::attackMove).forced && PursuitOf(Order::attackMove).fightFirst,"attack-move: fights first, then walks on");
         Check(!PursuitOf(Order::guard).forced && !PursuitOf(Order::guard).fightFirst && !PursuitOf(Order::engage).forced,
               "guard and engage: the soldier's own fight as before");
-        {   // Pursues: a move always walks; an attack-move walks with no target or one farther than `close`
+        {   // Pursues (the user, 2026-10-09: "一个移动攻击是全消灭再走。一个移动攻击是先走次要消灭"): a move always walks;
+            // an attack-move's squad stands while it fights (AttackMoveHolds) and walks on once the ground is clear.
             const auto mv=PursuitOf(Order::move),atk=PursuitOf(Order::attackMove),gd=PursuitOf(Order::guard);
-            Check(Pursues(mv,true,1.0f,15.0f) && Pursues(mv,false,0.0f,15.0f),"move: walks whatever it fights");
-            Check(Pursues(atk,false,0.0f,15.0f) && Pursues(atk,true,30.0f,15.0f),"attack-move: walks on firing past a far target");
-            Check(!Pursues(atk,true,15.0f,15.0f) && !Pursues(atk,true,4.0f,15.0f),"attack-move: stops for an enemy pressing on it");
-            Check(!Pursues(gd,false,0.0f,15.0f) && !Pursues(gd,true,40.0f,15.0f),"guard: never pursues");        }
+            Check(Pursues(mv,true) && Pursues(mv,false),"move: walks whatever it fights");
+            Check(!Pursues(atk,true) && Pursues(atk,false),"attack-move: stands while it holds, walks once clear");
+            Check(!Pursues(gd,false) && !Pursues(gd,true),"guard: never pursues");
+            constexpr unsigned long long g=kAttackMoveGraceMs,never=~0ull;
+            Check(!AttackMoveHolds(false,0,0),"no target round the squad: clear, it walks on");
+            Check(AttackMoveHolds(true,0,never) && AttackMoveHolds(true,g-1,never),"a target: it stands, the first shot given its grace");
+            Check(AttackMoveHolds(true,60000,0) && AttackMoveHolds(true,60000,g-1),"...and as long as it keeps firing, however long");
+            Check(!AttackMoveHolds(true,g,never) && !AttackMoveHolds(true,60000,g),
+                  "a target none can shoot at (behind a wall, out of reach): past the grace it walks on, not stuck");
+        }
         Check(Arrive(Order::move,5.0f,6.0f)==Order::guard && Arrive(Order::attackMove,6.0f,6.0f)==Order::guard,"at the point: a guard of it");
         Check(Arrive(Order::move,6.5f,6.0f)==Order::move && Arrive(Order::guard,0.0f,6.0f)==Order::guard &&
               Arrive(Order::follow,0.0f,6.0f)==Order::follow,"not there yet / other orders: unchanged");

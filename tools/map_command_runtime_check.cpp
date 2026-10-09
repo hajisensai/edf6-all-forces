@@ -643,6 +643,23 @@ void RtsClicks() noexcept {
     CommandUnit tank{squadObj,"tank",Command{},false,{0,0,0}};g.list[0]=Entry{tank,Owner::tank};
     Check(Takes(g.list[0],Order::move) && !Takes(g.list[0],Order::follow),"a tank takes a move (as its post), not follow");
     Check(!Takes(g.list[0],Order::withdraw),"WITHDRAW is a squad's order, not a vehicle's");
+    Check(!Takes(g.list[0],Order::dismount) && !Takes(g.list[0],Order::dismountAll),"a vehicle carrying no squad: no dismount");
+    {   // A vehicle carrying a squad that takes orders (List marks it): its DISMOUNT / ALL OUT are that squad's (the crew's squad
+        // is not boxed with its vehicle, so the vehicle is where its crew is told off), given once.
+        unsigned char hull[0x100]{};
+        Game v{};v.count=2;
+        CommandUnit crewSquad{squadObj,"crew",Command{},false,{0,0,0}};crewSquad.riding=true;crewSquad.vehicle=hull;
+        CommandUnit carrier{hull,"tank",Command{},false,{0,0,0}};carrier.carries=true;
+        v.list[0]=Entry{crewSquad,Owner::squad};v.list[1]=Entry{carrier,Owner::tank};
+        Check(Takes(v.list[1],Order::dismount) && Takes(v.list[1],Order::dismountAll) && Takes(v.list[0],Order::dismountAll),
+              "a vehicle carrying a squad takes DISMOUNT and ALL OUT, as its riding squad does");
+        const int before=squadOrders;v.sel.Add(hull);
+        Check(Give(v,v.list[1],Command{Order::dismountAll,{}}) && squadOrders==before+1 && squadGot.order==Order::dismountAll,
+              "ALL OUT to the vehicle: its squad's");
+        v.sel.Add(squadObj);
+        Check(!Give(v,v.list[1],Command{Order::dismount,{}}) && squadOrders==before+1,
+              "...once: a squad selected itself takes it from its own row, not again through its vehicle");
+    }
     std::memset(inputstub::keys,0,sizeof(inputstub::keys));squadOn=false;groundReady=false;marked=nullptr;ResetMapCommands();
 }
 void RemoteCommandResults() noexcept {

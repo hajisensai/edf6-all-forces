@@ -21,9 +21,9 @@ void Check(bool ok,const char* what,double a=0.0,double b=0.0) {
 void Layouts() {
     const float screens[][2]={{1920.0f,1080.0f},{2520.0f,1080.0f},{1440.0f,1080.0f},{960.0f,1080.0f},{640.0f,1080.0f}};
     const float widths[][kCount]={
-        {80,110,90,90,90,110,90,100,90,90,120,160,80,80,150,190,120},     // English-ish
-        {70,90,70,70,70,70,70,70,70,70,90,90,70,70,120,170,100},         // Chinese-ish
-        {300,40,40,40,40,40,40,40,40,40,40,40,40,40,700,150,150},        // odd ones: one very long
+        {80,110,90,90,90,110,90,100,90,90,120,160,90,80,80,150,190,120},     // English-ish
+        {70,90,70,70,70,70,70,70,70,70,90,90,80,70,70,120,170,100},         // Chinese-ish
+        {300,40,40,40,40,40,40,40,40,40,40,40,40,40,40,700,150,150},        // odd ones: one very long
     };
     for(const auto& sc:screens)for(const auto& w:widths) {
         Rect r[kCount];
@@ -80,7 +80,17 @@ void Card() {
         shown+=Shown(b,vehicle,false);
         squadOnly+=Shown(b,vehicle,false) && (b==Id::recruit || b==Id::board || b==Id::formation || b==Id::split);
     }
-    Check(shown==6 && !squadOnly,"a vehicle selected: its four orders, the sweep and its switch; no squad order or tool",shown);
+    Check(shown==5 && !squadOnly,"a vehicle selected: move, attack-move, stop, the sweep and its switch; no squad order or tool",shown);
+    // The card cut down (the user, 2026-10-09: "看看还有什么指令能砍一砍…感觉还是有点复杂了"): GUARD, ENGAGE AT WILL and
+    // FOCUS FIRE have no button whatever the selection takes (G / the right button / H give them); ALL OUT has one.
+    const std::uint32_t every=0xFFFFFFFFu;
+    Check(!Shown(Id::guard,every,true) && !Shown(Id::engage,every,true) && !Shown(Id::focus,every,true),
+          "no GUARD / ENGAGE / FOCUS button");
+    Check(Shown(Id::dismountAll,1u<<static_cast<unsigned>(Order::dismountAll),false) && OrderOf(Id::dismountAll)==Order::dismountAll &&
+          !Arms(Id::dismountAll) && OrderOf(Id::withdraw)==Order::withdraw,"ALL OUT: its button, acting at once");
+    int card=0;
+    for(int i=0;i<kCount;++i)card+=OnCard(static_cast<Id>(i));
+    Check(card==kCardCount && card==kCount-3,"every button but the three cut is on the card once",card);
     int idle=0;
     for(int i=0;i<kCount;++i)idle+=Shown(static_cast<Id>(i),0u,false);
     Check(idle==2 && Shown(Id::sweep,0u,false) && Shown(Id::health,0u,false),"nothing selected: the sweep and its switch alone",idle);

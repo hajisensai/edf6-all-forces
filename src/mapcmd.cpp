@@ -142,6 +142,13 @@ void List(Game& g) noexcept {
     add(GroundCommandUnits(buf,kCmdUnits-g.count),Owner::ground);
     add(TankCommandUnits(buf,kCmdUnits-g.count),Owner::tank);
     add(SquadCommandUnits(buf,kCmdUnits-g.count),Owner::squad);
+    // A vehicle unit carrying a squad that takes orders: DISMOUNT / DISMOUNT ALL given to it are that squad's (the user,
+    // 2026-10-09: the crew's squad is not boxed with its vehicle any more, so the vehicle is where its crew is told off).
+    for(int i=0;i<g.count;++i) {
+        const Entry& q=g.list[i];
+        if(q.owner!=Owner::squad || q.u.locked || !q.u.riding || !q.u.vehicle)continue;
+        for(int k=0;k<g.count;++k)if(g.list[k].owner!=Owner::squad && g.list[k].u.v==q.u.vehicle)g.list[k].u.carries=true;
+    }
     std::sort(g.list,g.list+g.count,[](const Entry& a,const Entry& b){ return std::less<const void*>()(a.u.v,b.u.v); });
 }
 
@@ -161,6 +168,19 @@ void RememberSelection(Game& g) noexcept {
 }
 
 bool Give(Game& g,const Entry& e,const Command& order) noexcept {
+    // DISMOUNT / DISMOUNT ALL to a vehicle: its riding squads' (each once: not those selected themselves, their own row
+    // gives it).
+    if(e.owner!=Owner::squad && mapcmd::DismountOrder(order.order)) {
+        bool any=false;
+        for(int i=0;i<g.count;++i) {
+            const Entry& q=g.list[i];
+            if(q.owner!=Owner::squad || q.u.locked || q.u.vehicle!=e.u.v || g.sel.Has(q.u.v))continue;
+            const auto result=NpcSquadCommandForRequester(ObjRef::Of(q.u.v),order,g.requester,g.focus);
+            if(!result.Accepted())g.failure=result.reason;
+            else{g.affected+=result.affected;any=true;}
+        }
+        return any;
+    }
     // A transport carrying its squad (transport.cpp; the user, 2026-10-09: "卡车之类的运输载具改成断剑那种操作方式"): a point
     // order to the vehicle is the squad's (they ride there and get off short of the point), unless the squad is selected
     // too (its own row gives it, once).
@@ -224,6 +244,7 @@ const char* OrderName(Order o) noexcept {
     case Order::focus: return "FOCUS FIRE";
     case Order::board: return "BOARD";
     case Order::dismount: return "DISMOUNT";
+    case Order::dismountAll: return "DISMOUNT ALL";
     case Order::dismiss: return "DISMISS";
     case Order::recruit: return "RECRUIT";
     case Order::move: return "MOVE";
@@ -241,6 +262,7 @@ const wchar_t* OrderText(Order o) noexcept {
     case Order::focus: return hudtext::Tr(Tx::orderFocus);
     case Order::board: return hudtext::Tr(Tx::orderBoard);
     case Order::dismount: return hudtext::Tr(Tx::orderDismount);
+    case Order::dismountAll: return hudtext::Tr(Tx::orderDismountAll);
     case Order::dismiss: return hudtext::Tr(Tx::orderDismiss);
     case Order::recruit: return hudtext::Tr(Tx::orderRecruit);
     case Order::move: return hudtext::Tr(Tx::orderMove);
@@ -260,13 +282,14 @@ bool Takes(const Entry& e,Order o) noexcept {
         if(o==Order::recruit)return e.u.recruitable;
         if(o==Order::dismiss)return e.u.recruited;
         if(o==Order::board)return !e.u.riding;
-        if(o==Order::dismount)return e.u.riding;
+        if(mapcmd::DismountOrder(o))return e.u.riding;
         // Its transport (transport.cpp): WITHDRAW sends it off; aboard it the point orders take it there (it gets off short
         // of the point and carries them out on foot).
         if(o==Order::withdraw)return e.u.transport;
         if(e.u.riding)return o!=Order::follow && o!=Order::engage && o!=Order::focus && (e.u.transport || !mapcmd::PointOrder(o));
         return true;
     }
+    if(mapcmd::DismountOrder(o))return e.u.carries;   // its riding squad's (Give)
     if(e.owner==Owner::tank)return o==Order::none || mapcmd::PointOrder(o);
     if(e.owner==Owner::heli || e.owner==Owner::jet)return mapcmd::AirOrder(o);
     return mapcmd::VehicleOrder(o);
@@ -291,7 +314,7 @@ const Entry* EntryOf(const Game& g,const void* id) noexcept {
 const char* ReasonName(NpcCommandReason why) noexcept {
     static const char* const kNames[]={"none","invalid requester","not found","not a leader","not its authority","not its owner",
         "scripted","not friendly","cooling down","no target","no seat","unsupported","failed","disabled","stale",
-        "boarding unavailable","no vehicle","riding","no transport"};
+        "boarding unavailable","no vehicle","riding","no transport","no passengers"};
     static_assert(sizeof(kNames)/sizeof(kNames[0])==static_cast<std::size_t>(NpcCommandReason::count),"a name a reason");
     const auto i=static_cast<std::size_t>(why);
     return i<sizeof(kNames)/sizeof(kNames[0]) ? kNames[i] : "?";
@@ -314,6 +337,7 @@ const wchar_t* CommandFailureText(NpcCommandReason why) noexcept {
     case Reason::unsupported:return Tr(Tx::cmdNpcUnsupported);
     case Reason::riding:return Tr(Tx::cmdNpcRiding);
     case Reason::noTransport:return Tr(Tx::cmdNpcNoTransport);
+    case Reason::noPassengers:return Tr(Tx::cmdNpcNoPassengers);
     default:return Tr(Tx::cmdNpcFailed);
     }
 }
@@ -811,8 +835,8 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
                           (k.follow && !g.was.follow) || (k.padFollow && !g.was.padFollow),
                           (k.release && !g.was.release) || (k.padRelease && !g.was.padRelease),
                           k.engage && !g.was.engage,k.focus && !g.was.focus,k.board && !g.was.board,
-                          k.dismount && !g.was.dismount,k.dismiss && !g.was.dismiss,k.recruit && !g.was.recruit,
-                          false,k.attackMove && !g.was.attackMove};
+                          k.dismount && !g.was.dismount && !k.shift,k.dismiss && !g.was.dismiss,k.recruit && !g.was.recruit,
+                          false,k.attackMove && !g.was.attackMove,k.dismount && !g.was.dismount && k.shift};   // Shift+N: ALL OUT
     // The armed point order's click on the ground: that order there (disarmed).
     int supportAt=-1;
     if(g.armedClick && g.armedOrder) {
@@ -826,6 +850,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     p.focus=p.focus || rightFocus;
     p.follow=p.follow || clicked(Id::follow);p.release=p.release || clicked(Id::release);p.engage=p.engage || clicked(Id::engage);
     p.focus=p.focus || clicked(Id::focus);p.board=p.board || clicked(Id::board);p.dismount=p.dismount || clicked(Id::dismount);
+    p.dismountAll=p.dismountAll || clicked(Id::dismountAll);p.withdraw=clicked(Id::withdraw);
     p.dismiss=p.dismiss || clicked(Id::dismiss);p.recruit=p.recruit || clicked(Id::recruit);
     if(clicked(Id::formation))g.formationMenu=!g.formationMenu;
     if(g.formationMenu) {   // no squad that takes orders selected any more: nothing to arrange

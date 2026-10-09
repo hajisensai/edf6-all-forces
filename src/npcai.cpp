@@ -728,6 +728,9 @@ struct Squad {
     float routePoint[3]{},routeArrival=1.0f;
     npc::Lead routeLead{};
     ObjRef commandFocus{}; // one squad's explicit attack target; never another player's global marker
+    // An attack-move's stand (mapcmd_logic.h AttackMoveHolds): the last frame a member had a target, when the stand
+    // began, when a member last fired. Reset by every new point order (GuardOrder).
+    ULONGLONG attackSeenFrame=0,attackHoldAt=0,attackShotAt=0;
 };
 Squad squads[kMaxSquads]{};
 npc::Cooldowns<kMaxSquads> cooldowns;
@@ -917,6 +920,20 @@ bool Pursue(Soldier& s,unsigned char* h,const float* pos,Squad* q,const unsigned
     return true;
 }
 
+// One member's frame under an attack-move (its target, its shot) folded into its squad's stand; whether the squad holds
+// (mapcmd_logic.h AttackMoveHolds): a target this frame or the last one seen by any member, the stand's start when the
+// squad saw none the frame before.
+bool AttackMoveSee(Squad& q,bool target,bool fired,ULONGLONG ms) noexcept {
+    const ULONGLONG frame=GameFrame();
+    if(target) {
+        if(!q.attackSeenFrame || q.attackSeenFrame+1<frame)q.attackHoldAt=ms;
+        q.attackSeenFrame=frame;
+    }
+    if(fired)q.attackShotAt=ms;
+    const bool seen=q.attackSeenFrame && q.attackSeenFrame+1>=frame;
+    return mapcmd::AttackMoveHolds(seen,ms-q.attackHoldAt,q.attackShotAt ? ms-q.attackShotAt : ~0ull);
+}
+
 Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const unsigned char* root,const float* eye,
            const float* pos,Squad* q,ULONGLONG ms) noexcept {
     Plan p{"stock",false,a.held[0]};
@@ -961,11 +978,13 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
         h[kTrigger]=0;
         Veto(h,StockTarget(h),eye,a);
     }
+    const bool holds=pursuit.fightFirst && AttackMoveSee(*q,t.e!=nullptr,p.fire,ms);
     if(!(mask&kMaskMove))return p;
-    // Its moves, the first that applies: the player's move order before anything of its own; an attack-move's unless an
-    // enemy presses on it (mapcmd_logic.h Pursues: it fires on the way either way).
-    if(mapcmd::Pursues(pursuit,t.e!=nullptr,t.e ? npc::Horiz(pos,t.e->aim) : 0.0f,Cfg().npcDangerRange) &&
-       Pursue(s,h,pos,q,root,ms,&p.move))return p;
+    // Its moves, the first that applies: the player's move order before anything of its own; an attack-move's while its
+    // squad meets no enemy (mapcmd_logic.h Pursues). A member with nothing of its own to shoot while the squad holds
+    // stands with it (it would walk on alone to the point under the formation's move).
+    if(mapcmd::Pursues(pursuit,holds) && Pursue(s,h,pos,q,root,ms,&p.move))return p;
+    if(holds && !t.e){MoveTo(h,pos,pos,1e9f);p.move="attack-move stand";return p;}
     if(Evade(s,h,c,pos,ms,&p.move))return p;
     if(s.boardV && Board(s,h,pos,ms)){p.move="to its seat";return p;}
     if(FallBack(s,h,pos,served,ms)){p.move="fall back";return p;}
@@ -1323,7 +1342,8 @@ int SquadCommandUnits(CommandUnit* out,int most) noexcept {
         if(!Live(q,ms) || (InSession() && !IsOnlineAuthority(q.top.obj)))continue;
         std::snprintf(squadNames[n],sizeof(squadNames[n]),"%s x%d",kClassWords[q.cls],q.alive>0 ? q.alive : 1);
         out[n]=CommandUnit{q.top.obj,squadNames[n],q.cmd,false,{},npc::Scripted(q.control),StatusOf(q,ms,status[n],sizeof(status[n])),
-                           SquadRiding(q),SquadRecruitable(q),q.control==npc::Control::recruited,TransportOf(q.top.obj)!=nullptr};
+                           SquadRiding(q),SquadRecruitable(q),q.control==npc::Control::recruited,TransportOf(q.top.obj)!=nullptr,
+                           SquadRiding(q) ? At<const void*>(q.top.obj,kHumanRiding) : nullptr};
         std::memcpy(out[n++].pos,static_cast<const unsigned char*>(q.top.obj)+kPosition,12);
     }
     for(int i=0;i<remoteSquadCount && n<most && n<kMaxSquads*2;++i) {
@@ -1757,6 +1777,13 @@ int SeatPriority(const unsigned char* v,unsigned seat) noexcept {
     return seat==0 ? 0 : At<std::uint64_t>(SeatAt(const_cast<unsigned char*>(v),seat),kSeatWeaponCount)>0 ? 1 : 2;
 }
 
+// The index of `seat` among `v`'s seats (its role: SeatPriority), or the count when it is not one of them.
+unsigned SeatIndex(unsigned char* v,const unsigned char* seat) noexcept {
+    const unsigned n=SeatCount(v);
+    for(unsigned k=0;k<n && k<edf::kMaxSeats;++k)if(SeatAt(v,k)==seat)return k;
+    return n;
+}
+
 bool AssignBoard(unsigned char* v,unsigned char* h,ULONGLONG ms) noexcept {
     if(!HumanOnFoot(h) || SupportSoldierHeld(h) || !IsOnlineAuthority(h) || !OnlineMaySeatNpc(v) ||
        npc::Scripted(ControlOf(h,RootLeader(h))))return false;
@@ -1791,9 +1818,11 @@ bool BoardSquad(unsigned char* top,ULONGLONG ms,const unsigned char* requester=n
     return given>0;
 }
 
-// Every riding member off (SeatKick: the get-off message, a real soldier lands and walks on; a dummy rider would die,
-// so only soldiers are kicked). Also cancels members still walking to a seat; false when neither applied.
-bool DismountSquad(unsigned char* top,int* affected=nullptr) noexcept {
+// The riding members off (SeatKick: the get-off message, a real soldier lands and walks on; a dummy rider would die,
+// so only soldiers are kicked): `all` every one (DISMOUNT ALL), else those on passenger seats (DISMOUNT: the driver and
+// the gunners keep the vehicle going; mapcmd_logic.h LeavesSeat). Also cancels members still walking to a seat; false
+// when neither applied.
+bool DismountSquad(unsigned char* top,int* affected=nullptr,bool all=true) noexcept {
     const int cancelled=CancelBoarding(top);
     unsigned char* m[kMaxSquad];
     const int n=Members(top,m,kMaxSquad);
@@ -1804,11 +1833,13 @@ bool DismountSquad(unsigned char* top,int* affected=nullptr) noexcept {
         const auto seat=At<unsigned char*>(m[i],kHumanSeat);
         if(!v || !seat || !Readable(seat,kSeatRiderCtrl+8) || At<const void*>(seat,kSeatRider)!=m[i])continue;
         if(!OnlineMaySeatNpc(v))continue;   // NPC riders come and go where they may be seated (online_authority.h)
+        const unsigned k=SeatIndex(v,seat);
+        if(k>=SeatCount(v) || !mapcmd::LeavesSeat(SeatPriority(v,k),all))continue;
         reinterpret_cast<void(__fastcall*)(void*,void*)>(image+kSeatKick)(v,seat);
         AnnounceNpcDismount(m[i]);
         ++off;
     }
-    Log("NPCAI squad %p dismounts: %d off",top,off);
+    Log("NPCAI squad %p dismounts (%s): %d off",top,all ? "all" : "passengers",off);
     if(affected)*affected=off+cancelled;
     return off>0 || cancelled>0;
 }
@@ -2082,6 +2113,7 @@ bool PlayerFormationCue(FormationCue* out) noexcept {
 namespace {
 void GuardOrder(Squad& q,const Command& c,const unsigned char* requester=nullptr) noexcept {
     q.cmd=c;q.cmdLead=npc::LeadOf(q.control);
+    q.attackSeenFrame=q.attackHoldAt=q.attackShotAt=0;
     const auto g=npc::formation::FromInt(Cfg().npcGuardFormation);
     if(q.guardShape==npc::formation::Shape::stock)q.guardShape=npc::formation::GuardShape(g) ? g : npc::formation::Shape::stock;
     float dir[3];const auto* me=requester ? requester : PlayerHuman();
@@ -2285,8 +2317,11 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
             break;
         }
         case Order::dismount:
+        case Order::dismountAll:
             if(!Cfg().npcBoarding || !rideOk)return CommandResult(Reason::boardingUnavailable);
-            if(!DismountSquad(top,&affected))return CommandResult(Reason::noSeat);break;
+            if(!DismountSquad(top,&affected,c.order==Order::dismountAll))
+                return CommandResult(c.order==Order::dismount ? Reason::noPassengers : Reason::noSeat);
+            break;
         default:return CommandResult(Reason::unsupported);
         }
         if(c.order!=Order::focus)npcmark::Assign(q->commandFocus,{});
