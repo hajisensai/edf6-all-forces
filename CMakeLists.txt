@@ -491,6 +491,8 @@ add_test(NAME drill_net COMMAND drill_net_test)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 # The installer's support menu (tools/support_config.py) against the plugin's keys and weapons, and its ini edits.
 add_test(NAME support_config_ini COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/support_config_ini_test.py")
+# The menu prints Chinese: UTF-8 like the workflow's other Python steps, not the runner's cp1252 console.
+set_tests_properties(support_config_ini PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME support_resources COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/support_resource_audit.py")
 set_tests_properties(support_resources PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME online_gate_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/online_gate_guard.py")
