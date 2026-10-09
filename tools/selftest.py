@@ -1475,13 +1475,26 @@ def every_npc_aircraft_boardable() -> None:
     rows = re.findall(r'\{Body::(\w+),L"[^"]*",L"[^"]*",(\d+)\.0f,[^}]*?"(\w+)"(,true)?\}', re.sub(r'\s+', ' ', table))
     assert len(rows) >= 15, f'src/jet_internal.h kBodies: read {len(rows)} rows'
     boardable = set(re.findall(r'\{Body::(\w+),Airframe::', src('src/playerjet_kinds.h')))
+    # A body that is another row's airframe under the same mark is boarded as that row: playerjet_kinds.inc BoardRowOf
+    # finds the row by the mark, a strike-mark jet then by its model's bones, so a row of its own could never be found.
+    # The paratroop plane is the bomber401 strike jet with passenger seats (tools/make_jets.py TRANSPORT_PLANE_FILE).
+    boarded_as = {'transportPlane': 'bomber401'}
+    marks = {body: mark for body, mark, _name, _hostile in rows}
+    for body, twin in boarded_as.items():
+        assert body not in boardable and twin in boardable and marks.get(body) == marks.get(twin), \
+            f'{body} is boarded as {twin}: the same mark, no row of its own'
+    assert "bomber_sgo(game, 'EDF6VC_BOMBER401.SGO'), 0, TRANSPORT_PLANE_PASSENGERS" in src('tools/make_jets.py'), \
+        'the paratroop plane is the bomber401 airframe'
+    board_row = src('src/playerjet_kinds.inc').split('const pjet::Boardable* BoardRowOf(', 1)[1].split('\n}\n', 1)[0]
+    assert 'BomberBody(v+kModelInst506)' in board_row and 'model==JetBody::bomber401 ? jet::Body::bomber401' in board_row
     for body, mark, _name, hostile in rows:
         if int(mark) == 0:
             continue   # a heli: the stock heli flight
         if hostile:
             assert body not in boardable, f'{body} is the enemy\'s: not boardable'
         else:
-            assert body in boardable, f'{body} (mark {mark}): no row in src/playerjet_kinds.h kBoardable'
+            assert body in boardable or boarded_as.get(body) in boardable, \
+                f'{body} (mark {mark}): no row in src/playerjet_kinds.h kBoardable'
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
     for key in ('PlayerJetAll', 'PlayerJetHailKey'):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
@@ -4648,7 +4661,10 @@ def npc_ai_wired() -> None:
     assert 'if(!IsOnlineAuthority(v))return;' in body, 'the real driver owner, not a hard-coded host, controls the post'
     assert body.index('StockDriving(v,f,*p)') < body.index('Write(v,f,*p,c0,c1);')
     move_to = code.split('void MoveTo(', 1)[1].split('\n}\n', 1)[0]
-    assert 'GroundNavigate(soldier->navigation,pos,to,stop,ms,waypoint)!=npc::navigation::Result::moving' in move_to
+    # Routed (2026-10-09): in kRouteHorizon legs, from the floor under the soldier (RouteStart), still stood while not moving.
+    assert 'GroundNavigate(soldier->navigation,from,to,stop,ms,waypoint,SoldierRoute())!=npc::navigation::Result::moving' in move_to
+    assert move_to.index('RouteStart(pos,from);') < move_to.index('GroundNavigate('), 'the route starts from the floor'
+    assert 'p.horizon=kRouteHorizon;' in code.split('npc::navigation::Profile SoldierRoute()', 1)[1].split('\n', 1)[0]
     assert move_to.index('{Stand(h);return;}') < move_to.index('Move(h,dir,'), 'blocked/pending routes wait instead of walking through walls'
     # Every family (2026-10-07): the mechs' turn-on-spot constant, the Barga by its stock walk, and the plugin's own
     # last write never read as the stock AI driving, taken back when the drive ends.
@@ -4745,7 +4761,8 @@ HUD_SPEC = re.compile(r'%[-+ #0]*\d*(?:\.\d+)?(?:hs|ls|l?[dufxXsc]|%)')
 def hud_literal_words(text: str) -> list[tuple[int, str]]:
     """The words (two letters or more, or any non-ASCII character) in a source's wide literals, with their lines."""
     found = []
-    for m in re.finditer(r'L"((?:[^"\\]|\\.)*)"', text):
+    # `L"` opens a wide literal only as a token of its own: the L closing a narrow one ("DISMOUNT ALL") is no prefix.
+    for m in re.finditer(r'(?<!\w)L"((?:[^"\\]|\\.)*)"', text):
         line = text.count('\n', 0, m.start()) + 1
         core = HUD_SPEC.sub('', m.group(1))
         found += [(line, w) for w in re.findall(r'[A-Za-z]{2,}', core) if w not in HUD_LITERAL_WORDS]
@@ -4835,12 +4852,22 @@ def soft_edge_wired() -> None:
     flight, jet, combat, heli = src('src/jet_flight.cpp'), src('src/jet.cpp'), src('src/jet_combat.cpp'), src('src/heli.cpp')
     guard = flight[flight.index('void Guard(Jet& j,'):flight.index('void ResetWalls()')]
     assert 'SoftEdge(j,pos,want);' in guard and 'WorldWalls' not in flight, 'Guard: the soft edge, not the world walls'
-    assert 'airbound::KeepIn(soft,pos,j.m.vel,r,react,want,&j.m.edgeBack,&j.m.edgeTurn);' in flight
+    # KeepIn every frame (its state follows the jet); only a gun dive at a ground point inside the soft box keeps its
+    # line (KeepIn on a copy, 2026-10-09: bent by the edge the dive never came onto the lead).
+    soft_edge = flight.split('void SoftEdge(Jet& j,const float* pos,float* want) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'airbound::KeepIn(soft,pos,j.m.vel,r,react,dive ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);' in soft_edge
+    assert 'const bool dive=j.mode==Mode::dive && j.t.target && !j.t.flyer && airbound::Depth(soft,j.t.aim)>=0.0f;' in soft_edge, \
+        'only a dive at a ground point inside the soft box is spared the edge'
     assert 'airbound::CapClimb(' in flight
     hover = flight[flight.index('void Hover(Jet& j,'):]
     assert 'airbound::ClampIn(JetSoftBox(j),inside,0.0f);' in hover[:1500], 'Hover: the goal inside the soft edge'
     assert 'anchor=SoftAnchor(*j,anchor,anchorIn);' in jet
-    assert 'if(PastEdge(*k.j,p))return;' in combat
+    # Targets past it let be; the map's focus target (2026-10-09) only out past the play area's walls, where no jet goes.
+    visit = combat.split('void VisitTarget(void* ctx,const void* object,const float* p) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(k.focus || PastEdge(*k.j,p))return;' in visit
+    focus = visit.split('if(k.j->focus.Is(object)) {', 1)[1].split('\n    }\n', 1)[0]
+    assert 0 <= focus.find('if(!airbound::Inside(PlayBox(),p))return;') < focus.find('k.focus=true;'), \
+        'a focus target out past the play area is waited for, not chased'
     fly = heli[heli.index('void Fly(Heli& h,unsigned char* v,bool playerAboard)'):]
     assert 'SoftEdge(h,s,mode,w);' in fly[:600] and 'airbound::LimitOut(' in heli
     assert 'LogImpact("JET",v,pos,was);' in jet and 'LogImpact("PJET",v,pos,j.sent);' in src('src/playerjet.cpp')

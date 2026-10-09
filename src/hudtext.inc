@@ -340,6 +340,7 @@ HUDTEXT(orderBoard,L"BOARD",L"上车",L"上車",L"搭乗")
 HUDTEXT(orderDismount,L"DISMOUNT",L"下车",L"下車",L"降車")
 // DISMOUNT ALL (the user, 2026-10-09: "下车是除了驾驶员，炮手等操作席都下车。全体下车是全部人").
 HUDTEXT(orderDismountAll,L"ALL OUT",L"全体下车",L"全體下車",L"全員降車")
+HUDTEXT(keyDismountAll,L"Shift+N",L"Shift+N",L"Shift+N",L"Shift+N")
 HUDTEXT(cmdNpcNoPassengers,L"Nobody on a passenger seat (the driver and gunners stay aboard: use ALL OUT)",
         L"没有乘客座上的人（驾驶员与炮手留在车上：要全部下车请用「全体下车」）",L"沒有乘客座上的人（駕駛員與砲手留在車上：要全部下車請用「全體下車」）",
         L"乗客席に誰もいない（運転手と射手は残る：全員降ろすには「全員降車」）")

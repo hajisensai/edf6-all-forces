@@ -3852,7 +3852,8 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
     static const Tx kWord[n]={Tx::orderMove,Tx::orderAttackMove,Tx::orderGuard,Tx::orderFollow,Tx::orderRelease,Tx::orderEngage,
                               Tx::orderFocus,Tx::orderBoard,Tx::orderDismount,Tx::orderDismiss,Tx::orderRecruit,Tx::orderWithdraw,
                               Tx::orderDismountAll,Tx::btnFormationShort,Tx::btnSplit,Tx::btnMerge,Tx::btnSweep,Tx::btnHealth};
-    static const wchar_t* const kKey[n]={L"",L"Z / G",L"G",L"V",L"X",L"J",L"H",L"B",L"N",L"K",L"U",L"",L"Shift+N",L"T",L"P",L"L",L"Y",L"O"};
+    const wchar_t* const kKey[n]={L"",L"Z / G",L"G",L"V",L"X",L"J",L"H",L"B",L"N",L"K",L"U",L"",Tr(Tx::keyDismountAll),L"T",L"P",L"L",L"Y",
+                                  L"O"};
     const std::uint32_t orders=c.allowed && c.selected>0 ? c.allowedOrders : 0u;
     const bool tools=c.allowed && c.squadToolsAllowed && c.selectedSquads>0;
     const float scale=kLineScale*0.7f;

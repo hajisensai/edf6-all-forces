@@ -24,6 +24,8 @@
 // Not boardable: the enemy's jets (BodyRow::hostile: the enemy fighter, the Primer fighter: the stock seat check
 // lets nobody into the other side's vehicle, and a jet the enemy flies is no ride for the player) and the helis
 // (stock helicopters, flown by the stock heli code already).
+// No row of its own: the paratroop plane (Body::transportPlane, transport.cpp) is the bomber401 strike jet with passenger
+// seats, the same mark and model, so BoardRowOf finds it as bomber401 and the player flies it as that row.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #pragma once
 #include "jet_internal.h"
