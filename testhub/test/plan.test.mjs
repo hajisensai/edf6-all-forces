@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { d1 } from './d1.mjs';
 import { parseAccounts } from '../src/auth.js';
 import { HttpError } from '../src/http.js';
-import { Plan, RATE, between, clean, scope } from '../src/plan.js';
+import { LIMIT, Plan, RATE, between, clean, scope } from '../src/plan.js';
 import worker from '../src/worker.js';
 
 const MISSIONS = [
@@ -173,6 +173,11 @@ test('worker: script digests are uploaded by developers and read by every accoun
   assert.equal(d.body, '■ [0] 開始\n⊘ old');
   assert.deepEqual((await (await call(e, '/api/plan')).json()).digests, ['EDF6/M001']);
   assert.equal((await call(e, '/api/plan/digest?mission=EDF7%2FM001')).status, 400);
+  // the cap is UTF-8 bytes (what a D1 row holds), not characters: CJK at the character cap is three times over
+  const cjk = '開'.repeat(Math.floor(LIMIT.digest / 3));
+  assert.equal((await put('dev', cjk)).status, 200);
+  assert.equal((await put('dev', cjk + '開')).status, 400);
+  assert.equal((await put('dev', '開'.repeat(LIMIT.digest))).status, 400);
 });
 
 // Hidden characters in the site's own source would defeat reading it for exactly the tricks the plan strips from

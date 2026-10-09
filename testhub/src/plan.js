@@ -11,6 +11,7 @@ import { HttpError, body } from './http.js';
 
 export const KINDS = ['new', 'edit'];
 export const PSTATUS = ['open', 'accepted', 'done', 'rejected'];
+// digest: UTF-8 bytes (a D1 row holds about 2 MB; a digest is mostly CJK, 3 bytes a character), the rest characters
 export const LIMIT = { title: 100, body: 10000, reply: 4000, note: 60, proposals: 3000, replies: 500, digest: 1 << 20 };
 export const RATE = [[10 * 60e3, 60], [864e5, 600]];   // [window ms, writes] per account
 
@@ -247,11 +248,12 @@ export class Plan {
   async putDigest(key, text) {
     if (!this.dev) throw new HttpError(403, 'developer only');
     const mission = this.mission(key);
-    if (!text || text.length > LIMIT.digest) throw new HttpError(400, `digest must be 1..${LIMIT.digest} characters`);
+    const size = new TextEncoder().encode(text).length;
+    if (!size || size > LIMIT.digest) throw new HttpError(400, `digest must be 1..${LIMIT.digest} bytes of UTF-8`);
     await this.db.prepare(
       'INSERT INTO mission_digests (mission, body, at) VALUES (?1, ?2, ?3) ON CONFLICT(mission) DO UPDATE SET body = ?2, at = ?3',
     ).bind(mission, text, Date.now()).run();
-    return { mission, size: text.length };
+    return { mission, size };
   }
 
   // ------------------------------------------------------------ helpers
