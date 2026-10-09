@@ -1953,8 +1953,10 @@ def heli_sight_after_aim_lines() -> None:
 def heli_mouse_aim_wired() -> None:
     """The helicopters' mouse-aim flight (src/heliaim.h) and HUD: their ini keys are read, shipped and documented, the
     lever they replaced (HeliMousePitch) is shipped no more and an old ini's is said ignored; the stock heli the player
-    flies and the NPC pilot write the input block through the same stick, throttle and yaw law (heli.cpp Steer and
-    AimFly), and the rotor craft fly the same aim::Fly (playerjet_board.inc HoverAim)."""
+    flies and the NPC pilot write the horizontal input through the same stick law (heli.cpp Steer and AimFly, StockStick);
+    since 2026-10-09 the player's heli flies the War Thunder instructor (aim::Instructor: W / S the collective, the nose
+    pitch the cyclic) with its own collective (aim::CollectiveThrottle: the stock vertical law inverted, on the rotor
+    PlayerMouseTune quickens) while the NPC keeps StockThrottle; the rotor craft still fly aim::Fly (HoverAim)."""
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
     for key in ('HeliMouseAim', 'HeliFlightHud'):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=1', ini, re.M) and key in readme, key
@@ -1963,20 +1965,33 @@ def heli_mouse_aim_wired() -> None:
     heli, board = src('src/heli.cpp'), src('src/playerjet_board.inc')
     steer = heli.split('Control Steer(', 1)[1].split('\n}\n', 1)[0]
     fly = heli.split('void AimFly(', 1)[1].split('\n}\n', 1)[0]
-    for law in ('aim::StockStick(', 'aim::StockThrottle('):
-        assert law in steer and law in fly, law
+    assert 'aim::StockStick(' in steer and 'aim::StockStick(' in fly, 'aim::StockStick('
+    assert 'aim::StockThrottle(' in steer and 'aim::CollectiveThrottle(' in fly and 'aim::StockThrottle(' not in fly
+    assert 'aim::Instructor(' in fly and 'aim::Fly(' not in fly, 'heli.cpp AimFly: the instructor, not the rotor craft law'
     # The yaw is the one law apart (2026-10-06, the user: the mouse did not turn the heli): the NPC damps its turn
     # (StockYaw), the player compensates the native angle-state lag/spring (PlayerYawInput).
     assert 'aim::StockYaw(' in steer and 'aim::PlayerYawInput(' in fly and 'aim::StockYaw(' not in fly
     assert 'aim::MoveOnScreen(' in fly, 'heli.cpp AimFly: the mouse kept on the screen axis by axis'
     player = heli.split('void PlayerHeli(', 1)[1].split('\n}\n', 1)[0]
-    assert 'PlayerYawTune(v,' in player and 'kMaxYaw,a.yaw' in heli.split('void AssistOff(', 1)[1].split('\n}\n', 1)[0]
+    off = heli.split('void AssistOff(', 1)[1].split('\n}\n', 1)[0]
+    assert 'PlayerMouseTune(v,' in player and 'kMaxYaw,a.yaw' in off
+    assert 'kRotorUp,a.rotorUp' in off and 'kRotorDown,a.rotorDown' in off and 'kTiltSmooth,a.tilt' in off, 'AssistOff: the rotor / tilt back'
+    attitude = heli.split('void __fastcall PlayerAttitudeHook(', 1)[1].split('\n}\n', 1)[0]
+    assert 'own[0]=roll;own[2]=pitch;' in attitude, 'PlayerAttitudeHook: the instructor\'s pitch and coordinated roll'
     # The hover rotor from the lift as it is in memory (heliaim.h HoverRotor), not the old 70 the 602 clamped to 1.0 on.
     assert 'kStockLift' not in heli and heli.count('aim::HoverRotor(') >= 3
     hud = src('src/hud.cpp').split('void HeliStrip(', 1)[1].split('\n}\n', 1)[0]
     assert 'Tx::heliKeysAir' in hud and 'KeyName(Cfg().playerJetBrakeKey' in hud, 'hud.cpp HeliStrip: the keys spelt out'
-    assert 'SPACE: up' in src('src/hudtext.inc').split('HUDTEXT(heliKeysAir,', 1)[1].split('\n', 1)[0]
-    assert 'aim::Fly(' in fly and 'aim::Fly(' in board.split('void HoverAim(', 1)[1].split('\n}\n', 1)[0]
+    # The stock heli's keys (f.collective) are the instructor's: W / S up and down, the nose down forward; the rotor
+    # craft's stay the speed setpoint's.
+    assert 'f.collective ? Tx::heliKeysInstructor : Tx::heliKeysAir' in hud and 'Tx::heliKeysInstructorLanded' in hud
+    texts = src('src/hudtext.inc')
+    assert 'SPACE: up' in texts.split('HUDTEXT(heliKeysAir,', 1)[1].split('\n', 1)[0]
+    instructor = texts.split('HUDTEXT(heliKeysInstructor,', 1)[1].split('\n', 1)[0]
+    assert 'W / S: up / down' in instructor and 'down: forward' in instructor, instructor
+    assert 'HOLD W / SPACE' in texts.split('HUDTEXT(heliKeysInstructorLanded,', 1)[1].split('\n', 1)[0]
+    assert 'f.collective=p.flying' in heli, 'heli.cpp PublishHud: the stock heli says its keys are the instructor\'s'
+    assert 'aim::Fly(' in board.split('void HoverAim(', 1)[1].split('\n}\n', 1)[0]
 
 
 @test
