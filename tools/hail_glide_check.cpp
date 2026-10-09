@@ -257,8 +257,7 @@ int main(int argc,char** argv){
         const float t0[3]={0,0,0},north[3]={0,0,1},R=FerryRadius(*fighter2);
         const bool entryIn=hail::InBox(mid,0.0f,-hail::kFinalLength,0.5f*R);
         const bool refused=!hail::PlanPattern(t0,north,R,mid).ok;
-        std::printf("%s a strip whose final fits but whose outer point does not is refused (entry inside %d)
-",entryIn && refused ? "ok  " : "FAIL",entryIn);
+        std::printf("%s a strip whose final fits but whose outer point does not is refused (entry inside %d)\n",entryIn && refused ? "ok  " : "FAIL",entryIn);
         fails+=!(entryIn && refused);
     }
     // Every wing on that map: strips round its middle (12 headings), hailed from states 600 m from the middle. Where an
