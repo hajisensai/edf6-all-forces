@@ -14,6 +14,8 @@ const Config& Cfg() noexcept { return config; }
 void Log(const char*,...) noexcept {}
 bool InSession() noexcept { return true; }
 void ProteusNetReceived(unsigned char*,const proteus_net::State& s) noexcept { ++proteusReceived;lastState=s; }
+int incompatibleSeen=0;std::uint32_t incompatibleVersion=0;
+void ProteusNetIncompatible(unsigned char*,std::uint32_t version) noexcept { ++incompatibleSeen;incompatibleVersion=version; }
 void DrillNetReceived(unsigned char*,const drill_net::State&) noexcept { ++drillReceived; }
 void SazabiNetReceived(unsigned char*,const sazabi_net::State&) noexcept { ++sazabiReceived; }
 }
@@ -101,6 +103,17 @@ int main(int argc,char** argv) {
     alignas(16) unsigned char reader[0x600]{};Reader(wrong.bytes,reader);
     proteus_net::State decoded;bool valid=false;
     Check(!transport::Peek(reader,decoded,valid) && At<std::int64_t>(reader,8)==0,"different magic passes through unchanged");
+    // A version-1 block (an older build of the rework): ours, not decoded, reported as an incompatible peer.
+    {
+        proteus_net::State old=s;old.version=1;old.sender=3;old.sequence=1;
+        transport::Stream v1;transport::Fn<bool(__fastcall*)(void*,std::int8_t)>(transport::kWriteSmall)(v1.bytes,15);
+        transport::Fn<bool(__fastcall*)(void*,const void*,std::size_t)>(transport::kWriteBlock)(v1.bytes,&old,sizeof(old));
+        alignas(16) unsigned char oldReader[0x600]{};Reader(v1.bytes,oldReader);
+        const int received=proteusReceived;
+        transport::Receive(proteusVehicle+0x120,oldReader);
+        Check(proteusReceived==received && incompatibleSeen==1 && incompatibleVersion==1,
+              "an older build's packet is swallowed undecoded and reported as an incompatible peer");
+    }
     // The full native object wrapper -> broadcast wrapper -> final event packet writer, with a max-width descriptor.
     alignas(16) unsigned char world[0x1600]{},manager[0x100]{},session[0x100]{},descriptor[0x40]{},reference[16]{};
     Put<void*>(image,0x20B2AC0,world+0x98);Put<void*>(image,0x20B2AC8,world);

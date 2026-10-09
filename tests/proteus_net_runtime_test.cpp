@@ -134,5 +134,52 @@ int main(){
     Seat(1,nullptr,nullptr);Tick();
     Check(!u->active && !(lastControl.flags&proteus_net::kActive),"the last human leaving an NPC-driven Proteus clears the rework");
     ResetProteus();Check(!UnitOf(vehicle,false),"a mission reset discards object-bound replay");
+
+    // --- A copy's local wall shows the owner's count: a local hit to 0 never drops it (no flicker, no re-raise). ---
+    Seat(0,human,ctrl);Seat(1,nullptr,nullptr);netDriver=42;netAuthority=false;Put<std::uint16_t>(vehicle,0x128,3);
+    s=Control(1);s.sender=21;s.mode=0;s.stagger=0;ProteusNetReceived(vehicle,s);u=UnitOf(vehicle,false);
+    proteus_net::State count=s;count.kind=proteus_net::Kind::defense;count.sender=22;count.sequence=1;count.barrier=.5f;count.flags=0;
+    ProteusNetReceived(vehicle,count);
+    int raises=emcFires;Tick();
+    alignas(16) static unsigned char local[0x1600];
+    FreshBarrier(local,vehicle,kBarrierSegmentCount);BarrierStep(local);
+    Put<float>(local,kBarrierHp,-20);BarrierStep(local);
+    Check(u->barrier.obj==local && std::fabs(At<float>(local,kBarrierHp)-.5f*.5f*7500)<.01f && !local[kBarrierNoEcho],
+          "a copy's wall shot to 0 locally is put back to the owner's count and kept");
+    s.sequence=2;ProteusNetReceived(vehicle,s);Tick();
+    Check(emcFires==raises+1,"no second raise for a copy's wall");
+    ResetProteus();
+
+    // --- Mixed builds: a version-1 packet for this Proteus. ---
+    Put<std::uint16_t>(vehicle,0x128,2);netAuthority=true;netDriver=42;
+    Put<float>(vehicle,kWalk,10);Put<float>(vehicle,kJump,8);
+    for(unsigned i=0;i<4;++i)Put<int>(SeatAt(vehicle,i),kSeatClassMask,15);
+    Tick();u=UnitOf(vehicle,false);
+    Check(u && u->active && At<float>(vehicle,kWalk)!=10,"(the local driver reworks it)");
+    const unsigned char* lent[4]{};
+    ProteusNetIncompatible(vehicle,1);
+    Check(u->net.incompatible && !ActiveOf(vehicle) && At<float>(vehicle,kWalk)==10 && At<int>(seats+2*kSeatStride,kSeatClassMask)==15,
+          "a version-1 peer: this Proteus is given back to the stock at once");
+    raises=emcFires;u->st.shieldOn=true;for(int i=0;i<5;++i)Tick();
+    Check(emcFires==raises && !ActiveOf(vehicle) && ProteusBorrowedWeapons(vehicle,0,lent,4)==0 && At<float>(vehicle,kWalk)==10,
+          "while a peer runs another build: no wall, no borrowed weapon, stock legs");
+    ProteusReadout ro{};now+=1000;Check(!PlayerProteus(&ro),"no rework HUD for a stock Proteus");
+    netSession=false;Tick();
+    Check(!u->net.incompatible && ActiveOf(vehicle)==u,"out of the session the rework is back");
+    netSession=true;ResetProteus();
+
+    // --- Mixed builds: the local driver of a Proteus another machine owns hears no shield count. ---
+    Put<float>(vehicle,kWalk,10);Put<float>(vehicle,kJump,8);   // (the reset above left the offline rework's legs)
+    Put<std::uint16_t>(vehicle,0x128,3);netAuthority=true;
+    Tick();u=UnitOf(vehicle,false);
+    Check(u && u->active,"(a guest drives a host-owned Proteus)");
+    for(int i=0;i<25;++i){Tick();count.sequence=static_cast<std::uint32_t>(10+i);ProteusNetReceived(vehicle,count);}
+    Check(u->active && !u->net.incompatible,"the owner's count keeps coming: the rework stays");
+    for(int i=0;i<25;++i)Tick();
+    Check(u->active && !u->net.incompatible,"a short gap (2.5 s) is tolerated");
+    for(int i=0;i<10;++i)Tick();
+    Check(u->net.incompatible && !ActiveOf(vehicle) && At<float>(vehicle,kWalk)==10,
+          "no count from the owner for 3 s (an older build): stock here");
+    ResetProteus();Put<std::uint16_t>(vehicle,0x128,2);
     std::printf("proteus_net_runtime_test: %d checks, %d failures\n",checks,failures);return failures ? 1 : 0;
 }

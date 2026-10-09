@@ -43,6 +43,14 @@
 
 **必须进游戏才能确认（未做）**：墙的外观、位置、大小是否合适（尤其墙底裙边与地形）；行走时墙跟随是否同步、会不会擦到敌人被锚定（插件会丢弃并重立）；墙是否真的挡住敌弹并按耐久破碎；墙的装置模型是否藏在机体里、展开音效能否播放（需要空袭兵音效库已加载）；驾驶员一人开两门炮的瞄准方向；驾驶员借用的导弹架能否原生锁定和追踪（锁定 tick 取武器方向，静态推断）；联机两台机器上各自的墙与 HP 同步；从旧版安装升级后模型恢复原版。
 
+## 4b. 整合审查后的修复（同分支第二个提交）
+
+1. 【中】新旧插件混房：旧说法「v1 被拒收、双方都只看原版」不对，新插件那端仍会立墙、借武器；新客户端驾驶、旧主机持车时本机墙 HP 一直被写回、打不碎。
+   现在收到别的版本的 Proteus 包（`proteus_net.cpp Receive` → `ProteusNetIncompatible`），或本机驾驶别人持有的车却 3 s 收不到 owner 的护盾计数（`proteus.cpp Frame` 末尾，`kDefenseSilentMs`），
+   这台普罗透斯在本机还原为原版，直到离开联机或任务重置。测试：`proteus_net_native`（真实编解码器发 v1 块，被吞且上报版本 1）、`proteus_net_runtime`（v1 → 立即还原、5 帧不立墙不借武器、离开联机后恢复；owner 计数持续时保持、2.5 s 空档容忍、3 s 无计数还原）、`proteus_net_guard`。文档 `docs/proteus-online.md` 已改。
+2. 【低】`proteus_shield.inc BarrierStep` 副本端先读本机 HP 再写回 owner 的值，却拿写回前的旧值判断，本机挡弹打到 ≤0 就删墙、下一帧重立（闪烁 + 多次立墙）。改为用写回后的值判断。测试：`proteus_net_runtime`「a copy's wall shot to 0 locally is put back to the owner's count and kept」「no second raise」。
+3. 【待确认 → 已确认无需改】子弹更新与车辆帧在同一线程串行（对象管理器 `0x1198DA0` 的 slot 4 循环在 slot 5 循环之前，墙在同一管理器里），证据写入 `docs/proteus-re.md` §8b。
+
 ## 5. 未完成 / 后续
 
 - 护盾弧度 / 半径 / 高度在 SGO 里写死（墙在构造时建网格），不能按 ini 调；若要可调，需要生成多个 SGO 或在 IFC 发射前改 InitParam 的自定义参数数组（未逆向）。
