@@ -881,13 +881,16 @@ struct PlayerJetSymbols {
 // its level part on the nose's frame); speed: its level part; clear: its height over the ground (ground: false, none
 // under it: over the world's zero); climb m/s; setSpeed: the forward speed W / S set (m/s) of `top`; aim: the mouse's aim,
 // a point ahead (aiming: the mouse-aim flight flies at it, heliaim.h); holding: it holds its height; rotor / hover: a stock
-// heli on the ground, its rotor and the rotor whose lift holds it (the takeoff cue; 0: none); landed: on the ground.
+// heli on the ground, its rotor and the rotor whose lift holds it (the takeoff cue; 0: none); landed: on the ground;
+// power: its engine, 0..1 (a stock heli's rotor, a rotor craft's Hover power: what holding the speed set and the height
+// takes of it; <0: unknown, not shown).
 // The ground-proximity warning (warn.cpp ClosureIn / GpwsOf), a real GPWS's modes: SINK RATE (sinking onto the ground
 // under it too fast), TERRAIN (its path runs into something higher than that), PULL UP (either within kPullUpSeconds).
 enum class Gpws : std::uint8_t { none, sinkRate, terrain, pullUp };
 // gpws / impactIn: the ground-proximity warning and the seconds to the impact it warns of (<0: none).
 struct HeliFlight {
     float vel[3],speed,clear,climb,hp,hpMax,setSpeed,top,aim[3],rotor,hover;
+    float power;
     bool ground,landed,keys,aiming,holding;
     bool collective;   // W / S are the collective (a stock heli's instructor, heliaim.h), not a speed setpoint
     Gpws gpws;

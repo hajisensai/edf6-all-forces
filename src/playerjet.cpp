@@ -212,7 +212,7 @@ struct PJet {
     bool autopilot;              // flown by the catch's autopilot, no one aboard (AutoFly)
     bool bodyFixed;
     Phase phase;
-    float throttle;              // 0..1, the lever the stick moves
+    float throttle;              // 0..1, the lever the stick moves; a rotor craft's: its engine (HoverDone)
     float turnIn,pitchIn;        // the stick's turn and pitch, smoothed (SmoothStick)
     float yawIn,rollIn;          // ...the air's turn (right stick) and roll (left stick sideways), smoothed
     float up[3];                 // the plane's own up in the air (see kLevelPull, pjet_handling.h)
@@ -1860,6 +1860,7 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
                 f.hp=r.hp;f.hpMax=r.hpMax;f.keys=j.keys;f.landed=!air;
                 f.aiming=j.keys && j.hasAim && Cfg().heliMouseAim;f.holding=f.aiming && j.hover.holding;
                 f.setSpeed=j.hover.speed;f.top=j.hoverTop;std::memcpy(f.aim,r.aim,12);
+                f.power=j.throttle;   // its engine (HoverDone)
                 f.gpws=r.gpws;f.impactIn=r.impactIn;
             }
             *out=r;
