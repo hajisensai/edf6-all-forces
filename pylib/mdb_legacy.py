@@ -225,12 +225,14 @@ def _blend_last(me: Mesh) -> None:
 
 
 def _check_mesh(me: Mesh) -> None:
-    ends = 0
-    for e in me.elems:
+    at = 0
+    for e in sorted(me.elems, key=lambda e: e.offset):   # the elements must tile [0, vsize) end to end
         if e.fmt not in _FMT:
             raise ValueError(f'unknown vertex format {e.fmt}')
-        ends += VFMT[e.fmt][1]
-    if ends != me.vsize:
+        if e.offset != at:
+            raise ValueError('vertex layout does not fill the vertex (gaps or overlaps)')
+        at += VFMT[e.fmt][1]
+    if at != me.vsize:
         raise ValueError('vertex layout does not fill the vertex (gaps or overlaps)')
     if me.flags[0] or me.flags[3] or me.flags[1] not in (0, 1):
         raise ValueError(f'unknown mesh flags {me.flags.hex()}')

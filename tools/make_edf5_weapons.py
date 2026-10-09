@@ -245,7 +245,7 @@ def convertible(g5: rootcpk.Game, missing: list[str]) -> tuple[dict[str, str], s
         source = f'{found[0]}/{found[1]}'
         try:
             legacy_assets.convert(source, g5.read(*found))
-        except (ValueError, ImportError) as e:
+        except ValueError as e:   # a converter's refusal; anything else is this machine's problem, raised
             return {}, f'EDF6 没有、不能从 EDF5 转换：{path}（{e}）'
         out[f'{folder.upper()}/{name.upper()}'] = source
     return out, None
@@ -300,6 +300,21 @@ def build(edf5: str, edf6: str) -> dict:
             'weapons': weapons, 'skipped': skipped}
 
 
+def keep_order(path: str, weapons: list[dict]) -> list[dict]:
+    """`weapons` in the order the registry at `path` already has them, new ones after (tools/ported_weapons.py
+    RELEASED: an installed row never moves, so a released registry only grows at its end). A weapon the old registry
+    has and this run lost is an error: its row would be nobody's."""
+    if not os.path.isfile(path):
+        return weapons
+    with open(path, encoding='utf-8') as f:
+        old = [w['id'] for w in json.load(f)['weapons']]
+    by = {w['id']: w for w in weapons}
+    lost = [i for i in old if i not in by]
+    if lost:
+        raise SystemExit(f'{path}: these weapons are no longer found: {", ".join(lost)} (a released row cannot go)')
+    return [by[i] for i in old] + [w for w in weapons if w['id'] not in set(old)]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--edf5', default=os.path.join(STEAM, 'EARTH DEFENSE FORCE 5'))
@@ -307,8 +322,8 @@ def main() -> int:
     a = ap.parse_args()
     data = build(a.edf5, a.edf6)
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
-    for path, weapons in ((OUT, [w for w in data['weapons'] if 'assets' not in w]),
-                          (OUT_MODELS, [w for w in data['weapons'] if 'assets' in w])):
+    for path, weapons in ((OUT, keep_order(OUT, [w for w in data['weapons'] if 'assets' not in w])),
+                          (OUT_MODELS, keep_order(OUT_MODELS, [w for w in data['weapons'] if 'assets' in w]))):
         with open(path, 'w', encoding='utf-8', newline='\n') as f:
             json.dump({**data, 'weapons': weapons, **({'skipped': data['skipped']} if path == OUT else {'skipped': []})},
                       f, ensure_ascii=False, indent=1)

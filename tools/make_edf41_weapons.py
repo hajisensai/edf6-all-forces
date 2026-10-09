@@ -371,6 +371,7 @@ def main() -> int:
     ap.add_argument('--edf6', default=os.path.join(STEAM, 'EARTH DEFENSE FORCE 6'))
     a = ap.parse_args()
     data = build(a.edf41, a.edf5, a.edf6)
+    data['weapons'] = m5.keep_order(OUT, data['weapons'])
     with open(OUT, 'w', encoding='utf-8', newline='\n') as f:
         json.dump(data, f, ensure_ascii=False, indent=1)
         f.write('\n')

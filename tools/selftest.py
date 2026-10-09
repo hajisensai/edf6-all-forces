@@ -5761,6 +5761,58 @@ def legacy_assets_match_edf6() -> None:
         rel = 'MENUOBJECT/ARMYSOLDIER.CAS'
         assert cas_legacy.cas_from_legacy(g4.read(*rel.split('/'))) == cas_legacy.cas_from_legacy(g5.read(*rel.split('/')))
 
+
+@test
+def legacy_archive_refusals() -> None:
+    """pylib/legacy_assets.py on hand-made archives: textures only -> the same archive back; a member of a kind it has
+    no converter for, a cut archive, a SHKT file -> ValueError (nothing half-converted reaches the game)."""
+    import legacy_assets
+    import mdb
+    tex = mdb.RabFile('a.lod.dds', 0, 0, b'DDS ' + bytes(124))
+    hd = mdb.RabFile('a.dds', 2, 1, b'DDS ' + bytes(252))
+    archive = mdb.rab_write(mdb.Rab(0x110, ['TEXTURE', 'MODEL', 'HD-TEXTURE'], [tex, hd]))
+    assert legacy_assets.convert('OBJECT/X.RAB', archive) == archive
+    odd = mdb.rab_write(mdb.Rab(0x110, ['TEXTURE', 'MODEL', 'HD-TEXTURE'], [tex, mdb.RabFile('a.txt', 1, 0, b'x')]))
+    for rel, data in (('OBJECT/X.RAB', odd), ('OBJECT/X.RAB', archive[:len(archive) - 40]), ('WEAPON/X.SHKT', b'')):
+        try:
+            legacy_assets.convert(rel, data)
+        except ValueError:
+            continue
+        raise AssertionError(f'{rel} ({len(data)} bytes) was not refused')
+
+
+@test
+def ported_assets_of_another_mod_stay() -> None:
+    """tools/call_weapons.py on a stand-in game: a model another mod put under the name an EDF5 weapon's asset uses
+    (Mods/OBJECT/V505_TANKEDF4.MRAB) survives an install that cannot build that weapon (no EDF5), the uninstall and a
+    repair (ours(): a file under a stock name is ours only by the sha we wrote); one we wrote is removed."""
+    import ported_weapons as pw
+    port = next(p for p in pw.PORTS if p.assets)
+    asset = next(iter(port.assets))
+    ids = STOCK + sorted({*cw.templates(), *(p.template for p in pw.PORTS)} - set(STOCK)) + list(calls.IDS)
+    for ours_written in (False, True):
+        with tempfile.TemporaryDirectory(prefix='edf6vc-asset-') as game, \
+                patched(modfiles, game_running=lambda process=modfiles.PROCESS: False), \
+                patched(cw, stock=lambda game_root, rel: b''):   # no Root.cpk: our tables are never the stock ones
+            if not ours_written:
+                modfiles.atomic_write(_mods(game, asset), b'another mod')
+            table = ids + [p.id if (ours_written and p is port) else pw.retired_id(p.id) for p in pw.PORTS]
+            files = _call_files(game, table)
+            rows = lambda key: dsgo.compact(dsgo.Document(dsgo.Node([dsgo.Node([   # noqa: E731
+                dsgo.Node([i, f'app:/weapon/{i}.sgo'] if key == 'table' else [f'name {i}', f'about {i}']) for i in table])],
+                {0: key}), []))
+            files.update({cw.TABLE: rows('table'), **{rel: rows('text_table') for rel in cw.TEXTS}})
+            if ours_written:
+                files.update({pw.sgo_file(port): b'ours', asset: b'our model'})
+            cw.install(game, files)
+            assert modfiles.read(_mods(game, asset)) == (b'our model' if ours_written else b'another mod')
+            cw.uninstall(game)
+            assert (modfiles.read(_mods(game, asset)) == b'another mod') if not ours_written else \
+                not os.path.isfile(_mods(game, asset)), ours_written
+            if not ours_written:
+                cw.repair(game)
+                assert modfiles.read(_mods(game, asset)) == b'another mod'
+
 def main() -> int:
     import rootcpk
     game = rootcpk.DEFAULT_GAME
