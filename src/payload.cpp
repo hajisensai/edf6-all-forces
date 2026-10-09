@@ -432,14 +432,14 @@ unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float distance,bo
         const float blast=At<float>(w,0x8B0);
         if(!std::isfinite(blast) || (blast>0.0f && distance<=blast*2.0f))continue;
         const StoreSpec* const spec=StoreOf(w);
-        const auto mark=At<std::int32_t>(w,edf::kWeaponMark);
+        const edf::GunRole role=edf::RoleOf(At<std::int32_t>(w,edf::kWeaponMark));   // EDF6AutoTurret's table too
         if(spec && ((airborne && (spec->role==StoreRole::ground || spec->role==StoreRole::bomb || spec->role==StoreRole::rocket)) ||
                     (!airborne && spec->role==StoreRole::air)))continue;
         // A catalogued gun round (StoreRole::gun, vcobjects.Shell) is a direct-fire round whatever class carries it: the
         // flak's proximity HE flies the stock grenade class (rounds.cpp calls it lobbed) and is meant for aircraft.
         const bool lobbed=m.lobbed && !(spec && spec->role==StoreRole::gun);
-        if(airborne && (lobbed || mark==edf::kMarkGround || mark==edf::kMarkLofted))continue;
-        if(!airborne && mark==edf::kMarkAir)continue;
+        if(airborne && (lobbed || role.prefer==edf::Prefer::ground))continue;
+        if(!airborne && role.prefer==edf::Prefer::air)continue;
         // Guided fire at long range, direct fire close up, splash against ground targets.
         float rank=m.kind==RoundKind::homing ? (distance>150.0f ? 4.0f : 2.0f) : airborne ? 3.0f : blast>0.0f ? 3.5f : 2.5f;
         if(ws[i]==previous)rank+=0.1f;

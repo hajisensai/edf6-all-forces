@@ -437,13 +437,20 @@ void FireMissiles(unsigned char* vehicle,unsigned s,Track& m) noexcept {
     m.locks=0;m.locksFirstAt=0;
 }
 
-// The driver's bindings and lock (designate.cpp), looking along the camera (else the main cannon's barrel).
+// The driver's bindings and lock (designate.cpp), looking along the camera (else the main cannon's barrel). The lock
+// reaches as far as the main cannon does (2026-10-09: it took the gunners' GunnerRange, 300 m, so a press over an enemy
+// farther out from a Titan found "no enemy in sight" or another one nearer). With EDF6VehicleCrew's turret camera on the
+// seat the cannon is the player's own auto-aimed gun (aimlink.h V4): the camera asks PlayerAimV4 later this frame, which
+// publishes the readout; else the lock is the gunners' and the readout says so.
 void DriverFrame(unsigned char* vehicle) noexcept {
     const auto seat=edf::SeatAt(vehicle,0);
     const auto gun=SeatGun(seat);
     float pos[3],dir[3];
     const bool barrel=gun && Readable(gun+kWeaponMatrix,0x40) && edf::MeanMuzzle(gun,8,pos,dir);
-    PilotFrame(vehicle,0,seat,barrel ? pos : nullptr,barrel ? dir : nullptr,cfg.gunnerRange);
+    float reach=barrel && Readable(gun,kAmmoAlive+4) ? At<float>(gun,kAmmoSpeed)*static_cast<float>(At<std::int32_t>(gun,kAmmoAlive)) : 0.0f;
+    if(!std::isfinite(reach) || reach<cfg.gunnerRange)reach=cfg.gunnerRange;
+    PilotFrame(vehicle,0,seat,barrel ? pos : nullptr,barrel ? dir : nullptr,reach);
+    if(CrewAims(vehicle,0))return;
     float world[3];
     const void* locked=Designated(vehicle,world);
     PublishAim(vehicle,false,locked,locked ? world : nullptr,nullptr,nullptr,nullptr,nullptr,0.0f);

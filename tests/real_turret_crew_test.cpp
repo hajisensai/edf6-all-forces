@@ -17,6 +17,7 @@ void PilotFrame(const unsigned char*,unsigned,const unsigned char*,const float*,
 const void* Designated(const unsigned char*,float*) noexcept{return nullptr;}
 bool LeadCircle() noexcept{return false;}
 bool CameraTurret(const unsigned char*,unsigned) noexcept{return false;}
+bool CrewAims(const unsigned char*,unsigned) noexcept{return false;}
 edf::aimlink::PlayerGun PlayerControlRule(const unsigned char*,unsigned,bool lead,bool locked) noexcept{return edf::aimlink::PlayerGunRule(false,lead,locked);}
 bool Stabilized(const unsigned char*,unsigned,const float*,float*,float*) noexcept{return false;}
 float PriorityWeight(const Enemy&) noexcept{return 1;}

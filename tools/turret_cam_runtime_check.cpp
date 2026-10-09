@@ -31,6 +31,12 @@ unsigned char* PayloadPicked(const void*) noexcept { return nullptr; } // legacy
 unsigned char* PayloadSightPicked(const void*,unsigned) noexcept { return selectedGun; }
 int owner=0;
 int AutoTurretSteers(const void*,unsigned) noexcept { return owner; }
+// The one player turret aim (turretaim.cpp PlayerTurretLead, aimlink.h V4) as the camera asks it: every frame, with the
+// gun the turret turns; `leadOn` the peer's answer (AUTO with a lock), `leadPoint` where the round meets the lock.
+int leadAsks=0;bool leadOn=false;float leadPoint[3]{};const void* leadGun=nullptr;
+bool PlayerTurretLead(const void*,unsigned,const void* gun,float* point) noexcept {
+    ++leadAsks;leadGun=gun;if(leadOn)std::memcpy(point,leadPoint,12);return leadOn;
+}
 bool AutoTurretReadout(edf::aimlink::TurretReadoutV1*) noexcept { return false; }
 bool StabHeld(const void*,float*,float*,float*) noexcept { return false; }
 float SightZoomNow(const void*) noexcept { return 1.0f; }
@@ -286,6 +292,41 @@ void Run() {
         Check(inputUnchanged,"high camera closed loop never generates native gun input from observation");
         Check(realFocus,"collision pivot must not change the real ballistic terrain focus");
         Check(stable,launcher ? "Katyusha high camera remains stable after native surface collision" : "twin artillery high camera remains stable after native surface collision");
+    }
+    // 2026-10-09 (fb aim #2, the user: "按了右键使用机枪以后，自瞄和瞄具等都无法使用了。需要按左键发射主炮才能恢复"): the
+    // Titan's right trigger picks its hull gatling (`front_gun` on `body`). The turret, its camera and the mouse command
+    // stay the turret gun's; the pick stays the HUD's.
+    {
+        Weapon hull(0,3,0);
+        Put<void*>(hull.holder,0x18,vehicleBones);Put<void*>(hull.data,0xE88,vehicleBones);Put<void*>(hull.data,0xF40,hull.bone);
+        Put<void*>(hull.data,weaponmount::kWeaponModel+0x10,hull.bone);Put<int>(hull.data,weaponmount::kWeaponModel+0x20,1);
+        Put<int>(hull.bone,0xC,0);Put<int>(hull.bone,0x10,-1);
+        unsigned char* three[]={primary.holder,hull.holder,picked.holder};
+        Put<void*>(seat,kSeatWeapons,three);Put<std::uint64_t>(seat,kSeatWeaponCount,3);
+        Put<int>(primary.data,edf::kWeaponMark,0);Put<int>(primary.data,kWeaponLockon,0);
+        ResetTurretCam();lookOk=true;nextAim=&UnexpectedAim;config.decoupledTurretCam=true;highOn=false;mountedOptic=false;
+        Put<float>(seat,kSeatAim+kAimAxes,-tcam::kPi);Put<float>(seat,kSeatAim+kAimAxes+4,tcam::kPi);
+        selectedGun=hull.data;TurretCamFrame(vehicle);
+        Check(TurretGun(vehicle,seat)==primary.data,"a hull gun pick leaves the turret to the seat's articulated gun");
+        Check(TurretCamServes(vehicle) && shared.decoupled && !shared.physicalOnly,"the hull gun pick keeps the turret camera decoupled");
+        Check(leadGun==primary.data,"auto-aim is asked with the turret's gun, not the hull gun");
+        selectedGun=primary.data;TurretCamFrame(vehicle);
+        Check(shared.decoupled && !shared.physicalOnly && TurretGun(vehicle,seat)==primary.data,"back on the cannon: the same, symmetric");
+        selectedGun=picked.data;TurretCamFrame(vehicle);
+        Check(TurretGun(vehicle,seat)==picked.data,"an articulated pick turns the turret by its own bore");
+        unsigned char* only[]={hull.holder};Put<void*>(seat,kSeatWeapons,only);Put<std::uint64_t>(seat,kSeatWeaponCount,1);
+        selectedGun=hull.data;TurretCamFrame(vehicle);
+        Check(TurretGun(vehicle,seat)==hull.data && shared.physicalOnly,"a seat with a fixed gun alone stays physical-only");
+        Put<void*>(seat,kSeatWeapons,three);Put<std::uint64_t>(seat,kSeatWeaponCount,3);
+        // The lock's lead replaces the screen's centre (aimlink.h V4); asked every frame, also through the high view.
+        selectedGun=primary.data;leadOn=true;leadPoint[0]=12;leadPoint[1]=3;leadPoint[2]=400;
+        TurretCamFrame(vehicle);
+        Check(game.hasAim && game.aimHit && game.aim[0]==12 && game.aim[2]==400,"AUTO with a lock: the turret goes to the lead point");
+        leadOn=false;TurretCamFrame(vehicle);
+        Check(game.hasAim && !(game.aim[0]==12 && game.aim[2]==400),"no lock: the screen's centre again");
+        const int asked=leadAsks;highOn=true;TurretCamFrame(vehicle);
+        Check(leadAsks==asked+1 && !game.hasAim,"the high view still asks (the lock is kept) but steers nothing");
+        highOn=false;Put<void*>(seat,kSeatWeapons,holders);Put<std::uint64_t>(seat,kSeatWeaponCount,2);
     }
     Shared intent=shared;intent.high=false;intent.decoupled=true;intent.physicalOnly=false;
     const float commandPoint[3]={0,3,250};

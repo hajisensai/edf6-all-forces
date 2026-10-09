@@ -132,6 +132,10 @@ constexpr float kTurnPerInput=1.1f/60.0f,kTurnPerInputMin=0.2f/60.0f,kTurnPerInp
 // The game frame number: it steps when a vehicle's input (slot 55, which every live vehicle gets once a
 // frame) comes round again. Game thread only.
 void SeeVehicle(const void* vehicle) noexcept;
+// The same for the player's vehicle the PlayerAimV4 export is asked about (aimlink.h V4, designate.cpp): a vehicle of a
+// class this plugin hooks is already seen by its own hook this frame (not seen twice: the clock would run double); any
+// other vehicle is seen here, once a frame.
+void SeeVehicleOnce(const void* vehicle) noexcept;
 ULONGLONG Frame() noexcept;
 
 // --- Enemies ---
@@ -232,6 +236,9 @@ bool LeadCircle() noexcept;
 // EDF6VehicleCrew's turret camera turns `vehicle`'s seat `seat` after the player's view (common/edf/aimlink.h
 // CameraTurret); false without that plugin (or an older one): the player's gun is this plugin's as in V1.
 bool CameraTurret(const unsigned char* vehicle,unsigned seat) noexcept;
+// EDF6VehicleCrew's turret camera steers the player's `vehicle` seat `seat` onto the PlayerAimV4 point (aimlink.h V4): this
+// plugin then never turns that seat itself, and a tank driver's lock is their own gun's (not only the gunners').
+bool CrewAims(const unsigned char* vehicle,unsigned seat) noexcept;
 bool ObservesTurret(const unsigned char* vehicle,unsigned seat) noexcept;
 edf::aimlink::PlayerGun PlayerControlRule(const unsigned char* vehicle,unsigned seat,bool lead,bool locked) noexcept;
 // EDF6VehicleCrew's gun stabilizer holds `vehicle`'s seat `seat` (common/edf/aimlink.h V3): `held` the axes it holds the

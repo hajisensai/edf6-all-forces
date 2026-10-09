@@ -6,6 +6,8 @@
 #include "crew.h"
 #include "turretaim.h"
 #include "memory.h"
+#include <cmath>
+#include <cstring>
 
 namespace crew {
 namespace {
@@ -13,9 +15,20 @@ edf::aimlink::TurretReadoutFn turretReadout=nullptr;
 edf::aimlink::SeatQueryFn turretSteers=nullptr;
 edf::aimlink::AwareFn turretAware=nullptr;
 edf::aimlink::ModeBindingFn turretBinding=nullptr;
+edf::aimlink::PlayerAimFn playerAim=nullptr;
 ULONGLONG bindingTried=0;
-ULONGLONG turretTried=0,steersTried=0,awareTried=0;
+ULONGLONG turretTried=0,steersTried=0,awareTried=0,playerAimTried=0;
 }  // namespace
+
+bool PlayerTurretLead(const void* vehicle,unsigned seat,const void* gun,float* point) noexcept {
+    namespace link=edf::aimlink;
+    const auto fn=link::Resolve(link::kTurretDll,link::kPlayerAim,playerAim,playerAimTried);
+    link::PlayerAimV4 r{};
+    if(!Cfg().enabled || !fn || !fn(vehicle,seat,gun,&r) || !r.steer)return false;
+    for(int i=0;i<3;++i)if(!std::isfinite(r.point[i]))return false;
+    std::memcpy(point,r.point,sizeof(r.point));
+    return true;
+}
 
 bool AutoTurretReadout(edf::aimlink::TurretReadoutV1* out) noexcept {
     namespace link=edf::aimlink;
@@ -70,6 +83,13 @@ extern "C" __declspec(dllexport) bool __cdecl EDF6VehicleCrew_ViewRayV1(float* e
 
 // EDF6AutoTurret asks whether the turret camera turns `vehicle`'s seat `seat` after the view (aimlink.h CameraTurret).
 extern "C" __declspec(dllexport) bool __cdecl EDF6VehicleCrew_CameraTurretV2(const void* vehicle,unsigned seat) {
+    __try { return crew::TurretCamTurret(vehicle,seat); }
+    __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+// EDF6AutoTurret asks whether the turret camera steers `vehicle`'s seat `seat` onto its PlayerAimV4 point (aimlink.h V4):
+// the camera's decoupled seat is the one hand on the player's turret.
+extern "C" __declspec(dllexport) bool __cdecl EDF6VehicleCrew_AimsTurretV4(const void* vehicle,unsigned seat) {
     __try { return crew::TurretCamTurret(vehicle,seat); }
     __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

@@ -20,6 +20,17 @@ constexpr std::size_t kWeaponAmmoOwnerMove=0x24C,kWeaponOwnerVel=0x190;
 // targets first, the low arc). kMarkLofted: a ground-attack launcher lobbing its rounds (the Katyusha: the high arc,
 // and EDF6VehicleCrew shows its rider where they land).
 constexpr std::int32_t kMarkAir=7301,kMarkGround=7302,kMarkLofted=7303;
+// What a mark means to an aim, one table for both plugins (2026-10-09, the user: "防空车的自瞄…统一一下"): the flak's
+// target choice and the tanks' are the same code, only these numbers differ. `prefer`: the targets it takes first (an
+// anti-air gun the air ones, a ground-attack gun the ground ones); `lofted`: its rounds take the high arc. Unmarked guns:
+// no preference, the low arc.
+enum class Prefer : std::uint8_t { any, air, ground };
+struct GunRole { std::int32_t mark; Prefer prefer; bool lofted; };
+constexpr GunRole kGunRoles[]={{kMarkAir,Prefer::air,false},{kMarkGround,Prefer::ground,false},{kMarkLofted,Prefer::ground,true}};
+constexpr GunRole RoleOf(std::int32_t mark) noexcept {
+    for(const GunRole& r:kGunRoles)if(r.mark==mark)return r;
+    return GunRole{0,Prefer::any,false};
+}
 
 // Weapon muzzles: array at +0x1D0, count at +0x1E0, stride 0xF0. Muzzle +0 is its bone (world rows
 // right/up/forward/position at +0xB0..+0xEF, updated every frame), +0x10 its local 4x4 matrix,

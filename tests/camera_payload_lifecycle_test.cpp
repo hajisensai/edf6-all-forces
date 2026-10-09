@@ -28,6 +28,7 @@ namespace audio { void LockTone(int,float) noexcept {} }
 void UnexpectedBoundary() noexcept { static volatile bool fail=true;if(fail)std::abort(); }
 void PumpAircraftPayloadUi(unsigned char*) noexcept { UnexpectedBoundary(); }
 int AutoTurretSteers(const void*,unsigned) noexcept { return 0; }
+bool PlayerTurretLead(const void*,unsigned,const void*,float*) noexcept { return false; } // no EDF6AutoTurret: the view steers
 bool AutoTurretReadout(edf::aimlink::TurretReadoutV1*) noexcept { return false; }
 bool StabHeld(const void*,float*,float*,float*) noexcept { return false; }
 float SightZoomNow(const void*) noexcept { return 1; }

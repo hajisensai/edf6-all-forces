@@ -183,6 +183,32 @@ const unsigned char* Gun(const unsigned char* vehicle,const unsigned char* seat)
     return nullptr;
 }
 
+// The gun the seat's turret turns (2026-10-09, the user: "按了右键使用机枪以后，自瞄和瞄具等都无法使用了。需要按左键发射主
+// 炮才能恢复"): whether the camera is decoupled, what the turret is steered by and the mouse command belong to the seat's
+// articulated turret, not to whichever trigger fired last. The fire-control pick (Gun) when its mount turns with both of
+// the seat's axes; otherwise the first live weapon of the seat that does (the Titan's hull `front_gun` hangs on `body`,
+// its cannon under `cannon_main`: the right trigger must not take the turret off the view); with none, the pick itself
+// (a fixed or single-axis gun stays physical-only, as before). No pick (the seat has no usable weapon): none.
+const unsigned char* TurretGun(const unsigned char* vehicle,const unsigned char* seat) noexcept {
+    const unsigned char* picked=Gun(vehicle,seat);
+    if(!picked)return nullptr;
+    const auto turns=[&](const unsigned char* w) noexcept {
+        const auto f=weaponmount::OfWeapon(vehicle,seat,w);
+        return f.known && f.yaw && f.pitch;
+    };
+    if(turns(picked))return picked;
+    const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
+    const auto count=At<std::uint64_t>(seat,kSeatWeaponCount);
+    for(std::uint64_t i=0;i<count && i<16;++i) {
+        if(!Readable(holders[i],kHolderWeapon+8))continue;
+        const auto ctrl=At<const unsigned char*>(holders[i],kHolderCtrl);
+        if(!Readable(ctrl,12) || At<std::int32_t>(ctrl,8)<=0)continue;
+        const auto w=At<const unsigned char*>(holders[i],kHolderWeapon);
+        if(w!=picked && Readable(w,edf::kWeaponAccuracyScale+4) && At<std::uint64_t>(w,edf::kMuzzleCount)>0 && turns(w))return w;
+    }
+    return picked;
+}
+
 // Same shot model and muzzle transform as the vehicle HUD. No camera ray participates in this prediction.
 // RoundLands also returns the flight endpoint on a miss; an unreadable/guided model uses the actual bore path.
 // The observed point is the landing while it is within reach, else the ground under where the shot ends, at most
@@ -253,7 +279,9 @@ bool AimPoint(float* p,bool* hit) noexcept {
 // EDF6AutoTurret's lead-circle mode on the player's own gun (its readout: common/edf/aimlink.h).
 bool LeadCircleOn() noexcept {
     edf::aimlink::TurretReadoutV1 r{};
-    return AutoTurretReadout(&r) && r.ownGun && r.mode==edf::aimlink::Mode::leadCircle;
+    // Only while a circle is there (a target and its solve): with none, the screen's centre takes the arc as in AUTO (a
+    // tank's driver seat is the player's own gun since aimlink.h V4 and must not lose its drop compensation to a mode).
+    return AutoTurretReadout(&r) && r.ownGun && r.mode==edf::aimlink::Mode::leadCircle && r.target && r.lead;
 }
 
 bool FreeHeld(const unsigned char* seat) noexcept {
@@ -296,7 +324,7 @@ bool TurretPivot(const unsigned char* seat,const float* muzzle,float* pivot) noe
 // `ballistic` the low arc for a gun whose rounds drop (a lofted launcher's arc is katyusha.cpp's: it gets the line), else
 // the bore line (turretcam.h BallisticAim).
 bool Wants(const unsigned char* seat,const float* frame,const float* p,bool ballistic,float* want) noexcept {
-    const unsigned char* gun=Gun(shared.v,seat);
+    const unsigned char* gun=TurretGun(shared.v,seat);
     float muzzle[3],dir[3];
     if(!gun || !edf::MeanMuzzle(gun,16,muzzle,dir))return false;
     float pivot[3],origin[3];
@@ -344,7 +372,7 @@ void Readout(const unsigned char* seat,const Shared& s,bool on,const float* hold
     r.aimValid=commandValid && s.decoupled && !s.physicalOnly && !s.high &&
                std::isfinite(holdAt[0]) && std::isfinite(holdAt[1]) && std::isfinite(holdAt[2]);
     r.decoupled=s.decoupled;r.freeLook=s.free || s.returning;r.high=s.high;r.onTarget=on;
-    const unsigned char* gun=Gun(s.v,seat);
+    const unsigned char* gun=TurretGun(s.v,seat);
     float muzzle[3],dir[3];
     if(!gun || !edf::MeanMuzzle(gun,64,muzzle,dir))return;
     std::memcpy(r.aim,holdAt,12);
@@ -788,7 +816,12 @@ void TurretCamFrame(unsigned char* v) noexcept {
     ReleaseSRWLockShared(&lock);
     const bool mounted=!high && SightZoomMounted(v);
     game.hasAim=!high && !observing && !mounted && AimPoint(game.aim,&game.aimHit);
-    const auto freedom=weaponmount::OfWeapon(v,seat,Gun(shared.v,seat));
+    // The one player turret aim (aimlink.h V4, turretaim.cpp): asked every frame so its bindings and lock stay current
+    // through the high view and the optic too; in AUTO with a lock the turret goes to where the round meets the target,
+    // through the same arc solve (Wants) as the screen's centre, the view staying the player's.
+    float lead[3];
+    if(PlayerTurretLead(v,0,TurretGun(v,seat),lead) && game.hasAim){std::memcpy(game.aim,lead,12);game.aimHit=true;}
+    const auto freedom=weaponmount::OfWeapon(v,seat,TurretGun(shared.v,seat));
     AcquireSRWLockExclusive(&lock);
     shared.seat=seat;shared.seenMs=GameMs();
     shared.physicalOnly=!(freedom.known && freedom.yaw && freedom.pitch);

@@ -135,10 +135,23 @@ void Log(const char* format,...) noexcept {
     if(n>0)log.Write(logPath,line,static_cast<DWORD>(n));
 }
 
-void SeeVehicle(const void* vehicle) noexcept {
+namespace {
+const void* exportSeen=nullptr;   // the vehicle whose frame entry the PlayerAimV4 export made (SeeVehicleOnce)
+void Step(const void* vehicle) noexcept {
     for(int i=0;i<frameSeenCount;++i)
         if(frameSeen[i]==vehicle){++frame;frameSeenCount=0;break;}
     if(frameSeenCount<kFrameSeen)frameSeen[frameSeenCount++]=vehicle;
+}
+}  // namespace
+void SeeVehicle(const void* vehicle) noexcept {
+    if(vehicle==exportSeen)exportSeen=nullptr;   // its own input hook sees it again: the export no longer steps for it
+    Step(vehicle);
+}
+void SeeVehicleOnce(const void* vehicle) noexcept {
+    bool seen=false;
+    for(int i=0;i<frameSeenCount;++i)seen=seen || frameSeen[i]==vehicle;
+    if(seen && exportSeen!=vehicle)return;   // its own input hook saw it this frame (the flak, a 403 / 404 tank)
+    Step(vehicle);exportSeen=vehicle;
 }
 ULONGLONG Frame() noexcept { return frame; }
 
@@ -500,8 +513,11 @@ bool ReadShot(const unsigned char* vehicle,const unsigned char* seat,Shot& shot,
         armed=true;++diag.weapons;
         shot.speed=At<float>(weapon,kAmmoSpeed);
         gravity=At<float>(weapon,kAmmoGravity);
-        shot.ground=shot.ground || mark==Mark::ground || mark==Mark::lofted;
-        shot.lofted=shot.lofted || mark==Mark::lofted;
+        // The mark's role from the one table (common/edf/weapon.h kGunRoles), the legacy mark read as its new one.
+        constexpr std::int32_t kValue[]={0,kMarkAir,kMarkGround,kMarkLofted};   // Mark::none, air, ground, lofted
+        const edf::GunRole role=edf::RoleOf(kValue[static_cast<int>(mark)]);
+        shot.ground=shot.ground || role.prefer==edf::Prefer::ground;
+        shot.lofted=shot.lofted || role.lofted;
         const float reach=shot.speed*static_cast<float>(At<std::int32_t>(weapon,kAmmoAlive));
         if(reach>range)range=reach;
     });
@@ -652,6 +668,9 @@ float Steer(unsigned char* vehicle,const unsigned char* seat) noexcept {
     // one dragged away from. With the camera the stick turns the view: no drag.
     edf::aimlink::PlayerGun rule=pilot ? PlayerControlRule(vehicle,0,LeadCircle(),only!=nullptr)
                                              : edf::aimlink::PlayerGun{true,true};
+    // EDF6VehicleCrew's turret camera is the one hand on the player's flak (aimlink.h V4): it steers onto the lead
+    // PlayerAimV4 gives, the same as every other ground vehicle's; here the turret is only tracked (the fuse, the readout).
+    if(pilot && CrewAims(vehicle,0))rule=edf::aimlink::PlayerGun{false,false};
     if(pilot && !rule.steer)track->steered=0; // observation camera cannot drive this gun
     const float stick[2]={At<float>(seat,kStick),At<float>(seat,kStick+4)};
     const bool drag=rule.drag && cfg.dragDeadzone>0.0f && (std::fabs(stick[0])>cfg.dragDeadzone || std::fabs(stick[1])>cfg.dragDeadzone);
