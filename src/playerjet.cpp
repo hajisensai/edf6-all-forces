@@ -298,8 +298,11 @@ void Boarded(PJet& j,unsigned char* v,const float* pos,float clear) noexcept;
 void Left(PJet& j,unsigned char* v,float clear,bool alive,bool eject) noexcept;
 void HandBack(PJet& j,unsigned char* v,const char* why) noexcept;
 jet::Jet* CatchChoice(const float* pos) noexcept;
+// Whether it flies on its own here (the hail, the catch, the hand-back): its real NPC pilot at the stick, or a drone of
+// the plugin's, which no one sits in (jet_internal.h Unmanned).
 bool CrewedPilot(const unsigned char* v) noexcept {
-    return v && SeatCount(v)>0 && SeatRider(SeatAt(const_cast<unsigned char*>(v),0))==Rider::other && NpcDriver(v) && OnlineRunsHere(v);
+    if(!v || SeatCount(v)==0 || !OnlineRunsHere(v))return false;
+    return (SeatRider(SeatAt(const_cast<unsigned char*>(v),0))==Rider::other && NpcDriver(v)) || JetFliesItself(v);
 }
 
 float RestOver(const unsigned char* v,const float* pos) noexcept;

@@ -28,6 +28,7 @@ bool HeliCommand(const void*,const Command&) noexcept {UnexpectedWorldCall();}
 bool ProteusReady() noexcept {UnexpectedWorldCall();}
 bool NpcDriver(const unsigned char*) noexcept {UnexpectedWorldCall();}
 bool SeatNpcRider(unsigned char*,bool) noexcept {UnexpectedWorldCall();}
+bool OnlineMaySeatNpc(const void*) noexcept {UnexpectedWorldCall();}
 void NoteLocalCopy(const void*,const void*) noexcept {UnexpectedWorldCall();}
 bool FixBodyPart506(unsigned char*,const char*) noexcept {UnexpectedWorldCall();}
 int FaultLog(const char*,const EXCEPTION_POINTERS*) noexcept {UnexpectedWorldCall();}

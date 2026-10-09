@@ -55,8 +55,9 @@ void MirrorEntry(const PJet& j,const unsigned char* v) noexcept {
 void HandBack(PJet& j,unsigned char* v,const char* why) noexcept {
     j.keep=false;j.hail=PJet::Hail{};j.autopilot=false;j.active=false;j.steered=false;j.orbiting=false;
     if(catchFlight.v==v)catchFlight=CatchFlight{};
-    if(SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::none && !v[kDead])SeatNpcRider(v,false);
-    if(CrewedPilot(v)){jet::ResumeNpc(v,j.vel);Log("PJET v=%p back to its real NPC pilot: %s",v,why);}
+    const bool drone=JetFliesItself(v);   // no one sits in it: the plugin flies it again (jet_internal.h Unmanned)
+    if(!drone && SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::none && !v[kDead])SeatNpcRider(v,false);
+    if(CrewedPilot(v)){jet::ResumeNpc(v,j.vel);Log("PJET v=%p back to %s: %s",v,drone ? "its own flight (a drone)" : "its real NPC pilot",why);}
     else Log("PJET v=%p has no local real pilot after hand-back: no autonomous flight",v);
 }
 

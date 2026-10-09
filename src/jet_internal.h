@@ -446,6 +446,14 @@ struct Jet {
 constexpr int kMaxJets=64,kPatrolRings=6;
 extern Jet jets[kMaxJets];
 inline const Kind& KindOf(const Jet& j) noexcept { return KindOf(j.role); }
+// The plugin's drones (drone, blast, doll): no one sits in them. One the plugin launched (Launch: a carrier's, the
+// submarine carrier's, a thrown one) is flown by JetFrame with its seats empty (heli.cpp HeliFrame, JetFliesItself):
+// since the real crews (2026-10-08) no soldier can walk aboard a drone made in the air, and none is made in it
+// (docs/real-npc-crew.md), so a drone that waited for a pilot fell from where it was launched (2026-10-09 log: six
+// doll drones driver=0, seats=[-], falling through the ground). Every crewed body comes with its real crew instead
+// (support_dispatch.cpp: made inside it, seated at spawn); Launch makes no crewed one.
+constexpr bool Unmanned(Role r) noexcept { return r==Role::drone || r==Role::blast || r==Role::doll; }
+inline bool FliesItself(const Jet& j) noexcept { return j.launched && Unmanned(j.role); }
 inline int IndexOf(const Jet& j) noexcept { return static_cast<int>(&j-jets); }
 
 // Retargeting abandons an old attack but preserves ammunition cooldowns and lifecycle flight modes.
