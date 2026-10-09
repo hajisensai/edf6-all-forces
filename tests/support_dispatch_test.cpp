@@ -17,6 +17,8 @@ unsigned char objects[32][0x3000]{},controls[32][32]{},seats[32][edf::kSeatStrid
 int made=0,deleted=0,boardRequests=0,activated=0,orders=0,followed=0,netRequests=0,releases=0,routeOrders=0;
 int held=0;bool transactionActive=false;
 bool SupportTransactionActive(std::uint64_t) noexcept {return transactionActive;}
+bool peersNew=true;
+bool SupportPeersAcceptVariants() noexcept {return peersNew;}
 bool HoldSupportSoldier(const ObjRef&,bool hold) noexcept {held+=hold ? 1 : -1;return true;}
 bool allReady=true,terrain=true,nativeFail=false;
 #ifndef SUPPORT_ROUTE_NATIVE_TEST
@@ -270,6 +272,23 @@ int main() {
     SupportPlan hostPlan=deployments[0].plan;
     check(Validate(hostPlan),"a peer accepts the host's configured weapons and count (structure, not its own ini)");
     hostPlan.units[1].resourceId=0x503;check(!Validate(hostPlan),"a non-template soldier resource is refused");
+    // A room with an older All Forces peer (no kCapSoldierVariants): the host plans the protocol v2 plan an older
+    // Validate accepts (rifles, each call's own aircraft count) and says why, instead of a silent mid-transaction refusal.
+    peersNew=false;
+    ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;routeResult=npc::navigation::Result::moving;
+    SupportCallAt(21,target,note,128);SupportDispatchTick();
+    bool rifles=made==4;for(int i=0;i<resourceCount;++i)rifles=rifles && lastResources[i]==(i%4 ? kSupportRangerResource : kSupportLeaderResource);
+    SupportCallStatus(note,128);
+    check(rifles && std::wcsstr(note,hudtext::Tr(hudtext::Tx::supportLegacyPeers))!=nullptr,
+          "older peer: rifle leader/members (ids 2/1) and the HUD says the configured weapons were not synchronised");
+    ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
+    SupportCallAt(10,target,note,128);SupportDispatchTick();
+    check(plannedAircraft==1 && made==2 && lastResources[0]==kSupportRangerResource,"older peer: the call's own aircraft count, rifle crew");
+    const auto old=deployments[0].plan;bool v2=true;
+    for(unsigned i=0;i<old.count;++i)v2=v2 && (old.units[i].resourceId>=kSupportAircraftResource || old.units[i].resourceId<=2);
+    check(v2,"the whole plan uses only resources a protocol v2 Validate knows");
+    peersNew=true;ResetSupportDispatch();SupportCallStatus(note,128);
+    check(!std::wcsstr(note,hudtext::Tr(hudtext::Tx::supportLegacyPeers)),"the older-peer notice ends with the mission");
     std::printf("support_dispatch_test: %d checks passed\n",checks);
 }
 #endif
