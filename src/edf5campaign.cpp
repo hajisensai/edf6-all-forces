@@ -1,16 +1,13 @@
-// The EDF5 campaign's rows left out of the story's end, clear ratio and progress (tools/make_edf5_campaign.py,
-// docs/mission-list-re.md §「EDF5 战役」). The campaign appends EDF5's missions to the offline mission list. EDF.dll
-// reads the list's row count as "the story" in two ways:
-// - as its length (7 of the 27 calls to the row-count accessor 0xE0650): the last row's clear plays the ending, sets
-//   the story-complete flag and unlocks every difficulty, and the clear ratio counts every row. Those calls get the
-//   count capped at the rows before the first EDF5 one (ini EDF5CampaignRows, written by the installer; 0 = no cap);
-// - as the scale of the story's progress, current row / (rows - 1) (0xD7B60), by which its 4 callers interpolate the
-//   mode's per-difficulty ranges (config.sgo ModeList: Easy 5..15 ... Inferno 160..280, the drop level by all
-//   appearances). Appended rows would compress EDF6's own missions to about half. Those 4 calls get EDF6's rows over
-//   EDF6's rows (as stock), and the EDF5 rows their own place in the campaign (0 at its first mission, 1 at its last).
-// The accessor itself stays as it is: the mission select, ProceedNextMission, the save's loops and loading need the
-// real count (the other 20 calls, each named in tools/selftest.py edf5_campaign_plugin_sites). Lists no longer than
-// the cap (the DLC lists, the online list, the offline list without the campaign) are untouched.
+// The EDF5 campaign's three mission packs owned (tools/make_edf5_campaign.py, docs/mission-list-re.md §7).
+// The installer appends EDF5's story and its two DLCs to DefaultPackage/config.sgo's ModeList as offline modes of
+// their own, content ids EDF5CampaignContent .. +2 (after every id in the list; EDF.dll knows 0..2). The mission-pack
+// dialog lists every offline mode and enables the ones whose content the player owns: 0xD92B0(mgr, id) looks the id
+// up in mgr+0xE0, a std::set rebuilt as {0} and the content ids of the platform's add-ons (0xDBB50, 0xDA600,
+// 0xDBD40). Ours are no platform add-on, so the dialog would show them greyed out with "not purchased". Every call
+// to 0xD92B0 (7, each named in kSites; tools/selftest.py edf5_campaign_plugin_sites checks there are no others)
+// goes through OwnedHook: the native answer, and ours owned besides. Nothing else changes: the packs' lists, saves,
+// endings (none: MAINSCRIPT plays them for contents 0..2) and the story's statistics (content 0 only) are the
+// game's own handling of a mode. EDF5CampaignContent=0 (no packs installed): the native answer alone.
 #include "crew.h"
 #include "memory.h"
 #include <cstdint>
@@ -19,51 +16,30 @@
 
 namespace crew {
 namespace {
-using RowsFn=int(__fastcall*)(std::uintptr_t);
-using ProgressFn=float(__fastcall*)(std::uintptr_t);
+using OwnedFn=bool(__fastcall*)(std::uintptr_t,int);
 
 // EDF.dll TimeDateStamp 0x678CCB46.
-constexpr unsigned kRows=0xE0650;       // (list): the rows of a mission list (its table's child count)
-constexpr unsigned kProgress=0xD7B60;   // (mgr): mgr+0x48 (current row) / (rows of mgr+0x130 - 1), 0 for 1 row or none
-constexpr std::uintptr_t kList=0x130;   // mgr+: the current mode's mission list
-constexpr std::uintptr_t kCurrent=0x48; // mgr+: the current row
-// mov rdx,[rcx+0xF0]; test rdx,rdx; jne +3
-const unsigned char kRowsSig[]={0x48,0x8B,0x91,0xF0,0x00,0x00,0x00,0x48,0x85,0xD2,0x75,0x03};
-// mov [rsp+8],rbx; push rdi; sub rsp,0x30; mov rbx,rcx
-const unsigned char kProgressSig[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x30,0x48,0x8B,0xD9};
-bool campaignReady=false;
-constexpr unsigned kRowSites[]={
-    0x70EDB7,   // IsLastMission (0x70EDA0): current == count-1, the ending
-    0xDF9B8,    // the all-clear check (0xDF990): the last row cleared by any class unlocks every difficulty
-    0x92EBD,    // clears applied from a record: the last row among them sets the story-complete flag (+0x300)
-    0xDCD3B,    // the clear ratio's denominator (0xDC9E0)
-    0xDD108,    // its numerator: the loop over the rows (0xDC9E0)
-    0xD8586,    // the per-difficulty clear counts (0xD8550)
-    0x7480F6,   // the online percentage
+constexpr unsigned kOwned=0xD92B0;   // (mgr, content id): whether the player owns the content
+constexpr int kPacks=3;              // EDF5's story, DLC1, DLC2: content ids EDF5CampaignContent .. +2
+// mov r8,[rcx+0xE0]; mov rcx,r8; mov rax,[r8+8]: the owned set's head and root
+const unsigned char kOwnedSig[]={0x4C,0x8B,0x81,0xE0,0x00,0x00,0x00,0x49,0x8B,0xC8,0x49,0x8B,0x40,0x08};
+constexpr unsigned kSites[]={
+    0x8BEF48,   // the mission-pack dialog's list (0x8BEE40): enabled or "not purchased"
+    0x8B5188,   // (0x8B4280)
+    0x8EC659,   // the lobby's room join (0x8EC270)
+    0x8F64A1,   // (0x8F6460)
+    0x8FD963,   // (0x8FD8F0)
+    0x90069B,   // the lobby's rooms (0x9005D0)
+    0x91A655,   // (0x91A600)
 };
-constexpr unsigned kProgressSites[]={0xD7B25,0xD7C77,0xD8140,0xD8860};
+bool campaignReady=false;
 
-constexpr int Capped(int rows,int cap) noexcept { return cap>0 && rows>cap ? cap : rows; }
-// The story's progress at row `current` of `rows`, the first `cap` of them EDF6's (cap > 0, rows > cap).
-constexpr float Progress(std::uint32_t current,int rows,int cap) noexcept {
-    if(current<static_cast<std::uint32_t>(cap))return cap>1 ? static_cast<float>(current)/static_cast<float>(cap-1) : 0.0f;
-    const int campaign=rows-cap;
-    return campaign>1 ? static_cast<float>(current-static_cast<std::uint32_t>(cap))/static_cast<float>(campaign-1) : 0.0f;
-}
-static_assert(Capped(282,147)==147 && Capped(147,147)==147 && Capped(40,147)==40 && Capped(282,0)==282);
-static_assert(Progress(0,282,147)==0.0f && Progress(146,282,147)==1.0f && Progress(73,282,147)==0.5f);
-static_assert(Progress(147,282,147)==0.0f && Progress(281,282,147)==1.0f && Progress(147,148,147)==0.0f);
+constexpr bool Ours(int id,int first) noexcept { return first>0 && id>=first && id<first+kPacks; }
+static_assert(Ours(3,3) && Ours(5,3) && !Ours(6,3) && !Ours(2,3) && !Ours(0,0) && !Ours(3,0));
 
-int __fastcall RowsHook(std::uintptr_t list) {
-    const int rows=reinterpret_cast<RowsFn>(image+kRows)(list);
-    return campaignReady ? Capped(rows,Cfg().edf5CampaignRows) : rows;
-}
-
-float __fastcall ProgressHook(std::uintptr_t mgr) {
-    const int cap=Cfg().edf5CampaignRows;
-    const int rows=reinterpret_cast<RowsFn>(image+kRows)(mgr+kList);
-    if(!campaignReady || cap<=0 || rows<=cap)return reinterpret_cast<ProgressFn>(image+kProgress)(mgr);
-    return Progress(*reinterpret_cast<const std::uint32_t*>(mgr+kCurrent),rows,cap);
+bool __fastcall OwnedHook(std::uintptr_t mgr,int id) {
+    if(reinterpret_cast<OwnedFn>(image+kOwned)(mgr,id))return true;
+    return campaignReady && Ours(id,Cfg().edf5CampaignContent);
 }
 
 bool Calls(unsigned site,unsigned target) noexcept {
@@ -73,37 +49,25 @@ bool Calls(unsigned site,unsigned target) noexcept {
     std::memcpy(&rel,p+1,4);
     return p+5+rel==image+target;
 }
-
-struct Group { unsigned target; const unsigned* sites; std::size_t count; void* hook; };
-const Group kGroups[]={
-    {kRows,kRowSites,std::size(kRowSites),reinterpret_cast<void*>(&RowsHook)},
-    {kProgress,kProgressSites,std::size(kProgressSites),reinterpret_cast<void*>(&ProgressHook)},
-};
 }  // namespace
 
-// All or nothing: the ending at the last EDF5 row but the ratio over the story (or the reverse) is worse than stock.
+// All or nothing: a pack enabled in the dialog but refused where another call asks is worse than stock.
 bool InstallEdf5Campaign() noexcept {
     if(campaignReady)return true;
-    if(!Matches(kRows,kRowsSig,sizeof(kRowsSig))){Log("HOOK edf5 campaign=0 (EDF+%#x does not match)",kRows);return false;}
-    if(!Matches(kProgress,kProgressSig,sizeof(kProgressSig))){Log("HOOK edf5 campaign=0 (EDF+%#x does not match)",kProgress);return false;}
-    int sites=0;
-    for(const auto& g:kGroups) {
-        for(std::size_t i=0;i<g.count;++i)
-            if(!Calls(g.sites[i],g.target)){Log("HOOK edf5 campaign=0 (EDF+%#x is no call to EDF+%#x)",g.sites[i],g.target);return false;}
-        sites+=static_cast<int>(g.count);
-    }
+    if(!Matches(kOwned,kOwnedSig,sizeof(kOwnedSig))){Log("HOOK edf5 campaign=0 (EDF+%#x does not match)",kOwned);return false;}
+    for(unsigned site:kSites)
+        if(!Calls(site,kOwned)){Log("HOOK edf5 campaign=0 (EDF+%#x is no call to EDF+%#x)",site,kOwned);return false;}
     int done=0;
-    for(const auto& g:kGroups)
-        for(std::size_t i=0;i<g.count;++i) {
-            bool changed=false;
-            if(RedirectCall(image+g.sites[i],image+g.target,g.hook,changed))++done;
-            else Log("EDF5 call site %#x %s",g.sites[i],changed ? "half patched" : "not patched");
-        }
+    for(unsigned site:kSites) {
+        bool changed=false;
+        if(RedirectCall(image+site,image+kOwned,reinterpret_cast<void*>(&OwnedHook),changed))++done;
+        else Log("EDF5 call site %#x %s",site,changed ? "half patched" : "not patched");
+    }
     // A near-thunk allocation/protection failure can occur after earlier calls were redirected. Keep those
-    // redirected calls on the original behavior until every call is installed, including a half-written call.
-    campaignReady=done==sites;
-    Log("HOOK edf5 campaign=%d (%d/%d calls: the story's length and progress over EDF5CampaignRows=%d rows)",campaignReady,done,sites,
-        Cfg().edf5CampaignRows);
+    // redirected calls on the native answer until every call is installed, including a half-written call.
+    campaignReady=done==static_cast<int>(std::size(kSites));
+    Log("HOOK edf5 campaign=%d (%d/%d calls: the mission packs' content %d..%d owned)",campaignReady,done,
+        static_cast<int>(std::size(kSites)),Cfg().edf5CampaignContent,Cfg().edf5CampaignContent+kPacks-1);
     return campaignReady;
 }
 }  // namespace crew

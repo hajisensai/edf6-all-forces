@@ -850,6 +850,7 @@ set_tests_properties(npc_reseat_native PROPERTIES SKIP_RETURN_CODE 77)
 # Integration checks for observed native crashes, real assets and mission participation.
 target_sources(EDF6VehicleCrew PRIVATE src/mission_participants.cpp src/mission_participant_gate.cpp)
 add_test(NAME stock_store_recoil COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_stock_store_recoil.py")
+add_test(NAME stock_store_loadouts COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_stock_store_loadouts.py")
 add_test(NAME stock_store_recoil_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/stock_store_recoil_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(stock_store_recoil_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME katyusha_mount COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/katyusha_mount_check.py" "${EDF6_GAME_DIR}")

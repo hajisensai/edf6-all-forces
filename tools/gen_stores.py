@@ -1,5 +1,5 @@
 """Writes src/stores.inc, the plugin's side of the jets' stores (src/stores.cpp includes it), from pylib/vcobjects.py:
-  kStores     every store kind (STORES): its weapon files' name prefix (vcobjects.store_file: EDF6VC_<KIND>_<rounds>.SGO),
+  kStores     every store kind (STORES: the jets' and the stock vehicles'): its weapon files' name prefix (vcobjects.store_file: EDF6VC_<KIND>_<rounds>.SGO),
               its name, its role, a round's mass and drag
   kJetMasses  a jet's mass without stores by its mark (JET_MASSES) and the durability its SGO gives it (JETS; the gunship
               tools/make_jets.py builds from the strike jet's): the ram's damage scales by its HP over that (src/playerjet.cpp)
@@ -18,7 +18,8 @@ import make_jets  # noqa: E402
 import vcobjects as vc  # noqa: E402
 
 OUT = os.path.normpath(os.path.join(HERE, '..', 'src', 'stores.inc'))
-ROLES = {'air': 'StoreRole::air', 'ground': 'StoreRole::ground', 'bomb': 'StoreRole::bomb', 'rocket': 'StoreRole::rocket'}
+ROLES = {'air': 'StoreRole::air', 'ground': 'StoreRole::ground', 'bomb': 'StoreRole::bomb', 'rocket': 'StoreRole::rocket',
+         'gun': 'StoreRole::gun'}   # gun: a stock vehicle's rounds (vcobjects.Shell)
 
 
 def durabilities() -> dict[float, float]:

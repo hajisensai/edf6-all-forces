@@ -34,8 +34,10 @@ class StockStoreRecoilTests(unittest.TestCase):
                 new = dsgo.to_py(dsgo.parse(after).root)['Ammo_CustomParameter'][0][3][1]
                 self.assertEqual(new[:count], old)
                 self.assertNotIn('coax_mg', str(new).lower())
-                for weapon in new[count:]:
-                    self.assertEqual(weapon[1], [0.0, 0.0])
+                for mount, weapon in zip(mounts, new[count:]):
+                    # rockets and missiles recoil nothing; a gun round as the stock gun it fires beside
+                    want = [0.1, 0.2] if stores.is_shell(mount.weapon) else [0.0, 0.0]
+                    self.assertEqual(weapon[1], want)
 
     def test_old_aim_recoil_variant_is_rejected(self) -> None:
         data, _ = stores.request_sgo(request('V505_TANK', 1), 'request.sgo', {'V505_TANK': 1})
