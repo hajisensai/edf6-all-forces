@@ -9,6 +9,11 @@
 //    residual: the error grows with the hull's turn rate, `lag` s of it), never turning the axis faster in total than
 //    the turret's own top rate (the stock params' top, rad/frame) and never past its stops. Past `slip` rad off (the hull
 //    turns faster than the drive), the reference is dragged along: the gun lags, then catches up once the hull calms.
+//  - Following the hull (Hold::follow, ini TurretFollowsHull, default on; the user, 2026-10-09: "炮塔不会随着车体旋转
+//    而旋转"): the hull's heading, its nose's turn about the world's up, carries the reference with it (CarryHeading),
+//    so a gun given no command turns with the hull, as it does stock, while the hull's pitch and roll (the bumps, a
+//    slope) are still taken out: the stabilizer holds the gun's elevation and its line against the jolts, not a world
+//    heading against the driver's steering. Off, the reference holds its world heading as well (a two-plane hold).
 //  - Which hull the drawn gun is seen in is measured, not assumed (Probe): the muzzle bones of the last pose against
 //    the axes as they were then, under each hypothesis (the gun's mount: the hull, or the hull turned by seat 0's yaw
 //    axis, a gun on the main turret; the pose's hull: the aim step's own, or the next step's, the hull having moved on
@@ -114,7 +119,32 @@ struct Hold {
     float shift[2];   // what the last step added to the axes past the stock step (rad, the aim's senses)
     float error;      // rad the gun is off the reference after the last step (both axes' larger)
     bool slipping;    // the reference was dragged (the drive could not keep up)
+    bool follow;      // the hull's heading carries the reference (see the top); set by the owner before each Step
 };
+
+// The heading change from `from` to `to`: the turn about the world's up (+y) that takes `from`'s nose, flattened,
+// onto `to`'s (cos, sin); none (`ok` false) when either nose is (nearly) vertical: no heading.
+struct HeadingTurn { float c,s; bool ok; };
+inline HeadingTurn HeadingChange(const Frame& from,const Frame& to) noexcept {
+    const float ax=from.r[6],az=from.r[8],bx=to.r[6],bz=to.r[8];
+    const float la=std::sqrt(ax*ax+az*az),lb=std::sqrt(bx*bx+bz*bz);
+    if(!(la>1e-3f) || !(lb>1e-3f))return HeadingTurn{1.0f,0.0f,false};
+    return HeadingTurn{(ax*bx+az*bz)/(la*lb),(az*bx-ax*bz)/(la*lb),true};
+}
+// `v` (a world direction) turned by `t`.
+inline void Carry(const HeadingTurn& t,float* v) noexcept {
+    if(!t.ok)return;
+    const float x=v[0],z=v[2];
+    v[0]=x*t.c+z*t.s;v[2]=-x*t.s+z*t.c;
+}
+// What following the hull does before a step (Step) or a controller's look ahead (Held): the reference carried by the
+// heading change since the frame the last step saw the gun in; the command's frame (`last`) with it, so the command
+// turns the carried reference exactly as it would have turned the uncarried one.
+inline void Follow(const Frame& was,const Frame& seen,float* ref,Frame* last) noexcept {
+    const HeadingTurn t=HeadingChange(was,seen);
+    Carry(t,ref);
+    if(last)for(int r=0;r<3;++r)Carry(t,last->r+3*r);
+}
 
 // A native velocity-joint readback replaces its previous target with the measured angle before the
 // next input step. Reconcile that actuator tracking difference in the PREVIOUS pose basis, rather
@@ -135,6 +165,7 @@ inline void Step(Hold& h,const Stops* stops,const float* before,const float* aft
     out[0]=after[0];out[1]=after[1];
     h.shift[0]=h.shift[1]=0.0f;h.error=0.0f;h.slipping=false;
     if(!h.live){Dir(seen,after,h.ref);h.last=f;h.seen=seen;h.live=true;return;}
+    if(h.follow)Follow(h.seen,seen,h.ref,&h.last);
     // The command (the stock step's own turn) moves the reference, about the frame it was held in.
     float ra[2];
     Angles(h.last,h.ref,ra);
@@ -170,8 +201,9 @@ inline void Step(Hold& h,const Stops* stops,const float* before,const float* aft
 inline bool Held(const Hold& h,const Stops* stops,const Frame& seen,const float* axes,float* held,float* hull) noexcept {
     held[0]=axes[0];held[1]=axes[1];hull[0]=hull[1]=0.0f;
     if(!h.live)return false;
-    float now[2],was[2];
-    Angles(seen,h.ref,now);Angles(h.seen,h.ref,was);
+    float now[2],was[2],ref[3]={h.ref[0],h.ref[1],h.ref[2]};
+    if(h.follow)Follow(h.seen,seen,ref,nullptr);
+    Angles(seen,ref,now);Angles(h.seen,h.ref,was);
     for(int i=0;i<2;++i){held[i]=Keep(stops[i],now[i]);hull[i]=Diff(stops[i],now[i],was[i]);}
     return true;
 }

@@ -67,6 +67,7 @@ int wmain(int argc,wchar_t** argv) {
     const auto module=LoadLibraryExW(argv[1],nullptr,DONT_RESOLVE_DLL_REFERENCES);
     image=edf::IdentifyImage(module);
     Check(image!=nullptr,"supported private EDF.dll mapping (no DllMain)");config.debug=false;
+    config.turretFollowsHull=false;   // the world-held (two-plane) contract first; the hull-following one at the end
     DWORD old=0;Check(VirtualProtect(image+0x5FC230,1,PAGE_EXECUTE_READWRITE,&old)!=0,"private signature negative control writable");
     const unsigned char originalWrite=image[0x5FC230];image[0x5FC230]^=1;
     Check(!InstallStabilizer() && !hooked,"changed native readback write disables every stabilizer path");
@@ -114,6 +115,17 @@ int wmain(int argc,wchar_t** argv) {
         worst=std::fmax(worst,std::fabs(e->hold.shift[0]));
     }
     Check(worst<0.001f*deg,"180 real native frames do not feed physical readback jitter into a second servo");
+    // TurretFollowsHull (default): the same tracking lag, hull yaw and player input through the production path. The
+    // hull's heading carries the reference: no correction for the yaw, the readback still reconciled, the command kept.
+    config.turretFollowsHull=true;
+    e=Setup();testFrame=2;
+    Hull(hullTurn);patchedReadback(aim,0,0,tracking);
+    Check(StabHeld(aim,held,delta,basis) && std::fabs(stab::Wrap(held[0]-tracking))<0.0001f*deg && std::fabs(delta[0])<0.0001f*deg,
+          "following: the controller sees the reconciled axis, the hull's yaw carried (no hull part)");
+    StabFrame(vehicle);StabStep(aim,input,reinterpret_cast<AimStepFn>(image+kPlainAimStep));
+    Check(std::fabs(e->hold.shift[0])<0.0001f*deg && std::fabs(AxisOf(aim,0)[2]-(tracking+own))<0.0001f*deg,
+          "following: the turret turns with the hull, the player's command and the native tracking kept");
+    Check(std::fabs(AxisOf(aim,0)[3]-own)<1e-7f,"following: the native command rate kept");
     std::printf("stab_native_readback_test: %d checks passed; old stationary shift %.3f deg, new worst %.6f deg\n",checks,legacy/deg,worst/deg);
     std::puts("No live Havok world/game; native angle readback, axis step and bone mapping execute unchanged.");
 }

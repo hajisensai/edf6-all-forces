@@ -32,6 +32,17 @@ inline float PitchOf(const float* d) noexcept {
     const float h=std::sqrt(d[0]*d[0]+d[2]*d[2]);
     return std::atan2(d[1],h);
 }
+// The hull's heading change carried into what the view holds (TurretFollowsHull, turretcam.cpp Follow): a world
+// point `p` turned by `turn` (YawOf's sense) about the world's up through `pivot`, so YawOf(p - pivot) grows by `turn`.
+inline void TurnAbout(const float* pivot,float turn,float* p) noexcept {
+    const float c=std::cos(turn),s=std::sin(turn),x=p[0]-pivot[0],z=p[2]-pivot[2];
+    p[0]=pivot[0]+x*c-z*s;p[2]=pivot[2]+z*c+x*s;
+}
+// The heading (YawOf's sense) of a frame's nose row `nose`, or `was` when the nose is (nearly) vertical.
+inline float HeadingOf(const float* nose,float was) noexcept {
+    return nose[0]*nose[0]+nose[2]*nose[2]>1e-6f ? YawOf(nose) : was;
+}
+
 // The horizontal forward and right of heading `yaw` (right = (-fz, 0, fx), the game's).
 inline void Flat(float yaw,float* fwd,float* right) noexcept {
     fwd[0]=-std::sin(yaw);fwd[1]=0.0f;fwd[2]=std::cos(yaw);
