@@ -159,7 +159,7 @@ constexpr float kHipShare=0.7f,kHipMost=40.0f;
 constexpr float kRunLean=10.0f,kWalkLean=3.0f,kStandLean=4.0f,kAccelLean=0.5f,kAccelLeanMost=9.0f;
 // The standing crouch, the shield's, the boost's lean, the cannon's brace (each foot kCannonStep m ahead / behind, the
 // chest back kCannonBack deg), the rifle's kick (muzzle kRecoilMuzzle deg up, the wrist kRecoilBack m back).
-constexpr float kStandCrouch=0.2f,kGuardCrouch=0.4f,kBoostLean=35.0f,kCannonStep=2.5f,kCannonBack=8.0f;
+constexpr float kStandCrouch=0.1f,kGuardCrouch=0.4f,kBoostLean=35.0f,kCannonStep=2.5f,kCannonBack=8.0f;
 constexpr float kRecoilMuzzle=5.0f,kRecoilBack=0.9f;
 constexpr float kChestShare=0.5f;   // of the aim's yaw the chest takes (the rest the arm)
 constexpr float kMostAimYaw=60.0f,kMostAimPitch=55.0f;
@@ -292,8 +292,12 @@ inline float Wrap(float a) { while(a>kPi)a-=2.0f*kPi; while(a<-kPi)a+=2.0f*kPi; 
 inline float StrideLength(float run) { return kStrideWalk+(kStrideRun-kStrideWalk)*Clamp(run,0.0f,1.0f); }
 inline float Duty(float run) { return kDutyWalk+(kDutyRun-kDutyWalk)*Clamp(run,0.0f,1.0f); }
 inline float Lift(float run) { return kLiftWalk+(kLiftRun-kLiftWalk)*Clamp(run,0.0f,1.0f); }
-// The cycle's length (m) at the steps' amplitude now: shorter strides when slow.
-inline float Cycle(const Anim& a) { return StrideLength(a.run)*(kStepLeast+(1.0f-kStepLeast)*a.amp); }
+// The cycle's length (m) at the steps' amplitude now: shorter strides when slow, and stepping aside (the hips only
+// spread so far: long side steps sank the pelvis 2.3 m to reach them) kSideStep of them.
+constexpr float kSideStep=0.55f;
+inline float Cycle(const Anim& a) {
+    return StrideLength(a.run)*(kStepLeast+(1.0f-kStepLeast)*a.amp)*(1.0f-(1.0f-kSideStep)*std::fabs(a.dir[0]));
+}
 inline FootPlan StepOf(const Anim& a,int side) { return Plan(a.phase,Cycle(a)*Duty(a.run)*a.amp,Duty(a.run),Lift(a.run)*a.amp,side); }
 
 // The gait's share of a frame: its direction, speed, hips, the turn on the spot, the phase.
@@ -377,9 +381,10 @@ inline void Step(const PoseInput& in,float runSpeed,float dt,Anim& a) {
     StepWeapons(in,dt,a);
     const float feet=1.0f-in.air;
     Follow(a.ready,a.readyV,in.aim>0.5f ? 1.0f : 0.0f,5.0f,dt);
-    // the rifle up: in hand and driven; dashing it is carried low unless fired
+    // the rifle up on the aim whenever it is in hand and driven (a dash too: lowered, the dash's lean pointed it at the
+    // ground); carried low only while it comes off or goes back on the rack
     const bool inHand=!a.axeOut;
-    const float up=inHand ? (in.boost>0.5f && !in.fire && in.recoil<=0.0f ? 0.0f : 1.0f) : 0.0f;
+    const float up=inHand ? 1.0f : 0.0f;
     Follow(a.raise,a.raiseV,up*a.ready,in.fire ? 18.0f : 9.0f,dt);
     Follow(a.guard,a.guardV,in.guard,in.guard>a.guard ? 14.0f : 8.0f,dt);
     Follow(a.present,a.presentV,in.present && inHand ? 1.0f : 0.0f,16.0f,dt);
