@@ -329,6 +329,12 @@ int main() {
         Check(!PursuitOf(Order::attackMove).forced && PursuitOf(Order::attackMove).fightFirst,"attack-move: fights first, then walks on");
         Check(!PursuitOf(Order::guard).forced && !PursuitOf(Order::guard).fightFirst && !PursuitOf(Order::engage).forced,
               "guard and engage: the soldier's own fight as before");
+        {   // Pursues: a move always walks; an attack-move walks with no target or one farther than `close`
+            const auto mv=PursuitOf(Order::move),atk=PursuitOf(Order::attackMove),gd=PursuitOf(Order::guard);
+            Check(Pursues(mv,true,1.0f,15.0f) && Pursues(mv,false,0.0f,15.0f),"move: walks whatever it fights");
+            Check(Pursues(atk,false,0.0f,15.0f) && Pursues(atk,true,30.0f,15.0f),"attack-move: walks on firing past a far target");
+            Check(!Pursues(atk,true,15.0f,15.0f) && !Pursues(atk,true,4.0f,15.0f),"attack-move: stops for an enemy pressing on it");
+            Check(!Pursues(gd,false,0.0f,15.0f) && !Pursues(gd,true,40.0f,15.0f),"guard: never pursues");        }
         Check(Arrive(Order::move,5.0f,6.0f)==Order::guard && Arrive(Order::attackMove,6.0f,6.0f)==Order::guard,"at the point: a guard of it");
         Check(Arrive(Order::move,6.5f,6.0f)==Order::move && Arrive(Order::guard,0.0f,6.0f)==Order::guard &&
               Arrive(Order::follow,0.0f,6.0f)==Order::follow,"not there yet / other orders: unchanged");

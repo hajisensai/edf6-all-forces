@@ -13,6 +13,14 @@ struct Profile {
     float radius=0.65f,height=1.8f,step=0.55f,cell=2.0f;
     float maxWaterDepth=0.35f; // conservative wading allowance, not swimming/amphibious navigation
     float waypointRadius=kWaypointReach; // intermediate corners; final arrival still uses the caller's stop
+    // 0: a route is a whole one to the goal or none (the support planner proves an entry reaches its target). > 0 (the
+    // NPCs' map orders): a rolling horizon -- the search ends at the first node it would expand this far (m) from where it
+    // began, and the actor walks that prefix (every edge of it checked as any) and searches again from its end. Searching
+    // a whole 200 m route at a few edges a frame under the shared per-frame budget left a soldier standing for most of a
+    // minute (the user, 2026-10-09: "移动攻击…不能让他边走边打吗"; the log: `move order` and the same position for 40 s).
+    // When the bounded search runs out of nodes (or of ground) before the horizon, it walks to the node nearest the
+    // goal if that is nearer than where it stands; else blocked as before. Never a straight-line fallback.
+    float horizon=0.0f;
 };
 enum class Edge { blocked,open,pending };
 enum class Result { pending,moving,arrived,blocked };
@@ -24,9 +32,13 @@ struct State {
     int count{},active=-1,direction{},length{},cursor{};
     std::uint64_t retryAt{},progressAt{},checkedAt{},lastAt{};
     bool initialized{},failed{},checked{};
+    bool partial{};   // the path ends short of the goal (Profile::horizon): its end is a corner, not the arrival
+    // Profile::horizon's legs to this goal: the nearest to it a leg has ended, and the legs since one ended nearer. A
+    // goal the ground does not reach (a sealed wall) would otherwise send leg after leg along the wall for ever.
+    float legBest=1e30f;int legStale=0;
 };
 inline void Begin(State& s,Point from,Point goal,Profile p,std::uint64_t ms) noexcept {
-    s.count=1;s.active=-1;s.direction=0;s.length=s.cursor=0;
+    s.count=1;s.active=-1;s.direction=0;s.length=s.cursor=0;s.partial=false;
     s.origin=from;s.goal=goal;s.profile=p;s.failed=false;s.initialized=true;
     s.progress=from;s.progressAt=ms;s.lastAt=ms;s.checked=false;
     s.nodes[0]={from,0.0f,Horizontal(from,goal),0,0,-1,false};
@@ -38,6 +50,30 @@ inline bool Path(State& s,int end,Point goal) noexcept {
     s.length=0;
     for(int i=n-2;i>=0;--i)s.path[s.length++]=s.nodes[ids[i]].at;
     s.path[s.length++]=goal;s.cursor=0;s.checked=false;return true;
+}
+// Profile::horizon: the route's prefix up to node `end` (never the start) to walk now, the search resumed from its end.
+constexpr int kLegsStale=3;   // legs in a row that end no nearer the goal: the goal is not reached this way
+inline bool Partial(State& s,int end,Point from,std::uint64_t ms) noexcept {
+    if(end<=0 || end>=s.count)return false;
+    const float left=Horizontal(s.nodes[end].at,s.goal);
+    if(left<s.legBest-s.profile.cell){s.legBest=left;s.legStale=0;}
+    else if(s.legStale>=kLegsStale)return false;
+    else ++s.legStale;
+    if(!Path(s,s.nodes[end].parent,s.nodes[end].at))return false;
+    s.partial=true;s.progress=from;s.progressAt=ms;
+    return true;
+}
+// The node the search reached nearest the goal, when it is nearer it than the start by more than a cell; else -1.
+inline int NearestGoal(const State& s) noexcept {
+    int best=-1;
+    float bestD=Horizontal(s.origin,s.goal)-s.profile.cell;
+    for(int i=1;i<s.count;++i){const float d=Horizontal(s.nodes[i].at,s.goal);if(d<bestD){bestD=d;best=i;}}
+    return best;
+}
+// The search cannot go on (no open node, no room for one): with a horizon, the prefix to the nearest node it found.
+inline bool PartialOrFail(State& s,Point from,std::uint64_t ms) noexcept {
+    if(s.profile.horizon>0.0f && Partial(s,NearestGoal(s),from,ms))return true;
+    Fail(s,ms);return false;
 }
 // edge(from,to,projected) must check the entire segment and project its endpoint
 // to connected ground. pending consumes no search state: work resumes next call.
@@ -56,15 +92,16 @@ Result Navigate(State& s,Point from,Point goal,float stop,std::uint64_t ms,Point
     }
     const bool changed=!s.initialized||Horizontal(goal,s.goal)>p.cell*8.0f||std::fabs(goal.y-s.goal.y)>p.step||
         p.radius!=s.profile.radius||p.height!=s.profile.height||p.step!=s.profile.step||p.cell!=s.profile.cell||
-        p.maxWaterDepth!=s.profile.maxWaterDepth||p.waypointRadius!=s.profile.waypointRadius||
+        p.maxWaterDepth!=s.profile.maxWaterDepth||p.waypointRadius!=s.profile.waypointRadius||p.horizon!=s.profile.horizon||
         ms<s.lastAt||ms-s.lastAt>2000;
+    if(!s.initialized||Horizontal(goal,s.goal)>p.cell*8.0f||std::fabs(goal.y-s.goal.y)>p.step){s.legBest=1e30f;s.legStale=0;}
     if(changed)Begin(s,from,goal,p,ms);
     s.lastAt=ms;
     if(s.failed) {if(ms<s.retryAt)return Result::blocked;Begin(s,from,goal,p,ms);}
     if(Horizontal(from,s.progress)>0.3f) {s.progress=from;s.progressAt=ms;}
     else if(s.length && ms-s.progressAt>=1500)Begin(s,from,goal,p,ms);
     if(s.length) {
-        while(s.cursor<s.length && Horizontal(from,s.path[s.cursor])<=(s.cursor+1==s.length ? stop : p.waypointRadius) &&
+        while(s.cursor<s.length && Horizontal(from,s.path[s.cursor])<=(s.cursor+1==s.length && !s.partial ? stop : p.waypointRadius) &&
               std::fabs(from.y-s.path[s.cursor].y)<=p.step){++s.cursor;s.checked=false;}
         if(s.cursor==s.length){Begin(s,from,goal,p,ms);}
         else {
@@ -85,7 +122,10 @@ Result Navigate(State& s,Point from,Point goal,float stop,std::uint64_t ms,Point
         if(s.active<0) {
             float best=1e30f;
             for(int i=0;i<s.count;++i)if(!s.nodes[i].closed && s.nodes[i].f<best){best=s.nodes[i].f;s.active=i;}
-            if(s.active<0){Fail(s,ms);return Result::blocked;}
+            if(s.active<0)return PartialOrFail(s,from,ms) ? Result::pending : Result::blocked;
+            // The horizon reached: the best node there is as far as this search goes (its prefix is walked first).
+            if(p.horizon>0.0f && Horizontal(s.nodes[s.active].at,s.origin)>=p.horizon && Partial(s,s.active,from,ms))
+                return Result::pending;
             s.direction=-1;
         }
         const Node current=s.nodes[s.active];
@@ -120,7 +160,7 @@ Result Navigate(State& s,Point from,Point goal,float stop,std::uint64_t ms,Point
             for(int i=0;i<s.count;++i)if(s.nodes[i].x==x && s.nodes[i].z==z && std::fabs(s.nodes[i].at.y-at.y)<0.25f){found=i;break;}
             const float g=current.g+Horizontal(current.at,at)+std::fabs(current.at.y-at.y);
             if(found<0) {
-                if(s.count==kNodes){Fail(s,ms);return Result::blocked;}
+                if(s.count==kNodes)return PartialOrFail(s,from,ms) ? Result::pending : Result::blocked;
                 found=s.count++;s.nodes[found]={at,g,g+Horizontal(at,s.goal),x,z,s.active,false};
             } else if(g<s.nodes[found].g) {
                 auto& n=s.nodes[found];n.g=g;n.f=g+Horizontal(at,s.goal);n.parent=s.active;n.closed=false;

@@ -76,4 +76,67 @@ void Routing() {
     Check(arrival==Result::arrived,"final approach can finish without planning forever");
 }
 }
-int main(){Routing();std::printf("ground navigation: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}
+// Profile::horizon (the NPCs' map orders; the user, 2026-10-09: soldiers under a move order stood still for 40 s): a long
+// route's first leg is searched in a fraction of the edges the whole route takes, every leg is walkable, the legs
+// together reach the goal round a long wall, and an unreachable goal is approached and then blocked, never crossed.
+struct Field {
+    float wallX=100.0f,wallHalf=60.0f;bool sealed=false;
+    long calls=0;
+    Edge operator()(Point a,Point b,Point& out) {
+        ++calls;
+        auto ground=[](Point,float,float& y){y=0.0f;return true;};
+        auto clear=[&](Point p,Point q){
+            for(int i=0;i<=20;++i) {
+                const float t=static_cast<float>(i)/20.0f,x=p.x+(q.x-p.x)*t,z=p.z+(q.z-p.z)*t;
+                if(x>=wallX && x<=wallX+2.0f && (sealed || std::fabs(z)<wallHalf))return false;
+            }
+            return true;
+        };
+        return WalkEdge(a,b,out,{},ground,clear) ? Edge::open : Edge::blocked;
+    }
+};
+// Walks along what Navigate gives (to each waypoint in turn, each step checked against the field) until it arrives or
+// is blocked; the steps taken and the result.
+Result Walk(Field& f,Point& at,Point goal,Profile p,int* steps,bool* valid,int most=200000) {
+    auto s=std::make_unique<State>();std::uint64_t ms=1;Result r=Result::pending;*steps=0;*valid=true;
+    for(int i=0;i<most;++i) {
+        ms+=16;Point next{};
+        r=Navigate(*s,at,goal,1.0f,ms,next,[&](Point a,Point b,Point& c){return f(a,b,c);},p);
+        if(r==Result::arrived || r==Result::blocked)break;
+        if(r!=Result::moving)continue;
+        Field check=f;Point out{};
+        if(Horizontal(at,next)>0.01f && check(at,next,out)!=Edge::open)*valid=false;
+        at=next;++*steps;
+    }
+    return r;
+}
+void Horizon() {
+    Profile rolling;rolling.horizon=40.0f;
+    {   // the first leg: a fraction of the whole route's search, a walkable prefix towards the goal
+        Field whole,leg;whole.wallHalf=leg.wallHalf=0.0f;
+        auto a=std::make_unique<State>(),b=std::make_unique<State>();std::uint64_t ms=1;Point next{};
+        Result ra=Result::pending,rb=Result::pending;
+        for(int i=0;i<20000 && ra==Result::pending;++i){ms+=16;ra=Navigate(*a,{},{300,0,0},1.0f,ms,next,[&](Point p,Point q,Point& c){return whole(p,q,c);});}
+        ms=1;
+        for(int i=0;i<20000 && rb==Result::pending;++i){ms+=16;rb=Navigate(*b,{},{300,0,0},1.0f,ms,next,[&](Point p,Point q,Point& c){return leg(p,q,c);},rolling);}
+        Check(ra==Result::moving && !a->partial,"no horizon: one whole route");
+        Check(rb==Result::moving && b->partial && b->length>0,"a horizon: a first leg to walk");
+        const Point end=b->path[b->length-1];
+        Check(Horizontal({},end)>=38.0f && Horizontal(end,{300,0,0})<262.0f,"the leg ends at the horizon, towards the goal");
+        Check(leg.calls*4<whole.calls,"the leg is searched in under a quarter of the whole route's edges");
+        std::printf("horizon: whole route %ld edge queries, first 40 m leg %ld\n",whole.calls,leg.calls);
+    }
+    {   // leg after leg round a 120 m wall to a goal 200 m away
+        Field f;Point at{};int steps=0;bool valid=true;
+        const Result r=Walk(f,at,{200,0,0},rolling,&steps,&valid);
+        Check(r==Result::arrived && Horizontal(at,{200,0,0})<=1.5f,"legs reach the goal round the wall");
+        Check(valid,"every step of every leg is walkable");
+    }
+    {   // a sealed wall: it walks up to the wall and is then blocked, never through
+        Field f;f.sealed=true;Point at{};int steps=0;bool valid=true;
+        const Result r=Walk(f,at,{200,0,0},rolling,&steps,&valid,4000);
+        Check(r!=Result::arrived && at.x<100.0f,"an unreachable goal is never reached through the wall");
+        Check(valid && at.x>80.0f,"it gets as near as the ground goes");
+    }
+}
+int main(){Routing();Horizon();std::printf("ground navigation: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}

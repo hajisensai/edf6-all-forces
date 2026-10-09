@@ -492,11 +492,26 @@ void Move(unsigned char* h,const float* dir,float magnitude) noexcept {
     Put<float>(h,kMoveX,x);Put<float>(h,kMoveY,0.0f);Put<float>(h,kMoveZ,z);Put<float>(h,kMoveW,1.0f);
 }
 void Stand(unsigned char* h) noexcept { Put<float>(h,kMoveX,0.0f);Put<float>(h,kMoveY,0.0f);Put<float>(h,kMoveZ,0.0f);Put<float>(h,kMoveW,1.0f); }
+// A soldier's route (the user, 2026-10-09: under a move order a squad stood still for 40 s):
+//  - in legs of kRouteHorizon m (ground_navigation.h Profile::horizon): it walks the first leg while the next is searched
+//    from its end, instead of standing until the whole route (a few edges a frame under the shared budget) is found;
+//  - from the floor under it: a soldier in the air (a Wing Diver flying, anyone mid-jump) has no ground at its own
+//    height for a route's first edge, so every search from there failed (the log's Wing Divers, 20-30 m up, never moved).
+constexpr float kRouteHorizon=48.0f;
+constexpr float kAirborneProbe=80.0f;   // m under the soldier the floor its route starts from is looked for
+npc::navigation::Profile SoldierRoute() noexcept { npc::navigation::Profile p;p.horizon=kRouteHorizon;return p; }
+void RouteStart(const float* pos,float* from) noexcept {
+    from[0]=pos[0];from[1]=pos[1];from[2]=pos[2];
+    const float above[3]={pos[0],pos[1]+0.3f,pos[2]},below[3]={pos[0],pos[1]-kAirborneProbe,pos[2]};
+    float floor[3];
+    if(MapFloorRay(above,below,floor)>=0.0f && std::isfinite(floor[1]) && floor[1]<pos[1])from[1]=floor[1];
+}
 void MoveTo(unsigned char* h,const float* pos,const float* to,float stop) noexcept {
     const ULONGLONG ms=GameMs();
     Soldier* const soldier=Entry(h,ms);
-    float waypoint[3],dir[3];
-    if(!soldier || GroundNavigate(soldier->navigation,pos,to,stop,ms,waypoint)!=npc::navigation::Result::moving ||
+    float waypoint[3],dir[3],from[3];
+    RouteStart(pos,from);
+    if(!soldier || GroundNavigate(soldier->navigation,from,to,stop,ms,waypoint,SoldierRoute())!=npc::navigation::Result::moving ||
        !npc::HorizDir(pos,waypoint,dir)){Stand(h);return;}
     const float d=npc::Horiz(pos,waypoint);
     Move(h,dir,d/6.0f+0.3f);
@@ -875,10 +890,18 @@ bool PickUp(Soldier& s,unsigned char* h,const float* pos) noexcept;
 // order's point (its formation slot, else the point itself) -- the player's command, over its own dodging, falling
 // back and combat spot (Drive takes this first; its look and trigger stay on its target). Its squad's top there: the
 // order is a guard of the point from then on (mapcmd_logic.h Arrive), the squad holds it and fights what comes.
+// On the way the members keep with their top while it is still kPointFollow m from the point (one long route searched a
+// squad, not one a soldier: the shared per-frame search budget is what kept them standing), and take their places by
+// the point once it is near.
 constexpr float kPointArrive=6.0f;   // m: the top this near its place has reached the order's point
+constexpr float kPointFollow=30.0f,kTopKeep=5.0f;
 bool Pursue(Soldier& s,unsigned char* h,const float* pos,Squad* q,const unsigned char* root,ULONGLONG ms,const char** move) noexcept {
     float left=0.0f;
-    if(!FormationMove(s,h,pos,q,root,ms,move,&left)) {
+    const auto* top=static_cast<const unsigned char*>(q->top.obj);
+    if(!q->top.Is(h) && top && !top[kDead] && HumanOnFoot(top) && npc::Horiz(Pos(top),q->cmd.at)>kPointFollow) {
+        left=npc::Horiz(pos,q->cmd.at);
+        MoveTo(h,pos,Pos(top),kTopKeep);
+    } else if(!FormationMove(s,h,pos,q,root,ms,move,&left)) {
         left=npc::Horiz(pos,q->cmd.at);
         MoveTo(h,pos,q->cmd.at,Cfg().npcGuardRadius*0.5f);
     }
@@ -937,9 +960,10 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
         Veto(h,StockTarget(h),eye,a);
     }
     if(!(mask&kMaskMove))return p;
-    // Its moves, the first that applies: the player's move order before anything of its own; an attack-move's once it
-    // has nothing to fight.
-    if((pursuit.forced || (pursuit.fightFirst && !t.e)) && Pursue(s,h,pos,q,root,ms,&p.move))return p;
+    // Its moves, the first that applies: the player's move order before anything of its own; an attack-move's unless an
+    // enemy presses on it (mapcmd_logic.h Pursues: it fires on the way either way).
+    if(mapcmd::Pursues(pursuit,t.e!=nullptr,t.e ? npc::Horiz(pos,t.e->aim) : 0.0f,Cfg().npcDangerRange) &&
+       Pursue(s,h,pos,q,root,ms,&p.move))return p;
     if(Evade(s,h,c,pos,ms,&p.move))return p;
     if(s.boardV && Board(s,h,pos,ms)){p.move="to its seat";return p;}
     if(FallBack(s,h,pos,served,ms)){p.move="fall back";return p;}

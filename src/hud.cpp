@@ -3700,8 +3700,13 @@ void MapOrderIcon(void* d,void* c,mapbtn::Id id,float x,float y,float h,float s,
     case Id::count: break;
     }
 }
+// MapAircraft's drawing reaches kAircraftReach of its own units from its centre (the heli's tail boom, the plane's nose):
+// an icon `h` px across draws it at h / 2 / kAircraftReach. `h` is already in screen px (the caller's kSupIcon * s): the
+// HUD scale must not go in a second time (the user, 2026-10-09, a 4K screenshot: "左边的重叠了" -- at s 2 the aircraft
+// were drawn at s * s, twice their row, over the rows round them).
+constexpr float kAircraftReach=13.0f;
 void MapSupportIcon(void* d,void* c,SupportIcon icon,float x,float y,float h,float s,const float* rgba) noexcept {
-    const float t=1.8f*s,r=h*0.5f;
+    const float t=1.8f*s,r=h*0.5f,plane=r/kAircraftReach;
     auto heads=[&](int n){
         for(int i=0;i<n;++i) {
             const float px=x+(static_cast<float>(i%3)-1.0f)*r*0.65f,py=y+(n>3 ? (i<3 ? -0.4f : 0.45f) : 0.0f)*r;
@@ -3709,11 +3714,11 @@ void MapSupportIcon(void* d,void* c,SupportIcon icon,float x,float y,float h,flo
         }
     };
     switch(icon) {
-    case SupportIcon::jet: MapAircraft(d,c,x,y,s*h/22.0f,false,0.0f,-1.0f,rgba);break;
-    case SupportIcon::heli: MapAircraft(d,c,x,y,s*h/22.0f,true,0.0f,-1.0f,rgba);break;
+    case SupportIcon::jet: MapAircraft(d,c,x,y,plane,false,0.0f,-1.0f,rgba);break;
+    case SupportIcon::heli: MapAircraft(d,c,x,y,plane,true,0.0f,-1.0f,rgba);break;
     case SupportIcon::carrier: MapBox(d,c,x,y,r*0.9f,t,rgba);MapBox(d,c,x,y,r*0.45f,t,rgba);break;
     case SupportIcon::gunship:
-        MapAircraft(d,c,x,y,s*h/22.0f,false,0.0f,-1.0f,rgba);Arc(d,c,x,y,r*0.95f,0.0f,kTurn,t*0.7f,16,kAmber);break;
+        MapAircraft(d,c,x,y,plane,false,0.0f,-1.0f,rgba);Arc(d,c,x,y,r*0.95f,0.0f,kTurn,t*0.7f,16,kAmber);break;
     case SupportIcon::sub:
         Arc(d,c,x-r*0.45f,y+r*0.2f,r*0.4f,kTurn*0.25f,kTurn*0.5f,t,8,rgba);Arc(d,c,x+r*0.45f,y+r*0.2f,r*0.4f,-kTurn*0.25f,kTurn*0.5f,t,8,rgba);
         Seg(d,c,x-r*0.45f,y-r*0.2f,x+r*0.45f,y-r*0.2f,t,rgba);Seg(d,c,x-r*0.45f,y+r*0.6f,x+r*0.45f,y+r*0.6f,t,rgba);

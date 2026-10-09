@@ -667,6 +667,35 @@ template<class F> Box Measured(F draw,float s=1.0f) {
     return box;
 }
 
+// The map's icons inside their rows (the user, 2026-10-09, a 4K screenshot of the support bar: "左边的重叠了" -- the
+// aircraft icons drawn at the HUD scale squared, each over the rows round it): every support icon within its bar row
+// (half a row up and down, and clear of the name that starts kSupIcon + 8 px in) and every order icon within its
+// button, at the HUD scales of 1080 .. 3240 lines.
+int MapIconFitChecks() {
+    void* const drawer=At<void*>(image,kQuadDrawer);
+    static unsigned char ctx[16]{};
+    int failed=0;
+    for(const float s:{1.0f,1440.0f/1080.0f,2.0f,3.0f}) {
+        const float x=500.0f*s,y=500.0f*s;
+        for(int i=0;i<=static_cast<int>(SupportIcon::truck);++i) {
+            const Box b=Measured([&](Text*,Line*,int*){MapSupportIcon(drawer,ctx,static_cast<SupportIcon>(i),x,y,kSupIcon*s,s,kWhite);},s);
+            const float across=(kSupIcon*0.5f+4.0f)*s,up=kSupRowH*0.5f*s;
+            const bool fits=b.any && b.x0>=x-across && b.x1<=x+across && b.y0>=y-up && b.y1<=y+up;
+            if(!fits){++failed;std::printf("FAIL support icon %d at scale %.2f: (%.1f,%.1f)-(%.1f,%.1f) round (%.0f,%.0f), +-%.1f x +-%.1f\n",
+                                           i,s,b.x0,b.y0,b.x1,b.y1,x,y,across,up);}
+        }
+        for(int i=0;i<mapbtn::kCount;++i) {
+            const Box b=Measured([&](Text*,Line*,int*){MapOrderIcon(drawer,ctx,static_cast<mapbtn::Id>(i),x,y,kBtnIcon*s,s,kWhite);},s);
+            const float half=kBtnRowH*0.5f*s;
+            if(!b.any || b.x0<x-half || b.x1>x+half || b.y0<y-half || b.y1>y+half){
+                ++failed;std::printf("FAIL order icon %d at scale %.2f outside its button\n",i,s);
+            }
+        }
+    }
+    std::printf(failed ? "map icons: %d FAILED\n" : "map icons: inside their rows at every scale\n",failed);
+    return failed;
+}
+
 // The stock HUD's RWR scope (Threats' side for it) and its block, at `width` x 1080: apart.
 bool StockLayoutApart(int width,const ProteusReadout* proteus=nullptr) {
     const float w=static_cast<float>(width),h=1080.0f,s=1.0f;
@@ -1862,5 +1891,6 @@ int wmain(int argc,wchar_t** argv) {
     hasStock=false;
     std::printf(scaled ? "scale: %d FAILED\n" : "scale: all as designed\n",scaled);
     failed+=scaled;
+    failed+=MapIconFitChecks();
     return failed ? 1 : 0;
 }

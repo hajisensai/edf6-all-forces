@@ -39,11 +39,17 @@ struct Command { Order order; float at[3]; };   // at: the point of a point orde
 // --- The squads' moves under an order (npcai.cpp Drive), the player's command over the soldiers' own fight ---
 //  - forced (move): every member walks to its place by the point before anything of its own (dodging, falling back
 //    hurt, its combat spot); it still turns on and fires at what is in reach as it goes;
-//  - fightFirst (attack-move): a member with a target fights it where it is (its combat spot round itself), with none it
-//    walks on to the point;
+//  - fightFirst (attack-move): walks on to the point firing at what it has in reach, as a move does; only a target
+//    within `close` m (the danger range: an enemy pressing on it) stops it there to fight with its own moves (dodging,
+//    its combat spot). Before 2026-10-09 any target stopped it, so a squad met by a far enemy stood on its combat spot
+//    and never came (the user: "这个移动攻击的优先级好像不对，不能让他边走边打吗");
 //  - neither: the order's anchor as before (guard holds its point's radius, engage / focus their reach).
 struct Pursuit { bool forced,fightFirst; };
 inline Pursuit PursuitOf(Order o) noexcept { return Pursuit{o==Order::move,o==Order::attackMove}; }
+// Whether a member walks on to the order's point this frame (npcai.cpp Drive), its target (if any) `targetDistance` m off.
+inline bool Pursues(Pursuit p,bool target,float targetDistance,float close) noexcept {
+    return p.forced || (p.fightFirst && (!target || !(targetDistance<=close)));
+}
 // A move / attack-move whose squad has reached its point (its top within `radius`, level) is a guard of that point from
 // then on: the members hold round it and fight what comes, as a guard order does. Others stay as they are.
 inline Order Arrive(Order o,float distance,float radius) noexcept {
