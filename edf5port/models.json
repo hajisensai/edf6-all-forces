@@ -1,0 +1,313 @@
+{
+ "source": "EDF5 Root.cpk WEAPON/WEAPONTABLE.SGO + WEAPONTEXT.*; SC = CN via OpenCC t2s",
+ "weapons": [
+  {
+   "id": "EDF6VC_E5_DLC_VEHICLE_BIKE",
+   "sgo": "DLC_Vehicle_Bike.sgo",
+   "source": "edf6",
+   "edf5_row": 295,
+   "edf5_category": 10,
+   "category": 10,
+   "class": "Weapon_Sub",
+   "level": 0.5,
+   "stars": [],
+   "pack": 0,
+   "template": "DLC_Vehicle_Bike_edf6benefits",
+   "text": {
+    "JA": [
+     "オメガ・フリージャー",
+     "<font color=%dq%#80ff80%dq%>操縦席：</font>運転\nフォースセイバー（左） <font color=%dq%#00ffff%dq%>（弾数：5000  ダメージ：[貫通]24.0  射程：25.0ｍ）</font>\nフォースセイバー（右） <font color=%dq%#00ffff%dq%>（弾数：5000  ダメージ：[貫通]24.0  射程：25.0ｍ）</font>\n\n搭乗員１名。\n精鋭部隊オメガのためにカスタムされた軍用オートバイ。\n特殊兵器「フォースセイバー」を装備。車体前方に光の剣を発生させ、敵を斬り裂く。\n\n地底での要請が可能。\n\n投下を要請するためには、戦場で一定の功績（多数の敵を撃破）が必要である。（功績は仲間による撃破も含まれる）",
+     [
+      [
+       "再要請",
+       "3500pt"
+      ],
+      [
+       "耐久度",
+       "450"
+      ],
+      [
+       "燃料",
+       "20000.0"
+      ],
+      [
+       "燃費",
+       "1.3"
+      ]
+     ]
+    ],
+    "EN": [
+     "Omega Freed",
+     "<font color=%dq%#80ff80%dq%>Bike:</font> Driver\nForce Saber (Left) <font color=%dq%#00ffff%dq%>(Capacity: 5000, Damage: [PT]24.0, Range: 25.0m)</font>\nForce Saber (Right) <font color=%dq%#00ffff%dq%>(Capacity: 5000, Damage: [PT]24.0, Range: 25.0m)</font>\n\n1 person.\nA military motorcycle customized for the elite unit Omega.\nIt's equipped with a special weapon Force Saber,which generates a sword of light in front of the vehicle and slash enemies.\n\nAble to request underground.\n\nIn order to request this, you need to achieve a certain number of credits during the mission by defeating enemies. Your allies' kills will also help you earn credits.",
+     [
+      [
+       "Re-request",
+       "3500pt"
+      ],
+      [
+       "Durability",
+       "450"
+      ],
+      [
+       "Fuel",
+       "20000.0"
+      ],
+      [
+       "Fuel Cost",
+       "1.3"
+      ]
+     ]
+    ],
+    "CN": [
+     "OMEGA奔馳裝甲機車",
+     "<font color=%dq%#80ff80%dq%>操縱席：</font>駕駛\n原力軍刀（左） <font color=%dq%#00ffff%dq%>（彈數：5000  傷害：[貫通]24.0  射程：25.0m）</font>\n原力軍刀（右） <font color=%dq%#00ffff%dq%>（彈數：5000  傷害：[貫通]24.0  射程：25.0m）</font>\n\n搭乘人數１人。\n專為精銳部隊OMEGA所特製的軍用機車。\n裝備特殊武器「原力軍刀」。會在車體前方產生光劍，斬斷敵人。\n\n身處地底也可進行請求。\n\n需要在戰場上取得一定的功績（擊破多數敵人）才能請求投落。（夥伴的擊破數也能列入功績計算）",
+     [
+      [
+       "再請求",
+       "3500pt"
+      ],
+      [
+       "耐用度",
+       "450"
+      ],
+      [
+       "燃料",
+       "20000.0"
+      ],
+      [
+       "油耗",
+       "1.3"
+      ]
+     ]
+    ],
+    "KR": [
+     "오메가 프리저",
+     "<font color=%dq%#80ff80%dq%>조종석：</font>운전\n포스 세이버(좌) <font color=%dq%#00ffff%dq%>（장탄 수：5000  대미지：[관통]24.0  사거리：25.0m ）</font>\n포스 세이버(우) <font color=%dq%#00ffff%dq%>（장탄 수：5000  대미지：[관통]24.0  사거리：25.0m ）</font>\n\n탑승 인원 1명.\n정예 부대 오메가용으로 개조된 군용 오토바이.\n특수 무기 포스 세이버가 장착되어 있다.\n차체 전방에 빛의 검을 만들어내 적을 벤다.\n\n지하에서도 요청할 수 있다.\n\n투하를 요청하려면 적을 격파하여 일정 수준의\n공적을 쌓아야 한다.\n(동료가 격파한 적도 공적에 포함된다.)",
+     [
+      [
+       "재요청",
+       "3500pt"
+      ],
+      [
+       "내구도",
+       "450"
+      ],
+      [
+       "연료",
+       "20000.0"
+      ],
+      [
+       "연비",
+       "1.3"
+      ]
+     ]
+    ],
+    "SC": [
+     "OMEGA奔驰装甲机车",
+     "<font color=%dq%#80ff80%dq%>操纵席：</font>驾驶\n原力军刀（左） <font color=%dq%#00ffff%dq%>（弹数：5000  伤害：[贯通]24.0  射程：25.0m）</font>\n原力军刀（右） <font color=%dq%#00ffff%dq%>（弹数：5000  伤害：[贯通]24.0  射程：25.0m）</font>\n\n搭乘人数１人。\n专为精锐部队OMEGA所特制的军用机车。\n装备特殊武器「原力军刀」。会在车体前方产生光剑，斩断敌人。\n\n身处地底也可进行请求。\n\n需要在战场上取得一定的功绩（击破多数敌人）才能请求投落。（伙伴的击破数也能列入功绩计算）",
+     [
+      [
+       "再请求",
+       "3500pt"
+      ],
+      [
+       "耐用度",
+       "450"
+      ],
+      [
+       "燃料",
+       "20000.0"
+      ],
+      [
+       "油耗",
+       "1.3"
+      ]
+     ]
+    ]
+   },
+   "damage_attribute": null,
+   "assets": {
+    "OBJECT/V503_BIKE_OMEGAZ.MRAB": "OBJECT/V503_BIKE_OMEGAZ.RAB"
+   }
+  },
+  {
+   "id": "EDF6VC_E5_DLC_VEHICLE_TANK41",
+   "sgo": "DLC_Vehicle_Tank41.sgo",
+   "source": "edf6",
+   "edf5_row": 305,
+   "edf5_category": 8,
+   "category": 8,
+   "class": "Weapon_Sub",
+   "level": 0.24,
+   "stars": [],
+   "pack": 0,
+   "template": "DLC_Vehicle_v505_tank_edf6benefits",
+   "text": {
+    "JA": [
+     "ブラッカー ナンバー４．１",
+     "<font color=%dq%#80ff80%dq%>操縦席：</font>運転\n拡散榴弾砲 <font color=%dq%#00ffff%dq%>（弾数：15  ダメージ：63.0×20 爆破範囲：半径6.0ｍ）</font>\n\n搭乗員１名。\n特殊なペイントが施された戦闘車両。これによって被弾率が下がるといわれているが……実際にはそのような効果はない。戦場で命をかける兵士たちが、幸運を願い、願かけとして塗装をおこなっているだけである。\n\n投下を要請するためには、戦場で一定の功績（多数の敵を撃破）が必要である。（功績は仲間による撃破も含まれる）",
+     [
+      [
+       "再要請",
+       "5400pt"
+      ],
+      [
+       "耐久度",
+       "500"
+      ]
+     ]
+    ],
+    "EN": [
+     "Blacker No. 4.1",
+     "<font color=%dq%#80ff80%dq%>Pilot Seat:</font> Driver\nDispersal Howitzer <font color=%dq%#00ffff%dq%>(Capacity: 15, Damage: 63.0×20, Blast Area: Radius 6.0m)</font>\n\n1 person.\nA combat vehicle with special coating. Rumor has it that the hit rate drops because of the coating, but that's nonsense. The coating was only a creation of the struggling soldiers praying for luck.\n\nIn order to request this, you need to achieve a certain number of credits during the mission by defeating enemies. Your allies' kills will also help you earn credits.",
+     [
+      [
+       "Re-request",
+       "5400pt"
+      ],
+      [
+       "Durability",
+       "500"
+      ]
+     ]
+    ],
+    "CN": [
+     "布萊克戰車 ４．１號",
+     "<font color=%dq%#80ff80%dq%>操縱席：</font>駕駛\n散射榴彈砲 <font color=%dq%#00ffff%dq%>（彈數：15  傷害：63.0×20 爆炸範圍：半徑6.0m）</font>\n\n搭乘者１名。\n畫有特殊圖案的戰車。據說這樣的外觀能降低敵人的命中率……但實際上並無此效果。只是在戰場賭命的士兵們，為了祈求好運而畫上此圖許願。\n\n需要在戰場上取得一定的功績（擊破多數敵人）才能請求投落。（夥伴的擊破數也能列入功績計算）",
+     [
+      [
+       "再請求",
+       "5400pt"
+      ],
+      [
+       "耐用度",
+       "500"
+      ]
+     ]
+    ],
+    "KR": [
+     "블래커 넘버 4.1",
+     "<font color=%dq%#80ff80%dq%>조종석：</font>운전\n확산 곡사포 <font color=%dq%#00ffff%dq%>（장탄 수：15  대미지：63.0×20 폭파 범위：반경 6.0m ）</font>\n\n탑승 인원 1명.\n특수 페인트가 도장된 전투 차량.\n특수 페인트가 피격률을 낮춰 준다는 말이 있지만…\n실제로 그런 효과는 없다. 전쟁터에서 목숨을 걸고\n싸우는 병사들이 행운을 빌며 간절한 마음을 담아\n도장한 것에 불과하다.\n\n투하를 요청하려면 적을 격파하여 일정 수준의\n공적을 쌓아야 한다.\n(동료가 격파한 적도 공적에 포함된다.)",
+     [
+      [
+       "재요청",
+       "5400pt"
+      ],
+      [
+       "내구도",
+       "500"
+      ]
+     ]
+    ],
+    "SC": [
+     "布莱克战车 ４．１号",
+     "<font color=%dq%#80ff80%dq%>操纵席：</font>驾驶\n散射榴弹砲 <font color=%dq%#00ffff%dq%>（弹数：15  伤害：63.0×20 爆炸范围：半径6.0m）</font>\n\n搭乘者１名。\n画有特殊图案的战车。据说这样的外观能降低敌人的命中率……但实际上并无此效果。只是在战场赌命的士兵们，为了祈求好运而画上此图许愿。\n\n需要在战场上取得一定的功绩（击破多数敌人）才能请求投落。（伙伴的击破数也能列入功绩计算）",
+     [
+      [
+       "再请求",
+       "5400pt"
+      ],
+      [
+       "耐用度",
+       "500"
+      ]
+     ]
+    ]
+   },
+   "damage_attribute": null,
+   "assets": {
+    "OBJECT/V505_TANKEDF4.MRAB": "OBJECT/V505_TANKEDF4.RAB"
+   }
+  },
+  {
+   "id": "EDF6VC_E5_DLC_VEHICLE_TANK5",
+   "sgo": "DLC_Vehicle_Tank5.sgo",
+   "source": "edf6",
+   "edf5_row": 1094,
+   "edf5_category": 306,
+   "category": 306,
+   "class": "Weapon_Sub",
+   "level": 0.24,
+   "stars": [],
+   "pack": 0,
+   "template": "eWeapon418",
+   "text": {
+    "JA": [
+     "ブラッカー ナンバー５",
+     "<font color=%dq%#80ff80%dq%>操縦席：</font>運転\n時限信管榴弾砲 <font color=%dq%#00ffff%dq%>（弾数：40  ダメージ：56.0 爆破範囲：半径12.0ｍ）</font>\n\n搭乗員１名。\n特殊なペイントが施された戦闘車両。これによって被弾率が下がるといわれているが……実際にはそのような効果はない。戦場で命をかける兵士たちが、幸運を願い、願かけとして塗装をおこなっているだけである。\n\n投下を要請するためには、戦場で一定の功績（多数の敵を撃破）が必要である。（功績は仲間による撃破も含まれる）",
+     [
+      [
+       "再要請",
+       "5400pt"
+      ],
+      [
+       "耐久度",
+       "500"
+      ]
+     ]
+    ],
+    "EN": [
+     "Blacker No. 5",
+     "<font color=%dq%#80ff80%dq%>Pilot Seat:</font> Driver\nTimed-Grenade Cannon <font color=%dq%#00ffff%dq%>(Capacity: 40, Damage: 56.0, Blast Area: Radius 12.0m)</font>\n\n1 person.\nA combat vehicle with a special paint design. The paintjob should supposedly lower the chance of getting hit by an enemy. However, this is not effective. It is just wishful thinking of the soldiers who risk their lives on the battlefield.\n\nIn order to request this, you need to achieve a certain number of credits during the mission by defeating enemies. Your allies' kills will also help you earn credits.",
+     [
+      [
+       "Re-request",
+       "5400pt"
+      ],
+      [
+       "Durability",
+       "500"
+      ]
+     ]
+    ],
+    "CN": [
+     "布萊克戰車 ５號",
+     "<font color=%dq%#80ff80%dq%>操縱席：</font>駕駛\n定時引信榴彈砲 <font color=%dq%#00ffff%dq%>（彈數：40  傷害：56.0 爆炸範圍：半徑12.0m）</font>\n\n搭乘者１名。\n畫有特殊圖案的戰車。據說這樣的外觀能降低敵人的命中率……但實際上並無此效果。只是在戰場賭命的士兵們，為了祈求好運而畫上此圖許願。\n\n需要在戰場上取得一定的功績（擊破多數敵人）才能請求投落。（夥伴的擊破數也能列入功績計算）",
+     [
+      [
+       "再請求",
+       "5400pt"
+      ],
+      [
+       "耐用度",
+       "500"
+      ]
+     ]
+    ],
+    "KR": [
+     "블래커 넘버 5",
+     "<font color=%dq%#80ff80%dq%>조종석：</font>운전\n시한 신관 곡사포 <font color=%dq%#00ffff%dq%>（장탄 수：40  대미지：56.0 폭파 범위：반경 12.0m ）</font>\n\n탑승 인원 1명.\n특수 페인트가 도장된 전투 차량.\n특수 페인트가 피격률을 낮춰 준다는 말이 있지만…\n실제로 그런 효과는 없다. 전쟁터에서 목숨을 걸고\n싸우는 병사들이 행운을 빌며 간절한 마음을 담아\n도장한 것에 불과하다.\n\n투하를 요청하려면 적을 격파하여 일정 수준의\n공적을 쌓아야 한다.\n(동료가 격파한 적도 공적에 포함된다.)",
+     [
+      [
+       "재요청",
+       "5400pt"
+      ],
+      [
+       "내구도",
+       "500"
+      ]
+     ]
+    ],
+    "SC": [
+     "布莱克战车 ５号",
+     "<font color=%dq%#80ff80%dq%>操纵席：</font>驾驶\n定时引信榴弹砲 <font color=%dq%#00ffff%dq%>（弹数：40  伤害：56.0 爆炸范围：半径12.0m）</font>\n\n搭乘者１名。\n画有特殊图案的战车。据说这样的外观能降低敌人的命中率……但实际上并无此效果。只是在战场赌命的士兵们，为了祈求好运而画上此图许愿。\n\n需要在战场上取得一定的功绩（击破多数敌人）才能请求投落。（伙伴的击破数也能列入功绩计算）",
+     [
+      [
+       "再请求",
+       "5400pt"
+      ],
+      [
+       "耐用度",
+       "500"
+      ]
+     ]
+    ]
+   },
+   "damage_attribute": null,
+   "assets": {
+    "OBJECT/V505_TANKEDF5.MRAB": "OBJECT/V505_TANKEDF5.RAB"
+   }
+  }
+ ],
+ "skipped": []
+}

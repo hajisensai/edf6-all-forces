@@ -2,10 +2,11 @@
 tools/call_weapons.py stacks after its call weapons, in the same transaction and manifest, kept where they are by id and
 turned into placeholders on uninstall like those (see its doc).
 
-Each game has a registry (GAMES: edf5port/weapons.json from tools/make_edf5_weapons.py, edf41port/weapons.json from
-tools/make_edf41_weapons.py; docs/edf5-weapons-plan.md): per weapon its id (EDF6VC_E5_* / EDF6VC_E41_*), category,
-level, star caps, the EDF6 template row, its texts in the five languages and the sound cues it needs swapped. Its SGO
-comes from one of two places:
+The registries (REGISTRIES, in the order they were released: edf5port/weapons.json and edf5port/models.json from
+tools/make_edf5_weapons.py, edf41port/weapons.json from tools/make_edf41_weapons.py; docs/edf5-weapons-plan.md): per
+weapon its id (EDF6VC_E5_* / EDF6VC_E41_*), category, level, star caps, the EDF6 template row, its texts in the five
+languages, the sound cues it needs swapped and the files it needs that EDF6 lacks ('assets': Mods path -> the file in
+its game, converted by pylib/legacy_assets.py: a model only EDF5 has). Its SGO comes from one of two places:
   'edf6'  EDF6's own copy of it (in Root.cpk, never named by EDF6's table): copied under our id.
   <game>  the player's own install of that game (gamedir.find_other: $EDF5_DIR / $EDF41_DIR, next to EDF6, the Steam
           libraries), its Root.cpk converted by pylib/edf5port.py. Without the game the row is still taken
@@ -46,15 +47,20 @@ SOURCE = 1.0      # column 3: 1 every non-pack weapon, 3 a pack's
 class Game:
     key: str                          # the registry's source value for 'converted from this game'
     name: str                         # as the texts name it
-    registry: str                     # under DATA
     install: tuple[str, str, str]     # gamedir.find_other's (Steam folder, program, $VAR)
     prefix: str                       # our row ids
     convert: Callable[[dict, dict], dsgo.Document]   # its weapon SGO's members, names -> the EDF6 weapon
 
 
 GAMES: tuple[Game, ...] = (
-    Game('edf5', 'EDF5', 'edf5port/weapons.json', gamedir.EDF5, 'EDF6VC_E5_', edf5port.weapon),
-    Game('edf41', 'EDF4.1', 'edf41port/weapons.json', gamedir.EDF41, 'EDF6VC_E41_', edf5port.weapon41),
+    Game('edf5', 'EDF5', gamedir.EDF5, 'EDF6VC_E5_', edf5port.weapon),
+    Game('edf41', 'EDF4.1', gamedir.EDF41, 'EDF6VC_E41_', edf5port.weapon41),
+)
+# (game, registry under DATA) in release order: IDS follows it, and a release only adds a registry at its end (RELEASED).
+REGISTRIES: tuple[tuple[str, str], ...] = (
+    ('edf5', 'edf5port/weapons.json'),
+    ('edf41', 'edf41port/weapons.json'),
+    ('edf5', 'edf5port/models.json'),
 )
 
 
@@ -88,20 +94,22 @@ class Port:
     text: dict         # lang -> [name, description, stats]
     damage_attribute: dict | None = None   # AmmoDamageAttribute a converted weapon takes (its EDF6 family's)
     cues: dict = field(default_factory=dict)   # sound cue EDF6 lacks -> the one played instead
+    assets: dict = field(default_factory=dict)   # Mods path it needs -> the file in its game it is converted from
 
 
-def _load(game: Game) -> tuple[Port, ...]:
-    """A game's registry. A missing one is an error, not an empty list: an install without it would have fewer rows
-    than every other (the rows are the same everywhere, call_weapons.plan_rows)."""
-    path = os.path.join(DATA, *game.registry.split('/'))
+def _load(game: str, registry: str) -> tuple[Port, ...]:
+    """A registry. A missing one is an error, not an empty list: an install without it would have fewer rows than
+    every other (the rows are the same everywhere, call_weapons.plan_rows)."""
+    path = os.path.join(DATA, *registry.split('/'))
     with open(path, encoding='utf-8') as f:
         data = json.load(f)
-    return tuple(Port(w['id'], game.key, w['sgo'], w['source'], int(w['category']), w['class'], float(w['level']),
-                      tuple(w['stars']), w['template'], w['text'], w.get('damage_attribute'), w.get('cues', {}))
+    return tuple(Port(w['id'], game, w['sgo'], w['source'], int(w['category']), w['class'], float(w['level']),
+                      tuple(w['stars']), w['template'], w['text'], w.get('damage_attribute'), w.get('cues', {}),
+                      w.get('assets', {}))
                  for w in data['weapons'])
 
 
-PORTS: tuple[Port, ...] = tuple(p for g in GAMES for p in _load(g))
+PORTS: tuple[Port, ...] = tuple(p for game, registry in REGISTRIES for p in _load(game, registry))
 IDS: tuple[str, ...] = tuple(p.id for p in PORTS)
 BY_ID = {p.id: p for p in PORTS}
 BY_GAME = {g.key: g for g in GAMES}
@@ -112,6 +120,7 @@ BY_GAME = {g.key: g for g in GAMES}
 RELEASED: dict[str, tuple[int, str]] = {
     'EDF5 weapons (2026-10-10)': (61, '1547668c15e2211bf19f9ff54483855df5903ff4a481dc80858ee69e9d6a7578'),
     'EDF4.1 weapons (2026-10-10)': (345, '169d12e069abf6eb1cbeb4106de7acf2f5c9c073be96a03a4a7f49a432b5569e'),
+    'EDF5 weapons with converted models (2026-10-10)': (348, 'cb28e972fcb1b3c78c6f195c927b9dc42cdbdafd0da1bd525fe8f5b754b073a2'),
 }
 
 
@@ -131,6 +140,11 @@ def slot_of(row_id: str) -> str | None:
 
 def sgo_file(p: Port) -> str:
     return f'WEAPON/{p.id}.SGO'
+
+
+def files(p: Port) -> list[str]:
+    """Every Mods file a built port writes: its SGO and its assets."""
+    return [sgo_file(p)] + list(p.assets)
 
 
 def game_root(game: Game, edf6_root: str) -> str | None:
@@ -183,14 +197,39 @@ def build_sgo(p: Port, stock, root: str | None) -> bytes:  # noqa: ANN001 - stoc
     return dsgo.write(doc)
 
 
-def build(edf6_root: str, stock) -> tuple[dict[str, bytes], dict[str, str]]:  # noqa: ANN001 - see build_sgo
-    """({port id: its SGO} for every port this machine can build, {port id: why not} for the others)."""
-    roots = {g.key: game_root(g, edf6_root) for g in GAMES}
+def build_assets(p: Port, root: str | None) -> dict[str, bytes]:
+    """{Mods path: bytes} of the files `p` needs that EDF6 lacks, converted from its game at `root`."""
+    import legacy_assets
     out: dict[str, bytes] = {}
+    name = BY_GAME[p.game].name
+    for rel, source in p.assets.items():
+        if root is None:
+            raise Unavailable(f'{name} not found')
+        folder, file = source.split('/', 1)
+        try:
+            data = _archive(root).read(folder, file)
+        except KeyError as e:
+            raise Unavailable(f'Root.cpk of {name} has no {source}') from e
+        try:
+            out[rel] = legacy_assets.convert(source, data)
+        except ValueError as e:   # a converter refused it: the weapon waits as a placeholder
+            raise edf5port.Unsupported(f'{source}: {e}') from e
+    return out
+
+
+def build_port(p: Port, stock, root: str | None) -> dict[str, bytes]:  # noqa: ANN001 - see build_sgo
+    """{Mods path: bytes} of every file `p` writes (files(p))."""
+    return {sgo_file(p): build_sgo(p, stock, root), **build_assets(p, root)}
+
+
+def build(edf6_root: str, stock) -> tuple[dict[str, dict[str, bytes]], dict[str, str]]:  # noqa: ANN001 - see build_sgo
+    """({port id: its files} for every port this machine can build, {port id: why not} for the others)."""
+    roots = {g.key: game_root(g, edf6_root) for g in GAMES}
+    out: dict[str, dict[str, bytes]] = {}
     why: dict[str, str] = {}
     for p in PORTS:
         try:
-            out[p.id] = build_sgo(p, stock, roots[p.game])
+            out[p.id] = build_port(p, stock, roots[p.game])
         except (Unavailable, edf5port.Unsupported) as e:
             why[p.id] = f'{type(e).__name__}: {e}'
     return out, why

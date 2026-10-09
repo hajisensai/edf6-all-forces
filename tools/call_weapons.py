@@ -97,8 +97,9 @@ def vehicle_file(call: Call) -> str:
 
 
 def our_sgos() -> list[str]:
-    """Every weapon SGO install writes: the calls' and the earlier games' (tools/ported_weapons.py)."""
-    return [sgo_file(c) for c in CALLS] + [pw.sgo_file(p) for p in pw.PORTS]
+    """Every weapon file install writes: the calls' SGOs and the earlier games' SGOs and assets
+    (tools/ported_weapons.py files)."""
+    return [sgo_file(c) for c in CALLS] + [rel for p in pw.PORTS for rel in pw.files(p)]
 
 
 # ---------------------------------------------------------------- reading the base
@@ -613,10 +614,11 @@ def stack(game_root: str) -> dict[str, bytes]:
     # An EDF5 weapon this run cannot build keeps the row an earlier install gave it (its SGO is still in Mods), else
     # its row is a placeholder until EDF5 is there (pw.pending_*): its index is taken either way.
     kept = {p.id for p in pw.PORTS if p.id not in ports and plan.at[p.id] < len(before)
-            and before[plan.at[p.id]] == p.id and os.path.isfile(_mods(game_root, pw.sgo_file(p)))}
+            and before[plan.at[p.id]] == p.id and all(os.path.isfile(_mods(game_root, rel)) for rel in pw.files(p))}
     put_ports = [p for p in pw.PORTS if p.id not in kept]
     port_tpl = {p.id: _template_index(before, p.template) for p in put_ports}
-    out.update({pw.sgo_file(p): ports[p.id] for p in put_ports if p.id in ports})
+    for p in put_ports:
+        out.update(ports.get(p.id, {}))
     rows = s.rows
     row_template = {c.id: rows[tpl[template_of(c)]] for c in CALLS}
     port_rows = {p.id: pw.table_row(rows[port_tpl[p.id]], p) if p.id in ports
@@ -971,8 +973,9 @@ def check_ports(game_root: str, ids: list[str], rows: dict[str, int]) -> bool:
         if p.id in rows and rows[p.id] != i:
             print(f'  {i:>5} {p.id}: {state} (installed at {rows[p.id]})')
             ok = False
-        if state == 'in' and not os.path.isfile(_mods(game_root, pw.sgo_file(p))):
-            print(f'  {i:>5} {p.id}: {pw.sgo_file(p)} missing')
+        lacking = [rel for rel in pw.files(p) if not os.path.isfile(_mods(game_root, rel))] if state == 'in' else []
+        if lacking:
+            print(f'  {i:>5} {p.id}: {", ".join(lacking)} missing')
             ok = False
     print(f'  ported weapons (EDF5, EDF4.1): {states["in"]} in, {states["placeholder"]} placeholders (waiting for their '
           f'game, or uninstalled), '

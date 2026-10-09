@@ -5267,6 +5267,9 @@ def edf5_weapons_registry() -> None:
     for name, (n, digest) in pw.RELEASED.items():
         assert len(pw.IDS) >= n and hashlib.sha256('\n'.join(pw.IDS[:n]).encode()).hexdigest() == digest, \
             f'{name}: the registry no longer starts with the ids that release installed (EDF5 weapons only go at the end)'
+    release = src('tools/build_release.py')
+    assert all(f"'{registry}'" in release for _game, registry in pw.REGISTRIES), \
+        'tools/build_release.py does not bundle every ported_weapons.REGISTRIES file: a frozen installer would lack rows'
     assert max(n for n, _ in pw.RELEASED.values()) == len(pw.IDS), \
         'edf5port/weapons.json has weapons no RELEASED order lists: add this release to tools/ported_weapons.py RELEASED'
     for p in pw.PORTS:
@@ -5487,22 +5490,30 @@ def edf5_weapons_stack_real() -> None:
     assert len(without) == len(with_edf5)
     for p in pw.PORTS:
         i = with_edf5.index(p.id)
-        assert without[i] == (p.id if p.source == 'edf6' else pw.retired_id(p.id)), p.id
-        assert (pw.sgo_file(p) in bare) == (p.source == 'edf6'), p.id
+        alone = p.source == 'edf6' and not p.assets   # built from EDF6's own files: no earlier game needed
+        assert without[i] == (p.id if alone else pw.retired_id(p.id)), p.id
+        assert (pw.sgo_file(p) in bare) == alone, p.id
     pending = next(p for p in pw.PORTS if p.source == 'edf5')
+    import mdb
+    for p in pw.PORTS:
+        for rel in p.assets:   # a converted model: EDF6's container, its models version 0x20
+            assert out[rel][:4] == b'SSA\0' and all(f.data[4:8] == (0x20).to_bytes(4, 'little')
+                                                    for f in mdb.rab_read(out[rel]).files if f.name.lower().endswith('.mdb')), rel
     text = dsgo.parse(bare['WEAPON/WEAPONTEXT.EN.SGO']).root.get('text_table').items[with_edf5.index(pending.id)]
     assert text.items[0] == pending.text['EN'][0] + pw.PENDING_NOTE['EN'][0].format(game=pw.BY_GAME[pending.game].name)
     orig_base, orig_mods = cw.base, cw._mods
     with tempfile.TemporaryDirectory(prefix='edf6vc-e5w-') as mods:
         for p in pw.PORTS:
-            modfiles.atomic_write(os.path.join(mods, *pw.sgo_file(p).split('/')), out[pw.sgo_file(p)])
+            for rel in pw.files(p):
+                modfiles.atomic_write(os.path.join(mods, *rel.split('/')), out[rel])
         installed = lambda game_root, rel: out[rel] if rel in cw.SHARED else orig_base(game_root, rel)   # noqa: E731
         ours = lambda game_root, *rel: os.path.join(mods, *[x for r in rel for x in r.split('/')])   # noqa: E731
         with patched(cw, base=installed, _mods=ours), patched(pw, game_root=lambda game, edf6_root: None):
             kept = cw.stack(games[0])
             retired, _ = cw.retire(games[0], False)
     assert cw.row_ids(kept[cw.TABLE]) == with_edf5, 'a built row an earlier install wrote was not kept'
-    assert not any(pw.sgo_file(p) in kept for p in pw.PORTS if p.source == 'edf5'), 'a kept SGO was rewritten'
+    assert not any(rel in kept for p in pw.PORTS if p.source == 'edf5' or p.assets for rel in pw.files(p)), \
+        'a kept file was rewritten'
     have = cw.row_ids(retired[cw.TABLE])
     assert all(have[with_edf5.index(p.id)] == pw.retired_id(p.id) for p in pw.PORTS)
 
@@ -5527,7 +5538,7 @@ def edf5_weapons_retire_and_uninstall() -> None:
         modfiles.atomic_write(_mods(game, cw.TABLE), table('table', ids))
         for rel in cw.TEXTS:
             modfiles.atomic_write(_mods(game, rel), table('text_table', ids))
-        for rel in [cw.sgo_file(c) for c in calls.CALLS] + [pw.sgo_file(p) for p in pw.PORTS]:
+        for rel in [cw.sgo_file(c) for c in calls.CALLS] + [rel for p in pw.PORTS for rel in [pw.sgo_file(p), *p.assets]]:
             modfiles.atomic_write(_mods(game, rel), b'ours')
         out, deleted = cw.retire(game, False)
         assert deleted == []
@@ -5541,7 +5552,8 @@ def edf5_weapons_retire_and_uninstall() -> None:
         _, deleted = cw.retire(game, True)
         assert deleted == list(calls.IDS) + [p.id for p in ports], 'the run of ours ending the table'
         cw.uninstall(game)
-        assert not any(os.path.isfile(_mods(game, pw.sgo_file(p))) for p in pw.PORTS)
+        assert not any(os.path.isfile(_mods(game, rel)) for p in pw.PORTS for rel in [pw.sgo_file(p), *p.assets])
+        assert any(p.assets for p in pw.PORTS), 'no port has assets: the asset half of this check is empty'
         assert not any(os.path.isfile(_mods(game, cw.sgo_file(c))) for c in calls.CALLS)
         left = [r.items[0] for r in dsgo.parse(modfiles.read(_mods(game, cw.TABLE))).root.get('table').items]
         assert all(pw.retired_id(p.id) in left for p in ports) and len(left) == len(ids)
@@ -5694,6 +5706,60 @@ def edf41_weapons_match_developers() -> None:
             if plain:
                 assert isinstance(va, dsgo.Node) == isinstance(vb, dsgo.Node), f'{mine} {k}: {dsgo.to_py(va)} / {dsgo.to_py(vb)}'
         assert dsgo.to_py(a.get('EnergyChargeRequire')) == dsgo.to_py(b.get('EnergyChargeRequire')) == [-1.0, -1.0]
+
+
+# EDF5 files EDF6 ships unchanged in content, so EDF5's converted must be EDF6's byte for byte (pylib/cas_legacy.py,
+# pylib/mdb_legacy.py; found 2026-10-10 among the 230 CAS / 3203 MDB pairs of the same name).
+LEGACY_CAS_SAME = ('OBJECT/E511_MOTHERSHIP_GENOCIDE_L.CAS', 'OBJECT/E511_MOTHERSHIP_GENOCIDE_S.CAS',
+                   'OBJECT/EDFDOOR01.CAS', 'OBJECT/V505_TANK.CAS')
+LEGACY_MDB_SAME = (('WEAPON/BEGARUTACANNON.RAB', 'begarutaCannon.mdb'), ('WEAPON/BEGARUTAGATLING.RAB', 'begarutaGatling.mdb'),
+                   ('WEAPON/BULLET_BEETLE01.RAB', 'bullet_beetle01.mdb'))
+
+
+@test
+def legacy_assets_match_edf6() -> None:
+    """Real data, where EDF5 and EDF6 are installed: EDF5's animations and models that EDF6 ships unchanged convert to
+    EDF6's files byte for byte (CAS 0x203 -> 0x204, MDB 0x14 -> 0x20); a whole EDF5 archive converts member by member
+    (pylib/legacy_assets.py), its models 0x20 and its textures as they were; and with EDF4.1 there too, a 4.1 animation
+    EDF5 kept converts to what EDF5's does."""
+    import cas_legacy
+    import gamedir
+    import legacy_assets
+    import mdb
+    import mdb_legacy
+    import rootcpk
+    edf6 = rootcpk.DEFAULT_GAME
+    edf5 = gamedir.find_other(gamedir.EDF5, near=edf6)
+    if not edf5 or not os.path.isfile(os.path.join(edf6, 'Root.cpk')):
+        print('skip  legacy_assets_match_edf6: needs EDF6 and EDF5 installed')
+        return
+    g5, g6 = rootcpk.Game(edf5), rootcpk.Game(edf6)
+    for rel in LEGACY_CAS_SAME:
+        assert cas_legacy.cas_from_legacy(g5.read(*rel.split('/'))) == g6.read(*rel.split('/')), rel
+    for rel, member in LEGACY_MDB_SAME:
+        mine = next(f.data for f in mdb.rab_read(g5.read(*rel.split('/'))).files if f.name == member)
+        theirs = next(f.data for f in mdb.rab_read(g6.read(*rel.split('/'))).files if f.name == member)
+        assert mdb_legacy.mdb_from_legacy(mine) == theirs, rel
+    source = g5.read('WEAPON', 'BEGARUTACANNON.RAB')
+    out = mdb.rab_read(legacy_assets.convert('WEAPON/BEGARUTACANNON.RAB', source))
+    old = mdb.rab_read(source)
+    assert [f.name for f in out.files] == [f.name for f in old.files] and out.folders == old.folders
+    for a, b in zip(out.files, old.files):
+        if a.name.lower().endswith('.mdb'):
+            assert a.data[4:8] == (0x20).to_bytes(4, 'little')
+        else:
+            assert a.stored == b.stored, a.name
+    try:
+        legacy_assets.convert('WEAPON/X.SHKT', b'')
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('a kind with no converter was passed through')
+    edf41 = gamedir.find_other(gamedir.EDF41, near=edf6)
+    if edf41:
+        g4 = rootcpk.Game(edf41)
+        rel = 'MENUOBJECT/ARMYSOLDIER.CAS'
+        assert cas_legacy.cas_from_legacy(g4.read(*rel.split('/'))) == cas_legacy.cas_from_legacy(g5.read(*rel.split('/')))
 
 def main() -> int:
     import rootcpk
