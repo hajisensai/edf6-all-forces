@@ -58,6 +58,7 @@ void MissionStart() noexcept {
     ResetHelis();
     ResetGround();
     ResetNpcAi();
+    ResetQMarks();   // the Q marks, ours and the teammates' (qmark.cpp)
     ResetNpcPosts();
     ResetAirstrikes();
     ResetSupportDispatch();

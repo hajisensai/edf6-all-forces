@@ -1051,3 +1051,13 @@ add_dependencies(offline_checks spot_ray_test)
 add_test(NAME spot_ray COMMAND spot_ray_test)
 add_test(NAME spot_ray_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/spot_ray_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(spot_ray_native PROPERTIES SKIP_RETURN_CODE 77)
+# The custom Q mark that replaces the stock spot (src/qmark.cpp, its wire src/qmark_protocol.cpp, its ray src/qmark_ray.h):
+# production qmark.cpp on stand-ins (marks shared and shown, the cues asked for), the protocol, the aim's ray.
+target_sources(EDF6VehicleCrew PRIVATE src/qmark.cpp src/qmark_protocol.cpp)
+add_executable(qmark_test EXCLUDE_FROM_ALL tests/qmark_test.cpp src/qmark_protocol.cpp)
+target_include_directories(qmark_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(qmark_test PRIVATE edf6common user32)
+target_compile_options(qmark_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+target_link_options(qmark_test PRIVATE /OPT:REF)
+add_dependencies(offline_checks qmark_test)
+add_test(NAME qmark COMMAND qmark_test)

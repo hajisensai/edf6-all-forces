@@ -105,6 +105,8 @@ void CommandContext(ULONGLONG now) noexcept {
     UpdateCommandNetwork({running && session.Ready(),snapshot.isHost!=0,session.Epoch(),commandHostPeer,
         snapshot.peerCount,snapshot.local.id,&SendCommand},now);
 }
+// The Q marks (qmark.cpp) go peer to peer over the same transport, with no host step: only the room has to be up.
+void QMarkContext(ULONGLONG now) noexcept { UpdateQMarkNetwork(running,snapshot.peerCount,&SendCommand,now); }
 bool PeerValid(const EDF6CoopPeer& peer) noexcept {
     return peer.id[0] && std::memchr(peer.id,0,sizeof(peer.id));
 }
@@ -155,11 +157,11 @@ void ConfigureSupportNet(const support_net::Hooks& configured) noexcept {
 }
 void ResetSupportNet() noexcept {
     session.Stop();running=false;blockedUntilMission=false;snapshot={};lastTick=~0ULL;ResetWorld();
-    commandHostPeer=0;ResetCommandNetwork();
+    commandHostPeer=0;ResetCommandNetwork();ResetQMarkNetwork();
 }
 void SuspendSupportNet() noexcept {
     session.Suspend();running=false;blockedUntilMission=true;
-    CommandContext(GetTickCount64());
+    CommandContext(GetTickCount64());QMarkContext(GetTickCount64());
     Log("SUPPORT NET suspended: existing actors retained; mission participant resynchronization required");
 }
 void SupportNetTick() noexcept {
@@ -182,6 +184,7 @@ void SupportNetTick() noexcept {
     if(!running && !Start(next,now)){NoteTransport("EDF6Coop snapshot rejected (peer list / host identity)");return;}
     NoteTransport(next.isHost ? "ready (host)" : "ready (client)");
     CommandContext(now);
+    QMarkContext(now);
     // Never spawn on the DirectNet worker. The map/crew game-thread frame owns
     // both deserialization and the native create/register/destroy callbacks.
     for(unsigned received=0;received<128;++received) {
@@ -192,6 +195,7 @@ void SupportNetTick() noexcept {
         for(std::uint32_t i=1;i<=snapshot.peerCount;++i)if(!std::strcmp(sender.id,peers[i].id)){peer=i;break;}
         if(peer) {
             CommandContext(now);
+            if(ReceiveQMarkNetwork(peer,sender.id,bytes,count,now))continue;   // before the support parser, as the commands
             if(ReceiveCommandNetwork(peer,sender.id,bytes,count,now))continue;
             support_net::Message message;
             if(support_net::Decode(bytes,count,message))session.Receive(peer,message,now);
@@ -199,6 +203,7 @@ void SupportNetTick() noexcept {
     }
     session.Tick(now);
     CommandContext(now);
+    QMarkContext(now);
     if(session.Suspended())SuspendSupportNet();
 }
 bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::size_t size) noexcept {

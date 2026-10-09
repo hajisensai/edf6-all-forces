@@ -4035,7 +4035,7 @@ void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,
     MapLegend(drawer,ctx,text,width,height,s,lines,at);
 }
 
-void NpcMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept;
+void QMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept;
 
 // The map view open: its marks drawn (true), nothing else of the HUD.
 bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
@@ -4050,7 +4050,7 @@ bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     MapGrid(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapUnits(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapCommandView(vp,width,height);   // the commands' box, clicks and pointer are found on this view
-    NpcMarkHud(drawer,ctx,text,vp,width,height,s,lines,at);   // which enemy the NPCs are set on, on the map too
+    QMarkHud(drawer,ctx,text,vp,width,height,s,lines,at);   // the Q marks, ours and the teammates', on the map too
     MapCommands(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapUiBox(drawer,ctx,width*0.55f-8*s,146*s,width-12*s,198*s,lines,*at);
     MapScale(drawer,ctx,text,vp,width,height,s,m,lines,at);
@@ -4070,17 +4070,37 @@ bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     }
     return true;
 }
-// The NPCs' mark (npcai.cpp, the user's Q on foot; docs/npc-ai-design.md §6.3): an amber diamond round it, MARK and its
-// distance under it.
-void NpcMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
-    float m[3],x,y,depth;
-    if(!NpcMarkReadout(m) || !Project(vp,m,width,height,&x,&y,&depth))return;
-    const float r=16.0f*s,t=2.0f*s;
-    Seg(drawer,ctx,x,y-r,x+r,y,t,kAmber);Seg(drawer,ctx,x+r,y,x,y+r,t,kAmber);
-    Seg(drawer,ctx,x,y+r,x-r,y,t,kAmber);Seg(drawer,ctx,x-r,y,x,y-r,t,kAmber);
+// The Q marks (qmark.cpp; the user's Q, docs/npc-ai-design.md §6.3): an enemy marked has a diamond round it, a point on
+// the ground a ring with a cross; this machine's player's amber with MARK and the distance, a teammate's in its player
+// slot's colour with P<n> (ALLY when its slot is not known here) and the distance. The teammates' are drawn first: ours
+// on top where two fall together.
+alignas(16) const float kSlotTint[4][4]={{0.3f,0.85f,1.0f,1.0f},{1.0f,0.45f,0.9f,1.0f},{0.55f,1.0f,0.35f,1.0f},{0.72f,0.6f,1.0f,1.0f}};
+void QMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
+    QMarkView v[kQMarkViews];
+    const int n=QMarkViews(v,kQMarkViews);
     float eye[3],dir[3];
-    if(CameraRay(eye,dir))Label(text,lines,at,x,y+r+12.0f*s,1,kLineScale*0.7f,kAmber,Tr(Tx::npcMarkRange),vec::Dist(eye,m));
-    else Label(text,lines,at,x,y+r+12.0f*s,1,kLineScale*0.7f,kAmber,L"%ls",Tr(Tx::npcMark));
+    const bool cam=CameraRay(eye,dir);
+    for(int pass=0;pass<2;++pass)for(int i=0;i<n;++i) {
+        const QMarkView& m=v[i];
+        float x,y,depth;
+        if(m.own!=(pass==1) || !Project(vp,m.at,width,height,&x,&y,&depth))continue;
+        const float* tint=m.own ? kAmber : m.slot>=0 ? kSlotTint[m.slot%4] : kWhite;
+        const float r=(m.own ? 16.0f : 13.0f)*s,t=2.0f*s;
+        if(m.enemy) {
+            Seg(drawer,ctx,x,y-r,x+r,y,t,tint);Seg(drawer,ctx,x+r,y,x,y+r,t,tint);
+            Seg(drawer,ctx,x,y+r,x-r,y,t,tint);Seg(drawer,ctx,x-r,y,x,y-r,t,tint);
+        } else {
+            Arc(drawer,ctx,x,y,r*0.9f,0.0f,kTurn,t,20,tint);
+            Seg(drawer,ctx,x,y-r*0.4f,x,y+r*0.4f,t,tint);Seg(drawer,ctx,x-r*0.4f,y,x+r*0.4f,y,t,tint);
+        }
+        // An enemy's words under it; a point's over it (the selected units' word, NpcPingHud, goes under).
+        const float ly=m.enemy ? y+r+12.0f*s : y-r-12.0f*s;
+        const float d=cam ? vec::Dist(eye,m.at) : -1.0f;
+        if(m.own && d>=0.0f)Label(text,lines,at,x,ly,1,kLineScale*0.7f,tint,Tr(Tx::npcMarkRange),d);
+        else if(m.own)Label(text,lines,at,x,ly,1,kLineScale*0.7f,tint,L"%ls",Tr(Tx::npcMark));
+        else if(m.slot>=0)Label(text,lines,at,x,ly,1,kLineScale*0.7f,tint,Tr(Tx::qmarkPlayer),m.slot+1,d>=0.0f ? d : 0.0f);
+        else Label(text,lines,at,x,ly,1,kLineScale*0.7f,tint,Tr(Tx::qmarkAlly),d>=0.0f ? d : 0.0f);
+    }
 }
 
 // The march formation just cycled (npcai.cpp; the player's key on foot or the map's T): its name and the key, a moment
@@ -4114,15 +4134,18 @@ void SweepBanner(Text* text,float width,float height,float s,Line* lines,int* at
     if(c.on)Label(text,lines,at,width*0.5f,height*0.5f+222.0f*s,1,kLineScale,kAmber,Tr(Tx::sweepOn),c.left,c.taken,key);
     else Label(text,lines,at,width*0.5f,height*0.5f+222.0f*s,1,kLineScale,kGreen,Tr(Tx::sweepDone),c.taken);
 }
-// The mark key on foot with no enemy near the centre (npcai.cpp SendToPoint): a ring where it points, for a moment, and
-// what came of it (the selected units sent there, how many; none selected; online).
+// The mark key with no enemy near the aim (npcai.cpp SendToPoint): what came of it under the point for a moment (the
+// selected units sent there, how many; none selected; online); the point's own ring is the Q mark's (QMarkHud). An
+// enemy near the aim but not on it: a ring there and the word to aim at it.
 void NpcPingHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
     NpcPing p{};
     float x,y,depth;
     if(!NpcPingReadout(&p) || !Project(vp,p.at,width,height,&x,&y,&depth))return;
     const float* tint=p.given>0 ? kMapOrder : kAmber;
-    Arc(drawer,ctx,x,y,14.0f*s,0.0f,kTurn,2.0f*s,20,tint);
-    Seg(drawer,ctx,x,y-6.0f*s,x,y+6.0f*s,2.0f*s,tint);Seg(drawer,ctx,x-6.0f*s,y,x+6.0f*s,y,2.0f*s,tint);
+    if(p.given==kPingNearEnemy) {
+        Arc(drawer,ctx,x,y,14.0f*s,0.0f,kTurn,2.0f*s,20,tint);
+        Seg(drawer,ctx,x,y-6.0f*s,x,y+6.0f*s,2.0f*s,tint);Seg(drawer,ctx,x-6.0f*s,y,x+6.0f*s,y,2.0f*s,tint);
+    }
     if(p.given>=0)Label(text,lines,at,x,y+26.0f*s,1,kLineScale*0.7f,tint,Tr(Tx::npcPingSent),p.given);
     else Label(text,lines,at,x,y+26.0f*s,1,kLineScale*0.7f,tint,L"%ls",
                Tr(p.given==-2 ? Tx::cmdOfflineOnly : p.given==kPingNearEnemy ? Tx::npcPingNearEnemy : Tx::npcPingNoUnit));
@@ -4308,7 +4331,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         }
         // The hidden stock armor gauge's numbers for a vehicle whose HUD is no StockBlock (that one has them in it).
         if(now-snap.tick<=kFreshMs && snap.armor && !stockHud)ArmorPanel(drawer,ctx,t,s,snap.armorRo,lines,&at);
-        NpcMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
+        QMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         FormationBanner(t,width,height,s,lines,&at);
         SweepBanner(t,width,height,s,lines,&at);
         NpcPingHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);

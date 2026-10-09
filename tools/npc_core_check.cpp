@@ -173,6 +173,12 @@ float MapFloorRay(const float* a,const float* b,float* at) noexcept {
 #endif
 Sea SeaAt(float,float,float*) noexcept { return Sea::land; }
 int MapCommandGuardAt(const float*) noexcept { ++pointOrders;return 1; }
+// The custom Q's side (qmark.cpp): the ray the camera's centre here; the point marks and the cues counted.
+bool QMarkRay(const unsigned char*,float* eye,float* dir) noexcept { return CameraRay(eye,dir); }
+int pointMarks=0,cueOwn=0,cueOff=0,qmarkFrames=0;
+void QMarkSetPoint(const float*) noexcept { ++pointMarks; }
+void QMarkPlay(QMarkCue c) noexcept { cueOwn+=c==QMarkCue::own;cueOff+=c==QMarkCue::off; }
+void QMarkFrame() noexcept { ++qmarkFrames; }
 // The lock registry's valid lock points whatever their lockable flag (the marked enemy out of sight): `lockAt` for `lockOf`.
 const void* lockOf=nullptr;float lockAt[3]{};
 bool VisitLockPoints(EnemyVisitor visit,void* ctx) noexcept { if(lockOf)visit(ctx,lockOf,lockAt);return true; }
@@ -611,9 +617,16 @@ int main() {
         Put<long>(foeCtrl,8,1);
         Expect(NpcMarkEnemy(other,seen,true) && !NpcMarkEnemy(other,seen,true) && !NpcMarked(),"the same enemy again: let go");
         Expect(NpcMarkEnemy(other,seen,true) && NpcMarkEnemy(other,seen,false) && NpcMarked(),"the focus order's mark never lets go");
+        // The Q mark replaces the stock spot (2026-10-10): it marks and shows without the custom AI; the NPCs' focus on it
+        // (NpcMarked: the map's focus order, the soldiers' priority) is the AI's alone.
         config.customNpcAi=false;KeepMark();
         float shown[3];
-        Expect(!NpcMarked() && !NpcMarkEnemy(other,seen,true) && !NpcMarkReadout(shown),"disabled AI neither marks nor publishes a saved mark");
+        Expect(!NpcMarked() && NpcMarkReadout(shown),"disabled AI: the mark still shown, the NPCs not set on it");
+        Expect(!NpcMarkEnemy(other,seen,true) && NpcMarkEnemy(other,seen,true) && !NpcMarked() && NpcMarkReadout(shown),
+               "disabled AI: the map's Q lets go and marks again");
+        config.npcMarkKey=0;KeepMark();
+        Expect(!NpcMarkEnemy(other,seen,true) && !NpcMarkReadout(shown),"NpcMarkKey=0: no Q mark at all");
+        config.npcMarkKey=0x51;
         config.customNpcAi=true;KeepMark();
         Expect(NpcMarked() && NpcMarkReadout(shown),"reenabling AI restores a still-live saved mark");
         ResetNpcAi();
@@ -655,11 +668,22 @@ int main() {
         mapHeld=true;markinput::down=true;NpcMarkFrame(human,false);
         Expect(!NpcMarked(),"TV or closing-map input hold blocks on-foot marking");
         markinput::down=false;NpcMarkFrame(human,false);mapHeld=false;
+        cueOwn=cueOff=pointMarks=qmarkFrames=0;
         markinput::down=true;NpcMarkFrame(human,false);
         Expect(NpcMarked(),"a fresh player-frame press marks without any NPC Think");
+        Expect(cueOwn==1 && cueOff==0 && qmarkFrames==1,"marking asks for the own cue; the Q mark's frame runs from the player's");
+        markinput::down=false;NpcMarkFrame(human,false);
+        markinput::down=true;NpcMarkFrame(human,false);
+        Expect(!NpcMarked() && cueOff==1,"the same enemy again: let go, the off cue");
+        markinput::down=false;NpcMarkFrame(human,false);
+        Put<void*>(human,kHumanVehicleCtrl,foeCtrl);   // riding (the stock spot it replaces was riding too)
+        markinput::down=true;NpcMarkFrame(human,false);
+        Expect(NpcMarked() && cueOwn==2,"riding: Q marks as on foot");
+        Put<void*>(human,kHumanVehicleCtrl,nullptr);
         markinput::down=false;NpcMarkFrame(human,false);markEnemy=nullptr;
         markinput::down=true;NpcMarkFrame(human,false);
         Expect(pointOrders==1 && NpcMarked(),"a ground miss orders selected units without clearing the existing mark");
+        Expect(pointMarks==1 && cueOwn==3,"a ground miss marks the point (shared, shown) with the own cue");
         markinput::down=false;NpcMarkFrame(human,false);config.enabled=false;
         markinput::down=true;NpcMarkFrame(human,false);
         Expect(pointOrders==1 && !NpcMarked(),"global disable prevents ground orders and hides the mark");
