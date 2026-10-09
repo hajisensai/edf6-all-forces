@@ -616,7 +616,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     std::memcpy(r.note,g.note,sizeof(r.note));
     r.sweepOn=NpcSweepOn();r.healthOn=NpcPickupHealthOn();r.march=NpcMarchShape();
     r.armedOrder=g.armedOrder;r.armed=g.armed;r.supportArmed=g.armedSupport;r.supportPick=g.supportPick;
-    r.supports=(std::min)(SupportCallCount(),kMapSupports);
+    r.supports=(std::min)(SupportMenuCount(),kMapSupports);   // the sea rescue is no map call
     for(int i=0;i<r.supports;++i) {
         _snwprintf_s(r.support[i].name,_countof(r.support[i].name),_TRUNCATE,L"%ls",SupportCallName(i));
         r.support[i].icon=SupportCallIcon(i);r.support[i].variant=SupportCallVariant(i);
@@ -670,7 +670,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     }
     const bool cancel=g.rightClick && (g.armedOrder || g.armedSupport>=0);   // RTS: the right button leaves the targeting
     if(cancel){Arm(g,false,Order::none,-1);g.rightClick=false;Note(g,L"%ls",hudtext::Tr(hudtext::Tx::cmdArmCancelled));}
-    const int supportCount=SupportCallCount();
+    const int supportCount=SupportMenuCount();
     if(supportCount>0) {
         const bool previous=k.supportPrev && !g.was.supportPrev,following=k.supportNext && !g.was.supportNext;
         if(previous || following) {

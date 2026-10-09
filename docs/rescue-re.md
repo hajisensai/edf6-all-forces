@@ -50,7 +50,18 @@ The plugin reads exactly this. If the bytes at 0x6346FC, 0x634726, 0x634758 or 0
 - the local player on foot (human+0x1550 empty);
 - the player's y < RescueBelow for 1.5 s.
 
-**Launch:** one 410, 60 m above the carrier's deck point nearest the player (HeliLaunch).
+**Launch (2026-10-09):** the support catalog's last entry, `RESCUE` (support_call.h SupportRescueAt), requested at the
+swimmer through the ordinary support request path (offline / a one-player world's host: planned here; any other online
+machine: through the host's transaction, every peer announcing `kCapSeaRescue`).
+- Planned as air support (`PlanAirSupport`): an entry at the map's edge, a clear corridor, open sky over the swimmer.
+- One 410 made in the air at the entry, its real pilot made inside it and seated at once (`BoardAirborne`), both
+  registered on every peer. Its door seats are left empty for the swimmer: the entry's crew is the pilot only.
+- The dispatcher hands it to heli.cpp (`RescueHeliDeployed`): where it is flown (offline, the host) the flight picks up
+  the player of any machine nearest the request's point; on the swimmer's machine the call presses the board button.
+- No heli (refused, cooldown, no sky / corridor, an older peer, nothing within 150 s): logged
+  `RESCUE request failed`, shown on the HUD, asked again 10 s later.
+- Before this, one 410 was made 60 m above the carrier's deck with an empty pilot seat (HeliLaunch): since the real
+  crews (c21f499) nobody sat in it and it fell. That spawner is gone (tests/rescue_support_guard.py).
 
 **Pickup:**
 - It flies to the player at sea level + 20 m.
@@ -75,6 +86,9 @@ The plugin reads exactly this. If the bytes at 0x6346FC, 0x634726, 0x634758 or 0
 - the heli is lost;
 - the player takes seat 0 (the heli becomes theirs and is left as is).
 
+The flight (where it is flown) and the call (the swimmer's machine) each test these on their own copy; offline both run
+on the same heli.
+
 After it ends, there is a 30 s pause before another rescue.
 
 The player's position is never written. Only the stock boarding seats them, and they get off themselves.
@@ -85,3 +99,5 @@ The player's position is never written. Only the stock boarding seats them, and 
 - The actual radius of the 410 door seats' riding points, and whether a heli 1.5 m over the sea brings them into reach of a swimmer. The logs report both.
 - Whether a swimming human passes the 0x56D700 state gates (+0x128, +0x5D0, +0x39C).
 - Whether the 410 is preloaded on sea missions.
+- Online: whether the host sees a guest's swimmer among the mission player actors (SupportMissionPlayerObjects), whether
+  a guest's board press takes a door seat of the host's registered copy, and whether team 5 set on a peer's copy holds.

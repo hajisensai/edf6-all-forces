@@ -205,6 +205,9 @@ bool PlayerFormationCue(FormationCue* o) noexcept { if(sceneFormation<0)return f
 // The box sweep banner (npcai.cpp PlayerSweepCue): on in the npc_sweep scenes.
 bool sceneSweepOn=false;SweepCue sceneSweep{};
 bool PlayerSweepCue(SweepCue* o) noexcept { if(sceneSweepOn)*o=sceneSweep;return sceneSweepOn; }
+// The sea rescue's banner (heli.cpp PlayerRescueCue): on in the rescue_banner scene.
+bool sceneRescueOn=false;RescueCue sceneRescue{};
+bool PlayerRescueCue(RescueCue* o) noexcept { if(sceneRescueOn)*o=sceneRescue;return sceneRescueOn; }
 bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
 void MapCommandView(const float*,float,float) noexcept {}
 // The map's buttons as drawn (hud.cpp MapButtons): the scene's check reads them.
@@ -1446,7 +1449,7 @@ int FullLoadoutScenes(const std::wstring& dir) {
     const Case cases[]={{1920,1080,1},{1440,1080,1.5f},{1024,768,1.5f},{960,1080,2.0f},{1920,1080,3.0f}};
     hasJet=hasHeli=hasWarn=hasStock=hasDrill=hasNix=hasMap=hasEmc=hasProteus=hasSazabi=hasTurret=false;
     hasLauncher=hasHeliSight=hasHighView=hasGunner=false;
-    sceneFormation=-1;sceneSweepOn=false;sceneMarkOn=false;
+    sceneFormation=-1;sceneSweepOn=false;sceneMarkOn=false;sceneRescueOn=false;
     for(int heli=0;heli<2;++heli)for(const Case& c:cases) {
         hasStock=true;hasHeli=heli!=0;StockTank(pos);sceneStock.heli=hasHeli;
         sceneStock.arms=kStockArms;sceneStock.selected=0;sceneStock.sight=-1;
@@ -1753,6 +1756,25 @@ int Scenes(const std::wstring& dir) {
         }
         failed+=!(line && apart);
         std::printf("%s  %ls: the sweep line %d, no text overlapping %d\n",line && apart ? "ok  " : "FAIL",name,line,apart);
+    }
+    // The sea rescue's banner under both (heli.cpp): why no heli came, the longest line it says.
+    {
+        sceneSweepOn=true;sceneSweep=SweepCue{true,12,7,0x59};sceneRescueOn=true;sceneRescue=RescueCue{};
+        _snwprintf_s(sceneRescue.text,_TRUNCATE,hudtext::Tr(hudtext::Tx::rescueFailed),hudtext::Tr(hudtext::Tx::supportRescueNeedsUpdate),10);
+        sceneRescue.bad=true;
+        Scene(dir,L"rescue_banner",ground);
+        bool line=false,apart=true;
+        for(std::size_t i=0;i<drew.size();++i) {
+            const Drew& p=drew[i];
+            if(p.text==sceneRescue.text)line=line || (p.x0>=0.0f && p.x1<=1920.0f && p.y1<=1080.0f);
+            for(std::size_t k=i+1;k<drew.size();++k) {
+                const Drew& q=drew[k];
+                if(!p.text.empty() && !q.text.empty() && p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1)apart=false;
+            }
+        }
+        failed+=!(line && apart);
+        std::printf("%s  rescue_banner: the rescue line %d, no text overlapping %d\n",line && apart ? "ok  " : "FAIL",line,apart);
+        sceneRescueOn=false;
     }
     sceneSweepOn=false;
     sceneFormation=-1;

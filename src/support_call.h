@@ -40,7 +40,24 @@ int SupportCallCount() noexcept;
 const wchar_t* SupportCallName(int index) noexcept;
 // The catalog entry's stable configuration key (EDF6VehicleCrew.ini SupportDisabled / SupportAircraftCount_<key>).
 const wchar_t* SupportCallKey(int index) noexcept;
+// A map / radio call of entry `index`; the sea rescue entry is refused here (only the rescue's own trigger asks for it).
 bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept;
+// The entries the map's support bar offers and cycles (mapcmd.cpp): every one but the sea rescue, the catalog's last.
+int SupportMenuCount() noexcept;
+// The sea rescue (2026-10-09, the user: 「给救援加一个支援目录项，走正规的呼叫支援流程」): the catalog's last entry,
+// after the ground ones, so every older index keeps its meaning on the wire. heli.cpp's trigger (a local player on
+// foot in the sea, a submarine carrier out) asks for it at the swimmer through the same request path as a map call:
+// offline / a one-player world's host plans it here, any other online machine through the host (support_net,
+// kCapSeaRescue on every peer). One 410 made in the air at the edge, its real pilot made inside it and seated at once;
+// its door seats are left for the swimmer. Same return and note as SupportCallAt.
+int SupportRescueCatalog() noexcept;
+bool SupportRescueAt(const float* target,wchar_t* note,std::size_t capacity) noexcept;
+// heli.cpp's half of the rescue (the dispatcher calls these, game thread):
+//  - a rescue deployment was made on this machine with every crew seated (`target`: its plan's, the request's point,
+//    identical on every machine). `flown`: this machine runs its flight (offline, the host), else it is a peer's copy.
+//  - this machine's rescue request ended without a heli (refused, timed out, cancelled, interrupted, not made): `why`.
+void RescueHeliDeployed(unsigned char* vehicle,const float* target,bool flown) noexcept;
+void RescueRequestFailed(const wchar_t* why) noexcept;
 void SupportDispatchTick() noexcept;
 void ResetSupportDispatch() noexcept;
 void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept;

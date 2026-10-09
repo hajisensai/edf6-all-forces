@@ -30,7 +30,8 @@ struct Room {
     std::deque<Packet> packets;
     std::vector<Packet> history;
     std::uint64_t now=10000;
-    unsigned failTo=999,dropTo=999,legacyNode=999;   // legacyNode: an older build, its hello announces no capability
+    unsigned failTo=999,dropTo=999,legacyNode=999;   // legacyNode: an older build, its hello announces legacyCaps only
+    std::uint32_t legacyCaps=0;
     Kind failKind=Kind::cancel,dropKind=Kind::cancel;
     explicit Room(unsigned count);
     unsigned Peer(unsigned node,unsigned global) const { return global<node ? global+1 : global; }
@@ -60,7 +61,7 @@ bool Send(void* ctx,std::uint32_t peer,const Message& message) noexcept {
     auto& node=*static_cast<Node*>(ctx);auto& room=*node.room;const auto dst=room.Global(node.id,peer);
     if(dst==room.failTo && message.kind==room.failKind)return false;
     unsigned char wire[kWireSize];Message decoded;
-    Message sent=message;if(node.id==room.legacyNode && sent.kind==Kind::hello)sent.index=0;   // protocol v2 before capabilities
+    Message sent=message;if(node.id==room.legacyNode && sent.kind==Kind::hello)sent.index=room.legacyCaps;   // an older build's capabilities
     if(!Encode(sent,wire,sizeof(wire)) || !Decode(wire,sizeof(wire),decoded))return false;
     Packet p{node.id,dst,decoded};room.packets.push_back(p);room.history.push_back(p);return true;
 }
@@ -132,13 +133,21 @@ void Capabilities() {
     {Room r(3);r.With(0);
      Check(r.nodes[0]->session->PeersHave(kCapSoldierVariants),"every new peer announced soldier variants");
      Check(r.nodes[0]->session->PeersHave(kCapSoldierVariants|kCapAirborneAir),"and airborne air support");
+     Check(r.nodes[0]->session->PeersHave(kCapSeaRescue) && (kCapabilities&kCapSeaRescue),"and the sea rescue entry");
      r.With(1);Check(r.nodes[1]->session->PeersHave(kCapSoldierVariants),"a client is never asked: true");}
     {Room r(3);r.legacyNode=2;r.With(2);r.nodes[2]->session->Stop();r.nodes[2]->session->Start(false,2,1,r.now);r.Settle();
      Check(r.nodes[0]->session->Ready(),"an older client still completes the handshake");
      Check(!r.nodes[0]->session->PeersHave(kCapSoldierVariants),"host knows one peer lacks soldier variants");
      Check(!r.nodes[0]->session->PeersHave(kCapAirborneAir),"host knows one peer cannot make air support in the air");
+     Check(!r.nodes[0]->session->PeersHave(kCapSeaRescue),"host knows one peer has no sea rescue entry (its plan is refused there)");
      Check(r.Submit(),"mixed room request");r.Settle();
      for(const auto& n:r.nodes)Check(n->spawns==1,"mixed room: the v2 plan (rifles) passes the older peer's Validate");}
+    // The build just before the sea rescue entry (soldier variants and airborne air, no rescue): every air call still
+    // plans, the rescue alone is refused there (support_dispatch.cpp SupportPeersAcceptRescue).
+    {Room r(3);r.legacyNode=2;r.legacyCaps=kCapSoldierVariants|kCapAirborneAir;r.With(2);r.nodes[2]->session->Stop();
+     r.nodes[2]->session->Start(false,2,1,r.now);r.Settle();
+     Check(r.nodes[0]->session->PeersHave(kCapSoldierVariants|kCapAirborneAir) && !r.nodes[0]->session->PeersHave(kCapSeaRescue),
+           "a peer one version older: air support yes, the sea rescue no");}
     {Room r(2);r.legacyNode=1;r.With(1);r.nodes[1]->session->Stop();r.nodes[1]->session->Start(false,1,1,r.now);r.Settle();
      r.legacyNode=999;r.Step(1100);r.Settle();
      Check(r.nodes[0]->session->PeersHave(kCapSoldierVariants),"a peer's latest hello decides (an updated peer rejoining)");}

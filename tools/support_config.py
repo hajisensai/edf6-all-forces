@@ -12,19 +12,20 @@ SECTION = 'VehicleCrew'
 # src/support_config.cpp kWeaponNames (the ini spelling, the label shown).
 WEAPONS = (('rifle', '步枪'), ('flame', '火焰'), ('rocket', '火箭'), ('shotgun', '霰弹'), ('sniper', '狙击'))
 # The catalog keys in catalog order: tools/calls.py's flown calls (EDF6VC_CALL_* without the prefix; src/airstrike.cpp
-# SupportAirCallKey), then src/support_dispatch.cpp SupportCallKey's own.
+# SupportAirCallKey), then src/support_dispatch.cpp SupportCallKey's own (the infantry, the ground pairs, and last the sea
+# rescue: never on the map's bar, a player in the sea asks for it; disabling it here stops the rescue).
 AIR_KEYS = ('INTERCEPTOR', 'INTERCEPTOR_F', 'STRIKE', 'STRIKE_F', 'MULTIROLE', 'MULTIROLE_F', 'FIGHTER', 'FIGHTER_F',
             'CARRIER', 'CARRIER_F', 'HELI', 'HELI_F', 'BLAST_CARRIER', 'BLAST_CARRIER_F', 'DOLL_CARRIER', 'DOLL_CARRIER_F', 'SUB',
             'GUNSHIP', 'GUNSHIP_F', 'MEDIC_HELI', 'MEDIC_HELI_F')
 GROUND_KEYS = ('SQUAD', 'PLATOON', 'TANK_CREWED', 'TANK_DELIVERY', 'TRANSPORT_CREWED', 'TRANSPORT_DELIVERY', 'TRUCK_CREWED',
-               'TRUCK_DELIVERY')
+               'TRUCK_DELIVERY', 'RESCUE')
 UNIT_KEYS = AIR_KEYS + GROUND_KEYS
 LABELS = dict(zip(UNIT_KEYS, (
     '截击机·守点', '截击机·跟随', '对地攻击机·守点', '对地攻击机·跟随', '多用途机·守点', '多用途机·跟随', '制空战斗机·守点',
     '制空战斗机·跟随', '无人机母舰·守点', '无人机母舰·跟随', '直升机·守点', '直升机·跟随', '自爆无人机母舰·守点',
     '自爆无人机母舰·跟随', '人偶无人机母舰·守点', '人偶无人机母舰·跟随', '潜水母舰', '炮艇机·守点', '炮艇机·跟随',
     '医疗直升机·守点', '医疗直升机·跟随', '步兵小队（4人）', '步兵大队（12人）', '坦克·有人', '坦克·空车交付',
-    '装甲运兵车·有人', '装甲运兵车·空车交付', '民用轻卡·有人', '民用轻卡·空车交付')))
+    '装甲运兵车·有人', '装甲运兵车·空车交付', '民用轻卡·有人', '民用轻卡·空车交付', '海上救援直升机')))
 WEAPON_KEYS = (('SupportSquadWeapon', '4 人小队队员'), ('SupportSquadLeaderWeapon', '所有小队队长'),
                ('SupportVehicleCrewWeapon', '车辆机组'), ('SupportAircraftCrewWeapon', '飞机机组'))
 DEFAULTS = {'SupportDisabled': '', 'SupportSquadWeapon': 'rifle', 'SupportSquadLeaderWeapon': 'rifle',

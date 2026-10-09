@@ -48,6 +48,9 @@ bool SupportPeersAcceptVariants() noexcept;
 // Whether every peer applies air support created in the air (kCapAirborneAir); true offline / with no session. Without
 // it the host refuses air support with a reason: no peer may have its hull on the ground while another's flies.
 bool SupportPeersAcceptAirborne() noexcept;
+// Whether every peer has the sea rescue catalog entry (kCapSeaRescue); true offline / with no session. Without it the
+// host refuses the rescue with a reason (the swimmer's machine is told, and logs it).
+bool SupportPeersAcceptRescue() noexcept;
 // Requester ownership: native EOS PUID must equal the authenticated transport
 // sender and belong to the sealed current-world participant set.
 bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) noexcept;
@@ -60,6 +63,9 @@ bool SupportMissionPlayerAllowed(int missionIndex) noexcept;
 // (SupportMissionPlayerAllowed), so the host may deploy support locally without the EDF6Coop transport.
 bool SupportSoloHostWorld() noexcept;
 void NoteSupportMissionPlayerCreated(int missionIndex,const ObjRef& object) noexcept;
+// The mission player actors this world created so far (any machine's; up to `most`, game thread): references only, each
+// to be checked live by the caller (ObjRef::Is). The sea rescue's heli finds the swimmer it was made for among them.
+int SupportMissionPlayerObjects(ObjRef* out,int most) noexcept;
 // Only a verified native return-to-lobby transition may call this; readiness
 // loss, a disappeared actor, and InSession() are not evidence of a lobby.
 void SupportMissionReturnedToLobby() noexcept;

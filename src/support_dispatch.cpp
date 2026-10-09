@@ -62,6 +62,7 @@ bool offlinePending=false;std::uint64_t nextOffline=1;ULONGLONG callAt=0;
 wchar_t status[160]{};
 struct LocalRequest {
     bool shown=false,acceptNotices=false,hasNotice=false;
+    bool rescue=false;   // the sea rescue's request (heli.cpp): its terminal failure is told to the rescue too
     std::uint32_t id=0;
     support_net::RequestStatus state=support_net::RequestStatus::accepted;
     wchar_t text[128]{};
@@ -98,6 +99,10 @@ void RequestNotice(std::uint32_t request,support_net::RequestStatus state) noexc
     if(!text)return;
     localRequest.id=request;localRequest.state=state;localRequest.shown=localRequest.hasNotice=true;
     _snwprintf_s(localRequest.text,_countof(localRequest.text),_TRUNCATE,L"%ls",text);
+    if(localRequest.rescue && state>=RequestStatus::refused) {
+        Log("SUPPORT rescue request %u ended without a heli (status %u)",request,static_cast<unsigned>(state));
+        RescueRequestFailed(text);
+    }
 }
 int AirCount() noexcept {return SupportAirCallCount();}
 int GroundStart() noexcept {return AirCount()+2;}
@@ -112,6 +117,20 @@ bool GroundCatalog(std::uint32_t id,SupportVehicleKind& kind,SupportCrewMode& mo
     if(index<0 || index>=kSupportVehicleCount*2)return false;
     kind=static_cast<SupportVehicleKind>(index/2);
     mode=index%2 ? SupportCrewMode::unmanned : SupportCrewMode::soldiers;return true;
+}
+// The sea rescue (support_call.h SupportRescueCatalog): the last entry, after the ground ones.
+std::uint32_t RescueCatalog() noexcept {return static_cast<std::uint32_t>(GroundStart()+kSupportVehicleCount*2);}
+bool IsRescue(std::uint32_t catalog) noexcept {return catalog==RescueCatalog();}
+// Entries that bring aircraft made in the air: the flown calls, and the rescue.
+bool AirCatalog(std::uint32_t catalog) noexcept {return catalog<static_cast<unsigned>(AirCount()) || IsRescue(catalog);}
+constexpr std::uint32_t kRescueFuelSec=900;   // the rescue heli's fuel (heli.cpp leaves on it), as the rescue always had
+// What an air entry brings: a flown call's own (airstrike.cpp SupportAircraftSpec), the rescue's one 410.
+bool AircraftOf(std::uint32_t catalog,SupportAircraft* out) noexcept {
+    if(IsRescue(catalog)) {
+        *out=SupportAircraft{};out->heli=static_cast<int>(HeliBody::brute410);out->count=1;out->fuelSeconds=kRescueFuelSec;
+        return true;
+    }
+    return catalog<static_cast<unsigned>(AirCount()) && SupportAircraftSpec(static_cast<int>(catalog),out);
 }
 npc::navigation::Profile VehicleRouteProfile(const SupportVehicleSpec& spec) noexcept {
     npc::navigation::Profile profile;
@@ -148,7 +167,10 @@ bool AddCrew(SupportPlan& plan,unsigned parent,const float* entry,const float* h
     }
     return true;
 }
-unsigned AirCrew(const SupportAircraft& spec) noexcept {
+// The real crew an entry's aircraft carries: a 410 its pilot and both door gunners, else its pilot; the rescue's 410 its
+// pilot only (its door seats are the swimmer's: docs/rescue-re.md).
+unsigned AirCrew(std::uint32_t catalog,const SupportAircraft& spec) noexcept {
+    if(IsRescue(catalog))return 1u;
     return spec.heli==static_cast<int>(HeliBody::brute410) || spec.heli==static_cast<int>(HeliBody::medic410) ? 3u : 1u;
 }
 // The aircraft one call brings: the configured number (SupportAircraftCount_<key>) or the call's own, never past the
@@ -166,6 +188,7 @@ bool UseConfiguredLoadout() noexcept {
     return false;
 }
 int AircraftCount(std::uint32_t catalog,const SupportAircraft& spec,unsigned group) noexcept {
+    if(IsRescue(catalog))return 1;   // one heli for one swimmer, never configured
     const int chosen=catalog<static_cast<unsigned>(kSupportConfigUnits) && UseConfiguredLoadout() ? SupportCfg().aircraft[catalog] : 0;
     const int most=static_cast<int>(support_net::kMaxUnits/group);
     const int wanted=chosen>0 ? chosen : spec.count;
@@ -194,15 +217,25 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,SupportPl
         legacyNoticed=false;
     }
     SupportPlan plan{};plan.catalogId=catalog;std::memcpy(plan.target,target,12);
-    if(catalog<static_cast<unsigned>(AirCount())) {
+    if(AirCatalog(catalog)) {
         if(!support::Allowed(SupportMissionPolicy(),support::Capability::air)) {
             Refuse(catalog,"mission forbids external air support or underground",L"本关限制外部航空支援，或处于地下环境");return PlanResult::refused;
         }
         SupportAircraft spec;support::Route route;
-        if(!SupportAircraftSpec(static_cast<int>(catalog),&spec)) {
+        if(!AircraftOf(catalog,&spec)) {
             Refuse(catalog,"no verified entry for this unit",L"该单位尚无可用的实际入场方式");return PlanResult::refused;
         }
-        if(!Cfg().jetAirRaider || !Cfg().npcBoarding || (spec.heli>=0 ? !Cfg().heliPilot : !Cfg().jetPilot)) {
+        if(IsRescue(catalog)) {
+            // No Air Raider's call: it needs the rescue itself, a pilot the plugin flies, and real crews seated.
+            if(!Cfg().seaRescue || !Cfg().npcBoarding || !Cfg().heliPilot) {
+                Refuse(catalog,"SeaRescue/NpcBoarding/HeliPilot off",L"海上救援、真实机组登乘或直升机驾驶功能未启用");return PlanResult::refused;
+            }
+            // Every peer must have the rescue entry (support_protocol.h kCapSeaRescue): an older one's catalog ends before it.
+            if(!SupportPeersAcceptRescue()) {
+                Refuse(catalog,"a peer runs an older All Forces without the sea rescue entry",hudtext::Tr(hudtext::Tx::supportRescueNeedsUpdate));
+                return PlanResult::refused;
+            }
+        } else if(!Cfg().jetAirRaider || !Cfg().npcBoarding || (spec.heli>=0 ? !Cfg().heliPilot : !Cfg().jetPilot)) {
             Refuse(catalog,"JetAirRaider/NpcBoarding/HeliPilot/JetPilot off",L"航空支援或真实机组驾驶功能未启用");return PlanResult::refused;
         }
         // Every peer must create it in the air the same way (support_protocol.h kCapAirborneAir): an older peer would
@@ -211,8 +244,8 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,SupportPl
             Refuse(catalog,"a peer runs an older All Forces without airborne air support",hudtext::Tr(hudtext::Tx::supportAirNeedsUpdate));
             return PlanResult::refused;
         }
-        spec.count=AircraftCount(catalog,spec,1+AirCrew(spec));
-        const auto refusal=PlanAirSupport(static_cast<int>(catalog),target,player.pos,&route,spec.count);
+        spec.count=AircraftCount(catalog,spec,1+AirCrew(catalog,spec));
+        const auto refusal=PlanAirSupport(spec,target,player.pos,&route);
         if(refusal!=support::Refusal::none) {
             if(refusal==support::Refusal::noSky)Refuse(catalog,"no open sky over the target",L"此处没有开放天空，航空支援无法进入");
             else Refuse(catalog,"no clear air corridor from any map edge",L"从地图边缘到目标没有净空的空中航线");
@@ -226,7 +259,7 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,SupportPl
             float at[3];support::AirFormationSlot(route,i,spacing,at);
             const unsigned parent=plan.count+1;
             if(!AddUnit(plan,kAircraft+kSupportAirborneOffset+catalog,0,at,route.heading)){Refuse(catalog,"plan full",L"支援单位过多");return PlanResult::refused;}
-            for(unsigned c=0;c<AirCrew(spec);++c)if(!AddUnit(plan,crew,parent,at,route.heading)) {
+            for(unsigned c=0;c<AirCrew(catalog,spec);++c)if(!AddUnit(plan,crew,parent,at,route.heading)) {
                 Refuse(catalog,"plan full",L"支援单位过多");return PlanResult::refused;
             }
         }
@@ -296,18 +329,21 @@ bool Validate(const SupportPlan& plan) noexcept {
     if(plan.catalogId==support_net::kMissionCrewCatalog)return ValidateMissionCrewPlan(plan);
     if(!support_net::ValidPlan(plan,false) || plan.catalogId>=static_cast<unsigned>(SupportCallCount()) || !SupportSoldiersReady())return false;
     SupportAircraft aircraft;SupportVehicleKind kind{};SupportCrewMode mode{};
-    const bool air=plan.catalogId<static_cast<unsigned>(AirCount()),ground=GroundCatalog(plan.catalogId,kind,mode);
+    const bool air=AirCatalog(plan.catalogId),ground=GroundCatalog(plan.catalogId,kind,mode);
     const auto capability=air ? support::Capability::air : ground ?
         (SupportVehicleInfo(kind)->wasteland ? support::Capability::civilianGround : support::Capability::militaryGround) : support::Capability::infantry;
     if(!support::Allowed(SupportMissionPolicy(),capability))return false;
-    if(air && !SupportAircraftSpec(static_cast<int>(plan.catalogId),&aircraft))return false;
+    if(air && !AircraftOf(plan.catalogId,&aircraft))return false;
     if(ground && !SupportVehicleReady(kind,mode))return false;
     // Weapons and the number of aircraft are the host's configuration: a peer checks the structure and that every
     // soldier is one of the stock templates, never against its own ini.
     const auto member=[](std::uint32_t id) noexcept {return IsSupportSoldierResource(id) && !IsSupportLeaderResource(id);};
     if(air) {
-        const unsigned group=1+AirCrew(aircraft);
+        const unsigned group=1+AirCrew(plan.catalogId,aircraft);
         if(!plan.count || plan.count%group)return false;
+        // The rescue: exactly one heli made in the air (no older host ever planned one on a runway).
+        if(IsRescue(plan.catalogId) && (plan.count!=group || plan.units[0].resourceId!=kAircraft+kSupportAirborneOffset+plan.catalogId))
+            return false;
         for(unsigned i=0;i<plan.count;++i) {
             const auto& unit=plan.units[i];
             // This version's airborne hull, or an older host's runway hull (applied as that host planned it).
@@ -333,7 +369,7 @@ bool Validate(const SupportPlan& plan) noexcept {
         if(unit.role && (unit.role>i || plan.units[unit.role-1].resourceId<kAircraft))return false;
         if(IsSupportSoldierResource(unit.resourceId))continue;
         if((unit.resourceId==kAircraft+plan.catalogId || unit.resourceId==kAircraft+kSupportAirborneOffset+plan.catalogId) &&
-           plan.catalogId<static_cast<unsigned>(AirCount()))continue;
+           AirCatalog(plan.catalogId))continue;
         if(unit.resourceId>=kVehicle && unit.resourceId<kVehicle+kSupportVehicleCount &&
            GroundCatalog(plan.catalogId,kind,mode) && unit.resourceId==kVehicle+static_cast<unsigned>(kind))continue;
         return false;
@@ -397,7 +433,7 @@ bool BoardAirborne(Deployment& deployed,bool networked) noexcept {
         }
         if(!deployed.remote) {
             SupportAircraft spec;
-            if(!SupportAircraftSpec(static_cast<int>(plan.catalogId),&spec) || !ActivateSupportAircraft(vehicle,spec,plan.target,true))return false;
+            if(!AircraftOf(plan.catalogId,&spec) || !ActivateSupportAircraft(vehicle,spec,plan.target,true))return false;
             deployed.started=true;
         }
     }
@@ -425,7 +461,7 @@ bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool n
             unsigned char* vehicle=nullptr;
             if(unit.resourceId<kVehicle) {
                 SupportAircraft spec;
-                if(SupportAircraftSpec(static_cast<int>(plan.catalogId),&spec))vehicle=PrepareSupportAircraft(spec,unit.matrix);
+                if(AircraftOf(plan.catalogId,&spec))vehicle=PrepareSupportAircraft(spec,unit.matrix);
             } else {
                 SupportVehicleKind kind{};SupportCrewMode mode{};
                 if(GroundCatalog(plan.catalogId,kind,mode))vehicle=SpawnSupportVehicle(kind,mode,unit.matrix+12,unit.matrix+8,nullptr);
@@ -442,6 +478,15 @@ bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool n
     if(!BoardAirborne(*deployed,networked)){Destroy(id);return false;}
     Log("SUPPORT spawn %llu: catalog %u, %u units created (%s)",static_cast<unsigned long long>(id),plan.catalogId,plan.count,
         networked ? "networked" : InSession() ? "host of a one-player world" : "offline");
+    if(IsRescue(plan.catalogId)) {
+        // The rescue's own logic (heli.cpp) flies it where it is flown and boards the swimmer on the swimmer's machine;
+        // the dispatcher keeps only the deployment's bookkeeping (held crew, cancel, losses), never the arrival order
+        // every other air entry gets.
+        deployed->delivered=true;
+        RescueHeliDeployed(static_cast<unsigned char*>(const_cast<void*>(deployed->objects[0].obj)),plan.target,!remote);
+        Status(L"救援直升机已从场外空中入场，正在飞往落水的玩家");
+        return true;
+    }
     if(deployed->started)Status(L"空中支援已从场外空中入场，正在飞往目标");
     else Status(networked ? L"支援已在入口集结，等待所有玩家确认对象" : L"支援已在入口集结，真实机组正在登车");
     return true;
@@ -477,13 +522,15 @@ void Configure() noexcept {
     InstallMissionCrewSupport();configured=true;
 }
 }
-int SupportCallCount() noexcept {return AirCount()+2+kSupportVehicleCount*2;}
+int SupportCallCount() noexcept {return AirCount()+2+kSupportVehicleCount*2+1;}
+int SupportMenuCount() noexcept {return SupportCallCount()-1;}   // the rescue (last) is no map call
+int SupportRescueCatalog() noexcept {return static_cast<int>(RescueCatalog());}
 const wchar_t* SupportCallKey(int index) noexcept {
     if(index<0)return nullptr;
     if(index<AirCount())return SupportAirCallKey(index);
     static const wchar_t* keys[]={L"SQUAD",L"PLATOON",L"TANK_CREWED",L"TANK_DELIVERY",L"TRANSPORT_CREWED",L"TRANSPORT_DELIVERY",
-                                  L"TRUCK_CREWED",L"TRUCK_DELIVERY"};
-    static_assert(sizeof(keys)/sizeof(keys[0])==2+kSupportVehicleCount*2,"one key per infantry and ground entry");
+                                  L"TRUCK_CREWED",L"TRUCK_DELIVERY",L"RESCUE"};
+    static_assert(sizeof(keys)/sizeof(keys[0])==2+kSupportVehicleCount*2+1,"one key per infantry, ground and the rescue entry");
     const int rest=index-AirCount();
     return rest<static_cast<int>(sizeof(keys)/sizeof(keys[0])) ? keys[rest] : nullptr;
 }
@@ -493,13 +540,17 @@ const wchar_t* SupportCallName(int index) noexcept {
     if(index==AirCount()+1)return L"步兵大队（12人）";
     // Returned static strings can safely be copied into draw-thread snapshots.
     static const wchar_t* labels[]={L"坦克·有人",L"坦克·空车交付",L"装甲运兵车·有人",L"装甲运兵车·空车交付",L"民用轻卡·有人",L"民用轻卡·空车交付"};
+    if(index==SupportRescueCatalog())return L"海上救援直升机";
     const int ground=index-GroundStart();return ground>=0 && ground<6 ? labels[ground] : L"支援";
 }
-bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept {
+namespace {
+// A request of entry `index` (a map / radio call, or the rescue's): planned here (offline, a one-player world's host) or
+// sent to the host. The rescue is an ordinary request of its own entry: the same switches, cooldown and transaction.
+bool Request(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept {
     if(!note || !capacity)return false;
     // Clear even when Submit refuses before allocating a request id. That attempt must not retain
     // the previous request's successful/failed notice. Offline calls use their detailed local status.
-    localRequest={};note[0]=0;
+    localRequest={};note[0]=0;localRequest.rescue=index>=0 && IsRescue(static_cast<std::uint32_t>(index));
     Configure();bool accepted=false;
     if(!Cfg().enabled || !target || index<0 || index>=SupportCallCount())Status(L"支援请求不可用");
     else if(!SupportCfg().Enabled(index)) {
@@ -533,8 +584,23 @@ bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capac
     }
     _snwprintf_s(note,capacity,_TRUNCATE,L"%ls",status);return accepted;
 }
+}  // namespace
+bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept {
+    if(note && capacity && index==SupportRescueCatalog()) {
+        // Only the rescue's own trigger asks for it (a swimmer to pick up and a carrier to ferry them to).
+        Status(L"海上救援只在玩家落海时自动呼叫");_snwprintf_s(note,capacity,_TRUNCATE,L"%ls",status);return false;
+    }
+    return Request(index,target,note,capacity);
+}
+bool SupportRescueAt(const float* target,wchar_t* note,std::size_t capacity) noexcept {
+    const bool accepted=Request(SupportRescueCatalog(),target,note,capacity);
+    Log("SUPPORT rescue request at (%.0f,%.1f,%.0f): %s",target ? target[0] : 0.0f,target ? target[1] : 0.0f,target ? target[2] : 0.0f,
+        accepted ? "accepted" : "not accepted");
+    return accepted;
+}
 SupportIcon SupportCallIcon(int index) noexcept {
     SupportAircraft spec;
+    if(index==SupportRescueCatalog())return SupportIcon::heli;
     if(index<AirCount()) {
         if(!SupportAircraftSpec(index,&spec))return SupportIcon::sub;
         if(spec.heli>=0)return SupportIcon::heli;
@@ -576,15 +642,21 @@ void SupportDispatchTick() noexcept {
     if(dispatchFrame==GameFrame())return;
     dispatchFrame=GameFrame();
     Configure();SupportNetTick();
-    if(offlinePending && !LocalAuthority()){offlinePending=false;planning.active=false;Status(L"已取消离线请求，请通过房主重新调度");}
+    if(offlinePending && !LocalAuthority()) {
+        offlinePending=false;planning.active=false;Status(L"已取消离线请求，请通过房主重新调度");
+        if(IsRescue(planning.catalog))RescueRequestFailed(status);
+    }
     if(offlinePending) {
         SupportPlan plan;
         const auto result=Plan(planning.catalog,planning.target,&plan);
         if(result!=support_net::PlanResult::pending) {
             offlinePending=false;
+            bool made=false;
             if(result==support_net::PlanResult::ready) {
-                if(SpawnDeployment(nextOffline++,plan,false,false))callAt=GameMs();else Status(L"支援资源、真实机组或席位分配失败");
+                made=SpawnDeployment(nextOffline++,plan,false,false);
+                if(made)callAt=GameMs();else Status(L"支援资源、真实机组或席位分配失败");
             }
+            if(!made && IsRescue(planning.catalog))RescueRequestFailed(status);   // the planner's own reason (Refuse / Status)
         }
     }
     for(auto& deployed:deployments) {
@@ -622,8 +694,8 @@ void SupportDispatchTick() noexcept {
                 const auto resource=deployed.plan.units[i].resourceId;
                 auto* object=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[i].obj));
                 if(resource>=kAircraft && resource<kVehicle) {
-                    SupportAircraft spec;SupportAircraftSpec(static_cast<int>(deployed.plan.catalogId),&spec);
-                    started=ActivateSupportAircraft(object,spec,deployed.plan.target,false) && started;   // an older host's runway hull
+                    SupportAircraft spec;   // an older host's runway hull
+                    started=AircraftOf(deployed.plan.catalogId,&spec) && ActivateSupportAircraft(object,spec,deployed.plan.target,false) && started;
                 } else if(resource>=kVehicle)started=NpcPrepareVehicleRoutePost(object,
                     reinterpret_cast<const float*>(object+kPosition),kVehicleDriverHold) && started;
                 else if(IsSupportLeaderResource(resource))started=NpcPrepareSquadRoute(object,
@@ -691,7 +763,8 @@ void SupportDispatchTick() noexcept {
             }
             if(arrived) {
                 for(unsigned i=0;i<deployed.plan.count;++i)if(deployed.plan.units[i].resourceId>=kAircraft) {
-                    SupportAircraft spec;SupportAircraftSpec(static_cast<int>(deployed.plan.catalogId),&spec);
+                    SupportAircraft spec;
+                    if(!AircraftOf(deployed.plan.catalogId,&spec))continue;
                     if(spec.heli>=0)HeliCommand(deployed.objects[i].obj,Command{});
                     else JetCommand(deployed.objects[i].obj,Command{});
                 }

@@ -223,6 +223,7 @@ void ReportSupportFailure(std::uint64_t transaction) noexcept {
 bool SupportTransactionActive(std::uint64_t transaction) noexcept { return session.IsActive(transaction); }
 bool SupportPeersAcceptVariants() noexcept { return !running || session.PeersHave(support_net::kCapSoldierVariants); }
 bool SupportPeersAcceptAirborne() noexcept { return !running || session.PeersHave(support_net::kCapAirborneAir); }
+bool SupportPeersAcceptRescue() noexcept { return !running || session.PeersHave(support_net::kCapSeaRescue); }
 bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) noexcept {
     if(!authenticatedPuid || !std::memchr(authenticatedPuid,0,65))return false;
     EDF6CoopPeer peer;
@@ -285,6 +286,14 @@ void NoteSupportMissionPlayerCreated(int index,const ObjRef& object) noexcept {
     AcquireSRWLockExclusive(&worldLock);
     worldCreated[index]=object;worldCreationSeen=true;
     ReleaseSRWLockExclusive(&worldLock);
+}
+int SupportMissionPlayerObjects(ObjRef* out,int most) noexcept {
+    int n=0;
+    if(!out || most<=0)return 0;
+    AcquireSRWLockShared(&worldLock);
+    for(const auto& actor:worldCreated)if(actor.obj && n<most)out[n++]=actor;
+    ReleaseSRWLockShared(&worldLock);
+    return n;
 }
 void SupportMissionReturnedToLobby() noexcept {
     SuspendSupportNet();

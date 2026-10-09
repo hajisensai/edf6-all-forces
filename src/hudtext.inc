@@ -473,6 +473,12 @@ HUDTEXT(cmdNpcNetworkLimit,L"Select at most 16 remote squads; no partial batch w
 HUDTEXT(supportInfantryTransferred,L"Infantry support is now under its new squad orders",L"步兵支援已交由新的小队命令控制",L"步兵支援已交由新的小隊命令控制",L"歩兵支援は新しい部隊命令に従います")
 HUDTEXT(supportLegacyPeers,L"Support: an older All Forces in the room, so rifles and the call's own aircraft count this time",L"支援：房间里有旧版全军出击，本次兵员用步枪、飞机按默认架数（武器/架数配置未同步）",L"支援：房間裡有舊版全軍出擊，本次兵員用步槍、飛機按預設架數（武器/架數設定未同步）",L"支援：旧版の全軍出撃の参加者がいるため、今回は小銃と既定の機数で出撃します")
 HUDTEXT(supportAirNeedsUpdate,L"Air support: everyone in the room needs this All Forces version (it flies in from the edge now)",L"空中支援：房间里有旧版全军出击，需全员更新到同一版本（现在改为从场外空中飞入）",L"空中支援：房間裡有舊版全軍出擊，需全員更新到同一版本（現在改為從場外空中飛入）",L"航空支援：旧版の全軍出撃の参加者がいます。全員同じ版に更新してください（場外から飛来する方式になりました）")
+HUDTEXT(supportRescueNeedsUpdate,L"Sea rescue: everyone in the room needs this All Forces version (the rescue is a support call now)",L"海上救援：房间里有旧版全军出击，需全员更新到同一版本（救援现在走支援部署）",L"海上救援：房間裡有舊版全軍出擊，需全員更新到同一版本（救援現在走支援部署）",L"海上救助：旧版の全軍出撃の参加者がいます。全員同じ版に更新してください（救助は支援の部署で来るようになりました）")
+HUDTEXT(rescueRequested,L"SEA RESCUE: HELI REQUESTED",L"海上救援：已呼叫救援直升机",L"海上救援：已呼叫救援直升機",L"海上救助：救助ヘリを要請")
+HUDTEXT(rescueComing,L"SEA RESCUE: HELI ON ITS WAY FROM THE MAP EDGE",L"海上救援：救援直升机已从场外飞入，正在赶来",L"海上救援：救援直升機已從場外飛入，正在趕來",L"海上救助：救助ヘリが場外から向かっています")
+HUDTEXT(rescueFailed,L"SEA RESCUE FAILED: %ls (asking again in %d s)",L"海上救援未能派出：%ls（%d 秒后重新呼叫）",L"海上救援未能派出：%ls（%d 秒後重新呼叫）",L"海上救助失敗：%ls（%d 秒後に再要請）")
+HUDTEXT(rescueLost,L"SEA RESCUE: HELI LOST (asking again in %d s)",L"海上救援：救援直升机已损失（%d 秒后重新呼叫）",L"海上救援：救援直升機已損失（%d 秒後重新呼叫）",L"海上救助：救助ヘリ喪失（%d 秒後に再要請）")
+HUDTEXT(rescueNoHeli,L"no heli came within 150 s",L"150 秒内没有直升机到来",L"150 秒內沒有直升機到來",L"150 秒以内にヘリが来なかった")
 HUDTEXT(supportInfantryArrived,L"Infantry support has arrived and is guarding the destination",L"步兵支援已抵达并守卫目的地",L"步兵支援已抵達並守衛目的地",L"歩兵支援が到着し目的地を警戒しています")
 
 HUDTEXT(mapPayloadTitle,L"LOADOUT - click bright rows to select",L"挂载：点击亮色条目切换",L"掛載：點擊亮色項目切換",L"兵装：明るい行をクリックして選択")

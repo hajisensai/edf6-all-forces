@@ -47,7 +47,8 @@ void SetObjectTeam(unsigned char*,std::int32_t) noexcept { MissingDependency(); 
 bool IsJet(const void*) noexcept { MissingDependency();return false; }
 bool JetInLine(const float*,const float*,const void*) noexcept { MissingDependency();return false; }
 void JetFrame(unsigned char*) noexcept { MissingDependency(); }
-unsigned char* HeliLaunch(HeliBody,const float*,const float*) noexcept { MissingDependency();return nullptr; }
+bool SupportRescueAt(const float*,wchar_t*,std::size_t) noexcept { MissingDependency();return false; }
+int SupportMissionPlayerObjects(ObjRef*,int) noexcept { MissingDependency();return 0; }
 PluginBody BodyOf(const void*) noexcept { MissingDependency();return PluginBody{}; }
 bool IsSub(const void*) noexcept { MissingDependency();return false; }
 bool SubDeck(const float*,float*) noexcept { MissingDependency();return false; }

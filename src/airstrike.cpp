@@ -82,7 +82,7 @@ using DeleteFn=void(*)(void*);
 // the fewer and the longer it reloads; the carrier is one, its drones do the work. What a call lasts is its
 // ammo (jets and helis are not refilled, a carrier has kCarrierSorties launches): out of it, out of fuel
 // (fuelSec) or badly damaged each leaves.
-// What a call brings: jets (JetLaunch, `role`), helis (HeliLaunch, `body`) or the submarine carrier
+// What a call brings: jets (`role`), helis (`body`; both made by the support deployment) or the submarine carrier
 // (SubLaunch); the field of what it does not bring is empty.
 enum class Brings { jets, helis, sub };
 struct Call { float mark; Brings brings; std::optional<JetRole> role; std::optional<HeliBody> body; int count; DWORD fuelSec;
@@ -527,10 +527,8 @@ const wchar_t* SupportAirCallKey(int index) noexcept {
 const wchar_t* SupportAirCallName(int index) noexcept {
     return index>=0 && index<kCallCount ? kCallLabels[index] : L"支援";
 }
-support::Refusal PlanAirSupport(int catalog,const float* target,const float* observer,support::Route* route,int count) noexcept {
-    SupportAircraft spec;
-    if(!route || !SupportAircraftSpec(catalog,&spec))return support::Refusal::unsupported;
-    if(count>0)spec.count=count;
+support::Refusal PlanAirSupport(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route) noexcept {
+    if(!route || !target || (spec.jet<0 && spec.heli<0) || spec.count<1)return support::Refusal::unsupported;
     if(!OpenSky(target))return support::Refusal::noSky;
     float direction[3]={0,0,1};
     // Host chooses the entire plan once. Peers receive its explicit matrices.

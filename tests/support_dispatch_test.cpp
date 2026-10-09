@@ -45,10 +45,11 @@ bool SupportAircraftSpec(int id,SupportAircraft* out) noexcept {
     if(id<0 || id>=21 || id==16)return false;
     *out={-1,static_cast<int>(HeliBody::eros506),1,300,false};return true;
 }
-int plannedAircraft=0;
-support::Refusal PlanAirSupport(int,const float*,const float*,support::Route* route,int count) noexcept {
-    plannedAircraft=count;
-    *route={{-1400,150,0},{1,0,0}};return terrain ? support::Refusal::none : support::Refusal::noEntry;
+int plannedAircraft=0,plannedHeli=-2;
+support::Refusal planRefusal=support::Refusal::none;
+support::Refusal PlanAirSupport(const SupportAircraft& spec,const float*,const float*,support::Route* route) noexcept {
+    plannedAircraft=spec.count;plannedHeli=spec.heli;
+    *route={{-1400,150,0},{1,0,0}};return !terrain ? support::Refusal::noEntry : planRefusal;
 }
 unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float* matrix) noexcept {
     auto ref=Make(true);std::memcpy(static_cast<unsigned char*>(const_cast<void*>(ref.obj))+kPosition,matrix+12,12);
@@ -56,8 +57,16 @@ unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float* matrix
 }
 bool lastAirborne=false;
 bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool airborne) noexcept {++activated;lastAirborne=airborne;return true;}
-bool peersAirborne=true;
+bool peersAirborne=true,peersRescue=true;
 bool SupportPeersAcceptAirborne() noexcept {return peersAirborne;}
+bool SupportPeersAcceptRescue() noexcept {return peersRescue;}
+// heli.cpp's half of the sea rescue: what the dispatcher hands it.
+int rescueDeployed=0,rescueFailed=0;unsigned char* rescueHeli=nullptr;float rescueTarget[3]{};bool rescueFlown=false;
+wchar_t rescueWhy[160]{};
+void RescueHeliDeployed(unsigned char* v,const float* target,bool flown) noexcept {
+    ++rescueDeployed;rescueHeli=v;std::memcpy(rescueTarget,target,12);rescueFlown=flown;
+}
+void RescueRequestFailed(const wchar_t* why) noexcept {++rescueFailed;_snwprintf_s(rescueWhy,_TRUNCATE,L"%ls",why ? why : L"");}
 bool DeleteSupportAircraft(const ObjRef& ref) noexcept {if(ref)++deleted;return true;}
 bool SupportSoldiersReady() noexcept {return allReady;}
 const wchar_t* soldierFailure=L"支援兵员创建发生异常，本局已停用";
@@ -123,7 +132,8 @@ bool NpcReleaseVehicleCrew(unsigned char*) noexcept {++releases;return true;}
 bool SquadCommand(const void*,const Command&) noexcept {++orders;return true;}
 bool NpcPrepareSquadRoute(unsigned char*,const float*,float) noexcept {++routeOrders;return true;}
 bool NpcFinishSquadRoute(unsigned char*,const float*) noexcept {return true;}
-bool HeliCommand(const void*,const Command&) noexcept {return true;}
+int heliCommands=0;
+bool HeliCommand(const void*,const Command&) noexcept {++heliCommands;return true;}
 bool JetCommand(const void*,const Command&) noexcept {return true;}
 PlayArea MapPlayArea() noexcept {return {{-1500,-1500},{1500,1500},true,0,true};}
 bool MapGroundNear(float,float,float,float* y,bool) noexcept {*y=0;return terrain;}
@@ -323,6 +333,77 @@ int main() {
     check(v2,"the whole plan uses only resources a protocol v2 Validate knows");
     peersNew=true;ResetSupportDispatch();SupportCallStatus(note,128);
     check(!std::wcsstr(note,hudtext::Tr(hudtext::Tx::supportLegacyPeers)),"the older-peer notice ends with the mission");
+    // ---- The sea rescue entry (2026-10-09, the user: 「给救援加一个支援目录项，走正规的呼叫支援流程」) ----
+    {
+    const int rescue=SupportRescueCatalog();
+    check(rescue==29 && SupportCallCount()==30 && SupportMenuCount()==29,"the rescue is the catalog's last entry, after the ground ones");
+    check(std::wcscmp(SupportCallKey(rescue),L"RESCUE")==0 && std::wcscmp(SupportCallName(rescue),L"海上救援直升机")==0 &&
+          SupportCallIcon(rescue)==SupportIcon::heli && SupportCallVariant(rescue)==SupportVariant::none,"its key, name and icon");
+    check(std::wcscmp(SupportCallKey(28),L"TRUCK_DELIVERY")==0 && std::wcscmp(SupportCallKey(21),L"SQUAD")==0,
+          "every older entry keeps its index (the wire's catalog id)");
+    const float sea[3]={120,-3,-40};
+    ResetSupportDispatch();testOnline=false;made=0;resourceCount=0;seatNow=0;activated=0;heliCommands=0;fixtureMs+=40000;
+    rescueDeployed=rescueFailed=0;
+    check(!SupportCallAt(rescue,sea,note,128) && !offlinePending && std::wcsstr(note,L"落海"),"a map or radio call cannot ask for the rescue");
+    check(SupportRescueAt(sea,note,128) && offlinePending,"offline: the rescue is planned here");
+    SupportDispatchTick();
+    const auto& rp=deployments[0].plan;
+    check(made==2 && rp.count==2 && rp.catalogId==static_cast<unsigned>(rescue) &&
+          rp.units[0].resourceId==kSupportAircraftResource+kSupportAirborneOffset+static_cast<unsigned>(rescue) &&
+          rp.units[1].role==1 && IsSupportSoldierResource(rp.units[1].resourceId),
+          "one airborne 410 hull and its one real pilot (the door seats are left for the swimmer)");
+    check(plannedHeli==static_cast<int>(HeliBody::brute410) && plannedAircraft==1,"planned as air support: one 410, the edge's air route");
+    check(seatNow==1 && At<const void*>(seats[0],kSeatRider)==objects[1] && activated==1 && lastAirborne,
+          "the pilot is made inside it and seated at once; it flies on at spawn");
+    check(At<float>(objects[0],kPosition)==-1400 && At<float>(objects[0],kPosition+4)==150,"made in the air at the planned entry, not over the swimmer");
+    check(rescueDeployed==1 && rescueFlown && rescueHeli==objects[0] && !std::memcmp(rescueTarget,sea,12),
+          "handed to the rescue with the request's point, flown here");
+    check(deployments[0].delivered,"the rescue flies it, not the dispatcher's arrival order");
+    for(int i=0;i<3;++i){fixtureMs+=100;SupportDispatchTick();}
+    check(heliCommands==0 && activated==1,"no arrival release, no second activation");
+    {SupportPlan bad=rp;bad.count=4;bad.units[2]=bad.units[1];bad.units[3]=bad.units[1];
+     check(!Validate(bad),"a rescue plan with door gunners is refused (their seats are the swimmer's)");
+     bad=rp;bad.units[0].resourceId=kSupportAircraftResource+static_cast<unsigned>(rescue);
+     check(!Validate(bad),"a rescue hull on a runway is refused");
+     check(Validate(rp),"a peer accepts the host's rescue plan");}
+    check(!SupportRescueAt(sea,note,128) && std::wcsstr(note,L"冷却"),"the regular cooldown holds for the rescue too");
+    // Refusals reach the rescue with their reason (heli.cpp logs it, shows it and asks again).
+    ResetSupportDispatch();fixtureMs+=40000;rescueFailed=0;made=0;
+    config.seaRescue=false;
+    SupportRescueAt(sea,note,128);SupportDispatchTick();
+    check(!made && rescueFailed==1 && std::wcsstr(rescueWhy,L"海上救援"),"SeaRescue=0: refused, the reason handed over");
+    config.seaRescue=true;
+    ResetSupportDispatch();rescueFailed=0;peersRescue=false;
+    SupportRescueAt(sea,note,128);SupportDispatchTick();
+    check(!made && rescueFailed==1 && std::wcscmp(rescueWhy,hudtext::Tr(hudtext::Tx::supportRescueNeedsUpdate))==0,
+          "a peer without the rescue entry: refused before anything exists, and said why");
+    peersRescue=true;
+    ResetSupportDispatch();rescueFailed=0;planRefusal=support::Refusal::noSky;
+    SupportRescueAt(sea,note,128);SupportDispatchTick();
+    check(!made && rescueFailed==1 && std::wcsstr(rescueWhy,L"开放天空"),"no open sky: refused with its reason");
+    planRefusal=support::Refusal::noEntry;ResetSupportDispatch();rescueFailed=0;
+    SupportRescueAt(sea,note,128);SupportDispatchTick();
+    check(!made && rescueFailed==1 && std::wcsstr(rescueWhy,L"航线"),"no air corridor: refused with its reason");
+    planRefusal=support::Refusal::none;
+    ResetSupportDispatch();rescueFailed=0;seatFail=true;deleted=0;
+    SupportRescueAt(sea,note,128);SupportDispatchTick();seatFail=false;
+    check(rescueFailed==1 && rescueDeployed==1 && deleted==2,"a pilot that cannot take its seat: rolled back, the rescue told");
+    // Online through the host: the request travels; its terminal status reaches the rescue once.
+    ResetSupportDispatch();testOnline=true;soloHost=false;netRequests=0;rescueFailed=0;
+    check(SupportRescueAt(sea,note,128) && netRequests==1 && localRequest.rescue && !offlinePending,"online: the rescue is a host request");
+    configuredHooks.notice(noticeRequest,support_net::RequestStatus::refused);
+    configuredHooks.notice(noticeRequest,support_net::RequestStatus::timeout);
+    check(rescueFailed==1,"the host's refusal reaches the rescue once");
+    SupportCallAt(0,target,note,128);
+    configuredHooks.notice(noticeRequest,support_net::RequestStatus::refused);
+    check(rescueFailed==1,"a map call's refusal is no rescue failure");
+    // The host's committed plan: flown on the host, a copy (never flown) on a peer, both handed to the rescue.
+    SupportPlan hostRescue;rescueDeployed=0;activated=0;
+    check(Plan(static_cast<std::uint32_t>(rescue),sea,&hostRescue)==support_net::PlanResult::ready && Spawn(40,hostRescue,false) &&
+          rescueDeployed==1 && rescueFlown && activated==1,"host: registered, flown, handed over");
+    check(Spawn(41,hostRescue,true) && rescueDeployed==2 && !rescueFlown && activated==1,"peer: its copy handed over, not flown");
+    testOnline=false;
+    }
     std::printf("support_dispatch_test: %d checks passed\n",checks);
 }
 #endif

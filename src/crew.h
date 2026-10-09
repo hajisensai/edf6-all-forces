@@ -555,10 +555,10 @@ unsigned char* JetLaunchThrown(ThrownDrone what,const float* at,const float* hea
 // Whether jet.cpp still flies `vehicle` (the object with weak-this control block `ctrl`), alive and not
 // withdrawing.
 bool JetFlying(const void* vehicle,const void* ctrl) noexcept;
-// A helicopter made at run time (EDF6VC_HELI_410 / _506.SGO, tools/make_jets.py) at `from` facing `heading`,
-// friend, NPC pilot: the vehicle, or nullptr (not preloaded this mission, the game failed to build it).
+// The plugin's helicopter bodies (EDF6VC_HELI_410 / _506.SGO, tools/make_jets.py). Every one of them is made by the
+// support deployment (support_aircraft.h PrepareSupportAircraft): in the air with its real crew seated at once; the sea
+// rescue too (support_call.h SupportRescueAt). Nothing makes one with an empty or dummy seat.
 enum class HeliBody { brute410, eros506, medic410 };   // medic410: EDF6VC_HELI_MEDIC (heli.cpp Medic)
-unsigned char* HeliLaunch(HeliBody body,const float* from,const float* heading) noexcept;
 // A bomber's payload: BombingPlane_Init's arguments (0x5AABB0; speed in metres a frame), which a jet's bomb
 // bay is set up from.
 struct BombLoad { const void* owner; float damage,spread,speed,adjust,reach; const void* param; std::int32_t seed; };
