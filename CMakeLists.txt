@@ -748,7 +748,10 @@ target_compile_options(edf5_campaign_native_test PRIVATE /W4 /WX /utf-8 /permiss
 add_dependencies(offline_checks edf5_campaign_native_test)
 add_test(NAME edf5_campaign_native COMMAND edf5_campaign_native_test "${EDF6_NATIVE_DLL}")
 add_test(NAME edf5_campaign_partial_install COMMAND edf5_campaign_native_test "${EDF6_NATIVE_DLL}" 3)
-set_tests_properties(edf5_campaign_native edf5_campaign_partial_install PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME edf5_campaign_chained COMMAND edf5_campaign_native_test "${EDF6_NATIVE_DLL}" chain)
+add_test(NAME edf5_campaign_foreign_site COMMAND edf5_campaign_native_test "${EDF6_NATIVE_DLL}" foreign)
+set_tests_properties(edf5_campaign_native edf5_campaign_partial_install edf5_campaign_chained edf5_campaign_foreign_site
+                     PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME edf5_campaign_lifecycle COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_edf5_campaign_lifecycle.py")
 
 add_executable(npc_gunners_online_test EXCLUDE_FROM_ALL tests/npc_gunners_online_test.cpp src/ground_navigation.cpp)
