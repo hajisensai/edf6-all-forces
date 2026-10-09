@@ -82,6 +82,8 @@ struct Game {
     // (its button), a support call's point (its bar's row or chip); `armedClick` that click this frame.
     bool armedOrder=false;Order armed=Order::none;
     int armedSupport=-1;
+    // The armed support's composed load (map_buttons.h ComposePanel), while it has seats; -1 none.
+    int composeEntry=-1;SupportLoadout compose{};
     bool armedClick=false;
     int supportPick;
     bool panelOpen=false;       // the squad panel opened past its commandable rows (mapcmd_logic.h SquadRowsShown)
@@ -93,7 +95,7 @@ struct Game {
     bool eat,eatWas;            // the mark key's press took the enemy under the pointer: not the map's (MapCommandEats)
     ObjRef eatHover;            // ...that enemy's original identity, its lock point
     float eatAt[3];
-    enum class UiKind : std::uint8_t { none,command,squad,payload,support,panel,fold,formation };
+    enum class UiKind : std::uint8_t { none,command,squad,payload,support,panel,fold,formation,compose };
     struct UiHit { UiKind kind=UiKind::none;int id=-1;ObjRef identity{};std::uint64_t token=0;int seat=-1,entry=-1; };
     UiHit uiPress{};
     bool uiLeft=false,uiRight=false,rowPicked=false,suppressLeft=false,suppressRight=false;
@@ -117,6 +119,7 @@ struct View {
     int squads=0,payloads=0,panels=0,supports=0;
     mapbtn::Rect squad[kUiItems]{},payload[kUiItems]{},panel[kUiItems]{},support[kMapSupports]{};
     int supportEntry[kMapSupports]{};
+    int composes=0;mapbtn::Rect compose[mapbtn::kComposeItems]{};int composeCode[mapbtn::kComposeItems]{};
     ObjRef squadIdentity[kUiItems]{};
     bool folds=false;mapbtn::Rect fold{};   // the squad panel's summary row
     int menus=0;mapbtn::Rect menu[kMapFormationEntries]{};int menuEntry[kMapFormationEntries]{};   // the formation menu's rows
@@ -357,6 +360,8 @@ Game::UiHit UiAt(const View& v,float x,float y) noexcept {
     if(v.folds && mapbtn::Hit(&v.fold,1,x,y)>=0){hit.kind=Game::UiKind::fold;return hit;}
     i=mapbtn::Hit(v.payload,v.payloads,x,y);
     if(i>=0){hit.kind=Game::UiKind::payload;hit.token=v.payloadToken;hit.seat=v.payloadSeat;hit.entry=v.payloadEntry[i];return hit;}
+    i=mapbtn::Hit(v.compose,v.composes,x,y);
+    if(i>=0){hit.kind=Game::UiKind::compose;hit.entry=v.composeCode[i];return hit;}
     i=mapbtn::Hit(v.support,v.supports,x,y);
     if(i>=0){hit.kind=Game::UiKind::support;hit.entry=v.supportEntry[i];return hit;}
     if(mapbtn::Hit(v.panel,v.panels,x,y)>=0)hit.kind=Game::UiKind::panel;
@@ -370,6 +375,12 @@ bool SameUi(const Game::UiHit& a,const Game::UiHit& b) noexcept {
 void Arm(Game& g,bool order,Order o,int support) noexcept {
     g.armedOrder=order;g.armed=order ? o : Order::none;g.armedSupport=order ? -1 : support;
     if(order || support>=0)g.formationMenu=false;
+    // A support with seats opens its composition from the load it brings uncomposed (SupportCallPreset); armed again it
+    // keeps what was put together; anything else closes it.
+    if(g.armedSupport!=g.composeEntry) {
+        g.composeEntry=-1;g.compose=SupportLoadout{};
+        if(g.armedSupport>=0 && SupportCallPreset(g.armedSupport,&g.compose))g.composeEntry=g.armedSupport;
+    }
 }
 // The formation menu's pick (map_buttons.h MenuEntry): a defence for the selected squads on a guard point, or the march
 // of the player's squads; the menu closed.
@@ -391,6 +402,11 @@ void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
     if(hit.kind==Game::UiKind::command){g.button=hit.id;return;}
     if(hit.kind==Game::UiKind::fold){g.panelOpen=!g.panelOpen;return;}
     if(hit.kind==Game::UiKind::formation){PickFormation(g,hit.entry);return;}
+    if(hit.kind==Game::UiKind::compose) {   // a kind: one more aboard; a taken seat: emptied
+        if(g.composeEntry>=0 && !mapbtn::ComposeApply(g.compose,SupportCallSeats(g.composeEntry),hit.entry) && hit.entry>=0)
+            Note(g,L"%ls",hudtext::Tr(hudtext::Tx::supportLoadoutTooMany));
+        return;
+    }
     if(hit.kind==Game::UiKind::support) {   // its row or chip: armed (again: disarmed)
         const bool again=g.armedSupport==hit.entry;
         Arm(g,false,Order::none,again ? -1 : hit.entry);
@@ -719,6 +735,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     std::memcpy(r.note,g.note,sizeof(r.note));
     r.sweepOn=NpcSweepOn();r.healthOn=NpcPickupHealthOn();r.march=NpcMarchShape();
     r.armedOrder=g.armedOrder;r.armed=g.armed;r.supportArmed=g.armedSupport;r.supportPick=g.supportPick;
+    r.composeEntry=g.composeEntry;r.composeSeats=g.composeEntry>=0 ? SupportCallSeats(g.composeEntry) : 0;r.compose=g.compose;
     r.supports=(std::min)(SupportCallCount(),kMapSupports);
     for(int i=0;i<r.supports;++i) {
         _snwprintf_s(r.support[i].name,_countof(r.support[i].name),_TRUNCATE,L"%ls",SupportCallName(i));
@@ -815,10 +832,15 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
                           false,k.attackMove && !g.was.attackMove};
     // The armed point order's click on the ground: that order there (disarmed).
     int supportAt=-1;
+    SupportLoadout load{};   // the armed support's composed load, taken before disarming closes it
     if(g.armedClick && g.armedOrder) {
         p.move=p.move || g.armed==Order::move;p.attackMove=p.attackMove || g.armed==Order::attackMove;p.guard=p.guard || g.armed==Order::guard;
         Arm(g,false,Order::none,-1);
-    } else if(g.armedClick && g.armedSupport>=0){supportAt=g.armedSupport;Arm(g,false,Order::none,-1);}
+    } else if(g.armedClick && g.armedSupport>=0) {
+        supportAt=g.armedSupport;
+        if(g.composeEntry==supportAt)load=g.compose;
+        Arm(g,false,Order::none,-1);
+    }
     // The right button let go on the map (RTS): a move to the ground there, or focus fire on the enemy under it.
     const mapcmd::RightClick right=mapcmd::RightClickOrder(g.rightClick && !g.rightOnUi ? g.sel.n : 0,npcmark::Alive(g.hover),true);
     p.move=p.move || (right.issue && right.order==Order::move);
@@ -827,7 +849,8 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     p.follow=p.follow || clicked(Id::follow);p.release=p.release || clicked(Id::release);p.engage=p.engage || clicked(Id::engage);
     p.focus=p.focus || clicked(Id::focus);p.board=p.board || clicked(Id::board);p.dismount=p.dismount || clicked(Id::dismount);
     p.dismiss=p.dismiss || clicked(Id::dismiss);p.recruit=p.recruit || clicked(Id::recruit);
-    if(clicked(Id::formation))g.formationMenu=!g.formationMenu;
+    // The formation menu and an armed order or support (its composition panel) are one at a time, as Arm keeps them.
+    if(clicked(Id::formation)){g.formationMenu=!g.formationMenu;if(g.formationMenu)Arm(g,false,Order::none,-1);}
     if(g.formationMenu) {   // no squad that takes orders selected any more: nothing to arrange
         bool squads=false;
         for(int i=0;i<g.count && !squads;++i)squads=g.sel.Has(g.list[i].u.v) && g.list[i].owner==Owner::squad && Picked(g.list[i]);
@@ -837,13 +860,16 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
                merge=(k.merge && !g.was.merge) || clicked(Id::merge),sweep=(k.sweep && !g.was.sweep) || clicked(Id::sweep),
                health=(k.health && !g.was.health) || clicked(Id::health);
     const bool markPress=k.mark && !g.was.mark;
-    if(supportAt<0 && k.supportCall && !g.was.supportCall)supportAt=g.supportPick;   // C: the picked call at the pointer
+    if(supportAt<0 && k.supportCall && !g.was.supportCall) {   // C: the picked call at the pointer (its composition if open)
+        supportAt=g.supportPick;
+        if(g.composeEntry==supportAt)load=g.compose;
+    }
     g.was=k;
     float point[3];
     const bool pointOk=TargetPoint(g,in,haveView ? &v : nullptr,point);
     const bool allowed=Cfg().enabled;
     if(supportAt>=0) {
-        if(pointOk){SupportCallAt(supportAt,point,g.note,_countof(g.note));g.noteAt=GetTickCount64();}
+        if(pointOk){SupportCallComposedAt(supportAt,point,load.count>0 ? &load : nullptr,g.note,_countof(g.note));g.noteAt=GetTickCount64();}
         else Note(g,L"%ls",hudtext::Tr(hudtext::Tx::cmdSupportNoPoint));
     }
     using hudtext::Tr;
@@ -899,7 +925,7 @@ void ResetMapCommands() noexcept {
 
 void MapCommandView(const float* viewProj,float width,float height) noexcept {
     AcquireSRWLockExclusive(&viewLock);
-    if(view.w!=width || view.h!=height){view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=0;view.folds=false;}
+    if(view.w!=width || view.h!=height){view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=0;view.folds=false;}
     std::memcpy(view.vp,viewProj,sizeof(view.vp));view.w=width;view.h=height;view.at=GetTickCount64();
     ReleaseSRWLockExclusive(&viewLock);
 }
@@ -916,7 +942,15 @@ void MapCommandButtons(const float* rects,const int* ids,int n) noexcept {
 void MapCommandSupportButtons(const float* rects,const int* entries,int n) noexcept {
     n=rects && entries ? (std::max)(0,(std::min)(n,kMapSupports)) : 0;
     AcquireSRWLockExclusive(&viewLock);view.supports=n;
+    if(!n)view.composes=0;   // no bar drawn: no composition panel beside it either
     for(int i=0;i<n;++i){view.support[i]={rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};view.supportEntry[i]=entries[i];}
+    ReleaseSRWLockExclusive(&viewLock);
+}
+
+void MapCommandComposeButtons(const float* rects,const int* codes,int n) noexcept {
+    n=rects && codes ? (std::max)(0,(std::min)(n,mapbtn::kComposeItems)) : 0;
+    AcquireSRWLockExclusive(&viewLock);view.composes=n;
+    for(int i=0;i<n;++i){view.compose[i]={rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};view.composeCode[i]=codes[i];}
     ReleaseSRWLockExclusive(&viewLock);
 }
 
@@ -961,7 +995,7 @@ void SuspendMapCommands() noexcept {
     g.frameAt=0;g.eat=g.eatWas=false;g.boxing=g.pressing=g.rpressing=false;Arm(g,false,Order::none,-1);g.armedClick=g.rightClick=false;
     g.button=-1;g.uiLeft=g.uiRight=false;g.uiPress={};g.formationMenu=false;
     boxingNow.store(false);pointerCaptured.store(false);
-    AcquireSRWLockExclusive(&viewLock);view.at=0;view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=0;view.folds=false;ReleaseSRWLockExclusive(&viewLock);
+    AcquireSRWLockExclusive(&viewLock);view.at=0;view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=0;view.folds=false;ReleaseSRWLockExclusive(&viewLock);
     AcquireSRWLockExclusive(&lock);readoutAt=0;ReleaseSRWLockExclusive(&lock);
 }
 

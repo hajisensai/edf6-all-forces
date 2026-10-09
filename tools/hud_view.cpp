@@ -236,6 +236,11 @@ float sceneSupportHits[kMapSupports*2][4]{};int sceneSupportEntry[kMapSupports*2
 void MapCommandSupportButtons(const float* r,const int* entries,int n) noexcept {
     sceneSupportHitCount=n;for(int i=0;i<n;++i){std::memcpy(sceneSupportHits[i],r+i*4,16);sceneSupportEntry[i]=entries[i];}
 }
+// The support composition panel's seats and kinds as drawn (hud.cpp MapComposePanel).
+float sceneComposeHits[mapbtn::kComposeItems][4]{};int sceneComposeCode[mapbtn::kComposeItems]{},sceneComposeHitCount=0;
+void MapCommandComposeButtons(const float* r,const int* codes,int n) noexcept {
+    sceneComposeHitCount=n;for(int i=0;i<n;++i){std::memcpy(sceneComposeHits[i],r+i*4,16);sceneComposeCode[i]=codes[i];}
+}
 bool GearHudLatest(GearHud* g) noexcept {
     if(!hasJet || sceneJet.rotor)return false;
     *g=GearHud{};g->shown=true;g->at[0]=g->at[1]=g->at[2]=1.0f;g->warn=(sceneWarn.on>>kWarnGear&1u)!=0;g->tick=sceneTick;
@@ -462,6 +467,13 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     sceneCmd.supports=static_cast<int>(sizeof(kCatalog)/sizeof(kCatalog[0]));
     for(int i=0;i<sceneCmd.supports;++i){wcscpy_s(sceneCmd.support[i].name,kCatalog[i].name);sceneCmd.support[i].icon=kCatalog[i].icon;const wchar_t* v=mapbtn::VariantOf(kCatalog[i].name);sceneCmd.support[i].variant=!v ? SupportVariant::none : std::wcscmp(v,L"守点")==0 ? SupportVariant::guard : std::wcscmp(v,L"跟随")==0 ? SupportVariant::follow : std::wcscmp(v,L"有人")==0 ? SupportVariant::crewed : SupportVariant::empty;}
     sceneCmd.supportArmed=payload ? 3 : -1;sceneCmd.supportPick=3;
+    // The payload scenes arm the platoon row and open its composition (map_buttons.h ComposePanel): two squads in, a
+    // Wing Diver and a Fencer one, of its twelve seats.
+    sceneCmd.composeEntry=-1;sceneCmd.composeSeats=0;sceneCmd.compose=SupportLoadout{};
+    if(payload) {
+        sceneCmd.supportArmed=sceneCmd.supportPick=sceneCmd.composeEntry=10;sceneCmd.composeSeats=12;sceneCmd.compose.count=8;
+        for(int i=0;i<4;++i){sceneCmd.compose.soldier[i]=SupportWeapon::wingLance;sceneCmd.compose.soldier[4+i]=SupportWeapon::fencerCannon;}
+    }
     sceneCmd.supportReady=payload ? SupportReadiness{SupportReady::cooldown,17} : SupportReadiness{SupportReady::ready,0};
     if(payload)wcscpy_s(sceneCmd.supportStatus,L"Support route ready - select a visible entry on the map");
     if(squadCount==9) {
@@ -476,6 +488,8 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         // The formation menu open over its button: the guarding squad's defences (perimeter in use) and the march.
         sceneCmd.formationMenu=sceneCmd.formationGuard=sceneCmd.formationMarch=true;
         sceneCmd.formationGuardShape=static_cast<int>(npc::formation::Shape::perimeter);
+        // An armed support's composition and the formation menu are never open together (mapcmd.cpp: one at a time).
+        if(payload)sceneCmd.formationMenu=false;
     }
     std::swprintf(sceneCmd.note,_countof(sceneCmd.note),Tr(Tx::cmdGuardResult),Tr(Tx::orderGuard),60.0,420.0,2,L"");
     if(vehicleOnly) {
@@ -537,6 +551,23 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
                 if(b[0]<q[2] && q[0]<b[2] && b[1]<q[3] && q[1]<b[3]){++textFailed;std::printf("FAIL support bar under button %d\n",sceneButtonId[k]);}
             }
         }
+        // The composition panel: a place for each squad in it and every kind clickable, on the screen, clear of the
+        // command card and of the bar.
+        if(sceneCmd.composeEntry>=0) {
+            if(sceneComposeHitCount!=2+kSupportWeaponCount){++textFailed;std::printf("FAIL composition clicks: %d\n",sceneComposeHitCount);}
+            for(int i=0;i<sceneComposeHitCount;++i) {
+                const float* b=sceneComposeHits[i];
+                if(b[0]<0.0f || b[2]>static_cast<float>(width) || b[1]<0.0f || b[3]>1080.0f){++textFailed;std::printf("FAIL composition hit %d off the screen\n",i);}
+                for(int k=0;k<sceneButtons;++k) {
+                    const float* q=sceneButton[k];
+                    if(b[0]<q[2] && q[0]<b[2] && b[1]<q[3] && q[1]<b[3]){++textFailed;std::printf("FAIL composition under button %d\n",sceneButtonId[k]);}
+                }
+                for(int k=0;k<sceneSupportHitCount;++k) {
+                    const float* q=sceneSupportHits[k];
+                    if(b[0]<q[2] && q[0]<b[2] && b[1]<q[3] && q[1]<b[3]){++textFailed;std::printf("FAIL composition over the support bar %d\n",k);}
+                }
+            }
+        } else if(sceneComposeHitCount){++textFailed;std::printf("FAIL composition clickable with none armed: %d\n",sceneComposeHitCount);}
         int reached=0;for(int i=0;i<sceneCmd.supports;++i)reached+=reach[i];
         if(reached!=sceneCmd.supports){++textFailed;std::printf("FAIL support entries clickable: %d of %d\n",reached,sceneCmd.supports);}
         for(int i=0;i<sceneButtons;++i) {

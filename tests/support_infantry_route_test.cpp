@@ -31,6 +31,7 @@ bool ApplySupportSoldierResource(const float*,std::uint32_t,const unsigned char*
 bool CreateSupportSoldierUnregistered(const float*,std::uint32_t,const unsigned char*,bool,ObjRef*) noexcept{return false;}
 bool SupportPeersAcceptAirborne() noexcept{return true;}
 bool SupportPeersAcceptTransports() noexcept{return true;}
+bool SupportPeersAcceptLoadout() noexcept{return true;}
 support::Refusal PlanAirSupportFor(SupportAircraft,const float*,const float*,support::Route*,int) noexcept{return support::Refusal::unsupported;}
 bool SupportAircraftReady(const SupportAircraft&) noexcept{return false;}
 bool TransportDeliver(const void*,const void* const*,int,const float*) noexcept{return false;}
@@ -50,7 +51,7 @@ bool SupportVehicleReady(SupportVehicleKind,SupportCrewMode) noexcept{return fal
 unsigned char* SpawnSupportVehicle(SupportVehicleKind,SupportCrewMode,const float*,const float*,const void*) noexcept{return nullptr;}
 bool DeleteSupportVehicle(unsigned char*) noexcept{return false;}
 void ConfigureSupportNet(const support_net::Hooks&) noexcept{}
-bool SubmitSupportRequest(int,const float*,wchar_t*,std::size_t) noexcept{return false;}
+bool SubmitSupportRequest(int,const float*,wchar_t*,std::size_t,std::uint64_t) noexcept{return false;}
 void SupportNetTick() noexcept{}
 void ResetSupportNet() noexcept{}
 void ReportSupportFailure(std::uint64_t) noexcept{}

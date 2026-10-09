@@ -12,8 +12,11 @@ constexpr std::uint32_t kMagic=0x54525053,kVersion=2;
 // plans air support only when every peer has it (an older peer would make the hull empty and its crew mid-air).
 // kCapTransports: it knows the transport catalog entries (support_dispatch.cpp TransportCatalog: the helicopter assault and
 // the paratroop drop) and their hulls; a host plans them only when every peer has it (an older one refuses the plan).
-constexpr std::uint32_t kCapSoldierVariants=1u,kCapAirborneAir=2u,kCapTransports=4u,
-    kCapabilities=kCapSoldierVariants|kCapAirborneAir|kCapTransports;
+// kCapLoadout: its Validate takes a composed load (support_call.h SupportLoadout: any count up to the seats, the Wing
+// Diver and Fencer kinds); a request carries the load in `challenge`. A host plans a composed load only when every peer
+// has it, else the call's own load (and says why).
+constexpr std::uint32_t kCapSoldierVariants=1u,kCapAirborneAir=2u,kCapTransports=4u,kCapLoadout=8u,
+    kCapabilities=kCapSoldierVariants|kCapAirborneAir|kCapTransports|kCapLoadout;
 static_assert(kCapabilities<kMaxUnits,"hello.index carries the capability bits");
 enum class Kind : std::uint32_t { hello=1,welcome,request,begin,unit,prepare,ready,commit,result,cancel,activate,activated,requestStatus };
 struct Message {
@@ -42,7 +45,8 @@ public:
     void Stop() noexcept;
     void Suspend() noexcept;
     bool Suspended() const noexcept { return suspended_; }
-    bool Submit(std::uint32_t catalog,const float* target,std::uint64_t now) noexcept;
+    // `loadout`: support_call.h PackSupportLoadout (0: the call's own), sent in the request's `challenge`.
+    bool Submit(std::uint32_t catalog,const float* target,std::uint64_t now,std::uint64_t loadout=0) noexcept;
     std::uint64_t SubmitPrepared(const Plan&,std::uint64_t now) noexcept;
     void Receive(std::uint32_t peer,const Message&,std::uint64_t now) noexcept;
     void Tick(std::uint64_t now) noexcept;
@@ -62,7 +66,7 @@ private:
         bool cancelConfirmed=false;
         bool spawned=false;
         RequestStatus failure=RequestStatus::cancelled;
-        std::uint64_t token=0;
+        std::uint64_t token=0,loadout=0;
         Plan plan{};
         std::uint32_t requester=0,request=0,received=0;
         std::uint64_t since=0;

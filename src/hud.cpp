@@ -3898,6 +3898,73 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
 // chips at the row's right; over them its title and whether the dispatcher takes a call now (dim when it does not). A
 // click on a row or chip arms that call (lit), the next left click on the map is its point; its tooltip the full name.
 constexpr float kSupRowH=26.0f,kSupGap=3.0f,kSupW=250.0f,kSupIcon=18.0f;   // px at 1080 lines
+// The composition panel's words (map_buttons.h ComposePanel): a soldier kind's short name (SupportWeapon order), a class's.
+constexpr Tx kKindText[kSupportWeaponCount]={Tx::kindRifle,Tx::kindFlame,Tx::kindRocket,Tx::kindShotgun,Tx::kindSniper,
+    Tx::kindLance,Tx::kindLaser,Tx::kindMonster,Tx::kindIzuna,Tx::kindThunderBow,
+    Tx::kindCannon,Tx::kindMiddleCannon,Tx::kindPileBanker,Tx::kindFencerShotgun};
+constexpr Tx kClassText[mapbtn::kComposeClasses]={Tx::classRanger,Tx::classWingDiver,Tx::classFencer};
+const wchar_t* KindText(SupportWeapon w) noexcept {
+    const int i=static_cast<int>(w);
+    return Tr(i>=0 && i<kSupportWeaponCount ? kKindText[i] : Tx::kindRifle);
+}
+// The armed support's composition beside the bar (the user, 2026-10-09: "支援栏是断剑那种，先点载具，然后选里面的人并且可以
+// 点多次，直到座位满"; a click a whole squad): the seats used over the seats in its title, its squads in their places (each
+// its kind; a click takes it out), the squad kinds a class a row (a click puts one more in; dim once no squad fits).
+void MapComposePanel(void* drawer,void* ctx,Text* text,float s,const MapCommandReadout& c,const wchar_t* name,float x0,float top,
+                     float ceiling,float bottom,Line* lines,int* at) noexcept {
+    if(c.composeEntry<0 || c.composeSeats<=0){MapCommandComposeButtons(nullptr,nullptr,0);return;}
+    const auto L=mapbtn::ComposePanel(x0,top,ceiling,bottom,c.composeSeats,s);
+    MapUiBox(drawer,ctx,L.box.x0,L.box.y0,L.box.x1,L.box.y1,lines,*at);
+    const auto& load=c.compose;
+    const bool room=mapbtn::ComposeRoom(load,c.composeSeats);
+    Label(text,lines,at,L.title.x0,(L.title.y0+L.title.y1)*0.5f,0,kLineScale*0.7f,kWhite,Tr(Tx::composeSeats),name,load.count,
+          c.composeSeats<kSupportLoadoutMost ? c.composeSeats : kSupportLoadoutMost);
+    if(*at>0)MapFitLabel(text,lines[*at-1],L.title.x0,L.title.x1);
+    float rects[mapbtn::kComposeItems*4];int codes[mapbtn::kComposeItems];int hits=0;
+    auto hit=[&](const mapbtn::Rect& q,int code){
+        if(hits>=mapbtn::kComposeItems)return;
+        rects[hits*4]=q.x0;rects[hits*4+1]=q.y0;rects[hits*4+2]=q.x1;rects[hits*4+3]=q.y1;codes[hits++]=code;
+    };
+    const float t=1.2f*s;
+    auto frame=[&](const mapbtn::Rect& q,const float* edge){
+        Seg(drawer,ctx,q.x0,q.y0,q.x1,q.y0,t,edge);Seg(drawer,ctx,q.x1,q.y0,q.x1,q.y1,t,edge);
+        Seg(drawer,ctx,q.x1,q.y1,q.x0,q.y1,t,edge);Seg(drawer,ctx,q.x0,q.y1,q.x0,q.y0,t,edge);
+    };
+    const int squads=mapbtn::ComposeSquads(load);
+    for(int j=0;j<L.slots;++j) {
+        const mapbtn::Rect& q=L.slot[j];
+        const bool taken=j<squads;
+        const bool hover=taken && c.pointer && c.px>=q.x0 && c.px<q.x1 && c.py>=q.y0 && c.py<q.y1;
+        Rect(drawer,ctx,q.x0,q.y0,q.x1,q.y1,hover ? kBtnLit : taken ? kBtnFill : kMapBoxFill);
+        frame(q,taken ? kMapOrder : kMapOrderDim);
+        if(!taken)continue;
+        const int members=load.count-j*mapbtn::kSquad<mapbtn::kSquad ? load.count-j*mapbtn::kSquad : mapbtn::kSquad;
+        const SupportWeapon kind=mapbtn::ComposeSquadKind(load,j);
+        Label(text,lines,at,(q.x0+q.x1)*0.5f,(q.y0+q.y1)*0.5f,1,kLineScale*0.6f,kWhite,Tr(Tx::composeSquad),KindText(kind),members);
+        if(*at>0)MapFitLabel(text,lines[*at-1],q.x0+2.0f*s,q.x1-2.0f*s);
+        MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::composeSquadTip),j+1,KindText(load.soldier[j*mapbtn::kSquad]),KindText(kind),members);
+        hit(q,mapbtn::ComposeSquadCode(j));
+    }
+    for(int k=0;k<mapbtn::kComposeClasses;++k) {
+        Label(text,lines,at,L.classLabel[k].x0,(L.classLabel[k].y0+L.classLabel[k].y1)*0.5f,0,kLineScale*0.6f,kMapOrder,L"%ls",Tr(kClassText[k]));
+        if(*at>0)MapFitLabel(text,lines[*at-1],L.classLabel[k].x0,L.classLabel[k].x1-2.0f*s);
+    }
+    for(int k=0;k<L.kinds;++k) {
+        const mapbtn::Rect& q=L.kind[k];
+        const auto kind=static_cast<SupportWeapon>(L.kindCode[k]);
+        const bool hover=room && c.pointer && c.px>=q.x0 && c.px<q.x1 && c.py>=q.y0 && c.py<q.y1;
+        Rect(drawer,ctx,q.x0,q.y0,q.x1,q.y1,hover ? kBtnLit : kBtnFill);
+        frame(q,room ? kMapOrder : kMapOrderDim);
+        Label(text,lines,at,(q.x0+q.x1)*0.5f,(q.y0+q.y1)*0.5f,1,kLineScale*0.6f,room ? kWhite : kMapOrderDim,L"%ls",KindText(kind));
+        if(*at>0)MapFitLabel(text,lines[*at-1],q.x0+2.0f*s,q.x1-2.0f*s);
+        if(room)MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::composeAddTip),KindText(kind),mapbtn::kSquad,c.composeSeats-load.count);
+        else MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::composeFullTip),KindText(kind),mapbtn::kSquad);
+        hit(q,L.kindCode[k]);
+    }
+    Label(text,lines,at,L.hint.x0,(L.hint.y0+L.hint.y1)*0.5f,0,kLineScale*0.55f,kMapOrderDim,L"%ls",Tr(Tx::composeHint));
+    if(*at>0)MapFitLabel(text,lines[*at-1],L.hint.x0,L.hint.x1);
+    MapCommandComposeButtons(rects,codes,hits);
+}
 void MapSupportBar(void* drawer,void* ctx,Text* text,float width,float s,float top,float bottom,bool pad,const MapCommandReadout& c,
                    Line* lines,int* at) noexcept {
     if(pad || c.supports<=0){MapCommandSupportButtons(nullptr,nullptr,0);return;}
@@ -3965,6 +4032,15 @@ void MapSupportBar(void* drawer,void* ctx,Text* text,float width,float s,float t
     }
     for(int k=0;k<placed;++k)hit(body[k],pickOf[k]);
     MapCommandSupportButtons(rects,entries,hits);
+    // The armed support's composition beside its row (its name before the "·").
+    int composeRow=-1;
+    for(int k=0;k<placed && composeRow<0;++k)
+        if(c.composeEntry>=groups[k].first && c.composeEntry<groups[k].first+groups[k].count)composeRow=k;
+    if(composeRow<0){MapCommandComposeButtons(nullptr,nullptr,0);return;}
+    wchar_t base[40]{};
+    const int most=static_cast<int>(_countof(base))-1,blen=mapbtn::BaseLength(names[c.composeEntry]);
+    std::wmemcpy(base,names[c.composeEntry],static_cast<std::size_t>(blen<most ? blen : most));
+    MapComposePanel(drawer,ctx,text,s,c,base,x1+6.0f*s,row[composeRow].y0,top,bottom,lines,at);
 }
 
 void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {

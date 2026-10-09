@@ -19,6 +19,16 @@ constexpr const wchar_t* kBodies[kSupportWeaponCount][2]={
     {L"app:/object/N601_COMMON_RANGER_RL.sgo",L"app:/object/N601_COMMON_RANGER_RL_LEADER.sgo"},
     {L"app:/object/N601_COMMON_RANGER_SG.sgo",L"app:/object/N601_COMMON_RANGER_SG_LEADER.sgo"},
     {L"app:/object/N601_COMMON_RANGER_SN.sgo",L"app:/object/N601_COMMON_RANGER_SN_LEADER.sgo"},
+    // The Wing Divers and Fencers a composed load may hold (support_call.h; read from Root.cpk: PaleWing / HeavyArmor).
+    {L"app:/object/N606_AIPALEWING_LANCE.sgo",L"app:/object/N606_AIPALEWING_LANCE_LEADER.sgo"},
+    {L"app:/object/N606_AIPALEWING_LR.sgo",L"app:/object/N606_AIPALEWING_LR_LEADER.sgo"},
+    {L"app:/object/N606_AIPALEWING_MS.sgo",L"app:/object/N606_AIPALEWING_MS_LEADER.sgo"},
+    {L"app:/object/N606_AIPALEWING_IZN.sgo",L"app:/object/N606_AIPALEWING_IZN_LEADER.sgo"},
+    {L"app:/object/N606_AIPALEWING_TB.sgo",L"app:/object/N606_AIPALEWING_TB_LEADER.sgo"},
+    {L"app:/object/N607_AIHEAVYARMOR_SC.sgo",L"app:/object/N607_AIHEAVYARMOR_SC_LEADER.sgo"},
+    {L"app:/object/N607_AIHEAVYARMOR_SMC.sgo",L"app:/object/N607_AIHEAVYARMOR_SMC_LEADER.sgo"},
+    {L"app:/object/N607_AIHEAVYARMOR_SP.sgo",L"app:/object/N607_AIHEAVYARMOR_SP_LEADER.sgo"},
+    {L"app:/object/N607_AIHEAVYARMOR_SSG.sgo",L"app:/object/N607_AIHEAVYARMOR_SSG_LEADER.sgo"},
 };
 const wchar_t* Body(std::uint32_t resource) noexcept {
     return IsSupportSoldierResource(resource) ?

@@ -103,7 +103,7 @@ void NoteCreations() {
     for(unsigned i=0;i<actors;++i)EDF6AF_MissionPlayerCreated(static_cast<int>(i),actorPuids[i],
         reinterpret_cast<const void*>(static_cast<std::uintptr_t>(i+100)));
 }
-PlanResult PlanCall(std::uint32_t id,const float* target,Plan* plan) noexcept {
+PlanResult PlanCall(std::uint32_t id,const float* target,std::uint64_t,Plan* plan) noexcept {
     *plan={};plan->catalogId=id;plan->count=1;std::memcpy(plan->target,target,12);
     auto& u=plan->units[0];u.resourceId=1;u.matrix[0]=u.matrix[5]=u.matrix[10]=u.matrix[15]=1;return PlanResult::ready;
 }

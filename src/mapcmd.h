@@ -87,6 +87,8 @@ void MapCommandView(const float* viewProj,float width,float height) noexcept;
 void MapCommandButtons(const float* rects,const int* ids,int n) noexcept;
 // hud.cpp: the support bar's rows and chips as drawn (`entries` each one's catalog index), for the clicks. Up to 48.
 void MapCommandSupportButtons(const float* rects,const int* entries,int n) noexcept;
+// hud.cpp: the support composition panel's seats and kinds as drawn (`codes`: map_buttons.h ComposeApply's), for the clicks.
+void MapCommandComposeButtons(const float* rects,const int* codes,int n) noexcept;
 // Draw-thread hitboxes: four floats per rectangle (x0,y0,x1,y1), published every draw.
 // Pass n=0 when a panel is absent. These calls copy snapshots and never read game objects.
 void MapCommandSquadButtons(const float* rects,const ObjRef* identities,int n) noexcept; // up to 16 rows
@@ -158,6 +160,10 @@ struct MapCommandReadout {
     float hoverAt[3];          // its lock point
     int supportArmed;          // the support call armed by its bar (or C): the next left click is its point; -1 none
     int supportPick;           // the call [ / ] picked (C arms it)
+    // The armed support's composition panel (map_buttons.h ComposePanel): its entry (-1: closed), its seats, the load.
+    int composeEntry;
+    int composeSeats;
+    SupportLoadout compose;
     int supports;              // the catalog, in its order
     MapSupportEntry support[kMapSupports];
     SupportReadiness supportReady;

@@ -11,6 +11,7 @@
 // against exactly what was drawn (Hit) before taking it for a unit. tools/map_buttons_check.cpp runs it offline.
 #pragma once
 #include "mapcmd_logic.h"
+#include "support_call.h"
 #include <cstddef>
 #include <cwchar>
 
@@ -163,5 +164,96 @@ inline int Column(const Group* g,int rows,float x0,float x1,float top,float bott
         ++placed;
     }
     return placed;
+}
+
+// --- The support bar's composition panel (the user, 2026-10-09: "支援栏是断剑那种，先点载具，然后选里面的人并且可以点多次，
+// 直到座位满"; then: a click puts in a whole squad, not one soldier) ---
+// A support with seats (support_call.h SupportCallSeats: the infantry, the transports, a crewed APC / truck) armed from the
+// bar opens a panel beside it: its squads so far (a click on one takes it out, the ones after it move up), the seats they
+// use over the seats there are, and a row of squad kinds a class (Ranger, Wing Diver, Fencer). A click on a kind puts in
+// one more squad of it (kSquad soldiers: its leader template and three members); dim when the seats left hold no squad.
+// It starts from the load the call brings uncomposed (SupportCallPreset: the ini's weapons); the next left click on the
+// map sends it (SupportCallComposedAt). Every squad is its own squad aboard (a leader every four, support_call.h).
+// A click's code: a kind (0..kSupportWeaponCount-1), or squad j as -1 - j.
+constexpr int kSquad=4;
+constexpr int kComposeSquadsMost=crew::kSupportLoadoutMost/kSquad;
+constexpr int ComposeSquadCode(int squad) noexcept { return -1-squad; }
+constexpr int kComposeItems=kComposeSquadsMost+crew::kSupportWeaponCount;
+inline int ComposeSquads(const crew::SupportLoadout& l) noexcept { return (l.count+kSquad-1)/kSquad; }
+// Whether one more squad fits the seats.
+inline bool ComposeRoom(const crew::SupportLoadout& l,int seats) noexcept {
+    if(seats>crew::kSupportLoadoutMost)seats=crew::kSupportLoadoutMost;
+    return l.count+kSquad<=seats;
+}
+// The kind squad j shows (its members'; a lone leader's own).
+inline crew::SupportWeapon ComposeSquadKind(const crew::SupportLoadout& l,int j) noexcept {
+    const int i=j*kSquad;
+    return i+1<l.count ? l.soldier[i+1] : i<l.count ? l.soldier[i] : crew::SupportWeapon::rifle;
+}
+inline bool ComposeApply(crew::SupportLoadout& l,int seats,int code) noexcept {
+    if(code>=0) {
+        if(code>=crew::kSupportWeaponCount || !ComposeRoom(l,seats))return false;
+        for(int k=0;k<kSquad;++k)l.soldier[l.count++]=static_cast<crew::SupportWeapon>(code);
+        return true;
+    }
+    const int squad=-1-code,from=squad*kSquad;
+    if(squad<0 || from>=l.count)return false;
+    const int to=from+kSquad<l.count ? from+kSquad : l.count,gone=to-from;
+    for(int i=from;i+gone<l.count;++i)l.soldier[i]=l.soldier[i+gone];
+    for(int i=l.count-gone;i<l.count;++i)l.soldier[i]=crew::SupportWeapon::rifle;
+    l.count-=gone;return true;
+}
+// The kinds of a class in the panel's row order (support_call.h SupportSoldierClass).
+inline int ComposeKinds(int cls,int* out,int most) noexcept {
+    int n=0;
+    for(int k=0;k<crew::kSupportWeaponCount && n<most;++k)
+        if(crew::SupportSoldierClass(static_cast<crew::SupportWeapon>(k))==cls)out[n++]=k;
+    return n;
+}
+// Pixel sizes at 1080 lines (times the HUD scale `s`).
+constexpr float kComposePad=6.0f,kComposeTitleH=22.0f,kComposeSquadH=22.0f,kComposeGap=3.0f,
+                kComposeLabelW=66.0f,kComposeKindW=56.0f,kComposeKindH=22.0f,kComposeHintH=18.0f;
+constexpr int kComposeClasses=3;
+struct ComposeLayout {
+    Rect box{},title{},hint{};
+    int slots=0;Rect slot[kComposeSquadsMost]{};   // a squad's place each (the seats / kSquad), one row
+    Rect classLabel[kComposeClasses]{};
+    int kinds=0;Rect kind[crew::kSupportWeaponCount]{};int kindCode[crew::kSupportWeaponCount]{};
+};
+inline float ComposeWidth(float s) noexcept {
+    return (2*kComposePad+kComposeLabelW+5*kComposeKindW+4*kComposeGap)*s;
+}
+inline float ComposeHeight(float s) noexcept {
+    return (2*kComposePad+kComposeTitleH+kComposeSquadH+kComposeGap+kComposeClasses*(kComposeKindH+kComposeGap)+kComposeHintH)*s;
+}
+// The panel with its left edge at `x0`, its top at `top` but moved up to end above `bottom` (never above `ceiling`).
+inline ComposeLayout ComposePanel(float x0,float top,float ceiling,float bottom,int seats,float s) noexcept {
+    ComposeLayout L;
+    if(seats>crew::kSupportLoadoutMost)seats=crew::kSupportLoadoutMost;
+    const int slots=seats>0 ? (seats+kSquad-1)/kSquad : 0;
+    const float w=ComposeWidth(s),h=ComposeHeight(s);
+    if(top+h>bottom)top=bottom-h;
+    if(top<ceiling)top=ceiling;
+    L.box=Rect{x0,top,x0+w,top+h};
+    const float in=kComposePad*s,gap=kComposeGap*s;
+    float y=top+in;
+    L.title=Rect{x0+in,y,x0+w-in,y+kComposeTitleH*s};y+=kComposeTitleH*s;
+    L.slots=slots;
+    if(slots>0) {
+        const float sw=(w-2*in-static_cast<float>(kComposeSquadsMost-1)*gap)/static_cast<float>(kComposeSquadsMost);
+        for(int j=0;j<slots;++j){const float sx=x0+in+static_cast<float>(j)*(sw+gap);L.slot[j]=Rect{sx,y,sx+sw,y+kComposeSquadH*s};}
+    }
+    y+=kComposeSquadH*s+gap;
+    for(int c=0;c<kComposeClasses;++c) {
+        L.classLabel[c]=Rect{x0+in,y,x0+in+kComposeLabelW*s,y+kComposeKindH*s};
+        int kinds[crew::kSupportWeaponCount];const int n=ComposeKinds(c,kinds,crew::kSupportWeaponCount);
+        for(int k=0;k<n && L.kinds<crew::kSupportWeaponCount;++k) {
+            const float kx=x0+in+kComposeLabelW*s+static_cast<float>(k)*(kComposeKindW*s+gap);
+            L.kind[L.kinds]=Rect{kx,y,kx+kComposeKindW*s,y+kComposeKindH*s};L.kindCode[L.kinds++]=kinds[k];
+        }
+        y+=kComposeKindH*s+gap;
+    }
+    L.hint=Rect{x0+in,y,x0+w-in,y+kComposeHintH*s};
+    return L;
 }
 }  // namespace mapbtn

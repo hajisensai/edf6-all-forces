@@ -18,10 +18,18 @@ const wchar_t* SupportCallName(int) noexcept { return L"Support"; }
 SupportIcon SupportCallIcon(int) noexcept { return SupportIcon::jet; }
 SupportVariant SupportCallVariant(int) noexcept { return SupportVariant::none; }
 SupportReadiness SupportCallReadiness() noexcept { return {SupportReady::ready,0}; }
-int supportCalls=0,supportChosen=-1;float supportTarget[3]{};
-bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept {
-    ++supportCalls;supportChosen=index;std::memcpy(supportTarget,target,12);
+int supportCalls=0,supportChosen=-1;float supportTarget[3]{};SupportLoadout supportLoad{};
+bool SupportCallComposedAt(int index,const float* target,const SupportLoadout* load,wchar_t* note,std::size_t capacity) noexcept {
+    ++supportCalls;supportChosen=index;std::memcpy(supportTarget,target,12);supportLoad=load ? *load : SupportLoadout{};
     _snwprintf_s(note,capacity,_TRUNCATE,L"support received");return true;
+}
+// The stub catalog's entry 1 carries soldiers (its composition panel): eight seats (two squads), one squad to start (a
+// sniper leader, three rifles: the ini's).
+int SupportCallSeats(int index) noexcept { return index==1 ? 8 : 0; }
+bool SupportCallPreset(int index,SupportLoadout* out) noexcept {
+    *out=SupportLoadout{};
+    if(index!=1)return false;
+    out->count=4;out->soldier[0]=SupportWeapon::sniper;return true;
 }
 int payloadRequests=0,payloadSeat=-1,payloadEntry=-1;std::uint64_t payloadToken=0;
 bool RequestPayloadSelection(std::uint64_t token,int seat,int entry) noexcept {
@@ -620,6 +628,39 @@ void RtsClicks() noexcept {
     left();
     Check(supportCalls==1 && supportChosen==2 && game.armedSupport<0 && game.sel.Has(squadObj),
           "armed, a left click on the map calls that support there, the selection kept");
+    Check(supportLoad.count==0,"a support with no seats is called with no composed load");
+    // The composition panel (the user, 2026-10-09: "支援栏是断剑那种，先点载具，然后选里面的人并且可以点多次，直到座位满"; a click a
+    // whole squad): a support with seats (the stub's entry 1: eight) armed opens it from its preset (one squad); a kind's
+    // click adds a squad, none past the seats; a squad's click takes it out; the left click on the map sends the load.
+    {
+        const float row1[4]={20,200,240,226};const int entry1=1;
+        supportCalls=0;supportLoad=SupportLoadout{};
+        MapCommandSupportButtons(row1,&entry1,1);
+        in.dx=(100.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(213.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
+        left();
+        MapCommandReadout rc{};
+        Check(game.armedSupport==1 && game.composeEntry==1 && PlayerMapCommands(&rc) && rc.composeEntry==1 && rc.composeSeats==8 &&
+              rc.compose.count==4 && rc.compose.soldier[0]==SupportWeapon::sniper,"armed, a support with seats opens its composition from its preset");
+        // The panel as drawn: a squad place, a Fencer cannon kind.
+        const float hits[8]={900,400,980,422, 900,460,950,482};
+        const int codes[2]={mapbtn::ComposeSquadCode(0),static_cast<int>(SupportWeapon::fencerCannon)};
+        MapCommandSupportButtons(row1,&entry1,1);MapCommandComposeButtons(hits,codes,2);
+        in.dx=(925.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(471.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
+        left();
+        Check(game.compose.count==8 && game.compose.soldier[4]==SupportWeapon::fencerCannon && game.armedSupport==1 && !supportCalls,
+              "a kind's click adds a squad of it; still armed, nothing called");
+        left();
+        Check(game.compose.count==8,"no room for a third squad: unchanged");
+        in.dx=(940.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(411.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
+        left();
+        Check(game.compose.count==4 && game.compose.soldier[0]==SupportWeapon::fencerCannon,"a squad's click takes it out, the next moves up");
+        supportCalls=0;
+        in.dx=(640.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(560.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
+        left();
+        Check(supportCalls==1 && supportChosen==1 && supportLoad.count==4 && supportLoad.soldier[3]==SupportWeapon::fencerCannon &&
+              game.armedSupport<0 && game.composeEntry<0,"the left click on the map sends the composed load; the panel closes");
+        MapCommandComposeButtons(nullptr,nullptr,0);
+    }
     MapCommandSupportButtons(nullptr,nullptr,0);MapCommandButtons(nullptr,nullptr,0);
     // Nothing selected: the right button does nothing.
     game.sel.Clear();RememberSelection(game);right();
