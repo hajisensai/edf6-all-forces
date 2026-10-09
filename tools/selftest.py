@@ -5538,8 +5538,13 @@ def edf5_weapons_retire_and_uninstall() -> None:
         modfiles.atomic_write(_mods(game, cw.TABLE), table('table', ids))
         for rel in cw.TEXTS:
             modfiles.atomic_write(_mods(game, rel), table('text_table', ids))
-        for rel in [cw.sgo_file(c) for c in calls.CALLS] + [rel for p in pw.PORTS for rel in [pw.sgo_file(p), *p.assets]]:
+        written = [cw.sgo_file(c) for c in calls.CALLS] + [rel for p in pw.PORTS for rel in [pw.sgo_file(p), *p.assets]]
+        for rel in written:
             modfiles.atomic_write(_mods(game, rel), b'ours')
+        # As an install leaves it: what we wrote, by sha (cw.ours: an asset under a stock name is ours only by that).
+        modfiles.atomic_write(_mods(game, cw.MANIFEST), json.dumps(
+            {'created': [], 'replaced': [], 'written': {rel: modfiles.sha256(b'ours') for rel in written},
+             'rows': {}}).encode())
         out, deleted = cw.retire(game, False)
         assert deleted == []
         rows = dsgo.parse(out[cw.TABLE]).root.get('table').items
