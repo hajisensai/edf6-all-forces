@@ -785,7 +785,7 @@ add_test(NAME npc_gunners_online COMMAND npc_gunners_online_test)
 # EDF6Autopilot: a test-only plugin for background measurement runs (tests/autopilot/autopilot.cpp, driven by
 # tests/autopilot/drive.py); a MODULE into build/tools, never shipped:
 # cmake --build build --target EDF6Autopilot
-add_library(EDF6Autopilot MODULE EXCLUDE_FROM_ALL tests/autopilot/autopilot.cpp)
+add_library(EDF6Autopilot MODULE EXCLUDE_FROM_ALL tests/autopilot/autopilot.cpp tests/autopilot/airdrop_probe.cpp)
 target_include_directories(EDF6Autopilot PRIVATE third_party/EDFModLoader)
 target_link_libraries(EDF6Autopilot PRIVATE edf6common psapi)
 target_include_directories(EDF6Autopilot PRIVATE common)

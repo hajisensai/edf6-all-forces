@@ -29,6 +29,7 @@
 #pragma warning(pop)
 #include "edf/memory.h"
 #include "edf/patch.h"
+#include "airdrop_probe.h"
 
 namespace {
 HMODULE self=nullptr;
@@ -104,6 +105,9 @@ SHORT WINAPI KeyState(int vk) {
     const SHORT real=realKeyState(vk);
     return vk>=0 && vk<256 && held[vk] ? static_cast<SHORT>(real|0x8000) : real;
 }
+
+// A key held (or let go) by the probe, on top of the keys file's (the next change of that file sets them all again).
+void HoldKey(int vk,bool down) noexcept {if(vk>=0 && vk<256)InterlockedExchange(&held[vk],down ? 1 : 0);}
 
 // The import slot of `function` (from `dll`) in `module`'s import table pointed at `hook`; the old target returned.
 void* PatchImport(HMODULE module,const char* dll,const char* function,void* hook) noexcept {
@@ -212,6 +216,7 @@ void* __fastcall CoRoutine(void* out,const std::wstring* decl) {
                 static const std::wstring play=L"string PlayMission_Offline()";
                 Log("SCRIPT HQMain -> PlayMission_Offline: row %ld, difficulty %ld",row,missionDifficulty);
                 LogMemory("mission start");
+                autopilot::AirdropProbeMissionStarted();
                 return realCoRoutine(out,&play);
             }
             Log("SCRIPT HQMain: no game state, the menu as is");
@@ -282,17 +287,25 @@ void RunCommand(const char* text) noexcept {
     if(!std::strcmp(word,"mem"))LogMemory("cmd");
     else if(!std::strcmp(word,"quit")){LogMemory("quit");Quit();}
     else if(!std::strcmp(word,"mission"))AskMission(text);
+    else if(!std::strcmp(word,"probe")) {
+        char what[32]{};
+        if(sscanf_s(text,"%*s %31s",what,static_cast<unsigned>(sizeof(what)))==1 && !std::strcmp(what,"airdrop"))
+            Log("PROBE airdrop installed=%d",autopilot::InstallAirdropProbe(image,&Log,&HoldKey));
+        else Log("CMD probe: unknown probe %s",what);
+    }
     else Log("CMD unknown: %s",word);
 }
 
 void PollCommand() noexcept {
-    char text[256]{};
+    char text[1024]{};
     const HANDLE f=CreateFileW(cmdPath,GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,0,nullptr);
     if(f==INVALID_HANDLE_VALUE)return;
     DWORD got=0;ReadFile(f,text,sizeof(text)-1,&got,nullptr);CloseHandle(f);
     if(!got)return;
     DeleteFileW(cmdPath);
-    RunCommand(text);
+    // One command per line (the driver may hand several before the launch: the mission, then a probe).
+    char* next=nullptr;
+    for(char* line=strtok_s(text,"\r\n",&next);line;line=strtok_s(nullptr,"\r\n",&next))RunCommand(line);
 }
 
 // The keys file read every 15 ms: whitespace separated hex virtual-key codes, all held until the file changes.
@@ -320,6 +333,7 @@ DWORD WINAPI Loop(void*) {
         const ULONGLONG now=GetTickCount64();
         if(now>=nextMemory){LogMemory("tick");nextMemory=now+1000;}
         PollCommand();
+        autopilot::AirdropProbeTick();
         Sleep(15);
     }
 }

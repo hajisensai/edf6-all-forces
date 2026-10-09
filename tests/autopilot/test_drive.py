@@ -111,11 +111,59 @@ class DriverTest(unittest.TestCase):
         with patch.object(drive.gamedir, 'find_or_dev', return_value=self.game), \
              patch.object(drive, 'run', return_value=0) as run:
             self.assertEqual(drive.main(['run']), 0)
-        run.assert_called_once_with(self.game, 'range', 1, 45, None)
+        none = {'extra': (), 'loadout': None, 'shots': None}
+        run.assert_called_once_with(self.game, 'range', 1, 45, None, **none)
         with patch.object(drive.gamedir, 'find_or_dev', return_value=self.game), \
              patch.object(drive, 'run', return_value=0) as run:
             self.assertEqual(drive.main(['run', 'RM015', '2']), 0)
-        run.assert_called_once_with(self.game, 'RM015', 2, 45, None)
+        run.assert_called_once_with(self.game, 'RM015', 2, 45, None, **none)
+
+    def test_run_options_after_the_positional_ones(self):
+        with patch.object(drive.gamedir, 'find_or_dev', return_value=self.game), \
+             patch.object(drive, 'run', return_value=0) as run:
+            self.assertEqual(drive.main(['run', 'RM015', '1', '90', 'out.log', '--cmd', 'probe airdrop',
+                                         '--loadout', 'x.ini', '--cmd', 'mem', '--shots', 'shots']), 0)
+        run.assert_called_once_with(self.game, 'RM015', 1, 90, 'out.log', extra=('probe airdrop', 'mem'),
+                                    loadout='x.ini', shots='shots')
+        with self.assertRaises(SystemExit):
+            drive.run_options(['--cmd'])
+
+    def test_extra_commands_go_with_the_mission(self):
+        with patch.object(drive, 'launch'), patch.object(drive, 'wait_for', return_value=False), \
+             patch.object(drive, 'command') as command:
+            self.assertEqual(drive.run(self.game, 'RM015', 1, 0, None, extra=('probe airdrop',)), 1)
+        command.assert_called_once_with(self.game, 'mission RM015 1\nprobe airdrop')
+
+    def test_loadout_is_placed_for_the_run_and_removed_after(self):
+        source = self.root / 'load.ini'
+        source.write_bytes(b'[Loadout]\nEnabled=1\n')
+        seen = []
+        def launch():
+            seen.append((self.plugins / drive.LOADOUT).read_bytes())
+        with patch.object(drive, 'launch', side_effect=launch), patch.object(drive, 'wait_for', return_value=False):
+            self.assertEqual(drive.run(self.game, 'RM015', 1, 0, None, loadout=str(source)), 1)
+        self.assertEqual(seen, [b'[Loadout]\nEnabled=1\n'])
+        self.assertEqual(list(self.plugins.iterdir()), [])
+
+    def test_existing_loadout_is_never_overwritten(self):
+        (self.plugins / drive.LOADOUT).write_bytes(b'the test range')
+        source = self.root / 'load.ini'
+        source.write_bytes(b'ours')
+        with patch.object(drive, 'launch') as launch:
+            with self.assertRaises(FileExistsError):
+                drive.run(self.game, 'RM015', 1, 0, None, loadout=str(source))
+        launch.assert_not_called()
+        self.assertEqual((self.plugins / drive.LOADOUT).read_bytes(), b'the test range')
+        self.assertEqual([p.name for p in self.plugins.iterdir()], [drive.LOADOUT])
+
+    def test_loadout_changed_during_the_run_is_left(self):
+        source = self.root / 'load.ini'
+        source.write_bytes(b'ours')
+        def launch():
+            (self.plugins / drive.LOADOUT).write_bytes(b'changed')
+        with patch.object(drive, 'launch', side_effect=launch), patch.object(drive, 'wait_for', return_value=False):
+            drive.run(self.game, 'RM015', 1, 0, None, loadout=str(source))
+        self.assertEqual((self.plugins / drive.LOADOUT).read_bytes(), b'changed')
 
     def test_modified_dll_not_deleted(self):
         drive.install(self.game)

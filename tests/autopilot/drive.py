@@ -13,6 +13,13 @@ background"). For measurements, e.g. the big map's memory against the stock test
         installed EDF6VehicleCrew.ini; RM015, M001 or a row: the stock offline list), launch in the background, stay
         SECONDS (default 45) in the mission, quit the game's own way, print the memory (at the start, peak, end), keep
         the plugin's log at LOG, uninstall
+        options (after the positional ones):
+          --cmd TEXT       one more plugin command handed with the mission's (repeatable), e.g. --cmd "probe airdrop"
+                           (the stock air delivery probe: tests/autopilot/airdrop_probe.cpp)
+          --loadout FILE   the run's forced loadout: FILE copied as <plugins>/EDF6TestRange.loadout.ini (read by the
+                           installed EDF6VehicleCrew at the player's creation; the file must not exist already, and
+                           is removed again afterwards), e.g. tests/autopilot/loadouts/airraider_grape.ini
+          --shots DIR      the game window's picture into DIR every 15 s of the mission (PrintWindow)
   python tests/autopilot/drive.py hide               the window off screen and at the back again
   python tests/autopilot/drive.py uninstall          remove the plugin, its keys file and its log (game closed)
 
@@ -103,6 +110,7 @@ def hide(hwnd: int) -> None:
 
 
 SESSION_EXTS = ('.dll', '.keys', '.log', '.cmd', '.keys.tmp', '.cmd.tmp')
+LOADOUT = 'EDF6TestRange.loadout.ini'   # EDF6VehicleCrew's forced loadout (src/loadout.cpp), next to the plugins
 
 
 def require_closed() -> None:
@@ -156,6 +164,30 @@ def uninstall(game: str) -> None:
             os.remove(path)
             print('removed', path)
     os.remove(marker)
+
+
+def place_loadout(game: str, source: str) -> tuple[str, bytes]:
+    """The run's forced loadout written as EDF6VehicleCrew's ini; never over an existing one (the test range's)."""
+    with open(source, 'rb') as f:
+        payload = f.read()
+    path = os.path.join(plugins(game), LOADOUT)
+    with open(path, 'xb') as f:
+        f.write(payload)
+    print('loadout', source, '->', path)
+    return path, payload
+
+
+def remove_loadout(path: str, payload: bytes) -> None:
+    """The run's loadout removed, only while it is still the one this run wrote."""
+    try:
+        with open(path, 'rb') as f:
+            if f.read() != payload:
+                print('loadout changed by someone else: left at', path)
+                return
+    except FileNotFoundError:
+        return
+    os.remove(path)
+    print('removed', path)
 
 
 def launch() -> None:
@@ -287,20 +319,33 @@ def commit_of(row: str) -> float:
     return float(row.split('commit ')[1].split(' MB')[0])
 
 
-def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None) -> int:
+def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None, *,
+        extra: tuple[str, ...] = (), loadout: str | None = None, shots: str | None = None) -> int:
     install(game)
+    placed: tuple[str, bytes] | None = None
     try:
-        command(game, f'mission {mission} {difficulty}')
+        if loadout:
+            placed = place_loadout(game, loadout)
+        command(game, '\n'.join([f'mission {mission} {difficulty}', *extra]))
         launch()
         if not wait_for(game, 'PlayMission_Offline', 240):
             print('the mission never started (see the log)')
             return 1
         print('mission started; staying', seconds, 's')
-        end = time.time() + seconds
+        start = time.time()
+        end = start + seconds
+        next_shot = start + 15
         while time.time() < end:
             if not game_pids():
                 print('the game exited before the observation period ended')
                 return 1
+            if shots and time.time() >= next_shot:
+                os.makedirs(shots, exist_ok=True)
+                try:
+                    shot(os.path.join(shots, f'{int(time.time() - start):04d}s.png'))
+                except (RuntimeError, AssertionError) as e:
+                    print('no picture:', e)
+                next_shot += 15
             time.sleep(1)
         if not game_pids():
             print('the game exited before quit was requested')
@@ -330,7 +375,31 @@ def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None
                 print('log kept at', keep)
         finally:
             if not game_pids():
+                if placed:
+                    remove_loadout(*placed)
                 uninstall(game)
+
+
+def run_options(argv: list[str]) -> tuple[list[str], dict]:
+    """`run`'s positional arguments and its options (--cmd TEXT repeatable, --loadout FILE, --shots DIR)."""
+    args: list[str] = []
+    extra: list[str] = []
+    options: dict = {'extra': (), 'loadout': None, 'shots': None}
+    i = 0
+    while i < len(argv):
+        if argv[i] in ('--cmd', '--loadout', '--shots'):
+            if i + 1 >= len(argv):
+                raise SystemExit(argv[i] + ' needs a value')
+            if argv[i] == '--cmd':
+                extra.append(argv[i + 1])
+            else:
+                options[argv[i][2:]] = argv[i + 1]
+            i += 2
+        else:
+            args.append(argv[i])
+            i += 1
+    options['extra'] = tuple(extra)
+    return args, options
 
 
 def main(argv: list[str]) -> int:
@@ -353,8 +422,9 @@ def main(argv: list[str]) -> int:
     elif cmd == 'cmd':
         command(game, ' '.join(argv[1:]))
     elif cmd == 'run':
-        return run(game, argv[1] if len(argv) > 1 else DEFAULT_MISSION, int(argv[2]) if len(argv) > 2 else 1,
-                   int(argv[3]) if len(argv) > 3 else 45, argv[4] if len(argv) > 4 else None)
+        args, options = run_options(argv[1:])
+        return run(game, args[0] if args else DEFAULT_MISSION, int(args[1]) if len(args) > 1 else 1,
+                   int(args[2]) if len(args) > 2 else 45, args[3] if len(args) > 3 else None, **options)
     elif cmd == 'mem':
         mem(game, int(argv[1]) if len(argv) > 1 else 10)
     else:
