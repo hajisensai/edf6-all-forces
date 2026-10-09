@@ -2,7 +2,7 @@
 
   python -B tools/make_edf5_weapons.py [--edf5 DIR] [--edf6 DIR]
 
-Runs once on a machine with both games; the JSON is the registry tools/edf5_weapons.py installs from. A weapon is
+Runs once on a machine with both games; the JSON is the registry tools/ported_weapons.py installs from. A weapon is
 EDF5's (a row of its WEAPONTABLE) that no row of EDF6's table names, in Japanese or English (NFKC, blanks dropped:
 EDF5 writes 'ニクス  レッドガード', EDF6 'ニクス レッドガード'). Each comes from one of two sources:
   'edf6'  EDF6 ships the weapon's SGO but its table never names it (Edf6.leftover; the EDF5 DLC weapons): that file,

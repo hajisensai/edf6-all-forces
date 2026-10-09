@@ -60,7 +60,7 @@ sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 sys.path.insert(0, HERE)
 import calls  # noqa: E402
 import dsgo  # noqa: E402
-import edf5_weapons as e5w  # noqa: E402
+import ported_weapons as pw  # noqa: E402
 import ledger  # noqa: E402
 import modfiles  # noqa: E402
 import vcobjects as vc  # noqa: E402
@@ -97,8 +97,8 @@ def vehicle_file(call: Call) -> str:
 
 
 def our_sgos() -> list[str]:
-    """Every weapon SGO install writes: the calls' and the EDF5 weapons' (tools/edf5_weapons.py)."""
-    return [sgo_file(c) for c in CALLS] + [e5w.sgo_file(p) for p in e5w.PORTS]
+    """Every weapon SGO install writes: the calls' and the earlier games' (tools/ported_weapons.py)."""
+    return [sgo_file(c) for c in CALLS] + [pw.sgo_file(p) for p in pw.PORTS]
 
 
 # ---------------------------------------------------------------- reading the base
@@ -181,8 +181,8 @@ def check_aligned(game_root: str, n: int) -> None:
 
 
 def slot_of(row_id: str) -> str | None:
-    """The call or EDF5 weapon (tools/edf5_weapons.py) a table row belongs to, its own row or its placeholder."""
-    return calls.slot_of(row_id) or e5w.slot_of(row_id)
+    """The call or earlier game's weapon (tools/ported_weapons.py) a table row belongs to, its own row or its placeholder."""
+    return calls.slot_of(row_id) or pw.slot_of(row_id)
 
 
 @dataclass
@@ -205,7 +205,7 @@ def plan_rows(ids: list[str]) -> Plan:
         if c in at:
             raise ValueError(f'{c} has two rows in the weapon table: {at[c]} and {i}')
         at[c] = i
-    appended = [c for c in IDS + e5w.IDS if c not in at]
+    appended = [c for c in IDS + pw.IDS if c not in at]
     for k, c in enumerate(appended):
         at[c] = len(ids) + k
     return Plan(at, appended)
@@ -595,10 +595,10 @@ def stack(game_root: str) -> dict[str, bytes]:
     only; raises (Misaligned, ValueError) before anything could be written."""
     s = load_shared(game_root)
     before = s.ids
-    ports, left_out = e5w.build(game_root, lambda rel: stock(game_root, rel))
+    ports, left_out = pw.build(game_root, lambda rel: stock(game_root, rel))
     if left_out:
         reasons = sorted(set(left_out.values()))
-        print(f'EDF5 weapons: {len(ports)} of {len(e5w.PORTS)} built, {len(left_out)} wait as placeholders: '
+        print(f'Ported weapons (EDF5, EDF4.1): {len(ports)} of {len(pw.PORTS)} built, {len(left_out)} wait as placeholders: '
               + '; '.join(reasons[:3]) + (' ...' if len(reasons) > 3 else ''))
     plan = plan_rows(before)
     tpl = {t: _template_index(before, t) for t in templates()}
@@ -611,16 +611,16 @@ def stack(game_root: str) -> dict[str, bytes]:
                              for c in CALLS}
     order = sorted(CALLS, key=lambda c: plan.at[c.id])   # appended rows in their order
     # An EDF5 weapon this run cannot build keeps the row an earlier install gave it (its SGO is still in Mods), else
-    # its row is a placeholder until EDF5 is there (e5w.pending_*): its index is taken either way.
-    kept = {p.id for p in e5w.PORTS if p.id not in ports and plan.at[p.id] < len(before)
-            and before[plan.at[p.id]] == p.id and os.path.isfile(_mods(game_root, e5w.sgo_file(p)))}
-    put_ports = [p for p in e5w.PORTS if p.id not in kept]
+    # its row is a placeholder until EDF5 is there (pw.pending_*): its index is taken either way.
+    kept = {p.id for p in pw.PORTS if p.id not in ports and plan.at[p.id] < len(before)
+            and before[plan.at[p.id]] == p.id and os.path.isfile(_mods(game_root, pw.sgo_file(p)))}
+    put_ports = [p for p in pw.PORTS if p.id not in kept]
     port_tpl = {p.id: _template_index(before, p.template) for p in put_ports}
-    out.update({e5w.sgo_file(p): ports[p.id] for p in put_ports if p.id in ports})
+    out.update({pw.sgo_file(p): ports[p.id] for p in put_ports if p.id in ports})
     rows = s.rows
     row_template = {c.id: rows[tpl[template_of(c)]] for c in CALLS}
-    port_rows = {p.id: e5w.table_row(rows[port_tpl[p.id]], p) if p.id in ports
-                 else e5w.pending_table_row(rows[port_tpl[p.id]], p) for p in put_ports}
+    port_rows = {p.id: pw.table_row(rows[port_tpl[p.id]], p) if p.id in ports
+                 else pw.pending_table_row(rows[port_tpl[p.id]], p) for p in put_ports}
     puts = sorted([(plan.at[c.id], _table_row(row_template[c.id], c)) for c in order]
                   + [(plan.at[p.id], port_rows[p.id]) for p in put_ports], key=lambda x: x[0])
     for at, row in puts:
@@ -638,8 +638,8 @@ def stack(game_root: str) -> dict[str, bytes]:
     for lang, rel in zip(LANGS, TEXTS):
         text = s.text_rows(rel)
         text_templates = {c.id: text[tpl[template_of(c)]] for c in CALLS}
-        port_text = {p.id: e5w.text_row(p, lang) if p.id in ports
-                     else e5w.pending_text_row(text[port_tpl[p.id]], p, lang) for p in put_ports}
+        port_text = {p.id: pw.text_row(p, lang) if p.id in ports
+                     else pw.pending_text_row(text[port_tpl[p.id]], p, lang) for p in put_ports}
         puts = sorted([(plan.at[c.id], _text_row(text_templates[c.id], c, lang, durability[c.id], stats.get(c.id)))
                        for c in order] + [(plan.at[p.id], port_text[p.id]) for p in put_ports], key=lambda x: x[0])
         for at, row in puts:
@@ -681,14 +681,14 @@ def retire(game_root: str, delete_rows: bool) -> tuple[dict[str, bytes], list[st
     cut = tail_start(ids) if delete_rows else len(ids)
     deleted = sorted((c for c, i in present.items() if i >= cut), key=lambda c: present[c])
     by_id = {c.id: c for c in CALLS}
-    tpl = {c: _template_index(ids, template_of(by_id[c]) if c in by_id else e5w.BY_ID[c].template) for c in present}
+    tpl = {c: _template_index(ids, template_of(by_id[c]) if c in by_id else pw.BY_ID[c].template) for c in present}
 
     def retired_row(cid: str, template: Node, lang: str | None) -> Node:
         if cid in by_id:
             c = by_id[cid]
             return _retired_table_row(template, c) if lang is None else _retired_text_row(template, c, lang)
-        p = e5w.BY_ID[cid]
-        return e5w.retired_table_row(template, p) if lang is None else e5w.retired_text_row(template, p, lang)
+        p = pw.BY_ID[cid]
+        return pw.retired_table_row(template, p) if lang is None else pw.retired_text_row(template, p, lang)
 
     rows = s.rows
     for cid, i in present.items():
@@ -711,7 +711,7 @@ def retire(game_root: str, delete_rows: bool) -> tuple[dict[str, bytes], list[st
 
 def retired_id(row: str) -> str:
     """The placeholder id of a call's or an EDF5 weapon's row."""
-    return e5w.retired_id(row) if row in e5w.BY_ID else calls.retired_id(row)
+    return pw.retired_id(row) if row in pw.BY_ID else calls.retired_id(row)
 
 
 # ---------------------------------------------------------------- game dir: transaction, manifest
@@ -960,8 +960,8 @@ def check_ports(game_root: str, ids: list[str], rows: dict[str, int]) -> bool:
     counted), at the row it was installed at, and a built one its SGO."""
     ok = True
     states = {'in': 0, 'placeholder': 0, 'missing': 0}
-    at = {e5w.slot_of(x): i for i, x in enumerate(ids) if e5w.slot_of(x)}
-    for p in e5w.PORTS:
+    at = {pw.slot_of(x): i for i, x in enumerate(ids) if pw.slot_of(x)}
+    for p in pw.PORTS:
         i = at.get(p.id)
         state = 'missing' if i is None else 'placeholder' if ids[i] != p.id else 'in'
         states[state] += 1
@@ -971,11 +971,12 @@ def check_ports(game_root: str, ids: list[str], rows: dict[str, int]) -> bool:
         if p.id in rows and rows[p.id] != i:
             print(f'  {i:>5} {p.id}: {state} (installed at {rows[p.id]})')
             ok = False
-        if state == 'in' and not os.path.isfile(_mods(game_root, e5w.sgo_file(p))):
-            print(f'  {i:>5} {p.id}: {e5w.sgo_file(p)} missing')
+        if state == 'in' and not os.path.isfile(_mods(game_root, pw.sgo_file(p))):
+            print(f'  {i:>5} {p.id}: {pw.sgo_file(p)} missing')
             ok = False
-    print(f'  EDF5 weapons: {states["in"]} in, {states["placeholder"]} placeholders (waiting for EDF5, or uninstalled), '
-          f'{states["missing"]} missing (of {len(e5w.PORTS)})')
+    print(f'  ported weapons (EDF5, EDF4.1): {states["in"]} in, {states["placeholder"]} placeholders (waiting for their '
+          f'game, or uninstalled), '
+          f'{states["missing"]} missing (of {len(pw.PORTS)})')
     return ok
 
 def main() -> None:

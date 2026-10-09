@@ -87,8 +87,9 @@ def find_or_dev() -> str:
     return find() or DEV_DIR
 
 
-# The earlier games the tools read data from (tools/edf5_weapons.py): (Steam folder, the program that marks it, $VAR).
+# The earlier games the tools read data from (tools/ported_weapons.py): (Steam folder, the program that marks it, $VAR).
 EDF5 = ('EARTH DEFENSE FORCE 5', 'EDF5.exe', 'EDF5_DIR')
+EDF41 = ('Earth Defense Force 4.1', 'EDF41.exe', 'EDF41_DIR')
 
 
 def find_other(game: tuple[str, str, str], near: str | None = None) -> str | None:

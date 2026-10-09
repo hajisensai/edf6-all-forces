@@ -734,8 +734,8 @@ def install_keeps_rows() -> None:
             for i, x in enumerate(table):
                 if calls.slot_of(x):
                     assert plan.at[x] == i, f'{name}: {x} moved'
-            import edf5_weapons as e5w   # every EDF5 weapon's row follows the calls' (edf5_weapons_rows)
-            assert plan.appended == [c for c in calls.IDS if c not in table] + list(e5w.IDS), name
+            import ported_weapons as pw   # every EDF5 weapon's row follows the calls' (edf5_weapons_rows)
+            assert plan.appended == [c for c in calls.IDS if c not in table] + list(pw.IDS), name
             assert sorted(plan.at[c] for c in plan.appended) == list(range(len(table), len(table) + len(plan.appended)))
     fresh = cw.plan_rows(STOCK)
     assert [fresh.at[c] for c in calls.IDS] == list(range(len(STOCK), len(STOCK) + len(calls.IDS)))
@@ -3178,8 +3178,8 @@ def sazabi_fallback_install_upgrade() -> None:
     with tempfile.TemporaryDirectory(prefix='edf6vc-sazabi-') as game, \
             patched(modfiles, game_running=lambda process=modfiles.PROCESS: False), \
             patched(sazabi_model, model_dir=lambda: None), patched(vc, Game=lambda root: Game()):
-        import edf5_weapons as e5w   # every install has a row per EDF5 weapon: here they wait for EDF5
-        files = _call_files(game, STOCK + list(calls.IDS) + [e5w.retired_id(x) for x in e5w.IDS])
+        import ported_weapons as pw   # every install has a row per EDF5 weapon: here they wait for EDF5
+        files = _call_files(game, STOCK + list(calls.IDS) + [pw.retired_id(x) for x in pw.IDS])
         arms = {f'WEAPON/{w.split("/")[-1].upper()}' for w in vc.SAZABI_WEAPONS}
         for rel in arms:
             os.remove(_mods(game, rel))  # clean CI package: no Sazabi weapons have ever been installed
@@ -5236,7 +5236,7 @@ def cpk_reads_compressed_entries_of_every_installed_archive() -> None:
             assert len(data) == int(entry['ExtractSize']), f'{root}/{archive} {entry["FileName"]}'
 
 
-# ---------------------------------------------------------------- EDF5 weapons (tools/edf5_weapons.py, pylib/edf5port.py)
+# ---------------------------------------------------------------- earlier games' weapons (tools/ported_weapons.py, pylib/edf5port.py)
 
 
 # The categories EDF6's slots take (DEFAULTPACKAGE/CONFIG.SGO SoldierInit, docs/loadout-re.md §1.2).
@@ -5260,18 +5260,18 @@ def edf5_weapons_registry() -> None:
     a prefix (a removed id would leave its row nobody's), five languages with EDF6's 7-element curves, and only
     categories an EDF6 slot takes (EDF5's 304 / 107 / 108 have none)."""
     import hashlib
-    import edf5_weapons as e5w
-    assert len(set(e5w.IDS)) == len(e5w.IDS) and all(x.startswith(e5w.ID_PREFIX) for x in e5w.IDS)
+    import ported_weapons as pw
+    assert len(set(pw.IDS)) == len(pw.IDS) and all(p.id.startswith(pw.BY_GAME[p.game].prefix) for p in pw.PORTS)
     calls_rows = set(calls.IDS) | {calls.retired_id(c) for c in calls.IDS}
-    assert not (set(e5w.IDS) | {e5w.retired_id(x) for x in e5w.IDS}) & calls_rows
-    for name, (n, digest) in e5w.RELEASED.items():
-        assert len(e5w.IDS) >= n and hashlib.sha256('\n'.join(e5w.IDS[:n]).encode()).hexdigest() == digest, \
+    assert not (set(pw.IDS) | {pw.retired_id(x) for x in pw.IDS}) & calls_rows
+    for name, (n, digest) in pw.RELEASED.items():
+        assert len(pw.IDS) >= n and hashlib.sha256('\n'.join(pw.IDS[:n]).encode()).hexdigest() == digest, \
             f'{name}: the registry no longer starts with the ids that release installed (EDF5 weapons only go at the end)'
-    assert max(n for n, _ in e5w.RELEASED.values()) == len(e5w.IDS), \
-        'edf5port/weapons.json has weapons no RELEASED order lists: add this release to tools/edf5_weapons.py RELEASED'
-    for p in e5w.PORTS:
+    assert max(n for n, _ in pw.RELEASED.values()) == len(pw.IDS), \
+        'edf5port/weapons.json has weapons no RELEASED order lists: add this release to tools/ported_weapons.py RELEASED'
+    for p in pw.PORTS:
         assert p.category in EDF6_SLOT_CATEGORIES, f'{p.id}: category {p.category} has no EDF6 slot'
-        assert p.source in ('edf5', 'edf6') and set(p.text) == set(cw.LANGS), p.id
+        assert p.source in (p.game, 'edf6') and set(p.text) == set(cw.LANGS), p.id
         for lang, t in p.text.items():
             assert isinstance(t[0], str) and t[0] and isinstance(t[1], str), f'{p.id} {lang}'
             assert all(c[6] in (0.0, 1.0) for c in _e5w_curves(t[2])), f'{p.id} {lang}: a curve without its flag'
@@ -5344,18 +5344,18 @@ def edf5_weapons_rows() -> None:
     """call_weapons with EDF5 weapons in the table: a fresh install appends every one of them (built or not: the rows
     are the same on every machine) after the calls, in the registry's order; a reinstall keeps each row or placeholder
     where it is; tail_start counts them as ours; retired_id picks each kind's."""
-    import edf5_weapons as e5w
+    import ported_weapons as pw
     fresh = cw.plan_rows(STOCK)
-    assert fresh.appended == list(calls.IDS) + list(e5w.IDS)
+    assert fresh.appended == list(calls.IDS) + list(pw.IDS)
     assert [fresh.at[x] for x in fresh.appended] == list(range(len(STOCK), len(STOCK) + len(fresh.appended)))
-    installed = STOCK + list(calls.IDS) + list(e5w.IDS) + OTHER
+    installed = STOCK + list(calls.IDS) + list(pw.IDS) + OTHER
     again = cw.plan_rows(installed)
-    assert all(again.at[x] == installed.index(x) for x in e5w.IDS) and again.appended == []
-    pending = STOCK + list(calls.IDS) + [e5w.retired_id(x) for x in e5w.IDS] + OTHER
-    assert all(cw.plan_rows(pending).at[x] == pending.index(e5w.retired_id(x)) for x in e5w.IDS)
-    ports = list(e5w.IDS[:3])
+    assert all(again.at[x] == installed.index(x) for x in pw.IDS) and again.appended == []
+    pending = STOCK + list(calls.IDS) + [pw.retired_id(x) for x in pw.IDS] + OTHER
+    assert all(cw.plan_rows(pending).at[x] == pending.index(pw.retired_id(x)) for x in pw.IDS)
+    ports = list(pw.IDS[:3])
     assert cw.tail_start(STOCK + ports) == len(STOCK) and cw.tail_start(STOCK + ports + OTHER) == len(STOCK) + 3 + 2
-    assert cw.retired_id(ports[0]) == e5w.retired_id(ports[0]) != calls.retired_id(ports[0])
+    assert cw.retired_id(ports[0]) == pw.retired_id(ports[0]) != calls.retired_id(ports[0])
     assert cw.retired_id(calls.IDS[0]) == calls.retired_id(calls.IDS[0])
 
 
@@ -5424,7 +5424,7 @@ def edf5_weapons_match_developers() -> None:
     fields they rebalanced (E5W_REBALANCED); the Light Truck's whole Weapon_Sub conversion among them."""
     import dataclasses
     import edf5port
-    import edf5_weapons as e5w
+    import ported_weapons as pw
     import rootcpk
     games = _e5w_games('edf5_weapons_match_developers')
     if games is None:
@@ -5432,12 +5432,12 @@ def edf5_weapons_match_developers() -> None:
     g6 = rootcpk.Game(games[0])
     stock = lambda rel: g6.read(*rel.split('/'))   # noqa: E731
     checked = 0
-    for p in e5w.PORTS:
+    for p in pw.PORTS:
         if p.source != 'edf6':
             continue
         want = E5W_REBALANCED.get(p.sgo, set())
         try:
-            ours = dsgo.parse(e5w.build_sgo(dataclasses.replace(p, source='edf5'), stock, games[1])).root
+            ours = dsgo.parse(pw.build_sgo(dataclasses.replace(p, source='edf5'), stock, games[1])).root
         except edf5port.Unsupported:
             assert want is None, f'{p.sgo}: not converted'
             continue
@@ -5459,20 +5459,20 @@ def edf5_weapons_stack_real() -> None:
     weapons built, the 'edf5' ones placeholders waiting for it, or, on a table an install with EDF5 wrote (its SGOs in
     Mods), those rows kept. retire on that table leaves every EDF5 weapon a placeholder."""
     import edf5port
-    import edf5_weapons as e5w
+    import ported_weapons as pw
     games = _e5w_games('edf5_weapons_stack_real')
     if games is None:
         return
     out = cw.stack(games[0])
     rows = {r.items[0]: r for r in dsgo.parse(out[cw.TABLE]).root.get('table').items}
-    for p in e5w.PORTS:
+    for p in pw.PORTS:
         row = rows[p.id]
         tpl = rows[p.template]
         assert row.items[1].lower() == f'app:/weapon/{p.id}.sgo'.lower(), p.id
         assert (row.items[2], row.items[3], row.items[4], row.items[5], row.items[8]) == \
                (float(p.category), 1.0, p.level, 0.0, 0.0), p.id
         assert dsgo.to_py(row.items[6]) == [float(x) for x in p.stars] and row.items[7] == tpl.items[7], p.id
-        w = dsgo.parse(out[e5w.sgo_file(p)]).root
+        w = dsgo.parse(out[pw.sgo_file(p)]).root
         assert w.get('xgs_scene_object_class') == p.cls, p.id
         for k, at in edf5port.CURVES.items():
             v = w.get(k) if k in w.names.values() else None
@@ -5481,30 +5481,30 @@ def edf5_weapons_stack_real() -> None:
             if isinstance(v, dsgo.Node) and all(isinstance(x, float) for x in v.items):
                 assert len(v.items) != 6, f'{p.id} {k}: a star curve still 6 long'
     with_edf5 = cw.row_ids(out[cw.TABLE])
-    with patched(e5w, edf5_root=lambda game_root: None):
+    with patched(pw, game_root=lambda game, edf6_root: None):
         bare = cw.stack(games[0])
     without = cw.row_ids(bare[cw.TABLE])
     assert len(without) == len(with_edf5)
-    for p in e5w.PORTS:
+    for p in pw.PORTS:
         i = with_edf5.index(p.id)
-        assert without[i] == (p.id if p.source == 'edf6' else e5w.retired_id(p.id)), p.id
-        assert (e5w.sgo_file(p) in bare) == (p.source == 'edf6'), p.id
-    pending = next(p for p in e5w.PORTS if p.source == 'edf5')
+        assert without[i] == (p.id if p.source == 'edf6' else pw.retired_id(p.id)), p.id
+        assert (pw.sgo_file(p) in bare) == (p.source == 'edf6'), p.id
+    pending = next(p for p in pw.PORTS if p.source == 'edf5')
     text = dsgo.parse(bare['WEAPON/WEAPONTEXT.EN.SGO']).root.get('text_table').items[with_edf5.index(pending.id)]
-    assert text.items[0] == pending.text['EN'][0] + e5w.PENDING_NOTE['EN'][0]
+    assert text.items[0] == pending.text['EN'][0] + pw.PENDING_NOTE['EN'][0].format(game=pw.BY_GAME[pending.game].name)
     orig_base, orig_mods = cw.base, cw._mods
     with tempfile.TemporaryDirectory(prefix='edf6vc-e5w-') as mods:
-        for p in e5w.PORTS:
-            modfiles.atomic_write(os.path.join(mods, *e5w.sgo_file(p).split('/')), out[e5w.sgo_file(p)])
+        for p in pw.PORTS:
+            modfiles.atomic_write(os.path.join(mods, *pw.sgo_file(p).split('/')), out[pw.sgo_file(p)])
         installed = lambda game_root, rel: out[rel] if rel in cw.SHARED else orig_base(game_root, rel)   # noqa: E731
         ours = lambda game_root, *rel: os.path.join(mods, *[x for r in rel for x in r.split('/')])   # noqa: E731
-        with patched(cw, base=installed, _mods=ours), patched(e5w, edf5_root=lambda game_root: None):
+        with patched(cw, base=installed, _mods=ours), patched(pw, game_root=lambda game, edf6_root: None):
             kept = cw.stack(games[0])
             retired, _ = cw.retire(games[0], False)
     assert cw.row_ids(kept[cw.TABLE]) == with_edf5, 'a built row an earlier install wrote was not kept'
-    assert not any(e5w.sgo_file(p) in kept for p in e5w.PORTS if p.source == 'edf5'), 'a kept SGO was rewritten'
+    assert not any(pw.sgo_file(p) in kept for p in pw.PORTS if p.source == 'edf5'), 'a kept SGO was rewritten'
     have = cw.row_ids(retired[cw.TABLE])
-    assert all(have[with_edf5.index(p.id)] == e5w.retired_id(p.id) for p in e5w.PORTS)
+    assert all(have[with_edf5.index(p.id)] == pw.retired_id(p.id) for p in pw.PORTS)
 
 
 @test
@@ -5512,8 +5512,8 @@ def edf5_weapons_retire_and_uninstall() -> None:
     """On a stand-in game whose Mods table holds the calls and three EDF5 weapons: retire turns each EDF5 weapon's row
     into its template's stock row under the placeholder id (text: its name marked uninstalled), deleting only the run
     of ours ending the table when asked; uninstall removes the EDF5 weapons' SGOs with the calls'."""
-    import edf5_weapons as e5w
-    ports = list(e5w.PORTS[:3])
+    import ported_weapons as pw
+    ports = list(pw.PORTS[:3])
     templates = sorted({*cw.templates(), *(p.template for p in ports)})
     ids = STOCK + [t for t in templates if t not in STOCK] + list(calls.IDS) + [p.id for p in ports]
 
@@ -5527,7 +5527,7 @@ def edf5_weapons_retire_and_uninstall() -> None:
         modfiles.atomic_write(_mods(game, cw.TABLE), table('table', ids))
         for rel in cw.TEXTS:
             modfiles.atomic_write(_mods(game, rel), table('text_table', ids))
-        for rel in [cw.sgo_file(c) for c in calls.CALLS] + [e5w.sgo_file(p) for p in e5w.PORTS]:
+        for rel in [cw.sgo_file(c) for c in calls.CALLS] + [pw.sgo_file(p) for p in pw.PORTS]:
             modfiles.atomic_write(_mods(game, rel), b'ours')
         out, deleted = cw.retire(game, False)
         assert deleted == []
@@ -5535,22 +5535,165 @@ def edf5_weapons_retire_and_uninstall() -> None:
         texts = dsgo.parse(out['WEAPON/WEAPONTEXT.EN.SGO']).root.get('text_table').items
         for p in ports:
             i = ids.index(p.id)
-            assert rows[i].items == [e5w.retired_id(p.id), f'app:/weapon/{p.template}.sgo'], p.id
+            assert rows[i].items == [pw.retired_id(p.id), f'app:/weapon/{p.template}.sgo'], p.id
             assert texts[i].items[0] == p.text['EN'][0] + calls.RETIRED_NOTE['EN'][0], p.id
         assert [r.items[0] for r in rows[:len(STOCK)]] == STOCK
         _, deleted = cw.retire(game, True)
         assert deleted == list(calls.IDS) + [p.id for p in ports], 'the run of ours ending the table'
         cw.uninstall(game)
-        assert not any(os.path.isfile(_mods(game, e5w.sgo_file(p))) for p in e5w.PORTS)
+        assert not any(os.path.isfile(_mods(game, pw.sgo_file(p))) for p in pw.PORTS)
         assert not any(os.path.isfile(_mods(game, cw.sgo_file(c))) for c in calls.CALLS)
         left = [r.items[0] for r in dsgo.parse(modfiles.read(_mods(game, cw.TABLE))).root.get('table').items]
-        assert all(e5w.retired_id(p.id) in left for p in ports) and len(left) == len(ids)
+        assert all(pw.retired_id(p.id) in left for p in ports) and len(left) == len(ids)
         # Installing again where these cannot be built (no EDF5): their placeholders stay, recorded (once a KeyError
         # after the commit, the manifest knowing only live rows).
         files = _call_files(game, left)
         cw.install(game, files)
         recorded = cw.load_manifest(game)['rows']
-        assert all(recorded[p.id] == left.index(e5w.retired_id(p.id)) for p in ports)
+        assert all(recorded[p.id] == left.index(pw.retired_id(p.id)) for p in ports)
+
+
+@test
+def edf41_weapon_conversion() -> None:
+    """pylib/edf5port.py weapon41 on a hand-made EDF4.1 weapon: 'name' and 'Range' gone, name.<lang> the registry's,
+    AmmoDamageReduce [1, 1] and ExtPrams [1] added (kept when the weapon has its own), plain numbers stay plain (4.1
+    has no star curves), an empty SecondaryFire_Parameter becomes [0.0]."""
+    import edf5port
+    members = {'xgs_scene_object_class': 'Weapon_BasicShoot', 'name': ['ＡＦ', 'AF', 'ＡＦ'], 'Range': _f32(120.0),
+               'AmmoDamage': _f32(6.0), 'AmmoCount': 200, 'ReloadTime': 150, 'SecondaryFire_Parameter': [],
+               'ExtPrams': [_f32(2.0)]}
+    r = edf5port.weapon41(members, {'ja': 'JA', 'en': 'EN'}).root
+    names = set(r.names.values())
+    assert 'name' not in names and 'Range' not in names
+    assert (r.get('name.ja'), r.get('name.en')) == ('JA', 'EN')
+    assert dsgo.to_py(r.get('AmmoDamageReduce')) == [1.0, 1.0] and dsgo.to_py(r.get('ExtPrams')) == [2.0]
+    assert (r.get('AmmoDamage'), r.get('AmmoCount'), r.get('ReloadTime')) == (6.0, 200.0, 150.0)
+    assert dsgo.to_py(r.get('SecondaryFire_Parameter')) == [0.0]
+    assert dsgo.to_py(edf5port.weapon41({'xgs_scene_object_class': 'x'}, {}).root.get('ExtPrams')) == [1.0]
+    energy = edf5port.weapon41({'EnergyChargeRequire': 25}, {}).root.get('EnergyChargeRequire')
+    assert dsgo.to_py(energy) == [25.0, 25.0], 'EDF6 holds EnergyChargeRequire as [curve, value]'
+
+
+@test
+def edf41_stat_lines() -> None:
+    """tools/make_edf41_weapons.py: a 4.1 stat line through EDF6's forms (its numbers put into each language's format),
+    two stats on one line, a part without a colon going on the value before it, a language-neutral value, a value put
+    together from EDF6's pieces, LABELS41's label, and None for a label nobody shows."""
+    import make_edf41_weapons as m41
+    form = lambda label, values: {L: (label[L], values[L]) for L in m41.LANGS}   # noqa: E731
+    rof = form({'JA': '連射速度', 'EN': 'ROF', 'CN': '連射速度', 'SC': '连射速度', 'KR': '연사 속도'},
+               {'JA': '$0発／秒', 'EN': '$0/sec', 'CN': '$0發/秒', 'SC': '$0发/秒', 'KR': '$0발/초'})
+    dmg = form({'JA': 'ダメージ', 'EN': 'Damage', 'CN': '傷害', 'SC': '伤害', 'KR': '대미지'},
+               {'JA': '$0×$1', 'EN': '$0×$1', 'CN': '$0×$1', 'SC': '$0×$1', 'KR': '$0×$1'})
+    acc = form({'JA': '精度', 'EN': 'Accuracy', 'CN': '準度', 'SC': '准度', 'KR': '정확도'},
+               {L: '$0' for L in m41.LANGS})
+    formats = {'連射速度': [rof], 'ダメージ': [dmg], '精度': [acc]}
+    pieces = m41.fragments(formats)
+    one = m41.stat_lines('連射速度：12.0発／秒', formats, pieces)
+    assert one == [{'JA': ['連射速度', '12.0発／秒'], 'EN': ['ROF', '12.0/sec'], 'CN': ['連射速度', '12.0發/秒'],
+                    'SC': ['连射速度', '12.0发/秒'], 'KR': ['연사 속도', '12.0발/초']}], one
+    two = m41.stat_lines('ダメージ：60.0    ×30', formats, pieces)
+    assert two and two[0]['EN'] == ['Damage', '60.0×30'], two
+    pair = m41.stat_lines('精度：S+     連射速度：60.0発／秒×900', formats, pieces)
+    assert pair and pair[0]['CN'] == ['準度', 'S+'] and pair[1]['KR'] == ['연사 속도', '60.0발/초×900'], pair
+    supply = m41.stat_lines('供給量：0.05', formats, pieces)
+    assert supply and supply[0]['EN'] == ['Supply Rate', '0.05'], supply
+    assert m41.stat_lines('謎の値：12', formats, pieces) is None
+    generic = m41._generalize({'JA': ('効果時間', '90.0秒'), 'EN': ('Effective Time', '90.0 sec'),
+                               'CN': ('效果時間', '90.0秒'), 'SC': ('效果时间', '90.0秒'), 'KR': ('효과 시간', '90.0초')})
+    assert generic['EN'] == ('Effective Time', '$0 sec') and generic['JA'] == ('効果時間', '$0秒'), generic
+
+
+@test
+def edf41_weapons_convert_real() -> None:
+    """Real data, where EDF4.1 and EDF6 are installed: every EDF4.1 weapon of the registry converts, of its class, with
+    every field nearly every EDF6 weapon has (EDF6 reads those; 4.1 lacks AmmoDamageReduce / ExtPrams / name.<lang>),
+    its swapped cues all in EDF6's banks and no cue left that EDF6's banks lack."""
+    import acb
+    import gamedir
+    import ported_weapons as pw
+    import rootcpk
+    edf6 = rootcpk.DEFAULT_GAME
+    edf41 = gamedir.find_other(gamedir.EDF41, near=edf6)
+    if not edf41 or not os.path.isfile(os.path.join(edf6, 'Root.cpk')):
+        print('skip  edf41_weapons_convert_real: needs EDF6 and EDF4.1 installed')
+        return
+    g6 = rootcpk.Game(edf6)
+    stock = lambda rel: g6.read(*rel.split('/'))   # noqa: E731
+    rows = dsgo.parse(stock('WEAPON/WEAPONTABLE.SGO')).root.get('table').items
+    count: dict[str, int] = {}
+    for r in rows[::7]:
+        for k in dsgo.parse(stock(f'WEAPON/{r.items[0].upper()}.SGO')).root.names.values():
+            count[k] = count.get(k, 0) + 1
+    common = {k for k, n in count.items() if n >= 0.95 * len(rows[::7])}
+    cues6 = acb.game_cues(edf6)
+    cues41 = acb.game_cues(edf41)
+    ports = [p for p in pw.PORTS if p.game == 'edf41']
+    assert ports
+    for p in ports:
+        r = dsgo.parse(pw.build_sgo(p, stock, edf41)).root
+        assert r.get('xgs_scene_object_class') == p.cls, p.id
+        lacking = common - set(r.names.values())
+        assert not lacking, f'{p.id}: lacks {sorted(lacking)}'
+        assert all(c in cues6 for c in p.cues.values()), p.id
+        strings = [x for x in _dsgo_strings(r) if x in cues41]
+        assert all(x in cues6 for x in strings), f'{p.id}: {sorted(set(strings) - cues6)} play nothing in EDF6'
+
+
+def _dsgo_strings(v: dsgo.Value) -> list[str]:
+    if isinstance(v, str):
+        return [v]
+    if isinstance(v, dsgo.Node):
+        return [x for c in v.items for x in _dsgo_strings(c)]
+    return []
+
+
+@test
+def utf_table_version_field() -> None:
+    """pylib/cpk.py parse_utf: an @UTF table starts u16 version, u16 rows offset. A CPK's are version 0 (so reading the
+    two as one u32 worked); an ACB's (pylib/acb.py, the sound banks) are version 1."""
+    import cpk
+    table = bytearray(_utf('Bank', [('CueName', 'str')], [{'CueName': 'weapon_fire'}]))
+    table[8:10] = (1).to_bytes(2, 'big')
+    _name, _cols, count, rows = cpk.parse_utf(bytes(table))
+    assert count == 1 and next(rows())['CueName'] == 'weapon_fire'
+
+
+# EDF4.1 weapons EDF6 ships converted by its developers (never in its table): 4.1 file -> EDF6 file.
+E41_DEVELOPER_COPIES = {'hHellStorm01.sgo': 'HHELLSTORM01.SGO', 'Weapon457.sgo': 'HWEAPON112.SGO',
+                        'Weapon462.sgo': 'HWEAPON118.SGO', 'Weapon466.sgo': 'HWEAPON123.SGO',
+                        'Weapon470.sgo': 'HWEAPON127.SGO'}
+
+
+@test
+def edf41_weapons_match_developers() -> None:
+    """Real data, where EDF4.1 and EDF6 are installed: pylib/edf5port.py weapon41 on the 4.1 weapons the developers
+    converted themselves gives their files' fields exactly (name / Range gone, AmmoDamageReduce / ExtPrams added), and
+    each field's shape theirs where they kept 4.1's numbers plain (EnergyChargeRequire [v, v], not 4.1's one number);
+    the rest they turned into star curves or rebalanced."""
+    import edf5port
+    import gamedir
+    import rootcpk
+    import sgo
+    edf6 = rootcpk.DEFAULT_GAME
+    edf41 = gamedir.find_other(gamedir.EDF41, near=edf6)
+    if not edf41 or not os.path.isfile(os.path.join(edf6, 'Root.cpk')):
+        print('skip  edf41_weapons_match_developers: needs EDF6 and EDF4.1 installed')
+        return
+    g4, g6 = rootcpk.Game(edf41), rootcpk.Game(edf6)
+    for mine, theirs in E41_DEVELOPER_COPIES.items():
+        a = edf5port.weapon41(sgo.read(g4.read('WEAPON', mine))[1], {}).root
+        b = dsgo.parse(g6.read('WEAPON', theirs)).root
+        names = lambda r: {k for k in r.names.values() if not k.startswith('name.')}   # noqa: E731
+        assert names(a) == names(b), f'{mine}: {sorted(names(a) ^ names(b))}'
+        for k in names(a):
+            va, vb = a.get(k), b.get(k)
+            plain = not isinstance(vb, dsgo.Node) or not any(isinstance(x, dsgo.Node) and len(x.items) == 7 for x in vb.items)
+            if isinstance(vb, dsgo.Node) and len(vb.items) == 7 and all(isinstance(x, float) for x in vb.items):
+                continue   # a star curve they added where 4.1 has a number
+            if plain:
+                assert isinstance(va, dsgo.Node) == isinstance(vb, dsgo.Node), f'{mine} {k}: {dsgo.to_py(va)} / {dsgo.to_py(vb)}'
+        assert dsgo.to_py(a.get('EnergyChargeRequire')) == dsgo.to_py(b.get('EnergyChargeRequire')) == [-1.0, -1.0]
 
 def main() -> int:
     import rootcpk
