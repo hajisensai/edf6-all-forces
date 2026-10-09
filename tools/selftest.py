@@ -1931,11 +1931,19 @@ def boarding_an_empty_aircraft_makes_its_entry() -> None:
     assert 'if(!e){j.active=false;return;}' in hover, 'HoverStep no longer needs the entry: revisit jet::Adopt'
 
 
+# The configuration modules src/plugin.cpp's LoadConfig hands EDF6VehicleCrew.ini to, and the call that does it.
+INI_MODULES = {'src/support_config.cpp': 'LoadSupportConfig(iniPath);'}
+
+
 @test
 def heli_sight_after_aim_lines() -> None:
     """The stock heli's gun sight (src/helisight.cpp) draws for the guns whose aim line AimLines hid this frame
     (HiddenAimGuns), so the input hook runs it after AimLines; AimLines hides the player's line for it
-    (PlayerHeliOwnSight); its ini key is read, shipped and documented; every key the ini ships is read."""
+    (PlayerHeliOwnSight); its ini key is read, shipped and documented; every key the ini ships is read.
+    "Read" means: by src/plugin.cpp (L"Key"), or by a configuration module plugin.cpp's LoadConfig hands the same ini
+    to (INI_MODULES: src/support_config.cpp, LoadSupportConfig(iniPath)). A module's suffixed keys (Prefix_<suffix>, read
+    as L"Prefix_%ls") count when the module reads that prefix and the suffix is one of its keys (tools/support_config.py
+    UNIT_KEYS for SupportAircraftCount_); every key a module reads is shipped in the ini, the suffixed ones as an example."""
     crew = src('src/crew.cpp')
     hook = crew.split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
     lines, sight = hook.find('&AimLines,'), hook.find('&HeliSightFrame,')
@@ -1944,8 +1952,27 @@ def heli_sight_after_aim_lines() -> None:
     assert 'PlayerHeliOwnSight(vehicle)' in aim, 'src/crew.cpp AimLines: the heli sight hides the player\'s line'
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
     assert re.search(r'^PlayerHeliGunSight=1', ini, re.M) and 'PlayerHeliGunSight' in readme
-    unread = [k for k in re.findall(r'^([A-Za-z]\w*)=', ini, re.M) if f'L"{k}"' not in plugin]
-    assert not unread, f'EDF6VehicleCrew.ini keys src/plugin.cpp never reads: {unread}'
+    modules = {path: src(path) for path, call in INI_MODULES.items()}
+    for path, call in INI_MODULES.items():
+        assert call in plugin.split('void LoadConfig() noexcept {', 1)[1].split('\n}\n', 1)[0], f'LoadConfig does not hand the ini to {path}'
+    sys.path.insert(0, os.path.join(ROOT, 'tools'))
+    import support_config
+    suffixes = {'SupportAircraftCount_': support_config.UNIT_KEYS}
+
+    def read(key: str) -> bool:
+        if f'L"{key}"' in plugin or any(f'L"{key}"' in m for m in modules.values()):
+            return True
+        for prefix, known in suffixes.items():
+            if key.startswith(prefix) and key[len(prefix):] in known:
+                return any(f'L"{prefix}%ls"' in m for m in modules.values())
+        return False
+    unread = [k for k in re.findall(r'^([A-Za-z]\w*)=', ini, re.M) if not read(k)]
+    assert not unread, f'EDF6VehicleCrew.ini keys neither src/plugin.cpp nor {list(INI_MODULES)} read: {unread}'
+    for path, text in modules.items():
+        for key in re.findall(r'L"(Support\w+?)"', text):
+            assert re.search(rf'^{key}=', ini, re.M), f'{path} reads {key}, the shipped ini lacks it'
+        for prefix in re.findall(r'L"(\w+_)%ls"', text):
+            assert prefix in suffixes and re.search(rf'{prefix}[A-Z_]+=\d', ini), f'{path} reads {prefix}<key>: no shipped example'
 
 
 
