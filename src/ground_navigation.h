@@ -8,30 +8,60 @@ namespace npc::navigation {
 struct Point { float x{},y{},z{}; };
 inline float Horizontal(Point a,Point b) noexcept {return std::hypot(a.x-b.x,a.z-b.z);}
 inline bool Finite(Point p) noexcept {return std::isfinite(p.x)&&std::isfinite(p.y)&&std::isfinite(p.z);}
+// The search's estimate: the shortest 8-way grid walk (straight cells and diagonals) from a cell to `b`, the goal's
+// own cell (State::aim), so that every step along an unobstructed route keeps the estimate exact. The Euclidean
+// distance to the goal it replaced undercounts every route off the grid's axes and diagonals (650 m at 22.5 deg by
+// 8 %): the search opened every cell of the ellipse whose estimate was under the true cost before it got anywhere,
+// thousands of cells against kNodes even on open ground, and support entries 650-950 m out were all refused after
+// ~40 s each (2026-10-09 17:00, the user's tank "dispatching" forever). Aimed at the goal point itself (off the grid)
+// it rose a fraction over the last cells, and the search then had to exhaust the whole band of equally short walks.
+inline float GridEstimate(Point a,Point b) noexcept {
+    const float dx=std::fabs(a.x-b.x),dz=std::fabs(a.z-b.z);
+    return (std::max)(dx,dz)+0.41421356f*(std::min)(dx,dz);
+}
 constexpr float kWaypointReach=0.45f;
 struct Profile {
     float radius=0.65f,height=1.8f,step=0.55f,cell=2.0f;
     float maxWaterDepth=0.35f; // conservative wading allowance, not swimming/amphibious navigation
     float waypointRadius=kWaypointReach; // intermediate corners; final arrival still uses the caller's stop
+    // >1: the estimate weighs this much (weighted A*): routes at most `greed` times the shortest, found opening far
+    // fewer cells round obstacles in the way. 1: the shortest route.
+    float greed=1.0f;
 };
 enum class Edge { blocked,open,pending };
 enum class Result { pending,moving,arrived,blocked };
-constexpr int kNodes=1536,kPath=512;
+// The search keeps every cell it has reached (open and closed): each step along a route reaches 5-7 new ones, so a
+// state of N nodes plans routes of some N/7 cells. kNodes is a soldier's own (256 of them): orders across a fight.
+// kRouteNodes is a support route's (support_dispatch.cpp, a few dozen): entries stand 650-950 m out on 4 m cells,
+// up to ~240 cells, which kNodes could not hold even on open ground with a perfect estimate (2026-10-09).
+constexpr int kNodes=1536,kRouteNodes=4096,kPath=512;
+// A support route's greed (Profile::greed): it must find a way in, not the shortest; with it a route of RouteState gets
+// round a wall 400 m long across its middle, where the shortest-route search runs out of nodes (ground_navigation_test).
+constexpr float kRouteGreed=2.0f;
 struct Node { Point at;float g{},f{};int x{},z{},parent=-1;bool closed{}; };
-struct State {
-    Node nodes[kNodes]{};Point path[kPath]{};
-    Point origin{},goal{},progress{};Profile profile{};
+template<int N>
+struct BasicState {
+    static constexpr int kCapacity=N;
+    Node nodes[N]{};Point path[kPath]{};
+    Point origin{},goal{},aim{},progress{};Profile profile{};   // aim: the grid cell nearest the goal (GridEstimate)
     int count{},active=-1,direction{},length{},cursor{};
     std::uint64_t retryAt{},progressAt{},checkedAt{},lastAt{};
     bool initialized{},failed{},checked{};
 };
+using State=BasicState<kNodes>;
+using RouteState=BasicState<kRouteNodes>;
+template<class State>
 inline void Begin(State& s,Point from,Point goal,Profile p,std::uint64_t ms) noexcept {
     s.count=1;s.active=-1;s.direction=0;s.length=s.cursor=0;
     s.origin=from;s.goal=goal;s.profile=p;s.failed=false;s.initialized=true;
     s.progress=from;s.progressAt=ms;s.lastAt=ms;s.checked=false;
-    s.nodes[0]={from,0.0f,Horizontal(from,goal),0,0,-1,false};
+    // The cells are placed as the search places them (origin + index * cell), so a cell's estimate is whole steps.
+    s.aim={from.x+std::round((goal.x-from.x)/p.cell)*p.cell,goal.y,from.z+std::round((goal.z-from.z)/p.cell)*p.cell};
+    s.nodes[0]={from,0.0f,p.greed*GridEstimate(from,s.aim),0,0,-1,false};
 }
+template<class State>
 inline void Fail(State& s,std::uint64_t ms) noexcept {s.failed=true;s.retryAt=ms+1000;s.length=0;}
+template<class State>
 inline bool Path(State& s,int end,Point goal) noexcept {
     int ids[kPath],n=0;
     for(int i=end;i>=0;i=s.nodes[i].parent) {if(n==kPath-1)return false;ids[n++]=i;}
@@ -42,21 +72,21 @@ inline bool Path(State& s,int end,Point goal) noexcept {
 // edge(from,to,projected) must check the entire segment and project its endpoint
 // to connected ground. pending consumes no search state: work resumes next call.
 // The caller supplies a per-call edge budget AND a shared world-query budget.
-template<class Query>
+template<class State,class Query>
 Result Navigate(State& s,Point from,Point goal,float stop,std::uint64_t ms,Point& next,Query edge,
                 Profile p={},int budget=4) noexcept {
     next=from;
     if(!Finite(from)||!Finite(goal)||!std::isfinite(stop)||!(p.cell>0.0f && p.cell<=8.0f)||
        !(p.step>0.0f && p.step<=1.0f)||!(p.radius>0.0f && p.radius<=10.0f)||
        !(p.height>p.step && p.height<=20.0f)||!(p.maxWaterDepth>=0.0f && p.maxWaterDepth<=2.0f)||
-       !(p.waypointRadius>0.0f && p.waypointRadius<=p.cell))return Result::blocked;
+       !(p.waypointRadius>0.0f && p.waypointRadius<=p.cell)||!(p.greed>=1.0f && p.greed<=4.0f))return Result::blocked;
     if(Horizontal(from,goal)<=stop && std::fabs(from.y-goal.y)<=p.step) {
         Point supported{};const Edge e=edge(from,from,supported);
         return e==Edge::open ? Result::arrived : e==Edge::pending ? Result::pending : Result::blocked;
     }
     const bool changed=!s.initialized||Horizontal(goal,s.goal)>p.cell*8.0f||std::fabs(goal.y-s.goal.y)>p.step||
         p.radius!=s.profile.radius||p.height!=s.profile.height||p.step!=s.profile.step||p.cell!=s.profile.cell||
-        p.maxWaterDepth!=s.profile.maxWaterDepth||p.waypointRadius!=s.profile.waypointRadius||
+        p.maxWaterDepth!=s.profile.maxWaterDepth||p.waypointRadius!=s.profile.waypointRadius||p.greed!=s.profile.greed||
         ms<s.lastAt||ms-s.lastAt>2000;
     if(changed)Begin(s,from,goal,p,ms);
     s.lastAt=ms;
@@ -83,8 +113,17 @@ Result Navigate(State& s,Point from,Point goal,float stop,std::uint64_t ms,Point
     constexpr int dx[8]={1,1,0,-1,-1,-1,0,1},dz[8]={0,1,1,1,0,-1,-1,-1};
     while(budget>0) {
         if(s.active<0) {
-            float best=1e30f;
-            for(int i=0;i<s.count;++i)if(!s.nodes[i].closed && s.nodes[i].f<best){best=s.nodes[i].f;s.active=i;}
+            // Lowest estimate first; among equal ones the farthest along (most cost behind it): on open ground every
+            // cell of the band of equally short grid walks ties, and this follows one of them instead of filling the band.
+            // "Equal" allows the float sums' drift over a long route (g adds hundreds of hypot steps): kTie per metre.
+            constexpr float kTie=1e-5f;
+            float best=1e30f,deepest=-1.0f;
+            for(int i=0;i<s.count;++i) {
+                const Node& n=s.nodes[i];
+                const float tie=1e-3f+kTie*n.f;
+                if(n.closed || n.f>best+tie || (n.f>=best-tie && n.g<=deepest))continue;
+                best=n.f;deepest=n.g;s.active=i;
+            }
             if(s.active<0){Fail(s,ms);return Result::blocked;}
             s.direction=-1;
         }
@@ -120,10 +159,10 @@ Result Navigate(State& s,Point from,Point goal,float stop,std::uint64_t ms,Point
             for(int i=0;i<s.count;++i)if(s.nodes[i].x==x && s.nodes[i].z==z && std::fabs(s.nodes[i].at.y-at.y)<0.25f){found=i;break;}
             const float g=current.g+Horizontal(current.at,at)+std::fabs(current.at.y-at.y);
             if(found<0) {
-                if(s.count==kNodes){Fail(s,ms);return Result::blocked;}
-                found=s.count++;s.nodes[found]={at,g,g+Horizontal(at,s.goal),x,z,s.active,false};
+                if(s.count==State::kCapacity){Fail(s,ms);return Result::blocked;}
+                found=s.count++;s.nodes[found]={at,g,g+p.greed*GridEstimate(at,s.aim),x,z,s.active,false};
             } else if(g<s.nodes[found].g) {
-                auto& n=s.nodes[found];n.g=g;n.f=g+Horizontal(at,s.goal);n.parent=s.active;n.closed=false;
+                auto& n=s.nodes[found];n.g=g;n.f=g+p.greed*GridEstimate(at,s.aim);n.parent=s.active;n.closed=false;
             }
         }
         if(s.direction==8){s.nodes[s.active].closed=true;s.active=-1;}
@@ -165,5 +204,7 @@ bool WalkEdge(Point a,Point b,Point& out,Profile p,Ground ground,Clear clear) no
 } // namespace npc::navigation
 namespace crew {
 npc::navigation::Result GroundNavigate(npc::navigation::State&,const float* from,const float* to,float stop,
+    std::uint64_t ms,float* waypoint,npc::navigation::Profile profile={}) noexcept;
+npc::navigation::Result GroundNavigate(npc::navigation::RouteState&,const float* from,const float* to,float stop,
     std::uint64_t ms,float* waypoint,npc::navigation::Profile profile={}) noexcept;
 }

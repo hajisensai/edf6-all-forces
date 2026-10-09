@@ -402,12 +402,13 @@ void HoverStep(PJet& j,unsigned char* v,const Stick& s,const float* pos,float cl
 // rollout before the stop: the approach speed's stop at kRollDecel, and kRollMargin) to kStripPast past the stop, the
 // ground every kStripStep within kStripRise of the stop's and kStripStepRise of the last sample's, nothing standing in
 // it kStripHigh and kStripHigher over it, the final approach (kFinal out on a kGlide slope) clear, the player
-// kStripClear off it, the stop no more than kStopRise from the player's feet. Cheapest: nearest, then turning least
-// from the jet's heading (kTurnCost a unit of 1 - cos).
+// kStripClear off it, the stop no more than kStopRise from the player's feet, and its whole approach inside the map
+// (hail_glide.h PlanPattern: the final and the outer point within the play area's walls, which turn a wing back).
+// Cheapest: nearest, then turning least from the jet's heading (kTurnCost a unit of 1 - cos).
 constexpr float kRings[]={60.0f,120.0f,200.0f,320.0f,500.0f,800.0f};
 constexpr int kRingCount=static_cast<int>(sizeof(kRings)/sizeof(kRings[0])),kAngles=12,kHeads=12,kPlanPerFrame=12;
 constexpr float kRollDecel=8.0f,kRollMargin=40.0f,kStripPast=30.0f,kStripStep=25.0f,kStripRise=4.0f,kStripStepRise=1.5f;
-constexpr float kStripHigh=4.0f,kStripHigher=12.0f,kFinal=1500.0f,kGlide=0.07f,kStripClear=25.0f,kStopRise=6.0f,kTurnCost=300.0f;
+constexpr float kStripHigh=4.0f,kStripHigher=12.0f,kFinal=hail::kFinalLength,kGlide=0.07f,kStripClear=25.0f,kStopRise=6.0f,kTurnCost=300.0f;
 constexpr float kProbe=400.0f;
 constexpr float kApproachOver=10.0f;   // m/s over its rotate speed: the final's speed
 constexpr float kFinalLead=450.0f;     // m: the final's aim, ahead along the glide line
@@ -441,8 +442,11 @@ float FlatToSegment(const float* p,const float* a,const float* b) noexcept {
     return std::sqrt(d[0]*d[0]+d[1]*d[1]);
 }
 
-// The strip stopping at `stop` (y: the player's) along `dir` for kind `k` (see kRings): its cost, or -1.
-float StripCost(const Kind& k,float* stop,const float* dir,const float* who,const float* heading,float ring) noexcept {
+// The strip stopping at `stop` (y: the player's) along `dir` for kind `k` (see kRings), its approach flown at turns of
+// `radius` within `box`: its cost and `pattern`, or -1 (no strip), or kCramped (a strip, but no approach to it fits).
+constexpr float kCramped=-2.0f;
+float StripCost(const Kind& k,float* stop,const float* dir,const float* who,const float* heading,float ring,float radius,
+                const hail::Box& box,hail::Pattern* pattern) noexcept {
     float y=0.0f;
     if(!GroundAt(stop[0],stop[2],who[1],&y) || std::fabs(y-who[1])>kStopRise)return -1.0f;
     stop[1]=y;
@@ -455,6 +459,8 @@ float StripCost(const Kind& k,float* stop,const float* dir,const float* who,cons
     }
     const float from[3]={stop[0]-dir[0]*roll,y,stop[2]-dir[2]*roll},to[3]={stop[0]+dir[0]*kStripPast,y,stop[2]+dir[2]*kStripPast};
     if(FlatToSegment(who,from,to)<kStripClear || StripBlocked(from,to,y,kStripHigh) || StripBlocked(from,to,y,kStripHigher))return -1.0f;
+    *pattern=hail::PlanPattern(from,dir,radius,box);
+    if(!pattern->ok)return kCramped;
     const float entry[3]={from[0]-dir[0]*kFinal,y+kStripHigh+kFinal*kGlide,from[2]-dir[2]*kFinal},touch[3]={from[0],y+kStripHigh,from[2]};
     float hit[3];
     if(MapRay(entry,touch,hit)>=0.0f)return -1.0f;
@@ -468,29 +474,48 @@ void TouchPoint(const Kind& k,PJet::Hail& h) noexcept {
     h.touch[1]=h.stop[1];
 }
 
+float HailLateralAt(const PJet& j,float speed) noexcept;
+// The radius of the ferry's turns (Approach flies the ferry at k.rotate + kApproachOver * 4).
+float FerryRadius(const PJet& j) noexcept {
+    const float speed=j.kind->rotate+kApproachOver*4.0f;
+    return hail::TurnRadius(speed,HailLateralAt(j,speed));
+}
+// The airspace a hail may fly in: the play area's walls (WallTurn turns a wing back at them).
+hail::Box HailBox() noexcept {
+    const PlayArea a=MapPlayArea();
+    return hail::Box{{a.lo[0],a.lo[1]},{a.hi[0],a.hi[1]}};
+}
 void PlanStrip(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
     PJet::Hail& h=j.hail;
     float heading[3]={j.vel[0],0.0f,j.vel[2]};
     if(!Normalize(heading)){heading[0]=0.0f;heading[2]=1.0f;}
+    const float radius=FerryRadius(j);
+    const hail::Box box=HailBox();
     const int perRing=kAngles*kHeads,all=perRing*kRingCount;
     for(int n=0;n<kPlanPerFrame && h.cand<all;++n,++h.cand) {
         const int ring=h.cand/perRing,angle=(h.cand/kHeads)%kAngles,head=h.cand%kHeads;
         const float a=2.0f*kWatchPi*static_cast<float>(angle)/kAngles,b=2.0f*kWatchPi*static_cast<float>(head)/kHeads;
         float stop[3]={player.pos[0]+std::cos(a)*kRings[ring],player.pos[1],player.pos[2]+std::sin(a)*kRings[ring]};
         const float dir[3]={std::sin(b),0.0f,std::cos(b)};
-        const float cost=StripCost(*j.kind,stop,dir,player.pos,heading,kRings[ring]);
+        hail::Pattern pattern;
+        const float cost=StripCost(*j.kind,stop,dir,player.pos,heading,kRings[ring],radius,box,&pattern);
+        if(cost==kCramped)h.cramped=true;
         if(cost<0.0f || (h.best>0.0f && cost>=h.best))continue;
         h.best=cost;std::memcpy(h.bestStop,stop,12);std::memcpy(h.bestDir,dir,12);
+        h.bestRoom=pattern.room;
     }
     const bool ringDone=h.cand%perRing==0 || h.cand>=all;
     if(!ringDone || (h.best<=0.0f && h.cand<all))return;
-    if(h.best<=0.0f){HandBack(j,v,"no place to land near the player");return;}
+    if(h.best<=0.0f){HandBack(j,v,h.cramped ? "no room on this map to fly its approach to a strip near the player" :
+                                              "no place to land near the player");return;}
     std::memcpy(h.stop,h.bestStop,12);std::memcpy(h.dir,h.bestDir,12);
+    h.room=h.bestRoom;
     TouchPoint(*j.kind,h);
     h.phase=kHailFerry;h.at=ms;
-    Log("PJET hail v=%p: a strip %.0f m from the player, heading %.0f deg, touchdown at (%.0f,%.0f,%.0f), stop at (%.0f,%.0f,%.0f)",v,
+    Log("PJET hail v=%p: a strip %.0f m from the player, heading %.0f deg, touchdown at (%.0f,%.0f,%.0f), stop at (%.0f,%.0f,%.0f); "
+        "outer point room %.0f m, turns of %.0f m",v,
         vec::Flat(h.stop,player.pos),std::atan2(h.dir[0],h.dir[2])*180.0f/kWatchPi,h.touch[0],h.touch[1],h.touch[2],h.stop[0],h.stop[1],
-        h.stop[2]);
+        h.stop[2],h.room,radius);
 }
 
 // A wing flown at `goal` at `want` m/s by the aim's law (Air on the autopilot: the catch's way), its descent within
@@ -498,12 +523,13 @@ void PlanStrip(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
 // level and up first when that margin runs out); above `want` + kAirbrakeOver the airbrake.
 constexpr float kAirbrakeOver=15.0f,kSpeedGain=0.03f;
 // The sideways lift its wing holds a level turn with now (hail_glide.h LevelTurnLateral), m/s^2.
-float HailLateral(const PJet& j) noexcept {
+float HailLateralAt(const PJet& j,float speed) noexcept {
     const Kind& k=*j.kind;
-    const float speed=Len(j.vel),wing=speed<k.corner ? (speed/k.corner)*(speed/k.corner) : 1.0f;
+    const float wing=speed<k.corner ? (speed/k.corner)*(speed/k.corner) : 1.0f;
     const float mass=j.burden.mass>1.0f ? j.burden.mass : 1.0f;
     return hail::LevelTurnLateral(k.maxG*kG*wing/mass);
 }
+float HailLateral(const PJet& j) noexcept { return HailLateralAt(j,Len(j.vel)); }
 void SteerAt(PJet& j,unsigned char* v,const float* pos,const float* goal,float want,bool final,float clear,bool water,float dt,
              ULONGLONG ms) noexcept {
     const Kind& k=*j.kind;
@@ -548,7 +574,7 @@ void Approach(PJet& j,unsigned char* v,const float* pos,float clear,bool water,f
         float track[3]={j.vel[0],0.0f,j.vel[2]};
         Normalize(track);
         bool inbound=h.phase==kHailInbound;
-        hail::FerryGoal(pos,track,entry,d,hail::TurnRadius(Len(j.vel),HailLateral(j)),inbound,goal);
+        hail::FerryGoal(pos,track,entry,d,h.room,hail::TurnRadius(Len(j.vel),HailLateral(j)),inbound,goal);
         if(inbound!=(h.phase==kHailInbound)){h.phase=inbound ? kHailInbound : kHailFerry;Log("PJET hail v=%p: %s",v,kHailNames[h.phase]);}
         SteerAt(j,v,pos,goal,k.rotate+kApproachOver*4.0f,false,clear,water,dt,ms);
         // Onto the final only on its slope and line too (hail_glide.h FinalReady): else it goes round.

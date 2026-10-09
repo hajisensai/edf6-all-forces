@@ -47,8 +47,8 @@ struct Jet {
     float aim[3];
 };
 enum class Law { legacy, production };
-enum class End { landed, crashed, gaveUp };
-struct Result { End end; float sink,speed,minClear,seconds; int phase; };
+enum class End { landed, crashed, gaveUp, refused };
+struct Result { End end; float sink,speed,minClear,seconds; int phase; float beyond; };   // beyond: its furthest past the box (m, < 0 inside)
 
 // One frame of Air with the aim's law (AimSteer) toward `aim`, at the throttle SteerAt sets for `want`.
 void Fly(Jet& j,const pjet::Perf& k,const float* aim,float want){
@@ -85,16 +85,30 @@ void Fly(Jet& j,const pjet::Perf& k,const float* aim,float want){
     for(int i=0;i<3;++i)j.pos[i]+=j.dir[i]*j.speed*kDt;
 }
 
-// The hail from `start` to a strip touching down at `touch` along heading `head` deg, on flat ground at touch[1].
-Result Hail(const pjet::Perf& k,Jet j,const float* touch,float head,Law law){
+// playerjet_board.inc FerryRadius: the ferry's turns, at its speed (k.rotate + kApproachOver * 4).
+float FerryRadius(const pjet::Perf& k){
+    const float speed=k.rotate+kApproachOver*4.0f,wing=speed<k.corner ? (speed/k.corner)*(speed/k.corner) : 1.0f;
+    return hail::TurnRadius(speed,hail::LevelTurnLateral(k.maxG*kG*wing));
+}
+const hail::Box kOpen{{-1e6f,-1e6f},{1e6f,1e6f}};
+// The hail from `start` to a strip touching down at `touch` along heading `head` deg, on flat ground at touch[1], the
+// map's walls `box` (the production law plans its approach inside it, hail_glide.h PlanPattern: refused if none fits).
+Result Hail(const pjet::Perf& k,Jet j,const float* touch,float head,Law law,const hail::Box& box=kOpen){
     const float d[3]={std::sin(head*kPi/180.0f),0.0f,std::cos(head*kPi/180.0f)};
     const float ground=touch[1];
+    Result r{End::gaveUp,0,0,1e9f,0,0,-1e9f};
+    hail::Pattern pattern;
+    if(law==Law::production) {
+        pattern=hail::PlanPattern(touch,d,FerryRadius(k),box);
+        if(!pattern.ok){r.end=End::refused;return r;}
+    } else pattern.room=1e9f;
     const float entry[3]={touch[0]-d[0]*kFinal,touch[1]+kStripHigh+kFinal*kGlide,touch[2]-d[2]*kFinal};
     bool final=false,inbound=false;int tries=0;
-    Result r{End::gaveUp,0,0,1e9f,0,0};
     for(float t=0;t<kMostSeconds;t+=kDt) {
         const float clear=j.pos[1]-ground;
         if(clear<r.minClear)r.minClear=clear;
+        const float past=std::fmax(std::fmax(box.lo[0]-j.pos[0],j.pos[0]-box.hi[0]),std::fmax(box.lo[1]-j.pos[2],j.pos[2]-box.hi[1]));
+        if(past>r.beyond)r.beyond=past;
         float track[3]={j.dir[0],0.0f,j.dir[2]};Norm(track);
         float goal[3]{};float want=k.rotate+kApproachOver*4.0f;
         if(final) {   // Approach's final: a missed approach goes back to the ferry (at most kTries)
@@ -116,7 +130,7 @@ Result Hail(const pjet::Perf& k,Jet j,const float* touch,float head,Law law){
                 goal[0]=entry[0]-d[0]*lead;goal[1]=entry[1];goal[2]=entry[2]-d[2]*lead;}
             else {
                 const float wing=j.speed<k.corner ? (j.speed/k.corner)*(j.speed/k.corner) : 1.0f;
-                hail::FerryGoal(j.pos,track,entry,d,hail::TurnRadius(j.speed,hail::LevelTurnLateral(k.maxG*kG*wing)),inbound,goal);
+                hail::FerryGoal(j.pos,track,entry,d,pattern.room,hail::TurnRadius(j.speed,hail::LevelTurnLateral(k.maxG*kG*wing)),inbound,goal);
             }
             if(out<kFinalOn && Dot(track,d)>kFinalAlign && (law==Law::legacy || hail::FinalReady(j.pos,entry,d,kMissHigh,kMissLow,kMissSide)))final=true;   // the final's goal from the next frame, as Approach
         }
@@ -152,7 +166,7 @@ Jet Start(float x,float y,float z,float speed,float climbDeg,float headDeg,float
     std::memcpy(j.aim,j.dir,12);
     return j;
 }
-const char* Name(End e){return e==End::landed ? "landed" : e==End::crashed ? "CRASHED" : "gave up";}
+const char* Name(End e){return e==End::landed ? "landed" : e==End::crashed ? "CRASHED" : e==End::refused ? "refused" : "gave up";}
 }  // namespace
 
 int main(int argc,char** argv){
@@ -218,6 +232,51 @@ int main(int argc,char** argv){
     const bool lands=landed*10>=flown*9;
     std::printf("%s %d of %d swept hails landed\n",lands ? "ok  " : "FAIL",landed,flown);
     fails+=!lands;
+    // 2026-10-09 16:53:56 (EDF6VehicleCrew.log): a gunship hailed on a map whose walls stand at +-1600 flew 4 minutes
+    // along the wall at z -1600 for an outer point past it, until the hail ran out. Negative control: that approach's
+    // outer point (straight behind a 1500 m final, 4 turn radii) lies outside the walls.
+    const hail::Box walls{{-1600.0f,-1600.0f},{1597.0f,1597.0f}};
+    const pjet::Perf* gunship=nullptr;
+    for(const auto& b:pjet::kBoardable)if(std::strcmp(b.perf.name,"gunship")==0)gunship=&b.perf;
+    if(!gunship){std::printf("FAIL no gunship perf\n");return 1;}
+    {
+        const float touch16[3]={347,24,129},head16=-30.0f,d16[2]={std::sin(head16*kPi/180.0f),std::cos(head16*kPi/180.0f)};
+        const float room=std::fmax(hail::kTurnRoom,hail::kOuterTurns*FerryRadius(*gunship));
+        const float oldOuter[2]={touch16[0]-d16[0]*(kFinal+room),touch16[2]-d16[1]*(kFinal+room)};
+        const bool outside=!hail::InBox(walls,oldOuter[0],oldOuter[1],0.0f);
+        std::printf("%s negative control: the 16:53 gunship's old outer point (%.0f,%.0f) lies %s the walls\n",outside ? "ok  " : "FAIL",
+                    oldOuter[0],oldOuter[1],outside ? "outside" : "inside");
+        fails+=!outside;
+        const Result r=Hail(*gunship,Start(-601,399,161,75,0,-6,57),touch16,head16,Law::production,walls);
+        const bool honest=r.end==End::refused || (r.end==End::landed && r.beyond<0.0f);
+        std::printf("%s the 16:53 gunship hail now: %s (never flown at the wall: refused at once, or landed inside it)\n",honest ? "ok  " : "FAIL",Name(r.end));
+        fails+=!honest;
+    }
+    // Every wing on that map: strips round its middle (12 headings), hailed from states 600 m from the middle. Where an
+    // approach fits (PlanPattern) it lands, never meets the ground and never goes past a wall (there the wall turns it back);
+    // where none fits the hail is refused at once.
+    const hail::Box big{{-4000.0f,-4000.0f},{4000.0f,4000.0f}};   // a BigWorld map's
+    for(const hail::Box* box:{&walls,&big})for(const auto& b:pjet::kBoardable) {
+        if(b.frame!=pjet::Airframe::wing)continue;
+        const auto& k=b.perf;int planned=0,down=0,out=0,crashed=0,cases=0;float worst=-1e9f;
+        for(int h=0;h<12;++h)for(float tx:{-400.0f,0.0f,400.0f}) {
+            const float touch2[3]={tx,0,tx*0.5f},head=h*30.0f;
+            const float dd[3]={std::sin(head*kPi/180.0f),0.0f,std::cos(head*kPi/180.0f)};
+            if(!hail::PlanPattern(touch2,dd,FerryRadius(k),*box).ok)continue;
+            ++planned;
+            for(float y:{250.0f,500.0f})for(float bank:{0.0f,90.0f})for(int bearing=0;bearing<4;++bearing)for(int hd=0;hd<4;++hd) {
+                const float a=bearing*kPi/2.0f;
+                const Result r=Hail(k,Start(std::sin(a)*600.0f,y,std::cos(a)*600.0f,0.5f*(k.minAir+k.top),0.0f,hd*90.0f+20.0f,bank),touch2,head,Law::production,*box);
+                ++cases;down+=r.end==End::landed;crashed+=r.end==End::crashed;
+                if(r.beyond>worst)worst=r.beyond;
+                if(r.beyond>0.0f)++out;
+            }
+        }
+        const bool ok=!crashed && !out && (!cases || down*10>=cases*8);
+        std::printf("%s %-12s (turns of %.0f m) on a +-%.0f map: %d of 36 strips fit, %d of %d hails landed, %d crashed, %d went past a wall (furthest %.0f m)\n",
+                    ok ? "ok  " : "FAIL",k.name,FerryRadius(k),box->hi[0],planned,down,cases,crashed,out,worst);
+        fails+=!ok;
+    }
     std::printf(fails ? "hail_glide_check: %d FAILED\n" : "hail_glide_check: all passed\n",fails);
     return fails ? 1 : 0;
 }
