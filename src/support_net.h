@@ -68,9 +68,6 @@ bool SupportMissionPlayerAllowed(int missionIndex) noexcept;
 // (SupportMissionPlayerAllowed), so the host may deploy support locally without the EDF6Coop transport.
 bool SupportSoloHostWorld() noexcept;
 void NoteSupportMissionPlayerCreated(int missionIndex,const ObjRef& object) noexcept;
-// The mission player actors this world created so far (any machine's; up to `most`, game thread): references only, each
-// to be checked live by the caller (ObjRef::Is). The sea rescue's heli finds the swimmer it was made for among them.
-int SupportMissionPlayerObjects(ObjRef* out,int most) noexcept;
 // Only a verified native return-to-lobby transition may call this; readiness
 // loss, a disappeared actor, and InSession() are not evidence of a lobby.
 void SupportMissionReturnedToLobby() noexcept;

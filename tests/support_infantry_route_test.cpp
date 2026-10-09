@@ -31,7 +31,10 @@ bool ApplySupportSoldierResource(const float*,std::uint32_t,const unsigned char*
 bool CreateSupportSoldierUnregistered(const float*,std::uint32_t,const unsigned char*,bool,ObjRef*) noexcept{return false;}
 bool SupportPeersAcceptAirborne() noexcept{return true;}
 bool SupportPeersAcceptRescue() noexcept{return true;}
-void RescueHeliDeployed(unsigned char*,const float*,bool) noexcept{}
+void RescueHeliDeployed(unsigned char*,const float*,bool,const ObjRef&) noexcept{}
+bool SupportTransactionRequester(std::uint64_t,ObjRef*) noexcept{return false;}
+bool SubDeck(const float*,float*) noexcept{return false;}
+support::Refusal PlanTakeoffSupport(const SupportAircraft&,const float*,const float (*)[3],int,support::Route*) noexcept{return support::Refusal::noEntry;}
 void RescueRequestFailed(const wchar_t*) noexcept{}
 bool DeriveSupportSoldierNetId(const void*,unsigned,unsigned char*) noexcept{return false;}
 bool RegisterSupportObject(const void*,const unsigned char*) noexcept{return false;}

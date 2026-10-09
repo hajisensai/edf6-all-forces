@@ -561,6 +561,13 @@ support::Refusal PlanAirSupport(const SupportAircraft& spec,const float* target,
     return support::AirRoute(area,target,observer,direction,altitude,entry,EntryHeight,*route);
 }
 
+support::Refusal PlanTakeoffSupport(const SupportAircraft& spec,const float* target,const float (*spots)[3],int count,
+                                    support::Route* route) noexcept {
+    if(!route || !target || spec.count!=1 || (spec.jet<0 && spec.heli<0))return support::Refusal::unsupported;
+    if(!OpenSky(target))return support::Refusal::noSky;
+    return support::TakeoffRoute(MapPlayArea(),target,spots,count,EntryClear,*route);
+}
+
 bool InstallAirstrikes() noexcept {
     CheckCallTable();
     __try {

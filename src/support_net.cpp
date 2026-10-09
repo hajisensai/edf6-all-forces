@@ -387,14 +387,6 @@ void NoteSupportMissionPlayerCreated(int index,const ObjRef& object) noexcept {
     worldCreated[index]=object;worldCreationSeen=true;
     ReleaseSRWLockExclusive(&worldLock);
 }
-int SupportMissionPlayerObjects(ObjRef* out,int most) noexcept {
-    int n=0;
-    if(!out || most<=0)return 0;
-    AcquireSRWLockShared(&worldLock);
-    for(const auto& actor:worldCreated)if(actor.obj && n<most)out[n++]=actor;
-    ReleaseSRWLockShared(&worldLock);
-    return n;
-}
 void SupportMissionReturnedToLobby() noexcept {
     SuspendSupportNet();
     AcquireSRWLockExclusive(&worldLock);

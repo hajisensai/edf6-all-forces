@@ -36,7 +36,6 @@ bool IsJet(const void*) noexcept { MissingDependency();return false; }
 bool JetInLine(const float*,const float*,const void*) noexcept { MissingDependency();return false; }
 void JetFrame(unsigned char*) noexcept { MissingDependency(); }
 bool SupportRescueAt(const float*,wchar_t*,std::size_t) noexcept { MissingDependency();return false; }
-int SupportMissionPlayerObjects(ObjRef*,int) noexcept { MissingDependency();return 0; }
 PluginBody BodyOf(const void*) noexcept { MissingDependency();return PluginBody{}; }
 bool IsSub(const void*) noexcept { MissingDependency();return false; }
 bool SubDeck(const float*,float*) noexcept { MissingDependency();return false; }
@@ -130,12 +129,12 @@ int main() {
         Put<void*>(copy,kSelfCtrl,copyCtrl);Put<int>(copyCtrl,8,1);Put<std::int32_t>(copy,kTeam,2);
         const float mine[3]={10,-2,30},theirs[3]={400,-2,30};
         call=RescueCall{};
-        RescueHeliDeployed(copy,mine,false);
+        RescueHeliDeployed(copy,mine,false,ObjRef{});
         check(call.phase==CallPhase::idle,"no request waiting: a peer's rescue copy is not taken");
         call.phase=CallPhase::requested;std::memcpy(call.at,mine,12);call.requestedAt=GameMs();
-        RescueHeliDeployed(copy,theirs,false);
+        RescueHeliDeployed(copy,theirs,false,ObjRef{});
         check(call.phase==CallPhase::requested,"another machine's rescue (another point) is not this machine's heli");
-        RescueHeliDeployed(copy,mine,false);
+        RescueHeliDeployed(copy,mine,false,ObjRef{});
         check(call.phase==CallPhase::assigned && call.vehicle==copy && call.ref.Is(copy) && !call.flown && call.team==2,
               "this machine's request gets the deployment's heli (a peer's copy, its own team kept for the end)");
         RescueRequestFailed(L"late refusal");
@@ -147,6 +146,10 @@ int main() {
         check(call.phase==CallPhase::idle && call.retryAt==GameMs()+kRetryMs,"a refused request is asked again kRetryMs later");
         check(PlayerRescueCue(&banner) && banner.bad && std::wcsstr(banner.text,L"此处没有开放天空")!=nullptr,"and the player is told why");
         call=RescueCall{};
+        // Flown here with no requester known (left the room meanwhile): no flight is kept for it (it is sent away).
+        RescueHeliDeployed(copy,mine,true,ObjRef{});
+        bool flying=false;for(const auto& r:rescues)flying=flying || r.phase!=RescuePhase::none;
+        check(!flying,"a rescue heli with no requester never stays to look for someone else");
     }
     std::printf("heli_command_test: %d checks passed\n",checks);
     return 0;

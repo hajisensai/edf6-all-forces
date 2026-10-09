@@ -55,8 +55,11 @@ bool SupportRescueAt(const float* target,wchar_t* note,std::size_t capacity) noe
 // heli.cpp's half of the rescue (the dispatcher calls these, game thread):
 //  - a rescue deployment was made on this machine with every crew seated (`target`: its plan's, the request's point,
 //    identical on every machine). `flown`: this machine runs its flight (offline, the host), else it is a peer's copy.
+//    `requester`: where it is flown, the player who asked (support_net.h SupportTransactionRequester; empty: unknown,
+//    the heli leaves at once).
 //  - this machine's rescue request ended without a heli (refused, timed out, cancelled, interrupted, not made): `why`.
-void RescueHeliDeployed(unsigned char* vehicle,const float* target,bool flown) noexcept;
+struct ObjRef;
+void RescueHeliDeployed(unsigned char* vehicle,const float* target,bool flown,const ObjRef& requester) noexcept;
 void RescueRequestFailed(const wchar_t* why) noexcept;
 void SupportDispatchTick() noexcept;
 void ResetSupportDispatch() noexcept;

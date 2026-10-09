@@ -16,6 +16,10 @@ bool SupportAircraftSpec(int catalog,SupportAircraft* out) noexcept;
 // AirFormationSlot, is checked); the dispatcher's, so an entry the call table does not hold (the sea rescue) plans the same.
 // route->from: the lead's place IN THE AIR at the edge, at the route's height; route->heading toward the target.
 support::Refusal PlanAirSupport(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route) noexcept;
+// One aircraft from the nearest of `spots` (takeoff points: a carrier's deck) it can climb out of to over `target`
+// (support_entry.h TakeoffRoute): route->from on the spot, kTakeoffLift over it. noEntry: none; the caller tries the edge.
+support::Refusal PlanTakeoffSupport(const SupportAircraft& spec,const float* target,const float (*spots)[3],int count,
+                                    support::Route* route) noexcept;
 // Creates the hull at `matrix` (in the air, or a legacy plan's runway) with empty seats. Activation never creates a rider.
 unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float* matrix) noexcept;
 // Its seated real pilot authorizes the flight. `airborne`: it is in the air already: it flies on at once, a wing at its
