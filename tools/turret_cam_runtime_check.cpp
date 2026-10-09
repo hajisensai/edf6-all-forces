@@ -135,10 +135,20 @@ void Run() {
     float first[3];std::memcpy(first,shared.focus,12);
     Put<float>(picked.data,edf::kWeaponAmmoOwnerMove,1);Put<float>(picked.data,edf::kWeaponOwnerVel,24);
     ShotFocus(shared);Check(shared.focus[0]>first[0]+50,"production predictor retains launcher's inherited motion");
-    terrain=false;Put<int>(picked.data,edf::kWeaponAmmoAlive,30);ShotFocus(shared);
-    Check(shared.focusValid && !shared.focusHit && shared.focus[1]>20,"no hit retains actual airborne lifetime endpoint");
+    // No landing (2026-10-09, the user: "稍微远就跳到了指数级别的距离"): the ground under where the shot ends, within its
+    // reach, never its point in the air (that put the view hundreds of metres up and away); no ground found: the hull's.
+    const float* hull=reinterpret_cast<const float*>(vehicle+kMatrix)+12;
+    const auto across=[&]{ return std::sqrt((shared.focus[0]-hull[0])*(shared.focus[0]-hull[0])+(shared.focus[2]-hull[2])*(shared.focus[2]-hull[2])); };
+    Put<int>(picked.data,edf::kWeaponAmmoAlive,30);ShotFocus(shared);
+    float airborne[3];std::memcpy(airborne,shared.focus,12);
+    Check(shared.focusValid && !shared.focusHit && std::fabs(shared.focus[1]-floorY)<0.001f,"no landing: the ground under the shot's end");
+    terrain=false;ShotFocus(shared);
+    Check(shared.focusValid && !shared.focusHit && std::fabs(shared.focus[1]-hull[1])<0.001f && across()>20 && across()<=kSightFar,
+          "no landing, no ground found: the hull's height, never the shot's end in the air");
+    Check(std::fabs(shared.focus[0]-airborne[0])<0.001f && std::fabs(shared.focus[2]-airborne[2])<0.001f,"the same point across the ground either way");
     Put<int>(picked.data,kWeaponLockon,kHoming);ShotFocus(shared);
-    Check(shared.focusValid && !shared.focusHit && shared.focus[1]>500,"guided/unpredictable shot falls back along real rail, not ground");
+    Check(shared.focusValid && !shared.focusHit && std::fabs(shared.focus[1]-hull[1])<0.001f && across()<=kAimFar+1,
+          "guided/unpredictable shot: under the real rail within kAimFar, not up in the air");
     Put<int>(picked.data,kWeaponLockon,0);
     for(bool coupled:{false,true}) {
         shared.decoupled=!coupled;shared.high=true;game=GameSide{};
