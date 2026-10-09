@@ -413,8 +413,11 @@ void ArmsStep(Mech& m,unsigned char* v,const ArmsInput& in,float dt) noexcept {
     a.switchHeld=in.cycle;
     // what the animator needs of the buttons (sazabi_anim.h: the tomahawk put away for the rifle, the shield turned for
     // its missiles); this machine's own, never sent
+    // a missile press is kept kMissileAsk s: the shield takes ~0.2 s to turn onto the aim, a tap still fires
+    constexpr float kMissileAsk=0.4f;
+    a.missileAsk=in.secondary && a.special==Special::missiles ? kMissileAsk : std::fmax(0.0f,a.missileAsk-dt);
     m.pose.fire=in.primary;
-    m.pose.present=in.secondary && a.special==Special::missiles;
+    m.pose.present=a.missileAsk>0.0f;
     a.guard+=((in.guard ? 1.0f : 0.0f)-a.guard)*std::fmin(1.0f,(in.guard ? 6.0f : 4.0f)*dt);
     if(m.rootOk)Tomahawk(m,v,in,dt);
     const bool launch=in.secondary && !a.secondaryHeld && a.special==Special::funnels;
@@ -440,8 +443,10 @@ void ArmsFire(Mech& m,unsigned char* v,const ArmsInput& in,float thrust,float dt
     }
     // the rifle fires along its barrel: only once the animator has it in hand and up on the aim (the tomahawk put away
     // first); the shield's missiles once it is turned onto the aim
-    if(in.primary && a.swing<0.0f && sazabi::RifleReady(m.anim))Trigger(rifle);
-    if(in.secondary && a.special==Special::missiles && a.swing<0.0f && sazabi::ShieldReady(m.anim))Trigger(missile);
+    // (a model without the Sazabi's bones is never posed: nothing to wait for)
+    if(in.primary && a.swing<0.0f && (!m.rigOk || sazabi::RifleReady(m.anim)))Trigger(rifle);
+    if(a.missileAsk>0.0f && a.special==Special::missiles && a.swing<0.0f && (!m.rigOk || sazabi::ShieldReady(m.anim)))
+        Trigger(missile);
     if(m.rootOk) {
         const bool cannon=a.special==Special::cannon;
         Cannon(m,v,cannon && in.secondary,cannon && a.secondaryHeld && !in.secondary,dt);

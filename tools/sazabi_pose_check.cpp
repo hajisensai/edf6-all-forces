@@ -76,6 +76,10 @@ PoseInput Swing(float t) { PoseInput i=Driven(t); Combo(t,0.3f,1,&i); return i; 
 PoseInput Melee(float t) { PoseInput i=Driven(t); Combo(t,0.3f,3,&i); return i; }
 PoseInput MeleeFire(float t) { PoseInput i=Melee(t); i.fire=t>2.2f; return i; }
 PoseInput MeleeWalk(float t) { PoseInput i=Melee(t); i.move[1]=10.0f; return i; }
+// two combos, the tomahawk put away between them (its last swing left the gameplay's combo at 2): the second draws again
+constexpr float kRechain=4.6f;
+PoseInput Rechain(float t) { PoseInput i=Driven(t); Combo(t,0.3f,3,&i); if(t>=kRechain)Combo(t,kRechain,2,&i); return i; }
+PoseInput Slow(float t) { PoseInput i=Driven(t); i.move[1]=3.0f; return i; }
 PoseInput Switch(float t) { PoseInput i=Driven(t); i.special=t<0.3f ? 0 : t<1.3f ? 1 : t<2.3f ? 2 : 0; return i; }
 PoseInput Boost(float t) { PoseInput i=Driven(t); i.air=1.0f; i.boost=t>0.3f ? 1.0f : 0.0f; i.lean=20.0f*kDeg; i.move[1]=60.0f; return i; }
 PoseInput Recoil(float t) {
@@ -101,7 +105,7 @@ constexpr Scenario kScenarios[]={
     {"diagonal",3.0f,Diagonal},{"turn",3.0f,Turn},{"stop",3.0f,Stop},{"fly",2.0f,Fly},{"land",1.5f,Land},{"aim",3.0f,Aim},
     {"aimwalk",3.0f,AimWalk},{"guard",3.0f,Guard},{"present",2.4f,Present},{"swing",3.0f,Swing},{"melee",4.0f,Melee},
     {"meleefire",3.2f,MeleeFire},{"meleewalk",4.0f,MeleeWalk},{"switch",3.2f,Switch},{"funnels",3.0f,Funnels},
-    {"cannon",2.0f,Cannon},{"boost",2.0f,Boost},{"recoil",2.0f,Recoil},
+    {"cannon",2.0f,Cannon},{"boost",2.0f,Boost},{"recoil",2.0f,Recoil},{"rechain",6.0f,Rechain},{"slow",3.0f,Slow},
 };
 
 int failures=0;
@@ -180,6 +184,27 @@ void Check(const Scenario& s,int f,const PoseInput& in,const Rig& rig,const Anim
     }
 }
 
+// Every step: a planted foot stays where it is on the ground (in sz_root's frame it goes back as fast as the mech goes
+// on: kSlip of that, at most), walking steadily; a combo after the tomahawk was put away draws it (the rifle in hand at
+// its start).
+constexpr float kSlip=0.2f;
+void CheckStep(const Scenario& s,float t,float dt,const PoseInput& in,const Anim& a,const Pose& p,const float was[2][3],
+               const bool wasPlanted[2]) {
+    const float speed=std::sqrt(in.move[0]*in.move[0]+in.move[1]*in.move[1]);
+    if(in.air==0.0f && speed>1.0f && t>1.5f && dt>0.0f && in.swing<0.0f)
+        for(int k=0;k<2;++k) {
+            if(!a.planted[k] || !wasPlanted[k])continue;
+            const float* at=p.modelPos[k==0 ? kFootL : kFootR];
+            const float vx=(at[0]-was[k][0])/dt+in.move[0],vz=(at[2]-was[k][2])/dt+in.move[1];
+            if(std::sqrt(vx*vx+vz*vz)>kSlip*speed+0.5f){
+                std::printf("  t %.2f foot %d slides %.1f m/s at %.1f m/s\n",t,k,std::sqrt(vx*vx+vz*vz),speed);
+                Fail(s.name,static_cast<int>(t*60.0f),"a planted foot slides");
+            }
+        }
+    if(std::strcmp(s.name,"rechain")==0 && t>=kRechain && t<kRechain+0.04f && !p.rifleInHand)
+        Fail(s.name,static_cast<int>(t*60.0f),"a combo after the put-away did not draw again (the rifle not in hand)");
+}
+
 bool LoadJoints(const char* path,Rig* rig) {
     std::FILE* h=std::fopen(path,"r");
     if(!h)return false;
@@ -217,9 +242,17 @@ int main(int argc,char** argv) {
         Anim a;
         const int steps=static_cast<int>(s.secs*kHz+0.5f);
         int f=0;
+        float was[2][3]{};
+        bool wasPlanted[2]{};
         for(int k=0;k<=steps;++k) {
             const PoseInput in=s.at(static_cast<float>(k)/kHz);
-            Animate(in,rig,kRun,k==0 ? 0.0f : 1.0f/kHz,a,&p);
+            const float dt=k==0 ? 0.0f : 1.0f/kHz;
+            Animate(in,rig,kRun,dt,a,&p);
+            CheckStep(s,static_cast<float>(k)/kHz,dt,in,a,p,was,wasPlanted);
+            for(int side=0;side<2;++side) {
+                std::memcpy(was[side],p.modelPos[side==0 ? kFootL : kFootR],sizeof was[side]);
+                wasPlanted[side]=a.planted[side];
+            }
             if(k*(kFrames-1)<f*steps)continue;   // frame f at step f*steps/(kFrames-1)
             Check(s,f,in,rig,a,p);
             if(out) {

@@ -74,7 +74,8 @@ inline M3 RotLerp(const M3& a,const M3& b,float t) {
     const float cosA=Clamp((d.m[0]+d.m[4]+d.m[8]-1.0f)*0.5f,-1.0f,1.0f),ang=std::acos(cosA);
     const V3 axis={d.m[5]-d.m[7],d.m[6]-d.m[2],d.m[1]-d.m[3]};
     const float l=VLen(axis);
-    if(ang<1e-4f || l<1e-5f) {   // the same, or half a turn apart: the blend made square
+    if(ang<1e-4f || l<1e-5f) {   // the same (the blend made square), or half a turn apart (no axis: one or the other)
+        if(ang>0.5f*kPi)return t<0.5f ? a : b;
         M3 m{};
         for(int k=0;k<9;++k)m.m[k]=a.m[k]*(1.0f-t)+b.m[k]*t;
         return Orthonormal(m);
@@ -154,7 +155,7 @@ constexpr int kIkIterations=20;
 constexpr float kIkStep=12.0f*kDeg,kReach=0.97f,kSway=0.45f,kFootFlat=1.0f,kAbduct=35.0f;
 // The hips turn kHipShare of the way into the walk's direction (at most kHipMost; walking back, into its reverse); the
 // waist and chest turn back so the chest faces the aim.
-constexpr float kHipShare=0.7f,kHipMost=40.0f;
+constexpr float kHipShare=0.7f,kHipMost=40.0f,kBackOn=110.0f,kBackOff=70.0f;
 // Leaning (deg): into the run, standing, per m/s/s of a speed change (at most kAccelLeanMost).
 constexpr float kRunLean=10.0f,kWalkLean=3.0f,kStandLean=4.0f,kAccelLean=0.5f,kAccelLeanMost=9.0f;
 // The standing crouch, the shield's, the boost's lean, the cannon's brace (each foot kCannonStep m ahead / behind, the
@@ -241,6 +242,7 @@ struct Anim {
     float crouch=0.0f,crouchV=0.0f;
     float still=0.0f;            // s standing still (the idle's weight shifts)
     bool planted[2]={true,true};
+    bool backward=false;         // walking back (the hips turned into the reverse of the way), held past kBackOn/kBackOff
     // the arms
     float raise=0.0f,raiseV=0.0f;     // the rifle up onto the aim
     float ready=0.0f,readyV=0.0f;     // 0 .. 1 driven (the arms held ready, not hanging)
@@ -250,12 +252,17 @@ struct Anim {
     float brace=0.0f,braceV=0.0f;
     bool axeOut=false;           // the tomahawk off the shield (in the hand, or about to be put back: stow)
     bool drawing=false;          // this swing's wind-up draws it (the rifle racked first)
+    float drawFrom=0.0f;         // ...from this far into the draw (kDrawRack: the rifle already racked, a put-away cut short)
     float held=0.0f;             // s since its last swing
     float stow=-1.0f;            // < 0 not putting it away; 0 .. 1 putting it back and taking the rifle
     float swingWas=-1.0f;
     int comboWas=0;
     float melee=0.0f,meleeV=0.0f;// 0 .. 1 the body in the tomahawk's swings (eased in and out)
     float twist=0.0f,lean=0.0f,lunge=0.0f,cut=0.0f;   // the swing's body keys as they are now
+    int stage=0;                 // the right arm's goal's source (Arms: aim, draw, swing, ready, put-away)
+    float fade=1.0f;             // 0 .. 1 the right arm's crossfade from where it was when its source changed (kFade s)
+    ArmGoal fadeFrom{},right{};  // ...from that goal; the goal it was last given
+    bool rightSet=false;
     // what follows
     float headYaw=0.0f,headYawV=0.0f,headPitch=0.0f,headPitchV=0.0f;
     float tank=0.0f,tankV=0.0f,pack=0.0f,packV=0.0f;
@@ -268,7 +275,7 @@ struct Anim {
 
 // What the animator lets the weapons do (sazabi_arms.inc): the rifle in hand and up (its rounds leave along the aim),
 // the shield turned onto the aim (its missiles leave it ahead).
-inline bool RifleReady(const Anim& a) { return !a.axeOut && a.stow<0.0f && a.raise>0.85f; }
+inline bool RifleReady(const Anim& a) { return !a.axeOut && a.stow<0.0f && a.raise>0.85f && a.brace<0.15f && a.fade>=1.0f; }
 inline bool ShieldReady(const Anim& a) { return !a.axeOut && a.present>0.8f; }
 
 // A swing's keys: kAxeReady (or the draw's grab, at `fromU`), its wind-up's end, mid-strike, its strike's end, kAxeReady
@@ -312,7 +319,8 @@ inline void StepGait(const PoseInput& in,float runSpeed,float dt,Anim& a) {
     Follow(a.run,a.runV,Clamp((speed-0.5f*runSpeed*0.46f)/(runSpeed*0.77f),0.0f,1.0f),4.0f,dt);
     // the hips into the walk (walking back: into its reverse), held level standing
     const float way=std::atan2(a.dir[0],a.dir[1]);
-    const float back=std::fabs(way)>100.0f*kDeg ? Wrap(way-kPi) : way;
+    if(speed>1.0f)a.backward=std::fabs(way)>(a.backward ? kBackOff : kBackOn)*kDeg;   // held: no flapping across the side
+    const float back=a.backward ? Wrap(way-kPi) : way;
     const float hipWant=speed>1.0f ? Clamp(back*kHipShare,-kHipMost*kDeg,kHipMost*kDeg) : 0.0f;
     // the turn on the spot: the feet stay where they are while the body turns (the hips lag), until it steps round
     if(feet>0.5f && speed<1.0f) {
@@ -324,9 +332,11 @@ inline void StepGait(const PoseInput& in,float runSpeed,float dt,Anim& a) {
     Follow(a.hip,a.hipV,hipWant,6.0f,dt);
     // the phase: the planted foot keeps pace with the ground; stopped, the steps go on while they die away; turning, a
     // cycle of steps in place
-    if(speed>1.0f)a.settle=std::fmax(kSettleRate,speed/Cycle(a));
+    // (the planted foot goes back Cycle x amp a cycle: the cycles a second that make that the ground's speed)
+    const float pace=speed/(Cycle(a)*std::fmax(a.amp,0.2f));
+    if(speed>1.0f)a.settle=std::fmax(kSettleRate,pace);
     else a.settle*=std::exp(-2.0f*dt);
-    float rate=speed>1.0f ? speed/Cycle(a) : (a.amp>0.05f ? a.settle : 0.0f);
+    float rate=speed>1.0f ? pace : (a.amp>0.05f ? a.settle : 0.0f);
     if(a.turning>0.0f)rate=std::fmax(rate,1.0f/kTurnCycle);
     a.phase+=2.0f*kPi*rate*dt;
     if(a.phase>200.0f*kPi)a.phase-=200.0f*kPi;
@@ -341,15 +351,19 @@ inline void StepWeapons(const PoseInput& in,float dt,Anim& a) {
     if(swinging && a.swingWas<0.0f) {   // a combo begins: drawn unless the tomahawk is still in hand
         const bool inHand=a.axeOut && (a.stow<0.0f || a.stow<kStowShield);
         a.drawing=!inHand;
+        a.drawFrom=a.axeOut && a.stow>=kStowShield && a.stow<kStowRifle ? kDrawRack : 0.0f;   // the rifle still racked
         a.axeOut=true;a.stow=-1.0f;
     }
-    if(swinging && in.combo!=a.comboWas)a.drawing=false;
+    // the next swing of the combo: drawn already (a combo's first swing is 0, whatever the last combo ended on)
+    if(swinging && a.swingWas>=0.0f && in.combo!=a.comboWas)a.drawing=false;
+    // a shot (the trigger here, its kick on a remote copy: the trigger is not sent) puts the tomahawk away at once
+    const bool shooting=in.fire || in.recoil>0.0f;
     if(swinging){a.held=0.0f;}
     else if(a.axeOut) {
         a.held+=dt;
-        if(a.stow<0.0f && (a.held>kAxeHold || in.fire || in.present || in.aim<0.5f))a.stow=0.0f;
+        if(a.stow<0.0f && (a.held>kAxeHold || shooting || in.present || in.aim<0.5f))a.stow=0.0f;
         if(a.stow>=0.0f) {
-            a.stow+=dt/(in.fire ? kStowQuick : kStowSec);
+            a.stow+=dt/(shooting ? kStowQuick : kStowSec);
             if(a.stow>=1.0f){a.stow=-1.0f;a.axeOut=false;a.drawing=false;}
         }
     }
@@ -380,7 +394,7 @@ inline void Step(const PoseInput& in,float runSpeed,float dt,Anim& a) {
     StepGait(in,runSpeed,dt,a);
     StepWeapons(in,dt,a);
     const float feet=1.0f-in.air;
-    Follow(a.ready,a.readyV,in.aim>0.5f ? 1.0f : 0.0f,5.0f,dt);
+    a.ready=Clamp(in.aim,0.0f,1.0f);   // eased already (sazabi.cpp Animate)
     // the rifle up on the aim whenever it is in hand and driven (a dash too: lowered, the dash's lean pointed it at the
     // ground); carried low only while it comes off or goes back on the rack
     const bool inHand=!a.axeOut;
@@ -434,7 +448,8 @@ inline void Legs(const PoseInput& in,const Anim& a,Pose* p) {
     const M3 turn=RotY(hip);
     const V3 pelvis=Of(p->modelPos[kPelvis]);
     p->gaitW=a.amp*feet;
-    const float lunge=a.lunge*kLunge*feet;
+    // the swing's step only standing: walking, the steps carry it on (on top of a step out ahead it is out of the leg's reach)
+    const float lunge=a.lunge*kLunge*feet*(1.0f-a.amp);
     for(int side=0;side<2;++side) {
         const int f=side==0 ? kFootL : kFootR;
         Store(pelvis+Times(Of(p->modelPos[f])-pelvis,turn),p->ankleStand[side]);
@@ -656,7 +671,8 @@ inline ArmGoal SwingAt(const ChestFrame& c,int combo,float u,const ArmGoal* from
 struct Holding { bool rifleInHand,axeInHand; };
 
 // The arms and the weapons, after the legs and the torso.
-inline void Arms(const PoseInput& in,const Rig& rig,const Anim& a,Pose* p) {
+constexpr float kFade=0.12f;
+inline void Arms(const PoseInput& in,const Rig& rig,float dt,Anim& a,Pose* p) {
     Finish(p);
     const ChestFrame cl=Shoulder(*p,0),cr=Shoulder(*p,1);
     // the left arm: at its side swinging with the right leg, up across the chest (guard), turned onto the aim (its
@@ -673,7 +689,7 @@ inline void Arms(const PoseInput& in,const Rig& rig,const Anim& a,Pose* p) {
     // the draw and the put-away: the shield brought in front of the belly, its inner face (the tomahawk's) to the right hand
     float drawU=-1.0f;
     const float drawEnd=DrawEnd();
-    if(in.swing>=0.0f && a.drawing && in.combo==0)drawU=in.swing/drawEnd;
+    if(in.swing>=0.0f && a.drawing && in.combo==0)drawU=std::fmax(in.swing/drawEnd,a.drawFrom);
     float support=0.0f;
     if(drawU>=0.0f)support=Smooth(drawU*3.0f)*(1.0f-Smooth((drawU-1.0f)*4.0f));
     if(a.stow>=0.0f)support=Smooth(a.stow*5.0f)*(1.0f-Smooth((a.stow-kStowShield)*6.0f));
@@ -692,8 +708,10 @@ inline void Arms(const PoseInput& in,const Rig& rig,const Anim& a,Pose* p) {
     rifle=Blend(rifle,RifleGoal(cr,kRifleBrace),a.brace);
     ArmGoal right=rifle;
     Holding hold{true,false};
+    int stage=0;
     if(in.swing>=0.0f) {
         hold={false,true};
+        stage=drawU>=0.0f && drawU<1.0f ? 1 : 2;
         if(drawU>=0.0f && drawU<1.0f) {   // the draw: the rifle to the rack, the hand to the tomahawk
             const float r=kDrawRack;
             hold.rifleInHand=drawU<r;
@@ -704,6 +722,7 @@ inline void Arms(const PoseInput& in,const Rig& rig,const Anim& a,Pose* p) {
         }
     } else if(a.axeOut) {   // held ready, then put away: back on the shield, the rifle off the rack, up again
         hold={false,true};
+        stage=a.stow>=0.0f ? 4 : 3;
         const ArmGoal ready=MeleeGoal(cr,kAxeReady);
         const float s=a.stow;
         right=ready;
@@ -713,6 +732,13 @@ inline void Arms(const PoseInput& in,const Rig& rig,const Anim& a,Pose* p) {
             else{right=Blend(rack,rifle,Smooth((s-kStowRifle)/(1.0f-kStowRifle)));hold={true,false};}
         }
     }
+    // a change of source the state machine did not lead into (a combo begun in a put-away, a draw cut short) would jump
+    // the hand: from where it was, crossfaded in over kFade
+    if(stage!=a.stage && a.rightSet){a.fadeFrom=a.right;a.fade=0.0f;}
+    a.stage=stage;
+    a.fade=std::fmin(1.0f,a.fade+dt/kFade);
+    a.right=right;a.rightSet=true;
+    if(a.fade<1.0f)right=Blend(a.fadeFrom,right,Smooth(a.fade));
     SolveArm(rig,1,right,p);
     Finish(p);
     // the shoulder armour lifts with its upper arm (a share of its turn)
@@ -740,7 +766,7 @@ inline void Animate(const PoseInput& in,const Rig& rig,float runSpeed,float dt,A
     Torso(in,Clamp(dt,0.0f,0.1f),a,p);
     Gait(in,p);
     Plant(in.air,p);
-    Arms(in,rig,a,p);
+    Arms(in,rig,Clamp(dt,0.0f,0.1f),a,p);
     Funnels(in,p);
     Finish(p);
 }

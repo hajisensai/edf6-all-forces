@@ -215,15 +215,20 @@ void Pose(Mech& m,unsigned char* v) noexcept {
     m.animMs=ms;
     sazabi::PoseInput& p=m.pose;
     p.move[0]=p.move[1]=0.0f;
-    if(m.rootOk) {   // the velocity over the ground in sz_root's frame (its x left, z ahead)
+    p.yawRate=0.0f;
+    // the buttons' requests are the local pilot's only (a remote copy, a parked or abandoned mech: none held)
+    if(!m.driven || m.net.remote)p.fire=p.present=false;
+    // driven only: a parked mech's (or a lost remote's) last velocity and turn are stale, and would walk it on the spot
+    if(m.driven && m.rootOk) {   // the velocity over the ground in sz_root's frame (its x left, z ahead)
         const float* r=m.rootInv;
         const float* w=m.fl.vel;
         p.move[0]=w[0]*r[0]+w[1]*r[4]+w[2]*r[8];
         p.move[1]=w[0]*r[2]+w[1]*r[6]+w[2]*r[10];
+        p.yawRate=m.yawRate;
     }
-    p.yawRate=m.yawRate;
     p.special=static_cast<int>(m.arms.special);
     sazabi::Animate(p,m.rig,Cfg().sazabiRun,dt,m.anim,&m.posed);
+    p.gait=m.anim.phase;   // sent: a peer on an older build still walks its feet off it
     for(int i=1;i<sazabi::kBoneCount;++i) {   // sz_root itself is the frame: its local (under body) stays the bind's
         float local[16];
         sazabi::LocalMatrix(m.posed,i,local);

@@ -30,7 +30,8 @@ using FunnelPhase=sazabi::funnels::Phase;
 struct Arms {
     Special special=Special::missiles;
     bool switchHeld=false,meleeHeld=false,secondaryHeld=false,queued=false,struck=false,whooshed=false;
-    int combo=0;                  // the combo's swing now (sazabi_pose.h kCombo: chop, slash, rising cut)
+    int combo=0;                  // the combo's swing now (sazabi_pose.h kCombo: diagonal cut, slash across, overhead chop)
+    float missileAsk=0.0f;        // s a missile press is still asked for (ArmsStep: the shield turns onto the aim first)
     float swing=-1.0f,guard=0.0f,charge=0.0f,brace=0.0f,cannonCool=0.0f,megaLeft=0.0f;
     float megaDamage=0.0f,megaYaw[kMegaBeams]{};
     RoundObj glow{},mega[kMegaBeams]{};
