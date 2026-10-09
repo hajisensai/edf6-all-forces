@@ -79,6 +79,7 @@ JetBody BomberBody(const unsigned char*) noexcept { MissingRecoveryDependency();
 PluginBody BodyOf(const void*) noexcept {if(rescueChoiceScenario)return PluginBody::jet;MissingRecoveryDependency();return PluginBody{};}
 float BodyMark(const void*) noexcept {if(rescueChoiceScenario)return pjet::MarkOf(jet::Body::fighter);if(!ramScenario)MissingRecoveryDependency();return ramMass.mark;}
 bool Body506Ok() noexcept { MissingRecoveryDependency();return false; }
+bool Body506ReadsSolver() noexcept { MissingRecoveryDependency();return false; }
 bool ImpactDamage(const unsigned char*,const float*,float damage,float) noexcept {
     if(!ramScenario)MissingRecoveryDependency();
     ++ramBlasts;ramDamage=damage;return true;
@@ -126,7 +127,7 @@ bool Alive(const ObjRef& r) noexcept {return r && r.Is(r.obj) && !At<unsigned ch
 Jet* FindJet(const unsigned char*) noexcept { MissingRecoveryDependency();return nullptr; }
 void HoldOffGround(Jet&,const float*,float,float,ULONGLONG,float) noexcept { MissingRecoveryDependency(); }
 void Hover(Jet&,const Kind&,const unsigned char*,const float*,const float*,const float*,float,float,float,float,bool) noexcept { MissingRecoveryDependency(); }
-void Thrusters(Jet&,const Kind&,unsigned char*,float,ULONGLONG) noexcept { MissingRecoveryDependency(); }
+void Thrusters(Jet&,const Kind&,unsigned char*,float,ULONGLONG,float) noexcept { MissingRecoveryDependency(); }
 void DollFrame(int,const unsigned char*,float) noexcept { MissingRecoveryDependency(); }
 bool PlayerLaunchDrone(unsigned char*,const float*,ULONGLONG) noexcept { MissingRecoveryDependency();return false; }
 int RecallDrones(unsigned char*,ULONGLONG) noexcept { MissingRecoveryDependency();return 0; }

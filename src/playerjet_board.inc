@@ -287,7 +287,8 @@ float FloorClear(const PJet& j,const unsigned char* v,const float* pos,float cle
 // those bounds) or the mouse (as the jets' aim: kAimPerUnit a unit). Either way its heading goes no more than kHoverLead
 // ahead of its nose. jet_flight.cpp's Hover flies it there (its thrust, its response, its lean: the NPC's
 // own rotor flight), HoldOffGround keeps it off the floor, the carrier's nacelles follow its thrust. Touching down
-// faster than its landMax is a crash; set down still with nothing asked, it is parked (the stock body holds it).
+// faster than its landMax is a crash; set down still with nothing asked, it is parked (held still on its contacts:
+// PlayerJetBodyStep's GroundContact, not the stock step that pulled it level against them).
 constexpr float kHoverCruise=0.6f,kHoverYawMin=0.6f,kHoverYawMax=2.0f,kHoverLead=0.8f,kHoverClimbShare=0.4f;
 constexpr float kSettle=2.0f,kSettleShare=0.8f;   // m/s, 1/s
 constexpr std::uint16_t kButtonL3=0x40;
@@ -313,7 +314,7 @@ void HoverTo(jet::Jet& e,const jet::Kind& k,const unsigned char* v,const float* 
 // still on the ground with nothing asked (`still`).
 void HoverDone(PJet& j,jet::Jet& e,const jet::Kind& k,unsigned char* v,const float* pos,float clear,bool still,float dt,ULONGLONG ms) noexcept {
     jet::HoldOffGround(e,pos,clear,dt,ms,RestOver(v,pos));   // `clear` is its bottom's (FloorClear)
-    if(k.pose==jet::Pose::thrusters)jet::Thrusters(e,k,v,dt,ms);
+    if(k.pose==jet::Pose::thrusters)jet::Thrusters(e,k,v,dt,ms,clear==kNoGround ? 1e9f : clear);
     jet::DollFrame(jet::IndexOf(e),v,clear);
     const bool down=clear!=kNoGround && clear<kTouch;
     if(down && still && Len(e.m.vel)<1.5f) {
@@ -323,7 +324,7 @@ void HoverDone(PJet& j,jet::Jet& e,const jet::Kind& k,unsigned char* v,const flo
     } else j.phase=Phase::air;
     std::memcpy(j.vel,e.m.vel,12);std::memcpy(j.omega,e.m.omega,12);
     j.load=1.0f;j.stall=false;j.clear=clear;j.climb=j.vel[1];
-    j.active=j.phase!=Phase::parked && !v[kDead];
+    j.active=!v[kDead];
     std::memcpy(j.sent,j.vel,12);
 }
 
@@ -353,7 +354,10 @@ void HoverAim(PJet& j,unsigned char* v,const Stick& s,const float* pos,float nos
     KeepAimOnScreen(j,v,level,was);
     const bool grounded=clear!=kNoGround && clear<kTouch;
     const aim::Keys keys{s.ly<-0.3f ? 1.0f : s.ly>0.3f ? -1.0f : 0.0f,s.lx,s.ascend-(down ? 1.0f : 0.0f)};
-    const aim::Want w=aim::Fly(j.hover,j.aim,level,pos,j.measured,keys,k.cruise,HoverClimb(k),grounded,grounded,
+    // Its own velocity (Hover's), not the measured one: touching the ground the solver's push out is in that, and the
+    // height the hold took on letting go (h.y = y + vy kHoldLead) rose with every bounce: the carrier let down on the
+    // ground was thrown back up to a height it then held (the user, 2026-10-09: 「我都撞地上了，还会把空母往天上弹」).
+    const aim::Want w=aim::Fly(j.hover,j.aim,level,pos,e->m.vel,keys,k.cruise,HoverClimb(k),grounded,grounded,
                                clear==kNoGround ? -1.0f : clear,dt);
     std::memcpy(want,w.vel,12);*vz=w.climb;
     j.yaw=std::atan2(w.face[0],w.face[2]);
