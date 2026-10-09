@@ -508,6 +508,9 @@ add_test(NAME debug_spawn_ini COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DI
 set_tests_properties(debug_spawn_ini PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME debug_spawn_resources COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/debug_spawn_resource_audit.py")
 set_tests_properties(debug_spawn_resources PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
+# It never launches a crewed aircraft without its crew (JetLaunch / HeliLaunch): those come as support calls.
+add_test(NAME debug_spawn_launch_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/debug_spawn_launch_guard.py")
+set_tests_properties(debug_spawn_launch_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The doll drone's doll follows its drone once a frame, whoever flies it (src/jet_carrier.cpp DollsFollow).
 add_test(NAME doll_follow_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/doll_follow_guard.py")
 set_tests_properties(doll_follow_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)

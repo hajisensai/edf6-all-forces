@@ -71,10 +71,7 @@ using SetLevelFn=void(__fastcall*)(void*,float);
 using ActivateFn=void(*)(void*);
 using CastFn=void*(*)(void*,std::int32_t,void*,void*,std::int32_t);
 
-// The plugin's aircraft from here fly as an escort of the player (JetLaunch's `escort`) for this long; a heli guards
-// the player as a rescue heli does.
-constexpr DWORD kHeliFuelSec=600;
-// The source jets launched from here share (jet_spawn.cpp FlightFor: one flight, their rounds pass each other).
+// The source the gun drones launched from here share (jet_spawn.cpp FlightFor: one flight, their rounds pass each other).
 const int kJetSource=0;
 // How long a spawn's result stays on the HUD (wall ms).
 constexpr ULONGLONG kStatusMs=4000;
@@ -107,6 +104,15 @@ bool InFront() noexcept {
 }
 bool Down(int vk) noexcept { return vk>0 && vk<255 && (GetAsyncKeyState(vk)&0x8000)!=0; }
 
+// The map's support catalog entry (support_dispatch.cpp SupportCallKey) of kSupportCalls[call], -1 none (not in this
+// build's catalog: a renamed call).
+int SupportCatalogOf(int call) noexcept {
+    if(call<0 || call>=kSupportCallCount)return -1;
+    for(int i=0,n=SupportCallCount();i<n;++i)
+        if(const wchar_t* key=SupportCallKey(i);key && std::wcscmp(key,kSupportCalls[call])==0)return i;
+    return -1;
+}
+
 // The row's state for the HUD: can it be made now.
 bool RowReady(int row) noexcept {
     if(row<0 || row>=kEntryCount)return false;
@@ -114,7 +120,8 @@ bool RowReady(int row) noexcept {
     switch(e.how) {
     case How::stockVehicle:
     case How::enemy: return profile && preloaded[row] && !broken[row];
-    case How::jetRole: case How::drone: case How::heli: return Cfg().jetPilot && jet::SpawnReady();
+    case How::drone: return Cfg().jetPilot && jet::SpawnReady();
+    case How::supportCall: return SupportCatalogOf(e.arg)>=0 && SupportCallReadiness().state==SupportReady::ready;
     case How::soldier: return SupportSoldiersReady();
     }
     return false;
@@ -134,7 +141,7 @@ void Publish() noexcept {
 }
 
 // The result of a spawn: on the HUD for kStatusMs (`status` of `row`: hudtext's words) and in the log (`format`, ASCII).
-void Say(int status,int row,const char* format,...) noexcept {
+void Say(int status,int row,const wchar_t* note,const char* format,...) noexcept {
     char line[400];
     va_list args;va_start(args,format);
     vsnprintf_s(line,sizeof(line),_TRUNCATE,format,args);
@@ -142,6 +149,7 @@ void Say(int status,int row,const char* format,...) noexcept {
     Log("DEBUGSPAWN %s",line);
     AcquireSRWLockExclusive(&cueLock);
     cue.status=status;cue.statusRow=row;statusAt=GetTickCount64();
+    wcsncpy_s(cue.note,note ? note : L"",_TRUNCATE);
     ReleaseSRWLockExclusive(&cueLock);
 }
 
@@ -250,12 +258,12 @@ void Spawn(int row,unsigned char* human) noexcept {
     if(row<0 || row>=kEntryCount)return;
     const Entry& e=kEntries[row];
     if(InSession()) {
-        Say(kDebugSpawnOnline,row,"%s: refused: online session (a local-only object would not exist on the other machines)",e.id);
+        Say(kDebugSpawnOnline,row,nullptr,"%s: refused: online session (a local-only object would not exist on the other machines)",e.id);
         return;
     }
     float at[3],heading[3],look[3];
     if(!Where(e,human,at,heading,look)) {
-        Say(kDebugSpawnNoPlace,row,"%s: failed: no place (camera straight up / down with nothing hit)",e.id);
+        Say(kDebugSpawnNoPlace,row,nullptr,"%s: failed: no place (camera straight up / down with nothing hit)",e.id);
         return;
     }
     alignas(16) float m[16];
@@ -270,22 +278,22 @@ void Spawn(int row,unsigned char* human) noexcept {
         else if(!preloaded[row])why="not preloaded this mission (DebugSpawn turned on mid-mission: next mission)";
         else made=e.how==How::enemy ? SpawnEnemy(row,m,&why) : SpawnVehicle(row,m,&why);
         break;
-    case How::jetRole:
-        if(!Cfg().jetPilot)why="JetPilot=0";
-        else if(!JetLaunch(static_cast<JetRole>(e.arg),at,look,at,Cfg().jetFuelSec,&kJetSource,true))
-            why="JetLaunch refused (its SGO not installed / not preloaded, or too many jets out)";
-        else made=&kJetSource;
-        break;
+    case How::supportCall: {
+        // A support call, as the map's air support makes it (support_dispatch.cpp SupportCallAt): its route planned from the
+        // map's edge to this point, the aircraft made in the air with their real crew seated aboard (BoardAirborne). The
+        // result comes later (planning, then the deployment); this says only whether it was accepted.
+        const int catalog=SupportCatalogOf(e.arg);
+        wchar_t note[96]{};
+        if(catalog<0){why="no such support call in this build's catalog";break;}
+        const bool accepted=SupportCallAt(catalog,at,note,_countof(note));
+        Say(accepted ? kDebugSpawnRequested : kDebugSpawnRefused,row,note,"%s: support call %ls (catalog %d) to (%.1f,%.1f,%.1f): %s",e.id,
+            kSupportCalls[e.arg],catalog,at[0],at[1],at[2],accepted ? "accepted (see SUPPORT lines)" : "refused (see SUPPORT lines)");
+        return;
+    }
     case How::drone:
         if(!Cfg().jetPilot)why="JetPilot=0";
         else if(!(made=JetLaunchDrone(at,look,at,Cfg().jetFuelSec,&kJetSource,true)))
             why="JetLaunchDrone refused (EDF6VC_JET_DRONE.SGO not preloaded, or too many jets out)";
-        break;
-    case How::heli:
-        if(!Cfg().jetPilot)why="JetPilot=0";
-        else if(unsigned char* const v=HeliLaunch(static_cast<HeliBody>(e.arg),at,look);!v)
-            why="HeliLaunch refused (its SGO not installed / not preloaded)";
-        else{HeliCalled(v,false,at,kHeliFuelSec);made=v;}
         break;
     case How::soldier: {
         ObjRef ref{};
@@ -296,10 +304,10 @@ void Spawn(int row,unsigned char* human) noexcept {
     }
     }
     if(made) {
-        Say(kDebugSpawnDone,row,"%s: spawned %p at (%.1f,%.1f,%.1f) heading (%.2f,%.2f)%s",e.id,made,at[0],at[1],at[2],heading[0],heading[2],
+        Say(kDebugSpawnDone,row,nullptr,"%s: spawned %p at (%.1f,%.1f,%.1f) heading (%.2f,%.2f)%s",e.id,made,at[0],at[1],at[2],heading[0],heading[2],
             e.category==Category::enemy ? " team enemy" : e.category==Category::vehicle ? " team friend, empty" : "");
     } else {
-        Say(kDebugSpawnFailed,row,"%s: failed at (%.1f,%.1f,%.1f): %s",e.id,at[0],at[1],at[2],why);
+        Say(kDebugSpawnFailed,row,nullptr,"%s: failed at (%.1f,%.1f,%.1f): %s",e.id,at[0],at[1],at[2],why);
     }
 }
 }  // namespace

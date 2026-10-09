@@ -42,10 +42,11 @@ void Catalog() {
         // The category says which kind of spawn it is (the faction and placement follow it).
         if(e.how==How::stockVehicle)Expect(e.category==Category::vehicle,"stock vehicles are vehicles");
         if(e.how==How::enemy)Expect(e.category==Category::enemy,"enemies are enemies");
-        if(e.how==How::jetRole || e.how==How::drone || e.how==How::heli)Expect(e.category==Category::aircraft,"the plugin's aircraft");
+        if(e.how==How::supportCall || e.how==How::drone)Expect(e.category==Category::aircraft,"the plugin's aircraft");
+        if(e.category==Category::aircraft)Expect(e.how==How::supportCall || e.how==How::drone,
+                                                 "a crewed aircraft only as a support call (its real crew), the drone alone launched");
         if(e.how==How::soldier)Expect(e.category==Category::soldier,"soldiers");
-        if(e.how==How::jetRole)Expect(e.arg>=0 && e.arg<8,"a JetRole (8 roles, crew.h)");
-        if(e.how==How::heli)Expect(e.arg>=0 && e.arg<3,"a HeliBody (3 bodies, crew.h)");
+        if(e.how==How::supportCall)Expect(e.arg>=0 && e.arg<kSupportCallCount,"a kSupportCalls index");
         if(e.how==How::soldier)Expect(e.arg>=0 && e.arg<5,"a SupportWeapon (5 weapons, support_call.h)");
         for(int k=0;k<i;++k)Expect(std::strcmp(kEntries[k].id,e.id)!=0,"log ids are unique");
     }

@@ -8,7 +8,10 @@
 //
 // Every spawn goes through a path the plugin already uses (docs/debug-spawn.md):
 //  - a stock ground vehicle: CreateObject + its mission_setup (support_spawn.cpp ApplyMissionSetup), empty, friend team;
-//  - the plugin's aircraft: JetLaunch / JetLaunchDrone / HeliLaunch (jet_spawn.cpp), NPC-flown as when called;
+//  - the plugin's crewed aircraft (jets, helis): a support call (support_dispatch.cpp SupportCallAt, the map's air support):
+//    planned from the map's edge to the crosshair's point, made in the air with its real crew seated aboard. Never
+//    JetLaunch / HeliLaunch: since the real crews (#88) an aircraft made there has no pilot and falls (2026-10-09 log);
+//  - the gun drone: JetLaunchDrone (jet_spawn.cpp; a drone flies with no one aboard, #103);
 //  - a stock enemy: the steps the script's CreateEnemy (0x1AD220 -> 0x1D8900) takes: CreateObject, SetTeam(enemy),
 //    SetLevel, the active flag's 0x548D50;
 //  - a friendly soldier: the support soldiers' stock Ranger (support_soldier.cpp), let go of at once.
@@ -22,9 +25,14 @@ enum class Category : std::uint8_t { vehicle, aircraft, enemy, soldier, count };
 constexpr int kCategoryCount=static_cast<int>(Category::count);
 // The categories' names are the HUD's words (src/hudtext.inc debugSpawnVehicles ...), in this order.
 
-// How a row is made (debug_spawn.cpp Spawn). `arg`: jetRole the JetRole (crew.h, same order), heli the HeliBody,
-// soldier the SupportWeapon (support_call.h); the others none.
-enum class How : std::uint8_t { stockVehicle, jetRole, drone, heli, enemy, soldier };
+// How a row is made (debug_spawn.cpp Spawn). `arg`: supportCall its kSupportCalls index, soldier the SupportWeapon
+// (support_call.h); the others none.
+enum class How : std::uint8_t { stockVehicle, supportCall, drone, enemy, soldier };
+// The support calls (support_dispatch.cpp SupportCallKey: the map's air support catalog) the crewed aircraft rows ask for.
+// The follow variants (they escort the player) where there is one; the Brute is the guard call (it guards the point).
+inline constexpr const wchar_t* kSupportCalls[]={L"STRIKE_F",L"FIGHTER_F",L"INTERCEPTOR_F",L"MULTIROLE_F",L"CARRIER_F",
+    L"BLAST_CARRIER_F",L"DOLL_CARRIER_F",L"GUNSHIP_F",L"HELI_F",L"HELI",L"MEDIC_HELI_F"};
+constexpr int kSupportCallCount=static_cast<int>(sizeof(kSupportCalls)/sizeof(kSupportCalls[0]));
 struct Entry {
     Category category;
     How how;
@@ -37,8 +45,8 @@ struct Entry {
 
 // The rows. Stock SGOs are Root.cpk's own (tests/debug_spawn_resource_audit.py reads each: a ground vehicle's must carry
 // mission_setup, every one must exist); the stock vehicles are the `_mission` ones the stock missions and the test range
-// place (testrange/gen.py VEHICLES), the enemies the test range's (ENEMIES, CreateEnemy). The plugin's aircraft are
-// the ones a call brings (their SGOs the installer's, preloaded by PreloadJets when installed).
+// place (testrange/gen.py VEHICLES), the enemies the test range's (ENEMIES, CreateEnemy). The plugin's crewed aircraft
+// are the map's air support calls; the drone is the carriers' (its SGO the installer's, preloaded by PreloadJets).
 inline constexpr Entry kEntries[]={
     {Category::vehicle,How::stockVehicle,"V505_TANK_MISSION",L"布莱克战车 505",L"app:/object/V505_TANK_MISSION.sgo",0,0.5f},
     {Category::vehicle,How::stockVehicle,"VEHICLE403_TANK_MISSION",L"坦克 403",L"app:/object/VEHICLE403_TANK_MISSION.sgo",0,0.5f},
@@ -56,20 +64,19 @@ inline constexpr Entry kEntries[]={
     {Category::vehicle,How::stockVehicle,"V614_PROTEUS_MK2_MISSION",L"机甲 Proteus 614",L"app:/object/V614_PROTEUS_MK2_MISSION.sgo",0,0.5f},
     {Category::vehicle,How::stockVehicle,"V608_OLDROBOT_G_MISSION",L"旧型机甲 608",L"app:/object/V608_OLDROBOT_G_MISSION.sgo",0,0.5f},
     {Category::vehicle,How::stockVehicle,"V515_RETROBALAM_MISSION",L"巨型机甲 Balam 515",L"app:/object/V515_RETROBALAM_MISSION.sgo",0,0.5f},
-    // jetRole: JetRole's order (crew.h): strike, fighter, interceptor, multirole, carrier, blastCarrier, dollCarrier, gunship.
-    {Category::aircraft,How::jetRole,"jet_strike",L"对地攻击机",nullptr,0,150.0f},
-    {Category::aircraft,How::jetRole,"jet_fighter",L"制空战斗机",nullptr,1,150.0f},
-    {Category::aircraft,How::jetRole,"jet_interceptor",L"截击机",nullptr,2,150.0f},
-    {Category::aircraft,How::jetRole,"jet_multirole",L"多用途战斗机",nullptr,3,150.0f},
-    {Category::aircraft,How::jetRole,"jet_carrier",L"空中航母",nullptr,4,150.0f},
-    {Category::aircraft,How::jetRole,"jet_blast_carrier",L"自爆无人机母舰",nullptr,5,150.0f},
-    {Category::aircraft,How::jetRole,"jet_doll_carrier",L"人偶无人机母舰",nullptr,6,150.0f},
-    {Category::aircraft,How::jetRole,"jet_gunship",L"炮舰机",nullptr,7,150.0f},
-    {Category::aircraft,How::drone,"jet_drone",L"机炮无人机",nullptr,0,60.0f},
-    // heli: HeliBody's order (crew.h): brute410, eros506, medic410.
-    {Category::aircraft,How::heli,"heli_506",L"直升机 Eros 506",nullptr,1,0.0f},
-    {Category::aircraft,How::heli,"heli_410",L"直升机 Brute 410",nullptr,0,0.0f},
-    {Category::aircraft,How::heli,"heli_medic",L"医疗直升机",nullptr,2,0.0f},
+    // supportCall: kSupportCalls' index. A support call: as many as the call brings (support config), from the map's edge.
+    {Category::aircraft,How::supportCall,"call_strike_f",L"对地攻击机（支援呼叫）",nullptr,0,0.0f},
+    {Category::aircraft,How::supportCall,"call_fighter_f",L"制空战斗机（支援呼叫）",nullptr,1,0.0f},
+    {Category::aircraft,How::supportCall,"call_interceptor_f",L"截击机（支援呼叫）",nullptr,2,0.0f},
+    {Category::aircraft,How::supportCall,"call_multirole_f",L"多用途战斗机（支援呼叫）",nullptr,3,0.0f},
+    {Category::aircraft,How::supportCall,"call_carrier_f",L"空中航母（支援呼叫）",nullptr,4,0.0f},
+    {Category::aircraft,How::supportCall,"call_blast_carrier_f",L"自爆无人机母舰（支援呼叫）",nullptr,5,0.0f},
+    {Category::aircraft,How::supportCall,"call_doll_carrier_f",L"人偶无人机母舰（支援呼叫）",nullptr,6,0.0f},
+    {Category::aircraft,How::supportCall,"call_gunship_f",L"炮舰机（支援呼叫）",nullptr,7,0.0f},
+    {Category::aircraft,How::supportCall,"call_heli_f",L"直升机 Eros 506（支援呼叫·跟随）",nullptr,8,0.0f},
+    {Category::aircraft,How::supportCall,"call_heli",L"直升机 Brute 410（支援呼叫·守点）",nullptr,9,0.0f},
+    {Category::aircraft,How::supportCall,"call_medic_heli_f",L"医疗直升机（支援呼叫）",nullptr,10,0.0f},
+    {Category::aircraft,How::drone,"jet_drone",L"机炮无人机（无人驾驶）",nullptr,0,60.0f},
     {Category::enemy,How::enemy,"GIANTANT01",L"巨蚁",L"app:/object/GIANTANT01.sgo",0,0.5f},
     {Category::enemy,How::enemy,"E650_GIANTANT01",L"巨蚁（EDF6）",L"app:/object/E650_GIANTANT01.sgo",0,0.5f},
     {Category::enemy,How::enemy,"GIANTSPIDER01",L"巨蜘蛛",L"app:/object/GIANTSPIDER01.sgo",0,0.5f},

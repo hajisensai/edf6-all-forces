@@ -4132,9 +4132,15 @@ void NpcPingHud(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
 // The result line (a spawn's, for a moment): its words, the row's name.
 void DebugSpawnStatusLine(Text* text,Line* lines,int* at,float x,float y,int align,float scale,const DebugSpawnCue& c) noexcept {
     if(c.status==kDebugSpawnNone || c.statusRow<0 || c.statusRow>=debugspawn::kEntryCount)return;
+    const wchar_t* const name=debugspawn::kEntries[c.statusRow].name;
+    if(c.status==kDebugSpawnRequested || c.status==kDebugSpawnRefused) {   // a support call: its own answer after the name
+        Label(text,lines,at,x,y,align,scale,c.status==kDebugSpawnRequested ? kGreen : kAmber,
+              Tr(c.status==kDebugSpawnRequested ? Tx::debugSpawnRequested : Tx::debugSpawnRefused),name,c.note);
+        return;
+    }
     const Tx words=c.status==kDebugSpawnDone ? Tx::debugSpawnDone : c.status==kDebugSpawnOnline ? Tx::debugSpawnOnline :
                    c.status==kDebugSpawnNoPlace ? Tx::debugSpawnNoPlace : Tx::debugSpawnFailed;
-    Label(text,lines,at,x,y,align,scale,c.status==kDebugSpawnDone ? kGreen : kAmber,Tr(words),debugspawn::kEntries[c.statusRow].name);
+    Label(text,lines,at,x,y,align,scale,c.status==kDebugSpawnDone ? kGreen : kAmber,Tr(words),name);
 }
 // The debug spawn tool's menu (debug_spawn.cpp; ini DebugSpawn, off by default): a panel at the left, its category, a
 // window of its rows round the one picked (an arrow at it; dim when it cannot be made now), the keys, and a spawn's

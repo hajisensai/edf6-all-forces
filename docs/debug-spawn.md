@@ -38,9 +38,15 @@
 
 插件用地面支援已在用的独立 setup 路径（`support_spawn.cpp`，见 `docs/support-ground-spawn.md`），把其中的 setup 步骤导出为 `ApplyMissionSetup`：`CreateObject` → 原生 cast 到 VehicleBase → `ApplyMissionSetup` → `SetTeam(2, true)` → `SetLevel(1.0)` → `NoteLocalCopy`。不写空投状态，不上任何 Dummy / RideAi。每个 SGO 都确认带 `mission_setup`（`tests/debug_spawn_resource_audit.py`；呼叫型 SGO 没有它会崩，`testrange/gen.py`）。
 
-## 插件飞机、友军士兵
+## 插件飞机
 
-直接调用已有接口，不新增原生调用：`JetLaunch(role, …, escort=true)`、`JetLaunchDrone`、`HeliLaunch` + `HeliCalled(follow)`（同 `heli.cpp` 救援直升机）、`ApplySupportSoldierResource(local=true)` + `HoldSupportSoldier(false)`（离线调用方自行放开）。
+- **有人驾驶的机种**（8 种喷气机、3 种直升机）：最初版本用 `JetLaunch` / `HeliLaunch` + `HeliCalled` 直接在空中生成，这在 main 上不成立——真实机组（#88）之后空中生成的有人机没有驾驶员，`heli.cpp HeliFrame` 判 `!NpcDriver` 直接返回，飞机自由落体（2026-10-09 日志）；#103 起 `Launch` 拒绝有人机型，`HeliLaunch` 也将被删除。现在改为以「调试请求」向准星点提交一次地图空中支援呼叫：`SupportCallAt(catalog, target, note)`（`support_dispatch.cpp`，与 M 地图的支援呼叫同一入口）。目录项按键名查（`kSupportCalls`：`STRIKE_F` `FIGHTER_F` `INTERCEPTOR_F` `MULTIROLE_F` `CARRIER_F` `BLAST_CARRIER_F` `DOLL_CARRIER_F` `GUNSHIP_F` `HELI_F` `HELI` `MEDIC_HELI_F`，均为 `src/calls.inc` 的 jets / helis 呼叫）。支援系统自己规划从地图边缘入场的航线，`BoardAirborne` 在机内同一矩阵创建真实机组并当场入座；冷却、`SupportDisabled`、`CustomNpcAi` / `NpcBoarding` / `JetPilot` / `HeliPilot`、任务的外部航空支援限制都由它判定。调试召唤只看它是否受理，并把它的答复（`note`）显示在菜单上。单机限制保留：联机时调试召唤在提交前就拒绝（支援系统本身允许联机客户端向房主请求，调试工具不走那条）。
+- **机炮无人机**：无人驾驶（#103：`Unmanned` 机型由插件空座位直飞），仍用 `JetLaunchDrone` 在准星点上空生成。
+- 守卫 `tests/debug_spawn_launch_guard.py`：`debug_spawn.cpp` 里不得调用 `JetLaunch` / `HeliLaunch` / `HeliCalled` / `SpawnJet` / `PrepareSupportAircraft`，有人机行必须是 `supportCall`、键名必须是 calls.inc 里的 jets / helis 呼叫，唯一直接生成的飞机是无人机，联机拒绝在任何生成路径之前。
+
+## 友军士兵
+
+`ApplySupportSoldierResource(local=true)` + `HoldSupportSoldier(false)`（离线调用方自行放开）。
 
 ## 签名
 
@@ -52,3 +58,4 @@
 - 原版载具空车：上车、武器、己方阵营（team 2）而非原版空车的 team 5 时是否有差异（地面支援交付已用 team 2）。
 - 巨型机甲 Balam 515 / 巴尔加炮 605（`Vehicle501_FortressRobo`）这类大体积载具放在准星点时与地形 / 建筑的重叠。
 - 预载 29 种额外资源对进关时间和内存的影响。
+- 支援呼叫：从菜单发出的呼叫与地图呼叫表现一致（入场、真实机组、跟随 / 守点）；冷却中菜单显示「现在不可用」。

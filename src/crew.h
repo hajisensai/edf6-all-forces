@@ -1049,9 +1049,11 @@ struct DebugSpawnCue {
     bool ready;               // the row can be spawned now (preloaded / its module up)
     int status;               // the last spawn's result, for a moment: DebugSpawnStatus (none: nothing to say)
     int statusRow;            // ...whose (kEntries index)
+    wchar_t note[96];         // ...a support call's own answer (support_dispatch.cpp SupportCallAt), else empty
     int keys[5];              // the ini's keys: toggle, prev, next, category, spawn
 };
-enum DebugSpawnStatus : int { kDebugSpawnNone, kDebugSpawnDone, kDebugSpawnFailed, kDebugSpawnOnline, kDebugSpawnNoPlace };
+enum DebugSpawnStatus : int { kDebugSpawnNone, kDebugSpawnDone, kDebugSpawnFailed, kDebugSpawnOnline, kDebugSpawnNoPlace,
+                                   kDebugSpawnRequested, kDebugSpawnRefused };
 bool DebugSpawnReadout(DebugSpawnCue* out) noexcept;   // any thread; false: nothing to show
 }  // namespace crew
 
