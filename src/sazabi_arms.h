@@ -27,11 +27,27 @@ constexpr int kMostTargets=32;
 enum class Special : int { missiles, funnels, cannon, count };
 using Funnel=sazabi::funnels::Funnel;
 using FunnelPhase=sazabi::funnels::Phase;
+// A trigger press as the weapon is asked for it: held, or after a tap until its round leaves (the animator may first
+// have to put the tomahawk away and raise the rifle / turn the shield, kAskMost at the longest). A release once a
+// round has left ends it: a tap fires one round, a release fires no extra one.
+constexpr float kAskMost=1.0f;
+struct Ask {
+    float left=0.0f;
+    bool held=false,shot=false;
+    bool Step(bool pressed,float dt) noexcept {
+        if(pressed) { if(!held)shot=false; left=kAskMost; }
+        else left=held && shot ? 0.0f : (left>dt ? left-dt : 0.0f);
+        held=pressed;
+        return left>0.0f;
+    }
+    void Shot() noexcept { shot=true; if(!held)left=0.0f; }
+    bool On() const noexcept { return left>0.0f; }
+};
 struct Arms {
     Special special=Special::missiles;
     bool switchHeld=false,meleeHeld=false,secondaryHeld=false,queued=false,struck=false,whooshed=false;
     int combo=0;                  // the combo's swing now (sazabi_pose.h kCombo: diagonal cut, slash across, overhead chop)
-    float missileAsk=0.0f;        // s a missile press is still asked for (ArmsStep: the shield turns onto the aim first)
+    Ask rifleAsk,missileAsk;      // the triggers as asked for (ArmsStep), each ended by its round (ArmsFire)
     float swing=-1.0f,guard=0.0f,charge=0.0f,brace=0.0f,cannonCool=0.0f,megaLeft=0.0f;
     float megaDamage=0.0f,megaYaw[kMegaBeams]{};
     RoundObj glow{},mega[kMegaBeams]{};
