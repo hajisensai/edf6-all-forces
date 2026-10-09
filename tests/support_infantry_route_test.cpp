@@ -63,6 +63,8 @@ bool NpcPrepareVehicleRoutePost(unsigned char*,const float*,float) noexcept{retu
 bool HeliCommand(const void*,const Command&) noexcept{return false;}
 bool JetCommand(const void*,const Command&) noexcept{return false;}
 PlayArea MapPlayArea() noexcept{return {{-930,-930},{930,930},true,0,true};}
+bool PlayAreaMeasured() noexcept{return true;}
+bool SupportAircraftLeft(const ObjRef&) noexcept{return false;}
 bool MapGroundNear(float,float,float,float* y,bool) noexcept{*y=0;return true;}
 }
 namespace {
