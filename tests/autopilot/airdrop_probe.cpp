@@ -188,14 +188,19 @@ bool Redirect(std::size_t site,std::size_t target,void* hook,const char* name) n
     return ok;
 }
 
-// The keys tried as the vehicle call, in order (mouse middle and side buttons first, then letters, digits, shift,
-// ctrl, space, the right button). Not Esc, Tab, Alt or the function keys (menus, the window).
-const int kCallKeys[]={0x04,0x05,0x06,'V','F','G','Q','E','X','Z','C','B','T','H','R','Y','U','1','2','3','4','5',
+// The inputs tried as the vehicle call, in order, each tapped. A soldier's support items (the Air Raider's support
+// device and vehicle) are used on a TAP, not a hold: 0x5A1D70 counts the frames their intent bytes (h+0xD7F, +0xD80,
+// from the player's action table 0x570650) stay down and uses the item only when let go before the item's threshold
+// (+0x14 of its entry in h+0x1A00); held 1.5-3 s, every button did nothing (2026-10-10 probe2-4). Pad buttons first
+// (0x100 + XInput bit): the sticks' clicks, LB, RB, X, B, Y, Back, left, right, LT, RT, A, then up and down (they open
+// the chat menu, which then takes the buttons after them); then keys (a later build may read them).
+const int kCallKeys[]={0x106,0x107,0x108,0x109,0x10E,0x10D,0x10F,0x105,0x102,0x103,0x110,0x111,0x10C,0x100,0x101,
+                       0x04,0x05,0x06,'V','F','G','Q','E','X','Z','C','B','T','H','R','Y','U','1','2','3','4','5',
                        0x10,0x11,0x20,0x02};
-constexpr ULONGLONG kTrialDelayMs=25000,kHoldMs=1500,kGapMs=2500;
+constexpr ULONGLONG kTrialDelayMs=25000,kHoldMs=150,kGapMs=4000;
 int trial=0;
 ULONGLONG trialAt=0;
-bool holding=false;
+bool holding=false,reported=false;
 int vehicleReads=0;
 }  // namespace
 
@@ -226,9 +231,12 @@ void AirdropProbeTick() noexcept {
             hold(kCallKeys[trial],false);holding=false;trialAt=now+kGapMs;++trial;
         }
     }
-    if(holding && transporterSeen) {
-        hold(kCallKeys[trial],false);holding=false;
-        say("PROBE the vehicle call key: %02x (the transporter came while it was held)",kCallKeys[trial]);
+    // The transporter comes a little after the tap (the soldier's call animation, the flare): the last input tapped.
+    if(transporterSeen && !reported) {
+        reported=true;
+        const int last=holding ? trial : trial ? trial-1 : 0;
+        if(holding){hold(kCallKeys[trial],false);holding=false;}
+        say("PROBE the vehicle call input: %02x (the last one tapped before the transporter came)",kCallKeys[last]);
     }
     // The delivered vehicle at 1, 3, 6 and 10 s.
     static const ULONGLONG kReads[]={1000,3000,6000,10000};

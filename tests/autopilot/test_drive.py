@@ -130,7 +130,7 @@ class DriverTest(unittest.TestCase):
         with patch.object(drive.gamedir, 'find_or_dev', return_value=self.game), \
              patch.object(drive, 'run', return_value=0) as run:
             self.assertEqual(drive.main(['run']), 0)
-        none = {'extra': (), 'loadout': None, 'shots': None}
+        none = {'extra': (), 'loadout': None, 'shots': None, 'keys': ()}
         run.assert_called_once_with(self.game, 'range', 1, 45, None, **none)
         with patch.object(drive.gamedir, 'find_or_dev', return_value=self.game), \
              patch.object(drive, 'run', return_value=0) as run:
@@ -141,9 +141,12 @@ class DriverTest(unittest.TestCase):
         with patch.object(drive.gamedir, 'find_or_dev', return_value=self.game), \
              patch.object(drive, 'run', return_value=0) as run:
             self.assertEqual(drive.main(['run', 'RM015', '1', '90', 'out.log', '--cmd', 'probe airdrop',
-                                         '--loadout', 'x.ini', '--cmd', 'mem', '--shots', 'shots']), 0)
+                                         '--loadout', 'x.ini', '--cmd', 'mem', '--shots', 'shots',
+                                         '--key', '57@25:5000', '--key', 'enter@30']), 0)
         run.assert_called_once_with(self.game, 'RM015', 1, 90, 'out.log', extra=('probe airdrop', 'mem'),
-                                    loadout='x.ini', shots='shots')
+                                    loadout='x.ini', shots='shots', keys=(('57', 25.0, 5000), ('enter', 30.0, 1000)))
+        with self.assertRaises(SystemExit):
+            drive.run_options(['--key', '57'])
         with self.assertRaises(SystemExit):
             drive.run_options(['--cmd'])
 
@@ -211,7 +214,14 @@ class DriverTest(unittest.TestCase):
                 drive.run(self.game, 'RM015', 1, 0, str(self.root / 'missing' / 'log'))
         self.assertEqual(list(self.plugins.iterdir()), [])
 
+    def test_keys_need_a_running_session(self):
+        with self.assertRaises(RuntimeError):
+            drive.key(self.game, 'enter', 150)
+        self.assertFalse(self.path('.keys').exists())
+
     def test_interrupted_key_hold_releases_keys(self):
+        drive.install(self.game)
+        self.pids.return_value = [123]
         with patch.object(drive.time, 'sleep', side_effect=KeyboardInterrupt):
             with self.assertRaises(KeyboardInterrupt):
                 drive.key(self.game, 'enter', 150)
@@ -259,7 +269,7 @@ class DriverTest(unittest.TestCase):
             at = {'x': 100, 'y': 200}
 
             def get(p):
-                p._obj.x, p._obj.y = (999, 999) if pull and (at['x'], at['y']) == (140, 240) else (at['x'], at['y'])
+                p._obj.x, p._obj.y = (1919, 540) if pull and (at['x'], at['y']) == (140, 240) else (at['x'], at['y'])
                 return 1
 
             def put(x, y):
@@ -269,7 +279,7 @@ class DriverTest(unittest.TestCase):
             u.SetCursorPos.side_effect = put
             u.GetSystemMetrics.side_effect = lambda i: {76: 0, 77: 0, 78: 1920, 79: 1080}[i]
             return u, at
-        for pull, word in ((False, 'stayed there'), (True, 'moved away in 100/100')):
+        for pull, word in ((False, 'stayed there'), (True, 'PULLED to the edge in 100/100')):
             with self.subTest(pull=pull):
                 u, at = fake_user32(pull)
                 with patch.object(drive, 'user32', u), patch.object(drive.time, 'sleep'):
