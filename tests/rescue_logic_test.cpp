@@ -71,7 +71,7 @@ void Takeoff() {
 
 void Versions() {
     using namespace crew::versionnote;
-    using namespace crew::support_net;
+    using crew::support_net::kCapabilities;using crew::support_net::kCapSoldierVariants;using crew::support_net::kCapAirborneAir;using crew::support_net::kCapSeaRescue;
     State s;s.online=true;s.mine=kCapabilities;s.silentHost=kCapSoldierVariants|kCapAirborneAir;
     Check(Compare(s).kind==Kind::none,"a guest before the welcome: nothing said");
     s.hostKnown=true;s.hostCaps=kCapabilities;

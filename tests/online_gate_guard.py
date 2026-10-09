@@ -186,9 +186,13 @@ def check_calls(root: str) -> None:
     dispatch = code_only(read(root, 'src/support_dispatch.cpp'))
     # A map / radio call (SupportCallAt) and the sea rescue (SupportRescueAt) are one request path (Request).
     request = body(dispatch, 'bool Request(int index,')
-    for entry in ('bool SupportCallAt(', 'bool SupportRescueAt('):
-        if 'Request(' not in body(dispatch, entry):
-            fail(f'src/support_dispatch.cpp {entry[5:-1]}: not through the one request path (Request)')
+    if 'Request(' not in body(dispatch, 'bool SupportCallAt('):
+        fail('src/support_dispatch.cpp SupportCallAt: not through the request path (Request)')
+    # The sea rescue: its own path (no map queue / cooldown), the same host transaction for any non-local machine.
+    rescue = body(dispatch, 'bool RescueRequest(')
+    if 'RescueRequest(' not in body(dispatch, 'bool SupportRescueAt(') or \
+            not before(rescue, 'InSession() && !LocalAuthority()', 'SubmitSupportRequest('):
+        fail('src/support_dispatch.cpp SupportRescueAt: an online rescue does not go through the host-planned protocol')
     if not before(request, 'else if(InSession() && !LocalAuthority())', 'SubmitSupportRequest(') or             not before(request, 'SubmitSupportRequest(', 'else if(offlinePending)'):
         fail('online support must go through the reliable host-planned deployment protocol')
     # The only local deployment in a session: the host of a world with no other participant (no peer to replicate to).

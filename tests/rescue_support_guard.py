@@ -5,8 +5,10 @@ python tests/rescue_support_guard.py [--root DIR], exit 1 on a failure. What it 
     rescue's code (src/heli.cpp) makes no object at all;
   - the rescue's trigger asks for the support catalog's rescue entry (SupportRescueAt) and its heli is only ever the one
     the support deployment hands over (RescueHeliDeployed), after the deployment seated its real pilot;
-  - the rescue entry is the catalog's last (older indices keep their wire meaning), carries its pilot only, and is
-    planned only when every peer announced it (kCapSeaRescue).
+  - the rescue entry is the catalog's last (older indices keep their wire meaning), carries its pilot and one door gunner
+    (the other door is the swimmer's), and is planned only when every peer announced it (kCapSeaRescue);
+  - 2026-10-10: it is held to no mission support rule, never queued behind, cooled down by or written over the map's
+    support; it takes off from a carrier's deck before the edge; its heli is the requester's (no nearest-swimmer search).
 Run against the code before this change it fails (StartRescue called HeliLaunch).
 """
 from __future__ import annotations
@@ -74,12 +76,25 @@ def main() -> int:
         fail('src/support_dispatch.cpp SupportCallKey: RESCUE is not the catalog\'s last entry (older indices would move)')
     crew = body(dispatch, 'unsigned AirCrew(')
     checks += 1
-    if 'if(IsRescue(catalog))return 1u;' not in crew:
-        fail('src/support_dispatch.cpp AirCrew: the rescue heli carries more than its pilot (the door seats are the swimmer\'s)')
+    if 'if(IsRescue(catalog))return 2u;' not in crew:
+        fail('src/support_dispatch.cpp AirCrew: the rescue heli is not its pilot and one door gunner (one door is the swimmer\'s)')
     plan = body(dispatch, 'support_net::PlanResult Plan(')
     checks += 1
     if not before(plan, 'SupportPeersAcceptRescue()', 'PlanAirSupport('):
         fail('src/support_dispatch.cpp Plan: the rescue is planned without every peer\'s kCapSeaRescue')
+    checks += 1
+    if '!IsRescue(catalog) && !support::Allowed(' not in plan or '!IsRescue(plan.catalogId) && !support::Allowed(' not in body(dispatch, 'bool Validate('):
+        fail('src/support_dispatch.cpp Plan / Validate: the rescue is held to the mission\'s support rules')
+    checks += 1
+    if not before(plan, 'PlanTakeoffSupport(', 'PlanAirSupport('):
+        fail('src/support_dispatch.cpp Plan: the rescue does not try its takeoff point before the edge')
+    own = body(dispatch, 'bool RescueRequest(') + body(dispatch, 'bool RescueHere(')
+    checks += 1
+    if not own or any(word in own for word in ('offlinePending', 'callAt', 'Status(', 'localRequest')):
+        fail('src/support_dispatch.cpp RescueRequest: the rescue shares the map\'s queue, cooldown, status or request notice')
+    checks += 1
+    if 'SwimmerNear' in heli or 'kSwimmerClaim' in heli or 'r->swimmer=requester' not in handover:
+        fail('src/heli.cpp: the rescue heli looks for the nearest swimmer instead of its requester')
     protocol = code_only(read(root, 'src/support_protocol.h'))
     checks += 1
     if not re.search(r'kCapabilities=[^;]*kCapSeaRescue', protocol):

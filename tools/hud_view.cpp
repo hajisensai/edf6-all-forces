@@ -208,6 +208,12 @@ bool PlayerSweepCue(SweepCue* o) noexcept { if(sceneSweepOn)*o=sceneSweep;return
 // The sea rescue's banner (heli.cpp PlayerRescueCue): on in the rescue_banner scene.
 bool sceneRescueOn=false;RescueCue sceneRescue{};
 bool PlayerRescueCue(RescueCue* o) noexcept { if(sceneRescueOn)*o=sceneRescue;return sceneRescueOn; }
+// The room's builds differ (support_net.cpp SupportVersionCue): on in the version_banner scene, under the rescue's line.
+bool sceneVersionOn=false;wchar_t sceneVersion[200]{};
+bool SupportVersionCue(wchar_t* out,std::size_t capacity) noexcept {
+    if(sceneVersionOn)_snwprintf_s(out,capacity,_TRUNCATE,L"%ls",sceneVersion);
+    return sceneVersionOn;
+}
 bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
 void MapCommandView(const float*,float,float) noexcept {}
 // The map's buttons as drawn (hud.cpp MapButtons): the scene's check reads them.
@@ -1449,7 +1455,7 @@ int FullLoadoutScenes(const std::wstring& dir) {
     const Case cases[]={{1920,1080,1},{1440,1080,1.5f},{1024,768,1.5f},{960,1080,2.0f},{1920,1080,3.0f}};
     hasJet=hasHeli=hasWarn=hasStock=hasDrill=hasNix=hasMap=hasEmc=hasProteus=hasSazabi=hasTurret=false;
     hasLauncher=hasHeliSight=hasHighView=hasGunner=false;
-    sceneFormation=-1;sceneSweepOn=false;sceneMarkOn=false;sceneRescueOn=false;
+    sceneFormation=-1;sceneSweepOn=false;sceneMarkOn=false;sceneRescueOn=false;sceneVersionOn=false;
     for(int heli=0;heli<2;++heli)for(const Case& c:cases) {
         hasStock=true;hasHeli=heli!=0;StockTank(pos);sceneStock.heli=hasHeli;
         sceneStock.arms=kStockArms;sceneStock.selected=0;sceneStock.sight=-1;
@@ -1774,7 +1780,26 @@ int Scenes(const std::wstring& dir) {
         }
         failed+=!(line && apart);
         std::printf("%s  rescue_banner: the rescue line %d, no text overlapping %d\n",line && apart ? "ok  " : "FAIL",line,apart);
-        sceneRescueOn=false;
+        // The room's builds differ, under it: the longest notice (older guests, every feature named).
+        wchar_t features[160];
+        _snwprintf_s(features,_TRUNCATE,L"%ls%ls%ls%ls%ls%ls%ls",hudtext::Tr(hudtext::Tx::versionFeatRescue),hudtext::Tr(hudtext::Tx::versionListSep),
+                     hudtext::Tr(hudtext::Tx::versionFeatAir),hudtext::Tr(hudtext::Tx::versionListSep),hudtext::Tr(hudtext::Tx::versionFeatLoadout),
+                     hudtext::Tr(hudtext::Tx::versionListSep),hudtext::Tr(hudtext::Tx::versionFeatCommand));
+        _snwprintf_s(sceneVersion,_TRUNCATE,hudtext::Tr(hudtext::Tx::versionPeersOlder),2,features);
+        sceneVersionOn=true;
+        Scene(dir,L"version_banner",ground);
+        bool shown=false,clear=true;
+        for(std::size_t i=0;i<drew.size();++i) {
+            const Drew& p=drew[i];
+            if(p.text==sceneVersion)shown=shown || (p.x0>=0.0f && p.x1<=1920.0f && p.y1<=1080.0f);
+            for(std::size_t k=i+1;k<drew.size();++k) {
+                const Drew& q=drew[k];
+                if(!p.text.empty() && !q.text.empty() && p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1)clear=false;
+            }
+        }
+        failed+=!(shown && clear);
+        std::printf("%s  version_banner: the build line on screen %d, no text overlapping %d\n",shown && clear ? "ok  " : "FAIL",shown,clear);
+        sceneVersionOn=false;sceneRescueOn=false;
     }
     sceneSweepOn=false;
     sceneFormation=-1;
