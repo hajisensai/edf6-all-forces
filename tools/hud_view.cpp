@@ -244,6 +244,14 @@ bool JetHud(const void*,JetHudInfo*) noexcept { return false; }
 bool HeliFuel(const void*,float*) noexcept { return false; }
 bool gaugeCovered=false;
 void SetStockGaugeCover(bool covered) noexcept { gaugeCovered=covered; }
+// stockgauge.cpp's armor readout: given exactly while the cover HudPublish just set hides the stock armor gauge
+// (HideStockGauges, Enabled), the numbers through the production armorhud::Publish (no number when they do not read).
+bool armorReads=false;
+float sceneArmor=1350.0f,sceneArmorMost=1600.0f,sceneHull=51205.0f,sceneHullMost=81929.0f;
+bool PlayerStockArmor(armorhud::Readout* o) noexcept {
+    return gaugeCovered && config.hideStockGauges && config.enabled && armorReads &&
+           armorhud::Publish(true,sceneArmor,sceneArmorMost,sceneHull,sceneHullMost,o);
+}
 }  // namespace crew
 
 using namespace crew;
@@ -1300,6 +1308,83 @@ void SazabiSceneAt(const std::wstring& dir,const wchar_t* name,const float* pos,
     SetScreen(1920,1080);
     std::printf("%ls\n",path.c_str());
 }
+// The stock armor gauge's numbers in our HUD (the user, 2026-10-09: "让护甲显示在咱们的hud不就行了"; stockgauge.cpp hides
+// the gauge, hud.cpp ArmorPanel / StockBlock show its numbers): in each covered vehicle (a stock tank: in its block under
+// the hull's bar; a jet, a rotor craft, a stock heli, the Sazabi: the panel at the top left with the hull's line), at
+// 16:9, 21:9, 1280 and a split screen's half (960): the armor's line drawn once, on the screen, clear of every other
+// line; never drawn on foot, with HideStockGauges=0 or when the numbers do not read (the gauge then shows: not hidden);
+// red at the stock gauge's low mark (0.25 of the most, 0x827723) and not above it.
+int ArmorDrawn(const wchar_t* scene,bool want,bool hull) {
+    wchar_t armor[128],hullText[128];
+    std::swprintf(armor,128,Tr(Tx::armorRow),static_cast<int>(std::lround(sceneArmor)),static_cast<int>(std::lround(sceneArmorMost)));
+    std::swprintf(hullText,128,Tr(Tx::hullRow),static_cast<int>(std::lround(sceneHull)),static_cast<int>(std::lround(sceneHullMost)));
+    int failed=0,found=0,hulls=0;
+    for(std::size_t i=0;i<drew.size();++i) {
+        const bool isArmor=drew[i].text==armor,isHull=drew[i].text==hullText;
+        found+=isArmor;hulls+=isHull;
+        if(!isArmor && !isHull)continue;
+        const Drew& a=drew[i];
+        for(std::size_t k=0;k<drew.size();++k) {
+            const Drew& b=drew[k];
+            if(k==i || b.text.find_first_not_of(L' ')==std::wstring::npos)continue;
+            if(a.x0<b.x1 && b.x0<a.x1 && a.y0<b.y1 && b.y0<a.y1) {
+                ++failed;std::printf("FAIL armor %ls: \"%s\" overlaps \"%s\"\n",scene,Narrow(a.text).c_str(),Narrow(b.text).c_str());
+            }
+        }
+    }
+    if(found!=(want ? 1 : 0)){++failed;std::printf("FAIL armor %ls: the armor line drawn %d times (want %d)\n",scene,found,want ? 1 : 0);}
+    if(hulls!=(want && hull ? 1 : 0)){++failed;std::printf("FAIL armor %ls: the hull line drawn %d times\n",scene,hulls);}
+    std::printf("%s  armor %s %ls: %s\n",failed ? "FAIL" : "ok",hudtext::Name(hudtext::InUse()),scene,want ? (hull ? "armor + hull, apart" : "armor in the block, apart") : "not drawn");
+    return failed;
+}
+
+int ArmorScenes(const std::wstring& dir,const float* ground,const float* pos) {
+    int failed=0;
+    // The low mark as the stock gauge sets it (+0xB01 at or under 0.25), and the colours that follow it.
+    armorhud::Durability d{};
+    Line l{};
+    failed+=!(armorhud::Read(400.0f,1600.0f,&d) && d.low);
+    DurabilityLine(l,Tx::armorRow,d,nullptr);failed+=l.rgba!=kRed || DurabilityFill(d,true)!=kRed;
+    failed+=!(armorhud::Read(401.0f,1600.0f,&d) && !d.low);
+    DurabilityLine(l,Tx::armorRow,d,nullptr);failed+=l.rgba!=kHud || DurabilityFill(d,true)!=kHud;
+    failed+=armorhud::Read(100.0f,0.0f,&d) || armorhud::Read(std::nanf(""),1600.0f,&d);   // no number made up
+    armorReads=true;
+    // A stock tank: its block (StockVehicleHud), the armor under the hull's bar.
+    hasJet=hasHeli=hasWarn=hasSazabi=false;hasStock=true;
+    StockTank(ground);
+    for(int w:{1920,2520,1280,960}) {
+        wchar_t name[64];std::swprintf(name,64,L"armor_stock_tank_%d",w);
+        Prime(ground,w);Scene(dir,name,ground,w);failed+=ArmorDrawn(name,true,false);
+    }
+    sceneArmor=380.0f;Scene(dir,L"armor_stock_tank_low",ground);failed+=ArmorDrawn(L"armor_stock_tank_low",true,false);sceneArmor=1350.0f;
+    config.hideStockGauges=false;Scene(dir,L"armor_stock_tank_gauge_kept",ground);failed+=ArmorDrawn(L"armor_stock_tank_gauge_kept",false,false);
+    config.hideStockGauges=true;
+    armorReads=false;Scene(dir,L"armor_unread",ground);failed+=ArmorDrawn(L"armor_unread",false,false);armorReads=true;
+    // On foot: nothing covered, nothing drawn.
+    hasStock=false;Scene(dir,L"armor_on_foot",ground);failed+=ArmorDrawn(L"armor_on_foot",false,false);
+    // A jet and a rotor craft (no durability of their own on our HUD): the panel, with the hull's line.
+    hasJet=true;sceneJet.rotor=false;sceneJet.hasImpact=false;config.playerJetFlightHud=true;
+    for(int w:{1920,960}) {
+        wchar_t name[64];std::swprintf(name,64,L"armor_jet_%d",w);
+        Prime(pos,w);Scene(dir,name,pos,w);failed+=ArmorDrawn(name,true,true);
+    }
+    sceneJet.rotor=true;config.heliFlightHud=true;
+    Scene(dir,L"armor_rotor",pos);failed+=ArmorDrawn(L"armor_rotor",true,true);
+    // A stock heli with its stores on the helicopter HUD's strip.
+    hasJet=false;hasHeli=true;hasStock=true;
+    StockTank(pos);sceneStock.heli=true;sceneStock.arms=1;sceneStock.threats=0;strcpy_s(sceneStock.arm[0].label,"MSL");
+    Scene(dir,L"armor_stock_heli",pos);failed+=ArmorDrawn(L"armor_stock_heli",true,true);
+    hasHeli=hasStock=false;
+    // The Sazabi's own HUD (as SazabiScenes left it).
+    hasSazabi=true;
+    for(int w:{1920,1280}) {
+        wchar_t name[64];std::swprintf(name,64,L"armor_sazabi_%d",w);
+        Scene(dir,name,ground,w);failed+=ArmorDrawn(name,true,true);
+    }
+    hasSazabi=false;armorReads=false;
+    return failed;
+}
+
 int SazabiScenes(const std::wstring& dir,const float* pos) {
     hasSazabi=true;
     const float noseWas[3]={sceneHeli.sym.nose[0],sceneHeli.sym.nose[1],sceneHeli.sym.nose[2]};
@@ -1718,6 +1803,7 @@ int Scenes(const std::wstring& dir) {
     hasProteus=false;
     hasStock=false;
     failed+=SazabiScenes(dir,ground);
+    failed+=ArmorScenes(dir,ground,pos);
     // The next language's run begins as this one did: EDF6AutoTurret's mode last seen as auto-aim, and seen long enough
     // ago that no switch's banner (hud_cue.h Changed, a wall-clock kSwitchMs) carries over into its turret scenes.
     hasStock=hasTurret=true;

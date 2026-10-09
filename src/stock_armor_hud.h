@@ -40,5 +40,36 @@ inline bool Step(maphud::Record (&rs)[kGauges],const void* gauge,std::uint64_t g
     maphud::Step(*r,gauge,generation,hide,shown);
     return r->hidden;
 }
+
+// --- What the hidden gauge showed, for the HUD of ours to show in its place (the user, 2026-10-09: "让护甲显示在咱们的
+// hud不就行了") ---
+// The gauge's own numbers: its player's HP (+0x2F8) over its most (+0x2F4), the soldier the update casts its owner to
+// (0x827126: the bar's share; the layout 0x826A83 / 0x826A9C: the number and its most, as integers), and the vehicle's
+// the same two fields (the layout 0x8277B0's bar_vehicle). Its low state: the update sets +0xB01 while the share is at
+// or under 0.25 (0x827723: comiss against the float at 0x1765A14 = 0.25).
+constexpr float kLowArmor=0.25f;
+
+// One HP readout: `hp` of `most` (a soldier's armor, a vehicle's durability). Not shown (false) unless both are finite
+// and `most` above 0: no made-up number.
+struct Durability { float hp,most,share; bool low; };
+inline bool Read(float hp,float most,Durability* out) noexcept {
+    if(!(most>0.0f) || !(most<3.4e38f) || !(hp==hp) || !(hp<3.4e38f) || !(hp>-3.4e38f))return false;
+    const float h=hp<0.0f ? 0.0f : hp;
+    const float share=h/most>1.0f ? 1.0f : h/most;
+    *out=Durability{h,most,share,share<=kLowArmor};
+    return true;
+}
+
+// The readout the HUD of ours shows in the gauge's place: given only while the gauge is held hidden (`held`: the very
+// same test that hides it, so the two never show together and never both go), its player's armor read, and the vehicle's
+// durability with it when it reads.
+struct Readout { Durability armor,hull; bool hasHull; };
+inline bool Publish(bool held,float armor,float armorMost,float hull,float hullMost,Readout* out) noexcept {
+    Readout r{};
+    if(!held || !Read(armor,armorMost,&r.armor))return false;
+    r.hasHull=Read(hull,hullMost,&r.hull);
+    *out=r;
+    return true;
+}
 }  // namespace armorhud
 }  // namespace crew

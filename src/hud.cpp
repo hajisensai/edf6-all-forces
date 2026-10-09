@@ -140,7 +140,8 @@ struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool
                   bool turretCamOk; TurretCamReadout turretCam;
                   bool nix; NixTorso nixTorso;
                   bool proteus; ProteusReadout proteusRo;
-                  bool sazabi; SazabiCue sazabiCue; };
+                  bool sazabi; SazabiCue sazabiCue;
+                  bool armor; armorhud::Readout armorRo; };
 constexpr unsigned kFresh=4;
 Snapshot snaps[3]{};
 std::atomic<unsigned> middle{1};
@@ -2524,7 +2525,8 @@ void StockMark(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
 // (a line in the block instead of DrillPanel), the EMC's charged beam (a line and its bar: emc.cpp), and whether
 // EDF6AutoTurret's lead circle is on the seat's own gun (the
 // seat's first weapon, the one its aim turns: then the circle and its bore cross are that gun's marks, not a pipper).
-struct StockExtras { const NixTorso* nix; const DrillCue* drill; bool leadGun; const EmcCue* emc; const ProteusReadout* proteus; bool high=false; };
+struct StockExtras { const NixTorso* nix; const DrillCue* drill; bool leadGun; const EmcCue* emc; const ProteusReadout* proteus; bool high=false;
+                     const armorhud::Readout* armor=nullptr; };   // the hidden stock armor gauge's numbers (ArmorRows)
 // --- The Proteus (proteus.cpp; README 普罗透斯): its part of the stock vehicle HUD. In the block (StockBlock) up to four
 // lines with a bar under some: the stance (and the stagger's progress), the shield (its state, HP and deployed its heat;
 // the HP bar under it), the field (its allies), the driver's missile launcher; the bindings named where the driver has a
@@ -2722,6 +2724,39 @@ float HeadingOfYaw(float yaw) noexcept {
     return sight::HeadingOf(d);
 }
 
+// The stock armor gauge's numbers where stockgauge.cpp hides it (the user, 2026-10-09: "上了载具以后…隐藏", then "让护甲
+// 显示在咱们的hud不就行了"): a line and a bar each, as the hull's in StockBlock (its 150 x 6 px bar under its line). The
+// player's armor red at the stock gauge's own low mark (armorhud::kLowArmor, 0x827723), else the HUD's colour; the
+// vehicle's durability coloured as StockBlock's hull (HpColour). In StockBlock the armor's line goes under the hull's
+// bar; a vehicle whose HUD shows no durability (the aircraft, a stock heli's strip, the Sazabi) has both in ArmorPanel.
+constexpr float kDurabilityBarW=150.0f,kDurabilityBarH=6.0f;   // px at 1080 lines: StockBlock's barW / barH
+void DurabilityLine(Line& l,Tx what,const armorhud::Durability& d,Text* text) noexcept {
+    Format(l,Tr(what),static_cast<int>(std::lround(d.hp)),static_cast<int>(std::lround(d.most)));
+    l.scale=kLineScale;l.rgba=d.low ? kRed : kHud;l.w=l.h=0.0f;
+    if(text)MeasureAll(*text,&l,1);
+}
+const float* DurabilityFill(const armorhud::Durability& d,bool armor) noexcept { return armor ? (d.low ? kRed : kHud) : HpColour(d.share); }
+
+// The block of ArmorRows apart (see above): where the stock gauge was, the screen's top left, the vehicle's durability
+// over the player's armor.
+constexpr float kArmorPanelX=48.0f,kArmorPanelY=96.0f;   // px at 1080 lines: its left and top
+void ArmorPanel(void* drawer,void* ctx,Text* text,float s,const armorhud::Readout& r,Line* lines,int* at) noexcept {
+    const int rows=r.hasHull ? 2 : 1;
+    if(*at+rows>kMaxLines)return;
+    const float lineH=18.0f*s,gap=3.0f*s,barW=kDurabilityBarW*s,barH=kDurabilityBarH*s,x=kArmorPanelX*s;
+    float y=kArmorPanelY*s;
+    const armorhud::Durability* const d[2]={r.hasHull ? &r.hull : &r.armor,&r.armor};
+    const Tx what[2]={r.hasHull ? Tx::hullRow : Tx::armorRow,Tx::armorRow};
+    for(int i=0;i<rows;++i) {
+        const bool armor=!r.hasHull || i==1;
+        Line& l=lines[(*at)++];
+        DurabilityLine(l,what[i],*d[i],text);
+        l.x=x;l.y=y;y+=(l.h>0.0f ? l.h : lineH)+gap;
+        Bar(drawer,ctx,x,y,barW,barH,d[i]->share,d[i]->share,DurabilityFill(*d[i],armor),s);
+        y+=barH+gap*2.0f;
+    }
+}
+
 // The block left of the bottom centre (see above). A Nix: the ring's hull is its legs, its gun the torso (nix.cpp), the
 // twist's limits ticked and its angle on the info line. The drill tank: its drill's RPM and heat a line under the
 // weapons (DrillPanel's colours), OVERHEAT the warning. The EMC (emc.cpp): its charged beam a line under the weapons
@@ -2733,6 +2768,8 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
                 Line* lines,int* at,float bottom=-1.0f,bool compact=false) noexcept {
     int room=kMaxLines-*at-3;   // the head's three lines first
     if(room<0)return;
+    const bool armorOn=x.armor && room>0;   // the hidden stock armor gauge's numbers: next after the head (ArmorRows)
+    room-=armorOn ? 1 : 0;
     const int want=compact ? 0 : r.arms<kStockArms ? r.arms : kStockArms;
     const int arms=want<room ? want : room;
     room-=arms;
@@ -2745,6 +2782,7 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
     Line& warn=lines[(*at)++];
     Line& title=lines[(*at)++];
     Line& info=lines[(*at)++];
+    Line* const armor=armorOn ? &lines[(*at)++] : nullptr;
     Line* const arm=&lines[*at];
     *at+=arms;
     Line* const drill=drillOn ? &lines[(*at)++] : nullptr;
@@ -2798,8 +2836,10 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
         if(text)MeasureAll(*text,emcLine,1);
     }
     for(int i=0;i<prots;++i){pl[i].line->w=pl[i].line->h=0.0f;if(text)MeasureAll(*text,pl[i].line,1);}
-    const float lineH=18.0f*s,gap=3.0f*s,barW=150.0f*s,barH=6.0f*s;
+    if(armor)DurabilityLine(*armor,Tx::armorRow,x.armor->armor,text);
+    const float lineH=18.0f*s,gap=3.0f*s,barW=kDurabilityBarW*s,barH=kDurabilityBarH*s;
     float h=(title.h>0.0f ? title.h : lineH)+gap+(info.h>0.0f ? info.h : lineH)+gap+barH+gap*2.0f;
+    if(armor)h+=(armor->h>0.0f ? armor->h : lineH)+gap+barH+gap*2.0f;
     for(int i=0;i<arms;++i)h+=(arm[i].h>0.0f ? arm[i].h : lineH)+gap;
     if(drill)h+=(drill->h>0.0f ? drill->h : lineH)+gap;
     if(emcLine)h+=(emcLine->h>0.0f ? emcLine->h : lineH)+gap+barH+gap;
@@ -2825,6 +2865,11 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
     info.x=x0;info.y=y;y+=(info.h>0.0f ? info.h : lineH)+gap;
     Bar(drawer,ctx,x0,y,barW,barH,hp,TrailOf(&kStockHpKey,hp,GetTickCount64()),HpColour(hp),s);
     y+=barH+gap*2.0f;
+    if(armor) {
+        armor->x=x0;armor->y=y;y+=(armor->h>0.0f ? armor->h : lineH)+gap;
+        Bar(drawer,ctx,x0,y,barW,barH,x.armor->armor.share,x.armor->armor.share,DurabilityFill(x.armor->armor,true),s);
+        y+=barH+gap*2.0f;
+    }
     for(int i=0;i<arms;++i){arm[i].x=x0;arm[i].y=y;y+=(arm[i].h>0.0f ? arm[i].h : lineH)+gap;}
     if(drill){drill->x=x0;drill->y=y;y+=(drill->h>0.0f ? drill->h : lineH)+gap;}
     if(emcLine) {
@@ -3046,6 +3091,7 @@ void HudPublish() noexcept {
     // lists are text.
     const bool heliLists=s.stock && s.stockHud.heli && s.heliFly && !s.cockpit && Cfg().heliFlightHud;
     SetStockGaugeCover(textOk && (s.cockpit || (s.stock && !s.cockpit && !s.stockHud.heli) || heliLists || (s.sazabi && !s.cockpit)));
+    s.armor=PlayerStockArmor(&s.armorRo);   // the stock armor gauge's numbers while that cover hides it (stockgauge.cpp)
     s.proteus=PlayerProteus(&s.proteusRo);   // the Proteus's stance, shield, field, launcher (proteus.cpp)
     if(Cfg().vehicleHud)
         for(const auto& w:work)if(w.ref && ms-w.seen<=kFreshMs)s.d[s.count++]=w.d;
@@ -4256,10 +4302,12 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             const StockExtras x{fresh && snap.nix ? &snap.nixTorso : nullptr,fresh && snap.drill ? &snap.drillCue : nullptr,
                                 showTurretOverlay && !physicalSight && stockPick==0 && snap.turretAim.ownGun && snap.turretAim.mode==edf::aimlink::Mode::leadCircle && snap.turretAim.lead,
                                 fresh && snap.emc ? &snap.emcCue : nullptr,
-                                fresh && snap.proteus ? &snap.proteusRo : nullptr,overhead};
+                                fresh && snap.proteus ? &snap.proteusRo : nullptr,overhead,snap.armor ? &snap.armorRo : nullptr};
             StockDockHud(drawer,ctx,t,viewProj,width,height,s,snap.stockHud,x,snap.payload ? &snap.payloadHud : nullptr,
                          storeSwitched,lines,&at);
         }
+        // The hidden stock armor gauge's numbers for a vehicle whose HUD is no StockBlock (that one has them in it).
+        if(now-snap.tick<=kFreshMs && snap.armor && !stockHud)ArmorPanel(drawer,ctx,t,s,snap.armorRo,lines,&at);
         NpcMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         FormationBanner(t,width,height,s,lines,&at);
         SweepBanner(t,width,height,s,lines,&at);

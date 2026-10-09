@@ -222,6 +222,10 @@ HUDTEXT(stockInfo,L"SPD %d km/h    HP %d%%",L"速度 %d km/h    耐久 %d%%",L"�
 HUDTEXT(twist,L"TWIST %+d",L"扭转 %+d",L"扭轉 %+d",L"ひねり %+d")
 HUDTEXT(stabLag,L"STAB LAG",L"稳定器滞后",L"穩定器滯後",L"スタビ遅れ")
 HUDTEXT(stab,L"STAB",L"稳定器",L"穩定器",L"スタビ")
+// The stock armor gauge's numbers where it is hidden (stockgauge.cpp, hud.cpp ArmorRows): the player's armor, and in a
+// vehicle whose HUD shows no durability of its own (the aircraft, the Sazabi) the vehicle's.
+HUDTEXT(armorRow,L"ARMOR %d / %d",L"护甲 %d / %d",L"護甲 %d / %d",L"アーマー %d / %d")
+HUDTEXT(hullRow,L"HULL %d / %d",L"耐久 %d / %d",L"耐久 %d / %d",L"耐久 %d / %d")
 
 // --- The map (map.cpp, mapcmd.cpp) ---
 HUDTEXT(orderFollow,L"FOLLOW",L"跟随",L"跟隨",L"追従")

@@ -347,6 +347,8 @@ fd  (0x38 字节): +0x00..+0x14 = mgr+0x80..+0x94 的 6 个 float；+0x18 = 1；
 
 签名（`InstallStockGauges` 内的 `InstallArmorGauge`，任一不符只关这一项）：`0x827010` 函数头、`0x825290`、`0x825438`、`0x8160C7`（`Guage_Root` 字符串）、`0x816101`、`0x827082`、`0x7E999C`。离线 `tools/armor_hud_check.cpp`（上车 / 换座 / 下车 / 被毁 / 开关 / 换关同地址 / 双人 / 旧记录让位）。
 
+插件 HUD 代显（2026-10-09 追加，用户：「让护甲显示在咱们的hud不就行了」）：仪表自己的数据源是拥有者士兵 `+0x2F8` / `+0x2F4`（更新 `0x827126` 求比值写 `+0xAEC`；布局 `0x826A83` / `0x826A9C` 取整显示），载具耐久是载具 `+0x2F8` / `+0x2F4`（布局 `0x8277B0`），低护甲：`0x827723` 比值 ≤ `0x1765A14` 处的 0.25 时置 `+0xB01`（H）。`ArmorHook` 只在按住隐藏时把这几个数发布给 `hud.cpp`（`armorhud::Publish`，`PlayerStockArmor`）：`StockBlock` 车体条下一行 ARMOR；没有车体耐久行的飞行 HUD / 沙扎比在左上画 `ArmorPanel`（HULL + ARMOR）。只对插件 HUD 的玩家（`PlayerHuman`）隐藏与代显。
+
 **需实机确认**：坐车时左上角护甲 + 耐久条整块消失、下车恢复；`HideStockGauges=0` 时保留；地图打开 / 过场（镜头 `+0x200`）与本隐藏叠加后关地图仍按坐车状态。
 
 ### 9.4 油箱（FuelTank）
