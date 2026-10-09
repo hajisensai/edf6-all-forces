@@ -94,4 +94,34 @@ while at >= 0:
 ok(reads == {(0x59B689, 'cmp', 'byte ptr [rbx + 0xd7a], r15b')}, 'soldier+0xD7A has one reader: the spot branch 0x59B689')
 ok({w[0] for w in writes} == {0x570847, 0x57093C, 0x570A72, 0x570B35},
    'soldier+0xD7A is written from the input mapping alone (0x570847 / 0x57093C / 0x570A72 / 0x570B35)')
+# The stock spot has no sound of its own (the custom Q's cues are the plugin's, vsynth.h MarkOwn ...): nothing reached by
+# direct calls from the cast 0x5A1120 (three deep) or from the SpotEffect's constructor and virtual functions plays one of
+# the game's sound effects (0x7B4510 a preset, 0x7B2A80 a voice: jetsound.cpp, emc.cpp). So VanillaSpot=0 leaves no
+# stray stock sound either.
+ends = {b0: e0 for b0, e0 in funcs}
+base_img = p.OPTIONAL_HEADER.ImageBase
+vt = p.get_data(0x17A91C8, 8 * 15)
+vfuncs = [struct.unpack('<Q', vt[i:i + 8])[0] - base_img for i in range(0, 8 * 15, 8)]
+ok(0x3047C0 in ends and all(f in ends or f < 0x400000 for f in vfuncs[:3]), 'SpotEffect constructor 0x3047C0 and vtable 0x17A91C8 read')
+sound_calls, walked = [], set()
+
+
+def walk(f, depth):
+    if f in walked or depth < 0 or f not in ends:
+        return
+    walked.add(f)
+    for i in md.disasm(p.get_data(f, min(ends[f] - f, 0x6000)), f):
+        if i.mnemonic in ('call', 'jmp') and i.operands and i.operands[0].type == x86.X86_OP_IMM:
+            t = i.operands[0].imm
+            if t in (0x7B4510, 0x7B2A80):
+                sound_calls.append((hex(f), hex(i.address)))
+            if i.mnemonic == 'call':
+                walk(t, depth - 1)
+
+
+walk(0x5A1120, 3)
+walk(0x3047C0, 2)
+for f in vfuncs:
+    walk(f, 2)
+ok(len(walked) > 20 and not sound_calls, f'no stock sound under the spot ({len(walked)} functions walked)')
 print(f'PASS: {checks} stock spot contracts; no game execution')
