@@ -32,6 +32,7 @@ struct Room {
     std::uint64_t now=10000;
     unsigned failTo=999,dropTo=999,legacyNode=999;   // legacyNode: an older build, its hello announces legacyCaps only
     std::uint32_t legacyCaps=0;
+    bool oldHost=false;   // the host's welcome as a build before it carried its capabilities (index 0)
     Kind failKind=Kind::cancel,dropKind=Kind::cancel;
     explicit Room(unsigned count);
     unsigned Peer(unsigned node,unsigned global) const { return global<node ? global+1 : global; }
@@ -62,6 +63,7 @@ bool Send(void* ctx,std::uint32_t peer,const Message& message) noexcept {
     if(dst==room.failTo && message.kind==room.failKind)return false;
     unsigned char wire[kWireSize];Message decoded;
     Message sent=message;if(node.id==room.legacyNode && sent.kind==Kind::hello)sent.index=room.legacyCaps;   // an older build's capabilities
+    if(node.id==0 && room.oldHost && sent.kind==Kind::welcome){sent.catalog=0;sent.ok=0;}
     if(!Encode(sent,wire,sizeof(wire)) || !Decode(wire,sizeof(wire),decoded))return false;
     Packet p{node.id,dst,decoded};room.packets.push_back(p);room.history.push_back(p);return true;
 }
@@ -130,6 +132,9 @@ void Capabilities() {
     Check(Encode(hello,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) && out.index==kCapabilities,
           "a capability hello round-trips on the unchanged v2 wire (an older host's same bounds accept it)");
     Check(bytes[4]==2 && bytes[5]==0,"wire version stays 2: older peers keep talking");
+    Message welcome;welcome.kind=Kind::welcome;welcome.epoch=5;welcome.challenge=7;welcome.request=1;welcome.catalog=kCapabilities;welcome.ok=1;
+    Check(Encode(welcome,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) && out.catalog==kCapabilities && out.ok==1,
+          "a welcome with the host's capabilities passes the unchanged bounds an older guest checks");
     {Room r(3);r.With(0);
      Check(r.nodes[0]->session->PeersHave(kCapSoldierVariants),"every new peer announced soldier variants");
      Check(r.nodes[0]->session->PeersHave(kCapSoldierVariants|kCapAirborneAir),"and airborne air support");
@@ -259,4 +264,37 @@ void RequestOutcomes() {
     Check(newer.nodes[1]->notices.back()==std::make_pair(2u,RequestStatus::active),"previous transaction cancel cannot be misreported as the newer request outcome");
 }
 }
-int main() { Codec();Capabilities();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();std::printf("support protocol: %d checks passed\n",checks); }
+// 2026-10-10: the host's welcome carries its capabilities (a guest says when its host is older or newer, or another guest
+// is behind it); the sea rescue's request and the map's are each told their own outcome; a host knows who asked.
+void RoomBuilds() {
+    {Room r(3);r.With(1);
+     Check(r.nodes[1]->session->HostCapsKnown() && r.nodes[1]->session->HostCaps()==kCapabilities && !r.nodes[1]->session->RoomBehindHost(),
+           "a guest knows its host's capabilities from the welcome");
+     std::uint32_t missing=1;
+     Check(r.nodes[0]->session->PeersBehind(&missing)==0 && missing==0 && r.nodes[0]->session->PeersAhead()==0,"the same build everywhere");}
+    {Room r(3);r.legacyNode=2;r.With(2);r.nodes[2]->session->Stop();r.nodes[2]->session->Start(false,2,1,r.now);r.Settle();r.Step(1100);r.Settle();
+     std::uint32_t missing=0;
+     Check(r.nodes[0]->session->PeersBehind(&missing)==1 && missing==kCapabilities,"the host counts the older guest and what it lacks");
+     Check(r.nodes[1]->session->RoomBehindHost(),"the other guest is told a guest of the room is behind the host");}
+    {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities|8u;r.With(2);r.nodes[2]->session->Stop();r.nodes[2]->session->Start(false,2,1,r.now);
+     r.Settle();r.Step(1100);r.Settle();
+     Check(r.nodes[0]->session->PeersAhead()==1 && r.nodes[0]->session->PeersBehind(nullptr)==0,"a newer guest: the host knows");}
+    {Room r(2);r.oldHost=true;r.With(1);r.nodes[1]->session->Stop();r.nodes[1]->session->Start(false,1,1,r.now);r.Settle();
+     Check(r.nodes[1]->session->Ready() && r.nodes[1]->session->HostCapsKnown() && r.nodes[1]->session->HostCaps()==0,
+           "an older host announces nothing: the guest knows it is older");}
+    {Room r(2);r.nodes[0]->pending=true;
+     Check(r.Submit(1,5),"the map's request");r.Settle();
+     const std::uint32_t first=r.nodes[1]->notices.back().first;
+     r.Step(2100);
+     Check(r.Submit(1,6),"the rescue's request while the map's is still planned");r.Settle();
+     const std::uint32_t second=r.nodes[1]->notices.back().first;
+     Check(second==first+1 && r.nodes[1]->notices.back().second==RequestStatus::refused,"the second is refused (one plan at a time)");
+     r.nodes[0]->pending=false;r.Settle();r.Settle();
+     bool firstActive=false;for(const auto& n:r.nodes[1]->notices)firstActive=firstActive || (n.first==first && n.second==RequestStatus::active);
+     Check(firstActive,"the earlier request still gets its own outcome after a later one (each kept by id)");
+     std::uint64_t token=0;for(std::uint64_t t=1;t<=kMaxTransactions;++t)if(r.nodes[0]->active[t])token=t;
+     std::uint32_t peer=99;
+     Check(token && r.nodes[0]->session->RequesterOf(token,&peer) && peer==1,"the host knows which peer asked for a transaction");
+     Check(!r.nodes[0]->session->RequesterOf(token+50,&peer),"no such transaction: unknown");}
+}
+int main() { Codec();Capabilities();RoomBuilds();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();std::printf("support protocol: %d checks passed\n",checks); }

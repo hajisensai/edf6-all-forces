@@ -98,7 +98,7 @@ void Session::ClearTransactions() noexcept {
 }
 void Session::Stop() noexcept {
     ClearTransactions();running_=false;suspended_=false;epoch_=0;challenge_=0;challenges_.fill(0);peerMissions_.fill(0);peerCaps_.fill(0);
-    hostCaps_=0;hostCapsKnown_=false;
+    hostCaps_=0;hostCapsKnown_=false;hostRoomBehind_=false;
 }
 std::uint32_t Session::PeersBehind(std::uint32_t* missing) const noexcept {
     std::uint32_t behind=0,lack=0;
@@ -166,7 +166,7 @@ bool Session::Broadcast(Message m) noexcept {
 }
 void Session::Welcome(std::uint32_t peer) noexcept {
     Message m;m.kind=Kind::welcome;m.challenge=challenges_[peer];m.request=epochSerial_;
-    m.index=kCapabilities|(PeersBehind(nullptr) ? kWelcomeRoomBehind : 0u);
+    m.catalog=kCapabilities;m.ok=PeersBehind(nullptr) ? 1u : 0u;
     Send(peer,m);
 }
 void Session::Cancel(std::uint32_t id,bool broadcast,RequestStatus reason) noexcept {
@@ -320,7 +320,7 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
     }
     if(!host_ && peer==hostPeer_ && m.kind==Kind::welcome && m.challenge==challenge_ && m.request>=seenEpochSerial_) {
         if(m.request==seenEpochSerial_ && epoch_!=m.epoch)return;
-        hostCaps_=m.index;hostCapsKnown_=true;   // what the host announced (0: an older host)
+        hostCaps_=m.catalog;hostRoomBehind_=m.ok!=0;hostCapsKnown_=true;   // what the host announced (0: an older host)
         if(epoch_!=m.epoch){if(HasSpawned()){Suspend();return;}ClearTransactions();epoch_=m.epoch;}
         seenEpochSerial_=m.request;
         return;
