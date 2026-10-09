@@ -62,6 +62,11 @@ void Codec() {
     m.request.formationSlots[1]=1;Check(!Encode(m,bytes,sizeof(bytes)),"duplicate formation slot rejected");
     m.request.formationTotal=97;Check(!Encode(m,bytes,sizeof(bytes)),"formation total bounded to map selection capacity");
     // Version 3: the RTS orders carry their formation slots as guard does; nothing past the last order decodes.
+    // Version 4: WITHDRAW (a squad's transport sent off) is an order with no point and no slots.
+    m.request=Make(1,mapcmd::Order::withdraw);
+    Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.request.command.order==mapcmd::Order::withdraw,
+          "WITHDRAW round trips");
+    Check(kVersion==4,"the wire is version 4 (WITHDRAW): an older peer refuses it instead of misreading it");
     for(auto order:{mapcmd::Order::move,mapcmd::Order::attackMove}) {
         m.request=Make(2,order);m.request.formationTotal=3;m.request.formationSlots[0]=0;m.request.formationSlots[1]=2;
         Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.request.command.order==order &&
@@ -77,7 +82,7 @@ void Codec() {
         std::uint32_t was;std::memcpy(&was,edit+kOrderAt,4);
         Check(was==static_cast<std::uint32_t>(mapcmd::Order::guard),"the order word where the codec writes it");
         std::memcpy(edit+kOrderAt,&last,4);
-        Check(Decode(edit,sizeof(edit),out) && out.request.command.order==mapcmd::kLastOrder,"the last order (attack-move) decodes");
+        Check(Decode(edit,sizeof(edit),out) && out.request.command.order==mapcmd::kLastOrder,"the last order (withdraw) decodes");
         std::memcpy(edit+kOrderAt,&past,4);
         Check(!Decode(edit,sizeof(edit),out),"an order past the last one is not decoded");
     }

@@ -631,10 +631,18 @@ void RtsClicks() noexcept {
     Check(!Takes(g.list[0],Order::recruit) && !Takes(g.list[0],Order::follow) && !Takes(g.list[0],Order::move) &&
           !Takes(g.list[0],Order::guard) && Takes(g.list[0],Order::dismount) && Takes(g.list[0],Order::none),
           "a riding squad: no recruit / follow / point order, dismount and release");
+    Check(!Takes(g.list[0],Order::withdraw),"a squad with no transport: no WITHDRAW");
+    // Its transport (transport.cpp; the user, 2026-10-09: "卡车之类的运输载具改成断剑那种操作方式"): aboard its own vehicle a
+    // squad takes the point orders (it rides there and gets off short of the point) and WITHDRAW; still no follow.
+    g.list[0].u.transport=true;
+    Check(Takes(g.list[0],Order::move) && Takes(g.list[0],Order::attackMove) && Takes(g.list[0],Order::guard) &&
+          Takes(g.list[0],Order::withdraw) && Takes(g.list[0],Order::dismount) && !Takes(g.list[0],Order::follow) &&
+          !Takes(g.list[0],Order::recruit),"a riding squad with its transport: point orders and WITHDRAW, no follow / recruit");
     CommandUnit free{squadObj,"squad",Command{},false,{0,0,0}};free.recruitable=true;g.list[0]=Entry{free,Owner::squad};
     Check(Takes(g.list[0],Order::recruit) && Takes(g.list[0],Order::move) && Takes(g.list[0],Order::attackMove),"a free squad on foot: all of them");
     CommandUnit tank{squadObj,"tank",Command{},false,{0,0,0}};g.list[0]=Entry{tank,Owner::tank};
     Check(Takes(g.list[0],Order::move) && !Takes(g.list[0],Order::follow),"a tank takes a move (as its post), not follow");
+    Check(!Takes(g.list[0],Order::withdraw),"WITHDRAW is a squad's order, not a vehicle's");
     std::memset(inputstub::keys,0,sizeof(inputstub::keys));squadOn=false;groundReady=false;marked=nullptr;ResetMapCommands();
 }
 void RemoteCommandResults() noexcept {

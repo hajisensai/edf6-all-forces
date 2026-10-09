@@ -373,6 +373,77 @@ int main() {
     check(v2,"the whole plan uses only resources a protocol v2 Validate knows");
     peersNew=true;ResetSupportDispatch();SupportCallStatus(note,128);
     check(!std::wcsstr(note,hudtext::Tr(hudtext::Tx::supportLegacyPeers)),"the older-peer notice ends with the mission");
+    // The transports (transport.cpp; the user, 2026-10-09: "飞机和直升机应该也有运输机", "飞机就空降"): four entries after the
+    // ground ones, every older index and key as it was; a hull in the air, its pilot and the soldiers made inside it.
+    check(SupportCallCount()==33 && !std::wcscmp(SupportCallKey(28),L"TRUCK_DELIVERY") && !std::wcscmp(SupportCallKey(29),L"SQUAD_HELI") &&
+          !std::wcscmp(SupportCallKey(32),L"PLATOON_AIRDROP"),"the transports appended: every older index and key stands");
+    check(SupportCallIcon(29)==SupportIcon::heli && SupportCallIcon(31)==SupportIcon::jet && SupportCallVariant(30)==SupportVariant::platoon &&
+          SupportCallVariant(31)==SupportVariant::squad,
+          "a helicopter row and a plane row, each with a squad and a platoon chip");
+    ResetSupportDispatch();made=deleted=seatNow=activated=delivered=followed=resourceCount=0;fixtureMs+=40000;peersNew=true;
+    check(SupportCallAt(30,target,note,128),"a helicopter assault (a platoon) queued");
+    SupportDispatchTick();
+    const SupportPlan assault=deployments[0].plan;
+    check(made==14 && assault.count==14 && lastPrepared.heli==static_cast<int>(HeliBody::transport410) && seatNow==1 && activated==1,
+          "a platoon in one transport helicopter: hull, pilot and twelve soldiers made inside it, seated, flying in at spawn");
+    check(At<const void*>(SeatAt(objects[0],0),kSeatRider)==objects[1] && At<const void*>(SeatAt(objects[0],12),kSeatRider)==objects[13],
+          "the pilot at the stick, the twelve in its other seats");
+    check(delivered==1 && deliveredSquads==3 && followed==9 && deliveredHull==objects[0] && deliveredTops[0]==objects[2] &&
+          deliveredTops[1]==objects[6] && deliveredTops[2]==objects[10],
+          "three squads (a leader every four, the three after it following him) handed to their helicopter");
+    check(deployments[0].delivered && Validate(assault),"handed over: the dispatcher leaves them to transport.cpp; a peer accepts the plan");
+    SupportPlan bad=assault;bad.units[3].resourceId=kSupportLeaderResource;check(!Validate(bad),"a leader out of place is refused");
+    bad=assault;bad.units[1].role=0;check(!Validate(bad),"a pilot detached from its hull is refused");
+    bad=assault;bad.count=10;check(!Validate(bad),"a platoon short of soldiers is refused");
+    bad=assault;bad.units[0].resourceId=kSupportAircraftResource+kSupportAirborneOffset+31;check(!Validate(bad),"another entry's hull is refused");
+    ResetSupportDispatch();made=0;ferries=paradrops=0;fixtureMs+=40000;
+    SupportCallAt(31,target,note,128);SupportDispatchTick();
+    check(made==6 && lastPrepared.transportPlane && ferries==1 && paradrops==1 && delivered==1,
+          "a paratroop plane: four soldiers aboard, it flies on to the point attacking nothing and drops them there");
+    ResetSupportDispatch();made=0;transportReady=false;fixtureMs+=40000;
+    SupportCallAt(29,target,note,128);SupportDispatchTick();
+    SupportCallStatus(note,128);
+    check(!made && !offlinePending && std::wcsstr(note,L"运输机资源未安装"),"the transport's SGO not installed: refused with why, nothing made");
+    transportReady=true;peersTransports=false;ResetSupportDispatch();made=0;fixtureMs+=40000;
+    SupportCallAt(29,target,note,128);SupportDispatchTick();
+    check(!made && !offlinePending,"a peer without the transports: refused before anything is made");
+    peersTransports=true;
+    // Retired with its soldiers got off: only the pilot still aboard is deleted (Retire), never the ones fighting on.
+    ResetSupportDispatch();made=deleted=0;fixtureMs+=40000;
+    SupportCallAt(29,target,note,128);SupportDispatchTick();
+    check(made==6,"a squad's helicopter");
+    for(unsigned seat=1;seat<6;++seat)Put<const void*>(SeatAt(objects[0],seat),kSeatRider,nullptr);
+    aircraftLeft=true;fixtureMs+=1;SupportDispatchTick();aircraftLeft=false;
+    check(deleted==1,"left: its pilot deleted, the four who got off left alone");
+    heliHull=true;
+    check(SupportWithdrawVehicle(objects[0]) && heliLeaves==1,"WITHDRAW: a support helicopter flies off");
+    heliHull=false;
+    check(!SupportWithdrawVehicle(objects[3]),"a soldier is no support vehicle");
+    // A crewed APC arrived (Broken Arrow, the user 2026-10-09: "卡车之类的运输载具改成断剑那种操作方式"): the soldiers in its
+    // passenger seats a squad, handed to it as their transport; its driver stays at the wheel.
+    ResetSupportDispatch();made=deleted=followed=delivered=0;fixtureMs+=40000;
+    {
+        auto apc=Make(true),driver=Make(),first=Make(),second=Make();
+        auto& d=deployments[0];d.used=d.assigned=d.started=true;d.id=7;d.born=fixtureMs;
+        d.plan.catalogId=static_cast<unsigned>(GroundStart()+2);d.plan.count=4;
+        d.plan.units[0].resourceId=kVehicle+1;
+        for(unsigned i=1;i<4;++i){d.plan.units[i].resourceId=kSoldier;d.plan.units[i].role=1;}
+        d.objects[0]=apc;d.objects[1]=driver;d.objects[2]=first;d.objects[3]=second;
+        auto* v=static_cast<unsigned char*>(const_cast<void*>(apc.obj));
+        for(unsigned i=0;i<3;++i){Put<const void*>(SeatAt(v,i),kSeatRider,d.objects[i+1].obj);}
+        routeResult=npc::navigation::Result::arrived;
+        SupportDispatchTick();fixtureMs+=16;SupportDispatchTick();
+        check(d.delivered && delivered==1 && deliveredSquads==1 && deliveredTops[0]==first.obj && deliveredHull==apc.obj && followed==1,
+              "arrived: its passengers one squad (the second following the first), handed to the APC; the driver not among them");
+        // WITHDRAW: back to its entry (here at once: nobody drives it), its own crew aboard deleted, then the hull.
+        driverAboard=false;deleted=0;
+        check(SupportWithdrawVehicle(apc.obj) && d.withdrawing,"WITHDRAW: a support APC goes back to its entry");
+        fixtureMs+=16;SupportDispatchTick();
+        check(deleted==3,"out: its crew still aboard deleted (all three here)");
+        fixtureMs+=16;SupportDispatchTick();
+        check(deleted==4 && !d.withdrawing,"then the hull");
+        driverAboard=true;routeResult=npc::navigation::Result::pending;
+    }
     std::printf("support_dispatch_test: %d checks passed\n",checks);
 }
 #endif

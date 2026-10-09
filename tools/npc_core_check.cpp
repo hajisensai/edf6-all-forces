@@ -137,6 +137,8 @@ void Reset() {
     gunnerEnemy=nullptr;vehicleCopyOwner=online::kCopyHost;
     mapHeld=true;rayOn=false;markEnemy=nullptr;pointOrders=0;markinput::down=false;
     ok=followOk=rideOk=true;world.frame=frame;config.npcSquadSuccession=true;
+    transportTakes=false;transportOrders=transportCancels=transportPairs=0;transportPaired=transportPairTop=transportSucceededTo=nullptr;
+    transportWithdraw=NpcCommandReason::noTransport;
 }
 }
 const Config& Cfg() noexcept { return config; }
@@ -214,6 +216,7 @@ int main() {
     Reset();Put<unsigned>(human,kObjectFlags,kFixPosition);PreThink(human);
     Expect(follows==0,"a fixed-position scripted follower keeps its native leader transition");
     Reset();PreThink(human);Expect(follows==1,"an ordinary friendly remnant still elects its leader");
+    Expect(transportSucceededTo==human,"its transport goes with the squad to the new leader (transport.cpp TransportSucceed)");
     Reset();world.friends=1;world.frObject[0]=other;Put<std::uint64_t>(other,kFollowerCount,1);Put<unsigned>(other,kObjectFlags,kFixPosition);
     unsigned char* leaders[4];float places[4][3];int sizes[4];
     Expect(OtherSquads(dead,false,leaders,places,sizes,4)==0,"fixed script squads cannot absorb a remnant");
@@ -371,6 +374,8 @@ int main() {
         auto* child=Entry(dead,now);
         Expect(result.Accepted() && result.affected==1 && child->boardV.Is(vehicle) && child->boardSeat==0,
             "mixed squad boards a compatible member via nearby entrance even when leader class cannot ride and body centre is far");
+        Expect(transportPairs==1 && transportPairTop==human && transportPaired==vehicle,
+            "a squad that boards a vehicle is paired with it (its transport from now on: transport.cpp)");
         const auto assignedAt=child->boardAt;++now;
         result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::board,{}},ObjRef::Of(other),{});
         Expect(result.Accepted() && child->boardAt==assignedAt,"an already valid boarding assignment is not reported as failure or restarted");
@@ -471,6 +476,22 @@ int main() {
                    "a seated squad: no recruitment offered, its status RIDING");
             result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::move,{40,0,0}},ObjRef::Of(other),{});
             Expect(!result.Accepted(),"a seated squad's soldiers take no map move (its vehicle does)");
+            // Its transport (transport.cpp; the user, 2026-10-09: "卡车之类的运输载具改成断剑那种操作方式"): a point order the
+            // transport takes is accepted and the squad's own order left for the trip to give back once off; WITHDRAW is the
+            // transport's (its refusal passed on); any other order leaves the trip.
+            transportTakes=true;const Order before=commandSquad->cmd.order;const int asked=transportOrders;
+            result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::attackMove,{900,0,0}},ObjRef::Of(other),{});
+            Expect(result.Accepted() && transportOrders==asked+1 && commandSquad->cmd.order==before,
+                   "a seated paired squad's far order goes by its transport, its own order untouched");
+            transportTakes=false;transportWithdraw=NpcCommandReason::none;
+            result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::withdraw,{}},ObjRef::Of(other),{});
+            Expect(result.Accepted(),"WITHDRAW answered by its transport");
+            transportWithdraw=NpcCommandReason::noTransport;
+            result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::withdraw,{}},ObjRef::Of(other),{});
+            Expect(result.reason==NpcCommandReason::noTransport,"...and its refusal passed on");
+            const int cancels=transportCancels;
+            NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::dismount,{}},ObjRef::Of(other),{});
+            Expect(transportCancels==cancels+1,"another order leaves the trip (TransportCancel)");
         } else Expect(false,"the stand-in ride makes the soldier seated");
         Put<void*>(human,kHumanRiding,nullptr);Put<void*>(human,kHumanVehicleCtrl,nullptr);
         Expect(SquadRecruitable(*commandSquad),"on foot again, a free squad: recruitment offered");
