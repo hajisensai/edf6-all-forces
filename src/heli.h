@@ -63,6 +63,9 @@ void HeliReap(const void* self) noexcept;
 void HeliCalled(unsigned char* vehicle,bool guard,const float* post,DWORD fuelSec) noexcept;
 // A called heli's fuel (game thread): seconds until it flies off (0: leaving); false with no limit.
 bool HeliFuel(const void* vehicle,float* sec) noexcept;
+// A called heli that has left and is far enough out to go (its reap is set). HeliReap deletes such a heli only with
+// no real soldier aboard; a support deployment's (real crew) is retired by its owner, the dispatcher.
+bool HeliLeft(const void* vehicle) noexcept;
 // Where a vehicle weapon's barrel is and points (the mean of its muzzles' frames).
 bool GunBarrel(const unsigned char* v,const unsigned char* weapon,float* pos,float* dir) noexcept;
 // Sea rescue: once a game frame from the frame's common step (crew.cpp FrameTick), whether or not any heli

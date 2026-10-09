@@ -46,6 +46,7 @@
 #include "edf/weapon.h"
 #include "warn.h"
 #include "retired_loadout.h"
+#include "support_aircraft.h"
 #include <cmath>
 
 namespace crew {
@@ -2895,6 +2896,11 @@ bool HeliCommand(const void* vehicle,const Command& c,const ObjRef& focus) noexc
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
+bool HeliLeft(const void* vehicle) noexcept {
+    for(const auto& h:helis)if(h.ref.Is(vehicle))return h.reap;
+    return false;
+}
+
 bool HeliFuel(const void* vehicle,float* sec) noexcept {
     for(const auto& h:helis) {
         if(!h.called || !h.ref.Is(vehicle))continue;
@@ -2927,7 +2933,9 @@ void HeliReap(const void* self) noexcept {
                 realCrew=realCrew || SeatRider(seat)==Rider::other;
             }
             if(playerAboard){h=Heli{};continue;}
-            if(realCrew)continue; // retain the complete flight state; never delete under real occupants
+            // Never under real soldiers: a support deployment's heli (its crew and hull) is retired by the dispatcher
+            // that made them (support_dispatch.cpp Retire), from HeliLeft; until then the flight state stays whole.
+            if(realCrew || SupportAircraftOwned(v))continue;
             h=Heli{};
             if(SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::dummy)reinterpret_cast<KickFn>(image+kSeatKick)(v,SeatAt(v,0));
             reinterpret_cast<DeleteFn>(image+kDelete)(v);

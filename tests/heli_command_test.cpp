@@ -38,6 +38,7 @@ void JetFrame(unsigned char*) noexcept { MissingDependency(); }
 unsigned char* HeliLaunch(HeliBody,const float*,const float*) noexcept { MissingDependency();return nullptr; }
 PluginBody BodyOf(const void*) noexcept { MissingDependency();return PluginBody{}; }
 bool IsSub(const void*) noexcept { MissingDependency();return false; }
+bool SupportAircraftOwned(const void*) noexcept { return false; }   // no support deployment in this test
 bool SubDeck(const float*,float*) noexcept { MissingDependency();return false; }
 float SubHullGap(const float*) noexcept { MissingDependency();return 0.0f; }
 bool IsPlayerJet(const void*) noexcept { MissingDependency();return false; }

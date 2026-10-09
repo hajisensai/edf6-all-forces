@@ -75,11 +75,53 @@ void Routing() {
         [&](Point a,Point b,Point& c){return w(a,b,c);});
     Check(arrival==Result::arrived,"final approach can finish without planning forever");
 }
+// Support entries stand 650-950 m from their target (support_entry.h GroundEntryCandidates) and the support route
+// profiles use 4 m cells. 2026-10-09 17:00 the user's tank call rejected all ten candidates one by one, ~40 s each,
+// "no route to the target": a Euclidean estimate on the 8-way grid undercounts every off-axis route, so the search
+// had to open the whole ellipse of cells whose estimate was under the real cost and ran out of nodes first, even
+// across an empty flat field (before the fix 15 of these 21 failed, all but 0 and 45 deg).
+struct Field {
+    float wall=0.0f;   // half the length of a wall across the route at x = 325, 0: none
+    Edge operator()(Point a,Point b,Point& out) const {
+        if((a.x<325.0f)!=(b.x<325.0f) && std::fabs(a.z)<wall)return Edge::blocked;
+        out=b;out.y=0.0f;return Edge::open;
+    }
+};
+template<class S>
+Result Far(S& s,const Field& f,Point to,Profile p) {
+    Point next{};std::uint64_t ms=1;Result r=Result::pending;
+    for(int i=0;i<40000 && r==Result::pending;++i){ms+=16;r=Navigate(s,{},to,2.0f,ms,next,f,p);}
+    return r;
+}
+void LongRoutes() {
+    Profile p;p.cell=4.0f;p.radius=4.0f;p.height=3.5f;p.waypointRadius=4.0f;
+    // The exact estimate alone: a soldier's state (kNodes), the shortest route, in a straight walk of cells.
+    for(float metres:{650.0f,800.0f,950.0f})for(float deg:{0.0f,10.0f,22.5f,33.0f,45.0f,67.5f,80.0f}) {
+        auto s=std::make_unique<State>();
+        const float a=deg*3.14159265f/180.0f;
+        char name[96];std::snprintf(name,sizeof name,"open field: a %.0f m route at %.1f deg is found",metres,deg);
+        Check(Far(*s,Field{},{std::cos(a)*metres,0,std::sin(a)*metres},p)==Result::moving && s->count<kNodes,name);
+        Point at{};bool straight=true;
+        for(int i=0;i<s->length;++i){straight=straight && Horizontal(at,s->path[i])<=p.cell*1.5f;at=s->path[i];}
+        Check(straight && s->length>metres/(p.cell*1.5f),"the route steps cell by cell");
+    }
+    // A support route (RouteState, kRouteGreed) round a wall straight across its middle: 400 m long, then the
+    // shortest-route search (greed 1) runs out of even kRouteNodes in front of it.
+    Profile route=p;route.greed=kRouteGreed;
+    auto s=std::make_unique<RouteState>();
+    Check(Far(*s,Field{200.0f},{650,0,0},route)==Result::moving,"a support route round a 400 m wall is found");
+    float length=0.0f;Point at{};bool round=false;
+    for(int i=0;i<s->length;++i){length+=Horizontal(at,s->path[i]);at=s->path[i];round=round || std::fabs(at.z)>=200.0f;}
+    Check(round && length<=650.0f*kRouteGreed,"it goes round the wall's end, within kRouteGreed of the shortest");
+    s=std::make_unique<RouteState>();
+    Check(Far(*s,Field{200.0f},{650,0,0},p)==Result::blocked,"negative control: the shortest-route search runs out there");
+    s=std::make_unique<RouteState>();
+    Check(Far(*s,Field{100000.0f},{650,0,0},route)==Result::blocked,"a wall with no end is still no route");
 }
 // Profile::horizon (the NPCs' map orders; the user, 2026-10-09: soldiers under a move order stood still for 40 s): a long
 // route's first leg is searched in a fraction of the edges the whole route takes, every leg is walkable, the legs
 // together reach the goal round a long wall, and an unreachable goal is approached and then blocked, never crossed.
-struct Field {
+struct HorizonField {
     float wallX=100.0f,wallHalf=60.0f;bool sealed=false;
     long calls=0;
     Edge operator()(Point a,Point b,Point& out) {
@@ -97,14 +139,14 @@ struct Field {
 };
 // Walks along what Navigate gives (to each waypoint in turn, each step checked against the field) until it arrives or
 // is blocked; the steps taken and the result.
-Result Walk(Field& f,Point& at,Point goal,Profile p,int* steps,bool* valid,int most=200000) {
+Result Walk(HorizonField& f,Point& at,Point goal,Profile p,int* steps,bool* valid,int most=200000) {
     auto s=std::make_unique<State>();std::uint64_t ms=1;Result r=Result::pending;*steps=0;*valid=true;
     for(int i=0;i<most;++i) {
         ms+=16;Point next{};
         r=Navigate(*s,at,goal,1.0f,ms,next,[&](Point a,Point b,Point& c){return f(a,b,c);},p);
         if(r==Result::arrived || r==Result::blocked)break;
         if(r!=Result::moving)continue;
-        Field check=f;Point out{};
+        HorizonField check=f;Point out{};
         if(Horizontal(at,next)>0.01f && check(at,next,out)!=Edge::open)*valid=false;
         at=next;++*steps;
     }
@@ -113,7 +155,7 @@ Result Walk(Field& f,Point& at,Point goal,Profile p,int* steps,bool* valid,int m
 void Horizon() {
     Profile rolling;rolling.horizon=40.0f;
     {   // the first leg: a fraction of the whole route's search, a walkable prefix towards the goal
-        Field whole,leg;whole.wallHalf=leg.wallHalf=0.0f;
+        HorizonField whole,leg;whole.wallHalf=leg.wallHalf=0.0f;
         auto a=std::make_unique<State>(),b=std::make_unique<State>();std::uint64_t ms=1;Point next{};
         Result ra=Result::pending,rb=Result::pending;
         for(int i=0;i<20000 && ra==Result::pending;++i){ms+=16;ra=Navigate(*a,{},{300,0,0},1.0f,ms,next,[&](Point p,Point q,Point& c){return whole(p,q,c);});}
@@ -127,16 +169,17 @@ void Horizon() {
         std::printf("horizon: whole route %ld edge queries, first 40 m leg %ld\n",whole.calls,leg.calls);
     }
     {   // leg after leg round a 120 m wall to a goal 200 m away
-        Field f;Point at{};int steps=0;bool valid=true;
+        HorizonField f;Point at{};int steps=0;bool valid=true;
         const Result r=Walk(f,at,{200,0,0},rolling,&steps,&valid);
         Check(r==Result::arrived && Horizontal(at,{200,0,0})<=1.5f,"legs reach the goal round the wall");
         Check(valid,"every step of every leg is walkable");
     }
     {   // a sealed wall: it walks up to the wall and is then blocked, never through
-        Field f;f.sealed=true;Point at{};int steps=0;bool valid=true;
+        HorizonField f;f.sealed=true;Point at{};int steps=0;bool valid=true;
         const Result r=Walk(f,at,{200,0,0},rolling,&steps,&valid,4000);
         Check(r!=Result::arrived && at.x<100.0f,"an unreachable goal is never reached through the wall");
         Check(valid && at.x>80.0f,"it gets as near as the ground goes");
     }
 }
-int main(){Routing();Horizon();std::printf("ground navigation: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}
+}
+int main(){Routing();LongRoutes();Horizon();std::printf("ground navigation: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}

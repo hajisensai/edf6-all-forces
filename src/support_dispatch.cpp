@@ -18,6 +18,8 @@
 #include "hudtext.h"
 #include <cwchar>
 #include <cstring>
+#include <new>
+#include <type_traits>
 
 namespace crew {
 // Implemented by the real-crew adapter; no imaginary rider participates in deployment.
@@ -41,21 +43,30 @@ static_assert(kInfantryRouteStop<kInfantryWaypointRadius,"leader must advance be
 static_assert(kVehicleDriverHold<kVehicleWaypointRadius,"a route must advance before its driver stops");
 struct Planning {
     bool active=false;std::uint32_t catalog=0;float target[3]{};
-    int edge=0;npc::navigation::State navigation{};
+    int edge=0;npc::navigation::RouteState navigation{};
     bool entriesMade=false;support::GroundEntries entries{};   // fixed at the request: the caller moves on meanwhile
 };
 Planning planning{};
+// The planning and deployment rows hold route states (ground_navigation.h RouteState, ~150 KB each): `row={}` would
+// build the empty value as a stack temporary first. Renew value-initialises the row where it stands.
+template<class T>
+void Renew(T& row) noexcept {
+    static_assert(std::is_trivially_destructible_v<T>,"rows are plain data");
+    ::new(static_cast<void*>(&row)) T{};
+}
+
 struct InfantryRoute {
-    npc::navigation::State navigation{};
+    npc::navigation::RouteState navigation{};
     bool given=false,done=false,released=false;
 };
 struct Deployment {
     bool used=false,remote=false,started=false,delivered=false,networked=false,assigned=false;
     std::uint64_t id=0;ULONGLONG born=0;
     SupportPlan plan{};ObjRef objects[support_net::kMaxUnits]{};
-    npc::navigation::State navigation{};
+    npc::navigation::RouteState navigation{};
     float vehicleSample[3]{};ULONGLONG vehicleSampleAt=0;
     InfantryRoute infantry[3]{}; // one bounded coarse route per leader, not per follower
+    ULONGLONG retiredFrame[support_net::kMaxUnits]{}; // an aircraft's crew deleted at this frame + 1 (Retire)
 };
 Deployment deployments[kDeployments]{};
 bool offlinePending=false;std::uint64_t nextOffline=1;ULONGLONG callAt=0;
@@ -105,7 +116,7 @@ bool InfantryCatalog(std::uint32_t catalog) noexcept {
     return catalog==static_cast<unsigned>(AirCount()) || catalog==static_cast<unsigned>(AirCount()+1);
 }
 npc::navigation::Profile InfantryRouteProfile() noexcept {
-    npc::navigation::Profile profile;profile.cell=4;profile.waypointRadius=kInfantryWaypointRadius;return profile;
+    npc::navigation::Profile profile;profile.cell=4;profile.waypointRadius=kInfantryWaypointRadius;profile.greed=npc::navigation::kRouteGreed;return profile;
 }
 bool GroundCatalog(std::uint32_t id,SupportVehicleKind& kind,SupportCrewMode& mode) noexcept {
     const int index=static_cast<int>(id)-GroundStart();
@@ -116,7 +127,7 @@ bool GroundCatalog(std::uint32_t id,SupportVehicleKind& kind,SupportCrewMode& mo
 npc::navigation::Profile VehicleRouteProfile(const SupportVehicleSpec& spec) noexcept {
     npc::navigation::Profile profile;
     profile.radius=std::hypot(spec.halfWidth,spec.halfLength);profile.height=spec.height;profile.cell=4;
-    profile.waypointRadius=kVehicleWaypointRadius;
+    profile.waypointRadius=kVehicleWaypointRadius;profile.greed=npc::navigation::kRouteGreed;
     return profile;
 }
 bool Live(const ObjRef& ref) noexcept {
@@ -189,8 +200,13 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,SupportPl
     }
     if(!Cfg().customNpcAi){Refuse(catalog,"CustomNpcAi=0",L"NPC 指挥功能未启用，无法调度支援机组");return PlanResult::refused;}
     if(!SupportSoldiersReady()){Refuse(catalog,"support soldiers not ready",SupportSoldierFailureText());return PlanResult::refused;}
+    // Both entries stand on the measured play area (playarea.cpp: once a mission, kMeasureAfterMs in, a side a frame).
+    // Until then MapPlayArea is the physics square with no ground: a call made in those seconds was refused (an air one as
+    // "no clear air corridor", 2026-10-09 16:52:26, 50 ms before the area was in; the same call worked later). It waits.
+    if(!PlayAreaMeasured())return PlanResult::pending;
+    if(!MapPlayArea().ground){Refuse(catalog,"no ground found round the map's centre",L"无法测定本图的地面范围，无法规划支援入口");return PlanResult::refused;}
     if(!planning.active || planning.catalog!=catalog || std::memcmp(planning.target,target,12)!=0) {
-        planning={};planning.active=true;planning.catalog=catalog;std::memcpy(planning.target,target,12);
+        Renew(planning);planning.active=true;planning.catalog=catalog;std::memcpy(planning.target,target,12);
         legacyNoticed=false;
     }
     SupportPlan plan{};plan.catalogId=catalog;std::memcpy(plan.target,target,12);
@@ -215,6 +231,7 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,SupportPl
         const auto refusal=PlanAirSupport(static_cast<int>(catalog),target,player.pos,&route,spec.count);
         if(refusal!=support::Refusal::none) {
             if(refusal==support::Refusal::noSky)Refuse(catalog,"no open sky over the target",L"此处没有开放天空，航空支援无法进入");
+            else if(refusal==support::Refusal::noArea)Refuse(catalog,"the measured play area is too small for an entry",L"本图场地过小，无法安排空中入场");
             else Refuse(catalog,"no clear air corridor from any map edge",L"从地图边缘到目标没有净空的空中航线");
             return PlanResult::refused;
         }
@@ -235,7 +252,6 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,SupportPl
         *out=plan;planning.active=false;return PlanResult::ready;
     }
     const auto area=MapPlayArea();
-    if(!area.ground){Refuse(catalog,"play area not measured yet",L"地图入口尚未测定");return PlanResult::refused;}
     SupportVehicleKind kind{};SupportCrewMode mode{};const bool vehicle=GroundCatalog(catalog,kind,mode);
     const auto* spec=vehicle ? SupportVehicleInfo(kind) : nullptr;
     if(vehicle && !support::Allowed(SupportMissionPolicy(),spec && spec->wasteland ? support::Capability::civilianGround : support::Capability::militaryGround)) {
@@ -257,7 +273,7 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,SupportPl
     float entry[3]={planning.entries.at[planning.edge][0],target[1],planning.entries.at[planning.edge][1]};
     const auto nextEdge=[&](const char* why) {
         Log("SUPPORT plan catalog=%u entry %d (%.0f,%.0f) rejected: %s",catalog,planning.edge,entry[0],entry[2],why);
-        ++planning.edge;planning.navigation={};return PlanResult::pending;
+        ++planning.edge;Renew(planning.navigation);return PlanResult::pending;
     };
     if(!Foot(entry[0],entry[2],target[1],entry[1]))return nextEdge("no dry standable ground");
     auto profile=InfantryRouteProfile();
@@ -340,6 +356,35 @@ bool Validate(const SupportPlan& plan) noexcept {
     }
     return true;
 }
+// A deployment's aircraft whose flight is over (SupportAircraftLeft: withdrawn far out for fuel, ammo or damage): its
+// owner deletes the real crew it made, then the hull once the game has taken it as empty (team kTeamVehicle, the stock
+// emptied step) or kRetireSettleFrames after (jet.cpp kReapSettleFrames: a hull deleted before that step stayed in team
+// 5's set after it was freed). HeliReap / JetReap never delete under real soldiers, so nothing deleted them: out of fuel
+// they hung at the map's edge for the rest of the mission (2026-10-09 16:59, two helis parked at x 1447 and -1450).
+// A player aboard keeps the whole aircraft.
+constexpr ULONGLONG kRetireSettleFrames=30;
+void Retire(Deployment& deployed) noexcept {
+    const auto& plan=deployed.plan;
+    for(unsigned i=0;i<plan.count;++i) {
+        const auto resource=plan.units[i].resourceId;
+        if(plan.units[i].role || resource<kAircraft || resource>=kVehicle || !Live(deployed.objects[i]))continue;
+        auto* hull=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[i].obj));
+        bool aboard=false;
+        for(unsigned seat=0;seat<SeatCount(hull);++seat)aboard=aboard || AnyPlayerIn(SeatAt(hull,seat));
+        if(aboard)continue;
+        auto& retired=deployed.retiredFrame[i];
+        if(!retired) {
+            if(!SupportAircraftLeft(deployed.objects[i]))continue;
+            for(unsigned k=0;k<plan.count;++k)if(plan.units[k].role==i+1)DeleteSupportSoldier(deployed.objects[k]);
+            retired=GameFrame()+1;
+            Log("SUPPORT deployment %llu: aircraft %u has left: its crew deleted",static_cast<unsigned long long>(deployed.id),i);
+            continue;
+        }
+        if(At<std::int32_t>(hull,kTeam)!=kTeamVehicle && GameFrame()+1-retired<kRetireSettleFrames)continue;
+        if(DeleteSupportAircraft(deployed.objects[i]))
+            Log("SUPPORT deployment %llu: aircraft %u gone (deleted)",static_cast<unsigned long long>(deployed.id),i);
+    }
+}
 void Destroy(std::uint64_t id) noexcept {
     for(auto& deployed:deployments)if(deployed.used && deployed.id==id) {
         bool preserve[support_net::kMaxUnits]{};
@@ -369,7 +414,7 @@ void Destroy(std::uint64_t id) noexcept {
             if(deployed.plan.units[i].resourceId>=kVehicle && Live(deployed.objects[i]))DeleteSupportVehicle(static_cast<unsigned char*>(const_cast<void*>(deployed.objects[i].obj)));
             else if(deployed.plan.units[i].resourceId>=kAircraft)DeleteSupportAircraft(deployed.objects[i]);
         }
-        deployed={};Status(occupied ? L"部署已取消，保留玩家已经登乘的车辆及其机组" : L"支援部署取消，已撤销未完成的部署");return;
+        Renew(deployed);Status(occupied ? L"部署已取消，保留玩家已经登乘的车辆及其机组" : L"支援部署取消，已撤销未完成的部署");return;
     }
     DestroyMissionCrewPlan(id);
 }
@@ -521,7 +566,7 @@ bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capac
     else if(offlinePending)Status(L"上一项支援仍在核实入场路线");
     else if(callAt && GameMs()-callAt<kCallCooldown)Status(L"支援调度冷却中（30 秒）");
     else {
-        planning={};planning.active=true;planning.catalog=static_cast<unsigned>(index);std::memcpy(planning.target,target,12);
+        Renew(planning);planning.active=true;planning.catalog=static_cast<unsigned>(index);std::memcpy(planning.target,target,12);
         offlinePending=true;accepted=true;Status(L"正在安排支援入口及路线");
         Log("SUPPORT request catalog=%d accepted here (%s)",index,InSession() ? "host of a one-player world" : "offline");
     }
@@ -591,7 +636,8 @@ void SupportDispatchTick() noexcept {
         if(!deployed.used)continue;
         bool anyLive=false;
         for(unsigned i=0;i<deployed.plan.count;++i)anyLive=anyLive || Live(deployed.objects[i]);
-        if(!anyLive){deployed={};continue;}
+        if(!anyLive){Renew(deployed);continue;}
+        if(!deployed.remote)Retire(deployed);
         if(!deployed.assigned) {
             if(deployed.networked && !SupportTransactionActive(deployed.id))continue;
             if(!Assign(deployed)) {
@@ -702,7 +748,7 @@ void SupportDispatchTick() noexcept {
 }
 void ResetSupportDispatch() noexcept {
     // Mission reset invalidates the old objects; do not delete through last mission's borrowed pointers.
-    planning={};for(auto& row:deployments)row={};offlinePending=false;callAt=0;nextOffline=1;status[0]=0;configNoticeShown=false;
+    Renew(planning);for(auto& row:deployments)Renew(row);offlinePending=false;callAt=0;nextOffline=1;status[0]=0;configNoticeShown=false;
     legacyNoticed=false;
     localRequest={};
     dispatchFrame=~ULONGLONG{0};

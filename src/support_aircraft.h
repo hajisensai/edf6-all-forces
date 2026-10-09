@@ -22,4 +22,9 @@ unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float* matrix
 // (a legacy plan's hull on the ground) it takes off.
 bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float* target,bool airborne) noexcept;
 bool DeleteSupportAircraft(const ObjRef&) noexcept;
+// A hull this support layer made (and has not deleted). Its owner, the dispatcher, deletes it with its real crew:
+// HeliReap / JetReap leave it alone (they never delete under real soldiers, and its crew is the dispatcher's).
+bool SupportAircraftOwned(const void* vehicle) noexcept;
+// One of ours whose flight is over: it has withdrawn (fuel, ammo, damage) far enough out to go (the heli's / jet's reap).
+bool SupportAircraftLeft(const ObjRef&) noexcept;
 }

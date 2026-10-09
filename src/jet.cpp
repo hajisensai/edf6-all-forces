@@ -34,6 +34,7 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
 #include "online_authority.h"
+#include "support_aircraft.h"
 #include <intrin.h>
 
 namespace crew {
@@ -603,6 +604,9 @@ void JetReap(const void* self) noexcept {
         // Only the same object, still there: one destroyed meanwhile is the game's (its entry just goes).
         unsigned char* const v=j.Vehicle();
         if(Alive(j.ref) && !v[kDead] && crew::BodyOf(v)==PluginBody::jet) {
+            // A support deployment's (its real crew with it) is retired by the dispatcher that made them
+            // (support_dispatch.cpp Retire, from SupportAircraftLeft); its entry stays until that delete.
+            if(SupportAircraftOwned(v))continue;
             // Its riders off first (the gunship's gunner too), the delete only once the jet has taken itself as empty
             // (see kReapSettleFrames); never with the player in any of its seats.
             const Rider aboard=Aboard(v);
