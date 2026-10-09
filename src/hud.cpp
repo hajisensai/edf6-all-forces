@@ -3784,10 +3784,50 @@ void MapVariantIcon(void* d,void* c,SupportVariant variant,float x,float y,float
 alignas(16) const float kBtnFill[4]={0.03f,0.05f,0.06f,0.78f};
 alignas(16) const float kBtnLit[4]={0.10f,0.42f,0.50f,0.90f};
 constexpr float kBtnRowH=30.0f,kBtnGap=6.0f,kBtnPad=8.0f,kBtnIcon=18.0f,kBtnMargin=16.0f,kBtnBottom=142.0f;   // px at 1080 lines
+// The formation button's menu (map_buttons.h MenuColumn; the user, 2026-10-09: "这个编队应该点击以后展开选择里面的东西"):
+// over the button, a row a shape -- a selected guarding squad's defences, the march of the squads following the player --
+// the shape in use lit; a click on a row is that shape (mapcmd.cpp PickFormation).
+void MapFormationMenu(void* drawer,void* ctx,Text* text,float width,float height,float s,const MapCommandReadout& c,
+                      const float* buttons,const int* ids,int n,Line* lines,int* at) noexcept {
+    int button=-1;
+    for(int i=0;i<n;++i)if(ids[i]==static_cast<int>(mapbtn::Id::formation))button=i;
+    if(!c.formationMenu || button<0){MapCommandFormationButtons(nullptr,nullptr,0);return;}
+    int entries[kMapFormationEntries];int count=0;
+    if(c.formationGuard)for(const auto shape:npc::formation::kGuard)if(count<kMapFormationEntries)entries[count++]=mapbtn::MenuEntry(true,static_cast<int>(shape));
+    if(c.formationMarch)for(const auto shape:npc::formation::kMarch)if(count<kMapFormationEntries)entries[count++]=mapbtn::MenuEntry(false,static_cast<int>(shape));
+    const float scale=kLineScale*0.7f,pad=kBtnPad*s,rowH=26.0f*s,gap=2.0f*s;
+    wchar_t word[kMapFormationEntries][64];float rowW=120.0f*s;
+    for(int i=0;i<count;++i) {
+        _snwprintf_s(word[i],_countof(word[i]),_TRUNCATE,L"%ls  %ls",Tr(mapbtn::MenuGuard(entries[i]) ? Tx::menuDefence : Tx::menuMarch),
+                     FormationText(mapbtn::MenuShape(entries[i])));
+        Line probe{};Format(probe,L"%ls",word[i]);probe.scale=scale;
+        if(text)MeasureAll(*text,&probe,1);
+        const float w=(text ? probe.w : static_cast<float>(wcslen(probe.text))*9.0f*s)+2.0f*pad;
+        rowW=std::fmax(rowW,w);
+    }
+    const mapbtn::Rect at0{buttons[button*4],buttons[button*4+1],buttons[button*4+2],buttons[button*4+3]};
+    mapbtn::Rect row[kMapFormationEntries]{};
+    const int placed=mapbtn::MenuColumn(at0,count,rowW,rowH,gap,width,height,row);
+    if(placed<=0){MapCommandFormationButtons(nullptr,nullptr,0);return;}
+    MapUiBox(drawer,ctx,row[0].x0-4.0f*s,row[0].y0-4.0f*s,row[0].x1+4.0f*s,row[placed-1].y1+4.0f*s,lines,*at);
+    float rects[kMapFormationEntries*4];
+    for(int i=0;i<placed;++i) {
+        const mapbtn::Rect& q=row[i];
+        const int shape=mapbtn::MenuShape(entries[i]);
+        const bool lit=mapbtn::MenuGuard(entries[i]) ? shape==c.formationGuardShape : shape==c.march;
+        const bool hover=c.pointer && c.px>=q.x0 && c.px<q.x1 && c.py>=q.y0 && c.py<q.y1;
+        Rect(drawer,ctx,q.x0,q.y0,q.x1,q.y1,lit ? kBtnLit : hover ? kMapBoxFill : kBtnFill);
+        Label(text,lines,at,q.x0+pad,(q.y0+q.y1)*0.5f,0,scale,lit ? kWhite : kMapOrder,L"%ls",word[i]);
+        if(*at>0)MapFitLabel(text,lines[*at-1],q.x0+pad,q.x1-pad);
+        rects[i*4]=q.x0;rects[i*4+1]=q.y0;rects[i*4+2]=q.x1;rects[i*4+3]=q.y1;
+    }
+    MapCommandFormationButtons(rects,entries,placed);
+}
+
 int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float s,bool pad,const MapCommandReadout& c,Line* lines,
                int* at) noexcept {
     using mapbtn::Id;
-    if(pad){MapCommandButtons(nullptr,nullptr,0);return 0;}
+    if(pad){MapCommandButtons(nullptr,nullptr,0);MapCommandFormationButtons(nullptr,nullptr,0);return 0;}
     constexpr int n=mapbtn::kCount;
     static const Tx kWord[n]={Tx::orderMove,Tx::orderAttackMove,Tx::orderGuard,Tx::orderFollow,Tx::orderRelease,Tx::orderEngage,
                               Tx::orderFocus,Tx::orderBoard,Tx::orderDismount,Tx::orderDismiss,Tx::orderRecruit,Tx::btnFormationShort,
@@ -3837,6 +3877,7 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
         rects[placed*4]=q.x0;rects[placed*4+1]=q.y0;rects[placed*4+2]=q.x1;rects[placed*4+3]=q.y1;ids[placed++]=shownIds[k];
     }
     MapCommandButtons(rects,ids,placed);
+    MapFormationMenu(drawer,ctx,text,width,height,s,c,rects,ids,placed,lines,at);
     return rows;
 }
 
@@ -3918,6 +3959,7 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     static MapCommandReadout c;   // the draw thread's (too big for its stack)
     if(!PlayerMapCommands(&c)){
         MapCommandButtons(nullptr,nullptr,0);MapCommandSquadButtons(nullptr,nullptr,0);MapCommandSquadFold(nullptr);
+        MapCommandFormationButtons(nullptr,nullptr,0);
         MapCommandPayloadButtons(nullptr,0,0,nullptr,0);MapCommandSupportButtons(nullptr,nullptr,0);return;
     }
     const float* tint=c.allowed && c.pickable ? kMapOrder : kMapOrderDim;
@@ -4068,6 +4110,7 @@ bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     static MapReadout m;   // the draw thread's (too big for its stack)
     if(!PlayerMap(&m)){
         MapCommandButtons(nullptr,nullptr,0);MapCommandSquadButtons(nullptr,nullptr,0);MapCommandSquadFold(nullptr);
+        MapCommandFormationButtons(nullptr,nullptr,0);
         MapCommandPayloadButtons(nullptr,0,0,nullptr,0);MapCommandSupportButtons(nullptr,nullptr,0);MapCommandUiPanels(nullptr,0);return false;
     }
     s=hudscale::FitMap(s,width,height);

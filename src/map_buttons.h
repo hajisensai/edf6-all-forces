@@ -82,6 +82,35 @@ inline int Hit(const Rect* r,int n,float x,float y) noexcept {
     return -1;
 }
 
+// --- The formation menu (the user, 2026-10-09: "这个编队应该点击以后展开选择里面的东西") ---
+// The formation button opens a column of the shapes to pick from (before, each click stepped to the next one: the log's
+// "formation: … the march column / staggered column / wedge / …" nine clicks in a row to get round to one). Its entries:
+// a guarding squad's defences (formation.h kGuard) and the march's shapes (kMarch), as MenuEntry codes.
+constexpr int kMenuGuard=0x100;
+inline int MenuEntry(bool guard,int shape) noexcept { return (guard ? kMenuGuard : 0)|(shape&0xFF); }
+inline bool MenuGuard(int entry) noexcept { return (entry&kMenuGuard)!=0; }
+inline int MenuShape(int entry) noexcept { return entry&0xFF; }
+// The column of `n` rows `rowW` x `rowH`, `gap` apart, over `button` (its bottom row on the button's top; under the button
+// when there is no room above), its left on the button's left, kept on a `width` x `height` screen. Returns the rows
+// placed (fewer when the screen runs out).
+inline int MenuColumn(const Rect& button,int n,float rowW,float rowH,float gap,float width,float height,Rect* out) noexcept {
+    if(n<=0)return 0;
+    const float total=static_cast<float>(n)*rowH+static_cast<float>(n-1)*gap;
+    float y0=button.y0-gap-total;
+    if(y0<0.0f)y0=button.y1+gap;
+    float x0=button.x0;
+    if(x0+rowW>width)x0=width-rowW;
+    if(x0<0.0f)x0=0.0f;
+    int placed=0;
+    for(int i=0;i<n;++i) {
+        const float y=y0+static_cast<float>(i)*(rowH+gap);
+        if(y+rowH>height)break;
+        out[i]=Rect{x0,y,x0+rowW,y+rowH};
+        ++placed;
+    }
+    return placed;
+}
+
 // --- The support bar ---
 // The catalog's entries a row (`names`, in catalog order): the consecutive ones whose names share what is before
 // their "·" (U+00B7) are one kind of support with variants; a name with none is a row of its own.

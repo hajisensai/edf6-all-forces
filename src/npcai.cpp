@@ -1995,20 +1995,46 @@ bool MergeSquads(const void* into,const void* from) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
-int CycleGuardFormation(const void* leader) noexcept {
-    if(!ok || !Cfg().enabled || !Cfg().customNpcAi || InSession())return -2;
+// A guarding squad's defence (the shape from the map's formation menu or T's cycle): the shape, -1 when it guards
+// nothing, -2 when it takes no orders or `shape` is no defence (formation.h kGuard).
+Squad* GuardingSquad(const void* leader,int* why) noexcept {
+    *why=-2;
+    if(!ok || !Cfg().enabled || !Cfg().customNpcAi || InSession())return nullptr;
     Squad* const q=FindSquad(leader);
-    if(!q || npc::Scripted(q->control))return -2;
-    if(q->cmd.order!=Order::guard)return -1;
-    q->guardShape=npc::formation::Next(q->guardShape,true);
+    if(!q || npc::Scripted(q->control))return nullptr;
+    *why=-1;
+    return q->cmd.order==Order::guard ? q : nullptr;
+}
+int SetGuardFormation(const void* leader,int shape) noexcept {
+    int why;
+    Squad* const q=GuardingSquad(leader,&why);
+    if(!q)return why;
+    const npc::formation::Shape s=npc::formation::FromInt(shape);
+    if(!npc::formation::GuardShape(s) || static_cast<int>(s)!=shape)return -2;
+    q->guardShape=s;
     Log("NPCAI squad %p guard formation: %s",leader,npc::formation::Name(q->guardShape));
     return static_cast<int>(q->guardShape);
 }
+int CycleGuardFormation(const void* leader) noexcept {
+    int why;
+    const Squad* const q=GuardingSquad(leader,&why);
+    return q ? SetGuardFormation(leader,static_cast<int>(npc::formation::Next(q->guardShape,true))) : why;
+}
+int NpcGuardShape(const void* leader) noexcept {
+    int why;
+    const Squad* const q=GuardingSquad(leader,&why);
+    return q ? static_cast<int>(q->guardShape) : why;
+}
 
-int CycleMarchFormation() noexcept {
-    const npc::formation::Shape s=npc::formation::Next(MarchShape(),false);
+// The march of the player's recruited squads: `shape` (formation.h kMarch), the shape now; -2 when it is no march.
+int SetMarchFormation(int shape) noexcept {
+    const npc::formation::Shape s=npc::formation::FromInt(shape);
+    if(!npc::formation::MarchShape(s) || static_cast<int>(s)!=shape)return -2;
     SetMarchShape(s,"the map");
     return static_cast<int>(s);
+}
+int CycleMarchFormation() noexcept {
+    return SetMarchFormation(static_cast<int>(npc::formation::Next(MarchShape(),false)));
 }
 
 constexpr ULONGLONG kSweepEndMs=3000;

@@ -224,6 +224,10 @@ void MapCommandSquadButtons(const float* r,const ObjRef*,int n) noexcept {
     sceneSquadButtonCount=n;for(int i=0;i<n;++i)std::memcpy(sceneSquadButtons[i],r+i*4,16);
 }
 void MapCommandSquadFold(const float* r) noexcept { sceneSquadFoldOn=r!=nullptr;if(r)std::memcpy(sceneSquadFold,r,16); }
+float sceneMenu[kMapFormationEntries][4]{};int sceneMenuEntry[kMapFormationEntries]{},sceneMenuCount=0;
+void MapCommandFormationButtons(const float* r,const int* entries,int n) noexcept {
+    sceneMenuCount=n;for(int i=0;i<n;++i){std::memcpy(sceneMenu[i],r+i*4,16);sceneMenuEntry[i]=entries[i];}
+}
 void MapCommandPayloadButtons(const float* r,std::uint64_t,int,const int*,int n) noexcept {
     scenePayloadButtonCount=n;for(int i=0;i<n;++i)std::memcpy(scenePayloadButtons[i],r+i*4,16);
 }
@@ -469,6 +473,9 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         for(int i=0;i<sceneCmd.count;++i)sceneCmd.unit[i].selected=i==sceneCmd.count-3;
         sceneCmd.selected=1;
         sceneCmd.squadOpen=true;   // opened: every row, a script's too, and the row that folds it
+        // The formation menu open over its button: the guarding squad's defences (perimeter in use) and the march.
+        sceneCmd.formationMenu=sceneCmd.formationGuard=sceneCmd.formationMarch=true;
+        sceneCmd.formationGuardShape=static_cast<int>(npc::formation::Shape::perimeter);
     }
     std::swprintf(sceneCmd.note,_countof(sceneCmd.note),Tr(Tx::cmdGuardResult),Tr(Tx::orderGuard),60.0,420.0,2,L"");
     if(vehicleOnly) {
@@ -583,6 +590,30 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         }
     }
     if(sceneSquadButtonCount!=(pad ? 0 : listedRows)) {++textFailed;std::puts("FAIL map squad clickable rows");}
+    {   // The formation menu: a row a shape, on the screen, clear of the buttons, its own word in each row.
+        bool formationShown=false;
+        for(int i=0;i<sceneButtons;++i)formationShown=formationShown || sceneButtonId[i]==static_cast<int>(mapbtn::Id::formation);
+        const int wanted=sceneCmd.formationMenu && formationShown ?
+            (sceneCmd.formationGuard ? static_cast<int>(std::size(npc::formation::kGuard)) : 0)+
+            (sceneCmd.formationMarch ? static_cast<int>(std::size(npc::formation::kMarch)) : 0) : 0;
+        if(sceneMenuCount!=wanted){++textFailed;std::printf("FAIL formation menu rows: %d of %d\n",sceneMenuCount,wanted);}
+        for(int i=0;i<sceneMenuCount;++i) {
+            const float* m=sceneMenu[i];
+            if(m[0]<0.0f || m[2]>static_cast<float>(width) || m[1]<0.0f || m[3]>1080.0f){++textFailed;std::printf("FAIL formation menu row %d off the screen\n",i);}
+            for(int k=0;k<sceneButtons;++k) {
+                const float* q=sceneButton[k];
+                if(m[0]<q[2] && q[0]<m[2] && m[1]<q[3] && q[1]<m[3]){++textFailed;std::printf("FAIL formation menu row %d over button %d\n",i,sceneButtonId[k]);}
+            }
+            int own=0;
+            for(const Drew& d:drew) {
+                if(d.text.empty() || !(d.x0<m[2] && m[0]<d.x1 && d.y0<m[3] && m[1]<d.y1))continue;
+                const float cy=(d.y0+d.y1)*0.5f;
+                if(cy>m[1] && cy<m[3] && d.x0>=m[0]-1.0f && d.x1<=m[2]+1.0f)++own;
+                else{++textFailed;std::printf("FAIL formation menu row %d covers %s\n",i,Narrow(d.text).c_str());}
+            }
+            if(own!=1){++textFailed;std::printf("FAIL formation menu row %d: %d labels in it\n",i,own);}
+        }
+    }
     if(scenePayloadButtonCount!=(payload && !pad ? 6 : 0)){++textFailed;std::puts("FAIL map payload clickable rows");}
     for(std::size_t i=0;i<drew.size();++i) {
         const auto& a=drew[i];if(a.text.empty())continue;bool panelText=false;

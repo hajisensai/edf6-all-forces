@@ -418,6 +418,10 @@ HUDTEXT(squadWait,L"WAIT %d s",L"等待 %d 秒",L"等待 %d 秒",L"待機 %d 秒
 // squads not listed (how many of them ride a vehicle, how many a script drives); open, the row that folds it again.
 HUDTEXT(squadMore,L"+%d MORE (%d riding, %d scripted): click to list",L"另有 %d 支（乘车 %d，脚本 %d）：点击展开",
         L"另有 %d 支（乘車 %d，腳本 %d）：點擊展開",L"他 %d 部隊（搭乗 %d、指示中 %d）：クリックで表示")
+// The formation menu's two sections (hud.cpp MapButtons): the march of the squads following the player, the defence of
+// the ones on a guard point.
+HUDTEXT(menuMarch,L"MARCH",L"行军",L"行軍",L"行軍")
+HUDTEXT(menuDefence,L"DEFENCE",L"守点",L"守點",L"防衛")
 HUDTEXT(squadFold,L"Click to fold: only the squads that take orders",L"点击收起：只列可指挥的小队",L"點擊收起：只列可指揮的小隊",
         L"クリックでたたむ：指揮できる分隊のみ")
 HUDTEXT(npcMark,L"MARK",L"标记",L"標記",L"マーク")

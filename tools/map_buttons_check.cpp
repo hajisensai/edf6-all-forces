@@ -129,10 +129,29 @@ void Support() {
     // Not enough room: the rows that fit.
     Check(Column(g,rows,x0,x1,top,top+3.0f*(rowH+gap),rowH,gap,inset,row,chip)==3,"a short column: the rows that fit");
 }
+// The formation menu (the user, 2026-10-09: "这个编队应该点击以后展开选择里面的东西"): its entries' codes, its column over
+// the button (under it with no room above), on the screen.
+void Menu() {
+    Check(MenuGuard(MenuEntry(true,10)) && MenuShape(MenuEntry(true,10))==10 && !MenuGuard(MenuEntry(false,3)) &&
+          MenuShape(MenuEntry(false,3))==3,"a menu entry: defence or march, and its shape");
+    const Rect button{900.0f,940.0f,1000.0f,970.0f};
+    Rect r[14]{};
+    const int placed=MenuColumn(button,14,180.0f,26.0f,2.0f,1920.0f,1080.0f,r);
+    bool above=placed==14,apart=true;
+    for(int i=0;i<placed;++i) {
+        above=above && r[i].y1<=button.y0 && r[i].x0==button.x0 && r[i].x1-r[i].x0==180.0f;
+        if(i)apart=apart && r[i].y0>=r[i-1].y1;
+    }
+    Check(above && apart && r[13].y1==button.y0-2.0f,"14 rows over the button, top-down, its bottom row on the button");
+    const Rect high{1850.0f,20.0f,1910.0f,50.0f};
+    const int below=MenuColumn(high,4,180.0f,26.0f,2.0f,1920.0f,1080.0f,r);
+    Check(below==4 && r[0].y0==high.y1+2.0f && r[0].x1<=1920.0f,"no room above: under the button, kept on the screen");
+    Check(MenuColumn(button,0,180.0f,26.0f,2.0f,1920.0f,1080.0f,r)==0,"no entries: no column");
+}
 }  // namespace
 
 int main() {
-    Layouts();Card();Support();
+    Layouts();Card();Support();Menu();
     std::printf(failures ? "map_buttons_check: %d of %d FAILED\n" : "map_buttons_check: all %d ok\n",failures ? failures : cases,cases);
     return failures ? 1 : 0;
 }

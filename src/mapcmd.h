@@ -86,6 +86,9 @@ void MapCommandSupportButtons(const float* rects,const int* entries,int n) noexc
 // Pass n=0 when a panel is absent. These calls copy snapshots and never read game objects.
 void MapCommandSquadButtons(const float* rects,const ObjRef* identities,int n) noexcept; // up to 16 rows
 void MapCommandSquadFold(const float* rect) noexcept; // the panel's summary row (opens / folds it); null: none
+// The formation menu's rows as drawn (`entries`: map_buttons.h MenuEntry), up to kMapFormationEntries.
+constexpr int kMapFormationEntries=24;
+void MapCommandFormationButtons(const float* rects,const int* entries,int n) noexcept;
 void MapCommandPayloadButtons(const float* rects,std::uint64_t token,int seat,const int* entries,int n) noexcept; // up to 16
 void MapCommandUiPanels(const float* rects,int n) noexcept; // up to 16 complete background rectangles
 // Game thread, after MapCommandFrame and before map camera steering. A press begun on UI stays
@@ -136,6 +139,9 @@ struct MapCommandReadout {
     int squads;                // the squad panel's rows (sorted: mapcmd::SquadRank; number keys 1-9 pick a shown one)
     SquadTally squadTally{};   // every squad, for the folded panel's summary row
     bool squadOpen=false;      // the panel opened past its commandable rows (its summary row clicked)
+    // The formation button's menu (map_buttons.h MenuEntry): open; its defences (a selected squad guards a point; the
+    // first one's shape lit) and its march (a selected squad follows the player; `march` lit).
+    bool formationMenu=false,formationGuard=false,formationMarch=false;int formationGuardShape=-1;
     SquadRow squad[16];
     bool squadSelected[16];
     bool sweepOn,healthOn;     // the box sweep going; health boxes for hurt soldiers (npcai.cpp)
