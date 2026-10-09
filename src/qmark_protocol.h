@@ -18,7 +18,9 @@
 namespace crew::qmark_net {
 constexpr std::uint32_t kMagic=0x4B524D51u;   // "QMRK"
 constexpr std::uint32_t kVersion=1;
-constexpr std::uint32_t kCapEnemy=1u,kCapPoint=2u,kCapabilities=kCapEnemy|kCapPoint;
+// kCapLetGo: `letGo` counts the marks its player let go (the key again on the same enemy), so the receiver tells a let-go
+// (its cue) from a mark gone with its enemy (silent).
+constexpr std::uint32_t kCapEnemy=1u,kCapPoint=2u,kCapLetGo=4u,kCapabilities=kCapEnemy|kCapPoint|kCapLetGo;
 constexpr std::size_t kWireSize=128;
 constexpr std::uint32_t kMaxPeers=1024;
 constexpr std::uint64_t kKeepMs=1000,kEnemyKeepMs=250,kMinGapMs=50,kSilentMs=3500;
@@ -35,6 +37,7 @@ struct State {
     bool point=false;
     float pointAt[3]{};
     std::uint32_t pointLeftMs=0;     // how long the point mark stays from now
+    std::uint32_t letGo=0;           // how many marks its player has let go this run (kCapLetGo)
 };
 bool Owned(const void* bytes,std::size_t size) noexcept;           // the QMRK magic (any version)
 bool Encode(const State&,void* bytes,std::size_t size) noexcept;
@@ -42,14 +45,15 @@ bool Encode(const State&,void* bytes,std::size_t size) noexcept;
 bool Decode(const void* bytes,std::size_t size,State& out) noexcept;
 bool SameMarks(const State& a,const State& b) noexcept;            // the same enemy and the same point (not positions)
 
-// What came of a state for its sender's marks, for the HUD's and the sound's sake.
-enum class Change { none, marked, cleared };
+// What came of a state for its sender's marks, for the HUD's and the sound's sake: a new mark; one let go by its
+// player; one gone otherwise (its enemy dead or removed, its point's time up).
+enum class Change { none, marked, letGo, cleared };
 
 // The sender: when this machine's state goes out.
 class Outbox {
 public:
     explicit Outbox(std::uint32_t origin=1) noexcept : origin_(origin) {}
-    // Due: the marks changed since the last sent, or the keepalive is due; never twice within kMinGapMs.
+    // Due: the marks (or the let-go count) changed since the last sent, or the keepalive is due; never twice within kMinGapMs.
     bool Due(const State& now,std::uint64_t at) const noexcept;
     // The state as sent (origin, sequence filled in), remembered.
     State Stamp(const State& now,std::uint64_t at) noexcept;
@@ -70,7 +74,7 @@ struct Remote {
 class Inbox {
 public:
     // A peer's state: taken unless it is older than the last one of the same run (a late message). `change`: marked when a
-    // new enemy or a new point came, cleared when one went with none new. False: not taken.
+    // new enemy or a new point came, letGo when its player let one go, cleared when one went otherwise. False: not taken.
     bool Receive(std::uint32_t peer,const State& s,std::uint64_t now,Change* change=nullptr) noexcept;
     // The peer's marks as of `now`: nothing once it is silent kSilentMs; its point only until its time.
     bool Enemy(std::uint32_t peer,std::uint64_t now) const noexcept;

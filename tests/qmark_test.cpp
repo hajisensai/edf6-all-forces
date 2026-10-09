@@ -59,6 +59,14 @@ bool ResolveMarkIdentities(const unsigned char marker[32],const unsigned char ta
     return true;
 }
 bool SupportCommandRequesterMatches(void* puid,const char* sender) noexcept { return puid==&teamPuid && !std::strcmp(sender,senderPuid); }
+// The name tag's name (player_name.cpp): the teammate's player's, a Japanese one; asked for which object.
+const void* namedWho=nullptr;bool nameReadable=true;
+bool ReadPlayerName(const void* soldier,wchar_t* out,std::size_t count) noexcept {
+    namedWho=soldier;
+    if(!nameReadable){out[0]=0;return false;}
+    const wchar_t* n=L"さくら_EDF";
+    FitName(n,std::wcslen(n),out,count);return true;
+}
 bool VisitLockPoints(EnemyVisitor visit,void* ctx) noexcept { visit(ctx,enemyMem,enemyLock);return true; }
 bool NpcMarkOwn(const void** object,float* at) noexcept {
     if(!ownEnemy)return false;
@@ -89,8 +97,8 @@ float Angle(const float* a,const float* b) {
 void Frame() { ++frame;QMarkFrame(); }
 int Views(QMarkView* v) { return QMarkViews(v,kQMarkViews); }
 // A teammate's state as its machine would send it.
-std::size_t TeamBytes(unsigned char* out,std::uint32_t sequence,bool enemy,bool point,std::uint32_t origin=77) {
-    qmark_net::State s;s.origin=origin;s.sequence=sequence;std::memcpy(s.marker,kTeamId,32);
+std::size_t TeamBytes(unsigned char* out,std::uint32_t sequence,bool enemy,bool point,std::uint32_t origin=77,std::uint32_t letGo=0) {
+    qmark_net::State s;s.origin=origin;s.sequence=sequence;std::memcpy(s.marker,kTeamId,32);s.letGo=letGo;
     if(enemy){s.enemy=true;std::memcpy(s.target,kEnemyId,32);s.enemyAt[0]=1;s.enemyAt[1]=2;s.enemyAt[2]=3;}
     if(point){s.point=true;s.pointAt[0]=-50;s.pointAt[1]=0;s.pointAt[2]=80;s.pointLeftMs=5000;}
     return qmark_net::Encode(s,out,qmark_net::kWireSize) ? qmark_net::kWireSize : 0;
@@ -165,6 +173,24 @@ void WireChecks() {
     Check(in.Receive(1,r,500,&ch) && ch==Change::marked && in.Point(1,1499) && !in.Point(1,1500),"a restarted sender taken; its point only for its time");
     Check(!in.Enemy(1,500+kSilentMs) && !in.Capable(1,500+kSilentMs,kCapEnemy) && in.Capable(1,600,kCapEnemy),"a silent peer: nothing kept");
     Check(!in.Receive(0,r,600) && !in.Receive(kMaxPeers+1,r,600),"no peer 0 (this machine) or past the peers");
+    {   // let-go: its count moved within one run; a restarted run's count is no let-go.
+        Inbox li;State a;a.origin=1;a.sequence=1;a.enemy=true;std::memcpy(a.target,kEnemyId,32);
+        li.Receive(1,a,100,&ch);
+        a.sequence=2;a.enemy=false;a.letGo=1;Check(li.Receive(1,a,200,&ch) && ch==Change::letGo,"let go: letGo");
+        a.sequence=3;a.enemy=true;li.Receive(1,a,300,&ch);
+        a.sequence=4;a.enemy=false;Check(li.Receive(1,a,400,&ch) && ch==Change::cleared,"gone, the count the same: cleared");
+        a.origin=2;a.sequence=1;a.enemy=true;li.Receive(1,a,500,&ch);
+        a.origin=3;a.sequence=1;a.enemy=false;a.letGo=7;Check(li.Receive(1,a,600,&ch) && ch==Change::cleared,"another run's count: no let-go");
+        State w=a;w.caps=kCapEnemy|kCapPoint;unsigned char lb[kWireSize];
+        Check(Encode(w,lb,sizeof(lb)) && Decode(lb,sizeof(lb),d) && d.letGo==0,"a peer without kCapLetGo: its count not read");
+    }
+    {   // The name fitted for the HUD.
+        wchar_t fit[6];
+        FitName(L"abc",3,fit,6);Check(!std::wcscmp(fit,L"abc"),"FitName: a short name as it is");
+        FitName(L"abcdefgh",8,fit,6);Check(!std::wcscmp(fit,L"abcd…"),"FitName: a long one cut with an ellipsis");
+        FitName(L"a\nb\tc",5,fit,6);Check(!std::wcscmp(fit,L"abc"),"FitName: control characters dropped");
+        FitName(L"x",1,fit,1);Check(fit[0]==0,"FitName: no room: empty");
+    }
 }
 
 void ShareChecks() {
@@ -204,6 +230,13 @@ void ShareChecks() {
     bool team=false;
     for(int i=0;i<n;++i)if(!v[i].own && v[i].enemy)team=v[i].slot==2 && v[i].at[2]==500.0f;
     Check(team,"the teammate's enemy found here by its ID, at its lock point here, with its player's slot");
+    bool named=false;
+    for(int i=0;i<n;++i)if(!v[i].own && v[i].enemy)named=!std::wcscmp(v[i].name,L"さくら_EDF");
+    Check(named && namedWho==humanMem,"...named as the game's name tag names its player (the resolved marker's own object)");
+    {   // The NPCs' side: the teammate's marked enemy offered to them as this machine's mark is (npcai.cpp NearestMark).
+        const void* e[4];
+        Check(QMarkTeamEnemies(e,4)==1 && e[0]==enemyMem,"the teammate's marked enemy offered to the NPCs");
+    }
     Check(played[audio::kClipMarkTeam]==1,"a teammate marked: the team cue");
     Check(TeamBytes(b,2,true,false) && ReceiveQMarkNetwork(1,senderPuid,b,sizeof(b),T+400),"the same mark again");
     Frame();Check(played[audio::kClipMarkTeam]==1 && resolves==1,"the same mark: no cue, not looked for again");
@@ -217,10 +250,21 @@ void ShareChecks() {
     Frame();n=Views(v);
     int unknown=0;for(int i=0;i<n;++i)unknown+=!v[i].own && v[i].slot<0;
     Check(unknown==1,"a marker that is not its sender's player: no slot (ALLY)");
+    bool unnamed=false;
+    for(int i=0;i<n;++i)if(!v[i].own && v[i].slot<0)unnamed=v[i].name[0]==0;
+    Check(unnamed,"...and no name: a peer cannot name another player");
+    {
+        const void* e[4];
+        Check(QMarkTeamEnemies(e,4)==1,"two teammates on one enemy: offered once");
+    }
     // The enemy dead here: the teammate's mark not shown.
     enemyMem[kDead]=1;Frame();n=Views(v);
     int teamEnemies=0;for(int i=0;i<n;++i)teamEnemies+=!v[i].own && v[i].enemy;
     Check(teamEnemies==0,"the teammates' enemy dead here: their marks of it not shown");
+    {
+        const void* e[4];
+        Check(QMarkTeamEnemies(e,4)==0,"...nor offered to the NPCs");
+    }
     enemyMem[kDead]=0;
     // Not found here (not registered yet): shown where its marker sent it.
     ResetQMarkNetwork();UpdateQMarkNetwork(true,2,&Send,T+700);resolveEnemy=false;
@@ -229,6 +273,32 @@ void ShareChecks() {
     for(int i=0;i<n;++i)if(!v[i].own && v[i].enemy)team=v[i].at[2]==3.0f;
     Check(team,"shown at the position its marker sent");
     resolveEnemy=true;
+    {
+        const void* e[4];
+        Check(QMarkTeamEnemies(e,4)==0,"an enemy not found here: shown, not offered to the NPCs (nothing here to fight)");
+    }
+    // Let go (the user, 2026-10-10: the teammate's let-go heard as ours; a mark gone with its enemy silent).
+    std::memset(played,0,sizeof(played));
+    Check(TeamBytes(b,2,false,false,77,1) && ReceiveQMarkNetwork(1,senderPuid,b,sizeof(b),T+720),"the teammate let its mark go");
+    Frame();Check(played[audio::kClipMarkOff]==1 && played[audio::kClipMarkTeam]==0,"a teammate's let-go: the off cue");
+    Check(TeamBytes(b,3,true,false,77,1) && ReceiveQMarkNetwork(1,senderPuid,b,sizeof(b),T+730),"it marks again");
+    Frame();std::memset(played,0,sizeof(played));
+    Check(TeamBytes(b,4,false,false,77,1) && ReceiveQMarkNetwork(1,senderPuid,b,sizeof(b),T+740),"its mark gone with its enemy (no let-go)");
+    Frame();Check(played[audio::kClipMarkOff]==0 && played[audio::kClipMarkTeam]==0,"a mark gone with its enemy: silent");
+    Check(TeamBytes(b,6,false,false,77,3) && ReceiveQMarkNetwork(1,senderPuid,b,sizeof(b),T+750),"a let-go whose message was lost, then another");
+    Frame();Check(played[audio::kClipMarkOff]==1,"the let-goes counted, not each message: one cue");
+    // This machine's let-go counted for the teammates.
+    Check(qmark_net::Decode(sent,sizeof(sent),d),"the last state sent");
+    const std::uint32_t before=d.letGo;
+    sends=0;QMarkPlay(QMarkCue::off);Frame();UpdateQMarkNetwork(true,2,&Send,T+760);
+    Check(sends==2 && qmark_net::Decode(sent,sizeof(sent),d) && d.letGo==before+1,"this machine's let-go counted and sent at once");
+    // The name not readable: P<n> (no name).
+    nameReadable=false;ResetQMarkNetwork();UpdateQMarkNetwork(true,2,&Send,T+770);
+    Check(TeamBytes(b,1,true,false) && ReceiveQMarkNetwork(1,senderPuid,b,sizeof(b),T+780),"heard again");
+    Frame();n=Views(v);named=true;
+    for(int i=0;i<n;++i)if(!v[i].own && v[i].enemy)named=v[i].name[0]!=0 || v[i].slot!=2;
+    Check(!named,"a name that cannot be read: none (the HUD says P<n>)");
+    nameReadable=true;
     // What is not ours.
     unsigned char other[qmark_net::kWireSize]{};other[0]='S';
     Check(!ReceiveQMarkNetwork(1,senderPuid,other,sizeof(other),T+800),"another magic: left to the support / command parsers");

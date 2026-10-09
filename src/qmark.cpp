@@ -11,6 +11,7 @@
 #include "jetaudio.h"
 #include "memory.h"
 #include "npc_mark.h"
+#include "player_name.h"
 #include "support_net.h"
 #include "support_soldier.h"
 #include <cmath>
@@ -33,6 +34,7 @@ struct Tracked {
     bool looked;                // the IDs above resolved once (or tried: kResolveMs)
     ULONGLONG lookedAt;
     int slot;                   // its player's mission slot, -1: not known (not found, or not the authenticated sender)
+    wchar_t name[kQMarkName];   // ...and its name (the name tag's), empty: not read
     ObjRef enemy;               // the enemy found here (pinned weak reference), empty: not found
     float enemyAt[3];
 };
@@ -48,8 +50,9 @@ QMarkView views[kQMarkViews]{};
 int viewCount=0;
 ULONGLONG viewWall=0;
 
-// The cues asked for since the last frame (bit per QMarkCue).
+// The cues asked for since the last frame (bit per QMarkCue); this run's let-goes (the teammates' off cue).
 unsigned cues=0;
+std::uint32_t letGoes=0;
 ULONGLONG frameDone=~0ULL;
 
 bool Zero(const unsigned char* id) noexcept { for(int i=0;i<32;++i)if(id[i])return false;return true; }
@@ -59,11 +62,15 @@ void Drop(Tracked& t) noexcept { npcmark::Assign(t.enemy,{});t=Tracked{};t.slot=
 // The teammate's marker and target found in this world (one native walk), its slot told only when the marker is the
 // player of the machine that sent it (its native PUID that sender's: a peer cannot speak for another).
 void Look(Tracked& t,ULONGLONG now) noexcept {
-    t.looked=true;t.lookedAt=now;t.slot=-1;
+    t.looked=true;t.lookedAt=now;t.slot=-1;t.name[0]=0;
     npcmark::Assign(t.enemy,{});
     MarkIdentities ids{};
     if(!ResolveMarkIdentities(Zero(t.marker) ? nullptr : t.marker,Zero(t.target) ? nullptr : t.target,&ids))return;
-    if(ids.player && ids.puid && SupportCommandRequesterMatches(ids.puid,t.puid))t.slot=ids.slot;
+    // Named only when it is its sender's own player (a peer cannot name another): the name tag's name.
+    if(ids.player && ids.puid && SupportCommandRequesterMatches(ids.puid,t.puid)) {
+        t.slot=ids.slot;
+        if(!ReadPlayerName(ids.player.obj,t.name,kQMarkName))t.name[0]=0;
+    }
     if(ids.target)npcmark::Assign(t.enemy,npcmark::Capture(ids.target.obj));
 }
 
@@ -86,6 +93,7 @@ void PlayCues() noexcept {
         if(asked&(1u<<static_cast<int>(QMarkCue::own)))audio::PlayOnce(audio::kClipMarkOwn,h);
         else if(asked&(1u<<static_cast<int>(QMarkCue::off)))audio::PlayOnce(audio::kClipMarkOff,h);
         if(asked&(1u<<static_cast<int>(QMarkCue::team)))audio::PlayOnce(audio::kClipMarkTeam,h);
+        else if(asked&(1u<<static_cast<int>(QMarkCue::teamOff)))audio::PlayOnce(audio::kClipMarkOff,h);
     } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 
@@ -94,8 +102,8 @@ void Publish(ULONGLONG now) noexcept {
     int n=0;
     const void* enemy=nullptr;
     float at[3];
-    if(NpcMarkOwn(&enemy,at))v[n++]=QMarkView{true,true,-1,{at[0],at[1],at[2]}};
-    if(ownPoint.on && now<ownPoint.until)v[n++]=QMarkView{true,false,-1,{ownPoint.at[0],ownPoint.at[1],ownPoint.at[2]}};
+    if(NpcMarkOwn(&enemy,at))v[n++]=QMarkView{true,true,-1,{at[0],at[1],at[2]},{}};
+    if(ownPoint.on && now<ownPoint.until)v[n++]=QMarkView{true,false,-1,{ownPoint.at[0],ownPoint.at[1],ownPoint.at[2]},{}};
     else ownPoint.on=false;
     for(std::uint32_t p=1;p<=peerCount && n<kQMarkViews;++p) {
         const Tracked& t=tracked[p];
@@ -105,10 +113,14 @@ void Publish(ULONGLONG now) noexcept {
             const bool found=static_cast<bool>(t.enemy);
             if(!found || npcmark::Alive(t.enemy)) {
                 const float* e=found ? t.enemyAt : r.state.enemyAt;
-                v[n++]=QMarkView{false,true,t.slot,{e[0],e[1],e[2]}};
+                v[n]=QMarkView{false,true,t.slot,{e[0],e[1],e[2]},{}};
+                std::memcpy(v[n++].name,t.name,sizeof(t.name));
             }
         }
-        if(inbox.Point(p,now) && n<kQMarkViews)v[n++]=QMarkView{false,false,t.slot,{r.state.pointAt[0],r.state.pointAt[1],r.state.pointAt[2]}};
+        if(inbox.Point(p,now) && n<kQMarkViews) {
+            v[n]=QMarkView{false,false,t.slot,{r.state.pointAt[0],r.state.pointAt[1],r.state.pointAt[2]},{}};
+            std::memcpy(v[n++].name,t.name,sizeof(t.name));
+        }
     }
     AcquireSRWLockExclusive(&viewLock);
     std::memcpy(views,v,sizeof(views));viewCount=n;viewWall=now;
@@ -130,6 +142,7 @@ bool OwnState(qmark_net::State* s,ULONGLONG now) noexcept {
         const ULONGLONG left=ownPoint.until-now;
         s->pointLeftMs=static_cast<std::uint32_t>(left<qmark_net::kMaxPointMs ? left : qmark_net::kMaxPointMs);
     }
+    s->letGo=letGoes;
     return true;
 }
 }  // namespace
@@ -157,7 +170,23 @@ void QMarkSetPoint(const float* at) noexcept {
     ownPoint=OwnPoint{true,{at[0],at[1],at[2]},GetTickCount64()+static_cast<ULONGLONG>(Cfg().qmarkPointSec*1000.0f)};
 }
 
-void QMarkPlay(QMarkCue cue) noexcept { cues|=1u<<static_cast<int>(cue); }
+void QMarkPlay(QMarkCue cue) noexcept {
+    cues|=1u<<static_cast<int>(cue);
+    if(cue==QMarkCue::off)++letGoes;   // this machine's player let a mark go: the teammates hear it (kCapLetGo)
+}
+
+int QMarkTeamEnemies(const void** out,int max) noexcept {
+    int n=0;
+    const ULONGLONG now=GetTickCount64();
+    for(std::uint32_t p=1;p<=peerCount && n<max;++p) {
+        const Tracked& t=tracked[p];
+        if(!inbox.Enemy(p,now) || !npcmark::Alive(t.enemy))continue;
+        bool seen=false;
+        for(int i=0;i<n;++i)seen=seen || out[i]==t.enemy.obj;
+        if(!seen)out[n++]=t.enemy.obj;
+    }
+    return n;
+}
 
 void QMarkFrame() noexcept {
     const ULONGLONG frame=GameFrame();
@@ -183,7 +212,7 @@ void QMarkFrame() noexcept {
 }
 
 void ResetQMarks() noexcept {
-    ownPoint=OwnPoint{};cues=0;
+    ownPoint=OwnPoint{};cues=0;letGoes=0;
     ResetQMarkNetwork();
     AcquireSRWLockExclusive(&viewLock);viewCount=0;viewWall=0;ReleaseSRWLockExclusive(&viewLock);
 }
@@ -218,6 +247,7 @@ bool ReceiveQMarkNetwork(std::uint32_t peer,const char* puid,const void* bytes,s
         Drop(t);
         strcpy_s(t.puid,puid);std::memcpy(t.marker,s.marker,32);std::memcpy(t.target,s.target,32);
     }
+    if(change==qmark_net::Change::letGo){QMarkPlay(QMarkCue::teamOff);Log("QMARK peer %u let its mark go",peer);}
     if(change==qmark_net::Change::marked) {
         QMarkPlay(QMarkCue::team);
         Log("QMARK peer %u marked %s at (%.0f,%.0f,%.0f)",peer,s.enemy ? "an enemy" : "a point",s.enemy ? s.enemyAt[0] : s.pointAt[0],

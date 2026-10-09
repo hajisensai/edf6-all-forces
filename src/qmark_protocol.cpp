@@ -5,8 +5,9 @@
 namespace crew::qmark_net {
 namespace {
 // Layout: magic, version, caps, origin, sequence, flags (bit 0 enemy, bit 1 point); marker[32]; target[32]; enemyAt[3];
-// pointAt[3]; pointLeftMs; reserved to kWireSize (zero sent, ignored read: room for a compatible addition).
-constexpr std::size_t kMarker=24,kTarget=56,kEnemyAt=88,kPointAt=100,kPointLeft=112,kUsed=116;
+// pointAt[3]; pointLeftMs; letGo (kCapLetGo); reserved to kWireSize (zero sent, ignored read: room for a compatible
+// addition).
+constexpr std::size_t kMarker=24,kTarget=56,kEnemyAt=88,kPointAt=100,kPointLeft=112,kLetGo=116,kUsed=120;
 static_assert(kUsed<=kWireSize,"the state fits its wire size");
 constexpr std::uint32_t kFlagEnemy=1u,kFlagPoint=2u;
 
@@ -45,6 +46,7 @@ bool Encode(const State& s,void* bytes,std::size_t size) noexcept {
     if(s.enemy)std::memcpy(p+kTarget,s.target,32);
     for(int i=0;i<3;++i){PutF(p+kEnemyAt+4*i,s.enemy ? s.enemyAt[i] : 0.0f);PutF(p+kPointAt+4*i,s.point ? s.pointAt[i] : 0.0f);}
     Put32(p+kPointLeft,s.point ? s.pointLeftMs : 0u);
+    Put32(p+kLetGo,s.letGo);
     return true;
 }
 
@@ -59,6 +61,7 @@ bool Decode(const void* bytes,std::size_t size,State& out) noexcept {
     std::memcpy(s.marker,p+kMarker,32);std::memcpy(s.target,p+kTarget,32);
     for(int i=0;i<3;++i){s.enemyAt[i]=GetF(p+kEnemyAt+4*i);s.pointAt[i]=GetF(p+kPointAt+4*i);}
     s.pointLeftMs=Get32(p+kPointLeft);
+    s.letGo=(s.caps&kCapLetGo) ? Get32(p+kLetGo) : 0u;
     s.enemy=(flags&kFlagEnemy)!=0 && (s.caps&kCapEnemy)!=0;
     s.point=(flags&kFlagPoint)!=0 && (s.caps&kCapPoint)!=0;
     if(!IdOk(s.marker) || !IdOk(s.target) || !Finite(s.enemyAt) || !Finite(s.pointAt) || s.pointLeftMs>kMaxPointMs)return false;
@@ -77,7 +80,7 @@ bool SameMarks(const State& a,const State& b) noexcept {
 
 bool Outbox::Due(const State& now,std::uint64_t at) const noexcept {
     if(sent_ && at-sentAt_<kMinGapMs)return false;
-    if(!sent_ || !SameMarks(now,last_))return true;
+    if(!sent_ || !SameMarks(now,last_) || now.letGo!=last_.letGo)return true;   // a let-go goes at once too (its cue)
     return at-sentAt_>=(now.enemy ? kEnemyKeepMs : kKeepMs);
 }
 
@@ -104,7 +107,11 @@ bool Inbox::Receive(std::uint32_t peer,const State& s,std::uint64_t now,Change* 
         const bool sameEnemy=hadEnemy && !std::memcmp(prev.target,s.target,32) && (!Zero(s.target) || Near(prev.enemyAt,s.enemyAt));
         const bool enemyNew=s.enemy && !sameEnemy;
         const bool pointNew=s.point && !(hadPoint && Near(prev.pointAt,s.pointAt));
+        // Let go by its player: its count of let-goes moved on within the same run (a lost message's let-go still counts;
+        // a mark gone with its enemy, dead or removed, moves nothing).
+        const bool letGo=live && s.origin==prev.origin && (s.caps&kCapLetGo) && s.letGo!=prev.letGo;
         if(enemyNew || pointNew)*change=Change::marked;
+        else if(letGo)*change=Change::letGo;
         else if((hadEnemy && !s.enemy) || (hadPoint && !s.point))*change=Change::cleared;
     }
     return true;

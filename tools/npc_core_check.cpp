@@ -179,6 +179,12 @@ int pointMarks=0,cueOwn=0,cueOff=0,qmarkFrames=0;
 void QMarkSetPoint(const float*) noexcept { ++pointMarks; }
 void QMarkPlay(QMarkCue c) noexcept { cueOwn+=c==QMarkCue::own;cueOff+=c==QMarkCue::off; }
 void QMarkFrame() noexcept { ++qmarkFrames; }
+// The teammates' marked enemies (qmark.cpp QMarkTeamEnemies: live, found in this world).
+const void* teamMarks[4]{};int teamMarkCount=0;
+int QMarkTeamEnemies(const void** out,int max) noexcept {
+    int n=0;for(;n<teamMarkCount && n<max;++n)out[n]=teamMarks[n];
+    return n;
+}
 // The lock registry's valid lock points whatever their lockable flag (the marked enemy out of sight): `lockAt` for `lockOf`.
 const void* lockOf=nullptr;float lockAt[3]{};
 bool VisitLockPoints(EnemyVisitor visit,void* ctx) noexcept { if(lockOf)visit(ctx,lockOf,lockAt);return true; }
@@ -688,6 +694,33 @@ int main() {
         markinput::down=true;NpcMarkFrame(human,false);
         Expect(pointOrders==1 && !NpcMarked(),"global disable prevents ground orders and hides the mark");
         ResetNpcAi();Expect(At<long>(foeCtrl,0xC)==1,"player-frame mark releases its identity on reset");
+    }
+    // The teammates' marks are the NPCs' as this machine's are (the user, 2026-10-10: "npc不是统一的吗，都去打"): each NPC
+    // takes the marked enemy nearest it, whoever marked it (NearestMark, the soldiers' and the gunners' pick).
+    {
+        Reset();config.enabled=true;config.customNpcAi=true;
+        unsigned char foeCtrl[0x10]{};Put<void*>(other,kSelfCtrl,foeCtrl);Put<long>(foeCtrl,8,1);Put<long>(foeCtrl,0xC,1);
+        static unsigned char teamFoe[0x400]{},plainFoe[0x400]{};
+        world.enemies=3;
+        world.enemy[0]=Enemy{plainFoe,{0,0,5},1};
+        world.enemy[1]=Enemy{other,{0,0,100},1};
+        world.enemy[2]=Enemy{teamFoe,{0,0,20},1};
+        const float from[3]={0,0,0},distant[3]={0,0,150};
+        Expect(!NearestMark(from),"nothing marked: no marked enemy, the nearest plain one not taken for one");
+        teamMarks[0]=teamFoe;teamMarkCount=1;
+        Expect(NearestMark(from)==&world.enemy[2],"a teammate's mark alone: the NPCs go for it as for their own");
+        const float seen[3]={0,0,100};
+        Expect(NpcMarkEnemy(other,seen,true),"this machine marks another enemy too");
+        Expect(NearestMark(from)==&world.enemy[2] && NearestMark(distant)==&world.enemy[1],
+               "two marks: each NPC takes the one nearest it, whoever marked it");
+        world.enemy[2].aim[2]=100.0f;
+        Expect(NearestMark(from)==&world.enemy[1],"as near as each other: this machine's first");
+        teamMarks[0]=plainFoe;world.enemy[2].aim[2]=20.0f;
+        Expect(NearestMark(from)==&world.enemy[0],"the teammate's mark moved to another enemy: that one");
+        teamMarks[0]=dead;
+        Expect(NearestMark(from)==&world.enemy[1],"a teammate's enemy not in this frame's list: not taken");
+        teamMarkCount=0;ResetNpcAi();
+        Put<void*>(other,kSelfCtrl,nullptr);
     }
     VirtualFree(image,0,MEM_RELEASE);return failures ? 1 : 0;
 }

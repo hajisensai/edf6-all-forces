@@ -215,10 +215,25 @@ constexpr float kMarkFar=2000.0f;   // m: no mark past this, no point past this
 constexpr float kPointClear=3.0f;   // the point needs no enemy within this many times NpcMarkCone of the centre
 constexpr ULONGLONG kPingMs=3000;   // wall ms a point's ring and its result are shown
 
-const Enemy* MarkedEnemy() noexcept {
-    if(!npcmark::Alive(mark.obj))return nullptr;
-    for(int i=0;i<world.enemies;++i)if(mark.obj.Is(world.enemy[i].object))return &world.enemy[i];
-    return nullptr;
+// The marked enemy an NPC at `from` goes for (§6.3): of this machine's mark and the teammates' (qmark.cpp
+// QMarkTeamEnemies: their marks reach the machine that runs the NPCs, the host or whichever is the authority), the one
+// nearest it, in this frame's enemy list. One rule for every mark, whoever made it (the user, 2026-10-10: "npc不是统一的
+// 吗，都去打"); a tie: this machine's. Null: none marked or none of them in the list.
+const Enemy* NearestMark(const float* from) noexcept {
+    const void* marks[1+kQMarkViews];
+    int n=0;
+    if(npcmark::Alive(mark.obj))marks[n++]=mark.obj.obj;
+    n+=QMarkTeamEnemies(marks+n,kQMarkViews);
+    const Enemy* best=nullptr;
+    float bestD=0.0f;
+    for(int k=0;k<n;++k)
+        for(int i=0;i<world.enemies;++i) {
+            if(world.enemy[i].object!=marks[k])continue;
+            const float d=npc::Dist(from,world.enemy[i].aim);
+            if(!best || d<bestD){best=&world.enemy[i];bestD=d;}
+            break;
+        }
+    return best;
 }
 
 // The marked object still the one marked and in the game (jet.cpp Alive) and alive.
@@ -917,7 +932,7 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     if(q && q->cmd.order==Order::focus && npcmark::Alive(q->commandFocus)) {
         for(int i=0;i<world.enemies;++i)if(q->commandFocus.Is(world.enemy[i].object)){commandTarget=&world.enemy[i];break;}
     }
-    if(const Enemy* m=commandTarget ? commandTarget : MarkedEnemy()) {
+    if(const Enemy* m=commandTarget ? commandTarget : NearestMark(eye)) {
         float reach=0.0f;
         for(int i=0;i<a.n;++i)if(a.arm[i].reach>reach)reach=a.arm[i].reach;
         const bool focus=commandTarget!=nullptr;
@@ -2361,7 +2376,7 @@ void NpcGunnersInput(unsigned char* v) noexcept {
         }
         if(!(reach>0.0f))continue;
         GunnerPick p{Pos(v),reach,nullptr,1e30f};
-        const Enemy* const m=world.frame==GameFrame() ? MarkedEnemy() : nullptr;   // the soldiers' list of this frame only
+        const Enemy* const m=world.frame==GameFrame() ? NearestMark(Pos(v)) : nullptr;   // the soldiers' list of this frame only
         if(m && npc::Dist(Pos(v),m->aim)<=reach){p.best=m->object;p.bestD=npc::Dist(Pos(v),m->aim);}
         else VisitEnemies(v,&GunnerVisit,&p);
         if(p.best) {

@@ -3,10 +3,10 @@
 #include <cstddef>
 
 namespace crew {
-// The name of the player soldier `player` (any machine's, as this machine's world has it): the game's name tag source
+// The name of the player soldier `soldier` (any machine's, as this machine's world has it): the game's name tag source
 // 0x784830 on the soldier's user (+0x1ED0, its control block +0x1ED8), fitted to `count` (FitName). Game thread.
 // False (out empty): no user, an empty name, EDF.dll not as read, or a fault.
-bool ReadPlayerName(const void* player,wchar_t* out,std::size_t count) noexcept;
+bool ReadPlayerName(const void* soldier,wchar_t* out,std::size_t count) noexcept;
 
 // `name` (`length` characters) fitted to `count` with its terminator: a longer one cut and ended with an ellipsis, control
 // characters dropped (a name is shown on one line). Pure (tests/qmark_test.cpp).

@@ -4072,7 +4072,8 @@ bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
 }
 // The Q marks (qmark.cpp; the user's Q, docs/npc-ai-design.md §6.3): an enemy marked has a diamond round it, a point on
 // the ground a ring with a cross; this machine's player's amber with MARK and the distance, a teammate's in its player
-// slot's colour with P<n> (ALLY when its slot is not known here) and the distance. The teammates' are drawn first: ours
+// slot's colour with its player's name (the game's name tag's; P<n> when it could not be read, ALLY when its slot is not
+// known here) and the distance. The teammates' are drawn first: ours
 // on top where two fall together.
 alignas(16) const float kSlotTint[4][4]={{0.3f,0.85f,1.0f,1.0f},{1.0f,0.45f,0.9f,1.0f},{0.55f,1.0f,0.35f,1.0f},{0.72f,0.6f,1.0f,1.0f}};
 void QMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
@@ -4098,6 +4099,9 @@ void QMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
         const float d=cam ? vec::Dist(eye,m.at) : -1.0f;
         if(m.own && d>=0.0f)Label(text,lines,at,x,ly,1,kLineScale*0.7f,tint,Tr(Tx::npcMarkRange),d);
         else if(m.own)Label(text,lines,at,x,ly,1,kLineScale*0.7f,tint,L"%ls",Tr(Tx::npcMark));
+        // Its player's name as the game's name tag shows it (any script: the game's font draws it; FitName cut it to
+        // kQMarkName - 1 characters, so a long one never runs past the mark); not read: P<n>.
+        else if(m.name[0])Label(text,lines,at,x,ly,1,kLineScale*0.7f,tint,L"%ls %.0f m",m.name,d>=0.0f ? d : 0.0f);
         else if(m.slot>=0)Label(text,lines,at,x,ly,1,kLineScale*0.7f,tint,Tr(Tx::qmarkPlayer),m.slot+1,d>=0.0f ? d : 0.0f);
         else Label(text,lines,at,x,ly,1,kLineScale*0.7f,tint,Tr(Tx::qmarkAlly),d>=0.0f ? d : 0.0f);
     }

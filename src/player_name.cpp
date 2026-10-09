@@ -27,14 +27,14 @@ using NameOfFn=std::int32_t(__fastcall*)(WString*,UserRef*,bool);
 using TidyFn=void(__fastcall*)(WString*);
 }  // namespace
 
-bool ReadPlayerName(const void* player,wchar_t* out,std::size_t count) noexcept {
+bool ReadPlayerName(const void* soldier,wchar_t* out,std::size_t count) noexcept {
     if(!out || !count)return false;
     out[0]=0;
     if(!image || !Matches(kNameOf,kNameOfCode,sizeof(kNameOfCode)) || !Matches(kTidy,kTidyCode,sizeof(kTidyCode)))return false;
     WString name{};name.cap=7;
     bool ok=false;
     __try {
-        const auto* p=static_cast<const unsigned char*>(player);
+        const auto* p=static_cast<const unsigned char*>(soldier);
         if(!Readable(p,kUserCtrl+8))return false;
         UserRef ref{At<void*>(p,kUser),At<void*>(p,kUserCtrl)};
         if(!ref.user || !ref.ctrl || !Readable(ref.ctrl,0x10) || At<long>(ref.ctrl,kCtrlStrong)<=0)return false;
