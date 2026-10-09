@@ -170,8 +170,10 @@ void Validate(Config& n) noexcept {
     n.sazabiLockButton=static_cast<int>(FixInt("SazabiLockButton",n.sazabiLockButton,0,255));
     n.sazabiDashKey=static_cast<int>(FixInt("SazabiDashKey",n.sazabiDashKey,0,254));
     n.sazabiDescendKey=static_cast<int>(FixInt("SazabiDescendKey",n.sazabiDescendKey,0,254));
-    n.sazabiSwitchKey=static_cast<int>(FixInt("SazabiSwitchKey",n.sazabiSwitchKey,0,254));
-    n.sazabiSwitchButton=static_cast<int>(FixInt("SazabiSwitchButton",n.sazabiSwitchButton,0,255));
+    n.sazabiFunnelKey=static_cast<int>(FixInt("SazabiFunnelKey",n.sazabiFunnelKey,0,254));
+    n.sazabiFunnelButton=static_cast<int>(FixInt("SazabiFunnelButton",n.sazabiFunnelButton,0,255));
+    n.sazabiCannonKey=static_cast<int>(FixInt("SazabiCannonKey",n.sazabiCannonKey,0,254));
+    n.sazabiCannonButton=static_cast<int>(FixInt("SazabiCannonButton",n.sazabiCannonButton,0,255));
     n.sazabiMeleeKey=static_cast<int>(FixInt("SazabiMeleeKey",n.sazabiMeleeKey,0,254));
     n.sazabiMeleeButton=static_cast<int>(FixInt("SazabiMeleeButton",n.sazabiMeleeButton,0,255));
     n.sazabiGuardKey=static_cast<int>(FixInt("SazabiGuardKey",n.sazabiGuardKey,0,254));
@@ -431,8 +433,12 @@ void LoadConfig() noexcept {
     n.sazabiLockButton=ReadInt(L"SazabiLockButton",static_cast<DWORD>(n.sazabiLockButton));
     n.sazabiDashKey=ReadInt(L"SazabiDashKey",static_cast<DWORD>(n.sazabiDashKey));
     n.sazabiDescendKey=ReadInt(L"SazabiDescendKey",static_cast<DWORD>(n.sazabiDescendKey));
-    n.sazabiSwitchKey=ReadInt(L"SazabiSwitchKey",static_cast<DWORD>(n.sazabiSwitchKey));
-    n.sazabiSwitchButton=ReadInt(L"SazabiSwitchButton",static_cast<DWORD>(n.sazabiSwitchButton));
+    // an ini from before the specials had their own keys: its switch key / button become the funnels'
+    n.sazabiFunnelKey=ReadInt(L"SazabiFunnelKey",static_cast<DWORD>(ReadInt(L"SazabiSwitchKey",static_cast<DWORD>(n.sazabiFunnelKey))));
+    n.sazabiFunnelButton=ReadInt(L"SazabiFunnelButton",
+                                 static_cast<DWORD>(ReadInt(L"SazabiSwitchButton",static_cast<DWORD>(n.sazabiFunnelButton))));
+    n.sazabiCannonKey=ReadInt(L"SazabiCannonKey",static_cast<DWORD>(n.sazabiCannonKey));
+    n.sazabiCannonButton=ReadInt(L"SazabiCannonButton",static_cast<DWORD>(n.sazabiCannonButton));
     n.sazabiMeleeKey=ReadInt(L"SazabiMeleeKey",static_cast<DWORD>(n.sazabiMeleeKey));
     n.sazabiMeleeButton=ReadInt(L"SazabiMeleeButton",static_cast<DWORD>(n.sazabiMeleeButton));
     n.sazabiGuardKey=ReadInt(L"SazabiGuardKey",static_cast<DWORD>(n.sazabiGuardKey));
@@ -626,10 +632,10 @@ void LoadConfig() noexcept {
     Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",n.subHullHp,n.subHeavyHit);
     Log("CONFIG hud vehicles=%d count=%d range=%.0f stockVehicleHud=%d hideStockGauges=%d scale=%.2f language=%d",n.vehicleHud,
         n.vehicleHudCount,n.vehicleHudRange,n.stockVehicleHud,n.hideStockGauges,n.hudScale,n.hudLanguage);
-    Log("CONFIG sazabi=%d walk=%.0f run=%.0f fly=%.0f dash=%.0f climb=%.0f gravity=%.1f turn=%.0f mouse=%.2f thrusters=%.1fs regen=%.2f invert=%d dashKey=0x%X descendKey=0x%X switch=0x%X/%d melee=0x%X/%d guard=0x%X/%d share=%.2f axe=%.0f cannon=%.0f funnel=%.0f testBoard=%d",
+    Log("CONFIG sazabi=%d walk=%.0f run=%.0f fly=%.0f dash=%.0f climb=%.0f gravity=%.1f turn=%.0f mouse=%.2f thrusters=%.1fs regen=%.2f invert=%d dashKey=0x%X descendKey=0x%X funnels=0x%X/%d cannon=0x%X/%d melee=0x%X/%d guard=0x%X/%d share=%.2f axe=%.0f cannon=%.0f funnel=%.0f testBoard=%d",
         n.sazabi,n.sazabiWalk,n.sazabiRun,n.sazabiFly,n.sazabiDash,n.sazabiClimb,n.sazabiGravity,n.sazabiTurn,n.sazabiMouseTurn,
-        n.sazabiThrusterSec,n.sazabiThrusterRegen,n.sazabiInvertAim,n.sazabiDashKey,n.sazabiDescendKey,n.sazabiSwitchKey,
-        n.sazabiSwitchButton,n.sazabiMeleeKey,n.sazabiMeleeButton,n.sazabiGuardKey,n.sazabiGuardButton,n.sazabiGuardShare,
+        n.sazabiThrusterSec,n.sazabiThrusterRegen,n.sazabiInvertAim,n.sazabiDashKey,n.sazabiDescendKey,n.sazabiFunnelKey,
+        n.sazabiFunnelButton,n.sazabiCannonKey,n.sazabiCannonButton,n.sazabiMeleeKey,n.sazabiMeleeButton,n.sazabiGuardKey,n.sazabiGuardButton,n.sazabiGuardShare,
         n.sazabiAxeDamage,n.sazabiCannonDamage,n.sazabiFunnelDamage,n.sazabiTestBoard);
     Log("CONFIG sazabi assist=%d cone=%.1f range=%.0f pull=%.1f mousePull=%d lock=0x%X/0x%X",n.sazabiAimAssist,n.sazabiAssistCone,
         n.sazabiAssistRange,n.sazabiAssistPull,n.sazabiAssistMousePull,n.sazabiLockKey,n.sazabiLockButton);

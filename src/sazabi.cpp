@@ -376,7 +376,7 @@ void Drive(Mech& m,unsigned char* v,ULONGLONG ms) noexcept {
     Controls c{};
     ArmsInput arms{};
     if(npc){Pilot(m,v,dt,&c,&arms);v[kFireGun]=0;v[kFireMissile]=0;}   // the 506 fires nothing of its own
-    else{c=Read(SeatAt(v,0),dt);arms=TakeButtons(v,SeatAt(v,0));LockInput(m,v,c,dt);}   // locked, the stick is the lock's
+    else{c=Read(SeatAt(v,0),dt);arms=TakeButtons(v,SeatAt(v,0));arms.dash=c.dash;LockInput(m,v,c,dt);}   // locked, the stick is the lock's
     m.yawRate=c.turn;
     m.heading+=c.turn*dt;
     if(m.heading>sazabi::kPi)m.heading-=2.0f*sazabi::kPi;

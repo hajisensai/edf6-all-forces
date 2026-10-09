@@ -2,10 +2,12 @@
 // two fire buttons are taken from the 506 (its fire bytes 0x2020 / 0x2021 cleared each frame: stock, the primary fires
 // holders 0 and 1 together, the beam rifle and the shield missiles) and routed here:
 //  - primary: the beam rifle (holder 0 on sz_muzzle, pylib/vcobjects.py SAZABI_WEAPONS: its trigger latch held);
-//  - secondary: the special picked (SazabiSwitchKey / Button cycles them): the shield missiles (holder 1, the game's
-//    own lock, lockon.h), the funnels (all six launched one after another, each curving round to its own side of an
-//    enemy and firing three beams there, then home: sazabi_funnels.h), or the belly's diffuse mega particle cannon (held: it charges, the
-//    glow at its muzzle growing; let go: a fan of kMegaBeams beams for kMegaSec, steered with the chest);
+//  - secondary: the shield missiles (holder 1, the game's own lock, lockon.h);
+//  - SazabiFunnelKey / Button: the funnels (all six launched one after another, each curving round to its own side of an
+//    enemy and firing three beams there, then home: sazabi_funnels.h);
+//  - SazabiCannonKey / Button: the belly's diffuse mega particle cannon (held: it charges, the glow at its muzzle
+//    growing; let go: a fan of kMegaBeams beams for kMegaSec, steered with the chest);
+//  every special on its own key, all usable together (the rifle too; a tomahawk swing holds the guns and the cannon);
 //  - SazabiMeleeKey / Button: the beam tomahawk drawn and swung (its strike a drill charge at each enemy in reach and
 //    one ahead for the buildings); pressed again mid-swing, another follows;
 //  - SazabiGuardKey / Button held: the shield up, the damage taken from ahead SazabiGuardShare of itself.
@@ -18,7 +20,7 @@
 // Its constants and the state it keeps: sazabi_arms.h.
 
 // The buttons this frame, besides the sticks (Controls): the two fire bytes and the ini's keys / pad buttons.
-struct ArmsInput { bool primary,secondary,cycle,melee,guard; };
+struct ArmsInput { bool primary,secondary,funnels,cannon,melee,guard,dash; };
 bool Pressed(const unsigned char* seat,int key,int button) noexcept {
     if(At<unsigned char>(seat,kSeatPad)==0)return KeyDown(key);
     return button && (At<std::uint16_t>(seat,kSeatButtons)&static_cast<std::uint16_t>(button))!=0;
@@ -27,7 +29,8 @@ ArmsInput TakeButtons(unsigned char* v,const unsigned char* seat) noexcept {
     ArmsInput a{};
     a.primary=v[kFireGun]!=0;a.secondary=v[kFireMissile]!=0;
     v[kFireGun]=0;v[kFireMissile]=0;   // the 506 fires nothing of its own
-    a.cycle=Pressed(seat,Cfg().sazabiSwitchKey,Cfg().sazabiSwitchButton);
+    a.funnels=Pressed(seat,Cfg().sazabiFunnelKey,Cfg().sazabiFunnelButton);
+    a.cannon=Pressed(seat,Cfg().sazabiCannonKey,Cfg().sazabiCannonButton);
     a.melee=Pressed(seat,Cfg().sazabiMeleeKey,Cfg().sazabiMeleeButton);
     a.guard=Pressed(seat,Cfg().sazabiGuardKey,Cfg().sazabiGuardButton);
     return a;
@@ -402,23 +405,34 @@ void ArmsPose(Mech& m,float dt) noexcept {
     }
 }
 
+// Each action's press, in the log (the user's reports say what was pressed and what came of it: 2026-10-09, no dash,
+// no melee, and nothing in the log to tell an unbound key from a dead action).
+void LogPresses(const Mech& m,const unsigned char* v,const ArmsInput& in) noexcept {
+    const Arms& a=m.arms;
+    const bool now[6]={in.secondary,in.funnels,in.cannon,in.melee,in.guard,in.dash};
+    const bool was[6]={a.secondaryHeld,a.funnelHeld,a.cannonHeld,a.meleeHeld,a.guardHeld,a.dashHeld};
+    static const char* const kNames[6]={"missiles","funnels","cannon","melee","guard","dash"};
+    for(int i=0;i<6;++i)if(now[i] && !was[i])Log("SAZABI v=%p pressed %s",v,kNames[i]);
+}
+
 // Before the pose: the buttons, the timers, the swing, the guard, the funnels' flight.
 void ArmsStep(Mech& m,unsigned char* v,const ArmsInput& in,float dt) noexcept {
     Arms& a=m.arms;
-    if(in.cycle && !a.switchHeld) {
-        a.special=static_cast<Special>((static_cast<int>(a.special)+1)%static_cast<int>(Special::count));
-        static const char* const kNames[]={"shield missiles","funnels","mega particle cannon"};
-        Log("SAZABI v=%p special: %s",v,kNames[static_cast<int>(a.special)]);
-    }
-    a.switchHeld=in.cycle;
+    LogPresses(m,v,in);
+    // the special used last (the HUD's readout, the animator's glance at it)
+    if(in.secondary && !a.secondaryHeld)a.special=Special::missiles;
+    if(in.funnels && !a.funnelHeld)a.special=Special::funnels;
+    if(in.cannon && !a.cannonHeld)a.special=Special::cannon;
     // what the animator needs of the buttons (sazabi_anim.h: the tomahawk put away for the rifle, the shield turned for
     // its missiles); this machine's own, never sent
     // a tap is kept until its round leaves: the tomahawk is put away and the rifle raised / the shield turned first
     m.pose.fire=a.rifleAsk.Step(in.primary,dt);
-    m.pose.present=a.missileAsk.Step(in.secondary && a.special==Special::missiles,dt);
+    m.pose.present=a.missileAsk.Step(in.secondary,dt);
+    a.guardHeld=in.guard;a.dashHeld=in.dash;
     a.guard+=((in.guard ? 1.0f : 0.0f)-a.guard)*std::fmin(1.0f,(in.guard ? 6.0f : 4.0f)*dt);
     if(m.rootOk)Tomahawk(m,v,in,dt);
-    const bool launch=in.secondary && !a.secondaryHeld && a.special==Special::funnels;
+    const bool launch=in.funnels && !a.funnelHeld;
+    a.funnelHeld=in.funnels;
     if(m.rootOk)FlyFunnels(m,v,launch,dt);
     ArmsPose(m,dt);
 }
@@ -447,14 +461,14 @@ void ArmsFire(Mech& m,unsigned char* v,const ArmsInput& in,float thrust,float dt
     // first); the shield's missiles once it is turned onto the aim
     // (a model without the Sazabi's bones is never posed: nothing to wait for)
     if(a.rifleAsk.On() && a.swing<0.0f && (!m.rigOk || sazabi::RifleReady(m.anim)))Trigger(rifle);
-    if(a.missileAsk.On() && a.special==Special::missiles && a.swing<0.0f && (!m.rigOk || sazabi::ShieldReady(m.anim)))
+    if(a.missileAsk.On() && a.swing<0.0f && (!m.rigOk || sazabi::ShieldReady(m.anim)))
         Trigger(missile);
     if(m.rootOk) {
-        const bool cannon=a.special==Special::cannon;
-        Cannon(m,v,cannon && in.secondary,cannon && a.secondaryHeld && !in.secondary,dt);
+        Cannon(m,v,in.cannon,a.cannonHeld && !in.cannon,dt);
         Flames(m,v,thrust);
     }
     a.secondaryHeld=in.secondary;
+    a.cannonHeld=in.cannon;
     // the reticle's point: Aim (sazabi_camera.inc), before the pose
     float point[3],progress=0.0f;
     const int lock=missile ? WeaponLock(missile,point,&progress) : 0;
@@ -503,6 +517,7 @@ void PublishCue(const Mech& m) noexcept {
     c.boosting=m.fl.boosting || m.fl.climbing;
     c.overheat=m.fl.overheat;
     c.special=static_cast<int>(a.special);
+    c.keys=m.vehicle && SeatCount(m.vehicle)>0 && At<unsigned char>(SeatAt(m.vehicle,0),kSeatPad)==0;
     c.aimRange=a.aimRange;c.aimHit=a.aimHit;c.centred=a.centred;
     c.hasAssist=a.hasAssist && (a.hasAim || a.lockOn);std::memcpy(c.assist,a.assist,12);
     c.lockOn=a.lockOn && a.hasAssist;

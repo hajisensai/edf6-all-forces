@@ -122,8 +122,13 @@ struct Config {
     int sazabiLockButton=0x80;      // ...and pad button (the seat's button bits, docs/stores-re.md §4: 0x80 R3; 0 none)
     int sazabiDashKey=0x10;         // ...on the keyboard: the dash (VK_SHIFT; a pad's is A)
     int sazabiDescendKey=0x11;      // ...on the keyboard: down faster in the air (VK_CONTROL)
-    int sazabiSwitchKey=0x52;       // the special the secondary fires: shield missiles, funnels, cannon (R; a pad's LB)
-    int sazabiSwitchButton=0x10;
+    // the specials each on their own key, usable together (the user, 2026-10-09: 「这几个浮游炮之类的应该能一块使用吧」): the
+    // secondary fires the shield missiles; the funnels (R; a pad's LB: what the old SazabiSwitchKey cycled with, read as
+    // its default) and the chest cannon (held: charged, let go: fired; E; a pad's B)
+    int sazabiFunnelKey=0x52;
+    int sazabiFunnelButton=0x10;
+    int sazabiCannonKey=0x45;
+    int sazabiCannonButton=0x02;
     int sazabiMeleeKey=0x56;        // the beam tomahawk swung (V; a pad's X)
     int sazabiMeleeButton=0x04;
     int sazabiGuardKey=0x42;        // held: the shield up (B; a pad's RB)
@@ -617,7 +622,8 @@ struct SazabiCue {
     float climb;             // m/s up (+) / down (-)
     bool boosting;           // the thrusters burning (a boost dash, a climb)
     bool overheat;           // the thrusters spent: no boost until it lands and they cool
-    int special;             // the secondary's weapon: 0 shield missiles, 1 funnels, 2 mega particle cannon
+    int special;             // the special used last: 0 shield missiles, 1 funnels, 2 mega particle cannon
+    bool keys;               // the pilot on the keyboard and mouse (else a pad): which bindings the HUD names
     float aimRange;          // m from the muzzle to the aim point
     bool aimHit;             // the centre's ray meets something within the reticle's reach (else the aim is its far end)
     bool centred;            // the camera is the Sazabi's own (sazabi.cpp): the aim point is the screen's centre

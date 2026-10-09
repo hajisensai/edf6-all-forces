@@ -65,13 +65,12 @@ void Pilot(Mech& m,unsigned char* v,float dt,Controls* c,ArmsInput* in) noexcept
     const float dist=std::sqrt(e.d2[0]);
     const bool onIt=std::fabs(off)<kOnTarget && std::fabs(pitch-m.aimPitch)<kOnTarget;
     Arms& a=m.arms;
-    // the special: the funnels when they are home and the enemies many, else the missiles
+    // the specials, each its own: the funnels when they are home and the enemies many (a press: launch), the missiles
+    // whenever they are locked
     int around=0;
     for(int i=0;i<e.n;++i)around+=e.d2[i]<=kFunnelRange*kFunnelRange;
-    const Special pick=FunnelsReady(a) && around>=kFunnelEnemies ? Special::funnels : Special::missiles;
-    in->cycle=a.special!=pick && !a.switchHeld;   // one press a frame until it is picked
-    if(a.special==Special::funnels)in->secondary=pick==Special::funnels && !a.secondaryHeld;   // a press: launch
-    else if(a.special==Special::missiles)in->secondary=a.hasLock;
+    in->funnels=FunnelsReady(a) && around>=kFunnelEnemies && !a.funnelHeld;
+    in->secondary=a.hasLock;
     in->melee=dist<=kMeleeRange && a.swing<0.0f && !a.meleeHeld;
     in->primary=onIt && dist<=kRifleRange && !in->melee;
 }

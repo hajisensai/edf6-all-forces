@@ -45,7 +45,8 @@ struct Ask {
 };
 struct Arms {
     Special special=Special::missiles;
-    bool switchHeld=false,meleeHeld=false,secondaryHeld=false,queued=false,struck=false,whooshed=false;
+    bool meleeHeld=false,secondaryHeld=false,funnelHeld=false,cannonHeld=false,guardHeld=false,dashHeld=false;
+    bool queued=false,struck=false,whooshed=false;
     int combo=0;                  // the combo's swing now (sazabi_pose.h kCombo: diagonal cut, slash across, overhead chop)
     Ask rifleAsk,missileAsk;      // the triggers as asked for (ArmsStep), each ended by its round (ArmsFire)
     float swing=-1.0f,guard=0.0f,charge=0.0f,brace=0.0f,cannonCool=0.0f,megaLeft=0.0f;
