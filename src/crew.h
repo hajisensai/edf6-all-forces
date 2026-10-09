@@ -206,7 +206,6 @@ struct Config {
     int sightZoomKey=0x5A;          // ...its key ('Z'; a Windows virtual-key code, 0: none)
     int sightZoomButton=0x80;       // ...and pad button (seat button bits: 0x80 R3, the high view keeps it where offered; 0 none)
     bool gunStabilizer=true;        // stab.cpp: the guns that should have one hold their world line on the move
-    bool turretFollowsHull=true;    // ...a turret given no command turns with the hull's heading (stab.h Follow, turretcam.cpp)
     float viewDistance=3000.0f;     // the near camera's far clip, m (view.cpp; stock 1000; 0: as the mission has it)
     bool map=true;                  // the map view (map.cpp): an overhead camera over the real world, the player held
     int mapKey=0x4D;                // ...its key ('M'; a Windows virtual-key code, 0: none)
