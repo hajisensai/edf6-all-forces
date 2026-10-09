@@ -54,10 +54,18 @@ The plugin reads exactly this. If the bytes at 0x6346FC, 0x634726, 0x634758 or 0
 swimmer through the ordinary support request path (offline / a one-player world's host: planned here; any other online
 machine: through the host's transaction, every peer announcing `kCapSeaRescue`).
 - Planned as air support (`PlanAirSupport`): an entry at the map's edge, a clear corridor, open sky over the swimmer.
-- One 410 made in the air at the entry, its real pilot made inside it and seated at once (`BoardAirborne`), both
-  registered on every peer. Its door seats are left empty for the swimmer: the entry's crew is the pilot only.
-- The dispatcher hands it to heli.cpp (`RescueHeliDeployed`): where it is flown (offline, the host) the flight picks up
-  the player of any machine nearest the request's point; on the swimmer's machine the call presses the board button.
+- One 410 made at the takeoff point, its real pilot and one door gunner made inside it and seated at once
+  (`BoardAirborne`, `NpcSeatCrewNow` in seat order: pilot seat 0, gunner seat 1 = `410_HELI_GUNNER_L`), all registered on
+  every peer. Seat 2 (`410_HELI_GUNNER_R`) stays free for the swimmer; `DoorSeat` finds it.
+- Takeoff point (2026-10-10): the carrier deck point nearest the swimmer, 20 m into the deck, 2 m over it, when its
+  30 m climb column and the level corridor to over the swimmer are clear (`support_entry.h TakeoffRoute`); else the
+  map's edge (`PlanAirSupport`). Over the hull footprint (or within 15 m of it) the heli keeps 8 m over the deck.
+- Not held to the mission's support policy, nor to the map's queue / 30 s cooldown / status line.
+- The dispatcher hands it to heli.cpp (`RescueHeliDeployed`) with its requester: offline / a one-player host this
+  machine's player, a guest's by the transaction's requester PUID resolved to its mission player actor
+  (`SupportTransactionRequester`). The requester gone, dead, ashore 3 s, in another vehicle or in another rescue's heli
+  calls it off (`rescue_logic.h PickupCancel`, logged `RESCUE cancelled: ...`) and the heli leaves (`StartLeave`). With no
+  requester known it leaves at once. On the swimmer's machine the call presses the board button.
 - No heli (refused, cooldown, no sky / corridor, an older peer, nothing within 150 s): logged
   `RESCUE request failed`, shown on the HUD, asked again 10 s later.
 - Before this, one 410 was made 60 m above the carrier's deck with an empty pilot seat (HeliLaunch): since the real
