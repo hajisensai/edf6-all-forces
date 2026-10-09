@@ -50,6 +50,7 @@ constexpr float kThrownHover=12.0f;    // m a thrown charge drone hovers over wh
 // kGoneStuck after kStuckMs of withdrawing.
 constexpr float kWithdrawHp=0.25f,kGone=1600.0f,kGoneStuck=900.0f,kWithdrawClimb=300.0f;
 constexpr ULONGLONG kStuckMs=60000;
+constexpr float kFerryAlt=150.0f;   // m over its point a ferry (the paratroop plane) flies: the stick under canopies ~25 s
 // The map's edge (docs/map-edge-re.md): the heli input (slot 55, 0x6543A0) clamps the body into the
 // mission's move area shrunk by veh+kAreaInset (0x5A9E50) and teleports it back, every frame, so a jet at
 // the edge stopped dead and slid flank first. A jet's inset is set to kNoInset (the box grown 1e6 m: no
@@ -460,6 +461,28 @@ void SeeFocus(void* ctx,const void* object,const float*) noexcept {
 
 // The map's orders (mapcmd.cpp Give). guard / follow / release: ApplyMapCommand. focus: `focus` (the enemy the player
 // marked) attacked first, its order kept (ApplyMapFocus); refused when that is no enemy of it now.
+// A ferry (transport.cpp, the paratroop plane): its command point `at` (ApplyMapCommand's guard), flown at kFerryAlt over
+// it, no target taken (Jet::ferry). Its stick jumps over the point; JetWithdrawNow then sends it off (deleted out of
+// sight, its crew first: support_dispatch.cpp Retire).
+bool JetFerry(const void* vehicle,const float* at) noexcept {
+    __try {
+        Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle));
+        if(!j || !at || j->reap)return false;
+        j->ferry=true;
+        ApplyMapCommand(*j,Command{Order::guard,{at[0],at[1],at[2]}},GameMs());
+        Log("JET v=%p ferry to (%.0f,%.0f,%.0f), %.0f m over it",vehicle,at[0],at[1],at[2],kFerryAlt);
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+bool JetWithdrawNow(const void* vehicle,const char* why) noexcept {
+    __try {
+        Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle));
+        if(!j || j->reap)return false;
+        if(j->mode!=Mode::withdraw)Withdraw(*j,why ? why : "ordered",GameMs());
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
 bool JetCommand(const void* vehicle,const Command& c,const ObjRef& focus) noexcept {
     __try {
         Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle));
@@ -539,7 +562,8 @@ void JetFrame(unsigned char* v) noexcept {
     // The target and its motion.
     const float targetRange=ordered ? kOrderRange : j->reach>0.0f ? j->reach : TargetRange(kind);
     const bool moving=!j->focus && MapCommandMoving(*j,pos,anchor,targetRange);   // a focus order: at it first
-    if(!moving && j->mode!=Mode::withdraw && j->mode!=Mode::takeoff && j->mode!=Mode::recover)PickTarget(*j,v,pos,anchor,targetRange,dt,ms);
+    if(!moving && !j->ferry && j->mode!=Mode::withdraw && j->mode!=Mode::takeoff && j->mode!=Mode::recover)
+        PickTarget(*j,v,pos,anchor,targetRange,dt,ms);
     else j->t.target=nullptr;
     if(j->t.target){const float to[3]={j->t.aim[0]-pos[0],j->t.aim[1]-pos[1],j->t.aim[2]-pos[2]};PickStore(arms,j->t.flyer,Len(to));}
     if(kind.weapon==Weapon::charge && j->t.target && j->mode!=Mode::withdraw && j->mode!=Mode::recover) {
@@ -554,7 +578,7 @@ void JetFrame(unsigned char* v) noexcept {
     // Guidance, then the flight its kind flies.
     const float clear=GroundClearance(pos);
     const float base=j->t.target && !j->t.flyer ? j->t.aim[1] : anchor[1];
-    const float height=base+kind.alt;
+    const float height=base+(j->ferry ? kFerryAlt : kind.alt);
     float want[3]={nose[0],0,nose[2]},speed=kind.cruise;
     bool gunsOk=false,missileOk=false;
     Guide(*j,kind,arms,mother,pos,nose,anchor,viewer,lead,height,clear,walled,ms,want,&speed,&gunsOk,&missileOk);

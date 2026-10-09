@@ -343,6 +343,11 @@ HUDTEXT(orderRecruit,L"RECRUIT",L"招募",L"招募",L"加入指示")
 // The RTS moves (mapcmd_logic.h Order::move / attackMove; hud.cpp MapButtons, mapcmd.cpp).
 HUDTEXT(orderMove,L"MOVE",L"移动",L"移動",L"移動")
 HUDTEXT(orderAttackMove,L"ATTACK-MOVE",L"攻击移动",L"攻擊移動",L"攻撃移動")
+// The transports (transport.cpp; mapcmd_logic.h Order::withdraw).
+HUDTEXT(orderWithdraw,L"SEND TRANSPORT AWAY",L"载具撤离",L"載具撤離",L"輸送車両撤収")
+HUDTEXT(cmdNpcNoTransport,L"No transport to withdraw (only a support vehicle leaves; get the squad off a moving one first)",
+        L"没有可撤离的运输载具（只有支援载具能撤离；载具行进中请先让小队下车）",L"沒有可撤離的運輸載具（只有支援載具能撤離；載具行進中請先讓小隊下車）",
+        L"撤収できる輸送車両がない（支援車両のみ；走行中は先に降車させる）")
 HUDTEXT(cmdOrderArmed,L"%ls: LEFT-CLICK THE MAP (RIGHT-CLICK: CANCEL)",L"%ls：左键点击地图指定位置（右键取消）",L"%ls：左鍵點擊地圖指定位置（右鍵取消）",
         L"%ls：マップを左クリックで地点指定（右クリックで取消）")
 HUDTEXT(cmdSupportArmed,L"%ls: LEFT-CLICK THE MAP FOR ITS DESTINATION (RIGHT-CLICK: CANCEL)",L"%ls：左键点击地图指定目的地（右键取消）",

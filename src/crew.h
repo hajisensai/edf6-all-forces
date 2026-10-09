@@ -557,9 +557,14 @@ unsigned char* JetLaunchThrown(ThrownDrone what,const float* at,const float* hea
 // Whether jet.cpp still flies `vehicle` (the object with weak-this control block `ctrl`), alive and not
 // withdrawing.
 bool JetFlying(const void* vehicle,const void* ctrl) noexcept;
+// jet.cpp: the paratroop plane (transport.cpp): on to `at` attacking nothing (a ferry); sent off now (withdrawn: deleted out
+// of sight, its crew by support_dispatch.cpp Retire). False when the plugin does not fly `vehicle`.
+bool JetFerry(const void* vehicle,const float* at) noexcept;
+bool JetWithdrawNow(const void* vehicle,const char* why) noexcept;
 // A helicopter made at run time (EDF6VC_HELI_410 / _506.SGO, tools/make_jets.py) at `from` facing `heading`,
 // friend, NPC pilot: the vehicle, or nullptr (not preloaded this mission, the game failed to build it).
-enum class HeliBody { brute410, eros506, medic410 };   // medic410: EDF6VC_HELI_MEDIC (heli.cpp Medic)
+enum class HeliBody { brute410, eros506, medic410, transport410 };   // medic410: EDF6VC_HELI_MEDIC (heli.cpp Medic); transport410:
+                                                                      // EDF6VC_HELI_TRANSPORT (transport.cpp)
 unsigned char* HeliLaunch(HeliBody body,const float* from,const float* heading) noexcept;
 // A bomber's payload: BombingPlane_Init's arguments (0x5AABB0; speed in metres a frame), which a jet's bomb
 // bay is set up from.
@@ -996,6 +1001,11 @@ bool PlayerHeliSight(HeliSightReadout* out) noexcept;
 // `most`; how many.
 int HiddenAimGuns(const unsigned char* seat,const unsigned char** out,int most) noexcept;
 void PlayerEjectTick() noexcept;   // playerjet.cpp: the player's ejection and parachute, a frame
+// playerjet.cpp: a parachute canopy over anyone (transport.cpp's paratroopers): made over `feet` (its front along `drift`),
+// moved there each frame, deleted. An empty ref: not made (EDF6VC_CHUTE.SGO not installed, or the game made nothing).
+ObjRef ChuteCanopyMake(const float* feet,const float* drift) noexcept;
+bool ChuteCanopyMove(const ObjRef& canopy,const float* feet,const float* drift) noexcept;
+void ChuteCanopyFree(const ObjRef& canopy) noexcept;
 void PreloadPlayerJets() noexcept; // playerjet.cpp: at a mission's start, the player jets' SGOs (the catch)
 namespace jet { bool SpawnReady() noexcept; bool PassThrough() noexcept;   // jet_hooks.cpp: the addBody hook is in
  bool ModFileThere(const wchar_t* file) noexcept; bool LockingOn(const void* target) noexcept;

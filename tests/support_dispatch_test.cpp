@@ -13,7 +13,7 @@ bool OnlineHostOnly() noexcept {return true;}
 ULONGLONG GameMs() noexcept {return fixtureMs;}
 std::uint64_t GameFrame() noexcept {return fixtureMs;}
 void Log(const char*,...) noexcept {}
-unsigned char objects[32][0x3000]{},controls[32][32]{},seats[32][edf::kSeatStride*3]{};
+unsigned char objects[32][0x3000]{},controls[32][32]{},seats[32][edf::kSeatStride*14]{};
 int made=0,deleted=0,boardRequests=0,activated=0,orders=0,followed=0,netRequests=0,releases=0,routeOrders=0;
 int held=0;bool transactionActive=false;
 bool SupportTransactionActive(std::uint64_t) noexcept {return transactionActive;}
@@ -50,10 +50,35 @@ support::Refusal PlanAirSupport(int,const float*,const float*,support::Route* ro
     plannedAircraft=count;
     *route={{-1400,150,0},{1,0,0}};return terrain ? support::Refusal::none : support::Refusal::noEntry;
 }
-unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float* matrix) noexcept {
+SupportAircraft lastPrepared{};
+unsigned char* PrepareSupportAircraft(const SupportAircraft& spec,const float* matrix) noexcept {
+    lastPrepared=spec;
     auto ref=Make(true);std::memcpy(static_cast<unsigned char*>(const_cast<void*>(ref.obj))+kPosition,matrix+12,12);
-    return static_cast<unsigned char*>(const_cast<void*>(ref.obj));
+    auto* hull=static_cast<unsigned char*>(const_cast<void*>(ref.obj));
+    // The transports' hulls seat their pilot and twelve (tools/make_jets.py TRANSPORT_*).
+    if(spec.transportPlane || spec.heli==static_cast<int>(HeliBody::transport410))Put<std::uint64_t>(hull,kSeatCount,13);
+    return hull;
 }
+// The transports' entry points (transport.cpp, jet.cpp, heli.cpp, airstrike.cpp, jet_spawn.cpp, support_net.cpp).
+int delivered=0,deliveredSquads=0,paradrops=0,ferries=0,jetWithdrawals=0,heliLeaves=0,plannedTransports=0;
+const void* deliveredTops[3]{};const void* deliveredHull=nullptr;
+bool transportReady=true,peersTransports=true,heliHull=false,driverAboard=true;
+bool TransportDeliver(const void* v,const void* const* tops,int n,const float*) noexcept {
+    ++delivered;deliveredSquads=n;deliveredHull=v;for(int i=0;i<n && i<3;++i)deliveredTops[i]=tops[i];return n>0;
+}
+bool TransportParadrop(const void*,const float*) noexcept {++paradrops;return true;}
+bool JetFerry(const void*,const float*) noexcept {++ferries;return true;}
+bool JetWithdrawNow(const void*,const char*) noexcept {++jetWithdrawals;return true;}
+bool HeliStartLeaving(const void*) noexcept {++heliLeaves;return true;}
+bool IsHelicopter(const void*) noexcept {return heliHull;}
+#ifndef SUPPORT_ROUTE_NATIVE_TEST
+bool NpcDriver(const unsigned char*) noexcept {return driverAboard;}
+#endif
+support::Refusal PlanAirSupportFor(SupportAircraft,const float*,const float*,support::Route* route,int) noexcept {
+    ++plannedTransports;*route={{-1400,150,0},{1,0,0}};return terrain ? support::Refusal::none : support::Refusal::noEntry;
+}
+bool SupportAircraftReady(const SupportAircraft&) noexcept {return transportReady;}
+bool SupportPeersAcceptTransports() noexcept {return peersTransports;}
 bool lastAirborne=false;
 bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool airborne) noexcept {++activated;lastAirborne=airborne;return true;}
 bool peersAirborne=true;
@@ -76,8 +101,9 @@ bool CreateSupportSoldierUnregistered(const float* matrix,std::uint32_t resource
 int seatNow=0,registeredBeforeSeat=0;bool seatFail=false;
 int NpcSeatCrewNow(unsigned char* v,unsigned char* const* crew,int count) noexcept {
     ++seatNow;if(seatFail)return 0;
-    for(int i=0;i<count && i<3;++i)Put<const void*>(SeatAt(v,static_cast<unsigned>(i)),kSeatRider,crew[i]);
-    return count;
+    int seated=0;
+    for(int i=0;i<count && i<static_cast<int>(SeatCount(v));++i){Put<const void*>(SeatAt(v,static_cast<unsigned>(i)),kSeatRider,crew[i]);++seated;}
+    return seated;
 }
 bool DeriveSupportSoldierNetId(const void*,unsigned,unsigned char*) noexcept {return true;}
 bool FollowSupportSoldier(const ObjRef&,const ObjRef&) noexcept {++followed;return true;}

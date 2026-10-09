@@ -66,6 +66,12 @@ bool HeliFuel(const void* vehicle,float* sec) noexcept;
 // A called heli that has left and is far enough out to go (its reap is set). HeliReap deletes such a heli only with
 // no real soldier aboard; a support deployment's (real crew) is retired by its owner, the dispatcher.
 bool HeliLeft(const void* vehicle) noexcept;
+// transport.cpp: a transport helicopter carrying a squad. A ferry to `at` (held HeliHeight over it; `land`: down on it and
+// staying down), fighting nothing and following nobody meanwhile; nullptr ends it (its post / follow as before). Whether it
+// stood on the ground last frame. Sent off now (StartLeave; deleted out there, its crew by support_dispatch.cpp Retire).
+bool HeliFerry(const void* vehicle,const float* at,bool land) noexcept;
+bool HeliGrounded(const void* vehicle) noexcept;
+bool HeliStartLeaving(const void* vehicle) noexcept;
 // Where a vehicle weapon's barrel is and points (the mean of its muzzles' frames).
 bool GunBarrel(const unsigned char* v,const unsigned char* weapon,float* pos,float* dir) noexcept;
 // Sea rescue: once a game frame from the frame's common step (crew.cpp FrameTick), whether or not any heli

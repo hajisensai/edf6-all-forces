@@ -530,6 +530,10 @@ const wchar_t* SupportAirCallName(int index) noexcept {
 support::Refusal PlanAirSupport(int catalog,const float* target,const float* observer,support::Route* route,int count) noexcept {
     SupportAircraft spec;
     if(!route || !SupportAircraftSpec(catalog,&spec))return support::Refusal::unsupported;
+    return PlanAirSupportFor(spec,target,observer,route,count);
+}
+support::Refusal PlanAirSupportFor(SupportAircraft spec,const float* target,const float* observer,support::Route* route,int count) noexcept {
+    if(!route || !target)return support::Refusal::unsupported;
     if(count>0)spec.count=count;
     if(!OpenSky(target))return support::Refusal::noSky;
     float direction[3]={0,0,1};

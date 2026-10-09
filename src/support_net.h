@@ -48,6 +48,8 @@ bool SupportPeersAcceptVariants() noexcept;
 // Whether every peer applies air support created in the air (kCapAirborneAir); true offline / with no session. Without
 // it the host refuses air support with a reason: no peer may have its hull on the ground while another's flies.
 bool SupportPeersAcceptAirborne() noexcept;
+// Whether every peer knows the transport entries (kCapTransports); true offline / with no session.
+bool SupportPeersAcceptTransports() noexcept;
 // Requester ownership: native EOS PUID must equal the authenticated transport
 // sender and belong to the sealed current-world participant set.
 bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) noexcept;

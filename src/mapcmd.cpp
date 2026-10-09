@@ -38,6 +38,7 @@
 #include "map_cam.h"
 #include "npc_mark.h"
 #include "support_call.h"
+#include "transport.h"
 #include <Xinput.h>
 #include <algorithm>
 #include <atomic>
@@ -160,6 +161,16 @@ void RememberSelection(Game& g) noexcept {
 }
 
 bool Give(Game& g,const Entry& e,const Command& order) noexcept {
+    // A transport carrying its squad (transport.cpp; the user, 2026-10-09: "卡车之类的运输载具改成断剑那种操作方式"): a point
+    // order to the vehicle is the squad's (they ride there and get off short of the point), unless the squad is selected
+    // too (its own row gives it, once).
+    if(e.owner!=Owner::squad && mapcmd::PointOrder(order.order))
+        if(const void* rider=TransportRiderOf(e.u.v); rider && !g.sel.Has(rider)) {
+            const auto result=NpcSquadCommandForRequester(ObjRef::Of(rider),order,g.requester,g.focus);
+            if(!result.Accepted())g.failure=result.reason;
+            else g.affected+=result.affected;
+            return result.Accepted();
+        }
     // A vehicle's module keeps one point (its post / anchor): a move or an attack-move reaches it as a guard of it.
     const Command c=e.owner==Owner::squad ? order : Command{mapcmd::VehicleCommandOf(order.order),{order.at[0],order.at[1],order.at[2]}};
     switch(e.owner) {
@@ -217,6 +228,7 @@ const char* OrderName(Order o) noexcept {
     case Order::recruit: return "RECRUIT";
     case Order::move: return "MOVE";
     case Order::attackMove: return "ATTACK-MOVE";
+    case Order::withdraw: return "WITHDRAW";
     default: return "RELEASE";
     }
 }
@@ -233,6 +245,7 @@ const wchar_t* OrderText(Order o) noexcept {
     case Order::recruit: return hudtext::Tr(Tx::orderRecruit);
     case Order::move: return hudtext::Tr(Tx::orderMove);
     case Order::attackMove: return hudtext::Tr(Tx::orderAttackMove);
+    case Order::withdraw: return hudtext::Tr(Tx::orderWithdraw);
     default: return hudtext::Tr(Tx::orderRelease);
     }
 }
@@ -248,7 +261,10 @@ bool Takes(const Entry& e,Order o) noexcept {
         if(o==Order::dismiss)return e.u.recruited;
         if(o==Order::board)return !e.u.riding;
         if(o==Order::dismount)return e.u.riding;
-        if(e.u.riding)return o!=Order::follow && o!=Order::engage && o!=Order::focus && !mapcmd::PointOrder(o);
+        // Its transport (transport.cpp): WITHDRAW sends it off; aboard it the point orders take it there (it gets off short
+        // of the point and carries them out on foot).
+        if(o==Order::withdraw)return e.u.transport;
+        if(e.u.riding)return o!=Order::follow && o!=Order::engage && o!=Order::focus && (e.u.transport || !mapcmd::PointOrder(o));
         return true;
     }
     if(e.owner==Owner::tank)return o==Order::none || mapcmd::PointOrder(o);
@@ -275,7 +291,7 @@ const Entry* EntryOf(const Game& g,const void* id) noexcept {
 const char* ReasonName(NpcCommandReason why) noexcept {
     static const char* const kNames[]={"none","invalid requester","not found","not a leader","not its authority","not its owner",
         "scripted","not friendly","cooling down","no target","no seat","unsupported","failed","disabled","stale",
-        "boarding unavailable","no vehicle","riding"};
+        "boarding unavailable","no vehicle","riding","no transport"};
     static_assert(sizeof(kNames)/sizeof(kNames[0])==static_cast<std::size_t>(NpcCommandReason::count),"a name a reason");
     const auto i=static_cast<std::size_t>(why);
     return i<sizeof(kNames)/sizeof(kNames[0]) ? kNames[i] : "?";
@@ -297,6 +313,7 @@ const wchar_t* CommandFailureText(NpcCommandReason why) noexcept {
     case Reason::boardingUnavailable:return Tr(Tx::cmdNpcBoardOff);
     case Reason::unsupported:return Tr(Tx::cmdNpcUnsupported);
     case Reason::riding:return Tr(Tx::cmdNpcRiding);
+    case Reason::noTransport:return Tr(Tx::cmdNpcNoTransport);
     default:return Tr(Tx::cmdNpcFailed);
     }
 }
@@ -665,6 +682,8 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     const int squads=SquadRows(rows,16,&tally);
     const void* pickable[kCmdUnits];
     const int pickCount=PickedIds(g,pickable);
+    TransportLink links[kMapTransportLinks];
+    const int linkCount=TransportLinks(links,kMapTransportLinks);
     const bool marked=NpcMarked();
     AcquireSRWLockExclusive(&lock);
     MapCommandReadout& r=readout;
@@ -691,6 +710,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
         std::snprintf(m.name,sizeof(m.name),"%s",e.u.name ? e.u.name : "?");
     }
     r.squads=squads;r.squadTally=tally;r.squadOpen=g.panelOpen;
+    r.links=linkCount;std::memcpy(r.link,links,sizeof(TransportLink)*static_cast<std::size_t>(linkCount));
     r.formationMenu=menu.open;r.formationGuard=menu.guard;r.formationGuardShape=menu.guardShape;r.formationMarch=menu.march;
     std::memcpy(r.squad,rows,sizeof(rows));
     for(int i=0;i<r.squads;++i)r.squadSelected[i]=g.sel.Has(r.squad[i].leader);

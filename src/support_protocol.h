@@ -10,7 +10,10 @@ constexpr std::uint32_t kMagic=0x54525053,kVersion=2;
 // those only when every peer announced it (Session::PeersHave); otherwise rifles and each call's own number.
 // kCapAirborneAir: it applies support_call.h airborne aircraft (created in the air, crew seated at once). A host
 // plans air support only when every peer has it (an older peer would make the hull empty and its crew mid-air).
-constexpr std::uint32_t kCapSoldierVariants=1u,kCapAirborneAir=2u,kCapabilities=kCapSoldierVariants|kCapAirborneAir;
+// kCapTransports: it knows the transport catalog entries (support_dispatch.cpp TransportCatalog: the helicopter assault and
+// the paratroop drop) and their hulls; a host plans them only when every peer has it (an older one refuses the plan).
+constexpr std::uint32_t kCapSoldierVariants=1u,kCapAirborneAir=2u,kCapTransports=4u,
+    kCapabilities=kCapSoldierVariants|kCapAirborneAir|kCapTransports;
 static_assert(kCapabilities<kMaxUnits,"hello.index carries the capability bits");
 enum class Kind : std::uint32_t { hello=1,welcome,request,begin,unit,prepare,ready,commit,result,cancel,activate,activated,requestStatus };
 struct Message {

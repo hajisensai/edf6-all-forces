@@ -4,7 +4,8 @@
 namespace crew::command_net {
 // Version 3 (2026-10-09): the move / attack-move orders (mapcmd::Order, formation slots for every point order) and
 // the riding refusal (NpcCommandReason::riding); a version-2 peer would reject or misread them.
-constexpr std::uint32_t kMagic=0x444D434Eu,kVersion=3,kMaxPeers=1024;
+// Version 4 (2026-10-09): the transport's WITHDRAW order and its refusal (NpcCommandReason::noTransport).
+constexpr std::uint32_t kMagic=0x444D434Eu,kVersion=4,kMaxPeers=1024;
 constexpr std::size_t kWireSize=828;
 enum class Kind : std::uint32_t { hello=1,capability,request,result };
 enum class Rpc : std::uint32_t { none,notReady,unsupported,invalid,stale,rateLimited,timeout,interrupted,count };

@@ -21,9 +21,9 @@ void Check(bool ok,const char* what,double a=0.0,double b=0.0) {
 void Layouts() {
     const float screens[][2]={{1920.0f,1080.0f},{2520.0f,1080.0f},{1440.0f,1080.0f},{960.0f,1080.0f},{640.0f,1080.0f}};
     const float widths[][kCount]={
-        {80,110,90,90,90,110,90,100,90,90,120,80,80,150,190,120},     // English-ish
-        {70,90,70,70,70,70,70,70,70,70,90,70,70,120,170,100},         // Chinese-ish
-        {300,40,40,40,40,40,40,40,40,40,40,40,40,700,150,150},        // odd ones: one very long
+        {80,110,90,90,90,110,90,100,90,90,120,160,80,80,150,190,120},     // English-ish
+        {70,90,70,70,70,70,70,70,70,70,90,90,70,70,120,170,100},         // Chinese-ish
+        {300,40,40,40,40,40,40,40,40,40,40,40,40,40,700,150,150},        // odd ones: one very long
     };
     for(const auto& sc:screens)for(const auto& w:widths) {
         Rect r[kCount];

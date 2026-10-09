@@ -38,6 +38,16 @@ unsigned char* image=nullptr;
 PlayerFix player{};
 const void* heldSupportActor=nullptr;
 bool SupportSoldierHeld(const void* h) noexcept {return h && h==heldSupportActor;}
+// transport.cpp stand-ins: npcai.cpp's hooks recorded; TransportOrder takes a point order when transportTakes is set.
+bool transportTakes=false;int transportOrders=0,transportCancels=0,transportPairs=0;
+const void* transportPaired=nullptr;const void* transportPairTop=nullptr;const void* transportSucceededTo=nullptr;
+NpcCommandReason transportWithdraw=NpcCommandReason::noTransport;
+bool TransportPair(const void* top,const void* v) noexcept {++transportPairs;transportPairTop=top;transportPaired=v;return v!=nullptr;}
+const void* TransportOf(const void*) noexcept {return transportPaired;}
+bool TransportOrder(const void*,const mapcmd::Command&) noexcept {++transportOrders;return transportTakes;}
+void TransportCancel(const void*) noexcept {++transportCancels;}
+NpcCommandReason TransportWithdraw(const void*) noexcept {return transportWithdraw;}
+void TransportSucceed(const void*,const void* lead) noexcept {transportSucceededTo=lead;}
 namespace {
 Config config{};
 ULONGLONG now=1000,frame=1;

@@ -3528,6 +3528,7 @@ const wchar_t* MapOrderWord(Order o) noexcept {
     case Order::dismount: return Tr(Tx::orderDismount);
     case Order::dismiss: return Tr(Tx::orderDismiss);
     case Order::recruit: return Tr(Tx::orderRecruit);
+    case Order::withdraw: return Tr(Tx::orderWithdraw);
     case Order::none: break;
     }
     return L"-";
@@ -3693,6 +3694,11 @@ void MapOrderIcon(void* d,void* c,mapbtn::Id id,float x,float y,float h,float s,
         if(id==Id::board){Seg(d,c,x-r,y,x+r*0.1f,y,t,rgba);Tri(d,c,x-r*0.1f,y,x+r*0.5f,y,r*0.4f,rgba);}
         else{Seg(d,c,x+r*0.5f,y,x-r*0.4f,y,t,rgba);Tri(d,c,x-r*0.3f,y,x-r,y,r*0.4f,rgba);}
         break;
+    case Id::withdraw:      // out of the box and away (the transport leaves the field)
+        Seg(d,c,x-r*0.9f,y-r*0.8f,x+r*0.1f,y-r*0.8f,t,rgba);Seg(d,c,x-r*0.9f,y-r*0.8f,x-r*0.9f,y+r*0.8f,t,rgba);
+        Seg(d,c,x-r*0.9f,y+r*0.8f,x+r*0.1f,y+r*0.8f,t,rgba);
+        Seg(d,c,x-r*0.4f,y,x+r*0.5f,y,t,kAmber);Tri(d,c,x+r*0.3f,y,x+r,y,r*0.4f,kAmber);
+        break;
     case Id::dismiss:       // a head and a minus
     case Id::recruit:       // a head and a plus
         Arc(d,c,x-r*0.35f,y-r*0.35f,r*0.35f,0.0f,kTurn,t,10,rgba);Seg(d,c,x-r*0.95f,y+r*0.8f,x+r*0.25f,y+r*0.8f,t,rgba);
@@ -3772,6 +3778,8 @@ void MapVariantIcon(void* d,void* c,SupportVariant variant,float x,float y,float
     case SupportVariant::empty: MapBox(d,c,x,y,h*0.4f,1.6f*s,rgba);break;
     case SupportVariant::crewed:
         Arc(d,c,x,y-h*0.15f,h*0.18f,0.0f,kTurn,1.6f*s,8,rgba);Seg(d,c,x-h*0.3f,y+h*0.35f,x+h*0.3f,y+h*0.35f,1.6f*s,rgba);break;
+    case SupportVariant::squad: MapSupportIcon(d,c,SupportIcon::squad,x,y,h,s,rgba);break;
+    case SupportVariant::platoon: MapSupportIcon(d,c,SupportIcon::platoon,x,y,h,s,rgba);break;
     case SupportVariant::none: Rect(d,c,x-h*0.12f,y-h*0.12f,x+h*0.12f,y+h*0.12f,rgba);break;
     }
 }
@@ -3805,7 +3813,11 @@ void MapFormationMenu(void* drawer,void* ctx,Text* text,float width,float height
         const float w=(text ? probe.w : static_cast<float>(wcslen(probe.text))*9.0f*s)+2.0f*pad;
         rowW=std::fmax(rowW,w);
     }
-    const mapbtn::Rect at0{buttons[button*4],buttons[button*4+1],buttons[button*4+2],buttons[button*4+3]};
+    // Over the whole card (its top row's top), at the formation button's left: a card of more rows than one (a narrow
+    // screen, the transport's WITHDRAW making one more) has buttons over the formation button the menu would cover.
+    float top=buttons[button*4+1];
+    for(int i=0;i<n;++i)top=std::fmin(top,buttons[i*4+1]);
+    const mapbtn::Rect at0{buttons[button*4],top,buttons[button*4+2],top+(buttons[button*4+3]-buttons[button*4+1])};
     mapbtn::Rect row[kMapFormationEntries]{};
     const int placed=mapbtn::MenuColumn(at0,count,rowW,rowH,gap,width,height,row);
     if(placed<=0){MapCommandFormationButtons(nullptr,nullptr,0);return;}
@@ -3830,9 +3842,9 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
     if(pad){MapCommandButtons(nullptr,nullptr,0);MapCommandFormationButtons(nullptr,nullptr,0);return 0;}
     constexpr int n=mapbtn::kCount;
     static const Tx kWord[n]={Tx::orderMove,Tx::orderAttackMove,Tx::orderGuard,Tx::orderFollow,Tx::orderRelease,Tx::orderEngage,
-                              Tx::orderFocus,Tx::orderBoard,Tx::orderDismount,Tx::orderDismiss,Tx::orderRecruit,Tx::btnFormationShort,
-                              Tx::btnSplit,Tx::btnMerge,Tx::btnSweep,Tx::btnHealth};
-    static const wchar_t* const kKey[n]={L"",L"Z",L"G",L"V",L"X",L"J",L"H",L"B",L"N",L"K",L"U",L"T",L"P",L"L",L"Y",L"O"};
+                              Tx::orderFocus,Tx::orderBoard,Tx::orderDismount,Tx::orderDismiss,Tx::orderRecruit,Tx::orderWithdraw,
+                              Tx::btnFormationShort,Tx::btnSplit,Tx::btnMerge,Tx::btnSweep,Tx::btnHealth};
+    static const wchar_t* const kKey[n]={L"",L"Z",L"G",L"V",L"X",L"J",L"H",L"B",L"N",L"K",L"U",L"",L"T",L"P",L"L",L"Y",L"O"};
     const std::uint32_t orders=c.allowed && c.selected>0 ? c.allowedOrders : 0u;
     const bool tools=c.allowed && c.squadToolsAllowed && c.selectedSquads>0;
     const float scale=kLineScale*0.7f;
@@ -3982,6 +3994,13 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     if(c.hover && Project(vp,c.hoverAt,width,height,&hx,&hy,&hd)) {
         MapBrackets(drawer,ctx,hx,hy,20.0f*s,2.0f*s,kAmber);
         Label(text,lines,at,hx,hy-30.0f*s,1,kLineScale*0.6f,kAmber,L"%ls",Tr(Tx::cmdHoverEnemy));
+    }
+    // The transports' pairs (transport.cpp): a thin line from a squad on foot to its vehicle (bright on a trip).
+    for(int i=0;i<c.links && i<kMapTransportLinks;++i) {
+        float sx,sy,sd,vx,vy,vd;
+        float sp[3],vp3[3];mapcmd::BodyPoint(c.link[i].squad,false,sp);mapcmd::BodyPoint(c.link[i].vehicle,false,vp3);
+        if(Project(vp,sp,width,height,&sx,&sy,&sd) && Project(vp,vp3,width,height,&vx,&vy,&vd))
+            Seg(drawer,ctx,sx,sy,vx,vy,1.0f*s,c.link[i].trip ? kMapOrder : kMapOrderDim);
     }
     wchar_t one[64]{};
     for(int i=0;i<c.count && i<kCmdUnits;++i) {

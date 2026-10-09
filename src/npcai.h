@@ -1,6 +1,7 @@
 // npcai.cpp: the plugin's own AI for the friendly NPC soldiers (docs/npc-ai-design.md §3, §4). Included by crew.h.
 #pragma once
 #include <cstdint>
+#include "mapcmd_logic.h"
 
 namespace crew {
 struct ObjRef;
@@ -80,6 +81,22 @@ constexpr int kPingNearEnemy=-3;
 struct NpcPing { bool on; float at[3]; int given; ULONGLONG wall; };
 // The last point for the HUD (draw thread): false when there is none shown now.
 bool NpcPingReadout(NpcPing* out) noexcept;
+
+// The squads' transports (transport.cpp; transport_logic.h): what a trip needs of a squad, by its top NPC (the map's
+// unit). The caller runs where the squad's AI does (IsOnlineAuthority); none of these makes or deletes a soldier.
+//  - its members alive, seated in `vehicle`, on foot (false: no such squad);
+//  - its members walking to seats of `vehicle` (the driver's first; no distance limit, unlike the map's BOARD): how many;
+//  - every riding member off (and walks to seats cancelled): how many;
+//  - its order set as the map gives one (a point order's guard / move / attack-move, or none), for the trip's hold and
+//    the order it carries out once off (`keepBoarding`: walks to seats go on);
+//  - the top of `human`'s squad (nullptr: no NPC soldier); whether `human` is a Wing Diver (she flies down, no canopy).
+struct SquadSeats { int alive=0,aboard=0,onFoot=0; };
+bool NpcSquadSeats(const void* top,const void* vehicle,SquadSeats* out) noexcept;
+int NpcSquadBoardVehicle(const void* top,unsigned char* vehicle) noexcept;
+int NpcSquadDismount(const void* top) noexcept;
+bool NpcSquadSetOrder(const void* top,const mapcmd::Command& c,bool keepBoarding) noexcept;
+const void* NpcSquadTopOf(const void* human) noexcept;
+bool NpcSoldierFlies(const void* human) noexcept;
 
 // npcpost.cpp: NPC tanks back to their post (docs/npc-ai-design.md §8). Each vehicle's input, before the stock input
 // reads seat 0's stick (crew.cpp InputHook).

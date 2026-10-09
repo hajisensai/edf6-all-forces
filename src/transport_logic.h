@@ -140,5 +140,5 @@ inline void ChuteStep(float* vel,float sink,float bleed) noexcept {
     if(vel[1]<0.0f){const float keep=1.0f-bleed/60.0f;vel[0]*=keep;vel[2]*=keep;}
 }
 // A jumper is down: standing (the walk's support), or this near the ground.
-inline bool Landed(bool support,float clearance,float near) noexcept { return support || (clearance>=0.0f && clearance<near); }
+inline bool Landed(bool support,float clearance,float close) noexcept { return support || (clearance>=0.0f && clearance<close); }
 }  // namespace transport

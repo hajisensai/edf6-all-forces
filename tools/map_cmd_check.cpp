@@ -350,8 +350,11 @@ int main() {
         Check(VehicleOrder(Order::move) && VehicleOrder(Order::attackMove) && VehicleCommandOf(Order::move)==Order::guard &&
               VehicleCommandOf(Order::attackMove)==Order::guard && VehicleCommandOf(Order::follow)==Order::follow,
               "a vehicle takes a move / attack-move as its post's guard");
-        Check(static_cast<int>(kLastOrder)==static_cast<int>(Order::attackMove) && static_cast<int>(Order::recruit)==8,
-              "the wire's order values: recruit stays 8, the new ones after it");
+        Check(static_cast<int>(kLastOrder)==static_cast<int>(Order::withdraw) && static_cast<int>(Order::recruit)==8 &&
+              static_cast<int>(Order::attackMove)==10 && static_cast<int>(Order::withdraw)==11,
+              "the wire's order values: recruit stays 8, the new ones after it (move, attack-move, withdraw)");
+        Check(!VehicleOrder(Order::withdraw) && !AirOrder(Order::withdraw) && !PointOrder(Order::withdraw),
+              "withdraw: a squad's transport order, no vehicle's own and no point");
         // The command's priority over the soldier's own fight.
         Check(PursuitOf(Order::move).forced && !PursuitOf(Order::move).fightFirst,"move: forced, before its dodge / combat spot");
         Check(!PursuitOf(Order::attackMove).forced && PursuitOf(Order::attackMove).fightFirst,"attack-move: fights first, then walks on");

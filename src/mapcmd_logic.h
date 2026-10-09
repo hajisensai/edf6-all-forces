@@ -25,9 +25,11 @@ inline constexpr unsigned kMaxFormationUnits=96;
 // player's: it stays where it is and may not be recruited again for a while), recruit (the player's now).
 // The RTS moves (the user, 2026-10-09: "m里面没办法让npc移动攻击，只有守点，如果npc在打怪，就没办法移动了"): move (go to
 // the point whatever it is fighting, firing on the way, and guard it once there), attack-move (go there fighting what it
-// meets on the way, then guard it). Appended: the values are the map command wire's (command_protocol.cpp).
-enum class Order : std::uint8_t { none, guard, follow, engage, focus, board, dismount, dismiss, recruit, move, attackMove };
-inline constexpr Order kLastOrder=Order::attackMove;
+// meets on the way, then guard it). withdraw (transport_logic.h, the user 2026-10-09: "卡车之类的运输载具改成断剑那种操作方式"):
+// a paired squad's transport leaves the field (a support vehicle: removed once out). Appended: the values are the map
+// command wire's (command_protocol.cpp).
+enum class Order : std::uint8_t { none, guard, follow, engage, focus, board, dismount, dismiss, recruit, move, attackMove, withdraw };
+inline constexpr Order kLastOrder=Order::withdraw;
 // The orders that take the ground point under the pointer (and stand round it in a formation).
 inline bool PointOrder(Order o) noexcept { return o==Order::guard || o==Order::move || o==Order::attackMove; }
 // Whether a vehicle unit (heli, jet, crawler, tank) takes `o`: the point orders, follow and release; the squads take all.

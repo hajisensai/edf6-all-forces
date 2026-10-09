@@ -9,6 +9,7 @@ enum class NpcCommandReason : std::uint32_t {
     none,invalidRequester,notFound,notLeader,notAuthority,notOwner,scripted,notFriendly,
     cooldown,noTarget,noSeat,unsupported,failed,disabled,stale,boardingUnavailable,noVehicle,
     riding, // a squad seated in a vehicle: recruiting / follow / point orders go to its vehicle (appended: wire value)
+    noTransport, // WITHDRAW for a squad with no transport, or one that cannot leave (not a support vehicle; moving with the squad aboard)
     count
 };
 struct NpcCommandResult { NpcCommandReason reason=NpcCommandReason::failed;std::uint32_t affected=0;

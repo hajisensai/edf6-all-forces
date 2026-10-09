@@ -16,6 +16,7 @@
 #include "online_authority.h"
 #include "memory.h"
 #include "hudtext.h"
+#include "transport.h"
 #include <cwchar>
 #include <cstring>
 #include <new>
@@ -67,6 +68,7 @@ struct Deployment {
     float vehicleSample[3]{};ULONGLONG vehicleSampleAt=0;
     InfantryRoute infantry[3]{}; // one bounded coarse route per leader, not per follower
     ULONGLONG retiredFrame[support_net::kMaxUnits]{}; // an aircraft's crew deleted at this frame + 1 (Retire)
+    bool withdrawing=false; // its ground vehicle sent off by a map order (SupportWithdrawVehicle): back to its entry, removed
 };
 Deployment deployments[kDeployments]{};
 bool offlinePending=false;std::uint64_t nextOffline=1;ULONGLONG callAt=0;
@@ -123,6 +125,37 @@ bool GroundCatalog(std::uint32_t id,SupportVehicleKind& kind,SupportCrewMode& mo
     if(index<0 || index>=kSupportVehicleCount*2)return false;
     kind=static_cast<SupportVehicleKind>(index/2);
     mode=index%2 ? SupportCrewMode::unmanned : SupportCrewMode::soldiers;return true;
+}
+// The transports (transport.h; the user, 2026-10-09: "飞机和直升机应该也有运输机", "飞机就空降"): four entries after the
+// ground ones (so every older index, ini key and wire value stands): a squad / a platoon flown in by a transport
+// helicopter (EDF6VC_HELI_TRANSPORT: it lands short of the point, they get off, it stays theirs: transport.cpp), and one
+// dropped by a transport plane's stick over the point (EDF6VC_JET_TRANSPORT; the plane leaves). One aircraft each: the
+// helicopter seats twelve, the plane twelve (a platoon); the plan is the hull, its pilot and the soldiers aboard.
+constexpr int kTransportEntries=4;
+int TransportStart() noexcept {return GroundStart()+kSupportVehicleCount*2;}
+bool TransportCatalog(std::uint32_t id,bool& platoon,bool& plane) noexcept {
+    const int k=static_cast<int>(id)-TransportStart();
+    if(k<0 || k>=kTransportEntries)return false;
+    platoon=(k&1)!=0;plane=k>=2;return true;
+}
+bool TransportSpec(std::uint32_t id,SupportAircraft* out) noexcept {
+    bool platoon=false,plane=false;
+    if(!out || !TransportCatalog(id,platoon,plane))return false;
+    SupportAircraft spec{};
+    spec.count=1;spec.fuelSeconds=plane ? 600u : 3600u;   // the helicopter stays theirs: its fuel is the mission's
+    if(plane)spec.transportPlane=true;else spec.heli=static_cast<int>(HeliBody::transport410);
+    *out=spec;return true;
+}
+unsigned TransportRiders(bool platoon) noexcept {return platoon ? 12u : 4u;}
+// The aircraft of an entry: an air call's, or a transport's.
+bool AircraftSpecOf(std::uint32_t id,SupportAircraft* out) noexcept {
+    return id<static_cast<unsigned>(AirCount()) ? SupportAircraftSpec(static_cast<int>(id),out) : TransportSpec(id,out);
+}
+// Whether `soldier` sits in a seat of `hull` now.
+bool Seated(const unsigned char* hull,const ObjRef& soldier) noexcept {
+    if(!soldier || !hull)return false;
+    for(unsigned seat=0;seat<SeatCount(hull);++seat)if(At<const void*>(SeatAt(const_cast<unsigned char*>(hull),seat),kSeatRider)==soldier.obj)return true;
+    return false;
 }
 npc::navigation::Profile VehicleRouteProfile(const SupportVehicleSpec& spec) noexcept {
     npc::navigation::Profile profile;
@@ -251,6 +284,41 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,SupportPl
             route.from[0],route.from[1],route.from[2],route.heading[0],route.heading[2],plan.count);
         *out=plan;planning.active=false;return PlanResult::ready;
     }
+    if(bool platoon=false,plane=false;TransportCatalog(catalog,platoon,plane)) {
+        if(!support::Allowed(SupportMissionPolicy(),support::Capability::air)) {
+            Refuse(catalog,"mission forbids external air support or underground",L"本关限制外部航空支援，或处于地下环境");return PlanResult::refused;
+        }
+        SupportAircraft spec;TransportSpec(catalog,&spec);support::Route route;
+        if(!Cfg().npcBoarding || (plane ? !Cfg().jetPilot : !Cfg().heliPilot)) {
+            Refuse(catalog,"NpcBoarding/HeliPilot/JetPilot off",L"真实机组驾驶或登乘功能未启用，无法空运");return PlanResult::refused;
+        }
+        if(!SupportPeersAcceptAirborne() || !SupportPeersAcceptTransports()) {
+            Refuse(catalog,"a peer runs an older All Forces without the transports",hudtext::Tr(hudtext::Tx::supportAirNeedsUpdate));
+            return PlanResult::refused;
+        }
+        if(!SupportAircraftReady(spec)) {
+            Refuse(catalog,plane ? "EDF6VC_JET_TRANSPORT.SGO not installed / preloaded" : "EDF6VC_HELI_TRANSPORT.SGO not installed / preloaded",
+                   L"运输机资源未安装：请用安装器重新安装");
+            return PlanResult::refused;
+        }
+        const auto refusal=PlanAirSupportFor(spec,target,player.pos,&route,1);
+        if(refusal!=support::Refusal::none) {
+            if(refusal==support::Refusal::noSky)Refuse(catalog,"no open sky over the target",L"此处没有开放天空，运输机无法进入");
+            else if(refusal==support::Refusal::noArea)Refuse(catalog,"the measured play area is too small for an entry",L"本图场地过小，无法安排空中入场");
+            else Refuse(catalog,"no clear air corridor from any map edge",L"从地图边缘到目标没有净空的空中航线");
+            return PlanResult::refused;
+        }
+        // The hull in the air at the edge, its pilot and the soldiers made inside it and seated at once (BoardAirborne).
+        const auto crew=UseConfiguredLoadout() ? SupportSoldierResource(SupportCfg().aircraftCrew,false) : kSupportRangerResource;
+        if(!AddUnit(plan,kAircraft+kSupportAirborneOffset+catalog,0,route.from,route.heading) ||
+           !AddUnit(plan,crew,1,route.from,route.heading)){Refuse(catalog,"plan full",L"支援单位过多");return PlanResult::refused;}
+        for(unsigned i=0;i<TransportRiders(platoon);++i)
+            if(!AddUnit(plan,InfantryResource(platoon,i),1,route.from,route.heading)){Refuse(catalog,"plan full",L"支援单位过多");return PlanResult::refused;}
+        Log("SUPPORT plan catalog=%u ready: a transport %s in the air at (%.0f,%.0f,%.0f) heading (%.2f,%.2f), %u soldiers aboard",catalog,
+            plane ? "plane (paratroop drop)" : "helicopter (air assault)",route.from[0],route.from[1],route.from[2],route.heading[0],
+            route.heading[2],TransportRiders(platoon));
+        *out=plan;planning.active=false;return PlanResult::ready;
+    }
     const auto area=MapPlayArea();
     SupportVehicleKind kind{};SupportCrewMode mode{};const bool vehicle=GroundCatalog(catalog,kind,mode);
     const auto* spec=vehicle ? SupportVehicleInfo(kind) : nullptr;
@@ -315,12 +383,23 @@ bool Validate(const SupportPlan& plan) noexcept {
     const bool air=plan.catalogId<static_cast<unsigned>(AirCount()),ground=GroundCatalog(plan.catalogId,kind,mode);
     const auto capability=air ? support::Capability::air : ground ?
         (SupportVehicleInfo(kind)->wasteland ? support::Capability::civilianGround : support::Capability::militaryGround) : support::Capability::infantry;
+    const auto member=[](std::uint32_t id) noexcept {return IsSupportSoldierResource(id) && !IsSupportLeaderResource(id);};
+    if(bool platoon=false,plane=false;TransportCatalog(plan.catalogId,platoon,plane)) {
+        // Its hull, its pilot, the soldiers aboard (a leader every four): all made inside the hull (role 1).
+        if(!support::Allowed(SupportMissionPolicy(),support::Capability::air))return false;
+        const unsigned riders=TransportRiders(platoon);
+        if(plan.count!=2+riders || plan.units[0].role || plan.units[0].resourceId!=kAircraft+kSupportAirborneOffset+plan.catalogId)return false;
+        if(!member(plan.units[1].resourceId) || plan.units[1].role!=1)return false;
+        for(unsigned i=2;i<plan.count;++i)
+            if(plan.units[i].role!=1 || !IsSupportSoldierResource(plan.units[i].resourceId) ||
+               IsSupportLeaderResource(plan.units[i].resourceId)!=((i-2)%4==0))return false;
+        return true;
+    }
     if(!support::Allowed(SupportMissionPolicy(),capability))return false;
     if(air && !SupportAircraftSpec(static_cast<int>(plan.catalogId),&aircraft))return false;
     if(ground && !SupportVehicleReady(kind,mode))return false;
     // Weapons and the number of aircraft are the host's configuration: a peer checks the structure and that every
     // soldier is one of the stock templates, never against its own ini.
-    const auto member=[](std::uint32_t id) noexcept {return IsSupportSoldierResource(id) && !IsSupportLeaderResource(id);};
     if(air) {
         const unsigned group=1+AirCrew(aircraft);
         if(!plan.count || plan.count%group)return false;
@@ -375,7 +454,8 @@ void Retire(Deployment& deployed) noexcept {
         auto& retired=deployed.retiredFrame[i];
         if(!retired) {
             if(!SupportAircraftLeft(deployed.objects[i]))continue;
-            for(unsigned k=0;k<plan.count;++k)if(plan.units[k].role==i+1)DeleteSupportSoldier(deployed.objects[k]);
+            // Only the ones still aboard: a transport's soldiers got off and fight on (transport.cpp).
+            for(unsigned k=0;k<plan.count;++k)if(plan.units[k].role==i+1 && Seated(hull,deployed.objects[k]))DeleteSupportSoldier(deployed.objects[k]);
             retired=GameFrame()+1;
             Log("SUPPORT deployment %llu: aircraft %u has left: its crew deleted",static_cast<unsigned long long>(deployed.id),i);
             continue;
@@ -384,6 +464,46 @@ void Retire(Deployment& deployed) noexcept {
         if(DeleteSupportAircraft(deployed.objects[i]))
             Log("SUPPORT deployment %llu: aircraft %u gone (deleted)",static_cast<unsigned long long>(deployed.id),i);
     }
+}
+// A support ground vehicle withdrawn by a map order (SupportWithdrawVehicle): driven back along a ground route to the entry
+// it came in at, there its own crew still aboard deleted and then the hull once its seats are empty (as Retire does an
+// aircraft's). With no driver it goes where it stands. A player aboard keeps it (the withdrawal ends).
+void WithdrawGround(Deployment& deployed) noexcept {
+    if(!Live(deployed.objects[0])){deployed.withdrawing=false;return;}
+    auto* hull=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[0].obj));
+    for(unsigned seat=0;seat<SeatCount(hull);++seat)if(AnyPlayerIn(SeatAt(hull,seat))) {
+        deployed.withdrawing=false;Status(L"玩家已登乘，撤离取消");return;
+    }
+    auto& retired=deployed.retiredFrame[0];
+    if(retired) {
+        if(DeleteSupportVehicle(hull)) {
+            Log("SUPPORT deployment %llu: its vehicle withdrawn (deleted)",static_cast<unsigned long long>(deployed.id));
+            deployed.withdrawing=false;return;
+        }
+        if(GameFrame()-retired>120) {
+            Log("SUPPORT deployment %llu: its withdrawn vehicle still has riders: left where it is",static_cast<unsigned long long>(deployed.id));
+            deployed.withdrawing=false;
+        }
+        return;
+    }
+    SupportVehicleKind kind{};SupportCrewMode mode{};
+    if(!GroundCatalog(deployed.plan.catalogId,kind,mode)){deployed.withdrawing=false;return;}
+    const float* position=reinterpret_cast<const float*>(hull+kPosition);
+    const float* exit=deployed.plan.units[0].matrix+12;
+    bool there=!NpcDriver(hull);
+    if(!there) {
+        float waypoint[3];
+        const auto path=GroundNavigate(deployed.navigation,position,exit,kVehicleArrival,GameMs(),waypoint,VehicleRouteProfile(*SupportVehicleInfo(kind)));
+        if(path==npc::navigation::Result::moving)NpcPrepareVehicleRoutePost(hull,waypoint,kVehicleDriverHold);
+        else if(path==npc::navigation::Result::arrived)there=true;
+        else if(path==npc::navigation::Result::blocked)there=support::FlatDistance(position,player.pos)>300.0f;   // out of the way
+        else NpcPrepareVehicleRoutePost(hull,position,kVehicleDriverHold);
+    }
+    if(!there)return;
+    for(unsigned k=0;k<deployed.plan.count;++k)
+        if(deployed.plan.units[k].role==1 && Seated(hull,deployed.objects[k]))DeleteSupportSoldier(deployed.objects[k]);
+    retired=GameFrame()+1;
+    Log("SUPPORT deployment %llu: its withdrawn vehicle is out: its crew deleted",static_cast<unsigned long long>(deployed.id));
 }
 void Destroy(std::uint64_t id) noexcept {
     for(auto& deployed:deployments)if(deployed.used && deployed.id==id) {
@@ -442,7 +562,7 @@ bool BoardAirborne(Deployment& deployed,bool networked) noexcept {
         }
         if(!deployed.remote) {
             SupportAircraft spec;
-            if(!SupportAircraftSpec(static_cast<int>(plan.catalogId),&spec) || !ActivateSupportAircraft(vehicle,spec,plan.target,true))return false;
+            if(!AircraftSpecOf(plan.catalogId,&spec) || !ActivateSupportAircraft(vehicle,spec,plan.target,true))return false;
             deployed.started=true;
         }
     }
@@ -470,7 +590,7 @@ bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool n
             unsigned char* vehicle=nullptr;
             if(unit.resourceId<kVehicle) {
                 SupportAircraft spec;
-                if(SupportAircraftSpec(static_cast<int>(plan.catalogId),&spec))vehicle=PrepareSupportAircraft(spec,unit.matrix);
+                if(AircraftSpecOf(plan.catalogId,&spec))vehicle=PrepareSupportAircraft(spec,unit.matrix);
             } else {
                 SupportVehicleKind kind{};SupportCrewMode mode{};
                 if(GroundCatalog(plan.catalogId,kind,mode))vehicle=SpawnSupportVehicle(kind,mode,unit.matrix+12,unit.matrix+8,nullptr);
@@ -510,6 +630,25 @@ bool Assign(Deployment& deployed) noexcept {
         for(unsigned k=0;k<plan.count;++k)if(plan.units[k].role==i+1)crew[count++]=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[k].obj));
         if(NpcBoardCrew(static_cast<unsigned char*>(const_cast<void*>(deployed.objects[i].obj)),crew,count)!=count)return false;
     }
+    if(bool platoon=false,plane=false;TransportCatalog(plan.catalogId,platoon,plane)) {
+        // The soldiers aboard as squads (a leader every four, from unit 2), then handed to their transport: a helicopter
+        // flies them in and lands short of the point (transport.cpp TransportDeliver), a plane drops them over it.
+        const void* tops[3]{};int squadCount=0;ObjRef top;
+        for(unsigned i=2;i<plan.count;++i) {
+            if(IsSupportLeaderResource(plan.units[i].resourceId)){top=deployed.objects[i];if(squadCount<3)tops[squadCount++]=top.obj;continue;}
+            if(top && !FollowSupportSoldier(deployed.objects[i],top))return false;
+        }
+        if(!deployed.remote) {
+            auto* hull=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[0].obj));
+            const bool handed=plane ? JetFerry(hull,plan.target) && TransportParadrop(hull,plan.target)
+                                    : TransportDeliver(hull,tops,squadCount,plan.target);
+            if(!handed)Log("SUPPORT deployment %llu: its transport not handed over (it flies its call)",static_cast<unsigned long long>(deployed.id));
+            deployed.delivered=true;
+        }
+        deployed.assigned=true;
+        Status(plane ? L"运输机已入场，将在目标上空空降" : L"运输直升机已入场，将在目标附近降落放下小队");
+        return true;
+    }
     deployed.assigned=true;Status(L"全员已确认，真实机组正在登车");return true;
 }
 void Configure() noexcept {
@@ -522,13 +661,36 @@ void Configure() noexcept {
     InstallMissionCrewSupport();configured=true;
 }
 }
-int SupportCallCount() noexcept {return AirCount()+2+kSupportVehicleCount*2;}
+// transport.cpp's WITHDRAW: a support vehicle of a deployment this machine made leaves the field. A helicopter or a plane
+// flies off (StartLeave / JetWithdrawNow; Retire deletes it out there with its crew still aboard), a ground vehicle drives
+// back to its entry (WithdrawGround). False: not a support vehicle of this machine's.
+bool SupportWithdrawVehicle(const void* vehicle) noexcept {
+    __try {
+        for(auto& deployed:deployments) {
+            if(!deployed.used || deployed.remote)continue;
+            for(unsigned i=0;i<deployed.plan.count;++i) {
+                const auto resource=deployed.plan.units[i].resourceId;
+                if(deployed.plan.units[i].role || resource<kAircraft || !deployed.objects[i].Is(vehicle) || !Live(deployed.objects[i]))continue;
+                if(resource>=kVehicle) {
+                    deployed.withdrawing=true;deployed.delivered=true;deployed.retiredFrame[0]=0;deployed.navigation.initialized=false;
+                    Log("SUPPORT deployment %llu: its vehicle withdrawn by order: back to its entry",static_cast<unsigned long long>(deployed.id));
+                    Status(L"支援车辆撤离中：返回入场点后离开战场");
+                    return true;
+                }
+                Status(L"支援飞机撤离中：飞离战场");
+                return IsHelicopter(vehicle) ? HeliStartLeaving(vehicle) : JetWithdrawNow(vehicle,"withdrawn by a map order");
+            }
+        }
+        return false;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+int SupportCallCount() noexcept {return AirCount()+2+kSupportVehicleCount*2+kTransportEntries;}
 const wchar_t* SupportCallKey(int index) noexcept {
     if(index<0)return nullptr;
     if(index<AirCount())return SupportAirCallKey(index);
     static const wchar_t* keys[]={L"SQUAD",L"PLATOON",L"TANK_CREWED",L"TANK_DELIVERY",L"TRANSPORT_CREWED",L"TRANSPORT_DELIVERY",
-                                  L"TRUCK_CREWED",L"TRUCK_DELIVERY"};
-    static_assert(sizeof(keys)/sizeof(keys[0])==2+kSupportVehicleCount*2,"one key per infantry and ground entry");
+                                  L"TRUCK_CREWED",L"TRUCK_DELIVERY",L"SQUAD_HELI",L"PLATOON_HELI",L"SQUAD_AIRDROP",L"PLATOON_AIRDROP"};
+    static_assert(sizeof(keys)/sizeof(keys[0])==2+kSupportVehicleCount*2+kTransportEntries,"one key per infantry, ground and transport entry");
     const int rest=index-AirCount();
     return rest<static_cast<int>(sizeof(keys)/sizeof(keys[0])) ? keys[rest] : nullptr;
 }
@@ -538,7 +700,11 @@ const wchar_t* SupportCallName(int index) noexcept {
     if(index==AirCount()+1)return L"步兵大队（12人）";
     // Returned static strings can safely be copied into draw-thread snapshots.
     static const wchar_t* labels[]={L"坦克·有人",L"坦克·空车交付",L"装甲运兵车·有人",L"装甲运兵车·空车交付",L"民用轻卡·有人",L"民用轻卡·空车交付"};
-    const int ground=index-GroundStart();return ground>=0 && ground<6 ? labels[ground] : L"支援";
+    const int ground=index-GroundStart();
+    if(ground>=0 && ground<6)return labels[ground];
+    static const wchar_t* transports[kTransportEntries]={L"直升机机降·小队（4人）",L"直升机机降·大队（12人）",L"运输机空降·小队（4人）",
+                                                         L"运输机空降·大队（12人）"};
+    const int t=index-TransportStart();return t>=0 && t<kTransportEntries ? transports[t] : L"支援";
 }
 bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept {
     if(!note || !capacity)return false;
@@ -588,6 +754,7 @@ SupportIcon SupportCallIcon(int index) noexcept {
         return role==JetRole::carrier || role==JetRole::blastCarrier || role==JetRole::dollCarrier ? SupportIcon::carrier : SupportIcon::jet;
     }
     if(InfantryCatalog(static_cast<std::uint32_t>(index)))return index==AirCount() ? SupportIcon::squad : SupportIcon::platoon;
+    if(bool platoon=false,plane=false;TransportCatalog(static_cast<std::uint32_t>(index),platoon,plane))return plane ? SupportIcon::jet : SupportIcon::heli;
     SupportVehicleKind kind{};SupportCrewMode mode{};
     if(!GroundCatalog(static_cast<std::uint32_t>(index),kind,mode))return SupportIcon::squad;
     return kind==SupportVehicleKind::tank ? SupportIcon::tank : kind==SupportVehicleKind::transport ? SupportIcon::apc : SupportIcon::truck;
@@ -595,6 +762,8 @@ SupportIcon SupportCallIcon(int index) noexcept {
 SupportVariant SupportCallVariant(int index) noexcept {
     SupportAircraft spec;
     if(index<AirCount())return SupportAircraftSpec(index,&spec) ? (spec.follow ? SupportVariant::follow : SupportVariant::guard) : SupportVariant::none;
+    if(bool platoon=false,plane=false;TransportCatalog(static_cast<std::uint32_t>(index),platoon,plane))
+        return platoon ? SupportVariant::platoon : SupportVariant::squad;
     SupportVehicleKind kind{};SupportCrewMode mode{};
     if(!GroundCatalog(static_cast<std::uint32_t>(index),kind,mode))return SupportVariant::none;
     return mode==SupportCrewMode::unmanned ? SupportVariant::empty : SupportVariant::crewed;
@@ -644,6 +813,7 @@ void SupportDispatchTick() noexcept {
                 const auto id=deployed.id;if(deployed.networked)ReportSupportFailure(id);else Destroy(id);continue;
             }
         }
+        if(deployed.withdrawing && !deployed.remote){WithdrawGround(deployed);continue;}
         if(deployed.remote || deployed.delivered)continue;
         bool alive=true,boarded=true;
         for(unsigned i=0;i<deployed.plan.count;++i) {
@@ -702,6 +872,20 @@ void SupportDispatchTick() noexcept {
                     const auto playerRef=ObjRef::Of(PlayerHuman());
                     for(unsigned i=0;i<deployed.plan.count;++i)if(deployed.plan.units[i].role==1)
                         FollowSupportSoldier(deployed.objects[i],playerRef);
+                } else if(kind!=SupportVehicleKind::tank) {
+                    // A crewed APC / truck: the soldiers in its passenger seats are a squad and it is their transport
+                    // (transport.cpp; the user, 2026-10-09: "卡车之类的运输载具改成断剑那种操作方式"): they get off here and
+                    // guard the point; its driver stays aboard and it waits for their next far order.
+                    ObjRef top;
+                    for(unsigned i=0;i<deployed.plan.count;++i) {
+                        if(deployed.plan.units[i].role!=1 || !Live(deployed.objects[i]) || SeatCount(vehicle)==0 ||
+                           At<const void*>(SeatAt(vehicle,0),kSeatRider)==deployed.objects[i].obj || !Seated(vehicle,deployed.objects[i]))continue;
+                        if(!top){top=deployed.objects[i];continue;}
+                        FollowSupportSoldier(deployed.objects[i],top);
+                    }
+                    const void* tops[1]={top.obj};
+                    if(top && !TransportDeliver(vehicle,tops,1,deployed.plan.target))
+                        Log("SUPPORT deployment %llu: its passengers not handed to their transport",static_cast<unsigned long long>(deployed.id));
                 }
                 deployed.delivered=true;Status(mode==SupportCrewMode::unmanned ? L"空车已到达交付点，司机已下车" : L"支援车辆已抵达目的地");
             } else NpcPrepareVehicleRoutePost(vehicle,position,kVehicleDriverHold); // wait for a verified route; never drive through the obstacle

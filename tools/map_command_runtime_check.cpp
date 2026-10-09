@@ -72,6 +72,8 @@ bool HeliSharesPost() noexcept { return true; }
 unsigned char squadObj[0x100]{},squadCtrl[0x10]{};
 bool squadOn=false,squadLocked=false,squadRiding=false;
 Command squadGot{};int squadOrders=0;
+int TransportLinks(TransportLink*,int) noexcept { return 0; }
+const void* TransportRiderOf(const void*) noexcept { return nullptr; }
 int SquadCommandUnits(CommandUnit* out,int most) noexcept {
     if(!squadOn || most<1)return 0;
     out[0]=CommandUnit{squadObj,"squad",Command{},false,{0.0f,0.0f,0.0f}};

@@ -91,8 +91,9 @@ inline constexpr Lean kCarrierLean{kCarrierPitchShare,kThrustDrag,2.5f,1.2f,0.3f
 // mission_setup writes into the speed gain k (veh+0x162C; body506.cpp's range 7001-7099 for jets), and what that
 // mark makes it. The mark is the one source of what a jet is: an entry made again for a jet (JetFrame) reads it.
 enum class Body { strike, fighter, bomber401, bomber501_2, interceptor, multirole, carrier, drone, blast, doll, heli410, heli506,
-                  gunship, blastCarrier, dollCarrier, enemyFighter, primerFighter, centipede, dragonfly, heliMedic };
-constexpr int kBodyCount=20;
+                  gunship, blastCarrier, dollCarrier, enemyFighter, primerFighter, centipede, dragonfly, heliMedic,
+                  heliTransport, transportPlane };
+constexpr int kBodyCount=22;
 struct BodyRow {
     Body body;
     const wchar_t* sgo;
@@ -137,6 +138,10 @@ inline constexpr BodyRow kBodies[kBodyCount]={
     {Body::dragonfly,L"app:/object/edf6vc_dragonfly.sgo",L"EDF6VC_DRAGONFLY.SGO",7013.0f,Role::dragonfly,Role::drone,"dragonfly",true},
     // The medic heli (tools/make_jets.py MEDIC_HELI_FILE): the 410 with healing door guns (heli.cpp Medic).
     {Body::heliMedic,L"app:/object/edf6vc_heli_medic.sgo",L"EDF6VC_HELI_MEDIC.SGO",0.0f,Role::fighter,Role::drone,"heliMedic"},
+    // The transports (tools/make_jets.py TRANSPORT_*; transport.cpp): the 410 with ten passenger seats more, and the bomber401
+    // strike jet with twelve behind its pilot (flown as a strike jet that attacks nothing: jet.cpp JetFerry).
+    {Body::heliTransport,L"app:/object/edf6vc_heli_transport.sgo",L"EDF6VC_HELI_TRANSPORT.SGO",0.0f,Role::fighter,Role::drone,"heliTransport"},
+    {Body::transportPlane,L"app:/object/edf6vc_jet_transport.sgo",L"EDF6VC_JET_TRANSPORT.SGO",7001.0f,Role::strike,Role::drone,"transportPlane"},
 };
 constexpr bool BodiesInOrder() noexcept {
     for(int i=0;i<kBodyCount;++i)if(static_cast<int>(kBodies[i].body)!=i)return false;
@@ -448,6 +453,9 @@ struct Jet {
     // any other, wherever in the play area, past its order's range and its way to its order's point; let go once it is no
     // longer among the enemies (dead, gone: PickTarget) or another order comes. Its point and its order stay as they were.
     ObjRef focus{};
+    // A ferry (JetFerry, transport.cpp: the paratroop plane): straight on to its command point kFerryAlt m over it, taking
+    // no target at all on the way or after (it carries soldiers, not bombs); its withdrawal ends it.
+    bool ferry=false;
     unsigned char* Vehicle() const noexcept { return static_cast<unsigned char*>(const_cast<void*>(ref.obj)); }
 };
 constexpr int kMaxJets=64,kPatrolRings=6;

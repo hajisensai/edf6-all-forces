@@ -280,6 +280,7 @@ void Validate(Config& n) noexcept {
     Fix("NpcRollSec",n.npcRollSec,0.5f,30.0f);
     Fix("NpcRetreatHp",n.npcRetreatHp,0.0f,0.9f);
     Fix("NpcLeash",n.npcLeash,5.0f,500.0f);
+    Fix("TransportAutoRange",n.transportAutoRange,50.0f,2000.0f);
     n.npcSquadMin=static_cast<int>(FixInt("NpcSquadMin",n.npcSquadMin,1,16));
     n.npcSquadMax=static_cast<int>(FixInt("NpcSquadMax",n.npcSquadMax,n.npcSquadMin,32));
     Fix("NpcSquadJoinRange",n.npcSquadJoinRange,0.0f,2000.0f);
@@ -587,6 +588,7 @@ void LoadConfig() noexcept {
     n.npcRollSec=ReadFloat(L"NpcRollSec",n.npcRollSec);
     n.npcRetreatHp=ReadFloat(L"NpcRetreatHp",n.npcRetreatHp);
     n.npcLeash=ReadFloat(L"NpcLeash",n.npcLeash);
+    n.transportAutoRange=ReadFloat(L"TransportAutoRange",n.transportAutoRange);
     n.npcSquadSuccession=ReadBool(L"NpcSquadSuccession",n.npcSquadSuccession);
     n.npcSquadMin=ReadInt(L"NpcSquadMin",static_cast<DWORD>(n.npcSquadMin));
     n.npcSquadMax=ReadInt(L"NpcSquadMax",static_cast<DWORD>(n.npcSquadMax));

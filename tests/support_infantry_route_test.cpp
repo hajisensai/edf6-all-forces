@@ -30,6 +30,15 @@ const wchar_t* SupportSoldierFailureText() noexcept{return L"";}
 bool ApplySupportSoldierResource(const float*,std::uint32_t,const unsigned char*,bool,ObjRef*) noexcept{return false;}
 bool CreateSupportSoldierUnregistered(const float*,std::uint32_t,const unsigned char*,bool,ObjRef*) noexcept{return false;}
 bool SupportPeersAcceptAirborne() noexcept{return true;}
+bool SupportPeersAcceptTransports() noexcept{return true;}
+support::Refusal PlanAirSupportFor(SupportAircraft,const float*,const float*,support::Route*,int) noexcept{return support::Refusal::unsupported;}
+bool SupportAircraftReady(const SupportAircraft&) noexcept{return false;}
+bool TransportDeliver(const void*,const void* const*,int,const float*) noexcept{return false;}
+bool TransportParadrop(const void*,const float*) noexcept{return false;}
+bool JetFerry(const void*,const float*) noexcept{return false;}
+bool JetWithdrawNow(const void*,const char*) noexcept{return false;}
+bool HeliStartLeaving(const void*) noexcept{return false;}
+bool IsHelicopter(const void*) noexcept{return false;}
 bool DeriveSupportSoldierNetId(const void*,unsigned,unsigned char*) noexcept{return false;}
 bool RegisterSupportObject(const void*,const unsigned char*) noexcept{return false;}
 bool FollowSupportSoldier(const ObjRef& who,const ObjRef& leader) noexcept {

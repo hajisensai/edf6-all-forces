@@ -8,6 +8,7 @@
 #include <Windows.h>
 #include "mapcmd_logic.h"
 #include "support_call.h"
+#include "transport.h"
 
 namespace crew {
 using mapcmd::Command;
@@ -30,7 +31,9 @@ inline bool AirCommandTransit(const Command& cmd,bool& moving,const float* pos,c
 // offered no recruitment: mapcmd::OffersRecruit). `recruitable`: the map offers RECRUIT for it now.
 // `recruited`: a squad the player recruited (the only kind DISMISS lets go: npcai.cpp answers others "not its owner").
 struct CommandUnit { const void* v; const char* name; Command now; bool air; float pos[3]{}; bool locked=false; const char* status=nullptr;
-    bool riding=false; bool recruitable=false; bool recruited=false; };
+    bool riding=false; bool recruitable=false; bool recruited=false;
+    bool transport=false; // a squad paired with a transport (transport.cpp): it takes point orders aboard and WITHDRAW
+};
 bool CommandVehicleLive(const ObjRef& ref) noexcept;
 bool ReadCommandUnit(const ObjRef& ref,const char* name,const Command& cmd,bool air,CommandUnit* out) noexcept;
 // Each module's units that take a command now (live, flown or driven by the plugin's NPC, not withdrawing), at most
@@ -119,6 +122,7 @@ constexpr std::uint8_t kCmdOwnerHeli=0,kCmdOwnerJet=1,kCmdOwnerGround=2;
 struct CmdMark { float pos[3]; Command now; bool selected,air,locked; std::uint8_t owner; char name[24]; bool riding=false; };
 // The support catalog as the map's bar shows it (copied on the game thread: the draw reads no support state).
 constexpr int kMapSupports=48;
+constexpr int kMapTransportLinks=16;   // the transports' lines the map draws (MapCommandReadout::link)
 struct MapSupportEntry { wchar_t name[40]; SupportIcon icon; SupportVariant variant; };
 struct MapCommandReadout {
     bool allowed;              // command framework enabled; each target still validates authority and execution
@@ -158,6 +162,9 @@ struct MapCommandReadout {
     MapSupportEntry support[kMapSupports];
     SupportReadiness supportReady;
     wchar_t supportStatus[128];
+    // The transports' pairs (transport.cpp TransportLinks): a squad on foot and its vehicle, a thin line between them.
+    int links=0;
+    TransportLink link[kMapTransportLinks]{};
 };
 bool PlayerMapCommands(MapCommandReadout* out) noexcept;
 }  // namespace crew

@@ -242,15 +242,22 @@ using namespace jet;
 
 namespace {
 ObjRef supportAircraft[32]{};
+Body HeliBodyOf(HeliBody as) noexcept {
+    return as==HeliBody::brute410 ? Body::heli410 : as==HeliBody::medic410 ? Body::heliMedic :
+           as==HeliBody::transport410 ? Body::heliTransport : Body::heli506;
+}
 Body SupportBody(const SupportAircraft& spec) noexcept {
-    if(spec.heli>=0)return spec.heli==static_cast<int>(HeliBody::brute410) ? Body::heli410 :
-        spec.heli==static_cast<int>(HeliBody::medic410) ? Body::heliMedic : Body::heli506;
+    if(spec.heli>=0)return HeliBodyOf(static_cast<HeliBody>(spec.heli));
+    if(spec.transportPlane)return Body::transportPlane;
     return kLaunchRows[spec.jet].body;
+}
+bool SupportSpecValid(const SupportAircraft& spec) noexcept {
+    return spec.heli>=0 || spec.transportPlane || (spec.jet>=0 && spec.jet<kLaunchCount);
 }
 }
 
 unsigned char* PrepareSupportAircraft(const SupportAircraft& spec,const float* matrix) noexcept {
-    if(!matrix || (spec.heli<0 && (spec.jet<0 || spec.jet>=kLaunchCount)))return nullptr;
+    if(!matrix || !SupportSpecValid(spec))return nullptr;
     const Body body=SupportBody(spec);
     if(!spawnOk || !Preloaded(body) || !At<void*>(image,kObjectMgr))return nullptr;
     ObjRef* slot=nullptr;
@@ -293,6 +300,10 @@ bool ActivateSupportAircraft(unsigned char* vehicle,const SupportAircraft& spec,
     JoinFlight(*entry,FlightFor(&supportAircraft,GameMs()));
     ApplyMapCommand(*entry,Command{Order::guard,{target[0],target[1],target[2]}},GameMs());
     return true;
+}
+
+bool SupportAircraftReady(const SupportAircraft& spec) noexcept {
+    return spawnOk && SupportSpecValid(spec) && Preloaded(SupportBody(spec));
 }
 
 bool DeleteSupportAircraft(const ObjRef& ref) noexcept {
@@ -424,7 +435,7 @@ unsigned char* JetLaunchThrown(ThrownDrone what,const float* at,const float* hea
 }
 
 unsigned char* HeliLaunch(HeliBody as,const float* from,const float* heading) noexcept {
-    const Body b=as==HeliBody::brute410 ? Body::heli410 : as==HeliBody::medic410 ? Body::heliMedic : Body::heli506;
+    const Body b=HeliBodyOf(as);
     if(!spawnOk || !Preloaded(b) || !At<void*>(image,kObjectMgr))return nullptr;
     __try {
         float start[3]={from[0],from[1],from[2]};

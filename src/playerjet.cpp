@@ -1705,6 +1705,54 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
 }
 }  // namespace
 
+// Anyone's canopy (transport.cpp: the paratroopers; the user, 2026-10-09: "飞机就空降"): the player's parachute's object
+// (ChuteMake: EDF6VC_CHUTE.SGO, a FarEventObject on the neutral team, nothing collides with it), made over `feet`, its
+// front along `drift` (else +z), moved each frame (its front kept while the drift is slow), deleted when the jump ends.
+namespace {
+void CanopyPose(const float* feet,float x,float z,float* m) noexcept {
+    const float pose[16]={z,0,-x,0, 0,1,0,0, x,0,z,0, feet[0],feet[1]+kChuteUp,feet[2],1};
+    std::memcpy(m,pose,sizeof(pose));
+}
+bool CanopyLive(const ObjRef& c) noexcept {
+    const auto* o=static_cast<const unsigned char*>(c.obj);
+    return o && Readable(o,kTeam+4) && At<const void*>(o,0)==image+kFarEventVtable && c.Is(o) && !(o[kObjFlags]&kObjDeleted);
+}
+}  // namespace
+ObjRef ChuteCanopyMake(const float* feet,const float* drift) noexcept {
+    if(!feet || !chuteOk || !chutePreloaded || !jet::SpawnReady() || !At<void*>(image,kObjectMgrAt))return {};
+    float f[3]={drift ? drift[0] : 0.0f,0.0f,drift ? drift[2] : 1.0f};
+    if(!Normalize(f)){f[0]=0.0f;f[2]=1.0f;}
+    alignas(16) float m[16];CanopyPose(feet,f[0],f[2],m);
+    SpawnParam param{image+kInitParamVt,{}};
+    unsigned char* o=nullptr;
+    __try {
+        o=reinterpret_cast<unsigned char*(*)(void*,const float*,const wchar_t*,SpawnParam*)>(image+kCreateObjectFn)(
+            At<void*>(image,kObjectMgrAt),m,kChuteSgo,&param);
+    } __except(EXCEPTION_EXECUTE_HANDLER){chutePreloaded=false;Log("CHUTE (a paratrooper's) not made: the game faulted: off this mission");return {};}
+    if(!o)return {};
+    if(At<const void*>(o,0)!=image+kFarEventVtable){reinterpret_cast<void(*)(void*)>(image+kDeleteFn)(o);return {};}
+    SetObjectTeam(o,kTeamNeutral);
+    return ObjRef::Of(o);
+}
+bool ChuteCanopyMove(const ObjRef& canopy,const float* feet,const float* drift) noexcept {
+    __try {
+        if(!feet || !CanopyLive(canopy))return false;
+        auto* o=static_cast<unsigned char*>(const_cast<void*>(canopy.obj));
+        const float* was=reinterpret_cast<const float*>(o+kMatrix);
+        float f[3]={was[8],0.0f,was[10]};
+        if(drift){const float d[3]={drift[0],0.0f,drift[2]};if(Len(d)>=kChuteTurnSpeed){f[0]=d[0];f[2]=d[2];}}
+        if(!Normalize(f)){f[0]=0.0f;f[2]=1.0f;}
+        alignas(16) float m[16];CanopyPose(feet,f[0],f[2],m);
+        std::memcpy(o+kMatrix,m,sizeof(m));
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+void ChuteCanopyFree(const ObjRef& canopy) noexcept {
+    __try {
+        if(CanopyLive(canopy))reinterpret_cast<void(*)(void*)>(image+kDeleteFn)(const_cast<void*>(canopy.obj));
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+}
+
 // The 506 physics step (body506.cpp), after the stock one: the player jet's velocity and spin.
 bool PlayerJetBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
     PJet* j=Find(v);

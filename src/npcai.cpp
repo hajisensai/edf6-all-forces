@@ -31,6 +31,7 @@
 #include "online_authority.h"
 #include "real_driver_native.h"
 #include "support_soldier.h"
+#include "transport.h"
 #include "vhud.h"
 #include <algorithm>
 #include <cmath>
@@ -1136,6 +1137,7 @@ void Succeed(unsigned char* dead) noexcept {
     unsigned char* const top=join>=0 ? others[join] : lead;
     if(join<0)Follow(lead,up);
     for(int i=0;i<n;++i)if(m[i]!=top)Follow(m[i],top);
+    TransportSucceed(dead,join>=0 ? nullptr : lead);   // its transport goes with the squad (transport.cpp)
     if(Squad* const old=FindSquad(dead)) {
         if(join>=0){if(old->dismissed){old->dismissed=false;--dismissedCount;}old->top=ObjRef{};}
         else {
@@ -1321,7 +1323,7 @@ int SquadCommandUnits(CommandUnit* out,int most) noexcept {
         if(!Live(q,ms) || (InSession() && !IsOnlineAuthority(q.top.obj)))continue;
         std::snprintf(squadNames[n],sizeof(squadNames[n]),"%s x%d",kClassWords[q.cls],q.alive>0 ? q.alive : 1);
         out[n]=CommandUnit{q.top.obj,squadNames[n],q.cmd,false,{},npc::Scripted(q.control),StatusOf(q,ms,status[n],sizeof(status[n])),
-                           SquadRiding(q),SquadRecruitable(q),q.control==npc::Control::recruited};
+                           SquadRiding(q),SquadRecruitable(q),q.control==npc::Control::recruited,TransportOf(q.top.obj)!=nullptr};
         std::memcpy(out[n++].pos,static_cast<const unsigned char*>(q.top.obj)+kPosition,12);
     }
     for(int i=0;i<remoteSquadCount && n<most && n<kMaxSquads*2;++i) {
@@ -1771,9 +1773,11 @@ bool AssignBoard(unsigned char* v,unsigned char* h,ULONGLONG ms) noexcept {
 }
 
 // Driver first, then actual armed seats, then passengers. Assignment never creates a rider.
-bool BoardSquad(unsigned char* top,ULONGLONG ms,const unsigned char* requester=nullptr,int* affected=nullptr,NpcCommandReason* why=nullptr) noexcept {
+bool BoardSquad(unsigned char* top,ULONGLONG ms,const unsigned char* requester=nullptr,int* affected=nullptr,NpcCommandReason* why=nullptr,
+                unsigned char** boarded=nullptr) noexcept {
     bool saw=false;
     unsigned char* const v=BoardTarget(top,requester ? requester : PlayerHuman(),ms,&saw);
+    if(boarded)*boarded=v;
     if(affected)*affected=0;
     if(why)*why=saw ? NpcCommandReason::noSeat : NpcCommandReason::noVehicle;
     if(!v){Log("NPCAI squad %p: no friendly vehicle with a seat for it within %.0f m",top,kBoardFar);return false;}
@@ -2114,6 +2118,75 @@ bool NpcFinishSquadRoute(unsigned char* leader,const float* destination) noexcep
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
+// --- The transports' primitives (npcai.h; transport.cpp) ---
+namespace {
+unsigned char* TransportTop(const void* top) noexcept {
+    auto* t=static_cast<unsigned char*>(const_cast<void*>(top));
+    return t && Readable(t,kHumanVehicleCtrl+8) && !t[kDead] && IsSoldierClass(t) && !IsAnyPlayer(t) ? t : nullptr;
+}
+}  // namespace
+bool NpcSquadSeats(const void* top,const void* vehicle,SquadSeats* out) noexcept {
+    __try {
+        auto* const t=TransportTop(top);
+        if(!t || !out)return false;
+        unsigned char* m[kMaxSquad];const int n=Members(t,m,kMaxSquad);
+        SquadSeats seats{};
+        for(int i=0;i<n;++i) {
+            if(m[i][kDead])continue;
+            ++seats.alive;
+            if(HumanOnFoot(m[i])){++seats.onFoot;continue;}
+            if(vehicle && At<const void*>(m[i],kHumanRiding)==vehicle)++seats.aboard;
+        }
+        *out=seats;return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+int NpcSquadBoardVehicle(const void* top,unsigned char* vehicle) noexcept {
+    __try {
+        auto* const t=TransportTop(top);
+        if(!t || !ok || !rideOk || !Cfg().npcBoarding || !vehicle || !Readable(vehicle,kSeatCount+8) || vehicle[kDead] ||
+           !OnlineMaySeatNpc(vehicle))return 0;
+        unsigned char* m[kMaxSquad];const int n=Members(t,m,kMaxSquad);
+        const ULONGLONG ms=GameMs();
+        int given=0;
+        for(int i=0;i<n;++i)if(FriendlyVehicle(vehicle,m[i]))given+=AssignBoard(vehicle,m[i],ms) ? 1 : 0;
+        return given;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return 0;}
+}
+int NpcSquadDismount(const void* top) noexcept {
+    __try {
+        auto* const t=TransportTop(top);
+        if(!t || !rideOk)return 0;
+        int off=0;DismountSquad(t,&off);return off;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return 0;}
+}
+bool NpcSquadSetOrder(const void* top,const mapcmd::Command& c,bool keepBoarding) noexcept {
+    __try {
+        auto* const t=TransportTop(top);
+        if(!t || !ok)return false;
+        Squad* const q=FindSquad(t);
+        if(!q || !q->top.Is(t) || GameMs()-q->seen>kOrderSeenMs)return false;
+        if(mapcmd::PointOrder(c.order)) {
+            if(!std::isfinite(c.at[0]+c.at[1]+c.at[2]))return false;
+            GuardOrder(*q,c);
+        } else if(c.order==Order::none)q->cmd={};
+        else return false;
+        npcmark::Assign(q->commandFocus,{});
+        q->routeActive=false;q->routeCancelled=true;
+        if(!keepBoarding)CancelBoarding(t);
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+const void* NpcSquadTopOf(const void* human) noexcept {
+    __try {
+        auto* h=static_cast<unsigned char*>(const_cast<void*>(human));
+        if(!h || !Readable(h,kHumanVehicleCtrl+8) || h[kDead] || !IsSoldierClass(h) || IsAnyPlayer(h))return nullptr;
+        return TopNpc(h);
+    } __except(EXCEPTION_EXECUTE_HANDLER){return nullptr;}
+}
+bool NpcSoldierFlies(const void* human) noexcept {
+    return human && Readable(human,8) && At<const void*>(human,0)==image+kSoldiers[1].vtable;   // the Wing Diver
+}
+
 namespace {
 NpcCommandResult lastCommand{};
 NpcCommandResult CommandResult(NpcCommandReason reason,unsigned affected=0) noexcept {
@@ -2158,6 +2231,17 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
         const bool recruited=control==npc::Control::recruited;
         unsigned char* members[kMaxSquad];const int count=Members(top,members,kMaxSquad);
         int affected=count;
+        // Its transport (transport.cpp): a far point order (or one given aboard) goes by the paired vehicle; WITHDRAW sends
+        // that vehicle off; any other order ends the squad's part in a trip (it stays where it is, aboard or not).
+        if(mapcmd::PointOrder(c.order) && std::isfinite(c.at[0]+c.at[1]+c.at[2]) && TransportOrder(top,c)) {
+            npcmark::Assign(q->commandFocus,{});q->routeActive=false;q->routeCancelled=true;
+            return CommandResult(Reason::none,static_cast<unsigned>(count));
+        }
+        if(c.order==Order::withdraw) {
+            const Reason why=TransportWithdraw(top);
+            return why==Reason::none ? CommandResult(Reason::none,1) : CommandResult(why);
+        }
+        TransportCancel(top);
         if(mapcmd::PointOrder(c.order) || c.order==Order::engage || c.order==Order::focus) {
             affected=0;
             for(int i=0;i<count;++i)if(HumanOnFoot(members[i]) && IsOnlineAuthority(members[i]) &&
@@ -2195,8 +2279,10 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
             q->cmd={Order::guard,{Pos(top)[0],Pos(top)[1],Pos(top)[2]}};q->cmdLead=npc::Lead::own;break;
         case Order::board: {
             if(!Cfg().npcBoarding || !rideOk)return CommandResult(Reason::boardingUnavailable);
-            Reason why=Reason::noVehicle;
-            if(!BoardSquad(top,ms,caller,&affected,&why))return CommandResult(why);break;
+            Reason why=Reason::noVehicle;unsigned char* vehicle=nullptr;
+            if(!BoardSquad(top,ms,caller,&affected,&why,&vehicle))return CommandResult(why);
+            TransportPair(top,vehicle);   // its transport from now on, when it is one (transport.cpp)
+            break;
         }
         case Order::dismount:
             if(!Cfg().npcBoarding || !rideOk)return CommandResult(Reason::boardingUnavailable);
