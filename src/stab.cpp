@@ -1,7 +1,9 @@
 // The gun stabilizer (README 炮管稳定器; docs/camera-re.md §7; the user, 2026-10-06: "vehicles that should have a gun
 // stabilizer get one"): while the hull pitches, rolls and turns under it, a stabilized gun stays on the line it was
 // laid on in the WORLD, as a modern tank's two-plane stabilizer holds it (elevation and traverse), within its turret's
-// own drive and with a small error that grows with the hull's turn rate.
+// own drive and with a small error that grows with the hull's turn rate. With TurretFollowsHull (default; the user,
+// 2026-10-09: "炮塔不会随着车体旋转而旋转") the hull's heading carries that line (stab.h Follow): the gun turns with
+// the hull as stock and only the pitch, roll and jolts are taken out.
 //  - Where (H, docs/camera-re.md §4, docs/nix-re.md §3): every seat's aim (VehicleWeaponAim at seat+0xE0) steps its two
 //    axes once a frame from the vehicle's update, slot 2: 0x5FBDA0 (VehicleWeaponAim, vtable 0x17D8A68) or 0x5FCD80
 //    (VehicleWeaponAimAddSe, 0x17D8A90: 0x5FBDA0 then a sound). Each axis' step 0x5FBC00 eases its rate toward the
@@ -280,6 +282,7 @@ void Hold(Entry& e,unsigned char* aim,const float* before) noexcept {
     const stab::Stops stops[2]={StopsAt(aim,0),StopsAt(aim,1)};
     const float top=At<float>(aim,kAimParams+8);
     float out[2];
+    e.hold.follow=Cfg().turretFollowsHull;   // the hull's heading carries the gun (stab.h Follow)
     stab::Step(e.hold,stops,before,after,std::isfinite(top) ? std::fabs(top) : 0.0f,mount,seen,*PerfOf(e.v,e.seat,e.cls),out);
     e.active=true;
     for(int i=0;i<2;++i) {

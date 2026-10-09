@@ -525,6 +525,7 @@ void LoadConfig() noexcept {
     n.sightZoomKey=ReadInt(L"SightZoomKey",static_cast<DWORD>(n.sightZoomKey));
     n.sightZoomButton=ReadInt(L"SightZoomButton",static_cast<DWORD>(n.sightZoomButton));
     n.gunStabilizer=ReadBool(L"GunStabilizer",n.gunStabilizer);
+    n.turretFollowsHull=ReadBool(L"TurretFollowsHull",n.turretFollowsHull);
     n.viewDistance=ReadFloat(L"ViewDistance",n.viewDistance);
     n.map=ReadBool(L"Map",n.map);
     n.mapKey=ReadInt(L"MapKey",static_cast<DWORD>(n.mapKey));

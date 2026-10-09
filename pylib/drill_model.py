@@ -24,9 +24,10 @@ with every stock mesh taken out and the OBJ in their place:
   - a marker bone DRILL_BONE (no geometry) inserted at the end of `body`'s subtree, at the drill's base: the plugin
     tells the drill tank from a stock Blacker by it (the object bones after it move one index on; no stock data
     refers to bones by index: the SGO, CAS, ragdoll and constraints name them);
-  - two materials made from the Blacker's hull material (its shader and parameters): MI_Tank_C with the OBJ's
-    Tank_C_BC.png, MI_Tank_B_CS (the tracks and running gear, whose texture is not in the OBJ's folder) a plain dark
-    steel; their normal maps flat, their roughness / metal / occlusion maps one neutral value.
+  - two materials made from the Blacker's hull material (its shader and parameters): MI_Tank_C (the upper hull and
+    the drill) and MI_Tank_B_CS (the lower hull, tracks and running gear), both on the OBJ's Tank_C_BC.png atlas
+    (MATERIALS: the lower hull was a plain dark steel until 2026-10-09); their normal maps flat, their roughness /
+    metal / occlusion maps one neutral value.
 The track object (Caterpi) is left out; its materials stay (the SGO's tank_caterpillar_animation names them), as do
 the Blacker's hull and light materials, but no mesh draws any of the five: their texture slots take the model's own
 plain textures (blank_unused_materials) and the Blacker's textures (12 MB, 74% of the archive) are not written.
@@ -45,19 +46,25 @@ import graft_pure as g
 import cas_pose
 import obj_model as om
 import texfile
-from mdb import Bone, Mdb, bind_world, cmpl_compress, cmpl_decompress, inverse_affine, mdb_read, mdb_write, mmul, rab_read, rab_write
+from mdb import Bone, Mdb, Texture, bind_world, cmpl_compress, cmpl_decompress, inverse_affine, mdb_read, mdb_write, mmul, rab_read, rab_write
 from mdb_jet import link
 
 HOST_ARC, HOST_MDB = 'V505_TANK.MRAB', 'v505_tank.mdb'
 HOST_CAS, OUT_CAS = 'V505_TANK.CAS', 'EDF6VC_DRILL.CAS'
 OUT_ARC = 'EDF6VC_DRILL.MRAB'
 MODEL_SUBDIR, OBJ_FILE = 'drill_tank', 'drill_tank.obj'
-TEXTURE_FILES = {'MI_Tank_C': 'Tank_C_BC.png'}        # the OBJ's materials' textures in its folder (the MTL has no map_Kd)
-SOLID = {'MI_Tank_B_CS': (62, 64, 60)}                  # ...and the one without a texture: dark steel
+# The OBJ's materials -> (the game material each becomes, its albedo: a texture file next to the OBJ; the MTL has no
+# map_Kd). Iron Rain's Tank_C_BC.png is ONE atlas for both: MI_Tank_B_CS (the lower hull, running gear and tracks, y
+# 0..1.85 m, 73k of the hull's 106k vertices) maps its road wheels, sprockets, track strips and lower plates onto the
+# atlas islands MI_Tank_C never uses (bottom-left wheels / track rows, the left side plates; texture_coverage(): with
+# it the two materials cover twice the atlas MI_Tank_C alone does). It used to be drawn a plain dark steel because
+# no `Tank_B` texture came with the model: the 2026-10-09 report "钻头战车的车体少了贴图" (docs/drill-re.md §10).
+MATERIALS = {'MI_Tank_C': ('edf6vc_drill_c', 'Tank_C_BC.png'), 'MI_Tank_B_CS': ('edf6vc_drill_b', 'Tank_C_BC.png')}
+ALBEDO_TEX = {'Tank_C_BC.png': 'edf6vc_drill_c.dds'}    # each source texture's archive file (one per source)
+STEEL = (62, 64, 60)                                     # dark steel: the albedo of the stock materials no mesh draws
 FLAT_NORMAL, NEUTRAL_RMO = (128, 128, 255), (150, 110, 255)   # tangent-space up; roughness 0.6, metal 0.43, no occlusion
 TEMPLATE_MATERIAL = 'v505_tank'
-TEX_STEM = {'MI_Tank_C': 'edf6vc_drill_c', 'MI_Tank_B_CS': 'edf6vc_drill_b'}
-NORMAL_TEX, RMO_TEX = 'edf6vc_drill_n.dds', 'edf6vc_drill_rmo.dds'
+NORMAL_TEX, RMO_TEX, STEEL_TEX = 'edf6vc_drill_n.dds', 'edf6vc_drill_rmo.dds', 'edf6vc_drill_steel.dds'
 # OBJ (+X forward, +Y up) -> game (+Z forward, +Y up, +X left): x -> z, y -> y, z -> -x (a rotation, no mirror)
 AXES: tuple[om.Vec3, om.Vec3, om.Vec3] = ((0.0, 0.0, 1.0), (0.0, 1.0, 0.0), (-1.0, 0.0, 0.0))
 SCALE = 1.0
@@ -208,16 +215,54 @@ def insert_bone(md: Mdb, parent: str, name: str, origin: om.Vec3) -> tuple[Mdb, 
 
 # ------------------------------------------------------------------------------------------ build
 
+def albedo_of(material: str) -> str:
+    """The archive texture file an OBJ material's albedo slot names."""
+    return ALBEDO_TEX[MATERIALS[material][1]]
+
+
 def textures(obj: om.ObjFile) -> dict[str, bytes]:
-    """The archive's new texture files {name: DDS}: each OBJ material's albedo, the flat normal, the neutral RMO."""
+    """The archive's new texture files {name: DDS}: each source albedo once, the flat normal, the neutral RMO, the
+    steel of the undrawn stock materials."""
     folder = os.path.dirname(obj.path)
-    out = {NORMAL_TEX: texfile.solid_dxt1(FLAT_NORMAL), RMO_TEX: texfile.solid_dxt1(NEUTRAL_RMO)}
-    for mat, stem in TEX_STEM.items():
-        if mat in TEXTURE_FILES:
-            out[f'{stem}.dds'] = om.texture_dds(os.path.join(folder, TEXTURE_FILES[mat]))
-        else:
-            out[f'{stem}.dds'] = texfile.solid_dxt1(SOLID[mat])
+    out = {NORMAL_TEX: texfile.solid_dxt1(FLAT_NORMAL), RMO_TEX: texfile.solid_dxt1(NEUTRAL_RMO), STEEL_TEX: texfile.solid_dxt1(STEEL)}
+    for source in sorted({src for _, src in MATERIALS.values()}):
+        out[ALBEDO_TEX[source]] = om.texture_dds(os.path.join(folder, source))
     return out
+
+
+def texture_coverage(obj: om.ObjFile, size: int = 256) -> dict[str, float]:
+    """The share of the atlas's texels (on a size x size grid) each OBJ material's UV triangles cover, and both
+    together ('all'): the evidence that MI_Tank_B_CS is laid out on the same atlas (MATERIALS)."""
+    cells: dict[str, set[tuple[int, int]]] = {m: set() for m in MATERIALS}
+    for o in obj.objects:
+        for f in o.faces:
+            if f.material not in cells or any(t < 0 for _, t, _ in f.corners):
+                continue
+            uv = [obj.uvs[t][:2] for _, t, _ in f.corners]
+            for k in range(1, len(uv) - 1):
+                _raster(cells[f.material], uv[0], uv[k], uv[k + 1], size)
+    out = {m: len(c) / size / size for m, c in cells.items()}
+    out['all'] = len(set().union(*cells.values())) / size / size
+    return out
+
+
+def _raster(cells: set[tuple[int, int]], a: tuple[float, float], b: tuple[float, float], c: tuple[float, float], n: int) -> None:
+    """Add the grid cells whose centres lie in the UV triangle abc (wrapped into 0..1) to `cells`."""
+    pts = [((p[0] % 1.0) * n, (p[1] % 1.0) * n) for p in (a, b, c)]
+    if max(abs(pts[i][j] - pts[0][j]) for i in (1, 2) for j in (0, 1)) > n / 2:
+        return      # a triangle across the wrap: left out of the estimate
+    area = (pts[1][0] - pts[0][0]) * (pts[2][1] - pts[0][1]) - (pts[2][0] - pts[0][0]) * (pts[1][1] - pts[0][1])
+    if abs(area) < 1e-12:
+        return
+    x0, x1 = int(min(p[0] for p in pts)), int(max(p[0] for p in pts))
+    y0, y1 = int(min(p[1] for p in pts)), int(max(p[1] for p in pts))
+    for y in range(max(0, y0), min(n - 1, y1) + 1):
+        for x in range(max(0, x0), min(n - 1, x1) + 1):
+            px, py = x + 0.5, y + 0.5
+            w1 = ((pts[1][0] - px) * (pts[2][1] - py) - (pts[2][0] - px) * (pts[1][1] - py)) / area
+            w2 = ((pts[2][0] - px) * (pts[0][1] - py) - (pts[0][0] - px) * (pts[2][1] - py)) / area
+            if w1 >= 0 and w2 >= 0 and w1 + w2 <= 1:
+                cells.add((x, y))
 
 
 def blank_unused_materials(md: Mdb) -> tuple[Mdb, list[str]]:
@@ -227,8 +272,10 @@ def blank_unused_materials(md: Mdb) -> tuple[Mdb, list[str]]:
     is never drawn: the Blacker's textures then go from the archive (build_with_info, graft_pure.prune_members).
     Returns the model and the blanked materials' names."""
     drawn = {me.material for o in md.objects for me in o.meshes}
+    if all(t.filename.lower() != STEEL_TEX.lower() for t in md.textures):   # no drawn material names the steel
+        md = replace(md, textures=list(md.textures) + [Texture(len(md.textures), STEEL_TEX.rsplit('.', 1)[0] + '_DDS', STEEL_TEX, 0)])
     files = {t.filename.lower(): t.index for t in md.textures}
-    plain = {'normal': NORMAL_TEX, 'albedo': f"{TEX_STEM['MI_Tank_B_CS']}.dds"}
+    plain = {'normal': NORMAL_TEX, 'albedo': STEEL_TEX}
     mats, blank = [], []
     for m in md.materials:
         if m.index not in drawn:
@@ -247,8 +294,8 @@ def build_model(game, obj_file: str) -> tuple[Mdb, object, dict[str, bytes], dic
     rab = rab_read(game.read('OBJECT', HOST_ARC))
     host = mdb_read(member(rab, HOST_MDB).data)
     obj = om.read_obj(obj_file)
-    _req(set(obj.materials) >= set(TEX_STEM), f'{obj_file}: materials {sorted(obj.materials)}, want {sorted(TEX_STEM)}')
-    for mat, f in TEXTURE_FILES.items():
+    _req(set(obj.materials) >= set(MATERIALS), f'{obj_file}: materials {sorted(obj.materials)}, want {sorted(MATERIALS)}')
+    for mat, (_, f) in MATERIALS.items():
         _req(os.path.isfile(os.path.join(os.path.dirname(obj_file), f)), f'{mat}: {f} not next to {obj_file}')
     hull, drill = split(om.obj_parts(obj, CONVERSION))
     _req(bool(hull) and bool(drill), 'the OBJ has no drill past DRILL_SPLIT_Z (or no hull)')
@@ -265,9 +312,9 @@ def build_model(game, obj_file: str) -> tuple[Mdb, object, dict[str, bytes], dic
     body = md.bone_index(DRILL_PARENT)
     template = next(me for o in host.objects for me in o.meshes if host.name_of(host.materials[me.material].name) == TEMPLATE_MATERIAL)
     meshes = []
-    for mat, stem in TEX_STEM.items():
-        md, mi = om.add_material(md, host, TEMPLATE_MATERIAL, stem,
-                                 {'albedo': f'{stem}.dds', 'normal': NORMAL_TEX, 'param_r_m_occ_hr': RMO_TEX})
+    for mat, (name, _) in MATERIALS.items():
+        md, mi = om.add_material(md, host, TEMPLATE_MATERIAL, name,
+                                 {'albedo': albedo_of(mat), 'normal': NORMAL_TEX, 'param_r_m_occ_hr': RMO_TEX})
         pieces = [(p, om.rigid(p, body)) for p in hull if p.material == mat]
         pieces += [(p, om.rigid(p, drill_bone)) for p in drill if p.material == mat]
         meshes += om.build_meshes(template, pieces, mi)
@@ -378,6 +425,24 @@ def check(arc: bytes, host_bones: list[str] | None = None) -> None:
             stem, ext = fn.rsplit('.', 1)
             for want in (fn, f'{stem}.lod.{ext}'):
                 _req(want.lower() in files, f'material {md.name_of(m.name)}: texture member {want} missing')
+    for problem in drawn_albedo_problems(md):
+        raise DrillModelError(problem)
+
+
+def drawn_albedo_problems(md: Mdb) -> list[str]:
+    """Every material a mesh draws is one of MATERIALS with its source atlas as its albedo (never the plain steel
+    of the undrawn stock materials): the 2026-10-09 untextured lower hull, as a check."""
+    want = {name: albedo_of(mat).lower() for mat, (name, _) in MATERIALS.items()}
+    out = []
+    for me in (me for o in md.objects for me in o.meshes):
+        m = md.materials[me.material]
+        name = md.name_of(m.name)
+        albedo = next((md.textures[x.texture].filename.lower() for x in m.textures if x.kind.lower() == 'albedo'), None)
+        if name not in want:
+            out.append(f'mesh on material {name}: not one of the OBJ materials')
+        elif albedo != want[name]:
+            out.append(f'material {name}: albedo {albedo}, want the atlas {want[name]}')
+    return out
 
 
 def stock_bones(game) -> list[str]:  # noqa: ANN001 - rootcpk.Game

@@ -113,9 +113,17 @@ constexpr float kBiteHeat=0.5f;
 constexpr float kOutStop=0.05f,kCatchM=1.0f,kAlignM=15.0f;
 constexpr float kReturnTurnRate=2.0f*kPi; // rad/s: half a second to reverse, including exactly opposite axes
 constexpr ULONGLONG kBackMostMs=12000;
-// In flight it bites every kFlightBiteSec the enemy whose body (root..lock point) is nearest its axis, within its
-// radius + kBodyPad; not one within kNearHullM of the vehicle's origin (the charge would start in or meet the tank).
+// In flight it bites every kFlightBiteSec the enemy whose body (root..lock point, kBodyPad thick) is in its reach,
+// nearest its axis; not one within kNearHullM of the vehicle's origin (the charge would start in or meet the tank).
+// Its reach is the hull's contact box carried along with it (2026-10-09: "发射钻头的时候没伤害，回收的时候有"): the
+// drill flies at the height it left the hull, its axis kDrillBaseY over the ground, and a cylinder of its radius +
+// kBodyPad round that axis passed over every enemy on the ground (an ant's root is on the ground, its lock point ~1 m
+// up: 3..4 m under the axis; the 2026-10-05 lesson of the hull's probe, §5.5). The bites the user saw were the hull's
+// own probe once it was caught (its RPM at the top). So, in the drill's frame (origin its base, z its axis, y the
+// vehicle's up made square to it), the reach is kBoxHalfX aside, from kDrillBaseY under the axis to kDrillRadius +
+// kTopMargin over it, from its base to kAhead past its tip: the hull's box (Touch) less the hull.
 constexpr float kFlightBiteSec=0.1f,kNearHullM=7.0f;
+constexpr float kReachLo[3]={-kBoxHalfX,-kDrillBaseY,0.0f},kReachHi[3]={kBoxHalfX,kDrillRadius+kTopMargin,kDrillLength+kAhead};
 // Kills: an enemy bitten in the last kKillWindowMs that is dead (or gone) is the drill's (up to kVictims tracked).
 constexpr ULONGLONG kKillWindowMs=1500;
 constexpr int kVictims=16;
@@ -274,13 +282,20 @@ void PoseHome(Drill& d) noexcept {
 // The drill in flight: its world pose (base at d.pos, +Z along d.axis, x / y from the vehicle's up, spun d.angle)
 // brought into the parent bone's frame (local = world x parent.world^-1, the parent's world as last composed: a
 // frame late at most). False (nothing written) without the parent or with a degenerate one.
-bool PoseFlight(const unsigned char* v,Drill& d) noexcept {
-    if(!d.parent)return false;
+// The flying drill's unturned rows x, y round its axis d.axis: x = the vehicle's up x the axis (the vehicle's rows:
+// x left = up x forward), y = axis x x (the vehicle's up made square to the axis). False for a degenerate axis.
+bool FlightRows(const unsigned char* v,const Drill& d,float* x0,float* y0) noexcept {
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
-    float x0[3],y0[3];
-    Cross(m+4,d.axis,x0);              // x = up x z (the vehicle's rows: x left = up x forward)
+    Cross(m+4,d.axis,x0);
     if(!Unit(x0,x0)){Cross(d.axis,m+8,x0);if(!Unit(x0,x0))return false;}
     Cross(d.axis,x0,y0);
+    return true;
+}
+
+bool PoseFlight(const unsigned char* v,Drill& d) noexcept {
+    if(!d.parent)return false;
+    float x0[3],y0[3];
+    if(!FlightRows(v,d,x0,y0))return false;
     float w[16]{};
     Turn(x0,y0,d.angle,w,w+4,3);
     std::memcpy(w+8,d.axis,12);
@@ -378,6 +393,13 @@ float BoxGap(const float* p,const float* lo,const float* hi) noexcept {
     return std::sqrt(s);
 }
 
+// Whether an enemy's body (the segment root..lock, both in the box's frame, kBodyPad thick) is in the box lo..hi.
+bool BodyInBox(const float* root,const float* lock,const float* lo,const float* hi) noexcept {
+    float l[3],h[3],t=0.0f;
+    for(int i=0;i<3;++i){l[i]=lo[i]-kBodyPad;h[i]=hi[i]+kBodyPad;}
+    return SegmentInBox(root,lock,l,h,&t);
+}
+
 // An enemy's root (object +0x90, world), or its lock point when that is not a number.
 void RootOf(const void* object,const float* aim,float* out) noexcept {
     const float* pos=reinterpret_cast<const float*>(static_cast<const unsigned char*>(object)+kPosition);
@@ -395,9 +417,7 @@ void SeeEnemy(void* ctx,const void* object,const float* aim) noexcept {
     ToLocal(r.v,rootWorld,root);
     const float gap=std::fmin(BoxGap(lock,r.lo,r.hi),BoxGap(root,r.lo,r.hi))-kBodyPad;
     if(r.seen++==0 || gap<r.nearest){r.nearest=gap<0.0f ? 0.0f : gap;std::memcpy(r.closest,lock,12);}
-    float lo[3],hi[3],t=0.0f;
-    for(int i=0;i<3;++i){lo[i]=r.lo[i]-kBodyPad;hi[i]=r.hi[i]+kBodyPad;}
-    if(!SegmentInBox(root,lock,lo,hi,&t))return;
+    if(!BodyInBox(root,lock,r.lo,r.hi))return;
     if(r.found && lock[2]>=r.along)return;
     r.found=true;r.along=lock[2];std::memcpy(r.at,aim,12);r.who=object;
 }
@@ -571,6 +591,7 @@ void Launch(unsigned char* v,Drill& d) noexcept {
     ToWorld(v,over,d.lastTip);
     d.speed=c.drillLaunchSpeed;d.flown=0.0f;d.flightBite=kFlightBiteSec;d.backAt=0;
     d.flight=Flight::out;
+    d.rpm=c.drillMaxRpm;   // its jet spins it at the top from the launch on, whatever the trigger did before (FlightSpin)
     d.heat=d.heat+c.drillLaunchHeat>1.0f ? 1.0f : d.heat+c.drillLaunchHeat;
     LatchOverheat(v,d);
     Log("DRILL v=%p launched: %.0f m/s out to %.0f m, heat %.0f%%",v,d.speed,c.drillLaunchRange,d.heat*100.0f);
@@ -632,15 +653,22 @@ void FlyBack(unsigned char* v,Drill& d,float dt,ULONGLONG ms) noexcept {
     std::memcpy(d.axis,next,12);
 }
 
-// The enemy nearest the flying drill's axis (EnemyVisitor): its body (root..lock point) within the drill's radius +
-// kBodyPad of the axis, not within kNearHullM of the vehicle's origin.
-struct Sweep { const unsigned char* v; float a[3],b[3],at[3],gap; const void* who; };
+// The enemy in the flying drill's reach (kReachLo..kReachHi in its frame: rows x, y, axis from its base `a`) nearest
+// its axis a..b (EnemyVisitor), not within kNearHullM of the vehicle's origin.
+struct Sweep { const unsigned char* v; float a[3],b[3],x[3],y[3],z[3],at[3],gap; const void* who; };
+void InFlightFrame(const Sweep& s,const float* p,float* out) noexcept {
+    const float d[3]={p[0]-s.a[0],p[1]-s.a[1],p[2]-s.a[2]};
+    out[0]=Dot(d,s.x);out[1]=Dot(d,s.y);out[2]=Dot(d,s.z);
+}
 void SweepEnemy(void* ctx,const void* object,const float* aim) noexcept {
     auto& s=*static_cast<Sweep*>(ctx);
     float root[3];RootOf(object,aim,root);
+    float rootIn[3],lockIn[3];
+    InFlightFrame(s,root,rootIn);InFlightFrame(s,aim,lockIn);
+    if(!BodyInBox(rootIn,lockIn,kReachLo,kReachHi))return;
     const float mid[3]={(root[0]+aim[0])*0.5f,(root[1]+aim[1])*0.5f,(root[2]+aim[2])*0.5f};
     const float gap=std::fmin(std::fmin(SegmentGap(aim,s.a,s.b),SegmentGap(root,s.a,s.b)),SegmentGap(mid,s.a,s.b));
-    if(gap>kDrillRadius+kBodyPad || (s.who && gap>=s.gap))return;
+    if(s.who && gap>=s.gap)return;
     const float* m=reinterpret_cast<const float*>(s.v+kMatrix);
     const float off[3]={aim[0]-m[12],aim[1]-m[13],aim[2]-m[14]};
     if(Len(off)<kNearHullM)return;
@@ -650,7 +678,8 @@ void SweepEnemy(void* ctx,const void* object,const float* aim) noexcept {
 // In flight (kFlightBiteSec): a charge at the enemy nearest its axis, from kLead short of it on the drill's side.
 void FlightBite(unsigned char* v,Drill& d,ULONGLONG ms) noexcept {
     Sweep s{v};
-    std::memcpy(s.a,d.pos,12);
+    if(!FlightRows(v,d,s.x,s.y))return;
+    std::memcpy(s.a,d.pos,12);std::memcpy(s.z,d.axis,12);
     for(int i=0;i<3;++i)s.b[i]=d.pos[i]+d.axis[i]*kDrillLength;
     VisitEnemies(v,&SweepEnemy,&s);
     if(!s.who)return;
@@ -694,6 +723,19 @@ void Publish(const Drill& d) noexcept {
                  d.flight==Flight::back,d.keys};
     cueAt=GetTickCount64();
     ReleaseSRWLockExclusive(&cueLock);
+}
+
+// The drill's one round (the user, 2026-10-09: "钻头为什么有25的弹药"): the weapon is the Blacker's cannon made to fire
+// nothing (tools/make_drill.py BIT), whose stock magazine of 25 the HUDs showed. Its AmmoCount is 1 (the one drill),
+// and its live count (weapon +0xBE8, layout.h kWeaponAmmo, what the stock gauge and vhud.cpp read) says whether the
+// drill is on the hull: 1 at home, 0 while it is launched, 1 again once caught. Every copy writes it from the flight
+// it shows (an NPC's AI that pulls the bit's trigger empties nothing that stays empty: the drill is home).
+void ShowRound(unsigned char* v,const Drill& d) noexcept {
+    const unsigned char* seat=SeatAt(v,0);
+    const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
+    if(!At<std::uint64_t>(seat,kSeatWeaponCount) || !Readable(holders,8) || !Readable(holders[0],kHolderWeapon+8))return;
+    const auto w=At<unsigned char*>(holders[0],kHolderWeapon);
+    if(Readable(w,kWeaponAmmo+4))Put<std::int32_t>(w,kWeaponAmmo,d.flight==Flight::home ? 1 : 0);
 }
 
 // Every copy poses the same drill; only the current vehicle authority integrates its path and tests contacts.
@@ -771,6 +813,7 @@ void DrillFrame(unsigned char* v) noexcept {
             Jet(v,*d,ms);
             if(!PoseFlight(v,*d))Catch(v,*d,ms,"no remote pose");
         } else PoseHome(*d);
+        ShowRound(v,*d);
         return;
     }
     if(d->launchAsked) {
@@ -804,6 +847,7 @@ void DrillFrame(unsigned char* v) noexcept {
     }
     if(d->rpm>0.0f || d->flight!=Flight::home)LogPose(v,*d,ms);
     if(d->player)Publish(*d);
+    ShowRound(v,*d);
     SendState(v,*d,ms);
 }
 
