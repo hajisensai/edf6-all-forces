@@ -15,7 +15,8 @@ constexpr WeaponName kWeaponNames[]={
     {SupportWeapon::rocket,L"rocket",L"火箭"},{SupportWeapon::shotgun,L"shotgun",L"霰弹"},
     {SupportWeapon::sniper,L"sniper",L"狙击"},
 };
-static_assert(sizeof(kWeaponNames)/sizeof(kWeaponNames[0])==static_cast<std::size_t>(kSupportWeaponCount));
+// The ini names only the Rangers (support_call.h kSupportRangerWeaponCount): the other kinds come in a composed load.
+static_assert(sizeof(kWeaponNames)/sizeof(kWeaponNames[0])==static_cast<std::size_t>(kSupportRangerWeaponCount));
 
 void Trim(const wchar_t*& begin,const wchar_t*& end) noexcept {
     while(begin<end && std::iswspace(*begin))++begin;
@@ -60,11 +61,11 @@ bool ParseSupportWeapon(const wchar_t* text,SupportWeapon* out) noexcept {
 }
 const wchar_t* SupportWeaponName(SupportWeapon weapon) noexcept {
     const auto i=static_cast<int>(weapon);
-    return i>=0 && i<kSupportWeaponCount ? kWeaponNames[i].name : L"rifle";
+    return i>=0 && i<kSupportRangerWeaponCount ? kWeaponNames[i].name : L"rifle";
 }
 const wchar_t* SupportWeaponLabel(SupportWeapon weapon) noexcept {
     const auto i=static_cast<int>(weapon);
-    return i>=0 && i<kSupportWeaponCount ? kWeaponNames[i].label : L"步枪";
+    return i>=0 && i<kSupportRangerWeaponCount ? kWeaponNames[i].label : L"步枪";
 }
 
 static int KeyIndexOf(SupportKeyOf keyOf,int units,const wchar_t* key) noexcept {

@@ -20,7 +20,7 @@ struct Plan {
 enum class PlanResult { pending,ready,refused };
 enum class RequestStatus : std::uint32_t { accepted,active,refused,timeout,cancelled,interrupted };
 struct Hooks {
-    PlanResult (*plan)(std::uint32_t,const float*,Plan*) noexcept=nullptr;
+    PlanResult (*plan)(std::uint32_t,const float*,std::uint64_t loadout,Plan*) noexcept=nullptr;   // loadout: PackSupportLoadout
     bool (*validate)(const Plan&) noexcept=nullptr;
     // Tokens are process-monotonic and local, not wire indexes. Retain them
     // verbatim; never use a token as a bounded array index.
@@ -36,7 +36,7 @@ bool ValidPlan(const Plan& plan,bool requireIds=true) noexcept;
 } // namespace support_net
 using SupportPlan=support_net::Plan;
 void ConfigureSupportNet(const support_net::Hooks& hooks) noexcept;
-bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::size_t noteSize) noexcept;
+bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::size_t noteSize,std::uint64_t loadout=0) noexcept;
 void SupportNetTick() noexcept;
 void ResetSupportNet() noexcept;
 void ReportSupportFailure(std::uint64_t transaction) noexcept;
@@ -50,6 +50,8 @@ bool SupportPeersAcceptVariants() noexcept;
 bool SupportPeersAcceptAirborne() noexcept;
 // Whether every peer knows the transport entries (kCapTransports); true offline / with no session.
 bool SupportPeersAcceptTransports() noexcept;
+// Host: whether every peer takes a composed load (support_protocol.h kCapLoadout); offline / no peer: true.
+bool SupportPeersAcceptLoadout() noexcept;
 // Requester ownership: native EOS PUID must equal the authenticated transport
 // sender and belong to the sealed current-world participant set.
 bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) noexcept;

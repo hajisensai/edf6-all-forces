@@ -17,6 +17,7 @@ struct Node {
     std::unique_ptr<Session> session=std::make_unique<Session>();
     bool reject=false,failSpawn=false,pending=false,refusePlan=false;
     unsigned spawns=0,destroys=0,plans=0;
+    std::uint64_t loadout=0;   // the last plan call's composed load (support_call.h PackSupportLoadout)
     std::uint64_t nonce=0;
     bool active[kMaxTransactions+1]{};
     Plan last{};
@@ -65,8 +66,8 @@ bool Send(void* ctx,std::uint32_t peer,const Message& message) noexcept {
     Packet p{node.id,dst,decoded};room.packets.push_back(p);room.history.push_back(p);return true;
 }
 std::uint64_t Nonce(void* ctx) noexcept { return ++static_cast<Node*>(ctx)->nonce; }
-PlanResult PlanCall(std::uint32_t catalog,const float* at,Plan* p) noexcept {
-    ++current->plans;
+PlanResult PlanCall(std::uint32_t catalog,const float* at,std::uint64_t loadout,Plan* p) noexcept {
+    ++current->plans;current->loadout=loadout;
     if(current->refusePlan)return PlanResult::refused;
     if(current->pending)return PlanResult::pending;
     *p=Plan{};p->catalogId=catalog;p->count=16;std::memcpy(p->target,at,sizeof(p->target));
@@ -143,9 +144,22 @@ void Capabilities() {
      r.legacyNode=999;r.Step(1100);r.Settle();
      Check(r.nodes[0]->session->PeersHave(kCapSoldierVariants),"a peer's latest hello decides (an updated peer rejoining)");}
 }
+void Loadout() {
+    // A composed load (support_call.h PackSupportLoadout) rides in the request's challenge: the host's plan sees it; an
+    // older host never reads that field of a request (the wire is v2 unchanged).
+    Room r(3);const float at[3]={10,20,30};const std::uint64_t load=0x0000000DDDD99998ull;
+    r.With(1);Check(current->session->Submit(5,at,r.now,load),"a guest submits a composed request");r.Settle();
+    Check(r.nodes[0]->loadout==load && r.nodes[0]->plans>=1,"the host plans with the guest's load");
+    for(const auto& n:r.nodes)Check(n->spawns==1,"every peer spawns the composed plan once");
+    Message m;m.kind=Kind::request;m.epoch=1;m.request=1;m.catalog=5;m.challenge=load;std::memcpy(m.target,at,12);
+    unsigned char wire[kWireSize];Message back;
+    Check(Encode(m,wire,sizeof(wire)) && Decode(wire,sizeof(wire),back) && back.challenge==load,"the load crosses the wire as v2");
+    Check((kCapabilities&kCapLoadout)!=0,"this version announces kCapLoadout");
+}
 void Success() {
     Room r(3);for(const auto& n:r.nodes)Check(n->session->Ready(),"authenticated handshake ready");
     Check(r.Submit(),"client submits catalog request");r.Settle();
+    Check(r.nodes[0]->loadout==0,"a request with no composed load plans the call's own (loadout 0)");
     for(const auto& n:r.nodes)Check(n->spawns==1 && n->session->ActiveCount()==1,"all peers spawn once");
     Check(!r.nodes[0]->remote && r.nodes[1]->remote && r.nodes[2]->remote,"host authority passed to adapters");
     Check(!std::memcmp(&r.nodes[0]->last,&r.nodes[2]->last,sizeof(Plan)),"all sixteen object specs and native IDs identical");
@@ -250,4 +264,4 @@ void RequestOutcomes() {
     Check(newer.nodes[1]->notices.back()==std::make_pair(2u,RequestStatus::active),"previous transaction cancel cannot be misreported as the newer request outcome");
 }
 }
-int main() { Codec();Capabilities();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();std::printf("support protocol: %d checks passed\n",checks); }
+int main() { Codec();Capabilities();Loadout();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();std::printf("support protocol: %d checks passed\n",checks); }

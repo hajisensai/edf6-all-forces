@@ -30,6 +30,7 @@
 #include "npc_mark.h"
 #include "online_authority.h"
 #include "real_driver_native.h"
+#include "seat_events.h"
 #include "support_soldier.h"
 #include "transport.h"
 #include "vhud.h"
@@ -826,6 +827,13 @@ constexpr ULONGLONG kBoardMs=20000;        // a board order not done in this lon
 const unsigned char kRideSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x18,0x48,0x89,0x7C,0x24,0x20,0x48};
 const unsigned char kRideReleaseSig[]={0x49,0x8B,0x5E,0x08,0x48,0x85,0xDB,0x74,0x27,0x8B,0xC7,0xF0,0x0F,0xC1,0x43,0x08};   // 0x57690D
 bool rideOk=false;
+// The vehicle's seat events (seat_events.h): the boarding-sound site 0x632AC6 (mov ecx,[rsi+0x620]; shl al,cl;
+// test [rsi+0x628],al) and the seat scan's 0x62F1AA (mov [rsi+0x628],dx; mov ecx,[rsi+0x620]; shl ax,cl). Not as read:
+// a crew created aboard is seated as before, with the stock boarding sound.
+const unsigned char kSeatSoundSig[]={0x8B,0x8E,0x20,0x06,0x00,0x00,0xD2,0xE0,0x84,0x86,0x28,0x06,0x00,0x00};
+const unsigned char kSeatScanSig[]={0x66,0x89,0x96,0x28,0x06,0x00,0x00,0x8B,0x8E,0x20,0x06,0x00,0x00,0x66,0xD3,0xE0};
+static_assert(seatevt::kMask==0x628 && seatevt::kShift==0x620,"the offsets the signatures read");
+bool seatEventsOk=false;
 struct SharedRef { void* obj; void* ctrl; };
 using RideFn=void(__fastcall*)(void*,SharedRef*,int);
 
@@ -1227,6 +1235,9 @@ bool InstallNpcAi() noexcept {
     __try { rideOk=Matches(kRideVehicle,kRideSig,sizeof(kRideSig)) && Matches(0x57690D,kRideReleaseSig,sizeof(kRideReleaseSig)); }
     __except(EXCEPTION_EXECUTE_HANDLER){rideOk=false;}
     if(!rideOk)Log("NPCAI RideVehicle not as read: squads do not board vehicles");
+    __try { seatEventsOk=Matches(0x632AC6,kSeatSoundSig,sizeof(kSeatSoundSig)) && Matches(0x62F1AA,kSeatScanSig,sizeof(kSeatScanSig)); }
+    __except(EXCEPTION_EXECUTE_HANDLER){seatEventsOk=false;}
+    if(!seatEventsOk)Log("NPCAI vehicle seat events not as read: a crew created aboard plays the boarding sound");
     if(!followOk)Log("NPCAI SetFollow not as read: squads are not reorganized when a leader dies");
     InstallRealDriverNative(&OwnsNpcSeatInput);
     InstallBoxes();
@@ -1879,7 +1890,15 @@ int NpcSeatCrewNow(unsigned char* v,unsigned char* const* humans,int count) noex
         _InterlockedIncrement(reinterpret_cast<volatile long*>(ctrl+8));
         SharedRef ref{v,ctrl};
         reinterpret_cast<RideFn>(image+kRideVehicle)(h,&ref,seat);
-        if(At<const void*>(SeatAt(v,static_cast<unsigned>(seat)),kSeatRider)==h)++seated;
+        if(At<const void*>(SeatAt(v,static_cast<unsigned>(seat)),kSeatRider)!=h)continue;
+        ++seated;
+        // Created aboard: no boarding. The vehicle takes the seat as held from the start, so neither its seat scan
+        // nor RideVehicle's own change leaves a boarding sound to play (seat_events.h; the user, 2026-10-09:
+        // "来支援的时候会有上车声音", "上车声是原版的上载具声音"). A soldier who walks aboard (NpcBoardCrew) still sounds.
+        if(seatEventsOk && Readable(v+seatevt::kShift,12)) {
+            auto& mask=*reinterpret_cast<std::uint16_t*>(v+seatevt::kMask);
+            mask=seatevt::Quiet(mask,At<std::uint32_t>(v,seatevt::kShift),static_cast<unsigned>(seat));
+        }
     }
     return seated;
 }

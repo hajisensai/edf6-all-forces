@@ -79,6 +79,8 @@ support::Refusal PlanAirSupportFor(SupportAircraft,const float*,const float*,sup
 }
 bool SupportAircraftReady(const SupportAircraft&) noexcept {return transportReady;}
 bool SupportPeersAcceptTransports() noexcept {return peersTransports;}
+bool peersLoadout=true;
+bool SupportPeersAcceptLoadout() noexcept {return peersLoadout;}
 bool lastAirborne=false;
 bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool airborne) noexcept {++activated;lastAirborne=airborne;return true;}
 bool peersAirborne=true;
@@ -128,8 +130,9 @@ void ConfigureSupportNet(const support_net::Hooks& hooks) noexcept {
     configuredHooks=hooks;++netConfigured;gateBeforeNetwork=gatesInstalled>0;creationSeen=false;
 }
 bool submitReady=true;unsigned noticeRequest=0;
-bool SubmitSupportRequest(int,const float*,wchar_t* note,std::size_t size) noexcept {
-    ++netRequests;
+std::uint64_t lastNetLoadout=0;
+bool SubmitSupportRequest(int,const float*,wchar_t* note,std::size_t size,std::uint64_t loadout) noexcept {
+    ++netRequests;lastNetLoadout=loadout;
     if(!submitReady){_snwprintf_s(note,size,_TRUNCATE,L"联机扩展尚未就绪");return false;}
     if(configuredHooks.notice)configuredHooks.notice(++noticeRequest,support_net::RequestStatus::accepted);
     _snwprintf_s(note,size,_TRUNCATE,L"request queued");return true;
@@ -237,7 +240,7 @@ int main() {
     ResetSupportDispatch();testOnline=true;made=0;
     check(SupportCallAt(0,target,note,128) && netRequests==1 && !made,"online click uses reliable request rather than local spawn");
     ResetSupportDispatch();made=boardRequests=0;held=0;seatNow=0;registered=0;registeredBeforeSeat=0;activated=0;SupportPlan networkPlan;
-    check(Plan(0,target,&networkPlan)==support_net::PlanResult::ready && Spawn(10,networkPlan,false),"committed online plan creates registered stand-ins");
+    check(Plan(0,target,0,&networkPlan)==support_net::PlanResult::ready && Spawn(10,networkPlan,false),"committed online plan creates registered stand-ins");
     check(seatNow==1 && registered==2 && registeredBeforeSeat==0,"airborne hull and crew are registered only after the crew is seated");
     check(activated==1,"the host flies its airborne copy at once: a hull in the air never waits unflown for the barrier");
     SupportDispatchTick();
@@ -248,12 +251,12 @@ int main() {
      check(Spawn(11,networkPlan,true) && seatNow==seated+1 && activated==before,"a peer's copy seats its crew identically but never flies it");}
     // A room with an older peer (no kCapAirborneAir): refused with its reason, never half in the air.
     peersAirborne=false;made=0;
-    check(Plan(0,target,&networkPlan)==support_net::PlanResult::refused && !made,"older peer: air support refused before anything exists");
+    check(Plan(0,target,0,&networkPlan)==support_net::PlanResult::refused && !made,"older peer: air support refused before anything exists");
     SupportCallStatus(note,128);
     check(std::wcsstr(note,hudtext::Tr(hudtext::Tx::supportAirNeedsUpdate))!=nullptr,"older peer: the HUD says why");
     peersAirborne=true;
     // An older host's runway plan (kAircraft + catalog) is applied as that host planned it: hull, crew walking aboard.
-    {SupportPlan legacy;check(Plan(0,target,&legacy)==support_net::PlanResult::ready,"plan for the legacy fixture");
+    {SupportPlan legacy;check(Plan(0,target,0,&legacy)==support_net::PlanResult::ready,"plan for the legacy fixture");
      legacy.units[0].resourceId=kSupportAircraftResource+legacy.catalogId;
      check(Validate(legacy),"an older host's runway plan still validates");
      ResetSupportDispatch();transactionActive=false;boardRequests=0;activated=0;seatNow=0;
@@ -394,7 +397,9 @@ int main() {
     check(deployments[0].delivered && Validate(assault),"handed over: the dispatcher leaves them to transport.cpp; a peer accepts the plan");
     SupportPlan bad=assault;bad.units[3].resourceId=kSupportLeaderResource;check(!Validate(bad),"a leader out of place is refused");
     bad=assault;bad.units[1].role=0;check(!Validate(bad),"a pilot detached from its hull is refused");
-    bad=assault;bad.count=10;check(!Validate(bad),"a platoon short of soldiers is refused");
+    // A composed load (support_call.h SupportLoadout): any number of squads up to the hull's twelve riders.
+    bad=assault;bad.count=10;check(Validate(bad),"two squads (a composed load) are a valid plan");
+    bad=assault;bad.units[14]=bad.units[2];bad.count=15;check(!Validate(bad),"thirteen riders, past the hull's seats, are refused");
     bad=assault;bad.units[0].resourceId=kSupportAircraftResource+kSupportAirborneOffset+31;check(!Validate(bad),"another entry's hull is refused");
     ResetSupportDispatch();made=0;ferries=paradrops=0;fixtureMs+=40000;
     SupportCallAt(31,target,note,128);SupportDispatchTick();
@@ -443,6 +448,76 @@ int main() {
         fixtureMs+=16;SupportDispatchTick();
         check(deleted==4 && !d.withdrawing,"then the hull");
         driverAboard=true;routeResult=npc::navigation::Result::pending;
+    }
+    // A composed load (the bar's composition panel; the user, 2026-10-09: "支援栏是断剑那种，先点载具，然后选里面的人"; a click
+    // a whole squad). The wire form first: PackSupportLoadout / UnpackSupportLoadout round trip, malformed refused.
+    {
+        SupportLoadout l{};l.count=8;
+        for(int i=0;i<4;++i){l.soldier[i]=SupportWeapon::wingLance;l.soldier[4+i]=SupportWeapon::fencerCannon;}
+        SupportLoadout back{};
+        check(UnpackSupportLoadout(PackSupportLoadout(l),&back) && back.count==8 && back.soldier[0]==SupportWeapon::wingLance &&
+              back.soldier[7]==SupportWeapon::fencerCannon,"a load packs into a request's 64 bits and back");
+        check(PackSupportLoadout(SupportLoadout{})==0 && !UnpackSupportLoadout(0,&back) && back.count==0,"no load: 0, the call's own");
+        check(!UnpackSupportLoadout(0xDu,&back) && !UnpackSupportLoadout(0x1u|(0xFull<<4),&back) &&
+              !UnpackSupportLoadout(PackSupportLoadout(l)|(1ull<<60),&back),
+              "malformed: thirteen soldiers, a kind past the table, bits past the count");
+        check(SupportLoadoutResource(l,0)==SupportSoldierResource(SupportWeapon::wingLance,true) &&
+              SupportLoadoutResource(l,4)==SupportSoldierResource(SupportWeapon::fencerCannon,true) &&
+              SupportLoadoutResource(l,5)==SupportSoldierResource(SupportWeapon::fencerCannon,false),"a leader every four, each squad its own");
+    }
+    check(SupportCallSeats(21)==12 && SupportCallSeats(22)==12 && SupportCallSeats(29)==12 && SupportCallSeats(32)==12 &&
+          SupportCallSeats(GroundStart()+2)==4 && SupportCallSeats(GroundStart()+4)==4 && SupportCallSeats(GroundStart())==0 &&
+          SupportCallSeats(GroundStart()+3)==0 && SupportCallSeats(0)==0,
+          "seats: the infantry and the transports twelve, a crewed APC / truck its four passenger rows; a tank, an empty delivery, an air call none");
+    {
+        SupportLoadout p{};
+        check(SupportCallPreset(21,&p) && p.count==4 && p.soldier[0]==SupportWeapon::sniper && p.soldier[1]==SupportWeapon::shotgun,
+              "a squad's preset: the ini's leader and members");
+        check(SupportCallPreset(30,&p) && p.count==12 && p.soldier[4]==SupportWeapon::sniper && p.soldier[5]==SupportWeapon::rocket,
+              "a platoon's preset: three squads, the ini's platoon weapons");
+        check(!SupportCallPreset(0,&p) && p.count==0,"an air call has no load");
+    }
+    {
+        SupportLoadout l{};l.count=8;
+        for(int i=0;i<4;++i){l.soldier[i]=SupportWeapon::wingLance;l.soldier[4+i]=SupportWeapon::fencerCannon;}
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;routeResult=npc::navigation::Result::moving;peersNew=true;
+        check(SupportCallComposedAt(21,target,&l,note,128),"a composed squad call queued");SupportDispatchTick();
+        check(made==8 && resourceCount==8 && lastResources[0]==SupportSoldierResource(SupportWeapon::wingLance,true) &&
+              lastResources[3]==SupportSoldierResource(SupportWeapon::wingLance,false) &&
+              lastResources[4]==SupportSoldierResource(SupportWeapon::fencerCannon,true) && Validate(deployments[0].plan),
+              "the composed squads walk in: a Wing Diver squad and a Fencer squad, each with its own leader; a peer accepts it");
+        ResetSupportDispatch();made=deleted=seatNow=activated=delivered=followed=resourceCount=0;fixtureMs+=40000;
+        SupportLoadout one{};one.count=4;for(int i=0;i<4;++i)one.soldier[i]=SupportWeapon::wingThunderBow;
+        check(SupportCallComposedAt(29,target,&one,note,128),"a composed helicopter assault queued");SupportDispatchTick();
+        check(made==6 && deployments[0].plan.count==6 && resourceCount==5 && lastResources[1]==SupportSoldierResource(SupportWeapon::wingThunderBow,true) &&
+              Validate(deployments[0].plan),"one squad aboard the transport: hull, pilot and the four composed soldiers");
+        ResetSupportDispatch();made=0;fixtureMs+=40000;
+        SupportLoadout many{};many.count=12;
+        check(!SupportCallComposedAt(GroundStart()+2,target,&many,note,128) && !offlinePending && !made &&
+              std::wcsstr(note,hudtext::Tr(hudtext::Tx::supportLoadoutTooMany))!=nullptr,
+              "twelve soldiers for an APC's four seats: refused with the reason, nothing planned");
+        // An older peer (no kCapLoadout): the call's own load, and the HUD says the chosen load was not sent.
+        peersLoadout=false;ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;routeResult=npc::navigation::Result::moving;
+        SupportCallComposedAt(21,target,&l,note,128);SupportDispatchTick();SupportCallStatus(note,128);
+        check(made==4 && lastResources[0]==SupportSoldierResource(SupportWeapon::sniper,true) &&
+              std::wcsstr(note,hudtext::Tr(hudtext::Tx::supportLoadoutLegacyPeers))!=nullptr,
+              "older peer: the squad's own four (the ini's), and the HUD says why");
+        peersLoadout=true;ResetSupportDispatch();
+        // Online (not the host): the load goes to the host in the request.
+        testOnline=true;submitReady=true;lastNetLoadout=0;fixtureMs+=40000;
+        check(SupportCallComposedAt(21,target,&l,note,128) && lastNetLoadout==PackSupportLoadout(l),"a guest's request carries its load");
+        testOnline=false;ResetSupportDispatch();
+    }
+    {
+        // A crewed APC with a composed load: its driver, then one squad of passengers (a leader first); a peer accepts it.
+        SupportPlan apc{};apc.catalogId=static_cast<unsigned>(GroundStart()+2);apc.count=6;std::memcpy(apc.target,target,12);
+        apc.units[0].resourceId=kVehicle+1;
+        apc.units[1].resourceId=kSoldier;apc.units[1].role=1;
+        for(unsigned i=2;i<6;++i){apc.units[i].resourceId=SupportSoldierResource(SupportWeapon::fencerShotgun,i==2);apc.units[i].role=1;}
+        for(auto& u:apc.units)u.matrix[0]=u.matrix[5]=u.matrix[10]=u.matrix[15]=1;
+        check(Validate(apc),"a crewed APC: driver and a composed squad of passengers");
+        apc.units[1].resourceId=kLeader;check(!Validate(apc),"its driver is a member, never a leader");
+        apc.units[1].resourceId=kSoldier;apc.count=7;apc.units[6]=apc.units[5];check(!Validate(apc),"six aboard a five-seat APC is refused");
     }
     std::printf("support_dispatch_test: %d checks passed\n",checks);
 }

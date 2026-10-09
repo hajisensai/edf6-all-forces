@@ -9,10 +9,18 @@ const wchar_t* SupportCallName(int) noexcept { return L"Support"; }
 SupportIcon SupportCallIcon(int) noexcept { return SupportIcon::jet; }
 SupportVariant SupportCallVariant(int) noexcept { return SupportVariant::none; }
 SupportReadiness SupportCallReadiness() noexcept { return {SupportReady::ready,0}; }
-int supportCalls=0,supportChosen=-1;float supportTarget[3]{};
-bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept {
-    ++supportCalls;supportChosen=index;std::memcpy(supportTarget,target,12);
+int supportCalls=0,supportChosen=-1;float supportTarget[3]{};SupportLoadout supportLoad{};
+bool SupportCallComposedAt(int index,const float* target,const SupportLoadout* load,wchar_t* note,std::size_t capacity) noexcept {
+    ++supportCalls;supportChosen=index;std::memcpy(supportTarget,target,12);supportLoad=load ? *load : SupportLoadout{};
     _snwprintf_s(note,capacity,_TRUNCATE,L"support received");return true;
+}
+// The stub catalog's entry 1 carries soldiers (its composition panel): eight seats (two squads), one squad to start (a
+// sniper leader, three rifles: the ini's).
+int SupportCallSeats(int index) noexcept { return index==1 ? 8 : 0; }
+bool SupportCallPreset(int index,SupportLoadout* out) noexcept {
+    *out=SupportLoadout{};
+    if(index!=1)return false;
+    out->count=4;out->soldier[0]=SupportWeapon::sniper;return true;
 }
 int payloadRequests=0,payloadSeat=-1,payloadEntry=-1;std::uint64_t payloadToken=0;
 bool RequestPayloadSelection(std::uint64_t token,int seat,int entry) noexcept {

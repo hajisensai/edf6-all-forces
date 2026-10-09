@@ -187,9 +187,9 @@ void Session::Publish(std::uint32_t peer,std::uint32_t request,RequestStatus sta
     if(replies_[peer].request==request && replies_[peer].status>=RequestStatus::refused)return;
     replies_[peer]={request,status,true};ReplyTo(peer);
 }
-bool Session::Submit(std::uint32_t catalog,const float* target,std::uint64_t now) noexcept {
+bool Session::Submit(std::uint32_t catalog,const float* target,std::uint64_t now,std::uint64_t loadout) noexcept {
     if(!target || !Ready() || catalog>=kMissionCrewCatalog || !Point(target) || nextRequest_==UINT32_MAX)return false;
-    Message m;m.kind=Kind::request;m.epoch=epoch_;m.request=++nextRequest_;m.catalog=catalog;
+    Message m;m.kind=Kind::request;m.epoch=epoch_;m.request=++nextRequest_;m.catalog=catalog;m.challenge=loadout;
     Notice(m.request,RequestStatus::accepted);
     std::memcpy(m.target,target,sizeof(m.target));
     if(host_){const auto before=nextTransaction_;HostRequest(0,m,now);return nextTransaction_!=before;}
@@ -206,7 +206,7 @@ void Session::HostRequest(std::uint32_t peer,const Message& m,std::uint64_t now)
         Publish(peer,m.request,RequestStatus::refused);return;
     }
     auto& t=transactions_[nextTransaction_++];t.token=++nextToken_;t.phase=Phase::planning;t.requester=peer;t.request=m.request;t.since=now;
-    t.plan.catalogId=m.catalog;std::memcpy(t.plan.target,m.target,sizeof(m.target));
+    t.plan.catalogId=m.catalog;std::memcpy(t.plan.target,m.target,sizeof(m.target));t.loadout=m.challenge;
     Publish(peer,m.request,RequestStatus::accepted);
 }
 std::uint64_t Session::SubmitPrepared(const Plan& plan,std::uint64_t now) noexcept {
@@ -228,7 +228,7 @@ void Session::Advance(std::uint32_t id,std::uint64_t now) noexcept {
     auto& t=transactions_[id-1];
     if(t.phase==Phase::planning) {
         const auto catalog=t.plan.catalogId;float target[3];std::memcpy(target,t.plan.target,sizeof(target));
-        const auto result=t.external ? PlanResult::ready : backend_.hooks.plan(catalog,target,&t.plan);
+        const auto result=t.external ? PlanResult::ready : backend_.hooks.plan(catalog,target,t.loadout,&t.plan);
         if(result==PlanResult::pending)return;
         if(result==PlanResult::refused || t.plan.catalogId!=catalog || !ValidPlan(t.plan,false)){Cancel(id,true,RequestStatus::refused);return;}
         for(std::uint32_t i=0;i<t.plan.count;++i) {
