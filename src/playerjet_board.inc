@@ -55,8 +55,9 @@ void MirrorEntry(const PJet& j,const unsigned char* v) noexcept {
 void HandBack(PJet& j,unsigned char* v,const char* why) noexcept {
     j.keep=false;j.hail=PJet::Hail{};j.autopilot=false;j.active=false;j.steered=false;j.orbiting=false;
     if(catchFlight.v==v)catchFlight=CatchFlight{};
-    if(SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::none && !v[kDead])SeatNpcRider(v,false);
-    if(CrewedPilot(v)){jet::ResumeNpc(v,j.vel);Log("PJET v=%p back to its real NPC pilot: %s",v,why);}
+    const bool drone=JetFliesItself(v);   // no one sits in it: the plugin flies it again (jet_internal.h Unmanned)
+    if(!drone && SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::none && !v[kDead])SeatNpcRider(v,false);
+    if(CrewedPilot(v)){jet::ResumeNpc(v,j.vel);Log("PJET v=%p back to %s: %s",v,drone ? "its own flight (a drone)" : "its real NPC pilot",why);}
     else Log("PJET v=%p has no local real pilot after hand-back: no autonomous flight",v);
 }
 
@@ -311,12 +312,11 @@ void HoverTo(jet::Jet& e,const jet::Kind& k,const unsigned char* v,const float* 
     jet::Hover(e,k,v,pos,goal,face,speed,HoverClimb(k),dt,mass ? hover::PlayerLift(mass->mass,Cfg().playerRotorLift) : 0.0f,false);
 }
 
-// The rotor craft's flight done: the player's record from its entry's, the nacelles, the doll; parked when it sits
-// still on the ground with nothing asked (`still`).
+// The rotor craft's flight done: the player's record from its entry's, the nacelles (a doll follows its drone in jet.cpp
+// Sweep); parked when it sits still on the ground with nothing asked (`still`).
 void HoverDone(PJet& j,jet::Jet& e,const jet::Kind& k,unsigned char* v,const float* pos,float clear,bool still,float dt,ULONGLONG ms) noexcept {
     jet::HoldOffGround(e,pos,clear,dt,ms,RestOver(v,pos));   // `clear` is its bottom's (FloorClear)
     if(k.pose==jet::Pose::thrusters)jet::Thrusters(e,k,v,dt,ms,clear==kNoGround ? 1e9f : clear);
-    jet::DollFrame(jet::IndexOf(e),v,clear);
     const bool down=clear!=kNoGround && clear<kTouch;
     if(down && still && Len(e.m.vel)<1.5f) {
         std::memset(e.m.vel,0,12);std::memset(e.m.acc,0,12);std::memset(e.m.omega,0,12);

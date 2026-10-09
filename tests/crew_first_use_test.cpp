@@ -23,6 +23,7 @@ unsigned char testVehicle[0x2000]{},testSeats[2*kSeatStride]{},testHuman[0x1600]
 void* testVtable[80]{};
 int calls=0,failures=0,checks=0;
 bool testJet=false;
+bool testDrone=false;   // JetFliesItself: one of the plugin's launched drones
 float testDoor[3]={30.3f,0.0f,1.8f};
 bool testHail=false,testComing=false;float testHailAt[3]={500.0f,150.0f,0.0f};   // PlayerJetHailHint
 float testFloor=exitground::kNoFloor,warpedTo[3]{};int warpCount=0;   // ExitGroundTick's world
@@ -34,7 +35,7 @@ void Occupy(unsigned seat,unsigned char* rider){Put<void*>(testSeats+seat*kSeatS
 void Setup(){
     ResetCrew();exitWatch=ExitWatch{};std::memset(testVehicle,0,sizeof(testVehicle));std::memset(testSeats,0,sizeof(testSeats));
     std::memset(testHuman,0,sizeof(testHuman));std::memset(testDummy,0,sizeof(testDummy));
-    calls=0;testJet=false;testConfig=Config{};testConfig.debug=false;pauseOk=false;
+    calls=0;testJet=false;testDrone=false;testConfig=Config{};testConfig.debug=false;pauseOk=false;
     testVtable[kSlotRideAi]=reinterpret_cast<void*>(&Ride);
     Put<void*>(testVehicle,0,testVtable);Put<void*>(testVehicle,kSelfCtrl,testCtrl);
     Put<void*>(testVehicle,kSeats,testSeats);Put<std::uint64_t>(testVehicle,kSeatCount,2);
@@ -56,6 +57,7 @@ bool IsPrimerVehicle(const void*) noexcept{return false;}
 bool IsHelicopter(const void*) noexcept{return false;}
 bool HeliCrewed(const void*) noexcept{return false;}
 bool IsJet(const void*) noexcept{return testJet;}
+bool JetFliesItself(const void*) noexcept{return testDrone;}
 bool PlayerJetBoardable(const void*) noexcept{return testJet;}
 unsigned char* PlayerHuman() noexcept{return testHuman;}
 bool SeatPoint(const unsigned char*,unsigned,float* point,float* reach) noexcept{std::memcpy(point,testDoor,12);*reach=2.3f;return true;}
@@ -145,6 +147,10 @@ int main(){
     Occupy(0,nullptr);Time(22000);Crew(testVehicle,0);Time(24000);Crew(testVehicle,0);
     Check(calls==0,"a used vehicle waits out its empty delay");
     Time(26000);Crew(testVehicle,0);Check(calls==1,"NPC may take over after the player drove and left");
+    // The same use as above, a launched drone this time: no one is ever recruited for it (the plugin flies it empty).
+    Setup();testDrone=true;Occupy(0,testHuman);Time(21000);Crew(testVehicle,0);Occupy(0,nullptr);
+    Time(22000);Crew(testVehicle,0);Time(26000);Crew(testVehicle,0);Time(40000);Crew(testVehicle,0);
+    Check(calls==0,"a launched drone left by the player is never given an NPC crew");
     Setup();Occupy(0,testDummy);Time(20000);Crew(testVehicle,0);
     Check(calls==0 && SeatRider(SeatAt(testVehicle,0))==Rider::dummy,"mission NPC is retained untouched");
     Setup();Crew(testVehicle,0);testJet=true;BoardingEntrance entry{};

@@ -508,6 +508,12 @@ add_test(NAME debug_spawn_ini COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DI
 set_tests_properties(debug_spawn_ini PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME debug_spawn_resources COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/debug_spawn_resource_audit.py")
 set_tests_properties(debug_spawn_resources PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The doll drone's doll follows its drone once a frame, whoever flies it (src/jet_carrier.cpp DollsFollow).
+add_test(NAME doll_follow_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/doll_follow_guard.py")
+set_tests_properties(doll_follow_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The plugin's launched drones fly with no one aboard; crewed aircraft never launched empty (src/jet_internal.h Unmanned).
+add_test(NAME unmanned_launch_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/unmanned_launch_guard.py")
+set_tests_properties(unmanned_launch_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # Proportional navigation (src/pn.h) against the stock pure pursuit at the same turn limit.
 add_executable(pn_test tests/pn_test.cpp)
 target_compile_options(pn_test PRIVATE /W4 /WX /utf-8 /permissive-)
