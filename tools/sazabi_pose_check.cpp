@@ -80,6 +80,8 @@ PoseInput MeleeWalk(float t) { PoseInput i=Melee(t); i.move[1]=10.0f; return i; 
 constexpr float kRechain=4.6f;
 PoseInput Rechain(float t) { PoseInput i=Driven(t); Combo(t,0.3f,3,&i); if(t>=kRechain)Combo(t,kRechain,2,&i); return i; }
 PoseInput Slow(float t) { PoseInput i=Driven(t); i.move[1]=3.0f; return i; }
+// the shield up, three hits stopped on it (each a jolt back through the arm)
+PoseInput Block(float t) { PoseInput i=Guard(t); i.blocks=(t>1.0f)+(t>1.15f)+(t>1.6f); return i; }
 PoseInput Switch(float t) { PoseInput i=Driven(t); i.special=t<0.3f ? 0 : t<1.3f ? 1 : t<2.3f ? 2 : 0; return i; }
 PoseInput Boost(float t) { PoseInput i=Driven(t); i.air=1.0f; i.boost=t>0.3f ? 1.0f : 0.0f; i.lean=20.0f*kDeg; i.move[1]=60.0f; return i; }
 PoseInput Recoil(float t) {
@@ -105,7 +107,7 @@ constexpr Scenario kScenarios[]={
     {"diagonal",3.0f,Diagonal},{"turn",3.0f,Turn},{"stop",3.0f,Stop},{"fly",2.0f,Fly},{"land",1.5f,Land},{"aim",3.0f,Aim},
     {"aimwalk",3.0f,AimWalk},{"guard",3.0f,Guard},{"present",2.4f,Present},{"swing",3.0f,Swing},{"melee",4.0f,Melee},
     {"meleefire",3.2f,MeleeFire},{"meleewalk",4.0f,MeleeWalk},{"switch",3.2f,Switch},{"funnels",3.0f,Funnels},
-    {"cannon",2.0f,Cannon},{"boost",2.0f,Boost},{"recoil",2.0f,Recoil},{"rechain",6.0f,Rechain},{"slow",3.0f,Slow},
+    {"cannon",2.0f,Cannon},{"boost",2.0f,Boost},{"recoil",2.0f,Recoil},{"rechain",6.0f,Rechain},{"slow",3.0f,Slow},{"block",3.0f,Block},
 };
 
 int failures=0;

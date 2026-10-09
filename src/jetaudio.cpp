@@ -489,16 +489,17 @@ const wchar_t* const kClipName[kClipCount]={L"engine_heavy_idle",L"engine_heavy_
                                             L"gun_medium_near",L"gun_medium_far",L"howitzer_near",L"howitzer_far",L"gun_heavy_near",
                                             L"gun_heavy_far",L"railgun_shot",L"railgun_far",L"railgun_charge",L"railgun_ready",
                                             L"grenade_shot",L"rocket_rail_launch",L"rocket_rail_load",L"case_medium",L"case_stub",
-                                            L"case_grenade",L"reload_breech_open",L"reload_shell_ram",L"reload_charge",L"reload_primer"};
+                                            L"case_grenade",L"reload_breech_open",L"reload_shell_ram",L"reload_charge",L"reload_primer",
+                                            L"sazabi_shield_block"};
 constexpr bool kClipLoops[kClipCount]={true,true,true,true,true,true,false,false,false,false,false,false,true,true,true,true,false,
                                        false,true,false,false,false,false,false,false,false,false,false,false,false,false,false,
                                        false,false,true,true,true,false,false,false,false,false,false,false,false,false,false,
-                                       false,false,false,false,false,false,false,false,false,false};
+                                       false,false,false,false,false,false,false,false,false,false,false};
 // Peak of each clip as made, of full scale: the loops a little under (several play at once), the gun's report at the top.
 constexpr float kClipPeak[kClipCount]={0.8f,0.8f,0.8f,0.8f,0.7f,0.6f,0.7f,0.98f,0.95f,0.8f,0.8f,0.85f,0.8f,0.8f,0.85f,0.85f,0.8f,
                                        0.95f,0.6f,0.8f,0.9f,0.95f,0.9f,0.8f,0.8f,0.8f,0.95f,0.98f,0.8f,0.85f,0.8f,0.95f,0.98f,
                                        0.9f,0.8f,0.7f,0.7f,0.98f,0.95f,0.98f,0.95f,0.98f,0.95f,0.95f,0.9f,0.75f,0.7f,0.9f,0.9f,0.8f,
-                                       0.8f,0.85f,0.8f,0.8f,0.85f,0.75f,0.7f};
+                                       0.8f,0.85f,0.8f,0.8f,0.85f,0.75f,0.7f,0.9f};
 constexpr int kLoops=96,kShots=64;   // the Sazabi's funnels fire six at once, a Katyusha ripples its rockets: room for them
 struct ClipPcm { std::vector<std::int16_t> pcm; WAVEFORMATEX format; };
 ClipPcm clips[kClipCount]{};       // written by MakeClips' thread before clipsReady (release), read after it (acquire)
@@ -569,6 +570,7 @@ std::vector<float> MadeClip(int c) {
     case kClipShellRam: return s::ReloadLoad(s::kShellRam);
     case kClipCharge: return s::ChargeModule();
     case kClipPrimer: return s::Primer();
+    case kClipSzShieldBlock: return s::ShieldBlock();
     default: return s::MissileLaunch();
     }
 }

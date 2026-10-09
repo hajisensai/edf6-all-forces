@@ -48,6 +48,8 @@ struct Arms {
     bool meleeHeld=false,secondaryHeld=false,funnelHeld=false,cannonHeld=false,guardHeld=false,dashHeld=false;
     bool queued=false,struck=false,whooshed=false;
     int combo=0;                  // the combo's swing now (sazabi_pose.h kCombo: diagonal cut, slash across, overhead chop)
+    int blocksHeard=0;            // the shield's blocks already sounded (ArmsStep)
+    float blockSince=1.0f;        // s since the last block's clang (a burst of bullets: kBlockSoundGap apart at most)
     Ask rifleAsk,missileAsk;      // the triggers as asked for (ArmsStep), each ended by its round (ArmsFire)
     float swing=-1.0f,guard=0.0f,charge=0.0f,brace=0.0f,cannonCool=0.0f,megaLeft=0.0f;
     float megaDamage=0.0f,megaYaw[kMegaBeams]{};

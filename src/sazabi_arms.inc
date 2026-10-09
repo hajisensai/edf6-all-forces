@@ -429,6 +429,18 @@ void ArmsStep(Mech& m,unsigned char* v,const ArmsInput& in,float dt) noexcept {
     m.pose.fire=a.rifleAsk.Step(in.primary,dt);
     m.pose.present=a.missileAsk.Step(in.secondary,dt);
     a.guardHeld=in.guard;a.dashHeld=in.dash;
+    // a hit the shield stopped (SazabiMessage): its clang at the shield, one each kBlockSoundGap at most
+    constexpr float kBlockSoundGap=0.12f;
+    a.blockSince+=dt;
+    if(m.pose.blocks!=a.blocksHeard) {
+        a.blocksHeard=m.pose.blocks;
+        if(a.blockSince>=kBlockSoundGap && m.rootOk) {
+            float at[3];
+            BoneAt(m,sazabi::kShield,nullptr,at);
+            Sfx(m,SzSfx::shieldBlock,at);
+            a.blockSince=0.0f;
+        }
+    }
     a.guard+=((in.guard ? 1.0f : 0.0f)-a.guard)*std::fmin(1.0f,(in.guard ? 6.0f : 4.0f)*dt);
     if(m.rootOk)Tomahawk(m,v,in,dt);
     const bool launch=in.funnels && !a.funnelHeld;

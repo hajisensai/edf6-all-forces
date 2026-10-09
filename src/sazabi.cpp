@@ -485,7 +485,7 @@ bool SazabiMessage(unsigned char* v,std::uint32_t msg,void* data,MessageRestore*
     if(msg==kMsgWater)return true;
     constexpr std::size_t kHitPoint=0x30,kDamage=0x50;
     if(msg!=kMsgDamage || !data || v[kDead])return false;
-    const Mech* m=Find(v);
+    Mech* const m=Find(v);
     if(!m || !m->driven || m->arms.guard<0.5f || (m->net.remote && !RemoteFresh(*m,v,GameMs())))return false;
     if(!m->net.remote && drill_net::Replicated(InSession(),At<std::uint16_t>(v,0x128)) && !IsOnlineAuthority(v))return false;
     const float* hit=reinterpret_cast<const float*>(static_cast<unsigned char*>(data)+kHitPoint);
@@ -495,6 +495,7 @@ bool SazabiMessage(unsigned char* v,std::uint32_t msg,void* data,MessageRestore*
     if(!(*damage>0.0f))return false;
     restore->at=damage;restore->was=*damage;
     *damage*=m->net.remote ? m->net.state.arms.guardShare : Cfg().sazabiGuardShare;
+    ++m->pose.blocks;   // the shield's jolt (the animator) and, driven here, its clang (ArmsStep)
     return false;
 }
 
