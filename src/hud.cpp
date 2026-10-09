@@ -23,6 +23,7 @@
 #include "formation.h"
 #include "map_buttons.h"
 #include "scopeview.h"
+#include "reticle.h"
 #include "boarding_entrance.h"
 #include "gear.h"
 #include "hudscale.h"
@@ -1374,38 +1375,60 @@ void GunSight(void* drawer,void* ctx,const float* vp,float width,float height,fl
 // jet sight's boresight and pipper, the pipper where a round fired now first hits the ground (dim: none in its life,
 // it is where the round ends), its distance in metres to its right. The other weapon (the secondary button's), each
 // in its own shape so neither is taken for the gun's pipper: the missile's lock as the jets' (LockAt: a yellow square
-// closing in, a red diamond locked) with MSL and its distance, or with no lock a dim ring of kMissileRing round its
+// closing in, a red diamond locked) with MSL and its distance, or with no lock the seeker gate (reticle.h Gate) round its
 // boresight with MSL and the range it locks within; the rockets' mark a hollow diamond where their path (flown as the
 // game flies them: vhud.h RoundLands) meets the map with its label (RKT, GREN...) and distance (none met: a dim one on
 // their boresight).
-// A gun's range ladder (gunsight.h) under its aim point (cx, top): a tick where a round fired now is when it has
-// gone that far over the ground (kLadderApart from the one above at least: closer ones left out), a thin line down
-// through them, each numbered (hundreds of metres; metres for a short gun's 50 m steps) where there is room for it.
-constexpr float kLadderTick=9.0f,kLadderApart=4.0f,kLabelApart=16.0f;   // px at 1080
-void LadderTicks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const gunsight::Ladder& l,
-                 float cx,float top,Line* lines,int* at) noexcept {
-    const float t=2.0f*s;
-    float last=top,lastX=cx,labelled=-1e9f;
-    bool any=false;
-    for(int k=0;k<l.ticks;++k) {
-        float lx,ly;
-        if(!sight::ToScreen(vp,l.at[k],1.0f,width,height,&lx,&ly))continue;
-        if(ly<last+kLadderApart*s)continue;
-        const float h=kLadderTick*s;
-        Seg(drawer,ctx,lx-h,ly,lx+h,ly,t,kHud);
-        const int metres=static_cast<int>(std::lround(l.range[k]));
-        if(ly>=labelled+kLabelApart*s) {   // its number where there is room for it (a tick too near the last one's: none)
-            if(l.step>=100.0f && metres%100!=0)   // a 250 m step: 2.5, 7.5 hundreds, not 2, 7
-                Label(text,lines,at,lx-h-5.0f*s,ly,2,kLineScale*0.7f,kHud,L"%.1f",metres/100.0);
-            else Label(text,lines,at,lx-h-5.0f*s,ly,2,kLineScale*0.7f,kHud,L"%d",l.step>=100.0f ? metres/100 : metres);
-            labelled=ly;
-        }
-        if(any)Seg(drawer,ctx,lastX,last,lx,ly,1.0f*s,kHudDim);
-        last=ly;lastX=lx;any=true;
+// A reticle's sketch (reticle.h) in the HUD's quads and text: green, dim green, amber.
+const float* InkOf(reticle::Ink ink) noexcept { return ink==reticle::Ink::dim ? kHudDim : ink==reticle::Ink::hot ? kAmber : kHud; }
+void Render(void* drawer,void* ctx,Text* text,float s,const reticle::Sketch& k,Line* lines,int* at) noexcept {
+    for(int i=0;i<k.strokes;++i){const auto& l=k.stroke[i];Seg(drawer,ctx,l.x0,l.y0,l.x1,l.y1,l.w,InkOf(l.ink));}
+    for(int i=0;i<k.circles;++i) {
+        const auto& c=k.circle[i];
+        const int sides=static_cast<int>(vec::Clamp(c.r/(4.0f*s),16.0f,64.0f));
+        Arc(drawer,ctx,c.x,c.y,c.r,0.0f,kTurn,c.w,sides,InkOf(c.ink));
+    }
+    for(int i=0;i<k.dots;++i){const auto& d=k.dot[i];Rect(drawer,ctx,d.x-d.r,d.y-d.r,d.x+d.r,d.y+d.r,InkOf(d.ink));}
+    for(int i=0;i<k.notes;++i){const auto& n=k.note[i];if(n.text[0])Label(text,lines,at,n.x,n.y,n.align,n.scale,InkOf(n.ink),L"%ls",n.text);}
+}
+// The pixels a unit of tan off `bore` spans on the screen from its point (cx, cy): the bore turned a little to its right,
+// projected (the view's own projection: the sight's magnification is in it). 0: not known.
+float FocalAt(const float* vp,const float* bore,float width,float height,float cx,float cy) noexcept {
+    constexpr float kProbe=0.01f;   // rad
+    float turned[3],mx,my;
+    if(!reticle::Turned(bore,kProbe,turned) || !sight::ToScreen(vp,turned,0.0f,width,height,&mx,&my))return 0.0f;
+    return std::sqrt((mx-cx)*(mx-cx)+(my-cy)*(my-cy))/std::tan(kProbe);
+}
+// A gun's range ladder (gunsight.h) projected onto the screen as reticle.h's ticks.
+void LadderMarks(const float* vp,float width,float height,const gunsight::Ladder& l,reticle::Aim* a) noexcept {
+    a->step=l.step;a->ticks=0;
+    for(int k=0;k<l.ticks && k<gunsight::kMostTicks;++k) {
+        float x,y;
+        if(!sight::ToScreen(vp,l.at[k],1.0f,width,height,&x,&y))continue;
+        a->tick[a->ticks++]=reticle::Mark{x,y,l.range[k]};
     }
 }
+// A gun's range ladder under its aim point (cx, top): reticle.h Ladder.
+void LadderTicks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const gunsight::Ladder& l,
+                 float cx,float top,Line* lines,int* at) noexcept {
+    reticle::Aim a{};
+    LadderMarks(vp,width,height,l,&a);
+    reticle::Sketch k{};
+    reticle::Ladder(k,reticle::View{cx,top,0.0f,s,kLineScale},a,cx,top,reticle::kLadderTick);
+    Render(drawer,ctx,text,s,k,lines,at);
+}
+// A guided round's seeker gate at its boresight (reticle.h Gate), `line` under it (its name, the range it locks within).
+void SeekerGate(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const float* bore,const wchar_t* line,
+                Line* lines,int* at) noexcept {
+    float x,y;
+    if(!sight::ToScreen(vp,bore,0.0f,width,height,&x,&y))return;
+    reticle::Sketch k{};
+    reticle::Gate(k,reticle::View{x,y,0.0f,s,kLineScale});
+    Render(drawer,ctx,text,s,k,lines,at);
+    Label(text,lines,at,x,y+(reticle::kGate+14.0f)*s,1,kLineScale*0.85f,kHudDim,L"%ls",line);
+}
 
-constexpr float kMissileRing=34.0f,kRocketMark=11.0f;   // px at 1080 lines
+constexpr float kRocketMark=11.0f;   // px at 1080 lines
 void RocketDiamond(void* drawer,void* ctx,float x,float y,float s,const float* rgba) noexcept {
     const float r=kRocketMark*s,t=2.0f*s;
     Seg(drawer,ctx,x,y-r,x+r,y,t,rgba);Seg(drawer,ctx,x+r,y,x,y+r,t,rgba);
@@ -1441,9 +1464,10 @@ void HeliGunSight(void* drawer,void* ctx,Text* text,const float* vp,float width,
     if(h.arm==HeliArm::missile) {
         if(LockAt(drawer,ctx,vp,width,height,s,h.lock,h.armAt,h.lockProgress,&x,&y))
             Label(text,lines,at,x,y+44.0f*s,1,note,h.lock==2 ? kRed : kYellow,Tr(Tx::missileRange),static_cast<int>(std::lround(h.armRange)));
-        else if(!h.lock && sight::ToScreen(vp,h.armBore,0.0f,width,height,&x,&y)) {
-            Arc(drawer,ctx,x,y,kMissileRing*s,0.0f,kTurn,2.0f*s,24,kHudDim);
-            Label(text,lines,at,x,y+(kMissileRing+12.0f)*s,1,note,kHudDim,Tr(Tx::missileRange),static_cast<int>(std::lround(h.lockRange)));
+        else if(!h.lock) {
+            wchar_t line[48];
+            _snwprintf_s(line,_countof(line),_TRUNCATE,Tr(Tx::missileRange),static_cast<int>(std::lround(h.lockRange)));
+            SeekerGate(drawer,ctx,text,vp,width,height,s,h.armBore,line,lines,at);
         }
     } else if(h.arm==HeliArm::rockets) {
         wchar_t arm[24];
@@ -2438,42 +2462,23 @@ void ArmName(const StockArm& a,bool selected,wchar_t* out,std::size_t size) noex
 }
 
 // One weapon's mark (see above); `name` its label (bracketed when selected).
-// A direct-fire gun's sight (gunsight.h; the user, 2026-10-08: "a sight HUD on every vehicle and weapon that has one,
-// tanks above all"), as a tank gunner's: on the gun's line (the boresight, where the gun points: it follows the camera
-// a moment late) a chevron, its tip the aim point; either side a stadia line, ticked every kMilTick mils when the
-// view is narrow enough for them to stand apart (a zoomed sight); under it the range ladder, a tick where a round
-// fired now is when it has gone that far over the ground (labelled in hundreds of metres, or metres for a short
-// gun's 50 m steps; a tick too near the last labelled one unlabelled), ticks too close to the one above left out; over the left stadia the gun, over the right its
+// A direct-fire gun's sight: the reticle its style draws (reticle.h: a tank gun's chevron, lead stadia and ballistic
+// range ladder; a marksman's duplex and mil dots; a machine gun's ring; an anti-aircraft gun's lead rings; a beam's
+// open cross) on the gun's line (the boresight, where the gun points: it follows the camera a moment late), its angles
+// from the view's own projection (the magnification is in it); over the left of it the gun, over the right its
 // rangefinder (the map hit or the ranged target: the pipper's `range`). The pipper and the lead mark stay StockMark's.
-constexpr float kChevron=14.0f,kStadiaIn=26.0f,kStadiaOut=112.0f;   // px at 1080
-constexpr float kMilTick=5.0f,kMilApart=8.0f;   // mils a tick; px they must be apart to be drawn
 void GunReticle(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockArm& a,
                 const wchar_t* name,Line* lines,int* at) noexcept {
     float cx,cy;
     if(!sight::ToScreen(vp,a.bore,0.0f,width,height,&cx,&cy))return;
-    const float t=2.0f*s,c=kChevron*s;
-    Seg(drawer,ctx,cx-c,cy+c*0.85f,cx,cy,t,kHud);Seg(drawer,ctx,cx,cy,cx+c,cy+c*0.85f,t,kHud);
-    const float in=kStadiaIn*s,out=kStadiaOut*s;
-    Seg(drawer,ctx,cx-out,cy,cx-in,cy,t,kHud);Seg(drawer,ctx,cx+in,cy,cx+out,cy,t,kHud);
-    Seg(drawer,ctx,cx-out,cy-5.0f*s,cx-out,cy+5.0f*s,t,kHud);Seg(drawer,ctx,cx+out,cy-5.0f*s,cx+out,cy+5.0f*s,t,kHud);
-    // The mils: the bore turned kMilTick mils about the up axis, where it lands on the screen.
-    const float up[3]={0.0f,1.0f,0.0f};
-    float side[3];vec::Cross(a.bore,up,side);
-    if(vec::Normalize(side)) {
-        const float m=kMilTick*0.001f;
-        const float turned[3]={a.bore[0]+side[0]*m,a.bore[1]+side[1]*m,a.bore[2]+side[2]*m};
-        float mx,my;
-        if(sight::ToScreen(vp,turned,0.0f,width,height,&mx,&my)) {
-            const float apart=std::fabs(mx-cx);
-            for(int k=1;apart>=kMilApart*s && k*apart<=out;++k) {
-                const float x=k*apart;
-                if(x<in)continue;
-                const float tall=(k%2==0 ? 6.0f : 3.5f)*s;
-                Seg(drawer,ctx,cx-x,cy,cx-x,cy+tall,t,kHud);Seg(drawer,ctx,cx+x,cy,cx+x,cy+tall,t,kHud);
-            }
-        }
-    }
-    if(!EnergyWeapon(a.style))LadderTicks(drawer,ctx,text,vp,width,height,s,a.ladder,cx,cy+c*0.85f,lines,at);
+    const reticle::View v{cx,cy,FocalAt(vp,a.bore,width,height,cx,cy),s,kLineScale};
+    reticle::Aim aim{};
+    aim.style=a.reticle;aim.shell=a.shell;aim.speed=a.roundSpeed;
+    LadderMarks(vp,width,height,a.ladder,&aim);
+    reticle::Sketch k{};
+    reticle::Draw(aim,v,&k);
+    Render(drawer,ctx,text,s,k,lines,at);
+    const float in=(a.reticle==reticle::Style::cannon ? reticle::kStadiaIn : 40.0f)*s;
     const float over=cy-16.0f*s,note=kLineScale*0.85f;
     Label(text,lines,at,cx-in,over,2,note,kHud,L"%ls",name);
     const float measured=a.ranged ? a.targetRange : a.range;
@@ -2492,9 +2497,10 @@ void StockMark(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     if(a.kind==RoundKind::homing) {
         if(LockAt(drawer,ctx,vp,width,height,s,a.lock,a.at,a.lockProgress,&x,&y))
             Label(text,lines,at,x,y+44.0f*s,1,note,a.lock==2 ? kRed : kYellow,L"%ls %d m",name,metres);
-        else if(!a.lock && sight::ToScreen(vp,a.bore,0.0f,width,height,&x,&y)) {
-            Arc(drawer,ctx,x,y,kMissileRing*s,0.0f,kTurn,2.0f*s,24,kHudDim);
-            Label(text,lines,at,x,y+(kMissileRing+12.0f)*s,1,note,kHudDim,L"%ls %d m",name,metres);
+        else if(!a.lock) {
+            wchar_t line[48];
+            _snwprintf_s(line,_countof(line),_TRUNCATE,L"%ls %d m",name,metres);
+            SeekerGate(drawer,ctx,text,vp,width,height,s,a.bore,line,lines,at);
         }
         return;
     }
@@ -2619,13 +2625,14 @@ void ProteusMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,
 
 
 // The marks of every aimed weapon but the Katyusha's (launcher.cpp's), those landing on another's drawn once.
-// The seat's sight gun (GunReticle's): the picked weapon when it is a direct-fire gun with a ladder, else the first such
-// (a tank's main gun before its coaxial machine gun); -1 for none. Not the gun EDF6AutoTurret's lead circle is on
+// The seat's sight gun (GunReticle's): the picked weapon when its style is a gun sight (reticle.h GunStyle: not a
+// flamethrower's, a grenade's, a missile's) with a ladder (a beam needs none); -1 for none. Not the gun EDF6AutoTurret's lead circle is on
 // (`leadGun`: arm 0 has its marks).
 int SightGun(const StockHudReadout& r,bool leadGun) noexcept {
     const auto sights=[&](int i){
         const StockArm& a=r.arm[i];
-        return a.aimed && !a.physicalOnly && !a.lofted && !a.lobbed && a.kind==RoundKind::arc && (EnergyWeapon(a.style) || a.ladder.ticks>0) && !(i==0 && leadGun);
+        return a.aimed && !a.physicalOnly && !a.lofted && !a.lobbed && a.kind==RoundKind::arc && reticle::GunStyle(a.reticle) &&
+               (a.shell==reticle::Shell::beam || a.ladder.ticks>0) && !(i==0 && leadGun);
     };
     return r.sight>=0 && r.sight<r.arms && r.sight<kStockArms && sights(r.sight) ? r.sight : -1;
 }
@@ -3841,7 +3848,8 @@ void Quad4(void* drawer,void* ctx,const scopeview::Quad& q,const float* rgba) no
     alignas(16) const float v[12]={q.x[0],q.y[0],0.0f, q.x[1],q.y[1],0.0f, q.x[2],q.y[2],0.0f, q.x[3],q.y[3],0.0f};
     reinterpret_cast<QuadFn>(image+kQuad)(drawer,ctx,m,rgba,kStrip,v,4,nullptr);
 }
-void ScopeShade(void* drawer,void* ctx,Text* text,float width,float height,float s,float zoom,bool sensor,Line* lines,int* at) noexcept {
+void ScopeShade(void* drawer,void* ctx,Text* text,float width,float height,float s,float zoom,bool sensor,reticle::Posts posts,Line* lines,
+                int* at) noexcept {
     const float cx=width*0.5f,cy=height*0.5f;
     if(sensor) {
         scopeview::Quad b[4];
@@ -3857,9 +3865,13 @@ void ScopeShade(void* drawer,void* ctx,Text* text,float width,float height,float
     const float r=scopeview::Radius(width,height),out=scopeview::Reach(width,height,cx,cy);
     for(int i=0;i<scopeview::kSides;++i)Quad4(drawer,ctx,scopeview::RingPiece(i,cx,cy,r,out),kScopeDark);
     Arc(drawer,ctx,cx,cy,r,0.0f,kTurn,3.0f*s,scopeview::kSides,kScopeRim);
+    // The posts the reticle's style carries (reticle.h Spec): a tank sight's three, the duplex's four, a ring sight's none.
     const float post=4.0f*s,inner=r*0.62f;
-    Seg(drawer,ctx,cx-r,cy,cx-inner,cy,post,kScopeRim);Seg(drawer,ctx,cx+inner,cy,cx+r,cy,post,kScopeRim);
-    Seg(drawer,ctx,cx,cy+inner,cx,cy+r,post,kScopeRim);
+    if(posts!=reticle::Posts::none) {
+        Seg(drawer,ctx,cx-r,cy,cx-inner,cy,post,kScopeRim);Seg(drawer,ctx,cx+inner,cy,cx+r,cy,post,kScopeRim);
+        Seg(drawer,ctx,cx,cy+inner,cx,cy+r,post,kScopeRim);
+    }
+    if(posts==reticle::Posts::duplex)Seg(drawer,ctx,cx,cy-r,cx,cy-inner,post,kScopeRim);
     Label(text,lines,at,cx-r+18.0f*s,cy-22.0f*s,0,kLineScale,kScopeRim,L"%.0fx",zoom);
 }
 
@@ -3901,8 +3913,11 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         const bool scopeOverlay=sightMagnification>1.0f && sightMask!=sightzoom::Mask::none;
         {   // A validated seat/weapon chooses the mask. Aircraft/mechs keep their own HUD; overhead has no optic.
             const Snapshot& z=Latest();
+            reticle::Posts posts=reticle::Posts::three;
+            const int pick=z.stock ? z.stockHud.sight : -1;
+            if(pick>=0 && pick<z.stockHud.arms && pick<kStockArms)posts=reticle::SpecOf(z.stockHud.arm[pick].reticle).posts;
             if(scopeOverlay && now-z.tick<=kFreshMs)
-                ScopeShade(drawer,ctx,t,width,height,s,sightMagnification,sightMask==sightzoom::Mask::sensor,lines,&at);
+                ScopeShade(drawer,ctx,t,width,height,s,sightMagnification,sightMask==sightzoom::Mask::sensor,posts,lines,&at);
         }
         for(int i=0;i<count && i<3;++i)CarrierBars(drawer,ctx,t,viewProj,width,height,s,panels[i],lines,&at,now);
         const Snapshot& snap=Latest();

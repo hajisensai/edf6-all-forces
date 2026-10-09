@@ -46,6 +46,9 @@ constexpr std::size_t kWeaponLockRange=0x6D0;
 // The weapon status the stock gauge reads (0x692100): rounds, magazine, the reload's counters and their full times.
 constexpr std::size_t kAmmoMax=0x248,kReloadFrames=0x20C,kReloadLeft=0xE68,kChargeTime=0x22C,kChargeLeft=0xE7C;
 constexpr std::size_t kCooldown=0xE0C,kAmmoSource=0xF18;
+// What the sight is chosen by (reticle.h Classify), as the weapon loader 0x68A920 stores the SGO: FireInterval (int frames,
+// 0x68CE36), SecondaryFire_Type (int, 0x68D0A4: 1 the game's own scope, docs/zoom-re.md §1), AmmoExplosion (float, 0x68D82F).
+constexpr std::size_t kFireInterval=0x36C,kScopeType=0x690,kBlast=0x8B0;
 
 StockHudReadout latest{};
 ULONGLONG latestMs=0;
@@ -133,8 +136,26 @@ void GunMarkOf(const unsigned char* w,const RoundModel& m,const float* pos,const
     a.targetRange=vec::Dist(pos,a.lead);
 }
 
+// The sight weapon `w` (its round `m`) gets: reticle.h Classify on the weapon's own numbers; `antiAir` the vehicle's role.
+void SightOf(const unsigned char* w,const RoundModel& m,bool antiAir,StockArm& a) noexcept {
+    reticle::Traits t{};
+    t.homing=m.kind==RoundKind::homing;t.rocket=m.kind==RoundKind::rocket;t.lobbed=m.lobbed;t.energy=EnergyWeapon(m.style);
+    const char* label=m.label ? m.label : "";
+    t.sprayer=!std::strcmp(label,"FLAME") || !std::strcmp(label,"ACID") || !std::strcmp(label,"NAPALM");
+    t.shellClass=!std::strcmp(label,"CANNON");
+    t.scoped=At<std::int32_t>(w,kScopeType)==1;
+    t.antiAir=antiAir;
+    t.interval=At<std::int32_t>(w,kFireInterval);
+    t.speed=std::isfinite(m.speed) ? m.speed*60.0f : 0.0f;
+    const float blast=At<float>(w,kBlast);
+    t.blast=std::isfinite(blast) ? blast : 0.0f;
+    a.reticle=m.kind==RoundKind::none ? reticle::Style::none : reticle::Classify(t);
+    a.shell=reticle::ShellOf(t);
+    a.roundSpeed=t.speed;
+}
+
 // One weapon's line and its impact point (see the top). `aim`: work the point out (not for a heli's).
-void Arm(const unsigned char* w,bool aim,StockArm& a,bool rangeTarget=true) noexcept {
+void Arm(const unsigned char* w,bool aim,StockArm& a,bool rangeTarget=true,bool antiAir=false) noexcept {
     const auto name=At<const wchar_t*>(w,0x1B0);
     if(name)for(std::size_t i=0;i+1<_countof(a.name) && Readable(name+i,sizeof(wchar_t)) && name[i];++i)a.name[i]=name[i];
     RoundModel m{};
@@ -145,6 +166,7 @@ void Arm(const unsigned char* w,bool aim,StockArm& a,bool rangeTarget=true) noex
     if(WeaponStatusOk())Reload(w,a);
     else{a.reload=1.0f;a.reloadSec=-1.0f;a.canReload=true;}
     a.kind=m.kind;a.style=m.style;a.lobbed=m.lobbed;
+    SightOf(w,m,antiAir,a);
     a.lofted=At<std::int32_t>(w,edf::kWeaponMark)==edf::kMarkLofted;
     if(a.lofted)strncpy_s(a.label,"ROCKETS",_TRUNCATE);
     if(!aim || a.lofted || m.kind==RoundKind::none)return;
@@ -261,6 +283,7 @@ void StockHudFrame(unsigned char* v) noexcept {
     // SetStockSelectedStore's index is the holder's, the arms' skip the tank: its arm found as the list is walked.
     const int store=selection.vehicle==v && selection.seat==r.seat && GameFrame()-selection.frame<=2 ? selection.store : -1;
     int pickedArm=-1,storeArm=-1;
+    const bool antiAir=reticle::AntiAirClass(VehicleClassName(v));
     if(n<=16 && Readable(holders,n*8))
         for(std::uint64_t i=0;i<n && r.arms<kStockArms;++i) {
             if(!Readable(holders[i],kHolderWeapon+8))continue;
@@ -275,7 +298,7 @@ void StockHudFrame(unsigned char* v) noexcept {
             const auto freedom=weaponmount::Of(v,seat,holders[i]);
             a.physicalOnly=!(freedom.known && freedom.yaw && freedom.pitch);
             for(int k=0;k<firing;++k)if(fired[k]==w)a.coFired=true;
-            Arm(w,!r.heli && a.coFired,a,w==sight && !(HighCamOn(v) || TurretCamHighTransition(v)));
+            Arm(w,!r.heli && a.coFired,a,w==sight && !(HighCamOn(v) || TurretCamHighTransition(v)),antiAir);
             if(!r.aimOk && a.aimed){std::memcpy(r.aim,a.bore,12);r.aimOk=true;}
         }
     // Proteus seat 0 owns no stock holder. Its custom gun borrows the physical right cannon; never substitute

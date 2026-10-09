@@ -740,6 +740,10 @@ void StockTank(const float* pos) {
         StockArm& a=sceneStock.arm[i];a.physicalOnly=false;
         strcpy_s(a.label,names[i]);a.ammo=10-i;a.ammoMax=10;a.reload=1.0f;a.reloadSec=-1.0f;a.canReload=true;a.kind=RoundKind::arc;
     }
+    // Their sights as vhud.cpp classifies them (reticle.h): the main gun's, the coaxial MG's ring, the missile's gate.
+    sceneStock.arm[0].reticle=reticle::Style::cannon;sceneStock.arm[0].shell=reticle::Shell::ap;sceneStock.arm[0].roundSpeed=810.0f;
+    sceneStock.arm[1].reticle=reticle::Style::autocannon;sceneStock.arm[1].shell=reticle::Shell::ap;sceneStock.arm[1].roundSpeed=360.0f;
+    sceneStock.arm[2].reticle=reticle::Style::missile;
     sceneStock.threats=2;
     sceneStock.threatKind[0]=2;sceneStock.threatAt[0][0]=pos[0]-600.0f;sceneStock.threatAt[0][1]=pos[1]+80.0f;sceneStock.threatAt[0][2]=pos[2]+900.0f;
     sceneStock.threatKind[1]=1;sceneStock.threatAt[1][0]=pos[0]+1500.0f;sceneStock.threatAt[1][1]=pos[1]+300.0f;sceneStock.threatAt[1][2]=pos[2]-800.0f;
@@ -806,6 +810,74 @@ int TankSightScenes(const std::wstring& dir,const float* ground) {
     failed+=!(half250 && half750);
     std::printf("%s  250 m ladder labels preserve half hundreds\n",half250 && half750 ? "ok  " : "FAIL");
     sceneFov=55.0f;sceneStock.zoom=1.0f;sceneZoom=1.0f;
+    StockTank(ground);
+    return failed;
+}
+
+// Each sight style (src/reticle.h) on the seat's sight gun, with the real numbers of a weapon that gets it (Root.cpk
+// SGO, tools/reticle_check.cpp kWeapons): AmmoSpeed m/frame, the gravity factor, AmmoAlive. Drawn at the game's view
+// and with the scope at 3x (a mock: only the 403/404/505/601 carry a model-authored optic in game, optic_mount.h).
+// Checked: the sight's own words (the round, the flak rings' km/h) are drawn, no two texts overlap, SightGun owns it;
+// the zoomed scope carries the style's posts (reticle.h Spec: the scope's ring pieces stay kSides).
+int SightStyleScenes(const std::wstring& dir,const float* ground) {
+    struct Case {
+        const wchar_t* name; reticle::Style style; reticle::Shell shell; const char* label;
+        float speed,gravity; int alive; const wchar_t* words[3];
+    };
+    const Case cases[]={
+        {L"sight_cannon_ap",reticle::Style::cannon,reticle::Shell::ap,"CANNON",22.5f,0.5f,150,{L"AP",nullptr}},          // V_403TANK_CANNON02
+        {L"sight_cannon_he",reticle::Style::cannon,reticle::Shell::he,"CANNON",11.0f,0.25f,600,{L"HE",nullptr}},         // V_505TANK_CANNON04L
+        {L"sight_precision",reticle::Style::precision,reticle::Shell::ap,"GUN",20.0f,1.0f,60,{nullptr}},                 // V_502_GROUNDROBO_SNIPE01
+        {L"sight_autocannon",reticle::Style::autocannon,reticle::Shell::he,"CANNON",4.0f,0.5f,150,{L"HE",nullptr}},      // V_401STRIKER_CANNON
+        {L"sight_machinegun",reticle::Style::autocannon,reticle::Shell::ap,"GUN",6.0f,0.0f,35,{L"AP",nullptr}},          // V_403TANK_MACHINEGUN
+        {L"sight_flak",reticle::Style::flak,reticle::Shell::ap,"GUN",6.0f,0.75f,60,{L"AA",L"90",L"180"}},                // V603_FLAK_GUN02
+        {L"sight_energy",reticle::Style::energy,reticle::Shell::beam,"LASER",120.0f,0.0f,8,{L"BEAM",nullptr}},           // V_612_A_LASERRIFLE_DLC2
+    };
+    int failed=0;
+    for(const Case& c:cases)for(int zoomed=0;zoomed<2;++zoomed) {
+        StockTank(ground);sceneStock.threats=0;
+        StockArm& a=sceneStock.arm[0];
+        strcpy_s(a.label,c.label);
+        a.reticle=c.style;a.shell=c.shell;a.roundSpeed=c.speed*60.0f;
+        a.style=c.shell==reticle::Shell::beam ? WeaponStyle::laser : WeaponStyle::projectile;
+        const float muzzle[3]={ground[0],ground[1]+2.6f,ground[2]+4.0f};
+        float bore[3]={0.0f,0.004f,1.0f};vec::Normalize(bore);
+        const roundaim::Round round{c.speed,{0.0f,-9.8f*c.gravity/3600.0f,0.0f},0.0f,c.alive};
+        const float still[3]={0.0f,0.0f,0.0f};
+        a.aimed=a.hit=true;a.kind=RoundKind::arc;std::memcpy(a.bore,bore,12);
+        a.ladder=c.shell==reticle::Shell::beam ? gunsight::Ladder{} : gunsight::Of(round,muzzle,bore,still);
+        a.at[0]=muzzle[0];a.at[1]=ground[1];a.at[2]=muzzle[2]+300.0f;a.range=300.0f;a.flight=300.0f/(c.speed*60.0f);
+        sceneZoom=zoomed ? 3.0f : 1.0f;sceneFov=55.0f/sceneZoom;sceneStock.zoom=sceneZoom;sceneSight=sightzoom::Kind::optical;
+        hasMountedOptic=zoomed!=0;
+        const std::wstring name=std::wstring(c.name)+(zoomed ? L"_zoom" : L"");
+        scopePieces=0;Scene(dir,name.c_str(),ground);
+        bool words=true,apart=true;
+        for(const wchar_t* w:c.words) {
+            if(!w)break;
+            bool found=false;
+            for(const Drew& d:drew)found=found || d.text==w;
+            if(!found){words=false;std::printf("      missing: %ls\n",w);}
+        }
+        for(std::size_t i=0;i<drew.size();++i)
+            for(std::size_t k=i+1;k<drew.size();++k) {
+                const Drew& p=drew[i];const Drew& q=drew[k];
+                if(p.text.empty() || q.text.empty())continue;
+                if(p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1){apart=false;std::printf("      overlap: %ls / %ls\n",p.text.c_str(),q.text.c_str());}
+            }
+        const bool owned=SightGun(sceneStock,false)==0;
+        const bool scope=zoomed ? scopePieces==scopeview::kSides : scopePieces==0;
+        const bool ok=words && apart && owned && scope;
+        failed+=!ok;
+        std::printf("%s  %ls: its words %d, no text overlapping %d, sight gun %d, scope quads %d\n",ok ? "ok  " : "FAIL",name.c_str(),words,apart,
+                    owned,scopePieces);
+    }
+    // A flamethrower, a grenade launcher: no gun sight (their impact marks only).
+    StockTank(ground);
+    sceneStock.arm[0].reticle=reticle::Style::none;sceneStock.arm[0].aimed=true;sceneStock.arm[0].ladder.ticks=1;
+    const bool none=SightGun(sceneStock,false)==-1;
+    failed+=!none;
+    std::printf("%s  a weapon without a sight (flamethrower, grenades) gets no gun reticle\n",none ? "ok  " : "FAIL");
+    sceneFov=55.0f;sceneZoom=1.0f;sceneStock.zoom=1.0f;hasMountedOptic=false;
     StockTank(ground);
     return failed;
 }
@@ -1455,6 +1527,7 @@ int Scenes(const std::wstring& dir) {
     Scene(dir,L"ground_stores_eight",ground);
     sceneStock=savedStock;
     sceneStock.arm[0].style=WeaponStyle::beam;strcpy_s(sceneStock.arm[0].label,"BEAM");sceneStock.arm[0].ladder.ticks=0;
+    sceneStock.arm[0].reticle=reticle::Style::energy;sceneStock.arm[0].shell=reticle::Shell::beam;
     sceneStock.arm[0].ranged=false;sceneStock.arm[0].physicalOnly=false;sceneStock.sight=0;
     sceneStock.arm[0].aimed=true;sceneStock.arm[0].bore[2]=1.0f;sceneStock.arm[0].hit=true;sceneStock.arm[0].range=90.0f;
     failed+=SightGun(sceneStock,false)!=0; // energy reticle does not need a bogus ballistic ladder to exist
@@ -1465,6 +1538,7 @@ int Scenes(const std::wstring& dir) {
     Scene(dir,L"emc_atomic_ray",ground);
     sceneStock=savedStock;
     failed+=TankSightScenes(dir,ground);
+    failed+=SightStyleScenes(dir,ground);
     failed+=GunshipSightScenes(dir,ground);
     failed+=ZoomScenes(dir,ground);
     failed+=FireControlScenes(dir,ground);

@@ -4,6 +4,7 @@
 #include <Windows.h>
 #include <cstdint>
 #include "gunsight.h"
+#include "reticle.h"
 #include "roundaim.h"
 
 namespace crew {
@@ -75,6 +76,9 @@ struct StockArm {
     int lock;                    // homing: 2 locked / 1 locking (lockProgress) on `at`, 0 none (LockonRange `range`)
     float lockProgress;
     gunsight::Ladder ladder;     // a direct-fire arc gun's range ladder (gunsight.h; no ticks: none), hud.cpp GunReticle
+    reticle::Style reticle=reticle::Style::none;   // its sight's style (reticle.h Classify, from the weapon's own data)
+    reticle::Shell shell=reticle::Shell::none;     // its round as the sight names it (AP / HE / BEAM)
+    float roundSpeed=0.0f;       // m/s: AmmoSpeed x 60 (the flak sight's lead rings)
 };
 struct StockHudReadout {
     char kind[16];
