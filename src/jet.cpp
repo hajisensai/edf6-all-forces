@@ -262,7 +262,7 @@ void Arm(Jet& j,const Kind& kind,unsigned char* v,const float* pos,const float* 
 }
 
 // Once a game frame (JetReap): every entry whose jet is finished is let go of; with JetPilot turned off, every
-// jet still flown is deleted (unflown, it would hover on its dummy pilot where it was).
+// jet still flown is deleted (unflown, it would hover on its dummy pilot where it was); the dolls follow their drones.
 void Sweep(ULONGLONG ms) noexcept {
     const bool off=!Cfg().jetPilot;
     bool changed=false;
@@ -274,6 +274,7 @@ void Sweep(ULONGLONG ms) noexcept {
     }
     if(left)Log("JET JetPilot off: %d jets deleted",left);
     if(changed)Publish(true);
+    DollsFollow();   // after the finished ones went (Release deletes their dolls)
     BoosterSweep(ms);
 }
 }  // namespace
@@ -545,7 +546,6 @@ void JetFrame(unsigned char* v) noexcept {
     BayFrame(*j,pos);
     if(gunner){v[kFireGun]=0;v[kFireMissile]=0;}   // the gun is the player's (playerjet_crew.inc GunnerFire)
     else Arm(*j,kind,v,pos,nose,lead,gunsOk,missileOk,arms,ms);
-    DollFrame(IndexOf(*j),v,clear);
     NpcFlares(*j,v,pos,nose,ms);
     if(Cfg().debug && ms-j->loggedAt>1000){j->loggedAt=ms;JetLog(*j,v,pos,arms,speed,clear,ms);}
 }

@@ -598,7 +598,7 @@ void Detonate(Jet& j,Jet* mother,float dist,ULONGLONG ms) noexcept;
 void Blast(Jet& j,unsigned char* v,ULONGLONG ms) noexcept;
 void DollMake(int i,const unsigned char* v,DWORD lifeSec) noexcept;
 void DollFree(int i) noexcept;
-void DollFrame(int i,const unsigned char* v,float clear) noexcept;   // its doll follows drone `v` (if it has one), `clear` over the ground
+void DollsFollow() noexcept;              // once a frame (Sweep): every doll kDollBelow under its drone, whoever moves it
 void ResetDolls() noexcept;                // the mission's end: forgotten, not deleted (they went with it)
 bool PreloadDolls(void* mgr,bool dollBody) noexcept;   // the dolls' SGOs with the doll drone's body: whether
 bool InstallDolls() noexcept;

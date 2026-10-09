@@ -128,7 +128,6 @@ Jet* FindJet(const unsigned char*) noexcept { MissingRecoveryDependency();return
 void HoldOffGround(Jet&,const float*,float,float,ULONGLONG,float) noexcept { MissingRecoveryDependency(); }
 void Hover(Jet&,const Kind&,const unsigned char*,const float*,const float*,const float*,float,float,float,float,bool) noexcept { MissingRecoveryDependency(); }
 void Thrusters(Jet&,const Kind&,unsigned char*,float,ULONGLONG,float) noexcept { MissingRecoveryDependency(); }
-void DollFrame(int,const unsigned char*,float) noexcept { MissingRecoveryDependency(); }
 bool PlayerLaunchDrone(unsigned char*,const float*,ULONGLONG) noexcept { MissingRecoveryDependency();return false; }
 int RecallDrones(unsigned char*,ULONGLONG) noexcept { MissingRecoveryDependency();return 0; }
 int DronesLeft(const unsigned char*) noexcept { MissingRecoveryDependency();return 0; }
