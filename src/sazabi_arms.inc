@@ -411,6 +411,10 @@ void ArmsStep(Mech& m,unsigned char* v,const ArmsInput& in,float dt) noexcept {
         Log("SAZABI v=%p special: %s",v,kNames[static_cast<int>(a.special)]);
     }
     a.switchHeld=in.cycle;
+    // what the animator needs of the buttons (sazabi_anim.h: the tomahawk put away for the rifle, the shield turned for
+    // its missiles); this machine's own, never sent
+    m.pose.fire=in.primary;
+    m.pose.present=in.secondary && a.special==Special::missiles;
     a.guard+=((in.guard ? 1.0f : 0.0f)-a.guard)*std::fmin(1.0f,(in.guard ? 6.0f : 4.0f)*dt);
     if(m.rootOk)Tomahawk(m,v,in,dt);
     const bool launch=in.secondary && !a.secondaryHeld && a.special==Special::funnels;
@@ -434,8 +438,10 @@ void ArmsFire(Mech& m,unsigned char* v,const ArmsInput& in,float thrust,float dt
         BoneAt(m,sazabi::kMissile,nullptr,at);
         Sfx(m,SzSfx::missileLaunch,at);
     }
-    if(in.primary && a.swing<0.0f)Trigger(rifle);
-    if(in.secondary && a.special==Special::missiles && a.swing<0.0f)Trigger(missile);
+    // the rifle fires along its barrel: only once the animator has it in hand and up on the aim (the tomahawk put away
+    // first); the shield's missiles once it is turned onto the aim
+    if(in.primary && a.swing<0.0f && sazabi::RifleReady(m.anim))Trigger(rifle);
+    if(in.secondary && a.special==Special::missiles && a.swing<0.0f && sazabi::ShieldReady(m.anim))Trigger(missile);
     if(m.rootOk) {
         const bool cannon=a.special==Special::cannon;
         Cannon(m,v,cannon && in.secondary,cannon && a.secondaryHeld && !in.secondary,dt);
@@ -451,17 +457,17 @@ void ArmsFire(Mech& m,unsigned char* v,const ArmsInput& in,float thrust,float dt
     a.missiles=missile ? At<std::int32_t>(missile,kWeaponAmmo) : 0;
 }
 
-// A footstep each time a foot comes down on its feet (its plan's stance begins), and the cue.
+// A footstep each time a foot comes down on its feet (the animator's step plants it), and the cue.
 void Footsteps(Mech& m) noexcept {
     for(int side=0;side<2;++side) {
-        const sazabi::FootPlan f=sazabi::Plan(m.pose.gait,m.pose.stride,side);
-        const bool down=f.stance && !m.fl.air && m.posed.gaitW>0.3f;
+        const bool planted=m.anim.planted[side];
+        const bool down=planted && !m.fl.air && m.posed.gaitW>0.2f;
         if(down && !m.arms.stance[side] && m.rootOk) {
             float at[3];
             BoneAt(m,side==0 ? sazabi::kFootL : sazabi::kFootR,nullptr,at);
             Sfx(m,SzSfx::footstep,at);
         }
-        m.arms.stance[side]=f.stance || m.fl.air;
+        m.arms.stance[side]=planted || m.fl.air;
     }
 }
 
