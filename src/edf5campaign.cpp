@@ -8,6 +8,8 @@
 // goes through OwnedHook: the native answer, and ours owned besides. Nothing else changes: the packs' lists, saves,
 // endings (none: MAINSCRIPT plays them for contents 0..2) and the story's statistics (content 0 only) are the
 // game's own handling of a mode. EDF5CampaignContent=0 (no packs installed): the native answer alone.
+// The test range (testrange/gen.py) is a mission pack of its own too, no longer laid over RM015: an offline and an
+// online mode sharing one content id, TestRangeContent (0: not installed), owned through the same hook.
 #include "crew.h"
 #include "memory.h"
 #include <cstdint>
@@ -34,12 +36,16 @@ constexpr unsigned kSites[]={
 };
 bool campaignReady=false;
 
-constexpr bool Ours(int id,int first) noexcept { return first>0 && id>=first && id<first+kPacks; }
-static_assert(Ours(3,3) && Ours(5,3) && !Ours(6,3) && !Ours(2,3) && !Ours(0,0) && !Ours(3,0));
+// first: the EDF5 packs' first id, range: the test range's id (each 0 when not installed).
+constexpr bool Ours(int id,int first,int range) noexcept {
+    return (first>0 && id>=first && id<first+kPacks) || (range>0 && id==range);
+}
+static_assert(Ours(3,3,0) && Ours(5,3,0) && !Ours(6,3,0) && !Ours(2,3,0) && !Ours(0,0,0) && !Ours(3,0,0));
+static_assert(Ours(7,3,7) && !Ours(6,3,7) && Ours(4,0,4) && !Ours(0,0,0) && !Ours(5,0,4));
 
 bool __fastcall OwnedHook(std::uintptr_t mgr,int id) {
     if(reinterpret_cast<OwnedFn>(image+kOwned)(mgr,id))return true;
-    return campaignReady && Ours(id,Cfg().edf5CampaignContent);
+    return campaignReady && Ours(id,Cfg().edf5CampaignContent,Cfg().testRangeContent);
 }
 
 bool Calls(unsigned site,unsigned target) noexcept {
@@ -66,8 +72,9 @@ bool InstallEdf5Campaign() noexcept {
     // A near-thunk allocation/protection failure can occur after earlier calls were redirected. Keep those
     // redirected calls on the native answer until every call is installed, including a half-written call.
     campaignReady=done==static_cast<int>(std::size(kSites));
-    Log("HOOK edf5 campaign=%d (%d/%d calls: the mission packs' content %d..%d owned)",campaignReady,done,
-        static_cast<int>(std::size(kSites)),Cfg().edf5CampaignContent,Cfg().edf5CampaignContent+kPacks-1);
+    Log("HOOK edf5 campaign=%d (%d/%d calls: the mission packs' content %d..%d owned, test range %d)",campaignReady,
+        done,static_cast<int>(std::size(kSites)),Cfg().edf5CampaignContent,Cfg().edf5CampaignContent+kPacks-1,
+        Cfg().testRangeContent);
     return campaignReady;
 }
 }  // namespace crew

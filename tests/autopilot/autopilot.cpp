@@ -7,11 +7,14 @@
 //  - every second, and when the keys change, a row in <dll>.log: the game's committed memory (and its peak), its RAM,
 //    and the machine's free RAM and commit, so a mission's load shows as a curve;
 //  - commands in <dll>.cmd (one at a time, cleared once run): "mem", "quit" (the game's own ExitApp way), and, written
-//    before the launch, "mission <row|RM015|M001> [difficulty 0-4]": straight into that offline mission, no menu. The
+//    before the launch, "mission <row|RM015|M001|range> [difficulty 0-4]": straight into that offline mission, no menu
+//    ("range": the test range's own mission pack, row 0 of the offline mode whose content id is the TestRangeContent
+//    the installer wrote into the EDF6VehicleCrew.ini next to this DLL; RM015 is the stock mission again). The
 //    menus are MAINSCRIPT.AS's routines, each run by name through createCoRoutine(const string &in) (0x12946F0, registered at
 //    0x129463E; 0x1294B00 is the (string, any@) overload); its leftover
 //    Debug_StartOffline() skips the logo, title, Epic login and slot choice, and the first HQMain() becomes
-//    PlayMission_Offline() with the mission row / difficulty set (GS+0x48 / +0x4C, GS = *(EDF+0x20B2890)).
+//    PlayMission_Offline() with the mission row / difficulty set (GS+0x48 / +0x4C, GS = *(EDF+0x20B2890)); for "range"
+//    the mode is switched first the way the script's SetMode(int) does it (EnterRangeMode).
 //    All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include <Windows.h>
 #include <psapi.h>
@@ -42,6 +45,19 @@ const unsigned char kCoRoutineSig[]={0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57,0x4
 using CoRoutineFn=void*(__fastcall*)(void*,const std::wstring*);
 CoRoutineFn realCoRoutine=nullptr;
 volatile LONG missionRow=-1,missionDifficulty=1;
+volatile LONG rangeContent=-1;   // "mission range": the test range's content id read from the ini (-1: not asked)
+
+// The game's mode list: count at GS+0x30, mode pointers at GS+0x20 (0x8C4CE3 walks them). A mode's ModeList item
+// (cfg = *(mode+0x10), its values at cfg + *(cfg+8)): +0x68 item 8 the online flag (0x8A2379), +0x74 item 9 the content
+// id, +0x80 item 10 the type (0x8C4CA0 compares both).
+constexpr std::size_t kModeArray=0x20,kModeCount=0x30,kModeCfg=0x10,kItemOnline=0x68,kItemContent=0x74,kItemType=0x80;
+// The mode switch (GS, index): what the script's `bool SetMode(int)` (0x70FAB0) calls once modes[index] is not null.
+constexpr std::size_t kSetMode=0xDC460;
+// mov [rsp+8],rbx; mov [rsp+10h],rbp; mov [rsp+18h],rsi; mov [rsp+20h],rdi; push r14; sub rsp,20h;
+// mov rax,[rcx+20h]; mov rbp,rcx; mov esi,edx: the modes array indexed by edx
+const unsigned char kSetModeSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48,
+    0x89,0x7C,0x24,0x20,0x41,0x56,0x48,0x83,0xEC,0x20,0x48,0x8B,0x41,0x20,0x48,0x8B,0xE9,0x8B,0xF2};
+using SetModeFn=void(__fastcall*)(void*,unsigned);
 
 using ForegroundFn=HWND(WINAPI*)();
 using KeyboardStateFn=BOOL(WINAPI*)(PBYTE);
@@ -145,6 +161,36 @@ void DumpArg(const char* name,const void* p) noexcept {
 
 volatile LONG dumped=0;
 
+// The offline mode (item 8 online 0, item 10 type 0) whose content id is `content`; -1 if none (or unreadable). The
+// pack's online mode carries the same id, hence the two checks.
+int FindRangeMode(const unsigned char* gs,int content) noexcept {
+    __try {
+        const unsigned count=*reinterpret_cast<const unsigned*>(gs+kModeCount);
+        const auto modes=*reinterpret_cast<unsigned char* const* const*>(gs+kModeArray);
+        for(unsigned i=0;i<count;++i) {
+            if(!modes[i])continue;
+            const auto cfg=*reinterpret_cast<const unsigned char* const*>(modes[i]+kModeCfg);
+            const unsigned char* values=cfg+*reinterpret_cast<const int*>(cfg+8);
+            if(!*reinterpret_cast<const int*>(values+kItemOnline) && !*reinterpret_cast<const int*>(values+kItemType) &&
+               *reinterpret_cast<const int*>(values+kItemContent)==content)return static_cast<int>(i);
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER){Log("RANGE the mode list is unreadable");}
+    return -1;
+}
+
+// "mission range": the test range pack's offline mode made current, as SetMode(int) does; false leaves the menu as is.
+bool EnterRangeMode(unsigned char* gs) noexcept {
+    const LONG content=InterlockedExchange(&rangeContent,-1);
+    if(content<0)return true;   // no range asked: the row alone
+    if(!content){Log("RANGE TestRangeContent=0 in EDF6VehicleCrew.ini (the test range pack is not installed)");return false;}
+    const int mode=FindRangeMode(gs,content);
+    if(mode<0){Log("RANGE no offline mode with content id %ld",content);return false;}
+    if(!edf::Matches(image,kSetMode,kSetModeSig,sizeof(kSetModeSig))){Log("RANGE EDF+%#zx does not match",kSetMode);return false;}
+    reinterpret_cast<SetModeFn>(image+kSetMode)(gs,static_cast<unsigned>(mode));
+    Log("RANGE mode %d (content id %ld) made current",mode,content);
+    return true;
+}
+
 void* __fastcall CoRoutine(void* out,const std::wstring* decl) {
     if(InterlockedIncrement(&dumped)<=60){Log("COROUTINE call");DumpArg("rcx",out);DumpArg("rdx",decl);}
     if(missionRow>=0 && decl) {
@@ -156,6 +202,10 @@ void* __fastcall CoRoutine(void* out,const std::wstring* decl) {
         if(*decl==L"string HQMain()") {
             const LONG row=InterlockedExchange(&missionRow,-1);
             auto gs=*reinterpret_cast<unsigned char**>(image+kGlobalState);
+            if(gs && !EnterRangeMode(gs)) {
+                Log("SCRIPT HQMain: the test range's mode not entered, the menu as is");
+                return realCoRoutine(out,decl);
+            }
             if(gs) {
                 *reinterpret_cast<int*>(gs+kMissionRow)=row;
                 *reinterpret_cast<int*>(gs+kDifficulty)=missionDifficulty;
@@ -197,14 +247,31 @@ void Quit() noexcept {
     PostMessageW(window,WM_CLOSE,0,0);
 }
 
-// "mission <row|RM015|M001> [difficulty]": the offline list's row (0-based: RM015 is 13, M001 is 1), difficulty 0-4.
+// The test range pack's content id: [VehicleCrew] TestRangeContent of the EDF6VehicleCrew.ini in this DLL's own
+// directory (Mods/Plugins), written by the installer; 0 when the pack is not installed.
+LONG ReadRangeContent() noexcept {
+    wchar_t ini[MAX_PATH]{};
+    if(!GetModuleFileNameW(self,ini,MAX_PATH))return 0;
+    wchar_t* slash=wcsrchr(ini,L'\\');
+    if(!slash)return 0;
+    if(wcscpy_s(slash+1,MAX_PATH-(slash+1-ini),L"EDF6VehicleCrew.ini"))return 0;
+    const UINT id=GetPrivateProfileIntW(L"VehicleCrew",L"TestRangeContent",0,ini);
+    return id<=65535 ? static_cast<LONG>(id) : 0;
+}
+
+// "mission <row|RM015|M001|range> [difficulty]": the offline list's row (0-based: RM015 is 13, M001 is 1), difficulty
+// 0-4. RM015 is the stock mission again (the test range left it for its own pack); "range" is that pack's row 0.
 void AskMission(const char* text) noexcept {
     char name[32]{};int difficulty=1;
     if(sscanf_s(text,"%*s %31s %d",name,static_cast<unsigned>(sizeof(name)),&difficulty)<1)return;
-    const int row=!_stricmp(name,"RM015") ? 13 : !_stricmp(name,"M001") ? 1 : std::atoi(name);
+    const bool range=!_stricmp(name,"range");
+    const int row=range ? 0 : !_stricmp(name,"RM015") ? 13 : !_stricmp(name,"M001") ? 1 : std::atoi(name);
     missionDifficulty=difficulty<0 || difficulty>4 ? 1 : difficulty;
+    rangeContent=range ? ReadRangeContent() : -1;
     missionRow=row;
-    Log("MISSION asked: row %d, difficulty %ld (applied when the script starts its title)",row,missionDifficulty);
+    Log("MISSION asked: %s row %d, difficulty %ld (applied when the script starts its title)",
+        range ? "the test range pack's" : "offline",row,missionDifficulty);
+    if(range)Log("MISSION the test range's content id %ld (EDF6VehicleCrew.ini TestRangeContent)",rangeContent);
 }
 
 // One command from <dll>.cmd (the driver writes it, this clears it once done).

@@ -1,4 +1,4 @@
-"""EDF6 测试场启动器：勾选载具、敌人波次和强制装备，一键装进一个离线任务（见 gen.SLOTS）。"""
+"""EDF6 测试场启动器：勾选载具、敌人波次和强制装备，一键装进「测试场」任务包（见 gen.RANGE_MISSION）。"""
 from __future__ import annotations
 
 import os
@@ -14,6 +14,7 @@ import weapons  # noqa: E402
 PLAN_FILE = os.path.join(gen.HERE, 'testrange.json')
 LOG_FILE = ('Mods', 'Plugins', 'EDF6VehicleCrew.log')
 TITLE = 'EDF6 测试场'
+PACK = gen.packs.RANGE.name['SC']   # the mission pack's name in the game's 「任务包」 list
 KEEP = '（保持存档里的）'
 
 
@@ -63,12 +64,8 @@ class App(tk.Tk):
         self.site = ttk.Combobox(bar, values=[x.label for x in gen.SITES], state='readonly', width=20)
         self.site.current(next(i for i, x in enumerate(gen.SITES) if x.source == self.plan.site))
         self.site.pack(side='left', padx=(4, 10))
-        ttk.Label(bar, text='装进').pack(side='left')
-        self.slot = ttk.Combobox(bar, values=[x.label for x in gen.SLOTS], state='readonly', width=46)
-        self.slot.current(next(i for i, x in enumerate(gen.SLOTS) if x.mission == self.plan.slot))
-        self.slot.pack(side='left', padx=4)
         ttk.Button(bar, text='安装', command=self.install).pack(side='left')
-        ttk.Button(bar, text='卸载（恢复原任务）', command=self.uninstall).pack(side='left', padx=6)
+        ttk.Button(bar, text='卸载', command=self.uninstall).pack(side='left', padx=6)
         ttk.Button(bar, text='打开插件日志', command=self.open_log).pack(side='left')
         self.status = ttk.Label(self, anchor='w', foreground='#555')
         self.status.pack(fill='x', **pad)
@@ -263,7 +260,6 @@ class App(tk.Tk):
         plan.air = gen.AirWaves(enabled=bool(self.a_on.get()), **{k: v.get() for k, v in self.a_vars.items()})
         plan.scenario = gen.GRAND if self.grand.get() else ''
         plan.loadout = self._loadout_choice()
-        plan.slot = gen.SLOTS[self.slot.current()].mission
         plan.site = gen.SITES[self.site.current()].source
         return plan
 
@@ -284,19 +280,23 @@ class App(tk.Tk):
             messagebox.showerror(TITLE, str(e))
             self._refresh_status()
             return
-        slot = gen.slot_of(plan.slot)
-        lines = [f'已装进离线任务列表第 {slot.item} 项（{slot.mission}），难度随意。', '']
+        lines = [f'已装进「{PACK}」任务包（离线 / 在线模式的「任务包」里选它，唯一的一关），难度随意。', '']
         lines += placed or ['（没有放载具）']
         lines += ['', '强制装备：'] + equip if equip else ['', '装备：用出击前自己选的']
         if game_running():
-            lines += ['', f'游戏正在运行：重新进入第 {slot.item} 项即生效。']
+            lines += ['', '游戏正在运行：重新进入测试场即生效。']
         messagebox.showinfo(TITLE, '\n'.join(lines))
         self._refresh_status()
 
     def uninstall(self) -> None:
-        weapons.remove_loadout(self.game.get())
-        removed = gen.uninstall(self.game.get())
-        messagebox.showinfo(TITLE, '已删除，原任务恢复原样，强制装备已关闭。' if removed
+        try:
+            removed = gen.uninstall(self.game.get())
+        except Exception as e:  # shown to the user as-is (the game running, a mode table changed by another tool)
+            messagebox.showerror(TITLE, str(e))
+            self._refresh_status()
+            return
+        weapons.remove_loadout(self.game.get())   # after the range: a failed uninstall keeps the loadout it shows
+        messagebox.showinfo(TITLE, f'已删除测试场关卡和「{PACK}」任务包，强制装备已关闭。' if removed
                             else '没装过测试场；强制装备已关闭。')
         self._refresh_status()
 
@@ -308,8 +308,7 @@ class App(tk.Tk):
             messagebox.showinfo(TITLE, f'还没有日志：{path}')
 
     def _refresh_status(self) -> None:
-        slot = gen.installed(self.game.get())
-        state = f'已装在第 {slot.item} 项（{slot.mission}）' if slot else '未安装'
+        state = f'已装（「{PACK}」任务包）' if gen.installed(self.game.get()) else '未安装'
         forced = '开' if os.path.isfile(weapons.loadout_path(self.game.get())) else '关'
         self.status.config(text=f'测试场：{state}　强制装备：{forced}　　设置保存在 {PLAN_FILE}')
 

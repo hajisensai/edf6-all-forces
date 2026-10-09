@@ -107,6 +107,16 @@ class DriverTest(unittest.TestCase):
         command.assert_called_once_with(self.game, 'mission RM015 1')
         self.assertEqual(list(self.plugins.iterdir()), [])
 
+    def test_run_defaults_to_the_test_range_pack(self):
+        with patch.object(drive.gamedir, 'find_or_dev', return_value=self.game), \
+             patch.object(drive, 'run', return_value=0) as run:
+            self.assertEqual(drive.main(['run']), 0)
+        run.assert_called_once_with(self.game, 'range', 1, 45, None)
+        with patch.object(drive.gamedir, 'find_or_dev', return_value=self.game), \
+             patch.object(drive, 'run', return_value=0) as run:
+            self.assertEqual(drive.main(['run', 'RM015', '2']), 0)
+        run.assert_called_once_with(self.game, 'RM015', 2, 45, None)
+
     def test_modified_dll_not_deleted(self):
         drive.install(self.game)
         self.path('.dll').write_bytes(b'new user version')

@@ -7,11 +7,12 @@ background"). For measurements, e.g. the big map's memory against the stock test
   python tests/autopilot/drive.py key VK[+VK] [ms]   hold the keys (hex virtual-key codes, or names: enter esc up ...)
   python tests/autopilot/drive.py shot FILE.png      the game window's picture (PrintWindow, never the screen)
   python tests/autopilot/drive.py mem [N]            the plugin's last N MEM rows
-  python tests/autopilot/drive.py cmd TEXT           one command to the plugin: mem, quit, mission ROW|RM015 [0-4]
+  python tests/autopilot/drive.py cmd TEXT           one command to the plugin: mem, quit, mission ROW|RM015|M001|range [0-4]
   python tests/autopilot/drive.py run [MISSION] [DIFFICULTY] [SECONDS] [LOG]
-        one go: install, ask the mission (default RM015, the test range's slot), launch in the background, stay SECONDS
-        (default 45) in the mission, quit the game's own way, print the memory (at the start, peak, end), keep the
-        plugin's log at LOG, uninstall
+        one go: install, ask the mission (default range: the test range's own mission pack, by the content id in the
+        installed EDF6VehicleCrew.ini; RM015, M001 or a row: the stock offline list), launch in the background, stay
+        SECONDS (default 45) in the mission, quit the game's own way, print the memory (at the start, peak, end), keep
+        the plugin's log at LOG, uninstall
   python tests/autopilot/drive.py hide               the window off screen and at the back again
   python tests/autopilot/drive.py uninstall          remove the plugin, its keys file and its log (game closed)
 
@@ -34,6 +35,7 @@ sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 import gamedir  # noqa: E402
 
 NAME = 'EDF6Autopilot'
+DEFAULT_MISSION = 'range'   # the test range's mission pack (no longer laid over RM015)
 APP_ID = 2291060
 KEYS = {'enter': 0x0D, 'esc': 0x1B, 'space': 0x20, 'left': 0x25, 'up': 0x26, 'right': 0x27, 'down': 0x28,
         'alt': 0x12, 'f4': 0x73, 'shift': 0x10, 'ctrl': 0x11, 'tab': 0x09}
@@ -351,7 +353,7 @@ def main(argv: list[str]) -> int:
     elif cmd == 'cmd':
         command(game, ' '.join(argv[1:]))
     elif cmd == 'run':
-        return run(game, argv[1] if len(argv) > 1 else 'RM015', int(argv[2]) if len(argv) > 2 else 1,
+        return run(game, argv[1] if len(argv) > 1 else DEFAULT_MISSION, int(argv[2]) if len(argv) > 2 else 1,
                    int(argv[3]) if len(argv) > 3 else 45, argv[4] if len(argv) > 4 else None)
     elif cmd == 'mem':
         mem(game, int(argv[1]) if len(argv) > 1 else 10)

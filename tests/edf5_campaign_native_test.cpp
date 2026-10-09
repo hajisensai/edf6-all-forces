@@ -67,11 +67,25 @@ int main(int argc,char** argv) {
             Check(owned(f.Mgr(),0),"the story stays owned");
             Check(!owned(f.Mgr(),1) && !owned(f.Mgr(),2),"the DLCs stay as the platform says");
             Check(owned(f.Mgr(),3) && owned(f.Mgr(),4) && owned(f.Mgr(),5),"all three packs owned");
-            Check(!owned(f.Mgr(),6),"no content past the packs");
+            Check(!owned(f.Mgr(),6) && !owned(f.Mgr(),7),"no content past the packs");
         }
+        // The test range pack: its one id owned beside the EDF5 packs, nothing between them.
+        config.testRangeContent=7;
+        for(unsigned site:kSites) {
+            const auto owned=Patched(site);
+            Check(owned(f.Mgr(),7),"the test range owned");
+            Check(!owned(f.Mgr(),6) && !owned(f.Mgr(),8),"only the test range's own id");
+            Check(owned(f.Mgr(),3) && owned(f.Mgr(),5) && owned(f.Mgr(),0) && !owned(f.Mgr(),1),"the rest unchanged");
+        }
+        Check(!native(f.Mgr(),7),"the native lookup does not own the test range");
+        config.testRangeContent=0;
+        Check(!Patched(kSites[0])(f.Mgr(),7) && Patched(kSites[0])(f.Mgr(),3),"no test range installed: nothing extra");
         Check(!native(f.Mgr(),3),"the native lookup itself unchanged");
         config.edf5CampaignContent=0;
         Check(!Patched(kSites[0])(f.Mgr(),3) && Patched(kSites[0])(f.Mgr(),0),"no packs installed: native answer");
+        config.testRangeContent=4;
+        Check(Patched(kSites[0])(f.Mgr(),4) && !Patched(kSites[0])(f.Mgr(),3),"the test range alone, without EDF5's packs");
+        config.testRangeContent=0;
     }
     std::printf("edf5_campaign_native_test: %d checks passed (injected failure %d)\n",checks,failAt);
 }
