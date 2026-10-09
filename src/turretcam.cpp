@@ -12,11 +12,8 @@
 //  - So the call at 0xFC01B is redirected (a shim hands rsi on as a third argument): the stock look-at is fetched, and
 //    while the plugin owns the view both targets and the eased points are replaced with the rig's (turretcam.h Place):
 //    the game's collision and look-at matrix work on them as on its own.
-//  - The view (decoupled): a heading and an elevation of the plugin's, world-held against the hull's pitch and roll;
-//    its heading carried by the hull's heading change while TurretFollowsHull is on (default; the user, 2026-10-09:
-//    "炮塔不会随着车体旋转而旋转": steering the hull turns the view and, through it, the turret, as stock; Follow), else
-//    world-held (the hull turning under it does not turn it). The seat's aim (VehicleWeaponAimAddSe, vtable 0x17D8A90
-//    slot 2 0x5FCD80) gets the rider's stick each
+//  - The view (decoupled): a heading and an elevation of the plugin's, world-held (the hull turning under it does not
+//    turn it). The seat's aim (VehicleWeaponAimAddSe, vtable 0x17D8A90 slot 2 0x5FCD80) gets the rider's stick each
 //    frame; the hook turns the view by the rider's own stick (seat+0x2D0, docs/camera-re.md §4: -1..1 a frame, the
 //    mouse's excess carried over by 0x56DBC0, handed to the aim as (-x, y)) and hands the aim the input that turns the
 //    turret onto the point under the screen's centre (CameraRay + MapRay, else kAimFar along it) at the stock rates
@@ -142,8 +139,6 @@ struct GameSide {
     tcam::SteerState steer;    // the turret command's last wants and their drift (turretcam.h SteerAxes)
     bool foreign;              // the aim's input was not the rider's stick last frame
     ULONGLONG logAt;
-    const void* hullOf;        // the vehicle whose heading hullYaw is (another: no turn carried)
-    float hullYaw;             // its hull's heading at the last aim step (tcam::HeadingOf)
 };
 Shared shared{};
 unsigned takes=0;              // Shared::take's counter (under `lock`)
@@ -396,37 +391,6 @@ void Readout(const unsigned char* seat,const Shared& s,bool on,const float* hold
     Publish(r);
 }
 
-// Whether the view follows the hull's heading (TurretFollowsHull): not on a Nix whose torso the player keeps in the
-// world (NixTorsoTwist, nix.cpp: the user's MechWarrior controls, A/D turn only the legs; its "hull" is the legs).
-constexpr unsigned kVtNix=0x17DD440;
-bool FollowsHull(const unsigned char* v) noexcept {
-    const Config& c=Cfg();
-    return c.turretFollowsHull && !(c.nixTorsoTwist && At<const unsigned char*>(v,0)==image+kVtNix);
-}
-
-// The hull's heading change (YawOf's sense) since this vehicle's last aim step; 0 the first time.
-float HullTurn(const unsigned char* v) noexcept {
-    const float yaw=tcam::HeadingOf(reinterpret_cast<const float*>(v+kMatrix)+8,game.hullYaw);
-    const float turn=game.hullOf==v ? tcam::Wrap(yaw-game.hullYaw) : 0.0f;
-    game.hullOf=v;game.hullYaw=std::isfinite(yaw) ? yaw : 0.0f;
-    return std::isfinite(turn) ? turn : 0.0f;
-}
-
-// TurretFollowsHull: the hull's heading change `turn` carried into all the view holds: its heading, the free look's
-// way back, the point the turret holds meanwhile and the screen centre's point (TurretCamFrame took it from the camera
-// this step's view has not placed yet: without the turn the want would trail the hull by a frame), both turned about
-// the vehicle (the rig's pivot). The screen's centre then turns with the hull and the turret, steered onto it (Steer),
-// keeps its place on the hull; the stabilizer carries its reference the same way (stab.h Follow), so neither works
-// against the steering.
-void Follow(Shared& s,float turn) noexcept {
-    if(turn==0.0f)return;
-    const float* pivot=reinterpret_cast<const float*>(s.v+kMatrix)+12;
-    s.yaw=tcam::Wrap(s.yaw+turn);
-    game.backYaw=tcam::Wrap(game.backYaw+turn);
-    tcam::TurnAbout(pivot,turn,game.holdAt);
-    if(game.hasAim)tcam::TurnAbout(pivot,turn,game.aim);
-}
-
 // The aim step's work for the player's seat: the view turned by the stick, the free look's latch and swing back, the
 // turret's input. `in` the stock input, `cmd` what the aim gets.
 void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
@@ -436,7 +400,6 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
     ReleaseSRWLockExclusive(&lock);
     if(seat!=s.seat || !s.v)return;
     s.aimMs=GameMs();
-    const float hullTurn=HullTurn(s.v);   // every step, so that a view taken over later starts from no turn
     if(!s.high && SightZoomMounted(s.v)) {
         // The sightzoom camera follows the actual barrel. Feeding its own last-frame ray back into the
         // decoupled controller pins the view or creates a feedback loop. Keep the native/stabilizer input.
@@ -504,7 +467,7 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
         if(!CameraRay(eye,dir))AxesDir(s.v,seat,dir);
         s.yaw=tcam::YawOf(dir);s.pitch=tcam::PitchOf(dir);s.view=true;
         s.highView=false;
-    } else if(FollowsHull(s.v))Follow(s,hullTurn);
+    }
     if(press) {
         std::memcpy(game.holdAt,game.aim,12);game.holdHit=game.aimHit;
         if(!game.hasAim){float d[3];AxesDir(s.v,seat,d);const float* p=reinterpret_cast<const float*>(s.v+kMatrix)+12;for(int i=0;i<3;++i)game.holdAt[i]=p[i]+d[i]*kAimFar;game.holdHit=false;}

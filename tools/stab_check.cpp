@@ -10,9 +10,9 @@
 //    while seat 0's own stabilizer turns the turret under it; one on the hull is told apart the same way;
 //  - a gun whose pitch moves against its axis (a seat the frame does not describe): the probe says it does not fit;
 //  - the stops: an axis is never stepped past its end, the reference rides it there;
-//  - following the hull (Hold::follow, TurretFollowsHull; the user, 2026-10-09: "炮塔不会随着车体旋转而旋转"): a gun given
-//    no command keeps its yaw against a slaloming hull (turns with it) while its elevation stays held in the world over
-//    the bumps; a controller's look ahead (Held) sees no hull part in a pure turn; off, the world heading is held.
+//  - the drive's top is against the hull (the user, 2026-10-09: "炮塔旋转速度应该叠加底座旋转速度"): the turret camera
+//    slewing onto a far world point, the hull standing still / turning the same way at w / against it faster than the
+//    drive / slaloming: the gun's world rate reaches the drive's top + w, is carried off, settles on the point.
 // Exit code 1 when one fails. Built on request only:
 // cmake --build build --target stab_check && build\stab_check.exe
 #include "../src/stab.h"
@@ -72,10 +72,8 @@ struct Result { float worst,mean; stab::Choice choice; float lateWorst,lag; };
 // measured from `settle` on. `stabilize`: the stabilizer on. `next`: the pose takes the next step's hull.
 // `lateFrom`: from that frame on, the most the gun's line moves in the world in a frame (lateWorst); `lag` the most the
 // gun lagged its reference. `blind`: the probe's timing ignored (the step's own hull taken), to show what it buys.
-Result Run(const Drive& d,const float* p,const stab::Perf& perf,bool stabilize,bool next,bool camera,int frames,int settle,int lateFrom=-1,bool blind=false,
-           bool follow=false) {
+Result Run(const Drive& d,const float* p,const stab::Perf& perf,bool stabilize,bool next,bool camera,int frames,int settle,int lateFrom=-1,bool blind=false) {
     Gun g{};
-    g.hold.follow=follow;
     g.x[0]=tcam::Axis{-stab::kPi,stab::kPi,0.0f,0.0f};
     g.x[1]=tcam::Axis{-60.0f*kDeg,10.0f*kDeg,-5.0f*kDeg,0.0f};
     const float o[3]={0.02f,-0.015f,0.9997f};   // the muzzle a little off the axes' line (an offset barrel)
@@ -92,17 +90,13 @@ Result Run(const Drive& d,const float* p,const stab::Perf& perf,bool stabilize,b
         const stab::Frame h=HullAt(d,f),prev=HullAt(d,f>0 ? f-1 : 0);
         const float before[2]={g.x[0].angle,g.x[1].angle};
         float in[2]={0.0f,0.0f};
-        if(follow && camera) {   // turretcam.cpp Follow: the view's far point carried by the hull's heading change
-            const float pivot[3]={0.0f,0.0f,0.0f};
-            tcam::TurnAbout(pivot,tcam::Wrap(tcam::HeadingOf(h.r+6,0.0f)-tcam::HeadingOf(prev.r+6,0.0f)),target);
-        }
         if(camera) {   // turretcam.cpp Steer: the want in the hull's frame, from the held axes, its drift less the hull's part
             float want[2];stab::Angles(h,target,want);
             const stab::Frame seenNow=stabilize && g.choice.next && f>0 ? stab::Ahead(h,prev) : h;
             float held[2],hull[2];
             if(!stabilize || !stab::Held(g.hold,stops,seenNow,before,held,hull)){held[0]=before[0];held[1]=before[1];hull[0]=hull[1]=0.0f;}
             for(int i=0;i<2;++i) {
-                const bool full=i==0;
+                const bool full=i==0;   // (a full circle: the yaw axis)
                 const float tgt=full ? want[i] : vec::Clamp(want[i],g.x[i].lo,g.x[i].hi);
                 const float err=full ? tcam::Wrap(tgt-held[i]) : tgt-held[i];
                 if(g.hasWant) {
@@ -114,7 +108,7 @@ Result Run(const Drive& d,const float* p,const stab::Perf& perf,bool stabilize,b
             }
             g.hasWant=true;
         }
-        for(int i=0;i<2;++i)tcam::AxisStep(g.x[i],in[i],p);
+        for(int i=0;i<2;++i){tcam::AxisStep(g.x[i],in[i],p);g.hold.full[i]=in[i]>=0.999f ? 1.0f : in[i]<=-0.999f ? -1.0f : 0.0f;}
         if(stabilize) {
             if(f>0)stab::Feed(g.probe,h,prev,posed,0.0f,0.0f,posedWas,drawn,false);
             g.choice=stab::Decide(g.probe,false,0.0f);
@@ -306,66 +300,67 @@ void NativeReadbackContract() {
            "physical tracking lag, hull turn and player input coexist without double correction",h.shift[0]/kDeg);
     Expect(std::fabs(out[1]-after[1])<1e-6f,"a yaw readback does not rewrite the pitch motor command");
 }
-// TurretFollowsHull: input 0 on a hull slaloming at 30 deg/s over bumps (the checks above are the hold off). Its yaw
-// against the hull (what the eye calls "turning with the hull") and its elevation in the world, from 1 s on.
-void FollowHull() {
-    const Drive d{30.0f*kDeg,2.0f,3.0f*kDeg,1.5f,2.0f*kDeg,1.1f,1e9f};
-    const float p[3]={0.1f,0.1f,1.1f/60.0f};
-    float worstYaw[2]{},worstElev[2]{};
-    for(int follow=0;follow<2;++follow) {
-        tcam::Axis g[2]={{-stab::kPi,stab::kPi,0.4f,0.0f},{-1.0f,0.3f,-0.1f,0.0f}};
-        const stab::Stops s[2]={stab::StopsOf(g[0].lo,g[0].hi),stab::StopsOf(g[1].lo,g[1].hi)};
-        stab::Hold hold{};hold.follow=follow!=0;
-        float elev0=0.0f;
-        for(int f=0;f<600;++f) {
-            const stab::Frame h=HullAt(d,f);
-            const float before[2]={g[0].angle,g[1].angle};
-            for(int i=0;i<2;++i)tcam::AxisStep(g[i],0.0f,p);
-            const float after[2]={g[0].angle,g[1].angle};
-            float out[2];
-            stab::Step(hold,s,before,after,p[2],h,h,kMbt,out);
-            g[0].angle=out[0];g[1].angle=out[1];
-            float dir[3];stab::Dir(h,out,dir);
-            const float elev=std::asin(dir[1]);
-            if(f==0)elev0=elev;
-            if(f<60)continue;
-            worstYaw[follow]=std::fmax(worstYaw[follow],std::fabs(tcam::Wrap(out[0]-0.4f)));
-            worstElev[follow]=std::fmax(worstElev[follow],std::fabs(elev-elev0));
-        }
+// The turret camera slewing the gun onto a world point `away` rad to its left (the yaw axis free, the hull's heading
+// turning at `w` rad/s, + to the left: toward the point; a slalom of amplitude `w` rad/s every 2 s with `slalom`),
+// stabilized as the plugin does it (turretcam.cpp Steer from stab::Held, stab.h Step with the command's ends) or with
+// `full` left off (the drive's top a world rate: the old model). Its world heading's fastest turn (rad/s), the frame it
+// is first within 0.5 deg, its error at 2 s and the most it is off over the last second.
+struct Slew { float peak; int on; float at2,late; };
+Slew SlewOnto(float away,float w,bool slalom,bool full) {
+    const float p[3]={0.1f,0.1f,0.5f/60.0f};   // a 0.5 rad/s (29 deg/s) drive
+    tcam::Axis x[2]={{-stab::kPi,stab::kPi,0.0f,0.0f},{-1.0f,0.3f,0.0f,0.0f}};
+    const stab::Stops stops[2]={stab::StopsOf(x[0].lo,x[0].hi),stab::StopsOf(x[1].lo,x[1].hi)};
+    stab::Hold hold{};stab::Probe probe{};
+    const auto heading=[&](int f) {
+        const float t=static_cast<float>(f)/60.0f;
+        return slalom ? w*2.0f/stab::kPi*std::sin(stab::kPi*t/2.0f) : w*t;
+    };
+    float target[3];{const float a[2]={away,0.0f};stab::Dir(Hull(0.0f,0.0f,0.0f),a,target);}
+    tcam::SteerState steer{};
+    Slew r{0.0f,-1,0.0f,0.0f};
+    float lastYaw=0.0f;
+    for(int f=0;f<360;++f) {
+        const stab::Frame h=Hull(heading(f),0.0f,0.0f);
+        const float before[2]={x[0].angle,x[1].angle};
+        float held[2],hull[2],want[2],in[2];
+        if(!stab::Held(hold,stops,h,before,held,hull)){held[0]=before[0];held[1]=before[1];hull[0]=hull[1]=0.0f;}
+        stab::Angles(h,target,want);
+        tcam::SteerAxes(steer,want,held,hull,x,p,0.0087f,in);
+        for(int i=0;i<2;++i){tcam::AxisStep(x[i],in[i],p);hold.full[i]=full && std::fabs(in[i])>=0.999f ? (in[i]>0.0f ? 1.0f : -1.0f) : 0.0f;}
+        const float after[2]={x[0].angle,x[1].angle};
+        float out[2];
+        stab::Step(hold,stops,before,after,p[2],h,h,kMbt,out);
+        x[0].angle=out[0];x[1].angle=out[1];
+        float bore[3];stab::Dir(h,out,bore);
+        float world[2];stab::Angles(Hull(0.0f,0.0f,0.0f),bore,world);
+        if(f>0)r.peak=std::fmax(r.peak,std::fabs(tcam::Wrap(world[0]-lastYaw))*60.0f);
+        lastYaw=world[0];
+        const float err=Between(bore,target);
+        if(r.on<0 && err<0.5f*kDeg)r.on=f;
+        if(f==120)r.at2=err;
+        if(f>=300)r.late=std::fmax(r.late,err);
     }
-    // The turret camera with both following: its far point carried by the hull's heading (turretcam.cpp Follow), the
-    // stabilizer's reference too; the bore stays on the carried point, better than the camera alone.
-    const Drive cd{25.0f*kDeg,2.5f,3.0f*kDeg,1.7f,2.0f*kDeg,1.2f,1e9f};
-    const Result both=Run(cd,p,kMbt,true,false,true,720,120,-1,false,true);
-    const Result alone=Run(cd,p,kMbt,false,false,true,720,120,-1,false,true);
-    std::printf("following the hull, turret camera on its carried point, bumps + 25 deg/s turns: camera alone worst %.2f mean %.2f deg,"
-                " with the stabilizer worst %.3f mean %.3f deg\n",alone.worst/kDeg,alone.mean/kDeg,both.worst/kDeg,both.mean/kDeg);
-    Expect(both.worst<kHoldDeg*kDeg,"follow + camera + stabilizer: on the carried point",both.worst/kDeg,kHoldDeg);
-    Expect(both.mean<alone.mean*0.5f,"follow + camera + stabilizer: better than the camera alone",both.mean/kDeg,alone.mean/kDeg);
-    {   // TurnAbout turns a point's heading about the pivot by exactly the turn (YawOf's sense), nothing else
-        const float pivot[3]={5.0f,1.0f,-3.0f};float q[3]={5.0f+3.0f,7.0f,-3.0f+4.0f};
-        const float d0[3]={q[0]-pivot[0],q[1]-pivot[1],q[2]-pivot[2]};
-        tcam::TurnAbout(pivot,0.3f,q);
-        const float d1[3]={q[0]-pivot[0],q[1]-pivot[1],q[2]-pivot[2]};
-        Expect(std::fabs(tcam::Wrap(tcam::YawOf(d1)-tcam::YawOf(d0)-0.3f))<1e-5f && std::fabs(d1[1]-d0[1])<1e-6f &&
-               std::fabs(std::hypot(d1[0],d1[2])-5.0f)<1e-4f,"TurnAbout: the heading grows by the turn, nothing else changes");
-    }
-    std::printf("following the hull, 30 deg/s slalom + bumps: yaw against the hull off by at most %.3f deg (hold off: %.1f deg), "
-                "world elevation off by at most %.3f deg (hold off: %.3f deg)\n",worstYaw[1]/kDeg,worstYaw[0]/kDeg,worstElev[1]/kDeg,worstElev[0]/kDeg);
-    Expect(worstYaw[1]<1.0f*kDeg,"follow: a gun given no command turns with the hull",worstYaw[1]/kDeg);
-    Expect(worstYaw[0]>10.0f*kDeg,"follow off: the world heading is held (the hull turns under the gun)",worstYaw[0]/kDeg);
-    Expect(worstElev[1]<kHoldDeg*kDeg,"follow: the elevation is still held in the world over the bumps",worstElev[1]/kDeg,kHoldDeg);
-    // A controller's look ahead in a pure turn: the gun's held axes are its own, no hull part (turretcam.cpp Steer would
-    // otherwise take the turn out of its drift and steer against the following).
-    const stab::Stops s[2]={stab::StopsOf(-stab::kPi,stab::kPi),stab::StopsOf(-1.0f,0.3f)};
-    stab::Hold hold{};hold.follow=true;
-    const float laid[2]={0.4f,-0.1f};
-    float out[2],held[2],hull[2];
-    stab::Step(hold,s,laid,laid,p[2],Hull(0.0f,0.0f,0.0f),Hull(0.0f,0.0f,0.0f),kMbt,out);
-    const stab::Frame turned=Hull(0.5f*kDeg,0.0f,0.0f);
-    const bool ok=stab::Held(hold,s,turned,laid,held,hull);
-    Expect(ok && std::fabs(held[0]-laid[0])<1e-5f && std::fabs(hull[0])<1e-5f && std::fabs(held[1]-laid[1])<1e-5f,
-           "follow: the look ahead keeps the laid axes in a pure turn",held[0]-laid[0],hull[0]);
+    (void)probe;
+    return r;
+}
+
+void HullAddsToDrive() {
+    const float top=0.5f,away=120.0f*kDeg;
+    const Slew still=SlewOnto(away,0.0f,false,true),stillOld=SlewOnto(away,0.0f,false,false);
+    const Slew with=SlewOnto(away,0.3f,false,true),withOld=SlewOnto(away,0.3f,false,false);
+    const Slew against=SlewOnto(away,-0.8f,false,true);
+    const Slew snake=SlewOnto(away,0.3f,true,true);   // within the drive (faster carries it off, as above)
+    std::printf("drive 0.5 rad/s onto a point 120 deg left: hull still peak %.3f rad/s, on at frame %d (full off: %.3f, %d); "
+                "hull turning toward it 0.3 rad/s: peak %.3f rad/s, on at %d (full off: %.3f, %d); against at 0.8 rad/s: error %.1f deg at 2 s; "
+                "slalom +-0.3 rad/s: last second off by at most %.3f deg\n",still.peak,still.on,stillOld.peak,stillOld.on,with.peak,with.on,
+                withOld.peak,withOld.on,against.at2/kDeg,snake.late/kDeg);
+    Expect(still.on==stillOld.on && std::fabs(still.peak-stillOld.peak)<1e-4f,"hull still: the slew is the same as before",still.on,stillOld.on);
+    Expect(still.peak<=top*1.001f,"hull still: never faster than the drive",still.peak,top);
+    Expect(with.peak>=(top+0.3f)*0.97f,"hull turning the same way: the gun's world rate is the drive's top plus the hull's",with.peak,top+0.3f);
+    Expect(with.on>=0 && with.on<still.on*0.8f && with.on<withOld.on,"hull turning the same way: on the point sooner",with.on,still.on);
+    Expect(withOld.peak<=top*1.02f,"(the old model capped the world rate at the drive's top)",withOld.peak,top);
+    Expect(against.at2>away,"hull turning against it faster than the drive: the gun is carried off",against.at2/kDeg,away/kDeg);
+    Expect(snake.on>=0 && snake.late<0.5f*kDeg,"world point, slaloming hull: the gun settles on it",snake.late/kDeg);
 }
 }  // namespace
 
@@ -378,7 +373,7 @@ int main() {
     WrongSign();
     Stops();
     NativeReadbackContract();
-    FollowHull();
+    HullAddsToDrive();
     std::printf(failures ? "%d FAILED\n" : "all passed\n",failures);
     return failures ? 1 : 0;
 }
