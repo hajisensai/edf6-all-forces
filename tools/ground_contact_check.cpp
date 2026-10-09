@@ -39,8 +39,8 @@ constexpr float kBaumgarte=0.2f,kSlop=0.005f,kFriction=0.5f;
 constexpr int kSweeps=8;
 constexpr float kMostSpread=0.002f,kMostPitch=0.05f*kPi/180.0f;   // 2 mm, 0.05 deg
 
-struct Ground { float slope,bump,wave; };
-float Height(const Ground& g,float x) noexcept { return g.slope*x+g.bump*std::sin(x*g.wave); }
+struct Ground { float slope,bump,wave,drop=0.0f; };   // drop: m the whole ground has fallen (a crater under it)
+float Height(const Ground& g,float x) noexcept { return g.slope*x+g.bump*std::sin(x*g.wave)-g.drop; }
 float Rise(const Ground& g,float x) noexcept { return g.slope+g.bump*g.wave*std::cos(x*g.wave); }
 
 struct Body { float x,y,th,vx,vy,w; };   // centre, pitch (+ nose up), velocity, pitch rate
@@ -151,6 +151,45 @@ bool Case(const char* name,const Ground& g,float speed) noexcept {
 }
 }  // namespace
 
+// The degraded path (the solver's velocity unreadable, pjet_handling.h Drives / GroundFallback): the ground under the
+// craft falls 1 m away after it settled. Rolling on the fallback (the measured fall along the normal) and on the
+// contract it comes down onto it; the whole velocity written (what the degraded path did: a parked craft's 0 every
+// frame) cancels the gravity but for one step's (14.7/60 m/s): it only creeps down, still 0.27 m up 3 s on. A parked
+// craft is not driven there at all (the stock step's).
+bool Degraded() noexcept {
+    const auto run=[](int law,float speed){   // 0 the contract, 1 the fallback, 2 the whole velocity
+        const Ground g{0.0f,0.0f,0.0f};
+        Ground now=g;
+        Body b{};b.y=kWheelDrop+0.05f;
+        float prevY=b.y;
+        for(int f=0;f<static_cast<int>(4.0f/kDt);++f) {
+            if(f==static_cast<int>(1.0f/kDt))now.drop=1.0f;
+            const float up[3]={-std::sin(b.th),std::cos(b.th),0.0f},fwd[3]={std::cos(b.th),std::sin(b.th),0.0f};
+            const float vel[3]={fwd[0]*speed,fwd[1]*speed,0.0f},omega[3]={0.0f,0.0f,0.0f};
+            const float measured[3]={b.vx,(b.y-prevY)/kDt,0.0f};
+            float lin[3]={b.vx,b.vy,0.0f},ang[3]={0.0f,0.0f,b.w};
+            if(law==0)GroundContact(up,vel,omega,lin,ang);
+            else if(law==1)crew::handling::GroundFallback(up,vel,omega,measured,lin,ang);
+            else{for(int i=0;i<3;++i)lin[i]=vel[i];ang[2]=0.0f;}
+            b.vx=lin[0];b.vy=lin[1];b.w=ang[2];
+            prevY=b.y;
+            float push=0.0f;
+            Solve(b,now,&push);
+        }
+        float gap=0.0f;
+        for(int k=0;k<2;++k){float q[2],r[2];Wheel(b,k ? -kAxle : kAxle,q,r);gap=std::fmax(gap,q[1]-Height(now,q[0]));}
+        return gap;
+    };
+    const float contract=run(0,0.0f),fallback=run(1,5.0f),whole=run(2,0.0f);
+    const bool drives=crew::handling::Drives(false,true) && crew::handling::Drives(false,false) && crew::handling::Drives(true,true) &&
+                      !crew::handling::Drives(true,false);
+    const bool ok=contract<0.05f && fallback<0.05f && whole>0.2f && drives;
+    std::printf("%-30s wheel gap after the ground fell 1 m: contract %.3f m, fallback (rolling) %.3f m, whole velocity %.3f m "
+                "(hangs); parked without the solver goes to the stock step %s  %s\n","degraded path",contract,fallback,whole,
+                drives ? "yes" : "NO",ok ? "ok" : "WRONG");
+    return ok;
+}
+
 int main() {
     // `slope` the rise a metre, `bump` m and `wave` rad/m of the undulation (a runway's few cm, a field's 10-30 cm).
     const struct { const char* name; Ground g; float speed; } cases[]={
@@ -162,6 +201,7 @@ int main() {
     };
     int bad=0;
     for(const auto& c:cases)bad+=Case(c.name,c.g,c.speed) ? 0 : 1;
+    bad+=Degraded() ? 0 : 1;
     // The stand-in tells the laws apart: a law before held a wheel off the ground (turned against its contacts) somewhere.
     std::printf("%-30s %d cases where a law before held a wheel off the ground  %s\n","the stand-in discriminates",fought,fought>0 ? "ok" : "WRONG");
     bad+=fought>0 ? 0 : 1;

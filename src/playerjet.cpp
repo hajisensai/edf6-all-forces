@@ -1689,7 +1689,9 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
         Ground(j,v,s,clear,dt);
         if(water || wet)Crash(j,v,0.0f,Len(j.vel),false,ms,nullptr);   // afloat: it breaks up, one crash a kCrashMs
     }
-    j.active=!v[kDead];   // parked too: held still on its contacts (the stock step pulled it level against its gear)
+    // Parked too: held still on its contacts (the stock step pulled it level against its gear), as long as the solver's
+    // velocity can be read (pjet_handling.h Drives).
+    j.active=!v[kDead] && handling::Drives(j.phase==Phase::parked,Body506ReadsSolver());
     std::memcpy(j.sent,j.vel,12);
     MirrorEntry(j,v);
     Elevons(j,v,s.pitch,s.roll,dt);
@@ -1715,9 +1717,10 @@ bool PlayerJetBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
         Crash(*j,v,0.0f,lost+j->kind->landMax,false,GameMs(),nullptr);
     // On the ground its contacts keep the solver's motion across it and its pitch and roll (`lin` / `ang` come in as the
     // solver left them: body506.cpp PhysicsHook); in the air the flight's is the whole of it.
-    if(j->phase!=Phase::air && Body506ReadsSolver()) {
+    if(j->phase!=Phase::air) {
         const float* m=reinterpret_cast<const float*>(v+kMatrix);
-        handling::GroundContact(m+4,j->vel,j->omega,lin,ang);
+        if(Body506ReadsSolver())handling::GroundContact(m+4,j->vel,j->omega,lin,ang);
+        else handling::GroundFallback(m+4,j->vel,j->omega,j->measured,lin,ang);   // rolling only: parked is the stock's
     } else for(int i=0;i<3;++i){lin[i]=j->vel[i];ang[i]=j->omega[i];}
     return true;
 }
