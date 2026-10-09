@@ -40,6 +40,8 @@ bool HighCamOn(const void*) noexcept{return observer;}
 bool TurretCamHighTransition(const void*) noexcept{return transition;}
 bool TurretCamTurret(const void*,unsigned) noexcept{return true;}
 bool CameraRay(float*,float*) noexcept{return false;}
+bool MapOwnsView() noexcept{return false;}
+void Log(const char*,...) noexcept{}
 float MapRay(const float*,const float*,float*) noexcept{return -1;}
 }
 extern "C" bool __cdecl EDF6VehicleCrew_SightBindingV1(const void*,unsigned,bool,int);
