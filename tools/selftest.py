@@ -3432,14 +3432,15 @@ def pack_install_upgrade_uninstall() -> None:
             enter(patched(rootcpk, use=lambda root: None))   # its readers are stubbed; DEFAULT_GAME stays
 
             def mission(game: str, plan: object) -> list[str]:
-                out = gen.mission_dir(game, gen.SLOTS[0].mission)
+                out = gen.mission_dir(game, gen.RANGE_MISSION)
                 modfiles.atomic_write(os.path.join(out, gen.MARKER), b'range')
                 modfiles.atomic_write(os.path.join(out, 'MISSION.AC'), b'script')
                 modfiles.atomic_write(os.path.join(out, 'MISSION.RMPA'), b'points')
+                modfiles.atomic_write(os.path.join(out, 'MISSION.JSON'), b'{}')
                 ledger.Ledger(game).put(gen.OWNER, 'OBJECT/EDF6TR_FAKE.SGO', b'range object')
                 return []
             enter(patched(gen, install=mission, grand_battle=lambda plan: plan))
-            enter(patched(e5c, build=lambda game: _e5c_stub()))   # its own install / remove / check run for real
+            enter(patched(e5c, build=lambda game, campaign=True, test_range=True: _e5c_stub()))   # its own install / remove / check run for real
             enter(patched(e5c.modfiles, refuse_while_running=lambda *a, **k: None))   # the real game may be open
             for group in buildcache.GROUPS:
                 made = (b'mac', {'FAKE_PIECE.MAC': b'piece'}) if group == 'bigmap' else \
@@ -4845,9 +4846,10 @@ def installer_recovery_regressions() -> None:
 # ---------------------------------------------------------------- the EDF5 campaign (tools/make_edf5_campaign.py)
 
 
-def _e5c_stub() -> tuple[dict[str, bytes], int, dict]:
-    """make_edf5_campaign.build on a stand-in game (no Root.cpk to read): a file each, the packs' content from 3."""
-    return {rel: f'stub {rel}'.encode() for rel in e5c.FILES}, 3, {'rows': [], 'skipped': []}
+def _e5c_stub() -> tuple[dict[str, bytes], object, dict]:
+    """make_edf5_campaign.build on a stand-in game (no Root.cpk to read): a file each, the EDF5 packs' content from 3,
+    the test range's after them."""
+    return {rel: f'stub {rel}'.encode() for rel in e5c.FILES}, e5c.Contents(3, 6), {'rows': [], 'skipped': []}
 
 
 def _e5c_have_game() -> bool:
@@ -4886,7 +4888,7 @@ def edf5_campaign_build() -> None:
     untouched), each with a content id of its own after every stock one, its own save file and its own list / five
     texts / thumbnails, the texts one row per list row, every row 11 members with the 11th named flags (EDF.dll reads it
     by name), successors chained and in range; every language's text table names the three modes. EDF6's own offline
-    list is not written."""
+    list is not written. The test range's pack after them: edf5_campaign_range_pack."""
     import mdb
     import rootcpk
     import sgo
@@ -4897,38 +4899,45 @@ def edf5_campaign_build() -> None:
     assert set(files) == set(e5c.FILES)
     stock = sgo.plain(sgo.read(rootcpk.default().read('DEFAULTPACKAGE', 'CONFIG.SGO'))[1]['ModeList'])
     modes = sgo.plain(sgo.read(files[e5c.CONFIG])[1]['ModeList'])
-    assert modes[:len(stock)] == stock and len(modes) == len(stock) + 3, 'the stock modes changed'
-    assert content == 3 == max(m[e5c.M_CONTENT] for m in stock) + 1
-    packs = modes[len(stock):]
-    assert [m[e5c.M_CONTENT] for m in packs] == [3, 4, 5]
-    assert all(m[e5c.M_ONLINE] == 0 and m[e5c.M_TYPE] == 0 for m in packs), 'a pack that is not offline'
-    assert len({m[e5c.M_MST].upper() for m in modes}) == len(stock) // 2 + 3, 'a pack sharing a save file'
+    assert modes[:len(stock)] == stock and len(modes) == len(stock) + 3 * 2 + 2, 'the stock modes changed'
+    assert content == e5c.Contents(3, 6) and content.campaign == max(m[e5c.M_CONTENT] for m in stock) + 1
+    packs = modes[len(stock):len(stock) + 6]   # each pack's offline mode, then its online one (more than one player)
+    assert [m[e5c.M_CONTENT] for m in packs] == [3, 3, 4, 4, 5, 5]
+    assert [(m[e5c.M_ONLINE], m[e5c.M_TYPE]) for m in packs] == [(0, 0), (1, 1)] * 3, 'not an offline and an online mode'
+    assert len({m[e5c.M_MST].upper() for m in modes}) == len(stock) // 2 + 3 + 1, 'a pack\'s two modes on two saves'
     assert len({(m[e5c.M_TYPE], m[e5c.M_CONTENT]) for m in modes}) == len(modes), 'GetModeNo(type, content) ambiguous'
-    for m, pack in zip(packs, e5c.PACKS):
-        like = next(s for s in stock if s[e5c.M_CONTENT] == pack.like and s[e5c.M_TYPE] == 0)
-        assert m[7] == like[7] and m[11:] == like[11:], 'the difficulty ranges are not the matching stock mode\'s'
-        assert m[e5c.M_FILES] == pack.paths() and m[e5c.M_NAME] == pack.name_key and m[e5c.M_DESC] == pack.desc_key
+    for (off, on), pack in zip(zip(packs[0::2], packs[1::2]), e5c.PACKS):
+        assert off[e5c.M_MST] == on[e5c.M_MST] == pack.mst
+        for m, kind in ((off, e5c.OFFLINE), (on, e5c.ONLINE)):
+            like = next(s for s in stock if s[e5c.M_CONTENT] == pack.like and s[e5c.M_TYPE] == m[e5c.M_TYPE])
+            assert m[7] == like[7] and m[11:] == like[11:], 'the difficulty ranges are not the matching stock mode\'s'
+            assert m[e5c.M_FILES] == pack.paths(kind) and (m[e5c.M_NAME], m[e5c.M_DESC]) == pack.keys(kind)
     for lang, rel in e5c.TEXTS.items():
         base = sgo.read(rootcpk.default().read('ETC', f'TEXTTABLE_STEAM.{lang}.TXT_SGO'))[1]
         text = sgo.read(files[rel])[1]
         assert {k: v for k, v in text.items() if k in base} == base, (rel, 'stock text changed')
         for pack in e5c.PACKS:
-            assert text[pack.name_key] == pack.name[lang] and text[pack.desc_key] == pack.desc[lang], rel
+            for kind in pack.kinds:
+                name_key, desc_key = pack.keys(kind)
+                assert text[name_key] == pack.name[lang] and text[desc_key] == pack.desc[lang], rel
     counts = {pack.group: 0 for pack in e5c.PACKS}
     for pack in e5c.PACKS:
-        rows = dsgo.parse(files[pack.list]).root.get('table').items
-        counts[pack.group] = len(rows)
-        assert 0 < len(rows) <= 512
-        for i, r in enumerate(rows):
-            assert len(r.items) == 11 and r.names == {10: 'flags'} and r.items[0] == float(i), (pack.tag, i)
-            assert r.items[3].items == ([float(i + 1)] if i + 1 < len(rows) else []), (pack.tag, i)
-            assert r.items[1].startswith('app:/Mission/EDF5_OLD_SCRIPT/') and r.items[10] == 8.0
-            rootcpk.default().read(r.items[1].split('app:/', 1)[1], 'MISSION.BVM')
-        for rel in pack.txt.values():
-            assert len(sgo.read(files[rel])[1]['table']) == len(rows), rel
-        names = [f.name for f in mdb.rab_read(files[pack.image]).files]
-        assert names == [e5c.thumb_name(r.items[2]) for r in rows], pack.tag
-        assert dsgo.compact(dsgo.parse(files[pack.list])) == files[pack.list]
+        assert pack.kinds == (e5c.OFFLINE, e5c.ONLINE)
+        lists = [pack.kind_files(kind) for kind in pack.kinds]
+        for listed, image, txt in lists:
+            rows = dsgo.parse(files[listed]).root.get('table').items
+            counts[pack.group] = len(rows)
+            assert 0 < len(rows) <= 512
+            for i, r in enumerate(rows):
+                assert len(r.items) == 11 and r.names == {10: 'flags'} and r.items[0] == float(i), (pack.tag, i)
+                assert r.items[3].items == ([float(i + 1)] if i + 1 < len(rows) else []), (pack.tag, i)
+                assert r.items[1].startswith('app:/Mission/EDF5_OLD_SCRIPT/') and r.items[10] == 8.0
+                rootcpk.default().read(r.items[1].split('app:/', 1)[1], 'MISSION.BVM')
+            for rel in txt.values():
+                assert len(sgo.read(files[rel])[1]['table']) == len(rows), rel
+            names = [f.name for f in mdb.rab_read(files[image]).files]
+            assert names == [e5c.thumb_name(r.items[2]) for r in rows], pack.tag
+            assert dsgo.compact(dsgo.parse(files[listed])) == files[listed]
     assert counts == {'main': 110, 'dlc1': 11, 'dlc2': 14}, counts
     assert {x[1] for x in p['skipped']} == {'DLC/DM015', 'DLC/DM018', 'DLC/DM019', 'DLC/DM020'}, p['skipped']
 
@@ -4953,9 +4962,10 @@ def edf5_campaign_install_remove() -> None:
         ini = os.path.join(root, 'Mods', e5c.INI)
         modfiles.atomic_write(ini, b'[VehicleCrew]\nEnabled=1\n')
         first = e5c.build(root)
-        assert first[1] == 8, 'the packs\' content ids collide with the other mod\'s'
+        assert first[1] == e5c.Contents(8, 11), 'the packs\' content ids collide with the other mod\'s'
         e5c.install(root, first)
         assert 'EDF5CampaignContent=8' in open(ini, encoding='utf-8').read()
+        assert 'TestRangeContent=11' in open(ini, encoding='utf-8').read()
         assert all('also' not in e for e in e5c.load_manifest(root)['files'].values()), 'the final manifest'
         assert e5c.check(root)
         again = e5c.build(root)
@@ -4966,6 +4976,7 @@ def edf5_campaign_install_remove() -> None:
         assert modfiles.read(e5c.rel_path(root, e5c.CONFIG)) == other, "the other mod's mode table not put back"
         assert all(modfiles.read(e5c.rel_path(root, rel)) is None for rel in e5c.FILES if rel != e5c.CONFIG)
         assert 'EDF5CampaignContent=0' in open(ini, encoding='utf-8').read()
+        assert 'TestRangeContent=0' in open(ini, encoding='utf-8').read()
         assert not e5c.installed(root) and e5c.check(root), 'not installed is a valid state'
         e5c.install(root, e5c.build(root))
         image = e5c.PACKS[0].image
@@ -4982,6 +4993,60 @@ def edf5_campaign_install_remove() -> None:
         e5c.remove(root)
         assert 'EDF5CampaignContent=8' in open(ini, encoding='utf-8').read(), 'content id zeroed under a kept table'
         assert all(os.path.isfile(e5c.rel_path(root, rel)) for rel in e5c.FILES)
+
+
+@test
+def edf5_campaign_range_pack() -> None:
+    """The test range's pack from the real Root.cpk (2026-10-09: the range over RM015 never ends, so the story stopped
+    there): an offline and an online mode after the EDF5 packs, one content id and one save file for both (as the stock
+    packs), each a copy of the stock story mode of its kind; one row each, row 0 (open from the start), no successor,
+    naming the range's folder with RM015's row values (flags 8: the Air Raider's requests arrive; the ruined world's
+    rows do not); texts and thumbnails per kind, the mode names in every text table. Without the campaign it is the
+    only pack, with the first free id; and the stock story's lists are never written."""
+    import mdb
+    import rootcpk
+    import sgo
+    if not _e5c_have_game():
+        return
+    game = rootcpk.default()
+    stock = sgo.plain(sgo.read(game.read('DEFAULTPACKAGE', 'CONFIG.SGO'))[1]['ModeList'])
+    rm015 = next(r for r in dsgo.parse(game.read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO')).root.get('table').items
+                 if r.items[2] == 'EDF6/RM015')
+    for campaign, want in ((True, e5c.Contents(3, 6)), (False, e5c.Contents(0, 3))):
+        files, content, _ = e5c.build(rootcpk.DEFAULT_GAME, campaign=campaign)
+        assert content == want, (campaign, content)
+        assert set(files) == {e5c.CONFIG, *e5c.TEXTS.values(),
+                              *(f for pk in (*(e5c.PACKS if campaign else ()), e5c.RANGE) for f in pk.files())}
+        modes = sgo.plain(sgo.read(files[e5c.CONFIG])[1]['ModeList'])
+        assert modes[:len(stock)] == stock
+        ours = modes[-2:]
+        assert [(m[e5c.M_ONLINE], m[e5c.M_TYPE]) for m in ours] == [(0, 0), (1, 1)]
+        assert {m[e5c.M_CONTENT] for m in ours} == {content.range} and {m[e5c.M_MST] for m in ours} == {e5c.RANGE.mst}
+        assert len({(m[e5c.M_TYPE], m[e5c.M_CONTENT]) for m in modes}) == len(modes), 'GetModeNo(type, content) ambiguous'
+        for m, kind in zip(ours, e5c.RANGE.kinds):
+            like = next(x for x in stock if x[e5c.M_CONTENT] == 0 and x[e5c.M_TYPE] == m[e5c.M_TYPE])
+            assert m[7] == like[7] and m[11:] == like[11:], 'not the stock story mode of its kind'
+            assert m[e5c.M_FILES] == e5c.RANGE.paths(kind) and (m[e5c.M_NAME], m[e5c.M_DESC]) == e5c.RANGE.keys(kind)
+            listed, image, txt = e5c.RANGE.kind_files(kind)
+            rows = dsgo.parse(files[listed]).root.get('table').items
+            assert len(rows) == 1 and rows[0].names == {10: 'flags'} and rows[0].items[3].items == []
+            assert rows[0].items[:3] == [0.0, f'app:/Mission/EDF6/{e5c.RANGE_MISSION}', f'EDF6/{e5c.RANGE_MISSION}']
+            assert rows[0].items[5:] == rm015.items[5:], 'not RM015\'s row values'
+            for lang, rel in txt.items():
+                assert sgo.read(files[rel])[1]['table'] == [[e5c.RANGE_ROW['title'][lang], e5c.RANGE_ROW['brief'][lang]]]
+            assert [f.name for f in mdb.rab_read(files[image]).files] == [e5c.thumb_name(rows[0].items[2])]
+        for lang, rel in e5c.TEXTS.items():
+            text = sgo.read(files[rel])[1]
+            for kind in e5c.RANGE.kinds:
+                name_key, desc_key = e5c.RANGE.keys(kind)
+                assert text[name_key] == e5c.RANGE.name[lang] and text[desc_key] == e5c.RANGE.desc[lang], rel
+        assert not set(files) & set(e5c.LEGACY)
+    try:
+        e5c.build(rootcpk.DEFAULT_GAME, campaign=False, test_range=False)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('a build with no pack')
 
 
 @test
@@ -5007,7 +5072,7 @@ def edf5_campaign_interrupted_reinstall() -> None:
             else:
                 raise AssertionError('the failing write did not fail')
         files, content, _ = e5c.build(root)   # neither refused nor added to the half-written table
-        assert content == 3 and files[e5c.CONFIG] == e5c.build(root)[0][e5c.CONFIG]
+        assert content == e5c.Contents(3, 6) and files[e5c.CONFIG] == e5c.build(root)[0][e5c.CONFIG]
         done, kept = e5c.remove(root)
         assert not kept, kept
         assert modfiles.read(e5c.rel_path(root, e5c.CONFIG)) == other, "the other mod's mode table lost"

@@ -110,10 +110,11 @@ class RecoveryTests(unittest.TestCase):
         self.stack.enter_context(patch.object(call_weapons, 'check', return_value=True))
         import make_edf5_campaign
         self.stack.enter_context(patch.object(make_edf5_campaign, 'check', return_value=True))
+        self.stack.enter_context(patch.object(make_edf5_campaign, 'range_installed', return_value=True))
         self.stack.enter_context(patch.object(rootcpk, 'use', lambda _: None))
         self.assertFalse(installer.check(str(self.game)))  # interrupted before gen.install
-        out = Path(gen.mission_dir(str(self.game), gen.DEFAULT_SLOT))
-        names = ('MISSION.AC', 'MISSION.RMPA', gen.MARKER)
+        out = Path(gen.mission_dir(str(self.game), gen.RANGE_MISSION))
+        names = ('MISSION.AC', 'MISSION.RMPA', 'MISSION.JSON', gen.MARKER)
         for name in names:
             modfiles.atomic_write(str(out / name), b'complete')
         self.assertTrue(installer.check(str(self.game)))

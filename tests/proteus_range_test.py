@@ -67,9 +67,10 @@ class RealRange(unittest.TestCase):
             plan.waves.enabled = False; plan.air.enabled = False
             # Resolve the temporary game's resource reads to the genuine read-only
             # archive; all production install/ledger writes still target `root`.
-            with patch.object(gen, 'Game', return_value=self.game):
+            # The pack registration reads the whole game (tools/make_edf5_campaign.py, its own tests): not this one's.
+            with patch.object(gen, 'Game', return_value=self.game), patch.object(gen, 'register_pack', return_value=[]):
                 gen.install(root, plan)
-            text = Path(gen.mission_dir(root, plan.slot), 'MISSION.AC').read_text(encoding='utf-8-sig')
+            text = Path(gen.mission_dir(root, gen.RANGE_MISSION), 'MISSION.AC').read_text(encoding='utf-8-sig')
             self.assertIn(f'Preload("app:/object/{private}.sgo"', text)
             self.assertIn(f'"app:/object/{private}.sgo", {plan.vehicle_level:.2f}', text)
             self.assertNotIn(f'"app:/object/{stock_name}.sgo"', text)

@@ -8,6 +8,9 @@ mission, run in-mission keys, collect the plugin log, quit. Screenshots only at 
     python run_test.py --keep                   # leave the game running at the end
 
 Every key goes through `front()` first: nothing is sent unless EDF6 owns the foreground window.
+The range is the one mission of its own mission pack: pick 「EDF6VehicleCrew 测试场」 once in the offline mode's
+「任务包」 list (the game keeps the last pack); the menus below then only run to the top of its one-row list.
+For a run without menus or keys, see tests/autopilot/drive.py (`run range`).
 Output: run_<time>/ with shots, the new plugin log lines (log.txt) and summary.txt.
 """
 from __future__ import annotations
@@ -355,19 +358,20 @@ def attach_cdb(pid: int, out_dir: str) -> subprocess.Popen:
                             stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
 
 
-def navigate(r: Runner, slot: gen.Slot, timeout: float, trace: bool, learn: bool) -> None:
+def navigate(r: Runner, timeout: float, trace: bool, learn: bool) -> None:
     """Title -> the test range's mission on the last used difficulty.
 
     Green title/save/mode menus all take Enter, so Enter is pressed every 3 s until the HQ-side
-    footer shows. From there every key depends on the recognised screen. On the mission list the
-    cursor runs to the top, steps down to the slot's item, and Enter is only pressed once the
-    briefing text matches refs/<mission>.png. `learn` saves that reference instead (first run)."""
+    footer shows. From there every key depends on the recognised screen. On the mission list (the
+    range pack's: one row) the cursor runs to the top, and Enter is only pressed once the briefing
+    text matches refs/<mission>.png. `learn` saves that reference instead (first run)."""
+    mission = gen.RANGE_MISSION
     end = time.time() + timeout
     last_enter = 0.0
     tries = 0
     step = 0
     while time.time() < end:
-        s = r.screen(slot.mission)
+        s = r.screen(mission)
         if trace:
             r.shot(f'0_nav{step:02d}')
             r.notes.append(f'nav{step:02d} ' + ' '.join(f'{k}={v:.0f}' for k, v in s.items()))
@@ -382,7 +386,7 @@ def navigate(r: Runner, slot: gen.Slot, timeout: float, trace: bool, learn: bool
             r.key('enter')
             r.wait(2.5)
             continue
-        if r.on('footer', s):        # mission list: top, then down to the slot's item
+        if r.on('footer', s):        # mission list: its top row is the range's
             tries += 1
             if tries > 3:            # not the list after all: back out to the HQ menu
                 r.key('esc')
@@ -390,15 +394,13 @@ def navigate(r: Runner, slot: gen.Slot, timeout: float, trace: bool, learn: bool
                 tries = 0
                 continue
             r.key('up', 6.0)
-            r.wait(0.3)
-            for _ in range(slot.item - 1):
-                r.key('down', 0.08, 0.3)
             r.wait(1.0)
             if learn:
                 r.screen()
-                r.last.crop(BRIEFING).save(os.path.join(REFS, slot.mission + '.png'))
-                r.shot('learn_' + slot.mission)
-                raise RuntimeError(f'已保存 refs/{slot.mission}.png，先看 learn_{slot.mission}.png 确认光标在第 {slot.item} 项')
+                r.last.crop(BRIEFING).save(os.path.join(REFS, mission + '.png'))
+                r.shot('learn_' + mission)
+                raise RuntimeError(f'已保存 refs/{mission}.png，先看 learn_{mission}.png 确认光标在测试场那一关'
+                                   '（列表不是测试场的：先在「任务包」里选「EDF6VehicleCrew 测试场」）')
             continue
         if time.time() - last_enter > 3:
             r.key('enter')
@@ -447,7 +449,7 @@ def quit_game(r: Runner) -> bool:
 
 
 def install(args: argparse.Namespace) -> list[str]:
-    if not (args.heli or args.plan or args.slot):
+    if not (args.heli or args.plan):
         return ['测试场/装备：保持现在装的']
     plan = gen.load_plan(args.plan) if args.plan else gen.Plan()
     if args.heli:
@@ -455,8 +457,6 @@ def install(args: argparse.Namespace) -> list[str]:
         plan.friends = dict(HELI_PLAN_FRIENDS)
         plan.loadout = dict(HELI_LOADOUT)
         plan.waves.enabled = args.enemies
-    if args.slot:
-        plan.slot = args.slot
     lines = gen.install(args.game, plan) or ['（没有脚本载具）']
     lines += weapons.write_loadout(args.game, plan.loadout) or ['装备：存档里的']
     return lines
@@ -467,14 +467,13 @@ def main() -> int:
     ap.add_argument('--game', default=os.environ.get('EDF6_DIR', gen.DEFAULT_GAME))
     ap.add_argument('--plan', help='testrange.json 一类的方案文件；不给就不重装')
     ap.add_argument('--heli', action='store_true', help='空袭兵；地图上生成两架 NPC 驾驶的 506 直升机（编队）；载具格仍是 N9 Eros')
-    ap.add_argument('--slot', choices=[x.mission for x in gen.SLOTS], help='测试场装进哪一关（默认沿用方案/现装的）')
     ap.add_argument('--enemies', action='store_true', help='和 --heli 一起用：也刷敌人波次')
     ap.add_argument('--seconds', type=float, default=60, help='进关后停留秒数（--act 跑完后剩余时间）')
     ap.add_argument('--act', default='', help='进关后的动作序列，见 Runner.act')
     ap.add_argument('--menu-timeout', type=float, default=180, help='从启动到选好难度最多等多少秒')
     ap.add_argument('--load-wait', type=float, default=25, help='选完难度后等关卡载入的秒数')
     ap.add_argument('--cdb', action='store_true')
-    ap.add_argument('--learn', action='store_true', help='第一次用某个槽位：走到那一项后保存说明文字参考图并停下')
+    ap.add_argument('--learn', action='store_true', help='第一次用：走到测试场那一关后保存说明文字参考图并停下')
     ap.add_argument('--trace', action='store_true', help='菜单每一步都截图（采集参考图用）')
     ap.add_argument('--keep', action='store_true', help='结束时不退出游戏')
     ap.add_argument('--attach', action='store_true', help='用已经在跑的 EDF6（停在标题画面）')
@@ -483,10 +482,9 @@ def main() -> int:
     out = os.path.join(gen.HERE, 'runs', time.strftime('%Y%m%d_%H%M%S'))
     os.makedirs(out, exist_ok=True)
     summary = ['安装：'] + ['    ' + l for l in install(args)]
-    slot = gen.installed(args.game)
-    if slot is None:
-        raise RuntimeError('游戏里没装测试场')
-    summary.append(f'槽位：{slot.mission}（任务列表第 {slot.item} 项）')
+    if not gen.installed(args.game):
+        raise RuntimeError('游戏里没装测试场（关卡或任务包缺一样）')
+    summary.append(f'关卡：{gen.RANGE_MISSION}（「EDF6VehicleCrew 测试场」任务包）')
     offset = log_size(args.game)
     t0 = time.time()
     stage = 'start'
@@ -497,7 +495,7 @@ def main() -> int:
     dbg = attach_cdb(pid, out) if args.cdb else None
     try:
         stage = 'menu'
-        navigate(r, slot, args.menu_timeout, args.trace, args.learn)
+        navigate(r, args.menu_timeout, args.trace, args.learn)
         stage = 'loading'
         r.wait(args.load_wait)
         r.shot('2_in_mission')

@@ -16,9 +16,9 @@ What install does, with EDF6.exe closed:
      Bohr, the NPC Titan's side guns, their text rows; its own manifest Mods/.edf6at_data.json and backups), and
      last the plugins (PLUGINS: EDF6VehicleCrew and EDF6AutoTurret): each DLL, and its .ini (a new one when there
      is none; else the player's own, with only the settings this version adds appended: merge_ini); then the big
-     map (it sets BigWorld in EDF6VehicleCrew.ini) and the test range's target-only mission (testrange/gen.py target_range, on
-     its slot), so everyone in an online room has the same map and the same objects (the user, 2026-10-05: one pack
-     to play with others). The test range's forced loadout is never written: everyone picks their own class.
+     map (it sets BigWorld in EDF6VehicleCrew.ini) and the test range's target-only mission (testrange/gen.py target_range,
+     the one mission of its own mission pack, offline and online: tools/make_edf5_campaign.py RANGE), so everyone in an
+     online room has the same map and the same objects (the user, 2026-10-05: one pack to play with others). The test range's forced loadout is never written: everyone picks their own class.
 
 With StockVehicleStores=1 (or the older StockHeliStores=1) in the player's ini (on by default) install also gives the
 stock vehicles' requests the stores they should carry (tools/make_stock_stores.py: the tanks, the missile launcher, the
@@ -392,6 +392,30 @@ def build_asset(cache: Any, module: ModuleType, label: str, builder: Any = None)
     return built
 
 
+def build_packs(game: str, campaign: bool) -> tuple | None:
+    """The mission packs to write (make_edf5_campaign.build), or None: the test range's always, the EDF5 campaign's
+    when wanted. A refusal of the campaign alone (a mission's resource missing, ...) still registers the range when no
+    campaign is installed to keep; the opt-out (`campaign` False) is the packs rebuilt without it."""
+    import make_edf5_campaign
+    if campaign:
+        print('生成任务包：测试场，以及可选实验 EDF5 战役（本篇、DLC1、DLC2 三个独立任务包；原始 BVM 脚本尚未逐关验证，缺少资源的 4 关不会安装）……')
+    else:
+        print('生成测试场任务包（EDF5 战役已停用）……')
+    try:
+        return make_edf5_campaign.build(game, campaign=campaign)
+    except make_edf5_campaign.Refused as e:
+        print('！ 不安装任务包：', e)
+    if not campaign or make_edf5_campaign.enabled(game):
+        return None
+    try:
+        built = make_edf5_campaign.build(game, campaign=False)
+    except make_edf5_campaign.Refused as e:
+        print('！ 测试场任务包也装不上：', e)
+        return None
+    print('  只装测试场任务包，不装 EDF5 战役。')
+    return built
+
+
 def install(game: str, campaign_requested: bool = False) -> None:
     import buildcache
     import call_weapons
@@ -448,19 +472,11 @@ def install(game: str, campaign_requested: bool = False) -> None:
     sazabi = build_asset(cache, make_sazabi, '沙扎比（模型生成约 1.5 分钟）')
     proteus = build_asset(cache, make_proteus, '普罗透斯护盾（原版空袭兵电磁碉堡墙；同时撤销旧版生成的模型）')
     bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
-    campaign = None
-    if campaign_requested or make_edf5_campaign.wanted(game):
-        print('生成可选实验 EDF5 战役（本篇、DLC1、DLC2 三个独立任务包；原始 BVM 脚本尚未逐关验证，缺少资源的 4 关不会安装）……')
-        try:
-            campaign = make_edf5_campaign.build(game)
-        except make_edf5_campaign.Refused as e:
-            print('！ 不安装 EDF5 战役：', e)
+    campaign = build_packs(game, campaign_requested or make_edf5_campaign.wanted(game))
     print('\n全部生成完毕，开始写入。')
-    if campaign is None and not make_edf5_campaign.wanted(game):
-        # Finish an interrupted opt-out before updating the rest of the installation.
-        make_edf5_campaign.remove(game)
-        if make_edf5_campaign.enabled(game):
-            raise make_edf5_campaign.Refused('无法完成 EDF5 战役停用：任务列表已被其他工具修改，已保留依赖文件。')
+    if campaign is None and not make_edf5_campaign.wanted(game) and make_edf5_campaign.enabled(game):
+        # An opt-out (finished by the packs rebuilt without the campaign) that cannot be: refused before writing.
+        raise make_edf5_campaign.Refused('无法完成 EDF5 战役停用：任务列表已被其他工具修改，已保留依赖文件。')
     for path in (make_optics.install_models(game, optics) if optics is not None else []):
         print('写入', path)
     for path in (make_jets.install(game, jets) if jets is not None else []) + \
@@ -494,7 +510,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
         print('写入', path)
     for name, section in PLUGINS:
         install_plugin(game, *plugins[name], name, section)
-    if campaign is not None:   # after the plugin's ini: it sets EDF5CampaignContent there
+    if campaign is not None:   # after the plugin's ini: it sets EDF5CampaignContent and TestRangeContent there
         for path in make_edf5_campaign.install(game, campaign):
             print('写入', path)
         print(make_edf5_campaign.summary(campaign))
@@ -514,7 +530,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
         cache.record('bigmap', {f'MAP/{make_bigmap.MAP_FILE}': mac,
                                 **{f'MAP/{name}': data for name, data in pieces.items()}})
     cache.save()  # assets succeeded: a later mission failure must not force expensive regeneration
-    print('写入测试场关卡（只有靶子，没有敌人；联机时大家要有同样的关卡和物体）……')
+    print('写入测试场关卡（「EDF6VehicleCrew 测试场」任务包的唯一一关；只有靶子，没有敌人；联机时大家要有同样的关卡和物体）……')
     for line in gen.install(game, gen.target_range(gen.Plan())):
         print('  ', line)
     print('\n安装完成。启动游戏即可。')
@@ -586,12 +602,13 @@ def uninstall(game: str) -> None:
                 print('保留（之后被别的工具改过）', path)
     if choice == '2':   # the stock vehicles' stores need the plugin to fire: they go with it (with 1 they went above)
         uninstall_stock_stores(game)
-    if gen.uninstall(game):
+    if gen.uninstall(game, unregister=False):   # its pack goes with the others just below
         print('删除测试场关卡')
     # with 2 too: without the plugin the packs would stay listed as content the player does not own
     import make_edf5_campaign
     if make_edf5_campaign.installed(game):
-        print('EDF5 战役：模式表、文本表还原成安装前的样子，删除 3 个任务包的任务列表（各任务包的存档 DEFP_E5*.MST 留着，重新安装后照旧显示）。')
+        print('任务包（测试场、EDF5 战役）：模式表、文本表还原成安装前的样子，删除各任务包的任务列表'
+              '（存档 DEFP_TR00.MST、DEFP_E5*.MST 留着，重新安装后照旧显示）。')
         done, kept = make_edf5_campaign.remove(game)
         for path in done:
             print('还原', path)
@@ -618,13 +635,19 @@ def _text(path: str) -> str | None:
 
 
 def check_range(game: str) -> bool:
-    """The installer always writes the default slot; mission files are outside the asset ledger."""
+    """The range's mission (outside the asset ledger) and its pack in the mode table: one without the other cannot be
+    played. A range still over a story mission it used to replace (gen.LEGACY_SLOTS) blocks the story there."""
     import gen
-    out = gen.mission_dir(game, gen.DEFAULT_SLOT)
-    missing = [name for name in ('MISSION.AC', 'MISSION.RMPA', gen.MARKER)
+    import make_edf5_campaign
+    out = gen.mission_dir(game, gen.RANGE_MISSION)
+    missing = [name for name in ('MISSION.AC', 'MISSION.RMPA', 'MISSION.JSON', gen.MARKER)
                if not modfiles.read(os.path.join(out, name))]
-    print('\n测试场关卡：' + (f'缺失或为空：{", ".join(missing)}' if missing else '文件齐全'))
-    return not missing
+    if not make_edf5_campaign.range_installed(game):
+        missing.append('任务包（模式表里没有测试场）')
+    legacy = [m for m in gen.LEGACY_SLOTS if gen.ours(game, m)]
+    print('\n测试场关卡：' + (f'缺失或为空：{", ".join(missing)}' if missing else '文件齐全，任务包已注册')
+          + (f'；旧版测试场还占着剧情关 {", ".join(legacy)}（重新安装会还原）' if legacy else ''))
+    return not missing and not legacy
 
 
 def check(game: str) -> bool:
@@ -713,16 +736,16 @@ def manage_campaign(game: str) -> int:
     if choice == '1':
         install(game, campaign_requested=True)
         return 0 if make_edf5_campaign.enabled(game) and make_edf5_campaign.check(game) else 1
-    if choice == '2':
-        done, kept = make_edf5_campaign.remove(game, remember_disabled=True)
-        for path in done:
-            print('还原', path)
-        for path in kept:
-            print('保留（之后被别的工具改过）', path)
+    if choice == '2':   # the test range's pack stays: the packs are rebuilt without the campaign's
+        try:
+            for path in make_edf5_campaign.disable(game):
+                print('写入或还原', path)
+        except make_edf5_campaign.Refused as e:
+            print('未能停用：', e)
         if make_edf5_campaign.enabled(game):
             print('未能停用：模式表或旧版任务列表被其他工具改过，已保留它依赖的任务文件和插件。')
             return 1
-        print('EDF5 战役已停用，后续普通更新不会重新启用。')
+        print('EDF5 战役已停用，后续普通更新不会重新启用（测试场任务包保留）。')
     return 0
 
 

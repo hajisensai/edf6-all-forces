@@ -168,8 +168,9 @@ class IncrementalTests(unittest.TestCase):
             mission = stack.enter_context(patch.object(gen, 'install', return_value=[]))
             stack.enter_context(patch.object(make_stock_stores, 'remove', lambda g: ([], [])))
             import make_edf5_campaign   # no Root.cpk here to append to: its files stand in, its install runs for real
-            stack.enter_context(patch.object(make_edf5_campaign, 'build', lambda g: (
-                {rel: b'stub' for rel in make_edf5_campaign.FILES}, 147, {'rows': [], 'skipped': []})))
+            stack.enter_context(patch.object(make_edf5_campaign, 'build', lambda g, campaign=True, test_range=True: (
+                {rel: b'stub' for rel in make_edf5_campaign.FILES}, make_edf5_campaign.Contents(3, 6),
+                {'rows': [], 'skipped': []})))
             stack.enter_context(patch.object(make_edf5_campaign.modfiles, 'refuse_while_running', lambda *a, **k: None))
             builders = {}
             for group in buildcache.GROUPS:
