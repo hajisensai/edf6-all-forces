@@ -31,7 +31,7 @@
 #include "sazabi_assist.h"
 #include "sazabi_flames.h"
 #include "sazabi_flight.h"
-#include "sazabi_pose.h"
+#include "sazabi_anim.h"
 #include "sazabi_sound.h"
 #include "sazabi_net.h"
 #include "online_authority.h"
@@ -88,6 +88,8 @@ struct Mech {
     unsigned char* rec[sazabi::kBoneCount]{};
     sazabi::Rig rig{};
     sazabi::PoseInput pose{};
+    sazabi::Anim anim{};                // the animator's own state (sazabi_anim.h: every machine steps its own)
+    ULONGLONG animMs=0;                 // the game clock at its last step
     sazabi::Pose posed{};             // this mech's last pose, also used before its next pose is composed
     exhaust::BodyTrack track{};         // the body's matrix last frame and now (sz_root's world carried: RootFrame)
     float root[16]{},rootInv[16]{};     // sz_root's world this frame, and its inverse
@@ -204,9 +206,29 @@ bool Rig(Mech& m,unsigned char* v) noexcept {
     return true;
 }
 
+// The animator stepped and the pose written: once a frame on every machine (a remote copy's from its replicated motion and
+// arms: the walk's way and speed from the velocity, the turn, the special chosen), so it needs nothing sent of its own.
 void Pose(Mech& m,unsigned char* v) noexcept {
     if(!Rig(m,v))return;
-    sazabi::Animate(m.pose,m.rig,&m.posed);
+    const ULONGLONG ms=GameMs();
+    const float dt=m.animMs && ms>m.animMs ? GameStep(ms-m.animMs) : 0.0f;
+    m.animMs=ms;
+    sazabi::PoseInput& p=m.pose;
+    p.move[0]=p.move[1]=0.0f;
+    p.yawRate=0.0f;
+    // the buttons' requests are the local pilot's only (a remote copy, a parked or abandoned mech: none held)
+    if(!m.driven || m.net.remote)p.fire=p.present=false;
+    // driven only: a parked mech's (or a lost remote's) last velocity and turn are stale, and would walk it on the spot
+    if(m.driven && m.rootOk) {   // the velocity over the ground in sz_root's frame (its x left, z ahead)
+        const float* r=m.rootInv;
+        const float* w=m.fl.vel;
+        p.move[0]=w[0]*r[0]+w[1]*r[4]+w[2]*r[8];
+        p.move[1]=w[0]*r[2]+w[1]*r[6]+w[2]*r[10];
+        p.yawRate=m.yawRate;
+    }
+    p.special=static_cast<int>(m.arms.special);
+    sazabi::Animate(p,m.rig,Cfg().sazabiRun,dt,m.anim,&m.posed);
+    p.gait=m.anim.phase;   // sent: a peer on an older build still walks its feet off it
     for(int i=1;i<sazabi::kBoneCount;++i) {   // sz_root itself is the frame: its local (under body) stays the bind's
         float local[16];
         sazabi::LocalMatrix(m.posed,i,local);
@@ -278,7 +300,6 @@ void Animate(Mech& m,float dt,bool driven) noexcept {
     p.t+=dt;
     const float strideWant=m.fl.air || !driven ? 0.0f : Clamp(ground/Cfg().sazabiRun,0.0f,1.0f);
     p.stride+=(strideWant-p.stride)*std::fmin(1.0f,4.0f*dt);
-    if(!m.fl.air)p.gait=sazabi::GaitStep(p.gait,ground,p.stride,dt);
     p.air+=((m.fl.air ? 1.0f : 0.0f)-p.air)*std::fmin(1.0f,kAirBlendRate*dt);
     const float leanWant=m.fl.air ? Clamp(ground/Cfg().sazabiFly,0.0f,1.0f)*28.0f*sazabi::kDeg : 0.0f;
     p.lean+=(leanWant-p.lean)*std::fmin(1.0f,5.0f*dt);   // a boost's own lean: the pose's (PoseInput::boost)

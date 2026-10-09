@@ -3,6 +3,8 @@
 EDF.dll TimeDateStamp 0x678CCB46。计划见 `gundam-plan.md`，代码 `src/sazabi.cpp`、`pylib/sazabi_model.py`、`tools/make_sazabi.py`、
 `tools/prep_sazabi.py`。置信度：H = 反汇编里看得到 / 文件逐字节核对过，M = 推断，L = 猜测或待实机。
 
+动作与行为（动画器：双骨 IK 手臂、武器状态机、全向步态）见 [sazabi-animation.md](sazabi-animation.md)。
+
 联机动作、盾、浮游炮的复制协议、原生封装预算与验证边界见 [sazabi-online.md](sazabi-online.md)。
 
 ## 1. 模型来源与资产管线

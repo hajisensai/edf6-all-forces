@@ -10,6 +10,7 @@ frame: the soles' floor is y = 0). Views:
   legs, legside     orthographic, the legs only (the floor to 15 m), the floor line: do the soles stand on it?
   cam               the riding camera (pylib/vcobjects.py SAZABI_SEAT_CAMERA), perspective, the ground grid
   quarter           a three-quarter view from behind and above, perspective, the ground grid
+  front3q           a three-quarter view from ahead on its right, perspective, the ground grid
 --bones colours each bone apart (with a legend) instead of the model's own colours. Needs numpy and PIL; build
 sazabi_pose_check first (cmake --build build --target sazabi_pose_check).
 """
@@ -36,7 +37,8 @@ from mdb import bind_world, mdb_read, rab_read  # noqa: E402
 CHECK = os.path.join(ROOT, 'build', 'sazabi_pose_check.exe')
 LIGHT = np.array([0.35, 0.8, -0.45]) / np.linalg.norm([0.35, 0.8, -0.45])
 QUARTER = ((-24.0, 30.0, -42.0), (0.0, 12.0, 0.0))   # eye, look (model frame)
-FOV = 50.0   # degrees, vertical
+FRONT3Q = ((-19.0, 17.0, 25.0), (0.0, 13.0, 2.0))   # ahead of it on its right, a little above: the swings and the shield
+FOV = 60.0   # degrees, vertical
 
 
 def load_model(path: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str], dict[str, np.ndarray]]:
@@ -169,6 +171,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument('--frames', default='0,4,8,12,16,20')
     ap.add_argument('--bones', action='store_true')
     ap.add_argument('--size', type=int, default=420)
+    ap.add_argument('--wrap', type=int, default=0, help='tiles a row (default: one frame a row)')
     a = ap.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
     tris, bones, cols, names, joint = load_model(a.mrab)
@@ -204,11 +207,13 @@ def main(argv: list[str]) -> int:
                     tiles.append(perspective(t, cols, *vc.SAZABI_SEAT_CAMERA, a.size, label))
                 elif v == 'quarter':
                     tiles.append(perspective(t, cols, *QUARTER, a.size, label))
+                elif v == 'front3q':
+                    tiles.append(perspective(t, cols, *FRONT3Q, a.size, label))
                 else:
                     tiles.append(ortho(t, cols, v, a.size, label))
-        cols_n = len(views)
+        cols_n = len(views) * max(1, a.wrap // len(views))   # --wrap: that many tiles a row (frames side by side)
         th = max(im.height for im in tiles)
-        sheet = Image.new('RGB', (a.size * cols_n, th * len(picks)))
+        sheet = Image.new('RGB', (a.size * cols_n, th * ((len(tiles) + cols_n - 1) // cols_n)))
         for k, im in enumerate(tiles):
             sheet.paste(im, ((k % cols_n) * a.size, (k // cols_n) * th))
         path = os.path.join(a.out, f'{scenario}.png')

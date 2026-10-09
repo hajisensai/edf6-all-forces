@@ -27,7 +27,7 @@ int main() {
     Check(!m->arms.lockOn && !m->arms.hasAssist && !m->arms.lockKeyHeld && !m->arms.lockOnTarget,
           "remote authority discards the former pilot's local lock target and input latch");
     Check(At<LONG>(control,0xC)==1,"remote takeover releases the local hard-lock weak reference");
-    Drive(*m,vehicle,testNow);
+    testNow+=16;Drive(*m,vehicle,testNow);   // the next frame: the animator eases the arms in (sazabi_anim.h), it does not jump
     Check(m->net.remote && m->driven && !m->active,"remote pilot replays without owning physics");
     Check(m->pose.guard==1 && m->pose.swing==0.4f && m->pose.combo==1,"guard/swing/combo reach the production pose");
     Check(std::memcmp(neutral,records[sazabi::kUpperArmL]+kBoneLocal506,64)!=0,"replicated guard writes the shield arm's bone");

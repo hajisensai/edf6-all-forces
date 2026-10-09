@@ -701,6 +701,12 @@ target_compile_options(sazabi_net_runtime_test PRIVATE /W4 /WX /utf-8 /permissiv
 target_link_options(sazabi_net_runtime_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks sazabi_net_test sazabi_net_runtime_test)
 add_test(NAME sazabi_net_runtime COMMAND sazabi_net_runtime_test)
+# The Sazabi's trigger requests (src/sazabi_arms.h Ask): a tap fires once, a release no extra round.
+add_executable(sazabi_ask_test EXCLUDE_FROM_ALL tests/sazabi_ask_test.cpp)
+target_include_directories(sazabi_ask_test PRIVATE src common third_party/EDFModLoader)
+target_compile_options(sazabi_ask_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks sazabi_ask_test)
+add_test(NAME sazabi_ask COMMAND sazabi_ask_test)
 add_test(NAME sazabi_net_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/sazabi_net_guard.py")
 add_executable(sazabi_net_native_test EXCLUDE_FROM_ALL tests/sazabi_net_native_test.cpp src/drill_net.cpp)
 target_include_directories(sazabi_net_native_test PRIVATE src common)

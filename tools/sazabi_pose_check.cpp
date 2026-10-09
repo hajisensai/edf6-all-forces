@@ -1,14 +1,17 @@
-// The Sazabi's poses (src/sazabi_pose.h, as src/sazabi.cpp runs it) offline, on the joints of its model.
+// The Sazabi's animation (src/sazabi_anim.h, as src/sazabi.cpp runs it) offline, on the joints of its model: each
+// scenario a few seconds of input, the animator stepped at 60 Hz, kFrames frames of it checked (and dumped).
 //   sazabi_pose_check                         the checks below on the built-in rig (exit 1 on a failure)
 //   sazabi_pose_check --joints F --dump OUT   the same scenarios on the joints in F ("name x y z" lines, sz_root's
 //                                             frame: tools/sazabi_pose_view.py writes it from the model folder), every
 //                                             frame's bone transforms into OUT for tools/sazabi_pose_view.py to draw
-// Checks: every scenario's every bone finite; the rifle (+z of sz_rifle) along the aim within 2 deg whenever the arm is
-// fully raised; the drawn tomahawk's grip within 1.5 m of the right hand and its blade lit, the stowed one dark and
-// within its bind offset of the shield; a flying funnel where it flies, nose along its course, a docked one in its pack; the soles never more than kSink under the floor walking.
+// Checks: every scenario's every bone finite; the rifle (+z of sz_rifle) along the aim within 2 deg (and its kick)
+// whenever the animator lets it fire (RifleReady); the rifle rigid in the right hand or on its rack; the tomahawk lit in
+// the fist or dark on the shield at its bind offset, and in the fist through every swing's strike; the shield's face onto
+// the aim when the animator lets its missiles go (ShieldReady); a flying funnel where it flies, nose along its course, a
+// docked one in its pack; each ankle where its step puts it; the soles never more than kSink under the floor.
 // Built on request only: cmake --build build --target sazabi_pose_check && build\sazabi_pose_check.exe
 #define _CRT_SECURE_NO_WARNINGS
-#include "../src/sazabi_pose.h"
+#include "../src/sazabi_anim.h"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -35,28 +38,59 @@ constexpr float kBuiltIn[kBoneCount][3]={
 constexpr float kAnkleMiss=0.15f;   // m: the IK's miss at most
 constexpr float kSink=1.5f;   // m: a sole this far under the floor at most (the gait's bob and the crouch's drop)
 constexpr int kFrames=24;
+constexpr float kHz=60.0f,kRun=26.0f;
 
-struct Scenario { const char* name; PoseInput (*at)(float u); };   // u 0..1 through the scenario
-
-PoseInput Stand(float u) { PoseInput i; i.t=u*4.0f; i.aim=0.0f; return i; }
-PoseInput Walk(float u) { PoseInput i; i.t=u; i.gait=u*2.0f*kPi; i.stride=0.55f; i.aim=0.0f; return i; }
-PoseInput Run(float u) { PoseInput i; i.t=u; i.gait=u*2.0f*kPi; i.stride=1.0f; i.aim=0.0f; i.lean=4.0f*kDeg; return i; }
-PoseInput Fly(float u) { PoseInput i; i.t=u; i.air=1.0f; i.lean=(10.0f+20.0f*u)*kDeg; i.aim=0.0f; return i; }
-PoseInput Land(float u) { PoseInput i; i.t=u; i.crouch=u<0.3f ? u/0.3f : 1.0f-(u-0.3f)/0.7f; i.aim=0.0f; return i; }
-PoseInput Aim(float u) {
-    PoseInput i; i.t=u; i.aim=1.0f;
+// The tomahawk's gameplay timer (sazabi_arms.inc Tomahawk) for a combo of `swings` swings begun at `start` s: the
+// swing's u and which swing at `t`; -1 before and after.
+void Combo(float t,float start,int swings,PoseInput* i) {
+    float at=start;
+    for(int c=0;c<swings;++c) {
+        const float len=SwingSec(c);
+        if(t>=at && t<at+len){i->swing=(t-at)/len;i->combo=c;return;}
+        at+=len;
+    }
+    i->swing=-1.0f;i->combo=t<start ? 0 : swings-1;
+}
+struct Scenario { const char* name; float secs; PoseInput (*at)(float t); };
+PoseInput Driven(float t) { PoseInput i; i.t=t; i.aim=1.0f; return i; }
+PoseInput Stand(float t) { PoseInput i; i.t=t; i.aim=0.0f; return i; }
+PoseInput Idle(float t) { return Driven(t); }
+PoseInput Walk(float t) { PoseInput i=Driven(t); i.move[1]=12.0f; return i; }
+PoseInput Run(float t) { PoseInput i=Driven(t); i.move[1]=26.0f; return i; }
+PoseInput Strafe(float t) { PoseInput i=Driven(t); i.move[0]=-12.0f; return i; }   // to its right
+PoseInput Back(float t) { PoseInput i=Driven(t); i.move[1]=-10.0f; return i; }
+PoseInput Diagonal(float t) { PoseInput i=Driven(t); i.move[0]=8.0f; i.move[1]=14.0f; return i; }
+PoseInput Turn(float t) { PoseInput i=Driven(t); i.yawRate=t<2.0f ? 1.6f : 0.0f; return i; }
+PoseInput Stop(float t) { PoseInput i=Driven(t); i.move[1]=t<1.2f ? 20.0f : 0.0f; return i; }
+PoseInput Fly(float t) { PoseInput i=Driven(t); i.air=1.0f; i.lean=Clamp(t*15.0f,0.0f,28.0f)*kDeg; i.move[1]=40.0f; return i; }
+PoseInput Land(float t) { PoseInput i=Driven(t); i.crouch=t<0.2f ? 0.0f : std::fmax(0.0f,1.0f-(t-0.2f)*2.2f); return i; }
+PoseInput Aim(float t) {
+    PoseInput i=Driven(t);
+    const float u=Clamp((t-0.5f)/2.5f,0.0f,1.0f);
     i.aimYaw=(-50.0f+100.0f*u)*kDeg; i.aimPitch=(30.0f-60.0f*u)*kDeg; return i;
 }
-PoseInput AimWalk(float u) { PoseInput i=Aim(0.5f); i.gait=u*2.0f*kPi; i.stride=0.6f; return i; }
-PoseInput Guard(float u) { PoseInput i; i.t=u; i.guard=u<0.5f ? u*2.0f : 1.0f; i.aim=1.0f; return i; }
-PoseInput Swing(float u) { PoseInput i; i.t=u; i.swing=u; i.aim=0.0f; return i; }
-PoseInput Slash(float u) { PoseInput i=Swing(u); i.combo=1; return i; }
-PoseInput Rise(float u) { PoseInput i=Swing(u); i.combo=2; return i; }
-PoseInput Boost(float u) { PoseInput i; i.t=u; i.air=1.0f; i.boost=u<0.3f ? u/0.3f : 1.0f; i.lean=20.0f*kDeg; i.aim=1.0f; return i; }
-PoseInput Recoil(float u) { PoseInput i=Aim(0.5f); const float s=u*0.6f; i.recoil=s<0.06f ? s/0.06f : s<0.41f ? Smooth(1.0f-(s-0.06f)/0.35f) : 0.0f; return i; }
+PoseInput AimWalk(float t) { PoseInput i=Walk(t); i.aimYaw=40.0f*kDeg; i.aimPitch=10.0f*kDeg; return i; }
+PoseInput Guard(float t) { PoseInput i=Driven(t); i.guard=t>0.4f && t<2.4f ? 1.0f : 0.0f; return i; }
+PoseInput Present(float t) { PoseInput i=Driven(t); i.present=t>0.4f && t<1.8f; i.aimYaw=20.0f*kDeg; i.aimPitch=15.0f*kDeg; return i; }
+PoseInput Swing(float t) { PoseInput i=Driven(t); Combo(t,0.3f,1,&i); return i; }
+PoseInput Melee(float t) { PoseInput i=Driven(t); Combo(t,0.3f,3,&i); return i; }
+PoseInput MeleeFire(float t) { PoseInput i=Melee(t); i.fire=t>2.2f; return i; }
+PoseInput MeleeWalk(float t) { PoseInput i=Melee(t); i.move[1]=10.0f; return i; }
+// two combos, the tomahawk put away between them (its last swing left the gameplay's combo at 2): the second draws again
+constexpr float kRechain=4.6f;
+PoseInput Rechain(float t) { PoseInput i=Driven(t); Combo(t,0.3f,3,&i); if(t>=kRechain)Combo(t,kRechain,2,&i); return i; }
+PoseInput Slow(float t) { PoseInput i=Driven(t); i.move[1]=3.0f; return i; }
+PoseInput Switch(float t) { PoseInput i=Driven(t); i.special=t<0.3f ? 0 : t<1.3f ? 1 : t<2.3f ? 2 : 0; return i; }
+PoseInput Boost(float t) { PoseInput i=Driven(t); i.air=1.0f; i.boost=t>0.3f ? 1.0f : 0.0f; i.lean=20.0f*kDeg; i.move[1]=60.0f; return i; }
+PoseInput Recoil(float t) {
+    PoseInput i=Driven(t); i.fire=true;
+    const float s=std::fmod(t,0.5f);
+    i.recoil=s<0.06f ? s/0.06f : s<0.41f ? Smooth(1.0f-(s-0.06f)/0.35f) : 0.0f; return i;
+}
 // the funnels launched one by one, each flying a ring 30 m ahead at its chest's height, nose to the ring's centre
-PoseInput Funnels(float u) {
-    PoseInput i; i.t=u;
+PoseInput Funnels(float t) {
+    PoseInput i=Driven(t);
+    const float u=t/3.0f;
     for(int k=0;k<6;++k) {
         i.funnelOut[k]=u*6.0f>static_cast<float>(k);
         const float a=u*2.0f*kPi+static_cast<float>(k)*kPi/3.0f;
@@ -65,11 +99,13 @@ PoseInput Funnels(float u) {
     }
     return i;
 }
-PoseInput Cannon(float u) { PoseInput i; i.t=u; i.cannon=u; i.crouch=0.3f*u; i.aim=0.0f; return i; }
+PoseInput Cannon(float t) { PoseInput i=Driven(t); i.cannon=Clamp(t-0.3f,0.0f,1.0f); i.crouch=0.3f*i.cannon; return i; }
 constexpr Scenario kScenarios[]={
-    {"stand",Stand},{"walk",Walk},{"run",Run},{"fly",Fly},{"land",Land},{"aim",Aim},{"aimwalk",AimWalk},
-    {"guard",Guard},{"swing",Swing},{"slash",Slash},{"rise",Rise},{"funnels",Funnels},{"cannon",Cannon},
-    {"boost",Boost},{"recoil",Recoil},
+    {"stand",3.0f,Stand},{"idle",6.0f,Idle},{"walk",3.0f,Walk},{"run",3.0f,Run},{"strafe",3.0f,Strafe},{"back",3.0f,Back},
+    {"diagonal",3.0f,Diagonal},{"turn",3.0f,Turn},{"stop",3.0f,Stop},{"fly",2.0f,Fly},{"land",1.5f,Land},{"aim",3.0f,Aim},
+    {"aimwalk",3.0f,AimWalk},{"guard",3.0f,Guard},{"present",2.4f,Present},{"swing",3.0f,Swing},{"melee",4.0f,Melee},
+    {"meleefire",3.2f,MeleeFire},{"meleewalk",4.0f,MeleeWalk},{"switch",3.2f,Switch},{"funnels",3.0f,Funnels},
+    {"cannon",2.0f,Cannon},{"boost",2.0f,Boost},{"recoil",2.0f,Recoil},{"rechain",6.0f,Rechain},{"slow",3.0f,Slow},
 };
 
 int failures=0;
@@ -83,25 +119,37 @@ float Dist(const float* a,const float* b) {
     return std::sqrt((a[0]-b[0])*(a[0]-b[0])+(a[1]-b[1])*(a[1]-b[1])+(a[2]-b[2])*(a[2]-b[2]));
 }
 
-void Check(const Scenario& s,int f,const PoseInput& in,const Rig& rig,const Pose& p) {
+void CheckArms(const Scenario& s,int f,const PoseInput& in,const Rig& rig,const Anim& a,const Pose& p) {
+    if(RifleReady(a) && a.raise>0.995f && a.ready>0.995f && a.brace<0.005f) {   // what fires, along the aim
+        const V3 want=AimDir(in,0.0f),got=Row(p.modelRot[kRifle],2);
+        if(VDot(want,got)<std::cos((2.0f+kRecoilMuzzle*in.recoil)*kDeg))Fail(s.name,f,"the rifle is off the aim (its kick aside)");
+    }
+    if(p.rifleInHand) {
+        if(Dist(p.modelPos[kRifle],p.modelPos[kHandR])>0.01f)Fail(s.name,f,"the rifle in hand is not at the hand");
+    } else if(Dist(p.modelPos[kRifle],p.modelPos[kPelvis])>8.0f)Fail(s.name,f,"the racked rifle is not on the hip");
+    if(p.axeInHand) {
+        if(p.scale[kAxeBlade]!=1.0f)Fail(s.name,f,"the tomahawk in hand is dark");
+        const V3 fist=Of(p.modelPos[kHandR])+Times(Of(kFist),p.modelRot[kHandR]);
+        const V3 up=Times(AxeUp(rig),p.modelRot[kAxe]);
+        if(VLen(Of(p.modelPos[kAxe])+up*kAxeGrip-fist)>0.05f)Fail(s.name,f,"the tomahawk is not in the fist");
+    } else {
+        if(p.scale[kAxeBlade]!=0.0f)Fail(s.name,f,"the stowed tomahawk's blade is lit");
+        const float bindOff=Dist(rig.joint[kAxe],rig.joint[kShield]);
+        if(std::fabs(Dist(p.modelPos[kAxe],p.modelPos[kShield])-bindOff)>0.01f)Fail(s.name,f,"the stowed tomahawk left the shield");
+    }
+    if(in.swing>=WindEnd(in.combo) && in.swing<=StrikeEnd(in.combo) && !p.axeInHand)
+        Fail(s.name,f,"striking without the tomahawk in hand");
+    if(ShieldReady(a) && a.present>0.995f) {   // the shield's face (its missiles') onto the aim
+        const V3 face=Times(ShieldNormal(rig),p.modelRot[kForearmL]);
+        if(VDot(face,AimDir(in,0.0f))<std::cos(25.0f*kDeg))Fail(s.name,f,"the shield is not turned onto the aim");
+    }
+}
+
+void Check(const Scenario& s,int f,const PoseInput& in,const Rig& rig,const Anim& a,const Pose& p) {
     for(int b=0;b<kBoneCount;++b)
         for(int k=0;k<9;++k)
             if(!std::isfinite(p.modelRot[b].m[k]) || (k<3 && !std::isfinite(p.modelPos[b][k]))){Fail(s.name,f,"not finite");return;}
-    if(in.aim>=1.0f && in.swing<0.0f) {
-        const float yaw=Clamp(in.aimYaw,-kMostAimYaw*kDeg,kMostAimYaw*kDeg),pitch=Clamp(in.aimPitch,-kMostAimPitch*kDeg,kMostAimPitch*kDeg);
-        const float want[3]={std::sin(yaw)*std::cos(pitch),std::sin(pitch),std::cos(yaw)*std::cos(pitch)};
-        const float* got=&p.modelRot[kRifle].m[6];
-        const float dot=got[0]*want[0]+got[1]*want[1]+got[2]*want[2];
-        if(dot<std::cos((2.0f+kRecoilMuzzle*in.recoil)*kDeg))Fail(s.name,f,"the rifle is off the aim (its kick aside)");
-    }
-    if(in.swing>=0.0f) {
-        if(Dist(p.modelPos[kAxe],p.modelPos[kHandR])>1.5f)Fail(s.name,f,"the drawn tomahawk is not in the right hand");
-        if(p.scale[kAxeBlade]!=1.0f || p.scale[kRifle]!=0.0f)Fail(s.name,f,"blade dark or rifle shown while swinging");
-    } else {
-        const float bindOff=Dist(rig.joint[kAxe],rig.joint[kShield]);
-        if(std::fabs(Dist(p.modelPos[kAxe],p.modelPos[kShield])-bindOff)>0.01f)Fail(s.name,f,"the stowed tomahawk left the shield");
-        if(p.scale[kAxeBlade]!=0.0f)Fail(s.name,f,"the stowed tomahawk's blade is lit");
-    }
+    CheckArms(s,f,in,rig,a,p);
     for(int k=0;k<6;++k) {   // a flying funnel where it flies, its nose along its direction; a docked one in its pack
         const int b=kFunnels[k];
         if(p.scale[b]!=1.0f)Fail(s.name,f,"a funnel not drawn");
@@ -122,9 +170,9 @@ void Check(const Scenario& s,int f,const PoseInput& in,const Rig& rig,const Pose
         const int foot[2]={kFootL,kFootR};
         float dy[2];
         for(int k=0;k<2;++k) {
-            const float* a=p.modelPos[foot[k]];
-            const float ex=a[0]-p.ankleStand[k][0],ez=a[2]-(p.ankleStand[k][2]+p.footDz[k]);
-            dy[k]=a[1]-(p.ankleStand[k][1]+p.footLift[k]);
+            const float* at=p.modelPos[foot[k]];
+            const float ex=at[0]-(p.ankleStand[k][0]+p.footDx[k]),ez=at[2]-(p.ankleStand[k][2]+p.footDz[k]);
+            dy[k]=at[1]-(p.ankleStand[k][1]+p.footLift[k]);
             if(std::sqrt(ex*ex+ez*ez)>kAnkleMiss){std::printf("  ankle %d off by (%.2f, %.2f)\n",k,ex,ez);Fail(s.name,f,"an ankle not where its step puts it");}
         }
         if(std::fabs(dy[0]-dy[1])>kAnkleMiss)Fail(s.name,f,"an ankle not at its step's height");
@@ -134,6 +182,27 @@ void Check(const Scenario& s,int f,const PoseInput& in,const Rig& rig,const Pose
         const float drop=standAnkle[k]-p.modelPos[kFeet[k]][1];
         if(in.air==0.0f && drop>kSink)Fail(s.name,f,"a sole sinks through the floor");
     }
+}
+
+// Every step: a planted foot stays where it is on the ground (in sz_root's frame it goes back as fast as the mech goes
+// on: kSlip of that, at most), walking steadily; a combo after the tomahawk was put away draws it (the rifle in hand at
+// its start).
+constexpr float kSlip=0.2f;
+void CheckStep(const Scenario& s,float t,float dt,const PoseInput& in,const Anim& a,const Pose& p,const float was[2][3],
+               const bool wasPlanted[2]) {
+    const float speed=std::sqrt(in.move[0]*in.move[0]+in.move[1]*in.move[1]);
+    if(in.air==0.0f && speed>1.0f && t>1.5f && dt>0.0f && in.swing<0.0f)
+        for(int k=0;k<2;++k) {
+            if(!a.planted[k] || !wasPlanted[k])continue;
+            const float* at=p.modelPos[k==0 ? kFootL : kFootR];
+            const float vx=(at[0]-was[k][0])/dt+in.move[0],vz=(at[2]-was[k][2])/dt+in.move[1];
+            if(std::sqrt(vx*vx+vz*vz)>kSlip*speed+0.5f){
+                std::printf("  t %.2f foot %d slides %.1f m/s at %.1f m/s\n",t,k,std::sqrt(vx*vx+vz*vz),speed);
+                Fail(s.name,static_cast<int>(t*60.0f),"a planted foot slides");
+            }
+        }
+    if(std::strcmp(s.name,"rechain")==0 && t>=kRechain && t<kRechain+0.04f && !p.rifleInHand)
+        Fail(s.name,static_cast<int>(t*60.0f),"a combo after the put-away did not draw again (the rifle not in hand)");
 }
 
 bool LoadJoints(const char* path,Rig* rig) {
@@ -164,22 +233,37 @@ int main(int argc,char** argv) {
     std::FILE* out=dump ? std::fopen(dump,"w") : nullptr;
     if(dump && !out){std::printf("cannot write %s\n",dump);return 2;}
     static Pose p;
-    PoseInput still;
-    still.aim=0.0f;
-    Animate(still,rig,&p);
-    standAnkle[0]=p.modelPos[kFootL][1];standAnkle[1]=p.modelPos[kFootR][1];
+    {
+        Anim a;
+        for(int k=0;k<120;++k)Animate(Stand(0.0f),rig,kRun,1.0f/kHz,a,&p);
+        standAnkle[0]=p.modelPos[kFootL][1];standAnkle[1]=p.modelPos[kFootR][1];
+    }
     for(const Scenario& s:kScenarios) {
-        for(int f=0;f<kFrames;++f) {
-            const PoseInput in=s.at(static_cast<float>(f)/(kFrames-1));
-            Animate(in,rig,&p);
-            Check(s,f,in,rig,p);
-            if(!out)continue;
-            std::fprintf(out,"frame %s %d\n",s.name,f);
-            for(int b=0;b<kBoneCount;++b) {
-                std::fprintf(out,"%ls",kBones[b].name);
-                for(float v:p.modelRot[b].m)std::fprintf(out," %.5f",v);
-                std::fprintf(out," %.4f %.4f %.4f %.2f\n",p.modelPos[b][0],p.modelPos[b][1],p.modelPos[b][2],p.scale[b]);
+        Anim a;
+        const int steps=static_cast<int>(s.secs*kHz+0.5f);
+        int f=0;
+        float was[2][3]{};
+        bool wasPlanted[2]{};
+        for(int k=0;k<=steps;++k) {
+            const PoseInput in=s.at(static_cast<float>(k)/kHz);
+            const float dt=k==0 ? 0.0f : 1.0f/kHz;
+            Animate(in,rig,kRun,dt,a,&p);
+            CheckStep(s,static_cast<float>(k)/kHz,dt,in,a,p,was,wasPlanted);
+            for(int side=0;side<2;++side) {
+                std::memcpy(was[side],p.modelPos[side==0 ? kFootL : kFootR],sizeof was[side]);
+                wasPlanted[side]=a.planted[side];
             }
+            if(k*(kFrames-1)<f*steps)continue;   // frame f at step f*steps/(kFrames-1)
+            Check(s,f,in,rig,a,p);
+            if(out) {
+                std::fprintf(out,"frame %s %d\n",s.name,f);
+                for(int b=0;b<kBoneCount;++b) {
+                    std::fprintf(out,"%ls",kBones[b].name);
+                    for(float v:p.modelRot[b].m)std::fprintf(out," %.5f",v);
+                    std::fprintf(out," %.4f %.4f %.4f %.2f\n",p.modelPos[b][0],p.modelPos[b][1],p.modelPos[b][2],p.scale[b]);
+                }
+            }
+            ++f;
         }
     }
     if(out)std::fclose(out);

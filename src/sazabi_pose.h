@@ -120,26 +120,35 @@ inline M3 Align(const float* a,const float* b) {
 }
 
 // ------------------------------------------------------------------------------------------ input, output
+// What the mech is doing (sazabi.cpp Animate / ArmsPose; a remote copy from sazabi_net.inc UnpackPose). The fields the
+// network carries are its own (sazabi_net.h Pose); the rest every machine works out for itself (sazabi.cpp Pose: from the
+// velocity, the turn and the arms' state it holds anyway), so sazabi_anim.h's animator runs the same on every machine.
 struct PoseInput {
     float t=0.0f;           // s, the mech's own clock (idle breathing)
-    float gait=0.0f;        // rad, the walk cycle's phase (sazabi.cpp advances it by the ground covered: GaitStep)
-    float stride=0.0f;      // 0 standing .. 1 a full run's stride (the gait's amplitude)
+    float gait=0.0f;        // rad, the flight's walk phase (sent; sazabi_anim.h steps its own, Anim::phase)
+    float stride=0.0f;      // 0 standing .. 1 a full run (sent; the animator reads move instead)
     float air=0.0f;         // 0 on its feet .. 1 flying (legs trail, feet point down)
-    float lean=0.0f;        // rad, the whole mech's lean forward (+) / back (-) from its acceleration and speed
+    float lean=0.0f;        // rad, the whole mech's lean forward (+) / back (-) from its flight
     float bank=0.0f;        // rad, its roll into a turn (+ to its left)
     float crouch=0.0f;      // 0 .. 1 knees bent: a landing, a jump's wind-up, a brace for the cannon
     float aimPitch=0.0f;    // rad, + up: where the rifle points, against the mech's facing
     float aimYaw=0.0f;      // rad, + left: ditto (the waist and chest turn part of it)
-    float aim=1.0f;         // 0 .. 1 the rifle raised to aim (1 while it is drawn and not swinging)
+    float aim=1.0f;         // 0 .. 1 driven: the rifle held ready (0: parked, the arms hang)
     float guard=0.0f;       // 0 .. 1 the shield held up across the chest
-    float swing=-1.0f;      // the tomahawk: < 0 stowed; 0 .. 1 one swing (wind-up, strike, recover)
-    int combo=0;            // ...which of the combo's swings: 0 the overhead chop, 1 the slash across, 2 the rising cut
+    float swing=-1.0f;      // the tomahawk: < 0 not swinging; 0 .. 1 one swing (wind-up, strike, recover)
+    int combo=0;            // ...which of the combo's swings: 0 the diagonal cut, 1 the slash across, 2 the overhead chop
     float boost=0.0f;       // 0 .. 1 the boost dash's pose (leaning into it, legs trailing, the free arm back)
     float recoil=0.0f;      // 0 .. 1 the rifle's kick (a shot: up at once, eased off)
     float cannon=0.0f;      // 0 .. 1 bracing for the chest cannon
     bool funnelOut[6]{};    // a funnel launched: drawn where it flies (funnelAt), not in its pack
     float funnelAt[6][3]{}; // ...its centre, in sz_root's frame (sazabi.cpp flies it in the world)
     float funnelDir[6][3]{};// ...where its nose points (unit, sz_root's frame)
+    // not sent: each machine's own
+    float move[2]{};        // m/s over the ground in sz_root's frame (x left, z ahead): where and how fast it walks
+    float yawRate=0.0f;     // rad/s its facing turns (+ to its left): the feet step round a turn on the spot
+    bool fire=false;        // the rifle's trigger held (the tomahawk put away at once for it; the arm up for it)
+    bool present=false;     // the shield's missiles asked for: the shield turned onto the aim
+    int special=0;          // the special weapon chosen (sazabi_arms.inc Special): a glance at it when it changes
 };
 struct Pose {
     M3 rot[kBoneCount];       // local rotations
@@ -147,14 +156,17 @@ struct Pose {
     float scale[kBoneCount];  // 1 drawn, 0 shrunk to its joint
     M3 modelRot[kBoneCount];  // after Finish: each bone's rotation and joint in sz_root's frame
     float modelPos[kBoneCount][3];
-    // the gait's plan (Legs), per leg [0] left [1] right: the ankle and the foot's rotation standing (sz_root's frame,
-    // before the torso leans), the knee's stance bend (rad), the step (FootPlan), how far ahead the leg is (-1 .. 1)
+    // the gait's plan (sazabi_anim.h Legs), per leg [0] left [1] right: the ankle and the foot's rotation standing (sz_root's
+    // frame, before the torso leans, turned with the hips), the knee's stance bend (rad), the step's offset from the stance
+    // (m, sz_root's x and z), lift (m) and toe (deg), how far ahead the leg is (-1 .. 1)
     float ankleStand[2][3];
     M3 footStand[2];
     float kneeStand[2];
-    float footDz[2],footLift[2],footToe[2],legFore[2];
+    float footDx[2],footDz[2],footLift[2],footToe[2],legFore[2];
     float gaitW;              // 0 .. 1 how much of the gait is on (stepping; 0 standing or in the air)
     float sway;               // m the pelvis moves toward the left foot (+) / the right (-)
+    bool rifleInHand;         // the rifle in the right hand (else racked on the hip: sazabi_anim.h Arms)
+    bool axeInHand;           // the tomahawk in the right hand, its blade lit (else on the shield, dark)
 };
 // Each bone's joint in sz_root's frame at the bind (the bone records' bind world, sazabi.cpp Joints).
 struct Rig { float joint[kBoneCount][3]; };
@@ -194,19 +206,8 @@ inline void LocalMatrix(const Pose& p,int i,float* out) {
     out[15]=1.0f;
 }
 
-// ------------------------------------------------------------------------------------------ the poses
-// Gait: walked by the feet's paths (Plan), solved onto the legs (Gait). A cycle (two steps) covers StrideLength m of
-// ground, longer the faster it goes (a leg ~12.9 m from hip to sole: a walk's cycle ~19 m, a run's 22 m, as a person's
-// is ~1.5 and ~1.7 leg lengths: a planted foot goes from ~5.3 m ahead of its stance to as far behind); each foot is on the ground for Duty of it, going back under the body exactly as fast as
-// the body goes forward (planted: it does not slide), then lifted kLift m and carried ahead for the next step. Below
-// kGaitOn of the stride the steps fade out into the stance. The pelvis sways kSway m over the foot that carries it.
-// kReach of the leg at its straightest (the knee's stance bend undone: the shin is not in line with the thigh there) is
-// the farthest a step stretches it (the pelvis comes down rather than the foot lift off).
-constexpr float kStrideWalk=16.0f,kStrideRun=22.0f,kDutyWalk=0.62f,kDutyRun=0.5f,kLiftWalk=1.0f,kLiftRun=2.2f;
-constexpr int kIkIterations=20;
-constexpr float kIkStep=12.0f*kDeg;
-constexpr float kGaitOn=0.15f,kSway=0.5f,kReach=0.97f,kSwingToe=12.0f,kFootFlat=1.0f;
-constexpr float kWaistTwist=7.0f,kArmSwing=14.0f,kRunLean=8.0f;
+// ------------------------------------------------------------------------------------------ the legs' geometry
+// (sazabi_anim.h walks them.)
 // The stance (tools/sazabi_stance.py works it out from the model): the source stands as it hovers (legs spread wide,
 // shins raked back, toes pointing down), so on its feet each leg is turned to stand: the thigh Rx(thighX) Rz(thighZ),
 // the knee Rx(knee), the foot Rx(footX) Rz(footZ) (degrees), [0] the left leg, [1] the right; the pelvis drops
@@ -282,38 +283,17 @@ inline constexpr SolePoint kSole[]={
 };
 // Landing / crouch: knees bend, the pelvis drops.
 constexpr float kCrouchThigh=-24.0f,kCrouchKnee=48.0f,kCrouchDrop=2.2f;
-// Standing (the research: knees bent ~15 deg, the torso leaning ~5 deg): a standing crouch and lean on its feet.
-constexpr float kStandCrouch=0.2f,kStandLean=5.0f;
-// The boost dash (the research: the torso ~35 deg into it, the legs trailing, the free arm swept back).
-constexpr float kBoostLean=35.0f,kBoostThigh=15.0f,kBoostKnee=25.0f,kBoostArm=25.0f;
-// The belly cannon's brace (the research: the cannon is the belly's: feet apart front and back, the belly pushed out,
-// both arms out of its way): each foot kCannonStep m ahead / behind, the chest back kCannonBack, the arms out.
-constexpr float kCannonStep=2.5f,kCannonBack=8.0f,kCannonArms=40.0f;
-// The rifle's kick (the research: elbow bent ~15 deg more, shoulder back ~8 deg, muzzle up).
-constexpr float kRecoilShoulder=8.0f,kRecoilElbow=15.0f,kRecoilMuzzle=5.0f;
-// The rifle arm raised: the upper arm forward and out, the forearm bent a little; the wrist then turns the rifle
-// onto the aim exactly (AimRifle).
-constexpr float kAimRaise=78.0f,kAimOut=12.0f,kAimElbow=-22.0f;
-constexpr float kChestShare=0.45f;   // of the aim's yaw the chest takes (the rest the arm)
-constexpr float kMostAimYaw=60.0f,kMostAimPitch=55.0f;
-// The shield up: the left arm across the chest.
-constexpr float kGuardRaise=75.0f,kGuardIn=-25.0f,kGuardElbow=-95.0f,kGuardTurn=15.0f,kGuardCrouch=0.45f;
-// The tomahawk's combo (the research, 2026-10-07: the games' three swings): each swing winds up to its wind key, strikes
-// to its strike key and recovers to rest, in the seconds given (wind, strike, recover); the keys are the right upper
-// arm's raise (deg forward-up) and swing across (deg, + toward its left) and the chest's twist (deg, + left).
-//  0 the overhead chop, 1 the slash across, 2 the rising cut. A swing's u (0..1) runs over the sum of its times.
-// The grip kGripAhead m along the hand's forward.
-struct Swing { float wind[3],strike[3],secs[3]; };
-inline constexpr Swing kCombo[3]={
-    {{170.0f,-10.0f,-5.0f},{40.0f,30.0f,10.0f},{0.25f,0.12f,0.20f}},
-    {{90.0f,-60.0f,-25.0f},{90.0f,70.0f,25.0f},{0.15f,0.10f,0.20f}},
-    {{-30.0f,-10.0f,-5.0f},{150.0f,20.0f,10.0f},{0.15f,0.12f,0.45f}},
-};
-constexpr float kGripAhead=1.1f;
+// The boost dash in the air: the legs trailing.
+constexpr float kBoostThigh=15.0f,kBoostKnee=25.0f;
+// The tomahawk's combo (the games' three swings): each swing winds up, strikes and recovers in the seconds given
+// (sazabi_arms.inc Tomahawk times it and strikes mid-strike; sazabi_anim.h draws it). 0 the diagonal cut (its wind-up
+// also draws the tomahawk off the shield when it was put away), 1 the slash across, 2 the overhead chop.
+struct SwingTime { float secs[3]; };
+inline constexpr SwingTime kCombo[3]={{{0.30f,0.12f,0.22f}},{{0.16f,0.10f,0.22f}},{{0.22f,0.12f,0.40f}}};
 // swing `c`'s length (s), and where its wind-up ends and its strike ends (u).
-inline float SwingSec(int c) { const Swing& w=kCombo[c<0 ? 0 : c>2 ? 2 : c]; return w.secs[0]+w.secs[1]+w.secs[2]; }
-inline float WindEnd(int c) { const Swing& w=kCombo[c<0 ? 0 : c>2 ? 2 : c]; return w.secs[0]/SwingSec(c); }
-inline float StrikeEnd(int c) { const Swing& w=kCombo[c<0 ? 0 : c>2 ? 2 : c]; return (w.secs[0]+w.secs[1])/SwingSec(c); }
+inline float SwingSec(int c) { const SwingTime& w=kCombo[c<0 ? 0 : c>2 ? 2 : c]; return w.secs[0]+w.secs[1]+w.secs[2]; }
+inline float WindEnd(int c) { const SwingTime& w=kCombo[c<0 ? 0 : c>2 ? 2 : c]; return w.secs[0]/SwingSec(c); }
+inline float StrikeEnd(int c) { const SwingTime& w=kCombo[c<0 ? 0 : c>2 ? 2 : c]; return (w.secs[0]+w.secs[1])/SwingSec(c); }
 
 inline float Smooth(float x) { x=x<0?0:x>1?1:x; return x*x*(3-2*x); }
 // The rotation nearest `a` keeping its forward (+z row) and then its up (Gram-Schmidt).
@@ -345,66 +325,26 @@ inline float LowestSole(const Pose& p) {
     return lowest;
 }
 
-// A cycle's length (m of ground) and the share of it a foot is on the ground, at `stride` (0 walk .. 1 run).
-inline float StrideLength(float stride) { return kStrideWalk+(kStrideRun-kStrideWalk)*Clamp(stride,0.0f,1.0f); }
-inline float Duty(float stride) { return kDutyWalk+(kDutyRun-kDutyWalk)*Clamp(stride,0.0f,1.0f); }
-
-// One foot's step at gait phase `gait` (rad; the right foot half a cycle behind the left): its offset ahead of where it
-// stands (m, + forward), its lift (m), its toe's turn up (deg), whether it is on the ground and its place in that part
-// (0 .. 1).
+// One foot's step at phase `phase` (rad; the right foot half a cycle behind the left) of a cycle whose planted foot
+// travels `travel` m, on the ground `duty` of it, lifted `lift` m while carried: its offset ahead of where it stands
+// (m, + along the walk), its lift (m), its toe's turn up (deg), whether it is on the ground and its place in that part
+// (0 .. 1). Planted it goes back under the body exactly as fast as the body goes on (it does not slide).
 struct FootPlan { float dz,lift,toe,s; bool stance; };
-inline FootPlan Plan(float gait,float stride,int side) {
-    float u=gait/(2.0f*kPi)+(side==0 ? 0.0f : 0.5f);
+constexpr float kSwingToe=14.0f;
+inline FootPlan Plan(float phase,float travel,float duty,float lift,int side) {
+    float u=phase/(2.0f*kPi)+(side==0 ? 0.0f : 0.5f);
     u-=std::floor(u);
-    const float duty=Duty(stride),travel=StrideLength(stride)*duty;
     FootPlan f{};
-    if(u<duty) {   // planted: from travel/2 ahead to travel/2 behind, at the body's speed
+    if(u<duty) {   // planted: from travel/2 ahead to travel/2 behind
         f.stance=true;f.s=u/duty;
         f.dz=travel*(0.5f-f.s);
         return f;
     }
-    f.s=(u-duty)/(1.0f-duty);   // swung: back to front, lifted, its toe up
-    f.dz=travel*(-0.5f+0.5f*(1.0f-std::cos(kPi*f.s)));
-    f.lift=(kLiftWalk+(kLiftRun-kLiftWalk)*Clamp(stride,0.0f,1.0f))*std::sin(kPi*f.s);
+    f.s=(u-duty)/(1.0f-duty);   // swung: back to front (eased: it leaves and lands slow), lifted, its toe up
+    f.dz=travel*(-0.5f+Smooth(f.s));
+    f.lift=lift*std::sin(kPi*f.s);
     f.toe=kSwingToe*std::sin(kPi*f.s);
     return f;
-}
-
-// The legs standing (the stance and the crouch; Plant puts them on the floor) and the gait's plan for them: where each
-// ankle and foot stand (before the torso leans: the ground's frame), each step, the pelvis's sway. Gait walks them.
-inline void Legs(const PoseInput& in,Pose* p) {
-    const float feet=1.0f-in.air;
-    const float cr=Clamp(in.crouch+(kStandCrouch+kGuardCrouch*Smooth(in.guard))*feet,0.0f,1.0f);
-    for(int side=0;side<2;++side) {
-        const Stance& k=kStance[side];
-        const float thigh=kCrouchThigh*cr,knee=kCrouchKnee*cr;
-        const float foot=-kFootFlat*(thigh+knee);
-        const int t=side==0 ? kThighL : kThighR;
-        p->rot[t]=Mul(RotX(k.thighX*feet*kDeg),RotZ(k.thighZ*feet*kDeg));
-        p->rot[t]=Mul(p->rot[t],RotX((thigh+kBoostThigh*Smooth(in.boost)*in.air)*kDeg));   // a boost in the air: trailing
-        p->kneeStand[side]=(k.knee*feet+knee+kBoostKnee*Smooth(in.boost)*in.air)*kDeg;
-        p->rot[t+1]=RotX(p->kneeStand[side]);
-        p->rot[t+2]=Mul(RotX(foot*kDeg),Mul(RotX(k.footX*feet*kDeg),RotZ(k.footZ*feet*kDeg)));
-    }
-    p->pos[kPelvis][1]+=-kCrouchDrop*cr-kStanceDrop*feet;
-    Finish(p);
-    p->gaitW=Smooth(in.stride/kGaitOn)*feet;
-    for(int side=0;side<2;++side) {
-        const int f=side==0 ? kFootL : kFootR;
-        std::memcpy(p->ankleStand[side],p->modelPos[f],sizeof p->ankleStand[side]);
-        p->footStand[side]=p->modelRot[f];
-        const FootPlan plan=Plan(in.gait,in.stride,side);
-        const float half=0.5f*StrideLength(in.stride)*Duty(in.stride);
-        p->footDz[side]=plan.dz*p->gaitW;
-        p->footLift[side]=plan.lift*p->gaitW;
-        p->footToe[side]=plan.toe*p->gaitW;
-        p->legFore[side]=plan.dz/half*p->gaitW;
-        p->footDz[side]+=(side==0 ? kCannonStep : -kCannonStep)*Smooth(in.cannon)*feet;   // the brace: feet apart
-    }
-    // over the left foot at the middle of its stance (+x: the left), over the right half a cycle on
-    float u=in.gait/(2.0f*kPi);
-    u-=std::floor(u);
-    p->sway=kSway*p->gaitW*std::cos(2.0f*kPi*(u-0.5f*Duty(in.stride)));
 }
 
 // The leg `side`'s ankle (sz_root's frame) with its thigh turned `th` more about the pelvis's x (forward / back) and
@@ -420,177 +360,12 @@ inline void AnkleWith(const Pose& p,int side,float th,float kn,float ab,float* o
     for(int k=0;k<3;++k)out[k]=p.modelPos[t][k]+a[k]+b[k];
 }
 
-// The steps onto the legs (after the torso's lean): the pelvis over the carrying foot and low enough for the longest
-// step, then each leg's thigh and knee turned (least squares, Gauss-Newton) so its ankle is where its step puts it, and
-// its foot flat on the ground (its standing rotation) but for the swung toe.
-inline void Gait(const PoseInput& in,Pose* p) {
-    const float feet=1.0f-in.air;
-    if(!(feet>0.0f))return;
-    float target[2][3];
-    for(int side=0;side<2;++side) {
-        target[side][0]=p->ankleStand[side][0];
-        target[side][1]=p->ankleStand[side][1]+p->footLift[side];
-        target[side][2]=p->ankleStand[side][2]+p->footDz[side];
-    }
-    p->pos[kPelvis][0]+=p->sway;
-    Finish(p);
-    float down=0.0f;
-    for(int side=0;side<2;++side) {
-        const int t=side==0 ? kThighL : kThighR;
-        float straight[3];
-        AnkleWith(*p,side,0.0f,-p->kneeStand[side],0.0f,straight);
-        const float e[3]={straight[0]-p->modelPos[t][0],straight[1]-p->modelPos[t][1],straight[2]-p->modelPos[t][2]};
-        const float reach=kReach*std::sqrt(e[0]*e[0]+e[1]*e[1]+e[2]*e[2]);
-        const float d[3]={target[side][0]-p->modelPos[t][0],target[side][1]-p->modelPos[t][1],target[side][2]-p->modelPos[t][2]};
-        const float level=reach*reach-d[0]*d[0]-d[2]*d[2];
-        const float need=-d[1]-std::sqrt(level>0.0f ? level : 0.0f);
-        down=need>down ? need : down;
-    }
-    p->pos[kPelvis][1]-=down;
-    Finish(p);
-    for(int side=0;side<2;++side) {
-        // q = (thigh forward/back, knee, thigh out/in); damped Gauss-Newton on the ankle's miss, each step at most kIkStep
-        // (a full step from the stance can leap onto the knee folded the wrong way: the run's longest steps did)
-        float q[3]={0.0f,0.0f,0.0f};
-        const float lo[3]={-80.0f*kDeg,-p->kneeStand[side],-25.0f*kDeg},hi[3]={60.0f*kDeg,130.0f*kDeg-p->kneeStand[side],25.0f*kDeg};
-        for(int it=0;it<kIkIterations;++it) {
-            float a[3],j[3][3],r[3];
-            AnkleWith(*p,side,q[0],q[1],q[2],a);
-            for(int c=0;c<3;++c) {
-                constexpr float h=1e-3f;
-                float d[3]={q[0],q[1],q[2]},b[3];
-                d[c]+=h;
-                AnkleWith(*p,side,d[0],d[1],d[2],b);
-                for(int k=0;k<3;++k)j[c][k]=(b[k]-a[k])/h;
-            }
-            for(int k=0;k<3;++k)r[k]=target[side][k]-a[k];
-            float m[3][3],g[3];   // (J^T J + damping) step = J^T r
-            for(int x=0;x<3;++x) {
-                g[x]=j[x][0]*r[0]+j[x][1]*r[1]+j[x][2]*r[2];
-                for(int y=0;y<3;++y)m[x][y]=j[x][0]*j[y][0]+j[x][1]*j[y][1]+j[x][2]*j[y][2]+(x==y ? 1e-3f : 0.0f);
-            }
-            const float det=m[0][0]*(m[1][1]*m[2][2]-m[1][2]*m[2][1])-m[0][1]*(m[1][0]*m[2][2]-m[1][2]*m[2][0])+
-                            m[0][2]*(m[1][0]*m[2][1]-m[1][1]*m[2][0]);
-            if(!(std::fabs(det)>1e-12f))break;
-            for(int c=0;c<3;++c) {   // Cramer: column c replaced by g
-                float n[3][3];
-                for(int x=0;x<3;++x)for(int y=0;y<3;++y)n[x][y]=y==c ? g[x] : m[x][y];
-                const float dc=n[0][0]*(n[1][1]*n[2][2]-n[1][2]*n[2][1])-n[0][1]*(n[1][0]*n[2][2]-n[1][2]*n[2][0])+
-                               n[0][2]*(n[1][0]*n[2][1]-n[1][1]*n[2][0]);
-                q[c]=Clamp(q[c]+Clamp(dc/det,-kIkStep,kIkStep),lo[c],hi[c]);
-            }
-        }
-        const float th=q[0],kn=q[1];
-        const int t=side==0 ? kThighL : kThighR;
-        p->rot[t]=Mul(p->rot[t],ThighTurn(th,q[2]));
-        p->rot[t+1]=Mul(RotX(kn),p->rot[t+1]);
-    }
-    Finish(p);
-    for(int side=0;side<2;++side) {   // the foot flat as it stands (the ground's frame), its toe up while swung
-        const int f=side==0 ? kFootL : kFootR;
-        const M3 want=Mul(RotX(-p->footToe[side]*kDeg),p->footStand[side]);
-        M3 blend{};
-        for(int k=0;k<9;++k)blend.m[k]=p->modelRot[f].m[k]*(1.0f-feet)+want.m[k]*feet;
-        p->rot[f]=Mul(Orthonormal(blend),T(p->modelRot[kBones[f].parent]));
-    }
-}
-
 // On its feet, the feet planted: the pelvis up or down by what puts the lowest of the legs' undersides on the floor
 // (LowestSole), so whichever foot carries it stays on the floor through the stride, a crouch and the lean (the bob is the
 // legs' own geometry); off its feet that hold fades out (air). After the legs and the torso's lean, before the arms.
-inline void Plant(const PoseInput& in,Pose* p) {
+inline void Plant(float air,Pose* p) {
     Finish(p);
-    p->pos[kPelvis][1]-=LowestSole(*p)*(1.0f-in.air);
-}
-
-inline void Torso(const PoseInput& in,Pose* p) {
-    const float twist=kWaistTwist*0.5f*(p->legFore[0]-p->legFore[1])*kDeg;   // the shoulders against the hips
-    const float yaw=Clamp(in.aimYaw,-kMostAimYaw*kDeg,kMostAimYaw*kDeg)*kChestShare*in.aim;
-    const float breathe=0.6f*std::sin(in.t*1.3f)*kDeg;
-    // a boost's lean takes over from the flight's (they do not add up: ~35 deg in all, the research's)
-    const float b=Smooth(in.boost);
-    const float lean=(in.lean+(kRunLean*in.stride*(1-in.air)+kStandLean*(1-in.air))*kDeg)*(1.0f-b)+kBoostLean*kDeg*b;
-    p->rot[kPelvis]=Mul(RotZ(-in.bank),RotX(lean));
-    p->rot[kWaist]=RotY(twist+yaw*0.4f+kGuardTurn*Smooth(in.guard)*kDeg);
-    p->rot[kChest]=Mul(RotX(breathe-kCannonBack*kDeg*Smooth(in.cannon)),RotY(yaw*0.6f));
-    p->rot[kHead]=RotX(-Clamp(in.aimPitch,-30*kDeg,30*kDeg)*0.4f);
-    // the backpack's tubes flare up in flight, the funnel packs open a little
-    const float flare=12.0f*in.air*kDeg;
-    p->rot[kTubeL]=RotX(-flare);p->rot[kTubeR]=RotX(-flare);
-}
-
-// The left arm: swinging with the gait, or the shield up across the chest.
-inline void LeftArm(const PoseInput& in,Pose* p) {
-    const float sw=kArmSwing*p->legFore[1]*(1-in.guard);   // forward with the other leg
-    const float g=Smooth(in.guard);
-    const float back=kBoostArm*Smooth(in.boost)*(1-g),out=kCannonArms*Smooth(in.cannon)*(1-g);
-    p->rot[kUpperArmL]=Mul(Mul(RotX(-(sw+kGuardRaise*g-back)*kDeg),RotY(kGuardIn*g*kDeg)),RotZ(out*kDeg));
-    p->rot[kForearmL]=RotY(kGuardElbow*g*kDeg);
-}
-
-// The right arm raised so that the rifle (+z of sz_rifle, which follows the hand rigidly) points along the aim.
-inline void AimRifle(const PoseInput& in,Pose* p) {
-    const float a=Smooth(in.aim);
-    const float sw=kArmSwing*p->legFore[0]*(1-a);
-    const float kick=in.recoil*a,out=kCannonArms*Smooth(in.cannon);
-    p->rot[kUpperArmR]=Mul(RotX(-(kAimRaise*a+sw-kRecoilShoulder*kick)*kDeg),RotZ(-(kAimOut*a+out)*kDeg));
-    p->rot[kForearmR]=RotX((kAimElbow*a-kRecoilElbow*kick)*kDeg);
-    Finish(p);
-    const float yaw=Clamp(in.aimYaw,-kMostAimYaw*kDeg,kMostAimYaw*kDeg);
-    const float pitch=Clamp(in.aimPitch,-kMostAimPitch*kDeg,kMostAimPitch*kDeg)+kRecoilMuzzle*kDeg*in.recoil*a;
-    const float dir[3]={std::sin(yaw)*std::cos(pitch),std::sin(pitch),std::cos(yaw)*std::cos(pitch)};
-    // the hand's model rotation wanted: the aim's (rifle along it), blended from the bind's (hanging, rifle level)
-    const M3 want=Facing(dir);
-    const M3 hand=Mul(p->rot[kHandR],p->modelRot[kForearmR]);
-    M3 blend{};
-    for(int k=0;k<9;++k)blend.m[k]=hand.m[k]*(1-a)+want.m[k]*a;
-    // re-orthonormalise (Facing of the blend's forward)
-    const M3 target=Facing(&blend.m[6]);
-    p->rot[kHandR]=Mul(target,T(p->modelRot[kForearmR]));
-}
-
-// The tomahawk: stowed (rigid with the shield, as at the bind), or drawn in the right hand through a swing; its
-// blade lit only while drawn. `axeAxis`: the handle's direction at the bind, grip to blade (sazabi.cpp from the
-// joints of sz_axe and sz_axe_blade).
-inline void Tomahawk(const PoseInput& in,const Rig& rig,Pose* p) {
-    Finish(p);
-    if(in.swing<0.0f) {   // stowed: its bind offset from the shield, carried with the shield
-        const int s=kShield;
-        float off[3]={rig.joint[kAxe][0]-rig.joint[s][0],rig.joint[kAxe][1]-rig.joint[s][1],rig.joint[kAxe][2]-rig.joint[s][2]};
-        float at[3];
-        Apply(off,p->modelRot[s],at);
-        for(int k=0;k<3;++k)at[k]+=p->modelPos[s][k];
-        PlaceAt(p,kAxe,p->modelRot[s],at);
-        p->scale[kAxeBlade]=0.0f;
-        return;
-    }
-    // drawn: the swing's arm (overrides the aim), then the axe in the hand with its blade along the hand's forward
-    const float u=in.swing;
-    const int c=in.combo<0 ? 0 : in.combo>2 ? 2 : in.combo;
-    const Swing& w=kCombo[c];
-    const float a=WindEnd(c),b=StrikeEnd(c);
-    float key[3];   // raise, across, twist
-    for(int i=0;i<3;++i) {
-        if(u<a)key[i]=w.wind[i]*Smooth(u/a);
-        else if(u<b)key[i]=w.wind[i]+(w.strike[i]-w.wind[i])*Smooth((u-a)/(b-a));
-        else key[i]=w.strike[i]*(1.0f-Smooth((u-b)/(1.0f-b)));
-    }
-    p->rot[kUpperArmR]=Mul(RotX(-key[0]*kDeg),RotY(key[1]*kDeg));
-    p->rot[kForearmR]=RotX(-25.0f*kDeg);
-    p->rot[kHandR]=RotX(-40.0f*kDeg);
-    p->rot[kChest]=Mul(p->rot[kChest],RotY(key[2]*kDeg));
-    p->scale[kRifle]=0.0f;   // the rifle away while the tomahawk is out
-    Finish(p);
-    const float axis[3]={rig.joint[kAxeBlade][0]-rig.joint[kAxe][0],rig.joint[kAxeBlade][1]-rig.joint[kAxe][1],
-                         rig.joint[kAxeBlade][2]-rig.joint[kAxe][2]};
-    const float len=std::sqrt(axis[0]*axis[0]+axis[1]*axis[1]+axis[2]*axis[2]);
-    const float unit[3]={axis[0]/len,axis[1]/len,axis[2]/len},fwd[3]={0,0,1};
-    const M3 rot=Mul(Align(unit,fwd),p->modelRot[kHandR]);   // handle to blade along the hand's +z
-    float ahead[3]={0,0,kGripAhead},at[3];
-    Apply(ahead,p->modelRot[kHandR],at);
-    for(int k=0;k<3;++k)at[k]+=p->modelPos[kHandR][k];
-    PlaceAt(p,kAxe,rot,at);
-    p->scale[kAxeBlade]=1.0f;
+    p->pos[kPelvis][1]-=LowestSole(*p)*(1.0f-air);
 }
 
 // The funnels flying (funnelOut): each at its funnelAt, its nose along funnelDir (the bind lies every funnel along
@@ -607,25 +382,5 @@ inline void Funnels(const PoseInput& in,Pose* p) {
         if(!(d>1e-4f)){dir[0]=nose[0];dir[1]=nose[1];dir[2]=nose[2];}else for(float& c:dir)c/=d;
         PlaceAt(p,kFunnels[k],Align(nose,dir),in.funnelAt[k]);
     }
-}
-
-// The whole pose for `in` on `rig`.
-inline void Animate(const PoseInput& in,const Rig& rig,Pose* p) {
-    Reset(rig,p);
-    Legs(in,p);
-    Torso(in,p);
-    Gait(in,p);
-    Plant(in,p);
-    LeftArm(in,p);
-    AimRifle(in,p);
-    Tomahawk(in,rig,p);
-    Funnels(in,p);
-    Finish(p);
-}
-
-// The gait's phase after `dt` s covering `ground` m/s at `stride` (a cycle a StrideLength: the planted foot keeps pace).
-inline float GaitStep(float phase,float ground,float stride,float dt) {
-    phase+=2.0f*kPi*ground/StrideLength(stride)*dt;
-    return phase>200.0f*kPi ? phase-200.0f*kPi : phase;
 }
 }  // namespace sazabi

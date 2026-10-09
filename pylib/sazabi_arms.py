@@ -34,9 +34,9 @@ RIFLE_GRIP = (0.0, -1.3, 0.6)          # sz_rifle frame: the grip, in the fist
 RIFLE_MUZZLE = (0.0, 0.25, 10.6)       # sz_rifle frame: where the boxes' rounds leave (the bone sz_muzzle's joint)
 SHIELD_OUT = 1.7                       # m from the forearm's axis to the shield's back
 SHIELD_SCALE = 0.85                    # 8.4 m point to top, 4.6 m across
-AXE_HANDLE = 6.0
+AXE_HANDLE = 7.0
 CANNON_AT = (0.0, 16.9, 3.3)           # the chest's front, under the cockpit hatch (the mega particle cannon)
-BLADE_SPAN = 3.4
+BLADE_SPAN = 5.2                       # m the beam blade stands out from the handle (an axe's head, seen across the field)
 
 
 def _add(a: Vec, b: Vec) -> Vec:
@@ -198,7 +198,10 @@ def axe(at: dict[str, Vec]) -> tuple[list[om.Part], list[om.Part]]:
     handle.tube(DARK, top, _add(grip, _mul(u, AXE_HANDLE / 2)), 0.28, 10)
     handle.box(METAL, top, (u, w, n), (0.5, 0.45, 0.4))           # the emitter
     blade = Builder('sz_axe_blade')
-    shape = [(-0.2, 0.0), (0.6, -0.4), (1.4, BLADE_SPAN * 0.5), (0.6, BLADE_SPAN), (-0.2, BLADE_SPAN * 0.7)]
+    # an axe's head: along the handle from the emitter (u, toward the butt) and out across it (w), the edge curving
+    # from a horn over the emitter to one below it
+    k = BLADE_SPAN / 5.2
+    shape = [(-0.3 * k, 0.0), (2.8 * k, 0.0), (3.6 * k, 4.6 * k), (1.2 * k, BLADE_SPAN), (-1.4 * k, 4.4 * k)]
     blade.prism(BEAM, shape, top, u, w, n, -0.08, 0.08)
     return list(handle.parts.values()), list(blade.parts.values())
 
