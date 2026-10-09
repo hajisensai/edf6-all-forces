@@ -312,6 +312,13 @@ void Run() {
         Check(leadGun==primary.data,"auto-aim is asked with the turret's gun, not the hull gun");
         selectedGun=primary.data;TurretCamFrame(vehicle);
         Check(shared.decoupled && !shared.physicalOnly && TurretGun(vehicle,seat)==primary.data,"back on the cannon: the same, symmetric");
+        // The overhead view observes the turret's gun too (integration review): after the hull gun's trigger its point is
+        // the cannon's, the one the view is handed back onto.
+        terrain=true;floorY=-25.0f;
+        selectedGun=primary.data;ShotFocus(shared);const float cannonFocus[3]={shared.focus[0],shared.focus[1],shared.focus[2]};
+        const bool cannonValid=shared.focusValid;
+        selectedGun=hullGun.data;ShotFocus(shared);
+        Check(cannonValid && shared.focusValid && vec::Dist(shared.focus,cannonFocus)<1e-3f,"hull gun pick: the overhead point is the cannon's");
         selectedGun=picked.data;TurretCamFrame(vehicle);
         Check(TurretGun(vehicle,seat)==picked.data,"an articulated pick turns the turret by its own bore");
         unsigned char* only[]={hullGun.holder};Put<void*>(seat,kSeatWeapons,only);Put<std::uint64_t>(seat,kSeatWeaponCount,1);

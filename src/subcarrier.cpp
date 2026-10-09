@@ -831,6 +831,7 @@ void __fastcall GaugeHook(void* hud,void* viewProj,void* owner,void* r9,void* fi
         int count=0;
         for(int i=0;fresh && i<kMaxSubs;++i)
             if(shot.sub[i].shown)panels[count++]=shot.sub[i].panel;
+        KeepPlayerViewProj(At<const void*>(hud,0x18),static_cast<const float*>(viewProj));   // this pass's player (split screen)
         HudDraw(static_cast<const float*>(viewProj),r9,fifth,panels,count);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }

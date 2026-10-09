@@ -41,6 +41,7 @@ bool TurretCamHighTransition(const void*) noexcept{return transition;}
 bool TurretCamTurret(const void*,unsigned) noexcept{return true;}
 bool CameraRay(float*,float*) noexcept{return false;}
 bool MapOwnsView() noexcept{return false;}
+bool CameraRayOf(const void*,float*,float*) noexcept{return false;}
 void Log(const char*,...) noexcept{}
 float MapRay(const float*,const float*,float*) noexcept{return -1;}
 }

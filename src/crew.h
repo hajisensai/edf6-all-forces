@@ -390,6 +390,10 @@ inline float WorldHalf() noexcept { return Cfg().bigWorld>3000.0f ? Cfg().bigWor
 bool LastViewProj(float* out) noexcept;
 // The camera's eye and its unit look through the screen's centre, from LastViewProj (hud.cpp); false: no camera yet.
 bool CameraRay(float* eye,float* dir) noexcept;
+// Split screen: each local player's own view (player_view.h). KeepPlayerViewProj from each HUD pass with the camera it
+// draws for (subcarrier.cpp GaugeHook); CameraRayOf the ray of the view last drawn for `human`, false with none fresh.
+void KeepPlayerViewProj(const void* camera,const float* viewProj) noexcept;
+bool CameraRayOf(const void* human,float* eye,float* dir) noexcept;
 // A bigger physics world and the map pieces' log (bigworld.cpp): at load, before any mission.
 bool InstallBigWorld() noexcept;
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
