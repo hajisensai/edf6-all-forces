@@ -328,10 +328,9 @@ void PreloadJets() noexcept {
         // The doll drones' dolls (as the Recruiter's weapon SGO has its doll preloaded, its `resource`).
         const bool dolls=PreloadDolls(mgr,Preloaded(Body::doll));
         Log("JET preload %s (dolls %d)",line,dolls);
-        // The gunship's shells (GunshipFire), with its body; the impact charges.
-        // ...and for the Proteus's gun and salvo (proteus.cpp) whenever its rework's code checked out at load, whatever the
-        // ini says now: a Proteus may be called any time, and ProteusRework (or Enabled) may be switched on mid-mission.
-        PreloadShells(mgr,Preloaded(Body::gunship),ProteusReady());
+        // The gunship's shells (GunshipFire), with its body; the impact charges; the EMC / Sazabi rounds and the Proteus's
+        // shield whenever their files are installed (a Proteus may be called any time, ProteusRework switched on mid-mission).
+        PreloadShells(mgr,Preloaded(Body::gunship));
     } __except(FaultLog("JET preload (nothing preloaded)",GetExceptionInformation())) {
         for(auto& p:preloaded)p=false;
         ResetShells();

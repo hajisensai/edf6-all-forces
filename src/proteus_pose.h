@@ -1,4 +1,4 @@
-// Model-space helpers for the Proteus deployment and visible directional shield.
+// Model-space helpers for the Proteus deployment (its support piles, proteus_visual.inc).
 #pragma once
 #include "proteus_logic.h"
 #include "exhaust_pose.h"
@@ -28,21 +28,5 @@ inline bool MoveWorld(const float* local,const float* world,const float* delta,f
 }
 inline void Point(const float* p,const float* matrix,float* out) noexcept {
     for(int i=0;i<3;++i)out[i]=p[0]*matrix[i]+p[1]*matrix[4+i]+p[2]*matrix[8+i]+matrix[12+i];
-}
-constexpr int kPanels=36;
-// Every mesh is a ten-degree panel centred on +Z. Its own rigid skin bone
-// gives each panel the angle needed by the configured shield arc.
-inline void Panel(int index,float arcDeg,float yaw,bool visible,float* out) noexcept {
-    Identity(out);
-    if(!std::isfinite(arcDeg) || !std::isfinite(yaw))visible=false;
-    const float arc=std::fmin(360.0f,std::fmax(10.0f,arcDeg));
-    const int count=static_cast<int>(std::ceil(arc/10.0f));
-    if(!visible || index>=count){out[0]=out[5]=out[10]=0.0f;return;}
-    constexpr float rad=0.0174532925199433f;
-    const float width=arc/static_cast<float>(count);
-    const float angle=yaw+(-arc*0.5f+(static_cast<float>(index)+0.5f)*width)*rad;
-    const float scale=std::tan(width*0.5f*rad)/std::tan(5.0f*rad);
-    out[0]=scale*std::cos(angle);out[2]=-scale*std::sin(angle);
-    out[8]=std::sin(angle);out[10]=std::cos(angle);
 }
 } // namespace proteus::pose

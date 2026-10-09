@@ -1,29 +1,53 @@
-// Exercise the production ProteusFrame reached by the native slot-4 shared vehicle tick, with an actual player
-// rider and four embedded seats. No AI input task is simulated. The EDF functions stay uncalled in this fixture.
+// The production Proteus rework (src/proteus.cpp and its .inc files) driven through its real entry points with a
+// player rider in four embedded seats: ProteusFrame (the native slot-4 tick), ProteusWeaponPost / ProteusEmptyWeapon /
+// UserHook (the stock weapon phase), BarrierStep (the stock barrier's update) and the readouts. The EDF functions stay
+// uncalled in this fixture (fakes for activation, the holder pull and the axis apply); tests/proteus_weapon_test.cpp
+// runs the same production code against the real EDF.dll.
 #include "../src/proteus.cpp"
 #include <cstdio>
 namespace crew {
 unsigned char* image=nullptr;PlayerFix player{};
 namespace {
 Config config{};ULONGLONG now=3600000,frame=1;
-unsigned char vehicle[0x3000]{},seats[4*kSeatStride]{},human[0x400]{},ctrl[16]{};
+alignas(16) unsigned char vehicle[0x3000]{},seats[4*kSeatStride]{},human[0x400]{},ctrl[16]{};
+alignas(16) unsigned char gunner[0x400]{},gunnerCtrl[16]{};
+alignas(16) unsigned char cannonL[0x1600]{},cannonR[0x1600]{},launcherW[0x1600]{},holders[3][0x48]{},weaponCtrl[16]{};
+unsigned char* lists[3][1]={{holders[0]},{holders[1]},{holders[2]}};
 unsigned char* observerHuman=human;
-int failures=0,checks=0,gunShots=0,salvoShots=0;
-bool netSession=false,netAuthority=true,roundsReady=false;
+int failures=0,checks=0;
+bool netSession=false,netAuthority=true,shieldFileReady=true,emcSucceeds=true;
 const void* localNpcAuthority=nullptr;
 std::int32_t netDriver=42;
-int controlSends=0,defenseSends=0;
+int controlSends=0,defenseSends=0,emcFires=0,activated=0,deactivated=0,pulls=0,axes=0;
 proteus_net::State lastControl,lastDefense;
-float lastFrom[3]{},lastAt[3]{};bool roundSucceeds=true;
+float emcFrom[3]{},emcAt[3]{};
+bool cameraOk=false;float cameraDir[3]{0,0,1};
 unsigned char* testPoseBones=nullptr;
 void Check(bool pass,const char* what){++checks;if(!pass){++failures;std::printf("FAIL %s\n",what);}}
-void __fastcall FakeMuzzle(void* raw,const void* matrix){
-    unsigned char w[edf::kWeaponMatrix+64]{};std::memcpy(w+edf::kWeaponMatrix,matrix,64);
-    float pos[3],dir[3];edf::MuzzleFrame(w,static_cast<const unsigned char*>(raw),pos,dir);
-    std::memcpy(static_cast<unsigned char*>(raw)+0x80,pos,12);std::memcpy(static_cast<unsigned char*>(raw)+0x70,dir,12);
-}
 void Tick(){++frame;now+=100;ProteusFrame(vehicle);}
+void __fastcall FakeActive(void* w){static_cast<unsigned char*>(w)[0x13E]=1;++activated;}
+void __fastcall FakeEmpty(void* w){static_cast<unsigned char*>(w)[0x13E]=0;++deactivated;}
+void __fastcall FakePull(void* h){At<unsigned char*>(h,kHolderWeapon)[kPull]=1;++pulls;}
+void __fastcall FakeAxis(void*,bool){++axes;}
+const void* __fastcall FakeUser(void*,const void*){return nullptr;}
+void Jump(unsigned rva,void* target){unsigned char b[12]={0x48,0xB8};b[10]=0xFF;b[11]=0xE0;std::memcpy(b+2,&target,8);std::memcpy(image+rva,b,sizeof(b));}
+void Seat(unsigned s,unsigned char* rider,unsigned char* c){Put<void*>(SeatAt(vehicle,s),kSeatRider,rider);Put<void*>(SeatAt(vehicle,s),kSeatRiderCtrl,c);}
+void InitWeapon(unsigned char* w,unsigned i) {
+    Put<void*>(holders[i],kHolderCtrl,weaponCtrl);Put<void*>(holders[i],kHolderWeapon,w);
+    auto seat=SeatAt(vehicle,i+1);Put<void*>(seat,kSeatWeapons,lists[i]);Put<std::uint64_t>(seat,kSeatWeaponCount,1);
+    Put<float>(w,kRate,1);Put<float>(w,kSpread,1);
 }
+void Soldier(unsigned char* h,unsigned char* c,std::uint16_t net) {
+    Put<void*>(h,0,image+kVtRanger);Put<void*>(h,kSelf,h);Put<void*>(h,kSelfCtrl,c);Put<float>(h,kHp,100);Put<int>(c,8,1);
+    h[edf::kHumanPlayer]=1;Put<void*>(h,edf::kHumanPad,h);Put<std::uint16_t>(h,0x128,net);
+}
+// A fresh BarrierBullet01 as the IFC would make it: its segments and its owner (the attacker ShellMake names).
+void FreshBarrier(unsigned char* b,const void* owner,int segments) {
+    std::memset(b,0,0x1600);Put<const void*>(b,0,image+kBarrierVt);
+    Put<std::int32_t>(b,kBarrierSegmentsAt,segments);Put<const void*>(b,kBarrierOwner,owner);Put<const void*>(b,kBarrierOwnerCtrl,ctrl);
+    Put<float>(b,kBarrierHp,0.0f);   // ShellMake may have zeroed the round's damage: the plugin's HP is written on the claim
+}
+}  // namespace
 const Config& Cfg() noexcept{return config;}
 bool InSession() noexcept{return netSession;}
 bool IsOnlineAuthority(const void* object) noexcept{
@@ -40,144 +64,210 @@ ULONGLONG GameMs() noexcept{return now;}ULONGLONG GameFrame() noexcept{return fr
 void Log(const char*,...) noexcept{}
 bool MapHoldsKeys() noexcept{return false;}
 bool KnownVehicle(const void*) noexcept{return false;}
-bool CameraRay(float*,float*) noexcept{return false;}
-bool VisitEnemies(const unsigned char*,EnemyVisitor,void*) noexcept{return true;}
+bool CameraRay(float* eye,float* dir) noexcept{if(!cameraOk)return false;eye[0]=eye[1]=eye[2]=0;std::memcpy(dir,cameraDir,12);return true;}
 float MapRay(const float*,const float*,float*) noexcept{return -1.0f;}
 unsigned char* PlayerHuman() noexcept{return observerHuman;}
-void ProteusRoundsReady(bool* gun,bool* salvo) noexcept{if(gun)*gun=roundsReady;if(salvo)*salvo=roundsReady;}
+bool EmcRoundReady(EmcRound kind) noexcept{return kind==EmcRound::proteusShield && shieldFileReady;}
+RoundObj EmcFire(EmcRound kind,const unsigned char* by,const float* from,const float* at,float) noexcept{
+    static unsigned char demo[0x40]{};
+    if(kind!=EmcRound::proteusShield || by!=vehicle || !emcSucceeds)return RoundObj{};
+    ++emcFires;std::memcpy(emcFrom,from,12);std::memcpy(emcAt,at,12);return RoundObj{demo,nullptr};
+}
 unsigned char* BoneRecord506(const unsigned char*,const wchar_t* name) noexcept{
     if(!testPoseBones)return nullptr;
-    if(!std::wcscmp(name,L"pile_l"))return testPoseBones+36*kBoneStride;
-    if(std::wcsncmp(name,L"vc_ps_",6))return nullptr;
-    const int i=_wtoi(name+6);return i>=0 && i<36 ? testPoseBones+static_cast<std::size_t>(i)*kBoneStride : nullptr;
+    if(!std::wcscmp(name,L"pile_l"))return testPoseBones;
+    if(!std::wcscmp(name,L"pile_r"))return testPoseBones+kBoneStride;
+    return nullptr;
 }
-bool ProteusGunRound(const unsigned char*,const float* from,const float* at,float) noexcept{
-    ++gunShots;std::memcpy(lastFrom,from,12);std::memcpy(lastAt,at,12);return roundSucceeds;
-}
-bool ProteusSalvoRound(const unsigned char*,const float* from,const float* at,float) noexcept{
-    ++salvoShots;std::memcpy(lastFrom,from,12);std::memcpy(lastAt,at,12);return roundSucceeds;
-}
-}
-int main(){
-    using namespace crew;
-    image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2200000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
-    if(!image)return 2;
-    const unsigned char setWorldCode[]={0xC6,0x81,0xB0,0,0,0,1,0x0F,0x28,0x02};
-    std::memcpy(image+kSetModelWorld,setWorldCode,sizeof(setWorldCode));
-    Put<const void*>(image,kProteusPoseSlot,image+kProteusPoseFn);
-    Check(InstallProteusPose() && nextProteusPose==image+kProteusPoseFn &&
-          At<const void*>(image,kProteusPoseSlot)==reinterpret_cast<const void*>(&ProteusPoseHook),
-          "production install chains only the actual BigBegaruta pose slot");
-    Check(!InstallProteusPose(),"unexpected already-hooked pose slot is not blindly overwritten");
-    buildMuzzle=&FakeMuzzle;
-    Put<void*>(human,0,image+kVtRanger);Put<float>(human,kHp,100);
-    ok=true;config.debug=false;config.proteusDriverGun=false;config.proteusFieldRadius=0;
-    Put<const void*>(vehicle,0,image+kVtBig);Put<void*>(vehicle,kSelfCtrl,ctrl);Put<void*>(vehicle,kSeats,seats);Put<std::uint64_t>(vehicle,kSeatCount,4);
+}  // namespace crew
+
+namespace {
+using namespace crew;
+// `image`: a private fake (null: allocated here, its pull / axis entries jumped to fakes) or the real EDF.dll mapping.
+void Setup() {
+    const bool fake=!image;
+    if(fake)image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2200000,MEM_RESERVE|MEM_COMMIT,PAGE_EXECUTE_READWRITE));
+    ok=userOk=barrierOk=true;config.debug=false;config.proteusFieldRadius=0;
+    Put<const void*>(vehicle,0,image+kVtBig);Put<void*>(vehicle,kSelf,vehicle);Put<void*>(vehicle,kSelfCtrl,ctrl);
+    Put<void*>(vehicle,kSeats,seats);Put<std::uint64_t>(vehicle,kSeatCount,4);
     Put<float>(vehicle,kWalk,10);Put<float>(vehicle,kWalkEase,0.1f);Put<float>(vehicle,kTurn,0.2f);Put<float>(vehicle,kJump,8);Put<float>(vehicle,kStepNormal,0.76f);
-    Put<float>(vehicle,kHpMax,7500);Put<float>(vehicle,kMatrix,1);Put<float>(vehicle,kMatrix+20,1);Put<float>(vehicle,kMatrix+40,1);
+    Put<float>(vehicle,kHpMax,7500);Put<float>(vehicle,kHp,7500);
+    proteus::pose::Identity(reinterpret_cast<float*>(vehicle+kMatrix));
+    Put<float>(vehicle,kPosition,100);Put<float>(vehicle,kPosition+4,5);Put<float>(vehicle,kPosition+8,-50);
     for(int i=0;i<4;++i)Put<int>(seats+i*kSeatStride,kSeatClassMask,15);
-    Put<void*>(seats,kSeatRider,human);Put<void*>(seats,kSeatRiderCtrl,ctrl);Put<int>(ctrl,edf::kCtrlUses,1);
-    human[edf::kHumanPlayer]=1;Put<void*>(human,edf::kHumanPad,human);seats[kSeatPad]=1;
+    Soldier(human,ctrl,2);Soldier(gunner,gunnerCtrl,2);
+    Seat(0,human,ctrl);seats[kSeatPad]=1;
+    Put<int>(weaponCtrl,8,1);
+    InitWeapon(cannonL,0);InitWeapon(cannonR,1);InitWeapon(launcherW,2);
+    if(!fake)return;
+    nativeActive=&FakeActive;nativeEmpty=&FakeEmpty;nextUser=&FakeUser;
+    Jump(kPullFn,reinterpret_cast<void*>(&FakePull));Jump(kAxisApply,reinterpret_cast<void*>(&FakeAxis));
+}
+
+void Stance() {
     Tick();ProteusReadout ro{};
-    Check(PlayerProteus(&ro) && ro.driver,"native player tick produces Proteus HUD readout without AI task");
-    Check(At<float>(vehicle,kWalk)==16.0f,"player entry applies movement rework");
-    Check(At<int>(seats+2*kSeatStride,kSeatClassMask)==0 && At<int>(seats+3*kSeatStride,kSeatClassMask)==0,"player entry really closes extra two seats");
+    Check(PlayerProteus(&ro) && ro.driver && ro.shieldReady,"native player tick produces the HUD readout (shield available)");
+    Check(At<float>(vehicle,kWalk)==16.0f,"player entry applies the walking legs");
+    Check(At<int>(seats+2*kSeatStride,kSeatClassMask)==0 && At<int>(seats+3*kSeatStride,kSeatClassMask)==0,"player entry closes the extra two seats");
     Check(ProteusVisibleSeats(vehicle,4)==2,"closed engine weapon slots are not advertised as passenger seats");
-    Put<void*>(seats+2*kSeatStride,kSeatRider,human);
-    Check(ProteusVisibleSeats(vehicle,4)==4,"an existing rider in a closed slot stays visible");
-    Put<void*>(seats+2*kSeatStride,kSeatRider,nullptr);
     Put<std::uint16_t>(seats,kSeatButtons,static_cast<std::uint16_t>(config.proteusModeButton));Tick();
     Put<std::uint16_t>(seats,kSeatButtons,0);for(int i=0;i<35;++i)Tick();
-    Check(PlayerProteus(&ro) && ro.mode==proteus::Mode::deployed,"native player frames advance deployment to completion");
-    Check(At<float>(vehicle,kWalk)==0 && At<float>(vehicle,kJump)==0,"deployed leg and jump parameters change in real object");
-    // Both riders are local. Seat 0 must keep controlling the vehicle while PlayerHuman observes seat 1.
-    alignas(16) unsigned char gunnerHuman[0x400]{},gunnerCtrl[16]{};
-    Put<void*>(gunnerHuman,0,image+kVtRanger);Put<float>(gunnerHuman,kHp,100);
-    gunnerHuman[edf::kHumanPlayer]=1;Put<void*>(gunnerHuman,edf::kHumanPad,gunnerHuman);Put<int>(gunnerCtrl,8,1);
-    Put<void*>(seats+kSeatStride,kSeatRider,gunnerHuman);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,gunnerCtrl);
-    seats[kSeatStride+kSeatPad]=0;observerHuman=gunnerHuman;
-    Put<std::uint16_t>(seats,kSeatButtons,static_cast<std::uint16_t>(config.proteusModeButton));Tick();
-    Check(PlayerProteus(&ro) && ro.seat==1 && !ro.driver && ro.keys,"split-screen gunner sees their own seat/device and no driver-only hints");
-    Check(UnitOf(vehicle,false)->playerSeat==0 && ro.mode==proteus::Mode::stowing,
-          "observing the gunner does not steal seat 0 deployment control");
-    Put<std::uint16_t>(seats,kSeatButtons,0);
-    Put<std::uint16_t>(seats+kSeatStride,kSeatButtons,static_cast<std::uint16_t>(config.proteusShieldButton));Tick();
-    Check(!UnitOf(vehicle,false)->st.shieldOn,"gunner's shield button is not mistaken for driver input");
-    observerHuman=human;Tick();
-    Check(PlayerProteus(&ro) && ro.seat==0 && ro.driver && !ro.keys,"driver observer regains driver hints and their pad binding mode");
-    Put<void*>(seats+kSeatStride,kSeatRider,nullptr);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,nullptr);
-    observerHuman=human;
-    config.proteus=false;Tick();
-    Check(At<float>(vehicle,kWalk)==10 && At<float>(vehicle,kJump)==8,"setting off restores stock legs through same native tick");
-    Check(At<int>(seats+2*kSeatStride,kSeatClassMask)==15 && At<int>(seats+3*kSeatStride,kSeatClassMask)==15,"setting off restores original seat masks");
-    Check(ProteusVisibleSeats(vehicle,4)==4,"disabled rework restores four public seats");
-    float transform[16];
-    proteus::pose::Panel(0,120,0,true,transform);
-    Check(std::fabs(std::atan2(transform[8],transform[10])+55.0f*kPi/180.0f)<.0001f,"shield first panel faces -55 degrees, covering -60 to -50");
-    proteus::pose::Panel(12,120,0,true,transform);
-    Check(transform[0]==0 && transform[5]==0 && transform[10]==0,"panels outside the configured arc are hidden");
-    proteus::pose::Panel(35,360,0,true,transform);
-    Check(transform[5]==1,"full-circle shield displays all 36 panels");
-    proteus::pose::Panel(0,120,0,false,transform);
-    Check(transform[0]==0 && transform[5]==0,"shield off writes a hidden complete matrix");
-    float local[16],world[16];proteus::pose::Identity(local);proteus::pose::Identity(world);
-    world[0]=0;world[1]=1;world[4]=-1;world[5]=0;
-    const float delta[3]={0,-2,0};
-    Check(proteus::pose::MoveWorld(local,world,delta,transform) && std::fabs(transform[12]+2)<.0001f && transform[13]==0,
-          "rotated pile parent converts vertical ground movement to its actual local axis");
-    proteus::State poseState{};poseState.mode=proteus::Mode::deploying;poseState.t=.75f;
-    Check(std::fabs(proteus::pose::Deployed(poseState,proteus::Tunables{})-.5f)<.0001f,"deployment model progresses halfway through real stagger");
-    poseState.mode=proteus::Mode::stowing;
-    Check(std::fabs(proteus::pose::Deployed(poseState,proteus::Tunables{})-.5f)<.0001f,"stowing reverses deployment model");
-    // Production firing paths, with real MuzzleFrame reading separate physical tubes and native bone matrices.
-    unsigned char weapon[0xF00]{},muzzles[2*edf::kMuzzleStride]{},bone[0x100]{};
-    Put<void*>(weapon,edf::kMuzzles,muzzles);Put<std::uint64_t>(weapon,edf::kMuzzleCount,2);
-    for(int k=0;k<4;++k)Put<float>(bone,edf::kBoneRows+k*20,1);
-    for(int i=0;i<2;++i){
-        auto m=muzzles+i*edf::kMuzzleStride;Put<void*>(m,0,bone);Put<int>(m,edf::kMuzzleMode,1);
-        for(int k=0;k<4;++k)Put<float>(m,edf::kMuzzleLocal+k*20,1);
-        Put<float>(m,edf::kMuzzleLocal+48,i==0 ? -3.0f : 3.0f);
-        Put<float>(m,edf::kMuzzleLocal+52,10.0f);Put<float>(m,edf::kMuzzleLocal+56,9.0f);
+    Check(PlayerProteus(&ro) && ro.mode==proteus::Mode::deployed,"the pad's stance button deploys after the stagger");
+    Check(At<float>(vehicle,kWalk)==0 && At<float>(vehicle,kJump)==0,"deployed: legs and jump stopped in the real object");
+    Check(At<float>(cannonL,kRate)==config.proteusDeployGunRate && At<float>(cannonR,kSpread)==config.proteusDeployGunSpread &&
+          At<float>(launcherW,kRate)==1,"deployed: the cannons get the stance's rate / spread, the launcher keeps its own");
+}
+
+void Weapons() {
+    Unit& u=*UnitOf(vehicle,false);
+    const unsigned char* lent[4]{};
+    // Alone, deployed: the driver works all three stock mounts.
+    Check(ProteusBorrowedWeapons(vehicle,0,lent,4)==3 && lent[0]==cannonL && lent[1]==cannonR && lent[2]==launcherW,
+          "alone deployed: the driver's seat lists both cannons and the launcher");
+    Check(UserHook(vehicle+kUserIface,cannonR)==human+kUserIface && UserHook(vehicle+kUserIface,launcherW)==human+kUserIface,
+          "the fire step's user of a borrowed mount is the driver");
+    // Aim: the borrowed mounts follow the driver's seat aim (clamped to their own stops).
+    for(unsigned i=0;i<4;++i)for(int axis=0;axis<2;++axis) {
+        auto a=seataim::Object(SeatAt(vehicle,i))+edf::kAimAxes+axis*edf::kAxisStride;
+        Put<float>(a,edf::kAxisMin,-.2f);Put<float>(a,edf::kAxisMax,.2f);Put<float>(a,edf::kAxisAngle,i==0 ? .3f : -.1f);
     }
-    Unit fire{};fire.weapon[kRightSeat]=weapon;fire.weapon[kLauncherSeat]=weapon;
-    fire.st.mode=proteus::Mode::deployed;fire.closed=true;config.proteusDriverGun=true;
-    Put<float>(seats,kSeatFire,1);float from[3],dir[3];
-    Check(RoundFrom(fire,kLauncherSeat,0,from,dir) && from[0]==-3 && from[1]==10,"salvo selects first real tube without arbitrary height offset");
-    Check(RoundFrom(fire,kLauncherSeat,1,from,dir) && from[0]==3,"salvo selects next real tube rather than midpoint in hull");
-    DriverGun(fire,vehicle,seats,now,config);
-    Check(gunShots==1 && lastFrom[0]==-3 && lastAt[2]>lastFrom[2],"driver cannon follows real barrel even when camera ray unavailable");
-    Put<void*>(seats+kSeatStride,kSeatRider,human);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,ctrl);
-    DriverGun(fire,vehicle,seats,now+2000,config);Check(gunShots==1,"occupied gunner has exclusive cannon ownership");
-    Put<void*>(seats+kSeatStride,kSeatRider,nullptr);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,nullptr);
-    fire.mark=human;fire.markAt[2]=200;fire.salvoLeft=2;Salvo(fire,vehicle,now,config);
-    Check(salvoShots==1 && fire.salvoLeft==1 && lastFrom[0]==-3,"salvo creates a round from actual tube and consumes one on success");
-    fire.markAt[0]=100;fire.markAt[2]=100;Salvo(fire,vehicle,now+2000,config);
-    Check(salvoShots==1 && fire.salvoLeft==0,"sideways mark outside physical launcher cone cannot create a sideways salvo");
-    fire.salvoLeft=1;fire.markAt[0]=0;
-    fire.markAt[2]=-200;Salvo(fire,vehicle,now+2000,config);
-    Check(salvoShots==1 && fire.salvoLeft==0,"target behind launcher cannot fire through its hull");
-    fire.markAt[2]=200;fire.salvoLeft=2;roundSucceeds=false;Salvo(fire,vehicle,now+4000,config);
-    Check(fire.salvoLeft==0,"failed round creation stops the salvo");
-    const auto old=fire.gunAt;DriverGun(fire,vehicle,seats,now+6000,config);
-    Check(fire.gunAt==old,"failed cannon creation does not consume cooldown");
-    Put<std::uint64_t>(weapon,edf::kMuzzleCount,0);fire.salvoLeft=2;Salvo(fire,vehicle,now+8000,config);
-    Check(fire.salvoLeft==0 && !RoundFrom(fire,kLauncherSeat,0,from,dir),"missing muzzle never spawns from imaginary hull position");
-    // Remote driver + this machine's gunner: publish the observer, but never turn replay into driver authority.
-    ResetProteus();config.proteus=true;netSession=true;netAuthority=false;
-    Put<std::uint16_t>(vehicle,0x128,1);Put<std::uint16_t>(human,0x128,1);Put<std::uint16_t>(gunnerHuman,0x128,2);
-    Put<void*>(seats+kSeatStride,kSeatRider,gunnerHuman);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,gunnerCtrl);
-    observerHuman=gunnerHuman;
-    proteus_net::State remote;remote.sender=7;remote.sequence=1;remote.controller=netDriver;
-    remote.flags=proteus_net::kActive;remote.mode=2;
-    ProteusNetReceived(vehicle,remote);
-    const int oldGunShots=gunShots,oldSalvoShots=salvoShots,oldControlSends=controlSends;
-    const float stockWalk=At<float>(vehicle,kWalk);
-    Put<std::uint16_t>(seats,kSeatButtons,static_cast<std::uint16_t>(config.proteusModeButton));Tick();
-    Check(PlayerProteus(&ro) && ro.seat==1 && !ro.driver && ro.keys,"remote deployment uses the actual local gunner HUD seat");
-    Check(UnitOf(vehicle,false)->net.remote && ro.mode==proteus::Mode::deployed && At<float>(vehicle,kWalk)==stockWalk &&
-          gunShots==oldGunShots && salvoShots==oldSalvoShots && controlSends==oldControlSends,
-          "observer selection does not run remote driver input, movement, fire or control publication");
-    observerHuman=human;Check(ObserverSeat(vehicle)==-1,"a copied remote rider cannot become the local HUD observer");
-    std::printf("proteus_frame_test: %d checks, %d failed\n",checks,failures);
-    VirtualFree(image,0,MEM_RELEASE);return failures?1:0;
+    nextWeaponPost=reinterpret_cast<void*>(+[](void*,const float*){});
+    ProteusWeaponPost(vehicle,nullptr);
+    Check(At<float>(seataim::Object(SeatAt(vehicle,1)),edf::kAimAxes+edf::kAxisAngle)==.2f &&
+          At<float>(seataim::Object(SeatAt(vehicle,3)),edf::kAimAxes+edf::kAxisAngle)==.2f && axes==6,
+          "before the stock pose every borrowed mount turns to the driver's aim within its stops (bones applied)");
+    // Fire: the primary pulls the cannons, the second trigger (a pad's LT) the launcher; nothing without a press.
+    ProteusEmptyWeapon(cannonL);ProteusEmptyWeapon(launcherW);
+    Check(cannonL[0x13E] && launcherW[0x13E] && pulls==0,"a borrowed mount is activated the stock way, not pulled unpressed");
+    Put<float>(seats,kSeatFire,1);ProteusEmptyWeapon(cannonL);ProteusEmptyWeapon(cannonR);ProteusEmptyWeapon(launcherW);
+    Check(cannonL[kPull] && cannonR[kPull] && !launcherW[kPull] && pulls==2,"the driver's primary pulls both cannons, not the launcher");
+    Put<float>(seats,kSeatFire,0);Put<float>(seats,kSeatFire2,1);cannonL[kPull]=cannonR[kPull]=0;
+    ProteusEmptyWeapon(cannonL);ProteusEmptyWeapon(launcherW);
+    Check(!cannonL[kPull] && launcherW[kPull],"the driver's second trigger pulls the launcher");
+    Put<float>(seats,kSeatFire2,0);launcherW[kPull]=0;
+    // A gunner comes: both cannons are theirs, the right one paired with their own (left) trigger latch.
+    Seat(1,gunner,gunnerCtrl);u.st.mode=proteus::Mode::deployed;
+    Check(ProteusBorrowedWeapons(vehicle,0,lent,4)==1 && lent[0]==launcherW,"with a gunner the driver keeps only the launcher");
+    Check(ProteusBorrowedWeapons(vehicle,1,lent,4)==1 && lent[0]==cannonR,"the gunner's seat lists the paired right cannon");
+    Check(UserHook(vehicle+kUserIface,cannonR)==gunner+kUserIface,"the right cannon's user is the gunner");
+    Check(UserHook(vehicle+kUserIface,cannonL)==nullptr,"the gunner's own cannon goes to the stock lookup (not borrowed)");
+    const int before=deactivated;ProteusEmptyWeapon(cannonL);
+    Check(deactivated==before+1,"a weapon not borrowed (its seat's own) gets the stock empty callback");
+    Put<float>(seats,kSeatFire,1);ProteusEmptyWeapon(cannonR);
+    Check(!cannonR[kPull],"the driver's trigger no longer fires the gunner's cannons");
+    Put<float>(seats,kSeatFire,0);cannonL[kHeld]=1;ProteusEmptyWeapon(cannonR);
+    Check(cannonR[kPull],"the gunner's held trigger (their cannon's own latch) fires the paired right cannon");
+    cannonL[kHeld]=0;cannonR[kPull]=0;
+    netSession=true;Put<std::uint16_t>(gunner,0x128,1);cannonL[kPull]=1;ProteusEmptyWeapon(cannonR);
+    Check(!cannonR[kPull] && cannonR[0x13E],"a remote gunner's cannon is activated here but fired only on their machine");
+    netSession=false;Put<std::uint16_t>(gunner,0x128,2);cannonL[kPull]=0;
+    // Walking the launcher is idle.
+    u.st.mode=proteus::Mode::walk;
+    Check(ProteusBorrowedWeapons(vehicle,0,lent,4)==0,"walking: the launcher is not borrowed");
+    const int empties=deactivated;ProteusEmptyWeapon(launcherW);
+    Check(deactivated==empties+1 && !launcherW[0x13E],"walking: the idle launcher gets the stock empty callback");
+    u.st.mode=proteus::Mode::deployed;
+    // A soldier in a mount's own seat keeps it.
+    Seat(2,gunner,gunnerCtrl);
+    Check(UserHook(vehicle+kUserIface,cannonR)==nullptr && ProteusBorrowedWeapons(vehicle,1,lent,4)==0,"a rider at the right seat keeps its own cannon");
+    Seat(2,nullptr,nullptr);Seat(1,nullptr,nullptr);
+    userOk=false;
+    Check(!UserHook(vehicle+kUserIface,cannonR) && ProteusBorrowedWeapons(vehicle,0,lent,4)==0,"without the verified user hook nothing is borrowed");
+    userOk=true;
+}
+
+void Shield() {
+    Unit& u=*UnitOf(vehicle,false);
+    alignas(16) static unsigned char barrier[0x1600],tochka[0x1600],second[0x1600];
+    u.st.mode=proteus::Mode::walk;u.st.shield=1;u.st.broken=false;
+    Put<std::uint16_t>(seats,kSeatButtons,static_cast<std::uint16_t>(config.proteusShieldButton));Tick();
+    Put<std::uint16_t>(seats,kSeatButtons,0);
+    Check(u.st.shieldOn && emcFires==1 && u.barrier.raisedFrame,"the shield button raises one native barrier round");
+    Check(emcFrom[0]==100 && emcFrom[1]==5 && emcFrom[2]==-50 && emcAt[2]==-49,"raised at the hull's feet toward its nose");
+    Tick();Check(emcFires==1,"a pending raise is not fired again");
+    // An Air Raider's tochka (27 segments, its own owner) is never claimed nor touched.
+    FreshBarrier(tochka,gunner,27);Put<float>(tochka,kBarrierHp,300);
+    BarrierStep(tochka);
+    Check(At<float>(tochka,kBarrierHp)==300 && !tochka[kBarrierNoEcho] && !u.barrier.obj,"an Air Raider's barrier is left alone");
+    // Ours: claimed, given the shield's HP, kept on the hull.
+    FreshBarrier(barrier,vehicle,kBarrierSegmentCount);
+    BarrierStep(barrier);
+    const float full=config.proteusBarrier*7500;
+    Check(u.barrier.obj==barrier && At<float>(barrier,kBarrierHp)==full,"our round is claimed and its HP is the shield's");
+    Check(At<float>(barrier,kBarrierMatrix+48)==100 && At<float>(barrier,kBarrierMatrix+56)==-50 &&
+          At<float>(barrier,kBarrierMatrix+40)==1 && At<float>(barrier,kBarrierMatrix+20)==1 && At<float>(barrier,kBarrierMatrix)==1,
+          "its world matrix is upright at the hull's feet, +Z on the nose");
+    // The hull turns and moves: the next update follows.
+    float* m=reinterpret_cast<float*>(vehicle+kMatrix);m[0]=0;m[2]=-1;m[8]=1;m[10]=0;Put<float>(vehicle,kPosition,130);
+    Tick();BarrierStep(barrier);
+    Check(At<float>(barrier,kBarrierMatrix+32)==1 && At<float>(barrier,kBarrierMatrix+40)==0 && At<float>(barrier,kBarrierMatrix+48)==130,
+          "it follows the hull's facing and position every update");
+    // Native hits drain its HP: the shield reads it.
+    Put<float>(barrier,kBarrierHp,full*0.6f);BarrierStep(barrier);
+    Check(std::fabs(u.st.shield-0.6f)<1e-5f && u.st.quiet==0 && proteus::ShieldUp(u.st),"the barrier's HP is the shield's (a hit restarts the quiet spell)");
+    ProteusReadout ro{};Tick();
+    Check(PlayerProteus(&ro) && ro.shieldUp && std::fabs(ro.shield-0.6f)<1e-5f && ro.shieldHp==full,"the HUD shows its HP share and full HP");
+    // Deployed it faces the driver's view.
+    u.st.mode=proteus::Mode::deployed;cameraOk=true;cameraDir[0]=-1;cameraDir[1]=0.5f;cameraDir[2]=0;Tick();BarrierStep(barrier);
+    Check(At<float>(barrier,kBarrierMatrix+32)==-1 && At<float>(barrier,kBarrierMatrix+36)==0,"deployed: it faces the driver's horizontal view");
+    cameraOk=false;u.st.mode=proteus::Mode::walk;
+    // Stuck (anchored by a touch): dropped without echo, raised anew.
+    barrier[kBarrierStuck]=1;BarrierStep(barrier);
+    Check(At<float>(barrier,kBarrierHp)==0 && barrier[kBarrierNoEcho] && !u.barrier.obj,"a stuck barrier is dropped (no network echo)");
+    BarrierStep(barrier);Check(!RaisedOf(barrier),"once dropped it is forgotten");
+    Tick();Check(emcFires==2,"the shield still on raises a new barrier");
+    FreshBarrier(second,vehicle,kBarrierSegmentCount);BarrierStep(second);
+    Check(u.barrier.obj==second && std::fabs(At<float>(second,kBarrierHp)-full*0.6f)<0.01f,"the new one stands with the HP the shield has left");
+    // Broken by hits.
+    Put<float>(second,kBarrierHp,-5);BarrierStep(second);
+    Check(u.st.broken && !proteus::ShieldUp(u.st) && !u.barrier.obj && u.st.shield==0,"HP gone: broken, the round goes");
+    Tick();Check(emcFires==2 && PlayerProteus(&ro) && ro.broken,"broken: nothing raised, the HUD says so");
+    u.st.broken=false;u.st.shield=1;Tick();FreshBarrier(second,vehicle,kBarrierSegmentCount);BarrierStep(second);
+    Check(emcFires==3 && u.barrier.obj==second,"refilled: raised again");
+    // Switched off: the round goes on its next update.
+    Put<std::uint16_t>(seats,kSeatButtons,static_cast<std::uint16_t>(config.proteusShieldButton));Tick();
+    Put<std::uint16_t>(seats,kSeatButtons,0);BarrierStep(second);
+    Check(!u.st.shieldOn && At<float>(second,kBarrierHp)==0 && second[kBarrierNoEcho] && !u.barrier.obj,"switched off: the barrier goes");
+    // A raise never seen ends the attempt (no endless re-raising).
+    Tick();   // the button released (a press is an edge)
+    Put<std::uint16_t>(seats,kSeatButtons,static_cast<std::uint16_t>(config.proteusShieldButton));Tick();Put<std::uint16_t>(seats,kSeatButtons,0);
+    const int fired=emcFires;
+    Check(u.st.shieldOn && u.barrier.raisedFrame,"(switched on again: a raise is pending)");
+    for(ULONGLONG i=0;i<=kBarrierRaiseFrames+1;++i)Tick();
+    Check(emcFires==fired && !u.st.shieldOn && u.barrier.failed,"a raise not seen in time switches the shield off, logged, not retried");
+    Put<std::uint16_t>(seats,kSeatButtons,static_cast<std::uint16_t>(config.proteusShieldButton));Tick();Put<std::uint16_t>(seats,kSeatButtons,0);
+    Tick();
+    Check(u.st.shieldOn && emcFires==fired && PlayerProteus(&ro) && !ro.shieldReady,"after a failed raise the shield stays offline for this ride");
+    u.barrier.failed=false;
+    shieldFileReady=false;Tick();
+    Check(PlayerProteus(&ro) && !ro.shieldReady,"without the installed SGO the HUD says the shield is offline");
+    shieldFileReady=true;
+}
+
+void GiveBackAll() {
+    Unit& u=*UnitOf(vehicle,false);
+    alignas(16) static unsigned char standing[0x1600];
+    u.st.shieldOn=true;u.st.broken=false;u.st.shield=1;Tick();FreshBarrier(standing,vehicle,kBarrierSegmentCount);BarrierStep(standing);
+    Check(u.barrier.obj==standing,"(a barrier stands)");
+    config.proteus=false;Tick();
+    Check(At<float>(vehicle,kWalk)==10 && At<float>(vehicle,kJump)==8,"setting off restores the stock legs through the same tick");
+    Check(At<int>(seats+2*kSeatStride,kSeatClassMask)==15 && At<int>(seats+3*kSeatStride,kSeatClassMask)==15,"setting off restores the seat masks");
+    Check(At<float>(cannonL,kRate)==1 && At<float>(cannonR,kSpread)==1,"setting off gives the cannons their own numbers back");
+    BarrierStep(standing);
+    Check(At<float>(standing,kBarrierHp)==0 && !RaisedOf(standing),"given back: its barrier goes on its next update");
+    Check(ProteusVisibleSeats(vehicle,4)==4,"disabled rework restores four public seats");
+    config.proteus=true;
+}
+}  // namespace
+
+int main() {
+    using namespace crew;
+    Setup();
+    if(!image)return 2;
+    Stance();
+    Weapons();
+    Shield();
+    GiveBackAll();
+    std::printf("proteus_frame_test: %d checks, %d failures\n",checks,failures);
+    return failures ? 1 : 0;
 }

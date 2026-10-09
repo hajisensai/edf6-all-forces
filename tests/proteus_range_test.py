@@ -11,11 +11,9 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'pylib'), str(ROOT / 'tools'), str(ROOT / 'testrange')]
 import gen
-import dsgo
 import ledger
 import make_proteus as mp
 import rootcpk
-import sgo
 
 
 class RangeIdentity(unittest.TestCase):
@@ -30,42 +28,35 @@ class RangeIdentity(unittest.TestCase):
 
 @unittest.skipUnless(Path(rootcpk.DEFAULT_GAME, 'Root.cpk').is_file(), 'read-only Root.cpk unavailable')
 class RealRange(unittest.TestCase):
+    """The range's Proteus SGOs are the stock ones (no model redirect); the range holds the shield SGO the plugin raises."""
     @classmethod
     def setUpClass(cls):
         cls.game = rootcpk.Game(rootcpk.DEFAULT_GAME)
         cls.files = mp.build(rootcpk.DEFAULT_GAME)
 
-    def test_full_install_range_reinstall_remove_order_keeps_dependencies(self):
+    def test_full_install_range_reinstall_remove_order_keeps_the_shield(self):
         with tempfile.TemporaryDirectory() as root:
             source = 'V614_PROTEUS_MK2_MISSION.SGO'
             original = self.game.read('OBJECT', source)
             loose = Path(root, 'Mods', 'OBJECT', source)
             loose.parent.mkdir(parents=True); loose.write_bytes(original)
             mp.install(root, self.files)
-            before_range = loose.read_bytes()
+            self.assertEqual(loose.read_bytes(), original, 'the install never touches a vehicle SGO any more')
             wanted = set(gen.PROTEUS_MISSION.values())
             for _ in range(2):
                 gen._write_derived(root, self.game, wanted)
-            self.assertEqual(loose.read_bytes(), before_range)
             for name in wanted:
                 data = Path(root, 'Mods', 'OBJECT', name.upper()+'.SGO').read_bytes()
-                _, needs = mp.redirect(data)
-                self.assertIn('mission_setup', sgo.load(data=data))
-                self.assertEqual(len(needs), 2)
-                for rel in needs:
-                    self.assertIn('testrange', ledger.Ledger(root).owners(rel))
-                    self.assertEqual(Path(root, 'Mods', rel).read_bytes(), self.files[rel])
+                self.assertEqual(data, self.game.read('OBJECT', gen.DERIVED[name] + '.SGO'), 'the stock vehicle, unredirected')
+            shield = Path(root, 'Mods', *mp.SHIELD_FILE.split('/'))
+            self.assertIn('testrange', ledger.Ledger(root).owners(mp.SHIELD_FILE))
+            self.assertEqual(shield.read_bytes(), self.files[mp.SHIELD_FILE])
             mp.remove(root)
-            self.assertEqual(loose.read_bytes(), original)
-            for rel in self.files:
-                if rel.endswith(('.MRAB', '.CAS')):
-                    self.assertTrue(Path(root, 'Mods', rel).exists(), rel)
+            self.assertTrue(shield.exists(), 'the range still holds it')
             gen._write_derived(root, self.game, set())
             mp.remove(root)
+            self.assertFalse(shield.exists())
             self.assertEqual(loose.read_bytes(), original)
-            for rel in self.files:
-                if rel.endswith(('.MRAB', '.CAS')):
-                    self.assertFalse(Path(root, 'Mods', rel).exists(), rel)
 
     def test_standalone_real_range_script_preloads_and_spawns_private_sgo(self):
         with tempfile.TemporaryDirectory() as root:
@@ -83,33 +74,11 @@ class RealRange(unittest.TestCase):
             self.assertIn(f'"app:/object/{private}.sgo", {plan.vehicle_level:.2f}', text)
             self.assertNotIn(f'"app:/object/{stock_name}.sgo"', text)
             self.assertFalse(Path(root, 'Mods', 'OBJECT', stock_name.upper()+'.SGO').exists())
-            data = Path(root, 'Mods', 'OBJECT', private.upper()+'.SGO').read_bytes()
-            _, needs = mp.redirect(data)
-            for rel in needs:
-                self.assertEqual(Path(root, 'Mods', rel).read_bytes(), self.files[rel])
-                self.assertIn('testrange', ledger.Ledger(root).owners(rel))
+            shield = Path(root, 'Mods', *mp.SHIELD_FILE.split('/'))
+            self.assertEqual(shield.read_bytes(), self.files[mp.SHIELD_FILE], 'a range alone builds the same shield SGO')
+            self.assertIn('testrange', ledger.Ledger(root).owners(mp.SHIELD_FILE))
             self.assertTrue(gen.uninstall(root))
-            for rel in needs:
-                self.assertFalse(Path(root, 'Mods', rel).exists())
-
-    def test_edited_private_consumer_survives_reinstall_and_both_uninstall_orders(self):
-        with tempfile.TemporaryDirectory() as root:
-            mp.install(root, self.files)
-            name = gen.mission_vehicle('v614_proteus_mk2_mission')
-            gen._write_derived(root, self.game, {name})
-            path = Path(root, 'Mods', 'OBJECT', name.upper()+'.SGO')
-            document = dsgo.parse(path.read_bytes())
-            document.root.set('game_object_durability', 54321.0)
-            altered = dsgo.write(document); path.write_bytes(altered)
-            gen._write_derived(root, self.game, {name})
-            self.assertEqual(path.read_bytes(), altered)
-            _, needs = mp.redirect(altered)
-            gen.uninstall(root)
-            mp.remove(root)
-            self.assertEqual(path.read_bytes(), altered)
-            for rel in needs:
-                self.assertTrue(Path(root, 'Mods', rel).exists())
-                self.assertIn('testrange', ledger.Ledger(root).owners(rel))
+            self.assertFalse(shield.exists())
 
 
 if __name__ == '__main__': unittest.main()

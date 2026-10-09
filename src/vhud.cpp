@@ -301,14 +301,15 @@ void StockHudFrame(unsigned char* v) noexcept {
             Arm(w,!r.heli && a.coFired,a,w==sight && !(HighCamOn(v) || TurretCamHighTransition(v)),antiAir);
             if(!r.aimOk && a.aimed){std::memcpy(r.aim,a.bore,12);r.aimOk=true;}
         }
-    // Proteus seat 0 owns no stock holder. Its custom gun borrows the physical right cannon; never substitute
-    // the stock cannon's speed/ammo for that custom round. Seat 1 also shows the paired right barrel's path.
-    if(r.seat==0 && !r.arms && ProteusDriverSight(v,&r.arm[0])) {
-        r.arms=1;r.sight=0;r.aimOk=true;std::memcpy(r.aim,r.arm[0].bore,12);
-    } else if(r.seat==1 && r.arms<kStockArms) {
-        if(const auto paired=ProteusSightWeapon(v,r.seat)) {
-            auto& a=r.arm[r.arms++];a.physicalOnly=true;a.coFired=true;
-            Arm(paired,true,a,false);
+    // A Proteus seat also works the stock mounts it borrows (proteus.cpp: the driver both cannons with nobody at the
+    // guns and the launcher deployed, the gunner the right cannon): they are listed as its own, from their own muzzles.
+    {
+        const unsigned char* borrowed[kStockArms];
+        const int lent=ProteusBorrowedWeapons(v,r.seat,borrowed,kStockArms-r.arms);
+        for(int i=0;i<lent && r.arms<kStockArms;++i) {
+            auto& a=r.arm[r.arms++];a.coFired=true;
+            Arm(borrowed[i],true,a,false);
+            if(!r.aimOk && a.aimed){std::memcpy(r.aim,a.bore,12);r.aimOk=true;}
         }
     }
     r.selected=pickedArm>=0 ? pickedArm : storeArm;

@@ -840,9 +840,11 @@ def hand_copies_agree() -> None:
     files = set(re.findall(r'L"(EDF6VC_(?!CALL_)[A-Z0-9_]+\.SGO)"', jet_src))
     sgos = set(re.findall(r'L"app:/object/(edf6vc_[a-z0-9_]+\.sgo)"', jet_src))
     assert files and {f.lower() for f in files} == sgos, 'src/jet*: the file names and the app:/object paths disagree'
-    # the drill's: tools/make_drill.py; the EMC's: tools/make_emc.py; the Sazabi's beams: tools/make_sazabi.py
+    # the drill's: tools/make_drill.py; the EMC's: tools/make_emc.py; the Sazabi's beams: tools/make_sazabi.py; the
+    # Proteus's shield: tools/make_proteus.py
+    import make_proteus
     written = ({n.split('/', 1)[1] for n in make_jets.names()} | {vc.DRILL_CHARGE_FILE} | set(vc.EMC_FILES)
-               | set(vc.SAZABI_ROUND_FILES))
+               | set(vc.SAZABI_ROUND_FILES) | {make_proteus.SHIELD_FILE.split('/', 1)[1]})
     assert files <= written, f'src/jet* loads files tools/make_jets.py does not write: {sorted(files - written)}'
 
 
@@ -917,7 +919,7 @@ def emc_copies_agree() -> None:
     bay, plan, emc = src('src/jet_bay.cpp'), src('src/emc_plan.h'), src('src/emc.cpp')
     files = re.findall(r'\{L"app:/object/(edf6vc_emc_[a-z_]+\.sgo)",L"(EDF6VC_EMC_[A-Z_]+\.SGO)"', bay)
     assert [f for _, f in files] == list(vc.EMC_FILES) and all(s == f.lower() for s, f in files), files
-    assert re.search(r'enum class EmcRound \{ beam, sight, breakCharge, blast, szMega, szCharge, szFunnel \};',
+    assert re.search(r'enum class EmcRound \{ beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield \};',
                      src('src/crew.h')), 'src/crew.h EmcRound'
     # after the EMC's, the Sazabi's beams (src/sazabi_arms.inc), in EmcRound's order: the files tools/make_sazabi.py writes
     sz_files = re.findall(r'\{L"app:/object/(edf6vc_sz_[a-z_]+\.sgo)",L"(EDF6VC_SZ_[A-Z_]+\.SGO)"', bay)
@@ -2042,41 +2044,43 @@ def nix_torso_wired() -> None:
 
 @test
 def embedded_seat_aim_wired() -> None:
-    """The live-layout fixture is used by Nix and Proteus; paired bone mapping
-    runs after the stock right-seat step, not from the unordered AI task."""
-    nix, proteus, plugin = src('src/nix.cpp'), src('src/proteus.cpp'), src('src/plugin.cpp')
+    """The live-layout fixture is used by Nix and Proteus; a Proteus mount another seat borrows turns to that seat's aim
+    before the stock slot 5 poses the model (so the muzzles the slot copies into the weapon are the borrowed aim's)."""
+    nix, weapons = src('src/nix.cpp'), src('src/proteus_weapons.inc')
     player_aim = nix.split('unsigned char* PlayerAim(', 1)[1].split('\n}\n', 1)[0]
     assert 'seataim::Object(seat)' in player_aim and 'At<unsigned char*>(seat,kSeatAim)' not in player_aim
-    two = proteus.split('void TwoSeats(', 1)[1].split('\n}\n', 1)[0]
-    assert 'kAimAxes' not in two, 'the AI task must not write unmapped cannon angles'
-    hook = proteus.split('void __fastcall AimHook(', 1)[1].split('\n}\n', 1)[0]
-    assert hook.index('reinterpret_cast<AimFn>(nextAim[I])(aim,input)') < hook.index('FollowCannon(aim)')
-    assert 'hooks[i],&nextAim[i]' in proteus, 'publish the continuation before installing its hook'
-    assert 'seataim::Follow(left,right' in proteus and '(axis,true)' in proteus
-    assert plugin.index('InstallTurretCam();') < plugin.index('InstallStabilizer();') < plugin.index('InstallProteus();')
+    aim = weapons.split('void AimBorrowed(', 1)[1].split('\n}\n', 1)[0]
+    assert 'seataim::Follow(seataim::Object(SeatAt(v,static_cast<unsigned>(op))),seataim::Object(SeatAt(v,seat))' in aim
+    assert '(axis,true)' in aim, 'each changed axis is applied to its bones as the stock axis step does'
+    post = weapons.split('void __fastcall ProteusWeaponPost(', 1)[1].split('\n}\n', 1)[0]
+    assert post.index('AimBorrowed(') < post.index('nextWeaponPost)(object,step)'), 'aim before the stock pose and muzzle copy'
     assert 'add_executable(seat_aim_check' in src('CMakeLists.txt')
 
 
 @test
 def proteus_wired() -> None:
-    """The Proteus rework (src/proteus.cpp, src/proteus_logic.h, README 普罗透斯, docs/proteus-re.md): every Proteus* key the
-    ini ships is read, range-checked (all but the three switches), and documented in README.md; the class crew.cpp chains
-    for it (VehicleBigBegaruta, its native player update slot 4) is the one proteus.cpp reworks; it is built (its own
-    target_sources line) with its offline check, which includes the rules' header alone; every EDF.dll address it checks is
-    in docs/proteus-re.md; the mission's reset, the per-frame step (before the plugin-off return: it gives the stock numbers
-    back), the install, the turret camera's lift, the shells' preload and the EDF6AutoTurret link (one export name, both
-    turret pickers weighed) are wired; the HUD's layout check covers it. With the game present: every VehicleBigBegaruta SGO
-    has the 5 m foot radius and the 7500 durability the code takes as constants, four seats, and the 50 deg walkable slope
-    whose 1.2 m step README.md quotes."""
+    """The Proteus rework (src/proteus.cpp and its .inc files, src/proteus_logic.h, README 普罗透斯, docs/proteus-re.md):
+    every Proteus* key the ini ships is read, range-checked (all but the two switches), and documented in README.md; the
+    class crew.cpp chains for it (VehicleBigBegaruta, its native player update slot 4) is the one proteus.cpp reworks; it
+    is built (its own target_sources line) with its offline check, which includes the rules' header alone; every EDF.dll
+    address it checks is in docs/proteus-re.md; the mission's reset, the per-frame step (before the plugin-off return: it
+    gives the stock numbers back), the install, the turret camera's lift, the shield's SGO (the EMC table's last round,
+    preloaded with the others) and the EDF6AutoTurret link (one export name, both turret pickers weighed) are wired; the
+    weapons are the stock mounts only (no custom rounds, no damage hook); the HUD's layout check covers it. With the game
+    present: every VehicleBigBegaruta SGO has the 5 m foot radius the code takes as a constant and four seats, and the
+    50 deg walkable slope whose 1.2 m step README.md quotes."""
     import math
     import rootcpk
     plugin, ini, readme, doc = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md'), src('docs/proteus-re.md')
     code, crew, cmake, check = src('src/proteus.cpp'), src('src/crew.cpp'), src('CMakeLists.txt'), src('tools/proteus_check.cpp')
+    weapons, shield = src('src/proteus_weapons.inc'), src('src/proteus_shield.inc')
     keys = re.findall(r'^(Proteus\w+)=', ini, re.M)
-    assert len(keys) >= 40 and 'ProteusRework' in keys, keys
+    assert len(keys) >= 30 and 'ProteusRework' in keys, keys
+    for gone in ('ProteusMarkKey', 'ProteusDriverGun', 'ProteusSalvoCount', 'ProteusShieldArc', 'ProteusShieldBlock'):
+        assert gone not in keys and f'L"{gone}"' not in plugin, f'{gone} was retired with the custom rounds / panel shield'
     for key in keys:
         assert f'L"{key}"' in plugin and key in readme, key
-        if key not in ('ProteusRework', 'ProteusTwoSeats', 'ProteusDriverGun'):
+        if key not in ('ProteusRework', 'ProteusTwoSeats'):
             assert f'Fix("{key}"' in plugin or f'FixInt("{key}"' in plugin, f'{key} is not range-checked'
     vt = re.search(r'kVtBig=(0x[0-9A-F]+)', code).group(1)
     assert re.search(rf'\{{{vt},0x644350,"BigBegaruta",kFindSeat,4\}}', crew), 'crew.cpp must chain the Proteus player update'
@@ -2086,23 +2090,22 @@ def proteus_wired() -> None:
     rvas = set()
     for block in re.findall(r'const Sig k\w+\[\]=\{(.*?)\n\};', code, re.S):
         rvas.update(re.findall(r'\{(0x[0-9A-F]+),\{', block))
-    assert len(rvas) >= 20, rvas
+    rvas.update(re.findall(r'Matches\((0x[0-9A-F]+),', shield + weapons))
+    rvas.update(re.findall(r'k\w+=(0x[0-9A-F]{6,7})', shield + weapons))
+    assert len(rvas) >= 25, rvas
     for rva in sorted(rvas):
-        assert rva in doc, f'docs/proteus-re.md does not mention {rva}'
+        assert rva.upper().replace('0X', '0x') in doc or rva in doc, f'docs/proteus-re.md does not mention {rva}'
     assert 'ResetProteus();' in src('src/mission.cpp') and 'InstallProteus();' in plugin
     frame = crew.split('void __fastcall InputHook', 1)[1]
     assert frame.index('&ProteusFrame') < disabled_return_offset(frame), 'the Proteus step must run with the plugin off'
     assert frame.index('&ProteusFrame') < frame.index('&SeatSwitchFrame'), 'the seats it closes are closed before the seat switch asks'
-    # The stock launcher is the salvo's only while the salvo can be fired and its seat is closed, decided each frame after
-    # the seats; what is given back is what was taken.
     step = code.split('void Frame(unsigned char* v)', 1)[1].split('\n}', 1)[0]
-    assert step.index('TwoSeats(*u,v,LocalGunner(v));') < step.index('Guns(*u,salvoReady,c);'), 'Guns after ownership-aware seats'
+    assert step.index('Seats(*u,v,c.proteusTwoSeats,true);') < step.index('Guns(*u,c);') < step.index('BarrierFrame(*u,v);')
     gunner = code.split('bool LocalGunner(', 1)[1].split('\n}\n', 1)[0]
-    assert 'Rider::none || rider==Rider::dummy' in gunner and 'IsOnlineAuthority(object)' in gunner, \
-        'only the real gunner owner may pull the paired cannon'
-    assert 'const bool hold=salvo && u.closed;' in code and 'Put<float>(m,kRate,u.rate[kLauncherSeat]);' in code
+    assert 'LivingSoldierInSeat(image,seat)' in gunner and 'IsOnlineAuthority(' in gunner, 'only a real local gunner fires here'
     give = code.split('void GiveBack(Unit& u', 1)[1].split('\n}', 1)[0]
-    assert 'Put<float>(w,kRate,u.rate[s]);Put<float>(w,kSpread,u.spread[s]);' in give and '1.0f' not in give
+    assert 'DropBarrier(u,why);' in give and 'OpenSeats(u,v);' in give and 'GunsBack(u);' in give
+    assert 'Put<float>(a.weapon,kRate,a.rate);Put<float>(a.weapon,kSpread,a.spread);' in weapons, 'what is given back is what was taken'
     lookup = code.split('Unit* UnitOf(', 1)[1].split('\n}\n', 1)[0]
     active = code.split('Unit* ActiveOf(', 1)[1].split('\n}\n', 1)[0]
     assert 'if(u.ref.Is(v))return &u;' in lookup and 'if(u.ref.Is(v))' in active, \
@@ -2111,14 +2114,21 @@ def proteus_wired() -> None:
         'replicas require fresh control; the local active path cannot consume stale remote state'
     # A Proteus no player has ridden is not crewed (the helicopters' rule, crew.cpp Crew).
     assert 'if(!st.playerAt)return;' in crew, 'every unused parked vehicle waits for its first player driver'
-    assert 'kProteusHoldCountdown*0.5f' in src('src/vehsound.cpp') and 'kHoldCountdown=kProteusHoldCountdown' in code
-    # The damage call both read: the carrier's check takes the Proteus's redirect as intact (no install order between them).
-    sub = src('src/subcarrier.cpp')
-    sigs = sub.split('const Sig kDamageSigs[]={', 1)[1].split('};', 1)[0]
-    assert '{0x54A586,' not in sigs and 'return to==image+kDamageTarget || ProteusDamageThunk(to);' in sub
-    assert 'damageOk=Body506MessageOk() && DamageCallReaches();' in sub and 'damageThunk=image+kDamageCall+5+rel;' in code
+    # The stock weapons only: no custom rounds, no damage-call redirect, the stock damage path untouched.
+    for gone in ('ProteusGunRound', 'ProteusSalvoRound', 'ProteusRoundsReady', 'ProteusDamageThunk', 'kProteusHoldCountdown'):
+        for rel in ('src/crew.h', 'src/jet_bay.cpp', 'src/proteus.cpp', 'src/proteus.h', 'src/subcarrier.cpp', 'src/vehsound.cpp'):
+            assert gone not in src(rel), f'{gone} in {rel}'
+    assert 'return to==image+kDamageTarget;' in src('src/subcarrier.cpp')
+    assert '0x54A586' not in code and 'RedirectCall' not in code
+    # The shield: the stock barrier round raised through the EMC table (preloaded whenever its file is installed).
+    bay = src('src/jet_bay.cpp')
+    assert 'L"app:/object/edf6vc_proteus_shield.sgo",L"EDF6VC_PROTEUS_SHIELD.SGO"' in bay
+    assert 'static_assert(kEmcCount==static_cast<int>(EmcRound::proteusShield)+1' in bay
+    assert 'PreloadShells(mgr,Preloaded(Body::gunship));' in src('src/jet_spawn.cpp')
+    assert 'EmcFire(EmcRound::proteusShield,v,p,at,1.0f)' in shield
+    assert "SHIELD_FILE = 'OBJECT/EDF6VC_PROTEUS_SHIELD.SGO'" in src('tools/make_proteus.py')
     assert 'ProteusViewLift(' in src('src/turretcam.cpp')
-    assert 'PreloadShells(mgr,Preloaded(Body::gunship),ProteusReady());' in src('src/jet_spawn.cpp') and 'gunship || proteus' in src('src/jet_bay.cpp')
+    assert 'ProteusBorrowedWeapons(v,r.seat,' in src('src/vhud.cpp')
     link = src('common/edf/aimlink.h')
     name = re.search(r'kPriorityZone\[\]="(\w+)"', link).group(1)
     assert f'extern "C" __declspec(dllexport) bool __cdecl {name}(' in code, name
@@ -2126,7 +2136,6 @@ def proteus_wired() -> None:
     assert 'distance*PriorityWeight(*e)' in src('autoturret/src/plugin.cpp') and 'distance*PriorityWeight(e)' in src('autoturret/src/gunner.cpp')
     assert 'StockLayoutApart(1920,&sceneProteus)' in src('tools/hud_view.cpp')
     foot = float(re.search(r'kFootRadius=([0-9.]+)f', code).group(1))
-    durability = float(re.search(r'kDurability=([0-9.]+)f', code).group(1))
     assert abs(foot * (1.0 - math.sin(math.radians(50.0))) - 1.17) < 0.01 and '1.2 米' in readme
     if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
         import sgo
@@ -2140,7 +2149,6 @@ def proteus_wired() -> None:
                 continue
             seen += 1
             assert v['begaruta_rigid_body'][1] == foot and v['begaruta_rigid_body'][3] == 50.0, (name, v['begaruta_rigid_body'])
-            assert v['game_object_durability'] == durability, name
             assert len(v['vehicle_riding_position']) == 4, name
         assert seen >= 8, seen
 
