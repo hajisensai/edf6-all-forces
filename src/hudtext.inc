@@ -136,6 +136,13 @@ HUDTEXT(setHover,L"FWD SET 0",L"前速目标 0",L"前速目標 0",L"前進設定
 HUDTEXT(setSpeed,L"FWD SET %d",L"前速目标 %d",L"前速目標 %d",L"前進設定 %d")
 HUDTEXT(heliKeysLanded,L"HOLD SPACE: spin the rotor up and lift off    MOUSE: aim the square",L"按住空格：旋翼加速并升空    鼠标：瞄准方框",
         L"按住空白鍵：旋翼加速並升空    滑鼠：瞄準方框",L"スペース長押し：ローター加速で離陸    マウス：四角で照準")
+HUDTEXT(heliKeysInstructorLanded,L"HOLD W / SPACE: spin the rotor up and lift off    MOUSE: aim the square",
+        L"按住 W / 空格：旋翼加速并升空    鼠标：瞄准方框",L"按住 W / 空白鍵：旋翼加速並升空    滑鼠：瞄準方框",
+        L"W / スペース長押し：ローター加速で離陸    マウス：四角で照準")
+HUDTEXT(heliKeysInstructor,L"MOUSE: heading / nose (down: forward)    W / S: up / down    A / D: slide    SPACE: up    %ls: down",
+        L"鼠标：航向 / 机头（压低 = 前进）    W / S：上升 / 下降    A / D：横移    空格：上升    %ls：下降",
+        L"滑鼠：航向 / 機首（壓低 = 前進）    W / S：上升 / 下降    A / D：橫移    空白鍵：上升    %ls：下降",
+        L"マウス：方位 / 機首（下げると前進）    W / S：上昇 / 下降    A / D：横移動    スペース：上昇    %ls：下降")
 HUDTEXT(heliKeysAir,L"MOUSE: turn / pitch    W / S: forward speed    A / D: slide    SPACE: up    %ls: down",
         L"鼠标：转向 / 俯仰    W / S：前速    A / D：横移    空格：上升    %ls：下降",
         L"滑鼠：轉向 / 俯仰    W / S：前速    A / D：橫移    空白鍵：上升    %ls：下降",

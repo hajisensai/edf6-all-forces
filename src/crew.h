@@ -591,6 +591,7 @@ PluginBody BodyOf(const void* vehicle) noexcept;
 float BodyMark(const void* vehicle) noexcept;      // the mark of a 506 body, 0 for anything else
 bool InstallBody506() noexcept;                    // before InstallJets / InstallSub / InstallPlayerJets
 bool Body506Ok() noexcept;                         // the physics hook is in
+bool Body506ReadsSolver() noexcept;                // ...and it reads the solver's velocity before the stock step (GroundContact)
 bool JetBodyStep(unsigned char* v,float* lin,float* ang) noexcept;        // jet.cpp
 bool SubBodyStep(unsigned char* v,float* lin,float* ang) noexcept;        // subcarrier.cpp
 bool PlayerJetBodyStep(unsigned char* v,float* lin,float* ang) noexcept;  // playerjet.cpp
@@ -899,6 +900,7 @@ enum class Gpws : std::uint8_t { none, sinkRate, terrain, pullUp };
 struct HeliFlight {
     float vel[3],speed,clear,climb,hp,hpMax,setSpeed,top,aim[3],rotor,hover;
     bool ground,landed,keys,aiming,holding;
+    bool collective;   // W / S are the collective (a stock heli's instructor, heliaim.h), not a speed setpoint
     Gpws gpws;
     float impactIn;
 };

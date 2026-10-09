@@ -1831,8 +1831,8 @@ void HeliStrip(void* drawer,void* ctx,Text* text,float width,float height,float 
     if(f.keys && f.aiming) {
         wchar_t down[32];
         KeyName(Cfg().playerJetBrakeKey,down,32);
-        if(f.landed)Format(help,L"%ls",Tr(Tx::heliKeysLanded));
-        else Format(help,Tr(Tx::heliKeysAir),down);
+        if(f.landed)Format(help,L"%ls",Tr(f.collective ? Tx::heliKeysInstructorLanded : Tx::heliKeysLanded));
+        else Format(help,Tr(f.collective ? Tx::heliKeysInstructor : Tx::heliKeysAir),down);
     }
     const bool blink=(GetTickCount64()/125)%2==0,lift=f.landed && f.hover>0.0f && f.rotor>0.01f,liftOk=lift && f.rotor>=f.hover;
     if(liftOk){Format(warn,L"%ls",Tr(Tx::liftOk));warn.rgba=blink ? kGreen : kYellow;}

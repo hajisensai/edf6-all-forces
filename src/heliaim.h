@@ -9,10 +9,11 @@
 //  - W / S move a forward speed setpoint that stays where they leave it (0 hovers; one press stops at 0 on the way
 //    through, a new one goes on into the back speeds), A / D sidestep while held, up / down (Space, the brake key) climb
 //    and descend at the craft's most; everything let go it holds its height and flies at the setpoint (0: it stops).
-// What a craft is asked (Fly: a horizontal velocity, a climb, a heading) is flown by its own law: a stock heli's input
-// block through the NPC pilot's stick law (StockStick, StockThrottle, StockYaw: heli.cpp Steer flies the NPC with the
-// same three), the plugin's rotor craft through jet::Hover (playerjet_board.inc HoverStep). The stock heli's attitude
-// takes PitchInput separately through PlayerAttitudeHook, leaving the speed channel independent of mouse pitch.
+// What a craft is asked (a horizontal velocity, a climb, a heading) is flown by its own law: the plugin's rotor craft
+// fly Fly's want through jet::Hover (playerjet_board.inc HoverStep). A stock heli (2026-10-09) flies the Instructor
+// below instead (War Thunder's mouse aim: the aim is the heading and pitch wanted, nose down flies forward, W / S the
+// collective), through StockStick, CollectiveThrottle and PlayerYawInput, the pitch and the coordinated roll handed to its
+// attitude function by heli.cpp PlayerAttitudeHook.
 // Pure math (no EDF.dll): tools/heli_aim_check.cpp runs it against the stock heli's flight law (docs/aircraft-re.md) to
 // show the signs.
 #pragma once
@@ -65,13 +66,6 @@ inline bool ViewCentreAim(const float* pos,const float* eye,const float* view,fl
     if(!(t>0.0f))return false;
     for(int i=0;i<3;++i)out[i]=(d[i]+view[i]*t)/mark;
     return vec::Normalize(out);
-}
-
-// The stock attitude's forward channel tilts the nose down at +maxTilt; speed has a separate use of that channel
-// later in the physics step. A mouse-flown heli substitutes only the attitude copy, so W/S cannot set its pitch.
-inline float PitchInput(const float* direction,float maxTilt) noexcept {
-    if(!(maxTilt>1e-3f) || !std::isfinite(direction[1]))return 0.0f;
-    return vec::Clamp(-std::asin(vec::Clamp(direction[1],-1.0f,1.0f))/maxTilt,-1.0f,1.0f);
 }
 
 // The aim kept on the screen (the user, 2026-10-05: the aim ran off the screen and the craft turned on after it, unseen):
@@ -161,20 +155,81 @@ inline float Climb(Hold& h,const float* aim,const float* pos,const float* vel,fl
 // The frame's want (see the top): `nose` the craft's level heading (unit), `vel` its velocity (m/s), `top` its top
 // speed and `most` its fastest climb, `grounded` on the ground, `still` nothing horizontal yet (grounded, or lifting off:
 // SetSpeed), `clear` m over the ground (< 0: unknown).
+// The horizontal velocity and the way to face of a want (Fly's and Instructor's): `speed` along the level `nose`, the
+// A / D `side` (-1..1) at kSideShare of `top` across it (none while `still`), the two at most `top`; the aim's heading.
+inline void Course(Want& w,const float* aim,const float* nose,float speed,float side,float top,bool still) noexcept {
+    float right[3];RightOf(nose,right);
+    const float across=still ? 0.0f : vec::Clamp(side,-1.0f,1.0f)*kSideShare*top;
+    w.vel[0]=nose[0]*speed+right[0]*across;w.vel[1]=0.0f;w.vel[2]=nose[2]*speed+right[2]*across;
+    const float len=std::sqrt(w.vel[0]*w.vel[0]+w.vel[2]*w.vel[2]);
+    if(len>top){w.vel[0]*=top/len;w.vel[2]*=top/len;}
+    w.face[0]=aim[0];w.face[1]=0.0f;w.face[2]=aim[2];
+    if(!vec::Normalize(w.face))std::memcpy(w.face,nose,12);
+}
+
 inline Want Fly(Hold& h,const float* aim,const float* nose,const float* pos,const float* vel,const Keys& k,float top,float most,
                 bool grounded,bool still,float clear,float dt) noexcept {
     Want w{};
     SetSpeed(h,k.fore,top,grounded || still,dt);
-    float right[3];RightOf(nose,right);
-    const float side=grounded || still ? 0.0f : vec::Clamp(k.side,-1.0f,1.0f)*kSideShare*top;
-    w.vel[0]=nose[0]*h.speed+right[0]*side;w.vel[2]=nose[2]*h.speed+right[2]*side;
-    const float len=std::sqrt(w.vel[0]*w.vel[0]+w.vel[2]*w.vel[2]);
-    if(len>top){w.vel[0]*=top/len;w.vel[2]*=top/len;}
-    w.face[0]=aim[0];w.face[2]=aim[2];
-    if(!vec::Normalize(w.face))std::memcpy(w.face,nose,12);
+    Course(w,aim,nose,h.speed,k.side,top,grounded || still);
     const float along=vel[0]*nose[0]+vel[2]*nose[2];
     w.climb=Climb(h,aim,pos,vel,along,k.vert,most,grounded,clear);
     return w;
+}
+
+// --- The instructor: a stock helicopter the player flies on the keyboard and mouse (heli.cpp AimFly) ---
+// The user (2026-10-09): 「这个直升机的飞控依旧怪怪的，参考战雷做吧」. Fly above made the aim's elevation a climb and W / S a
+// speed setpoint, while the nose took the aim's pitch: the nose dipped while the heli sank straight down, sat level
+// while W flew it at full speed, and the stock rotor's seconds-long lag under the height hold porpoised it (heli_aim_check
+// "before" rows). War Thunder's mouse-aim instructor instead takes the aim as the attitude wanted and flies the controls
+// to it:
+//  - heading: the aim's (the tail rotor, PlayerYawInput);
+//  - pitch: the aim's elevation, at most the craft's max tilt (AimPitch); the cyclic flies it: nose down forward, the
+//    farther the faster (full tilt the top speed), nose up slows and backs (at most kBackShare of the top), within
+//    kElDead of level it hovers (CyclicSpeed). The stock heli's own forward stick is both its tilt and its speed (its
+//    0x654E69 and 0x651E2F read the same input), so the nose and the motion agree;
+//  - roll: the sidestep's, plus a coordinated turn's bank (BankInput: tan bank = speed x turn rate / g);
+//  - W / S (and Space / the brake key) the collective: climb / descend at the most while held, let go it holds the
+//    height it comes to (Collective, the same hold as Fly's); A / D slide.
+inline float AimPitch(const float* aim,float maxTilt) noexcept {
+    if(!(maxTilt>1e-3f) || !std::isfinite(aim[1]))return 0.0f;
+    return vec::Clamp(std::asin(vec::Clamp(aim[1],-1.0f,1.0f)),-maxTilt,maxTilt);
+}
+
+// The forward speed the cyclic flies at a `pitch` (rad, + nose up) of at most `maxTilt`.
+inline float CyclicSpeed(float pitch,float maxTilt,float top) noexcept {
+    const float span=maxTilt-kElDead,down=-pitch;
+    if(!(span>1e-3f) || std::fabs(down)<=kElDead)return 0.0f;
+    const float past=down>0.0f ? down-kElDead : down+kElDead;
+    return vec::Clamp(past/span,-kBackShare,1.0f)*top;
+}
+
+// The climb the collective asks: Fly's Climb with a level aim (no climb from the aim): the keys, else the height held.
+inline float Collective(Hold& h,const float* pos,const float* vel,float vert,float most,bool grounded,float clear) noexcept {
+    const float level[3]={0.0f,0.0f,1.0f};
+    return Climb(h,level,pos,vel,0.0f,vert,most,grounded,clear);
+}
+
+// The instructor's want (see above) and its pitch (`pitch`, rad, + nose up). `vert` the collective keys (-1..1), `side` A / D.
+// h.speed is the forward speed the cyclic flies (the HUD's speed target).
+inline Want Instructor(Hold& h,const float* aim,const float* nose,const float* pos,const float* vel,float vert,float side,float top,
+                       float most,float maxTilt,bool grounded,bool still,float clear,float* pitch) noexcept {
+    Want w{};
+    *pitch=AimPitch(aim,maxTilt);
+    h.pressing=false;
+    h.speed=grounded || still ? 0.0f : CyclicSpeed(*pitch,maxTilt,top);
+    Course(w,aim,nose,h.speed,side,top,grounded || still);
+    w.climb=Collective(h,pos,vel,vert,most,grounded,clear);
+    return w;
+}
+
+// The coordinated turn's bank in the stock lateral channel (veh+0x1540, whose roll is -maxTilt x it, 0x654E84): the
+// centripetal acceleration `speed` x `turn` (m/s, rad/s toward the heading's row 0) tilted into, as a sidestep the same
+// way tilts it (the channel's own sign carries the handedness).
+constexpr float kGravity=9.8f;
+inline float BankInput(float speed,float turn,float maxTilt) noexcept {
+    if(!(maxTilt>1e-3f) || !std::isfinite(speed*turn))return 0.0f;
+    return vec::Clamp(std::atan(speed*turn/kGravity)/maxTilt,-1.0f,1.0f);
 }
 
 // --- A stock heli's input block for a want (the NPC pilot's law, heli.cpp Steer; docs/heli-input-re.md §2a) ---
@@ -200,6 +255,53 @@ inline float StockThrottle(float climb,float vy,float rotor,float* hover,bool le
     if(learn)*hover=vec::Clamp(*hover+err*g.learn*dt,0.1f,1.0f);
     const float want=vec::Clamp(*hover+err*g.climb,0.0f,1.0f);
     return std::isfinite(rotor) ? vec::Clamp(want+(want-rotor)*g.rotor,0.0f,1.0f) : want;
+}
+
+// The instructor's collective (veh+0x1544): the stock heli's vertical law inverted, on a rotor whose lag the player's
+// frames shorten (heli.cpp PlayerMouseTune: its up / down rates raised to kPlayerRotorRate; the stock 0.001 / 0.0007 a
+// frame, 0x656744 / 0x656770, take 17 / 24 s and porpoised the height hold).
+// The vertical law (slot 57, 0x651D6B-0x651F47, read 2026-10-09): hover = M g / (60 L) (0x651D9B), t = (rotor - idle) /
+// (hover - idle) within 0..1 (0x651EF4), vy = (1 + (vdamp - 1) t) vy + rotor L (0x651F35), Havok's gravity after it:
+// with G = hover L, a frame vy' = (1 + (vdamp - 1) t(rotor)) vy + rotor L - G. Under the hover the damping fades with the
+// rotor (at the idle none): a straight line from the hover (the old feed-forward) asked a rotor at the idle for any
+// descent and the heli fell at 15 m/s for a 6 m/s one.
+// ClimbRotor solves it for the rotor that brings vy kVerticalShare of the way to the climb in one frame; RotorThrottle
+// then puts the rotor there in one native step (rotor += rate (throttle - rotor)), clamped to 0..1. `hover` (G / L: the
+// game's gravity is not 9.8) is learned from the climb's error, kPlayerHoverLearn of it a second, only while `learn` (the
+// height held, near it), the heli about still in height (under kLearnBand m/s: stopping a climb, the error is the law's
+// own easing, not the hover's, and learning it wound the hover off by a fifth and crept the height for seconds; a wrong
+// hover instead holds it still a little off the height, the hold's climb then the error to learn) and the throttle is
+// not clamped (a saturated rotor is no measure of the hover).
+constexpr float kPlayerRotorRate=0.05f,kVerticalShare=1.0f/12.0f,kPlayerHoverLearn=0.1f,kLearnBand=1.0f;
+struct Rotor { float lift,vdamp,idle,up,down; };   // veh+0x1610, +0x1618, +0x1BD4 (heli_roter[3]), +0x1BCC, +0x1BD0
+inline bool RotorKnown(const Rotor& r,float hover) noexcept {
+    return std::isfinite(r.lift+r.vdamp+r.idle+hover) && r.lift>1e-3f && r.vdamp>0.0f && r.vdamp<=1.0f && r.idle>=0.0f &&
+           hover>r.idle+1e-3f;
+}
+// The rotor for which the next frame's vy is `next` from `vy` (see above), within idle..1.
+inline float ClimbRotor(float next,float vy,float hover,const Rotor& r) noexcept {
+    const float gravity=hover*r.lift;
+    const float above=(next-r.vdamp*vy+gravity)/r.lift;   // t = 1: at or over the hover
+    if(above>=hover)return vec::Clamp(above,r.idle,1.0f);
+    // Under the hover vy' is linear in the rotor: vy + q (rotor - idle) + rotor L - G, q = (vdamp - 1) vy / (hover - idle).
+    const float q=(r.vdamp-1.0f)*vy/(hover-r.idle),slope=q+r.lift;
+    const auto at=[&](float rotor){ return vy+q*(rotor-r.idle)+rotor*r.lift-gravity; };
+    if(slope>1e-4f)return vec::Clamp((next-vy+q*r.idle+gravity)/slope,r.idle,hover);
+    // Climbing fast the damping brakes more than the rotor's lift: the end of the range that comes nearest.
+    return std::fabs(at(r.idle)-next)<std::fabs(at(hover)-next) ? r.idle : hover;
+}
+inline float RotorThrottle(float want,float rotor,float up,float down) noexcept {
+    const float rate=want>=rotor ? up : down;
+    if(!std::isfinite(rotor) || !(rate>1e-4f))return vec::Clamp(want,0.0f,1.0f);
+    return vec::Clamp(rotor+(want-rotor)/rate,0.0f,1.0f);
+}
+inline float CollectiveThrottle(float climb,float vy,float rotor,float* hover,bool learn,float dt,const Rotor& r) noexcept {
+    const float err=climb-vy;
+    // Without the law's numbers (an EDF.dll that differs): the NPC's feed-forward from the hover (heli.cpp kClimbGain).
+    const float want=RotorKnown(r,*hover) ? ClimbRotor(vy+err*kVerticalShare,vy,*hover,r) : vec::Clamp(*hover+err*0.08f,0.0f,1.0f);
+    const float throttle=RotorThrottle(want,rotor,r.up,r.down);
+    if(learn && std::fabs(vy)<kLearnBand && throttle>0.0f && throttle<1.0f)*hover=vec::Clamp(*hover+err*kPlayerHoverLearn*dt,0.1f,1.0f);
+    return throttle;
 }
 
 // The yaw (veh+0x1550, before the heli's yaw sign) for a heading `off` rad off the way to face (+: to the left, the
