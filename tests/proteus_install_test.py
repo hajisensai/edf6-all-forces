@@ -1,4 +1,5 @@
-"""Proteus file transaction and range consumers; all writes use temporary games."""
+"""The Proteus resource transaction (tools/make_proteus.py): the shield SGO installed and removed under the write-ahead
+journal, and an older install (private models + redirected vehicle SGOs) undone on update. Temporary games only."""
 from pathlib import Path
 import sys
 import tempfile
@@ -11,121 +12,112 @@ import ledger
 import modfiles
 import make_proteus as mp
 import sgo
-from test_proteus_assets import fixture as cas_fixture
 
 HOST = 'V614_PROTEUS_MK2'
 MODEL, CAS = f'OBJECT/EDF6VC_{HOST}.MRAB', f'OBJECT/EDF6VC_{HOST}.CAS'
 VEHICLE = f'OBJECT/{HOST}_MISSION.SGO'
+SHIELD = mp.SHIELD_FILE
 
-def stock(hp=7500):
+
+def vehicle(hp=7500, model=HOST.lower()):
     return sgo.write(0x102, {'xgs_scene_object_class': 'VehicleBigBegaruta',
         'game_object_durability': hp, 'mission_setup': [1, 2],
-        'animation_model': [[f'app:/object/{HOST.lower()}.mrab', HOST.lower()+'.mdb'],
-                            f'app:/object/{HOST.lower()}.cas', []]})
+        'animation_model': [[f'app:/object/{model}.mrab', HOST.lower()+'.mdb'], f'app:/object/{model}.cas', []]})
+
 
 class Transaction(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
         self.root = self.tmp.name
-        # Root integration registers the owner; keep the isolated branch testable.
         self.owner = patch.object(ledger, 'OWNERS', tuple(set(ledger.OWNERS) | {mp.OWNER}))
         self.owner.start(); self.addCleanup(self.owner.stop)
-        self.original = stock(12345)
-        self.files = {VEHICLE: mp.redirect(stock())[0], MODEL: b'new model', CAS: mp.proteus_model.animation(cas_fixture())}
+        self.original = vehicle(12345)
+        self.shield = b'shield sgo bytes'
+        # What the old install wrote: the private model pair and the vehicle SGO redirected to it (its own original kept).
+        self.legacy = {VEHICLE: vehicle(12345, 'edf6vc_' + HOST.lower()), MODEL: b'old model', CAS: b'old cas'}
         self.write(VEHICLE, self.original)
 
     def path(self, rel): return Path(self.root, 'Mods', *rel.split('/'))
     def write(self, rel, data): modfiles.atomic_write(str(self.path(rel)), data)
-    def test_existing_mod_fields_reinstall_and_exact_restore(self):
-        self.write(MODEL, b'previous model')
-        mp.install(self.root, self.files)
-        self.assertEqual(sgo.load(data=self.path(VEHICLE).read_bytes())['game_object_durability'], 12345)
-        first = self.path(VEHICLE).read_bytes()
-        mp.install(self.root, self.files)
-        self.assertEqual(self.path(VEHICLE).read_bytes(), first)
-        mp.remove(self.root)
-        self.assertEqual(self.path(VEHICLE).read_bytes(), self.original)
-        self.assertEqual(self.path(MODEL).read_bytes(), b'previous model')
-        self.assertFalse(self.path(CAS).exists())
-        self.assertFalse(self.path(mp.MANIFEST).exists())
 
-    def test_changed_consumer_keeps_pair_and_is_not_overwritten_on_reinstall(self):
-        mp.install(self.root, self.files)
-        altered = mp.redirect(stock(99999))[0]; self.write(VEHICLE, altered)
-        mp.install(self.root, self.files)
-        self.assertEqual(self.path(VEHICLE).read_bytes(), altered)
+    def test_update_undoes_the_old_models_and_writes_the_shield(self):
+        mp.install(self.root, self.legacy)
+        self.assertNotEqual(self.path(VEHICLE).read_bytes(), self.original)
+        mp.install(self.root, {SHIELD: self.shield})
+        self.assertEqual(self.path(VEHICLE).read_bytes(), self.original, 'the redirected vehicle SGO gets its original back')
+        self.assertFalse(self.path(MODEL).exists() or self.path(CAS).exists(), 'the private model pair is removed')
+        self.assertEqual(self.path(SHIELD).read_bytes(), self.shield)
+        self.assertEqual(set(ledger.Ledger(self.root).owners(SHIELD)), {mp.OWNER})
+        mp.install(self.root, {SHIELD: self.shield})
+        self.assertEqual(self.path(SHIELD).read_bytes(), self.shield, 'a reinstall is idempotent')
+        mp.remove(self.root)
+        self.assertFalse(self.path(SHIELD).exists() or self.path(mp.MANIFEST).exists())
+        self.assertEqual(self.path(VEHICLE).read_bytes(), self.original)
+
+    def test_third_party_edit_of_a_redirected_sgo_keeps_it_and_its_models(self):
+        mp.install(self.root, self.legacy)
+        altered = vehicle(99999, 'edf6vc_' + HOST.lower()); self.write(VEHICLE, altered)
+        mp.install(self.root, {SHIELD: self.shield})
+        self.assertEqual(self.path(VEHICLE).read_bytes(), altered, 'somebody else edited it: kept')
+        self.assertTrue(self.path(MODEL).exists() and self.path(CAS).exists(), 'it still names the old pair: kept')
         _, kept = mp.remove(self.root)
-        self.assertEqual(self.path(VEHICLE).read_bytes(), altered)
-        self.assertTrue(self.path(MODEL).exists() and self.path(CAS).exists())
         self.assertEqual(len(kept), 3)
-        self.assertTrue(self.path(mp.MANIFEST).exists())
+        self.assertTrue(self.path(mp.MANIFEST).exists(), 'the journal keeps what it could not restore')
 
-    def test_external_range_reference_survives_uninstall(self):
-        mp.install(self.root, self.files)
-        self.write('OBJECT/EDF6TR_CUSTOM.SGO', mp.redirect(stock())[0])
+    def test_a_foreign_file_at_the_shield_path_is_restored(self):
+        self.write(SHIELD, b'someone else')
+        mp.install(self.root, {SHIELD: self.shield})
+        self.assertEqual(self.path(SHIELD).read_bytes(), self.shield)
         mp.remove(self.root)
-        self.assertEqual(self.path(VEHICLE).read_bytes(), self.original)
-        self.assertTrue(self.path(MODEL).exists() and self.path(CAS).exists())
-        self.path('OBJECT/EDF6TR_CUSTOM.SGO').unlink()
-        mp.remove(self.root)
-        self.assertFalse(self.path(MODEL).exists() or self.path(CAS).exists())
+        self.assertEqual(self.path(SHIELD).read_bytes(), b'someone else')
 
-    def test_range_uses_same_redirect_and_holds_both_actual_dependencies(self):
-        mp.install(self.root, self.files)
+    def test_shield_changed_after_install_is_not_overwritten(self):
+        mp.install(self.root, {SHIELD: self.shield})
+        self.write(SHIELD, b'edited later')
+        mp.install(self.root, {SHIELD: self.shield})
+        self.assertEqual(self.path(SHIELD).read_bytes(), b'edited later')
+
+    def test_range_holds_the_installed_shield_and_builds_it_alone(self):
+        mp.install(self.root, {SHIELD: self.shield})
         led = ledger.Ledger(self.root)
-        made, needs = mp.range_vehicle(led, None, stock())
-        self.assertEqual(needs, (MODEL, CAS))
-        led.put('testrange', 'OBJECT/EDF6TR_PROTEUS.SGO', made)
+        self.assertEqual(mp.range_shield(led, None), SHIELD)
+        led._save()
         mp.remove(self.root)
-        current = ledger.Ledger(self.root)
-        for rel in needs:
-            self.assertIn('testrange', current.owners(rel))
-            self.assertTrue(self.path(rel).exists())
+        self.assertIn('testrange', ledger.Ledger(self.root).owners(SHIELD))
+        with tempfile.TemporaryDirectory() as alone:
+            led = ledger.Ledger(alone)
+            with patch.object(mp, 'shield', return_value=b'range shield') as build:
+                mp.range_shield(led, object())
+            build.assert_called_once()
+            self.assertEqual(Path(alone, 'Mods', *SHIELD.split('/')).read_bytes(), b'range shield')
+            self.assertIn('testrange', ledger.Ledger(alone).owners(SHIELD))
 
-    def test_standalone_range_builds_missing_pair_before_publishing_consumer(self):
-        led = ledger.Ledger(self.root)
-        with patch.object(mp.proteus_model, 'build_model', return_value=(b'range model', b'range CAS')) as build:
-            made, needs = mp.range_vehicle(led, object(), stock())
-        build.assert_called_once()
-        self.assertEqual(self.path(MODEL).read_bytes(), b'range model')
-        self.assertEqual(self.path(CAS).read_bytes(), b'range CAS')
-        led.put('testrange', 'OBJECT/EDF6TR_PROTEUS.SGO', made)
-        for rel in needs:
-            self.assertIn('testrange', ledger.Ledger(self.root).owners(rel))
-
-    def test_third_party_model_is_not_replaced(self):
-        values = sgo.load(data=self.original)
-        values['animation_model'][0][0] = 'app:/object/some_other_mod.mrab'
-        custom = sgo.write(0x102, values); self.write(VEHICLE, custom)
-        mp.install(self.root, self.files); mp.remove(self.root)
-        self.assertEqual(self.path(VEHICLE).read_bytes(), custom)
-
-    def test_interruptions_after_every_write_recover_originals(self):
+    def test_interrupted_update_recovers_the_originals(self):
         atomic = modfiles.atomic_write
-        # Exercise backup, pending journal, file commit, ledger commit, and final
-        # journal writes. An exception after commit simulates a killed installer.
-        for stop in range(1, 19):
+        for stop in range(1, 25):
             with self.subTest(stop=stop), tempfile.TemporaryDirectory() as root:
                 old = Path(root, 'Mods', VEHICLE); atomic(str(old), self.original)
+                mp.install(root, self.legacy)
                 calls = [0]
                 def interrupted(path, data):
                     atomic(path, data); calls[0] += 1
                     if calls[0] == stop: raise OSError('interrupted after commit')
                 with patch.object(modfiles, 'atomic_write', interrupted), patch.object(ledger, 'atomic_write', interrupted):
-                    try: mp.install(root, self.files)
+                    try: mp.install(root, {SHIELD: self.shield})
                     except OSError: pass
-                mp.install(root, self.files)
-                mp.remove(root)
+                mp.install(root, {SHIELD: self.shield})
                 self.assertEqual(old.read_bytes(), self.original)
-                self.assertFalse(Path(root, 'Mods', MODEL).exists())
-                self.assertFalse(Path(root, 'Mods', CAS).exists())
+                self.assertFalse(Path(root, 'Mods', MODEL).exists() or Path(root, 'Mods', CAS).exists())
+                mp.remove(root)
+                self.assertFalse(Path(root, 'Mods', *SHIELD.split('/')).exists())
+                self.assertEqual(old.read_bytes(), self.original)
 
-    def test_interrupted_restores_are_idempotent(self):
+    def test_interrupted_removal_is_idempotent(self):
         atomic = modfiles.atomic_write
         for stop in range(1, 13):
             with self.subTest(stop=stop), tempfile.TemporaryDirectory() as root:
                 old = Path(root, 'Mods', VEHICLE); atomic(str(old), self.original)
-                mp.install(root, self.files); calls = [0]
+                mp.install(root, self.legacy); calls = [0]
                 def interrupted(path, data):
                     atomic(path, data); calls[0] += 1
                     if calls[0] == stop: raise OSError('interrupted restore')
@@ -134,7 +126,7 @@ class Transaction(unittest.TestCase):
                     except OSError: pass
                 mp.remove(root)
                 self.assertEqual(old.read_bytes(), self.original)
-                self.assertFalse(Path(root, 'Mods', MODEL).exists())
-                self.assertFalse(Path(root, 'Mods', CAS).exists())
+                self.assertFalse(Path(root, 'Mods', MODEL).exists() or Path(root, 'Mods', CAS).exists())
+
 
 if __name__ == '__main__': unittest.main()

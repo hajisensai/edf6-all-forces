@@ -850,15 +850,13 @@ const Sig kGaugeSigs[]={
 const Sig kDamageSigs[]={
     {0x543AB9,{0xC7,0x45,0x6F,0x00,0x00,0x00,0x10},7},          // the flush's message: 10000000h...
     {0x543ADE,{0xFF,0x50,0x48},3},                              // ...sent through slot 9
-    // 0x54A530, that message: call 0x547C30 at kDamageCall (DamageCallReaches: the Proteus rework redirects it)
+    // 0x54A530, that message: call 0x547C30 at kDamageCall (DamageCallReaches)
     {0x547C70,{0x4C,0x8B,0xEA},3},                              // mov r13,rdx: the GameDamageInfo
     {0x547DB7,{0x49,0x63,0x45,0x24},4},                         // its team
     {0x547DBF,{0x4C,0x63,0x87,0x14,0x03,0x00,0x00},7},          // the object's team (+0x314)
     {0x548109,{0xF3,0x41,0x0F,0x10,0x75,0x50},6},               // its damage
 };
-// The damage call 0x54A586 still reaches 0x547C30: called straight (the stock bytes E8 A5 D6 FF FF), or through the Proteus
-// rework's redirect of it (proteus.cpp DamageHook, which calls 0x547C30 for every object). Either plugin step may install
-// first: neither reads the other's bytes as "changed".
+// The damage call 0x54A586 still reaches 0x547C30 (the stock bytes E8 A5 D6 FF FF).
 constexpr unsigned kDamageCall=0x54A586,kDamageTarget=0x547C30;
 bool DamageCallReaches() noexcept {
     const unsigned char* const site=image+kDamageCall;
@@ -866,7 +864,7 @@ bool DamageCallReaches() noexcept {
     std::int32_t rel=0;
     std::memcpy(&rel,site+1,4);
     const unsigned char* const to=site+5+rel;
-    return to==image+kDamageTarget || ProteusDamageThunk(to);
+    return to==image+kDamageTarget;
 }
 
 // Whether the vtable at RVA `vtable` is of the class `rtti` (its CompleteObjectLocator's TypeDescriptor name).

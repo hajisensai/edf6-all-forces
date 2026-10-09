@@ -1,12 +1,13 @@
-// Proteus object events: driver-owned control/pose and target-owner-owned barrier accounting are separate streams.
+// Proteus object events: driver-owned control/pose and target-owner-owned shield HP are separate streams. Version 2
+// (2026-10-09): `barrier` is the native shield's HP share, kBroken its broken lock; version 1 packets are refused.
 #pragma once
 #include "drill_net.h"
 #include "proteus_logic.h"
 namespace crew::proteus_net {
 constexpr std::int8_t kTag=15;
-constexpr std::uint32_t kMagic=0x544E5250,kVersion=1;
+constexpr std::uint32_t kMagic=0x544E5250,kVersion=2;
 enum class Kind : std::uint32_t { control,defense };
-constexpr std::uint32_t kActive=1,kShieldOn=2,kOverheated=4,kTwoSeats=8,kFlags=15;
+constexpr std::uint32_t kActive=1,kShieldOn=2,kOverheated=4,kTwoSeats=8,kBroken=16,kFlags=31;
 struct State {
     std::uint32_t magic=kMagic,version=kVersion;
     std::uint64_t sender=0;

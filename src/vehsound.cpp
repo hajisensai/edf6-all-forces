@@ -482,9 +482,6 @@ void GunStep(unsigned char* v,Vehicle& s,float frames) noexcept {
             const float vol=GroupVolume(pf.group);
             Keep(w+kFirePreset+kCues,g->fire,vol>0.0f);
             if(vol>0.0f && pf.fire==vmix::Fire::burst)StopPlaying(w+kFireLoop);   // a stock loop begun before it was held
-            // The Proteus rework's held launcher (proteus.h kProteusHoldCountdown): its countdown parked, no shot. Its
-            // jump there is not a shot's wait, nor its drop back to 0 when given back (the wait only falls then).
-            if(At<float>(w,kCooldown)>=kProteusHoldCountdown*0.5f){CloseLoop(g->burst);CloseLoop(g->brass);continue;}
             const std::int32_t ammo=At<std::int32_t>(w,kWeaponAmmo),sent=At<std::int32_t>(w,kWeaponShots);
             const float wait=WaitOf(w),before=g->wait,sinceBefore=g->since;
             const bool shot=ammo<g->ammo || (wait>before+2.0f && At<float>(w,kCooldown)>before+2.0f) ||

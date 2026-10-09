@@ -924,11 +924,8 @@ def vehicle_sgo(game: Game, sgo_name: str, jet_model: list[str] | None = None) -
     """The SGO bytes the mission will load for this vehicle (generated ones are made here)."""
     if sgo_name in JETS:
         return jet_sgo(game, sgo_name, jet_model)
-    if sgo_name in PROTEUS_MISSION.values():
-        import make_proteus
-        return make_proteus.redirect(game.read('OBJECT', DERIVED[sgo_name] + '.SGO'))[0]
-    if sgo_name in OPTIC_MISSION.values():
-        return game.read('OBJECT', DERIVED[sgo_name] + '.SGO')
+    if sgo_name in PROTEUS_MISSION.values() or sgo_name in OPTIC_MISSION.values():
+        return game.read('OBJECT', DERIVED[sgo_name] + '.SGO')   # the stock model (the Proteus's shield is a round of its own)
     if sgo_name in GROUND_MISSION:
         import importlib
         data = importlib.import_module(GROUND_MISSION[sgo_name]).vehicle_sgo(game)
@@ -1012,8 +1009,7 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
             data = vehicle_sgo(game, name, JET_ELEVON_MODEL if elevons else None)
         if name in PROTEUS_MISSION.values():
             import make_proteus
-            data, needs = make_proteus.range_vehicle(led, game, data, OWNER)
-            held.update(ledger.key(rel) for rel in needs)
+            held.add(ledger.key(make_proteus.range_shield(led, game, OWNER)))
         if name in OPTIC_MISSION.values():
             import make_optics
             data, needs = make_optics.range_vehicle(led, game, data, OWNER)

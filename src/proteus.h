@@ -5,34 +5,26 @@
 #include "proteus_logic.h"
 
 namespace crew {
-// At load: the code the rework rests on checked; the damage call (0x54A586), the Proteus's weapon user (its interface
-// slot 11) and the soldiers' target search (SearchAttackTarget slot 1) hooked. False: no Proteus is reworked.
+// At load: the code the rework rests on checked; the weapon mounts' empty-seat callback, the weapon user, the pose and
+// the native shield's update hooked; the soldiers' target search chained. False: no Proteus is reworked.
 bool InstallProteus() noexcept;
 void ResetProteus() noexcept;                     // a new mission (mission.cpp)
 bool ProteusReady() noexcept;                     // InstallProteus found the rework's code (the ini decides each frame)
-// `target` is where the rework redirected the damage call 0x54A586 to (its thunk to DamageHook, which calls the stock
-// 0x547C30 for every object): subcarrier.cpp's check of that call takes it as intact, whichever installs first.
-bool ProteusDamageThunk(const void* target) noexcept;
 bool IsProteus(const void* vehicle) noexcept;     // a VehicleBigBegaruta (the Proteus, V614_PROTEUS_MK2* / VEHICLE407_BIGBEGARUTA*)
-// The actual right cannon borrowed by the driver (0), or paired with the left gunner (1). No synthetic holder.
-const unsigned char* ProteusSightWeapon(const unsigned char* vehicle,unsigned seat) noexcept;
-struct StockArm;
-// Custom driver's straight round, with its real physical bore and 960 m/s flight (not the stock weapon's ammo).
-bool ProteusDriverSight(const unsigned char* vehicle,StockArm* out) noexcept;
-// Engine slots 2/3 still drive the weapons; empty closed slots are not public seats.
+// The stock weapons seat `seat` works without holding them (a borrowed mount, proteus_logic.h Operator): up to `max`
+// into `out`, their count. The vehicle HUD lists them with the seat's own (vhud.cpp).
+int ProteusBorrowedWeapons(const unsigned char* vehicle,unsigned seat,const unsigned char** out,int max) noexcept;
+// Engine seats 2/3 still hold the weapons; empty closed seats are not public seats.
 unsigned ProteusVisibleSeats(const unsigned char* vehicle,unsigned count) noexcept;
 // Every vehicle's input (crew.cpp InputHook), before the seat switch and before the plugin's Enabled test: a Proteus a
 // local player rides is reworked, one they left gets its stock numbers back (the plugin off too: it gives everything
 // back then). Before the seat switch on purpose: the seats it closes (their class masks) are closed by the time the seat
 // switch asks which seats the player may move to, the frame they board too; a move the switch makes is seen next frame.
 void ProteusFrame(unsigned char* vehicle) noexcept;
-// The shot countdown (weapon +0xE0C, frames) the rework parks the stock missile launcher at while the salvo is its: no
-// shot comes before it runs out. A countdown of half this or more is that hold, never a shot's wait (vehsound.cpp reads it).
-constexpr float kProteusHoldCountdown=1.0e9f;
 // The turret camera's look-at fetch (turretcam.cpp LookHook), for a seat camera it does not place itself: a deployed
 // Proteus the player rides raises the camera's targets (`look`, `eye`: the look-at and the eye, world). False: none.
 bool ProteusViewLift(const unsigned char* seat,float* look,float* eye) noexcept;
-// Where the allies are to look first (the front shield up, the user 2026-10-06: "己方 NPC 和自动炮塔会优先攻击"): enemies
+// Where the allies are to look first (the shield up walking, the user 2026-10-06: "己方 NPC 和自动炮塔会优先攻击"): enemies
 // within `radius` of `centre`, or whose target is `vehicle`, weigh `weight` of their distance in an ally's choice.
 // False with no zone this moment. Any thread (EDF6AutoTurret asks through common/edf/aimlink.h PriorityZoneV1).
 struct ProteusZone { float centre[3]; float radius,weight; const void* vehicle; };
@@ -43,27 +35,23 @@ bool ProteusPriorityZone(ProteusZone* out) noexcept;
 constexpr int kProteusRing=40;
 struct ProteusReadout {
     const void* vehicle;
-    float pos[3],hull[3];
+    float pos[3],hull[3];          // hull: the way the shield faces (horizontal)
     unsigned seat;                 // the player's seat (0 the driver's)
     bool driver;                   // the player drives it (the keys are theirs)
     proteus::Mode mode;
     float stagger;                 // the stagger's share done
-    bool shieldOn,shieldUp,dirShield,overheated;
+    bool shieldOn,shieldUp,dirShield,overheated,broken;
+    bool shieldReady;              // the native shield can be raised this mission (its SGO installed and preloaded)
     float heat,shieldHalfArc;
-    float barrier,barrierHp;       // share left, its full HP
-    bool marked;
-    float markAt[3],markRange;
-    float salvoWait,salvoCooldown;
-    int salvoLeft;
-    bool salvoArmed;               // shells preloaded this mission (else no salvo, no driver gun)
-    bool gun;                      // the driver's gun is there (deployed, ProteusDriverGun, shells preloaded)
+    float shield,shieldHp;         // the shield's HP share left, its full HP
+    bool launcher;                 // the driver works the missile launcher now (deployed, its seat empty)
     bool priority;                 // the allies' priority zone is up
     float fieldRadius;
     int allies;                    // allies the field covers now
     int ringCount;
     float ring[kProteusRing][3];
     bool keys;                     // the driver on the keyboard and mouse (else a pad): which binding the HUD names
-    int modeKey,modeButton,shieldKey,shieldButton,markKey,markButton,salvoKey;
+    int modeKey,modeButton,shieldKey,shieldButton,launcherKey;
 };
 bool PlayerProteus(ProteusReadout* out) noexcept;
 }  // namespace crew

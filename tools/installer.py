@@ -444,7 +444,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
         stock = files, skipped
     sidecar = build_asset(cache, make_sidecar, '边三轮摩托')
     sazabi = build_asset(cache, make_sazabi, '沙扎比（模型生成约 1.5 分钟）')
-    proteus = build_asset(cache, make_proteus, '普罗透斯支撑桩和护盾模型')
+    proteus = build_asset(cache, make_proteus, '普罗透斯护盾（原版空袭兵电磁碉堡墙；同时撤销旧版生成的模型）')
     bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
     campaign = None
     if campaign_requested or make_edf5_campaign.wanted(game):

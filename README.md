@@ -279,7 +279,7 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
    - **机枪、加特林、防空炮**（射击间隔 5 帧以内的，或原版射击声本来就是循环的：Kepler 的双联加特林、直升机的机枪 / 舱门机枪、403 的机枪、Begaruta 的加特林、榴弹机枪等）：开火时是一段连射声的循环（不是每发一个声音叠几百个），按射速调节快慢（以每秒 12 发的机枪和每秒 20 发的加特林两种为准，音调最多偏 ±1/3），停火时一声回响；30～40 米内能听到弹壳、弹链哗啦落地（武器自己会抛物理弹壳的，例如 Kepler、Begaruta 的加特林，由游戏播它们的落地声）；
    - **机炮、榴弹发射器**（其余的子弹 / 炮弹类武器：Striker 的机炮、机器人卡车的步枪、Begaruta 的榴弹、Titan 的侧榴弹等）：机炮每发一个短促有力的单发声（爆音 + 70 Hz 重击 + 回声），榴弹发射器是没有炸裂声的空洞「嗵」；近处有弹壳落地声（武器自己抛物理弹壳的除外）；按距离延迟；
    - **导弹、火箭**：发射时点火「噗」一声、火箭推进的呼啸从高到低远去、后喷的低频冲击（直升机、Naegling、Begaruta、Titan 的侧导弹等；插件飞机的导弹保留安装器生成的空袭导弹声）；
-   - **保留原版的**：激光、光束（Proteus / Nix 的激光步枪）、火焰、酸液、追踪激光；Barga 的巨炮（循环射击声）。直升机旋翼声保留原版（原版旋翼循环是实录、随旋翼转速变化，不算弱）；插件喷气机本来就是插件自己的引擎声。Depth Crawler 的音效表里只有受损 / 爆炸 / 上下车，没有行走声可以替换；机甲的脚步声不在音效表里（没有逆向到出处），插件不另加脚步声，免得和原版叠成两份；Balam、Barga、机器人卡车、皮卡、救援车不在插件每帧处理的车类里，保留原版（这些车上的武器也一样）；Proteus 现在由插件每帧处理（见「普罗透斯」），它的炮和导弹发射架换成插件的射击声，行走 / 伺服声保留原版；
+   - **保留原版的**：激光、光束（Proteus / Nix 的激光步枪）、火焰、酸液、追踪激光；Barga 的巨炮（循环射击声）。直升机旋翼声保留原版（原版旋翼循环是实录、随旋翼转速变化，不算弱）；插件喷气机本来就是插件自己的引擎声。Depth Crawler 的音效表里只有受损 / 爆炸 / 上下车，没有行走声可以替换；机甲的脚步声不在音效表里（没有逆向到出处），插件不另加脚步声，免得和原版叠成两份；Balam、Barga、机器人卡车、皮卡、救援车不在插件每帧处理的车类里，保留原版（这些车上的武器也一样）；Proteus 现在由插件每帧处理（见「普罗透斯」），它的原版炮和导弹发射架换成插件的射击声，行走 / 伺服声保留原版；
    - **音量**：`VehicleEngineVolume`（引擎和履带）、`VehicleTurretVolume`（炮塔和机甲武装转动）、`VehicleReloadVolume`、`VehicleGunVolume`（主炮）、`VehicleMgVolume`（机枪、机炮、弹壳）、`VehicleMissileVolume`（导弹、火箭）各管一组（0~4，乘在游戏音量上）；某一组填 0 就保留这一组的原版声音。`VehicleSound=0` 全部回到原版。原版声音是在每台载具 / 每把主炮自己的音效预设里清掉的（不改游戏文件），关掉时马上还回去。
    - **自定义录音**：在 DLL 旁边放 `EDF6VehicleCrew_veh_<名字>.wav`（16 位 PCM，单声道或立体声，任意采样率）就用它代替对应的合成音，名字：`engine_heavy_idle` / `engine_heavy_load` / `engine_light_idle` / `engine_light_load`（引擎的怠速层 / 负荷层，录在怠速转速，循环）、`tracks`（履带，录在约 8 m/s，循环）、`turret`（炮塔转动，最快转速时，循环）、`turret_stop`、`gun_near`、`gun_far`、`reload_eject`、`reload_load`、`reload_close`、`engine_bike_idle` / `engine_bike_load`（摩托，怠速转速，循环）、`mg_burst`（机枪连射，每秒 12 发，循环）、`gatling_burst`（加特林连射，每秒 20 发，循环）、`burst_tail`、`autocannon`、`brass`（弹壳落地，循环）、`case_small`、`missile_launch`；按口径的：`gun_medium_near` / `gun_medium_far`（75～105 mm）、`howitzer_near` / `howitzer_far`（155 mm）、`gun_heavy_near` / `gun_heavy_far`（超重型）、`railgun_shot` / `railgun_far` / `railgun_charge`（电容充电，1.5 秒，结束时就绪）/ `railgun_ready`、`grenade_shot`、`rocket_rail_launch` / `rocket_rail_load`、`case_medium` / `case_stub` / `case_grenade`（弹壳落地）、`reload_breech_open` / `reload_shell_ram` / `reload_charge` / `reload_primer`（分装式装填：开闩、推弹丸、推装药、装底火）。`reload_eject` 现在只是开闩抽壳（弹壳落地是各口径的 `case_*`）。
    - **试听**：`cmake --build build --target vsound_check && build\vsound_check.exe` 把所有合成音和三段场景混音（坦克：启动、怠速、起步、转炮塔、开炮、装填、远处另一辆开炮；小口径武器：摩托驶过、加特林连射 2 秒、机枪短点射、机炮四发、发射导弹；大炮：电磁炮充电开炮、榴弹炮齐射和分装装填、喀秋莎 40 发连射和重新装填、坦克炮和底座落地、Titan 主炮）写到 `%TEMP%\edf6_vsound_check`，同时检查电平（不削波、无直流偏移、循环无缝）。
@@ -312,7 +312,7 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
 
 18. **EMC 蓄力光束**（`src/emc.cpp`，ini `EmcBeam` / `EmcChargeSec` / `EmcBeamSec` / `EmcBlastRadius` / `EmcBlastShare` / `EmcBreak`，逆向与设计 `docs/emc-re.md`）：EMC 的射击键改成蓄力，蓄满射出一道贯穿沿线敌人和建筑的粗光束，终点大爆炸，伤害等于原版一次 1000 发连射的总和；详见下面「EMC 蓄力光束」。
 
-19. **普罗透斯重构**（`src/proteus.cpp`，ini `ProteusRework` 和其它 `Proteus*`，逆向笔记 `docs/proteus-re.md`；2026-10-06 用户需求）：你坐进普罗透斯时，它变成两个座位（驾驶员 + 炮手）、两种姿态的机甲：行走模式移速和步高提高、有手动开关的正面护盾（打开时减速，友军优先攻击它附近的敌人），炮偏散偏慢、不能用导弹；架设模式有硬直、架设时真实落下支撑桩，护盾有透明模型，镜头升高，展开减伤 / 增伤 / 射速 / 回能的力场，有自身恢复护盾和带热量的单向盾，炮又准又快，驾驶员有机炮和标记后呼叫的导弹齐射。详见下文「普罗透斯」。
+19. **普罗透斯重构**（`src/proteus.cpp`，ini `ProteusRework` 和其它 `Proteus*`，逆向笔记 `docs/proteus-re.md`；2026-10-06 用户需求，2026-10-09 完全重做）：你坐进普罗透斯时，它变成两个座位（驾驶员 + 炮手）、两种姿态的机甲，武器全是原版的两门加农炮和导弹架（空着的炮位由在座的人借用），护盾是原版空袭兵电磁碉堡的能量墙；行走模式移速和步高提高，架设模式落下支撑桩、展开力场、镜头升高。详见下文「普罗透斯」。
 
 20. **沙扎比（MSN-04）**（`src/sazabi.cpp`、`src/sazabi_pose.h`，模型 `pylib/sazabi_model.py`，ini `Sazabi` 和其它 `Sazabi*`，计划与逆向 `docs/gundam-plan.md`、`docs/sazabi-re.md`；2026-10-06 用户：「增加高达」「全新做一个」「按原设身高」）：空袭兵请求来一台全高 25.6 米的沙扎比，玩家坐进去自己驾驶：走、跑、推进器跳跃 / 飞行 / 冲刺，全身每个关节由插件逐帧摆出姿态（步态、落地屈膝、飞行前倾、举枪瞄准），单眼、推进器口、胸灯自发光。详见下文「沙扎比」。
 
@@ -697,57 +697,43 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 ## 普罗透斯（Proteus）
 
 空降兵的大型步行机甲普罗透斯（`VehicleBigBegaruta`：`V614_PROTEUS_MK2*`、`VEHICLE407_BIGBEGARUTA*`）重构成「行走时是快速转移的指挥平台，
-架设后变成能保护周围友军的火力据点」（`src/proteus.cpp`、规则 `src/proteus_logic.h`，ini `ProteusRework` 和其它 `Proteus*`，默认开；
-逆向笔记 `docs/proteus-re.md`；2026-10-06 用户需求）。只在**你坐在里面**时生效，你下车后它恢复原版的全部数值。
+架设后变成能保护周围友军的火力据点」（`src/proteus.cpp` 及 `proteus_weapons.inc` / `proteus_shield.inc` / `proteus_visual.inc`，规则 `src/proteus_logic.h`，
+ini `ProteusRework` 和其它 `Proteus*`，默认开；逆向笔记 `docs/proteus-re.md`；2026-10-06 用户需求；2026-10-09 用户：「护盾用原版的护盾样式」「完全重做」，
+重做说明 `docs/feedback-2026-10-09-proteus.md`）。只在**你坐在里面**时生效，你下车后它恢复原版的全部数值。模型、武器、弹药、护盾全是游戏原版的。
 
-- **两个座位**（`ProteusTwoSeats`）：驾驶员（0 号座）和炮手（1 号座）。炮手的两门炮一起转、一起开火（右炮跟着左炮的角度，
-  左炮开火时右炮同时开火）。原版的右炮座和导弹座关闭：谁都坐不进去，原版派进去的 NPC 炮手被请下车；导弹发射架改成驾驶员的导弹齐射
-  （只在齐射用得了时：本关预载了炮舰机的炮弹、导弹座也关着；否则导弹发射架照原版能用，每帧重新判断）。
-  （以前插件从没给普罗透斯接上每帧入口，所以它也没有载具 HUD、换座位、NPC 驾驶；现在都有了。）
-- **自动配 NPC**（`AutoCrew`）：和直升机同一规则——任务里停着、**你还没坐过**的普罗透斯，插件不派 NPC 进去（否则原版会坐满四个座位把它开走，
-  你就上不去了）；你坐过、下车之后，它照常配 NPC 驾驶（原版 RideAi，四个座位都坐 NPC）。
-- **按键**（驾驶员；键盘 / 手柄，ini 可改）：切换行走 / 架设 **T** / **RB**（`ProteusModeKey` / `ProteusModeButton`）；
-  护盾开关 **B** / **LB**（`ProteusShieldKey` / `ProteusShieldButton`）；标记目标 **Q** / **X**（`ProteusMarkKey` / `ProteusMarkButton`：
-  屏幕中心 8° 内最近的敌人，再按一次同一个目标就取消）；导弹齐射 **鼠标右键** / **LT**（`ProteusSalvoKey`）；
-  架设时驾驶员遥控右炮 **鼠标左键** / **RT**（仅炮手席无人时，炮手入座后优先使用双炮）。手柄键位选的是驾驶员原本空着的键：A、B、L3 是原版的跳跃（`docs/proteus-re.md` §3），Y 留给上下车，L3 / R3 另有观察键 / 高视角。
-- **行走模式**：移速和起步加速 ×1.6、转向 ×1.3（`ProteusWalkSpeed` / `ProteusWalkTurn`），能迈上去的台阶从约 1.2 米提高到
-  2.6 米（`ProteusStepHeight`；同时能走的最陡坡从 40° 变成约 61°），靠高腿跨地形、抢位置。
-  - **正面护盾**（护盾键开关）：车头左右各 60°（`ProteusShieldArc`）内打来的伤害全挡（`ProteusShieldBlock`），打开时移速和转向
-    减半（`ProteusShieldSlow`），没有热量，用来转移途中保命。
-  - **护盾打开时己方 NPC 和自动炮塔优先攻击**：解读为「指挥平台」——友军优先打**普罗透斯附近（`ProteusPriorityRadius`，100 米内）
-    或正在攻击它的敌人**：己方 NPC 士兵挑目标时（原版按距离挑最近的）这些敌人的距离按 `ProteusPriority`（0.3）打折；
-    EDF6AutoTurret 的自动炮塔（防空车、Titan 和坦克的副炮）挑新目标时同样打折（两个插件通过 `common/edf/aimlink.h` 的 `PriorityZoneV1` 互相告知）。
-    没有做成「嘲讽」（让敌人都打普罗透斯），因为那和「保命」相反（逆向见 `docs/proteus-re.md` §7，嘲讽也能做：敌人的目标权重 +0x47C）。
-  - 炮：射速 ×0.7、散布 ×1.8（`ProteusWalkGunRate` / `ProteusWalkGunSpread`）；导弹发射架让给齐射（齐射用不了时照旧，见上）。
-- **架设模式**：按切换键后 1.5 秒硬直（`ProteusDeploySec`；收起同样 `ProteusStowSec`），期间不能走、不能转、不能跳；
-  架好后不能走（是固定炮台），可以原地慢慢转身（`ProteusDeployTurn`）去面对威胁。镜头升高 12 米（`ProteusViewLift`），视野变大。
-  - **力场**（半径 60 米，`ProteusFieldRadius`；地面上的青色虚线圈）：覆盖范围内的友军士兵和载具受到的伤害 −30%（`ProteusFieldDefense`），
-    士兵造成的伤害 +20%（`ProteusFieldAttack`），武器射速 ×1.2（`ProteusFieldFireRate`），翼装兵每秒多恢复 5% 能量（`ProteusFieldEnergy`），
-    空袭兵的支援武器每秒多充 25 点（`ProteusFieldPower`）。普罗透斯自己不在力场里（它有自己的护盾）。
-  - **自身护盾**：容量为最大耐久的 30%（`ProteusBarrier`），先替车体挨打，4 秒没挨打后（`ProteusBarrierDelaySec`）40 秒从空回满（`ProteusBarrierRegenSec`）。
-  - **单向盾**（护盾键开关，面朝车头 ±60°）：挡住覆盖角度内的伤害，有热量：开着时热量只随时间涨，12 秒过热（`ProteusHeatSec`），
-    过热后盾降下，冷却到 30%（`ProteusResumeHeat`）后自动重新升起（只要开关还开着），关掉时冷却（`ProteusCoolSec`）。
-  - **炮**：射速 ×1.8、散布 ×0.35（`ProteusDeployGunRate` / `ProteusDeployGunSpread`）——炮手席在架设模式射速大幅提高。
-    原版炮弹 200 发、不装填，射速变快后打完得更快。
-  - **驾驶员机炮**（`ProteusDriverGun`）：主射击键开火，每秒 4 发（`ProteusGunRate`）炮舰机的 40 毫米高爆弹（每发 45 伤害，`ProteusGunDamage`，基础档，按档位放大），从背上发射架的位置打向屏幕中心；
-    标记的目标在屏幕中心附近时自动算提前量（可以当防空炮打飞行目标）。
-  - **导弹齐射**：标记目标后按齐射键，12 发（`ProteusSalvoCount`）炮舰机的火箭弹从背上依次射出，按抛物线落向目标（按目标移动算提前量，
-    落点在目标周围 6 米内散开），每发 150 伤害（`ProteusSalvoDamage`，基础档，按档位放大）；打完冷却 30 秒（`ProteusSalvoCooldownSec`）；标记最远 1500 米（`ProteusSalvoRange`）。
-- **HUD**（原版载具 HUD 的左下块里）：姿态（硬直时琥珀色进度条）、护盾状态（架设时下面是热量条，过热闪红）、自身护盾条、
-  力场半径和覆盖的友军数、齐射状态（冷却秒数 / 待标记 / READY）和标记距离；车体圆环外侧的青色弧是正在立着的护盾的方向；
-  被标记的目标上有红色菱形和距离。离线排版检查：`tools/hud_view`（`stock_proteus_*`）。
-- **离线检查**：`cmake --build build --target proteus_check && build\proteus_check.exe`：两套参数下逐帧验证硬直时长、硬直中不接受切换、
-  热量按时间过热 / 冷却 / 自动重新升起、自身护盾吸收与恢复、齐射冷却、护盾覆盖角度和台阶高度换算。
-- **做不到的、近似的地方**（`docs/proteus-re.md` §8）：
-  - 「架好后机身升到最高」：普罗透斯的身高是走路动画和出生时建好的物理胶囊决定的，类里没有能调身高的参数，所以做的是镜头升高 12 米、
-    往后拉开（视野变大），机体本身不变高。
-  - 驾驶席的「机枪 / 防空炮塔」：原版驾驶席没有武器，也无法在运行时给座位加武器，所以用插件发射炮舰机的机炮弹实现（伤害、
-    击杀、阵营都算普罗透斯的）；导弹齐射同理用炮舰机的火箭弹（无制导，按抛物线和提前量打标记的位置），不是原版的追踪导弹。
-  - 机炮和齐射需要本关预载这些弹药（任务开始时自动预载，需要喷气机功能可用：`JetPilot` 那套的签名对得上）；没有时 HUD 显示 SALVO OFFLINE。
-- **待游戏内确认**：`Debug=1` 时日志 `PROTEUS` 行：上车 `reworked (... walk / turn / jump / step normal ...)` 给出原版数值；
-  每 2 秒一行姿态、护盾、热量、自身护盾、齐射、力场友军数和这 2 秒里挡掉 / 自身护盾吸收 / 打到车体的伤害，以及腿的数值。
-  要看的：行走变快、能迈上更高的台阶；架设时立刻停住；炮手开火时两门炮都开火；护盾方向打来的伤害被挡（`blocked` 增加）；
-  力场里的队友受伤变少；驾驶员机炮和齐射能打出来；镜头在架设后升高。联机：只在本机生效（数值在本机改，别人的机器上不变）。
+- **两个座位**（`ProteusTwoSeats`）：驾驶员（0 号座）和炮手（1 号座）。原版的右炮座和导弹座关闭（谁都坐不进去，原版派进去的 NPC 炮手被请下车）。
+  （EDF5 / EDF6 原版的普罗透斯都是驾驶员 + 左炮 + 右炮 + 导弹四个座位，驾驶席本身没有武器；两席是 2026-10-06 的需求。）
+- **武器：原版两门加农炮和原版导弹架**，空着的炮位由在座的人「借用」（不造任何替代弹）：
+  - 炮手：两门炮一起转、一起开火（右炮跟左炮的角度和扳机）；
+  - 只有驾驶员时：驾驶员用主射击键开两门炮（炮跟着驾驶员的视角转，受各自限位约束）；
+  - 架设后：驾驶员用**鼠标右键 / LT**（`ProteusSalvoKey`）发射原版导弹架（原版锁定、原版追踪导弹）；行走时导弹架不用；
+  - 某个炮位上真有人坐时（`ProteusTwoSeats=0` 或之前就坐着的人），那座武器完全按原版由他操作。
+  - 车辆 HUD 的武器列表里会列出你借用的武器（弹数、装填、弹着点 / 锁定框都是原版武器的）。
+- **护盾：原版空袭兵「电磁碉堡（電磁トーチカ）」的能量墙**（护盾键开关：**B** / **LB**）：一面 120°、半径 12 米、高 17 米的原版蓝色能量墙立在机体周围，
+  行走时朝车头、架设时朝驾驶员视线，跟着机体走。敌人的子弹打在墙上被挡住并扣墙的耐久，己方和友军的子弹穿过（游戏原版规则）。
+  - 墙的耐久 = 普罗透斯最大耐久 × `ProteusBarrier`（默认 30%）；打光墙碎，恢复到 `ProteusResumeHeat`（30%）之前立不起来；放下且 `ProteusBarrierDelaySec`（4 秒）没挨打后，
+    `ProteusBarrierRegenSec`（40 秒）从空回满。
+  - 行走时立着护盾：移速和转向乘 `ProteusShieldSlow`（0.5），己方 NPC 和自动炮塔优先打普罗透斯附近（`ProteusPriorityRadius`，100 米内）或正在攻击它的敌人
+    （距离按 `ProteusPriority` 0.3 打折；EDF6AutoTurret 通过 `common/edf/aimlink.h` 的 `PriorityZoneV1` 得知）。
+  - 架设时立着护盾会发热：`ProteusHeatSec`（12 秒）过热放下，冷却（`ProteusCoolSec`）到 `ProteusResumeHeat` 后自动再立起（开关还开着的话）。
+  - 需要安装器生成的 `EDF6VC_PROTEUS_SHIELD.SGO`；没有时 HUD 显示护盾 OFFLINE。
+- **自动配 NPC**（`AutoCrew`）：任务里停着、**你还没坐过**的普罗透斯，插件不派 NPC 进去；你坐过、下车之后照常配 NPC（原版 RideAi）。
+- **按键**（驾驶员；键盘 / 手柄，ini 可改）：切换行走 / 架设 **T** / **RB**（`ProteusModeKey` / `ProteusModeButton`）；护盾 **B** / **LB**（`ProteusShieldKey` / `ProteusShieldButton`）；
+  导弹架 **鼠标右键** / **LT**（`ProteusSalvoKey`）；两门炮用主射击键。手柄键位选的是驾驶员原本空着的键：A、B、L3 是原版的跳跃。
+- **行走模式**：移速和起步加速 ×1.6、转向 ×1.3（`ProteusWalkSpeed` / `ProteusWalkTurn`），能迈上去的台阶从约 1.2 米提高到 2.6 米（`ProteusStepHeight`；
+  同时能走的最陡坡从 40° 变成约 61°）。炮：射速 ×0.7、散布 ×1.8（`ProteusWalkGunRate` / `ProteusWalkGunSpread`）。
+- **架设模式**：按切换键后 1.5 秒硬直（`ProteusDeploySec`；收起 `ProteusStowSec`），期间不能走、不能转、不能跳；架好后原版模型自带的支撑桩落到地面，
+  不能走，可以原地慢慢转身（`ProteusDeployTurn`）；镜头升高 12 米（`ProteusViewLift`）。炮：射速 ×1.8、散布 ×0.35（`ProteusDeployGunRate` / `ProteusDeployGunSpread`）。
+  - **力场**（半径 60 米，`ProteusFieldRadius`；地面上的青色虚线圈）：范围内友军受到的伤害 −30%（`ProteusFieldDefense`），士兵造成的伤害 +20%（`ProteusFieldAttack`），
+    武器射速 ×1.2（`ProteusFieldFireRate`），翼装兵每秒多恢复 5% 能量（`ProteusFieldEnergy`），空袭兵支援武器每秒多充 25 点（`ProteusFieldPower`）。
+- **HUD**（原版载具 HUD 的左下块里）：姿态（硬直时琥珀色进度条）、护盾状态 / 耐久 % / 热量和耐久条（墙碎时闪 BROKEN）、力场半径和友军数、驾驶员的导弹架按键；
+  车体圆环外侧的青色弧是护盾方向。离线排版检查：`tools/hud_view`（`stock_proteus_*`）。
+- **离线检查**：`cmake --build build --target proteus_check && build\proteus_check.exe`：姿态硬直、护盾热量 / 击碎 / 回复、每种座位占用下谁操作哪座武器、台阶换算。
+- **做不到的、近似的地方**：「架好后机身升到最高」——身高由走路动画和出生时建好的物理胶囊决定，类里没有参数，所以是镜头升高 12 米、机体不变高；
+  护盾的弧度、半径、高度写在安装器生成的 SGO 里（墙在生成时建好网格），不能运行时调。
+- **待游戏内确认**（全部未实机验证）：`Debug=1` 时日志 `PROTEUS` 行：上车 `reworked (...)` 给出原版数值；每 2 秒一行姿态、护盾（开 / UP / BROKEN / OVERHEAT、耐久 %、热量、
+  墙对象指针）、力场友军数、三座武器各由几号座操作（`mounts L.. R.. M..`），以及腿的数值。要看的：墙的外观和位置、走动时墙是否跟着、敌弹是否被挡、
+  驾驶员一个人能否开两门炮和导弹架（导弹能否锁定）、炮手开火时两门炮都开火；联机时两台机器上的墙。
 
 ## 登车狙击枪
 
@@ -943,7 +929,7 @@ NPC 驾驶时的单次音效照常能听到，HUD 只在你自己驾驶时显示
 
 **待实机确认**：EDF5 的 BVM 脚本能否在 EDF6 里从开始跑到结算（执行器 `MissionScriptBVMImplement` 还在，脚本也被开发组维护过，但没有在游戏里跑过）；有问题的关可以从列表里剔除，不影响其它关。缩略图、`flags`（照 EDF6 里 EDF5 时代任务的取值 8）的效果同样待确认。
 
-普罗透斯 2026-10-08 修正：座位提示和召唤说明显示默认驾驶员 + 炮手两席；架设 / 收起驱动实物支撑桩，开启护盾显示透明能量盾。齐射逐真实管口发弹，碰撞半径匹配原版导弹；无炮口不造弹。整机升高腿部 IK 及游戏 / 双机画面尚未验收，详见 `docs/proteus-assets.md` 与 `docs/proteus-rounds-feedback.md`。
+普罗透斯 2026-10-09 完全重做：护盾改为原版空袭兵电磁碉堡的能量墙（原版资源与原版碰撞），不再生成私有模型（旧版安装会被自动撤销）；武器只用原版两门加农炮和导弹架，空座武器由在座的人借用，删除插件机炮 / 齐射弹和伤害钩。游戏 / 双机画面尚未验收，详见 `docs/feedback-2026-10-09-proteus.md`。
 
 ### 固定武器与同发火控
 

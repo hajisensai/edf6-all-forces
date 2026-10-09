@@ -242,8 +242,8 @@ target_include_directories(stab_native_readback_test PRIVATE src common)
 target_link_libraries(stab_native_readback_test PRIVATE edf6common)
 target_compile_options(stab_native_readback_test PRIVATE /W4 /WX /utf-8 /permissive-)
 
-# The Proteus rework's rules (src/proteus_logic.h: the stances and their stagger, the directional shield's heat, the barrier,
-# the salvo's cooldown, the step height) offline (tools/proteus_check.cpp). Not part of the plugin build:
+# The Proteus rework's rules (src/proteus_logic.h: the stances and their stagger, the shield's heat / HP / break / refill,
+# who operates each stock weapon mount, the step height) offline (tools/proteus_check.cpp). Not part of the plugin build:
 # cmake --build build --target proteus_check && build\proteus_check.exe
 # The flyers' soft edge's rules offline (tools/airbound_check.cpp, src/airbound.h). Not part of the plugin build.
 add_executable(airbound_check EXCLUDE_FROM_ALL tools/airbound_check.cpp)
@@ -561,12 +561,6 @@ add_executable(proteus_net_native_test EXCLUDE_FROM_ALL tests/proteus_net_native
 target_include_directories(proteus_net_native_test PRIVATE src common)
 target_link_libraries(proteus_net_native_test PRIVATE edf6common user32)
 target_compile_options(proteus_net_native_test PRIVATE /W4 /WX /utf-8 /permissive-)
-add_library(proteus_damage_gate_bridge MODULE EXCLUDE_FROM_ALL tests/proteus_damage_gate_bridge.cpp)
-target_compile_options(proteus_damage_gate_bridge PRIVATE /W4 /WX /utf-8 /permissive-)
-add_dependencies(offline_checks proteus_damage_gate_bridge)
-add_test(NAME proteus_damage_gate_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_damage_native_audit.py"
-    --gate-dll "$<TARGET_FILE:proteus_damage_gate_bridge>")
-set_tests_properties(proteus_damage_gate_native PROPERTIES SKIP_RETURN_CODE 77)
 target_link_libraries(gunner_aim_object_test PRIVATE edf6common)
 target_link_libraries(heli_player_input_test PRIVATE edf6common user32)
 add_executable(jetsound_check EXCLUDE_FROM_ALL tools/jetsound_check.cpp)
@@ -579,15 +573,11 @@ add_test(NAME heli_request_setup COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE
 # The Begaruta family (Proteus too) chains its per-frame slot 4; with the game present, against EDF.dll.
 add_test(NAME begaruta_family_profile COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/begaruta_family_native_profile_test.py")
 add_test(NAME proteus_visual_profile COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_visual_native_profile.py")
-add_test(NAME proteus_round_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_round_native_audit.py")
-set_tests_properties(proteus_visual_profile proteus_round_native PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(proteus_visual_profile PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME proteus_assets COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_proteus_assets.py")
 add_test(NAME proteus_text COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_text_test.py")
 add_test(NAME proteus_install COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_install_test.py")
 add_test(NAME proteus_range COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_range_test.py")
-add_test(NAME proteus_cas_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_cas_native_audit.py" "${EDF6_NATIVE_DLL}")
-set_tests_properties(proteus_cas_native PROPERTIES SKIP_RETURN_CODE 77)
-add_test(NAME proteus_cas_upgrade COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_cas_upgrade_test.py")
 add_test(NAME vehicle_shapes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_vehicle_model_shapes.py")
 add_test(NAME aircraft_collision COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/aircraft_collision_check.py")
 
@@ -962,7 +952,7 @@ target_compile_options(camera_payload_lifecycle_test PRIVATE /W4 /WX /utf-8 /per
 target_link_options(camera_payload_lifecycle_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks camera_payload_lifecycle_test)
 add_test(NAME camera_payload_lifecycle COMMAND camera_payload_lifecycle_test)
-# Proteus original weapon callbacks and post-pose firing; native mode maps EDF.dll without DllMain.
+# The Proteus's borrowed stock weapon mounts and native shield barrier; native mode maps EDF.dll without DllMain.
 add_executable(proteus_weapon_test EXCLUDE_FROM_ALL tests/proteus_weapon_test.cpp)
 target_include_directories(proteus_weapon_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(proteus_weapon_test PRIVATE edf6common user32)

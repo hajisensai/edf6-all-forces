@@ -2518,13 +2518,13 @@ void StockMark(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
 // EDF6AutoTurret's lead circle is on the seat's own gun (the
 // seat's first weapon, the one its aim turns: then the circle and its bore cross are that gun's marks, not a pipper).
 struct StockExtras { const NixTorso* nix; const DrillCue* drill; bool leadGun; const EmcCue* emc; const ProteusReadout* proteus; bool high=false; };
-// --- The Proteus (proteus.cpp; README 普罗透斯): its part of the stock vehicle HUD. In the block (StockBlock) up to five
-// lines with a bar under some: the stance (and the stagger's progress), the shield (deployed its heat), the barrier, the
-// salvo (its cooldown, the mark's range), the field (its allies) and the driver's gun; the bindings named where the
-// driver has a press to make. On the hull ring the standing shield's arc; on the ground the field's edge; on the marked
-// target a red diamond with its range. ---
-constexpr int kProteusLines=5;
-const char kBarrierKey=0;            // the barrier bar's damage trail's key (an address of our own)
+// --- The Proteus (proteus.cpp; README 普罗透斯): its part of the stock vehicle HUD. In the block (StockBlock) up to four
+// lines with a bar under some: the stance (and the stagger's progress), the shield (its state, HP and deployed its heat;
+// the HP bar under it), the field (its allies), the driver's missile launcher; the bindings named where the driver has a
+// press to make. The cannons and the launcher themselves are listed with the seat's weapons (vhud.cpp, borrowed mounts).
+// On the hull ring the standing shield's arc; on the ground the field's edge. ---
+constexpr int kProteusLines=4;
+const char kBarrierKey=0;            // the shield's HP bar's damage trail's key (an address of our own)
 struct ProteusLine { Line* line; bool bar; float share; const float* fill; const void* trailKey; };
 
 // A binding's name: the mouse's buttons by name (GetKeyNameText has none for them), the keys as KeyName, a pad's button.
@@ -2536,12 +2536,11 @@ void ProteusBinding(bool keys,int key,int button,wchar_t* out,int size) noexcept
 
 // The block's Proteus lines (see above) into `pl` (`n` of them): the lines are `lines`' next ones.
 int ProteusLinesOf(const ProteusReadout& p,Line* lines,ProteusLine* pl) noexcept {
-    wchar_t mode[24],shield[24],mark[24],salvo[24];
+    wchar_t mode[24],shield[24],launcher[24];
     ProteusBinding(p.keys,p.modeKey,p.modeButton,mode,24);
     ProteusBinding(p.keys,p.shieldKey,p.shieldButton,shield,24);
-    ProteusBinding(p.keys,p.markKey,p.markButton,mark,24);
-    ProteusBinding(p.keys,p.salvoKey,0,salvo,24);
-    if(!p.keys)wcscpy_s(salvo,L"LT");
+    ProteusBinding(p.keys,p.launcherKey,0,launcher,24);
+    if(!p.keys)wcscpy_s(launcher,L"LT");
     const bool blink=(GetTickCount64()/125)%2==0;
     int n=0;
     const auto add=[&](bool bar,float share,const float* fill)->Line& {
@@ -2562,43 +2561,35 @@ int ProteusLinesOf(const ProteusReadout& p,Line* lines,ProteusLine* pl) noexcept
             case proteus::Mode::stowing: Format(l,Tr(Tx::proteusStowing),static_cast<int>(std::lround(p.stagger*100.0f)));l.rgba=kAmber;break;
         }
     }
-    // The shield.
+    // The shield: its state and HP (deployed its heat too), the HP bar under it.
     {
         const bool deployed=p.mode==proteus::Mode::deployed;
-        Line& l=add(deployed,p.heat,p.overheated ? kRed : p.heat>=0.7f ? kAmber : kYellow);
-        Format(l,Tr(deployed ? Tx::shieldHeat : Tx::frontShield),Tr(p.overheated ? Tx::overheat : p.shieldUp ? Tx::shieldUp : Tx::shieldOff),
-               static_cast<int>(std::lround(p.heat*100.0f)));
-        if(p.driver)Append(l,L"   [%ls]",shield);
-        if(p.priority)Append(l,L"%ls",Tr(Tx::alliesFocus));
-        l.rgba=p.overheated ? (blink ? kRed : kWhite) : p.shieldUp ? kCyan : kHudDim;
-    }
-    if(p.mode==proteus::Mode::deployed) {
-        // The barrier.
-        Line& b=add(true,p.barrier,HullColour(p.barrier));
+        Line& l=add(true,p.shield,HullColour(p.shield));
         pl[n-1].trailKey=&kBarrierKey;
-        Format(b,Tr(Tx::barrier),static_cast<int>(std::lround(p.barrier*100.0f)));
-        b.rgba=p.barrier>0.25f ? kHud : kAmber;
-        // The field and the gun.
+        const Tx state=!p.shieldReady ? Tx::shieldOffline : p.broken ? Tx::shieldBroken : deployed && p.overheated ? Tx::overheat :
+                       p.shieldUp ? Tx::shieldUp : Tx::shieldOff;
+        const int hp=static_cast<int>(std::lround(p.shield*100.0f));
+        if(deployed)Format(l,Tr(Tx::shieldHeat),Tr(state),hp,static_cast<int>(std::lround(p.heat*100.0f)));
+        else Format(l,Tr(Tx::frontShield),Tr(state),hp);
+        if(p.driver && p.shieldReady)Append(l,L"   [%ls]",shield);
+        if(p.priority)Append(l,L"%ls",Tr(Tx::alliesFocus));
+        l.rgba=!p.shieldReady ? kHudDim : p.broken || (deployed && p.overheated) ? (blink ? kRed : kWhite) : p.shieldUp ? kCyan : kHudDim;
+    }
+    if(p.mode==proteus::Mode::deployed) {   // the field
         Line& f=add(false,0.0f,nullptr);
         Format(f,Tr(Tx::field),static_cast<int>(std::lround(p.fieldRadius)),p.allies);
-        if(p.gun)Append(f,L"   %ls [%ls]",Tr(Tx::wordGun),p.keys ? Tr(Tx::mouseLeft) : L"RT");
         f.rgba=kTeal;
     }
-    // The salvo.
-    {
+    if(p.driver) {   // the launcher, the driver's while its own seat is empty
         Line& l=add(false,0.0f,nullptr);
-        if(!p.salvoArmed){Format(l,L"%ls",Tr(Tx::salvoOffline));l.rgba=kHudDim;}
-        else if(p.mode!=proteus::Mode::deployed){Format(l,L"%ls",Tr(Tx::salvoDeployFirst));l.rgba=kHudDim;}
-        else if(p.salvoLeft>0){Format(l,Tr(Tx::salvoInAir),p.salvoLeft);l.rgba=kRed;}
-        else if(p.salvoWait>0.0f){Format(l,Tr(Tx::salvoWait),p.salvoWait);l.rgba=kAmber;}
-        else if(!p.marked){Format(l,L"%ls",Tr(Tx::salvoMark));if(p.driver)Append(l,L" [%ls]",mark);l.rgba=kYellow;}
-        else{Format(l,L"%ls",Tr(Tx::salvoReady));if(p.driver)Append(l,L" [%ls]",salvo);l.rgba=blink ? kRed : kYellow;}
-        if(p.marked){Append(l,L"   ");Append(l,Tr(Tx::markRange),static_cast<int>(std::lround(p.markRange)));}
+        if(p.launcher){Format(l,Tr(Tx::launcherKey),launcher);l.rgba=kYellow;}
+        else if(p.mode!=proteus::Mode::deployed){Format(l,L"%ls",Tr(Tx::launcherDeployFirst));l.rgba=kHudDim;}
+        else --n;   // a gunner of its own works it
     }
     return n;
 }
 
-// The field's edge on the ground and the marked target (see above).
+// The field's edge on the ground (see above).
 void ProteusMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const ProteusReadout& p,Line* lines,
                   int* at) noexcept {
     for(int i=0;i<p.ringCount && i<kProteusRing;++i) {
@@ -2608,13 +2599,7 @@ void ProteusMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,
         if(sight::ToScreen(vp,p.ring[i],1.0f,width,height,&x0,&y0) && sight::ToScreen(vp,p.ring[k],1.0f,width,height,&x1,&y1))
             Seg(drawer,ctx,x0,y0,x1,y1,2.0f*s,kTeal);
     }
-    float x,y;
-    if(p.marked && sight::ToScreen(vp,p.markAt,1.0f,width,height,&x,&y)) {
-        const float r=16.0f*s,t=2.5f*s;
-        Seg(drawer,ctx,x,y-r,x+r,y,t,kRed);Seg(drawer,ctx,x+r,y,x,y+r,t,kRed);
-        Seg(drawer,ctx,x,y+r,x-r,y,t,kRed);Seg(drawer,ctx,x-r,y,x,y-r,t,kRed);
-        Label(text,lines,at,x,y+r+12.0f*s,1,kLineScale*0.85f,kRed,Tr(Tx::markRange),static_cast<int>(std::lround(p.markRange)));
-    }
+    (void)text;(void)lines;(void)at;
 }
 
 
@@ -3053,7 +3038,7 @@ void HudPublish() noexcept {
     // lists are text.
     const bool heliLists=s.stock && s.stockHud.heli && s.heliFly && !s.cockpit && Cfg().heliFlightHud;
     SetStockGaugeCover(textOk && (s.cockpit || (s.stock && !s.cockpit && !s.stockHud.heli) || heliLists || (s.sazabi && !s.cockpit)));
-    s.proteus=PlayerProteus(&s.proteusRo);   // the Proteus's stance, shields, salvo, field (proteus.cpp)
+    s.proteus=PlayerProteus(&s.proteusRo);   // the Proteus's stance, shield, field, launcher (proteus.cpp)
     if(Cfg().vehicleHud)
         for(const auto& w:work)if(w.ref && ms-w.seen<=kFreshMs)s.d[s.count++]=w.d;
     back=middle.exchange(back|kFresh,std::memory_order_acq_rel)&3u;

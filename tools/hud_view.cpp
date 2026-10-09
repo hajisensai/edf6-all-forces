@@ -1590,13 +1590,12 @@ int Scenes(const std::wstring& dir) {
     std::memcpy(sceneProteus.pos,ground,12);sceneProteus.hull[2]=1.0f;
     sceneProteus.driver=true;sceneProteus.keys=true;sceneProteus.mode=proteus::Mode::walk;sceneProteus.stagger=1.0f;
     sceneProteus.shieldOn=sceneProteus.shieldUp=true;sceneProteus.priority=true;sceneProteus.shieldHalfArc=60.0f*kDeg;
-    sceneProteus.barrier=1.0f;sceneProteus.barrierHp=3300.0f;sceneProteus.salvoArmed=true;sceneProteus.salvoCooldown=30.0f;
+    sceneProteus.shield=1.0f;sceneProteus.shieldHp=3300.0f;sceneProteus.shieldReady=true;
     sceneProteus.modeKey=0x54;sceneProteus.modeButton=0x20;sceneProteus.shieldKey=0x42;sceneProteus.shieldButton=0x10;
-    sceneProteus.markKey=0x51;sceneProteus.markButton=0x04;sceneProteus.salvoKey=0x02;
+    sceneProteus.launcherKey=0x02;
     Scene(dir,L"stock_proteus_walk",ground);
     sceneProteus.mode=proteus::Mode::deployed;sceneProteus.dirShield=true;sceneProteus.priority=false;sceneProteus.heat=0.74f;
-    sceneProteus.barrier=0.42f;sceneProteus.marked=true;sceneProteus.markAt[0]=-120.0f;sceneProteus.markAt[1]=8.0f;sceneProteus.markAt[2]=420.0f;
-    sceneProteus.markRange=437.0f;sceneProteus.salvoWait=12.4f;sceneProteus.gun=true;sceneProteus.fieldRadius=60.0f;sceneProteus.allies=5;
+    sceneProteus.shield=0.42f;sceneProteus.launcher=true;sceneProteus.fieldRadius=60.0f;sceneProteus.allies=5;
     sceneProteus.ringCount=kProteusRing;
     for(int i=0;i<kProteusRing;++i) {
         const float a=2.0f*3.14159265f*static_cast<float>(i)/static_cast<float>(kProteusRing);

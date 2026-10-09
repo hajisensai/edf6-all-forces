@@ -614,7 +614,7 @@ void BayFrame(Jet& j,const float* pos) noexcept;
 void BayFree(unsigned char*& ifc) noexcept;
 void GunshipFire(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms) noexcept;
 bool InstallBay(bool spawnOk) noexcept;
-void PreloadShells(void* mgr,bool gunship,bool proteus) noexcept;   // the gunship's shells (with its body), the impact charges
+void PreloadShells(void* mgr,bool gunship) noexcept;   // the gunship's shells (with its body), the impact charges
 void ResetShells() noexcept;
 // The player's aircraft (playerjet_board.inc): a bay's bombs left (0: no bay, or it is open already); the bay opened
 // with its first bomb on `at`, the carpet laid along `vel` at its speed (false: none); a frame of the open bay; the
