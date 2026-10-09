@@ -17,6 +17,15 @@ constexpr std::uint32_t kMagic=0x54525053,kVersion=2;
 constexpr std::uint32_t kCapSoldierVariants=1u,kCapAirborneAir=2u,kCapSeaRescue=4u,
     kCapabilities=kCapSoldierVariants|kCapAirborneAir|kCapSeaRescue;
 static_assert(kCapabilities<kMaxUnits,"hello.index carries the capability bits");
+// The host's welcome carries its own capabilities in `index` too (2026-10-10, the user: 「进入房间发现版本不同步给一下说明
+// 吧」), and kWelcomeRoomBehind when a peer of the room announced fewer than the host: a guest then knows an older host,
+// a newer one, or an older third player, and says so (support_net.cpp VersionNotice). An older host sends 0 there (its
+// welcome never set it); an older guest ignores the field; ValidMessage's bound (below kMaxUnits) holds for both.
+constexpr std::uint32_t kWelcomeRoomBehind=8u;
+static_assert((kCapabilities|kWelcomeRoomBehind)<kMaxUnits && !(kCapabilities&kWelcomeRoomBehind),"welcome.index fits an older peer's bound");
+// Request statuses kept per requester (host) and for this machine's own requests (any machine): the map's call and the
+// sea rescue are separate requests, each told its own outcome even when the other came later.
+constexpr std::uint32_t kRecentRequests=4;
 enum class Kind : std::uint32_t { hello=1,welcome,request,begin,unit,prepare,ready,commit,result,cancel,activate,activated,requestStatus };
 struct Message {
     Kind kind=Kind::hello;
@@ -56,6 +65,16 @@ public:
     // Host: whether every peer of this session announced all of `caps` in its current hello (no peer: true).
     // A client is never asked to plan: true.
     bool PeersHave(std::uint32_t caps) const noexcept;
+    // Host: the peers that announced fewer capabilities than this build (`missing`: what they lack between them).
+    std::uint32_t PeersBehind(std::uint32_t* missing) const noexcept;
+    std::uint32_t PeersAhead() const noexcept;   // host: peers that announced capabilities this build does not have
+    // Client: whether the host's welcome came, the capabilities it announced (0: an older host, which announces none),
+    // and whether it said a peer of the room is behind it.
+    bool HostCapsKnown() const noexcept { return hostCapsKnown_; }
+    std::uint32_t HostCaps() const noexcept { return hostCaps_&kCapabilities; }
+    bool RoomBehindHost() const noexcept { return (hostCaps_&kWelcomeRoomBehind)!=0; }
+    // Host: the peer whose request made transaction `token` (0: this machine's own). False: no such requested one.
+    bool RequesterOf(std::uint64_t token,std::uint32_t* peer) const noexcept;
 private:
     enum class Phase { empty,planning,assembling,prepared,spawning,active,cancelled };
     struct Transaction {
@@ -84,9 +103,11 @@ private:
     std::array<std::uint32_t,kMaxPeers+1> requests_{};
     std::array<std::uint32_t,kMaxPeers+1> peerMissions_{};
     std::array<std::uint32_t,kMaxPeers+1> peerCaps_{};
+    std::uint32_t hostCaps_=0;bool hostCapsKnown_=false;
     struct Reply { std::uint32_t request=0;RequestStatus status=RequestStatus::accepted;bool dirty=false; };
-    std::array<Reply,kMaxPeers+1> replies_{};
-    Reply localReply_{};
+    using Replies=std::array<Reply,kRecentRequests>;
+    std::array<Replies,kMaxPeers+1> replies_{};
+    Replies localReplies_{};
     std::array<Transaction,kMaxTransactions> transactions_{};
     bool Send(std::uint32_t peer,Message message) noexcept;
     bool Broadcast(Message message) noexcept;
@@ -99,5 +120,6 @@ private:
     void Publish(std::uint32_t peer,std::uint32_t request,RequestStatus status) noexcept;
     void Notice(std::uint32_t request,RequestStatus status) noexcept;
     void ReplyTo(std::uint32_t peer) noexcept;
+    static Reply* Record(Replies& replies,std::uint32_t request,RequestStatus status) noexcept;
 };
 } // namespace crew::support_net

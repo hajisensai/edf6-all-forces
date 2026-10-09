@@ -51,6 +51,11 @@ bool SupportPeersAcceptAirborne() noexcept;
 // Whether every peer has the sea rescue catalog entry (kCapSeaRescue); true offline / with no session. Without it the
 // host refuses the rescue with a reason (the swimmer's machine is told, and logs it).
 bool SupportPeersAcceptRescue() noexcept;
+// The room's builds differ (version_notice.h): the HUD's line about it, for a while after it changed (draw thread).
+bool SupportVersionCue(wchar_t* out,std::size_t capacity) noexcept;
+// Host: the player whose request made committed transaction `token`, by its stable identity (the requester's
+// authenticated PUID resolved to its mission player actor; this machine's player for its own). False when unknown.
+bool SupportTransactionRequester(std::uint64_t token,ObjRef* out) noexcept;
 // Requester ownership: native EOS PUID must equal the authenticated transport
 // sender and belong to the sealed current-world participant set.
 bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) noexcept;

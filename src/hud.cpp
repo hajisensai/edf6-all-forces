@@ -38,6 +38,7 @@
 #include "turretaim.h"
 #include "vecmath.h"
 #include "warn.h"
+#include "support_net.h"
 #include <atomic>
 #include <cmath>
 #include <cstdarg>
@@ -4120,6 +4121,13 @@ void RescueCueBanner(Text* text,float width,float height,float s,Line* lines,int
     if(!PlayerRescueCue(&c))return;
     Label(text,lines,at,width*0.5f,height*0.5f+254.0f*s,1,kLineScale,c.bad ? kAmber : kGreen,L"%ls",c.text);
 }
+// The room's builds differ (support_net.cpp, version_notice.h): who is older or newer and what does not work because of
+// it, a while after joining (or after a player joined); under the rescue's banner.
+void VersionBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
+    wchar_t line[200];
+    if(!SupportVersionCue(line,_countof(line)))return;
+    Label(text,lines,at,width*0.5f,height*0.5f+286.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",line);
+}
 // The mark key on foot with no enemy near the centre (npcai.cpp SendToPoint): a ring where it points, for a moment, and
 // what came of it (the selected units sent there, how many; none selected; online).
 void NpcPingHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
@@ -4318,6 +4326,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         FormationBanner(t,width,height,s,lines,&at);
         SweepBanner(t,width,height,s,lines,&at);
         RescueCueBanner(t,width,height,s,lines,&at);
+        VersionBanner(t,width,height,s,lines,&at);
         NpcPingHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         if(Cfg().vehicleHud) {
             if(now-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);

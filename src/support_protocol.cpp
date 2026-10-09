@@ -94,10 +94,34 @@ void Session::ClearTransactions() noexcept {
         transactions_[i]=Transaction{};
     }
     nextTransaction_=0;requests_.fill(0);lastRequestAt_.fill(0);nextRequest_=0;
-    replies_.fill(Reply{});localReply_={};
+    replies_.fill(Replies{});localReplies_.fill(Reply{});
 }
 void Session::Stop() noexcept {
     ClearTransactions();running_=false;suspended_=false;epoch_=0;challenge_=0;challenges_.fill(0);peerMissions_.fill(0);peerCaps_.fill(0);
+    hostCaps_=0;hostCapsKnown_=false;
+}
+std::uint32_t Session::PeersBehind(std::uint32_t* missing) const noexcept {
+    std::uint32_t behind=0,lack=0;
+    for(std::uint32_t i=1;host_ && i<=peers_;++i) {
+        if(!challenges_[i])continue;   // not heard yet
+        const std::uint32_t gap=kCapabilities&~peerCaps_[i];
+        if(gap){++behind;lack|=gap;}
+    }
+    if(missing)*missing=lack;
+    return behind;
+}
+std::uint32_t Session::PeersAhead() const noexcept {
+    std::uint32_t ahead=0;
+    for(std::uint32_t i=1;host_ && i<=peers_;++i)if(challenges_[i] && (peerCaps_[i]&~kCapabilities))++ahead;
+    return ahead;
+}
+bool Session::RequesterOf(std::uint64_t token,std::uint32_t* peer) const noexcept {
+    if(!token || !peer)return false;
+    for(const auto& t:transactions_)if(t.token==token) {
+        if(t.external || !t.request)return false;
+        *peer=t.requester;return true;
+    }
+    return false;
 }
 bool Session::PeersHave(std::uint32_t caps) const noexcept {
     if(!host_)return true;
@@ -113,7 +137,7 @@ void Session::Suspend() noexcept {
     // copies, including those awaiting finalize: another peer may already have
     // activated them. Only the explicit mission reset may clear that ledger.
     running_=false;suspended_=true;
-    if(localReply_.request && localReply_.status==RequestStatus::accepted)Notice(localReply_.request,RequestStatus::interrupted);
+    for(const auto reply:localReplies_)if(reply.request && reply.status==RequestStatus::accepted)Notice(reply.request,RequestStatus::interrupted);
     for(std::uint32_t i=0;i<kMaxTransactions;++i) {
         auto& t=transactions_[i];
         if(!t.spawned && t.phase!=Phase::empty && t.phase!=Phase::cancelled)Cancel(i+1,false);
@@ -141,7 +165,9 @@ bool Session::Broadcast(Message m) noexcept {
     bool ok=true;for(std::uint32_t i=1;i<=peers_;++i)if(!Send(i,m))ok=false;return ok;
 }
 void Session::Welcome(std::uint32_t peer) noexcept {
-    Message m;m.kind=Kind::welcome;m.challenge=challenges_[peer];m.request=epochSerial_;Send(peer,m);
+    Message m;m.kind=Kind::welcome;m.challenge=challenges_[peer];m.request=epochSerial_;
+    m.index=kCapabilities|(PeersBehind(nullptr) ? kWelcomeRoomBehind : 0u);
+    Send(peer,m);
 }
 void Session::Cancel(std::uint32_t id,bool broadcast,RequestStatus reason) noexcept {
     if(!id || id>kMaxTransactions)return;
@@ -162,30 +188,43 @@ void Session::Failed(std::uint64_t token,RequestStatus reason) noexcept {
     if(host_)Cancel(id,true,reason);
     else {Cancel(id,false,reason);Message m;m.kind=Kind::result;m.transaction=id;m.index=static_cast<std::uint32_t>(reason);Send(hostPeer_,m);}
 }
-void Session::Notice(std::uint32_t request,RequestStatus status) noexcept {
-    if(!request || request!=nextRequest_)return;
-    if(localReply_.request==request) {
-        if(localReply_.status==status)return;
-        if(localReply_.status>=RequestStatus::refused)return; // terminal rejection never reopens on a late reply
-        if(localReply_.status==RequestStatus::active && status==RequestStatus::accepted)return;
+// The kept status of `request` among `replies` (or the slot it may take: the oldest kept, if older than it), applying
+// the status rules: a terminal one never reopens on a late reply, an active one never goes back to accepted. nullptr:
+// nothing to record (the same status again, a late one, or older than every kept request).
+Session::Reply* Session::Record(Replies& replies,std::uint32_t request,RequestStatus status) noexcept {
+    Reply* oldest=nullptr;
+    for(auto& reply:replies) {
+        if(reply.request==request) {
+            if(reply.status==status || reply.status>=RequestStatus::refused)return nullptr;
+            if(reply.status==RequestStatus::active && status==RequestStatus::accepted)return nullptr;
+            reply.status=status;return &reply;
+        }
+        if(!oldest || reply.request<oldest->request)oldest=&reply;
     }
-    localReply_={request,status,false};
+    if(!oldest || oldest->request>request)return nullptr;
+    *oldest={request,status,false};return oldest;
+}
+void Session::Notice(std::uint32_t request,RequestStatus status) noexcept {
+    // Any of this machine's last kRecentRequests requests: the map's call and the rescue are told apart by their ids.
+    if(!request || request>nextRequest_ || nextRequest_-request>=kRecentRequests)return;
+    if(!Record(localReplies_,request,status))return;
     if(backend_.hooks.notice)backend_.hooks.notice(request,status);
 }
 void Session::ReplyTo(std::uint32_t peer) noexcept {
-    auto& reply=replies_[peer];
-    if(!reply.request)return;
-    Message m;m.kind=Kind::requestStatus;m.request=reply.request;m.index=static_cast<std::uint32_t>(reply.status);
-    reply.dirty=!Send(peer,m);
+    for(auto& reply:replies_[peer]) {
+        if(!reply.request || !reply.dirty)continue;
+        Message m;m.kind=Kind::requestStatus;m.request=reply.request;m.index=static_cast<std::uint32_t>(reply.status);
+        reply.dirty=!Send(peer,m);
+    }
 }
 void Session::Publish(std::uint32_t peer,std::uint32_t request,RequestStatus status) noexcept {
     if(!request)return;
     if(!peer){Notice(request,status);return;}
-    // A newer request has already replaced this UI slot. Its predecessor may
-    // still own actors, but its cancel is not the newer request's outcome.
-    if(replies_[peer].request>request)return;
-    if(replies_[peer].request==request && replies_[peer].status>=RequestStatus::refused)return;
-    replies_[peer]={request,status,true};ReplyTo(peer);
+    // Each of the peer's recent requests keeps its own outcome: a newer request (a rescue after a map call) does not
+    // swallow its predecessor's, and the guest tells them apart by id.
+    Reply* reply=Record(replies_[peer],request,status);
+    if(!reply)return;
+    reply->dirty=true;ReplyTo(peer);
 }
 bool Session::Submit(std::uint32_t catalog,const float* target,std::uint64_t now) noexcept {
     if(!target || !Ready() || catalog>=kMissionCrewCatalog || !Point(target) || nextRequest_==UINT32_MAX)return false;
@@ -197,7 +236,10 @@ bool Session::Submit(std::uint32_t catalog,const float* target,std::uint64_t now
 }
 void Session::HostRequest(std::uint32_t peer,const Message& m,std::uint64_t now) noexcept {
     if(!m.request || m.catalog>=kMissionCrewCatalog)return;
-    if(m.request<=requests_[peer]) {if(peer && replies_[peer].request==m.request)ReplyTo(peer);return;}
+    if(m.request<=requests_[peer]) {
+        if(peer)for(auto& reply:replies_[peer])if(reply.request==m.request){reply.dirty=true;ReplyTo(peer);}
+        return;
+    }
     requests_[peer]=m.request; // consume even rejected requests; they cannot be replayed later
     if(!Ready() || (lastRequestAt_[peer] && now-lastRequestAt_[peer]<2000)) {Publish(peer,m.request,RequestStatus::refused);return;}
     lastRequestAt_[peer]=now;
@@ -278,6 +320,7 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
     }
     if(!host_ && peer==hostPeer_ && m.kind==Kind::welcome && m.challenge==challenge_ && m.request>=seenEpochSerial_) {
         if(m.request==seenEpochSerial_ && epoch_!=m.epoch)return;
+        hostCaps_=m.index;hostCapsKnown_=true;   // what the host announced (0: an older host)
         if(epoch_!=m.epoch){if(HasSpawned()){Suspend();return;}ClearTransactions();epoch_=m.epoch;}
         seenEpochSerial_=m.request;
         return;
@@ -336,7 +379,7 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
 }
 void Session::Tick(std::uint64_t now) noexcept {
     if(!running_)return;
-    if(host_)for(std::uint32_t peer=1;peer<=peers_;++peer)if(replies_[peer].dirty)ReplyTo(peer);
+    if(host_)for(std::uint32_t peer=1;peer<=peers_;++peer)ReplyTo(peer);   // the dirty ones
     // Keep the challenge alive after establishment too: a welcome whose local
     // enqueue failed during another member's mission reset must be recoverable.
     if(!host_ && now-lastHello_>=1000) {
