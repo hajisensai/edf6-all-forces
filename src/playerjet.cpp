@@ -950,7 +950,9 @@ void Blocked(PJet& j,unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
     const bool rammedEnemy=j.enemyRamAt && ms-j.enemyRamAt<kCrashMs;
     Crash(j,v,0.0f,sent,ram.closing,false,ms,rammedEnemy ? nullptr : &ram);
     if(!j.active)return;
-    if(j.phase!=Phase::air){j.vel[0]=j.vel[2]=0.0f;return;}
+    // Rolling it stops: the whole of its velocity (Ground's lies along its wheels' plane: kept, its rise on a slope would
+    // be read back next frame as speed along that plane, pjet_handling.h RollSpeed).
+    if(j.phase!=Phase::air){j.vel[0]=j.vel[1]=j.vel[2]=0.0f;return;}
     for(int i=0;i<3;i+=2)j.vel[i]=-j.vel[i];
     float dir[3]={j.vel[0],0.2f*Len(j.vel),j.vel[2]};
     if(!Normalize(dir))return;
