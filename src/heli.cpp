@@ -1597,6 +1597,10 @@ struct RescueCall {
 };
 RescueCall call{};
 ULONGLONG rescueFrame=0;   // RescueTick: at most once a frame
+// This machine's player's rescue cooldown (Cfg().seaRescueCooldownSec, 2026-10-10, the user: 「救援应该有单独的cd」):
+// from the last heli made for them; its own, never the map support's. The host holds every requester to its own value.
+ULONGLONG rescueMadeAt=0;
+bool cooldownSaid=false;
 
 // The rescue banner (draw thread reads, game thread writes): what became of this machine's rescue, a moment.
 SRWLOCK rescueCueLock=SRWLOCK_INIT;
@@ -3210,6 +3214,17 @@ void StartRescue(unsigned char* human,ULONGLONG ms) noexcept {
         call.warned=true;call.retryAt=ms+kRetryMs;
         return;
     }
+    const ULONGLONG cooldown=static_cast<ULONGLONG>(Cfg().seaRescueCooldownSec)*1000;
+    if(rescueMadeAt && ms-rescueMadeAt<cooldown) {
+        if(!cooldownSaid) {
+            const int left=static_cast<int>((cooldown-(ms-rescueMadeAt)+999)/1000);
+            Log("RESCUE cooldown: the next rescue in %ds (SeaRescueCooldownSec=%lu)",left,Cfg().seaRescueCooldownSec);
+            RescueBanner(true,hudtext::Tr(hudtext::Tx::rescueCooldown),left);
+            cooldownSaid=true;
+        }
+        return;
+    }
+    cooldownSaid=false;
     const float at[3]={p[0],p[1],p[2]};
     const ULONGLONG wet=ms-call.wetSince;
     call=RescueCall{};
@@ -3304,6 +3319,7 @@ void RescueHeliDeployed(unsigned char* vehicle,const float* target,bool flown,co
     }
     if(call.phase!=CallPhase::requested || std::memcmp(call.at,target,12)!=0)return;   // another machine's rescue
     call.phase=CallPhase::assigned;call.vehicle=vehicle;call.ref=ObjRef::Of(vehicle);call.madeFrame=frame;call.flown=flown;
+    rescueMadeAt=GameMs();   // this player's rescue cooldown starts
     call.team=At<std::int32_t>(vehicle,kTeam);
     Log("RESCUE heli %p made for this machine's player (%s), %.0f s after the request",vehicle,flown ? "flown here" : "a peer's copy",
         static_cast<float>(GameMs()-call.requestedAt)*0.001f);
@@ -3530,7 +3546,7 @@ void ResetHelis() noexcept {
     fullLoggedAt=0;
     ResetTrack();
     for(auto& r:rescues)r=Rescue{};
-    call=RescueCall{};rescueFrame=0;
+    call=RescueCall{};rescueFrame=0;rescueMadeAt=0;cooldownSaid=false;
     AcquireSRWLockExclusive(&rescueCueLock);rescueCueAt=0;ReleaseSRWLockExclusive(&rescueCueLock);
 }
 }  // namespace crew

@@ -31,6 +31,8 @@ struct Hooks {
     bool (*admissionReady)() noexcept=nullptr;
     bool (*createdMatches)(const ObjRef*,std::uint32_t) noexcept=nullptr;
     void (*notice)(std::uint32_t,RequestStatus) noexcept=nullptr;
+    // Whether `catalog` is the sea rescue (support_dispatch.cpp IsRescue): its own channel and cooldown on the host.
+    bool (*ownChannel)(std::uint32_t) noexcept=nullptr;
 };
 bool ValidPlan(const Plan& plan,bool requireIds=true) noexcept;
 } // namespace support_net

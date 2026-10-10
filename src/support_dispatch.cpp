@@ -573,7 +573,8 @@ void Configure() noexcept {
     ConfigureSupportNet({Plan,Validate,Spawn,Destroy,
         [](std::uint32_t ordinal,unsigned char* out) noexcept {
             return OnlineHostOnly() && DeriveSupportSoldierNetId(PlayerHuman(),ordinal,out);
-        },&ReadMissionParticipants,&MissionParticipantGateReady,&MissionParticipantCreationsMatch,&RequestNotice});
+        },&ReadMissionParticipants,&MissionParticipantGateReady,&MissionParticipantCreationsMatch,&RequestNotice,
+        [](std::uint32_t catalog) noexcept {return IsRescue(catalog);}});
     InstallMissionCrewSupport();configured=true;
 }
 }

@@ -93,7 +93,7 @@ void Session::ClearTransactions() noexcept {
         if(transactions_[i].token && backend_.hooks.destroy)backend_.hooks.destroy(transactions_[i].token);
         transactions_[i]=Transaction{};
     }
-    nextTransaction_=0;requests_.fill(0);lastRequestAt_.fill(0);nextRequest_=0;
+    nextTransaction_=0;requests_.fill(0);lastRequestAt_.fill(0);nextRequest_=0;rescueAt_.fill(0);
     replies_.fill(Replies{});localReplies_.fill(Reply{});
 }
 void Session::Stop() noexcept {
@@ -234,6 +234,13 @@ bool Session::Submit(std::uint32_t catalog,const float* target,std::uint64_t now
     if(host_){const auto before=nextTransaction_;HostRequest(0,m,now);return nextTransaction_!=before;}
     const bool sent=Send(hostPeer_,m);if(!sent)Notice(m.request,RequestStatus::interrupted);return sent;
 }
+bool Session::InFlight(const Transaction& t) const noexcept {
+    return t.phase==Phase::planning || t.phase==Phase::prepared || t.phase==Phase::spawning;
+}
+// Two channels (2026-10-10): the map's (and the mission crew's), one transaction in flight in the whole room and each
+// requester's requests 2 s apart; and, when every peer has kCapRescueChannel, the sea rescue's: one in flight per
+// requester beside anything else, each requester's rescues rescueCooldown_ apart from its last one made. Both draw on
+// the same kMaxTransactions ids and ordinals; a failed one of either rolls back alone (Cancel of its own id).
 void Session::HostRequest(std::uint32_t peer,const Message& m,std::uint64_t now) noexcept {
     if(!m.request || m.catalog>=kMissionCrewCatalog)return;
     if(m.request<=requests_[peer]) {
@@ -241,13 +248,22 @@ void Session::HostRequest(std::uint32_t peer,const Message& m,std::uint64_t now)
         return;
     }
     requests_[peer]=m.request; // consume even rejected requests; they cannot be replayed later
-    if(!Ready() || (lastRequestAt_[peer] && now-lastRequestAt_[peer]<2000)) {Publish(peer,m.request,RequestStatus::refused);return;}
-    lastRequestAt_[peer]=now;
+    const bool isRescue=backend_.hooks.ownChannel && backend_.hooks.ownChannel(m.catalog);
+    const bool channel=isRescue && PeersHave(kCapRescueChannel);
+    if(!Ready()) {Publish(peer,m.request,RequestStatus::refused);return;}
+    if(isRescue && rescueAt_[peer] && now-rescueAt_[peer]<rescueCooldown_) {Publish(peer,m.request,RequestStatus::refused);return;}
+    if(!channel) {
+        if(lastRequestAt_[peer] && now-lastRequestAt_[peer]<2000) {Publish(peer,m.request,RequestStatus::refused);return;}
+        lastRequestAt_[peer]=now;
+    }
     if(nextTransaction_>=kMaxTransactions || nextToken_==UINT64_MAX) {Publish(peer,m.request,RequestStatus::refused);return;}
-    for(const auto& t:transactions_)if(t.phase==Phase::planning || t.phase==Phase::prepared || t.phase==Phase::spawning) {
-        Publish(peer,m.request,RequestStatus::refused);return;
+    for(const auto& t:transactions_) {
+        if(!InFlight(t))continue;
+        // The rescue channel: this requester's own rescue in flight blocks it, nothing else. The map's: anything of its own.
+        if(channel ? t.rescue && t.requester==peer : !t.rescue) {Publish(peer,m.request,RequestStatus::refused);return;}
     }
     auto& t=transactions_[nextTransaction_++];t.token=++nextToken_;t.phase=Phase::planning;t.requester=peer;t.request=m.request;t.since=now;
+    t.rescue=channel;
     t.plan.catalogId=m.catalog;std::memcpy(t.plan.target,m.target,sizeof(m.target));
     Publish(peer,m.request,RequestStatus::accepted);
 }
@@ -262,7 +278,7 @@ std::uint64_t Session::SubmitPrepared(const Plan& plan,std::uint64_t now) noexce
                 !std::memcmp(prior.plan.units[j].netId,plan.units[i].netId,32))return 0;
     }
     if(existing!=1)return 0;
-    for(const auto& t:transactions_)if(t.phase==Phase::planning || t.phase==Phase::prepared || t.phase==Phase::spawning)return 0;
+    for(const auto& t:transactions_)if(InFlight(t) && !t.rescue)return 0;
     auto& t=transactions_[nextTransaction_++];t.token=++nextToken_;t.phase=Phase::planning;t.external=true;t.plan=plan;t.since=now;
     return t.token;
 }
@@ -295,6 +311,8 @@ void Session::Advance(std::uint32_t id,std::uint64_t now) noexcept {
         Message m;m.kind=Kind::commit;m.transaction=id;
         if(!Broadcast(m) || !backend_.hooks.spawn(t.token,t.plan,false)){Cancel(id,true);return;}
         t.spawned=true;t.result[0]=1;
+        // A rescue made: its requester's cooldown starts (whichever channel carried it).
+        if(!t.external && t.request && backend_.hooks.ownChannel && backend_.hooks.ownChannel(t.plan.catalogId))rescueAt_[t.requester]=now;
     }
     if(t.phase==Phase::spawning) {
         for(std::uint32_t i=0;i<=peers_;++i)if(!t.result[i])return;

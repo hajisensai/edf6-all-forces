@@ -175,6 +175,7 @@ void Features(std::uint32_t caps,bool command,wchar_t* out,std::size_t size) noe
     using hudtext::Tr;using hudtext::Tx;
     out[0]=0;
     const struct { std::uint32_t bit; Tx text; } kNames[]={{support_net::kCapSeaRescue,Tx::versionFeatRescue},
+        {support_net::kCapRescueChannel,Tx::versionFeatRescueChannel},
         {support_net::kCapAirborneAir,Tx::versionFeatAir},{support_net::kCapSoldierVariants,Tx::versionFeatLoadout}};
     const auto add=[&](const wchar_t* word) noexcept {
         const std::size_t used=std::wcslen(out);
@@ -273,6 +274,7 @@ void SupportNetTick() noexcept {
             if(support_net::Decode(bytes,count,message))session.Receive(peer,message,now);
         }
     }
+    session.SetRescueCooldown(static_cast<std::uint64_t>(Cfg().seaRescueCooldownSec)*1000);   // the host's own setting decides
     session.Tick(now);
     VersionTick(running);
     CommandContext(now);

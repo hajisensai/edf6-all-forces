@@ -65,6 +65,8 @@ struct Config {
     float rescueBelow=-5.0f;   // ...once they have been below this height (metres) for 1.5 s
     bool boardingGun=true;     // the boarding gun's rounds put the player into the friendly vehicle they hit (boarding.cpp)
     bool rescueAutoBoard=true; // ...and, in the stock board reach of a free door seat, boards them by the stock board path
+    DWORD seaRescueCooldownSec=30;   // a player's rescues stand this far apart (from the last heli made for them); the
+                                     // host's value decides online; the map's support cooldown has nothing to do with it
     float subHullHp=100000.0f; // a submarine carrier's hull HP at the base tier (its SGO's is 30000), times its tier (25 at the highest); 0 = the game's
     float subHeavyHit=1500.0f; // a hit on its hull (no deck part) counts only from a heavy source, or from this much
                                // damage in one hit (0 = only the listed heavy sources, subcarrier.cpp kHeavy)

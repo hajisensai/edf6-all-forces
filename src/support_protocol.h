@@ -14,9 +14,15 @@ constexpr std::uint32_t kMagic=0x54525053,kVersion=2;
 // and its Validate accepts that entry's plan (one 410, its pilot only: the door seats are the swimmer's). A host
 // plans a rescue only when every peer has it; an older peer's catalog ends before that index and would refuse the
 // plan mid-transaction with no reason anyone sees.
-constexpr std::uint32_t kCapSoldierVariants=1u,kCapAirborneAir=2u,kCapSeaRescue=4u,
-    kCapabilities=kCapSoldierVariants|kCapAirborneAir|kCapSeaRescue;
+// kCapRescueChannel (2026-10-10, the user: 「救援应该有单独的cd」): it takes part in a sea rescue transaction while another
+// one (a map call's, another player's rescue) is still being made. The host gives a rescue its own channel only when
+// every peer announced it: one rescue in flight per requester, beside the map's one, never under the map's 2 s rate,
+// each requester's rescues kRescueCooldownMs apart (SetRescueCooldown). Without it a rescue waits its turn as before.
+// It is hello.index's last bit (an older host bounds index below kMaxUnits): a later capability goes in hello.catalog.
+constexpr std::uint32_t kCapSoldierVariants=1u,kCapAirborneAir=2u,kCapSeaRescue=4u,kCapRescueChannel=8u,
+    kCapabilities=kCapSoldierVariants|kCapAirborneAir|kCapSeaRescue|kCapRescueChannel;
 static_assert(kCapabilities<kMaxUnits,"hello.index carries the capability bits");
+constexpr std::uint64_t kRescueCooldownMs=30000;   // the default; the host's ini SeaRescueCooldownSec sets it
 // The host's welcome carries its own capabilities too (2026-10-10, the user: 「进入房间发现版本不同步给一下说明吧」), in its
 // `catalog` (unused by a welcome before; ValidMessage bounds it below 1024, room for ten bits), and `ok` = 1 when a peer of
 // the room announced fewer than the host: a guest then knows an older host, a newer one, or an older third player, and
@@ -75,6 +81,8 @@ public:
     bool RoomBehindHost() const noexcept { return hostRoomBehind_; }
     // Host: the peer whose request made transaction `token` (0: this machine's own). False: no such requested one.
     bool RequesterOf(std::uint64_t token,std::uint32_t* peer) const noexcept;
+    // Host: how long one requester's rescues stand apart (from its last rescue made); the host's setting decides.
+    void SetRescueCooldown(std::uint64_t ms) noexcept { rescueCooldown_=ms; }
 private:
     enum class Phase { empty,planning,assembling,prepared,spawning,active,cancelled };
     struct Transaction {
@@ -82,6 +90,7 @@ private:
         bool external=false;
         bool cancelConfirmed=false;
         bool spawned=false;
+        bool rescue=false;   // on the rescue channel (Hooks::ownChannel, every peer kCapRescueChannel)
         RequestStatus failure=RequestStatus::cancelled;
         std::uint64_t token=0;
         Plan plan{};
@@ -104,6 +113,9 @@ private:
     std::array<std::uint32_t,kMaxPeers+1> peerMissions_{};
     std::array<std::uint32_t,kMaxPeers+1> peerCaps_{};
     std::uint32_t hostCaps_=0;bool hostCapsKnown_=false,hostRoomBehind_=false;
+    std::array<std::uint64_t,kMaxPeers+1> rescueAt_{};   // host: when each requester's last rescue was made (0: none)
+    std::uint64_t rescueCooldown_=kRescueCooldownMs;
+    bool InFlight(const Transaction& t) const noexcept;
     struct Reply { std::uint32_t request=0;RequestStatus status=RequestStatus::accepted;bool dirty=false; };
     using Replies=std::array<Reply,kRecentRequests>;
     std::array<Replies,kMaxPeers+1> replies_{};
