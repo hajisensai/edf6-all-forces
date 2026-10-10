@@ -41,6 +41,7 @@ Config config;
 const Config& Cfg() noexcept { config.enabled=true;return config; }
 bool InSession() noexcept { return fixture::online; }
 bool OnlineHostOnly() noexcept { return fixture::host; }
+unsigned char* PlayerHuman() noexcept { return nullptr; }   // the rescue requester lookup (no player in this fixture)
 void Log(const char*,...) noexcept {}
 bool ReadNativeMissionLocation(unsigned* out) noexcept { *out=fixture::location;return fixture::locationReadable; }
 void ResetCommandNetwork() noexcept {}

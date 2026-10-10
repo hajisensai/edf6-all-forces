@@ -47,7 +47,13 @@
 #include "warn.h"
 #include "retired_loadout.h"
 #include "support_aircraft.h"
+#include "support_call.h"
+#include "support_net.h"
+#include "hudtext.h"
+#include "rescue_logic.h"
+#include "helipad.h"
 #include <cmath>
+#include <cstdarg>
 
 namespace crew {
 namespace {
@@ -1511,29 +1517,41 @@ const char* LeaveReason(const Heli& h,const unsigned char* v,const Loadout& l) n
 }
 
 // ---- Sea rescue (docs/rescue-re.md) ----
-// A local player on foot below Cfg().rescueBelow for kWetMs, with a submarine carrier out (SubDeck): one Brute
-// (410) is launched over the carrier's deck and flies to them (pickup), comes down so a free door seat's
-// riding point is over the swimmer, and hovers there. The player boards it with their own board button
-// (the stock reach, never from farther); with Cfg().rescueAutoBoard the plugin presses it for them through
-// the stock board path (0x56D700) once that seat is within the stock reach. Aboard in a door seat, it flies
-// them to the deck (ferry) and hovers kDeckHover over it until they jump off; then it leaves (StartLeave).
-// The player is never moved by the plugin: only the stock boarding seats them, and they get off themselves.
+// A local player on foot below Cfg().rescueBelow for kWetMs, with a submarine carrier out (SubDeck): this machine
+// asks for the support catalog's rescue entry at the swimmer (support_call.h SupportRescueAt, 2026-10-09, the user:
+// 「给救援加一个支援目录项，走正规的呼叫支援流程」). The support deployment plans it as any air support (an entry at
+// the map's edge, a clear corridor, open sky), makes one Brute (410) in the air there with its real pilot made inside
+// it and seated at once, and registers both on every peer; the plugin never makes the heli itself, and nobody
+// boards in mid-air. The dispatcher hands the heli over (RescueHeliDeployed) on every machine that made it:
+//  - where it is flown (offline, the host): the flight (Rescue): to the player who asked (the requester, by identity:
+//    support_net.h SupportTransactionRequester; 2026-10-10), down so the free door seat's riding point is over them,
+//    hovering there; aboard, to the deck (ferry), kDeckHover over it until they jump off; then it leaves (StartLeave).
+//    The requester gone, dead, ashore, in another vehicle or picked up by another rescue calls it off at once
+//    (rescue_logic.h PickupCancel): the reason logged, the heli leaves as support aircraft leave;
+//  - on the swimmer's machine: the call (RescueCall): the board button pressed for them (Cfg().rescueAutoBoard, the
+//    stock board path 0x56D700, only within the stock reach; else they press it themselves), and when it ends.
+// A request that brings no heli (refused, timed out, nothing made) is logged and shown (RescueBanner) and asked
+// again kRetryMs later. The player is never moved by the plugin: only the stock boarding seats them, and they get
+// off themselves.
 // The 410, not the 506: the 506 has one seat (V506_HELI vehicle_riding_position: the driver only), so a
 // player boarding it would bump the NPC pilot out and fly it themselves; the 410 has two door gunner seats.
 // While it waits it is on team kTeamVehicle (5, nobody's): the stock seat check lets a human of another team
 // into a seat only with bit 7 of its masks, which none of the 410's seats have (masks 9 / 15), and the call
-// helis are team 2 (friend). Its own team is given back when it leaves.
+// helis are team 2 (friend). Its own team is given back when it leaves (on a peer's copy, by the call).
 constexpr float kSeaY=0.0f;            // the sea surface when the water probe is off (SeaAt unknown): about y = 0, a guess
 constexpr float kUnderSurface=1.0f;     // in the sea: this far under the water's surface at least
 constexpr ULONGLONG kWetMs=1500;       // in the sea this long before a heli is sent
-constexpr ULONGLONG kRetryMs=10000;    // after a launch could not be made, or the heli was lost
+constexpr ULONGLONG kRetryMs=10000;    // after a request brought no heli, or the heli was lost
+constexpr ULONGLONG kRequestWaitMs=150000;   // a request whose heli has not come by then failed (support planning: 120 s)
+constexpr float kOverHull=15.0f;        // m: over the carrier's hull footprint or this near it (a 410's rotor), not below its deck
+constexpr std::size_t kHumanVehicle=0x1548;   // the vehicle a human rides (0x56A3D0 writes it; +0x1550 its control block)
 constexpr ULONGLONG kAgainMs=30000;    // after a rescue ended: not another heli each few seconds for one who will not board
 constexpr float kRescueApproach=40.0f; // m: farther out it flies kRescueCruise over the sea, nearer it comes down
 constexpr float kRescueCruise=20.0f;
 constexpr float kSkid=1.5f;            // m: its origin no lower than this over the sea (the 410 box bottom is 0.1 m over it)
 constexpr float kSeatAbove=0.5f;       // m: the door seat's riding point this far over the swimmer (or the sea)
 constexpr ULONGLONG kBoardTryMs=500,kPickupMs=120000,kDryMs=3000,kOverDeckLogMs=10000;
-constexpr DWORD kRescueFuelSec=900;
+constexpr DWORD kRescueFuelSec=900;     // support_dispatch.cpp gives the rescue entry the same
 constexpr float kDeckHover=8.0f;       // m over the deck it hovers at for the player to jump off
 constexpr float kFerrySpeed=15.0f;     // m/s at most while it carries them
 constexpr float kHullMargin=80.0f;     // m: lower than the deck and this near the hull it climbs before it closes in
@@ -1562,22 +1580,65 @@ const Signature kRescueSignatures[]={
 };
 bool reachOk=false,boardOk=false;   // the seat reach can be read / the board button can be pressed
 
+// The flight of a rescue heli this machine flies (offline, the host): one a rescue deployment (a player of each
+// machine may be in the sea at once).
 enum class RescuePhase { none, pickup, ferry };
 struct Rescue {
     RescuePhase phase;
     unsigned char* vehicle;
-    ObjRef ref;                         // the heli as it was launched
-    ULONGLONG launchFrame,seenFrame;    // the game frame it was launched in / its input last ran in (HeliFrame; 0: not yet)
+    ObjRef ref;                         // the heli as the deployment handed it over
+    ObjRef swimmer;                     // the player (of any machine) it picks up
+    ULONGLONG launchFrame,seenFrame;    // the game frame it was handed over in / its input last ran in (HeliFrame; 0: not yet)
     std::int32_t team;                  // the heli's own team, given back when it leaves
-    ULONGLONG wetSince,retryAt,startedAt,nearAt,boardTryAt,dryAt,overDeckAt,loggedAt,frame;
-    int tries,seat;
-    float seatDist,seatReach;           // the free door seat's riding point to the player, and its stock reach
+    ULONGLONG startedAt,nearAt,dryAt,overDeckAt,loggedAt;
+    int seat;
+    float seatDist,seatReach;           // the free door seat's riding point to the swimmer, and its stock reach
     // What Fly flies to (RescueGoal): a point and height; `climb`: no horizontal move yet; `slow`: kFerrySpeed;
     // `low`: down to the swimmer, under the kGroundClear that Avoid keeps over the ground (or the sea) below.
     float goal[3],height;
-    bool climb,slow,low,warned;
+    bool climb,slow,low;
 };
-Rescue rescue{};
+constexpr int kRescues=4;
+Rescue rescues[kRescues]{};
+// This machine's player's rescue: its request, then the heli the deployment made for it here (flown here, or a
+// peer's copy of the host's) until the player is out of it or it is over.
+enum class CallPhase { idle, requested, assigned };
+struct RescueCall {
+    CallPhase phase;
+    ULONGLONG wetSince,retryAt,requestedAt,nearAt,boardTryAt,dryAt,loggedAt;
+    float at[3];                        // the request's point: the deployment's plan target on every machine
+    unsigned char* vehicle;
+    ObjRef ref;
+    ULONGLONG madeFrame,seenFrame;      // as Rescue's launchFrame / seenFrame
+    bool flown;                         // this machine flies it (the flight above keeps its team); else a peer's copy
+    std::int32_t team;                  // a peer's copy's own team, given back when the call ends
+    int tries;
+    float seatDist,seatReach;
+    bool aboard,warned;
+};
+RescueCall call{};
+ULONGLONG rescueFrame=0;   // RescueTick: at most once a frame
+// Where a helicopter stood this mission (helipad.h): the rescue's takeoff points besides the carrier's deck.
+helipad::Pads pads{};
+
+// This machine's player's rescue cooldown (Cfg().seaRescueCooldownSec, 2026-10-10, the user: 「救援应该有单独的cd」):
+// from the last heli made for them; its own, never the map support's. The host holds every requester to its own value.
+ULONGLONG rescueMadeAt=0;
+bool cooldownSaid=false;
+
+// The rescue banner (draw thread reads, game thread writes): what became of this machine's rescue, a moment.
+SRWLOCK rescueCueLock=SRWLOCK_INIT;
+wchar_t rescueCueText[128]{};
+bool rescueCueBad=false;
+ULONGLONG rescueCueAt=0;
+constexpr ULONGLONG kRescueCueMs=6000;
+void RescueBanner(bool bad,const wchar_t* format,...) noexcept {
+    wchar_t text[128];
+    va_list a;va_start(a,format);_vsnwprintf_s(text,_countof(text),_TRUNCATE,format,a);va_end(a);
+    AcquireSRWLockExclusive(&rescueCueLock);
+    std::memcpy(rescueCueText,text,sizeof(text));rescueCueBad=bad;rescueCueAt=GetTickCount64();
+    ReleaseSRWLockExclusive(&rescueCueLock);
+}
 
 // A seat's riding point and its stock reach (see kSeatPoint); false when they cannot be read.
 bool RidingPoint(const unsigned char* seat,float* at,float* reach) noexcept {
@@ -1610,11 +1671,14 @@ int DoorSeat(unsigned char* v,const unsigned char* human,float* at,float* reach)
     return best;
 }
 
-// Whether `v` is the rescue heli flying a rescue, and where to (see Rescue::goal).
+// Whether `v` is a rescue heli flying a rescue, and where to (see Rescue::goal).
 bool RescueGoal(const unsigned char* v,float* goal,float* height,bool* climb,bool* slow,bool* low) noexcept {
-    if(rescue.phase==RescuePhase::none || !rescue.ref.Is(v))return false;
-    std::memcpy(goal,rescue.goal,12);*height=rescue.height;*climb=rescue.climb;*slow=rescue.slow;*low=rescue.low;
-    return true;
+    for(const auto& r:rescues) {
+        if(r.phase==RescuePhase::none || !r.ref.Is(v))continue;
+        std::memcpy(goal,r.goal,12);*height=r.height;*climb=r.climb;*slow=r.slow;*low=r.low;
+        return true;
+    }
+    return false;
 }
 
 // ---- Flight (Fly) ----
@@ -2790,10 +2854,40 @@ void Replay(unsigned char* v) noexcept {
 }
 }  // namespace
 
+namespace {
+// A sample of a stock-bodied helicopter for the pads (helipad.h): resting on solid ground (GroundClearance within
+// kGrounded; water is no pad), never a rescue heli itself.
+void NoteParked(unsigned char* v) noexcept {
+    const ULONGLONG ms=GameMs();
+    if(!helipad::Due(pads,v,ms))return;
+    for(const auto& r:rescues)if(r.phase!=RescuePhase::none && r.ref.Is(v))return;
+    if(call.phase==CallPhase::assigned && call.ref.Is(v))return;
+    const float* p=reinterpret_cast<const float*>(v+kPosition);
+    const float clear=GroundClearance(p);
+    float surface=kSeaY;
+    const bool wet=SeaProbe(p[0],p[2],&surface)==Sea::water && surface>p[1]-helipad::kGrounded;
+    const bool grounded=clear!=kNoGround && clear>-1.0f && clear<helipad::kGrounded && !wet;
+    if(helipad::Observe(pads,v,p,grounded,ms))
+        Log("RESCUE takeoff point %d: helicopter %p stood at (%.0f,%.1f,%.0f)",pads.count-1,v,p[0],p[1],p[2]);
+}
+}  // namespace
+
+int RescueTakeoffPads(float (*out)[3],int most) noexcept {
+    const ULONGLONG ms=GameMs();
+    int n=0;
+    for(int i=0;i<pads.count && n<most;++i) {
+        if(helipad::Occupied(pads,i,ms))continue;   // a helicopter still stands there
+        std::memcpy(out[n++],pads.at[i],12);
+    }
+    return n;
+}
+
 void HeliFrame(unsigned char* vehicle) noexcept {
-    if(rescue.ref.Is(vehicle))rescue.seenFrame=GameFrame();   // RescueHeliAlive
+    for(auto& r:rescues)if(r.phase!=RescuePhase::none && r.ref.Is(vehicle))r.seenFrame=GameFrame();   // RescueHeliAlive
+    if(call.phase==CallPhase::assigned && call.ref.Is(vehicle))call.seenFrame=GameFrame();   // a peer's copy too (Replay)
     if(!profileOk || vehicle[kDead])return;
     const bool stockHeli=!IsJet(vehicle) && !IsSub(vehicle) && !IsPlayerJet(vehicle) && !IsSazabi(vehicle) && TypeOf(vehicle);
+    if(stockHeli)NoteParked(vehicle);
     // NPC gunners have their own firing authority. A remote player pilot must not suppress host/local NPC door
     // gunners; the native weapon messages replicate their shots. NPC pilots already call DoorGun through Fly.
     if(stockHeli && SeatCount(vehicle)>0 && !NpcDriver(vehicle))CrewDoorGuns(vehicle);
@@ -2861,8 +2955,15 @@ void HeliCalled(unsigned char* vehicle,bool guard,const float* post,DWORD fuelSe
 
 namespace {
 // A heli a map command reaches: flown by its NPC now (as HeliReap tells a live one), not on its way out.
+// A heli a rescue flies (Rescue: to its swimmer, to the deck): the rescue's, not the map's to order (2026-10-10 review: a
+// focus, a post or a withdrawal would take it off its swimmer).
+bool RescueFlies(const ObjRef& ref) noexcept {
+    for(const auto& r:rescues)if(r.phase!=RescuePhase::none && r.ref.obj==ref.obj && r.ref.ctrl==ref.ctrl)return true;
+    return false;
+}
 bool Commandable(const Heli& h) noexcept {
-    return h.ref && h.seenFrame && GameFrame()-h.seenFrame<=kAliveFrames && !h.leaving && !h.reap && CommandVehicleLive(h.ref);
+    return h.ref && h.seenFrame && GameFrame()-h.seenFrame<=kAliveFrames && !h.leaving && !h.reap && CommandVehicleLive(h.ref) &&
+           !RescueFlies(h.ref);
 }
 }  // namespace
 
@@ -3008,20 +3109,22 @@ void HeliReap(const void* self) noexcept {
 }
 
 namespace {
-// The rescue heli as it was launched: its input ran just now (HeliFrame stamps seenFrame; before its first
-// input, within kFirstFrames of its launch), and it is still that object, alive.
+// A rescue heli as it was handed over: its input ran just now (HeliFrame stamps `seen`; before its first input,
+// within kFirstFrames of the hand-over), and it is still that object, alive.
 constexpr ULONGLONG kFirstFrames=120;
-bool RescueHeliAlive() noexcept {
-    const auto v=rescue.vehicle;
+bool HeliAlive(unsigned char* v,const ObjRef& ref,ULONGLONG made,ULONGLONG seen) noexcept {
     const ULONGLONG frame=GameFrame();
-    const bool recent=rescue.seenFrame ? frame-rescue.seenFrame<=kAliveFrames : frame-rescue.launchFrame<=kFirstFrames;
-    return recent && Readable(v,kSeats+8) && !v[kDead] && rescue.ref.Is(v) && IsHelicopter(v);
+    const bool recent=seen ? frame-seen<=kAliveFrames : frame-made<=kFirstFrames;
+    return recent && Readable(v,kSeats+8) && !v[kDead] && ref.Is(v) && IsHelicopter(v);
 }
+bool RescueHeliAlive(const Rescue& r) noexcept { return HeliAlive(r.vehicle,r.ref,r.launchFrame,r.seenFrame); }
 
-// The seat the player holds in the rescue heli, or -1.
-int PlayerSeat() noexcept {
-    for(unsigned i=0;i<SeatCount(rescue.vehicle);++i)
-        if(SeatRider(SeatAt(rescue.vehicle,i))==Rider::player)return static_cast<int>(i);
+// The seat `human` (a player of any machine) holds in `v`, or -1.
+int HumanSeat(unsigned char* v,const unsigned char* human) noexcept {
+    for(unsigned i=0;i<SeatCount(v);++i) {
+        const auto* seat=SeatAt(v,i);
+        if(At<const void*>(seat,kSeatRider)==human && AnyPlayerIn(seat))return static_cast<int>(i);
+    }
     return -1;
 }
 
@@ -3030,18 +3133,58 @@ bool OnFoot(const unsigned char* human) noexcept {
     return !ctrl || (Readable(ctrl,0x10) && At<std::int32_t>(ctrl,8)==0);
 }
 
-// Ends the rescue; `leave`: the heli (alive) gets its own team back and flies off (StartLeave), else it is
-// left as it is (the player took its pilot seat: theirs now).
-void EndRescue(const char* why,bool leave,ULONGLONG ms) noexcept {
-    Log("RESCUE over: %s (heli %p)",why,rescue.vehicle);
-    if(leave && RescueHeliAlive()) {
-        auto v=rescue.vehicle;
-        SetObjectTeam(v,rescue.team);
+// The requester's object if it is still the same one (alive or not), else nullptr: gone (left the room, the mission over).
+unsigned char* RequesterObject(const ObjRef& ref) noexcept {
+    auto* h=static_cast<unsigned char*>(const_cast<void*>(ref.obj));
+    return ref && Readable(h,kHumanVehicleCtrl+8) && ref.Is(h) && IsAnyPlayer(h) ? h : nullptr;
+}
+
+// Whether `human` rides another rescue's heli than `own` (one flown here, or this machine's call's).
+bool InOtherRescue(const unsigned char* human,const unsigned char* own) noexcept {
+    const auto* rides=At<const unsigned char*>(human,kHumanVehicle);
+    if(!rides || rides==own)return false;
+    for(const auto& r:rescues)if(r.phase!=RescuePhase::none && r.vehicle==rides)return true;
+    return call.phase==CallPhase::assigned && call.vehicle==rides;
+}
+bool InSea(const float* p,float* surface) noexcept;
+
+// What the requester is now (rescue_logic.h), for the rescue heli `v`: its object (`*human`), its seat in `v` (`*seat`),
+// and `*dryAt` kept (when they came out of the sea; 0: in it).
+rescue::Requester Assess(unsigned char* v,const ObjRef& who,ULONGLONG* dryAt,ULONGLONG ms,unsigned char** human,int* seat) noexcept {
+    rescue::Requester q{};
+    *human=RequesterObject(who);*seat=-1;
+    if(!*human)return q;
+    unsigned char* h=*human;
+    q.present=true;q.dead=h[kDead]!=0;
+    *seat=HumanSeat(v,h);q.aboard=*seat>=0;
+    q.onFoot=OnFoot(h);
+    q.inOtherRescue=!q.onFoot && InOtherRescue(h,v);
+    float sea=kSeaY;
+    if(InSea(reinterpret_cast<const float*>(h+kPosition),&sea))*dryAt=0;
+    else if(!*dryAt)*dryAt=ms;
+    q.dry=*dryAt && ms-*dryAt>kDryMs;
+    return q;
+}
+
+// Sends a rescue heli away at once (StartLeave), as a support heli leaves.
+void LeaveNow(unsigned char* v,const char* why) noexcept {
+    float fwd[3];
+    if(Heli* h=Find(v); h && Row(v,kHeadForward,fwd))StartLeave(*h,reinterpret_cast<const float*>(v+kPosition),fwd,why);
+    else Log("RESCUE heli %p: %s, but it is not flown here (it goes as its support flight goes)",v,why);
+}
+
+// Ends a flight; `leave`: the heli (alive) gets its own team back and flies off (StartLeave), else it is left as it
+// is (a player took its pilot seat: theirs now).
+void EndRescue(Rescue& r,const char* why,bool leave) noexcept {
+    Log("RESCUE over: %s (heli %p)",why,r.vehicle);
+    if(leave && RescueHeliAlive(r)) {
+        auto v=r.vehicle;
+        SetObjectTeam(v,r.team);
         if(!Find(v))HeliCalled(v,false,reinterpret_cast<const float*>(v+kPosition),kRescueFuelSec);   // re-crewed meanwhile
         float fwd[3];
         if(Heli* h=Find(v); h && Row(v,kHeadForward,fwd))StartLeave(*h,reinterpret_cast<const float*>(v+kPosition),fwd,why);
     }
-    rescue=Rescue{};rescue.retryAt=ms+kAgainMs;
+    r=Rescue{};
 }
 
 // Presses the board button for `human` (see kBoardButton). `bump` off: it takes a free seat in the stock reach or
@@ -3064,159 +3207,272 @@ bool InSea(const float* p,float* surface) noexcept {
     return sea==Sea::water && p[1]<y-kUnderSurface;
 }
 
-// No rescue yet: the player on foot in the sea for kWetMs with a carrier out launches one.
-void StartRescue(unsigned char* human,ULONGLONG ms) noexcept {
-    const float* p=reinterpret_cast<const float*>(human+kPosition);
-    float sea=kSeaY;
-    if(!Cfg().seaRescue || !OnFoot(human) || !InSea(p,&sea)){rescue.wetSince=0;rescue.warned=false;return;}
-    if(!rescue.wetSince)rescue.wetSince=ms;
-    if(ms-rescue.wetSince<kWetMs || ms<rescue.retryAt)return;
-    float deck[3];
-    if(!SubDeck(p,deck)) {
-        if(!rescue.warned)Log("RESCUE player in the sea at (%.0f,%.1f,%.0f), but no submarine carrier out: no rescue",p[0],p[1],p[2]);
-        rescue.warned=true;rescue.retryAt=ms+kRetryMs;
-        return;
-    }
-    const float from[3]={deck[0],deck[1]+60.0f,deck[2]};
-    float dir[3]={p[0]-deck[0],0.0f,p[2]-deck[2]};
-    const float away=std::sqrt(Dot2(dir,dir));
-    if(away>1.0f){dir[0]/=away;dir[2]/=away;}else{dir[0]=0.0f;dir[2]=1.0f;}
-    const online::CopyOwner was=SetSpawnOwner(online::kCopyHere);   // this machine's player's rescue (online_authority.h)
-    unsigned char* const v=HeliLaunch(HeliBody::brute410,from,dir);
-    SetSpawnOwner(was);
-    if(!v) {
-        Log("RESCUE no heli could be made (EDF6VC_HELI_410.SGO not installed or not preloaded this mission): retry in %llus",kRetryMs/1000);
-        rescue.retryAt=ms+kRetryMs;
-        return;
-    }
-    HeliCalled(v,false,p,kRescueFuelSec);
-    const ULONGLONG wet=ms-rescue.wetSince;
-    rescue=Rescue{};
-    rescue.phase=RescuePhase::pickup;rescue.vehicle=v;rescue.ref=ObjRef::Of(v);rescue.launchFrame=GameFrame();rescue.team=At<std::int32_t>(v,kTeam);
-    rescue.startedAt=ms;rescue.seat=-1;
-    std::memcpy(rescue.goal,p,12);rescue.height=from[1];
-    Log("RESCUE launched: heli %p (410) over the carrier deck (%.0f,%.0f,%.0f), %.0f m from the player at (%.0f,%.1f,%.0f) in the sea %.1fs; seats=%u reach=%d autoBoard=%d",
-        v,deck[0],deck[1],deck[2],away,p[0],p[1],p[2],static_cast<float>(wet)*0.001f,SeatCount(v),reachOk,Cfg().rescueAutoBoard && boardOk);
-}
-
-// Pickup: the heli flies to the player and brings a free door seat's riding point over them.
-void Pickup(unsigned char* human,ULONGLONG ms) noexcept {
-    auto v=rescue.vehicle;
+// Pickup: the heli flies to the swimmer and brings a free door seat's riding point over them.
+void Pickup(Rescue& r,unsigned char* human,ULONGLONG ms) noexcept {
+    auto v=r.vehicle;
     const float* p=reinterpret_cast<const float*>(human+kPosition);
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     SetObjectTeam(v,kTeamVehicle);   // see the Rescue comment
-    if(!OnFoot(human)){EndRescue("the player boarded another vehicle",true,ms);return;}
     float sea=kSeaY;
-    if(!InSea(p,&sea)) {
-        if(!rescue.dryAt)rescue.dryAt=ms;
-        if(ms-rescue.dryAt>kDryMs){EndRescue("the player is out of the sea",true,ms);return;}
-    } else rescue.dryAt=0;
+    InSea(p,&sea);
     const float surface=p[1]>sea ? p[1] : sea;
     const float away=Dist2(pos,p);
     float at[3]{},reach=0.0f;
     const int seat=reachOk ? DoorSeat(v,human,at,&reach) : -1;
-    rescue.climb=false;rescue.slow=false;rescue.low=false;
+    r.climb=false;r.slow=false;r.low=false;
     if(away>kRescueApproach || seat<0) {
         // Out there, or no door seat to bring over them: over the sea next to them.
-        std::memcpy(rescue.goal,p,12);
-        rescue.height=surface+(away>kRescueApproach ? kRescueCruise : kSkid+2.0f);
+        std::memcpy(r.goal,p,12);
+        r.height=surface+(away>kRescueApproach ? kRescueCruise : kSkid+2.0f);
     } else {
         // The seat's point (it moves with the heli) over the swimmer: the heli kSeatAbove higher than that.
-        rescue.goal[0]=p[0]-(at[0]-pos[0]);rescue.goal[1]=p[1];rescue.goal[2]=p[2]-(at[2]-pos[2]);
-        rescue.height=surface+kSeatAbove-(at[1]-pos[1]);
+        r.goal[0]=p[0]-(at[0]-pos[0]);r.goal[1]=p[1];r.goal[2]=p[2]-(at[2]-pos[2]);
+        r.height=surface+kSeatAbove-(at[1]-pos[1]);
         // Under kGroundClear only once over the spot (the walls are not looked for then: the steep coast).
-        rescue.low=Dist2(pos,rescue.goal)<10.0f;
+        r.low=Dist2(pos,r.goal)<10.0f;
     }
-    if(rescue.height<sea+kSkid)rescue.height=sea+kSkid;
-    if(away<=kRescueApproach && !rescue.nearAt){rescue.nearAt=ms;Log("RESCUE heli %p beside the player (%.0f m), coming down",v,away);}
-    if(rescue.nearAt && ms-rescue.nearAt>kPickupMs){EndRescue("not boarded in 120 s",true,ms);return;}
-    rescue.seat=seat;
+    if(r.height<sea+kSkid)r.height=sea+kSkid;
+    // Taken off from a carrier's deck (support_dispatch.cpp RescueTakeoffSpots): over its hull (map rays do not see it)
+    // it keeps kDeckHover over the deck, and comes down only once clear of it.
+    float deck[3];
+    if(SubDeck(pos,deck)) {
+        const float gap=SubHullGap(pos);
+        if(gap>=0.0f && gap<kOverHull && r.height<deck[1]+kDeckHover){r.height=deck[1]+kDeckHover;r.low=false;}
+    }
+    if(away<=kRescueApproach && !r.nearAt){r.nearAt=ms;Log("RESCUE heli %p beside the player (%.0f m), coming down",v,away);}
+    if(r.nearAt && ms-r.nearAt>kPickupMs){EndRescue(r,"not boarded in 120 s",true);return;}
+    r.seat=seat;
     if(seat>=0) {
         const float d[3]={at[0]-p[0],at[1]-p[1],at[2]-p[2]};
-        rescue.seatDist=std::sqrt(Dot3(d,d));rescue.seatReach=reach;
+        r.seatDist=std::sqrt(Dot3(d,d));r.seatReach=reach;
     }
-    const bool inReach=seat>=0 && rescue.seatDist<=reach;
-    if(inReach && Cfg().rescueAutoBoard && boardOk && ms-rescue.boardTryAt>=kBoardTryMs) {
-        rescue.boardTryAt=ms;++rescue.tries;
-        Log("RESCUE board try %d: seat %d riding point %.2f m from the player (stock reach %.2f), heli %.1f m over them",
-            rescue.tries,seat,rescue.seatDist,reach,pos[1]-p[1]);
-        PressBoard(human);
-        return;
-    }
-    if(ms-rescue.loggedAt>2000) {
-        rescue.loggedAt=ms;
-        Log("RESCUE pickup: heli %.0f m from the player, y=%.1f (player %.1f, goal %.1f), seat %d point %.2f m (stock reach %.2f)%s",
-            away,pos[1],p[1],rescue.height,seat,seat>=0 ? rescue.seatDist : -1.0f,seat>=0 ? reach : -1.0f,
-            inReach ? (Cfg().rescueAutoBoard && boardOk ? " in reach" : " in reach: waiting for the player's board button") : "");
+    if(ms-r.loggedAt>2000) {
+        r.loggedAt=ms;
+        Log("RESCUE pickup: heli %p %.0f m from the player, y=%.1f (player %.1f, goal %.1f), seat %d point %.2f m (stock reach %.2f)%s",
+            v,away,pos[1],p[1],r.height,seat,seat>=0 ? r.seatDist : -1.0f,seat>=0 ? reach : -1.0f,
+            seat>=0 && r.seatDist<=reach ? " in reach" : "");
     }
 }
 
-// Ferry: the player in a door seat; to the nearest carrier's deck, kDeckHover over it, until they get off.
-void Ferry(ULONGLONG ms) noexcept {
-    auto v=rescue.vehicle;
+// Ferry: the swimmer in a door seat; to the nearest carrier's deck, kDeckHover over it, until they get off.
+void Ferry(Rescue& r,ULONGLONG ms) noexcept {
+    auto v=r.vehicle;
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     SetObjectTeam(v,kTeamVehicle);   // a door seat the player takes back after a stray exit
     float deck[3];
-    rescue.slow=true;rescue.climb=false;rescue.low=false;
+    r.slow=true;r.climb=false;r.low=false;
     if(!SubDeck(pos,deck)) {   // the carrier is gone: it holds where it is
-        if(ms-rescue.loggedAt>kOverDeckLogMs){rescue.loggedAt=ms;Log("RESCUE ferry: no carrier out, holding at (%.0f,%.0f,%.0f)",pos[0],pos[1],pos[2]);}
-        std::memcpy(rescue.goal,pos,12);rescue.height=pos[1];
+        if(ms-r.loggedAt>kOverDeckLogMs){r.loggedAt=ms;Log("RESCUE ferry: no carrier out, holding at (%.0f,%.0f,%.0f)",pos[0],pos[1],pos[2]);}
+        std::memcpy(r.goal,pos,12);r.height=pos[1];
         return;
     }
-    std::memcpy(rescue.goal,deck,12);rescue.height=deck[1]+kDeckHover;
+    std::memcpy(r.goal,deck,12);r.height=deck[1]+kDeckHover;
     const float gap=SubHullGap(pos);
-    rescue.climb=pos[1]<deck[1]+5.0f && gap>=0.0f && gap<kHullMargin;   // not into the hull's side
-    const bool over=Dist2(pos,deck)<kOverDeck && std::fabs(pos[1]-rescue.height)<4.0f;
-    if(over && !rescue.overDeckAt) {
-        rescue.overDeckAt=rescue.loggedAt=ms;
+    r.climb=pos[1]<deck[1]+5.0f && gap>=0.0f && gap<kHullMargin;   // not into the hull's side
+    const bool over=Dist2(pos,deck)<kOverDeck && std::fabs(pos[1]-r.height)<4.0f;
+    if(over && !r.overDeckAt) {
+        r.overDeckAt=r.loggedAt=ms;
         Log("RESCUE over the carrier deck (%.0f,%.0f,%.0f), %.1f m above it: the player can jump off",deck[0],deck[1],deck[2],pos[1]-deck[1]);
-    } else if(ms-rescue.loggedAt>(rescue.overDeckAt ? kOverDeckLogMs : 2000)) {
-        rescue.loggedAt=ms;
-        Log("RESCUE ferry: %.0f m to the deck, y=%.1f (deck %.1f)%s%s",Dist2(pos,deck),pos[1],deck[1],rescue.climb ? " climbing clear of the hull" : "",
-            rescue.overDeckAt ? ", over it: waiting for the player to jump off" : "");
-    }
-}
-// A fault in the rescue's step: it ends as any rescue ends (the heli's own team back, sent off), and only if
-// that faults too is the rescue just dropped (the heli then keeps team 5 until the mission ends).
-void RescueFault() noexcept {
-    const ULONGLONG ms=GameMs();
-    __try { EndRescue("fault in the rescue step",true,ms); }
-    __except(EXCEPTION_EXECUTE_HANDLER) {
-        Log("RESCUE fault ending it: heli %p left as it is",rescue.vehicle);
-        rescue=Rescue{};rescue.retryAt=ms+kAgainMs;
+    } else if(ms-r.loggedAt>(r.overDeckAt ? kOverDeckLogMs : 2000)) {
+        r.loggedAt=ms;
+        Log("RESCUE ferry: %.0f m to the deck, y=%.1f (deck %.1f)%s%s",Dist2(pos,deck),pos[1],deck[1],r.climb ? " climbing clear of the hull" : "",
+            r.overDeckAt ? ", over it: waiting for the player to jump off" : "");
     }
 }
 
-// The rescue's step, once a frame (RescueTick).
-void RescueStep() noexcept {
-    const ULONGLONG ms=GameMs();
-    unsigned char* const human=PlayerHuman();
-    if(rescue.phase==RescuePhase::none) {
-        if(human)StartRescue(human,ms);
-        return;
+// One flight's step, once a frame: the requester assessed (rescue_logic.h), then pickup or ferry.
+void FlightStep(Rescue& r,ULONGLONG ms) noexcept {
+    if(!RescueHeliAlive(r)){Log("RESCUE heli %p lost (shot down or gone)",r.vehicle);r=Rescue{};return;}
+    unsigned char* human=nullptr;int seat=-1;
+    const rescue::Requester q=Assess(r.vehicle,r.swimmer,&r.dryAt,ms,&human,&seat);
+    if(seat==0){EndRescue(r,"the player took the pilot seat: the heli is theirs",false);return;}
+    if(r.phase==RescuePhase::pickup) {
+        if(const auto cancel=rescue::PickupCancel(q);cancel!=rescue::Cancel::none) {
+            Log("RESCUE cancelled: %s",rescue::CancelText(cancel));
+            EndRescue(r,rescue::CancelText(cancel),true);return;
+        }
+        if(seat<0){Pickup(r,human,ms);return;}
+        Log("RESCUE boarded: seat %d, its riding point was %.2f m from the player (stock reach %.2f); ferrying to the carrier",
+            seat,r.seatDist,r.seatReach);
+        r.phase=RescuePhase::ferry;r.loggedAt=0;
     }
-    if(!RescueHeliAlive()){Log("RESCUE heli %p lost (shot down or gone)",rescue.vehicle);rescue=Rescue{};rescue.retryAt=ms+kRetryMs;return;}
-    if(!human){EndRescue("the player is not seen (dead, or the mission over)",true,ms);return;}
-    const int seat=PlayerSeat();
-    const float* p=reinterpret_cast<const float*>(human+kPosition);
-    if(seat==0){EndRescue("the player took the pilot seat: the heli is theirs",false,ms);return;}
-    if(rescue.phase==RescuePhase::pickup) {
-        if(seat<0){Pickup(human,ms);return;}
-        Log("RESCUE boarded: seat %d after %d presses, its riding point was %.2f m from the player (stock reach %.2f); ferrying to the carrier",
-            seat,rescue.tries,rescue.seatDist,rescue.seatReach);
-        rescue.phase=RescuePhase::ferry;rescue.loggedAt=0;
+    if(!q.present || q.dead) {
+        const auto cancel=!q.present ? rescue::Cancel::gone : rescue::Cancel::dead;
+        Log("RESCUE cancelled: %s",rescue::CancelText(cancel));
+        EndRescue(r,rescue::CancelText(cancel),true);return;
     }
     if(seat<0) {
-        const float* pos=reinterpret_cast<const float*>(rescue.vehicle+kPosition);
+        const float* p=reinterpret_cast<const float*>(human+kPosition);
+        const float* pos=reinterpret_cast<const float*>(r.vehicle+kPosition);
         float deck[3];
         const bool sub=SubDeck(pos,deck);
         Log("RESCUE player got off at (%.0f,%.1f,%.0f)%s%.1f m over the deck",p[0],p[1],p[2],sub ? ", " : " (no carrier) ",sub ? p[1]-deck[1] : 0.0f);
-        EndRescue("the player got off",true,ms);
+        EndRescue(r,"the player got off",true);
         return;
     }
-    Ferry(ms);
+    Ferry(r,ms);
+}
+
+// A fault in a flight's step: it ends as any rescue ends (the heli's own team back, sent off), and only if that
+// faults too is it just dropped (the heli then keeps team 5 until the mission ends).
+void FlightFault(Rescue& r) noexcept {
+    __try { EndRescue(r,"fault in the rescue step",true); }
+    __except(EXCEPTION_EXECUTE_HANDLER){Log("RESCUE fault ending it: heli %p left as it is",r.vehicle);r=Rescue{};}
+}
+
+// This machine's call is over: a peer's copy gets its own team back; asked again `again` ms later.
+void EndCall(const char* why,ULONGLONG ms,ULONGLONG again) noexcept {
+    Log("RESCUE call over: %s (heli %p)",why,call.vehicle);
+    if(call.phase==CallPhase::assigned && !call.flown && HeliAlive(call.vehicle,call.ref,call.madeFrame,call.seenFrame))
+        SetObjectTeam(call.vehicle,call.team);
+    call=RescueCall{};call.retryAt=ms+again;
+}
+
+// This machine's request brought no heli: said (log and banner), asked again kRetryMs later.
+void CallFailed(const wchar_t* why,ULONGLONG ms) noexcept {
+    Log("RESCUE request failed: %ls; asking again in %llus",why && why[0] ? why : L"(no reason given)",kRetryMs/1000);
+    RescueBanner(true,hudtext::Tr(hudtext::Tx::rescueFailed),why && why[0] ? why : L"-",static_cast<int>(kRetryMs/1000));
+    call=RescueCall{};call.retryAt=ms+kRetryMs;
+}
+
+// No call yet: the player on foot in the sea for kWetMs with a carrier out asks for the rescue entry at them. The call
+// waits from before the request: offline the heli is made within it (RescueHeliDeployed).
+void StartRescue(unsigned char* human,ULONGLONG ms) noexcept {
+    const float* p=reinterpret_cast<const float*>(human+kPosition);
+    float sea=kSeaY;
+    if(!Cfg().seaRescue || !OnFoot(human) || !InSea(p,&sea)){call.wetSince=0;call.warned=false;return;}
+    if(!call.wetSince)call.wetSince=ms;
+    if(ms-call.wetSince<kWetMs || ms<call.retryAt)return;
+    float deck[3];
+    if(!SubDeck(p,deck)) {
+        if(!call.warned)Log("RESCUE player in the sea at (%.0f,%.1f,%.0f), but no submarine carrier out: no rescue",p[0],p[1],p[2]);
+        call.warned=true;call.retryAt=ms+kRetryMs;
+        return;
+    }
+    const ULONGLONG cooldown=static_cast<ULONGLONG>(Cfg().seaRescueCooldownSec)*1000;
+    if(const ULONGLONG wait=rescue::CooldownLeft(rescueMadeAt,ms,cooldown)) {
+        if(!cooldownSaid) {
+            const int left=static_cast<int>((wait+999)/1000);
+            Log("RESCUE cooldown: the next rescue in %ds (SeaRescueCooldownSec=%lu)",left,Cfg().seaRescueCooldownSec);
+            RescueBanner(true,hudtext::Tr(hudtext::Tx::rescueCooldown),left);
+            cooldownSaid=true;
+        }
+        return;
+    }
+    cooldownSaid=false;
+    const float at[3]={p[0],p[1],p[2]};
+    const ULONGLONG wet=ms-call.wetSince;
+    call=RescueCall{};
+    call.phase=CallPhase::requested;call.requestedAt=ms;std::memcpy(call.at,at,12);
+    Log("RESCUE requested: the player at (%.0f,%.1f,%.0f) in the sea %.1fs, carrier deck (%.0f,%.0f,%.0f); reach=%d autoBoard=%d",
+        p[0],p[1],p[2],static_cast<float>(wet)*0.001f,deck[0],deck[1],deck[2],reachOk,Cfg().rescueAutoBoard && boardOk);
+    RescueBanner(false,L"%ls",hudtext::Tr(hudtext::Tx::rescueRequested));
+    wchar_t note[160]{};
+    if(!SupportRescueAt(at,note,_countof(note)) && call.phase==CallPhase::requested)CallFailed(note,ms);
+}
+
+// The call's heli is here (`call.vehicle`): the player boards it (pressed for them in the stock reach), rides it, and
+// gets off; or it is called off as the flight is (rescue_logic.h PickupCancel), or not boarded in time.
+void CallStep(ULONGLONG ms) noexcept {
+    auto v=call.vehicle;
+    if(!HeliAlive(v,call.ref,call.madeFrame,call.seenFrame)) {
+        Log("RESCUE heli %p lost (shot down or gone)",v);
+        RescueBanner(true,hudtext::Tr(hudtext::Tx::rescueLost),static_cast<int>(kRetryMs/1000));
+        call=RescueCall{};call.retryAt=ms+kRetryMs;return;
+    }
+    unsigned char* human=nullptr;int seat=-1;
+    const ObjRef me=ObjRef::Of(PlayerHuman());
+    const rescue::Requester q=Assess(v,me,&call.dryAt,ms,&human,&seat);
+    if(seat==0){EndCall("the player took the pilot seat: the heli is theirs",ms,kAgainMs);return;}
+    if(!call.flown)SetObjectTeam(v,kTeamVehicle);   // a peer's copy: the stock seat check runs here (see the Rescue comment)
+    if(seat>0) {
+        if(!call.aboard)Log("RESCUE aboard: seat %d after %d presses",seat,call.tries);
+        call.aboard=true;return;
+    }
+    if(call.aboard && q.present && !q.dead){EndCall("the player got off",ms,kAgainMs);return;}
+    if(const auto cancel=rescue::PickupCancel(q);cancel!=rescue::Cancel::none) {
+        Log("RESCUE call cancelled: %s",rescue::CancelText(cancel));
+        EndCall(rescue::CancelText(cancel),ms,kAgainMs);return;
+    }
+    const float* p=reinterpret_cast<const float*>(human+kPosition);
+    const float away=Dist2(reinterpret_cast<const float*>(v+kPosition),p);
+    if(away<=kRescueApproach && !call.nearAt)call.nearAt=ms;
+    if(call.nearAt && ms-call.nearAt>kPickupMs){EndCall("not boarded in 120 s",ms,kAgainMs);return;}
+    float at[3]{},reach=0.0f;
+    const int door=reachOk ? DoorSeat(v,human,at,&reach) : -1;
+    if(door<0)return;
+    const float d[3]={at[0]-p[0],at[1]-p[1],at[2]-p[2]};
+    call.seatDist=std::sqrt(Dot3(d,d));call.seatReach=reach;
+    if(call.seatDist>reach || !Cfg().rescueAutoBoard || !boardOk || ms-call.boardTryAt<kBoardTryMs)return;
+    call.boardTryAt=ms;++call.tries;
+    Log("RESCUE board try %d: seat %d riding point %.2f m from the player (stock reach %.2f), heli %.1f m over them",
+        call.tries,door,call.seatDist,reach,reinterpret_cast<const float*>(v+kPosition)[1]-p[1]);
+    PressBoard(human);
+}
+
+// The rescue's step, once a frame (RescueTick): every flight flown here, then this machine's call.
+void RescueStep() noexcept {
+    const ULONGLONG ms=GameMs();
+    for(auto& r:rescues) {
+        if(r.phase==RescuePhase::none)continue;
+        __try { FlightStep(r,ms); }
+        __except(EXCEPTION_EXECUTE_HANDLER){Log("RESCUE fault: ending the flight");FlightFault(r);}
+    }
+    unsigned char* const human=PlayerHuman();
+    if(call.phase==CallPhase::idle) {
+        if(human)StartRescue(human,ms);
+        return;
+    }
+    if(call.phase==CallPhase::requested) {
+        if(ms-call.requestedAt>kRequestWaitMs)CallFailed(hudtext::Tr(hudtext::Tx::rescueNoHeli),ms);
+        return;
+    }
+    CallStep(ms);
 }
 }  // namespace
+
+void RescueHeliDeployed(unsigned char* vehicle,const float* target,bool flown,const ObjRef& requester) noexcept {
+    if(!vehicle || !target)return;
+    const ULONGLONG frame=GameFrame();
+    if(flown) {
+        Rescue* r=nullptr;
+        for(auto& row:rescues)if(row.phase==RescuePhase::none){r=&row;break;}
+        // The heli is the requester's: with none known (left the room meanwhile) or no slot, it leaves at once, as a
+        // support heli leaves; it never stays to guard the point on its fuel (2026-10-10, the user: 「为什么会找不到」).
+        if(!r || !RequesterObject(requester)) {
+            const char* why=r ? rescue::CancelText(rescue::Cancel::gone) : "every rescue slot taken";
+            Log("RESCUE cancelled: heli %p made for (%.0f,%.1f,%.0f): %s",vehicle,target[0],target[1],target[2],why);
+            LeaveNow(vehicle,why);
+        } else {
+            *r=Rescue{};
+            r->phase=RescuePhase::pickup;r->vehicle=vehicle;r->ref=ObjRef::Of(vehicle);r->swimmer=requester;r->launchFrame=frame;
+            r->team=At<std::int32_t>(vehicle,kTeam);r->startedAt=GameMs();r->seat=-1;
+            std::memcpy(r->goal,target,12);r->height=reinterpret_cast<const float*>(vehicle+kPosition)[1];
+            Log("RESCUE flight: heli %p (410) for the requester %p, asked at (%.0f,%.1f,%.0f), seats=%u",vehicle,requester.obj,target[0],
+                target[1],target[2],SeatCount(vehicle));
+        }
+    }
+    if(call.phase!=CallPhase::requested || std::memcmp(call.at,target,12)!=0)return;   // another machine's rescue
+    call.phase=CallPhase::assigned;call.vehicle=vehicle;call.ref=ObjRef::Of(vehicle);call.madeFrame=frame;call.flown=flown;
+    rescueMadeAt=GameMs();   // this player's rescue cooldown starts
+    call.team=At<std::int32_t>(vehicle,kTeam);
+    Log("RESCUE heli %p made for this machine's player (%s), %.0f s after the request",vehicle,flown ? "flown here" : "a peer's copy",
+        static_cast<float>(GameMs()-call.requestedAt)*0.001f);
+    RescueBanner(false,L"%ls",hudtext::Tr(hudtext::Tx::rescueComing));
+}
+
+void RescueRequestFailed(const wchar_t* why) noexcept {
+    if(call.phase!=CallPhase::requested)return;   // not this machine's waiting request (or already over)
+    CallFailed(why,GameMs());
+}
+
+bool PlayerRescueCue(RescueCue* out) noexcept {
+    AcquireSRWLockShared(&rescueCueLock);
+    const bool fresh=rescueCueAt && GetTickCount64()-rescueCueAt<=kRescueCueMs;
+    if(fresh){std::memcpy(out->text,rescueCueText,sizeof(out->text));out->bad=rescueCueBad;}
+    ReleaseSRWLockShared(&rescueCueLock);
+    return fresh;
+}
 
 void PressBoardButton(unsigned char* human) noexcept { PressBoard(human); }
 void PressBoardButtonBumping(unsigned char* human) noexcept { PressBoard(human,true); }
@@ -3229,10 +3485,10 @@ bool SeatPoint(const unsigned char* v,unsigned seat,float* at,float* reach) noex
 }
 
 void RescueTick() noexcept {
-    if(!profileOk || rescue.frame==GameFrame())return;   // it flies the heli through Fly; at most once a frame
-    rescue.frame=GameFrame();
+    if(!profileOk || rescueFrame==GameFrame())return;   // it flies the heli through Fly; at most once a frame
+    rescueFrame=GameFrame();
     __try { RescueStep(); }
-    __except(EXCEPTION_EXECUTE_HANDLER){Log("RESCUE fault: ending the rescue");SetSpawnOwner(online::kCopyHost);RescueFault();}
+    __except(EXCEPTION_EXECUTE_HANDLER){Log("RESCUE fault: this machine's call dropped");call=RescueCall{};call.retryAt=GameMs()+kRetryMs;}
 }
 
 namespace {
@@ -3424,6 +3680,8 @@ void ResetHelis() noexcept {
     for(auto& p:pilots)p=Pilot{};
     fullLoggedAt=0;
     ResetTrack();
-    rescue=Rescue{};
+    for(auto& r:rescues)r=Rescue{};
+    call=RescueCall{};rescueFrame=0;rescueMadeAt=0;cooldownSaid=false;pads=helipad::Pads{};
+    AcquireSRWLockExclusive(&rescueCueLock);rescueCueAt=0;ReleaseSRWLockExclusive(&rescueCueLock);
 }
 }  // namespace crew

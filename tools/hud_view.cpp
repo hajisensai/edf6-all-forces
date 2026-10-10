@@ -219,6 +219,15 @@ bool PlayerFormationCue(FormationCue* o) noexcept { if(sceneFormation<0)return f
 // The box sweep banner (npcai.cpp PlayerSweepCue): on in the npc_sweep scenes.
 bool sceneSweepOn=false;SweepCue sceneSweep{};
 bool PlayerSweepCue(SweepCue* o) noexcept { if(sceneSweepOn)*o=sceneSweep;return sceneSweepOn; }
+// The sea rescue's banner (heli.cpp PlayerRescueCue): on in the rescue_banner scene.
+bool sceneRescueOn=false;RescueCue sceneRescue{};
+bool PlayerRescueCue(RescueCue* o) noexcept { if(sceneRescueOn)*o=sceneRescue;return sceneRescueOn; }
+// The room's builds differ (support_net.cpp SupportVersionCue): on in the version_banner scene, under the rescue's line.
+bool sceneVersionOn=false;wchar_t sceneVersion[200]{};
+bool SupportVersionCue(wchar_t* line,std::size_t capacity) noexcept {
+    if(sceneVersionOn)_snwprintf_s(line,capacity,_TRUNCATE,L"%ls",sceneVersion);
+    return sceneVersionOn;
+}
 bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
 // The debug spawn tool's menu (debug_spawn.cpp DebugSpawnReadout): up in the debug_spawn scenes.
 bool sceneDebugSpawnOn=false;DebugSpawnCue sceneDebugSpawn{};
@@ -1580,7 +1589,7 @@ int FullLoadoutScenes(const std::wstring& dir) {
     const Case cases[]={{1920,1080,1},{1440,1080,1.5f},{1024,768,1.5f},{960,1080,2.0f},{1920,1080,3.0f}};
     hasJet=hasHeli=hasWarn=hasStock=hasDrill=hasNix=hasMap=hasEmc=hasProteus=hasSazabi=hasTurret=false;
     hasLauncher=hasHeliSight=hasHighView=hasGunner=false;
-    sceneFormation=-1;sceneSweepOn=false;sceneMarkOn=false;
+    sceneFormation=-1;sceneSweepOn=false;sceneMarkOn=false;sceneRescueOn=false;sceneVersionOn=false;
     for(int heli=0;heli<2;++heli)for(const Case& c:cases) {
         hasStock=true;hasHeli=heli!=0;StockTank(pos);sceneStock.heli=hasHeli;
         sceneStock.arms=kStockArms;sceneStock.selected=0;sceneStock.sight=-1;
@@ -1887,6 +1896,49 @@ int Scenes(const std::wstring& dir) {
         }
         failed+=!(line && apart);
         std::printf("%s  %ls: the sweep line %d, no text overlapping %d\n",line && apart ? "ok  " : "FAIL",name,line,apart);
+    }
+    // The sea rescue's banner under both (heli.cpp): why no heli came, the longest line it says.
+    {
+        sceneSweepOn=true;sceneSweep=SweepCue{true,12,7,0x59};sceneRescueOn=true;sceneRescue=RescueCue{};
+        _snwprintf_s(sceneRescue.text,_TRUNCATE,hudtext::Tr(hudtext::Tx::rescueFailed),hudtext::Tr(hudtext::Tx::supportRescueNeedsUpdate),10);
+        sceneRescue.bad=true;
+        Scene(dir,L"rescue_banner",ground);
+        bool line=false,apart=true;
+        for(std::size_t i=0;i<drew.size();++i) {
+            const Drew& p=drew[i];
+            if(p.text==sceneRescue.text)line=line || (p.x0>=0.0f && p.x1<=1920.0f && p.y1<=1080.0f);
+            for(std::size_t k=i+1;k<drew.size();++k) {
+                const Drew& q=drew[k];
+                if(!p.text.empty() && !q.text.empty() && p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1)apart=false;
+            }
+        }
+        failed+=!(line && apart);
+        std::printf("%s  rescue_banner: the rescue line %d, no text overlapping %d\n",line && apart ? "ok  " : "FAIL",line,apart);
+        // The room's builds differ, under it: the longest notice (older guests, every feature named).
+        wchar_t features[160];
+        _snwprintf_s(features,_TRUNCATE,L"%ls%ls%ls%ls%ls%ls%ls",hudtext::Tr(hudtext::Tx::versionFeatRescue),hudtext::Tr(hudtext::Tx::versionListSep),
+                     hudtext::Tr(hudtext::Tx::versionFeatAir),hudtext::Tr(hudtext::Tx::versionListSep),hudtext::Tr(hudtext::Tx::versionFeatLoadout),
+                     hudtext::Tr(hudtext::Tx::versionListSep),hudtext::Tr(hudtext::Tx::versionFeatCommand));
+        wchar_t who[120],what[160];
+        _snwprintf_s(who,_TRUNCATE,hudtext::Tr(hudtext::Tx::versionPeersOlder),2);
+        _snwprintf_s(what,_TRUNCATE,hudtext::Tr(hudtext::Tx::versionUnavailable),features);
+        _snwprintf_s(sceneVersion,_TRUNCATE,L"%ls\n%ls",who,what);
+        sceneVersionOn=true;
+        Scene(dir,L"version_banner",ground);
+        bool shown=false,clear=true;
+        for(std::size_t i=0;i<drew.size();++i) {
+            const Drew& p=drew[i];
+            const bool mine=p.text==who || p.text==what;
+            if(mine && !(p.x0>=0.0f && p.x1<=1920.0f && p.y1<=1080.0f))clear=false;   // every line of it on screen
+            if(p.text==what)shown=true;
+            for(std::size_t k=i+1;k<drew.size();++k) {
+                const Drew& q=drew[k];
+                if(!p.text.empty() && !q.text.empty() && p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1)clear=false;
+            }
+        }
+        failed+=!(shown && clear);
+        std::printf("%s  version_banner: the build line on screen %d, no text overlapping %d\n",shown && clear ? "ok  " : "FAIL",shown,clear);
+        sceneVersionOn=false;sceneRescueOn=false;
     }
     sceneSweepOn=false;
     // The debug spawn tool's menu (DebugSpawn=1): the longest category (vehicles, its window scrolled to the middle) and

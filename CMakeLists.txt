@@ -536,6 +536,14 @@ set_tests_properties(support_loadout_ini PROPERTIES ENVIRONMENT PYTHONIOENCODING
 add_test(NAME support_resources COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/support_resource_audit.py")
 set_tests_properties(support_resources PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME online_gate_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/online_gate_guard.py")
+# The sea rescue comes only through the support deployment (a catalog entry, real pilot seated): no seatless spawner.
+add_test(NAME rescue_support_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/rescue_support_guard.py")
+set_tests_properties(rescue_support_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The rescue's cancel reasons, its takeoff point, and the room's build notice (pure: src/rescue_logic.h, support_entry.h,
+# version_notice.h).
+add_executable(rescue_logic_test tests/rescue_logic_test.cpp)
+target_compile_options(rescue_logic_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME rescue_logic COMMAND rescue_logic_test)
 # The debug spawn tool ships off and an upgraded ini keeps it off; its natives and stock SGOs against the installed game
 # (skip 77 without it).
 add_test(NAME debug_spawn_ini COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/debug_spawn_ini_test.py")

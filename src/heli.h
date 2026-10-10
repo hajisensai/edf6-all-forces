@@ -79,4 +79,8 @@ bool GunBarrel(const unsigned char* v,const unsigned char* weapon,float* pos,flo
 // Sea rescue: once a game frame from the frame's common step (crew.cpp FrameTick), whether or not any heli
 // is out.
 void RescueTick() noexcept;
+// The rescue banner (draw thread): what became of this machine's rescue (asked for, coming, failed and why), a moment
+// after it changed; `bad`: it brought no heli.
+struct RescueCue { wchar_t text[128]; bool bad; };
+bool PlayerRescueCue(RescueCue* out) noexcept;
 }  // namespace crew

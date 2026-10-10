@@ -36,7 +36,7 @@ bool IsJet(const void*) noexcept { MissingDependency();return false; }
 bool JetFliesItself(const void*) noexcept { MissingDependency();return false; }
 bool JetInLine(const float*,const float*,const void*) noexcept { MissingDependency();return false; }
 void JetFrame(unsigned char*) noexcept { MissingDependency(); }
-unsigned char* HeliLaunch(HeliBody,const float*,const float*) noexcept { MissingDependency();return nullptr; }
+bool SupportRescueAt(const float*,wchar_t*,std::size_t) noexcept { MissingDependency();return false; }
 PluginBody BodyOf(const void*) noexcept { MissingDependency();return PluginBody{}; }
 bool IsSub(const void*) noexcept { MissingDependency();return false; }
 bool SupportAircraftOwned(const void*) noexcept { return false; }   // no support deployment in this test
@@ -147,6 +147,35 @@ int main() {
     remotePilot[edf::kHumanPlayer]=1;Put<std::uint16_t>(remotePilot,0x128,1);
     HeliReap(nullptr);
     check(!h.ref,"player takeover releases called flight ownership without deleting aircraft");
+    // The sea rescue's hand-over (support_dispatch.cpp RescueHeliDeployed): the heli is the deployment's, matched to this
+    // machine's waiting request by the request's point; another machine's rescue (another point) is not taken.
+    {
+        alignas(16) static unsigned char copy[0x2100]{},copyCtrl[16]{};
+        Put<void*>(copy,kSelfCtrl,copyCtrl);Put<int>(copyCtrl,8,1);Put<std::int32_t>(copy,kTeam,2);
+        const float mine[3]={10,-2,30},theirs[3]={400,-2,30};
+        call=RescueCall{};
+        RescueHeliDeployed(copy,mine,false,ObjRef{});
+        check(call.phase==CallPhase::idle,"no request waiting: a peer's rescue copy is not taken");
+        call.phase=CallPhase::requested;std::memcpy(call.at,mine,12);call.requestedAt=GameMs();
+        RescueHeliDeployed(copy,theirs,false,ObjRef{});
+        check(call.phase==CallPhase::requested,"another machine's rescue (another point) is not this machine's heli");
+        RescueHeliDeployed(copy,mine,false,ObjRef{});
+        check(call.phase==CallPhase::assigned && call.vehicle==copy && call.ref.Is(copy) && !call.flown && call.team==2,
+              "this machine's request gets the deployment's heli (a peer's copy, its own team kept for the end)");
+        RescueRequestFailed(L"late refusal");
+        check(call.phase==CallPhase::assigned,"a late failure notice cannot drop a heli already here");
+        RescueCue banner{};
+        check(PlayerRescueCue(&banner) && !banner.bad,"the banner says the heli is coming");
+        call=RescueCall{};call.phase=CallPhase::requested;std::memcpy(call.at,mine,12);
+        RescueRequestFailed(L"此处没有开放天空");
+        check(call.phase==CallPhase::idle && call.retryAt==GameMs()+kRetryMs,"a refused request is asked again kRetryMs later");
+        check(PlayerRescueCue(&banner) && banner.bad && std::wcsstr(banner.text,L"此处没有开放天空")!=nullptr,"and the player is told why");
+        call=RescueCall{};
+        // Flown here with no requester known (left the room meanwhile): no flight is kept for it (it is sent away).
+        RescueHeliDeployed(copy,mine,true,ObjRef{});
+        bool flying=false;for(const auto& r:rescues)flying=flying || r.phase!=RescuePhase::none;
+        check(!flying,"a rescue heli with no requester never stays to look for someone else");
+    }
     std::printf("heli_command_test: %d checks passed\n",checks);
     return 0;
 }

@@ -1,5 +1,6 @@
 // The jets' bodies (jet.cpp): the SGOs (jet_internal.h kBodies), their preload for a mission, spawning a jet
-// (JetLaunch and the airstrike takeovers) or a called heli, the body's fix-ups and its far rendering.
+// (JetLaunch and the airstrike takeovers) or a support aircraft (PrepareSupportAircraft), the body's fix-ups and its
+// far rendering.
 // Run-time spawning (docs/mission-airstrike-re.md §3): JetLaunch makes a jet exactly like the script's
 // CreateFriend: CreateObject on the preloaded SGO, team friend, RideAi(true). Only RideAi with true reads the
 // SGO's mission_setup (0x633063 -> slot 46), which is what writes the jet mark, the weapons and the heli
@@ -20,9 +21,6 @@ namespace {
 // &matrix, path, &InitParam) -> the object (the manager owns it), SetTeam(object, team, 1).
 constexpr unsigned kPreload=0x7A3780;
 constexpr std::size_t kPreloadMgr=0x20B29A8;
-// The heli starts kHeliClear over the ground: high enough that it does not hit it while its rotor spins
-// up (heli.cpp gives it the hover rotor at once), low enough that it is soon at its working height.
-constexpr float kHeliClear=40.0f;
 const unsigned char kPreloadSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48};
 const unsigned char kCreateObjectSig[]={0x40,0x55,0x53,0x56,0x57,0x41,0x54,0x41,0x56,0x41,0x57,0x48,0x8D,0x6C,0x24,0xD9};
 const unsigned char kSetTeamSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x20,0x41};
@@ -441,18 +439,4 @@ unsigned char* JetLaunchThrown(ThrownDrone what,const float* at,const float* hea
     __except(FaultLog("JET thrown drone launch",GetExceptionInformation())){return nullptr;}
 }
 
-unsigned char* HeliLaunch(HeliBody as,const float* from,const float* heading) noexcept {
-    const Body b=HeliBodyOf(as);
-    if(!spawnOk || !Preloaded(b) || !At<void*>(image,kObjectMgr))return nullptr;
-    __try {
-        float start[3]={from[0],from[1],from[2]};
-        ClearGround(start,kHeliClear);
-        alignas(16) float m[16];
-        Facing(heading,start,m);
-        unsigned char* const v=SpawnJet(b,m);
-        NoteLocalCopy(v,nullptr);   // whose its damage is online: the call's / the rescue's (online_authority.h)
-        if(v)Log("HELI v=%p launched: %ls at (%.0f,%.0f,%.0f)",v,Row(b).file,start[0],start[1],start[2]);
-        return v;
-    } __except(FaultLog("HELI launch",GetExceptionInformation())){return nullptr;}
-}
 }  // namespace crew

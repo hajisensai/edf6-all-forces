@@ -38,6 +38,8 @@ struct Hooks {
     // This machine's hello extension (support_protocol.h kExtVariants) and the Bloom filter of the variant files it has
     // preloaded this mission (support_loadout.h BloomAdd); nullptr: none (an older build's hello: 0 and empty).
     void (*variants)(std::uint32_t* ext,unsigned char* bloom32) noexcept=nullptr;
+    // Whether `catalog` is the sea rescue (support_dispatch.cpp IsRescue): its own channel and cooldown on the host.
+    bool (*ownChannel)(std::uint32_t) noexcept=nullptr;
 };
 bool ValidPlan(const Plan& plan,bool requireIds=true) noexcept;
 } // namespace support_net
@@ -64,6 +66,14 @@ bool SupportPeersAcceptLoadout() noexcept;
 bool SupportPeersHaveVariantFile(std::uint64_t hash) noexcept;
 // Host: whether every peer applies unit variants at all (an older build's do not); offline / no peer: true.
 bool SupportPeersApplyVariants() noexcept;
+// Whether every peer has the sea rescue catalog entry (support_protocol.h kExtSeaRescue); true offline / with no session. Without it the
+// host refuses the rescue with a reason (the swimmer's machine is told, and logs it).
+bool SupportPeersAcceptRescue() noexcept;
+// The room's builds differ (version_notice.h): the HUD's line about it, for a while after it changed (draw thread).
+bool SupportVersionCue(wchar_t* out,std::size_t capacity) noexcept;
+// Host: the player whose request made committed transaction `token`, by its stable identity (the requester's
+// authenticated PUID resolved to its mission player actor; this machine's player for its own). False when unknown.
+bool SupportTransactionRequester(std::uint64_t token,ObjRef* out) noexcept;
 // Requester ownership: native EOS PUID must equal the authenticated transport
 // sender and belong to the sealed current-world participant set.
 bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) noexcept;

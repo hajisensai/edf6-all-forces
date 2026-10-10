@@ -5,6 +5,7 @@
 namespace crew {
 void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept {if(out && capacity)out[0]=0;}
 int SupportCallCount() noexcept { return 3; }
+int SupportMenuCount() noexcept { return 3; }
 const wchar_t* SupportCallName(int) noexcept { return L"Support"; }
 SupportIcon SupportCallIcon(int) noexcept { return SupportIcon::jet; }
 SupportVariant SupportCallVariant(int) noexcept { return SupportVariant::none; }

@@ -21,7 +21,7 @@ const wchar_t* SupportAirCallName(int) noexcept{return L"air";}
 const wchar_t* SupportAirCallKey(int) noexcept{return L"AIR";}
 bool SupportSoloHostWorld() noexcept{return false;}
 bool SupportAircraftSpec(int,SupportAircraft*) noexcept{return false;}
-support::Refusal PlanAirSupport(int,const float*,const float*,support::Route*,int) noexcept{return support::Refusal::unsupported;}
+support::Refusal PlanAirSupport(const SupportAircraft&,const float*,const float*,support::Route*) noexcept{return support::Refusal::unsupported;}
 unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float*,const wchar_t*) noexcept{return nullptr;}
 bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool) noexcept{return false;}
 bool DeleteSupportAircraft(const ObjRef&) noexcept{return false;}
@@ -30,9 +30,15 @@ const wchar_t* SupportSoldierFailureText() noexcept{return L"";}
 bool ApplySupportSoldierResource(const float*,std::uint32_t,const unsigned char*,bool,ObjRef*,const wchar_t*) noexcept{return false;}
 bool CreateSupportSoldierUnregistered(const float*,std::uint32_t,const unsigned char*,bool,ObjRef*,const wchar_t*) noexcept{return false;}
 bool SupportPeersAcceptAirborne() noexcept{return true;}
+bool SupportPeersAcceptRescue() noexcept{return true;}
+void RescueHeliDeployed(unsigned char*,const float*,bool,const ObjRef&) noexcept{}
+bool SupportTransactionRequester(std::uint64_t,ObjRef*) noexcept{return false;}
+bool SubDeck(const float*,float*) noexcept{return false;}
+int RescueTakeoffPads(float (*)[3],int) noexcept{return 0;}
+support::Refusal PlanTakeoffSupport(const SupportAircraft&,const float*,const float (*)[3],int,support::Route*) noexcept{return support::Refusal::noEntry;}
+void RescueRequestFailed(const wchar_t*) noexcept{}
 bool SupportPeersAcceptTransports() noexcept{return true;}
 bool SupportPeersAcceptLoadout() noexcept{return true;}
-support::Refusal PlanAirSupportFor(SupportAircraft,const float*,const float*,support::Route*,int) noexcept{return support::Refusal::unsupported;}
 bool SupportAircraftReady(const SupportAircraft&) noexcept{return false;}
 bool TransportDeliver(const void*,const void* const*,int,const float*) noexcept{return false;}
 bool TransportParadrop(const void*,const float*) noexcept{return false;}

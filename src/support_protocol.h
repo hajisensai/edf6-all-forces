@@ -24,8 +24,37 @@ static_assert(kCapabilities<kMaxUnits,"hello.index carries the capability bits")
 // the peer has preloaded this mission. An older build sends zeros there and ignores ours.
 // kExtVariants: it applies plan unit variants (support_net.h Unit::variant: support_loadout.h looks and vehicle pylons,
 // sent in the unit message's `challenge`) and writes the ones it lacks to its pending list. A host plans a variant
-// applied only when every peer announced this and has its file by the filter; otherwise stock, said.
-constexpr std::uint32_t kExtVariants=1u,kExtensions=kExtVariants;
+// applied only when every peer announced this and has its file by the filter; otherwise stock, said. The variants hook
+// (support_net.h Hooks::variants) announces it.
+// kExtSeaRescue: its catalog has the sea rescue entry (support_call.h SupportRescueCatalog, the catalog's last) and its
+// Validate accepts that entry's plan (one 410, its pilot only: the door seats are the swimmer's). A host plans a rescue
+// only when every peer has it (PeersHaveExtension); an older peer's catalog ends before that index and would refuse the
+// plan mid-transaction with no reason anyone sees. Every hello of this build announces it (Session::Tick), whatever the
+// hook says: it is the catalog's, not a mission's.
+// kExtRescueChannel (2026-10-10, the user: 「救援应该有单独的cd」): it takes part in a sea rescue transaction while another
+// one (a map call's, another player's rescue) is still being made. The host gives a rescue its own channel only when
+// every peer announced it: one rescue in flight per requester, beside the map's one, never under the map's 2 s rate,
+// each requester's rescues kRescueCooldownMs apart (SetRescueCooldown). Without it a rescue waits its turn as before.
+// Announced as kExtSeaRescue is (the hello's index has no bit left: #100's kCapTransports 4 / kCapLoadout 8).
+constexpr std::uint32_t kExtVariants=1u,kExtSeaRescue=2u,kExtRescueChannel=4u,kExtensions=kExtVariants|kExtSeaRescue|kExtRescueChannel;
+constexpr std::uint32_t kExtBuilt=kExtSeaRescue|kExtRescueChannel;   // what every hello of this build announces (Tick)
+constexpr std::uint64_t kRescueCooldownMs=30000;   // the default; the host's ini SeaRescueCooldownSec sets it
+// What a build has, both words in one (the version notice compares and names these, support_net.cpp VersionTick): the
+// capability bits low (below kMaxUnits, 4 bits), the extension bits above them.
+constexpr std::uint32_t kExtShift=4;
+static_assert(kMaxUnits==(1u<<kExtShift),"the capability bits fill exactly the low kExtShift bits");
+constexpr std::uint32_t Features(std::uint32_t caps,std::uint32_t ext) noexcept { return (caps&(kMaxUnits-1))|(ext<<kExtShift); }
+constexpr std::uint32_t FeatureExt(std::uint32_t ext) noexcept { return ext<<kExtShift; }
+constexpr std::uint32_t kFeatures=Features(kCapabilities,kExtensions);
+// The host's welcome carries its own features too (2026-10-10, the user: 「进入房间发现版本不同步给一下说明吧」), in its
+// `catalog` (unused by a welcome before; ValidMessage bounds it below 1024, room for ten bits), and `ok` = 1 when a peer of
+// the room announced fewer than the host: a guest then knows an older host, a newer one, or an older third player, and
+// says so (support_net.cpp VersionTick). An older host sends 0 in both (its welcome never set them); an older guest
+// ignores them. The hello's own `index` keeps its bound (below kMaxUnits).
+static_assert(kFeatures<1024,"welcome.catalog carries the host's features");
+// Request statuses kept per requester (host) and for this machine's own requests (any machine): the map's call and the
+// sea rescue are separate requests, each told its own outcome even when the other came later.
+constexpr std::uint32_t kRecentRequests=4;
 enum class Kind : std::uint32_t { hello=1,welcome,request,begin,unit,prepare,ready,commit,result,cancel,activate,activated,requestStatus };
 struct Message {
     Kind kind=Kind::hello;
@@ -69,6 +98,21 @@ public:
     // Host: whether every peer announced all of `ext` (kExtVariants) and, `hash` non-zero, has that variant file by its
     // hello's filter (no peer: true). A client is never asked: true.
     bool PeersHaveVariant(std::uint32_t ext,std::uint64_t hash) const noexcept;
+    // Host: whether every peer announced all of `ext` in its hello's extension word (kExtSeaRescue). A client: true.
+    bool PeersHaveExtension(std::uint32_t ext) const noexcept { return PeersHaveVariant(ext,0); }
+    // Host: the heard peers whose features (Features: capabilities and extensions) lack some of this build's kFeatures
+    // (`missing`: what they lack between them, feature bits).
+    std::uint32_t PeersBehind(std::uint32_t* missing) const noexcept;
+    std::uint32_t PeersAhead() const noexcept;   // host: peers that announced features this build does not have
+    // Client: whether the host's welcome came, the features it announced (0: an older host, which announces none),
+    // and whether it said a peer of the room is behind it.
+    bool HostCapsKnown() const noexcept { return hostCapsKnown_; }
+    std::uint32_t HostCaps() const noexcept { return hostCaps_; }
+    bool RoomBehindHost() const noexcept { return hostRoomBehind_; }
+    // Host: the peer whose request made transaction `token` (0: this machine's own). False: no such requested one.
+    bool RequesterOf(std::uint64_t token,std::uint32_t* peer) const noexcept;
+    // Host: how long one requester's rescues stand apart (from its last rescue made); the host's setting decides.
+    void SetRescueCooldown(std::uint64_t ms) noexcept { rescueCooldown_=ms; }
 private:
     enum class Phase { empty,planning,assembling,prepared,spawning,active,cancelled };
     struct Transaction {
@@ -76,6 +120,7 @@ private:
         bool external=false;
         bool cancelConfirmed=false;
         bool spawned=false;
+        bool rescue=false;   // on the rescue channel (Hooks::ownChannel, every peer kExtRescueChannel)
         RequestStatus failure=RequestStatus::cancelled;
         std::uint64_t token=0,loadout=0;
         Plan plan{};
@@ -98,9 +143,14 @@ private:
     std::array<std::uint32_t,kMaxPeers+1> peerMissions_{};
     std::array<std::uint32_t,kMaxPeers+1> peerCaps_{},peerExt_{};
     std::array<std::array<unsigned char,32>,kMaxPeers+1> peerBloom_{};
+    std::uint32_t hostCaps_=0;bool hostCapsKnown_=false,hostRoomBehind_=false;
+    std::array<std::uint64_t,kMaxPeers+1> rescueAt_{};   // host: when each requester's last rescue was made (0: none)
+    std::uint64_t rescueCooldown_=kRescueCooldownMs;
+    bool InFlight(const Transaction& t) const noexcept;
     struct Reply { std::uint32_t request=0;RequestStatus status=RequestStatus::accepted;bool dirty=false; };
-    std::array<Reply,kMaxPeers+1> replies_{};
-    Reply localReply_{};
+    using Replies=std::array<Reply,kRecentRequests>;
+    std::array<Replies,kMaxPeers+1> replies_{};
+    Replies localReplies_{};
     std::array<Transaction,kMaxTransactions> transactions_{};
     bool Send(std::uint32_t peer,Message message) noexcept;
     bool Broadcast(Message message) noexcept;
@@ -113,5 +163,6 @@ private:
     void Publish(std::uint32_t peer,std::uint32_t request,RequestStatus status) noexcept;
     void Notice(std::uint32_t request,RequestStatus status) noexcept;
     void ReplyTo(std::uint32_t peer) noexcept;
+    static Reply* Record(Replies& replies,std::uint32_t request,RequestStatus status) noexcept;
 };
 } // namespace crew::support_net

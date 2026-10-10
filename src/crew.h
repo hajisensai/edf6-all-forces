@@ -65,6 +65,8 @@ struct Config {
     float rescueBelow=-5.0f;   // ...once they have been below this height (metres) for 1.5 s
     bool boardingGun=true;     // the boarding gun's rounds put the player into the friendly vehicle they hit (boarding.cpp)
     bool rescueAutoBoard=true; // ...and, in the stock board reach of a free door seat, boards them by the stock board path
+    DWORD seaRescueCooldownSec=30;   // a player's rescues stand this far apart (from the last heli made for them); the
+                                     // host's value decides online; the map's support cooldown has nothing to do with it
     float subHullHp=100000.0f; // a submarine carrier's hull HP at the base tier (its SGO's is 30000), times its tier (25 at the highest); 0 = the game's
     float subHeavyHit=1500.0f; // a hit on its hull (no deck part) counts only from a heavy source, or from this much
                                // damage in one hit (0 = only the listed heavy sources, subcarrier.cpp kHeavy)
@@ -576,11 +578,11 @@ bool JetFlying(const void* vehicle,const void* ctrl) noexcept;
 // of sight, its crew by support_dispatch.cpp Retire). False when the plugin does not fly `vehicle`.
 bool JetFerry(const void* vehicle,const float* at) noexcept;
 bool JetWithdrawNow(const void* vehicle,const char* why) noexcept;
-// A helicopter made at run time (EDF6VC_HELI_410 / _506.SGO, tools/make_jets.py) at `from` facing `heading`,
-// friend, NPC pilot: the vehicle, or nullptr (not preloaded this mission, the game failed to build it).
+// The plugin's helicopter bodies (EDF6VC_HELI_410 / _506 / _MEDIC / _TRANSPORT.SGO, tools/make_jets.py). Every one of them
+// is made by the support deployment (support_aircraft.h PrepareSupportAircraft): in the air with its real crew seated at
+// once; the sea rescue too (support_call.h SupportRescueAt). Nothing makes one with an empty or dummy seat.
 enum class HeliBody { brute410, eros506, medic410, transport410 };   // medic410: EDF6VC_HELI_MEDIC (heli.cpp Medic); transport410:
                                                                       // EDF6VC_HELI_TRANSPORT (transport.cpp)
-unsigned char* HeliLaunch(HeliBody body,const float* from,const float* heading) noexcept;
 // A bomber's payload: BombingPlane_Init's arguments (0x5AABB0; speed in metres a frame), which a jet's bomb
 // bay is set up from.
 struct BombLoad { const void* owner; float damage,spread,speed,adjust,reach; const void* param; std::int32_t seed; };

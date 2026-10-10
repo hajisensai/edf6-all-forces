@@ -39,6 +39,7 @@
 #include "turretaim.h"
 #include "vecmath.h"
 #include "warn.h"
+#include "support_net.h"
 #include <atomic>
 #include <cmath>
 #include <cstdarg>
@@ -4318,6 +4319,23 @@ void SweepBanner(Text* text,float width,float height,float s,Line* lines,int* at
     if(c.on)Label(text,lines,at,width*0.5f,height*0.5f+222.0f*s,1,kLineScale,kAmber,Tr(Tx::sweepOn),c.left,c.taken,key);
     else Label(text,lines,at,width*0.5f,height*0.5f+222.0f*s,1,kLineScale,kGreen,Tr(Tx::sweepDone),c.taken);
 }
+// The sea rescue (heli.cpp): asked for, on its way, or why no heli came; a moment, under the sweep's banner.
+void RescueCueBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
+    RescueCue c{};
+    if(!PlayerRescueCue(&c))return;
+    Label(text,lines,at,width*0.5f,height*0.5f+254.0f*s,1,kLineScale,c.bad ? kAmber : kGreen,L"%ls",c.text);
+}
+// The room's builds differ (support_net.cpp, version_notice.h): who is older or newer and what does not work because of
+// it, a while after joining (or after a player joined); under the rescue's banner.
+void VersionBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
+    wchar_t line[200];
+    if(!SupportVersionCue(line,_countof(line)))return;
+    // Who, then (after a '\n') what does not work here.
+    wchar_t* second=std::wcschr(line,L'\n');
+    if(second)*second++=0;
+    Label(text,lines,at,width*0.5f,height*0.5f+286.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",line);
+    if(second && *second)Label(text,lines,at,width*0.5f,height*0.5f+314.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",second);
+}
 // The mark key with no enemy near the aim (npcai.cpp SendToPoint): what came of it under the point for a moment (the
 // selected units sent there, how many; none selected; online); the point's own ring is the Q mark's (QMarkHud). An
 // enemy near the aim but not on it: a ring there and the word to aim at it.
@@ -4572,6 +4590,8 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         QMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         FormationBanner(t,width,height,s,lines,&at);
         SweepBanner(t,width,height,s,lines,&at);
+        RescueCueBanner(t,width,height,s,lines,&at);
+        VersionBanner(t,width,height,s,lines,&at);
         NpcPingHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         DebugSpawnHud(drawer,ctx,t,width,height,s,lines,&at);
         if(Cfg().vehicleHud) {

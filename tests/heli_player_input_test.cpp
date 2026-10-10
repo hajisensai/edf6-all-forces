@@ -51,7 +51,7 @@ bool IsJet(const void*) noexcept { if(!testJets)MissingDependency();return testJ
 bool JetFliesItself(const void*) noexcept { if(!testJets)MissingDependency();return testFliesItself; }
 bool JetInLine(const float*,const float*,const void*) noexcept { MissingDependency();return false; }
 void JetFrame(unsigned char*) noexcept { if(!testJets)MissingDependency();++jetFrames; }
-unsigned char* HeliLaunch(HeliBody,const float*,const float*) noexcept { MissingDependency();return nullptr; }
+bool SupportRescueAt(const float*,wchar_t*,std::size_t) noexcept { MissingDependency();return false; }
 PluginBody BodyOf(const void*) noexcept { MissingDependency();return PluginBody{}; }
 bool IsSub(const void*) noexcept { MissingDependency();return false; }
 bool SubDeck(const float*,float*) noexcept { MissingDependency();return false; }

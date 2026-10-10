@@ -198,8 +198,9 @@ SIDE_GUNS: tuple[GunRound, ...] = (CANNON, GATLING)   # src/jet_bay.cpp kSideGun
 GUNSHIP_AIRFRAME = ((0.0, 2.136, 0.0), (25.938, 2.009, 8.078))
 SHELL_STOCK = 'DEMOGUNSHIPFIREE25.SGO'   # the gunship's shells (src/jet_bay.cpp kGunshipSgo), fired as the game has them
 SHELL_HIT = 10.0                         # its hit radius: #7 10 x #8 1
-# The helis the Air Raider's call weapons bring (src/jet.cpp HeliLaunch, tools/call_weapons.py): the stock
-# call-in helis made script-placeable (vcobjects.as_mission_sgo), so RideAi(true) gives them their weapons.
+# The helis the Air Raider's call weapons and the sea rescue bring (src/jet_spawn.cpp PrepareSupportAircraft,
+# tools/call_weapons.py): the stock call-in helis made script-placeable (vcobjects.as_mission_sgo), so RideAi(true)
+# gives them their weapons.
 HELIS: dict[str, str] = {
     'EDF6VC_HELI_410.SGO': 'VEHICLE410_HELI',
     'EDF6VC_HELI_506.SGO': 'V506_HELI',

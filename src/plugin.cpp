@@ -380,6 +380,7 @@ void LoadConfig() noexcept {
     n.seaRescue=ReadBool(L"SeaRescue",n.seaRescue);
     n.rescueBelow=ReadFloat(L"RescueBelow",n.rescueBelow);
     n.rescueAutoBoard=ReadBool(L"RescueAutoBoard",n.rescueAutoBoard);
+    n.seaRescueCooldownSec=FixInt("SeaRescueCooldownSec",ReadInt(L"SeaRescueCooldownSec",static_cast<int>(n.seaRescueCooldownSec)),0,3600);
     n.boardingGun=ReadBool(L"BoardingGun",n.boardingGun);
     n.subHullHp=ReadFloat(L"SubHullHp",n.subHullHp);
     n.subHeavyHit=ReadFloat(L"SubHeavyHit",n.subHeavyHit);
@@ -714,7 +715,8 @@ void LoadConfig() noexcept {
     Log("CONFIG proteus field %.0fm defense %.2f attack %.2f fireRate %.2f energy %.2f power %.0f; priority %.2f within %.0fm",
         n.proteusFieldRadius,n.proteusFieldDefense,n.proteusFieldAttack,n.proteusFieldFireRate,n.proteusFieldEnergy,n.proteusFieldPower,n.proteusPriority,
         n.proteusPriorityRadius);
-    Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d boardingGun=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard,n.boardingGun);
+    Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d cooldown=%lus boardingGun=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard,
+        n.seaRescueCooldownSec,n.boardingGun);
     Log("CONFIG carrierLaser=%d damage=%.0f break=%.2f",n.carrierLaser,n.carrierLaserDamage,n.carrierLaserBreak);
     Log("CONFIG calls next=%#lx prev=%#lx (0: off)",n.callNextKey,n.callPrevKey);
     Log("CONFIG physics vehicleWelding=%d giantContactCap=%d splitMissileSurface=%d stockMissilePN=%d nav=%.1f playerLockByView=%d tempestTv=%d (mouse %.1f, boost x%.1f)",
