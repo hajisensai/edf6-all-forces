@@ -2663,7 +2663,18 @@ def gunship_muzzle_wired() -> None:
     assert f'kGunshipSgo[]=L"app:/object/{make_jets.SHELL_STOCK.lower()}"' in bay, 'src/jet_bay.cpp kGunshipSgo is SHELL_STOCK'
     fired = re.findall(r'Shell\((kGunshipSgo|gun\.sgo),(?:gunshipReady|gun\.ready),v,(\w+),', bay)
     assert len(fired) == 3 and all(f == 'muzzle' for _sgo, f in fired), f'the gunship fires from its muzzle: {fired}'
-    assert len(re.findall(r'GunshipMuzzle\(v,', bay)) == 4, 'GunshipMuzzle for the side guns, their sight line and both shells'
+    assert len(re.findall(r'GunshipMuzzle\(j,v,', bay)) == 4, 'GunshipMuzzle for the side guns, their sight line and both shells'
+    # The round's path against the flying airframe (the user, 2026-10-10: 「炮舰机的机炮有可能会打在自己身上」): every gunship
+    # round is held by GunshipClears before it is made, its rounds' speeds and fall are make_jets.py's (the shell's held to
+    # the stock file by check_gunship_muzzle), and the side guns' lead speeds are their rounds'.
+    for gun, round_ in (('kCannon', (make_jets.CANNON_SPEED, 0.0, 'kCannonHit')), ('kGatling', (make_jets.GATLING_SPEED, 0.0, 'kGatlingHit')),
+                        ('kShell', (make_jets.SHELL_SPEED, make_jets.SHELL_FALL, 'kShellHit'))):
+        m = re.search(gun + r'\{' + num + ',' + num + r',(\w+)\}', head)
+        assert m and float(m.group(1)) == round_[0] and float(m.group(2)) == round_[1] and m.group(3) == round_[2], f'src/gunmuzzle.h {gun}'
+    assert len(re.findall(r'if\(!GunshipClears\(j,v,', bay)) == 3, "GunshipClears before the side guns' round and both shells"
+    assert 'static_assert(kCannonSpeed==gunmuzzle::kCannon.speed*60.0f' in bay, "the side guns lead by their rounds' speed"
+    muzzle_fn = bay.split('bool GunshipMuzzle(', 1)[1].split('\n}\n', 1)[0]
+    assert 'gunmuzzle::Launch(' in muzzle_fn, 'GunshipMuzzle is gunmuzzle::Launch'
     assert re.search(r'MapRay\(muzzle,at,hit\)', bay), 'the NPC cannon looks along the line its round flies'
     make = bay.split('unsigned char* ShellMake(', 1)[1].split('\n}\n', 1)[0]
     assert 'if(ifcWaitOk)Put<std::int32_t>(ifc,kIfcWait,0);' in make, 'ShellMake zeroes the first-round wait'
@@ -2673,6 +2684,14 @@ def gunship_muzzle_wired() -> None:
     assert 'add_executable(gunship_muzzle_check EXCLUDE_FROM_ALL tools/gunship_muzzle_check.cpp)' in cmake
     checks = cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0]
     assert 'gunship_muzzle_check' in checks.split(), 'CTest runs gunship_muzzle_check'
+    # A plugin jet's own round never on its own airframe (src/ownround.h), whatever the bullet's owner bit: the collector's
+    # hook asks Judge with the candidate's body id, Publish gives every jet its own body ids, the offline check runs.
+    hooks = src('src/jet_hooks.cpp')
+    assert 'ownround::Judge(flights.jet,flights.count,owner,target,body)' in hooks, 'jet_hooks.cpp Passes asks ownround::Judge'
+    assert 'Passes(owner,target,body)' in hooks and 'OwnBodies(static_cast<const unsigned char*>(j.ref.obj),c);' in hooks
+    assert 'own round kept off its airframe' in hooks, 'the own round is logged'
+    assert 'add_executable(own_round_check EXCLUDE_FROM_ALL tools/own_round_check.cpp)' in cmake
+    assert 'own_round_check' in checks.split(), 'CTest runs own_round_check'
     assert '炮舰机的炮口' in src('README.md'), 'README.md: the gunship muzzle'
 
 
