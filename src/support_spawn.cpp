@@ -138,7 +138,7 @@ unsigned char* SpawnSupportVehicle(SupportVehicleKind kind,SupportCrewMode mode,
 }
 
 // airdrop.cpp: a vehicle the game's container made for the plugin's transport plane gets the same setup step.
-bool ApplySupportVehicleSetup(unsigned char* vehicle) noexcept {return profile && vehicle && ApplySetup(vehicle);}
+bool ApplySupportVehicleSetup(unsigned char* vehicle) noexcept {return profile && vehicle && ApplyMissionSetup(vehicle);}
 
 bool DeleteSupportVehicle(unsigned char* v) noexcept {
     if(!v || !profile)return false;
