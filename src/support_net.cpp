@@ -181,6 +181,8 @@ void Features(std::uint32_t caps,bool command,wchar_t* out,std::size_t size) noe
         const std::size_t used=std::wcslen(out);
         _snwprintf_s(out+used,size-used,_TRUNCATE,L"%ls%ls",used ? Tr(Tx::versionListSep) : L"",word);
     };
+    // Without the rescue at all, its channel goes unsaid (the line stays within the HUD's one line).
+    if(caps&support_net::kCapSeaRescue)caps&=~support_net::kCapRescueChannel;
     for(const auto& n:kNames)if(caps&n.bit)add(Tr(n.text));
     if(command)add(Tr(Tx::versionFeatCommand));
     if(!out[0])add(Tr(Tx::versionFeatSome));

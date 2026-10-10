@@ -112,10 +112,10 @@ void PadChecks() {
     int a=0,b=0;const void* heli=&a;const void* other=&b;
     const float ground[3]={100,10,50};
     unsigned long long ms=1000;
-    Check(Due(p,heli,ms) && !Observe(p,heli,ground,true,ms),"a first sample is no pad yet");
-    ms+=kSampleMs;Check(!Due(p,heli,ms-1) && !Observe(p,heli,ground,true,ms),"resting starts");
-    ms+=kStillMs-1;Check(!Observe(p,heli,ground,true,ms) && p.count==0,"not long enough");
-    ms+=2;Check(Observe(p,heli,ground,true,ms) && p.count==1 && p.at[0][0]==100,"rested kStillMs: a pad where it stood");
+    Check(Due(p,heli,ms) && !Observe(p,heli,ground,true,ms),"a first sample on the ground: resting starts, no pad yet");
+    ms+=kSampleMs;Check(!Due(p,heli,ms-1) && !Observe(p,heli,ground,true,ms),"still resting");
+    ms=1000+kStillMs-1;Check(!Observe(p,heli,ground,true,ms) && p.count==0,"not long enough");
+    ms+=1;Check(Observe(p,heli,ground,true,ms) && p.count==1 && p.at[0][0]==100,"rested kStillMs: a pad where it stood");
     Check(Occupied(p,0,ms),"it still stands there: occupied");
     const float away[3]={400,10,50};
     ms+=kSampleMs;Observe(p,heli,away,false,ms);
