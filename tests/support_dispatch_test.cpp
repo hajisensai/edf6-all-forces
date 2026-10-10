@@ -235,7 +235,8 @@ int main() {
     check(configured && netConfigured==1 && gateBeforeNetwork,"mission preload installs admission gate before configuring support networking");
     check(configuredHooks.participants==&ReadMissionParticipants && configuredHooks.admissionReady==&MissionParticipantGateReady,
           "network quorum reads actual mission actors and the verified upper admission gate");
-    check(configuredHooks.ownChannel && configuredHooks.ownChannel(29) && !configuredHooks.ownChannel(0) && !configuredHooks.ownChannel(21),
+    check(configuredHooks.ownChannel && configuredHooks.ownChannel(36) && !configuredHooks.ownChannel(29) &&
+          !configuredHooks.ownChannel(0) && !configuredHooks.ownChannel(21),
           "the protocol is told which catalog entry is the sea rescue (its own channel and cooldown)");
     check(installedCreatedObserver==&NoteSupportMissionPlayerCreated && configuredHooks.createdMatches==&MissionParticipantCreationsMatch,
           "successful native actor creation observer and exact identity matcher are both wired before creation");
