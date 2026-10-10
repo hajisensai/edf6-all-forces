@@ -45,8 +45,10 @@ bool SupportVehicleReady(SupportVehicleKind kind,SupportCrewMode mode) noexcept;
 // its copy owner (owner is the parent; otherwise inherits SetSpawnOwner, as jet::Launch). Caller then
 // registers its native network identity, boards real humans and starts its validated route; non-null is not a
 // crew/delivery success. No RideAi / DummyVehicleRider participates in initialization.
+// `variant`: a loaded copy of the hull (support_loadout.h VehicleVariantFile, app:/object/ path) preloaded this mission
+// (support_variants.h); nullptr: the stock hull. The same class and seats are required of it.
 unsigned char* SpawnSupportVehicle(SupportVehicleKind kind,SupportCrewMode mode,const float* entry,
-                                   const float* heading,const void* owner) noexcept;
+                                   const float* heading,const void* owner,const wchar_t* variant=nullptr) noexcept;
 // Rollback only a hull returned above, while the caller still owns its live reference, before delivery.
 bool DeleteSupportVehicle(unsigned char* vehicle) noexcept;
 }  // namespace crew

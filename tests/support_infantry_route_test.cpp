@@ -22,14 +22,26 @@ const wchar_t* SupportAirCallKey(int) noexcept{return L"AIR";}
 bool SupportSoloHostWorld() noexcept{return false;}
 bool SupportAircraftSpec(int,SupportAircraft*) noexcept{return false;}
 support::Refusal PlanAirSupport(int,const float*,const float*,support::Route*,int) noexcept{return support::Refusal::unsupported;}
-unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float*) noexcept{return nullptr;}
+unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float*,const wchar_t*) noexcept{return nullptr;}
 bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool) noexcept{return false;}
 bool DeleteSupportAircraft(const ObjRef&) noexcept{return false;}
 bool SupportSoldiersReady() noexcept{return true;}
 const wchar_t* SupportSoldierFailureText() noexcept{return L"";}
-bool ApplySupportSoldierResource(const float*,std::uint32_t,const unsigned char*,bool,ObjRef*) noexcept{return false;}
-bool CreateSupportSoldierUnregistered(const float*,std::uint32_t,const unsigned char*,bool,ObjRef*) noexcept{return false;}
+bool ApplySupportSoldierResource(const float*,std::uint32_t,const unsigned char*,bool,ObjRef*,const wchar_t*) noexcept{return false;}
+bool CreateSupportSoldierUnregistered(const float*,std::uint32_t,const unsigned char*,bool,ObjRef*,const wchar_t*) noexcept{return false;}
 bool SupportPeersAcceptAirborne() noexcept{return true;}
+bool SupportPeersAcceptTransports() noexcept{return true;}
+bool SupportPeersAcceptLoadout() noexcept{return true;}
+support::Refusal PlanAirSupportFor(SupportAircraft,const float*,const float*,support::Route*,int) noexcept{return support::Refusal::unsupported;}
+bool SupportAircraftReady(const SupportAircraft&) noexcept{return false;}
+bool TransportDeliver(const void*,const void* const*,int,const float*) noexcept{return false;}
+bool TransportParadrop(const void*,const float*) noexcept{return false;}
+bool JetFerry(const void*,const float*) noexcept{return false;}
+bool AirdropReady(SupportVehicleKind) noexcept{return false;}
+bool AirdropBegin(const void*,SupportVehicleKind,const float*) noexcept{return false;}
+bool JetWithdrawNow(const void*,const char*) noexcept{return false;}
+bool HeliStartLeaving(const void*) noexcept{return false;}
+bool IsHelicopter(const void*) noexcept{return false;}
 bool DeriveSupportSoldierNetId(const void*,unsigned,unsigned char*) noexcept{return false;}
 bool RegisterSupportObject(const void*,const unsigned char*) noexcept{return false;}
 bool FollowSupportSoldier(const ObjRef& who,const ObjRef& leader) noexcept {
@@ -38,10 +50,15 @@ bool FollowSupportSoldier(const ObjRef& who,const ObjRef& leader) noexcept {
 bool DeleteSupportSoldier(const ObjRef&) noexcept{return false;}
 bool HoldSupportSoldier(const ObjRef&,bool) noexcept{return true;}
 bool SupportVehicleReady(SupportVehicleKind,SupportCrewMode) noexcept{return false;}
-unsigned char* SpawnSupportVehicle(SupportVehicleKind,SupportCrewMode,const float*,const float*,const void*) noexcept{return nullptr;}
+unsigned char* SpawnSupportVehicle(SupportVehicleKind,SupportCrewMode,const float*,const float*,const void*,const wchar_t*) noexcept{return nullptr;}
+bool SupportVariantReady(const wchar_t*) noexcept{return false;}
+void NoteMissingVariant(const wchar_t*,const char*) noexcept{}
+void SupportVariantHello(std::uint32_t*,unsigned char*) noexcept{}
+bool SupportPeersApplyVariants() noexcept{return true;}
+bool SupportPeersHaveVariantFile(std::uint64_t) noexcept{return true;}
 bool DeleteSupportVehicle(unsigned char*) noexcept{return false;}
 void ConfigureSupportNet(const support_net::Hooks&) noexcept{}
-bool SubmitSupportRequest(int,const float*,wchar_t*,std::size_t) noexcept{return false;}
+bool SubmitSupportRequest(int,const float*,wchar_t*,std::size_t,std::uint64_t) noexcept{return false;}
 void SupportNetTick() noexcept{}
 void ResetSupportNet() noexcept{}
 void ReportSupportFailure(std::uint64_t) noexcept{}
@@ -60,9 +77,11 @@ bool MissionParticipantCreationsMatch(const ObjRef*,unsigned) noexcept{return tr
 bool ReadMissionParticipants(void**,unsigned,unsigned*,unsigned*) noexcept{return true;}
 namespace support_net {bool ValidPlan(const Plan& p,bool) noexcept{return p.count>0&&p.count<=kMaxUnits;}}
 bool NpcPrepareVehicleRoutePost(unsigned char*,const float*,float) noexcept{return false;}
-bool HeliCommand(const void*,const Command&) noexcept{return false;}
-bool JetCommand(const void*,const Command&) noexcept{return false;}
+bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept{return false;}
+bool JetCommand(const void*,const Command&,const ObjRef&) noexcept{return false;}
 PlayArea MapPlayArea() noexcept{return {{-930,-930},{930,930},true,0,true};}
+bool PlayAreaMeasured() noexcept{return true;}
+bool SupportAircraftLeft(const ObjRef&) noexcept{return false;}
 bool MapGroundNear(float,float,float,float* y,bool) noexcept{*y=0;return true;}
 }
 namespace {
@@ -114,14 +133,18 @@ int main() {
     Check(d.used && !d.started && !FindSquad(units[0]),"first activation waits for initial Think registration without rolling back new actors");
     Tick();Tick();Check(d.started && FindSquad(units[0])->routeActive,"online authority starts route once native squad is known");
     Check(follows==3 && At<void*>(units[1],kNpcLeaderOffset)==units[0],"support preserves real native follower links");
-    auto* fine=Entry(units[0],npcFixtureMs);bool ordinaryLongFailed=false;
-    for(int i=0;i<2200 && !ordinaryLongFailed;++i) {
+    // Ordinary MoveTo on the same direct 900 m order: before 2026-10-09 its whole-route search ran out of its bounds and
+    // the soldier stood (the map's long move orders stood for most of a minute). Now it walks a first leg under its
+    // horizon (ground_navigation.h Profile::horizon) on the same 2 m cell and node bound -- never the whole route at once.
+    auto* fine=Entry(units[0],npcFixtureMs);bool ordinaryLongMoving=false;
+    for(int i=0;i<2200 && !ordinaryLongMoving;++i) {
         npcFixtureMs+=16;++frame;world.frame=frame;
         MoveTo(units[0],Pos(units[0]),d.plan.target,kInfantryRouteStop);
-        ordinaryLongFailed=fine->navigation.failed;
+        ordinaryLongMoving=At<float>(units[0],kMoveX)!=0.0f || At<float>(units[0],kMoveZ)!=0.0f;
     }
-    Check(ordinaryLongFailed && fine->navigation.profile.cell==2 && At<float>(units[0],kMoveX)==0,
-        "negative control: ordinary MoveTo cannot navigate the same direct 900m order within its unchanged bounds");
+    Check(ordinaryLongMoving && fine->navigation.partial && !fine->navigation.failed && fine->navigation.profile.cell==2 &&
+          fine->navigation.profile.horizon>0.0f && fine->navigation.length<npc::navigation::kPath,
+        "ordinary MoveTo walks the same direct 900m order in legs: a first leg under its horizon, not the whole route");
     fine->navigation={};
     Think(units[0],0); // the isolated negative-control loop did not run the normal Think registration
     const auto originalNodeLimit=npc::navigation::kNodes;

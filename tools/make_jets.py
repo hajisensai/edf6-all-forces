@@ -226,6 +226,18 @@ MEDIC_GUN_HEAL = 150.0       # HP a round, at the base tier (the call's tier mul
 MEDIC_GUN_BLAST = 8.0        # m
 MEDIC_GUN_AMMO = 240.0
 MEDIC_GUN_NAMES = {'ja': 'メディックガン', 'en': 'Medic Gun', 'cn': '救護機砲', 'kr': '메딕 건', 'sc': '救护机炮'}
+# The transports (the user, 2026-10-09: "飞机和直升机应该也有运输机", "飞机就空降"; src/transport.cpp, docs/feature-2026-10-09-transport.md):
+# no stock helicopter or plane carries a squad (the 410 Brute: a pilot and two door gunners, the bomber: its pilot), so
+# these are the call-in Brute (EDF6VC_HELI_410, script-placeable) and the bomber401 strike jet with passenger seats added
+# the way the gunship's gunner seat is (with_gunner_seat): rows copied from a seat the model already has (its locators:
+# the models have no others), the 410 door gunner's pose and key row, every class (mask 15), no weapon on them.
+#  - TRANSPORT_HELI_FILE: 2 door gunners + TRANSPORT_HELI_EXTRA passengers = 12 riders (a 12-soldier platoon in one).
+#  - TRANSPORT_PLANE_FILE: TRANSPORT_PLANE_PASSENGERS behind the pilot; the plugin flies it as a strike jet (its mark) that
+#    attacks nothing (jet.cpp JetFerry) and drops them by parachute over the point.
+TRANSPORT_HELI_FILE = 'EDF6VC_HELI_TRANSPORT.SGO'
+TRANSPORT_HELI_EXTRA = 10
+TRANSPORT_PLANE_FILE = 'EDF6VC_JET_TRANSPORT.SGO'
+TRANSPORT_PLANE_PASSENGERS = 12
 MODEL_FILE = vc.JET_ELEVON_FILE
 MODEL = vc.JET_ELEVON_MODEL
 
@@ -274,6 +286,13 @@ def build(root: str) -> dict[str, bytes]:
         out[f'OBJECT/{name}'] = vc.as_mission_sgo(game.read('OBJECT', stock + '.SGO'))
     out[f'WEAPON/{MEDIC_GUN_FILE}'] = medic_gun(game.read('WEAPON', MEDIC_GUN_STOCK), game.read('WEAPON', MEDIC_ROUND_STOCK))
     out[f'OBJECT/{MEDIC_HELI_FILE}'] = medic_heli(out[f'OBJECT/EDF6VC_HELI_410.SGO'])
+    heli = with_passenger_seats(out[f'OBJECT/EDF6VC_HELI_410.SGO'], 1, TRANSPORT_HELI_EXTRA)
+    check_passenger_seats(heli, 3 + TRANSPORT_HELI_EXTRA, TRANSPORT_HELI_FILE, 3)
+    out[f'OBJECT/{TRANSPORT_HELI_FILE}'] = heli
+    plane = with_passenger_seats(bomber_sgo(game, 'EDF6VC_BOMBER401.SGO'), 0, TRANSPORT_PLANE_PASSENGERS,
+                                 game.read('OBJECT', GUNNER_STOCK))
+    check_passenger_seats(plane, 1 + TRANSPORT_PLANE_PASSENGERS, TRANSPORT_PLANE_FILE, 1)
+    out[f'OBJECT/{TRANSPORT_PLANE_FILE}'] = plane
     return out
 
 
@@ -324,7 +343,7 @@ def bomber_sgo(game: vc.Game, name: str) -> bytes:
 def names() -> list[str]:
     """Every path under Mods this tool writes (whether or not installed)."""
     import aircraft_collision
-    objects = [*FILES, *BOMBERS, GUNSHIP_FILE, *IMPACT_FILES, *(g.file for g in SIDE_GUNS), *HELIS, MEDIC_HELI_FILE, MODEL_FILE, *MODEL_FILES,
+    objects = [*FILES, *BOMBERS, GUNSHIP_FILE, *IMPACT_FILES, *(g.file for g in SIDE_GUNS), *HELIS, MEDIC_HELI_FILE, TRANSPORT_HELI_FILE, TRANSPORT_PLANE_FILE, MODEL_FILE, *MODEL_FILES,
                *vc.PORTAL_LASER_FILES, *aircraft_collision.FILES.values(), *jet_models.ANIMATIONS.values()]
     return [f'OBJECT/{n}' for n in objects] + [f'WEAPON/{n}' for n in (*vc.JET_WEAPON_FILES, MEDIC_GUN_FILE)]
 
@@ -375,6 +394,46 @@ def with_gunner_seat(data: bytes, stock: bytes) -> bytes:
     seat[3:7] = copy.deepcopy(gunner[3:7])
     seats.append(seat)
     return sgo.write(version, m)
+
+
+def with_passenger_seats(data: bytes, source: int, extra: int, stock: bytes | None = None) -> bytes:
+    """`data` (a vehicle SGO) with `extra` passenger seats after its own: each a copy of its seat `source` (its locators),
+    the 410 door gunner's pose and key row (from `stock`, GUNNER_STOCK's bytes; None: `data`'s own seat `source` is one),
+    every class (mask 15). No weapon setting names them (a passenger rides; the plugin seats and unseats them)."""
+    import copy
+    import sgo
+    version, m = sgo.read(data)
+    seats = m.get('vehicle_riding_position')
+    if not (isinstance(seats, list) and len(seats) > source and len(seats[source]) == 7):
+        raise ValueError(f'vehicle_riding_position 没有第 {source} 号座位')
+    gunner = (sgo.read(stock)[1]['vehicle_riding_position'][GUNNER_STOCK_SEAT] if stock is not None else seats[source])
+    if gunner[3] != GUNNER_POSE or gunner[6] != GUNNER_KEYS:
+        raise ValueError(f'乘客座的姿势 / 按键行来源不是 410 门炮手（{gunner[3]!r} / {gunner[6]!r}）')
+    for _ in range(extra):
+        seat = copy.deepcopy(seats[source])
+        seat[3:7] = copy.deepcopy(gunner[3:7])
+        seat[4] = 15
+        seats.append(seat)
+    return sgo.write(version, m)
+
+
+def check_passenger_seats(data: bytes, total: int, name: str, stock_seats: int) -> None:
+    """Re-read a transport SGO: `total` seats; every one past the stock's `stock_seats` taking every class (15) with a 410
+    door gunner's pose and key row; every seat on a door / seat locator pair of a stock seat (the models have no other); no weapon setting on a seat past the stock's (a passenger fires nothing of the vehicle's)."""
+    import sgo
+    _, m = sgo.read(data)
+    seats = m.get('vehicle_riding_position')
+    if not (isinstance(seats, list) and len(seats) == total):
+        raise ValueError(f'{name}: 应有 {total} 个座位，实际 {len(seats) if isinstance(seats, list) else seats!r}')
+    stock = [seat[:2] for seat in seats[:stock_seats]]
+    for i, seat in enumerate(seats):
+        if seat[:2] not in stock:
+            raise ValueError(f'{name}: 第 {i} 号座位的定位点不是模型已有的（原版座位的）')
+        if i >= stock_seats and (seat[4] != 15 or seat[6] != GUNNER_KEYS or not str(seat[3]).startswith('410_HELI_GUNNER_')):
+            raise ValueError(f'{name}: 第 {i} 号座位不是乘客座（{seat[3:]!r}）')
+    for w in m.get('vehicle_weapon_setting') or []:
+        if isinstance(w, list) and len(w) > 1 and (_number(w[1]) or 0.0) >= stock_seats:
+            raise ValueError(f'{name}: 有武器挂在乘客座上（{w!r}）')
 
 
 def check_gunner_seat(data: bytes, name: str = GUNSHIP_FILE) -> None:

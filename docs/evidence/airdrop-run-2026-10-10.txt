@@ -1,0 +1,37 @@
+# 2026-10-10 helicopter container airdrop of an APC, RM015 offline, drive.py run (run 6)
+# command: python tests/autopilot/drive.py run RM015 1 165 <log> --place build/Mods/Plugins/EDF6VehicleCrew.dll=Plugins/EDF6VehicleCrew.dll --place EDF6VC_HELI_TRANSPORT.SGO=OBJECT/EDF6VC_HELI_TRANSPORT.SGO --ini AirdropTest=2 --shots <dir> --key stick_up@135:6000
+[02:11:33.525] CONFIG AirdropTest=2 (tests only): a container airdrop asked once a mission
+[02:11:33.544] AIRDROP container step watched=1
+[02:12:00.915] SUPPORT AirdropTest: TRANSPORT_AIRDROP asked at (-367,0,-495), 40 m from the player: accepted
+[02:12:00.955] HELI v=0000021933F94B90 called: guard at (-367,0,-495), fuel 600s
+[02:12:00.955] HELI v=0000021933F94B90 ferry to (-367,0,-495)
+[02:12:00.955] AIRDROP helicopter 0000021933F94B90 carries container 00000219539D9E70 for app:/Object/V507_RESCUETANK_AI.SGO to (-367,0,-495)
+[02:12:38.825] AIRDROP container 00000219539D9E70 let go where it hovers at (-336,30,-381), 118 m from its point
+[02:12:38.825] HELI v=0000021933F94B90 withdrawn by a map order: leaving towards (716,2428)
+[02:12:43.825] AIRDROP vehicle 0000021953AF3140 (app:/Object/V507_RESCUETANK_AI.SGO) made by container 00000219539D9E70 at (-336,2,-381), 118 m from its point: its mission setup applied
+[02:12:43.838] VEH v=0000021953AF3140 507_Rescuetank team=5 playerTeam=0 seats=[-----] pos=(-336,2,-381) dist=156
+[02:12:47.826] AIRDROP AirdropTest: the player put into vehicle 0000021953AF3140 (team 5)
+[02:12:47.842] BOARDING v=0000021953AF3140 class 26 seat 0: the player boarded it from 156 m (press 1)
+[02:12:48.866] VEH v=0000021953AF3140 507_Rescuetank team=0 playerTeam=0 seats=[P----] pos=(-336,0,-381) dist=0
+[02:12:53.882] VEH v=0000021953AF3140 507_Rescuetank team=0 playerTeam=0 seats=[P----] pos=(-336,0,-381) dist=0
+[02:12:58.887] VEH v=0000021953AF3140 507_Rescuetank team=0 playerTeam=0 seats=[P----] pos=(-336,0,-381) dist=0
+[02:13:03.908] VEH v=0000021953AF3140 507_Rescuetank team=0 playerTeam=0 seats=[P----] pos=(-336,0,-381) dist=0
+[02:13:08.926] VEH v=0000021953AF3140 507_Rescuetank team=0 playerTeam=0 seats=[P----] pos=(-336,0,-381) dist=0
+[02:13:13.947] VEH v=0000021953AF3140 507_Rescuetank team=0 playerTeam=0 seats=[P----] pos=(-336,0,-381) dist=0
+[02:13:18.985] VEH v=0000021953AF3140 507_Rescuetank team=0 playerTeam=0 seats=[P----] pos=(-336,0,-381) dist=0
+[02:13:24.004] VEH v=0000021953AF3140 507_Rescuetank team=0 playerTeam=0 seats=[P----] pos=(-336,0,-381) dist=0
+[02:13:29.024] VEH v=0000021953AF3140 507_Rescuetank team=0 playerTeam=0 seats=[P----] pos=(-336,0,-381) dist=0
+[02:13:34.042] VEH v=0000021953AF3140 507_Rescuetank team=0 playerTeam=0 seats=[P----] pos=(-336,0,-381) dist=0
+[02:13:39.065] VEH v=0000021953AF3140 507_Rescuetank team=0 playerTeam=0 seats=[P----] pos=(-336,0,-381) dist=0
+[02:13:44.081] VEH v=0000021953AF3140 507_Rescuetank team=0 playerTeam=0 seats=[P----] pos=(-336,0,-381) dist=0
+[02:13:49.094] VEH v=0000021953AF3140 507_Rescuetank team=0 playerTeam=0 seats=[P----] pos=(-336,0,-381) dist=0
+[02:13:54.117] VEH v=0000021953AF3140 507_Rescuetank team=0 playerTeam=0 seats=[P----] pos=(-336,0,-381) dist=0
+[02:13:59.127] VEH v=0000021953AF3140 507_Rescuetank team=0 playerTeam=0 seats=[P----] pos=(-336,0,-381) dist=0
+[02:14:04.135] VEH v=0000021953AF3140 507_Rescuetank team=0 playerTeam=0 seats=[P----] pos=(-351,2,-340) dist=0
+[02:14:09.155] VEH v=0000021953AF3140 507_Rescuetank team=0 playerTeam=0 seats=[P----] pos=(-351,0,-331) dist=0
+[02:14:14.165] VEH v=0000021953AF3140 507_Rescuetank team=0 playerTeam=0 seats=[P----] pos=(-351,0,-331) dist=0
+[02:14:19.188] VEH v=0000021953AF3140 507_Rescuetank team=0 playerTeam=0 seats=[P----] pos=(-351,0,-331) dist=0
+[02:14:24.207] VEH v=0000021953AF3140 507_Rescuetank team=0 playerTeam=0 seats=[P----] pos=(-351,0,-331) dist=0
+# the driver's desktop watch:
+desktop over 7022 samples: game in the foreground 0, cursor clipped 0, cursor on the right edge 0; nudges: ['cursor set to (1880, 1040), stayed there for 2 s']
+restored Plugins/EDF6VehicleCrew.ini byte for byte; removed OBJECT/EDF6VC_HELI_TRANSPORT.SGO; restored Plugins/EDF6VehicleCrew.dll byte for byte

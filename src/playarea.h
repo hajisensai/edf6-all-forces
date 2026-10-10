@@ -32,6 +32,7 @@ struct PlayArea {
 };
 // The current mission's (playarea.cpp), game thread.
 PlayArea MapPlayArea() noexcept;
+bool PlayAreaMeasured() noexcept;   // this mission's measurement is done (MapPlayArea is no longer the square)
 void PlayAreaTick() noexcept;    // crew.cpp FrameTick: once a mission, kMeasureAfterMs into it, one side a frame
 void ResetPlayArea() noexcept;   // mission.cpp: a new mission measures again
 
