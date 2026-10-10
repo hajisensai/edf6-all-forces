@@ -148,7 +148,8 @@ struct PoseInput {
     float yawRate=0.0f;     // rad/s its facing turns (+ to its left): the feet step round a turn on the spot
     bool fire=false;        // the rifle's trigger held (the tomahawk put away at once for it; the arm up for it)
     bool present=false;     // the shield's missiles asked for: the shield turned onto the aim
-    int special=0;          // the special weapon chosen (sazabi_arms.inc Special): a glance at it when it changes
+    int special=0;          // the special used last (sazabi_arms.inc Special): a glance at it when it changes
+    int blocks=0;           // hits the raised shield has stopped (sazabi.cpp SazabiMessage, on every machine): each kicks it
 };
 struct Pose {
     M3 rot[kBoneCount];       // local rotations

@@ -13,6 +13,8 @@
 #include "body506.h"
 #include "memory.h"
 #include "airbound.h"
+#include "ferry_line.h"
+#include "air_chase.h"
 #include <cmath>
 
 namespace crew {
@@ -183,6 +185,9 @@ struct Kind {
     float trigger;                  // a charge's: m from its target it goes off (see kBlastTrigger), else 0
     bool doll;                      // it carries a hololive doll (DollMake)
     Body body;                      // the body it flies in when launched as itself
+    float blast=0.0f;               // a charge's: m its charge's blast reaches (pylib/vcobjects.py jet_guns' AmmoExplosion of
+                                    // EDF6VC_BLAST_CHARGE / EDF6VC_DOLL_CHARGE), else 0: held off its target it goes off only
+                                    // within this (JetFrame, airchase::Step)
 };
 // Blast and doll drones (Weapon::charge: a blast or doll carrier's): rotor drones that fly at their target
 // (Hover; no guns) and, within their trigger of it (or held off it by its body within kTriggerHeld times that),
@@ -214,9 +219,9 @@ inline constexpr Kind kKinds[kRoleCount]={
      120.0f, 500.0f,35.0f,700.0f, 350.0f,30.0f, 300.0f,40.0f, 50.0f,20.0f, 1800.0f, 0.0f,1.0f, 0.0f,false,Body::drone},
     // Rotor drones (Hover): cruise is the most they fly at, thrust what they turn with; no gun ever fires.
     {Role::blast,"blast",Prefer::any,FlightModel::rotor,Weapon::charge,Pose::none,&kRotorLean, 70.0f,70.0f,0.0f, 30.0f,30.0f, 8.0f,3.5f,
-     20.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 1800.0f, 0.0f,1.0f, kBlastTrigger,false,Body::blast},
+     20.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 1800.0f, 0.0f,1.0f, kBlastTrigger,false,Body::blast,15.0f},
     {Role::doll,"doll",Prefer::any,FlightModel::rotor,Weapon::charge,Pose::none,&kRotorLean, 25.0f,25.0f,0.0f, 12.0f,12.0f, 4.0f,2.0f,
-     10.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 1800.0f, 0.0f,1.0f, kDollTrigger,true,Body::doll},
+     10.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 1800.0f, 0.0f,1.0f, kDollTrigger,true,Body::doll,25.0f},
     // The gunship (JetRole::gunship): the bomber401 body (its own SGO, mark 7011) circling its anchor wide and
     // slow, never diving; it shells ground targets in reach from where it flies and fires its side cannon at them
     // from further out (GunshipFire; TargetRange: its range grows with the cannon).
@@ -237,11 +242,12 @@ constexpr bool KindsInOrder() noexcept {
     for(int i=0;i<kRoleCount;++i) {
         const Kind& k=kKinds[i];
         if(static_cast<int>(k.role)!=i || Row(k.body).role!=k.role)return false;
-        if((k.flight==FlightModel::rotor)!=(k.lean!=nullptr) || (k.weapon==Weapon::charge)!=(k.trigger>0.0f))return false;
+        if((k.flight==FlightModel::rotor)!=(k.lean!=nullptr) || (k.weapon==Weapon::charge)!=(k.trigger>0.0f) ||
+           (k.weapon==Weapon::charge)!=(k.blast>k.trigger))return false;
     }
     return true;
 }
-static_assert(KindsInOrder(),"kKinds is indexed by Role, each row's body is of its role, rotor craft lean, charges trigger");
+static_assert(KindsInOrder(),"kKinds is indexed by Role, each row's body is of its role, rotor craft lean, charges trigger and blast");
 constexpr const Kind& KindOf(Role r) noexcept { return kKinds[static_cast<int>(r)]; }
 
 // The roles a launch asks for (crew.h JetRole) and the body each flies in. The blast and doll carriers are
@@ -324,6 +330,8 @@ struct Aim {
     ULONGLONG gateAt;        // the last gun gate log (Fire)
     ULONGLONG bombAt;        // its last bomb (Fire)
     ULONGLONG rocketAt;      // its last rocket ripple (Fire)
+    airchase::Closing closing;   // a charge drone's run at its target (JetFrame: airchase::Step)
+    airchase::ShunList shun;     // targets let be for now: a charge drone's it gave up, its carrier's (VisitTarget)
 };
 // A carrier's work (CarrierGoal, LaunchDrones): hit (hpSeen fell) it sidesteps to evadeTo until evadeUntil, and
 // not again before evadeAgain; it holds still while a drone docks (docking); its station follows its target.
@@ -405,11 +413,15 @@ struct GunClock {
     int shots;               // ...and how many it has fired (the gatling's spread pattern counts on it)
     ULONGLONG lookAt;        // the NPCs' last look along its line (GunAtTarget: a ray a gap at the most)
     int held;                // ...and how many found the map in the way (logged every tenth)
+    int ownHeld;             // ...and how many would have crossed the gunship's own airframe (gunmuzzle.h Clears)
+    ULONGLONG ownHeldAt;     // ...the last such logged
 };
 // The gunship's shells and its side guns (GunshipFire): three guns, each with its own gap.
 struct ShellState {
     ULONGLONG gunAt;         // its last shell
     int gunShots;            // ...and how many it has fired
+    int shellHeld;           // ...and how many were held off its own airframe (gunmuzzle.h Clears)
+    ULONGLONG shellHeldAt;   // ...the last such logged
     GunClock guns[static_cast<int>(SideGun::count)];
 };
 
@@ -465,11 +477,13 @@ struct Jet {
     // any other, wherever in the play area, past its order's range and its way to its order's point; let go once it is no
     // longer among the enemies (dead, gone: PickTarget) or another order comes. Its point and its order stay as they were.
     ObjRef focus{};
-    // A ferry (JetFerry, transport.cpp: the paratroop plane): straight on to its command point kFerryAlt m over it, taking
-    // no target at all on the way or after (it carries soldiers, not bombs); its withdrawal ends it. Its passes (Ferry):
-    // `ferryOut` once over (or past) the point, flying on along `ferryDir` until it has room to come round for the next.
-    bool ferry=false,ferryOut=false;
-    float ferryDir[3]{};
+    // A ferry (JetFerry, transport.cpp: the paratroop plane): kFerryAlt m over its drop point, taking no target at all on
+    // the way or after (it carries soldiers, not bombs). Its passes (Ferry, ferry_line.h): along `ferryLine`, the straight
+    // line from off the map through the point to off the map past it, either way in turn (`ferryPass`) until its stick is
+    // out (JetFerryDone); past the end of that pass `ferryGone`: deleted there (JetFrame reaps it), off the map.
+    bool ferry=false,ferryGone=false;
+    support::PassLine ferryLine{};
+    ferry::Pass ferryPass{};
     unsigned char* Vehicle() const noexcept { return static_cast<unsigned char*>(const_cast<void*>(ref.obj)); }
 };
 constexpr int kMaxJets=64,kPatrolRings=6;
@@ -580,9 +594,12 @@ float TurnRadiusOf(const Kind& k,float mass,float speed) noexcept;
 const float* SoftAnchor(const Jet& j,const float* anchor,float* room) noexcept;
 void HoldOffGround(Jet& j,const float* pos,float clear,float dt,ULONGLONG ms,float rest=0.0f) noexcept;
 float Patrol(const Jet& j,const float* pos,const float* anchor,float height,float* want) noexcept;
-// A ferry's pass over `point` (Jet::ferry, the paratroop plane): at it, over it and straight on, round, back over it.
-// Returns the speed to fly it at (its slowest loiter: the stick jumps over the point).
-float Ferry(Jet& j,const float* pos,const float* point,float height,float* want) noexcept;
+// A ferry's passes along its line (Jet::ferry, the paratroop plane; ferry_line.h), `height` over it. Returns the speed to fly
+// it at (FerrySpeed: its slowest loiter, the stick jumps over the point); sets ferryGone past its last pass's end.
+float Ferry(Jet& j,const float* pos,float height,float* want) noexcept;
+// m/s a ferry of kind `k` flies at, and m: its turn's radius there (the room its line's ends keep: support_entry.h PassEnd).
+float FerrySpeed(const Kind& k) noexcept;
+float FerryTurn(const Kind& k) noexcept;
 // `lift`: m/s^2 of vertical acceleration apart from the kind's thrust (hover_lift.h: the player's); 0, one budget (the NPCs').
 // `npcGoal`: clamp autonomous goals to the NPC soft band; player control and its hail pass false.
 void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const float* goal,const float* face,float speed,float climb,

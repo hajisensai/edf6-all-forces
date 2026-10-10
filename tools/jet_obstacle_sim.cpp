@@ -121,7 +121,6 @@ bool GunBarrel(const unsigned char*,const unsigned char*,float*,float*) noexcept
 int ReadStores(unsigned char*,Store*,int) noexcept { return 0; }
 void TriggerStore(const Store&) noexcept {}
 void NpcGear(unsigned char*,float,float) noexcept {}
-void CarrierFlames(const unsigned char*,unsigned char* const*,float,ULONGLONG) noexcept {}
 void JetFlames(const unsigned char*,float,bool,ULONGLONG) noexcept {}
 void JetSmoke(const unsigned char*,bool,ULONGLONG) noexcept {}
 bool JetBodyStep(unsigned char*,float*,float*) noexcept { return false; }
@@ -135,6 +134,7 @@ bool SazabiMessage(unsigned char*,std::uint32_t,void*,MessageRestore*) noexcept 
 bool PrimerMessage(unsigned char*,std::uint32_t,void*,MessageRestore*) noexcept { return false; }
 namespace jet {
 Jet jets[kMaxJets]{};
+bool Preloaded(Body) noexcept { return true; }   // every body there (LimitsOf: a doll carrier launches doll drones)
 }  // namespace jet
 }  // namespace crew
 
@@ -201,7 +201,7 @@ Role RoleNamed(const char* n) {
 }
 
 // --- --selftest ---
-constexpr float kFerryCheckOver=100.0f;   // m: a ferry's pass comes this near its point at least
+constexpr float kFerryCheckOver=30.0f;    // m: a ferry's pass crosses its point this near its line at least
 constexpr float kPullMargin=15.0f;   // m: the least a pull-out may leave under it (Guard aims at kMinAlt, 25)
 
 // A body for a selftest case: at `at`, flying `dir` (unit) at `speed`, rolled `bank` rad about its path (0 upright).
@@ -357,43 +357,76 @@ int SelfTest(const char* outDir) {
                     r.launched ? "entry" : "run  ",static_cast<double>(r.over),static_cast<double>(r.off),static_cast<double>(gun),
                     static_cast<double>(over),static_cast<double>(msl),ok ? "ok" : "FAIL");
     }
-    // The paratroop plane's passes (jet_flight.cpp Ferry; transport.cpp jumps within 400 m of the point): from 3 km out,
-    // abeam, it comes over the point, and round again for another pass. Patrol's 1000 m ring never brought it within 400 m.
+    // The paratroop plane's passes (jet_flight.cpp Ferry, ferry_line.h; 2026-10-10, the user: 「空降时外援飞来的路线不对……
+    // 直线之类的更合理的路线才对吧」): on a stock map's ground (+-1750 m, its soft box +-1000) it comes in from off the map
+    // (support_entry.h AirRoute: 1950-2700 m out) on the line through the point, along it over the point and on to the line's
+    // end off the map, round there (inside the square, never deleted at the world's edge) and back over the point along the
+    // same line; its stick out, on to the end of that pass and gone there. The soft edge never turns it back on its line.
+    // Before: chasing the point it went by 288 m abeam and circled the north-east corner for 2 minutes (13:17-13:19 log).
     {
         boxes.clear();
+        const float wasGround=groundHalf;groundHalf=1750.0f;
         const Role role=Role::strike;
         std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0);
         unsigned char* v=mem.data();
         Jet& j=jets[0];
-        const float point[3]={0.0f,0.0f,0.0f},at[3]={0.0f,150.0f,-3000.0f},dir[3]={1.0f,0.0f,0.0f};
-        Place(j,v,ctrl.data(),role,at,dir,KindOf(role).cruise,0.0f);
-        j.ferry=true;
-        int passes=0;bool inside=false;float nearest=1e9f,firstAt=-1.0f;
-        const ULONGLONG born=nowMs;
-        for(int f=0;f<60*180;++f) {
-            nowMs+=16;
-            const float* pos=reinterpret_cast<const float*>(v+kPosition);
-            const float* m=reinterpret_cast<const float*>(v+kMatrix);
-            float nose[3]={m[8],m[9],m[10]};
-            if(!Normalize(nose)){nose[0]=0;nose[1]=0;nose[2]=1;}
-            j.seen=nowMs;
-            Sense(j,pos,nowMs);
-            const float clear=GroundClearance(pos);
-            float want[3]={nose[0],0.0f,nose[2]};
-            const float speed=Ferry(j,pos,point,point[1]+150.0f,want);
-            Wing(j,KindOf(role),v,pos,clear,nose,want,speed,kDt,nowMs);
-            HoldOffGround(j,pos,clear,kDt,nowMs);
-            j.m.ready=true;
-            Move(j,v);
-            const float d=HorizDist(pos,point);
-            if(d<nearest)nearest=d;
-            if(d<=400.0f && !inside){++passes;if(firstAt<0.0f)firstAt=static_cast<float>(nowMs-born)*0.001f;}
-            inside=d<=400.0f;
+        const float point[3]={150.0f,0.0f,-200.0f};
+        const struct { const char* what; float at[3],dir[3]; } runs[]={
+            {"from off the map, on the line",{-2350.0f,150.0f,-200.0f},{1.0f,0.0f,0.0f}},
+            {"from off the map, 300 m off the line",{-2350.0f,150.0f,100.0f},{1.0f,0.0f,0.0f}},
+            {"diagonal, from a corner",{-1700.0f,150.0f,-2050.0f},{0.707f,0.0f,0.707f}}};
+        for(const auto& r:runs) {
+            float dir[3]={r.dir[0],0.0f,r.dir[2]};Normalize(dir);
+            Place(j,v,ctrl.data(),role,r.at,dir,KindOf(role).cruise,0.0f);
+            support::PassLine line{};
+            const support::Reach reach{WorldHalf()-kArrivalRoom,1000.0f};
+            const bool lined=support::MakePassLine(MapPlayArea(),reach,point,dir,FerryTurn(KindOf(role)),line);
+            j.ferry=true;j.ferryLine=line;j.ferryPass=ferry::Pass{};j.ferryGone=false;
+            int crossings=0,ends=0;float worstAcross=0.0f,mostOut=0.0f,firstAt=-1.0f;
+            bool lastAhead=true,inEnd=false,gone=false;float goneAt[3]{};
+            const ULONGLONG born=nowMs;
+            for(int f=0;f<60*300 && !gone;++f) {
+                nowMs+=16;
+                const float* pos=reinterpret_cast<const float*>(v+kPosition);
+                const float* m=reinterpret_cast<const float*>(v+kMatrix);
+                float nose[3]={m[8],m[9],m[10]};
+                if(!Normalize(nose)){nose[0]=0;nose[1]=0;nose[2]=1;}
+                j.seen=nowMs;
+                Sense(j,pos,nowMs);
+                const float clear=GroundClearance(pos);
+                float want[3]={nose[0],0.0f,nose[2]};
+                const float speed=Ferry(j,pos,point[1]+150.0f,want);
+                Wing(j,KindOf(role),v,pos,clear,nose,want,speed,kDt,nowMs);
+                HoldOffGround(j,pos,clear,kDt,nowMs);
+                j.m.ready=true;
+                Move(j,v);
+                if(j.ferryGone){gone=true;std::memcpy(goneAt,pos,12);}
+                float along,across;ferry::Along(line,pos,&along,&across);
+                const bool ahead=along<0.0f ? j.ferryPass.dir>0 : j.ferryPass.dir<0;   // the point still ahead on this pass
+                if(lastAhead && !ahead && std::fabs(along)<200.0f) {   // over the point (along its pass)
+                    ++crossings;
+                    if(firstAt<0.0f)firstAt=static_cast<float>(nowMs-born)*0.001f;
+                    if(crossings>0 && std::fabs(across)>worstAcross)worstAcross=std::fabs(across);
+                    if(crossings==2)j.ferryPass.done=true;   // the stick out on the second pass (JetFerryDone)
+                }
+                lastAhead=ahead;
+                const bool atEnd=along>=line.hi || along<=line.lo;
+                if(atEnd && !inEnd)++ends;
+                inEnd=atEnd;
+                const float out=std::fmax(std::fabs(pos[0]),std::fabs(pos[2]));
+                if(out>mostOut)mostOut=out;
+            }
+            float glo[2],ghi[2];support::GroundEdge(MapPlayArea(),glo,ghi);
+            const bool offMap=gone && (goneAt[0]<glo[0] || goneAt[0]>ghi[0] || goneAt[2]<glo[1] || goneAt[2]>ghi[1]);
+            const bool ok=lined && crossings>=2 && worstAcross<kFerryCheckOver && ends>=2 && gone && offMap &&
+                          mostOut<WorldHalf()-50.0f && firstAt>=0.0f && firstAt<60.0f;
+            if(!ok)++bad;
+            std::printf("ferry %s: over the point at %.1f s, %d passes %.0f m off its line at most, %d ends reached, gone %s at "
+                        "(%.0f,%.0f), %.0f m out at most %s\n",r.what,static_cast<double>(firstAt),crossings,static_cast<double>(worstAcross),
+                        ends,offMap ? "off the map" : gone ? "ON THE MAP" : "never",static_cast<double>(goneAt[0]),static_cast<double>(goneAt[2]),
+                        static_cast<double>(mostOut),ok ? "ok" : "FAIL");
         }
-        const bool ok=passes>=2 && firstAt>=0.0f && firstAt<60.0f && nearest<kFerryCheckOver;
-        if(!ok)++bad;
-        std::printf("ferry from 3 km abeam: first within 400 m at %.1f s, %d passes in 180 s, nearest %.0f m %s\n",
-                    static_cast<double>(firstAt),passes,static_cast<double>(nearest),ok ? "ok" : "FAIL");
+        groundHalf=wasGround;
     }
     // The map's focus order (2026-10-09, "飞机没办法指定攻击目标"): the marked enemy is the target before a nearer one and
     // past its guard order's range (production PickTarget / VisitTarget); out past the walls it waits, the others fought;
@@ -427,6 +460,58 @@ int SelfTest(const char* outDir) {
             std::printf("focus %-70s %s\n",c.what,c.ok ? "ok" : "FAIL");
         }
         simEnemies.clear();
+    }
+    // What a weapon that cannot reach every enemy goes for (2026-10-10, src/air_chase.h; production PickTarget / VisitTarget,
+    // the flyer probe on this world's ground at y 0): the gunship never a flyer; a doll drone, and a doll carrier, nothing
+    // over the charge's ceiling, the current target neither, nor one out of its range; one it gave up (shunned) not again
+    // until its shun is over; a gun jet any flyer as before.
+    {
+        std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0),low(0x400,0),high(0x400,0),ground(0x400,0),lowCtrl(16,0),
+            highCtrl(16,0),groundCtrl(16,0);
+        Put<const void*>(low.data(),kSelfCtrl,lowCtrl.data());Put<const void*>(high.data(),kSelfCtrl,highCtrl.data());
+        Put<const void*>(ground.data(),kSelfCtrl,groundCtrl.data());
+        Jet& j=jets[0];
+        const float at[3]={0.0f,150.0f,0.0f},dir[3]={0.0f,0.0f,1.0f},anchor[3]={0.0f,150.0f,0.0f};
+        // The low one a flyer 80 m up and 400 m off; the high one 483 m up (the log's) and nearer.
+        simEnemies={SimEnemy{low.data(),{400.0f,80.0f,0.0f}},SimEnemy{high.data(),{0.0f,483.0f,100.0f}}};
+        auto pick=[&](Role role,float range){
+            nowMs+=1000;   // past the flyer memo's look
+            const Role drones=j.carrier.drones;
+            const void* const was=j.t.target;
+            const airchase::ShunList shun=j.t.shun;
+            Place(j,mem.data(),ctrl.data(),role,at,dir,0.0f,0.0f);
+            j.carrier.drones=drones;j.t.target=was;j.t.shun=shun;j.m.groundSeen=true;j.m.groundY=0.0f;
+            PickTarget(j,mem.data(),at,anchor,range,kDt,nowMs);
+            return j.t.target;
+        };
+        struct { const char* what; bool ok; } cases[9]{};
+        j.t.target=nullptr;j.carrier.drones=Role::drone;
+        cases[0]={"a gun jet: the nearer flyer, 483 m up",pick(Role::fighter,1800.0f)==high.data()};
+        j.t.target=nullptr;
+        cases[1]={"the gunship: no flyer at all",pick(Role::gunship,1800.0f)==nullptr};
+        simEnemies.push_back(SimEnemy{ground.data(),{600.0f,2.0f,0.0f}});   // a third: on the ground
+        j.t.target=nullptr;
+        cases[2]={"the gunship: the one on the ground",pick(Role::gunship,1800.0f)==ground.data()};
+        simEnemies.pop_back();
+        j.t.target=nullptr;
+        cases[3]={"a doll drone: the low flyer, not the one over its ceiling",pick(Role::doll,1800.0f)==low.data()};
+        j.t.target=high.data();
+        cases[4]={"a doll drone: its current target over its ceiling let go",pick(Role::doll,1800.0f)==low.data()};
+        j.t.target=low.data();
+        cases[5]={"a doll drone: its current target out of its range let go",pick(Role::doll,300.0f)==nullptr};
+        j.t.target=nullptr;j.carrier.drones=Role::doll;
+        cases[6]={"a doll carrier: no drone at the one over their ceiling",pick(Role::carrier,1800.0f)==low.data()};
+        j.t.target=nullptr;j.carrier.drones=Role::drone;
+        airchase::Shun(j.t.shun,low.data(),nowMs+1000+airchase::kShunMs);
+        cases[7]={"a doll drone: the one it gave up not taken while shunned",pick(Role::doll,1800.0f)==nullptr};
+        nowMs+=airchase::kShunMs;
+        cases[8]={"...and taken again after",pick(Role::doll,1800.0f)==low.data()};
+        for(const auto& c:cases) {
+            if(!c.ok)++bad;
+            std::printf("limits %-70s %s\n",c.what,c.ok ? "ok" : "FAIL");
+        }
+        simEnemies.clear();
+        jets[0]=Jet{};
     }
     if(logFile)std::fclose(logFile);
     std::printf("%s\n",bad ? "SELFTEST FAILED" : "selftest passed");

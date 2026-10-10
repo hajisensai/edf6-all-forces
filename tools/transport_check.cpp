@@ -137,11 +137,20 @@ void Aborts() {
 }
 
 void Paradrop() {
-    Check(!JumpNow(500.0f,400.0f,0,12,0,0),"no jump before the plane is within the radius");
-    Check(JumpNow(390.0f,400.0f,0,12,1000,0),"the first jumps within it");
-    Check(!JumpNow(390.0f,400.0f,1,12,1000+kJumpEveryMs-1,1000),"one at a time");
-    Check(JumpNow(900.0f,400.0f,1,12,1000+kJumpEveryMs,1000),"the stick, once begun, goes on past the point");
-    Check(!JumpNow(0.0f,400.0f,12,12,99999,0),"all out: no more");
+    // Where the stick starts (2026-10-10: anywhere within 400 m, and 288 m abeam put the stick 250-400 m off the point):
+    // its lead short of the point along the track (the drift its canopies bleed off, half the stick), on the track.
+    const float speed=98.0f,lead=StickLead(speed,12,0.6f);
+    Check(std::fabs(lead-(speed/0.6f+5.5f*speed*0.35f))<0.5f,"the lead: the drift plus half the stick",lead);
+    Check(!StickStarts(lead+20.0f,0.0f,speed,12,0.6f),"not before its lead");
+    Check(StickStarts(lead-1.0f,0.0f,speed,12,0.6f),"at its lead, on the track: the stick starts");
+    Check(!StickStarts(lead-1.0f,kStickAcross+10.0f,speed,12,0.6f),"not with the point off its track (288 m abeam: none)");
+    Check(!StickStarts(lead-speed*kStickWindowS-5.0f,0.0f,speed,12,0.6f),"not once past its window: the next pass");
+    Check(!StickStarts(lead-1.0f,0.0f,0.5f,12,0.6f),"not standing still");
+    // Landing: the stick's middle jumper (the 6.5th of 12) carried its drift on from where it jumped: over the point.
+    const float middle=-(lead-1.0f)+5.5f*speed*0.35f+kJumpInherit*speed/0.6f;
+    Check(std::fabs(middle)<5.0f,"the stick lands centred on the point",middle);
+    Check(JumpNow(1,12,1000+kJumpEveryMs,1000) && !JumpNow(1,12,1000+kJumpEveryMs-1,1000),"one at a time, the stick goes on");
+    Check(!JumpNow(12,12,99999,0),"all out: no more");
     // The canopy: the fall held to the sink, the drift bled; a climb (a Wing Diver's boost) untouched.
     float vel[3]={30.0f,-40.0f,0.0f};
     for(int i=0;i<60;++i)ChuteStep(vel,6.0f,0.6f);

@@ -196,9 +196,9 @@ void Guide(Jet& j,const Kind& kind,const Arms& arms,Jet* mother,const float* pos
     default:
         break;
     }
-    if(j.ferry) {   // the paratroop plane: passes over its point (Ferry), never Patrol's ring round it
+    if(j.ferry) {   // the paratroop plane: passes along its line over its point (Ferry), never Patrol's ring round it
         if(j.mode!=Mode::patrol)SetMode(j,Mode::patrol,ms);
-        *speed=Ferry(j,pos,anchor,height,want);
+        *speed=Ferry(j,pos,height,want);
         return;
     }
     switch(kind.weapon) {
@@ -239,9 +239,12 @@ void Rotor(Jet& j,const Kind& kind,unsigned char* v,Jet* mother,const float* pos
         if(j.mode==Mode::recover && mp){goal[0]=mp[0];goal[1]=mp[1]-kDockBelow;goal[2]=mp[2];}
         else if(j.t.target) {
             std::memcpy(goal,j.t.aim,12);
-            // A doll drone comes in kDollRide over the ground there (still within kDollTrigger of a target on it).
-            const float under=kind.doll ? GroundClearance(goal) : kNoGround;
-            if(under!=kNoGround && under<kDollRide)goal[1]+=kDollRide-under;
+            // A doll drone comes in kDollRide over the ground there (still within kDollTrigger of a target on it); no
+            // charge drone flies higher than its ceiling over it (airchase::kChargeCeiling: its targets are under it,
+            // VisitTarget; this holds its goal there between their looks).
+            const float under=GroundClearance(goal);
+            if(under!=kNoGround && kind.doll && under<kDollRide)goal[1]+=kDollRide-under;
+            if(under!=kNoGround)goal[1]=airchase::UnderCeiling(goal[1],goal[1]-under,airchase::kChargeCeiling);
         }
         else if(mp && !mother->carrier.ordered){goal[0]=mp[0];goal[1]=mp[1]-kDockBelow*2.0f;goal[2]=mp[2];}
         else{goal[0]=anchor[0];goal[1]=anchor[1]+kThrownHover;goal[2]=anchor[2];}
@@ -474,15 +477,36 @@ void SeeFocus(void* ctx,const void* object,const float*) noexcept {
 // The map's orders (mapcmd.cpp Give). guard / follow / release: ApplyMapCommand. focus: `focus` (the enemy the player
 // marked) attacked first, its order kept (ApplyMapFocus); refused when that is no enemy of it now.
 // A ferry (transport.cpp, the paratroop plane): its command point `at` (ApplyMapCommand's guard), flown at kFerryAlt over
-// it, no target taken (Jet::ferry). Its stick jumps over the point; JetWithdrawNow then sends it off (deleted out of
-// sight, its crew first: support_dispatch.cpp Retire).
-bool JetFerry(const void* vehicle,const float* at) noexcept {
+// it, no target taken (Jet::ferry), in passes along the straight line through it along `heading` (the heading its plan
+// brought it in on), each end off the map (support_entry.h MakePassLine, ferry_line.h). Its stick jumps over the point
+// (transport.cpp); JetFerryDone then lets it fly on to the end of that pass, where it is deleted (JetFrame reaps it; its
+// crew first: support_dispatch.cpp Retire). The same point again (the deployment's Assign after BoardAirborne): kept as
+// it is.
+bool JetFerry(const void* vehicle,const float* at,const float* heading) noexcept {
     __try {
         Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle));
-        if(!j || !at || j->reap)return false;
-        j->ferry=true;j->ferryOut=false;
+        if(!j || !at || !heading || j->reap)return false;
+        if(j->ferry && j->ferryLine.at[0]==at[0] && j->ferryLine.at[1]==at[1] && j->ferryLine.at[2]==at[2])return true;
+        const support::Reach reach{ArrivalHalf(),NearDrawDistance()};
+        support::PassLine line;
+        if(!support::MakePassLine(MapPlayArea(),reach,at,heading,FerryTurn(KindOf(*j)),line)) {
+            Log("JET v=%p ferry to (%.0f,%.0f,%.0f): no line along (%.2f,%.2f) with room to turn off the map at both ends",vehicle,
+                at[0],at[1],at[2],heading[0],heading[2]);
+            return false;
+        }
+        j->ferry=true;j->ferryGone=false;j->ferryLine=line;j->ferryPass=ferry::Pass{};
         ApplyMapCommand(*j,Command{Order::guard,{at[0],at[1],at[2]}},GameMs());
-        Log("JET v=%p ferry to (%.0f,%.0f,%.0f), %.0f m over it",vehicle,at[0],at[1],at[2],kFerryAlt);
+        Log("JET v=%p ferry to (%.0f,%.0f,%.0f), %.0f m over it: passes along (%.2f,%.2f) from %.0f to %.0f m of it",vehicle,at[0],at[1],
+            at[2],kFerryAlt,line.dir[0],line.dir[2],line.lo,line.hi);
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+bool JetFerryDone(const void* vehicle) noexcept {
+    __try {
+        Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle));
+        if(!j || !j->ferry || j->reap)return false;
+        if(!j->ferryPass.done)Log("JET v=%p ferry: stick out, on along the line (%+d) to its end off the map",vehicle,j->ferryPass.dir);
+        j->ferryPass.done=true;
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
@@ -591,9 +615,20 @@ void JetFrame(unsigned char* v) noexcept {
     else j->t.target=nullptr;
     if(j->t.target){const float to[3]={j->t.aim[0]-pos[0],j->t.aim[1]-pos[1],j->t.aim[2]-pos[2]};PickStore(arms,j->t.flyer,Len(to));}
     if(kind.weapon==Weapon::charge && j->t.target && j->mode!=Mode::withdraw && j->mode!=Mode::recover) {
+        // Its run at the target (airchase::Step): within its trigger it goes off; held off it (by its body, from any side)
+        // within its charge's blast, as well; not closing in farther out, it gives the target up, shunned by it and its
+        // carrier for a while (a map focus order's target is kept: the player's).
         const float to[3]={j->t.aim[0]-pos[0],j->t.aim[1]-pos[1],j->t.aim[2]-pos[2]};
-        const float d=Len(to);
-        if(d<kind.trigger || (walled && d<kind.trigger*kTriggerHeld)){Detonate(*j,mother,d,ms);Blast(*j,v,ms);return;}
+        const float d=Len(to),held=std::fmin(kind.trigger*kTriggerHeld,kind.blast);
+        const airchase::Verdict verdict=airchase::Step(j->t.closing,j->t.target,d,kind.trigger,held,walled,ms);
+        if(verdict==airchase::Verdict::detonate){Detonate(*j,mother,d,ms);Blast(*j,v,ms);return;}
+        if(verdict==airchase::Verdict::giveUp && !j->focus.Is(j->t.target)) {
+            Log("JET v=%p %s gives up %p: %.0f m off it (y=%.0f, target y=%.0f), no nearer than %.0f m in %.0f s",j->Vehicle(),
+                kind.name,j->t.target,d,pos[1],j->t.aim[1],j->t.closing.best,static_cast<float>(airchase::kGiveUpMs)*0.001f);
+            airchase::Shun(j->t.shun,j->t.target,ms+airchase::kShunMs);
+            if(mother)airchase::Shun(mother->t.shun,j->t.target,ms+airchase::kShunMs);
+            j->t.target=nullptr;j->t.closing=airchase::Closing{};
+        }
     }
     float lead[3];
     if(j->t.target)Lead(pos,j->t.aim,j->t.tgtVel,arms,lead);
@@ -609,6 +644,7 @@ void JetFrame(unsigned char* v) noexcept {
     if(kind.flight==FlightModel::rotor)Rotor(*j,kind,v,mother,pos,anchor,want,height,hp,hpMax,dt,ms);
     else Wing(*j,kind,v,pos,clear,nose,want,speed,dt,ms);
     HoldOffGround(*j,pos,clear,dt,ms);
+    if(j->ferryGone)j->reap=true;   // past its last pass's end, off the map (Ferry): deleted there
     j->m.ready=true;
     BayFrame(*j,pos);
     if(gunner){v[kFireGun]=0;v[kFireMissile]=0;}   // the gun is the player's (playerjet_crew.inc GunnerFire)

@@ -101,8 +101,9 @@ def vehicle_file(call: Call) -> str:
 
 
 def our_sgos() -> list[str]:
-    """Every weapon SGO install writes: the calls' and the earlier games' (tools/ported_weapons.py)."""
-    return [sgo_file(c) for c in CALLS] + [pw.sgo_file(p) for p in pw.PORTS]
+    """Every weapon file install writes: the calls' SGOs and the earlier games' SGOs and assets
+    (tools/ported_weapons.py files)."""
+    return [sgo_file(c) for c in CALLS] + [rel for p in pw.PORTS for rel in pw.files(p)]
 
 
 # ---------------------------------------------------------------- reading the base
@@ -623,13 +624,17 @@ def stack(game_root: str) -> dict[str, bytes]:
                                                 fallback=fallback and c.jet == vc.SAZABI_JET)
                              for c in CALLS}
     order = sorted(CALLS, key=lambda c: plan.at[c.id])   # appended rows in their order
-    # An EDF5 weapon this run cannot build keeps the row an earlier install gave it (its SGO is still in Mods), else
-    # its row is a placeholder until EDF5 is there (pw.pending_*): its index is taken either way.
-    kept = {p.id for p in pw.PORTS if p.id not in ports and plan.at[p.id] < len(before)
-            and before[plan.at[p.id]] == p.id and os.path.isfile(_mods(game_root, pw.sgo_file(p)))}
+    # A ported weapon this run cannot build for want of its game keeps the row an earlier install gave it (all its files
+    # are still in Mods), else its row is a placeholder until the game is there (pw.pending_*): its index is taken either
+    # way. One the conversion refuses (edf5port.Unsupported) is a placeholder even then: the SGO an earlier install
+    # wrote is what an older conversion made of it (2026-10-10: 4.1 weapons with no muzzle, which crash on firing).
+    kept = {p.id for p in pw.PORTS if p.id not in ports and left_out[p.id].startswith(pw.Unavailable.__name__)
+            and plan.at[p.id] < len(before) and before[plan.at[p.id]] == p.id
+            and all(os.path.isfile(_mods(game_root, rel)) for rel in pw.files(p))}
     put_ports = [p for p in pw.PORTS if p.id not in kept]
     port_tpl = {p.id: _template_index(before, p.template) for p in put_ports}
-    out.update({pw.sgo_file(p): ports[p.id] for p in put_ports if p.id in ports})
+    for p in put_ports:
+        out.update(ports.get(p.id, {}))
     rows = s.rows
     row_template = {c.id: rows[tpl[template_of(c)]] for c in CALLS}
     port_rows = {p.id: pw.table_row(rows[port_tpl[p.id]], p) if p.id in ports
@@ -817,6 +822,16 @@ def _first_backup(game_root: str, manifest: dict, rels: list[str]) -> None:
             manifest['created'].append(rel)
 
 
+def ours(game_root: str, manifest: dict, rel: str) -> bool:
+    """Whether the Mods file `rel` (one of our_sgos) is ours to remove: what we last wrote into it (the manifest's
+    sha), or, for a file of our own prefix an older manifest may not list, not changed by another tool since. A file
+    under a stock name (an earlier game's model, ported_weapons assets) another mod may have put there: only by the
+    sha."""
+    if rel in manifest['written']:
+        return modfiles.sha256_file(_mods(game_root, rel)) == manifest['written'][rel]
+    return os.path.basename(rel).upper().startswith('EDF6VC_')
+
+
 def changed_since(game_root: str, manifest: dict, rels: list[str]) -> list[str]:
     """The files among `rels` that are not what we last wrote into them (another tool changed them since)."""
     return [rel for rel in rels if rel in manifest['written']
@@ -850,7 +865,12 @@ def install(game_root: str, files: dict[str, bytes] | None = None) -> dict[str, 
     old_rows = dict(manifest['rows'])
     _first_backup(game_root, manifest, list(files))
     ids = row_ids(files[TABLE])
-    manifest['written'] = {rel: modfiles.sha256(data) for rel, data in files.items()}
+    written = {rel: modfiles.sha256(data) for rel, data in files.items()}
+    # A port this run kept as an earlier install built it (stack: its game is gone now) keeps its files' record, or a
+    # later uninstall could not tell them ours (ours()).
+    written.update({rel: sha for rel, sha in manifest['written'].items()
+                    if rel not in written and rel in our_sgos() and ours(game_root, manifest, rel)})
+    manifest['written'] = written
     manifest['rows'] = {slot_of(x): i for i, x in enumerate(ids) if slot_of(x)}   # placeholders too, as uninstall
     commit(game_root, {**files, MANIFEST: _manifest_bytes(manifest)})
     moved = {c: (old_rows[c], manifest['rows'].get(c)) for c in old_rows if old_rows[c] != manifest['rows'].get(c)}
@@ -889,8 +909,8 @@ def uninstall(game_root: str, delete_rows: bool = False, unequipped: bool = Fals
             with open(bak, 'rb') as f:
                 changes[rel] = f.read()
         elif os.path.isfile(path):
-            if rel in changed_since(game_root, manifest, [rel]):
-                print(f'kept {rel}: another tool changed it since our install')
+            if not ours(game_root, manifest, rel):
+                print(f'kept {rel}: not what we wrote there (another tool wrote or changed it)')
                 continue
             changes[rel] = None
     _first_backup(game_root, manifest, list(shared))
@@ -924,7 +944,8 @@ def repair(game_root: str) -> list[str]:
         if rel in manifest['replaced'] and os.path.isfile(bak):
             with open(bak, 'rb') as f:
                 changes[rel] = f.read()
-        elif rel in manifest['created'] or (rel not in SHARED and os.path.isfile(_mods(game_root, rel))):
+        elif os.path.isfile(_mods(game_root, rel)) and (rel in manifest['created'] or (rel not in SHARED
+                                                                                     and ours(game_root, manifest, rel))):
             changes[rel] = None
     commit(game_root, {**changes, MANIFEST: None})
     shutil.rmtree(_mods(game_root, BACKUP), ignore_errors=True)
@@ -989,8 +1010,9 @@ def check_ports(game_root: str, ids: list[str], rows: dict[str, int]) -> bool:
         if p.id in rows and rows[p.id] != i:
             print(f'  {i:>5} {p.id}: {state} (installed at {rows[p.id]})')
             ok = False
-        if state == 'in' and not os.path.isfile(_mods(game_root, pw.sgo_file(p))):
-            print(f'  {i:>5} {p.id}: {pw.sgo_file(p)} missing')
+        lacking = [rel for rel in pw.files(p) if not os.path.isfile(_mods(game_root, rel))] if state == 'in' else []
+        if lacking:
+            print(f'  {i:>5} {p.id}: {", ".join(lacking)} missing')
             ok = False
     print(f'  ported weapons (EDF5, EDF4.1): {states["in"]} in, {states["placeholder"]} placeholders (waiting for their '
           f'game, or uninstalled), '

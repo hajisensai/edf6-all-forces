@@ -29,6 +29,10 @@ class CampaignLifecycleTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory(prefix='edf6-campaign-lifecycle-')
         self.addCleanup(temp.cleanup)
         self.root = temp.name
+        # The installer run from source queues for the game (pylib/gamelease.py): this scratch game's queue stays here.
+        queue = patch.dict(os.environ, {'EDF6_QUEUE_DIR': os.path.join(self.root, 'queues')})
+        queue.start()
+        self.addCleanup(queue.stop)
         running = patch.object(modfiles, 'refuse_while_running', lambda: None)
         running.start()
         self.addCleanup(running.stop)

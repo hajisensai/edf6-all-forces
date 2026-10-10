@@ -5,6 +5,7 @@
 #include "online_authority.h"
 #include "vehicleram.h"
 #include "gunmuzzle.h"
+#include "ifc_model.h"
 #include <malloc.h>
 #include <cstdio>
 #include <cwchar>
@@ -101,14 +102,16 @@ const wchar_t kGatlingFile[]=L"EDF6VC_GUNSHIP_GATLING.SGO";
 // installed and preloaded this mission (PreloadShells). Spread 0: every round on the aim (the cannon).
 struct SideGunSpec {
     const wchar_t* sgo; const wchar_t* file; const char* name;
-    ULONGLONG gapMs; float reach,damage,speed,hit,spread;
+    ULONGLONG gapMs; float reach,damage,speed; gunmuzzle::Round round; float spread;
     bool ready;
 };
 SideGunSpec kSideGuns[]={
-    {kCannonSgo,kCannonFile,"cannon",kCannonGapMs,kCannonReach,kCannonDamage,kCannonSpeed,gunmuzzle::kCannonHit,0.0f,false},
-    {kGatlingSgo,kGatlingFile,"gatling",kGatlingGapMs,kGatlingReach,kGatlingDamage,kGatlingSpeed,gunmuzzle::kGatlingHit,kGatlingSpread,false},
+    {kCannonSgo,kCannonFile,"cannon",kCannonGapMs,kCannonReach,kCannonDamage,kCannonSpeed,gunmuzzle::kCannon,0.0f,false},
+    {kGatlingSgo,kGatlingFile,"gatling",kGatlingGapMs,kGatlingReach,kGatlingDamage,kGatlingSpeed,gunmuzzle::kGatling,kGatlingSpread,false},
 };
 static_assert(sizeof(kSideGuns)/sizeof(kSideGuns[0])==static_cast<std::size_t>(SideGun::count),"jet::SideGun's order");
+static_assert(kCannonSpeed==gunmuzzle::kCannon.speed*60.0f && kGatlingSpeed==gunmuzzle::kGatling.speed*60.0f,
+              "a side gun's lead speed is its round's (gunmuzzle.h)");
 SideGunSpec& GunOf(SideGun g) noexcept { return kSideGuns[static_cast<int>(g)]; }
 bool& cannonReady=kSideGuns[0].ready;
 // Impact charges (ImpactDamage): tools/make_jets.py's EDF6VC_IMPACT_*.SGO, the gunship round made a one-round,
@@ -147,7 +150,9 @@ bool drillReady=false;                    // preloaded this mission (PreloadShel
 // The EMC's rounds (emc.cpp, EmcFire; pylib/vcobjects.py EMC_*, tools/make_emc.py): its beam, its charge's glow, the
 // break charge it fires at each building on its line and the blast at its end; then the Sazabi's beams (sazabi.cpp;
 // pylib/vcobjects.py SAZABI_ROUND_FILES, tools/make_sazabi.py). Order: EmcRound's.
-struct EmcFile { const wchar_t* sgo; const wchar_t* file; const char* name; };
+// `model`: its round's class builds the firing weapon's model from the InitParam (BarrierBullet01, ifc_model.h):
+// the SGO carries an animation_model and EmcFire hands it to the IFC before it fires.
+struct EmcFile { const wchar_t* sgo; const wchar_t* file; const char* name; bool model=false; };
 const EmcFile kEmcFiles[]={
     {L"app:/object/edf6vc_emc_beam.sgo",L"EDF6VC_EMC_BEAM.SGO","beam"},
     {L"app:/object/edf6vc_emc_sight.sgo",L"EDF6VC_EMC_SIGHT.SGO","sight"},
@@ -156,7 +161,7 @@ const EmcFile kEmcFiles[]={
     {L"app:/object/edf6vc_sz_mega.sgo",L"EDF6VC_SZ_MEGA.SGO","Sazabi mega particle cannon"},
     {L"app:/object/edf6vc_sz_charge.sgo",L"EDF6VC_SZ_CHARGE.SGO","Sazabi charge"},
     {L"app:/object/edf6vc_sz_funnel.sgo",L"EDF6VC_SZ_FUNNEL.SGO","Sazabi funnel beam"},
-    {L"app:/object/edf6vc_proteus_shield.sgo",L"EDF6VC_PROTEUS_SHIELD.SGO","Proteus shield"},   // tools/make_proteus.py
+    {L"app:/object/edf6vc_proteus_shield.sgo",L"EDF6VC_PROTEUS_SHIELD.SGO","Proteus shield",true},   // tools/make_proteus.py
 };
 constexpr int kEmcCount=static_cast<int>(sizeof(kEmcFiles)/sizeof(kEmcFiles[0]));
 static_assert(kEmcCount==static_cast<int>(EmcRound::proteusShield)+1,"kEmcFiles is indexed by EmcRound");
@@ -184,6 +189,17 @@ const Sig kIfcWaitSigs[]={
     {0x2B97D3,{0x41,0x89,0x86,0xD8,0x02,0x00,0x00,0x48,0x8B,0x4D,0xE8,0x48}},
 };
 bool ifcWaitOk=false;
+// The round model's contract (ifc_model.h): a BarrierBullet01 builds its model from InitParam +0x1B0; the InitParam
+// ctor leaves it valueless; a DemoIndirectFire's SGO root is at +0x100, read with the variant's find / get visitors.
+const Sig kIfcModelSigs[]={
+    {0x28FCEC,{0x4C,0x8D,0x86,0xB0,0x01,0x00,0x00,0x45,0x8D,0x4E,0x01,0x49}},   // lea r8,[rsi+0x1B0] (then 0x6BB890)
+    {0x28FD02,{0xE8,0x89,0xBB,0x42,0x00,0x49,0x8D,0x8F,0x40,0x12,0x00,0x00}},   // call 0x6BB890
+    {0x100321,{0x66,0x89,0xBB,0xC0,0x01,0x00,0x00,0x48,0x89,0xB3,0xC8,0x01}},   // InitParam: +0x1C0 = 0xFFFF
+    {0x5B56F9,{0x48,0x8D,0x9F,0x00,0x01,0x00,0x00,0x0F,0xB7,0x43,0x10,0x41}},   // DemoIndirectFire: SGO root +0x100
+    {0x5B5723,{0x4D,0x8B,0x84,0xC4,0xA8,0xEB,0x79,0x01,0x48,0x8D,0x54,0x24}},   // ...its find visitor (0x179EBA8)
+    {0x5B5767,{0x4D,0x8B,0x84,0xC4,0xF0,0xEA,0x79,0x01,0x48,0x8D,0x54,0x24}},   // ...its get visitor (0x179EAF0)
+};
+bool ifcModelOk=false;
 
 using PreloadFn=void(*)(void*,const wchar_t*,std::int32_t,std::int32_t);
 constexpr unsigned kPreload=0x7A3780;
@@ -297,10 +313,36 @@ float Tier(const unsigned char* v) noexcept {
     return kind && kind->durability>0.0f && hpMax>0.0f && std::isfinite(hpMax) ? hpMax/kind->durability : 1.0f;
 }
 
-// Where a gunship round of hit radius `hit` leaves gunship `v` for `at`: off its airframe on the line to `at`
-// (gunmuzzle.h: from the vehicle's origin, its belly's floor, the line climbed through the plane it circles banked).
-bool GunshipMuzzle(const unsigned char* v,const float* at,float hit,float* out) noexcept {
-    return gunmuzzle::Muzzle(reinterpret_cast<const float*>(v+kMatrix),gunmuzzle::kGunship,at,hit+gunmuzzle::kMargin,out);
+// Where gunship round `r` leaves gunship `v` (entry `j`) for `at`: off its airframe on the round's path relative to the
+// gunship in flight (gunmuzzle.h Launch: the box's centre out along that path to the box grown by the round's hit radius,
+// kMargin and the gunship's travel over a late round's frame). False when the aim is inside that.
+gunmuzzle::Motion MotionOf(const Jet& j) noexcept {
+    gunmuzzle::Motion mo{};
+    for(int c=0;c<3;++c){mo.vel[c]=j.m.vel[c]/60.0f;mo.spin[c]=j.m.omega[c]/60.0f;}   // m/s, rad/s -> a frame
+    return mo;
+}
+bool GunshipMuzzle(const Jet& j,const unsigned char* v,const float* at,const gunmuzzle::Round& r,float* out) noexcept {
+    return gunmuzzle::Launch(reinterpret_cast<const float*>(v+kMatrix),MotionOf(j),gunmuzzle::kGunship,r,at,r.hit+gunmuzzle::kMargin,out);
+}
+
+// Whether round `r` from `muzzle` at `aim` keeps its hit sphere off gunship `v`'s airframe as both fly (gunmuzzle.h Clears:
+// leaving at once or a frame late, falling as it does, the gunship flying and turning on). A round that would not is
+// not fired: `held: own airframe`, counted in `count` and logged whatever the debug switch, at most every kOwnHeldLogMs
+// (`at`), so a user's log shows whether a round was ever about to come at its own gunship (the user, 2026-10-10:
+// 「炮舰机的机炮有可能会打在自己身上，导致没打出去」).
+constexpr ULONGLONG kOwnHeldLogMs=2000;
+bool GunshipClears(const Jet& j,const unsigned char* v,const gunmuzzle::Round& r,const float* muzzle,const float* aim,const char* gun,
+                   const char* who,int& count,ULONGLONG& at) noexcept {
+    if(gunmuzzle::Clears(reinterpret_cast<const float*>(v+kMatrix),MotionOf(j),gunmuzzle::kGunship,r,muzzle,aim))return true;
+    ++count;
+    const ULONGLONG ms=GameMs();
+    if(!at || ms-at>=kOwnHeldLogMs) {
+        at=ms;
+        const float d[3]={aim[0]-muzzle[0],aim[1]-muzzle[1],aim[2]-muzzle[2]};
+        Log("JET v=%p gunship %s held: own airframe (%s): its round's path at %.0f m would cross the gunship flying at %.0f m/s "
+            "(%d held so far)",v,gun,who,Len(d),Len(j.m.vel),count);
+    }
+    return false;
 }
 
 // A round of side gun `gun` fired by `who` from the gunship (`pos`, its reach measured from there) at `at` (see
@@ -316,8 +358,9 @@ bool GunShot(Jet& j,SideGun g,const unsigned char* v,const float* pos,const floa
     if(Len(d)>gun.reach)return false;
     const float damage=gun.damage*Tier(v);
     float muzzle[3],aim[3];
-    if(!GunshipMuzzle(v,at,gun.hit,muzzle))return false;
+    if(!GunshipMuzzle(j,v,at,gun.round,muzzle))return false;
     gunmuzzle::Scatter(muzzle,at,gun.spread,c.shots,aim);
+    if(!GunshipClears(j,v,gun.round,muzzle,aim,gun.name,who,c.ownHeld,c.ownHeldAt))return false;
     c.at=ms;
     if(!Shell(gun.sgo,gun.ready,v,muzzle,aim,damage,true,gun.name,by))return false;
     if(Cfg().debug && c.shots%10==0)
@@ -347,7 +390,7 @@ bool GunAtTarget(Jet& j,SideGun g,const unsigned char* v,const float* pos,ULONGL
     if(Len(to)>gun.reach)return false;
     c.lookAt=ms;
     float muzzle[3],hit[3];
-    if(!GunshipMuzzle(v,at,gun.hit,muzzle))return false;   // no clear line to a target inside the airframe
+    if(!GunshipMuzzle(j,v,at,gun.round,muzzle))return false;   // no clear line to a target inside the airframe
     if(MapRay(muzzle,at,hit)>=0.0f) {
         const float gap[3]={hit[0]-at[0],hit[1]-at[1],hit[2]-at[2]};
         if(Len(gap)>kGunSightSlack) {
@@ -438,7 +481,8 @@ void GunshipFire(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms) no
     const float d[3]={j.t.aim[0]-pos[0],j.t.aim[1]-pos[1],j.t.aim[2]-pos[2]};
     if(Len(d)>kGunshipReach)return;
     float muzzle[3];
-    if(!GunshipMuzzle(v,j.t.aim,gunmuzzle::kShellHit,muzzle))return;
+    if(!GunshipMuzzle(j,v,j.t.aim,gunmuzzle::kShell,muzzle))return;
+    if(!GunshipClears(j,v,gunmuzzle::kShell,muzzle,j.t.aim,"shell","its NPC crew",j.shells.shellHeld,j.shells.shellHeldAt))return;
     j.shells.gunAt=ms;
     if(!Shell(kGunshipSgo,gunshipReady,v,muzzle,j.t.aim,kGunshipDamage*Tier(v),false,"gunship shell"))return;
     ++j.shells.gunShots;
@@ -484,7 +528,8 @@ bool CrewFire(Jet& j,unsigned char* v,const float* at,ULONGLONG ms,const char* w
     const float d[3]={at[0]-pos[0],at[1]-pos[1],at[2]-pos[2]};
     if(Len(d)>kGunshipReach)return false;
     float muzzle[3];
-    if(!GunshipMuzzle(v,at,gunmuzzle::kShellHit,muzzle))return false;
+    if(!GunshipMuzzle(j,v,at,gunmuzzle::kShell,muzzle))return false;
+    if(!GunshipClears(j,v,gunmuzzle::kShell,muzzle,at,"shell",who,j.shells.shellHeld,j.shells.shellHeldAt))return false;
     j.shells.gunAt=ms;
     if(!Shell(kGunshipSgo,gunshipReady,v,muzzle,at,kGunshipDamage*Tier(v),false,"gunship shell",by))return false;
     ++j.shells.gunShots;
@@ -566,6 +611,9 @@ bool InstallBay(bool spawnOk) noexcept {
     ifcWaitOk=shellsOk;
     for(const auto& b:kIfcWaitSigs)ifcWaitOk=ifcWaitOk && Matches(b.rva,b.bytes,sizeof(b.bytes));
     if(shellsOk && !ifcWaitOk)Log("JET the IFC's first-round wait (0x2B624D / 0x2B97BC) is not as known: shells keep their stock wait");
+    ifcModelOk=shellsOk;
+    for(const auto& b:kIfcModelSigs)ifcModelOk=ifcModelOk && Matches(b.rva,b.bytes,sizeof(b.bytes));
+    if(shellsOk && !ifcModelOk)Log("JET the round model's code (0x28FCEC / 0x100321 / 0x5B56F9) is not as known: no Proteus shield");
     return bayOk;
 }
 
@@ -584,7 +632,7 @@ void PreloadShells(void* mgr,bool gunship) noexcept {
     drillReady=shellsOk && ModFileThere(kDrillChargeFile);
     if(drillReady)reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kDrillChargeSgo,2,-1);
     for(int i=0;i<kEmcCount;++i) {
-        emcReady[i]=shellsOk && ModFileThere(kEmcFiles[i].file);
+        emcReady[i]=shellsOk && ModFileThere(kEmcFiles[i].file) && (!kEmcFiles[i].model || ifcModelOk);
         if(emcReady[i])reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kEmcFiles[i].sgo,2,-1);
     }
     char charges[64];
@@ -693,12 +741,28 @@ bool EmcRoundReady(EmcRound kind) noexcept {
     return i>=0 && i<kEmcCount && emcReady[i];
 }
 
+namespace {
+// Round `i`'s model (a model round, kEmcFiles) into the IFC of `o` (just made, not yet fired): see ifc_model.h. Not
+// carried, the round is deleted before it fires (its class would throw building it) and the kind is off this mission.
+bool EmcCarryModel(unsigned char* o,int i) noexcept {
+    ifcmodel::Carry c=ifcmodel::Carry::notMade;
+    __try { c=ifcmodel::CarryModel(image,o+ifcmodel::kDemoSgo,o+kDemoIfc+ifcmodel::kIfcModel); }
+    __except(FaultLog("EMC round model",GetExceptionInformation())){c=ifcmodel::Carry::notMade;}
+    if(c==ifcmodel::Carry::done)return true;
+    Log("JET %s: %s: deleted before it fires, off for this mission",kEmcFiles[i].name,ifcmodel::CarryText(c));
+    __try { reinterpret_cast<DeleteFn>(image+kDelete)(o); } __except(FaultLog("EMC round model delete",GetExceptionInformation())){}
+    emcReady[i]=false;
+    return false;
+}
+}  // namespace
+
 RoundObj EmcFire(EmcRound kind,const unsigned char* by,const float* from,const float* at,float damage) noexcept {
     const int i=static_cast<int>(kind);
     if(!by || !from || !at || !std::isfinite(from[0]+from[1]+from[2]+at[0]+at[1]+at[2]) || !std::isfinite(damage) || damage<0.0f ||
        !EmcRoundReady(kind))return RoundObj{};
     unsigned char* const o=ShellMake(kEmcFiles[i].sgo,emcReady[i],by,from,at,damage,true,kEmcFiles[i].name);
     if(!o)return RoundObj{};
+    if(kEmcFiles[i].model && !EmcCarryModel(o,i))return RoundObj{};
     __try { return RoundObj{o,At<const void*>(o,kSelfCtrl)}; }
     __except(FaultLog("EMC round",GetExceptionInformation())){return RoundObj{};}
 }

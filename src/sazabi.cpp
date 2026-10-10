@@ -78,6 +78,7 @@ struct Mech {
     ObjRef ref;
     unsigned char* vehicle=nullptr;
     bool driven=false,npc=false,active=false,insetSaved=false,havePrev=false,rigOk=false,rigSaid=false;
+    bool everDriven=false,parked=false;   // someone has driven it (then left: Park keeps its body), it is parked now
     float savedInset=0.0f;
     ULONGLONG frame=0,lastMs=0,logAt=0;
     float prev[3]{},measured[3]{},omega[3]{};
@@ -91,6 +92,7 @@ struct Mech {
     sazabi::Anim anim{};                // the animator's own state (sazabi_anim.h: every machine steps its own)
     ULONGLONG animMs=0;                 // the game clock at its last step
     sazabi::Pose posed{};             // this mech's last pose, also used before its next pose is composed
+    float viewBack=0.0f,viewSide=0.0f,viewFloor=0.0f;   // its camera's boom as the map leaves it (sazabi_camera.inc Boom)
     exhaust::BodyTrack track{};         // the body's matrix last frame and now (sz_root's world carried: RootFrame)
     float root[16]{},rootInv[16]{};     // sz_root's world this frame, and its inverse
     bool rootOk=false;
@@ -252,7 +254,7 @@ float FeetClear(const Mech& m) noexcept {
 
 // ------------------------------------------------------------------------------------------ driving
 void Board(Mech& m,unsigned char* v,bool npc) noexcept {
-    m.driven=true;m.npc=npc;
+    m.driven=true;m.npc=npc;m.everDriven=true;m.parked=false;
     if(!m.insetSaved){m.savedInset=At<float>(v,kAreaInset);m.insetSaved=true;}
     const float* f=reinterpret_cast<const float*>(v+kMatrix)+8;
     m.heading=std::atan2(f[0],f[2]);
@@ -334,6 +336,23 @@ void Report(Mech& m,const unsigned char* v,const Controls& c,ULONGLONG ms) noexc
     }
 }
 
+// Nobody in it, after someone drove it: the plugin keeps its body (the stock 506 flew it on as a helicopter, drifting off
+// with what it had: the user, 2026-10-09 「下沙扎比的时候它会漂移甚至像直升机，而不是高达」, the log 100 m in 9 s after
+// getting out). It walks and flies as driven with no stick and no button: it falls onto its feet, stops where it stands,
+// upright, facing as it faces. A mech never driven (just called, being delivered) is left to the stock body as before.
+void Park(Mech& m,unsigned char* v,float dt) noexcept {
+    const float* f=reinterpret_cast<const float*>(v+kMatrix)+8;
+    if(std::fabs(f[0])+std::fabs(f[2])>1e-3f)m.heading=std::atan2(f[0],f[2]);
+    m.yawRate=0.0f;
+    if(!m.parked){m.parked=true;m.fl.boostHeld=m.fl.ascendHeld=true;}   // nothing held over from the pilot
+    Fly(m,v,Controls{},dt);
+    const float nose[3]={std::sin(m.heading),0.0f,std::cos(m.heading)},up[3]={0.0f,1.0f,0.0f};
+    BodyAttitude(v,nose,up,kAttitudeGain,kAttitudeMost,m.omega);
+    Put<float>(v,kInLateral,0.0f);Put<float>(v,kInForward,0.0f);Put<float>(v,kInYaw,0.0f);
+    Put<float>(v,kInThrottle,0.0f);Put<float>(v,kInW,1.0f);
+    m.active=true;
+}
+
 void Drive(Mech& m,unsigned char* v,ULONGLONG ms) noexcept {
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     const float dt=Measure(m,pos,ms);
@@ -345,6 +364,7 @@ void Drive(Mech& m,unsigned char* v,ULONGLONG ms) noexcept {
     if(m.driven && (!driven || m.npc!=npc))Leave(m,v,true,m.npc ? "the NPC got out" : "got out");
     if(!driven) {
         RootFrame(m,v);
+        if(m.everDriven)Park(m,v,dt);
         Animate(m,dt,false);
         ArmsPose(m,dt);
         Pose(m,v);
@@ -356,12 +376,13 @@ void Drive(Mech& m,unsigned char* v,ULONGLONG ms) noexcept {
     Controls c{};
     ArmsInput arms{};
     if(npc){Pilot(m,v,dt,&c,&arms);v[kFireGun]=0;v[kFireMissile]=0;}   // the 506 fires nothing of its own
-    else{c=Read(SeatAt(v,0),dt);arms=TakeButtons(v,SeatAt(v,0));LockInput(m,v,c,dt);}   // locked, the stick is the lock's
+    else{c=Read(SeatAt(v,0),dt);arms=TakeButtons(v,SeatAt(v,0));arms.dash=c.dash;LockInput(m,v,c,dt);}   // locked, the stick is the lock's
     m.yawRate=c.turn;
     m.heading+=c.turn*dt;
     if(m.heading>sazabi::kPi)m.heading-=2.0f*sazabi::kPi;
     if(m.heading<-sazabi::kPi)m.heading+=2.0f*sazabi::kPi;
     m.aimPitch=Clamp(m.aimPitch+c.pitch,-kAimMost,kAimMost);
+    if(!npc)Boom(m,dt);         // the camera's boom kept out of the ground and the buildings (sazabi_camera.inc)
     if(!npc)Assist(m,v,dt);     // the lock-on's enemy or the aim assist's, the camera pulled onto it (sazabi_camera.inc)
     Fly(m,v,c,dt);
     const float nose[3]={std::sin(m.heading),0.0f,std::cos(m.heading)},up[3]={0.0f,1.0f,0.0f};
@@ -450,7 +471,8 @@ bool SazabiBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
     if(!Cfg().enabled || !Cfg().sazabi)return false;
     if(drill_net::Replicated(InSession(),At<std::uint16_t>(v,0x128)) && !IsOnlineAuthority(v))return false;
     const Mech* m=Find(v);
-    if(!m || m->net.remote || !m->active || !m->driven || v[kDead] || m->frame+1<GameFrame() || !At<void*>(v,kBody))return false;
+    if(!m || m->net.remote || !m->active || !(m->driven || m->parked) || v[kDead] || m->frame+1<GameFrame() || !At<void*>(v,kBody))
+        return false;
     for(int i=0;i<3;++i){lin[i]=m->fl.vel[i];ang[i]=m->omega[i];}
     return true;
 }
@@ -463,7 +485,7 @@ bool SazabiMessage(unsigned char* v,std::uint32_t msg,void* data,MessageRestore*
     if(msg==kMsgWater)return true;
     constexpr std::size_t kHitPoint=0x30,kDamage=0x50;
     if(msg!=kMsgDamage || !data || v[kDead])return false;
-    const Mech* m=Find(v);
+    Mech* const m=Find(v);
     if(!m || !m->driven || m->arms.guard<0.5f || (m->net.remote && !RemoteFresh(*m,v,GameMs())))return false;
     if(!m->net.remote && drill_net::Replicated(InSession(),At<std::uint16_t>(v,0x128)) && !IsOnlineAuthority(v))return false;
     const float* hit=reinterpret_cast<const float*>(static_cast<unsigned char*>(data)+kHitPoint);
@@ -473,6 +495,7 @@ bool SazabiMessage(unsigned char* v,std::uint32_t msg,void* data,MessageRestore*
     if(!(*damage>0.0f))return false;
     restore->at=damage;restore->was=*damage;
     *damage*=m->net.remote ? m->net.state.arms.guardShare : Cfg().sazabiGuardShare;
+    ++m->pose.blocks;   // the shield's jolt (the animator) and, driven here, its clang (ArmsStep)
     return false;
 }
 

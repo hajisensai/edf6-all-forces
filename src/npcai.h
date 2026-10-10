@@ -13,7 +13,11 @@ bool InstallNpcAi() noexcept;
 bool NpcRequestCrew(unsigned char* vehicle,bool spawned=false) noexcept;
 // Explicit support crew assignment; the supplied real soldiers still walk to the entry and board.
 int NpcBoardCrew(unsigned char* vehicle,unsigned char* const* humans,int count) noexcept;
-// A real NPC driver, or a legacy mission-script Dummy (never made by the plugin).
+// An NPC holds the seat: a legacy mission-script Dummy, or a live soldier no machine's player drives (a real crew
+// member, whichever machine runs it). What a test of "an NPC is there" asks (crew.cpp AimLines hides its red lines);
+// NpcCanYieldSeat is the stricter "and this machine may move it".
+bool NpcInSeat(const unsigned char* seat) noexcept;
+// A real NPC driver, or a legacy mission-script Dummy (never made by the plugin): NpcInSeat of seat 0.
 bool NpcDriver(const unsigned char* vehicle) noexcept;
 bool NpcCanYieldSeat(const unsigned char* seat) noexcept;
 // Already aboard: native Human seat transition, or dismount for to=-1.

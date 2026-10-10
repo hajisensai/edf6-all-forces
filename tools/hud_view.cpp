@@ -197,6 +197,15 @@ bool PlayerMap(MapReadout* o) noexcept { if(hasMap)*o=sceneMap;return hasMap; }
 bool MapOwnsView() noexcept { return hasMap || mapEasing; }
 MapCommandReadout sceneCmd{};
 bool PlayerMapCommands(MapCommandReadout* o) noexcept { if(hasMap)*o=sceneCmd;return hasMap; }
+// The damage statistics (damagestats.cpp): on in every map scene (the map's STATS tab), the page shown in StatsScenes.
+dmgstat::Book sceneBook;dmgstat::View sceneStatsView{};std::uint32_t sceneMissionMs=0;int sceneStatsTargets=0;
+bool DamageStatsRead(dmgstat::Book* b,bool* fresh,dmgstat::View* v,std::uint32_t* ms) noexcept {
+    *fresh=b->serial!=sceneBook.serial;
+    if(*fresh)std::memcpy(b,&sceneBook,sizeof(sceneBook));
+    *v=sceneStatsView;*ms=sceneMissionMs;
+    return true;
+}
+void DamageStatsUi(const float*,const int*,int n,int,int) noexcept { sceneStatsTargets=n; }
 // The NPCs' mark (npcai.cpp): none in these scenes but the ground one (GroundScene sets sceneMark).
 bool sceneMarkOn=false;float sceneMark[3]{};
 bool NpcMarkReadout(float* at) noexcept { if(sceneMarkOn)std::memcpy(at,sceneMark,12);return sceneMarkOn; }
@@ -684,6 +693,93 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     std::fclose(out);out=nullptr;
     hasMap=false;hasMapPayload=false;config.hudScale=previousScale;
     std::printf("%ls\n",path.c_str());
+}
+// The damage statistics' page (hud_stats.inc) on its own scenes: a mission's book as the hook would fill it (my weapons
+// and my vehicle's, a squad's, a support heli, another player; friendly fire, heals on friends and on an enemy, the
+// enemies' attacks, twelve minutes of it), each tab with the pointer on a bar (its tooltip), a bar's breakdown open, the
+// timeline's column picked, at 16:9, 21:9, 4:3 and a narrow split. Each scene: the page's click targets handed over, its
+// tooltip drawn whole, and no two of its lines overlapping (in English; the other languages: none English lacks, Record).
+void StatsBook() {
+    using dmgstat::Group;using dmgstat::Side;
+    dmgstat::Clear(sceneBook);
+    const wchar_t* me=Tr(Tx::statsGroupMe);
+    const wchar_t* allies=Tr(Tx::statsGroupAlly);
+    const wchar_t* others=Tr(Tx::statsGroupTeammate);
+    struct Shot { Side side; const wchar_t* weapon; Group group; const wchar_t* target; float amount; bool heal; int every; };
+    const Shot shots[]={
+        {Side::me,L"AF-99ST",Group::enemy,L"E501_ANT_BLACK",180.0f,false,1},{Side::me,L"AF-99ST",Group::enemy,L"E501_ANT_RED",160.0f,false,2},
+        {Side::me,L"Lysander Z",Group::enemy,L"E520_SPIDER_GIANT",4200.0f,false,9},{Side::me,L"Goliath D2",Group::enemy,L"E501_ANT_RED",2600.0f,false,7},
+        {Side::me,L"Goliath D2",Group::ally,allies,900.0f,false,23},{Side::me,L"Goliath D2",Group::me,me,300.0f,false,31},
+        {Side::myVehicle,L"Blacker A1 120mm Cannon With A Very Long Name",Group::enemy,L"E601_FROG_SOLDIER",3100.0f,false,5},
+        {Side::squad,L"PA-11",Group::enemy,L"E501_ANT_BLACK",95.0f,false,1},{Side::squad,L"PA-11",Group::teammate,others,60.0f,false,17},
+        {Side::support,L"EDF6VC_HELI_GUN",Group::enemy,L"E520_SPIDER_GIANT",520.0f,false,3},
+        {Side::teammate,L"Mirage 15WR",Group::enemy,L"E520_SPIDER_GIANT",330.0f,false,2},
+        {Side::me,L"Life Vendor Gun",Group::me,me,400.0f,true,6},{Side::me,L"Life Vendor Gun",Group::ally,allies,600.0f,true,8},
+        {Side::me,L"Life Vendor Gun",Group::enemy,L"E501_ANT_RED",250.0f,true,13},{Side::enemy,L"E540_QUEEN",Group::enemy,L"E501_ANT_RED",800.0f,true,19},
+        {Side::enemy,L"E501_ANT_RED",Group::me,me,45.0f,false,3},{Side::enemy,L"E501_ANT_RED",Group::ally,allies,40.0f,false,2},
+        {Side::enemy,L"E520_SPIDER_GIANT",Group::myVehicle,Tr(Tx::statsGroupMyVehicle),210.0f,false,5},
+        {Side::enemy,L"E601_FROG_SOLDIER",Group::vehicle,L"APP_VEHICLE_BLACKER",380.0f,false,11},
+    };
+    for(int tick=0;tick<720;++tick)   // a hit a second for twelve minutes, each kind at its own rate
+        for(const Shot& s:shots) {
+            if(tick%s.every)continue;
+            const float wave=1.0f+0.6f*std::sin(static_cast<float>(tick)*0.02f);
+            dmgstat::Add(sceneBook,dmgstat::Hit{s.side,s.weapon,s.group,s.target,s.amount*wave,s.heal,!s.heal && tick%(s.every*4)==0,
+                                                static_cast<std::uint32_t>(tick)*1000u},Tr(Tx::statsOther));
+        }
+    sceneMissionMs=720000u;
+    // A new book each scene (and language): never the serial the draw's last copy holds (damagestats.cpp Reset's rule).
+    static std::uint32_t generation=0;
+    sceneBook.serial+=(++generation)<<20;
+}
+// `pick`: the row whose breakdown is open (a timeline column; -1 none), or `pickName`'s row (a source; a target on the
+// enemies tab) when given.
+int StatsScene(const std::wstring& dir,const wchar_t* name,dmgstat::Tab tab,dmgstat::Scope scope,int pick,float px,float py,int width=1920,
+               const wchar_t* pickName=nullptr) {
+    StatsBook();
+    if(pickName && tab==dmgstat::Tab::enemies){for(int i=0;i<sceneBook.targets;++i)if(dmgstat::SameName(sceneBook.target[i].name,pickName))pick=i;}
+    else if(pickName){for(int i=0;i<sceneBook.sources;++i)if(dmgstat::SameName(sceneBook.source[i].name,pickName))pick=i;}
+    sceneStatsView=dmgstat::View{};
+    sceneStatsView.open=true;sceneStatsView.tab=tab;sceneStatsView.scope=scope;sceneStatsView.pick=pick;
+    sceneMap=MapReadout{};
+    sceneMap.yaw=0.0f;sceneMap.pitch=60.0f*kDeg;sceneMap.height=700.0f;sceneMap.mapKey=0x4D;sceneMap.mapButton=0x20;
+    sceneCmd=MapCommandReadout{};
+    sceneCmd.pointer=px>=0.0f;sceneCmd.px=px;sceneCmd.py=py;
+    hasMap=true;sceneStatsTargets=0;
+    const std::wstring path=dir+L"\\"+name+L".txt";
+    if(_wfopen_s(&out,path.c_str(),L"w") || !out){hasMap=false;return 1;}
+    std::fprintf(out,"W %d 1080\n",width);
+    SetScreen(width,1080);
+    float vp[16];
+    MapCamera(sceneMap,static_cast<float>(width),1080.0f,vp);
+    struct { std::int32_t x,y,w,h; } viewport{0,0,width,1080};
+    Record(name,[&]{HudDraw(vp,image,&viewport,nullptr,0);},width);
+    int failed=0;
+    if(sceneStatsTargets<6){++failed;std::printf("FAIL  %ls: %d click targets handed over\n",name,sceneStatsTargets);}
+    if(hudtext::InUse()==hudtext::Lang::en)
+        for(const auto& p:english[name].overlaps) {
+            ++failed;
+            std::printf("FAIL  %ls: \"%s\" overlaps \"%s\"\n",name,Narrow(english[name].texts[static_cast<std::size_t>(p.second)]).c_str(),
+                        Narrow(english[name].texts[static_cast<std::size_t>(p.first)]).c_str());
+        }
+    std::fclose(out);out=nullptr;
+    hasMap=false;sceneStatsView=dmgstat::View{};
+    std::printf("%ls\n",path.c_str());
+    textFailed+=failed;
+    return failed;
+}
+void StatsScenes(const std::wstring& dir) {
+    using dmgstat::Scope;using dmgstat::Tab;
+    // The rows start 160 px down the page (FrameOf at 1080 lines): the pointer on the second row, on a detail row.
+    StatsScene(dir,L"stats_weapons_hover",Tab::weapons,Scope::mine,-1,700.0f,250.0f);
+    StatsScene(dir,L"stats_weapons_all_detail",Tab::weapons,Scope::everyone,-1,1500.0f,400.0f,1920,L"Goliath D2");
+    StatsScene(dir,L"stats_enemies_detail",Tab::enemies,Scope::everyone,0,300.0f,220.0f);
+    StatsScene(dir,L"stats_taken_hover",Tab::taken,Scope::mine,-1,900.0f,220.0f);
+    StatsScene(dir,L"stats_heals_detail",Tab::heals,Scope::everyone,-1,500.0f,190.0f,1920,L"Life Vendor Gun");
+    StatsScene(dir,L"stats_timeline",Tab::timeline,Scope::everyone,40,600.0f,700.0f);
+    StatsScene(dir,L"stats_weapons_21x9",Tab::weapons,Scope::everyone,0,1200.0f,300.0f,2560);
+    StatsScene(dir,L"stats_weapons_4x3",Tab::weapons,Scope::everyone,0,1100.0f,300.0f,1440);
+    StatsScene(dir,L"stats_timeline_narrow",Tab::timeline,Scope::mine,10,400.0f,600.0f,960);
 }
 void Symbols(PlayerJetSymbols& y,const float* pos,float pitchDeg,float pathDeg) {
     std::memcpy(y.pos,pos,12);
@@ -1987,6 +2083,7 @@ int Scenes(const std::wstring& dir) {
     MapScene(dir,L"map_clickable_payload_4x3",700.0f,60.0f,20.0f,false,9,1440,2.0f,true);
     MapScene(dir,L"map_vehicle_only_controls",700.0f,60.0f,20.0f,false,9,1440,1.5f,true,true);
     MapScene(dir,L"map_online_controls",700.0f,60.0f,20.0f,false,9,1920,1.0f,true,false,true);
+    StatsScenes(dir);
     StockTank(ground);
     failed+=!MapDrawsMapAlone(ground,sceneStock.hull);
     hasStock=false;

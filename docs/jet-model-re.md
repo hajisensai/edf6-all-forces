@@ -289,6 +289,7 @@ SetLinearVelocity 写多少都没用，Havok 在积分时夹到 200：18:58 那�
 - 空母离开 1000 ms 后或死亡时删除四个 Booster。
 - 火焰朝向（2026-10-04 实测反了，已修）：原版的火焰挂在 V508 SGO `animation_model[2]` 内嵌 MAB 里的定位点「ブースト0..3」上（父骨骼 boosterF_l/F_r/B_l/B_r，欧拉角都是 (0, π, 0)，平移 (±2.15, −0.04, −5.95) / (±1.45, 0, −4.30)），世界矩阵 = L × 骨骼世界矩阵（0x6BB5A0，行向量），火焰沿矩阵 +Z 喷出（方向常量 0x1765B70 = (0,0,1)）。插件现在按同样方式算（`NozzleMatrix`：X、Z 行取反，平移 ×1.6）。第 4/5 项挂在 body 上、标志 0，只在载具某个状态（推测加速）时点火，插件不做。
 - 未验证：尺寸是否合适。
+- 2026-10-10 起喷口不再手抄：空母模型构建时从 V508 SGO 的 `boosts` 与 MAB 定位点生成 `nozzle_0..3` 骨骼（挂推力舱），尾焰与入场尾烟都从模型骨骼取，见 `docs/feedback-2026-10-10-exhaust-from-model.md`。
 
 ### 8.2 空母的俯仰与压坡度（`src/jet_internal.h` / `src/jet_flight.cpp`，`Lean`）
 
@@ -324,6 +325,11 @@ SetLinearVelocity 写多少都没用，Havok 在积分时夹到 200：18:58 那�
     不符则保留原版等待并记日志），炮弹在第一步就从炮口出去；插件自己的 SGO（机炮、撞击装药、钻头、EMC）本来就是 0。
     普罗透斯的齐射同样用这种炮弹，它按飞行时间算提前量，以前多等的 1 秒没算进去，现在也一并对上。
   - 仍未进游戏验证：新造的对象是在当帧还是下一帧走第一步（仿真按最多落后 1 帧算：起点离当时的炮口不超过 1 帧的飞行距离，2.4 m）。
+  - 2026-10-10（用户：「炮舰机的机炮有可能会打在自己身上，导致没打出去」，`docs/feedback-2026-10-10-gunship-own-rounds.md`）：上面的
+    炮口只对「机体静止、弹走直线」成立。弹不继承炮舰机速度，若晚一帧出发，起点相对机体后移一帧的航程（145 m/s 时 2.4 m）；朝前下方开火时
+    出膛点在机头面上，后移就落进机头。现在 `gunmuzzle::Launch` 沿弹相对机体的速度方向选出膛点（并把一帧航程算进外扩），
+    `gunmuzzle::Clears` 按机体速度与角速度逐帧跟弹道（0 帧和 1 帧延迟都跟），会碰到机体的不打并记 `held: own airframe`。
+    炮弹 `DEMOGUNSHIPFIREE25` 的 #6 重力系数为 0（RocketBullet01），IFC 的「弹道」求解 `0x2312A0` 按弹的重力系数抬高初速，0 时就是直线（H，静态）。
 - `GunshipFire`（`src/jet_bay.cpp`）：每 2.5 s 一发；只打非飞行目标、目标在 1800 m 内；开火门控与其它喷气机武器同一个
   `WeaponsFree`（JetPilot、有目标、不在起飞 / 回收 / 撤离），不再看直升机的 `HeliFire`。用到的 IFC 函数（`kIfcOwner` /
   `kIfcDamage`）走弹舱的签名校验（`bayOk`），DemoIndirectFire 的 vtable 也先确认可读。
@@ -338,7 +344,7 @@ SetLinearVelocity 写多少都没用，Havok 在积分时夹到 200：18:58 那�
   远相机 500 m 到 20 km，只画 bit26（`0x04000000`）。
 - 载具的渲染节点建立时遮罩是 `0x12000000`，没有 bit26，所以飞出 1000 m 的喷气机就看不见了。
 - 游戏自己的开关是 SGO `FarRender` / `use_far_render` 走的 `image+0x11B3020(node, true)`。
-  喷气机的节点是模型组件 `vehicle+0xE40`（vtable `image+0x176B9A8`），遮罩在节点 `+0x20`。
+  喷气机的节点是模型组件 `vehicle+0xE40`，遮罩在节点 `+0x20`。**更正（2026-10-10）**：它是 `AnimationModel`（RTTI `0x17C4030`，基类 `umbra::Object@0`），构造函数 `0x6B8740` 先调 `umbra::Object` 构造（写 vtable `0x176B9A8`）再在 `0x6B875D` 覆盖成自己的 vtable `0x17C4030`，所以运行时读到的永远是 `0x17C4030`，原来只认 `0x176B9A8` 的校验让每架飞机都“far rendering off”（实机日志 `has vtable ...DBC4030`，基址 `...C400000`）。现在两者都认，并要求 `node+0x10`（Umbra::Object*）非空才调用（`0x11B3020` 不判空）。
 - 插件每帧（`JetFrame` → `src/jet_spawn.cpp` `FarRender`）检查：vtable 不符 → 记日志、这架不再处理；bit26 已在 → 什么都不做；
   否则调用开关并复查，没生效就关掉这架的远景。近相机那一路不变。
 - 开关函数在安装时核签名（`kSetFarRenderSig`：`44 8B 41 20 41 8B C0 0F BA F0 1A 41 0F BA E8 1A`，即 `mov r8d,[rcx+20h]; mov eax,r8d;

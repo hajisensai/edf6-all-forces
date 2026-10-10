@@ -3,8 +3,9 @@
 
   python -B tools/make_edf41_weapons.py [--edf41 DIR] [--edf5 DIR] [--edf6 DIR]
 
-Runs once on a machine with the three games; the JSON is a registry tools/ported_weapons.py installs from, the weapon
-data itself converted from the player's EDF4.1 at install time (pylib/edf5port.py weapon41). A weapon is a row of
+Runs once on a machine with the three games; the JSON is a registry tools/ported_weapons.py installs from, each weapon
+converted here (pylib/edf5port.py weapon41) and kept in it ('weapon'), so the install needs no EDF4.1 (2026-10-10 user:
+make them ahead of time, as EDF5's). A weapon is a row of
 4.1's WEAPON/_WEAPONTABLE.SGO no row of EDF5's or EDF6's table names, in Japanese or English (make_edf5_weapons.key /
 words, and without 4.1's unit suffix: its 榴弾砲〔砲兵隊〕 is EDF6's 榴弾砲); one EDF5 has but EDF6 lacks is
 tools/make_edf5_weapons.py's to bring over.
@@ -39,6 +40,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 sys.path.insert(0, HERE)
 import acb  # noqa: E402
+import dsgo  # noqa: E402
 import edf5port  # noqa: E402
 import make_edf5_weapons as m5  # noqa: E402
 import rootcpk  # noqa: E402
@@ -319,8 +321,9 @@ def build(edf41: str, edf5: str, edf6: str) -> dict:
         if missing:
             skipped.append({'sgo': sgo_id, 'name': ja, 'reason': 'EDF6 没有这些资源：' + ', '.join(missing)})
             continue
+        members = sgo.read(g4.read('WEAPON', file))[1]
         try:   # what the install will do with it (tools/ported_weapons.py build_sgo): refused here, not there
-            edf5port.weapon41(sgo.read(g4.read('WEAPON', file))[1], {})
+            edf5port.weapon41(members, {})
         except edf5port.Unsupported as e:
             skipped.append({'sgo': sgo_id, 'name': ja, 'reason': f'转换不支持：{e}'})
             continue
@@ -359,6 +362,8 @@ def build(edf41: str, edf5: str, edf6: str) -> dict:
             'pack': 0, 'template': template, 'text': entry_text,
             'damage_attribute': e6.damage_attribute(category, ammo), 'cues': swaps,
             'unmapped_stats': len(left_ja),
+            # The weapon itself, converted here: the install builds it from this, with no EDF4.1.
+            'weapon': dsgo.dump(edf5port.weapon41(members, {L.lower(): names[L] for L in LANGS}).root),
         })
     return {'source': "EDF4.1 Root.cpk WEAPON/_WEAPONTABLE.SGO + _WEAPONTEXT.SGO; CN / SC / KR edf41port/translations.json",
             'weapons': weapons, 'skipped': skipped}
@@ -371,6 +376,7 @@ def main() -> int:
     ap.add_argument('--edf6', default=os.path.join(STEAM, 'EARTH DEFENSE FORCE 6'))
     a = ap.parse_args()
     data = build(a.edf41, a.edf5, a.edf6)
+    data['weapons'] = m5.keep_order(OUT, data['weapons'])
     with open(OUT, 'w', encoding='utf-8', newline='\n') as f:
         json.dump(data, f, ensure_ascii=False, indent=1)
         f.write('\n')

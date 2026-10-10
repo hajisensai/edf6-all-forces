@@ -76,6 +76,10 @@ bool NpcMarkEnemy(const void*,const float*,bool) noexcept { return false; }
 bool VisitEnemiesOf(std::int32_t,EnemyVisitor,void*) noexcept { return true; }
 PlayerFix player{};
 const Config& Cfg() noexcept { static const Config c{};return c; }
+// The damage statistics' page (damagestats.cpp): never shown here.
+int DamageStatsUiAt(float,float) noexcept { return 0; }
+void DamageStatsClick(int) noexcept {}
+bool DamageStatsShown() noexcept { return false; }
 float MapRay(const float*,const float*,float*) noexcept { return -1; }
 float MapFloorRay(const float*,const float*,float*) noexcept { return -1; }
 bool MapGroundNear(float,float,float,float*,bool) noexcept { return false; }

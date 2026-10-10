@@ -12,6 +12,8 @@ bool supportSky=true,supportGround=true,supportMeasured=true;
 Sea supportSea=Sea::land;
 Sea SeaAt(float,float,float* surface) noexcept {*surface=1;return supportSea;}
 PlayArea MapPlayArea() noexcept { return {{-1500,-1500},{1500,1500},supportMeasured,0,true}; }
+float HavokHalf() noexcept { return 3000.0f; }   // BigWorld off: the stock world
+float SupportPassTurn(const SupportAircraft& spec) noexcept { return spec.transportPlane ? 266.0f : 0.0f; }   // jet_flight.cpp FerryTurn
 // Ground height under (x, z): flat by default; `supportSlope` m per m rising from the map's centre; `supportStep` a
 // ledge every 30 m outward (no flat ground anywhere). Vertical rays meet that same ground.
 float supportSlope=0,supportStep=0;
@@ -195,6 +197,10 @@ int main() {
     // 2026-10-09: air support is made in the air at the edge and flies in; no runway, no ground for a crew.
     Check(PlanAirSupport(call0,supportTarget,observer,&route)==support::Refusal::none && route.from[1]>=150,
           "production entry planner puts the aircraft in the air at the route's height");
+    // Off the map (2026-10-10: made 180 m inside the ground, in plain sight): past the ground's edge (the walls +-1500 stand
+    // kVoidMargin inside it) by kOffMap, inside the physical square (crew.h ArrivalHalf: Havok's 3000 less kArrivalRoom).
+    Check(std::fmax(std::fabs(route.from[0]),std::fabs(route.from[2]))>=1500.0f+area::kVoidMargin+support::kOffMap-0.5f &&
+          std::fabs(route.from[0])<=ArrivalHalf() && std::fabs(route.from[2])<=ArrivalHalf(),"the entry stands off the map, inside the square");
     supportSlope=0.05f;supportStep=2.0f;   // a hillside of ledges: no flat ground anywhere
     Check(PlanAirSupport(four,supportTarget,observer,&route)==support::Refusal::none,"air support needs no flat ground at all");
     {float slot[3];support::AirFormationSlot(route,3,1.0f,slot);float g=0;MapGroundNear(slot[0],slot[2],0,&g,true);

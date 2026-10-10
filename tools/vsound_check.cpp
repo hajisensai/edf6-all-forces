@@ -706,6 +706,7 @@ void SazabiScenario(const std::wstring& dir) {
     play(SzSfx::beamShot,7.2f,kCam);play(SzSfx::beamHit,7.4f,200.0f);
     play(SzSfx::saberOn,8.0f,kCam);play(SzSfx::whoosh,8.8f,kCam);play(SzSfx::whoosh,9.4f,kCam);
     play(SzSfx::saberHit,9.6f,kCam);play(SzSfx::saberOff,10.5f,kCam);
+    play(SzSfx::shieldBlock,11.4f,kCam);play(SzSfx::shieldBlock,11.9f,kCam);
     play(SzSfx::cannonShot,13.0f,kCam);
     play(SzSfx::missileLaunch,14.0f,kCam);
     play(SzSfx::funnelLaunch,14.5f,kCam);

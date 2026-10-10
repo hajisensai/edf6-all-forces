@@ -74,6 +74,10 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           git diff --exit-code -- src/stores.inc
           if ($LASTEXITCODE) { Write-Error 'src/stores.inc is stale: run python tools/gen_stores.py and commit it'; exit 1 }
+          # src/nozzles_gen.h is measured on the game's models (no Root.cpk here): checked against its own record of
+          # what it was made from (tools/gen_nozzles.py --check).
+          python tools/gen_nozzles.py --check
+          if ($LASTEXITCODE) { Write-Error 'src/nozzles_gen.h is stale: run python tools/gen_nozzles.py (with the game) and commit it'; exit 1 }
 
       - name: Self-test of the install chain
         shell: pwsh

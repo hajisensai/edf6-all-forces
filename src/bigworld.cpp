@@ -35,6 +35,7 @@ constexpr int kMostLogged=96;            // a mission's pieces logged at most
 using AttachFn=void(__fastcall*)(void*);
 AttachFn nextAttach=nullptr;
 int logged=0;
+float boundsHalf=3000.0f;   // the Havok world's half size the patch put in (HavokHalf)
 
 bool BoundsFour(std::size_t rva,float value) noexcept {
     const float* v=reinterpret_cast<const float*>(image+rva);
@@ -83,10 +84,13 @@ bool InstallBigWorld() noexcept {
             nextAttach=reinterpret_cast<AttachFn>(current);
             pieces=PatchVtableSlot(slot,current,reinterpret_cast<void*>(&AttachHook));
         }
-        Log("HOOK bigworld bounds=%d (+-%.0f m from the next mission load) pieces=%d",bounds,bounds ? want : 3000.0f,pieces);
+        boundsHalf=bounds ? want : 3000.0f;
+        Log("HOOK bigworld bounds=%d (+-%.0f m from the next mission load) pieces=%d",bounds,boundsHalf,pieces);
         return bounds;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
+
+float HavokHalf() noexcept { return boundsHalf; }
 
 namespace {
 // The map's ground as the physics sees it (the user, 2026-10-05: the big map; the far ground pieces reach about
