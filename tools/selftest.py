@@ -5994,6 +5994,65 @@ def ported_assets_bundled() -> None:
             with open(pw.bundled(rel), 'rb') as f:
                 assert f.read() == legacy_assets.convert(source, g5.read(*source.split('/'))), rel
 
+
+@test
+def edf41_objects_shipped() -> None:
+    """edf41port: every object's files are shipped (edf41port/objects, the registry's SHA-256), every shipped file is
+    some object's (a dropped object leaves none behind), each SGO's MAB blocks are EDF6's (0x83, pylib/legacy_sgo.py)
+    and each model archive's MDBs EDF6's (0x20, pylib/legacy_assets.py)."""
+    import hashlib
+    import edf41_objects as eo
+    import legacy_sgo
+    import mdb
+    import sgo
+    reg = eo.registry()
+    assert reg['objects'], 'no object registered: this check is empty'
+    listed = {rel for o in reg['objects'] for rel in o['files']}
+    assert listed == set(reg['files']), 'the registry lists files no object needs, or the reverse'
+    root = os.path.join(ROOT, 'edf41port', 'objects')
+    shipped = {os.path.relpath(os.path.join(d, f), root).replace(os.sep, '/') for d, _, fs in os.walk(root) for f in fs}
+    assert shipped == listed, f'shipped but unlisted: {sorted(shipped - listed)[:5]}; listed, not shipped: {sorted(listed - shipped)[:5]}'
+    for rel in listed:
+        with open(eo.bundled(rel), 'rb') as f:
+            data = f.read()
+        assert hashlib.sha256(data).hexdigest() == reg['files'][rel], rel
+        if rel.endswith('.SGO'):
+            assert not legacy_sgo.mab_blocks(data), f'{rel}: a MAB block still in 4.1\'s form'
+            assert sgo.load(data=data).get('xgs_scene_object_class'), rel
+        elif rel.endswith(('.RAB', '.MRAB')):
+            models = [f for f in mdb.rab_read(data).files if f.name.lower().endswith('.mdb')]
+            assert models and all(f.data[4:8] == (0x20).to_bytes(4, 'little') for f in models), rel
+
+
+@test
+def edf41_objects_install() -> None:
+    """tools/edf41_objects.py on a stand-in game: install writes every object's files as the ledger owner edf41 and
+    remove deletes them; a file of the same name another mod put in Mods is never written over, every object needing
+    it is left out (said why), the others installed."""
+    import edf41_objects as eo
+    import ledger
+    reg = eo.registry()
+    with tempfile.TemporaryDirectory(prefix='edf6vc-e41o-') as game:
+        os.makedirs(os.path.join(game, 'Mods'))
+        files, skipped = eo.build(game)
+        assert not skipped and set(files) == set(reg['files'])
+        eo.install(game, files)
+        led = ledger.Ledger(game)
+        assert {ledger.key(r) for r in files} == set(led.owned_by(eo.OWNER))
+        assert all(os.path.isfile(led.disk(r)) for r in files)
+        assert eo.install(game, files) == [], 'a second install rewrote files it already holds'
+        deleted, kept = eo.remove(game)
+        assert not kept and not any(os.path.exists(led.disk(r)) for r in files), 'remove left files'
+        anthill = next(o for o in reg['objects'] if o['object'] == 'OBJECT/ANTHILL301.SGO')
+        theirs = anthill['files'][1]
+        modfiles.atomic_write(os.path.join(game, 'Mods', *theirs.split('/')), b'another mod')
+        files, skipped = eo.build(game)
+        users = {o['object'] for o in reg['objects'] if theirs in o['files']}
+        assert {obj for obj, _why in skipped} == users and theirs not in files, skipped
+        eo.install(game, files)
+        with open(os.path.join(game, 'Mods', *theirs.split('/')), 'rb') as f:
+            assert f.read() == b'another mod', "another mod's file was written over"
+
 def main() -> int:
     import rootcpk
     game = rootcpk.DEFAULT_GAME

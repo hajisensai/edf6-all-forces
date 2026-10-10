@@ -13,7 +13,7 @@
 | P1 | EDF5 武器：EDF6 缺的 61 把（载具呼叫在内）进 EDF6 武器表 | PR #108 |
 | P2 | EDF4.1 武器：EDF5、EDF6 都没有的 284 把（见 §6） | 本 PR |
 | P3 | 资产转换器（MDB、CAS）+ EDF5 的 3 辆换皮载具（见 §7）；诱饵 17 把待 SHKT 实机确认 | 本 PR |
-| P4 | EDF4.1 敌人：插件「别名工厂」借 EDF6 相近类 + 参数转换 + 标志性行为补丁；含现代化修复 | 待做 |
+| P4 | EDF4.1 敌人：第一批 EDF6 还有原类的 15 种已转换（见 §8）；其余借 EDF6 相近类 + 行为补丁；含现代化修复 | 进行中 |
 | P5 | EDF4.1 载具 | 待做 |
 | P6 | EDF4.1 战役任务包（先验证 4.1 BVM 能否在 EDF6 执行器里跑） | 待做 |
 
@@ -103,3 +103,22 @@ EDF5 武器 SGO 是 v0x102、类型化数值；EDF6 是 DSGO（数值全为 doub
 **EDF5 的 3 辆换皮载具**（ブラッカー ナンバー４．１ / ５、オメガ·フリージャー）：EDF6 自带它们的呼叫和载具 SGO（`V505_TANK_EDF4.SGO` 等，引用 `app:/Object/v505_tankedf4.mrab`、EDF6 原车的 `Ragdoll_v505_tank.shkt` 与 `v505_tank.cas`），只缺车模；EDF5 的车模是同一种容器（`.rab`），转换后装成 `Mods/OBJECT/<名字>.MRAB`。转换好的车模由开发工具写到 `edf5port/assets/<Mods 路径>`（3 个共约 37MB），随工具与安装包发布，安装时直接复制，玩家不需要 EDF5（2026-10-10 用户：「不能我们预先生成吗」；这是 EDF5 的模型与贴图本身的再分发，由仓库所有者决定）。只有一把武器的全部资源都能转换时才写文件，被跳过的武器不留文件（`ported_assets_bundled` 守住两个方向：每个资源都有文件、每个文件都有武器）。没有预生成文件的资源仍可从玩家本机的游戏转换（`ported_weapons.build_assets`）。骨骼按名字与原车动画对得上，唯一不同的是模型自己那根物体骨骼（`v505_tankedf4` / `v503_bike_omegaz` 对原车的 `v505_tank`）：动画里 `v505_tank` 那条轨道在换皮车上找不到，EDF5 自己的换皮也一样。EDF6 的原车重做过（物体骨骼挪到最后、材质换成 snd_BRDF_*），换皮车保持 EDF5 原车的骨骼顺序和着色器。已实现、未实机验证。
 
 **SHKT（物理）与诱饵发射器**：EDF6 的 EDF.dll 还带着旧 Havok 文件读取器（2014 二进制 tagfile、2015 TAG0）、全套版本补丁和 Havok 的 hkp → hknp 迁移工具（ragdoll 加载 `0x11A5270` 发现 `hkpPhysicsData` 就调 `0x160B950` 转换），诱饵用到的碰撞形状都在支持范围内，所以旧 SHKT 很可能可以直接用（M，静态）。但原版资源从没走过这条路，且加载后的查找不判空（`0x6E85D6`），任一步失败就崩溃。诱饵发射器因此另做，先请测试者实机确认不崩溃再合入。
+
+## 8. P4：EDF4.1 敌人（`tools/make_edf41_objects.py` → `edf41port/objects.json` + `edf41port/objects/`）
+
+**要什么**：扫 4.1 全部 98 关的 BVM 脚本，脚本里点名、EDF6 没有的 OBJECT 共 60 个，77 关至少用到一个（2026-10-10，`jobs/4bf89026/tmp/bvm41/assets41.json`）。按 EDF6 还有没有那个类分三层：
+
+| 层 | 对象（关数） | 怎么来 |
+|---|---|---|
+| 一：EDF6 还有原类 | 蚁巢 AntHill301（14）、迪洛伊 Deiroi401 系列 5 个（25）、外星运输车 AlienTrailer401 系列 5 个（17）、欧米伽队士兵 AiArmySoldier_OMG（+队长，各 5）、巴尔姆 Vehicle501_FortressRobo（+_AI，各 1） | 4.1 的文件原样搬过来，只做格式转换：**本节，已完成转换** |
+| 二：类没了、有可借的壳 | 赫克托 Hector 全系（几十关）、UFO301/401（33）、运输船 Carrier301/401（30）、4.1 坦克 Vehicle301_tank_ai（13）、四足要塞（4）、巨龙（2） | 借 EDF6 相近类（UfoSmall507、UfoCarrier508、EDF6_Berserker_Large …）+ 模型补骨骼 / CAS 补契约 / 插件补行为：待做 |
+| 三：没有可借的壳 | 母舰 UfoMother301、地球吞噬者 UfoMother401 系列、UfoRobo | 要重写原生逻辑，暂不做 |
+
+**第一层的转换**：每个对象沿 SGO 里的 `app:/` 路径（含它引用的子 SGO）收集 EDF6 没有的文件；EDF6 有同路径文件的用 EDF6 的（所有档案都算：Root.cpk、ChunkNN、DX11）；4.1 自己也没有的不需要（4.1 引用的 `*_LIGHT.MRAB` 在它的任何档案里都没有，游戏照样跑）；没有扩展名的是目录前缀。各类文件：
+
+- `.SGO`：EDF6 仍读 4.1 的 SGO 格式（EDF6 自己抽样 300 个 OBJECT SGO 里有 143 个是这种），只把里面的 MAB 块从 0x03 改成 0x83（`pylib/legacy_sgo.py`），原地替换、长度不变，其它字节保持 4.1 的；不重新编码（`sgo.write_depth_first` 有 174 / 233 个 4.1 OBJECT SGO 写不回原样）。
+- `.RAB` / `.MRAB` / `.CAS`：`legacy_assets.convert`。4.1 有 30 个档案的成员不按文件夹分组（迪洛伊、外星运输车、欧米伽队士兵的模型），EDF6 自己也有 22 个这样的档案照常加载，所以转换时保持原顺序（P3 的修复）。
+- `.SHKT`：4.1 的 Havok 2014 二进制 packfile 原样带过来（EDF5 / EDF6 都是 TAG0）。**实机（2026-10-10，测试场，2 个 AntHill301 + 2 名 AI 飞翔兵）**：4.1 的蚁巢刷出、模型正常显示、雷达上是敌人，带着 4.1 的 SHKT 加载不崩溃，整局正常退出；蚁巢被打垮（物理坍塌真正启用的那一刻）这次没等到，仍待确认。
+- `.ACB`：4.1 的音效库（TIKYUU4_*）EDF6 作为散文件放在 `SOUND/PC`，只核对存在，不复制。
+
+15 个对象、45 个文件、约 62 MB，转换好放进 `edf41port/objects/`，随工具发布，玩家不需要装 4.1。安装（`tools/edf41_objects.py`，账本 owner `edf41`）按 4.1 原来的文件名写进 `Mods/OBJECT`，4.1 任务脚本可直接引用；Mods 里已有别的 mod 放的同名文件时不覆盖，用到它的对象整个跳过并说明。测试：`edf41_objects_shipped`（登记表与文件双向一致、哈希、MAB 0x83、MDB 0x20）、`edf41_objects_install`（替身游戏上安装 / 卸载、不覆盖别人的文件）。

@@ -430,6 +430,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     import make_emc
     import make_chute
     import make_jets
+    import edf41_objects
     import make_katyusha
     import make_sazabi
     import make_proteus
@@ -482,6 +483,12 @@ def install(game: str, campaign_requested: bool = False) -> None:
         raise make_edf5_campaign.Refused('无法完成 EDF5 战役停用：任务列表已被其他工具修改，已保留依赖文件。')
     for path in (make_optics.install_models(game, optics) if optics is not None else []):
         print('写入', path)
+    objects41, skipped41 = edf41_objects.build(game)
+    print(f'写入 EDF4.1 的敌人与 NPC（EDF6 没有、4.1 任务要用的 {len(edf41_objects.registry()["objects"])} 种，'
+          '预先转换好，不需要装 4.1；用 4.1 原来的文件名）……')
+    for obj, why in skipped41:
+        print('  跳过', obj, why)
+    edf41_objects.install(game, objects41)
     for path in (make_jets.install(game, jets) if jets is not None else []) + \
             (make_sub.install(game, sub) if sub is not None else []) + \
             (make_katyusha.install(game, katyusha) if katyusha is not None else []) + \
@@ -573,6 +580,7 @@ def uninstall(game: str) -> None:
     import make_emc
     import make_chute
     import make_jets
+    import edf41_objects
     import make_katyusha
     import make_sazabi
     import make_proteus
@@ -603,7 +611,7 @@ def uninstall(game: str) -> None:
         make_optics.remove(game)
         remove_autoturret(game)
         import support_loadout
-        for remove in (support_loadout.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove,
+        for remove in (support_loadout.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:
