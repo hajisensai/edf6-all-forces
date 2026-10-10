@@ -6,6 +6,7 @@
 // it the jets', the carrier's and the laser's preloads) does not hang on the loadout's own checks: the
 // loadout only wraps the call when it is on (LoadoutPreload). Layout: docs/loadout-re.md.
 #include "crew.h"
+#include "mission_watch.h"
 #include "transport.h"
 #include "airdrop.h"
 #include "gear.h"
@@ -33,12 +34,14 @@ const unsigned char kSessionSig[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C,0x24,
 PlayerPreloadFn preloadOrig=nullptr,sessionOrig=nullptr;
 
 std::uintptr_t __fastcall PreloadHook(std::uintptr_t a,std::uintptr_t b,std::uintptr_t c,std::uintptr_t d) {
+    WatchMissionPhase("the game's player preload");
     const auto result=LoadoutPreload(preloadOrig,a,b,c,d);
     MissionStart();
     return result;
 }
 
 std::uintptr_t __fastcall SessionPreloadHook(std::uintptr_t a,std::uintptr_t b,std::uintptr_t c,std::uintptr_t d) {
+    WatchMissionPhase("the game's session player preload");
     const auto result=sessionOrig(a,b,c,d);
     MissionStart();
     return result;
@@ -56,6 +59,8 @@ int Redirect(const unsigned* sites,std::size_t count,unsigned target,void* hook)
 }  // namespace
 
 void MissionStart() noexcept {
+    LogMemory("mission start entered");
+    WatchMissionPhase("resets");
     ResetPlayer();
     ResetCrew();
     ResetHelis();
@@ -103,18 +108,29 @@ void MissionStart() noexcept {
     ResetBigWorld();
     ResetTerrainShare();
     ResetPlayArea();
+    WatchMissionPhase("jets");
     PreloadJets();   // the airstrike takeovers' jets (jet.cpp), with the mission's own resources
+    WatchMissionPhase("player jets");
     PreloadPlayerJets();   // ...and the player jets, for the catch after an ejection (playerjet.cpp)
+    WatchMissionPhase("submarine carrier");
     PreloadSub();    // ...and the submarine carrier (subcarrier.cpp)
+    WatchMissionPhase("portal laser");
     PreloadLaser();  // ...and the teleportation ships' portal laser (carrierlaser.cpp)
+    WatchMissionPhase("support vehicles");
     PreloadSupportVehicles(); // stock ground support hulls; no dummy crew created by initialization
+    WatchMissionPhase("airdrop container");
     PreloadAirdrop();         // ...and the stock container a transport plane drops one in (airdrop.cpp)
+    WatchMissionPhase("support soldiers");
     PreloadSupportSoldiers(); // original real NPC resources, before the game's preload wait
+    WatchMissionPhase("support variants");
     PreloadSupportVariants(); // ...and the generated coloured soldiers / loaded vehicles there are (support_variants.h)
+    WatchMissionPhase("debug spawn");
     PreloadDebugSpawn();      // the debug spawn tool's stock vehicles and enemies; nothing at all with DebugSpawn=0
+    WatchMissionPhase("per-frame inputs");
     EnsureInputs();  // every plugin has loaded by now: the per-frame hooks chain onto theirs
     Log("MISSION start: per-object state dropped, resources preloaded");
     LogMemory("mission start");
+    WatchMissionPhase(nullptr);
 }
 
 bool InstallMission() noexcept {

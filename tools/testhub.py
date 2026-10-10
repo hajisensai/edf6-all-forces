@@ -246,6 +246,12 @@ def collect(game: str, build: str = '') -> tuple[bytes, list[str]]:
                              f'{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime))}  pe {_pe_stamp(path)}  sha256 {_sha256(path)}')
         add('', 'versions.txt', '\r\n'.join(lines).encode('utf-8'))
 
+        # The plugin's own dump of a mission start that hung (src/mission_watch.cpp): Windows writes none for a game
+        # that hangs and is killed, nor without LocalDumps set up (a tester's machine, 2026-10-10).
+        for path in sorted(glob.glob(os.path.join(plugins, '*.hang.dmp'))):
+            if time.time() - os.path.getmtime(path) < DUMP_AGE and os.path.getsize(path) <= DUMP_MAX:
+                with open(path, 'rb') as f:
+                    add(path, 'crash/' + os.path.basename(path), f.read())
         dumps = [p for p in glob.glob(os.path.join(os.environ.get('LOCALAPPDATA', ''), 'CrashDumps', 'EDF6*.dmp'))
                  if time.time() - os.path.getmtime(p) < DUMP_AGE and os.path.getsize(p) <= DUMP_MAX]
         if dumps:
