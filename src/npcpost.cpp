@@ -25,6 +25,7 @@
 // What the plugin wrote last is remembered: a stick still holding it is the plugin's, not the stock AI driving (a
 // frame without the AI pass clears nothing), and it is taken back when the drive ends.
 #include "crew.h"
+#include "body506.h"
 #include "layout.h"
 #include "online_authority.h"
 #include "memory.h"
@@ -168,9 +169,12 @@ namespace {
 // SGO and every Nix SGO lack it). A player-called mech with a real NPC soldier at the wheel therefore aims, turns and
 // walks but never fires. The plugin gives such a mech the rows the stock AI version carries: one per seat-0 weapon, from
 // 0 to that weapon's own range. A table the SGO filled (size > 0) is never touched.
+// The same slot 6 block also sets the fire step's aim origin, veh+0x2008 = the `spine` bone's record (0x642C1B..0x642CA8:
+// 0x11002A0 finds the index, 0x1100280 the record): with it null 0x63AED9 faults every frame. Set the same way here.
 constexpr std::size_t kAttackTable=0x1FE8,kAttackData=0x1FF0,kAttackCap=0x1FF8,kAttackSize=0x2000;
 constexpr unsigned kAttackRead=0x63B274,kAttackRelease=0x646300,kGameNew=0x12D85B0;
 constexpr std::size_t kWeaponReach=0x224;   // npcai.cpp kArmReach
+constexpr std::size_t kAimOrigin=0x2008,kVehicleModel=0xEE0;
 constexpr std::uint64_t kAttackRows=16;     // the seat holder limit npcai.cpp uses
 const unsigned char kAttackReadSig[]={0x49,0x8B,0x9F,0xF0,0x1F,0x00,0x00,0x45,0x32,0xC0,0x49,0x8B,0x8F,0x00,0x20,0x00,0x00,
                                       0x48,0xC1,0xE1,0x04,0x48,0x03,0xCB,0x44,0x88,0x44,0x24,0x31,0x48,0x3B,0xD9,0x74,0x7A,
@@ -208,8 +212,14 @@ std::uint64_t AttackRows(unsigned char* v,AttackRow* rows) noexcept {
     return count;
 }
 
-void EnsureMechAttackTable(unsigned char* v) noexcept {
-    if(!Readable(v,kAttackSize+8) || At<std::uint64_t>(v,kAttackSize) || !AttackTableOk())return;
+void EnsureMechAiSetup(unsigned char* v) noexcept {
+    if(!Readable(v,kAttackSize+8) || !AttackTableOk())return;
+    if(!At<const void*>(v,kAimOrigin)) {
+        unsigned char* const spine=BoneRecord506(v+kVehicleModel,L"spine");
+        if(!spine)return;   // no origin: the fire step must not run with the table (the AI action checks it: npcai.cpp)
+        Put<unsigned char*>(v,kAimOrigin,spine);
+    }
+    if(At<std::uint64_t>(v,kAttackSize))return;
     AttackRow rows[kAttackRows];
     const std::uint64_t count=AttackRows(v,rows);
     if(!count)return;
@@ -233,7 +243,7 @@ void EnsureMechAttackTable(unsigned char* v) noexcept {
 void NpcPostInput(unsigned char* v) noexcept {
     if(!Cfg().customNpcAi || v[kDead])return;
     const Family f=FamilyOf(v);
-    if(f==Family::mech && NpcDriver(v) && IsOnlineAuthority(v))EnsureMechAttackTable(v);   // before the stock AI fires
+    if(f==Family::mech && NpcDriver(v) && IsOnlineAuthority(v))EnsureMechAiSetup(v);   // before the stock AI fires
     if(!Cfg().tankReturnToPost)return;
     if(f==Family::none || (f==Family::barga && !BargaWalkOk()))return;
     if(!NpcDriver(v)) {

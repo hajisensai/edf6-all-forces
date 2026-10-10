@@ -1240,7 +1240,7 @@ void GiveBackDismissed(unsigned char* h) noexcept {
 constexpr unsigned kCarAiPass=0x673300,kMechAiPass=0x643530;
 constexpr unsigned kCarAi=0x661440,kMechAi=0x63C1C0,kProteusAi=0x648F70;
 constexpr std::size_t kSlotCarAi=72,kSlotMechAi=55;
-constexpr std::size_t kCarAction=0x2508,kCarInAction=0x2590,kMechAction=0x1F08,kMechInAction=0x1F90;
+constexpr std::size_t kCarAction=0x2508,kCarInAction=0x2590,kMechAction=0x1F08,kMechInAction=0x1F90,kMechAimOrigin=0x2008;
 using AiActionFn=void(__fastcall*)(void*,int,const float*,void*);
 const unsigned char kCarAiPassSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x20,0x48,0x8B,0xF2,
                                     0x48,0x8B,0xD9,0xE8,0xE6,0x6C,0xED,0xFF};   // ...call 0x54A000
@@ -1277,6 +1277,7 @@ void DriveVehicleAi(unsigned char* h,const float* dt) noexcept {
     if(At<const void*>(v,action) || !Readable(vt,(slot+1)*8))return;
     const void* fn=vt[slot];
     if(car ? fn!=image+kCarAi : (fn!=image+kMechAi && fn!=image+kProteusAi))return;
+    if(!car && !At<const void*>(v,kMechAimOrigin))return;   // npcpost.cpp EnsureMechAiSetup sets it first
     v[inAction]=1;
     reinterpret_cast<AiActionFn>(const_cast<void*>(fn))(v,1,dt,nullptr);
     v[inAction]=0;
