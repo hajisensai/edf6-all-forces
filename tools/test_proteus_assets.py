@@ -26,11 +26,18 @@ def stock_round() -> bytes:
                                 [0.4, 0.4, 6.0, 1.0], [], 0, 60, 0, [0, 'shot', 0.5, 1.0, 1.0, 500.0], [0, 'hit', 0.9, 1.0, 3.0, 200.0]]})
 
 
-def stock_barrier() -> bytes:
-    """An EWEAPON196-shaped electromagnetic barrier."""
-    return sgo.write(0x102, {'AmmoClass': 'BarrierBullet01', 'AmmoColor': [0.1, 0.1, 1.0, 0.25],
-                             'Ammo_CustomParameter': [2.4, 2.5, 3.0, [1.0, 1.0, 0.5], [0.0, 0.0, 1.0]],
-                             'FireSe': [0.0, 'weapon_Engineer_EX_spcBarrier01', 1.0, 1.0, 2.0, 30.0]})
+DEVICE = [['app:/Weapon/e_support_barrier01.rab', 'e_support_barrier01.mdb'], 'app:/Weapon/e_support_barrier01.cas',
+          b'MAB\x00' + bytes(range(28))]
+
+
+def stock_barrier(model: bool = True) -> bytes:
+    """An EWEAPON196-shaped electromagnetic barrier (`model`: with its animation_model, the device)."""
+    m = {'AmmoClass': 'BarrierBullet01', 'AmmoColor': [0.1, 0.1, 1.0, 0.25],
+         'Ammo_CustomParameter': [2.4, 2.5, 3.0, [1.0, 1.0, 0.5], [0.0, 0.0, 1.0]],
+         'FireSe': [0.0, 'weapon_Engineer_EX_spcBarrier01', 1.0, 1.0, 2.0, 30.0]}
+    if model:
+        m['animation_model'] = DEVICE
+    return sgo.write(0x102, m)
 
 
 class FakeGame:
@@ -84,6 +91,23 @@ class ShieldFile(unittest.TestCase):
         self.assertGreater(radius, 9.8, 'the wall stands outside the MK2 hull (9.7 m forward, 8.9 m aside)')
         self.assertGreater(height, 15.9, 'and above it (15.2-15.9 m)')
 
+    def test_carries_the_barrier_device(self) -> None:
+        # A BarrierBullet01 builds its device from its InitParam +0x1B0, which only a weapon fills (0x68DAD5): the IFC
+        # gets it from this SGO (src/ifc_model.h). Without it the ctor throws and the game dies (report #6).
+        game = FakeGame({('OBJECT', mp.SHIELD_STOCK): stock_round(), ('WEAPON', mp.BARRIER_WEAPON): stock_barrier()})
+        self.assertEqual(sgo.read(mp.shield(game))[1]['animation_model'], DEVICE)
+        bare = FakeGame({('OBJECT', mp.SHIELD_STOCK): stock_round(), ('WEAPON', mp.BARRIER_WEAPON): stock_barrier(False)})
+        with self.assertRaises((ValueError, KeyError)):
+            mp.shield(bare)
+        old = sgo.write(*sgo.read(mp.shield(game))[:1], {k: v for k, v in sgo.read(mp.shield(game))[1].items()
+                                                          if k != 'animation_model'})
+        with self.assertRaises(AssertionError):
+            mp.check_shield(old)
+
+    def test_plugin_reads_the_member_the_sgo_has(self) -> None:
+        text = (ROOT / 'src/ifc_model.h').read_text(encoding='utf-8')
+        self.assertIn('kModelMember[]=L"animation_model"', text)
+
     def test_refuses_unexpected_sources(self) -> None:
         bad = sgo.write(0x102, {'AmmoClass': 'SolidBullet01', 'AmmoColor': [1, 1, 1, 1], 'Ammo_CustomParameter': []})
         with self.assertRaises(ValueError):
@@ -106,6 +130,12 @@ class RealRoot(unittest.TestCase):
         for a, b in zip(built[12], tochka['AmmoColor'], strict=True):
             self.assertAlmostEqual(a, b, places=6)
         self.assertEqual(mp.segments(tochka['Ammo_CustomParameter'][0]), 27)
+        import dsgo
+        device = dsgo.parse(self.game.read('WEAPON', mp.BARRIER_WEAPON)).root.get('animation_model')
+        model = sgo.read(data)[1]['animation_model']
+        self.assertEqual(model[0], device.items[0].items)
+        self.assertEqual(model[1], device.items[1])
+        self.assertEqual(model[2], device.items[2].data, 'the MAB block byte for byte')
         files = mp.build(str(Path(rootcpk.DEFAULT_GAME)))
         self.assertEqual(set(files), {mp.SHIELD_FILE}, 'no model, animation or vehicle SGO is generated any more')
 
