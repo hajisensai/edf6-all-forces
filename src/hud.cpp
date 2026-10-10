@@ -3486,14 +3486,19 @@ void MapUnits(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
     if(p.dx!=0.0f || p.dy!=0.0f)Tri(drawer,ctx,p.ix-p.dx*5.0f*s,p.iy-p.dy*5.0f*s,p.ix+p.dx*20.0f*s,p.iy+p.dy*20.0f*s,7.0f*s,kWhite);
 }
 
-// Map panels share a viewport-fitted scale and publish the exact opaque UI regions.
-// Text is drawn in a final batch: remove earlier world labels under each panel before that batch.
-float mapUiPanels[16*4]{};int mapUiPanelCount=0;
-void MapUiBox(void* drawer,void* ctx,float x0,float y0,float x1,float y1,Line* lines,int prior) noexcept {
+// Text is drawn in a final batch, over every panel: an opaque panel first empties the earlier lines (world labels) under
+// it, else they would show through on top of it.
+void HideLinesUnder(Line* lines,int prior,float x0,float y0,float x1,float y1) noexcept {
     for(int i=0;i<prior;++i) {
         auto& line=lines[i];
         if(line.x<x1 && line.x+line.w>x0 && line.y<y1 && line.y+line.h>y0)line.text[0]=0;
     }
+}
+
+// Map panels share a viewport-fitted scale and publish the exact opaque UI regions.
+float mapUiPanels[16*4]{};int mapUiPanelCount=0;
+void MapUiBox(void* drawer,void* ctx,float x0,float y0,float x1,float y1,Line* lines,int prior) noexcept {
+    HideLinesUnder(lines,prior,x0,y0,x1,y1);
     Rect(drawer,ctx,x0,y0,x1,y1,kMapBand);
     if(mapUiPanelCount<16) {
         auto* r=mapUiPanels+4*mapUiPanelCount++;r[0]=x0;r[1]=y0;r[2]=x1;r[3]=y1;
@@ -4379,7 +4384,9 @@ void DebugSpawnHud(void* drawer,void* ctx,Text* text,float width,float height,fl
     // The panel behind them, as wide as the widest line (the quads go down now, the text over them at DrawAll).
     float right=x+460.0f*s;
     for(int i=firstLine;i<*at;++i)if(lines[i].x+lines[i].w+12.0f*s>right)right=lines[i].x+lines[i].w+12.0f*s;
-    Rect(drawer,ctx,x-12.0f*s,top-24.0f*s,right,top+row*(shown+4)+8.0f*s,kPanel);
+    const float y0=top-24.0f*s,y1=top+row*(shown+4)+8.0f*s;
+    HideLinesUnder(lines,firstLine,x-12.0f*s,y0,right,y1);   // a Q mark's name tag, a squad's label: not over the menu
+    Rect(drawer,ctx,x-12.0f*s,y0,right,y1,kPanel);
 }
 
 }  // namespace
