@@ -4875,7 +4875,7 @@ def soft_edge_wired() -> None:
     assert 'anchor=SoftAnchor(*j,anchor,anchorIn);' in jet
     # Targets past it let be; the map's focus target (2026-10-09) only out past the play area's walls, where no jet goes.
     visit = combat.split('void VisitTarget(void* ctx,const void* object,const float* p) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'if(k.focus || PastEdge(*k.j,p))return;' in visit
+    assert 'if(k.focus || PastEdge(*k.j,p) || airchase::Shunned(k.j->t.shun,object,k.ms))return;' in visit
     focus = visit.split('if(k.j->focus.Is(object)) {', 1)[1].split('\n    }\n', 1)[0]
     assert 0 <= focus.find('if(!airbound::Inside(PlayBox(),p))return;') < focus.find('k.focus=true;'), \
         'a focus target out past the play area is waited for, not chased'
@@ -4890,6 +4890,39 @@ def soft_edge_wired() -> None:
     for key, default in (('AirSoftEdge', '600'), ('AirSoftTurns', '1'), ('AirSoftCeil', '150'), ('HeliSoftEdge', '150')):
         assert f'L"{key}"' in plugin and f'Fix("{key}"' in plugin, key
         assert re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme, key
+
+@test
+def air_chase_wired() -> None:
+    """The flyers the plugin's weapons cannot reach (src/air_chase.h, the user 2026-10-10: "飞行怪好像会导致越飞越高"): the
+    target pick holds every jet's weapon limits (a gunship no flyer, a charge drone and its carrier nothing over the ceiling)
+    and its shun list, the current target of a charge drone too; the charge drone's run goes through airchase::Step (held
+    off its target it goes off within its charge's blast, not closing in it gives the target up, shunned by it and its
+    carrier); its goal is held under its ceiling; the NPC soldiers rank targets in reach first (npc_logic.h PickTarget
+    with their longest reach); the log has the target's height; the offline check is a CTest test."""
+    combat, jet, npcai = src('src/jet_combat.cpp'), src('src/jet.cpp'), src('src/npcai.cpp')
+    visit = combat.split('void VisitTarget(void* ctx,const void* object,const float* p) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'airchase::Shunned(k.j->t.shun,object,k.ms)' in visit
+    assert "k.j->cmd.order!=Order::none || k.charges) && Dot(d,d)>k.range*k.range" in visit, 'a charge drone: its current target in range'
+    assert 'if(!airchase::Allowed(k.limits,flyer,p[1],ground,' in visit, 'the weapon limits on every target, the current one too'
+    limits = combat.split('airchase::Limits LimitsOf(const Jet& j) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'k.weapon==Weapon::shells' in limits and 'airchase::kChargeCeiling' in limits and 'Preloaded(own.body)' in limits
+    assert 'bottom[3]={root[0],root[1]-kFlyerDepth,root[2]}' in combat, 'the ground under a high flyer is found'
+    assert 'ty=%.0f' in combat, 'the target height in the jet log'
+    assert 'airchase::Step(j->t.closing,j->t.target,d,kind.trigger,held,walled,ms)' in jet
+    assert 'const float d=Len(to),held=std::fmin(kind.trigger*kTriggerHeld,kind.blast);' in jet
+    assert 'if(mother)airchase::Shun(mother->t.shun,j->t.target,ms+airchase::kShunMs);' in jet
+    assert 'goal[1]=airchase::UnderCeiling(goal[1],goal[1]-under,airchase::kChargeCeiling);' in jet
+    assert 'PickTarget(s,eye,anchor,o.leash+engage,LongestReach(a))' in npcai and 'npc::PickTarget(world.enemies,' in npcai
+    cm = src('CMakeLists.txt')
+    assert 'add_executable(air_chase_check EXCLUDE_FROM_ALL tools/air_chase_check.cpp)' in cm and ' air_chase_check)' in cm
+    assert '#include "../src/air_chase.h"' in src('tools/air_chase_check.cpp')
+    # The charges' blast radii are their generated charges' (pylib/vcobjects.py jet_guns).
+    vc = src('pylib/vcobjects.py')
+    blast = float(re.search(r"'EDF6VC_BLAST_CHARGE\.SGO': \([\d.]+, ([\d.]+)\)", vc).group(1))
+    doll = float(re.search(r"'EDF6VC_DOLL_CHARGE\.SGO': \([\d.]+, ([\d.]+)\)", vc).group(1))
+    kinds = src('src/jet_internal.h')
+    assert f'kBlastTrigger,false,Body::blast,{blast:.1f}f}}' in kinds, blast
+    assert f'kDollTrigger,true,Body::doll,{doll:.1f}f}}' in kinds, doll
 
 @test
 def installer_recovery_regressions() -> None:
