@@ -5,6 +5,9 @@
 #include "online_authority.h"
 #include "mission_participants.h"
 #include "command_net.h"
+#include "command_protocol.h"
+#include "version_notice.h"
+#include "hudtext.h"
 #include <cstdlib>
 #include <cstring>
 #include <cwchar>
@@ -30,6 +33,13 @@ std::uint64_t worldSerial=1;
 std::uint32_t worldPhase=0;
 ObjRef worldCreated[support_net::kMaxPeers]{};
 ULONGLONG nextWorldRead=0;
+// The room's builds (version_notice.h): peers whose map command messages carry another protocol version, and the notice
+// last said (logged and shown once a change).
+std::uint32_t commandVersionOf[support_net::kMaxPeers+1]{};
+versionnote::Notice versionShown{};
+SRWLOCK versionLock=SRWLOCK_INIT;
+wchar_t versionText[200]{};
+ULONGLONG versionAt=0;
 // Why the transport is (not) usable, logged once a change: an online request refused as "not ready" has its cause in
 // the log (the 2026-10-09 report had none).
 const char* transportState="";
@@ -105,6 +115,8 @@ void CommandContext(ULONGLONG now) noexcept {
     UpdateCommandNetwork({running && session.Ready(),snapshot.isHost!=0,session.Epoch(),commandHostPeer,
         snapshot.peerCount,snapshot.local.id,&SendCommand},now);
 }
+// The Q marks (qmark.cpp) go peer to peer over the same transport, with no host step: only the room has to be up.
+void QMarkContext(ULONGLONG now) noexcept { UpdateQMarkNetwork(running,snapshot.peerCount,&SendCommand,now); }
 bool PeerValid(const EDF6CoopPeer& peer) noexcept {
     return peer.id[0] && std::memchr(peer.id,0,sizeof(peer.id));
 }
@@ -148,6 +160,81 @@ bool Start(const EDF6CoopSnapshot& next,ULONGLONG now) noexcept {
 void Note(wchar_t* note,std::size_t size,const wchar_t* text) noexcept {
     if(note && size)swprintf_s(note,size,L"%ls",text);
 }
+// A header of another build: the map command protocol's magic with another version (support's own wire is v2 in every
+// build that has the extension). Only read: the message is still dropped as before.
+void NoteForeignVersion(std::uint32_t peer,const unsigned char* bytes,std::uint32_t count) noexcept {
+    if(!peer || peer>support_net::kMaxPeers || count<8)return;
+    std::uint32_t magic=0,version=0;std::memcpy(&magic,bytes,4);std::memcpy(&version,bytes+4,4);
+    if(magic!=command_net::kMagic)return;
+    const std::uint32_t seen=version==command_net::kVersion ? 0u : version;
+    if(commandVersionOf[peer]!=seen && seen)
+        Log("SUPPORT NET peer %u sends map commands of protocol v%u (this build: v%u): its map orders are not synchronised",peer,version,
+            command_net::kVersion);
+    commandVersionOf[peer]=seen;
+}
+// The features a set of feature bits (support_protocol.h Features: capabilities and extensions) names, in the HUD's language.
+void Features(std::uint32_t caps,bool command,wchar_t* out,std::size_t size) noexcept {
+    using hudtext::Tr;using hudtext::Tx;using support_net::FeatureExt;
+    out[0]=0;
+    const struct { std::uint32_t bit; Tx text; } kNames[]={{FeatureExt(support_net::kExtSeaRescue),Tx::versionFeatRescue},
+        {FeatureExt(support_net::kExtRescueChannel),Tx::versionFeatRescueChannel},
+        {support_net::kCapAirborneAir,Tx::versionFeatAir},{support_net::kCapTransports,Tx::versionFeatTransport},
+        {support_net::kCapLoadout,Tx::versionFeatCompose},{FeatureExt(support_net::kExtVariants),Tx::versionFeatVariants},
+        {support_net::kCapSoldierVariants,Tx::versionFeatLoadout}};
+    // At most kNamed named, then "and more": the line stays within the HUD's one line.
+    constexpr int kNamed=3;
+    int named=0;bool more=false;
+    const auto add=[&](const wchar_t* word) noexcept {
+        if(named>=kNamed){more=true;return;}
+        const std::size_t used=std::wcslen(out);
+        _snwprintf_s(out+used,size-used,_TRUNCATE,L"%ls%ls",used ? Tr(Tx::versionListSep) : L"",word);
+        ++named;
+    };
+    // Without the rescue at all, its channel goes unsaid (the line stays within the HUD's one line).
+    if(caps&FeatureExt(support_net::kExtSeaRescue))caps&=~FeatureExt(support_net::kExtRescueChannel);
+    for(const auto& n:kNames)if(caps&n.bit)add(Tr(n.text));
+    if(command)add(Tr(Tx::versionFeatCommand));
+    if(!out[0])add(Tr(Tx::versionFeatSome));
+    if(more){const std::size_t used=std::wcslen(out);_snwprintf_s(out+used,size-used,_TRUNCATE,L"%ls",Tr(Tx::versionListMore));}
+}
+// The room's builds compared (version_notice.h), said once a change: logged, and shown on the HUD a while.
+void VersionTick(bool online) noexcept {
+    versionnote::State s;
+    s.online=online;s.host=snapshot.isHost!=0;s.mine=support_net::kFeatures;
+    s.hostKnown=session.HostCapsKnown();s.hostCaps=session.HostCaps();s.roomBehind=session.RoomBehindHost();
+    // The newest build whose welcome carried nothing: the one before the sea rescue (every capability, the variants).
+    s.silentHost=support_net::Features(support_net::kCapabilities,support_net::kExtVariants);
+    s.peersBehind=session.PeersBehind(&s.peersMissing);s.peersAhead=session.PeersAhead();
+    for(std::uint32_t i=1;online && i<=snapshot.peerCount && i<=support_net::kMaxPeers;++i)if(commandVersionOf[i])++s.commandPeers;
+    const versionnote::Notice n=versionnote::Compare(s);
+    if(n==versionShown)return;
+    versionShown=n;
+    using hudtext::Tr;using hudtext::Tx;
+    // Two lines: who is older or newer, then what does not work in this room because of it.
+    wchar_t text[200]{},features[120]{};
+    Features(n.missing,n.command,features,_countof(features));
+    switch(n.kind) {
+    case versionnote::Kind::none: break;
+    case versionnote::Kind::hostOlder: _snwprintf_s(text,_TRUNCATE,L"%ls",Tr(Tx::versionHostOlder));break;
+    case versionnote::Kind::selfOlder: _snwprintf_s(text,_TRUNCATE,L"%ls",Tr(Tx::versionSelfOlder));break;
+    case versionnote::Kind::peersOlder: _snwprintf_s(text,_TRUNCATE,Tr(Tx::versionPeersOlder),static_cast<int>(n.count));break;
+    case versionnote::Kind::peersNewer: _snwprintf_s(text,_TRUNCATE,Tr(Tx::versionPeersNewer),static_cast<int>(n.count));break;
+    case versionnote::Kind::roomOlder: _snwprintf_s(text,_TRUNCATE,L"%ls",Tr(Tx::versionRoomOlder));break;
+    case versionnote::Kind::commandOnly: _snwprintf_s(text,_TRUNCATE,L"%ls",Tr(Tx::versionCommandOnly));break;
+    }
+    if(n.kind!=versionnote::Kind::none && n.kind!=versionnote::Kind::selfOlder && n.kind!=versionnote::Kind::peersNewer) {
+        const std::size_t used=std::wcslen(text);
+        _snwprintf_s(text+used,_countof(text)-used,_TRUNCATE,L"\n");
+        const std::size_t more=std::wcslen(text);
+        _snwprintf_s(text+more,_countof(text)-more,_TRUNCATE,Tr(Tx::versionUnavailable),features);
+    }
+    Log("SUPPORT NET builds: kind=%d host=%d mine=0x%X hostKnown=%d hostCaps=0x%X roomBehind=%d peersBehind=%u missing=0x%X ahead=%u "
+        "commandPeers=%u%s",static_cast<int>(n.kind),s.host,s.mine,s.hostKnown,s.hostCaps,s.roomBehind,s.peersBehind,s.peersMissing,
+        s.peersAhead,s.commandPeers,n.kind==versionnote::Kind::none ? " (the same build everywhere)" : "");
+    AcquireSRWLockExclusive(&versionLock);
+    std::memcpy(versionText,text,sizeof(text));versionAt=n.kind==versionnote::Kind::none ? 0 : GetTickCount64();
+    ReleaseSRWLockExclusive(&versionLock);
+}
 }
 void ConfigureSupportNet(const support_net::Hooks& configured) noexcept {
     ResetSupportNet();hooks=configured;
@@ -155,11 +242,13 @@ void ConfigureSupportNet(const support_net::Hooks& configured) noexcept {
 }
 void ResetSupportNet() noexcept {
     session.Stop();running=false;blockedUntilMission=false;snapshot={};lastTick=~0ULL;ResetWorld();
-    commandHostPeer=0;ResetCommandNetwork();
+    for(auto& v:commandVersionOf)v=0;
+    versionShown={};AcquireSRWLockExclusive(&versionLock);versionAt=0;ReleaseSRWLockExclusive(&versionLock);
+    commandHostPeer=0;ResetCommandNetwork();ResetQMarkNetwork();
 }
 void SuspendSupportNet() noexcept {
     session.Suspend();running=false;blockedUntilMission=true;
-    CommandContext(GetTickCount64());
+    CommandContext(GetTickCount64());QMarkContext(GetTickCount64());
     Log("SUPPORT NET suspended: existing actors retained; mission participant resynchronization required");
 }
 void SupportNetTick() noexcept {
@@ -182,6 +271,7 @@ void SupportNetTick() noexcept {
     if(!running && !Start(next,now)){NoteTransport("EDF6Coop snapshot rejected (peer list / host identity)");return;}
     NoteTransport(next.isHost ? "ready (host)" : "ready (client)");
     CommandContext(now);
+    QMarkContext(now);
     // Never spawn on the DirectNet worker. The map/crew game-thread frame owns
     // both deserialization and the native create/register/destroy callbacks.
     for(unsigned received=0;received<128;++received) {
@@ -191,17 +281,22 @@ void SupportNetTick() noexcept {
         std::uint32_t peer=0;
         for(std::uint32_t i=1;i<=snapshot.peerCount;++i)if(!std::strcmp(sender.id,peers[i].id)){peer=i;break;}
         if(peer) {
+            NoteForeignVersion(peer,bytes,count);
             CommandContext(now);
+            if(ReceiveQMarkNetwork(peer,sender.id,bytes,count,now))continue;   // before the support parser, as the commands
             if(ReceiveCommandNetwork(peer,sender.id,bytes,count,now))continue;
             support_net::Message message;
             if(support_net::Decode(bytes,count,message))session.Receive(peer,message,now);
         }
     }
+    session.SetRescueCooldown(static_cast<std::uint64_t>(Cfg().seaRescueCooldownSec)*1000);   // the host's own setting decides
     session.Tick(now);
+    VersionTick(running);
     CommandContext(now);
+    QMarkContext(now);
     if(session.Suspended())SuspendSupportNet();
 }
-bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::size_t size) noexcept {
+bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::size_t size,std::uint64_t loadout) noexcept {
     SupportNetTick();
     if(blockedUntilMission) {
         Note(note,size,L"联机参与者同步已暂停，现有支援保留；重新开始关卡后可再呼叫");return false;
@@ -209,7 +304,7 @@ bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::s
     if(catalogId<0 || !running || !session.Ready()) {
         Note(note,size,L"联机支援尚未就绪：需全房同版全军出击与联机扩展，并完成关卡同步");return false;
     }
-    if(!session.Submit(static_cast<std::uint32_t>(catalogId),target,GetTickCount64())) {
+    if(!session.Submit(static_cast<std::uint32_t>(catalogId),target,GetTickCount64(),loadout)) {
         Note(note,size,L"支援请求未受理：已有部署、调用过快或本关支援额度已满");return false;
     }
     Note(note,size,L"支援请求已排队，等待房主验证与全员确认");return true;
@@ -223,6 +318,43 @@ void ReportSupportFailure(std::uint64_t transaction) noexcept {
 bool SupportTransactionActive(std::uint64_t transaction) noexcept { return session.IsActive(transaction); }
 bool SupportPeersAcceptVariants() noexcept { return !running || session.PeersHave(support_net::kCapSoldierVariants); }
 bool SupportPeersAcceptAirborne() noexcept { return !running || session.PeersHave(support_net::kCapAirborneAir); }
+bool SupportPeersAcceptTransports() noexcept { return !running || session.PeersHave(support_net::kCapTransports); }
+bool SupportPeersAcceptLoadout() noexcept { return !running || session.PeersHave(support_net::kCapLoadout); }
+bool SupportPeersHaveVariantFile(std::uint64_t hash) noexcept {
+    return !running || session.PeersHaveVariant(support_net::kExtVariants,hash);
+}
+bool SupportPeersApplyVariants() noexcept { return !running || session.PeersHaveVariant(support_net::kExtVariants,0); }
+bool SupportPeersAcceptRescue() noexcept { return !running || session.PeersHaveExtension(support_net::kExtSeaRescue); }
+bool SupportVersionCue(wchar_t* out,std::size_t capacity) noexcept {
+    constexpr ULONGLONG kShowMs=12000;
+    AcquireSRWLockShared(&versionLock);
+    const bool fresh=versionAt && GetTickCount64()-versionAt<=kShowMs && out && capacity;
+    if(fresh)_snwprintf_s(out,capacity,_TRUNCATE,L"%ls",versionText);
+    ReleaseSRWLockShared(&versionLock);
+    return fresh;
+}
+bool SupportTransactionRequester(std::uint64_t token,ObjRef* out) noexcept {
+    std::uint32_t peer=0;
+    if(!out || !session.RequesterOf(token,&peer))return false;
+    *out=ObjRef{};
+    if(!peer) {   // the host's own request
+        if(unsigned char* own=PlayerHuman())*out=ObjRef::Of(own);
+        return static_cast<bool>(*out);
+    }
+    if(peer>snapshot.peerCount)return false;
+    // The requester's stable identity is the transport's authenticated PUID; its player actor is the mission player whose
+    // index EDF6Coop resolves to that PUID (the same resolution the admission gate uses).
+    const HMODULE coop=GetModuleHandleW(L"EDF6Coop.dll");
+    using ResolvePlayer=std::uint32_t(__cdecl*)(std::int32_t,EDF6CoopPeer*);
+    const auto resolve=coop ? reinterpret_cast<ResolvePlayer>(GetProcAddress(coop,"EDF6Coop_ResolveMissionPlayerPuid")) : nullptr;
+    if(!resolve)return false;
+    for(std::uint32_t i=0;i<support_net::kMaxPeers && !*out;++i) {
+        AcquireSRWLockShared(&worldLock);const ObjRef actor=worldCreated[i];ReleaseSRWLockShared(&worldLock);
+        EDF6CoopPeer who{};
+        if(actor.obj && resolve(static_cast<std::int32_t>(i),&who) && PeerValid(who) && !std::strcmp(who.id,peers[peer].id))*out=actor;
+    }
+    return static_cast<bool>(*out);
+}
 bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) noexcept {
     if(!authenticatedPuid || !std::memchr(authenticatedPuid,0,65))return false;
     EDF6CoopPeer peer;

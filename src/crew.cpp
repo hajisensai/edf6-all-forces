@@ -572,7 +572,8 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     if(anyPlayer){if(SeatRider(SeatAt(vehicle,0))==Rider::player)st.playerAt=now;st.emptySince=0;return;}
     // A player jet waits for the player, and so does one of the plugin's aircraft the player holds (playerjet.cpp).
     // A sidecar passenger does not grant driver authority; an existing real driver is assigned separately.
-    if(driver || !Cfg().autoCrew || IsPlayerJet(vehicle) || PlayerJetHolds(vehicle) || SidecarHoldsPlayer(vehicle) || IsPrimerVehicle(vehicle)){st.emptySince=0;return;}
+    if(driver || !Cfg().autoCrew || IsPlayerJet(vehicle) || PlayerJetHolds(vehicle) || SidecarHoldsPlayer(vehicle) || IsPrimerVehicle(vehicle) ||
+       JetFliesItself(vehicle)){st.emptySince=0;return;}   // a drone of the plugin's: no one is ever seated in it
     // Online, the host coordinates recruitment for registered vehicles. Real soldiers keep their native
     // network identities and announce boarding; each vehicle copy follows the resulting native authority.
     if(!OnlineMaySeatNpc(vehicle)){st.emptySince=0;return;}
@@ -616,10 +617,10 @@ void SlowLog(int cls,const void* v,LONGLONG stock,LONGLONG plugin) noexcept {
 // with how many so far) skips that step for that vehicle this frame, not every step after it.
 enum Step { kStepCrew, kStepAimLines, kStepJetReap, kStepHeliReap, kStepPlayerJet, kStepSub, kStepHeli, kStepGround, kStepHud,
             kStepJetSound, kStepLockSound, kStepRescue, kStepHudPublish, kStepJetSoundTick, kStepUnderground, kStepShield, kStepView, kStepDrill,
-            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepSeats, kStepPayload, kStepSidecar, kStepTurretCam, kStepRam, kStepStab, kStepVehicleSound, kStepEmc, kStepProteus, kStepBoarding, kStepNpcPost, kStepNpcGunners, kStepSazabi, kStepSightZoom, kStepCount };
+            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepSeats, kStepPayload, kStepSidecar, kStepTurretCam, kStepRam, kStepStab, kStepVehicleSound, kStepEmc, kStepProteus, kStepBoarding, kStepNpcPost, kStepNpcGunners, kStepSazabi, kStepSightZoom, kStepDebugSpawn, kStepCount };
 const char* const kStepNames[kStepCount]={"crew","aim lines","jet reap","heli reap","player jet","carrier","heli","ground","hud see",
                                           "jet sound","lock sound","rescue","hud publish","jet sound tick","underground","shield","view","drill",
-                                          "launcher","heli sight","net probe","high cam","stock hud","warn","seat switch","payload","sidecar","turret cam","ram","stabilizer","vehicle sound","emc","proteus","boarding","npc post","npc gunners","sazabi","sight zoom"};
+                                          "launcher","heli sight","net probe","high cam","stock hud","warn","seat switch","payload","sidecar","turret cam","ram","stabilizer","vehicle sound","emc","proteus","boarding","npc post","npc gunners","sazabi","sight zoom","debug spawn"};
 constexpr ULONGLONG kFaultLogMs=10000;
 struct Faults { unsigned count; ULONGLONG loggedAt; } faults[kStepCount]{};
 
@@ -759,6 +760,8 @@ void PerfTick() noexcept {
     perf.at=t;perf.worst=perf.sum=0.0;perf.frames=perf.slow=0;
 }
 
+void DebugSpawnTick() noexcept { DebugSpawnFrame(PlayerHuman()); }
+
 void FrameTick() noexcept {
     if(tickFrame==GameFrame())return;
     tickFrame=GameFrame();
@@ -774,6 +777,7 @@ void FrameTick() noexcept {
     GuardedTick(kStepPlayerJet,&PlayerEjectTick);
     GuardedTick(kStepView,&ViewTick);
     GuardedTick(kStepBoarding,&BoardingTick);
+    GuardedTick(kStepDebugSpawn,&DebugSpawnTick);   // riding: the player's own frame may not come (off by default)
 }
 
 template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,void* a3,void* a4) {

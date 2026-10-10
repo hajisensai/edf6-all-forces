@@ -100,4 +100,29 @@ inline void AirFormationSlot(const Route& route,int slot,float spacing,float* ou
     const float hx=route.heading[0],hz=route.heading[2];
     out[0]=route.from[0]+hz*side;out[1]=route.from[1];out[2]=route.from[2]-hx*side;
 }
+// A takeoff point instead of the edge (2026-10-10, the user: 「能从机场起飞就从机场起飞吧，为什么要从外面来」): an aircraft
+// that has somewhere near to start from (the sea rescue: a submarine carrier's deck; no stock map has an airfield or a
+// helipad the plugin has identified) is made there, kTakeoffLift over the spot, its crew seated at once, and climbs out.
+// `spots`: the candidates; the one nearest the target (flat) within kTakeoffReach, inside the measured area, whose climb
+// column (kTakeoffClimb straight up) and level corridor from the top of it to over the target are clear, wins. None:
+// noEntry, and the caller falls back to the edge (AirRoute). route.heading: level, towards the target.
+constexpr float kTakeoffLift=2.0f,kTakeoffClimb=30.0f,kTakeoffReach=4000.0f;
+template<class Clear>
+Refusal TakeoffRoute(const PlayArea& area,const float* target,const float (*spots)[3],int count,Clear clear,Route& route) noexcept {
+    if(!area.ground || !std::isfinite(target[0]+target[1]+target[2]))return Refusal::noArea;
+    bool found=false;float best=0.0f;
+    for(int i=0;spots && i<count;++i) {
+        const float* s=spots[i];
+        if(!std::isfinite(s[0]+s[1]+s[2]) || s[0]<area.lo[0] || s[0]>area.hi[0] || s[2]<area.lo[1] || s[2]>area.hi[1])continue;
+        const float away=FlatDistance(s,target);
+        if(away>kTakeoffReach || (found && away>=best))continue;
+        const float from[3]={s[0],s[1]+kTakeoffLift,s[2]},top[3]={s[0],from[1]+kTakeoffClimb,s[2]};
+        const float over[3]={target[0],top[1],target[2]};
+        if(!clear(from,top) || (away>=1.0f && !clear(top,over)))continue;
+        Route candidate{{from[0],from[1],from[2]},{0.0f,0.0f,1.0f}};
+        if(away>=1.0f){candidate.heading[0]=(target[0]-s[0])/away;candidate.heading[2]=(target[2]-s[2])/away;}
+        route=candidate;best=away;found=true;
+    }
+    return found ? Refusal::none : Refusal::noEntry;
+}
 } // namespace crew::support

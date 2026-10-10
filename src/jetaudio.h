@@ -43,7 +43,8 @@ bool Running() noexcept;   // Start succeeded (Beat keeps it going)
 // gun's, a 155 mm howitzer's and a super-heavy gun's reports near and far (the 120 mm tank gun's are gun_near / gun_far),
 // a rail gun's discharge near and far, its capacitors charging and its ready click; a 40 mm grenade launcher's thump, a
 // rocket off its rail and the next one latched on; the cases landing (a medium gun's brass, a tank gun's stub base, a
-// grenade's aluminium); the separate loading's breech opening, shell rammed, charge module and primer.
+// grenade's aluminium); the separate loading's breech opening, shell rammed, charge module and primer. Last the Q mark's
+// cues (qmark.cpp): this machine's player marked, a teammate marked, a mark let go (not heard where they are: UI cues).
 enum Clip : int { kClipHeavyIdle, kClipHeavyLoad, kClipLightIdle, kClipLightLoad, kClipTracks, kClipTurret, kClipTurretStop,
                   kClipGunNear, kClipGunFar, kClipEject, kClipLoad, kClipClose, kClipBikeIdle, kClipBikeLoad, kClipMg, kClipGatling,
                   kClipBurstTail, kClipAutocannon, kClipBrass, kClipCaseSmall, kClipMissile, kClipSzBeamShot, kClipSzBeamHit,
@@ -52,7 +53,8 @@ enum Clip : int { kClipHeavyIdle, kClipHeavyLoad, kClipLightIdle, kClipLightLoad
                   kClipSzSaberHum, kClipSzCharge, kClipGunMediumNear, kClipGunMediumFar, kClipHowitzerNear, kClipHowitzerFar,
                   kClipGunHeavyNear, kClipGunHeavyFar, kClipRailShot, kClipRailFar, kClipRailCharge, kClipRailReady,
                   kClipGrenadeShot, kClipRocketRail, kClipRocketLoad, kClipCaseMedium, kClipCaseStub, kClipCaseGrenade,
-                  kClipBreechOpen, kClipShellRam, kClipCharge, kClipPrimer, kClipSzShieldBlock, kClipCount };
+                  kClipBreechOpen, kClipShellRam, kClipCharge, kClipPrimer, kClipMarkOwn, kClipMarkTeam, kClipMarkOff,
+                  kClipSzShieldBlock, kClipCount };
 // The Sazabi's one-shots' clips in sazabi_sound.h SzSfx's order (its missiles the vehicles' launch), its loops' in SzLoop's.
 constexpr int kSazabiSfxClip[]={kClipSzBeamShot,kClipSzBeamHit,kClipSzSaberOn,kClipSzSaberOff,kClipSzWhoosh,kClipSzSaberHit,
                                 kClipSzCannonShot,kClipSzFunnelLaunch,kClipSzFunnelShot,kClipSzFunnelDock,kClipMissile,kClipSzFootstep,

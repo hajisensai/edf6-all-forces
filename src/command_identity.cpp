@@ -28,13 +28,14 @@ bool Live(const unsigned char* object,ObjRef* ref) noexcept {
     if(!Readable(ctrl,16) || At<LONG>(ctrl,8)<=0 || At<const void*>(object,kSelf)!=object)return false;
     *ref=ObjRef{object,ctrl};return true;
 }
-bool Requester(const unsigned char* object,unsigned expected,void** puid) noexcept {
+bool Requester(const unsigned char* object,unsigned expected,void** puid,int* slot=nullptr) noexcept {
     if(!Readable(object,0x1EE0) || !IsAnyPlayer(object) || !IsSoldierClass(object))return false;
     const auto user=At<const unsigned char*>(object,0x1ED0);
     const auto ctrl=At<const unsigned char*>(object,0x1ED8);
     if(!Readable(user,0x4C) || !Readable(ctrl,16) || At<LONG>(ctrl,8)<=0)return false;
     const int index=At<int>(user,0x48);
     if(index<0 || static_cast<unsigned>(index)>=expected)return false;
+    if(slot)*slot=index;
     *puid=At<void*>(user,0x18);return *puid!=nullptr;
 }
 void __fastcall Ignore(void*) noexcept {}
@@ -54,6 +55,27 @@ void __fastcall Visit(Visitor* v,const unsigned char* object) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){v->failed=true;}
 }
 const void* const kVisitorVtable[]={reinterpret_cast<const void*>(&Ignore),reinterpret_cast<const void*>(&Visit)};
+// The Q mark's (qmark.cpp): the marker and its target, either one missing is no failure (a dead marker, an enemy not
+// yet registered here); a match not live is left empty.
+struct MarkVisitor {
+    const void* const* vtable;
+    const unsigned char* marker;
+    const unsigned char* target;
+    unsigned expected=0;
+    MarkIdentities out{};
+};
+void __fastcall VisitMark(MarkVisitor* v,const unsigned char* object) noexcept {
+    if(!object)return;
+    __try {
+        unsigned char id[32]{};
+        if(!ReadNativeObjectId(object,id))return;
+        ObjRef ref{};
+        if(v->marker && !std::memcmp(id,v->marker,32) && Live(object,&ref) && Requester(object,v->expected,&v->out.puid,&v->out.slot))
+            v->out.player=ref;
+        else if(v->target && !std::memcmp(id,v->target,32) && Live(object,&ref))v->out.target=ref;
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+}
+const void* const kMarkVisitorVtable[]={reinterpret_cast<const void*>(&Ignore),reinterpret_cast<const void*>(&VisitMark)};
 bool Add(Visitor* v,const unsigned char* id) noexcept {
     if(!Canonical(id) || v->count>=kMaxIds)return false;
     for(unsigned i=0;i<v->count;++i)if(!std::memcmp(id,v->ids[i],32))return false;
@@ -96,5 +118,23 @@ bool ResolveCommandIdentities(const unsigned char requester[32],const unsigned c
         if(focus)result.focus=visitor.refs[count+1];
         *out=result;return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+bool ResolveMarkIdentities(const unsigned char marker[32],const unsigned char target[32],MarkIdentities* out) noexcept {
+    using namespace command_identity;
+    if(!out)return false;
+    *out=MarkIdentities{};
+    __try {
+        MarkVisitor visitor{kMarkVisitorVtable,Canonical(marker) ? marker : nullptr,Canonical(target) ? target : nullptr};
+        if(!visitor.marker && !visitor.target)return false;
+        if(!Matches(kEnumAllTeams,kEnumSignature,sizeof(kEnumSignature)))return false;
+        void* mgr=At<void*>(image,kTeamManager);
+        const auto status=At<const unsigned char*>(image,kGameStatus);
+        if(!Readable(mgr,0x50) || !Readable(status,0x14FFC))return false;
+        visitor.expected=At<unsigned>(status,0x14FF8);
+        if(!visitor.expected || visitor.expected>kMaxPlayers || !Readable(At<void*>(mgr,0x38),7*0x38))return false;
+        reinterpret_cast<WalkFn>(image+kEnumAllTeams)(mgr,&visitor);
+        *out=visitor.out;
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){*out=MarkIdentities{};return false;}
 }
 }

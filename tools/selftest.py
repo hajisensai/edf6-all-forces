@@ -734,7 +734,8 @@ def install_keeps_rows() -> None:
             for i, x in enumerate(table):
                 if calls.slot_of(x):
                     assert plan.at[x] == i, f'{name}: {x} moved'
-            assert plan.appended == [c for c in calls.IDS if c not in table], name
+            import ported_weapons as pw   # every EDF5 weapon's row follows the calls' (edf5_weapons_rows)
+            assert plan.appended == [c for c in calls.IDS if c not in table] + list(pw.IDS), name
             assert sorted(plan.at[c] for c in plan.appended) == list(range(len(table), len(table) + len(plan.appended)))
     fresh = cw.plan_rows(STOCK)
     assert [fresh.at[c] for c in calls.IDS] == list(range(len(STOCK), len(STOCK) + len(calls.IDS)))
@@ -1475,13 +1476,26 @@ def every_npc_aircraft_boardable() -> None:
     rows = re.findall(r'\{Body::(\w+),L"[^"]*",L"[^"]*",(\d+)\.0f,[^}]*?"(\w+)"(,true)?\}', re.sub(r'\s+', ' ', table))
     assert len(rows) >= 15, f'src/jet_internal.h kBodies: read {len(rows)} rows'
     boardable = set(re.findall(r'\{Body::(\w+),Airframe::', src('src/playerjet_kinds.h')))
+    # A body that is another row's airframe under the same mark is boarded as that row: playerjet_kinds.inc BoardRowOf
+    # finds the row by the mark, a strike-mark jet then by its model's bones, so a row of its own could never be found.
+    # The paratroop plane is the bomber401 strike jet with passenger seats (tools/make_jets.py TRANSPORT_PLANE_FILE).
+    boarded_as = {'transportPlane': 'bomber401'}
+    marks = {body: mark for body, mark, _name, _hostile in rows}
+    for body, twin in boarded_as.items():
+        assert body not in boardable and twin in boardable and marks.get(body) == marks.get(twin), \
+            f'{body} is boarded as {twin}: the same mark, no row of its own'
+    assert "bomber_sgo(game, 'EDF6VC_BOMBER401.SGO'), 0, TRANSPORT_PLANE_PASSENGERS" in src('tools/make_jets.py'), \
+        'the paratroop plane is the bomber401 airframe'
+    board_row = src('src/playerjet_kinds.inc').split('const pjet::Boardable* BoardRowOf(', 1)[1].split('\n}\n', 1)[0]
+    assert 'BomberBody(v+kModelInst506)' in board_row and 'model==JetBody::bomber401 ? jet::Body::bomber401' in board_row
     for body, mark, _name, hostile in rows:
         if int(mark) == 0:
             continue   # a heli: the stock heli flight
         if hostile:
             assert body not in boardable, f'{body} is the enemy\'s: not boardable'
         else:
-            assert body in boardable, f'{body} (mark {mark}): no row in src/playerjet_kinds.h kBoardable'
+            assert body in boardable or boarded_as.get(body) in boardable, \
+                f'{body} (mark {mark}): no row in src/playerjet_kinds.h kBoardable'
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
     for key in ('PlayerJetAll', 'PlayerJetHailKey'):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
@@ -1972,7 +1986,10 @@ def heli_sight_after_aim_lines() -> None:
         assert call in plugin.split('void LoadConfig() noexcept {', 1)[1].split('\n}\n', 1)[0], f'LoadConfig does not hand the ini to {path}'
     sys.path.insert(0, os.path.join(ROOT, 'tools'))
     import support_config
-    suffixes = {'SupportAircraftCount_': support_config.UNIT_KEYS}
+    import support_loadout
+    suffixes = {'SupportAircraftCount_': support_config.UNIT_KEYS, 'SupportPreset_': tuple(support_loadout.SEATS),
+                'SupportVehicle_': tuple(support_loadout.VEHICLE_KEYS)}
+    example = {'SupportAircraftCount_': r'\d', 'SupportPreset_': r'[a-z]', 'SupportVehicle_': r'[A-Z]'}   # a count; a kind; a gun
 
     def read(key: str) -> bool:
         if f'L"{key}"' in plugin or any(f'L"{key}"' in m for m in modules.values()):
@@ -1987,7 +2004,7 @@ def heli_sight_after_aim_lines() -> None:
         for key in re.findall(r'L"(Support\w+?)"', text):
             assert re.search(rf'^{key}=', ini, re.M), f'{path} reads {key}, the shipped ini lacks it'
         for prefix in re.findall(r'L"(\w+_)%ls"', text):
-            assert prefix in suffixes and re.search(rf'{prefix}[A-Z_]+=\d', ini), f'{path} reads {prefix}<key>: no shipped example'
+            assert prefix in suffixes and re.search(rf'{prefix}[A-Z_]+={example[prefix]}', ini), f'{path} reads {prefix}<key>: no shipped example'
 
 
 
@@ -3177,7 +3194,8 @@ def sazabi_fallback_install_upgrade() -> None:
     with tempfile.TemporaryDirectory(prefix='edf6vc-sazabi-') as game, \
             patched(modfiles, game_running=lambda process=modfiles.PROCESS: False), \
             patched(sazabi_model, model_dir=lambda: None), patched(vc, Game=lambda root: Game()):
-        files = _call_files(game, STOCK + list(calls.IDS))
+        import ported_weapons as pw   # every install has a row per EDF5 weapon: here they wait for EDF5
+        files = _call_files(game, STOCK + list(calls.IDS) + [pw.retired_id(x) for x in pw.IDS])
         arms = {f'WEAPON/{w.split("/")[-1].upper()}' for w in vc.SAZABI_WEAPONS}
         for rel in arms:
             os.remove(_mods(game, rel))  # clean CI package: no Sazabi weapons have ever been installed
@@ -3460,6 +3478,11 @@ def pack_install_upgrade_uninstall() -> None:
             enter(patched(importlib.import_module('make_stock_stores'),
                           build=lambda game, overlay=None: (dict(stores), [], {}),
                           store_files=lambda: []))   # the fake make_jets writes no store weapons to need
+            # the out-of-game loadouts' files (tools/support_loadout.py): written after the plugin's ini, gone with uninstall 1
+            loadout = {'OBJECT/EDF6VC_LO_TANK_4000000000000C81.SGO': b'loaded tank'}
+            built_from: list[str] = []
+            enter(patched(importlib.import_module('support_loadout'),
+                          build=lambda game, text, pending=(), errors=None: (built_from.append(text), dict(loadout))[1]))
             with contextlib.redirect_stdout(io.StringIO()):
                 _pack_bundle(bundle, b'v1 ')
                 answers[:] = ['y']   # AT_C: back up the other mod's file and replace it
@@ -3476,6 +3499,9 @@ def pack_install_upgrade_uninstall() -> None:
                 assert installer.check(game), 'check fails right after install'
                 for rel, data in stores.items():
                     assert _read(os.path.join(mods, *rel.split('/'))) == data, f'stores file {rel} not installed'
+                for rel, data in loadout.items():
+                    assert _read(os.path.join(mods, *rel.split('/'))) == data, f'loadout file {rel} not installed'
+                assert built_from and '[VehicleCrew]' in built_from[-1], 'the loadouts are built from the installed ini'
                 modfiles.atomic_write(os.path.join(plugins, 'EDF6AutoTurret.dll'), b'old autoturret, EML6_Load only')
                 assert not installer.check(game), 'check passes an old EDF6AutoTurret.dll'
                 # The upgrade: new DLLs, a setting the new ini adds.
@@ -4235,7 +4261,7 @@ def map_commands_wired() -> None:
     jet, heli, ground = src('src/jet.cpp'), src('src/heli.cpp'), src('src/ground.cpp')
     assert 'CommandAnchor(*j,follow,follow && !j->launched ? player.pos : j->anchor)' in jet
     assert 'const float* leader=r.cmd.order==Order::guard ? r.cmd.at : hasLeader ? player.pos : nullptr;' in ground
-    cmd = heli.split('bool HeliCommand(const void* vehicle,const Command& c)', 1)[1].split('\n}\n', 1)[0]
+    cmd = heli.split('bool HeliCommand(const void* vehicle,const Command& c,const ObjRef& focus)', 1)[1].split('\n}\n', 1)[0]
     assert 'h->guard=true;' in cmd and 'h->orbitSet=false;' in cmd and 'h->guard=h->ownGuard;' in cmd
     for key in ('Ctrl', 'Shift', 'Tab', 'G', 'V', 'X', '联机指令', '框选'):
         assert key in readme, key
@@ -4352,7 +4378,9 @@ def map_wired() -> None:
     assert at_readers == ['designate.cpp'], f'a new EDF6AutoTurret key reader: make it give way to the map ({at_readers})'
     readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'GetAsyncKeyState' in src(f'src/{f}')]
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
-                                      'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp', 'sightzoom.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp', 'sightzoom.cpp',
+                                      'debug_spawn.cpp']), f'a new key reader: make it give way to the map ({readers})'
+    assert 'InFront() && !MapHoldsKeys()' in src('src/debug_spawn.cpp'), 'the debug spawn keys give way to the map'
 
     assert 'InstallMap();' in plugin and 'ResetMap();' in mission and 'src/map.cpp' in cmake
     assert 'EXCLUDE_FROM_ALL tools/map_cam_check.cpp' in cmake and '#include "../src/map_cam.h"' in src('tools/map_cam_check.cpp')
@@ -4637,7 +4665,11 @@ def npc_ai_wired() -> None:
     assert 'if(!IsOnlineAuthority(v))return;' in body, 'the real driver owner, not a hard-coded host, controls the post'
     assert body.index('StockDriving(v,f,*p)') < body.index('Write(v,f,*p,c0,c1);')
     move_to = code.split('void MoveTo(', 1)[1].split('\n}\n', 1)[0]
-    assert 'GroundNavigate(soldier->navigation,pos,to,stop,ms,waypoint)!=npc::navigation::Result::moving' in move_to
+    # Routed (2026-10-09): in kRouteHorizon legs, from the floor under the soldier (RouteStart), still stood while not moving.
+    assert 'GroundNavigate(soldier->navigation,from,goal,stop,ms,waypoint,SoldierRoute())!=npc::navigation::Result::moving' in move_to
+    assert move_to.index('RouteStart(pos,from);') < move_to.index('GroundNavigate('), 'the route starts from the floor'
+    assert move_to.index('RouteStart(to,goal);') < move_to.index('GroundNavigate('), '...and ends on the floor under its goal'
+    assert 'p.horizon=kRouteHorizon;' in code.split('npc::navigation::Profile SoldierRoute()', 1)[1].split('\n', 1)[0]
     assert move_to.index('{Stand(h);return;}') < move_to.index('Move(h,dir,'), 'blocked/pending routes wait instead of walking through walls'
     # Every family (2026-10-07): the mechs' turn-on-spot constant, the Barga by its stock walk, and the plugin's own
     # last write never read as the stock AI driving, taken back when the drive ends.
@@ -4673,12 +4705,18 @@ def npc_ai_wired() -> None:
     for key, default in (('NpcGuardRadius', '15'), ('NpcFreeRange', '120'), ('NpcRecruitCooldownSec', '60')):
         assert f'L"{key}"' in plugin and f'Fix("{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M), key
         assert key in readme and key in doc, key
-    # The mark (§6.3): its key read on foot only (in a vehicle Q is the vehicle's: Proteus, the jets, the turrets), drawn
-    # by the HUD; the focus order needs it.
+    # The mark (§6.3): since 2026-10-10 it is the custom Q that replaces the stock spot (src/qmark.cpp, README「自制 Q 标记
+    # 取代原版 Q」): read on foot and riding alike, with or without the custom NPC AI (npcmark::MarkOn: the plugin on and the
+    # key set; the NPCs' priority on it stays the AI's, npcmark::Enabled), drawn by the HUD; the focus order needs it.
     tick = code.split('void NpcMarkFrame(unsigned char* human,bool mapOpen)', 1)[1].split('\n}\n', 1)[0]
-    assert 'down && !mark.held && !mapOpen && !MapHoldsKeys()' in tick
-    assert 'c.enabled && c.customNpcAi && HumanOnFoot(human)' in tick and 'KeepMark();' in tick
-    assert 'NpcMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);' in src('src/hud.cpp')
+    assert 'down && !mark.held && !mapOpen && !MapHoldsKeys() && npcmark::MarkOn()' in tick
+    assert 'HumanOnFoot' not in tick and 'customNpcAi' not in tick, 'the custom Q marks riding too, without the NPC AI'
+    assert 'KeepMark();' in tick and 'QMarkFrame();' in tick
+    # A teammate's point mark is named (slot and name tag) as its enemy mark is: its marker is looked up for either.
+    qframe = src('src/qmark.cpp').split('void QMarkFrame() noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'inbox.Point(p,now)' in qframe and 't.slot<0' in qframe, "a teammate's point mark goes unnamed"
+    assert re.search(r'inline bool MarkOn\(\) noexcept \{ return Cfg\(\)\.enabled && Cfg\(\)\.npcMarkKey>0; \}', src('src/npc_mark.h'))
+    assert 'QMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);' in src('src/hud.cpp')
     assert 'mapcmd::Decide(g.sel.n,p,allowed,point,pointOk,NpcMarked())' in mapc
     for key, default in (('NpcMarkKey', '81'), ('NpcMarkCone', '8')):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
@@ -4734,7 +4772,8 @@ HUD_SPEC = re.compile(r'%[-+ #0]*\d*(?:\.\d+)?(?:hs|ls|l?[dufxXsc]|%)')
 def hud_literal_words(text: str) -> list[tuple[int, str]]:
     """The words (two letters or more, or any non-ASCII character) in a source's wide literals, with their lines."""
     found = []
-    for m in re.finditer(r'L"((?:[^"\\]|\\.)*)"', text):
+    # `L"` opens a wide literal only as a token of its own: the L closing a narrow one ("DISMOUNT ALL") is no prefix.
+    for m in re.finditer(r'(?<!\w)L"((?:[^"\\]|\\.)*)"', text):
         line = text.count('\n', 0, m.start()) + 1
         core = HUD_SPEC.sub('', m.group(1))
         found += [(line, w) for w in re.findall(r'[A-Za-z]{2,}', core) if w not in HUD_LITERAL_WORDS]
@@ -4824,12 +4863,22 @@ def soft_edge_wired() -> None:
     flight, jet, combat, heli = src('src/jet_flight.cpp'), src('src/jet.cpp'), src('src/jet_combat.cpp'), src('src/heli.cpp')
     guard = flight[flight.index('void Guard(Jet& j,'):flight.index('void ResetWalls()')]
     assert 'SoftEdge(j,pos,want);' in guard and 'WorldWalls' not in flight, 'Guard: the soft edge, not the world walls'
-    assert 'airbound::KeepIn(soft,pos,j.m.vel,r,react,want,&j.m.edgeBack,&j.m.edgeTurn);' in flight
+    # KeepIn every frame (its state follows the jet); only a gun dive at a ground point inside the soft box keeps its
+    # line (KeepIn on a copy, 2026-10-09: bent by the edge the dive never came onto the lead).
+    soft_edge = flight.split('void SoftEdge(Jet& j,const float* pos,float* want) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'airbound::KeepIn(soft,pos,j.m.vel,r,react,dive ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);' in soft_edge
+    assert 'const bool dive=j.mode==Mode::dive && j.t.target && !j.t.flyer && airbound::Depth(soft,j.t.aim)>=0.0f;' in soft_edge, \
+        'only a dive at a ground point inside the soft box is spared the edge'
     assert 'airbound::CapClimb(' in flight
     hover = flight[flight.index('void Hover(Jet& j,'):]
     assert 'airbound::ClampIn(JetSoftBox(j),inside,0.0f);' in hover[:1500], 'Hover: the goal inside the soft edge'
     assert 'anchor=SoftAnchor(*j,anchor,anchorIn);' in jet
-    assert 'if(PastEdge(*k.j,p))return;' in combat
+    # Targets past it let be; the map's focus target (2026-10-09) only out past the play area's walls, where no jet goes.
+    visit = combat.split('void VisitTarget(void* ctx,const void* object,const float* p) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(k.focus || PastEdge(*k.j,p))return;' in visit
+    focus = visit.split('if(k.j->focus.Is(object)) {', 1)[1].split('\n    }\n', 1)[0]
+    assert 0 <= focus.find('if(!airbound::Inside(PlayBox(),p))return;') < focus.find('k.focus=true;'), \
+        'a focus target out past the play area is waited for, not chased'
     fly = heli[heli.index('void Fly(Heli& h,unsigned char* v,bool playerAboard)'):]
     assert 'SoftEdge(h,s,mode,w);' in fly[:600] and 'airbound::LimitOut(' in heli
     assert 'LogImpact("JET",v,pos,was);' in jet and 'LogImpact("PJET",v,pos,j.sent);' in src('src/playerjet.cpp')
@@ -5162,6 +5211,591 @@ def edf5_campaign_shipped() -> None:
     assert re.search(r'foreach \(\$f in git [^\n]*ls-files [^\n)]*\bedf5campaign\b', workflow), \
         'source-tools archive omits the campaign text required by make_edf5_campaign.TEXT'
 
+
+
+def _utf(name: str, columns: list[tuple[str, str]], rows: list[dict]) -> bytes:
+    """A minimal unmasked @UTF table: every column per-row (storage 0x50), kinds 'str' / 'I' / 'Q'."""
+    import struct
+    codes = {'I': 4, 'Q': 6, 'str': 0xA}
+    strings = bytearray(b'<NULL>\0')
+    at: dict[str, int] = {}
+
+    def text(s: str) -> int:
+        if s not in at:
+            at[s] = len(strings)
+            strings.extend(s.encode() + b'\0')
+        return at[s]
+
+    described = b''.join(struct.pack('>BI', 0x50 | codes[k], text(c)) for c, k in columns)
+    packed = bytearray()
+    for row in rows:
+        for c, k in columns:
+            packed += struct.pack('>I', text(row[c])) if k == 'str' else struct.pack('>' + k, row[c])
+    width = len(packed) // max(len(rows), 1)
+    rows_at = 0x18 + len(described)
+    strings_at = rows_at + len(packed)
+    name_at = text(name)
+    body = struct.pack('>IIIIHHI', rows_at, strings_at, strings_at + len(strings), name_at, len(columns), width,
+                       len(rows)) + described + bytes(packed) + bytes(strings)
+    return b'@UTF' + struct.pack('>I', len(body)) + body
+
+
+@test
+def cpk_offsets_count_from_the_header_sector() -> None:
+    """EDF5 / EDF4.1 (and EDF6's DX11.cpk) keep the table of contents at the end of the archive: file offsets still
+    count from the end of the 0x800-byte header sector, never from TocOffset."""
+    import struct
+    import tempfile
+    import cpk
+    payload = b'SSA\0 fixture file'
+    toc_at = cpk.HEADER_SECTOR + 0x40 + len(payload)
+    header = _utf('CpkHeader', [('TocOffset', 'Q'), ('ContentOffset', 'Q')],
+                  [{'TocOffset': toc_at, 'ContentOffset': cpk.HEADER_SECTOR + 0x40}])
+    toc = _utf('CpkTocInfo', [('DirName', 'str'), ('FileName', 'str'), ('FileOffset', 'Q'), ('FileSize', 'I'),
+                              ('ExtractSize', 'I')],
+               [{'DirName': 'WEAPON', 'FileName': 'X.RAB', 'FileOffset': 0x40, 'FileSize': len(payload),
+                 'ExtractSize': len(payload)}])
+    blob = bytearray(b'@CPK' + bytes(4) + struct.pack('<Q', len(header)) + header)
+    blob += bytes(cpk.HEADER_SECTOR + 0x40 - len(blob)) + payload
+    assert len(blob) == toc_at
+    blob += b'TOC ' + bytes(4) + struct.pack('<Q', len(toc)) + toc
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, 'Root.cpk')
+        with open(path, 'wb') as f:
+            f.write(blob)
+        assert cpk.Cpk(path).read('WEAPON', 'X.RAB') == payload
+
+
+@test
+def cpk_reads_compressed_entries_of_every_installed_archive() -> None:
+    """Real data where present: a compressed entry of each EDF6 / EDF5 / EDF4.1 archive decompresses. EDF6's DX11.cpk
+    and every EDF5 / EDF4.1 archive failed with 'not CRILAYLA data' while the base was TocOffset."""
+    import rootcpk
+    steam = os.path.dirname(rootcpk.DEFAULT_GAME)
+    games = [rootcpk.DEFAULT_GAME] + [os.path.join(steam, n) for n in ('EARTH DEFENSE FORCE 5', 'Earth Defense Force 4.1')]
+    for root in games:
+        for archive in ('Root.cpk', 'DX11.cpk'):
+            if not os.path.isfile(os.path.join(root, archive)):
+                continue
+            game = rootcpk.Game(root, archive)
+            entry = next(e for e in game.cpk.entries if int(e['ExtractSize']) != int(e['FileSize']))
+            data = game.read(entry['DirName'], entry['FileName'])
+            assert len(data) == int(entry['ExtractSize']), f'{root}/{archive} {entry["FileName"]}'
+
+
+# ---------------------------------------------------------------- earlier games' weapons (tools/ported_weapons.py, pylib/edf5port.py)
+
+
+# The categories EDF6's slots take (DEFAULTPACKAGE/CONFIG.SGO SoldierInit, docs/loadout-re.md §1.2).
+EDF6_SLOT_CATEGORIES = ({*range(0, 11), 20, 21, 22, 23} | {*range(100, 107), *range(110, 117), 120}
+                        | {*range(200, 210)} | {302, 303, 305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 320,
+                                                330, 331, 332, 333, 334})
+
+
+def _e5w_curves(v: object) -> list[list]:
+    """The 7-element numeric lists in a text row (its stat curves)."""
+    if isinstance(v, list):
+        if len(v) == 7 and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in v):
+            return [v]
+        return [c for x in v for c in _e5w_curves(x)]
+    return []
+
+
+@test
+def edf5_weapons_registry() -> None:
+    """edf5port/weapons.json: unique ids under EDF6VC_E5_ whose placeholders no call shares, every released order still
+    a prefix (a removed id would leave its row nobody's), five languages with EDF6's 7-element curves, and only
+    categories an EDF6 slot takes (EDF5's 304 / 107 / 108 have none)."""
+    import hashlib
+    import ported_weapons as pw
+    assert len(set(pw.IDS)) == len(pw.IDS) and all(p.id.startswith(pw.BY_GAME[p.game].prefix) for p in pw.PORTS)
+    calls_rows = set(calls.IDS) | {calls.retired_id(c) for c in calls.IDS}
+    assert not (set(pw.IDS) | {pw.retired_id(x) for x in pw.IDS}) & calls_rows
+    for name, (n, digest) in pw.RELEASED.items():
+        assert len(pw.IDS) >= n and hashlib.sha256('\n'.join(pw.IDS[:n]).encode()).hexdigest() == digest, \
+            f'{name}: the registry no longer starts with the ids that release installed (EDF5 weapons only go at the end)'
+    assert max(n for n, _ in pw.RELEASED.values()) == len(pw.IDS), \
+        'edf5port/weapons.json has weapons no RELEASED order lists: add this release to tools/ported_weapons.py RELEASED'
+    for p in pw.PORTS:
+        assert p.category in EDF6_SLOT_CATEGORIES, f'{p.id}: category {p.category} has no EDF6 slot'
+        assert p.source in (p.game, 'edf6') and set(p.text) == set(cw.LANGS), p.id
+        for lang, t in p.text.items():
+            assert isinstance(t[0], str) and t[0] and isinstance(t[1], str), f'{p.id} {lang}'
+            assert all(c[6] in (0.0, 1.0) for c in _e5w_curves(t[2])), f'{p.id} {lang}: a curve without its flag'
+
+
+def _f32(x: float) -> object:
+    import struct
+    import sgo
+    return sgo.Float(struct.pack('<f', x))
+
+
+@test
+def edf5_weapon_conversion() -> None:
+    """pylib/edf5port.py on a hand-made EDF5 weapon: a curve gets a 7th element, 1.0 when its base was stored as a float
+    and 0.0 when as an int; a 6-element list that is no curve (ShellCase's) stays 6 long; the curve inside
+    EnergyChargeRequire is found; an empty SecondaryFire_Parameter becomes [0.0]; name.<lang> are the registry's; a raw
+    block other than a MAB is refused. to_sub: Weapon_Sub with the template's named custom_parameter, EDF5's animation
+    unless the template plays 'vehicle_call', EDF5's speed."""
+    import edf5port
+    members = {
+        'xgs_scene_object_class': 'Weapon_BasicShoot',
+        'AmmoCount': [15, 0, 0, 6, _f32(0.5), _f32(0.5)],
+        'AmmoDamage': [_f32(150.0), 8, 1, 8, _f32(0.5), _f32(0.5)],
+        'ShellCase': ['ShellCase_RB', 'app:/Weapon/ShellCase401.rab', [0, 'shell', _f32(0.22), _f32(1.15), _f32(1.0), _f32(5.0)]],
+        'EnergyChargeRequire': [[_f32(100.0), 8, 1, 8, _f32(0.5), _f32(0.5)], 3],
+        'SecondaryFire_Parameter': [],
+        'custom_parameter': ['assault_recoil1', 0, 0, _f32(1.5)],
+        'name.ja': 'old',
+    }
+    doc = edf5port.weapon(members, {'ja': 'JA', 'sc': 'SC'})
+    r = doc.root
+    assert dsgo.to_py(r.get('AmmoCount')) == [15.0, 0.0, 0.0, 6.0, 0.5, 0.5, 0.0]
+    assert dsgo.to_py(r.get('AmmoDamage'))[6] == 1.0 and len(r.get('AmmoDamage').items) == 7
+    assert len(r.get('ShellCase').items[2].items) == 6
+    assert len(r.get('EnergyChargeRequire').items[0].items) == 7 and r.get('EnergyChargeRequire').items[1] == 3.0
+    assert dsgo.to_py(r.get('SecondaryFire_Parameter')) == [0.0]
+    assert (r.get('name.ja'), r.get('name.sc')) == ('JA', 'SC')
+    named = lambda animation: dsgo.Node([dsgo.Node([animation, 1.0, 1.0, 1.0], {0: 'animation', 1: 'whole_body',   # noqa: E731
+                                                                                2: 'animation_speed', 3: 'is_manual_reload'})],
+                                        {0: 'custom_parameter'})
+    call = edf5port.weapon(members, {})
+    edf5port.to_sub(call, named('vehicle_call'))
+    custom = dsgo.to_py(call.root.get('custom_parameter'))
+    assert call.root.get('xgs_scene_object_class') == 'Weapon_Sub'
+    assert custom == {'animation': 'vehicle_call', 'whole_body': 1.0, 'animation_speed': 1.5, 'is_manual_reload': 1.0}
+    unit = edf5port.weapon(members, {})
+    edf5port.to_sub(unit, named('mine_whole_recoil1'))
+    assert dsgo.to_py(unit.root.get('custom_parameter'))['animation'] == 'assault_recoil1'
+    try:
+        edf5port.weapon({'animation_model': [['a', 'b'], 'c', b'XXXX' + bytes(12)]}, {})
+    except edf5port.Unsupported:
+        pass
+    else:
+        raise AssertionError('a raw block other than a MAB was carried over')
+    stat = edf5port.text_value([['ROF', '$0', [60, 25, 4, 8, _f32(0.5), _f32(0.5)]], ['Damage', '$0', [_f32(2175.0), 8, 0, 8, _f32(0.5), _f32(0.5)]]])
+    assert stat[0][2][6] == 0.0 and stat[1][2][6] == 1.0
+    assert stat[0][2][4] == 0.5 and edf5port.text_value(_f32(0.05)) == float(_f32(0.05).value) != 0.05
+    other = edf5port.weapon({'Ammo_CustomParameter': [[1, 2, 3, 4, 5, 6], 'x']}, {}).root.get('Ammo_CustomParameter')
+    assert len(other.items[0].items) == 6, 'a 6-list outside CURVES got a flag'
+    try:
+        edf5port.weapon({'animation_model': [['a', 'b'], 'c', b'MAB\0' + bytes(28)]}, {})
+    except edf5port.Unsupported:
+        pass
+    else:
+        raise AssertionError('a MAB mab_legacy refuses was not Unsupported')
+
+
+@test
+def edf5_weapons_rows() -> None:
+    """call_weapons with EDF5 weapons in the table: a fresh install appends every one of them (built or not: the rows
+    are the same on every machine) after the calls, in the registry's order; a reinstall keeps each row or placeholder
+    where it is; tail_start counts them as ours; retired_id picks each kind's."""
+    import ported_weapons as pw
+    fresh = cw.plan_rows(STOCK)
+    assert fresh.appended == list(calls.IDS) + list(pw.IDS)
+    assert [fresh.at[x] for x in fresh.appended] == list(range(len(STOCK), len(STOCK) + len(fresh.appended)))
+    installed = STOCK + list(calls.IDS) + list(pw.IDS) + OTHER
+    again = cw.plan_rows(installed)
+    assert all(again.at[x] == installed.index(x) for x in pw.IDS) and again.appended == []
+    pending = STOCK + list(calls.IDS) + [pw.retired_id(x) for x in pw.IDS] + OTHER
+    assert all(cw.plan_rows(pending).at[x] == pending.index(pw.retired_id(x)) for x in pw.IDS)
+    ports = list(pw.IDS[:3])
+    assert cw.tail_start(STOCK + ports) == len(STOCK) and cw.tail_start(STOCK + ports + OTHER) == len(STOCK) + 3 + 2
+    assert cw.retired_id(ports[0]) == pw.retired_id(ports[0]) != calls.retired_id(ports[0])
+    assert cw.retired_id(calls.IDS[0]) == calls.retired_id(calls.IDS[0])
+
+
+@test
+def edf5_found_by_gamedir() -> None:
+    """gamedir.find_other: $EDF5_DIR first, then the folder next to EDF6 (the same Steam library); a folder counts only
+    with EDF5.exe and Root.cpk."""
+    import gamedir
+    folder, exe, var = gamedir.EDF5
+    tmp = tempfile.mkdtemp(prefix='edf6vc-selftest-')
+    old = os.environ.get(var)
+    try:
+        edf6 = os.path.join(tmp, 'lib', 'EARTH DEFENSE FORCE 6')
+        near = os.path.join(tmp, 'lib', folder)
+        own = os.path.join(tmp, 'elsewhere')
+        for d, files in ((edf6, ()), (near, (exe, 'Root.cpk')), (own, (exe, 'Root.cpk'))):
+            os.makedirs(d)
+            for n in files:
+                open(os.path.join(d, n), 'wb').close()
+        os.environ[var] = own
+        assert gamedir.find_other(gamedir.EDF5, near=edf6) == os.path.normpath(own)
+        os.environ[var] = os.path.join(tmp, 'missing')
+        assert gamedir.find_other(gamedir.EDF5, near=edf6) == os.path.normpath(near)
+        os.remove(os.path.join(near, 'Root.cpk'))
+        found = gamedir.find_other(gamedir.EDF5, near=edf6)
+        assert found != os.path.normpath(near), 'a folder without Root.cpk counted'
+    finally:
+        if old is None:
+            os.environ.pop(var, None)
+        else:
+            os.environ[var] = old
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+@test
+def weapon_table_fits_the_save() -> None:
+    """stack refuses, before building anything, a table its rows would take past the 0x800 weapons a save keeps (the
+    game writes past the save's block for every row beyond); a table exactly full is fine."""
+    import types
+    import ported_weapons as pw
+    ours = len(cw.plan_rows([]).appended)
+    full = [f'OTHER{i}' for i in range(cw.SAVE_WEAPONS - ours + 1)]
+
+    def built(*_a: object) -> None:
+        raise AssertionError('stack built the weapons before refusing the table')
+
+    with patched(cw, load_shared=lambda game_root: types.SimpleNamespace(ids=full)), patched(pw, build=built):
+        try:
+            cw.stack('nowhere')
+        except SystemExit as e:
+            assert str(cw.SAVE_WEAPONS + 1) in str(e), e
+        else:
+            raise AssertionError('a table past the save was stacked')
+    cw.check_room(cw.SAVE_WEAPONS)
+
+
+def _e5w_games(test: str) -> tuple[str, str] | None:
+    """(EDF6, EDF5) when both are installed (the real-data tests), else None, saying the test is skipped."""
+    import gamedir
+    import rootcpk
+    edf6 = rootcpk.DEFAULT_GAME
+    edf5 = gamedir.find_other(gamedir.EDF5, near=edf6)
+    if edf5 and os.path.isfile(os.path.join(edf6, 'Root.cpk')):
+        return edf6, edf5
+    print(f'skip  {test}: needs EDF6 and EDF5 installed')
+    return None
+
+
+@contextlib.contextmanager
+def _stock_only_mods() -> Iterator[None]:
+    """call_weapons reading the real game's archives but an empty Mods: the real-data tests start from the stock table
+    whatever this machine has installed (an install of ours or another tool's would change what stack keeps)."""
+    with tempfile.TemporaryDirectory(prefix='edf6vc-stock-mods-') as clean, \
+            patched(cw, _mods=lambda game_root, *rel: os.path.join(clean, *[x for r in rel for x in r.split('/')])):
+        yield
+
+
+# The 'edf6' weapons' fields the developers changed beyond converting them (measured 2026-10-10): balance, and the MAB
+# of the gunship requests. The two thrown Wing Diver weapons became Weapon_Subs with new physics, which edf5port does
+# not do (Unsupported).
+E5W_REBALANCED: dict[str, set[str] | None] = {
+    'DLC_hSupport_Actuator.sgo': {'custom_parameter'},
+    'eRequestAirStrike01D.sgo': {'ReloadTime', 'animation_model'},
+    'eRequestAirStrike01.sgo': {'ReloadTime', 'animation_model'},
+    'eWeapon016.sgo': {'ReloadTime', 'animation_model'},
+    'DLC_Vehicle_Begaruta01.sgo': {'ReloadInit'},
+    'DLC_Vehicle_Begaruta02.sgo': {'ReloadInit'},
+    'DLC_pWeapon01.sgo': None,
+    'DLC_pWeapon02.sgo': None,
+}
+
+
+@test
+def edf5_weapons_match_developers() -> None:
+    """Real data, where both games are installed: EDF5's copy of every weapon the developers converted themselves (the
+    'edf6' weapons) run through pylib/edf5port.py equals EDF6's file field for field, MAB bytes included, but for the
+    fields they rebalanced (E5W_REBALANCED); the Light Truck's whole Weapon_Sub conversion among them."""
+    import dataclasses
+    import edf5port
+    import ported_weapons as pw
+    import rootcpk
+    games = _e5w_games('edf5_weapons_match_developers')
+    if games is None:
+        return
+    g6 = rootcpk.Game(games[0])
+    stock = lambda rel: g6.read(*rel.split('/'))   # noqa: E731
+    checked = 0
+    for p in pw.PORTS:
+        if p.source != 'edf6':
+            continue
+        want = E5W_REBALANCED.get(p.sgo, set())
+        try:
+            ours = dsgo.parse(pw.build_sgo(dataclasses.replace(p, source='edf5'), stock, games[1])).root
+        except edf5port.Unsupported:
+            assert want is None, f'{p.sgo}: not converted'
+            continue
+        assert want is not None, f'{p.sgo} converted now: drop it from E5W_REBALANCED'
+        theirs = dsgo.parse(stock(f'WEAPON/{p.sgo.upper()}')).root
+        a = {ours.names[i]: dsgo.dump(v) for i, v in enumerate(ours.items) if not ours.names[i].startswith('name.')}
+        b = {theirs.names[i]: dsgo.dump(v) for i, v in enumerate(theirs.items) if not theirs.names[i].startswith('name.')}
+        differ = {k for k in set(a) | set(b) if a.get(k) != b.get(k)}
+        assert differ == want, f'{p.sgo}: differs in {sorted(differ)}, expected {sorted(want)}'
+        checked += 1
+    assert checked >= 10
+
+
+@test
+def edf5_weapons_stack_real() -> None:
+    """Real data: call_weapons.stack builds every EDF5 weapon; each row names its own SGO, with the registry's category,
+    level and star caps, acquire 0, no EDF6 pack and its template's other columns; each SGO is a DSGO of the registry's
+    class with no star curve left 6 long. Without EDF5 the table has the same rows at the same indices: the 'edf6'
+    weapons built, the 'edf5' ones placeholders waiting for it, or, on a table an install with EDF5 wrote (its SGOs in
+    Mods), those rows kept. retire on that table leaves every EDF5 weapon a placeholder."""
+    import edf5port
+    import ported_weapons as pw
+    games = _e5w_games('edf5_weapons_stack_real')
+    if games is None:
+        return
+    with _stock_only_mods():
+        out = cw.stack(games[0])
+    rows = {r.items[0]: r for r in dsgo.parse(out[cw.TABLE]).root.get('table').items}
+    for p in pw.PORTS:
+        row = rows[p.id]
+        tpl = rows[p.template]
+        assert row.items[1].lower() == f'app:/weapon/{p.id}.sgo'.lower(), p.id
+        assert (row.items[2], row.items[3], row.items[4], row.items[5], row.items[8]) == \
+               (float(p.category), 1.0, p.level, 0.0, 0.0), p.id
+        assert dsgo.to_py(row.items[6]) == [float(x) for x in p.stars] and row.items[7] == tpl.items[7], p.id
+        w = dsgo.parse(out[pw.sgo_file(p)]).root
+        assert w.get('xgs_scene_object_class') == p.cls, p.id
+        for k, at in edf5port.CURVES.items():
+            v = w.get(k) if k in w.names.values() else None
+            if at is not None and isinstance(v, dsgo.Node) and v.items:
+                v = v.items[at]
+            if isinstance(v, dsgo.Node) and all(isinstance(x, float) for x in v.items):
+                assert len(v.items) != 6, f'{p.id} {k}: a star curve still 6 long'
+    with_edf5 = cw.row_ids(out[cw.TABLE])
+    with _stock_only_mods(), patched(pw, game_root=lambda game, edf6_root: None):   # no EDF5 / EDF4.1 here
+        no_game = cw.stack(games[0])
+    no_ids = cw.row_ids(no_game[cw.TABLE])
+    assert len(no_ids) == len(with_edf5)
+    for p in pw.PORTS:   # EDF6's own and the registry's converted (EDF5's) need no game; EDF4.1's wait
+        i = with_edf5.index(p.id)
+        alone = p.source == 'edf6' or p.weapon is not None
+        assert no_ids[i] == (p.id if alone else pw.retired_id(p.id)), p.id
+        assert not alone or no_game[pw.sgo_file(p)] == out[pw.sgo_file(p)], f'{p.id}: built without its game differs'
+    # A weapon this machine cannot build (its game missing): the same rows, a placeholder for it.
+    real_build = pw.build
+
+    def edf6_only(game_root: str, stock):  # noqa: ANN001, ANN202
+        built, why = real_build(game_root, stock)
+        cut = {k for k in built if pw.BY_ID[k].source != 'edf6'}
+        return {k: v for k, v in built.items() if k not in cut}, {**why, **{k: 'Unavailable: test' for k in cut}}
+
+    with _stock_only_mods(), patched(pw, build=edf6_only):
+        bare = cw.stack(games[0])
+    without = cw.row_ids(bare[cw.TABLE])
+    assert len(without) == len(with_edf5)
+    for p in pw.PORTS:
+        i = with_edf5.index(p.id)
+        assert without[i] == (p.id if p.source == 'edf6' else pw.retired_id(p.id)), p.id
+        assert (pw.sgo_file(p) in bare) == (p.source == 'edf6'), p.id
+        assert dsgo.parse(bare[cw.TABLE]).root.get('table').items[i].items[5] == pw.ACQUIRE, \
+            f'{p.id}: a placeholder obtained otherwise than the weapon (its template a starting or DLC weapon)'
+    pending = next(p for p in pw.PORTS if p.source == 'edf5')
+    text = dsgo.parse(bare['WEAPON/WEAPONTEXT.EN.SGO']).root.get('text_table').items[with_edf5.index(pending.id)]
+    assert text.items[0] == pending.text['EN'][0] + pw.PENDING_NOTE['EN'][0].format(game=pw.BY_GAME[pending.game].name)
+    orig_base, orig_mods = cw.base, cw._mods
+    with tempfile.TemporaryDirectory(prefix='edf6vc-e5w-') as mods:
+        for p in pw.PORTS:
+            modfiles.atomic_write(os.path.join(mods, *pw.sgo_file(p).split('/')), out[pw.sgo_file(p)])
+        installed = lambda game_root, rel: out[rel] if rel in cw.SHARED else orig_base(game_root, rel)   # noqa: E731
+        ours = lambda game_root, *rel: os.path.join(mods, *[x for r in rel for x in r.split('/')])   # noqa: E731
+        with patched(cw, base=installed, _mods=ours), patched(pw, build=edf6_only):
+            kept = cw.stack(games[0])
+            retired, _ = cw.retire(games[0], False)
+    assert cw.row_ids(kept[cw.TABLE]) == with_edf5, 'a built row an earlier install wrote was not kept'
+    assert not any(pw.sgo_file(p) in kept for p in pw.PORTS if p.source == 'edf5'), 'a kept SGO was rewritten'
+    have = cw.row_ids(retired[cw.TABLE])
+    assert all(have[with_edf5.index(p.id)] == pw.retired_id(p.id) for p in pw.PORTS)
+
+
+@test
+def edf5_weapons_retire_and_uninstall() -> None:
+    """On a stand-in game whose Mods table holds the calls and three EDF5 weapons: retire turns each EDF5 weapon's row
+    into its template's stock row under the placeholder id (text: its name marked uninstalled), deleting only the run
+    of ours ending the table when asked; uninstall removes the EDF5 weapons' SGOs with the calls'."""
+    import ported_weapons as pw
+    ports = list(pw.PORTS[:3])
+    templates = sorted({*cw.templates(), *(p.template for p in ports)})
+    ids = STOCK + [t for t in templates if t not in STOCK] + list(calls.IDS) + [p.id for p in ports]
+
+    def table(key: str, rows: list[str]) -> bytes:
+        def row(i: str) -> dsgo.Node:
+            # the 9 columns; every template a new save's starting weapon (acquire 1), as AssultRifle01 is
+            acquire = 1.0 if i in templates else 0.0
+            return dsgo.Node([i, f'app:/weapon/{i}.sgo', 0.0, 1.0, 0.0, acquire, dsgo.Node([]), 1.0, 0.0]
+                             if key == 'table' else [f'name {i}', f'about {i}'])
+        return dsgo.compact(dsgo.Document(dsgo.Node([dsgo.Node([row(i) for i in rows])], {0: key}), []))
+
+    with tempfile.TemporaryDirectory(prefix='edf6vc-e5w-') as game, \
+            patched(modfiles, game_running=lambda process=modfiles.PROCESS: False):
+        modfiles.atomic_write(_mods(game, cw.TABLE), table('table', ids))
+        for rel in cw.TEXTS:
+            modfiles.atomic_write(_mods(game, rel), table('text_table', ids))
+        for rel in [cw.sgo_file(c) for c in calls.CALLS] + [pw.sgo_file(p) for p in pw.PORTS]:
+            modfiles.atomic_write(_mods(game, rel), b'ours')
+        out, deleted = cw.retire(game, False)
+        assert deleted == []
+        rows = dsgo.parse(out[cw.TABLE]).root.get('table').items
+        texts = dsgo.parse(out['WEAPON/WEAPONTEXT.EN.SGO']).root.get('text_table').items
+        for p in ports:
+            i = ids.index(p.id)
+            assert rows[i].items[:2] == [pw.retired_id(p.id), f'app:/weapon/{p.template}.sgo'], p.id
+            assert rows[i].items[5] == pw.ACQUIRE, f'{p.id}: the placeholder took its template\'s acquire'
+            assert texts[i].items[0] == p.text['EN'][0] + calls.RETIRED_NOTE['EN'][0], p.id
+        assert [r.items[0] for r in rows[:len(STOCK)]] == STOCK
+        _, deleted = cw.retire(game, True)
+        assert deleted == list(calls.IDS) + [p.id for p in ports], 'the run of ours ending the table'
+        cw.uninstall(game)
+        assert not any(os.path.isfile(_mods(game, pw.sgo_file(p))) for p in pw.PORTS)
+        assert not any(os.path.isfile(_mods(game, cw.sgo_file(c))) for c in calls.CALLS)
+        left = [r.items[0] for r in dsgo.parse(modfiles.read(_mods(game, cw.TABLE))).root.get('table').items]
+        assert all(pw.retired_id(p.id) in left for p in ports) and len(left) == len(ids)
+        # Installing again where these cannot be built (no EDF5): their placeholders stay, recorded (once a KeyError
+        # after the commit, the manifest knowing only live rows).
+        files = _call_files(game, left)
+        cw.install(game, files)
+        recorded = cw.load_manifest(game)['rows']
+        assert all(recorded[p.id] == left.index(pw.retired_id(p.id)) for p in ports)
+
+
+@test
+def edf41_weapon_conversion() -> None:
+    """pylib/edf5port.py weapon41 on a hand-made EDF4.1 weapon: 'name' and 'Range' gone, name.<lang> the registry's,
+    AmmoDamageReduce [1, 1] and ExtPrams [1] added (kept when the weapon has its own), plain numbers stay plain (4.1
+    has no star curves), an empty SecondaryFire_Parameter becomes [0.0]."""
+    import edf5port
+    members = {'xgs_scene_object_class': 'Weapon_BasicShoot', 'name': ['ＡＦ', 'AF', 'ＡＦ'], 'Range': _f32(120.0),
+               'AmmoDamage': _f32(6.0), 'AmmoCount': 200, 'ReloadTime': 150, 'SecondaryFire_Parameter': [],
+               'ExtPrams': [_f32(2.0)]}
+    r = edf5port.weapon41(members, {'ja': 'JA', 'en': 'EN'}).root
+    names = set(r.names.values())
+    assert 'name' not in names and 'Range' not in names
+    assert (r.get('name.ja'), r.get('name.en')) == ('JA', 'EN')
+    assert dsgo.to_py(r.get('AmmoDamageReduce')) == [1.0, 1.0] and dsgo.to_py(r.get('ExtPrams')) == [2.0]
+    assert (r.get('AmmoDamage'), r.get('AmmoCount'), r.get('ReloadTime')) == (6.0, 200.0, 150.0)
+    assert dsgo.to_py(r.get('SecondaryFire_Parameter')) == [0.0]
+    assert dsgo.to_py(edf5port.weapon41({'xgs_scene_object_class': 'x'}, {}).root.get('ExtPrams')) == [1.0]
+    energy = edf5port.weapon41({'EnergyChargeRequire': 25}, {}).root.get('EnergyChargeRequire')
+    assert dsgo.to_py(energy) == [25.0, 25.0], 'EDF6 holds EnergyChargeRequire as [curve, value]'
+
+
+@test
+def edf41_stat_lines() -> None:
+    """tools/make_edf41_weapons.py: a 4.1 stat line through EDF6's forms (its numbers put into each language's format),
+    two stats on one line, a part without a colon going on the value before it, a language-neutral value, a value put
+    together from EDF6's pieces, LABELS41's label, and None for a label nobody shows."""
+    import make_edf41_weapons as m41
+    form = lambda label, values: {L: (label[L], values[L]) for L in m41.LANGS}   # noqa: E731
+    rof = form({'JA': '連射速度', 'EN': 'ROF', 'CN': '連射速度', 'SC': '连射速度', 'KR': '연사 속도'},
+               {'JA': '$0発／秒', 'EN': '$0/sec', 'CN': '$0發/秒', 'SC': '$0发/秒', 'KR': '$0발/초'})
+    dmg = form({'JA': 'ダメージ', 'EN': 'Damage', 'CN': '傷害', 'SC': '伤害', 'KR': '대미지'},
+               {'JA': '$0×$1', 'EN': '$0×$1', 'CN': '$0×$1', 'SC': '$0×$1', 'KR': '$0×$1'})
+    acc = form({'JA': '精度', 'EN': 'Accuracy', 'CN': '準度', 'SC': '准度', 'KR': '정확도'},
+               {L: '$0' for L in m41.LANGS})
+    formats = {'連射速度': [rof], 'ダメージ': [dmg], '精度': [acc]}
+    pieces = m41.fragments(formats)
+    one = m41.stat_lines('連射速度：12.0発／秒', formats, pieces)
+    assert one == [{'JA': ['連射速度', '12.0発／秒'], 'EN': ['ROF', '12.0/sec'], 'CN': ['連射速度', '12.0發/秒'],
+                    'SC': ['连射速度', '12.0发/秒'], 'KR': ['연사 속도', '12.0발/초']}], one
+    two = m41.stat_lines('ダメージ：60.0    ×30', formats, pieces)
+    assert two and two[0]['EN'] == ['Damage', '60.0×30'], two
+    pair = m41.stat_lines('精度：S+     連射速度：60.0発／秒×900', formats, pieces)
+    assert pair and pair[0]['CN'] == ['準度', 'S+'] and pair[1]['KR'] == ['연사 속도', '60.0발/초×900'], pair
+    supply = m41.stat_lines('供給量：0.05', formats, pieces)
+    assert supply and supply[0]['EN'] == ['Supply Rate', '0.05'], supply
+    assert m41.stat_lines('謎の値：12', formats, pieces) is None
+    generic = m41._generalize({'JA': ('効果時間', '90.0秒'), 'EN': ('Effective Time', '90.0 sec'),
+                               'CN': ('效果時間', '90.0秒'), 'SC': ('效果时间', '90.0秒'), 'KR': ('효과 시간', '90.0초')})
+    assert generic['EN'] == ('Effective Time', '$0 sec') and generic['JA'] == ('効果時間', '$0秒'), generic
+
+
+@test
+def edf41_weapons_convert_real() -> None:
+    """Real data, where EDF4.1 and EDF6 are installed: every EDF4.1 weapon of the registry converts, of its class, with
+    every field nearly every EDF6 weapon has (EDF6 reads those; 4.1 lacks AmmoDamageReduce / ExtPrams / name.<lang>),
+    its swapped cues all in EDF6's banks and no cue left that EDF6's banks lack."""
+    import acb
+    import gamedir
+    import ported_weapons as pw
+    import rootcpk
+    edf6 = rootcpk.DEFAULT_GAME
+    edf41 = gamedir.find_other(gamedir.EDF41, near=edf6)
+    if not edf41 or not os.path.isfile(os.path.join(edf6, 'Root.cpk')):
+        print('skip  edf41_weapons_convert_real: needs EDF6 and EDF4.1 installed')
+        return
+    g6 = rootcpk.Game(edf6)
+    stock = lambda rel: g6.read(*rel.split('/'))   # noqa: E731
+    rows = dsgo.parse(stock('WEAPON/WEAPONTABLE.SGO')).root.get('table').items
+    count: dict[str, int] = {}
+    for r in rows[::7]:
+        for k in dsgo.parse(stock(f'WEAPON/{r.items[0].upper()}.SGO')).root.names.values():
+            count[k] = count.get(k, 0) + 1
+    common = {k for k, n in count.items() if n >= 0.95 * len(rows[::7])}
+    cues6 = acb.game_cues(edf6)
+    cues41 = acb.game_cues(edf41)
+    ports = [p for p in pw.PORTS if p.game == 'edf41']
+    assert ports
+    for p in ports:
+        r = dsgo.parse(pw.build_sgo(p, stock, edf41)).root
+        assert r.get('xgs_scene_object_class') == p.cls, p.id
+        lacking = common - set(r.names.values())
+        assert not lacking, f'{p.id}: lacks {sorted(lacking)}'
+        assert all(c in cues6 for c in p.cues.values()), p.id
+        strings = [x for x in _dsgo_strings(r) if x in cues41]
+        assert all(x in cues6 for x in strings), f'{p.id}: {sorted(set(strings) - cues6)} play nothing in EDF6'
+
+
+def _dsgo_strings(v: dsgo.Value) -> list[str]:
+    if isinstance(v, str):
+        return [v]
+    if isinstance(v, dsgo.Node):
+        return [x for c in v.items for x in _dsgo_strings(c)]
+    return []
+
+
+@test
+def utf_table_version_field() -> None:
+    """pylib/cpk.py parse_utf: an @UTF table starts u16 version, u16 rows offset. A CPK's are version 0 (so reading the
+    two as one u32 worked); an ACB's (pylib/acb.py, the sound banks) are version 1."""
+    import cpk
+    table = bytearray(_utf('Bank', [('CueName', 'str')], [{'CueName': 'weapon_fire'}]))
+    table[8:10] = (1).to_bytes(2, 'big')
+    _name, _cols, count, rows = cpk.parse_utf(bytes(table))
+    assert count == 1 and next(rows())['CueName'] == 'weapon_fire'
+
+
+# EDF4.1 weapons EDF6 ships converted by its developers (never in its table): 4.1 file -> EDF6 file.
+E41_DEVELOPER_COPIES = {'hHellStorm01.sgo': 'HHELLSTORM01.SGO', 'Weapon457.sgo': 'HWEAPON112.SGO',
+                        'Weapon462.sgo': 'HWEAPON118.SGO', 'Weapon466.sgo': 'HWEAPON123.SGO',
+                        'Weapon470.sgo': 'HWEAPON127.SGO'}
+
+
+@test
+def edf41_weapons_match_developers() -> None:
+    """Real data, where EDF4.1 and EDF6 are installed: pylib/edf5port.py weapon41 on the 4.1 weapons the developers
+    converted themselves gives their files' fields exactly (name / Range gone, AmmoDamageReduce / ExtPrams added), and
+    each field's shape theirs where they kept 4.1's numbers plain (EnergyChargeRequire [v, v], not 4.1's one number);
+    the rest they turned into star curves or rebalanced."""
+    import edf5port
+    import gamedir
+    import rootcpk
+    import sgo
+    edf6 = rootcpk.DEFAULT_GAME
+    edf41 = gamedir.find_other(gamedir.EDF41, near=edf6)
+    if not edf41 or not os.path.isfile(os.path.join(edf6, 'Root.cpk')):
+        print('skip  edf41_weapons_match_developers: needs EDF6 and EDF4.1 installed')
+        return
+    g4, g6 = rootcpk.Game(edf41), rootcpk.Game(edf6)
+    for mine, theirs in E41_DEVELOPER_COPIES.items():
+        a = edf5port.weapon41(sgo.read(g4.read('WEAPON', mine))[1], {}).root
+        b = dsgo.parse(g6.read('WEAPON', theirs)).root
+        names = lambda r: {k for k in r.names.values() if not k.startswith('name.')}   # noqa: E731
+        assert names(a) == names(b), f'{mine}: {sorted(names(a) ^ names(b))}'
+        for k in names(a):
+            va, vb = a.get(k), b.get(k)
+            plain = not isinstance(vb, dsgo.Node) or not any(isinstance(x, dsgo.Node) and len(x.items) == 7 for x in vb.items)
+            if isinstance(vb, dsgo.Node) and len(vb.items) == 7 and all(isinstance(x, float) for x in vb.items):
+                continue   # a star curve they added where 4.1 has a number
+            if plain:
+                assert isinstance(va, dsgo.Node) == isinstance(vb, dsgo.Node), f'{mine} {k}: {dsgo.to_py(va)} / {dsgo.to_py(vb)}'
+        assert dsgo.to_py(a.get('EnergyChargeRequire')) == dsgo.to_py(b.get('EnergyChargeRequire')) == [-1.0, -1.0]
 
 def main() -> int:
     import rootcpk

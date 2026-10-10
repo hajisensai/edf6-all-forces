@@ -50,7 +50,35 @@ The plugin reads exactly this. If the bytes at 0x6346FC, 0x634726, 0x634758 or 0
 - the local player on foot (human+0x1550 empty);
 - the player's y < RescueBelow for 1.5 s.
 
-**Launch:** one 410, 60 m above the carrier's deck point nearest the player (HeliLaunch).
+**Launch (2026-10-09):** the support catalog's last entry, `RESCUE` (support_call.h SupportRescueAt), requested at the
+swimmer through the ordinary support request path (offline / a one-player world's host: planned here; any other online
+machine: through the host's transaction, every peer announcing `kExtSeaRescue` in its hello's extension word; the
+capability bits 1|2|4|8 are the transports' and loads' since #100).
+- Planned as air support (`PlanAirSupport`): an entry at the map's edge, a clear corridor, open sky over the swimmer.
+- One 410 made at the takeoff point, its real pilot and one door gunner made inside it and seated at once
+  (`BoardAirborne`, `NpcSeatCrewNow` in seat order: pilot seat 0, gunner seat 1 = `410_HELI_GUNNER_L`), all registered on
+  every peer. Seat 2 (`410_HELI_GUNNER_R`) stays free for the swimmer; `DoorSeat` finds it.
+- Takeoff point (2026-10-10): the nearest of the candidates whose 30 m climb column and level corridor to over the
+  swimmer are clear (`support_entry.h TakeoffRoute`), else the map's edge (`PlanAirSupport`). Candidates: the carrier
+  deck point nearest the swimmer, 20 m into the deck; and every pad of the mission (`helipad.h`: where a stock-bodied
+  helicopter rested on solid ground, within 4 m of it and not over water, for 3 s; 25 m apart, at most 16; none a
+  helicopter stands on now). Made 2 m over the spot. Over the hull footprint (or within 15 m of it) the heli keeps 8 m
+  over the deck. The game's data has no airfield: no runway / apron / hangar / helipad piece in any of the 50 .MAC
+  archives, and the only mission helicopters (M017, M031D, M031E) are route-flying event helicopters.
+- Protocol (2026-10-10): its own channel when every peer has `kExtRescueChannel` (the hello's extension word) (one rescue in flight per requester,
+  beside the map's single one, no 2 s rate) and the host's per-requester cooldown (`SeaRescueCooldownSec`, from the
+  transaction going active; a cancelled one starts none). The swimmer's machine holds its own cooldown too (from the
+  heli handed to its call).
+- Not held to the mission's support policy, nor to the map's queue / 30 s cooldown / status line.
+- The dispatcher hands it to heli.cpp (`RescueHeliDeployed`) with its requester: offline / a one-player host this
+  machine's player, a guest's by the transaction's requester PUID resolved to its mission player actor
+  (`SupportTransactionRequester`). The requester gone, dead, ashore 3 s, in another vehicle or in another rescue's heli
+  calls it off (`rescue_logic.h PickupCancel`, logged `RESCUE cancelled: ...`) and the heli leaves (`StartLeave`). With no
+  requester known it leaves at once. On the swimmer's machine the call presses the board button.
+- No heli (refused, cooldown, no sky / corridor, an older peer, nothing within 150 s): logged
+  `RESCUE request failed`, shown on the HUD, asked again 10 s later.
+- Before this, one 410 was made 60 m above the carrier's deck with an empty pilot seat (HeliLaunch): since the real
+  crews (c21f499) nobody sat in it and it fell. That spawner is gone (tests/rescue_support_guard.py).
 
 **Pickup:**
 - It flies to the player at sea level + 20 m.
@@ -75,6 +103,9 @@ The plugin reads exactly this. If the bytes at 0x6346FC, 0x634726, 0x634758 or 0
 - the heli is lost;
 - the player takes seat 0 (the heli becomes theirs and is left as is).
 
+The flight (where it is flown) and the call (the swimmer's machine) each test these on their own copy; offline both run
+on the same heli.
+
 After it ends, there is a 30 s pause before another rescue.
 
 The player's position is never written. Only the stock boarding seats them, and they get off themselves.
@@ -85,3 +116,5 @@ The player's position is never written. Only the stock boarding seats them, and 
 - The actual radius of the 410 door seats' riding points, and whether a heli 1.5 m over the sea brings them into reach of a swimmer. The logs report both.
 - Whether a swimming human passes the 0x56D700 state gates (+0x128, +0x5D0, +0x39C).
 - Whether the 410 is preloaded on sea missions.
+- Online: whether the host sees a guest's swimmer among the mission player actors (SupportMissionPlayerObjects), whether
+  a guest's board press takes a door seat of the host's registered copy, and whether team 5 set on a peer's copy holds.

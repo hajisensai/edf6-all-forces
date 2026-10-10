@@ -13,6 +13,8 @@ import struct
 
 _KEYSTREAM = bytearray()
 
+HEADER_SECTOR = 0x800  # the '@CPK' header packet, padded out with CRI's copyright
+
 
 def _keystream(length):
     global _KEYSTREAM
@@ -55,8 +57,10 @@ def parse_utf(block):
     if block[:4] != b'@UTF':
         raise ValueError('not an @UTF table: %s' % block[:8].hex())
     body = block[8:8 + struct.unpack_from('>I', block, 4)[0]]
-    rows_at, strings_at, data_at, name_at, columns, row_width, row_count = \
-        struct.unpack_from('>IIIIHHI', body, 0)
+    # u16 version, u16 rows offset: a CPK's tables are version 0, so reading the two as one u32 happened to work;
+    # an ACB's (pylib/acb.py) are version 1.
+    _version, rows_at, strings_at, data_at, name_at, columns, row_width, row_count = \
+        struct.unpack_from('>HHIIIHHI', body, 0)
     strings = body[strings_at:data_at]
 
     def text(offset):
@@ -106,10 +110,14 @@ class Cpk:
         _, header_block = _read_block(path, 0)
         self.header = next(parse_utf(header_block)[3]())
         toc_at = int(self.header['TocOffset'])
-        # File offsets in the table are relative to the table's own position,
-        # not to ContentOffset. Reading one known file both ways is what says so:
-        # WEAPON/V_NULL.RAB lands on its 'SSA\0' magic only from TocOffset.
-        self.base = toc_at
+        # File offsets in the table count from the end of the 0x800-byte header
+        # sector, not from TocOffset or ContentOffset. EDF6's Root.cpk puts its
+        # table right after that sector (TocOffset == 0x800), which hid the
+        # difference; EDF6's DX11.cpk and every EDF5 / EDF4.1 archive keep the
+        # table at the end. Measured over all twelve archives of the three games:
+        # every compressed entry lands on 'CRILAYLA' from 0x800 and from neither
+        # of the other two.
+        self.base = HEADER_SECTOR
         _, toc_block = _read_block(path, toc_at)
         self.entries = list(parse_utf(toc_block)[3]())
         self.index = {(e['DirName'], e['FileName']): e for e in self.entries}

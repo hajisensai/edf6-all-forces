@@ -18,6 +18,7 @@ const char* actorPuids[4]={"host","client","host","lobby-only"};
 std::uint64_t generation=1;
 unsigned spawnCount=0,destroyCount=0,sendCount=0,peerCount=0;
 unsigned commandPackets=0,commandContexts=0;
+unsigned qmarkPackets=0,qmarkContexts=0,qmarkResets=0;std::uint32_t qmarkPeers=0;bool qmarkReady=false;
 EDF6CoopPeer Peer(const char* id) { EDF6CoopPeer p{};strcpy_s(p.id,id);return p; }
 struct Packet { EDF6CoopPeer sender;unsigned char bytes[176]; };
 std::deque<Packet> incoming;
@@ -40,6 +41,7 @@ Config config;
 const Config& Cfg() noexcept { config.enabled=true;return config; }
 bool InSession() noexcept { return fixture::online; }
 bool OnlineHostOnly() noexcept { return fixture::host; }
+unsigned char* PlayerHuman() noexcept { return nullptr; }   // the rescue requester lookup (no player in this fixture)
 void Log(const char*,...) noexcept {}
 bool ReadNativeMissionLocation(unsigned* out) noexcept { *out=fixture::location;return fixture::locationReadable; }
 void ResetCommandNetwork() noexcept {}
@@ -48,6 +50,15 @@ bool ReceiveCommandNetwork(std::uint32_t,const char*,const void* bytes,std::size
     if(size<4 || std::memcmp(bytes,"NCMD",4))return false;
     ++fixture::commandPackets;return true;
 }
+// The Q marks (qmark.cpp): the room's state each tick, their packets before the command and support parsers.
+void UpdateQMarkNetwork(bool ready,std::uint32_t roomPeers,bool (*)(std::uint32_t,const void*,std::size_t) noexcept,std::uint64_t) noexcept {
+    ++fixture::qmarkContexts;fixture::qmarkReady=ready;fixture::qmarkPeers=roomPeers;
+}
+bool ReceiveQMarkNetwork(std::uint32_t,const char*,const void* bytes,std::size_t size,std::uint64_t) noexcept {
+    if(size<4 || std::memcmp(bytes,"QMRK",4))return false;
+    ++fixture::qmarkPackets;return true;
+}
+void ResetQMarkNetwork() noexcept { ++fixture::qmarkResets; }
 }
 namespace fixture {
 using namespace crew::support_net;
@@ -103,7 +114,7 @@ void NoteCreations() {
     for(unsigned i=0;i<actors;++i)EDF6AF_MissionPlayerCreated(static_cast<int>(i),actorPuids[i],
         reinterpret_cast<const void*>(static_cast<std::uintptr_t>(i+100)));
 }
-PlanResult PlanCall(std::uint32_t id,const float* target,Plan* plan) noexcept {
+PlanResult PlanCall(std::uint32_t id,const float* target,std::uint64_t,Plan* plan) noexcept {
     *plan={};plan->catalogId=id;plan->count=1;std::memcpy(plan->target,target,12);
     auto& u=plan->units[0];u.resourceId=1;u.matrix[0]=u.matrix[5]=u.matrix[10]=u.matrix[15]=1;return PlanResult::ready;
 }
@@ -181,11 +192,15 @@ int main() {
     packet.sender=Peer("client");incoming.push_back(packet);Step();Check(sendCount==1,"roster peer receives welcome");
     auto commandPacket=packet;std::memcpy(commandPacket.bytes,"NCMD",4);incoming.push_back(commandPacket);Step();
     Check(commandPackets==1 && commandContexts>0 && sendCount==1,"shared extension poll routes command packets once without consuming a support message");
+    auto markPacket=packet;std::memcpy(markPacket.bytes,"QMRK",4);incoming.push_back(markPacket);Step();
+    Check(qmarkPackets==1 && commandPackets==1 && sendCount==1,"a Q mark packet goes to qmark.cpp alone");
+    Check(qmarkContexts>0 && qmarkReady && qmarkPeers==1,"the Q marks get the room (ready, its peers) each tick");
     Check(crew::SubmitSupportRequest(1,at,note,256),"full handshake queues request");
     installed=false;Step();Check(!crew::SubmitSupportRequest(1,at,note,256),"unloaded bridge disables queued work");
     installed=true;peerCount=0;generation++;tick+=1000;Step();
     online=false;Step();Check(!crew::SubmitSupportRequest(1,at,note,256),"offline never sends multiplayer requests");
-    crew::ResetSupportNet();
+    const unsigned resetsBefore=qmarkResets;crew::ResetSupportNet();
+    Check(qmarkResets>resetsBefore,"the session reset drops the teammates' marks");
     WorldParticipants();
     std::printf("support runtime bridge: %d checks passed\n",checks);
 }

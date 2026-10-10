@@ -1,5 +1,6 @@
 // The jets' bodies (jet.cpp): the SGOs (jet_internal.h kBodies), their preload for a mission, spawning a jet
-// (JetLaunch and the airstrike takeovers) or a called heli, the body's fix-ups and its far rendering.
+// (JetLaunch and the airstrike takeovers) or a support aircraft (PrepareSupportAircraft), the body's fix-ups and its
+// far rendering.
 // Run-time spawning (docs/mission-airstrike-re.md §3): JetLaunch makes a jet exactly like the script's
 // CreateFriend: CreateObject on the preloaded SGO, team friend, RideAi(true). Only RideAi with true reads the
 // SGO's mission_setup (0x633063 -> slot 46), which is what writes the jet mark, the weapons and the heli
@@ -20,9 +21,6 @@ namespace {
 // &matrix, path, &InitParam) -> the object (the manager owns it), SetTeam(object, team, 1).
 constexpr unsigned kPreload=0x7A3780;
 constexpr std::size_t kPreloadMgr=0x20B29A8;
-// The heli starts kHeliClear over the ground: high enough that it does not hit it while its rotor spins
-// up (heli.cpp gives it the hover rotor at once), low enough that it is soon at its working height.
-constexpr float kHeliClear=40.0f;
 const unsigned char kPreloadSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48};
 const unsigned char kCreateObjectSig[]={0x40,0x55,0x53,0x56,0x57,0x41,0x54,0x41,0x56,0x41,0x57,0x48,0x8D,0x6C,0x24,0xD9};
 const unsigned char kSetTeamSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x20,0x41};
@@ -108,13 +106,13 @@ int SpawnFault(Body b,const EXCEPTION_POINTERS* e) noexcept {
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
-unsigned char* CreateJet(Body b,const float* m,InitParam* param) noexcept {
+unsigned char* CreateJet(Body b,const float* m,InitParam* param,const wchar_t* sgo=nullptr) noexcept {
     __try {
         // Network plans store ordinary floats. SceneObject's constructor loads
         // four matrix rows with MOVAPS, regardless of the incoming ABI's type.
         alignas(16) float nativeMatrix[16];
         std::memcpy(nativeMatrix,m,sizeof(nativeMatrix));
-        return reinterpret_cast<CreateObjectFn>(image+kCreateObject)(At<void*>(image,kObjectMgr),nativeMatrix,Row(b).sgo,param);
+        return reinterpret_cast<CreateObjectFn>(image+kCreateObject)(At<void*>(image,kObjectMgr),nativeMatrix,sgo ? sgo : Row(b).sgo,param);
     }
     __except(SpawnFault(b,GetExceptionInformation())) { return nullptr; }
 }
@@ -156,8 +154,12 @@ unsigned char* SpawnJet(Body b,const float* m,std::int32_t team) noexcept {
     if(bodyPartOk)FixBodyPart506(v,"JET");
     reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,team,true);
     LevelVehicle(v);
-    SeatNpcRider(v,true);   // a copy this machine just made: never registered, so its own here (online_authority.h)
     const BodyRow& row=Row(b);
+    // A copy this machine just made: never registered, so its own here (online_authority.h). A drone gets the native
+    // init alone (mission_setup, its weapons): no one is seated in it, JetFrame flies it (Unmanned); a crewed body asks
+    // the soldiers near it to walk aboard (SeatNpcRider).
+    if(!Unmanned(row.role))SeatNpcRider(v,true);
+    else if(OnlineMaySeatNpc(v))PrepareNpcVehicle(v,true);
     const bool jet=row.mark>0.0f;
     Role role=Role::fighter;
     if(jet ? IsJetVehicle(v,&role,nullptr) && role==row.role : IsHelicopter(v) && !IsJetVehicle(v,nullptr,nullptr))return v;
@@ -169,6 +171,9 @@ unsigned char* SpawnJet(Body b,const float* m,std::int32_t team) noexcept {
 Jet* Launch(Body b,const float* from,const float* heading,const float* target,DWORD fuelSec,float speed,const void* source,
             float clear) noexcept {
     if(!spawnOk || !Cfg().jetPilot || !Preloaded(b) || !At<void*>(image,kObjectMgr) || !SlotFree())return nullptr;
+    // Made in the air with no one in it, only a drone flies (Unmanned): a crewed body would be an empty hull falling.
+    // Crewed aircraft come through the support deployment with their real crew (support_dispatch.cpp).
+    if(!Unmanned(Row(b).role)){Log("JET launch: %ls is crewed: not launched without its crew (support calls bring it)",Row(b).file);return nullptr;}
     const ULONGLONG ms=GameMs();
     float start[3]={from[0],from[1],from[2]};
     ClearGround(start,clear);
@@ -183,9 +188,9 @@ Jet* Launch(Body b,const float* from,const float* heading,const float* target,DW
     std::memcpy(j->anchor,target,12);j->fuelMs=static_cast<ULONGLONG>(fuelSec)*1000;
     JoinFlight(*j,FlightFor(source,ms));
     for(int i=0;i<3;++i)j->m.vel[i]=m[8+i]*speed;
-    Log("JET v=%p launched: %s (%ls) flight %u wing %d from (%.0f,%.0f,%.0f) at (%.0f,%.0f,%.0f) %.0f m/s fuel=%lus driver=%d hp=%.0f/%.0f",
+    Log("JET v=%p launched: %s (%ls) flight %u wing %d from (%.0f,%.0f,%.0f) at (%.0f,%.0f,%.0f) %.0f m/s fuel=%lus unmanned=%d hp=%.0f/%.0f",
         v,KindOf(*j).name,Row(b).file,j->flight,j->wing,start[0],start[1],start[2],target[0],target[1],target[2],speed,fuelSec,
-        SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::dummy,At<float>(v,kHp),At<float>(v,kHpMax));
+        FliesItself(*j),At<float>(v,kHp),At<float>(v,kHpMax));
     Publish(true);
     return j;
 }
@@ -242,22 +247,29 @@ using namespace jet;
 
 namespace {
 ObjRef supportAircraft[32]{};
+Body HeliBodyOf(HeliBody as) noexcept {
+    return as==HeliBody::brute410 ? Body::heli410 : as==HeliBody::medic410 ? Body::heliMedic :
+           as==HeliBody::transport410 ? Body::heliTransport : Body::heli506;
+}
 Body SupportBody(const SupportAircraft& spec) noexcept {
-    if(spec.heli>=0)return spec.heli==static_cast<int>(HeliBody::brute410) ? Body::heli410 :
-        spec.heli==static_cast<int>(HeliBody::medic410) ? Body::heliMedic : Body::heli506;
+    if(spec.heli>=0)return HeliBodyOf(static_cast<HeliBody>(spec.heli));
+    if(spec.transportPlane)return Body::transportPlane;
     return kLaunchRows[spec.jet].body;
+}
+bool SupportSpecValid(const SupportAircraft& spec) noexcept {
+    return spec.heli>=0 || spec.transportPlane || (spec.jet>=0 && spec.jet<kLaunchCount);
 }
 }
 
-unsigned char* PrepareSupportAircraft(const SupportAircraft& spec,const float* matrix) noexcept {
-    if(!matrix || (spec.heli<0 && (spec.jet<0 || spec.jet>=kLaunchCount)))return nullptr;
+unsigned char* PrepareSupportAircraft(const SupportAircraft& spec,const float* matrix,const wchar_t* variant) noexcept {
+    if(!matrix || !SupportSpecValid(spec))return nullptr;
     const Body body=SupportBody(spec);
     if(!spawnOk || !Preloaded(body) || !At<void*>(image,kObjectMgr))return nullptr;
     ObjRef* slot=nullptr;
     for(auto& ref:supportAircraft)if(!ref || !Alive(ref)){slot=&ref;break;}
     if(!slot)return nullptr;
     InitParam param{image+kInitParamVtable,{}};
-    unsigned char* const vehicle=CreateJet(body,matrix,&param);
+    unsigned char* const vehicle=CreateJet(body,matrix,&param,variant);
     if(!vehicle)return nullptr;
     if(bodyPartOk)FixBodyPart506(vehicle,"SUPPORT");
     SetJetTeam(vehicle,kTeamFriend);LevelVehicle(vehicle);
@@ -295,6 +307,10 @@ bool ActivateSupportAircraft(unsigned char* vehicle,const SupportAircraft& spec,
     return true;
 }
 
+bool SupportAircraftReady(const SupportAircraft& spec) noexcept {
+    return spawnOk && SupportSpecValid(spec) && Preloaded(SupportBody(spec));
+}
+
 bool DeleteSupportAircraft(const ObjRef& ref) noexcept {
     for(auto& own:supportAircraft)if(own.obj==ref.obj && own.ctrl==ref.ctrl && own.obj) {
         if(Alive(own)) {
@@ -305,6 +321,20 @@ bool DeleteSupportAircraft(const ObjRef& ref) noexcept {
         own={};return true;
     }
     return false;
+}
+
+bool SupportAircraftOwned(const void* vehicle) noexcept {
+    for(const auto& own:supportAircraft)if(own && own.obj==vehicle && Alive(own))return true;
+    return false;
+}
+
+bool SupportAircraftLeft(const ObjRef& ref) noexcept {
+    bool owned=false;
+    for(const auto& own:supportAircraft)owned=owned || (own && own.obj==ref.obj && own.ctrl==ref.ctrl && Alive(own));
+    if(!owned)return false;
+    if(HeliLeft(ref.obj))return true;
+    const Jet* j=FindJet(static_cast<const unsigned char*>(ref.obj));
+    return j && j->reap;
 }
 
 // Every flag is cleared first: a body not preloaded for this mission is never spawned (the stock planes come).
@@ -409,18 +439,4 @@ unsigned char* JetLaunchThrown(ThrownDrone what,const float* at,const float* hea
     __except(FaultLog("JET thrown drone launch",GetExceptionInformation())){return nullptr;}
 }
 
-unsigned char* HeliLaunch(HeliBody as,const float* from,const float* heading) noexcept {
-    const Body b=as==HeliBody::brute410 ? Body::heli410 : as==HeliBody::medic410 ? Body::heliMedic : Body::heli506;
-    if(!spawnOk || !Preloaded(b) || !At<void*>(image,kObjectMgr))return nullptr;
-    __try {
-        float start[3]={from[0],from[1],from[2]};
-        ClearGround(start,kHeliClear);
-        alignas(16) float m[16];
-        Facing(heading,start,m);
-        unsigned char* const v=SpawnJet(b,m);
-        NoteLocalCopy(v,nullptr);   // whose its damage is online: the call's / the rescue's (online_authority.h)
-        if(v)Log("HELI v=%p launched: %ls at (%.0f,%.0f,%.0f)",v,Row(b).file,start[0],start[1],start[2]);
-        return v;
-    } __except(FaultLog("HELI launch",GetExceptionInformation())){return nullptr;}
-}
 }  // namespace crew

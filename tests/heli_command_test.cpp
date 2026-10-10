@@ -33,11 +33,13 @@ bool LastViewProj(float*) noexcept { MissingDependency();return false; }
 bool CameraRay(float*,float*) noexcept { MissingDependency();return false; }
 void SetObjectTeam(unsigned char*,std::int32_t) noexcept { MissingDependency(); }
 bool IsJet(const void*) noexcept { MissingDependency();return false; }
+bool JetFliesItself(const void*) noexcept { MissingDependency();return false; }
 bool JetInLine(const float*,const float*,const void*) noexcept { MissingDependency();return false; }
 void JetFrame(unsigned char*) noexcept { MissingDependency(); }
-unsigned char* HeliLaunch(HeliBody,const float*,const float*) noexcept { MissingDependency();return nullptr; }
+bool SupportRescueAt(const float*,wchar_t*,std::size_t) noexcept { MissingDependency();return false; }
 PluginBody BodyOf(const void*) noexcept { MissingDependency();return PluginBody{}; }
 bool IsSub(const void*) noexcept { MissingDependency();return false; }
+bool SupportAircraftOwned(const void*) noexcept { return false; }   // no support deployment in this test
 bool SubDeck(const float*,float*) noexcept { MissingDependency();return false; }
 float SubHullGap(const float*) noexcept { MissingDependency();return 0.0f; }
 bool IsPlayerJet(const void*) noexcept { MissingDependency();return false; }
@@ -101,6 +103,29 @@ int main() {
     check(HeliCommand(vehicle,Command{Order::follow,{}}),"follow accepted");
     const float leader[3]={1000,0,1000};
     check(CommandMoving(h,pos,leader),"follow first joins the player instead of retaining its old fight");
+    // The map's focus order (2026-10-09): nothing marked, refused; a focus held is let go by the next order.
+    check(!HeliCommand(vehicle,Command{Order::focus,{}},ObjRef{}),"focus with no marked enemy is refused");
+    h.focus=ObjRef::Of(enemy);
+    check(HeliCommand(vehicle,Command{Order::follow,{}}) && !h.focus,"another order lets the focus target go");
+    // A squad's transport (transport.cpp; the user, 2026-10-09: "飞机和直升机应该也有运输机"): a ferry holds over its point,
+    // engaging nothing; landing, it comes down on that point (never beside the player); kept for its squad, it does not leave
+    // for fuel or ammo; HeliFerry(nullptr) ends the ferry.
+    const float drop[3]={300.0f,10.0f,200.0f};
+    check(HeliFerry(vehicle,drop,false) && h.ferry && !h.ferryLand && !h.focus && h.hold[0]==300.0f &&
+          h.hold[1]==10.0f+commandConfig.heliHeight,"a ferry holds HeliHeight over its point");
+    Sense f{};f.pos=pos;f.type=h.type;f.fwd[2]=1.0f;f.dt=1.0f/60.0f;f.ms=GameMs();
+    check(SelectMode(h,f)==Mode::hold,"ferrying: it holds its point (no orbit, no follow, no fight)");
+    check(HeliFerry(vehicle,drop,true) && h.ferryLand,"...then lands there");
+    f.land=true;
+    check(SelectMode(h,f)==Mode::land,"landing mode");
+    const Want down=FlyMode(h,f,Mode::land);
+    check(down.height<drop[1] && std::fabs(down.off-std::hypot(pos[0]-drop[0],pos[2]-drop[2]))<0.01f,
+          "it comes down on the ferry's point, not beside the player");
+    h.leaveAt=0;const Loadout spent{};
+    check(LeaveReason(h,vehicle,spent)!=nullptr,"a called heli out of fuel leaves");
+    check(HeliKeep(vehicle) && LeaveReason(h,vehicle,spent)==nullptr,"a squad's transport stays (no leaving for fuel or ammo)");
+    check(HeliFerry(vehicle,nullptr,false) && !h.ferry,"the ferry ends");
+    h.keep=false;
     // Enhanced door gunners are independent of local pilot controls; the online aim hook is required online only.
     alignas(16) unsigned char gunSeats[3*edf::kSeatStride]{},remotePilot[0x500]{};
     image=reinterpret_cast<unsigned char*>(0x10000000);
@@ -122,6 +147,35 @@ int main() {
     remotePilot[edf::kHumanPlayer]=1;Put<std::uint16_t>(remotePilot,0x128,1);
     HeliReap(nullptr);
     check(!h.ref,"player takeover releases called flight ownership without deleting aircraft");
+    // The sea rescue's hand-over (support_dispatch.cpp RescueHeliDeployed): the heli is the deployment's, matched to this
+    // machine's waiting request by the request's point; another machine's rescue (another point) is not taken.
+    {
+        alignas(16) static unsigned char copy[0x2100]{},copyCtrl[16]{};
+        Put<void*>(copy,kSelfCtrl,copyCtrl);Put<int>(copyCtrl,8,1);Put<std::int32_t>(copy,kTeam,2);
+        const float mine[3]={10,-2,30},theirs[3]={400,-2,30};
+        call=RescueCall{};
+        RescueHeliDeployed(copy,mine,false,ObjRef{});
+        check(call.phase==CallPhase::idle,"no request waiting: a peer's rescue copy is not taken");
+        call.phase=CallPhase::requested;std::memcpy(call.at,mine,12);call.requestedAt=GameMs();
+        RescueHeliDeployed(copy,theirs,false,ObjRef{});
+        check(call.phase==CallPhase::requested,"another machine's rescue (another point) is not this machine's heli");
+        RescueHeliDeployed(copy,mine,false,ObjRef{});
+        check(call.phase==CallPhase::assigned && call.vehicle==copy && call.ref.Is(copy) && !call.flown && call.team==2,
+              "this machine's request gets the deployment's heli (a peer's copy, its own team kept for the end)");
+        RescueRequestFailed(L"late refusal");
+        check(call.phase==CallPhase::assigned,"a late failure notice cannot drop a heli already here");
+        RescueCue banner{};
+        check(PlayerRescueCue(&banner) && !banner.bad,"the banner says the heli is coming");
+        call=RescueCall{};call.phase=CallPhase::requested;std::memcpy(call.at,mine,12);
+        RescueRequestFailed(L"此处没有开放天空");
+        check(call.phase==CallPhase::idle && call.retryAt==GameMs()+kRetryMs,"a refused request is asked again kRetryMs later");
+        check(PlayerRescueCue(&banner) && banner.bad && std::wcsstr(banner.text,L"此处没有开放天空")!=nullptr,"and the player is told why");
+        call=RescueCall{};
+        // Flown here with no requester known (left the room meanwhile): no flight is kept for it (it is sent away).
+        RescueHeliDeployed(copy,mine,true,ObjRef{});
+        bool flying=false;for(const auto& r:rescues)flying=flying || r.phase!=RescuePhase::none;
+        check(!flying,"a rescue heli with no requester never stays to look for someone else");
+    }
     std::printf("heli_command_test: %d checks passed\n",checks);
     return 0;
 }

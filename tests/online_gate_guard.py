@@ -126,9 +126,9 @@ def check_damage(root: str) -> None:
     if 'damage,true,gun.name,by)' not in body(bay, 'bool GunShot('):
         fail('src/jet_bay.cpp GunShot: side guns discard the player shot authority')
     # Every copy the plugin makes is recorded with its owner, and a call's copies are its caller's.
-    for rel, fn in (('src/jet_spawn.cpp', 'Jet* Launch('), ('src/jet_spawn.cpp', 'unsigned char* HeliLaunch('),
+    for rel, fn in (('src/jet_spawn.cpp', 'Jet* Launch('), ('src/jet_spawn.cpp', 'unsigned char* PrepareSupportAircraft('),
                     ('src/subcarrier.cpp', 'unsigned char* SubLaunch(')):
-        if 'NoteLocalCopy(v,' not in body(code_only(read(root, rel)), fn):
+        if 'NoteLocalCopy(' not in body(code_only(read(root, rel)), fn):
             fail(f'{rel} {fn}: a copy is made without its owner recorded (its damage would count on the host only)')
     radio = body(code_only(read(root, 'src/airstrike.cpp')), 'std::uintptr_t __fastcall RadioStartHook(')
     if 'if(!InSession() || IsPlayer(owner))SupportCallAt(' not in radio:
@@ -184,7 +184,17 @@ def check_frames(root: str) -> None:
 def check_calls(root: str) -> None:
     code = code_only(read(root, 'src/airstrike.cpp'))
     dispatch = code_only(read(root, 'src/support_dispatch.cpp'))
-    request = body(dispatch, 'bool SupportCallAt(')
+    # Every map / radio call goes through SupportCallComposedAt (a composed load or none; SupportCallAt only delegates),
+    # which refuses the sea rescue's entry and hands the rest to the one gated request path (Request).
+    request = body(dispatch, 'bool Request(int index,')
+    if 'return SupportCallComposedAt(index,target,nullptr,note,capacity);' not in body(dispatch, 'bool SupportCallAt('):
+        fail('SupportCallAt must only delegate to SupportCallComposedAt (one gated path)')
+    if 'return Request(index,target,load,note,capacity);' not in body(dispatch, 'bool SupportCallComposedAt('):
+        fail('src/support_dispatch.cpp SupportCallComposedAt: not through the request path (Request)')
+    # The sea rescue: its own path (no map queue / cooldown), the same host transaction for any non-local machine.
+    rescue = body(dispatch, 'bool RescueRequest(')
+    if 'RescueRequest(' not in body(dispatch, 'bool SupportRescueAt(') or             not before(rescue, 'InSession() && !LocalAuthority()', 'SubmitSupportRequest('):
+        fail('src/support_dispatch.cpp SupportRescueAt: an online rescue does not go through the host-planned protocol')
     if not before(request, 'else if(InSession() && !LocalAuthority())', 'SubmitSupportRequest(') or             not before(request, 'SubmitSupportRequest(', 'else if(offlinePending)'):
         fail('online support must go through the reliable host-planned deployment protocol')
     # The only local deployment in a session: the host of a world with no other participant (no peer to replicate to).

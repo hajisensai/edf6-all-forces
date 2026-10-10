@@ -27,6 +27,8 @@
 //    of record [human+0xD40], before its /24); a pad is read through XInput (the hold clears the game's own pad input).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "transport.h"
+#include "airdrop.h"
 #include "layout.h"
 #include "map_cam.h"
 #include "map_marks.h"
@@ -685,8 +687,11 @@ bool __fastcall MapHumanFrame(unsigned char* human) noexcept {
         SeeFrame(human);
         PlayAreaTick();
         SupportDispatchTick();
+        TransportTick();   // the squads' transports (transport.cpp), after the deliveries that start them
+        AirdropTick();     // the transport planes' containers (airdrop.cpp): held under them, let go over their points
         const bool open=Frame(human);
         NpcMarkFrame(human,open && game.open);
+        DebugSpawnFrame(human);   // the debug spawn tool (off by default: returns before reading a key)
         return TvFrame(human,open && game.open,TvRead(human)) || open;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

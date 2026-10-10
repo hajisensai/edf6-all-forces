@@ -967,4 +967,23 @@ inline Wave RailReady() {
     }
     return Normalized(std::move(x),1.0f);
 }
+
+// --- The Q mark's cues (qmark.cpp; the user, 2026-10-10: "声音也要有吧") ---
+// The stock spot has no sound of its own to reuse (tests/spot_ray_native_audit.py: nothing under its cast plays one), so
+// these are the plugin's: short sine notes with a soft attack and a ring-out, `n` of them `gap` s apart, note k at hz[k].
+inline Wave Notes(const float* hz,int n,float gap,float ring) {
+    Wave x(static_cast<std::size_t>(Samples(gap*static_cast<float>(n-1)+ring*5.0f)),0.0f);
+    for(int k=0;k<n;++k)
+        for(int i=Samples(gap*static_cast<float>(k));i<static_cast<int>(x.size());++i) {
+            const float t=static_cast<float>(i)/static_cast<float>(kRate)-gap*static_cast<float>(k);
+            const float env=std::fmin(1.0f,t/0.004f)*std::exp(-t/ring);
+            x[static_cast<std::size_t>(i)]+=env*(std::sin(kTau*hz[k]*t)+0.25f*std::sin(kTau*2.0f*hz[k]*t));
+        }
+    return Normalized(std::move(x),1.0f);
+}
+// Marked (this machine's player): two notes rising, bright. A teammate marked: three notes falling, softer and lower
+// (told apart without looking). Let go: one low short note.
+inline Wave MarkOwn() { const float hz[2]={1318.5f,1975.5f};return Notes(hz,2,0.07f,0.06f); }
+inline Wave MarkTeam() { const float hz[3]={1568.0f,1174.7f,1568.0f};return Notes(hz,3,0.08f,0.05f); }
+inline Wave MarkOff() { const float hz[1]={659.3f};return Notes(hz,1,0.0f,0.035f); }
 }  // namespace crew::vsynth

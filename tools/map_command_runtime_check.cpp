@@ -14,14 +14,23 @@ SHORT Down(int key) noexcept { return key>=0 && key<256 && keys[key] ? static_ca
 namespace crew {
 void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept {if(out && capacity)out[0]=0;}
 int SupportCallCount() noexcept { return 3; }
+int SupportMenuCount() noexcept { return 3; }
 const wchar_t* SupportCallName(int) noexcept { return L"Support"; }
 SupportIcon SupportCallIcon(int) noexcept { return SupportIcon::jet; }
 SupportVariant SupportCallVariant(int) noexcept { return SupportVariant::none; }
 SupportReadiness SupportCallReadiness() noexcept { return {SupportReady::ready,0}; }
-int supportCalls=0,supportChosen=-1;float supportTarget[3]{};
-bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept {
-    ++supportCalls;supportChosen=index;std::memcpy(supportTarget,target,12);
+int supportCalls=0,supportChosen=-1;float supportTarget[3]{};SupportLoadout supportLoad{};
+bool SupportCallComposedAt(int index,const float* target,const SupportLoadout* load,wchar_t* note,std::size_t capacity) noexcept {
+    ++supportCalls;supportChosen=index;std::memcpy(supportTarget,target,12);supportLoad=load ? *load : SupportLoadout{};
     _snwprintf_s(note,capacity,_TRUNCATE,L"support received");return true;
+}
+// The stub catalog's entry 1 carries soldiers (its composition panel): eight seats (two squads), one squad to start (a
+// sniper leader, three rifles: the ini's).
+int SupportCallSeats(int index) noexcept { return index==1 ? 8 : 0; }
+bool SupportCallPreset(int index,SupportLoadout* out) noexcept {
+    *out=SupportLoadout{};
+    if(index!=1)return false;
+    out->count=4;out->soldier[0]=SupportWeapon::sniper;return true;
 }
 int payloadRequests=0,payloadSeat=-1,payloadEntry=-1;std::uint64_t payloadToken=0;
 bool RequestPayloadSelection(std::uint64_t token,int seat,int entry) noexcept {
@@ -47,6 +56,7 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& id,const mapcmd::Comm
     return SquadCommand(id.obj,command) ? NpcCommandResult{NpcCommandReason::none,1} : NpcCommandResult{NpcCommandReason::failed,0};
 }
 unsigned char* image=nullptr;
+bool JetFliesItself(const void*) noexcept { return false; }   // no plugin jet in this world
 bool NpcDriver(const unsigned char* v) noexcept {
     if(!v || !SeatCount(v))return false;
     auto* seat=SeatAt(const_cast<unsigned char*>(v),0);const auto who=SeatRider(seat);
@@ -64,21 +74,24 @@ bool MapGroundNear(float,float,float level,float* out,bool) noexcept {*out=level
 int HeliCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int JetCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int GroundCommandUnits(CommandUnit*,int) noexcept { return 0; }
-bool HeliCommand(const void*,const Command&) noexcept { return false; }
-bool JetCommand(const void*,const Command&) noexcept { return false; }
+bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }
+bool JetCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }
 bool GroundCommand(const void*,const Command&) noexcept { return false; }
 bool HeliSharesPost() noexcept { return true; }
 // One stand-in squad (when `squadOn`), its last order; the enemies the lock registry would list; the mark npcai.cpp keeps.
 unsigned char squadObj[0x100]{},squadCtrl[0x10]{};
-bool squadOn=false;
+bool squadOn=false,squadLocked=false,squadRiding=false;
 Command squadGot{};int squadOrders=0;
+int TransportLinks(TransportLink*,int) noexcept { return 0; }
+const void* TransportRiderOf(const void*) noexcept { return nullptr; }
 int SquadCommandUnits(CommandUnit* out,int most) noexcept {
     if(!squadOn || most<1)return 0;
     out[0]=CommandUnit{squadObj,"squad",Command{},false,{0.0f,0.0f,0.0f}};
+    out[0].locked=squadLocked;out[0].riding=squadRiding;
     return 1;
 }
 int TankCommandUnits(CommandUnit*,int) noexcept {return 0;}
-int SquadRows(SquadRow*,int) noexcept {return 0;}
+int SquadRows(SquadRow*,int,SquadTally* tally) noexcept {if(tally)*tally=SquadTally{};return 0;}
 bool SquadCommand(const void* leader,const Command& c) noexcept {
     if(leader!=squadObj)return false;
     squadGot=c;++squadOrders;
@@ -90,6 +103,11 @@ const void* guardLeader=nullptr;
 int guardCalls=0,marchCalls=0;
 int CycleGuardFormation(const void* leader) noexcept { ++guardCalls;return leader==guardLeader ? 10 : -1; }
 int CycleMarchFormation() noexcept { ++marchCalls;return 3; }
+// The formation menu (npcai.cpp): the shapes set, the guarding squad's defence.
+int guardSet=-1,marchSet=-1;
+int SetGuardFormation(const void* leader,int shape) noexcept { if(leader!=guardLeader)return -1;guardSet=shape;return shape; }
+int NpcGuardShape(const void* leader) noexcept { return leader==guardLeader ? 10 : -1; }
+int SetMarchFormation(int shape) noexcept { marchSet=shape;return shape; }
 int SplitSquad(const void*) noexcept {return -1;}
 bool MergeSquads(const void*,const void*) noexcept {return false;}
 int sweepCalls=0,healthCalls=0;bool sweepState=false,healthState=false;
@@ -355,7 +373,7 @@ void MarkLifetimeAndConfig() noexcept {
         if(scenario==2)foe[0x18]=4;
         if(scenario==3)Put<long>(control,8,0);
         if(scenario==4)Check(VirtualProtect(foe,4096,PAGE_NOACCESS,&protect)!=FALSE,"protect a removed hover target");
-        if(scenario==5)config.customNpcAi=false;
+        if(scenario==5)config.npcMarkKey=0;   // the Q mark off (it no longer hangs on the custom NPC AI: qmark.h)
         if(scenario==6)config.enabled=false;
         if(scenario==7) {
             game.sel.Add(squadObj);
@@ -383,11 +401,12 @@ void MarkLifetimeAndConfig() noexcept {
     MapCommandFrame(in,centre);
     Check(!markCalls,"replacement after latching is not marked");
 
-    // With NPC AI off, even a current registry entry must not be offered as Q/H's target.
-    for(bool disabled:{false,true}) {
+    // With the Q mark off (the plugin off, or NpcMarkKey=0), even a current registry entry must not be offered as Q/H's
+    // target. (The custom NPC AI off no longer turns it off: the Q mark replaces the stock spot, qmark.h.)
+    for(bool keyOff:{false,true}) {
         ResetMapCommands();view=View{};config=Config{};marked=nullptr;markCalls=0;
         std::memset(inputstub::keys,0,sizeof(inputstub::keys));
-        config.customNpcAi=!disabled;config.enabled=disabled;
+        config.customNpcAi=false;config.enabled=keyOff;config.npcMarkKey=keyOff ? 0 : 0x51;
         stubEnemyCount=1;
         MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
         inputstub::keys['Q']=true;inputstub::keys['H']=true;
@@ -479,6 +498,79 @@ void UiCaptureAndSnapshots() noexcept {
     Check(!MapCommandPointerCaptured() && !view.squads && !view.payloads && !view.panels,"closing map drops captures and all stale UI snapshots");
     std::memset(inputstub::keys,0,sizeof(inputstub::keys));squadOn=false;ResetMapCommands();
 }
+// Only the units that take orders are picked (the user, 2026-10-09: "总有一些我不能指挥的"; "坦克上的…框选的时候应该去重"):
+// Tab passes over a script's squad and a riding one, a script's squad's panel row says why instead of selecting it, a
+// riding squad's row still picks it (for its dismount), and the log of a refused order counts why per unit.
+void PickOnlyCommandable() noexcept {
+    ResetMapCommands();view=View{};config=Config{};
+    std::memset(inputstub::keys,0,sizeof(inputstub::keys));squadOn=true;squadLocked=true;squadRiding=false;
+    Put<void*>(squadObj,kSelfCtrl,squadCtrl);
+    MapCmdInput in{};in.front=true;in.mouse=true;in.eye[1]=100.0f;float centre[3]{};
+    const float vp[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+    MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
+    const auto tab=[&]{inputstub::keys[VK_TAB]=true;MapCommandFrame(in,centre);inputstub::keys[VK_TAB]=false;MapCommandFrame(in,centre);};
+    tab();
+    MapCommandReadout r{};
+    Check(!game.sel.n && PlayerMapCommands(&r) && r.count==1 && r.pickable==0,"Tab passes over a script's squad (shown, not picked)");
+    const float panel[4]={500,300,900,500},row[4]={600,340,680,380};
+    MapCommandUiPanels(panel,1);ObjRef identity=ObjRef::Of(squadObj);MapCommandSquadButtons(row,&identity,1);
+    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
+    Check(!game.sel.n && std::wcscmp(game.note,CommandFailureText(NpcCommandReason::scripted))==0,
+          "a script's squad's row: not selected, the note says why");
+    squadLocked=false;squadRiding=true;
+    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
+    Check(game.sel.Has(squadObj),"a riding squad's row picks it (its dismount)");
+    game.sel.Clear();RememberSelection(game);MapCommandSquadButtons(nullptr,nullptr,0);MapCommandUiPanels(nullptr,0);
+    tab();
+    Check(!game.sel.n,"Tab passes over a riding squad (its vehicle is the unit)");
+    squadRiding=false;tab();
+    Check(game.sel.Has(squadObj),"Tab picks a squad on foot that takes orders");
+    // The squad panel's summary row: a click opens the panel (published), another folds it.
+    const float foldRow[4]={600,400,680,420};
+    MapCommandUiPanels(panel,1);MapCommandSquadFold(foldRow);
+    in.dx=(640.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(410.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
+    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
+    Check(game.panelOpen && PlayerMapCommands(&r) && r.squadOpen,"the summary row opens the squad panel");
+    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
+    Check(!game.panelOpen,"clicked again: folded");
+    MapCommandSquadFold(nullptr);MapCommandUiPanels(nullptr,0);
+    std::memset(inputstub::keys,0,sizeof(inputstub::keys));squadOn=false;ResetMapCommands();
+}
+// The formation button opens a menu of the shapes (the user, 2026-10-09: "这个编队应该点击以后展开选择里面的东西"; before,
+// each click stepped to the next shape): a guarding squad selected, its defences offered with its own lit; a row's
+// click sets that shape and closes the menu; the right button closes it with no order; T still steps through.
+void FormationMenu() noexcept {
+    ResetMapCommands();view=View{};config=Config{};
+    std::memset(inputstub::keys,0,sizeof(inputstub::keys));squadOn=true;squadLocked=squadRiding=false;
+    Put<void*>(squadObj,kSelfCtrl,squadCtrl);guardLeader=squadObj;guardSet=marchSet=-1;squadOrders=0;guardCalls=marchCalls=0;
+    MapCmdInput in{};in.front=true;in.mouse=true;in.eye[1]=100.0f;float centre[3]{};
+    const float vp[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+    MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
+    game.sel.Add(squadObj);game.selected[0]=ObjRef::Of(squadObj);
+    const float button[4]={600,340,680,380};const int id=static_cast<int>(mapbtn::Id::formation);
+    MapCommandButtons(button,&id,1);
+    const auto click=[&]{inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);};
+    click();
+    MapCommandReadout r{};
+    Check(PlayerMapCommands(&r) && r.formationMenu && r.formationGuard && !r.formationMarch && r.formationGuardShape==10 && guardCalls==0,
+          "the formation button opens its menu: the guarding squad's defences, its own lit, nothing cycled");
+    const float rows[8]={600,250,760,276, 600,280,760,306};const int entries[2]={mapbtn::MenuEntry(true,1),mapbtn::MenuEntry(true,5)};
+    MapCommandFormationButtons(rows,entries,2);
+    in.dy=(293.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dy=0.0f;
+    click();
+    Check(guardSet==5 && !game.formationMenu && game.sel.Has(squadObj) && squadOrders==0,"a menu row: that defence set, the menu closed, the selection kept");
+    MapCommandFormationButtons(nullptr,nullptr,0);
+    in.dy=(360.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dy=0.0f;
+    click();
+    Check(game.formationMenu,"opened again");
+    inputstub::keys[VK_RBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_RBUTTON]=false;MapCommandFrame(in,centre);
+    Check(!game.formationMenu && squadOrders==0,"the right button closes the menu, no move given");
+    click();
+    game.sel.Clear();RememberSelection(game);MapCommandFrame(in,centre);
+    Check(!game.formationMenu,"no squad selected: the menu closes");
+    MapCommandButtons(nullptr,nullptr,0);
+    std::memset(inputstub::keys,0,sizeof(inputstub::keys));squadOn=false;guardLeader=nullptr;ResetMapCommands();
+}
 // RTS (the user, 2026-10-09): the right button let go on the map without a drag moves the selection there, on an enemy
 // attacks it; a right drag (the map's turn) gives nothing; Z attack-moves; an armed move button takes the next left
 // click, the right button cancels it; a support row arms its call for the next left click. A squad seated in a vehicle
@@ -539,6 +631,39 @@ void RtsClicks() noexcept {
     left();
     Check(supportCalls==1 && supportChosen==2 && game.armedSupport<0 && game.sel.Has(squadObj),
           "armed, a left click on the map calls that support there, the selection kept");
+    Check(supportLoad.count==0,"a support with no seats is called with no composed load");
+    // The composition panel (the user, 2026-10-09: "支援栏是断剑那种，先点载具，然后选里面的人并且可以点多次，直到座位满"; a click a
+    // whole squad): a support with seats (the stub's entry 1: eight) armed opens it from its preset (one squad); a kind's
+    // click adds a squad, none past the seats; a squad's click takes it out; the left click on the map sends the load.
+    {
+        const float row1[4]={20,200,240,226};const int entry1=1;
+        supportCalls=0;supportLoad=SupportLoadout{};
+        MapCommandSupportButtons(row1,&entry1,1);
+        in.dx=(100.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(213.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
+        left();
+        MapCommandReadout rc{};
+        Check(game.armedSupport==1 && game.composeEntry==1 && PlayerMapCommands(&rc) && rc.composeEntry==1 && rc.composeSeats==8 &&
+              rc.compose.count==4 && rc.compose.soldier[0]==SupportWeapon::sniper,"armed, a support with seats opens its composition from its preset");
+        // The panel as drawn: a squad place, a Fencer cannon kind.
+        const float hits[8]={900,400,980,422, 900,460,950,482};
+        const int codes[2]={mapbtn::ComposeSquadCode(0),static_cast<int>(SupportWeapon::fencerCannon)};
+        MapCommandSupportButtons(row1,&entry1,1);MapCommandComposeButtons(hits,codes,2);
+        in.dx=(925.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(471.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
+        left();
+        Check(game.compose.count==8 && game.compose.soldier[4]==SupportWeapon::fencerCannon && game.armedSupport==1 && !supportCalls,
+              "a kind's click adds a squad of it; still armed, nothing called");
+        left();
+        Check(game.compose.count==8,"no room for a third squad: unchanged");
+        in.dx=(940.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(411.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
+        left();
+        Check(game.compose.count==4 && game.compose.soldier[0]==SupportWeapon::fencerCannon,"a squad's click takes it out, the next moves up");
+        supportCalls=0;
+        in.dx=(640.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(560.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
+        left();
+        Check(supportCalls==1 && supportChosen==1 && supportLoad.count==4 && supportLoad.soldier[3]==SupportWeapon::fencerCannon &&
+              game.armedSupport<0 && game.composeEntry<0,"the left click on the map sends the composed load; the panel closes");
+        MapCommandComposeButtons(nullptr,nullptr,0);
+    }
     MapCommandSupportButtons(nullptr,nullptr,0);MapCommandButtons(nullptr,nullptr,0);
     // Nothing selected: the right button does nothing.
     game.sel.Clear();RememberSelection(game);right();
@@ -550,10 +675,35 @@ void RtsClicks() noexcept {
     Check(!Takes(g.list[0],Order::recruit) && !Takes(g.list[0],Order::follow) && !Takes(g.list[0],Order::move) &&
           !Takes(g.list[0],Order::guard) && Takes(g.list[0],Order::dismount) && Takes(g.list[0],Order::none),
           "a riding squad: no recruit / follow / point order, dismount and release");
+    Check(!Takes(g.list[0],Order::withdraw),"a squad with no transport: no WITHDRAW");
+    // Its transport (transport.cpp; the user, 2026-10-09: "卡车之类的运输载具改成断剑那种操作方式"): aboard its own vehicle a
+    // squad takes the point orders (it rides there and gets off short of the point) and WITHDRAW; still no follow.
+    g.list[0].u.transport=true;
+    Check(Takes(g.list[0],Order::move) && Takes(g.list[0],Order::attackMove) && Takes(g.list[0],Order::guard) &&
+          Takes(g.list[0],Order::withdraw) && Takes(g.list[0],Order::dismount) && !Takes(g.list[0],Order::follow) &&
+          !Takes(g.list[0],Order::recruit),"a riding squad with its transport: point orders and WITHDRAW, no follow / recruit");
     CommandUnit free{squadObj,"squad",Command{},false,{0,0,0}};free.recruitable=true;g.list[0]=Entry{free,Owner::squad};
     Check(Takes(g.list[0],Order::recruit) && Takes(g.list[0],Order::move) && Takes(g.list[0],Order::attackMove),"a free squad on foot: all of them");
     CommandUnit tank{squadObj,"tank",Command{},false,{0,0,0}};g.list[0]=Entry{tank,Owner::tank};
     Check(Takes(g.list[0],Order::move) && !Takes(g.list[0],Order::follow),"a tank takes a move (as its post), not follow");
+    Check(!Takes(g.list[0],Order::withdraw),"WITHDRAW is a squad's order, not a vehicle's");
+    Check(!Takes(g.list[0],Order::dismount) && !Takes(g.list[0],Order::dismountAll),"a vehicle carrying no squad: no dismount");
+    {   // A vehicle carrying a squad that takes orders (List marks it): its DISMOUNT / ALL OUT are that squad's (the crew's squad
+        // is not boxed with its vehicle, so the vehicle is where its crew is told off), given once.
+        unsigned char hull[0x100]{};
+        Game v{};v.count=2;
+        CommandUnit crewSquad{squadObj,"crew",Command{},false,{0,0,0}};crewSquad.riding=true;crewSquad.vehicle=hull;
+        CommandUnit carrier{hull,"tank",Command{},false,{0,0,0}};carrier.carries=true;
+        v.list[0]=Entry{crewSquad,Owner::squad};v.list[1]=Entry{carrier,Owner::tank};
+        Check(Takes(v.list[1],Order::dismount) && Takes(v.list[1],Order::dismountAll) && Takes(v.list[0],Order::dismountAll),
+              "a vehicle carrying a squad takes DISMOUNT and ALL OUT, as its riding squad does");
+        const int before=squadOrders;v.sel.Add(hull);
+        Check(Give(v,v.list[1],Command{Order::dismountAll,{}}) && squadOrders==before+1 && squadGot.order==Order::dismountAll,
+              "ALL OUT to the vehicle: its squad's");
+        v.sel.Add(squadObj);
+        Check(!Give(v,v.list[1],Command{Order::dismount,{}}) && squadOrders==before+1,
+              "...once: a squad selected itself takes it from its own row, not again through its vehicle");
+    }
     std::memset(inputstub::keys,0,sizeof(inputstub::keys));squadOn=false;groundReady=false;marked=nullptr;ResetMapCommands();
 }
 void RemoteCommandResults() noexcept {
@@ -595,6 +745,20 @@ void SelectionCapabilityMask() noexcept {
         "tank selection enables only its post's point orders (guard, move, attack-move as its post) and release");
     selection.list[0].owner=Owner::squad;selection.list[0].u.locked=true;Publish(selection,true,true,point,true);PlayerMapCommands(&r);
     Check(!r.allowedOrders && !r.selectedSquads,"script locked squad exposes no executable buttons");
+    // The card shows no order that would only be refused (the user, 2026-10-09: "解散解除交战集火是不是重叠了").
+    const auto has=[&](Order o){return (r.allowedOrders&(1u<<static_cast<unsigned>(o)))!=0;};
+    selection.list[0].u.locked=false;selection.list[0].u.recruitable=true;marked=nullptr;
+    Publish(selection,true,true,point,true);PlayerMapCommands(&r);
+    Check(has(Order::recruit) && !has(Order::dismiss) && has(Order::board) && !has(Order::dismount) && !has(Order::focus) && has(Order::none),
+          "a free squad on foot: recruit, no dismiss; board, no dismount; no focus with nothing marked; clear order");
+    selection.list[0].u.recruitable=false;selection.list[0].u.recruited=true;
+    static int foe=0;marked=&foe;
+    Publish(selection,true,true,point,true);PlayerMapCommands(&r);
+    Check(!has(Order::recruit) && has(Order::dismiss) && has(Order::focus),"the player's squad: dismiss, not recruit; focus with an enemy marked");
+    selection.list[0].u.riding=true;
+    Publish(selection,true,true,point,true);PlayerMapCommands(&r);
+    Check(has(Order::dismount) && !has(Order::board) && !has(Order::move),"a riding squad: dismount, not board, no point order");
+    marked=nullptr;
 }
 }  // namespace
 }  // namespace crew
@@ -602,7 +766,7 @@ int main() {
     crew::UnitLifetime();crew::PointerAndInput();crew::CameraIsolation();crew::FormationKey();crew::ButtonClicks();
     crew::FocusButtonPreservesMark();crew::MarkFromMap();crew::MarkLifetimeAndConfig();
     crew::SupportInput();
-    crew::UiCaptureAndSnapshots();crew::RtsClicks();
+    crew::UiCaptureAndSnapshots();crew::RtsClicks();crew::PickOnlyCommandable();crew::FormationMenu();
     crew::RemoteCommandResults();crew::SelectionCapabilityMask();
     std::printf("map_command_runtime_check: %d checks, %d failed\n",crew::cases,crew::failures);
     return crew::failures ? 1 : 0;
