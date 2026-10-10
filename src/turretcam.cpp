@@ -813,6 +813,10 @@ bool TurretCamLarge(const void* vehicle) noexcept {
 
 bool TurretCamServes(const void* vehicle) noexcept { return lookOk && shared.v==vehicle; }
 
+const unsigned char* PlayerTurretGun(const unsigned char* vehicle,const unsigned char* seat) noexcept {
+    return vehicle && seat ? TurretGun(vehicle,seat) : nullptr;
+}
+
 bool TurretCamHighTransition(const void* vehicle) noexcept {
     AcquireSRWLockShared(&lock);
     const bool active=shared.v==vehicle && (shared.highView || shared.observing)

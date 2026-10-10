@@ -63,7 +63,7 @@
 - 主炮仍是原版那门（HE 榴弹炮，或换成 A1 的 AP 滑膛炮挂载）。
 - 每个挂点再加一条武器表项和一行挂点行，挂已有的炮弹挂载 `EDF6VC_AP_<n>` / `EDF6VC_HE_<n>` / `EDF6VC_GLM_<n>`。这几种是 `vcobjects.STORES` 的 Shell，由原版炮弹原样拷贝、只改弹数。
 - 炮弹挂点的后坐与主炮相同（与 `make_stock_stores` 同一规则）。
-- 这和原版坦克请求早已用上的「额外挂载」是同一机制：`make_stock_stores` 给 MBT 挂 APFSDS 20 / HE 20 / LAHAT 4。
+- 这和原版坦克请求早已用上的「额外挂载」是同一机制：`make_stock_stores` 给 MBT 挂原版主炮没有的那种炮弹（APFSDS 或 HE）20 / LAHAT 4（2026-10-10 起，见 `docs/feedback-2026-10-10-tank-ammo.md`）。
 
 **谁来切换**
 

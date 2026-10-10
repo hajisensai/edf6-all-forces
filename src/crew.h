@@ -767,6 +767,9 @@ void HighCamFrame(unsigned char* vehicle) noexcept;
 bool PlayerHighCam(bool* on,bool* keys) noexcept;
 bool HighCamOn(const void* vehicle) noexcept;   // turretcam.cpp: the high view is on in `vehicle` now
 bool TurretCamHighTransition(const void* vehicle) noexcept; // includes the return from overhead to the normal camera
+// The weapon seat `seat` of `vehicle`'s turret is laid by (turretcam.cpp TurretGun: the fire-control pick when it turns
+// with both of the seat's axes, else the seat's first weapon that does); nullptr: none. vhud.cpp: whose aim overlay it is.
+const unsigned char* PlayerTurretGun(const unsigned char* vehicle,const unsigned char* seat) noexcept;
 // The seat holds an indirect-fire weapon (the Katyusha's rockets, the howitzer's shells: lofted or ground marked, rounds
 // living 10 s or more): its high view (HighCamClass 1) and no gun stabilizer (stab.cpp: it fires from a halt).
 bool IndirectFireSeat(const unsigned char* seat) noexcept;
