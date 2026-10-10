@@ -229,6 +229,9 @@ bool SupportVersionCue(wchar_t* line,std::size_t capacity) noexcept {
     return sceneVersionOn;
 }
 bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
+// The debug spawn tool's menu (debug_spawn.cpp DebugSpawnReadout): up in the debug_spawn scenes.
+bool sceneDebugSpawnOn=false;DebugSpawnCue sceneDebugSpawn{};
+bool DebugSpawnReadout(DebugSpawnCue* o) noexcept { if(sceneDebugSpawnOn)*o=sceneDebugSpawn;return sceneDebugSpawnOn; }
 void MapCommandView(const float*,float,float) noexcept {}
 // The map's buttons as drawn (hud.cpp MapButtons): the scene's check reads them.
 int sceneButtons=0;float sceneButton[mapbtn::kCount][4]{};int sceneButtonId[mapbtn::kCount]{};
@@ -1938,6 +1941,37 @@ int Scenes(const std::wstring& dir) {
         sceneVersionOn=false;sceneRescueOn=false;
     }
     sceneSweepOn=false;
+    // The debug spawn tool's menu (DebugSpawn=1): the longest category (vehicles, its window scrolled to the middle) and
+    // the enemies with a spawn's result; on the screen and no two texts on each other, the picked row's name drawn.
+    for(int pass=0;pass<2;++pass) {
+        using namespace debugspawn;
+        const Category cat=pass ? Category::enemy : Category::vehicle;
+        sceneDebugSpawnOn=true;
+        sceneDebugSpawn=DebugSpawnCue{};
+        sceneDebugSpawn.open=true;sceneDebugSpawn.category=static_cast<int>(cat);
+        sceneDebugSpawn.count=CountIn(cat);sceneDebugSpawn.pick=pass ? 2 : 8;
+        sceneDebugSpawn.row=RowOf(cat,sceneDebugSpawn.pick);sceneDebugSpawn.ready=pass==0;
+        const int keys[5]={0x77,0x74,0x75,0x76,0x78};
+        std::memcpy(sceneDebugSpawn.keys,keys,sizeof(keys));
+        if(pass){sceneDebugSpawn.status=kDebugSpawnDone;sceneDebugSpawn.statusRow=sceneDebugSpawn.row;}
+        const wchar_t* name=pass ? L"debug_spawn_enemy" : L"debug_spawn_vehicle";
+        Scene(dir,name,ground);
+        bool picked=false,inside=true,apart=true;
+        for(std::size_t i=0;i<drew.size();++i) {
+            const Drew& p=drew[i];
+            if(p.text.empty())continue;
+            if(p.text.find(debugspawn::kEntries[sceneDebugSpawn.row].name)!=std::wstring::npos)picked=true;
+            if(p.x0<0.0f || p.x1>1920.0f || p.y0<0.0f || p.y1>1080.0f)inside=false;
+            for(std::size_t k=i+1;k<drew.size();++k) {
+                const Drew& q=drew[k];
+                if(!q.text.empty() && p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1)apart=false;
+            }
+        }
+        failed+=!(picked && inside && apart);
+        std::printf("%s  %ls: the picked row drawn %d, on the screen %d, no text overlapping %d\n",
+                    picked && inside && apart ? "ok  " : "FAIL",name,picked,inside,apart);
+    }
+    sceneDebugSpawnOn=false;
     sceneFormation=-1;
     sceneMarkOn=false;hasHeli=heliWas;
     std::memcpy(sceneHeli.sym.nose,noseWas,12);

@@ -25,6 +25,7 @@
 #include "scopeview.h"
 #include "reticle.h"
 #include "boarding_entrance.h"
+#include "debug_spawn.h"
 #include "gear.h"
 #include "hudscale.h"
 #include "map_cam.h"
@@ -3486,14 +3487,19 @@ void MapUnits(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
     if(p.dx!=0.0f || p.dy!=0.0f)Tri(drawer,ctx,p.ix-p.dx*5.0f*s,p.iy-p.dy*5.0f*s,p.ix+p.dx*20.0f*s,p.iy+p.dy*20.0f*s,7.0f*s,kWhite);
 }
 
-// Map panels share a viewport-fitted scale and publish the exact opaque UI regions.
-// Text is drawn in a final batch: remove earlier world labels under each panel before that batch.
-float mapUiPanels[16*4]{};int mapUiPanelCount=0;
-void MapUiBox(void* drawer,void* ctx,float x0,float y0,float x1,float y1,Line* lines,int prior) noexcept {
+// Text is drawn in a final batch, over every panel: an opaque panel first empties the earlier lines (world labels) under
+// it, else they would show through on top of it.
+void HideLinesUnder(Line* lines,int prior,float x0,float y0,float x1,float y1) noexcept {
     for(int i=0;i<prior;++i) {
         auto& line=lines[i];
         if(line.x<x1 && line.x+line.w>x0 && line.y<y1 && line.y+line.h>y0)line.text[0]=0;
     }
+}
+
+// Map panels share a viewport-fitted scale and publish the exact opaque UI regions.
+float mapUiPanels[16*4]{};int mapUiPanelCount=0;
+void MapUiBox(void* drawer,void* ctx,float x0,float y0,float x1,float y1,Line* lines,int prior) noexcept {
+    HideLinesUnder(lines,prior,x0,y0,x1,y1);
     Rect(drawer,ctx,x0,y0,x1,y1,kMapBand);
     if(mapUiPanelCount<16) {
         auto* r=mapUiPanels+4*mapUiPanelCount++;r[0]=x0;r[1]=y0;r[2]=x1;r[3]=y1;
@@ -4347,6 +4353,60 @@ void NpcPingHud(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
                Tr(p.given==-2 ? Tx::cmdOfflineOnly : p.given==kPingNearEnemy ? Tx::npcPingNearEnemy : Tx::npcPingNoUnit));
 }
 
+// The result line (a spawn's, for a moment): its words, the row's name.
+void DebugSpawnStatusLine(Text* text,Line* lines,int* at,float x,float y,int align,float scale,const DebugSpawnCue& c) noexcept {
+    if(c.status==kDebugSpawnNone || c.statusRow<0 || c.statusRow>=debugspawn::kEntryCount)return;
+    const wchar_t* const name=debugspawn::kEntries[c.statusRow].name;
+    if(c.status==kDebugSpawnRequested || c.status==kDebugSpawnRefused) {   // a support call: its own answer after the name
+        Label(text,lines,at,x,y,align,scale,c.status==kDebugSpawnRequested ? kGreen : kAmber,
+              Tr(c.status==kDebugSpawnRequested ? Tx::debugSpawnRequested : Tx::debugSpawnRefused),name,c.note);
+        return;
+    }
+    const Tx words=c.status==kDebugSpawnDone ? Tx::debugSpawnDone : c.status==kDebugSpawnOnline ? Tx::debugSpawnOnline :
+                   c.status==kDebugSpawnNoPlace ? Tx::debugSpawnNoPlace : Tx::debugSpawnFailed;
+    Label(text,lines,at,x,y,align,scale,c.status==kDebugSpawnDone ? kGreen : kAmber,Tr(words),name);
+}
+// The debug spawn tool's menu (debug_spawn.cpp; ini DebugSpawn, off by default): a panel at the left, its category, a
+// window of its rows round the one picked (an arrow at it; dim when it cannot be made now), the keys, and a spawn's
+// result for a moment (also with the menu shut). Nothing when the tool is off.
+void DebugSpawnHud(void* drawer,void* ctx,Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
+    DebugSpawnCue c{};
+    if(!DebugSpawnReadout(&c))return;
+    const float x=40.0f*s,top=height*0.22f,row=28.0f*s;
+    constexpr int kWindow=10;
+    if(!c.open){DebugSpawnStatusLine(text,lines,at,width*0.5f,height*0.5f+254.0f*s,1,kLineScale,c);return;}
+    if(*at+kWindow+5>kMaxLines)return;
+    using debugspawn::Category;
+    const Category cat=static_cast<Category>(c.category>=0 && c.category<debugspawn::kCategoryCount ? c.category : 0);
+    static const Tx kNames[debugspawn::kCategoryCount]={Tx::debugSpawnVehicles,Tx::debugSpawnAircraft,Tx::debugSpawnEnemies,
+                                                        Tx::debugSpawnSoldiers};
+    static const Tx kHints[debugspawn::kCategoryCount]={Tx::debugSpawnHintVehicle,Tx::debugSpawnHintAircraft,Tx::debugSpawnHintEnemy,
+                                                        Tx::debugSpawnHintSoldier};
+    const int first=c.count<=kWindow ? 0 : (c.pick-kWindow/2<0 ? 0 : (c.pick-kWindow/2+kWindow>c.count ? c.count-kWindow : c.pick-kWindow/2));
+    const int shown=c.count<kWindow ? c.count : kWindow;
+    const int firstLine=*at;
+    Label(text,lines,at,x,top,0,kTitleScale,kTitle,Tr(Tx::debugSpawnTitle),Tr(kNames[static_cast<int>(cat)]),c.pick+1,c.count);
+    for(int i=0;i<shown;++i) {
+        const int index=first+i,entry=debugspawn::RowOf(cat,index);
+        if(entry<0)break;
+        const bool picked=index==c.pick;
+        const float* tint=!picked ? kWhite : c.ready ? kYellow : kAmber;
+        Label(text,lines,at,x,top+row*(i+1.2f),0,kLineScale,tint,L"%ls %ls%ls",picked ? L">" : L"  ",debugspawn::kEntries[entry].name,
+              picked && !c.ready ? Tr(Tx::debugSpawnUnavailable) : L"");
+    }
+    wchar_t k[5][24];
+    for(int i=0;i<5;++i)KeyName(c.keys[i],k[i],_countof(k[i]));
+    Label(text,lines,at,x,top+row*(shown+1.6f),0,kLineScale*0.8f,kTeal,Tr(Tx::debugSpawnKeys),k[1],k[2],k[3],k[4],k[0]);
+    Label(text,lines,at,x,top+row*(shown+2.5f),0,kLineScale*0.8f,kTeal,L"%ls",Tr(kHints[static_cast<int>(cat)]));
+    DebugSpawnStatusLine(text,lines,at,x,top+row*(shown+3.4f),0,kLineScale*0.8f,c);
+    // The panel behind them, as wide as the widest line (the quads go down now, the text over them at DrawAll).
+    float right=x+460.0f*s;
+    for(int i=firstLine;i<*at;++i)if(lines[i].x+lines[i].w+12.0f*s>right)right=lines[i].x+lines[i].w+12.0f*s;
+    const float y0=top-24.0f*s,y1=top+row*(shown+4)+8.0f*s;
+    HideLinesUnder(lines,firstLine,x-12.0f*s,y0,right,y1);   // a Q mark's name tag, a squad's label: not over the menu
+    Rect(drawer,ctx,x-12.0f*s,y0,right,y1,kPanel);
+}
+
 }  // namespace
 
 // A magnified sight's picture (scopeview.h; sightzoom.cpp): while the sight is magnified the screen outside its field
@@ -4533,6 +4593,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         RescueCueBanner(t,width,height,s,lines,&at);
         VersionBanner(t,width,height,s,lines,&at);
         NpcPingHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
+        DebugSpawnHud(drawer,ctx,t,width,height,s,lines,&at);
         if(Cfg().vehicleHud) {
             if(now-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);
             float top=height*0.28f;

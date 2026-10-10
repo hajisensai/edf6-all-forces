@@ -213,6 +213,15 @@ struct Config {
     int mapKey=0x4D;                // ...its key ('M'; a Windows virtual-key code, 0: none)
     int mapButton=0x20;             // ...and pad button (XInput button bits: 0x20 Back / View; 0 none)
     float mapViewDistance=6000.0f;  // ...the near camera's far clip while it is open, m (view.cpp; 0: as it is)
+    // The debug spawn tool (debug_spawn.cpp): OFF by default. Off: nothing preloaded, no key read, nothing drawn.
+    bool debugSpawn=false;
+    int debugSpawnKey=0x77;         // ...its menu opened / shut (F8; Windows virtual-key codes, 0: none)
+    int debugSpawnPrevKey=0x74;     // ...the row before (F5)
+    int debugSpawnNextKey=0x75;     // ...the row after (F6)
+    int debugSpawnCategoryKey=0x76; // ...the next category (F7)
+    int debugSpawnSpawnKey=0x78;    // ...spawn the row picked (F9)
+    float debugSpawnRange=500.0f;   // ...the crosshair's ground point counts within this, m
+    float debugSpawnDistance=30.0f; // ...else (sky, too far, at the player's feet) this far ahead of the player, m
     bool stockStores=true;          // the stock vehicles' requests carry the stores they should (the installer,
                                     // tools/make_stock_stores.py) and the switch goes round them (payload.cpp)
     bool seatSwitch=true;           // the player moves to another seat of the vehicle they are in (seatswitch.cpp)
@@ -1045,6 +1054,27 @@ bool InstallPlayerJets() noexcept;                      // after InstallSub (it 
 // The local player's human (plugin.cpp, from SeePlayer): the object, or nullptr when not seen for
 // kPlayerHumanMs or no longer the same live player object.
 unsigned char* PlayerHuman() noexcept;
+
+// debug_spawn.cpp (ini DebugSpawn, off by default; src/debug_spawn.h): spawn vehicles, the plugin's aircraft, enemies and
+// friendly soldiers out of thin air where the crosshair points. No hook of its own: PreloadDebugSpawn from the mission's
+// start (mission.cpp), DebugSpawnFrame from the player's frame (map.cpp MapHumanFrame, crew.cpp FrameTick; once a game
+// frame whichever comes first), the menu drawn from the HUD pass (hud.cpp) through DebugSpawnReadout.
+void PreloadDebugSpawn() noexcept;
+void DebugSpawnFrame(unsigned char* human) noexcept;
+struct DebugSpawnCue {
+    bool open;                // the menu is up
+    int category;             // debugspawn::Category shown
+    int row;                  // kEntries index picked (-1 none)
+    int pick,count;           // its place in the category, of how many
+    bool ready;               // the row can be spawned now (preloaded / its module up)
+    int status;               // the last spawn's result, for a moment: DebugSpawnStatus (none: nothing to say)
+    int statusRow;            // ...whose (kEntries index)
+    wchar_t note[96];         // ...a support call's own answer (support_dispatch.cpp SupportCallAt), else empty
+    int keys[5];              // the ini's keys: toggle, prev, next, category, spawn
+};
+enum DebugSpawnStatus : int { kDebugSpawnNone, kDebugSpawnDone, kDebugSpawnFailed, kDebugSpawnOnline, kDebugSpawnNoPlace,
+                                   kDebugSpawnRequested, kDebugSpawnRefused };
+bool DebugSpawnReadout(DebugSpawnCue* out) noexcept;   // any thread; false: nothing to show
 }  // namespace crew
 
 // The core modules' declarations (self-contained; every file that includes crew.h sees them as before).

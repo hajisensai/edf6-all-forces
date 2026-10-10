@@ -110,6 +110,7 @@ void MissionStart() noexcept {
     PreloadAirdrop();         // ...and the stock container a transport plane drops one in (airdrop.cpp)
     PreloadSupportSoldiers(); // original real NPC resources, before the game's preload wait
     PreloadSupportVariants(); // ...and the generated coloured soldiers / loaded vehicles there are (support_variants.h)
+    PreloadDebugSpawn();      // the debug spawn tool's stock vehicles and enemies; nothing at all with DebugSpawn=0
     EnsureInputs();  // every plugin has loaded by now: the per-frame hooks chain onto theirs
     Log("MISSION start: per-object state dropped, resources preloaded");
     LogMemory("mission start");

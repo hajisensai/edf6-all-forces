@@ -555,3 +555,30 @@ HUDTEXT(predictedGround,L"GROUND %.0f m  %.1f s",L"预测地形落点 %.0f 米  
 HUDTEXT(noGroundHit,L"NO TERRAIN HIT  %.0f m  %.1f s",L"无地形命中  %.0f 米  %.1f 秒",L"無地形命中  %.0f 公尺  %.1f 秒",L"地形着弾なし  %.0f m  %.1f 秒")
 
 HUDTEXT(aimSightBinding,L"  SIGHT %ls / AUTO %ls",L"  瞄具 %ls / 自瞄 %ls",L"  瞄具 %ls / 自瞄 %ls",L"  照準器 %ls / 自動 %ls")
+
+// --- The debug spawn tool's menu (hud.cpp DebugSpawnHud; debug_spawn.cpp, ini DebugSpawn). Its rows' names are the
+// catalog's own (src/debug_spawn.h, Chinese: a debug tool). ---
+HUDTEXT(debugSpawnTitle,L"DEBUG SPAWN - %ls (%d/%d)",L"调试召唤 - %ls（%d/%d）",L"除錯召喚 - %ls（%d/%d）",L"デバッグ召喚 - %ls（%d/%d）")
+HUDTEXT(debugSpawnVehicles,L"VEHICLES",L"载具",L"載具",L"ビークル")
+HUDTEXT(debugSpawnAircraft,L"AIRCRAFT",L"飞机",L"飛機",L"航空機")
+HUDTEXT(debugSpawnEnemies,L"ENEMIES",L"敌人",L"敵人",L"敵")
+HUDTEXT(debugSpawnSoldiers,L"FRIENDLY SOLDIERS",L"友军士兵",L"友軍士兵",L"友軍兵士")
+HUDTEXT(debugSpawnUnavailable,L" (unavailable now)",L"（现在不可用）",L"（現在不可用）",L"（現在使用不可）")
+HUDTEXT(debugSpawnKeys,L"%ls / %ls PICK   %ls CATEGORY   %ls SPAWN   %ls CLOSE",L"%ls / %ls 选择   %ls 换分类   %ls 召唤   %ls 关闭",
+        L"%ls / %ls 選擇   %ls 換分類   %ls 召喚   %ls 關閉",L"%ls / %ls 選択   %ls 分類切替   %ls 召喚   %ls 閉じる")
+HUDTEXT(debugSpawnHintVehicle,L"ON THE GROUND AT THE CROSSHAIR, EMPTY, FRIENDLY",L"放在准星指向的地面，空车、己方阵营",
+        L"放在準星指向的地面，空車、己方陣營",L"照準の地面に配置、無人・味方")
+HUDTEXT(debugSpawnHintAircraft,L"A SUPPORT CALL TO THE CROSSHAIR: FROM THE MAP EDGE, REAL CREW (THE DRONE: AT ONCE)",
+        L"向准星点呼叫支援：从地图边缘进场，真实机组（无人机直接出现）",L"向準星點呼叫支援：從地圖邊緣進場，真實機組（無人機直接出現）",
+        L"照準へ支援要請：マップ端から進入、実機の搭乗員（ドローンは即時）")
+HUDTEXT(debugSpawnHintEnemy,L"ON THE GROUND AT THE CROSSHAIR, HOSTILE",L"放在准星指向的地面，敌方阵营",L"放在準星指向的地面，敵方陣營",
+        L"照準の地面に配置、敵")
+HUDTEXT(debugSpawnHintSoldier,L"ON THE GROUND AT THE CROSSHAIR, FRIENDLY",L"放在准星指向的地面，己方阵营",L"放在準星指向的地面，己方陣營",
+        L"照準の地面に配置、味方")
+HUDTEXT(debugSpawnDone,L"SPAWNED: %ls",L"已召唤：%ls",L"已召喚：%ls",L"召喚しました：%ls")
+HUDTEXT(debugSpawnFailed,L"SPAWN FAILED: %ls (SEE DEBUGSPAWN IN THE LOG)",L"召唤失败：%ls（原因见日志 DEBUGSPAWN）",
+        L"召喚失敗：%ls（原因見日誌 DEBUGSPAWN）",L"召喚失敗：%ls（理由はログの DEBUGSPAWN）")
+HUDTEXT(debugSpawnOnline,L"OFFLINE ONLY: %ls",L"联机中不能用调试召唤：%ls",L"連線中不能用除錯召喚：%ls",L"オンラインでは使えません：%ls")
+HUDTEXT(debugSpawnNoPlace,L"NO PLACE FOR %ls",L"召唤失败：找不到放置点（%ls）",L"召喚失敗：找不到放置點（%ls）",L"召喚失敗：置き場所なし（%ls）")
+HUDTEXT(debugSpawnRequested,L"SUPPORT CALLED: %ls  %ls",L"已呼叫支援：%ls  %ls",L"已呼叫支援：%ls  %ls",L"支援要請：%ls  %ls")
+HUDTEXT(debugSpawnRefused,L"SUPPORT REFUSED: %ls  %ls",L"支援未受理：%ls  %ls",L"支援未受理：%ls  %ls",L"支援要請不可：%ls  %ls")

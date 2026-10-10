@@ -107,6 +107,7 @@ void CarrierLaserFrame(unsigned char const *) noexcept{unexpectedHook();return;}
 bool GunshipCrewSeats(void const *) noexcept{unexpectedHook();return {};}
 unsigned int GunshipBoardSeat(void) noexcept{unexpectedHook();return {};}
 void BoardingTick(void) noexcept{unexpectedHook();return;}
+void DebugSpawnFrame(unsigned char *) noexcept{}
 void const * BoardingOnly(void) noexcept{unexpectedHook();return {};}
 void PlayerJetFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void LauncherFrame(unsigned char *) noexcept{unexpectedHook();return;}
