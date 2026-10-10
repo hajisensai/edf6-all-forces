@@ -46,6 +46,7 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& id,const mapcmd::Comm
     return SquadCommand(id.obj,command) ? NpcCommandResult{NpcCommandReason::none,1} : NpcCommandResult{NpcCommandReason::failed,0};
 }
 unsigned char* image=nullptr;
+bool JetFliesItself(const void*) noexcept { return false; }   // no plugin jet in this world (command_unit.cpp)
 bool NpcDriver(const unsigned char* v) noexcept {
     if(!v || !SeatCount(v))return false;
     auto* seat=SeatAt(const_cast<unsigned char*>(v),0);const auto who=SeatRider(seat);
