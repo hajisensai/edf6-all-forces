@@ -53,11 +53,12 @@ enum Clip : int { kClipHeavyIdle, kClipHeavyLoad, kClipLightIdle, kClipLightLoad
                   kClipSzSaberHum, kClipSzCharge, kClipGunMediumNear, kClipGunMediumFar, kClipHowitzerNear, kClipHowitzerFar,
                   kClipGunHeavyNear, kClipGunHeavyFar, kClipRailShot, kClipRailFar, kClipRailCharge, kClipRailReady,
                   kClipGrenadeShot, kClipRocketRail, kClipRocketLoad, kClipCaseMedium, kClipCaseStub, kClipCaseGrenade,
-                  kClipBreechOpen, kClipShellRam, kClipCharge, kClipPrimer, kClipMarkOwn, kClipMarkTeam, kClipMarkOff, kClipCount };
+                  kClipBreechOpen, kClipShellRam, kClipCharge, kClipPrimer, kClipMarkOwn, kClipMarkTeam, kClipMarkOff,
+                  kClipSzShieldBlock, kClipCount };
 // The Sazabi's one-shots' clips in sazabi_sound.h SzSfx's order (its missiles the vehicles' launch), its loops' in SzLoop's.
 constexpr int kSazabiSfxClip[]={kClipSzBeamShot,kClipSzBeamHit,kClipSzSaberOn,kClipSzSaberOff,kClipSzWhoosh,kClipSzSaberHit,
                                 kClipSzCannonShot,kClipSzFunnelLaunch,kClipSzFunnelShot,kClipSzFunnelDock,kClipMissile,kClipSzFootstep,
-                                kClipSzLand,kClipSzDash};
+                                kClipSzLand,kClipSzDash,kClipSzShieldBlock};
 constexpr int kSazabiLoopClip[]={kClipSzThrusters,kClipSzSaberHum,kClipSzCharge};
 // How a sound is heard this frame: its gain in each ear (the caller's volume in it), its playback rate (pitch and the
 // Doppler ratio together) and how far off it is (0 near .. 1 far: the air takes its highs).
