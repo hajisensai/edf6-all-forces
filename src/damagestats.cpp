@@ -158,9 +158,11 @@ dmgstat::Group GroupOf(unsigned char* o,std::int32_t team,wchar_t* name,std::siz
 }
 
 // --- The rounds' tags (the game thread's; under tagLock all the same, should a fire run elsewhere) ---
-struct Tag { const unsigned char* round; const void* vtable; const void* owner; dmgstat::Side side; wchar_t name[dmgstat::kNameLen]; };
+struct Tag { const unsigned char* round; const void* vtable; const void* owner; std::uint64_t seq; dmgstat::Side side;
+             wchar_t name[dmgstat::kNameLen]; };
 constexpr int kTags=4096;   // two ways per hash: a round lives a few seconds at most, a few hundred in flight
 Tag tags[kTags];
+std::uint64_t tagSeq=0;   // the fires so far: a pair's older tag is the one replaced
 SRWLOCK tagLock=SRWLOCK_INIT;
 int TagHome(const void* round) noexcept {
     const std::uint64_t h=(reinterpret_cast<std::uintptr_t>(round)>>4)*0x9E3779B97F4A7C15ull;
@@ -177,29 +179,38 @@ const unsigned char* WeaponOfParam(const unsigned char* param) noexcept {
 void TagRound(unsigned char* round,const unsigned char* param) noexcept {
     const unsigned char* w=WeaponOfParam(param);
     if(!w || !Readable(round,kRoundOwnerCtrl+8))return;
-    Tag t{round,At<const void*>(round,0),At<const void*>(round,kRoundOwner),dmgstat::Side::ally,{}};
+    Tag t{round,At<const void*>(round,0),At<const void*>(round,kRoundOwner),0,dmgstat::Side::ally,{}};
     const auto owner=At<unsigned char*>(round,kRoundOwner);
     if(owner && Readable(owner,kTeam+4))t.side=EnemyTeam(At<std::int32_t>(owner,kTeam)) ? dmgstat::Side::enemy : SideOf(owner,w);
     WeaponName(w,t.name,dmgstat::kNameLen);
     AcquireSRWLockExclusive(&tagLock);
+    t.seq=++tagSeq;
     const int home=TagHome(round);
-    Tag& slot=tags[home].round==round || !tags[home].round ? tags[home] : tags[home+1];
-    slot=t;
+    Tag* slot=&tags[home];
+    if(tags[home+1].round==round || (tags[home].round!=round && (!tags[home+1].round ||
+       (tags[home].round && tags[home+1].seq<tags[home].seq))))slot=&tags[home+1];
+    *slot=t;
     ReleaseSRWLockExclusive(&tagLock);
 }
-// The tag of the round whose GDI is `gdi`, checked against the round as it is now and the hit's attacker.
+// The tag of the round whose GDI is `gdi`, checked against the round as it is now (its class and owner: the round is
+// alive while its hits settle) and, with one, the hit's attacker (a dead shooter's round still names its weapon). A tag
+// left by another round at the same address (one never tagged: a derived round) is cleared.
 bool TagOf(const unsigned char* gdi,const void* attacker,Tag* out) noexcept {
     const unsigned char* round=gdi-kRoundGdi;
     if(!Readable(round,kRoundOwnerCtrl+8))return false;
+    const void* const vtable=At<const void*>(round,0);
+    const void* const owner=At<const void*>(round,kRoundOwner);
     bool found=false;
-    AcquireSRWLockShared(&tagLock);
+    AcquireSRWLockExclusive(&tagLock);
     const int home=TagHome(round);
     for(int i=home;i<home+2 && !found;++i) {
-        const Tag& t=tags[i];
-        found=t.round==round && t.vtable==At<const void*>(round,0) && t.owner==At<const void*>(round,kRoundOwner) && t.owner==attacker;
+        Tag& t=tags[i];
+        if(t.round!=round)continue;
+        found=t.vtable==vtable && t.owner==owner && (!attacker || t.owner==attacker);
         if(found)*out=t;
+        else t=Tag{};
     }
-    ReleaseSRWLockShared(&tagLock);
+    ReleaseSRWLockExclusive(&tagLock);
     return found;
 }
 
@@ -221,7 +232,7 @@ constexpr int kTargets=200;
 float uiRect[kTargets*4];
 int uiCode[kTargets],uiCount=0,uiRows=0,uiVisible=1;
 // How the hits were named (under lock): by a round's tag, by a friendly attacker (no tag), by an enemy; the last summary.
-std::uint32_t namedByTag=0,namedByAttacker=0,namedByEnemy=0;
+std::uint32_t namedByTag=0,namedByAttacker=0,namedByEnemy=0,namedByWorld=0;
 ULONGLONG summaryAt=0;
 
 // One log line of the book (under lock): its tables, the totals, the three weapons that dealt the most, how hits were named.
@@ -242,9 +253,9 @@ void Summary(const char* why) noexcept {
     for(int k=0;k<3;++k)
         if(top[k]>=0)WideCharToMultiByte(CP_UTF8,0,book.source[top[k]].name.text,-1,names[k],sizeof(names[k]),nullptr,nullptr);
     Log("DAMAGESTATS %s: %d sources, %d targets; dealt %.0f, friendly fire %.0f, taken %.0f, healed %.0f; top [%s] %.0f, [%s] %.0f, "
-        "[%s] %.0f; named by tag %u, by attacker %u, enemy %u",why,book.sources,book.targets,dealt,ff,taken,healed,names[0],
+        "[%s] %.0f; named by tag %u, by attacker %u, enemy %u, world %u",why,book.sources,book.targets,dealt,ff,taken,healed,names[0],
         top[0]>=0 ? book.source[top[0]].damage : 0.0f,names[1],top[1]>=0 ? book.source[top[1]].damage : 0.0f,names[2],
-        top[2]>=0 ? book.source[top[2]].damage : 0.0f,namedByTag,namedByAttacker,namedByEnemy);
+        top[2]>=0 ? book.source[top[2]].damage : 0.0f,namedByTag,namedByAttacker,namedByEnemy,namedByWorld);
 }
 
 void Record(unsigned char* obj,const unsigned char* gdi,float hpBefore,bool deadBefore) noexcept {
@@ -260,9 +271,14 @@ void Record(unsigned char* obj,const unsigned char* gdi,float hpBefore,bool dead
         wchar_t source[dmgstat::kNameLen],target[dmgstat::kNameLen];
         dmgstat::Side side;
         Tag tag;
-        int named=0;   // 0 tag, 1 a friendly attacker, 2 an enemy
+        int named=0;   // 0 tag, 1 a friendly attacker, 2 an enemy, 3 the world
         const unsigned char* settling=Source();
-        if(settling && attacker && TagOf(settling,attacker,&tag)){side=tag.side;wcscpy_s(source,tag.name);}
+        if(settling && TagOf(settling,attacker,&tag)){side=tag.side;wcscpy_s(source,tag.name);}
+        else if(!attacker && (team<0 || team>=kMostTeams)) {   // nobody's and no side's: a mission script's blast, the world
+            named=3;
+            side=dmgstat::Side::world;
+            swprintf_s(source,L"%ls",Tr(Tx::statsSideWorld));
+        }
         else if(EnemyTeam(team)) {
             named=2;
             side=dmgstat::Side::enemy;
@@ -279,13 +295,17 @@ void Record(unsigned char* obj,const unsigned char* gdi,float hpBefore,bool dead
         const dmgstat::Hit h{side,source,group,target,change>0.0f ? change : -change,change<0.0f,!deadBefore && obj[kDead]!=0,
                              static_cast<std::uint32_t>(GameMs()-missionAt)};
         AcquireSRWLockExclusive(&lock);
+        const std::uint32_t span=book.time.spanMs;
         dmgstat::Add(book,h,Tr(Tx::statsOther));
-        ++(named==0 ? namedByTag : named==1 ? namedByAttacker : namedByEnemy);
+        for(std::uint32_t s=span;s<book.time.spanMs;s*=2)dmgstat::FollowSpan(view,1);
+        ++(named==0 ? namedByTag : named==1 ? namedByAttacker : named==2 ? namedByEnemy : namedByWorld);
         const ULONGLONG now=GetTickCount64();
         if(Cfg().debug && now-summaryAt>=10000){summaryAt=now;Summary("so far");}
         ReleaseSRWLockExclusive(&lock);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
+
+bool On() noexcept { return Cfg().enabled && Cfg().damageStats; }
 
 // --- The hooks ---
 using DamageFn=std::uintptr_t(__fastcall*)(unsigned char*,unsigned char*,std::uintptr_t,std::uintptr_t);
@@ -305,7 +325,7 @@ Before Read(const unsigned char* obj) noexcept {
     return Before{0.0f,false,false};
 }
 std::uintptr_t __fastcall DamageHook(unsigned char* obj,unsigned char* gdi,std::uintptr_t r8,std::uintptr_t r9) noexcept {
-    const bool on=Cfg().damageStats;
+    const bool on=On();
     const Before b=on ? Read(obj) : Before{};
     const std::uintptr_t r=damageNext(obj,gdi,r8,r9);
     if(on && b.ok)Record(obj,gdi,b.hp,b.dead);
@@ -313,7 +333,7 @@ std::uintptr_t __fastcall DamageHook(unsigned char* obj,unsigned char* gdi,std::
 }
 unsigned char* __fastcall SpawnHook(void* mgr,void* matrix,void* factory,unsigned char* param) noexcept {
     unsigned char* const round=spawnNext(mgr,matrix,factory,param);
-    if(round && param && Cfg().damageStats) {
+    if(round && param && On()) {
         __try { TagRound(round,param); } __except(EXCEPTION_EXECUTE_HANDLER) {}
     }
     return round;
@@ -373,7 +393,7 @@ void ResetDamageStats() noexcept {
     ReleaseSRWLockExclusive(&tagLock);
     AcquireSRWLockExclusive(&lock);
     if(book.sources || book.targets)Summary("the mission before");
-    namedByTag=namedByAttacker=namedByEnemy=0;
+    namedByTag=namedByAttacker=namedByEnemy=namedByWorld=0;
     const std::uint32_t serial=book.serial;
     dmgstat::Clear(book);
     book.serial=serial+1;   // never back to a number the draw's copy may hold: the new book is copied
@@ -384,9 +404,9 @@ void ResetDamageStats() noexcept {
 }
 
 bool DamageStatsRead(dmgstat::Book* out,bool* fresh,dmgstat::View* v,std::uint32_t* missionMs) noexcept {
-    if(!Cfg().damageStats)return false;
+    if(!On())return false;
     AcquireSRWLockShared(&lock);
-    *fresh=out->serial!=book.serial;
+    *fresh=view.open && out->serial!=book.serial;   // the map alone (its STATS tab) needs no book
     if(*fresh)std::memcpy(out,&book,sizeof(book));
     *v=view;
     *missionMs=static_cast<std::uint32_t>(GameMs()-missionAt);
@@ -404,7 +424,7 @@ void DamageStatsUi(const float* rects,const int* codes,int n,int rows,int visibl
 }
 
 int DamageStatsUiAt(float x,float y) noexcept {
-    if(!Cfg().damageStats)return 0;
+    if(!On())return 0;
     int code=0;
     AcquireSRWLockShared(&lock);
     for(int i=uiCount-1;i>=0 && !code;--i) {   // the last drawn on top
@@ -422,7 +442,7 @@ void DamageStatsClick(int code) noexcept {
 }
 
 bool DamageStatsShown() noexcept {
-    if(!Cfg().damageStats)return false;
+    if(!On())return false;
     AcquireSRWLockShared(&lock);
     const bool shown=view.open;
     ReleaseSRWLockShared(&lock);
@@ -432,6 +452,13 @@ bool DamageStatsShown() noexcept {
 void DamageStatsWheel(int notches) noexcept {
     AcquireSRWLockExclusive(&lock);
     dmgstat::Scroll(view,notches,uiRows,uiVisible);
+    ReleaseSRWLockExclusive(&lock);
+}
+
+void DamageStatsPad(int tabStep,bool flipScope) noexcept {
+    AcquireSRWLockExclusive(&lock);
+    if(tabStep)dmgstat::StepTab(view,tabStep);
+    if(flipScope)dmgstat::FlipScope(view);
     ReleaseSRWLockExclusive(&lock);
 }
 

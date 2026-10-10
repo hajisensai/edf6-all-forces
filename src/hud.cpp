@@ -4244,7 +4244,7 @@ bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
         MapCommandView(vp,width,height);   // the pointer moves on this view
         MapCommandReadout c{};
         const bool pointer=PlayerMapCommands(&c) && c.pointer && !m.pad;
-        StatsPage(drawer,ctx,text,width,height,s,book,statsView,missionMs,StatsPointer{pointer,c.px,c.py},lines,at);
+        StatsPage(drawer,ctx,text,width,height,s,book,statsView,missionMs,m.pad,StatsPointer{pointer,c.px,c.py},lines,at);
         MapCommandUiPanels(mapUiPanels,mapUiPanelCount);
         return true;
     }

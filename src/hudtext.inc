@@ -614,6 +614,9 @@ HUDTEXT(statsSideSupport,L"NPC vehicles",L"NPC 载具",L"NPC 載具",L"NPC ビ�
 HUDTEXT(statsSideTeammate,L"Other players",L"其他玩家",L"其他玩家",L"他のプレイヤー")
 HUDTEXT(statsSideAlly,L"Other allies",L"其他友军",L"其他友軍",L"その他の味方")
 HUDTEXT(statsSideEnemy,L"Enemy",L"敌人",L"敵人",L"敵")
+HUDTEXT(statsSideWorld,L"Mission / world",L"任务 / 环境",L"任務 / 環境",L"ミッション / 環境")
+HUDTEXT(statsPadHint,L"LB / RB: tab   D-pad: scroll   Y: scope   B: close",L"LB / RB 切换页签   十字键 翻页   Y 切换范围   B 关闭",
+        L"LB / RB 切換頁籤   十字鍵 翻頁   Y 切換範圍   B 關閉",L"LB / RB タブ切替   十字キー スクロール   Y 範囲切替   B 閉じる")
 HUDTEXT(statsGroupMe,L"Me",L"我",L"我",L"自分")
 HUDTEXT(statsGroupMyVehicle,L"My vehicle",L"我的载具",L"我的載具",L"自分のビークル")
 HUDTEXT(statsGroupTeammate,L"Other players",L"其他玩家",L"其他玩家",L"他のプレイヤー")

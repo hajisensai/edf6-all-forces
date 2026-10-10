@@ -18,14 +18,14 @@ alignas(16) const float kStatsTaken[4]={1.0f,0.35f,0.3f,0.95f};
 alignas(16) const float kStatsFriendly[4]={1.0f,0.35f,0.75f,0.95f};   // friendly fire
 alignas(16) const float kStatsHeal[4]={0.45f,1.0f,0.6f,0.95f};
 // A side's colour (dmgstat::Side's order): me cyan, my vehicle blue, NPC soldiers green, NPC vehicles amber, the other
-// players violet, the rest grey, an enemy red; a group's (dmgstat::Group's) for whom it hit.
+// players violet, the rest grey, an enemy red, the world brown; a group's (dmgstat::Group's) for whom it hit.
 alignas(16) const float kStatsSide[dmgstat::kSides][4]={{0.3f,0.85f,1.0f,0.95f},{0.4f,0.55f,1.0f,0.95f},{0.4f,0.9f,0.45f,0.95f},
                                                          {1.0f,0.7f,0.15f,0.95f},{0.78f,0.55f,1.0f,0.95f},{0.62f,0.66f,0.7f,0.95f},
-                                                         {1.0f,0.35f,0.3f,0.95f}};
+                                                         {1.0f,0.35f,0.3f,0.95f},{0.75f,0.62f,0.45f,0.95f}};
 alignas(16) const float kStatsGroup[dmgstat::kGroups][4]={{0.3f,0.85f,1.0f,0.95f},{0.4f,0.55f,1.0f,0.95f},{0.78f,0.55f,1.0f,0.95f},
                                                            {0.4f,0.9f,0.45f,0.95f},{1.0f,0.82f,0.25f,0.95f},{1.0f,0.5f,0.2f,0.95f}};
 const Tx kStatsSideName[dmgstat::kSides]={Tx::statsSideMe,Tx::statsSideMyVehicle,Tx::statsSideSquad,Tx::statsSideSupport,
-                                          Tx::statsSideTeammate,Tx::statsSideAlly,Tx::statsSideEnemy};
+                                          Tx::statsSideTeammate,Tx::statsSideAlly,Tx::statsSideEnemy,Tx::statsSideWorld};
 const Tx kStatsGroupName[dmgstat::kGroups]={Tx::statsGroupMe,Tx::statsGroupMyVehicle,Tx::statsGroupTeammate,Tx::statsGroupAlly,
                                             Tx::statsGroupVehicle,Tx::statsGroupEnemy};
 const Tx kStatsTabName[dmgstat::kTabs]={Tx::statsTabWeapons,Tx::statsTabEnemies,Tx::statsTabTaken,Tx::statsTabHeals,Tx::statsTabTimeline};
@@ -399,7 +399,7 @@ void StatsTimeline(void* drawer,void* ctx,Text* text,const dmgstat::Frame& f,flo
 
 // The page's head: the title, the tabs, the scope, the close button; the mission's totals and the hint under them.
 void StatsHead(void* drawer,void* ctx,Text* text,const dmgstat::Frame& f,float s,const dmgstat::Book& b,const dmgstat::View& v,
-               std::uint32_t missionMs,const StatsPointer& p,StatsTargets& tg,Line* lines,int* at) noexcept {
+               std::uint32_t missionMs,bool pad,const StatsPointer& p,StatsTargets& tg,Line* lines,int* at) noexcept {
     const dmgstat::Box& t=f.tabs;
     const float mid=(t.y0+t.y1)*0.5f;
     Label(text,lines,at,t.x0,mid,0,kTitleScale,kTitle,L"%ls",Tr(Tx::statsTitle));
@@ -437,14 +437,14 @@ void StatsHead(void* drawer,void* ctx,Text* text,const dmgstat::Frame& f,float s
           Amount(healed).t,Amount(ff).t,When(missionMs).t);
     if(*at>0)MapFitLabel(text,lines[*at-1],t.x0,t.x1);
     // The hint in the footer's left (the scroll, when there is one, at its right).
-    Label(text,lines,at,f.footer.x0,(f.footer.y0+f.footer.y1)*0.5f,0,kLineScale*0.58f,kStatsDim,L"%ls",Tr(Tx::statsHint));
+    Label(text,lines,at,f.footer.x0,(f.footer.y0+f.footer.y1)*0.5f,0,kLineScale*0.58f,kStatsDim,L"%ls",Tr(pad ? Tx::statsPadHint : Tx::statsHint));
     if(*at>0)MapFitLabel(text,lines[*at-1],f.footer.x0,f.footer.x0+(f.footer.x1-f.footer.x0)*0.6f);
 }
 
 // The page over the map (MapScreen while it is shown): the screen shaded, the panel, its head and chart, the tooltip; its
 // targets handed to damagestats.cpp for the clicks.
 void StatsPage(void* drawer,void* ctx,Text* text,float width,float height,float s,const dmgstat::Book& b,const dmgstat::View& v,
-               std::uint32_t missionMs,const StatsPointer& p,Line* lines,int* at) noexcept {
+               std::uint32_t missionMs,bool pad,const StatsPointer& p,Line* lines,int* at) noexcept {
     static StatsTargets tg;   // the draw thread's (too big for its stack)
     tg.n=0;
     MapUiBox(drawer,ctx,0.0f,0.0f,width,height,lines,*at);   // the whole screen: no click falls through to the map
@@ -453,7 +453,7 @@ void StatsPage(void* drawer,void* ctx,Text* text,float width,float height,float 
     Rect(drawer,ctx,f.panel.x0,f.panel.y0,f.panel.x1,f.panel.y1,kStatsPanel);
     Rect(drawer,ctx,f.panel.x0,f.panel.y0,f.panel.x1,f.panel.y0+2.0f*s,kStatsEdge);
     StatsTip tip{};
-    StatsHead(drawer,ctx,text,f,s,b,v,missionMs,p,tg,lines,at);
+    StatsHead(drawer,ctx,text,f,s,b,v,missionMs,pad,p,tg,lines,at);
     int rows=0;
     if(v.tab==dmgstat::Tab::timeline)StatsTimeline(drawer,ctx,text,f,s,b,v,p,tg,tip,lines,at);
     else rows=StatsBars(drawer,ctx,text,f,s,b,v,p,tg,tip,lines,at);

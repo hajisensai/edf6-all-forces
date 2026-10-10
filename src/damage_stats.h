@@ -16,13 +16,14 @@
 #include <cwchar>
 
 namespace dmgstat {
-// Who dealt or gave it: a side of the player's, or an enemy.
-enum class Side : std::uint8_t { me, myVehicle, squad, support, teammate, ally, enemy, count };
+// Who dealt or gave it: a side of the player's, an enemy, or the world (no attacker and no team: a mission script's
+// blast, the ground; the review of 2026-10-10: it was booked as an ally's friendly fire).
+enum class Side : std::uint8_t { me, myVehicle, squad, support, teammate, ally, enemy, world, count };
 constexpr int kSides=static_cast<int>(Side::count);
 // Who took it: the player's side by group, or an enemy.
 enum class Group : std::uint8_t { me, myVehicle, teammate, ally, vehicle, enemy, count };
 constexpr int kGroups=static_cast<int>(Group::count);
-inline bool Friendly(Side s) noexcept { return s!=Side::enemy; }
+inline bool Friendly(Side s) noexcept { return s<Side::enemy; }
 inline bool Friendly(Group g) noexcept { return g!=Group::enemy; }
 
 constexpr int kNameLen=40;
@@ -32,7 +33,7 @@ inline void SetName(Name& n,const wchar_t* text) noexcept { wcsncpy_s(n.text,tex
 // (compared whole, a long weapon name would open a new row with every hit).
 inline bool SameName(const Name& n,const wchar_t* text) noexcept { return std::wcsncmp(n.text,text ? text : L"",kNameLen-1)==0; }
 
-constexpr int kSources=96,kTargets=96;   // each table's last row is "other"
+constexpr int kSources=96,kTargets=96;   // each table's last two rows are "other": the friendly side's, the rest's
 constexpr int kBuckets=120;              // the timeline's columns
 constexpr std::uint32_t kFirstBucketMs=5000;   // 5 s each to start with (10 min); doubled as often as it fills
 
@@ -103,23 +104,25 @@ inline void Clear(Book& b) noexcept {
     b.time.spanMs=kFirstBucketMs;
 }
 
-// The row of `rows` (`n` in use of `most`) `match` finds, a new one (`fill` names it) while there is room, else the last
-// row, "other" (filled once by `other`).
-template<class Row,class Match,class Fill,class Other>
-int Slot(Row* rows,int& n,int most,Match&& match,Fill&& fill,Other&& other) noexcept {
-    for(int i=0;i<n && i<most-1;++i)if(match(rows[i]))return i;
-    if(n<most-1){fill(rows[n]);return n++;}
-    if(n==most-1)other(rows[n++]);
-    return most-1;
+// The row of `rows` (`n` in use of `most`) `match` finds, a new one (`fill` names it) while there is room, else one of
+// the last two, "other" (`others` fills both once): the friendly side's (most-2) when `friendly`, the rest's (most-1). One
+// "other" for both sides would put an enemy's overflow into the friendly tabs and a friend's into the enemies'.
+template<class Row,class Match,class Fill,class Others>
+int Slot(Row* rows,int& n,int most,bool friendly,Match&& match,Fill&& fill,Others&& others) noexcept {
+    for(int i=0;i<n && i<most-2;++i)if(match(rows[i]))return i;
+    if(n<most-2){fill(rows[n]);return n++;}
+    if(n<most){others(rows[most-2],rows[most-1]);n=most;}
+    return friendly ? most-2 : most-1;
 }
-// An "other" source counts with the whole friendly side, never with mine alone; an "other" target as an enemy.
 inline int SourceOf(Book& b,Side side,const wchar_t* name,const wchar_t* other) noexcept {
-    return Slot(b.source,b.sources,kSources,[&](const Source& s){return s.side==side && SameName(s.name,name);},
-                [&](Source& s){SetName(s.name,name);s.side=side;},[&](Source& s){SetName(s.name,other);s.side=Side::ally;});
+    return Slot(b.source,b.sources,kSources,Friendly(side),[&](const Source& s){return s.side==side && SameName(s.name,name);},
+                [&](Source& s){SetName(s.name,name);s.side=side;},
+                [&](Source& f,Source& e){SetName(f.name,other);f.side=Side::ally;SetName(e.name,other);e.side=Side::enemy;});
 }
 inline int TargetOf(Book& b,Group group,const wchar_t* name,const wchar_t* other) noexcept {
-    return Slot(b.target,b.targets,kTargets,[&](const Target& t){return t.group==group && SameName(t.name,name);},
-                [&](Target& t){SetName(t.name,name);t.group=group;},[&](Target& t){SetName(t.name,other);t.group=Group::enemy;});
+    return Slot(b.target,b.targets,kTargets,Friendly(group),[&](const Target& t){return t.group==group && SameName(t.name,name);},
+                [&](Target& t){SetName(t.name,name);t.group=group;},
+                [&](Target& f,Target& e){SetName(f.name,other);f.group=Group::ally;SetName(e.name,other);e.group=Group::enemy;});
 }
 
 // A source's timeline row follows the timeline's span: when it doubles, every row is halved with it.
@@ -279,6 +282,19 @@ inline void Click(View& v,int code,int rows,int visible) noexcept {
     const int most=rows>visible ? rows-visible : 0;
     if(what==Ui::scrollUp)v.scroll=v.scroll>0 ? v.scroll-1 : 0;
     if(what==Ui::scrollDown)v.scroll=v.scroll<most ? v.scroll+1 : most;
+}
+// A pad on the page (no pointer): LB / RB a tab before / after, Y the other scope.
+inline void StepTab(View& v,int step) noexcept {
+    v.tab=static_cast<Tab>(((static_cast<int>(v.tab)+step)%kTabs+kTabs)%kTabs);
+    v.pick=-1;v.scroll=0;
+}
+inline void FlipScope(View& v) noexcept {
+    v.scope=v.scope==Scope::mine ? Scope::everyone : Scope::mine;
+    v.pick=-1;v.scroll=0;
+}
+// The picked timeline column when the timeline's span doubled `halvings` times: the same span of the mission, still.
+inline void FollowSpan(View& v,int halvings) noexcept {
+    if(v.tab==Tab::timeline && v.pick>=0)v.pick>>=halvings;
 }
 // The wheel over the page: `notches` up (+) or down (-).
 inline void Scroll(View& v,int notches,int rows,int visible) noexcept {

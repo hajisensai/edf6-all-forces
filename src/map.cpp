@@ -540,10 +540,20 @@ void Steer(const unsigned char* human,float dt,bool front,const XINPUT_STATE* pa
     // The mark key pressed with the pointer on an enemy marks it (mapcmd.cpp), the map does not turn with it. Asked every
     // frame, in front or not: a release ends the press.
     const bool eat=MapCommandEats(front);
-    // The damage statistics' page over it: the map holds still, the wheel scrolls the page's bars.
+    // The damage statistics' page over it: the map holds still; the wheel scrolls the page's bars (a notch a row, a fine
+    // wheel's part-notches kept until they make one), the pad's D-pad too, LB / RB turn its tabs, Y its scope.
     if(DamageStatsShown()) {
-        const int delta=wheel.exchange(0);
-        if(delta)DamageStatsWheel(delta/WHEEL_DELTA ? delta/WHEEL_DELTA : (delta>0 ? 1 : -1));
+        static int part=0;
+        static WORD padWas=0;
+        part+=wheel.exchange(0);
+        const int notches=part/WHEEL_DELTA;
+        part-=notches*WHEEL_DELTA;
+        const WORD b=pad ? pad->Gamepad.wButtons : static_cast<WORD>(0),edge=static_cast<WORD>(b&~padWas);
+        padWas=b;
+        const int rows=notches+((edge&XINPUT_GAMEPAD_DPAD_UP) ? 1 : 0)-((edge&XINPUT_GAMEPAD_DPAD_DOWN) ? 1 : 0);
+        if(rows)DamageStatsWheel(rows);
+        const int tab=((edge&XINPUT_GAMEPAD_RIGHT_SHOULDER) ? 1 : 0)-((edge&XINPUT_GAMEPAD_LEFT_SHOULDER) ? 1 : 0);
+        if(tab || (edge&XINPUT_GAMEPAD_Y))DamageStatsPad(tab,(edge&XINPUT_GAMEPAD_Y)!=0);
         return;
     }
     if(front) {
@@ -619,6 +629,10 @@ bool Frame(unsigned char* human) noexcept {
     const bool centre=(k.centre && !game.was.centre) || (k.padCentre && !game.was.padCentre);
     // The stats key: the map opened on the damage statistics' page, the page shown over an open map, again: both shut.
     const bool stats=k.stats && !game.was.stats;
+    // Debug=1: which key's edge moved the map (keyboard M / I / Esc, the pad's map / close button), for input reports.
+    if(c.debug && (toggle || close || stats))
+        Log("MAP key edge: map %d, pad map %d, stats %d, esc %d, pad close %d (open %d, front %d, pad read %d)",k.map && !game.was.map,
+            k.padMap && !game.was.padMap,stats,k.esc && !game.was.esc,k.padClose && !game.was.padClose,game.open,front,pad);
     game.was=k;
     if(game.open && stats && !DamageStatsShown())DamageStatsShow(true);
     else if(game.open && (toggle || close || stats)) {

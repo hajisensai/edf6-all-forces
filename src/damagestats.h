@@ -22,5 +22,7 @@ bool DamageStatsShown() noexcept;
 // map.cpp: the wheel's notches while the page is shown (they scroll its bars, not the map's zoom); the page shown or not
 // (the stats key, the map closing).
 void DamageStatsWheel(int notches) noexcept;
+// map.cpp, a pad on the page (it has no pointer): LB / RB a tab before / after (`tabStep`), Y the other scope.
+void DamageStatsPad(int tabStep,bool flipScope) noexcept;
 void DamageStatsShow(bool shown) noexcept;
 }  // namespace crew

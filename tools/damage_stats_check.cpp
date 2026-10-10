@@ -118,12 +118,21 @@ void Overflow() {
         total+=1.0f+static_cast<float>(i);
     }
     Check(b->sources==kSources && b->targets==kTargets,"the tables full",b->sources,b->targets);
-    Check(SameName(b->source[kSources-1].name,L"other") && SameName(b->target[kTargets-1].name,L"other"),"their last rows: other");
+    Check(SameName(b->source[kSources-2].name,L"other") && SameName(b->target[kTargets-1].name,L"other"),"their last rows: other");
+    Check(b->source[kSources-2].side==Side::ally && b->source[kSources-1].side==Side::enemy,"a friendly other and an enemy other source");
+    Check(b->target[kTargets-2].group==Group::ally && b->target[kTargets-1].group==Group::enemy,"a friendly other and an enemy other target");
+    Check(b->source[kSources-2].hits>0 && b->source[kSources-1].hits==0,"my overflow in the friendly other only");
+    Check(b->target[kTargets-1].hits>0 && b->target[kTargets-2].hits==0,"enemies' overflow in the enemy other only");
     float sum=0.0f,targets=0.0f,cells=0.0f;
     for(int s=0;s<b->sources;++s){sum+=b->source[s].damage;for(int t=0;t<b->targets;++t)cells+=b->cell[s][t].damage;}
     for(int t=0;t<b->targets;++t)targets+=b->target[t].damage;
     Check(Near(sum,total) && Near(targets,total) && Near(cells,total),"nothing lost to a full table",sum,total);
-    Check(SameName(b->source[kSources-2].name,L"gun94"),"the last named row is a real weapon");
+    Check(SameName(b->source[kSources-3].name,L"gun93"),"the last named row is a real weapon");
+    // An enemy's overflow goes to the enemy other: the attacks tab sees it, the weapons tab does not.
+    Add(*b,Shot(Side::enemy,L"queen",Group::me,L"me",50.0f,false,200),L"other");
+    Check(Near(b->source[kSources-1].damage,50.0f) && Near(b->taken[static_cast<int>(Group::me)],50.0f),"an enemy's overflow");
+    Check(Near(Value(*b,Tab::weapons,Scope::everyone,kSources-1),0.0f) && Near(Value(*b,Tab::taken,Scope::mine,kSources-1),50.0f),
+          "...counted on the attacks tab, not the weapons tab");
     Add(*b,Shot(Side::me,L"gun3",Group::enemy,L"gun3",10.0f,false,100),L"other");
     Check(Near(b->source[3].damage,14.0f),"a known weapon after the table filled",b->source[3].damage);
 }
@@ -142,6 +151,20 @@ void LongNames() {
     std::wstring other(gun,kNameLen-1);other+=L" Mk2";
     Add(*b,Shot(Side::me,other.c_str(),Group::enemy,ant,10.0f,false,9),L"other");
     Check(b->sources==1,"names alike in the kept part share a row",b->sources);
+}
+
+void World() {
+    // No attacker and no team (a mission script's blast): the world, never anyone's friendly fire; on us it is damage taken.
+    auto b=std::make_unique<Book>();
+    Clear(*b);
+    Add(*b,Shot(Side::world,L"world",Group::me,L"me",300.0f,false,100),L"other");
+    Add(*b,Shot(Side::world,L"world",Group::enemy,L"ant",200.0f,true,200),L"other");
+    float ff=0.0f;
+    for(const float f:b->friendlyFire)ff+=f;
+    Check(Near(ff,0.0f) && Near(b->taken[static_cast<int>(Group::me)],300.0f),"the world's damage on us: taken, no friendly fire",ff);
+    Check(Near(b->dealt[static_cast<int>(Side::ally)],0.0f) && b->kills[static_cast<int>(Side::ally)]==0,"...and no ally's kill on an enemy");
+    Check(!Friendly(Side::world) && !InScope(Scope::everyone,Side::world),"the world is no friendly side");
+    Check(Near(Value(*b,Tab::taken,Scope::mine,0),300.0f),"the attacks tab shows it");
 }
 
 void LongMission() {
@@ -191,6 +214,26 @@ void Clicks() {
     Check(v.open && v.tab==Tab::taken && v.scope==Scope::everyone,"opened where it was left");
     Click(v,UiCode(Ui::close,0),20,8);
     Check(!v.open,"closed");
+    // The pad: LB / RB round the tabs, Y the scope; a step leaves the breakdown and the scroll.
+    View p;
+    p.pick=3;p.scroll=2;
+    StepTab(p,-1);
+    Check(p.tab==Tab::timeline && p.pick==-1 && p.scroll==0,"LB from the first tab: the last");
+    StepTab(p,1);StepTab(p,1);
+    Check(p.tab==Tab::enemies,"RB twice: the second tab");
+    FlipScope(p);
+    Check(p.scope==Scope::everyone,"Y: everyone");
+    FlipScope(p);
+    Check(p.scope==Scope::mine,"Y again: mine");
+    // The timeline's span doubled: the picked column follows the same time.
+    View t;
+    t.tab=Tab::timeline;t.pick=37;
+    FollowSpan(t,1);
+    Check(t.pick==18,"the picked column after a doubling",t.pick);
+    FollowSpan(t,2);
+    Check(t.pick==4,"...after two more",t.pick);
+    View w;w.pick=5;FollowSpan(w,1);
+    Check(w.pick==5,"a bar tab's pick is no column");
 }
 
 void Numbers() {
@@ -244,6 +287,7 @@ int main() {
     Heals();
     Overflow();
     LongNames();
+    World();
     LongMission();
     Ranking();
     Clicks();
