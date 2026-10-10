@@ -645,21 +645,26 @@ def stack(game_root: str) -> dict[str, bytes]:
         for at, row in puts:
             _put(text, at, row)
         out[rel] = dsgo.compact(s.texts[rel])
-    verify(game_root, out, plan)
+    # What each row of ours must hold: a call and an EDF5 weapon built or kept their own id, one waiting for EDF5 its
+    # placeholder's.
+    want = {c.id: c.id for c in CALLS}
+    want.update({p.id: p.id if p.id in ports or p.id in kept else e5w.retired_id(p.id) for p in e5w.PORTS})
+    verify(game_root, out, plan, want)
     return out
 
 
-def verify(game_root: str, out: dict[str, bytes], plan: Plan) -> None:
+def verify(game_root: str, out: dict[str, bytes], plan: Plan, want: dict[str, str]) -> None:
     """Before anything is written: every row not ours unchanged at its index, each of ours where plan_rows put
-    it, the table grown by exactly the rows appended, the texts as long as the table."""
+    it and holding the row id stack meant it to (`want`: its own, or a placeholder's), the table grown by exactly the
+    rows appended, the texts as long as the table."""
     before = load_shared(game_root)
     ids = before.ids
     after = row_ids(out[TABLE])
     if len(after) != len(ids) + len(plan.appended):
         raise ValueError(f'the table grew by {len(after) - len(ids)} rows, {len(plan.appended)} were appended')
     for cid, i in plan.at.items():
-        if after[i] not in (cid, retired_id(cid)):
-            raise ValueError(f'row {i} is {after[i]}, expected {cid}')
+        if after[i] != want[cid]:
+            raise ValueError(f'row {i} is {after[i]}, expected {want[cid]}')
     ours = set(plan.at.values())
     for rel in SHARED:
         old = [dsgo.to_py(r) for r in (before.rows if rel == TABLE else before.text_rows(rel))]

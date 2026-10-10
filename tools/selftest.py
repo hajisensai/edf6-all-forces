@@ -5402,6 +5402,15 @@ def _e5w_games(test: str) -> tuple[str, str] | None:
     return None
 
 
+@contextlib.contextmanager
+def _stock_only_mods() -> Iterator[None]:
+    """call_weapons reading the real game's archives but an empty Mods: the real-data tests start from the stock table
+    whatever this machine has installed (an install of ours or another tool's would change what stack keeps)."""
+    with tempfile.TemporaryDirectory(prefix='edf6vc-stock-mods-') as clean, \
+            patched(cw, _mods=lambda game_root, *rel: os.path.join(clean, *[x for r in rel for x in r.split('/')])):
+        yield
+
+
 # The 'edf6' weapons' fields the developers changed beyond converting them (measured 2026-10-10): balance, and the MAB
 # of the gunship requests. The two thrown Wing Diver weapons became Weapon_Subs with new physics, which edf5port does
 # not do (Unsupported).
@@ -5463,7 +5472,8 @@ def edf5_weapons_stack_real() -> None:
     games = _e5w_games('edf5_weapons_stack_real')
     if games is None:
         return
-    out = cw.stack(games[0])
+    with _stock_only_mods():
+        out = cw.stack(games[0])
     rows = {r.items[0]: r for r in dsgo.parse(out[cw.TABLE]).root.get('table').items}
     for p in e5w.PORTS:
         row = rows[p.id]
@@ -5481,7 +5491,7 @@ def edf5_weapons_stack_real() -> None:
             if isinstance(v, dsgo.Node) and all(isinstance(x, float) for x in v.items):
                 assert len(v.items) != 6, f'{p.id} {k}: a star curve still 6 long'
     with_edf5 = cw.row_ids(out[cw.TABLE])
-    with patched(e5w, edf5_root=lambda game_root: None):
+    with _stock_only_mods(), patched(e5w, edf5_root=lambda game_root: None):
         bare = cw.stack(games[0])
     without = cw.row_ids(bare[cw.TABLE])
     assert len(without) == len(with_edf5)
@@ -5489,6 +5499,8 @@ def edf5_weapons_stack_real() -> None:
         i = with_edf5.index(p.id)
         assert without[i] == (p.id if p.source == 'edf6' else e5w.retired_id(p.id)), p.id
         assert (e5w.sgo_file(p) in bare) == (p.source == 'edf6'), p.id
+        assert dsgo.parse(bare[cw.TABLE]).root.get('table').items[i].items[5] == e5w.ACQUIRE, \
+            f'{p.id}: a placeholder obtained otherwise than the weapon (its template a starting or DLC weapon)'
     pending = next(p for p in e5w.PORTS if p.source == 'edf5')
     text = dsgo.parse(bare['WEAPON/WEAPONTEXT.EN.SGO']).root.get('text_table').items[with_edf5.index(pending.id)]
     assert text.items[0] == pending.text['EN'][0] + e5w.PENDING_NOTE['EN'][0]
@@ -5519,7 +5531,10 @@ def edf5_weapons_retire_and_uninstall() -> None:
 
     def table(key: str, rows: list[str]) -> bytes:
         def row(i: str) -> dsgo.Node:
-            return dsgo.Node([i, f'app:/weapon/{i}.sgo'] if key == 'table' else [f'name {i}', f'about {i}'])
+            # the 9 columns; every template a new save's starting weapon (acquire 1), as AssultRifle01 is
+            acquire = 1.0 if i in templates else 0.0
+            return dsgo.Node([i, f'app:/weapon/{i}.sgo', 0.0, 1.0, 0.0, acquire, dsgo.Node([]), 1.0, 0.0]
+                             if key == 'table' else [f'name {i}', f'about {i}'])
         return dsgo.compact(dsgo.Document(dsgo.Node([dsgo.Node([row(i) for i in rows])], {0: key}), []))
 
     with tempfile.TemporaryDirectory(prefix='edf6vc-e5w-') as game, \
@@ -5535,7 +5550,8 @@ def edf5_weapons_retire_and_uninstall() -> None:
         texts = dsgo.parse(out['WEAPON/WEAPONTEXT.EN.SGO']).root.get('text_table').items
         for p in ports:
             i = ids.index(p.id)
-            assert rows[i].items == [e5w.retired_id(p.id), f'app:/weapon/{p.template}.sgo'], p.id
+            assert rows[i].items[:2] == [e5w.retired_id(p.id), f'app:/weapon/{p.template}.sgo'], p.id
+            assert rows[i].items[5] == e5w.ACQUIRE, f'{p.id}: the placeholder took its template\'s acquire'
             assert texts[i].items[0] == p.text['EN'][0] + calls.RETIRED_NOTE['EN'][0], p.id
         assert [r.items[0] for r in rows[:len(STOCK)]] == STOCK
         _, deleted = cw.retire(game, True)
