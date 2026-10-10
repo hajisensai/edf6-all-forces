@@ -5,6 +5,7 @@
 #include "../src/support_entry.h"
 #include "../src/support_protocol.h"
 #include "../src/version_notice.h"
+#include "../src/helipad.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -34,6 +35,9 @@ void Cancels() {
     Check(PickupCancel(r)==Cancel::none,"aboard this heli (no longer on foot, out of the water): not a cancel");
     r.dead=true;
     Check(PickupCancel(r)==Cancel::dead,"dead aboard: called off");
+    Check(CooldownLeft(0,5000,30000)==0,"no rescue made yet: no cooldown");
+    Check(CooldownLeft(1000,11000,30000)==20000,"20 s left of 30");
+    Check(CooldownLeft(1000,31000,30000)==0 && CooldownLeft(1000,2000,0)==0,"over, or no cooldown set");
     for(Cancel c:{Cancel::gone,Cancel::dead,Cancel::otherRescue,Cancel::otherVehicle,Cancel::ashore})
         Check(std::strlen(CancelText(c))>10 && std::strcmp(CancelText(c),CancelText(Cancel::none))!=0,"every cancel has its own log words");
 }
@@ -74,16 +78,17 @@ void Versions() {
     using crew::support_net::kCapabilities;using crew::support_net::kCapSoldierVariants;using crew::support_net::kCapAirborneAir;
     using crew::support_net::kCapTransports;using crew::support_net::kCapLoadout;using crew::support_net::kExtVariants;
     using crew::support_net::kExtSeaRescue;using crew::support_net::kExtensions;using crew::support_net::kFeatures;
-    using crew::support_net::Features;using crew::support_net::FeatureExt;
-    // Feature words (support_protocol.h Features): the capability bits low, the extension bits above them.
-    const std::uint32_t rescueBit=FeatureExt(kExtSeaRescue);
+    using crew::support_net::Features;using crew::support_net::FeatureExt;using crew::support_net::kExtRescueChannel;
+    // Feature words (support_protocol.h Features): the capability bits low, the extension bits above them. The rescue and
+    // its own channel (2026-10-10) came after #100's build, the newest that announces nothing.
+    const std::uint32_t rescueBit=FeatureExt(kExtSeaRescue|kExtRescueChannel);
     State s;s.online=true;s.mine=kFeatures;s.silentHost=Features(kCapabilities,kExtVariants);
     Check(Compare(s).kind==Kind::none,"a guest before the welcome: nothing said");
     s.hostKnown=true;s.hostCaps=kFeatures;
     Check(Compare(s).kind==Kind::none,"the same build: nothing said");
     s.hostCaps=0;
     Notice n=Compare(s);
-    Check(n.kind==Kind::hostOlder && n.missing==rescueBit,"a host that announces nothing (#100's build): older, the sea rescue named");
+    Check(n.kind==Kind::hostOlder && n.missing==rescueBit,"a host that announces nothing (#100's build): older, the sea rescue and its channel named");
     s.hostCaps=Features(kCapSoldierVariants,0);n=Compare(s);
     Check(n.kind==Kind::hostOlder && n.missing==(kCapAirborneAir|kCapTransports|kCapLoadout|FeatureExt(kExtVariants)|rescueBit),
           "an older host: what it lacks named, capabilities and extensions alike");
@@ -109,8 +114,46 @@ void Versions() {
 }
 }  // namespace
 
+// Pads (helipad.h): a helicopter resting on ground kStillMs is one; moving, flying or over water is not; kSame apart.
+void PadChecks() {
+    using namespace crew::helipad;
+    crew::helipad::Pads p{};
+    int a=0,b=0;const void* heli=&a;const void* other=&b;
+    const float ground[3]={100,10,50};
+    unsigned long long ms=1000;
+    Check(Due(p,heli,ms) && !Observe(p,heli,ground,true,ms),"a first sample on the ground: resting starts, no pad yet");
+    ms+=kSampleMs;Check(!Due(p,heli,ms-1) && !Observe(p,heli,ground,true,ms),"still resting");
+    ms=1000+kStillMs-1;Check(!Observe(p,heli,ground,true,ms) && p.count==0,"not long enough");
+    ms+=1;Check(Observe(p,heli,ground,true,ms) && p.count==1 && p.at[0][0]==100,"rested kStillMs: a pad where it stood");
+    Check(Occupied(p,0,ms),"it still stands there: occupied");
+    const float away[3]={400,10,50};
+    ms+=kSampleMs;Observe(p,heli,away,false,ms);
+    Check(!Occupied(p,0,ms),"it took off: the pad is free");
+    ms+=kSampleMs;Observe(p,heli,away,true,ms);ms+=kStillMs+kSampleMs;Observe(p,heli,away,true,ms);
+    Check(p.count==2,"resting elsewhere: a second pad");
+    const float near[3]={110,10,55};
+    ms+=kSampleMs;Observe(p,other,near,true,ms);ms+=kStillMs+kSampleMs;Observe(p,other,near,true,ms);
+    Check(p.count==2,"within kSame of a pad: no new one");
+    const float drifting[3]={700,10,50};
+    for(int i=0;i<20;++i){ms+=kSampleMs;const float at[3]={drifting[0]+i*1.0f,10,50};Observe(p,other,at,true,ms);}
+    Check(p.count==2,"moving on the ground (taxiing, sliding): never a pad");
+    for(int i=0;i<20;++i){ms+=kSampleMs;Observe(p,other,drifting,false,ms);}
+    Check(p.count==2,"hovering (not on the ground) or over water: never a pad");
+    ms+=10*kSampleMs;
+    Check(!Occupied(p,1,ms),"a helicopter no longer sampled (deleted) occupies nothing");
+    // The deck and the pads are one set of takeoff candidates: the nearest that climbs out wins.
+    using namespace crew::support;
+    crew::PlayArea area{};area.lo[0]=area.lo[1]=-1500;area.hi[0]=area.hi[1]=1500;area.ground=true;
+    const float swimmer[3]={0,-3,0};
+    const float spots[3][3]={{900,193,0},{-300,12,0},{200,40,100}};
+    Route route{};
+    const auto open=[](const float*,const float*) noexcept {return true;};
+    Check(TakeoffRoute(area,swimmer,spots,3,open,route)==Refusal::none && route.from[0]==200,"the nearest candidate, pad or deck alike");
+}
+
 int main() {
     Cancels();
+    PadChecks();
     Takeoff();
     Versions();
     std::printf("rescue_logic_test: %d checks passed\n",checks);

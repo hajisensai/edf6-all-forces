@@ -38,6 +38,8 @@ struct Hooks {
     // This machine's hello extension (support_protocol.h kExtVariants) and the Bloom filter of the variant files it has
     // preloaded this mission (support_loadout.h BloomAdd); nullptr: none (an older build's hello: 0 and empty).
     void (*variants)(std::uint32_t* ext,unsigned char* bloom32) noexcept=nullptr;
+    // Whether `catalog` is the sea rescue (support_dispatch.cpp IsRescue): its own channel and cooldown on the host.
+    bool (*ownChannel)(std::uint32_t) noexcept=nullptr;
 };
 bool ValidPlan(const Plan& plan,bool requireIds=true) noexcept;
 } // namespace support_net

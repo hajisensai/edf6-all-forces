@@ -96,15 +96,25 @@ def main() -> int:
     checks += 1
     if 'SwimmerNear' in heli or 'kSwimmerClaim' in heli or 'r->swimmer=requester' not in handover:
         fail('src/heli.cpp: the rescue heli looks for the nearest swimmer instead of its requester')
+    session = body(code_only(read(root, 'src/support_protocol.cpp')), 'void Session::HostRequest(')
+    checks += 1
+    if 'ownChannel' not in session or 'PeersHaveExtension(kExtRescueChannel)' not in session or 'rescueAt_[peer]' not in session:
+        fail('src/support_protocol.cpp HostRequest: the rescue has no channel or cooldown of its own (or ignores an older peer)')
+    checks += 1
+    if 'CooldownLeft(' not in body(heli, 'void StartRescue('):
+        fail('src/heli.cpp StartRescue: this player rescue cooldown is not held')
     protocol = code_only(read(root, 'src/support_protocol.h'))
     checks += 1
-    if not re.search(r'kExtensions=[^;]*kExtSeaRescue', protocol) or 'kCapSeaRescue' in protocol:
+    if not re.search(r'kExtensions=[^;]*kExtSeaRescue[^;]*kExtRescueChannel', protocol) or 'kCapSeaRescue' in protocol or \
+            'kCapRescueChannel' in protocol:
         fail('src/support_protocol.h: the sea rescue is not an extension bit of this build (kExtSeaRescue in kExtensions), '
              'or a capability bit claims it (the capability bits are #100\'s: kCapTransports 4, kCapLoadout 8)')
     hello = body(code_only(read(root, 'src/support_protocol.cpp')), 'void Session::Tick(')
     checks += 1
-    if not before(hello, 'backend_.hooks.variants(', 'm.unit.resourceId|=kExtSeaRescue;'):
-        fail('src/support_protocol.cpp Tick: the hello does not announce kExtSeaRescue after the variants hook wrote its word')
+    if not before(hello, 'backend_.hooks.variants(', 'm.unit.resourceId|=kExtBuilt;') or \
+            not re.search(r'kExtBuilt=kExtSeaRescue\|kExtRescueChannel;', protocol):
+        fail('src/support_protocol.cpp Tick: the hello does not announce the rescue\'s bits (kExtBuilt) after the variants '
+             'hook wrote its word')
     net = code_only(read(root, 'src/support_net.cpp'))
     checks += 1
     if 'PeersHaveExtension(support_net::kExtSeaRescue)' not in body(net, 'bool SupportPeersAcceptRescue('):

@@ -51,6 +51,7 @@
 #include "support_net.h"
 #include "hudtext.h"
 #include "rescue_logic.h"
+#include "helipad.h"
 #include <cmath>
 #include <cstdarg>
 
@@ -1617,6 +1618,13 @@ struct RescueCall {
 };
 RescueCall call{};
 ULONGLONG rescueFrame=0;   // RescueTick: at most once a frame
+// Where a helicopter stood this mission (helipad.h): the rescue's takeoff points besides the carrier's deck.
+helipad::Pads pads{};
+
+// This machine's player's rescue cooldown (Cfg().seaRescueCooldownSec, 2026-10-10, the user: 「救援应该有单独的cd」):
+// from the last heli made for them; its own, never the map support's. The host holds every requester to its own value.
+ULONGLONG rescueMadeAt=0;
+bool cooldownSaid=false;
 
 // The rescue banner (draw thread reads, game thread writes): what became of this machine's rescue, a moment.
 SRWLOCK rescueCueLock=SRWLOCK_INIT;
@@ -2846,11 +2854,40 @@ void Replay(unsigned char* v) noexcept {
 }
 }  // namespace
 
+namespace {
+// A sample of a stock-bodied helicopter for the pads (helipad.h): resting on solid ground (GroundClearance within
+// kGrounded; water is no pad), never a rescue heli itself.
+void NoteParked(unsigned char* v) noexcept {
+    const ULONGLONG ms=GameMs();
+    if(!helipad::Due(pads,v,ms))return;
+    for(const auto& r:rescues)if(r.phase!=RescuePhase::none && r.ref.Is(v))return;
+    if(call.phase==CallPhase::assigned && call.ref.Is(v))return;
+    const float* p=reinterpret_cast<const float*>(v+kPosition);
+    const float clear=GroundClearance(p);
+    float surface=kSeaY;
+    const bool wet=SeaProbe(p[0],p[2],&surface)==Sea::water && surface>p[1]-helipad::kGrounded;
+    const bool grounded=clear!=kNoGround && clear>-1.0f && clear<helipad::kGrounded && !wet;
+    if(helipad::Observe(pads,v,p,grounded,ms))
+        Log("RESCUE takeoff point %d: helicopter %p stood at (%.0f,%.1f,%.0f)",pads.count-1,v,p[0],p[1],p[2]);
+}
+}  // namespace
+
+int RescueTakeoffPads(float (*out)[3],int most) noexcept {
+    const ULONGLONG ms=GameMs();
+    int n=0;
+    for(int i=0;i<pads.count && n<most;++i) {
+        if(helipad::Occupied(pads,i,ms))continue;   // a helicopter still stands there
+        std::memcpy(out[n++],pads.at[i],12);
+    }
+    return n;
+}
+
 void HeliFrame(unsigned char* vehicle) noexcept {
     for(auto& r:rescues)if(r.phase!=RescuePhase::none && r.ref.Is(vehicle))r.seenFrame=GameFrame();   // RescueHeliAlive
     if(call.phase==CallPhase::assigned && call.ref.Is(vehicle))call.seenFrame=GameFrame();   // a peer's copy too (Replay)
     if(!profileOk || vehicle[kDead])return;
     const bool stockHeli=!IsJet(vehicle) && !IsSub(vehicle) && !IsPlayerJet(vehicle) && !IsSazabi(vehicle) && TypeOf(vehicle);
+    if(stockHeli)NoteParked(vehicle);
     // NPC gunners have their own firing authority. A remote player pilot must not suppress host/local NPC door
     // gunners; the native weapon messages replicate their shots. NPC pilots already call DoorGun through Fly.
     if(stockHeli && SeatCount(vehicle)>0 && !NpcDriver(vehicle))CrewDoorGuns(vehicle);
@@ -3312,6 +3349,17 @@ void StartRescue(unsigned char* human,ULONGLONG ms) noexcept {
         call.warned=true;call.retryAt=ms+kRetryMs;
         return;
     }
+    const ULONGLONG cooldown=static_cast<ULONGLONG>(Cfg().seaRescueCooldownSec)*1000;
+    if(const ULONGLONG wait=rescue::CooldownLeft(rescueMadeAt,ms,cooldown)) {
+        if(!cooldownSaid) {
+            const int left=static_cast<int>((wait+999)/1000);
+            Log("RESCUE cooldown: the next rescue in %ds (SeaRescueCooldownSec=%lu)",left,Cfg().seaRescueCooldownSec);
+            RescueBanner(true,hudtext::Tr(hudtext::Tx::rescueCooldown),left);
+            cooldownSaid=true;
+        }
+        return;
+    }
+    cooldownSaid=false;
     const float at[3]={p[0],p[1],p[2]};
     const ULONGLONG wet=ms-call.wetSince;
     call=RescueCall{};
@@ -3406,6 +3454,7 @@ void RescueHeliDeployed(unsigned char* vehicle,const float* target,bool flown,co
     }
     if(call.phase!=CallPhase::requested || std::memcmp(call.at,target,12)!=0)return;   // another machine's rescue
     call.phase=CallPhase::assigned;call.vehicle=vehicle;call.ref=ObjRef::Of(vehicle);call.madeFrame=frame;call.flown=flown;
+    rescueMadeAt=GameMs();   // this player's rescue cooldown starts
     call.team=At<std::int32_t>(vehicle,kTeam);
     Log("RESCUE heli %p made for this machine's player (%s), %.0f s after the request",vehicle,flown ? "flown here" : "a peer's copy",
         static_cast<float>(GameMs()-call.requestedAt)*0.001f);
@@ -3632,7 +3681,7 @@ void ResetHelis() noexcept {
     fullLoggedAt=0;
     ResetTrack();
     for(auto& r:rescues)r=Rescue{};
-    call=RescueCall{};rescueFrame=0;
+    call=RescueCall{};rescueFrame=0;rescueMadeAt=0;cooldownSaid=false;pads=helipad::Pads{};
     AcquireSRWLockExclusive(&rescueCueLock);rescueCueAt=0;ReleaseSRWLockExclusive(&rescueCueLock);
 }
 }  // namespace crew

@@ -22,6 +22,12 @@ constexpr Cancel PickupCancel(const Requester& r) noexcept {
     if(!r.onFoot)return r.inOtherRescue ? Cancel::otherRescue : Cancel::otherVehicle;
     return r.dry ? Cancel::ashore : Cancel::none;
 }
+// This player's rescue cooldown (SeaRescueCooldownSec; 2026-10-10, the user: 「救援应该有单独的cd」): how long until the
+// next rescue may be asked for, from the last heli made for them (`madeAt` 0: none yet). Its own: the map's support
+// cooldown is not in it.
+constexpr unsigned long long CooldownLeft(unsigned long long madeAt,unsigned long long now,unsigned long long cooldown) noexcept {
+    return madeAt && now-madeAt<cooldown ? cooldown-(now-madeAt) : 0;
+}
 // The log's words (ASCII: the log is not wide).
 constexpr const char* CancelText(Cancel c) noexcept {
     switch(c) {

@@ -177,6 +177,7 @@ void Features(std::uint32_t caps,bool command,wchar_t* out,std::size_t size) noe
     using hudtext::Tr;using hudtext::Tx;using support_net::FeatureExt;
     out[0]=0;
     const struct { std::uint32_t bit; Tx text; } kNames[]={{FeatureExt(support_net::kExtSeaRescue),Tx::versionFeatRescue},
+        {FeatureExt(support_net::kExtRescueChannel),Tx::versionFeatRescueChannel},
         {support_net::kCapAirborneAir,Tx::versionFeatAir},{support_net::kCapTransports,Tx::versionFeatTransport},
         {support_net::kCapLoadout,Tx::versionFeatCompose},{FeatureExt(support_net::kExtVariants),Tx::versionFeatVariants},
         {support_net::kCapSoldierVariants,Tx::versionFeatLoadout}};
@@ -184,6 +185,8 @@ void Features(std::uint32_t caps,bool command,wchar_t* out,std::size_t size) noe
         const std::size_t used=std::wcslen(out);
         _snwprintf_s(out+used,size-used,_TRUNCATE,L"%ls%ls",used ? Tr(Tx::versionListSep) : L"",word);
     };
+    // Without the rescue at all, its channel goes unsaid (the line stays within the HUD's one line).
+    if(caps&FeatureExt(support_net::kExtSeaRescue))caps&=~FeatureExt(support_net::kExtRescueChannel);
     for(const auto& n:kNames)if(caps&n.bit)add(Tr(n.text));
     if(command)add(Tr(Tx::versionFeatCommand));
     if(!out[0])add(Tr(Tx::versionFeatSome));
@@ -280,6 +283,7 @@ void SupportNetTick() noexcept {
             if(support_net::Decode(bytes,count,message))session.Receive(peer,message,now);
         }
     }
+    session.SetRescueCooldown(static_cast<std::uint64_t>(Cfg().seaRescueCooldownSec)*1000);   // the host's own setting decides
     session.Tick(now);
     VersionTick(running);
     CommandContext(now);
