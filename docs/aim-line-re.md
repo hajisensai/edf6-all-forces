@@ -52,3 +52,14 @@
      `HeliSightFrame` 排在 `AimLines` 之后（`tools/selftest.py` `heli_sight_after_aim_lines` 检查顺序）。原版就没有红线的炮
      （`V_409HELI_GATLING01` 的 `custom_parameter` 为空）没有可替换的东西，不画瞄准具。
 7. 其余原版载具（2026-10-06 用户要求「把所有原版载具都改成咱们的显示……弹着点也加上」）：玩家坐的不是插件机体、也不是直升机的原版载具（`vhud.cpp` `PlayerStockOwnSight`），ini `StockVehicleHud=1`（默认）且 HUD 能画（`hud.cpp` `HudReady`）时，玩家座位的瞄准线同样按「隐藏」处理，HUD 改画该座位每件武器的弹着点（`docs/hud-re.md` §7）；`StockVehicleHud=0` 时下一帧按「恢复」写回。原版屏幕中心的准星没有改动。
+
+## 2026-10-10：真实机组的红线没被隐藏
+
+用户：「npc载具红线会显示出来」。
+
+- 根因：#88 起支援载具的乘员是当场入座的**真实士兵**，座位读出来是 `Rider::other`（`common/seat.cpp` `SeatRider` 只把 RideAi 的替身认作 `Rider::dummy`）。原来的 `Want` 只对 `Rider::dummy` 隐藏、对 `other` 一律「不动」，`npcDriven` 也只认驾驶座上的替身，所以真实 NPC 坐的炮位、以及真实 NPC 驾驶的载具上没人坐的炮位，红线都留着。
+- 修法：座位持有者改按 `npcai.cpp` `NpcInSeat` 判断——替身，或活着且不是任何一台机器玩家的士兵（与 `NpcDriver` 同一判据，`NpcDriver` 改为 `NpcInSeat` 取 0 号座位）。纯决策移到 `src/aim_line_want.h`（`Holder` → `LineWant`），`crew.cpp` `LineHolder` 做座位到持有者的映射，`npcDriven` 用 `NpcDriver`。
+- 没用 `NpcCanYieldSeat`：它还要求本机有联机权限、且不是任务脚本的小队，是「能不能挪动这个 NPC」的判据；画不画线是本机显示问题，联机客户端看到的房主 NPC、任务脚本里的真人乘员也要隐藏。
+- 远程玩家（`Rider::other` 且是某台机器的玩家）仍「不动」，与原来一致。
+- 测试：`tools/aim_line_want_check.cpp`（9 项，含「旧判据会把真实机组的线留着」以复现报告）；selftest `aim_lines_hide_real_crews` 钉住接线（变异：`npcDriven` 退回只认替身、`LineHolder` 退回只认替身，两处都变红）。
+- 未实测：没有进游戏看。

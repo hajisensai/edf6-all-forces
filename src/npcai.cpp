@@ -1996,12 +1996,16 @@ bool NpcReleaseVehicleCrew(unsigned char* v) noexcept {
     return released;
 }
 
-bool NpcDriver(const unsigned char* v) noexcept {
-    if(!v || SeatCount(v)==0)return false;
-    const auto* seat=SeatAt(const_cast<unsigned char*>(v),0);
-    if(SeatRider(seat)==Rider::dummy)return true; // original mission-script crew, never fabricated here
+bool NpcInSeat(const unsigned char* seat) noexcept {
+    if(!seat)return false;
+    const Rider who=SeatRider(seat);
+    if(who==Rider::dummy)return true; // original mission-script crew, never fabricated here
     const auto* h=At<const unsigned char*>(seat,kSeatRider);
-    return SeatRider(seat)==Rider::other && IsSoldierClass(h) && !IsAnyPlayer(h) && !h[kDead];
+    return who==Rider::other && IsSoldierClass(h) && !IsAnyPlayer(h) && !h[kDead];
+}
+
+bool NpcDriver(const unsigned char* v) noexcept {
+    return v && SeatCount(v)>0 && NpcInSeat(SeatAt(const_cast<unsigned char*>(v),0));
 }
 
 // An order to a squad (§6.2): guard / engage / release change what its members work round; follow / recruit make it the

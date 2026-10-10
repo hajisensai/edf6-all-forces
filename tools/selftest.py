@@ -2022,6 +2022,21 @@ def boarding_an_empty_aircraft_makes_its_entry() -> None:
     assert 'if(!e){j.active=false;return;}' in hover, 'HoverStep no longer needs the entry: revisit jet::Adopt'
 
 
+@test
+def aim_lines_hide_real_crews() -> None:
+    """An NPC's red aim lines are hidden whoever the NPC is (the user, 2026-10-10: "npc载具红线会显示出来"): the
+    support's crews are real soldiers (Rider::other), so AimLines reads a seat's holder through npcai.cpp NpcInSeat
+    (src/aim_line_want.h, tools/aim_line_want_check.cpp) and "an NPC drives it" through NpcDriver, not through
+    Rider::dummy alone."""
+    crew, npcai = src('src/crew.cpp'), src('src/npcai.cpp')
+    aim = crew.split('void AimLines(', 1)[1].split('\n}\n', 1)[0]
+    holder = crew.split('aimline::Holder LineHolder(', 1)[1].split('\n}\n', 1)[0]
+    assert 'aimline::Want(LineHolder(seat),' in aim and 'npcDriven=NpcDriver(vehicle)' in aim, 'AimLines: holder by NpcInSeat'
+    assert 'NpcInSeat(seat)' in holder and 'Rider::dummy' not in aim, 'LineHolder: an NPC is NpcInSeat, not the Dummy alone'
+    driver = npcai.split('bool NpcDriver(', 1)[1].split('\n}\n', 1)[0]
+    assert 'NpcInSeat(' in driver, 'NpcDriver is NpcInSeat of seat 0 (one test of "an NPC is there")'
+
+
 # The configuration modules src/plugin.cpp's LoadConfig hands EDF6VehicleCrew.ini to, and the call that does it.
 INI_MODULES = {'src/support_config.cpp': 'LoadSupportConfig(iniPath);'}
 

@@ -10,6 +10,9 @@ void ResetMissionCrew() noexcept {}
 bool InstallMissionCrewHooks(const unsigned*,std::size_t) noexcept { return true; }
 bool NpcCanYieldSeat(const unsigned char*) noexcept { return false; }
 bool NpcMoveSeat(unsigned char*,unsigned,int) noexcept { return false; }
+// The fixture seats Dummies only (no soldier class here): npcai.cpp's NpcInSeat / NpcDriver as they read a Dummy.
+bool NpcInSeat(const unsigned char* seat) noexcept { return seat && SeatRider(seat)==Rider::dummy; }
+bool NpcDriver(const unsigned char* v) noexcept { return v && SeatCount(v)>0 && NpcInSeat(SeatAt(const_cast<unsigned char*>(v),0)); }
 unsigned char* image=nullptr;PlayerFix player{};
 // Offline (online_authority.h): an NPC rider may be seated, through the vehicle's own RideAi (the fixture's vtable).
 bool OnlineMaySeatNpc(const void*) noexcept { return true; }
