@@ -4897,6 +4897,53 @@ def installer_recovery_regressions() -> None:
     run_checks()
 
 
+@test
+def installer_menu_8_opens_the_loadouts() -> None:
+    """The pre-battle loadouts (squads, each soldier's class and colour, each tank's and jet's pylons) have their own
+    main-menu entry (the user, 2026-10-10: “战斗外配置npc和挂载好像没做入口”: it was only menu 7's `l`, and
+    menu 7's line named neither): 8 goes straight to support_loadout.edit and saves the ini the way menu 7 does."""
+    import tempfile
+    sys.path.insert(0, os.path.join(ROOT, 'tools'))
+    import installer
+    import modfiles
+    import support_config
+    import support_loadout
+    with tempfile.TemporaryDirectory() as game:
+        plugins = os.path.join(game, 'Mods', 'Plugins')
+        os.makedirs(plugins)
+        ini = os.path.join(plugins, installer.PLUGIN + '.ini')
+        with open(os.path.join(ROOT, 'EDF6VehicleCrew.ini'), 'rb') as f:
+            original = f.read()
+        with open(ini, 'wb') as f:
+            f.write(original)
+        prompts: list[str] = []
+        opened: list[str] = []
+
+        def ask(prompt: str) -> str:
+            prompts.append(prompt)
+            return '8' if len(prompts) == 1 else ''
+
+        def loadouts(text: str, _ask) -> str:
+            opened.append('loadout')
+            return text + 'SupportPreset_SQUAD=ranger\n'
+
+        def menu_7(text: str, _ask) -> str:
+            opened.append('support')
+            return text
+
+        saved = (installer.ask, installer.pick_game, modfiles.game_running, support_loadout.edit, support_config.edit)
+        installer.ask, installer.pick_game, modfiles.game_running = ask, lambda: game, lambda: True
+        support_loadout.edit, support_config.edit = loadouts, menu_7
+        try:
+            assert installer.main([]) == 0
+        finally:
+            installer.ask, installer.pick_game, modfiles.game_running, support_loadout.edit, support_config.edit = saved
+        assert '8 战前配置' in prompts[0] and '挂载' in prompts[0], prompts[0]
+        assert opened == ['loadout'], opened
+        with open(ini, 'rb') as f:
+            assert f.read() == original + b'SupportPreset_SQUAD=ranger\n'
+
+
 # ---------------------------------------------------------------- the EDF5 campaign (tools/make_edf5_campaign.py)
 
 

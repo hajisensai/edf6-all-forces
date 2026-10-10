@@ -135,7 +135,7 @@ def edit(text: str, ask) -> str:
     while True:
         print(summary(text))
         pick = ask('输入编号切换开/关；w 改兵员武器；p 改大队三个小队武器；c 改飞机架数；'
-                   'l 编辑支援预设（编组 / 每人兵种 / 颜色 / 坦克弹种）；r 恢复默认；回车保存并返回：').strip().lower()
+                   'l 战前配置（编组 / 每人兵种 / 颜色 / 坦克与战机挂载，主菜单 8 直达）；r 恢复默认；回车保存并返回：').strip().lower()
         if not pick:
             return text
         try:
