@@ -102,14 +102,16 @@ const wchar_t kGatlingFile[]=L"EDF6VC_GUNSHIP_GATLING.SGO";
 // installed and preloaded this mission (PreloadShells). Spread 0: every round on the aim (the cannon).
 struct SideGunSpec {
     const wchar_t* sgo; const wchar_t* file; const char* name;
-    ULONGLONG gapMs; float reach,damage,speed,hit,spread;
+    ULONGLONG gapMs; float reach,damage,speed; gunmuzzle::Round round; float spread;
     bool ready;
 };
 SideGunSpec kSideGuns[]={
-    {kCannonSgo,kCannonFile,"cannon",kCannonGapMs,kCannonReach,kCannonDamage,kCannonSpeed,gunmuzzle::kCannonHit,0.0f,false},
-    {kGatlingSgo,kGatlingFile,"gatling",kGatlingGapMs,kGatlingReach,kGatlingDamage,kGatlingSpeed,gunmuzzle::kGatlingHit,kGatlingSpread,false},
+    {kCannonSgo,kCannonFile,"cannon",kCannonGapMs,kCannonReach,kCannonDamage,kCannonSpeed,gunmuzzle::kCannon,0.0f,false},
+    {kGatlingSgo,kGatlingFile,"gatling",kGatlingGapMs,kGatlingReach,kGatlingDamage,kGatlingSpeed,gunmuzzle::kGatling,kGatlingSpread,false},
 };
 static_assert(sizeof(kSideGuns)/sizeof(kSideGuns[0])==static_cast<std::size_t>(SideGun::count),"jet::SideGun's order");
+static_assert(kCannonSpeed==gunmuzzle::kCannon.speed*60.0f && kGatlingSpeed==gunmuzzle::kGatling.speed*60.0f,
+              "a side gun's lead speed is its round's (gunmuzzle.h)");
 SideGunSpec& GunOf(SideGun g) noexcept { return kSideGuns[static_cast<int>(g)]; }
 bool& cannonReady=kSideGuns[0].ready;
 // Impact charges (ImpactDamage): tools/make_jets.py's EDF6VC_IMPACT_*.SGO, the gunship round made a one-round,
@@ -311,10 +313,36 @@ float Tier(const unsigned char* v) noexcept {
     return kind && kind->durability>0.0f && hpMax>0.0f && std::isfinite(hpMax) ? hpMax/kind->durability : 1.0f;
 }
 
-// Where a gunship round of hit radius `hit` leaves gunship `v` for `at`: off its airframe on the line to `at`
-// (gunmuzzle.h: from the vehicle's origin, its belly's floor, the line climbed through the plane it circles banked).
-bool GunshipMuzzle(const unsigned char* v,const float* at,float hit,float* out) noexcept {
-    return gunmuzzle::Muzzle(reinterpret_cast<const float*>(v+kMatrix),gunmuzzle::kGunship,at,hit+gunmuzzle::kMargin,out);
+// Where gunship round `r` leaves gunship `v` (entry `j`) for `at`: off its airframe on the round's path relative to the
+// gunship in flight (gunmuzzle.h Launch: the box's centre out along that path to the box grown by the round's hit radius,
+// kMargin and the gunship's travel over a late round's frame). False when the aim is inside that.
+gunmuzzle::Motion MotionOf(const Jet& j) noexcept {
+    gunmuzzle::Motion mo{};
+    for(int c=0;c<3;++c){mo.vel[c]=j.m.vel[c]/60.0f;mo.spin[c]=j.m.omega[c]/60.0f;}   // m/s, rad/s -> a frame
+    return mo;
+}
+bool GunshipMuzzle(const Jet& j,const unsigned char* v,const float* at,const gunmuzzle::Round& r,float* out) noexcept {
+    return gunmuzzle::Launch(reinterpret_cast<const float*>(v+kMatrix),MotionOf(j),gunmuzzle::kGunship,r,at,r.hit+gunmuzzle::kMargin,out);
+}
+
+// Whether round `r` from `muzzle` at `aim` keeps its hit sphere off gunship `v`'s airframe as both fly (gunmuzzle.h Clears:
+// leaving at once or a frame late, falling as it does, the gunship flying and turning on). A round that would not is
+// not fired: `held: own airframe`, counted in `count` and logged whatever the debug switch, at most every kOwnHeldLogMs
+// (`at`), so a user's log shows whether a round was ever about to come at its own gunship (the user, 2026-10-10:
+// 「炮舰机的机炮有可能会打在自己身上，导致没打出去」).
+constexpr ULONGLONG kOwnHeldLogMs=2000;
+bool GunshipClears(const Jet& j,const unsigned char* v,const gunmuzzle::Round& r,const float* muzzle,const float* aim,const char* gun,
+                   const char* who,int& count,ULONGLONG& at) noexcept {
+    if(gunmuzzle::Clears(reinterpret_cast<const float*>(v+kMatrix),MotionOf(j),gunmuzzle::kGunship,r,muzzle,aim))return true;
+    ++count;
+    const ULONGLONG ms=GameMs();
+    if(!at || ms-at>=kOwnHeldLogMs) {
+        at=ms;
+        const float d[3]={aim[0]-muzzle[0],aim[1]-muzzle[1],aim[2]-muzzle[2]};
+        Log("JET v=%p gunship %s held: own airframe (%s): its round's path at %.0f m would cross the gunship flying at %.0f m/s "
+            "(%d held so far)",v,gun,who,Len(d),Len(j.m.vel),count);
+    }
+    return false;
 }
 
 // A round of side gun `gun` fired by `who` from the gunship (`pos`, its reach measured from there) at `at` (see
@@ -330,8 +358,9 @@ bool GunShot(Jet& j,SideGun g,const unsigned char* v,const float* pos,const floa
     if(Len(d)>gun.reach)return false;
     const float damage=gun.damage*Tier(v);
     float muzzle[3],aim[3];
-    if(!GunshipMuzzle(v,at,gun.hit,muzzle))return false;
+    if(!GunshipMuzzle(j,v,at,gun.round,muzzle))return false;
     gunmuzzle::Scatter(muzzle,at,gun.spread,c.shots,aim);
+    if(!GunshipClears(j,v,gun.round,muzzle,aim,gun.name,who,c.ownHeld,c.ownHeldAt))return false;
     c.at=ms;
     if(!Shell(gun.sgo,gun.ready,v,muzzle,aim,damage,true,gun.name,by))return false;
     if(Cfg().debug && c.shots%10==0)
@@ -361,7 +390,7 @@ bool GunAtTarget(Jet& j,SideGun g,const unsigned char* v,const float* pos,ULONGL
     if(Len(to)>gun.reach)return false;
     c.lookAt=ms;
     float muzzle[3],hit[3];
-    if(!GunshipMuzzle(v,at,gun.hit,muzzle))return false;   // no clear line to a target inside the airframe
+    if(!GunshipMuzzle(j,v,at,gun.round,muzzle))return false;   // no clear line to a target inside the airframe
     if(MapRay(muzzle,at,hit)>=0.0f) {
         const float gap[3]={hit[0]-at[0],hit[1]-at[1],hit[2]-at[2]};
         if(Len(gap)>kGunSightSlack) {
@@ -452,7 +481,8 @@ void GunshipFire(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms) no
     const float d[3]={j.t.aim[0]-pos[0],j.t.aim[1]-pos[1],j.t.aim[2]-pos[2]};
     if(Len(d)>kGunshipReach)return;
     float muzzle[3];
-    if(!GunshipMuzzle(v,j.t.aim,gunmuzzle::kShellHit,muzzle))return;
+    if(!GunshipMuzzle(j,v,j.t.aim,gunmuzzle::kShell,muzzle))return;
+    if(!GunshipClears(j,v,gunmuzzle::kShell,muzzle,j.t.aim,"shell","its NPC crew",j.shells.shellHeld,j.shells.shellHeldAt))return;
     j.shells.gunAt=ms;
     if(!Shell(kGunshipSgo,gunshipReady,v,muzzle,j.t.aim,kGunshipDamage*Tier(v),false,"gunship shell"))return;
     ++j.shells.gunShots;
@@ -498,7 +528,8 @@ bool CrewFire(Jet& j,unsigned char* v,const float* at,ULONGLONG ms,const char* w
     const float d[3]={at[0]-pos[0],at[1]-pos[1],at[2]-pos[2]};
     if(Len(d)>kGunshipReach)return false;
     float muzzle[3];
-    if(!GunshipMuzzle(v,at,gunmuzzle::kShellHit,muzzle))return false;
+    if(!GunshipMuzzle(j,v,at,gunmuzzle::kShell,muzzle))return false;
+    if(!GunshipClears(j,v,gunmuzzle::kShell,muzzle,at,"shell",who,j.shells.shellHeld,j.shells.shellHeldAt))return false;
     j.shells.gunAt=ms;
     if(!Shell(kGunshipSgo,gunshipReady,v,muzzle,at,kGunshipDamage*Tier(v),false,"gunship shell",by))return false;
     ++j.shells.gunShots;

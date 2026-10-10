@@ -67,6 +67,11 @@ EDF.dll x64，TimeDateStamp `0x678CCB46`。下文地址都是 RVA；可信度 H/
 | 7 | body 有 key 2 属性时，`0x22E800(*prop, core+0xA00)` 为假 → 跳过。只有该属性的 team（`prop+8`）与子弹 team 为敌对（rel==2）或任一方为 -1 才能命中 | | M/H |
 | 8 | 调用基类 `0x109DA0(this, id)`：比较 `this+0x30` 单个忽略对象、可选阵营检查、compound 路径，最后 `0x11A9EC0(this, id)` 加入列表 | | H |
 
+补充（2026-10-10，静态，炮舰机自伤排查）：第 1 条里置 0x80 的两处——`0x236662` 在类型 0 的移动 `0x2364D0` 中，只走
+「`core+0x6D8` 非空且 `core+0xB04` ∉ {0, 3}」的分支（子弹跟着 `core+0x6C8` 所指 body 的 `+0x44` 号刚体移动）；`0x2361E4` 在类型 2 的移动
+`0x235FA0` 中，条件是 `*(core+0xBE8)+0x28` 字节或之前算出的 `sil` 非 0。IFC 发出的弹会不会走到这两处没有确认（L）。插件因此不再依赖
+这一位：喷气机自己的弹由 `src/ownround.h`（`jet_hooks.cpp` 的 addBody 钩子）按对象指针和它自己的刚体编号一律排除。
+
 ### 3.3 子弹参数 → core 字段
 
 `0x22E9C0` 调用 `0x231CC0(core, matrix, InitParam*)`，后者用 `0x2307F0` 把参数复制到 `core+0x9A0`，所以 **core 偏移 = 0x9A0 + param 偏移**。武器开火 `0x696FD0` 把模板 `weapon+0x830` 复制到 `weapon+0xA10` 再发射，所以 **weapon 偏移 = 0x830 + param 偏移**。
