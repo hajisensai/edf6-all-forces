@@ -42,6 +42,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/impact.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/playarea.cpp)
 # The stock split missiles (MissileBullet02) split short of a big target's surface.
 target_sources(EDF6VehicleCrew PRIVATE src/splitmissile.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/route_guide.cpp)
 # Which machine runs the plugin's work on an object online (src/online_authority.h, docs/online-re.md section 3).
 target_sources(EDF6VehicleCrew PRIVATE src/online_authority.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/drill_net.cpp)
@@ -550,6 +551,10 @@ set_target_properties(view_clip_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMA
 add_executable(split_fuse_test tests/split_fuse_test.cpp)
 target_compile_options(split_fuse_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME split_fuse COMMAND split_fuse_test)
+# The stock route guide's field corrections (src/route_guide.h).
+add_executable(route_guide_test tests/route_guide_test.cpp)
+target_compile_options(route_guide_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME route_guide COMMAND route_guide_test)
 # The online gates (src/online_authority.h): their rules on every case, and a source guard that the plugin asks them.
 add_executable(online_authority_test tests/online_authority_test.cpp)
 target_compile_options(online_authority_test PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -860,6 +865,15 @@ add_test(NAME edf5_campaign_native COMMAND edf5_campaign_native_test "${EDF6_NAT
 add_test(NAME edf5_campaign_partial_install COMMAND edf5_campaign_native_test "${EDF6_NATIVE_DLL}" 3)
 add_test(NAME edf5_campaign_chained COMMAND edf5_campaign_native_test "${EDF6_NATIVE_DLL}" chain)
 add_test(NAME edf5_campaign_foreign_site COMMAND edf5_campaign_native_test "${EDF6_NATIVE_DLL}" foreign)
+# The route guide hook on a private EDF.dll mapping: every constructor call redirected, each caller's guide corrected.
+add_executable(route_guide_native_test EXCLUDE_FROM_ALL tests/route_guide_native_test.cpp)
+target_include_directories(route_guide_native_test PRIVATE src common)
+target_link_libraries(route_guide_native_test PRIVATE edf6common)
+target_compile_options(route_guide_native_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks route_guide_native_test)
+add_test(NAME route_guide_native COMMAND route_guide_native_test "${EDF6_NATIVE_DLL}")
+add_test(NAME route_guide_foreign_site COMMAND route_guide_native_test "${EDF6_NATIVE_DLL}" foreign)
+add_test(NAME route_guide_partial_install COMMAND route_guide_native_test "${EDF6_NATIVE_DLL}" partial)
 set_tests_properties(edf5_campaign_native edf5_campaign_partial_install edf5_campaign_chained edf5_campaign_foreign_site
                      PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME edf5_campaign_lifecycle COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_edf5_campaign_lifecycle.py")
