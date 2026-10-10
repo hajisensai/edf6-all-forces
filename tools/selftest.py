@@ -5825,6 +5825,39 @@ def legacy_archive_refusals() -> None:
 
 
 @test
+def legacy_parsers_refuse_malformed_input() -> None:
+    """Cut or corrupt EDF5 / EDF4.1 files are refused with ValueError (what ported_weapons.build_assets and
+    make_edf5_weapons.convertible catch: the weapon waits as a placeholder) by the parsers themselves: a UTF-16 string
+    with no end looped forever, a cut CMPL stream came back short or raised IndexError, a 4-byte MDB raised struct.error,
+    a vertex size of 0 ZeroDivisionError, a CANM offset past the file allocated it and raised IndexError, a channel
+    value no float32 holds OverflowError."""
+    import struct
+    import cas_legacy
+    import mdb
+    import mdb_legacy
+    packed = mdb.cmpl_compress(bytes(range(256)) * 8)
+    cases = {
+        'string past the end': lambda: mdb._wstr(b'a\0b\0', 0),
+        'string offset past the end': lambda: mdb._wstr(b'a\0\0\0', 8),
+        'CMPL header cut': lambda: mdb.cmpl_decompress(b'CMPL\0\0'),
+        'CMPL stream cut': lambda: mdb.cmpl_decompress(packed[:len(packed) // 2]),
+        'CMPL stream cut in a token': lambda: mdb.cmpl_decompress(packed[:-1]),
+        'MDB of 4 bytes': lambda: mdb_legacy.mdb_from_legacy(b'MDB0'),
+        'vertex size 0': lambda: mdb_legacy._check_mesh(mdb.Mesh(bytes(4), 0, 0, 0, [], 0, b'', b'')),
+        'CANM past the file': lambda: cas_legacy.cas_layout(b'CAS\0' + struct.pack('<II', cas_legacy.CAS_5, 0xFFFFFFF0)
+                                                            + bytes(0x24)),
+        'float32 overflow': lambda: cas_legacy._f32(1e39),
+    }
+    assert mdb.cmpl_decompress(packed) == bytes(range(256)) * 8
+    for name, case in cases.items():
+        try:
+            case()
+        except ValueError:
+            continue
+        raise AssertionError(f'{name}: not refused')
+
+
+@test
 def ported_assets_of_another_mod_stay() -> None:
     """tools/call_weapons.py on a stand-in game: a model another mod put under the name an EDF5 weapon's asset uses
     (Mods/OBJECT/V505_TANKEDF4.MRAB) survives an install that cannot build that weapon (no EDF5), the uninstall and a
@@ -5842,7 +5875,8 @@ def ported_assets_of_another_mod_stay() -> None:
             table = ids + [p.id if (ours_written and p is port) else pw.retired_id(p.id) for p in pw.PORTS]
             files = _call_files(game, table)
             rows = lambda key: dsgo.compact(dsgo.Document(dsgo.Node([dsgo.Node([   # noqa: E731
-                dsgo.Node([i, f'app:/weapon/{i}.sgo'] if key == 'table' else [f'name {i}', f'about {i}']) for i in table])],
+                dsgo.Node([i, f'app:/weapon/{i}.sgo', 0.0, 1.0, 0.0, 0.0, dsgo.Node([]), 1.0, 0.0]   # the 9 columns
+                          if key == 'table' else [f'name {i}', f'about {i}']) for i in table])],
                 {0: key}), []))
             files.update({cw.TABLE: rows('table'), **{rel: rows('text_table') for rel in cw.TEXTS}})
             if ours_written:

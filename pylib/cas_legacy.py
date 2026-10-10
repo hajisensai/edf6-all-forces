@@ -194,6 +194,8 @@ class _Walk:
         self.b = b
         self.common = COMMON_SIZE[version]
         self.lay = CasLayout(version, _u(b, '<I', 8)[0])
+        if not 0x30 <= self.lay.canm_at <= len(b):
+            raise ValueError(f'CAS CANM offset {self.lay.canm_at:#x} outside the file ({len(b):#x} bytes)')
         self.tree: Tree | None = None
 
     def mark(self, at: int, kind: str, size: int) -> None:
@@ -350,7 +352,11 @@ def cas_layout(b: bytes) -> CasLayout:
 # ---------------------------------------------------------------------------------------------- conversion
 
 def _f32(x: float) -> float:
-    return struct.unpack('<f', struct.pack('<f', x))[0]
+    """`x` rounded to a float32; ValueError when it does not fit one (a channel's base / step out of any range)."""
+    try:
+        return struct.unpack('<f', struct.pack('<f', x))[0]
+    except OverflowError as e:
+        raise ValueError(f'{x!r} does not fit a float32') from e
 
 
 def _crt_sincosf() -> tuple[Callable[[float], float], Callable[[float], float]] | None:

@@ -73,6 +73,7 @@ LEGACY_VERSION = 0x14
 EDF6_VERSION = 0x20
 _FMT: dict[int, str] = {1: '<4f', 4: '<3f', 7: '<4e', 12: '<2f', 21: '<4B'}
 _BLEND: tuple[str, str] = ('blendweight', 'blendindices')
+_BLEND_FMT: dict[str, int] = {'blendweight': 1, 'blendindices': 21}
 _TYPES_41: frozenset[int] = frozenset({0x000, 0x101, 0x302, 0x303, 0x3FF})
 _ONLY_41: frozenset[int] = frozenset({0x000, 0x101, 0x303, 0x3FF})
 _TYPES_5: frozenset[int] = frozenset({0x100, 0x201, 0x302, 0x402, 0x403, 0x104, 0x1FF, 0x2FF, 0x4FF})
@@ -225,6 +226,11 @@ def _blend_last(me: Mesh) -> None:
 
 
 def _check_mesh(me: Mesh) -> None:
+    if me.vsize <= 0:
+        raise ValueError(f'vertex size {me.vsize}')
+    for e in me.elems:   # the forms _weighted_bones reads them in: indices ubyte4, weights float4
+        if e.name.lower() in _BLEND and e.fmt != _BLEND_FMT[e.name.lower()]:
+            raise ValueError(f'{e.name} of vertex format {e.fmt}, expected {_BLEND_FMT[e.name.lower()]}')
     at = 0
     for e in sorted(me.elems, key=lambda e: e.offset):   # the elements must tile [0, vsize) end to end
         if e.fmt not in _FMT:
@@ -245,7 +251,7 @@ def mdb_from_legacy(b: bytes, map_part: bool = False) -> bytes:
     model is a map part (MAP/): rigid snd_Map_* meshes become single-bone skinned ones (EDF4.1 maps; a no-op for
     EDF5's, already skinned). Raises ValueError on anything this conversion was not derived from (module docstring)."""
     data = cmpl_decompress(b)
-    if data[:4] != b'MDB0':
+    if len(data) < 8 or data[:4] != b'MDB0':
         raise ValueError('not an MDB0 model')
     ver = struct.unpack_from('<I', data, 4)[0]
     if ver != LEGACY_VERSION:
@@ -258,6 +264,8 @@ def mdb_from_legacy(b: bytes, map_part: bool = False) -> bytes:
     if not same:
         raise ValueError('unrecognised MDB layout (does not re-serialise byte for byte)')
     for ob in md.objects:
+        if not 0 <= ob.bone < len(md.bones):
+            raise ValueError('object bone out of range')
         for me in ob.meshes:
             _check_mesh(me)
     if _param_encoding(md) == '41':
