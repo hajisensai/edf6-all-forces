@@ -58,7 +58,9 @@ struct BasicState {
     bool partial{};   // the path ends short of the goal (Profile::horizon): its end is a corner, not the arrival
     // Profile::horizon's legs to this goal: the nearest to it a leg has ended, and the legs since one ended nearer. A
     // goal the ground does not reach (a sealed wall) would otherwise send leg after leg along the wall for ever.
-    float legBest=1e30f;int legStale=0;
+    // legWalked: the last leg was walked to its end (only such a leg counts as one more no nearer: a search again from
+    // where the actor was held, blocked by a friend or a closed edge, ends where the last one did and is no leg walked).
+    float legBest=1e30f;int legStale=0;bool legWalked=false;
 };
 using State=BasicState<kNodes>;
 using RouteState=BasicState<kRouteNodes>;
@@ -87,9 +89,10 @@ template<class State>
 inline bool Partial(State& s,int end,Point from,std::uint64_t ms) noexcept {
     if(end<=0 || end>=s.count)return false;
     const float left=Horizontal(s.nodes[end].at,s.goal);
+    const bool walked=s.legWalked;s.legWalked=false;
     if(left<s.legBest-s.profile.cell){s.legBest=left;s.legStale=0;}
     else if(s.legStale>=kLegsStale)return false;
-    else ++s.legStale;
+    else if(walked)++s.legStale;
     if(!Path(s,s.nodes[end].parent,s.nodes[end].at))return false;
     s.partial=true;s.progress=from;s.progressAt=ms;
     return true;
@@ -128,7 +131,7 @@ Result Navigate(State& s,Point from,Point goal,float stop,std::uint64_t ms,Point
         p.maxWaterDepth!=s.profile.maxWaterDepth||p.waypointRadius!=s.profile.waypointRadius||p.greed!=s.profile.greed||
         p.horizon!=s.profile.horizon||
         ms<s.lastAt||ms-s.lastAt>2000;
-    if(!s.initialized||Horizontal(goal,s.goal)>p.cell*8.0f||std::fabs(goal.y-s.goal.y)>p.step){s.legBest=1e30f;s.legStale=0;}
+    if(!s.initialized||Horizontal(goal,s.goal)>p.cell*8.0f||std::fabs(goal.y-s.goal.y)>p.step){s.legBest=1e30f;s.legStale=0;s.legWalked=false;}
     if(changed)Begin(s,from,goal,p,ms);
     s.lastAt=ms;
     if(s.failed) {if(ms<s.retryAt)return Result::blocked;Begin(s,from,goal,p,ms);}
@@ -137,7 +140,7 @@ Result Navigate(State& s,Point from,Point goal,float stop,std::uint64_t ms,Point
     if(s.length) {
         while(s.cursor<s.length && Horizontal(from,s.path[s.cursor])<=(s.cursor+1==s.length && !s.partial ? stop : p.waypointRadius) &&
               std::fabs(from.y-s.path[s.cursor].y)<=p.step){++s.cursor;s.checked=false;}
-        if(s.cursor==s.length){Begin(s,from,goal,p,ms);}
+        if(s.cursor==s.length){s.legWalked=s.partial;Begin(s,from,goal,p,ms);}
         else {
             // Validate the next edge repeatedly: destroyed/new obstacles invalidate
             // cached routes. No straight-line fallback on a blocked or deferred query.

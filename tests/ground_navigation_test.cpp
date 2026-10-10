@@ -174,6 +174,22 @@ void Horizon() {
         Check(r==Result::arrived && Horizontal(at,{200,0,0})<=1.5f,"legs reach the goal round the wall");
         Check(valid,"every step of every leg is walkable");
     }
+    {   // held where it stands (a friend in the way) through several searches of its first leg, then let go: those searches
+        // from the same spot are no legs walked that got no nearer, the goal round the wall is still reached
+        HorizonField f;Point at{};const Point goal{600,0,0};
+        auto s=std::make_unique<State>();std::uint64_t ms=1;Result r=Result::pending;int held=0,staleHeld=-1;
+        for(int i=0;i<400000;++i) {
+            ms+=16;Point next{};
+            r=Navigate(*s,at,goal,1.0f,ms,next,[&](Point a,Point b,Point& c){return f(a,b,c);},rolling);
+            if(r==Result::arrived || r==Result::blocked)break;
+            if(r!=Result::moving)continue;
+            if(held<6){++held;ms+=1600;continue;}   // no progress for over 1.5 s: the leg searched again from here
+            if(staleHeld<0)staleHeld=s->legStale;
+            at=next;
+        }
+        Check(staleHeld==0,"searches again while held in place are not legs that got no nearer");
+        Check(held==6 && r==Result::arrived && Horizontal(at,goal)<=1.5f,"...and once let go it walks on to the goal");
+    }
     {   // a sealed wall: it walks up to the wall and is then blocked, never through
         HorizonField f;f.sealed=true;Point at{};int steps=0;bool valid=true;
         const Result r=Walk(f,at,{200,0,0},rolling,&steps,&valid,4000);
