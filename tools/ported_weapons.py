@@ -119,6 +119,7 @@ BY_GAME = {g.key: g for g in GAMES}
 RELEASED: dict[str, tuple[int, str]] = {
     'EDF5 weapons (2026-10-10)': (61, '1547668c15e2211bf19f9ff54483855df5903ff4a481dc80858ee69e9d6a7578'),
     'EDF4.1 weapons (2026-10-10)': (345, '169d12e069abf6eb1cbeb4106de7acf2f5c9c073be96a03a4a7f49a432b5569e'),
+    'EDF4.1 calls (plan P5)': (429, 'af7375a801355cca861370e242876251f0f6439da9dadab6933bfba456270bf7'),
 }
 
 

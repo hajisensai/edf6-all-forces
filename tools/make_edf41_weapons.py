@@ -476,7 +476,19 @@ def build(edf41: str, edf5: str, edf6: str) -> dict:
             **({'call': call} if call is not None else {}),
         })
     return {'source': "EDF4.1 Root.cpk WEAPON/_WEAPONTABLE.SGO + _WEAPONTEXT.SGO; CN / SC / KR edf41port/translations.json",
-            'weapons': weapons, 'skipped': skipped}
+            'weapons': released_first(weapons), 'skipped': skipped}
+
+
+def released_first(weapons: list[dict]) -> list[dict]:
+    """`weapons` with the ones the registry already lists first, in its order, the new ones after in table order: a
+    released registry's ids stay its prefix (the table rows an install wrote are kept by id and index;
+    tools/selftest.py edf5_weapons_registry)."""
+    if not os.path.isfile(OUT):
+        return weapons
+    with open(OUT, encoding='utf-8') as f:
+        before = [w['id'] for w in json.load(f)['weapons']]
+    at = {wid: k for k, wid in enumerate(before)}
+    return sorted(weapons, key=lambda w: (0, at[w['id']]) if w['id'] in at else (1, 0))
 
 
 def main() -> int:
