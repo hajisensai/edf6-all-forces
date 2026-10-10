@@ -340,9 +340,12 @@ void Thrusters(Jet& j,const Kind& k,unsigned char* v,float dt,ULONGLONG ms,float
         if(clear<kNacelleFar)want[i]=std::fmax(want[i],nacelle::MostTilt(i<2 ? nacelle::kFront : nacelle::kBack,-clear,-kThrustBack));
     }
     PoseSurfaces(j,want,kThrustRate,dt,"thrusters");
-    // The stock Booster flame on each nozzle, with the engine (Hover's power): half at idle, full at all of it. It was
-    // the thrust over gravity, so full from the hover on: the same flame hovering, cruising or climbing.
-    CarrierFlames(v,j.surf.rec,Clamp(0.5f+0.5f*j.m.power,0.5f,1.0f),ms);
+    // The stock Booster flame on each nozzle (its model's nozzle bones, one on each pod: booster.cpp), with the engine
+    // (Hover's power): half at idle, full at all of it. It was the thrust over gravity, so full from the hover on: the same
+    // flame hovering, cruising or climbing. After the pods are posed: the flames take the pods' tilt of this frame. The
+    // arrival's smoke from the same nozzles, as a jet's (Wing).
+    JetFlames(v,Clamp(0.5f+0.5f*j.m.power,0.5f,1.0f),false,ms);
+    JetSmoke(v,Entering(j,ms),ms);
     if(Cfg().debug && ms-j.m.thrustLogAt>1000) {
         j.m.thrustLogAt=ms;
         Log("JET v=%p thrusters: thrust %.1f m/s^2 (up %.1f, fwd %.1f) tilt %.0f deg, yaw %.0f deg, at F %.0f/%.0f B %.0f/%.0f",v,

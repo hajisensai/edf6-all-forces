@@ -121,7 +121,6 @@ bool GunBarrel(const unsigned char*,const unsigned char*,float*,float*) noexcept
 int ReadStores(unsigned char*,Store*,int) noexcept { return 0; }
 void TriggerStore(const Store&) noexcept {}
 void NpcGear(unsigned char*,float,float) noexcept {}
-void CarrierFlames(const unsigned char*,unsigned char* const*,float,ULONGLONG) noexcept {}
 void JetFlames(const unsigned char*,float,bool,ULONGLONG) noexcept {}
 void JetSmoke(const unsigned char*,bool,ULONGLONG) noexcept {}
 bool JetBodyStep(unsigned char*,float*,float*) noexcept { return false; }

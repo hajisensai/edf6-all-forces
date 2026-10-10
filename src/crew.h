@@ -540,12 +540,12 @@ bool ShieldLetsThrough(void* collector,std::uint32_t body) noexcept;
 // shield.cpp: a fast vehicle's velocity (m/s) kept from crossing a hostile shield's face; the speed it lost
 float ShieldBlock(const unsigned char* vehicle,float* vel) noexcept;
 void ShieldVehicle(unsigned char* vehicle) noexcept;   // shield.cpp: the same for a vehicle with no plugin body
-void CarrierFlames(const unsigned char* v,unsigned char* const* recs,float intensity,ULONGLONG ms) noexcept;
-// booster.cpp: a jet's exhaust flames on its nozzles (by its mark), burning `intensity` (0..1), `burner` longer.
+// booster.cpp: an aircraft's exhaust flames on its model's nozzles (exhaust_nozzles.h: a jet's exits, the carrier's four
+// pods), burning `intensity` (0..1), `burner` longer.
 void JetFlames(const unsigned char* v,float intensity,bool burner,ULONGLONG ms) noexcept;
 // booster.cpp: flames on nozzles placed in the world (+z out of each, rows unit), `size[i]` (length, width m) and `level[i]` (0 out .. 1) each; at most 10.
 void NozzleFlames(const unsigned char* v,const float (*m)[16],int n,const float (*size)[2],const float* level,ULONGLONG ms) noexcept;
-void JetSmoke(const unsigned char* v,bool on,ULONGLONG ms) noexcept;   // booster.cpp: an arriving jet's smoke trails
+void JetSmoke(const unsigned char* v,bool on,ULONGLONG ms) noexcept;   // booster.cpp: an arriving aircraft's smoke trails (its flames' nozzles)
 bool JetMotionProps(void* body) noexcept;          // a jet body's own motion properties (no 200 m/s cap); each physics step
 void PreloadJets() noexcept;                       // from the mission's player preload
 // A jet made at run time at `from`, flying along `heading` to work round `target`; false when it cannot
