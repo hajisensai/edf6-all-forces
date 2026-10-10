@@ -5,6 +5,7 @@
 #include "online_authority.h"
 #include "vehicleram.h"
 #include "gunmuzzle.h"
+#include "ifc_model.h"
 #include <malloc.h>
 #include <cstdio>
 #include <cwchar>
@@ -147,7 +148,9 @@ bool drillReady=false;                    // preloaded this mission (PreloadShel
 // The EMC's rounds (emc.cpp, EmcFire; pylib/vcobjects.py EMC_*, tools/make_emc.py): its beam, its charge's glow, the
 // break charge it fires at each building on its line and the blast at its end; then the Sazabi's beams (sazabi.cpp;
 // pylib/vcobjects.py SAZABI_ROUND_FILES, tools/make_sazabi.py). Order: EmcRound's.
-struct EmcFile { const wchar_t* sgo; const wchar_t* file; const char* name; };
+// `model`: its round's class builds the firing weapon's model from the InitParam (BarrierBullet01, ifc_model.h):
+// the SGO carries an animation_model and EmcFire hands it to the IFC before it fires.
+struct EmcFile { const wchar_t* sgo; const wchar_t* file; const char* name; bool model=false; };
 const EmcFile kEmcFiles[]={
     {L"app:/object/edf6vc_emc_beam.sgo",L"EDF6VC_EMC_BEAM.SGO","beam"},
     {L"app:/object/edf6vc_emc_sight.sgo",L"EDF6VC_EMC_SIGHT.SGO","sight"},
@@ -156,7 +159,7 @@ const EmcFile kEmcFiles[]={
     {L"app:/object/edf6vc_sz_mega.sgo",L"EDF6VC_SZ_MEGA.SGO","Sazabi mega particle cannon"},
     {L"app:/object/edf6vc_sz_charge.sgo",L"EDF6VC_SZ_CHARGE.SGO","Sazabi charge"},
     {L"app:/object/edf6vc_sz_funnel.sgo",L"EDF6VC_SZ_FUNNEL.SGO","Sazabi funnel beam"},
-    {L"app:/object/edf6vc_proteus_shield.sgo",L"EDF6VC_PROTEUS_SHIELD.SGO","Proteus shield"},   // tools/make_proteus.py
+    {L"app:/object/edf6vc_proteus_shield.sgo",L"EDF6VC_PROTEUS_SHIELD.SGO","Proteus shield",true},   // tools/make_proteus.py
 };
 constexpr int kEmcCount=static_cast<int>(sizeof(kEmcFiles)/sizeof(kEmcFiles[0]));
 static_assert(kEmcCount==static_cast<int>(EmcRound::proteusShield)+1,"kEmcFiles is indexed by EmcRound");
@@ -184,6 +187,17 @@ const Sig kIfcWaitSigs[]={
     {0x2B97D3,{0x41,0x89,0x86,0xD8,0x02,0x00,0x00,0x48,0x8B,0x4D,0xE8,0x48}},
 };
 bool ifcWaitOk=false;
+// The round model's contract (ifc_model.h): a BarrierBullet01 builds its model from InitParam +0x1B0; the InitParam
+// ctor leaves it valueless; a DemoIndirectFire's SGO root is at +0x100, read with the variant's find / get visitors.
+const Sig kIfcModelSigs[]={
+    {0x28FCEC,{0x4C,0x8D,0x86,0xB0,0x01,0x00,0x00,0x45,0x8D,0x4E,0x01,0x49}},   // lea r8,[rsi+0x1B0] (then 0x6BB890)
+    {0x28FD02,{0xE8,0x89,0xBB,0x42,0x00,0x49,0x8D,0x8F,0x40,0x12,0x00,0x00}},   // call 0x6BB890
+    {0x100321,{0x66,0x89,0xBB,0xC0,0x01,0x00,0x00,0x48,0x89,0xB3,0xC8,0x01}},   // InitParam: +0x1C0 = 0xFFFF
+    {0x5B56F9,{0x48,0x8D,0x9F,0x00,0x01,0x00,0x00,0x0F,0xB7,0x43,0x10,0x41}},   // DemoIndirectFire: SGO root +0x100
+    {0x5B5723,{0x4D,0x8B,0x84,0xC4,0xA8,0xEB,0x79,0x01,0x48,0x8D,0x54,0x24}},   // ...its find visitor (0x179EBA8)
+    {0x5B5767,{0x4D,0x8B,0x84,0xC4,0xF0,0xEA,0x79,0x01,0x48,0x8D,0x54,0x24}},   // ...its get visitor (0x179EAF0)
+};
+bool ifcModelOk=false;
 
 using PreloadFn=void(*)(void*,const wchar_t*,std::int32_t,std::int32_t);
 constexpr unsigned kPreload=0x7A3780;
@@ -566,6 +580,9 @@ bool InstallBay(bool spawnOk) noexcept {
     ifcWaitOk=shellsOk;
     for(const auto& b:kIfcWaitSigs)ifcWaitOk=ifcWaitOk && Matches(b.rva,b.bytes,sizeof(b.bytes));
     if(shellsOk && !ifcWaitOk)Log("JET the IFC's first-round wait (0x2B624D / 0x2B97BC) is not as known: shells keep their stock wait");
+    ifcModelOk=shellsOk;
+    for(const auto& b:kIfcModelSigs)ifcModelOk=ifcModelOk && Matches(b.rva,b.bytes,sizeof(b.bytes));
+    if(shellsOk && !ifcModelOk)Log("JET the round model's code (0x28FCEC / 0x100321 / 0x5B56F9) is not as known: no Proteus shield");
     return bayOk;
 }
 
@@ -584,7 +601,7 @@ void PreloadShells(void* mgr,bool gunship) noexcept {
     drillReady=shellsOk && ModFileThere(kDrillChargeFile);
     if(drillReady)reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kDrillChargeSgo,2,-1);
     for(int i=0;i<kEmcCount;++i) {
-        emcReady[i]=shellsOk && ModFileThere(kEmcFiles[i].file);
+        emcReady[i]=shellsOk && ModFileThere(kEmcFiles[i].file) && (!kEmcFiles[i].model || ifcModelOk);
         if(emcReady[i])reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kEmcFiles[i].sgo,2,-1);
     }
     char charges[64];
@@ -693,12 +710,28 @@ bool EmcRoundReady(EmcRound kind) noexcept {
     return i>=0 && i<kEmcCount && emcReady[i];
 }
 
+namespace {
+// Round `i`'s model (a model round, kEmcFiles) into the IFC of `o` (just made, not yet fired): see ifc_model.h. Not
+// carried, the round is deleted before it fires (its class would throw building it) and the kind is off this mission.
+bool EmcCarryModel(unsigned char* o,int i) noexcept {
+    ifcmodel::Carry c=ifcmodel::Carry::notMade;
+    __try { c=ifcmodel::CarryModel(image,o+ifcmodel::kDemoSgo,o+kDemoIfc+ifcmodel::kIfcModel); }
+    __except(FaultLog("EMC round model",GetExceptionInformation())){c=ifcmodel::Carry::notMade;}
+    if(c==ifcmodel::Carry::done)return true;
+    Log("JET %s: %s: deleted before it fires, off for this mission",kEmcFiles[i].name,ifcmodel::CarryText(c));
+    __try { reinterpret_cast<DeleteFn>(image+kDelete)(o); } __except(FaultLog("EMC round model delete",GetExceptionInformation())){}
+    emcReady[i]=false;
+    return false;
+}
+}  // namespace
+
 RoundObj EmcFire(EmcRound kind,const unsigned char* by,const float* from,const float* at,float damage) noexcept {
     const int i=static_cast<int>(kind);
     if(!by || !from || !at || !std::isfinite(from[0]+from[1]+from[2]+at[0]+at[1]+at[2]) || !std::isfinite(damage) || damage<0.0f ||
        !EmcRoundReady(kind))return RoundObj{};
     unsigned char* const o=ShellMake(kEmcFiles[i].sgo,emcReady[i],by,from,at,damage,true,kEmcFiles[i].name);
     if(!o)return RoundObj{};
+    if(kEmcFiles[i].model && !EmcCarryModel(o,i))return RoundObj{};
     __try { return RoundObj{o,At<const void*>(o,kSelfCtrl)}; }
     __except(FaultLog("EMC round",GetExceptionInformation())){return RoundObj{};}
 }

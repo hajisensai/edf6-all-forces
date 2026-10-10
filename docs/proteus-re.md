@@ -72,12 +72,14 @@ EDF5 `Root.cpk`（`D:\steam\steamapps\common\EARTH DEFENSE FORCE 5`，CPK 文件
 | 位置 | slot 5 每帧把 `+0xC90..+0xCC0`（right / up / forward / pos，子弹核心的矩阵）复制到对象矩阵 `+0x60`（`0x2918BE`），再把碰撞 body 放过去（接口槽 0x88）；slot 3 用 `+0x60` 生成渲染矩阵（乘 AmmoSize） | H |
 | 粘附 | 子弹自己碰到东西时 `+0xD40` 置 1（`0x2918F0` 读），之后位置被锚定（`0x236AC6` / `0x236B4C`），插件写矩阵无效 | H |
 | owner | 弱引用在 `+0x880/+0x888`（核心初始化 `0x231FF2`） | H |
+| 装置模型 | ctor `0x28FD02` 用 **InitParam+0x1B0**（发射武器 SGO 的 `animation_model`，武器初始化 `0x68DAD5` 填）建模型；`0x6BB890` 遇空 variant 抛 `sgs::ut::InvalidVariantException`。IFC 的 InitParam（IFC+0x40）这一格永远为空，所以插件必须自己填（`src/ifc_model.h`；2026-10-10 B 键闪退，`docs/feedback-2026-10-10-proteus-shield-crash.md`） | H |
 
 插件做法：
 
 - **资源**：`tools/make_proteus.py` 生成 `OBJECT/EDF6VC_PROTEUS_SHIELD.SGO`：原版 `DEMOGUNSHIPFIRESOLID.SGO`（DemoIndirectFire）改成一发 `BarrierBullet01`，
   速度 0、重力 0、寿命 2^30 帧、AmmoSize 1、命中半径系数 0.01（不碰东西，避免被锚定）、颜色和展开音效取自 EWEAPON196，
   Ammo_CustomParameter = [120°, 12 m, 17 m, [1,1,1], [0,0,0]]（MK2 机体前伸 9.7 m、侧宽 8.9 m、高 15.2–15.9 m）。分段数 24（电磁碉堡是 27）。
+- **装置模型**：SGO 另带 EWEAPON196 的 `animation_model`；`EmcFire` 在 IFC 发射前把它写进 IFC+0x1F0（InitParam+0x1B0），拿不到就不发、本关停用护盾。
 - **立起**：护盾该立着且没有墙时，`EmcFire(EmcRound::proteusShield, ...)`（`jet_bay.cpp` 的 DemoIndirectFire 路径，和 EMC / 沙扎比的弹同一张表，
   文件存在就随关卡预载）。新墙第一次更新时按「分段数 24 + owner 是这台普罗透斯或它的乘员 + 有待领取的立起」认领，写入 HP。
   30 帧内没看到就记日志、把护盾开关关掉，不反复重试。
@@ -113,6 +115,7 @@ slot 45（`0x17DEC40+45*8`，原版 `0x6437D0`）之后，对重构中的普罗�
 | `0x6302B0`（`lea rax,[0x690230]`）、`0x630250` 序言 | 空座回调与 slot 5 | 整个重构关闭 |
 | `0x62D950` 序言、接口槽 `0x17DEE68` | 武器使用者 | 不借用任何武器 |
 | `0x2917B0` 序言、`0x29189E` `0x2918AB` `0x2918BE` `0x2918F0` `0x291B99` `0x28FD62`、vtable `0x17A45E8` 槽 5 | 电磁碉堡墙的更新与 HP | 没有护盾（HUD 显示 OFFLINE） |
+| `0x28FCEC` `0x28FD02` `0x100321` `0x5B56F9` `0x5B5723` `0x5B5767`（`jet_bay.cpp kIfcModelSigs`） | 墙的装置模型从 InitParam 取、DemoIndirectFire 的 SGO 根与 visitor | 护盾 SGO 不预载（没有护盾） |
 | `0x5E11D0` `0x54BED5` `0x54BEE5` `0x59B53E` `0x580D6B` `0x693E8D` `0x693F18` | 力场 | 没有力场 |
 | `0x598C50` `0x598C60` `0x598CE9` | 士兵选目标 | 友军不优先 |
 
