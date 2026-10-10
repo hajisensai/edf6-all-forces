@@ -6,12 +6,15 @@
 // it the jets', the carrier's and the laser's preloads) does not hang on the loadout's own checks: the
 // loadout only wraps the call when it is on (LoadoutPreload). Layout: docs/loadout-re.md.
 #include "crew.h"
+#include "transport.h"
+#include "airdrop.h"
 #include "gear.h"
 #include "memory.h"
 #include "playarea.h"
 #include "sazabi_sound.h"
 #include "support_spawn.h"
 #include "support_soldier.h"
+#include "support_variants.h"
 #include <iterator>
 
 namespace crew {
@@ -61,6 +64,8 @@ void MissionStart() noexcept {
     ResetNpcPosts();
     ResetAirstrikes();
     ResetSupportDispatch();
+    ResetTransports();
+    ResetAirdrops();
     ResetJets();
     ResetBoosters();
     ResetShields();
@@ -101,7 +106,9 @@ void MissionStart() noexcept {
     PreloadSub();    // ...and the submarine carrier (subcarrier.cpp)
     PreloadLaser();  // ...and the teleportation ships' portal laser (carrierlaser.cpp)
     PreloadSupportVehicles(); // stock ground support hulls; no dummy crew created by initialization
+    PreloadAirdrop();         // ...and the stock container a transport plane drops one in (airdrop.cpp)
     PreloadSupportSoldiers(); // original real NPC resources, before the game's preload wait
+    PreloadSupportVariants(); // ...and the generated coloured soldiers / loaded vehicles there are (support_variants.h)
     EnsureInputs();  // every plugin has loaded by now: the per-frame hooks chain onto theirs
     Log("MISSION start: per-object state dropped, resources preloaded");
     LogMemory("mission start");

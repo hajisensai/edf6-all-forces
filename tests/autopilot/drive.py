@@ -4,7 +4,8 @@ background"). For measurements, e.g. the big map's memory against the stock test
 
   python tests/autopilot/drive.py install            copy build/tools/EDF6Autopilot.dll into <game>/Mods/Plugins
   python tests/autopilot/drive.py launch             start the game (Steam), then put its window off screen, at the back
-  python tests/autopilot/drive.py key VK[+VK] [ms]   hold the keys (hex virtual-key codes, or names: enter esc up ...)
+  python tests/autopilot/drive.py key VK[+VK] [ms]   hold the keys (hex virtual-key codes, or names: enter esc up ...;
+                                                     pad_a ... pad_rt: the autopilot's virtual pad)
   python tests/autopilot/drive.py shot FILE.png      the game window's picture (PrintWindow, never the screen)
   python tests/autopilot/drive.py mem [N]            the plugin's last N MEM rows
   python tests/autopilot/drive.py cmd TEXT           one command to the plugin: mem, quit, mission ROW|RM015|M001|range [0-4]
@@ -13,6 +14,22 @@ background"). For measurements, e.g. the big map's memory against the stock test
         installed EDF6VehicleCrew.ini; RM015, M001 or a row: the stock offline list), launch in the background, stay
         SECONDS (default 45) in the mission, quit the game's own way, print the memory (at the start, peak, end), keep
         the plugin's log at LOG, uninstall
+        options (after the positional ones):
+          --cmd TEXT       one more plugin command handed with the mission's (repeatable), e.g. --cmd "probe airdrop"
+                           (the stock air delivery probe: tests/autopilot/airdrop_probe.cpp)
+          --loadout FILE   the run's forced loadout: FILE copied as <plugins>/EDF6TestRange.loadout.ini (read by the
+                           installed EDF6VehicleCrew at the player's creation; the file must not exist already, and
+                           is removed again afterwards), e.g. tests/autopilot/loadouts/airraider_grape.ini
+          --shots DIR      the game window's picture into DIR every 15 s of the mission (PrintWindow)
+          --key SPEC@S[:MS] hold SPEC (as `key` takes it) S seconds into the mission for MS ms (default 1000),
+                           with a picture just before and after when --shots is given (repeatable)
+          --place SRC=DEST  SRC put at <game>/Mods/DEST for the run (e.g. a build's EDF6VehicleCrew.dll over the
+                           installed one, or an SGO the build needs); the original bytes are kept and put back
+                           byte for byte afterwards (repeatable)
+          --ini KEY=VALUE  KEY set in EDF6VehicleCrew.ini [VehicleCrew] for the run, the ini put back afterwards
+        Every run also watches the desktop (DesktopWatch): the foreground window's process, the cursor clip and the
+        cursor every 20 ms, and once in the mission the real cursor moved 40 px to see that nothing pulls it back;
+        the counts are printed at the end (all must be 0).
   python tests/autopilot/drive.py hide               the window off screen and at the back again
   python tests/autopilot/drive.py uninstall          remove the plugin, its keys file and its log (game closed)
 
@@ -28,17 +45,25 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 import gamedir  # noqa: E402
+TOOLS = os.path.join(ROOT, 'tools')   # tools/support_config.py (the ini's own editor)
 
 NAME = 'EDF6Autopilot'
 DEFAULT_MISSION = 'range'   # the test range's mission pack (no longer laid over RM015)
 APP_ID = 2291060
 KEYS = {'enter': 0x0D, 'esc': 0x1B, 'space': 0x20, 'left': 0x25, 'up': 0x26, 'right': 0x27, 'down': 0x28,
-        'alt': 0x12, 'f4': 0x73, 'shift': 0x10, 'ctrl': 0x11, 'tab': 0x09}
+        'alt': 0x12, 'f4': 0x73, 'shift': 0x10, 'ctrl': 0x11, 'tab': 0x09,
+        # the autopilot's virtual pad (0x100 + XInput button bit; 0x110 / 0x111 the triggers)
+        'pad_up': 0x100, 'pad_down': 0x101, 'pad_left': 0x102, 'pad_right': 0x103, 'pad_ls': 0x106, 'pad_rs': 0x107,
+        'pad_lb': 0x108, 'pad_rb': 0x109, 'pad_a': 0x10C, 'pad_b': 0x10D, 'pad_x': 0x10E, 'pad_y': 0x10F,
+        'pad_lt': 0x110, 'pad_rt': 0x111,
+        # its left stick pushed all the way (the autopilot's PadState: up, down, right, left)
+        'stick_up': 0x112, 'stick_down': 0x113, 'stick_right': 0x114, 'stick_left': 0x115}
 user32 = ctypes.WinDLL('user32', use_last_error=True)
 gdi32 = ctypes.WinDLL('gdi32')
 # ctypes otherwise defaults to C int, truncating Win64 HWND/HDC/HGDIOBJ values.
@@ -56,6 +81,9 @@ for lib, name, result, args in (
                                     ctypes.c_int, ctypes.c_int, wt.UINT]),
     (user32, 'SetForegroundWindow', wt.BOOL, [wt.HWND]),
     (user32, 'PrintWindow', wt.BOOL, [wt.HWND, wt.HDC, wt.UINT]),
+    (user32, 'GetCursorPos', wt.BOOL, [ctypes.POINTER(wt.POINT)]),
+    (user32, 'SetCursorPos', wt.BOOL, [ctypes.c_int, ctypes.c_int]),
+    (user32, 'GetClipCursor', wt.BOOL, [ctypes.POINTER(wt.RECT)]),
     (gdi32, 'CreateCompatibleDC', wt.HDC, [wt.HDC]),
     (gdi32, 'CreateCompatibleBitmap', wt.HBITMAP, [wt.HDC, ctypes.c_int, ctypes.c_int]),
     (gdi32, 'SelectObject', wt.HGDIOBJ, [wt.HDC, wt.HGDIOBJ]),
@@ -102,7 +130,103 @@ def hide(hwnd: int) -> None:
     user32.SetWindowPos(hwnd, 1, left, 0, 0, 0, 0x0001 | 0x0010)   # HWND_BOTTOM, SWP_NOSIZE | SWP_NOACTIVATE
 
 
+class DesktopWatch:
+    """What a background run does to the user's desktop, sampled every 20 ms from outside the game: the foreground
+    window's process, the cursor clip and the cursor. `nudge()` moves the real cursor 40 px and back and tells whether
+    something pulled it meanwhile (2026-10-10: the game recentred the user's mouse every frame)."""
+
+    def __init__(self) -> None:
+        self.samples = 0
+        self.game_foreground = 0      # samples with an EDF6.exe window in the foreground
+        self.clipped = 0              # samples with the cursor clipped to less than the whole desktop
+        self.at_right_edge = 0        # samples with the cursor on the desktop's right edge (where an off-screen centre clamps)
+        self.nudges: list[str] = []
+        self.clips: list[str] = []    # each distinct clip rectangle seen: when, the rectangle, the foreground process
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+
+    def start(self) -> 'DesktopWatch':
+        self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(5)
+
+    def _loop(self) -> None:
+        left, top = user32.GetSystemMetrics(76), user32.GetSystemMetrics(77)
+        right, bottom = left + user32.GetSystemMetrics(78), top + user32.GetSystemMetrics(79)
+        while not self._stop.is_set():
+            pids = set(game_pids()) if self.samples % 50 == 0 else getattr(self, '_pids', set())
+            self._pids = pids
+            pid = wt.DWORD()
+            user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), ctypes.byref(pid))
+            clip, pos = wt.RECT(), wt.POINT()
+            user32.GetClipCursor(ctypes.byref(clip))
+            user32.GetCursorPos(ctypes.byref(pos))
+            self.samples += 1
+            self.game_foreground += pid.value in pids
+            rect = (clip.left, clip.top, clip.right, clip.bottom)
+            if rect != (left, top, right, bottom):
+                self.clipped += 1
+                if len(self.clips) < 8 and not any(str(rect) in c for c in self.clips):
+                    self.clips.append(f'{time.strftime("%H:%M:%S")} clip {rect} with {process_name(pid.value)} '
+                                      'in the foreground')
+            self.at_right_edge += pos.x >= right - 1
+            time.sleep(0.02)
+
+    def nudge(self) -> str:
+        start = wt.POINT()
+        user32.GetCursorPos(ctypes.byref(start))
+        # 40 px towards the desktop's middle (a target past the edge would be clamped by Windows, not by a pull)
+        middle = (user32.GetSystemMetrics(76) + user32.GetSystemMetrics(78) // 2,
+                  user32.GetSystemMetrics(77) + user32.GetSystemMetrics(79) // 2)
+        target = (start.x + (40 if start.x < middle[0] else -40), start.y + (40 if start.y < middle[1] else -40))
+        user32.SetCursorPos(*target)
+        # The game's window is off screen past the desktop's right edge: a pull to its centre lands on that edge.
+        edge = user32.GetSystemMetrics(76) + user32.GetSystemMetrics(78) - 1
+        moved, pulled = [], []
+        for _ in range(100):   # 2 s
+            time.sleep(0.02)
+            now = wt.POINT()
+            user32.GetCursorPos(ctypes.byref(now))
+            if (now.x, now.y) != target:
+                (pulled if now.x >= edge else moved).append((now.x, now.y))
+        user32.SetCursorPos(start.x, start.y)
+        if pulled:
+            verdict = f'cursor set to {target}, PULLED to the edge in {len(pulled)}/100 samples (first {pulled[0]})'
+        elif moved:
+            verdict = (f'cursor set to {target}, moved elsewhere in {len(moved)}/100 samples (first {moved[0]}): '
+                       'the user moving it, not pulled to the game')
+        else:
+            verdict = f'cursor set to {target}, stayed there for 2 s'
+        self.nudges.append(verdict)
+        return verdict
+
+    def report(self) -> str:
+        return (f'desktop over {self.samples} samples: game in the foreground {self.game_foreground}, cursor clipped '
+                f'{self.clipped}, cursor on the right edge {self.at_right_edge}; nudges: {self.nudges or "none"}'
+                + (f'; clips: {self.clips}' if self.clips else ''))
+
+
+def process_name(pid: int) -> str:
+    """The executable's file name of a process (or its id when it cannot be read)."""
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    handle = kernel.OpenProcess(0x1000, False, pid)   # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return f'pid {pid}'
+    try:
+        size = wt.DWORD(512)
+        buf = ctypes.create_unicode_buffer(512)
+        if kernel.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+            return os.path.basename(buf.value)
+        return f'pid {pid}'
+    finally:
+        kernel.CloseHandle(handle)
+
+
 SESSION_EXTS = ('.dll', '.keys', '.log', '.cmd', '.keys.tmp', '.cmd.tmp')
+LOADOUT = 'EDF6TestRange.loadout.ini'   # EDF6VehicleCrew's forced loadout (src/loadout.cpp), next to the plugins
 
 
 def require_closed() -> None:
@@ -158,6 +282,93 @@ def uninstall(game: str) -> None:
     os.remove(marker)
 
 
+def place_loadout(game: str, source: str) -> tuple[str, bytes]:
+    """The run's forced loadout written as EDF6VehicleCrew's ini; never over an existing one (the test range's)."""
+    with open(source, 'rb') as f:
+        payload = f.read()
+    path = os.path.join(plugins(game), LOADOUT)
+    with open(path, 'xb') as f:
+        f.write(payload)
+    print('loadout', source, '->', path)
+    return path, payload
+
+
+class Placement:
+    """A file of the game's Mods put there for one run (`--place`, `--ini`): the bytes it had before (None: it did not
+    exist) are kept here and in `<plugins>/EDF6Autopilot.placed/` (so a crashed driver leaves them recoverable), and put
+    back afterwards byte for byte, only while the file still holds what this run wrote."""
+
+    def __init__(self, game: str, dest: str, payload: bytes) -> None:
+        self.path = os.path.join(game, 'Mods', dest)
+        self.payload = payload
+        self.original: bytes | None = None
+        if os.path.exists(self.path):
+            with open(self.path, 'rb') as f:
+                self.original = f.read()
+            keep = os.path.join(plugins(game), NAME + '.placed', dest.replace('/', '__').replace('\\', '__'))
+            os.makedirs(os.path.dirname(keep), exist_ok=True)
+            with open(keep, 'xb') as f:
+                f.write(self.original)
+            self.kept = keep
+        else:
+            self.kept = None
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        with open(self.path, 'wb') as f:
+            f.write(payload)
+        print('placed', dest, 'over the original' if self.original is not None else '(new)')
+
+    def restore(self) -> None:
+        try:
+            with open(self.path, 'rb') as f:
+                now = f.read()
+        except FileNotFoundError:
+            now = None
+        if now != self.payload:
+            print('changed by someone else during the run: left as it is:', self.path)
+            return
+        if self.original is None:
+            os.remove(self.path)
+            print('removed', self.path)
+        else:
+            with open(self.path, 'wb') as f:
+                f.write(self.original)
+            print('restored', self.path, 'byte for byte')
+        if self.kept:
+            os.remove(self.kept)
+            try:
+                os.rmdir(os.path.dirname(self.kept))
+            except OSError:
+                pass
+
+
+def ini_with(game: str, settings: tuple[str, ...]) -> bytes:
+    """EDF6VehicleCrew.ini with `KEY=VALUE` settings set in [VehicleCrew] (tools/support_config.put), its encoding kept."""
+    if TOOLS not in sys.path:
+        sys.path.insert(0, TOOLS)
+    import support_config
+    with open(os.path.join(plugins(game), 'EDF6VehicleCrew.ini'), 'rb') as f:
+        raw = f.read()
+    bom = raw.startswith(b'\xef\xbb\xbf')
+    text = raw[3 if bom else 0:].decode('utf-8')
+    for setting in settings:
+        key, _, value = setting.partition('=')
+        text = support_config.put(text, key.strip(), value.strip())
+    return (b'\xef\xbb\xbf' if bom else b'') + text.encode('utf-8')
+
+
+def remove_loadout(path: str, payload: bytes) -> None:
+    """The run's loadout removed, only while it is still the one this run wrote."""
+    try:
+        with open(path, 'rb') as f:
+            if f.read() != payload:
+                print('loadout changed by someone else: left at', path)
+                return
+    except FileNotFoundError:
+        return
+    os.remove(path)
+    print('removed', path)
+
+
 def launch() -> None:
     require_closed()
     before = user32.GetForegroundWindow()
@@ -179,6 +390,9 @@ def launch() -> None:
 
 def key(game: str, spec: str, ms: int) -> None:
     codes = [KEYS[k.lower()] if k.lower() in KEYS else int(k, 16) for k in spec.split('+')]
+    if not os.path.isfile(os.path.join(plugins(game), NAME + '.session.json')) or not game_pids():
+        # A keys file written with no session would be left behind and block the next install.
+        raise RuntimeError('no autopilot session with the game running: no keys written')
     path = os.path.join(plugins(game), NAME + '.keys')
     def write(text: str) -> None:
         with open(path + '.tmp', 'w') as f:
@@ -287,20 +501,50 @@ def commit_of(row: str) -> float:
     return float(row.split('commit ')[1].split(' MB')[0])
 
 
-def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None) -> int:
+def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None, *,
+        extra: tuple[str, ...] = (), loadout: str | None = None, shots: str | None = None,
+        keys: tuple[tuple[str, float, int], ...] = (), place: tuple[str, ...] = (), ini: tuple[str, ...] = ()) -> int:
     install(game)
+    placed: tuple[str, bytes] | None = None
+    placements: list[Placement] = []
+    watch = DesktopWatch().start()
     try:
-        command(game, f'mission {mission} {difficulty}')
+        if loadout:
+            placed = place_loadout(game, loadout)
+        for item in place:
+            source, _, dest = item.partition('=')
+            with open(source, 'rb') as f:
+                placements.append(Placement(game, dest, f.read()))
+        if ini:
+            placements.append(Placement(game, 'Plugins/EDF6VehicleCrew.ini', ini_with(game, ini)))
+        command(game, '\n'.join([f'mission {mission} {difficulty}', *extra]))
         launch()
         if not wait_for(game, 'PlayMission_Offline', 240):
             print('the mission never started (see the log)')
             return 1
         print('mission started; staying', seconds, 's')
-        end = time.time() + seconds
-        while time.time() < end:
+        start = time.time()
+        end = start + seconds
+        next_shot = start + 15
+        nudge_at = start + min(20, seconds / 2)
+        pending = sorted(keys, key=lambda k: k[1])
+        while (now := time.time()) < end:
             if not game_pids():
                 print('the game exited before the observation period ended')
                 return 1
+            if nudge_at and now >= nudge_at:
+                print('real mouse check:', watch.nudge())
+                nudge_at = 0
+            if shots and now >= next_shot:
+                os.makedirs(shots, exist_ok=True)
+                try:
+                    shot(os.path.join(shots, f'{int(now - start):04d}s.png'))
+                except (RuntimeError, AssertionError) as e:
+                    print('no picture:', e)
+                next_shot += 15
+            while pending and now >= start + pending[0][1]:
+                spec, at, ms = pending.pop(0)
+                hold_keys(game, spec, ms, shots, f'{int(at):04d}s-{spec.replace("+", "_")}')
             time.sleep(1)
         if not game_pids():
             print('the game exited before quit was requested')
@@ -324,13 +568,84 @@ def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None
             return 1
         return 0
     finally:
+        watch.stop()
+        print(watch.report())
         try:
             if keep and os.path.exists(os.path.join(plugins(game), NAME + '.log')):
                 shutil.copyfile(os.path.join(plugins(game), NAME + '.log'), keep)
                 print('log kept at', keep)
         finally:
             if not game_pids():
+                for p in reversed(placements):
+                    p.restore()
+                if placed:
+                    remove_loadout(*placed)
                 uninstall(game)
+
+
+def hold_keys(game: str, spec: str, ms: int, shots: str | None, name: str) -> None:
+    """A scheduled key hold of `run`, with the window's picture just before and just after when pictures are kept."""
+    def picture(when: str) -> None:
+        if not shots:
+            return
+        os.makedirs(shots, exist_ok=True)
+        try:
+            shot(os.path.join(shots, f'{name}-{when}.png'))
+        except (RuntimeError, AssertionError) as e:
+            print('no picture:', e)
+    picture('before')
+    print('holding', spec, 'for', ms, 'ms')
+    key(game, spec, ms)
+    picture('after')
+
+
+def key_option(text: str) -> tuple[str, float, int]:
+    """--key SPEC@SECONDS[:MS]: hold SPEC (as `key` takes it) SECONDS into the mission, for MS (default 1000)."""
+    try:
+        spec, when = text.split('@', 1)
+        at, _, ms = when.partition(':')
+        return spec, float(at), int(ms) if ms else 1000
+    except ValueError:
+        raise SystemExit('--key wants SPEC@SECONDS[:MS], e.g. 57@25:5000') from None
+
+
+def run_options(argv: list[str]) -> tuple[list[str], dict]:
+    """`run`'s positional arguments and its options (--cmd TEXT and --key SPEC@SECONDS[:MS] repeatable,
+    --loadout FILE, --shots DIR)."""
+    args: list[str] = []
+    extra: list[str] = []
+    keys: list[tuple[str, float, int]] = []
+    place: list[str] = []
+    ini: list[str] = []
+    options: dict = {'extra': (), 'loadout': None, 'shots': None, 'keys': (), 'place': (), 'ini': ()}
+    i = 0
+    while i < len(argv):
+        if argv[i] in ('--cmd', '--loadout', '--shots', '--key', '--place', '--ini'):
+            if i + 1 >= len(argv):
+                raise SystemExit(argv[i] + ' needs a value')
+            if argv[i] == '--cmd':
+                extra.append(argv[i + 1])
+            elif argv[i] == '--key':
+                keys.append(key_option(argv[i + 1]))
+            elif argv[i] == '--place':
+                if '=' not in argv[i + 1]:
+                    raise SystemExit('--place wants SOURCE=DEST (DEST under Mods, e.g. Plugins/EDF6VehicleCrew.dll)')
+                place.append(argv[i + 1])
+            elif argv[i] == '--ini':
+                if '=' not in argv[i + 1]:
+                    raise SystemExit('--ini wants KEY=VALUE')
+                ini.append(argv[i + 1])
+            else:
+                options[argv[i][2:]] = argv[i + 1]
+            i += 2
+        else:
+            args.append(argv[i])
+            i += 1
+    options['extra'] = tuple(extra)
+    options['keys'] = tuple(keys)
+    options['place'] = tuple(place)
+    options['ini'] = tuple(ini)
+    return args, options
 
 
 def main(argv: list[str]) -> int:
@@ -353,8 +668,9 @@ def main(argv: list[str]) -> int:
     elif cmd == 'cmd':
         command(game, ' '.join(argv[1:]))
     elif cmd == 'run':
-        return run(game, argv[1] if len(argv) > 1 else DEFAULT_MISSION, int(argv[2]) if len(argv) > 2 else 1,
-                   int(argv[3]) if len(argv) > 3 else 45, argv[4] if len(argv) > 4 else None)
+        args, options = run_options(argv[1:])
+        return run(game, args[0] if args else DEFAULT_MISSION, int(args[1]) if len(args) > 1 else 1,
+                   int(args[2]) if len(args) > 2 else 45, args[3] if len(args) > 3 else None, **options)
     elif cmd == 'mem':
         mem(game, int(argv[1]) if len(argv) > 1 else 10)
     else:

@@ -64,6 +64,8 @@ float MeasureSide(int s) noexcept {
 }
 }  // namespace
 
+bool PlayAreaMeasured() noexcept {return measured;}
+
 PlayArea MapPlayArea() noexcept {
     return areaSet ? walls : Square();
 }

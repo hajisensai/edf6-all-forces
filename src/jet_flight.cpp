@@ -568,7 +568,15 @@ void SoftEdge(Jet& j,const float* pos,float* want) noexcept {
     float band=0.0f;
     const airbound::Box soft=JetSoftBox(j,&band);
     const bool was=j.m.edgeBack;
-    airbound::KeepIn(soft,pos,j.m.vel,r,react,want,&j.m.edgeBack,&j.m.edgeTurn);
+    // A gun dive at a point on the ground inside the soft box keeps its line: it ends at that point (Strike pulls out
+    // gunClose short of it), and the band past the soft line holds its turn's reach (JetSoftBox), so the pull-out turns
+    // back inside the play edge as any turn there does. Bent by the edge (eased off outward, or levelled flying back in)
+    // the nose never came onto the lead: on a stock map (soft box +-960 m, the target's whole run within the edge's ease)
+    // three called multirole jets dived 64 times in 4 minutes with the nose 15-60 deg off it and fired no gun (2026-10-09
+    // log). The edge's state still follows the jet (KeepIn on a copy); the pull-out is the edge's again.
+    float kept[3]={want[0],want[1],want[2]};
+    const bool dive=j.mode==Mode::dive && j.t.target && !j.t.flyer && airbound::Depth(soft,j.t.aim)>=0.0f;
+    airbound::KeepIn(soft,pos,j.m.vel,r,react,dive ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);
     if(j.m.edgeBack!=was)
         Log("JET v=%p %s the soft edge at (%.0f,%.0f): soft x %.0f..%.0f z %.0f..%.0f, band %.0f, %.0f m/s%s",j.Vehicle(),
             was ? "back inside" : "past",pos[0],pos[2],soft.lo[0],soft.hi[0],soft.lo[1],soft.hi[1],band,s,was ? "" : ": back in first");
@@ -765,6 +773,36 @@ float Patrol(const Jet& j,const float* pos,const float* anchor,float height,floa
     const float dir[3]={tangent[0]+out[0]*pull,0,tangent[2]+out[2]*pull};
     Level(pos,dir,height,want);
     return Clamp(std::sqrt(r*kG*kLoiterTan),k.minSpeed*kLoiterMin,k.cruise);
+}
+
+// A ferry's pass (the paratroop plane: transport.cpp's stick jumps within kDropRadius, 400 m, of the point). Patrol
+// cannot carry it there: a strike body's circle is 1000 m round its anchor, so it never comes nearer the point than that
+// (the 2026-10-10 runs: the plane went round the point, never over it). In: straight at the point. Over it (within
+// kFerryOver) or past it (the point behind it): straight on along its heading, out kFerryRoom of its turns, then in
+// again, every pass from far enough out to line up on the point.
+constexpr float kFerryOver=60.0f,kFerryRoom=2.2f;
+float Ferry(Jet& j,const float* pos,const float* point,float height,float* want) noexcept {
+    const Kind& k=KindOf(j);
+    const float speed=Clamp(k.minSpeed*kLoiterMin,k.minSpeed,k.cruise);
+    const float turn=speed*speed/(kG*kLoiterTan);   // m: its turn's radius at that speed, Patrol's bank
+    float to[3]={point[0]-pos[0],0.0f,point[2]-pos[2]};
+    const float dist=Len(to);
+    if(j.ferryOut) {
+        if(dist>=turn*kFerryRoom)j.ferryOut=false;   // room to come round: the next pass
+    } else {
+        const float ahead=to[0]*j.m.vel[0]+to[2]*j.m.vel[2];
+        if(dist<=kFerryOver || (ahead<0.0f && dist<turn*kFerryRoom)) {   // over it, or by it: on, out for the next pass
+            j.ferryOut=true;
+            j.ferryDir[0]=j.m.vel[0];j.ferryDir[1]=0.0f;j.ferryDir[2]=j.m.vel[2];
+            if(!Normalize(j.ferryDir)){j.ferryDir[0]=0.0f;j.ferryDir[2]=1.0f;}
+        }
+    }
+    if(j.ferryOut)Level(pos,j.ferryDir,height,want);
+    else {
+        if(!Normalize(to)){to[0]=j.ferryDir[0];to[2]=j.ferryDir[2];}
+        Level(pos,to,height,want);
+    }
+    return speed;
 }
 
 void Wing(Jet& j,const Kind& k,unsigned char* v,const float* pos,float clear,const float* nose,float* want,float speed,float dt,

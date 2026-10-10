@@ -17,6 +17,11 @@ target_sources(EDF6VehicleCrew PRIVATE src/map.cpp)
 # The map's NPC commands (src/mapcmd.cpp, src/mapcmd_logic.h).
 target_sources(EDF6VehicleCrew PRIVATE src/mapcmd.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/support_dispatch.cpp)
+# The squads' transports (src/transport.cpp, rules in src/transport_logic.h; tools/transport_check.cpp).
+target_sources(EDF6VehicleCrew PRIVATE src/transport.cpp)
+# The container airdrops (src/airdrop.cpp, the stock container's data and the carrier's decisions in src/airdrop_logic.h;
+# tools/airdrop_check.cpp).
+target_sources(EDF6VehicleCrew PRIVATE src/airdrop.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/support_policy.cpp)
 # Out-of-mission support configuration: callable units and their crews' stock weapons (src/support_config.h).
 target_sources(EDF6VehicleCrew PRIVATE src/support_config.cpp)
@@ -53,6 +58,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/support_soldier.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/npc_gunner_aim.cpp src/real_driver_native.cpp src/mission_crew.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/command_unit.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/support_spawn.cpp)
+# The generated variant files (coloured soldiers, loaded vehicles) a mission preloads (src/support_variants.h).
+target_sources(EDF6VehicleCrew PRIVATE src/support_variants.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
@@ -178,6 +185,11 @@ set_target_properties(rounds_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_
 add_executable(map_buttons_check EXCLUDE_FROM_ALL tools/map_buttons_check.cpp)
 target_compile_options(map_buttons_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(map_buttons_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# A stock vehicle's seat events (src/seat_events.h): a crew created aboard plays no boarding sound, offline
+# (tools/seat_events_check.cpp).
+add_executable(seat_events_check EXCLUDE_FROM_ALL tools/seat_events_check.cpp)
+target_compile_options(seat_events_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(seat_events_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # A magnified sight's picture (src/scopeview.h): the dark round the field, offline (tools/scopeview_check.cpp).
 # Not part of the plugin build: cmake --build build --target scopeview_check && build\scopeview_check.exe
@@ -351,6 +363,19 @@ set_target_properties(map_cam_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE
 add_executable(map_cmd_check EXCLUDE_FROM_ALL tools/map_cmd_check.cpp)
 target_compile_options(map_cmd_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(map_cmd_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The squads' transports' rules (src/transport_logic.h) offline: phases, drop points, the paratroop stick and canopy.
+# The transports executed (src/transport.cpp against a world model: trips, an assault, WITHDRAW, the paratroop drop).
+add_executable(transport_runtime_test EXCLUDE_FROM_ALL tests/transport_runtime_test.cpp)
+target_link_libraries(transport_runtime_test PRIVATE edf6common)
+target_include_directories(transport_runtime_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_compile_options(transport_runtime_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME transport_runtime COMMAND transport_runtime_test)
+add_executable(airdrop_check EXCLUDE_FROM_ALL tools/airdrop_check.cpp)
+target_compile_options(airdrop_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(airdrop_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+add_executable(transport_check EXCLUDE_FROM_ALL tools/transport_check.cpp)
+target_compile_options(transport_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(transport_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # The Depth Crawler's driving on a floor, a wall and a ceiling (src/crawl_logic.h), offline (tools/crawl_check.cpp).
 # Not part of the plugin build:
 # cmake --build build --target crawl_check && build\crawl_check.exe
@@ -432,6 +457,11 @@ add_test(NAME support_entry COMMAND support_entry_test)
 add_executable(support_config_test tests/support_config_test.cpp)
 target_compile_options(support_config_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME support_config COMMAND support_config_test)
+# The out-of-game loadouts' pure logic: preset / round-mix syntax, the per-tank ratio allocation, generated file names
+# (src/support_loadout.h; docs/feature-2026-10-09-loadout-editor.md).
+add_executable(support_loadout_test tests/support_loadout_test.cpp)
+target_compile_options(support_loadout_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME support_loadout COMMAND support_loadout_test)
 add_executable(support_policy_test EXCLUDE_FROM_ALL tests/support_policy_test.cpp)
 target_link_libraries(support_policy_test PRIVATE edf6common)
 target_compile_options(support_policy_test PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -493,6 +523,10 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME support_config_ini COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/support_config_ini_test.py")
 # The menu prints Chinese: UTF-8 like the workflow's other Python steps, not the runner's cp1252 console.
 set_tests_properties(support_config_ini PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The loadout editor and generator (tools/support_loadout.py) against src/support_loadout.h; with the game installed, the
+# files it makes from Root.cpk (read only).
+add_test(NAME support_loadout_ini COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/support_loadout_ini_test.py")
+set_tests_properties(support_loadout_ini PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME support_resources COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/support_resource_audit.py")
 set_tests_properties(support_resources PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME online_gate_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/online_gate_guard.py")
@@ -503,8 +537,9 @@ add_test(NAME pn COMMAND pn_test)
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
-    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check hover_lift_check view_clip_check npc_ai_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check)
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check hover_lift_check view_clip_check npc_ai_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
+add_dependencies(offline_checks transport_runtime_test)
 add_dependencies(offline_checks stab_native_readback_test)
 add_test(NAME stab_native_readback COMMAND stab_native_readback_test "${EDF6_NATIVE_DLL}")
 set_tests_properties(stab_native_readback PROPERTIES SKIP_RETURN_CODE 77)
@@ -521,6 +556,9 @@ add_test(NAME jet_attack_runs COMMAND jet_obstacle_sim --selftest --out "${CMAKE
 # The NPC flyers' soft edge (src/airbound.h): its rules (airbound_check) and the jets' real flight code flown at the play
 # edge (jet_obstacle_sim --edge-suite).
 add_test(NAME jet_edge_suite COMMAND jet_obstacle_sim --edge-suite WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
+# Ground attack runs on a stock-size map, whose soft box is narrower than the strike's own run (jet_obstacle_sim
+# --strike-room-suite; the 2026-10-09 log's multirole jets that never fired).
+add_test(NAME jet_strike_room COMMAND jet_obstacle_sim --strike-room-suite --out "${CMAKE_BINARY_DIR}")
 # The play area's walls (src/playarea.h: the ground's edge found by map rays, the walls' turn), a jet flown out at them
 # offline (tools/play_area_check.cpp). Not part of the plugin build:
 # cmake --build build --target play_area_check && build\play_area_check.exe
@@ -545,6 +583,7 @@ target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
 target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks map_command_runtime_check)
 add_dependencies(offline_checks support_dispatch_test)
+add_dependencies(offline_checks support_loadout_test support_config_test support_spawn_test)
 add_dependencies(offline_checks support_infantry_route_test)
 add_dependencies(offline_checks support_vehicle_route_test)
 add_dependencies(offline_checks support_policy_test)
@@ -764,7 +803,7 @@ add_test(NAME npc_gunners_online COMMAND npc_gunners_online_test)
 # EDF6Autopilot: a test-only plugin for background measurement runs (tests/autopilot/autopilot.cpp, driven by
 # tests/autopilot/drive.py); a MODULE into build/tools, never shipped:
 # cmake --build build --target EDF6Autopilot
-add_library(EDF6Autopilot MODULE EXCLUDE_FROM_ALL tests/autopilot/autopilot.cpp)
+add_library(EDF6Autopilot MODULE EXCLUDE_FROM_ALL tests/autopilot/autopilot.cpp tests/autopilot/airdrop_probe.cpp)
 target_include_directories(EDF6Autopilot PRIVATE third_party/EDFModLoader)
 target_link_libraries(EDF6Autopilot PRIVATE edf6common psapi)
 target_include_directories(EDF6Autopilot PRIVATE common)

@@ -201,7 +201,7 @@ void SupportNetTick() noexcept {
     CommandContext(now);
     if(session.Suspended())SuspendSupportNet();
 }
-bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::size_t size) noexcept {
+bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::size_t size,std::uint64_t loadout) noexcept {
     SupportNetTick();
     if(blockedUntilMission) {
         Note(note,size,L"联机参与者同步已暂停，现有支援保留；重新开始关卡后可再呼叫");return false;
@@ -209,7 +209,7 @@ bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::s
     if(catalogId<0 || !running || !session.Ready()) {
         Note(note,size,L"联机支援尚未就绪：需全房同版全军出击与联机扩展，并完成关卡同步");return false;
     }
-    if(!session.Submit(static_cast<std::uint32_t>(catalogId),target,GetTickCount64())) {
+    if(!session.Submit(static_cast<std::uint32_t>(catalogId),target,GetTickCount64(),loadout)) {
         Note(note,size,L"支援请求未受理：已有部署、调用过快或本关支援额度已满");return false;
     }
     Note(note,size,L"支援请求已排队，等待房主验证与全员确认");return true;
@@ -223,6 +223,12 @@ void ReportSupportFailure(std::uint64_t transaction) noexcept {
 bool SupportTransactionActive(std::uint64_t transaction) noexcept { return session.IsActive(transaction); }
 bool SupportPeersAcceptVariants() noexcept { return !running || session.PeersHave(support_net::kCapSoldierVariants); }
 bool SupportPeersAcceptAirborne() noexcept { return !running || session.PeersHave(support_net::kCapAirborneAir); }
+bool SupportPeersAcceptTransports() noexcept { return !running || session.PeersHave(support_net::kCapTransports); }
+bool SupportPeersAcceptLoadout() noexcept { return !running || session.PeersHave(support_net::kCapLoadout); }
+bool SupportPeersHaveVariantFile(std::uint64_t hash) noexcept {
+    return !running || session.PeersHaveVariant(support_net::kExtVariants,hash);
+}
+bool SupportPeersApplyVariants() noexcept { return !running || session.PeersHaveVariant(support_net::kExtVariants,0); }
 bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) noexcept {
     if(!authenticatedPuid || !std::memchr(authenticatedPuid,0,65))return false;
     EDF6CoopPeer peer;
