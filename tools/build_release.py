@@ -150,7 +150,7 @@ def build_exe(name: str) -> str:
                 'make_bigmap', 'bigmap', 'seams', 'fmb', 'hkcms', 'hktag', 'gen', 'rmpa', 'jet_models', 'jet_gear', 'weapons',
                 'testhub', 'make_emc', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
                 'cas_pose', 'aircraft_collision', 'support_config', 'support_loadout',
-                'make_sazabi', 'sazabi_model', 'sazabi_arms', 'procmesh', 'make_edf5_campaign', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics',
+                'make_sazabi', 'sazabi_model', 'sazabi_arms', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics',
                 'build'):   # every module installer.py imports in a function (selftest release_imports); build is
         # autoturret/tools/build.py (--paths above comes before site-packages, where pip's own `build` may be)
         cmd += ['--hidden-import', mod]
@@ -162,6 +162,9 @@ def build_exe(name: str) -> str:
     cmd += ['--add-data', f'{recipes}{seps}plugin']
     # the EDF5 campaign's titles and briefings (make_edf5_campaign.TEXT reads them from the bundle when frozen)
     cmd += ['--add-data', f'{os.path.join(ROOT, "edf5campaign", "missions.json")}{seps}edf5campaign']
+    # the earlier games' weapon registries (ported_weapons.DATA is the bundle when frozen)
+    for folder in ('edf5port', 'edf41port'):
+        cmd += ['--add-data', f'{os.path.join(ROOT, folder, "weapons.json")}{seps}{folder}']
     cmd.append(os.path.join(ROOT, 'tools', 'installer.py'))
     subprocess.run(cmd, check=True)
     return os.path.join(WORK, 'dist', EXE_NAME + '.exe')
