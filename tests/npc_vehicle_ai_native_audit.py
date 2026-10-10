@@ -67,8 +67,22 @@ rel = code(0x646300, 0x62)
 assert rel[0x646309] == 'mov rcx, qword ptr [rcx + 8]' and rel[0x646312] == 'mov rdx, qword ptr [rbx + 0x10]'
 assert rel[0x646346] == 'call 0x12d85ec'
 
+# The Barga: slot 6 builds its state machine, slot 7 clears its own block and runs the current action (+0x1648); its
+# slot 4 reads that block only when 0x62D850(veh, 0) answers 2, which is the AI-list bit for seat 0.
+BARGA = 0x17D98C8
+assert slot(BARGA, 6) == 0x609D70 and slot(BARGA, 7) == 0x60A520 and slot(BARGA, 4) == 0x60AEC0
+bp = code(0x60A520, 0xE3)
+assert bp[0x60A535] == 'call 0x54a000' and bp[0x60A579] == 'mov rcx, qword ptr [rbx + 0x1648]'
+assert bp[0x60A580] == 'mov byte ptr [rbx + 0x16d0], 1' and bp[0x60A598] == 'call qword ptr [rax + 8]'
+assert p.get_data(0x60AEFE, 10) == bytes.fromhex('33d2488bcbe848290200')   # xor edx,edx; mov rcx,rbx; call 0x62D850
+b4 = code(0x60AEC0, 0x60)
+assert b4[0x60AF14] == 'cmp eax, 2' and b4[0x60AF19] == 'movups xmm0, xmmword ptr [rbx + 0x1610]'
+kind = code(0x62D850, 0x37)
+assert kind[0x62D850] == 'test byte ptr [rcx + 0x1a], 8' and kind[0x62D859] == 'mov eax, 1' and kind[0x62D864] == 'mov eax, 2'
+assert code(0x60A110, 7)[0x60A110] == 'lea r8, [rip + 0x11cfd49]'   # the Barga's slot 6 reads the punch combos
+
 # The CarBase seat aim's trigger: only with the range flag, no limit veto (r14b) and on target (r15b).
 aim = code(0x65FF26, 0x30)
 assert aim[0x65FF2B] == 'cmp byte ptr [rsp + 0x30], 0' and aim[0x65FF32] == 'test r14b, r14b'
 assert aim[0x65FF37] == 'test r15b, r15b' and aim[0x65FF3C] == 'mov dword ptr [r12 + rbx + 0x2e4], 0x3f800000'
-print('PASS: AI-list flag -> slot 6, both AI passes and actions, the mech attack table and aim origin, the seat aim gate')
+print('PASS: AI-list flag -> slot 6, the three AI passes and actions (the Barga slot 4 kind), the mech attack table and aim origin, the seat aim gate')
