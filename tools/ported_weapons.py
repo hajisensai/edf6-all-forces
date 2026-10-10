@@ -7,9 +7,9 @@ tools/make_edf41_weapons.py; docs/edf5-weapons-plan.md): per weapon its id (EDF6
 level, star caps, the EDF6 template row, its texts in the five languages and the sound cues it needs swapped. Its SGO
 comes from one of two places:
   'edf6'  EDF6's own copy of it (in Root.cpk, never named by EDF6's table): copied under our id.
-  <game>  converted by pylib/edf5port.py: EDF5's when the registry was made, kept in it ('weapon'), so the install
-          needs no EDF5; EDF4.1's from the player's own install (gamedir.find_other: $EDF41_DIR, next to EDF6, the
-          Steam libraries). Without the game the row is still taken
+  <game>  converted by pylib/edf5port.py when the registry was made (EDF5's, EDF4.1's), kept in it ('weapon'), so
+          the install needs neither game; a registry entry without one is converted from the player's own install
+          (gamedir.find_other: $EDF41_DIR, next to EDF6, the Steam libraries). Without the game the row is still taken
           (tools/call_weapons.py plan_rows: every install of a release has the same rows, with or without it): a
           placeholder, its template's stock weapon named as waiting for the game (pending_*), until an install finds
           it; a row an earlier install built is kept as it is (its SGO is in Mods already).
@@ -252,7 +252,7 @@ def build_sgo(p: Port, stock, root: str | None, models: Models | None = None) ->
     something in it this conversion does not carry."""
     if p.source == 'edf6':
         return stock(f'WEAPON/{p.sgo.upper()}')
-    if p.weapon is not None:   # converted when the registry was made (EDF5's): the game is not needed
+    if p.weapon is not None:   # converted when the registry was made: the game is not needed
         doc = dsgo.Document(dsgo.load(p.weapon), [])
     else:
         name = BY_GAME[p.game].name

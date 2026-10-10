@@ -6021,6 +6021,34 @@ def mab_strings_relaid_as_the_game() -> None:
     assert count > 1000 and kanji > 100, f'{count} blocks, {kanji} with a kanji name: this check is empty'
 
 
+
+@test
+def ported_weapons_registry_current() -> None:
+    """Every converted weapon the registries keep ('weapon': EDF5's and EDF4.1's, so the install needs neither game)
+    is what pylib/edf5port.py makes of that game's file today, where the game is installed: a converter change without
+    tools/make_edf5_weapons.py / make_edf41_weapons.py run again fails here. Every port not EDF6's own carries one."""
+    import edf5port
+    import gamedir
+    import ported_weapons as pw
+    import rootcpk
+    import sgo
+    lacking = [p.id for p in pw.PORTS if p.source != 'edf6' and p.weapon is None]
+    assert not lacking, f'converted at install time, needing the game: {lacking[:5]}'
+    checked = 0
+    for g in pw.GAMES:
+        root = gamedir.find_other(g.install, near=rootcpk.DEFAULT_GAME)
+        if not root:
+            print(f'skip  ported_weapons_registry_current ({g.name}): not installed')
+            continue
+        game = rootcpk.Game(root)
+        for p in pw.PORTS:
+            if p.game != g.key or p.source == 'edf6':
+                continue
+            members = sgo.read(game.read('WEAPON', p.sgo))[1]
+            assert dsgo.dump(g.convert(members, pw._names(p)).root) == p.weapon, f'{p.id}: registry out of date'
+            checked += 1
+    print(f'  {checked} registry weapons equal to a conversion now')
+
 def _dsgo_strings(v: dsgo.Value) -> list[str]:
     if isinstance(v, str):
         return [v]
