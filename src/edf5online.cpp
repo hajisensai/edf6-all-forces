@@ -13,12 +13,17 @@
 //    GS+0x14FF8 (the session's) online (0x1D95F4). The BVM loop (0x22B3B0) creates by index through 0x22AB90,
 //    whose own online half (0x22AC2F -> 0x591130) is intact. At 0x22B36C the patch sets the loop's count (r13d) to
 //    the session's and enters it, the state there being the offline path's (xmm0 0, r15 0, the empty list at
-//    rbp-0x58; nothing else read before the loop sets it).
+//    rbp-0x58; nothing else read before the loop sets it). The loop's per-player pad (from {0,1,2,3}) and split (its
+//    count) are the offline ones, wrong online: 0x22AB90 binds that pad's input and makes a viewport of 1/split of
+//    the screen. The participant gate's wrapper of that call (mission_participant_gate.cpp) gives it AngelScript's:
+//    -1 for a remote user (no input, no viewport), this machine's own count for a local one, split by the local
+//    players (Edf5BvmOnlinePlayerArgs).
 // The BVM loop holds four players: its spawn offsets are four 16-byte slots on the stack (rbp+0x170..0x1A0, the
 // stack cookie at rbp+0x1B0) and its player table four 0x18-byte rows (object +0x168..+0x1C7, the object list at
 // +0x1C8). A session of more is created four, logged; never written past those.
 #include "crew.h"
 #include "memory.h"
+#include "mission_participant_gate.h"
 #include <cstdint>
 #include <cstring>
 
@@ -46,8 +51,38 @@ const unsigned char kCreateCode[]={
 static_assert(sizeof(kCreateCode)==0x22B3A4-kCreateAt);
 constexpr unsigned kCreatePatchSize=17;   // mov rax,imm64; call rax; mov r13d,eax; jmp short kCreateLoop
 
+// The session's players in mission order: the session object (*(EDF+0x20B2AC0)-0x98)+0xD0 and its slot 1, which
+// fills a std::vector<std::shared_ptr<User>> (AngelScript's PreloadPlayerResource 0x1B8D13..0x1B8D60, and 0x734670 the
+// creation's copy of it, 0x1D984D). A user is remote when bit 1 of its +0x10 is set (0x12AC420, read for every user
+// by the creation at 0x1D98B1).
+constexpr unsigned kSessionBase=0x20B2AC0,kSessionBack=0x98,kSessionList=0xD0,kUserFlags=0x10;
+constexpr unsigned kDelete=0x12D85EC;   // the game's sized operator delete
+// A created player whose +0x128 bit 0 is set is not counted as this machine's (0x1D9B50).
+constexpr unsigned kPlayerNotLocal=0x128;
+
+struct Shared { void* obj; void* ctrl; };
+struct SharedVector { Shared* first; Shared* last; Shared* end; };
+using ListFn=SharedVector*(__fastcall*)(void*,SharedVector*);
+using DeleteFn=void(__fastcall*)(void*,std::size_t);
+using CtrlFn=void(__fastcall*)(void*);
+DeleteFn freeFn=nullptr;   // the game's delete; tests/edf5_online_native_test.cpp sets its own (no CRT in its mapping)
+
+// What the patched creation loop needs per index, from AngelScript's creation (0x1D9A60..0x1D9A7B and 0x1D9B5F): this
+// machine's pad for a user of its own (its local players counted as they are created), -1 for a remote one (0x22AB90
+// then neither binds input nor makes a viewport, 0x22ACFE), and the split by the local players (GS+0x14FF4), not the
+// session's: one local player of two in the session is the whole screen, not its left half.
+struct Creation {
+    bool armed=false;
+    std::uint32_t count=0;
+    bool remote[kBvmPlayerSlots]{};
+    int localMade=0;
+    int split=1;
+};
+Creation creation;
+
 bool ready=false;
 bool clampLogged=false;
+bool gateLogged=false;
 
 bool WriteCode(unsigned rva,const unsigned char* code,std::size_t size) noexcept {
     unsigned char* at=image+rva;
@@ -58,21 +93,107 @@ bool WriteCode(unsigned rva,const unsigned char* code,std::size_t size) noexcept
     FlushInstructionCache(GetCurrentProcess(),at,size);
     return true;
 }
+
+// MSVC's _Ref_count_base::_Decref (as booster.cpp DropShared).
+void DropShared(void* ctrl) noexcept {
+    if(!ctrl)return;
+    if(_InterlockedExchangeAdd(reinterpret_cast<volatile long*>(static_cast<unsigned char*>(ctrl)+8),-1)!=1)return;
+    (*reinterpret_cast<CtrlFn* const*>(ctrl))[0](ctrl);
+    if(_InterlockedExchangeAdd(reinterpret_cast<volatile long*>(static_cast<unsigned char*>(ctrl)+0xC),-1)==1)
+        (*reinterpret_cast<CtrlFn* const*>(ctrl))[1](ctrl);
+}
+// The vector let go as the game does (0x1B8DA4..0x1B8E1F): every element, then the storage; a big one's (0x1000 bytes
+// and over) real block 8 bytes before it.
+void FreeList(SharedVector& v) noexcept {
+    if(!v.first)return;
+    for(Shared* p=v.first;p!=v.last;++p)DropShared(p->ctrl);
+    std::size_t bytes=static_cast<std::size_t>(reinterpret_cast<unsigned char*>(v.end)-reinterpret_cast<unsigned char*>(v.first))&
+                      ~std::size_t{15};
+    void* block=v.first;
+    if(bytes>=0x1000){bytes+=0x27;block=reinterpret_cast<void**>(v.first)[-1];}
+    (freeFn ? freeFn : reinterpret_cast<DeleteFn>(image+kDelete))(block,bytes);
+    v={};
+}
+
+bool ReadList(SharedVector& list) noexcept {
+    __try {
+        auto* base=At<unsigned char*>(image,kSessionBase);
+        void* session=base ? At<void*>(base-kSessionBack,kSessionList) : nullptr;
+        if(!session)return false;
+        SharedVector* got=(*reinterpret_cast<ListFn* const*>(session))[1](session,&list);
+        if(got && got!=&list){list=*got;*got=SharedVector{};}
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+// Which of the session's first `count` users are remote. False when the list cannot be read or is shorter.
+bool ReadRemote(std::uint32_t count,bool* remote) noexcept {
+    SharedVector list{};
+    bool ok=ReadList(list);
+    __try {
+        ok=ok && static_cast<std::uint32_t>(list.last-list.first)>=count;
+        for(std::uint32_t i=0;ok && i<count;++i)
+            remote[i]=list.first[i].obj && ((At<std::uint32_t>(list.first[i].obj,kUserFlags)>>1)&1);
+    } __except(EXCEPTION_EXECUTE_HANDLER){ok=false;}
+    __try {FreeList(list);} __except(EXCEPTION_EXECUTE_HANDLER){}
+    return ok;
+}
 }  // namespace
 
-// The BVM creation loop's count online: the session's players, at most the loop's four. Called from the patched
-// 0x22B36C on the game thread (its registers: rax back to the loop as r13d; rcx..r11 free there).
+// The BVM creation loop's count online: the session's players, at most the loop's four, with what each needs armed for
+// the creation (Edf5BvmOnlinePlayerArgs). Called from the patched 0x22B36C on the game thread (its registers: rax back
+// to the loop as r13d; rcx..r11 free there). 0, no player created, when the per-player arguments cannot be put right
+// (the participant gate, which wraps the creation, not installed, or the session's users unreadable): every machine
+// creating every player for its own pads and splitting the screen by them is worse than no player.
 std::uint32_t Edf5BvmOnlinePlayers() noexcept {
-    std::uint32_t players=0;
+    creation=Creation{};
+    std::uint32_t players=0,local=0;
+    bool read=false;
     __try {
         const auto status=At<unsigned char*>(image,kGameStatus);
-        players=status ? At<std::uint32_t>(status,kSessionPlayers) : 0;
-    } __except(EXCEPTION_EXECUTE_HANDLER){players=0;}
-    if(players<=kBvmPlayerSlots){clampLogged=false;return players;}
-    if(!clampLogged)Log("EDF5 online: %u players in the session, an EDF5 mission creates %u (its script's player slots)",
-                        players,kBvmPlayerSlots);
-    clampLogged=true;
-    return kBvmPlayerSlots;
+        if(status){players=At<std::uint32_t>(status,kSessionPlayers);local=At<std::uint32_t>(status,kLocalPlayers);read=true;}
+    } __except(EXCEPTION_EXECUTE_HANDLER){read=false;}
+    if(!read){Log("EDF5 online: no game status, no player created");return 0;}
+    std::uint32_t count=players;
+    if(players>kBvmPlayerSlots) {
+        if(!clampLogged)Log("EDF5 online: %u players in the session, an EDF5 mission creates %u (its script's player slots)",
+                            players,kBvmPlayerSlots);
+        clampLogged=true;
+        count=kBvmPlayerSlots;
+    } else clampLogged=false;
+    if(!MissionParticipantGateReady()) {
+        if(!gateLogged)Log("EDF5 online: the player creation's wrapper (mission_participant_gate) is not installed: no player created");
+        gateLogged=true;
+        return 0;
+    }
+    if(!ReadRemote(count,creation.remote)) {
+        Log("EDF5 online: the session's %u users unreadable: no player created",count);
+        creation=Creation{};
+        return 0;
+    }
+    bool localFound=false;
+    for(std::uint32_t i=0;i<count;++i)localFound=localFound || !creation.remote[i];
+    if(players>count && !localFound)Log("EDF5 online: this machine's player is past the script's %u slots: it has none",count);
+    creation.count=count;
+    creation.split=local>0 ? static_cast<int>(local) : 1;
+    creation.armed=count>0;
+    return count;
+}
+
+// Before the BVM creation of mission player `index` (0x22B626 -> 0x22AB90, its 5th and 6th arguments): online, this
+// machine's pad or -1, and the split by the local players. False offline and outside the armed online loop.
+bool Edf5BvmOnlinePlayerArgs(int index,int* pad,int* split) noexcept {
+    if(!creation.armed || index<0 || static_cast<std::uint32_t>(index)>=creation.count || !pad || !split)return false;
+    *pad=creation.remote[index] ? -1 : creation.localMade;
+    *split=creation.split;
+    return true;
+}
+// After it: a created player of this machine's counts (0x1D9B50); the loop's last index disarms.
+void Edf5BvmOnlinePlayerMade(int index,const void* made) noexcept {
+    if(!creation.armed || index<0 || static_cast<std::uint32_t>(index)>=creation.count)return;
+    __try {
+        if(!creation.remote[index] && made && !(At<unsigned char>(made,kPlayerNotLocal)&1))++creation.localMade;
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+    if(static_cast<std::uint32_t>(index)+1==creation.count)creation=Creation{};
 }
 
 // Both or neither: players preloaded but never created is the black screen this fixes, created but not preloaded worse.
@@ -97,7 +218,12 @@ bool InstallEdf5Online() noexcept {
         return false;
     }
     if(!WriteCode(kCreateOnline,patch,sizeof(patch))) {
-        Log("HOOK edf5 online=0 (CreatePlayer not patched; its preload is AngelScript's, harmless alone)");
+        // Back to the BVM preload: the call now lands on our near thunk.
+        std::int32_t rel=0;
+        std::memcpy(&rel,image+kPreloadCall+1,4);
+        bool undone=false;
+        RedirectCall(image+kPreloadCall,image+kPreloadCall+5+rel,image+kBvmPreload,undone);
+        Log("HOOK edf5 online=0 (CreatePlayer not patched; native 0x10 %s)",undone ? "back to the BVM preload" : "left on AngelScript's");
         return false;
     }
     ready=true;

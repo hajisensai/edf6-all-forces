@@ -17,14 +17,25 @@ MissionPlayerCreated observer=nullptr;
 bool ready=false;
 ObjRef* __fastcall UpperHook(void* context,ObjRef* out,const float* matrix,int index,
                             int a5,int a6,int a7,bool a8,int a9,void* a10) noexcept {
+    // a5 the pad bound to this player, a6 the screen split: the EDF5 loop's offline ones, AngelScript's online
+    // (edf5online.cpp Edf5BvmOnlinePlayerArgs: -1 for a remote user, split by this machine's players).
+    const bool online=Edf5BvmOnlinePlayerArgs(index,&a5,&a6);
     if(ready && InSession() && admission && !admission(index)) {
         // 22AB90 returns a weak_ptr in its caller-provided output, not a Soldier*. Its caller
         // checks the ctrl at 22B637, then the locked object at 22B694: this is its valid empty path.
         // Returning null from the inner 591130 instead would crash at 22AC3F.
         if(out)*out=ObjRef{};
+        if(online)Edf5BvmOnlinePlayerMade(index,nullptr);
         return out;
     }
     ObjRef* result=original(context,out,matrix,index,a5,a6,a7,a8,a9,a10);
+    if(online) {
+        const void* made=nullptr;
+        __try {
+            if(Readable(result,sizeof(ObjRef)) && result->obj && result->ctrl && At<LONG>(result->ctrl,8)>0)made=result->obj;
+        } __except(EXCEPTION_EXECUTE_HANDLER){made=nullptr;}
+        Edf5BvmOnlinePlayerMade(index,made);
+    }
     if(ready && InSession() && observer && index>=0) {
         __try {
             if(Readable(result,sizeof(ObjRef)) && result->obj && Readable(result->ctrl,16) &&
