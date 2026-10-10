@@ -735,6 +735,15 @@ add_test(NAME npc_core_check COMMAND npc_core_check)
 set(EDF6_NATIVE_DLL "" CACHE FILEPATH "Optional supported EDF.dll for isolated native checks")
 add_test(NAME item_pickup_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/item_pickup_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(item_pickup_native PROPERTIES SKIP_RETURN_CODE 77)
+# The Proteus shield's round carries its model into the IFC (src/ifc_model.h; test hub report #6, the B-key crash):
+# the copy against fake visitors, its wiring in jet_bay.cpp / make_proteus.py, and the contract on the real EDF.dll.
+add_executable(ifc_model_test EXCLUDE_FROM_ALL tests/ifc_model_test.cpp)
+target_compile_options(ifc_model_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks ifc_model_test)
+add_test(NAME ifc_model COMMAND ifc_model_test)
+add_test(NAME ifc_model_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/ifc_model_guard.py")
+add_test(NAME ifc_model_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/ifc_model_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(ifc_model_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME playerjet_recovery COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/playerjet_recovery_check.py"
     --build-dir "${CMAKE_BINARY_DIR}" --negative-controls)
 # Production launch heat and cooling, including the overheat latch before the launch frame's cooling.

@@ -8,6 +8,9 @@ EMC's rounds are: pylib/vcobjects.py) whose one round is a BarrierBullet01, the 
 (speed 0, no gravity) and never runs out (the plugin keeps it on the hull and takes it down); its Ammo_CustomParameter
 [arc (rad), radius, height, [sx, sy, sz], [offset]] is a wall round the Proteus (SHIELD_*: proteus_shield.inc reads the
 same numbers). Its hit size is tiny: the barrier never touches what it stands round (a touch would anchor it there).
+It carries EWEAPON196's animation_model (the barrier's device: e_support_barrier01 rab / mdb / cas / MAB): a
+BarrierBullet01 builds that model from its InitParam, which only a weapon fills; EmcFire hands the SGO's to the IFC
+(src/ifc_model.h). Without it the round's ctor throws and the game dies (docs/feedback-2026-10-10-proteus-shield-crash.md).
 
 Until 2026-10-09 this module rewrote the stock Proteus models (private MRAB / CAS with 36 hand-made shield panels) and
 redirected every VehicleBigBegaruta SGO to them. That is gone: the game loads the stock model again. install() still
@@ -26,6 +29,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'pylib'))
 import ledger
 import modfiles
+import dsgo
 import rootcpk
 import sgo
 
@@ -58,6 +62,32 @@ def shield_arc() -> float:
     return _f32(SHIELD_ARC_DEG * math.pi / 180.0)
 
 
+def _sgo_value(v):
+    """A DSGO value (pylib/dsgo.py) as an SGO one: lists, strings, raw blocks; numbers as floats (an SGO keeps the type)."""
+    if isinstance(v, dsgo.Node):
+        if v.names:
+            raise ValueError('animation_model 里有带名字的容器')
+        return [_sgo_value(c) for c in v.items]
+    if isinstance(v, dsgo.Blob):
+        return bytes(v.data)
+    if isinstance(v, str):
+        return v
+    return float(v)
+
+
+def barrier_model(data: bytes) -> list:
+    """EWEAPON196's animation_model as an SGO value: [[rab, mdb], cas, MAB] (the weapon init's, 0x68DAD5)."""
+    if data[:4] == b'DSGO':
+        model = _sgo_value(dsgo.parse(data).root.get('animation_model'))
+    else:
+        model = sgo.read(data)[1]['animation_model']
+    if (not isinstance(model, list) or len(model) != 3 or not isinstance(model[0], list) or len(model[0]) != 2
+            or not all(isinstance(x, str) and x for x in model[0]) or not isinstance(model[1], str)
+            or not isinstance(model[2], bytes)):
+        raise ValueError(f'{BARRIER_WEAPON} 的 animation_model 不是 [[rab, mdb], cas, MAB]')
+    return model
+
+
 def shield(game: rootcpk.Game) -> bytes:
     """EDF6VC_PROTEUS_SHIELD.SGO from the player's Root.cpk (see the module's doc)."""
     version, m = sgo.read(game.read('OBJECT', SHIELD_STOCK))
@@ -65,7 +95,8 @@ def shield(game: rootcpk.Game) -> bytes:
     if (m.get('xgs_scene_object_class') != 'DemoIndirectFire' or not isinstance(p, list) or len(p) != 19
             or p[4] != 'SolidBullet01' or 'indirect_fire_damage' not in m):
         raise ValueError(f'{SHIELD_STOCK} 不是预期的炮舰炮弹（DemoIndirectFire）')
-    w = sgo.plain(sgo.load(data=game.read('WEAPON', BARRIER_WEAPON)))   # a DSGO
+    weapon = game.read('WEAPON', BARRIER_WEAPON)
+    w = sgo.plain(sgo.load(data=weapon))   # a DSGO
     if w.get('AmmoClass') != BARRIER_CLASS or not isinstance(w.get('Ammo_CustomParameter'), list):
         raise ValueError(f'{BARRIER_WEAPON} 不是原版电磁碉堡（{BARRIER_CLASS}）')
     stock_cp = w['Ammo_CustomParameter']
@@ -85,6 +116,7 @@ def shield(game: rootcpk.Game) -> bytes:
     if isinstance(p[18], list) and len(p[18]) == 6:
         p[18][2] = 0.0                           # no hit sound: it hits nothing
     m['indirect_fire_damage'] = 0.0              # its HP is the plugin's (proteus_shield.inc writes +0x14D8)
+    m['animation_model'] = barrier_model(weapon)  # the device the BarrierBullet01 builds (src/ifc_model.h)
     return sgo.write(version, m)
 
 
@@ -99,6 +131,10 @@ def check_shield(data: bytes) -> None:
     assert abs(arc - shield_arc()) < 1e-6 and radius == SHIELD_RADIUS and height == SHIELD_HEIGHT, p[13]
     assert scale == [1.0, 1.0, 1.0] and offset == [0.0, 0.0, 0.0], p[13]
     assert m['indirect_fire_damage'] == 0.0
+    model = sgo.read(data)[1].get('animation_model')
+    assert (isinstance(model, list) and len(model) == 3 and isinstance(model[0], list) and len(model[0]) == 2
+            and all(isinstance(x, str) and x for x in model[0]) and isinstance(model[1], str)
+            and isinstance(model[2], bytes)), 'animation_model'
 
 
 def segments(arc: float) -> int:
