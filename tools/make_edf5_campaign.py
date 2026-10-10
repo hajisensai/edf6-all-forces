@@ -369,7 +369,7 @@ def pick_thumbs(rows: list[dict], own: dict[str, mdb.RabFile], stock: dict[str, 
     for r in rows:
         mine = None if r.get('thumb') else own.get(thumb_name(r.get('path', '')).upper())
         src = mine or stock.get(thumb_name(r.get('thumb') or by_map.get(r['map'] or '', '')).upper(), fallback)
-        out.append(mdb.RabFile(thumb_name(r['key']), src.folder, src.flag, src.stored))
+        out.append(mdb.RabFile(thumb_name(r['key']), src.folder, src.flag, src.stored, src.unk))
     return out
 
 
