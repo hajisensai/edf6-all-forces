@@ -196,6 +196,11 @@ void Guide(Jet& j,const Kind& kind,const Arms& arms,Jet* mother,const float* pos
     default:
         break;
     }
+    if(j.ferry) {   // the paratroop plane: passes over its point (Ferry), never Patrol's ring round it
+        if(j.mode!=Mode::patrol)SetMode(j,Mode::patrol,ms);
+        *speed=Ferry(j,pos,anchor,height,want);
+        return;
+    }
     switch(kind.weapon) {
     case Weapon::charge: {   // at its target, else under its carrier (Hover)
         const Mode at=j.t.target ? Mode::approach : Mode::patrol;
@@ -433,7 +438,8 @@ const float* CommandAnchor(const Jet& j,bool follow,const float* own) noexcept {
 // carrier's drone (its carrier sends it) nor a Primer creature.
 bool Commandable(const Jet& j,ULONGLONG ms) noexcept {
     if(!j.ref || j.reap || !Alive(j.ref) || IsPrimer(j) || MotherOf(j))return false;
-    if(j.mode==Mode::withdraw || ms-j.seen>kCommandSeenMs)return false;
+    // A ferry takes none: its point is its drop's (transport.cpp keeps the stick's), a new one would carry the soldiers off.
+    if(j.mode==Mode::withdraw || j.ferry || ms-j.seen>kCommandSeenMs)return false;
     const unsigned char* v=j.Vehicle();
     return CommandVehicleLive(j.ref) && !HostileJet(v) && !PlayerJetHolds(v);
 }
@@ -468,7 +474,7 @@ bool JetFerry(const void* vehicle,const float* at) noexcept {
     __try {
         Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle));
         if(!j || !at || j->reap)return false;
-        j->ferry=true;
+        j->ferry=true;j->ferryOut=false;
         ApplyMapCommand(*j,Command{Order::guard,{at[0],at[1],at[2]}},GameMs());
         Log("JET v=%p ferry to (%.0f,%.0f,%.0f), %.0f m over it",vehicle,at[0],at[1],at[2],kFerryAlt);
         return true;

@@ -201,6 +201,7 @@ Role RoleNamed(const char* n) {
 }
 
 // --- --selftest ---
+constexpr float kFerryCheckOver=100.0f;   // m: a ferry's pass comes this near its point at least
 constexpr float kPullMargin=15.0f;   // m: the least a pull-out may leave under it (Guard aims at kMinAlt, 25)
 
 // A body for a selftest case: at `at`, flying `dir` (unit) at `speed`, rolled `bank` rad about its path (0 upright).
@@ -355,6 +356,44 @@ int SelfTest(const char* outDir) {
         std::printf("%s %3.0f m over, target %2.0f deg off the nose: guns at %.1f s (%.0f m over it), missile at %.1f s %s\n",
                     r.launched ? "entry" : "run  ",static_cast<double>(r.over),static_cast<double>(r.off),static_cast<double>(gun),
                     static_cast<double>(over),static_cast<double>(msl),ok ? "ok" : "FAIL");
+    }
+    // The paratroop plane's passes (jet_flight.cpp Ferry; transport.cpp jumps within 400 m of the point): from 3 km out,
+    // abeam, it comes over the point, and round again for another pass. Patrol's 1000 m ring never brought it within 400 m.
+    {
+        boxes.clear();
+        const Role role=Role::strike;
+        std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0);
+        unsigned char* v=mem.data();
+        Jet& j=jets[0];
+        const float point[3]={0.0f,0.0f,0.0f},at[3]={0.0f,150.0f,-3000.0f},dir[3]={1.0f,0.0f,0.0f};
+        Place(j,v,ctrl.data(),role,at,dir,KindOf(role).cruise,0.0f);
+        j.ferry=true;
+        int passes=0;bool inside=false;float nearest=1e9f,firstAt=-1.0f;
+        const ULONGLONG born=nowMs;
+        for(int f=0;f<60*180;++f) {
+            nowMs+=16;
+            const float* pos=reinterpret_cast<const float*>(v+kPosition);
+            const float* m=reinterpret_cast<const float*>(v+kMatrix);
+            float nose[3]={m[8],m[9],m[10]};
+            if(!Normalize(nose)){nose[0]=0;nose[1]=0;nose[2]=1;}
+            j.seen=nowMs;
+            Sense(j,pos,nowMs);
+            const float clear=GroundClearance(pos);
+            float want[3]={nose[0],0.0f,nose[2]};
+            const float speed=Ferry(j,pos,point,point[1]+150.0f,want);
+            Wing(j,KindOf(role),v,pos,clear,nose,want,speed,kDt,nowMs);
+            HoldOffGround(j,pos,clear,kDt,nowMs);
+            j.m.ready=true;
+            Move(j,v);
+            const float d=HorizDist(pos,point);
+            if(d<nearest)nearest=d;
+            if(d<=400.0f && !inside){++passes;if(firstAt<0.0f)firstAt=static_cast<float>(nowMs-born)*0.001f;}
+            inside=d<=400.0f;
+        }
+        const bool ok=passes>=2 && firstAt>=0.0f && firstAt<60.0f && nearest<kFerryCheckOver;
+        if(!ok)++bad;
+        std::printf("ferry from 3 km abeam: first within 400 m at %.1f s, %d passes in 180 s, nearest %.0f m %s\n",
+                    static_cast<double>(firstAt),passes,static_cast<double>(nearest),ok ? "ok" : "FAIL");
     }
     // The map's focus order (2026-10-09, "飞机没办法指定攻击目标"): the marked enemy is the target before a nearer one and
     // past its guard order's range (production PickTarget / VisitTarget); out past the walls it waits, the others fought;

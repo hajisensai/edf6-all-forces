@@ -464,8 +464,10 @@ struct Jet {
     // longer among the enemies (dead, gone: PickTarget) or another order comes. Its point and its order stay as they were.
     ObjRef focus{};
     // A ferry (JetFerry, transport.cpp: the paratroop plane): straight on to its command point kFerryAlt m over it, taking
-    // no target at all on the way or after (it carries soldiers, not bombs); its withdrawal ends it.
-    bool ferry=false;
+    // no target at all on the way or after (it carries soldiers, not bombs); its withdrawal ends it. Its passes (Ferry):
+    // `ferryOut` once over (or past) the point, flying on along `ferryDir` until it has room to come round for the next.
+    bool ferry=false,ferryOut=false;
+    float ferryDir[3]{};
     unsigned char* Vehicle() const noexcept { return static_cast<unsigned char*>(const_cast<void*>(ref.obj)); }
 };
 constexpr int kMaxJets=64,kPatrolRings=6;
@@ -568,6 +570,9 @@ float TurnRadiusOf(const Kind& k,float mass,float speed) noexcept;
 const float* SoftAnchor(const Jet& j,const float* anchor,float* room) noexcept;
 void HoldOffGround(Jet& j,const float* pos,float clear,float dt,ULONGLONG ms,float rest=0.0f) noexcept;
 float Patrol(const Jet& j,const float* pos,const float* anchor,float height,float* want) noexcept;
+// A ferry's pass over `point` (Jet::ferry, the paratroop plane): at it, over it and straight on, round, back over it.
+// Returns the speed to fly it at (its slowest loiter: the stick jumps over the point).
+float Ferry(Jet& j,const float* pos,const float* point,float height,float* want) noexcept;
 // `lift`: m/s^2 of vertical acceleration apart from the kind's thrust (hover_lift.h: the player's); 0, one budget (the NPCs').
 // `npcGoal`: clamp autonomous goals to the NPC soft band; player control and its hail pass false.
 void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const float* goal,const float* face,float speed,float climb,
