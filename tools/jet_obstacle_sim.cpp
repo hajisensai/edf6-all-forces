@@ -201,7 +201,7 @@ Role RoleNamed(const char* n) {
 }
 
 // --- --selftest ---
-constexpr float kFerryCheckOver=100.0f;   // m: a ferry's pass comes this near its point at least
+constexpr float kFerryCheckOver=30.0f;    // m: a ferry's pass crosses its point this near its line at least
 constexpr float kPullMargin=15.0f;   // m: the least a pull-out may leave under it (Guard aims at kMinAlt, 25)
 
 // A body for a selftest case: at `at`, flying `dir` (unit) at `speed`, rolled `bank` rad about its path (0 upright).
@@ -357,43 +357,76 @@ int SelfTest(const char* outDir) {
                     r.launched ? "entry" : "run  ",static_cast<double>(r.over),static_cast<double>(r.off),static_cast<double>(gun),
                     static_cast<double>(over),static_cast<double>(msl),ok ? "ok" : "FAIL");
     }
-    // The paratroop plane's passes (jet_flight.cpp Ferry; transport.cpp jumps within 400 m of the point): from 3 km out,
-    // abeam, it comes over the point, and round again for another pass. Patrol's 1000 m ring never brought it within 400 m.
+    // The paratroop plane's passes (jet_flight.cpp Ferry, ferry_line.h; 2026-10-10, the user: 「空降时外援飞来的路线不对……
+    // 直线之类的更合理的路线才对吧」): on a stock map's ground (+-1750 m, its soft box +-1000) it comes in from off the map
+    // (support_entry.h AirRoute: 1950-2700 m out) on the line through the point, along it over the point and on to the line's
+    // end off the map, round there (inside the square, never deleted at the world's edge) and back over the point along the
+    // same line; its stick out, on to the end of that pass and gone there. The soft edge never turns it back on its line.
+    // Before: chasing the point it went by 288 m abeam and circled the north-east corner for 2 minutes (13:17-13:19 log).
     {
         boxes.clear();
+        const float wasGround=groundHalf;groundHalf=1750.0f;
         const Role role=Role::strike;
         std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0);
         unsigned char* v=mem.data();
         Jet& j=jets[0];
-        const float point[3]={0.0f,0.0f,0.0f},at[3]={0.0f,150.0f,-3000.0f},dir[3]={1.0f,0.0f,0.0f};
-        Place(j,v,ctrl.data(),role,at,dir,KindOf(role).cruise,0.0f);
-        j.ferry=true;
-        int passes=0;bool inside=false;float nearest=1e9f,firstAt=-1.0f;
-        const ULONGLONG born=nowMs;
-        for(int f=0;f<60*180;++f) {
-            nowMs+=16;
-            const float* pos=reinterpret_cast<const float*>(v+kPosition);
-            const float* m=reinterpret_cast<const float*>(v+kMatrix);
-            float nose[3]={m[8],m[9],m[10]};
-            if(!Normalize(nose)){nose[0]=0;nose[1]=0;nose[2]=1;}
-            j.seen=nowMs;
-            Sense(j,pos,nowMs);
-            const float clear=GroundClearance(pos);
-            float want[3]={nose[0],0.0f,nose[2]};
-            const float speed=Ferry(j,pos,point,point[1]+150.0f,want);
-            Wing(j,KindOf(role),v,pos,clear,nose,want,speed,kDt,nowMs);
-            HoldOffGround(j,pos,clear,kDt,nowMs);
-            j.m.ready=true;
-            Move(j,v);
-            const float d=HorizDist(pos,point);
-            if(d<nearest)nearest=d;
-            if(d<=400.0f && !inside){++passes;if(firstAt<0.0f)firstAt=static_cast<float>(nowMs-born)*0.001f;}
-            inside=d<=400.0f;
+        const float point[3]={150.0f,0.0f,-200.0f};
+        const struct { const char* what; float at[3],dir[3]; } runs[]={
+            {"from off the map, on the line",{-2350.0f,150.0f,-200.0f},{1.0f,0.0f,0.0f}},
+            {"from off the map, 300 m off the line",{-2350.0f,150.0f,100.0f},{1.0f,0.0f,0.0f}},
+            {"diagonal, from a corner",{-1700.0f,150.0f,-2050.0f},{0.707f,0.0f,0.707f}}};
+        for(const auto& r:runs) {
+            float dir[3]={r.dir[0],0.0f,r.dir[2]};Normalize(dir);
+            Place(j,v,ctrl.data(),role,r.at,dir,KindOf(role).cruise,0.0f);
+            support::PassLine line{};
+            const support::Reach reach{WorldHalf()-kArrivalRoom,1000.0f};
+            const bool lined=support::MakePassLine(MapPlayArea(),reach,point,dir,FerryTurn(KindOf(role)),line);
+            j.ferry=true;j.ferryLine=line;j.ferryPass=ferry::Pass{};j.ferryGone=false;
+            int crossings=0,ends=0;float worstAcross=0.0f,mostOut=0.0f,firstAt=-1.0f;
+            bool lastAhead=true,inEnd=false,gone=false;float goneAt[3]{};
+            const ULONGLONG born=nowMs;
+            for(int f=0;f<60*300 && !gone;++f) {
+                nowMs+=16;
+                const float* pos=reinterpret_cast<const float*>(v+kPosition);
+                const float* m=reinterpret_cast<const float*>(v+kMatrix);
+                float nose[3]={m[8],m[9],m[10]};
+                if(!Normalize(nose)){nose[0]=0;nose[1]=0;nose[2]=1;}
+                j.seen=nowMs;
+                Sense(j,pos,nowMs);
+                const float clear=GroundClearance(pos);
+                float want[3]={nose[0],0.0f,nose[2]};
+                const float speed=Ferry(j,pos,point[1]+150.0f,want);
+                Wing(j,KindOf(role),v,pos,clear,nose,want,speed,kDt,nowMs);
+                HoldOffGround(j,pos,clear,kDt,nowMs);
+                j.m.ready=true;
+                Move(j,v);
+                if(j.ferryGone){gone=true;std::memcpy(goneAt,pos,12);}
+                float along,across;ferry::Along(line,pos,&along,&across);
+                const bool ahead=along<0.0f ? j.ferryPass.dir>0 : j.ferryPass.dir<0;   // the point still ahead on this pass
+                if(lastAhead && !ahead && std::fabs(along)<200.0f) {   // over the point (along its pass)
+                    ++crossings;
+                    if(firstAt<0.0f)firstAt=static_cast<float>(nowMs-born)*0.001f;
+                    if(crossings>0 && std::fabs(across)>worstAcross)worstAcross=std::fabs(across);
+                    if(crossings==2)j.ferryPass.done=true;   // the stick out on the second pass (JetFerryDone)
+                }
+                lastAhead=ahead;
+                const bool atEnd=along>=line.hi || along<=line.lo;
+                if(atEnd && !inEnd)++ends;
+                inEnd=atEnd;
+                const float out=std::fmax(std::fabs(pos[0]),std::fabs(pos[2]));
+                if(out>mostOut)mostOut=out;
+            }
+            float glo[2],ghi[2];support::GroundEdge(MapPlayArea(),glo,ghi);
+            const bool offMap=gone && (goneAt[0]<glo[0] || goneAt[0]>ghi[0] || goneAt[2]<glo[1] || goneAt[2]>ghi[1]);
+            const bool ok=lined && crossings>=2 && worstAcross<kFerryCheckOver && ends>=2 && gone && offMap &&
+                          mostOut<WorldHalf()-50.0f && firstAt>=0.0f && firstAt<60.0f;
+            if(!ok)++bad;
+            std::printf("ferry %s: over the point at %.1f s, %d passes %.0f m off its line at most, %d ends reached, gone %s at "
+                        "(%.0f,%.0f), %.0f m out at most %s\n",r.what,static_cast<double>(firstAt),crossings,static_cast<double>(worstAcross),
+                        ends,offMap ? "off the map" : gone ? "ON THE MAP" : "never",static_cast<double>(goneAt[0]),static_cast<double>(goneAt[2]),
+                        static_cast<double>(mostOut),ok ? "ok" : "FAIL");
         }
-        const bool ok=passes>=2 && firstAt>=0.0f && firstAt<60.0f && nearest<kFerryCheckOver;
-        if(!ok)++bad;
-        std::printf("ferry from 3 km abeam: first within 400 m at %.1f s, %d passes in 180 s, nearest %.0f m %s\n",
-                    static_cast<double>(firstAt),passes,static_cast<double>(nearest),ok ? "ok" : "FAIL");
+        groundHalf=wasGround;
     }
     // The map's focus order (2026-10-09, "飞机没办法指定攻击目标"): the marked enemy is the target before a nearer one and
     // past its guard order's range (production PickTarget / VisitTarget); out past the walls it waits, the others fought;

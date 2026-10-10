@@ -344,7 +344,7 @@ SetLinearVelocity 写多少都没用，Havok 在积分时夹到 200：18:58 那�
   远相机 500 m 到 20 km，只画 bit26（`0x04000000`）。
 - 载具的渲染节点建立时遮罩是 `0x12000000`，没有 bit26，所以飞出 1000 m 的喷气机就看不见了。
 - 游戏自己的开关是 SGO `FarRender` / `use_far_render` 走的 `image+0x11B3020(node, true)`。
-  喷气机的节点是模型组件 `vehicle+0xE40`（vtable `image+0x176B9A8`），遮罩在节点 `+0x20`。
+  喷气机的节点是模型组件 `vehicle+0xE40`，遮罩在节点 `+0x20`。**更正（2026-10-10）**：它是 `AnimationModel`（RTTI `0x17C4030`，基类 `umbra::Object@0`），构造函数 `0x6B8740` 先调 `umbra::Object` 构造（写 vtable `0x176B9A8`）再在 `0x6B875D` 覆盖成自己的 vtable `0x17C4030`，所以运行时读到的永远是 `0x17C4030`，原来只认 `0x176B9A8` 的校验让每架飞机都“far rendering off”（实机日志 `has vtable ...DBC4030`，基址 `...C400000`）。现在两者都认，并要求 `node+0x10`（Umbra::Object*）非空才调用（`0x11B3020` 不判空）。
 - 插件每帧（`JetFrame` → `src/jet_spawn.cpp` `FarRender`）检查：vtable 不符 → 记日志、这架不再处理；bit26 已在 → 什么都不做；
   否则调用开关并复查，没生效就关掉这架的远景。近相机那一路不变。
 - 开关函数在安装时核签名（`kSetFarRenderSig`：`44 8B 41 20 41 8B C0 0F BA F0 1A 41 0F BA E8 1A`，即 `mov r8d,[rcx+20h]; mov eax,r8d;

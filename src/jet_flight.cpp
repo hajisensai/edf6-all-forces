@@ -579,10 +579,15 @@ void SoftEdge(Jet& j,const float* pos,float* want) noexcept {
     // the nose never came onto the lead: on a stock map (soft box +-960 m, the target's whole run within the edge's ease)
     // three called multirole jets dived 64 times in 4 minutes with the nose 15-60 deg off it and fired no gun (2026-10-09
     // log). The edge's state still follows the jet (KeepIn on a copy); the pull-out is the edge's again.
+    // A ferry on its line (the paratroop plane, ferry_line.h) keeps it too: the line was planned from off the map, through
+    // the drop point to off the map, each end past the ground's edge with room to turn round inside the physical square
+    // (support_entry.h PassEnd); the soft edge 600 m inside the area turned it back the moment it was made (2026-10-10
+    // 13:17:21) and round over the map after its pass. Withdrawing, it is the edge's again.
     float kept[3]={want[0],want[1],want[2]};
     const bool dive=j.mode==Mode::dive && j.t.target && !j.t.flyer && airbound::Depth(soft,j.t.aim)>=0.0f;
-    airbound::KeepIn(soft,pos,j.m.vel,r,react,dive ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);
-    if(j.m.edgeBack!=was)
+    const bool line=j.ferry && j.mode!=Mode::withdraw;
+    airbound::KeepIn(soft,pos,j.m.vel,r,react,dive || line ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);
+    if(j.m.edgeBack!=was && !line)
         Log("JET v=%p %s the soft edge at (%.0f,%.0f): soft x %.0f..%.0f z %.0f..%.0f, band %.0f, %.0f m/s%s",j.Vehicle(),
             was ? "back inside" : "past",pos[0],pos[2],soft.lo[0],soft.hi[0],soft.lo[1],soft.hi[1],band,s,was ? "" : ": back in first");
     // Over the top it pushes over: its lift down at most kNegG, gravity with it (JetSteer), a radius of s^2 / ((1 + kNegG) g).
@@ -782,34 +787,21 @@ float Patrol(const Jet& j,const float* pos,const float* anchor,float height,floa
     return Clamp(std::sqrt(r*kG*kLoiterTan),k.minSpeed*kLoiterMin,k.cruise);
 }
 
-// A ferry's pass (the paratroop plane: transport.cpp's stick jumps within kDropRadius, 400 m, of the point). Patrol
-// cannot carry it there: a strike body's circle is 1000 m round its anchor, so it never comes nearer the point than that
-// (the 2026-10-10 runs: the plane went round the point, never over it). In: straight at the point. Over it (within
-// kFerryOver) or past it (the point behind it): straight on along its heading, out kFerryRoom of its turns, then in
-// again, every pass from far enough out to line up on the point.
-constexpr float kFerryOver=60.0f,kFerryRoom=2.2f;
-float Ferry(Jet& j,const float* pos,const float* point,float height,float* want) noexcept {
+// A ferry's passes (the paratroop plane; ferry_line.h): along its line through the drop point, either way in turn, at
+// FerrySpeed, `height` over it (Level). Not round the point: a strike body's Patrol circle is 1000 m round its anchor, so it
+// never came within transport.cpp's reach of the point; nor at it: chasing the point went by 288 m abeam and turned round
+// over the map (2026-10-10).
+float FerrySpeed(const Kind& k) noexcept { return Clamp(k.minSpeed*kLoiterMin,k.minSpeed,k.cruise); }
+float FerryTurn(const Kind& k) noexcept { return TurnRadiusOf(k,1.0f,FerrySpeed(k)); }
+float Ferry(Jet& j,const float* pos,float height,float* want) noexcept {
     const Kind& k=KindOf(j);
-    const float speed=Clamp(k.minSpeed*kLoiterMin,k.minSpeed,k.cruise);
-    const float turn=speed*speed/(kG*kLoiterTan);   // m: its turn's radius at that speed, Patrol's bank
-    float to[3]={point[0]-pos[0],0.0f,point[2]-pos[2]};
-    const float dist=Len(to);
-    if(j.ferryOut) {
-        if(dist>=turn*kFerryRoom)j.ferryOut=false;   // room to come round: the next pass
-    } else {
-        const float ahead=to[0]*j.m.vel[0]+to[2]*j.m.vel[2];
-        if(dist<=kFerryOver || (ahead<0.0f && dist<turn*kFerryRoom)) {   // over it, or by it: on, out for the next pass
-            j.ferryOut=true;
-            j.ferryDir[0]=j.m.vel[0];j.ferryDir[1]=0.0f;j.ferryDir[2]=j.m.vel[2];
-            if(!Normalize(j.ferryDir)){j.ferryDir[0]=0.0f;j.ferryDir[2]=1.0f;}
-        }
+    float way[3];
+    if(ferry::Steer(j.ferryLine,j.ferryPass,pos,j.m.vel,ferry::Lead(FerryTurn(k)),way) && !j.ferryGone) {
+        j.ferryGone=true;
+        Log("JET v=%p ferry: its last pass is over at (%.0f,%.0f), off the map: deleting",j.Vehicle(),pos[0],pos[2]);
     }
-    if(j.ferryOut)Level(pos,j.ferryDir,height,want);
-    else {
-        if(!Normalize(to)){to[0]=j.ferryDir[0];to[2]=j.ferryDir[2];}
-        Level(pos,to,height,want);
-    }
-    return speed;
+    Level(pos,way,height,want);
+    return FerrySpeed(k);
 }
 
 void Wing(Jet& j,const Kind& k,unsigned char* v,const float* pos,float clear,const float* nose,float* want,float speed,float dt,

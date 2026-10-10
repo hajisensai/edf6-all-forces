@@ -36,6 +36,7 @@ int FaultLog(const char*,const EXCEPTION_POINTERS*) noexcept {UnexpectedWorldCal
 bool PrepareNpcVehicle(unsigned char*,bool) noexcept {UnexpectedWorldCall();}
 namespace jet {
 Jet jets[kMaxJets]{};
+float FerryTurn(const Kind&) noexcept {UnexpectedWorldCall();}
 bool Alive(const ObjRef&) noexcept {UnexpectedWorldCall();}
 Jet* FindJet(const unsigned char*) noexcept {UnexpectedWorldCall();}
 Jet* NewEntry(unsigned char*,ULONGLONG) noexcept {UnexpectedWorldCall();}
