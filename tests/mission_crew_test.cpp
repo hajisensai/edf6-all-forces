@@ -57,7 +57,7 @@ int main() {
  setupWorks=true;call(vehicle,false);MissionCrewVehicleFrame(vehicle);
  Check(preparations==2 && requests==1,"new explicit native request can initialize after prior failure");
  ResetMissionCrew();requests=preparations=0;
- unsigned char legacySeat[edf::kSeatStride]{},legacyDummy[0x200]{};
+ unsigned char legacySeat[edf::kSeatStride]{},legacyDummy[edf::kHumanPlayer+1]{};   // every byte SeatRider reads
  Put<void*>(vehicle,kSeats,legacySeat);Put<std::uint64_t>(vehicle,kSeatCount,1);
  Put<void*>(vehicle,0x4A8,ctrl);MissionCrewVehicleFrame(vehicle);
  Check(requests==0,"route data alone does not invent a rider for an empty map vehicle");
