@@ -95,6 +95,13 @@ def main() -> int:
     checks += 1
     if 'SwimmerNear' in heli or 'kSwimmerClaim' in heli or 'r->swimmer=requester' not in handover:
         fail('src/heli.cpp: the rescue heli looks for the nearest swimmer instead of its requester')
+    session = body(code_only(read(root, 'src/support_protocol.cpp')), 'void Session::HostRequest(')
+    checks += 1
+    if 'ownChannel' not in session or 'PeersHave(kCapRescueChannel)' not in session or 'rescueAt_[peer]' not in session:
+        fail('src/support_protocol.cpp HostRequest: the rescue has no channel or cooldown of its own (or ignores an older peer)')
+    checks += 1
+    if 'CooldownLeft(' not in body(heli, 'void StartRescue('):
+        fail('src/heli.cpp StartRescue: this player rescue cooldown is not held')
     protocol = code_only(read(root, 'src/support_protocol.h'))
     checks += 1
     if not re.search(r'kCapabilities=[^;]*kCapSeaRescue', protocol):

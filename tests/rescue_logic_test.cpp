@@ -75,16 +75,16 @@ void Takeoff() {
 
 void Versions() {
     using namespace crew::versionnote;
-    using crew::support_net::kCapabilities;using crew::support_net::kCapSoldierVariants;using crew::support_net::kCapAirborneAir;using crew::support_net::kCapSeaRescue;
+    using crew::support_net::kCapabilities;using crew::support_net::kCapSoldierVariants;using crew::support_net::kCapAirborneAir;using crew::support_net::kCapSeaRescue;using crew::support_net::kCapRescueChannel;
     State s;s.online=true;s.mine=kCapabilities;s.silentHost=kCapSoldierVariants|kCapAirborneAir;
     Check(Compare(s).kind==Kind::none,"a guest before the welcome: nothing said");
     s.hostKnown=true;s.hostCaps=kCapabilities;
     Check(Compare(s).kind==Kind::none,"the same build: nothing said");
     s.hostCaps=0;
     Notice n=Compare(s);
-    Check(n.kind==Kind::hostOlder && n.missing==kCapSeaRescue,"a host that announces nothing: older, the sea rescue named");
+    Check(n.kind==Kind::hostOlder && n.missing==(kCapSeaRescue|kCapRescueChannel),"a host that announces nothing: older, the sea rescue and its channel named");
     s.hostCaps=kCapSoldierVariants;n=Compare(s);
-    Check(n.kind==Kind::hostOlder && n.missing==(kCapAirborneAir|kCapSeaRescue),"an older host: what it lacks named");
+    Check(n.kind==Kind::hostOlder && n.missing==(kCapAirborneAir|kCapSeaRescue|kCapRescueChannel),"an older host: what it lacks named");
     s.hostCaps=kCapabilities|16u;n=Compare(s);
     Check(n.kind==Kind::selfOlder,"a host with a capability this build does not know: this guest is older");
     s.hostCaps=kCapabilities;s.roomBehind=true;n=Compare(s);
