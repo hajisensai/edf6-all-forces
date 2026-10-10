@@ -118,6 +118,10 @@ ObjRef ChuteCanopyMake(const float*,const float*) noexcept {++canopies;return Ob
 bool ChuteCanopyMove(const ObjRef&,const float*,const float*) noexcept {return true;}
 void ChuteCanopyFree(const ObjRef& c) noexcept {if(c)++canopyFrees;}
 bool JetWithdrawNow(const void* v,const char*) noexcept {if(v==plane.m)++jetLeaves;return v==plane.m;}
+// The plane flies its pass line (jet.cpp JetFerry) or not (a plane with no line: it withdraws instead).
+bool planeFerries=true;int ferryDones=0;
+bool JetFerryDone(const void* v) noexcept {if(v==plane.m && planeFerries)++ferryDones;return v==plane.m && planeFerries;}
+float planeVel[3]{};   // m/s: the plane flies straight on at it (Step)
 bool SupportWithdrawVehicle(const void*) noexcept {++withdrawals;return withdrawOk;}
 }  // namespace crew
 
@@ -147,6 +151,8 @@ void Step(int frames=1) {
             if(d>0.01f){hp[0]+=dx/d*step;hp[1]+=dy/d*step;hp[2]+=dz/d*step;}
             heliGround=ferryLand && std::fabs(hp[1]-ferryAt[1])<0.5f && std::hypot(hp[0]-ferryAt[0],hp[2]-ferryAt[2])<1.0f;
         }
+        float* pp=PosOf(plane);
+        for(int i=0;i<3;++i)pp[i]+=planeVel[i]*0.016f;
         for(auto& q:squads)if(q.top && q.in && q.aboard>0){const float* vp=PosOf(*q.in);Place(*q.top,vp[0],vp[1],vp[2]);}
     }
 }
@@ -155,6 +161,7 @@ void Reset() {
     for(auto& q:squads)q=SquadModel{};
     truckDriver=heliDriver=true;ferryOn=ferryLand=heliGround=false;
     routePosts=ferries=ferryReleases=heliGuards=withdrawals=canopies=canopyFrees=jetLeaves=moves=0;withdrawOk=true;
+    planeFerries=true;ferryDones=0;planeVel[0]=planeVel[1]=planeVel[2]=0.0f;
 }
 bool Done(const void* top) noexcept {for(const auto& t:trips)for(int i=0;i<t.count;++i)if(t.riders[i].top.obj==top)return false;return true;}
 
@@ -262,9 +269,10 @@ void Succession() {
     Check(!TransportPair(soldier[3].m,plane.m),"a plane is no squad's transport");
 }
 
-void Paradrop() {
+// The plane's stick of four aboard, flying +x at `speed` from `x`, its track `across` m off the point at the origin.
+void Stick(float x,float across,float speed) {
     Reset();
-    MakeVehicle(plane,planeSeats,5);Place(plane,-1500,150,0);
+    MakeVehicle(plane,planeSeats,5);Place(plane,x,150,across);planeVel[0]=speed;
     MakeObj(soldier[0]);squads[0]={&soldier[0],4,4,&plane,{},0,0,0};
     for(int i=0;i<4;++i) {
         MakeObj(soldier[8+i]);jumper[i]=&soldier[8+i];jumperOut[i]=false;jumperFlies[i]=i==2;   // the third: a Wing Diver
@@ -272,16 +280,28 @@ void Paradrop() {
         Put<void*>(seat,kSeatRider,jumper[i]->m);Put<void*>(seat,kSeatRiderCtrl,seatCtrl[i]);Put<int>(seatCtrl[i],8,1);
         Place(*jumper[i],0,150,0);
     }
+}
+
+void Paradrop() {
+    // On its line over the point (ferry_line.h): the stick starts StickLead short of it (2026-10-10: it began anywhere
+    // within 400 m, and 288 m abeam landed 250-400 m off), so it lands centred on the point.
+    const float speed=98.0f,lead=transport::StickLead(speed,4,kChuteBleed);
+    Stick(-1500,0,speed);
     const float target[3]={0,0,0};
     Check(TransportParadrop(plane.m,target),"a paratroop drop over the point");
     Step(10);
     Check(!jumperOut[0],"nobody out far from the point");
-    Place(plane,-300,150,0);
-    Step(1);
-    Check(jumperOut[0] && !jumperOut[1],"the first jumps within 400 m, one at a time");
+    float firstAt=1e9f;
+    for(int i=0;i<2000 && !jumperOut[0];++i){Step();if(jumperOut[0])firstAt=-PosOf(plane)[0];}
+    Check(jumperOut[0] && !jumperOut[1],"the first jumps, one at a time");
+    Check(firstAt<=lead+2.0f && firstAt>=lead-speed*transport::kStickWindowS,"the stick starts its lead short of the point",firstAt,lead);
+    // Where it lands: the stick's middle jumper (the 2.5th of 4) carried its drift (speed / bleed) on: over the point.
+    const float middle=-firstAt+1.5f*speed*static_cast<float>(transport::kJumpEveryMs)*0.001f+transport::kJumpInherit*speed/kChuteBleed;
+    Check(std::fabs(middle)<speed*0.1f,"the stick lands centred on the point",middle);
     for(int i=0;i<200;++i)Step();
     Check(jumperOut[1] && jumperOut[2] && jumperOut[3],"the stick goes on");
-    Check(jetLeaves==1 && squads[0].order.order==mapcmd::Order::guard,"all out: the plane leaves, the squad guards the point");
+    Check(ferryDones==1 && jetLeaves==0 && squads[0].order.order==mapcmd::Order::guard,
+          "all out: the plane flies on along its line to be deleted off the map, the squad guards the point");
     // Under the canopy: falling no faster than the sink; the Wing Diver has none.
     for(int i=0;i<4;++i)reinterpret_cast<float*>(jumper[i]->m+0x6B0)[1]=-30.0f;
     Step(1);
@@ -291,6 +311,18 @@ void Paradrop() {
     for(int i=0;i<4;++i)Place(*jumper[i],0,0.5f,0);
     Step(30);
     Check(canopyFrees==3,"down: the canopies gone",canopyFrees);
+    // A pass 150 m abeam: no stick (the line brings it over the point on the next); a pass that is past the window: none.
+    Stick(-1500,150,speed);TransportParadrop(plane.m,target);
+    for(int i=0;i<1500;++i)Step();
+    Check(!jumperOut[0],"no stick from a pass that goes by abeam");
+    Stick(-20,0,speed);TransportParadrop(plane.m,target);
+    for(int i=0;i<100;++i)Step();
+    Check(!jumperOut[0],"no stick once past the window (the next pass)");
+    // A plane that flies no line (JetFerry refused): all out, it withdraws.
+    Stick(-1000,0,speed);planeFerries=false;TransportParadrop(plane.m,target);
+    for(int i=0;i<2000 && !jumperOut[3];++i)Step();
+    Step(5);
+    Check(jumperOut[3] && jetLeaves==1 && ferryDones==0,"no line: all out, it withdraws");
 }
 
 // A new far order for a squad on a trip under way: the trip goes there instead (not to the first order's drop point).
@@ -325,18 +357,11 @@ void SuccessionMidTrip() {
 
 // The stick's squads are kept by identity: a top freed and its memory reused before the plane is empty gets no order.
 void ParadropReusedTop() {
-    Reset();
-    MakeVehicle(plane,planeSeats,5);Place(plane,0,150,0);
-    MakeObj(soldier[0]);squads[0]={&soldier[0],4,4,&plane,{},0,0,0};
-    for(int i=0;i<4;++i) {
-        MakeObj(soldier[8+i]);jumper[i]=&soldier[8+i];jumperOut[i]=false;jumperFlies[i]=false;
-        unsigned char* seat=SeatAt(plane.m,static_cast<unsigned>(i+1));
-        Put<void*>(seat,kSeatRider,jumper[i]->m);Put<void*>(seat,kSeatRiderCtrl,seatCtrl[i]);Put<int>(seatCtrl[i],8,1);
-        Place(*jumper[i],0,150,0);
-    }
+    Stick(-400,0,98.0f);planeFerries=false;
+    for(int i=0;i<4;++i)jumperFlies[i]=false;
     const float target[3]={0,0,0};
     TransportParadrop(plane.m,target);
-    for(int i=0;i<200 && !jumperOut[3];++i)Step();
+    for(int i=0;i<400 && !jumperOut[3];++i)Step();
     Check(jumperOut[3] && jetLeaves==0,"the last one out, the plane not yet gone");
     unsigned char other[0x20]{};Put<void*>(soldier[0].m,kSelfCtrl,other);   // freed, another object there now
     const int orders=squads[0].orders;

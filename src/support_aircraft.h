@@ -24,6 +24,9 @@ support::Refusal PlanAirSupport(const SupportAircraft& spec,const float* target,
 // (support_entry.h TakeoffRoute): route->from on the spot, kTakeoffLift over it. noEntry: none; the caller tries the edge.
 support::Refusal PlanTakeoffSupport(const SupportAircraft& spec,const float* target,const float (*spots)[3],int count,
                                     support::Route* route) noexcept;
+// m: the turn radius a pass of this aircraft's needs room for past each end of its line (the paratroop plane's ferry:
+// jet_flight.cpp FerryTurn), 0 for one that flies no passes (support_entry.h AirRoute `turn`).
+float SupportPassTurn(const SupportAircraft&) noexcept;
 // Whether its hull can be made this mission (its SGO installed and preloaded: jet_spawn.cpp PreloadJets).
 bool SupportAircraftReady(const SupportAircraft&) noexcept;
 // Creates the hull at `matrix` (in the air, or a legacy plan's runway) with empty seats. Activation never creates a rider.
@@ -40,4 +43,7 @@ bool DeleteSupportAircraft(const ObjRef&) noexcept;
 bool SupportAircraftOwned(const void* vehicle) noexcept;
 // One of ours whose flight is over: it has withdrawn (fuel, ammo, damage) far enough out to go (the heli's / jet's reap).
 bool SupportAircraftLeft(const ObjRef&) noexcept;
+// Once a frame for every helicopter-class body, on every machine (heli.cpp HeliFrame): one of ours arriving from off the
+// map: its far rendering until on, and a helicopter's move-area clamp back once it is inside it (jet_spawn.cpp Arrival).
+void SupportAircraftFrame(unsigned char* vehicle) noexcept;
 }

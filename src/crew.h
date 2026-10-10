@@ -405,6 +405,17 @@ constexpr float kEdgeBuffer=800.0f;
 inline float WorldHalf() noexcept;
 inline float PlayEdge() noexcept { return Cfg().bigWorld>3000.0f ? Cfg().bigWorld-kBigWorldMargin : 3000.0f-kStockEdgeIn; }
 inline float WorldHalf() noexcept { return Cfg().bigWorld>3000.0f ? Cfg().bigWorld : 3000.0f; }    // bigworld.cpp: once a mission, the map's ground on a grid (log)
+// m: the Havok world's half size in fact (bigworld.cpp): ini BigWorld only once its bounds were patched in, else the
+// stock 3000 (WorldHalf takes the ini at its word).
+float HavokHalf() noexcept;
+// m: the square the support arrivals are made and fly their passes in (support_entry.h Reach::half): kArrivalRoom inside
+// both the Havok world (a body past it is no longer simulated) and the jets' deletion (jet.cpp kWorldGoneIn of WorldHalf).
+constexpr float kArrivalRoom=300.0f;
+inline float ArrivalHalf() noexcept { const float h=HavokHalf(),w=WorldHalf();return (h<w ? h : w)-kArrivalRoom; }
+// m: how far the near camera draws (view.cpp: the mission's FarClipZ, 1000 m in every mission, raised to ini
+// ViewDistance); past it only what has the far-render bit is drawn (jet_spawn.cpp FarRender).
+constexpr float kStockFarClip=1000.0f;
+inline float NearDrawDistance() noexcept { return Cfg().viewDistance>kStockFarClip ? Cfg().viewDistance : kStockFarClip; }
 // The camera's view-projection (row vectors, the HUD's) as of the last frame drawn; false before one (hud.cpp).
 bool LastViewProj(float* out) noexcept;
 // The camera's eye and its unit look through the screen's centre, from LastViewProj (hud.cpp); false: no camera yet.
@@ -574,9 +585,12 @@ unsigned char* JetLaunchThrown(ThrownDrone what,const float* at,const float* hea
 // Whether jet.cpp still flies `vehicle` (the object with weak-this control block `ctrl`), alive and not
 // withdrawing.
 bool JetFlying(const void* vehicle,const void* ctrl) noexcept;
-// jet.cpp: the paratroop plane (transport.cpp): on to `at` attacking nothing (a ferry); sent off now (withdrawn: deleted out
-// of sight, its crew by support_dispatch.cpp Retire). False when the plugin does not fly `vehicle`.
-bool JetFerry(const void* vehicle,const float* at) noexcept;
+// jet.cpp: the paratroop plane (transport.cpp): passes over `at` along the straight line through it along `heading`, ends off
+// the map, attacking nothing (a ferry; ferry_line.h); JetFerryDone: its stick is out, on to the end of the pass and deleted
+// there (its crew by support_dispatch.cpp Retire); sent off now (withdrawn: deleted out of sight). False when the plugin
+// does not fly `vehicle` (JetFerry: or no line with room to turn off the map at both ends; JetFerryDone: no ferry).
+bool JetFerry(const void* vehicle,const float* at,const float* heading) noexcept;
+bool JetFerryDone(const void* vehicle) noexcept;
 bool JetWithdrawNow(const void* vehicle,const char* why) noexcept;
 // The plugin's helicopter bodies (EDF6VC_HELI_410 / _506 / _MEDIC / _TRANSPORT.SGO, tools/make_jets.py). Every one of them
 // is made by the support deployment (support_aircraft.h PrepareSupportAircraft): in the air with its real crew seated at

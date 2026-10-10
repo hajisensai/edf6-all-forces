@@ -5,6 +5,7 @@
 #include <cstdlib>
 
 namespace crew {
+void SupportAircraftFrame(unsigned char*) noexcept {}   // jet_spawn.cpp: no support aircraft here
 bool NpcDriver(const unsigned char* v) noexcept { return v && SeatCount(v)>0 && SeatRider(SeatAt(const_cast<unsigned char*>(v),0))==Rider::dummy; }
 
 unsigned char* image=nullptr;

@@ -77,7 +77,8 @@ bool TransportDeliver(const void* v,const void* const* tops,int n,const float*) 
     ++delivered;deliveredSquads=n;deliveredHull=v;for(int i=0;i<n && i<3;++i)deliveredTops[i]=tops[i];return n>0;
 }
 bool TransportParadrop(const void*,const float*) noexcept {++paradrops;return true;}
-bool JetFerry(const void*,const float*) noexcept {++ferries;return true;}
+float ferryHeading[3]{};
+bool JetFerry(const void*,const float*,const float* heading) noexcept {++ferries;ferryHeading[0]=heading[0];ferryHeading[2]=heading[2];return true;}
 bool JetWithdrawNow(const void*,const char*) noexcept {++jetWithdrawals;return true;}
 bool HeliStartLeaving(const void*) noexcept {++heliLeaves;return true;}
 // The container airdrops (airdrop.cpp).
@@ -469,10 +470,12 @@ int main() {
     bad=assault;bad.count=10;check(Validate(bad),"two squads (a composed load) are a valid plan");
     bad=assault;bad.units[14]=bad.units[2];bad.count=15;check(!Validate(bad),"thirteen riders, past the hull's seats, are refused");
     bad=assault;bad.units[0].resourceId=kSupportAircraftResource+kSupportAirborneOffset+31;check(!Validate(bad),"another entry's hull is refused");
-    ResetSupportDispatch();made=0;ferries=paradrops=0;plannedTransports=0;fixtureMs+=40000;
+    ResetSupportDispatch();made=0;ferries=paradrops=0;plannedTransports=0;ferryHeading[0]=ferryHeading[2]=0;fixtureMs+=40000;
     SupportCallAt(31,target,note,128);SupportDispatchTick();
     check(made==6 && lastPrepared.transportPlane && ferries==1 && paradrops==1 && delivered==1,
           "a paratroop plane: four soldiers aboard, it flies on to the point attacking nothing and drops them there");
+    check(ferryHeading[0]==1.0f && ferryHeading[2]==0.0f,
+          "its passes along the heading it was planned on (the route's, in its matrix), from its first frame (BoardAirborne)");
     check(plannedTransports==1 && plannedHeli==-1 && plannedAircraft==1,
           "the plane planned through the one air planner with its own spec (transportPlane, no heli row, one aircraft)");
     ResetSupportDispatch();made=0;transportReady=false;fixtureMs+=40000;

@@ -459,6 +459,10 @@ add_test(NAME call_pick COMMAND call_pick_test)
 add_executable(support_entry_test tests/support_entry_test.cpp)
 target_compile_options(support_entry_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME support_entry COMMAND support_entry_test)
+# The paratroop plane's passes along one straight line through its drop point (src/ferry_line.h; 2026-10-10).
+add_executable(ferry_line_test tests/ferry_line_test.cpp)
+target_compile_options(ferry_line_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME ferry_line COMMAND ferry_line_test)
 # The support configuration's parse and validation, and the ini it really reads (src/support_config.cpp).
 add_executable(support_config_test tests/support_config_test.cpp)
 target_compile_options(support_config_test PRIVATE /W4 /WX /utf-8 /permissive-)
