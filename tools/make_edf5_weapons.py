@@ -39,6 +39,9 @@ import sgo  # noqa: E402
 
 STEAM = r'D:\Steam\steamapps\common'
 OUT = os.path.join(HERE, '..', 'edf5port', 'weapons.json')
+# The weapons that need files EDF6 lacks, converted from EDF5 (pylib/legacy_assets.py): their own registry, released
+# after edf41port's (tools/ported_weapons.py REGISTRIES).
+OUT_MODELS = os.path.join(HERE, '..', 'edf5port', 'models.json')
 LANGS5 = ('JA', 'EN', 'CN', 'KR')
 ID_PREFIX = 'EDF6VC_E5_'
 # EDF5 categories EDF6 has no slot for -> the one that keeps the weapon in the slot EDF5 had it in:
@@ -228,6 +231,38 @@ def _t2s(v: object, t2s) -> object:  # noqa: ANN001 - opencc.OpenCC
     return v
 
 
+def convertible(g5: rootcpk.Game, missing: list[str]) -> tuple[dict[str, str], str | None]:
+    """The files EDF6 lacks as {Mods path: EDF5 file} (EDF6 names a model .mrab where EDF5 has the same archive as
+    .rab), each converted once here so the install will not meet a refusal, or ({}, why one cannot be)."""
+    import legacy_assets
+    index = {(d.upper(), n.upper()): (d, n) for d, n in g5.cpk.index}
+    out: dict[str, str] = {}
+    done: dict[str, bytes] = {}
+    for path in missing:
+        folder, name = path[len('app:/'):].split('/', 1)
+        stem, ext = os.path.splitext(name)
+        found = next((index[(folder.upper(), n.upper())] for n in (name, stem + '.rab') if (folder.upper(), n.upper())
+                      in index and (ext.lower() == '.mrab' or n == name)), None)
+        if found is None:
+            return {}, f'EDF6 没有、EDF5 也没有：{path}'
+        source = f'{found[0]}/{found[1]}'
+        try:
+            converted = legacy_assets.convert(source, g5.read(*found))
+        except ValueError as e:   # a converter's refusal; anything else is this machine's problem, raised
+            return {}, f'EDF6 没有、不能从 EDF5 转换：{path}（{e}）'
+        rel = f'{folder.upper()}/{name.upper()}'
+        out[rel] = source
+        done[rel] = converted
+    # Shipped converted (tools/ported_weapons.py bundled): players need no EDF5 for it. Only once every file of the
+    # weapon converts: a weapon left out leaves no file behind.
+    for rel, data in done.items():
+        target = os.path.join(HERE, '..', 'edf5port', 'assets', *rel.split('/'))
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, 'wb') as f:
+            f.write(data)
+    return out, None
+
+
 def build(edf5: str, edf6: str) -> dict:
     import opencc
     t2s = opencc.OpenCC('t2s')
@@ -248,8 +283,9 @@ def build(edf5: str, edf6: str) -> dict:
         source = 'edf6' if e6.leftover(file, plain, names) else 'edf5'
         own = e6.weapon(file) if source == 'edf6' else plain
         missing = sorted(e6.missing({p for p in _strings(own) if p.lower().startswith('app:/')}))
-        if missing:
-            skipped.append({'sgo': sgo_id, 'name': names[0], 'reason': 'EDF6 没有这些资源：' + ', '.join(missing)})
+        assets, why = convertible(g5, missing)
+        if why:
+            skipped.append({'sgo': sgo_id, 'name': names[0], 'reason': why})
             continue
         category = TARGET.get(int(cat5), int(cat5))
         cls = own['xgs_scene_object_class']
@@ -270,12 +306,28 @@ def build(edf5: str, edf6: str) -> dict:
             'stars': [int(x) for x in stars], 'pack': int(pack),
             'template': e6.template(category, cls, own.get('AmmoClass', ''), level), 'text': text,
             'damage_attribute': e6.damage_attribute(category, own.get('AmmoClass', '')) if source == 'edf5' else None,
+            **({'assets': assets} if assets else {}),
             # The weapon itself, converted here (edf5port.weapon): the install builds it from this, with no EDF5.
             **({'weapon': dsgo.dump(edf5port.weapon(members, {lang.lower(): t[0] for lang, t in text.items()}).root)}
                if source == 'edf5' else {}),
         })
     return {'source': 'EDF5 Root.cpk WEAPON/WEAPONTABLE.SGO + WEAPONTEXT.*; SC = CN via OpenCC t2s',
             'weapons': weapons, 'skipped': skipped}
+
+
+def keep_order(path: str, weapons: list[dict]) -> list[dict]:
+    """`weapons` in the order the registry at `path` already has them, new ones after (tools/ported_weapons.py
+    RELEASED: an installed row never moves, so a released registry only grows at its end). A weapon the old registry
+    has and this run lost is an error: its row would be nobody's."""
+    if not os.path.isfile(path):
+        return weapons
+    with open(path, encoding='utf-8') as f:
+        old = [w['id'] for w in json.load(f)['weapons']]
+    by = {w['id']: w for w in weapons}
+    lost = [i for i in old if i not in by]
+    if lost:
+        raise SystemExit(f'{path}: these weapons are no longer found: {", ".join(lost)} (a released row cannot go)')
+    return [by[i] for i in old] + [w for w in weapons if w['id'] not in set(old)]
 
 
 def main() -> int:
@@ -285,10 +337,14 @@ def main() -> int:
     a = ap.parse_args()
     data = build(a.edf5, a.edf6)
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
-    with open(OUT, 'w', encoding='utf-8', newline='\n') as f:
-        json.dump(data, f, ensure_ascii=False, indent=1)
-        f.write('\n')
-    print(f'{OUT}: {len(data["weapons"])} weapons, {len(data["skipped"])} skipped')
+    for path, weapons in ((OUT, keep_order(OUT, [w for w in data['weapons'] if 'assets' not in w])),
+                          (OUT_MODELS, keep_order(OUT_MODELS, [w for w in data['weapons'] if 'assets' in w]))):
+        with open(path, 'w', encoding='utf-8', newline='\n') as f:
+            json.dump({**data, 'weapons': weapons, **({'skipped': data['skipped']} if path == OUT else {'skipped': []})},
+                      f, ensure_ascii=False, indent=1)
+            f.write('\n')
+        print(f'{path}: {len(weapons)} weapons')
+    print(f'{len(data["skipped"])} skipped')
     for s in data['skipped']:
         print(f'  skipped {s["sgo"]} {s["name"]}: {s["reason"][:160]}')
     return 0
