@@ -58,8 +58,9 @@ def convert_archive(data: bytes, map_part: bool = False) -> bytes:
     rab = _read_archive(data)
     for f in rab.files:
         f.stored = _member(f.name, f.stored, map_part)
-    if not mdb.folder_order_ok(rab):
-        raise ValueError('archive members out of folder order')
+    # Members in the order they came, grouped by folder or not: 30 of 4.1's archives interleave TEXTURE members with
+    # MODEL ones (OBJECT/DEIROI401.MRAB, ALIENTRAILER401.MRAB, ARMYANDENGINEER.MRAB) and so do 22 of EDF6's own, which
+    # it loads (MAP/NW_HAIKYO601.RAB ...). Grouping is insert_member's invariant, for adding a member; nothing is added.
     return mdb.rab_write(rab)
 
 

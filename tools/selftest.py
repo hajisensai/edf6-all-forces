@@ -5865,6 +5865,20 @@ def legacy_assets_match_edf6() -> None:
         g4 = rootcpk.Game(edf41)
         rel = 'MENUOBJECT/ARMYSOLDIER.CAS'
         assert cas_legacy.cas_from_legacy(g4.read(*rel.split('/'))) == cas_legacy.cas_from_legacy(g5.read(*rel.split('/')))
+        # 4.1's archives whose members are not grouped by folder convert, every member where it was
+        mixed = 0
+        for d, n in g4.cpk.index:
+            if not n.upper().endswith(('.RAB', '.MRAB')) or d.upper() == 'MAP':
+                continue
+            source = g4.read(d, n)
+            old = mdb.rab_read(source)
+            if mdb.folder_order_ok(old):
+                continue
+            new = mdb.rab_read(legacy_assets.convert(f'{d}/{n}', source))
+            assert [(f.name, f.folder) for f in new.files] == [(f.name, f.folder) for f in old.files], n
+            assert all(f.data[4:8] == (0x20).to_bytes(4, 'little') for f in new.files if f.name.lower().endswith('.mdb')), n
+            mixed += 1
+        assert mixed >= 3, f'{mixed} 4.1 archives out of folder order: this check is empty'
 
 
 @test
@@ -5877,6 +5891,8 @@ def legacy_archive_refusals() -> None:
     hd = mdb.RabFile('a.dds', 2, 1, b'DDS ' + bytes(252))
     archive = mdb.rab_write(mdb.Rab(0x110, ['TEXTURE', 'MODEL', 'HD-TEXTURE'], [tex, hd]))
     assert legacy_assets.convert('OBJECT/X.RAB', archive) == archive
+    mixed = mdb.rab_write(mdb.Rab(0x110, ['TEXTURE', 'MODEL', 'HD-TEXTURE'], [hd, tex]))   # folders 2 then 0, as
+    assert legacy_assets.convert('OBJECT/X.RAB', mixed) == mixed, 'an archive out of folder order'   # 4.1's DEIROI401
     odd = mdb.rab_write(mdb.Rab(0x110, ['TEXTURE', 'MODEL', 'HD-TEXTURE'], [tex, mdb.RabFile('a.txt', 1, 0, b'x')]))
     for rel, data in (('OBJECT/X.RAB', odd), ('OBJECT/X.RAB', archive[:len(archive) - 40]), ('WEAPON/X.SHKT', b'')):
         try:
