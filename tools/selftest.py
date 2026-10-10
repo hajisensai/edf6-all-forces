@@ -4866,7 +4866,10 @@ def soft_edge_wired() -> None:
     # KeepIn every frame (its state follows the jet); only a gun dive at a ground point inside the soft box keeps its
     # line (KeepIn on a copy, 2026-10-09: bent by the edge the dive never came onto the lead).
     soft_edge = flight.split('void SoftEdge(Jet& j,const float* pos,float* want) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'airbound::KeepIn(soft,pos,j.m.vel,r,react,dive ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);' in soft_edge
+    assert 'airbound::KeepIn(soft,pos,j.m.vel,r,react,dive || line ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);' in soft_edge
+    # And the paratroop plane on its pass line (ferry_line.h, 2026-10-10): its line's ends stand off the map with room to
+    # turn (support_entry.h PassEnd); the soft edge turned it back the moment it was made. Withdrawing, the edge's again.
+    assert 'const bool line=j.ferry && j.mode!=Mode::withdraw;' in soft_edge, 'a ferry on its line keeps it'
     assert 'const bool dive=j.mode==Mode::dive && j.t.target && !j.t.flyer && airbound::Depth(soft,j.t.aim)>=0.0f;' in soft_edge, \
         'only a dive at a ground point inside the soft box is spared the edge'
     assert 'airbound::CapClimb(' in flight
@@ -4890,6 +4893,52 @@ def soft_edge_wired() -> None:
     for key, default in (('AirSoftEdge', '600'), ('AirSoftTurns', '1'), ('AirSoftCeil', '150'), ('HeliSoftEdge', '150')):
         assert f'L"{key}"' in plugin and f'Fix("{key}"' in plugin, key
         assert re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme, key
+
+@test
+def support_arrives_from_off_the_map() -> None:
+    """The support's arrival (2026-10-10, the user: 「我叫的支援直接凭空出现了」; docs/feedback-2026-10-10-support-arrival.md).
+    The game-memory halves the offline tests cannot run: the move-area clamp held off as the hull is made (before the stock
+    input's first clamp, which runs before the plugin's frame step) on every machine, and given back to a helicopter once
+    inside; far rendering on the vehicle's AnimationModel node (its own vtable 0x17C4030 over umbra::Object's); the air
+    entry planned off the map in the physical square past the draw distance; the paratroop plane on its pass line from its
+    first frame, its stick by StickStarts, and on to the line's end when it is out; the ground entries the caller cannot
+    see first."""
+    spawn, heli, crew = src('src/jet_spawn.cpp'), src('src/heli.cpp'), src('src/crew.cpp')
+    prep = spawn.split('unsigned char* PrepareSupportAircraft(', 1)[1].split('\n}\n', 1)[0]
+    made = prep.index('CreateJet(body,matrix,&param,variant)')
+    inset = prep.index('Put<float>(vehicle,kAreaInset,kNoInset);')
+    assert made < inset < prep.rindex('return vehicle;'), 'the clamp held off as the hull is made, before it is handed back'
+    assert prep.index('At<float>(vehicle,kAreaInset)') < inset, 'its own inset kept to give back'
+    # The clamp runs in the stock input, before the plugin's frame step: JetFrame's own write came a frame late.
+    step = crew[crew.index('nextInput[I](vehicle,hasInput,a3,a4);'):]
+    assert step.index('nextInput[I](vehicle,hasInput,a3,a4);') < step.index('Guarded(kStepHeli,&HeliStep,v);')
+    frame = heli.split('void HeliFrame(unsigned char* vehicle) noexcept {', 1)[1]
+    assert frame.lstrip().startswith('SupportAircraftFrame(vehicle);'), 'every machine, any pilot: before any branch returns'
+    arrival = spawn.split('void SupportAircraftFrame(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'Put<float>(v,kAreaInset,a.stockInset);a.held=false;' in arrival and 'MoveAreaBox(lo,hi)' in arrival
+    assert 'kAnimationModelVtable=0x17C4030' in spawn and 'vt!=image+kAnimationModelVtable && vt!=image+kRenderNodeVtable' in spawn
+    assert 'if(!At<const void*>(node,kNodeUmbra))return Far::later;' in spawn, 'no Umbra object yet: setBitmask would get a null this'
+    plan = src('src/airstrike.cpp').split('support::Refusal PlanAirSupport(', 1)[1].split('\n}\n', 1)[0]
+    assert 'const support::Reach reach{ArrivalHalf(),NearDrawDistance()};' in plan
+    assert 'std::fabs(at[0])>reach.half || std::fabs(at[2])>reach.half' in plan, 'each formation slot inside the physical square'
+    assert 'at[0]<area.lo[0]' not in plan, 'no slot is held to the map any more'
+    assert 'SupportPassTurn(spec)' in plan
+    crewh = src('src/crew.h')
+    assert 'inline float ArrivalHalf() noexcept { const float h=HavokHalf(),w=WorldHalf();return (h<w ? h : w)-kArrivalRoom; }' in crewh
+    assert 'Cfg().viewDistance>kStockFarClip' in crewh
+    dispatch = src('src/support_dispatch.cpp')
+    board = dispatch.split('bool BoardAirborne(Deployment& deployed,bool networked) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'JetFerry(vehicle,plan.target,plan.units[i].matrix+8)' in board, 'the plane on its line from its first frame'
+    assert 'JetFerry(' not in dispatch.split('bool Assign(Deployment& deployed) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'NearDrawDistance(),[&](const float* p) noexcept {' in dispatch and 'MapRay(eye,top,hit)>=0.0f' in dispatch
+    transport = src('src/transport.cpp')
+    drop = transport.split('void DropFrame(Drop& d,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'transport::StickStarts(along,across,speed,aboard,kChuteBleed)' in drop and 'kDropRadius' not in transport
+    assert 'if(!JetFerryDone(plane))JetWithdrawNow(plane,"paratroopers out");' in drop
+    jet = src('src/jet.cpp')
+    assert 'if(j->ferryGone)j->reap=true;' in jet
+    cm = src('CMakeLists.txt')
+    assert 'add_test(NAME ferry_line COMMAND ferry_line_test)' in cm and 'add_test(NAME support_entry COMMAND support_entry_test)' in cm
 
 @test
 def installer_recovery_regressions() -> None:

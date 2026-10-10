@@ -34,7 +34,6 @@ using transport::Phase;
 constexpr int kPairs=32,kTrips=8,kRiders=4,kDrops=16,kJumpers=32,kDropTops=16;
 constexpr ULONGLONG kBoardEveryMs=2000,kUnloadEveryMs=1500,kWalkEveryMs=3000,kLogMs=2000;
 constexpr ULONGLONG kJumpMostMs=180000;              // a jump not down after this long is let go
-constexpr float kDropRadius=400.0f;                  // m (level) from its point a transport plane's stick begins
 constexpr float kChuteSink=6.0f,kChuteBleed=0.6f;    // as the player's parachute (playerjet.cpp EjectTick)
 constexpr float kChuteLand=1.5f;
 constexpr float kHeliBeside=25.0f;                   // m from the squad a helicopter lands to pick it up
@@ -54,10 +53,13 @@ struct Trip {
     Act last;
     npc::navigation::State nav;
 };
-struct Jumper { ObjRef human,canopy; ULONGLONG at; bool flies; };
+// `wayLogged`: its way out of the plane logged (the drift StickLead assumes, transport_logic.h kJumpInherit).
+struct Jumper { ObjRef human,canopy; ULONGLONG at; bool flies,wayLogged; };
 // tops: the squads that jumped, by identity (a squad's top killed on the way down may be freed and its memory reused
 // before the stick ends: a bare pointer would hand the guard order to whatever lives there then).
-struct Drop { ObjRef plane; float target[3]; int jumped; ULONGLONG lastJump; ObjRef tops[kDropTops]; int topCount; };
+// `seen` / `seenAt`: the plane's place last frame (its way: StickStarts).
+struct Drop { ObjRef plane; float target[3]; int jumped; ULONGLONG lastJump; ObjRef tops[kDropTops]; int topCount;
+              float seen[3]; ULONGLONG seenAt; };
 Pair pairs[kPairs]{};
 Trip trips[kTrips]{};
 Drop drops[kDrops]{};
@@ -294,6 +296,7 @@ void JumpFrame(Jumper& j,ULONGLONG ms) noexcept {
     }
     if(j.flies)return;   // a Wing Diver flies down on her own
     float* const vel=reinterpret_cast<float*>(h+kHumanVel);
+    if(!j.wayLogged){j.wayLogged=true;Log("TRANSPORT paratrooper %p out at %.0f m/s level, %.0f m/s down",h,std::sqrt(vel[0]*vel[0]+vel[2]*vel[2]),-vel[1]);}
     transport::ChuteStep(vel,kChuteSink,kChuteBleed);
     if(!j.canopy && vel[1]<=0.0f)j.canopy=ChuteCanopyMake(p,vel);
     else if(j.canopy)ChuteCanopyMove(j.canopy,p,vel);
@@ -319,7 +322,8 @@ void DropFrame(Drop& d,ULONGLONG ms) noexcept {
     const int seat=NextJumper(plane);
     if(seat<0) {
         if(d.jumped>0 || ms-d.lastJump>60000) {   // all out (or nobody aboard after a minute): off it goes, they guard the point
-            JetWithdrawNow(plane,"paratroopers out");
+            // On along its line to its end off the map, deleted there (jet.cpp JetFerryDone); a plane flying no line withdraws.
+            if(!JetFerryDone(plane))JetWithdrawNow(plane,"paratroopers out");
             for(int i=0;i<d.topCount;++i)
                 if(Live(d.tops[i]))NpcSquadSetOrder(d.tops[i].obj,mapcmd::Command{mapcmd::Order::guard,{d.target[0],d.target[1],d.target[2]}},false);
             Log("TRANSPORT drop over (%d out): the plane leaves",d.jumped);
@@ -327,15 +331,31 @@ void DropFrame(Drop& d,ULONGLONG ms) noexcept {
         }
         return;
     }
-    const float dist=transport::Level(Pos(plane),d.target);
-    if(!transport::JumpNow(dist,kDropRadius,d.jumped,d.jumped+1,ms,d.lastJump))return;
+    const float* pp=Pos(plane);
+    const float dist=transport::Level(pp,d.target);
+    if(d.jumped==0) {
+        // Its way from last frame's place; the point along and across its track (StickStarts).
+        const float dt=d.seenAt && ms>d.seenAt ? static_cast<float>(ms-d.seenAt)*0.001f : 0.0f;
+        const float way[2]={dt>0.0f ? (pp[0]-d.seen[0])/dt : 0.0f,dt>0.0f ? (pp[2]-d.seen[2])/dt : 0.0f};
+        std::memcpy(d.seen,pp,12);d.seenAt=ms;
+        const float speed=std::sqrt(way[0]*way[0]+way[1]*way[1]);
+        if(!(speed>1.0f))return;
+        const float to[2]={d.target[0]-pp[0],d.target[2]-pp[2]};
+        const float along=(to[0]*way[0]+to[1]*way[1])/speed,across=(to[0]*way[1]-to[1]*way[0])/speed;
+        int aboard=0;
+        for(unsigned s=1;s<SeatCount(plane);++s)
+            aboard+=SeatRider(SeatAt(plane,s))==Rider::other && IsSoldierClass(At<const void*>(SeatAt(plane,s),kSeatRider));
+        if(!transport::StickStarts(along,across,speed,aboard,kChuteBleed))return;
+        Log("TRANSPORT stick of %d starts %.0f m short of the point along the track, %.0f m off it, at %.0f m/s (lead %.0f m)",aboard,along,
+            across,speed,transport::StickLead(speed,aboard,kChuteBleed));
+    } else if(!transport::JumpNow(d.jumped,d.jumped+1,ms,d.lastJump))return;
     Jumper* const slot=FreeJumper();
     if(!slot)return;   // every place taken by those still coming down: the next waits for one
     auto* h=At<unsigned char*>(SeatAt(plane,static_cast<unsigned>(seat)),kSeatRider);
     const void* top=NpcSquadTopOf(h);
     if(!NpcMoveSeat(plane,static_cast<unsigned>(seat),-1)){d.lastJump=ms;return;}
     ++d.jumped;d.lastJump=ms;
-    *slot=Jumper{ObjRef::Of(h),{},ms,NpcSoldierFlies(h)};
+    *slot=Jumper{ObjRef::Of(h),{},ms,NpcSoldierFlies(h),false};
     bool known=false;for(int i=0;i<d.topCount;++i)known=known || d.tops[i].Is(top);
     if(top && !known && d.topCount<kDropTops)d.tops[d.topCount++]=ObjRef::Of(top);
     Log("TRANSPORT jump %d from plane %p (seat %d) %.0f m from the point%s",d.jumped,plane,seat,dist,NpcSoldierFlies(h) ? ", a Wing Diver: no canopy" : "");

@@ -196,9 +196,9 @@ void Guide(Jet& j,const Kind& kind,const Arms& arms,Jet* mother,const float* pos
     default:
         break;
     }
-    if(j.ferry) {   // the paratroop plane: passes over its point (Ferry), never Patrol's ring round it
+    if(j.ferry) {   // the paratroop plane: passes along its line over its point (Ferry), never Patrol's ring round it
         if(j.mode!=Mode::patrol)SetMode(j,Mode::patrol,ms);
-        *speed=Ferry(j,pos,anchor,height,want);
+        *speed=Ferry(j,pos,height,want);
         return;
     }
     switch(kind.weapon) {
@@ -474,15 +474,36 @@ void SeeFocus(void* ctx,const void* object,const float*) noexcept {
 // The map's orders (mapcmd.cpp Give). guard / follow / release: ApplyMapCommand. focus: `focus` (the enemy the player
 // marked) attacked first, its order kept (ApplyMapFocus); refused when that is no enemy of it now.
 // A ferry (transport.cpp, the paratroop plane): its command point `at` (ApplyMapCommand's guard), flown at kFerryAlt over
-// it, no target taken (Jet::ferry). Its stick jumps over the point; JetWithdrawNow then sends it off (deleted out of
-// sight, its crew first: support_dispatch.cpp Retire).
-bool JetFerry(const void* vehicle,const float* at) noexcept {
+// it, no target taken (Jet::ferry), in passes along the straight line through it along `heading` (the heading its plan
+// brought it in on), each end off the map (support_entry.h MakePassLine, ferry_line.h). Its stick jumps over the point
+// (transport.cpp); JetFerryDone then lets it fly on to the end of that pass, where it is deleted (JetFrame reaps it; its
+// crew first: support_dispatch.cpp Retire). The same point again (the deployment's Assign after BoardAirborne): kept as
+// it is.
+bool JetFerry(const void* vehicle,const float* at,const float* heading) noexcept {
     __try {
         Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle));
-        if(!j || !at || j->reap)return false;
-        j->ferry=true;j->ferryOut=false;
+        if(!j || !at || !heading || j->reap)return false;
+        if(j->ferry && j->ferryLine.at[0]==at[0] && j->ferryLine.at[1]==at[1] && j->ferryLine.at[2]==at[2])return true;
+        const support::Reach reach{ArrivalHalf(),NearDrawDistance()};
+        support::PassLine line;
+        if(!support::MakePassLine(MapPlayArea(),reach,at,heading,FerryTurn(KindOf(*j)),line)) {
+            Log("JET v=%p ferry to (%.0f,%.0f,%.0f): no line along (%.2f,%.2f) with room to turn off the map at both ends",vehicle,
+                at[0],at[1],at[2],heading[0],heading[2]);
+            return false;
+        }
+        j->ferry=true;j->ferryGone=false;j->ferryLine=line;j->ferryPass=ferry::Pass{};
         ApplyMapCommand(*j,Command{Order::guard,{at[0],at[1],at[2]}},GameMs());
-        Log("JET v=%p ferry to (%.0f,%.0f,%.0f), %.0f m over it",vehicle,at[0],at[1],at[2],kFerryAlt);
+        Log("JET v=%p ferry to (%.0f,%.0f,%.0f), %.0f m over it: passes along (%.2f,%.2f) from %.0f to %.0f m of it",vehicle,at[0],at[1],
+            at[2],kFerryAlt,line.dir[0],line.dir[2],line.lo,line.hi);
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+bool JetFerryDone(const void* vehicle) noexcept {
+    __try {
+        Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle));
+        if(!j || !j->ferry || j->reap)return false;
+        if(!j->ferryPass.done)Log("JET v=%p ferry: stick out, on along the line (%+d) to its end off the map",vehicle,j->ferryPass.dir);
+        j->ferryPass.done=true;
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
@@ -609,6 +630,7 @@ void JetFrame(unsigned char* v) noexcept {
     if(kind.flight==FlightModel::rotor)Rotor(*j,kind,v,mother,pos,anchor,want,height,hp,hpMax,dt,ms);
     else Wing(*j,kind,v,pos,clear,nose,want,speed,dt,ms);
     HoldOffGround(*j,pos,clear,dt,ms);
+    if(j->ferryGone)j->reap=true;   // past its last pass's end, off the map (Ferry): deleted there
     j->m.ready=true;
     BayFrame(*j,pos);
     if(gunner){v[kFireGun]=0;v[kFireMissile]=0;}   // the gun is the player's (playerjet_crew.inc GunnerFire)
