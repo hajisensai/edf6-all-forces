@@ -87,5 +87,25 @@ def find_or_dev() -> str:
     return find() or DEV_DIR
 
 
+# The earlier games the tools read data from (tools/ported_weapons.py): (Steam folder, the program that marks it, $VAR).
+EDF5 = ('EARTH DEFENSE FORCE 5', 'EDF5.exe', 'EDF5_DIR')
+EDF41 = ('Earth Defense Force 4.1', 'EDF41.exe', 'EDF41_DIR')
+
+
+def find_other(game: tuple[str, str, str], near: str | None = None) -> str | None:
+    """Another EDF's install: $VAR, the folder next to `near` (EDF6's: the same Steam library), then every Steam
+    library. A directory counts only when it holds the game's program and Root.cpk."""
+    folder, exe, var = game
+    out = [os.environ.get(var, '')]
+    if near:
+        out.append(os.path.join(os.path.dirname(os.path.normpath(near)), folder))
+    for steam in _steam_roots():
+        out += [os.path.join(lib, 'steamapps', 'common', folder) for lib in _libraries(steam)]
+    for path in out:
+        if path and all(os.path.isfile(os.path.join(path, n)) for n in (exe, 'Root.cpk')):
+            return os.path.normpath(path)
+    return None
+
+
 if __name__ == '__main__':
     print(find())

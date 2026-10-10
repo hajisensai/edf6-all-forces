@@ -60,6 +60,7 @@ sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 sys.path.insert(0, HERE)
 import calls  # noqa: E402
 import dsgo  # noqa: E402
+import ported_weapons as pw  # noqa: E402
 import ledger  # noqa: E402
 import modfiles  # noqa: E402
 import vcobjects as vc  # noqa: E402
@@ -75,6 +76,10 @@ TEXTS = [f'WEAPON/WEAPONTEXT.{lang}.SGO' for lang in LANGS]
 SHARED = [TABLE] + TEXTS
 BACKUP = '.edf6vc_backup'
 MANIFEST = '.edf6vc_calls.json'
+# A save keeps 0x800 weapon records, one per table row (docs/loadout-re.md 8.1: GS+0x6E68 ends at GS+0x14B50), and the
+# game loops over every row of the table when it grants weapons or clamps their stars: a row past them is written past
+# the save's block.
+SAVE_WEAPONS = 0x800
 JOURNAL = '.edf6vc_calls.txn.json'
 ACQUIRE = 0.0   # WEAPONTABLE column 5: 0 normal (the plugin makes EDF6VC_CALL_* owned at every save load)
 PROCESS = modfiles.PROCESS
@@ -93,6 +98,11 @@ def sgo_file(call: Call) -> str:
 
 def vehicle_file(call: Call) -> str:
     return f'OBJECT/{call.vehicle.upper()}.SGO'
+
+
+def our_sgos() -> list[str]:
+    """Every weapon SGO install writes: the calls' and the earlier games' (tools/ported_weapons.py)."""
+    return [sgo_file(c) for c in CALLS] + [pw.sgo_file(p) for p in pw.PORTS]
 
 
 # ---------------------------------------------------------------- reading the base
@@ -174,35 +184,50 @@ def check_aligned(game_root: str, n: int) -> None:
 # ---------------------------------------------------------------- where the rows go
 
 
+def slot_of(row_id: str) -> str | None:
+    """The call or earlier game's weapon (tools/ported_weapons.py) a table row belongs to, its own row or its placeholder."""
+    return calls.slot_of(row_id) or pw.slot_of(row_id)
+
+
 @dataclass
 class Plan:
-    at: dict[str, int]      # call id -> its row index in the result
-    appended: list[str]     # the call ids added at the table's end, in that order
+    at: dict[str, int]      # call / EDF5 weapon id -> its row index in the result
+    appended: list[str]     # the ids added at the table's end, in that order
 
 
 def plan_rows(ids: list[str]) -> Plan:
-    """Where each call's row goes in a table whose row ids are `ids`: a row of ours already there (or the
-    placeholder an uninstall left) stays where it is, whatever order an older install put them in; the rest go
-    at the end in CALLS order. Raises when a call has two rows."""
+    """Where each call's row and each EDF5 weapon's goes in a table whose row ids are `ids`: a row of ours already
+    there (or the placeholder an uninstall left) stays where it is, whatever order an older install put them in; the
+    rest go at the end, the calls in CALLS order, then the EDF5 weapons in the registry's. Every EDF5 weapon gets its
+    row whether this machine can build it or not (stack puts a placeholder then), so every install of a release has
+    the same rows at the same indices, with or without EDF5. Raises when one has two rows."""
     at: dict[str, int] = {}
     for i, x in enumerate(ids):
-        c = calls.slot_of(x)
+        c = slot_of(x)
         if c is None:
             continue
         if c in at:
             raise ValueError(f'{c} has two rows in the weapon table: {at[c]} and {i}')
         at[c] = i
-    appended = [c for c in IDS if c not in at]
+    appended = [c for c in IDS + pw.IDS if c not in at]
     for k, c in enumerate(appended):
         at[c] = len(ids) + k
     return Plan(at, appended)
+
+
+def check_room(rows: int) -> None:
+    """Refuses (SystemExit, before anything is built or written) a table longer than a save keeps weapons for."""
+    if rows > SAVE_WEAPONS:
+        raise SystemExit(f'the weapon table would have {rows} rows, but a save keeps {SAVE_WEAPONS} weapons, one per '
+                         f'row, and the game writes past them for every row beyond: {rows - SAVE_WEAPONS} too many. '
+                         'Remove another mod\'s weapon rows first; nothing was written.')
 
 
 def tail_start(ids: list[str]) -> int:
     """Where the run of our rows (or placeholders) that ends the table starts: only those can be deleted
     without moving another row."""
     i = len(ids)
-    while i > 0 and calls.slot_of(ids[i - 1]) is not None:
+    while i > 0 and slot_of(ids[i - 1]) is not None:
         i -= 1
     return i
 
@@ -583,6 +608,12 @@ def stack(game_root: str) -> dict[str, bytes]:
     s = load_shared(game_root)
     before = s.ids
     plan = plan_rows(before)
+    check_room(len(before) + len(plan.appended))
+    ports, left_out = pw.build(game_root, lambda rel: stock(game_root, rel))
+    if left_out:
+        reasons = sorted(set(left_out.values()))
+        print(f'Ported weapons (EDF5, EDF4.1): {len(ports)} of {len(pw.PORTS)} built, {len(left_out)} wait as placeholders: '
+              + '; '.join(reasons[:3]) + (' ...' if len(reasons) > 3 else ''))
     tpl = {t: _template_index(before, t) for t in templates()}
     template_sgo = {t: stock(game_root, f'WEAPON/{t.upper()}.SGO') for t in tpl}
     curves = {request_family(c): request_curve(game_root, request_family(c)) for c in CALLS if c.brings == 'vehicle'}
@@ -592,10 +623,21 @@ def stack(game_root: str) -> dict[str, bytes]:
                                                 fallback=fallback and c.jet == vc.SAZABI_JET)
                              for c in CALLS}
     order = sorted(CALLS, key=lambda c: plan.at[c.id])   # appended rows in their order
+    # An EDF5 weapon this run cannot build keeps the row an earlier install gave it (its SGO is still in Mods), else
+    # its row is a placeholder until EDF5 is there (pw.pending_*): its index is taken either way.
+    kept = {p.id for p in pw.PORTS if p.id not in ports and plan.at[p.id] < len(before)
+            and before[plan.at[p.id]] == p.id and os.path.isfile(_mods(game_root, pw.sgo_file(p)))}
+    put_ports = [p for p in pw.PORTS if p.id not in kept]
+    port_tpl = {p.id: _template_index(before, p.template) for p in put_ports}
+    out.update({pw.sgo_file(p): ports[p.id] for p in put_ports if p.id in ports})
     rows = s.rows
     row_template = {c.id: rows[tpl[template_of(c)]] for c in CALLS}
-    for c in order:
-        _put(rows, plan.at[c.id], _table_row(row_template[c.id], c))
+    port_rows = {p.id: pw.table_row(rows[port_tpl[p.id]], p) if p.id in ports
+                 else pw.pending_table_row(rows[port_tpl[p.id]], p) for p in put_ports}
+    puts = sorted([(plan.at[c.id], _table_row(row_template[c.id], c)) for c in order]
+                  + [(plan.at[p.id], port_rows[p.id]) for p in put_ports], key=lambda x: x[0])
+    for at, row in puts:
+        _put(rows, at, row)
     out[TABLE] = dsgo.compact(s.table)
     durability = {c.id: vehicle_durability(game_root, c) if c.brings == 'vehicle' else None for c in CALLS}
     if fallback:
@@ -609,24 +651,33 @@ def stack(game_root: str) -> dict[str, bytes]:
     for lang, rel in zip(LANGS, TEXTS):
         text = s.text_rows(rel)
         text_templates = {c.id: text[tpl[template_of(c)]] for c in CALLS}
-        for c in order:
-            _put(text, plan.at[c.id], _text_row(text_templates[c.id], c, lang, durability[c.id], stats.get(c.id)))
+        port_text = {p.id: pw.text_row(p, lang) if p.id in ports
+                     else pw.pending_text_row(text[port_tpl[p.id]], p, lang) for p in put_ports}
+        puts = sorted([(plan.at[c.id], _text_row(text_templates[c.id], c, lang, durability[c.id], stats.get(c.id)))
+                       for c in order] + [(plan.at[p.id], port_text[p.id]) for p in put_ports], key=lambda x: x[0])
+        for at, row in puts:
+            _put(text, at, row)
         out[rel] = dsgo.compact(s.texts[rel])
-    verify(game_root, out, plan)
+    # What each row of ours must hold: a call and a ported weapon built or kept their own id, one waiting for its game
+    # its placeholder's.
+    want = {c.id: c.id for c in CALLS}
+    want.update({p.id: p.id if p.id in ports or p.id in kept else pw.retired_id(p.id) for p in pw.PORTS})
+    verify(game_root, out, plan, want)
     return out
 
 
-def verify(game_root: str, out: dict[str, bytes], plan: Plan) -> None:
+def verify(game_root: str, out: dict[str, bytes], plan: Plan, want: dict[str, str]) -> None:
     """Before anything is written: every row not ours unchanged at its index, each of ours where plan_rows put
-    it, the table grown by exactly the rows appended, the texts as long as the table."""
+    it and holding the row id stack meant it to (`want`: its own, or a placeholder's), the table grown by exactly the
+    rows appended, the texts as long as the table."""
     before = load_shared(game_root)
     ids = before.ids
     after = row_ids(out[TABLE])
     if len(after) != len(ids) + len(plan.appended):
         raise ValueError(f'the table grew by {len(after) - len(ids)} rows, {len(plan.appended)} were appended')
     for cid, i in plan.at.items():
-        if after[i] != cid:
-            raise ValueError(f'row {i} is {after[i]}, expected {cid}')
+        if after[i] != want[cid]:
+            raise ValueError(f'row {i} is {after[i]}, expected {want[cid]}')
     ours = set(plan.at.values())
     for rel in SHARED:
         old = [dsgo.to_py(r) for r in (before.rows if rel == TABLE else before.text_rows(rel))]
@@ -647,25 +698,38 @@ def retire(game_root: str, delete_rows: bool) -> tuple[dict[str, bytes], list[st
     present = {c: i for c, i in plan.at.items() if i < len(ids)}
     cut = tail_start(ids) if delete_rows else len(ids)
     deleted = sorted((c for c, i in present.items() if i >= cut), key=lambda c: present[c])
-    tpl = {t: _template_index(ids, t) for t in templates()}
     by_id = {c.id: c for c in CALLS}
+    tpl = {c: _template_index(ids, template_of(by_id[c]) if c in by_id else pw.BY_ID[c].template) for c in present}
+
+    def retired_row(cid: str, template: Node, lang: str | None) -> Node:
+        if cid in by_id:
+            c = by_id[cid]
+            return _retired_table_row(template, c) if lang is None else _retired_text_row(template, c, lang)
+        p = pw.BY_ID[cid]
+        return pw.retired_table_row(template, p) if lang is None else pw.retired_text_row(template, p, lang)
+
     rows = s.rows
     for cid, i in present.items():
         if i < cut:
-            rows[i] = _retired_table_row(rows[tpl[template_of(by_id[cid])]], by_id[cid])
+            rows[i] = retired_row(cid, rows[tpl[cid]], None)
     del rows[cut:]
     out = {TABLE: dsgo.compact(s.table)}
     for lang, rel in zip(LANGS, TEXTS):
         text = s.text_rows(rel)
         for cid, i in present.items():
             if i < cut:
-                text[i] = _retired_text_row(text[tpl[template_of(by_id[cid])]], by_id[cid], lang)
+                text[i] = retired_row(cid, text[tpl[cid]], lang)
         del text[cut:]
         out[rel] = dsgo.compact(s.texts[rel])
     after = row_ids(out[TABLE])
-    if after[:cut] != [x if calls.slot_of(x) is None else calls.retired_id(calls.slot_of(x)) for x in ids[:cut]]:
+    if after[:cut] != [x if slot_of(x) is None else retired_id(slot_of(x)) for x in ids[:cut]]:
         raise AssertionError('retire moved a row')
     return out, deleted
+
+
+def retired_id(row: str) -> str:
+    """The placeholder id of a call's or an EDF5 weapon's row."""
+    return pw.retired_id(row) if row in pw.BY_ID else calls.retired_id(row)
 
 
 # ---------------------------------------------------------------- game dir: transaction, manifest
@@ -787,9 +851,9 @@ def install(game_root: str, files: dict[str, bytes] | None = None) -> dict[str, 
     _first_backup(game_root, manifest, list(files))
     ids = row_ids(files[TABLE])
     manifest['written'] = {rel: modfiles.sha256(data) for rel, data in files.items()}
-    manifest['rows'] = {c: ids.index(c) for c in IDS}
+    manifest['rows'] = {slot_of(x): i for i, x in enumerate(ids) if slot_of(x)}   # placeholders too, as uninstall
     commit(game_root, {**files, MANIFEST: _manifest_bytes(manifest)})
-    moved = {c: (old_rows[c], manifest['rows'][c]) for c in old_rows if old_rows[c] != manifest['rows'].get(c)}
+    moved = {c: (old_rows[c], manifest['rows'].get(c)) for c in old_rows if old_rows[c] != manifest['rows'].get(c)}
     for c, (was, now) in moved.items():
         print(f'WARNING: {c} was row {was}, now {now}: another tool rewrote the weapon table without it; a save '
               f'that had it equipped or owned refers to row {was}')
@@ -818,8 +882,7 @@ def uninstall(game_root: str, delete_rows: bool = False, unequipped: bool = Fals
             changes[rel] = None   # we made it and nobody else's rows are left in it
         elif data != base(game_root, rel):
             changes[rel] = data
-    for c in CALLS:
-        rel = sgo_file(c)
+    for rel in our_sgos():
         path = _mods(game_root, rel)
         bak = _mods(game_root, BACKUP, rel)
         if rel in manifest['replaced'] and os.path.isfile(bak):
@@ -832,10 +895,10 @@ def uninstall(game_root: str, delete_rows: bool = False, unequipped: bool = Fals
             changes[rel] = None
     _first_backup(game_root, manifest, list(shared))
     ids = row_ids(shared[TABLE])   # the table as this commit leaves it (deleted only when it is stock again)
-    left = [x for x in ids if calls.slot_of(x)]
+    left = [x for x in ids if slot_of(x)]
     if left:   # placeholders stay ours: a later install takes their rows back, repair can still restore
         manifest['written'] = {rel: modfiles.sha256(d) for rel, d in changes.items() if d is not None}
-        manifest['rows'] = {calls.slot_of(x): ids.index(x) for x in left}
+        manifest['rows'] = {slot_of(x): ids.index(x) for x in left}
     commit(game_root, {**changes, MANIFEST: _manifest_bytes(manifest) if left else None})
     for rel, data in changes.items():
         print(f'{"removed" if data is None else "wrote"} {rel}')
@@ -856,7 +919,7 @@ def repair(game_root: str) -> list[str]:
     if not os.path.isfile(_manifest_path(game_root)):
         raise SystemExit('EDF6VehicleCrew never installed its call weapons here: nothing to restore')
     changes: dict[str, bytes | None] = {}
-    for rel in SHARED + [sgo_file(c) for c in CALLS]:
+    for rel in SHARED + our_sgos():
         bak = _mods(game_root, BACKUP, rel)
         if rel in manifest['replaced'] and os.path.isfile(bak):
             with open(bak, 'rb') as f:
@@ -907,8 +970,32 @@ def check(game_root: str) -> bool:
         if state == 'in' and c.vehicle and any(not os.path.isfile(_mods(game_root, rel)) for rel in vehicle_needs(c, request)):
             print(f'        {vehicle_file(c)} missing (python tools/make_jets.py)')
             ok = False
-    return ok
+    return check_ports(game_root, ids, rows) and ok
 
+
+def check_ports(game_root: str, ids: list[str], rows: dict[str, int]) -> bool:
+    """The EDF5 weapons' part of check: every one has its row (a placeholder while EDF5 is missing is fine, it is
+    counted), at the row it was installed at, and a built one its SGO."""
+    ok = True
+    states = {'in': 0, 'placeholder': 0, 'missing': 0}
+    at = {pw.slot_of(x): i for i, x in enumerate(ids) if pw.slot_of(x)}
+    for p in pw.PORTS:
+        i = at.get(p.id)
+        state = 'missing' if i is None else 'placeholder' if ids[i] != p.id else 'in'
+        states[state] += 1
+        if state == 'missing':
+            ok = False
+            continue
+        if p.id in rows and rows[p.id] != i:
+            print(f'  {i:>5} {p.id}: {state} (installed at {rows[p.id]})')
+            ok = False
+        if state == 'in' and not os.path.isfile(_mods(game_root, pw.sgo_file(p))):
+            print(f'  {i:>5} {p.id}: {pw.sgo_file(p)} missing')
+            ok = False
+    print(f'  ported weapons (EDF5, EDF4.1): {states["in"]} in, {states["placeholder"]} placeholders (waiting for their '
+          f'game, or uninstalled), '
+          f'{states["missing"]} missing (of {len(pw.PORTS)})')
+    return ok
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
