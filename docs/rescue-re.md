@@ -52,7 +52,8 @@ The plugin reads exactly this. If the bytes at 0x6346FC, 0x634726, 0x634758 or 0
 
 **Launch (2026-10-09):** the support catalog's last entry, `RESCUE` (support_call.h SupportRescueAt), requested at the
 swimmer through the ordinary support request path (offline / a one-player world's host: planned here; any other online
-machine: through the host's transaction, every peer announcing `kCapSeaRescue`).
+machine: through the host's transaction, every peer announcing `kExtSeaRescue` in its hello's extension word; the
+capability bits 1|2|4|8 are the transports' and loads' since #100).
 - Planned as air support (`PlanAirSupport`): an entry at the map's edge, a clear corridor, open sky over the swimmer.
 - One 410 made at the takeoff point, its real pilot and one door gunner made inside it and seated at once
   (`BoardAirborne`, `NpcSeatCrewNow` in seat order: pilot seat 0, gunner seat 1 = `410_HELI_GUNNER_L`), all registered on

@@ -528,7 +528,8 @@ const wchar_t* SupportAirCallName(int index) noexcept {
     return index>=0 && index<kCallCount ? kCallLabels[index] : L"支援";
 }
 support::Refusal PlanAirSupport(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route) noexcept {
-    if(!route || !target || (spec.jet<0 && spec.heli<0) || spec.count<1)return support::Refusal::unsupported;
+    // A spec that brings an aircraft: a jet row, a heli row, or the paratroop plane (no row of either).
+    if(!route || !target || (spec.jet<0 && spec.heli<0 && !spec.transportPlane) || spec.count<1)return support::Refusal::unsupported;
     if(!OpenSky(target))return support::Refusal::noSky;
     float direction[3]={0,0,1};
     // Host chooses the entire plan once. Peers receive its explicit matrices.
@@ -563,7 +564,7 @@ support::Refusal PlanAirSupport(const SupportAircraft& spec,const float* target,
 
 support::Refusal PlanTakeoffSupport(const SupportAircraft& spec,const float* target,const float (*spots)[3],int count,
                                     support::Route* route) noexcept {
-    if(!route || !target || spec.count!=1 || (spec.jet<0 && spec.heli<0))return support::Refusal::unsupported;
+    if(!route || !target || spec.count!=1 || (spec.jet<0 && spec.heli<0 && !spec.transportPlane))return support::Refusal::unsupported;
     if(!OpenSky(target))return support::Refusal::noSky;
     return support::TakeoffRoute(MapPlayArea(),target,spots,count,EntryClear,*route);
 }

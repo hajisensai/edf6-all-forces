@@ -1,0 +1,132 @@
+[     0.0 s] LOADED foreground=1 keyboardState=1 keyState=1
+[     0.0 s] HOOK createCoRoutine=1
+[     0.0 s] CMD mission RM015 1
+[     0.0 s] MISSION asked: offline row 13, difficulty 1 (applied when the script starts its title)
+[     0.0 s] CMD probe airdrop
+[     0.0 s] PROBE hook container create at EDF+0x5e5260: in
+[     0.0 s] PROBE hook configure at EDF+0x5e5687: in
+[     0.0 s] PROBE hook release at EDF+0x5e5d3d: in
+[     0.0 s] PROBE hook vehicle create at EDF+0x5e8fdc: in
+[     0.0 s] PROBE airdrop installed=1
+[     0.0 s] PAD the virtual pad is in (xinput9_1_0!XInputGetState 00007FFCC59D1B40, XInputGetCapabilities 00007FFCC59D1A60)
+[     6.8 s] COROUTINE call
+[     6.8 s]   rcx=0000013EFF363778 size=0 cap=0 ""
+[     6.8 s]   rdx=0000013EFF363798 size=13 cap=15 "string Boot()"
+[     7.0 s] COROUTINE call
+[     7.0 s]   rcx=0000013EFF363778 size=0 cap=0 ""
+[     7.0 s]   rdx=0000013EFF363798 size=21 cap=23 "string StartToTitle()"
+[     7.0 s] SCRIPT StartToTitle -> Debug_StartOffline
+[     8.4 s] COROUTINE call
+[     8.4 s]   rcx=0000013EFF363778 size=0 cap=0 ""
+[     8.4 s]   rdx=0000013EFF363798 size=15 cap=15 "string HQMain()"
+[     8.4 s] SCRIPT HQMain -> PlayMission_Offline: row 13, difficulty 1
+[     9.0 s] PAD XInputGetState read 230 times
+[    19.1 s] PAD XInputGetState read 1316 times
+[    29.1 s] PAD XInputGetState read 2516 times
+[    33.4 s] PROBE try call key 106
+[    37.5 s] PROBE try call key 107
+[    39.2 s] PAD XInputGetState read 3718 times
+[    41.7 s] PROBE try call key 108
+[    45.9 s] PROBE try call key 109
+[    49.2 s] PAD XInputGetState read 4924 times
+[    50.0 s] PROBE try call key 10e
+[    54.2 s] PROBE try call key 10d
+[    58.3 s] PROBE try call key 10f
+[    59.3 s] PAD XInputGetState read 6126 times
+[    62.0 s] PROBE container CreateObject (in Transporter508 init 0x5E5070)
+[    62.0 s]   transporter=0000013F3EFE45C0 vtable EDF+0x17d75c0 pos (-167.29, 125.00, -69.64) fwd (0.975, 0.221, -0.006)
+[    62.0 s]   transporter+0x120+000 607704EAFB7F0000 0000000000000000 701084393F010000 C0D2ED293F010000
+[    62.0 s]   transporter +0x778 (derived id counter) = 4294967295
+[    62.0 s]   init.stackargs[5..10]+000 5A245B943E010000 AC255B943E010000 0000000000000000 E8EE4FD52D000000
+[    62.0 s]   init.stackargs[5..10]+020 000000003E010000 0000803F3E010000
+[    62.0 s]   init.arg5 containerSgo=0000013E945B245A "app:/object/v509_transportbox.sgo"
+[    62.0 s]   init.arg6 vehicleSgo=0000013E945B25AC "app:/object/edf6vc_vehicle401_striker_stores.sgo"
+[    62.0 s]   init.arg7 setupText=0000000000000000 ""
+[    62.0 s]   init.arg8 setupValue=0000002DD54FEEE8
+[    62.0 s]   init.arg8 variant index=2 (0xFFFF empty)
+[    62.0 s]   init.arg8+000 B890E7393F010000 6B00000000000000 0200B2E8FB7F0000
+[    62.0 s]   init.arg8.q0->+000 0000000000000000 0000000000000000 0000000000000000 0000000000000000
+[    62.0 s]   init.arg8.q0->+020 0000000000000000 0000000000000000 0000000000000000 0000000000000000
+[    62.0 s]   init.arg8.q0->+040 0000000000000000 0000000000000000 C0055B943E010000 B890E7393F010000
+[    62.0 s]   init.arg9 int=0 arg10 level=1.0000
+[    62.0 s]   init.arg2 parent shared_ptr+000 8020CB393F010000 40A772393F010000
+[    62.0 s]   parent=0000013F39CB2080 vtable EDF+0x17cf100 pos (-390.25, 0.01, -527.00) fwd (1.000, -0.000, -0.006)
+[    62.0 s]   init derivedNetId(rbp+58h)+000 5DF72B67FFFFFFFF 0000000005000000 00000000FB7F0000 E8D570440378E48B
+[    62.0 s]   create.sgo=0000013E945B245A "app:/object/v509_transportbox.sgo"
+[    62.0 s]   create.matrix+000 1566C0BB00000000 DFFE7FBF00000000 0ACF62BE29A4793F 7976AA3A00000000
+[    62.0 s]   create.matrix+020 0FA3793F0AD0623E AB9EBBBB00000000 F24A27C36DFFF942 AC478BC20000803F
+[    62.0 s]   create.param vtable EDF+0x17d7818
+[    62.0 s]   create.param+000 187804EAFB7F0000 0000000000000000 0000000000000000 0000000000000000
+[    62.0 s]   create.param+020 0000000000000000 0000000000000000 5DF72B67FFFFFFFF 0000000005000000
+[    62.0 s]   create.param+040 000000003F010000 E8D570440378E48B FFFFFFFF00000000
+[    62.0 s]   container=0000013F221BDF70 vtable EDF+0x17d7cb8 pos (-167.29, 125.00, -69.64) fwd (0.975, 0.221, -0.006)
+[    62.0 s] PROBE container configure 0x5E8B40 container=0000013F221BDF70 level=1.0000
+[    62.0 s]   configure.parent shared_ptr+000 8020CB393F010000 40A772393F010000
+[    62.0 s]   configure.parent=0000013F39CB2080 vtable EDF+0x17cf100 pos (-390.25, 0.01, -527.00) fwd (1.000, -0.000, -0.006)
+[    62.0 s]   configure.vehicleSgo=0000013E945B25AC "app:/object/edf6vc_vehicle401_striker_stores.sgo"
+[    62.0 s]   configure.setup+000 0000FE3E3F010000 F0EB4FD52D000000 0000000000000000 0700000000000000
+[    62.0 s]   configure.setup+020 B890E7393F010000 6B00000000000000 0200000000000000
+[    62.0 s]   configure.setup wstring size=0 cap=7
+[    62.0 s]   configure.setup variant index=2 (0xFFFF empty)
+[    62.0 s]   configure.setup+000 B890E7393F010000 6B00000000000000 0200000000000000
+[    62.0 s]   configure.setup.q0->+000 0000000000000000 0000000000000000 0000000000000000 0000000000000000
+[    62.0 s]   configure.setup.q0->+020 0000000000000000 0000000000000000 0000000000000000 0000000000000000
+[    62.0 s]   configure.setup.q0->+040 0000000000000000 0000000000000000 C0055B943E010000 B890E7393F010000
+[    62.0 s]   container+0xB40+000 A07C04EAFB7F0000 10EA1B223F010000 70DF1B223F010000 C093E5E8FB7F0000
+[    62.0 s]   container+0xB40+020 0000000000000000 0000000000C00F00 8020CB393F010000 40A772393F010000
+[    62.0 s]   container+0xB40+040 E0A3CC903E010000 0000000000C00F00 3000000000000000 3700000000000000
+[    62.0 s]   container+0xB40+060 0000803F00000000 00BB2D223F010000 304295393F010000 D00984393F010000
+[    62.0 s]   container+0xB40+080 0000804066668240 000010410000803F 00000000666682C0 000000000000803F
+[    62.0 s]   container+0xB40+0a0 000000000000ECC0 000000000000803F 0000000000000000 0000000000000000
+[    62.0 s]   container+0xB40+0c0 0000000000000000 000000000000803F 5DF72B67FFFFFFFF 0000000005000000
+[    62.0 s]   container+0xB40+0e0 0000000000000000 E8D570440378E48B FFFFFFFF00000000 0000000000000000
+[    62.0 s]   container+0xB40+100 0000000000000000 0000000000000000 0700000000000000 B890E7393F010000
+[    62.0 s]   container+0xB40+120 6B00000000000000 0200000000000000 0000000000000000 0000000000000000
+[    62.0 s]   container+0xB40+140 8000000000000000 DE6B0A1B000A0080 0000000000000000 1000000001000000
+[    62.0 s]   container+0xB40+160 8104080200000000 1000000000000000
+[    62.0 s]   container+0xB80 wstring size=48 cap=55
+[    62.0 s]   container+0xB80=0000013E90CCA3E0 "app:/object/edf6vc_vehicle401_striker_stores.sgo"
+[    62.0 s]   container+0xC38+000 0000000000000000 0000000000000000 0000000000000000 0700000000000000
+[    62.0 s]   container+0xC38+020 B890E7393F010000 6B00000000000000 0200000000000000
+[    62.0 s]   container+0xC38 wstring size=0 cap=7
+[    62.0 s]   container+0xC38 variant index=2 (0xFFFF empty)
+[    62.0 s]   container+0xC38+000 B890E7393F010000 6B00000000000000 0200000000000000
+[    62.0 s]   container+0xC38.q0->+000 0000000000000000 0000000000000000 0000000000000000 0000000000000000
+[    62.0 s]   container+0xC38.q0->+020 0000000000000000 0000000000000000 0000000000000000 0000000000000000
+[    62.0 s]   container+0xC38.q0->+040 0000000000000000 0000000000000000 C0055B943E010000 B890E7393F010000
+[    62.0 s] PROBE the vehicle call input: 10f (the last one tapped before the transporter came)
+[    69.3 s] PAD XInputGetState read 7324 times
+[    79.0 s] PROBE container release 0x5E84D0 container=0000013F221BDF70
+[    79.0 s]   container=0000013F221BDF70 vtable EDF+0x17d7cb8 pos (-368.05, 70.33, -522.16) fwd (-1.000, 0.000, 0.003)
+[    79.0 s]   container+0xB40+000 A07C04EAFB7F0000 10EA1B223F010000 70DF1B223F010000 C093E5E8FB7F0000
+[    79.0 s]   container+0xB40+020 0000000000000000 0000000000C00F00 8020CB393F010000 40A772393F010000
+[    79.4 s] PAD XInputGetState read 8522 times
+[    84.0 s] PROBE vehicle CreateObject (container unload 0x5E8C00)
+[    84.0 s]   vehicle.sgo=0000013E90CCA3E0 "app:/object/edf6vc_vehicle401_striker_stores.sgo"
+[    84.0 s]   vehicle.matrix+000 77EF47BB7CCAD7BA 9AFF7FBF00000000 EC4130B9E9FF7F3F 8AB9D7BA00000000
+[    84.0 s]   vehicle.matrix+020 B0FF7F3FD2FD2A39 77F447BB00000000 AC04B8C3F8EA603F B78702C40000803F
+[    84.0 s]   vehicle.param vtable EDF+0x1762068
+[    84.0 s]   vehicle=0000013F20E33030 vtable EDF+0x17e01b0 pos (-368.04, 0.88, -522.12) fwd (1.000, 0.000, -0.003)
+[    85.0 s] PROBE vehicle after 1000 ms
+[    85.0 s]   vehicle=0000013F20E33030 vtable EDF+0x17e01b0 pos (-368.04, 0.13, -522.13) fwd (0.996, 0.014, 0.092)
+[    85.0 s]   vehicle +0x67C level=1.0000
+[    87.0 s] PROBE vehicle after 3000 ms
+[    87.0 s]   vehicle=0000013F20E33030 vtable EDF+0x17e01b0 pos (-368.04, 0.06, -522.17) fwd (0.996, 0.008, 0.094)
+[    87.0 s]   vehicle +0x67C level=1.0000
+[    89.4 s] PAD XInputGetState read 9712 times
+[    90.0 s] PROBE vehicle after 6000 ms
+[    90.0 s]   vehicle=0000013F20E33030 vtable EDF+0x17e01b0 pos (-368.04, 0.06, -522.17) fwd (0.996, 0.008, 0.094)
+[    90.0 s]   vehicle +0x67C level=1.0000
+[    94.0 s] PROBE vehicle after 10000 ms
+[    94.0 s]   vehicle=0000013F20E33030 vtable EDF+0x17e01b0 pos (-368.04, 0.07, -522.17) fwd (0.996, 0.007, 0.094)
+[    94.0 s]   vehicle +0x67C level=1.0000
+[    99.5 s] PAD XInputGetState read 10918 times
+[   109.5 s] PAD XInputGetState read 12098 times
+[   119.5 s] PAD XInputGetState read 13300 times
+[   129.6 s] PAD XInputGetState read 14502 times
+[   139.7 s] PAD XInputGetState read 15708 times
+[   149.7 s] PAD XInputGetState read 16878 times
+[   159.8 s] PAD XInputGetState read 17288 times
+[   169.8 s] PAD XInputGetState read 18386 times
+[   170.0 s] CMD quit
+[   170.0 s] QUIT window 0000000002082AAC

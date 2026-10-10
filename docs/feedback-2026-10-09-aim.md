@@ -64,6 +64,10 @@
 
 ### 3a. 原版 Q 标记（Spot）——本条反馈的本体
 
+> **2026-10-10 更新**：用户要求「给原版的q删掉吧，改成我们自制的q」。现在默认 `VanillaSpot=0`：本机玩家的原版 Spot 在 `0x59B75C`
+> 的调用处直接不投射（下面的射线修正只在 `VanillaSpot=1` 时还有用）；取代它的是插件自制 Q（`src/qmark.cpp`，队友可见、
+> 鼠标瞄准点、提示音），见 `docs/npc-ai-design.md` §6.3 与 README「自制 Q 标记取代原版 Q」。
+
 **它是什么**：原版键位配置里的 `OptionPlayer_KeyboardBaseSpot`（字符串 `0x17F33C8`，键位说明分发 `0x899750` 的第 5 项）。
 按下时向前打一条射线，在命中处放一个 `SpotEffect`（vtable `0x17A91C8`，构造 `0x3047C0`，贴图 `SpotCircle.dds`），
 经士兵的网络消息同步给其他玩家（远端在 `0x59E210` 收到点位后同样走 `0x59F630`）。
@@ -95,6 +99,9 @@ SpotEffect、联机同步全部照旧，只在原版读完数据源、交给投�
 `CameraRay` 本身（炮塔镜头、EDF6AutoTurret 视线等单人功能用）没改，仍是最后画的那个视图。
 
 ### 3b. EDF6AutoTurret 的 Q 锁定——与原版 Q 的关系
+
+> **2026-10-10 更新**：原版 Q 默认关闭后，坐在 EDF6AutoTurret 管的座位上按 Q 同时发生的是：EDF6AutoTurret 锁定 + 插件自制 Q 标记
+> （两者都用 `GetAsyncKeyState` 读键、互不吞键；炮手座的自制 Q 射线也是屏幕中心，与 `ViewRayV1` 同一条）。
 
 - 两者默认都是 Q（原版 Spot 键由用户确认是 Q；EDF6AutoTurret `LockKey=0x51`），**互不吞键**：原版走自己的输入系统，
   EDF6AutoTurret 用 `GetAsyncKeyState` 另读。所以坐在 EDF6AutoTurret 管的座位上按一次 Q，两件事同时发生：原版放一个

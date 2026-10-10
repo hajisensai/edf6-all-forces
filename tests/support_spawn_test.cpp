@@ -7,7 +7,9 @@
 #include <limits>
 
 namespace fixture {
-bool signatures=true,failSetup=false,badClass=false,occupied=false;
+bool signatures=true,failSetup=false,badClass=false,occupied=false,variantBadClass=false;
+const wchar_t* lastPath=nullptr;
+const wchar_t* const kLoaded=L"app:/object/edf6vc_lo_tank_4000000000000c81.sgo";
 int checks=0,preloads=0,makes=0,applies=0,disposals=0,deletes=0,teams=0,levels=0,owners=0;
 alignas(16) unsigned char object[0x2000]{},seats[5*edf::kSeatStride]{};
 const void* expectedOwner=nullptr;
@@ -29,8 +31,11 @@ unsigned char* Create(void*,const float* matrix,const wchar_t* path,crew::InitPa
     ++makes;
     Check(param->vtable==crew::image+crew::kInitVtable,"native init parameter");
     for(int i=0;i<3;++i)lastPosition[i]=matrix[12+i];
-    for(const auto& row:crew::kSupportVehicles)if(std::wcscmp(path,row.sgo)==0) {
-        edf::Put<const void*>(object,0,crew::image+row.vtable+(badClass ? 8 : 0));
+    lastPath=path;
+    // A loaded tank (support_loadout.h VehicleVariantFile): the stock tank's class and seats, holders past the stock one.
+    const bool loaded=std::wcscmp(path,kLoaded)==0;
+    for(const auto& row:crew::kSupportVehicles)if(std::wcscmp(path,row.sgo)==0 || (loaded && &row==&crew::kSupportVehicles[0])) {
+        edf::Put<const void*>(object,0,crew::image+row.vtable+(badClass || (loaded && variantBadClass) ? 8 : 0));
         edf::Put<unsigned>(object,edf::kSeatCount,row.seats);
         edf::Put<unsigned char*>(object,edf::kSeats,seats);
         edf::Put<const void*>(object,edf::kSelfCtrl,seats+makes);
@@ -92,9 +97,20 @@ int main() {
     fixture::occupied=true;Check(!DeleteSupportVehicle(v),"occupied hull not deleted by rollback");
     fixture::occupied=false;Check(DeleteSupportVehicle(v) && fixture::deletes==1,"empty owned hull rollback");
     Check(!DeleteSupportVehicle(v),"rollback idempotent");
+    // A loaded tank (SupportVehicle_<key>): made from its generated file, checked as the stock hull is.
+    v=SpawnSupportVehicle(tank,manned,at,forward,nullptr,fixture::kLoaded);
+    Check(v && !std::wcscmp(fixture::lastPath,fixture::kLoaded),"a loaded tank is made from its own file");
+    Check(DeleteSupportVehicle(v),"loaded tank rollback");
+    fixture::variantBadClass=true;
+    Check(!SpawnSupportVehicle(tank,manned,at,forward,nullptr,fixture::kLoaded),"a loaded file of another class is refused");
+    Check(SupportVehicleReady(tank,manned),"a bad loaded file refuses itself only: the stock tank stays callable");
+    fixture::variantBadClass=false;
+    v=SpawnSupportVehicle(tank,manned,at,forward,nullptr);
+    Check(v && !std::wcscmp(fixture::lastPath,kSupportVehicles[0].sgo),"no variant: the stock V505_TANK_MISSION");
+    Check(DeleteSupportVehicle(v),"stock tank rollback");
     fixture::failSetup=true;
     Check(!SpawnSupportVehicle(tank,manned,at,forward,nullptr),"setup fault cannot return partial hull");
-    Check(fixture::disposals==2 && fixture::deletes==2 && fixture::owners==1,"setup fault disposes variant and hull before ownership");
+    Check(fixture::disposals==4 && fixture::deletes==5 && fixture::owners==3,"setup fault disposes variant and hull before ownership");
     PreloadSupportVehicles();Check(!SupportVehicleReady(tank,manned),"faulted resource stays disabled across mission reset");
     fixture::failSetup=false;
     v=SpawnSupportVehicle(SupportVehicleKind::civilianTruck,SupportCrewMode::unmanned,at,forward,nullptr);
@@ -102,7 +118,7 @@ int main() {
     Check(DeleteSupportVehicle(v),"truck rollback");
     fixture::badClass=true;
     Check(!SpawnSupportVehicle(SupportVehicleKind::transport,manned,at,forward,nullptr),"wrong class rejected and deleted");
-    Check(fixture::deletes==4,"wrong class rollback once");
+    Check(fixture::deletes==7,"wrong class rollback once");
     fixture::signatures=false;PreloadSupportVehicles();
     Check(!SupportVehicleReady(SupportVehicleKind::civilianTruck,manned),"profile mismatch clears old mission readiness");
     Check(SupportVehicleEnvironmentAllowed(tank,SupportEnvironment::underground),"underground vehicle decision belongs to real route geometry");

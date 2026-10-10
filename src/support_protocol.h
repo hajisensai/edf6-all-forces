@@ -10,19 +10,41 @@ constexpr std::uint32_t kMagic=0x54525053,kVersion=2;
 // those only when every peer announced it (Session::PeersHave); otherwise rifles and each call's own number.
 // kCapAirborneAir: it applies support_call.h airborne aircraft (created in the air, crew seated at once). A host
 // plans air support only when every peer has it (an older peer would make the hull empty and its crew mid-air).
-// kCapSeaRescue: its catalog has the sea rescue entry (support_call.h SupportRescueCatalog, after the ground entries)
-// and its Validate accepts that entry's plan (one 410, its pilot only: the door seats are the swimmer's). A host
-// plans a rescue only when every peer has it; an older peer's catalog ends before that index and would refuse the
-// plan mid-transaction with no reason anyone sees.
-constexpr std::uint32_t kCapSoldierVariants=1u,kCapAirborneAir=2u,kCapSeaRescue=4u,
-    kCapabilities=kCapSoldierVariants|kCapAirborneAir|kCapSeaRescue;
+// kCapTransports: it knows the transport catalog entries (support_dispatch.cpp TransportCatalog: the helicopter assault and
+// the paratroop drop) and their hulls; a host plans them only when every peer has it (an older one refuses the plan).
+// kCapLoadout: its Validate takes a composed load (support_call.h SupportLoadout: any count up to the seats, the Wing
+// Diver and Fencer kinds); a request carries the load in `challenge`. A host plans a composed load only when every peer
+// has it, else the call's own load (and says why).
+constexpr std::uint32_t kCapSoldierVariants=1u,kCapAirborneAir=2u,kCapTransports=4u,kCapLoadout=8u,
+    kCapabilities=kCapSoldierVariants|kCapAirborneAir|kCapTransports|kCapLoadout;
 static_assert(kCapabilities<kMaxUnits,"hello.index carries the capability bits");
-// The host's welcome carries its own capabilities too (2026-10-10, the user: 「进入房间发现版本不同步给一下说明吧」), in its
+// The hello's `index` has no bit left (it must stay below kMaxUnits for an older host's ValidMessage). The extension is
+// the hello's unit, which neither side ever read for a hello (ValidMessage checks a unit only in a unit message):
+// unit.resourceId = the extension bits, unit.netId = the Bloom filter (support_loadout.h, 256 bits) of the variant files
+// the peer has preloaded this mission. An older build sends zeros there and ignores ours.
+// kExtVariants: it applies plan unit variants (support_net.h Unit::variant: support_loadout.h looks and vehicle pylons,
+// sent in the unit message's `challenge`) and writes the ones it lacks to its pending list. A host plans a variant
+// applied only when every peer announced this and has its file by the filter; otherwise stock, said. The variants hook
+// (support_net.h Hooks::variants) announces it.
+// kExtSeaRescue: its catalog has the sea rescue entry (support_call.h SupportRescueCatalog, the catalog's last) and its
+// Validate accepts that entry's plan (one 410, its pilot only: the door seats are the swimmer's). A host plans a rescue
+// only when every peer has it (PeersHaveExtension); an older peer's catalog ends before that index and would refuse the
+// plan mid-transaction with no reason anyone sees. Every hello of this build announces it (Session::Tick), whatever the
+// hook says: it is the catalog's, not a mission's.
+constexpr std::uint32_t kExtVariants=1u,kExtSeaRescue=2u,kExtensions=kExtVariants|kExtSeaRescue;
+// What a build has, both words in one (the version notice compares and names these, support_net.cpp VersionTick): the
+// capability bits low (below kMaxUnits, 4 bits), the extension bits above them.
+constexpr std::uint32_t kExtShift=4;
+static_assert(kMaxUnits==(1u<<kExtShift),"the capability bits fill exactly the low kExtShift bits");
+constexpr std::uint32_t Features(std::uint32_t caps,std::uint32_t ext) noexcept { return (caps&(kMaxUnits-1))|(ext<<kExtShift); }
+constexpr std::uint32_t FeatureExt(std::uint32_t ext) noexcept { return ext<<kExtShift; }
+constexpr std::uint32_t kFeatures=Features(kCapabilities,kExtensions);
+// The host's welcome carries its own features too (2026-10-10, the user: 「进入房间发现版本不同步给一下说明吧」), in its
 // `catalog` (unused by a welcome before; ValidMessage bounds it below 1024, room for ten bits), and `ok` = 1 when a peer of
 // the room announced fewer than the host: a guest then knows an older host, a newer one, or an older third player, and
 // says so (support_net.cpp VersionTick). An older host sends 0 in both (its welcome never set them); an older guest
 // ignores them. The hello's own `index` keeps its bound (below kMaxUnits).
-static_assert(kCapabilities<1024,"welcome.catalog carries the host's capability bits");
+static_assert(kFeatures<1024,"welcome.catalog carries the host's features");
 // Request statuses kept per requester (host) and for this machine's own requests (any machine): the map's call and the
 // sea rescue are separate requests, each told its own outcome even when the other came later.
 constexpr std::uint32_t kRecentRequests=4;
@@ -53,7 +75,8 @@ public:
     void Stop() noexcept;
     void Suspend() noexcept;
     bool Suspended() const noexcept { return suspended_; }
-    bool Submit(std::uint32_t catalog,const float* target,std::uint64_t now) noexcept;
+    // `loadout`: support_call.h PackSupportLoadout (0: the call's own), sent in the request's `challenge`.
+    bool Submit(std::uint32_t catalog,const float* target,std::uint64_t now,std::uint64_t loadout=0) noexcept;
     std::uint64_t SubmitPrepared(const Plan&,std::uint64_t now) noexcept;
     void Receive(std::uint32_t peer,const Message&,std::uint64_t now) noexcept;
     void Tick(std::uint64_t now) noexcept;
@@ -65,10 +88,16 @@ public:
     // Host: whether every peer of this session announced all of `caps` in its current hello (no peer: true).
     // A client is never asked to plan: true.
     bool PeersHave(std::uint32_t caps) const noexcept;
-    // Host: the peers that announced fewer capabilities than this build (`missing`: what they lack between them).
+    // Host: whether every peer announced all of `ext` (kExtVariants) and, `hash` non-zero, has that variant file by its
+    // hello's filter (no peer: true). A client is never asked: true.
+    bool PeersHaveVariant(std::uint32_t ext,std::uint64_t hash) const noexcept;
+    // Host: whether every peer announced all of `ext` in its hello's extension word (kExtSeaRescue). A client: true.
+    bool PeersHaveExtension(std::uint32_t ext) const noexcept { return PeersHaveVariant(ext,0); }
+    // Host: the heard peers whose features (Features: capabilities and extensions) lack some of this build's kFeatures
+    // (`missing`: what they lack between them, feature bits).
     std::uint32_t PeersBehind(std::uint32_t* missing) const noexcept;
-    std::uint32_t PeersAhead() const noexcept;   // host: peers that announced capabilities this build does not have
-    // Client: whether the host's welcome came, the capabilities it announced (0: an older host, which announces none),
+    std::uint32_t PeersAhead() const noexcept;   // host: peers that announced features this build does not have
+    // Client: whether the host's welcome came, the features it announced (0: an older host, which announces none),
     // and whether it said a peer of the room is behind it.
     bool HostCapsKnown() const noexcept { return hostCapsKnown_; }
     std::uint32_t HostCaps() const noexcept { return hostCaps_; }
@@ -83,7 +112,7 @@ private:
         bool cancelConfirmed=false;
         bool spawned=false;
         RequestStatus failure=RequestStatus::cancelled;
-        std::uint64_t token=0;
+        std::uint64_t token=0,loadout=0;
         Plan plan{};
         std::uint32_t requester=0,request=0,received=0;
         std::uint64_t since=0;
@@ -102,7 +131,8 @@ private:
     std::array<std::uint64_t,kMaxPeers+1> challenges_{},lastRequestAt_{};
     std::array<std::uint32_t,kMaxPeers+1> requests_{};
     std::array<std::uint32_t,kMaxPeers+1> peerMissions_{};
-    std::array<std::uint32_t,kMaxPeers+1> peerCaps_{};
+    std::array<std::uint32_t,kMaxPeers+1> peerCaps_{},peerExt_{};
+    std::array<std::array<unsigned char,32>,kMaxPeers+1> peerBloom_{};
     std::uint32_t hostCaps_=0;bool hostCapsKnown_=false,hostRoomBehind_=false;
     struct Reply { std::uint32_t request=0;RequestStatus status=RequestStatus::accepted;bool dirty=false; };
     using Replies=std::array<Reply,kRecentRequests>;

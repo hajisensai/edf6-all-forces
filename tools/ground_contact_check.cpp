@@ -190,6 +190,83 @@ bool Degraded() noexcept {
     return ok;
 }
 
+// Rolling with the throttle (pjet_handling.h AlongPlane / RollSpeed; the user, 2026-10-09: 「这个飞机起飞的时候撞到东西了，然后
+// 弹来弹去的」): the ground step's speed integrated as playerjet.cpp Ground does it, the throttle full (kThrust m/s^2 up to
+// kTop), on the stand-in's contacts. "before" read last frame's velocity along the level nose; "now" along the plane the
+// wheels stand on. Started at kRollFrom m/s, after kRollFor s "now" must have gained the throttle's speed (within 2%: over
+// bumps each frame's change of pitch still turns a little of it away) whatever the
+// slope (the plugin owns the speed along the ground; the stand-in's slope adds no gravity along it, as GroundContact
+// does not), and moved as far as that speed says; "before" is printed beside it and must lose speed on the pitched
+// ground (else the case tells nothing apart).
+constexpr float kThrust=10.0f,kTop=100.0f,kRollFrom=15.0f,kRollFor=4.0f;
+struct Roll { float speed,moved; };
+Roll RollThrottle(const Ground& g,bool level) noexcept {
+    Body b{};
+    b.y=Height(g,0.0f)+kWheelDrop;b.th=std::atan(g.slope);
+    float vel[3]={kRollFrom*std::cos(b.th),kRollFrom*std::sin(b.th),0.0f};
+    const float startX=b.x;
+    float speed=0.0f;
+    for(int f=0;f<static_cast<int>(kRollFor/kDt);++f) {
+        const float up[3]={-std::sin(b.th),std::cos(b.th),0.0f},nose[3]={1.0f,0.0f,0.0f};
+        float ahead[3];
+        if(!crew::handling::AlongPlane(nose,up,ahead))return Roll{};
+        speed=level ? vel[0] : crew::handling::RollSpeed(vel,ahead);
+        speed+=std::fmin(kThrust*kDt,kTop-speed);
+        for(int i=0;i<3;++i)vel[i]=ahead[i]*speed;
+        const float omega[3]={0.0f,0.0f,0.0f};
+        float lin[3]={b.vx,b.vy,0.0f},ang[3]={0.0f,0.0f,b.w};
+        GroundContact(up,vel,omega,lin,ang);
+        b.vx=lin[0];b.vy=lin[1];b.w=ang[2];
+        float push=0.0f;
+        Solve(b,g,&push);
+    }
+    return Roll{speed,b.x-startX};
+}
+bool Throttle() noexcept {
+    const struct { const char* name; Ground g; } cases[]={
+        {"throttle, flat",                 {0.0f,0.0f,0.0f}},
+        {"throttle, 4 deg slope",          {0.07f,0.0f,0.0f}},
+        {"throttle, 10 deg (on rubble)",   {0.18f,0.0f,0.0f}},
+        {"throttle, field (0.2 m / 9 m)",  {0.02f,0.2f,0.7f}},
+    };
+    const float want=kRollFrom+kThrust*kRollFor,wantMoved=(kRollFrom+want)*0.5f*kRollFor;
+    bool ok=true;
+    int told=0;
+    for(const auto& c:cases) {
+        const Roll before=RollThrottle(c.g,true),now=RollThrottle(c.g,false);
+        // Along the ground (x is level): the slope's run is cos of the way rolled.
+        const float run=std::cos(std::atan(c.g.slope));
+        const bool good=std::fabs(now.speed-want)<0.02f*want && (c.g.bump>0.0f || std::fabs(now.moved-wantMoved*run)<0.03f*wantMoved);
+        if(before.speed<want-5.0f)++told;
+        std::printf("%-30s rolling with the throttle %.0f s from %.0f m/s (wants %.0f): before %5.1f m/s, %5.1f m; now %5.1f m/s, %5.1f m  %s\n",
+                    c.name,kRollFor,kRollFrom,want,before.speed,before.moved,now.speed,now.moved,good ? "ok" : "WRONG");
+        ok=ok && good;
+    }
+    std::printf("%-30s %d cases where the level read lost speed  %s\n","the throttle cases discriminate",told,told>0 ? "ok" : "WRONG");
+    return ok && told>0;
+}
+
+// Rolled off what it stood on (pjet_handling.h RollsIntoAir; the log of 2026-10-09 19:21): flying only from the air's
+// least speed (playerjet.cpp kStallFloor 25 m/s) over kOffGround 6 m; slower it stays on its contacts and falls.
+bool OffTheGround() noexcept {
+    constexpr float kNone=-1e9f,kOff=6.0f,kFloor=25.0f;
+    const struct { float clear,speed; bool air; const char* what; } rows[]={
+        {6.2f,1.0f,false,"lifted 6 m at 1 m/s (19:21:25, then a 20 m/s dive)"},
+        {6.5f,22.0f,false,"lifted 6.5 m at 22 m/s (19:21:08, then STALL)"},
+        {6.5f,25.0f,true,"6.5 m at the air's least speed"},
+        {40.0f,80.0f,true,"off a cliff at 80 m/s"},
+        {2.0f,80.0f,false,"2 m over it at 80 m/s (on its wheels)"},
+        {kNone,80.0f,false,"no ground seen"},
+    };
+    bool ok=true;
+    for(const auto& r:rows) {
+        const bool air=crew::handling::RollsIntoAir(r.clear,kNone,kOff,r.speed,kFloor);
+        std::printf("%-30s %-52s %s  %s\n","off the ground",r.what,air ? "air   " : "ground",air==r.air ? "ok" : "WRONG");
+        ok=ok && air==r.air;
+    }
+    return ok;
+}
+
 int main() {
     // `slope` the rise a metre, `bump` m and `wave` rad/m of the undulation (a runway's few cm, a field's 10-30 cm).
     const struct { const char* name; Ground g; float speed; } cases[]={
@@ -202,6 +279,8 @@ int main() {
     int bad=0;
     for(const auto& c:cases)bad+=Case(c.name,c.g,c.speed) ? 0 : 1;
     bad+=Degraded() ? 0 : 1;
+    bad+=Throttle() ? 0 : 1;
+    bad+=OffTheGround() ? 0 : 1;
     // The stand-in tells the laws apart: a law before held a wheel off the ground (turned against its contacts) somewhere.
     std::printf("%-30s %d cases where a law before held a wheel off the ground  %s\n","the stand-in discriminates",fought,fought>0 ? "ok" : "WRONG");
     bad+=fought>0 ? 0 : 1;

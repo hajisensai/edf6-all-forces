@@ -36,12 +36,13 @@ ground = re.search(r'static const wchar_t\* keys\[\]=\{([^}]*)\}', dispatch).gro
 check(tuple(re.findall(r'L"(\w+)"', ground)) == sc.GROUND_KEYS, 'ground / infantry keys equal SupportCallKey\'s')
 flown = tuple(c.id[len(calls.ID_PREFIX):] for c in calls.CALLS if c.flown)
 check(flown == sc.AIR_KEYS, 'air keys: the flown calls in calls.py order (airstrike.cpp SupportAirCallKey)')
-check(len(sc.LABELS) == len(sc.UNIT_KEYS) == 30, 'one label per catalog entry (the sea rescue last)')
+check(len(sc.LABELS) == len(sc.UNIT_KEYS) == 37, 'one label per catalog entry (the sea rescue last)')
+check(sc.UNIT_KEYS[-1] == 'RESCUE', "the sea rescue is the catalog's last entry (support_dispatch.cpp RescueCatalog)")
 names = re.search(r'static const wchar_t\* labels\[\]=\{([^}]*)\}', dispatch).group(1)
 rescue_name = re.search(r'if\(index==SupportRescueCatalog\(\)\)return L"([^"]+)";', dispatch)
-check(rescue_name is not None and sc.LABELS['RESCUE'] == rescue_name.group(1), 'the rescue label equals SupportCallName\'s')
-check(tuple(re.findall(r'L"([^"]+)"', names)) == tuple(sc.LABELS[k] for k in sc.GROUND_KEYS[2:-1]),
-      'ground labels equal SupportCallName\'s')
+check(rescue_name is not None and sc.LABELS['RESCUE'] == rescue_name.group(1), "the rescue label equals SupportCallName's")
+check(tuple(re.findall(r'L"([^"]+)"', names)) == tuple(sc.LABELS[k] for k in sc.GROUND_KEYS[2:8]),
+      "ground labels equal SupportCallName's")
 ini = read('EDF6VehicleCrew.ini')
 for key, value in sc.DEFAULTS.items():
     check(sc.get(ini, key) == value, f'shipped ini {key} = the default {value!r}')

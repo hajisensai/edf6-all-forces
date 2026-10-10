@@ -15,7 +15,8 @@ constexpr WeaponName kWeaponNames[]={
     {SupportWeapon::rocket,L"rocket",L"火箭"},{SupportWeapon::shotgun,L"shotgun",L"霰弹"},
     {SupportWeapon::sniper,L"sniper",L"狙击"},
 };
-static_assert(sizeof(kWeaponNames)/sizeof(kWeaponNames[0])==static_cast<std::size_t>(kSupportWeaponCount));
+// The ini names only the Rangers (support_call.h kSupportRangerWeaponCount): the other kinds come in a composed load.
+static_assert(sizeof(kWeaponNames)/sizeof(kWeaponNames[0])==static_cast<std::size_t>(kSupportRangerWeaponCount));
 
 void Trim(const wchar_t*& begin,const wchar_t*& end) noexcept {
     while(begin<end && std::iswspace(*begin))++begin;
@@ -60,11 +61,11 @@ bool ParseSupportWeapon(const wchar_t* text,SupportWeapon* out) noexcept {
 }
 const wchar_t* SupportWeaponName(SupportWeapon weapon) noexcept {
     const auto i=static_cast<int>(weapon);
-    return i>=0 && i<kSupportWeaponCount ? kWeaponNames[i].name : L"rifle";
+    return i>=0 && i<kSupportRangerWeaponCount ? kWeaponNames[i].name : L"rifle";
 }
 const wchar_t* SupportWeaponLabel(SupportWeapon weapon) noexcept {
     const auto i=static_cast<int>(weapon);
-    return i>=0 && i<kSupportWeaponCount ? kWeaponNames[i].label : L"步枪";
+    return i>=0 && i<kSupportRangerWeaponCount ? kWeaponNames[i].label : L"步枪";
 }
 
 static int KeyIndexOf(SupportKeyOf keyOf,int units,const wchar_t* key) noexcept {
@@ -72,7 +73,7 @@ static int KeyIndexOf(SupportKeyOf keyOf,int units,const wchar_t* key) noexcept 
     return -1;
 }
 
-SupportConfig ParseSupportConfig(SupportIniRead read,void* context,SupportKeyOf keyOf,int units) noexcept {
+SupportConfig ParseSupportConfig(SupportIniRead read,void* context,SupportKeyOf keyOf,int units,SupportSeatsOf seatsOf) noexcept {
     SupportConfig c;
     if(!read)return c;
     if(units>kSupportConfigUnits)units=kSupportConfigUnits;
@@ -129,6 +130,30 @@ SupportConfig ParseSupportConfig(SupportIniRead read,void* context,SupportKeyOf 
             Problem(c,key,value,fallback);
         }
     }
+    // SupportPreset_<key> (support_loadout.h): a seated entry's soldiers and colours; a bad one keeps the entry's own load.
+    for(int i=0;keyOf && i<units;++i) {
+        const wchar_t* unit=keyOf(i);
+        if(!unit)continue;
+        wchar_t key[96],why[96];
+        _snwprintf_s(key,_TRUNCATE,L"SupportPreset_%ls",unit);
+        if(!read(context,key,text,std::size(text)))continue;
+        if(!ParseSupportPreset(text,seatsOf ? seatsOf(i) : kSupportLoadoutMost,&c.preset[i],why,std::size(why))) {
+            wchar_t fallback[128];_snwprintf_s(fallback,_TRUNCATE,L"该单位自己的兵员（%ls）",why);
+            Problem(c,key,text,fallback);
+        }
+    }
+    // SupportVehicle_<key> (support_loadout.h): the pylons of an entry's tank or jets; a bad one keeps the stock vehicle.
+    for(int i=0;keyOf && i<units;++i) {
+        const wchar_t* unit=keyOf(i);
+        if(!unit)continue;
+        wchar_t key[96],why[160];
+        _snwprintf_s(key,_TRUNCATE,L"SupportVehicle_%ls",unit);
+        if(!read(context,key,text,std::size(text)))continue;
+        if(!ParseVehicleLoadout(text,VehicleBodyOfKey(unit),&c.vehicle[i],why,std::size(why))) {
+            wchar_t fallback[192];_snwprintf_s(fallback,_TRUNCATE,L"原版挂载（%ls）",why);
+            Problem(c,key,text,fallback);
+        }
+    }
     return c;
 }
 
@@ -145,14 +170,23 @@ std::size_t ReadIni(void* context,const wchar_t* key,wchar_t* out,std::size_t ca
 void LoadSupportConfig(const wchar_t* iniPath) noexcept {
     if(!iniPath)return;
     IniFile ini{iniPath};
-    auto* next=new(std::nothrow) SupportConfig(ParseSupportConfig(&ReadIni,&ini,&SupportCallKey,SupportCallCount()));
+    auto* next=new(std::nothrow) SupportConfig(ParseSupportConfig(&ReadIni,&ini,&SupportCallKey,SupportCallCount(),&SupportCallSeats));
     if(!next)return;
-    char problems[512]{};
+    char problems[1024]{};   // UTF-8 of SupportConfig::problems (256 wide, up to 3 bytes each)
     if(next->problems[0])WideCharToMultiByte(CP_UTF8,0,next->problems,-1,problems,sizeof(problems),nullptr,nullptr);
-    Log("CONFIG support disabled=%016llX squad=%ls leader=%ls platoon=%ls/%ls/%ls vehicleCrew=%ls aircraftCrew=%ls%s%s",
+    int presets=0,looks=0,vehicles=0;
+    for(const auto& p:next->preset) {
+        if(p.count>0)++presets;
+        for(int i=0;i<p.count;++i)if(p.look[i].On())++looks;
+    }
+    for(const auto& v:next->vehicle)vehicles+=v.On();
+    Log("CONFIG support disabled=%016llX squad=%ls leader=%ls platoon=%ls/%ls/%ls vehicleCrew=%ls aircraftCrew=%ls "
+        "presets=%d (coloured soldiers %d) vehicle loadouts=%d%s%s",
         static_cast<unsigned long long>(next->disabled),SupportWeaponName(next->squad),SupportWeaponName(next->leader),
         SupportWeaponName(next->platoon[0]),SupportWeaponName(next->platoon[1]),SupportWeaponName(next->platoon[2]),
-        SupportWeaponName(next->vehicleCrew),SupportWeaponName(next->aircraftCrew),problems[0] ? " INVALID: " : "",problems);
+        SupportWeaponName(next->vehicleCrew),SupportWeaponName(next->aircraftCrew),presets,looks,
+        vehicles,
+        problems[0] ? " INVALID: " : "",problems);
     publishedSupport.store(next,std::memory_order_release);
 }
 const SupportConfig& SupportCfg() noexcept { return *publishedSupport.load(std::memory_order_acquire); }

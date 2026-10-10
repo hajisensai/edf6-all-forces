@@ -2,8 +2,10 @@
 // MODULE into build/tools) that lets tests/autopilot/drive.py play the game in the background, for measurements
 // (the user, 2026-10-07: "use code, or let it run in the background"; no keys sent to the desktop, no focus taken):
 //  - EDF.dll reads the keyboard with GetKeyboardState / GetKeyState and checks GetForegroundWindow; those three imports
-//    are pointed here: the game window counts as the foreground one, and the keys listed in <dll>.keys (hex virtual-key
-//    codes, written by the driver) count as held, on top of the real ones;
+//    are pointed here: the game window counts as the foreground one, and only the keys listed in <dll>.keys (hex
+//    virtual-key codes, written by the driver) count as held (never the desktop's: the user's typing is not the game's);
+//  - the system mouse and the desktop's activation stay the user's (KeepDesktop, KeepWindowInactive): the game's cursor is a virtual
+//    one, its window is made off screen and never activates;
 //  - every second, and when the keys change, a row in <dll>.log: the game's committed memory (and its peak), its RAM,
 //    and the machine's free RAM and commit, so a mission's load shows as a curve;
 //  - commands in <dll>.cmd (one at a time, cleared once run): "mem", "quit" (the game's own ExitApp way), and, written
@@ -18,6 +20,7 @@
 //    All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include <Windows.h>
 #include <psapi.h>
+#include <intrin.h>
 #include <cstdio>
 #include <cstdarg>
 #include <cstdlib>
@@ -29,11 +32,17 @@
 #pragma warning(pop)
 #include "edf/memory.h"
 #include "edf/patch.h"
+#include "airdrop_probe.h"
 
 namespace {
 HMODULE self=nullptr;
 wchar_t keysPath[MAX_PATH]{},logPath[MAX_PATH]{},cmdPath[MAX_PATH]{};
-volatile LONG held[256]{};
+// What the autopilot holds: codes 0x00-0xFF are virtual keys, 0x100 + n the virtual pad's button bit n (XInput
+// wButtons), 0x110 / 0x111 its left / right trigger (kPadLeftTrigger, kPadRightTrigger), 0x112-0x115 its left stick all
+// the way up / down / right / left.
+constexpr int kKeyCodes=0x100,kPadBase=0x100,kPadLeftTrigger=0x110,kPadRightTrigger=0x111,kStickUp=0x112,kStickDown=0x113,
+              kStickRight=0x114,kStickLeft=0x115,kInputCodes=0x116;
+volatile LONG held[kInputCodes]{};
 volatile HWND gameWindow=nullptr;
 ULONGLONG started=0;
 unsigned char* image=nullptr;
@@ -87,23 +96,328 @@ BOOL CALLBACK FindGameWindow(HWND w,LPARAM) {
     return FALSE;
 }
 
+// Whether the system cursor is safe from the game (KeepDesktop took SetCursorPos and GetCursorPos): only then is the
+// game told it is the foreground window. A game told so moves the cursor every frame (see KeepDesktop), so without the
+// cursor taken the autopilot plays without input rather than pull the user's mouse.
+volatile LONG desktopSafe=0;
+
 HWND WINAPI Foreground() {
     const HWND real=realForeground();
     DWORD pid=0;GetWindowThreadProcessId(real,&pid);
-    if(pid==GetCurrentProcessId() || !gameWindow)return real;
+    if(pid==GetCurrentProcessId() || !gameWindow || !desktopSafe)return real;
     return gameWindow;
 }
 
+void* PatchImport(HMODULE module,const char* dll,const char* function,void* hook) noexcept;
+
+// The keyboard (and mouse buttons) the game sees: only the autopilot's held keys, never the desktop's. The game believes
+// it is the foreground window (Foreground), so with the real state the user's typing and clicks elsewhere would play it.
 BOOL WINAPI KeyboardState(PBYTE keys) {
-    const BOOL ok=realKeyboardState(keys);
-    if(ok)for(int vk=0;vk<256;++vk)if(held[vk])keys[vk]|=0x80;
-    return ok;
+    if(!keys)return FALSE;
+    for(int vk=0;vk<kKeyCodes;++vk)keys[vk]=held[vk] ? 0x80 : 0;
+    return TRUE;
 }
 
 SHORT WINAPI KeyState(int vk) {
-    const SHORT real=realKeyState(vk);
-    return vk>=0 && vk<256 && held[vk] ? static_cast<SHORT>(real|0x8000) : real;
+    return vk>=0 && vk<kKeyCodes && held[vk] ? static_cast<SHORT>(0x8000) : 0;
 }
+
+// --- The system mouse and the desktop's activation stay the user's (2026-10-10: a background run pulled the user's
+// mouse to the right edge of the desktop, where the off-screen game window's centre clamps).
+// The cause, measured (tests/autopilot drive.py run, the BACKGROUND rows): told it is the foreground window (Foreground
+// above, needed for its input to run), EDF.dll's frame loop (0x1183880) takes the mouse as a focused game does: every
+// frame GetCursorPos, the delta from its window's centre as the mouse look, then SetCursorPos back to that centre
+// (0x1183B7D, returning to EDF+0x1183B83; also 0x11845D1). Pointing EDF.dll's own import slots elsewhere is not
+// enough: the Epic overlay (EOSOVH-Win64-Shipping.dll, loaded by EOSSDK some seconds in) rewrites EDF.dll's
+// SetCursorPos / GetCursorPos slots to its hooks (EOSOVH+0x249F0 / +0x24020), which go on to USER32. So the cursor
+// calls are taken in USER32 itself, for the whole process (KeepDesktop): whoever calls them, through whatever slot,
+// meets a virtual cursor. EDF.dll imports no ClipCursor, SetCapture, RegisterRawInputDevices or DirectInput (import
+// scan, 2026-10-10); ClipCursor and SendInput are taken anyway so no module can use them (mouse_event is a whole
+// function in USER32, not a stub, and is left: see StubWithRoom).
+// The window side stays in EDF.dll's imports (its window is made at 2.4 s, before the overlay): ShowWindow
+// (SW_SHOWDEFAULT, 0x1183733) shows without activating, SetWindowPos (0x1183788, 0x1184B2C, 0x1184C17) gets
+// SWP_NOACTIVATE and keeps the window off screen, SetFocus (0x11837D3) does nothing, CreateWindowExW (0x11836F5) makes
+// it off screen with WS_EX_NOACTIVATE; ShowCursor (0x1183798, 0x1183C32) counts on its own. SetForegroundWindow
+// (EDF.dll 0xBC2C5 / 0x6B47BE / 0x6B48FE, EOSSDK too) is taken in USER32 with the cursor.
+using ShowWindowFn=BOOL(WINAPI*)(HWND,int);
+using SetWindowPosFn=BOOL(WINAPI*)(HWND,HWND,int,int,int,int,UINT);
+using CreateWindowFn=HWND(WINAPI*)(DWORD,LPCWSTR,LPCWSTR,DWORD,int,int,int,int,HWND,HMENU,HINSTANCE,LPVOID);
+ShowWindowFn realShowWindow=nullptr;
+SetWindowPosFn realSetWindowPos=nullptr,realEosSetWindowPos=nullptr;
+CreateWindowFn realCreateWindow=nullptr;
+volatile LONG cursorX=0,cursorY=0,cursorSet=0,cursorCount=0;
+volatile LONG windowCalls[2]{};   // ShowCursor, SetFocus: how often EDF.dll asked (both absorbed)
+HWND volatile madeWindow=nullptr;   // the game's top-level window, as CreateWindowExW made it
+
+int OffScreenX() noexcept {return GetSystemMetrics(SM_XVIRTUALSCREEN)+GetSystemMetrics(SM_CXVIRTUALSCREEN)+200;}
+
+int WINAPI VirtualShowCursor(BOOL show) {
+    InterlockedIncrement(&windowCalls[0]);
+    return show ? InterlockedIncrement(&cursorCount) : InterlockedDecrement(&cursorCount);
+}
+
+HWND WINAPI NoFocus(HWND) {InterlockedIncrement(&windowCalls[1]);return nullptr;}
+
+// The show commands that activate, as their non-activating forms.
+BOOL WINAPI ShowNoActivate(HWND w,int cmd) {
+    switch(cmd) {
+    case SW_SHOWNORMAL: case SW_SHOWMAXIMIZED: case SW_RESTORE: case SW_SHOWDEFAULT: cmd=SW_SHOWNOACTIVATE;break;
+    case SW_SHOW: cmd=SW_SHOWNA;break;
+    case SW_MINIMIZE: cmd=SW_SHOWMINNOACTIVE;break;
+    default: break;
+    }
+    return realShowWindow(w,cmd);
+}
+
+BOOL MovePos(SetWindowPosFn real,HWND w,HWND after,int x,int y,int cx,int cy,UINT flags) noexcept {
+    if(w && w==madeWindow && !(flags&SWP_NOMOVE))x=OffScreenX();
+    return real(w,after,x,y,cx,cy,flags|SWP_NOACTIVATE);
+}
+BOOL WINAPI EdfSetWindowPos(HWND w,HWND after,int x,int y,int cx,int cy,UINT flags) {
+    return MovePos(realSetWindowPos,w,after,x,y,cx,cy,flags);
+}
+BOOL WINAPI EosSetWindowPos(HWND w,HWND after,int x,int y,int cx,int cy,UINT flags) {
+    return MovePos(realEosSetWindowPos,w,after,x,y,cx,cy,flags);
+}
+
+HWND WINAPI OffScreenWindow(DWORD ex,LPCWSTR cls,LPCWSTR name,DWORD style,int x,int y,int w,int h,HWND parent,HMENU menu,
+                            HINSTANCE inst,LPVOID param) {
+    const bool top=!parent && !(style&WS_CHILD);
+    const HWND made=realCreateWindow(top ? ex|WS_EX_NOACTIVATE : ex,cls,name,style,top ? OffScreenX() : x,y,w,h,parent,menu,
+                                     inst,param);
+    if(top && made)madeWindow=made;
+    Log("BACKGROUND window %p made off screen (x %d, asked %d), no activation",made,top ? OffScreenX() : x,x);
+    return made;
+}
+
+// The calls taken in USER32 (KeepDesktop): how often, and the first callers by module and offset.
+enum DesktopCall { kSetCursor, kGetCursor, kClipCursor, kSendInput, kForeground, kKeyboard, kDesktopCalls };
+const char* const kDesktopCallNames[kDesktopCalls]={"SetCursorPos","GetCursorPos","ClipCursor","SendInput",
+                                                    "SetForegroundWindow","GetKeyboardState"};
+volatile LONG desktopCalls[kDesktopCalls]{};
+
+void Caller(DesktopCall which,void* at) noexcept {
+    const LONG n=InterlockedIncrement(&desktopCalls[which]);
+    if(n>3)return;
+    HMODULE m=nullptr;
+    char name[MAX_PATH]="?";
+    if(GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                          static_cast<LPCSTR>(at),&m) && m)GetModuleFileNameA(m,name,MAX_PATH);
+    const char* base=std::strrchr(name,'\\');
+    Log("BACKGROUND %s (call %ld) taken, from %s+%#llx",kDesktopCallNames[which],n,base ? base+1 : name,
+        static_cast<unsigned long long>(static_cast<unsigned char*>(at)-reinterpret_cast<unsigned char*>(m)));
+}
+
+// The virtual cursor: SetCursorPos moves only it; GetCursorPos reads it (until the first set, where the real one was,
+// read with GetCursorInfo: GetCursorPos itself is taken).
+BOOL WINAPI DeskSetCursorPos(int x,int y) {
+    Caller(kSetCursor,_ReturnAddress());
+    InterlockedExchange(&cursorX,x);InterlockedExchange(&cursorY,y);InterlockedExchange(&cursorSet,1);
+    return TRUE;
+}
+BOOL WINAPI DeskGetCursorPos(LPPOINT p) {
+    Caller(kGetCursor,_ReturnAddress());
+    if(!p)return FALSE;
+    if(!cursorSet) {
+        CURSORINFO real{};real.cbSize=sizeof(real);
+        if(!GetCursorInfo(&real))return FALSE;
+        InterlockedExchange(&cursorX,real.ptScreenPos.x);InterlockedExchange(&cursorY,real.ptScreenPos.y);
+        InterlockedExchange(&cursorSet,1);
+    }
+    p->x=cursorX;p->y=cursorY;
+    return TRUE;
+}
+BOOL WINAPI DeskClipCursor(const RECT*) {Caller(kClipCursor,_ReturnAddress());return TRUE;}
+UINT WINAPI DeskSendInput(UINT count,LPINPUT,int) {Caller(kSendInput,_ReturnAddress());return count;}
+BOOL WINAPI DeskSetForegroundWindow(HWND) {Caller(kForeground,_ReturnAddress());return TRUE;}
+// The keyboard: the same overlay rewrites EDF.dll's GetKeyboardState / GetKeyState slots too (so the held keys never
+// reached the game, 2026-10-10: holding W did not move the player), so the autopilot's keys are given in USER32 as well.
+// Only GetKeyboardState (EDF.dll's key read, 0x95FA51): GetKeyState / GetAsyncKeyState are whole functions in USER32,
+// and writing over their start crashed the game in USER32 once the overlay came up (2026-10-10, EDF6.exe.117352.dmp);
+// the entries diverted here are all import stubs (jmp [win32u] padded to 16 bytes), checked against .pdata.
+BOOL WINAPI DeskKeyboardState(PBYTE keys) {Caller(kKeyboard,_ReturnAddress());return KeyboardState(keys);}
+
+struct Diversion { const char* function; void* hook; };
+// SetPhysicalCursorPos / GetPhysicalCursorPos: on this Windows the same exports as SetCursorPos / GetCursorPos (one
+// address each, 2026-10-10); listed so a build where they differ is covered too.
+const Diversion kDiversions[]={
+    {"SetCursorPos",reinterpret_cast<void*>(&DeskSetCursorPos)},
+    {"SetPhysicalCursorPos",reinterpret_cast<void*>(&DeskSetCursorPos)},
+    {"GetCursorPos",reinterpret_cast<void*>(&DeskGetCursorPos)},
+    {"GetPhysicalCursorPos",reinterpret_cast<void*>(&DeskGetCursorPos)},
+    {"ClipCursor",reinterpret_cast<void*>(&DeskClipCursor)},
+    {"SendInput",reinterpret_cast<void*>(&DeskSendInput)},
+    {"SetForegroundWindow",reinterpret_cast<void*>(&DeskSetForegroundWindow)},
+    {"GetKeyboardState",reinterpret_cast<void*>(&DeskKeyboardState)}};
+constexpr int kDiversionCount=static_cast<int>(sizeof(kDiversions)/sizeof(kDiversions[0]));
+
+// Whether the 12 bytes at `at` are an import stub and its int3 padding (jmp [rip+x]; rex.w jmp [rip+x]; or
+// mov edx,imm32 then rex.w jmp [rip+x]): only those are written over, so no neighbouring code is ever touched.
+// Decided by USER32's unwind table, not by the bytes: an overlay (Steam's) may already have written its own jump over
+// a stub (2026-10-10: the byte check then refused every entry and the run pulled the mouse again). A stub has no
+// unwind entry and starts a 16-byte slot; a real function (GetKeyState, mouse_event) has one and is never written.
+bool StubWithRoom(const unsigned char* at) noexcept {
+    DWORD64 base=0;
+    const auto address=reinterpret_cast<DWORD64>(at);
+    if(address%16)return false;
+    for(std::size_t i=0;i<12;++i)if(RtlLookupFunctionEntry(address+i,&base,nullptr))return false;
+    return true;
+}
+
+// `at` made to start with an absolute jump to `hook` (mov rax,imm64; jmp rax). The original is never called again.
+bool Divert(unsigned char* at,void* hook) noexcept {
+    if(!StubWithRoom(at))return false;
+    unsigned char jump[12]={0x48,0xB8,0,0,0,0,0,0,0,0,0xFF,0xE0};
+    std::memcpy(jump+2,&hook,sizeof(hook));
+    DWORD old=0;
+    if(!VirtualProtect(at,sizeof(jump),PAGE_EXECUTE_READWRITE,&old))return false;
+    std::memcpy(at,jump,sizeof(jump));
+    VirtualProtect(at,sizeof(jump),old,&old);
+    FlushInstructionCache(GetCurrentProcess(),at,sizeof(jump));
+    return true;
+}
+
+// Every USER32 entry above diverted once (an alias already diverted is skipped); how many entries were written.
+int KeepDesktop() noexcept {
+    const HMODULE user32=GetModuleHandleW(L"user32.dll");
+    unsigned char* done[kDiversionCount]{};
+    int count=0;
+    for(int i=0;i<kDiversionCount;++i) {
+        auto at=reinterpret_cast<unsigned char*>(GetProcAddress(user32,kDiversions[i].function));
+        if(!at){Log("BACKGROUND user32 has no %s",kDiversions[i].function);continue;}
+        bool alias=false;
+        for(int j=0;j<i;++j)alias=alias || done[j]==at;
+        if(alias){Log("BACKGROUND %s: the same export as one already taken",kDiversions[i].function);continue;}
+        if(Divert(at,kDiversions[i].hook)){done[i]=at;++count;}
+        else Log("BACKGROUND %s: not diverted (not an import stub: %02X %02X %02X %02X %02X %02X)",kDiversions[i].function,
+                 at[0],at[1],at[2],at[3],at[4],at[5]);
+    }
+    const auto taken=[&](const char* fn) {
+        const void* at=GetProcAddress(user32,fn);
+        for(int i=0;i<kDiversionCount;++i)if(done[i] && done[i]==at)return true;
+        return false;
+    };
+    desktopSafe=taken("SetCursorPos") && taken("GetCursorPos");
+    if(!desktopSafe)Log("BACKGROUND the cursor calls are not taken: the game is NOT told it is in the foreground "
+                        "(no input reaches it, but the user's mouse stays theirs)");
+    return count;
+}
+
+// Where an import slot of EDF.dll points now (module and offset): the overlay's rewrite shows here.
+void LogSlot(const char* what,std::size_t rva) noexcept {
+    void* const to=*reinterpret_cast<void* const*>(image+rva);
+    HMODULE m=nullptr;char name[MAX_PATH]="?";
+    if(GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                          static_cast<LPCSTR>(to),&m) && m)GetModuleFileNameA(m,name,MAX_PATH);
+    const char* base=std::strrchr(name,'\\');
+    Log("BACKGROUND EDF.dll import %s -> %s+%#llx",what,base ? base+1 : name,
+        static_cast<unsigned long long>(static_cast<unsigned char*>(to)-reinterpret_cast<unsigned char*>(m)));
+}
+
+// The window side in the imports of EDF.dll (and EOSSDK's SetWindowPos); how many of the slots were found.
+int KeepWindowInactive(HMODULE edf) noexcept {
+    int done=0;
+    auto put=[&](HMODULE m,const char* fn,void* hook)->void* {
+        void* const was=m ? PatchImport(m,"USER32.dll",fn,hook) : nullptr;
+        if(was)++done;
+        else Log("BACKGROUND %s: no import slot",fn);
+        return was;
+    };
+    put(edf,"ShowCursor",reinterpret_cast<void*>(&VirtualShowCursor));
+    put(edf,"SetFocus",reinterpret_cast<void*>(&NoFocus));
+    realShowWindow=reinterpret_cast<ShowWindowFn>(put(edf,"ShowWindow",reinterpret_cast<void*>(&ShowNoActivate)));
+    realSetWindowPos=reinterpret_cast<SetWindowPosFn>(put(edf,"SetWindowPos",reinterpret_cast<void*>(&EdfSetWindowPos)));
+    realCreateWindow=reinterpret_cast<CreateWindowFn>(put(edf,"CreateWindowExW",reinterpret_cast<void*>(&OffScreenWindow)));
+    realEosSetWindowPos=reinterpret_cast<SetWindowPosFn>(put(GetModuleHandleW(L"EOSSDK-Win64-Shipping.dll"),"SetWindowPos",
+                                                            reinterpret_cast<void*>(&EosSetWindowPos)));
+    if(!realShowWindow)realShowWindow=&ShowWindow;
+    if(!realSetWindowPos)realSetWindowPos=&SetWindowPos;
+    if(!realEosSetWindowPos)realEosSetWindowPos=&SetWindowPos;
+    if(!realCreateWindow)realCreateWindow=&CreateWindowExW;
+    return done;
+}
+
+// --- The virtual pad. The game reads no gameplay key through the keyboard imports above (2026-10-10: W held through
+// GetKeyboardState, which it reads twice a frame, moved nothing; its key reads there only ask "is any key down"), but it
+// loads xinput9_1_0.dll and polls XInputGetState (EDF.dll's string at 0x1AE0310) for pads. So the autopilot is a pad:
+// once that DLL is in, its XInputGetState starts with a jump to PadState, which reports pad 0 connected with the held
+// pad codes as its buttons and triggers; other pads are not connected. Only written when the export is a whole function
+// of at least 12 bytes by its unwind entry (so nothing beyond it is touched). The user's own pads are then not seen by
+// this background game: they are the user's.
+struct PadGamepad { WORD buttons; BYTE leftTrigger,rightTrigger; SHORT lx,ly,rx,ry; };
+struct PadState { DWORD packet; PadGamepad pad; };
+volatile LONG padPacket=0,padReads=0;
+bool padIn=false;
+ULONGLONG padLookAt=0;
+
+DWORD WINAPI FakeXInputGetState(DWORD user,PadState* state) {
+    InterlockedIncrement(&padReads);
+    if(user>=4)return ERROR_DEVICE_NOT_CONNECTED;
+    if(!state)return ERROR_BAD_ARGUMENTS;
+    WORD buttons=0;
+    for(int bit=0;bit<16;++bit)if(held[kPadBase+bit])buttons=static_cast<WORD>(buttons|(1u<<bit));
+    *state=PadState{};
+    state->pad.buttons=buttons;
+    state->pad.leftTrigger=held[kPadLeftTrigger] ? 255 : 0;
+    state->pad.rightTrigger=held[kPadRightTrigger] ? 255 : 0;
+    state->pad.ly=held[kStickUp] ? 32767 : held[kStickDown] ? -32768 : 0;
+    state->pad.lx=held[kStickRight] ? 32767 : held[kStickLeft] ? -32768 : 0;
+    state->packet=static_cast<DWORD>(InterlockedIncrement(&padPacket));
+    return ERROR_SUCCESS;
+}
+
+// XInputGetCapabilities: EDF.dll asks it before each read (0x11883BC, flag 1 = gamepad) and reads only a pad that
+// answers, so the virtual pad answers as a wired gamepad (type 1, subtype 1) on every index the game asks.
+struct PadCaps { BYTE type,subType; WORD flags; PadGamepad pad; WORD leftMotor,rightMotor; };
+DWORD WINAPI FakeXInputGetCapabilities(DWORD user,DWORD,PadCaps* caps) {
+    if(user>=4)return ERROR_DEVICE_NOT_CONNECTED;
+    if(!caps)return ERROR_BAD_ARGUMENTS;
+    *caps=PadCaps{};
+    caps->type=1;caps->subType=1;
+    caps->pad.buttons=0xF3FF;caps->pad.leftTrigger=caps->pad.rightTrigger=255;
+    return ERROR_SUCCESS;
+}
+
+bool WholeFunction(const unsigned char* at,std::size_t bytes) noexcept {
+    DWORD64 base=0;
+    const auto address=reinterpret_cast<DWORD64>(at);
+    const RUNTIME_FUNCTION* f=RtlLookupFunctionEntry(address,&base,nullptr);
+    return f && base+f->BeginAddress==address && f->EndAddress-f->BeginAddress>=bytes;
+}
+
+// Once a second until xinput9_1_0.dll is loaded, then once.
+void InstallPad() noexcept {
+    const ULONGLONG now=GetTickCount64();
+    if(now<padLookAt)return;
+    padLookAt=now+1000;
+    const HMODULE xinput=GetModuleHandleW(L"xinput9_1_0.dll");
+    if(!xinput)return;
+    padIn=true;
+    const struct { const char* name; void* hook; } kPadCalls[]={
+        {"XInputGetState",reinterpret_cast<void*>(&FakeXInputGetState)},
+        {"XInputGetCapabilities",reinterpret_cast<void*>(&FakeXInputGetCapabilities)}};
+    unsigned char* found[2]{};
+    for(int i=0;i<2;++i) {
+        found[i]=reinterpret_cast<unsigned char*>(GetProcAddress(xinput,kPadCalls[i].name));
+        if(!found[i] || !WholeFunction(found[i],12)) {
+            Log("PAD xinput9_1_0!%s %p not a whole function: no virtual pad",kPadCalls[i].name,found[i]);
+            return;
+        }
+    }
+    for(int i=0;i<2;++i) {
+        unsigned char jump[12]={0x48,0xB8,0,0,0,0,0,0,0,0,0xFF,0xE0};
+        std::memcpy(jump+2,&kPadCalls[i].hook,sizeof(void*));
+        DWORD old=0;
+        if(!VirtualProtect(found[i],sizeof(jump),PAGE_EXECUTE_READWRITE,&old)){Log("PAD %s not writable",kPadCalls[i].name);return;}
+        std::memcpy(found[i],jump,sizeof(jump));
+        VirtualProtect(found[i],sizeof(jump),old,&old);
+        FlushInstructionCache(GetCurrentProcess(),found[i],sizeof(jump));
+    }
+    Log("PAD the virtual pad is in (xinput9_1_0!XInputGetState %p, XInputGetCapabilities %p)",found[0],found[1]);
+}
+
+// A key held (or let go) by the probe, on top of the keys file's (the next change of that file sets them all again).
+void HoldKey(int code,bool down) noexcept {if(code>=0 && code<kInputCodes)InterlockedExchange(&held[code],down ? 1 : 0);}
 
 // The import slot of `function` (from `dll`) in `module`'s import table pointed at `hook`; the old target returned.
 void* PatchImport(HMODULE module,const char* dll,const char* function,void* hook) noexcept {
@@ -212,6 +526,7 @@ void* __fastcall CoRoutine(void* out,const std::wstring* decl) {
                 static const std::wstring play=L"string PlayMission_Offline()";
                 Log("SCRIPT HQMain -> PlayMission_Offline: row %ld, difficulty %ld",row,missionDifficulty);
                 LogMemory("mission start");
+                autopilot::AirdropProbeMissionStarted();
                 return realCoRoutine(out,&play);
             }
             Log("SCRIPT HQMain: no game state, the menu as is");
@@ -282,44 +597,68 @@ void RunCommand(const char* text) noexcept {
     if(!std::strcmp(word,"mem"))LogMemory("cmd");
     else if(!std::strcmp(word,"quit")){LogMemory("quit");Quit();}
     else if(!std::strcmp(word,"mission"))AskMission(text);
+    else if(!std::strcmp(word,"probe")) {
+        char what[32]{};
+        if(sscanf_s(text,"%*s %31s",what,static_cast<unsigned>(sizeof(what)))==1 && !std::strcmp(what,"airdrop"))
+            Log("PROBE airdrop installed=%d",autopilot::InstallAirdropProbe(image,&Log,&HoldKey));
+        else Log("CMD probe: unknown probe %s",what);
+    }
     else Log("CMD unknown: %s",word);
 }
 
 void PollCommand() noexcept {
-    char text[256]{};
+    char text[1024]{};
     const HANDLE f=CreateFileW(cmdPath,GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,0,nullptr);
     if(f==INVALID_HANDLE_VALUE)return;
     DWORD got=0;ReadFile(f,text,sizeof(text)-1,&got,nullptr);CloseHandle(f);
     if(!got)return;
     DeleteFileW(cmdPath);
-    RunCommand(text);
+    // One command per line (the driver may hand several before the launch: the mission, then a probe).
+    char* next=nullptr;
+    for(char* line=strtok_s(text,"\r\n",&next);line;line=strtok_s(nullptr,"\r\n",&next))RunCommand(line);
 }
 
 // The keys file read every 15 ms: whitespace separated hex virtual-key codes, all held until the file changes.
 DWORD WINAPI Loop(void*) {
     char last[512]{};
     ULONGLONG nextMemory=0;
+    unsigned memoryRows=0;
     for(;;) {
         if(!gameWindow)EnumWindows(&FindGameWindow,0);
         char text[512]{};
         const HANDLE f=CreateFileW(keysPath,GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,0,nullptr);
         if(f!=INVALID_HANDLE_VALUE){DWORD got=0;ReadFile(f,text,sizeof(text)-1,&got,nullptr);CloseHandle(f);}
         if(std::strcmp(text,last)) {
-            LONG next[256]{};
+            LONG next[kInputCodes]{};
             for(char* p=text;*p;) {
                 char* end=nullptr;
                 const unsigned long vk=std::strtoul(p,&end,16);
                 if(end==p){++p;continue;}
-                if(vk<256)next[vk]=1;
+                if(vk<kInputCodes)next[vk]=1;
                 p=end;
             }
-            for(int vk=0;vk<256;++vk)InterlockedExchange(&held[vk],next[vk]);
+            for(int vk=0;vk<kInputCodes;++vk)InterlockedExchange(&held[vk],next[vk]);
             strcpy_s(last,text);
             Log("KEYS [%s]",text);
         }
         const ULONGLONG now=GetTickCount64();
-        if(now>=nextMemory){LogMemory("tick");nextMemory=now+1000;}
+        if(now>=nextMemory) {
+            LogMemory("tick");
+            if(!(++memoryRows%10)) {
+                Log("BACKGROUND taken in user32: SetCursorPos %ld, GetCursorPos %ld, ClipCursor %ld, "
+                    "SendInput %ld, SetForegroundWindow %ld, key state %ld; the game's virtual cursor (%ld, %ld); "
+                    "EDF.dll's ShowCursor %ld, SetFocus %ld",desktopCalls[kSetCursor],desktopCalls[kGetCursor],
+                    desktopCalls[kClipCursor],desktopCalls[kSendInput],
+                    desktopCalls[kForeground],desktopCalls[kKeyboard],cursorX,cursorY,windowCalls[0],windowCalls[1]);
+                LogSlot("SetCursorPos",0x1755EC8);LogSlot("GetCursorPos",0x1755F80);
+                LogSlot("GetKeyboardState",0x1756008);LogSlot("GetKeyState",0x1756010);
+                Log("PAD XInputGetState read %ld times",padReads);
+            }
+            nextMemory=now+1000;
+        }
         PollCommand();
+        if(!padIn)InstallPad();
+        autopilot::AirdropProbeTick();
         Sleep(15);
     }
 }
@@ -355,6 +694,8 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     if(!realForeground)realForeground=&GetForegroundWindow;
     if(!realKeyboardState)realKeyboardState=&GetKeyboardState;
     if(!realKeyState)realKeyState=&GetKeyState;
+    Log("BACKGROUND window kept inactive and off screen: %d of 6 import slots",KeepWindowInactive(edf));
+    Log("BACKGROUND user32 diverted in the whole process: %d entries (aliases once)",KeepDesktop());
     Log("HOOK createCoRoutine=%d",HookCoRoutine());
     LogMemory("load");
     PollCommand();   // a mission asked before the launch, before the script's main loop runs

@@ -38,6 +38,16 @@ unsigned char* image=nullptr;
 PlayerFix player{};
 const void* heldSupportActor=nullptr;
 bool SupportSoldierHeld(const void* h) noexcept {return h && h==heldSupportActor;}
+// transport.cpp stand-ins: npcai.cpp's hooks recorded; TransportOrder takes a point order when transportTakes is set.
+bool transportTakes=false;int transportOrders=0,transportCancels=0,transportPairs=0;
+const void* transportPaired=nullptr;const void* transportPairTop=nullptr;const void* transportSucceededTo=nullptr;
+NpcCommandReason transportWithdraw=NpcCommandReason::noTransport;
+bool TransportPair(const void* top,const void* v) noexcept {++transportPairs;transportPairTop=top;transportPaired=v;return v!=nullptr;}
+const void* TransportOf(const void*) noexcept {return transportPaired;}
+bool TransportOrder(const void*,const mapcmd::Command&) noexcept {++transportOrders;return transportTakes;}
+void TransportCancel(const void*) noexcept {++transportCancels;}
+NpcCommandReason TransportWithdraw(const void*) noexcept {return transportWithdraw;}
+void TransportSucceed(const void*,const void* lead) noexcept {transportSucceededTo=lead;}
 namespace {
 Config config{};
 ULONGLONG now=1000,frame=1;
@@ -105,6 +115,14 @@ void __fastcall FollowRec(void* self,void* leader,bool) {
 // Whom `self` was last made to follow (nullptr none; `none` when it was not re-parented).
 const void* none=reinterpret_cast<const void*>(1);
 const void* FollowedBy(const void* self) { const void* to=none;for(int i=0;i<follows && i<16;++i)if(followSelf[i]==self)to=followTo[i];return to; }
+int kicks=0;
+// The stock get-off (kSeatKick): the rider leaves its seat and stands.
+void __fastcall KickRec(void* vehicleObj,void* seat) {
+    (void)vehicleObj;++kicks;
+    auto* h=At<unsigned char*>(seat,kSeatRider);
+    Put<void*>(seat,kSeatRider,nullptr);
+    if(h){Put<void*>(h,kHumanRiding,nullptr);Put<void*>(h,kHumanVehicleCtrl,nullptr);Put<void*>(h,kHumanSeat,nullptr);}
+}
 void __fastcall RideRec(void* actor,SharedRef* ref,int slot) {
     --*reinterpret_cast<int*>(static_cast<unsigned char*>(ref->ctrl)+8);++rides;
     if(completeRide) {
@@ -127,6 +145,8 @@ void Reset() {
     gunnerEnemy=nullptr;vehicleCopyOwner=online::kCopyHost;
     mapHeld=true;rayOn=false;markEnemy=nullptr;pointOrders=0;markinput::down=false;
     ok=followOk=rideOk=true;world.frame=frame;config.npcSquadSuccession=true;
+    transportTakes=false;transportOrders=transportCancels=transportPairs=0;transportPaired=transportPairTop=transportSucceededTo=nullptr;
+    transportWithdraw=NpcCommandReason::noTransport;
 }
 }
 const Config& Cfg() noexcept { return config; }
@@ -173,6 +193,18 @@ float MapFloorRay(const float* a,const float* b,float* at) noexcept {
 #endif
 Sea SeaAt(float,float,float*) noexcept { return Sea::land; }
 int MapCommandGuardAt(const float*) noexcept { ++pointOrders;return 1; }
+// The custom Q's side (qmark.cpp): the ray the camera's centre here; the point marks and the cues counted.
+bool QMarkRay(const unsigned char*,float* eye,float* dir) noexcept { return CameraRay(eye,dir); }
+int pointMarks=0,cueOwn=0,cueOff=0,qmarkFrames=0;
+void QMarkSetPoint(const float*) noexcept { ++pointMarks; }
+void QMarkPlay(QMarkCue c) noexcept { cueOwn+=c==QMarkCue::own;cueOff+=c==QMarkCue::off; }
+void QMarkFrame() noexcept { ++qmarkFrames; }
+// The teammates' marked enemies (qmark.cpp QMarkTeamEnemies: live, found in this world).
+const void* teamMarks[4]{};int teamMarkCount=0;
+int QMarkTeamEnemies(const void** out,int max) noexcept {
+    int n=0;for(;n<teamMarkCount && n<max;++n)out[n]=teamMarks[n];
+    return n;
+}
 // The lock registry's valid lock points whatever their lockable flag (the marked enemy out of sight): `lockAt` for `lockOf`.
 const void* lockOf=nullptr;float lockAt[3]{};
 bool VisitLockPoints(EnemyVisitor visit,void* ctx) noexcept { if(lockOf)visit(ctx,lockOf,lockAt);return true; }
@@ -197,6 +229,7 @@ int main() {
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2200000,MEM_RESERVE|MEM_COMMIT,PAGE_EXECUTE_READWRITE));
     if(!image)return 2;
     Jump(kSetFollow,reinterpret_cast<const void*>(&FollowRec));Jump(kRideVehicle,reinterpret_cast<const void*>(&RideRec));
+    Jump(kSeatKick,reinterpret_cast<const void*>(&KickRec));
     Jump(kNotifyBox,reinterpret_cast<const void*>(&NotifyRec));Jump(kApplyBox,reinterpret_cast<const void*>(&ApplyRec));Jump(kHealHuman,reinterpret_cast<const void*>(&HealRec));
     Jump(kNodePos,reinterpret_cast<const void*>(&NodePosRec));
     Reset();Put<int>(human,kTeam,1);PreThink(human);
@@ -204,6 +237,7 @@ int main() {
     Reset();Put<unsigned>(human,kObjectFlags,kFixPosition);PreThink(human);
     Expect(follows==0,"a fixed-position scripted follower keeps its native leader transition");
     Reset();PreThink(human);Expect(follows==1,"an ordinary friendly remnant still elects its leader");
+    Expect(transportSucceededTo==human,"its transport goes with the squad to the new leader (transport.cpp TransportSucceed)");
     Reset();world.friends=1;world.frObject[0]=other;Put<std::uint64_t>(other,kFollowerCount,1);Put<unsigned>(other,kObjectFlags,kFixPosition);
     unsigned char* leaders[4];float places[4][3];int sizes[4];
     Expect(OtherSquads(dead,false,leaders,places,sizes,4)==0,"fixed script squads cannot absorb a remnant");
@@ -284,6 +318,27 @@ int main() {
     walking->boardV=ObjRef::Of(vehicle);
     Expect(SquadCommand(human,Command{Order::guard,{10,0,0}}) && !walking->boardV,
            "a new guard order replaces the earlier walk-to-seat order");
+    {   // DISMOUNT and ALL OUT by the seat's role (the user, 2026-10-09: "下车是除了驾驶员，炮手等操作席都下车。全体下车是全
+        // 部人"): the production DismountSquad through the stock get-off.
+        auto seatIn=[&](unsigned k,std::uint64_t weapons) {
+            auto* seat=SeatAt(vehicle,k);
+            Put<void*>(human,kHumanRiding,vehicle);Put<void*>(human,kHumanVehicleCtrl,ctrl);Put<long>(ctrl,8,1);Put<void*>(human,kHumanSeat,seat);
+            Put<void*>(seat,kSeatRider,human);Put<const void*>(seat,kSeatRiderCtrl,At<const void*>(human,kSelfCtrl));
+            Put<std::uint64_t>(seat,kSeatWeaponCount,weapons);
+        };
+        Reset();Put<void*>(human,kLeader,nullptr);SeeSquad(human,human,0,npc::Control::free,now);
+        const int k0=kicks;
+        seatIn(1,0);
+        Expect(SquadCommand(human,Command{Order::dismount,{}}) && kicks==k0+1 && HumanOnFoot(human),"DISMOUNT takes a passenger off");
+        seatIn(1,1);
+        Expect(!SquadCommand(human,Command{Order::dismount,{}}) && kicks==k0+1 && !HumanOnFoot(human) &&
+               LastNpcCommandResult().reason==NpcCommandReason::noPassengers,"DISMOUNT leaves a gunner aboard (and says why)");
+        Expect(SquadCommand(human,Command{Order::dismountAll,{}}) && kicks==k0+2 && HumanOnFoot(human),"ALL OUT takes the gunner off");
+        Put<std::uint64_t>(SeatAt(vehicle,1),kSeatWeaponCount,0);
+        seatIn(0,0);
+        Expect(!SquadCommand(human,Command{Order::dismount,{}}) && kicks==k0+2 && !HumanOnFoot(human),"DISMOUNT leaves the driver aboard");
+        Expect(SquadCommand(human,Command{Order::dismountAll,{}}) && kicks==k0+3 && HumanOnFoot(human),"ALL OUT takes the driver off");
+    }
     // A panel order lives only under the lead it was given in (npc::LeadOf).
     Reset();playerObj=other;Put<unsigned char>(other,kHumanPlayer,1);Put<void*>(other,kHumanPad,other);
     Put<void*>(human,kLeader,other);q=SeeSquad(human,human,0,npc::Control::recruited,now);
@@ -361,6 +416,8 @@ int main() {
         auto* child=Entry(dead,now);
         Expect(result.Accepted() && result.affected==1 && child->boardV.Is(vehicle) && child->boardSeat==0,
             "mixed squad boards a compatible member via nearby entrance even when leader class cannot ride and body centre is far");
+        Expect(transportPairs==1 && transportPairTop==human && transportPaired==vehicle,
+            "a squad that boards a vehicle is paired with it (its transport from now on: transport.cpp)");
         const auto assignedAt=child->boardAt;++now;
         result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::board,{}},ObjRef::Of(other),{});
         Expect(result.Accepted() && child->boardAt==assignedAt,"an already valid boarding assignment is not reported as failure or restarted");
@@ -434,10 +491,23 @@ int main() {
         Expect(commandSquad->cmd.order==Order::move,"on the way: still a move");
         result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::attackMove,{40,0,0}},ObjRef::Of(other),{});
         behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
-        Expect(result.Accepted() && fights(behavior.move),"an attack-move fights the enemy in reach on its way");
-        world.enemies=0;
+        Expect(result.Accepted() && fights(behavior.move),"an attack-move fights the enemy pressing on it");
+        // The user, 2026-10-09: "一个移动攻击是全消灭再走。一个移动攻击是先走次要消灭": an attack-move stops for any enemy
+        // in its reach and fights it (the move order is the one that walks on firing).
+        world.enemy[0]=Enemy{enemy,{0,0,30},1};
+        result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::attackMove,{40,0,0}},ObjRef::Of(other),{});
         behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
-        Expect(std::strcmp(behavior.move,"attack-move")==0,"an attack-move with nothing in reach walks on to its point");
+        Expect(fights(behavior.move) && soldier->target.Is(enemy),"an attack-move stands and fights an enemy in reach, not only a close one");
+        // A target it never gets a shot at (this stand-in soldier never fires: its look is not on it) holds it only for the
+        // grace: then it walks on, still on its target, instead of standing there for ever.
+        now+=mapcmd::kAttackMoveGraceMs;++frame;world.frame=frame;SeeSquad(human,human,0,npc::Control::free,now);
+        behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
+        Expect(std::strcmp(behavior.move,"attack-move")==0 && soldier->target.Is(enemy),
+               "an attack-move with no shot at its target for the grace walks on (not stuck at its combat spot)");
+        world.enemies=0;frame+=2;world.frame=frame;
+        result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::attackMove,{40,0,0}},ObjRef::Of(other),{});
+        behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
+        Expect(std::strcmp(behavior.move,"attack-move")==0,"an attack-move with the ground round it clear walks on to its point");
         const float there[3]={38.0f,0.0f,1.0f};
         behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,there,commandSquad,now);
         Expect(commandSquad->cmd.order==Order::guard && commandSquad->cmd.at[0]==40.0f,"at its point the attack-move is a guard of it");
@@ -453,11 +523,41 @@ int main() {
             Expect(result.reason==NpcCommandReason::riding,"a seated squad is not recruited out of its vehicle");
             Expect(!SquadRecruitable(*commandSquad) && std::strcmp(StatusOf(*commandSquad,now,nullptr,0),"RIDING")==0,
                    "a seated squad: no recruitment offered, its status RIDING");
+            const int refusedCancels=transportCancels;
             result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::move,{40,0,0}},ObjRef::Of(other),{});
             Expect(!result.Accepted(),"a seated squad's soldiers take no map move (its vehicle does)");
+            Expect(transportCancels==refusedCancels,"a refused order leaves its trip as it was (no TransportCancel)");
+            // Its transport (transport.cpp; the user, 2026-10-09: "卡车之类的运输载具改成断剑那种操作方式"): a point order the
+            // transport takes is accepted and the squad's own order left for the trip to give back once off; WITHDRAW is the
+            // transport's (its refusal passed on); any other order leaves the trip.
+            transportTakes=true;const Order before=commandSquad->cmd.order;const int asked=transportOrders;
+            result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::attackMove,{900,0,0}},ObjRef::Of(other),{});
+            Expect(result.Accepted() && transportOrders==asked+1 && commandSquad->cmd.order==before,
+                   "a seated paired squad's far order goes by its transport, its own order untouched");
+            transportTakes=false;transportWithdraw=NpcCommandReason::none;
+            result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::withdraw,{}},ObjRef::Of(other),{});
+            Expect(result.Accepted(),"WITHDRAW answered by its transport");
+            transportWithdraw=NpcCommandReason::noTransport;
+            result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::withdraw,{}},ObjRef::Of(other),{});
+            Expect(result.reason==NpcCommandReason::noTransport,"...and its refusal passed on");
+            const int cancels=transportCancels;
+            result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::none,{}},ObjRef::Of(other),{});
+            Expect(result.Accepted() && transportCancels==cancels+1,"another order, taken, leaves the trip (TransportCancel)");
         } else Expect(false,"the stand-in ride makes the soldier seated");
         Put<void*>(human,kHumanRiding,nullptr);Put<void*>(human,kHumanVehicleCtrl,nullptr);
         Expect(SquadRecruitable(*commandSquad),"on foot again, a free squad: recruitment offered");
+    }
+    // A Wing Diver hovering 25 m up held where she is (an attack-move's stand): no search from the floor under her to a
+    // goal in the air (it never ends: every node spent, failed, again a second later); the goal is the floor under it.
+    Reset();flatFloor=true;
+    {
+        Put<float>(human,kPosition,0.0f);Put<float>(human,kPosition+4,25.0f);Put<float>(human,kPosition+8,0.0f);
+        Put<float>(human,kMoveX,0.5f);
+        MoveTo(human,Pos(human),Pos(human),1e9f);
+        const Soldier* const hovering=Entry(human,now);
+        Expect(hovering && !hovering->navigation.initialized && At<float>(human,kMoveX)==0.0f,
+               "a soldier held in the air stands: no route search from the floor to a point in the air");
+        Put<float>(human,kPosition+4,0.0f);
     }
     // The player a soldier fights for is the one who recruited its squad, whichever machine's (this harness's
     // PlayerHuman is nullptr: `other` stands for another machine's player).
@@ -611,9 +711,16 @@ int main() {
         Put<long>(foeCtrl,8,1);
         Expect(NpcMarkEnemy(other,seen,true) && !NpcMarkEnemy(other,seen,true) && !NpcMarked(),"the same enemy again: let go");
         Expect(NpcMarkEnemy(other,seen,true) && NpcMarkEnemy(other,seen,false) && NpcMarked(),"the focus order's mark never lets go");
+        // The Q mark replaces the stock spot (2026-10-10): it marks and shows without the custom AI; the NPCs' focus on it
+        // (NpcMarked: the map's focus order, the soldiers' priority) is the AI's alone.
         config.customNpcAi=false;KeepMark();
         float shown[3];
-        Expect(!NpcMarked() && !NpcMarkEnemy(other,seen,true) && !NpcMarkReadout(shown),"disabled AI neither marks nor publishes a saved mark");
+        Expect(!NpcMarked() && NpcMarkReadout(shown),"disabled AI: the mark still shown, the NPCs not set on it");
+        Expect(!NpcMarkEnemy(other,seen,true) && NpcMarkEnemy(other,seen,true) && !NpcMarked() && NpcMarkReadout(shown),
+               "disabled AI: the map's Q lets go and marks again");
+        config.npcMarkKey=0;KeepMark();
+        Expect(!NpcMarkEnemy(other,seen,true) && !NpcMarkReadout(shown),"NpcMarkKey=0: no Q mark at all");
+        config.npcMarkKey=0x51;
         config.customNpcAi=true;KeepMark();
         Expect(NpcMarked() && NpcMarkReadout(shown),"reenabling AI restores a still-live saved mark");
         ResetNpcAi();
@@ -655,15 +762,53 @@ int main() {
         mapHeld=true;markinput::down=true;NpcMarkFrame(human,false);
         Expect(!NpcMarked(),"TV or closing-map input hold blocks on-foot marking");
         markinput::down=false;NpcMarkFrame(human,false);mapHeld=false;
+        cueOwn=cueOff=pointMarks=qmarkFrames=0;
         markinput::down=true;NpcMarkFrame(human,false);
         Expect(NpcMarked(),"a fresh player-frame press marks without any NPC Think");
+        Expect(cueOwn==1 && cueOff==0 && qmarkFrames==1,"marking asks for the own cue; the Q mark's frame runs from the player's");
+        markinput::down=false;NpcMarkFrame(human,false);
+        markinput::down=true;NpcMarkFrame(human,false);
+        Expect(!NpcMarked() && cueOff==1,"the same enemy again: let go, the off cue");
+        markinput::down=false;NpcMarkFrame(human,false);
+        Put<void*>(human,kHumanVehicleCtrl,foeCtrl);   // riding (the stock spot it replaces was riding too)
+        markinput::down=true;NpcMarkFrame(human,false);
+        Expect(NpcMarked() && cueOwn==2,"riding: Q marks as on foot");
+        Put<void*>(human,kHumanVehicleCtrl,nullptr);
         markinput::down=false;NpcMarkFrame(human,false);markEnemy=nullptr;
         markinput::down=true;NpcMarkFrame(human,false);
         Expect(pointOrders==1 && NpcMarked(),"a ground miss orders selected units without clearing the existing mark");
+        Expect(pointMarks==1 && cueOwn==3,"a ground miss marks the point (shared, shown) with the own cue");
         markinput::down=false;NpcMarkFrame(human,false);config.enabled=false;
         markinput::down=true;NpcMarkFrame(human,false);
         Expect(pointOrders==1 && !NpcMarked(),"global disable prevents ground orders and hides the mark");
         ResetNpcAi();Expect(At<long>(foeCtrl,0xC)==1,"player-frame mark releases its identity on reset");
+    }
+    // The teammates' marks are the NPCs' as this machine's are (the user, 2026-10-10: "npc不是统一的吗，都去打"): each NPC
+    // takes the marked enemy nearest it, whoever marked it (NearestMark, the soldiers' and the gunners' pick).
+    {
+        Reset();config.enabled=true;config.customNpcAi=true;
+        unsigned char foeCtrl[0x10]{};Put<void*>(other,kSelfCtrl,foeCtrl);Put<long>(foeCtrl,8,1);Put<long>(foeCtrl,0xC,1);
+        static unsigned char teamFoe[0x400]{},plainFoe[0x400]{};
+        world.enemies=3;
+        world.enemy[0]=Enemy{plainFoe,{0,0,5},1};
+        world.enemy[1]=Enemy{other,{0,0,100},1};
+        world.enemy[2]=Enemy{teamFoe,{0,0,20},1};
+        const float from[3]={0,0,0},distant[3]={0,0,150};
+        Expect(!NearestMark(from),"nothing marked: no marked enemy, the nearest plain one not taken for one");
+        teamMarks[0]=teamFoe;teamMarkCount=1;
+        Expect(NearestMark(from)==&world.enemy[2],"a teammate's mark alone: the NPCs go for it as for their own");
+        const float seen[3]={0,0,100};
+        Expect(NpcMarkEnemy(other,seen,true),"this machine marks another enemy too");
+        Expect(NearestMark(from)==&world.enemy[2] && NearestMark(distant)==&world.enemy[1],
+               "two marks: each NPC takes the one nearest it, whoever marked it");
+        world.enemy[2].aim[2]=100.0f;
+        Expect(NearestMark(from)==&world.enemy[1],"as near as each other: this machine's first");
+        teamMarks[0]=plainFoe;world.enemy[2].aim[2]=20.0f;
+        Expect(NearestMark(from)==&world.enemy[0],"the teammate's mark moved to another enemy: that one");
+        teamMarks[0]=dead;
+        Expect(NearestMark(from)==&world.enemy[1],"a teammate's enemy not in this frame's list: not taken");
+        teamMarkCount=0;ResetNpcAi();
+        Put<void*>(other,kSelfCtrl,nullptr);
     }
     VirtualFree(image,0,MEM_RELEASE);return failures ? 1 : 0;
 }

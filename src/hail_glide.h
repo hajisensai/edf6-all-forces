@@ -39,9 +39,41 @@ inline float FlatLen(float x,float z) noexcept { return std::sqrt(x*x+z*z); }
 // kHailInbound): once inbound it stays so until it has passed the entry (then round to the outer point again); without
 // it a wide turn left the inbound zone and swapped goals for ever.
 constexpr float kOuterTurns=4.0f,kLeadTurns=1.5f,kNearTurns=1.5f,kTurnedOnto=0.3f;
-inline void FerryGoal(const float* pos,const float* track,const float* entry,const float* d,float radius,bool& inbound,
-                      float* goal) noexcept {
-    const float room=std::fmax(kTurnRoom,kOuterTurns*radius),lead=std::fmax(kInboundLead,kLeadTurns*radius);
+
+// Whether the approach fits the map (PlanPattern). 2026-10-09 16:53 a gunship hailed on a map whose walls stand at
+// +-1600 m flew for its outer point 1500 m (the final) + 4 turn radii (2.7 km) behind the touchdown, far past the wall:
+// the wall turned it back, it flew at the point again, 4 minutes along the wall at z -1600 until the hail ran out
+// ("一直在降落"). The strip search never asked whether its approach fits the map. Now it must, within `box` (x / z): the
+// final's entry kFinalLength out half a turn radius inside, the outer point (as FerryGoal places it, at the ferry's
+// turn radius `radius`) a whole turn radius inside (it turns about it). `room`: the furthest the outer point may stand
+// behind the entry inside the box (FerryGoal never sets it further back, however fast it flies).
+struct Box { float lo[2],hi[2]; };
+struct Pattern { float room=0.0f; bool ok=false; };
+constexpr float kOuterMargin=2.0f;      // turn radii the outer point stands inside the box: it circles it, overshooting
+constexpr float kFinalLength=1500.0f;   // playerjet_board.inc's final (its glide from 105 m)
+inline bool InBox(const Box& b,float x,float z,float margin) noexcept {
+    return x>=b.lo[0]+margin && x<=b.hi[0]-margin && z>=b.lo[1]+margin && z<=b.hi[1]-margin;
+}
+inline Pattern PlanPattern(const float* touch,const float* d,float radius,const Box& box) noexcept {
+    Pattern p;
+    const float entry[2]={touch[0]-d[0]*kFinalLength,touch[2]-d[2]*kFinalLength};
+    if(!InBox(box,entry[0],entry[1],0.5f*radius))return p;
+    // How far back from the entry along -d the box holds a point `radius` inside it.
+    float most=1e9f;
+    for(int a=0;a<2;++a) {
+        const float back=-(a ? d[2] : d[0]),at=entry[a],lo=box.lo[a]+kOuterMargin*radius,hi=box.hi[a]-kOuterMargin*radius;
+        if(back>1e-4f)most=std::fmin(most,(hi-at)/back);
+        else if(back< -1e-4f)most=std::fmin(most,(lo-at)/back);
+    }
+    const float room=std::fmax(kTurnRoom,kOuterTurns*radius);
+    if(most<room)return p;
+    p.room=most;p.ok=true;return p;
+}
+
+// `roomMost`: the pattern's room (PlanPattern): the outer point never stands further back than that.
+inline void FerryGoal(const float* pos,const float* track,const float* entry,const float* d,float roomMost,float radius,
+                      bool& inbound,float* goal) noexcept {
+    const float room=std::fmin(std::fmax(kTurnRoom,kOuterTurns*radius),roomMost),lead=std::fmax(kInboundLead,kLeadTurns*radius);
     const float outer[3]={entry[0]-d[0]*room,entry[1],entry[2]-d[2]*room};
     const float toOuter=FlatLen(pos[0]-outer[0],pos[2]-outer[2]);
     const float along=(pos[0]-entry[0])*d[0]+(pos[2]-entry[2])*d[2];   // < 0: before the entry

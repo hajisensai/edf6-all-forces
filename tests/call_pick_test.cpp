@@ -208,6 +208,13 @@ int main() {
     {SupportAircraft sub{};
      Check(!SupportAircraftSpec(16,&sub) && PlanAirSupport(sub,supportTarget,observer,&route)==support::Refusal::unsupported,
            "stationary submarine model cannot fake a physical entry");}
+    // One planner for every entry's spec (merge of #100 and #104): #100's paratroop plane has no jet or heli row
+    // (SupportAircraft::transportPlane) and must still plan; a spec that brings no aircraft at all is refused.
+    {SupportAircraft plane{};plane.transportPlane=true;plane.count=1;
+     Check(PlanAirSupport(plane,supportTarget,observer,&route)==support::Refusal::none && route.from[1]>=150,
+           "the transport plane is planned in the air at the edge like any aircraft");
+     SupportAircraft nothing{};nothing.count=1;
+     Check(PlanAirSupport(nothing,supportTarget,observer,&route)==support::Refusal::unsupported,"a spec with no aircraft is refused");}
     // Installation against a private image with the supported native bomber signatures. A restored
     // legacy takeover installs successfully here and mutates these bytes/vtable, failing this check.
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2000000,MEM_RESERVE|MEM_COMMIT,PAGE_EXECUTE_READWRITE));

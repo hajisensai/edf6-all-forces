@@ -78,7 +78,8 @@ int main() {
         Check(std::memcmp(static_cast<const unsigned char*>(spawned.obj)+kPosition,wirePlan.units[i].matrix+12,12)==0,
               "aligned native copy preserves requested position exactly");
     }
-    Setup();Check(preloads==10 && SupportSoldiersReady(),"all five stock Ranger weapon templates (member and leader) queued");
+    Setup();Check(preloads==2*kSupportWeaponCount && SupportSoldiersReady(),
+          "every stock template a load may hold (member and leader) queued: five Rangers, five Wing Divers, four Fencers");
     ObjRef one;Check(SpawnSupportSoldier(poses[0],&one) && initGood,"native InitParam and fixed real resource");
     Check(At<LONG>(one.ctrl,8)==1 && At<LONG>(one.ctrl,12)==2,"retain weak only, scene owns strong");
     Check(SupportSoldierHeld(one.obj),"new soldiers start held before network Active");
@@ -126,7 +127,8 @@ int main() {
     Check(ApplySupportSoldierResource(poses[1],SupportSoldierResource(SupportWeapon::sniper,false),nullptr,true,&one) &&
           wcscmp(lastPath,L"app:/object/N601_COMMON_RANGER_SN.sgo")==0,"each weapon variant creates its own stock template");
     {const int was=made;
-     Check(!ApplySupportSoldierResource(poses[1],0x502,nullptr,true,&one) && made==was,"an unknown soldier resource creates nothing");}
+     Check(!ApplySupportSoldierResource(poses[1],(static_cast<std::uint32_t>(kSupportWeaponCount)<<8)|2u,nullptr,true,&one) && made==was,
+          "a soldier resource past the templates creates nothing");}
     host=false;{const int was=made;
     Check(!ApplySupportSoldierResource(poses[2],SupportSoldierResource(SupportWeapon::rifle,false),nullptr,true,&one) && made==was,
           "a client never creates a local damaging soldier, whatever it asks");}host=true;

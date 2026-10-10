@@ -71,31 +71,39 @@ void Takeoff() {
 
 void Versions() {
     using namespace crew::versionnote;
-    using crew::support_net::kCapabilities;using crew::support_net::kCapSoldierVariants;using crew::support_net::kCapAirborneAir;using crew::support_net::kCapSeaRescue;
-    State s;s.online=true;s.mine=kCapabilities;s.silentHost=kCapSoldierVariants|kCapAirborneAir;
+    using crew::support_net::kCapabilities;using crew::support_net::kCapSoldierVariants;using crew::support_net::kCapAirborneAir;
+    using crew::support_net::kCapTransports;using crew::support_net::kCapLoadout;using crew::support_net::kExtVariants;
+    using crew::support_net::kExtSeaRescue;using crew::support_net::kExtensions;using crew::support_net::kFeatures;
+    using crew::support_net::Features;using crew::support_net::FeatureExt;
+    // Feature words (support_protocol.h Features): the capability bits low, the extension bits above them.
+    const std::uint32_t rescueBit=FeatureExt(kExtSeaRescue);
+    State s;s.online=true;s.mine=kFeatures;s.silentHost=Features(kCapabilities,kExtVariants);
     Check(Compare(s).kind==Kind::none,"a guest before the welcome: nothing said");
-    s.hostKnown=true;s.hostCaps=kCapabilities;
+    s.hostKnown=true;s.hostCaps=kFeatures;
     Check(Compare(s).kind==Kind::none,"the same build: nothing said");
     s.hostCaps=0;
     Notice n=Compare(s);
-    Check(n.kind==Kind::hostOlder && n.missing==kCapSeaRescue,"a host that announces nothing: older, the sea rescue named");
-    s.hostCaps=kCapSoldierVariants;n=Compare(s);
-    Check(n.kind==Kind::hostOlder && n.missing==(kCapAirborneAir|kCapSeaRescue),"an older host: what it lacks named");
-    s.hostCaps=kCapabilities|16u;n=Compare(s);
-    Check(n.kind==Kind::selfOlder,"a host with a capability this build does not know: this guest is older");
-    s.hostCaps=kCapabilities;s.roomBehind=true;n=Compare(s);
+    Check(n.kind==Kind::hostOlder && n.missing==rescueBit,"a host that announces nothing (#100's build): older, the sea rescue named");
+    s.hostCaps=Features(kCapSoldierVariants,0);n=Compare(s);
+    Check(n.kind==Kind::hostOlder && n.missing==(kCapAirborneAir|kCapTransports|kCapLoadout|FeatureExt(kExtVariants)|rescueBit),
+          "an older host: what it lacks named, capabilities and extensions alike");
+    Check((Features(kCapabilities,0)&rescueBit)==0 && (kFeatures&rescueBit) && (rescueBit&kCapTransports)==0,
+          "the rescue's bit is none of #100's capabilities (kCapTransports 4 / kCapLoadout 8 keep their meaning)");
+    s.hostCaps=kFeatures|FeatureExt(kExtensions+1);n=Compare(s);
+    Check(n.kind==Kind::selfOlder,"a host with an extension this build does not know: this guest is older");
+    s.hostCaps=kFeatures;s.roomBehind=true;n=Compare(s);
     Check(n.kind==Kind::roomOlder,"the host says another guest is behind it");
     s.roomBehind=false;s.commandPeers=1;n=Compare(s);
     Check(n.kind==Kind::commandOnly && n.command,"map command protocol differs only: said");
-    State h;h.online=true;h.host=true;h.mine=kCapabilities;
+    State h;h.online=true;h.host=true;h.mine=kFeatures;
     Check(Compare(h).kind==Kind::none,"a host with every guest the same: nothing");
-    h.peersBehind=2;h.peersMissing=kCapSeaRescue;n=Compare(h);
-    Check(n.kind==Kind::peersOlder && n.count==2 && n.missing==kCapSeaRescue,"a host: how many guests are older and what they lack");
+    h.peersBehind=2;h.peersMissing=rescueBit;n=Compare(h);
+    Check(n.kind==Kind::peersOlder && n.count==2 && n.missing==rescueBit,"a host: how many guests are older and what they lack");
     h.peersBehind=0;h.peersAhead=1;n=Compare(h);
     Check(n.kind==Kind::peersNewer && n.count==1,"a host: a guest newer than it");
     h.peersAhead=0;h.commandPeers=1;h.peersBehind=1;h.peersMissing=kCapAirborneAir;n=Compare(h);
     Check(n.kind==Kind::peersOlder && n.command,"older guests and a different map command protocol: both said");
-    State off;off.mine=kCapabilities;off.hostKnown=true;
+    State off;off.mine=kFeatures;off.hostKnown=true;
     Check(Compare(off).kind==Kind::none,"offline: nothing");
     Check(Compare(s)!=Compare(h) && Compare(h)==Compare(h),"notices compare by what they say (said once a change)");
 }

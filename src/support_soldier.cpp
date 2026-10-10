@@ -19,6 +19,16 @@ constexpr const wchar_t* kBodies[kSupportWeaponCount][2]={
     {L"app:/object/N601_COMMON_RANGER_RL.sgo",L"app:/object/N601_COMMON_RANGER_RL_LEADER.sgo"},
     {L"app:/object/N601_COMMON_RANGER_SG.sgo",L"app:/object/N601_COMMON_RANGER_SG_LEADER.sgo"},
     {L"app:/object/N601_COMMON_RANGER_SN.sgo",L"app:/object/N601_COMMON_RANGER_SN_LEADER.sgo"},
+    // The Wing Divers and Fencers a composed load may hold (support_call.h; read from Root.cpk: PaleWing / HeavyArmor).
+    {L"app:/object/N606_AIPALEWING_LANCE.sgo",L"app:/object/N606_AIPALEWING_LANCE_LEADER.sgo"},
+    {L"app:/object/N606_AIPALEWING_LR.sgo",L"app:/object/N606_AIPALEWING_LR_LEADER.sgo"},
+    {L"app:/object/N606_AIPALEWING_MS.sgo",L"app:/object/N606_AIPALEWING_MS_LEADER.sgo"},
+    {L"app:/object/N606_AIPALEWING_IZN.sgo",L"app:/object/N606_AIPALEWING_IZN_LEADER.sgo"},
+    {L"app:/object/N606_AIPALEWING_TB.sgo",L"app:/object/N606_AIPALEWING_TB_LEADER.sgo"},
+    {L"app:/object/N607_AIHEAVYARMOR_SC.sgo",L"app:/object/N607_AIHEAVYARMOR_SC_LEADER.sgo"},
+    {L"app:/object/N607_AIHEAVYARMOR_SMC.sgo",L"app:/object/N607_AIHEAVYARMOR_SMC_LEADER.sgo"},
+    {L"app:/object/N607_AIHEAVYARMOR_SP.sgo",L"app:/object/N607_AIHEAVYARMOR_SP_LEADER.sgo"},
+    {L"app:/object/N607_AIHEAVYARMOR_SSG.sgo",L"app:/object/N607_AIHEAVYARMOR_SSG_LEADER.sgo"},
 };
 const wchar_t* Body(std::uint32_t resource) noexcept {
     return IsSupportSoldierResource(resource) ?
@@ -107,11 +117,13 @@ int SpawnFault(const char* stage,const EXCEPTION_POINTERS* error,const float* re
         static_cast<unsigned>(reinterpret_cast<std::uintptr_t>(nativeMatrix)&15u),soldier);
     return EXCEPTION_EXECUTE_HANDLER;
 }
+// `look`: a coloured copy of the resource's template (support_loadout.h SupportLookFile, app:/object/ spelling) the caller
+// found preloaded (support_variants.h); nullptr: the stock template. Same class, AI weapon and setup either way.
 bool Spawn(const float* matrix,std::uint32_t resource,ObjRef* out,const unsigned char* netId=nullptr,bool local=false,
-           bool registerNow=true) noexcept {
+           bool registerNow=true,const wchar_t* look=nullptr) noexcept {
     *out=ObjRef{};
     if(!Gate(netId!=nullptr,local))return false;
-    const wchar_t* const body=Body(resource);
+    const wchar_t* const body=Body(resource) && look ? look : Body(resource);
     if(!body){failure=SupportSpawnFailure::transform;return false;}
     if(netId && (!InSession() || !Readable(netId,32) || At<unsigned>(netId,0xC)!=5 || !registerObject || !At<void*>(image,kNetworkManager))) {
         failure=SupportSpawnFailure::onlineReplication;return false;
@@ -266,13 +278,15 @@ bool ApplySupportSoldierSpawn(const float* matrix,bool leader,const unsigned cha
     if(!out)return false;
     return support_native::Spawn(matrix,leader ? kSupportLeaderResource : kSupportRangerResource,out,id);
 }
-bool ApplySupportSoldierResource(const float* matrix,std::uint32_t resource,const unsigned char* id,bool local,ObjRef* out) noexcept {
+bool ApplySupportSoldierResource(const float* matrix,std::uint32_t resource,const unsigned char* id,bool local,ObjRef* out,
+                                 const wchar_t* look) noexcept {
     if(!out)return false;
-    return support_native::Spawn(matrix,resource,out,id,local && !id);
+    return support_native::Spawn(matrix,resource,out,id,local && !id,true,look);
 }
-bool CreateSupportSoldierUnregistered(const float* matrix,std::uint32_t resource,const unsigned char* id,bool local,ObjRef* out) noexcept {
+bool CreateSupportSoldierUnregistered(const float* matrix,std::uint32_t resource,const unsigned char* id,bool local,ObjRef* out,
+                                      const wchar_t* look) noexcept {
     if(!out)return false;
-    return support_native::Spawn(matrix,resource,out,id,local && !id,false);
+    return support_native::Spawn(matrix,resource,out,id,local && !id,false,look);
 }
 bool RegisterSupportObject(const void* object,const unsigned char* id) noexcept {
     using namespace support_native;
