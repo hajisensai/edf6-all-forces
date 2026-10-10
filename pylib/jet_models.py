@@ -40,6 +40,7 @@ Facts relied on (checked by the asserts / `check` below):
 """
 from __future__ import annotations
 
+import math
 import os
 import struct
 import sys
@@ -262,16 +263,19 @@ def with_gear(md: Mdb, gear: str | None, d: jet_gear.Donors | None) -> tuple[Mdb
 
 def elevon_model(game) -> Mdb:  # noqa: ANN001 - rootcpk.Game
     md, _tex = with_gear(mdb_jet.jet_archive(game.read('OBJECT', ELEVON_ARCHIVE))[2], ELEVON_GEAR, donors(game))
-    return grounded(md)
+    md = grounded(md)
+    return with_nozzles(md, exit_nozzles(md, None))
 
 
 def elevon_archive(game) -> bytes:  # noqa: ANN001 - rootcpk.Game
-    """EDF6VC_JET.MRAB, its model's gear checked (jet_gear.check_gear)."""
+    """EDF6VC_JET.MRAB, its model's gear checked (jet_gear.check_gear) and its nozzle bones on its exits (check_nozzle_bones)."""
     raw = game.read('OBJECT', ELEVON_ARCHIVE)
     d = donors(game)
     md, tex = with_gear(mdb_jet.jet_archive(raw)[2], ELEVON_GEAR, d)
     md = grounded(md)
     jet_gear.check_gear(md, 1.0)
+    md = with_nozzles(md, exit_nozzles(md, None))
+    check_nozzle_bones(md, exit_nozzles(strip_nozzles(md), None))   # on the exits of the model they are in
     return replace_member(raw, ELEVON_MODEL, mdb_write(md), d.rab, tex)
 
 
@@ -433,9 +437,11 @@ def build(game, models: dict[str, Recipe] | None = None) -> dict[str, bytes]:  #
         src = mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == r.model.lower()).data)
         d = donors(game) if r.gear else None
         md, tex = unscaled(src, r, d)
-        data = mdb_write(finish(md, r))
+        made = finish(md, r)
+        nozzles = nozzles_for(game, made, name)
+        data = mdb_write(with_nozzles(made, nozzles))
         arc = replace_member(raw, r.model, data, d.rab if d else None, tex)
-        check(raw, arc, r, d)
+        check(raw, arc, r, d, nozzles)
         out[name] = arc
     return out
 
@@ -492,41 +498,46 @@ def _make_model_of(game, file: str | None) -> Mdb:  # noqa: ANN001 - rootcpk.Gam
         return mdb_read(next(f for f in rab_read(game.read('OBJECT', arc)).files if f.name.lower() == mdl).data)
     r = MODELS[file]
     raw = game.read('OBJECT', r.archive)
-    return make_model(mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == r.model.lower()).data), r,
-                      donors(game) if r.gear else None)
+    md = make_model(mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == r.model.lower()).data), r,
+                    donors(game) if r.gear else None)
+    return with_nozzles(md, nozzles_for(game, md, file))
 
 
-# Each jet model's nozzles, in its frame (x right, y up, z forward): src/booster.cpp kJetNozzles (tools/selftest.py
-# holds that table to this one). Read off the meshes, each checked against the game where there is a picture:
-#  - the interceptor (the player's fighter): two square nozzles either side of the tail, each exit a slanted quad
-#    (1.43,0.18,-7.77) (2.22,0.38,-8.23) (3.22,0.84,-7.77) (2.34,1.67,-7.63). The first table put each flame at
-#    (1.85,0.85,-7.3): 0.45 m in from the opening's middle and 0.55 m inside it, which from behind and below shows
-#    the flame high in the opening (the user's picture, 2026-10-05: 「飞机的尾焰高了一点」).
-#  - the strike jet's bomber501: the interceptor's mesh at x 1 (bomber501_2 is the same mesh): the same two square
-#    nozzles either side of the tail. The first tables put one flame on the tail cone's end on the centre line (x 0),
-#    between them, half their size (2026-10-05).
-#  - the multirole (bomber401 x 0.5): two dark exhaust notches in the trailing edge either side of the centre body
-#    (x 1.22..2.69, y 0.94..1.41, z -0.88..-0.15: the two dark trapezoids the user sees from behind). The first tables
-#    put one flame on a 0.68 x 0.26 m box under the centre body (x 0, z -0.8), a light panel, not an engine: from
-#    behind it burned under the belly's middle, off both exhausts (the user's picture, 2026-10-06, 548 km/h).
-#  - the drone: a round 0.33 m nozzle at z -1.26 (the old table had it 0.33 m above and 0.24 m behind it); 0.25 m higher
-#    since its skids (jet_skids) stand it 0.25 m higher.
-# Each flame sits on its exit's centre in the exit plane and is as big as its engine (the user, 2026-10-05:
-# 「尾焰大小应该根据引擎大小来」): width the exit's diameter (a circle of the exit's area; an exit that is only an edge:
-# its length), length FLAME_LENGTH_PER_DIAMETER of that. NOZZLE_EXITS picks each exit's rim vertices (a box in the
-# model's frame, the right one of a mirrored pair); measure_nozzles reads them off the model, NOZZLES is what it
-# reads (constants: the self-test has no Root.cpk), check_nozzles holds the two together.
-# STOCK_BOMBERS: the stock bombers the airstrike's strike jets take over fly their own models as they are (no scale,
-# no grounding, no gear), sharing the strike jet's mark: their exits are measured on those (src/booster.cpp
-# kBomberNozzles). bomber501_2's x 0.65 + grounding is the interceptor's, bomber401's x 0.5 the multirole's.
-STOCK_BOMBERS: dict[str, tuple[str, str]] = {'bomber401': ('BOMBER401.MRAB', 'bomber401.mdb'),
-                                             'bomber501_2': ('BOMBER501.MRAB', 'bomber501_2.mdb')}
-# Their fuselages' half widths (fuselage_box): the elevon bomber's (same mesh, x 1) and the multirole's (unscaled).
-STOCK_FUSELAGE_X: dict[str, float] = {'bomber401': 2.5, 'bomber501_2': ELEVON_FUSELAGE_X}
+# Each jet model's nozzles are bones of the model itself (the user, 2026-10-10: 「尾烟应该跟着模型生成，而不是用两段可能不同步的
+# 代码维护」): bones nozzle_0, nozzle_1, ... (NOZZLE_BONE; src/exhaust_nozzles.h finds them by name), each a transform-only
+# bone (kind 0, unbounded: no mesh, outside the instance's bounds) whose bind origin is its exit's centre and whose +z is
+# the way the flame leaves; its half extents (+0xA0, which the engine copies into the bone record's +0xF0: EDF.dll
+# 0x1111042) carry the flame's length and width (m): (length, width, 0, 1). The plugin lights its flames and lays its
+# arrival smoke on those bones (src/booster.cpp), so the model is the one place the exhausts are said.
+#  - the jets (NOZZLE_EXITS): on the mesh bone (mesh_bone: the body the V506 animation drives), turned pi about y (x and z
+#    negated: the flame leaves along the body's -z, its thrust axis), at the exit read off the mesh: NOZZLE_EXITS picks each
+#    exit's rim vertices (a box in the model's frame, the right one of a mirrored pair) and exit_of reads the opening's
+#    centre and diameter off them. The flame is as big as its engine (the user, 2026-10-05: 「尾焰大小应该根据引擎大小来」):
+#    width the exit's diameter, length FLAME_LENGTH_PER_DIAMETER of it. Not the exit's own normal: the interceptor's
+#    square exits are slanted quads (their normal 30 deg off the thrust axis); the flame follows the engine's axis.
+#      - the interceptor (the player's fighter): two square nozzles either side of the tail, each exit a slanted quad
+#        (1.43,0.18,-7.77) (2.22,0.38,-8.23) (3.22,0.84,-7.77) (2.34,1.67,-7.63); a flame 0.55 m inside it showed high
+#        in the opening from behind (the user's picture, 2026-10-05: 「飞机的尾焰高了一点」), so it sits in the exit plane.
+#      - the strike jet's bomber501: the interceptor's mesh at x 1: the same two square nozzles either side of the tail.
+#      - the multirole (bomber401 x 0.5): two dark exhaust notches in the trailing edge either side of the centre body
+#        (the user's picture, 2026-10-06: a flame under the belly's middle, off both exhausts, before they were read).
+#      - the drone: a round 0.33 m nozzle at z -1.26.
+#  - the carrier (CARRIER_FILE): the stock V508's own boosters, read off its SGO at build time (carrier_nozzles: the
+#    `boosts` rows lit (flag 1) and their locators in animation_model[2]'s MAB: 'ブースト0'..'ブースト3' on boosterF_l,
+#    boosterF_r, boosterB_l, boosterB_r, turned (0, pi, 0) and set back along the pod; their length and width the row's),
+#    under the pod each hangs on, its offset and size x the model's scale: the pods tilt (jet_flight.cpp Thrusters) and the
+#    flames with them.
+# STOCK_BOMBERS: the stock bombers the airstrike's strike jets take over (and the gunship) fly their own models as they are
+# (no scale, no grounding, no gear): those cannot carry bones of ours, so tools/gen_nozzles.py measures their exits the
+# same way and writes them into src/nozzles_gen.h for the plugin (keyed by the model's bones).
 # The landing gear (Recipe.gear) stands each model up on its wheels, so its grounding lifts it by the gear's height
 # more (2026-10-05): the bomber501 1.0 m, the interceptor 0.65 m (both: jet_gear.SPECS drop x scale), the multirole
 # 0.4365 m ((1.0 - its stock lowest point 0.127) x 0.5); the drone's skids 0.25 m (jet_skids.SPECS drop x 3). The exit
 # boxes are in the lifted frame.
+STOCK_BOMBERS: dict[str, tuple[str, str]] = {'bomber401': ('BOMBER401.MRAB', 'bomber401.mdb'),
+                                             'bomber501_2': ('BOMBER501.MRAB', 'bomber501_2.mdb')}
+# Their fuselages' half widths (fuselage_box): the elevon bomber's (same mesh, x 1) and the multirole's (unscaled).
+STOCK_FUSELAGE_X: dict[str, float] = {'bomber401': 2.5, 'bomber501_2': ELEVON_FUSELAGE_X}
 FLAME_LENGTH_PER_DIAMETER = 5.0
 ExitBox = tuple[tuple[float, float], tuple[float, float], tuple[float, float]]   # (x0, x1), (y0, y1), (z0, z1)
 NOZZLE_EXITS: dict[str | None, tuple[ExitBox, bool]] = {    # (box, mirrored: a left twin at -x)
@@ -537,15 +548,21 @@ NOZZLE_EXITS: dict[str | None, tuple[ExitBox, bool]] = {    # (box, mirrored: a 
     'bomber401': (((2.0, 5.8), (0.8, 2.15), (-2.0, -0.2)), True),
     'bomber501_2': (((1.5, 5.6), (-2.3, 2.3), (-12.95, -11.69)), True),
 }
-Nozzle = tuple[tuple[float, float, float], float]   # (exit centre, diameter)
-NOZZLES: dict[str | None, tuple[Nozzle, ...]] = {
-    None: (((3.58, 2.325, -12.006), 1.839), ((-3.58, 2.325, -12.006), 1.839)),
-    'EDF6VC_INTERCEPTOR.MRAB': (((2.327, 1.511, -7.804), 1.195), ((-2.327, 1.511, -7.804), 1.195)),
-    'EDF6VC_MULTIROLE.MRAB': (((1.916, 1.157, -0.457), 0.738), ((-1.916, 1.157, -0.457), 0.738)),
-    'EDF6VC_DRONE.MRAB': (((0.0, 1.255, -1.261), 0.323),),
-    'bomber401': (((3.831, 1.44, -0.913), 1.478), ((-3.831, 1.44, -0.913), 1.478)),
-    'bomber501_2': (((3.58, 0.039, -12.006), 1.839), ((-3.58, 0.039, -12.006), 1.839)),
-}
+CARRIER_FILE = 'EDF6VC_CARRIER.MRAB'
+CARRIER_SGO = 'V508_TRANSPORT.SGO'   # the stock transport whose model (x MODELS[CARRIER_FILE].scale) the carrier wears
+NOZZLE_BONE = 'nozzle_'              # + the nozzle's number (src/exhaust_nozzles.h kNozzlePrefix)
+MAX_NOZZLES = 4                      # a model's nozzles at most (src/exhaust_nozzles.h kMaxNozzles)
+Nozzle = tuple[tuple[float, float, float], float]   # an exit: (centre, diameter)
+
+
+@dataclass(frozen=True)
+class NozzleBone:
+    """A nozzle as its bone says it: `parent` the bone it hangs on, `bind` its model-space bind (row vectors: its origin
+    the exit's centre, its +z the way the flame leaves, unit rows), the flame's `length` and `width` (m)."""
+    parent: str
+    bind: tuple[float, ...]
+    length: float
+    width: float
 
 
 def _hull(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
@@ -586,10 +603,10 @@ def exit_of(rim: list[tuple[float, float, float]]) -> Nozzle:
     return (cx, cy, z), 2.0 * (abs(a2) / 2 / 3.141592653589793) ** 0.5
 
 
-def measure_nozzles(game, file: str | None) -> tuple[Nozzle, ...]:  # noqa: ANN001 - rootcpk.Game
-    """`file`'s exits read off its model (NOZZLE_EXITS picks their rim vertices), the right one first."""
+def measure_exits(md: Mdb, file: str | None) -> tuple[Nozzle, ...]:
+    """`file`'s exits read off its model `md` (NOZZLE_EXITS picks their rim vertices), the right one first."""
     ((x0, x1), (y0, y1), (z0, z1)), mirrored = NOZZLE_EXITS[file]
-    rim = [p for p in bind_positions(_model_of(game, file)) if x0 <= p[0] <= x1 and y0 <= p[1] <= y1 and z0 <= p[2] <= z1]
+    rim = [p for p in bind_positions(md) if x0 <= p[0] <= x1 and y0 <= p[1] <= y1 and z0 <= p[2] <= z1]
     if len({(round(p[0], 3), round(p[1], 3)) for p in rim}) < 2:
         raise ValueError(f'{file}: {len(rim)} rim vertices in its exit box')
     (c, d) = exit_of(rim)
@@ -598,14 +615,149 @@ def measure_nozzles(game, file: str | None) -> tuple[Nozzle, ...]:  # noqa: ANN0
     return ((c, d), ((-c[0], c[1], c[2]), d))
 
 
-def check_nozzles(game) -> None:  # noqa: ANN001 - rootcpk.Game
-    """NOZZLES is what measure_nozzles reads off the player's models (to 5 mm)."""
-    for file, want in NOZZLES.items():
-        got = measure_nozzles(game, file)
-        ok = len(got) == len(want) and all(abs(a - b) < 0.005 for (gc, gd), (wc, wd) in zip(got, want)
-                                           for a, b in zip(gc + (gd,), wc + (wd,)))
-        if not ok:
-            raise ValueError(f'{file}: NOZZLES {want}, the model has {got}')
+def turned_at(at: tuple[float, float, float], frame: list[float] | None = None) -> tuple[float, ...]:
+    """`frame` (identity when None; row vectors, its translation ignored) turned pi about its y (x and z negated), at `at`:
+    a flame leaving along the frame's -z from `at`."""
+    f = frame or ident()
+    return (-f[0], -f[1], -f[2], 0.0, f[4], f[5], f[6], 0.0, -f[8], -f[9], -f[10], 0.0, at[0], at[1], at[2], 1.0)
+
+
+def exit_nozzles(md: Mdb, file: str | None) -> list[NozzleBone]:
+    """A jet model's nozzles: its exits (measure_exits) on its mesh bone, each flame along the mesh bone's -z (its thrust
+    axis, in the bind) and as big as its engine."""
+    k = mesh_bone(md)
+    body = bind_world(md)[k]
+    return [NozzleBone(md.name_of(md.bones[k].name), turned_at(c, body), round(FLAME_LENGTH_PER_DIAMETER * d, 4), round(d, 4))
+            for c, d in measure_exits(md, file)]
+
+
+def _mab_locators(block: bytes) -> list[tuple[str, str, tuple[float, ...], tuple[float, ...]]]:
+    """Every list's locators of a vehicle's MAB block (its SGO's animation_model[2]: pylib/mab.py's layout, any number of
+    lists): (name, node, position, euler (x, y, z))."""
+    import mab
+    if block[:4] != b'MAB\0':
+        raise ValueError('not a MAB block')
+    nlists, heads = struct.unpack_from('<H', block, 0x0C)[0], struct.unpack_from('<I', block, 0x14)[0]
+    out = []
+    for k in range(nlists):
+        _kind, n, first = struct.unpack_from('<HHi', block, heads + 8 * k)
+        for r in range(heads + 8 * k + first, heads + 8 * k + first + mab.RECORD * n, mab.RECORD):
+            name, node, _kd, pos, _b, euler = struct.unpack_from('<6i', block, r)
+            out.append((mab._text(block, r + name), mab._text(block, r + node), mab._vec(block, r + pos)[:3],
+                        mab._vec(block, r + euler)[:3]))
+    return out
+
+
+def carrier_nozzles(game, md: Mdb, scale: float) -> list[NozzleBone]:  # noqa: ANN001 - rootcpk.Game
+    """The carrier's nozzles: the stock V508's lit boosters (its SGO's `boosts` rows: locator name, flame length, width,
+    lit), each on its locator in the SGO's MAB (node: the pod bone; turned (0, pi, 0), set back along the pod), the offset
+    and the flame x `scale` (the model's: its bone rows are unit, its lengths scaled). Only the stock's turn is taken:
+    a locator turned otherwise is refused (the engine's euler order was never read)."""
+    import sgo
+    _ver, members = sgo.read(game.read('OBJECT', CARRIER_SGO))
+    boosts = sgo.plain(members['boosts'])
+    model = sgo.plain(members['animation_model'])
+    raw = model[2]
+    if not (isinstance(raw, str) and raw.startswith('raw:')):
+        raise ValueError(f'{CARRIER_SGO}: animation_model[2] is not a MAB block')
+    locators = {name: (node, pos, euler) for name, node, pos, euler in _mab_locators(bytes.fromhex(raw[4:]))}
+    w = bind_world(md)
+    out = []
+    for name, length, width, lit in boosts:
+        if lit != 1:
+            continue   # the stock lights 4 / 5 only in some state of its own (docs/jet-model-re.md §8.1): not ours
+        node, pos, euler = locators[name]
+        if max(abs(euler[0]), abs(euler[2])) > 1e-6 or abs(abs(euler[1]) - math.pi) > 1e-5:
+            raise ValueError(f'{CARRIER_SGO}: booster {name!r} turned {euler}, not the stock (0, pi, 0)')
+        pod = w[md.bone_index(node)]
+        at = tuple(pos[0] * scale * pod[c] + pos[1] * scale * pod[4 + c] + pos[2] * scale * pod[8 + c] + pod[12 + c]
+                   for c in range(3))
+        out.append(NozzleBone(node, turned_at(at, pod), round(length * scale, 4), round(width * scale, 4)))   # type: ignore[arg-type]
+    return out
+
+
+def nozzles_for(game, md: Mdb, file: str | None) -> list[NozzleBone]:  # noqa: ANN001 - rootcpk.Game
+    """The nozzles model `file` (as model_box; `md` the model made, without them) carries: none for a model without an
+    exhaust (the submarine, the Primers)."""
+    if file == CARRIER_FILE:
+        return carrier_nozzles(game, md, MODELS[file].scale)
+    if file in NOZZLE_EXITS and file not in STOCK_BOMBERS:
+        return exit_nozzles(md, file)
+    return []
+
+
+def with_nozzles(md: Mdb, nozzles: list[NozzleBone]) -> Mdb:
+    """`md` with bone NOZZLE_BONE + i for nozzle i (see above): transform only, unbounded, under its parent, placed after
+    the parent's subtree (skinned vertices on later bones renumbered with them: jet_gear.insert_bones)."""
+    assert len(nozzles) <= MAX_NOZZLES, f'{len(nozzles)} nozzles, the plugin takes {MAX_NOZZLES}'
+    assert not any(md.name_of(b.name).startswith(NOZZLE_BONE) for b in md.bones), 'the model has nozzle bones already'
+    for i, n in enumerate(nozzles):
+        md, _at = jet_gear.insert_bones(md, md.bone_index(n.parent), [(f'{NOZZLE_BONE}{i}', list(n.bind))], kind=0, bounded=0,
+                                        half=[n.length, n.width, 0.0, 1.0], renumber_skin=True)
+    return md
+
+
+def nozzle_bones(md: Mdb) -> list[NozzleBone]:
+    """The nozzles `md`'s bones say (NOZZLE_BONE + 0, 1, ... in order; none: [])."""
+    w = bind_world(md)
+    out = []
+    while (k := md.bone_index(f'{NOZZLE_BONE}{len(out)}')) >= 0:
+        b = md.bones[k]
+        out.append(NozzleBone(md.name_of(md.bones[b.parent].name), tuple(w[k]), b.half[0], b.half[1]))
+    return out
+
+
+def strip_nozzles(md: Mdb) -> Mdb:
+    """`md` without its nozzle bones (with_nozzles undone: later bones, object bones, parents and skinned vertices
+    renumbered back; their names dropped from the name table's end, where with_nozzles put them, when nothing else uses them)."""
+    gone = sorted(b.index for b in md.bones if md.name_of(b.name).startswith(NOZZLE_BONE))
+    if not gone:
+        return md
+    assert all(not any(c.parent == k for c in md.bones) for k in gone), 'a bone hangs on a nozzle bone'
+
+    def moved(i: int) -> int:
+        return i - sum(1 for k in gone if k < i)
+    bones = [replace(b, index=moved(b.index), parent=moved(b.parent) if b.parent >= 0 else -1)
+             for b in md.bones if b.index not in gone]
+    mdb_jet.link(bones)
+    objects = [replace(o, bone=moved(o.bone), meshes=[jet_gear._renumber_skin(me, moved) if me.flags[1] else me
+                                                      for me in o.meshes]) for o in md.objects]
+    used = {b.name for b in bones} | {o.name for o in md.objects} | {m.name for m in md.materials}
+    names = list(md.names)
+    while names and (names[-1] or '').startswith(NOZZLE_BONE) and len(names) - 1 not in used:
+        names.pop()
+    return replace(md, names=names, bones=bones, objects=objects, buffer_order=None)
+
+
+def check_nozzle_bones(md: Mdb, want: list[NozzleBone]) -> None:
+    """`md` carries exactly the nozzles `want` (nozzle_bones: parent, bind to 1e-4, flame length and width), each bone
+    transform only and unbounded; without them (strip_nozzles) every skinned vertex and object on the same bones by name,
+    and strip_nozzles undoes with_nozzles byte for byte."""
+    got = nozzle_bones(md)
+    named = [md.name_of(b.name) for b in md.bones if md.name_of(b.name).startswith(NOZZLE_BONE)]
+    assert len(named) == len(got) == len(want), f'nozzle bones {named}, want {len(want)}'
+    for i, (g, n) in enumerate(zip(got, want)):
+        b = md.bones[md.bone_index(f'{NOZZLE_BONE}{i}')]
+        assert (b.kind, b.bounded) == (0, 0), f'{NOZZLE_BONE}{i}: kind {b.kind}, bounded {b.bounded}'
+        assert g.parent == n.parent, f'{NOZZLE_BONE}{i} on {g.parent}, want {n.parent}'
+        assert max(abs(x - y) for x, y in zip(g.bind, n.bind)) < 1e-4, f'{NOZZLE_BONE}{i} at {g.bind}, measured {n.bind}'
+        assert abs(g.length - n.length) < 1e-4 and abs(g.width - n.width) < 1e-4, f'{NOZZLE_BONE}{i} flame {g}, want {n}'
+    bare = strip_nozzles(md)
+    assert _skin_names(bare) == _skin_names(md), 'a skinned vertex changed bones with the nozzle bones'
+    assert [(o.name, md.name_of(md.bones[o.bone].name)) for o in md.objects] == \
+           [(o.name, bare.name_of(bare.bones[o.bone].name)) for o in bare.objects], 'an object changed bones'
+    assert mdb_write(strip_nozzles(with_nozzles(bare, want))) == mdb_write(bare), 'strip_nozzles does not undo with_nozzles'
+
+
+def _skin_names(md: Mdb) -> list[tuple[str, ...]]:
+    """Every skinned vertex's blend bones by name (in order: object, mesh, vertex)."""
+    out = []
+    for o in md.objects:
+        for me in o.meshes:
+            if me.flags[1]:
+                bi, _bw = graft_pure.skin_columns(me)
+                out += [tuple(md.name_of(md.bones[int(x)].name) for x in i4) for i4 in bi]
+    return out
 
 
 def fuselage_box(game, file: str | None) -> list[list[float]]:  # noqa: ANN001 - rootcpk.Game
@@ -641,14 +793,15 @@ def close(a: float, b: float) -> bool:
     return abs(a - b) <= 1e-3 * abs(b) + 2e-3      # half4 positions re-rounded after scaling
 
 
-def check(raw: bytes, arc: bytes, r: Recipe, d: jet_gear.Donors | None = None) -> None:
+def check(raw: bytes, arc: bytes, r: Recipe, d: jet_gear.Donors | None = None, nozzles: list[NozzleBone] | None = None) -> None:
     """Re-read the written archive: the stock members in their order, untouched ones byte-identical, but for the ones
     nothing loads (replace_member: other models, textures no texture table of the new model names), plus (a model with
     gear) exactly the gear's donor textures, their bytes the donor's; the new model round-trips; bone names as the
     unscaled model it was made from (unscaled: the stock skeleton, the elevon split, the gear), every bone's bind x
     inv_bind and world translation consistent with that x scale; the stock geometry's box == the source box x scale
     and the whole model's == the unscaled model's x scale (both raised by the grounding); the gear's own checks
-    (jet_gear.check_gear: one ground plane under every wheel, the legs fold into the body)."""
+    (jet_gear.check_gear: one ground plane under every wheel, the legs fold into the body); its nozzle bones exactly
+    `nozzles` (check_nozzle_bones), every other check on the model without them (strip_nozzles)."""
     a, b = rab_read(raw), rab_read(arc)
     assert rab_write(b) == arc
     src = mdb_read(next(f for f in a.files if f.name.lower() == r.model.lower()).data)
@@ -662,6 +815,8 @@ def check(raw: bytes, arc: bytes, r: Recipe, d: jet_gear.Donors | None = None) -
     data = next(f for f in b.files if f.name.lower() == r.model.lower()).data
     new = mdb_read(data)
     assert mdb_write(new) == data, 'new model does not round-trip'
+    check_nozzle_bones(new, nozzles or [])
+    new = strip_nozzles(new)
     used = {x.name.lower() for t in new.textures for x in graft_pure.texture_members(b, t.filename)}
     assert all(len(graft_pure.texture_members(b, t.filename)) == 2 for t in new.textures), 'a texture of the model is no member'
     gone = [f for f in a.files if f.name.lower() not in {x.name.lower() for x in kept}]
