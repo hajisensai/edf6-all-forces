@@ -159,11 +159,11 @@ bool AirdropReady(SupportVehicleKind kind) noexcept {
 bool AirdropBegin(const void* carrier,SupportVehicleKind kind,const float* target) noexcept {
     const auto spec=SupportVehicleInfo(kind);
     if(!carrier || !target || !spec || !AirdropReady(kind) || InSession())return false;
-    // The helicopter on its way to hover over the point first: no container is made for one that cannot go there.
-    if(!HeliFerry(carrier,target,false)){Log("AIRDROP helicopter %p: no ferry",carrier);return false;}
     Drop* d=nullptr;
     for(auto& row:drops)if(row.phase==Phase::free){d=&row;break;}
-    if(!d){Log("AIRDROP no free drop slot");return false;}
+    if(!d){Log("AIRDROP no free drop slot");return false;}   // before the ferry: a false return leaves the helicopter's call alone
+    // The helicopter on its way to hover over the point first: no container is made for one that cannot go there.
+    if(!HeliFerry(carrier,target,false)){Log("AIRDROP helicopter %p: no ferry",carrier);return false;}
     unsigned char* box=nullptr;
     __try {
         alignas(16) float m[16];

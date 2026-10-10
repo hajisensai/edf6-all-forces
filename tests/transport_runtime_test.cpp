@@ -292,12 +292,63 @@ void Paradrop() {
     Step(30);
     Check(canopyFrees==3,"down: the canopies gone",canopyFrees);
 }
+
+// A new far order for a squad on a trip under way: the trip goes there instead (not to the first order's drop point).
+void ReOrder() {
+    Reset();
+    MakeVehicle(truck,truckSeats,5);Place(truck,0,0,0);MakeObj(soldier[0]);Place(soldier[0],0,0,0);
+    squads[0]={&soldier[0],4,4,&truck,{},0,0,0};
+    TransportPair(soldier[0].m,truck.m);
+    Check(TransportOrder(soldier[0].m,mapcmd::Command{mapcmd::Order::move,{0,0,800}}),"aboard, a far order");
+    Step(200);
+    Check(PosOf(truck)[2]>20.0f,"under way to the first point",PosOf(truck)[2]);
+    Check(TransportOrder(soldier[0].m,mapcmd::Command{mapcmd::Order::guard,{800,0,0}}),"re-ordered on the way");
+    for(int i=0;i<40000 && !Done(soldier[0].m);++i)Step();
+    const float* tp=PosOf(truck);
+    Check(Done(soldier[0].m) && std::hypot(tp[0]-800.0f,tp[2])<50.0f,"the truck went to the new point",tp[0],tp[2]);
+    Check(squads[0].order.order==mapcmd::Order::guard && squads[0].order.at[0]==800.0f,"off, the squad carries out the new order");
+}
+
+// A squad's top dies mid-trip and its remnant joins another squad: its trip ends as any other order ends it (the
+// helicopter's ferry let go: it does not fly on to the drop point empty).
+void SuccessionMidTrip() {
+    Reset();
+    MakeVehicle(heli,heliSeats,13);Place(heli,-1400,150,0);heliGround=false;MakeObj(soldier[0]);
+    squads[0]={&soldier[0],4,4,&heli,{},0,0,0};
+    const void* tops[1]={soldier[0].m};const float target[3]={0,0,0};
+    TransportDeliver(heli.m,tops,1,target);
+    Step(20);
+    Check(ferryOn && !Done(soldier[0].m),"flying them in");
+    TransportSucceed(soldier[0].m,nullptr);
+    Check(Done(soldier[0].m) && !ferryOn && heliGuards>0,"the trip over: its ferry let go, it guards where it is");
+}
+
+// The stick's squads are kept by identity: a top freed and its memory reused before the plane is empty gets no order.
+void ParadropReusedTop() {
+    Reset();
+    MakeVehicle(plane,planeSeats,5);Place(plane,0,150,0);
+    MakeObj(soldier[0]);squads[0]={&soldier[0],4,4,&plane,{},0,0,0};
+    for(int i=0;i<4;++i) {
+        MakeObj(soldier[8+i]);jumper[i]=&soldier[8+i];jumperOut[i]=false;jumperFlies[i]=false;
+        unsigned char* seat=SeatAt(plane.m,static_cast<unsigned>(i+1));
+        Put<void*>(seat,kSeatRider,jumper[i]->m);Put<void*>(seat,kSeatRiderCtrl,seatCtrl[i]);Put<int>(seatCtrl[i],8,1);
+        Place(*jumper[i],0,150,0);
+    }
+    const float target[3]={0,0,0};
+    TransportParadrop(plane.m,target);
+    for(int i=0;i<200 && !jumperOut[3];++i)Step();
+    Check(jumperOut[3] && jetLeaves==0,"the last one out, the plane not yet gone");
+    unsigned char other[0x20]{};Put<void*>(soldier[0].m,kSelfCtrl,other);   // freed, another object there now
+    const int orders=squads[0].orders;
+    Step(5);
+    Check(jetLeaves==1 && squads[0].orders==orders,"all out: the plane leaves, no order to what lives at the old top",squads[0].orders,orders);
+}
 }  // namespace
 
 int main() {
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x1800000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
     config.transportAutoRange=200.0f;
-    GroundTrip();EmptyTruck();HeliAssault();Withdraw();Succession();Paradrop();
+    GroundTrip();EmptyTruck();HeliAssault();Withdraw();Succession();Paradrop();ReOrder();SuccessionMidTrip();ParadropReusedTop();
     std::printf("transport_runtime: %d checks, %d failed\n",checks,failed);
     return failed ? 1 : 0;
 }

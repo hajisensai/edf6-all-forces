@@ -29,7 +29,9 @@ namespace {
 using transport::Act;
 using transport::Carrier;
 using transport::Phase;
-constexpr int kPairs=32,kTrips=8,kRiders=4,kDrops=4,kJumpers=32,kDropTops=16;
+// kDrops: one a deployment (support_dispatch.cpp kDeployments): a plane with no drop would fly its call with its soldiers
+// aboard and never let them out.
+constexpr int kPairs=32,kTrips=8,kRiders=4,kDrops=16,kJumpers=32,kDropTops=16;
 constexpr ULONGLONG kBoardEveryMs=2000,kUnloadEveryMs=1500,kWalkEveryMs=3000,kLogMs=2000;
 constexpr ULONGLONG kJumpMostMs=180000;              // a jump not down after this long is let go
 constexpr float kDropRadius=400.0f;                  // m (level) from its point a transport plane's stick begins
@@ -53,7 +55,9 @@ struct Trip {
     npc::navigation::State nav;
 };
 struct Jumper { ObjRef human,canopy; ULONGLONG at; bool flies; };
-struct Drop { ObjRef plane; float target[3]; int jumped; ULONGLONG lastJump; const void* tops[kDropTops]; int topCount; };
+// tops: the squads that jumped, by identity (a squad's top killed on the way down may be freed and its memory reused
+// before the stick ends: a bare pointer would hand the guard order to whatever lives there then).
+struct Drop { ObjRef plane; float target[3]; int jumped; ULONGLONG lastJump; ObjRef tops[kDropTops]; int topCount; };
 Pair pairs[kPairs]{};
 Trip trips[kTrips]{};
 Drop drops[kDrops]{};
@@ -234,9 +238,21 @@ void TripFrame(Trip& t,ULONGLONG ms) noexcept {
 
 // A trip for `v` with rider `top` (its order `after`): a new one, or `top` joining the vehicle's trip under way while it
 // still gathers (or riding it already). False: the vehicle is busy elsewhere.
+// The trip's drop point for `after` (the vehicle where it is now) and the phase it goes on in from there.
+void Aim(Trip& t,unsigned char* v,const mapcmd::Command& after,ULONGLONG ms) noexcept {
+    transport::DropPoint(Pos(v),after.at,Standoff(t.t.carrier),t.t.drop);
+    const transport::View view=ViewOf(t,ms);
+    t.t.phase=transport::Begin(t.t.carrier,view,tuning);t.t.since=ms;t.last=Act::none;
+}
+
 bool StartOrJoin(unsigned char* v,const void* top,const mapcmd::Command& after,bool aboard,ULONGLONG ms) noexcept {
     if(Trip* t=TripOf(v)) {
-        if(TripRider* r=RiderOf(*t,top)){r->after=after;return true;}
+        if(TripRider* r=RiderOf(*t,top)) {   // a new order for a squad on it: the trip goes there instead
+            r->after=after;Aim(*t,v,after,ms);
+            Log("TRANSPORT v=%p squad %p re-ordered: drop (%.0f,%.0f), %s",v,top,t->t.drop[0],t->t.drop[2],
+                transport::kPhaseNames[static_cast<int>(t->t.phase)]);
+            return true;
+        }
         const bool gathering=t->t.phase==Phase::pickup || t->t.phase==Phase::boarding;
         if(t->count>=kRiders || !(gathering || aboard))return false;
         t->riders[t->count++]=TripRider{ObjRef::Of(top),after};
@@ -249,9 +265,7 @@ bool StartOrJoin(unsigned char* v,const void* top,const mapcmd::Command& after,b
     t->vehicle=ObjRef::Of(v);t->count=1;t->riders[0]=TripRider{ObjRef::Of(top),after};
     t->sampleAt=0;t->speed=0.0f;t->actAt=0;t->loggedAt=0;t->last=Act::none;t->nav.initialized=false;
     t->t=transport::Trip{};t->t.carrier=CarrierOf(v);
-    transport::DropPoint(Pos(v),after.at,Standoff(t->t.carrier),t->t.drop);
-    const transport::View view=ViewOf(*t,ms);
-    t->t.phase=transport::Begin(t->t.carrier,view,tuning);t->t.since=ms;
+    Aim(*t,v,after,ms);
     Log("TRANSPORT v=%p (%s) trip for squad %p to (%.0f,%.0f,%.0f): drop (%.0f,%.0f), %s",v,t->t.carrier==Carrier::heli ? "heli" : "ground",
         top,after.at[0],after.at[1],after.at[2],t->t.drop[0],t->t.drop[2],transport::kPhaseNames[static_cast<int>(t->t.phase)]);
     return true;
@@ -285,11 +299,10 @@ void JumpFrame(Jumper& j,ULONGLONG ms) noexcept {
     else if(j.canopy)ChuteCanopyMove(j.canopy,p,vel);
 }
 
-void AddJumper(unsigned char* h,ULONGLONG ms) noexcept {
-    for(auto& j:jumpers)if(!j.human) {
-        j=Jumper{ObjRef::Of(h),{},ms,NpcSoldierFlies(h)};
-        return;
-    }
+// A free jumper's place: a soldier is let out only with one (with none it would fall without its canopy).
+Jumper* FreeJumper() noexcept {
+    for(auto& j:jumpers)if(!j.human)return &j;
+    return nullptr;
 }
 
 // The plane's passengers (soldiers in its seats past the pilot's): the first one's seat, or -1.
@@ -308,7 +321,7 @@ void DropFrame(Drop& d,ULONGLONG ms) noexcept {
         if(d.jumped>0 || ms-d.lastJump>60000) {   // all out (or nobody aboard after a minute): off it goes, they guard the point
             JetWithdrawNow(plane,"paratroopers out");
             for(int i=0;i<d.topCount;++i)
-                if(Live(ObjRef::Of(d.tops[i])))NpcSquadSetOrder(d.tops[i],mapcmd::Command{mapcmd::Order::guard,{d.target[0],d.target[1],d.target[2]}},false);
+                if(Live(d.tops[i]))NpcSquadSetOrder(d.tops[i].obj,mapcmd::Command{mapcmd::Order::guard,{d.target[0],d.target[1],d.target[2]}},false);
             Log("TRANSPORT drop over (%d out): the plane leaves",d.jumped);
             d=Drop{};
         }
@@ -316,13 +329,15 @@ void DropFrame(Drop& d,ULONGLONG ms) noexcept {
     }
     const float dist=transport::Level(Pos(plane),d.target);
     if(!transport::JumpNow(dist,kDropRadius,d.jumped,d.jumped+1,ms,d.lastJump))return;
+    Jumper* const slot=FreeJumper();
+    if(!slot)return;   // every place taken by those still coming down: the next waits for one
     auto* h=At<unsigned char*>(SeatAt(plane,static_cast<unsigned>(seat)),kSeatRider);
     const void* top=NpcSquadTopOf(h);
     if(!NpcMoveSeat(plane,static_cast<unsigned>(seat),-1)){d.lastJump=ms;return;}
     ++d.jumped;d.lastJump=ms;
-    AddJumper(h,ms);
-    bool known=false;for(int i=0;i<d.topCount;++i)known=known || d.tops[i]==top;
-    if(top && !known && d.topCount<kDropTops)d.tops[d.topCount++]=top;
+    *slot=Jumper{ObjRef::Of(h),{},ms,NpcSoldierFlies(h)};
+    bool known=false;for(int i=0;i<d.topCount;++i)known=known || d.tops[i].Is(top);
+    if(top && !known && d.topCount<kDropTops)d.tops[d.topCount++]=ObjRef::Of(top);
     Log("TRANSPORT jump %d from plane %p (seat %d) %.0f m from the point%s",d.jumped,plane,seat,dist,NpcSoldierFlies(h) ? ", a Wing Diver: no canopy" : "");
 }
 }  // namespace
@@ -411,15 +426,15 @@ NpcCommandReason TransportWithdraw(const void* top) noexcept {
 }
 
 void TransportSucceed(const void* dead,const void* lead) noexcept {
-    for(auto& p:pairs)if(p.top.obj==dead) {
-        if(lead)p.top=ObjRef::Of(lead);
-        else p=Pair{};
-    }
-    for(auto& t:trips)for(int i=0;i<t.count;++i)if(t.riders[i].top.obj==dead) {
-        if(lead)t.riders[i].top=ObjRef::Of(lead);
-        else{t.riders[i]=t.riders[--t.count];if(!t.count)t.t=transport::Trip{};}
-        break;
-    }
+    __try {
+        for(auto& p:pairs)if(p.top.obj==dead) {
+            if(lead)p.top=ObjRef::Of(lead);
+            else p=Pair{};
+        }
+        if(lead) {
+            for(auto& t:trips)for(int i=0;i<t.count;++i)if(t.riders[i].top.obj==dead)t.riders[i].top=ObjRef::Of(lead);
+        } else LeaveTrips(dead);   // joined another squad: its place in the trip goes as any other order's (EndTrip if the last)
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 
 bool TransportDeliver(const void* vehicle,const void* const* tops,int count,const float* target) noexcept {
