@@ -413,8 +413,9 @@ struct ShellState {
 };
 
 // The targets a jet goes for by what its stores can strike (the user, 2026-10-09: loads made before the battle, "飞机可以
-// 全带炸弹，或者全带导弹"): with rounds left only in air-to-air stores, flying targets first; only in ground ones (air-to-
-// ground missiles, bombs, rockets), ground targets first; mixed, none, or all spent: its kind's own (Kind::prefer). Every
+// 全带炸弹，或者全带导弹"): carrying only air-to-air stores, flying targets first; only ground ones (air-to-ground
+// missiles, bombs, rockets), ground targets first; mixed, none, or all spent: its kind's own (Kind::prefer). The stores
+// carried, not their rounds left (jet.cpp): a mixed load with one side spent stays mixed. Every
 // stock load keeps its kind's (the fighter's and the interceptor's are air-to-air, the strike jet's and the multirole's
 // mixed), so this changes only a load the player chose (a fighter loaded with bombs now goes for the ground).
 constexpr Prefer LoadoutPrefer(Prefer kind,int airRounds,int groundRounds) noexcept {

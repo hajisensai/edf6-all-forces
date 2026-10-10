@@ -545,14 +545,16 @@ void JetFrame(unsigned char* v) noexcept {
     Arms arms=ReadArms(v);
     j->burden=BurdenOf(BodyMark(v),arms.stores,arms.storeCount);
     {
-        int air=0,ground=0;
+        // By the stores it carries, not by what is left in them: a mixed load with one side spent (a strike jet's bombs
+        // gone, its AIM-9X left) keeps its kind's; every store empty, its kind's too.
+        int air=0,ground=0,left=0;
         for(int i=0;i<arms.storeCount;++i) {
             const auto r=arms.stores[i].spec->role;
-            const int left=arms.stores[i].ammo>0 ? arms.stores[i].ammo : 0;
-            if(r==StoreRole::air)air+=left;
-            else if(r==StoreRole::ground || r==StoreRole::bomb || r==StoreRole::rocket)ground+=left;
+            left+=arms.stores[i].ammo>0 ? arms.stores[i].ammo : 0;
+            if(r==StoreRole::air)++air;
+            else if(r==StoreRole::ground || r==StoreRole::bomb || r==StoreRole::rocket)++ground;
         }
-        j->loadPrefer=LoadoutPrefer(kind.prefer,air,ground);j->loadSet=true;
+        j->loadPrefer=LoadoutPrefer(kind.prefer,left>0 ? air : 0,left>0 ? ground : 0);j->loadSet=true;
     }
     const bool follow=player.at && ms-player.at<10000;
     // A drone works round its carrier, a launched jet round its strike point, a placed one guards the
