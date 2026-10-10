@@ -5263,8 +5263,12 @@ def edf5_campaign_build() -> None:
                 rootcpk.default().read(r.items[1].split('app:/', 1)[1], 'MISSION.BVM')
             for rel in txt.values():
                 assert len(sgo.read(files[rel])[1]['table']) == len(rows), rel
-            names = [f.name for f in mdb.rab_read(files[image]).files]
-            assert names == [e5c.thumb_name(r.items[2]) for r in rows], pack.tag
+            thumbs = mdb.rab_read(files[image]).files
+            assert [f.name for f in thumbs] == [e5c.thumb_name(r.items[2]) for r in rows], pack.tag
+            own = e5c.edf5_thumbs()   # each mission shows EDF5's own thumbnail, not a stand-in on its map
+            for r, f in zip(rows, thumbs):
+                path = r.items[2].split(f'{e5c.SCRIPTS}/', 1)[1]
+                assert f.stored == own[e5c.thumb_name(path).upper()].stored, (pack.tag, path)
             assert dsgo.compact(dsgo.parse(files[listed])) == files[listed]
     assert counts == {'main': 110, 'dlc1': 11, 'dlc2': 14}, counts
     assert {x[1] for x in p['skipped']} == {'DLC/DM015', 'DLC/DM018', 'DLC/DM019', 'DLC/DM020'}, p['skipped']
@@ -5475,12 +5479,42 @@ def edf5_campaign_plugin_sites() -> None:
 
 
 @test
+def edf5_campaign_thumbnails() -> None:
+    """Every EDF5 mission in the text has EDF5's own thumbnail in THUMBS (no game needed: the file is committed), each a
+    440x220 DXT1 DDS like EDF6's; pick_thumbs gives a mission EDF5's one, the range its stock 'thumb', a mission THUMBS
+    lacks the stock one on its map, else M046's."""
+    import mdb
+    import struct
+    own = e5c.edf5_thumbs()
+    text = json.load(open(e5c.TEXT, encoding='utf-8'))
+    paths = [m['path'] for group in ('main', 'dlc1', 'dlc2') for m in text[group]]
+    names = {e5c.thumb_name(x).upper() for x in paths}
+    assert len(paths) == 139 and set(own) == names, sorted(set(own) ^ names)
+    for name, f in own.items():
+        d = f.data
+        assert d[:4] == b'DDS ' and struct.unpack_from('<II', d, 12) == (220, 440) and d[84:88] == b'DXT1', name
+
+    stock = {n.upper(): mdb.RabFile(n, 0, 0, n.encode()) for n in ('EDF6_M046.dds', 'EDF6_M045.dds', 'EDF6_M010.dds')}
+    rows = [{'key': 'EDF5_OLD_SCRIPT/M001', 'path': 'M001', 'map': 'X.MAC'},
+            {'key': 'EDF5_OLD_SCRIPT/DLC/DM011', 'path': 'DLC/DM011', 'map': None},
+            {'key': 'EDF5_OLD_SCRIPT/M999', 'path': 'M999', 'map': 'X.MAC'},     # not in THUMBS: its map's
+            {'key': 'EDF5_OLD_SCRIPT/M998', 'path': 'M998', 'map': None},        # nothing: M046's
+            {'key': 'EDF6/RANGE', 'map': None, 'thumb': 'EDF6/M045'}]
+    out = e5c.pick_thumbs(rows, own, stock, {'X.MAC': 'EDF6/M010'})
+    assert [f.name for f in out] == [e5c.thumb_name(r['key']) for r in rows]
+    assert [f.stored for f in out] == [own['M001.DDS'].stored, own['DLC_DM011.DDS'].stored, b'EDF6_M010.dds',
+                                       b'EDF6_M046.dds', b'EDF6_M045.dds']
+
+
+@test
 def edf5_campaign_shipped() -> None:
     """Both the frozen installer and source-tools archive must carry the campaign's required text."""
     rel = src('tools/build_release.py')
     assert '"edf5campaign", "missions.json")}{seps}edf5campaign' in rel
     assert "os.path.join(sys._MEIPASS, 'edf5campaign', 'missions.json')" in src('tools/make_edf5_campaign.py')
     assert os.path.isfile(os.path.join(ROOT, 'edf5campaign', 'missions.json'))
+    assert '"edf5campaign", "thumbnails.rab")}{seps}edf5campaign' in rel
+    assert e5c.THUMBS == os.path.join(os.path.dirname(e5c.TEXT), 'thumbnails.rab')
     workflow = src('.github/workflows/build.yml')
     assert re.search(r'foreach \(\$f in git [^\n]*ls-files [^\n)]*\bedf5campaign\b', workflow), \
         'source-tools archive omits the campaign text required by make_edf5_campaign.TEXT'

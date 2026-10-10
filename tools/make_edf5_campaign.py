@@ -62,6 +62,9 @@ import sgo  # noqa: E402
 
 TEXT = (os.path.join(sys._MEIPASS, 'edf5campaign', 'missions.json') if getattr(sys, 'frozen', False)  # type: ignore[attr-defined]
         else os.path.join(HERE, '..', 'edf5campaign', 'missions.json'))   # the installer exe: tools/build_release.py
+# EDF5's own thumbnails of these missions (EDF5's three offline IMAGE.RABs merged, names as EDF5 has them: the
+# mission's path with '/' as '_', M001.dds, DLC_DM011.dds); tools/make_edf5_campaign_text.py, committed like TEXT.
+THUMBS = os.path.join(os.path.dirname(TEXT), 'thumbnails.rab')
 MANIFEST = '.edf5campaign.json'
 DISABLED = '.edf5campaign-disabled'
 INI = os.path.join('Plugins', 'EDF6VehicleCrew.ini')
@@ -350,20 +353,33 @@ def pack_text(game: rootcpk.Game, lang: str, rows: list[dict], kind: str = OFFLI
     return sgo.write_depth_first(ver, members)
 
 
-def pack_image(game: rootcpk.Game, rows: list[dict], kind: str = OFFLINE) -> bytes:
-    """A thumbnail per row (named by its key, EDF.dll 0xE0D80): the row's own stock one ('thumb'), else a stock
-    mission's on the same map, else M046's."""
-    stock = dsgo.parse(game.read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO')).root.get('table').items
-    rab = mdb.rab_read(game.read('MISSION', f'MISSIONLIST.{kind.upper()}.IMAGE.RAB'))
-    by_name = {f.name.upper(): f for f in rab.files}
-    by_map = stock_maps(game, stock) if any(not r.get('thumb') for r in rows) else {}
-    fallback = by_name.get(thumb_name('EDF6/M046').upper(), rab.files[0])
-    files = []
+def edf5_thumbs() -> dict[str, mdb.RabFile]:
+    """EDF5's thumbnails (THUMBS) by upper-case name."""
+    with open(THUMBS, 'rb') as f:
+        return {x.name.upper(): x for x in mdb.rab_read(f.read()).files}
+
+
+def pick_thumbs(rows: list[dict], own: dict[str, mdb.RabFile], stock: dict[str, mdb.RabFile],
+                by_map: dict[str, str]) -> list[mdb.RabFile]:
+    """A thumbnail per row, named by its key (EDF.dll 0xE0D80): a row with a stock 'thumb' (the range) shows that one;
+    an EDF5 mission EDF5's own (`own`, THUMBS: 440x220 DXT1 like EDF6's), else a stock mission's on its map, else
+    M046's. `own` and `stock` by upper-case name, `by_map` map file -> stock key (stock_maps)."""
+    fallback = stock.get(thumb_name('EDF6/M046').upper()) or next(iter(stock.values()))
+    out = []
     for r in rows:
-        source = r.get('thumb') or by_map.get(r['map'] or '', '')
-        src = by_name.get(thumb_name(source).upper(), fallback)
-        files.append(mdb.RabFile(thumb_name(r['key']), src.folder, src.flag, src.stored, src.unk))
-    rab.files = files
+        mine = None if r.get('thumb') else own.get(thumb_name(r.get('path', '')).upper())
+        src = mine or stock.get(thumb_name(r.get('thumb') or by_map.get(r['map'] or '', '')).upper(), fallback)
+        out.append(mdb.RabFile(thumb_name(r['key']), src.folder, src.flag, src.stored, src.unk))
+    return out
+
+
+def pack_image(game: rootcpk.Game, rows: list[dict], kind: str = OFFLINE) -> bytes:
+    """The kind's thumbnails RAB of `rows` (pick_thumbs), in the stock one's layout."""
+    rab = mdb.rab_read(game.read('MISSION', f'MISSIONLIST.{kind.upper()}.IMAGE.RAB'))
+    listed = dsgo.parse(game.read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO')).root.get('table').items
+    by_map = stock_maps(game, listed) if any(not r.get('thumb') for r in rows) else {}
+    own = edf5_thumbs() if any(r.get('path') for r in rows) else {}
+    rab.files = pick_thumbs(rows, own, {f.name.upper(): f for f in rab.files}, by_map)
     return mdb.rab_write(rab)
 
 

@@ -393,6 +393,7 @@ void LoadConfig() noexcept {
     n.vehicleWelding=ReadBool(L"VehicleWelding",n.vehicleWelding);
     n.giantContactCap=ReadBool(L"GiantContactCap",n.giantContactCap);
     n.splitMissileSurface=ReadBool(L"SplitMissileSurface",n.splitMissileSurface);
+    n.routeGuidePath=ReadBool(L"RouteGuidePath",n.routeGuidePath);
     n.stockMissilePN=ReadBool(L"StockMissilePN",n.stockMissilePN);
     n.stockMissileNav=ReadFloat(L"StockMissileNav",n.stockMissileNav);
     if(!(n.stockMissileNav>=2.0f && n.stockMissileNav<=6.0f))n.stockMissileNav=3.0f;
@@ -945,6 +946,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallVehicleSound();  // the ground vehicles' engines, turrets, loaders and main guns (vehsound.cpp)
     InstallMissiles();
     InstallSplitMissiles(); // the stock split missiles' split distance to the target's surface
+    InstallRouteGuide();    // the stock route guide strip along the navmesh route's corners
     InstallGuidance();      // the stock homing rounds by proportional navigation
     InstallStores();        // before any mission builds a jet: the 506 builds a weapon for every holder, the others their extras
     InstallPayload();       // the stock vehicles' stores: the holder pull lands on the one picked

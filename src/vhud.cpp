@@ -278,6 +278,7 @@ void StockHudFrame(unsigned char* v) noexcept {
     // The store the payload switch has picked (payload.cpp: the secondary fires it), found by its weapon: selected.
     const unsigned char* const picked=PayloadPicked(v);
     const unsigned char* const sight=PayloadSightPicked(v,r.seat);
+    const unsigned char* const turret=PlayerTurretGun(v,seat);
     unsigned char* fired[kStockArms]{};
     const int firing=PayloadSightWeapons(v,r.seat,fired,kStockArms);
     // SetStockSelectedStore's index is the holder's, the arms' skip the tank: its arm found as the list is walked.
@@ -293,6 +294,7 @@ void StockHudFrame(unsigned char* v) noexcept {
             if(!Readable(w,kChargeLeft+4) || IsFuelTank(w))continue;
             if(picked && w==picked)pickedArm=r.arms;
             if(sight && w==sight)r.sight=r.arms;
+            if(turret && w==turret)r.turret=r.arms;
             if(static_cast<int>(i)==store)storeArm=r.arms;
             StockArm& a=r.arm[r.arms++];
             const auto freedom=weaponmount::Of(v,seat,holders[i]);
