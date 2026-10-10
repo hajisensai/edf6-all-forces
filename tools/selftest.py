@@ -5393,6 +5393,28 @@ def edf5_found_by_gamedir() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+@test
+def weapon_table_fits_the_save() -> None:
+    """stack refuses, before building anything, a table its rows would take past the 0x800 weapons a save keeps (the
+    game writes past the save's block for every row beyond); a table exactly full is fine."""
+    import types
+    import ported_weapons as pw
+    ours = len(cw.plan_rows([]).appended)
+    full = [f'OTHER{i}' for i in range(cw.SAVE_WEAPONS - ours + 1)]
+
+    def built(*_a: object) -> None:
+        raise AssertionError('stack built the weapons before refusing the table')
+
+    with patched(cw, load_shared=lambda game_root: types.SimpleNamespace(ids=full)), patched(pw, build=built):
+        try:
+            cw.stack('nowhere')
+        except SystemExit as e:
+            assert str(cw.SAVE_WEAPONS + 1) in str(e), e
+        else:
+            raise AssertionError('a table past the save was stacked')
+    cw.check_room(cw.SAVE_WEAPONS)
+
+
 def _e5w_games(test: str) -> tuple[str, str] | None:
     """(EDF6, EDF5) when both are installed (the real-data tests), else None, saying the test is skipped."""
     import gamedir
@@ -5403,6 +5425,15 @@ def _e5w_games(test: str) -> tuple[str, str] | None:
         return edf6, edf5
     print(f'skip  {test}: needs EDF6 and EDF5 installed')
     return None
+
+
+@contextlib.contextmanager
+def _stock_only_mods() -> Iterator[None]:
+    """call_weapons reading the real game's archives but an empty Mods: the real-data tests start from the stock table
+    whatever this machine has installed (an install of ours or another tool's would change what stack keeps)."""
+    with tempfile.TemporaryDirectory(prefix='edf6vc-stock-mods-') as clean, \
+            patched(cw, _mods=lambda game_root, *rel: os.path.join(clean, *[x for r in rel for x in r.split('/')])):
+        yield
 
 
 # The 'edf6' weapons' fields the developers changed beyond converting them (measured 2026-10-10): balance, and the MAB
@@ -5466,7 +5497,8 @@ def edf5_weapons_stack_real() -> None:
     games = _e5w_games('edf5_weapons_stack_real')
     if games is None:
         return
-    out = cw.stack(games[0])
+    with _stock_only_mods():
+        out = cw.stack(games[0])
     rows = {r.items[0]: r for r in dsgo.parse(out[cw.TABLE]).root.get('table').items}
     for p in pw.PORTS:
         row = rows[p.id]
@@ -5484,7 +5516,7 @@ def edf5_weapons_stack_real() -> None:
             if isinstance(v, dsgo.Node) and all(isinstance(x, float) for x in v.items):
                 assert len(v.items) != 6, f'{p.id} {k}: a star curve still 6 long'
     with_edf5 = cw.row_ids(out[cw.TABLE])
-    with patched(pw, game_root=lambda game, edf6_root: None):
+    with _stock_only_mods(), patched(pw, game_root=lambda game, edf6_root: None):
         bare = cw.stack(games[0])
     without = cw.row_ids(bare[cw.TABLE])
     assert len(without) == len(with_edf5)
@@ -5493,6 +5525,8 @@ def edf5_weapons_stack_real() -> None:
         alone = p.source == 'edf6' and not p.assets   # built from EDF6's own files: no earlier game needed
         assert without[i] == (p.id if alone else pw.retired_id(p.id)), p.id
         assert (pw.sgo_file(p) in bare) == alone, p.id
+        assert dsgo.parse(bare[cw.TABLE]).root.get('table').items[i].items[5] == pw.ACQUIRE, \
+            f'{p.id}: a placeholder obtained otherwise than the weapon (its template a starting or DLC weapon)'
     pending = next(p for p in pw.PORTS if p.source == 'edf5')
     import mdb
     for p in pw.PORTS:
@@ -5530,7 +5564,10 @@ def edf5_weapons_retire_and_uninstall() -> None:
 
     def table(key: str, rows: list[str]) -> bytes:
         def row(i: str) -> dsgo.Node:
-            return dsgo.Node([i, f'app:/weapon/{i}.sgo'] if key == 'table' else [f'name {i}', f'about {i}'])
+            # the 9 columns; every template a new save's starting weapon (acquire 1), as AssultRifle01 is
+            acquire = 1.0 if i in templates else 0.0
+            return dsgo.Node([i, f'app:/weapon/{i}.sgo', 0.0, 1.0, 0.0, acquire, dsgo.Node([]), 1.0, 0.0]
+                             if key == 'table' else [f'name {i}', f'about {i}'])
         return dsgo.compact(dsgo.Document(dsgo.Node([dsgo.Node([row(i) for i in rows])], {0: key}), []))
 
     with tempfile.TemporaryDirectory(prefix='edf6vc-e5w-') as game, \
@@ -5551,7 +5588,8 @@ def edf5_weapons_retire_and_uninstall() -> None:
         texts = dsgo.parse(out['WEAPON/WEAPONTEXT.EN.SGO']).root.get('text_table').items
         for p in ports:
             i = ids.index(p.id)
-            assert rows[i].items == [pw.retired_id(p.id), f'app:/weapon/{p.template}.sgo'], p.id
+            assert rows[i].items[:2] == [pw.retired_id(p.id), f'app:/weapon/{p.template}.sgo'], p.id
+            assert rows[i].items[5] == pw.ACQUIRE, f'{p.id}: the placeholder took its template\'s acquire'
             assert texts[i].items[0] == p.text['EN'][0] + calls.RETIRED_NOTE['EN'][0], p.id
         assert [r.items[0] for r in rows[:len(STOCK)]] == STOCK
         _, deleted = cw.retire(game, True)
