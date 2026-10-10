@@ -32,6 +32,7 @@
 #include "npc_logic.h"
 #include <cmath>
 #include <cstring>
+#include <cwchar>
 
 namespace crew {
 namespace {
@@ -174,7 +175,7 @@ namespace {
 constexpr std::size_t kAttackTable=0x1FE8,kAttackData=0x1FF0,kAttackCap=0x1FF8,kAttackSize=0x2000;
 constexpr unsigned kAttackRead=0x63B274,kAttackRelease=0x646300,kGameNew=0x12D85B0;
 constexpr std::size_t kWeaponReach=0x224;   // npcai.cpp kArmReach
-constexpr std::size_t kAimOrigin=0x2008,kVehicleModel=0xEE0;
+constexpr std::size_t kAimOrigin=0x2008;
 constexpr std::uint64_t kAttackRows=16;     // the seat holder limit npcai.cpp uses
 const unsigned char kAttackReadSig[]={0x49,0x8B,0x9F,0xF0,0x1F,0x00,0x00,0x45,0x32,0xC0,0x49,0x8B,0x8F,0x00,0x20,0x00,0x00,
                                       0x48,0xC1,0xE1,0x04,0x48,0x03,0xCB,0x44,0x88,0x44,0x24,0x31,0x48,0x3B,0xD9,0x74,0x7A,
@@ -212,10 +213,26 @@ std::uint64_t AttackRows(unsigned char* v,AttackRow* rows) noexcept {
     return count;
 }
 
+// The record of the bone `name` in the vehicle's model (what 0x1100280 returns for 0x11002A0's index): the layout of
+// body506.h BoneRecord506, looked up here so the files compiled with this one need not link body506.cpp.
+unsigned char* BoneRecordNamed(unsigned char* v,const wchar_t* name) noexcept {
+    const unsigned char* const inst=v+kModelInst506;
+    if(!Readable(inst,kInstBoneCount+4))return nullptr;
+    const auto count=At<std::int32_t>(inst,kInstBoneCount);
+    const auto bones=At<unsigned char*>(inst,kInstBones506);
+    if(count<=0 || count>256 || !Readable(bones,static_cast<std::size_t>(count)*kBoneStride))return nullptr;
+    for(std::int32_t i=0;i<count;++i) {
+        unsigned char* const rec=bones+static_cast<std::size_t>(i)*kBoneStride;
+        const auto n=At<const wchar_t*>(rec,0);
+        if(n && Readable(n,32) && std::wcsncmp(n,name,16)==0)return rec;
+    }
+    return nullptr;
+}
+
 void EnsureMechAiSetup(unsigned char* v) noexcept {
     if(!Readable(v,kAttackSize+8) || !AttackTableOk())return;
     if(!At<const void*>(v,kAimOrigin)) {
-        unsigned char* const spine=BoneRecord506(v+kVehicleModel,L"spine");
+        unsigned char* const spine=BoneRecordNamed(v,L"spine");
         if(!spine)return;   // no origin: the fire step must not run with the table (the AI action checks it: npcai.cpp)
         Put<unsigned char*>(v,kAimOrigin,spine);
     }
