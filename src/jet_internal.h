@@ -412,11 +412,15 @@ struct GunClock {
     int shots;               // ...and how many it has fired (the gatling's spread pattern counts on it)
     ULONGLONG lookAt;        // the NPCs' last look along its line (GunAtTarget: a ray a gap at the most)
     int held;                // ...and how many found the map in the way (logged every tenth)
+    int ownHeld;             // ...and how many would have crossed the gunship's own airframe (gunmuzzle.h Clears)
+    ULONGLONG ownHeldAt;     // ...the last such logged
 };
 // The gunship's shells and its side guns (GunshipFire): three guns, each with its own gap.
 struct ShellState {
     ULONGLONG gunAt;         // its last shell
     int gunShots;            // ...and how many it has fired
+    int shellHeld;           // ...and how many were held off its own airframe (gunmuzzle.h Clears)
+    ULONGLONG shellHeldAt;   // ...the last such logged
     GunClock guns[static_cast<int>(SideGun::count)];
 };
 
