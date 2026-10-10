@@ -9,7 +9,9 @@ missions' scripts name them so: app:/Object/AntHill301.sgo ...), so no EDF4.1 is
 Which: ROOTS, the objects of 4.1's missions whose class EDF6 still has (some EDF6 object SGO uses it), and those of
 ALIASES, whose class EDF6 dropped for one that does the same job: the 4.1 object under that EDF6 class, with the SGO
 keys and CAS players (cas_graft) the class looks up that 4.1's file lacks, taken from an EDF6 object of the class (plan
-P4 tier 2). The rest (Hector, the UFOs, Vehicle301, the motherships, UfoRobo, DragonBig) come later. Each root's files: every app:/ path it names, and every one those name (SGOs), that EDF6 lacks at that path
+P4 tier 2), and those of STAND_INS, whose 4.1 file shares no key with what EDF6 does the job with: an EDF6 object
+in their place, under 4.1's name (with a look of its own: a model the tools already ship, SHARED). The rest (Hector,
+the UFOs, the motherships, UfoRobo, DragonBig) come later. Each root's files: every app:/ path it names, and every one those name (SGOs), that EDF6 lacks at that path
 (EDF6's own copy, when it has one, is what the game loads; every archive of both games counted: Root.cpk, ChunkNN,
 DX11). A path 4.1 itself does not have is not needed (4.1 runs without it: every *_LIGHT.MRAB its objects name, none
 in any of its archives), nor one without an extension (a folder prefix: OBJECT/ARMYSOLDIER/APPEAL). How each comes
@@ -53,6 +55,7 @@ ROOTS: dict[str, int] = {
     'AIARMYSOLDIER_OMG.SGO': 5, 'AIARMYSOLDIER_OMG_LEADER.SGO': 5,
     'VEHICLE501_FORTRESSROBO.SGO': 1, 'VEHICLE501_FORTRESSROBO_AI.SGO': 1,
     'UFOCARRIER301.SGO': 15, 'UFOCARRIER401.SGO': 15,
+    'VEHICLE301_TANK_AI.SGO': 13,
 }
 
 
@@ -160,6 +163,34 @@ def convert(games: Games, rel: str) -> bytes:
     raise ValueError(f'no conversion for {ext} files')
 
 
+@dataclass(frozen=True)
+class StandIn:
+    template: str             # the EDF6 object in its place (OBJECT/<name>, 4.1's SGO format)
+    model: tuple[str, str]    # its animation_model[0]: (RAB, MDB)
+
+
+# Files these need that the tools already ship elsewhere: Mods path -> path under the tools' data (not copied again).
+SHARED: dict[str, str] = {'OBJECT/V505_TANKEDF4.MRAB': 'edf5port/assets/OBJECT/V505_TANKEDF4.MRAB'}
+
+STAND_INS: dict[str, StandIn] = {
+    # 4.1's AI tank (13 missions): class VehicleTank301, keys none of which EDF6's tank (Vehicle505_Tank) has. EDF6's
+    # AI tank on EDF5's Blacker No.4.1 model (the same tank, EDF5's remake; P3 ships it converted, SHARED).
+    'VEHICLE301_TANK_AI.SGO': StandIn('V505_TANK_AI.SGO', ('app:/Object/v505_tankedf4.mrab', 'v505_tankedf4.mdb')),
+}
+
+
+def stand_in(games: Games, s: StandIn) -> tuple[bytes, list[str]]:
+    """(the SGO in its place, the files it needs EDF6 lacks: SHARED ones)."""
+    version, members = sgo.read(games.read6('OBJECT/' + s.template))
+    am = members['animation_model']
+    am[0] = [s.model[0], s.model[1]]
+    need = [r for r in (rel_of(s.model[0]),) if r not in games.have6]
+    missing = [r for r in need if r not in SHARED]
+    if missing:
+        raise ValueError(f'{missing}: neither EDF6 nor the tools have it')
+    return sgo.write_depth_first(version, members), need
+
+
 def alias(games: Games, root: str, files: dict[str, bytes], a: Alias) -> None:
     """In `files` (the converted closure of OBJECT/`root`): its SGO under class a.cls with a.template's keys it
     lacks, its CAS with a.template's players it lacks (when the CAS is one of the files; else EDF6's own is used)."""
@@ -182,8 +213,19 @@ def alias(games: Games, root: str, files: dict[str, bytes], a: Alias) -> None:
 def build(edf41: str, edf6: str) -> tuple[dict, dict[str, bytes]]:
     games = Games(edf41, edf6)
     objects, skipped, files = [], [], {}
+    shared: dict[str, str] = {}
+    for root, s in STAND_INS.items():
+        rel = 'OBJECT/' + root
+        data, need = stand_in(games, s)
+        files[rel] = data
+        for r in need:
+            shared[r] = SHARED[r]
+        objects.append({'object': rel, 'class': sgo.load(data=data).get('xgs_scene_object_class'),
+                        'missions': ROOTS.get(root, 0), 'files': [rel] + need, 'stand_in': s.template})
     for root, uses in ROOTS.items():
         rel = 'OBJECT/' + root
+        if root in STAND_INS:
+            continue
         if rel in games.have6:
             skipped.append({'object': rel, 'reason': 'EDF6 has it'})
             continue
@@ -211,8 +253,12 @@ def build(edf41: str, edf6: str) -> tuple[dict, dict[str, bytes]]:
         files.update(out)
         cls = sgo.load(data=out[rel]).get('xgs_scene_object_class')
         objects.append({'object': rel, 'class': cls, 'missions': uses, 'files': need})
+    hashes = {r: hashlib.sha256(b).hexdigest() for r, b in files.items()}
+    for r, path in shared.items():
+        with open(os.path.join(HERE, '..', *path.split('/')), 'rb') as f:
+            hashes[r] = hashlib.sha256(f.read()).hexdigest()
     data = {'source': 'EDF4.1 Root.cpk; tools/make_edf41_objects.py', 'objects': objects, 'skipped': skipped,
-            'files': {r: hashlib.sha256(b).hexdigest() for r, b in sorted(files.items())}}
+            'files': dict(sorted(hashes.items())), 'shared': shared}
     return data, files
 
 

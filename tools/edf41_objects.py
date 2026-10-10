@@ -28,6 +28,11 @@ REGISTRY = os.path.join(DATA, 'edf41port', 'objects.json')
 
 
 def bundled(rel: str) -> str:
+    """Where the tools ship the file for Mods path `rel`: edf41port/objects, or where the registry's 'shared' says
+    (a file another part already ships: EDF5's converted Blacker No.4.1 model, edf5port/assets)."""
+    shared = registry().get('shared', {})
+    if rel in shared:
+        return os.path.join(DATA, *shared[rel].split('/'))
     return os.path.join(DATA, 'edf41port', 'objects', *rel.split('/'))
 
 
@@ -36,16 +41,27 @@ def registry() -> dict:
         return json.load(f)
 
 
+def _not_ours(led: ledger.Ledger, rel: str, sha: str) -> bool:
+    """A file in Mods this install must not write over: one no tool of ours wrote (no owner in the ledger), or one
+    another of our tools holds with other bytes."""
+    if not os.path.exists(led.disk(rel)):
+        return False
+    owners = led.owners(rel)
+    others = [o for o in owners if o != OWNER]
+    return not owners or (bool(others) and sha256_file(led.disk(rel)) != sha)
+
+
 def build(root: str) -> tuple[dict[str, bytes], list[tuple[str, str]]]:
     """The files of every registered object (each checked against the registry's SHA-256), but those of an object
-    one of whose files another mod already put in Mods."""
+    one of whose files is in Mods and is not ours: another mod's (the ledger knows no owner of it), or another of our
+    tools' with other bytes. One of our tools' with these very bytes (the Blacker No.4.1 model the EDF5 weapons install
+    too) is shared: install records edf41 as needing it as well."""
     reg = registry()
     led = ledger.Ledger(root)
-    ours = set(led.owned_by(OWNER))
     files: dict[str, bytes] = {}
     skipped: list[tuple[str, str]] = []
     for obj in reg['objects']:
-        foreign = [rel for rel in obj['files'] if os.path.exists(led.disk(rel)) and ledger.key(rel) not in ours]
+        foreign = [rel for rel in obj['files'] if _not_ours(led, rel, reg['files'][rel])]
         if foreign:
             skipped.append((obj['object'], f"another mod's file in Mods: {', '.join(foreign)}"))
             continue

@@ -6067,7 +6067,9 @@ def edf41_objects_shipped() -> None:
     assert listed == set(reg['files']), 'the registry lists files no object needs, or the reverse'
     root = os.path.join(ROOT, 'edf41port', 'objects')
     shipped = {os.path.relpath(os.path.join(d, f), root).replace(os.sep, '/') for d, _, fs in os.walk(root) for f in fs}
-    assert shipped == listed, f'shipped but unlisted: {sorted(shipped - listed)[:5]}; listed, not shipped: {sorted(listed - shipped)[:5]}'
+    own = listed - set(reg.get('shared', {}))
+    assert shipped == own, f'shipped but unlisted: {sorted(shipped - own)[:5]}; listed, not shipped: {sorted(own - shipped)[:5]}'
+    assert all(os.path.isfile(eo.bundled(r)) for r in reg.get('shared', {})), 'a shared file is not shipped where named'
     for rel in listed:
         with open(eo.bundled(rel), 'rb') as f:
             data = f.read()
@@ -6108,6 +6110,22 @@ def edf41_objects_install() -> None:
         eo.install(game, files)
         with open(os.path.join(game, 'Mods', *theirs.split('/')), 'rb') as f:
             assert f.read() == b'another mod', "another mod's file was written over"
+    # a file another of our tools ships with the same bytes (the Blacker No.4.1 model, EDF5 weapons) is shared;
+    # rewritten by that tool with other bytes, it is not written over: the objects needing it wait
+    shared = next(iter(reg.get('shared', {})), None)
+    if shared:
+        with tempfile.TemporaryDirectory(prefix='edf6vc-e41s-') as game:
+            os.makedirs(os.path.join(game, 'Mods'))
+            with open(eo.bundled(shared), 'rb') as f:
+                ledger.Ledger(game).put('calls', shared, f.read())
+            files, skipped = eo.build(game)
+            assert not skipped and shared in files, skipped
+            eo.install(game, files)
+            assert set(ledger.Ledger(game).owners(shared)) == {'calls', eo.OWNER}
+            ledger.Ledger(game).put('calls', shared, b'calls changed it')
+            files, skipped = eo.build(game)
+            users = {o['object'] for o in reg['objects'] if shared in o['files']}
+            assert {obj for obj, _why in skipped} == users and shared not in files, skipped
 
 def main() -> int:
     import rootcpk
