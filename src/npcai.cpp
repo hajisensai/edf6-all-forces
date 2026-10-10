@@ -1222,6 +1222,46 @@ void GiveBackDismissed(unsigned char* h) noexcept {
         if(q.dismissed && q.top.Is(h)){h[kAutoFollow]=q.autoFollow;q.dismissed=false;--dismissedCount;Log("NPCAI squad %p: the AI is off, given back to the stock",h);}
 }
 
+// --- The vehicle's AI pass under a real NPC driver (the user 2026-10-10: "驾驶位的npc根本就不开火") ---
+// The object manager runs an object's Think (vtable slot 7) only while it is on the AI list (+0x1A bit 3). A vehicle the
+// stock RideAi crews, or a script spawns as an AI, is on it: its slot 7 clears every seat block and runs the class's AI
+// (CarBase 0x673300 -> the ActionTable -> 0x661440, which aims and fires seat 0 through slot 70; the mechs' 0x643530 ->
+// 0x63C1C0). A vehicle a real soldier walked into (a player's call-in, a dropped one) is not (measured: +0x1A 0x17 against
+// 0x1F, the AI pass hit 0 times in 3000 for the boarded Titan and Nix): its NPC driver drives (npcpost.cpp writes the
+// stick) but never aims or fires. So the driver's own Think, in the same AI phase and with the same frame step, runs its
+// vehicle's pass once: the seats are cleared before any player's human writes its own seat later in the frame, as the
+// stock pass clears them for a vehicle the stock AI drives. Never for a vehicle on the AI list (it has its own pass).
+constexpr unsigned kCarAiPass=0x673300,kMechAiPass=0x643530;
+const unsigned char kCarAiPassSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x20,0x48,0x8B,0xF2,
+                                    0x48,0x8B,0xD9,0xE8,0xE6,0x6C,0xED,0xFF};   // ...call 0x54A000
+const unsigned char kMechAiPassSig[]={0x48,0x89,0x6C,0x24,0x20,0x57,0x48,0x83,0xEC,0x30,0x48,0x89,0x74,0x24,0x50,0x48,0x8B,0xEA,
+                                     0x33,0xF6,0x48,0x8B,0xF9,0x40,0x38,0xB1,0x29,0x20,0x00,0x00};
+constexpr std::size_t kSlotAiPass=7;
+using AiPassFn=void(__fastcall*)(void*,const float*);
+
+bool AiPassKnown(const void* fn) noexcept {
+    static int car=0,mech=0;
+    if(!car)car=Matches(kCarAiPass,kCarAiPassSig,sizeof(kCarAiPassSig)) ? 1 : -1;
+    if(!mech)mech=Matches(kMechAiPass,kMechAiPassSig,sizeof(kMechAiPassSig)) ? 1 : -1;
+    return (car>0 && fn==image+kCarAiPass) || (mech>0 && fn==image+kMechAiPass);
+}
+
+void DriveVehicleAi(unsigned char* h,const float* dt) noexcept {
+    static const void* lastV=nullptr;static ULONGLONG lastFrame=0;
+    if(!dt || !Cfg().npcBoarding || h[kDead])return;
+    auto* seat=At<unsigned char*>(h,kHumanSeat);
+    auto* v=At<unsigned char*>(h,kHumanRiding);
+    if(!seat || !Readable(v,kSeatCount+8) || v[kDead] || (v[kListFlags]&kInAiList) || !OwnsNpcSeatInput(seat))return;
+    const auto vt=At<void* const*>(v,0);
+    if(!Readable(vt,(kSlotAiPass+1)*8) || !AiPassKnown(vt[kSlotAiPass]))return;
+    const ULONGLONG frame=GameFrame();
+    if(lastV==v && lastFrame==frame)return;   // once a frame
+    lastV=v;lastFrame=frame;
+    static ULONGLONG loggedAt=0;
+    if(GameMs()-loggedAt>10000){loggedAt=GameMs();Log("NPCAI driver %p runs the AI pass of v=%p (not on the AI list)",h,v);}
+    reinterpret_cast<AiPassFn>(vt[kSlotAiPass])(v,dt);
+}
+
 template<int I> void __fastcall ThinkHook(void* human,const float* dt) {
     if(SupportSoldierHeld(human)) {
         // The actor exists on this peer, but native movement/fire/boarding must wait until every
@@ -1239,6 +1279,7 @@ template<int I> void __fastcall ThinkHook(void* human,const float* dt) {
     nextThink[I](human,dt);
     if(!ok || !Cfg().enabled || !Cfg().customNpcAi)return;
     __try { Think(static_cast<unsigned char*>(human),I); } __except(Fault(GetExceptionInformation())) {}
+    __try { DriveVehicleAi(static_cast<unsigned char*>(human),dt); } __except(Fault(GetExceptionInformation())) {}
 }
 constexpr ThinkFn kHooks[kClasses]={&ThinkHook<0>,&ThinkHook<1>,&ThinkHook<2>,&ThinkHook<3>};
 constexpr std::size_t kSlotThink=7;
