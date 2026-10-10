@@ -65,7 +65,7 @@ EDF5 武器 SGO 是 v0x102、类型化数值；EDF6 是 DSGO（数值全为 doub
 
 ## 6. P2：EDF4.1 武器（`tools/make_edf41_weapons.py` → `edf41port/weapons.json`）
 
-4.1 武器表 827 行里，EDF5、EDF6 两张表都没有其日文名 / 英文名的 396 把（名字比较时去掉 4.1 的部队后缀：4.1 的「榴弾砲〔砲兵隊〕」就是 EDF6 的「榴弾砲」；EDF5 有、EDF6 没有的归 P1）。收录 284 把，跳过 112 把：
+4.1 武器表 827 行里，EDF5、EDF6 两张表都没有其日文名 / 英文名的 396 把（名字比较时去掉 4.1 的部队后缀：4.1 的「榴弾砲〔砲兵隊〕」就是 EDF6 的「榴弾砲」；EDF5 有、EDF6 没有的归 P1）。收录 284 把，跳过 112 把（收录的和 EDF5 武器一样在开发时转换好存进登记表 `weapon`，玩家不需要装 EDF4.1，2026-10-10 用户：「预生成吧」；`tools/selftest.py` `ported_weapons_registry_current` 守住登记表与当前转换器一致）：
 
 - 65 把载具呼叫（4.1 分类 36–39）：4.1 用 `Weapon_Throw` 召来 `Transporter401` 投送，EDF6 已没有这个类（`EDF.dll` 无注册名，H），归 P5。
 - 19 把分类 31 里的攻击机 / 轰炸机呼叫：ホエール机炮（`Weapon_BasicShoot` 烟雾弹）和轰炸机（`Weapon_Throw` 烟雾弹的模式 2，`Ammo_CustomParameter[3]`，召来 `Bomber401`）。EDF6 的呼叫只有模式 0（炮击）和 1（载具），归 P5。
