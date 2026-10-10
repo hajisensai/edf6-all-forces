@@ -81,6 +81,7 @@ struct Config {
     bool tempestTv=true;       // the player's Tempest cruise missile flown from its nose once it is out (tvguide.cpp)
     float tempestTvMouseSpeed=1.0f;// ...how fast the mouse steers it
     float tempestTvBoost=3.0f;     // ...fire boosts it to this many times its top speed (once, for good)// a stock lock-on weapon the player holds locks the target nearest the screen's centre first (lockon.cpp)
+    bool routeGuidePath=true;  // the stock route guide strip along the navmesh route's corners, not through walls (route_guide.cpp)
     bool splitMissileSurface=true;// split missiles (Blood Storm) measure their split distance to the target's surface (splitmissile.cpp)
     bool vehicleHud=true;      // HP / ammo / fuel over the nearest NPC-driven friendly vehicles, the carriers' panel (hud.cpp)
     int vehicleHudCount=6;     // ...over at most this many of them (nearest first)
@@ -437,6 +438,8 @@ bool InstallBigWorld() noexcept;
 bool InstallMissiles() noexcept;
 // The stock split missiles (MissileBullet02) split short of a big target's surface (splitmissile.cpp).
 bool InstallSplitMissiles() noexcept;
+// The stock route guide strip (RouteGuide) drawn along the navmesh route's corners (route_guide.cpp).
+bool InstallRouteGuide() noexcept;
 bool InstallGuidance() noexcept;   // guidance.cpp: the stock homing rounds' steering calls
 // The jets' engine sound (jetsound.cpp): checked at load; per vehicle input (it picks the plugin's jets itself);
 // once a frame, the plugin off too (the camera's motion; the sounds of jets gone, or all with the plugin off, stopped).
