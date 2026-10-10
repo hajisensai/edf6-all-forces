@@ -185,9 +185,13 @@ def text_row(p: Port, lang: str) -> Node:
 
 
 def retired_table_row(template: Node, p: Port) -> Node:
-    """The placeholder for an uninstalled port: its template's own stock row (stock SGO, level, acquire)."""
+    """The placeholder for an uninstalled port: its template's own stock row (stock SGO, level) under the placeholder
+    id, obtained as the port itself is (ACQUIRE). Not the template's acquire: a template may be a new save's starting
+    weapon (1, AssultRifle01: every new save would be handed the placeholder, and own the port once EDF5 is found) or
+    a DLC / bonus item (3, granted with that DLC)."""
     row = copy.deepcopy(template)
     row.items[0] = retired_id(p.id)
+    row.items[5] = ACQUIRE
     return row
 
 
