@@ -2283,7 +2283,8 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
         unsigned char* members[kMaxSquad];const int count=Members(top,members,kMaxSquad);
         int affected=count;
         // Its transport (transport.cpp): a far point order (or one given aboard) goes by the paired vehicle; WITHDRAW sends
-        // that vehicle off; any other order ends the squad's part in a trip (it stays where it is, aboard or not).
+        // that vehicle off; any other order, once taken, ends the squad's part in a trip (it stays where it is, aboard or
+        // not). A refused one leaves the trip as it was (TransportCancel below, after every refusal).
         if(mapcmd::PointOrder(c.order) && std::isfinite(c.at[0]+c.at[1]+c.at[2]) && TransportOrder(top,c)) {
             npcmark::Assign(q->commandFocus,{});q->routeActive=false;q->routeCancelled=true;
             return CommandResult(Reason::none,static_cast<unsigned>(count));
@@ -2292,7 +2293,6 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
             const Reason why=TransportWithdraw(top);
             return why==Reason::none ? CommandResult(Reason::none,1) : CommandResult(why);
         }
-        TransportCancel(top);
         if(mapcmd::PointOrder(c.order) || c.order==Order::engage || c.order==Order::focus) {
             affected=0;
             for(int i=0;i<count;++i)if(HumanOnFoot(members[i]) && IsOnlineAuthority(members[i]) &&
@@ -2343,6 +2343,7 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
             break;
         default:return CommandResult(Reason::unsupported);
         }
+        TransportCancel(top);
         if(c.order!=Order::focus)npcmark::Assign(q->commandFocus,{});
         if(c.order!=Order::board)CancelBoarding(top);
         q->routeActive=false;q->routeCancelled=true;

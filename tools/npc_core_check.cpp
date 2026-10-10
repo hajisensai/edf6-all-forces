@@ -511,8 +511,10 @@ int main() {
             Expect(result.reason==NpcCommandReason::riding,"a seated squad is not recruited out of its vehicle");
             Expect(!SquadRecruitable(*commandSquad) && std::strcmp(StatusOf(*commandSquad,now,nullptr,0),"RIDING")==0,
                    "a seated squad: no recruitment offered, its status RIDING");
+            const int refusedCancels=transportCancels;
             result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::move,{40,0,0}},ObjRef::Of(other),{});
             Expect(!result.Accepted(),"a seated squad's soldiers take no map move (its vehicle does)");
+            Expect(transportCancels==refusedCancels,"a refused order leaves its trip as it was (no TransportCancel)");
             // Its transport (transport.cpp; the user, 2026-10-09: "卡车之类的运输载具改成断剑那种操作方式"): a point order the
             // transport takes is accepted and the squad's own order left for the trip to give back once off; WITHDRAW is the
             // transport's (its refusal passed on); any other order leaves the trip.
@@ -527,8 +529,8 @@ int main() {
             result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::withdraw,{}},ObjRef::Of(other),{});
             Expect(result.reason==NpcCommandReason::noTransport,"...and its refusal passed on");
             const int cancels=transportCancels;
-            NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::dismount,{}},ObjRef::Of(other),{});
-            Expect(transportCancels==cancels+1,"another order leaves the trip (TransportCancel)");
+            result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::none,{}},ObjRef::Of(other),{});
+            Expect(result.Accepted() && transportCancels==cancels+1,"another order, taken, leaves the trip (TransportCancel)");
         } else Expect(false,"the stand-in ride makes the soldier seated");
         Put<void*>(human,kHumanRiding,nullptr);Put<void*>(human,kHumanVehicleCtrl,nullptr);
         Expect(SquadRecruitable(*commandSquad),"on foot again, a free squad: recruitment offered");
