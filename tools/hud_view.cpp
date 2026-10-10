@@ -1708,7 +1708,7 @@ int Scenes(const std::wstring& dir) {
     sceneJet.rotor=true;config.heliFlightHud=true;
     sceneJet.heli=HeliFlight{};
     sceneJet.heli.speed=3.0f;sceneJet.heli.clear=12.0f;sceneJet.heli.climb=-9.0f;sceneJet.heli.ground=true;sceneJet.heli.vel[1]=-9.0f;
-    sceneJet.heli.gpws=Gpws::pullUp;sceneJet.heli.impactIn=1.3f;
+    sceneJet.heli.gpws=Gpws::pullUp;sceneJet.heli.impactIn=1.3f;sceneJet.heli.power=0.38f;   // sinking: under the hover's
     sceneJet.liftShare=0.0f;sceneJet.gpws=Gpws::pullUp;
     Symbols(sceneJet.sym,pos,0.0f,-70.0f);
     sceneJet.sym.threats=0;

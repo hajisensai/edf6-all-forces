@@ -1866,6 +1866,7 @@ void HeliStrip(void* drawer,void* ctx,Text* text,float width,float height,float 
     else{Format(warn,L"");warn.rgba=kHud;}
     Format(info,L"");
     if(f.aiming)Append(info,Tr(f.setSpeed==0.0f ? Tx::speedSetHover : Tx::speedSet),static_cast<int>(std::lround(f.setSpeed*3.6f)));
+    if(f.power>=0.0f && !f.landed)Append(info,Tr(Tx::heliPower),info.text[0] ? L"    " : L"",static_cast<int>(std::lround(f.power*100.0f)));
     if(f.holding)Append(info,Tr(Tx::altHold),info.text[0] ? L"    " : L"");
     wchar_t tank[32];
     FuelText(tank,_countof(tank),fuel);

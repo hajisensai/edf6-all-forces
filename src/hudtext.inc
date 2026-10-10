@@ -153,6 +153,7 @@ HUDTEXT(rotorLiftOk,L"ROTOR %d%%    LIFT OK: TAKE OFF (ascend)",L"旋翼 %d%%   
         L"ローター %d%%    揚力十分：離陸（上昇）")
 HUDTEXT(speedSetHover,L"FORWARD HOLD 0 km/h",L"前速保持 0 km/h",L"前速保持 0 km/h",L"前進速度維持 0 km/h")
 HUDTEXT(speedSet,L"FORWARD HOLD %d km/h",L"前速保持 %d km/h",L"前速保持 %d km/h",L"前進速度維持 %d km/h")
+HUDTEXT(heliPower,L"%lsPOWER %d%%",L"%ls功率 %d%%",L"%ls功率 %d%%",L"%lsパワー %d%%")
 HUDTEXT(altHold,L"%lsALTITUDE HOLD",L"%ls垂直：定高",L"%ls垂直：定高",L"%ls垂直：高度維持")
 HUDTEXT(gearState,L"GEAR %ls  [%ls]",L"起落架 %ls  [%ls]",L"起落架 %ls  [%ls]",L"ギア %ls  [%ls]")
 HUDTEXT(gearDown,L"DOWN",L"放下",L"放下",L"ダウン")

@@ -2625,6 +2625,8 @@ void PublishHud(const Pilot& p,unsigned char* v,const float* pos,bool grounded,f
     f.hp=At<float>(v,kHp);f.hpMax=At<float>(v,kHpMax);
     f.keys=keys;f.aiming=p.flying;f.collective=p.flying;f.holding=p.flying && p.hold.holding;f.landed=grounded;
     f.setSpeed=p.hold.speed;f.top=PlayerTop(v);
+    const float engine=At<float>(v,kRotor);   // its rotor is its engine: the collective's throttle drives it (CollectiveThrottle)
+    f.power=std::isfinite(engine) ? Clamp(engine,0.0f,1.0f) : -1.0f;
     // The ground-proximity warning (warn.cpp), off the ground: sinking faster than the descent key's kPlayerClimb (plus
     // kGpwsSlack) onto the ground, or the path into something standing higher than it.
     f.gpws=Gpws::none;f.impactIn=-1.0f;

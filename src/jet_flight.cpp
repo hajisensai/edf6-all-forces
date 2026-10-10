@@ -340,7 +340,9 @@ void Thrusters(Jet& j,const Kind& k,unsigned char* v,float dt,ULONGLONG ms,float
         if(clear<kNacelleFar)want[i]=std::fmax(want[i],nacelle::MostTilt(i<2 ? nacelle::kFront : nacelle::kBack,-clear,-kThrustBack));
     }
     PoseSurfaces(j,want,kThrustRate,dt,"thrusters");
-    CarrierFlames(v,j.surf.rec,Clamp(Len(j.m.thrust)/kG,0.5f,1.0f),ms);   // the stock Booster flame on each nozzle
+    // The stock Booster flame on each nozzle, with the engine (Hover's power): half at idle, full at all of it. It was
+    // the thrust over gravity, so full from the hover on: the same flame hovering, cruising or climbing.
+    CarrierFlames(v,j.surf.rec,Clamp(0.5f+0.5f*j.m.power,0.5f,1.0f),ms);
     if(Cfg().debug && ms-j.m.thrustLogAt>1000) {
         j.m.thrustLogAt=ms;
         Log("JET v=%p thrusters: thrust %.1f m/s^2 (up %.1f, fwd %.1f) tilt %.0f deg, yaw %.0f deg, at F %.0f/%.0f B %.0f/%.0f",v,
@@ -710,7 +712,8 @@ void HoldOffGround(Jet& j,const float* pos,float clear,float dt,ULONGLONG ms,flo
 // the speed that can still stop there, sqrt(2 brake d)) at its thrust; its body leans into that acceleration
 // (up = acceleration + gravity, as a rotor's thrust does) as its kind's Lean says, the nose on `face`.
 // `climb`: m/s up or down at the most (kHoverClimb; a blast drone dives faster). j.m.thrust gets the thrust
-// asked for (gravity held, the acceleration, the drag shown), which the lean and the thrusters follow.
+// asked for (gravity held, the acceleration, the drag shown), which the lean and the thrusters follow; j.m.power the
+// engine's share of its full thrust that takes (hover_lift.h Power).
 void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const float* goal,const float* face,float speed,float climb,
            float dt,float lift,bool npcGoal) noexcept {
     const Lean& how=*k.lean;
@@ -730,11 +733,12 @@ void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const fl
     wantV[1]=Clamp((goal[1]-pos[1])*0.5f,-climb,climb);
     float acc[3];
     const float respond=how.respond>dt ? how.respond : dt;
-    hover::Accel(wantV,mo.vel,respond,hover::Budget{k.thrust,lift,how.jerk},mo.acc,dt,acc);   // hover_lift.h
+    const hover::Budget budget{k.thrust,lift,how.jerk};
+    hover::Accel(wantV,mo.vel,respond,budget,mo.acc,dt,acc);   // hover_lift.h
     std::memcpy(mo.acc,acc,12);
     for(int i=0;i<3;++i)mo.vel[i]+=acc[i]*dt;
-    for(int i=0;i<3;++i)mo.thrust[i]=acc[i]+mo.vel[i]*how.drag;
-    mo.thrust[1]+=kG;
+    hover::Thrust(acc,mo.vel,how.drag,kG,mo.thrust);
+    mo.power=hover::Power(mo.thrust,budget,kG);   // the engine: the player's throttle readout, the sound, the flames
     float nose[3]={face[0]-pos[0],0.0f,face[2]-pos[2]};
     if(!Normalize(nose)) {
         const float* m=reinterpret_cast<const float*>(v+kMatrix);

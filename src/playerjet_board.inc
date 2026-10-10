@@ -323,6 +323,10 @@ void HoverDone(PJet& j,jet::Jet& e,const jet::Kind& k,unsigned char* v,const flo
         if(j.phase!=Phase::parked)Log("PJET v=%p set down",v);
         j.phase=Phase::parked;
     } else j.phase=Phase::air;
+    // Its throttle is its engine, what the flight takes of it (Hover's power: the speed set held, the height held, the
+    // climb), read by the cockpit's THR, the engine sound and the log; parked, closed. It stood at 0 from boarding on:
+    // no stick moves a rotor craft's lever (the user's log, 2026-10-09: the doll carrier 11-50 m/s, thr 0.00 throughout).
+    j.throttle=j.phase==Phase::parked ? 0.0f : e.m.power;
     std::memcpy(j.vel,e.m.vel,12);std::memcpy(j.omega,e.m.omega,12);
     j.load=1.0f;j.stall=false;j.clear=clear;j.climb=j.vel[1];
     j.active=!v[kDead] && handling::Drives(j.phase==Phase::parked,Body506ReadsSolver());
