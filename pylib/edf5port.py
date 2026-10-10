@@ -1,6 +1,6 @@
-"""EDF5 weapon data in EDF6's form: an EDF5 weapon SGO (SGO v0x102, typed values) -> an EDF6 DSGO weapon, and an EDF5
-WEAPONTEXT row -> an EDF6 one. Read only; tools/make_edf5_weapons.py picks the weapons and tools/edf5_weapons.py
-installs them.
+"""Earlier games' weapon data in EDF6's form: an EDF5 (weapon) or EDF4.1 (weapon41) weapon SGO (SGO v0x102, typed
+values) -> an EDF6 DSGO weapon, and an EDF5 WEAPONTEXT row -> an EDF6 one. Read only; tools/make_edf5_weapons.py and
+tools/make_edf41_weapons.py pick the weapons, tools/ported_weapons.py installs them.
 
 What changes between the two games' copies of the same weapon (measured on every weapon both ship under the same SGO
 name and the same parameters, docs/edf5-weapons-plan.md):
@@ -16,7 +16,7 @@ name and the same parameters, docs/edf5-weapons-plan.md):
 Weapon_Sub (the class EDF6 uses for everything in a support or vehicle slot; EDF5 used Weapon_BasicShoot there): the
 class name and custom_parameter from a list to EDF6's named form, which comes from an EDF6 weapon of the same category
 (to_sub).
-Checked against the developers' own conversions (the EDF5 weapons EDF6 ships but never lists, tools/edf5_weapons.py
+Checked against the developers' own conversions (the EDF5 weapons EDF6 ships but never lists, tools/ported_weapons.py
 'edf6'): converting EDF5's copy gives EDF6's field for field (the Light Truck's Weapon_Sub all 70), but for the fields
 they rebalanced.
 """
@@ -42,7 +42,7 @@ SUB = 'Weapon_Sub'
 
 class Unsupported(ValueError):
     """Something in the EDF5 file this conversion does not know how to carry over: the weapon is not built (its row
-    waits as a placeholder, tools/edf5_weapons.py)."""
+    waits as a placeholder, tools/ported_weapons.py)."""
 
 
 def _number(v: object) -> bool:
@@ -113,6 +113,31 @@ def weapon(members: dict[str, object], names: dict[str, str]) -> dsgo.Document:
     for lang, name in names.items():
         root.set(f'name.{lang}', name)
     return dsgo.Document(root, [])
+
+
+# What every EDF6 weapon has and an EDF4.1 weapon lacks: the value most EDF6 weapons have (1350 of 1564
+# AmmoDamageReduce [1, 1]: no fall-off with range, which 4.1 has none of; 1486 of 1564 ExtPrams [1]).
+EDF41_ADDED: dict[str, list[float]] = {'AmmoDamageReduce': [1.0, 1.0], 'ExtPrams': [1.0]}
+# EDF4.1's fields EDF6 has no use for: 'name' (one list [ja, en, ja]; EDF6 has name.<lang>) and 'Range' (AmmoSpeed x
+# AmmoAlive in every 4.1 weapon, which is how EDF5 and EDF6 get a weapon's range).
+EDF41_DROPPED = ('name', 'Range')
+
+
+def weapon41(members: dict[str, object], names: dict[str, str]) -> dsgo.Document:
+    """An EDF4.1 weapon SGO's members as an EDF6 DSGO document: weapon()'s conversion (4.1 has no star curves, its
+    numbers stay plain), without EDF41_DROPPED and with EDF41_ADDED. EnergyChargeRequire, one number in 4.1, is
+    [curve, value] in every EDF6 weapon: [v, v] (the developers' own conversions of 4.1 weapons EDF6 ships turn -1
+    into [-1, -1]; a Wing Diver weapon's 4.1 number is EDF5's curve base and value, Rapier 25 / [[25, ...], 25]; a
+    plain number where a curve goes is a curve that does not grow, as EDF6's own plain AmmoCount etc.)."""
+    members = dict(members)
+    energy = members.get('EnergyChargeRequire')
+    if isinstance(energy, (int, float, sgo.Float)) and not isinstance(energy, bool):
+        members['EnergyChargeRequire'] = [energy, energy]
+    doc = weapon({k: v for k, v in members.items() if k not in EDF41_DROPPED}, names)
+    for key, value in EDF41_ADDED.items():
+        if key not in doc.root.names.values():
+            doc.root.set(key, Node(list(value)))
+    return doc
 
 
 def _curve_field(value: object, at: int | None) -> dsgo.Value:

@@ -44,13 +44,18 @@ ULONGLONG GameFrame() noexcept { return inputTime/16; }
 void MissingDependency() noexcept { void(*volatile stop)()=std::abort;stop(); }
 void SuppressBump(bool) noexcept { MissingDependency(); }
 void SetObjectTeam(unsigned char*,std::int32_t) noexcept { MissingDependency(); }
-bool IsJet(const void*) noexcept { MissingDependency();return false; }
+// The plugin's jets: reached only by CheckDroneFrame's HeliFrame (testJets), unavailable elsewhere.
+bool testJets=false,testFliesItself=false;
+int jetFrames=0;
+bool IsJet(const void*) noexcept { if(!testJets)MissingDependency();return testJets; }
+bool JetFliesItself(const void*) noexcept { if(!testJets)MissingDependency();return testFliesItself; }
 bool JetInLine(const float*,const float*,const void*) noexcept { MissingDependency();return false; }
-void JetFrame(unsigned char*) noexcept { MissingDependency(); }
+void JetFrame(unsigned char*) noexcept { if(!testJets)MissingDependency();++jetFrames; }
 unsigned char* HeliLaunch(HeliBody,const float*,const float*) noexcept { MissingDependency();return nullptr; }
 PluginBody BodyOf(const void*) noexcept { MissingDependency();return PluginBody{}; }
 bool IsSub(const void*) noexcept { MissingDependency();return false; }
 bool SubDeck(const float*,float*) noexcept { MissingDependency();return false; }
+bool SupportAircraftOwned(const void*) noexcept { return false; }   // no support deployment in this test
 float SubHullGap(const float*) noexcept { MissingDependency();return 0.0f; }
 bool IsPlayerJet(const void*) noexcept { MissingDependency();return false; }
 bool InstallNpcGunnerAim() noexcept { MissingDependency();return false; }
@@ -161,6 +166,22 @@ void CheckMedicPermission() {
     RestoreMedicPermission(nullptr);
     inputConfig.enabled=true;inputConfig.medicGunnerAim=true;
     VirtualFree(trampoline,0,MEM_RELEASE);medicShotNext=nullptr;
+}
+// Production HeliFrame with one of the plugin's jets whose seats are all empty: a launched drone (JetFliesItself) is
+// flown (JetFrame), as an NPC-piloted jet is; a crewed one with no pilot is not (it waits for its real crew).
+void CheckDroneFrame() {
+    alignas(16) static unsigned char drone[0x2100]{},seats[0x340]{};
+    Put<void*>(drone,kSeats,seats);Put<std::uint64_t>(drone,kSeatCount,1);
+    Check(SeatRider(SeatAt(drone,0))==Rider::none && !NpcDriver(drone),"the drone's pilot seat is empty");
+    const bool wasProfile=profileOk;
+    profileOk=true;testJets=true;inputConfig.jetPilot=true;
+    testFliesItself=true;jetFrames=0;HeliFrame(drone);
+    Check(jetFrames==1,"a launched drone with no one aboard is flown by JetFrame");
+    inputConfig.jetPilot=false;jetFrames=0;HeliFrame(drone);
+    Check(jetFrames==0,"JetPilot=0 keeps the drone unflown");
+    inputConfig.jetPilot=true;testFliesItself=false;jetFrames=0;HeliFrame(drone);
+    Check(jetFrames==0,"a crewed jet with an empty pilot seat is not flown (no fabricated pilot)");
+    profileOk=wasProfile;testJets=false;testFliesItself=false;
 }
 }  // namespace
 
@@ -339,6 +360,7 @@ int main() {
     const float oldX=pilot.aim[0];
     AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
     Check(pilot.aim[0]!=oldX && aim::OnScreen(inputVP,pos,pilot.aim,kPlayerMark,kAimOnScreen),"subsequent mouse movement remains effective and visible");
+    CheckDroneFrame();
     VirtualFree(trampoline,0,MEM_RELEASE);VirtualFree(image,0,MEM_RELEASE);
     std::printf("heli_player_input: %d production-path checks passed (%d attitude calls)\n",checks,calls);
     return 0;

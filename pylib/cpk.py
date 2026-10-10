@@ -57,8 +57,10 @@ def parse_utf(block):
     if block[:4] != b'@UTF':
         raise ValueError('not an @UTF table: %s' % block[:8].hex())
     body = block[8:8 + struct.unpack_from('>I', block, 4)[0]]
-    rows_at, strings_at, data_at, name_at, columns, row_width, row_count = \
-        struct.unpack_from('>IIIIHHI', body, 0)
+    # u16 version, u16 rows offset: a CPK's tables are version 0, so reading the two as one u32 happened to work;
+    # an ACB's (pylib/acb.py) are version 1.
+    _version, rows_at, strings_at, data_at, name_at, columns, row_width, row_count = \
+        struct.unpack_from('>HHIIIHHI', body, 0)
     strings = body[strings_at:data_at]
 
     def text(offset):

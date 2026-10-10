@@ -33,12 +33,14 @@ bool SpawnSupportSoldier(const float* worldMatrix,ObjRef* out) noexcept;
 bool ApplySupportSoldierSpawn(const float* worldMatrix,bool leader,const unsigned char* nativeNetId32,ObjRef* out) noexcept;
 // The same for any support_call.h soldier resource (its stock weapon variant). `local` (no ID): a soldier this
 // machine alone owns, allowed offline and to the host of a world with no other participant; clients never.
+// `look`: a coloured copy of its template (support_loadout.h SupportLookFile, app:/object/ path) preloaded this mission
+// (support_variants.h); nullptr: the stock template.
 bool ApplySupportSoldierResource(const float* worldMatrix,std::uint32_t resource,const unsigned char* nativeNetId32,
-                                 bool local,ObjRef* out) noexcept;
+                                 bool local,ObjRef* out,const wchar_t* look=nullptr) noexcept;
 // The same, but an ID-bearing soldier is not registered yet: the caller seats it first (a crew made aboard an aircraft
 // in the air) and then registers it with RegisterSupportObject(soldier, id); on failure it deletes it.
 bool CreateSupportSoldierUnregistered(const float* worldMatrix,std::uint32_t resource,const unsigned char* nativeNetId32,
-                                      bool local,ObjRef* out) noexcept;
+                                      bool local,ObjRef* out,const wchar_t* look=nullptr) noexcept;
 bool DeriveSupportSoldierNetId(const void* registeredAnchor,unsigned ordinal,unsigned char* out32) noexcept;
 // Register a freshly created canonical support object (soldier/aircraft/ground vehicle) on this peer.
 // Never call twice; the reliable spawn transaction owns validation and rollback on failure.

@@ -149,8 +149,8 @@ def build_exe(name: str) -> str:
     for mod in ('call_weapons', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'ragdoll_fit', 'make_chute', 'chute_model', 'obj_model', 'texfile', 'make_drill', 'drill_model', 'make_stock_stores', 'graft_pure', 'primer_fighter_model', 'calls', 'make_sidecar', 'sidecar_model',
                 'make_bigmap', 'bigmap', 'seams', 'fmb', 'hkcms', 'hktag', 'gen', 'rmpa', 'jet_models', 'jet_gear', 'weapons',
                 'testhub', 'make_emc', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
-                'cas_pose', 'aircraft_collision', 'support_config',
-                'make_sazabi', 'sazabi_model', 'sazabi_arms', 'procmesh', 'make_edf5_campaign', 'edf5_weapons', 'edf5port', 'mab_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics',
+                'cas_pose', 'aircraft_collision', 'support_config', 'support_loadout',
+                'make_sazabi', 'sazabi_model', 'sazabi_arms', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics',
                 'build'):   # every module installer.py imports in a function (selftest release_imports); build is
         # autoturret/tools/build.py (--paths above comes before site-packages, where pip's own `build` may be)
         cmd += ['--hidden-import', mod]
@@ -162,8 +162,9 @@ def build_exe(name: str) -> str:
     cmd += ['--add-data', f'{recipes}{seps}plugin']
     # the EDF5 campaign's titles and briefings (make_edf5_campaign.TEXT reads them from the bundle when frozen)
     cmd += ['--add-data', f'{os.path.join(ROOT, "edf5campaign", "missions.json")}{seps}edf5campaign']
-    # the EDF5 weapons' registry (edf5_weapons.LIST reads it from the bundle when frozen)
-    cmd += ['--add-data', f'{os.path.join(ROOT, "edf5port", "weapons.json")}{seps}edf5port']
+    # the earlier games' weapon registries (ported_weapons.DATA is the bundle when frozen)
+    for folder in ('edf5port', 'edf41port'):
+        cmd += ['--add-data', f'{os.path.join(ROOT, folder, "weapons.json")}{seps}{folder}']
     cmd.append(os.path.join(ROOT, 'tools', 'installer.py'))
     subprocess.run(cmd, check=True)
     return os.path.join(WORK, 'dist', EXE_NAME + '.exe')

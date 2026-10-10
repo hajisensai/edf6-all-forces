@@ -109,7 +109,7 @@ jobs:
           New-Item -ItemType Directory -Force "$root/Mods/Plugins" | Out-Null
           Copy-Item build/Mods/Plugins/EDF6VehicleCrew.dll, build/Mods/Plugins/EDF6VehicleCrew.ini, build/Mods/Plugins/EDF6AutoTurret.dll, build/Mods/Plugins/EDF6AutoTurret.ini "$root/Mods/Plugins/"
           # The data builders find each other by relative path (../pylib): the tracked files keep the repository's layout.
-          foreach ($f in git -c core.quotepath=off ls-files tools pylib testrange autoturret/tools autoturret/third_party/edf6-cpk edf5campaign edf5port) {
+          foreach ($f in git -c core.quotepath=off ls-files tools pylib testrange autoturret/tools autoturret/third_party/edf6-cpk edf5campaign edf5port edf41port) {
             $to = Join-Path $root $f
             New-Item -ItemType Directory -Force (Split-Path $to) | Out-Null
             Copy-Item -LiteralPath $f $to
