@@ -9,6 +9,7 @@
 
 using namespace crew::support_net;
 namespace {
+constexpr std::uint32_t kRescue=7;   // the fixture's sea rescue catalog (Hooks::ownChannel)
 int checks=0;
 void Check(bool ok,const char* why) { ++checks;if(!ok){std::fprintf(stderr,"FAIL: %s\n",why);std::exit(1);} }
 struct Room;
@@ -16,6 +17,7 @@ struct Node {
     Room* room=nullptr;unsigned id=0;
     std::unique_ptr<Session> session=std::make_unique<Session>();
     bool reject=false,failSpawn=false,pending=false,refusePlan=false;
+    std::uint32_t pendingCatalog=0;   // pending only for this catalog (0: every one)
     unsigned spawns=0,destroys=0,plans=0;
     std::uint64_t nonce=0;
     bool active[kMaxTransactions+1]{};
@@ -31,7 +33,7 @@ struct Room {
     std::vector<Packet> history;
     std::uint64_t now=10000;
     unsigned failTo=999,dropTo=999,legacyNode=999;   // legacyNode: an older build, its hello announces legacyCaps only
-    std::uint32_t legacyCaps=0;
+    std::uint32_t legacyCaps=0,legacyCatalog=0;   // an older build's hello: index, and catalog (0 before it carried caps)
     bool oldHost=false;   // the host's welcome as a build before it carried its capabilities (index 0)
     Kind failKind=Kind::cancel,dropKind=Kind::cancel;
     explicit Room(unsigned count);
@@ -62,7 +64,7 @@ bool Send(void* ctx,std::uint32_t peer,const Message& message) noexcept {
     auto& node=*static_cast<Node*>(ctx);auto& room=*node.room;const auto dst=room.Global(node.id,peer);
     if(dst==room.failTo && message.kind==room.failKind)return false;
     unsigned char wire[kWireSize];Message decoded;
-    Message sent=message;if(node.id==room.legacyNode && sent.kind==Kind::hello)sent.index=room.legacyCaps;   // an older build's capabilities
+    Message sent=message;if(node.id==room.legacyNode && sent.kind==Kind::hello){sent.index=room.legacyCaps;sent.catalog=room.legacyCatalog;}
     if(node.id==0 && room.oldHost && sent.kind==Kind::welcome){sent.catalog=0;sent.ok=0;}
     if(!Encode(sent,wire,sizeof(wire)) || !Decode(wire,sizeof(wire),decoded))return false;
     Packet p{node.id,dst,decoded};room.packets.push_back(p);room.history.push_back(p);return true;
@@ -71,7 +73,7 @@ std::uint64_t Nonce(void* ctx) noexcept { return ++static_cast<Node*>(ctx)->nonc
 PlanResult PlanCall(std::uint32_t catalog,const float* at,Plan* p) noexcept {
     ++current->plans;
     if(current->refusePlan)return PlanResult::refused;
-    if(current->pending)return PlanResult::pending;
+    if(current->pending && (!current->pendingCatalog || current->pendingCatalog==catalog))return PlanResult::pending;
     *p=Plan{};p->catalogId=catalog;p->count=16;std::memcpy(p->target,at,sizeof(p->target));
     for(unsigned i=0;i<p->count;++i) {
         auto& u=p->units[i];u.resourceId=i%2+1;
@@ -100,6 +102,7 @@ Room::Room(unsigned count) {
         auto n=std::make_unique<Node>();n->id=i;n->room=this;n->nonce=100000+1000*i;
         Backend b{n.get(),&Send,&Nonce,{&PlanCall,&Validate,&Spawn,&Destroy,&Derive}};
         b.hooks.notice=&Notice;
+        b.hooks.ownChannel=[](std::uint32_t catalog) noexcept {return catalog==kRescue;};
         n->session->Configure(b);nodes.push_back(std::move(n));
     }
     for(unsigned i=0;i<count;++i){With(i);current->session->Start(i==0,count-1,i==0 ? 0 : Peer(i,0),now);}
@@ -276,7 +279,7 @@ void RoomBuilds() {
      std::uint32_t missing=0;
      Check(r.nodes[0]->session->PeersBehind(&missing)==1 && missing==kCapabilities,"the host counts the older guest and what it lacks");
      Check(r.nodes[1]->session->RoomBehindHost(),"the other guest is told a guest of the room is behind the host");}
-    {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities|8u;r.With(2);r.nodes[2]->session->Stop();r.nodes[2]->session->Start(false,2,1,r.now);
+    {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyCatalog=kCapabilities|16u;r.With(2);r.nodes[2]->session->Stop();r.nodes[2]->session->Start(false,2,1,r.now);
      r.Settle();r.Step(1100);r.Settle();
      Check(r.nodes[0]->session->PeersAhead()==1 && r.nodes[0]->session->PeersBehind(nullptr)==0,"a newer guest: the host knows");}
     {Room r(2);r.oldHost=true;r.With(1);r.nodes[1]->session->Stop();r.nodes[1]->session->Start(false,1,1,r.now);r.Settle();
@@ -297,4 +300,61 @@ void RoomBuilds() {
      Check(token && r.nodes[0]->session->RequesterOf(token,&peer) && peer==1,"the host knows which peer asked for a transaction");
      Check(!r.nodes[0]->session->RequesterOf(token+50,&peer),"no such transaction: unknown");}
 }
-int main() { Codec();Capabilities();RoomBuilds();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();std::printf("support protocol: %d checks passed\n",checks); }
+// 2026-10-10 (the user: 「救援应该有单独的cd」): the rescue's own channel beside the map's, its own per-player cooldown.
+bool Active(Room& r,std::uint32_t catalog) {
+    for(const auto& n:r.nodes) {
+        bool found=false;
+        for(std::uint64_t t=1;t<=kMaxTransactions;++t)found=found || (n->active[t] && n->last.catalogId==catalog);
+        if(!found)return false;
+    }
+    return true;
+}
+RequestStatus LastFor(Room& r,unsigned node) { return r.nodes[node]->notices.back().second; }
+void RescueChannel() {
+    {Room r(3);r.nodes[0]->pending=true;r.nodes[0]->pendingCatalog=5;
+     Check(r.Submit(1,5),"a map call");r.Settle();
+     Check(LastFor(r,1)==RequestStatus::accepted,"the map call is being planned (its ground route)");
+     Check(r.Submit(2,kRescue),"another player's rescue meanwhile");r.Settle();
+     Check(LastFor(r,2)==RequestStatus::active && r.nodes[1]->last.catalogId==kRescue && r.nodes[2]->last.catalogId==kRescue,
+           "the rescue is made on every machine while the map call is still planned");
+     Check(r.Submit(1,kRescue),"the map caller's own rescue right after its map call");r.Settle();
+     Check(LastFor(r,1)==RequestStatus::active,"no 2 s rate between a map call and a rescue");
+     const auto before=r.nodes[2]->notices.size();
+     Check(r.Submit(2,kRescue),"the same player's rescue again at once");r.Settle();
+     Check(r.nodes[2]->notices.size()>before && LastFor(r,2)==RequestStatus::refused,"refused: its rescue cooldown");
+     r.nodes[0]->session->SetRescueCooldown(5000);r.Step(5100);
+     Check(r.Submit(2,kRescue),"after the cooldown");r.Settle();
+     Check(LastFor(r,2)==RequestStatus::active,"the next rescue comes");
+     r.nodes[0]->pending=false;r.Settle();r.Settle();
+     bool mapActive=false;for(const auto& n:r.nodes[1]->notices)mapActive=mapActive || n.second==RequestStatus::active;
+     Check(mapActive,"the map call finishes on its own channel");}
+    {Room r(2);r.nodes[0]->pending=true;r.nodes[0]->pendingCatalog=kRescue;
+     Check(r.Submit(1,kRescue),"a rescue being planned");r.Settle();
+     r.Step(2100);
+     Check(r.Submit(1,kRescue),"the same player's second rescue while the first is in flight");r.Settle();
+     Check(LastFor(r,1)==RequestStatus::refused,"one rescue in flight a player");
+     Check(r.Submit(1,5),"a map call meanwhile");r.Settle();
+     r.nodes[0]->pending=false;r.Settle();r.Settle();
+     unsigned active=0;for(const auto& n:r.nodes[1]->notices)active+=n.second==RequestStatus::active;
+     Check(active==2,"the map call is not held by the rescue in flight; both made");}
+    // A peer without the rescue channel: the rescue waits its turn as before (the map's channel and rate).
+    {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities&~kCapRescueChannel;r.With(2);r.nodes[2]->session->Stop();
+     r.nodes[2]->session->Start(false,2,1,r.now);r.Settle();r.Step(1100);r.Settle();
+     Check(!r.nodes[0]->session->PeersHave(kCapRescueChannel) && r.nodes[0]->session->PeersHave(kCapSeaRescue),"an older peer");
+     r.nodes[0]->pending=true;r.nodes[0]->pendingCatalog=5;
+     Check(r.Submit(1,5),"a map call");r.Settle();
+     Check(r.Submit(2,kRescue),"a rescue meanwhile");r.Settle();
+     Check(LastFor(r,2)==RequestStatus::refused,"one transaction at a time with that peer in the room");}
+    // A failed rescue rolls back alone: the map's deployment stays.
+    {Room r(3);
+     Check(r.Submit(1,5),"a map call");r.Settle();
+     Check(Active(r,5),"made everywhere");
+     std::uint64_t mapToken=0;for(std::uint64_t t=1;t<=kMaxTransactions;++t)if(r.nodes[2]->active[t])mapToken=t;
+     r.nodes[2]->failSpawn=true;
+     Check(r.Submit(1,kRescue),"a rescue a peer cannot make");r.Settle();r.Settle();
+     Check(LastFor(r,1)!=RequestStatus::active && r.nodes[2]->active[mapToken],"the rescue is cancelled; the map's deployment stays");
+     r.nodes[2]->failSpawn=false;
+     Check(r.Submit(1,kRescue),"asked again at once");r.Settle();
+     Check(LastFor(r,1)==RequestStatus::active,"a rescue that was cancelled started no cooldown (it starts once made everywhere)");}
+}
+int main() { Codec();Capabilities();RoomBuilds();RescueChannel();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();std::printf("support protocol: %d checks passed\n",checks); }

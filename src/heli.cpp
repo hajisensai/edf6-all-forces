@@ -3248,9 +3248,9 @@ void StartRescue(unsigned char* human,ULONGLONG ms) noexcept {
         return;
     }
     const ULONGLONG cooldown=static_cast<ULONGLONG>(Cfg().seaRescueCooldownSec)*1000;
-    if(rescueMadeAt && ms-rescueMadeAt<cooldown) {
+    if(const ULONGLONG wait=rescue::CooldownLeft(rescueMadeAt,ms,cooldown)) {
         if(!cooldownSaid) {
-            const int left=static_cast<int>((cooldown-(ms-rescueMadeAt)+999)/1000);
+            const int left=static_cast<int>((wait+999)/1000);
             Log("RESCUE cooldown: the next rescue in %ds (SeaRescueCooldownSec=%lu)",left,Cfg().seaRescueCooldownSec);
             RescueBanner(true,hudtext::Tr(hudtext::Tx::rescueCooldown),left);
             cooldownSaid=true;

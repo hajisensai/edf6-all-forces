@@ -311,12 +311,13 @@ void Session::Advance(std::uint32_t id,std::uint64_t now) noexcept {
         Message m;m.kind=Kind::commit;m.transaction=id;
         if(!Broadcast(m) || !backend_.hooks.spawn(t.token,t.plan,false)){Cancel(id,true);return;}
         t.spawned=true;t.result[0]=1;
-        // A rescue made: its requester's cooldown starts (whichever channel carried it).
-        if(!t.external && t.request && backend_.hooks.ownChannel && backend_.hooks.ownChannel(t.plan.catalogId))rescueAt_[t.requester]=now;
     }
     if(t.phase==Phase::spawning) {
         for(std::uint32_t i=0;i<=peers_;++i)if(!t.result[i])return;
         t.phase=Phase::active;t.activated[0]=1;t.since=now;
+        // A rescue made on every machine: its requester's cooldown starts (whichever channel carried it); a cancelled one
+        // starts none.
+        if(!t.external && t.request && backend_.hooks.ownChannel && backend_.hooks.ownChannel(t.plan.catalogId))rescueAt_[t.requester]=now;
         Message m;m.kind=Kind::activate;m.transaction=id;Broadcast(m);
         if(t.request)Publish(t.requester,t.request,RequestStatus::active);
     }
@@ -325,7 +326,7 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
     if(!running_ || !peer || peer>peers_ || !ValidMessage(m))return;
     if(host_ && m.kind==Kind::hello) {
         if(m.request<peerMissions_[peer] || (m.request==peerMissions_[peer] && challenges_[peer]!=m.challenge))return;
-        peerMissions_[peer]=m.request;peerCaps_[peer]=m.index;
+        peerMissions_[peer]=m.request;peerCaps_[peer]=m.index|m.catalog;
         if(challenges_[peer] && challenges_[peer]!=m.challenge) {
             if(HasSpawned()){Suspend();return;}
             if(epochSerial_==UINT32_MAX){Stop();return;}
@@ -401,7 +402,8 @@ void Session::Tick(std::uint64_t now) noexcept {
     // Keep the challenge alive after establishment too: a welcome whose local
     // enqueue failed during another member's mission reset must be recoverable.
     if(!host_ && now-lastHello_>=1000) {
-        Message m;m.kind=Kind::hello;m.challenge=challenge_;m.request=missionSerial_;m.index=kCapabilities;Send(hostPeer_,m);lastHello_=now;
+        Message m;m.kind=Kind::hello;m.challenge=challenge_;m.request=missionSerial_;m.index=kCapabilities;m.catalog=kCapabilities;
+        Send(hostPeer_,m);lastHello_=now;
     }
     for(std::uint32_t id=1;id<=kMaxTransactions;++id) {
         auto& t=transactions_[id-1];

@@ -18,7 +18,9 @@ constexpr std::uint32_t kMagic=0x54525053,kVersion=2;
 // one (a map call's, another player's rescue) is still being made. The host gives a rescue its own channel only when
 // every peer announced it: one rescue in flight per requester, beside the map's one, never under the map's 2 s rate,
 // each requester's rescues kRescueCooldownMs apart (SetRescueCooldown). Without it a rescue waits its turn as before.
-// It is hello.index's last bit (an older host bounds index below kMaxUnits): a later capability goes in hello.catalog.
+// It is hello.index's last bit (an older host bounds index below kMaxUnits), so a hello now also carries every bit in its
+// `catalog` (unused by a hello before, bounded below 1024): a later capability is announced there (an older host reads
+// neither the bit nor the field; a host of this build reads index | catalog).
 constexpr std::uint32_t kCapSoldierVariants=1u,kCapAirborneAir=2u,kCapSeaRescue=4u,kCapRescueChannel=8u,
     kCapabilities=kCapSoldierVariants|kCapAirborneAir|kCapSeaRescue|kCapRescueChannel;
 static_assert(kCapabilities<kMaxUnits,"hello.index carries the capability bits");

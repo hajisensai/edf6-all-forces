@@ -35,6 +35,9 @@ void Cancels() {
     Check(PickupCancel(r)==Cancel::none,"aboard this heli (no longer on foot, out of the water): not a cancel");
     r.dead=true;
     Check(PickupCancel(r)==Cancel::dead,"dead aboard: called off");
+    Check(CooldownLeft(0,5000,30000)==0,"no rescue made yet: no cooldown");
+    Check(CooldownLeft(1000,11000,30000)==20000,"20 s left of 30");
+    Check(CooldownLeft(1000,31000,30000)==0 && CooldownLeft(1000,2000,0)==0,"over, or no cooldown set");
     for(Cancel c:{Cancel::gone,Cancel::dead,Cancel::otherRescue,Cancel::otherVehicle,Cancel::ashore})
         Check(std::strlen(CancelText(c))>10 && std::strcmp(CancelText(c),CancelText(Cancel::none))!=0,"every cancel has its own log words");
 }
@@ -103,9 +106,9 @@ void Versions() {
 }  // namespace
 
 // Pads (helipad.h): a helicopter resting on ground kStillMs is one; moving, flying or over water is not; kSame apart.
-void Pads() {
+void PadChecks() {
     using namespace crew::helipad;
-    Pads p{};
+    crew::helipad::Pads p{};
     int a=0,b=0;const void* heli=&a;const void* other=&b;
     const float ground[3]={100,10,50};
     unsigned long long ms=1000;
@@ -141,7 +144,7 @@ void Pads() {
 
 int main() {
     Cancels();
-    Pads();
+    PadChecks();
     Takeoff();
     Versions();
     std::printf("rescue_logic_test: %d checks passed\n",checks);
