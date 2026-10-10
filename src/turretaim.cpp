@@ -7,6 +7,7 @@
 #include "turretaim.h"
 #include "memory.h"
 #include "spot_ray.h"
+#include "npc_mark.h"
 #include <cmath>
 #include <cstring>
 
@@ -52,10 +53,11 @@ bool SpotFromView(const unsigned char* soldier,float* origin,float* dir) noexcep
         return CameraRayOf(soldier,eye,look) && spotray::NativeArgs(eye,look,origin,dir);
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
-// VanillaSpot=0 (the default) and the plugin on: a local player's stock spot is not cast. Read every press: the ini
-// reloads while the game runs.
+// VanillaSpot=0 (the default) and the custom Q on (npcmark::MarkOn: the plugin on, NpcMarkKey set): a local player's stock
+// spot is not cast. With NpcMarkKey=0 nothing replaces it, so it stays stock. Read every press: the ini reloads while the
+// game runs.
 bool SpotBlocked(const unsigned char* soldier) noexcept {
-    __try {return Cfg().enabled && !Cfg().vanillaSpot && soldier && IsPlayer(soldier);}
+    __try {return !Cfg().vanillaSpot && npcmark::MarkOn() && soldier && IsPlayer(soldier);}
     __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 void __fastcall SpotHook(void* soldier,const float* origin,const float* dir) {

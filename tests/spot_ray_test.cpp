@@ -78,7 +78,9 @@ int main() {
         casts=0;SpotHook(npc,stockOrigin,stockDir);Check(stockKept(npc),"VanillaSpot=0: a soldier no local player drives: stock");
         testConfig.enabled=false;casts=0;SpotHook(soldier,stockOrigin,stockDir);
         Check(stockKept(soldier),"VanillaSpot=0 with the plugin off: the stock spot as it was");
-        testConfig.enabled=true;edf::Put<void*>(soldier,0x1550,nullptr);
+        testConfig.enabled=true;testConfig.npcMarkKey=0;casts=0;SpotHook(soldier,stockOrigin,stockDir);
+        Check(casts==1 && gotSoldier==soldier,"VanillaSpot=0 with the custom Q off (NpcMarkKey=0): nothing replaces the stock spot, it is cast");
+        testConfig.npcMarkKey=Config{}.npcMarkKey;edf::Put<void*>(soldier,0x1550,nullptr);
     }
     testConfig.vanillaSpot=true;   // the stock spot asked back: the drawn camera's ray, as before
     // On foot: the stock spot as it was.

@@ -198,12 +198,15 @@ void QMarkFrame() noexcept {
         AcquireSRWLockExclusive(&viewLock);viewCount=0;ReleaseSRWLockExclusive(&viewLock);
         return;
     }
-    // The teammates' enemies: found again when their IDs were not; dead ones let go of here (the pin only).
+    // The teammates' marks: the marker (its slot and name, for an enemy and a point mark alike) and the enemy found here,
+    // looked for again while either is not; dead enemies let go of here (the pin only).
     bool any=false;
     for(std::uint32_t p=1;p<=peerCount;++p) {
         Tracked& t=tracked[p];
-        if(!inbox.Enemy(p,now)){if(t.enemy)npcmark::Assign(t.enemy,{});continue;}
-        if(!t.looked || (!t.enemy && now-t.lookedAt>=kResolveMs))Look(t,now);
+        const bool enemy=inbox.Enemy(p,now);
+        if(!enemy && t.enemy)npcmark::Assign(t.enemy,{});
+        if(!enemy && !inbox.Point(p,now))continue;
+        if(!t.looked || ((t.slot<0 || (enemy && !t.enemy)) && now-t.lookedAt>=kResolveMs))Look(t,now);
         any=any || static_cast<bool>(t.enemy);
     }
     if(any){SeenAll s{peerCount};VisitLockPoints(&SeeTracked,&s);}
