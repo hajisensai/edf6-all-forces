@@ -8,8 +8,9 @@ EDF5 writes 'ニクス  レッドガード', EDF6 'ニクス レッドガード'
   'edf6'  EDF6 ships the weapon's SGO but its table never names it (Edf6.leftover; the EDF5 DLC weapons): that file,
           already converted by the developers (Weapon_Sub where EDF6 wants one, its own balance and names), installed
           as a copy under our id. Needs nothing of EDF5's.
-  'edf5'  converted from the player's EDF5 at install time (pylib/edf5port.py): its category's EDF6 class
-          (Weapon_Sub in the support and vehicle slots, edf5port.to_sub), every other field EDF5's.
+  'edf5'  converted from EDF5 here (pylib/edf5port.py weapon), the result kept in the registry ('weapon'), so the
+          install needs no EDF5: there it takes its category's EDF6 class (Weapon_Sub in the support and vehicle
+          slots, edf5port.to_sub, from EDF6's own template) and its family's AmmoDamageAttribute.
 Its category is EDF5's, but where EDF6 has no slot for it (TARGET) or its class needs another (a Weapon_Sub outside the
 support / vehicle categories goes to the support category of its soldier that holds its ammo class). Its template, the
 EDF6 weapon of its category and class (the same ammo class first) whose level is nearest, gives the table columns EDF5
@@ -31,6 +32,7 @@ import unicodedata
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
+import dsgo  # noqa: E402
 import edf5port  # noqa: E402
 import rootcpk  # noqa: E402
 import sgo  # noqa: E402
@@ -295,6 +297,9 @@ def build(edf5: str, edf6: str) -> dict:
             'template': e6.template(category, cls, own.get('AmmoClass', ''), level), 'text': text,
             'damage_attribute': e6.damage_attribute(category, own.get('AmmoClass', '')) if source == 'edf5' else None,
             **({'assets': assets} if assets else {}),
+            # The weapon itself, converted here (edf5port.weapon): the install builds it from this, with no EDF5.
+            **({'weapon': dsgo.dump(edf5port.weapon(members, {lang.lower(): t[0] for lang, t in text.items()}).root)}
+               if source == 'edf5' else {}),
         })
     return {'source': 'EDF5 Root.cpk WEAPON/WEAPONTABLE.SGO + WEAPONTEXT.*; SC = CN via OpenCC t2s',
             'weapons': weapons, 'skipped': skipped}

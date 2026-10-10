@@ -5516,13 +5516,30 @@ def edf5_weapons_stack_real() -> None:
             if isinstance(v, dsgo.Node) and all(isinstance(x, float) for x in v.items):
                 assert len(v.items) != 6, f'{p.id} {k}: a star curve still 6 long'
     with_edf5 = cw.row_ids(out[cw.TABLE])
-    with _stock_only_mods(), patched(pw, game_root=lambda game, edf6_root: None):
+    with _stock_only_mods(), patched(pw, game_root=lambda game, edf6_root: None):   # no EDF5 / EDF4.1 here
+        no_game = cw.stack(games[0])
+    no_ids = cw.row_ids(no_game[cw.TABLE])
+    assert len(no_ids) == len(with_edf5)
+    for p in pw.PORTS:   # EDF6's own and the registry's converted (EDF5's) need no game; EDF4.1's wait
+        i = with_edf5.index(p.id)
+        alone = (p.source == 'edf6' or p.weapon is not None) and not p.assets   # assets: converted from its game
+        assert no_ids[i] == (p.id if alone else pw.retired_id(p.id)), p.id
+        assert not alone or no_game[pw.sgo_file(p)] == out[pw.sgo_file(p)], f'{p.id}: built without its game differs'
+    # A weapon this machine cannot build (its game missing): the same rows, a placeholder for it.
+    real_build = pw.build
+
+    def edf6_only(game_root: str, stock):  # noqa: ANN001, ANN202
+        built, why = real_build(game_root, stock)
+        cut = {k for k in built if pw.BY_ID[k].source != 'edf6'}
+        return {k: v for k, v in built.items() if k not in cut}, {**why, **{k: 'Unavailable: test' for k in cut}}
+
+    with _stock_only_mods(), patched(pw, build=edf6_only):
         bare = cw.stack(games[0])
     without = cw.row_ids(bare[cw.TABLE])
     assert len(without) == len(with_edf5)
     for p in pw.PORTS:
         i = with_edf5.index(p.id)
-        alone = p.source == 'edf6' and not p.assets   # built from EDF6's own files: no earlier game needed
+        alone = p.source == 'edf6'   # edf6_only keeps exactly these (their assets are built, EDF5 is here)
         assert without[i] == (p.id if alone else pw.retired_id(p.id)), p.id
         assert (pw.sgo_file(p) in bare) == alone, p.id
         assert dsgo.parse(bare[cw.TABLE]).root.get('table').items[i].items[5] == pw.ACQUIRE, \
@@ -5542,11 +5559,11 @@ def edf5_weapons_stack_real() -> None:
                 modfiles.atomic_write(os.path.join(mods, *rel.split('/')), out[rel])
         installed = lambda game_root, rel: out[rel] if rel in cw.SHARED else orig_base(game_root, rel)   # noqa: E731
         ours = lambda game_root, *rel: os.path.join(mods, *[x for r in rel for x in r.split('/')])   # noqa: E731
-        with patched(cw, base=installed, _mods=ours), patched(pw, game_root=lambda game, edf6_root: None):
+        with patched(cw, base=installed, _mods=ours), patched(pw, build=edf6_only):
             kept = cw.stack(games[0])
             retired, _ = cw.retire(games[0], False)
     assert cw.row_ids(kept[cw.TABLE]) == with_edf5, 'a built row an earlier install wrote was not kept'
-    assert not any(rel in kept for p in pw.PORTS if p.source == 'edf5' or p.assets for rel in pw.files(p)), \
+    assert not any(rel in kept for p in pw.PORTS if p.source != 'edf6' for rel in pw.files(p)), \
         'a kept file was rewritten'
     have = cw.row_ids(retired[cw.TABLE])
     assert all(have[with_edf5.index(p.id)] == pw.retired_id(p.id) for p in pw.PORTS)
