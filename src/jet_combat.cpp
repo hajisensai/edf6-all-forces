@@ -57,6 +57,10 @@ constexpr float kCornerFrom=0.35f,kCornerShare=0.45f;
 // ground found by a ray from kFlyerProbe over it. (By its lock point the queen ant, whose lock points
 // are high on its body, flew: fighters made gun passes at it, back and forth over it, 2026-10-03.)
 constexpr float kFlyerClear=15.0f,kFlyerProbe=30.0f;
+// The ray looks this far down for the ground under a target: past the game's 1200 m ceiling (CeilingY), so a flyer high
+// up has the ground under it found too (a charge drone's ceiling is over that ground: airchase::Limits). 400 m until
+// 2026-10-10: a flyer higher than that had no ground under it, which made it a flyer all the same.
+constexpr float kFlyerDepth=2000.0f;
 constexpr ULONGLONG kFlyerMemoMs=500;
 // The current target counts as kKeepScale of its distance less kKeepTarget: another must be much nearer
 // to take its place (a fighter switched every 11 s among 32 in one fight, turning hard each time).
@@ -64,14 +68,16 @@ constexpr float kKeepScale=0.6f,kKeepTarget=100.0f;
 
 // The target: as the role prefers (Kind::prefer), nearest to the jet among those within `range` of
 // `anchor`, the current one counting nearer (kKeepScale, kKeepTarget).
-struct Pick { Jet* j; const float* pos; const float* anchor; float range; ULONGLONG ms; const void* best; float score,aim[3]; bool flyer,focus,focusSeen; };
+struct Pick { Jet* j; const float* pos; const float* anchor; float range; ULONGLONG ms; airchase::Limits limits; bool charges;
+             const void* best; float score,aim[3]; bool flyer,focus,focusSeen; };
 // Whether `object` (lock point `p`) flies: its root more than kFlyerClear over the ground, or no ground
 // under it (see kFlyerProbe); one ray per object per kFlyerMemoMs, shared by every jet.
 // The memo: kFlyerSets sets of kFlyerWays, an object's set picked by a multiplicative hash of its address (the
 // game allocates objects at a fixed stride: their low address bits alone put whole waves of targets in one slot,
 // which then evicted each other on every look, re-probed and re-logged each frame); a new object takes its set's
 // least recently looked at way.
-struct FlyerMemo { const void* object; ULONGLONG at; bool flyer; };
+// `ground`/`groundY`: the ground the ray found under it (a charge drone's ceiling over it: airchase::Limits).
+struct FlyerMemo { const void* object; ULONGLONG at; bool flyer,ground; float groundY; };
 constexpr int kFlyerSets=128,kFlyerWays=4;
 FlyerMemo flyerMemo[kFlyerSets][kFlyerWays]{};
 FlyerMemo& FlyerSlot(const void* object,bool* first) noexcept {
@@ -85,21 +91,33 @@ FlyerMemo& FlyerSlot(const void* object,bool* first) noexcept {
     *first=true;
     return *oldest;
 }
-bool Flies(const void* object,const float* p,ULONGLONG ms) noexcept {
+const FlyerMemo& Probe(const void* object,const float* p,ULONGLONG ms) noexcept {
     bool first=false;
     auto& m=FlyerSlot(object,&first);
-    if(!first && ms-m.at<kFlyerMemoMs)return m.flyer;
+    if(!first && ms-m.at<kFlyerMemoMs)return m;
     const auto o=static_cast<const unsigned char*>(object);
     const float* root=Readable(o+kPosition,12) ? reinterpret_cast<const float*>(o+kPosition) : p;
     const float off[3]={root[0]-p[0],root[1]-p[1],root[2]-p[2]};
     if(!std::isfinite(Dot(off,off)) || Dot(off,off)>300.0f*300.0f)root=p;   // not where its lock point is
-    const float top[3]={root[0],root[1]+kFlyerProbe,root[2]},bottom[3]={root[0],root[1]-400.0f,root[2]};
+    const float top[3]={root[0],root[1]+kFlyerProbe,root[2]},bottom[3]={root[0],root[1]-kFlyerDepth,root[2]};
     float hit[3];
     const bool ground=MapRay(top,bottom,hit)>=0.0f;
-    m={object,ms,!ground || root[1]-hit[1]>kFlyerClear};
+    m={object,ms,!ground || root[1]-hit[1]>kFlyerClear,ground,ground ? hit[1] : 0.0f};
     if(first && Cfg().debug)Log("JET target %p: root y=%.0f, lock point y=%.0f, ground %s: %s",object,root[1],p[1],
                               ground ? "under it" : "none seen",m.flyer ? "flies" : "on the ground");
-    return m.flyer;
+    return m;
+}
+bool Flies(const void* object,const float* p,ULONGLONG ms) noexcept { return Probe(object,p,ms).flyer; }
+
+// What jet `j`'s weapon can strike (airchase::Limits): a gunship's shells only the ground (GunshipFire, CrewShell); a charge
+// drone, and a carrier launching them (LaunchOne: its own drones when their body is there), nothing over the charge's
+// ceiling. Every other weapon anything.
+airchase::Limits LimitsOf(const Jet& j) noexcept {
+    const Kind& k=KindOf(j);
+    const Kind& own=KindOf(j.carrier.drones);
+    const bool charges=k.weapon==Weapon::charge ||
+                       (k.weapon==Weapon::drones && own.weapon==Weapon::charge && Preloaded(own.body));
+    return airchase::Limits{k.weapon==Weapon::shells,charges ? airchase::kChargeCeiling : 0.0f};
 }
 
 // A target it lets be for its edge (airbound.h, jet_flight.cpp SoftEdge): flying back in from past its soft edge,
@@ -119,11 +137,17 @@ void VisitTarget(void* ctx,const void* object,const float* p) noexcept {
         k.focus=true;k.best=object;k.score=-1e30f;std::memcpy(k.aim,p,12);k.flyer=Flies(object,p,k.ms);
         return;
     }
-    if(k.focus || PastEdge(*k.j,p))return;
+    if(k.focus || PastEdge(*k.j,p) || airchase::Shunned(k.j->t.shun,object,k.ms))return;
     const float d[3]={p[0]-k.anchor[0],p[1]-k.anchor[1],p[2]-k.anchor[2]};
-    // A map order bounds the current target too; an uncommanded jet keeps its ordinary pursuit.
-    if((object!=k.j->t.target || k.j->cmd.order!=Order::none) && Dot(d,d)>k.range*k.range)return;
-    const bool flyer=Flies(object,p,k.ms);
+    // A map order bounds the current target too; an uncommanded jet keeps its ordinary pursuit, but a charge drone (or its
+    // carrier) is bound by its range always: it does not chase one it cannot catch out of it.
+    if((object!=k.j->t.target || k.j->cmd.order!=Order::none || k.charges) && Dot(d,d)>k.range*k.range)return;
+    const FlyerMemo& seen=Probe(object,p,k.ms);
+    const bool flyer=seen.flyer;
+    // What its weapon cannot strike (airchase::Allowed), the current target too. No ground under the target: the ground
+    // under the jet stands in for it.
+    const bool ground=seen.ground || k.j->m.groundSeen;
+    if(!airchase::Allowed(k.limits,flyer,p[1],ground,seen.ground ? seen.groundY : k.j->m.groundY))return;
     const float f[3]={p[0]-k.pos[0],p[1]-k.pos[1],p[2]-k.pos[2]};
     float score=Len(f);
     if(object==k.j->t.target)score=score*kKeepScale-kKeepTarget;
@@ -410,7 +434,8 @@ void Lead(const float* from,const float* aim,const float* tv,const Arms& a,float
 }
 
 void PickTarget(Jet& j,unsigned char* v,const float* pos,const float* anchor,float range,float dt,ULONGLONG ms) noexcept {
-    Pick pick{&j,pos,anchor,range,ms,nullptr,0.0f,{},false,false,false};
+    const airchase::Limits limits=LimitsOf(j);
+    Pick pick{&j,pos,anchor,range,ms,limits,limits.ceiling>0.0f,nullptr,0.0f,{},false,false,false};
     VisitEnemies(v,&VisitTarget,&pick);
     if(j.focus && !pick.focusSeen) {
         Log("JET v=%p focus target %p no longer among the enemies: back to its order",j.Vehicle(),j.focus.obj);
@@ -556,10 +581,10 @@ void JetLog(const Jet& j,const unsigned char* v,const float* pos,const Arms& a,f
     const float hp=At<float>(v,kHp),hpMax=At<float>(v,kHpMax);
     const float* aim=j.t.aim;
     const float d=j.t.target ? std::sqrt((aim[0]-pos[0])*(aim[0]-pos[0])+(aim[1]-pos[1])*(aim[1]-pos[1])+(aim[2]-pos[2])*(aim[2]-pos[2])) : 0.0f;
-    Log("JET v=%p %s %s y=%.0f clear=%.0f ceil=%.0f spd=%.0f/%.0f real=%.0f vy=%.1f bank=%.0f target=%p%s dist=%.0f guns=%d msl=%d hp=%.0f/%.0f fuel=%.0fs fire=%d/%d at=(%.0f,%.0f) soft=%.0f%s",
+    Log("JET v=%p %s %s y=%.0f clear=%.0f ceil=%.0f spd=%.0f/%.0f real=%.0f vy=%.1f bank=%.0f target=%p%s dist=%.0f ty=%.0f guns=%d msl=%d hp=%.0f/%.0f fuel=%.0fs fire=%d/%d at=(%.0f,%.0f) soft=%.0f%s",
         v,KindOf(j).name,kModeNames[static_cast<int>(j.mode)],pos[1],clear,CeilingY(),Len(j.m.vel),speed,j.m.real,j.m.vel[1],
         std::acos(Clamp(At<float>(v,kMatrix+0x14)/std::sqrt(1.0f-At<float>(v,kMatrix+0x24)*At<float>(v,kMatrix+0x24)+1e-6f),-1.0f,1.0f))*180.0f/kPi,
-        j.t.target,j.t.flyer ? "(air)" : "",d,a.guns,a.missiles,hp,hpMax,
+        j.t.target,j.t.flyer ? "(air)" : "",d,j.t.target ? aim[1] : 0.0f,a.guns,a.missiles,hp,hpMax,
         static_cast<float>(j.fuelMs)*0.001f-static_cast<float>(ms-j.bornAt)*0.001f,v[kFireGun],v[kFireMissile],pos[0],pos[2],
         airbound::Depth(JetSoftBox(j),pos),j.m.edgeBack ? " back" : "");
     // Each weapon's barrel against the nose: the guns must point where the nose does.

@@ -212,6 +212,29 @@ inline float EngageRange(const Arm* arms,int n,float share) noexcept {
     return r>floor ? r : (reach>floor ? floor : reach);
 }
 
+// The target (npcai.cpp PickTarget): among the enemies in its scope, the nearest (from its eye, in three dimensions),
+// the current one kKeepTarget m nearer; but one out of every weapon's reach (`reach`: its longest, 0 unknown) only with
+// none in reach (kOutOfReach). Until 2026-10-10 the nearest only: with the enemies near it gone a soldier stared at a
+// flying one 1 km up over its scope's ground (the 2026-10-10 log: reach 150 m, 268 looks, never a shot) while a nearer
+// one in reach was there for the next soldier along.
+constexpr float kKeepTarget=20.0f,kOutOfReach=100000.0f;
+inline float TargetScore(float dist,float reach,bool current) noexcept {
+    return dist-(current ? kKeepTarget : 0.0f)+(reach>0.0f && dist>reach ? kOutOfReach : 0.0f);
+}
+// The index of the target among `n` (aimOf(i): its lock point; isCurrent(i): it is the one held), -1 with none in scope:
+// within `scope` m of `anchor` over the ground (Horiz), ranked by TargetScore from `eye`.
+template<class AimOf,class IsCurrent>
+int PickTarget(int n,AimOf aimOf,IsCurrent isCurrent,const float* eye,const float* anchor,float scope,float reach) noexcept {
+    int best=-1;float bestScore=0.0f;
+    for(int i=0;i<n;++i) {
+        const float* aim=aimOf(i);
+        if(Horiz(anchor,aim)>scope)continue;
+        const float score=TargetScore(Dist(eye,aim),reach,isCurrent(i));
+        if(best<0 || score<bestScore){best=i;bestScore=score;}
+    }
+    return best;
+}
+
 // --- Crowding (B4, B5) ---
 struct Threat { float pos[3],radius; };   // radius: how big it is (its reach to bite or grab)
 enum class Move : std::uint8_t { hold, back, sidestep, roll };

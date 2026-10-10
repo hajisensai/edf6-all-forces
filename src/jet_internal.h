@@ -13,6 +13,7 @@
 #include "body506.h"
 #include "memory.h"
 #include "airbound.h"
+#include "air_chase.h"
 #include <cmath>
 
 namespace crew {
@@ -183,6 +184,9 @@ struct Kind {
     float trigger;                  // a charge's: m from its target it goes off (see kBlastTrigger), else 0
     bool doll;                      // it carries a hololive doll (DollMake)
     Body body;                      // the body it flies in when launched as itself
+    float blast=0.0f;               // a charge's: m its charge's blast reaches (pylib/vcobjects.py jet_guns' AmmoExplosion of
+                                    // EDF6VC_BLAST_CHARGE / EDF6VC_DOLL_CHARGE), else 0: held off its target it goes off only
+                                    // within this (JetFrame, airchase::Step)
 };
 // Blast and doll drones (Weapon::charge: a blast or doll carrier's): rotor drones that fly at their target
 // (Hover; no guns) and, within their trigger of it (or held off it by its body within kTriggerHeld times that),
@@ -214,9 +218,9 @@ inline constexpr Kind kKinds[kRoleCount]={
      120.0f, 500.0f,35.0f,700.0f, 350.0f,30.0f, 300.0f,40.0f, 50.0f,20.0f, 1800.0f, 0.0f,1.0f, 0.0f,false,Body::drone},
     // Rotor drones (Hover): cruise is the most they fly at, thrust what they turn with; no gun ever fires.
     {Role::blast,"blast",Prefer::any,FlightModel::rotor,Weapon::charge,Pose::none,&kRotorLean, 70.0f,70.0f,0.0f, 30.0f,30.0f, 8.0f,3.5f,
-     20.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 1800.0f, 0.0f,1.0f, kBlastTrigger,false,Body::blast},
+     20.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 1800.0f, 0.0f,1.0f, kBlastTrigger,false,Body::blast,15.0f},
     {Role::doll,"doll",Prefer::any,FlightModel::rotor,Weapon::charge,Pose::none,&kRotorLean, 25.0f,25.0f,0.0f, 12.0f,12.0f, 4.0f,2.0f,
-     10.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 1800.0f, 0.0f,1.0f, kDollTrigger,true,Body::doll},
+     10.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 1800.0f, 0.0f,1.0f, kDollTrigger,true,Body::doll,25.0f},
     // The gunship (JetRole::gunship): the bomber401 body (its own SGO, mark 7011) circling its anchor wide and
     // slow, never diving; it shells ground targets in reach from where it flies and fires its side cannon at them
     // from further out (GunshipFire; TargetRange: its range grows with the cannon).
@@ -237,11 +241,12 @@ constexpr bool KindsInOrder() noexcept {
     for(int i=0;i<kRoleCount;++i) {
         const Kind& k=kKinds[i];
         if(static_cast<int>(k.role)!=i || Row(k.body).role!=k.role)return false;
-        if((k.flight==FlightModel::rotor)!=(k.lean!=nullptr) || (k.weapon==Weapon::charge)!=(k.trigger>0.0f))return false;
+        if((k.flight==FlightModel::rotor)!=(k.lean!=nullptr) || (k.weapon==Weapon::charge)!=(k.trigger>0.0f) ||
+           (k.weapon==Weapon::charge)!=(k.blast>k.trigger))return false;
     }
     return true;
 }
-static_assert(KindsInOrder(),"kKinds is indexed by Role, each row's body is of its role, rotor craft lean, charges trigger");
+static_assert(KindsInOrder(),"kKinds is indexed by Role, each row's body is of its role, rotor craft lean, charges trigger and blast");
 constexpr const Kind& KindOf(Role r) noexcept { return kKinds[static_cast<int>(r)]; }
 
 // The roles a launch asks for (crew.h JetRole) and the body each flies in. The blast and doll carriers are
@@ -324,6 +329,8 @@ struct Aim {
     ULONGLONG gateAt;        // the last gun gate log (Fire)
     ULONGLONG bombAt;        // its last bomb (Fire)
     ULONGLONG rocketAt;      // its last rocket ripple (Fire)
+    airchase::Closing closing;   // a charge drone's run at its target (JetFrame: airchase::Step)
+    airchase::ShunList shun;     // targets let be for now: a charge drone's it gave up, its carrier's (VisitTarget)
 };
 // A carrier's work (CarrierGoal, LaunchDrones): hit (hpSeen fell) it sidesteps to evadeTo until evadeUntil, and
 // not again before evadeAgain; it holds still while a drone docks (docking); its station follows its target.
