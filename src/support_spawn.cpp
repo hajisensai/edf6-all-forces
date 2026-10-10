@@ -92,7 +92,7 @@ bool SupportVehicleReady(SupportVehicleKind kind,SupportCrewMode mode) noexcept 
 }
 
 unsigned char* SpawnSupportVehicle(SupportVehicleKind kind,SupportCrewMode mode,const float* entry,
-                                   const float* heading,const void* owner) noexcept {
+                                   const float* heading,const void* owner,const wchar_t* variant) noexcept {
     if(!SupportVehicleReady(kind,mode) || !Finite3(entry) || !Finite3(heading))return nullptr;
     const float length=std::hypot(heading[0],heading[2]);
     if(!std::isfinite(length) || length<0.001f)return nullptr;
@@ -101,6 +101,7 @@ unsigned char* SpawnSupportVehicle(SupportVehicleKind kind,SupportCrewMode mode,
     if(!slot)return nullptr;
     const auto row=SupportVehicleInfo(kind);
     const auto index=static_cast<unsigned>(kind);
+    const wchar_t* const sgo=variant ? variant : row->sgo;
     const float x=heading[0]/length,z=heading[2]/length;
     alignas(16) const float matrix[]={z,0,-x,0, 0,1,0,0, x,0,z,0, entry[0],entry[1],entry[2],1};
     InitParam param{image+kInitVtable,{}};
@@ -109,7 +110,7 @@ unsigned char* SpawnSupportVehicle(SupportVehicleKind kind,SupportCrewMode mode,
     __try {
         const auto mgr=At<void*>(image,kObjectMgr);
         if(!mgr)return nullptr;
-        v=reinterpret_cast<CreateFn>(image+kCreate)(mgr,matrix,row->sgo,&param);
+        v=reinterpret_cast<CreateFn>(image+kCreate)(mgr,matrix,sgo,&param);
         if(!v)return nullptr;
         if(At<const void*>(v,0)==image+row->vtable && SeatCount(v)==row->seats && ApplySetup(v)) {
             reinterpret_cast<void(*)(void*,std::int32_t,bool)>(image+kSetTeam)(v,2,true);
@@ -119,18 +120,23 @@ unsigned char* SpawnSupportVehicle(SupportVehicleKind kind,SupportCrewMode mode,
             initialized=slot->ctrl && slot->Is(v);
         }
     } __except(EXCEPTION_EXECUTE_HANDLER) {
-        Log("SUPPORT ground: native creation fault for %ls, disabled until restart",row->sgo);
+        Log("SUPPORT ground: native creation fault for %ls, disabled until restart",sgo);
     }
     if(!initialized) {
-        broken[index]=true;preloaded[index]=false;
+        // A generated loaded hull that does not come up as the stock one does is refused alone: the stock stays callable.
+        if(variant)Log("SUPPORT ground: %ls is not the stock hull's class / seats / setup: refused",sgo);
+        else {broken[index]=true;preloaded[index]=false;}
         if(v)NativeDelete(v);
         *slot=ObjRef{};
         return nullptr;
     }
     Log("SUPPORT ground: %ls hull=%p seats=%u at verified entry (%.1f,%.1f,%.1f), awaiting real crew",
-        row->sgo,v,row->seats,entry[0],entry[1],entry[2]);
+        sgo,v,row->seats,entry[0],entry[1],entry[2]);
     return v;
 }
+
+// airdrop.cpp: a vehicle the game's container made for the plugin's transport plane gets the same setup step.
+bool ApplySupportVehicleSetup(unsigned char* vehicle) noexcept {return profile && vehicle && ApplySetup(vehicle);}
 
 bool DeleteSupportVehicle(unsigned char* v) noexcept {
     if(!v || !profile)return false;

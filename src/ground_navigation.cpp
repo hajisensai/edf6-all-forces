@@ -2,13 +2,16 @@
 #include "ground_navigation.h"
 #include "heli.h"
 namespace crew {
-npc::navigation::Result GroundNavigate(npc::navigation::State& state,const float* from,const float* to,float stop,
+namespace {
+// Shared budget caps collision work across the entire NPC population and the support routes alike (one budget for
+// both state sizes: never a static per instantiation). Each caller also yields after four edges, so one long route
+// cannot consume it all.
+std::uint64_t frame=~std::uint64_t{0};int queries=0;
+const void* start=nullptr;const void* nextStart=nullptr;bool waiting=false;
+template<class State>
+npc::navigation::Result Navigate(State& state,const float* from,const float* to,float stop,
     std::uint64_t ms,float* waypoint,npc::navigation::Profile profile) noexcept {
     using namespace npc::navigation;
-    // Shared budget caps collision work across the entire NPC population. Each
-    // caller also yields after four edges, so one long route cannot consume it all.
-    static std::uint64_t frame=~std::uint64_t{0};static int queries=0;
-    static const State* start=nullptr;static const State* nextStart=nullptr;static bool waiting=false;
     const auto now=GameFrame();
     if(frame!=now) {
         // Start the next frame at the first caller denied by the shared budget,
@@ -49,7 +52,16 @@ npc::navigation::Result GroundNavigate(npc::navigation::State& state,const float
         return walkable ? Edge::open : waterUnknown ? Edge::pending : Edge::blocked;
     };
     Point next{};
-    const Result result=Navigate(state,{from[0],from[1],from[2]},{to[0],to[1],to[2]},stop,ms,next,edge,profile);
+    const Result result=npc::navigation::Navigate(state,{from[0],from[1],from[2]},{to[0],to[1],to[2]},stop,ms,next,edge,profile);
     waypoint[0]=next.x;waypoint[1]=next.y;waypoint[2]=next.z;return result;
+}
+}  // namespace
+npc::navigation::Result GroundNavigate(npc::navigation::State& state,const float* from,const float* to,float stop,
+    std::uint64_t ms,float* waypoint,npc::navigation::Profile profile) noexcept {
+    return Navigate(state,from,to,stop,ms,waypoint,profile);
+}
+npc::navigation::Result GroundNavigate(npc::navigation::RouteState& state,const float* from,const float* to,float stop,
+    std::uint64_t ms,float* waypoint,npc::navigation::Profile profile) noexcept {
+    return Navigate(state,from,to,stop,ms,waypoint,profile);
 }
 }

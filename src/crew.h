@@ -133,6 +133,8 @@ struct Config {
     float sazabiCannonDamage=300.0f;   // a mega particle beam's round at full charge (90 rounds a beam, 5 beams)
     float sazabiFunnelDamage=500.0f;   // a funnel beam's round (6 rounds a shot)
     bool sazabiTestBoard=false;     // tests (testrange/run_test.py): the player put into the first empty Sazabi seen
+    int airdropTest=0;              // tests (tests/autopilot): 1-3 = a container airdrop of the tank / APC / truck asked
+                                    // once a mission near the player, then the player put into what it brings
     bool heliMouseAim=true;         // a heli or rotor craft the player flies on the keyboard and mouse: the mouse-aim flight (heliaim.h; off: the stock / keys)
     bool heliFlightHud=true;        // ...and the helicopter HUD (hud.cpp HeliHud) in place of the takeoff panel / the jet cockpit (off: those)
     float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take its kinetic energy's damage times this (0: none)
@@ -289,6 +291,8 @@ struct Config {
     float npcRollSec=2.5f;          // ...s between two rolls
     float npcRetreatHp=0.3f;        // ...under this share of their HP they fall back behind the player (0: never)
     float npcLeash=40.0f;           // ...m from their anchor (the player they follow, their leader, their post) they go to fight
+    float transportAutoRange=200.0f; // a paired squad's point order farther than this (m) goes by its transport (transport.cpp)
+           // ...m from their anchor (the player they follow, their leader, their post) they go to fight
     bool npcSquadSuccession=true;   // ...a squad whose leader dies gets a new one (or joins another), not split up
     int npcSquadMin=2;              // ...fewer left than this: it joins the nearest squad with room
     int npcSquadMax=8;              // ...a squad takes in others up to this many
@@ -298,6 +302,9 @@ struct Config {
                                     // there) work their guns: ground vehicles (npcai.cpp), the 410's doors under a player pilot
     int npcMarkKey=0x51;            // ...on foot: marks the enemy nearest the screen's centre for the NPCs ('Q'; 0: off)
     float npcMarkCone=8.0f;         // ...within this many degrees of the centre
+    float qmarkPointSec=15.0f;      // the Q mark on the ground (no enemy aimed at) stays this many s (qmark.cpp)
+    float qmarkVolume=0.8f;         // the Q mark's cues (marked / a teammate marked / let go), 0: silent
+    bool vanillaSpot=false;         // the stock spot (原版 Q, SpotEffect): false = the local players' is not cast (turretaim.cpp)
     int npcFormation=0;             // the recruited squads' march round the player (formation.h Shape: 0 stock, 1 column...)
     int npcFormationKey=0x54;       // ...on foot: cycles it ('T'; 0: off; the map's T on a selected squad too)
     float npcFormationSpacing=5.0f; // ...m between soldiers
@@ -555,9 +562,14 @@ unsigned char* JetLaunchThrown(ThrownDrone what,const float* at,const float* hea
 // Whether jet.cpp still flies `vehicle` (the object with weak-this control block `ctrl`), alive and not
 // withdrawing.
 bool JetFlying(const void* vehicle,const void* ctrl) noexcept;
+// jet.cpp: the paratroop plane (transport.cpp): on to `at` attacking nothing (a ferry); sent off now (withdrawn: deleted out
+// of sight, its crew by support_dispatch.cpp Retire). False when the plugin does not fly `vehicle`.
+bool JetFerry(const void* vehicle,const float* at) noexcept;
+bool JetWithdrawNow(const void* vehicle,const char* why) noexcept;
 // A helicopter made at run time (EDF6VC_HELI_410 / _506.SGO, tools/make_jets.py) at `from` facing `heading`,
 // friend, NPC pilot: the vehicle, or nullptr (not preloaded this mission, the game failed to build it).
-enum class HeliBody { brute410, eros506, medic410 };   // medic410: EDF6VC_HELI_MEDIC (heli.cpp Medic)
+enum class HeliBody { brute410, eros506, medic410, transport410 };   // medic410: EDF6VC_HELI_MEDIC (heli.cpp Medic); transport410:
+                                                                      // EDF6VC_HELI_TRANSPORT (transport.cpp)
 unsigned char* HeliLaunch(HeliBody body,const float* from,const float* heading) noexcept;
 // A bomber's payload: BombingPlane_Init's arguments (0x5AABB0; speed in metres a frame), which a jet's bomb
 // bay is set up from.
@@ -881,13 +893,16 @@ struct PlayerJetSymbols {
 // its level part on the nose's frame); speed: its level part; clear: its height over the ground (ground: false, none
 // under it: over the world's zero); climb m/s; setSpeed: the forward speed W / S set (m/s) of `top`; aim: the mouse's aim,
 // a point ahead (aiming: the mouse-aim flight flies at it, heliaim.h); holding: it holds its height; rotor / hover: a stock
-// heli on the ground, its rotor and the rotor whose lift holds it (the takeoff cue; 0: none); landed: on the ground.
+// heli on the ground, its rotor and the rotor whose lift holds it (the takeoff cue; 0: none); landed: on the ground;
+// power: its engine, 0..1 (a stock heli's rotor, a rotor craft's Hover power: what holding the speed set and the height
+// takes of it; <0: unknown, not shown).
 // The ground-proximity warning (warn.cpp ClosureIn / GpwsOf), a real GPWS's modes: SINK RATE (sinking onto the ground
 // under it too fast), TERRAIN (its path runs into something higher than that), PULL UP (either within kPullUpSeconds).
 enum class Gpws : std::uint8_t { none, sinkRate, terrain, pullUp };
 // gpws / impactIn: the ground-proximity warning and the seconds to the impact it warns of (<0: none).
 struct HeliFlight {
     float vel[3],speed,clear,climb,hp,hpMax,setSpeed,top,aim[3],rotor,hover;
+    float power;
     bool ground,landed,keys,aiming,holding;
     bool collective;   // W / S are the collective (a stock heli's instructor, heliaim.h), not a speed setpoint
     Gpws gpws;
@@ -994,6 +1009,11 @@ bool PlayerHeliSight(HeliSightReadout* out) noexcept;
 // `most`; how many.
 int HiddenAimGuns(const unsigned char* seat,const unsigned char** out,int most) noexcept;
 void PlayerEjectTick() noexcept;   // playerjet.cpp: the player's ejection and parachute, a frame
+// playerjet.cpp: a parachute canopy over anyone (transport.cpp's paratroopers): made over `feet` (its front along `drift`),
+// moved there each frame, deleted. An empty ref: not made (EDF6VC_CHUTE.SGO not installed, or the game made nothing).
+ObjRef ChuteCanopyMake(const float* feet,const float* drift) noexcept;
+bool ChuteCanopyMove(const ObjRef& canopy,const float* feet,const float* drift) noexcept;
+void ChuteCanopyFree(const ObjRef& canopy) noexcept;
 void PreloadPlayerJets() noexcept; // playerjet.cpp: at a mission's start, the player jets' SGOs (the catch)
 namespace jet { bool SpawnReady() noexcept; bool PassThrough() noexcept;   // jet_hooks.cpp: the addBody hook is in
  bool ModFileThere(const wchar_t* file) noexcept; bool LockingOn(const void* target) noexcept;
@@ -1039,3 +1059,4 @@ unsigned char* PlayerHuman() noexcept;
 #include "mapcmd.h"
 #include "proteus.h"
 #include "npcai.h"
+#include "qmark.h"

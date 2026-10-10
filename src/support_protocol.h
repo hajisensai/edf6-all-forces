@@ -10,8 +10,22 @@ constexpr std::uint32_t kMagic=0x54525053,kVersion=2;
 // those only when every peer announced it (Session::PeersHave); otherwise rifles and each call's own number.
 // kCapAirborneAir: it applies support_call.h airborne aircraft (created in the air, crew seated at once). A host
 // plans air support only when every peer has it (an older peer would make the hull empty and its crew mid-air).
-constexpr std::uint32_t kCapSoldierVariants=1u,kCapAirborneAir=2u,kCapabilities=kCapSoldierVariants|kCapAirborneAir;
+// kCapTransports: it knows the transport catalog entries (support_dispatch.cpp TransportCatalog: the helicopter assault and
+// the paratroop drop) and their hulls; a host plans them only when every peer has it (an older one refuses the plan).
+// kCapLoadout: its Validate takes a composed load (support_call.h SupportLoadout: any count up to the seats, the Wing
+// Diver and Fencer kinds); a request carries the load in `challenge`. A host plans a composed load only when every peer
+// has it, else the call's own load (and says why).
+constexpr std::uint32_t kCapSoldierVariants=1u,kCapAirborneAir=2u,kCapTransports=4u,kCapLoadout=8u,
+    kCapabilities=kCapSoldierVariants|kCapAirborneAir|kCapTransports|kCapLoadout;
 static_assert(kCapabilities<kMaxUnits,"hello.index carries the capability bits");
+// The hello's `index` has no bit left (it must stay below kMaxUnits for an older host's ValidMessage). The extension is
+// the hello's unit, which neither side ever read for a hello (ValidMessage checks a unit only in a unit message):
+// unit.resourceId = the extension bits, unit.netId = the Bloom filter (support_loadout.h, 256 bits) of the variant files
+// the peer has preloaded this mission. An older build sends zeros there and ignores ours.
+// kExtVariants: it applies plan unit variants (support_net.h Unit::variant: support_loadout.h looks and vehicle pylons,
+// sent in the unit message's `challenge`) and writes the ones it lacks to its pending list. A host plans a variant
+// applied only when every peer announced this and has its file by the filter; otherwise stock, said.
+constexpr std::uint32_t kExtVariants=1u,kExtensions=kExtVariants;
 enum class Kind : std::uint32_t { hello=1,welcome,request,begin,unit,prepare,ready,commit,result,cancel,activate,activated,requestStatus };
 struct Message {
     Kind kind=Kind::hello;
@@ -39,7 +53,8 @@ public:
     void Stop() noexcept;
     void Suspend() noexcept;
     bool Suspended() const noexcept { return suspended_; }
-    bool Submit(std::uint32_t catalog,const float* target,std::uint64_t now) noexcept;
+    // `loadout`: support_call.h PackSupportLoadout (0: the call's own), sent in the request's `challenge`.
+    bool Submit(std::uint32_t catalog,const float* target,std::uint64_t now,std::uint64_t loadout=0) noexcept;
     std::uint64_t SubmitPrepared(const Plan&,std::uint64_t now) noexcept;
     void Receive(std::uint32_t peer,const Message&,std::uint64_t now) noexcept;
     void Tick(std::uint64_t now) noexcept;
@@ -51,6 +66,9 @@ public:
     // Host: whether every peer of this session announced all of `caps` in its current hello (no peer: true).
     // A client is never asked to plan: true.
     bool PeersHave(std::uint32_t caps) const noexcept;
+    // Host: whether every peer announced all of `ext` (kExtVariants) and, `hash` non-zero, has that variant file by its
+    // hello's filter (no peer: true). A client is never asked: true.
+    bool PeersHaveVariant(std::uint32_t ext,std::uint64_t hash) const noexcept;
 private:
     enum class Phase { empty,planning,assembling,prepared,spawning,active,cancelled };
     struct Transaction {
@@ -59,7 +77,7 @@ private:
         bool cancelConfirmed=false;
         bool spawned=false;
         RequestStatus failure=RequestStatus::cancelled;
-        std::uint64_t token=0;
+        std::uint64_t token=0,loadout=0;
         Plan plan{};
         std::uint32_t requester=0,request=0,received=0;
         std::uint64_t since=0;
@@ -78,7 +96,8 @@ private:
     std::array<std::uint64_t,kMaxPeers+1> challenges_{},lastRequestAt_{};
     std::array<std::uint32_t,kMaxPeers+1> requests_{};
     std::array<std::uint32_t,kMaxPeers+1> peerMissions_{};
-    std::array<std::uint32_t,kMaxPeers+1> peerCaps_{};
+    std::array<std::uint32_t,kMaxPeers+1> peerCaps_{},peerExt_{};
+    std::array<std::array<unsigned char,32>,kMaxPeers+1> peerBloom_{};
     struct Reply { std::uint32_t request=0;RequestStatus status=RequestStatus::accepted;bool dirty=false; };
     std::array<Reply,kMaxPeers+1> replies_{};
     Reply localReply_{};

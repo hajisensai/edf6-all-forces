@@ -59,5 +59,25 @@ inline void Accel(const float* want,const float* vel,float respond,const Budget&
         acc[0]=prev[0]+change[0];acc[2]=prev[2]+change[1];
     }
 }
+// The thrust the flight asks for (`out`, world m/s^2): its acceleration, the drag of its velocity (`drag` a m/s, its
+// Lean's: the plugin sets the velocity, nothing slows it, so this is what a real one would need to hold it) and gravity
+// held. Hover's Motion::thrust: the lean, the carrier's nacelles and the engine (Power) follow it.
+inline void Thrust(const float* acc,const float* vel,float drag,float gravity,float* out) noexcept {
+    for(int i=0;i<3;++i)out[i]=acc[i]+vel[i]*drag;
+    out[1]+=gravity;
+}
+
+// The engine (0..1): the share of its full thrust that `thrust` (Thrust) takes, the full thrust gravity held plus the
+// most it may climb at (Accel's vertical budget: the lift, never less than the thrust). So it is the controller's own
+// demand, not the speed set: hovering, gravity's share (the carrier under the player about half, an NPC's ~0.7); the
+// faster the speed it holds the more (the drag of it), climbing more, descending less; accelerating or braking hard up
+// to all of it (the user, 2026-10-09: 「直升机的设定速度，正常来说是不是会自动调引擎大小啊」, the rotor craft's thr
+// logged 0 whatever it did).
+inline float Power(const float* thrust,const Budget& b,float gravity) noexcept {
+    const float full=gravity+(b.lift>b.thrust ? b.lift : b.thrust);
+    if(!(full>0.0f))return 0.0f;
+    const float p=Len3(thrust)/full;
+    return std::isfinite(p) ? (p<1.0f ? p : 1.0f) : 0.0f;
+}
 }  // namespace hover
 }  // namespace crew

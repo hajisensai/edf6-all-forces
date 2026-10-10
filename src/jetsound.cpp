@@ -181,6 +181,7 @@ void Step(unsigned char* v) noexcept {
             state.commanded=true;state.parked=false;
             state.rotor=jet::KindOf(j->role).flight==jet::FlightModel::rotor;
             state.speed=std::sqrt(Dot(j->m.vel,j->m.vel));
+            if(state.rotor)state.throttle=j->m.power;   // its engine (Hover): hovering, climbing, braking
         }
     }
     state.occupied=SeatCount(v)>0 && SeatRider(SeatAt(v,0))!=Rider::none;

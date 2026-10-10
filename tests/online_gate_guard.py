@@ -184,7 +184,10 @@ def check_frames(root: str) -> None:
 def check_calls(root: str) -> None:
     code = code_only(read(root, 'src/airstrike.cpp'))
     dispatch = code_only(read(root, 'src/support_dispatch.cpp'))
-    request = body(dispatch, 'bool SupportCallAt(')
+    # Every call goes through SupportCallComposedAt (a composed load or none): it holds the gate; SupportCallAt only delegates.
+    request = body(dispatch, 'bool SupportCallComposedAt(')
+    if 'return SupportCallComposedAt(index,target,nullptr,note,capacity);' not in body(dispatch, 'bool SupportCallAt('):
+        fail('SupportCallAt must only delegate to SupportCallComposedAt (one gated path)')
     if not before(request, 'else if(InSession() && !LocalAuthority())', 'SubmitSupportRequest(') or             not before(request, 'SubmitSupportRequest(', 'else if(offlinePending)'):
         fail('online support must go through the reliable host-planned deployment protocol')
     # The only local deployment in a session: the host of a world with no other participant (no peer to replicate to).
