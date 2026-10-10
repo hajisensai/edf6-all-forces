@@ -398,7 +398,7 @@ inline void StepWeapons(const PoseInput& in,float dt,Anim& a) {
 }
 
 inline void Step(const PoseInput& in,float runSpeed,float dt,Anim& a) {
-    if(!a.started){a=Anim{};a.started=true;a.ready=in.aim;}
+    if(!a.started){a=Anim{};a.started=true;a.ready=in.aim;a.blocksSeen=in.blocks;}   // no jolt for hits before it
     dt=Clamp(dt,0.0f,0.1f);
     a.clock+=dt;
     StepGait(in,runSpeed,dt,a);

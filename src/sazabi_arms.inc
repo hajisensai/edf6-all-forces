@@ -407,12 +407,18 @@ void ArmsPose(Mech& m,float dt) noexcept {
 
 // Each action's press, in the log (the user's reports say what was pressed and what came of it: 2026-10-09, no dash,
 // no melee, and nothing in the log to tell an unbound key from a dead action).
-void LogPresses(const Mech& m,const unsigned char* v,const ArmsInput& in) noexcept {
-    const Arms& a=m.arms;
+// The player's only (an NPC pilot's presses are its own logic's, logged by what they do). Its own edges: the features'
+// held flags step only when they run (Tomahawk's meleeHeld not without the rig), and a press must be logged once.
+void LogPresses(Mech& m,const unsigned char* v,const ArmsInput& in) noexcept {
     const bool now[6]={in.secondary,in.funnels,in.cannon,in.melee,in.guard,in.dash};
-    const bool was[6]={a.secondaryHeld,a.funnelHeld,a.cannonHeld,a.meleeHeld,a.guardHeld,a.dashHeld};
     static const char* const kNames[6]={"missiles","funnels","cannon","melee","guard","dash"};
-    for(int i=0;i<6;++i)if(now[i] && !was[i])Log("SAZABI v=%p pressed %s",v,kNames[i]);
+    unsigned char held=0;
+    for(int i=0;i<6;++i) {
+        const unsigned char bit=static_cast<unsigned char>(1u<<i);
+        if(now[i])held|=bit;
+        if(now[i] && !(m.arms.pressed&bit) && !m.npc)Log("SAZABI v=%p pressed %s",v,kNames[i]);
+    }
+    m.arms.pressed=held;
 }
 
 // Before the pose: the buttons, the timers, the swing, the guard, the funnels' flight.
@@ -428,7 +434,6 @@ void ArmsStep(Mech& m,unsigned char* v,const ArmsInput& in,float dt) noexcept {
     // a tap is kept until its round leaves: the tomahawk is put away and the rifle raised / the shield turned first
     m.pose.fire=a.rifleAsk.Step(in.primary,dt);
     m.pose.present=a.missileAsk.Step(in.secondary,dt);
-    a.guardHeld=in.guard;a.dashHeld=in.dash;
     // a hit the shield stopped (SazabiMessage): its clang at the shield, one each kBlockSoundGap at most
     constexpr float kBlockSoundGap=0.12f;
     a.blockSince+=dt;

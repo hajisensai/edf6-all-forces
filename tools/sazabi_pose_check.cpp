@@ -82,6 +82,8 @@ PoseInput Rechain(float t) { PoseInput i=Driven(t); Combo(t,0.3f,3,&i); if(t>=kR
 PoseInput Slow(float t) { PoseInput i=Driven(t); i.move[1]=3.0f; return i; }
 // the shield up, three hits stopped on it (each a jolt back through the arm)
 PoseInput Block(float t) { PoseInput i=Guard(t); i.blocks=(t>1.0f)+(t>1.15f)+(t>1.6f); return i; }
+// the animator (re)started on a mech whose shield had already stopped hits (a count carried in PoseInput): no jolt
+PoseInput BlockedBefore(float t) { PoseInput i=Guard(t); i.blocks=4; return i; }
 PoseInput Switch(float t) { PoseInput i=Driven(t); i.special=t<0.3f ? 0 : t<1.3f ? 1 : t<2.3f ? 2 : 0; return i; }
 PoseInput Boost(float t) { PoseInput i=Driven(t); i.air=1.0f; i.boost=t>0.3f ? 1.0f : 0.0f; i.lean=20.0f*kDeg; i.move[1]=60.0f; return i; }
 PoseInput Recoil(float t) {
@@ -108,6 +110,7 @@ constexpr Scenario kScenarios[]={
     {"aimwalk",3.0f,AimWalk},{"guard",3.0f,Guard},{"present",2.4f,Present},{"swing",3.0f,Swing},{"melee",4.0f,Melee},
     {"meleefire",3.2f,MeleeFire},{"meleewalk",4.0f,MeleeWalk},{"switch",3.2f,Switch},{"funnels",3.0f,Funnels},
     {"cannon",2.0f,Cannon},{"boost",2.0f,Boost},{"recoil",2.0f,Recoil},{"rechain",6.0f,Rechain},{"slow",3.0f,Slow},{"block",3.0f,Block},
+    {"blockedbefore",1.0f,BlockedBefore},
 };
 
 int failures=0;
@@ -203,6 +206,11 @@ void CheckStep(const Scenario& s,float t,float dt,const PoseInput& in,const Anim
                 Fail(s.name,static_cast<int>(t*60.0f),"a planted foot slides");
             }
         }
+    // a block jolts the shield (its kick sprung out), hits counted before the animator started do not
+    if(std::strcmp(s.name,"block")==0 && t>1.03f && t<1.08f && !(a.kick>0.02f))
+        Fail(s.name,static_cast<int>(t*60.0f),"a stopped hit did not jolt the shield");
+    if(std::strcmp(s.name,"blockedbefore")==0 && a.kick!=0.0f)
+        Fail(s.name,static_cast<int>(t*60.0f),"hits counted before the animator started jolted the shield");
     if(std::strcmp(s.name,"rechain")==0 && t>=kRechain && t<kRechain+0.04f && !p.rifleInHand)
         Fail(s.name,static_cast<int>(t*60.0f),"a combo after the put-away did not draw again (the rifle not in hand)");
 }

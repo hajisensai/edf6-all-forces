@@ -45,7 +45,9 @@ struct Ask {
 };
 struct Arms {
     Special special=Special::missiles;
-    bool meleeHeld=false,secondaryHeld=false,funnelHeld=false,cannonHeld=false,guardHeld=false,dashHeld=false;
+    bool meleeHeld=false,secondaryHeld=false,funnelHeld=false,cannonHeld=false;
+    unsigned char pressed=0;      // the actions held last frame as LogPresses saw them (its own: each *Held above is
+                                  // its feature's, stepped only when that feature runs)
     bool queued=false,struck=false,whooshed=false;
     int combo=0;                  // the combo's swing now (sazabi_pose.h kCombo: diagonal cut, slash across, overhead chop)
     int blocksHeard=0;            // the shield's blocks already sounded (ArmsStep)
