@@ -47,6 +47,7 @@ const unsigned char kBargaWalkSig[]={0x40,0x53,0x48,0x81,0xEC,0x80,0x00,0x00,0x0
 constexpr std::size_t kBargaBlock=0x1610,kBargaForward=0x8,kBargaTurn=0x14;
 constexpr std::size_t kSeatRightX=0x2D0;
 constexpr std::size_t kRoute=0x4A8;
+constexpr std::size_t kTarget=0x518;                 // the stock AI's target (0x63C328, 0x661667)
 constexpr std::size_t kStockGoal=0x25E0;             // the navigation target (the spawn position until a route)
 constexpr std::size_t kDriveMode=0x1AD0;             // bit 0 clear: slot 55 does not read the stick (dl = 0)
 constexpr std::size_t kSeatSteer=0x2C0,kSeatThrottle=0x2C4;
@@ -282,7 +283,16 @@ void NpcPostInput(unsigned char* v) noexcept {
         request=PendingPost{};break;
     }
     const bool reads=f!=Family::carBase || (At<std::uint32_t>(v,kDriveMode)&1);   // a CarBase's slot 55 reads the stick
-    if(!reads || StockDriving(v,f,*p)){p->active=false;p->wrote=false;return;}
+    // The Barga's stock AI walks after its target (the tanks' and the mechs' only turn): an NPC-driven Barga fights where
+    // it stands, up to NpcLeash from its post (the soldiers' own leash round their anchor), and past it the plugin takes
+    // its walk over back to the post (its attacks stay the AI's: the walk writes only the turn and forward channels),
+    // giving it back once within TankPostHold (the user 2026-10-10: NPC Barga should not leave its post chasing).
+    const bool leashed=f==Family::barga && (p->active ||
+        npc::Horiz(reinterpret_cast<const float*>(v+kPosition),p->at)>Cfg().npcLeash);
+    // Inside the leash with a target (+0x518, the stock AI's) it is fighting, standing still to punch included: the stock
+    // AI's, not a stray from its post to bring back.
+    const bool fighting=f==Family::barga && At<const void*>(v,kTarget)!=nullptr;
+    if(!reads || (!leashed && (fighting || StockDriving(v,f,*p)))){p->active=false;p->wrote=false;return;}
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
     // A navigation waypoint is not an area guard post. The route planner supplies its arrival
     // contract; using the ordinary 6 m guard radius would swallow a 4 m grid edge without driving.
