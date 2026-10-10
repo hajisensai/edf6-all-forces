@@ -76,6 +76,10 @@ TEXTS = [f'WEAPON/WEAPONTEXT.{lang}.SGO' for lang in LANGS]
 SHARED = [TABLE] + TEXTS
 BACKUP = '.edf6vc_backup'
 MANIFEST = '.edf6vc_calls.json'
+# A save keeps 0x800 weapon records, one per table row (docs/loadout-re.md 8.1: GS+0x6E68 ends at GS+0x14B50), and the
+# game loops over every row of the table when it grants weapons or clamps their stars: a row past them is written past
+# the save's block.
+SAVE_WEAPONS = 0x800
 JOURNAL = '.edf6vc_calls.txn.json'
 ACQUIRE = 0.0   # WEAPONTABLE column 5: 0 normal (the plugin makes EDF6VC_CALL_* owned at every save load)
 PROCESS = modfiles.PROCESS
@@ -209,6 +213,14 @@ def plan_rows(ids: list[str]) -> Plan:
     for k, c in enumerate(appended):
         at[c] = len(ids) + k
     return Plan(at, appended)
+
+
+def check_room(rows: int) -> None:
+    """Refuses (SystemExit, before anything is built or written) a table longer than a save keeps weapons for."""
+    if rows > SAVE_WEAPONS:
+        raise SystemExit(f'the weapon table would have {rows} rows, but a save keeps {SAVE_WEAPONS} weapons, one per '
+                         f'row, and the game writes past them for every row beyond: {rows - SAVE_WEAPONS} too many. '
+                         'Remove another mod\'s weapon rows first; nothing was written.')
 
 
 def tail_start(ids: list[str]) -> int:
@@ -595,12 +607,13 @@ def stack(game_root: str) -> dict[str, bytes]:
     only; raises (Misaligned, ValueError) before anything could be written."""
     s = load_shared(game_root)
     before = s.ids
+    plan = plan_rows(before)
+    check_room(len(before) + len(plan.appended))
     ports, left_out = pw.build(game_root, lambda rel: stock(game_root, rel))
     if left_out:
         reasons = sorted(set(left_out.values()))
         print(f'Ported weapons (EDF5, EDF4.1): {len(ports)} of {len(pw.PORTS)} built, {len(left_out)} wait as placeholders: '
               + '; '.join(reasons[:3]) + (' ...' if len(reasons) > 3 else ''))
-    plan = plan_rows(before)
     tpl = {t: _template_index(before, t) for t in templates()}
     template_sgo = {t: stock(game_root, f'WEAPON/{t.upper()}.SGO') for t in tpl}
     curves = {request_family(c): request_curve(game_root, request_family(c)) for c in CALLS if c.brings == 'vehicle'}
