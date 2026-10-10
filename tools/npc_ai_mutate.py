@@ -34,6 +34,9 @@ MUTANTS = [
     ('script released again', 'if(!w.was || w.released)return false;', 'if(!w.was)return false;'),
     ('never-scripted released', 'if(!w.was || w.released)return false;', 'if(w.released)return false;'),
     ('mark ignores move', 'return Dist(pos,mark)<=reach+moveRadius;', 'return Dist(pos,mark)<=reach;'),
+    ('target reach ignored', '+(reach>0.0f && dist>reach ? kOutOfReach : 0.0f);', ';'),
+    ('target scope ignored', 'if(Horiz(anchor,aim)>scope)continue;', ''),
+    ('target not kept', 'return dist-(current ? kKeepTarget : 0.0f)', 'return dist-(current ? 0.0f : 0.0f)'),
 ]
 
 

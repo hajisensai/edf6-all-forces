@@ -476,16 +476,11 @@ Arms ArmsOf(const unsigned char* h) noexcept {
 
 // --- The target ---
 struct Pick { const Enemy* e; float dist; };
-Pick PickTarget(const Soldier& s,const float* eye,const float* anchor,float scope) noexcept {
-    Pick best{nullptr,0.0f};float bestScore=0.0f;
-    for(int i=0;i<world.enemies;++i) {
-        const Enemy& e=world.enemy[i];
-        if(npc::Horiz(anchor,e.aim)>scope)continue;
-        const float d=npc::Dist(eye,e.aim);
-        const float score=d-(s.target.Is(e.object) ? 20.0f : 0.0f);
-        if(!best.e || score<bestScore){best={&e,d};bestScore=score;}
-    }
-    return best;
+// The target in its scope (npc_logic.h PickTarget): the nearest it can reach with `reach` (its longest weapon's).
+Pick PickTarget(const Soldier& s,const float* eye,const float* anchor,float scope,float reach) noexcept {
+    const int i=npc::PickTarget(world.enemies,[](int k) noexcept { return world.enemy[k].aim; },
+                                [&s](int k) noexcept { return s.target.Is(world.enemy[k].object); },eye,anchor,scope,reach);
+    return i<0 ? Pick{nullptr,0.0f} : Pick{&world.enemy[i],npc::Dist(eye,world.enemy[i].aim)};
 }
 const Enemy* StockTarget(const unsigned char* h) noexcept {
     const auto o=At<const void*>(h,kStockTarget);
@@ -979,7 +974,7 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     if(pursuit.forced || pursuit.fightFirst){o.anchor=pos;o.leash=Cfg().npcLeash;o.hold=false;}
     const float* anchor=o.anchor;
     const float engage=npc::EngageRange(a.arm,a.n,Cfg().npcEngageShare);
-    Pick t=engage>0.0f ? PickTarget(s,eye,anchor,o.leash+engage) : Pick{nullptr,0.0f};
+    Pick t=engage>0.0f ? PickTarget(s,eye,anchor,o.leash+engage,LongestReach(a)) : Pick{nullptr,0.0f};
     // The mark first (§6.3): always for a squad told to focus on it, else when within its reach plus its leash.
     const Enemy* commandTarget=nullptr;
     if(q && q->cmd.order==Order::focus && npcmark::Alive(q->commandFocus)) {
