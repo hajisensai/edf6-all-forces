@@ -404,6 +404,8 @@ void KeepPlayerViewProj(const void* camera,const float* viewProj) noexcept;
 bool CameraRayOf(const void* human,float* eye,float* dir) noexcept;
 // A bigger physics world and the map pieces' log (bigworld.cpp): at load, before any mission.
 bool InstallBigWorld() noexcept;
+// legacymap.cpp: EDF4.1 maps' Havok 2014 collision migrated to hknp on the map path (plan P6).
+bool InstallLegacyMap() noexcept;
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
 bool InstallMissiles() noexcept;
 // The stock split missiles (MissileBullet02) split short of a big target's surface (splitmissile.cpp).

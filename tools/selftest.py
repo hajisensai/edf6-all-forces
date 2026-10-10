@@ -6127,6 +6127,114 @@ def edf41_objects_install() -> None:
             users = {o['object'] for o in reg['objects'] if shared in o['files']}
             assert {obj for obj, _why in skipped} == users and shared not in files, skipped
 
+
+# EDF4.1's mission maps (plan P6): the maps EDF4.1's 98 missions load (pylib/map_legacy.py converts their MAC).
+EDF41_MISSION_MAPS = ('IG_CAVE01', 'IG_HORNETCAVE01', 'IG_WRECKTOWN01', 'NW_HILLYCITY_LIGHT', 'NW_KASENJIKI01',
+                      'NW_KOUSOUBLD01', 'NW_SINSUIKOUEN', 'NW_SOUKOGAI01', 'NW_UNDERGROUND01', 'SK_CRATER01',
+                      'SK_HEIGEN02', 'SK_KAIGAN01', 'SK_SANGAKU01', 'SK_SANGAKU02', 'SK_STEPMOUNTAIN01',
+                      'SK_VALLEY01')
+
+
+def _legacy_games() -> tuple[dict, dict, dict] | None:
+    """(EDF4.1, EDF5, EDF6) archives by path, or None off a developer's machine (CI has no game)."""
+    import make_edf41_objects as m
+    import rootcpk
+    steam = os.path.dirname(rootcpk.DEFAULT_GAME)
+    roots = [os.path.join(steam, 'Earth Defense Force 4.1'), os.path.join(steam, 'EARTH DEFENSE FORCE 5'),
+             rootcpk.DEFAULT_GAME]
+    if not all(os.path.isfile(os.path.join(r, 'Root.cpk')) for r in roots):
+        return None
+    g41, g5, g6 = (m.archives(r) for r in roots)
+    return g41, g5, g6
+
+
+def _game_read(games: dict, rel: str) -> bytes:
+    return games[rel.upper()].read(*rel.rsplit('/', 1))
+
+
+def _rmpa_points(tree: object) -> list[tuple]:
+    """Every point of a decoded RMPA (rmpa_legacy.decode5 / decode6): (name, id, position, facing), in order."""
+    out: list[tuple] = []
+    if isinstance(tree, dict):
+        if 'pos' in tree and 'face' in tree:
+            out.append((tree['name'], tree['id'], tuple(tree['pos']), tuple(tree['face'])))
+        for v in tree.values():
+            out += _rmpa_points(v)
+    elif isinstance(tree, list):
+        for v in tree:
+            out += _rmpa_points(v)
+    return out
+
+
+@test
+def map_legacy_real() -> None:
+    """pylib/map_legacy.py on the games: where EDF6 kept an EDF5 map's content its re-laid MAPO / MAPB is EDF6's byte for
+    byte (IG_CAVE501/503/504 MAPO; IG_CAVE503 and IG_TESTLIGHTMAP (EDF5's) MAPB with EDF6's empty scene slots), and every EDF4.1
+    mission map converts to a MAC bigmap reads and verifies, one MAPO entry per MAPB record. The other pairs differ in
+    content EDF6 changed (docs/edf41-map-mac-format.md)."""
+    import bigmap
+    import map_legacy
+    games = _legacy_games()
+    if games is None:
+        return
+    g41, g5, g6 = games
+
+    def members(mac: bytes) -> dict[str, bytes]:
+        return dict(bigmap.Marc.parse(mac).files)
+
+    for name in ('IG_CAVE501', 'IG_CAVE503', 'IG_CAVE504'):
+        new = members(map_legacy.mac_from_legacy(_game_read(g5, f'MAP/{name}.MAC')))
+        assert new['map.mapo'] == members(_game_read(g6, f'MAP/{name}.MAC'))['map.mapo'], name
+    for name, games_from in (('IG_CAVE503', g5), ('IG_TESTLIGHTMAP', g5)):
+        new = members(map_legacy.mac_from_legacy(_game_read(games_from, f'MAP/{name}.MAC'), 'edf6'))
+        assert new['map.mapb'] == members(_game_read(g6, f'MAP/{name}.MAC'))['map.mapb'], name
+    for name in EDF41_MISSION_MAPS:
+        out = map_legacy.mac_from_legacy(_game_read(g41, f'MAP/{name}.MAC'))
+        assert not bigmap.verify(out), (name, bigmap.verify(out)[:3])
+        m = members(out)
+        assert bigmap.MapO(m['map.mapo']).ent_n == bigmap.MapB(m['map.mapb']).rec_n, name
+
+
+@test
+def rmpa_legacy_real() -> None:
+    """pylib/rmpa_legacy.py on the games. EDF6 ships EDF5's missions converted (MISSION/EDF5_OLD_SCRIPT): 65 of the 146
+    come out of rmpa_from_legacy byte for byte, the rest differ only in content EDF6's editor changed
+    (docs/edf41-map-rmpa-format.md), and every output is a full EDF6 RMPA. EDF6's own files pass through unchanged. All
+    of EDF4.1's mission RMPAs (EDF5's MISSION/EDF4.1) and its mission maps' map.rmpa convert keeping every point's
+    name, id, position and facing."""
+    import map_legacy
+    import rmpa_legacy
+    games = _legacy_games()
+    if games is None:
+        return
+    g41, g5, g6 = games
+    pairs = [k for k in g6 if k.startswith('MISSION/EDF5_OLD_SCRIPT/') and k.endswith('.RMPA')
+             and 'MISSION/' + k[len('MISSION/EDF5_OLD_SCRIPT/'):] in g5]
+    assert len(pairs) == 146, len(pairs)
+    same = 0
+    for k in pairs:
+        e6 = _game_read(g6, k)
+        out = rmpa_legacy.rmpa_from_legacy(_game_read(g5, 'MISSION/' + k[len('MISSION/EDF5_OLD_SCRIPT/'):]))
+        assert rmpa_legacy.is_edf6(out), k
+        assert rmpa_legacy.rmpa_from_legacy(e6) == e6, k
+        same += out == e6
+    assert same == 65, same
+
+    def kept(old: bytes) -> bytes:
+        new = rmpa_legacy.rmpa_from_legacy(old)
+        assert rmpa_legacy.is_edf6(new)
+        before, after = _rmpa_points(rmpa_legacy.decode5(old)[0]), _rmpa_points(rmpa_legacy.decode6(new)[0])
+        assert sorted(before) == sorted(after), 'a point was lost or changed'
+        return new
+
+    missions = [k for k in g5 if k.startswith('MISSION/EDF4.1/') and k.endswith('/MISSION.RMPA')]
+    assert len(missions) == 126, len(missions)
+    for k in missions:
+        kept(_game_read(g5, k))
+    for name in EDF41_MISSION_MAPS:
+        kept(dict(map_legacy.parse_marc_lenient(_game_read(g41, f'MAP/{name}.MAC'))[1])['map.rmpa'])
+
+
 def main() -> int:
     import rootcpk
     game = rootcpk.DEFAULT_GAME
