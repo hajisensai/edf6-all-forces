@@ -444,6 +444,11 @@ bool InstallJetSound() noexcept;
 // The game's glyph cache under one lock (glyphs.cpp): its threads lost glyphs and showed one character as another.
 bool InstallGlyphLock() noexcept;
 bool InstallEdf5Campaign() noexcept;
+// EDF5's compiled mission scripts online: the BVM executor's PreloadPlayerResource and CreatePlayer given their online
+// half (edf5online.cpp). Edf5BvmOnlinePlayers: the patched creation loop's count.
+bool InstallEdf5Online() noexcept;
+bool Edf5OnlineReady() noexcept;
+std::uint32_t Edf5BvmOnlinePlayers() noexcept;
 void JetSound(unsigned char* vehicle) noexcept;
 void JetSoundTick() noexcept;
 float GameEffectVolume() noexcept;   // jetsound.cpp: the game's master volume times its effect volume (0..1)
