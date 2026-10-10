@@ -201,12 +201,23 @@ def build_sgo(p: Port, stock, root: str | None) -> bytes:  # noqa: ANN001 - stoc
     return dsgo.write(doc)
 
 
+def bundled(rel: str) -> str:
+    """Where the converted copy of the asset at Mods path `rel` ships with the tools (tools/make_edf5_weapons.py
+    writes it), so the install needs no earlier game for it (2026-10-10 user: make them ahead of time)."""
+    return os.path.join(DATA, 'edf5port', 'assets', *rel.split('/'))
+
+
 def build_assets(p: Port, root: str | None) -> dict[str, bytes]:
-    """{Mods path: bytes} of the files `p` needs that EDF6 lacks, converted from its game at `root`."""
+    """{Mods path: bytes} of the files `p` needs that EDF6 lacks: the converted copy shipped with the tools
+    (bundled), else converted from its game at `root`."""
     import legacy_assets
     out: dict[str, bytes] = {}
     name = BY_GAME[p.game].name
     for rel, source in p.assets.items():
+        if os.path.isfile(bundled(rel)):
+            with open(bundled(rel), 'rb') as f:
+                out[rel] = f.read()
+            continue
         if root is None:
             raise Unavailable(f'{name} not found')
         folder, file = source.split('/', 1)

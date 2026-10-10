@@ -5567,7 +5567,7 @@ def edf5_weapons_stack_real() -> None:
     assert len(no_ids) == len(with_edf5)
     for p in pw.PORTS:   # EDF6's own and the registry's converted (EDF5's) need no game; EDF4.1's wait
         i = with_edf5.index(p.id)
-        alone = (p.source == 'edf6' or p.weapon is not None) and not p.assets   # assets: converted from its game
+        alone = (p.source == 'edf6' or p.weapon is not None) and all(os.path.isfile(pw.bundled(r)) for r in p.assets)
         assert no_ids[i] == (p.id if alone else pw.retired_id(p.id)), p.id
         assert not alone or no_game[pw.sgo_file(p)] == out[pw.sgo_file(p)], f'{p.id}: built without its game differs'
     # A weapon this machine cannot build (its game missing): the same rows, a placeholder for it.
@@ -5951,6 +5951,32 @@ def ported_assets_of_another_mod_stay() -> None:
             if not ours_written:
                 cw.repair(game)
                 assert modfiles.read(_mods(game, asset)) == b'another mod'
+
+
+@test
+def ported_assets_bundled() -> None:
+    """The converted models the EDF5 weapons need ship with the tools (tools/ported_weapons.py bundled): every asset of
+    a port has its file, and every file under edf5port/assets is some port's asset (a weapon left out leaves none).
+    Where EDF5 is installed, each is what converting EDF5's file gives, byte for byte."""
+    import gamedir
+    import legacy_assets
+    import ported_weapons as pw
+    import rootcpk
+    wanted = {rel for p in pw.PORTS for rel in p.assets}
+    assert wanted, 'no port has assets: this check is empty'
+    assert all(os.path.isfile(pw.bundled(rel)) for rel in wanted), 'an asset of a port is not shipped'
+    root = os.path.join(ROOT, 'edf5port', 'assets')
+    shipped = {os.path.relpath(os.path.join(d, f), root).replace(os.sep, '/') for d, _, fs in os.walk(root) for f in fs}
+    assert shipped == wanted, f'shipped files no port needs: {sorted(shipped - wanted)}'
+    edf5 = gamedir.find_other(gamedir.EDF5, near=rootcpk.DEFAULT_GAME)
+    if not edf5:
+        print('skip  ported_assets_bundled (against EDF5): EDF5 not installed')
+        return
+    g5 = rootcpk.Game(edf5)
+    for p in pw.PORTS:
+        for rel, source in p.assets.items():
+            with open(pw.bundled(rel), 'rb') as f:
+                assert f.read() == legacy_assets.convert(source, g5.read(*source.split('/'))), rel
 
 def main() -> int:
     import rootcpk

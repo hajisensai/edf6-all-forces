@@ -237,6 +237,7 @@ def convertible(g5: rootcpk.Game, missing: list[str]) -> tuple[dict[str, str], s
     import legacy_assets
     index = {(d.upper(), n.upper()): (d, n) for d, n in g5.cpk.index}
     out: dict[str, str] = {}
+    done: dict[str, bytes] = {}
     for path in missing:
         folder, name = path[len('app:/'):].split('/', 1)
         stem, ext = os.path.splitext(name)
@@ -246,10 +247,19 @@ def convertible(g5: rootcpk.Game, missing: list[str]) -> tuple[dict[str, str], s
             return {}, f'EDF6 没有、EDF5 也没有：{path}'
         source = f'{found[0]}/{found[1]}'
         try:
-            legacy_assets.convert(source, g5.read(*found))
+            converted = legacy_assets.convert(source, g5.read(*found))
         except ValueError as e:   # a converter's refusal; anything else is this machine's problem, raised
             return {}, f'EDF6 没有、不能从 EDF5 转换：{path}（{e}）'
-        out[f'{folder.upper()}/{name.upper()}'] = source
+        rel = f'{folder.upper()}/{name.upper()}'
+        out[rel] = source
+        done[rel] = converted
+    # Shipped converted (tools/ported_weapons.py bundled): players need no EDF5 for it. Only once every file of the
+    # weapon converts: a weapon left out leaves no file behind.
+    for rel, data in done.items():
+        target = os.path.join(HERE, '..', 'edf5port', 'assets', *rel.split('/'))
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, 'wb') as f:
+            f.write(data)
     return out, None
 
 
