@@ -475,7 +475,7 @@ HUDTEXT(supportLegacyPeers,L"Support: an older All Forces in the room, so rifles
 HUDTEXT(supportAirNeedsUpdate,L"Air support: everyone in the room needs this All Forces version (it flies in from the edge now)",L"空中支援：房间里有旧版全军出击，需全员更新到同一版本（现在改为从场外空中飞入）",L"空中支援：房間裡有舊版全軍出擊，需全員更新到同一版本（現在改為從場外空中飛入）",L"航空支援：旧版の全軍出撃の参加者がいます。全員同じ版に更新してください（場外から飛来する方式になりました）")
 HUDTEXT(supportRescueNeedsUpdate,L"a player runs an older All Forces (everyone needs the same version)",L"房间里有旧版全军出击（需全员同一版本）",L"房間裡有舊版全軍出擊（需全員同一版本）",L"旧版の全軍出撃の参加者がいます（全員同じ版が必要）")
 HUDTEXT(rescueRequested,L"SEA RESCUE: HELI REQUESTED",L"海上救援：已呼叫救援直升机",L"海上救援：已呼叫救援直升機",L"海上救助：救助ヘリを要請")
-HUDTEXT(rescueComing,L"SEA RESCUE: HELI ON ITS WAY FROM THE MAP EDGE",L"海上救援：救援直升机已从场外飞入，正在赶来",L"海上救援：救援直升機已從場外飛入，正在趕來",L"海上救助：救助ヘリが場外から向かっています")
+HUDTEXT(rescueComing,L"SEA RESCUE: HELI ON ITS WAY",L"海上救援：救援直升机已起飞，正在赶来",L"海上救援：救援直升機已起飛，正在趕來",L"海上救助：救助ヘリが向かっています")
 HUDTEXT(rescueFailed,L"SEA RESCUE FAILED: %ls (asking again in %d s)",L"海上救援未能派出：%ls（%d 秒后重新呼叫）",L"海上救援未能派出：%ls（%d 秒後重新呼叫）",L"海上救助失敗：%ls（%d 秒後に再要請）")
 HUDTEXT(rescueLost,L"SEA RESCUE: HELI LOST (asking again in %d s)",L"海上救援：救援直升机已损失（%d 秒后重新呼叫）",L"海上救援：救援直升機已損失（%d 秒後重新呼叫）",L"海上救助：救助ヘリ喪失（%d 秒後に再要請）")
 HUDTEXT(rescueNoHeli,L"no heli came within 150 s",L"150 秒内没有直升机到来",L"150 秒內沒有直升機到來",L"150 秒以内にヘリが来なかった")
