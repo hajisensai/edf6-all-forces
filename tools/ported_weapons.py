@@ -7,8 +7,9 @@ tools/make_edf41_weapons.py; docs/edf5-weapons-plan.md): per weapon its id (EDF6
 level, star caps, the EDF6 template row, its texts in the five languages and the sound cues it needs swapped. Its SGO
 comes from one of two places:
   'edf6'  EDF6's own copy of it (in Root.cpk, never named by EDF6's table): copied under our id.
-  <game>  the player's own install of that game (gamedir.find_other: $EDF5_DIR / $EDF41_DIR, next to EDF6, the Steam
-          libraries), its Root.cpk converted by pylib/edf5port.py. Without the game the row is still taken
+  <game>  converted by pylib/edf5port.py: EDF5's when the registry was made, kept in it ('weapon'), so the install
+          needs no EDF5; EDF4.1's from the player's own install (gamedir.find_other: $EDF41_DIR, next to EDF6, the
+          Steam libraries). Without the game the row is still taken
           (tools/call_weapons.py plan_rows: every install of a release has the same rows, with or without it): a
           placeholder, its template's stock weapon named as waiting for the game (pending_*), until an install finds
           it; a row an earlier install built is kept as it is (its SGO is in Mods already).
@@ -87,6 +88,7 @@ class Port:
     template: str      # the EDF6 weapon whose row fills the other columns and is the placeholder
     text: dict         # lang -> [name, description, stats]
     damage_attribute: dict | None = None   # AmmoDamageAttribute a converted weapon takes (its EDF6 family's)
+    weapon: dict | None = None             # converted when the registry was made (dsgo.dump): built with no game
     cues: dict = field(default_factory=dict)   # sound cue EDF6 lacks -> the one played instead
 
 
@@ -97,7 +99,8 @@ def _load(game: Game) -> tuple[Port, ...]:
     with open(path, encoding='utf-8') as f:
         data = json.load(f)
     return tuple(Port(w['id'], game.key, w['sgo'], w['source'], int(w['category']), w['class'], float(w['level']),
-                      tuple(w['stars']), w['template'], w['text'], w.get('damage_attribute'), w.get('cues', {}))
+                      tuple(w['stars']), w['template'], w['text'], w.get('damage_attribute'), w.get('weapon'),
+                      w.get('cues', {}))
                  for w in data['weapons'])
 
 
@@ -161,15 +164,17 @@ def build_sgo(p: Port, stock, root: str | None) -> bytes:  # noqa: ANN001 - stoc
     does not carry."""
     if p.source == 'edf6':
         return stock(f'WEAPON/{p.sgo.upper()}')
-    name = BY_GAME[p.game].name
-    if root is None:
-        raise Unavailable(f'{name} not found')
-    try:
-        data = _archive(root).read('WEAPON', p.sgo)
-    except KeyError as e:
-        raise Unavailable(f"{name}'s Root.cpk has no WEAPON/{p.sgo}") from e
-    members = sgo.read(data)[1]
-    doc = BY_GAME[p.game].convert(members, _names(p))
+    if p.weapon is not None:   # converted when the registry was made (EDF5's): the game is not needed
+        doc = dsgo.Document(dsgo.load(p.weapon), [])
+    else:
+        name = BY_GAME[p.game].name
+        if root is None:
+            raise Unavailable(f'{name} not found')
+        try:
+            data = _archive(root).read('WEAPON', p.sgo)
+        except KeyError as e:
+            raise Unavailable(f"{name}'s Root.cpk has no WEAPON/{p.sgo}") from e
+        doc = BY_GAME[p.game].convert(sgo.read(data)[1], _names(p))
     if p.damage_attribute is not None:
         doc.root.set('AmmoDamageAttribute', Node([float(v) for v in p.damage_attribute.values()],
                                                  dict(enumerate(p.damage_attribute))))
