@@ -35,7 +35,10 @@ int main() {
     script.mergeDrop=std::numeric_limits<float>::infinity();
     const Fields odd=Corrected(script);
     Check(odd.nearDrop==kKeepCorners && odd.mergeDrop==kKeepCorners,"a NaN or endless drop is no drop of every corner");
-    Check(Corrected(Corrected(Stock(kModeNone,true))).mode==kModeObject,"correcting twice changes nothing more");
+    const Fields once=Corrected(Stock(kModeNone,true)),twice=Corrected(once);
+    Check(twice.mode==once.mode && twice.target==once.target && twice.nearDrop==once.nearDrop &&
+          twice.mergeDrop==once.mergeDrop && twice.polyline==once.polyline && twice.smoothing==once.smoothing,
+          "correcting twice changes nothing more");
     std::printf("route_guide_test: %d checks passed\n",checks);
     return 0;
 }

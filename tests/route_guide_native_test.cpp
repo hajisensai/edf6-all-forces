@@ -1,7 +1,19 @@
 // The route guide hook on a private EDF.dll mapping: every constructor call site redirected, and a guide made
 // through each patched site corrected (the constructor itself stood in for: it needs the running game). Never starts
 // the game.
+#include "../src/crew.h"
+#include "../src/memory.h"
+namespace crew {
+int redirectCount=0,failAt=0;
+// RedirectCall with its `failAt`th call failing (no near page): the install's partial-failure branch.
+bool RouteTestRedirect(unsigned char* at,void* expected,void* replacement,bool& changed) noexcept {
+    if(++redirectCount==failAt){changed=false;return false;}
+    return edf::RedirectCall(at,expected,replacement,changed);
+}
+}
+#define RedirectCall RouteTestRedirect
 #include "../src/route_guide.cpp"
+#undef RedirectCall
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -65,6 +77,19 @@ int main(int argc,char** argv) {
         return 0;
     }
     config.routeGuidePath=true;
+    if(mode=="partial") {   // the second redirect fails: the first site redirected, but every guide passed through as made
+        failAt=2;
+        Check(!InstallRouteGuide() && !ready,"a failed redirect: not ready");
+        Check(reinterpret_cast<unsigned char*>(Through(kSites[0]))!=image+kCtor,"the first site was redirected");
+        ctor=&FakeCtor;
+        std::memset(guide,0,sizeof(guide));
+        madeMode=kModeNone;madeTarget=true;
+        Check(Through(kSites[0])(guide,nullptr)==guide && made==1,"the redirected site still makes the guide");
+        Check(At<std::uint32_t>(guide,kMode)==kModeNone && !At<bool>(guide,kPolyline) && At<float>(guide,kNearDrop)==15.0f,
+              "...as the game made it, like the sites left stock");
+        std::printf("route_guide_native_test: %d checks passed (partial install)\n",checks);
+        return 0;
+    }
     Check(InstallRouteGuide(),"installed on every constructor call");
     for(const unsigned site:kSites)
         Check(image[site]==0xE8 && reinterpret_cast<unsigned char*>(Through(site))!=image+kCtor,"call redirected");

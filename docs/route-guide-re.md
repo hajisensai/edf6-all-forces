@@ -18,7 +18,7 @@ EDF.dll TimeDateStamp 0x678CCB46，全部为 RVA。置信度：H = 读反汇编�
 
 | 调用点 | 原字节 | 来源 | 模式 +0x150 |
 |---|---|---|---|
-| 0x1A7EDC | `E8 2F ED 41 00` | AngelScript `DispRouteGuideToArea[EX]` 工厂（0x1B3760 → 0x1B38A0），存档恢复 0x5C5FE0 也走这里 | 2：区域中心 +0x180 |
+| 0x1A7EDC | `E8 2F ED 41 00` | AngelScript `DispRouteGuideToArea[EX]` 工厂（0x1B3760 → 0x1B38A0）；快照登记 0x5C5FE0（`IRecordable_SceneObject_Registration<RouteGuide>` 槽 0）也走这里，它带恢复标志（参数 +0x28），基类构造 0x5C6EC9 跳过参数拷贝，恢复出的引导线本来就是模式 0、无目标 | 2：区域中心 +0x180 |
 | 0x1B4528 | `E8 E3 26 41 00` | AngelScript `DispRouteGuideToObject[EX]`（0x1B4000 → 0x1B4190） | 1：跟随物体 +0x168 / 控制块 +0x170，物体没了自删（0x5C9DA0） |
 | 0x21F681 | `E8 8A 75 3A 00` | EDF5 BVM 原生 **1200**（0x21F380；低字节 0xB0 的编号都落到这个 case，0x213CBA） | **0**（0x21F44C `mov [rbp-0x49], r14d`，r14 = 0） |
 

@@ -2,7 +2,7 @@
 // them (src/route_guide.h says what the stock builder does to the route). The user, 2026-10-10: the EDF5 missions'
 // guide line, a stock fault EDF6 has too, "感觉指到墙里面了".
 // RouteGuide's constructor 0x5C6C10(this, InitParam*) is called from three places, every guide a mission makes:
-// the AngelScript DispRouteGuideToArea[EX] factory 0x1A7EDC (the saved-game restore too), DispRouteGuideToObject[EX]
+// the AngelScript DispRouteGuideToArea[EX] factory 0x1A7EDC (the snapshot registration 0x5C5FE0 too), DispRouteGuideToObject[EX]
 // 0x1B4528, and the EDF5 scripts' BVM native 1200 0x21F681. Each call is redirected to a wrapper that runs the
 // constructor and then sets the guide's fields (routeguide::Corrected); the frame's update reads them every frame.
 // Docs: docs/route-guide-re.md. All addresses are RVAs into EDF.dll 0x678CCB46.
