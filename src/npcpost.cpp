@@ -158,9 +158,83 @@ void Relinquish(const unsigned char* v) noexcept {
 
 bool NpcDrivable(const unsigned char* v) noexcept { return FamilyOf(v)!=Family::none; }
 
+namespace {
+// --- The mech's AI attack table (the user 2026-10-10: "npc操控的尼克斯依然没法开火") ---
+// The Begaruta family's fire step 0x63AD50 (from the AI think 0x63C1C0 -> 0x63AC40, seat 0) pulls a weapon's trigger only
+// when the vehicle's attack table holds a row {min range, max range, seat, weapon index} for that seat's weapon and the
+// target is inside its range (0x63B274..0x63B30B sets [rsp+0x31]; 0x63B49D skips the trigger without it). Slot 6 0x642970
+// fills the table (0x642DBC: the container at veh+0x1FE8, data +0x1FF0, capacity +0x1FF8, size +0x2000, 16-byte rows)
+// from the SGO's `ai_attack_setting` only for a mech spawned as an AI (V504_BEGARUTA_AI has it; every _MISSION / call-in
+// SGO and every Nix SGO lack it). A player-called mech with a real NPC soldier at the wheel therefore aims, turns and
+// walks but never fires. The plugin gives such a mech the rows the stock AI version carries: one per seat-0 weapon, from
+// 0 to that weapon's own range. A table the SGO filled (size > 0) is never touched.
+constexpr std::size_t kAttackTable=0x1FE8,kAttackData=0x1FF0,kAttackCap=0x1FF8,kAttackSize=0x2000;
+constexpr unsigned kAttackRead=0x63B274,kAttackRelease=0x646300,kGameNew=0x12D85B0;
+constexpr std::size_t kWeaponReach=0x224;   // npcai.cpp kArmReach
+constexpr std::uint64_t kAttackRows=16;     // the seat holder limit npcai.cpp uses
+const unsigned char kAttackReadSig[]={0x49,0x8B,0x9F,0xF0,0x1F,0x00,0x00,0x45,0x32,0xC0,0x49,0x8B,0x8F,0x00,0x20,0x00,0x00,
+                                      0x48,0xC1,0xE1,0x04,0x48,0x03,0xCB,0x44,0x88,0x44,0x24,0x31,0x48,0x3B,0xD9,0x74,0x7A,
+                                      0x48,0x63,0x43,0x08,0x49,0x3B,0xC5,0x75,0x09,0x48,0x63,0x43,0x0C};
+const unsigned char kAttackReleaseSig[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0xD9,0x48,0x8B,0x49,0x08,0x48,0x85,0xC9};
+struct AttackRow { float minRange,maxRange; std::int32_t seat,weapon; };
+static_assert(sizeof(AttackRow)==16,"the stock row");
+using GameNewFn=void*(*)(std::size_t);
+using AttackReleaseFn=void(__fastcall*)(void*);
+
+bool AttackTableOk() noexcept {
+    static int ok=0;
+    if(!ok) {
+        ok=Matches(kAttackRead,kAttackReadSig,sizeof(kAttackReadSig)) &&
+           Matches(kAttackRelease,kAttackReleaseSig,sizeof(kAttackReleaseSig)) ? 1 : -1;
+        Log("NPCPOST mech attack table: %s",ok>0 ? "on" : "off (native profile mismatch)");
+    }
+    return ok>0;
+}
+
+// The rows for seat 0's weapons (holder order = the fire step's weapon index); 0 when it has none with a range.
+std::uint64_t AttackRows(unsigned char* v,AttackRow* rows) noexcept {
+    unsigned char* const seat=SeatAt(v,0);
+    const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
+    const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
+    if(!n || n>kAttackRows || !Readable(holders,n*8))return 0;
+    std::uint64_t count=0;
+    for(std::uint64_t i=0;i<n;++i) {
+        if(!Readable(holders[i],kHolderWeapon+8))continue;
+        const auto w=At<const unsigned char*>(holders[i],kHolderWeapon);
+        if(!Readable(w,kWeaponReach+4))continue;
+        const float reach=At<float>(w,kWeaponReach);
+        if(std::isfinite(reach) && reach>0.0f)rows[count++]=AttackRow{0.0f,reach,0,static_cast<std::int32_t>(i)};
+    }
+    return count;
+}
+
+void EnsureMechAttackTable(unsigned char* v) noexcept {
+    if(!Readable(v,kAttackSize+8) || At<std::uint64_t>(v,kAttackSize) || !AttackTableOk())return;
+    AttackRow rows[kAttackRows];
+    const std::uint64_t count=AttackRows(v,rows);
+    if(!count)return;
+    auto data=At<AttackRow*>(v,kAttackData);
+    if(!data || At<std::uint64_t>(v,kAttackCap)<count) {
+        // Grown as 0x642970 grows it: the game's operator new (below 0x1000 bytes, as here, unaligned), so the stock
+        // release 0x646300 and the vehicle's destructor free it.
+        auto fresh=static_cast<AttackRow*>(reinterpret_cast<GameNewFn>(image+kGameNew)(count*sizeof(AttackRow)));
+        if(!fresh)return;
+        if(data)reinterpret_cast<AttackReleaseFn>(image+kAttackRelease)(v+kAttackTable);
+        data=fresh;
+        Put<AttackRow*>(v,kAttackData,data);Put<std::uint64_t>(v,kAttackCap,count);
+    }
+    std::memcpy(data,rows,count*sizeof(AttackRow));
+    Put<std::uint64_t>(v,kAttackSize,count);
+    Log("NPCPOST v=%p mech attack table: %llu row(s) for its NPC driver (the SGO has no ai_attack_setting), first reach %.0f m",
+        v,static_cast<unsigned long long>(count),rows[0].maxRange);
+}
+}  // namespace
+
 void NpcPostInput(unsigned char* v) noexcept {
-    if(!Cfg().customNpcAi || !Cfg().tankReturnToPost || v[kDead])return;
+    if(!Cfg().customNpcAi || v[kDead])return;
     const Family f=FamilyOf(v);
+    if(f==Family::mech && NpcDriver(v) && IsOnlineAuthority(v))EnsureMechAttackTable(v);   // before the stock AI fires
+    if(!Cfg().tankReturnToPost)return;
     if(f==Family::none || (f==Family::barga && !BargaWalkOk()))return;
     if(!NpcDriver(v)) {
         // Not NPC-driven (the player took the wheel, or nobody): its post is forgotten; an NPC later starts from where it is.
