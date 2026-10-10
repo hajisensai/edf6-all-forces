@@ -25,25 +25,53 @@ inline constexpr unsigned kMaxFormationUnits=96;
 // player's: it stays where it is and may not be recruited again for a while), recruit (the player's now).
 // The RTS moves (the user, 2026-10-09: "m里面没办法让npc移动攻击，只有守点，如果npc在打怪，就没办法移动了"): move (go to
 // the point whatever it is fighting, firing on the way, and guard it once there), attack-move (go there fighting what it
-// meets on the way, then guard it). Appended: the values are the map command wire's (command_protocol.cpp).
-enum class Order : std::uint8_t { none, guard, follow, engage, focus, board, dismount, dismiss, recruit, move, attackMove };
-inline constexpr Order kLastOrder=Order::attackMove;
+// meets on the way, then guard it). withdraw (transport_logic.h, the user 2026-10-09: "卡车之类的运输载具改成断剑那种操作方式"):
+// a paired squad's transport leaves the field (a support vehicle: removed once out). dismount / dismountAll (the user,
+// 2026-10-09: "下车是除了驾驶员，炮手等操作席都下车。全体下车是全部人"): DISMOUNT takes the squad's soldiers off the
+// passenger seats only (its driver and gunners keep the vehicle going: LeavesSeat), DISMOUNT ALL every one of them.
+// Appended: the values are the map command wire's (command_protocol.cpp).
+enum class Order : std::uint8_t { none, guard, follow, engage, focus, board, dismount, dismiss, recruit, move, attackMove, withdraw,
+                                  dismountAll };
+inline constexpr Order kLastOrder=Order::dismountAll;
+// The seats a dismount empties, by the seat's role (npcai.cpp SeatPriority: 0 the driver's, 1 an armed seat, 2 a
+// passenger's): DISMOUNT the passengers', DISMOUNT ALL every one.
+inline constexpr int kSeatDriver=0,kSeatGunner=1,kSeatPassenger=2;
+inline bool LeavesSeat(int seatRole,bool all) noexcept { return all || seatRole>=kSeatPassenger; }
+inline bool DismountOrder(Order o) noexcept { return o==Order::dismount || o==Order::dismountAll; }
 // The orders that take the ground point under the pointer (and stand round it in a formation).
 inline bool PointOrder(Order o) noexcept { return o==Order::guard || o==Order::move || o==Order::attackMove; }
 // Whether a vehicle unit (heli, jet, crawler, tank) takes `o`: the point orders, follow and release; the squads take all.
 inline bool VehicleOrder(Order o) noexcept { return o==Order::none || o==Order::follow || PointOrder(o); }
 // A vehicle's modules know one point order (their post / anchor): move and attack-move reach it as guard.
 inline Order VehicleCommandOf(Order o) noexcept { return PointOrder(o) ? Order::guard : o; }
+// Whether an aircraft unit (heli, jet) takes `o`: a vehicle's orders and focus fire on the marked enemy (the user,
+// 2026-10-09: "飞机没办法指定攻击目标"; jet.cpp / heli.cpp JetCommand / HeliCommand take it as a squad's focus).
+inline bool AirOrder(Order o) noexcept { return VehicleOrder(o) || o==Order::focus; }
 struct Command { Order order; float at[3]; };   // at: the point of a point order (on the ground)
 
 // --- The squads' moves under an order (npcai.cpp Drive), the player's command over the soldiers' own fight ---
-//  - forced (move): every member walks to its place by the point before anything of its own (dodging, falling back
-//    hurt, its combat spot); it still turns on and fires at what is in reach as it goes;
-//  - fightFirst (attack-move): a member with a target fights it where it is (its combat spot round itself), with none it
-//    walks on to the point;
+// The user, 2026-10-09: "一个移动攻击是全消灭再走。一个移动攻击是先走次要消灭" -- the two RTS moves:
+//  - forced (move, right click): every member walks to its place by the point before anything of its own (dodging,
+//    falling back hurt, its combat spot); it still turns on and fires at what is in reach as it goes;
+//  - fightFirst (attack-move, Z / G): the squad stops where it meets enemies and fights them with its own moves
+//    (dodging, its combat spot) until the ground round it is clear, then walks on. The squad holds as one
+//    (AttackMoveHolds), not each soldier on its own target, so it does not string out between those fighting and
+//    those walking on;
 //  - neither: the order's anchor as before (guard holds its point's radius, engage / focus their reach).
 struct Pursuit { bool forced,fightFirst; };
 inline Pursuit PursuitOf(Order o) noexcept { return Pursuit{o==Order::move,o==Order::attackMove}; }
+// An attack-move's squad holds to fight while any member had a target last frame or this one (`target`: what it looks
+// for round itself, its leash plus its weapons' reach) -- the ground round it is clear when none has. A target none of
+// them can shoot at (behind a wall, out of every weapon's reach) would hold it for ever: so it holds only while it fights,
+// `sinceShot` ms since any member last fired, or for `grace` ms from the hold's start for the first shot. A squad past
+// that walks on (firing on the way as a move does) and holds again at its next shot.
+inline constexpr unsigned long long kAttackMoveGraceMs=8000;
+inline bool AttackMoveHolds(bool target,unsigned long long sinceHold,unsigned long long sinceShot,
+                            unsigned long long grace=kAttackMoveGraceMs) noexcept {
+    return target && (sinceHold<grace || sinceShot<grace);
+}
+// Whether a member walks on to the order's point this frame (npcai.cpp Drive); `holds`: its squad's AttackMoveHolds.
+inline bool Pursues(Pursuit p,bool holds) noexcept { return p.forced || (p.fightFirst && !holds); }
 // A move / attack-move whose squad has reached its point (its top within `radius`, level) is a guard of that point from
 // then on: the members hold round it and fight what comes, as a guard order does. Others stay as they are.
 inline Order Arrive(Order o,float distance,float radius) noexcept {
@@ -66,6 +94,19 @@ inline RightClick RightClickOrder(int selected,bool enemyUnder,bool pointOk) noe
 // 的标记"), its vehicle is the unit the map commands.
 inline bool OffersRecruit(bool ownedByPlayer,bool scripted,bool dismissed,bool riding) noexcept {
     return !ownedByPlayer && !scripted && !dismissed && !riding;
+}
+
+// --- The squad panel (the user, 2026-10-09: "小队太多了吧，怎么处理合适，感觉看不过来"; the log's mission had 37) ---
+// Rows in the order a commander wants them (npcai.cpp SquadRows sorts by it, stable): the player's own squads, the free
+// ones it may command or recruit, the ones riding a vehicle (their vehicles are the map's units), a script's last.
+inline int SquadRank(bool recruited,bool scripted,bool riding) noexcept { return scripted ? 3 : riding ? 2 : recruited ? 0 : 1; }
+inline constexpr int kSquadRowsFolded=9;   // the number keys' reach
+// The rows shown (a prefix of the sorted rows `rank`): folded (the default) the ones on foot that take orders (rank
+// 0-1), at most kSquadRowsFolded, the rest summed in one row that opens the panel; open, all of them (up to `most`).
+inline int SquadRowsShown(const int* rank,int n,bool open,int most) noexcept {
+    int k=0;
+    while(k<n && k<most && (open || (rank[k]<=1 && k<kSquadRowsFolded)))++k;
+    return k;
 }
 
 // --- Where a unit's mark is drawn and clicked ---
@@ -165,8 +206,12 @@ struct Selection {
     void Remove(const void* v) noexcept { for(int i=0;i<n;++i)if(id[i]==v){id[i]=id[--n];return;} }
     void Clear() noexcept { n=0; }
 };
-// A unit as the selection sees it: its id and where its icon is on the screen (`on`: in front of the eye).
-struct Mark { const void* id; float x,y; bool on; };
+// A unit as the selection sees it: its id and where its icon is on the screen (`on`: in front of the eye). `pick`: the
+// map's box, click and cycle take it. A squad a mission script drives and a squad riding a vehicle are shown but not
+// picked (the user, 2026-10-09: "总有一些我不能指挥的" -- a box over the field took 30 units of which none took an
+// order; "坦克上的应该不能统一框选…怎么我在操作坦克还能操作里面的人" -- the crew's squad sits on its vehicle's icon and
+// came along in every box). A riding squad is still picked from the squad panel (its row), for its dismount.
+struct Mark { const void* id; float x,y; bool on; bool pick=true; };
 
 inline int IndexOf(const void* const* ids,int n,const void* id) noexcept {
     for(int i=0;i<n;++i)if(ids[i]==id)return i;
@@ -199,7 +244,7 @@ inline void Cycle(Selection& s,const void* const* ids,int n,int step) noexcept {
 inline void Box(Selection& s,const Mark* m,int n,float x0,float y0,float x1,float y1,bool add) noexcept {
     const float lx=x0<x1 ? x0 : x1,hx=x0<x1 ? x1 : x0,ly=y0<y1 ? y0 : y1,hy=y0<y1 ? y1 : y0;
     if(!add)s.Clear();
-    for(int i=0;i<n;++i)if(m[i].on && m[i].x>=lx && m[i].x<=hx && m[i].y>=ly && m[i].y<=hy)s.Add(m[i].id);
+    for(int i=0;i<n;++i)if(m[i].on && m[i].pick && m[i].x>=lx && m[i].x<=hx && m[i].y>=ly && m[i].y<=hy)s.Add(m[i].id);
 }
 
 // The mark on the screen nearest (x, y) within `radius` px: its index, or -1. A unit's icon under a click, the enemy under
@@ -216,9 +261,21 @@ inline int Nearest(const Mark* m,int n,float x,float y,float radius) noexcept {
 }
 
 // A click at (x, y): the unit whose icon is nearest within `radius` px becomes the selection (`add`, Shift: it is added,
-// or taken out when it is in); none there clears it (Shift: left as it is). The unit clicked, or nullptr.
+// or taken out when it is in); none there clears it (Shift: left as it is). A unit not picked (`pick` false) leaves the
+// selection as it is: the caller says why it takes no order. The unit clicked, or nullptr.
+// A picked unit in reach wins over one not picked nearer (a crew's squad sits on its vehicle's icon).
 inline const void* Click(Selection& s,const Mark* m,int n,float x,float y,float radius,bool add) noexcept {
-    const int i=Nearest(m,n,x,y,radius);
+    int i=-1;
+    float bestD2=radius*radius;
+    for(int k=0;k<n;++k) {
+        if(!m[k].on || !m[k].pick)continue;
+        const float dx=m[k].x-x,dy=m[k].y-y,d2=dx*dx+dy*dy;
+        if(d2<=bestD2){bestD2=d2;i=k;}
+    }
+    if(i<0) {
+        const int other=Nearest(m,n,x,y,radius);
+        if(other>=0)return m[other].id;
+    }
     const void* best=i>=0 ? m[i].id : nullptr;
     if(!add)s.Clear();
     if(best && add && s.Has(best))s.Remove(best);
@@ -228,7 +285,9 @@ inline const void* Click(Selection& s,const Mark* m,int n,float x,float y,float 
 
 // --- The keys ---
 // The keys' presses this frame (edges).
-struct Press { bool next,prev,guard,follow,release,engage,focus,board,dismount,dismiss,recruit,move,attackMove; };
+// guard (G, pad Y) is an attack-move since 2026-10-09 (the user: "看看还有什么指令能砍一砍"): an attack-move turns
+// into a guard of its point once there, so the two buttons were one; the key is kept.
+struct Press { bool next,prev,guard,follow,release,engage,focus,board,dismount,dismiss,recruit,move,attackMove,dismountAll,withdraw; };
 enum class Refusal : std::uint8_t { none, noUnit, noPoint, online, noMark };
 // What a frame's presses come to: a command to the selection (issue), or why not (why). The cycle (next / prev) has
 // already moved the selection (Cycle).
@@ -237,16 +296,17 @@ struct Step { bool issue; Command cmd; Refusal why; };
 // The order a frame's presses give (one at a time, in this order of precedence); false with none pressed.
 inline bool Wanted(const Press& p,Order* o) noexcept {
     if(p.move)*o=Order::move;
-    else if(p.attackMove)*o=Order::attackMove;
-    else if(p.guard)*o=Order::guard;
+    else if(p.attackMove || p.guard)*o=Order::attackMove;
     else if(p.follow)*o=Order::follow;
     else if(p.release)*o=Order::none;
     else if(p.engage)*o=Order::engage;
     else if(p.focus)*o=Order::focus;
     else if(p.board)*o=Order::board;
+    else if(p.dismountAll)*o=Order::dismountAll;
     else if(p.dismount)*o=Order::dismount;
     else if(p.dismiss)*o=Order::dismiss;
     else if(p.recruit)*o=Order::recruit;
+    else if(p.withdraw)*o=Order::withdraw;
     else return false;
     return true;
 }

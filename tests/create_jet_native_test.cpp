@@ -24,10 +24,12 @@ float BodyMark(const void*) noexcept {UnexpectedWorldCall();}
 bool IsHelicopter(const void*) noexcept {UnexpectedWorldCall();}
 float MapRay(const float*,const float*,float*) noexcept {UnexpectedWorldCall();}
 void HeliCalled(unsigned char*,bool,const float*,DWORD) noexcept {UnexpectedWorldCall();}
-bool HeliCommand(const void*,const Command&) noexcept {UnexpectedWorldCall();}
+bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept {UnexpectedWorldCall();}
+bool HeliLeft(const void*) noexcept {UnexpectedWorldCall();}
 bool ProteusReady() noexcept {UnexpectedWorldCall();}
 bool NpcDriver(const unsigned char*) noexcept {UnexpectedWorldCall();}
 bool SeatNpcRider(unsigned char*,bool) noexcept {UnexpectedWorldCall();}
+bool OnlineMaySeatNpc(const void*) noexcept {UnexpectedWorldCall();}
 void NoteLocalCopy(const void*,const void*) noexcept {UnexpectedWorldCall();}
 bool FixBodyPart506(unsigned char*,const char*) noexcept {UnexpectedWorldCall();}
 int FaultLog(const char*,const EXCEPTION_POINTERS*) noexcept {UnexpectedWorldCall();}

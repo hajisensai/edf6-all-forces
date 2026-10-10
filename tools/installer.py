@@ -31,7 +31,10 @@ row numbers saves use), EDF6AutoTurret's vehicle data and the generated objects 
 Menu 3 downloads the newest build from the test site, menu 4 sends the logs back to it (tools/testhub.py;
 the site itself is testhub/), menu 5 checks what is installed (check: reads only, the game may be running).
 Menu 7 edits the map support's out-of-mission configuration in the player's EDF6VehicleCrew.ini (tools/support_config.py):
-which support units can be called, their real crews' stock weapons, how many aircraft a call brings.
+which support units can be called, their real crews' stock weapons, how many aircraft a call brings; its `l` edits the
+out-of-game loadouts (tools/support_loadout.py: each seated call's soldiers and their colours, each support tank's and jet's
+pylons) and, with the game closed, writes the files those need (and the ones an online host's presets needed here: the
+plugin's pending list). Install writes them too.
 """
 from __future__ import annotations
 
@@ -61,7 +64,7 @@ PLUGINS = ((PLUGIN, SECTION), ('EDF6AutoTurret', 'AutoTurret'))
 PLUGIN_FILES = ('.dll', '.ini')            # shipped
 # What a plugin writes beside itself: its log, the log rotated away (src/plugin.cpp RotateLog), the Primers' trace
 # (src/primer.cpp TraceFile, ini PrimerTrace).
-PLUGIN_RUNTIME = ('.log', '.log.1', '.primer.csv')
+PLUGIN_RUNTIME = ('.log', '.log.1', '.primer.csv', '.variants_pending.txt')
 ADDED_HEADER = '; ---- 新版本新增的设置（安装器补入，默认值）----'
 # Settings whose shipped default became on (the user, 2026-10-07: "还有什么默认是关的，都打开，都装mod了，肯定要打开啊"):
 # key -> (the old default, the new one). An existing ini still holding the old default gets the new one, once: the
@@ -510,6 +513,9 @@ def install(game: str, campaign_requested: bool = False) -> None:
         print('写入', path)
     for name, section in PLUGINS:
         install_plugin(game, *plugins[name], name, section)
+    # After the plugin's ini (the presets are the player's) and after every writer of V505_TANK_MISSION (AutoTurret's
+    # recoil, the optics' model redirect above): the AP tank is that file with another gun.
+    write_loadout_files(game)
     if campaign is not None:   # after the plugin's ini: it sets EDF5CampaignContent and TestRangeContent there
         for path in make_edf5_campaign.install(game, campaign):
             print('写入', path)
@@ -596,7 +602,8 @@ def uninstall(game: str) -> None:
         # First detach stock paths, preserving other writers' fields; consumers keep shared optic models.
         make_optics.remove(game)
         remove_autoturret(game)
-        for remove in (make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove,
+        import support_loadout
+        for remove in (support_loadout.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:
@@ -752,6 +759,33 @@ def manage_campaign(game: str) -> int:
     return 0
 
 
+def write_loadout_files(game: str) -> bool:
+    """The out-of-game loadouts' generated files (tools/support_loadout.py) for the installed ini and for the names the
+    plugin listed as missing in an online room (Mods/Plugins/EDF6VehicleCrew.variants_pending.txt): coloured soldiers,
+    loaded tanks and jets, the pylon weapons they carry. False (said why) when any cannot be made: the plugin then sends
+    those soldiers / vehicles stock and logs it; the others are made all the same (support_loadout.build's errors: one
+    pending name for a jet this machine has not installed must not stop every other file), everything else unaffected."""
+    import support_loadout
+    path = os.path.join(game, 'Mods', 'Plugins', PLUGIN + '.ini')
+    errors: dict[str, str] = {}
+    try:
+        with open(path, 'rb') as f:
+            raw = f.read()
+        text = (raw[3:] if raw.startswith(b'\xef\xbb\xbf') else raw).decode('utf-8', errors='replace')
+        files = support_loadout.build(game, text, pending=support_loadout.read_pending(game), errors=errors)
+    except (OSError, ValueError, KeyError, AssertionError) as e:
+        print(f'！ 支援预设的文件没有生成（带颜色的士兵、配了挂载的载具将按原版出动，插件日志会说明）：{e}')
+        return False
+    print('生成支援预设用的文件（带颜色的士兵模板、配了挂载的坦克 / 战机；只读 Root.cpk）……')
+    for name, why in errors.items():
+        print(f'！ {name} 没有生成（留在待生成清单里，插件按原版出动）：{why}')
+    for written in support_loadout.install(game, files, keep=['OBJECT/' + name for name in errors]):
+        print('写入', written)
+    for name in support_loadout.clear_pending(game, files):
+        print('已生成联机时房主预设需要、本机缺少的文件', name)
+    return not errors
+
+
 def manage_support(game: str) -> int:
     """Menu 7: the map support's out-of-mission configuration (tools/support_config.py, the plugin's src/support_config.h)
     in the player's EDF6VehicleCrew.ini: callable units, their crews' weapons, aircraft counts. The plugin rereads the
@@ -771,6 +805,13 @@ def manage_support(game: str) -> int:
         return 0
     modfiles.atomic_write(path, (b'\xef\xbb\xbf' if bom else b'') + edited.encode('utf-8'))
     print(f'已保存 {path}：下一次在地图呼叫支援时生效。')
+    # The presets' colours and the AP tank need generated files, read at a mission's start: written only with the game
+    # closed (the installer never writes game files under a running game).
+    if modfiles.game_running():
+        print('游戏正在运行：带颜色的士兵模板 / 配了挂载的载具文件没有生成。退出游戏后再进菜单 7 保存一次（或选 1 安装）即可；'
+              '在那之前这些士兵 / 坦克按原版出动（兵种、编组照常生效）。')
+    else:
+        write_loadout_files(game)
     return 0
 
 

@@ -105,6 +105,8 @@ void CommandContext(ULONGLONG now) noexcept {
     UpdateCommandNetwork({running && session.Ready(),snapshot.isHost!=0,session.Epoch(),commandHostPeer,
         snapshot.peerCount,snapshot.local.id,&SendCommand},now);
 }
+// The Q marks (qmark.cpp) go peer to peer over the same transport, with no host step: only the room has to be up.
+void QMarkContext(ULONGLONG now) noexcept { UpdateQMarkNetwork(running,snapshot.peerCount,&SendCommand,now); }
 bool PeerValid(const EDF6CoopPeer& peer) noexcept {
     return peer.id[0] && std::memchr(peer.id,0,sizeof(peer.id));
 }
@@ -155,11 +157,11 @@ void ConfigureSupportNet(const support_net::Hooks& configured) noexcept {
 }
 void ResetSupportNet() noexcept {
     session.Stop();running=false;blockedUntilMission=false;snapshot={};lastTick=~0ULL;ResetWorld();
-    commandHostPeer=0;ResetCommandNetwork();
+    commandHostPeer=0;ResetCommandNetwork();ResetQMarkNetwork();
 }
 void SuspendSupportNet() noexcept {
     session.Suspend();running=false;blockedUntilMission=true;
-    CommandContext(GetTickCount64());
+    CommandContext(GetTickCount64());QMarkContext(GetTickCount64());
     Log("SUPPORT NET suspended: existing actors retained; mission participant resynchronization required");
 }
 void SupportNetTick() noexcept {
@@ -182,6 +184,7 @@ void SupportNetTick() noexcept {
     if(!running && !Start(next,now)){NoteTransport("EDF6Coop snapshot rejected (peer list / host identity)");return;}
     NoteTransport(next.isHost ? "ready (host)" : "ready (client)");
     CommandContext(now);
+    QMarkContext(now);
     // Never spawn on the DirectNet worker. The map/crew game-thread frame owns
     // both deserialization and the native create/register/destroy callbacks.
     for(unsigned received=0;received<128;++received) {
@@ -192,6 +195,7 @@ void SupportNetTick() noexcept {
         for(std::uint32_t i=1;i<=snapshot.peerCount;++i)if(!std::strcmp(sender.id,peers[i].id)){peer=i;break;}
         if(peer) {
             CommandContext(now);
+            if(ReceiveQMarkNetwork(peer,sender.id,bytes,count,now))continue;   // before the support parser, as the commands
             if(ReceiveCommandNetwork(peer,sender.id,bytes,count,now))continue;
             support_net::Message message;
             if(support_net::Decode(bytes,count,message))session.Receive(peer,message,now);
@@ -199,9 +203,10 @@ void SupportNetTick() noexcept {
     }
     session.Tick(now);
     CommandContext(now);
+    QMarkContext(now);
     if(session.Suspended())SuspendSupportNet();
 }
-bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::size_t size) noexcept {
+bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::size_t size,std::uint64_t loadout) noexcept {
     SupportNetTick();
     if(blockedUntilMission) {
         Note(note,size,L"联机参与者同步已暂停，现有支援保留；重新开始关卡后可再呼叫");return false;
@@ -209,7 +214,7 @@ bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::s
     if(catalogId<0 || !running || !session.Ready()) {
         Note(note,size,L"联机支援尚未就绪：需全房同版全军出击与联机扩展，并完成关卡同步");return false;
     }
-    if(!session.Submit(static_cast<std::uint32_t>(catalogId),target,GetTickCount64())) {
+    if(!session.Submit(static_cast<std::uint32_t>(catalogId),target,GetTickCount64(),loadout)) {
         Note(note,size,L"支援请求未受理：已有部署、调用过快或本关支援额度已满");return false;
     }
     Note(note,size,L"支援请求已排队，等待房主验证与全员确认");return true;
@@ -223,6 +228,12 @@ void ReportSupportFailure(std::uint64_t transaction) noexcept {
 bool SupportTransactionActive(std::uint64_t transaction) noexcept { return session.IsActive(transaction); }
 bool SupportPeersAcceptVariants() noexcept { return !running || session.PeersHave(support_net::kCapSoldierVariants); }
 bool SupportPeersAcceptAirborne() noexcept { return !running || session.PeersHave(support_net::kCapAirborneAir); }
+bool SupportPeersAcceptTransports() noexcept { return !running || session.PeersHave(support_net::kCapTransports); }
+bool SupportPeersAcceptLoadout() noexcept { return !running || session.PeersHave(support_net::kCapLoadout); }
+bool SupportPeersHaveVariantFile(std::uint64_t hash) noexcept {
+    return !running || session.PeersHaveVariant(support_net::kExtVariants,hash);
+}
+bool SupportPeersApplyVariants() noexcept { return !running || session.PeersHaveVariant(support_net::kExtVariants,0); }
 bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) noexcept {
     if(!authenticatedPuid || !std::memchr(authenticatedPuid,0,65))return false;
     EDF6CoopPeer peer;

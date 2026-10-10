@@ -11,17 +11,28 @@
 // against exactly what was drawn (Hit) before taking it for a unit. tools/map_buttons_check.cpp runs it offline.
 #pragma once
 #include "mapcmd_logic.h"
+#include "support_call.h"
 #include <cstddef>
 #include <cwchar>
 
 namespace mapbtn {
 enum class Id : int {
     move, attackMove, guard, follow, release, engage, focus, board, dismount, dismiss, recruit,   // the orders
+    withdraw,                                                                                    // ...a squad's transport sent off
+    dismountAll,                                                                                 // ...every rider off, its crew too
     formation, split, merge,                                                                     // the squads' shape and fireteams
     sweep, health,                                                                               // the box sweep, its health-box switch
     count
 };
 constexpr int kCount=static_cast<int>(Id::count);
+// The card's order (the user, 2026-10-09: "解散解除交战集火是不是重叠了"; "看看还有什么指令能砍一砍…感觉还是有点复杂了"):
+// moving, vehicles, membership, STOP, then the squads' tools. Not on it (their keys and orders stay, the wire's values
+// unchanged): GUARD (an attack-move turns into one at its point; G gives an attack-move), ENGAGE AT WILL (an attack-move
+// on the spot), FOCUS FIRE (the right button on an enemy, or H). RECRUIT and DISMISS never both show (mapcmd.cpp Takes):
+// one button that reads as the squad's state. STOP (release) apart from DISMISS it was mistaken for.
+constexpr Id kCardOrder[]={Id::move,Id::attackMove,Id::follow,Id::board,Id::dismount,Id::dismountAll,Id::withdraw,Id::recruit,
+                           Id::dismiss,Id::release,Id::formation,Id::split,Id::merge,Id::sweep,Id::health};
+constexpr int kCardCount=static_cast<int>(sizeof(kCardOrder)/sizeof(kCardOrder[0]));
 constexpr int kOrders=static_cast<int>(Id::formation);
 struct Rect { float x0,y0,x1,y1; };
 
@@ -29,16 +40,23 @@ struct Rect { float x0,y0,x1,y1; };
 inline mapcmd::Order OrderOf(Id b) noexcept {
     using mapcmd::Order;
     static const Order kOrder[kOrders]={Order::move,Order::attackMove,Order::guard,Order::follow,Order::none,Order::engage,
-                                         Order::focus,Order::board,Order::dismount,Order::dismiss,Order::recruit};
+                                         Order::focus,Order::board,Order::dismount,Order::dismiss,Order::recruit,Order::withdraw,
+                                         Order::dismountAll};
     const int i=static_cast<int>(b);
     return i>=0 && i<kOrders ? kOrder[i] : Order::none;
 }
 inline bool IsOrder(Id b) noexcept { return static_cast<int>(b)>=0 && static_cast<int>(b)<kOrders; }
+// Whether `b` is a button of the card at all (GUARD, ENGAGE AT WILL and FOCUS FIRE are orders with no button).
+inline bool OnCard(Id b) noexcept {
+    for(const Id c:kCardOrder)if(c==b)return true;
+    return false;
+}
 // An order button arms a click on the map (its point) instead of acting at once.
 inline bool Arms(Id b) noexcept { return IsOrder(b) && mapcmd::PointOrder(OrderOf(b)); }
 // Shown on the card: an order the selection takes (`allowedOrders`: Order bits), a squad tool with squads selected,
 // the sweep and its switch always (they work on the recruited squads with nothing selected).
 inline bool Shown(Id b,std::uint32_t allowedOrders,bool squadTools) noexcept {
+    if(!OnCard(b))return false;
     if(IsOrder(b))return (allowedOrders&(1u<<static_cast<unsigned>(OrderOf(b))))!=0;
     if(b==Id::sweep || b==Id::health)return true;
     return squadTools;
@@ -80,6 +98,35 @@ inline int Flow(const float* w,int n,float width,float bottom,float rowH,float g
 inline int Hit(const Rect* r,int n,float x,float y) noexcept {
     for(int i=0;i<n;++i)if(x>=r[i].x0 && x<r[i].x1 && y>=r[i].y0 && y<r[i].y1)return i;
     return -1;
+}
+
+// --- The formation menu (the user, 2026-10-09: "这个编队应该点击以后展开选择里面的东西") ---
+// The formation button opens a column of the shapes to pick from (before, each click stepped to the next one: the log's
+// "formation: … the march column / staggered column / wedge / …" nine clicks in a row to get round to one). Its entries:
+// a guarding squad's defences (formation.h kGuard) and the march's shapes (kMarch), as MenuEntry codes.
+constexpr int kMenuGuard=0x100;
+inline int MenuEntry(bool guard,int shape) noexcept { return (guard ? kMenuGuard : 0)|(shape&0xFF); }
+inline bool MenuGuard(int entry) noexcept { return (entry&kMenuGuard)!=0; }
+inline int MenuShape(int entry) noexcept { return entry&0xFF; }
+// The column of `n` rows `rowW` x `rowH`, `gap` apart, over `button` (its bottom row on the button's top; under the button
+// when there is no room above), its left on the button's left, kept on a `width` x `height` screen. Returns the rows
+// placed (fewer when the screen runs out).
+inline int MenuColumn(const Rect& button,int n,float rowW,float rowH,float gap,float width,float height,Rect* out) noexcept {
+    if(n<=0)return 0;
+    const float total=static_cast<float>(n)*rowH+static_cast<float>(n-1)*gap;
+    float y0=button.y0-gap-total;
+    if(y0<0.0f)y0=button.y1+gap;
+    float x0=button.x0;
+    if(x0+rowW>width)x0=width-rowW;
+    if(x0<0.0f)x0=0.0f;
+    int placed=0;
+    for(int i=0;i<n;++i) {
+        const float y=y0+static_cast<float>(i)*(rowH+gap);
+        if(y+rowH>height)break;
+        out[i]=Rect{x0,y,x0+rowW,y+rowH};
+        ++placed;
+    }
+    return placed;
 }
 
 // --- The support bar ---
@@ -128,5 +175,96 @@ inline int Column(const Group* g,int rows,float x0,float x1,float top,float bott
         ++placed;
     }
     return placed;
+}
+
+// --- The support bar's composition panel (the user, 2026-10-09: "支援栏是断剑那种，先点载具，然后选里面的人并且可以点多次，
+// 直到座位满"; then: a click puts in a whole squad, not one soldier) ---
+// A support with seats (support_call.h SupportCallSeats: the infantry, the transports, a crewed APC / truck) armed from the
+// bar opens a panel beside it: its squads so far (a click on one takes it out, the ones after it move up), the seats they
+// use over the seats there are, and a row of squad kinds a class (Ranger, Wing Diver, Fencer). A click on a kind puts in
+// one more squad of it (kSquad soldiers: its leader template and three members); dim when the seats left hold no squad.
+// It starts from the load the call brings uncomposed (SupportCallPreset: the ini's weapons); the next left click on the
+// map sends it (SupportCallComposedAt). Every squad is its own squad aboard (a leader every four, support_call.h).
+// A click's code: a kind (0..kSupportWeaponCount-1), or squad j as -1 - j.
+constexpr int kSquad=4;
+constexpr int kComposeSquadsMost=crew::kSupportLoadoutMost/kSquad;
+constexpr int ComposeSquadCode(int squad) noexcept { return -1-squad; }
+constexpr int kComposeItems=kComposeSquadsMost+crew::kSupportWeaponCount;
+inline int ComposeSquads(const crew::SupportLoadout& l) noexcept { return (l.count+kSquad-1)/kSquad; }
+// Whether one more squad fits the seats.
+inline bool ComposeRoom(const crew::SupportLoadout& l,int seats) noexcept {
+    if(seats>crew::kSupportLoadoutMost)seats=crew::kSupportLoadoutMost;
+    return l.count+kSquad<=seats;
+}
+// The kind squad j shows (its members'; a lone leader's own).
+inline crew::SupportWeapon ComposeSquadKind(const crew::SupportLoadout& l,int j) noexcept {
+    const int i=j*kSquad;
+    return i+1<l.count ? l.soldier[i+1] : i<l.count ? l.soldier[i] : crew::SupportWeapon::rifle;
+}
+inline bool ComposeApply(crew::SupportLoadout& l,int seats,int code) noexcept {
+    if(code>=0) {
+        if(code>=crew::kSupportWeaponCount || !ComposeRoom(l,seats))return false;
+        for(int k=0;k<kSquad;++k)l.soldier[l.count++]=static_cast<crew::SupportWeapon>(code);
+        return true;
+    }
+    const int squad=-1-code,from=squad*kSquad;
+    if(squad<0 || from>=l.count)return false;
+    const int to=from+kSquad<l.count ? from+kSquad : l.count,gone=to-from;
+    for(int i=from;i+gone<l.count;++i)l.soldier[i]=l.soldier[i+gone];
+    for(int i=l.count-gone;i<l.count;++i)l.soldier[i]=crew::SupportWeapon::rifle;
+    l.count-=gone;return true;
+}
+// The kinds of a class in the panel's row order (support_call.h SupportSoldierClass).
+inline int ComposeKinds(int cls,int* out,int most) noexcept {
+    int n=0;
+    for(int k=0;k<crew::kSupportWeaponCount && n<most;++k)
+        if(crew::SupportSoldierClass(static_cast<crew::SupportWeapon>(k))==cls)out[n++]=k;
+    return n;
+}
+// Pixel sizes at 1080 lines (times the HUD scale `s`).
+constexpr float kComposePad=6.0f,kComposeTitleH=22.0f,kComposeSquadH=22.0f,kComposeGap=3.0f,
+                kComposeLabelW=66.0f,kComposeKindW=56.0f,kComposeKindH=22.0f,kComposeHintH=18.0f;
+constexpr int kComposeClasses=3;
+struct ComposeLayout {
+    Rect box{},title{},hint{};
+    int slots=0;Rect slot[kComposeSquadsMost]{};   // a squad's place each (the seats / kSquad), one row
+    Rect classLabel[kComposeClasses]{};
+    int kinds=0;Rect kind[crew::kSupportWeaponCount]{};int kindCode[crew::kSupportWeaponCount]{};
+};
+inline float ComposeWidth(float s) noexcept {
+    return (2*kComposePad+kComposeLabelW+5*kComposeKindW+4*kComposeGap)*s;
+}
+inline float ComposeHeight(float s) noexcept {
+    return (2*kComposePad+kComposeTitleH+kComposeSquadH+kComposeGap+kComposeClasses*(kComposeKindH+kComposeGap)+kComposeHintH)*s;
+}
+// The panel with its left edge at `x0`, its top at `top` but moved up to end above `bottom` (never above `ceiling`).
+inline ComposeLayout ComposePanel(float x0,float top,float ceiling,float bottom,int seats,float s) noexcept {
+    ComposeLayout L;
+    if(seats>crew::kSupportLoadoutMost)seats=crew::kSupportLoadoutMost;
+    const int slots=seats>0 ? (seats+kSquad-1)/kSquad : 0;
+    const float w=ComposeWidth(s),h=ComposeHeight(s);
+    if(top+h>bottom)top=bottom-h;
+    if(top<ceiling)top=ceiling;
+    L.box=Rect{x0,top,x0+w,top+h};
+    const float in=kComposePad*s,gap=kComposeGap*s;
+    float y=top+in;
+    L.title=Rect{x0+in,y,x0+w-in,y+kComposeTitleH*s};y+=kComposeTitleH*s;
+    L.slots=slots;
+    if(slots>0) {
+        const float sw=(w-2*in-static_cast<float>(kComposeSquadsMost-1)*gap)/static_cast<float>(kComposeSquadsMost);
+        for(int j=0;j<slots;++j){const float sx=x0+in+static_cast<float>(j)*(sw+gap);L.slot[j]=Rect{sx,y,sx+sw,y+kComposeSquadH*s};}
+    }
+    y+=kComposeSquadH*s+gap;
+    for(int c=0;c<kComposeClasses;++c) {
+        L.classLabel[c]=Rect{x0+in,y,x0+in+kComposeLabelW*s,y+kComposeKindH*s};
+        int kinds[crew::kSupportWeaponCount];const int n=ComposeKinds(c,kinds,crew::kSupportWeaponCount);
+        for(int k=0;k<n && L.kinds<crew::kSupportWeaponCount;++k) {
+            const float kx=x0+in+kComposeLabelW*s+static_cast<float>(k)*(kComposeKindW*s+gap);
+            L.kind[L.kinds]=Rect{kx,y,kx+kComposeKindW*s,y+kComposeKindH*s};L.kindCode[L.kinds++]=kinds[k];
+        }
+        y+=kComposeKindH*s+gap;
+    }
+    L.hint=Rect{x0+in,y,x0+w-in,y+kComposeHintH*s};
+    return L;
 }
 }  // namespace mapbtn

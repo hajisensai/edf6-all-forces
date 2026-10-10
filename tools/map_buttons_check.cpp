@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cwchar>
+#include <initializer_list>
 
 namespace {
 using namespace mapbtn;
@@ -21,9 +22,9 @@ void Check(bool ok,const char* what,double a=0.0,double b=0.0) {
 void Layouts() {
     const float screens[][2]={{1920.0f,1080.0f},{2520.0f,1080.0f},{1440.0f,1080.0f},{960.0f,1080.0f},{640.0f,1080.0f}};
     const float widths[][kCount]={
-        {80,110,90,90,90,110,90,100,90,90,120,80,80,150,190,120},     // English-ish
-        {70,90,70,70,70,70,70,70,70,70,90,70,70,120,170,100},         // Chinese-ish
-        {300,40,40,40,40,40,40,40,40,40,40,40,40,700,150,150},        // odd ones: one very long
+        {80,110,90,90,90,110,90,100,90,90,120,160,90,80,80,150,190,120},     // English-ish
+        {70,90,70,70,70,70,70,70,70,70,90,90,80,70,70,120,170,100},         // Chinese-ish
+        {300,40,40,40,40,40,40,40,40,40,40,40,40,40,40,700,150,150},        // odd ones: one very long
     };
     for(const auto& sc:screens)for(const auto& w:widths) {
         Rect r[kCount];
@@ -80,7 +81,17 @@ void Card() {
         shown+=Shown(b,vehicle,false);
         squadOnly+=Shown(b,vehicle,false) && (b==Id::recruit || b==Id::board || b==Id::formation || b==Id::split);
     }
-    Check(shown==6 && !squadOnly,"a vehicle selected: its four orders, the sweep and its switch; no squad order or tool",shown);
+    Check(shown==5 && !squadOnly,"a vehicle selected: move, attack-move, stop, the sweep and its switch; no squad order or tool",shown);
+    // The card cut down (the user, 2026-10-09: "看看还有什么指令能砍一砍…感觉还是有点复杂了"): GUARD, ENGAGE AT WILL and
+    // FOCUS FIRE have no button whatever the selection takes (G / the right button / H give them); ALL OUT has one.
+    const std::uint32_t every=0xFFFFFFFFu;
+    Check(!Shown(Id::guard,every,true) && !Shown(Id::engage,every,true) && !Shown(Id::focus,every,true),
+          "no GUARD / ENGAGE / FOCUS button");
+    Check(Shown(Id::dismountAll,1u<<static_cast<unsigned>(Order::dismountAll),false) && OrderOf(Id::dismountAll)==Order::dismountAll &&
+          !Arms(Id::dismountAll) && OrderOf(Id::withdraw)==Order::withdraw,"ALL OUT: its button, acting at once");
+    int card=0;
+    for(int i=0;i<kCount;++i)card+=OnCard(static_cast<Id>(i));
+    Check(card==kCardCount && card==kCount-3,"every button but the three cut is on the card once",card);
     int idle=0;
     for(int i=0;i<kCount;++i)idle+=Shown(static_cast<Id>(i),0u,false);
     Check(idle==2 && Shown(Id::sweep,0u,false) && Shown(Id::health,0u,false),"nothing selected: the sweep and its switch alone",idle);
@@ -129,10 +140,78 @@ void Support() {
     // Not enough room: the rows that fit.
     Check(Column(g,rows,x0,x1,top,top+3.0f*(rowH+gap),rowH,gap,inset,row,chip)==3,"a short column: the rows that fit");
 }
+// The formation menu (the user, 2026-10-09: "这个编队应该点击以后展开选择里面的东西"): its entries' codes, its column over
+// the button (under it with no room above), on the screen.
+void Menu() {
+    Check(MenuGuard(MenuEntry(true,10)) && MenuShape(MenuEntry(true,10))==10 && !MenuGuard(MenuEntry(false,3)) &&
+          MenuShape(MenuEntry(false,3))==3,"a menu entry: defence or march, and its shape");
+    const Rect button{900.0f,940.0f,1000.0f,970.0f};
+    Rect r[14]{};
+    const int placed=MenuColumn(button,14,180.0f,26.0f,2.0f,1920.0f,1080.0f,r);
+    bool above=placed==14,apart=true;
+    for(int i=0;i<placed;++i) {
+        above=above && r[i].y1<=button.y0 && r[i].x0==button.x0 && r[i].x1-r[i].x0==180.0f;
+        if(i)apart=apart && r[i].y0>=r[i-1].y1;
+    }
+    Check(above && apart && r[13].y1==button.y0-2.0f,"14 rows over the button, top-down, its bottom row on the button");
+    const Rect high{1850.0f,20.0f,1910.0f,50.0f};
+    const int below=MenuColumn(high,4,180.0f,26.0f,2.0f,1920.0f,1080.0f,r);
+    Check(below==4 && r[0].y0==high.y1+2.0f && r[0].x1<=1920.0f,"no room above: under the button, kept on the screen");
+    Check(MenuColumn(button,0,180.0f,26.0f,2.0f,1920.0f,1080.0f,r)==0,"no entries: no column");
+}
 }  // namespace
 
+// The support composition panel (the user, 2026-10-09: "支援栏是断剑那种，先点载具，然后选里面的人并且可以点多次，直到座位满";
+// a click a whole squad): ComposeApply adds a squad of four of a kind while one fits and takes a squad out; ComposePanel
+// lays its squad places, the kinds a class a row and the hint inside its box, apart, within the ceiling and the bottom.
+void Compose() {
+    using crew::SupportLoadout;using crew::SupportWeapon;
+    SupportLoadout l{};
+    Check(ComposeApply(l,12,static_cast<int>(SupportWeapon::wingLance)) && l.count==4 && l.soldier[0]==SupportWeapon::wingLance &&
+          l.soldier[3]==SupportWeapon::wingLance,"a kind's click: a whole squad of it");
+    Check(ComposeApply(l,12,static_cast<int>(SupportWeapon::fencerCannon)) && ComposeApply(l,12,0) && l.count==12,"three squads fill twelve seats");
+    Check(!ComposeRoom(l,12) && !ComposeApply(l,12,0) && l.count==12,"no room for a fourth: refused, nothing changes");
+    Check(ComposeSquads(l)==3 && ComposeSquadKind(l,1)==SupportWeapon::fencerCannon,"three squads, the second the Fencers");
+    Check(ComposeApply(l,12,ComposeSquadCode(0)) && l.count==8 && l.soldier[0]==SupportWeapon::fencerCannon &&
+          l.soldier[4]==SupportWeapon::rifle,"taking the first squad out moves the others up");
+    Check(!ComposeApply(l,12,ComposeSquadCode(2)) && !ComposeApply(l,12,crew::kSupportWeaponCount),"no third squad now; no such kind");
+    SupportLoadout apc{};
+    Check(ComposeApply(apc,4,0) && !ComposeRoom(apc,4) && !ComposeApply(apc,4,1),"an APC's four seats: one squad");
+    SupportLoadout tiny{};
+    Check(!ComposeApply(tiny,3,0) && tiny.count==0,"three seats hold no squad");
+    // A partial squad (an odd preset) is taken out whole.
+    SupportLoadout odd{};odd.count=6;
+    Check(ComposeSquads(odd)==2 && ComposeApply(odd,12,ComposeSquadCode(1)) && odd.count==4,"a partial second squad taken out whole");
+    int ranger[16],wing[16],fencer[16];
+    Check(ComposeKinds(0,ranger,16)==5 && ComposeKinds(1,wing,16)==5 && ComposeKinds(2,fencer,16)==4 &&
+          wing[0]==static_cast<int>(SupportWeapon::wingLance) && fencer[3]==static_cast<int>(SupportWeapon::fencerShotgun),
+          "the rows: five Rangers, five Wing Divers, four Fencers");
+    for(float sc:{0.75f,1.0f,1.5f,2.0f})for(int seats:{4,12}) {
+        const float ceiling=100.0f*sc,bottom=900.0f*sc;
+        for(float top:{120.0f*sc,880.0f*sc}) {
+            const ComposeLayout L=ComposePanel(250.0f*sc,top,ceiling,bottom,seats,sc);
+            Check(L.box.y0>=ceiling-0.01f && L.box.y1<=bottom+0.01f,"the panel within the ceiling and the bottom",sc,seats);
+            Check(L.slots==seats/kSquad && L.kinds==crew::kSupportWeaponCount,"a place a squad, every kind",L.slots,L.kinds);
+            Rect all[kComposeSquadsMost+crew::kSupportWeaponCount+2];int n=0;
+            for(int j=0;j<L.slots;++j)all[n++]=L.slot[j];
+            for(int k=0;k<L.kinds;++k)all[n++]=L.kind[k];
+            all[n++]=L.title;all[n++]=L.hint;
+            bool inside=true,apart=true;
+            for(int i=0;i<n;++i) {
+                inside=inside && all[i].x0>=L.box.x0-0.01f && all[i].x1<=L.box.x1+0.01f && all[i].y0>=L.box.y0-0.01f && all[i].y1<=L.box.y1+0.01f;
+                for(int j=i+1;j<n;++j)
+                    apart=apart && (all[i].x1<=all[j].x0+0.01f || all[j].x1<=all[i].x0+0.01f || all[i].y1<=all[j].y0+0.01f || all[j].y1<=all[i].y0+0.01f);
+            }
+            Check(inside,"every place, kind, title and hint inside the box",sc,seats);
+            Check(apart,"none of them overlapping",sc,seats);
+            for(int k=0;k<L.kinds;++k)Check(Hit(L.kind,L.kinds,(L.kind[k].x0+L.kind[k].x1)*0.5f,(L.kind[k].y0+L.kind[k].y1)*0.5f)==k,"a click on a kind finds it",k);
+            for(int c=0;c<kComposeClasses;++c)
+                Check(L.classLabel[c].x1<=L.kind[0].x0+0.01f,"the class names left of the kinds",c);
+        }
+    }
+}
 int main() {
-    Layouts();Card();Support();
+    Layouts();Card();Support();Menu();Compose();
     std::printf(failures ? "map_buttons_check: %d of %d FAILED\n" : "map_buttons_check: all %d ok\n",failures ? failures : cases,cases);
     return failures ? 1 : 0;
 }

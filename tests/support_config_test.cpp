@@ -11,6 +11,8 @@ namespace crew {
 const wchar_t* const keys[]={L"INTERCEPTOR",L"FIGHTER",L"HELI",L"SQUAD",L"PLATOON",L"TANK_CREWED"};
 int SupportCallCount() noexcept {return 6;}
 const wchar_t* SupportCallKey(int i) noexcept {return i>=0 && i<6 ? keys[i] : nullptr;}
+// SQUAD / PLATOON 12 seats, the others none (support_dispatch.cpp SupportCallSeats: a tank is called as it is).
+int SupportCallSeats(int i) noexcept {return i==3 || i==4 ? 12 : 0;}
 std::string lastLog;
 void Log(const char* fmt,...) noexcept {
     char line[1024];va_list a;va_start(a,fmt);vsnprintf(line,sizeof(line),fmt,a);va_end(a);lastLog=line;
