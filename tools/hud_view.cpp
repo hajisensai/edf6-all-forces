@@ -30,6 +30,7 @@
 //   python tools/hud_view.py DIR
 #include "../src/turretcam.h"
 #include "../src/hud.cpp"
+#include "../src/player_name.h"
 #include "../src/map_cam.h"
 #include <cstdio>
 #include <map>
@@ -199,6 +200,19 @@ bool PlayerMapCommands(MapCommandReadout* o) noexcept { if(hasMap)*o=sceneCmd;re
 // The NPCs' mark (npcai.cpp): none in these scenes but the ground one (GroundScene sets sceneMark).
 bool sceneMarkOn=false;float sceneMark[3]{};
 bool NpcMarkReadout(float* at) noexcept { if(sceneMarkOn)std::memcpy(at,sceneMark,12);return sceneMarkOn; }
+// The Q marks (qmark.cpp) with it: ours on that enemy, a teammate's (P2) on another one, a teammate's (P3) point.
+int QMarkViews(QMarkView* to,int max) noexcept {
+    if(!sceneMarkOn || max<3)return 0;
+    to[0]=QMarkView{true,true,-1,{sceneMark[0],sceneMark[1],sceneMark[2]}};
+    to[1]=QMarkView{false,true,1,{sceneMark[0]-60.0f,sceneMark[1]+4.0f,sceneMark[2]+40.0f}};
+    to[2]=QMarkView{false,false,2,{sceneMark[0]+45.0f,sceneMark[1]-6.0f,sceneMark[2]-60.0f}};
+    // Names as the game's name tag gives them (player_name.cpp FitName): a Japanese one, and a long mixed one cut.
+    const wchar_t* jp=L"さくら_EDF";
+    const wchar_t* longName=L"风暴战士 VeryLongCallsign 2026";
+    FitName(jp,std::wcslen(jp),to[1].name,kQMarkName);
+    FitName(longName,std::wcslen(longName),to[2].name,kQMarkName);
+    return 3;
+}
 // The squads' formation banner (npcai.cpp PlayerFormationCue): on in the npc_formation scene.
 int sceneFormation=-1;
 bool PlayerFormationCue(FormationCue* o) noexcept { if(sceneFormation<0)return false;o->shape=sceneFormation;o->key=0x54;return true; }

@@ -541,7 +541,7 @@ void SeeEnemyMark(void* ctx,const void* object,const float* aim) {
 // The enemy under the pointer (with a pad: the screen's centre), within the click's radius of one of its marks.
 void Hover(Game& g,const MapCmdInput& in,const View* v) noexcept {
     npcmark::Assign(g.hover,{});
-    if(!v || !npcmark::Enabled())return;
+    if(!v || !npcmark::MarkOn())return;
     if(!in.usingPad && UiAt(*v,g.pointer.x,g.pointer.y).kind!=Game::UiKind::none)return;
     EnemyMarks& e=enemyMarks;
     e.v=v;e.pin=PinOf(in);e.n=0;
@@ -900,7 +900,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     using hudtext::Tr;
     using hudtext::Tx;
     // The enemy under the pointer: the mark key marks it (or lets it go), the focus order marks it first.
-    if(markPress && g.eat && npcmark::Enabled() && npcmark::Alive(g.eatHover))
+    if(markPress && g.eat && npcmark::MarkOn() && npcmark::Alive(g.eatHover))
         Note(g,L"%ls",Tr(NpcMarkEnemy(g.eatHover.obj,g.eatAt,true) ? Tx::cmdMarked : Tx::cmdUnmarked));
     if(p.focus && npcmark::Alive(g.hover) && allowed && g.sel.n)NpcMarkEnemy(g.hover.obj,g.hoverAt,false);
     else if(rightFocus)p.focus=false;   // the enemy left between the press and here: no focus on an older mark
@@ -1029,7 +1029,7 @@ bool MapCommandEats(bool front) noexcept {
     if(GetTickCount64()-g.frameAt>kFreshMs)npcmark::Assign(g.hover,{});
     const int vk=Cfg().npcMarkKey;
     const bool down=front && vk>0 && Down(vk);
-    if(!down || !npcmark::Enabled()){g.eat=false;npcmark::Assign(g.eatHover,{});}
+    if(!down || !npcmark::MarkOn()){g.eat=false;npcmark::Assign(g.eatHover,{});}
     else if(!g.eatWas) {   // the press begins: the pointer's enemy of the last frame (Steer reads before the frame)
         g.eat=npcmark::Alive(g.hover);
         npcmark::Assign(g.eatHover,g.eat ? g.hover : ObjRef{});

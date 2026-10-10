@@ -36,6 +36,8 @@ bool NpcMarked() noexcept;
 ObjRef NpcMarkedIdentity() noexcept; // copied game-thread identity for an explicit per-squad focus command
 // The mark for the HUD (draw thread): where it is; false with none (or none published lately).
 bool NpcMarkReadout(float* at) noexcept;
+// The mark for qmark.cpp (game thread): the marked enemy (alive, the same object) and its last lock point.
+bool NpcMarkOwn(const void** object,float* at) noexcept;
 // The squads' formations (formation.h): the map's T on a selected squad cycles a guarding squad's defence
 // (CycleGuardFormation: the new shape, -1 when it guards nothing, -2 when it takes no orders) or the march of the
 // player's recruited squads (CycleMarchFormation: the new shape). The HUD's banner: the march's shape, shown a

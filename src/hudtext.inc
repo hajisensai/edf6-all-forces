@@ -440,6 +440,8 @@ HUDTEXT(squadFold,L"Click to fold: only the squads that take orders",L"点击收
         L"クリックでたたむ：指揮できる分隊のみ")
 HUDTEXT(npcMark,L"MARK",L"标记",L"標記",L"マーク")
 HUDTEXT(npcMarkRange,L"MARK %.0f m",L"标记 %.0f m",L"標記 %.0f m",L"マーク %.0f m")
+HUDTEXT(qmarkPlayer,L"P%d %.0f m",L"玩家%d %.0f m",L"玩家%d %.0f m",L"プレイヤー%d %.0f m")
+HUDTEXT(qmarkAlly,L"ALLY %.0f m",L"队友 %.0f m",L"隊友 %.0f m",L"味方 %.0f m")
 // The mark key on foot with no enemy near the centre (npcai.cpp SendToPoint): the units selected on the map sent there.
 HUDTEXT(npcPingSent,L"MOVE HERE: %d UNIT(S)",L"前往此处：%d 个单位",L"前往此處：%d 個單位",L"ここへ移動：%d ユニット")
 HUDTEXT(npcPingNearEnemy,L"AIM AT THE ENEMY TO MARK IT",L"对准敌人才能标记",L"對準敵人才能標記",L"敵に合わせるとマーク")

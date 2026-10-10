@@ -190,12 +190,16 @@ void PlayerLane(World& w) noexcept {
     w.lane=true;
 }
 
-// --- The mark (§6.3) ---
-// On foot, the map shut, the game in front: NpcMarkKey marks the enemy lock point nearest the screen's centre within
-// NpcMarkCone degrees (the same one again: the mark let go; another: the mark moves to it). With no enemy within
-// kPointClear times that cone it is a point instead: the units selected on the map (mapcmd.cpp) guard where the centre
-// meets the ground (MapCommandGuardAt), the mark kept; between the two (a near miss) nothing is done but a word that the
-// key marks what it is aimed at. In the map the key marks the enemy under the pointer (mapcmd.cpp NpcMarkEnemy).
+// --- The mark (§6.3): the custom Q (qmark.h) ---
+// On foot or riding, the map shut, the game in front: NpcMarkKey marks the enemy lock point nearest the aim within
+// NpcMarkCone degrees (the same one again: the mark let go; another: the mark moves to it). The aim is the mouse's where
+// the player's mode keeps it apart from the view (a heli's or a jet's mouse-aim flight), else the screen's centre
+// (QMarkRay; the user, 2026-10-10: "这个q应该在鼠标位置"). With no enemy within kPointClear times that cone it is a point
+// instead: marked on the ground for QMarkPointSec (QMarkSetPoint: the teammates see it too) and the units selected on the
+// map (mapcmd.cpp) sent to guard there (MapCommandGuardAt), the enemy mark kept; between the two (a near miss) nothing
+// is done but a word that the key marks what it is aimed at. In the map the key marks the enemy under the pointer
+// (mapcmd.cpp NpcMarkEnemy). It replaces the stock spot (VanillaSpot=0, turretaim.cpp), so it is on whenever the plugin
+// and the key are (npcmark::MarkOn), the custom NPC AI or not; the NPCs' priority on it is the AI's (npcmark::Enabled).
 // The key is read on the player's own frame (map.cpp MapHumanFrame -> NpcMarkFrame), not in a soldier's Think: the point
 // order is for any unit the map commands (helis, jets, tanks), with or without a friendly soldier in the mission.
 // The mark is kept until that enemy dies or is gone (the user, 2026-10-07: "标记效果应该先打死才换吧"): not only while its
@@ -214,10 +218,25 @@ constexpr float kMarkFar=2000.0f;   // m: no mark past this, no point past this
 constexpr float kPointClear=3.0f;   // the point needs no enemy within this many times NpcMarkCone of the centre
 constexpr ULONGLONG kPingMs=3000;   // wall ms a point's ring and its result are shown
 
-const Enemy* MarkedEnemy() noexcept {
-    if(!npcmark::Alive(mark.obj))return nullptr;
-    for(int i=0;i<world.enemies;++i)if(mark.obj.Is(world.enemy[i].object))return &world.enemy[i];
-    return nullptr;
+// The marked enemy an NPC at `from` goes for (§6.3): of this machine's mark and the teammates' (qmark.cpp
+// QMarkTeamEnemies: their marks reach the machine that runs the NPCs, the host or whichever is the authority), the one
+// nearest it, in this frame's enemy list. One rule for every mark, whoever made it (the user, 2026-10-10: "npc不是统一的
+// 吗，都去打"); a tie: this machine's. Null: none marked or none of them in the list.
+const Enemy* NearestMark(const float* from) noexcept {
+    const void* marks[1+kQMarkViews];
+    int n=0;
+    if(npcmark::Alive(mark.obj))marks[n++]=mark.obj.obj;
+    n+=QMarkTeamEnemies(marks+n,kQMarkViews);
+    const Enemy* best=nullptr;
+    float bestD=0.0f;
+    for(int k=0;k<n;++k)
+        for(int i=0;i<world.enemies;++i) {
+            if(world.enemy[i].object!=marks[k])continue;
+            const float d=npc::Dist(from,world.enemy[i].aim);
+            if(!best || d<bestD){best=&world.enemy[i];bestD=d;}
+            break;
+        }
+    return best;
 }
 
 // The marked object still the one marked and in the game (jet.cpp Alive) and alive.
@@ -239,17 +258,18 @@ void Mark(const void* object,const float* at) noexcept {
 
 void Ping(const float* at,int given) noexcept { ping=NpcPing{true,{at[0],at[1],at[2]},given,GetTickCount64()}; }
 
-// The point under the screen's centre the selected units are sent to (no enemy near the centre).
+// The point under the aim, marked; the selected units sent to it (no enemy near the aim).
 void SendToPoint(const float* eye,const float* dir) noexcept {
     const float end[3]={eye[0]+dir[0]*kMarkFar,eye[1]+dir[1]*kMarkFar,eye[2]+dir[2]*kMarkFar};
     float hit[3];
     if(!(MapFloorRay(eye,end,hit)>=0.0f) || !std::isfinite(hit[0]+hit[1]+hit[2])) {
-        Log("NPCAI mark: nothing near the screen's centre to mark, no ground under it");
+        Log("NPCAI mark: nothing near the aim to mark, no ground under it");
         return;
     }
+    QMarkSetPoint(hit);QMarkPlay(QMarkCue::own);
     const int given=MapCommandGuardAt(hit);
     Ping(hit,given);
-    Log("NPCAI mark: no enemy near the screen's centre: the point (%.0f,%.0f,%.0f) -> %d",hit[0],hit[1],hit[2],given);
+    Log("NPCAI mark: no enemy near the aim: the point (%.0f,%.0f,%.0f) marked -> %d unit(s) sent",hit[0],hit[1],hit[2],given);
 }
 
 // The enemy lock point nearest the centre's ray (the lock registry's lockable ones of the player's side's enemies).
@@ -263,9 +283,9 @@ void SeeAimed(void* ctx,const void* object,const float* aim) {
     if(off<a.off){a.off=off;a.best=object;std::memcpy(a.at,aim,12);}
 }
 
-void ToggleMark(std::int32_t team) noexcept {
+void ToggleMark(const unsigned char* human,std::int32_t team) noexcept {
     float eye[3],dir[3];
-    if(!CameraRay(eye,dir))return;
+    if(!QMarkRay(human,eye,dir))return;
     const float cone=Cfg().npcMarkCone*npc::kPi/180.0f;
     Aimed a{eye,dir,nullptr,cone*kPointClear,{}};
     VisitEnemiesOf(team,&SeeAimed,&a);
@@ -278,6 +298,7 @@ void ToggleMark(std::int32_t team) noexcept {
     const bool same=mark.obj.Is(a.best);
     if(same)npcmark::Assign(mark.obj,{});
     else Mark(a.best,a.at);
+    QMarkPlay(same ? QMarkCue::off : QMarkCue::own);
     Log("NPCAI mark: %s",same ? "let go" : "an enemy marked");
 }
 
@@ -286,9 +307,9 @@ void KeepMark() noexcept {
     if(MarkAlive()){LastSeen l{&mark.obj,mark.at};VisitLockPoints(&SeeMarked,&l);}
     else if(mark.obj){npcmark::Assign(mark.obj,{});Log("NPCAI mark: the marked enemy is dead or gone");}
     AcquireSRWLockExclusive(&markLock);
-    markPub.on=npcmark::Enabled() && static_cast<bool>(mark.obj);std::memcpy(markPub.at,mark.at,12);markPub.wall=GetTickCount64();
+    markPub.on=npcmark::MarkOn() && static_cast<bool>(mark.obj);std::memcpy(markPub.at,mark.at,12);markPub.wall=GetTickCount64();
     markPub.ping=ping;
-    if(!npcmark::Enabled())markPub.ping.on=false;
+    if(!npcmark::MarkOn())markPub.ping.on=false;
     ReleaseSRWLockExclusive(&markLock);
 }
 
@@ -964,7 +985,7 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     if(q && q->cmd.order==Order::focus && npcmark::Alive(q->commandFocus)) {
         for(int i=0;i<world.enemies;++i)if(q->commandFocus.Is(world.enemy[i].object)){commandTarget=&world.enemy[i];break;}
     }
-    if(const Enemy* m=commandTarget ? commandTarget : MarkedEnemy()) {
+    if(const Enemy* m=commandTarget ? commandTarget : NearestMark(eye)) {
         float reach=0.0f;
         for(int i=0;i<a.n;++i)if(a.arm[i].reach>reach)reach=a.arm[i].reach;
         const bool focus=commandTarget!=nullptr;
@@ -2565,7 +2586,7 @@ void NpcGunnersInput(unsigned char* v) noexcept {
         }
         if(!(reach>0.0f))continue;
         GunnerPick p{Pos(v),reach,nullptr,1e30f};
-        const Enemy* const m=world.frame==GameFrame() ? MarkedEnemy() : nullptr;   // the soldiers' list of this frame only
+        const Enemy* const m=world.frame==GameFrame() ? NearestMark(Pos(v)) : nullptr;   // the soldiers' list of this frame only
         if(m && npc::Dist(Pos(v),m->aim)<=reach){p.best=m->object;p.bestD=npc::Dist(Pos(v),m->aim);}
         else VisitEnemies(v,&GunnerVisit,&p);
         if(p.best) {
@@ -2583,11 +2604,17 @@ void NpcGunnersInput(unsigned char* v) noexcept {
 bool NpcMarked() noexcept { return npcmark::Enabled() && MarkAlive(); }
 
 bool NpcMarkEnemy(const void* object,const float* at,bool toggle) noexcept {
-    if(!npcmark::Enabled() || !npcmark::Capture(object))return false;
+    if(!npcmark::MarkOn() || !npcmark::Capture(object))return false;
     const bool same=mark.obj.Is(object);
-    if(toggle && same){npcmark::Assign(mark.obj,{});Log("NPCAI mark: let go (the map)");return false;}
-    if(!same)Log("NPCAI mark: an enemy marked (the map)");
+    if(toggle && same){npcmark::Assign(mark.obj,{});QMarkPlay(QMarkCue::off);Log("NPCAI mark: let go (the map)");return false;}
+    if(!same){QMarkPlay(QMarkCue::own);Log("NPCAI mark: an enemy marked (the map)");}
     Mark(object,at);
+    return true;
+}
+
+bool NpcMarkOwn(const void** object,float* at) noexcept {
+    if(!npcmark::MarkOn() || !MarkAlive())return false;
+    *object=mark.obj.obj;std::memcpy(at,mark.at,12);
     return true;
 }
 
@@ -2598,10 +2625,12 @@ void NpcMarkFrame(unsigned char* human,bool mapOpen) noexcept {
     const bool down=c.npcMarkKey>0 && pid==GetCurrentProcessId() && (GetAsyncKeyState(c.npcMarkKey)&0x8000)!=0;
     // Held is followed while the map holds the keys too: a press made in the map (mapcmd.cpp) and still down when it
     // closes is not a second press on foot.
-    if(down && !mark.held && !mapOpen && !MapHoldsKeys() && c.enabled && c.customNpcAi && HumanOnFoot(human))
-        ToggleMark(At<std::int32_t>(human,kTeam));
+    // On foot and riding alike (the stock spot it replaces was both; EDF6AutoTurret's lock on the same key reads the key
+    // itself, so a turret seat still locks as well).
+    if(down && !mark.held && !mapOpen && !MapHoldsKeys() && npcmark::MarkOn())ToggleMark(human,At<std::int32_t>(human,kTeam));
     mark.held=down;
     KeepMark();
+    QMarkFrame();
 }
 
 bool NpcMarkReadout(float* at) noexcept {

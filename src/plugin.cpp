@@ -287,6 +287,8 @@ void Validate(Config& n) noexcept {
     Fix("NpcSquadJoinRange",n.npcSquadJoinRange,0.0f,2000.0f);
     n.npcMarkKey=static_cast<int>(FixInt("NpcMarkKey",n.npcMarkKey,0,254));
     Fix("NpcMarkCone",n.npcMarkCone,1.0f,45.0f);
+    Fix("QMarkPointSec",n.qmarkPointSec,1.0f,600.0f);
+    Fix("QMarkVolume",n.qmarkVolume,0.0f,2.0f);
     n.npcFormation=static_cast<int>(FixInt("NpcFormation",n.npcFormation,0,10));
     n.npcFormationKey=static_cast<int>(FixInt("NpcFormationKey",n.npcFormationKey,0,254));
     Fix("NpcFormationSpacing",n.npcFormationSpacing,2.0f,30.0f);
@@ -600,6 +602,9 @@ void LoadConfig() noexcept {
     n.npcGunners=ReadBool(L"NpcGunners",n.npcGunners);
     n.npcMarkKey=ReadInt(L"NpcMarkKey",static_cast<DWORD>(n.npcMarkKey));
     n.npcMarkCone=ReadFloat(L"NpcMarkCone",n.npcMarkCone);
+    n.qmarkPointSec=ReadFloat(L"QMarkPointSec",n.qmarkPointSec);
+    n.qmarkVolume=ReadFloat(L"QMarkVolume",n.qmarkVolume);
+    n.vanillaSpot=ReadBool(L"VanillaSpot",n.vanillaSpot);
     n.npcFormation=ReadInt(L"NpcFormation",static_cast<DWORD>(n.npcFormation));
     n.npcFormationKey=ReadInt(L"NpcFormationKey",static_cast<DWORD>(n.npcFormationKey));
     n.npcFormationSpacing=ReadFloat(L"NpcFormationSpacing",n.npcFormationSpacing);
@@ -658,6 +663,7 @@ void LoadConfig() noexcept {
         n.npcDangerRange,n.npcGrabRange,n.npcCrowd,n.npcRollSec,n.npcRetreatHp,n.npcLeash);
     Log("CONFIG npcSquadSuccession=%d min=%d max=%d joinRange=%.0f",n.npcSquadSuccession,n.npcSquadMin,n.npcSquadMax,n.npcSquadJoinRange);
     Log("CONFIG npc markKey=0x%X markCone=%.0f boarding=%d gunners=%d",n.npcMarkKey,n.npcMarkCone,n.npcBoarding,n.npcGunners);
+    Log("CONFIG qmark pointSec=%.0f volume=%.2f vanillaSpot=%d",n.qmarkPointSec,n.qmarkVolume,n.vanillaSpot);
     Log("CONFIG npc formation=%d key=0x%X spacing=%.1f guard=%d",n.npcFormation,n.npcFormationKey,n.npcFormationSpacing,n.npcGuardFormation);
     Log("CONFIG npc pickup key=0x%X range=%.0f sec=%.0f health=%d",n.npcPickupKey,n.npcPickupRange,n.npcPickupSec,n.npcPickupHealth);
     Log("CONFIG npc guardRadius=%.0f freeRange=%.0f recruitCooldown=%.0fs",n.npcGuardRadius,n.npcFreeRange,n.npcRecruitCooldownSec);
@@ -889,7 +895,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallKatyusha();      // the Katyusha's launcher pose: the arc onto the camera's ground point, the telescopic ram
     InstallNix();           // the Nix's torso twist: its own update (slot 4) chained, apart from the crews' input slot
     InstallTurretCam();     // the riding camera of a turret (decoupled from it, free look, the high view's placement)
-    InstallSpotRay();       // the stock spot (Q) from a vehicle: along the camera actually drawn (turretaim.cpp)
+    InstallSpotRay();       // the stock spot (Q): off for this machine's players (VanillaSpot=0), else along the drawn camera
     InstallStabilizer();    // the gun stabilizer, after the aim steps the turret camera chains (it runs from its hook)
     InstallProteus();       // the Proteus rework: its weapon mounts, shield barrier, piles and field
     InstallMap();           // the map view (the player's camera overhead, their input held while it is open)
