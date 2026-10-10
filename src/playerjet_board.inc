@@ -390,8 +390,8 @@ void HoverStep(PJet& j,unsigned char* v,const Stick& s,const float* pos,float cl
     const float face[3]={pos[0]+fwd[0]*100.0f,pos[1],pos[2]+fwd[2]*100.0f};
     const float sink=-j.measured[1];
     HoverTo(*e,k,v,pos,want,vz,face,dt);
-    if(clear!=kNoGround && clear<kTouch && j.fresh && sink>j.kind->landMax)Crash(j,v,sink,0.0f,false,ms,nullptr);
-    if(wet)Crash(j,v,0.0f,0.0f,false,ms,nullptr);   // afloat: it breaks up, one crash a kCrashMs
+    if(clear!=kNoGround && clear<kTouch && j.fresh && sink>j.kind->landMax)Crash(j,v,sink,0.0f,0.0f,false,ms,nullptr);
+    if(wet)Crash(j,v,0.0f,0.0f,0.0f,false,ms,nullptr);   // afloat: it breaks up, one crash a kCrashMs
     if(v[kDead]){j.active=false;return;}
     HoverDone(j,*e,k,v,pos,clear,asked<0.1f && vz<=0.0f,dt,ms);
 }
