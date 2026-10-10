@@ -29,6 +29,7 @@ off it (vcobjects.jet_sgo) has its bottom on the wheels' contact points.
 from __future__ import annotations
 
 import math
+import struct
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
@@ -366,31 +367,52 @@ def frame(origin: Vec3, z_axis: Vec3) -> Mat:
     return [x[0], x[1], x[2], 0.0, 0.0, 1.0, 0.0, 0.0, z[0], z[1], z[2], 0.0, origin[0], origin[1], origin[2], 1.0]
 
 
-def insert_bones(md: Mdb, parent: int, new: list[tuple[str, Mat]]) -> tuple[Mdb, list[int]]:
-    """`md` with skin bones (kind 3, bounded) under `parent`, bind matrices `new` (name, model-space bind), placed
-    right after `parent`'s subtree (preorder kept): later bones, object bones and parents renumbered. Blend indices
-    must all lie before the insertion (checked: none is renumbered). Returns the model and the new bones' indices."""
+def _renumber_skin(me: Mesh, moved: Callable[[int], int]) -> Mesh:
+    """A skinned mesh with every blend index i made moved(i), in place in its vertex bytes (nothing else touched)."""
+    out = bytearray(me.vdata)
+    for e in me.elems:
+        if e.name.upper() != 'BLENDINDICES':
+            continue
+        _req(e.fmt == 21, f'blend indices stored as format {e.fmt}, not ubyte4')
+        for v in range(me.nverts):
+            at = v * me.vsize + e.offset
+            struct.pack_into('<4B', out, at, *(moved(x) for x in struct.unpack_from('<4B', out, at)))
+    return replace(me, vdata=bytes(out))
+
+
+def insert_bones(md: Mdb, parent: int, new: list[tuple[str, Mat]], kind: int = 3, bounded: int = 1,
+                 half: list[float] | None = None, renumber_skin: bool = False) -> tuple[Mdb, list[int]]:
+    """`md` with bones (skin bones by default: kind 3, bounded) under `parent`, bind matrices `new` (name, model-space
+    bind), placed right after `parent`'s subtree (preorder kept): later bones, object bones and parents renumbered.
+    `half`: their half extents (+0xA0; default none). Blend indices must all lie before the insertion (checked: none is
+    renumbered) unless `renumber_skin`, which renumbers those after it with the bones. Returns the model and the new
+    bones' indices."""
     at = max(g.subtree(md, parent)) + 1
     n = len(new)
 
     def moved(i: int) -> int:
         return i if i < at else i + n
+    meshes_moved = False
     for o in md.objects:
         for me in o.meshes:
             if me.flags[1]:
                 bi, _bw = g.skin_columns(me)
-                _req(all(int(x) < at for i4 in bi for x in i4), 'a skinned vertex on a bone the insertion moves')
+                past = any(int(x) >= at for i4 in bi for x in i4)
+                _req(not past or renumber_skin, 'a skinned vertex on a bone the insertion moves')
+                meshes_moved = meshes_moved or past
     names = list(md.names)
     w = bind_world(md)
     bones = [replace(b, index=moved(b.index), parent=moved(b.parent) if b.parent >= 0 else -1) for b in md.bones]
     added = []
     for k, (name, bind) in enumerate(new):
         local = mmul(bind, inverse_affine(w[parent]))
-        added.append(Bone(at + k, parent, -1, -1, g._name_index(names, name), 0, 3, 0, 1, 0, 0, local,
-                          inverse_affine(bind), [0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]))
+        added.append(Bone(at + k, parent, -1, -1, g._name_index(names, name), 0, kind, 0, bounded, 0, 0, local,
+                          inverse_affine(bind), list(half) if half else [0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]))
     bones = bones[:at] + added + bones[at:]
     link(bones)
-    objects = [replace(o, bone=moved(o.bone)) for o in md.objects]
+    objects = [replace(o, bone=moved(o.bone),
+                       meshes=[_renumber_skin(me, moved) if me.flags[1] and meshes_moved else me for me in o.meshes])
+               for o in md.objects]
     return replace(md, names=names, bones=bones, objects=objects, buffer_order=None), list(range(at, at + n))
 
 

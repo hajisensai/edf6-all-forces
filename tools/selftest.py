@@ -128,49 +128,111 @@ def range_writes_every_generated_sgo_its_script_creates() -> None:
 
 
 @test
-def jet_nozzles_on_their_models() -> None:
-    """src/booster.cpp kJetNozzles: each mark's nozzles those of its model (pylib/jet_models.py NOZZLES: on the exit's
-    centre), its flame as big as that engine (width the exit's diameter, length FLAME_LENGTH_PER_DIAMETER of it), and
-    every jet mark has a row."""
+def exhausts_come_from_the_models() -> None:
+    """The flames and the arrival smoke are placed only from the models (the user, 2026-10-10: 「尾烟应该跟着模型生成，而不是
+    用两段可能不同步的代码维护」): src/booster.cpp keeps no nozzle table of its own (the jets' by mark, the carrier's locators,
+    the stock bombers') and takes both from ExhaustOf; the plugin's names for the bones are pylib/jet_models.py's; the stock
+    models' table (src/nozzles_gen.h) is what tools/gen_nozzles.py makes (re-measured with the game, else checked against its
+    own record); every plugin model with an exhaust makes nozzle bones (with the game: on its exits / the V508's boosters)."""
+    import gen_nozzles
     import jet_models
-    from vcobjects import JETS
-    carrier = 'EDF6VC_CARRIER.MRAB'
-    num = r'([-\d.]+)f'
-    vec = r'\{' + num + ',' + num + ',' + num + r'\}'
-    rows = {}
-    for m in re.finditer(r'\{(\d+)\.0f,(\d),\{' + vec + ',' + vec + r'\},\{' + num + ',' + num + r'\}\}',
-                         src('src/booster.cpp')):
-        count = int(m.group(2))
-        at = [tuple(float(m.group(k)) for k in range(3 + 3 * n, 6 + 3 * n)) for n in range(count)]
-        rows[float(m.group(1))] = (at, (float(m.group(9)), float(m.group(10))))
-    bad = []
-    for name, jet in JETS.items():
-        if jet.file is not None and (jet.file not in jet_models.MODELS or jet.file == carrier):
-            continue   # the carrier's four nozzles are its own (CarrierFlames); the Primers' fighter flaps: no exhaust
-        if jet.mark not in rows:
-            bad.append(f'{name}: mark {jet.mark} has no nozzle row')
-            continue
-        want = jet_models.NOZZLES[jet.file or jet.box_model]   # the gunship: the stock bomber401 it flies
-        got, size = rows[jet.mark]
-        d = want[0][1]
-        if len(got) != len(want) or any(abs(a - b) >= 0.005 for g, (w, _d) in zip(got, want) for a, b in zip(g, w)):
-            bad.append(f'{name}: {got}, the model has {[w for w, _d in want]}')
-        if abs(size[1] - d) >= 0.005 or abs(size[0] - jet_models.FLAME_LENGTH_PER_DIAMETER * d) >= 0.01:
-            bad.append(f'{name}: flame {size}, its engine {d} m across')
-    assert len(rows) >= 10, f'{len(rows)} nozzle rows parsed: the pattern no longer reads the table'
-    table = src('src/booster.cpp').split('kBomberNozzles[]={', 1)[1].split('};', 1)[0]
-    for name in ('bomber401', 'bomber501_2'):
-        m = re.search(r'\{0\.0f,(\d),\{' + vec + ',' + vec + r'\},\{' + num + ',' + num + r'\}\},\s*// JetBody::'
-                      + name + r'\n', table)
-        assert m, f'src/booster.cpp kBomberNozzles: no {name} row'
-        want = jet_models.NOZZLES[name]
-        got = [tuple(float(m.group(k)) for k in range(2 + 3 * n, 5 + 3 * n)) for n in range(int(m.group(1)))]
-        d = want[0][1]
-        if len(got) != len(want) or any(abs(a - b) >= 0.005 for g, (w, _d) in zip(got, want) for a, b in zip(g, w)):
-            bad.append(f'{name}: {got}, the model has {[w for w, _d in want]}')
-        if abs(float(m.group(9)) - d) >= 0.005 or abs(float(m.group(8)) - jet_models.FLAME_LENGTH_PER_DIAMETER * d) >= 0.01:
-            bad.append(f'{name}: flame {m.group(8)} x {m.group(9)}, its engine {d} m across')
-    assert not bad, '\n'.join(bad)
+    import rootcpk
+    booster = src('src/booster.cpp')
+    for gone in ('kJetNozzles', 'kBomberNozzles', 'kNozzleAt', 'NozzlesOf', 'ExhaustBasis', 'CarrierFlames'):
+        assert gone not in booster, f'src/booster.cpp: {gone} (a nozzle table or path of its own) is back'
+    assert not hasattr(jet_models, 'NOZZLES'), 'pylib/jet_models.py: a hand-copied NOZZLES table is back'
+    flames = booster.split('void JetFrame(', 1)[1].split('\n}\n', 1)[0]
+    smoke = booster.split('void SmokeFrame(', 1)[1].split('\n}\n', 1)[0]
+    assert 'ExhaustOf(v,ms)' in flames and 'e->world[i]' in flames, 'the flames do not take ExhaustOf\'s nozzles'
+    assert 'ExhaustOf(v,ms)' in smoke and 'e->world[i]' in smoke, 'the smoke does not take ExhaustOf\'s nozzles'
+    header = src('src/exhaust_nozzles.h')
+    prefix = re.search(r'kNozzlePrefix\[\]=L"([^"]+)"', header)
+    most = re.search(r'constexpr int kMaxNozzles=(\d+);', header)
+    assert prefix and prefix.group(1) == jet_models.NOZZLE_BONE, f'{prefix and prefix.group(1)} vs {jet_models.NOZZLE_BONE}'
+    assert most and int(most.group(1)) == jet_models.MAX_NOZZLES, f'{most and most.group(1)} vs {jet_models.MAX_NOZZLES}'
+    assert 'JetFlames(v,' in src('src/jet_flight.cpp').split('void Thrusters(', 1)[1].split('\n}\n', 1)[0], \
+        'the carrier lights its pods\' flames through JetFlames'
+    have = os.path.isfile(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk'))
+    why = gen_nozzles.check(rootcpk.Game(rootcpk.DEFAULT_GAME) if have else None)
+    assert why is None, f'src/nozzles_gen.h is stale ({why}): python tools/gen_nozzles.py'
+    exhaust = [f for f in jet_models.MODELS if f == jet_models.CARRIER_FILE or f in jet_models.NOZZLE_EXITS]
+    assert sorted(exhaust) == sorted(jet_models.MODELS), f'a plugin model without nozzles: {set(jet_models.MODELS) - set(exhaust)}'
+    if have:
+        game = rootcpk.Game(rootcpk.DEFAULT_GAME)
+        for f in [None, *jet_models.MODELS]:
+            md = jet_models._model_of(game, f)
+            want = jet_models.nozzles_for(game, jet_models.strip_nozzles(md), f) if f is not None else \
+                jet_models.exit_nozzles(jet_models.strip_nozzles(md), None)
+            jet_models.check_nozzle_bones(md, want)
+            assert len(want) == (4 if f == jet_models.CARRIER_FILE else 1 if f == 'EDF6VC_DRONE.MRAB' else 2), f'{f}: {len(want)}'
+
+
+def _nozzle_model() -> 'object':
+    """A stand-in jet model: mdl; body (skin) with a pod (skin) and a tail (skin) under it, then the object's bone; one
+    skinned triangle on each skin bone (its blend index that bone), and on the body a hexagonal exhaust rim 0.5 m across
+    the corners round (2, 1) at z -5."""
+    import struct
+    from mdb import Bone, MatParam, MatTex, Material, Mdb, Mesh, Object, VElem
+    import mdb_jet
+    ident = [1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0]
+
+    def at(x: float, y: float, z: float) -> list[float]:
+        return ident[:12] + [x, y, z, 1.0]
+    binds = [ident, ident, at(4.0, 0.0, 1.0), at(0.0, 2.0, -6.0), ident]
+    parents = [-1, 0, 1, 1, 0]
+    kinds = [0, 3, 3, 3, 2]
+    bones = [Bone(i, parents[i], -1, -1, i, 0, kinds[i], 0, int(kinds[i] == 3), 0, 0, list(binds[i]), list(binds[i]),
+                  [0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]) for i in range(5)]
+    for i in (2, 3):   # inverse binds: their binds are translations
+        bones[i].inv_bind = ident[:12] + [-binds[i][12], -binds[i][13], -binds[i][14], 1.0]
+    mdb_jet.link(bones)
+    elems = [VElem(4, 0, 0, 'position'), VElem(1, 12, 0, 'BLENDWEIGHT'), VElem(21, 28, 0, 'BLENDINDICES')]
+    import math
+    pts = [((2.0 + 0.25 * math.cos(k * math.pi / 3), 1.0 + 0.25 * math.sin(k * math.pi / 3), -5.0), 1) for k in range(6)]
+    pts += [((4.0, 0.0, 1.0), 2), ((4.5, 0.0, 1.0), 2), ((4.0, 0.5, 1.0), 2), ((0.0, 2.0, -6.0), 3), ((0.0, 2.5, -6.0), 3),
+            ((0.5, 2.0, -6.0), 3)]
+    rows = b''.join(struct.pack('<3f4f4B', *p, 1.0, 0.0, 0.0, 0.0, bone, 0, 0, 0) for p, bone in pts)
+    tris = struct.pack('<12H', 0, 1, 2, 0, 2, 3, 6, 7, 8, 9, 10, 11)
+    me = Mesh(bytes((0, 1, 1, 0)), 0, 0, 32, elems, 0, rows, tris)
+    mat = Material(0, 0, 0, 3, 'snd_BRDF_Common_Basic', [MatParam([0.5, 0.5, 0.5, 0.0], (0, 0), 'diffuse', 0x402)],
+                   [MatTex(0, 'albedo', (0,) * 5)], 3)
+    return Mdb(0x20, ['mdl', 'body', 'pod', 'tail', 'body_mesh', 'Material'], bones, [Object(4, 4, [me])], [mat], [])
+
+
+@test
+def nozzle_bones_in_a_made_model() -> None:
+    """pylib/jet_models.py with_nozzles on a stand-in model (no game): a nozzle measured on the body's exit rim (its centre,
+    its diameter, the flame FLAME_LENGTH_PER_DIAMETER of it, leaving along -z) and one on the pod (the carrier's kind) are
+    bones nozzle_0 / nozzle_1, transform only and unbounded, right after their parents' subtrees, at those binds with those
+    flames (check_nozzle_bones, also on the model written and read back); the skinned vertices on the bones the insertion
+    moved (the tail's) still on the tail; strip_nozzles gives the model back byte for byte."""
+    import math
+    import jet_models
+    from mdb import bind_world, mdb_read, mdb_write
+    md = _nozzle_model()
+    jet_models.NOZZLE_EXITS['standin'] = (((1.6, 2.4), (0.6, 1.4), (-5.1, -4.9)), False)
+    try:
+        body = jet_models.exit_nozzles(md, 'standin')
+    finally:
+        del jet_models.NOZZLE_EXITS['standin']
+    assert len(body) == 1 and body[0].parent == 'body', body
+    (c, d), = [((body[0].bind[12], body[0].bind[13], body[0].bind[14]), body[0].width)]
+    area = 3 * 3 ** 0.5 / 2 * 0.25 ** 2
+    assert max(abs(a - b) for a, b in zip(c, (2.0, 1.0, -5.0))) < 1e-6 and abs(d - 2 * (area / math.pi) ** 0.5) < 1e-4, (c, d)
+    assert abs(body[0].length - jet_models.FLAME_LENGTH_PER_DIAMETER * d) < 1e-3 and body[0].bind[8:11] == (0.0, 0.0, -1.0), body[0]
+    pod = jet_models.NozzleBone('pod', jet_models.turned_at((4.0, -0.1, -2.0)), 40.0, 12.0)
+    want = [body[0], pod]
+    out = jet_models.with_nozzles(md, want)
+    names = [out.name_of(b.name) for b in out.bones]
+    assert names == ['mdl', 'body', 'pod', 'nozzle_1', 'tail', 'nozzle_0', 'body_mesh'], names
+    jet_models.check_nozzle_bones(out, want)
+    back = mdb_read(mdb_write(out))
+    jet_models.check_nozzle_bones(back, want)
+    assert [x[0] for x in jet_models._skin_names(back)] == ['body'] * 6 + ['pod'] * 3 + ['tail'] * 3, jet_models._skin_names(back)
+    assert back.objects[0].bone == back.bone_index('body_mesh')
+    w = bind_world(back)
+    assert max(abs(a - b) for a, b in zip(w[back.bone_index('nozzle_1')][12:15], (4.0, -0.1, -2.0))) < 1e-5
+    assert mdb_write(jet_models.strip_nozzles(out)) == mdb_write(md), 'strip_nozzles does not give the model back'
 
 
 @test

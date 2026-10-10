@@ -261,7 +261,7 @@ def build(root: str) -> dict[str, bytes]:
         out[f'OBJECT/{name}'] = data
     for model, name in jet_models.ANIMATIONS.items():
         out[f'OBJECT/{name}'] = jet_models.animation(game, model)
-    jet_models.check_nozzles(game)   # the plugin's flames (src/booster.cpp kJetNozzles) on these models' exits
+    # (each model's nozzle bones, the flames' and the arrival smoke's, are checked on its exits by jet_models.build / elevon_archive)
     import primer_fighter_model   # the Primer fighter's own model (not a jet_models recipe)
     arc = primer_fighter_model.build(game)
     primer_fighter_model.check(arc)
