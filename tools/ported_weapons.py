@@ -18,9 +18,11 @@ weapons (calls.ID_PREFIX), never these.
 """
 from __future__ import annotations
 
+import collections
 import copy
 import json
 import os
+import struct
 import sys
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -32,6 +34,7 @@ import calls  # noqa: E402
 import dsgo  # noqa: E402
 import edf5port  # noqa: E402
 import gamedir  # noqa: E402
+import mab_legacy  # noqa: E402
 import mdb  # noqa: E402
 import rootcpk  # noqa: E402
 import sgo  # noqa: E402
@@ -159,31 +162,70 @@ def _swap_cues(v: dsgo.Value, cues: dict[str, str]) -> dsgo.Value:
     return v
 
 
-_BONES: dict[str, list[tuple[str, int]]] = {}
+class Models:
+    """What EDF6 holds about the models the ported weapons show, read once per install: each model's bones, and the
+    nodes EDF6's own weapons on it give their locators (edf5port.fit_locators' `prefer`). `stock(rel)` reads EDF6's
+    file; `weapons` names EDF6's weapon SGOs (WEAPON/<name>), () for none (then only the root is preferred)."""
+
+    def __init__(self, stock, weapons: tuple[str, ...] = ()) -> None:  # noqa: ANN001 - see build_sgo
+        self.stock = stock
+        self.weapons = weapons
+        self._bones: dict[str, list[tuple[str, int]]] = {}
+        self._nodes: dict[str, dict[str, str]] | None = None
+
+    @staticmethod
+    def model_of(doc: dsgo.Document) -> tuple[str, str] | None:
+        if 'animation_model' not in doc.root.names.values():
+            return None
+        rab, name = doc.root.get('animation_model').items[0].items[:2]
+        return rab, name
+
+    def bones(self, doc: dsgo.Document) -> list[tuple[str, int]]:
+        """(name, parent) of every bone of the EDF6 model the weapon `doc` shows (animation_model[0]: its RAB, the MDB
+        in it); [] for a weapon without a model (Weapon_Accessory). edf5port.Unsupported when EDF6 lacks that model or
+        it does not read."""
+        model = self.model_of(doc)
+        if model is None:
+            return []
+        rab, name = model
+        key = f'{rab}|{name}'.lower()
+        if key not in self._bones:
+            folder, _, file = rab.split(':/', 1)[-1].rpartition('/')
+            try:
+                archive = mdb.rab_read(self.stock(f'{folder.upper()}/{file.upper()}'))
+                found = mdb.mdb_read(next(f for f in archive.files if f.name.lower() == name.lower()).data)
+            except (KeyError, ValueError, StopIteration, AssertionError, IndexError, struct.error) as e:
+                raise edf5port.Unsupported(f'model {rab} {name} not in EDF6 or unreadable: {e!r}') from e
+            self._bones[key] = [(found.name_of(b.name), b.parent) for b in found.bones]
+        return self._bones[key]
+
+    def preferred(self, doc: dsgo.Document) -> dict[str, str]:
+        """{locator name: the node EDF6's own weapons on this weapon's model hang it on} (the most of them)."""
+        model = self.model_of(doc)
+        if model is None:
+            return {}
+        if self._nodes is None:
+            votes: dict[str, dict[str, collections.Counter]] = {}
+            for name in self.weapons:
+                try:
+                    root = dsgo.parse(self.stock(f'WEAPON/{name}')).root
+                    if 'animation_model' not in root.names.values():
+                        continue
+                    am = root.get('animation_model')
+                    rab = am.items[0].items[0].lower()
+                    for loc, node in mab_legacy.mab_locator_nodes(am.items[2].data):
+                        votes.setdefault(rab, {}).setdefault(loc, collections.Counter())[node] += 1
+                except (KeyError, ValueError, AttributeError, IndexError, struct.error):
+                    continue   # not a weapon with a MAB block: nothing to learn from it
+            self._nodes = {rab: {loc: c.most_common(1)[0][0] for loc, c in locs.items()} for rab, locs in votes.items()}
+        return self._nodes.get(model[0].lower(), {})
 
 
-def model_bones(stock, doc: dsgo.Document) -> list[tuple[str, int]]:  # noqa: ANN001 - see build_sgo
-    """(name, parent) of every bone of the EDF6 model the weapon `doc` shows (animation_model[0]: its RAB, the MDB
-    in it); [] for a weapon without a model (Weapon_Accessory). edf5port.Unsupported when EDF6 lacks that model."""
-    if 'animation_model' not in doc.root.names.values():
-        return []
-    rab, name = doc.root.get('animation_model').items[0].items[:2]
-    key = f'{rab}|{name}'.lower()
-    if key not in _BONES:
-        folder, _, file = rab.split(':/', 1)[-1].rpartition('/')
-        try:
-            archive = mdb.rab_read(stock(f'{folder.upper()}/{file.upper()}'))
-            model = mdb.mdb_read(next(f for f in archive.files if f.name.lower() == name.lower()).data)
-        except (KeyError, ValueError, StopIteration) as e:
-            raise edf5port.Unsupported(f'model {rab} {name} not in EDF6: {e!r}') from e
-        _BONES[key] = [(model.name_of(b.name), b.parent) for b in model.bones]
-    return _BONES[key]
-
-
-def build_sgo(p: Port, stock, root: str | None) -> bytes:  # noqa: ANN001 - stock(rel) -> bytes, the EDF6 file
+def build_sgo(p: Port, stock, root: str | None, models: Models | None = None) -> bytes:  # noqa: ANN001 - stock(rel) -> bytes, the EDF6 file
     """The installed SGO of `p`: EDF6's own copy, or its game's converted (edf5port) from that game's install at
-    `root`. Unavailable: the game is not there or lacks the file; edf5port.Unsupported: something in it this conversion
-    does not carry."""
+    `root`, its MAB locators on bones of its EDF6 model (`models`: Models(stock) when not given, the root then the only
+    bone a missing node moves to). Unavailable: the game is not there or lacks the file; edf5port.Unsupported:
+    something in it this conversion does not carry."""
     if p.source == 'edf6':
         return stock(f'WEAPON/{p.sgo.upper()}')
     if p.weapon is not None:   # converted when the registry was made (EDF5's): the game is not needed
@@ -197,7 +239,8 @@ def build_sgo(p: Port, stock, root: str | None) -> bytes:  # noqa: ANN001 - stoc
         except KeyError as e:
             raise Unavailable(f"{name}'s Root.cpk has no WEAPON/{p.sgo}") from e
         doc = BY_GAME[p.game].convert(sgo.read(data)[1], _names(p))
-    edf5port.fit_locators(doc, model_bones(stock, doc))
+    models = models or Models(stock)
+    edf5port.fit_locators(doc, models.bones(doc), models.preferred(doc))
     if p.damage_attribute is not None:
         doc.root.set('AmmoDamageAttribute', Node([float(v) for v in p.damage_attribute.values()],
                                                  dict(enumerate(p.damage_attribute))))
@@ -214,11 +257,16 @@ def build_sgo(p: Port, stock, root: str | None) -> bytes:  # noqa: ANN001 - stoc
 def build(edf6_root: str, stock) -> tuple[dict[str, bytes], dict[str, str]]:  # noqa: ANN001 - see build_sgo
     """({port id: its SGO} for every port this machine can build, {port id: why not} for the others)."""
     roots = {g.key: game_root(g, edf6_root) for g in GAMES}
+    try:   # EDF6's weapons, for the nodes its own weapons hang locators on (Models.preferred)
+        weapons = tuple(n for d, n in rootcpk.Game(edf6_root).cpk.index if d.upper() == 'WEAPON' and n.upper().endswith('.SGO'))
+    except (OSError, ValueError, KeyError):   # a stand-in game without a Root.cpk: the root only
+        weapons = ()
+    models = Models(stock, weapons)
     out: dict[str, bytes] = {}
     why: dict[str, str] = {}
     for p in PORTS:
         try:
-            out[p.id] = build_sgo(p, stock, roots[p.game])
+            out[p.id] = build_sgo(p, stock, roots[p.game], models)
         except (Unavailable, edf5port.Unsupported) as e:
             why[p.id] = f'{type(e).__name__}: {e}'
     return out, why

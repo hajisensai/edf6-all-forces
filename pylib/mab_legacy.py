@@ -169,12 +169,43 @@ def _text_at(b: bytes, at: int) -> str:
     return b[at:e].decode('utf-16le')
 
 
+def mab_locator_nodes(b: bytes) -> list[tuple[str, str]]:
+    """(name, node) of every record of the block, every list's, in order; ValueError on a layout mab_layout refuses."""
+    mab_layout(b)
+    nlists = struct.unpack_from('<H', b, 0x0C)[0]
+    head, end = struct.unpack_from('<II', b, 0x14)
+    flag = struct.unpack_from('<I', b, 8)[0]
+    base = (lambda r: r) if flag == RELATIVE else (lambda r: 0)
+    return [(_text_at(b, base(r) + _i32(b, r)), _text_at(b, base(r) + _i32(b, r + 4)))
+            for r in range(head + 8 * nlists, end, RECORD)]
+
+
+def _sjis_units(s: str) -> int:
+    try:
+        return len(s.encode('cp932'))
+    except UnicodeEncodeError:   # no Shift-JIS form: its UTF-16 length (no EDF6 block has one)
+        return len(s.encode('utf-16le')) // 2
+
+
+def _string_area(texts: set[str], at: int) -> tuple[bytes, dict[str, int]]:
+    """(the string area, {string: where it starts}) the way EDF6's exporter writes it: each string once, in the order
+    of its Shift-JIS bytes, in (its Shift-JIS bytes + 1) UTF-16 units, NUL-filled past its text (a kanji name takes
+    twice its characters: '排莢' 10 bytes, not 6). Measured on every weapon MAB of EDF6's Root.cpk, 1676 blocks, all
+    reproduced (UTF-16 order fails 132, unpadded slots 382)."""
+    data, where = b'', {}
+    for s in sorted(texts, key=lambda s: s.encode('cp932', 'replace')):
+        where[s] = at + len(data)
+        raw = s.encode('utf-16le')
+        data += raw + b'\0' * (2 * (_sjis_units(s) + 1) - len(raw))
+    return data, where
+
+
 def mab_set_strings(b: bytes, changes: dict[int, str]) -> bytes:
     """EDF6's 0x83 block `b` with the string field at each address in `changes` (a record's +0 name / +4 node, a
-    track's +8, a key's +0) now naming its new string. The string area is laid out again as EDF6 lays its own: every
-    string still pointed at, once, NUL-ended, in UTF-16 order, nothing else (edf5port.fit_locators: a 4.1 / EDF5
-    weapon's locator node 'mdl' -> its EDF6 model's root; tools/selftest.py ported_weapon_locators_fit). ValueError on
-    another layout, or an address that is not a string field."""
+    track's +8, a key's +0) now naming its new string. The string area is laid out again as EDF6 lays its own
+    (_string_area: every block of EDF6's weapons comes back byte for byte when nothing changes, tools/selftest.py
+    mab_strings_relaid_as_the_game); edf5port.fit_locators moves a 4.1 / EDF5 weapon's locators onto bones its EDF6
+    model has. ValueError on another layout, or an address that is not a string field."""
     lay = mab_layout(b)
     if lay.flag != RELATIVE:
         raise ValueError(f'MAB 标志是 {lay.flag:#x}，不是 EDF6 的 0x83')
@@ -182,10 +213,7 @@ def mab_set_strings(b: bytes, changes: dict[int, str]) -> bytes:
     if not set(changes) <= {at for at, _b, _t in fields}:
         raise ValueError(f'MAB 里 {sorted(set(changes) - {at for at, _b, _t in fields})} 不是字符串偏移')
     value = {at: changes.get(at, _text_at(b, to)) for at, _b, to in fields}
-    data, where = b'', {}
-    for s in sorted(set(value.values()), key=lambda s: s.encode('utf-16le')):
-        where[s] = lay.strings_at + len(data)
-        data += s.encode('utf-16le') + b'\0\0'
+    data, where = _string_area(set(value.values()), lay.strings_at)
     if len(data) > 0xFFFF:
         raise ValueError('MAB 字符串区超过 u16')
     out = bytearray(b[:lay.strings_at] + data)

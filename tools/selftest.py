@@ -5789,6 +5789,13 @@ def ported_weapon_locators_fit() -> None:
     d = doc_of(block)
     edf5port.fit_locators(d, [('mdl', -1), ('barrel', 0)])
     assert block_of(d) == block, 'a block whose nodes are all bones changed'
+    d = doc_of(block)
+    edf5port.fit_locators(d, [('w_model', -1), ('barrel', 0), ('slide', 1)], {'muzzle': 'slide', 'grip': 'w_model'})
+    assert [n for _name, n, _at in vc.mab_muzzles(block_of(d))] == ['slide', 'barrel', 'w_model'], \
+        'a preferred bone did not win over the root (or moved a locator whose node is a bone)'
+    d = doc_of(block)
+    edf5port.fit_locators(d, [('a', -1), ('b', -1), ('barrel', 0)], {'muzzle': 'a', 'z_aim': 'b'})
+    assert [n for _name, n, _at in vc.mab_muzzles(block_of(d))] == ['a', 'barrel', 'b'], 'preferred bones, no root'
     for bones, why in (([('a', -1), ('b', -1), ('barrel', 0)], 'two roots'),
                        ([], 'no bones')):
         try:
@@ -5803,6 +5810,14 @@ def ported_weapon_locators_fit() -> None:
         pass
     else:
         raise AssertionError('a block without a muzzle was taken (EDF.dll divides by the muzzles found)')
+    cut = bytearray(block)   # its records said to run past its end: followed unchecked, a struct.error ends the install
+    struct.pack_into('<I', cut, 0x18, len(block) + 0x1000)
+    try:
+        edf5port.fit_locators(doc_of(bytes(cut)), [('w_model', -1)])
+    except edf5port.Unsupported:
+        pass
+    else:
+        raise AssertionError('a block mab_layout refuses was followed')
     try:
         mab_legacy.mab_set_strings(block, {0x24: 'x'})
     except ValueError:
@@ -5815,8 +5830,9 @@ def ported_weapon_locators_fit() -> None:
 def ported_weapon_locators_fit_real() -> None:
     """With the games: every ported weapon (EDF5's, EDF4.1's) as installed hangs every locator of its MAB on a bone
     of its EDF6 model (EDF.dll finds no muzzle otherwise, ported_weapon_locators_fit), and where fit_locators moved
-    one and EDF6 ships a weapon on the same model laid out alike, the strings are the developers' (their blocks differ
-    from these only in re-authored positions)."""
+    one, it went where EDF6's own weapons on that model hang a locator of that name (Models.preferred: the Hercules
+    sniper's on 'body', not the root), and where EDF6 ships a weapon on the same model laid out alike, the strings are
+    the developers' (their blocks differ from these only in re-authored positions)."""
     import struct
     import edf5port
     import mab_legacy
@@ -5841,11 +5857,13 @@ def ported_weapon_locators_fit_real() -> None:
             if 'animation_model' in r.names.values():
                 am = r.get('animation_model')
                 developers.setdefault(am.items[0].items[0].lower(), []).append(am.items[2].data)
-    built = moved = like = 0
+    weapons = tuple(n for d, n in g6.cpk.index if d.upper() == 'WEAPON' and n.upper().endswith('.SGO'))
+    models = pw.Models(stock, weapons)
+    built = moved = like = preferred = 0
     fit = edf5port.fit_locators
     for p in pw.PORTS:
         try:
-            r = dsgo.parse(pw.build_sgo(p, stock, roots[p.game])).root
+            r = dsgo.parse(pw.build_sgo(p, stock, roots[p.game], models)).root
         except pw.Unavailable:
             continue
         built += 1
@@ -5853,18 +5871,22 @@ def ported_weapon_locators_fit_real() -> None:
             continue
         am = r.get('animation_model')
         b = am.items[2].data
-        bones = {n for n, _parent in pw.model_bones(stock, dsgo.Document(r, []))}
-        nlists, head, end = struct.unpack_from('<H', b, 0x0C)[0], *struct.unpack_from('<II', b, 0x14)
-        nodes = [strings(b)[r + 4] for r in range(head + 8 * nlists, end, 0x20)]
-        assert nodes and set(nodes) <= bones, f'{p.id}: locator node(s) {sorted(set(nodes) - bones)} not in its model'
-        edf5port.fit_locators = lambda doc, bones: None   # noqa: E731 - the block as converted, before the fit
+        bones = {n for n, _parent in models.bones(dsgo.Document(r, []))}
+        after = mab_legacy.mab_locator_nodes(b)
+        assert after and {n for _l, n in after} <= bones, f'{p.id}: locator node(s) not in its model'
+        edf5port.fit_locators = lambda doc, bones, prefer=None: None   # noqa: E731 - the block as converted, unfitted
         try:
-            before = dsgo.parse(pw.build_sgo(p, stock, roots[p.game])).root.get('animation_model').items[2].data
+            before = dsgo.parse(pw.build_sgo(p, stock, roots[p.game], models)).root.get('animation_model').items[2].data
         finally:
             edf5port.fit_locators = fit
         if before == b:
             continue
         moved += 1
+        want = models.preferred(dsgo.Document(r, []))
+        for (loc, old), (_loc, new) in zip(mab_legacy.mab_locator_nodes(before), after):
+            if old not in bones and want.get(loc) in bones:
+                preferred += 1
+                assert new == want[loc], f'{p.id} {loc}: moved to {new}, EDF6\'s weapons on its model use {want[loc]}'
         alike = [d for d in developers.get(am.items[0].items[0].lower(), []) if len(d) == len(b)]
         if alike:
             like += 1
@@ -5872,8 +5894,37 @@ def ported_weapon_locators_fit_real() -> None:
     if not built:
         print('skip  ported_weapon_locators_fit_real: no ported weapon could be built')
         return
-    assert moved and like, f'{moved} blocks moved, {like} beside a developer block: this check is empty'
-    print(f'  {built} weapons built, {moved} with locators moved, {like} checked against the developers\' blocks')
+    assert moved and like and preferred, f'{moved} blocks moved, {like} beside a developer block, {preferred} ' \
+                                         'locators the developers place: this check is empty'
+    print(f'  {built} weapons built, {moved} with locators moved, {like} checked against the developers\' blocks, '
+          f'{preferred} locators where the developers put them')
+
+
+@test
+def mab_strings_relaid_as_the_game() -> None:
+    """pylib/mab_legacy.py mab_set_strings lays the string area as EDF6's exporter does (_string_area: Shift-JIS order,
+    each string in its Shift-JIS bytes + 1 UTF-16 units): every weapon MAB of EDF6's Root.cpk, re-laid with nothing
+    renamed, comes back byte for byte (so a renamed block is the game's own layout too)."""
+    import mab_legacy
+    import rootcpk
+    edf6 = rootcpk.DEFAULT_GAME
+    if not os.path.isfile(os.path.join(edf6, 'Root.cpk')):
+        print('skip  mab_strings_relaid_as_the_game: needs EDF6 installed')
+        return
+    g6 = rootcpk.Game(edf6)
+    count = kanji = 0
+    for folder, name in g6.cpk.index:
+        if folder.upper() != 'WEAPON' or not name.upper().endswith('.SGO'):
+            continue
+        r = dsgo.parse(g6.read(folder, name)).root
+        if 'animation_model' not in r.names.values():
+            continue
+        b = r.get('animation_model').items[2].data
+        assert mab_legacy.mab_set_strings(b, {}) == b, f'{name}: its MAB laid out again differs'
+        count += 1
+        kanji += any(not loc.isascii() for loc, _node in mab_legacy.mab_locator_nodes(b))
+    assert count > 1000 and kanji > 100, f'{count} blocks, {kanji} with a kanji name: this check is empty'
+
 
 def _dsgo_strings(v: dsgo.Value) -> list[str]:
     if isinstance(v, str):

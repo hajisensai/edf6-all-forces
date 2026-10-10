@@ -140,7 +140,7 @@ def weapon41(members: dict[str, object], names: dict[str, str]) -> dsgo.Document
     return doc
 
 
-def fit_locators(doc: dsgo.Document, bones: list[tuple[str, int]]) -> None:
+def fit_locators(doc: dsgo.Document, bones: list[tuple[str, int]], prefer: dict[str, str] | None = None) -> None:
     """Hang every locator of the weapon's MAB block (animation_model[2]: the muzzles of list 0, the grips and the rest
     of the other lists) on a bone its EDF6 model has; `bones` is that model's (name, parent) list.
     EDF.dll skips a muzzle whose node the model lacks and then takes every shot's muzzle as (shots % muzzles found):
@@ -148,10 +148,12 @@ def fit_locators(doc: dsgo.Document, bones: list[tuple[str, int]]) -> None:
     4.1 Wing Diver weapon). EDF6 re-exported many models EDF4.1 / EDF5 share with it, the root bone 'mdl' renamed
     after the model (p_lazer_LAZR01: 4.1 ['mdl', 'p_lazer_LAZR01'], EDF6 ['p_lazer_LAZR01', 'polymesh']); the
     developers' own ports of those weapons hang every locator that was on it on the new root and change nothing else
-    in the block (tools/selftest.py ported_weapon_locators_fit). So does this: a missing node becomes the model's one
-    root. Every locator of every EDF6 weapon names a bone of its model, and each model has one root (2026-10-10, every
-    weapon file of Root.cpk). Unsupported when the block has no muzzle, or a node is missing and the model has no single
-    root to move it to."""
+    in the block (tools/selftest.py ported_weapon_locators_fit). So does this: a missing node becomes the node EDF6's
+    own weapons on that model give a locator of that name (`prefer`: {record name: node}; the Hercules sniper's
+    s_sniper_hercules01, a sibling of body in 4.1, is 'body' in all five of EDF6's), else the model's one root.
+    Every locator of every EDF6 weapon names a bone of its model, and each model has one root (2026-10-10, every
+    weapon file of Root.cpk). Unsupported when the block is not a MAB mab_legacy reads, has no muzzle, or a node is
+    missing and neither a preferred bone nor a single root takes it."""
     if 'animation_model' not in doc.root.names.values():
         return
     am = doc.root.get('animation_model')
@@ -159,22 +161,34 @@ def fit_locators(doc: dsgo.Document, bones: list[tuple[str, int]]) -> None:
     if not isinstance(block, Blob) or block.data[:4] != b'MAB\0':
         raise Unsupported('animation_model has no MAB block')
     b = block.data
+    try:
+        mab_legacy.mab_layout(b)   # every offset and string checked before one is followed
+    except (ValueError, struct.error) as e:
+        raise Unsupported(f'MAB block: {e}') from e
     nlists = struct.unpack_from('<H', b, 0x0C)[0]
     head, records_end = struct.unpack_from('<II', b, 0x14)
     if not nlists or not struct.unpack_from('<H', b, head + 2)[0]:
         raise Unsupported('the MAB block has no muzzle')
     names = {name for name, _parent in bones}
-    nodes = {r + 4: mab_legacy._text_at(b, r + struct.unpack_from('<i', b, r + 4)[0])
-             for r in range(head + 8 * nlists, records_end, mab_legacy.RECORD)}
-    missing = [at for at, node in nodes.items() if node not in names]
+    records = range(head + 8 * nlists, records_end, mab_legacy.RECORD)
+    text = {r: (mab_legacy._text_at(b, r + struct.unpack_from('<i', b, r)[0]),
+                mab_legacy._text_at(b, r + struct.unpack_from('<i', b, r + 4)[0])) for r in records}
+    missing = [r for r, (_name, node) in text.items() if node not in names]
     if not missing:
         return
     roots = [name for name, parent in bones if parent == -1]
-    if len(roots) != 1:
-        raise Unsupported(f'locator node(s) {sorted({nodes[at] for at in missing})} not in the model, '
-                          f'and it has {len(roots)} root bones to hang them on')
+    moved: dict[int, str] = {}
+    for r in missing:
+        want = (prefer or {}).get(text[r][0])
+        if want in names:
+            moved[r + 4] = want
+        elif len(roots) == 1:
+            moved[r + 4] = roots[0]
+        else:
+            raise Unsupported(f'locator {text[r][0]!r} on {text[r][1]!r}, not in the model, which has no '
+                              f'preferred bone for it and {len(roots)} root bones')
     try:
-        am.items[2] = Blob(mab_legacy.mab_set_strings(b, {at: roots[0] for at in missing}), block.kind)
+        am.items[2] = Blob(mab_legacy.mab_set_strings(b, moved), block.kind)
     except (ValueError, struct.error) as e:   # a layout mab_legacy refuses: this weapon stays out
         raise Unsupported(f'MAB block: {e}') from e
 
