@@ -434,6 +434,11 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
                 Refuse(catalog,"a peer runs an older All Forces without the sea rescue entry",hudtext::Tr(hudtext::Tx::supportRescueNeedsUpdate));
                 return PlanResult::refused;
             }
+            // Its hull must be preloaded this mission (as the transports' are checked): else nothing would be made.
+            if(!SupportAircraftReady(spec)) {
+                Refuse(catalog,"EDF6VC_HELI_410.SGO not installed / preloaded",L"救援直升机资源未安装或本关未预载：请用安装器重新安装");
+                return PlanResult::refused;
+            }
         } else if(!Cfg().jetAirRaider || !Cfg().npcBoarding || (spec.heli>=0 ? !Cfg().heliPilot : !Cfg().jetPilot)) {
             Refuse(catalog,"JetAirRaider/NpcBoarding/HeliPilot/JetPilot off",L"航空支援或真实机组驾驶功能未启用");return PlanResult::refused;
         }

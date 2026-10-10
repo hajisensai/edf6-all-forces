@@ -181,15 +181,21 @@ void Features(std::uint32_t caps,bool command,wchar_t* out,std::size_t size) noe
         {support_net::kCapAirborneAir,Tx::versionFeatAir},{support_net::kCapTransports,Tx::versionFeatTransport},
         {support_net::kCapLoadout,Tx::versionFeatCompose},{FeatureExt(support_net::kExtVariants),Tx::versionFeatVariants},
         {support_net::kCapSoldierVariants,Tx::versionFeatLoadout}};
+    // At most kNamed named, then "and more": the line stays within the HUD's one line.
+    constexpr int kNamed=3;
+    int named=0;bool more=false;
     const auto add=[&](const wchar_t* word) noexcept {
+        if(named>=kNamed){more=true;return;}
         const std::size_t used=std::wcslen(out);
         _snwprintf_s(out+used,size-used,_TRUNCATE,L"%ls%ls",used ? Tr(Tx::versionListSep) : L"",word);
+        ++named;
     };
     // Without the rescue at all, its channel goes unsaid (the line stays within the HUD's one line).
     if(caps&FeatureExt(support_net::kExtSeaRescue))caps&=~FeatureExt(support_net::kExtRescueChannel);
     for(const auto& n:kNames)if(caps&n.bit)add(Tr(n.text));
     if(command)add(Tr(Tx::versionFeatCommand));
     if(!out[0])add(Tr(Tx::versionFeatSome));
+    if(more){const std::size_t used=std::wcslen(out);_snwprintf_s(out+used,size-used,_TRUNCATE,L"%ls",Tr(Tx::versionListMore));}
 }
 // The room's builds compared (version_notice.h), said once a change: logged, and shown on the HUD a while.
 void VersionTick(bool online) noexcept {

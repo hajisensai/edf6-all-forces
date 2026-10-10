@@ -550,6 +550,7 @@ HUDTEXT(versionFeatVariants,L"coloured / armed support variants",L"支援外观�
 HUDTEXT(versionFeatCommand,L"map order sync",L"地图指挥（M 地图对 NPC 下令）同步",L"地圖指揮（M 地圖對 NPC 下令）同步",L"マップ指揮（NPC への命令）の同期")
 HUDTEXT(versionFeatSome,L"some newer features",L"部分新功能",L"部分新功能",L"一部の新機能")
 HUDTEXT(versionListSep,L", ",L"、",L"、",L"、")
+HUDTEXT(versionListMore,L" and more",L"等",L"等",L"など")
 HUDTEXT(supportInfantryArrived,L"Infantry support has arrived and is guarding the destination",L"步兵支援已抵达并守卫目的地",L"步兵支援已抵達並守衛目的地",L"歩兵支援が到着し目的地を警戒しています")
 
 HUDTEXT(mapPayloadTitle,L"LOADOUT - click bright rows to select",L"挂载：点击亮色条目切换",L"掛載：點擊亮色項目切換",L"兵装：明るい行をクリックして選択")

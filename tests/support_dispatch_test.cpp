@@ -789,6 +789,9 @@ int main() {
     check(!SupportRescueAt(sea,note,128) && !made && std::wcsstr(note,L"开放天空"),"no open sky: refused with its reason");
     planRefusal=support::Refusal::noEntry;
     check(!SupportRescueAt(sea,note,128) && !made && std::wcsstr(note,L"航线"),"no air corridor: refused with its reason");
+    planRefusal=support::Refusal::none;transportReady=false;
+    check(!SupportRescueAt(sea,note,128) && !made && std::wcsstr(note,L"救援直升机资源"),"its 410 not preloaded: refused with why");
+    transportReady=true;
     planRefusal=support::Refusal::none;
     seatFail=true;deleted=0;const int handed=rescueDeployed;
     check(!SupportRescueAt(sea,note,128) && rescueDeployed==handed && deleted==3,"a crew that cannot take its seats: rolled back, nothing handed over");
