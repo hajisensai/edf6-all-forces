@@ -523,11 +523,13 @@ class _Emit:
         self.out = bytearray(b[:0x30])
         self.strings: list[tuple[int, int]] = []     # (new field, old string)
         self.kinds: dict[int, str] = {}              # new struct start -> kind
+        self.sources: dict[int, int] = {}            # new struct start -> where it was copied from
 
     def put(self, old: int, size: int, kind: str, grow: int = 0) -> int:
         at = len(self.out)
         self.out += self.b[old:old + size] + bytes(grow)
         self.kinds[at] = kind
+        self.sources[at] = old
         if old in self.lay.string_fields and kind in ('tcontrol', 'vcontrol', 'anmgroup', 'bone', 'mcanm'):
             self.strings.append((at, old + _u(self.b, '<i', old)[0]))
         return at

@@ -5995,6 +5995,62 @@ def ported_assets_bundled() -> None:
                 assert f.read() == legacy_assets.convert(source, g5.read(*source.split('/'))), rel
 
 
+
+@test
+def cas_graft_players() -> None:
+    """pylib/cas_graft.py: grafting no group gives every EDF6 CAS back byte for byte (the re-emission and the CANM
+    edit change nothing of the target's); EDF4.1's carriers (CAS converted) get EDF6's carrier players in_ring /
+    out_ring, which UfoCarrier508 resolves unchecked (a crash on spawn without them): the groups and their tcontrols
+    after the target's own, renumbered to them, each with a trackless clip of its own after the target's clips, every
+    clip of the target's as it was."""
+    import cas_graft
+    import cas_legacy
+    import cas_pose
+    import gamedir
+    import rootcpk
+    import struct
+    edf6 = rootcpk.DEFAULT_GAME
+    if not os.path.isfile(os.path.join(edf6, 'Root.cpk')):
+        print('skip  cas_graft_players: needs EDF6 installed')
+        return
+    g6 = rootcpk.Game(edf6)
+    donor = g6.read('OBJECT', 'E508_CARRIER.CAS')
+    count = 0
+    for folder, name in g6.cpk.index:
+        if name.upper().endswith('.CAS') and folder.upper() == 'OBJECT':
+            b = g6.read(folder, name)
+            assert cas_graft.graft(b, donor, []) == b, f'{name}: grafting nothing changed it'
+            count += 1
+    assert count > 100, count
+    edf41 = gamedir.find_other(gamedir.EDF41, near=edf6)
+    if not edf41:
+        print('skip  cas_graft_players (4.1 carriers): EDF4.1 not installed')
+        return
+    g4 = rootcpk.Game(edf41)
+
+    def name_at(b: bytes, at: int) -> str:
+        return cas_legacy._text(b, at + struct.unpack_from('<i', b, at)[0])
+
+    for n in ('UFOCARRIER301.CAS', 'UFOCARRIER401.CAS'):
+        target = cas_legacy.cas_from_legacy(g4.read('OBJECT', n))
+        out = cas_graft.graft(target, donor, ['in_ring', 'out_ring'])
+        lay = cas_legacy.cas_layout(out)
+        groups = {name_at(out, at): ms for at, ms in lay.tree.anmgroups}
+        assert set(groups) == {'main', 'in_ring', 'out_ring'}, sorted(groups)
+        tcs = [name_at(out, at) for at, _w in lay.tree.tcontrols]
+        assert tcs[-2:] == ['t_in_rotation_add', 't_out_rotation_add'], tcs
+        before, after = cas_pose.CasPose(target), cas_pose.CasPose(out)
+        assert [(c.name, [t.name for t in c.tracks]) for c in after.clips[:len(before.clips)]] == \
+               [(c.name, [t.name for t in c.tracks]) for c in before.clips], f'{n}: a clip of its own changed'
+        new = after.clips[len(before.clips):]
+        assert [c.name for c in new] == ['in_rotation_add', 'out_rotation_add'] and not any(c.tracks for c in new)
+        for k, g in enumerate(('in_ring', 'out_ring')):
+            m = groups[g][0]
+            index = len(before.clips) + k
+            assert struct.unpack_from('<I', out, m.at + 0x20)[0] == tcs.index(f't_{name_at(out, m.at)}'), g
+            words = lay.tree.tcontrols[tcs.index(f't_{name_at(out, m.at)}')][1]
+            assert [struct.unpack_from('<I', out, w)[0] for w in words] == [index], g
+
 @test
 def edf41_objects_shipped() -> None:
     """edf41port: every object's files are shipped (edf41port/objects, the registry's SHA-256), every shipped file is
