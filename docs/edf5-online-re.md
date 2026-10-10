@@ -33,14 +33,18 @@ AngelScript 的实现不能直接拿来给 CreatePlayer 用：AngelScript 原生
 2. `22B36C` 写入 17 字节：`mov rax, &Edf5BvmOnlinePlayers; call rax; mov r13d, eax; jmp short 22B3B0`。人数是会话人数 `GS+0x14FF8`，然后进入原有的创建循环。
    - 状态：离线路径也是从 `22B353 / 22B36A` 跳到 `22B3B0`。那时 `xmm0 = 0`（`22B333`），`r15 = 0`，`[rbp-0x58]` 是空 vector；循环用到的输入只有 `r13d`。
    - 调用约定：插入点的 rsp 是 16 字节对齐的（函数序言之后），被调函数可能写的 `[rsp+0..0x1F]` 是本函数的出参影子区，此时没有活数据（`22B38A` 读的 `[rsp+0x50]` 不在这个范围内）。
-   - 单人创建 `22AB90` 的联机分支是完整的：`22AC2F` 调用 `591130(ecx = 序号, rdx = 矩阵, r8d = 模式)`，和 AngelScript 的 `1DC525`（`ecx = [记录+8]`，`r8d = [记录+0x54]`）一致。传给它的玩家编号常量是 `{0,1,2,3}`（`1765B00`）。
+   - 单人创建 `22AB90` 创建对象的联机分支是完整的：`22AC2F` 调用 `591130(ecx = 序号, rdx = 矩阵, r8d = 模式)`，和 AngelScript 的 `1DC525`（`ecx = [记录+8]`，`r8d = [记录+0x54]`）一致。
+   - **但它的第 5、6 个参数在联机时不对**（2026-10-10 审查发现，`d8254fe` 修复）。第 5 个是本机手柄号，循环从常量 `{0,1,2,3}`（`1765B00`，`rbp+0x150`）里取；第 6 个是分屏除数，就是循环人数 `r13d`（`22B60F`）。`22AB90` 在 `22ACF6` 读手柄号：小于 0 时跳到 `22AFB1`，既不绑定输入也不建视口；否则先 `54ED40` 绑定这个手柄，再按 `[rbp+0x108]`（除数）切分视口宽度（`22AD43..22AD5E`），然后 `1198C40` 建视口。原样跑的话，每台机器都会按会话人数分屏，而且所有机器的 0 号玩家都绑定本机手柄。
+   - AngelScript 的做法（`1D9520`）：先取会话用户列表（与 `1B8CC0` 同一个会话对象，`734670` 拷贝 `vf+8` 的结果），对每个用户调用 `12AC420`，即 `(用户+0x10 >> 1) & 1` 的远端位（`1D98B1`）。手柄号：远端填 -1，本机填本机计数（`1D9A64..1D9A74`）；本机计数只在创建成功、且玩家 `+0x128` 第 0 位为 0 时递增（`1D9B50..1D9B5F`）。除数填本机人数 `GS+0x14FF4`（`1D9A77`）。
+   - 修法：`22B36C` 处的人数函数进入循环前读一次会话用户的远端位，按序号记下；参与者准入门包住的正是 `22B626 → 22AB90` 这个调用（`mission_participant_gate.cpp` 的 `UpperHook`），在那里按 AngelScript 的规则改写第 5、6 个参数，创建后回报玩家对象，供本机计数递增；循环最后一个序号处理完就解除。准入门在 `MissionStart` 的 `ResetSupportDispatch` 里安装，早于创建。准入门没装上、或者会话用户列表读不到时，人数函数返回 0，一个玩家都不创建，并记日志：宁可黑屏，也不能绑错手柄、分屏。
+   - 用户列表的释放照游戏的写法：每个 `shared_ptr` 按 MSVC `_Decref`（`+8` 减到 0 调 vtbl[0]，`+0xC` 减到 0 调 vtbl[1]），存储用游戏带大小的 `operator delete`（`12D85EC`），`>= 0x1000` 字节时取 `[ptr-8]`、大小加 0x27（`1B8DA4..1B8E1F`）。
    - 循环里的 `1F74A0` 是把玩家 `push_back` 进脚本当前的对象分组（`[rsi+0x2D0]` 是分组序号），不是镜头。
    - AngelScript 在循环之后会把 `MissionGameOverEvent` 注册为全灭事件（`1D1CB0`）。BVM 脚本自带同名函数，由脚本自己处理全灭，所以 BVM 不需要这一步。
-3. **人数上限 4**：出生点偏移是栈上 4 个 16 字节槽位（`rbp+0x170..0x1A0`，`rbp+0x1B0` 是栈 cookie），BVM 玩家表是 4 个 0x18 字节条目（`+0x168..+0x1C7`，`+0x1C8` 起是对象列表）。会话超过 4 人时只创建 4 人，并记一行 `EDF5 online: N players in the session, an EDF5 mission creates 4`。EDF6Coop 的 `[Mission] Extend=1` 会把第 5 个以后的条目当作空槽读（`multislot/src/patches.h` 的 BvmPlayerTableHooks），所以不会越界读。
+3. **人数上限 4**：出生点偏移是栈上 4 个 16 字节槽位（`rbp+0x170..0x1A0`，`rbp+0x1B0` 是栈 cookie），BVM 玩家表是 4 个 0x18 字节条目（`+0x168..+0x1C7`，`+0x1C8` 起是对象列表）。会话超过 4 人时只创建前 4 个序号；如果本机玩家的序号在 4 以后，会额外记一行 `this machine's player is past the script's 4 slots`，因为这台机器上就不会有自己的玩家，并记一行 `EDF5 online: N players in the session, an EDF5 mission creates 4`。EDF6Coop 的 `[Mission] Extend=1` 会把第 5 个以后的条目当作空槽读（`multislot/src/patches.h` 的 BvmPlayerTableHooks），所以不会越界读。
 
 EDF6Coop 已经知道这张表（同一处注释："filled by its CreatePlayers (22B1C0) for the split-screen players (GameStatus+0x14FF4)"），并且指出那些读取它的原生函数在联机时按 `GS+0x14FF8` 循环（`225290`）。也就是说，读取方本来就期待联机时表里是会话里的玩家，这次补上的是写入方。Coop 在 BVM 一带只改了 `179DE90 → 22BCF0`（Online_GameOverWait 的槽位），和这两处补丁不重叠。
 
 ## 验证
 
-- `tests/edf5_online_native_test.cpp`（`edf5_online_native` / `edf5_online_foreign_build`，需要 `EDF6_NATIVE_DLL`）：在私有映射的真实 EDF.dll 上检查原版字节是空壳；安装后 native 0x10 指向 `1B8CC0`，`22B36C` 的 17 字节内容正确、跳转目标是 `22B3B0`；人数取会话人数而不是本地人数、超过 4 截断并只记一次日志；任一处原字节不符时完全不写。改成读本地人数的变异会被测试抓到。
+- `tests/edf5_online_native_test.cpp`（43 项）用一个假的会话对象覆盖：客人视角（远端在前）和房主视角的手柄号、本机人数 2 时的分屏、创建失败或被标为非本机的玩家不计数、列表与存储正确释放、超过 4 人截断、准入门未装或列表读不到时返回 0。把手柄号或除数改回旧规则的两个变异都会被抓到。`tests/mission_participant_gate_test.cpp` 检查改写后的参数确实传到原函数，以及创建后的回报。原有说明：（`edf5_online_native` / `edf5_online_foreign_build`，需要 `EDF6_NATIVE_DLL`）：在私有映射的真实 EDF.dll 上检查原版字节是空壳；安装后 native 0x10 指向 `1B8CC0`，`22B36C` 的 17 字节内容正确、跳转目标是 `22B3B0`；人数取会话人数而不是本地人数、超过 4 截断并只记一次日志；任一处原字节不符时完全不写。改成读本地人数的变异会被测试抓到。
 - **未实机验证**：需要两台机器联机打一关 EDF5 包，确认两边都出现玩家并能结算。
