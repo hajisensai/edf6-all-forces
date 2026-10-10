@@ -134,7 +134,7 @@ bool SazabiMessage(unsigned char*,std::uint32_t,void*,MessageRestore*) noexcept 
 bool PrimerMessage(unsigned char*,std::uint32_t,void*,MessageRestore*) noexcept { return false; }
 namespace jet {
 Jet jets[kMaxJets]{};
-bool Preloaded(Body) noexcept { return true; }   // every body there (LimitsOf: a doll carrier launches doll drones)
+bool Preloaded(Body) noexcept { return true; }   // every body there (Charges: a doll carrier launches doll drones)
 }  // namespace jet
 }  // namespace crew
 
@@ -461,10 +461,10 @@ int SelfTest(const char* outDir) {
         }
         simEnemies.clear();
     }
-    // What a weapon that cannot reach every enemy goes for (2026-10-10, src/air_chase.h; production PickTarget / VisitTarget,
-    // the flyer probe on this world's ground at y 0): the gunship never a flyer; a doll drone, and a doll carrier, nothing
-    // over the charge's ceiling, the current target neither, nor one out of its range; one it gave up (shunned) not again
-    // until its shun is over; a gun jet any flyer as before.
+    // The flyers are fought (the user 2026-10-10: the drones and their carrier are to attack them; production PickTarget /
+    // VisitTarget, the flyer probe on this world's ground at y 0): a gun jet, the gunship (with nothing on the ground), a doll
+    // drone and a doll carrier take the flyer 483 m up, a drone keeps it as its target; the gunship still prefers one on the
+    // ground; a charge drone lets go of a current target out of its range.
     {
         std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0),low(0x400,0),high(0x400,0),ground(0x400,0),lowCtrl(16,0),
             highCtrl(16,0),groundCtrl(16,0);
@@ -478,34 +478,28 @@ int SelfTest(const char* outDir) {
             nowMs+=1000;   // past the flyer memo's look
             const Role drones=j.carrier.drones;
             const void* const was=j.t.target;
-            const airchase::ShunList shun=j.t.shun;
             Place(j,mem.data(),ctrl.data(),role,at,dir,0.0f,0.0f);
-            j.carrier.drones=drones;j.t.target=was;j.t.shun=shun;j.m.groundSeen=true;j.m.groundY=0.0f;
+            j.carrier.drones=drones;j.t.target=was;j.m.groundSeen=true;j.m.groundY=0.0f;
             PickTarget(j,mem.data(),at,anchor,range,kDt,nowMs);
             return j.t.target;
         };
-        struct { const char* what; bool ok; } cases[9]{};
+        struct { const char* what; bool ok; } cases[7]{};
         j.t.target=nullptr;j.carrier.drones=Role::drone;
         cases[0]={"a gun jet: the nearer flyer, 483 m up",pick(Role::fighter,1800.0f)==high.data()};
         j.t.target=nullptr;
-        cases[1]={"the gunship: no flyer at all",pick(Role::gunship,1800.0f)==nullptr};
+        cases[1]={"the gunship: a flyer when nothing is on the ground",pick(Role::gunship,1800.0f)==high.data()};
         simEnemies.push_back(SimEnemy{ground.data(),{600.0f,2.0f,0.0f}});   // a third: on the ground
         j.t.target=nullptr;
-        cases[2]={"the gunship: the one on the ground",pick(Role::gunship,1800.0f)==ground.data()};
+        cases[2]={"the gunship: the one on the ground first",pick(Role::gunship,1800.0f)==ground.data()};
         simEnemies.pop_back();
         j.t.target=nullptr;
-        cases[3]={"a doll drone: the low flyer, not the one over its ceiling",pick(Role::doll,1800.0f)==low.data()};
+        cases[3]={"a doll drone: the nearer flyer, 483 m up",pick(Role::doll,1800.0f)==high.data()};
         j.t.target=high.data();
-        cases[4]={"a doll drone: its current target over its ceiling let go",pick(Role::doll,1800.0f)==low.data()};
+        cases[4]={"a doll drone: keeps its target 483 m up",pick(Role::doll,1800.0f)==high.data()};
         j.t.target=low.data();
         cases[5]={"a doll drone: its current target out of its range let go",pick(Role::doll,300.0f)==nullptr};
         j.t.target=nullptr;j.carrier.drones=Role::doll;
-        cases[6]={"a doll carrier: no drone at the one over their ceiling",pick(Role::carrier,1800.0f)==low.data()};
-        j.t.target=nullptr;j.carrier.drones=Role::drone;
-        airchase::Shun(j.t.shun,low.data(),nowMs+1000+airchase::kShunMs);
-        cases[7]={"a doll drone: the one it gave up not taken while shunned",pick(Role::doll,1800.0f)==nullptr};
-        nowMs+=airchase::kShunMs;
-        cases[8]={"...and taken again after",pick(Role::doll,1800.0f)==low.data()};
+        cases[6]={"a doll carrier: drones at the flyer 483 m up",pick(Role::carrier,1800.0f)==high.data()};
         for(const auto& c:cases) {
             if(!c.ok)++bad;
             std::printf("limits %-70s %s\n",c.what,c.ok ? "ok" : "FAIL");

@@ -5010,7 +5010,7 @@ def soft_edge_wired() -> None:
     assert 'anchor=SoftAnchor(*j,anchor,anchorIn);' in jet
     # Targets past it let be; the map's focus target (2026-10-09) only out past the play area's walls, where no jet goes.
     visit = combat.split('void VisitTarget(void* ctx,const void* object,const float* p) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'if(k.focus || PastEdge(*k.j,p) || airchase::Shunned(k.j->t.shun,object,k.ms))return;' in visit
+    assert 'if(k.focus || PastEdge(*k.j,p))return;' in visit
     focus = visit.split('if(k.j->focus.Is(object)) {', 1)[1].split('\n    }\n', 1)[0]
     assert 0 <= focus.find('if(!airbound::Inside(PlayBox(),p))return;') < focus.find('k.focus=true;'), \
         'a focus target out past the play area is waited for, not chased'
@@ -5074,25 +5074,37 @@ def support_arrives_from_off_the_map() -> None:
 
 @test
 def air_chase_wired() -> None:
-    """The flyers the plugin's weapons cannot reach (src/air_chase.h, the user 2026-10-10: "飞行怪好像会导致越飞越高"): the
-    target pick holds every jet's weapon limits (a gunship no flyer, a charge drone and its carrier nothing over the ceiling)
-    and its shun list, the current target of a charge drone too; the charge drone's run goes through airchase::Step (held
-    off its target it goes off within its charge's blast, not closing in it gives the target up, shunned by it and its
-    carrier); its goal is held under its ceiling; the NPC soldiers rank targets in reach first (npc_logic.h PickTarget
-    with their longest reach); the log has the target's height; the offline check is a CTest test."""
-    combat, jet, npcai = src('src/jet_combat.cpp'), src('src/jet.cpp'), src('src/npcai.cpp')
+    """The flyers are fought (src/air_chase.h, the user 2026-10-10: "飞行怪在打无人机，但是无人机和一堆npc竟然没有攻击蜜蜂",
+    and, correcting the first fix, which had the gunship take no flyer and the charge drones and their carrier none over a
+    200 m ceiling, given up and shunned when outrun: they are to attack them). No jet's target pick leaves a flyer out; a
+    charge drone (and its carrier) lets go only of a current target out of its range; a charge drone climbs as fast as it
+    flies at a flyer (at half that the flyers kept above it to the ceiling) and its run goes through airchase::Step (held
+    off its target it goes off within its charge's blast, farther out it keeps after it); the gunship's side guns fire at a
+    flyer, its shell only at the ground; the NPC soldiers rank targets in reach first (npc_logic.h PickTarget with their
+    longest reach); the log has the target's height; the offline check is a CTest test."""
+    combat, jet, npcai, bay = src('src/jet_combat.cpp'), src('src/jet.cpp'), src('src/npcai.cpp'), src('src/jet_bay.cpp')
     visit = combat.split('void VisitTarget(void* ctx,const void* object,const float* p) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'airchase::Shunned(k.j->t.shun,object,k.ms)' in visit
     assert "k.j->cmd.order!=Order::none || k.charges) && Dot(d,d)>k.range*k.range" in visit, 'a charge drone: its current target in range'
-    assert 'if(!airchase::Allowed(k.limits,flyer,p[1],ground,' in visit, 'the weapon limits on every target, the current one too'
-    limits = combat.split('airchase::Limits LimitsOf(const Jet& j) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'k.weapon==Weapon::shells' in limits and 'airchase::kChargeCeiling' in limits and 'Preloaded(own.body)' in limits
+    assert 'const bool flyer=Flies(object,p,k.ms);' in visit
+    for gone in ('Shunned', 'Allowed', 'kChargeCeiling', 'groundOnly', 'UnderCeiling', 'giveUp', 'ShunList'):
+        assert gone not in combat + jet + src('src/air_chase.h') + src('src/jet_internal.h'), f'{gone}: a flyer left out again'
+    charges = combat.split('bool Charges(const Jet& j) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'k.weapon==Weapon::charge' in charges and 'Preloaded(own.body)' in charges
+    assert 'Pick pick{&j,pos,anchor,range,ms,Charges(j),' in combat
     assert 'bottom[3]={root[0],root[1]-kFlyerDepth,root[2]}' in combat, 'the ground under a high flyer is found'
     assert 'ty=%.0f' in combat, 'the target height in the jet log'
+    assert 'climb=j.t.target && j.t.flyer ? kind.cruise : kind.cruise*0.5f;' in jet, 'a charge drone at a flyer: its full climb'
+    assert 'for(int i=0;i<3;++i)goal[i]=j.t.aim[i]+j.t.tgtVel[i]*kChargeLead;' in jet, 'a charge drone leads its target'
+    assert 'constexpr float kChargeLead=2.0f;' in jet and 'wantV[1]=Clamp((goal[1]-pos[1])*0.5f,-climb,climb);' in src('src/jet_flight.cpp'), \
+        "the lead is 1 / Hover's vertical gain"
     assert 'airchase::Step(j->t.closing,j->t.target,d,kind.trigger,held,walled,ms)' in jet
     assert 'const float d=Len(to),held=std::fmin(kind.trigger*kTriggerHeld,kind.blast);' in jet
-    assert 'if(mother)airchase::Shun(mother->t.shun,j->t.target,ms+airchase::kShunMs);' in jet
-    assert 'goal[1]=airchase::UnderCeiling(goal[1],goal[1]-under,airchase::kChargeCeiling);' in jet
+    gun = bay.split('bool GunAtTarget(Jet& j,SideGun g,', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(!gun.ready || !j.t.target)return false;' in gun and 'flyer' not in gun, 'the side guns at a flyer too'
+    fire = bay.split('void GunshipFire(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert fire.index('GunsAtTarget(j,v,pos,ms,"its NPC crew");') < fire.index('if(j.t.flyer || ms-j.shells.gunAt<kGunshipGapMs)return;')
+    crew = bay.split('bool CrewShell(unsigned char* v,float dt,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(!j->t.target)return false;' in crew and 'const bool shell=!j->t.flyer && ' in crew
     assert 'PickTarget(s,eye,anchor,o.leash+engage,LongestReach(a))' in npcai and 'npc::PickTarget(world.enemies,' in npcai
     cm = src('CMakeLists.txt')
     assert 'add_executable(air_chase_check EXCLUDE_FROM_ALL tools/air_chase_check.cpp)' in cm
