@@ -2862,6 +2862,12 @@ void HeliFrame(unsigned char* vehicle) noexcept {
         return;
     }
     ReplicaOff(vehicle);
+    // The plugin's launched drones have no one aboard (jet_internal.h Unmanned): flown as its NPC-piloted jets are.
+    if(IsJet(vehicle) && JetFliesItself(vehicle)) {
+        AssistOff(vehicle);
+        if(Cfg().jetPilot && OnlineRunsHere(vehicle))JetFrame(vehicle);
+        return;
+    }
     if(!NpcDriver(vehicle)) {   // only NPC pilots
         if(Heli* h=Find(vehicle))Restore(*h,vehicle);
         if(stockHeli && SeatCount(vehicle)>0 && SeatRider(SeatAt(vehicle,0))==Rider::player) {

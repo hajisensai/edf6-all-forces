@@ -475,6 +475,14 @@ struct Jet {
 constexpr int kMaxJets=64,kPatrolRings=6;
 extern Jet jets[kMaxJets];
 inline const Kind& KindOf(const Jet& j) noexcept { return KindOf(j.role); }
+// The plugin's drones (drone, blast, doll): no one sits in them. One the plugin launched (Launch: a carrier's, the
+// submarine carrier's, a thrown one) is flown by JetFrame with its seats empty (heli.cpp HeliFrame, JetFliesItself):
+// since the real crews (2026-10-08) no soldier can walk aboard a drone made in the air, and none is made in it
+// (docs/real-npc-crew.md), so a drone that waited for a pilot fell from where it was launched (2026-10-09 log: six
+// doll drones driver=0, seats=[-], falling through the ground). Every crewed body comes with its real crew instead
+// (support_dispatch.cpp: made inside it, seated at spawn); Launch makes no crewed one.
+constexpr bool Unmanned(Role r) noexcept { return r==Role::drone || r==Role::blast || r==Role::doll; }
+inline bool FliesItself(const Jet& j) noexcept { return j.launched && Unmanned(j.role); }
 inline int IndexOf(const Jet& j) noexcept { return static_cast<int>(&j-jets); }
 
 // Retargeting abandons an old attack but preserves ammunition cooldowns and lifecycle flight modes.
@@ -642,7 +650,7 @@ void Detonate(Jet& j,Jet* mother,float dist,ULONGLONG ms) noexcept;
 void Blast(Jet& j,unsigned char* v,ULONGLONG ms) noexcept;
 void DollMake(int i,const unsigned char* v,DWORD lifeSec) noexcept;
 void DollFree(int i) noexcept;
-void DollFrame(int i,const unsigned char* v,float clear) noexcept;   // its doll follows drone `v` (if it has one), `clear` over the ground
+void DollsFollow() noexcept;              // once a frame (Sweep): every doll kDollBelow under its drone, whoever moves it
 void ResetDolls() noexcept;                // the mission's end: forgotten, not deleted (they went with it)
 bool PreloadDolls(void* mgr,bool dollBody) noexcept;   // the dolls' SGOs with the doll drone's body: whether
 bool InstallDolls() noexcept;

@@ -269,7 +269,7 @@ void Arm(Jet& j,const Kind& kind,unsigned char* v,const float* pos,const float* 
 }
 
 // Once a game frame (JetReap): every entry whose jet is finished is let go of; with JetPilot turned off, every
-// jet still flown is deleted (unflown, it would hover on its dummy pilot where it was).
+// jet still flown is deleted (unflown, it would hover on its dummy pilot where it was); the dolls follow their drones.
 void Sweep(ULONGLONG ms) noexcept {
     const bool off=!Cfg().jetPilot;
     bool changed=false;
@@ -281,6 +281,7 @@ void Sweep(ULONGLONG ms) noexcept {
     }
     if(left)Log("JET JetPilot off: %d jets deleted",left);
     if(changed)Publish(true);
+    DollsFollow();   // after the finished ones went (Release deletes their dolls)
     BoosterSweep(ms);
 }
 }  // namespace
@@ -456,6 +457,11 @@ int JetCommandUnits(CommandUnit* out,int most) noexcept {
     return n;
 }
 
+bool JetFliesItself(const void* vehicle) noexcept {
+    const Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle));
+    return j && FliesItself(*j);
+}
+
 namespace {
 // Whether `focus` is among the enemies of jet `v` now (a focus order's target, as npcai.cpp checks a squad's).
 struct FocusSeen { ObjRef focus; bool seen; };
@@ -607,7 +613,6 @@ void JetFrame(unsigned char* v) noexcept {
     BayFrame(*j,pos);
     if(gunner){v[kFireGun]=0;v[kFireMissile]=0;}   // the gun is the player's (playerjet_crew.inc GunnerFire)
     else Arm(*j,kind,v,pos,nose,lead,gunsOk,missileOk,arms,ms);
-    DollFrame(IndexOf(*j),v,clear);
     NpcFlares(*j,v,pos,nose,ms);
     if(Cfg().debug && ms-j->loggedAt>1000){j->loggedAt=ms;JetLog(*j,v,pos,arms,speed,clear,ms);}
 }
@@ -677,7 +682,9 @@ void JetReap(const void* self) noexcept {
 // orders are dropped (they work round the carrier again); a bomber whose run is not over flies it again. Mode: as it
 // was when withdrawing, bombing or going back to its carrier, else patrol (takeoff off the ground).
 void jet::ResumeNpc(unsigned char* v,const float* vel) noexcept {
-    if(!NpcDriver(v) || SeatRider(SeatAt(v,0))!=Rider::other || !OnlineRunsHere(v))return;
+    // Its real pilot aboard, or a drone of the plugin's (no one sits in it: FliesItself); run here either way.
+    const bool piloted=NpcDriver(v) && SeatRider(SeatAt(v,0))==Rider::other;
+    if((!piloted && !JetFliesItself(v)) || !OnlineRunsHere(v))return;
     const ULONGLONG ms=GameMs();
     Jet* const j=FindJet(v);
     if(!j)return;   // its first frame with its pilot makes the entry (CrewPlaced)

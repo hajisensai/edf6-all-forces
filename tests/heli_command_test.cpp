@@ -33,6 +33,7 @@ bool LastViewProj(float*) noexcept { MissingDependency();return false; }
 bool CameraRay(float*,float*) noexcept { MissingDependency();return false; }
 void SetObjectTeam(unsigned char*,std::int32_t) noexcept { MissingDependency(); }
 bool IsJet(const void*) noexcept { MissingDependency();return false; }
+bool JetFliesItself(const void*) noexcept { MissingDependency();return false; }
 bool JetInLine(const float*,const float*,const void*) noexcept { MissingDependency();return false; }
 void JetFrame(unsigned char*) noexcept { MissingDependency(); }
 bool SupportRescueAt(const float*,wchar_t*,std::size_t) noexcept { MissingDependency();return false; }

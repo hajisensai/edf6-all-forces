@@ -572,7 +572,8 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     if(anyPlayer){if(SeatRider(SeatAt(vehicle,0))==Rider::player)st.playerAt=now;st.emptySince=0;return;}
     // A player jet waits for the player, and so does one of the plugin's aircraft the player holds (playerjet.cpp).
     // A sidecar passenger does not grant driver authority; an existing real driver is assigned separately.
-    if(driver || !Cfg().autoCrew || IsPlayerJet(vehicle) || PlayerJetHolds(vehicle) || SidecarHoldsPlayer(vehicle) || IsPrimerVehicle(vehicle)){st.emptySince=0;return;}
+    if(driver || !Cfg().autoCrew || IsPlayerJet(vehicle) || PlayerJetHolds(vehicle) || SidecarHoldsPlayer(vehicle) || IsPrimerVehicle(vehicle) ||
+       JetFliesItself(vehicle)){st.emptySince=0;return;}   // a drone of the plugin's: no one is ever seated in it
     // Online, the host coordinates recruitment for registered vehicles. Real soldiers keep their native
     // network identities and announce boarding; each vehicle copy follows the resulting native authority.
     if(!OnlineMaySeatNpc(vehicle)){st.emptySince=0;return;}
