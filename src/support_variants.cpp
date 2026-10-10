@@ -46,6 +46,12 @@ void Find(const wchar_t* pattern,void* mgr) noexcept {
             continue;
         }
         auto& row=ready[readyCount];
+        // Too long a name skipped by its length first: wcscpy_s / swprintf_s on one would not fail with an error code but
+        // call the CRT's invalid parameter handler (no handler set: the game killed on the spot, at a mission's load).
+        if(std::wcslen(found.cFileName)>=std::size(row.file)) {
+            Log("SUPPORT variant %ls: name too long, left unloaded",found.cFileName);
+            continue;
+        }
         if(wcscpy_s(row.file,found.cFileName))continue;
         Upper(row.file);
         wchar_t app[128];

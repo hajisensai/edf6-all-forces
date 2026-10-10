@@ -762,24 +762,28 @@ def manage_campaign(game: str) -> int:
 def write_loadout_files(game: str) -> bool:
     """The out-of-game loadouts' generated files (tools/support_loadout.py) for the installed ini and for the names the
     plugin listed as missing in an online room (Mods/Plugins/EDF6VehicleCrew.variants_pending.txt): coloured soldiers,
-    loaded tanks and jets, the pylon weapons they carry. False (said why) when they cannot be made: the plugin then sends
-    those soldiers / vehicles stock and logs it; everything else is unaffected."""
+    loaded tanks and jets, the pylon weapons they carry. False (said why) when any cannot be made: the plugin then sends
+    those soldiers / vehicles stock and logs it; the others are made all the same (support_loadout.build's errors: one
+    pending name for a jet this machine has not installed must not stop every other file), everything else unaffected."""
     import support_loadout
     path = os.path.join(game, 'Mods', 'Plugins', PLUGIN + '.ini')
+    errors: dict[str, str] = {}
     try:
         with open(path, 'rb') as f:
             raw = f.read()
         text = (raw[3:] if raw.startswith(b'\xef\xbb\xbf') else raw).decode('utf-8', errors='replace')
-        files = support_loadout.build(game, text, pending=support_loadout.read_pending(game))
+        files = support_loadout.build(game, text, pending=support_loadout.read_pending(game), errors=errors)
     except (OSError, ValueError, KeyError, AssertionError) as e:
         print(f'！ 支援预设的文件没有生成（带颜色的士兵、配了挂载的载具将按原版出动，插件日志会说明）：{e}')
         return False
     print('生成支援预设用的文件（带颜色的士兵模板、配了挂载的坦克 / 战机；只读 Root.cpk）……')
-    for written in support_loadout.install(game, files):
+    for name, why in errors.items():
+        print(f'！ {name} 没有生成（留在待生成清单里，插件按原版出动）：{why}')
+    for written in support_loadout.install(game, files, keep=['OBJECT/' + name for name in errors]):
         print('写入', written)
     for name in support_loadout.clear_pending(game, files):
         print('已生成联机时房主预设需要、本机缺少的文件', name)
-    return True
+    return not errors
 
 
 def manage_support(game: str) -> int:

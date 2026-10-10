@@ -33,6 +33,14 @@ def read(rel: str) -> str:
         return f.read()
 
 
+def refused_with(error: type, fn, *args) -> bool:
+    try:
+        fn(*args)
+    except error:
+        return True
+    return False
+
+
 def refused(fn, *args) -> bool:
     try:
         fn(*args)
@@ -134,6 +142,38 @@ with tempfile.TemporaryDirectory(prefix='edf6vc-pending-') as root:
           'what was made (and what no file can be made from) leaves the list; the rest stays')
     sl.clear_pending(root, {'OBJECT/EDF6VC_LO_TANK_4000000000000C81.SGO': b''})
     check(not os.path.isfile(sl.pending_path(root)), 'an empty list is removed')
+
+# One file that cannot be made (a pending name for a jet this machine lacks: jet_sgo raises) leaves out that one alone,
+# reported by name; the others are made, and install keeps the copy already on disk (the 2026-10-10 review: one failure
+# threw away the whole build, every run, and the coloured soldiers of this machine's own presets with it).
+bad_name, good_name = 'EDF6VC_NPC_RIFLE_X_FFFFFF.SGO', 'EDF6VC_NPC_RIFLE_X_000000.SGO'
+check(sl.decode_name(bad_name) and sl.decode_name(good_name), 'two decodable soldier names')
+real_soldier_file = sl.soldier_file
+
+
+def fake_soldier_file(game, kind, leader, look):
+    if look == sl.decode_name(bad_name)[3]:
+        raise ValueError('its template is not installed here')
+    return b'made'
+
+
+sl.soldier_file = fake_soldier_file
+try:
+    errors: dict[str, str] = {}
+    files = sl.build(None, '', object(), pending=[bad_name, good_name], errors=errors)
+    check(files == {'OBJECT/' + good_name: b'made'} and list(errors) == [bad_name] and 'not installed' in errors[bad_name],
+          'one file that cannot be made: left out and reported, the other made')
+    check(refused_with(ValueError, sl.build, None, '', object(), [bad_name, good_name]), 'without errors given: it raises')
+finally:
+    sl.soldier_file = real_soldier_file
+with tempfile.TemporaryDirectory(prefix='edf6vc-keep-') as root:
+    for folder in ('OBJECT', 'WEAPON', 'Plugins'):
+        os.makedirs(os.path.join(root, 'Mods', folder))
+    sl.install(root, {'OBJECT/' + bad_name: b'old', 'OBJECT/' + good_name: b'old'})
+    sl.install(root, {'OBJECT/' + good_name: b'made'}, keep=['OBJECT/' + bad_name])
+    check(os.path.isfile(os.path.join(root, 'Mods', 'OBJECT', bad_name)), 'a file not made this time is kept on disk')
+    sl.install(root, {'OBJECT/' + good_name: b'made'})
+    check(not os.path.isfile(os.path.join(root, 'Mods', 'OBJECT', bad_name)), 'one no longer wanted is released')
 
 # With the game: the generated files, from its own files (read only).
 try:

@@ -539,36 +539,59 @@ def check_vehicle(made: bytes, base: bytes, l: Loadout) -> None:
         assert len(weapons) >= 4, 'the 506 builds four holders without the plugin'
 
 
-def build(root: str | None, ini_text: str, game: rootcpk.Game | None = None, pending: list[str] = ()) -> dict[str, bytes]:
+def _build_one(root: str | None, game: rootcpk.Game, file: str, out: dict[str, bytes]) -> dict[str, bytes]:
+    """`file` (a wanted_files name) and the pylon weapons it carries that neither the disk nor `out` has yet."""
+    what = decode_name(file)
+    if what[0] == 'npc':
+        return {'OBJECT/' + file: soldier_file(game, *what[1:])}
+    l = what[1]
+    tank = BODIES[l.body][2]
+    made = tank_sgo(root, game, l) if tank else jet_sgo(root, game, l)
+    check_vehicle(made, _source(root, game, 'OBJECT', BODIES[l.body][0]), l)
+    one = {'OBJECT/' + file: made}
+    for name, rounds in l.pylons:
+        weapon = store_file(name, rounds)
+        there = root and os.path.isfile(os.path.join(root, 'Mods', 'WEAPON', weapon))
+        if not there and 'WEAPON/' + weapon not in out and 'WEAPON/' + weapon not in one:
+            import vcobjects as vc
+            one['WEAPON/' + weapon] = vc.store_sgo(game, weapon)
+    return one
+
+
+def build(root: str | None, ini_text: str, game: rootcpk.Game | None = None, pending: list[str] = (),
+          errors: dict[str, str] | None = None) -> dict[str, bytes]:
     """Every file this tool writes, {path under Mods: bytes}: the ini's (and the pending list's) coloured soldiers and
-    loaded vehicles, and the pylon weapons they carry that are not on disk yet."""
+    loaded vehicles, and the pylon weapons they carry that are not on disk yet.
+    `errors`: given, a file that cannot be made is left out (with its weapons) and its name -> why recorded there, the
+    others made all the same: one name the host listed for a jet this machine has not installed (jet_sgo: not
+    installed yet) must not stop every coloured soldier of this machine's own presets. Without it the first one raises."""
     game = game or (rootcpk.Game(root) if root else rootcpk.default())
     out: dict[str, bytes] = {}
     for file in wanted_files(ini_text, pending):
-        what = decode_name(file)
-        if what[0] == 'npc':
-            out['OBJECT/' + file] = soldier_file(game, *what[1:])
+        try:
+            one = _build_one(root, game, file, out)
+        except Exception as e:   # reported to the caller by name, never dropped silently
+            if errors is None:
+                raise
+            errors[file] = f'{type(e).__name__}: {e}'
             continue
-        l = what[1]
-        tank = BODIES[l.body][2]
-        made = tank_sgo(root, game, l) if tank else jet_sgo(root, game, l)
-        check_vehicle(made, _source(root, game, 'OBJECT', BODIES[l.body][0]), l)
-        out['OBJECT/' + file] = made
-        for name, rounds in l.pylons:
-            weapon = store_file(name, rounds)
-            there = root and os.path.isfile(os.path.join(root, 'Mods', 'WEAPON', weapon))
-            if not there and 'WEAPON/' + weapon not in out:
-                import vcobjects as vc
-                out['WEAPON/' + weapon] = vc.store_sgo(game, weapon)
+        out.update(one)
     return out
 
 
-def install(root: str, files: dict[str, bytes]) -> list[str]:
+def install(root: str, files: dict[str, bytes], keep: list[str] = ()) -> list[str]:
     """Writes `files` (build) as this tool's, each one only when it is not already exactly that (every install and every
-    menu-7 save rebuilds them: an unchanged file is not rewritten); what it wrote before and does not now is released.
+    menu-7 save rebuilds them: an unchanged file is not rewritten); what it wrote before and does not now is released,
+    but for `keep` (build's errors, as OBJECT/ paths: wanted still, only not made this time: the copy on disk stays).
     A pylon weapon another tool already wrote is only recorded as needed. Returns the paths written."""
     led = ledger.Ledger(root)
-    before = set(led.owned_by(OWNER))
+    held = set()
+    for rel in keep:   # a kept vehicle keeps the pylon weapons it carries
+        held.add(ledger.key(rel))
+        what = decode_name(rel.split('/')[-1])
+        for name, rounds in (what[1].pylons if what and what[0] == 'lo' else []):
+            held.add(ledger.key('WEAPON/' + store_file(name, rounds)))
+    before = set(led.owned_by(OWNER)) - held
     paths = []
     for rel, data in files.items():
         if sha256_file(led.disk(rel)) == sha256(data) and (ledger.key(rel) in before or led.owners(rel)):
@@ -777,12 +800,15 @@ def main(argv: list[str]) -> int:
         return 0
     ini = os.path.join(root, 'Mods', 'Plugins', 'EDF6VehicleCrew.ini')
     text = open(ini, encoding='utf-8-sig').read() if os.path.isfile(ini) else ''
-    files = build(root, text, pending=read_pending(root))
-    for path in install(root, files):
+    errors: dict[str, str] = {}
+    files = build(root, text, pending=read_pending(root), errors=errors)
+    for name, why in errors.items():
+        print(f'！ 没有生成 {name}（留在待生成清单里，插件按原版出动）：{why}')
+    for path in install(root, files, keep=['OBJECT/' + name for name in errors]):
         print('写入', path)
     for name in clear_pending(root, files):
         print('已生成联机时缺少的文件', name)
-    return 0
+    return 1 if errors else 0
 
 
 if __name__ == '__main__':
