@@ -151,7 +151,7 @@ def build_exe(name: str) -> str:
                 'testhub', 'make_emc', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
                 'cas_pose', 'aircraft_collision', 'support_config', 'support_loadout',
                 'make_sazabi', 'sazabi_model', 'sazabi_arms', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics',
-                'build'):   # every module installer.py imports in a function (selftest release_imports); build is
+                'gamelease', 'build'):   # every module installer.py imports in a function (selftest release_imports); build is
         # autoturret/tools/build.py (--paths above comes before site-packages, where pip's own `build` may be)
         cmd += ['--hidden-import', mod]
     for mod in ('matplotlib', 'pandas', 'tkinter'):  # Pillow builds procedural textures; numpy builds map seams

@@ -503,6 +503,22 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
   不用时取消勾选再点安装，或点卸载（两者都会删掉这个 ini）。日志里每次生效有一行 `LOADOUT preload/create class=...`。
   勾「开局补满」时，进关建人后再把所有武器弹药和空袭兵的载具呼叫次数补满（`LOADOUT refill weapons=N`），不用先攒点数。
 
+### 实测排队（多个会话共用一个游戏）
+
+一台机器上只有一个游戏目录、一个 EDF6.exe：两个会话同时实测时，一个装的 DLL 会被另一个覆盖，一个跑到一半另一个又启动游戏，两边的结果都作废。
+所以凡是写游戏目录或驱动游戏的步骤都先**排队拿到游戏**再动手（`pylib/gamelease.py`）：
+
+- `tests/autopilot/drive.py`（除 `mem` / `shot` 只读外的每个命令）、`testrange/run_test.py`（整次运行）、从源码运行的 `tools/installer.py`
+  （安装 / 卸载 / 战役）自己排队；打包给玩家的安装器不排队。等待时每当排位或占用者变化打印一行
+  `[game queue] waiting: N ahead of us; the game is held by ...`。
+- 其它要碰游戏的命令用 `python tools/gamequeue.py run -- <命令...>` 包起来；`--wait-max-min N` 等超过 N 分钟就放弃（退出码 75，命令不运行），默认一直等。
+- 几步算一次实测（装 → 启动 → 按键 → 卸载）时，用 `python tools/gamequeue.py hold`（后台运行）拿住游戏，它打印 `EDF6_GAME_LEASE=<token>`，
+  之后每步带上这个环境变量就直接用这份占用、不再排队；完了 `python tools/gamequeue.py release <token>`（不 release 也会在 `--minutes`，默认 60 分钟后自动放）。
+- `python tools/gamequeue.py status`：谁占着游戏（标签、进程、分支、目录、多久了）、后面按顺序谁在等。
+- 占用是操作系统文件锁：占用者崩溃 / 被杀 / 关掉终端，游戏立刻空出来，不会留下陈旧的占用；排队者死了也自动出队。先来先得。
+  队列按游戏目录分开（`%LOCALAPPDATA%\EDF6TestQueue\<目录哈希>`），对临时游戏副本的测试不会排在真实测试后面。
+- 排队只管会话之间；**用户自己开着的游戏照旧不碰**（各脚本原有的「游戏在运行就拒绝」检查不变）。
+
 ### 自动实测（run_test.py）
 
 一条命令：启动游戏 → 认画面走菜单（标题、存档、模式这些绿色菜单一路回车；作战指令总部 → 出击 → 任务列表按到顶，就是测试场那一关，

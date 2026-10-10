@@ -26,6 +26,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gen  # noqa: E402
+import gamelease  # noqa: E402  (pylib, on the path through gen)
 import weapons  # noqa: E402
 
 user32 = ctypes.windll.user32
@@ -478,7 +479,12 @@ def main() -> int:
     ap.add_argument('--keep', action='store_true', help='结束时不退出游戏')
     ap.add_argument('--attach', action='store_true', help='用已经在跑的 EDF6（停在标题画面）')
     args = ap.parse_args()
+    # The whole run holds the machine's game (pylib/gamelease.py): no other session installs or drives meanwhile.
+    with gamelease.lease(args.game, 'run_test.py ' + ' '.join(sys.argv[1:])):
+        return run(args)
 
+
+def run(args: argparse.Namespace) -> int:
     out = os.path.join(gen.HERE, 'runs', time.strftime('%Y%m%d_%H%M%S'))
     os.makedirs(out, exist_ok=True)
     summary = ['安装：'] + ['    ' + l for l in install(args)]

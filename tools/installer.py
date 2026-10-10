@@ -843,6 +843,17 @@ def main(argv: list[str]) -> int:
     game = pick_game()
     if not game:
         return 1
+    if getattr(sys, 'frozen', False):   # the player's installer: their machine, nobody to queue behind
+        return write_game(mode, game)
+    import gamelease   # run from source (a developer's session): wait for the game like every other test step
+    with gamelease.lease(game, f'installer.py {mode}'):
+        if modfiles.game_running():
+            print(f'{PROCESS} 正在运行（排队期间别的会话启动了它）。')
+            return 1
+        return write_game(mode, game)
+
+
+def write_game(mode: str, game: str) -> int:
     if mode == 'campaign':
         return manage_campaign(game)
     (install if mode == 'install' else uninstall)(game)

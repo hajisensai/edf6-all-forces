@@ -845,6 +845,8 @@ target_link_libraries(fieldshare_test PRIVATE edf6common)
 target_compile_options(fieldshare_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME fieldshare COMMAND fieldshare_test)
 add_test(NAME autopilot_driver COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/autopilot/test_drive.py")
+# One real-game test at a time per game folder, first come first served (pylib/gamelease.py, tools/gamequeue.py).
+add_test(NAME game_lease COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/game_lease_test.py")
 
 add_executable(ground_navigation_test tests/ground_navigation_test.cpp)
 target_compile_options(ground_navigation_test PRIVATE /W4 /WX /utf-8 /permissive-)
