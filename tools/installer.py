@@ -786,11 +786,14 @@ def write_loadout_files(game: str) -> bool:
     return not errors
 
 
-def manage_support(game: str) -> int:
+def manage_support(game: str, loadout_only: bool = False) -> int:
     """Menu 7: the map support's out-of-mission configuration (tools/support_config.py, the plugin's src/support_config.h)
-    in the player's EDF6VehicleCrew.ini: callable units, their crews' weapons, aircraft counts. The plugin rereads the
-    ini on save, so the game may even be running."""
+    in the player's EDF6VehicleCrew.ini: callable units, their crews' weapons, aircraft counts. Menu 8 goes straight to
+    menu 7's `l`, the pre-battle loadouts (tools/support_loadout.py: squads, each soldier's class and colour, each tank's
+    and jet's pylons), the same edit saved the same way. The plugin rereads the ini on save, so the game may even be
+    running."""
     import support_config
+    import support_loadout
     path = os.path.join(game, 'Mods', 'Plugins', PLUGIN + '.ini')
     if not os.path.isfile(path):
         print('还没有安装插件（找不到 EDF6VehicleCrew.ini），请先选 1 安装。')
@@ -799,7 +802,7 @@ def manage_support(game: str) -> int:
         raw = f.read()
     bom = raw.startswith(b'\xef\xbb\xbf')
     text = (raw[3:] if bom else raw).decode('utf-8', errors='replace')
-    edited = support_config.edit(text, ask)
+    edited = (support_loadout.edit if loadout_only else support_config.edit)(text, ask)
     if edited == text:
         print('没有改动。')
         return 0
@@ -818,18 +821,20 @@ def manage_support(game: str) -> int:
 def main(argv: list[str]) -> int:
     print(f'== {PLUGIN} 安装程序 {build_name()} ==\n')
     mode = argv[0] if argv else ''
-    if mode not in ('install', 'uninstall', 'update', 'logs', 'check', 'campaign', 'support'):
+    if mode not in ('install', 'uninstall', 'update', 'logs', 'check', 'campaign', 'support', 'loadout'):
         pick = ask('输入 1 安装 / 更新，2 卸载，3 下载最新测试版，4 回传日志给开发者，5 检查安装状态，6 管理 EDF5 实验战役，'
-                   '7 配置地图支援（可呼叫单位 / 兵员武器 / 架数），回车退出：')
-        mode = {'1': 'install', '2': 'uninstall', '3': 'update', '4': 'logs', '5': 'check', '6': 'campaign', '7': 'support'}.get(pick, '')
+                   '7 配置地图支援（可呼叫单位 / 兵员武器 / 架数），8 战前配置（小队编组 / 每人兵种与颜色 / 坦克与战机挂载），'
+                   '回车退出：')
+        mode = {'1': 'install', '2': 'uninstall', '3': 'update', '4': 'logs', '5': 'check', '6': 'campaign', '7': 'support',
+                '8': 'loadout'}.get(pick, '')
         if not mode:
             return 0
     if mode == 'check':   # reads only: the game may be running
         game = pick_game()
         return 1 if not game else 0 if check(game) else 1
-    if mode == 'support':   # edits one ini the plugin rereads on save: the game may be running
+    if mode in ('support', 'loadout'):   # edits one ini the plugin rereads on save: the game may be running
         game = pick_game()
-        return 1 if not game else manage_support(game)
+        return 1 if not game else manage_support(game, loadout_only=mode == 'loadout')
     if mode in ('update', 'logs'):
         import testhub
         try:
