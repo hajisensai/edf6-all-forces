@@ -1231,7 +1231,17 @@ void GiveBackDismissed(unsigned char* h) noexcept {
 // stick) but never aims or fires. So the driver's own Think, in the same AI phase and with the same frame step, runs its
 // vehicle's pass once: the seats are cleared before any player's human writes its own seat later in the frame, as the
 // stock pass clears them for a vehicle the stock AI drives. Never for a vehicle on the AI list (it has its own pass).
+// The pass runs the class's AI through an action registered by slot 6 (CarBase 0x6731C0: veh+0x2508, the thunk to slot
+// 72 0x661440; the mechs' 0x642970: veh+0x1F08, the thunk 0x638310 to slot 55 0x63C1C0), and slot 6 runs only when the
+// object joins the AI list (0x118A4B0 setting bit 3). It cannot be run for these: the mechs' reads `ai_attack_setting`,
+// which no call-in or Nix SGO has, and throws (bad_variant_access at 0x6434A9: the game ends, measured with a script-
+// spawned Nix). So with no action registered the plugin calls that same action itself (edx 1, the "in action" byte
+// set around it as the pass sets it), right after the pass, whose own tail (0x660C00 / 0x63BAA0) only follows a route.
 constexpr unsigned kCarAiPass=0x673300,kMechAiPass=0x643530;
+constexpr unsigned kCarAi=0x661440,kMechAi=0x63C1C0,kProteusAi=0x648F70;
+constexpr std::size_t kSlotCarAi=72,kSlotMechAi=55;
+constexpr std::size_t kCarAction=0x2508,kCarInAction=0x2590,kMechAction=0x1F08,kMechInAction=0x1F90;
+using AiActionFn=void(__fastcall*)(void*,int,const float*,void*);
 const unsigned char kCarAiPassSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x20,0x48,0x8B,0xF2,
                                     0x48,0x8B,0xD9,0xE8,0xE6,0x6C,0xED,0xFF};   // ...call 0x54A000
 const unsigned char kMechAiPassSig[]={0x48,0x89,0x6C,0x24,0x20,0x57,0x48,0x83,0xEC,0x30,0x48,0x89,0x74,0x24,0x50,0x48,0x8B,0xEA,
@@ -1259,7 +1269,17 @@ void DriveVehicleAi(unsigned char* h,const float* dt) noexcept {
     lastV=v;lastFrame=frame;
     static ULONGLONG loggedAt=0;
     if(GameMs()-loggedAt>10000){loggedAt=GameMs();Log("NPCAI driver %p runs the AI pass of v=%p (not on the AI list)",h,v);}
+    const bool car=vt[kSlotAiPass]==image+kCarAiPass;
     reinterpret_cast<AiPassFn>(vt[kSlotAiPass])(v,dt);
+    // The class's AI action when no slot 6 registered one (see above).
+    const std::size_t action=car ? kCarAction : kMechAction,inAction=car ? kCarInAction : kMechInAction;
+    const std::size_t slot=car ? kSlotCarAi : kSlotMechAi;
+    if(At<const void*>(v,action) || !Readable(vt,(slot+1)*8))return;
+    const void* fn=vt[slot];
+    if(car ? fn!=image+kCarAi : (fn!=image+kMechAi && fn!=image+kProteusAi))return;
+    v[inAction]=1;
+    reinterpret_cast<AiActionFn>(const_cast<void*>(fn))(v,1,dt,nullptr);
+    v[inAction]=0;
 }
 
 template<int I> void __fastcall ThinkHook(void* human,const float* dt) {
