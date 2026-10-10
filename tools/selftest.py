@@ -5390,6 +5390,28 @@ def edf5_found_by_gamedir() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+@test
+def weapon_table_fits_the_save() -> None:
+    """stack refuses, before building anything, a table its rows would take past the 0x800 weapons a save keeps (the
+    game writes past the save's block for every row beyond); a table exactly full is fine."""
+    import types
+    import edf5_weapons as e5w
+    ours = len(cw.plan_rows([]).appended)
+    full = [f'OTHER{i}' for i in range(cw.SAVE_WEAPONS - ours + 1)]
+
+    def built(*_a: object) -> None:
+        raise AssertionError('stack built the weapons before refusing the table')
+
+    with patched(cw, load_shared=lambda game_root: types.SimpleNamespace(ids=full)), patched(e5w, build=built):
+        try:
+            cw.stack('nowhere')
+        except SystemExit as e:
+            assert str(cw.SAVE_WEAPONS + 1) in str(e), e
+        else:
+            raise AssertionError('a table past the save was stacked')
+    cw.check_room(cw.SAVE_WEAPONS)
+
+
 def _e5w_games(test: str) -> tuple[str, str] | None:
     """(EDF6, EDF5) when both are installed (the real-data tests), else None, saying the test is skipped."""
     import gamedir
