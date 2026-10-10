@@ -6,8 +6,9 @@ The registry is edf5port/weapons.json (tools/make_edf5_weapons.py, docs/edf5-wea
 (EDF6VC_E5_<EDF5 SGO>), category, level, star caps, the EDF6 template row and its texts in the five languages. Its SGO
 comes from one of two places:
   'edf6'  EDF6's own copy of it (in Root.cpk, never named by EDF6's table): copied under our id.
-  'edf5'  the player's EDF5 Root.cpk (gamedir.find_other: $EDF5_DIR, next to EDF6, the Steam libraries), converted
-          by pylib/edf5port.py. Without EDF5 the row is still taken (tools/call_weapons.py plan_rows: every install
+  'edf5'  EDF5's file converted by pylib/edf5port.py when the registry was made, kept in it ('weapon'): the install
+          needs no EDF5. (One without 'weapon' would be read from the player's EDF5 Root.cpk, gamedir.find_other:
+          $EDF5_DIR, next to EDF6, the Steam libraries.) Without what it is built from the row is still taken (tools/call_weapons.py plan_rows: every install
           of a release has the same rows, with or without EDF5): a placeholder, its template's stock weapon named as
           waiting for EDF5 (pending_*), until an install finds EDF5; a row an earlier install built is kept as it is
           (its SGO is in Mods already).
@@ -70,13 +71,14 @@ class Port:
     template: str      # the EDF6 weapon whose row fills the other columns and is the placeholder
     text: dict         # lang -> [name, description, stats]
     damage_attribute: dict | None = None   # AmmoDamageAttribute a converted weapon takes (its EDF6 family's)
+    weapon: dict | None = None             # an 'edf5' weapon converted (dsgo.dump of edf5port.weapon's root)
 
 
 def _load() -> tuple[Port, ...]:
     with open(LIST, encoding='utf-8') as f:
         data = json.load(f)
     return tuple(Port(w['id'], w['sgo'], w['source'], int(w['category']), w['class'], float(w['level']),
-                      tuple(w['stars']), w['template'], w['text'], w.get('damage_attribute'))
+                      tuple(w['stars']), w['template'], w['text'], w.get('damage_attribute'), w.get('weapon'))
                  for w in data['weapons'])
 
 
@@ -126,14 +128,16 @@ def build_sgo(p: Port, stock, edf5: str | None) -> bytes:  # noqa: ANN001 - stoc
     lacks the file; edf5port.Unsupported: something in it this conversion does not carry."""
     if p.source == 'edf6':
         return stock(f'WEAPON/{p.sgo.upper()}')
-    if edf5 is None:
-        raise Unavailable('EDF5 not found')
-    try:
-        data = _edf5(edf5).read('WEAPON', p.sgo)
-    except KeyError as e:
-        raise Unavailable(f"EDF5's Root.cpk has no WEAPON/{p.sgo}") from e
-    members = sgo.read(data)[1]
-    doc = edf5port.weapon(members, _names(p))
+    if p.weapon is not None:   # converted when the registry was made: no EDF5 needed
+        doc = dsgo.Document(dsgo.load(p.weapon), [])
+    else:
+        if edf5 is None:
+            raise Unavailable('EDF5 not found')
+        try:
+            data = _edf5(edf5).read('WEAPON', p.sgo)
+        except KeyError as e:
+            raise Unavailable(f"EDF5's Root.cpk has no WEAPON/{p.sgo}") from e
+        doc = edf5port.weapon(sgo.read(data)[1], _names(p))
     if p.damage_attribute is not None:
         doc.root.set('AmmoDamageAttribute', Node([float(v) for v in p.damage_attribute.values()],
                                                  dict(enumerate(p.damage_attribute))))

@@ -5481,7 +5481,19 @@ def edf5_weapons_stack_real() -> None:
             if isinstance(v, dsgo.Node) and all(isinstance(x, float) for x in v.items):
                 assert len(v.items) != 6, f'{p.id} {k}: a star curve still 6 long'
     with_edf5 = cw.row_ids(out[cw.TABLE])
-    with patched(e5w, edf5_root=lambda game_root: None):
+    with patched(e5w, edf5_root=lambda game_root: None):   # no EDF5: the registry's converted weapons suffice
+        no_edf5 = cw.stack(games[0])
+    assert cw.row_ids(no_edf5[cw.TABLE]) == with_edf5
+    assert all(no_edf5[e5w.sgo_file(p)] == out[e5w.sgo_file(p)] for p in e5w.PORTS), 'built without EDF5 differs'
+    # A weapon this machine cannot build (a later game's, missing): the same rows, a placeholder for it.
+    real_build = e5w.build
+
+    def edf6_only(game_root: str, stock):  # noqa: ANN001, ANN202
+        built, why = real_build(game_root, stock)
+        cut = {k for k in built if e5w.BY_ID[k].source != 'edf6'}
+        return {k: v for k, v in built.items() if k not in cut}, {**why, **{k: 'Unavailable: test' for k in cut}}
+
+    with patched(e5w, build=edf6_only):
         bare = cw.stack(games[0])
     without = cw.row_ids(bare[cw.TABLE])
     assert len(without) == len(with_edf5)
@@ -5498,7 +5510,7 @@ def edf5_weapons_stack_real() -> None:
             modfiles.atomic_write(os.path.join(mods, *e5w.sgo_file(p).split('/')), out[e5w.sgo_file(p)])
         installed = lambda game_root, rel: out[rel] if rel in cw.SHARED else orig_base(game_root, rel)   # noqa: E731
         ours = lambda game_root, *rel: os.path.join(mods, *[x for r in rel for x in r.split('/')])   # noqa: E731
-        with patched(cw, base=installed, _mods=ours), patched(e5w, edf5_root=lambda game_root: None):
+        with patched(cw, base=installed, _mods=ours), patched(e5w, build=edf6_only):
             kept = cw.stack(games[0])
             retired, _ = cw.retire(games[0], False)
     assert cw.row_ids(kept[cw.TABLE]) == with_edf5, 'a built row an earlier install wrote was not kept'
