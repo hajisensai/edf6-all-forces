@@ -220,6 +220,9 @@ void Guide(Jet& j,const Kind& kind,const Arms& arms,Jet* mother,const float* pos
     }
 }
 
+// s a charge drone leads its target by (Rotor): 1 / Hover's vertical gain (its wantV[1]: half the gap a second).
+constexpr float kChargeLead=2.0f;
+
 // A rotor craft's step (FlightModel::rotor): kind.alt over its anchor, facing its target: a carrier about its
 // station, a charge at its target; leaving, along `want` (Away's way out, climbing). A carrier's nacelles follow
 // its thrust.
@@ -234,17 +237,20 @@ void Rotor(Jet& j,const Kind& kind,unsigned char* v,Jet* mother,const float* pos
         // itself; sent somewhere (the player's order, CarrierState::order) or thrown (no carrier), kThrownHover over
         // its anchor, waiting there. The anchor is on the ground in both, and twice kDockBelow under it, as before,
         // was under the ground (the drone sank into it, held by HoldOffGround's floor).
-        climb=kind.cruise*0.5f;
+        // At a flyer it climbs as fast as it flies: at half that (12.5 m/s, a doll drone) the flyers it chased kept above
+        // it, climbing with it to the game's ceiling, and it never reached them (2026-10-10 log: y 483 -> 985 m in 46 s,
+        // 28-110 m under its target; the user: the drones and their carrier are to attack the flyers).
+        climb=j.t.target && j.t.flyer ? kind.cruise : kind.cruise*0.5f;
         const float* mp=mother ? reinterpret_cast<const float*>(mother->Vehicle()+kPosition) : nullptr;
         if(j.mode==Mode::recover && mp){goal[0]=mp[0];goal[1]=mp[1]-kDockBelow;goal[2]=mp[2];}
         else if(j.t.target) {
-            std::memcpy(goal,j.t.aim,12);
-            // A doll drone comes in kDollRide over the ground there (still within kDollTrigger of a target on it); no
-            // charge drone flies higher than its ceiling over it (airchase::kChargeCeiling: its targets are under it,
-            // VisitTarget; this holds its goal there between their looks).
+            // Where the target will be kChargeLead on (its velocity, PickTarget): Hover closes on its goal at half the gap a
+            // second, which behind a target moving at v stays 2v off it (26 m under a flyer climbing 13 m/s, outside even
+            // the held reach of its charge: Step); led by 1 / that gain it closes in, and over the ground it flies to meet it.
+            for(int i=0;i<3;++i)goal[i]=j.t.aim[i]+j.t.tgtVel[i]*kChargeLead;
+            // A doll drone comes in kDollRide over the ground there (still within kDollTrigger of a target on it).
             const float under=GroundClearance(goal);
             if(under!=kNoGround && kind.doll && under<kDollRide)goal[1]+=kDollRide-under;
-            if(under!=kNoGround)goal[1]=airchase::UnderCeiling(goal[1],goal[1]-under,airchase::kChargeCeiling);
         }
         else if(mp && !mother->carrier.ordered){goal[0]=mp[0];goal[1]=mp[1]-kDockBelow*2.0f;goal[2]=mp[2];}
         else{goal[0]=anchor[0];goal[1]=anchor[1]+kThrownHover;goal[2]=anchor[2];}
@@ -616,19 +622,11 @@ void JetFrame(unsigned char* v) noexcept {
     if(j->t.target){const float to[3]={j->t.aim[0]-pos[0],j->t.aim[1]-pos[1],j->t.aim[2]-pos[2]};PickStore(arms,j->t.flyer,Len(to));}
     if(kind.weapon==Weapon::charge && j->t.target && j->mode!=Mode::withdraw && j->mode!=Mode::recover) {
         // Its run at the target (airchase::Step): within its trigger it goes off; held off it (by its body, from any side)
-        // within its charge's blast, as well; not closing in farther out, it gives the target up, shunned by it and its
-        // carrier for a while (a map focus order's target is kept: the player's).
+        // within its charge's blast, as well; farther out it keeps after it.
         const float to[3]={j->t.aim[0]-pos[0],j->t.aim[1]-pos[1],j->t.aim[2]-pos[2]};
         const float d=Len(to),held=std::fmin(kind.trigger*kTriggerHeld,kind.blast);
         const airchase::Verdict verdict=airchase::Step(j->t.closing,j->t.target,d,kind.trigger,held,walled,ms);
         if(verdict==airchase::Verdict::detonate){Detonate(*j,mother,d,ms);Blast(*j,v,ms);return;}
-        if(verdict==airchase::Verdict::giveUp && !j->focus.Is(j->t.target)) {
-            Log("JET v=%p %s gives up %p: %.0f m off it (y=%.0f, target y=%.0f), no nearer than %.0f m in %.0f s",j->Vehicle(),
-                kind.name,j->t.target,d,pos[1],j->t.aim[1],j->t.closing.best,static_cast<float>(airchase::kGiveUpMs)*0.001f);
-            airchase::Shun(j->t.shun,j->t.target,ms+airchase::kShunMs);
-            if(mother)airchase::Shun(mother->t.shun,j->t.target,ms+airchase::kShunMs);
-            j->t.target=nullptr;j->t.closing=airchase::Closing{};
-        }
     }
     float lead[3];
     if(j->t.target)Lead(pos,j->t.aim,j->t.tgtVel,arms,lead);

@@ -58,8 +58,8 @@ constexpr float kCornerFrom=0.35f,kCornerShare=0.45f;
 // are high on its body, flew: fighters made gun passes at it, back and forth over it, 2026-10-03.)
 constexpr float kFlyerClear=15.0f,kFlyerProbe=30.0f;
 // The ray looks this far down for the ground under a target: past the game's 1200 m ceiling (CeilingY), so a flyer high
-// up has the ground under it found too (a charge drone's ceiling is over that ground: airchase::Limits). 400 m until
-// 2026-10-10: a flyer higher than that had no ground under it, which made it a flyer all the same.
+// up has the ground under it found too. 400 m until 2026-10-10: a flyer higher than that had no ground under it, which
+// made it a flyer all the same.
 constexpr float kFlyerDepth=2000.0f;
 constexpr ULONGLONG kFlyerMemoMs=500;
 // The current target counts as kKeepScale of its distance less kKeepTarget: another must be much nearer
@@ -68,7 +68,7 @@ constexpr float kKeepScale=0.6f,kKeepTarget=100.0f;
 
 // The target: as the role prefers (Kind::prefer), nearest to the jet among those within `range` of
 // `anchor`, the current one counting nearer (kKeepScale, kKeepTarget).
-struct Pick { Jet* j; const float* pos; const float* anchor; float range; ULONGLONG ms; airchase::Limits limits; bool charges;
+struct Pick { Jet* j; const float* pos; const float* anchor; float range; ULONGLONG ms; bool charges;
              const void* best; float score,aim[3]; bool flyer,focus,focusSeen; };
 // Whether `object` (lock point `p`) flies: its root more than kFlyerClear over the ground, or no ground
 // under it (see kFlyerProbe); one ray per object per kFlyerMemoMs, shared by every jet.
@@ -76,8 +76,7 @@ struct Pick { Jet* j; const float* pos; const float* anchor; float range; ULONGL
 // game allocates objects at a fixed stride: their low address bits alone put whole waves of targets in one slot,
 // which then evicted each other on every look, re-probed and re-logged each frame); a new object takes its set's
 // least recently looked at way.
-// `ground`/`groundY`: the ground the ray found under it (a charge drone's ceiling over it: airchase::Limits).
-struct FlyerMemo { const void* object; ULONGLONG at; bool flyer,ground; float groundY; };
+struct FlyerMemo { const void* object; ULONGLONG at; bool flyer; };
 constexpr int kFlyerSets=128,kFlyerWays=4;
 FlyerMemo flyerMemo[kFlyerSets][kFlyerWays]{};
 FlyerMemo& FlyerSlot(const void* object,bool* first) noexcept {
@@ -102,22 +101,19 @@ const FlyerMemo& Probe(const void* object,const float* p,ULONGLONG ms) noexcept 
     const float top[3]={root[0],root[1]+kFlyerProbe,root[2]},bottom[3]={root[0],root[1]-kFlyerDepth,root[2]};
     float hit[3];
     const bool ground=MapRay(top,bottom,hit)>=0.0f;
-    m={object,ms,!ground || root[1]-hit[1]>kFlyerClear,ground,ground ? hit[1] : 0.0f};
+    m={object,ms,!ground || root[1]-hit[1]>kFlyerClear};
     if(first && Cfg().debug)Log("JET target %p: root y=%.0f, lock point y=%.0f, ground %s: %s",object,root[1],p[1],
                               ground ? "under it" : "none seen",m.flyer ? "flies" : "on the ground");
     return m;
 }
 bool Flies(const void* object,const float* p,ULONGLONG ms) noexcept { return Probe(object,p,ms).flyer; }
 
-// What jet `j`'s weapon can strike (airchase::Limits): a gunship's shells only the ground (GunshipFire, CrewShell); a charge
-// drone, and a carrier launching them (LaunchOne: its own drones when their body is there), nothing over the charge's
-// ceiling. Every other weapon anything.
-airchase::Limits LimitsOf(const Jet& j) noexcept {
+// Whether jet `j` sends charge drones at its targets: a charge drone itself, or a carrier launching them (LaunchOne: its
+// own drones when their body is there). They fly at the target and have to touch it: one out of their range is let go.
+bool Charges(const Jet& j) noexcept {
     const Kind& k=KindOf(j);
     const Kind& own=KindOf(j.carrier.drones);
-    const bool charges=k.weapon==Weapon::charge ||
-                       (k.weapon==Weapon::drones && own.weapon==Weapon::charge && Preloaded(own.body));
-    return airchase::Limits{k.weapon==Weapon::shells,charges ? airchase::kChargeCeiling : 0.0f};
+    return k.weapon==Weapon::charge || (k.weapon==Weapon::drones && own.weapon==Weapon::charge && Preloaded(own.body));
 }
 
 // A target it lets be for its edge (airbound.h, jet_flight.cpp SoftEdge): flying back in from past its soft edge,
@@ -137,17 +133,12 @@ void VisitTarget(void* ctx,const void* object,const float* p) noexcept {
         k.focus=true;k.best=object;k.score=-1e30f;std::memcpy(k.aim,p,12);k.flyer=Flies(object,p,k.ms);
         return;
     }
-    if(k.focus || PastEdge(*k.j,p) || airchase::Shunned(k.j->t.shun,object,k.ms))return;
+    if(k.focus || PastEdge(*k.j,p))return;
     const float d[3]={p[0]-k.anchor[0],p[1]-k.anchor[1],p[2]-k.anchor[2]};
     // A map order bounds the current target too; an uncommanded jet keeps its ordinary pursuit, but a charge drone (or its
     // carrier) is bound by its range always: it does not chase one it cannot catch out of it.
     if((object!=k.j->t.target || k.j->cmd.order!=Order::none || k.charges) && Dot(d,d)>k.range*k.range)return;
-    const FlyerMemo& seen=Probe(object,p,k.ms);
-    const bool flyer=seen.flyer;
-    // What its weapon cannot strike (airchase::Allowed), the current target too. No ground under the target: the ground
-    // under the jet stands in for it.
-    const bool ground=seen.ground || k.j->m.groundSeen;
-    if(!airchase::Allowed(k.limits,flyer,p[1],ground,seen.ground ? seen.groundY : k.j->m.groundY))return;
+    const bool flyer=Flies(object,p,k.ms);
     const float f[3]={p[0]-k.pos[0],p[1]-k.pos[1],p[2]-k.pos[2]};
     float score=Len(f);
     if(object==k.j->t.target)score=score*kKeepScale-kKeepTarget;
@@ -434,8 +425,7 @@ void Lead(const float* from,const float* aim,const float* tv,const Arms& a,float
 }
 
 void PickTarget(Jet& j,unsigned char* v,const float* pos,const float* anchor,float range,float dt,ULONGLONG ms) noexcept {
-    const airchase::Limits limits=LimitsOf(j);
-    Pick pick{&j,pos,anchor,range,ms,limits,limits.ceiling>0.0f,nullptr,0.0f,{},false,false,false};
+    Pick pick{&j,pos,anchor,range,ms,Charges(j),nullptr,0.0f,{},false,false,false};
     VisitEnemies(v,&VisitTarget,&pick);
     if(j.focus && !pick.focusSeen) {
         Log("JET v=%p focus target %p no longer among the enemies: back to its order",j.Vehicle(),j.focus.obj);

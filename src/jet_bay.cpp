@@ -370,7 +370,7 @@ bool GunShot(Jet& j,SideGun g,const unsigned char* v,const float* pos,const floa
     return true;
 }
 
-// The NPC crew's side gun `g` at its target (j.t: a ground one), led: where a round fired now meets it as it moves on
+// The NPC crew's side gun `g` at its target (j.t: on the ground or a flyer), led: where a round fired now meets it as it moves on
 // (tgtVel, m/s) over the round's flight to where it is now. Only with the line from the gunship to that point clear of
 // the map (kGunSightSlack): the rounds fly straight at 8-11 deg down from 350 m over up to the gun's reach and burst on
 // the first thing they meet (HE, no penetration), so a target behind a building or a ridge took every round into the
@@ -381,7 +381,7 @@ constexpr float kGunSightSlack=20.0f;   // m: what stands this near the aim poin
 bool GunAtTarget(Jet& j,SideGun g,const unsigned char* v,const float* pos,ULONGLONG ms,const char* who) noexcept {
     const SideGunSpec& gun=GunOf(g);
     GunClock& c=j.shells.guns[static_cast<int>(g)];
-    if(!gun.ready || !j.t.target || j.t.flyer)return false;
+    if(!gun.ready || !j.t.target)return false;
     if(ms-c.at<gun.gapMs || ms-c.lookAt<gun.gapMs)return false;
     const float d[3]={j.t.aim[0]-pos[0],j.t.aim[1]-pos[1],j.t.aim[2]-pos[2]};
     const float t=Len(d)/gun.speed;
@@ -471,13 +471,15 @@ void BayFrame(Jet& j,const float* pos) noexcept {
     }
 }
 
-// A gunship's guns while its weapons are free (WeaponsFree, as every jet weapon) at a ground target: its side guns
-// (GunsAtTarget: the cannon within kCannonReach, the gatling within kGatlingReach, each on its own gap), and a shell every
-// kGunshipGapMs within kGunshipReach of the gunship (`pos`), from its muzzle (GunshipMuzzle) onto the target's lock point.
+// A gunship's guns while its weapons are free (WeaponsFree, as every jet weapon) at its target: its side guns
+// (GunsAtTarget: the cannon within kCannonReach, the gatling within kGatlingReach, each on its own gap), at a flyer too
+// (their rounds fly straight, led onto it; the user 2026-10-10: the aircraft are to attack the flyers, it circled a whole
+// sortie without a shot at them), and at a target on the ground a shell every kGunshipGapMs within kGunshipReach of the
+// gunship (`pos`), from its muzzle (GunshipMuzzle) onto the target's lock point (the shell strikes where it lands).
 void GunshipFire(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
-    if(!WeaponsFree(j) || j.t.flyer)return;
+    if(!WeaponsFree(j) || !j.t.target)return;
     GunsAtTarget(j,v,pos,ms,"its NPC crew");
-    if(ms-j.shells.gunAt<kGunshipGapMs)return;
+    if(j.t.flyer || ms-j.shells.gunAt<kGunshipGapMs)return;
     const float d[3]={j.t.aim[0]-pos[0],j.t.aim[1]-pos[1],j.t.aim[2]-pos[2]};
     if(Len(d)>kGunshipReach)return;
     float muzzle[3];
@@ -564,8 +566,8 @@ bool CrewShell(unsigned char* v,float dt,ULONGLONG ms) noexcept {
     if(!j || !Cfg().jetPilot)return false;
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     PickTarget(*j,v,pos,pos,cannonReady ? kCannonReach : kGunshipReach,dt,ms);
-    if(!j->t.target || j->t.flyer)return false;
-    const bool shell=ms-j->shells.gunAt>=kGunshipGapMs;
+    if(!j->t.target)return false;
+    const bool shell=!j->t.flyer && ms-j->shells.gunAt>=kGunshipGapMs;   // a shell strikes where it lands: the ground
     const bool fired=GunsAtTarget(*j,v,pos,ms,"its NPC gunner");   // each side gun on its own gap (none ready: none fires)
     return (shell && CrewFire(*j,v,j->t.aim,ms,"its NPC gunner")) || fired;
 }

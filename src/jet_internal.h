@@ -331,7 +331,6 @@ struct Aim {
     ULONGLONG bombAt;        // its last bomb (Fire)
     ULONGLONG rocketAt;      // its last rocket ripple (Fire)
     airchase::Closing closing;   // a charge drone's run at its target (JetFrame: airchase::Step)
-    airchase::ShunList shun;     // targets let be for now: a charge drone's it gave up, its carrier's (VisitTarget)
 };
 // A carrier's work (CarrierGoal, LaunchDrones): hit (hpSeen fell) it sidesteps to evadeTo until evadeUntil, and
 // not again before evadeAgain; it holds still while a drone docks (docking); its station follows its target.
