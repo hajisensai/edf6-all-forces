@@ -4609,7 +4609,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(fresh && snap.turretCamOk && !mountedOptic && !snap.cockpit && !launcherSight && !overhead && !gunnerSight && !mechSight)
             TurretMark(drawer,ctx,viewProj,width,height,s,snap.turretCam,!stockHud);
         if(gunnerSight)GunnerMarks(drawer,ctx,t,viewProj,width,height,s,snap.gun,lines,&at);
-        const bool showTurretOverlay=fresh && snap.turret && !mountedOptic && !snap.cockpit && !(physicalSight && snap.turretAim.ownGun) && (!stockHud || stockPick==0) && !launcherSight && !overhead && !gunnerSight && !mechSight;
+        const bool showTurretOverlay=fresh && snap.turret && !mountedOptic && !snap.cockpit && !(physicalSight && snap.turretAim.ownGun) && (!stockHud || hudcue::TurretOverlayOwned(stockPick,snap.stockHud.turret)) && !launcherSight && !overhead && !gunnerSight && !mechSight;
         if(showTurretOverlay) {
             float controlsBottom=-1.0f;
             if(stockHud) {
@@ -4623,7 +4623,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         }
         if(stockHud) {
             const StockExtras x{fresh && snap.nix ? &snap.nixTorso : nullptr,fresh && snap.drill ? &snap.drillCue : nullptr,
-                                showTurretOverlay && !physicalSight && stockPick==0 && snap.turretAim.ownGun && snap.turretAim.mode==edf::aimlink::Mode::leadCircle && snap.turretAim.lead,
+                                showTurretOverlay && !physicalSight && snap.turretAim.ownGun && snap.turretAim.mode==edf::aimlink::Mode::leadCircle && snap.turretAim.lead,
                                 fresh && snap.emc ? &snap.emcCue : nullptr,
                                 fresh && snap.proteus ? &snap.proteusRo : nullptr,overhead,snap.armor ? &snap.armorRo : nullptr};
             StockDockHud(drawer,ctx,t,viewProj,width,height,s,snap.stockHud,x,snap.payload ? &snap.payloadHud : nullptr,

@@ -35,7 +35,7 @@ class LoadoutTableTests(unittest.TestCase):
         self.assertEqual(set(stores.LOADOUTS), set(stores.CATEGORIES))
         for stem, category in stores.CATEGORIES.items():
             with self.subTest(stem=stem, category=category):
-                kinds = [kind_of(m.weapon) for m in stores.LOADOUTS[stem]]
+                kinds = [kind_of(w) for m in stores.LOADOUTS[stem] for w in m.options()]
                 roles = {vc.STORES[k].role for k in kinds}
                 self.assertEqual(len(kinds), len(set(kinds)), 'one kind once')
                 for need in stores.REQUIRED[category]:
@@ -49,13 +49,27 @@ class LoadoutTableTests(unittest.TestCase):
             if category != 'mbt':
                 continue
             with self.subTest(stem=stem):
-                load = {kind_of(m.weapon): m for m in stores.LOADOUTS[stem]}
+                load = {kind_of(w): m for m in stores.LOADOUTS[stem] for w in m.options()}
                 for k in ('AP', 'HE', 'GLM'):
                     self.assertEqual(load[k].like, 0, 'fired from the main gun (holder 0)')
+                self.assertIs(load['AP'], load['HE'], 'AP and HE are one holder: the round the stock gun is not')
                 self.assertIsInstance(vc.STORES['AP'].weapon, vc.Shell)
                 self.assertEqual(vc.STORES['AP'].weapon.kind, 'ap')
                 self.assertEqual(vc.STORES['HE'].weapon.kind, 'he')
                 self.assertEqual(vc.STORES['GLM'].role, 'ground')
+                self.assertEqual(vc.STORES['GLM'].weapon.muzzle, 'V_505TANK_CANNON01.SGO', 'from the tank gun muzzle')
+
+    def test_a_round_pair_carries_the_kind_the_stock_gun_is_not(self) -> None:
+        # The user, 2026-10-10: 「这个he和原本的弹药重复了吧」.
+        pair = stores.LOADOUTS['V505_TANK'][0]
+        kinds = {'app:/weapon/howitzer.sgo': 'he', 'app:/weapon/smoothbore.sgo': 'ap'}.get
+        beside = lambda path: ['app:/weapon/' + path, [0.1, 0.2]]   # noqa: E731
+        self.assertEqual(kind_of(stores.pick(pair, beside('howitzer.sgo'), kinds)), 'AP')
+        self.assertEqual(kind_of(stores.pick(pair, beside('smoothbore.sgo'), kinds)), 'HE')
+        self.assertEqual(kind_of(stores.pick(pair, beside('unknown.sgo'), kinds)), 'AP', 'not known: AP')
+        self.assertEqual(kind_of(stores.pick(pair, 0.0, kinds)), 'AP', 'an empty stock holder')
+        glm = stores.LOADOUTS['V505_TANK'][1]
+        self.assertEqual(stores.pick(glm, beside('smoothbore.sgo'), kinds), glm.weapon, 'a single store: itself')
 
     def test_rounds_are_catalogued_and_typed(self) -> None:
         inc = (ROOT / 'src' / 'stores.inc').read_text(encoding='utf-8')
@@ -138,6 +152,36 @@ class WithGameTests(unittest.TestCase):
                     self.assertEqual((got['AmmoExplosion'], got['AmmoIsPenetration']), (0.0, 1.0))
                 else:
                     self.assertGreater(got['AmmoExplosion'], 0.0)
+
+    def test_no_request_carries_the_round_its_stock_gun_already_fires(self) -> None:
+        # 22 of the tank requests bring a howitzer (an HE gun): they get APFSDS, the smooth-bore ones HE.
+        kinds = stores.stock_round_kind(self.game)
+        rows = {stem: stores.stock_rows(self.game, stem) for stem in stores.LOADOUTS}
+        seen = set()
+        for name in stores.requests(self.game):
+            data, stem = stores.request_sgo(self.game.read('WEAPON', name), name, rows, kinds)
+            entry = next(x for x in dsgo.to_py(dsgo.parse(data).root)['Ammo_CustomParameter']
+                         if isinstance(x, list) and len(x) >= 4 and isinstance(x[2], str) and 'edf6vc_' in x[2])
+            weapons = next(x for x in entry[3] if stores._is_list(x))
+            for mount, w in zip(stores.LOADOUTS[stem], weapons[rows[stem]:]):
+                if mount.other is None:
+                    continue
+                with self.subTest(request=name):
+                    stock = kinds(weapons[mount.like][0]) if isinstance(weapons[mount.like], list) else None
+                    mine = vc.STORES[kind_of(w[0].split('/')[-1])].weapon.kind
+                    self.assertNotEqual(stock, mine, f'{w[0]} beside {weapons[mount.like]}')
+                    seen.add(mine)
+        self.assertEqual(seen, {'ap', 'he'}, 'both rounds are carried somewhere')
+
+    def test_gun_launched_missile_fires_from_the_tank_gun_muzzle(self) -> None:
+        # The user, 2026-10-10: 「这个炮射导弹是从坦克车头两边射出去的」: not the heli pods' four muzzles.
+        got = dsgo.parse(vc.store_sgo(self.game, vc.store_file('GLM', 4))).root.get('animation_model').items[2].data
+        gun = dsgo.parse(self.game.read('WEAPON', 'V_505TANK_CANNON01.SGO')).root.get('animation_model').items[2].data
+        self.assertEqual(got, gun)
+        self.assertEqual(len(vc.mab_muzzles(got)), 1)
+        for name in ('V601_TANK_CANNON01.SGO', 'V_505TANK_CANNON01S.SGO'):
+            other = dsgo.parse(self.game.read('WEAPON', name)).root.get('animation_model').items[2].data
+            self.assertEqual(vc.mab_muzzles(other), vc.mab_muzzles(got), f'{name}: the same muzzle')
 
 
 if __name__ == '__main__':

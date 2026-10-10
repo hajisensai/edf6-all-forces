@@ -45,4 +45,10 @@ constexpr StoreIcon ArmIconOf(int kind,bool lobbed,int style=0) noexcept {
     if(style!=0)return StoreIcon::energy;
     return kind==2 ? StoreIcon::rocket : kind==3 ? StoreIcon::aam : lobbed ? StoreIcon::bomb : StoreIcon::gun;
 }
+// Whether a stock vehicle's turret aim overlay (the auto-aim state and keys, the lock box, the range, the lead circle:
+// hud.cpp TurretAimMarks) is the fire-control pick's: arm `sight` (vhud.h StockHudReadout.sight) is the gun the turret is
+// laid by, arm `turret` (turretcam.cpp TurretGun, the one EDF6AutoTurret leads). Not "the first arm" (2026-10-10, the
+// user: 「自瞄之类的只有原始的弹药有。ap和he之类的少了」: the APFSDS / HE stores on the main gun's holder are arms 1.., and
+// the turret is laid by them once picked); a pick the turret does not turn with (the Titan's hull gatling) has none.
+constexpr bool TurretOverlayOwned(int sight,int turret) noexcept { return sight>=0 && sight==turret; }
 }  // namespace crew::hudcue

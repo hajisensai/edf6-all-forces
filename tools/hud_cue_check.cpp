@@ -51,6 +51,12 @@ int main() {
     Check(ArmIconOf(3,false)==StoreIcon::aam,"a homing missile");
     Check(ArmIconOf(1,true)==StoreIcon::bomb,"a lobbed round");
 
+    // The turret aim overlay follows the fire-control pick when the turret is laid by it (vhud.h sight / turret).
+    Check(TurretOverlayOwned(0,0),"the stock main gun picked: the overlay");
+    Check(TurretOverlayOwned(2,2),"a store on the main gun's holder picked (APFSDS / HE): the overlay, not only arm 0");
+    Check(!TurretOverlayOwned(3,0),"a pick the turret does not turn with (the Titan's hull gatling): none");
+    Check(!TurretOverlayOwned(-1,-1) && !TurretOverlayOwned(0,-1),"no pick, or no turret gun: none");
+
     std::printf("hud_cue_check: %d cases, %d failures\n",cases,failures);
     return failures ? 1 : 0;
 }
