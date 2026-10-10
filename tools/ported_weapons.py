@@ -172,6 +172,8 @@ class Models:
         self.weapons = weapons
         self._bones: dict[str, list[tuple[str, int]]] = {}
         self._nodes: dict[str, dict[str, str]] | None = None
+        self._peers: dict[str, list[Node]] = {}
+        self.known: dict[str, set[str]] = {f: set() for f in edf5port.HOLD_NAMES}
 
     @staticmethod
     def model_of(doc: dsgo.Document) -> tuple[str, str] | None:
@@ -199,26 +201,48 @@ class Models:
             self._bones[key] = [(found.name_of(b.name), b.parent) for b in found.bones]
         return self._bones[key]
 
+    def _index(self) -> None:
+        """EDF6's weapons read once: per model, the weapons on it and the node each locator name hangs on; per HOLD
+        name field, the names they use."""
+        if self._nodes is not None:
+            return
+        votes: dict[str, dict[str, collections.Counter]] = {}
+        for name in self.weapons:
+            try:
+                root = dsgo.parse(self.stock(f'WEAPON/{name}')).root
+            except (KeyError, ValueError, IndexError, struct.error):
+                continue
+            for f in edf5port.HOLD_NAMES:
+                if f in root.names.values():
+                    text = edf5port._first_text(root.get(f))
+                    if text is not None:
+                        self.known[f].add(text)
+            try:
+                am = root.get('animation_model')
+                rab = am.items[0].items[0].lower()
+                nodes = mab_legacy.mab_locator_nodes(am.items[2].data)
+            except (KeyError, ValueError, AttributeError, IndexError, struct.error):
+                continue   # not a weapon with a MAB block: nothing to learn from it
+            self._peers.setdefault(rab, []).append(root)
+            for loc, node in nodes:
+                votes.setdefault(rab, {}).setdefault(loc, collections.Counter())[node] += 1
+        self._nodes = {rab: {loc: c.most_common(1)[0][0] for loc, c in locs.items()} for rab, locs in votes.items()}
+
     def preferred(self, doc: dsgo.Document) -> dict[str, str]:
         """{locator name: the node EDF6's own weapons on this weapon's model hang it on} (the most of them)."""
         model = self.model_of(doc)
         if model is None:
             return {}
-        if self._nodes is None:
-            votes: dict[str, dict[str, collections.Counter]] = {}
-            for name in self.weapons:
-                try:
-                    root = dsgo.parse(self.stock(f'WEAPON/{name}')).root
-                    if 'animation_model' not in root.names.values():
-                        continue
-                    am = root.get('animation_model')
-                    rab = am.items[0].items[0].lower()
-                    for loc, node in mab_legacy.mab_locator_nodes(am.items[2].data):
-                        votes.setdefault(rab, {}).setdefault(loc, collections.Counter())[node] += 1
-                except (KeyError, ValueError, AttributeError, IndexError, struct.error):
-                    continue   # not a weapon with a MAB block: nothing to learn from it
-            self._nodes = {rab: {loc: c.most_common(1)[0][0] for loc, c in locs.items()} for rab, locs in votes.items()}
+        self._index()
         return self._nodes.get(model[0].lower(), {})
+
+    def peers(self, doc: dsgo.Document) -> list[Node]:
+        """EDF6's own weapons on this weapon's model."""
+        model = self.model_of(doc)
+        if model is None:
+            return []
+        self._index()
+        return self._peers.get(model[0].lower(), [])
 
 
 def build_sgo(p: Port, stock, root: str | None, models: Models | None = None) -> bytes:  # noqa: ANN001 - stock(rel) -> bytes, the EDF6 file
@@ -240,7 +264,6 @@ def build_sgo(p: Port, stock, root: str | None, models: Models | None = None) ->
             raise Unavailable(f"{name}'s Root.cpk has no WEAPON/{p.sgo}") from e
         doc = BY_GAME[p.game].convert(sgo.read(data)[1], _names(p))
     models = models or Models(stock)
-    edf5port.fit_locators(doc, models.bones(doc), models.preferred(doc))
     if p.damage_attribute is not None:
         doc.root.set('AmmoDamageAttribute', Node([float(v) for v in p.damage_attribute.values()],
                                                  dict(enumerate(p.damage_attribute))))
@@ -251,6 +274,11 @@ def build_sgo(p: Port, stock, root: str | None, models: Models | None = None) ->
         edf5port.to_sub(doc, template)
     if doc.root.get('xgs_scene_object_class') != p.cls:
         raise edf5port.Unsupported(f"class {doc.root.get('xgs_scene_object_class')}, the registry says {p.cls}")
+    # Held as EDF6's own weapons on its model are (after to_sub: a vehicle call is held as a Weapon_Sub), then every
+    # locator on a bone the model has.
+    template = dsgo.parse(stock(f'WEAPON/{p.template.upper()}.SGO')).root
+    edf5port.hold_as(doc, models.peers(doc), template, models.known)
+    edf5port.fit_locators(doc, models.bones(doc), models.preferred(doc))
     return dsgo.write(doc)
 
 

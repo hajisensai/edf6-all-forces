@@ -5826,14 +5826,76 @@ def ported_weapon_locators_fit() -> None:
         raise AssertionError('mab_set_strings wrote over a field that is not a string offset')
 
 
+
+@test
+def ported_weapons_held_as_edf6() -> None:
+    """pylib/edf5port.py hold_as on hand-made weapons: with EDF6 weapons of its class on its model, the weapon takes the
+    hand and holding animations most of them have, of custom_parameter only the animation (element 0; a Weapon_Sub's
+    named form, the call it makes, untouched), and the MAB block of one whose locators include all of its own; without
+    one of its class, only a holding animation no EDF6 weapon uses takes the template's; its numbers never change."""
+    import edf5port
+    import struct
+    import mab
+
+    def block(*names: str) -> bytes:
+        sgo_block = b'SGO\0' + struct.pack('<7I', 0x102, 0, 0x20, 0, 0x20, 0, 0x20)
+        return mab.mab_write(mab.Mab((0xF, 0x83, 0), [0, 1, 2], [
+            mab.Locator(n, 'body', 2, (0.0, 0.1 * k, 1.0, 1.0), (0.05, 0.05, 0.25, 1.0), (0.0, 0.0, 0.0, 1.0), 0, sgo_block)
+            for k, n in enumerate(names)]))
+
+    def weapon(cls: str, hand: str, base: str, recoil: str, mab_block: bytes, damage: float = 10.0) -> dsgo.Node:
+        r = dsgo.Node([])
+        r.set('xgs_scene_object_class', cls)
+        r.set('ModelConstraint', dsgo.Node([hand]))
+        r.set('BaseAnimation', base)
+        r.set('custom_parameter', dsgo.Node([recoil, 0.0, 0.0, 1.0]))
+        r.set('AmmoDamage', damage)
+        r.set('animation_model', dsgo.Node([dsgo.Node(['app:/Weapon/w.rab', 'w.mdb']), 'c', dsgo.Blob(mab_block, 2)]))
+        return r
+
+    ours_block, theirs_block = block('01'), block('01', 'IK')
+    peers = [weapon('Weapon_BasicShoot', 'arms_l', 'assault', 'assault_recoil1', theirs_block, 99.0) for _ in range(2)]
+    peers.append(weapon('Weapon_BasicShoot', 'arms_r', 'assault', 'assault_recoil1', theirs_block, 99.0))
+    known = {f: {'assault', 'assault_recoil1'} for f in edf5port.HOLD_NAMES}
+    doc = dsgo.Document(weapon('Weapon_BasicShoot', 'arms_r', 'assault2', 'assault_recoil3', ours_block), [])
+    edf5port.hold_as(doc, peers, peers[0], known)
+    r = doc.root
+    assert r.get('ModelConstraint').items == ['arms_l'], 'not the hand most of EDF6\'s weapons on the model use'
+    assert r.get('BaseAnimation') == 'assault' and r.get('custom_parameter').items == ['assault_recoil1', 0.0, 0.0, 1.0]
+    assert r.get('AmmoDamage') == 10.0, 'a number of the weapon\'s own changed'
+    assert r.get('animation_model').items[2].data == theirs_block, 'not the developers\' MAB block (a superset of ours)'
+    # a block whose locators the developers' do not all carry stays ours
+    doc = dsgo.Document(weapon('Weapon_BasicShoot', 'arms_r', 'assault', 'assault_recoil1', block('01', 'extra')), [])
+    edf5port.hold_as(doc, peers, peers[0], known)
+    assert doc.root.get('animation_model').items[2].data == block('01', 'extra')
+    # no peer of its class: only the names no EDF6 weapon uses take the template's
+    template = weapon('Weapon_Throw', 'arms_l', 'assault', 'assault_recoil1', theirs_block)
+    doc = dsgo.Document(weapon('Weapon_Throw', 'arms_r', 'bag', 'assault_recoil1', ours_block), [])
+    edf5port.hold_as(doc, peers, template, known)
+    assert doc.root.get('BaseAnimation') == 'assault' and doc.root.get('ModelConstraint').items == ['arms_r']
+    # a Weapon_Sub's named custom_parameter (the call it makes) is never taken over
+    sub = weapon('Weapon_Sub', 'arms_r', 'assault', 'assault_recoil1', ours_block)
+    named = dsgo.Node(['vehicle_call', 1.0], {0: 'motion', 1: 'speed'})
+    sub.set('custom_parameter', named)
+    peer = weapon('Weapon_Sub', 'arms_r', 'assault', 'assault_recoil1', theirs_block)
+    peer.set('custom_parameter', dsgo.Node(['other_call', 2.0], {0: 'motion', 1: 'speed'}))
+    doc = dsgo.Document(sub, [])
+    edf5port.hold_as(doc, [peer], peer, known)
+    assert doc.root.get('custom_parameter').items == ['vehicle_call', 1.0], 'a Weapon_Sub\'s call was taken over'
+
 @test
 def ported_weapon_locators_fit_real() -> None:
-    """With the games: every ported weapon (EDF5's, EDF4.1's) as installed hangs every locator of its MAB on a bone
-    of its EDF6 model (EDF.dll finds no muzzle otherwise, ported_weapon_locators_fit), and where fit_locators moved
-    one, it went where EDF6's own weapons on that model hang a locator of that name (Models.preferred: the Hercules
-    sniper's on 'body', not the root), and where EDF6 ships a weapon on the same model laid out alike, the strings are
-    the developers' (their blocks differ from these only in re-authored positions)."""
-    import struct
+    """With the games, every ported weapon (EDF5's, EDF4.1's) as installed:
+      - is held as EDF6's own weapons on its model (edf5port.hold_as; user 2026-10-10, a 4.1 weapon's hands looked
+        wrong): its MAB block is a developer block on its model wherever one carries all its locators, its hand and
+        holding animations the set most of EDF6's weapons of its class on its model have, and no holding animation
+        name is one no EDF6 weapon uses;
+      - hangs every locator of its MAB on a bone of its EDF6 model (EDF.dll finds no muzzle otherwise,
+        ported_weapon_locators_fit).
+    And fit_locators alone (hold_as off, as for a model no EDF6 weapon uses) moves a missing node where EDF6's own
+    weapons on that model hang a locator of that name (the Hercules sniper's on 'body', not the root), the strings then
+    the developers' where a developer block is laid out alike."""
+    import collections
     import edf5port
     import mab_legacy
     import ported_weapons as pw
@@ -5850,54 +5912,87 @@ def ported_weapon_locators_fit_real() -> None:
         lay = mab_legacy.mab_layout(b)
         return {at: mab_legacy._text_at(b, to) for at, _base, to in lay.offsets if to >= lay.strings_at}
 
-    developers: dict[str, list[bytes]] = {}
-    for folder, name in g6.cpk.index:
-        if folder.upper() == 'WEAPON' and name.upper().endswith('.SGO'):
-            r = dsgo.parse(g6.read(folder, name)).root
-            if 'animation_model' in r.names.values():
-                am = r.get('animation_model')
-                developers.setdefault(am.items[0].items[0].lower(), []).append(am.items[2].data)
+    def locs(b: bytes) -> set[str]:
+        return {loc for loc, _node in mab_legacy.mab_locator_nodes(b)}
+
     weapons = tuple(n for d, n in g6.cpk.index if d.upper() == 'WEAPON' and n.upper().endswith('.SGO'))
     models = pw.Models(stock, weapons)
-    built = moved = like = preferred = 0
-    fit = edf5port.fit_locators
+    hold, fit = edf5port.hold_as, edf5port.fit_locators
+
+    def build(p: object, held: bool, fitted: bool) -> dsgo.Node:
+        if not held:
+            edf5port.hold_as = lambda *a: None   # noqa: E731
+        if not fitted:
+            edf5port.fit_locators = lambda *a: None   # noqa: E731
+        try:
+            return dsgo.parse(pw.build_sgo(p, stock, roots[p.game], models)).root
+        finally:
+            edf5port.hold_as, edf5port.fit_locators = hold, fit
+
+    built = adopted = held_fields = moved = like = preferred = 0
     for p in pw.PORTS:
         try:
-            r = dsgo.parse(pw.build_sgo(p, stock, roots[p.game], models)).root
+            r = build(p, True, True)
         except pw.Unavailable:
             continue
         built += 1
         if 'animation_model' not in r.names.values():
             continue
-        am = r.get('animation_model')
-        b = am.items[2].data
-        bones = {n for n, _parent in models.bones(dsgo.Document(r, []))}
-        after = mab_legacy.mab_locator_nodes(b)
-        assert after and {n for _l, n in after} <= bones, f'{p.id}: locator node(s) not in its model'
-        edf5port.fit_locators = lambda doc, bones, prefer=None: None   # noqa: E731 - the block as converted, unfitted
-        try:
-            before = dsgo.parse(pw.build_sgo(p, stock, roots[p.game], models)).root.get('animation_model').items[2].data
-        finally:
-            edf5port.fit_locators = fit
-        if before == b:
+        doc = dsgo.Document(r, [])
+        b = r.get('animation_model').items[2].data
+        bones = {n for n, _parent in models.bones(doc)}
+        assert {n for _l, n in mab_legacy.mab_locator_nodes(b)} <= bones, f'{p.id}: locator node(s) not in its model'
+        for f in edf5port.HOLD_NAMES:
+            if f in r.names.values() and edf5port._first_text(r.get(f)) is not None:
+                assert edf5port._first_text(r.get(f)) in models.known[f], f'{p.id} {f}: an animation EDF6 has not'
+        raw = build(p, False, False)
+        raw_block = raw.get('animation_model').items[2].data
+        peers = models.peers(doc)
+        carriers = [q.get('animation_model').items[2].data for q in peers
+                    if locs(raw_block) <= locs(q.get('animation_model').items[2].data)]
+        if carriers:
+            adopted += 1
+            assert b in carriers, f'{p.id}: not the developers\' MAB block for its model'
+        alike = [q for q in peers if q.get('xgs_scene_object_class') == r.get('xgs_scene_object_class')]
+        if alike:
+            held_fields += 1
+            def held(q: dsgo.Node) -> tuple:
+                return tuple(edf5port._key(q.get(f)) if f in q.names.values() else None for f in edf5port.HOLD)
+            best = collections.Counter(held(q) for q in alike).most_common(1)[0][0]
+            donor = next(q for q in alike if held(q) == best)
+            for f in edf5port.HOLD:
+                if f not in donor.names.values():
+                    continue
+                if f == 'custom_parameter':
+                    if edf5port._first_text(r.get(f)) is not None and not r.get(f).names:
+                        assert r.get(f).items[0] == donor.get(f).items[0], f'{p.id}: recoil not EDF6\'s'
+                    continue
+                assert edf5port._key(r.get(f)) == edf5port._key(donor.get(f)), \
+                    f'{p.id} {f}: not as most of EDF6\'s weapons on its model hold it'
+        # fit_locators alone, hold_as off
+        unheld = build(p, False, True).get('animation_model').items[2].data
+        if unheld == raw_block:
             continue
         moved += 1
-        want = models.preferred(dsgo.Document(r, []))
-        for (loc, old), (_loc, new) in zip(mab_legacy.mab_locator_nodes(before), after):
+        want = models.preferred(doc)
+        for (loc, old), (_loc, new) in zip(mab_legacy.mab_locator_nodes(raw_block), mab_legacy.mab_locator_nodes(unheld)):
             if old not in bones and want.get(loc) in bones:
                 preferred += 1
                 assert new == want[loc], f'{p.id} {loc}: moved to {new}, EDF6\'s weapons on its model use {want[loc]}'
-        alike = [d for d in developers.get(am.items[0].items[0].lower(), []) if len(d) == len(b)]
-        if alike:
+        same_len = [q.get('animation_model').items[2].data for q in peers
+                    if len(q.get('animation_model').items[2].data) == len(unheld)]
+        if same_len:
             like += 1
-            assert strings(b) in [strings(d) for d in alike], f'{p.id}: strings not the developers\' block\'s'
+            assert strings(unheld) in [strings(d) for d in same_len], f'{p.id}: strings not the developers\' block\'s'
     if not built:
         print('skip  ported_weapon_locators_fit_real: no ported weapon could be built')
         return
-    assert moved and like and preferred, f'{moved} blocks moved, {like} beside a developer block, {preferred} ' \
-                                         'locators the developers place: this check is empty'
-    print(f'  {built} weapons built, {moved} with locators moved, {like} checked against the developers\' blocks, '
-          f'{preferred} locators where the developers put them')
+    assert adopted > 150 and held_fields > 100 and moved and like and preferred, \
+        (f'{adopted} developer blocks taken, {held_fields} held as EDF6\'s, {moved} fitted, {like} beside a developer '
+         f'block, {preferred} placed as the developers do: this check is (nearly) empty')
+    print(f'  {built} weapons built: {adopted} on the developers\' MAB block, {held_fields} held as EDF6\'s weapons '
+          f'on their model; fit_locators alone: {moved} moved, {like} against the developers\' strings, {preferred} '
+          'locators where the developers put them')
 
 
 @test
