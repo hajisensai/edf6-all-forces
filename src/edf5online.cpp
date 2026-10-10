@@ -55,7 +55,7 @@ constexpr unsigned kCreatePatchSize=17;   // mov rax,imm64; call rax; mov r13d,e
 // fills a std::vector<std::shared_ptr<User>> (AngelScript's PreloadPlayerResource 0x1B8D13..0x1B8D60, and 0x734670 the
 // creation's copy of it, 0x1D984D). A user is remote when bit 1 of its +0x10 is set (0x12AC420, read for every user
 // by the creation at 0x1D98B1).
-constexpr unsigned kSessionBase=0x20B2AC0,kSessionBack=0x98,kSessionList=0xD0,kUserFlags=0x10;
+constexpr unsigned kSessionBase=0x20B2AC0,kSessionBack=0x98,kSessionList=0xD0,kUserFlags=0x10,kUserIndex=0x48;
 constexpr unsigned kDelete=0x12D85EC;   // the game's sized operator delete
 // A created player whose +0x128 bit 0 is set is not counted as this machine's (0x1D9B50).
 constexpr unsigned kPlayerNotLocal=0x128;
@@ -83,6 +83,20 @@ Creation creation;
 bool ready=false;
 bool clampLogged=false;
 bool gateLogged=false;
+
+// The BVM natives' own online test (0x22B34D..0x22B36A, the same in 0x225E30 and AngelScript's 0x1B8CC0): a session
+// (GS+0x38 != -1) whose mode object's virtual base has +0x68 set.
+bool BvmOnline() noexcept {
+    __try {
+        const auto status=At<unsigned char*>(image,kGameStatus);
+        if(!status)return false;
+        const std::int32_t slot=At<std::int32_t>(status,0x38);
+        if(slot==-1)return false;
+        const auto modes=At<unsigned char**>(status,0x20);
+        const auto mode=At<unsigned char*>(modes[static_cast<std::uint32_t>(slot)],0x10);
+        return At<std::int32_t>(mode,static_cast<std::size_t>(At<std::int32_t>(mode,8))+0x68)!=0;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
 
 bool WriteCode(unsigned rva,const unsigned char* code,std::size_t size) noexcept {
     unsigned char* at=image+rva;
@@ -125,14 +139,20 @@ bool ReadList(SharedVector& list) noexcept {
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
-// Which of the session's first `count` users are remote. False when the list cannot be read or is shorter.
+// Whether mission player 0..count-1 is remote. Player i is the user whose +0x48 is i, not the list's i-th: the creation
+// 591130 finds it by that (its predicate 0x5A35D0 compares user+0x48), and AngelScript's copy 0x734670 puts each user at
+// out[user+0x48] (0x734705..0x7347FC), holes left empty. A player no user stands for is remote here: 591130 finds
+// nobody for it, and -1 binds no pad. False when the list cannot be read.
 bool ReadRemote(std::uint32_t count,bool* remote) noexcept {
+    for(std::uint32_t i=0;i<count;++i)remote[i]=true;
     SharedVector list{};
     bool ok=ReadList(list);
     __try {
-        ok=ok && static_cast<std::uint32_t>(list.last-list.first)>=count;
-        for(std::uint32_t i=0;ok && i<count;++i)
-            remote[i]=list.first[i].obj && ((At<std::uint32_t>(list.first[i].obj,kUserFlags)>>1)&1);
+        for(Shared* p=list.first;ok && p && p!=list.last;++p) {
+            if(!p->obj)continue;
+            const auto index=At<std::int32_t>(p->obj,kUserIndex);
+            if(index>=0 && static_cast<std::uint32_t>(index)<count)remote[index]=(At<std::uint32_t>(p->obj,kUserFlags)>>1)&1;
+        }
     } __except(EXCEPTION_EXECUTE_HANDLER){ok=false;}
     __try {FreeList(list);} __except(EXCEPTION_EXECUTE_HANDLER){}
     return ok;
@@ -183,6 +203,8 @@ std::uint32_t Edf5BvmOnlinePlayers() noexcept {
 // machine's pad or -1, and the split by the local players. False offline and outside the armed online loop.
 bool Edf5BvmOnlinePlayerArgs(int index,int* pad,int* split) noexcept {
     if(!creation.armed || index<0 || static_cast<std::uint32_t>(index)>=creation.count || !pad || !split)return false;
+    // An online loop left early (0x22B5EC: no spawn point) is still armed: never its arguments for an offline creation.
+    if(!BvmOnline()){creation=Creation{};return false;}
     *pad=creation.remote[index] ? -1 : creation.localMade;
     *split=creation.split;
     return true;
@@ -195,6 +217,9 @@ void Edf5BvmOnlinePlayerMade(int index,const void* made) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){}
     if(static_cast<std::uint32_t>(index)+1==creation.count)creation=Creation{};
 }
+
+// A mission start (mission.cpp): whatever an earlier mission's loop left armed is gone.
+void ResetEdf5Online() noexcept { creation=Creation{}; }
 
 // Both or neither: players preloaded but never created is the black screen this fixes, created but not preloaded worse.
 bool InstallEdf5Online() noexcept {

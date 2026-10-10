@@ -108,6 +108,7 @@ void MissionStart() noexcept {
     ResetBigWorld();
     ResetTerrainShare();
     ResetPlayArea();
+    ResetEdf5Online();   // the EDF5 creation loop's online arguments (edf5online.cpp)
     WatchMissionPhase("jets");
     PreloadJets();   // the airstrike takeovers' jets (jet.cpp), with the mission's own resources
     WatchMissionPhase("player jets");

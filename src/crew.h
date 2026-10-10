@@ -451,6 +451,7 @@ bool Edf5OnlineReady() noexcept;
 std::uint32_t Edf5BvmOnlinePlayers() noexcept;
 bool Edf5BvmOnlinePlayerArgs(int index,int* pad,int* split) noexcept;
 void Edf5BvmOnlinePlayerMade(int index,const void* made) noexcept;
+void ResetEdf5Online() noexcept;
 void JetSound(unsigned char* vehicle) noexcept;
 void JetSoundTick() noexcept;
 float GameEffectVolume() noexcept;   // jetsound.cpp: the game's master volume times its effect volume (0..1)

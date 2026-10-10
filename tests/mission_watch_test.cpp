@@ -43,7 +43,7 @@ int main() {
     wchar_t dump[MAX_PATH];
     Check(DumpPath(dump,std::size(dump)) && std::wcsstr(dump,L"EDF6VehicleCrew.hang.dmp"),"dump beside the module");
     DeleteFileW(dump);
-    stuckMs=300;dumpMs=900;pollMs=20;
+    stuckMs=300;dumpMs=3000;pollMs=20;
 
     // A mission start that runs through: each phase logged with the previous one's time, nothing reported stuck.
     WatchMissionPhase("resets");

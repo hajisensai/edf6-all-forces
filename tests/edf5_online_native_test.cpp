@@ -45,28 +45,44 @@ void Log(const char* format,...) noexcept {
 }
 
 // The session object's users (edf5online.cpp ReadList): an object whose vtable slot 1 fills a
-// std::vector<std::shared_ptr<User>>, each user's +0x10 bit 1 the remote flag, each control block counting its
-// dispose and destroy, the storage given back through freeFn.
+// std::vector<std::shared_ptr<User>>, each user's +0x10 bit 1 the remote flag and +0x48 its mission index, each
+// control block counting its dispose and destroy, the storage given back through freeFn - a big one (0x1000 bytes and
+// over) allocated as MSVC does, 32-aligned with the real block 8 bytes before it.
 namespace SessionFixture {
 struct Ctrl { void* const* vtable; volatile long uses; volatile long weaks; int disposed; int destroyed; };
 void __fastcall Dispose(void* c) { ++static_cast<Ctrl*>(c)->disposed; }
 void __fastcall Destroy(void* c) { ++static_cast<Ctrl*>(c)->destroyed; }
 void* const ctrlVtable[]={reinterpret_cast<void*>(&Dispose),reinterpret_cast<void*>(&Destroy)};
-struct User { unsigned char bytes[0x20]; };
-std::vector<bool> remote;
+struct User { unsigned char bytes[0x60]; };
+struct Entry { bool remote; int index; };
+std::vector<Entry> entries;
+std::size_t padTo=0;   // the list's length with empty entries after the users (a big storage)
 User users[8]{};
 Ctrl ctrls[8]{};
 crew::Shared* storage=nullptr;
-std::size_t storageBytes=0;
+void* block=nullptr;
+std::size_t storageBytes=0,blockBytes=0;
 bool freed=false;
 crew::SharedVector* __fastcall List(void*,crew::SharedVector* out) {
-    const std::size_t n=remote.size();
+    const std::size_t n=entries.size()>padTo ? entries.size() : padTo;
     storageBytes=(n ? n : 1)*sizeof(crew::Shared);
-    storage=static_cast<crew::Shared*>(std::malloc(storageBytes));
+    if(storageBytes>=0x1000) {
+        blockBytes=storageBytes+0x27;
+        block=std::malloc(blockBytes);
+        auto at=(reinterpret_cast<std::uintptr_t>(block)+0x27)&~std::uintptr_t{0x1F};
+        reinterpret_cast<void**>(at)[-1]=block;
+        storage=reinterpret_cast<crew::Shared*>(at);
+    } else {
+        blockBytes=storageBytes;
+        block=std::malloc(blockBytes);
+        storage=static_cast<crew::Shared*>(block);
+    }
+    std::memset(storage,0,n*sizeof(crew::Shared));
     freed=false;
-    for(std::size_t i=0;i<n;++i) {
+    for(std::size_t i=0;i<entries.size();++i) {
         std::memset(&users[i],0,sizeof(User));
-        users[i].bytes[0x10]=remote[i] ? 2 : 1;   // bit 1 remote; bit 0 set either way (not the flag)
+        users[i].bytes[0x10]=entries[i].remote ? 2 : 1;   // bit 1 remote; bit 0 set either way (not the flag)
+        std::memcpy(users[i].bytes+0x48,&entries[i].index,4);
         ctrls[i]=Ctrl{ctrlVtable,1,1,0,0};
         storage[i]={&users[i],&ctrls[i]};
     }
@@ -76,12 +92,18 @@ crew::SharedVector* __fastcall List(void*,crew::SharedVector* out) {
 void* const sessionVtable[]={nullptr,reinterpret_cast<void*>(&List)};
 struct Session { void* const* vtable; } session{sessionVtable};
 alignas(16) unsigned char holder[0x100]{};   // the session base points 0x98 into it, the object at +0xD0
-void __fastcall Free(void* block,std::size_t bytes) {
-    if(block==storage && bytes==storageBytes){freed=true;std::free(block);storage=nullptr;}
+void __fastcall Free(void* at,std::size_t bytes) {
+    if(at==block && bytes==blockBytes){freed=true;std::free(at);block=nullptr;storage=nullptr;}
 }
-void Users(std::initializer_list<bool> list) { remote.assign(list.begin(),list.end()); }
+// In list order, each at the mission index given (default: its place in the list).
+void Users(std::initializer_list<Entry> list) { entries.assign(list.begin(),list.end());padTo=0; }
+void Users(std::initializer_list<bool> list) {
+    entries.clear();
+    for(bool r:list)entries.push_back({r,static_cast<int>(entries.size())});
+    padTo=0;
+}
 bool Released() {
-    for(std::size_t i=0;i<remote.size();++i)
+    for(std::size_t i=0;i<entries.size();++i)
         if(ctrls[i].uses!=0 || ctrls[i].weaks!=0 || ctrls[i].disposed!=1 || ctrls[i].destroyed!=1)return false;
     return freed;
 }
@@ -92,6 +114,20 @@ void Install(unsigned char* at) {
     unsigned char* const base=holder+0x98;std::memcpy(at,&base,8);
 }
 void Uninstall(unsigned char* at) { unsigned char* const none=nullptr;std::memcpy(at,&none,8); }
+// GameStatus' online test (edf5online.cpp BvmOnline): +0x38 the mode slot, +0x20 the modes, the mode's +0x10 object
+// with its virtual base's offset at +8 and +0x68 set online.
+alignas(16) unsigned char modeObject[0x100]{};
+alignas(16) unsigned char mode[0x40]{};
+void* modes[1]{};
+void Online(unsigned char* status,bool online) {
+    std::memset(modeObject,0,sizeof(modeObject));
+    const std::int32_t vbase=0x10;std::memcpy(modeObject+8,&vbase,4);
+    const std::int32_t flag=1;std::memcpy(modeObject+vbase+0x68,&flag,4);
+    void* const obj=modeObject;std::memcpy(mode+0x10,&obj,8);
+    modes[0]=mode;
+    void* const table=modes;std::memcpy(status+0x20,&table,8);
+    const std::int32_t slot=online ? 0 : -1;std::memcpy(status+0x38,&slot,4);
+}
 }  // namespace SessionFixture
 
 int main(int argc,char** argv) {
@@ -142,13 +178,14 @@ int main(int argc,char** argv) {
     Check(image[kCreateLoop]==0x66 && image[kCreateLoop+1]==0x0F,"the loop itself untouched (movdqa xmm0)");
 
     // The count: the session's (GS+0x14FF8), never the local players' (GS+0x14FF4), at most four; and for each index
-    // the pad and split AngelScript's creation gives (0x1D9A60..0x1D9A7B), from the session's users.
+    // the pad and split AngelScript's creation gives (0x1D9A60..0x1D9A7B), from the session's users by their +0x48.
     alignas(16) static unsigned char status[0x15000]{};
     unsigned char* const statusPtr=status;
     DWORD old=0;VirtualProtect(image+kGameStatus,8,PAGE_READWRITE,&old);
     std::memcpy(image+kGameStatus,&statusPtr,8);
     DWORD oldSession=0;VirtualProtect(image+kSessionBase,8,PAGE_READWRITE,&oldSession);
     SessionFixture::Install(image+kSessionBase);
+    SessionFixture::Online(status,true);
     freeFn=&SessionFixture::Free;
     Put<std::uint32_t>(status,kLocalPlayers,1);
 
@@ -170,10 +207,26 @@ int main(int argc,char** argv) {
     Edf5BvmOnlinePlayerMade(0,SessionFixture::Player(false));
     Check(Edf5BvmOnlinePlayerArgs(1,&pad,&split) && pad==-1,"the joiner on the host: no pad");
     Edf5BvmOnlinePlayerMade(1,nullptr);
+    // The list's order is not the mission's: player i is the user whose +0x48 is i (0x5A35D0, 0x734705).
+    SessionFixture::Users({SessionFixture::Entry{false,1},SessionFixture::Entry{true,0}});
+    Check(Edf5BvmOnlinePlayers()==2,"a list in another order");
+    Check(Edf5BvmOnlinePlayerArgs(0,&pad,&split) && pad==-1,"player 0 the remote user listed second");
+    Edf5BvmOnlinePlayerMade(0,nullptr);
+    Check(Edf5BvmOnlinePlayerArgs(1,&pad,&split) && pad==0,"player 1 this machine's, listed first");
+    Edf5BvmOnlinePlayerMade(1,SessionFixture::Player(false));
+    // Someone left: three in the count, nobody at index 1 (a hole, as 0x734670 leaves it): remote, no pad.
+    SessionFixture::Users({SessionFixture::Entry{false,0},SessionFixture::Entry{true,2}});
+    Put<std::uint32_t>(status,kSessionPlayers,3);
+    Check(Edf5BvmOnlinePlayers()==3,"a hole in the list: still created");
+    Check(Edf5BvmOnlinePlayerArgs(0,&pad,&split) && pad==0,"this machine's at 0");
+    Edf5BvmOnlinePlayerMade(0,SessionFixture::Player(false));
+    Check(Edf5BvmOnlinePlayerArgs(1,&pad,&split) && pad==-1,"nobody at 1: no pad");
+    Edf5BvmOnlinePlayerMade(1,nullptr);
+    Check(Edf5BvmOnlinePlayerArgs(2,&pad,&split) && pad==-1,"the remote at 2");
+    Edf5BvmOnlinePlayerMade(2,nullptr);
     // Two local players (split screen online) of three: pads 0 and 1 as each is made, split by two.
     Put<std::uint32_t>(status,kLocalPlayers,2);
     SessionFixture::Users({false,true,false});
-    Put<std::uint32_t>(status,kSessionPlayers,3);
     Check(Edf5BvmOnlinePlayers()==3,"three in the session");
     Check(Edf5BvmOnlinePlayerArgs(0,&pad,&split) && pad==0 && split==2,"the first local: pad 0, half the screen");
     Edf5BvmOnlinePlayerMade(0,SessionFixture::Player(false));
@@ -191,8 +244,31 @@ int main(int argc,char** argv) {
     Edf5BvmOnlinePlayerMade(2,nullptr);
     Put<std::uint32_t>(status,kLocalPlayers,1);
 
+    // A loop left early (0x22B5EC) stays armed: an offline creation after it gets none of its arguments, and the next
+    // mission start clears it.
+    SessionFixture::Users({true,false});
+    Put<std::uint32_t>(status,kSessionPlayers,2);
+    Check(Edf5BvmOnlinePlayers()==2,"armed for two");
+    Edf5BvmOnlinePlayerMade(0,nullptr);   // index 1 never reached
+    SessionFixture::Online(status,false);
+    Check(!Edf5BvmOnlinePlayerArgs(1,&pad,&split),"offline: the left-over online arguments never apply");
+    SessionFixture::Online(status,true);
+    Check(!Edf5BvmOnlinePlayerArgs(1,&pad,&split),"and they were dropped, online again or not");
+    Check(Edf5BvmOnlinePlayers()==2,"armed again");
+    Edf5BvmOnlinePlayerMade(0,nullptr);
+    ResetEdf5Online();
+    Check(!Edf5BvmOnlinePlayerArgs(1,&pad,&split),"a mission start clears an armed loop");
+
+    // A big list (0x1000 bytes and over): its storage given back as the game does, the real block 8 bytes before.
+    SessionFixture::Users({false,true});
+    SessionFixture::padTo=300;
+    Check(Edf5BvmOnlinePlayers()==2 && SessionFixture::Released(),"a big list's block and size given back right");
+    Edf5BvmOnlinePlayerMade(0,nullptr);Edf5BvmOnlinePlayerMade(1,nullptr);
+    SessionFixture::padTo=0;
+
     SessionFixture::Users({false,true,true,true});
     Put<std::uint32_t>(status,kSessionPlayers,4);
+    lines.clear();
     Check(Edf5BvmOnlinePlayers()==4 && !Logged("EDF5 online:"),"four: all of them, nothing logged");
     SessionFixture::Users({false,true,true,true,true,true});
     Put<std::uint32_t>(status,kSessionPlayers,6);
@@ -208,18 +284,16 @@ int main(int argc,char** argv) {
     SessionFixture::Users({false,true,true});
     Put<std::uint32_t>(status,kSessionPlayers,3);
     Check(Edf5BvmOnlinePlayers()==3,"back to three");
+    ResetEdf5Online();
 
     // Nothing created when the per-player arguments cannot be put right.
-    SessionFixture::Users({false});
-    Check(Edf5BvmOnlinePlayers()==0 && Logged("users unreadable"),"a session list shorter than its count: nobody");
-    Check(!Edf5BvmOnlinePlayerArgs(0,&pad,&split),"and nothing armed");
-    SessionFixture::Users({false,true,true});
     gateReady=false;
     Check(Edf5BvmOnlinePlayers()==0 && Logged("mission_participant_gate) is not installed"),
           "no participant gate: nobody (no wrong pads, no split screen)");
     gateReady=true;
     SessionFixture::Uninstall(image+kSessionBase);
-    Check(Edf5BvmOnlinePlayers()==0,"no session object: nobody");
+    Check(Edf5BvmOnlinePlayers()==0 && Logged("users unreadable"),"no session object: nobody");
+    Check(!Edf5BvmOnlinePlayerArgs(0,&pad,&split),"and nothing armed");
     VirtualProtect(image+kSessionBase,8,oldSession,&oldSession);
     const unsigned char* const none=nullptr;
     std::memcpy(image+kGameStatus,&none,8);
