@@ -623,10 +623,13 @@ def stack(game_root: str) -> dict[str, bytes]:
                                                 fallback=fallback and c.jet == vc.SAZABI_JET)
                              for c in CALLS}
     order = sorted(CALLS, key=lambda c: plan.at[c.id])   # appended rows in their order
-    # An EDF5 weapon this run cannot build keeps the row an earlier install gave it (its SGO is still in Mods), else
-    # its row is a placeholder until EDF5 is there (pw.pending_*): its index is taken either way.
-    kept = {p.id for p in pw.PORTS if p.id not in ports and plan.at[p.id] < len(before)
-            and before[plan.at[p.id]] == p.id and os.path.isfile(_mods(game_root, pw.sgo_file(p)))}
+    # A ported weapon this run cannot build for want of its game keeps the row an earlier install gave it (its SGO is
+    # still in Mods), else its row is a placeholder until the game is there (pw.pending_*): its index is taken either
+    # way. One the conversion refuses (edf5port.Unsupported) is a placeholder even then: the SGO an earlier install
+    # wrote is what an older conversion made of it (2026-10-10: 4.1 weapons with no muzzle, which crash on firing).
+    kept = {p.id for p in pw.PORTS if p.id not in ports and left_out[p.id].startswith(pw.Unavailable.__name__)
+            and plan.at[p.id] < len(before) and before[plan.at[p.id]] == p.id
+            and os.path.isfile(_mods(game_root, pw.sgo_file(p)))}
     put_ports = [p for p in pw.PORTS if p.id not in kept]
     port_tpl = {p.id: _template_index(before, p.template) for p in put_ports}
     out.update({pw.sgo_file(p): ports[p.id] for p in put_ports if p.id in ports})

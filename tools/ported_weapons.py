@@ -32,6 +32,7 @@ import calls  # noqa: E402
 import dsgo  # noqa: E402
 import edf5port  # noqa: E402
 import gamedir  # noqa: E402
+import mdb  # noqa: E402
 import rootcpk  # noqa: E402
 import sgo  # noqa: E402
 from dsgo import Node  # noqa: E402
@@ -158,6 +159,27 @@ def _swap_cues(v: dsgo.Value, cues: dict[str, str]) -> dsgo.Value:
     return v
 
 
+_BONES: dict[str, list[tuple[str, int]]] = {}
+
+
+def model_bones(stock, doc: dsgo.Document) -> list[tuple[str, int]]:  # noqa: ANN001 - see build_sgo
+    """(name, parent) of every bone of the EDF6 model the weapon `doc` shows (animation_model[0]: its RAB, the MDB
+    in it); [] for a weapon without a model (Weapon_Accessory). edf5port.Unsupported when EDF6 lacks that model."""
+    if 'animation_model' not in doc.root.names.values():
+        return []
+    rab, name = doc.root.get('animation_model').items[0].items[:2]
+    key = f'{rab}|{name}'.lower()
+    if key not in _BONES:
+        folder, _, file = rab.split(':/', 1)[-1].rpartition('/')
+        try:
+            archive = mdb.rab_read(stock(f'{folder.upper()}/{file.upper()}'))
+            model = mdb.mdb_read(next(f for f in archive.files if f.name.lower() == name.lower()).data)
+        except (KeyError, ValueError, StopIteration) as e:
+            raise edf5port.Unsupported(f'model {rab} {name} not in EDF6: {e!r}') from e
+        _BONES[key] = [(model.name_of(b.name), b.parent) for b in model.bones]
+    return _BONES[key]
+
+
 def build_sgo(p: Port, stock, root: str | None) -> bytes:  # noqa: ANN001 - stock(rel) -> bytes, the EDF6 file
     """The installed SGO of `p`: EDF6's own copy, or its game's converted (edf5port) from that game's install at
     `root`. Unavailable: the game is not there or lacks the file; edf5port.Unsupported: something in it this conversion
@@ -175,6 +197,7 @@ def build_sgo(p: Port, stock, root: str | None) -> bytes:  # noqa: ANN001 - stoc
         except KeyError as e:
             raise Unavailable(f"{name}'s Root.cpk has no WEAPON/{p.sgo}") from e
         doc = BY_GAME[p.game].convert(sgo.read(data)[1], _names(p))
+    edf5port.fit_locators(doc, model_bones(stock, doc))
     if p.damage_attribute is not None:
         doc.root.set('AmmoDamageAttribute', Node([float(v) for v in p.damage_attribute.values()],
                                                  dict(enumerate(p.damage_attribute))))

@@ -3,6 +3,7 @@ relative to the struct that holds it.
 
     mab_from_edf5(b) -> bytes       the 0x83 block; ValueError on anything not laid out as below
     mab_layout(b) -> Layout         the block's structs and offset fields (either flag), checked as below
+    mab_set_strings(b, changes) -> bytes   EDF6's block with some string fields renamed, its string area laid again
 
 The block (pylib/mab.py reads EDF6's simplest ones); i32 offsets, the flag decides what they count from:
   0x00 b'MAB\\0', u32 0x04 0x0F, u32 0x08 the flag, u16 0x0C the lists' count (4.1/5/6 weapons and objects: 3 or 4,
@@ -159,6 +160,39 @@ def _string_cover(b: bytes, lay: Layout) -> bytearray:
             e += 2
         cover[s - lay.strings_at:e + 2 - lay.strings_at] = b'\1' * (e + 2 - s)
     return cover
+
+
+def _text_at(b: bytes, at: int) -> str:
+    e = at
+    while b[e:e + 2] != b'\0\0':
+        e += 2
+    return b[at:e].decode('utf-16le')
+
+
+def mab_set_strings(b: bytes, changes: dict[int, str]) -> bytes:
+    """EDF6's 0x83 block `b` with the string field at each address in `changes` (a record's +0 name / +4 node, a
+    track's +8, a key's +0) now naming its new string. The string area is laid out again as EDF6 lays its own: every
+    string still pointed at, once, NUL-ended, in UTF-16 order, nothing else (edf5port.fit_locators: a 4.1 / EDF5
+    weapon's locator node 'mdl' -> its EDF6 model's root; tools/selftest.py ported_weapon_locators_fit). ValueError on
+    another layout, or an address that is not a string field."""
+    lay = mab_layout(b)
+    if lay.flag != RELATIVE:
+        raise ValueError(f'MAB 标志是 {lay.flag:#x}，不是 EDF6 的 0x83')
+    fields = [(at, base, to) for at, base, to in lay.offsets if to >= lay.strings_at]
+    if not set(changes) <= {at for at, _b, _t in fields}:
+        raise ValueError(f'MAB 里 {sorted(set(changes) - {at for at, _b, _t in fields})} 不是字符串偏移')
+    value = {at: changes.get(at, _text_at(b, to)) for at, _b, to in fields}
+    data, where = b'', {}
+    for s in sorted(set(value.values()), key=lambda s: s.encode('utf-16le')):
+        where[s] = lay.strings_at + len(data)
+        data += s.encode('utf-16le') + b'\0\0'
+    if len(data) > 0xFFFF:
+        raise ValueError('MAB 字符串区超过 u16')
+    out = bytearray(b[:lay.strings_at] + data)
+    struct.pack_into('<H', out, 0x12, len(data))
+    for at, base, _to in fields:
+        struct.pack_into('<i', out, at, where[value[at]] - base)
+    return bytes(out)
 
 
 def mab_from_edf5(b: bytes) -> bytes:

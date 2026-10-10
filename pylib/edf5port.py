@@ -140,6 +140,45 @@ def weapon41(members: dict[str, object], names: dict[str, str]) -> dsgo.Document
     return doc
 
 
+def fit_locators(doc: dsgo.Document, bones: list[tuple[str, int]]) -> None:
+    """Hang every locator of the weapon's MAB block (animation_model[2]: the muzzles of list 0, the grips and the rest
+    of the other lists) on a bone its EDF6 model has; `bones` is that model's (name, parent) list.
+    EDF.dll skips a muzzle whose node the model lacks and then takes every shot's muzzle as (shots % muzzles found):
+    none found, the first shot divides by zero (0x69AA20, Weapon_BasicShoot's family; the crash 2026-10-10 on firing a
+    4.1 Wing Diver weapon). EDF6 re-exported many models EDF4.1 / EDF5 share with it, the root bone 'mdl' renamed
+    after the model (p_lazer_LAZR01: 4.1 ['mdl', 'p_lazer_LAZR01'], EDF6 ['p_lazer_LAZR01', 'polymesh']); the
+    developers' own ports of those weapons hang every locator that was on it on the new root and change nothing else
+    in the block (tools/selftest.py ported_weapon_locators_fit). So does this: a missing node becomes the model's one
+    root. Every locator of every EDF6 weapon names a bone of its model, and each model has one root (2026-10-10, every
+    weapon file of Root.cpk). Unsupported when the block has no muzzle, or a node is missing and the model has no single
+    root to move it to."""
+    if 'animation_model' not in doc.root.names.values():
+        return
+    am = doc.root.get('animation_model')
+    block = am.items[2] if isinstance(am, Node) and len(am.items) > 2 else None
+    if not isinstance(block, Blob) or block.data[:4] != b'MAB\0':
+        raise Unsupported('animation_model has no MAB block')
+    b = block.data
+    nlists = struct.unpack_from('<H', b, 0x0C)[0]
+    head, records_end = struct.unpack_from('<II', b, 0x14)
+    if not nlists or not struct.unpack_from('<H', b, head + 2)[0]:
+        raise Unsupported('the MAB block has no muzzle')
+    names = {name for name, _parent in bones}
+    nodes = {r + 4: mab_legacy._text_at(b, r + struct.unpack_from('<i', b, r + 4)[0])
+             for r in range(head + 8 * nlists, records_end, mab_legacy.RECORD)}
+    missing = [at for at, node in nodes.items() if node not in names]
+    if not missing:
+        return
+    roots = [name for name, parent in bones if parent == -1]
+    if len(roots) != 1:
+        raise Unsupported(f'locator node(s) {sorted({nodes[at] for at in missing})} not in the model, '
+                          f'and it has {len(roots)} root bones to hang them on')
+    try:
+        am.items[2] = Blob(mab_legacy.mab_set_strings(b, {at: roots[0] for at in missing}), block.kind)
+    except (ValueError, struct.error) as e:   # a layout mab_legacy refuses: this weapon stays out
+        raise Unsupported(f'MAB block: {e}') from e
+
+
 def _curve_field(value: object, at: int | None) -> dsgo.Value:
     """A CURVES field: its curve 7 long (the field itself, or its element `at`); a scalar or another shape as it is
     (EDF6 holds many of these fields as plain numbers too)."""
