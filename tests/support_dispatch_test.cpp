@@ -181,9 +181,9 @@ bool NpcPrepareSquadRoute(unsigned char*,const float*,float) noexcept {++routeOr
 bool NpcFinishSquadRoute(unsigned char*,const float*) noexcept {return true;}
 bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept {return true;}
 bool JetCommand(const void*,const Command&,const ObjRef&) noexcept {return true;}
-bool areaMeasured=true;
+bool areaMeasured=true,areaGround=true;
 bool PlayAreaMeasured() noexcept {return areaMeasured;}
-PlayArea MapPlayArea() noexcept {return {{-1500,-1500},{1500,1500},true,0,true};}
+PlayArea MapPlayArea() noexcept {return {{-1500,-1500},{1500,1500},areaGround,0,true};}
 bool MapGroundNear(float,float,float,float* y,bool) noexcept {*y=0;return terrain;}
 #ifndef SUPPORT_ROUTE_NATIVE_TEST
 float MapRay(const float*,const float*,float*) noexcept {return -1;}
@@ -247,6 +247,14 @@ int main() {
     check(!made && offlinePending && SupportCallReadiness().state==SupportReady::planning,"it waits (dispatching), never refused for it");
     areaMeasured=true;fixtureMs+=16;SupportDispatchTick();
     check(made==2 && !offlinePending,"once the area is in, the same request is planned and flies in");
+    // A map with no ground found round its centre: its ground entries cannot be planned, its air ones can (as before).
+    ResetSupportDispatch();terrain=true;areaGround=false;made=0;fixtureMs+=40000;
+    SupportCallAt(0,target,note,128);SupportDispatchTick();
+    check(made==2,"no ground measured: an air call still flies in");
+    ResetSupportDispatch();made=0;routeResult=npc::navigation::Result::moving;
+    SupportCallAt(21,target,note,128);SupportDispatchTick();
+    check(!made && !offlinePending,"...a ground entry is refused");
+    areaGround=true;
     ResetSupportDispatch();terrain=true;nativeFail=true;made=deleted=0;
     SupportCallAt(0,target,note,128);SupportDispatchTick();
     check(made==1 && deleted==1 && !deployments[0].used,"partial crew construction rolls the hull back");

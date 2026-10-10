@@ -349,7 +349,6 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
     // Until then MapPlayArea is the physics square with no ground: a call made in those seconds was refused (an air one as
     // "no clear air corridor", 2026-10-09 16:52:26, 50 ms before the area was in; the same call worked later). It waits.
     if(!PlayAreaMeasured())return PlanResult::pending;
-    if(!MapPlayArea().ground){Refuse(catalog,"no ground found round the map's centre",L"无法测定本图的地面范围，无法规划支援入口");return PlanResult::refused;}
     if(!planning.active || planning.catalog!=catalog || std::memcmp(planning.target,target,12)!=0 || planning.loadout!=loadout) {
         Renew(planning);planning.active=true;planning.catalog=catalog;std::memcpy(planning.target,target,12);planning.loadout=loadout;
         legacyNoticed=false;loadoutNoticed=false;variantNote[0]=0;
@@ -478,6 +477,9 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
         *out=plan;planning.active=false;return PlanResult::ready;
     }
     const auto area=MapPlayArea();
+    // The ground entries alone need the measured ground (the air ones plan in the play box, refusing noArea themselves:
+    // a map with no ground found round its centre still takes an air call, as before the transports).
+    if(!area.ground){Refuse(catalog,"no ground found round the map's centre",L"无法测定本图的地面范围，无法规划支援入口");return PlanResult::refused;}
     SupportVehicleKind kind{};SupportCrewMode mode{};const bool vehicle=GroundCatalog(catalog,kind,mode);
     const auto* spec=vehicle ? SupportVehicleInfo(kind) : nullptr;
     if(vehicle && !support::Allowed(SupportMissionPolicy(),spec && spec->wasteland ? support::Capability::civilianGround : support::Capability::militaryGround)) {
