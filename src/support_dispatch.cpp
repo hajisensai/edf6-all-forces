@@ -16,6 +16,7 @@
 #include "online_authority.h"
 #include "memory.h"
 #include "hudtext.h"
+#include "helipad.h"
 #include <cwchar>
 #include <cstring>
 
@@ -136,20 +137,22 @@ bool IsRescue(std::uint32_t catalog) noexcept {return catalog==RescueCatalog();}
 bool AirCatalog(std::uint32_t catalog) noexcept {return catalog<static_cast<unsigned>(AirCount()) || IsRescue(catalog);}
 constexpr std::uint32_t kRescueFuelSec=900;   // the rescue heli's fuel (heli.cpp leaves on it), as the rescue always had
 // What an air entry brings: a flown call's own (airstrike.cpp SupportAircraftSpec), the rescue's one 410.
-// The rescue's takeoff points (support_entry.h TakeoffRoute): the submarine carrier's deck nearest the swimmer (where the
-// rescue always started), kDeckInset further into the deck than its nearest edge so the whole 410 stands on it. No stock
-// map has an airfield or helipad the plugin has identified; such a point would be one more candidate here.
+// The rescue's takeoff points (support_entry.h TakeoffRoute picks the nearest it can climb out of, all alike): the
+// submarine carrier's deck nearest the swimmer, kDeckInset further into the deck than its nearest edge so the whole 410
+// stands on it; and the ground helicopters stood on this mission (heli.cpp RescueTakeoffPads, helipad.h: the game's maps
+// have no airfield or helipad piece to read).
 constexpr float kDeckInset=20.0f;
+constexpr int kTakeoffSpots=1+helipad::kMost;
 int RescueTakeoffSpots(const float* target,float (*spots)[3]) noexcept {
+    int n=0;
     float deck[3];
-    if(!SubDeck(target,deck))return 0;
-    const float d=support::FlatDistance(deck,target);
-    if(d>=1.0f) {
-        const float in[3]={deck[0]+(deck[0]-target[0])/d*kDeckInset,deck[1],deck[2]+(deck[2]-target[2])/d*kDeckInset};
-        if(!SubDeck(in,deck))return 0;
+    if(SubDeck(target,deck)) {
+        const float d=support::FlatDistance(deck,target);
+        const float in[3]={d>=1.0f ? deck[0]+(deck[0]-target[0])/d*kDeckInset : deck[0],deck[1],
+                           d>=1.0f ? deck[2]+(deck[2]-target[2])/d*kDeckInset : deck[2]};
+        if(SubDeck(in,deck))std::memcpy(spots[n++],deck,12);
     }
-    std::memcpy(spots[0],deck,12);
-    return 1;
+    return n+RescueTakeoffPads(spots+n,kTakeoffSpots-n);
 }
 bool AircraftOf(std::uint32_t catalog,SupportAircraft* out) noexcept {
     if(IsRescue(catalog)) {
@@ -279,12 +282,12 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,SupportPl
         // the edge only when there is none it can climb out of (2026-10-10, the user: 「能从机场起飞就从机场起飞吧」).
         auto refusal=support::Refusal::noEntry;
         if(IsRescue(catalog)) {
-            float spots[1][3];
+            float spots[kTakeoffSpots][3];
             const int n=RescueTakeoffSpots(target,spots);
             refusal=n ? PlanTakeoffSupport(spec,target,spots,n,&route) : support::Refusal::noEntry;
-            if(refusal==support::Refusal::none)Log("SUPPORT plan catalog=%u: takes off from the carrier deck (%.0f,%.0f,%.0f)",catalog,
-                                                    route.from[0],route.from[1],route.from[2]);
-            else Log("SUPPORT plan catalog=%u: %s; from the map's edge",catalog,n ? "no clear climb out from the carrier deck" : "no takeoff point");
+            if(refusal==support::Refusal::none)Log("SUPPORT plan catalog=%u: takes off from (%.0f,%.0f,%.0f), the nearest of %d takeoff points",
+                                                    catalog,route.from[0],route.from[1],route.from[2],n);
+            else Log("SUPPORT plan catalog=%u: %s; from the map's edge",catalog,n ? "no takeoff point to climb out of" : "no takeoff point");
         }
         if(refusal!=support::Refusal::none)refusal=PlanAirSupport(spec,target,player.pos,&route);
         if(refusal!=support::Refusal::none) {

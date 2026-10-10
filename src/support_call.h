@@ -61,6 +61,8 @@ bool SupportRescueAt(const float* target,wchar_t* note,std::size_t capacity) noe
 struct ObjRef;
 void RescueHeliDeployed(unsigned char* vehicle,const float* target,bool flown,const ObjRef& requester) noexcept;
 void RescueRequestFailed(const wchar_t* why) noexcept;
+//  - the ground helicopters stood on this mission and none stands on now (helipad.h; heli.cpp): takeoff points.
+int RescueTakeoffPads(float (*out)[3],int most) noexcept;
 void SupportDispatchTick() noexcept;
 void ResetSupportDispatch() noexcept;
 void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept;

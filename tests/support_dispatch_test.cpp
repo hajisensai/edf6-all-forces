@@ -75,6 +75,11 @@ bool SubDeck(const float* from,float* deck) noexcept {
     if(!carrierOut)return false;
     deck[0]=carrierDeck[0]+(from[0]>carrierDeck[0] ? 1.0f : -1.0f);deck[1]=carrierDeck[1];deck[2]=carrierDeck[2];return true;
 }
+// Where helicopters stood this mission (heli.cpp RescueTakeoffPads): the fixture's pads.
+int padCount=0;float padAt[2][3]={{-200,12,40},{600,30,-300}};
+int RescueTakeoffPads(float (*out)[3],int most) noexcept {
+    int n=0;for(;n<padCount && n<most;++n)std::memcpy(out[n],padAt[n],12);return n;
+}
 support::Refusal takeoffRefusal=support::Refusal::none;int takeoffSpots=-1;
 support::Refusal PlanTakeoffSupport(const SupportAircraft&,const float* target,const float (*spots)[3],int count,support::Route* route) noexcept {
     takeoffSpots=count;
@@ -413,6 +418,13 @@ int main() {
     check(SupportRescueAt(sea,note,128) && takeoffSpots==1,"one takeoff point: the carrier's deck");
     check(At<float>(objects[0],kPosition+4)==carrierDeck[1]+support::kTakeoffLift && std::fabs(At<float>(objects[0],kPosition)-carrierDeck[0])<2.0f,
           "the hull is made on the deck, kTakeoffLift over it, not at the edge");
+    // A pad a helicopter stood on (helipad.h) is a takeoff point like the deck: both handed to the planner.
+    ResetSupportDispatch();fixtureMs+=40000;made=0;padCount=2;
+    check(SupportRescueAt(sea,note,128) && takeoffSpots==3,"the deck and both pads are the takeoff candidates");
+    ResetSupportDispatch();fixtureMs+=40000;made=0;carrierOut=false;
+    check(SupportRescueAt(sea,note,128) && takeoffSpots==2 && At<float>(objects[0],kPosition)==padAt[0][0] &&
+          At<float>(objects[0],kPosition+4)==padAt[0][1]+support::kTakeoffLift,"no carrier: it takes off from a pad");
+    padCount=0;carrierOut=true;
     ResetSupportDispatch();fixtureMs+=40000;made=0;takeoffRefusal=support::Refusal::noEntry;
     check(SupportRescueAt(sea,note,128) && At<float>(objects[0],kPosition)==-1400,"no clear climb out from the deck: the edge instead");
     takeoffRefusal=support::Refusal::none;carrierOut=false;

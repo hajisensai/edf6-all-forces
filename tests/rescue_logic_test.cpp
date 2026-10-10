@@ -5,6 +5,7 @@
 #include "../src/support_entry.h"
 #include "../src/support_protocol.h"
 #include "../src/version_notice.h"
+#include "../src/helipad.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -101,8 +102,46 @@ void Versions() {
 }
 }  // namespace
 
+// Pads (helipad.h): a helicopter resting on ground kStillMs is one; moving, flying or over water is not; kSame apart.
+void Pads() {
+    using namespace crew::helipad;
+    Pads p{};
+    int a=0,b=0;const void* heli=&a;const void* other=&b;
+    const float ground[3]={100,10,50};
+    unsigned long long ms=1000;
+    Check(Due(p,heli,ms) && !Observe(p,heli,ground,true,ms),"a first sample is no pad yet");
+    ms+=kSampleMs;Check(!Due(p,heli,ms-1) && !Observe(p,heli,ground,true,ms),"resting starts");
+    ms+=kStillMs-1;Check(!Observe(p,heli,ground,true,ms) && p.count==0,"not long enough");
+    ms+=2;Check(Observe(p,heli,ground,true,ms) && p.count==1 && p.at[0][0]==100,"rested kStillMs: a pad where it stood");
+    Check(Occupied(p,0,ms),"it still stands there: occupied");
+    const float away[3]={400,10,50};
+    ms+=kSampleMs;Observe(p,heli,away,false,ms);
+    Check(!Occupied(p,0,ms),"it took off: the pad is free");
+    ms+=kSampleMs;Observe(p,heli,away,true,ms);ms+=kStillMs+kSampleMs;Observe(p,heli,away,true,ms);
+    Check(p.count==2,"resting elsewhere: a second pad");
+    const float near[3]={110,10,55};
+    ms+=kSampleMs;Observe(p,other,near,true,ms);ms+=kStillMs+kSampleMs;Observe(p,other,near,true,ms);
+    Check(p.count==2,"within kSame of a pad: no new one");
+    const float drifting[3]={700,10,50};
+    for(int i=0;i<20;++i){ms+=kSampleMs;const float at[3]={drifting[0]+i*1.0f,10,50};Observe(p,other,at,true,ms);}
+    Check(p.count==2,"moving on the ground (taxiing, sliding): never a pad");
+    for(int i=0;i<20;++i){ms+=kSampleMs;Observe(p,other,drifting,false,ms);}
+    Check(p.count==2,"hovering (not on the ground) or over water: never a pad");
+    ms+=10*kSampleMs;
+    Check(!Occupied(p,1,ms),"a helicopter no longer sampled (deleted) occupies nothing");
+    // The deck and the pads are one set of takeoff candidates: the nearest that climbs out wins.
+    using namespace crew::support;
+    crew::PlayArea area{};area.lo[0]=area.lo[1]=-1500;area.hi[0]=area.hi[1]=1500;area.ground=true;
+    const float swimmer[3]={0,-3,0};
+    const float spots[3][3]={{900,193,0},{-300,12,0},{200,40,100}};
+    Route route{};
+    const auto open=[](const float*,const float*) noexcept {return true;};
+    Check(TakeoffRoute(area,swimmer,spots,3,open,route)==Refusal::none && route.from[0]==200,"the nearest candidate, pad or deck alike");
+}
+
 int main() {
     Cancels();
+    Pads();
     Takeoff();
     Versions();
     std::printf("rescue_logic_test: %d checks passed\n",checks);
