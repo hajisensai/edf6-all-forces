@@ -3480,7 +3480,7 @@ def pack_install_upgrade_uninstall() -> None:
             loadout = {'OBJECT/EDF6VC_LO_TANK_4000000000000C81.SGO': b'loaded tank'}
             built_from: list[str] = []
             enter(patched(importlib.import_module('support_loadout'),
-                          build=lambda game, text, pending=(): (built_from.append(text), dict(loadout))[1]))
+                          build=lambda game, text, pending=(), errors=None: (built_from.append(text), dict(loadout))[1]))
             with contextlib.redirect_stdout(io.StringIO()):
                 _pack_bundle(bundle, b'v1 ')
                 answers[:] = ['y']   # AT_C: back up the other mod's file and replace it
@@ -4662,8 +4662,9 @@ def npc_ai_wired() -> None:
     assert body.index('StockDriving(v,f,*p)') < body.index('Write(v,f,*p,c0,c1);')
     move_to = code.split('void MoveTo(', 1)[1].split('\n}\n', 1)[0]
     # Routed (2026-10-09): in kRouteHorizon legs, from the floor under the soldier (RouteStart), still stood while not moving.
-    assert 'GroundNavigate(soldier->navigation,from,to,stop,ms,waypoint,SoldierRoute())!=npc::navigation::Result::moving' in move_to
+    assert 'GroundNavigate(soldier->navigation,from,goal,stop,ms,waypoint,SoldierRoute())!=npc::navigation::Result::moving' in move_to
     assert move_to.index('RouteStart(pos,from);') < move_to.index('GroundNavigate('), 'the route starts from the floor'
+    assert move_to.index('RouteStart(to,goal);') < move_to.index('GroundNavigate('), '...and ends on the floor under its goal'
     assert 'p.horizon=kRouteHorizon;' in code.split('npc::navigation::Profile SoldierRoute()', 1)[1].split('\n', 1)[0]
     assert move_to.index('{Stand(h);return;}') < move_to.index('Move(h,dir,'), 'blocked/pending routes wait instead of walking through walls'
     # Every family (2026-10-07): the mechs' turn-on-spot constant, the Barga by its stock walk, and the plugin's own

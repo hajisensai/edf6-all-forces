@@ -1178,13 +1178,18 @@ void SupportDispatchTick() noexcept {
                     // A crewed APC / truck: the soldiers in its passenger seats are a squad and it is their transport
                     // (transport.cpp; the user, 2026-10-09: "卡车之类的运输载具改成断剑那种操作方式"): they get off here and
                     // guard the point; its driver stays aboard and it waits for their next far order.
+                    // Its leader the passenger made as one (IsSupportLeaderResource), else the first: the seats need not
+                    // be in the plan's order, and a leader following one of its own members inverts the squad.
+                    const auto passenger=[&](unsigned i) noexcept {
+                        return deployed.plan.units[i].role==1 && Live(deployed.objects[i]) && SeatCount(vehicle)>0 &&
+                               At<const void*>(SeatAt(vehicle,0),kSeatRider)!=deployed.objects[i].obj && Seated(vehicle,deployed.objects[i]);
+                    };
                     ObjRef top;
-                    for(unsigned i=0;i<deployed.plan.count;++i) {
-                        if(deployed.plan.units[i].role!=1 || !Live(deployed.objects[i]) || SeatCount(vehicle)==0 ||
-                           At<const void*>(SeatAt(vehicle,0),kSeatRider)==deployed.objects[i].obj || !Seated(vehicle,deployed.objects[i]))continue;
-                        if(!top){top=deployed.objects[i];continue;}
-                        FollowSupportSoldier(deployed.objects[i],top);
-                    }
+                    for(unsigned i=0;i<deployed.plan.count && !top;++i)
+                        if(passenger(i) && IsSupportLeaderResource(deployed.plan.units[i].resourceId))top=deployed.objects[i];
+                    for(unsigned i=0;i<deployed.plan.count && !top;++i)if(passenger(i))top=deployed.objects[i];
+                    for(unsigned i=0;i<deployed.plan.count;++i)
+                        if(passenger(i) && deployed.objects[i].obj!=top.obj)FollowSupportSoldier(deployed.objects[i],top);
                     const void* tops[1]={top.obj};
                     if(top && !TransportDeliver(vehicle,tops,1,deployed.plan.target))
                         Log("SUPPORT deployment %llu: its passengers not handed to their transport",static_cast<unsigned long long>(deployed.id));
