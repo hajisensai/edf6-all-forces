@@ -6,7 +6,7 @@ python tests/rescue_support_guard.py [--root DIR], exit 1 on a failure. What it 
   - the rescue's trigger asks for the support catalog's rescue entry (SupportRescueAt) and its heli is only ever the one
     the support deployment hands over (RescueHeliDeployed), after the deployment seated its real pilot;
   - the rescue entry is the catalog's last (older indices keep their wire meaning), carries its pilot and one door gunner
-    (the other door is the swimmer's), and is planned only when every peer announced it (kCapSeaRescue);
+    (the other door is the swimmer's), and is planned only when every peer announced it (kExtSeaRescue);
   - 2026-10-10: it is held to no mission support rule, never queued behind, cooled down by or written over the map's
     support; it takes off from a carrier's deck before the edge; its heli is the requester's (no nearest-swimmer search).
 Run against the code before this change it fails (StartRescue called HeliLaunch).
@@ -81,7 +81,7 @@ def main() -> int:
     plan = body(dispatch, 'support_net::PlanResult Plan(')
     checks += 1
     if not before(plan, 'SupportPeersAcceptRescue()', 'PlanAirSupport('):
-        fail('src/support_dispatch.cpp Plan: the rescue is planned without every peer\'s kCapSeaRescue')
+        fail('src/support_dispatch.cpp Plan: the rescue is planned without every peer\'s kExtSeaRescue')
     checks += 1
     if '!IsRescue(catalog) && !support::Allowed(' not in plan or '!IsRescue(plan.catalogId) && !support::Allowed(' not in body(dispatch, 'bool Validate('):
         fail('src/support_dispatch.cpp Plan / Validate: the rescue is held to the mission\'s support rules')
@@ -97,15 +97,15 @@ def main() -> int:
         fail('src/heli.cpp: the rescue heli looks for the nearest swimmer instead of its requester')
     session = body(code_only(read(root, 'src/support_protocol.cpp')), 'void Session::HostRequest(')
     checks += 1
-    if 'ownChannel' not in session or 'PeersHave(kCapRescueChannel)' not in session or 'rescueAt_[peer]' not in session:
+    if 'ownChannel' not in session or 'PeersHaveVariant(kExtRescueChannel,0)' not in session or 'rescueAt_[peer]' not in session:
         fail('src/support_protocol.cpp HostRequest: the rescue has no channel or cooldown of its own (or ignores an older peer)')
     checks += 1
     if 'CooldownLeft(' not in body(heli, 'void StartRescue('):
         fail('src/heli.cpp StartRescue: this player rescue cooldown is not held')
     protocol = code_only(read(root, 'src/support_protocol.h'))
     checks += 1
-    if not re.search(r'kCapabilities=[^;]*kCapSeaRescue', protocol):
-        fail('src/support_protocol.h: this build does not announce kCapSeaRescue')
+    if not re.search(r'kExtensions=[^;]*kExtSeaRescue[^;]*kExtRescueChannel', protocol) or             'm.unit.resourceId|=kExtSeaRescue|kExtRescueChannel;' not in code_only(read(root, 'src/support_protocol.cpp')):
+        fail('src/support_protocol.h / .cpp: this build does not announce kExtSeaRescue / kExtRescueChannel in every hello')
     for message in failures:
         print('FAIL', message)
     print(f'rescue_support_guard: {checks} checks, {len(failures)} failures')

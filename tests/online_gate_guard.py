@@ -184,14 +184,13 @@ def check_frames(root: str) -> None:
 def check_calls(root: str) -> None:
     code = code_only(read(root, 'src/airstrike.cpp'))
     dispatch = code_only(read(root, 'src/support_dispatch.cpp'))
-    # A map / radio call (SupportCallAt) and the sea rescue (SupportRescueAt) are one request path (Request).
-    request = body(dispatch, 'bool Request(int index,')
-    if 'Request(' not in body(dispatch, 'bool SupportCallAt('):
-        fail('src/support_dispatch.cpp SupportCallAt: not through the request path (Request)')
+    # Every call goes through SupportCallComposedAt (a composed load or none): it holds the gate; SupportCallAt only delegates.
+    request = body(dispatch, 'bool SupportCallComposedAt(')
+    if 'return SupportCallComposedAt(index,target,nullptr,note,capacity);' not in body(dispatch, 'bool SupportCallAt('):
+        fail('SupportCallAt must only delegate to SupportCallComposedAt (one gated path)')
     # The sea rescue: its own path (no map queue / cooldown), the same host transaction for any non-local machine.
     rescue = body(dispatch, 'bool RescueRequest(')
-    if 'RescueRequest(' not in body(dispatch, 'bool SupportRescueAt(') or \
-            not before(rescue, 'InSession() && !LocalAuthority()', 'SubmitSupportRequest('):
+    if 'RescueRequest(' not in body(dispatch, 'bool SupportRescueAt(') or             not before(rescue, 'InSession() && !LocalAuthority()', 'SubmitSupportRequest('):
         fail('src/support_dispatch.cpp SupportRescueAt: an online rescue does not go through the host-planned protocol')
     if not before(request, 'else if(InSession() && !LocalAuthority())', 'SubmitSupportRequest(') or             not before(request, 'SubmitSupportRequest(', 'else if(offlinePending)'):
         fail('online support must go through the reliable host-planned deployment protocol')

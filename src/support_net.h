@@ -11,6 +11,10 @@ struct Unit {
     std::uint32_t resourceId=0,role=0; // role: parent vehicle index + 1, zero for independent infantry/vehicle
     float matrix[16]{};
     unsigned char netId[32]{};
+    // support_loadout.h: a soldier's look or a vehicle's pylons (kVariantApplied: made from that file). On the wire in the
+    // unit message's `challenge`, which a unit message never used (an older peer reads it and ignores it; a host plans
+    // one only when every peer announced kExtVariants, support_protocol.h).
+    std::uint64_t variant=0;
 };
 struct Plan {
     std::uint32_t catalogId=0,count=0;
@@ -20,7 +24,7 @@ struct Plan {
 enum class PlanResult { pending,ready,refused };
 enum class RequestStatus : std::uint32_t { accepted,active,refused,timeout,cancelled,interrupted };
 struct Hooks {
-    PlanResult (*plan)(std::uint32_t,const float*,Plan*) noexcept=nullptr;
+    PlanResult (*plan)(std::uint32_t,const float*,std::uint64_t loadout,Plan*) noexcept=nullptr;   // loadout: PackSupportLoadout
     bool (*validate)(const Plan&) noexcept=nullptr;
     // Tokens are process-monotonic and local, not wire indexes. Retain them
     // verbatim; never use a token as a bounded array index.
@@ -31,6 +35,9 @@ struct Hooks {
     bool (*admissionReady)() noexcept=nullptr;
     bool (*createdMatches)(const ObjRef*,std::uint32_t) noexcept=nullptr;
     void (*notice)(std::uint32_t,RequestStatus) noexcept=nullptr;
+    // This machine's hello extension (support_protocol.h kExtVariants) and the Bloom filter of the variant files it has
+    // preloaded this mission (support_loadout.h BloomAdd); nullptr: none (an older build's hello: 0 and empty).
+    void (*variants)(std::uint32_t* ext,unsigned char* bloom32) noexcept=nullptr;
     // Whether `catalog` is the sea rescue (support_dispatch.cpp IsRescue): its own channel and cooldown on the host.
     bool (*ownChannel)(std::uint32_t) noexcept=nullptr;
 };
@@ -38,7 +45,7 @@ bool ValidPlan(const Plan& plan,bool requireIds=true) noexcept;
 } // namespace support_net
 using SupportPlan=support_net::Plan;
 void ConfigureSupportNet(const support_net::Hooks& hooks) noexcept;
-bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::size_t noteSize) noexcept;
+bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::size_t noteSize,std::uint64_t loadout=0) noexcept;
 void SupportNetTick() noexcept;
 void ResetSupportNet() noexcept;
 void ReportSupportFailure(std::uint64_t transaction) noexcept;
@@ -50,7 +57,7 @@ bool SupportPeersAcceptVariants() noexcept;
 // Whether every peer applies air support created in the air (kCapAirborneAir); true offline / with no session. Without
 // it the host refuses air support with a reason: no peer may have its hull on the ground while another's flies.
 bool SupportPeersAcceptAirborne() noexcept;
-// Whether every peer has the sea rescue catalog entry (kCapSeaRescue); true offline / with no session. Without it the
+// Whether every peer has the sea rescue catalog entry (kExtSeaRescue); true offline / with no session. Without it the
 // host refuses the rescue with a reason (the swimmer's machine is told, and logs it).
 bool SupportPeersAcceptRescue() noexcept;
 // The room's builds differ (version_notice.h): the HUD's line about it, for a while after it changed (draw thread).
@@ -58,6 +65,15 @@ bool SupportVersionCue(wchar_t* out,std::size_t capacity) noexcept;
 // Host: the player whose request made committed transaction `token`, by its stable identity (the requester's
 // authenticated PUID resolved to its mission player actor; this machine's player for its own). False when unknown.
 bool SupportTransactionRequester(std::uint64_t token,ObjRef* out) noexcept;
+// Whether every peer knows the transport entries (kCapTransports); true offline / with no session.
+bool SupportPeersAcceptTransports() noexcept;
+// Host: whether every peer takes a composed load (support_protocol.h kCapLoadout); offline / no peer: true.
+bool SupportPeersAcceptLoadout() noexcept;
+// Host: whether every peer applies plan unit variants (support_protocol.h kExtVariants) and has the variant file of
+// hash `hash` (support_loadout.h VariantHash) preloaded, by its last hello; offline / no peer: true.
+bool SupportPeersHaveVariantFile(std::uint64_t hash) noexcept;
+// Host: whether every peer applies unit variants at all (an older build's do not); offline / no peer: true.
+bool SupportPeersApplyVariants() noexcept;
 // Requester ownership: native EOS PUID must equal the authenticated transport
 // sender and belong to the sealed current-world participant set.
 bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) noexcept;

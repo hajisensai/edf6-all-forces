@@ -38,6 +38,16 @@ int main() {
         check(j.cmdMoving && !j.t.target && !j.t.trackFrame && !j.t.lockAt && !j.t.lockSeen &&
               !j.carrier.evadeUntil && j.mode==Mode::patrol && j.modeAt==1000,"new command abandons the old attack");
         check(j.t.missileAt==800,"retargeting preserves weapon cooldowns");
+        // A focus order (the map's, on the marked enemy): its order and point kept, the old attack dropped; the next
+        // order lets it go.
+        alignas(16) unsigned char marked[0x40]{},markedCtrl[16]{};
+        Put<void*>(marked,kSelfCtrl,markedCtrl);
+        j.t.target=&j;j.mode=Mode::dive;
+        ApplyMapFocus(j,ObjRef::Of(marked),1100);
+        check(j.focus.Is(marked) && j.cmd.order==Order::guard && j.cmdMoving && !j.t.target && j.mode==Mode::patrol,
+              "focus keeps the order and its point, drops the old attack");
+        ApplyMapCommand(j,guard,1000);
+        check(!j.focus,"a new order lets the focus target go");
         const Kind& k=KindOf(j);
         float pos[3]={0.0f,600.0f,0.0f};
         check(MapCommandMoving(j,pos,anchor,k.range),"distant command must be reached first");

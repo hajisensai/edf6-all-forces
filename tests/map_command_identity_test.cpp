@@ -10,10 +10,18 @@ const wchar_t* SupportCallName(int) noexcept { return L"Support"; }
 SupportIcon SupportCallIcon(int) noexcept { return SupportIcon::jet; }
 SupportVariant SupportCallVariant(int) noexcept { return SupportVariant::none; }
 SupportReadiness SupportCallReadiness() noexcept { return {SupportReady::ready,0}; }
-int supportCalls=0,supportChosen=-1;float supportTarget[3]{};
-bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept {
-    ++supportCalls;supportChosen=index;std::memcpy(supportTarget,target,12);
+int supportCalls=0,supportChosen=-1;float supportTarget[3]{};SupportLoadout supportLoad{};
+bool SupportCallComposedAt(int index,const float* target,const SupportLoadout* load,wchar_t* note,std::size_t capacity) noexcept {
+    ++supportCalls;supportChosen=index;std::memcpy(supportTarget,target,12);supportLoad=load ? *load : SupportLoadout{};
     _snwprintf_s(note,capacity,_TRUNCATE,L"support received");return true;
+}
+// The stub catalog's entry 1 carries soldiers (its composition panel): eight seats (two squads), one squad to start (a
+// sniper leader, three rifles: the ini's).
+int SupportCallSeats(int index) noexcept { return index==1 ? 8 : 0; }
+bool SupportCallPreset(int index,SupportLoadout* out) noexcept {
+    *out=SupportLoadout{};
+    if(index!=1)return false;
+    out->count=4;out->soldier[0]=SupportWeapon::sniper;return true;
 }
 int payloadRequests=0,payloadSeat=-1,payloadEntry=-1;std::uint64_t payloadToken=0;
 bool RequestPayloadSelection(std::uint64_t token,int seat,int entry) noexcept {
@@ -39,6 +47,7 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& id,const mapcmd::Comm
     return SquadCommand(id.obj,command) ? NpcCommandResult{NpcCommandReason::none,1} : NpcCommandResult{NpcCommandReason::failed,0};
 }
 unsigned char* image=nullptr;
+bool JetFliesItself(const void*) noexcept { return false; }   // no plugin jet in this world (command_unit.cpp)
 bool NpcDriver(const unsigned char* v) noexcept {
     if(!v || !SeatCount(v))return false;
     auto* seat=SeatAt(const_cast<unsigned char*>(v),0);const auto who=SeatRider(seat);
@@ -52,6 +61,9 @@ bool InSession() noexcept { return mapOnline; }
 bool NpcMarked() noexcept { return false; }
 int CycleGuardFormation(const void*) noexcept {return -2;}
 int CycleMarchFormation() noexcept {return 0;}
+int SetGuardFormation(const void*,int) noexcept {return -2;}
+int NpcGuardShape(const void*) noexcept {return -2;}
+int SetMarchFormation(int) noexcept {return -2;}
 int SplitSquad(const void*) noexcept {return -1;}
 bool MergeSquads(const void*,const void*) noexcept {return false;}
 bool NpcSweepToggle(const void* const*,int) noexcept {return false;}
@@ -72,10 +84,12 @@ int HeliCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int JetCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int GroundCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int TankCommandUnits(CommandUnit*,int) noexcept { return 0; }
+int TransportLinks(TransportLink*,int) noexcept { return 0; }
+const void* TransportRiderOf(const void*) noexcept { return nullptr; }
 int SquadCommandUnits(CommandUnit*,int) noexcept { return 0; }
-int SquadRows(SquadRow*,int) noexcept { return 0; }
-bool HeliCommand(const void*,const Command&) noexcept { return false; }
-bool JetCommand(const void*,const Command&) noexcept { return false; }
+int SquadRows(SquadRow*,int,SquadTally* tally) noexcept { if(tally)*tally=SquadTally{};return 0; }
+bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }
+bool JetCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }
 bool GroundCommand(const void*,const Command&) noexcept { return false; }
 bool TankCommand(const void*,const Command&) noexcept { return false; }
 bool SquadCommand(const void*,const Command&) noexcept { return false; }

@@ -30,6 +30,7 @@
 //   python tools/hud_view.py DIR
 #include "../src/turretcam.h"
 #include "../src/hud.cpp"
+#include "../src/player_name.h"
 #include "../src/map_cam.h"
 #include <cstdio>
 #include <map>
@@ -199,6 +200,19 @@ bool PlayerMapCommands(MapCommandReadout* o) noexcept { if(hasMap)*o=sceneCmd;re
 // The NPCs' mark (npcai.cpp): none in these scenes but the ground one (GroundScene sets sceneMark).
 bool sceneMarkOn=false;float sceneMark[3]{};
 bool NpcMarkReadout(float* at) noexcept { if(sceneMarkOn)std::memcpy(at,sceneMark,12);return sceneMarkOn; }
+// The Q marks (qmark.cpp) with it: ours on that enemy, a teammate's (P2) on another one, a teammate's (P3) point.
+int QMarkViews(QMarkView* to,int max) noexcept {
+    if(!sceneMarkOn || max<3)return 0;
+    to[0]=QMarkView{true,true,-1,{sceneMark[0],sceneMark[1],sceneMark[2]}};
+    to[1]=QMarkView{false,true,1,{sceneMark[0]-60.0f,sceneMark[1]+4.0f,sceneMark[2]+40.0f}};
+    to[2]=QMarkView{false,false,2,{sceneMark[0]+45.0f,sceneMark[1]-6.0f,sceneMark[2]-60.0f}};
+    // Names as the game's name tag gives them (player_name.cpp FitName): a Japanese one, and a long mixed one cut.
+    const wchar_t* jp=L"さくら_EDF";
+    const wchar_t* longName=L"风暴战士 VeryLongCallsign 2026";
+    FitName(jp,std::wcslen(jp),to[1].name,kQMarkName);
+    FitName(longName,std::wcslen(longName),to[2].name,kQMarkName);
+    return 3;
+}
 // The squads' formation banner (npcai.cpp PlayerFormationCue): on in the npc_formation scene.
 int sceneFormation=-1;
 bool PlayerFormationCue(FormationCue* o) noexcept { if(sceneFormation<0)return false;o->shape=sceneFormation;o->key=0x54;return true; }
@@ -215,6 +229,9 @@ bool SupportVersionCue(wchar_t* line,std::size_t capacity) noexcept {
     return sceneVersionOn;
 }
 bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
+// The debug spawn tool's menu (debug_spawn.cpp DebugSpawnReadout): up in the debug_spawn scenes.
+bool sceneDebugSpawnOn=false;DebugSpawnCue sceneDebugSpawn{};
+bool DebugSpawnReadout(DebugSpawnCue* o) noexcept { if(sceneDebugSpawnOn)*o=sceneDebugSpawn;return sceneDebugSpawnOn; }
 void MapCommandView(const float*,float,float) noexcept {}
 // The map's buttons as drawn (hud.cpp MapButtons): the scene's check reads them.
 int sceneButtons=0;float sceneButton[mapbtn::kCount][4]{};int sceneButtonId[mapbtn::kCount]{};
@@ -223,13 +240,19 @@ void MapCommandButtons(const float* r,const int* ids,int n) noexcept {
     for(int i=0;i<n;++i){for(int k=0;k<4;++k)sceneButton[i][k]=r[i*4+k];sceneButtonId[i]=ids[i];}
 }
 float sceneUiPanels[16][4]{};int sceneUiCount=0;
-float sceneSquadButtons[9][4]{};int sceneSquadButtonCount=0;
+float sceneSquadButtons[16][4]{};int sceneSquadButtonCount=0;
+float sceneSquadFold[4]{};bool sceneSquadFoldOn=false;
 float scenePayloadButtons[kMostPayload][4]{};int scenePayloadButtonCount=0;
 void MapCommandUiPanels(const float* r,int n) noexcept {
     sceneUiCount=n;for(int i=0;i<n;++i)std::memcpy(sceneUiPanels[i],r+i*4,16);
 }
 void MapCommandSquadButtons(const float* r,const ObjRef*,int n) noexcept {
     sceneSquadButtonCount=n;for(int i=0;i<n;++i)std::memcpy(sceneSquadButtons[i],r+i*4,16);
+}
+void MapCommandSquadFold(const float* r) noexcept { sceneSquadFoldOn=r!=nullptr;if(r)std::memcpy(sceneSquadFold,r,16); }
+float sceneMenu[kMapFormationEntries][4]{};int sceneMenuEntry[kMapFormationEntries]{},sceneMenuCount=0;
+void MapCommandFormationButtons(const float* r,const int* entries,int n) noexcept {
+    sceneMenuCount=n;for(int i=0;i<n;++i){std::memcpy(sceneMenu[i],r+i*4,16);sceneMenuEntry[i]=entries[i];}
 }
 void MapCommandPayloadButtons(const float* r,std::uint64_t,int,const int*,int n) noexcept {
     scenePayloadButtonCount=n;for(int i=0;i<n;++i)std::memcpy(scenePayloadButtons[i],r+i*4,16);
@@ -238,6 +261,11 @@ void MapCommandPayloadButtons(const float* r,std::uint64_t,int,const int*,int n)
 float sceneSupportHits[kMapSupports*2][4]{};int sceneSupportEntry[kMapSupports*2]{},sceneSupportHitCount=0;
 void MapCommandSupportButtons(const float* r,const int* entries,int n) noexcept {
     sceneSupportHitCount=n;for(int i=0;i<n;++i){std::memcpy(sceneSupportHits[i],r+i*4,16);sceneSupportEntry[i]=entries[i];}
+}
+// The support composition panel's seats and kinds as drawn (hud.cpp MapComposePanel).
+float sceneComposeHits[mapbtn::kComposeItems][4]{};int sceneComposeCode[mapbtn::kComposeItems]{},sceneComposeHitCount=0;
+void MapCommandComposeButtons(const float* r,const int* codes,int n) noexcept {
+    sceneComposeHitCount=n;for(int i=0;i<n;++i){std::memcpy(sceneComposeHits[i],r+i*4,16);sceneComposeCode[i]=codes[i];}
 }
 bool GearHudLatest(GearHud* g) noexcept {
     if(!hasJet || sceneJet.rotor)return false;
@@ -442,10 +470,11 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     cmdUnit(sq3,false,"RANGER x6",Order::none,nullptr,false);
     for(int i=sceneCmd.count-3;i<sceneCmd.count;++i)sceneCmd.unit[i].owner=kCmdOwnerGround;
     sceneCmd.unit[sceneCmd.count-1].locked=true;
+    sceneCmd.pickable=sceneCmd.count-1;   // the script's squad is shown, not picked
     auto row=[](const char* name,int alive,const char* status,Order order,bool locked,bool selected){
         SquadRow& r=sceneCmd.squad[sceneCmd.squads];
         std::snprintf(r.name,sizeof(r.name),"%s",name);std::snprintf(r.status,sizeof(r.status),"%s",status);
-        r.alive=alive;r.now.order=order;r.locked=locked;
+        r.alive=alive;r.now.order=order;r.locked=locked;r.rank=mapcmd::SquadRank(std::strcmp(status,"RECRUITED")==0,locked,false);
         sceneCmd.squadSelected[sceneCmd.squads++]=selected;
     };
     row("RANGER",4,"RECRUITED",Order::guard,false,true);
@@ -464,6 +493,13 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     sceneCmd.supports=static_cast<int>(sizeof(kCatalog)/sizeof(kCatalog[0]));
     for(int i=0;i<sceneCmd.supports;++i){wcscpy_s(sceneCmd.support[i].name,kCatalog[i].name);sceneCmd.support[i].icon=kCatalog[i].icon;const wchar_t* v=mapbtn::VariantOf(kCatalog[i].name);sceneCmd.support[i].variant=!v ? SupportVariant::none : std::wcscmp(v,L"守点")==0 ? SupportVariant::guard : std::wcscmp(v,L"跟随")==0 ? SupportVariant::follow : std::wcscmp(v,L"有人")==0 ? SupportVariant::crewed : SupportVariant::empty;}
     sceneCmd.supportArmed=payload ? 3 : -1;sceneCmd.supportPick=3;
+    // The payload scenes arm the platoon row and open its composition (map_buttons.h ComposePanel): two squads in, a
+    // Wing Diver and a Fencer one, of its twelve seats.
+    sceneCmd.composeEntry=-1;sceneCmd.composeSeats=0;sceneCmd.compose=SupportLoadout{};
+    if(payload) {
+        sceneCmd.supportArmed=sceneCmd.supportPick=sceneCmd.composeEntry=10;sceneCmd.composeSeats=12;sceneCmd.compose.count=8;
+        for(int i=0;i<4;++i){sceneCmd.compose.soldier[i]=SupportWeapon::wingLance;sceneCmd.compose.soldier[4+i]=SupportWeapon::fencerCannon;}
+    }
     sceneCmd.supportReady=payload ? SupportReadiness{SupportReady::cooldown,17} : SupportReadiness{SupportReady::ready,0};
     if(payload)wcscpy_s(sceneCmd.supportStatus,L"Support route ready - select a visible entry on the map");
     if(squadCount==9) {
@@ -474,6 +510,12 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         row("RANGER",4,"FREE",Order::recruit,false,false);
         for(int i=0;i<sceneCmd.count;++i)sceneCmd.unit[i].selected=i==sceneCmd.count-3;
         sceneCmd.selected=1;
+        sceneCmd.squadOpen=true;   // opened: every row, a script's too, and the row that folds it
+        // The formation menu open over its button: the guarding squad's defences (perimeter in use) and the march.
+        sceneCmd.formationMenu=sceneCmd.formationGuard=sceneCmd.formationMarch=true;
+        sceneCmd.formationGuardShape=static_cast<int>(npc::formation::Shape::perimeter);
+        // An armed support's composition and the formation menu are never open together (mapcmd.cpp: one at a time).
+        if(payload)sceneCmd.formationMenu=false;
     }
     std::swprintf(sceneCmd.note,_countof(sceneCmd.note),Tr(Tx::cmdGuardResult),Tr(Tx::orderGuard),60.0,420.0,2,L"");
     if(vehicleOnly) {
@@ -483,6 +525,12 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         sceneCmd.allowedOrders=(1u<<static_cast<unsigned>(Order::guard))|(1u<<static_cast<unsigned>(Order::none))|(1u<<static_cast<unsigned>(Order::follow))|
                                (1u<<static_cast<unsigned>(Order::move))|(1u<<static_cast<unsigned>(Order::attackMove));
     }
+    // The rows as npcai.cpp SquadRows gives them: sorted by rank (stable), a script's last; the tally of them all.
+    for(int i=1;i<sceneCmd.squads;++i)for(int j=i;j>0 && sceneCmd.squad[j].rank<sceneCmd.squad[j-1].rank;--j) {
+        std::swap(sceneCmd.squad[j],sceneCmd.squad[j-1]);std::swap(sceneCmd.squadSelected[j],sceneCmd.squadSelected[j-1]);
+    }
+    sceneCmd.squadTally=SquadTally{};sceneCmd.squadTally.total=sceneCmd.squads;
+    for(int i=0;i<sceneCmd.squads;++i)sceneCmd.squadTally.scripted+=sceneCmd.squad[i].rank==3;
     sceneCmd.noteFresh=true;
     hasMap=true;
     const std::wstring path=dir+L"\\"+name+L".txt";
@@ -529,6 +577,23 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
                 if(b[0]<q[2] && q[0]<b[2] && b[1]<q[3] && q[1]<b[3]){++textFailed;std::printf("FAIL support bar under button %d\n",sceneButtonId[k]);}
             }
         }
+        // The composition panel: a place for each squad in it and every kind clickable, on the screen, clear of the
+        // command card and of the bar.
+        if(sceneCmd.composeEntry>=0) {
+            if(sceneComposeHitCount!=2+kSupportWeaponCount){++textFailed;std::printf("FAIL composition clicks: %d\n",sceneComposeHitCount);}
+            for(int i=0;i<sceneComposeHitCount;++i) {
+                const float* b=sceneComposeHits[i];
+                if(b[0]<0.0f || b[2]>static_cast<float>(width) || b[1]<0.0f || b[3]>1080.0f){++textFailed;std::printf("FAIL composition hit %d off the screen\n",i);}
+                for(int k=0;k<sceneButtons;++k) {
+                    const float* q=sceneButton[k];
+                    if(b[0]<q[2] && q[0]<b[2] && b[1]<q[3] && q[1]<b[3]){++textFailed;std::printf("FAIL composition under button %d\n",sceneButtonId[k]);}
+                }
+                for(int k=0;k<sceneSupportHitCount;++k) {
+                    const float* q=sceneSupportHits[k];
+                    if(b[0]<q[2] && q[0]<b[2] && b[1]<q[3] && q[1]<b[3]){++textFailed;std::printf("FAIL composition over the support bar %d\n",k);}
+                }
+            }
+        } else if(sceneComposeHitCount){++textFailed;std::printf("FAIL composition clickable with none armed: %d\n",sceneComposeHitCount);}
         int reached=0;for(int i=0;i<sceneCmd.supports;++i)reached+=reach[i];
         if(reached!=sceneCmd.supports){++textFailed;std::printf("FAIL support entries clickable: %d of %d\n",reached,sceneCmd.supports);}
         for(int i=0;i<sceneButtons;++i) {
@@ -545,11 +610,27 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
             if(own!=1){++textFailed;std::printf("FAIL map button %d: %d labels in it\n",sceneButtonId[i],own);}
         }
     }
+    // The squad panel (the user, 2026-10-09: "小队太多了…看不过来"): folded, the rows on foot that take orders, the rest
+    // (a script's) in the summary row that opens it; open, every row and the row that folds it.
+    int ranks[16];
+    for(int i=0;i<sceneCmd.squads;++i)ranks[i]=sceneCmd.squad[i].rank;
+    const int listedRows=mapcmd::SquadRowsShown(ranks,sceneCmd.squads,sceneCmd.squadOpen,16);
+    const int foldedRows=mapcmd::SquadRowsShown(ranks,sceneCmd.squads,false,16);
+    const bool summary=sceneCmd.squadOpen ? foldedRows<sceneCmd.squads : listedRows<sceneCmd.squads;
     for(int i=0;i<sceneCmd.squads;++i) {
         const SquadRow& r=sceneCmd.squad[i];wchar_t kind[32],status[32];
         hudtext::WordTo(r.name,kind,_countof(kind));MapSquadStatus(r,status,_countof(status));
-        Line expected{};Format(expected,L"%d  %ls x%d   %ls   %ls",i+1,kind,r.alive,status,MapOrderWord(r.now.order));shown(expected.text);
+        Line expected{};Format(expected,L"%d  %ls x%d   %ls   %ls",i+1,kind,r.alive,status,MapOrderWord(r.now.order));
+        if(i<listedRows)shown(expected.text);
+        else for(const Drew& d:drew)if(d.text==expected.text){++textFailed;std::printf("FAIL folded squad row shown: %s\n",Narrow(d.text).c_str());}
     }
+    if(summary) {
+        Line more{};
+        if(sceneCmd.squadOpen)Format(more,L"%ls",Tr(Tx::squadFold));
+        else Format(more,Tr(Tx::squadMore),sceneCmd.squads-listedRows,sceneCmd.squadTally.riding,sceneCmd.squadTally.scripted);
+        shown(more.text);
+    }
+    if(sceneSquadFoldOn!=(summary && !pad)){++textFailed;std::puts("FAIL map squad summary row clickable");}
     if(online && !pad) {
         bool board=false;
         for(int i=0;i<sceneButtons;++i) {
@@ -565,7 +646,31 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
             ++textFailed;std::puts("FAIL unsupported vehicle order is clickable");
         }
     }
-    if(sceneSquadButtonCount!=(pad ? 0 : (sceneCmd.squads<9 ? sceneCmd.squads : 9))) {++textFailed;std::puts("FAIL map squad clickable rows");}
+    if(sceneSquadButtonCount!=(pad ? 0 : listedRows)) {++textFailed;std::puts("FAIL map squad clickable rows");}
+    {   // The formation menu: a row a shape, on the screen, clear of the buttons, its own word in each row.
+        bool formationShown=false;
+        for(int i=0;i<sceneButtons;++i)formationShown=formationShown || sceneButtonId[i]==static_cast<int>(mapbtn::Id::formation);
+        const int wanted=sceneCmd.formationMenu && formationShown ?
+            (sceneCmd.formationGuard ? static_cast<int>(std::size(npc::formation::kGuard)) : 0)+
+            (sceneCmd.formationMarch ? static_cast<int>(std::size(npc::formation::kMarch)) : 0) : 0;
+        if(sceneMenuCount!=wanted){++textFailed;std::printf("FAIL formation menu rows: %d of %d\n",sceneMenuCount,wanted);}
+        for(int i=0;i<sceneMenuCount;++i) {
+            const float* m=sceneMenu[i];
+            if(m[0]<0.0f || m[2]>static_cast<float>(width) || m[1]<0.0f || m[3]>1080.0f){++textFailed;std::printf("FAIL formation menu row %d off the screen\n",i);}
+            for(int k=0;k<sceneButtons;++k) {
+                const float* q=sceneButton[k];
+                if(m[0]<q[2] && q[0]<m[2] && m[1]<q[3] && q[1]<m[3]){++textFailed;std::printf("FAIL formation menu row %d over button %d\n",i,sceneButtonId[k]);}
+            }
+            int own=0;
+            for(const Drew& d:drew) {
+                if(d.text.empty() || !(d.x0<m[2] && m[0]<d.x1 && d.y0<m[3] && m[1]<d.y1))continue;
+                const float cy=(d.y0+d.y1)*0.5f;
+                if(cy>m[1] && cy<m[3] && d.x0>=m[0]-1.0f && d.x1<=m[2]+1.0f)++own;
+                else{++textFailed;std::printf("FAIL formation menu row %d covers %s\n",i,Narrow(d.text).c_str());}
+            }
+            if(own!=1){++textFailed;std::printf("FAIL formation menu row %d: %d labels in it\n",i,own);}
+        }
+    }
     if(scenePayloadButtonCount!=(payload && !pad ? 6 : 0)){++textFailed;std::puts("FAIL map payload clickable rows");}
     for(std::size_t i=0;i<drew.size();++i) {
         const auto& a=drew[i];if(a.text.empty())continue;bool panelText=false;
@@ -674,6 +779,35 @@ template<class F> Box Measured(F draw,float s=1.0f) {
     FreeText(text);
     boxing=false;
     return box;
+}
+
+// The map's icons inside their rows (the user, 2026-10-09, a 4K screenshot of the support bar: "左边的重叠了" -- the
+// aircraft icons drawn at the HUD scale squared, each over the rows round it): every support icon within its bar row
+// (half a row up and down, and clear of the name that starts kSupIcon + 8 px in) and every order icon within its
+// button, at the HUD scales of 1080 .. 3240 lines.
+int MapIconFitChecks() {
+    void* const drawer=At<void*>(image,kQuadDrawer);
+    static unsigned char ctx[16]{};
+    int failed=0;
+    for(const float s:{1.0f,1440.0f/1080.0f,2.0f,3.0f}) {
+        const float x=500.0f*s,y=500.0f*s;
+        for(int i=0;i<=static_cast<int>(SupportIcon::truck);++i) {
+            const Box b=Measured([&](Text*,Line*,int*){MapSupportIcon(drawer,ctx,static_cast<SupportIcon>(i),x,y,kSupIcon*s,s,kWhite);},s);
+            const float across=(kSupIcon*0.5f+4.0f)*s,up=kSupRowH*0.5f*s;
+            const bool fits=b.any && b.x0>=x-across && b.x1<=x+across && b.y0>=y-up && b.y1<=y+up;
+            if(!fits){++failed;std::printf("FAIL support icon %d at scale %.2f: (%.1f,%.1f)-(%.1f,%.1f) round (%.0f,%.0f), +-%.1f x +-%.1f\n",
+                                           i,s,b.x0,b.y0,b.x1,b.y1,x,y,across,up);}
+        }
+        for(int i=0;i<mapbtn::kCount;++i) {
+            const Box b=Measured([&](Text*,Line*,int*){MapOrderIcon(drawer,ctx,static_cast<mapbtn::Id>(i),x,y,kBtnIcon*s,s,kWhite);},s);
+            const float half=kBtnRowH*0.5f*s;
+            if(!b.any || b.x0<x-half || b.x1>x+half || b.y0<y-half || b.y1>y+half){
+                ++failed;std::printf("FAIL order icon %d at scale %.2f outside its button\n",i,s);
+            }
+        }
+    }
+    std::printf(failed ? "map icons: %d FAILED\n" : "map icons: inside their rows at every scale\n",failed);
+    return failed;
 }
 
 // The stock HUD's RWR scope (Threats' side for it) and its block, at `width` x 1080: apart.
@@ -1600,7 +1734,7 @@ int Scenes(const std::wstring& dir) {
     sceneJet.rotor=true;config.heliFlightHud=true;
     sceneJet.heli=HeliFlight{};
     sceneJet.heli.speed=3.0f;sceneJet.heli.clear=12.0f;sceneJet.heli.climb=-9.0f;sceneJet.heli.ground=true;sceneJet.heli.vel[1]=-9.0f;
-    sceneJet.heli.gpws=Gpws::pullUp;sceneJet.heli.impactIn=1.3f;
+    sceneJet.heli.gpws=Gpws::pullUp;sceneJet.heli.impactIn=1.3f;sceneJet.heli.power=0.38f;   // sinking: under the hover's
     sceneJet.liftShare=0.0f;sceneJet.gpws=Gpws::pullUp;
     Symbols(sceneJet.sym,pos,0.0f,-70.0f);
     sceneJet.sym.threats=0;
@@ -1807,6 +1941,37 @@ int Scenes(const std::wstring& dir) {
         sceneVersionOn=false;sceneRescueOn=false;
     }
     sceneSweepOn=false;
+    // The debug spawn tool's menu (DebugSpawn=1): the longest category (vehicles, its window scrolled to the middle) and
+    // the enemies with a spawn's result; on the screen and no two texts on each other, the picked row's name drawn.
+    for(int pass=0;pass<2;++pass) {
+        using namespace debugspawn;
+        const Category cat=pass ? Category::enemy : Category::vehicle;
+        sceneDebugSpawnOn=true;
+        sceneDebugSpawn=DebugSpawnCue{};
+        sceneDebugSpawn.open=true;sceneDebugSpawn.category=static_cast<int>(cat);
+        sceneDebugSpawn.count=CountIn(cat);sceneDebugSpawn.pick=pass ? 2 : 8;
+        sceneDebugSpawn.row=RowOf(cat,sceneDebugSpawn.pick);sceneDebugSpawn.ready=pass==0;
+        const int keys[5]={0x77,0x74,0x75,0x76,0x78};
+        std::memcpy(sceneDebugSpawn.keys,keys,sizeof(keys));
+        if(pass){sceneDebugSpawn.status=kDebugSpawnDone;sceneDebugSpawn.statusRow=sceneDebugSpawn.row;}
+        const wchar_t* name=pass ? L"debug_spawn_enemy" : L"debug_spawn_vehicle";
+        Scene(dir,name,ground);
+        bool picked=false,inside=true,apart=true;
+        for(std::size_t i=0;i<drew.size();++i) {
+            const Drew& p=drew[i];
+            if(p.text.empty())continue;
+            if(p.text.find(debugspawn::kEntries[sceneDebugSpawn.row].name)!=std::wstring::npos)picked=true;
+            if(p.x0<0.0f || p.x1>1920.0f || p.y0<0.0f || p.y1>1080.0f)inside=false;
+            for(std::size_t k=i+1;k<drew.size();++k) {
+                const Drew& q=drew[k];
+                if(!q.text.empty() && p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1)apart=false;
+            }
+        }
+        failed+=!(picked && inside && apart);
+        std::printf("%s  %ls: the picked row drawn %d, on the screen %d, no text overlapping %d\n",
+                    picked && inside && apart ? "ok  " : "FAIL",name,picked,inside,apart);
+    }
+    sceneDebugSpawnOn=false;
     sceneFormation=-1;
     sceneMarkOn=false;hasHeli=heliWas;
     std::memcpy(sceneHeli.sym.nose,noseWas,12);
@@ -1914,5 +2079,6 @@ int wmain(int argc,wchar_t** argv) {
     hasStock=false;
     std::printf(scaled ? "scale: %d FAILED\n" : "scale: all as designed\n",scaled);
     failed+=scaled;
+    failed+=MapIconFitChecks();
     return failed ? 1 : 0;
 }

@@ -1,4 +1,5 @@
 #include "../src/support_protocol.h"
+#include "../src/support_loadout.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -19,6 +20,9 @@ struct Node {
     bool reject=false,failSpawn=false,pending=false,refusePlan=false;
     std::uint32_t pendingCatalog=0;   // pending only for this catalog (0: every one)
     unsigned spawns=0,destroys=0,plans=0;
+    std::uint64_t loadout=0;   // the last plan call's composed load (support_call.h PackSupportLoadout)
+    std::uint64_t variant=0;   // given to every planned unit (support_net.h Unit::variant)
+    std::uint32_t ext=kExtVariants;unsigned char bloom[32]{};   // its hello's extension (support_variants.h)
     std::uint64_t nonce=0;
     bool active[kMaxTransactions+1]{};
     Plan last{};
@@ -33,7 +37,7 @@ struct Room {
     std::vector<Packet> history;
     std::uint64_t now=10000;
     unsigned failTo=999,dropTo=999,legacyNode=999;   // legacyNode: an older build, its hello announces legacyCaps only
-    std::uint32_t legacyCaps=0,legacyCatalog=0;   // an older build's hello: index, and catalog (0 before it carried caps)
+    std::uint32_t legacyCaps=0,legacyExt=0;   // an older build's hello: its index bits and its extension word
     bool oldHost=false;   // the host's welcome as a build before it carried its capabilities (index 0)
     Kind failKind=Kind::cancel,dropKind=Kind::cancel;
     explicit Room(unsigned count);
@@ -64,19 +68,22 @@ bool Send(void* ctx,std::uint32_t peer,const Message& message) noexcept {
     auto& node=*static_cast<Node*>(ctx);auto& room=*node.room;const auto dst=room.Global(node.id,peer);
     if(dst==room.failTo && message.kind==room.failKind)return false;
     unsigned char wire[kWireSize];Message decoded;
-    Message sent=message;if(node.id==room.legacyNode && sent.kind==Kind::hello){sent.index=room.legacyCaps;sent.catalog=room.legacyCatalog;}
+    Message sent=message;
+    // An older build's hello: legacyCaps in index, legacyExt as its extension word (main's before the rescue: kExtVariants;
+    // older still: 0), no filter.
+    if(node.id==room.legacyNode && sent.kind==Kind::hello){sent.index=room.legacyCaps;sent.unit=Unit{};sent.unit.resourceId=room.legacyExt;}
     if(node.id==0 && room.oldHost && sent.kind==Kind::welcome){sent.catalog=0;sent.ok=0;}
     if(!Encode(sent,wire,sizeof(wire)) || !Decode(wire,sizeof(wire),decoded))return false;
     Packet p{node.id,dst,decoded};room.packets.push_back(p);room.history.push_back(p);return true;
 }
 std::uint64_t Nonce(void* ctx) noexcept { return ++static_cast<Node*>(ctx)->nonce; }
-PlanResult PlanCall(std::uint32_t catalog,const float* at,Plan* p) noexcept {
-    ++current->plans;
+PlanResult PlanCall(std::uint32_t catalog,const float* at,std::uint64_t loadout,Plan* p) noexcept {
+    ++current->plans;current->loadout=loadout;
     if(current->refusePlan)return PlanResult::refused;
     if(current->pending && (!current->pendingCatalog || current->pendingCatalog==catalog))return PlanResult::pending;
     *p=Plan{};p->catalogId=catalog;p->count=16;std::memcpy(p->target,at,sizeof(p->target));
     for(unsigned i=0;i<p->count;++i) {
-        auto& u=p->units[i];u.resourceId=i%2+1;
+        auto& u=p->units[i];u.resourceId=i%2+1;u.variant=current->variant;
         u.matrix[0]=u.matrix[5]=u.matrix[10]=u.matrix[15]=1;
         u.matrix[12]=at[0]+static_cast<float>(i);u.matrix[13]=at[1];u.matrix[14]=at[2];
     }
@@ -97,11 +104,12 @@ bool Derive(std::uint32_t ordinal,unsigned char* out) noexcept {
     std::memcpy(out+24,&ordinal,4);return true;
 }
 void Notice(std::uint32_t request,RequestStatus status) noexcept { current->notices.emplace_back(request,status); }
+void Hello(std::uint32_t* ext,unsigned char* bloom) noexcept { *ext=current->ext;std::memcpy(bloom,current->bloom,32); }
 Room::Room(unsigned count) {
     for(unsigned i=0;i<count;++i) {
         auto n=std::make_unique<Node>();n->id=i;n->room=this;n->nonce=100000+1000*i;
         Backend b{n.get(),&Send,&Nonce,{&PlanCall,&Validate,&Spawn,&Destroy,&Derive}};
-        b.hooks.notice=&Notice;
+        b.hooks.notice=&Notice;b.hooks.variants=&Hello;
         b.hooks.ownChannel=[](std::uint32_t catalog) noexcept {return catalog==kRescue;};
         n->session->Configure(b);nodes.push_back(std::move(n));
     }
@@ -141,28 +149,41 @@ void Capabilities() {
     {Room r(3);r.With(0);
      Check(r.nodes[0]->session->PeersHave(kCapSoldierVariants),"every new peer announced soldier variants");
      Check(r.nodes[0]->session->PeersHave(kCapSoldierVariants|kCapAirborneAir),"and airborne air support");
-     Check(r.nodes[0]->session->PeersHave(kCapSeaRescue) && (kCapabilities&kCapSeaRescue),"and the sea rescue entry");
+     Check(r.nodes[0]->session->PeersHaveVariant(kExtSeaRescue|kExtRescueChannel,0),"and the sea rescue entry and its channel");
      r.With(1);Check(r.nodes[1]->session->PeersHave(kCapSoldierVariants),"a client is never asked: true");}
     {Room r(3);r.legacyNode=2;r.With(2);r.nodes[2]->session->Stop();r.nodes[2]->session->Start(false,2,1,r.now);r.Settle();
      Check(r.nodes[0]->session->Ready(),"an older client still completes the handshake");
      Check(!r.nodes[0]->session->PeersHave(kCapSoldierVariants),"host knows one peer lacks soldier variants");
      Check(!r.nodes[0]->session->PeersHave(kCapAirborneAir),"host knows one peer cannot make air support in the air");
-     Check(!r.nodes[0]->session->PeersHave(kCapSeaRescue),"host knows one peer has no sea rescue entry (its plan is refused there)");
+     Check(!r.nodes[0]->session->PeersHaveVariant(kExtSeaRescue,0),"host knows one peer has no sea rescue entry (its plan is refused there)");
      Check(r.Submit(),"mixed room request");r.Settle();
      for(const auto& n:r.nodes)Check(n->spawns==1,"mixed room: the v2 plan (rifles) passes the older peer's Validate");}
     // The build just before the sea rescue entry (soldier variants and airborne air, no rescue): every air call still
     // plans, the rescue alone is refused there (support_dispatch.cpp SupportPeersAcceptRescue).
-    {Room r(3);r.legacyNode=2;r.legacyCaps=kCapSoldierVariants|kCapAirborneAir;r.With(2);r.nodes[2]->session->Stop();
+    {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtVariants;r.With(2);r.nodes[2]->session->Stop();
      r.nodes[2]->session->Start(false,2,1,r.now);r.Settle();
-     Check(r.nodes[0]->session->PeersHave(kCapSoldierVariants|kCapAirborneAir) && !r.nodes[0]->session->PeersHave(kCapSeaRescue),
+     Check(r.nodes[0]->session->PeersHave(kCapabilities) && !r.nodes[0]->session->PeersHaveVariant(kExtSeaRescue,0),
            "a peer one version older: air support yes, the sea rescue no");}
     {Room r(2);r.legacyNode=1;r.With(1);r.nodes[1]->session->Stop();r.nodes[1]->session->Start(false,1,1,r.now);r.Settle();
      r.legacyNode=999;r.Step(1100);r.Settle();
      Check(r.nodes[0]->session->PeersHave(kCapSoldierVariants),"a peer's latest hello decides (an updated peer rejoining)");}
 }
+void Loadout() {
+    // A composed load (support_call.h PackSupportLoadout) rides in the request's challenge: the host's plan sees it; an
+    // older host never reads that field of a request (the wire is v2 unchanged).
+    Room r(3);const float at[3]={10,20,30};const std::uint64_t load=0x0000000DDDD99998ull;
+    r.With(1);Check(current->session->Submit(5,at,r.now,load),"a guest submits a composed request");r.Settle();
+    Check(r.nodes[0]->loadout==load && r.nodes[0]->plans>=1,"the host plans with the guest's load");
+    for(const auto& n:r.nodes)Check(n->spawns==1,"every peer spawns the composed plan once");
+    Message m;m.kind=Kind::request;m.epoch=1;m.request=1;m.catalog=5;m.challenge=load;std::memcpy(m.target,at,12);
+    unsigned char wire[kWireSize];Message back;
+    Check(Encode(m,wire,sizeof(wire)) && Decode(wire,sizeof(wire),back) && back.challenge==load,"the load crosses the wire as v2");
+    Check((kCapabilities&kCapLoadout)!=0,"this version announces kCapLoadout");
+}
 void Success() {
     Room r(3);for(const auto& n:r.nodes)Check(n->session->Ready(),"authenticated handshake ready");
     Check(r.Submit(),"client submits catalog request");r.Settle();
+    Check(r.nodes[0]->loadout==0,"a request with no composed load plans the call's own (loadout 0)");
     for(const auto& n:r.nodes)Check(n->spawns==1 && n->session->ActiveCount()==1,"all peers spawn once");
     Check(!r.nodes[0]->remote && r.nodes[1]->remote && r.nodes[2]->remote,"host authority passed to adapters");
     Check(!std::memcmp(&r.nodes[0]->last,&r.nodes[2]->last,sizeof(Plan)),"all sixteen object specs and native IDs identical");
@@ -267,19 +288,51 @@ void RequestOutcomes() {
     Check(newer.nodes[1]->notices.back()==std::make_pair(2u,RequestStatus::active),"previous transaction cancel cannot be misreported as the newer request outcome");
 }
 }
+// 2026-10-09 (the user: colours and loaded vehicles must work online). The hello's `index` has no capability bit left, so
+// the extension rides in the hello's unit (never read for a hello): resourceId the extension word, netId a Bloom filter of
+// the variant files the peer has; a unit's variant rides in the unit message's unused `challenge`. Older builds: zeros.
+void Variants() {
+    using crew::BloomAdd;using crew::VariantHash;
+    const std::uint64_t a=VariantHash(L"EDF6VC_NPC_RIFLE_L_1E3A8A_X.SGO"),b=VariantHash(L"EDF6VC_LO_TANK_4000000000000C81.SGO");
+    Message hello;hello.kind=Kind::hello;hello.challenge=7;hello.request=1;hello.index=kCapabilities;
+    hello.unit.resourceId=kExtVariants;BloomAdd(hello.unit.netId,a);
+    unsigned char bytes[kWireSize];Message out;
+    Check(Encode(hello,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) && out.unit.resourceId==kExtVariants &&
+          !std::memcmp(out.unit.netId,hello.unit.netId,32),"the hello's extension and filter round-trip on the v2 wire");
+    Message unit;unit.kind=Kind::unit;unit.epoch=22;unit.transaction=1;unit.unit.resourceId=1;
+    unit.unit.matrix[0]=unit.unit.matrix[5]=unit.unit.matrix[10]=unit.unit.matrix[15]=1;Derive(0x40000001,unit.unit.netId);
+    unit.challenge=0xC000000000000C81ull;
+    Check(Encode(unit,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) && out.challenge==unit.challenge,
+          "a unit message carries its variant in `challenge`");
+    {Room r(3);
+     BloomAdd(r.nodes[1]->bloom,a);BloomAdd(r.nodes[1]->bloom,b);BloomAdd(r.nodes[2]->bloom,a);r.Step(1100);r.Settle();
+     const auto& host=*r.nodes[0]->session;
+     Check(host.PeersHaveVariant(kExtVariants,0),"every peer applies variants");
+     Check(host.PeersHaveVariant(kExtVariants,a),"every peer has the coloured soldier's file");
+     Check(!host.PeersHaveVariant(kExtVariants,b),"one peer lacks the tank's file: the host plans it stock");
+     Check(r.nodes[1]->session->PeersHaveVariant(kExtVariants,b),"a client is never asked: true");
+     BloomAdd(r.nodes[2]->bloom,b);r.Step(1100);r.Settle();
+     Check(host.PeersHaveVariant(kExtVariants,b),"a peer's next hello (after its installer made the file) decides");
+     r.nodes[0]->variant=0xC000000000000C81ull;Check(r.Submit(),"a request");r.Settle();
+     for(const auto& n:r.nodes)Check(n->spawns==1 && n->last.units[0].variant==0xC000000000000C81ull &&
+                                    n->last.units[15].variant==0xC000000000000C81ull,"every peer's plan has the host's unit variants");}
+    {Room r(3);r.legacyNode=2;r.With(2);r.nodes[2]->session->Stop();r.nodes[2]->session->Start(false,2,1,r.now);r.Settle();
+     Check(!r.nodes[0]->session->PeersHaveVariant(kExtVariants,0),"an older peer announces no extension: no variants for the room");
+     Check(r.nodes[0]->session->Ready(),"and still completes the handshake");}
+}
 // 2026-10-10: the host's welcome carries its capabilities (a guest says when its host is older or newer, or another guest
 // is behind it); the sea rescue's request and the map's are each told their own outcome; a host knows who asked.
 void RoomBuilds() {
     {Room r(3);r.With(1);
-     Check(r.nodes[1]->session->HostCapsKnown() && r.nodes[1]->session->HostCaps()==kCapabilities && !r.nodes[1]->session->RoomBehindHost(),
+     Check(r.nodes[1]->session->HostCapsKnown() && r.nodes[1]->session->HostCaps()==kFeatures && !r.nodes[1]->session->RoomBehindHost(),
            "a guest knows its host's capabilities from the welcome");
      std::uint32_t missing=1;
      Check(r.nodes[0]->session->PeersBehind(&missing)==0 && missing==0 && r.nodes[0]->session->PeersAhead()==0,"the same build everywhere");}
     {Room r(3);r.legacyNode=2;r.With(2);r.nodes[2]->session->Stop();r.nodes[2]->session->Start(false,2,1,r.now);r.Settle();r.Step(1100);r.Settle();
      std::uint32_t missing=0;
-     Check(r.nodes[0]->session->PeersBehind(&missing)==1 && missing==kCapabilities,"the host counts the older guest and what it lacks");
+     Check(r.nodes[0]->session->PeersBehind(&missing)==1 && missing==kFeatures,"the host counts the older guest and what it lacks");
      Check(r.nodes[1]->session->RoomBehindHost(),"the other guest is told a guest of the room is behind the host");}
-    {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyCatalog=kCapabilities|16u;r.With(2);r.nodes[2]->session->Stop();r.nodes[2]->session->Start(false,2,1,r.now);
+    {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtensions|0x100u;r.With(2);r.nodes[2]->session->Stop();r.nodes[2]->session->Start(false,2,1,r.now);
      r.Settle();r.Step(1100);r.Settle();
      Check(r.nodes[0]->session->PeersAhead()==1 && r.nodes[0]->session->PeersBehind(nullptr)==0,"a newer guest: the host knows");}
     {Room r(2);r.oldHost=true;r.With(1);r.nodes[1]->session->Stop();r.nodes[1]->session->Start(false,1,1,r.now);r.Settle();
@@ -338,9 +391,9 @@ void RescueChannel() {
      unsigned active=0;for(const auto& n:r.nodes[1]->notices)active+=n.second==RequestStatus::active;
      Check(active==2,"the map call is not held by the rescue in flight; both made");}
     // A peer without the rescue channel: the rescue waits its turn as before (the map's channel and rate).
-    {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities&~kCapRescueChannel;r.With(2);r.nodes[2]->session->Stop();
+    {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtensions&~kExtRescueChannel;r.With(2);r.nodes[2]->session->Stop();
      r.nodes[2]->session->Start(false,2,1,r.now);r.Settle();r.Step(1100);r.Settle();
-     Check(!r.nodes[0]->session->PeersHave(kCapRescueChannel) && r.nodes[0]->session->PeersHave(kCapSeaRescue),"an older peer");
+     Check(!r.nodes[0]->session->PeersHaveVariant(kExtRescueChannel,0) && r.nodes[0]->session->PeersHaveVariant(kExtSeaRescue,0),"an older peer");
      r.nodes[0]->pending=true;r.nodes[0]->pendingCatalog=5;
      Check(r.Submit(1,5),"a map call");r.Settle();
      Check(r.Submit(2,kRescue),"a rescue meanwhile");r.Settle();
@@ -357,4 +410,4 @@ void RescueChannel() {
      Check(r.Submit(1,kRescue),"asked again at once");r.Settle();
      Check(LastFor(r,1)==RequestStatus::active,"a rescue that was cancelled started no cooldown (it starts once made everywhere)");}
 }
-int main() { Codec();Capabilities();RoomBuilds();RescueChannel();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();std::printf("support protocol: %d checks passed\n",checks); }
+int main() { Codec();Capabilities();Variants();Loadout();RoomBuilds();RescueChannel();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();std::printf("support protocol: %d checks passed\n",checks); }

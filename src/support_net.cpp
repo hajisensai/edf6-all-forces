@@ -115,6 +115,8 @@ void CommandContext(ULONGLONG now) noexcept {
     UpdateCommandNetwork({running && session.Ready(),snapshot.isHost!=0,session.Epoch(),commandHostPeer,
         snapshot.peerCount,snapshot.local.id,&SendCommand},now);
 }
+// The Q marks (qmark.cpp) go peer to peer over the same transport, with no host step: only the room has to be up.
+void QMarkContext(ULONGLONG now) noexcept { UpdateQMarkNetwork(running,snapshot.peerCount,&SendCommand,now); }
 bool PeerValid(const EDF6CoopPeer& peer) noexcept {
     return peer.id[0] && std::memchr(peer.id,0,sizeof(peer.id));
 }
@@ -170,29 +172,39 @@ void NoteForeignVersion(std::uint32_t peer,const unsigned char* bytes,std::uint3
             command_net::kVersion);
     commandVersionOf[peer]=seen;
 }
-// The features a set of capability bits names, in the HUD's language.
+// The features a set of feature bits (support_protocol.h kFeatures) names, in the HUD's language: the first kNamed of
+// them, then "and more" (the line stays within the HUD's one line).
 void Features(std::uint32_t caps,bool command,wchar_t* out,std::size_t size) noexcept {
     using hudtext::Tr;using hudtext::Tx;
+    using support_net::kExtShift;
     out[0]=0;
-    const struct { std::uint32_t bit; Tx text; } kNames[]={{support_net::kCapSeaRescue,Tx::versionFeatRescue},
-        {support_net::kCapRescueChannel,Tx::versionFeatRescueChannel},
-        {support_net::kCapAirborneAir,Tx::versionFeatAir},{support_net::kCapSoldierVariants,Tx::versionFeatLoadout}};
+    constexpr int kNamed=3;
+    const struct { std::uint32_t bit; Tx text; } kNames[]={{support_net::kExtSeaRescue<<kExtShift,Tx::versionFeatRescue},
+        {support_net::kExtRescueChannel<<kExtShift,Tx::versionFeatRescueChannel},{support_net::kCapAirborneAir,Tx::versionFeatAir},
+        {support_net::kCapTransports,Tx::versionFeatTransports},{support_net::kCapLoadout,Tx::versionFeatComposed},
+        {support_net::kExtVariants<<kExtShift,Tx::versionFeatVariants},{support_net::kCapSoldierVariants,Tx::versionFeatLoadout}};
+    int named=0;bool more=false;
     const auto add=[&](const wchar_t* word) noexcept {
+        if(named>=kNamed){more=true;return;}
         const std::size_t used=std::wcslen(out);
         _snwprintf_s(out+used,size-used,_TRUNCATE,L"%ls%ls",used ? Tr(Tx::versionListSep) : L"",word);
+        ++named;
     };
-    // Without the rescue at all, its channel goes unsaid (the line stays within the HUD's one line).
-    if(caps&support_net::kCapSeaRescue)caps&=~support_net::kCapRescueChannel;
+    // Without the rescue at all, its channel goes unsaid.
+    if(caps&(support_net::kExtSeaRescue<<kExtShift))caps&=~(support_net::kExtRescueChannel<<kExtShift);
     for(const auto& n:kNames)if(caps&n.bit)add(Tr(n.text));
     if(command)add(Tr(Tx::versionFeatCommand));
     if(!out[0])add(Tr(Tx::versionFeatSome));
+    if(more){const std::size_t used=std::wcslen(out);_snwprintf_s(out+used,size-used,_TRUNCATE,L"%ls",Tr(Tx::versionListMore));}
 }
 // The room's builds compared (version_notice.h), said once a change: logged, and shown on the HUD a while.
 void VersionTick(bool online) noexcept {
     versionnote::State s;
-    s.online=online;s.host=snapshot.isHost!=0;s.mine=support_net::kCapabilities;
+    s.online=online;s.host=snapshot.isHost!=0;s.mine=support_net::kFeatures;
     s.hostKnown=session.HostCapsKnown();s.hostCaps=session.HostCaps();s.roomBehind=session.RoomBehindHost();
-    s.silentHost=support_net::kCapSoldierVariants|support_net::kCapAirborneAir;
+    // A host announcing nothing in its welcome: at least the newest build without that field (origin/main 8af0c9c: every
+    // index bit and the unit variants), so what is named missing is what that build truly lacks (the rescue, its channel).
+    s.silentHost=support_net::kCapabilities|(support_net::kExtVariants<<support_net::kExtShift);
     s.peersBehind=session.PeersBehind(&s.peersMissing);s.peersAhead=session.PeersAhead();
     for(std::uint32_t i=1;online && i<=snapshot.peerCount && i<=support_net::kMaxPeers;++i)if(commandVersionOf[i])++s.commandPeers;
     const versionnote::Notice n=versionnote::Compare(s);
@@ -233,11 +245,11 @@ void ResetSupportNet() noexcept {
     session.Stop();running=false;blockedUntilMission=false;snapshot={};lastTick=~0ULL;ResetWorld();
     for(auto& v:commandVersionOf)v=0;
     versionShown={};AcquireSRWLockExclusive(&versionLock);versionAt=0;ReleaseSRWLockExclusive(&versionLock);
-    commandHostPeer=0;ResetCommandNetwork();
+    commandHostPeer=0;ResetCommandNetwork();ResetQMarkNetwork();
 }
 void SuspendSupportNet() noexcept {
     session.Suspend();running=false;blockedUntilMission=true;
-    CommandContext(GetTickCount64());
+    CommandContext(GetTickCount64());QMarkContext(GetTickCount64());
     Log("SUPPORT NET suspended: existing actors retained; mission participant resynchronization required");
 }
 void SupportNetTick() noexcept {
@@ -260,6 +272,7 @@ void SupportNetTick() noexcept {
     if(!running && !Start(next,now)){NoteTransport("EDF6Coop snapshot rejected (peer list / host identity)");return;}
     NoteTransport(next.isHost ? "ready (host)" : "ready (client)");
     CommandContext(now);
+    QMarkContext(now);
     // Never spawn on the DirectNet worker. The map/crew game-thread frame owns
     // both deserialization and the native create/register/destroy callbacks.
     for(unsigned received=0;received<128;++received) {
@@ -271,6 +284,7 @@ void SupportNetTick() noexcept {
         if(peer) {
             NoteForeignVersion(peer,bytes,count);
             CommandContext(now);
+            if(ReceiveQMarkNetwork(peer,sender.id,bytes,count,now))continue;   // before the support parser, as the commands
             if(ReceiveCommandNetwork(peer,sender.id,bytes,count,now))continue;
             support_net::Message message;
             if(support_net::Decode(bytes,count,message))session.Receive(peer,message,now);
@@ -280,9 +294,10 @@ void SupportNetTick() noexcept {
     session.Tick(now);
     VersionTick(running);
     CommandContext(now);
+    QMarkContext(now);
     if(session.Suspended())SuspendSupportNet();
 }
-bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::size_t size) noexcept {
+bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::size_t size,std::uint64_t loadout) noexcept {
     SupportNetTick();
     if(blockedUntilMission) {
         Note(note,size,L"联机参与者同步已暂停，现有支援保留；重新开始关卡后可再呼叫");return false;
@@ -290,7 +305,7 @@ bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::s
     if(catalogId<0 || !running || !session.Ready()) {
         Note(note,size,L"联机支援尚未就绪：需全房同版全军出击与联机扩展，并完成关卡同步");return false;
     }
-    if(!session.Submit(static_cast<std::uint32_t>(catalogId),target,GetTickCount64())) {
+    if(!session.Submit(static_cast<std::uint32_t>(catalogId),target,GetTickCount64(),loadout)) {
         Note(note,size,L"支援请求未受理：已有部署、调用过快或本关支援额度已满");return false;
     }
     Note(note,size,L"支援请求已排队，等待房主验证与全员确认");return true;
@@ -304,7 +319,7 @@ void ReportSupportFailure(std::uint64_t transaction) noexcept {
 bool SupportTransactionActive(std::uint64_t transaction) noexcept { return session.IsActive(transaction); }
 bool SupportPeersAcceptVariants() noexcept { return !running || session.PeersHave(support_net::kCapSoldierVariants); }
 bool SupportPeersAcceptAirborne() noexcept { return !running || session.PeersHave(support_net::kCapAirborneAir); }
-bool SupportPeersAcceptRescue() noexcept { return !running || session.PeersHave(support_net::kCapSeaRescue); }
+bool SupportPeersAcceptRescue() noexcept { return !running || session.PeersHaveVariant(support_net::kExtSeaRescue,0); }
 bool SupportVersionCue(wchar_t* out,std::size_t capacity) noexcept {
     constexpr ULONGLONG kShowMs=12000;
     AcquireSRWLockShared(&versionLock);
@@ -335,6 +350,12 @@ bool SupportTransactionRequester(std::uint64_t token,ObjRef* out) noexcept {
     }
     return static_cast<bool>(*out);
 }
+bool SupportPeersAcceptTransports() noexcept { return !running || session.PeersHave(support_net::kCapTransports); }
+bool SupportPeersAcceptLoadout() noexcept { return !running || session.PeersHave(support_net::kCapLoadout); }
+bool SupportPeersHaveVariantFile(std::uint64_t hash) noexcept {
+    return !running || session.PeersHaveVariant(support_net::kExtVariants,hash);
+}
+bool SupportPeersApplyVariants() noexcept { return !running || session.PeersHaveVariant(support_net::kExtVariants,0); }
 bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) noexcept {
     if(!authenticatedPuid || !std::memchr(authenticatedPuid,0,65))return false;
     EDF6CoopPeer peer;

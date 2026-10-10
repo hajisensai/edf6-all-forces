@@ -6,6 +6,11 @@
 //    (want 0 forward) and holds ascend: the climb rate before (one budget) and after (PlayerLift of the carrier's
 //    120 t) over 4 s. After, it climbs within a second and reaches kWantClimb by 3 s; before, it still sinks at 1 s;
 //  - the lift: the carrier's ~10.6 m/s^2, the heli's own at the heli's mass, capped there for lighter craft, 0 off.
+//  - the engine (Power, Hover's Motion::power: the player's THR, the engine sound, the carrier's flames): Thrust is bit for
+//    bit Hover's old sum; flown to steady flight at a speed set and a climb (the carrier's drag, kThrustDrag), the
+//    hover takes gravity's share of its full thrust (a middle value), a faster speed set more, a climb more, a descent
+//    less, accelerating more than the hover (braking from cruise less than cruising: the drag brakes too); the NPCs'
+//    one budget the same way round.
 // Exit code 1 when one fails. Built on request only:
 // cmake --build build --target hover_lift_check && build\hover_lift_check.exe
 #include "../src/hover_lift.h"
@@ -40,6 +45,23 @@ void OldAccel(const float* wantV,const float* vel,float respond,float thrust,flo
 
 constexpr float kDt=1.0f/60.0f,kRespond=2.5f,kJerk=1.2f,kThrust=4.0f,kClimbKey=24.0f,kCarrierMass=120000.0f;
 constexpr float kWantClimb=10.0f;   // m/s: the climb the player should have 3 s into braking with ascend held
+constexpr float kDrag=0.12f,kGravity=9.8f;   // jet_internal.h kThrustDrag (kCarrierLean's drag), kG
+
+// Hover's engine after `seconds` flying toward forward `speed` and `climb` from (`fwd0` forward, `up0` up): its velocity
+// integrated as Hover does, its thrust (Thrust) and the engine (Power) of the last frame.
+float Engine(float lift,float thrust,float speed,float climb,float fwd0,float up0,float seconds) {
+    const hover::Budget b{thrust,lift,kJerk};
+    float vel[3]={0.0f,up0,fwd0},acc[3]={0.0f,0.0f,0.0f},push[3]={0.0f,0.0f,0.0f};
+    const float want[3]={0.0f,climb,speed};
+    for(int f=0;f<static_cast<int>(seconds*60.0f);++f) {
+        float next[3];
+        hover::Accel(want,vel,kRespond,b,acc,kDt,next);
+        std::memcpy(acc,next,12);
+        for(int i=0;i<3;++i)vel[i]+=acc[i]*kDt;
+        hover::Thrust(acc,vel,kDrag,kGravity,push);
+    }
+    return hover::Power(push,b,kGravity);
+}
 
 // The climb rate (m/s) at each whole second of `seconds`, braking from 45 m/s forward and 8.3 m/s down, ascend held.
 void Fly(float lift,int seconds,float* climb) {
@@ -87,6 +109,35 @@ int main() {
     Expect(after[0]>0.0f,"after: climbing 1 s in",after[0]);
     Expect(after[2]>=kWantClimb,"after: a real climb 3 s in",after[2],kWantClimb);
     Expect(after[3]<=kClimbKey+1e-3f,"never past the climb asked",after[3],kClimbKey);
+
+    // The engine (see the top).
+    int sums=0;
+    for(int n=0;n<100000;++n) {
+        const float acc[3]={u(rng)*0.2f,u(rng)*0.2f,u(rng)*0.2f},vel[3]={u(rng),u(rng),u(rng)},drag=n%2 ? kDrag : 0.0f;
+        float old[3],now[3];
+        for(int i=0;i<3;++i)old[i]=acc[i]+vel[i]*drag;
+        old[1]+=kGravity;
+        hover::Thrust(acc,vel,drag,kGravity,now);
+        sums+=std::memcmp(old,now,12)==0;
+    }
+    Expect(sums==100000,"Thrust is Hover's old sum",sums,100000);
+    const float still=Engine(lift,kThrust,0.0f,0.0f,0.0f,0.0f,30.0f),slow=Engine(lift,kThrust,30.0f,0.0f,0.0f,0.0f,30.0f);
+    const float cruise=Engine(lift,kThrust,60.0f,0.0f,0.0f,0.0f,30.0f);
+    const float up=Engine(lift,kThrust,0.0f,10.0f,0.0f,0.0f,30.0f),down=Engine(lift,kThrust,0.0f,-10.0f,0.0f,0.0f,30.0f);
+    const float going=Engine(lift,kThrust,60.0f,0.0f,0.0f,0.0f,3.0f),braking=Engine(lift,kThrust,0.0f,0.0f,60.0f,0.0f,1.0f),rising=Engine(lift,kThrust,0.0f,kClimbKey,0.0f,0.0f,1.5f);
+    const float npcStill=Engine(0.0f,kThrust,0.0f,0.0f,0.0f,0.0f,30.0f),npcCruise=Engine(0.0f,kThrust,60.0f,0.0f,0.0f,0.0f,30.0f);
+    std::printf("engine (player carrier, lift %.1f): hover %.2f, 30 m/s %.2f, 60 m/s %.2f, climbing 10 m/s %.2f, descending 10 m/s %.2f,"
+                " accelerating 3 s in %.2f, braking from 60 %.2f, ascend key 1.5 s in %.2f; NPC hover %.2f, 60 m/s %.2f\n",
+                lift,still,slow,cruise,up,down,going,braking,rising,npcStill,npcCruise);
+    Expect(std::fabs(still-kGravity/(kGravity+lift))<0.01f,"hover: gravity's share of the full thrust",still,kGravity/(kGravity+lift));
+    Expect(still>0.2f && still<0.8f,"hover: a middle value, neither idle nor full",still);
+    Expect(slow>still+0.01f && cruise>slow+0.01f,"a faster speed set takes more engine",slow,cruise);
+    Expect(up>still+0.01f,"climbing takes more than the hover",up,still);
+    Expect(down<still-0.01f,"descending takes less than the hover",down,still);
+    Expect(going>still+0.01f,"accelerating from the hover takes more than the hover",going,still);
+    Expect(braking<cruise,"braking from cruise: its drag brakes too, less than cruising",braking,cruise);
+    Expect(rising>up && rising<=1.0f,"the ascend key held: near all of it, never past",rising);
+    Expect(npcCruise>npcStill && npcStill>0.5f && npcStill<1.0f,"the NPCs' one budget: the same way round",npcStill,npcCruise);
     std::printf(failures ? "%d failed\n" : "hover_lift_check: all passed\n",failures);
     return failures ? 1 : 0;
 }

@@ -52,7 +52,7 @@ The plugin reads exactly this. If the bytes at 0x6346FC, 0x634726, 0x634758 or 0
 
 **Launch (2026-10-09):** the support catalog's last entry, `RESCUE` (support_call.h SupportRescueAt), requested at the
 swimmer through the ordinary support request path (offline / a one-player world's host: planned here; any other online
-machine: through the host's transaction, every peer announcing `kCapSeaRescue`).
+machine: through the host's transaction, every peer announcing the hello extension bit `kExtSeaRescue`).
 - Planned as air support (`PlanAirSupport`): an entry at the map's edge, a clear corridor, open sky over the swimmer.
 - One 410 made at the takeoff point, its real pilot and one door gunner made inside it and seated at once
   (`BoardAirborne`, `NpcSeatCrewNow` in seat order: pilot seat 0, gunner seat 1 = `410_HELI_GUNNER_L`), all registered on
@@ -64,7 +64,7 @@ machine: through the host's transaction, every peer announcing `kCapSeaRescue`).
   helicopter stands on now). Made 2 m over the spot. Over the hull footprint (or within 15 m of it) the heli keeps 8 m
   over the deck. The game's data has no airfield: no runway / apron / hangar / helipad piece in any of the 50 .MAC
   archives, and the only mission helicopters (M017, M031D, M031E) are route-flying event helicopters.
-- Protocol (2026-10-10): its own channel when every peer has `kCapRescueChannel` (one rescue in flight per requester,
+- Protocol (2026-10-10): its own channel when every peer has the extension bit `kExtRescueChannel` (one rescue in flight per requester,
   beside the map's single one, no 2 s rate) and the host's per-requester cooldown (`SeaRescueCooldownSec`, from the
   transaction going active; a cancelled one starts none). The swimmer's machine holds its own cooldown too (from the
   heli handed to its call).

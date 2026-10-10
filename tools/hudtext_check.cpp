@@ -62,9 +62,10 @@ void Table() {
             if(Conversions(e.text[l])!=want)Fail("arguments differ from the English",e.key,l);
         }
         // A text with words in it is translated: the same as the English only where it is a name, a unit or a symbol.
+        // (keyDismountAll: a key's name, Shift+N, printed the same on every keyboard the four languages use.)
         for(int l=1;l<kLangs;++l)
             if(e.text[l] && std::wcscmp(e.text[l],e.text[0])==0 && !HasWide(e.text[0]) && std::string(e.key)!="holderNpc" &&
-               std::string(e.key)!="kindNpc")
+               std::string(e.key)!="kindNpc" && std::string(e.key)!="keyDismountAll")
                 Fail("not translated",e.key,l);
     }
     std::printf("table: %d texts x %d languages\n",kTexts,kLangs);

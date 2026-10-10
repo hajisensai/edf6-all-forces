@@ -189,25 +189,20 @@ int main() {
     Put<std::uint64_t>(weapon,kWeaponRxSeed,callnet::Encode(0ull,3));
     Check(CallOf(ifc,remote)==nullptr,"a stock call is never converted, whatever its seed carries");
     const float supportTarget[3]={0,0,0},observer[3]={0,0,100};support::Route route;
-    SupportAircraft call0{},four{};
-    Check(SupportAircraftSpec(0,&call0),"the first flown call has a spec");
-    four=call0;four.count=4;
     // 2026-10-09: air support is made in the air at the edge and flies in; no runway, no ground for a crew.
-    Check(PlanAirSupport(call0,supportTarget,observer,&route)==support::Refusal::none && route.from[1]>=150,
+    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::none && route.from[1]>=150,
           "production entry planner puts the aircraft in the air at the route's height");
     supportSlope=0.05f;supportStep=2.0f;   // a hillside of ledges: no flat ground anywhere
-    Check(PlanAirSupport(four,supportTarget,observer,&route)==support::Refusal::none,"air support needs no flat ground at all");
+    Check(PlanAirSupport(0,supportTarget,observer,&route,4)==support::Refusal::none,"air support needs no flat ground at all");
     {float slot[3];support::AirFormationSlot(route,3,1.0f,slot);float g=0;MapGroundNear(slot[0],slot[2],0,&g,true);
      Check(slot[1]>=g+75.0f,"every formation slot stands over its own ground");}
     supportSlope=0;supportStep=0;
     supportSky=false;
-    Check(PlanAirSupport(call0,supportTarget,observer,&route)==support::Refusal::noSky,"a roof above the destination refuses air support");
+    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::noSky,"a roof above the destination refuses air support");
     supportSky=true;supportMeasured=false;
-    Check(PlanAirSupport(call0,supportTarget,observer,&route)==support::Refusal::noArea,"unmeasured bounds cannot be used as an entry");
+    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::noArea,"unmeasured bounds cannot be used as an entry");
     supportMeasured=true;
-    {SupportAircraft sub{};
-     Check(!SupportAircraftSpec(16,&sub) && PlanAirSupport(sub,supportTarget,observer,&route)==support::Refusal::unsupported,
-           "stationary submarine model cannot fake a physical entry");}
+    Check(PlanAirSupport(16,supportTarget,observer,&route,0)==support::Refusal::unsupported,"stationary submarine model cannot fake a physical entry");
     // Installation against a private image with the supported native bomber signatures. A restored
     // legacy takeover installs successfully here and mutates these bytes/vtable, failing this check.
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2000000,MEM_RESERVE|MEM_COMMIT,PAGE_EXECUTE_READWRITE));

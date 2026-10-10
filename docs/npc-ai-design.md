@@ -208,7 +208,17 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 
 ### 6.3 Q 标记（C4，P5）
 
-- 步行、地图关着、游戏在前台时按 `NpcMarkKey`（默认 Q，0x51）：取镜头中心 `NpcMarkCone` 度内最近的敌人锁定点（与普罗透斯 `Mark` 同法），再按一次同一目标取消，对着别的敌人按则换目标。HUD 画标记框。
+> 2026-10-10 起它就是取代原版 Spot 的「自制 Q」（`src/qmark.cpp`，用户：「给原版的q删掉吧，改成我们自制的q。同时这个q会在队友那边显示，还有这个q应该在鼠标位置」「声音也要有吧」）：
+> - 原版 Spot：`VanillaSpot=0`（默认）时本机玩家的 Spot 在唯一的投射调用 `0x59B75C` 处直接返回（`turretaim.cpp SpotHook`）。spot 标志 `soldier+0xD7A` 全 .text 只有 `0x59B689` 一处读、只由输入映射 `0x570847/0x57093C/0x570A72/0x570B35` 写；该分支除两次定位点读取外只调用 `0x5A1120`（SpotEffect `0x59F630`、联机消息都在里面），不走分支的目标就是调用的返回地址 `0x59B761`——所以不投射等价于分支未进入（`tests/spot_ray_native_audit.py` 钉住）。原版 Spot 路径（`0x5A1120` 往下三层直接调用、SpotEffect 构造 `0x3047C0` 与虚表函数）里没有音效播放（`0x7B4510` / `0x7B2A80`）也没有音效名字符串，原版 Spot 没有可复用的提示音，关掉后也不会残留声音。
+> - 不再限步行、不再依赖 `CustomNpcAi`（`npcmark::MarkOn` = 插件开 + 键非 0；NPC 优先打标记仍是 `npcmark::Enabled` = AI 的事）。
+> - 射线 `QMarkRay`：镜头眼点（`CameraRayOf(human)`）穿过鼠标瞄准点——直升机鼠标瞄准飞行 `PlayerHeliHud().f.aim`（`f.aiming`）、旋翼机 `PlayerJetHud().heli.aim`、战斗机 `PlayerJetHud().aim`（`aiming`），这些是 HUD 方框所画的世界点（机体前方 800 m）；其余（步行、炮手、炮塔镜头：鼠标直接转镜头）屏幕中心（`src/qmark_ray.h`）。
+> - 地点标记 `QMarkSetPoint`，保留 `QMarkPointSec`；HUD `QMarkHud` 画自己的（琥珀）和队友的（按玩家槽位上色、`玩家N`）敌人菱形 / 地点圈，地图视图同一函数。
+> - 联机：`src/qmark_protocol.h`（`QMRK` v1，128 字节，能力位 `kCapEnemy|kCapPoint`）经 support_net 的 EDF6Coop 扩展通道点对点广播「状态」（变化即发，平时 1 s、有敌人标记时 250 毫秒一次保活）；收方按发送序号去重、3.5 s 静默即清除；敌人按原生网络 ID（`ReadNativeObjectId`）用一次全队伍遍历（`ResolveMarkIdentities`）找到本机对象并取其锁定点，找不到时画在对方发来的位置；标记者槽位只在其原生 PUID 等于认证发送者时才显示。旧版插件收到 `QMRK` 时支援解析器因魔数不符直接丢弃。
+> - 提示音：`jetaudio` 的 one-shot 片段 `mark_own` / `mark_team` / `mark_off`（`vsynth.h` 合成，可用 DLL 旁 WAV 替换），音量 `QMarkVolume`。主动取消（`QMarkPlay(off)`）累加 `letGo` 计数随状态发出（能力位 `kCapLetGo`），收方计数变化才响 `mark_off`；目标死亡 / 消失导致的清除计数不变，不响。
+> - NPC：队友的敌人标记（`QMarkTeamEnemies`，本机已找到且存活的）与本机标记同权；`NearestMark(from)` 取离该 NPC（炮手：载具）最近的被标记敌人，平局本机优先，再按原 `MarkInReach` 判定。只在运行这些 NPC 的机器上起作用（AI 本来只跑权威机器的 NPC）。
+> - 标记者名字：`src/player_name.cpp` 调用原版名字标签的来源 `0x784830`（与 `0x7FFBD0` 完全相同的调用方式：士兵 `+0x1ED0` user / `+0x1ED8` 控制块，先加一个强引用交给被调方释放，空 `std::wstring` 收结果，`0x3D3C0` 释放），`tests/player_name_native_audit.py` 钉住；只在标记者 PUID 与认证发送者一致时才读名字，读不到回退「玩家N」。
+
+- 地图关着、游戏在前台时按 `NpcMarkKey`（默认 Q，0x51）：取瞄准点（`QMarkRay`）`NpcMarkCone` 度内最近的敌人锁定点（与普罗透斯 `Mark` 同法），再按一次同一目标取消，对着别的敌人按则换目标。HUD 画标记框。
 - 按键在玩家自己的每帧（`map.cpp MapHumanFrame` → `NpcMarkFrame`）读，不在士兵 Think 里，所以任务里没有友军士兵时也有效；地图打开期间也照常记录「按住」，地图里的一次按下关地图后不会再触发。
 - 镜头中心 `NpcMarkCone` 的 3 倍内有敌人但不在锥内：既不标记也不派兵（提示对准敌人）。再远处才算没有敌人：不动标记，改为把准星对着的地面点（`MapFloorRay`，2000 m 内）交给 `MapCommandGuardAt`：地图里当前选中的单位驻守该点（同地图 G，队形散开）。HUD 画落点圈和结果约 3 秒（`NpcPingReadout`）。
 - 地图打开时同一个键由 `mapcmd.cpp` 处理：指针（手柄：屏幕中心）22 px 内有敌人锁定点（锁定点本身或其上图钉高度处）就标记它（`NpcMarkEnemy`，同目标切换），这一下地图不转向（`MapCommandEats`）；H 在指针指着敌人时先标记它再下「集中火力」。

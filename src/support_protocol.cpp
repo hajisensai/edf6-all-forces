@@ -1,4 +1,5 @@
 #include "support_protocol.h"
+#include "support_loadout.h"
 #include <cmath>
 #include <cstring>
 
@@ -98,13 +99,14 @@ void Session::ClearTransactions() noexcept {
 }
 void Session::Stop() noexcept {
     ClearTransactions();running_=false;suspended_=false;epoch_=0;challenge_=0;challenges_.fill(0);peerMissions_.fill(0);peerCaps_.fill(0);
+    peerExt_.fill(0);for(auto& b:peerBloom_)b.fill(0);
     hostCaps_=0;hostCapsKnown_=false;hostRoomBehind_=false;
 }
 std::uint32_t Session::PeersBehind(std::uint32_t* missing) const noexcept {
     std::uint32_t behind=0,lack=0;
     for(std::uint32_t i=1;host_ && i<=peers_;++i) {
         if(!challenges_[i])continue;   // not heard yet
-        const std::uint32_t gap=kCapabilities&~peerCaps_[i];
+        const std::uint32_t gap=kFeatures&~PeerFeatures(i);
         if(gap){++behind;lack|=gap;}
     }
     if(missing)*missing=lack;
@@ -112,7 +114,7 @@ std::uint32_t Session::PeersBehind(std::uint32_t* missing) const noexcept {
 }
 std::uint32_t Session::PeersAhead() const noexcept {
     std::uint32_t ahead=0;
-    for(std::uint32_t i=1;host_ && i<=peers_;++i)if(challenges_[i] && (peerCaps_[i]&~kCapabilities))++ahead;
+    for(std::uint32_t i=1;host_ && i<=peers_;++i)if(challenges_[i] && (PeerFeatures(i)&~kFeatures))++ahead;
     return ahead;
 }
 bool Session::RequesterOf(std::uint64_t token,std::uint32_t* peer) const noexcept {
@@ -126,6 +128,14 @@ bool Session::RequesterOf(std::uint64_t token,std::uint32_t* peer) const noexcep
 bool Session::PeersHave(std::uint32_t caps) const noexcept {
     if(!host_)return true;
     for(std::uint32_t i=1;i<=peers_;++i)if((peerCaps_[i]&caps)!=caps)return false;
+    return true;
+}
+bool Session::PeersHaveVariant(std::uint32_t ext,std::uint64_t hash) const noexcept {
+    if(!host_)return true;
+    for(std::uint32_t i=1;i<=peers_;++i) {
+        if((peerExt_[i]&ext)!=ext)return false;
+        if(hash && !BloomHas(peerBloom_[i].data(),hash))return false;
+    }
     return true;
 }
 bool Session::HasSpawned() const noexcept {
@@ -166,7 +176,7 @@ bool Session::Broadcast(Message m) noexcept {
 }
 void Session::Welcome(std::uint32_t peer) noexcept {
     Message m;m.kind=Kind::welcome;m.challenge=challenges_[peer];m.request=epochSerial_;
-    m.catalog=kCapabilities;m.ok=PeersBehind(nullptr) ? 1u : 0u;
+    m.catalog=kFeatures;m.ok=PeersBehind(nullptr) ? 1u : 0u;
     Send(peer,m);
 }
 void Session::Cancel(std::uint32_t id,bool broadcast,RequestStatus reason) noexcept {
@@ -226,9 +236,9 @@ void Session::Publish(std::uint32_t peer,std::uint32_t request,RequestStatus sta
     if(!reply)return;
     reply->dirty=true;ReplyTo(peer);
 }
-bool Session::Submit(std::uint32_t catalog,const float* target,std::uint64_t now) noexcept {
+bool Session::Submit(std::uint32_t catalog,const float* target,std::uint64_t now,std::uint64_t loadout) noexcept {
     if(!target || !Ready() || catalog>=kMissionCrewCatalog || !Point(target) || nextRequest_==UINT32_MAX)return false;
-    Message m;m.kind=Kind::request;m.epoch=epoch_;m.request=++nextRequest_;m.catalog=catalog;
+    Message m;m.kind=Kind::request;m.epoch=epoch_;m.request=++nextRequest_;m.catalog=catalog;m.challenge=loadout;
     Notice(m.request,RequestStatus::accepted);
     std::memcpy(m.target,target,sizeof(m.target));
     if(host_){const auto before=nextTransaction_;HostRequest(0,m,now);return nextTransaction_!=before;}
@@ -238,7 +248,7 @@ bool Session::InFlight(const Transaction& t) const noexcept {
     return t.phase==Phase::planning || t.phase==Phase::prepared || t.phase==Phase::spawning;
 }
 // Two channels (2026-10-10): the map's (and the mission crew's), one transaction in flight in the whole room and each
-// requester's requests 2 s apart; and, when every peer has kCapRescueChannel, the sea rescue's: one in flight per
+// requester's requests 2 s apart; and, when every peer has kExtRescueChannel, the sea rescue's: one in flight per
 // requester beside anything else, each requester's rescues rescueCooldown_ apart from its last one made. Both draw on
 // the same kMaxTransactions ids and ordinals; a failed one of either rolls back alone (Cancel of its own id).
 void Session::HostRequest(std::uint32_t peer,const Message& m,std::uint64_t now) noexcept {
@@ -249,7 +259,7 @@ void Session::HostRequest(std::uint32_t peer,const Message& m,std::uint64_t now)
     }
     requests_[peer]=m.request; // consume even rejected requests; they cannot be replayed later
     const bool isRescue=backend_.hooks.ownChannel && backend_.hooks.ownChannel(m.catalog);
-    const bool channel=isRescue && PeersHave(kCapRescueChannel);
+    const bool channel=isRescue && PeersHaveVariant(kExtRescueChannel,0);
     if(!Ready()) {Publish(peer,m.request,RequestStatus::refused);return;}
     if(isRescue && rescueAt_[peer] && now-rescueAt_[peer]<rescueCooldown_) {Publish(peer,m.request,RequestStatus::refused);return;}
     if(!channel) {
@@ -264,7 +274,7 @@ void Session::HostRequest(std::uint32_t peer,const Message& m,std::uint64_t now)
     }
     auto& t=transactions_[nextTransaction_++];t.token=++nextToken_;t.phase=Phase::planning;t.requester=peer;t.request=m.request;t.since=now;
     t.rescue=channel;
-    t.plan.catalogId=m.catalog;std::memcpy(t.plan.target,m.target,sizeof(m.target));
+    t.plan.catalogId=m.catalog;std::memcpy(t.plan.target,m.target,sizeof(m.target));t.loadout=m.challenge;
     Publish(peer,m.request,RequestStatus::accepted);
 }
 std::uint64_t Session::SubmitPrepared(const Plan& plan,std::uint64_t now) noexcept {
@@ -286,7 +296,7 @@ void Session::Advance(std::uint32_t id,std::uint64_t now) noexcept {
     auto& t=transactions_[id-1];
     if(t.phase==Phase::planning) {
         const auto catalog=t.plan.catalogId;float target[3];std::memcpy(target,t.plan.target,sizeof(target));
-        const auto result=t.external ? PlanResult::ready : backend_.hooks.plan(catalog,target,&t.plan);
+        const auto result=t.external ? PlanResult::ready : backend_.hooks.plan(catalog,target,t.loadout,&t.plan);
         if(result==PlanResult::pending)return;
         if(result==PlanResult::refused || t.plan.catalogId!=catalog || !ValidPlan(t.plan,false)){Cancel(id,true,RequestStatus::refused);return;}
         for(std::uint32_t i=0;i<t.plan.count;++i) {
@@ -299,7 +309,7 @@ void Session::Advance(std::uint32_t id,std::uint64_t now) noexcept {
         std::memcpy(m.target,t.plan.target,sizeof(m.target));
         if(!Broadcast(m)){Cancel(id,true);return;}
         for(std::uint32_t i=0;i<t.plan.count;++i) {
-            m=Message{};m.kind=Kind::unit;m.transaction=id;m.index=i;m.unit=t.plan.units[i];
+            m=Message{};m.kind=Kind::unit;m.transaction=id;m.index=i;m.unit=t.plan.units[i];m.challenge=t.plan.units[i].variant;
             if(!Broadcast(m)){Cancel(id,true);return;}
         }
         m=Message{};m.kind=Kind::prepare;m.transaction=id;
@@ -326,7 +336,9 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
     if(!running_ || !peer || peer>peers_ || !ValidMessage(m))return;
     if(host_ && m.kind==Kind::hello) {
         if(m.request<peerMissions_[peer] || (m.request==peerMissions_[peer] && challenges_[peer]!=m.challenge))return;
-        peerMissions_[peer]=m.request;peerCaps_[peer]=m.index|m.catalog;
+        peerMissions_[peer]=m.request;peerCaps_[peer]=m.index;
+        // Every extension bit as sent (a later build's too: PeersAhead); the checks mask what they ask for.
+        peerExt_[peer]=m.unit.resourceId;std::memcpy(peerBloom_[peer].data(),m.unit.netId,32);
         if(challenges_[peer] && challenges_[peer]!=m.challenge) {
             if(HasSpawned()){Suspend();return;}
             if(epochSerial_==UINT32_MAX){Stop();return;}
@@ -376,8 +388,9 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
         std::memcpy(t.plan.target,m.target,sizeof(m.target));
     } else if(m.kind==Kind::unit && t.phase==Phase::assembling && m.index<t.plan.count) {
         const auto bit=1u<<m.index;
-        if((t.received&bit) && std::memcmp(&t.plan.units[m.index],&m.unit,sizeof(Unit))) {Failed(t.token);return;}
-        t.plan.units[m.index]=m.unit;t.received|=bit;
+        Unit unit=m.unit;unit.variant=m.challenge;
+        if((t.received&bit) && std::memcmp(&t.plan.units[m.index],&unit,sizeof(Unit))) {Failed(t.token);return;}
+        t.plan.units[m.index]=unit;t.received|=bit;
     } else if(m.kind==Kind::prepare && t.phase==Phase::assembling) {
         Message reply;reply.kind=Kind::ready;reply.transaction=m.transaction;
         reply.ok=t.received==((1u<<t.plan.count)-1) && ValidPlan(t.plan) && backend_.hooks.validate && backend_.hooks.validate(t.plan);
@@ -402,7 +415,9 @@ void Session::Tick(std::uint64_t now) noexcept {
     // Keep the challenge alive after establishment too: a welcome whose local
     // enqueue failed during another member's mission reset must be recoverable.
     if(!host_ && now-lastHello_>=1000) {
-        Message m;m.kind=Kind::hello;m.challenge=challenge_;m.request=missionSerial_;m.index=kCapabilities;m.catalog=kCapabilities;
+        Message m;m.kind=Kind::hello;m.challenge=challenge_;m.request=missionSerial_;m.index=kCapabilities;
+        if(backend_.hooks.variants)backend_.hooks.variants(&m.unit.resourceId,m.unit.netId);
+        m.unit.resourceId|=kExtSeaRescue|kExtRescueChannel;   // this build's own, whatever the variants hook announced
         Send(hostPeer_,m);lastHello_=now;
     }
     for(std::uint32_t id=1;id<=kMaxTransactions;++id) {

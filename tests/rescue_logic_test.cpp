@@ -75,33 +75,38 @@ void Takeoff() {
 
 void Versions() {
     using namespace crew::versionnote;
-    using crew::support_net::kCapabilities;using crew::support_net::kCapSoldierVariants;using crew::support_net::kCapAirborneAir;using crew::support_net::kCapSeaRescue;using crew::support_net::kCapRescueChannel;
-    State s;s.online=true;s.mine=kCapabilities;s.silentHost=kCapSoldierVariants|kCapAirborneAir;
+    namespace net=crew::support_net;
+    // Feature bits (support_protocol.h kFeatures): the hello's index bits, the extension bits above kExtShift.
+    constexpr std::uint32_t kRescue=net::kExtSeaRescue<<net::kExtShift,kChannel=net::kExtRescueChannel<<net::kExtShift,
+        kVariantExt=net::kExtVariants<<net::kExtShift;
+    State s;s.online=true;s.mine=net::kFeatures;s.silentHost=net::kCapabilities|kVariantExt;
     Check(Compare(s).kind==Kind::none,"a guest before the welcome: nothing said");
-    s.hostKnown=true;s.hostCaps=kCapabilities;
+    s.hostKnown=true;s.hostCaps=net::kFeatures;
     Check(Compare(s).kind==Kind::none,"the same build: nothing said");
     s.hostCaps=0;
     Notice n=Compare(s);
-    Check(n.kind==Kind::hostOlder && n.missing==(kCapSeaRescue|kCapRescueChannel),"a host that announces nothing: older, the sea rescue and its channel named");
-    s.hostCaps=kCapSoldierVariants;n=Compare(s);
-    Check(n.kind==Kind::hostOlder && n.missing==(kCapAirborneAir|kCapSeaRescue|kCapRescueChannel),"an older host: what it lacks named");
-    s.hostCaps=kCapabilities|16u;n=Compare(s);
-    Check(n.kind==Kind::selfOlder,"a host with a capability this build does not know: this guest is older");
-    s.hostCaps=kCapabilities;s.roomBehind=true;n=Compare(s);
+    Check(n.kind==Kind::hostOlder && n.missing==(kRescue|kChannel),"a host that announces nothing (origin/main's build): the sea rescue and its channel named");
+    s.hostCaps=net::kCapSoldierVariants;n=Compare(s);
+    Check(n.kind==Kind::hostOlder && n.missing==(net::kFeatures&~net::kCapSoldierVariants),"an older host: what it lacks named");
+    s.hostCaps=net::kFeatures|0x200u;n=Compare(s);
+    Check(n.kind==Kind::selfOlder,"a host with a feature this build does not know: this guest is older");
+    s.hostCaps=net::kFeatures;s.roomBehind=true;n=Compare(s);
     Check(n.kind==Kind::roomOlder,"the host says another guest is behind it");
     s.roomBehind=false;s.commandPeers=1;n=Compare(s);
     Check(n.kind==Kind::commandOnly && n.command,"map command protocol differs only: said");
-    State h;h.online=true;h.host=true;h.mine=kCapabilities;
+    State h;h.online=true;h.host=true;h.mine=net::kFeatures;
     Check(Compare(h).kind==Kind::none,"a host with every guest the same: nothing");
-    h.peersBehind=2;h.peersMissing=kCapSeaRescue;n=Compare(h);
-    Check(n.kind==Kind::peersOlder && n.count==2 && n.missing==kCapSeaRescue,"a host: how many guests are older and what they lack");
+    h.peersBehind=2;h.peersMissing=kRescue;n=Compare(h);
+    Check(n.kind==Kind::peersOlder && n.count==2 && n.missing==kRescue,"a host: how many guests are older and what they lack");
     h.peersBehind=0;h.peersAhead=1;n=Compare(h);
     Check(n.kind==Kind::peersNewer && n.count==1,"a host: a guest newer than it");
-    h.peersAhead=0;h.commandPeers=1;h.peersBehind=1;h.peersMissing=kCapAirborneAir;n=Compare(h);
+    h.peersAhead=0;h.commandPeers=1;h.peersBehind=1;h.peersMissing=net::kCapAirborneAir;n=Compare(h);
     Check(n.kind==Kind::peersOlder && n.command,"older guests and a different map command protocol: both said");
-    State off;off.mine=kCapabilities;off.hostKnown=true;
+    State off;off.mine=net::kFeatures;off.hostKnown=true;
     Check(Compare(off).kind==Kind::none,"offline: nothing");
     Check(Compare(s)!=Compare(h) && Compare(h)==Compare(h),"notices compare by what they say (said once a change)");
+    Check((net::kFeatures&0xFu)==net::kCapabilities && !(kRescue&net::kCapabilities) && !(kChannel&net::kCapabilities) &&
+          kRescue!=kVariantExt && kChannel!=kVariantExt,"the rescue's bits collide with no index bit and no other extension");
 }
 }  // namespace
 
