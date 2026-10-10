@@ -535,6 +535,18 @@ int main() {
         Put<void*>(human,kHumanRiding,nullptr);Put<void*>(human,kHumanVehicleCtrl,nullptr);
         Expect(SquadRecruitable(*commandSquad),"on foot again, a free squad: recruitment offered");
     }
+    // A Wing Diver hovering 25 m up held where she is (an attack-move's stand): no search from the floor under her to a
+    // goal in the air (it never ends: every node spent, failed, again a second later); the goal is the floor under it.
+    Reset();flatFloor=true;
+    {
+        Put<float>(human,kPosition,0.0f);Put<float>(human,kPosition+4,25.0f);Put<float>(human,kPosition+8,0.0f);
+        Put<float>(human,kMoveX,0.5f);
+        MoveTo(human,Pos(human),Pos(human),1e9f);
+        const Soldier* const hovering=Entry(human,now);
+        Expect(hovering && !hovering->navigation.initialized && At<float>(human,kMoveX)==0.0f,
+               "a soldier held in the air stands: no route search from the floor to a point in the air");
+        Put<float>(human,kPosition+4,0.0f);
+    }
     // The player a soldier fights for is the one who recruited its squad, whichever machine's (this harness's
     // PlayerHuman is nullptr: `other` stands for another machine's player).
     Reset();Put<float>(other,kPosition,300.0f);Put<float>(other,kPosition+8,40.0f);

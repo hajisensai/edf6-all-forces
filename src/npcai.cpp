@@ -509,12 +509,15 @@ void RouteStart(const float* pos,float* from) noexcept {
     float floor[3];
     if(MapFloorRay(above,below,floor)>=0.0f && std::isfinite(floor[1]) && floor[1]<pos[1])from[1]=floor[1];
 }
+// Both ends on the floor under them (RouteStart): a route is the ground's. A goal left in the air (a flying top followed,
+// a Wing Diver held where she hovers) is never reached from the floor: every search ran out its nodes, failed, and
+// began again a second later, for each such soldier, out of the budget all of them share.
 void MoveTo(unsigned char* h,const float* pos,const float* to,float stop) noexcept {
     const ULONGLONG ms=GameMs();
     Soldier* const soldier=Entry(h,ms);
-    float waypoint[3],dir[3],from[3];
-    RouteStart(pos,from);
-    if(!soldier || GroundNavigate(soldier->navigation,from,to,stop,ms,waypoint,SoldierRoute())!=npc::navigation::Result::moving ||
+    float waypoint[3],dir[3],from[3],goal[3];
+    RouteStart(pos,from);RouteStart(to,goal);
+    if(!soldier || GroundNavigate(soldier->navigation,from,goal,stop,ms,waypoint,SoldierRoute())!=npc::navigation::Result::moving ||
        !npc::HorizDir(pos,waypoint,dir)){Stand(h);return;}
     const float d=npc::Horiz(pos,waypoint);
     Move(h,dir,d/6.0f+0.3f);
