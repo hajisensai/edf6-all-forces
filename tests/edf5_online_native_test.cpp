@@ -284,6 +284,11 @@ int main(int argc,char** argv) {
     SessionFixture::Users({false,true,true});
     Put<std::uint32_t>(status,kSessionPlayers,3);
     Check(Edf5BvmOnlinePlayers()==3,"back to three");
+    SessionFixture::Users({true,true});
+    Put<std::uint32_t>(status,kSessionPlayers,2);
+    lines.clear();
+    Check(Edf5BvmOnlinePlayers()==2 && Logged("no user of this machine among the session's 2"),
+          "no user of this machine in the list: said, not a silent black screen");
     ResetEdf5Online();
 
     // Nothing created when the per-player arguments cannot be put right.

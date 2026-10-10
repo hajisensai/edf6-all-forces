@@ -193,6 +193,7 @@ std::uint32_t Edf5BvmOnlinePlayers() noexcept {
     bool localFound=false;
     for(std::uint32_t i=0;i<count;++i)localFound=localFound || !creation.remote[i];
     if(players>count && !localFound)Log("EDF5 online: this machine's player is past the script's %u slots: it has none",count);
+    else if(!localFound)Log("EDF5 online: no user of this machine among the session's %u: it gets no player",count);
     creation.count=count;
     creation.split=local>0 ? static_cast<int>(local) : 1;
     creation.armed=count>0;
