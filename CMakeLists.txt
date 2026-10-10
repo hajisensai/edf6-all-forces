@@ -14,6 +14,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/stab.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/gunnerrecoil.cpp)
 # The map view (src/map.cpp: the overhead camera, the input hold, the marks it gathers).
 target_sources(EDF6VehicleCrew PRIVATE src/map.cpp)
+# The damage statistics (src/damagestats.cpp: the damage hook and the round tags; the page in src/hud_stats.inc).
+target_sources(EDF6VehicleCrew PRIVATE src/damagestats.cpp)
 # The map's NPC commands (src/mapcmd.cpp, src/mapcmd_logic.h).
 target_sources(EDF6VehicleCrew PRIVATE src/mapcmd.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/support_dispatch.cpp)
@@ -181,6 +183,11 @@ add_executable(rounds_check EXCLUDE_FROM_ALL tools/rounds_check.cpp)
 target_compile_options(rounds_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(rounds_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+# The damage statistics' book and page (src/damage_stats.h, tools/damage_stats_check.cpp). Not part of the plugin build:
+# cmake --build build --target damage_stats_check && build\damage_stats_check.exe
+add_executable(damage_stats_check EXCLUDE_FROM_ALL tools/damage_stats_check.cpp)
+target_compile_options(damage_stats_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(damage_stats_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # The map's command buttons (src/map_buttons.h): their layout and the click's button, offline
 # (tools/map_buttons_check.cpp). Not part of the plugin build:
 # cmake --build build --target map_buttons_check && build\map_buttons_check.exe
@@ -566,7 +573,7 @@ add_test(NAME pn COMMAND pn_test)
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
-    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check hover_lift_check view_clip_check npc_ai_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check)
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check hover_lift_check view_clip_check npc_ai_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check damage_stats_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 add_dependencies(offline_checks transport_runtime_test)
 add_dependencies(offline_checks stab_native_readback_test)

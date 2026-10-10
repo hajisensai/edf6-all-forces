@@ -215,6 +215,8 @@ struct Config {
     int mapKey=0x4D;                // ...its key ('M'; a Windows virtual-key code, 0: none)
     int mapButton=0x20;             // ...and pad button (XInput button bits: 0x20 Back / View; 0 none)
     float mapViewDistance=6000.0f;  // ...the near camera's far clip while it is open, m (view.cpp; 0: as it is)
+    bool damageStats=true;          // the damage statistics (damagestats.cpp): every hit booked, its page over the map
+    int damageStatsKey=0x49;        // ...the page's key ('I': the map opened on it; a Windows virtual-key code, 0: none)
     // The debug spawn tool (debug_spawn.cpp): OFF by default. Off: nothing preloaded, no key read, nothing drawn.
     bool debugSpawn=false;
     int debugSpawnKey=0x77;         // ...its menu opened / shut (F8; Windows virtual-key codes, 0: none)
@@ -1089,6 +1091,7 @@ bool DebugSpawnReadout(DebugSpawnCue* out) noexcept;   // any thread; false: not
 #include "mapbounds.h"
 #include "payload.h"
 #include "map.h"
+#include "damagestats.h"
 #include "mapcmd.h"
 #include "proteus.h"
 #include "npcai.h"
