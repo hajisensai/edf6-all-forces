@@ -5013,7 +5013,8 @@ def air_chase_wired() -> None:
     assert 'goal[1]=airchase::UnderCeiling(goal[1],goal[1]-under,airchase::kChargeCeiling);' in jet
     assert 'PickTarget(s,eye,anchor,o.leash+engage,LongestReach(a))' in npcai and 'npc::PickTarget(world.enemies,' in npcai
     cm = src('CMakeLists.txt')
-    assert 'add_executable(air_chase_check EXCLUDE_FROM_ALL tools/air_chase_check.cpp)' in cm and ' air_chase_check)' in cm
+    assert 'add_executable(air_chase_check EXCLUDE_FROM_ALL tools/air_chase_check.cpp)' in cm
+    assert 'air_chase_check' in cm.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0].split(), 'air_chase_check runs in CTest'
     assert '#include "../src/air_chase.h"' in src('tools/air_chase_check.cpp')
     # The charges' blast radii are their generated charges' (pylib/vcobjects.py jet_guns).
     vc = src('pylib/vcobjects.py')
