@@ -194,4 +194,17 @@ for body in bodies:
         assert g.read(folder,file)
     checks+=1
     print('PASS real Root template',name,': AssultSoldier, model/CAS/rifle dependencies present')
+# The Wing Diver and Fencer templates a composed load may hold (support_call.h): their own class, CAS and stock AI weapons.
+others={'N606_AIPALEWING_':('PaleWing','app:/Object/EDF6_wingDiver.cas'),'N607_AIHEAVYARMOR_':('HeavyArmor','app:/Object/EDF6HeavyArmor.cas')}
+extra=re.findall(r'L"app:/object/(N60[67]_\w+)\.sgo"',source)
+assert len(extra)==18,extra
+for body in extra:
+    r=dsgo.to_py(dsgo.parse(g.read('OBJECT',body+'.SGO')).root)
+    cls,cas=next(v for k,v in others.items() if body.startswith(k))
+    assert r['xgs_scene_object_class']==cls and r['animation_model'][1]==cas,(body,r['xgs_scene_object_class'])
+    for path in r['soldier_load_weapon']:
+        folder,file=path.removeprefix('app:/').split('/',1)
+        assert g.read(folder,file),(body,path)
+    checks+=1
+    print('PASS real Root template',body,':',cls,', its CAS and stock weapons present')
 print(checks,'native/resource checks passed; complete game constructor and live co-op remain unverified')

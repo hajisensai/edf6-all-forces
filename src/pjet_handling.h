@@ -87,6 +87,34 @@ inline void GroundFallback(const float* up,const float* vel,const float* omega,c
     for(int i=0;i<3;++i){lin[i]=solver[i];ang[i]=spin[i];}
 }
 
+// The way it rolls (playerjet.cpp Ground): the level nose `nose` laid along the plane its wheels stand on (`up`, unit: the
+// body's up row), unit; false when the nose lies along `up` (`along` then unset).
+inline bool AlongPlane(const float* nose,const float* up,float* along) noexcept {
+    const float lift=nose[0]*up[0]+nose[1]*up[1]+nose[2]*up[2];
+    for(int i=0;i<3;++i)along[i]=nose[i]-up[i]*lift;
+    const float l=std::sqrt(along[0]*along[0]+along[1]*along[1]+along[2]*along[2]);
+    if(!(l>1e-4f) || !std::isfinite(l))return false;
+    for(int i=0;i<3;++i)along[i]/=l;
+    return true;
+}
+// Its speed along the ground now: `vel`, what the ground step sent last frame (along last frame's plane), along `ahead`,
+// the way it rolls now (AlongPlane of the level nose). The user (2026-10-09): 「这个飞机起飞的时候撞到东西了，然后弹来弹去的」.
+// Until then it was read along the level nose: the velocity lies along the body's plane, so a body pitched by theta (a slope,
+// rubble under a wheel, the nose up against what it ran into) kept cos(theta) of its speed a frame: 10 deg took 60% of it
+// a second, and the throttle full held it at ~11 m/s; on bumps it fell from 34 m/s to 8 within 2 s (tools/
+// ground_contact_check.cpp "rolling with the throttle").
+inline float RollSpeed(const float* vel,const float* ahead) noexcept {
+    return vel[0]*ahead[0]+vel[1]*ahead[1]+vel[2]*ahead[2];
+}
+// Whether, rolling `clear` m over the floor (`noGround`: none seen) at `speed` m/s along it, it is flying: over `offGround`
+// and at least `floor` (the air's least speed, playerjet.cpp kStallFloor). Slower it is not flying but falling, or lifted
+// by what it rolled onto: it stays on its contacts (GroundContact: the fall is the solver's) and lands back on its wheels.
+// Handed to the air at 1 m/s, the flight made that 25 m/s along its nose, pitched down off what had lifted it: a 20 m/s
+// dive into the ground 6 m under it, destroyed (the log of 2026-10-09 19:21:26).
+constexpr bool RollsIntoAir(float clear,float noGround,float offGround,float speed,float floor) noexcept {
+    return clear!=noGround && clear>offGround && speed>=floor;
+}
+
 inline float AimRoll(float pathRoll,float off) noexcept {
     const float lo=std::fmin(kLevelRate,pathRoll),t=Clamp(off/kAimRollFull,0.0f,1.0f);
     return lo+(pathRoll-lo)*t;

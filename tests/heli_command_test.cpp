@@ -39,6 +39,7 @@ void JetFrame(unsigned char*) noexcept { MissingDependency(); }
 unsigned char* HeliLaunch(HeliBody,const float*,const float*) noexcept { MissingDependency();return nullptr; }
 PluginBody BodyOf(const void*) noexcept { MissingDependency();return PluginBody{}; }
 bool IsSub(const void*) noexcept { MissingDependency();return false; }
+bool SupportAircraftOwned(const void*) noexcept { return false; }   // no support deployment in this test
 bool SubDeck(const float*,float*) noexcept { MissingDependency();return false; }
 float SubHullGap(const float*) noexcept { MissingDependency();return 0.0f; }
 bool IsPlayerJet(const void*) noexcept { MissingDependency();return false; }
@@ -102,6 +103,29 @@ int main() {
     check(HeliCommand(vehicle,Command{Order::follow,{}}),"follow accepted");
     const float leader[3]={1000,0,1000};
     check(CommandMoving(h,pos,leader),"follow first joins the player instead of retaining its old fight");
+    // The map's focus order (2026-10-09): nothing marked, refused; a focus held is let go by the next order.
+    check(!HeliCommand(vehicle,Command{Order::focus,{}},ObjRef{}),"focus with no marked enemy is refused");
+    h.focus=ObjRef::Of(enemy);
+    check(HeliCommand(vehicle,Command{Order::follow,{}}) && !h.focus,"another order lets the focus target go");
+    // A squad's transport (transport.cpp; the user, 2026-10-09: "飞机和直升机应该也有运输机"): a ferry holds over its point,
+    // engaging nothing; landing, it comes down on that point (never beside the player); kept for its squad, it does not leave
+    // for fuel or ammo; HeliFerry(nullptr) ends the ferry.
+    const float drop[3]={300.0f,10.0f,200.0f};
+    check(HeliFerry(vehicle,drop,false) && h.ferry && !h.ferryLand && !h.focus && h.hold[0]==300.0f &&
+          h.hold[1]==10.0f+commandConfig.heliHeight,"a ferry holds HeliHeight over its point");
+    Sense f{};f.pos=pos;f.type=h.type;f.fwd[2]=1.0f;f.dt=1.0f/60.0f;f.ms=GameMs();
+    check(SelectMode(h,f)==Mode::hold,"ferrying: it holds its point (no orbit, no follow, no fight)");
+    check(HeliFerry(vehicle,drop,true) && h.ferryLand,"...then lands there");
+    f.land=true;
+    check(SelectMode(h,f)==Mode::land,"landing mode");
+    const Want down=FlyMode(h,f,Mode::land);
+    check(down.height<drop[1] && std::fabs(down.off-std::hypot(pos[0]-drop[0],pos[2]-drop[2]))<0.01f,
+          "it comes down on the ferry's point, not beside the player");
+    h.leaveAt=0;const Loadout spent{};
+    check(LeaveReason(h,vehicle,spent)!=nullptr,"a called heli out of fuel leaves");
+    check(HeliKeep(vehicle) && LeaveReason(h,vehicle,spent)==nullptr,"a squad's transport stays (no leaving for fuel or ammo)");
+    check(HeliFerry(vehicle,nullptr,false) && !h.ferry,"the ferry ends");
+    h.keep=false;
     // Enhanced door gunners are independent of local pilot controls; the online aim hook is required online only.
     alignas(16) unsigned char gunSeats[3*edf::kSeatStride]{},remotePilot[0x500]{};
     image=reinterpret_cast<unsigned char*>(0x10000000);

@@ -64,7 +64,7 @@ constexpr float kKeepScale=0.6f,kKeepTarget=100.0f;
 
 // The target: as the role prefers (Kind::prefer), nearest to the jet among those within `range` of
 // `anchor`, the current one counting nearer (kKeepScale, kKeepTarget).
-struct Pick { Jet* j; const float* pos; const float* anchor; float range; ULONGLONG ms; const void* best; float score,aim[3]; bool flyer; };
+struct Pick { Jet* j; const float* pos; const float* anchor; float range; ULONGLONG ms; const void* best; float score,aim[3]; bool flyer,focus,focusSeen; };
 // Whether `object` (lock point `p`) flies: its root more than kFlyerClear over the ground, or no ground
 // under it (see kFlyerProbe); one ray per object per kFlyerMemoMs, shared by every jet.
 // The memo: kFlyerSets sets of kFlyerWays, an object's set picked by a multiplicative hash of its address (the
@@ -111,7 +111,15 @@ bool PastEdge(const Jet& j,const float* p) noexcept {
 
 void VisitTarget(void* ctx,const void* object,const float* p) noexcept {
     auto& k=*static_cast<Pick*>(ctx);
-    if(PastEdge(*k.j,p))return;
+    // The map's focus order (Jet::focus): this one, before any other and past its order's range; out past the play
+    // area's walls (where no jet goes) it waits for it, the others fought meanwhile.
+    if(k.j->focus.Is(object)) {
+        k.focusSeen=true;
+        if(!airbound::Inside(PlayBox(),p))return;
+        k.focus=true;k.best=object;k.score=-1e30f;std::memcpy(k.aim,p,12);k.flyer=Flies(object,p,k.ms);
+        return;
+    }
+    if(k.focus || PastEdge(*k.j,p))return;
     const float d[3]={p[0]-k.anchor[0],p[1]-k.anchor[1],p[2]-k.anchor[2]};
     // A map order bounds the current target too; an uncommanded jet keeps its ordinary pursuit.
     if((object!=k.j->t.target || k.j->cmd.order!=Order::none) && Dot(d,d)>k.range*k.range)return;
@@ -119,7 +127,7 @@ void VisitTarget(void* ctx,const void* object,const float* p) noexcept {
     const float f[3]={p[0]-k.pos[0],p[1]-k.pos[1],p[2]-k.pos[2]};
     float score=Len(f);
     if(object==k.j->t.target)score=score*kKeepScale-kKeepTarget;
-    const Prefer prefer=KindOf(*k.j).prefer;
+    const Prefer prefer=k.j->loadSet ? k.j->loadPrefer : KindOf(*k.j).prefer;   // its stores' (jet.cpp, LoadoutPrefer)
     if(prefer!=Prefer::any && flyer!=(prefer==Prefer::air))score+=2000.0f;   // the other kind: only with none of its own
     if(!k.best || score<k.score){k.best=object;k.score=score;std::memcpy(k.aim,p,12);k.flyer=flyer;}
 }
@@ -135,6 +143,71 @@ bool InsideTurn(const Jet& j,const float* pos,const float* at) noexcept {
     const float side=to[0]*v[2]-to[2]*v[0]>=0.0f ? 1.0f : -1.0f;   // the target off the (v.z,-v.x) side or not
     const float c[3]={pos[0]+v[2]*side*r-at[0],0,pos[2]-v[0]*side*r-at[2]};
     return Dot(c,c)<r*r;
+}
+
+// The room out from `at` along `u` (unit, level) to the soft box's edge (0 outside it).
+float RoomAlong(const airbound::Box& soft,const float* at,const float* u) noexcept {
+    float t=1e9f;
+    const float p[2]={at[0],at[2]},d[2]={u[0],u[2]};
+    for(int i=0;i<2;++i) {
+        if(d[i]>1e-4f)t=std::fmin(t,(soft.hi[i]-p[i])/d[i]);
+        else if(d[i]<-1e-4f)t=std::fmin(t,(soft.lo[i]-p[i])/d[i]);
+    }
+    return t>0.0f ? t : 0.0f;
+}
+
+// m/s: the most a ground attack run flies at. In a play area too small for its turns at its attack speed (TightSpeed
+// below attack: a stock map's ground for every wing) it flies the run at its least speed: its turn there is a quarter of
+// the area's, and its run in from the turn back to the target several seconds long (at TightSpeed the run in was 3-4 s
+// and the nose seldom settled within the gun's 2 deg: offline, jet_obstacle_sim --strike-room-suite). Its attack speed
+// where the area holds that (the open map: as before).
+constexpr float kStrikeSlow=1.0f;
+float StrikeSpeed(const Kind& k) noexcept {
+    return TightSpeed(k,airbound::HalfOf(PlayBox()))<k.attack ? k.minSpeed*kStrikeSlow : k.attack;
+}
+
+// Strike's way out to come round on the target `lead` again. Where the soft box holds it (the open map), as before: its
+// flight path on out to extendOut (j.t.out, j.t.outRun) and round. In a box too small for that (a stock map's soft box
+// is some +-960 m against a 2300 m extend) the extend ran into the soft edge, which turned it in while the extend
+// steered it out again until kExtendMs ran out, pass after pass (2026-10-09 log: 481 extend lines, no gun fired); and
+// flown straight out and round, the turn back puts it two turn radii beside the line through the target, so it lined up
+// a few hundred metres out, too close to dive from its height (offline, jet_obstacle_sim --strike-room-suite). There it
+// flies a teardrop: out to j.t.outAt, kTearSide turn radii beside the line out from the target and outRun along it, so
+// the turn back from there ends on that line outRun out with its nose on the target. Of the ways out (kExtendWays, and
+// both sides), the one with the longest run in (up to diveStart: it dives from there), the one nearest its way ahead.
+constexpr float kTearSide=2.0f,kTearAlign=150.0f;   // turn radii beside; m of run in a way straight ahead is worth
+constexpr int kExtendWays=16;
+void PlanExtend(Jet& j,const float* pos,const float* lead,const float* vdir) noexcept {
+    const Kind& k=KindOf(j);
+    const airbound::Box soft=JetSoftBox(j);
+    const float r=TurnRadiusOf(k,j.burden.mass,StrikeSpeed(k));
+    j.t.outTear=false;
+    std::memcpy(j.t.out,vdir,12);j.t.out[1]=0.0f;
+    if(RoomAlong(soft,lead,vdir)-r-airbound::kSlack>=k.extendOut){j.t.outRun=k.extendOut;return;}
+    const airbound::Box box=airbound::Inset(soft,airbound::kSlack);
+    const float want=std::fmin(k.extendOut,k.diveStart),least=k.gunClose*3.0f;
+    float bestScore=-1e9f;
+    constexpr float kSides[2]={1.0f,-1.0f};
+    for(int i=0;i<kExtendWays;++i)for(const float side:kSides) {
+        const float a=2.0f*kPi*static_cast<float>(i)/static_cast<float>(kExtendWays);
+        const float u[3]={std::cos(a),0.0f,std::sin(a)},w[3]={u[2]*side,0.0f,-u[0]*side};
+        const float base[3]={lead[0]+w[0]*kTearSide*r,lead[1],lead[2]+w[2]*kTearSide*r};
+        if(!airbound::Inside(box,base))continue;
+        const float run=std::fmin(k.extendOut,RoomAlong(box,base,u)-r);   // its turn's reach past outAt inside
+        if(run<least)continue;
+        const float at[3]={base[0]+u[0]*run,lead[1],base[2]+u[2]*run};
+        float go[3]={at[0]-pos[0],0.0f,at[2]-pos[2]};
+        const float dot=Normalize(go) ? Dot(go,vdir) : 1.0f;
+        const float score=std::fmin(run,want)+kTearAlign*dot;
+        if(score<=bestScore)continue;
+        bestScore=score;
+        std::memcpy(j.t.out,u,12);std::memcpy(j.t.outAt,at,12);j.t.outRun=run;j.t.outTear=true;
+    }
+    // No teardrop fits (a box little wider than its turn): straight out as far as the box leaves its turn back.
+    if(!j.t.outTear)j.t.outRun=std::fmax(0.0f,RoomAlong(soft,lead,vdir)-r-airbound::kSlack);
+    if(Cfg().debug)Log("JET v=%p extend: %s (%.2f,%.2f) %.0f m out from (%.0f,%.0f), turn point (%.0f,%.0f), turn radius %.0f m",
+                       j.Vehicle(),j.t.outTear ? "teardrop" : "straight",j.t.out[0],j.t.out[2],j.t.outRun,lead[0],lead[2],
+                       j.t.outTear ? j.t.outAt[0] : 0.0f,j.t.outTear ? j.t.outAt[2] : 0.0f,r);
 }
 
 // Where to steer for the guns: the nose onto `lead`, not the flight path. The guns fire along the nose, which rides
@@ -177,12 +250,19 @@ bool Strike(Jet& j,const float* pos,const float* nose,const float* lead,float he
         return true;
     case Mode::pull:
         if(pos[1]>=height-20.0f || ms-j.modeAt>kPullMs) {
-            std::memcpy(j.t.out,vdir,12);SetMode(j,Mode::extend,ms);break;
+            PlanExtend(j,pos,lead,vdir);SetMode(j,Mode::extend,ms);break;
         }
         want[0]=vdir[0];want[1]=0.7f;want[2]=vdir[2];Normalize(want);
         return false;
     case Mode::extend:
-        if(dh>k.extendOut || ms-j.modeAt>kExtendMs){SetMode(j,Mode::approach,ms);break;}
+        if(j.t.outTear) {
+            // The teardrop: to its turn point; past it along the way out, the turn back (Approach) lines it up.
+            const float out[3]={pos[0]-lead[0],0.0f,pos[2]-lead[2]},toAt[3]={j.t.outAt[0]-pos[0],0.0f,j.t.outAt[2]-pos[2]};
+            if(Dot(out,j.t.out)>=j.t.outRun || ms-j.modeAt>kExtendMs){SetMode(j,Mode::approach,ms);break;}
+            Level(pos,toAt,height,want);
+            return false;
+        }
+        if(dh>j.t.outRun || ms-j.modeAt>kExtendMs){SetMode(j,Mode::approach,ms);break;}
         Level(pos,j.t.out,height,want);
         return false;
     default:
@@ -198,7 +278,12 @@ bool Strike(Jet& j,const float* pos,const float* nose,const float* lead,float he
     if(dh<=k.diveStart && dh>k.gunClose*2.0f && off<kDiveCone && over>k.pullAlt+30.0f && InSight(pos,lead)) {
         j.entered=true;SetMode(j,Mode::dive,ms);GunToward(j,pos,nose,lead,want);return true;
     }
-    if(!entering && off>kDiveCone && InsideTurn(j,pos,lead)){std::memcpy(j.t.out,vdir,12);SetMode(j,Mode::extend,ms);Level(pos,vdir,height,want);return false;}
+    if(!entering && off>kDiveCone && InsideTurn(j,pos,lead)) {
+        PlanExtend(j,pos,lead,vdir);SetMode(j,Mode::extend,ms);
+        if(j.t.outTear){const float toAt[3]={j.t.outAt[0]-pos[0],0.0f,j.t.outAt[2]-pos[2]};Level(pos,toAt,height,want);}
+        else Level(pos,j.t.out,height,want);
+        return false;
+    }
     Level(pos,to,entering ? pos[1] : height,want);
     *speed=entering ? k.attack : k.cruise;
     return false;
@@ -325,8 +410,12 @@ void Lead(const float* from,const float* aim,const float* tv,const Arms& a,float
 }
 
 void PickTarget(Jet& j,unsigned char* v,const float* pos,const float* anchor,float range,float dt,ULONGLONG ms) noexcept {
-    Pick pick{&j,pos,anchor,range,ms,nullptr,0.0f,{},false};
+    Pick pick{&j,pos,anchor,range,ms,nullptr,0.0f,{},false,false,false};
     VisitEnemies(v,&VisitTarget,&pick);
+    if(j.focus && !pick.focusSeen) {
+        Log("JET v=%p focus target %p no longer among the enemies: back to its order",j.Vehicle(),j.focus.obj);
+        j.focus={};
+    }
     Aim& t=j.t;
     if(!pick.best){t.target=nullptr;return;}
     // The velocity from the target's move over one frame (`dt`, this frame's game step) only: a call after skipped frames
@@ -362,6 +451,7 @@ void Attack(Jet& j,const Arms& arms,const float* pos,const float* nose,const flo
     if(t.target && !t.flyer) {
         t.lockSeen=0;
         *gunsOk=Strike(j,pos,nose,lead,height,ms,want,speed);
+        *speed=std::fmin(*speed,StrikeSpeed(kind));
         *missileOk=*gunsOk && arms.missiles>0 && reach>0.0f;
         return;
     }

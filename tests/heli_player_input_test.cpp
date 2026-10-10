@@ -55,6 +55,7 @@ unsigned char* HeliLaunch(HeliBody,const float*,const float*) noexcept { Missing
 PluginBody BodyOf(const void*) noexcept { MissingDependency();return PluginBody{}; }
 bool IsSub(const void*) noexcept { MissingDependency();return false; }
 bool SubDeck(const float*,float*) noexcept { MissingDependency();return false; }
+bool SupportAircraftOwned(const void*) noexcept { return false; }   // no support deployment in this test
 float SubHullGap(const float*) noexcept { MissingDependency();return 0.0f; }
 bool IsPlayerJet(const void*) noexcept { MissingDependency();return false; }
 bool InstallNpcGunnerAim() noexcept { MissingDependency();return false; }
