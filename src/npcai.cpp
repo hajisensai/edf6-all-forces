@@ -1222,6 +1222,128 @@ void GiveBackDismissed(unsigned char* h) noexcept {
         if(q.dismissed && q.top.Is(h)){h[kAutoFollow]=q.autoFollow;q.dismissed=false;--dismissedCount;Log("NPCAI squad %p: the AI is off, given back to the stock",h);}
 }
 
+// --- The vehicle's AI pass under a real NPC driver (the user 2026-10-10: "驾驶位的npc根本就不开火") ---
+// The object manager runs an object's Think (vtable slot 7) only while it is on the AI list (+0x1A bit 3). A vehicle the
+// stock RideAi crews, or a script spawns as an AI, is on it: its slot 7 clears every seat block and runs the class's AI
+// (CarBase 0x673300 -> the ActionTable -> 0x661440, which aims and fires seat 0 through slot 70; the mechs' 0x643530 ->
+// 0x63C1C0). A vehicle a real soldier walked into (a player's call-in, a dropped one) is not (measured: +0x1A 0x17 against
+// 0x1F, the AI pass hit 0 times in 3000 for the boarded Titan and Nix): its NPC driver drives (npcpost.cpp writes the
+// stick) but never aims or fires. So the driver's own Think, in the same AI phase and with the same frame step, runs its
+// vehicle's pass once: the seats are cleared before any player's human writes its own seat later in the frame, as the
+// stock pass clears them for a vehicle the stock AI drives. Never for a vehicle on the AI list (it has its own pass).
+// The pass runs the class's AI through an action registered by slot 6 (CarBase 0x6731C0: veh+0x2508, the thunk to slot
+// 72 0x661440; the mechs' 0x642970: veh+0x1F08, the thunk 0x638310 to slot 55 0x63C1C0), and slot 6 runs only when the
+// object joins the AI list (0x118A4B0 setting bit 3). It cannot be run for these: the mechs' reads `ai_attack_setting`,
+// which no call-in or Nix SGO has, and throws (bad_variant_access at 0x6434A9: the game ends, measured with a script-
+// spawned Nix). So with no action registered the plugin calls that same action itself (edx 1, the "in action" byte
+// set around it as the pass sets it), right after the pass, whose own tail (0x660C00 / 0x63BAA0) only follows a route.
+constexpr unsigned kCarAiPass=0x673300,kMechAiPass=0x643530,kBargaAiPass=0x60A520;
+constexpr unsigned kCarAi=0x661440,kMechAi=0x63C1C0,kProteusAi=0x648F70;
+constexpr std::size_t kSlotCarAi=72,kSlotMechAi=55;
+constexpr std::size_t kCarAction=0x2508,kCarInAction=0x2590,kMechAction=0x1F08,kMechInAction=0x1F90,kMechAimOrigin=0x2008;
+using AiActionFn=void(__fastcall*)(void*,int,const float*,void*);
+const unsigned char kCarAiPassSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x20,0x48,0x8B,0xF2,
+                                    0x48,0x8B,0xD9,0xE8,0xE6,0x6C,0xED,0xFF};   // ...call 0x54A000
+const unsigned char kMechAiPassSig[]={0x48,0x89,0x6C,0x24,0x20,0x57,0x48,0x83,0xEC,0x30,0x48,0x89,0x74,0x24,0x50,0x48,0x8B,0xEA,
+                                     0x33,0xF6,0x48,0x8B,0xF9,0x40,0x38,0xB1,0x29,0x20,0x00,0x00};
+const unsigned char kBargaAiPassSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x20,0x48,0x8B,0xF2,
+                                      0x48,0x8B,0xD9,0xE8,0xC6,0xFA,0xF3,0xFF,0x33,0xFF};   // ...call 0x54A000; xor edi,edi
+constexpr std::size_t kSlotAiPass=7;
+using AiPassFn=void(__fastcall*)(void*,const float*);
+
+// The Barga (501_FortressRobo): its pass 0x60A520 clears its own AI block +0x1610..+0x1636 (never a seat) and runs the
+// current action of a state machine (veh+0x1648, the "in action" byte +0x16D0) that its slot 6 0x609D70 builds (the
+// ActionTable at +0x16E0, the stand-by action 0x6049B0, the punch combos of `ai_attack_setting`, which every Barga SGO
+// has: the call-in V605_BARGA_CANNON too). So with no action yet its own slot 6 is run, once. Its slot 4 0x60AEC0 reads
+// that block only when 0x62D850(veh, 0) says AI (2: the AI list bit), its seat 0's sticks otherwise: that one call site
+// 0x60AF03 is redirected (BargaControlKind) to answer AI for a Barga a real NPC soldier drives.
+constexpr unsigned kBargaSix=0x609D70,kControlKind=0x62D850,kBargaKindCall=0x60AF03;
+constexpr std::size_t kSlotSix=6,kBargaAction=0x1648;
+const unsigned char kBargaSixSig[]={0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57};
+const unsigned char kBargaKindContext[]={0x33,0xD2,0x48,0x8B,0xCB};   // xor edx,edx; mov rcx,rbx (seat 0, the vehicle)
+using SixFn=bool(__fastcall*)(void*);
+using ControlKindFn=int(__fastcall*)(const void*,std::uint64_t);
+enum class AiPass : std::uint8_t { none, car, mech, barga };
+constexpr int kBargaTried=16;
+ObjRef bargaTried[kBargaTried]{};int bargaTriedNext=0;
+bool bargaKindOk=false;
+
+AiPass AiPassOf(const void* fn) noexcept {
+    static int car=0,mech=0,barga=0;
+    if(!car)car=Matches(kCarAiPass,kCarAiPassSig,sizeof(kCarAiPassSig)) ? 1 : -1;
+    if(!mech)mech=Matches(kMechAiPass,kMechAiPassSig,sizeof(kMechAiPassSig)) ? 1 : -1;
+    if(!barga)barga=Matches(kBargaAiPass,kBargaAiPassSig,sizeof(kBargaAiPassSig)) &&
+                    Matches(kBargaSix,kBargaSixSig,sizeof(kBargaSixSig)) ? 1 : -1;
+    if(car>0 && fn==image+kCarAiPass)return AiPass::car;
+    if(mech>0 && fn==image+kMechAiPass)return AiPass::mech;
+    if(barga>0 && bargaKindOk && fn==image+kBargaAiPass)return AiPass::barga;
+    return AiPass::none;
+}
+
+// A Barga driven by a real NPC soldier this machine runs, its state machine built.
+bool NpcDrivenBarga(const unsigned char* v) noexcept {
+    if(!Readable(v,kBargaAction+8) || (v[kListFlags]&kInAiList) || !At<const void*>(v,kBargaAction) || SeatCount(v)==0)return false;
+    const auto vt=At<void* const*>(v,0);
+    return Readable(vt,(kSlotAiPass+1)*8) && vt[kSlotAiPass]==image+kBargaAiPass &&
+        OwnsNpcSeatInput(SeatAt(const_cast<unsigned char*>(v),0));
+}
+int __fastcall BargaControlKind(const void* v,std::uint64_t seat) noexcept {
+    __try { if(seat==0 && NpcDrivenBarga(static_cast<const unsigned char*>(v)))return 2; } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    return reinterpret_cast<ControlKindFn>(image+kControlKind)(v,seat);
+}
+void InstallBargaControlKind() noexcept {
+    bool changed=false;
+    __try {
+        bargaKindOk=Matches(kBargaKindCall-5,kBargaKindContext,sizeof(kBargaKindContext)) &&
+            RedirectCall(image+kBargaKindCall,image+kControlKind,reinterpret_cast<void*>(&BargaControlKind),changed) && changed;
+    } __except(EXCEPTION_EXECUTE_HANDLER){bargaKindOk=false;}
+    Log("NPCAI Barga NPC driver input=%d (slot 4 reads its AI block)",bargaKindOk);
+}
+
+// The Barga's state machine, built once by its own slot 6 (a vehicle it failed for is not tried again).
+bool BargaReady(unsigned char* v,void* const* vt) noexcept {
+    if(At<const void*>(v,kBargaAction))return true;
+    for(const auto& r:bargaTried)if(r.Is(v))return false;
+    bargaTried[bargaTriedNext]=ObjRef::Of(v);bargaTriedNext=(bargaTriedNext+1)%kBargaTried;
+    if(!Readable(vt,(kSlotSix+1)*8) || vt[kSlotSix]!=image+kBargaSix)return false;
+    bool built=false;
+    __try { built=reinterpret_cast<SixFn>(vt[kSlotSix])(v) && At<const void*>(v,kBargaAction); }
+    __except(EXCEPTION_EXECUTE_HANDLER){built=false;}
+    Log("NPCAI Barga v=%p: its AI %s for the NPC driver",v,built ? "built (slot 6)" : "could not be built: left driving only");
+    return built;
+}
+
+void DriveVehicleAi(unsigned char* h,const float* dt) noexcept {
+    static const void* lastV=nullptr;static ULONGLONG lastFrame=0;
+    if(!dt || !Cfg().npcBoarding || h[kDead])return;
+    auto* seat=At<unsigned char*>(h,kHumanSeat);
+    auto* v=At<unsigned char*>(h,kHumanRiding);
+    if(!seat || !Readable(v,kSeatCount+8) || v[kDead] || (v[kListFlags]&kInAiList) || !OwnsNpcSeatInput(seat))return;
+    const auto vt=At<void* const*>(v,0);
+    if(!Readable(vt,(kSlotAiPass+1)*8))return;
+    const AiPass kind=AiPassOf(vt[kSlotAiPass]);
+    if(kind==AiPass::none)return;
+    const ULONGLONG frame=GameFrame();
+    if(lastV==v && lastFrame==frame)return;   // once a frame
+    lastV=v;lastFrame=frame;
+    if(kind==AiPass::barga && !BargaReady(v,vt))return;
+    static ULONGLONG loggedAt=0;
+    if(GameMs()-loggedAt>10000){loggedAt=GameMs();Log("NPCAI driver %p runs the AI pass of v=%p (not on the AI list)",h,v);}
+    reinterpret_cast<AiPassFn>(vt[kSlotAiPass])(v,dt);
+    if(kind==AiPass::barga)return;   // its action runs inside its pass
+    // The class's AI action when no slot 6 registered one (see above).
+    const bool car=kind==AiPass::car;
+    const std::size_t action=car ? kCarAction : kMechAction,inAction=car ? kCarInAction : kMechInAction;
+    const std::size_t slot=car ? kSlotCarAi : kSlotMechAi;
+    if(At<const void*>(v,action) || !Readable(vt,(slot+1)*8))return;
+    const void* fn=vt[slot];
+    if(car ? fn!=image+kCarAi : (fn!=image+kMechAi && fn!=image+kProteusAi))return;
+    if(!car && !At<const void*>(v,kMechAimOrigin))return;   // npcpost.cpp EnsureMechAiSetup sets it first
+    v[inAction]=1;
+    reinterpret_cast<AiActionFn>(const_cast<void*>(fn))(v,1,dt,nullptr);
+    v[inAction]=0;
+}
+
 template<int I> void __fastcall ThinkHook(void* human,const float* dt) {
     if(SupportSoldierHeld(human)) {
         // The actor exists on this peer, but native movement/fire/boarding must wait until every
@@ -1239,6 +1361,7 @@ template<int I> void __fastcall ThinkHook(void* human,const float* dt) {
     nextThink[I](human,dt);
     if(!ok || !Cfg().enabled || !Cfg().customNpcAi)return;
     __try { Think(static_cast<unsigned char*>(human),I); } __except(Fault(GetExceptionInformation())) {}
+    __try { DriveVehicleAi(static_cast<unsigned char*>(human),dt); } __except(Fault(GetExceptionInformation())) {}
 }
 constexpr ThinkFn kHooks[kClasses]={&ThinkHook<0>,&ThinkHook<1>,&ThinkHook<2>,&ThinkHook<3>};
 constexpr std::size_t kSlotThink=7;
@@ -1264,6 +1387,7 @@ bool InstallNpcAi() noexcept {
     if(!seatEventsOk)Log("NPCAI vehicle seat events not as read: a crew created aboard plays the boarding sound");
     if(!followOk)Log("NPCAI SetFollow not as read: squads are not reorganized when a leader dies");
     InstallRealDriverNative(&OwnsNpcSeatInput);
+    InstallBargaControlKind();
     InstallBoxes();
     int hooked=0;
     for(int i=0;i<kClasses;++i) {
