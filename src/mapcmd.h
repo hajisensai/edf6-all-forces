@@ -8,6 +8,7 @@
 #include <Windows.h>
 #include "mapcmd_logic.h"
 #include "support_call.h"
+#include "transport.h"
 
 namespace crew {
 using mapcmd::Command;
@@ -28,8 +29,13 @@ inline bool AirCommandTransit(const Command& cmd,bool& moving,const float* pos,c
 // `v` is an identity only outside the owning module; positions are copied while the object is verified live.
 // `riding`: a squad whose soldiers are seated in a vehicle (its vehicle is the unit that takes the point orders; it is
 // offered no recruitment: mapcmd::OffersRecruit). `recruitable`: the map offers RECRUIT for it now.
+// `recruited`: a squad the player recruited (the only kind DISMISS lets go: npcai.cpp answers others "not its owner").
 struct CommandUnit { const void* v; const char* name; Command now; bool air; float pos[3]{}; bool locked=false; const char* status=nullptr;
-    bool riding=false; bool recruitable=false; };
+    bool riding=false; bool recruitable=false; bool recruited=false;
+    bool transport=false; // a squad paired with a transport (transport.cpp): it takes point orders aboard and WITHDRAW
+    const void* vehicle=nullptr; // a riding squad's vehicle (its top's): a DISMOUNT / DISMOUNT ALL given to that vehicle is its
+    bool carries=false;          // a vehicle unit with a riding squad that takes orders aboard (mapcmd.cpp List): it takes them
+};
 bool CommandVehicleLive(const ObjRef& ref) noexcept;
 bool ReadCommandUnit(const ObjRef& ref,const char* name,const Command& cmd,bool air,CommandUnit* out) noexcept;
 // Each module's units that take a command now (live, flown or driven by the plugin's NPC, not withdrawing), at most
@@ -39,8 +45,9 @@ int JetCommandUnits(CommandUnit* out,int most) noexcept;
 int GroundCommandUnits(CommandUnit* out,int most) noexcept;
 // ...and a command given to one of them: false when `v` is not one of its units now. Order::none releases it (back to
 // what it did before any command). Game thread.
-bool HeliCommand(const void* v,const Command& c) noexcept;
-bool JetCommand(const void* v,const Command& c) noexcept;
+// `focus`: a focus order's target (the enemy the player marked, as a squad's); the aircraft take it (mapcmd::AirOrder).
+bool HeliCommand(const void* v,const Command& c,const ObjRef& focus={}) noexcept;
+bool JetCommand(const void* v,const Command& c,const ObjRef& focus={}) noexcept;
 bool GroundCommand(const void* v,const Command& c) noexcept;
 // npcai.cpp: the NPC soldiers' squads (one unit a squad, its leader's address; docs/npc-ai-design.md §5, §6), every one
 // the frame saw (a script's too, locked), and an order to one.
@@ -53,8 +60,12 @@ bool TankCommand(const void* v,const Command& c) noexcept;
 struct SquadRow { const void* leader; char name[24]; char status[16]; int alive; int cooldown; Command now; bool locked;
     ObjRef identity{}; // game-thread snapshot; the draw passes this unchanged, never recaptures from leader
     bool riding=false; // its soldiers seated in a vehicle (status RIDING, no recruitment offered)
+    int rank=1;        // mapcmd::SquadRank: the panel's order (the rows come sorted by it)
 };
-int SquadRows(SquadRow* out,int most) noexcept;
+// Every squad listed, the ones riding and the ones a script drives (the folded panel's summary row).
+struct SquadTally { int total=0,riding=0,scripted=0; };
+// The squads' rows in mapcmd::SquadRank order (stable), at most `most`; how many. `tally` (may be null): all of them.
+int SquadRows(SquadRow* out,int most,SquadTally* tally=nullptr) noexcept;
 bool HeliSharesPost() noexcept;   // heli.cpp: guard helis on one post share its orbit (HeliGuardRadius > 0)
 
 // The map's input a frame (map.cpp Frame, the map open): the game window in front, a pad read (its buttons), the last
@@ -78,9 +89,15 @@ void MapCommandView(const float* viewProj,float width,float height) noexcept;
 void MapCommandButtons(const float* rects,const int* ids,int n) noexcept;
 // hud.cpp: the support bar's rows and chips as drawn (`entries` each one's catalog index), for the clicks. Up to 48.
 void MapCommandSupportButtons(const float* rects,const int* entries,int n) noexcept;
+// hud.cpp: the support composition panel's seats and kinds as drawn (`codes`: map_buttons.h ComposeApply's), for the clicks.
+void MapCommandComposeButtons(const float* rects,const int* codes,int n) noexcept;
 // Draw-thread hitboxes: four floats per rectangle (x0,y0,x1,y1), published every draw.
 // Pass n=0 when a panel is absent. These calls copy snapshots and never read game objects.
 void MapCommandSquadButtons(const float* rects,const ObjRef* identities,int n) noexcept; // up to 16 rows
+void MapCommandSquadFold(const float* rect) noexcept; // the panel's summary row (opens / folds it); null: none
+// The formation menu's rows as drawn (`entries`: map_buttons.h MenuEntry), up to kMapFormationEntries.
+constexpr int kMapFormationEntries=24;
+void MapCommandFormationButtons(const float* rects,const int* entries,int n) noexcept;
 void MapCommandPayloadButtons(const float* rects,std::uint64_t token,int seat,const int* entries,int n) noexcept; // up to 16
 void MapCommandUiPanels(const float* rects,int n) noexcept; // up to 16 complete background rectangles
 // Game thread, after MapCommandFrame and before map camera steering. A press begun on UI stays
@@ -105,9 +122,11 @@ constexpr int kCmdUnits=static_cast<int>(mapcmd::kMaxFormationUnits);
 // A unit's mark: `name` its kind as the plugin names it (a jet's role, a heli's type, CRAWLER: hud.cpp shows it in the
 // HUD's language, hudtext.h Word), `owner` whose unit it is (the HUD names a heli's and a jet's so).
 constexpr std::uint8_t kCmdOwnerHeli=0,kCmdOwnerJet=1,kCmdOwnerGround=2;
-struct CmdMark { float pos[3]; Command now; bool selected,air,locked; std::uint8_t owner; char name[24]; };
+// `riding`: a squad seated in a vehicle (drawn only when picked from its panel row: its vehicle's mark stands for it).
+struct CmdMark { float pos[3]; Command now; bool selected,air,locked; std::uint8_t owner; char name[24]; bool riding=false; };
 // The support catalog as the map's bar shows it (copied on the game thread: the draw reads no support state).
 constexpr int kMapSupports=48;
+constexpr int kMapTransportLinks=16;   // the transports' lines the map draws (MapCommandReadout::link)
 struct MapSupportEntry { wchar_t name[40]; SupportIcon icon; SupportVariant variant; };
 struct MapCommandReadout {
     bool allowed;              // command framework enabled; each target still validates authority and execution
@@ -123,10 +142,16 @@ struct MapCommandReadout {
     bool boxing;               // a box being dragged from (bx, by) to the pointer
     float bx,by;
     int count;
+    int pickable=0;            // of them, the ones the box / click / Tab take (no script's squad, no riding squad)
     CmdMark unit[kCmdUnits];
     wchar_t note[80];          // the last command's result or refusal
     bool noteFresh;
-    int squads;                // the squad panel (number keys 1-9 pick a row)
+    int squads;                // the squad panel's rows (sorted: mapcmd::SquadRank; number keys 1-9 pick a shown one)
+    SquadTally squadTally{};   // every squad, for the folded panel's summary row
+    bool squadOpen=false;      // the panel opened past its commandable rows (its summary row clicked)
+    // The formation button's menu (map_buttons.h MenuEntry): open; its defences (a selected squad guards a point; the
+    // first one's shape lit) and its march (a selected squad follows the player; `march` lit).
+    bool formationMenu=false,formationGuard=false,formationMarch=false;int formationGuardShape=-1;
     SquadRow squad[16];
     bool squadSelected[16];
     bool sweepOn,healthOn;     // the box sweep going; health boxes for hurt soldiers (npcai.cpp)
@@ -137,10 +162,17 @@ struct MapCommandReadout {
     float hoverAt[3];          // its lock point
     int supportArmed;          // the support call armed by its bar (or C): the next left click is its point; -1 none
     int supportPick;           // the call [ / ] picked (C arms it)
+    // The armed support's composition panel (map_buttons.h ComposePanel): its entry (-1: closed), its seats, the load.
+    int composeEntry;
+    int composeSeats;
+    SupportLoadout compose;
     int supports;              // the catalog, in its order
     MapSupportEntry support[kMapSupports];
     SupportReadiness supportReady;
     wchar_t supportStatus[128];
+    // The transports' pairs (transport.cpp TransportLinks): a squad on foot and its vehicle, a thin line between them.
+    int links=0;
+    TransportLink link[kMapTransportLinks]{};
 };
 bool PlayerMapCommands(MapCommandReadout* out) noexcept;
 }  // namespace crew

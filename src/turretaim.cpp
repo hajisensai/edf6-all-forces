@@ -7,6 +7,7 @@
 #include "turretaim.h"
 #include "memory.h"
 #include "spot_ray.h"
+#include "npc_mark.h"
 #include <cmath>
 #include <cstring>
 
@@ -21,7 +22,14 @@ ULONGLONG bindingTried=0;
 ULONGLONG turretTried=0,steersTried=0,awareTried=0,playerAimTried=0;
 }  // namespace
 
-// --- The stock spot (原版 Q 标记) from a vehicle: cast along the camera actually drawn (spot_ray.h) ---
+// --- The stock spot (原版 Q 标记): off for the local players (VanillaSpot=0), else cast along the camera drawn (spot_ray.h) ---
+// The user, 2026-10-10: "给原版的q删掉吧，改成我们自制的q" (qmark.cpp is the custom one). The spot flag soldier+0xD7A, written
+// from the player's input each frame (0x570847 / 0x57093C / 0x570A72 / 0x570B35), has one reader in EDF.dll: the soldier
+// update's branch at 0x59B689, whose only effect is the cast 0x5A1120 at 0x59B75C (the SpotEffect 0x59F630, its sound and
+// its network message are all inside it) and whose not-taken path is the next instruction 0x59B761
+// (tests/spot_ray_native_audit.py pins all of it). Returning without the cast there is the branch never taken: the stock
+// spot does nothing for this machine's players, nothing goes online. Another machine's spot reaches this one through
+// its own message (0x59E210), not this call: still shown. VanillaSpot=1 gives it back (with the drawn camera's ray).
 namespace {
 constexpr unsigned kSpotCall=0x59B75C,kSpotCast=0x5A1120,kSpotLift=0x5A11EC,kSpotLiftValue=0x1C369B8,kSpotReach=0x1765A80;
 constexpr std::size_t kSoldierVehicleCtrl=0x1550;
@@ -45,7 +53,15 @@ bool SpotFromView(const unsigned char* soldier,float* origin,float* dir) noexcep
         return CameraRayOf(soldier,eye,look) && spotray::NativeArgs(eye,look,origin,dir);
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
+// VanillaSpot=0 (the default) and the custom Q on (npcmark::MarkOn: the plugin on, NpcMarkKey set): a local player's stock
+// spot is not cast. With NpcMarkKey=0 nothing replaces it, so it stays stock. Read every press: the ini reloads while the
+// game runs.
+bool SpotBlocked(const unsigned char* soldier) noexcept {
+    __try {return !Cfg().vanillaSpot && npcmark::MarkOn() && soldier && IsPlayer(soldier);}
+    __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
 void __fastcall SpotHook(void* soldier,const float* origin,const float* dir) {
+    if(SpotBlocked(static_cast<const unsigned char*>(soldier)))return;
     alignas(16) float o[4],d[4];
     if(SpotFromView(static_cast<const unsigned char*>(soldier),o,d)){stockSpot(soldier,o,d);return;}
     stockSpot(soldier,origin,dir);
@@ -59,13 +75,13 @@ bool InstallSpotRay() noexcept {
             Matches(0x59B689,kSpotBranchCode,sizeof(kSpotBranchCode)) && Matches(kSpotLift,kSpotLiftCode,sizeof(kSpotLiftCode));
         if(code){std::memcpy(&lift,image+kSpotLiftValue,4);std::memcpy(&reach,image+kSpotReach,4);}
         if(!code || lift!=spotray::kLift || reach!=spotray::kReach) {
-            Log("HOOK spot ray=0 (unexpected EDF.dll code: the stock spot keeps the stock riding camera's ray)");
+            Log("HOOK spot ray=0 (unexpected EDF.dll code: the stock spot stays stock, VanillaSpot=0 cannot turn it off)");
             return false;
         }
         stockSpot=reinterpret_cast<SpotCastFn>(image+kSpotCast);
         bool changed=false;
         const bool ok=RedirectCall(image+kSpotCall,image+kSpotCast,reinterpret_cast<void*>(&SpotHook),changed);
-        Log("HOOK spot ray=%d (the stock spot from a vehicle goes where the drawn camera looks)",ok);
+        Log("HOOK spot ray=%d (the stock spot: off for this machine's players with VanillaSpot=0; else along the drawn camera)",ok);
         return ok;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

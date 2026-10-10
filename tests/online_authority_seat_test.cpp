@@ -21,7 +21,7 @@ void Check(bool ok,const char* what) {
 int main() {
     using namespace crew;
     alignas(16) unsigned char hostVehicle[0x700]{},clientVehicle[0x700]{},hostSeat[0x340]{},clientSeat[0x340]{};
-    alignas(16) unsigned char dummy[0x200]{},driverObject[0x200]{},dummyCtrl[16]{},playerCtrl[16]{};
+    alignas(16) unsigned char dummy[edf::kHumanPlayer+1]{},driverObject[edf::kHumanPlayer+1]{},dummyCtrl[16]{},playerCtrl[16]{};
     Put<void*>(hostVehicle,kSeats,hostSeat);Put<std::uint64_t>(hostVehicle,kSeatCount,1);
     Put<void*>(clientVehicle,kSeats,clientSeat);Put<std::uint64_t>(clientVehicle,kSeatCount,1);
     Put<LONG>(dummyCtrl,8,1);Put<LONG>(playerCtrl,8,1);Put<std::uint16_t>(driverObject,0x128,1);

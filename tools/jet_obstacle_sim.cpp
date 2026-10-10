@@ -109,7 +109,13 @@ float MapRay(const float* a,const float* b,float* hit) noexcept {
     return best*std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
 }
 // Nothing else is in this world: no enemies to visit (Strike gets its target from the harness), nobody in line.
-bool VisitEnemies(const unsigned char*,EnemyVisitor,void*) noexcept { return false; }
+// The enemies the harness puts in (--selftest's focus cases); none elsewhere.
+struct SimEnemy { const void* object; float aim[3]; };
+std::vector<SimEnemy> simEnemies;
+bool VisitEnemies(const unsigned char*,EnemyVisitor visit,void* ctx) noexcept {
+    for(const auto& e:simEnemies)visit(ctx,e.object,e.aim);
+    return !simEnemies.empty();
+}
 bool FriendInLine(const float*,const float*,const void*) noexcept { return false; }
 bool GunBarrel(const unsigned char*,const unsigned char*,float*,float*) noexcept { return false; }
 int ReadStores(unsigned char*,Store*,int) noexcept { return 0; }
@@ -195,6 +201,7 @@ Role RoleNamed(const char* n) {
 }
 
 // --- --selftest ---
+constexpr float kFerryCheckOver=100.0f;   // m: a ferry's pass comes this near its point at least
 constexpr float kPullMargin=15.0f;   // m: the least a pull-out may leave under it (Guard aims at kMinAlt, 25)
 
 // A body for a selftest case: at `at`, flying `dir` (unit) at `speed`, rolled `bank` rad about its path (0 upright).
@@ -349,6 +356,77 @@ int SelfTest(const char* outDir) {
         std::printf("%s %3.0f m over, target %2.0f deg off the nose: guns at %.1f s (%.0f m over it), missile at %.1f s %s\n",
                     r.launched ? "entry" : "run  ",static_cast<double>(r.over),static_cast<double>(r.off),static_cast<double>(gun),
                     static_cast<double>(over),static_cast<double>(msl),ok ? "ok" : "FAIL");
+    }
+    // The paratroop plane's passes (jet_flight.cpp Ferry; transport.cpp jumps within 400 m of the point): from 3 km out,
+    // abeam, it comes over the point, and round again for another pass. Patrol's 1000 m ring never brought it within 400 m.
+    {
+        boxes.clear();
+        const Role role=Role::strike;
+        std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0);
+        unsigned char* v=mem.data();
+        Jet& j=jets[0];
+        const float point[3]={0.0f,0.0f,0.0f},at[3]={0.0f,150.0f,-3000.0f},dir[3]={1.0f,0.0f,0.0f};
+        Place(j,v,ctrl.data(),role,at,dir,KindOf(role).cruise,0.0f);
+        j.ferry=true;
+        int passes=0;bool inside=false;float nearest=1e9f,firstAt=-1.0f;
+        const ULONGLONG born=nowMs;
+        for(int f=0;f<60*180;++f) {
+            nowMs+=16;
+            const float* pos=reinterpret_cast<const float*>(v+kPosition);
+            const float* m=reinterpret_cast<const float*>(v+kMatrix);
+            float nose[3]={m[8],m[9],m[10]};
+            if(!Normalize(nose)){nose[0]=0;nose[1]=0;nose[2]=1;}
+            j.seen=nowMs;
+            Sense(j,pos,nowMs);
+            const float clear=GroundClearance(pos);
+            float want[3]={nose[0],0.0f,nose[2]};
+            const float speed=Ferry(j,pos,point,point[1]+150.0f,want);
+            Wing(j,KindOf(role),v,pos,clear,nose,want,speed,kDt,nowMs);
+            HoldOffGround(j,pos,clear,kDt,nowMs);
+            j.m.ready=true;
+            Move(j,v);
+            const float d=HorizDist(pos,point);
+            if(d<nearest)nearest=d;
+            if(d<=400.0f && !inside){++passes;if(firstAt<0.0f)firstAt=static_cast<float>(nowMs-born)*0.001f;}
+            inside=d<=400.0f;
+        }
+        const bool ok=passes>=2 && firstAt>=0.0f && firstAt<60.0f && nearest<kFerryCheckOver;
+        if(!ok)++bad;
+        std::printf("ferry from 3 km abeam: first within 400 m at %.1f s, %d passes in 180 s, nearest %.0f m %s\n",
+                    static_cast<double>(firstAt),passes,static_cast<double>(nearest),ok ? "ok" : "FAIL");
+    }
+    // The map's focus order (2026-10-09, "飞机没办法指定攻击目标"): the marked enemy is the target before a nearer one and
+    // past its guard order's range (production PickTarget / VisitTarget); out past the walls it waits, the others fought;
+    // gone from the enemies, the focus is let go and its order's targets come back.
+    {
+        const Role role=Role::multirole;
+        std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0),close(0x400,0),distant(0x400,0),closeCtrl(16,0),distantCtrl(16,0);
+        Put<const void*>(close.data(),kSelfCtrl,closeCtrl.data());Put<const void*>(distant.data(),kSelfCtrl,distantCtrl.data());
+        Jet& j=jets[0];
+        const float at[3]={0.0f,400.0f,0.0f},dir[3]={0.0f,0.0f,1.0f};
+        Place(j,mem.data(),ctrl.data(),role,at,dir,KindOf(role).cruise,0.0f);
+        const Kind& k=KindOf(role);
+        const float anchor[3]={0.0f,0.0f,0.0f};
+        ApplyMapCommand(j,Command{Order::guard,{0.0f,0.0f,0.0f}},nowMs);
+        const SimEnemy closeOne{close.data(),{300.0f,0.0f,200.0f}},distantOne{distant.data(),{0.0f,0.0f,k.range+3000.0f}};
+        simEnemies={closeOne,distantOne};
+        auto pick=[&]{PickTarget(j,mem.data(),at,anchor,k.range,kDt,nowMs);return j.t.target;};
+        struct { const char* what; bool ok; } cases[5]{};
+        cases[0]={"guard order: the enemy in its range, the one past it not",pick()==close.data()};
+        ApplyMapFocus(j,ObjRef::Of(distant.data()),nowMs);
+        cases[1]={"focus: the marked enemy past its range before the nearer one",
+                  pick()==distant.data() && static_cast<bool>(j.focus) && j.cmd.order==Order::guard};
+        simEnemies[1].aim[2]=PlayEdge()+500.0f;
+        cases[2]={"focus out past the walls: the others fought, the focus kept",pick()==close.data() && static_cast<bool>(j.focus)};
+        simEnemies.pop_back();
+        cases[3]={"focus gone from the enemies: let go, its order's target back",pick()==close.data() && !j.focus};
+        ApplyMapFocus(j,ObjRef::Of(close.data()),nowMs);ApplyMapCommand(j,Command{Order::none,{}},nowMs);
+        cases[4]={"another order lets the focus go",!j.focus};
+        for(const auto& c:cases) {
+            if(!c.ok)++bad;
+            std::printf("focus %-70s %s\n",c.what,c.ok ? "ok" : "FAIL");
+        }
+        simEnemies.clear();
     }
     if(logFile)std::fclose(logFile);
     std::printf("%s\n",bad ? "SELFTEST FAILED" : "selftest passed");
@@ -677,13 +755,109 @@ int EdgeSuite() {
 }
 }  // namespace
 
+// --strike-room-suite (CTest jet_strike_room): ground attack runs on a stock-size map (walls +-1600 m: the ground
+// +-1750, playarea.h's kVoidMargin inside it), where the soft box is some +-960 m. The 2026-10-09 log (a stock map,
+// AREA walls -1600..1597): three called multirole jets arrived 600 m outside the soft line at (x,197,1567) and flew
+// approach / dive / pull / extend for 4 minutes at ground targets 1100-1500 m away without one gun burst (guns 3600
+// throughout, 481 extend lines, every line "back"). Each case: a loaded jet called in (Entering) at the log's arrival
+// point and height, or already inside at its kind's height, at a ground target; it must fire its guns within
+// kRoomFirstS and make at least kRoomPasses separate gun passes within kRoomSeconds, never past the play edge.
+namespace {
+constexpr float kRoomSeconds=120.0f,kRoomFirstS=45.0f;
+constexpr int kRoomPasses=2;
+struct RoomCase { Role role; float mass; float start[3]; float heading; bool launched; float target[3]; };
+struct RoomOut { float first; int passes; float pastHard,fireS,lowest; };
+
+RoomOut RoomRun(const RoomCase& c,bool print) {
+    boxes.clear();
+    config=Config{};config.debug=true;config.jetPilot=true;
+    groundHalf=1750.0f;
+    ResetWalls();
+    const Kind& k=KindOf(c.role);
+    std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0);
+    unsigned char* v=mem.data();
+    Jet& j=jets[0];
+    const float rad=c.heading*kPi/180.0f,dir[3]={std::sin(rad),0.0f,std::cos(rad)};
+    nowMs=1000;
+    Place(j,v,ctrl.data(),c.role,c.start,dir,k.cruise,0.0f);
+    j.launched=c.launched;j.burden=Burden{c.mass,0.0f};
+    static int targetDummy=0;
+    j.t.target=&targetDummy;j.t.flyer=false;std::memcpy(j.t.aim,c.target,12);std::memcpy(j.t.tgtPrev,c.target,12);
+    Arms arms{};arms.gunSpeed=960.0f;arms.gunRange=960.0f;arms.pick=-1;arms.rocket=-1;arms.guns=3600;arms.hasGun=true;
+    const airbound::Box hard=PlayBox();
+    const ULONGLONG born=nowMs;
+    RoomOut o{-1.0f,0,-1e9f,0.0f,1e9f};
+    bool firing=false;
+    for(int f=0;f<static_cast<int>(kRoomSeconds*60.0f);++f) {
+        nowMs+=16;
+        const float* pos=reinterpret_cast<const float*>(v+kPosition);
+        const float* m=reinterpret_cast<const float*>(v+kMatrix);
+        float nose[3]={m[8],m[9],m[10]};
+        if(!Normalize(nose)){nose[0]=0;nose[1]=0;nose[2]=1;}
+        j.seen=nowMs;
+        Sense(j,pos,nowMs);
+        const float clear=GroundClearance(pos);
+        float want[3]={nose[0],0.0f,nose[2]},speed=k.cruise;
+        bool gunsOk=false,missileOk=false;
+        Attack(j,arms,pos,nose,c.target,c.target[1]+k.alt,nowMs,want,&speed,&gunsOk,&missileOk);
+        Wing(j,k,v,pos,clear,nose,want,speed,kDt,nowMs);
+        HoldOffGround(j,pos,clear,kDt,nowMs);
+        j.m.ready=true;
+        Fire(j,v,pos,nose,c.target,gunsOk,missileOk,arms,nowMs);
+        const float t=static_cast<float>(nowMs-born)*0.001f;
+        const bool gun=v[kFireGun]!=0;
+        if(gun && o.first<0.0f)o.first=t;
+        if(gun && !firing)++o.passes;
+        if(gun)o.fireS+=kDt;
+        if(clear!=kNoGround)o.lowest=std::fmin(o.lowest,clear);
+        firing=gun || (firing && j.mode==Mode::dive);
+        o.pastHard=std::fmax(o.pastHard,-airbound::Depth(hard,pos));
+        if(f%60==0)Log("SIM %s at (%.0f,%.0f,%.0f) %.0f m/s heading (%.2f,%.2f) target %.0f m out, %.0f over",kModeNames[static_cast<int>(j.mode)],
+                       pos[0],pos[1],pos[2],Len(j.m.vel),j.m.vel[0]/(Len(j.m.vel)+1e-3f),j.m.vel[2]/(Len(j.m.vel)+1e-3f),
+                       HorizDist(pos,c.target),pos[1]-c.target[1]);
+        Move(j,v);
+    }
+    const bool ok=o.first>=0.0f && o.first<=kRoomFirstS && o.passes>=kRoomPasses && o.pastHard<=0.0f;
+    if(print)
+        std::printf("room %-9s x%.2f %s from (%5.0f,%4.0f,%5.0f) heading %4.0f at (%5.0f,%3.0f,%5.0f): first burst %6.1f s, "
+                    "%d passes, %4.1f s of fire, lowest %4.0f m, %+6.0f m past the play edge %s\n",k.name,static_cast<double>(c.mass),c.launched ? "called" : "inside",
+                    static_cast<double>(c.start[0]),static_cast<double>(c.start[1]),static_cast<double>(c.start[2]),
+                    static_cast<double>(c.heading),static_cast<double>(c.target[0]),static_cast<double>(c.target[1]),
+                    static_cast<double>(c.target[2]),static_cast<double>(o.first),o.passes,static_cast<double>(o.fireS),static_cast<double>(o.lowest),static_cast<double>(o.pastHard),
+                    ok ? "ok" : "FAIL");
+    return o;
+}
+
+int StrikeRoomSuite(const char* outDir) {
+    const std::string logPath=std::string(outDir)+"/strike_room.log";
+    logFile=std::fopen(logPath.c_str(),"w");
+    int bad=0,cases=0;
+    float fireAll=0.0f;
+    // The log's arrival (support_entry.h: the entry point on the soft side, 197 m = 173 over this flat ground) and a run in
+    // at the kind's height from mid-map; targets where the log's were (z 450), mid-map, and off in a corner.
+    const float targets[][3]={{40.0f,0.0f,450.0f},{0.0f,0.0f,0.0f},{-600.0f,0.0f,-500.0f},{700.0f,0.0f,650.0f}};
+    const struct { Role role; float mass; } loads[]={{Role::multirole,1.18f},{Role::strike,1.21f},{Role::strike,1.0f}};
+    for(const auto& l:loads)for(const auto& t:targets)for(int s=0;s<3;++s) {
+        RoomCase c{l.role,l.mass,{-2.0f,173.0f,1567.0f},180.0f,true,{t[0],t[1],t[2]}};
+        if(s==1){c.start[0]=600.0f;c.heading=200.0f;}
+        if(s==2){c.start[0]=-800.0f;c.start[1]=KindOf(l.role).alt;c.start[2]=-200.0f;c.heading=90.0f;c.launched=false;}
+        const RoomOut o=RoomRun(c,true);
+        ++cases;fireAll+=o.fireS;
+        if(!(o.first>=0.0f && o.first<=kRoomFirstS && o.passes>=kRoomPasses && o.pastHard<=0.0f))++bad;
+    }
+    if(logFile)std::fclose(logFile);
+    std::printf("strike room: %d cases, %d failed, %.0f s of fire in all\n",cases,bad,static_cast<double>(fireAll));
+    return bad ? 1 : 0;
+}
+}  // namespace
+
 int main(int argc,char** argv) {
     const char* scenario="a";
     const char* kindName="strike";
     const char* outDir=".";
     std::string tag;
     float seconds=0.0f;
-    bool selftest=false,playerRotors=false;
+    bool selftest=false,playerRotors=false,strikeRoom=false;
     for(int a=1;a<argc;++a)if(!std::strcmp(argv[a],"--edge-suite"))return EdgeSuite();
     for(int a=1;a<argc;++a) {
         if(!std::strcmp(argv[a],"--scenario") && a+1<argc)scenario=argv[++a];
@@ -694,6 +868,7 @@ int main(int argc,char** argv) {
         else if(!std::strcmp(argv[a],"--selftest"))selftest=true;
         else if(!std::strcmp(argv[a],"--ground-settle-suite"))return GroundSettleSuite();
         else if(!std::strcmp(argv[a],"--player-rotor-suite"))playerRotors=true;
+        else if(!std::strcmp(argv[a],"--strike-room-suite"))strikeRoom=true;
         else {std::fprintf(stderr,"unknown argument %s\n",argv[a]);return 1;}
     }
     // The image: zeroed, so the ceiling's pointer (image+0x20B2998) reads null: no ceiling (CeilingY 1e9).
@@ -702,6 +877,7 @@ int main(int argc,char** argv) {
     config.debug=true;
     if(playerRotors)return PlayerRotorSuite();
     if(selftest)return SelfTest(outDir);
+    if(strikeRoom)return StrikeRoomSuite(outDir);
     if(tag.empty())tag=std::string(scenario)+"_"+kindName;
     const std::string csvPath=std::string(outDir)+"/"+tag+".csv",logPath=std::string(outDir)+"/"+tag+".log";
     logFile=std::fopen(logPath.c_str(),"w");

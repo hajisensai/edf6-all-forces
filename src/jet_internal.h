@@ -91,8 +91,9 @@ inline constexpr Lean kCarrierLean{kCarrierPitchShare,kThrustDrag,2.5f,1.2f,0.3f
 // mission_setup writes into the speed gain k (veh+0x162C; body506.cpp's range 7001-7099 for jets), and what that
 // mark makes it. The mark is the one source of what a jet is: an entry made again for a jet (JetFrame) reads it.
 enum class Body { strike, fighter, bomber401, bomber501_2, interceptor, multirole, carrier, drone, blast, doll, heli410, heli506,
-                  gunship, blastCarrier, dollCarrier, enemyFighter, primerFighter, centipede, dragonfly, heliMedic };
-constexpr int kBodyCount=20;
+                  gunship, blastCarrier, dollCarrier, enemyFighter, primerFighter, centipede, dragonfly, heliMedic,
+                  heliTransport, transportPlane };
+constexpr int kBodyCount=22;
 struct BodyRow {
     Body body;
     const wchar_t* sgo;
@@ -137,6 +138,10 @@ inline constexpr BodyRow kBodies[kBodyCount]={
     {Body::dragonfly,L"app:/object/edf6vc_dragonfly.sgo",L"EDF6VC_DRAGONFLY.SGO",7013.0f,Role::dragonfly,Role::drone,"dragonfly",true},
     // The medic heli (tools/make_jets.py MEDIC_HELI_FILE): the 410 with healing door guns (heli.cpp Medic).
     {Body::heliMedic,L"app:/object/edf6vc_heli_medic.sgo",L"EDF6VC_HELI_MEDIC.SGO",0.0f,Role::fighter,Role::drone,"heliMedic"},
+    // The transports (tools/make_jets.py TRANSPORT_*; transport.cpp): the 410 with ten passenger seats more, and the bomber401
+    // strike jet with twelve behind its pilot (flown as a strike jet that attacks nothing: jet.cpp JetFerry).
+    {Body::heliTransport,L"app:/object/edf6vc_heli_transport.sgo",L"EDF6VC_HELI_TRANSPORT.SGO",0.0f,Role::fighter,Role::drone,"heliTransport"},
+    {Body::transportPlane,L"app:/object/edf6vc_jet_transport.sgo",L"EDF6VC_JET_TRANSPORT.SGO",7001.0f,Role::strike,Role::drone,"transportPlane"},
 };
 constexpr bool BodiesInOrder() noexcept {
     for(int i=0;i<kBodyCount;++i)if(static_cast<int>(kBodies[i].body)!=i)return false;
@@ -292,6 +297,7 @@ struct Motion {
     ULONGLONG floorLogAt;    // when HoldOffGround last logged it (once a second)
     float thrust[3];         // a rotor craft's (Hover): the thrust its flight asks for, world, m/s^2
     float acc[3];            // a rotor craft's eased acceleration (see Lean::respond)
+    float power;             // a rotor craft's engine, 0..1: its share of its full thrust `thrust` takes (Hover)
     ULONGLONG thrustLogAt;   // Thrusters' last log
     std::uint8_t sweep;      // Ahead's next stretch of its track
     float obstTop,obstAt[3]; // the highest thing Ahead found on its track: its top, where its face was hit
@@ -308,6 +314,9 @@ struct Aim {
     ULONGLONG trackFrame;    // GameFrame of tgtPrev (PickTarget: the velocity from one frame's move only)
     ULONGLONG seenTarget;    // game ms it last had a target
     float out[3];            // extend / run-out / crank direction
+    float outRun;            // m from the target its extend flies out to (Strike: PlanExtend, the room it has)
+    float outAt[3];          // a teardrop extend's turn point (outTear): beside the line out, outRun along it
+    bool outTear;            // its extend is a teardrop to outAt (a box too small to fly straight out and round)
     ULONGLONG missileAt;     // its last missile salvo
     ULONGLONG lockAt;        // game ms the nose came onto the target within kMissileCone (0: not on it)
     ULONGLONG lockSeen;      // standing off with missiles: game ms the lock list last held a target (0: not)
@@ -404,6 +413,15 @@ struct ShellState {
     GunClock guns[static_cast<int>(SideGun::count)];
 };
 
+// The targets a jet goes for by what its stores can strike (the user, 2026-10-09: loads made before the battle, "飞机可以
+// 全带炸弹，或者全带导弹"): carrying only air-to-air stores, flying targets first; only ground ones (air-to-ground
+// missiles, bombs, rockets), ground targets first; mixed, none, or all spent: its kind's own (Kind::prefer). The stores
+// carried, not their rounds left (jet.cpp): a mixed load with one side spent stays mixed. Every
+// stock load keeps its kind's (the fighter's and the interceptor's are air-to-air, the strike jet's and the multirole's
+// mixed), so this changes only a load the player chose (a fighter loaded with bombs now goes for the ground).
+constexpr Prefer LoadoutPrefer(Prefer kind,int airRounds,int groundRounds) noexcept {
+    return airRounds>0 && groundRounds<=0 ? Prefer::air : groundRounds>0 && airRounds<=0 ? Prefer::ground : kind;
+}
 struct Jet {
     ObjRef ref;              // the vehicle: address and weak-this control block, on which a weak reference is
                              // held while the entry is (HoldRef): the block outlives the object, so a destroyed
@@ -414,6 +432,8 @@ struct Jet {
     ULONGLONG lastStep;   // GameMs of the last frame step (GameStep)
     float anchor[3];         // where it patrols when there is no player
     bool reap;               // withdrawn: delete from another object's update (JetReap)
+    bool loadSet;            // loadPrefer read this frame from its stores (jet.cpp; else its kind's preference)
+    Prefer loadPrefer;       // LoadoutPrefer of its stores
     const char* why;         // why it withdrew
     ULONGLONG emptyFrame;    // the game frame its rider was put off for the reap (JetReap: the delete waits for it), 0 none
     bool launched;           // made by JetLaunch: anchor is its strike point
@@ -441,6 +461,15 @@ struct Jet {
     PrimerState primer;
     bool cmdMoving=false;       // reach a new map order before taking another target
     Command cmd{};              // a map command (JetCommand, mapcmd.cpp): what it works round instead (jet.cpp JetFrame)
+    // A map focus order's target (JetCommand: the enemy the player marked, as a squad's focus takes it): attacked before
+    // any other, wherever in the play area, past its order's range and its way to its order's point; let go once it is no
+    // longer among the enemies (dead, gone: PickTarget) or another order comes. Its point and its order stay as they were.
+    ObjRef focus{};
+    // A ferry (JetFerry, transport.cpp: the paratroop plane): straight on to its command point kFerryAlt m over it, taking
+    // no target at all on the way or after (it carries soldiers, not bombs); its withdrawal ends it. Its passes (Ferry):
+    // `ferryOut` once over (or past) the point, flying on along `ferryDir` until it has room to come round for the next.
+    bool ferry=false,ferryOut=false;
+    float ferryDir[3]{};
     unsigned char* Vehicle() const noexcept { return static_cast<unsigned char*>(const_cast<void*>(ref.obj)); }
 };
 constexpr int kMaxJets=64,kPatrolRings=6;
@@ -450,7 +479,17 @@ inline int IndexOf(const Jet& j) noexcept { return static_cast<int>(&j-jets); }
 
 // Retargeting abandons an old attack but preserves ammunition cooldowns and lifecycle flight modes.
 inline void ApplyMapCommand(Jet& j,const Command& cmd,ULONGLONG ms) noexcept {
-    j.cmd=cmd;j.cmdMoving=cmd.order!=Order::none;
+    j.cmd=cmd;j.cmdMoving=cmd.order!=Order::none;j.focus={};
+    j.t.target=nullptr;j.t.trackFrame=0;j.t.lockAt=0;j.t.lockSeen=0;
+    j.carrier.stationFor=nullptr;j.carrier.evadeUntil=0;
+    if(j.mode!=Mode::takeoff && j.mode!=Mode::withdraw && j.mode!=Mode::recover && j.mode!=Mode::bomb)
+        {j.mode=Mode::patrol;j.modeAt=ms;}
+}
+
+// A map focus order: `target` attacked first (Jet::focus); the order and the point it works round are kept. The attack it
+// flew is abandoned as a new order's is (ApplyMapCommand).
+inline void ApplyMapFocus(Jet& j,const ObjRef& target,ULONGLONG ms) noexcept {
+    j.focus=target;
     j.t.target=nullptr;j.t.trackFrame=0;j.t.lockAt=0;j.t.lockSeen=0;
     j.carrier.stationFor=nullptr;j.carrier.evadeUntil=0;
     if(j.mode!=Mode::takeoff && j.mode!=Mode::withdraw && j.mode!=Mode::recover && j.mode!=Mode::bomb)
@@ -527,10 +566,15 @@ void Guard(Jet& j,const float* pos,float clear,float* want,ULONGLONG ms) noexcep
 airbound::Box JetSoftBox(const Jet& j,float* band=nullptr) noexcept;
 // m/s: the most a wing of kind `k` flies inside a play area of half size `half` (turns that fit it; jet_flight.cpp).
 float TightSpeed(const Kind& k,float half) noexcept;
+// m: its turn's radius at `speed` with its stores' `mass` (the g its thrust holds, kTurnWide).
+float TurnRadiusOf(const Kind& k,float mass,float speed) noexcept;
 // The anchor it works round, put inside its soft box less its patrol circle (`room` holds the copy when it moved).
 const float* SoftAnchor(const Jet& j,const float* anchor,float* room) noexcept;
 void HoldOffGround(Jet& j,const float* pos,float clear,float dt,ULONGLONG ms,float rest=0.0f) noexcept;
 float Patrol(const Jet& j,const float* pos,const float* anchor,float height,float* want) noexcept;
+// A ferry's pass over `point` (Jet::ferry, the paratroop plane): at it, over it and straight on, round, back over it.
+// Returns the speed to fly it at (its slowest loiter: the stick jumps over the point).
+float Ferry(Jet& j,const float* pos,const float* point,float height,float* want) noexcept;
 // `lift`: m/s^2 of vertical acceleration apart from the kind's thrust (hover_lift.h: the player's); 0, one budget (the NPCs').
 // `npcGoal`: clamp autonomous goals to the NPC soft band; player control and its hail pass false.
 void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const float* goal,const float* face,float speed,float climb,
