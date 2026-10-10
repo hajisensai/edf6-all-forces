@@ -6022,6 +6022,98 @@ def mab_strings_relaid_as_the_game() -> None:
 
 
 
+
+@test
+def edf41_calls_convert() -> None:
+    """pylib/edf41calls.py on hand-made calls: a vehicle request becomes its EDF6 template's call (class, transport,
+    voices) with the EDF6 vehicle in its place, 4.1's settings with the weapons renamed to EDF6's (a weapon EDF6 split
+    in two: a row each) when laid out as the template's, else the template's, and 4.1's use (AmmoCount, ReloadTime,
+    EnergyChargeRequire as [v, v]); a bomber call takes 4.1's bomber run when laid out as the template's, else refused."""
+    import edf41calls as ec
+    import edf5port
+
+    def call(acp: list, extra: dict | None = None) -> dsgo.Node:
+        r = dsgo.Node([])
+        r.set('xgs_scene_object_class', 'Weapon_Sub')
+        r.set('Ammo_CustomParameter', edf5port.to_value(acp))
+        r.set('AmmoCount', 1.0)
+        r.set('ReloadTime', 600.0)
+        for k, v in (extra or {}).items():
+            r.set(k, v)
+        return r
+
+    template = call([0.05, 180.0, 120.0, 1.0, ['app:/Object/v508_transport.sgo', 'app:/object/v509_transportbox.sgo',
+                     'app:/Object/v504_begaruta.sgo', [[0.5, 0.7], [[ 'app:/weapon/v_504begaruta_cannon01_l.sgo', 1.0],
+                                                                     ['app:/weapon/v_504begaruta_cannon01_r.sgo', 1.0]]]],
+                     ['輸送部隊目標確認', '輸送部隊発射', '輸送部隊攻撃後']])
+    mine = {'Ammo_CustomParameter': [0.05, 180, 120, 1, ['app:/Object/Transporter401.sgo', 'app:/object/Transporter401_ContainerM.sgo',
+                                     'app:/Object/Vehicle406_Begaruta_red.sgo', [[0.4, 0.6], [['app:/weapon/v_406begaruta_cannon01.sgo', 2.0]]]],
+                                     ['x', '輸送部隊発射ベガルタ', 'y']],
+            'AmmoCount': 3, 'ReloadTime': 900, 'EnergyChargeRequire': -1.0}
+    r = ec.vehicle_call(mine, template, ec.VEHICLES['vehicle406_begaruta_red.sgo']).root
+    acp = r.get('Ammo_CustomParameter')
+    drop = acp.items[4]
+    assert drop.items[0] == 'app:/Object/v508_transport.sgo' and drop.items[2] == 'app:/Object/v504_begaruta_red.sgo'
+    assert dsgo.to_py(drop.items[3]) == [[0.4, 0.6], [['app:/weapon/v_504begaruta_cannon01_l.sgo', 2.0],
+                                                      ['app:/weapon/v_504begaruta_cannon01_r.sgo', 2.0]]], dsgo.to_py(drop.items[3])
+    assert dsgo.to_py(acp.items[5]) == ['輸送部隊目標確認', '輸送部隊発射', '輸送部隊攻撃後'], 'not the template\'s voices'
+    assert r.get('AmmoCount') == 3 and r.get('ReloadTime') == 900 and dsgo.to_py(r.get('EnergyChargeRequire')) == [-1.0, -1.0]
+    assert template.get('Ammo_CustomParameter').items[4].items[2] == 'app:/Object/v504_begaruta.sgo', 'the template changed'
+    odd = dict(mine, Ammo_CustomParameter=mine['Ammo_CustomParameter'][:4] + [mine['Ammo_CustomParameter'][4][:3] + [[0.4]]]
+               + mine['Ammo_CustomParameter'][5:])
+    r = ec.vehicle_call(odd, template, 'v504_begaruta_red.sgo').root
+    assert dsgo.to_py(r.get('Ammo_CustomParameter').items[4].items[3]) == dsgo.to_py(template.get('Ammo_CustomParameter').items[4].items[3])
+    bomber = call([30.0, 1.0, ['app:/object/Bomber501.sgo', 2.0, [1.0]], ['a']])
+    r = ec.bomber_call({'Ammo_CustomParameter': [0.05, 120, 180, 2, ['app:/object/Bomber401.sgo', 3, [5.0]]]}, bomber).root
+    assert dsgo.to_py(r.get('Ammo_CustomParameter').items[2]) == ['app:/object/Bomber401.sgo', 3, [5.0]]
+    try:
+        ec.bomber_call({'Ammo_CustomParameter': [0.05, 120, 180, 2, ['app:/object/Bomber401.sgo', 3]]}, bomber)
+    except edf5port.Unsupported:
+        pass
+    else:
+        raise AssertionError('a bomber run laid out otherwise was taken')
+
+
+@test
+def edf41_calls_real() -> None:
+    """The registry's EDF4.1 calls (plan P5): every 4.1 vehicle request is a Weapon_Sub bringing an EDF6 vehicle with
+    EDF6's transport, its weapons all EDF6's; every bomber call a Weapon_RadioContact running a Bomber401; the Whale
+    gunship's calls in EDF6's gunship category; none left out for want of a template."""
+    import collections
+    import edf41calls as ec
+    import ported_weapons as pw
+    import rootcpk
+    with open(os.path.join(ROOT, 'edf41port', 'weapons.json'), encoding='utf-8') as f:
+        reg = json.load(f)
+    kinds = collections.Counter(w['call']['kind'] for w in reg['weapons'] if 'call' in w)
+    assert kinds['vehicle'] == 65 and kinds['bomber'] == 11, kinds
+    assert not [s for s in reg['skipped'] if '呼叫' in s['reason']], 'a call left out'
+    gunships = [w for w in reg['weapons'] if w['category'] == 311]
+    assert len(gunships) == 8 and all(w['class'] == 'Weapon_BasicShoot' for w in gunships)
+    edf6 = rootcpk.DEFAULT_GAME
+    have = None
+    if os.path.isfile(os.path.join(edf6, 'Root.cpk')):
+        g6 = rootcpk.Game(edf6)
+        have = {f'{d}/{n}'.upper() for d, n in g6.cpk.index}
+    by_id = {p.id: p for p in pw.PORTS}
+    for w in reg['weapons']:
+        if 'call' not in w:
+            continue
+        r = dsgo.load(by_id[w['id']].weapon)
+        acp = r.get('Ammo_CustomParameter')
+        if w['call']['kind'] == 'vehicle':
+            assert r.get('xgs_scene_object_class') == 'Weapon_Sub', w['id']
+            drop = acp.items[4]
+            assert ec.leaf(drop.items[2]) == w['call']['vehicle'], w['id']
+            paths = [x for x in _dsgo_strings(drop) if x.lower().startswith('app:/')]
+            assert not any('transporter401' in x.lower() for x in paths), f"{w['id']}: still 4.1's transport"
+            if have is not None:
+                gone = [x for x in paths if x.split(':/', 1)[1].upper() not in have]
+                assert not gone, f"{w['id']}: EDF6 lacks {gone}"
+        else:
+            assert r.get('xgs_scene_object_class') == 'Weapon_RadioContact', w['id']
+            assert ec.leaf(acp.items[2].items[0]) == 'bomber401.sgo', w['id']
+
 @test
 def ported_weapons_registry_current() -> None:
     """Every converted weapon the registries keep ('weapon': EDF5's and EDF4.1's, so the install needs neither game)
@@ -6041,11 +6133,20 @@ def ported_weapons_registry_current() -> None:
             print(f'skip  ported_weapons_registry_current ({g.name}): not installed')
             continue
         game = rootcpk.Game(root)
+        with open(os.path.join(ROOT, *g.registry.split('/')), encoding='utf-8') as f:
+            calls = {w['id']: w['call'] for w in json.load(f)['weapons'] if 'call' in w}
+        templates = None
         for p in pw.PORTS:
             if p.game != g.key or p.source == 'edf6':
                 continue
             members = sgo.read(game.read('WEAPON', p.sgo))[1]
-            assert dsgo.dump(g.convert(members, pw._names(p)).root) == p.weapon, f'{p.id}: registry out of date'
+            if p.id in calls:   # an EDF6 call made of a 4.1 vehicle request / bomber call (plan P5)
+                import make_edf41_weapons as m41
+                templates = templates or m41.CallTemplates(rootcpk.Game(rootcpk.DEFAULT_GAME))
+                made = m41.convert(members, pw._names(p), calls[p.id], templates)
+            else:
+                made = g.convert(members, pw._names(p)).root
+            assert dsgo.dump(made) == p.weapon, f'{p.id}: registry out of date'
             checked += 1
     print(f'  {checked} registry weapons equal to a conversion now')
 

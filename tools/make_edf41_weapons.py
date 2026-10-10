@@ -12,13 +12,15 @@ tools/make_edf5_weapons.py's to bring over.
 
 Category: 4.1 numbers its own (CATEGORY: by soldier and kind, the same kinds EDF6 has), its Air Raider calls by class
 (CALLS). Left out, listed under 'skipped' with why:
-  - the vehicle requests (4.1 categories 36-39): 4.1 drops a vehicle with a Transporter401 its Weapon_Throw calls, a
-    class EDF6 no longer has; and the calls of 31 that are not artillery: the Whale gunship's (Weapon_BasicShoot
-    smoke candles) and the bombers' (Weapon_Throw smoke candles of mode 2, Ammo_CustomParameter[3], bringing
-    Bomber401; every EDF6 call is mode 0, artillery, or 1, a vehicle): docs/edf5-weapons-plan.md P5;
+  - a vehicle request (4.1 categories 36-39) or bomber call (31, Weapon_Throw smoke candle of mode 2) pylib/edf41calls.py
+    has no EDF6 vehicle / template for (plan P5: the rest come over as EDF6 calls, below);
   - a weapon naming a resource EDF6 lacks (make_edf5_weapons.Edf6.missing; mostly decoy models, P3).
 Its class: a Weapon_BasicShoot in a category whose EDF6 weapons are all Weapon_Sub becomes one (edf5port.to_sub), every
-other keeps 4.1's. Template, AmmoDamageAttribute: as make_edf5_weapons. Sound cues: a cue no EDF6 bank holds (it would
+other keeps 4.1's. Calls (plan P5, pylib/edf41calls.py; the entry's 'call' records how): a vehicle request becomes an
+EDF6 call of the EDF6 vehicle in its place (CallTemplates.vehicle: an EDF6 call of that vehicle, the Air Raider's
+categories first, the nearest level: its category and class); the Whale gunship's (Weapon_BasicShoot smoke candle,
+mode 0) is EDF6's gunship category 311 as it is; a bomber call is an EDF6 Weapon_RadioContact bomber call (312) of a
+template whose bomber run is laid out as its own. Template, AmmoDamageAttribute: as make_edf5_weapons. Sound cues: a cue no EDF6 bank holds (it would
 play nothing; pylib/acb.py) takes the template's cue at the same place ('cues'); a weapon with one the template has no
 cue for stays out.
 Texts: names and descriptions JA / EN are 4.1's, CN / SC / KR translated (edf41port/translations.json; 4.1 has no
@@ -41,6 +43,7 @@ sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 sys.path.insert(0, HERE)
 import acb  # noqa: E402
 import dsgo  # noqa: E402
+import edf41calls as ec  # noqa: E402
 import edf5port  # noqa: E402
 import make_edf5_weapons as m5  # noqa: E402
 import rootcpk  # noqa: E402
@@ -277,6 +280,99 @@ def missing_cues(own: dict, swaps: dict[str, str], edf6_cues: set[str], known: s
     return sorted({s for s in m5._strings(own) if s in known and s not in edf6_cues and s not in swaps})
 
 
+class CallTemplates:
+    """EDF6's own calls by what they bring, from its weapon table: vehicle calls (Weapon_Sub) by vehicle, bomber calls
+    (Weapon_RadioContact bringing a bomber: the run comes from the 4.1 call, Bomber401 and all, so the template's bomber
+    only breaks a tie)."""
+
+    # A 4.1 vehicle EDF6 has no call of: the call of its family's.
+    FAMILY = {'vehicle502_groundrobogold.sgo': 'vehicle502_groundrobo.sgo'}
+
+    def __init__(self, game: rootcpk.Game) -> None:
+        self.vehicles: dict[str, list[tuple[float, float, str, dsgo.Node]]] = {}
+        self.bombers: list[tuple[float, float, str, dsgo.Node]] = []
+        for row in dsgo.parse(game.read('WEAPON', 'WEAPONTABLE.SGO')).root.get('table').items:
+            wid, cat, level = row.items[0], float(row.items[2]), float(row.items[4])
+            try:
+                root = dsgo.parse(game.read('WEAPON', f'{wid.upper()}.SGO')).root
+                acp = root.get('Ammo_CustomParameter')
+                cls = root.get('xgs_scene_object_class')
+                if cls == edf5port.SUB and len(acp.items) > 4 and isinstance(acp.items[4], dsgo.Node):
+                    self.vehicles.setdefault(ec.leaf(acp.items[4].items[2]), []).append((cat, level, wid, root))
+                elif cls == 'Weapon_RadioContact' and 'bomber' in str(acp.items[2].items[0]).lower():
+                    self.bombers.append((cat, level, wid, root))
+            except (KeyError, ValueError, AttributeError, IndexError):
+                continue
+
+    def vehicle(self, six: str, level: float) -> tuple[float, float, str, dsgo.Node] | None:
+        calls = self.vehicles.get(six) or self.vehicles.get(self.FAMILY.get(six, ''), [])
+        air = [c for c in calls if c[0] >= 300] or calls
+        return min(air, key=lambda c: (abs(c[1] - level), c[2])) if air else None
+
+    def bomber(self, run: object, level: float) -> tuple[float, float, str, dsgo.Node] | None:
+        alike = [c for c in self.bombers if ec.shape(c[3].get('Ammo_CustomParameter').items[2]) == ec.shape(run)]
+        return min(alike, key=lambda c: ('bomber401' not in str(c[3].get('Ammo_CustomParameter').items[2].items[0]).lower(),
+                                         abs(c[1] - level), c[2])) if alike else None
+
+
+GUNSHIP = 311   # EDF6's gunship calls (the Whale's 105 mm etc.), Weapon_BasicShoot smoke candles of mode 0 as 4.1's
+
+
+def call_template(templates: CallTemplates, call: dict) -> dsgo.Node:
+    """The EDF6 call `call` (an entry's 'call') was made from."""
+    pool = templates.bombers if call['kind'] == 'bomber' else [c for cs in templates.vehicles.values() for c in cs]
+    return next(c[3] for c in pool if c[2] == call['template'])
+
+
+def convert(members: dict, names: dict[str, str], call: dict | None, templates: CallTemplates) -> dsgo.Node:
+    """The EDF6 weapon a 4.1 weapon's SGO members become: edf5port.weapon41, or for a call (its entry's 'call') the
+    EDF6 call edf41calls makes of it; named in every language."""
+    if call is None:
+        return edf5port.weapon41(members, names).root
+    template = call_template(templates, call)
+    doc = (ec.vehicle_call(members, template, call['vehicle']) if call['kind'] == 'vehicle'
+           else ec.bomber_call(members, template))
+    for lang, name in names.items():
+        doc.root.set(f'name.{lang}', name)
+    return doc.root
+
+
+def call_entry(g4: rootcpk.Game, file: str, cat41: int, level: float, templates: CallTemplates,
+               e6: m5.Edf6) -> tuple[dict, int, str, str] | str:
+    """(its 'call', category, class, template) for a 4.1 vehicle request or bomber call, else why it stays out."""
+    members = sgo.read(g4.read('WEAPON', file))[1]
+    acp = members.get('Ammo_CustomParameter')
+    if cat41 in VEHICLES:
+        six = ec.VEHICLES.get(ec.leaf(acp[4][2]))
+        if six is None:
+            return f'载具呼叫：没有对应的 EDF6 载具（{ec.leaf(acp[4][2])}）'
+        found = templates.vehicle(six, level)
+        if found is None:
+            return f'载具呼叫：EDF6 没有 {six} 的呼叫可作模板'
+        call = {'kind': 'vehicle', 'template': found[2], 'vehicle': six}
+    else:
+        found = templates.bomber(edf5port.to_value(sgo.plain(acp[4])), level)
+        if found is None:
+            return '轰炸机呼叫：EDF6 没有同样排法的轰炸呼叫可作模板'
+        call = {'kind': 'bomber', 'template': found[2]}
+    try:
+        doc = convert(members, {}, call, templates)
+    except edf5port.Unsupported as e:
+        return f'转换不支持：{e}'
+    missing = sorted(e6.missing({p for p in _dsgo_strings(doc) if p.lower().startswith('app:/')}))
+    if missing:
+        return 'EDF6 没有这些资源：' + ', '.join(missing)
+    return call, int(found[0]), found[3].get('xgs_scene_object_class'), found[2]
+
+
+def _dsgo_strings(v: object) -> list[str]:
+    if isinstance(v, str):
+        return [v]
+    if isinstance(v, dsgo.Node):
+        return [x for c in v.items for x in _dsgo_strings(c)]
+    return []
+
+
 def build(edf41: str, edf5: str, edf6: str) -> dict:
     g4 = rootcpk.Game(edf41)
     g5 = rootcpk.Game(edf5)
@@ -293,6 +389,7 @@ def build(edf41: str, edf5: str, edf6: str) -> dict:
     rows = plain_table(g4, '_WEAPONTABLE.SGO', 'table')
     texts = plain_table(g4, '_WEAPONTEXT.SGO', 'text_table')
     ja6 = [r[0] for r in plain_table(e6.game, 'WEAPONTEXT.JA.SGO', 'text_table')]
+    templates = CallTemplates(e6.game)
     weapons, skipped = [], []
     for i, (row, text) in enumerate(zip(rows, texts)):
         sgo_id, path, cat41, _one, level, _acquire = row
@@ -305,34 +402,46 @@ def build(edf41: str, edf5: str, edf6: str) -> dict:
         cls = own['xgs_scene_object_class']
         ammo = own.get('AmmoClass', '')
         cat41 = int(cat41)
-        if cat41 in VEHICLES:
-            skipped.append({'sgo': sgo_id, 'name': ja, 'reason': '载具呼叫：4.1 用 Transporter401 投送，EDF6 已没有这个类（P5）'})
-            continue
         custom = own.get('Ammo_CustomParameter')
         mode = custom[3] if isinstance(custom, list) and len(custom) > 3 and isinstance(custom[3], (int, float)) else 0
-        if cat41 == 31 and (cls not in CALLS or (ammo == 'SmokeCandleBullet01' and mode != 0)):
-            skipped.append({'sgo': sgo_id, 'name': ja, 'reason': '攻击机 / 轰炸机呼叫：EDF6 没有这种呼叫方式（P5）'})
+        call = None
+        if cat41 in VEHICLES or (cat41 == 31 and cls == 'Weapon_Throw' and ammo == 'SmokeCandleBullet01' and mode == 2):
+            entry = call_entry(g4, file, cat41, float(level), templates, e6)
+            if isinstance(entry, str):
+                skipped.append({'sgo': sgo_id, 'name': ja, 'reason': entry})
+                continue
+            call, category, cls, template = entry
+        elif cat41 == 31 and cls == 'Weapon_BasicShoot' and ammo == 'SmokeCandleBullet01' and mode == 0:
+            category = GUNSHIP   # the Whale gunship's call: EDF6's own gunship calls are this
+        elif cat41 == 31 and (cls not in CALLS or (ammo == 'SmokeCandleBullet01' and mode != 0)):
+            skipped.append({'sgo': sgo_id, 'name': ja, 'reason': '攻击机 / 轰炸机呼叫：EDF6 没有这种呼叫方式'})
             continue
-        if cat41 == 31:
+        elif cat41 == 31:
             category = CALLS[cls] or airstrike_category(ja, e6, ja6)
         else:
             category = CATEGORY[cat41]
-        missing = sorted(e6.missing({p for p in m5._strings(own) if p.lower().startswith('app:/')}))
-        if missing:
+        if call is not None:
+            pass   # call_entry checked what the EDF6 call names
+        else:
+            missing = sorted(e6.missing({p for p in m5._strings(own) if p.lower().startswith('app:/')}))
+        if call is None and missing:
             skipped.append({'sgo': sgo_id, 'name': ja, 'reason': 'EDF6 没有这些资源：' + ', '.join(missing)})
             continue
         members = sgo.read(g4.read('WEAPON', file))[1]
-        try:   # what the install will do with it (tools/ported_weapons.py build_sgo): refused here, not there
-            edf5port.weapon41(members, {})
-        except edf5port.Unsupported as e:
-            skipped.append({'sgo': sgo_id, 'name': ja, 'reason': f'转换不支持：{e}'})
-            continue
-        if category in subs and cls == 'Weapon_BasicShoot':
-            cls = edf5port.SUB
-        category = e6.category_for(category, cls, ammo, subs)
-        template = e6.template(category, cls, ammo, float(level))
-        swaps = cue_swaps(own, e6.weapon(f'{template}.SGO'), cues6, cues41)
-        silent = missing_cues(own, swaps, cues6, cues41)
+        if call is None:
+            try:   # what the install will do with it (tools/ported_weapons.py build_sgo): refused here, not there
+                edf5port.weapon41(members, {})
+            except edf5port.Unsupported as e:
+                skipped.append({'sgo': sgo_id, 'name': ja, 'reason': f'转换不支持：{e}'})
+                continue
+            if category in subs and cls == 'Weapon_BasicShoot':
+                cls = edf5port.SUB
+            category = e6.category_for(category, cls, ammo, subs)
+            template = e6.template(category, cls, ammo, float(level))
+            swaps = cue_swaps(own, e6.weapon(f'{template}.SGO'), cues6, cues41)
+            silent = missing_cues(own, swaps, cues6, cues41)
+        else:   # an EDF6 call's cues are its template's (4.1's vehicle-named voices are in no EDF6 bank)
+            swaps, silent = {}, []
         if silent:
             skipped.append({'sgo': sgo_id, 'name': ja, 'reason': 'EDF6 没有这些音效且无可替换：' + ', '.join(silent)})
             continue
@@ -363,10 +472,23 @@ def build(edf41: str, edf5: str, edf6: str) -> dict:
             'damage_attribute': e6.damage_attribute(category, ammo), 'cues': swaps,
             'unmapped_stats': len(left_ja),
             # The weapon itself, converted here: the install builds it from this, with no EDF4.1.
-            'weapon': dsgo.dump(edf5port.weapon41(members, {L.lower(): names[L] for L in LANGS}).root),
+            'weapon': dsgo.dump(convert(members, {L.lower(): names[L] for L in LANGS}, call, templates)),
+            **({'call': call} if call is not None else {}),
         })
     return {'source': "EDF4.1 Root.cpk WEAPON/_WEAPONTABLE.SGO + _WEAPONTEXT.SGO; CN / SC / KR edf41port/translations.json",
-            'weapons': weapons, 'skipped': skipped}
+            'weapons': released_first(weapons), 'skipped': skipped}
+
+
+def released_first(weapons: list[dict]) -> list[dict]:
+    """`weapons` with the ones the registry already lists first, in its order, the new ones after in table order: a
+    released registry's ids stay its prefix (the table rows an install wrote are kept by id and index;
+    tools/selftest.py edf5_weapons_registry)."""
+    if not os.path.isfile(OUT):
+        return weapons
+    with open(OUT, encoding='utf-8') as f:
+        before = [w['id'] for w in json.load(f)['weapons']]
+    at = {wid: k for k, wid in enumerate(before)}
+    return sorted(weapons, key=lambda w: (0, at[w['id']]) if w['id'] in at else (1, 0))
 
 
 def main() -> int:
