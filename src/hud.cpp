@@ -4239,17 +4239,37 @@ void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,
 
 void QMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept;
 
-// The map view open: its marks drawn (true), nothing else of the HUD.
+#include "hud_stats.inc"
+
+// The map's click targets dropped (the map shut, or the stats page over it: nothing under the page takes a click).
+void MapTargetsNone() noexcept {
+    MapCommandButtons(nullptr,nullptr,0);MapCommandSquadButtons(nullptr,nullptr,0);MapCommandSquadFold(nullptr);
+    MapCommandFormationButtons(nullptr,nullptr,0);MapCommandComposeButtons(nullptr,nullptr,0);
+    MapCommandPayloadButtons(nullptr,0,0,nullptr,0);MapCommandSupportButtons(nullptr,nullptr,0);MapCommandUiPanels(nullptr,0);
+}
+
+// The map view open: its marks drawn (true), nothing else of the HUD; the damage statistics' page in their place while it
+// is shown.
 bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
     static MapReadout m;   // the draw thread's (too big for its stack)
-    if(!PlayerMap(&m)){
-        MapCommandButtons(nullptr,nullptr,0);MapCommandSquadButtons(nullptr,nullptr,0);MapCommandSquadFold(nullptr);
-        MapCommandFormationButtons(nullptr,nullptr,0);
-        MapCommandPayloadButtons(nullptr,0,0,nullptr,0);MapCommandSupportButtons(nullptr,nullptr,0);MapCommandUiPanels(nullptr,0);return false;
-    }
+    static dmgstat::Book book;   // the last copy of the statistics (copied again only when they moved)
+    if(!PlayerMap(&m)){MapTargetsNone();DamageStatsUi(nullptr,nullptr,0,0,0);return false;}
     s=hudscale::FitMap(s,width,height);
     if(text)text->s=s;
     mapUiPanelCount=0;mapTip.on=false;
+    bool fresh=false;
+    dmgstat::View statsView{};
+    std::uint32_t missionMs=0;
+    const bool stats=DamageStatsRead(&book,&fresh,&statsView,&missionMs);
+    if(stats && statsView.open) {
+        MapTargetsNone();
+        MapCommandView(vp,width,height);   // the pointer moves on this view
+        MapCommandReadout c{};
+        const bool pointer=PlayerMapCommands(&c) && c.pointer && !m.pad;
+        StatsPage(drawer,ctx,text,width,height,s,book,statsView,missionMs,m.pad,StatsPointer{pointer,c.px,c.py},lines,at);
+        MapCommandUiPanels(mapUiPanels,mapUiPanelCount);
+        return true;
+    }
     MapGrid(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapUnits(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapCommandView(vp,width,height);   // the commands' box, clicks and pointer are found on this view
@@ -4260,6 +4280,8 @@ bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     MapUiBox(drawer,ctx,width-134*s,54*s,width-6*s,174*s,lines,*at);
     MapCompass(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapText(drawer,ctx,text,width,height,s,m,lines,at);
+    if(stats)StatsMapTab(drawer,ctx,text,width,height,s,lines,at);
+    else DamageStatsUi(nullptr,nullptr,0,0,0);
     if(!m.pad)MapTipDraw(drawer,ctx,text,width,height,s,lines,at);   // over everything: drawn last
     MapCommandUiPanels(mapUiPanels,mapUiPanelCount);
     MapCommandReadout pointer{};

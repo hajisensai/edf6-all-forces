@@ -237,6 +237,7 @@ void Validate(Config& n) noexcept {
     n.mapKey=static_cast<int>(FixInt("MapKey",n.mapKey,0,254));
     n.mapButton=static_cast<int>(FixInt("MapButton",n.mapButton,0,0xFFFF));
     if(n.mapViewDistance!=0.0f)Fix("MapViewDistance",n.mapViewDistance,1000.0f,10000.0f);
+    n.damageStatsKey=static_cast<int>(FixInt("DamageStatsKey",n.damageStatsKey,0,254));
     n.debugSpawnKey=static_cast<int>(FixInt("DebugSpawnKey",n.debugSpawnKey,0,254));
     n.debugSpawnPrevKey=static_cast<int>(FixInt("DebugSpawnPrevKey",n.debugSpawnPrevKey,0,254));
     n.debugSpawnNextKey=static_cast<int>(FixInt("DebugSpawnNextKey",n.debugSpawnNextKey,0,254));
@@ -543,6 +544,8 @@ void LoadConfig() noexcept {
     n.mapKey=ReadInt(L"MapKey",static_cast<DWORD>(n.mapKey));
     n.mapButton=ReadInt(L"MapButton",static_cast<DWORD>(n.mapButton));
     n.mapViewDistance=ReadFloat(L"MapViewDistance",n.mapViewDistance);
+    n.damageStats=ReadBool(L"DamageStats",n.damageStats);
+    n.damageStatsKey=ReadInt(L"DamageStatsKey",static_cast<DWORD>(n.damageStatsKey));
     n.debugSpawn=ReadBool(L"DebugSpawn",n.debugSpawn);   // off unless the ini says 1 (an old ini without it: off)
     n.debugSpawnKey=ReadInt(L"DebugSpawnKey",static_cast<DWORD>(n.debugSpawnKey));
     n.debugSpawnPrevKey=ReadInt(L"DebugSpawnPrevKey",static_cast<DWORD>(n.debugSpawnPrevKey));
@@ -707,6 +710,7 @@ void LoadConfig() noexcept {
     Log("CONFIG sightZoom=%d key=0x%X button=0x%X",n.sightZoom,n.sightZoomKey,n.sightZoomButton);
     Log("CONFIG nixTorsoTwist=%d",n.nixTorsoTwist);
     Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f",n.map,n.mapKey,n.mapButton,n.mapViewDistance);
+    Log("CONFIG damageStats=%d key=0x%X",n.damageStats,n.damageStatsKey);
     Log("CONFIG debugSpawn=%d keys menu=0x%X prev=0x%X next=0x%X category=0x%X spawn=0x%X range=%.0f distance=%.0f",n.debugSpawn,
         n.debugSpawnKey,n.debugSpawnPrevKey,n.debugSpawnNextKey,n.debugSpawnCategoryKey,n.debugSpawnSpawnKey,n.debugSpawnRange,
         n.debugSpawnDistance);
@@ -932,6 +936,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallLaser();
     InstallGauge();         // the follower gauge's draw (subcarrier.cpp): the carriers' gauges and the vehicle HUD
     InstallHud();
+    InstallDamageStats();   // the damage function's head and the rounds' spawn (damagestats.cpp): the statistics' page over the map
     InstallRounds();        // the stock vehicles' and helis' impact points: the rounds as the game flies them
     InstallStockGauges();   // the stock weapon gauge where our HUD lists the weapons, the fuel tanks it showed
     InstallGlyphLock();     // the game's own text, wrong or missing characters (glyphs.cpp)

@@ -84,6 +84,7 @@ void MissionStart() noexcept {
     ResetTurretCam();
     ResetStabilizer();
     ResetMap();
+    ResetDamageStats();
     ResetHeliSight();
     ResetStockHud();
     ResetStockGauges();

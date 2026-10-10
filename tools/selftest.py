@@ -4385,6 +4385,41 @@ def play_area_wired() -> None:
 
 
 @test
+def damage_stats_wired() -> None:
+    """The damage statistics (src/damagestats.cpp, README 伤害统计, docs/damage-stats-re.md): its ini keys are read,
+    range-checked, shipped and documented; the addresses it hooks are the doc's; it never touches the damage call
+    0x54A586 (subcarrier.cpp's DamageCallReaches needs it stock); with the game present, 0x547C30's head is the bytes
+    the detour copies and each call it redirects is an E8 to the function it expects; it is installed, reset with the
+    mission, built, and its offline checks are wired."""
+    plugin, ini, readme, doc = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md'), src('docs/damage-stats-re.md')
+    code, cmake, mission = src('src/damagestats.cpp'), src('CMakeLists.txt'), src('src/mission.cpp')
+    for key in ('DamageStats', 'DamageStatsKey'):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
+    assert 'FixInt("DamageStatsKey"' in plugin, 'DamageStatsKey is not range-checked'
+    consts = {m.group(1): int(m.group(2), 16) for m in re.finditer(r'\b(k\w+)=(0x[0-9A-F]+)\b', code)}
+    for name in ('kDamage', 'kSpawn', 'kSpawnCall', 'kSettle', 'kArea'):
+        assert f'{consts[name]:#X}'.replace('0X', '0x') in doc, name
+    settle = [int(v, 16) for v in re.search(r'kSettleCalls\[\]=\{([^}]*)\}', code).group(1).split(',')]
+    area = [int(v, 16) for v in re.search(r'kAreaCalls\[\]=\{([^}]*)\}', code).group(1).split(',')]
+    assert settle == [0x232702, 0x23426F] and area == [0x23250E, 0x5425D6, 0x5427BF], (settle, area)
+    assert '0x54A586' not in re.sub(r'//.*', '', code), 'the damage call 0x54A586 must stay stock (subcarrier.cpp DamageCallReaches)'
+    assert 'InstallDamageStats();' in plugin and 'ResetDamageStats();' in mission and 'src/damagestats.cpp' in cmake
+    assert 'add_executable(damage_stats_check' in cmake and 'damage_stats_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0]
+    assert 'StatsScenes(dir);' in src('tools/hud_view.cpp') and 'crew::StatsPage();' in src('tools/map_command_runtime_check.cpp')
+    import rootcpk
+    dll = os.path.join(rootcpk.DEFAULT_GAME, 'EDF.dll')
+    if os.path.exists(dll):
+        import edfre
+        head = bytes(int(b, 16) for b in re.findall(r'0x[0-9A-F]+', re.search(r'kDamageHead\[\]=\{(.*?)\};', code, re.S).group(1)))
+        assert edfre.img[consts['kDamage']:consts['kDamage'] + len(head)] == head, 'the damage function head'
+        for site, target in [(consts['kSpawnCall'], consts['kSpawn'])] + [(s, consts['kSettle']) for s in settle] + \
+                            [(s, consts['kArea']) for s in area]:
+            assert edfre.img[site] == 0xE8, hex(site)
+            rel = int.from_bytes(edfre.img[site + 1:site + 5], 'little', signed=True)
+            assert site + 5 + rel == target, (hex(site), hex(site + 5 + rel), hex(target))
+
+
+@test
 def map_wired() -> None:
     """The map view (src/map.cpp, README 功能 17, docs/camera-re.md §8): its ini keys are read, range-checked, shipped and
     documented; the EDF.dll addresses it patches are the doc's, and with the game present its code signatures are the
@@ -4446,11 +4481,12 @@ def map_wired() -> None:
             want = bytes(int(b, 16) for b in re.findall(r'0x[0-9A-F]+', re.search(rf'{arr}\[\]=\{{(.*?)\}};', code, re.S).group(1)))
             assert edfre.img[at:at + len(want)] == want, (arr, hex(at))
 
-    # Closed by a key: the hold stays until every closing key is let go (the closing B is no seat switch, no stock B action).
+    # Closed by a key: the hold stays until every closing key is let go (the closing B is no seat switch, no stock B action;
+    # the damage statistics' key, which shuts the map from its page, drains the same way).
     frame = code.split('bool Frame(unsigned char* human)', 1)[1].split('\n}\n', 1)[0]
-    shut = frame.index('Close(close ? "Esc / B" : "the map key");')
+    shut = frame.index('Close(close ? "Esc / B" : stats ? "the stats key" : "the map key");')
     assert shut < frame.index('game.draining=true;holds.store(true);') < frame.index(
-        'if(k.map || k.esc || k.padMap || k.padClose)return true;') < frame.index('if(!game.open) {'), 'map: the closing key drains'
+        'if(k.map || k.esc || k.padMap || k.padClose || k.stats)return true;') < frame.index('if(!game.open) {'), 'map: the closing key drains'
     assert 'if(game.draining){game.draining=false;holds.store(false);}' in code.split('void Close(const char* why)', 1)[1].split('\n}', 1)[0]
     # Every key the plugin reads gives way to the map.
     for rel in ('src/heli.cpp', 'src/highcam.cpp', 'src/payload.cpp', 'src/playerjet.cpp', 'src/seatswitch.cpp', 'src/turretcam.cpp',

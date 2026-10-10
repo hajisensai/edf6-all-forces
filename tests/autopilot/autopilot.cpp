@@ -122,6 +122,19 @@ SHORT WINAPI KeyState(int vk) {
     return vk>=0 && vk<kKeyCodes && held[vk] ? static_cast<SHORT>(0x8000) : 0;
 }
 
+// EDF6VehicleCrew reads its own keys (the map's M, the damage statistics' I, ...) with GetAsyncKeyState and checks
+// GetForegroundWindow itself, through its own imports: those two are pointed here too once it is loaded (it loads after
+// this plugin), so a background run can press the plugin's keys the way it presses the game's.
+bool pluginInput=false;
+void PatchPluginInput() noexcept {
+    const HMODULE crew=GetModuleHandleW(L"EDF6VehicleCrew.dll");
+    if(!crew)return;
+    pluginInput=true;
+    const bool fore=PatchImport(crew,"USER32.dll","GetForegroundWindow",reinterpret_cast<void*>(&Foreground))!=nullptr;
+    const bool keys=PatchImport(crew,"USER32.dll","GetAsyncKeyState",reinterpret_cast<void*>(&KeyState))!=nullptr;
+    Log("BACKGROUND EDF6VehicleCrew's input: foreground=%d asyncKeys=%d",fore,keys);
+}
+
 // --- The system mouse and the desktop's activation stay the user's (2026-10-10: a background run pulled the user's
 // mouse to the right edge of the desktop, where the off-screen game window's centre clamps).
 // The cause, measured (tests/autopilot drive.py run, the BACKGROUND rows): told it is the foreground window (Foreground
@@ -658,6 +671,7 @@ DWORD WINAPI Loop(void*) {
         }
         PollCommand();
         if(!padIn)InstallPad();
+        if(!pluginInput)PatchPluginInput();
         autopilot::AirdropProbeTick();
         Sleep(15);
     }
