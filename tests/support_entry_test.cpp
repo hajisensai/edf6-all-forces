@@ -34,7 +34,10 @@ int main() {
     check(AirRoute(area,stock,target,observer,preferred,150,0,clear,mapGround(area),route)==Refusal::none,"an entry off the map");
     check(PastGround(area,route.from)>=kOffMap-0.01f,"the entry stands past the ground's edge, not on the map");
     check(InSquare(route.from,stock.half),"the entry inside the physical square");
-    check(route.beyond && FlatDistance(route.from,observer)>=stock.draw+kDrawClear,"past the caller's draw distance");
+    const Route visibleRoute=route;
+    check(AirRoute(area,{stock.half,100000.0f},target,observer,preferred,150,0,clear,mapGround(area),route)==Refusal::none,
+          "unlimited view never refuses an otherwise valid air entry");
+    check(route.from[0]==visibleRoute.from[0] && route.from[2]==visibleRoute.from[2],"draw distance does not change the air entry");
     check(FlatDistance(route.from,target)>=kMinJourney,"arrival has visible journey");
     check(route.from[1]==150,"altitude above real ground");
     check(route.heading[0]*route.heading[0]+route.heading[2]*route.heading[2]>0.999f,"normalised heading");
@@ -61,7 +64,7 @@ int main() {
     const float atTarget[3]={0,0,0};
     check(AirRoute(area,distant,target,atTarget,preferred,150,0,clear,mapGround(area),route)==Refusal::none,"an entry with none past the draw distance");
     check(PastGround(area,route.from)>=kOffMap-0.01f && InSquare(route.from,distant.half),"still off the map, inside the square");
-    check(!route.beyond && FlatDistance(route.from,atTarget)>2700.0f*1.41f-150.0f,"none past it: the farthest (a corner of the square)");
+    check(!route.beyond && FlatDistance(route.from,atTarget)<2700.0f,"visible air entry uses nearest valid approach instead of a far corner");
     // A square with no room past the ground: refused, never made on the map.
     const Reach cramped{1100,1000};
     check(AirRoute(area,cramped,target,observer,preferred,150,0,clear,mapGround(area),route)==Refusal::noEntry,
@@ -75,8 +78,8 @@ int main() {
         const Reach big{5700,3000};
         const float turn=266.0f;   // the strike body's ferry turn (jet_flight.cpp FerryTurn at 98 m/s)
         check(AirRoute(log,big,point,caller,east,150,turn,clear,mapGround(log),route)==Refusal::none,"the log's call: an entry");
-        check(PastGround(log,route.from)>=kOffMap-0.01f && route.beyond && FlatDistance(route.from,caller)>=3200.0f-0.5f,
-              "the log's call: off the map and past the 3000 m draw distance");
+        check(PastGround(log,route.from)>=kOffMap-0.01f && InSquare(route.from,big.half),
+              "the log's call: physical map and turning constraints still apply");
         // Its line: entry, point and far end on one straight line, the far end off the map past the point.
         const float ax=point[0]-route.from[0],az=point[2]-route.from[2],bx=route.to[0]-point[0],bz=route.to[2]-point[2];
         check(std::fabs(ax*bz-az*bx)<1e-2f*std::sqrt((ax*ax+az*az)*(bx*bx+bz*bz)) && ax*bx+az*bz>0.0f,"entry, point and exit on one straight line");
@@ -108,15 +111,15 @@ int main() {
     check(entries.count>=kGroundBearings,"a central target on a stock map has ground entry candidates");
     for(int i=0;i<entries.count;++i) {
         const float p[3]={entries.at[i][0],0,entries.at[i][1]};
-        check(FlatDistance(p,centre)>=kMinJourney-0.5f && FlatDistance(p,caller)>=kObserverClear,"every entry: a journey, away from the caller");
+        check(FlatDistance(p,centre)>=kGroundMinJourney-0.5f,"every entry has a physical delivery journey, visibility unrestricted");
         check(std::fabs(p[0]-centre[0])<256*kGroundPlanCell && std::fabs(p[2]-centre[2])<256*kGroundPlanCell,
               "every entry inside the planner's square round it");
         check(p[0]>=stockMap.lo[0]+kEntryInset-0.01f && p[0]<=stockMap.hi[0]-kEntryInset+0.01f && p[2]>=stockMap.lo[1]+kEntryInset-0.01f &&
               p[2]<=stockMap.hi[1]-kEntryInset+0.01f,"every entry inside the measured play area");
     }
     const float east[3]={900,0,0};const auto away=GroundEntryCandidates(stockMap,centre,east,1000.0f,none);
-    const float first[3]={away.at[0][0],0,away.at[0][1]},second[3]={away.at[1][0],0,away.at[1][1]};
-    check(away.count>0 && FlatDistance(first,east)>=FlatDistance(second,east),"within a ring the farthest from the caller is tried first");
+    check(away.count==entries.count && away.at[0][0]==entries.at[0][0] && away.at[0][1]==entries.at[0][1],
+          "caller position never biases ground entry selection");
     const PlayArea corner{{-700,-700},{700,700},true,0,true};const float edge[3]={650,0,650};
     const auto few=GroundEntryCandidates(corner,edge,nullptr,1000.0f,none);
     for(int i=0;i<few.count;++i)check(few.at[i][0]<=670 && few.at[i][1]<=670,"no entry past a near map edge");
@@ -125,20 +128,16 @@ int main() {
     // distance, then hidden behind the map, the visible ones last.
     {
         const float west[3]={-600,0,455};
-        const auto hiddenEast=[&](const float* p){return p[0]>centre[0]+100.0f;};   // a ridge east of the target
+        int sightQueries=0;
+        const auto hiddenEast=[&](const float*){++sightQueries;return true;};
         const auto seen=GroundEntryCandidates(stockMap,centre,west,1000.0f,hiddenEast);
         check(seen.count>0,"candidates with a ridge");
-        for(int i=1;i<seen.count;++i)check(seen.seen[i-1]<=seen.seen[i],"the ones out of sight before the visible ones");
-        int unseen=0;
-        for(int i=0;i<seen.count;++i) {
-            const float p[3]={seen.at[i][0],0,seen.at[i][1]};
-            const Seen want=FlatDistance(p,west)>=1000.0f+kDrawClear ? Seen::beyond : hiddenEast(p) ? Seen::hidden : Seen::visible;
-            check(seen.seen[i]==want,"each candidate's sight as the caller has it");
-            unseen+=want!=Seen::visible;
-        }
-        check(unseen>0 && seen.seen[0]!=Seen::visible,"an unseen entry is tried first");
+        check(sightQueries==0,"ground entries perform no visibility probes");
+        check(seen.count==entries.count,"hidden geometry never filters valid entry candidates");
+        for(int i=0;i<seen.count;++i)check(seen.at[i][0]==entries.at[i][0] && seen.at[i][1]==entries.at[i][1],
+            "hidden geometry and caller position never reorder candidates");
         // The field's edge on a bearing, where it is within the rings' reach: a target near the east edge.
-        const float nearEdge[3]={800,0,0};
+        const float nearEdge[3]={1197,0,0};
         const auto edgeEntries=GroundEntryCandidates(stockMap,nearEdge,nullptr,1000.0f,none);
         bool onEdge=false;
         for(int i=0;i<edgeEntries.count;++i)onEdge=onEdge || std::fabs(edgeEntries.at[i][0]-(stockMap.hi[0]-kEntryInset))<0.5f;
