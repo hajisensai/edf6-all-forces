@@ -27,6 +27,7 @@ const unsigned char* pickedWeapon=nullptr;
 float originalFov=sightzoom::kBaseFov;
 const float thirdPerson[16]={1,0,0,0,0,1,0,0,0,0,1,0,25,12,-20,1};
 int checks=0,failures=0;
+int autoSteers=0,remaps=0;bool remapOk=true;   // EDF6AutoTurret's Steers answer; stab.cpp RemapAimAxis's bone map
 void Check(bool ok,const char* name){++checks;if(!ok){++failures;std::printf("FAIL %s\n",name);}}
 void __fastcall Original(void* cam,void*) {
     if(originalWrites) {
@@ -43,6 +44,7 @@ void Setup() {
     muzzleDirection[0]=muzzleDirection[1]=0;muzzleDirection[2]=1;
     mapKeys=false;mapView=false;highView=false;sazabiVehicle=false;paused=false;originalWrites=true;originalFov=sightzoom::kBaseFov;playerHuman=human;
     highActive=highReturning=heliVehicle=aircraft=gunship=fuel=lobbed=false;roundSpeed=roundFactor=0.0f;wheelNotches=0;knownRound=hud=true;roundKind=RoundKind::arc;roundStyle=WeaponStyle::projectile;pickedWeapon=nullptr;
+    autoSteers=0;remaps=0;remapOk=true;
     std::memset(weapon,0,sizeof(weapon));std::memset(secondWeapon,0,sizeof(secondWeapon));
     Put<void*>(holder,kHolderWeapon,weapon);Put<void*>(secondHolder,kHolderWeapon,secondWeapon);
     Put<int>(weapon,edf::kWeaponAmmoAlive,120);Put<int>(secondWeapon,edf::kWeaponAmmoAlive,120);
@@ -77,6 +79,19 @@ void Setup() {
 void Button(unsigned short mask){Put<unsigned short>(seats,kSeatButtons,mask);SightZoomStock(vehicle);}
 void Zoom(){Button(0);Button(0x80);Check(SightZoomNow(vehicle)==3.0f,"pad release/press selects 3x");}
 float Fov(){CamStepHook(camera,nullptr);return At<float>(camera,kCamFov);}
+// Seat 0's aim (seat+0xE0): its pitch axis {min, max, angle, rate} and the params' top rate, as docs/nix-re.md §3 has them.
+unsigned char* Aim(){return seats+kSeatAim;}
+float* Pitch(){return reinterpret_cast<float*>(Aim()+kAimAxes+kAxisStride);}
+void Axis(float lo,float hi,float top){Pitch()[0]=lo;Pitch()[1]=hi;Pitch()[2]=0.0f;Put<float>(Aim(),kAimParams+8,top);}
+// One aim step of the seat (stab.cpp StepHook: the stock step left the axis as it is), then the drawn barrel posed from
+// the axis (the pitch negative up) so the muzzle's direction is the gun's.
+void LayFrame() {
+    SightLayStep(Aim(),Pitch()[2]);
+    const float e=-Pitch()[2];
+    muzzleDirection[0]=0.0f;muzzleDirection[1]=std::sin(e);muzzleDirection[2]=std::cos(e);
+}
+// The camera's line of sight's elevation, rad (LookFixture puts the view's direction in the third row).
+float Sight(){Fov();return std::asin(At<float>(camera,kCamMatrix+36));}
 }
 unsigned char* BoneRecord506(const unsigned char*,const wchar_t* name) noexcept {
     if(extraOptic && std::wcscmp(name,L"vc_optic_01")==0)return bones+4*weaponmount::kStride;
@@ -102,6 +117,12 @@ PluginBody BodyOf(const void*) noexcept{return aircraft ? PluginBody::jet : saza
 bool IsFuelTank(const unsigned char*) noexcept{return fuel;}
 unsigned char* PayloadPicked(const void*) noexcept{return nullptr;} // store selection is not the fire-control selection
 unsigned char* PayloadSightPicked(const void*,unsigned) noexcept{return const_cast<unsigned char*>(pickedWeapon ? pickedWeapon : weapon);}
+int AutoTurretSteers(const void*,unsigned) noexcept{return autoSteers;}
+bool AimAxisAdjustable() noexcept{return remapOk;}
+bool RemapAimAxis(unsigned char* aim,int axis,float,float corrected) noexcept {
+    if(!remapOk || axis!=1)return false;
+    ++remaps;reinterpret_cast<float*>(aim+kAimAxes+kAxisStride)[2]=corrected;return true;
+}
 bool ReadRound(const unsigned char* w,RoundModel* r) noexcept {
     *r=RoundModel{};r->kind=roundKind;r->style=roundStyle;r->rtti=knownRound ? "test factory" : nullptr;r->lobbed=lobbed;r->alive=At<int>(w,edf::kWeaponAmmoAlive);r->speed=roundSpeed;r->factor=roundFactor;
     return true;
@@ -278,6 +299,81 @@ int wmain(int argc,wchar_t** argv){
     Setup();extraOptic=true;Button(0);Button(0x80);Check(!SightZoomMounted(vehicle) && SightZoomNow(vehicle)==1,"ambiguous same-mount optics fail closed");
     Setup();Zoom();Fov();opticPresent=false;originalWrites=false;Fov();
     Check(std::memcmp(camera+kCamMatrix,thirdPerson,sizeof(thirdPerson))==0 && At<float>(camera,kCamFov)==originalFov,"losing installed lens restores camera and FOV immediately");
+    // 2026-10-11 ("调标尺的时候准镜和炮管应该会动啊"): the drum is laid on the gun. Turning it leaves the line of sight on
+    // the target and the barrel climbs over it by the superelevation at a gun drive's pace through the seat aim's own
+    // pitch axis; the camera looks along the climbing bore lowered by what the gun carries so far.
+    {
+        Setup();roundSpeed=10.0f;roundFactor=1.0f;Axis(-0.6f,0.2f,0.01f);Zoom();
+        LayFrame();Check(lay.engaged && lay.laid==0.0f && remaps==0 && Pitch()[2]==0.0f,"the sight comes up on the bore line: the lay engages, the gun stays");
+        Check(std::fabs(Sight())<1e-6f,"the line of sight on the target");
+        wheelNotches=1000;Button(0);
+        const float elev=sightzoom::ZeroAngle(10.0f,9.8f/3600.0f,1200.0f);
+        Check(SightZoomRange(vehicle)==1200 && elev>0.01f,"the drum at 1200 m: a superelevation worth laying");
+        Check(std::fabs(Sight())<1e-6f,"turning the drum does not throw the view down (the old range drum lowered the camera)");
+        int frames=0;float worst=0.0f,last=Pitch()[2];bool monotone=true;
+        while(lay.laid<elev && frames<1000) {
+            LayFrame();++frames;
+            worst=std::fmax(worst,std::fabs(Sight()));
+            monotone=monotone && Pitch()[2]<last;last=Pitch()[2];
+        }
+        Check(std::fabs(lay.laid-elev)<1e-6f && std::fabs(-Pitch()[2]-elev)<1e-6f,"the barrel stands the superelevation over the line of sight");
+        Check(frames==static_cast<int>(std::ceil(elev/sightzoom::kLayRate)) && monotone,"at the gun drive's pace, climbing every frame, not a jump");
+        Check(worst<1e-5f,"the reticle stays on the target while the barrel climbs");
+        float shown=0.0f;Check(SightZoomRange(vehicle,&shown)==1200 && std::fabs(shown-elev)<1e-6f,"the readout's superelevation is the gun's");
+        const int moved=remaps;LayFrame();Check(remaps==moved && Pitch()[2]==last,"laid: no further turn");
+        wheelNotches=-1000;Button(0);
+        for(int i=0;i<1000 && lay.laid>0.0f;++i){LayFrame();worst=std::fmax(worst,std::fabs(Sight()));}
+        Check(lay.laid==0.0f && std::fabs(Pitch()[2])<1e-6f && worst<1e-5f,"back to the bore line the barrel comes down, the view still");
+        // Out of the sight the gun is left where it is (the turret camera has it); the sight comes up on it laid at once.
+        wheelNotches=1000;Button(0);for(int i=0;i<1000 && lay.laid<elev;++i)LayFrame();
+        Button(0);Button(0x80);Button(0);Button(0x80);Check(SightZoomNow(vehicle)==1,"back at 1x");
+        const float raised=Pitch()[2];LayFrame();Check(!lay.engaged && Pitch()[2]==raised,"at 1x the lay lets go and does not touch the gun");
+        Button(0);Button(0x80);const int before=remaps;LayFrame();
+        Check(lay.engaged && std::fabs(lay.laid-elev)<1e-6f && remaps==before && Pitch()[2]==raised,"magnified again: the setting carried at once, no second climb");
+        // EDF6AutoTurret laying the gun on a lock solves the arc itself: the lay holds still.
+        autoSteers=1;wheelNotches=-4;Button(0);const float held=Pitch()[2];LayFrame();
+        Check(Pitch()[2]==held && std::fabs(lay.laid-elev)<1e-6f,"auto-aim's lock: no lay on top of its own arc");
+        // Another seat's aim (an NPC's, another vehicle's) is never laid.
+        autoSteers=0;SightLayStep(seats+kSeatStride+kSeatAim,0.0f);Check(Pitch()[2]==held,"only the player's sighted seat's aim");
+        Aim()[kAimNetwork]=1;LayFrame();Check(Pitch()[2]==held,"an aim the network steps is never laid");Aim()[kAimNetwork]=0;
+        LayFrame();Check(Pitch()[2]>held,"its own again: the gun comes down toward the new setting");
+    }
+    {   // the elevation stop: the gun carries what it can, and the view shows where the round really goes
+        Setup();roundSpeed=10.0f;roundFactor=1.0f;Axis(-0.005f,0.2f,0.01f);Zoom();LayFrame();
+        wheelNotches=1000;Button(0);for(int i=0;i<1000;++i)LayFrame();
+        Check(Pitch()[2]==-0.005f && std::fabs(lay.laid-0.005f)<1e-6f,"held at its stop the gun carries only what it can");
+        Check(std::fabs(Sight())<1e-5f,"and the line of sight did not move for the part it could not lay");
+    }
+    {   // the aim step's hooks not in (no bone map): the old way, the line of sight laid under the still bore
+        Setup();roundSpeed=10.0f;roundFactor=1.0f;Axis(-0.6f,0.2f,0.01f);remapOk=false;Zoom();LayFrame();
+        wheelNotches=1000;Button(0);LayFrame();
+        const float elev=sightzoom::ZeroAngle(10.0f,9.8f/3600.0f,1200.0f);
+        Check(!lay.engaged && Pitch()[2]==0.0f && std::fabs(Sight()+elev)<1e-5f,"no lay: the camera falls back to the set range's shown");
+    }
+    {   // review of #137: the setting is held to the reach only when turned; a shorter-reaching weapon picked after it
+        // must not see ZeroAngle's 45 degrees
+        Setup();roundSpeed=10.0f;roundFactor=1.0f;Axis(-0.6f,0.2f,0.01f);
+        Put<std::uint64_t>(seats,kSeatWeaponCount,2);Put<void*>(holder,kHolderCtrl,vehicleCtrl);Put<void*>(secondHolder,kHolderCtrl,vehicleCtrl);
+        Put<void*>(secondHolder,weaponmount::kHolderBone,At<void*>(holder,weaponmount::kHolderBone));Put<int>(secondWeapon,edf::kWeaponAmmoAlive,30);
+        Zoom();LayFrame();wheelNotches=1000;Button(0);for(int i=0;i<1000;++i)LayFrame();
+        const float cannon=sightzoom::ZeroAngle(10.0f,9.8f/3600.0f,1200.0f),coax=sightzoom::ZeroAngle(10.0f,9.8f/3600.0f,300.0f);
+        pickedWeapon=secondWeapon;Button(0);float shown=0.0f;
+        Check(SightZoomRange(vehicle,&shown)==300 && toggle.zero==1200,"the coaxial gun reads its own reach (300 m), the drum keeps the cannon's 1200");
+        Check(std::fabs(ZeroOf(secondWeapon,1200)-coax)<1e-6f && ZeroOf(secondWeapon,1200)<0.1f,"past its reach its superelevation is its reach's, never 45 degrees");
+        for(int i=0;i<1000;++i){LayFrame();Check(std::fabs(Sight())<1e-5f,"the re-lay for the coaxial round keeps the view");if(lay.laid==coax)break;}
+        Check(std::fabs(lay.laid-coax)<1e-6f && std::fabs(-Pitch()[2]-coax)<1e-6f && coax<cannon,"the gun comes down to the coaxial round's lay");
+        pickedWeapon=weapon;Button(0);Check(SightZoomRange(vehicle)==1200,"back on the cannon its setting is whole");
+        Put<void*>(holder,kHolderCtrl,nullptr);Put<void*>(secondHolder,kHolderCtrl,nullptr);
+        // A slow round lands short of its flight's reach: the drum stops where it can still land (speed^2 / drop).
+        Setup();roundSpeed=1.0f;roundFactor=1.0f;Put<int>(weapon,edf::kWeaponAmmoAlive,1200);Zoom();wheelNotches=1000;Button(0);
+        const int most=static_cast<int>(sightzoom::BallisticReach(1.0f,9.8f/3600.0f));
+        Check(SightZoomRange(vehicle,&shown)==most && most<1200 && shown<0.785398163f && std::isfinite(shown),"held to where the round still lands, below 45 degrees");
+    }
+    Check(sightzoom::LayStep(0.01f,0.0f,0.0f,0.0f,-1.0f,1.0f).angle==-0.01f && sightzoom::LayStep(0.01f,0.0f,0.0f,0.0f,-1.0f,1.0f).laid==0.01f,
+          "no rate: laid at once");
+    Check(sightzoom::LayStep(-0.01f,0.0f,0.002f,0.0f,-1.0f,1.0f).angle==0.002f,"a negative lay lowers the gun at the rate");
+    Check(sightzoom::LayStep(0.5f,0.0f,0.0f,0.0f,-7.0f,7.0f).angle==-0.5f,"a whole-circle axis has no stops");
+    Check(sightzoom::LayStep(std::nanf(""),0.2f,0.01f,0.1f,-1.0f,1.0f).laid==0.2f,"not a number: nothing moves");
     if(native) {
         for(const auto& d: {std::array<float,3>{0,0,1},std::array<float,3>{1,0,0},std::array<float,3>{0.3f,0.4f,0.8660254f}}) {
             Setup();std::memcpy(muzzleDirection,d.data(),12);Zoom();Fov();

@@ -18,6 +18,8 @@ bool IndirectFireSeat(const unsigned char*) noexcept { return false; }
 int AutoTurretSteers(const void*,unsigned) noexcept { return 0; }
 int AutoTurretStabAware() noexcept { return 1; }
 void Log(const char*,...) noexcept {}
+int layCalls=0;float layBefore=0.0f;   // sightzoom.cpp's lay, called after every step (StepHook)
+void SightLayStep(unsigned char*,float before) noexcept { ++layCalls;layBefore=before; }
 }
 namespace edf {
 // No real scene/skeleton in the fixture: mount probing is intentionally left at its known seat-0 hull basis.
@@ -114,6 +116,23 @@ int wmain(int argc,wchar_t** argv) {
         worst=std::fmax(worst,std::fabs(e->hold.shift[0]));
     }
     Check(worst<0.001f*deg,"180 real native frames do not feed physical readback jitter into a second servo");
+    // The range drum's lay (sightzoom.cpp SightLayStep through RemapAimAxis): a turn of the held gun's pitch made after
+    // the step is mapped by the native bone map and kept by the stabilizer, not pulled back as a hull disturbance.
+    e=Setup();testFrame=2;layCalls=0;
+    const float pitchBefore=AxisOf(aim,1)[2];Step();
+    Check(layCalls==1 && layBefore==pitchBefore,"every step hands the lay its pitch angle before the step");
+    const float lift=-0.3f*deg;
+    Check(AimAxisAdjustable() && RemapAimAxis(aim,1,pitchBefore,AxisOf(aim,1)[2]+lift),"native bone map takes the lay's turn");
+    const float laid=AxisOf(aim,1)[2];
+    Check(std::fabs(At<float>(bones[1],0xC)-laid)<1e-6f,"the native bone entry carries the laid angle");
+    for(int f=3;f<63;++f){testFrame=static_cast<ULONGLONG>(f);Step();}
+    Check(std::fabs(AxisOf(aim,1)[2]-laid)<0.0001f*deg,"a second of held frames keeps the laid barrel (the held line moved with it)");
+    e=Setup();testFrame=2;Step();
+    {   // negative control: the same turn written behind the stabilizer's back is pulled back out
+        float* axis=AxisOf(aim,1);const float was=axis[2];axis[2]=was+lift;
+        for(int f=3;f<63;++f){testFrame=static_cast<ULONGLONG>(f);Step();}
+        Check(std::fabs(AxisOf(aim,1)[2]-was)<0.01f*deg,"without the held line's shift the stabilizer undoes the lay");
+    }
     std::printf("stab_native_readback_test: %d checks passed; old stationary shift %.3f deg, new worst %.6f deg\n",checks,legacy/deg,worst/deg);
     std::puts("No live Havok world/game; native angle readback, axis step and bone mapping execute unchanged.");
 }

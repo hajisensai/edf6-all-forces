@@ -75,11 +75,40 @@ static_assert(NextZero(0,1,0)==25 && NextZero(275,1,0)==300 && NextZero(300,1,0)
               "zero steps");
 // The superelevation, rad, that carries a round leaving at `speed` (m a frame) and falling `drop` (m a frame squared:
 // the game's rounds keep their speed, rounds.cpp) to the level `range` m out: the low root of sin(2a) = drop range /
-// speed^2; 0 for no range, no drop or no speed; 45 degrees past the round's reach.
+// speed^2; 0 for no range, no drop or no speed; 45 degrees past the round's ballistic reach (BallisticReach: the
+// callers hold the setting to it, sightzoom.cpp ReachOf, so a sight never lays its gun 45 degrees up).
 inline float ZeroAngle(float speed,float drop,float range) noexcept {
     if(!(speed>0.0f) || !(drop>0.0f) || !(range>0.0f))return 0.0f;
     const float s=drop*range/(speed*speed);
     return s>=1.0f ? 0.785398163f : 0.5f*std::asin(s);
+}
+// The farthest a round leaving at `speed` and falling `drop` lands on the level (speed^2 / drop: sin 2a = 1), m; 0 for
+// no speed, no drop or not a number.
+inline float BallisticReach(float speed,float drop) noexcept {
+    if(!(speed>0.0f) || !(drop>0.0f))return 0.0f;
+    const float r=speed*speed/drop;
+    return std::isfinite(r) ? r : 0.0f;
+}
+// --- The lay (2026-10-11, the user: "调标尺的时候准镜和炮管应该会动啊"). A tank's range drum does not move the line of
+// sight: the gunner keeps the reticle on the target and the gun drive raises the barrel over it by the superelevation
+// for the set range (a sight on the mantlet rides up with it). So the setting is laid on the gun, not on the camera:
+// sightzoom.cpp SightLayStep turns the seat aim's own pitch axis (the native aim state the game maps onto the barrel's
+// bones, docs/nix-re.md §3) by the change at the drive's pace, and the camera looks along the bore lowered by what the
+// gun carries now (`laid`), so the line of sight stays where it was while the barrel climbs. ---
+constexpr float kLayRate=0.00174533f;   // rad a frame (0.1 deg, 6 deg/s): a gun drive's elevation rate, at most the axis' own
+struct Lay { float angle,laid; };       // the pitch axis' angle to set, the superelevation the gun then carries
+// One frame of the lay: the gun carrying `laid` rad over the line of sight goes toward `want` by at most `rate`
+// (none: at once), its pitch axis (the aim's sense: negative up) at `angle` within its stops `lo` .. `hi` (a whole
+// circle or more: no stops). Held at a stop the gun carries less than `want`, and `laid` says so: the camera then shows
+// the line of sight where the gun really puts the round, not where the drum wishes it.
+inline Lay LayStep(float want,float laid,float rate,float angle,float lo,float hi) noexcept {
+    if(!std::isfinite(want) || !std::isfinite(laid) || !std::isfinite(angle))return {angle,laid};
+    float d=want-laid;
+    bool whole=true;   // the rest of the way this frame: then exactly `want`, no float residue left to creep after
+    if(rate>0.0f && std::isfinite(rate) && (d>rate || d<-rate)){d=d>0.0f ? rate : -rate;whole=false;}
+    float to=angle-d;
+    if(std::isfinite(lo) && std::isfinite(hi) && hi-lo<6.2821853f && lo<=hi && (to<lo || to>hi)){to=to<lo ? lo : hi;whole=false;}
+    return {to,whole ? want : laid+(angle-to)};
 }
 // Unit direction `dir` lowered by `angle` rad toward the ground (about its level right axis): the line of sight under a
 // bore raised by its superelevation. `dir` straight up or down: unchanged.

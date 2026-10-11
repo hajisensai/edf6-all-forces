@@ -302,16 +302,21 @@ void Hold(Entry& e,unsigned char* aim,const float* before,const float* in) noexc
     Debug(e);
 }
 
+// Every seat aim's step through either hook: the stock step, the stabilizer's hold of a seat it knows, then the player's
+// sight's lay (sightzoom.cpp SightLayStep: the range drum's superelevation on the pitch axis, after the hold so the
+// stabilizer's correction and the lay are one mapped turn).
 void StepHook(void* aim,const float* in,AimStepFn next) noexcept {
-    Entry* e=hooked ? Find(aim) : nullptr;
-    if(!e){next(aim,in);return;}
     auto* a=static_cast<unsigned char*>(aim);
     const float before[2]={AxisOf(a,0)[2],AxisOf(a,1)[2]};
+    Entry* e=hooked ? Find(aim) : nullptr;
     next(aim,in);
-    __try {
-        Hold(*e,a,before,in);
-        e->before[0]=before[0];e->before[1]=before[1];e->stepFrame=GameFrame();
-    } __except(EXCEPTION_EXECUTE_HANDLER){Off(*e);}
+    if(e) {
+        __try {
+            Hold(*e,a,before,in);
+            e->before[0]=before[0];e->before[1]=before[1];e->stepFrame=GameFrame();
+        } __except(EXCEPTION_EXECUTE_HANDLER){Off(*e);}
+    }
+    SightLayStep(a,before[1]);
 }
 
 void __fastcall PlainHook(void* aim,const float* in) { StepHook(aim,in,nextPlain); }
@@ -384,6 +389,21 @@ int StabState(unsigned char* vehicle,unsigned seat) noexcept {
     const Entry* e=Find(SeatAt(vehicle,seat)+kSeatAim);
     if(!e || !e->ref.Is(vehicle) || !e->active || GameFrame()-e->stepFrame>2)return 0;
     return e->hold.slipping ? 2 : 1;
+}
+
+bool AimAxisAdjustable() noexcept { return hooked && axisMap!=nullptr; }
+
+bool RemapAimAxis(unsigned char* aim,int i,float before,float corrected) noexcept {
+    if(!AimAxisAdjustable() || !aim || i<0 || i>1 || !std::isfinite(corrected) || !std::isfinite(before))return false;
+    float* axis=AxisOf(aim,i);
+    const float was=axis[2];
+    if(!std::isfinite(was))return false;
+    stab::Remap(axis,before,corrected,[](float* mapped) noexcept { axisMap(mapped,true); });
+    // The held gun keeps the new angle: its line turned with it (the stabilizer's step already ran this frame, in the
+    // basis this turn is seen in), else the next step's hold would pull the turn back out.
+    Entry* e=Find(aim);
+    if(e && e->active && e->hold.live && e->stepFrame==GameFrame())stab::Shift(e->hold,i,stab::Diff(StopsAt(aim,i),corrected,was));
+    return true;
 }
 
 void ResetStabilizer() noexcept {
