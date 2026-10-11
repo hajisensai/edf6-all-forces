@@ -4885,6 +4885,17 @@ def npc_ai_wired() -> None:
         assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
     for key, default in (('TankReturnToPost', '1'), ('TankPostHold', '6'), ('TankReverseMax', '30')):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
+    # The stock walk-up recruit off (VanillaRecruit=0, the user 2026-10-11: "删了原版的率领npc机制"): +0x540 hidden only
+    # around the stock Think (whose 0x596BD8 gate it feeds), put back right after; a script's squad the stock would let
+    # in takes the map's join alone.
+    hook = code.split('void __fastcall ThinkHook(void* human,const float* dt)', 1)[1].split('\n}', 1)[0]
+    assert hook.index('HideWalkUp(') < hook.index('nextThink[I](human,dt);') < hook.index('h[kAutoFollow]=walkUp;')
+    walk = code.split('bool WalkUpOff() noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'followOk' in walk and 'Cfg().customNpcAi' in walk and '!Cfg().vanillaRecruit' in walk, \
+        'the walk-up stays when the map cannot recruit (AI off, SetFollow not as read) or VanillaRecruit=1'
+    assert '!(joinOrder && NativeJoinable(top))' in cmd.split('switch', 1)[0]
+    assert 'if(e.u.joinOnly)return (o==Order::recruit || o==Order::follow) && e.u.recruitable;' in takes
+    assert 'L"VanillaRecruit"' in plugin and re.search(r'^VanillaRecruit=0\s*$', ini, re.M) and 'VanillaRecruit' in readme and 'VanillaRecruit' in doc
 
 
 @test

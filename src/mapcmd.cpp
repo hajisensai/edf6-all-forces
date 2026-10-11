@@ -282,6 +282,7 @@ const wchar_t* OrderText(Order o) noexcept {
 bool Takes(const Entry& e,Order o) noexcept {
     if(e.u.locked)return false;
     if(e.owner==Owner::squad) {
+        if(e.u.joinOnly)return (o==Order::recruit || o==Order::follow) && e.u.recruitable;   // the script keeps the rest
         if(o==Order::recruit)return e.u.recruitable;
         if(o==Order::dismiss)return e.u.recruited;
         if(o==Order::board)return !e.u.riding;
@@ -616,8 +617,9 @@ int Issue(Game& g,const Command& cmd,int* skipped) noexcept {
         Entry& e=g.list[i];
         if(!g.sel.Has(e.u.v))continue;
         if(!Takes(e,cmd.order)) {
-            g.failure=e.u.locked ? NpcCommandReason::scripted : e.u.riding ? NpcCommandReason::riding : NpcCommandReason::unsupported;
-            ++(e.u.locked ? g.skipScript : e.u.riding ? g.skipRiding : g.skipCannot);
+            const bool script=e.u.locked || (e.owner==Owner::squad && e.u.joinOnly);
+            g.failure=script ? NpcCommandReason::scripted : e.u.riding ? NpcCommandReason::riding : NpcCommandReason::unsupported;
+            ++(script ? g.skipScript : e.u.riding ? g.skipRiding : g.skipCannot);
             ++*skipped;continue;
         }
         if(!IsOnlineAuthority(e.u.v)) {
