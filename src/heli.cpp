@@ -1220,11 +1220,11 @@ float RoofBelow(const float* at,float top,bool any=false,std::uint32_t* flags=nu
 
 // The rotor's clearance (rotor_clear.h) on the map ray: last, so no push before it sends the blades into a wall.
 rotorclear::Result RotorClear(const float* pos,const float* vel,float rotor,float stopDecel,float* want,float* height,
-                              bool climb) noexcept {
+                              bool climb,float push) noexcept {
     const float top=(pos[1]>*height ? pos[1] : *height)+kRoofProbe;
     return rotorclear::Clear(pos,vel,rotor,stopDecel,want,height,climb,
         [](const float* a,const float* b,float* hit,float* normal){ return CastRay(a,b,hit,false,nullptr,kMapLayer,normal); },
-        [top](const float* at){ return RoofBelow(at,top); });
+        [top](const float* at){ return RoofBelow(at,top); },push);
 }
 
 Avoidance AvoidMap(const float* pos,const float* vel,float* want,float* height,bool land,float stopDecel,float rotor) noexcept {
@@ -1283,11 +1283,13 @@ Avoidance AvoidMap(const float* pos,const float* vel,float* want,float* height,b
 }
 
 // `rotor`: its rotor's radius (HeliType::rotor). Landing (and low over the sea) it keeps its blades off the walls but
-// does not climb over them.
-Avoidance Avoid(const float* pos,const float* vel,float* want,float* height,bool land,float stopDecel,float rotor) noexcept {
+// does not climb over them; `push`: the share of the rotor's push out of them it takes (rotorclear::PushShare: none
+// landing or lifting off).
+Avoidance Avoid(const float* pos,const float* vel,float* want,float* height,bool land,float stopDecel,float rotor,
+                float push) noexcept {
     if(!Cfg().heliAvoid || !rayOk)return Avoidance{-1.0f,-1.0f,-1e9f,-1e9f,0,{-1.0f,{0.0f,0.0f},0,-1e9f}};
     Avoidance r=AvoidMap(pos,vel,want,height,land,stopDecel,rotor);
-    r.rotor=RotorClear(pos,vel,rotor,stopDecel,want,height,!land);
+    r.rotor=RotorClear(pos,vel,rotor,stopDecel,want,height,!land,push);
     return r;
 }
 
@@ -2140,8 +2142,10 @@ Control Steer(Heli& h,const Sense& s,Mode mode,Want& w) noexcept {
         w.height=pos[1]+(above ? kUnstick : -kUnstick);
     }
     Control c{};
+    // The rotor's push out of a wall: none landing, on the ground or lifting off, eased in after (rotor_clear.h PushShare).
+    const float push=rotorclear::PushShare(land,s.grounded ? 0 : s.ms-h.groundAt,kLiftOffMs);
     c.avoid=Avoid(pos,h.vel,w.vel,&w.height,land || (mode==Mode::rescue && s.rescueLow),h.stopDecel,
-                  h.type ? h.type->rotor : kRotor506);
+                  h.type ? h.type->rotor : kRotor506,push);
     if((s.follow || s.engage) && !h.guard && !h.leaving)std::memcpy(h.hold,pos,12);
 
     // Horizontal: the stick for the wanted velocity (full stick flies h.top) plus kBrakeGain per m/s it is
@@ -2555,7 +2559,6 @@ struct Pilot {
     aim::Hold hold;
     float hover;                       // the rotor that holds its height (learned, StockThrottle)
     float prevHeading,yawRate;
-    float prevFwd[3],turn;             // the level nose last frame; its turn toward row 0 (rad/s, BankInput)
     float pitchIn,rollIn;              // the attitude the controller asks this frame (PlayerAttitudeHook's pitch / roll input)
     bool flying;                       // the mouse-aim flight wrote its input last frame (logged as it changes)
 };
@@ -2630,7 +2633,7 @@ Pilot* PilotOf(unsigned char* v,const float* fwd,ULONGLONG ms) noexcept {
     for(auto& x:pilots)if(!p && (!x.ref || x.ref.Is(v) || ms-x.seen>kAssistStaleMs))p=&x;
     if(!p)return nullptr;
     *p=Pilot{};p->ref=ObjRef::Of(v);p->lastMs=p->seen=ms;
-    std::memcpy(p->aim,fwd,12);std::memcpy(p->prevFwd,fwd,12);
+    std::memcpy(p->aim,fwd,12);
     const float lift=At<float>(v,kLiftPerRotor),mass=At<float>(v,kLiftMass);   // the takeoff cue's hover speed
     p->hover=aim::HoverRotor(lift,mass);
     p->prevHeading=std::atan2(fwd[0],fwd[2]);
@@ -2684,18 +2687,16 @@ void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos
     if(lifting)forward=lateral=0.0f;
     // 2. The attitude controller. The native yaw channel is a lagged heading offset, not a rate: compensate its current
     // state and the native spring conversion (aim::PlayerYawInput). The pitch the aim's; the roll the slide's plus the
-    // turn's bank (the nose's turn toward row 0, measured, times the forward speed).
+    // turn's bank (the course command, not a feedback from the bank's own native heading transient).
     const float heading=std::atan2(fwd[0],fwd[2]);
     const float maxYaw=At<float>(v,kMaxYaw);
     const float spring=At<float>(v,kPlayerYawSpring),blend=At<float>(v,kYawSmooth),state=At<float>(v,kPlayerYawState);
     const float rateLimit=Cfg().heliYawRate>0.0f ? Cfg().heliYawRate*kPi/180.0f : std::fabs(maxYaw)*spring*60.0f;
-    const float yaw=aim::PlayerYawInput(Wrap(std::atan2(w.face[0],w.face[2])-heading),p.yawRate,rateLimit,maxYaw,state,blend,spring);
-    const float turnNow=((fwd[0]-p.prevFwd[0])*right[0]+(fwd[2]-p.prevFwd[2])*right[2])/dt;
-    std::memcpy(p.prevFwd,fwd,12);
-    if(std::isfinite(turnNow))p.turn+=(turnNow-p.turn)*0.3f;
-    const float along=p.vel[0]*fwd[0]+p.vel[2]*fwd[2];
+    const float off=Wrap(std::atan2(w.face[0],w.face[2])-heading);
+    const float yaw=aim::PlayerYawInput(off,p.yawRate,rateLimit,maxYaw,state,blend,spring);
     p.pitchIn=maxTilt>1e-3f ? Clamp(-pitch/maxTilt,-1.0f,1.0f) : 0.0f;
-    p.rollIn=grounded ? lateral : Clamp(lateral+aim::BankInput(along,p.turn,maxTilt),-1.0f,1.0f);
+    const float bank=aim::PlayerBankInput(p.hold.speed,off,rateLimit,maxTilt,fwd,right);
+    p.rollIn=grounded ? lateral : Clamp(lateral+bank,-1.0f,1.0f);
     Put<float>(v,kInLateral,lateral);Put<float>(v,kInForward,forward);Put<float>(v,kInW,1.0f);Put<float>(v,kInYaw,yaw);
     // 3. The collective. On the ground the stock throttle (Space) stands, W spins the rotor up too.
     if(!grounded) {
@@ -2709,8 +2710,8 @@ void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos
     if(Cfg().debug && ms-p.inputLogAt>=1000) {
         p.inputLogAt=ms;
         Log("HELI INPUT v=%p mouse=(%.3f,%.3f) vert=%.0f side=%.2f set=%.2f climb=%.2f aim=(%.3f,%.3f,%.3f) pitch=%.3f roll=%.3f "
-            "move=%.3f yaw=%.3f rate=%.3f turn=%.3f state=%.4f ground=%d lift=%d",v,mx,my,vert,side,p.hold.speed,w.climb,p.aim[0],
-            p.aim[1],p.aim[2],p.pitchIn,p.rollIn,forward,yaw,p.yawRate,p.turn,state,grounded,lifting);
+            "move=%.3f yaw=%.3f rate=%.3f bank=%.3f state=%.4f ground=%d lift=%d",v,mx,my,vert,side,p.hold.speed,w.climb,p.aim[0],
+            p.aim[1],p.aim[2],p.pitchIn,p.rollIn,forward,yaw,p.yawRate,bank,state,grounded,lifting);
     }
     p.flying=true;
 }

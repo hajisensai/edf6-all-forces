@@ -818,6 +818,10 @@ sightzoom::Kind SightZoomView(const void* vehicle=nullptr) noexcept;
 // The sight's range setting (sightzoom.h kZeroStep..; 0 the bore line) and the superelevation, rad, it lays the line of
 // sight under the bore for the weapon looked through now; any thread, 0 with no magnified optic.
 int SightZoomRange(const void* vehicle=nullptr,float* angle=nullptr) noexcept;
+// The range drum laid on the gun (sightzoom.h LayStep): from every seat aim's step, after the stock step and the
+// stabilizer (stab.cpp StepHook), `before` the pitch axis' angle before that step. Only the player's magnified sight's
+// aim is touched: its pitch axis turned toward the set range's superelevation over the line of sight (game thread).
+void SightLayStep(unsigned char* aim,float before) noexcept;
 void ResetSightZoom() noexcept;
 // map.cpp: the game window's mouse wheel for the magnified sight's range (`hold` while it is up: the wheel's notches are
 // swallowed and counted, up +; the count since the last call), and the first XInput pad's buttons now (false: none).
@@ -860,6 +864,12 @@ void StabFrame(unsigned char* vehicle) noexcept;
 void StabStep(void* aim,const float* in,AimStepFn next) noexcept;
 bool StabHeld(const void* aim,float* held,float* hull,float* frame) noexcept;
 int StabState(unsigned char* vehicle,unsigned seat) noexcept;
+// RemapAimAxis: after `aim`'s step this frame, set its axis `axis` (0 yaw, 1 pitch) to `corrected` and map it onto the
+// bones with the whole turn from `before` (its angle before the step) as the stabilizer's own correction is (0x5FC280,
+// stab.h Remap); a gun the stabilizer holds has its held line moved with it, so the turn is kept, not pulled back
+// (stab.h Shift). False when the bone map is not in (AimAxisAdjustable).
+bool AimAxisAdjustable() noexcept;
+bool RemapAimAxis(unsigned char* aim,int axis,float before,float corrected) noexcept;
 void ResetStabilizer() noexcept;
 
 // airstrike.cpp

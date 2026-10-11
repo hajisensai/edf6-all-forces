@@ -101,6 +101,8 @@ constexpr Kind kKinds[]={
 constexpr float kAutoRotate=20.0f;     // m/s over rotate: it lifts off without the stick...
 constexpr float kAutoThrottle=0.6f;    // ...with the throttle at least this open (not rolling out a landing)
 constexpr float kLiftOffClimb=5.0f;    // m/s up the moment it lifts off
+constexpr ULONGLONG kLiftOffGraceMs=1000;   // ...and its wheels' contact this long after, climbing, is not a touchdown (kTouch at
+                                            // kLiftOffClimb: 0.6 s)
 constexpr float kThrottleRate=1.0f;    // the throttle lever's travel a second (closed to open in 1 s)
 // In the air the throttle is Ace Combat's: held forward (or ascend) it boosts to full, held back it closes and brakes,
 // let go it returns to kCruiseThrottle; on the ground it stays where the stick left it (taxi, hold, roll out).
@@ -254,6 +256,8 @@ struct PJet {
     float savedInset;
     bool insetSaved;
     ULONGLONG lastMs,logAt,crashAt,blockedSince;
+    ULONGLONG liftOffAt;         // game ms it last lifted off its runway (Ground; ReconcileGround's kLiftOffGraceMs)...
+    bool liftedOff;              // ...if it has
     int threat;                  // 2 a missile homing on it, 1 an enemy's missile lock on it, 0 none (StoresStep)
     int flares;                  // flare pairs left (Cfg().playerJetFlares when the entry is made)
     bool flareHeld;
@@ -605,6 +609,7 @@ void Ground(PJet& j,const unsigned char* v,const Stick& s,float clear,float dt) 
     for(int i=0;i<3;++i){j.vel[i]=along[i]*speed;j.omega[i]=up[i]*yaw;}
     if(!belly && j.throttle>0.02f && speed>=k.rotate && (s.pitch>0.2f || (speed>=k.rotate+kAutoRotate && j.throttle>=kAutoThrottle))) {
         j.phase=Phase::air;j.vel[1]=kLiftOffClimb;j.hasAim=false;
+        j.liftOffAt=GameMs();j.liftedOff=true;   // its wheels' contact for kLiftOffGraceMs is not a landing (ReconcileGround)
         Log("PJET v=%p takeoff at %.0f m/s (throttle %.2f, stick %.2f)",v,speed,j.throttle,s.pitch);
         return;
     }
@@ -651,7 +656,10 @@ void Touch(PJet& j,unsigned char* v,float speed,bool water,ULONGLONG ms) noexcep
     Crash(j,v,sink,speed,PastLanding(j,speed),banked,ms,nullptr);
 }
 
+// Native ground support in the air (veh+0x1580 bit 1 within kTouch): a touchdown, even rebounding, except its own wheels
+// leaving the runway in the kLiftOffGraceMs after Ground lifted it off while it climbs (pjet_handling.h OwnLiftOffContact).
 void ReconcileGround(PJet& j,unsigned char* v,float clear,bool water,bool wet,ULONGLONG ms) noexcept {
+    if(handling::OwnLiftOffContact(j.liftedOff,ms-j.liftOffAt,kLiftOffGraceMs,j.vel[1]))return;
     if(j.phase==Phase::air && !water && !wet && (v[0x1580]&2)!=0 && clear!=kNoGround && clear<=kTouch)
         Touch(j,v,Len(j.vel),false,ms);
 }

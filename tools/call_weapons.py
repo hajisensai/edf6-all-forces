@@ -398,11 +398,19 @@ def throw_sgo(template: bytes, call: Call) -> bytes:
 
 # The boarding gun (Call.brings 'gun'), a debugging tool (the user, 2026-10-07: "it should arrive at once, with no
 # spread, reload at once or never run out"): each curve's base (the star curves keep their template's shape) and
-# scalar set here. Its rounds go 750 m a frame for 2 frames: 1500 m in 33 ms (the stock shape cast still decides what
-# it hits, src/boarding.cpp); no spread, no recoil; 999 rounds a magazine, reloaded
-# in a frame, 10 shots a second (the stock bolt waits 90 frames).
+# scalar set here. Its rounds go 750 m a frame (1500 m in 33 ms; the stock shape cast still decides what it hits,
+# src/boarding.cpp) for GUN_LIFE frames; no spread, no recoil; 999 rounds a magazine, reloaded in a frame, 10 shots a
+# second (the stock bolt waits 90 frames).
+# Its reach (AmmoSpeed x AmmoAlive, the only limit on how far the gun shoots: a round lives AmmoAlive frames, and the
+# weapon's range +0x224 is that product, docs/boarding-re.md §2; src/boarding.cpp has no distance gate) is unlimited in practice (the user, 2026-10-11:
+# "登车狙击枪的射击距离应该是无限远"; it was 2 frames, 1500 m): 120 frames, 90 km in 2 s, past the farthest anything
+# can stand or be drawn, the unlimited view distance at the largest BigWorld (src/crew.h UnlimitedViewDistance:
+# 2.83 x 20000 = 56.6 km) and the stock far pass (20 km); still a short life (under 600 frames, which
+# src/highcam.cpp / src/sightzoom.cpp take for an indirect-fire round), so a miss is gone in 2 s, at most 20 in
+# flight at 10 a second. No damage falloff: the four templates' AmmoDamageReduce is [1, 1].
+GUN_LIFE = 120.0
 GUN_CURVES = {'AmmoSpeed': 750.0, 'FireAccuracy': 0.0, 'AmmoCount': 999.0, 'ReloadTime': 1.0, 'FireInterval': 6.0}
-GUN_SCALARS = {'AmmoAlive': 2.0, 'FireRecoil': 0.0, 'AmmoExplosion': 0.0,
+GUN_SCALARS = {'AmmoAlive': GUN_LIFE, 'FireRecoil': 0.0, 'AmmoExplosion': 0.0,
                'AmmoGravityFactor': 0.0, 'AmmoIsPenetration': 0.0, 'AmmoOwnerMove': 0.0,
                'FireCount': 1.0, 'FireBurstCount': 1.0}
 FPS = 60.0   # the menu shows m/frame as m/s, frames as seconds

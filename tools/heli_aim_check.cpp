@@ -80,7 +80,7 @@ void Step(Heli& h,const Inputs& in) noexcept {
 struct Hand { float fore,side,vert; float from,to; float mx,my; float mouseAt; int frames; };
 
 constexpr float kLiftOffSec=1.5f;   // heli.cpp kLiftOffMs
-struct Pilot { float aim[3]; aim::Hold hold; float hover,yawPrev,yawRate,vel[3],groundAt,prevFwd[3],turn; };
+struct Pilot { float aim[3]; aim::Hold hold; float hover,yawPrev,yawRate,vel[3],groundAt; };
 
 void MoveAim(Pilot& p,const Heli& h,const Hand& hand,int frame) noexcept {
     const int mouseFrame=static_cast<int>(std::lround(hand.mouseAt/kDt));
@@ -113,11 +113,10 @@ Inputs Fly(Pilot& p,const Heli& h,const Hand& hand,float t,int frame) noexcept {
     aim::StockStick(w.vel,h.vel,kTop,kBrakeGain,fwd,right,&in.forward,&in.lateral);
     if(lifting)in.forward=in.lateral=0.0f;
     in.yaw=YawIn(p,h,w);
-    const float turn=((fwd[0]-p.prevFwd[0])*right[0]+(fwd[2]-p.prevFwd[2])*right[2])/kDt;
-    std::memcpy(p.prevFwd,fwd,12);
-    p.turn+=(turn-p.turn)*0.3f;
     in.pitchIn=-pitch/kMaxTilt;
-    in.rollIn=grounded ? in.lateral : std::fmax(-1.0f,std::fmin(1.0f,in.lateral+aim::BankInput(h.vel[0]*fwd[0]+h.vel[2]*fwd[2],p.turn,kMaxTilt)));
+    const float off=Wrap(std::atan2(w.face[0],w.face[2])-h.a);
+    const float bank=aim::PlayerBankInput(p.hold.speed,off,kYawMost,kMaxTilt,fwd,right);
+    in.rollIn=grounded ? in.lateral : std::fmax(-1.0f,std::fmin(1.0f,in.lateral+bank));
     if(!grounded) {
         const bool learn=p.hold.holding && std::fabs(p.hold.y-h.pos[1])<6.0f;
         const aim::Rotor r{kLift,kHoverDamp,kIdle,h.up,h.down};
@@ -155,7 +154,7 @@ Heli Hovering(float y,float maxYaw,bool stock) noexcept {
 }
 Pilot Fresh(float hover) noexcept {
     Pilot p{};
-    p.aim[2]=1.0f;p.hover=hover;p.groundAt=-10.0f;p.prevFwd[2]=1.0f;
+    p.aim[2]=1.0f;p.hover=hover;p.groundAt=-10.0f;
     return p;
 }
 

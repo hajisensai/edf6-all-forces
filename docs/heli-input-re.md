@@ -274,6 +274,13 @@ all ownership/device gates, signature rejection/installation, and recovery of th
 downward camera. `tools/heli_aim_check.cpp` continues to cover the flight law. These are offline regressions; actual
 mouse feel and the installed-game path still require the integration owner's subsequent in-game check.
 
+## 2026-10-11：玩家压坡与航向反馈环
+
+`AimFly` 的自动压坡改为 cyclic 目标速度和目标航向转弯指令。
+原生姿态恢复航向时会撤掉存储的俯仰/横滚，测得的航向导数包含压坡瞬态；重新用它要求压坡会产生反复左右满杆。
+三维原生姿态夹具已复现旧控制并验证修复，证据与游戏内验证边界见
+[feedback-2026-10-11-player-heli-bank.md](feedback-2026-10-11-player-heli-bank.md)。
+
 ## 8. Open items for a live cdb session
 
 - World-axis sign of `+0x1540` and `+0x1550`, and the actual gains `veh+0x162C/0x1630/0x1634/0x1640`.

@@ -325,16 +325,20 @@ int main() {
     // A coordinated turn: flying forward with the nose turning toward row 0 (a slide's way), the roll the attitude gets is
     // the lateral plus the bank into the turn; the movement's lateral stays the velocity law's.
     Put<float>(inputSeat,kSeatRY,0.0f);
-    pilot.vel[2]=15.0f;pilot.turn=0.0f;
-    const float turned=0.02f;   // rad a frame toward row 0 (right = (-1, 0, 0) here)
-    const float swung[3]={-std::sin(turned),0.0f,std::cos(turned)};
+    pilot.vel[2]=15.0f;
+    const float turned=0.2f;   // course wanted toward row 0 (right = (-1, 0, 0) here)
+    pilot.aim[0]=-std::sin(turned)*std::cos(0.3f);pilot.aim[1]=-std::sin(0.3f);pilot.aim[2]=std::cos(turned)*std::cos(0.3f);
     for(int frame=0;frame<20;++frame) {
-        pilot.prevFwd[0]=0.0f;pilot.prevFwd[1]=0.0f;pilot.prevFwd[2]=1.0f;
-        AimFly(pilot,inputVehicle,inputSeat,pos,swung,right,false,100.0f,1.0f/60.0f,inputTime);
+        AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
     }
     PlayerAttitudeHook(inputVehicle+kHeadRight,inputVehicle,movement,&contact);
-    Check(pilot.turn>0.5f && recordedInput[0]>movement[0]+0.1f,"turning toward row 0 banks the way a slide there rolls it");
-    pilot.vel[2]=0.0f;pilot.turn=0.0f;std::memcpy(pilot.prevFwd,forward,12);
+    Check(recordedInput[0]>movement[0]+0.1f,"course wanted toward row 0 banks the way a slide there rolls it");
+    pitchAim(-0.3f);pilot.yawRate=1.0f;
+    AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
+    PlayerAttitudeHook(inputVehicle+kHeadRight,inputVehicle,movement,&contact);
+    Check(std::fabs(recordedInput[0]-movement[0])<1e-5f,"on course a measured yaw transient cannot feed its own bank");
+    pilot.yawRate=0.0f;
+    pilot.vel[2]=0.0f;
     pitchAim(0.0f);
 
     inputSeat[kSeatPad]=1;CheckPassThrough("pad control retains stock pitch");inputSeat[kSeatPad]=0;

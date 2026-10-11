@@ -20,8 +20,9 @@ here as needed) and the rounds no jet carries (the gun rounds, vcobjects.Shell: 
 and tier renamed; the LAHAT), which this tool writes itself (Mods/WEAPON/EDF6VC_<KIND>_<rounds>.SGO).
 The 2026-10-07 coaxial gun (EDF6VC_COAX_MG.SGO, retired: the 403 gunner's AimRecoil on a 505 crashed, and it fired
 from the main gun's own muzzle) stays retired. Since 2026-10-11 the tanks and the Grape carry a real one (COAX:
-EDF6VC_MG<tank>_1500.SGO): its own holder on the mantlet's elevating bone, its own muzzle measured right of each
-model's gun, a zero BodyRecoil pair, fired by the secondary trigger (src/payload.cpp), never cycled by the switch.
+EDF6VC_MG<tank>_<belt>.SGO, vcobjects.COAX_MOUNTS: the M240C / Type 74, its barrel and flash hider out of a port on
+the mantlet, EDF6VC_COAX_GUN<tank>.RAB): its own holder on the mantlet's elevating bone, its muzzle on the flash
+hider, a zero BodyRecoil pair, fired by the secondary trigger (src/payload.cpp), never cycled by the switch.
 The original 403/Titan machine guns stay on their existing stock mounts. Each hangs on the bone and seat of the stock holder it fires beside (Mount.like): the switch
 (PlayerJetSwitchKey R, pad LB) goes round that holder's control's stock weapon and the stores, and that control fires
 the one picked (src/payload.cpp). Into <game>/Mods:
@@ -124,20 +125,18 @@ NO_RECOIL = [0.0, 0.0]
 # the HE store's template is one of them), 5 the A series' smooth-bore (AP), one the heat gun.
 _MBT = (_rounds('AP', 'HE', 20, 0), _store('GLM', 4, 0))
 _IFV = (_rounds('AC_AP', 'AC_HE', 150, 0), _store('AGM_L', 4, 0))
-# The coaxial machine guns (the user, 2026-10-11: 「应该有同轴机枪的坦克增加同轴机枪」; vcobjects STORES 'MG<tank>'): a
-# 1500-round belt beside the main gun, fired by the secondary trigger (src/payload.cpp). Each model's own gun mantlet
-# (measured from the MRAB: the vertices skinned to the bone; +X is the tank's left):
-#   Blacker 505 (its five requests share the v505_tank skeleton): the 'cannon' bone (elevation; 'cannon_slide' under
-#     it is the barrel's recoil travel), its mantlet 0.58 m wide, its face 0.96 m ahead: the muzzle at its right edge,
-#     just proud of the face;
-#   Varius 601: the 'cannon' bone, a gun stub modelled right of the barrel 0.25 m out, 1.6..2.0 m ahead: its mouth;
-#   Grape 401: its 'Barrel' bone is the elevating cannon itself (no recoil bone): beside the barrel's root, right.
-COAX_MG_ROUNDS = 1500
+# The coaxial machine guns (the user, 2026-10-11: 「应该有同轴机枪的坦克增加同轴机枪」, 「这个坦克的同轴机枪做的什么玩意，
+# 找现实的模型来做」; vcobjects COAX_MOUNTS / STORES 'MG<tank>'): the real 7.62 mm coax of each class, its ready belt,
+# fired by the secondary trigger (src/payload.cpp). The holder hangs on the bone that elevates the mantlet:
+#   Blacker 505 (its five requests share the v505_tank skeleton): 'cannon' ('cannon_slide' under it is the barrel's
+#     recoil travel); Varius 601: 'cannon'; Grape 401: its 'Barrel' bone is the elevating cannon itself (no recoil bone).
+# The port on each mantlet and the gun's muzzle: vcobjects.COAX_MOUNTS.
 COAX: dict[str, Mount] = {
-    **{s: Mount(vc.store_file('MG505', COAX_MG_ROUNDS), 0, bone='cannon') for s in (
+    **{s: Mount(vc.store_file('MG505', vc.COAX_MOUNTS['505'].belt), 0, bone='cannon') for s in (
         'V505_TANK', 'V505_TANK_EDF4', 'V505_TANK_EDF5', 'V505_TANK_EDF6BENEFITS', 'V505_TANK_MPACK2')},
-    'V601_TANK': Mount(vc.store_file('MG601', COAX_MG_ROUNDS), 0, bone='cannon'),
-    **{s: Mount(vc.store_file('MG401', COAX_MG_ROUNDS), 0) for s in ('VEHICLE401_STRIKER', 'VEHICLE401_STRIKER_MPACK2')},
+    'V601_TANK': Mount(vc.store_file('MG601', vc.COAX_MOUNTS['601'].belt), 0, bone='cannon'),
+    **{s: Mount(vc.store_file('MG401', vc.COAX_MOUNTS['401'].belt), 0)
+       for s in ('VEHICLE401_STRIKER', 'VEHICLE401_STRIKER_MPACK2')},
 }
 _FLAK = (_store('FLAK_HE', 500, 0), _store('AAM_S', 2, 0), _store('AAM_M', 4, 0))
 _LAUNCHER = (_store('AAM_M', 4, 0), _store('AGM', 2, 0), _store('RKT', 19, 0))
@@ -571,7 +570,7 @@ def build(root: str, overlay: dict[str, bytes] | None = None
             if os.path.isfile(led.disk(model)) and OWNER not in led.owners(model):
                 skipped.append(model)
             else:
-                out[model] = vc.coax_model(game, shell.model, shell.muzzle[1])
+                out[model] = vc.coax_model(game, shell.model)
     check({**out, **handed}, rows)
     return out, skipped, handed
 
