@@ -45,8 +45,17 @@ constexpr std::size_t kWeaponName=0x1B0,kWeaponTrigger=0x139,kWeaponCapacity=0x2
 constexpr std::size_t kSeatPad=0x2B0,kSeatButtons=0x2E8;
 constexpr std::uint16_t kButtonLB=0x10;
 constexpr ULONGLONG kFreshMs=200;                 // a readout this old (game ms) is gone: the player got out
-constexpr float kCoaxNpcM=600.0f;                 // an NPC crew's coaxial gun: targets this close (NpcCoaxFire)
+constexpr float kCoaxNpcM=900.0f;                 // an NPC crew's coaxial gun: targets this close (NpcCoaxFire; a 7.62 mm
+                                                  // coax's point-target reach, where its tracer burns out)
 constexpr float kCoaxCone=0.05f;                  // ...within this of its line (rad, ~3 degrees)
+// A coax belt is linked four ball to one tracer (CoaxBelt). The round's colour is the weapon's AmmoColor, four floats
+// at +0x8D0 in the round template (+0x830) fire copies into each round it makes (docs/boarding-re.md §2: 0x68D978
+// writes it there, 0x69712F copies the block; only the drawing reads the round's copy). Keep these equal to
+// pylib/vcobjects.py COAX_TRACER / COAX_BALL / COAX_TRACER_EVERY (tests/test_stock_store_loadouts.py).
+constexpr std::size_t kWeaponAmmoColor=0x8D0;
+constexpr int kCoaxTracerEvery=5;
+constexpr float kCoaxTracer[4]={3.0f,1.0f,0.35f,1.0f};   // red-orange (NATO M62 / M276); the weapon file's own colour
+constexpr float kCoaxBall[4]={0.3f,0.28f,0.26f,0.1f};    // ball: a faint streak (the game draws every round)
 constexpr int kTracked=64;
 
 // The classes whose fire was read (§2); the vtables as crew.cpp kClasses has them.
@@ -207,6 +216,21 @@ bool IsCoax(const unsigned char* w) noexcept {
     const StoreSpec* const spec=StoreOf(w);
     return spec && spec->role==StoreRole::coax;
 }
+// The coax's next round as its belt has it (kCoaxTracerEvery): a tracer when the rounds left are a multiple of it,
+// else ball. Written before every pull (the player's and the NPC crew's): the weapon fires at most one round a frame
+// (FireInterval 4-5), each with the colour of the count it leaves from, so the belt's rhythm holds whichever comes
+// first in a frame, this write or the weapon's update. Only on the EDF.dll whose AmmoColor write and fire copy were
+// read (coaxBeltOk, InstallPayload); otherwise every round is the file's tracer, as before.
+bool coaxBeltOk=false;
+void CoaxBelt(unsigned char* w) noexcept {
+    if(!coaxBeltOk || !Readable(w,kWeaponAmmoColor+sizeof(kCoaxTracer)))return;
+    const std::int32_t left=At<std::int32_t>(w,kWeaponAmmo);
+    std::memcpy(w+kWeaponAmmoColor,left%kCoaxTracerEvery==0 ? kCoaxTracer : kCoaxBall,sizeof(kCoaxTracer));
+}
+constexpr unsigned kAmmoColorInit=0x68D978,kFireCopy=0x69712F;   // the same bytes boarding.cpp checks
+const unsigned char kAmmoColorInitCode[]={0x0F,0x28,0x45,0x50,0x0F,0x11,0x86,0xD0,0x08,0x00,0x00};   // movups [rsi+0x8D0]
+const unsigned char kFireCopyCode[]={0x49,0x8D,0x97,0x30,0x08,0x00,0x00};                           // lea rdx,[r15+0x830]
+
 // Whether class `c`'s stock input leaves the seat's second fire control unread (the 505, the 601, the Grape: their
 // slot 55 pulls holder 0 on the primary trigger alone, docs/stock-payload-re.md §2), so a coaxial gun can have it.
 constexpr bool FreeSecondary(Class c) noexcept { return c==Class::other; }
@@ -407,8 +431,9 @@ void PayloadFrame(unsigned char* v) noexcept {
     // main gun's choice (R / LB) is untouched, so the gunner keeps a round in the breech while he hoses infantry.
     if(Cfg().stockStores && secondary && !MapHoldsKeys())
         for(int i=0;i<r.count;++i)
-            if(r.entry[i].coax && r.entry[i].fire==PayloadFire::secondary && !Spent(ws[i]) && Readable(ws[i],kWeaponTrigger+1))
-                ws[i][kWeaponTrigger]=1;
+            if(r.entry[i].coax && r.entry[i].fire==PayloadFire::secondary && !Spent(ws[i]) && Readable(ws[i],kWeaponTrigger+1)) {
+                CoaxBelt(ws[i]);ws[i][kWeaponTrigger]=1;
+            }
     latest=r;latestMs=ms;PublishSelectableSnapshot(r);
 }
 
@@ -502,7 +527,7 @@ bool NpcCoaxFire(unsigned char* v,unsigned seat,const void* target,LineBlocked b
             if(!(d>1.0f) || d>reach)continue;
             const float c=(to[0]*dir[0]+to[1]*dir[1]+to[2]*dir[2])/d;
             if(c<std::cos(kCoaxCone) || (blocked && blocked(muzzle,at,v)))continue;   // not laid on it yet, or a friend in the way
-            if(Readable(ws[i],kWeaponTrigger+1)){ws[i][kWeaponTrigger]=1;fired=true;}
+            if(Readable(ws[i],kWeaponTrigger+1)){CoaxBelt(ws[i]);ws[i][kWeaponTrigger]=1;fired=true;}
         }
         return fired;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
@@ -659,6 +684,9 @@ int PayloadSightWeapons(const void* vehicle,unsigned index,unsigned char** out,i
 
 bool InstallPayload() noexcept {
     __try {
+        coaxBeltOk=Matches(kAmmoColorInit,kAmmoColorInitCode,sizeof(kAmmoColorInitCode)) &&
+                   Matches(kFireCopy,kFireCopyCode,sizeof(kFireCopyCode));
+        Log("HOOK coax belt=%d (a tracer every %d coax rounds)",coaxBeltOk,kCoaxTracerEvery);
         if(!Matches(kPull,kPullCode,sizeof(kPullCode))) {
             Log("HOOK payload=0 (unexpected EDF.dll code at the holder pull: the stock vehicles' stores do not switch)");
             return false;

@@ -130,9 +130,12 @@ int main() {
         for(int i=0;i<3;++i)weapons[1][i][kWeaponTrigger]=0;
         weapons[1][0][0x100]=0;weapons[1][0][0x101]=0;Put<int>(weapons[1][0],kWeaponAmmo,10);
         weapons[1][1][0x100]=2;weapons[1][1][0x101]=2;Put<int>(weapons[1][1],kWeaponAmmo,4);
-        weapons[1][2][0x100]=2;weapons[1][2][0x101]=5;Put<int>(weapons[1][2],kWeaponAmmo,1500);
-        Put<int>(weapons[1][2],kWeaponReloadTime,240);
-        Put<const wchar_t*>(weapons[1][1],0x08,L"EDF6VC_GLM_4.SGO");Put<const wchar_t*>(weapons[1][2],0x08,L"EDF6VC_MG505_1500.SGO");
+        weapons[1][2][0x100]=2;weapons[1][2][0x101]=5;Put<int>(weapons[1][2],kWeaponAmmo,3000);
+        Put<int>(weapons[1][2],kWeaponReloadTime,600);
+        Put<const wchar_t*>(weapons[1][1],0x08,L"EDF6VC_GLM_4.SGO");Put<const wchar_t*>(weapons[1][2],0x08,L"EDF6VC_MG505_3000.SGO");
+        coaxBeltOk=true;
+        const auto colour=[&](const unsigned char* w){return reinterpret_cast<const float*>(w+kWeaponAmmoColor);};
+        const auto is=[&](const unsigned char* w,const float* c){return std::memcmp(colour(w),c,sizeof(kCoaxTracer))==0;};
         Put<std::uint64_t>(seat,kSeatWeaponCount,3);
         riders[1][edf::kHumanPlayer]=1;Put<void*>(riders[1],edf::kHumanPad,riders[1]);trackedHuman=riders[1];
         Put<float>(seat,0x2E4,0.0f);Put<float>(seat,0x2E0,0.0f);
@@ -146,8 +149,19 @@ int main() {
         check(weapons[1][2][kWeaponTrigger]==1 && !weapons[1][0][kWeaponTrigger] && !weapons[1][1][kWeaponTrigger],
               "the secondary trigger pulls the coax alone");
         check(PayloadSightPicked(v,0)==weapons[1][2],"the secondary edge hands the fire-control view to the coax");
+        check(is(weapons[1][2],kCoaxTracer),"3000 left: the round it fires is a tracer (one in five)");
+        check(!is(weapons[1][0],kCoaxTracer) && !is(weapons[1][0],kCoaxBall),"the main gun's colour is never touched");
+        // The belt's rhythm over the next rounds: 2999..2996 ball, 2995 tracer.
+        bool rhythm=true;
+        for(int left=2999;left>=2995;--left) {
+            Put<int>(weapons[1][2],kWeaponAmmo,left);weapons[1][2][kWeaponTrigger]=0;now+=16;PayloadFrame(v);
+            rhythm=rhythm && weapons[1][2][kWeaponTrigger]==1 && is(weapons[1][2],left%5==0 ? kCoaxTracer : kCoaxBall);
+        }
+        check(rhythm,"held, it keeps firing (its own interval paces it), four ball to one tracer");
+        coaxBeltOk=false;Put<int>(weapons[1][2],kWeaponAmmo,2994);std::memcpy(weapons[1][2]+kWeaponAmmoColor,kCoaxTracer,16);
         weapons[1][2][kWeaponTrigger]=0;now+=16;PayloadFrame(v);
-        check(weapons[1][2][kWeaponTrigger]==1,"held, it keeps firing (its own interval paces it)");
+        check(weapons[1][2][kWeaponTrigger]==1 && is(weapons[1][2],kCoaxTracer),"an unread EDF.dll: the file's tracer on every round, still firing");
+        coaxBeltOk=true;Put<int>(weapons[1][2],kWeaponAmmo,3000);
         Put<float>(seat,0x2E0,0.0f);weapons[1][2][kWeaponTrigger]=0;now+=16;PayloadFrame(v);
         check(!weapons[1][2][kWeaponTrigger] && PayloadSightPicked(v,0)==weapons[1][2],"let go: it stops, the view stays on it");
         Put<float>(seat,0x2E4,1.0f);now+=16;PayloadFrame(v);
@@ -155,7 +169,7 @@ int main() {
         Put<float>(seat,0x2E4,0.0f);Put<int>(weapons[1][2],kWeaponAmmo,0);Put<int>(weapons[1][2],kWeaponReloadTime,-1);
         Put<float>(seat,0x2E0,1.0f);now+=16;PayloadFrame(v);
         check(!weapons[1][2][kWeaponTrigger],"a coax spent for good is not pulled");
-        Put<float>(seat,0x2E0,0.0f);Put<int>(weapons[1][2],kWeaponAmmo,1500);Put<int>(weapons[1][2],kWeaponReloadTime,240);
+        Put<float>(seat,0x2E0,0.0f);Put<int>(weapons[1][2],kWeaponAmmo,3000);Put<int>(weapons[1][2],kWeaponReloadTime,600);
         // An NPC crew (2026-10-11: 「ap弹和机枪不冲突吧，两个都用不就好了」): the coax is never the one weapon chosen; it
         // fires alongside the main gun whenever the gun is laid on the target close enough, a friend not in the line.
         riders[1][edf::kHumanPlayer]=0;trackedHuman=nullptr;
@@ -164,12 +178,17 @@ int main() {
         alignas(16) unsigned char enemy[0x400]{};
         float* where=reinterpret_cast<float*>(enemy+kPosition);where[0]=0;where[1]=-0.5f;where[2]=80;
         weapons[1][0][kWeaponTrigger]=weapons[1][2][kWeaponTrigger]=0;
+        Put<int>(weapons[1][2],kWeaponAmmo,2999);
         check(NpcCoaxFire(v,0,enemy,&FriendInLine) && weapons[1][2][kWeaponTrigger]==1,"the coax fires alongside it, laid on the target");
+        check(is(weapons[1][2],kCoaxBall),"an NPC's coax belt too: 2999 left, a ball round");
+        Put<int>(weapons[1][2],kWeaponAmmo,3000);
         PullHook(holders[1][0]);
         check(weapons[1][0][kWeaponTrigger]==1,"and the main gun's own pull still lands on the main gun");
         weapons[1][2][kWeaponTrigger]=0;where[0]=30;
         check(!NpcCoaxFire(v,0,enemy,&FriendInLine) && !weapons[1][2][kWeaponTrigger],"not laid on it (20 degrees off): no coax burst");
-        where[0]=0;where[2]=900;check(!NpcCoaxFire(v,0,enemy,&FriendInLine),"beyond 600 m: the coax holds");
+        where[0]=0;where[2]=850;weapons[1][2][kWeaponTrigger]=0;
+        check(NpcCoaxFire(v,0,enemy,&FriendInLine) && weapons[1][2][kWeaponTrigger]==1,"850 m: inside a 7.62 mm coax's reach, it fires");
+        where[2]=950;check(!NpcCoaxFire(v,0,enemy,&FriendInLine),"beyond 900 m (its tracer burns out): the coax holds");
         where[2]=80;friendInLine=true;check(!NpcCoaxFire(v,0,enemy,&FriendInLine),"a friend in the line: the coax holds");friendInLine=false;
         check(!NpcCoaxFire(v,0,nullptr),"no target, no burst");
         Put<void*>(v,0,image+kVt403);
