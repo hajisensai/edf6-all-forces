@@ -161,13 +161,31 @@ void ViewAndBack() noexcept {
     Put<std::uint32_t>(missile,kFlags,kRoundDead);TvAfter(missile);
     Check(eyeZ()>=105.0f,"a round that hit does not re-place the view");
 
+    // "要能来回切换电视和玩家视角": the right button switches views; the round stays the TV's throughout.
     Start();TvInput in{};in.front=true;in.back=true;   // zoomed on the laser with the right button when it came out
-    Check(TvFrame(owner,false,in) && tv.active,"a right button held from before the take does not hand back");
-    in.back=false;Check(TvFrame(owner,false,in) && tv.active,"let go: armed");
+    Check(TvFrame(owner,false,in) && tv.active && tv.viewOn,"a right button held from before the take is no switch");
+    in.back=false;Check(TvFrame(owner,false,in) && tv.viewOn,"let go: still the missile's view");
     in.back=true;
-    Check(TvFrame(owner,false,in) && !tv.active && !ViewShown() && TvHoldsKeys(),"right button hands back and holds until let go");
-    in.back=false;Check(!TvFrame(owner,false,in) && !TvHoldsKeys(),"released: the soldier is free (no stray zoom)");
-    Check(!TvSteer(missile) && GateOpen(missile,20),"handed back by the right button: the laser guides it at its next update");
+    Check(TvFrame(owner,false,in) && tv.active && !tv.viewOn && !ViewShown() && TvHoldsKeys(),
+          "press: the player's view, the soldier held until the button is let go (no stray zoom)");
+    in.back=false;
+    Check(!TvFrame(owner,false,in) && !TvHoldsKeys() && tv.active,"let go: the soldier free, the round still the TV's");
+    in.dx=500.0f;in.fire=true;
+    Check(!TvFrame(owner,false,in) && !tv.boost && tv.yaw==0.0f,"in the player's view the mouse and fire are the soldier's");
+    Check(TvSteer(missile) && At<unsigned>(missile,kDelay)==kTvHomingDelay && !ViewShown(),
+          "the round flies on under the TV (no laser handback), its view not shown");
+    in.dx=0.0f;in.leave=true;
+    Check(!TvFrame(owner,false,in) && tv.active,"Esc / B in the player's view are the game's (no handback)");
+    in.leave=false;in.back=true;
+    Check(TvFrame(owner,false,in) && tv.viewOn && TvHoldsKeys(),"press again: back to the missile's view, the soldier held");
+    TvSteer(missile);Check(ViewShown(),"the missile's view shown again");
+    Check(TvFrame(owner,false,in) && !tv.boost,"the fire held from the soldier's shot is no boost");
+    in.fire=false;TvFrame(owner,false,in);in.fire=true;TvFrame(owner,false,in);
+    Check(tv.boost,"fire let go and pressed again in the missile's view boosts");
+    in.back=false;in.fire=false;in.leave=true;
+    Check(TvFrame(owner,false,in) && !tv.active,"Esc / B in the missile's view hand it back");
+    in.leave=false;TvFrame(owner,false,in);
+    Check(!TvSteer(missile) && GateOpen(missile,20),"handed back: the laser guides it at its next update");
 }
 }  // namespace
 const Config& Cfg() noexcept { return config; }

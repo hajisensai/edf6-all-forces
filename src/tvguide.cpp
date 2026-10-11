@@ -8,8 +8,9 @@
 //    so neither the stock steering nor guidance.cpp's turns it; this turns its own velocity (+0x13D0) toward the
 //    heading the player steers at most its own stock turn a frame (CP[5], +0x13A4), its speed kept; the stock step
 //    then speeds it up, clamps it, builds its frame along it and moves it.
-//  - Handing it back (the right button, Esc / B, the map opened; Esc mostly opens the pause menu first, which stops the
-//    soldier's update the TV reads keys in, so the right button is the one to use): the next update of that live round clears both homing gates, so even
+//  - The right button switches the view between the missile and the player (2026-10-10: "要能来回切换电视和玩家视角"); in
+//    the player's view the soldier is free and the round, still the TV's, flies straight on until the TV is back.
+//  - Handing it back (Esc / B in the missile's view, the map opened): the next update of that live round clears both homing gates, so even
 //    an early handback immediately homes on its laser (stock, or guidance.cpp's PN); it is not taken again.
 //  - Fire boosts it (the user, 2026-10-06: "left button speeds the missile up, and it cannot be taken back"): its
 //    own top speed (CP[6], +0x13A8) times TempestTvBoost, its acceleration (CP[4], +0x13A0) enough to reach that in
@@ -57,7 +58,12 @@ struct Tv {
     bool active,armed,draining;
     bool fireHeld,leaveHeld;   // carry held buttons across a hit/disappearance, on this soldier only
     bool boost,boosted;
-    bool backArmed;            // the right button let go since the take (held for the laser's zoom it does not count)
+    // The right button switches between the TV and the player's own view (2026-10-10, the user: "要能来回切换电视和玩家视角").
+    // viewOn: the TV's view and controls (the soldier held); off: the player's view, the soldier free, the round still the
+    // TV's flying straight on until the TV is back. backWas / backKnown: its last state (a press held from before the take,
+    // the laser's zoom, is no switch). freeing: switched to the player's view with the button still down -- the soldier
+    // stays held until it is let go (the press would be the game's zoom).
+    bool viewOn,backWas,backKnown,freeing;
     float turn;               // stock turn sampled by the missile callback; the soldier reads only this copy
     float yaw,pitch;
 };
@@ -70,8 +76,8 @@ SRWLOCK lock=SRWLOCK_INIT;
 
 void Publish(bool on,const float* eye,const float* look) noexcept {
     AcquireSRWLockExclusive(&lock);
-    view.on=on;view.human=tv.owner.obj;view.at=tv.seen;
-    if(on){std::memcpy(view.eye,eye,12);std::memcpy(view.look,look,12);}
+    view.on=on && tv.viewOn;view.human=tv.owner.obj;view.at=tv.seen;
+    if(on && eye && look){std::memcpy(view.eye,eye,12);std::memcpy(view.look,look,12);}
     ReleaseSRWLockExclusive(&lock);
 }
 
@@ -195,7 +201,7 @@ bool TvSteer(unsigned char* b) noexcept {
     // unique marker never belongs to the plugin's other missiles (their sentinel is 1000000).
     if(ours){ReleaseRound(b);return false;}
     if(tv.active || tv.draining || !Available() || !IsPlayersTempest(b,age))return false;
-    tv=Tv{};tv.round=ObjRef::Of(b);tv.owner=ObjRef::Of(PlayerHuman());tv.age=age;tv.seen=GameMs();tv.active=true;
+    tv=Tv{};tv.round=ObjRef::Of(b);tv.owner=ObjRef::Of(PlayerHuman());tv.age=age;tv.seen=GameMs();tv.active=true;tv.viewOn=true;
     holding.store(true);
     Put<std::uint32_t>(b,kDelay,kTvHomingDelay);
     Log("TV take: the player's Tempest %p at %d frames",static_cast<void*>(b),age);
@@ -206,18 +212,32 @@ bool TvSteer(unsigned char* b) noexcept {
 bool TvFrame(unsigned char* human,bool mapOpen,const TvInput& in) noexcept {
     if((tv.active || tv.draining) && (!Available() || !OwnerLive())){End("owner or setting unavailable");return false;}
     if(tv.owner.obj!=human)return false; // another local player never consumes or inherits this hold
-    tv.fireHeld=in.fire;tv.leaveHeld=in.leave || in.back;
+    // Held keys carried over an end are the TV's own (in the player's view the buttons are the soldier's).
+    tv.fireHeld=tv.viewOn && in.fire;tv.leaveHeld=tv.viewOn && (in.leave || in.back);
     if(tv.draining) {
         if(in.fire || in.leave || in.back)return true;
-        tv.draining=false;holding.store(tv.active);
+        tv.draining=false;holding.store(tv.active && tv.viewOn);
     }
     if(!tv.active)return false;
     if(GameMs()-tv.seen>kFreshMs){End("the round is gone",true);return tv.draining;}
     if(mapOpen){End("the map opened");return false;}
+    // The right button's press: TV <-> the player's view.
+    const bool press=tv.backKnown && in.back && !tv.backWas;
+    tv.backWas=in.back;tv.backKnown=true;
+    if(press) {
+        tv.viewOn=!tv.viewOn;tv.yaw=tv.pitch=0.0f;
+        if(tv.viewOn)tv.armed=false;   // the fire held for the soldier's shot is no boost: let go first
+        else{tv.freeing=true;Publish(false,nullptr,nullptr);}
+        Log("TV view: %s (round %p flies on)",tv.viewOn ? "the missile's" : "the player's",tv.round.obj);
+    }
+    if(!tv.viewOn) {   // the player's view: the soldier free (once the switching press is let go), the round flies straight
+        if(tv.freeing && in.back){holding.store(true);return true;}
+        tv.freeing=false;holding.store(false);
+        return false;
+    }
+    holding.store(true);
     if(!tv.armed){tv.armed=!in.fire;}
     else if(in.fire && !tv.boost){tv.boost=true;Log("TV boost: round %p",tv.round.obj);}
-    if(!tv.backArmed)tv.backArmed=!in.back;
-    else if(in.back){End("the right button",true);return true;}
     if(in.leave){End("Esc / B",true);return true;}
     const float k=kMouseTurn*vec::Clamp(Cfg().tempestTvMouseSpeed,0.1f,5.0f);
     tv.yaw+=in.dx*k+in.rx*tv.turn;

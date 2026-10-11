@@ -1,6 +1,8 @@
 // TV guidance for the Air Raider's Tempest cruise missiles (src/tvguide.cpp, docs/tvguide-re.md): the player's own
 // Tempest, once it is out, is flown from its nose; the camera rides it, the soldier stands still (the map's hold),
-// mouse / right stick steer it at its own stock turn, fire boosts it (for good), the right button (or Esc / B) hands it back to its laser.
+// mouse / right stick steer it at its own stock turn, fire boosts it (for good), the right button switches between the
+// missile's view and the player's (the round flies straight on meanwhile, the soldier free), Esc / B hand it back to its
+// laser.
 // Offline only: controls are not replicated. Online missiles retain their existing stock / PN laser guidance.
 #pragma once
 #include <cstdint>
@@ -12,9 +14,8 @@ struct TvInput {
     float dx,dy;       // the game's own mouse delta this frame (mouse units; 0 with none)
     float rx,ry;       // the right stick (-1..1, past its dead zone)
     bool fire,leave;   // left button / right trigger; Esc / B
-    // The right button (2026-10-10 feedback: "没办法切换回原本的视角" -- Esc is the game's pause menu, which pauses the
-    // soldier's update before the TV sees it, so the view stayed on the missile). Hands back as Esc / B does, once it has
-    // been let go since the take (an Air Raider aims the laser zoomed with it held).
+    // The right button (2026-10-10 feedback: "没办法切换回原本的视角"; then "要能来回切换电视和玩家视角"): each press switches
+    // between the missile's view and the player's. A press held from before the take (the laser's zoom) is none.
     bool back;
 };
 // The TV's frame for the player `human` (game thread, the soldier pre-update, after the map's): true while it holds
