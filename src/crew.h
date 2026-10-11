@@ -221,7 +221,7 @@ struct Config {
     bool sightRangePad=true;        // ...and on a pad the d-pad up / down
     bool infantryScope=true;        // a soldier's scoped weapon zoomed: a real optic's eyepiece and reticle (infantryscope.cpp)
     bool gunStabilizer=true;        // stab.cpp: the guns that should have one hold their world line on the move
-    float viewDistance=3000.0f;     // the near camera's far clip, m (view.cpp; stock 1000; 0: as the mission has it)
+    float viewDistance=-1.0f;       // the near camera's far clip, m (view.cpp; stock 1000; 0: as the mission has it; -1: unlimited)
     bool map=true;                  // the map view (map.cpp): an overhead camera over the real world, the player held
     int mapKey=0x4D;                // ...its key ('M'; a Windows virtual-key code, 0: none)
     int mapButton=0x20;             // ...and pad button (XInput button bits: 0x20 Back / View; 0 none)
@@ -315,7 +315,6 @@ struct Config {
     float npcRollSec=2.5f;          // ...s between two rolls
     float npcRetreatHp=0.3f;        // ...under this share of their HP they fall back behind the player (0: never)
     float npcLeash=40.0f;           // ...m from their anchor (the player they follow, their leader, their post) they go to fight
-    float transportAutoRange=200.0f; // a paired squad's point order farther than this (m) goes by its transport (transport.cpp)
            // ...m from their anchor (the player they follow, their leader, their post) they go to fight
     bool npcSquadSuccession=true;   // ...a squad whose leader dies gets a new one (or joins another), not split up
     int npcSquadMin=2;              // ...fewer left than this: it joins the nearest squad with room
@@ -430,7 +429,14 @@ inline float ArrivalHalf() noexcept { const float h=HavokHalf(),w=WorldHalf();re
 // m: how far the near camera draws (view.cpp: the mission's FarClipZ, 1000 m in every mission, raised to ini
 // ViewDistance); past it only what has the far-render bit is drawn (jet_spawn.cpp FarRender).
 constexpr float kStockFarClip=1000.0f;
-inline float NearDrawDistance() noexcept { return Cfg().viewDistance>kStockFarClip ? Cfg().viewDistance : kStockFarClip; }
+// ViewDistance -1 (the default since 2026-10-10, the user: "改一下上限，改成无限"): no limit of the plugin's -- the near
+// camera reaches past anything the world holds: its diagonal (2.83 x WorldHalf) and no nearer than the stock far pass's
+// end (20000 m). view.cpp also never sets it nearer than the mission's own far pass end.
+constexpr float kUnlimitedView=-1.0f,kStockDistantFar=20000.0f;
+inline float UnlimitedViewDistance() noexcept { const float d=2.83f*WorldHalf();return d>kStockDistantFar ? d : kStockDistantFar; }
+// m: the near camera's far clip the plugin asks for (0: none, the mission's own).
+inline float ViewDistanceWanted() noexcept { return Cfg().viewDistance<0.0f ? UnlimitedViewDistance() : Cfg().viewDistance; }
+inline float NearDrawDistance() noexcept { const float v=ViewDistanceWanted();return v>kStockFarClip ? v : kStockFarClip; }
 // The camera's view-projection (row vectors, the HUD's) as of the last frame drawn; false before one (hud.cpp).
 bool LastViewProj(float* out) noexcept;
 // The camera's eye and its unit look through the screen's centre, from LastViewProj (hud.cpp); false: no camera yet.

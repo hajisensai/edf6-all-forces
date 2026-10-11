@@ -4673,6 +4673,10 @@ def stock_guidance_wired() -> None:
     assert 'kCamStep' not in src('src/tvguide.cpp'), 'one camera hook: the map\'s'
     assert 'holds.load(std::memory_order_relaxed) || TvHoldsKeys()' in m
     assert 'if(!TvSteer(static_cast<unsigned char*>(b)) && Cfg().enabled)Guide(' in src('src/missile.cpp')
+    # 2026-10-10: the view placed after the stock step (it was a frame behind, inside the missile); the right button hands back.
+    ms_src = src('src/missile.cpp')
+    assert ms_src.index('nextUpdate(b,a2,a3,a4);') < ms_src.index('TvAfter(static_cast<unsigned char*>(b));'), 'TV view after the step'
+    assert 'in.back=Down(VK_RBUTTON);' in m, 'the right button hands the TV back'
     crew, vini, readme = src('src/crew.h'), src('EDF6VehicleCrew.ini'), src('README.md')
     for field, key in (('stockMissilePN', 'StockMissilePN'), ('playerLockByView', 'PlayerLockByView'),
                        ('tempestTv', 'TempestTv')):
@@ -5068,7 +5072,10 @@ def support_arrives_from_off_the_map() -> None:
     assert 'SupportPassTurn(spec)' in plan
     crewh = src('src/crew.h')
     assert 'inline float ArrivalHalf() noexcept { const float h=HavokHalf(),w=WorldHalf();return (h<w ? h : w)-kArrivalRoom; }' in crewh
-    assert 'Cfg().viewDistance>kStockFarClip' in crewh
+    assert 'const float v=ViewDistanceWanted();return v>kStockFarClip ? v : kStockFarClip;' in crewh
+    # 2026-10-10 "改成无限": ViewDistance -1 (the default) reaches past the world's diagonal and the stock far pass end.
+    assert 'float viewDistance=-1.0f;' in crewh and re.search(r'^ViewDistance=-1', src('EDF6VehicleCrew.ini'), re.M)
+    assert 'Cfg().viewDistance<0.0f ? UnlimitedViewDistance()' in crewh
     dispatch = src('src/support_dispatch.cpp')
     board = dispatch.split('bool BoardAirborne(Deployment& deployed,bool networked) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'JetFerry(vehicle,plan.target,plan.units[i].matrix+8)' in board, 'the plane on its line from its first frame'

@@ -191,7 +191,9 @@ void Validate(Config& n) noexcept {
     Fix("AirSoftTurns",n.airSoftTurns,0.0f,3.0f);
     Fix("AirSoftCeil",n.airSoftCeil,0.0f,1000.0f);
     Fix("HeliSoftEdge",n.heliSoftEdge,0.0f,1000.0f);
-    if(n.viewDistance!=0.0f)Fix("ViewDistance",n.viewDistance,1000.0f,10000.0f);
+    // -1 (any negative): unlimited (crew.h UnlimitedViewDistance); 0: the mission's own; else from 1000 m, no upper limit.
+    if(n.viewDistance<0.0f)n.viewDistance=kUnlimitedView;
+    else if(n.viewDistance!=0.0f)Fix("ViewDistance",n.viewDistance,1000.0f,1.0e6f);
     Fix("JetSoundVolume",n.jetSoundVolume,0.0f,4.0f);
     Fix("WarnVolume",n.warnVolume,0.0f,4.0f);
     Fix("VehicleEngineVolume",n.vehicleEngineVolume,0.0f,4.0f);
@@ -294,7 +296,6 @@ void Validate(Config& n) noexcept {
     Fix("NpcRollSec",n.npcRollSec,0.5f,30.0f);
     Fix("NpcRetreatHp",n.npcRetreatHp,0.0f,0.9f);
     Fix("NpcLeash",n.npcLeash,5.0f,500.0f);
-    Fix("TransportAutoRange",n.transportAutoRange,50.0f,2000.0f);
     n.npcSquadMin=static_cast<int>(FixInt("NpcSquadMin",n.npcSquadMin,1,16));
     n.npcSquadMax=static_cast<int>(FixInt("NpcSquadMax",n.npcSquadMax,n.npcSquadMin,32));
     Fix("NpcSquadJoinRange",n.npcSquadJoinRange,0.0f,2000.0f);
@@ -627,7 +628,6 @@ void LoadConfig() noexcept {
     n.npcRollSec=ReadFloat(L"NpcRollSec",n.npcRollSec);
     n.npcRetreatHp=ReadFloat(L"NpcRetreatHp",n.npcRetreatHp);
     n.npcLeash=ReadFloat(L"NpcLeash",n.npcLeash);
-    n.transportAutoRange=ReadFloat(L"TransportAutoRange",n.transportAutoRange);
     n.npcSquadSuccession=ReadBool(L"NpcSquadSuccession",n.npcSquadSuccession);
     n.npcSquadMin=ReadInt(L"NpcSquadMin",static_cast<DWORD>(n.npcSquadMin));
     n.npcSquadMax=ReadInt(L"NpcSquadMax",static_cast<DWORD>(n.npcSquadMax));
@@ -721,6 +721,7 @@ void LoadConfig() noexcept {
     Log("CONFIG sightZoom=%d key=0x%X button=0x%X infantryScope=%d",n.sightZoom,n.sightZoomKey,n.sightZoomButton,n.infantryScope);
     Log("CONFIG nixTorsoTwist=%d",n.nixTorsoTwist);
     Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f",n.map,n.mapKey,n.mapButton,n.mapViewDistance);
+    Log("CONFIG ViewDistance=%.0f (%s)",n.viewDistance,n.viewDistance<0.0f ? "unlimited" : n.viewDistance==0.0f ? "the mission's own" : "m");
     Log("CONFIG damageStats=%d key=0x%X",n.damageStats,n.damageStatsKey);
     Log("CONFIG debugSpawn=%d keys menu=0x%X prev=0x%X next=0x%X category=0x%X spawn=0x%X range=%.0f distance=%.0f",n.debugSpawn,
         n.debugSpawnKey,n.debugSpawnPrevKey,n.debugSpawnNextKey,n.debugSpawnCategoryKey,n.debugSpawnSpawnKey,n.debugSpawnRange,
