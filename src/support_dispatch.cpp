@@ -42,6 +42,8 @@ constexpr int kDeployments=16;
 constexpr ULONGLONG kBoardLimit=120000,kCallCooldown=30000;
 constexpr ULONGLONG kStuckMs=20000;   // a delivery making no way this long gets off where it is (see Deployment::stuckSince)
 constexpr float kStuckMove=5.0f;      // m: moved this far from where its wait began, it is making way
+// The deployments' trace (always on, rate-limited): every kTraceMs while it comes in, kTraceAfterMs on after delivery.
+constexpr ULONGLONG kTraceMs=5000,kTraceAfterMs=60000;
 constexpr float kVehicleWaypointRadius=1.5f,kVehicleDriverHold=1.0f,kVehicleArrival=5.0f;
 constexpr float kInfantryWaypointRadius=1.5f,kInfantryRouteStop=1.0f,kInfantryArrival=3.0f;
 constexpr int kPlanCallsPerFrame=3;
@@ -82,6 +84,9 @@ struct Deployment {
     // walking squad's quiet movement) where they stood for the rest of the mission. Past kStuckMs they get off / are let go.
     ULONGLONG stuckSince=0,infantryStuck[3]{};
     float stuckAt[3]{},infantryAt[3][3]{};   // where each was when its stuckSince began
+    // The trace (Trace): when last logged, when delivered, each unit's place at the last line.
+    ULONGLONG tracedAt=0,deliveredAt=0;
+    float traced[support_net::kMaxUnits][3]{};
 };
 Deployment deployments[kDeployments]{};
 bool offlinePending=false;std::uint64_t nextOffline=1;ULONGLONG callAt=0;
@@ -769,6 +774,52 @@ bool Unseat(const ObjRef& soldier) noexcept {
         return false;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
+// One deployment's state in the log (2026-10-10, the user: "那你加日志啊" -- "我摇的人还没到目的地成棍木了 / 卡车也跟着
+// 虚化了" came with no log to tell why). Every unit: alive, where, how far it went since the last line ("still" when it
+// made no way while the deployment is still coming in), the vehicle it sits in and which seat, its team, its object
+// flags, its distance from the player and whether that is past the near camera's draw distance; a vehicle also its
+// riders and whether an NPC drives it.
+void Trace(Deployment& d) noexcept {
+    const ULONGLONG now=GameMs();
+    if(d.delivered && !d.deliveredAt)d.deliveredAt=now;
+    if(d.tracedAt && now-d.tracedAt<kTraceMs)return;
+    if(d.delivered && now-d.deliveredAt>kTraceAfterMs && !d.withdrawing)return;
+    const bool first=!d.tracedAt;
+    d.tracedAt=now;
+    __try {
+        const float draw=NearDrawDistance();
+        Log("SUPPORT TRACE %llu: catalog %u, %u units, age %.0f s, started %d assigned %d delivered %d withdrawing %d, stuck %.0f s, draw %.0f m",
+            static_cast<unsigned long long>(d.id),d.plan.catalogId,d.plan.count,static_cast<float>(now-d.born)*0.001f,d.started,d.assigned,
+            d.delivered,d.withdrawing,d.stuckSince ? static_cast<float>(now-d.stuckSince)*0.001f : 0.0f,draw);
+        for(unsigned i=0;i<d.plan.count;++i) {
+            const ObjRef& ref=d.objects[i];
+            if(!Live(ref)){Log("SUPPORT TRACE %llu   #%u gone",static_cast<unsigned long long>(d.id),i);continue;}
+            const auto* o=static_cast<const unsigned char*>(ref.obj);
+            const float* p=reinterpret_cast<const float*>(o+kPosition);
+            const float moved=first ? 0.0f : support::FlatDistance(p,d.traced[i]);
+            std::memcpy(d.traced[i],p,12);
+            const float away=support::FlatDistance(p,player.pos);
+            const int team=At<std::int32_t>(o,kTeam);
+            const unsigned flags=At<std::uint32_t>(o,kObjectFlags);
+            if(d.plan.units[i].resourceId<kAircraft) {
+                const auto* v=At<const unsigned char*>(o,kSoldierVehicle);
+                int seat=-1;
+                if(v && Readable(v,kSeatCount+8))
+                    for(unsigned s=0;s<SeatCount(v);++s)if(At<const void*>(SeatAt(const_cast<unsigned char*>(v),s),kSeatRider)==o){seat=static_cast<int>(s);break;}
+                Log("SUPPORT TRACE %llu   #%u soldier %p at (%.0f,%.0f,%.0f) moved %.1f m%s, in v=%p seat %d, team %d flags %08X, %.0f m from the player%s",
+                    static_cast<unsigned long long>(d.id),i,ref.obj,p[0],p[1],p[2],moved,
+                    !first && !d.delivered && !v && moved<0.5f ? " (still)" : "",v,seat,team,flags,away,away>draw ? " (past draw)" : "");
+            } else {
+                auto* v=const_cast<unsigned char*>(o);
+                int riders=0;const unsigned seatCount=Readable(v,kSeatCount+8) ? SeatCount(v) : 0;
+                for(unsigned s=0;s<seatCount;++s)riders+=SeatRider(SeatAt(v,s))!=Rider::none;
+                Log("SUPPORT TRACE %llu   #%u vehicle %p at (%.0f,%.0f,%.0f) moved %.1f m%s, riders %d/%u, driven %d, team %d flags %08X, %.0f m from the player%s",
+                    static_cast<unsigned long long>(d.id),i,ref.obj,p[0],p[1],p[2],moved,!first && !d.delivered && moved<0.5f ? " (still)" : "",
+                    riders,seatCount,NpcDriver(v),team,flags,away,away>draw ? " (past draw)" : "");
+            }
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER){Log("SUPPORT TRACE %llu: fault while reading",static_cast<unsigned long long>(d.id));}
+}
 void DeleteSoldier(const ObjRef& soldier) noexcept {
     if(!Unseat(soldier))Log("SUPPORT soldier %p: not out of its seat before it is deleted",soldier.obj);
     DeleteSupportSoldier(soldier);
@@ -1327,11 +1378,13 @@ void SupportDispatchTick() noexcept {
         if(!deployed.used)continue;
         bool anyLive=false;
         for(unsigned i=0;i<deployed.plan.count;++i)anyLive=anyLive || Live(deployed.objects[i]);
-        if(!anyLive){Renew(deployed);continue;}
+        if(!anyLive){Log("SUPPORT deployment %llu: none of its units left",static_cast<unsigned long long>(deployed.id));Renew(deployed);continue;}
+        if(!deployed.remote)Trace(deployed);
         if(!deployed.remote)Retire(deployed);
         if(!deployed.assigned) {
             if(deployed.networked && !SupportTransactionActive(deployed.id))continue;
             if(!Assign(deployed)) {
+                Log("SUPPORT deployment %llu: its crew could not be released / boarded (Assign): rolled back",static_cast<unsigned long long>(deployed.id));
                 const auto id=deployed.id;if(deployed.networked)ReportSupportFailure(id);else Destroy(id);continue;
             }
         }
@@ -1349,9 +1402,12 @@ void SupportDispatchTick() noexcept {
         }
         if(!alive && deployed.started) {
             // Once in the field, losses are gameplay. Never despawn the surviving deployed units.
+            Log("SUPPORT deployment %llu: a unit lost on the way: the survivors carry on (delivered)",static_cast<unsigned long long>(deployed.id));
             deployed.delivered=true;Status(L"支援途中遭受损失，存活单位继续执行任务");continue;
         }
         if(!alive || (!deployed.started && GameMs()-deployed.born>kBoardLimit)) {
+            Log("SUPPORT deployment %llu: rolled back before it set off (%s; boarded %d)",static_cast<unsigned long long>(deployed.id),
+                alive ? "boarding took past kBoardLimit" : "a unit lost before it set off",boarded);
             const auto id=deployed.id;if(deployed.networked)ReportSupportFailure(id);else Destroy(id);continue;
         }
         if(!deployed.started && boarded) {

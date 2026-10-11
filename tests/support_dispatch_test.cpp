@@ -18,7 +18,8 @@ bool InSession() noexcept {return testOnline;}
 bool OnlineHostOnly() noexcept {return true;}
 ULONGLONG GameMs() noexcept {return fixtureMs;}
 std::uint64_t GameFrame() noexcept {return fixtureMs;}
-void Log(const char*,...) noexcept {}
+int traceLines=0;   // "SUPPORT TRACE" lines (support_dispatch.cpp Trace)
+void Log(const char* f,...) noexcept {if(f && std::strncmp(f,"SUPPORT TRACE",13)==0)++traceLines;}
 unsigned char objects[32][0x3000]{},controls[32][32]{},seats[32][edf::kSeatStride*14]{};
 int made=0,deleted=0,boardRequests=0,activated=0,orders=0,followed=0,netRequests=0,releases=0,routeOrders=0;
 int held=0;bool transactionActive=false;
@@ -605,9 +606,13 @@ int main() {
             Put<const void*>(SeatAt(v,i),kSeatRider,d.objects[i+1].obj);
             Put<const void*>(static_cast<unsigned char*>(const_cast<void*>(d.objects[i+1].obj)),kSoldierVehicle,v);
         }
-        routeResult=npc::navigation::Result::blocked;
-        SupportDispatchTick();fixtureMs+=kStuckMs/2;SupportDispatchTick();
-        check(!d.delivered && !delivered,"no way yet: it waits for its route");
+        routeResult=npc::navigation::Result::blocked;traceLines=0;
+        SupportDispatchTick();
+        check(traceLines==5,"the trace: a header and one line for each of its four units");
+        fixtureMs+=1000;SupportDispatchTick();
+        check(traceLines==5,"...rate-limited (not every frame)");
+        fixtureMs+=kStuckMs/2;SupportDispatchTick();
+        check(!d.delivered && !delivered && traceLines==10,"no way yet: it waits for its route (traced again)");
         fixtureMs+=kStuckMs;SupportDispatchTick();
         check(d.delivered && delivered==1 && deliveredHere && deliveredTops[0]==first.obj,
               "making no way past kStuckMs: its passengers handed over to get off where it stands");
