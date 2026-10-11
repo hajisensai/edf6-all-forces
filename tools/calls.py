@@ -406,18 +406,22 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
                              'through buildings and rock. Melee: it fires no shells.'),
     },
     'boarding_gun': {
-        'SC': ('登车狙击枪', '调试用。使用本职业武器模型、瞄具和射击操作的狙击枪：子弹瞬间到达（1500 米约 0.03 秒）、没有散布和后坐力，'
+        'SC': ('登车狙击枪', '调试用。使用本职业武器模型、瞄具和射击操作的狙击枪：子弹瞬间到达（1500 米约 0.03 秒）、'
+                        '射程无限（90 公里，超过任何地图与视距）、没有散布和后坐力，'
                         '弹匣 999 发、1 帧换弹、每秒 10 发。子弹打中己方载具时不造成伤害，而是让你立刻坐进那台载具'
                         '（优先驾驶座；NPC 驾驶的载具，NPC 挪到副座或下车）。对敌人照常造成伤害。'),
-        'CN': ('登車狙擊槍', '除錯用。使用本職業武器模型、瞄具和射擊操作的狙擊槍：子彈瞬間到達（1500 公尺約 0.03 秒）、沒有散布和後座力，'
+        'CN': ('登車狙擊槍', '除錯用。使用本職業武器模型、瞄具和射擊操作的狙擊槍：子彈瞬間到達（1500 公尺約 0.03 秒）、'
+                        '射程無限（90 公里，超過任何地圖與視距）、沒有散布和後座力，'
                         '彈匣 999 發、1 幀換彈、每秒 10 發。子彈打中己方載具時不造成傷害，而是讓你立刻坐進那台載具'
                         '（優先駕駛座；NPC 駕駛的載具，NPC 挪到副座或下車）。對敵人照常造成傷害。'),
-        'JA': ('搭乗狙撃銃', 'デバッグ用。兵科固有のモデル・スコープ・射撃操作を使う狙撃銃。弾は一瞬で届き（1500 m を約 0.03 秒）、'
+        'JA': ('搭乗狙撃銃', 'デバッグ用。兵科固有のモデル・スコープ・射撃操作を使う狙撃銃。弾は一瞬で届き（1500 m を約 0.03 秒）、射程は無制限（90 km、'
+                        'どのマップ・視界よりも遠い）、'
                         '弾のばらつきと反動はなく、装弾数 999・リロード 1 フレーム・毎秒 10 発。味方のビークルに命中すると、'
                         'ダメージを与えずにそのビークルへ即座に搭乗する（運転席を優先。NPC が運転中なら NPC は副座へ移るか降車する）。'
                         '敵には通常どおりダメージを与える。'),
         'EN': ('Boarding Rifle', 'A debugging tool: a sniper rifle retaining the class-specific model, scope and firing controls, whose rounds '
-                                 'arrive at once (1500 m in about 0.03 s), with no spread and no recoil, 999 rounds, a '
+                                 'arrive at once (1500 m in about 0.03 s) and reach any distance (90 km, past any map '
+                                 'and view), with no spread and no recoil, 999 rounds, a '
                                  'one-frame reload and 10 shots a second. A round that hits a friendly vehicle does it '
                                  'no harm and puts you in it at once (the driver seat first; an NPC driver moves to a '
                                  'gunner seat or gets off). It hurts enemies as usual.'),
