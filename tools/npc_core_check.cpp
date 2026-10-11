@@ -348,7 +348,7 @@ int main() {
     now+=static_cast<ULONGLONG>(config.npcRecruitCooldownSec*1000.0f)+1;++frame;SeeSquad(human,human,0,npc::Control::free,now);
     Expect(!q->dismissed && q->cmd.order==Order::guard,"the cooldown ending does not move it by itself");
     ++frame;++now;SeeSquad(human,human,0,npc::Control::recruited,now);
-    Expect(q->cmd.order==Order::none,"recruited again by the stock walk-up after the cooldown: the hold is dropped and it follows");
+    Expect(q->cmd.order==Order::none,"recruited again after the cooldown: the hold is dropped and it follows");
     Reset();Put<void*>(human,kLeader,nullptr);q=SeeSquad(human,human,0,npc::Control::free,now);
     Expect(SquadCommand(human,Command{Order::guard,{10,0,0}}),"a free squad takes a guard order");
     ++frame;++now;SeeSquad(human,human,0,npc::Control::squad,now);
@@ -401,6 +401,41 @@ int main() {
         Put<void*>(human,kRoute,other);
         result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::engage,{}},ObjRef::Of(dead),{});
         Expect(result.reason==NpcCommandReason::scripted,"live script control blocks commandeering even when the row was previously free");
+    }
+    // The stock walk-up recruit off (VanillaRecruit=0, the user 2026-10-11: "删了原版的率领npc机制，和指挥跟随重复了"):
+    // its one gate (+0x548 == 0 ? +0x540 : 0 at 0x596BD8) reads 0 inside the stock Think, the flag put back after it.
+    {
+        Reset();Put<void*>(human,kLeader,nullptr);human[kAutoFollow]=1;
+        static std::uint8_t seenAuto=0xFF;seenAuto=0xFF;
+        struct StockThink { static void __fastcall Run(void* h,const float*) { seenAuto=static_cast<unsigned char*>(h)[kAutoFollow]; } };
+        const ThinkFn keep=nextThink[0];nextThink[0]=&StockThink::Run;
+        const float dt=1.0f/60.0f;
+        ThinkHook<0>(human,&dt);
+        Expect(seenAuto==0 && human[kAutoFollow]==1,"VanillaRecruit=0: the stock Think sees no walk-up flag, the script's flag is put back");
+        config.vanillaRecruit=true;seenAuto=0xFF;ThinkHook<0>(human,&dt);
+        Expect(seenAuto==1 && human[kAutoFollow]==1,"VanillaRecruit=1: the stock walk-up reads the flag as before");
+        config.vanillaRecruit=false;config.customNpcAi=false;seenAuto=0xFF;ThinkHook<0>(human,&dt);
+        Expect(seenAuto==1,"with the custom AI off the stock walk-up stays (the map cannot recruit then)");
+        config.customNpcAi=true;followOk=false;seenAuto=0xFF;ThinkHook<0>(human,&dt);
+        Expect(seenAuto==1,"SetFollow not as read: the stock walk-up stays (the map cannot recruit then)");
+        followOk=true;Put<void*>(human,kLeader,other);seenAuto=0xFF;ThinkHook<0>(human,&dt);
+        Expect(seenAuto==1 && human[kAutoFollow]==1,"a soldier with a leader is left alone (the gate reads 0 for it anyway)");
+        nextThink[0]=keep;
+        // A script's squad the stock would have let in: the map's RECRUIT / FOLLOW is that walk-up now; nothing else.
+        Reset();Put<void*>(human,kLeader,nullptr);playerObj=other;
+        Put<unsigned char>(other,kHumanPlayer,1);Put<void*>(other,kHumanPad,other);Put<int>(other,kTeam,0);
+        Put<unsigned>(human,kObjectFlags,kFixPosition);human[kAutoFollow]=1;
+        SeeSquad(human,human,0,npc::Control::hold,now);
+        Expect(JoinOnly(npc::Control::hold,human),"a held script squad with its walk-up flag is joinable from the map");
+        auto result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::engage,{}},ObjRef::Of(other),{});
+        Expect(result.reason==NpcCommandReason::scripted,"the joinable script squad still takes no other order");
+        result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::recruit,{}},ObjRef::Of(other),{});
+        Expect(result.Accepted() && At<void*>(human,kLeader)==other,"RECRUIT joins it to the requester as the stock walk-up did");
+        Put<void*>(human,kLeader,nullptr);human[kAutoFollow]=0;
+        result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::follow,{}},ObjRef::Of(other),{});
+        Expect(result.reason==NpcCommandReason::scripted && !At<void*>(human,kLeader),"a script squad the stock would not let in stays locked");
+        human[kAutoFollow]=1;config.vanillaRecruit=true;
+        Expect(!JoinOnly(npc::Control::hold,human),"VanillaRecruit=1: a script squad is joined by walking up, as before");
     }
     // Leader class is not the whole squad: a Wing Diver can lead a Ranger who may occupy the driver seat.
     {

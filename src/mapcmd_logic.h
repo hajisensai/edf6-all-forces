@@ -92,8 +92,11 @@ inline RightClick RightClickOrder(int selected,bool enemyUnder,bool pointOk) noe
 // no script's), not cooling down from a dismissal. A squad riding a vehicle (the plugin's real crews, a support's
 // soldiers) is that vehicle's crew: no recruitment is offered for it (the user, 2026-10-09: "载具上的npc还标着可以招募
 // 的标记"), its vehicle is the unit the map commands.
-inline bool OffersRecruit(bool ownedByPlayer,bool scripted,bool dismissed,bool riding) noexcept {
-    return !ownedByPlayer && !scripted && !dismissed && !riding;
+// `joinable`: a script's squad the stock would have let a player walk up to and join (no leader, its +0x540 set). With
+// the stock walk-up gone (VanillaRecruit=0, the user 2026-10-11: "删了原版的率领npc机制，和指挥跟随重复了") the map's
+// RECRUIT is the only way in, so a squad a mission waits for the player to take stays recruitable from the map.
+inline bool OffersRecruit(bool ownedByPlayer,bool scripted,bool dismissed,bool riding,bool joinable=false) noexcept {
+    return !ownedByPlayer && (!scripted || joinable) && !dismissed && !riding;
 }
 
 // --- The squad panel (the user, 2026-10-09: "小队太多了吧，怎么处理合适，感觉看不过来"; the log's mission had 37) ---

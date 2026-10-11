@@ -335,6 +335,8 @@ struct Config {
     float npcGuardRadius=15.0f;     // ...a squad told to guard a point (the map): m round it its members stay
     float npcFreeRange=120.0f;      // ...a squad told to engage freely: m round where it stood it goes after enemies
     float npcRecruitCooldownSec=60.0f;// ...a dismissed squad may be recruited again after this many s
+    bool vanillaRecruit=false;      // the stock walk-up recruit (原版率领: a free NPC joins a player within 10 m): false = off,
+                                    // the map's FOLLOW / RECRUIT the only way in (npcai.cpp ThinkHook; needs CustomNpcAi)
     bool scriptNpcRecruit=true;     // ...a squad a mission script let go of may be recruited (its +0x540 set, §4.4)
     float scriptNpcSettleSec=5.0f;  // ...after this many s without the script taking it back
     bool tankReturnToPost=true;     // npcpost.cpp: an NPC tank pushed off its post (recoil, a ram) drives back to it
