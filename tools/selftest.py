@@ -571,11 +571,48 @@ def boarding_debug_gun_parameters_and_text() -> None:
     damage = dsgo.Node(['damage', '', dsgo.Node([242.0, 999.0, 0.5, 2.0, -1.0])])
     lines.append(damage)
     row = dsgo.Node(['title', 'description', dsgo.Node(lines)])
-    expected = [cw.GUN_CURVES[key] * unit for key, unit in units.items()] + [1500.0, 242.0]
+    reach = cw.GUN_CURVES['AmmoSpeed'] * cw.GUN_SCALARS['AmmoAlive']
+    assert reach == 90000.0, reach
+    expected = [cw.GUN_CURVES[key] * unit for key, unit in units.items()] + [reach, 242.0]
     for lang in cw.LANGS:
         changed = cw._text_row(row, gun, lang, gun=cw.gun_stats(template))
         assert [st.items[2].items[0] for st in changed.items[2].items] == expected, lang
         assert changed.items[2].items[-1] == damage, 'damage and its star parameters stay unchanged'
+
+
+@test
+def boarding_gun_range_unlimited() -> None:
+    """The boarding rifle shoots as far as anything can be (the user, 2026-10-11: "登车狙击枪的射击距离应该是无限远"):
+    its reach (AmmoSpeed x AmmoAlive, its only range limit) is past the unlimited view distance at the largest
+    BigWorld (src/crew.h UnlimitedViewDistance) and the stock far pass, with half again to spare (a fire modifier
+    may scale a round's life, docs/boarding-re.md §2); its life stays a direct-fire round's (src/highcam.cpp, src/sightzoom.cpp: 600 frames is indirect fire) and
+    flat (no drop). Only the boarding guns get it: GUN_LIFE is read by gun_sgo / gun_stats alone."""
+    import ast
+    plugin, crew_h = src('src/plugin.cpp'), src('src/crew.h')
+    most = re.search(r'Fix\("BigWorld",n\.bigWorld,([\d.]+)f,([\d.]+)f\)', plugin)
+    assert most, 'BigWorld clamp not found in src/plugin.cpp'
+    diag = re.search(r'UnlimitedViewDistance\(\) noexcept \{ const float d=([\d.]+)f\*WorldHalf\(\)', crew_h)
+    far = re.search(r'kStockDistantFar=([\d.]+)f', crew_h)
+    assert diag and far, 'src/crew.h UnlimitedViewDistance changed'
+    farthest = max(float(diag.group(1)) * float(most.group(2)), float(far.group(1)))
+    speed, life = cw.GUN_CURVES['AmmoSpeed'], cw.GUN_SCALARS['AmmoAlive']
+    assert life == cw.GUN_LIFE and life == int(life), life
+    assert speed * life >= 1.5 * farthest, (speed * life, farthest)
+    indirect = int(re.search(r'kIndirectLife=(\d+);', src('src/highcam.cpp')).group(1))
+    assert 'round.alive>=600' in src('src/sightzoom.cpp')
+    assert life < min(indirect, 600), 'the boarding rifle would count as indirect fire'
+    assert cw.GUN_SCALARS['AmmoGravityFactor'] == 0.0 and cw.GUN_SCALARS['AmmoIsPenetration'] == 0.0
+    # 10 shots a second, each alive `life` frames: few rounds in flight.
+    assert life / cw.GUN_CURVES['FireInterval'] <= 20
+    tree = ast.parse(src('tools/call_weapons.py'))
+    users = {f.name for f in ast.walk(tree) if isinstance(f, ast.FunctionDef)
+             for n in ast.walk(f) if isinstance(n, ast.Name) and n.id in ('GUN_LIFE', 'GUN_SCALARS', 'GUN_CURVES')}
+    assert users == {'gun_sgo', 'gun_stats'}, users
+    for lang in ('SC', 'CN', 'JA', 'EN'):
+        assert f'{speed * life / 1000:.0f} ' in calls.KINDS['boarding_gun'][lang][1], lang
+    for c in calls.CALLS:
+        if c.brings == 'gun':
+            assert calls.call_description(c, 'SC').startswith(calls.KINDS['boarding_gun']['SC'][1])
 
 
 @test
@@ -606,6 +643,10 @@ def boarding_all_classes_stock_resources() -> None:
         assert weapon.get('AmmoExplosion') == weapon.get('AmmoGravityFactor') == 0
         assert weapon.get('SecondaryFire_Type') == 1
         assert weapon.get('Ammo_CustomParameter').items == []
+        # The range (the user, 2026-10-11: unlimited): the real weapon's speed x life, no falloff over it.
+        assert weapon.get('AmmoAlive') == cw.GUN_LIFE and weapon.get('AmmoSpeed').items[0] == cw.GUN_CURVES['AmmoSpeed']
+        assert weapon.get('AmmoSpeed').items[1:] == original.get('AmmoSpeed').items[1:], 'star curve kept'
+        assert dsgo.to_py(weapon.get('AmmoDamageReduce')) == [1.0, 1.0], (call.id, 'damage falls off with range')
         for lang, rel in zip(cw.LANGS, cw.TEXTS):
             texts = cw._rows(dsgo.parse(cw.stock(game, rel)), rel)
             cw._text_row(texts[index], call, lang, gun=cw.gun_stats(template))
