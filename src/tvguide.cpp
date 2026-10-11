@@ -8,7 +8,8 @@
 //    so neither the stock steering nor guidance.cpp's turns it; this turns its own velocity (+0x13D0) toward the
 //    heading the player steers at most its own stock turn a frame (CP[5], +0x13A4), its speed kept; the stock step
 //    then speeds it up, clamps it, builds its frame along it and moves it.
-//  - Handing it back (Esc / B, the map opened): the next update of that live round clears both homing gates, so even
+//  - Handing it back (the right button, Esc / B, the map opened; Esc mostly opens the pause menu first, which stops the
+//    soldier's update the TV reads keys in, so the right button is the one to use): the next update of that live round clears both homing gates, so even
 //    an early handback immediately homes on its laser (stock, or guidance.cpp's PN); it is not taken again.
 //  - Fire boosts it (the user, 2026-10-06: "left button speeds the missile up, and it cannot be taken back"): its
 //    own top speed (CP[6], +0x13A8) times TempestTvBoost, its acceleration (CP[4], +0x13A0) enough to reach that in
@@ -42,7 +43,11 @@ const unsigned char kLookToSig[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x81,0xEC,0
 using LookToFn=float*(__fastcall*)(float*,const float*);
 constexpr float kMouseTurn=0.003f;        // rad a mouse unit (times TempestTvMouseSpeed)
 constexpr float kMostPitch=1.45f;         // rad from level: no straight up or down (the heading would be lost)
-constexpr float kNoseAhead=4.0f,kLookAhead=300.0f;   // m: the eye before the nose (clear of its model), the look
+// m: the eye before the round's origin (clear of its model), the look. 2026-10-10 feedback: "暴风雨的电视制导视角不对，全被
+// 暴风雨挡住了": 4 m from a view placed before the stock step (which then moved the round on by its speed, 3x boosted
+// several m a frame) put the eye inside the missile. Now placed after the step (TvAfter), further out, and one frame of
+// the round's own way further still (the camera may step before the missile in the next frame).
+constexpr float kNoseAhead=8.0f,kLookAhead=300.0f;
 
 struct Tv {
     ObjRef round;              // identity only outside its own update; no soldier/camera callback dereferences it
@@ -52,6 +57,7 @@ struct Tv {
     bool active,armed,draining;
     bool fireHeld,leaveHeld;   // carry held buttons across a hit/disappearance, on this soldier only
     bool boost,boosted;
+    bool backArmed;            // the right button let go since the take (held for the laser's zoom it does not count)
     float turn;               // stock turn sampled by the missile callback; the soldier reads only this copy
     float yaw,pitch;
 };
@@ -121,6 +127,16 @@ void Boost(unsigned char* b) noexcept {
     if(!std::isfinite(accel) || accel<need)Put<float>(b,kAccel,need);
 }
 
+// The view from the round at `pos` along `dir` at `speed` m a frame: the eye kNoseAhead before it plus a frame of its way
+// (two when `before` the stock step, which moves it one more first).
+void Show(const float* pos,const float* dir,float speed,bool before) noexcept {
+    const float step=vec::Clamp(speed,0.0f,50.0f);
+    const float ahead=kNoseAhead+step*(before ? 2.0f : 1.0f);
+    const float eye[3]={pos[0]+dir[0]*ahead,pos[1]+dir[1]*ahead,pos[2]+dir[2]*ahead};
+    const float look[3]={eye[0]+dir[0]*kLookAhead,eye[1]+dir[1]*kLookAhead,eye[2]+dir[2]*kLookAhead};
+    Publish(true,eye,look);
+}
+
 void Fly(unsigned char* b) noexcept {
     if(tv.boost && !tv.boosted)Boost(b);
     float* own=reinterpret_cast<float*>(b+kOwn);
@@ -143,12 +159,22 @@ void Fly(unsigned char* b) noexcept {
         reinterpret_cast<LookToFn>(image+kLookTo)(m,along);
         std::memcpy(b+0x60,m,48);
     }
-    const float* pos=reinterpret_cast<const float*>(b+kPos);
-    const float eye[3]={pos[0]+out[0]*kNoseAhead,pos[1]+out[1]*kNoseAhead,pos[2]+out[2]*kNoseAhead};
-    const float look[3]={eye[0]+out[0]*kLookAhead,eye[1]+out[1]*kLookAhead,eye[2]+out[2]*kLookAhead};
-    Publish(true,eye,look);
+    // Where the stock step is about to put it (one frame along at this speed): replaced by TvAfter once it has.
+    Show(reinterpret_cast<const float*>(b+kPos),out,std::isfinite(speed) ? speed : 0.0f,true);
 }
 }  // namespace
+
+void TvAfter(unsigned char* b) noexcept {
+    if(!tv.active || tv.round.obj!=b || !tv.round.Is(b))return;
+    if(At<std::uint32_t>(b,kDelay)!=kTvHomingDelay || (At<std::uint32_t>(b,kFlags)&kRoundDead))return;
+    const float* own=reinterpret_cast<const float*>(b+kOwn);
+    float dir[3]={own[0],own[1],own[2]};
+    const float speed=vec::Len(own);
+    if(!std::isfinite(speed) || !vec::Normalize(dir))return;   // the view from before the step stands
+    const float* pos=reinterpret_cast<const float*>(b+kPos);
+    if(!std::isfinite(pos[0]+pos[1]+pos[2]))return;
+    Show(pos,dir,speed,false);
+}
 
 bool TvSteer(unsigned char* b) noexcept {
     if(At<const void*>(b,0)!=image+kVtable)return false;
@@ -180,9 +206,9 @@ bool TvSteer(unsigned char* b) noexcept {
 bool TvFrame(unsigned char* human,bool mapOpen,const TvInput& in) noexcept {
     if((tv.active || tv.draining) && (!Available() || !OwnerLive())){End("owner or setting unavailable");return false;}
     if(tv.owner.obj!=human)return false; // another local player never consumes or inherits this hold
-    tv.fireHeld=in.fire;tv.leaveHeld=in.leave;
+    tv.fireHeld=in.fire;tv.leaveHeld=in.leave || in.back;
     if(tv.draining) {
-        if(in.fire || in.leave)return true;
+        if(in.fire || in.leave || in.back)return true;
         tv.draining=false;holding.store(tv.active);
     }
     if(!tv.active)return false;
@@ -190,6 +216,8 @@ bool TvFrame(unsigned char* human,bool mapOpen,const TvInput& in) noexcept {
     if(mapOpen){End("the map opened");return false;}
     if(!tv.armed){tv.armed=!in.fire;}
     else if(in.fire && !tv.boost){tv.boost=true;Log("TV boost: round %p",tv.round.obj);}
+    if(!tv.backArmed)tv.backArmed=!in.back;
+    else if(in.back){End("the right button",true);return true;}
     if(in.leave){End("Esc / B",true);return true;}
     const float k=kMouseTurn*vec::Clamp(Cfg().tempestTvMouseSpeed,0.1f,5.0f);
     tv.yaw+=in.dx*k+in.rx*tv.turn;

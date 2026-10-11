@@ -15,6 +15,7 @@ ULONGLONG GameFrame() noexcept{return tick;}
 ULONGLONG GameMs() noexcept{return tick*16+3600000;}
 void Log(const char*,...) noexcept{}
 bool TvSteer(unsigned char*) noexcept{return false;}
+void TvAfter(unsigned char*) noexcept{}
 void ResetTv() noexcept{}
 }
 int main(){

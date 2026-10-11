@@ -4673,6 +4673,10 @@ def stock_guidance_wired() -> None:
     assert 'kCamStep' not in src('src/tvguide.cpp'), 'one camera hook: the map\'s'
     assert 'holds.load(std::memory_order_relaxed) || TvHoldsKeys()' in m
     assert 'if(!TvSteer(static_cast<unsigned char*>(b)) && Cfg().enabled)Guide(' in src('src/missile.cpp')
+    # 2026-10-10: the view placed after the stock step (it was a frame behind, inside the missile); the right button hands back.
+    ms_src = src('src/missile.cpp')
+    assert ms_src.index('nextUpdate(b,a2,a3,a4);') < ms_src.index('TvAfter(static_cast<unsigned char*>(b));'), 'TV view after the step'
+    assert 'in.back=Down(VK_RBUTTON);' in m, 'the right button hands the TV back'
     crew, vini, readme = src('src/crew.h'), src('EDF6VehicleCrew.ini'), src('README.md')
     for field, key in (('stockMissilePN', 'StockMissilePN'), ('playerLockByView', 'PlayerLockByView'),
                        ('tempestTv', 'TempestTv')):

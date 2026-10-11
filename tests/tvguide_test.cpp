@@ -145,6 +145,30 @@ void OverlapAndBoost() noexcept {
     in.leave=true;TvFrame(owner,false,in);TvSteer(missile);
     Check(At<float>(missile,kTop)==3.0f && GateOpen(missile,20),"laser handback preserves the irreversible boost");
 }
+// 2026-10-10 feedback: "视角不对，全被暴风雨挡住了" / "没办法切换回原本的视角".
+void ViewAndBack() noexcept {
+    const auto eyeZ=[]{const void* h=nullptr;float eye[3]{},look[3]{};return TvView(&h,eye,look) ? eye[2] : -1.0f;};
+    Start();
+    // The stock step moved it on 5 m a frame (boosted) after TvSteer: the view comes from where it is now.
+    Put<float>(missile,kPos+8,100.0f);Put<float>(missile,kOwn+8,5.0f);
+    TvAfter(missile);
+    Check(eyeZ()>=100.0f+kNoseAhead+5.0f-0.01f,"view placed after the step, clear of the model and a frame of its way ahead");
+    Put<float>(missile,kPos+8,105.0f);TvSteer(missile);
+    Check(eyeZ()>=105.0f+kNoseAhead+10.0f-0.01f,"view before the step leads by the step it is about to take");
+    unsigned char stray[0x1500]{},strayCtrl[16]{};Round(stray,strayCtrl);Put<float>(stray,kPos+8,-500.0f);
+    TvAfter(stray);
+    Check(eyeZ()>0.0f,"another round's update never moves the TV's view");
+    Put<std::uint32_t>(missile,kFlags,kRoundDead);TvAfter(missile);
+    Check(eyeZ()>=105.0f,"a round that hit does not re-place the view");
+
+    Start();TvInput in{};in.front=true;in.back=true;   // zoomed on the laser with the right button when it came out
+    Check(TvFrame(owner,false,in) && tv.active,"a right button held from before the take does not hand back");
+    in.back=false;Check(TvFrame(owner,false,in) && tv.active,"let go: armed");
+    in.back=true;
+    Check(TvFrame(owner,false,in) && !tv.active && !ViewShown() && TvHoldsKeys(),"right button hands back and holds until let go");
+    in.back=false;Check(!TvFrame(owner,false,in) && !TvHoldsKeys(),"released: the soldier is free (no stray zoom)");
+    Check(!TvSteer(missile) && GateOpen(missile,20),"handed back by the right button: the laser guides it at its next update");
+}
 }  // namespace
 const Config& Cfg() noexcept { return config; }
 ULONGLONG GameMs() noexcept { return gameclock::Read(clock,wall,paused); }
@@ -159,7 +183,7 @@ int main() {
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2000000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
     missile=static_cast<unsigned char*>(VirtualAlloc(nullptr,8192,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
     if(!image || !missile)return 2;
-    Lifetime();EarlyReturn();PauseAndReset();Availability();OverlapAndBoost();
+    Lifetime();EarlyReturn();PauseAndReset();Availability();OverlapAndBoost();ViewAndBack();
     std::printf("tvguide_test: %d checks, %d failed\n",cases,failed);
     VirtualFree(missile,0,MEM_RELEASE);VirtualFree(image,0,MEM_RELEASE);
     return failed ? 1 : 0;

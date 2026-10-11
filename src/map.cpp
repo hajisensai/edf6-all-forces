@@ -690,10 +690,10 @@ bool Frame(unsigned char* human) noexcept {
 
 // The player's input for the Tempest's TV (tvguide.cpp): mouse and keys in front, a pad.
 TvInput TvRead(const unsigned char* human) noexcept {
-    TvInput in{InFront(),0.0f,0.0f,0.0f,0.0f,false,false};
+    TvInput in{InFront(),0.0f,0.0f,0.0f,0.0f,false,false,false};
     if(in.front) {
         if(!MouseDelta(human,&in.dx,&in.dy))in.dx=in.dy=0.0f;
-        in.fire=Down(VK_LBUTTON);in.leave=Down(VK_ESCAPE);
+        in.fire=Down(VK_LBUTTON);in.leave=Down(VK_ESCAPE);in.back=Down(VK_RBUTTON);
     }
     XINPUT_STATE pad{};
     if(PadState(&pad)) {
