@@ -5121,7 +5121,8 @@ def support_arrives_from_off_the_map() -> None:
     board = dispatch.split('bool BoardAirborne(Deployment& deployed,bool networked) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'JetFerry(vehicle,plan.target,plan.units[i].matrix+8)' in board, 'the plane on its line from its first frame'
     assert 'JetFerry(' not in dispatch.split('bool Assign(Deployment& deployed) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'NearDrawDistance(),[&](const float* p) noexcept {' in dispatch and 'MapRay(eye,top,hit)>=0.0f' in dispatch
+    # Visibility was explicitly removed from support admission on 2026-10-11.
+    # support_entry CTest verifies observer/draw/occlusion cannot affect entry selection.
     transport = src('src/transport.cpp')
     drop = transport.split('void DropFrame(Drop& d,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'transport::StickStarts(along,across,speed,aboard,kChuteBleed)' in drop and 'kDropRadius' not in transport
