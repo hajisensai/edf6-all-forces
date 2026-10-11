@@ -115,6 +115,19 @@ constexpr bool RollsIntoAir(float clear,float noGround,float offGround,float spe
     return clear!=noGround && clear>offGround && speed>=floor;
 }
 
+// Whether the ground contact a wing reads in the air (playerjet.cpp ReconcileGround: veh+0x1580 bit 1 within kTouch) is
+// its own wheels leaving the runway: `sinceLiftOff` game ms after Ground lifted it off (`lifted`: it did, this flight),
+// within `grace`, still climbing (`climb` m/s, the flight's). The step that lifts it off starts on the ground, so the
+// contact callback reports the wheels for it, and Havok keeps a contact a few cm apart for a few frames more. The user
+// (2026-10-11): 「飞机起飞的时候会抖抖的」: that contact was taken for a touchdown the very next frame (Touch at a 5 m/s
+// climb is a gentle landing): the boost let go, the lever closed and it braked back down onto the runway after a hop;
+// the boost held, Ground lifted it off again the same frame with its pitch rate, angle of attack and up reset, the
+// solver's ground contact and the flight's whole velocity taking turns while the wheels were near the ground. Sinking
+// back (climb <= 0) inside the window is a touchdown again (Air's floor step lands it too).
+constexpr bool OwnLiftOffContact(bool lifted,unsigned long long sinceLiftOff,unsigned long long grace,float climb) noexcept {
+    return lifted && sinceLiftOff<grace && climb>0.0f;
+}
+
 inline float AimRoll(float pathRoll,float off) noexcept {
     const float lo=std::fmin(kLevelRate,pathRoll),t=Clamp(off/kAimRollFull,0.0f,1.0f);
     return lo+(pathRoll-lo)*t;

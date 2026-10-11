@@ -161,6 +161,61 @@ void ResetJet(PJet& j) {
     j.driven=true;j.fresh=true;j.vel[2]=55.0f;j.vel[1]=-3.0f;
     j.throttle=0.55f;j.stall=true;j.stallShare=1.2f;j.hasAim=j.hasUp=j.mouseFlies=true;
 }
+
+// The takeoff (the user, 2026-10-11: 銆岄鏈鸿捣椋炵殑鏃跺€欎細鎶栨姈鐨勩€?: Fly's order of the production steps (Lever, ReconcileGround,
+// Air or Ground) over a stand-in body on flat ground at y = 0 (its bottom at its position: rest 0), the body step as
+// PlayerJetBodyStep sends it (in the air the flight's whole velocity; on the ground GroundContact over a solver that
+// keeps the normal motion, gravity kGravity, the ground holding it up). The native contact byte (veh+0x1580 bit 1) as
+// the contact callback leaves it: set by a step that began with the wheels within kSkin of the ground (Havok keeps the
+// manifold of a contact still that near, and the step that lifts it off starts on it), read by the next frame's Fly.
+struct TakeoffRun { int takeoffs,relandings,climbFlips; float clearAt1s,lowestClimbAfter; bool airAtEnd; };
+TakeoffRun Takeoff(PJet& j,float boost) {
+    constexpr float dt=1.0f/60.0f,kGravity=14.7f,kSkin=0.05f;
+    ResetJet(j);
+    j.phase=Phase::rolling;j.vel[1]=0.0f;j.vel[2]=j.kind->rotate-3.0f;j.throttle=1.0f;j.throttleIn=boost;
+    j.hasUp=j.hasAim=j.mouseFlies=false;j.stall=false;
+    float* body=reinterpret_cast<float*>(recoveryVehicle+kPosition);body[0]=body[1]=body[2]=0.0f;
+    float* mat=reinterpret_cast<float*>(recoveryVehicle+kMatrix);
+    std::memset(mat,0,64);mat[0]=mat[5]=mat[10]=mat[15]=1.0f;
+    float solver[3]={0.0f,0.0f,j.vel[2]};
+    recoveryVehicle[0x1580]=2;
+    Stick s{};s.pitch=1.0f;s.throttle=boost;   // a pad: the stick held back from the roll on, the boost as given
+    TakeoffRun r{0,0,0,0.0f,1e9f,false};
+    Phase was=j.phase;float lastClimb=0.0f;bool flown=false;int frame=0;
+    for(;frame<240;++frame) {
+        Put<float>(recoveryBone,kBoneWorld506+0x34,body[1]);   // RestOver: 0
+        const float clear=body[1];
+        Lever(j,recoveryVehicle,s,dt);
+        ReconcileGround(j,recoveryVehicle,clear,false,false,recoveryTime);
+        // Counted where each happens: a frame that lands it (ReconcileGround) and lifts it off again (Ground) is both.
+        if(was==Phase::air && j.phase!=Phase::air)++r.relandings;
+        was=j.phase;
+        if(j.phase==Phase::air)Air(j,recoveryVehicle,s,body,clear,false,dt,recoveryTime);
+        else Ground(j,recoveryVehicle,s,clear,dt);
+        if(was!=Phase::air && j.phase==Phase::air)++r.takeoffs;
+        if(was==Phase::air && j.phase!=Phase::air)++r.relandings;
+        was=j.phase;
+        float lin[3],ang[3]={0.0f,0.0f,0.0f};
+        if(j.phase==Phase::air)std::memcpy(lin,j.vel,12);
+        else{std::memcpy(lin,solver,12);handling::GroundContact(mat+4,j.vel,j.omega,lin,ang);}
+        const bool touching=body[1]<=kSkin;
+        for(int i=0;i<3;++i)body[i]+=lin[i]*dt;
+        lin[1]-=kGravity*dt;
+        if(body[1]<0.0f){body[1]=0.0f;if(lin[1]<0.0f)lin[1]=0.0f;}
+        if(body[1]<=0.0f && lin[1]<0.0f)lin[1]=0.0f;
+        std::memcpy(solver,lin,12);
+        recoveryVehicle[0x1580]=touching ? 2 : 0;
+        if(j.phase==Phase::air) {
+            if(flown && (lastClimb>0.0f)!=(j.vel[1]>0.0f))++r.climbFlips;
+            if(flown && j.vel[1]<r.lowestClimbAfter)r.lowestClimbAfter=j.vel[1];
+            lastClimb=j.vel[1];flown=true;
+        }
+        if(frame==60+30)r.clearAt1s=body[1];   // ~1 s after the roll reaches its rotate speed
+        recoveryTime+=16;
+    }
+    r.airAtEnd=j.phase==Phase::air;
+    return r;
+}
 }
 
 int main() {
@@ -332,7 +387,25 @@ int main() {
     resetRam();EnemyRam(j,recoveryVehicle,ramPos,10000);j.sent[2]=200.0f;j.measured[2]=0.0f;j.blockedSince=10000;
     Blocked(j,recoveryVehicle,ramPos,10200);
     Check(ramBlasts==1,"blocked recovery does not duplicate a recent enemy blast");
+    ramScenario=false;recoveryVehicle[kDead]=0;Put<float>(recoveryVehicle,kHp,1000.0f);
+    // The takeoff: its own wheels' contact in the step that lifts it off is not a landing. Before, the next frame's
+    // ReconcileGround took it for one: the boost let go, the lever closed and it braked on the runway after a hop; the
+    // boost held, it lifted off again every frame from the ground step (its pitch rate and angle of attack zeroed each
+    // time) while the solver's ground contact and the flight's whole velocity took turns.
+    char takeoffLine[160]{};int takeoffNote=0;
+    for(const float boost:{0.0f,1.0f}) {
+        const TakeoffRun t=Takeoff(j,boost);
+        Check(t.takeoffs==1 && t.relandings==0,"takeoff: one lift-off, never handed back to the ground by its own wheels");
+        Check(t.climbFlips==0 && t.lowestClimbAfter>0.0f,"takeoff: the climb never reverses after lift-off");
+        Check(t.airAtEnd && t.clearAt1s>kTouch,"takeoff: past the touch height within a second and a half, still flying");
+        takeoffNote+=std::snprintf(takeoffLine+takeoffNote,sizeof(takeoffLine)-takeoffNote," [boost %.0f: %d lift-off, %.1f m up]",
+                                   boost,t.takeoffs,t.clearAt1s);
+    }
+    // A real touchdown inside the window after a lift-off (sinking back onto the ground) still lands.
+    ResetJet(j);j.vel[1]=-2.0f;j.liftOffAt=recoveryTime;j.liftedOff=true;recoveryVehicle[0x1580]=2;
+    ReconcileGround(j,recoveryVehicle,0.5f,false,false,recoveryTime+100);
+    Check(j.phase==Phase::rolling,"takeoff: sinking back onto its contacts within the lift-off window still lands");
     VirtualFree(image,0,MEM_RELEASE);
-    std::printf("playerjet_recovery: %d production-path checks passed\n",checks);
+    std::printf("playerjet_recovery: %d production-path checks passed; takeoff%s\n",checks,takeoffLine);
     return 0;
 }

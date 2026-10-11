@@ -100,6 +100,43 @@ float Fly(const World& w,Sim& s,const float* goalVel,float goalHeight,float radi
     }
     return worst;
 }
+// A lift-off (or a landing) beside a wall, as heli.cpp Steer gates it: the stick (here the commanded velocity) nothing
+// horizontal on the ground and for kLiftOff ms after it, the mode's want (`goal`, x z) with the clearance on top at
+// `share(sinceGround)` of its push; climbing (or sinking, `vy`) the whole time, on the ground under `groundUntil` s.
+// The stand-in's velocity follows the command at kDecel. It reports the biggest step in the command from one frame to
+// the next, how often the sideways velocity turned round, and where it ended.
+constexpr unsigned long long kLiftOff=1500;
+struct Lift { float step,x; int flips; };
+template<class Share>
+Lift Pad(const World& w,float x0,float y0,float vy,float groundUntil,bool land,float seconds,Share&& share) {
+    constexpr float dt=1.0f/60.0f;
+    Sim s{{x0,y0,0.0f},{0.0f,0.0f,0.0f}};
+    Lift r{0.0f,0.0f,0};
+    float last=0.0f;int sign=0;
+    unsigned long long groundAt=0;bool seen=false;   // never on the ground: as long ago as heli.cpp's groundAt 0
+    for(int i=0;i*dt<seconds;++i) {
+        const unsigned long long ms=100000+static_cast<unsigned long long>(i)*16;
+        const bool grounded=i*dt<groundUntil;
+        if(grounded){groundAt=ms;seen=true;}
+        const unsigned long long since=grounded ? 0 : seen ? ms-groundAt : ms;
+        float want[3]={0.0f,0.0f,0.0f},height=s.pos[1];
+        Clear(s.pos,s.vel,4.8f,kDecel,want,&height,!land,
+              [&](const float* a,const float* b,float* hit,float* normal){ return Ray(w,a,b,hit,normal); },
+              [&](const float* at){ return RoofAt(w,at); },share(land,since));
+        const float cmd=since<kLiftOff ? 0.0f : want[0];
+        if(i>0 && std::fabs(cmd-last)>r.step)r.step=std::fabs(cmd-last);
+        last=cmd;
+        const float dv=cmd-s.vel[0],a=kDecel*dt;
+        s.vel[0]+=dv>a ? a : dv<-a ? -a : dv;
+        s.pos[0]+=s.vel[0]*dt;
+        if(!grounded)s.pos[1]+=vy*dt;
+        const int now=s.vel[0]>0.05f ? 1 : s.vel[0]<-0.05f ? -1 : 0;
+        if(now && sign && now!=sign)++r.flips;
+        if(now)sign=now;
+    }
+    r.x=s.pos[0];
+    return r;
+}
 }  // namespace
 
 int main() {
@@ -241,6 +278,47 @@ int main() {
         const float gap=WallGap(w,s.pos);
         std::printf("410 hover: wall %.2f m (disc %.1f m) at y=%.1f\n",gap,r410,s.pos[1]);
         Check(gap>r410 || s.pos[1]+kLift>30.0f,"410 hover: off the tower or over it");
+    }
+
+    // How much of the push it takes: none landing, on the ground or in the lift-off, then eased in over kPushEaseMs.
+    Check(PushShare(true,1000000,kLiftOff)==0.0f,"push share: none landing");
+    Check(PushShare(false,0,kLiftOff)==0.0f && PushShare(false,kLiftOff,kLiftOff)==0.0f,"push share: none on the ground or lifting off");
+    Check(std::fabs(PushShare(false,kLiftOff+kPushEaseMs/2,kLiftOff)-0.5f)<1e-3f,"push share: half way through the ease, half");
+    Check(PushShare(false,kLiftOff+kPushEaseMs,kLiftOff)==1.0f && PushShare(false,~0ull,kLiftOff)==1.0f,"push share: all after it");
+    // Without the push the cut still stops it short of the wall: the blades' safety is not eased.
+    {
+        const World w{{4.0f,40.0f,-50.0f,50.0f,30.0f}};
+        const float pos[3]={0.0f,10.0f,0.0f};
+        float want[3]={5.0f,0.0f,0.0f},height=10.0f;
+        Clear(pos,kStill,r506,kDecel,want,&height,false,
+              [&](const float* a,const float* b,float* hit,float* normal){ return Ray(w,a,b,hit,normal); },
+              [&](const float* at){ return RoofAt(w,at); },0.0f);
+        Check(std::fabs(want[0])<1e-3f,"no push: the speed into a wall inside the disc is still cut to nothing, and no push out");
+    }
+    // Lifting off 4 m from a tower (the 506's box clear, its disc not), straight up at 3 m/s: before, the whole push
+    // (3.8 m short at 1.2 m/s a metre: 4.6 m/s) came in as one step when the lift-off's 1.5 s ended, a few metres up.
+    {
+        const World w{{4.0f,40.0f,-50.0f,50.0f,80.0f}};
+        const auto whole=[](bool,unsigned long long){ return 1.0f; };
+        const auto eased=[](bool landing,unsigned long long since){ return PushShare(landing,since,kLiftOff); };
+        const Lift was=Pad(w,0.0f,0.0f,3.0f,1.0f,false,8.0f,whole),now=Pad(w,0.0f,0.0f,3.0f,1.0f,false,8.0f,eased);
+        std::printf("lift-off by a tower: the command's biggest step %.2f m/s before, %.2f now; %d / %d turns; off it %.1f / %.1f m\n",
+                    was.step,now.step,was.flips,now.flips,was.x,now.x);
+        Check(was.step>3.0f,"lift-off (before): the push came in as a step of metres a second");
+        Check(now.step<0.2f,"lift-off: the push eases in, no step in the command");
+        Check(now.flips==0,"lift-off: the sideways velocity never turns round");
+        Check(-now.x+4.0f>r506-0.5f,"lift-off: it still backs off the tower once eased in");
+    }
+    // Landing beside a wall (the land mode wants to sit where it is, 4.5 m off it): before, the push held it off its
+    // spot as it came down; now it comes straight down onto it, the cut keeping it from going any closer.
+    {
+        const World w{{4.5f,40.0f,-50.0f,50.0f,80.0f}};
+        const auto whole=[](bool,unsigned long long){ return 1.0f; };
+        const auto eased=[](bool landing,unsigned long long since){ return PushShare(landing,since,kLiftOff); };
+        const Lift was=Pad(w,0.0f,12.0f,-2.0f,-1.0f,true,5.0f,whole),now=Pad(w,0.0f,12.0f,-2.0f,-1.0f,true,5.0f,eased);
+        std::printf("landing by a wall: off its spot %.2f m before, %.2f m now\n",was.x,now.x);
+        Check(was.x<-1.0f,"landing (before): pushed off its spot, against the landing's wanted velocity");
+        Check(std::fabs(now.x)<0.01f,"landing: straight down onto its spot");
     }
 
     std::printf("rotor_clear_check: %d checks, %d failed\n",checks,fails);
