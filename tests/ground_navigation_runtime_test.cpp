@@ -84,5 +84,22 @@ void LongSearch() {
     Check(crew::GroundNavigate(*s,from,to,0.1f,frame*16,next,profile)!=Result::moving && s->count<plannedNodes,
         "an actor actually stuck after route creation still replans");
 }
+void SupportBeforeNpcs() {
+    auto npcs=std::make_unique<State[]>(32);
+    auto route=std::make_unique<RouteState>();Scene(0,crew::Sea::land);
+    const float from[3]={0,0,0},goal[3]={100,0,0},npcGoal[3]={1000,0,0};float next[3]{};
+    Profile profile;profile.cell=4;profile.greed=kRouteGreed;profile.horizon=2*profile.cell;
+    // Establish a selected NPC budget turn before the early support caller begins.
+    Next();for(int i=0;i<32;++i)crew::GroundNavigate(npcs[i],from,npcGoal,0.1f,frame*16,next);
+    Result result=Result::pending;
+    for(int f=0;f<100 && result==Result::pending;++f) {
+        Next();
+        for(int call=0;call<3 && result==Result::pending;++call)
+            result=crew::GroundNavigate(*route,from,goal,0.1f,frame*16,next,profile);
+        for(int i=0;i<32;++i)crew::GroundNavigate(npcs[i],from,npcGoal,0.1f,frame*16,next);
+        Check(queries<=4096,"support and NPC population retain one bounded query budget");
+    }
+    Check(result==Result::moving && route->partial,"safe admission prefix completes under NPC load without solving the entire route");
 }
-int main(){Water();Corners();LongSearch();Fairness();std::printf("ground navigation runtime: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}
+}
+int main(){Water();Corners();LongSearch();Fairness();SupportBeforeNpcs();std::printf("ground navigation runtime: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}

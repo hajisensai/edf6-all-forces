@@ -126,7 +126,7 @@ void RequestNotice(std::uint32_t request,support_net::RequestStatus state) noexc
     if(rescueSubmitting && state==RequestStatus::accepted && request){rescueRequest=request;rescueEnded=false;return;}
     if(request && request==rescueRequest) {
         if(state<RequestStatus::refused || rescueEnded)return;   // told once; its id is kept so it never reaches the map's line
-        static const wchar_t* const kWhy[]={L"",L"",L"房主拒绝了救援请求：环境、资源或当前部署条件不满足",L"救援请求超时：未及时获得房主及全员确认",
+        static const wchar_t* const kWhy[]={L"",L"",L"房主拒绝了救援请求：环境、资源或当前部署条件不满足",L"救援请求超时：部署规划或对象同步超时",
                                             L"这次救援部署已取消",L"联机会话中断，救援请求未完成"};
         Log("SUPPORT rescue request %u ended without a heli (status %u)",request,static_cast<unsigned>(state));
         rescueEnded=true;RescueRequestFailed(kWhy[static_cast<unsigned>(state)]);
@@ -139,10 +139,10 @@ void RequestNotice(std::uint32_t request,support_net::RequestStatus state) noexc
     }
     const wchar_t* text=nullptr;
     switch(state) {
-    case RequestStatus::accepted:text=L"本机支援请求已受理，等待房主及全员确认";break;
-    case RequestStatus::active:text=L"本机支援已获全员对象确认，开始部署";break;
+    case RequestStatus::accepted:text=L"支援调度中：规划入场路线并同步部署";break;
+    case RequestStatus::active:text=L"支援已出动";break;
     case RequestStatus::refused:text=L"房主拒绝了本机支援请求：环境、资源或当前部署条件不满足";break;
-    case RequestStatus::timeout:text=L"本机支援请求超时：未及时获得房主及全员确认";break;
+    case RequestStatus::timeout:text=L"本机支援请求超时：部署规划或对象同步超时";break;
     case RequestStatus::cancelled:text=L"本机这次支援部署已取消";break;
     case RequestStatus::interrupted:text=L"联机会话中断，本机支援请求未完成";break;
     }
@@ -271,8 +271,6 @@ bool Foot(float x,float z,float level,float& floor,float height=2.0f) noexcept {
     const float from[3]={x,floor+0.08f,z},to[3]={x,floor+height,z};float hit[3];
     return MapRay(from,to,hit)<0;
 }
-// m: the caller's eye over its feet, and a vehicle's top over its entry's ground (GroundEntryCandidates' sight line).
-constexpr float kCallerEye=1.7f,kVehicleTop=3.0f;
 bool AddUnit(SupportPlan& plan,std::uint32_t resource,std::uint32_t parent,const float* at,const float* heading) noexcept {
     if(plan.count>=support_net::kMaxUnits)return false;
     auto& unit=plan.units[plan.count++];unit={};unit.resourceId=resource;unit.role=parent;Matrix(at,heading,unit.matrix);return true;
@@ -593,28 +591,18 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
     if(vehicle && (!spec || !Cfg().npcBoarding || !SupportVehicleReady(kind,mode))) {
         Refuse(catalog,"vehicle resource not preloaded / NpcBoarding off",L"该车辆的资源或交付能力不可用");return PlanResult::refused;
     }
-    // Entry candidates round the target within the route planner's reach (support_entry.h GroundEntryCandidates), the
-    // ones the caller cannot see first (past its draw distance, or the map between its eye and the vehicle's top), fixed
-    // when the request starts so a caller walking on cannot reshuffle the ones already tried.
+    // Fix physical candidates at request start; visibility does not filter or reorder them.
     if(!planning.entriesMade) {
-        const float eye[3]={player.pos[0],player.pos[1]+kCallerEye,player.pos[2]};
-        planning.entries=support::GroundEntryCandidates(area,target,player.pos,NearDrawDistance(),[&](const float* p) noexcept {
-            const float top[3]={p[0],p[1]+kVehicleTop,p[2]};float hit[3];
-            return MapRay(eye,top,hit)>=0.0f;
-        });
+        planning.entries=support::GroundEntryCandidates(area,target,player.pos,NearDrawDistance(),[](const float*) noexcept {return false;});
         planning.entriesMade=true;
-        int unseen=0;for(int i=0;i<planning.entries.count;++i)unseen+=planning.entries.seen[i]!=support::Seen::visible;
-        Log("SUPPORT plan catalog=%u: %d ground entry candidates round (%.0f,%.0f,%.0f), %d of them out of the caller's sight",catalog,
-            planning.entries.count,target[0],target[1],target[2],unseen);
+        Log("SUPPORT plan catalog=%u: %d physical ground entry candidates round (%.0f,%.0f,%.0f), visibility unrestricted",catalog,
+            planning.entries.count,target[0],target[1],target[2]);
     }
     if(planning.edge>=planning.entries.count) {
-        Refuse(catalog,"no entry candidate connected to the target by a verified route",L"找不到与目的地连通的支援入口（周围 650-950 米及场地边缘无可达路线）");
+        Refuse(catalog,"no entry candidate connected to the target by a verified route",L"找不到与目的地连通的支援入口（周围 100-500 米及场地边缘无安全入场通道）");
         return PlanResult::refused;
     }
     float entry[3]={planning.entries.at[planning.edge][0],target[1],planning.entries.at[planning.edge][1]};
-    if(planning.entries.seen[planning.edge]==support::Seen::visible)
-        Log("SUPPORT plan catalog=%u entry %d (%.0f,%.0f): in the caller's sight (no unseen entry left with a route)",catalog,planning.edge,
-            entry[0],entry[2]);
     const auto nextEdge=[&](const char* why) {
         Log("SUPPORT plan catalog=%u entry %d (%.0f,%.0f) rejected: %s",catalog,planning.edge,entry[0],entry[2],why);
         ++planning.edge;Renew(planning.navigation);return PlanResult::pending;
@@ -622,6 +610,9 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
     if(!Foot(entry[0],entry[2],target[1],entry[1]))return nextEdge("no dry standable ground");
     auto profile=InfantryRouteProfile();
     if(spec)profile=VehicleRouteProfile(*spec);
+    // Admission needs a safe initial movement corridor, not a complete cross-map A* search. The actual crew
+    // continues terrain-checked navigation after deployment; remote peers still validate the same spawn plan.
+    profile.horizon=2.0f*profile.cell;
     float waypoint[3];
     // A request plans across frames. It may take a few route steps a frame (each GroundNavigate call yields after
     // four edges); the navigator's shared per-frame query budget still bounds the work and keeps the NPCs' share.
@@ -1045,7 +1036,7 @@ bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool n
         return true;
     }
     if(deployed->started)Status(L"空中支援已从场外空中入场，正在飞往目标");
-    else Status(networked ? L"支援已在入口集结，等待所有玩家确认对象" : L"支援已在入口集结，真实机组正在登车");
+    else Status(networked ? L"支援已在入口集结，正在自动同步部署对象" : L"支援已在入口集结，真实机组正在登车");
     return true;
 }
 bool Spawn(std::uint64_t id,const SupportPlan& plan,bool remote) noexcept {

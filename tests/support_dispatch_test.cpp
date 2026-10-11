@@ -373,7 +373,7 @@ int main() {
     SupportCallAt(0,target,note,128);const auto firstRequest=noticeRequest;
     check(configuredHooks.notice!=nullptr,"local request status callback is wired");
     Status(L"other peer planning");SupportCallStatus(note,128);
-    check(std::wcsstr(note,L"等待房主")!=nullptr,"accepted means waiting and is not overwritten by another peer's planner");
+    check(std::wcsstr(note,L"调度中")!=nullptr,"accepted means automatic dispatch and is not overwritten by another peer's planner");
     configuredHooks.notice(firstRequest,support_net::RequestStatus::refused);
     Status(L"other peer deployment active");SupportCallStatus(note,128);
     check(std::wcsstr(note,L"房主拒绝")!=nullptr,"local refusal is persistent despite unrelated host deployment progress");
@@ -381,9 +381,9 @@ int main() {
     check(std::wcsstr(note,L"房主拒绝")!=nullptr,"late active cannot reopen the same rejected request");
     SupportCallAt(0,target,note,128);const auto secondRequest=noticeRequest;
     configuredHooks.notice(firstRequest,support_net::RequestStatus::cancelled);SupportCallStatus(note,128);
-    check(std::wcsstr(note,L"等待房主")!=nullptr,"old cancellation cannot overwrite a newer local request");
+    check(std::wcsstr(note,L"调度中")!=nullptr,"old cancellation cannot overwrite a newer local request");
     configuredHooks.notice(secondRequest,support_net::RequestStatus::active);SupportCallStatus(note,128);
-    check(std::wcsstr(note,L"全员对象确认")!=nullptr,"active reports object confirmation rather than claiming arrival");
+    check(std::wcsstr(note,L"已出动")!=nullptr && !std::wcsstr(note,L"已到达"),"active reports deployment rather than claiming arrival");
     submitReady=false;check(!SupportCallAt(0,target,note,128),"pre-id transport refusal returns failure");
     SupportCallStatus(note,128);
     check(std::wcsstr(note,L"联机扩展尚未就绪")!=nullptr,"new pre-id refusal clears the previous active result");
@@ -875,12 +875,12 @@ int main() {
     const auto mapRequest=noticeRequest;
     check(SupportRescueAt(sea,note,128) && netRequests==2 && rescueRequest==noticeRequest && !offlinePending,"online: the rescue is a host request");
     configuredHooks.notice(mapRequest,support_net::RequestStatus::active);SupportCallStatus(note,128);
-    check(std::wcsstr(note,L"全员对象确认")!=nullptr && rescueFailed==0,"the map's earlier request still gets its own outcome");
+    check(std::wcsstr(note,L"已出动")!=nullptr && rescueFailed==0,"the map's earlier request still gets its own outcome");
     configuredHooks.notice(rescueRequest,support_net::RequestStatus::refused);
     configuredHooks.notice(noticeRequest,support_net::RequestStatus::timeout);
     check(rescueFailed==1,"the host's refusal reaches the rescue once");
     SupportCallStatus(note,128);
-    check(std::wcsstr(note,L"全员对象确认")!=nullptr,"and is not shown on the map's line");
+    check(std::wcsstr(note,L"已出动")!=nullptr,"and is not shown on the map's line");
     SupportCallAt(0,target,note,128);
     configuredHooks.notice(noticeRequest,support_net::RequestStatus::refused);
     check(rescueFailed==1,"a map call's refusal is no rescue failure");

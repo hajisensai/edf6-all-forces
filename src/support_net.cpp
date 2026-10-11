@@ -307,7 +307,7 @@ bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::s
     if(!session.Submit(static_cast<std::uint32_t>(catalogId),target,GetTickCount64(),loadout)) {
         Note(note,size,L"支援请求未受理：已有部署、调用过快或本关支援额度已满");return false;
     }
-    Note(note,size,L"支援请求已排队，等待房主验证与全员确认");return true;
+    Note(note,size,L"支援调度中：规划入场路线并同步部署");return true;
 }
 void ReportSupportFailure(std::uint64_t transaction) noexcept {
     if(transaction) {
