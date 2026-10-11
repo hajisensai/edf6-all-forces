@@ -5061,7 +5061,10 @@ def support_arrives_from_off_the_map() -> None:
     assert 'SupportPassTurn(spec)' in plan
     crewh = src('src/crew.h')
     assert 'inline float ArrivalHalf() noexcept { const float h=HavokHalf(),w=WorldHalf();return (h<w ? h : w)-kArrivalRoom; }' in crewh
-    assert 'Cfg().viewDistance>kStockFarClip' in crewh
+    assert 'const float v=ViewDistanceWanted();return v>kStockFarClip ? v : kStockFarClip;' in crewh
+    # 2026-10-10 "改成无限": ViewDistance -1 (the default) reaches past the world's diagonal and the stock far pass end.
+    assert 'float viewDistance=-1.0f;' in crewh and re.search(r'^ViewDistance=-1', src('EDF6VehicleCrew.ini'), re.M)
+    assert 'Cfg().viewDistance<0.0f ? UnlimitedViewDistance()' in crewh
     dispatch = src('src/support_dispatch.cpp')
     board = dispatch.split('bool BoardAirborne(Deployment& deployed,bool networked) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'JetFerry(vehicle,plan.target,plan.units[i].matrix+8)' in board, 'the plane on its line from its first frame'
