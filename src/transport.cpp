@@ -102,6 +102,20 @@ TripRider* RiderOf(Trip& t,const void* top) noexcept {
 }
 void Hold(unsigned char* v) noexcept { NpcPrepareVehicleRoutePost(v,Pos(v),kVehicleHold); }
 
+// Every soldier still in a seat of `v` past the driver's put off (the stock get-off, npcai.cpp NpcMoveSeat; a player is
+// never kicked: NpcCanYieldSeat). Returns how many are left in those seats. A delivery's squad need not be on its trip
+// any more when the trip ends (LeaveTrips: an engage / stop / passenger-only DISMOUNT, a merge took it off the list while
+// it was still aboard): the vehicle must not take them home, where Retire / WithdrawGround delete whoever is seated.
+int PassengersOff(unsigned char* v) noexcept {
+    int left=0;
+    for(unsigned seat=1;seat<SeatCount(v);++seat) {
+        unsigned char* const s=SeatAt(v,seat);
+        if(SeatRider(s)!=Rider::other || !IsSoldierClass(At<const void*>(s,kSeatRider)))continue;
+        if(!NpcMoveSeat(v,seat,-1))++left;
+    }
+    return left;
+}
+
 // The trip's end: each rider takes its order on foot (`off`: the riding ones get off first, when the vehicle is at rest),
 // the vehicle waits where it is (a helicopter's ferry ends: it guards the drop point).
 void EndTrip(Trip& t,bool off,const char* why) noexcept {
@@ -113,11 +127,18 @@ void EndTrip(Trip& t,bool off,const char* why) noexcept {
         NpcSquadSetOrder(r.top.obj,r.after,false);
     }
     const bool still=v && (t.t.carrier==Carrier::heli ? HeliGrounded(v) : t.speed<=tuning.stopped);
+    int left=0;
     if(v && t.leave && still) {
-        // The delivery is over: nobody is left aboard (any still seated are put off: it is at rest after unloading), the
-        // pairs to it go and it leaves the field (a helicopter flies off, a truck drives back to its entry; Retire /
-        // WithdrawGround remove it out there with its own crew).
+        // Nobody may go back with it: the riders still listed get off, and so does anyone else in a seat past the
+        // driver's (a squad that left the trip while aboard is no longer listed here: LeaveTrips).
         for(int i=0;i<t.count;++i)if(Live(t.riders[i].top))NpcSquadDismount(t.riders[i].top.obj);
+        left=PassengersOff(v);
+        if(left)Log("TRANSPORT v=%p delivered, but %d still aboard will not get off: it stays",t.vehicle.obj,left);
+    }
+    if(v && t.leave && still && !left) {
+        // The delivery is over and its seats past the driver's are empty: the pairs to it go and it leaves the field (a
+        // helicopter flies off, a truck drives back to its entry; Retire / WithdrawGround remove it out there with its
+        // own crew).
         for(auto& p:pairs)if(p.vehicle.Is(v))p=Pair{};
         if(SupportWithdrawVehicle(v))Log("TRANSPORT v=%p delivered: it goes back",t.vehicle.obj);
         else if(t.t.carrier==Carrier::heli){HeliFerry(v,nullptr,false);HeliStartLeaving(v);}

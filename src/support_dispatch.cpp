@@ -79,6 +79,10 @@ struct Deployment {
     InfantryRoute infantry[3]{}; // one bounded coarse route per leader, not per follower
     ULONGLONG retiredFrame[support_net::kMaxUnits]{}; // an aircraft's crew deleted at this frame + 1 (Retire)
     bool withdrawing=false; // its ground vehicle sent off by a map order (SupportWithdrawVehicle): back to its entry, removed
+    // The soldiers it delivered as a squad (handed to transport.cpp TransportDeliver): the player's now. Retire /
+    // WithdrawGround put one still seated off, never delete it with the crew (2026-10-11 review: a squad that left its
+    // trip while aboard went home with the vehicle and was deleted there).
+    bool carried[support_net::kMaxUnits]{};
     // Since when its ground vehicle (or an infantry leader's route, by index + 1) has made no way (GameMs; 0: it moves).
     // 2026-10-10 "我摇的人还没到目的地成棍木了": a route that stayed pending / blocked held the truck and its passengers (or a
     // walking squad's quiet movement) where they stood for the rest of the mission. Past kStuckMs they get off / are let go.
@@ -824,6 +828,18 @@ void DeleteSoldier(const ObjRef& soldier) noexcept {
     if(!Unseat(soldier))Log("SUPPORT soldier %p: not out of its seat before it is deleted",soldier.obj);
     DeleteSupportSoldier(soldier);
 }
+// A leaving hull's soldiers still seated: its own crew deleted, a squad it delivered (Deployment::carried) put off.
+void ClearSeated(Deployment& deployed,unsigned hullIndex,unsigned char* hull) noexcept {
+    for(unsigned k=0;k<deployed.plan.count;++k) {
+        if(deployed.plan.units[k].role!=hullIndex+1 || !Seated(hull,deployed.objects[k]))continue;
+        if(!deployed.carried[k]){DeleteSoldier(deployed.objects[k]);continue;}
+        bool off=false;
+        for(unsigned seat=0;seat<SeatCount(hull);++seat)
+            if(At<const void*>(SeatAt(hull,seat),kSeatRider)==deployed.objects[k].obj){off=NpcMoveSeat(hull,seat,-1);break;}
+        Log("SUPPORT deployment %llu: delivered soldier %p still aboard its leaving vehicle: %s, not deleted",
+            static_cast<unsigned long long>(deployed.id),deployed.objects[k].obj,off ? "put off" : "could not be put off");
+    }
+}
 void Retire(Deployment& deployed) noexcept {
     const auto& plan=deployed.plan;
     for(unsigned i=0;i<plan.count;++i) {
@@ -836,8 +852,9 @@ void Retire(Deployment& deployed) noexcept {
         auto& retired=deployed.retiredFrame[i];
         if(!retired) {
             if(!SupportAircraftLeft(deployed.objects[i]))continue;
-            // Only the ones still aboard: a transport's soldiers got off and fight on (transport.cpp).
-            for(unsigned k=0;k<plan.count;++k)if(plan.units[k].role==i+1 && Seated(hull,deployed.objects[k]))DeleteSoldier(deployed.objects[k]);
+            // Only the ones still aboard: a transport's soldiers got off and fight on (transport.cpp); a delivered one
+            // still seated is put off, never deleted (ClearSeated).
+            ClearSeated(deployed,i,hull);
             retired=GameFrame()+1;
             Log("SUPPORT deployment %llu: aircraft %u has left: its crew deleted",static_cast<unsigned long long>(deployed.id),i);
             continue;
@@ -862,11 +879,14 @@ void WithdrawGround(Deployment& deployed) noexcept {
             Log("SUPPORT deployment %llu: its vehicle withdrawn (deleted)",static_cast<unsigned long long>(deployed.id));
             deployed.withdrawing=false;return;
         }
-        // Still occupied: anyone of ours (an NPC, never a player: checked above) is put off, then it is tried again.
-        if(GameFrame()-retired==30 || GameFrame()-retired==90) {
+        // Still occupied: anyone of ours (an NPC, never a player: checked above) is put off, then it is tried again. Frames
+        // since as Retire counts them (retired is the frame + 1: no wrap on a second call in the same frame); a window,
+        // not exact frames, so a frame this is not run on cannot skip the get-off.
+        const ULONGLONG since=GameFrame()+1-retired;
+        if(since>30) {
             for(unsigned seat=0;seat<SeatCount(hull);++seat)if(SeatRider(SeatAt(hull,seat))==Rider::other)NpcMoveSeat(hull,seat,-1);
         }
-        if(GameFrame()-retired>120) {
+        if(since>121) {
             Log("SUPPORT deployment %llu: its withdrawn vehicle still has riders: left where it is",static_cast<unsigned long long>(deployed.id));
             deployed.withdrawing=false;
         }
@@ -886,8 +906,7 @@ void WithdrawGround(Deployment& deployed) noexcept {
         else NpcPrepareVehicleRoutePost(hull,position,kVehicleDriverHold);
     }
     if(!there)return;
-    for(unsigned k=0;k<deployed.plan.count;++k)
-        if(deployed.plan.units[k].role==1 && Seated(hull,deployed.objects[k]))DeleteSoldier(deployed.objects[k]);
+    ClearSeated(deployed,0,hull);
     retired=GameFrame()+1;
     Log("SUPPORT deployment %llu: its withdrawn vehicle is out: its crew deleted",static_cast<unsigned long long>(deployed.id));
 }
@@ -1061,6 +1080,7 @@ bool Assign(Deployment& deployed) noexcept {
             // The plane's passes began at BoardAirborne (JetFerry); its stick is handed the point here.
             const bool handed=plane ? TransportParadrop(hull,plan.target) : TransportDeliver(hull,tops,squadCount,plan.target);
             if(!handed)Log("SUPPORT deployment %llu: its transport not handed over (it flies its call)",static_cast<unsigned long long>(deployed.id));
+            else for(unsigned i=2;i<plan.count;++i)deployed.carried[i]=true;   // the squads are the player's now
             deployed.delivered=true;
         }
         deployed.assigned=true;
@@ -1474,8 +1494,10 @@ void SupportDispatchTick() noexcept {
                     for(unsigned i=0;i<deployed.plan.count && !top;++i)
                         if(passenger(i) && IsSupportLeaderResource(deployed.plan.units[i].resourceId))top=deployed.objects[i];
                     for(unsigned i=0;i<deployed.plan.count && !top;++i)if(passenger(i))top=deployed.objects[i];
-                    for(unsigned i=0;i<deployed.plan.count;++i)
-                        if(passenger(i) && deployed.objects[i].obj!=top.obj)FollowSupportSoldier(deployed.objects[i],top);
+                    for(unsigned i=0;i<deployed.plan.count;++i)if(passenger(i)) {
+                        deployed.carried[i]=true;   // the player's now: never deleted with the vehicle (ClearSeated)
+                        if(deployed.objects[i].obj!=top.obj)FollowSupportSoldier(deployed.objects[i],top);
+                    }
                     const void* tops[1]={top.obj};
                     if(top && !TransportDeliver(vehicle,tops,1,deployed.plan.target,stuck)) {
                         // No trip: put them off here anyway (they walk to the point) and send it back.

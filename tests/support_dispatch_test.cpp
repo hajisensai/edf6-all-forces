@@ -565,6 +565,12 @@ int main() {
     check(SupportWithdrawVehicle(objects[0]) && heliLeaves==1,"WITHDRAW: a support helicopter flies off");
     heliHull=false;
     check(!SupportWithdrawVehicle(objects[3]),"a soldier is no support vehicle");
+    // Left with the squad it delivered still seated (2026-10-11 review): the pilot deleted, the four put off, not deleted.
+    ResetSupportDispatch();made=deleted=unseated=0;fixtureMs+=40000;
+    SupportCallAt(29,target,note,128);SupportDispatchTick();
+    check(made==6 && delivered>0,"a squad's helicopter, its squad handed over");
+    aircraftLeft=true;fixtureMs+=1;SupportDispatchTick();aircraftLeft=false;
+    check(deleted==1 && unseated==4,"left with them aboard: its pilot deleted, the four delivered put off");
     // A crewed APC arrived (Broken Arrow, the user 2026-10-09: "卡车之类的运输载具改成断剑那种操作方式"): the soldiers in its
     // passenger seats a squad, handed to it as their transport; its driver stays at the wheel.
     ResetSupportDispatch();made=deleted=followed=delivered=0;fixtureMs+=40000;
@@ -581,13 +587,16 @@ int main() {
         SupportDispatchTick();fixtureMs+=16;SupportDispatchTick();
         check(d.delivered && delivered==1 && deliveredSquads==1 && deliveredTops[0]==first.obj && deliveredHull==apc.obj && followed==1,
               "arrived: its passengers one squad (the second following the first), handed to the APC; the driver not among them");
-        // WITHDRAW: back to its entry (here at once: nobody drives it), its own crew aboard deleted, then the hull.
-        driverAboard=false;deleted=0;
+        // WITHDRAW: back to its entry (here at once: nobody drives it), its own crew aboard deleted, then the hull. The
+        // squad it delivered, still seated (2026-10-11 review: one that left its trip while aboard), is put off, never
+        // deleted with it.
+        driverAboard=false;deleted=0;unseated=0;
         check(SupportWithdrawVehicle(apc.obj) && d.withdrawing,"WITHDRAW: a support APC goes back to its entry");
         fixtureMs+=16;SupportDispatchTick();
-        check(deleted==3,"out: its crew still aboard deleted (all three here)");
+        check(deleted==1 && unseated==2 && !Seated(v,first) && !Seated(v,second),
+              "out: its driver deleted, the two delivered soldiers still aboard put off (not deleted)");
         fixtureMs+=16;SupportDispatchTick();
-        check(deleted==4 && !d.withdrawing,"then the hull");
+        check(deleted==2 && !d.withdrawing,"then the hull");
         driverAboard=true;routeResult=npc::navigation::Result::pending;
     }
     // 2026-10-10 "我摇的人还没到目的地成棍木了": a route that never comes (pending / blocked) held the APC and its passengers
@@ -620,7 +629,7 @@ int main() {
         driverAboard=false;deleted=0;
         check(SupportWithdrawVehicle(apc.obj),"it goes back");
         fixtureMs+=16;SupportDispatchTick();
-        check(unseated==3 && deleted==3,"each seated soldier out of its seat first, then deleted");
+        check(unseated==3 && deleted==1,"each seated soldier out of its seat; only its driver deleted (the delivered two put off)");
         driverAboard=true;routeResult=npc::navigation::Result::pending;
     }
     // A composed load (the bar's composition panel; the user, 2026-10-09: "支援栏是断剑那种，先点载具，然后选里面的人"; a click
