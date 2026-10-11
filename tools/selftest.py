@@ -4137,7 +4137,7 @@ def stock_payload_and_seats_wired() -> None:
     want = sorted(c.replace('Vehicle', '', 1).lstrip('_') if c != 'VehicleHelicopter409' else 'Helicopter409'
                   for c in mss.BUILT_CLASSES if c != 'Vehicle506_Helicopter')
     assert sorted(builds) == want, (builds, want)
-    assert 'if(IsStoreWeapon(w))return PayloadFire::store;' in payload and 'return StoreOf(w)!=nullptr;' in stores
+    assert 'if(IsStoreWeapon(w))return playerSeat && FreeSecondary(c) && IsCoax(w) ? PayloadFire::secondary : PayloadFire::store;' in payload and 'return StoreOf(w)!=nullptr;' in stores
     hook = src('src/crew.cpp').split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
     # The disabled branch also calls AimLines to restore native lines. Check the
     # enabled pipeline's ordering, not that earlier ownership-cleanup call.

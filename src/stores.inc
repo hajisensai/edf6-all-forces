@@ -14,6 +14,9 @@ inline constexpr StoreSpec kStores[]={
     {L"EDF6VC_AC_AP_","AP belt",StoreRole::gun,0.0f,0.0000f},
     {L"EDF6VC_AC_HE_","HE belt",StoreRole::gun,0.0f,0.0000f},
     {L"EDF6VC_FLAK_HE_","HE-PROX",StoreRole::gun,0.0f,0.0000f},
+    {L"EDF6VC_MG505_","Coax MG",StoreRole::coax,0.0f,0.0000f},
+    {L"EDF6VC_MG601_","Coax MG",StoreRole::coax,0.0f,0.0000f},
+    {L"EDF6VC_MG401_","Coax MG",StoreRole::coax,0.0f,0.0000f},
 };
 inline constexpr JetMass kJetMasses[]={
     {7001.0f,22000.0f,1500.0f},

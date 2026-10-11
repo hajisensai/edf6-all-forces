@@ -189,6 +189,9 @@ float sceneZoom=1.0f;
 float SightZoomNow(const void*) noexcept { return sceneZoom; }
 sightzoom::Kind sceneSight=sightzoom::Kind::optical;
 sightzoom::Kind SightZoomView(const void*) noexcept { return sceneSight; }
+// A soldier's open scope (infantryscope.cpp): on in the infantry_scope scenes.
+bool hasInfantry=false;InfantryScopeCue sceneInfantry{};
+bool InfantryScopeNow(InfantryScopeCue* o) noexcept { if(hasInfantry && o)*o=sceneInfantry;return hasInfantry; }
 bool hasGunner=false;GunnerReadout sceneGunner{};
 bool PlayerGunnerHud(GunnerReadout* o) noexcept { if(hasGunner)*o=sceneGunner;return hasGunner; }
 bool hasHighView=false;
@@ -1053,8 +1056,12 @@ int TankSightScenes(const std::wstring& dir,const float* ground) {
     const auto check=[&](const wchar_t* name,int wantTicks){
         Scene(dir,name,ground);
         bool lrf=false,order=true,apart=true;int ticks=0,lastRange=0;float lastY=-1e9f;
+        const bool zoomed=sceneZoom>1.0f;
         for(const Drew& d:drew) {
-            if(d.text.find(L"1300 m")!=std::wstring::npos)lrf=true;   // Tx::sightRange, in any language
+            // Tx::sightRange in any language; through the optic the computer's LED range (four digits)
+            if(d.text.find(zoomed ? L"1300" : L"1300 m")!=std::wstring::npos)lrf=true;
+            // through the optic the lead ticks' mils are numbered over the cross: the range marks are the ones under it
+            if(zoomed && (d.y0<540.0f || (!d.text.empty() && d.text.back()==L'x')))continue;   // (the data line's power, "3x")
             if(d.text.size()<=2 && !d.text.empty() && d.text[0]>=L'1' && d.text[0]<=L'9') {
                 const int r=std::stoi(d.text);
                 order=order && r>lastRange && d.y0>lastY;   // farther ranges further down
@@ -1079,6 +1086,25 @@ int TankSightScenes(const std::wstring& dir,const float* ground) {
     for(const Drew& d:drew)named=named || d.text.find(L"3x")!=std::wstring::npos;
     failed+=!named;
     std::printf("%s  stock_tank_sight_zoom: the magnification named (3x) %d\n",named ? "ok  " : "FAIL",named);
+    // Through the optic: the eyepiece (its outer black kSides pieces), no green HUD reticle text (the AP/HE tag), the
+    // reticle etched black and its aiming point lit red, the LED data line.
+    {
+        sceneFov=55.0f/6.0f;sceneStock.zoom=6.0f;sceneZoom=6.0f;
+        scopePieces=0;Scene(dir,L"stock_tank_sight_zoom_6x",ground);
+        bool tag=false,ready=false,boreLine=false;
+        for(const Drew& d:drew){tag=tag || d.text==L"AP" || d.text==L"HE";ready=ready || d.text==Tr(Tx::scopeReady);boreLine=boreLine || d.text==Tr(Tx::scopeZeroBore);}
+        const bool ok=scopePieces==scopeview::kSides && !tag && ready;
+        failed+=!ok;
+        std::printf("%s  stock_tank_sight_zoom_6x: eyepiece %d, no HUD tag %d, data line %d\n",ok ? "ok  " : "FAIL",scopePieces,!tag,ready);
+        // The range setting (the wheel: sightzoom.h): named on the data line, ---- at the bore line.
+        sceneStock.zero=400;Scene(dir,L"stock_tank_sight_zoom_range",ground);sceneStock.zero=0;
+        wchar_t zero[32];_snwprintf_s(zero,_countof(zero),_TRUNCATE,Tr(Tx::scopeZero),400);
+        bool named400=false;
+        for(const Drew& d:drew)named400=named400 || d.text==zero;
+        failed+=!(named400 && boreLine);
+        std::printf("%s  stock_tank_sight_zoom_range: the setting named %d, the bore line named %d\n",named400 && boreLine ? "ok  " : "FAIL",named400,boreLine);
+        sceneFov=55.0f/3.0f;sceneStock.zoom=3.0f;sceneZoom=3.0f;   // the fractional ladder below is read through the 3x optic
+    }
     // A 250 m ladder must say 2.5 / 7.5 hundreds, not truncate those ranges to 2 / 7.
     a.ladder={};a.ladder.step=250.0f;a.ladder.ticks=2;
     for(int i=0;i<2;++i) {
@@ -1134,7 +1160,12 @@ int SightStyleScenes(const std::wstring& dir,const float* ground) {
         const std::wstring name=std::wstring(c.name)+(zoomed ? L"_zoom" : L"");
         scopePieces=0;Scene(dir,name.c_str(),ground);
         bool words=true,apart=true;
-        for(const wchar_t* w:c.words) {
+        // Through the optic the round is the data line's (the weapon's name) and the power is named; a flak sight's
+        // lead rings keep their km/h. At 1x the HUD reticle's own words.
+        const wchar_t* zoomWords[3]={L"3x",c.style==reticle::Style::flak ? L"90" : nullptr,c.style==reticle::Style::flak ? L"180" : nullptr};
+        const wchar_t* const* list=zoomed ? zoomWords : c.words;
+        for(int wi=0;wi<3;++wi) {
+            const wchar_t* w=list[wi];
             if(!w)break;
             bool found=false;
             for(const Drew& d:drew)found=found || d.text==w;
@@ -1239,7 +1270,9 @@ int ZoomScenes(const std::wstring& dir,const float* ground) {
     sceneHeliSight.pipper[0]=ground[0];sceneHeliSight.pipper[1]=ground[1];sceneHeliSight.pipper[2]=ground[2]+700.0f;sceneHeliSight.range=700.0f;
     check(L"heli_gun_ladder",0,0);
     sceneFov=55.0f/3.0f;sceneZoom=3.0f;
-    check(L"heli_gun_ladder_zoom",1,1);
+    // The eyepiece names no power of its own (2026-10-11: no drawn rim or label; the optic's data line, a stock
+    // vehicle's, names it): the heli mock (no stock heli carries an optic) shows the field and its ladder.
+    check(L"heli_gun_ladder_zoom",0,1);
     hasHeliSight=false;
     hasJet=true;
     sceneSight=sightzoom::Kind::flight;
@@ -1309,12 +1342,58 @@ int FireControlScenes(const std::wstring& dir,const float* ground) {
             for(int k=0;k<kLauncherRing;++k){const float angle=2*tcam::kPi*k/kLauncherRing;sceneLauncher.ring[k][0]=12*std::cos(angle);sceneLauncher.ring[k][2]=600+12*std::sin(angle);}
         }
         scopePieces=0;Scene(dir,names[i],ground);
-        const int want=i==0 ? scopeview::kSides : i==1 || i==2 ? 4 : 0;
+        // A gun-launched missile / rocket on the seat is looked at through the same optic (2026-10-11): its round field.
+        const int want=i<=2 ? scopeview::kSides : 0;
         const bool right=scopePieces==want && (i==0 ? SightGun(sceneStock,false)==0 : SightGun(sceneStock,false)==-1);
         failed+=!right;
         std::printf("%s fire-control owner %ls: scope quads %d/%d, no fallback optical reticle\n",right ? "ok" : "FAIL",names[i],scopePieces,want);
     }
     hasHighView=hasLauncher=false;sceneSight=sightzoom::Kind::optical;sceneZoom=1;sceneFov=55;
+    StockTank(ground);
+    return failed;
+}
+
+// A soldier's open scope (hud.cpp InfantryScope, infantryscope.h; the user, 2026-10-11): a marksman's rifle at 5.5x (the
+// KFF 50's SecondaryFire_Parameter), a quick-firing rifle's combat optic at 4x, a rocket launcher's at 3x, on foot (no
+// vehicle HUD). Checked: the eyepiece's black all round (kSides pieces), every number etched on the glass inside the
+// field, no two texts overlapping; with no scope open nothing of it.
+int InfantryScopeScenes(const std::wstring& dir,const float* ground) {
+    int failed=0;
+    const bool stockWas=hasStock;
+    hasStock=false;hasJet=hasHeli=hasGunner=hasHeliSight=hasTurret=false;sceneSight=sightzoom::Kind::none;sceneZoom=1.0f;
+    struct Case { const wchar_t* name; scope::Look look; float zoom; int numbers; };
+    const Case cases[]={{L"infantry_scope_marksman",scope::Look::marksman,5.5f,2},{L"infantry_scope_combat",scope::Look::combat,4.0f,1},
+                        {L"infantry_scope_launcher",scope::Look::launcher,3.0f,3}};
+    for(const Case& c:cases) {
+        hasInfantry=true;sceneInfantry=InfantryScopeCue{&sceneInfantry,c.zoom,c.look};
+        sceneFov=55.0f/c.zoom;
+        StockTank(ground);hasStock=false;
+        sceneJet.sym.nose[0]=0.0f;sceneJet.sym.nose[1]=0.0f;sceneJet.sym.nose[2]=1.0f;   // the camera along +Z (Scene)
+        scopePieces=0;Scene(dir,c.name,ground);
+        int numbers=0;bool inside=true,apart=true;
+        const float r=scopeview::Radius(1920.0f,1080.0f);
+        for(std::size_t i=0;i<drew.size();++i) {
+            const Drew& p=drew[i];
+            if(!p.text.empty() && p.text[0]>=L'0' && p.text[0]<=L'9') {
+                ++numbers;
+                const float x=(p.x0+p.x1)*0.5f-960.0f,y=(p.y0+p.y1)*0.5f-540.0f;
+                inside=inside && x*x+y*y<=r*r;
+            }
+            for(std::size_t k=i+1;k<drew.size();++k) {
+                const Drew& q=drew[k];
+                if(!p.text.empty() && !q.text.empty() && p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1){apart=false;std::printf("      overlap: %ls / %ls\n",p.text.c_str(),q.text.c_str());}
+            }
+        }
+        const bool ok=scopePieces==scopeview::kSides && numbers>=c.numbers && inside && apart;
+        failed+=!ok;
+        std::printf("%s  %ls: eyepiece %d, etched numbers %d (want >= %d) inside %d, no text overlapping %d\n",ok ? "ok  " : "FAIL",c.name,
+                    scopePieces,numbers,c.numbers,inside,apart);
+    }
+    hasInfantry=false;scopePieces=0;sceneFov=55.0f;
+    Scene(dir,L"infantry_scope_closed",ground);
+    failed+=scopePieces!=0;
+    std::printf("%s  infantry_scope_closed: no eyepiece %d\n",scopePieces==0 ? "ok  " : "FAIL",scopePieces);
+    hasStock=stockWas;sceneSight=sightzoom::Kind::optical;
     StockTank(ground);
     return failed;
 }
@@ -1901,6 +1980,7 @@ int Scenes(const std::wstring& dir) {
     failed+=GunshipSightScenes(dir,ground);
     failed+=ZoomScenes(dir,ground);
     failed+=FireControlScenes(dir,ground);
+    failed+=InfantryScopeScenes(dir,ground);
     failed+=FixedFireScenes(dir,ground);
     hasDrill=true;
     sceneDrill=DrillCue{1180.0f,1200.0f,0.93f,true,true};

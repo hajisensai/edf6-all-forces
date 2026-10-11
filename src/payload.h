@@ -13,6 +13,8 @@ constexpr int kMostPayload=8;
 // button bit 0x20, fire byte +0x2021; the Titan's left trigger +0x2E0), `store` one of the stores the secondary fires
 // when it is the one picked (any of the plugin's weapons hung on the seat: they ride the seat's secondary when a stock
 // weapon is on it, else its primary), `other` a control the plugin has not read for this class (a mech's arms).
+// A coaxial gun (StoreRole::coax, tools/make_stock_stores.py COAX) is `secondary` for the player on a class whose stock
+// input reads no second control (the Blacker 505, the Varius 601, the Grape): payload.cpp pulls it on that trigger.
 enum class PayloadFire : std::uint8_t { other, primary, secondary, store };
 struct PayloadEntry {
     wchar_t name[32];          // the weapon's own name in the game's language (weapon +0x1B0), or its store's
@@ -24,6 +26,7 @@ struct PayloadEntry {
     bool picked;               // the one the secondary fires now (a seat whose secondary has stores to switch)
     bool homing;               // it locks on (LockonType 1)
     bool selectable;           // a live choice in the R/LB cycle; independent primary guns remain read-only
+    bool coax;                 // a coaxial machine gun (StoreRole::coax): its own secondary trigger, never cycled
 };
 // The local player's seat on a stock vehicle (a plugin aircraft has the cockpit readout, PlayerJetHud, instead).
 struct PayloadReadout {
@@ -69,6 +72,12 @@ int PayloadSightWeapons(const void* vehicle,unsigned seat,unsigned char** out,in
 // `fire` reports the native trigger control to use (primary or secondary).
 // Repeat each frame; redirects expire and check AiGunner again at the native trigger pull.
 unsigned char* NpcPayloadSelect(unsigned char* vehicle,unsigned seat,float distance,bool airborne,PayloadFire* fire=nullptr) noexcept;
+// An NPC crew's coaxial gun (StoreRole::coax): fired alongside the main gun / store NpcPayloadSelect chose, whenever the
+// gun is laid within ~3 degrees of `target` inside 600 m (and its reach) with no friend in the line; its trigger latch
+// pulled this frame. True when it fired.
+// locked: whether a burst from -> to would pass a friend (heli.h FriendInLine); nullptr none checked.
+using LineBlocked=bool(*)(const float* from,const float* to,const void* self) noexcept;
+bool NpcCoaxFire(unsigned char* vehicle,unsigned seat,const void* target,LineBlocked blocked=nullptr) noexcept;
 void ResetPayload() noexcept;
 bool InstallPayload() noexcept;                       // at load: the holder pull 0x62C000 taken over (checked)
 

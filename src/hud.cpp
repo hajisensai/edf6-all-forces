@@ -24,6 +24,7 @@
 #include "map_buttons.h"
 #include "scopeview.h"
 #include "reticle.h"
+#include "scopereticle.h"
 #include "boarding_entrance.h"
 #include "debug_spawn.h"
 #include "gear.h"
@@ -1384,7 +1385,25 @@ void GunSight(void* drawer,void* ctx,const float* vp,float width,float height,fl
 // game flies them: vhud.h RoundLands) meets the map with its label (RKT, GREN...) and distance (none met: a dim one on
 // their boresight).
 // A reticle's sketch (reticle.h) in the HUD's quads and text: green, dim green, amber.
-const float* InkOf(reticle::Ink ink) noexcept { return ink==reticle::Ink::dim ? kHudDim : ink==reticle::Ink::hot ? kAmber : kHud; }
+// A magnified optic's inks (scopereticle.h): the etched glass black (it reads against the sky and the ground the way a
+// real reticle does), the illuminated aiming point red, the fire-control display's LED digits orange.
+alignas(16) const float kEtch[4]={0.02f,0.02f,0.02f,0.92f};
+alignas(16) const float kEtchDim[4]={0.02f,0.02f,0.02f,0.5f};
+alignas(16) const float kLit[4]={1.0f,0.16f,0.1f,0.95f};
+alignas(16) const float kLed[4]={1.0f,0.42f,0.12f,1.0f};
+alignas(16) const float kLedDim[4]={1.0f,0.42f,0.12f,0.55f};
+const float* InkOf(reticle::Ink ink) noexcept {
+    switch(ink) {
+        case reticle::Ink::dim: return kHudDim;
+        case reticle::Ink::hot: return kAmber;
+        case reticle::Ink::etch: return kEtch;
+        case reticle::Ink::etchDim: return kEtchDim;
+        case reticle::Ink::lit: return kLit;
+        case reticle::Ink::led: return kLed;
+        case reticle::Ink::ledDim: return kLedDim;
+        default: return kHud;
+    }
+}
 void Render(void* drawer,void* ctx,Text* text,float s,const reticle::Sketch& k,Line* lines,int* at) noexcept {
     for(int i=0;i<k.strokes;++i){const auto& l=k.stroke[i];Seg(drawer,ctx,l.x0,l.y0,l.x1,l.y1,l.w,InkOf(l.ink));}
     for(int i=0;i<k.circles;++i) {
@@ -1403,6 +1422,25 @@ float FocalAt(const float* vp,const float* bore,float width,float height,float c
     if(!reticle::Turned(bore,kProbe,turned) || !sight::ToScreen(vp,turned,0.0f,width,height,&mx,&my))return 0.0f;
     return std::sqrt((mx-cx)*(mx-cx)+(my-cy)*(my-cy))/std::tan(kProbe);
 }
+// The px a unit of tan spans at the screen's centre on view-projection `vp`: the view's forward direction unprojected
+// from the centre (near and far), then FocalAt along it. 0: not known.
+float CentreFocal(const float* vp,float width,float height) noexcept {
+    float inv[16];
+    if(!mapcmd::Invert4(vp,inv))return 0.0f;
+    const float nearH[4]={0.0f,0.0f,0.0f,1.0f},farH[4]={0.0f,0.0f,1.0f,1.0f};
+    float n[4],f[4];
+    for(int k=0;k<4;++k) {
+        n[k]=nearH[0]*inv[k]+nearH[1]*inv[4+k]+nearH[2]*inv[8+k]+nearH[3]*inv[12+k];
+        f[k]=farH[0]*inv[k]+farH[1]*inv[4+k]+farH[2]*inv[8+k]+farH[3]*inv[12+k];
+    }
+    if(!(std::fabs(n[3])>1e-9f) || !(std::fabs(f[3])>1e-9f))return 0.0f;
+    float dir[3]={f[0]/f[3]-n[0]/n[3],f[1]/f[3]-n[1]/n[3],f[2]/f[3]-n[2]/n[3]};
+    const float l=std::sqrt(dir[0]*dir[0]+dir[1]*dir[1]+dir[2]*dir[2]);
+    if(!(l>1e-6f))return 0.0f;
+    for(float& d:dir)d/=l;
+    return FocalAt(vp,dir,width,height,width*0.5f,height*0.5f);
+}
+
 // A gun's range ladder (gunsight.h) projected onto the screen as reticle.h's ticks.
 void LadderMarks(const float* vp,float width,float height,const gunsight::Ladder& l,reticle::Aim* a) noexcept {
     a->step=l.step;a->ticks=0;
@@ -2514,10 +2552,65 @@ void GunReticle(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
     else Label(text,lines,at,cx+in,over,0,note,kHudDim,L"%ls",Tr(Tx::sightNoRange));
 }
 
+// --- Looking through a magnified optic (scopereticle.h; the user, 2026-10-11: the Z sight redone, realistic) ---
+// The fire-control computer's data line, inside the bottom of the field either side of the lower post, in LED digits
+// (a Leopard 2's EMES / an M1's GPS show theirs under the image): left the weapon now laid and its rounds, under it the
+// magnification; right the laser range (four digits, ---- with no return), under it the gun's state.
+void ScopeData(Text* text,Line* lines,int* at,float s,const scope::Field& f,const StockArm& a,float zoom,int zero) noexcept {
+    const float y=f.cy+f.r*scope::kDataLine,gap=16.0f*s,row=24.0f*s;
+    const float measured=a.ranged ? a.targetRange : a.range;
+    const bool ranged=measured>0.0f && (a.hit || a.ranged);
+    wchar_t word[40];
+    if(a.name[0])_snwprintf_s(word,_countof(word),_TRUNCATE,L"%ls",a.name);
+    else hudtext::WordTo(a.label,word,_countof(word));
+    Label(text,lines,at,f.cx-gap,y,2,kLineScale*0.9f,kLed,L"%ls  %d",word,a.ammo>0 ? a.ammo : 0);
+    if(ranged)Label(text,lines,at,f.cx+gap,y,0,kLineScale*1.15f,a.ranged && !a.inReach ? kLedDim : kLed,L"%04d",
+                    static_cast<int>(std::lround(measured>9999.0f ? 9999.0f : measured)));
+    else Label(text,lines,at,f.cx+gap,y,0,kLineScale*1.15f,kLedDim,L"----");
+    Label(text,lines,at,f.cx-gap,y+row,2,kLineScale*0.8f,kLed,L"%.0fx",zoom);
+    if(a.ammo>0)Label(text,lines,at,f.cx+gap,y+row,0,kLineScale*0.8f,kLed,L"%ls",Tr(Tx::scopeReady));
+    else if(a.canReload)Label(text,lines,at,f.cx+gap,y+row,0,kLineScale*0.8f,kLedDim,Tr(Tx::scopeLoading),a.reloadSec>0.0f ? a.reloadSec : 0.0f);
+    else Label(text,lines,at,f.cx+gap,y+row,0,kLineScale*0.8f,kLedDim,L"%ls",Tr(Tx::scopeEmpty));
+    // The range setting (sightzoom.h: the wheel), the line of sight laid under the bore for it; ---- the bore line.
+    if(zero>0)Label(text,lines,at,f.cx-gap,y+2.0f*row,2,kLineScale*0.8f,kLed,Tr(Tx::scopeZero),zero);
+    else Label(text,lines,at,f.cx-gap,y+2.0f*row,2,kLineScale*0.8f,kLedDim,L"%ls",Tr(Tx::scopeZeroBore));
+}
+// What the optic shows of the weapon the gunner has laid (the seat's fire-control pick): its reticle etched across the
+// field round the bore's point, a guided round's lock as the tracker shows it, a rocket's impact point, the predicted
+// ground intersections of the barrels (the 1x HUD's crosses: the computer's), and the data line.
+void ScopeArm(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockArm& a,
+              const scope::Field& f,float zoom,int zero,Line* lines,int* at) noexcept {
+    // The reticle is on the optic's glass: the field's centre, the line of sight (the camera looks along it; laid under the
+    // bore by the range setting, so the bore's own point stands above it and the range marks hang from the set range).
+    const float cx=f.cx,cy=f.cy;
+    float bx=cx,by=cy;   // the focal length is measured at the bore's own point (the turned probe's distance from it)
+    float focal=sight::ToScreen(vp,a.bore,0.0f,width,height,&bx,&by) ? FocalAt(vp,a.bore,width,height,bx,by) : 0.0f;
+    if(!(focal>0.0f))focal=CentreFocal(vp,width,height);
+    const reticle::View v{cx,cy,focal,s,kLineScale};
+    reticle::Aim aim{};
+    aim.style=a.reticle;aim.shell=a.shell;aim.speed=a.roundSpeed;
+    LadderMarks(vp,width,height,a.ladder,&aim);
+    const scope::Look look=a.kind==RoundKind::homing ? scope::Look::seeker : a.kind==RoundKind::rocket ? scope::Look::rocket :
+                           scope::LookOf(a.reticle);
+    reticle::Sketch k{};
+    scope::Draw(look,aim,v,f,&k);
+    Render(drawer,ctx,text,s,k,lines,at);
+    float x,y;
+    if(a.kind==RoundKind::homing)LockAt(drawer,ctx,vp,width,height,s,a.lock,a.at,a.lockProgress,&x,&y);
+    else if(a.kind==RoundKind::rocket && a.hit && sight::ToScreen(vp,a.at,1.0f,width,height,&x,&y))RocketDiamond(drawer,ctx,x,y,s,kLit);
+    else if(a.ranged && !a.physicalOnly)LeadMark(drawer,ctx,vp,width,height,s,a.lead,a.inReach ? kLit : kLedDim);
+    if(a.kind!=RoundKind::homing)PhysicalPaths(drawer,ctx,text,vp,width,height,s,a.path,a.paths,false,lines,at);
+    ScopeData(text,lines,at,s,f,a,zoom,zero);
+}
+// The optic the player looks through this frame (HudDraw sets it before the vehicle's marks: ScopeShade's field).
+struct ScopeNow { bool on; scope::Field field; float zoom; int zero; };
+ScopeNow scopeNow{};
+
 // `reticle`: this gun's sight is GunReticle (the seat's sight gun: StockMarks), its pipper unlabelled (the reticle
 // reads its range).
 void StockMark(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockArm& a,const wchar_t* name,
                bool reticle,Line* lines,int* at) noexcept {
+    if(scopeNow.on && !a.lofted){ScopeArm(drawer,ctx,text,vp,width,height,s,a,scopeNow.field,scopeNow.zoom,scopeNow.zero,lines,at);return;}
     float x,y;
     const float note=kLineScale*0.85f;
     const int metres=static_cast<int>(std::lround(a.range));
@@ -3137,7 +3230,10 @@ void KeepViewProj(const float* viewProj) noexcept {
 pview::Store playerViews{};   // under viewLock
 }  // namespace
 
+// The camera of the HUD pass GaugeHook is about to draw (its player's: split screen), for HudDraw's per-player marks.
+static const void* passCamera=nullptr;
 void KeepPlayerViewProj(const void* camera,const float* viewProj) noexcept {
+    passCamera=camera;
     if(!camera || !viewProj || MapOwnsView())return;   // as KeepViewProj: the map's camera is not the aim's view
     const void* ref=nullptr;const void* soldier=nullptr;
     __try {
@@ -4453,18 +4549,30 @@ void DebugSpawnHud(void* drawer,void* ctx,Text* text,float width,float height,fl
 
 }  // namespace
 
-// A magnified sight's picture (scopeview.h; sightzoom.cpp): while the sight is magnified the screen outside its field
-// dark; a round field for an optical sight with its rim and three posts (left, right, under: the aim stays clear), the
-// magnification inside its left edge; the gunship gunner's a 4:3 sensor with its edge (GunnerMarks names its zoom).
-alignas(16) const float kScopeDark[4]={0.0f,0.0f,0.0f,0.86f};
-alignas(16) const float kScopeRim[4]={0.55f,0.62f,0.55f,0.75f};
+// A magnified sight's picture (scopeview.h; sightzoom.cpp). Redone 2026-10-11 as real optics look: a round field for an
+// optic (a gunner's sight, a scope): the eyepiece's black all round (opaque, as an eyepiece is), the image darkening
+// over the field's last few percent into it (scopeview.h kFeather*: no drawn rim), the reticle etched on the glass
+// (scopereticle.h, drawn with the weapon's marks: ScopeArm / InfantryScope). An electronic sensor (an energy weapon's
+// display, the gunship gunner's) is a 4:3 screen: black bands round it, a thin bezel, its field-of-view name.
+alignas(16) const float kScopeDark[4]={0.0f,0.0f,0.0f,0.97f};
+alignas(16) const float kScopeFeather[scopeview::kFeathers][4]={
+    {0.0f,0.0f,0.0f,scopeview::kFeatherAlpha[0]},{0.0f,0.0f,0.0f,scopeview::kFeatherAlpha[1]},
+    {0.0f,0.0f,0.0f,scopeview::kFeatherAlpha[2]},{0.0f,0.0f,0.0f,scopeview::kFeatherAlpha[3]}};
+alignas(16) const float kScopeBezel[4]={0.75f,0.8f,0.78f,0.55f};
 void Quad4(void* drawer,void* ctx,const scopeview::Quad& q,const float* rgba) noexcept {
     alignas(16) const float m[16]={1.0f,0.0f,0.0f,0.0f, 0.0f,1.0f,0.0f,0.0f, 0.0f,0.0f,1.0f,0.0f, 0.0f,0.0f,0.0f,1.0f};
     alignas(16) const float v[12]={q.x[0],q.y[0],0.0f, q.x[1],q.y[1],0.0f, q.x[2],q.y[2],0.0f, q.x[3],q.y[3],0.0f};
     reinterpret_cast<QuadFn>(image+kQuad)(drawer,ctx,m,rgba,kStrip,v,4,nullptr);
 }
-void ScopeShade(void* drawer,void* ctx,Text* text,float width,float height,float s,float zoom,bool sensor,reticle::Posts posts,Line* lines,
-                int* at) noexcept {
+// The round field's eyepiece round (cx, cy), radius r (see above).
+void Eyepiece(void* drawer,void* ctx,float width,float height,float cx,float cy,float r) noexcept {
+    const float out=scopeview::Reach(width,height,cx,cy);
+    for(int b=0;b<scopeview::kFeathers;++b)
+        for(int i=0;i<scopeview::kSides;++i)
+            Quad4(drawer,ctx,scopeview::RingPiece(i,cx,cy,r*scopeview::FeatherFrom(b),r*scopeview::FeatherTo(b)),kScopeFeather[b]);
+    for(int i=0;i<scopeview::kSides;++i)Quad4(drawer,ctx,scopeview::RingPiece(i,cx,cy,r,out),kScopeDark);
+}
+void ScopeShade(void* drawer,void* ctx,Text* text,float width,float height,float s,float zoom,bool sensor,Line* lines,int* at) noexcept {
     const float cx=width*0.5f,cy=height*0.5f;
     if(sensor) {
         scopeview::Quad b[4];
@@ -4472,22 +4580,39 @@ void ScopeShade(void* drawer,void* ctx,Text* text,float width,float height,float
         for(const auto& q:b)Quad4(drawer,ctx,q,kScopeDark);
         float hx,hy;
         scopeview::RectHalf(width,height,&hx,&hy);
-        const float t=2.0f*s;
-        Seg(drawer,ctx,cx-hx,cy-hy,cx+hx,cy-hy,t,kScopeRim);Seg(drawer,ctx,cx-hx,cy+hy,cx+hx,cy+hy,t,kScopeRim);
-        Seg(drawer,ctx,cx-hx,cy-hy,cx-hx,cy+hy,t,kScopeRim);Seg(drawer,ctx,cx+hx,cy-hy,cx+hx,cy+hy,t,kScopeRim);
+        // A thin bezel, a corner mark at each corner, the field of view named (narrow / medium / wide) with its power.
+        const float t=1.2f*s,c=28.0f*s;
+        Seg(drawer,ctx,cx-hx,cy-hy,cx+hx,cy-hy,t,kScopeBezel);Seg(drawer,ctx,cx-hx,cy+hy,cx+hx,cy+hy,t,kScopeBezel);
+        Seg(drawer,ctx,cx-hx,cy-hy,cx-hx,cy+hy,t,kScopeBezel);Seg(drawer,ctx,cx+hx,cy-hy,cx+hx,cy+hy,t,kScopeBezel);
+        for(int sx=-1;sx<=1;sx+=2)for(int sy=-1;sy<=1;sy+=2) {
+            const float x=cx+sx*(hx-10.0f*s),y=cy+sy*(hy-10.0f*s);
+            Seg(drawer,ctx,x,y,x-sx*c,y,2.0f*s,kScopeBezel);Seg(drawer,ctx,x,y,x,y-sy*c,2.0f*s,kScopeBezel);
+        }
+        Label(text,lines,at,cx-hx+(18.0f+28.0f+12.0f)*s,cy-hy+22.0f*s,0,kLineScale*0.85f,kScopeBezel,
+              Tr(zoom>=5.0f ? Tx::scopeFovNarrow : zoom>=2.0f ? Tx::scopeFovMedium : Tx::scopeFovWide),zoom);
         return;
     }
-    const float r=scopeview::Radius(width,height),out=scopeview::Reach(width,height,cx,cy);
-    for(int i=0;i<scopeview::kSides;++i)Quad4(drawer,ctx,scopeview::RingPiece(i,cx,cy,r,out),kScopeDark);
-    Arc(drawer,ctx,cx,cy,r,0.0f,kTurn,3.0f*s,scopeview::kSides,kScopeRim);
-    // The posts the reticle's style carries (reticle.h Spec): a tank sight's three, the duplex's four, a ring sight's none.
-    const float post=4.0f*s,inner=r*0.62f;
-    if(posts!=reticle::Posts::none) {
-        Seg(drawer,ctx,cx-r,cy,cx-inner,cy,post,kScopeRim);Seg(drawer,ctx,cx+inner,cy,cx+r,cy,post,kScopeRim);
-        Seg(drawer,ctx,cx,cy+inner,cx,cy+r,post,kScopeRim);
-    }
-    if(posts==reticle::Posts::duplex)Seg(drawer,ctx,cx,cy-r,cx,cy-inner,post,kScopeRim);
-    Label(text,lines,at,cx-r+18.0f*s,cy-22.0f*s,0,kLineScale,kScopeRim,L"%.0fx",zoom);
+    Eyepiece(drawer,ctx,width,height,cx,cy,scopeview::Radius(width,height));
+    (void)s;(void)zoom;(void)text;(void)lines;(void)at;
+}
+
+// A soldier's open scope (infantryscope.h): for the HUD pass of the soldier looking through it, the eyepiece and the
+// weapon's optic etched across the field round the screen's centre (the camera looks along the weapon's line).
+static void InfantryScope(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
+    InfantryScopeCue c{};
+    if(!InfantryScopeNow(&c))return;
+    __try {
+        if(passCamera && (!Readable(passCamera,0x368) ||
+           (At<const void*>(passCamera,0x350)!=c.human && At<const void*>(passCamera,0x360)!=c.human)))return;   // another player's view
+    } __except(EXCEPTION_EXECUTE_HANDLER){return;}
+    const float cx=width*0.5f,cy=height*0.5f,r=scopeview::Radius(width,height);
+    Eyepiece(drawer,ctx,width,height,cx,cy,r);
+    float focal=CentreFocal(vp,width,height);
+    if(!(focal>0.0f))focal=0.5f*height/std::tan(0.5f*sightzoom::kBaseFov/c.zoom);   // the stock camera's vertical FOV
+    const reticle::View v{cx,cy,focal,s,kLineScale};
+    reticle::Sketch k{};
+    scope::Draw(c.look,reticle::Aim{},v,scope::Field{cx,cy,r},&k);
+    Render(drawer,ctx,text,s,k,lines,at);
 }
 
 void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierPanel* panels,int count) noexcept {
@@ -4526,14 +4651,18 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         const float sightMagnification=SightZoomNow(nullptr);
         const sightzoom::Mask sightMask=sightzoom::MaskOf(sightKind);
         const bool scopeOverlay=sightMagnification>1.0f && sightMask!=sightzoom::Mask::none;
+        scopeNow=ScopeNow{};
         {   // A validated seat/weapon chooses the mask. Aircraft/mechs keep their own HUD; overhead has no optic.
             const Snapshot& z=Latest();
-            reticle::Posts posts=reticle::Posts::three;
-            const int pick=z.stock ? z.stockHud.sight : -1;
-            if(pick>=0 && pick<z.stockHud.arms && pick<kStockArms)posts=reticle::SpecOf(z.stockHud.arm[pick].reticle).posts;
-            if(scopeOverlay && now-z.tick<=kFreshMs)
-                ScopeShade(drawer,ctx,t,width,height,s,sightMagnification,sightMask==sightzoom::Mask::sensor,posts,lines,&at);
+            if(scopeOverlay && now-z.tick<=kFreshMs) {
+                ScopeShade(drawer,ctx,t,width,height,s,sightMagnification,sightMask==sightzoom::Mask::sensor,lines,&at);
+                // The optic's reticle goes with the weapon's marks (StockMark: ScopeArm), etched across this field.
+                if(sightMask==sightzoom::Mask::round)
+                    scopeNow=ScopeNow{true,scope::Field{width*0.5f,height*0.5f,scopeview::Radius(width,height)},sightMagnification,
+                                      z.stock ? z.stockHud.zero : 0};
+            }
         }
+        if(!scopeOverlay)InfantryScope(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         for(int i=0;i<count && i<3;++i)CarrierBars(drawer,ctx,t,viewProj,width,height,s,panels[i],lines,&at,now);
         const Snapshot& snap=Latest();
         const bool mountedOptic=snap.mountedOptic || scopeOverlay; // also cover the first paint before next HUD publication

@@ -45,6 +45,8 @@ constexpr std::size_t kWeaponName=0x1B0,kWeaponTrigger=0x139,kWeaponCapacity=0x2
 constexpr std::size_t kSeatPad=0x2B0,kSeatButtons=0x2E8;
 constexpr std::uint16_t kButtonLB=0x10;
 constexpr ULONGLONG kFreshMs=200;                 // a readout this old (game ms) is gone: the player got out
+constexpr float kCoaxNpcM=600.0f;                 // an NPC crew's coaxial gun: targets this close (NpcCoaxFire)
+constexpr float kCoaxCone=0.05f;                  // ...within this of its line (rad, ~3 degrees)
 constexpr int kTracked=64;
 
 // The classes whose fire was read (§2); the vtables as crew.cpp kClasses has them.
@@ -200,11 +202,21 @@ std::int64_t HolderIndex(const unsigned char* v,const unsigned char* h) noexcept
     return off%kHolderStride==0 && off/kHolderStride<count ? static_cast<std::int64_t>(off/kHolderStride) : -1;
 }
 
-// `weapons`: the seat's stock weapons (its stores left out).
-PayloadFire FireOf(Class c,unsigned seat,std::int64_t holder,const unsigned char* w,int weapons) noexcept {
+// A coaxial machine gun (tools/make_stock_stores.py COAX; the user, 2026-10-11: 「应该有同轴机枪的坦克增加同轴机枪」).
+bool IsCoax(const unsigned char* w) noexcept {
+    const StoreSpec* const spec=StoreOf(w);
+    return spec && spec->role==StoreRole::coax;
+}
+// Whether class `c`'s stock input leaves the seat's second fire control unread (the 505, the 601, the Grape: their
+// slot 55 pulls holder 0 on the primary trigger alone, docs/stock-payload-re.md §2), so a coaxial gun can have it.
+constexpr bool FreeSecondary(Class c) noexcept { return c==Class::other; }
+
+// `weapons`: the seat's stock weapons (its stores left out). `playerSeat`: the readout of a player's seat (an NPC's
+// selection treats a coaxial gun as one more store, fired through the redirected primary pull: NpcPayloadSelect).
+PayloadFire FireOf(Class c,unsigned seat,std::int64_t holder,const unsigned char* w,int weapons,bool playerSeat=true) noexcept {
     const std::int64_t s=static_cast<std::int64_t>(seat);
     // EDF6VC_ also names native drill/Katyusha/Proteus weapons. Only catalogued add-on stores are redirectable.
-    if(IsStoreWeapon(w))return PayloadFire::store;
+    if(IsStoreWeapon(w))return playerSeat && FreeSecondary(c) && IsCoax(w) ? PayloadFire::secondary : PayloadFire::store;
     switch(c) {
         case Class::heli506: return holder==0 || holder==1 ? PayloadFire::primary : holder==2 ? PayloadFire::secondary : PayloadFire::other;
         case Class::heli409: return holder==0 ? PayloadFire::primary : holder==1 ? PayloadFire::secondary : PayloadFire::other;
@@ -224,7 +236,7 @@ int PlayerSeatOf(unsigned char* v) noexcept {
 }
 
 // The seat's weapons (`ws`, at most kMostPayload, the fuel tank left out) and their entries.
-int ReadSeat(unsigned char* v,unsigned seat,Class c,unsigned char** ws,PayloadReadout& r) noexcept {
+int ReadSeat(unsigned char* v,unsigned seat,Class c,unsigned char** ws,PayloadReadout& r,bool playerSeat=true) noexcept {
     const auto s=SeatAt(v,seat);
     const auto holders=At<unsigned char* const*>(s,kSeatWeapons);
     const auto n=At<std::uint64_t>(s,kSeatWeaponCount);
@@ -251,7 +263,8 @@ int ReadSeat(unsigned char* v,unsigned seat,Class c,unsigned char** ws,PayloadRe
         e.rounds=rounds>0 ? rounds : 0;
         e.capacity=cap>0 ? cap : 0;
         Reload(ws[i],rounds,&e.ready,&e.reloadSec);
-        e.fire=FireOf(c,seat,index[i],ws[i],stock);
+        e.fire=FireOf(c,seat,index[i],ws[i],stock,playerSeat);
+        e.coax=IsCoax(ws[i]);
         e.homing=At<std::int32_t>(ws[i],kWeaponLockon)==kHoming;
     }
     return count;
@@ -302,8 +315,8 @@ bool pullOk=false;
 // The store switch on the player's seat (see the top). `ws` the seat's weapons, `r` their entries.
 bool Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* const* ws,PayloadReadout& r,bool* uiChoice) noexcept {
     *uiChoice=false;
-    PayloadFire ride=PayloadFire::primary;
-    for(int i=0;i<r.count;++i)if(r.entry[i].fire==PayloadFire::secondary)ride=PayloadFire::secondary;
+    PayloadFire ride=PayloadFire::primary;   // the coaxial gun has the secondary to itself: the stores stay on the gun
+    for(int i=0;i<r.count;++i)if(r.entry[i].fire==PayloadFire::secondary && !r.entry[i].coax)ride=PayloadFire::secondary;
     int stock[kMostPayload],ns=0,list[kMostPayload],n=0;
     for(int i=0;i<r.count;++i)if(r.entry[i].fire==ride)stock[ns++]=i;
     if(ns)list[n++]=stock[0];   // that control's stock weapon(s): one choice (the 603's pair fire together)
@@ -389,6 +402,13 @@ void PayloadFrame(unsigned char* v) noexcept {
         else if(chose)sightPick.control=PayloadFire::store;
     }
     sightPick.primaryHeld=primary;sightPick.secondaryHeld=secondary;
+    // The coaxial gun fires while the secondary trigger is held (the stock input of these classes never reads it): its
+    // trigger latch, as a store's pull sets it (PullHook), each frame held; its own FireInterval paces the burst. The
+    // main gun's choice (R / LB) is untouched, so the gunner keeps a round in the breech while he hoses infantry.
+    if(Cfg().stockStores && secondary && !MapHoldsKeys())
+        for(int i=0;i<r.count;++i)
+            if(r.entry[i].coax && r.entry[i].fire==PayloadFire::secondary && !Spent(ws[i]) && Readable(ws[i],kWeaponTrigger+1))
+                ws[i][kWeaponTrigger]=1;
     latest=r;latestMs=ms;PublishSelectableSnapshot(r);
 }
 
@@ -406,7 +426,9 @@ unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float distance,bo
     p->seen=GameMs();p->npc=true;p->redirects=0;p->weapon=nullptr;
     if(!std::isfinite(distance) || distance<=0.0f)return nullptr;
     PayloadReadout r{};unsigned char* ws[kMostPayload]{};
-    r.count=ReadSeat(v,seat,ClassOf(v),ws,r);
+    r.count=ReadSeat(v,seat,ClassOf(v),ws,r,false);
+    // The coaxial gun is not one of the choices: it fires alongside whatever is chosen (NpcCoaxFire).
+    for(int i=0;i<r.count;++i)if(r.entry[i].coax)r.entry[i].fire=PayloadFire::other;
     PayloadFire ride=PayloadFire::primary;
     for(int i=0;i<r.count;++i)if(r.entry[i].fire==PayloadFire::secondary)ride=PayloadFire::secondary;
     int best=-1;float score=-1.0f;
@@ -458,6 +480,32 @@ unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float distance,bo
     if(previous && previous!=p->weapon && Readable(previous,kWeaponCharge+4))ClearWeaponLock(previous);
     if(fire)*fire=r.entry[best].fire==PayloadFire::store ? ride : r.entry[best].fire;
     return p->weapon;
+}
+
+bool NpcCoaxFire(unsigned char* v,unsigned seat,const void* target,LineBlocked blocked) noexcept {
+    __try {
+        if(!Cfg().enabled || !Cfg().stockStores || !Cfg().npcGunners || !v || v[kDead] || !target || BodyOf(v)!=PluginBody::none ||
+           seat>=SeatCount(v) || !AiGunner(v,SeatAt(v,seat)) || !Readable(target,kPosition+12))return false;
+        PayloadReadout r{};unsigned char* ws[kMostPayload]{};
+        r.count=ReadSeat(v,seat,ClassOf(v),ws,r,false);
+        const float* p=reinterpret_cast<const float*>(static_cast<const unsigned char*>(target)+kPosition);
+        const float at[3]={p[0],p[1]+0.5f,p[2]};
+        bool fired=false;
+        for(int i=0;i<r.count;++i) {
+            if(!r.entry[i].coax || Spent(ws[i]) || r.entry[i].rounds<=0)continue;
+            float muzzle[3],dir[3];
+            if(!edf::MeanMuzzle(ws[i],64,muzzle,dir))continue;
+            float to[3]={at[0]-muzzle[0],at[1]-muzzle[1],at[2]-muzzle[2]};
+            const float d=std::sqrt(to[0]*to[0]+to[1]*to[1]+to[2]*to[2]);
+            float reach=At<float>(ws[i],0x224);
+            if(!std::isfinite(reach) || reach<=0.0f || reach>kCoaxNpcM)reach=kCoaxNpcM;
+            if(!(d>1.0f) || d>reach)continue;
+            const float c=(to[0]*dir[0]+to[1]*dir[1]+to[2]*dir[2])/d;
+            if(c<std::cos(kCoaxCone) || (blocked && blocked(muzzle,at,v)))continue;   // not laid on it yet, or a friend in the way
+            if(Readable(ws[i],kWeaponTrigger+1)){ws[i][kWeaponTrigger]=1;fired=true;}
+        }
+        return fired;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
 bool PlayerPayload(PayloadReadout* out) noexcept {
@@ -584,7 +632,7 @@ int PayloadSightWeapons(const void* vehicle,unsigned index,unsigned char** out,i
                     // Stores ride the native secondary if present, otherwise the primary (Switch).
                     // Enumerating that group also requires a live source holder before returning a store.
                     group=PayloadFire::primary;
-                    for(int j=0;j<r.count;++j)if(r.entry[j].fire==PayloadFire::secondary)group=PayloadFire::secondary;
+                    for(int j=0;j<r.count;++j)if(r.entry[j].fire==PayloadFire::secondary && !r.entry[j].coax)group=PayloadFire::secondary;
                 }
                 break;
             }

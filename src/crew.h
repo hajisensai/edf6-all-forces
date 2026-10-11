@@ -215,6 +215,11 @@ struct Config {
     bool sightZoom=true;            // a vehicle gun's sight magnifies: 1x -> 3x -> 6x (sightzoom.cpp, docs/zoom-re.md)
     int sightZoomKey=0x5A;          // ...its key ('Z'; a Windows virtual-key code, 0: none)
     int sightZoomButton=0x80;       // ...and pad button (seat button bits: 0x80 R3, the high view keeps it where offered; 0 none)
+    int sightRangeUpKey=0x21;       // the magnified sight's range a step farther ('Page Up'; the wheel up too; 0 none)
+    int sightRangeDownKey=0x22;     // ...nearer ('Page Down'; the wheel down too)
+    int sightRangeStep=0;           // ...its step, m (0: graduated, 25 m to 300, 50 m to 1000, 100 m beyond: sightzoom.h)
+    bool sightRangePad=true;        // ...and on a pad the d-pad up / down
+    bool infantryScope=true;        // a soldier's scoped weapon zoomed: a real optic's eyepiece and reticle (infantryscope.cpp)
     bool gunStabilizer=true;        // stab.cpp: the guns that should have one hold their world line on the move
     float viewDistance=3000.0f;     // the near camera's far clip, m (view.cpp; stock 1000; 0: as the mission has it)
     bool map=true;                  // the map view (map.cpp): an overhead camera over the real world, the player held
@@ -804,7 +809,14 @@ bool SightZoomCanMount(const void* vehicle,unsigned seat) noexcept; // game-thre
 bool SightZoomMounted(const void* vehicle=nullptr) noexcept; // active physical optic; turret input stays native
 // Current validated seat/weapon fire-control surface; none when unavailable or another camera owns the view.
 sightzoom::Kind SightZoomView(const void* vehicle=nullptr) noexcept;
+// The sight's range setting (sightzoom.h kZeroStep..; 0 the bore line) and the superelevation, rad, it lays the line of
+// sight under the bore for the weapon looked through now; any thread, 0 with no magnified optic.
+int SightZoomRange(const void* vehicle=nullptr,float* angle=nullptr) noexcept;
 void ResetSightZoom() noexcept;
+// map.cpp: the game window's mouse wheel for the magnified sight's range (`hold` while it is up: the wheel's notches are
+// swallowed and counted, up +; the count since the last call), and the first XInput pad's buttons now (false: none).
+int TakeScopeWheel(bool hold) noexcept;
+bool MapPadButtons(std::uint16_t* buttons) noexcept;
 
 // turretcam.cpp: the turret camera (README 炮塔镜头, docs/camera-re.md §3b, §5). InstallTurretCam at load (the riding
 // camera's look-at fetch, the seat aim's step); TurretCamFrame from every vehicle's input, the plugin off too (it lets
@@ -1134,3 +1146,4 @@ bool DebugSpawnReadout(DebugSpawnCue* out) noexcept;   // any thread; false: not
 #include "proteus.h"
 #include "npcai.h"
 #include "qmark.h"
+#include "infantryscope.h"

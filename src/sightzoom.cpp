@@ -28,6 +28,7 @@ const unsigned char kFovWriteCode[]={0xF3,0x0F,0x10,0x05,0x12,0xD1,0x66,0x01,0xF
 const unsigned char kCamStepCode[]={0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57,0x41,0x56,0x41,0x57,0x48,0x81,0xEC,0x90};
 // The seat's input (docs/stores-re.md §4): 1 = a pad (0 keyboard and mouse), the pad's button bits.
 constexpr std::size_t kSeatPad=0x2B0,kSeatButtons=0x2E8;
+constexpr std::uint16_t kDpadUp=0x0001,kDpadDown=0x0002;   // XInput's wButtons (XINPUT_GAMEPAD_DPAD_*)
 constexpr std::size_t kCamMatrix=0x220;
 constexpr unsigned kLookTo=0x4E220;
 const unsigned char kLookToCode[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x81,0xEC,0x90,0x00,0x00,0x00,0x0F,0x10,0x0A};
@@ -39,10 +40,10 @@ CamStepFn nextCamStep=nullptr;
 bool installed=false;
 
 struct Capability { sightzoom::Kind kind; const void* weapon; bool mounted=false; };
-struct Toggle { ObjRef ref,human; const void* v; unsigned seat; int step; bool held; Capability sight; };
+struct Toggle { ObjRef ref,human; const void* v; unsigned seat; int step; bool held; Capability sight; int zero=0; bool upHeld=false,downHeld=false; std::uint16_t pad=0; };
 Toggle toggle{};
 // Publish the entire seat identity together: a camera must not combine another seat's zoom and timestamp.
-struct Cue { ObjRef vehicle,human; unsigned seat; float zoom; Capability sight; };
+struct Cue { ObjRef vehicle,human; unsigned seat; float zoom; Capability sight; int zero=0; };
 Cue cue{};
 SRWLOCK cueLock=SRWLOCK_INIT;
 // Camera-thread state only. The original step may leave FOV untouched when its target expires.
@@ -102,6 +103,24 @@ Capability SeatCapability(const unsigned char* v,unsigned index) noexcept {
     return found;
 }
 
+// The sight's range setting for weapon `w` (sightzoom.h): an arc gun's round (its speed, its fall: AmmoGravityFactor x
+// the world's gravity), else no superelevation (a guided or motor round, an energy weapon: nothing to lay over).
+float ZeroOf(const unsigned char* w,int zero) noexcept {
+    if(zero<=0 || !w)return 0.0f;
+    RoundModel m{};float g[3];
+    if(!ReadRound(w,&m) || m.kind!=RoundKind::arc || m.lobbed || !(m.speed>0.0f) || !(m.factor>0.0f) || !edf::WorldGravity(image,g))
+        return 0.0f;
+    const float a=sightzoom::ZeroAngle(m.speed,m.factor*std::fabs(g[1])/3600.0f,static_cast<float>(zero));
+    return std::isfinite(a) ? a : 0.0f;
+}
+// The farthest the setting goes for weapon `w`: its round's reach (speed x life), 0 not known (kZeroMost).
+int ReachOf(const unsigned char* w) noexcept {
+    RoundModel m{};
+    if(!w || !ReadRound(w,&m) || !(m.speed>0.0f) || m.alive<=0)return 0;
+    const float reach=m.speed*static_cast<float>(m.alive);
+    return reach>=sightzoom::kZeroStep && reach<1e6f ? static_cast<int>(reach) : 0;
+}
+
 Cue Snapshot() noexcept {
     AcquireSRWLockShared(&cueLock);
     const Cue c=cue;
@@ -109,7 +128,16 @@ Cue Snapshot() noexcept {
     return c;
 }
 
-bool Current(const Cue& c) noexcept {
+// Whether two capabilities are the same scope as far as the camera and the player see it: one physical optic per seat
+// (the user, 2026-10-11: "用副武器的时候瞄具不会强制切回去，而是两边共用才对"). The primary gun, the coaxial gun on the
+// secondary trigger and the stores the switch picks all look through the seat's one sight, so picking another weapon
+// keeps the view, the magnification and the eye; only losing the optic, an overhead / indirect view or no weapon end it.
+bool SameScope(const Capability& a,const Capability& b) noexcept {
+    return a.kind!=sightzoom::Kind::none && b.kind!=sightzoom::Kind::none && a.mounted==b.mounted &&
+           sightzoom::Magnifies(a.kind)==sightzoom::Magnifies(b.kind);
+}
+
+bool Current(const Cue& c,Capability* live=nullptr) noexcept {
     if(!Cfg().enabled || !Cfg().sightZoom || !c.vehicle)return false;
     const unsigned char* human=PlayerHuman();
     if(!human || !c.human.Is(human) || human[kDead])return false;
@@ -120,7 +148,9 @@ bool Current(const Cue& c) noexcept {
     const unsigned char* seat=SeatAt(v,c.seat);
     if(SeatRider(seat)!=Rider::player || At<const void*>(seat,kSeatRider)!=human)return false;
     const Capability now=SeatCapability(v,c.seat);
-    return now.kind!=sightzoom::Kind::none && now.kind==c.sight.kind && now.weapon==c.sight.weapon && now.mounted==c.sight.mounted;
+    if(!SameScope(now,c.sight))return false;
+    if(live)*live=now;
+    return true;
 }
 
 bool KeyHeld(int vk) noexcept {
@@ -131,7 +161,7 @@ bool KeyHeld(int vk) noexcept {
 }
 
 void Publish(unsigned char* v,unsigned seat,float zoom) noexcept {
-    const Cue next{ObjRef::Of(v),ObjRef::Of(PlayerHuman()),seat,zoom,toggle.sight};
+    const Cue next{ObjRef::Of(v),ObjRef::Of(PlayerHuman()),seat,zoom,toggle.sight,toggle.zero};
     AcquireSRWLockExclusive(&cueLock);
     cue=next;
     ReleaseSRWLockExclusive(&cueLock);
@@ -153,7 +183,8 @@ void __fastcall CamStepHook(void* cam,void* step) {
     const Cue state=Snapshot();
     __try {
         auto c=static_cast<unsigned char*>(cam);
-        if(!Current(state) || !(state.zoom>1.0f) || !state.sight.mounted || !opticLookTo)return;
+        Capability live{};
+        if(!Current(state,&live) || !(state.zoom>1.0f) || !live.mounted || !opticLookTo)return;
         const void* human=state.human.obj;
         if(At<const void*>(c,kCamTargetRef)!=human && At<const void*>(c,kCamTarget)!=human)return;
         const float before=At<float>(c,kCamFov);
@@ -161,8 +192,10 @@ void __fastcall CamStepHook(void* cam,void* step) {
         const auto vehicle=static_cast<const unsigned char*>(state.vehicle.obj);
         optic::Pose pose;
         if(!optic::Mounted(vehicle,SeatAt(const_cast<unsigned char*>(vehicle),state.seat),
-                           static_cast<const unsigned char*>(state.sight.weapon),&pose))return;
+                           static_cast<const unsigned char*>(live.weapon),&pose))return;
+        // The line of sight under the bore by the range setting's superelevation (sightzoom.h ZeroAngle, Lowered).
         alignas(16) float direction[4]={pose.direction[0],pose.direction[1],pose.direction[2],0};
+        sightzoom::Lowered(pose.direction,ZeroOf(static_cast<const unsigned char*>(live.weapon),state.zero),direction);
         alignas(16) float matrix[16];
         opticLookTo(matrix,direction);
         for(float value:matrix)if(!std::isfinite(value))return;
@@ -203,20 +236,41 @@ void SightZoomFrame(unsigned char* v,unsigned seat,bool padButton) noexcept {
     if(sight.kind==sightzoom::Kind::none){ResetSightZoom();return;}
     // A seat just taken: 1x, a key held while boarding no press. Wall time is not
     // ownership: pausing or a slow frame cannot erase the player's scope choice.
-    if(!toggle.ref.Is(v) || !toggle.human.Is(PlayerHuman()) || toggle.seat!=seat ||
-       toggle.sight.kind!=sight.kind || toggle.sight.weapon!=sight.weapon)
+    // The magnification belongs to the seat's sight, not to the weapon last fired: the primary, the secondary
+    // trigger's gun and the switch's stores share it (SameScope). A weapon that cannot be looked at through the
+    // optic (an indirect round, the overhead view) shows 1x while it is picked; the step is kept for the next one.
+    if(!toggle.ref.Is(v) || !toggle.human.Is(PlayerHuman()) || toggle.seat!=seat)
         toggle=Toggle{ObjRef::Of(v),ObjRef::Of(PlayerHuman()),v,seat,0,true,sight};
-    if(!sightzoom::Magnifies(sight.kind) || !sight.mounted){toggle.step=0;toggle.held=true;Publish(v,seat,1.0f);return;}
-    if(GamePaused()){toggle.held=true;Publish(v,seat,sightzoom::At(toggle.step));return;}
+    toggle.sight=sight;
+    if(!sightzoom::Magnifies(sight.kind) || !sight.mounted){toggle.held=true;TakeScopeWheel(false);Publish(v,seat,1.0f);return;}
+    if(GamePaused()){toggle.held=true;TakeScopeWheel(false);Publish(v,seat,sightzoom::At(toggle.step));return;}
     const bool keys=At<unsigned char>(s,kSeatPad)==0;
     const bool down=keys ? KeyHeld(c.sightZoomKey)
                          : padButton && c.sightZoomButton && (At<std::uint16_t>(s,kSeatButtons)&static_cast<std::uint16_t>(c.sightZoomButton))!=0;
-    if(MapHoldsKeys()){toggle.held=true;Publish(v,seat,sightzoom::At(toggle.step));return;}
+    if(MapHoldsKeys()){toggle.held=true;TakeScopeWheel(false);Publish(v,seat,sightzoom::At(toggle.step));return;}
     if(down && !toggle.held) {
         toggle.step=sightzoom::Next(toggle.step);
         Log("SIGHTZOOM v=%p seat %u: %.0fx by the %s",v,seat,sightzoom::At(toggle.step),keys ? "key" : "pad button");
     }
     toggle.held=down;
+    // The range setting, while the sight is magnified: the wheel (swallowed then: map.cpp TakeScopeWheel) and the
+    // keys on the keyboard and mouse, the d-pad on a pad; one step a notch or a press (sightzoom.h NextZero).
+    const bool scoped=sightzoom::At(toggle.step)>1.0f;
+    int notches=TakeScopeWheel(scoped);   // the wheel whichever input the seat is on (a pad player's mouse too)
+    const bool up=scoped && keys && KeyHeld(c.sightRangeUpKey),downKey=scoped && keys && KeyHeld(c.sightRangeDownKey);
+    notches+=(up && !toggle.upHeld ? 1 : 0)-(downKey && !toggle.downHeld ? 1 : 0);
+    toggle.upHeld=up;toggle.downHeld=downKey;
+    std::uint16_t pad=0;
+    if(scoped && !keys && c.sightRangePad && MapPadButtons(&pad)) {
+        const std::uint16_t edge=static_cast<std::uint16_t>(pad&~toggle.pad);
+        notches+=((edge&kDpadUp) ? 1 : 0)-((edge&kDpadDown) ? 1 : 0);
+    }
+    toggle.pad=pad;
+    if(notches) {
+        const int was=toggle.zero;
+        toggle.zero=sightzoom::NextZero(toggle.zero,notches,ReachOf(static_cast<const unsigned char*>(sight.weapon)),c.sightRangeStep);
+        if(toggle.zero!=was)Log("SIGHTZOOM v=%p seat %u: range set %d m",v,seat,toggle.zero);
+    }
     Publish(v,seat,sightzoom::At(toggle.step));
 }
 
@@ -264,8 +318,21 @@ sightzoom::Kind SightZoomView(const void* vehicle) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){return sightzoom::Kind::none;}
 }
 
+int SightZoomRange(const void* vehicle,float* angle) noexcept {
+    if(angle)*angle=0.0f;
+    if(MapOwnsView())return 0;
+    const Cue c=Snapshot();
+    __try {
+        Capability live{};
+        if((vehicle && c.vehicle.obj!=vehicle) || !(c.zoom>1.0f) || !Current(c,&live) || !live.mounted)return 0;
+        if(angle)*angle=ZeroOf(static_cast<const unsigned char*>(live.weapon),c.zero);
+        return c.zero;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return 0;}
+}
+
 void ResetSightZoom() noexcept {
     toggle=Toggle{};
+    TakeScopeWheel(false);
     AcquireSRWLockExclusive(&cueLock);
     cue=Cue{};
     ReleaseSRWLockExclusive(&cueLock);

@@ -211,6 +211,9 @@ bool VisitLockPoints(EnemyVisitor visit,void* ctx) noexcept { if(lockOf)visit(ct
 unsigned char* chosenGunnerWeapon=nullptr;
 bool suppressGunnerChoice=false;
 PayloadFire chosenGunnerFire=PayloadFire::primary;
+bool FriendInLine(const float*,const float*,const void*) noexcept { return false; }   // heli.cpp's (NpcCoaxFire's check)
+int coaxCalls=0;   // payload.cpp NpcCoaxFire: called beside every crew aim (no coax on these fixtures)
+bool NpcCoaxFire(unsigned char*,unsigned,const void*,LineBlocked) noexcept { ++coaxCalls;return false; }
 unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float,bool,PayloadFire* fire) noexcept {
     if(fire)*fire=chosenGunnerFire;
     if(suppressGunnerChoice)return nullptr;
