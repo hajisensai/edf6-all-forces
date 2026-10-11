@@ -171,6 +171,8 @@ bool CameraRay(float* eye,float* dir) noexcept {
 bool HumanOnFoot(const unsigned char* h) noexcept { return !At<void*>(h,kHumanVehicleCtrl); }
 bool MapHoldsKeys() noexcept { return mapHeld; }
 bool KnownVehicle(const void* v) noexcept { return v==vehicle; }
+bool drivableVehicle=true;   // the stand-in vehicle is a ground one a soldier can drive (npcpost.cpp NpcDrivable)
+bool NpcDrivable(const unsigned char* v) noexcept { return drivableVehicle && v==vehicle; }
 float MapRay(const float*,const float*,float* hit) noexcept {
     if(!wall)return -1.0f;hit[0]=0;hit[1]=1.5f;hit[2]=20;return 20;
 }
@@ -424,6 +426,32 @@ int main() {
         completeRide=true;Board(*child,dead,Pos(dead),now);
         Expect(rides==1 && announcedBoards==1 && At<void*>(dead,kHumanRiding)==vehicle && At<void*>(seats,kSeatRider)==dead,
             "accepted online command reaches real Board/native Ride entry and announces the completed seat transition");
+    }
+    // 2026-10-10 "步兵不乘啊": an empty stock vehicle is nobody's (team 5), which the friends' walk never visits. Team 5's own
+    // walk (NobodyVisit) lists its drivable ground vehicles and BOARD takes them.
+    {
+        Reset();Put<void*>(human,kLeader,nullptr);playerObj=other;drivableVehicle=true;
+        Put<unsigned char>(other,kHumanPlayer,1);Put<void*>(other,kHumanPad,other);Put<int>(other,kTeam,0);
+        Put<int>(human,kTeam,0);Put<int>(vehicle,kTeam,kTeamVehicle);
+        Put<unsigned>(seats,kSeatClass,1);Put<unsigned>(seats,kSeatEnable,1);
+        world.friends=0;world.nobodys=0;
+        FriendWalk walk{kNobodyVtable,&world};
+        NobodyVisit(&walk,vehicle);NobodyVisit(&walk,other);
+        Expect(world.nobodys==1 && world.nobody[0]==vehicle,"team 5's walk keeps the empty ground vehicle, not other objects");
+        drivableVehicle=false;NobodyVisit(&walk,vehicle);drivableVehicle=true;
+        Expect(world.nobodys==1,"team 5's walk leaves aircraft (not NPC-drivable: a parked jet, a rescue helicopter waiting)");
+        SeeSquad(human,human,0,npc::Control::free,now);
+        auto result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::board,{}},ObjRef::Of(other),{});
+        auto* boarding=Entry(human,now);
+        Expect(result.Accepted() && boarding && boarding->boardV.Is(vehicle),
+            "BOARD takes an empty (team 5) vehicle the friends' walk never lists");
+        Reset();Put<void*>(human,kLeader,nullptr);playerObj=other;
+        Put<unsigned char>(other,kHumanPlayer,1);Put<void*>(other,kHumanPad,other);Put<int>(other,kTeam,0);
+        Put<int>(human,kTeam,0);Put<int>(vehicle,kTeam,kTeamVehicle);
+        Put<unsigned>(seats,kSeatClass,1);Put<unsigned>(seats,kSeatEnable,1);
+        world.friends=0;world.nobodys=0;SeeSquad(human,human,0,npc::Control::free,now);
+        result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::board,{}},ObjRef::Of(other),{});
+        Expect(result.reason==NpcCommandReason::noVehicle,"without team 5's walk the same empty vehicle was never found (the bug)");
     }
     // A guest pilots its own vehicle while the host owns the NPCs boarding the gunner seats.
     {

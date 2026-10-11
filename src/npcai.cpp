@@ -72,6 +72,11 @@ constexpr std::size_t kArmReach=0x224,kArmDamage=0x89C,kArmBlast=0x8B0;
 // --- The friends' walk (as sidecar.cpp's): 0x5E11D0(manager, team, functor) visits every object of every team friendly
 // to `team` through functor slot 1.
 constexpr unsigned kTeamWalk=0x5E11D0,kTeamManager=0x20B2978;
+// Nobody's vehicles (team 5: the stock vehicle update puts an empty one there, docs/camera-re.md "team 5 另走一遍"): the
+// friends' walk never visits them, so a squad's BOARD found no empty truck or tank (2026-10-10: "步兵不乘啊"). The stock
+// board prompt walks team 5 on its own through 0x5E0D60(manager, team, functor), as map.cpp does for its marks.
+constexpr unsigned kOneTeamWalk=0x5E0D60;
+const unsigned char kOneTeamWalkSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x48,0x89,0x7C,0x24,0x18,0x41,0x56};
 
 struct SoldierClass { unsigned vtable,think; bool rolls; const char* name; };
 // Slot 68 of the Ranger and the Air Raider rolls sideways on the evade press; the Wing Diver's and the Fencer's jump /
@@ -105,7 +110,7 @@ constexpr float kSpotStop=3.0f;         // m from its combat spot it stops
 constexpr float kBehindPlayer=8.0f;     // m behind the player a hurt soldier falls back to
 constexpr ULONGLONG kSpotMs=4000,kLosFrames=6,kStaleMs=2000,kLogMs=2000,kPlayerFixMs=2000;
 constexpr int kArmMissFrames=90;        // a pick not taken this long (1.5 s: a heavy weapon's switch takes a while): picking off for it
-constexpr int kMaxArms=16,kMaxSoldiers=256,kMaxEnemies=1024,kMaxFriends=512,kMaxRoot=16;
+constexpr int kMaxArms=16,kMaxSoldiers=256,kMaxEnemies=1024,kMaxFriends=512,kMaxRoot=16,kMaxNobodys=128;
 
 struct Soldier {
     ObjRef ref;
@@ -139,6 +144,8 @@ struct World {
     Enemy enemy[kMaxEnemies];
     npc::Friend fr[kMaxFriends];
     const void* frObject[kMaxFriends];
+    int nobodys;                       // nobody's (team 5) ground vehicles: BOARD's candidates only (no shot lanes)
+    const void* nobody[kMaxNobodys];
     bool player,lane,lookOk;
     float playerAt[3],look[3];
     npc::Lane laneOf;
@@ -172,6 +179,17 @@ void __fastcall FriendVisit(void* self,void* object) noexcept {
 }
 void __fastcall FriendDtor(void*,unsigned) noexcept {}
 void* kFriendVtable[]={reinterpret_cast<void*>(&FriendDtor),reinterpret_cast<void*>(&FriendVisit)};
+// Team 5's walk: its ground vehicles a soldier can drive (NpcDrivable: car, mech, Barga families) -- no aircraft (a
+// delivered or parked jet / a rescue helicopter waits there for the player, not for a squad).
+void __fastcall NobodyVisit(void* self,void* object) noexcept {
+    __try {
+        World& w=*static_cast<FriendWalk*>(self)->w;
+        auto o=static_cast<const unsigned char*>(object);
+        if(!o || o[kDead] || w.nobodys>=kMaxNobodys || !KnownVehicle(o) || !NpcDrivable(o))return;
+        w.nobody[w.nobodys++]=o;
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+}
+void* kNobodyVtable[]={reinterpret_cast<void*>(&FriendDtor),reinterpret_cast<void*>(&NobodyVisit)};
 using WalkFn=void(__fastcall*)(void*,std::int32_t,void*);
 
 // The player's lane (§3.4): from their chest along the camera's centre to the first map hit, or NpcLaneLength.
@@ -367,7 +385,7 @@ void FormationTick() noexcept {
 
 void Gather(std::int32_t team) noexcept {
     World& w=world;
-    w.frame=GameFrame();w.team=team;w.enemies=w.friends=0;
+    w.frame=GameFrame();w.team=team;w.enemies=w.friends=w.nobodys=0;
     w.player=player.at && GameMs()-player.at<kPlayerFixMs;
     if(w.player)std::memcpy(w.playerAt,player.pos,12);
     VisitEnemiesOf(team,&SeeEnemy,&w);
@@ -379,6 +397,11 @@ void Gather(std::int32_t team) noexcept {
     if(const auto manager=At<void*>(image,kTeamManager)) {
         FriendWalk f{kFriendVtable,&w};
         reinterpret_cast<WalkFn>(image+kTeamWalk)(manager,team,&f);
+        // On team 5 itself the friends' walk had them already (BoardTarget reads the friends first).
+        if(team!=kTeamVehicle && Matches(kOneTeamWalk,kOneTeamWalkSig,sizeof(kOneTeamWalkSig))) {
+            FriendWalk n{kNobodyVtable,&w};
+            reinterpret_cast<WalkFn>(image+kOneTeamWalk)(manager,kTeamVehicle,&n);
+        }
     }
     PlayerLane(w);
     FormationTick();
@@ -1908,13 +1931,15 @@ unsigned char* BoardTarget(unsigned char* top,const unsigned char* requester,ULO
         }
     }
     unsigned char* best=nullptr;float bestD=kBoardFar+1;
-    for(int i=0;i<world.friends;++i) {
-        auto* object=static_cast<unsigned char*>(const_cast<void*>(world.frObject[i]));
-        if(!object || !Readable(object,kSeatCount+8) || !KnownVehicle(object) || object[kDead])continue;
+    const auto consider=[&](const void* candidate) {
+        auto* object=static_cast<unsigned char*>(const_cast<void*>(candidate));
+        if(!object || !Readable(object,kSeatCount+8) || !KnownVehicle(object) || object[kDead])return;
         if(sawVehicle)*sawVehicle=true;
         const float distance=BoardDistance(object,members,count,ms);
         if(distance>=0 && distance<bestD){best=object;bestD=distance;}
-    }
+    };
+    for(int i=0;i<world.friends;++i)consider(world.frObject[i]);
+    for(int i=0;i<world.nobodys;++i)consider(world.nobody[i]);   // the empty ones (team 5): FriendlyVehicle takes them
     return best;
 }
 
@@ -2429,7 +2454,8 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
         const bool recruited=control==npc::Control::recruited;
         unsigned char* members[kMaxSquad];const int count=Members(top,members,kMaxSquad);
         int affected=count;
-        // Its transport (transport.cpp): a far point order (or one given aboard) goes by the paired vehicle; WITHDRAW sends
+        // Its transport (transport.cpp): a point order given aboard goes by the paired vehicle (on foot it walks, however far:
+        // 2026-10-10 the far-order ride was removed); WITHDRAW sends
         // that vehicle off; any other order, once taken, ends the squad's part in a trip (it stays where it is, aboard or
         // not). A refused one leaves the trip as it was (TransportCancel below, after every refusal).
         if(mapcmd::PointOrder(c.order) && std::isfinite(c.at[0]+c.at[1]+c.at[2]) && TransportOrder(top,c)) {
