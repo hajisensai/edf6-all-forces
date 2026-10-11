@@ -73,7 +73,7 @@ class LoadoutTableTests(unittest.TestCase):
 
     def test_rounds_are_catalogued_and_typed(self) -> None:
         inc = (ROOT / 'src' / 'stores.inc').read_text(encoding='utf-8')
-        roles = {'air', 'ground', 'bomb', 'rocket', 'gun'}
+        roles = {'air', 'ground', 'bomb', 'rocket', 'gun', 'coax'}
         for weapon in stores.store_files():
             kind = kind_of(weapon)
             store = vc.STORES[kind]
@@ -81,8 +81,8 @@ class LoadoutTableTests(unittest.TestCase):
                 self.assertIn(f'L"EDF6VC_{kind}_"', inc)
                 self.assertIn(store.role, roles)
                 if isinstance(store.weapon, vc.Shell):
-                    self.assertEqual(store.role, 'gun')
-                    self.assertIn(store.weapon.kind, ('ap', 'he'))
+                    self.assertEqual(store.role, 'coax' if store.weapon.kind == 'mg' else 'gun')
+                    self.assertIn(store.weapon.kind, ('ap', 'he', 'mg'))
                     self.assertTrue(store.weapon.template.upper().endswith('.SGO'))
                     if store.weapon.kind == 'ap':
                         self.assertIn('SolidBullet01', store.weapon.ammo_class)
@@ -146,12 +146,56 @@ class WithGameTests(unittest.TestCase):
                 stock = dsgo.to_py(dsgo.parse(self.game.read('WEAPON', store.weapon.template)).root)
                 self.assertEqual(got['AmmoClass'], store.weapon.ammo_class)
                 changed = {'AmmoCount', *dict(store.weapon.extra)} | {k for k in got if k.startswith('name.')}
+                if store.weapon.muzzle is not None:
+                    changed.add('animation_model')
                 self.assertEqual({k: v for k, v in got.items() if k not in changed},
                                  {k: v for k, v in stock.items() if k not in changed})
                 if store.weapon.kind == 'ap':
                     self.assertEqual((got['AmmoExplosion'], got['AmmoIsPenetration']), (0.0, 1.0))
+                elif store.weapon.kind == 'mg':
+                    self.assertEqual(got['AmmoExplosion'], 0.0)
                 else:
                     self.assertGreater(got['AmmoExplosion'], 0.0)
+
+    def test_coaxial_gun_lays_with_the_main_gun_from_its_own_muzzle(self) -> None:
+        # The user, 2026-10-11: 「应该有同轴机枪的坦克增加同轴机枪」. Its holder hangs on the bone that elevates the main gun
+        # (or the gun itself where the model has no recoil bone), its muzzle beside the barrel (right of it, +X is left)
+        # and not the main gun's; the model has that bone.
+        import struct
+        rows = {stem: stores.stock_rows(self.game, stem) for stem in stores.COAX}
+        for stem, mount in stores.COAX.items():
+            with self.subTest(stem=stem):
+                self.assertIn(mount, stores.LOADOUTS[stem])
+                stock = stores._read_any(self.game.read('OBJECT', stem + '.SGO'))['vehicle_weapon_setting']
+                self.assertEqual(rows[stem], 1)
+                bone = mount.bone or stock[0][0]
+                bones = stores.model_bones(self.game, stem)
+                if bones is not None:
+                    self.assertIn(bone, bones)
+                got = dsgo.parse(vc.store_sgo(self.game, mount.weapon)).root.get('animation_model').items[2].data
+                muzzles = vc.mab_muzzles(got)
+                self.assertEqual(len(muzzles), 1)
+                x, y, z = struct.unpack_from('<3f', got, muzzles[0][2])
+                self.assertLess(x, -0.15, 'right of the main gun')
+                self.assertLess(abs(y), 0.2, 'at the gun axis height')
+                self.assertGreater(z, 0.3, 'in front of the mantlet')
+                self.assertEqual(stores._params(mount, [0.1, 0.4]), stores.NO_RECOIL, 'no hull rock')
+                # Its own gun to see (the user: 「同轴机枪的模型也要用」): the weapon names its model, the model's gun bone
+                # is the muzzle's node, its front end on the muzzle point and the rest of it behind (in the mantlet).
+                import mdb
+                shell = vc.STORES[kind_of(mount.weapon)].weapon
+                ref = dsgo.to_py(dsgo.parse(vc.store_sgo(self.game, mount.weapon)).root)['animation_model'][0]
+                self.assertEqual(ref[0].lower(), 'app:/weapon/' + shell.model.lower())
+                rab = mdb.rab_read(vc.coax_model(self.game, shell.model, (x, y, z)))
+                member = next(f for f in rab.files if f.name.lower().endswith('.mdb'))
+                self.assertEqual(member.name, ref[1])
+                md = mdb.mdb_read(member.data)
+                self.assertIn(vc.COAX_GUN_NODE, [md.name_of(b.name) for b in md.bones])
+                self.assertEqual(muzzles[0][1], vc.COAX_GUN_NODE)
+                points = mdb.read_elem(md.objects[0].meshes[0], 'position')
+                front = max(p[2] for p in points)
+                self.assertLess(abs(front - z), 0.01, 'its muzzle on the muzzle point')
+                self.assertTrue(0.8 < front - min(p[2] for p in points) < 1.2, 'a rifle-calibre gun, about a metre')
 
     def test_no_request_carries_the_round_its_stock_gun_already_fires(self) -> None:
         # 22 of the tank requests bring a howitzer (an HE gun): they get APFSDS, the smooth-bore ones HE.

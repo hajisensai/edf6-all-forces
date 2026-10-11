@@ -90,6 +90,7 @@ struct StockHudReadout {
     float speed;                 // m/s, level (its own position's change)
     float hp,hpMax;
     float zoom;                  // the sight's magnification (sightzoom.cpp SightZoomNow: 1 none)
+    int zero;                    // its range setting, m (sightzoom.cpp SightZoomRange: 0 the bore line)
     int stab;                    // the seat's gun stabilizer (stab.cpp StabState): 1 holding, 2 outrun by the hull, 0 none
     FuelReading fuel;            // its fuel tank (a bike's; a heli's is HeliStrip's, PlayerHeliReadout), not among the arms
     int arms,selected;           // selected: secondary payload/list selection (-1 none)

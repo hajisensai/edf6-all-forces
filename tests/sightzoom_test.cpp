@@ -15,6 +15,8 @@ bool highActive=false,highReturning=false,heliVehicle=false,aircraft=false,gunsh
 RoundKind roundKind=RoundKind::arc;
 WeaponStyle roundStyle=WeaponStyle::projectile;
 bool lobbed=false;
+float roundSpeed=0.0f,roundFactor=0.0f;
+int wheelNotches=0;bool wheelHeld=false;
 alignas(16) unsigned char bones[5*weaponmount::kStride]{};
 bool opticPresent=true,extraOptic=false;
 float muzzleDirection[3]={0,0,1};
@@ -40,7 +42,7 @@ void Setup() {
     ResetSightZoom();applied=Applied{};config=Config{};installed=true;nextCamStep=&Original;opticLookTo=testedLookTo ? testedLookTo : &LookFixture;opticPresent=true;extraOptic=false;
     muzzleDirection[0]=muzzleDirection[1]=0;muzzleDirection[2]=1;
     mapKeys=false;mapView=false;highView=false;sazabiVehicle=false;paused=false;originalWrites=true;originalFov=sightzoom::kBaseFov;playerHuman=human;
-    highActive=highReturning=heliVehicle=aircraft=gunship=fuel=lobbed=false;knownRound=hud=true;roundKind=RoundKind::arc;roundStyle=WeaponStyle::projectile;pickedWeapon=nullptr;
+    highActive=highReturning=heliVehicle=aircraft=gunship=fuel=lobbed=false;roundSpeed=roundFactor=0.0f;wheelNotches=0;knownRound=hud=true;roundKind=RoundKind::arc;roundStyle=WeaponStyle::projectile;pickedWeapon=nullptr;
     std::memset(weapon,0,sizeof(weapon));std::memset(secondWeapon,0,sizeof(secondWeapon));
     Put<void*>(holder,kHolderWeapon,weapon);Put<void*>(secondHolder,kHolderWeapon,secondWeapon);
     Put<int>(weapon,edf::kWeaponAmmoAlive,120);Put<int>(secondWeapon,edf::kWeaponAmmoAlive,120);
@@ -83,6 +85,8 @@ unsigned char* BoneRecord506(const unsigned char*,const wchar_t* name) noexcept 
 const Config& Cfg() noexcept{return config;}
 void Log(const char*,...) noexcept{}
 unsigned char* PlayerHuman() noexcept{return playerHuman;}
+int TakeScopeWheel(bool hold) noexcept{wheelHeld=hold;const int n=hold ? wheelNotches : 0;wheelNotches=0;return n;}
+bool MapPadButtons(std::uint16_t*) noexcept{return false;}
 bool GamePaused() noexcept{return paused;}
 bool MapHoldsKeys() noexcept{return mapKeys;}
 bool MapOwnsView() noexcept{return mapView;}
@@ -99,11 +103,12 @@ bool IsFuelTank(const unsigned char*) noexcept{return fuel;}
 unsigned char* PayloadPicked(const void*) noexcept{return nullptr;} // store selection is not the fire-control selection
 unsigned char* PayloadSightPicked(const void*,unsigned) noexcept{return const_cast<unsigned char*>(pickedWeapon ? pickedWeapon : weapon);}
 bool ReadRound(const unsigned char* w,RoundModel* r) noexcept {
-    *r=RoundModel{};r->kind=roundKind;r->style=roundStyle;r->rtti=knownRound ? "test factory" : nullptr;r->lobbed=lobbed;r->alive=At<int>(w,edf::kWeaponAmmoAlive);
+    *r=RoundModel{};r->kind=roundKind;r->style=roundStyle;r->rtti=knownRound ? "test factory" : nullptr;r->lobbed=lobbed;r->alive=At<int>(w,edf::kWeaponAmmoAlive);r->speed=roundSpeed;r->factor=roundFactor;
     return true;
 }
 }
 namespace edf {
+bool WorldGravity(const unsigned char*,float* g) noexcept {g[0]=0;g[1]=-9.8f;g[2]=0;return true;}
 bool MeanMuzzle(const unsigned char*,std::uint64_t,float* p,float* d) noexcept {p[0]=p[1]=p[2]=0;std::memcpy(d,crew::muzzleDirection,12);return true;}
 }
 float NativeSin(float x){return std::sin(x);}
@@ -198,8 +203,10 @@ int wmain(int argc,wchar_t** argv){
     Setup();fuel=true;Button(0);Button(0x80);Check(SightZoomNow(vehicle)==1,"fuel holder is not a gun sight");
     Setup();knownRound=false;Button(0);Button(0x80);Check(SightZoomNow(vehicle)==1,"unknown ammo has no fabricated optic");
     Setup();Zoom();highActive=true;Check(Fov()==originalFov && SightZoomNow(vehicle)==1,"entering overhead restores FOV before another input frame");
-    Button(0);Button(0x80);Check(SightZoomView()==sightzoom::Kind::indirect && toggle.step==0,"overhead is its own fire-control view, never a zoomed scope");
+    Button(0);Button(0x80);Check(SightZoomView()==sightzoom::Kind::indirect && SightZoomNow(vehicle)==1 && toggle.step==1,
+                                 "overhead is its own fire-control view, never a zoomed scope; its presses do not step the scope");
     highActive=false;highReturning=true;Check(SightZoomNow(vehicle)==1,"returning overhead camera is not magnified");
+    highReturning=false;Button(0);Check(SightZoomNow(vehicle)==3,"back on the gunner's sight the seat's own magnification returns");
     Setup();Put<int>(weapon,edf::kWeaponMark,edf::kMarkLofted);Button(0);Button(0x80);
     Check(SightZoomNow(vehicle)==1 && SightZoomView()==sightzoom::Kind::indirect,"Katyusha uses its impact/spread solution, not an optical scope");
     Setup();Put<int>(weapon,edf::kWeaponMark,edf::kMarkGround);Put<int>(weapon,edf::kWeaponAmmoAlive,1200);Button(0);Button(0x80);
@@ -220,9 +227,18 @@ int wmain(int argc,wchar_t** argv){
     Setup();roundKind=RoundKind::rocket;Zoom();Check(SightZoomView()==sightzoom::Kind::rocket,"unguided rockets use ballistic fire control");
     Setup();lobbed=true;Zoom();Check(SightZoomView()==sightzoom::Kind::rocket,"short-range grenade uses a ballistic sensor instead of a rifle optic");
     Setup();heliVehicle=true;Zoom();Check(SightZoomView()==sightzoom::Kind::flight,"armed helicopter pilot keeps a flight HUD without optical vignette");
-    Setup();Zoom();Put<std::uint64_t>(seats,kSeatWeaponCount,2);pickedWeapon=secondWeapon;
-    Check(SightZoomNow(vehicle)==1,"new selected weapon cannot inherit old weapon magnification");
-    Button(0);Check(toggle.step==0,"new weapon begins at normal field of view");
+    // 2026-10-11 ("鐢ㄥ壇姝﹀櫒鐨勬椂鍊欑瀯鍏蜂笉浼氬己鍒跺垏鍥炲幓锛岃€屾槸涓よ竟鍏辩敤"): a second weapon on the same mount (the coaxial gun on
+    // the secondary trigger, a store the switch picks) looks through the same optic: the scope, its magnification and
+    // its eye stay, through the pick and back, with no frame of the third-person view in between.
+    Setup();Put<std::uint64_t>(seats,kSeatWeaponCount,2);Put<void*>(holder,kHolderCtrl,vehicleCtrl);Put<void*>(secondHolder,kHolderCtrl,vehicleCtrl);
+    Put<void*>(secondHolder,weaponmount::kHolderBone,At<void*>(holder,weaponmount::kHolderBone));Zoom();
+    pickedWeapon=secondWeapon;
+    Check(SightZoomNow(vehicle)==3 && SightZoomMounted(vehicle),"a second weapon on the same optic keeps the scope before its first input frame");
+    Fov();Check(Fov()<originalFov,"the camera stays magnified across the trigger change");
+    Button(0);Check(toggle.step==1 && SightZoomNow(vehicle)==3,"the secondary weapon shares the seat's magnification");
+    Button(0x80);Check(SightZoomNow(vehicle)==6,"the shared scope still steps on the secondary weapon");
+    pickedWeapon=weapon;Button(0);Check(SightZoomNow(vehicle)==6,"back on the primary the shared scope is unchanged");
+    Put<void*>(secondHolder,kHolderCtrl,nullptr);
     Setup();pickedWeapon=secondWeapon;Button(0);Button(0x80);Check(SightZoomNow(vehicle)==1,"stale selection outside this seat does not borrow another gun optic");
     // 2026-10-09 (fb aim #2): the Titan's right trigger picks its hull gatling (holder on the hull root, no optic of its
     // own). The seat's turret optic stays the scope's, through a pick and back, and so does the key reserved for it.
@@ -236,7 +252,27 @@ int wmain(int argc,wchar_t** argv){
     Put<void*>(secondHolder,weaponmount::kHolderBone,bones);pickedWeapon=secondWeapon;
     Button(0);Button(0x80);Check(SightZoomNow(vehicle)==1,"a dead holder's optic is never borrowed");
     Put<void*>(secondHolder,kHolderCtrl,nullptr);   // Setup leaves the holders' controls as they are
-    Setup();Zoom();hud=false;Check(Fov()==originalFov,"failed sight renderer cannot leave a zoomed camera");
+    // 2026-10-11 ("类似战雷那样，鼠标滚轮可以调到100m、200m"): the range setting. The wheel is the sight's only while it is
+    // magnified; each notch a step of the graduated drum (25 m to 300, 50 m to 1000, 100 m beyond) up to the round's reach;
+    // the camera's line of sight is laid under the bore by
+    // the round's superelevation for that range, the setting kept across the seat's weapons and dropped with the seat.
+    Setup();Button(0);Check(!wheelHeld,"at 1x the wheel stays the game's");
+    roundSpeed=10.0f;roundFactor=1.0f;Zoom();Check(wheelHeld,"magnified, the sight takes the wheel");
+    wheelNotches=3;Button(0);float angle=0.0f;
+    Check(SightZoomRange(vehicle,&angle)==75,"three notches up: 75 m (the fine end of the drum)");
+    const float want=sightzoom::ZeroAngle(10.0f,9.8f/3600.0f,75.0f);
+    Check(want>0.0f && std::fabs(angle-want)<1e-6f,"the superelevation of this round at that range");
+    Fov();{const auto m=reinterpret_cast<const float*>(camera+kCamMatrix);
+           Check(std::fabs(m[9]+std::sin(want))<1e-4f && std::fabs(m[10]-std::cos(want))<1e-4f,"the line of sight laid under the bore by it");}
+    wheelNotches=-1;Button(0);Check(SightZoomRange(vehicle)==50,"a notch down: 50 m");
+    wheelNotches=1000;Button(0);Check(SightZoomRange(vehicle)==1200,"held to the round's reach (10 m a frame for 120 frames)");
+    wheelNotches=-1000;Button(0);Check(SightZoomRange(vehicle)==0,"down to the bore line");
+    Fov();{const auto m=reinterpret_cast<const float*>(camera+kCamMatrix);Check(m[9]==0.0f && m[10]==1.0f,"at 0 the bore line itself");}
+    wheelNotches=14;Button(0);Button(0x80);Check(SightZoomRange(vehicle)==400 && SightZoomNow(vehicle)==6,"the setting stays through a magnification step");
+    Button(0);Button(0x80);Check(SightZoomRange(vehicle)==0 && !wheelHeld,"back at 1x: no setting shown, the wheel the game's again");
+    Button(0);Button(0x80);Check(SightZoomRange(vehicle)==400,"magnified again: the seat's setting");
+    config.sightRangeStep=200;wheelNotches=2;Button(0);Check(SightZoomRange(vehicle)==800,"a fixed step (ini SightRangeStep) when set");
+    ResetSightZoom();Check(SightZoomRange(vehicle)==0,"a new seat or mission starts at the bore line");    Setup();Zoom();hud=false;Check(Fov()==originalFov,"failed sight renderer cannot leave a zoomed camera");
     Check(sightzoom::MaskOf(sightzoom::Kind::flight)==sightzoom::Mask::none && sightzoom::MaskOf(sightzoom::Kind::mech)==sightzoom::Mask::none,
           "flight and mech fire control never stack a generic scope mask");
     Setup();extraOptic=true;Button(0);Button(0x80);Check(!SightZoomMounted(vehicle) && SightZoomNow(vehicle)==1,"ambiguous same-mount optics fail closed");

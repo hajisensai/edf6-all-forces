@@ -14,6 +14,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/stab.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/gunnerrecoil.cpp)
 # The map view (src/map.cpp: the overhead camera, the input hold, the marks it gathers).
 target_sources(EDF6VehicleCrew PRIVATE src/map.cpp)
+# A soldier's zoomed scope as a real optic (src/infantryscope.cpp: the cue, the stock crosshair's draw held back).
+target_sources(EDF6VehicleCrew PRIVATE src/infantryscope.cpp)
 # The damage statistics (src/damagestats.cpp: the damage hook and the round tags; the page in src/hud_stats.inc).
 target_sources(EDF6VehicleCrew PRIVATE src/damagestats.cpp)
 # The map's NPC commands (src/mapcmd.cpp, src/mapcmd_logic.h).

@@ -2654,6 +2654,7 @@ void __fastcall DriverPayloadAim(unsigned char* v,int index,const void* target) 
             native(v,0,target); // keep native tracking/idle behavior, but no unavailable shot
             Put<float>(seat,0x2E4,0.0f);Put<float>(seat,0x2E0,0.0f);
         }
+        if(target)NpcCoaxFire(v,0,target,&FriendInLine);   // the coaxial gun alongside whatever the crew chose (payload.cpp)
         RememberDriverPayload(v);
     } __except(EXCEPTION_EXECUTE_HANDLER) {
         // The selected-list helper restores its temporary pointer in __finally.
@@ -2718,6 +2719,7 @@ void NpcGunnersInput(unsigned char* v) noexcept {
                 const auto w=NpcPayloadSelect(v,i,p.bestD,GunnerAirTarget(p.best),&fire);
                 if(!w)continue;
                 AimSelectedGunner(v,i,p.best,w,fire);
+                NpcCoaxFire(v,i,p.best,&FriendInLine);
             } else reinterpret_cast<SeatFireFn>(image+kSeatFire)(v,static_cast<int>(i),p.best);
             RememberGunnerInputs(v,i,seat);
         }

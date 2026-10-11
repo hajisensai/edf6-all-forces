@@ -234,6 +234,9 @@ void Validate(Config& n) noexcept {
     n.freeLookButton=static_cast<int>(FixInt("FreeLookButton",n.freeLookButton,0,255));
     n.sightZoomKey=static_cast<int>(FixInt("SightZoomKey",n.sightZoomKey,0,254));
     n.sightZoomButton=static_cast<int>(FixInt("SightZoomButton",n.sightZoomButton,0,255));
+    n.sightRangeUpKey=static_cast<int>(FixInt("SightRangeUpKey",n.sightRangeUpKey,0,254));
+    n.sightRangeDownKey=static_cast<int>(FixInt("SightRangeDownKey",n.sightRangeDownKey,0,254));
+    n.sightRangeStep=static_cast<int>(FixInt("SightRangeStep",n.sightRangeStep,0,1000));
     n.mapKey=static_cast<int>(FixInt("MapKey",n.mapKey,0,254));
     n.mapButton=static_cast<int>(FixInt("MapButton",n.mapButton,0,0xFFFF));
     if(n.mapViewDistance!=0.0f)Fix("MapViewDistance",n.mapViewDistance,1000.0f,10000.0f);
@@ -539,6 +542,11 @@ void LoadConfig() noexcept {
     n.sightZoom=ReadBool(L"SightZoom",n.sightZoom);
     n.sightZoomKey=ReadInt(L"SightZoomKey",static_cast<DWORD>(n.sightZoomKey));
     n.sightZoomButton=ReadInt(L"SightZoomButton",static_cast<DWORD>(n.sightZoomButton));
+    n.sightRangeUpKey=ReadInt(L"SightRangeUpKey",static_cast<DWORD>(n.sightRangeUpKey));
+    n.sightRangeDownKey=ReadInt(L"SightRangeDownKey",static_cast<DWORD>(n.sightRangeDownKey));
+    n.sightRangeStep=ReadInt(L"SightRangeStep",static_cast<DWORD>(n.sightRangeStep));
+    n.sightRangePad=ReadBool(L"SightRangePad",n.sightRangePad);
+    n.infantryScope=ReadBool(L"InfantryScope",n.infantryScope);
     n.gunStabilizer=ReadBool(L"GunStabilizer",n.gunStabilizer);
     n.viewDistance=ReadFloat(L"ViewDistance",n.viewDistance);
     n.map=ReadBool(L"Map",n.map);
@@ -708,7 +716,7 @@ void LoadConfig() noexcept {
     Log("CONFIG sidecar=%d npcGunner=%d npcRange=%.0f",n.sidecar,n.sidecarNpcGunner,n.sidecarNpcRange);
     Log("CONFIG highCam=%d key=0x%X button=0x%X height=%.0f back=%.0f pitch=%.0f",n.highCam,n.highCamKey,n.highCamButton,n.highCamHeight,
         n.highCamBack,n.highCamPitch);
-    Log("CONFIG sightZoom=%d key=0x%X button=0x%X",n.sightZoom,n.sightZoomKey,n.sightZoomButton);
+    Log("CONFIG sightZoom=%d key=0x%X button=0x%X infantryScope=%d",n.sightZoom,n.sightZoomKey,n.sightZoomButton,n.infantryScope);
     Log("CONFIG nixTorsoTwist=%d",n.nixTorsoTwist);
     Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f",n.map,n.mapKey,n.mapButton,n.mapViewDistance);
     Log("CONFIG damageStats=%d key=0x%X",n.damageStats,n.damageStatsKey);
@@ -931,6 +939,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallProteus();       // the Proteus rework: its weapon mounts, shield barrier, piles and field
     InstallMap();           // the map view (the player's camera overhead, their input held while it is open)
     InstallSightZoom();     // a vehicle gun's sight magnified (the same camera step, chained after the map's)
+    InstallInfantryScope(); // a soldier's zoomed scope drawn as a real optic (the stock crosshair's draw chained)
     InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp), the sidecar's level hook
     InstallGunnerRecoil();  // a remote gunner's recoil on the vehicle's authority (gunnerrecoil.cpp)
     InstallSidecar();       // the sidecar motorcycle's gunner (sidecar.cpp)

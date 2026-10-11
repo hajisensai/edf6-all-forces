@@ -218,8 +218,15 @@ class Shell:
     the kind of round is the template's, not a guess."""
     template: str           # Root.cpk WEAPON file
     ammo_class: str         # its AmmoClass
-    kind: str               # 'ap' (no blast, penetrating) or 'he' (a blast radius)
+    kind: str               # 'ap' (no blast, penetrating), 'he' (a blast radius) or 'mg' (a machine gun's ball: no blast)
     extra: tuple[tuple[str, float], ...] = ()
+    # A coaxial gun's muzzle: (the template's single muzzle where it is, where it goes) in the frame of the holder bone
+    # it hangs on (make_stock_stores COAX: the gun mantlet's elevating bone, measured on each tank's model). None: the
+    # template's muzzle as it is.
+    muzzle: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None
+    # The gun's own model (Mods/WEAPON, coax_model): a coaxial machine gun seen in the mantlet, its muzzle on muzzle's
+    # point. None: the template's model (v_null: none to see).
+    model: str | None = None
 
     def params(self, rounds: int) -> dict[str, float]:
         return {'AmmoCount': float(rounds), **dict(self.extra)}
@@ -243,6 +250,17 @@ class Store:
 def _local(en: str, ja: str, cn: str, sc: str, kr: str) -> tuple[tuple[str, str], ...]:
     return (('en', en), ('ja', ja), ('cn', cn), ('sc', sc), ('kr', kr))
 
+
+# The coaxial machine guns' model (Shell.model, coax_model): the stock Begaruta hand machine gun
+# (WEAPON/V_504_H_MACHINEGUN.RAB: 3.8 m, a mech's) at COAX_GUN_SCALE, a 0.96 m rifle-calibre gun, its muzzle on the
+# coax's muzzle point and the rest of it back in the mantlet, as a real coax shows only its barrel's end.
+COAX_GUN_STOCK = 'V_504_H_MACHINEGUN.RAB'
+COAX_GUN_SCALE = 0.25
+COAX_GUN_NODE = 'v_Null'   # the template's muzzle node (V_403TANK_MACHINEGUN's MAB): the model's gun bone named so
+
+
+def coax_model_name(tank: str) -> str:
+    return f'EDF6VC_COAX_GUN{tank}.RAB'
 
 STORES: dict[str, Store] = {
     # Short-range air-to-air, infrared, high off-boresight (AIM-9X): quick to lock, very agile, light warhead. 3.02 m.
@@ -308,6 +326,19 @@ STORES: dict[str, Store] = {
     # proximity fuse in effect; it does not harm the map.
     'FLAK_HE': Store('HE-PROX', 'gun', 0.0, 0.0, Shell('V603_FLAK_GLGUN01_DLC_L.SGO', 'GrenadeBullet01_MapNoDamage', 'he'),
                      _local('HE proximity', '近接信管榴弾', '近炸引信高爆彈', '近炸引信高爆弹', '근접신관 고폭탄')),
+    # A tank's / an IFV's coaxial machine gun (the user, 2026-10-11: 「应该有同轴机枪的坦克增加同轴机枪」): every real main
+    # battle tank and IFV carries a 7.62 mm gun in the gun mantlet beside the main gun, laid with it and fired on its own
+    # trigger (src/payload.cpp: the secondary trigger, the main gun staying loaded). The stock Epsilon gunner's machine
+    # gun (V_403TANK_MACHINEGUN: SolidBullet01, 6 a ball, 15 a second) with a 7.62 mm gun's numbers: 840 m/s
+    # (14 m a frame), 900 m (64 frames), a 1500-round belt changed in 4 s, a tight cone. The muzzle sits where the
+    # mantlet has room right of the gun on each model (make_stock_stores COAX), the holder on the elevating bone (no
+    # recoil travel with the main gun). Recoilless on the hull (make_stock_stores._params: zero BodyRecoil).
+    **{f'MG{tank}': Store('Coax MG', 'coax', 0.0, 0.0,
+                          Shell('V_403TANK_MACHINEGUN.SGO', 'SolidBullet01', 'mg',
+                                (('AmmoSpeed', 14.0), ('AmmoAlive', 64.0), ('ReloadTime', 240.0), ('FireAccuracy', 0.008)),
+                                ((0.0, 0.2, 2.47), at), coax_model_name(tank)),
+                          _local('Coaxial MG', '同軸機銃', '同軸機槍', '同轴机枪', '동축 기관총'))
+       for tank, at in (('505', (-0.25, -0.05, 1.0)), ('601', (-0.25, 0.08, 1.9)), ('401', (-0.18, 0.0, 0.45)))},
 }
 JET_MISSILE_STOCK, JET_BOMB_STOCK = JET_MISSILE_STOCK, 'V_409HELI_BOMB01.SGO'
 
@@ -1327,14 +1358,84 @@ def _shell_sgo(game: Game, store: Store, rounds: int) -> bytes:
     if r.get('AmmoClass') != shell.ammo_class:
         raise ValueError(f'{shell.template} 的弹类是 {r.get("AmmoClass")}，不是 {shell.ammo_class}')
     blast = r.get('AmmoExplosion')
-    if (shell.kind == 'ap') != (not blast) or (shell.kind == 'ap' and r.get('AmmoIsPenetration') != 1.0):
+    if shell.kind == 'mg':
+        if blast:
+            raise ValueError(f'{shell.template}: 机枪弹不应有爆炸半径')
+    elif (shell.kind == 'ap') != (not blast) or (shell.kind == 'ap' and r.get('AmmoIsPenetration') != 1.0):
         raise ValueError(f'{shell.template}: {shell.kind} 弹应{"穿透且无爆炸" if shell.kind == "ap" else "有爆炸半径"}')
     for key, value in shell.params(rounds).items():
         if r.get(key) is None:
             raise ValueError(f'{shell.template} 缺少 {key}')
         r.set(key, value)
+    if shell.muzzle is not None:
+        _move_muzzle(r, shell.template, *shell.muzzle)
+    if shell.model is not None:   # its own gun to see (coax_model), its muzzle node COAX_GUN_NODE as the template's
+        ref = r.get('animation_model').items[0]
+        ref.items[0] = 'app:/Weapon/' + shell.model.lower()
+        ref.items[1] = shell.model.rsplit('.', 1)[0].lower() + '.mdb'
     _named(r, store)
     return dsgo.write(doc)
+
+
+def _move_muzzle(r: dsgo.Node, template: str, was: tuple[float, float, float], at: tuple[float, float, float]) -> None:
+    """Move weapon root `r`'s single muzzle (animation_model[2], mab_muzzles) from `was` to `at`: ValueError unless the
+    template has exactly one muzzle, it is at `was`, and no other locator of the block shares its vec4."""
+    model = r.get('animation_model')
+    block = bytearray(model.items[2].data)
+    muzzles = mab_muzzles(bytes(block))
+    if len(muzzles) != 1:
+        raise ValueError(f'{template} 不是单炮口的武器')
+    vec = muzzles[0][2]
+    got = struct.unpack_from('<3f', block, vec)
+    if any(abs(g - w) > 1e-3 for g, w in zip(got, was)):
+        raise ValueError(f'{template} 的炮口在 {got}，不是 {was}')
+    # Every list's records (0x20 each, from the lists' headers to the u32 at 0x18; pylib/mab.py) name their three vec4s
+    # at +0xC / +0x10 / +0x14, each vec4 stored once: the muzzle's must be named by its own record alone.
+    heads, end = struct.unpack_from('<2I', block, 0x14)
+    first = heads + 8 * struct.unpack_from('<H', block, 0x0C)[0]
+    users = [(rec, off) for rec in range(first, end, 0x20) for off in (0xC, 0x10, 0x14)
+             if rec + struct.unpack_from('<i', block, rec + off)[0] == vec]
+    if len(users) != 1:
+        raise ValueError(f'{template} 的炮口坐标被 {len(users)} 处共用')
+    struct.pack_into('<3f', block, vec, *at)
+    model.items[2] = dsgo.Blob(bytes(block), model.items[2].kind)
+
+
+def coax_model(game: Game, name: str, at: tuple[float, float, float]) -> bytes:
+    """The coaxial gun's model `name` (coax_model_name): COAX_GUN_STOCK scaled by COAX_GUN_SCALE and moved so its muzzle
+    (the centre of its barrel's front end) stands on `at` (the coax's muzzle, the holder bone's frame); its gun bone
+    named COAX_GUN_NODE (the muzzle locator's node), its bounds moved with it, its model member named after `name` (each
+    archive its own: the textures stay the stock gun's, by the archive's own texture map)."""
+    import mdb
+    rab = mdb.rab_read(game.read('WEAPON', COAX_GUN_STOCK))
+    member = next(f for f in rab.files if f.name.lower().endswith('.mdb'))
+    md = mdb.mdb_read(member.data)
+    if len(md.objects) != 1 or len(md.objects[0].meshes) != 1 or len(md.bones) != 2:
+        raise ValueError(f'{COAX_GUN_STOCK} 不是预期的单网格机枪模型')
+    mesh = md.objects[0].meshes[0]
+    pos = next((e for e in mesh.elems if e.name == 'position' and e.channel == 0), None)
+    if pos is None or mesh.vsize < pos.offset + 8:
+        raise ValueError(f'{COAX_GUN_STOCK} 的顶点没有 half4 位置')
+    points = mdb.read_elem(mesh, 'position')
+    front = max(p[2] for p in points)
+    mouth = [p for p in points if p[2] >= front - 0.15]
+    tip = (sum(p[0] for p in mouth) / len(mouth), sum(p[1] for p in mouth) / len(mouth), front)
+    k = COAX_GUN_SCALE
+    shift = tuple(at[c] - tip[c] * k for c in range(3))
+    data = bytearray(mesh.vdata)
+    for i, p in enumerate(points):
+        q = tuple(p[c] * k + shift[c] for c in range(3))
+        struct.pack_into('<3e', data, i * mesh.vsize + pos.offset, *q)
+    mesh.vdata = bytes(data)
+    gun = md.bones[1]
+    gun.half = [gun.half[0] * k, gun.half[1] * k, gun.half[2] * k, 1.0]
+    gun.centre = [gun.centre[0] * k + shift[0], gun.centre[1] * k + shift[1], gun.centre[2] * k + shift[2], 1.0]
+    names = list(md.names)
+    names[gun.name] = COAX_GUN_NODE
+    md = replace(md, names=names)
+    member.stored = mdb.cmpl_compress(mdb.mdb_write(md))
+    member.name = name.rsplit('.', 1)[0].lower() + '.mdb'
+    return mdb.rab_write(rab)
 
 
 def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:

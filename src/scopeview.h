@@ -14,6 +14,15 @@ constexpr int kSides=64;
 constexpr float kRound=0.46f;     // the round field's radius: this share of the screen's smaller side
 constexpr float kRectHigh=0.40f;  // the sensor's half height: this share of the screen's height (its width 4:3, held to the screen)
 constexpr float kPi=3.14159265f;
+// The eyepiece's edge (2026-10-11, the sight redone as a real optic): a real exit pupil does not end in a drawn line;
+// the image darkens over the last few percent of the field (vignetting) into the black of the eyepiece. kFeathers
+// bands from kFeatherIn of the radius to the field's edge, each darker (kFeatherAlpha), under the black outside.
+constexpr int kFeathers=4;
+constexpr float kFeatherIn=0.925f;
+constexpr float kFeatherAlpha[kFeathers]={0.10f,0.24f,0.45f,0.72f};
+// Band `b` of the feather: its inner and outer radius as shares of the field's.
+constexpr float FeatherFrom(int b) noexcept { return kFeatherIn+(1.0f-kFeatherIn)*static_cast<float>(b)/kFeathers; }
+constexpr float FeatherTo(int b) noexcept { return kFeatherIn+(1.0f-kFeatherIn)*static_cast<float>(b+1)/kFeathers; }
 
 // Four corners of a strip quad (hud.cpp's kStrip=5: triangles 0 1 2 and 2 1 3, alternating strip order).
 struct Quad { float x[4],y[4]; };
