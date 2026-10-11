@@ -1,6 +1,7 @@
 // transport.cpp: the squads' transports, Broken Arrow's way (transport_logic.h has the rules and the user's words). A squad
-// paired with a vehicle (a truck, an APC, a transport helicopter) rides it to a far point order and gets off short of
-// it; its transport waits there and leaves on WITHDRAW. A transport plane drops its soldiers over a point.
+// paired with a vehicle (a truck, an APC, a transport helicopter) and aboard it rides it to a point order and gets off
+// short of it; on foot it walks. A support delivery's vehicle goes back once its passengers are off; another waits and
+// leaves on WITHDRAW. A transport plane drops its soldiers over a point.
 // The pairs and the trips are the game thread's, kept where the squad's AI runs (online: its authority, the host for the
 // plugin's support soldiers); a new mission drops them (ResetTransports).
 #pragma once
@@ -18,8 +19,8 @@ const void* TransportOf(const void* top) noexcept;
 // its trip), else nullptr.
 const void* TransportRiderOf(const void* vehicle) noexcept;
 // A point order for a paired squad (npcai.cpp NpcSquadCommandForRequester): true when its transport takes it (a trip begun
-// or joined; the squad's own order is held until it gets off), false when it walks (not paired, near enough on foot, its
-// vehicle busy elsewhere or gone).
+// or joined; the squad's own order is held until it gets off), false when it walks (not paired, on foot, its vehicle
+// busy elsewhere or gone).
 bool TransportOrder(const void* top,const mapcmd::Command& c) noexcept;
 // Any other order for the squad: its place in a trip is let go (it stays where it is, aboard or not).
 void TransportCancel(const void* top) noexcept;
@@ -29,9 +30,10 @@ NpcCommandReason TransportWithdraw(const void* top) noexcept;
 // npcai.cpp: a squad's top died and `lead` leads it now (nullptr: it joined another squad, its pair goes).
 void TransportSucceed(const void* dead,const void* lead) noexcept;
 // support_dispatch.cpp: a deployment's soldiers aboard their transport, the squads' tops `tops` (a crewed APC / truck
-// arrived, a helicopter assault): paired with it and on a trip to `target`, where they get off and guard it. `aboard`:
-// they are seated already (else they board first).
-bool TransportDeliver(const void* vehicle,const void* const* tops,int count,const float* target) noexcept;
+// arrived, a helicopter assault): on a trip to `target`, where they get off and guard it; then the vehicle goes back
+// (SupportWithdrawVehicle) -- it is not left as their transport. `here`: they get off where the vehicle stands (a ground
+// vehicle that found no route on: they walk the rest) and still guard `target`.
+bool TransportDeliver(const void* vehicle,const void* const* tops,int count,const float* target,bool here=false) noexcept;
 // support_dispatch.cpp: a transport plane over `target`: its passengers jump there (transport_logic.h JumpNow), then it
 // is sent off (jet.cpp JetWithdrawNow). Each squad guards `target` once down.
 bool TransportParadrop(const void* plane,const float* target) noexcept;

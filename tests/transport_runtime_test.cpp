@@ -123,6 +123,8 @@ bool planeFerries=true;int ferryDones=0;
 bool JetFerryDone(const void* v) noexcept {if(v==plane.m && planeFerries)++ferryDones;return v==plane.m && planeFerries;}
 float planeVel[3]{};   // m/s: the plane flies straight on at it (Step)
 bool SupportWithdrawVehicle(const void*) noexcept {++withdrawals;return withdrawOk;}
+int heliLeaves=0;
+bool HeliStartLeaving(const void* v) noexcept {if(v==heli.m)++heliLeaves;return v==heli.m;}
 }  // namespace crew
 
 namespace {
@@ -160,7 +162,7 @@ void Reset() {
     ResetTransports();
     for(auto& q:squads)q=SquadModel{};
     truckDriver=heliDriver=true;ferryOn=ferryLand=heliGround=false;
-    routePosts=ferries=ferryReleases=heliGuards=withdrawals=canopies=canopyFrees=jetLeaves=moves=0;withdrawOk=true;
+    routePosts=ferries=ferryReleases=heliGuards=withdrawals=canopies=canopyFrees=jetLeaves=moves=heliLeaves=0;withdrawOk=true;
     planeFerries=true;ferryDones=0;planeVel[0]=planeVel[1]=planeVel[2]=0.0f;
 }
 bool Done(const void* top) noexcept {for(const auto& t:trips)for(int i=0;i<t.count;++i)if(t.riders[i].top.obj==top)return false;return true;}
@@ -172,15 +174,16 @@ void GroundTrip() {
     Check(TransportPair(soldier[0].m,truck.m),"a squad paired with a truck");
     Check(TransportOf(soldier[0].m)==truck.m,"its transport");
     const mapcmd::Command nearOrder{mapcmd::Order::move,{0,0,150}};
-    Check(!TransportOrder(soldier[0].m,nearOrder),"an order nearer than the auto range: they walk");
+    Check(!TransportOrder(soldier[0].m,nearOrder),"on foot, a near order: they walk");
     const mapcmd::Command farOrder{mapcmd::Order::attackMove,{0,0,800}};
-    Check(TransportOrder(soldier[0].m,farOrder),"a far order goes by the truck");
-    Check(squads[0].order.order==mapcmd::Order::guard,"held where it is until the truck is there (no walking off)");
-    TransportLink links[4];
-    Check(TransportLinks(links,4)==1 && links[0].trip,"the map's line from the squad to its truck, on a trip");
+    // 2026-10-10 "站原地冷暴力我": no vehicle is sent for a squad on foot; it walks (and is not held in place).
+    Check(!TransportOrder(soldier[0].m,farOrder) && squads[0].orders==0 && routePosts==0,
+          "on foot, a far order: they walk too (no truck sent, no hold)");
+    squads[0].in=&truck;squads[0].aboard=4;Place(truck,0,0,0);Place(soldier[0],0,0,0);
+    Check(TransportOrder(soldier[0].m,farOrder),"aboard, a far order goes by the truck");
     for(int i=0;i<20000 && !Done(soldier[0].m);++i)Step();
     Check(Done(soldier[0].m),"the trip ends");
-    Check(squads[0].boards>0 && squads[0].dismounts>0,"they boarded and got off",squads[0].boards,squads[0].dismounts);
+    Check(squads[0].dismounts>0,"they got off",squads[0].dismounts);
     const float* tp=PosOf(truck);
     Check(std::fabs(tp[2]-760.0f)<10.0f && std::fabs(tp[0])<10.0f,"the truck stopped 40 m short of the point",tp[0],tp[2]);
     Check(squads[0].order.order==mapcmd::Order::attackMove && squads[0].order.at[2]==800.0f,"off, the squad carries out its attack-move");
@@ -196,15 +199,27 @@ void EmptyTruck() {
     Reset();
     MakeVehicle(truck,truckSeats,5);Place(truck,300,0,0);MakeObj(soldier[0]);Place(soldier[0],0,0,0);
     squads[0]={&soldier[0],4,0,nullptr,{},0,0,0};
-    truckDriver=false;   // nobody aboard to drive it: the squad walks to it
+    truckDriver=false;
     TransportPair(soldier[0].m,truck.m);
-    Check(TransportOrder(soldier[0].m,mapcmd::Command{mapcmd::Order::move,{0,0,900}}),"an empty truck still takes the order");
+    // No longer sent off to an empty truck 300 m away: the far order is theirs to walk.
+    Check(!TransportOrder(soldier[0].m,mapcmd::Command{mapcmd::Order::move,{0,0,900}}),"on foot: the empty truck takes no order");
     for(int i=0;i<10;++i)Step();
-    Check(moves>0 && squads[0].order.order==mapcmd::Order::move && squads[0].order.at[0]==300.0f,"the squad sent walking to the empty truck",
-          squads[0].order.at[0]);
-    Place(soldier[0],290,0,0);   // there
-    for(int i=0;i<20000 && !Done(soldier[0].m);++i)Step();
-    Check(squads[0].dismounts>0 && std::fabs(PosOf(truck)[2]-860.0f)<10.0f,"one of them drove it there",PosOf(truck)[2]);
+    Check(moves==0 && squads[0].orders==0,"nobody sent walking to the truck");
+}
+
+// A crewed truck that found no way on (support_dispatch.cpp: stuck): its passengers off where it stands, each to guard
+// the point (they walk the rest), and it goes back (2026-10-10 "载具送过来以后就会直接回去").
+void DeliverHere() {
+    Reset();
+    MakeVehicle(truck,truckSeats,5);Place(truck,0,0,0);MakeObj(soldier[0]);Place(soldier[0],0,0,0);
+    squads[0]={&soldier[0],4,4,&truck,{},0,0,0};
+    const void* tops[1]={soldier[0].m};const float target[3]={0,0,600};
+    Check(TransportDeliver(truck.m,tops,1,target,true),"a stuck truck hands over its passengers where it stands");
+    for(int i=0;i<2000 && !Done(soldier[0].m);++i)Step();
+    Check(Done(soldier[0].m) && squads[0].aboard==0 && std::hypot(PosOf(truck)[0],PosOf(truck)[2])<2.0f,
+          "they got off where it stood (it did not drive on)",PosOf(truck)[2]);
+    Check(squads[0].order.order==mapcmd::Order::guard && squads[0].order.at[2]==600.0f,"each walks on to guard the point");
+    Check(withdrawals==1 && !TransportOf(soldier[0].m),"delivered: it goes back, no longer their transport");
 }
 
 void HeliAssault() {
@@ -227,15 +242,9 @@ void HeliAssault() {
     const float* hp=PosOf(heli);
     Check(std::hypot(hp[0]+60.0f,hp[2])<5.0f,"it landed 60 m short of the point on its way in",hp[0],hp[2]);
     Check(squads[0].order.order==mapcmd::Order::guard && squads[1].order.order==mapcmd::Order::guard,"each guards the point");
-    Check(ferryReleases>0 && heliGuards>0 && lastHeliCommand.order==mapcmd::Order::guard,"the helicopter's ferry over: it guards the drop point");
-    // A far order later: it comes for them (lands beside them), they board, it flies, lands, they get off.
-    Place(heli,-60,0,0);Place(soldier[0],-50,0,30);heliGround=true;
-    const int boards=squads[0].boards;
-    Check(TransportOrder(soldier[0].m,mapcmd::Command{mapcmd::Order::move,{0,0,1200}}),"a later far order goes by the helicopter");
-    for(int i=0;i<40000 && !Done(soldier[0].m);++i)Step();
-    Check(squads[0].boards>boards && std::hypot(PosOf(heli)[0],PosOf(heli)[2]-1140.0f)<5.0f,"picked up and set down 60 m short",
-          PosOf(heli)[0],PosOf(heli)[2]);
-    Check(squads[1].aboard==0 && squads[1].order.order==mapcmd::Order::guard,"the other squad stayed where it was");
+    // 2026-10-10 "载具送过来以后就会直接回去": once they are off it goes back, no longer their transport.
+    Check(withdrawals==1 && !TransportOf(soldier[0].m) && !TransportOf(soldier[1].m),"delivered: the helicopter goes back, the pairs gone");
+    Check(!TransportOrder(soldier[0].m,mapcmd::Command{mapcmd::Order::move,{0,0,1200}}),"a later far order: they walk");
 }
 
 void Withdraw() {
@@ -352,7 +361,8 @@ void SuccessionMidTrip() {
     Step(20);
     Check(ferryOn && !Done(soldier[0].m),"flying them in");
     TransportSucceed(soldier[0].m,nullptr);
-    Check(Done(soldier[0].m) && !ferryOn && heliGuards>0,"the trip over: its ferry let go, it guards where it is");
+    Check(Done(soldier[0].m) && !ferryOn && heliGuards>0 && withdrawals==0,
+          "the trip over in the air: its ferry let go, it guards where it is (it does not fly off with anyone aboard)");
 }
 
 // The stick's squads are kept by identity: a top freed and its memory reused before the plane is empty gets no order.
@@ -372,8 +382,7 @@ void ParadropReusedTop() {
 
 int main() {
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x1800000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
-    config.transportAutoRange=200.0f;
-    GroundTrip();EmptyTruck();HeliAssault();Withdraw();Succession();Paradrop();ReOrder();SuccessionMidTrip();ParadropReusedTop();
+    GroundTrip();EmptyTruck();DeliverHere();HeliAssault();Withdraw();Succession();Paradrop();ReOrder();SuccessionMidTrip();ParadropReusedTop();
     std::printf("transport_runtime: %d checks, %d failed\n",checks,failed);
     return failed ? 1 : 0;
 }

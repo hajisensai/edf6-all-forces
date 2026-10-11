@@ -73,8 +73,9 @@ unsigned char* PrepareSupportAircraft(const SupportAircraft& spec,const float* m
 int delivered=0,deliveredSquads=0,paradrops=0,ferries=0,jetWithdrawals=0,heliLeaves=0;
 const void* deliveredTops[3]{};const void* deliveredHull=nullptr;
 bool transportReady=true,peersTransports=true,heliHull=false,driverAboard=true;
-bool TransportDeliver(const void* v,const void* const* tops,int n,const float*) noexcept {
-    ++delivered;deliveredSquads=n;deliveredHull=v;for(int i=0;i<n && i<3;++i)deliveredTops[i]=tops[i];return n>0;
+bool deliveredHere=false;
+bool TransportDeliver(const void* v,const void* const* tops,int n,const float*,bool here) noexcept {
+    ++delivered;deliveredHere=here;deliveredSquads=n;deliveredHull=v;for(int i=0;i<n && i<3;++i)deliveredTops[i]=tops[i];return n>0;
 }
 bool TransportParadrop(const void*,const float*) noexcept {++paradrops;return true;}
 float ferryHeading[3]{};
@@ -208,6 +209,18 @@ int NpcBoardCrew(unsigned char*,unsigned char* const*,int count) noexcept {++boa
 bool NpcPrepareVehicleRoutePost(unsigned char*,const float*,float) noexcept {return true;}
 #endif
 bool NpcReleaseVehicleCrew(unsigned char*) noexcept {++releases;return true;}
+// The stock get-off before a seated soldier is deleted (support_dispatch.cpp Unseat): the seat cleared, counted.
+int unseated=0;
+bool NpcMoveSeat(unsigned char* v,unsigned seat,int to) noexcept {
+    if(to>=0)return false;
+    ++unseated;
+    auto* h=At<unsigned char*>(SeatAt(v,seat),kSeatRider);
+    Put<const void*>(SeatAt(v,seat),kSeatRider,nullptr);
+    if(h)Put<void*>(h,kSoldierVehicle,nullptr);
+    return true;
+}
+int squadOrders=0;mapcmd::Command lastSquadOrder{};
+bool NpcSquadSetOrder(const void*,const mapcmd::Command& c,bool) noexcept {++squadOrders;lastSquadOrder=c;return true;}
 bool SquadCommand(const void*,const Command&) noexcept {++orders;return true;}
 bool NpcPrepareSquadRoute(unsigned char*,const float*,float) noexcept {++routeOrders;return true;}
 bool NpcFinishSquadRoute(unsigned char*,const float*) noexcept {return true;}
@@ -303,6 +316,19 @@ int main() {
     check(!made && offlinePending,"infantry waits for full ground route before creation");
     routeResult=npc::navigation::Result::moving;++fixtureMs;SupportDispatchTick();
     check(made==4 && followed==3 && routeOrders>0 && orders==0,"verified infantry entry creates real squad with three native followers and a short-route order");
+    // 2026-10-10 "我摇的人还没到目的地成棍木了": a walk-in whose route stays blocked held the squad's quiet movement where it stood.
+    // Past kStuckMs without way it is let go with the point as its own guard order (its AI walks / fights on).
+    {
+        auto& d=deployments[0];
+        routeResult=npc::navigation::Result::blocked;squadOrders=0;
+        fixtureMs+=16;SupportDispatchTick();fixtureMs+=kStuckMs/2;SupportDispatchTick();
+        check(!d.delivered && squadOrders==0,"a walk-in briefly without a route keeps its route");
+        fixtureMs+=kStuckMs;SupportDispatchTick();
+        check(d.infantry[0].released && d.delivered && squadOrders==1 && lastSquadOrder.order==mapcmd::Order::guard &&
+              lastSquadOrder.at[0]==d.plan.target[0] && lastSquadOrder.at[2]==d.plan.target[2],
+              "no way past kStuckMs: the squad let go to guard the point on its own");
+        routeResult=npc::navigation::Result::pending;
+    }
     ResetSupportDispatch();made=0;routeResult=npc::navigation::Result::pending;
     SupportCallAt(21,target,note,128);testOnline=true;SupportDispatchTick();
     check(!offlinePending && !made,"entering an online session cancels an uncommitted offline request");
@@ -561,6 +587,35 @@ int main() {
         check(deleted==3,"out: its crew still aboard deleted (all three here)");
         fixtureMs+=16;SupportDispatchTick();
         check(deleted==4 && !d.withdrawing,"then the hull");
+        driverAboard=true;routeResult=npc::navigation::Result::pending;
+    }
+    // 2026-10-10 "我摇的人还没到目的地成棍木了": a route that never comes (pending / blocked) held the APC and its passengers
+    // where they stood for good. Past kStuckMs making no way it delivers where it stands; each seated soldier deleted later
+    // is put out of its seat first (Unseat), so no freed rider is left in a seat.
+    ResetSupportDispatch();made=deleted=followed=delivered=unseated=0;deliveredHere=false;fixtureMs+=40000;
+    {
+        auto apc=Make(true),driver=Make(),first=Make(),second=Make();
+        auto& d=deployments[0];d.used=d.assigned=d.started=true;d.id=8;d.born=fixtureMs;
+        d.plan.catalogId=static_cast<unsigned>(GroundStart()+2);d.plan.count=4;
+        d.plan.units[0].resourceId=kVehicle+1;
+        for(unsigned i=1;i<4;++i){d.plan.units[i].resourceId=kSoldier;d.plan.units[i].role=1;}
+        d.objects[0]=apc;d.objects[1]=driver;d.objects[2]=first;d.objects[3]=second;
+        auto* v=static_cast<unsigned char*>(const_cast<void*>(apc.obj));
+        for(unsigned i=0;i<3;++i) {
+            Put<const void*>(SeatAt(v,i),kSeatRider,d.objects[i+1].obj);
+            Put<const void*>(static_cast<unsigned char*>(const_cast<void*>(d.objects[i+1].obj)),kSoldierVehicle,v);
+        }
+        routeResult=npc::navigation::Result::blocked;
+        SupportDispatchTick();fixtureMs+=kStuckMs/2;SupportDispatchTick();
+        check(!d.delivered && !delivered,"no way yet: it waits for its route");
+        fixtureMs+=kStuckMs;SupportDispatchTick();
+        check(d.delivered && delivered==1 && deliveredHere && deliveredTops[0]==first.obj,
+              "making no way past kStuckMs: its passengers handed over to get off where it stands");
+        // WITHDRAW (as the delivery's end does): out at the entry, its seated driver put out of the seat before deletion.
+        driverAboard=false;deleted=0;
+        check(SupportWithdrawVehicle(apc.obj),"it goes back");
+        fixtureMs+=16;SupportDispatchTick();
+        check(unseated==3 && deleted==3,"each seated soldier out of its seat first, then deleted");
         driverAboard=true;routeResult=npc::navigation::Result::pending;
     }
     // A composed load (the bar's composition panel; the user, 2026-10-09: "支援栏是断剑那种，先点载具，然后选里面的人"; a click

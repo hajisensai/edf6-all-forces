@@ -40,6 +40,8 @@ constexpr std::uint32_t kSoldier=kSupportRangerResource,kLeader=kSupportLeaderRe
     kAircraft=kSupportAircraftResource,kVehicle=kSupportVehicleResource;
 constexpr int kDeployments=16;
 constexpr ULONGLONG kBoardLimit=120000,kCallCooldown=30000;
+constexpr ULONGLONG kStuckMs=20000;   // a delivery making no way this long gets off where it is (see Deployment::stuckSince)
+constexpr float kStuckMove=5.0f;      // m: moved this far from where its wait began, it is making way
 constexpr float kVehicleWaypointRadius=1.5f,kVehicleDriverHold=1.0f,kVehicleArrival=5.0f;
 constexpr float kInfantryWaypointRadius=1.5f,kInfantryRouteStop=1.0f,kInfantryArrival=3.0f;
 constexpr int kPlanCallsPerFrame=3;
@@ -75,6 +77,11 @@ struct Deployment {
     InfantryRoute infantry[3]{}; // one bounded coarse route per leader, not per follower
     ULONGLONG retiredFrame[support_net::kMaxUnits]{}; // an aircraft's crew deleted at this frame + 1 (Retire)
     bool withdrawing=false; // its ground vehicle sent off by a map order (SupportWithdrawVehicle): back to its entry, removed
+    // Since when its ground vehicle (or an infantry leader's route, by index + 1) has made no way (GameMs; 0: it moves).
+    // 2026-10-10 "我摇的人还没到目的地成棍木了": a route that stayed pending / blocked held the truck and its passengers (or a
+    // walking squad's quiet movement) where they stood for the rest of the mission. Past kStuckMs they get off / are let go.
+    ULONGLONG stuckSince=0,infantryStuck[3]{};
+    float stuckAt[3]{},infantryAt[3][3]{};   // where each was when its stuckSince began
 };
 Deployment deployments[kDeployments]{};
 bool offlinePending=false;std::uint64_t nextOffline=1;ULONGLONG callAt=0;
@@ -745,6 +752,27 @@ bool Validate(const SupportPlan& plan) noexcept {
 // they hung at the map's edge for the rest of the mission (2026-10-09 16:59, two helis parked at x 1447 and -1450).
 // A player aboard keeps the whole aircraft.
 constexpr ULONGLONG kRetireSettleFrames=30;
+// A support soldier taken out of its seat (the stock get-off: npcai.cpp NpcMoveSeat -> SeatKick 0x62E1A0) before it is
+// deleted. Deleting a seated one left its seat owned by a freed object: the hull then counted as occupied
+// (DeleteSupportVehicle refused it, the deployment let it go undriven) and the rider stood in its seat pose, updated by
+// nothing (2026-10-10 "我摇的人...成棍木了 / 卡车也跟着虚化了"). True: it is not in a seat now.
+constexpr std::size_t kSoldierVehicle=0x1548;   // Human: the vehicle it is in (crew.h, by kHumanVehicleCtrl)
+bool Unseat(const ObjRef& soldier) noexcept {
+    __try {
+        if(!Live(soldier))return true;
+        auto* h=static_cast<unsigned char*>(const_cast<void*>(soldier.obj));
+        auto* v=At<unsigned char*>(h,kSoldierVehicle);
+        if(!v)return true;
+        if(!Readable(v,kSeatCount+8))return false;
+        for(unsigned seat=0;seat<SeatCount(v);++seat)
+            if(At<const void*>(SeatAt(v,seat),kSeatRider)==h)return NpcMoveSeat(v,seat,-1);
+        return false;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+void DeleteSoldier(const ObjRef& soldier) noexcept {
+    if(!Unseat(soldier))Log("SUPPORT soldier %p: not out of its seat before it is deleted",soldier.obj);
+    DeleteSupportSoldier(soldier);
+}
 void Retire(Deployment& deployed) noexcept {
     const auto& plan=deployed.plan;
     for(unsigned i=0;i<plan.count;++i) {
@@ -758,7 +786,7 @@ void Retire(Deployment& deployed) noexcept {
         if(!retired) {
             if(!SupportAircraftLeft(deployed.objects[i]))continue;
             // Only the ones still aboard: a transport's soldiers got off and fight on (transport.cpp).
-            for(unsigned k=0;k<plan.count;++k)if(plan.units[k].role==i+1 && Seated(hull,deployed.objects[k]))DeleteSupportSoldier(deployed.objects[k]);
+            for(unsigned k=0;k<plan.count;++k)if(plan.units[k].role==i+1 && Seated(hull,deployed.objects[k]))DeleteSoldier(deployed.objects[k]);
             retired=GameFrame()+1;
             Log("SUPPORT deployment %llu: aircraft %u has left: its crew deleted",static_cast<unsigned long long>(deployed.id),i);
             continue;
@@ -783,6 +811,10 @@ void WithdrawGround(Deployment& deployed) noexcept {
             Log("SUPPORT deployment %llu: its vehicle withdrawn (deleted)",static_cast<unsigned long long>(deployed.id));
             deployed.withdrawing=false;return;
         }
+        // Still occupied: anyone of ours (an NPC, never a player: checked above) is put off, then it is tried again.
+        if(GameFrame()-retired==30 || GameFrame()-retired==90) {
+            for(unsigned seat=0;seat<SeatCount(hull);++seat)if(SeatRider(SeatAt(hull,seat))==Rider::other)NpcMoveSeat(hull,seat,-1);
+        }
         if(GameFrame()-retired>120) {
             Log("SUPPORT deployment %llu: its withdrawn vehicle still has riders: left where it is",static_cast<unsigned long long>(deployed.id));
             deployed.withdrawing=false;
@@ -804,7 +836,7 @@ void WithdrawGround(Deployment& deployed) noexcept {
     }
     if(!there)return;
     for(unsigned k=0;k<deployed.plan.count;++k)
-        if(deployed.plan.units[k].role==1 && Seated(hull,deployed.objects[k]))DeleteSupportSoldier(deployed.objects[k]);
+        if(deployed.plan.units[k].role==1 && Seated(hull,deployed.objects[k]))DeleteSoldier(deployed.objects[k]);
     retired=GameFrame()+1;
     Log("SUPPORT deployment %llu: its withdrawn vehicle is out: its crew deleted",static_cast<unsigned long long>(deployed.id));
 }
@@ -831,7 +863,7 @@ void Destroy(std::uint64_t id) noexcept {
         }
         // Remove crew first so native seat ownership is released before deleting hulls.
         for(unsigned i=0;i<deployed.plan.count;++i)
-            if(!preserve[i] && deployed.plan.units[i].resourceId<kAircraft)DeleteSupportSoldier(deployed.objects[i]);
+            if(!preserve[i] && deployed.plan.units[i].resourceId<kAircraft)DeleteSoldier(deployed.objects[i]);
         for(unsigned i=0;i<deployed.plan.count;++i) {
             if(preserve[i])continue;
             if(deployed.plan.units[i].resourceId>=kVehicle && Live(deployed.objects[i]))DeleteSupportVehicle(static_cast<unsigned char*>(const_cast<void*>(deployed.objects[i].obj)));
@@ -1354,18 +1386,28 @@ void SupportDispatchTick() noexcept {
             }
             std::memcpy(deployed.vehicleSample,position,12);deployed.vehicleSampleAt=now;
             const auto path=GroundNavigate(deployed.navigation,position,deployed.plan.target,kVehicleArrival,now,waypoint,profile);
-            if(path==npc::navigation::Result::moving)NpcPrepareVehicleRoutePost(vehicle,waypoint,kVehicleDriverHold);
-            else if(path==npc::navigation::Result::arrived) {
-                if(!NpcPrepareVehicleRoutePost(vehicle,position,kVehicleDriverHold) || !(speed<=0.5f))continue;
+            // Making no way (no route found, a route it cannot drive): past kStuckMs it delivers where it stands.
+            bool stuck=false;
+            if(path!=npc::navigation::Result::arrived) {
+                if(!deployed.stuckSince || support::FlatDistance(position,deployed.stuckAt)>kStuckMove) {
+                    deployed.stuckSince=now;std::memcpy(deployed.stuckAt,position,12);
+                } else stuck=now-deployed.stuckSince>kStuckMs;
+            }
+            if(stuck)Log("SUPPORT deployment %llu: its vehicle made no way for %llu s (route %d): delivers where it stands, %.0f m short",
+                         static_cast<unsigned long long>(deployed.id),static_cast<unsigned long long>(kStuckMs/1000),static_cast<int>(path),
+                         support::FlatDistance(position,deployed.plan.target));
+            if(path==npc::navigation::Result::moving && !stuck)NpcPrepareVehicleRoutePost(vehicle,waypoint,kVehicleDriverHold);
+            else if(path==npc::navigation::Result::arrived || stuck) {
+                if(!NpcPrepareVehicleRoutePost(vehicle,position,kVehicleDriverHold) || !(speed<=0.5f || stuck))continue;
                 if(mode==SupportCrewMode::unmanned && !NpcReleaseVehicleCrew(vehicle))continue;
                 if(mode==SupportCrewMode::unmanned) {
                     const auto playerRef=ObjRef::Of(PlayerHuman());
                     for(unsigned i=0;i<deployed.plan.count;++i)if(deployed.plan.units[i].role==1)
                         FollowSupportSoldier(deployed.objects[i],playerRef);
                 } else if(kind!=SupportVehicleKind::tank) {
-                    // A crewed APC / truck: the soldiers in its passenger seats are a squad and it is their transport
-                    // (transport.cpp; the user, 2026-10-09: "卡车之类的运输载具改成断剑那种操作方式"): they get off here and
-                    // guard the point; its driver stays aboard and it waits for their next far order.
+                    // A crewed APC / truck: the soldiers in its passenger seats are a squad; they get off here (stuck:
+                    // where it stands, then walk on) and guard the point, and it goes back with its driver (the user,
+                    // 2026-10-10: "载具送过来以后就会直接回去"; transport.cpp TransportDeliver -> SupportWithdrawVehicle).
                     // Its leader the passenger made as one (IsSupportLeaderResource), else the first: the seats need not
                     // be in the plan's order, and a leader following one of its own members inverts the squad.
                     const auto passenger=[&](unsigned i) noexcept {
@@ -1379,10 +1421,17 @@ void SupportDispatchTick() noexcept {
                     for(unsigned i=0;i<deployed.plan.count;++i)
                         if(passenger(i) && deployed.objects[i].obj!=top.obj)FollowSupportSoldier(deployed.objects[i],top);
                     const void* tops[1]={top.obj};
-                    if(top && !TransportDeliver(vehicle,tops,1,deployed.plan.target))
-                        Log("SUPPORT deployment %llu: its passengers not handed to their transport",static_cast<unsigned long long>(deployed.id));
+                    if(top && !TransportDeliver(vehicle,tops,1,deployed.plan.target,stuck)) {
+                        // No trip: put them off here anyway (they walk to the point) and send it back.
+                        Log("SUPPORT deployment %llu: its passengers not handed to their transport: off here",static_cast<unsigned long long>(deployed.id));
+                        for(unsigned i=0;i<deployed.plan.count;++i)if(passenger(i))Unseat(deployed.objects[i]);
+                        if(top)NpcSquadSetOrder(top.obj,mapcmd::Command{mapcmd::Order::guard,{deployed.plan.target[0],deployed.plan.target[1],deployed.plan.target[2]}},false);
+                        SupportWithdrawVehicle(vehicle);
+                    }
                 }
-                deployed.delivered=true;Status(mode==SupportCrewMode::unmanned ? L"空车已到达交付点，司机已下车" : L"支援车辆已抵达目的地");
+                deployed.delivered=true;
+                Status(mode==SupportCrewMode::unmanned ? L"空车已到达交付点，司机已下车" :
+                       stuck ? L"支援车辆无法继续前进：乘员就地下车步行前往" : L"支援车辆已抵达目的地");
             } else NpcPrepareVehicleRoutePost(vehicle,position,kVehicleDriverHold); // wait for a verified route; never drive through the obstacle
         } else if(InfantryCatalog(deployed.plan.catalogId)) {
             int leader=0;bool complete=true,released=false;
@@ -1392,7 +1441,22 @@ void SupportDispatchTick() noexcept {
                     auto* object=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[i].obj));
                     const auto* position=reinterpret_cast<const float*>(object+kPosition);float waypoint[3];
                     const auto path=GroundNavigate(route.navigation,position,deployed.plan.target,kInfantryArrival,GameMs(),waypoint,InfantryRouteProfile());
-                    if(path==npc::navigation::Result::arrived) {
+                    const int k=leader-1;
+                    const ULONGLONG ms=GameMs();
+                    bool stuck=false;
+                    if(path!=npc::navigation::Result::arrived) {
+                        if(!deployed.infantryStuck[k] || support::FlatDistance(position,deployed.infantryAt[k])>kStuckMove) {
+                            deployed.infantryStuck[k]=ms;std::memcpy(deployed.infantryAt[k],position,12);
+                        } else stuck=ms-deployed.infantryStuck[k]>kStuckMs;
+                    }
+                    if(stuck) {
+                        // Its route held it where it stood: let the squad go, with the point as its own guard order (its
+                        // own AI walks / fights there; it can be ordered like any squad).
+                        NpcSquadSetOrder(object,mapcmd::Command{mapcmd::Order::guard,{deployed.plan.target[0],deployed.plan.target[1],deployed.plan.target[2]}},false);
+                        route.done=route.released=true;
+                        Log("SUPPORT deployment %llu: squad %d made no way for %llu s (route %d): let go toward the point",
+                            static_cast<unsigned long long>(deployed.id),k,static_cast<unsigned long long>(kStuckMs/1000),static_cast<int>(path));
+                    } else if(path==npc::navigation::Result::arrived) {
                         route.done=NpcFinishSquadRoute(object,deployed.plan.target);
                     } else {
                         // Pending/blocked requests hold only quiet movement; combat and native follower
