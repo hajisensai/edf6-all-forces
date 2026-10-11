@@ -434,6 +434,8 @@ void KeepPlayerViewProj(const void* camera,const float* viewProj) noexcept;
 bool CameraRayOf(const void* human,float* eye,float* dir) noexcept;
 // A bigger physics world and the map pieces' log (bigworld.cpp): at load, before any mission.
 bool InstallBigWorld() noexcept;
+// legacymap.cpp: EDF4.1 maps' Havok 2014 collision migrated to hknp on the map path (plan P6).
+bool InstallLegacyMap() noexcept;
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
 bool InstallMissiles() noexcept;
 // The stock split missiles (MissileBullet02) split short of a big target's surface (splitmissile.cpp).
@@ -447,6 +449,14 @@ bool InstallJetSound() noexcept;
 // The game's glyph cache under one lock (glyphs.cpp): its threads lost glyphs and showed one character as another.
 bool InstallGlyphLock() noexcept;
 bool InstallEdf5Campaign() noexcept;
+// EDF5's compiled mission scripts online: the BVM executor's PreloadPlayerResource and CreatePlayer given their online
+// half (edf5online.cpp). Edf5BvmOnlinePlayers: the patched creation loop's count.
+bool InstallEdf5Online() noexcept;
+bool Edf5OnlineReady() noexcept;
+std::uint32_t Edf5BvmOnlinePlayers() noexcept;
+bool Edf5BvmOnlinePlayerArgs(int index,int* pad,int* split) noexcept;
+void Edf5BvmOnlinePlayerMade(int index,const void* made) noexcept;
+void ResetEdf5Online() noexcept;
 void JetSound(unsigned char* vehicle) noexcept;
 void JetSoundTick() noexcept;
 float GameEffectVolume() noexcept;   // jetsound.cpp: the game's master volume times its effect volume (0..1)
