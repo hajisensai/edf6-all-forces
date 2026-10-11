@@ -316,6 +316,18 @@ inline float StockYaw(float off,float rate,float faceRate,float damp,float feed)
 // with the aim kept on the screen (at most ~30 deg ahead of a camera that follows the nose) that damping ate half of
 // the command and the heli turned 5-17 deg/s however the mouse moved (the user's log, 2026-10-06 15:01).
 constexpr float kTurnGain=2.0f,kRateGain=1.5f;
+// Bank into the commanded speed and turn, not the motion measured on the native attitude basis. At a nose-down attitude the
+// native 0x654A80 removes its stored pitch/roll before recovering heading; banking on that heading's derivative
+// feeds the roll's own transient back into roll (the three-dimensional native audit reproduces repeated full
+// left/right banks). The heading error is the instructor's course command; on course it asks for no bank.
+// `speed` is Instructor's cyclic speed: braking/backing banks for the requested motion instead of sustaining a
+// forward bank during the native pitch transient; at a commanded hover there is no turn bank.
+inline float PlayerBankInput(float speed,float off,float most,float maxTilt,const float* fwd,const float* right) noexcept {
+    if(!(most>0.0f) || !std::isfinite(off+most))return 0.0f;
+    const float turn=vec::Clamp(off*kTurnGain,-most,most);
+    const float sense=fwd[2]*right[0]-fwd[0]*right[2];   // atan2 heading's turn expressed toward the native row 0
+    return BankInput(speed,turn*sense,maxTilt);
+}
 inline float PlayerYaw(float off,float rate,float most) noexcept {
     if(!(most>1e-3f) || !std::isfinite(off+rate))return 0.0f;
     const float want=vec::Clamp(off*kTurnGain,-most,most);

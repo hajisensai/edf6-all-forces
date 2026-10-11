@@ -2559,7 +2559,6 @@ struct Pilot {
     aim::Hold hold;
     float hover;                       // the rotor that holds its height (learned, StockThrottle)
     float prevHeading,yawRate;
-    float prevFwd[3],turn;             // the level nose last frame; its turn toward row 0 (rad/s, BankInput)
     float pitchIn,rollIn;              // the attitude the controller asks this frame (PlayerAttitudeHook's pitch / roll input)
     bool flying;                       // the mouse-aim flight wrote its input last frame (logged as it changes)
 };
@@ -2634,7 +2633,7 @@ Pilot* PilotOf(unsigned char* v,const float* fwd,ULONGLONG ms) noexcept {
     for(auto& x:pilots)if(!p && (!x.ref || x.ref.Is(v) || ms-x.seen>kAssistStaleMs))p=&x;
     if(!p)return nullptr;
     *p=Pilot{};p->ref=ObjRef::Of(v);p->lastMs=p->seen=ms;
-    std::memcpy(p->aim,fwd,12);std::memcpy(p->prevFwd,fwd,12);
+    std::memcpy(p->aim,fwd,12);
     const float lift=At<float>(v,kLiftPerRotor),mass=At<float>(v,kLiftMass);   // the takeoff cue's hover speed
     p->hover=aim::HoverRotor(lift,mass);
     p->prevHeading=std::atan2(fwd[0],fwd[2]);
@@ -2688,18 +2687,16 @@ void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos
     if(lifting)forward=lateral=0.0f;
     // 2. The attitude controller. The native yaw channel is a lagged heading offset, not a rate: compensate its current
     // state and the native spring conversion (aim::PlayerYawInput). The pitch the aim's; the roll the slide's plus the
-    // turn's bank (the nose's turn toward row 0, measured, times the forward speed).
+    // turn's bank (the course command, not a feedback from the bank's own native heading transient).
     const float heading=std::atan2(fwd[0],fwd[2]);
     const float maxYaw=At<float>(v,kMaxYaw);
     const float spring=At<float>(v,kPlayerYawSpring),blend=At<float>(v,kYawSmooth),state=At<float>(v,kPlayerYawState);
     const float rateLimit=Cfg().heliYawRate>0.0f ? Cfg().heliYawRate*kPi/180.0f : std::fabs(maxYaw)*spring*60.0f;
-    const float yaw=aim::PlayerYawInput(Wrap(std::atan2(w.face[0],w.face[2])-heading),p.yawRate,rateLimit,maxYaw,state,blend,spring);
-    const float turnNow=((fwd[0]-p.prevFwd[0])*right[0]+(fwd[2]-p.prevFwd[2])*right[2])/dt;
-    std::memcpy(p.prevFwd,fwd,12);
-    if(std::isfinite(turnNow))p.turn+=(turnNow-p.turn)*0.3f;
-    const float along=p.vel[0]*fwd[0]+p.vel[2]*fwd[2];
+    const float off=Wrap(std::atan2(w.face[0],w.face[2])-heading);
+    const float yaw=aim::PlayerYawInput(off,p.yawRate,rateLimit,maxYaw,state,blend,spring);
     p.pitchIn=maxTilt>1e-3f ? Clamp(-pitch/maxTilt,-1.0f,1.0f) : 0.0f;
-    p.rollIn=grounded ? lateral : Clamp(lateral+aim::BankInput(along,p.turn,maxTilt),-1.0f,1.0f);
+    const float bank=aim::PlayerBankInput(p.hold.speed,off,rateLimit,maxTilt,fwd,right);
+    p.rollIn=grounded ? lateral : Clamp(lateral+bank,-1.0f,1.0f);
     Put<float>(v,kInLateral,lateral);Put<float>(v,kInForward,forward);Put<float>(v,kInW,1.0f);Put<float>(v,kInYaw,yaw);
     // 3. The collective. On the ground the stock throttle (Space) stands, W spins the rotor up too.
     if(!grounded) {
@@ -2713,8 +2710,8 @@ void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos
     if(Cfg().debug && ms-p.inputLogAt>=1000) {
         p.inputLogAt=ms;
         Log("HELI INPUT v=%p mouse=(%.3f,%.3f) vert=%.0f side=%.2f set=%.2f climb=%.2f aim=(%.3f,%.3f,%.3f) pitch=%.3f roll=%.3f "
-            "move=%.3f yaw=%.3f rate=%.3f turn=%.3f state=%.4f ground=%d lift=%d",v,mx,my,vert,side,p.hold.speed,w.climb,p.aim[0],
-            p.aim[1],p.aim[2],p.pitchIn,p.rollIn,forward,yaw,p.yawRate,p.turn,state,grounded,lifting);
+            "move=%.3f yaw=%.3f rate=%.3f bank=%.3f state=%.4f ground=%d lift=%d",v,mx,my,vert,side,p.hold.speed,w.climb,p.aim[0],
+            p.aim[1],p.aim[2],p.pitchIn,p.rollIn,forward,yaw,p.yawRate,bank,state,grounded,lifting);
     }
     p.flying=true;
 }
