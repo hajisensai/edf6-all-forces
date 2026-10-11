@@ -13,7 +13,8 @@
 // the normal (three rays on one flat wall give one gap). Per wall:
 //  - the wanted velocity into it is cut to what still stops kGapMin off the disc's edge at `decel`;
 //  - inside the disc plus kMargin it is pushed out at kPushGain m/s per metre short (one push per wall, the pushes of
-//    walls either side adding up: between two it goes to the middle; all of them at most kPushMax);
+//    walls either side adding up: between two it goes to the middle; all of them at most kPushMax), times PushShare
+//    (none landing or lifting off, eased in after);
 //  - inside the disc plus kOverlap (a street narrower than the disc, or pressed against one) the wanted height goes
 //    kOverRoof over the wall's top (`roofAt` a metre past the hit), unless `climb` is off (landing: it has to come down;
 //    the sea rescue low over the water).
@@ -39,12 +40,26 @@ constexpr float kPi=3.14159265f;
 // walls: how many walls; roof: the highest wall top it climbs over (-1e9: none).
 struct Result { float nearest,dir[2]; int walls; float roof; };
 
+// How much of the push out it takes (Clear's `push`, 0..1): none landing (it has to come down where its landing put it,
+// and the push only fought that wanted velocity: the reviewer of #136) nor on the ground or in its lift-off
+// (`sinceGround` ms since it last had the ground under it, `liftOff` the lift-off's ms with no horizontal stick: heli.cpp
+// kLiftOffMs), then eased in over kPushEaseMs. Lifting off by a wall the full push (up to kPushMax) came in as a step at
+// the end of the lift-off, a lurch sideways a few metres over the ground (tools/rotor_clear_check.cpp "lift-off"). The
+// cut of the speed into a wall is never eased: that is what keeps the blades off it.
+constexpr unsigned long long kPushEaseMs=1500;
+constexpr float PushShare(bool landing,unsigned long long sinceGround,unsigned long long liftOff) noexcept {
+    return landing || sinceGround<=liftOff ? 0.0f
+         : sinceGround-liftOff>=kPushEaseMs ? 1.0f
+         : static_cast<float>(sinceGround-liftOff)/static_cast<float>(kPushEaseMs);
+}
+
 // `ray(from, to, hit, normal)`: metres along from->to to the nearest map hit, or < 0 with none. `roofAt(point)`: the
 // map's top under that point (y), or below -1e8 with none. `vel`: its velocity, `decel`: the braking it plans with
-// (m/s2); `want`: the wanted velocity (x, z used); `height`: the wanted height.
+// (m/s2); `want`: the wanted velocity (x, z used); `height`: the wanted height; `push`: the share of the push out it
+// takes (PushShare).
 template<class Ray,class Roof>
 Result Clear(const float* pos,const float* vel,float radius,float decel,float* want,float* height,bool climb,
-             Ray&& ray,Roof&& roofAt) noexcept {
+             Ray&& ray,Roof&& roofAt,float push=1.0f) noexcept {
     Result r{-1.0f,{0.0f,0.0f},0,-1e9f};
     if(!(radius>0.0f))return r;
     if(!(decel>0.5f))decel=0.5f;
@@ -85,7 +100,7 @@ Result Clear(const float* pos,const float* vel,float radius,float decel,float* w
         if(k==count){walls[count++]=Wall{{n[0],n[1]},gap,out};}
         else if(gap<walls[k].gap){walls[k].gap=gap;walls[k].out=out;}
     }
-    float push[2]={0.0f,0.0f};
+    float out[2]={0.0f,0.0f};
     for(int k=0;k<count;++k) {
         const Wall& w=walls[k];
         if(r.nearest<0.0f || w.gap<r.nearest){r.nearest=w.gap;r.dir[0]=w.n[0];r.dir[1]=w.n[1];}
@@ -93,12 +108,13 @@ Result Clear(const float* pos,const float* vel,float radius,float decel,float* w
         const float allowed=room>0.0f ? std::sqrt(2.0f*decel*room) : 0.0f;
         const float into=want[0]*w.n[0]+want[2]*w.n[1];
         if(into>allowed){want[0]-=w.n[0]*(into-allowed);want[2]-=w.n[1]*(into-allowed);}
-        push[0]-=w.n[0]*w.out;push[1]-=w.n[1]*w.out;
+        out[0]-=w.n[0]*w.out;out[1]-=w.n[1]*w.out;
     }
     r.walls=count;
-    const float len=std::sqrt(push[0]*push[0]+push[1]*push[1]);
-    if(len>kPushMax){push[0]*=kPushMax/len;push[1]*=kPushMax/len;}
-    want[0]+=push[0];want[2]+=push[1];
+    const float len=std::sqrt(out[0]*out[0]+out[1]*out[1]);
+    if(len>kPushMax){out[0]*=kPushMax/len;out[1]*=kPushMax/len;}
+    const float share=push>0.0f ? (push<1.0f ? push : 1.0f) : 0.0f;
+    want[0]+=out[0]*share;want[2]+=out[1]*share;
     if(r.roof>-1e8f && *height<r.roof+kOverRoof)*height=r.roof+kOverRoof;
     return r;
 }

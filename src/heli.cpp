@@ -1220,11 +1220,11 @@ float RoofBelow(const float* at,float top,bool any=false,std::uint32_t* flags=nu
 
 // The rotor's clearance (rotor_clear.h) on the map ray: last, so no push before it sends the blades into a wall.
 rotorclear::Result RotorClear(const float* pos,const float* vel,float rotor,float stopDecel,float* want,float* height,
-                              bool climb) noexcept {
+                              bool climb,float push) noexcept {
     const float top=(pos[1]>*height ? pos[1] : *height)+kRoofProbe;
     return rotorclear::Clear(pos,vel,rotor,stopDecel,want,height,climb,
         [](const float* a,const float* b,float* hit,float* normal){ return CastRay(a,b,hit,false,nullptr,kMapLayer,normal); },
-        [top](const float* at){ return RoofBelow(at,top); });
+        [top](const float* at){ return RoofBelow(at,top); },push);
 }
 
 Avoidance AvoidMap(const float* pos,const float* vel,float* want,float* height,bool land,float stopDecel,float rotor) noexcept {
@@ -1283,11 +1283,13 @@ Avoidance AvoidMap(const float* pos,const float* vel,float* want,float* height,b
 }
 
 // `rotor`: its rotor's radius (HeliType::rotor). Landing (and low over the sea) it keeps its blades off the walls but
-// does not climb over them.
-Avoidance Avoid(const float* pos,const float* vel,float* want,float* height,bool land,float stopDecel,float rotor) noexcept {
+// does not climb over them; `push`: the share of the rotor's push out of them it takes (rotorclear::PushShare: none
+// landing or lifting off).
+Avoidance Avoid(const float* pos,const float* vel,float* want,float* height,bool land,float stopDecel,float rotor,
+                float push) noexcept {
     if(!Cfg().heliAvoid || !rayOk)return Avoidance{-1.0f,-1.0f,-1e9f,-1e9f,0,{-1.0f,{0.0f,0.0f},0,-1e9f}};
     Avoidance r=AvoidMap(pos,vel,want,height,land,stopDecel,rotor);
-    r.rotor=RotorClear(pos,vel,rotor,stopDecel,want,height,!land);
+    r.rotor=RotorClear(pos,vel,rotor,stopDecel,want,height,!land,push);
     return r;
 }
 
@@ -2140,8 +2142,10 @@ Control Steer(Heli& h,const Sense& s,Mode mode,Want& w) noexcept {
         w.height=pos[1]+(above ? kUnstick : -kUnstick);
     }
     Control c{};
+    // The rotor's push out of a wall: none landing, on the ground or lifting off, eased in after (rotor_clear.h PushShare).
+    const float push=rotorclear::PushShare(land,s.grounded ? 0 : s.ms-h.groundAt,kLiftOffMs);
     c.avoid=Avoid(pos,h.vel,w.vel,&w.height,land || (mode==Mode::rescue && s.rescueLow),h.stopDecel,
-                  h.type ? h.type->rotor : kRotor506);
+                  h.type ? h.type->rotor : kRotor506,push);
     if((s.follow || s.engage) && !h.guard && !h.leaving)std::memcpy(h.hold,pos,12);
 
     // Horizontal: the stick for the wanted velocity (full stick flies h.top) plus kBrakeGain per m/s it is
