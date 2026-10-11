@@ -270,6 +270,9 @@ void __fastcall UpdateHook(void* b,void* a2,void* a3,void* a4) noexcept {
     __try { if(!TvSteer(static_cast<unsigned char*>(b)) && Cfg().enabled)Guide(static_cast<unsigned char*>(b)); }
     __except(EXCEPTION_EXECUTE_HANDLER){}
     nextUpdate(b,a2,a3,a4);
+    // The TV's view from where the stock step put the round (tvguide.cpp TvAfter; nothing when it is not the TV's).
+    __try { TvAfter(static_cast<unsigned char*>(b)); }
+    __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 }  // namespace
 

@@ -19,9 +19,10 @@ void Log(const char*,...) noexcept {}
 bool IsFuelTank(const unsigned char* w) noexcept { return w[0x100]==3; }
 bool IsLoadoutWeapon(const unsigned char* w) noexcept { return w[0x100]==2; }
 bool IsStoreWeapon(const unsigned char* w) noexcept { return w[0x100]==2; }
-const StoreSpec airSpec{L"AA", "AA", StoreRole::air,0,0},groundSpec{L"AG", "AG", StoreRole::ground,0,0},gunSpec{L"HP", "HP", StoreRole::gun,0,0};
+const StoreSpec airSpec{L"AA", "AA", StoreRole::air,0,0},groundSpec{L"AG", "AG", StoreRole::ground,0,0},gunSpec{L"HP", "HP", StoreRole::gun,0,0},
+                coaxSpec{L"MG", "MG", StoreRole::coax,0,0};
 const StoreSpec* StoreOf(const unsigned char* w) noexcept {
-    return w[0x101]==1 ? &airSpec : w[0x101]==2 ? &groundSpec : w[0x101]==3 ? &gunSpec : nullptr;
+    return w[0x101]==1 ? &airSpec : w[0x101]==2 ? &groundSpec : w[0x101]==3 ? &gunSpec : w[0x101]==5 ? &coaxSpec : nullptr;
 }
 int fileQueries=0;
 const wchar_t* WeaponFile(const unsigned char* w,std::size_t* n) noexcept {
@@ -31,11 +32,12 @@ void ClearWeaponLock(unsigned char*) noexcept {}
 int WeaponLock(const unsigned char*,float*,float*) noexcept { return 0; }
 bool ReadRound(const unsigned char* w,RoundModel* m) noexcept {
     // 3: a catalogued gun round of the grenade class (the flak's HE proximity), 4: a stock grenade round
-    *m={};m->kind=w[0x101]==1 || w[0x101]==2 ? RoundKind::homing : RoundKind::arc;m->lobbed=w[0x101]>=3;m->speed=2;m->alive=300;return true;
+    *m={};m->kind=w[0x101]==1 || w[0x101]==2 ? RoundKind::homing : RoundKind::arc;m->lobbed=w[0x101]==3 || w[0x101]==4;m->speed=2;m->alive=300;return true;
 }
 namespace audio { void LockTone(int,float) noexcept {} }
 }
-namespace edf { bool MeanMuzzle(const unsigned char* w,std::uint64_t,float*,float*) noexcept { return w[0x102]!=1; } }
+namespace crew { bool friendInLine=false; bool FriendInLine(const float*,const float*,const void*) noexcept { return friendInLine; } }
+namespace edf { bool MeanMuzzle(const unsigned char* w,std::uint64_t,float* p,float* d) noexcept { p[0]=p[1]=p[2]=0;d[0]=d[1]=0;d[2]=1;return w[0x102]!=1; } }
 int main() {
     using namespace crew;
     int fail=0,checks=0;
@@ -117,6 +119,61 @@ int main() {
     check(NpcPayloadSelect(vehicles[1],0,400,true)==weapons[1][1],"gun-role proximity HE is used against aircraft");
     weapons[1][1][0x101]=4;
     check(!NpcPayloadSelect(vehicles[1],0,400,true),"a lobbed round that is no gun store stays off aircraft");
+    // 2026-10-11 「应该有同轴机枪的坦克增加同轴机枪」 / 「用副武器的时候瞄具不会强制切回去」: a Blacker-class seat (its stock
+    // input reads the primary alone) with its main gun, a store on the gun and the coaxial machine gun. The coax rides
+    // the secondary trigger by itself: never one of R / LB's choices, its latch pulled only while that trigger is held,
+    // the main gun's pick untouched; the fire-control view follows the secondary edge to it and back.
+    {
+        ResetPayload();now+=1000;
+        auto v=vehicles[1];Put<void*>(v,0,image+0x1000);   // Class::other (not one of the classes read in §2)
+        auto seat=SeatAt(v,0);
+        for(int i=0;i<3;++i)weapons[1][i][kWeaponTrigger]=0;
+        weapons[1][0][0x100]=0;weapons[1][0][0x101]=0;Put<int>(weapons[1][0],kWeaponAmmo,10);
+        weapons[1][1][0x100]=2;weapons[1][1][0x101]=2;Put<int>(weapons[1][1],kWeaponAmmo,4);
+        weapons[1][2][0x100]=2;weapons[1][2][0x101]=5;Put<int>(weapons[1][2],kWeaponAmmo,1500);
+        Put<int>(weapons[1][2],kWeaponReloadTime,240);
+        Put<const wchar_t*>(weapons[1][1],0x08,L"EDF6VC_GLM_4.SGO");Put<const wchar_t*>(weapons[1][2],0x08,L"EDF6VC_MG505_1500.SGO");
+        Put<std::uint64_t>(seat,kSeatWeaponCount,3);
+        riders[1][edf::kHumanPlayer]=1;Put<void*>(riders[1],edf::kHumanPad,riders[1]);trackedHuman=riders[1];
+        Put<float>(seat,0x2E4,0.0f);Put<float>(seat,0x2E0,0.0f);
+        PayloadFrame(v);PayloadReadout coax{};
+        check(PlayerPayload(&coax) && coax.count==3 && coax.entry[2].coax && coax.entry[2].fire==PayloadFire::secondary,
+              "the coaxial gun is the seat's secondary-trigger weapon");
+        check(coax.choices==2 && !coax.entry[2].selectable && coax.entry[1].selectable,"R / LB cycles the main gun and its stores, never the coax");
+        check(!weapons[1][2][kWeaponTrigger],"no trigger, no coax burst");
+        check(PayloadSightPicked(v,0)==weapons[1][0],"the main gun owns the sight by default");
+        now+=16;Put<float>(seat,0x2E0,1.0f);PayloadFrame(v);
+        check(weapons[1][2][kWeaponTrigger]==1 && !weapons[1][0][kWeaponTrigger] && !weapons[1][1][kWeaponTrigger],
+              "the secondary trigger pulls the coax alone");
+        check(PayloadSightPicked(v,0)==weapons[1][2],"the secondary edge hands the fire-control view to the coax");
+        weapons[1][2][kWeaponTrigger]=0;now+=16;PayloadFrame(v);
+        check(weapons[1][2][kWeaponTrigger]==1,"held, it keeps firing (its own interval paces it)");
+        Put<float>(seat,0x2E0,0.0f);weapons[1][2][kWeaponTrigger]=0;now+=16;PayloadFrame(v);
+        check(!weapons[1][2][kWeaponTrigger] && PayloadSightPicked(v,0)==weapons[1][2],"let go: it stops, the view stays on it");
+        Put<float>(seat,0x2E4,1.0f);now+=16;PayloadFrame(v);
+        check(PayloadSightPicked(v,0)==weapons[1][0],"the primary edge takes the view back to the main gun");
+        Put<float>(seat,0x2E4,0.0f);Put<int>(weapons[1][2],kWeaponAmmo,0);Put<int>(weapons[1][2],kWeaponReloadTime,-1);
+        Put<float>(seat,0x2E0,1.0f);now+=16;PayloadFrame(v);
+        check(!weapons[1][2][kWeaponTrigger],"a coax spent for good is not pulled");
+        Put<float>(seat,0x2E0,0.0f);Put<int>(weapons[1][2],kWeaponAmmo,1500);Put<int>(weapons[1][2],kWeaponReloadTime,240);
+        // An NPC crew (2026-10-11: 「ap弹和机枪不冲突吧，两个都用不就好了」): the coax is never the one weapon chosen; it
+        // fires alongside the main gun whenever the gun is laid on the target close enough, a friend not in the line.
+        riders[1][edf::kHumanPlayer]=0;trackedHuman=nullptr;
+        PayloadFire fire=PayloadFire::other;
+        check(NpcPayloadSelect(v,0,80,false,&fire)==weapons[1][0],"an NPC crew keeps its main gun on a close target");
+        alignas(16) unsigned char enemy[0x400]{};
+        float* where=reinterpret_cast<float*>(enemy+kPosition);where[0]=0;where[1]=-0.5f;where[2]=80;
+        weapons[1][0][kWeaponTrigger]=weapons[1][2][kWeaponTrigger]=0;
+        check(NpcCoaxFire(v,0,enemy,&FriendInLine) && weapons[1][2][kWeaponTrigger]==1,"the coax fires alongside it, laid on the target");
+        PullHook(holders[1][0]);
+        check(weapons[1][0][kWeaponTrigger]==1,"and the main gun's own pull still lands on the main gun");
+        weapons[1][2][kWeaponTrigger]=0;where[0]=30;
+        check(!NpcCoaxFire(v,0,enemy,&FriendInLine) && !weapons[1][2][kWeaponTrigger],"not laid on it (20 degrees off): no coax burst");
+        where[0]=0;where[2]=900;check(!NpcCoaxFire(v,0,enemy,&FriendInLine),"beyond 600 m: the coax holds");
+        where[2]=80;friendInLine=true;check(!NpcCoaxFire(v,0,enemy,&FriendInLine),"a friend in the line: the coax holds");friendInLine=false;
+        check(!NpcCoaxFire(v,0,nullptr),"no target, no burst");
+        Put<void*>(v,0,image+kVt403);
+    }
     ResetPayload();check(!PayloadPicked(vehicles[0]),"mission reset clears choices");
     VirtualFree(image,0,MEM_RELEASE);std::printf("payload runtime: %d checks, %d failures\n",checks,fail);return fail ? 1 : 0;
 }

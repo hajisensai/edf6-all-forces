@@ -19,7 +19,8 @@ import vcobjects as vc  # noqa: E402
 
 OUT = os.path.normpath(os.path.join(HERE, '..', 'src', 'stores.inc'))
 ROLES = {'air': 'StoreRole::air', 'ground': 'StoreRole::ground', 'bomb': 'StoreRole::bomb', 'rocket': 'StoreRole::rocket',
-         'gun': 'StoreRole::gun'}   # gun: a stock vehicle's rounds (vcobjects.Shell)
+         'gun': 'StoreRole::gun',   # gun: a stock vehicle's rounds (vcobjects.Shell)
+         'coax': 'StoreRole::coax'}   # coax: a tank's coaxial machine gun (its own trigger: src/payload.cpp)
 
 
 def durabilities() -> dict[float, float]:

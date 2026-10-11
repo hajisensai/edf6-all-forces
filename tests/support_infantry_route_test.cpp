@@ -40,7 +40,7 @@ void RescueRequestFailed(const wchar_t*) noexcept{}
 bool SupportPeersAcceptTransports() noexcept{return true;}
 bool SupportPeersAcceptLoadout() noexcept{return true;}
 bool SupportAircraftReady(const SupportAircraft&) noexcept{return false;}
-bool TransportDeliver(const void*,const void* const*,int,const float*) noexcept{return false;}
+bool TransportDeliver(const void*,const void* const*,int,const float*,bool) noexcept{return false;}
 bool TransportParadrop(const void*,const float*) noexcept{return false;}
 bool JetFerry(const void*,const float*,const float*) noexcept{return false;}
 bool AirdropReady(SupportVehicleKind) noexcept{return false;}

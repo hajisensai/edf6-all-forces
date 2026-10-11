@@ -170,7 +170,8 @@ def build_exe(name: str) -> str:
     # EDF4.1's objects converted ahead of time (tools/edf41_objects.py), so the installer needs no EDF4.1
     cmd += ['--add-data', f'{os.path.join(ROOT, "edf41port", "objects")}{seps}edf41port/objects']
     cmd += ['--add-data', f'{os.path.join(ROOT, "edf41port", "objects.json")}{seps}edf41port']
-    for registry in ('edf5port/weapons.json', 'edf41port/weapons.json', 'edf5port/models.json'):   # REGISTRIES
+    for registry in ('edf5port/weapons.json', 'edf41port/weapons.json', 'edf5port/models.json',
+                     'edf41port/calls.json'):   # REGISTRIES
         folder = registry.split('/')[0]
         cmd += ['--add-data', f'{os.path.join(ROOT, *registry.split("/"))}{seps}{folder}']
     cmd.append(os.path.join(ROOT, 'tools', 'installer.py'))

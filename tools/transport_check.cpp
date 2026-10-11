@@ -29,10 +29,11 @@ View ViewOf(const World& w,std::uint64_t ms) {
 
 void Decisions() {
     const Tuning t{};
-    Check(Rides(true,false,250.0f,t.autoRange),"a paired squad rides to a point past the auto range");
-    Check(!Rides(true,false,150.0f,t.autoRange),"...and walks to a nearer one");
-    Check(Rides(true,true,10.0f,t.autoRange),"aboard it rides (gets off) whatever the distance");
-    Check(!Rides(false,true,900.0f,t.autoRange),"no pair: no ride");
+    (void)t;
+    // 2026-10-10 "站原地冷暴力我": no far-order ride any more -- a paired squad on foot walks, however far.
+    Check(!Rides(true,false),"a paired squad on foot walks to any point (no vehicle is sent for it)");
+    Check(Rides(true,true),"aboard it rides (gets off) whatever the distance");
+    Check(!Rides(false,true),"no pair: no ride");
     // The drop point: standoff short of the point along the way in; an order nearer than that: where the vehicle is.
     const float from[3]={0,0,0},target[3]={0,5,500};float out[3];
     DropPoint(from,target,40.0f,out);

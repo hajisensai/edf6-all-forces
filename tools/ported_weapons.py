@@ -3,7 +3,8 @@ tools/call_weapons.py stacks after its call weapons, in the same transaction and
 turned into placeholders on uninstall like those (see its doc).
 
 The registries (REGISTRIES, in the order they were released: edf5port/weapons.json and edf5port/models.json from
-tools/make_edf5_weapons.py, edf41port/weapons.json from tools/make_edf41_weapons.py; docs/edf5-weapons-plan.md): per
+tools/make_edf5_weapons.py, edf41port/weapons.json and edf41port/calls.json from tools/make_edf41_weapons.py;
+docs/edf5-weapons-plan.md): per
 weapon its id (EDF6VC_E5_* / EDF6VC_E41_*), category, level, star caps, the EDF6 template row, its texts in the five
 languages, the sound cues it needs swapped and the files it needs that EDF6 lacks ('assets': Mods path -> the file in
 its game, converted by pylib/legacy_assets.py: a model only EDF5 has). Its SGO comes from one of two places:
@@ -66,6 +67,7 @@ REGISTRIES: tuple[tuple[str, str], ...] = (
     ('edf5', 'edf5port/weapons.json'),
     ('edf41', 'edf41port/weapons.json'),
     ('edf5', 'edf5port/models.json'),
+    ('edf41', 'edf41port/calls.json'),
 )
 
 
@@ -127,6 +129,7 @@ RELEASED: dict[str, tuple[int, str]] = {
     'EDF5 weapons (2026-10-10)': (61, '1547668c15e2211bf19f9ff54483855df5903ff4a481dc80858ee69e9d6a7578'),
     'EDF4.1 weapons (2026-10-10)': (345, '169d12e069abf6eb1cbeb4106de7acf2f5c9c073be96a03a4a7f49a432b5569e'),
     'EDF5 weapons with converted models (2026-10-10)': (348, 'cb28e972fcb1b3c78c6f195c927b9dc42cdbdafd0da1bd525fe8f5b754b073a2'),
+    'EDF4.1 calls (plan P5)': (432, '71d6096f275689d777128d1d6a23f23901c84cdf0d969e476e3de3ed3a8a48f1'),
 }
 
 

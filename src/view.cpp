@@ -6,7 +6,9 @@
 // So past 1000 m everything but the scenery was gone. The env is *(*(image+0x20B2990)+0x258); the plugin raises
 // FarClipZ to Cfg().viewDistance once a frame (the mission's load writes the stock values back each mission) and the
 // far camera's end to no nearer than it. The far camera's start is left as the mission set it (view_clip.h: moving it
-// out cut the far-only mountains nearer than it, 2026-10-06). 0: the stock values are left alone. (Static RE: M;
+// out cut the far-only mountains nearer than it, 2026-10-06). 0: the stock values are left alone. -1 (the default since
+// 2026-10-10, the user: "改一下上限，改成无限"): unlimited -- past the world's diagonal and the mission's far pass end
+// (crew.h UnlimitedViewDistance), so the plugin's clip is never what cuts a vehicle or a soldier off. (Static RE: M;
 // untested in game. The depth range grows with it: far/near 30000 at 3000 m, the stock 10000.)
 #include "crew.h"
 #include "memory.h"
@@ -117,13 +119,15 @@ void ViewMapClip(bool on,float farClip,float nearClip) noexcept {
 }
 
 void ViewTick() noexcept {
-    const float want=Cfg().viewDistance;
+    float want=ViewDistanceWanted();
     if(want<=0.0f)return;
-    RaiseCameras(want);
     const auto holder=At<const unsigned char*>(image,kEnvHolder);
-    if(!holder || !Readable(holder+kEnv,8))return;
-    const auto env=At<unsigned char*>(holder,kEnv);
-    if(!env || !Readable(env+kDistantFar,4,true))return;
+    unsigned char* env=holder && Readable(holder+kEnv,8) ? At<unsigned char*>(holder,kEnv) : nullptr;
+    if(env && !Readable(env+kDistantFar,4,true))env=nullptr;
+    // Unlimited (-1): no nearer than the mission's own far pass end (a map's 35000 m one too), past which nothing draws.
+    if(Cfg().viewDistance<0.0f && env && At<float>(env,kDistantFar)>want)want=At<float>(env,kDistantFar);
+    RaiseCameras(want);
+    if(!env)return;
     const float was=At<float>(env,kFarClip);
     if(Raise(env,kFarClip,want) && env!=loggedEnv) {
         loggedEnv=env;

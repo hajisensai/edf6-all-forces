@@ -155,7 +155,7 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 ### 4.4 脚本结束后转成普通单位（A3，P7）
 
 - 每帧按小队顶端士兵读一次「脚本占用」= 自己有路线、或 NPC 根队长有路线、或 FixAiPosition（只有朝向令不算：脚本让单位转个身不等于接管过它）。占用由真变假（路线走完、`CancelAiRoute`、`Unfollow`、Fix 解除）并保持 `ScriptNpcSettleSec` 秒 → 该小队转成普通自制 AI 单位：移动交给插件、出现在面板里可下令（`npc::ScriptWatch`，只释放一次）。
-- 可招募：`+0x540` 是脚本的意图（`CreateFriendSquad` 的参数 / `SetAiAutoFollow` / `Unfollow` 会清 0）。脚本结束后，ini `ScriptNpcRecruit=1` 时插件把这支小队的 `+0x540` 置 1，玩家走近即按原版方式入队；`=0` 时保持脚本给的值。
+- 可招募：`+0x540` 是脚本的意图（`CreateFriendSquad` 的参数 / `SetAiAutoFollow` / `Unfollow` 会清 0）。脚本结束后，ini `ScriptNpcRecruit=1` 时插件把这支小队的 `+0x540` 置 1，玩家可在面板招募（`VanillaRecruit=1` 时走近即按原版方式入队）；`=0` 时保持脚本给的值。
 - 风险（写明）：脚本日后若再对这支小队 `SetAiRoute`，而它已被玩家招募（`+0x548 != 0`），原版函数什么都不做；之后等待「走完」的脚本会立即通过（`+0x4A8 == 0`），但等「到达区域」的脚本会等不到。所以 `ScriptNpcRecruit` 默认 1（用户要求），但只对**判据曾为真、现在为假超过 `ScriptNpcSettleSec` 秒**的单位放开，避免脚本两条指令之间的空档被误判为结束。
 - 列表与标记（A1）：脚本单位也进面板，状态列显示 `SCRIPT`（路线中）/ `HOLD`（Fix）/ `ESCORT`（Navigation explorer）/ `FREE` / `SQUAD` / `RECRUITED`；地图上用同一套小队图标，脚本单位灰色、不可选中下令。
 
@@ -169,7 +169,15 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 
 ### 5.2 招募
 
-保持原版的「走近 10 m 自动入队」，插件不改距离常量（`0x1765A44` 被 913 处共用）。面板里多一条「招募」：对选中的自由小队调 `SetFollow(队长, 玩家)` + vslot 39，等价于原版招募（单机）。
+面板的「招募」/「跟随」：对选中的自由小队调 `SetFollow(队长, 玩家)` + vslot 39，等价于原版招募。
+
+原版的「走近 10 m 自动入队」（率领）**默认关闭**（`VanillaRecruit=0`；2026-10-11 用户：「删了原版的率领npc机制。和指挥跟随重复了感觉」）：
+- 原版只有一道门：士兵 Think `0x596B50` 里 `0x596BD8` 取 `dl = (+0x548 == 0) ? +0x540 : 0`，`0x596E5F` `test dl,dl; je 0x59717D` 跳过整段（遍历队伍 → `0x598D10` 10 m 内本机玩家 → `0x596FF7` `SetFollow` → `0x597009` vslot 39）。
+- 插件在 `ThinkHook` 里、调原版 Think **之前**把没有队长的非玩家士兵的 `+0x540` 清 0，原版 Think 返回后立即放回原值（`HideWalkUp`）。不改代码字节、不改距离常量（`0x1765A44` 被 913 处共用），`+0x540` 在 Think 之外保持脚本给的值，所以解除招募 / 冷却 / `ScriptNpcRecruit` / 关掉 AI 时的归还逻辑都不用改；`0x59B4CF`（vslot 5）读到的也仍是原值。
+- 只在 `CustomNpcAi=1` 且 `SetFollow` 签名核对通过时生效：否则面板不能招募，原版率领是唯一入口，保留。
+- 任务里等玩家去率领的小队（例如 `FixAiPosition` 待命 = HOLD）原版能走近带走，面板却因「脚本控制」拒绝一切指令。为不让这类任务卡住：`NativeJoinable`（没有队长且 `+0x540 != 0`，即原版会放行的条件）的脚本小队在面板上不置灰，只接受「招募」/「跟随」（`CommandUnit::joinOnly`，执行入口同样只放行这两个指令），其余指令仍回 `scripted`。入队后它的脚本状态和原版走近入队后一样。
+- 联机：走近入队发生在运行该士兵 Think 的机器上，每台机器按自己的 ini 处理；房主和客机都需更新且设同值。顺带消除了 §2.3 的「`+0x540` 不复制，一台机器解除、另一台走近又招回」。
+- `VanillaRecruit=1` 恢复原版行为（脚本小队重新置灰，靠走近入队）。
 
 ### 5.3 队长阵亡（B8，P3）
 
@@ -180,8 +188,8 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 
 ### 5.4 解除招募与冷却（C2，P4）
 
-- 解除：队长 `+0x540 = 0` → `SetFollow(队长, nullptr)` + vslot 39（取原版队长阵亡分支的写法，H）。小队停在原地（招募时原版已清掉路线），插件给它一个驻守点 = 解除时的位置，这个驻守点属于「插件自己领导」：冷却结束后玩家走近、原版把它招募回去时自动作废，小队跟随玩家（见 §6.2 指令的领导归属）。
-- 冷却：`Cooldowns` 记 `NpcRecruitCooldownSec`；到时把 `+0x540` 置回 1，原版走近招募重新生效。冷却期间面板显示剩余秒数。
+- 解除：队长 `+0x540 = 0` → `SetFollow(队长, nullptr)` + vslot 39（取原版队长阵亡分支的写法，H）。小队停在原地（招募时原版已清掉路线），插件给它一个驻守点 = 解除时的位置，这个驻守点属于「插件自己领导」：冷却结束后玩家再招募它（面板，或 `VanillaRecruit=1` 时走近）时自动作废，小队跟随玩家（见 §6.2 指令的领导归属）。
+- 冷却：`Cooldowns` 记 `NpcRecruitCooldownSec`；到时把 `+0x540` 置回原值，面板重新可招募（`VanillaRecruit=1` 时原版走近招募也重新生效）。冷却期间面板显示剩余秒数。
 - 单机限定（§2.3）。
 
 ## 6. 指挥面板（C，P4/P5）
@@ -321,7 +329,7 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 联机里直接决定客人的小队会不会被拉向房主。远端玩家的镜头读不到：撤退的「身后」改为那位玩家背对最近威胁的一侧；
 枪线回避（§3.4）只对本机玩家有，远端玩家本人仍在友军射线检查里。
 
-ini（`[VehicleCrew]`，热加载）：`CustomNpcAi`（总开关）、`NpcFireLane`、`NpcLaneWidth`、`NpcLaneLength`、`NpcFlankDeg`、`NpcWeaponSwitch`、`NpcEngageShare`、`NpcEvade`、`NpcDangerRange`、`NpcGrabRange`、`NpcCrowd`、`NpcRollSec`、`NpcRetreatHp`、`NpcLeash`、`NpcSquadSuccession`、`NpcSquadMin`、`NpcSquadMax`、`NpcSquadJoinRange`、`NpcRecruitCooldownSec`、`NpcMarkKey`、`NpcMarkCone`、`NpcFreeRange`、`NpcGuardRadius`、`NpcBoarding`、`ScriptNpcRecruit`、`ScriptNpcSettleSec`、`TankReturnToPost`、`TankPostHold`、`TankReverseMax`。每项范围检查同其他 ini 项。
+ini（`[VehicleCrew]`，热加载）：`CustomNpcAi`（总开关）、`NpcFireLane`、`NpcLaneWidth`、`NpcLaneLength`、`NpcFlankDeg`、`NpcWeaponSwitch`、`NpcEngageShare`、`NpcEvade`、`NpcDangerRange`、`NpcGrabRange`、`NpcCrowd`、`NpcRollSec`、`NpcRetreatHp`、`NpcLeash`、`NpcSquadSuccession`、`NpcSquadMin`、`NpcSquadMax`、`NpcSquadJoinRange`、`NpcRecruitCooldownSec`、`VanillaRecruit`、`NpcMarkKey`、`NpcMarkCone`、`NpcFreeRange`、`NpcGuardRadius`、`NpcBoarding`、`ScriptNpcRecruit`、`ScriptNpcSettleSec`、`TankReturnToPost`、`TankPostHold`、`TankReverseMax`。每项范围检查同其他 ini 项。
 
 ## 10. 分阶段计划与顺序
 

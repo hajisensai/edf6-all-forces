@@ -72,6 +72,11 @@ constexpr std::size_t kArmReach=0x224,kArmDamage=0x89C,kArmBlast=0x8B0;
 // --- The friends' walk (as sidecar.cpp's): 0x5E11D0(manager, team, functor) visits every object of every team friendly
 // to `team` through functor slot 1.
 constexpr unsigned kTeamWalk=0x5E11D0,kTeamManager=0x20B2978;
+// Nobody's vehicles (team 5: the stock vehicle update puts an empty one there, docs/camera-re.md "team 5 另走一遍"): the
+// friends' walk never visits them, so a squad's BOARD found no empty truck or tank (2026-10-10: "步兵不乘啊"). The stock
+// board prompt walks team 5 on its own through 0x5E0D60(manager, team, functor), as map.cpp does for its marks.
+constexpr unsigned kOneTeamWalk=0x5E0D60;
+const unsigned char kOneTeamWalkSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x48,0x89,0x7C,0x24,0x18,0x41,0x56};
 
 struct SoldierClass { unsigned vtable,think; bool rolls; const char* name; };
 // Slot 68 of the Ranger and the Air Raider rolls sideways on the evade press; the Wing Diver's and the Fencer's jump /
@@ -105,7 +110,7 @@ constexpr float kSpotStop=3.0f;         // m from its combat spot it stops
 constexpr float kBehindPlayer=8.0f;     // m behind the player a hurt soldier falls back to
 constexpr ULONGLONG kSpotMs=4000,kLosFrames=6,kStaleMs=2000,kLogMs=2000,kPlayerFixMs=2000;
 constexpr int kArmMissFrames=90;        // a pick not taken this long (1.5 s: a heavy weapon's switch takes a while): picking off for it
-constexpr int kMaxArms=16,kMaxSoldiers=256,kMaxEnemies=1024,kMaxFriends=512,kMaxRoot=16;
+constexpr int kMaxArms=16,kMaxSoldiers=256,kMaxEnemies=1024,kMaxFriends=512,kMaxRoot=16,kMaxNobodys=128;
 
 struct Soldier {
     ObjRef ref;
@@ -139,6 +144,8 @@ struct World {
     Enemy enemy[kMaxEnemies];
     npc::Friend fr[kMaxFriends];
     const void* frObject[kMaxFriends];
+    int nobodys;                       // nobody's (team 5) ground vehicles: BOARD's candidates only (no shot lanes)
+    const void* nobody[kMaxNobodys];
     bool player,lane,lookOk;
     float playerAt[3],look[3];
     npc::Lane laneOf;
@@ -172,6 +179,17 @@ void __fastcall FriendVisit(void* self,void* object) noexcept {
 }
 void __fastcall FriendDtor(void*,unsigned) noexcept {}
 void* kFriendVtable[]={reinterpret_cast<void*>(&FriendDtor),reinterpret_cast<void*>(&FriendVisit)};
+// Team 5's walk: its ground vehicles a soldier can drive (NpcDrivable: car, mech, Barga families) -- no aircraft (a
+// delivered or parked jet / a rescue helicopter waits there for the player, not for a squad).
+void __fastcall NobodyVisit(void* self,void* object) noexcept {
+    __try {
+        World& w=*static_cast<FriendWalk*>(self)->w;
+        auto o=static_cast<const unsigned char*>(object);
+        if(!o || o[kDead] || w.nobodys>=kMaxNobodys || !KnownVehicle(o) || !NpcDrivable(o))return;
+        w.nobody[w.nobodys++]=o;
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+}
+void* kNobodyVtable[]={reinterpret_cast<void*>(&FriendDtor),reinterpret_cast<void*>(&NobodyVisit)};
 using WalkFn=void(__fastcall*)(void*,std::int32_t,void*);
 
 // The player's lane (§3.4): from their chest along the camera's centre to the first map hit, or NpcLaneLength.
@@ -367,7 +385,7 @@ void FormationTick() noexcept {
 
 void Gather(std::int32_t team) noexcept {
     World& w=world;
-    w.frame=GameFrame();w.team=team;w.enemies=w.friends=0;
+    w.frame=GameFrame();w.team=team;w.enemies=w.friends=w.nobodys=0;
     w.player=player.at && GameMs()-player.at<kPlayerFixMs;
     if(w.player)std::memcpy(w.playerAt,player.pos,12);
     VisitEnemiesOf(team,&SeeEnemy,&w);
@@ -379,6 +397,11 @@ void Gather(std::int32_t team) noexcept {
     if(const auto manager=At<void*>(image,kTeamManager)) {
         FriendWalk f{kFriendVtable,&w};
         reinterpret_cast<WalkFn>(image+kTeamWalk)(manager,team,&f);
+        // On team 5 itself the friends' walk had them already (BoardTarget reads the friends first).
+        if(team!=kTeamVehicle && Matches(kOneTeamWalk,kOneTeamWalkSig,sizeof(kOneTeamWalkSig))) {
+            FriendWalk n{kNobodyVtable,&w};
+            reinterpret_cast<WalkFn>(image+kOneTeamWalk)(manager,kTeamVehicle,&n);
+        }
     }
     PlayerLane(w);
     FormationTick();
@@ -1211,6 +1234,34 @@ void PreThink(unsigned char* h) noexcept {
     Succeed(leader);
 }
 
+// --- The stock walk-up recruit, off (VanillaRecruit=0; the user 2026-10-11: "删了原版的率领npc机制，和指挥跟随重复了") ---
+// The soldier's Think 0x596B50 joins a player itself: at 0x596BD8 dl = (+0x548 == 0) ? +0x540 : 0, the one gate
+// (0x596E5F test dl,dl; je 0x59717D) of the branch that walks the team (visitor 0x598D10, a player within
+// [0x1765A44] = 10 m), then SetFollow(self, player) at 0x596FF7 and its replication (vslot 39) at 0x597009. The map's
+// FOLLOW / RECRUIT does the same join (Follow), so the stock's is dropped: +0x540 is read as 0 by that one Think and
+// put back right after it, so the script's intent (CreateFriendSquad / SetAiAutoFollow) and the plugin's own bookkeeping
+// of it (a dismissal, its cooldown, ScriptNpcRecruit) stay as they were; the map reads it (NativeJoinable). Only while
+// the plugin's AI is on and SetFollow is as read: else the stock walk-up is the only way in, and it stays.
+bool WalkUpOff() noexcept {
+    return ok && followOk && Cfg().enabled && Cfg().customNpcAi && !Cfg().vanillaRecruit;
+}
+// Before the stock Think: +0x540 that the walk-up gate would read, cleared (returned, to be put back); 0 when none.
+std::uint8_t HideWalkUp(unsigned char* h) noexcept {
+    if(!WalkUpOff() || IsAnyPlayer(h) || At<const void*>(h,kLeader))return 0;
+    const std::uint8_t was=h[kAutoFollow];
+    h[kAutoFollow]=0;
+    return was;
+}
+// A squad the stock would let a player walk up to and join: no leader, +0x540 set. A script's squad so (a mission
+// waiting for the player to take it) is recruited from the map instead while the walk-up is off.
+bool NativeJoinable(const unsigned char* top) noexcept {
+    return WalkUpOff() && top && Readable(top,kLeader+8) && !At<const void*>(top,kLeader) && top[kAutoFollow];
+}
+// A script's squad the map takes FOLLOW / RECRUIT for alone (mapcmd.h CommandUnit::joinOnly): not locked on the map.
+bool JoinOnly(npc::Control control,const void* top) noexcept {
+    return npc::Scripted(control) && NativeJoinable(static_cast<const unsigned char*>(top));
+}
+
 // The plugin (or its AI) turned off while a dismissed squad cools down: its +0x540 back as it was (stock again).
 void GiveBackDismissed(unsigned char* h) noexcept {
     for(auto& q:squads)
@@ -1353,7 +1404,13 @@ template<int I> void __fastcall ThinkHook(void* human,const float* dt) {
     if(ok && Cfg().enabled && Cfg().customNpcAi) {
         __try { PreThink(static_cast<unsigned char*>(human)); } __except(Fault(GetExceptionInformation())) {}
     }
+    std::uint8_t walkUp=0;   // +0x540 hidden from the stock walk-up for this Think (HideWalkUp)
+    __try { walkUp=HideWalkUp(static_cast<unsigned char*>(human)); } __except(Fault(GetExceptionInformation())) {walkUp=0;}
     nextThink[I](human,dt);
+    if(walkUp) {
+        auto* h=static_cast<unsigned char*>(human);
+        if(!h[kAutoFollow])h[kAutoFollow]=walkUp;   // put back, unless the Think itself set it meanwhile
+    }
     if(!ok || !Cfg().enabled || !Cfg().customNpcAi)return;
     __try { Think(static_cast<unsigned char*>(human),I); } __except(Fault(GetExceptionInformation())) {}
     __try { DriveVehicleAi(static_cast<unsigned char*>(human),dt); } __except(Fault(GetExceptionInformation())) {}
@@ -1466,9 +1523,11 @@ void RefreshCommandSnapshots() noexcept {
 }
 // A squad whose top sits in a vehicle (the plugin's real crews, a support's soldiers): its vehicle's crew.
 bool SquadRiding(const Squad& q) noexcept { return !HumanOnFoot(static_cast<const unsigned char*>(q.top.obj)); }
-// Whether the map offers RECRUIT for it (mapcmd_logic.h OffersRecruit): nobody's, on foot, not cooling down.
+// Whether the map offers RECRUIT for it (mapcmd_logic.h OffersRecruit): nobody's, on foot, not cooling down; a
+// script's only when the stock would have let a player walk up to it (NativeJoinable, the walk-up off).
 bool SquadRecruitable(const Squad& q) noexcept {
-    return mapcmd::OffersRecruit(q.control==npc::Control::recruited,npc::Scripted(q.control),q.dismissed,SquadRiding(q));
+    return mapcmd::OffersRecruit(q.control==npc::Control::recruited,npc::Scripted(q.control),q.dismissed,SquadRiding(q),
+                                 NativeJoinable(static_cast<const unsigned char*>(q.top.obj)));
 }
 const char* StatusOf(const Squad& q,ULONGLONG ms,char* buf,std::size_t size) noexcept {
     if(q.dismissed){std::snprintf(buf,size,"WAIT %llus",static_cast<unsigned long long>((cooldowns.Left(SquadKey(q.top.obj),ms)+999)/1000));return buf;}
@@ -1495,18 +1554,22 @@ int SquadCommandUnits(CommandUnit* out,int most) noexcept {
         const Squad& q=squads[i];
         if(!Live(q,ms) || (InSession() && !IsOnlineAuthority(q.top.obj)))continue;
         std::snprintf(squadNames[n],sizeof(squadNames[n]),"%s x%d",kClassWords[q.cls],q.alive>0 ? q.alive : 1);
-        out[n]=CommandUnit{q.top.obj,squadNames[n],q.cmd,false,{},npc::Scripted(q.control),StatusOf(q,ms,status[n],sizeof(status[n])),
+        const bool joinOnly=JoinOnly(q.control,q.top.obj);
+        out[n]=CommandUnit{q.top.obj,squadNames[n],q.cmd,false,{},npc::Scripted(q.control) && !joinOnly,StatusOf(q,ms,status[n],sizeof(status[n])),
                            SquadRiding(q),SquadRecruitable(q),q.control==npc::Control::recruited,TransportOf(q.top.obj)!=nullptr,
                            SquadRiding(q) ? At<const void*>(q.top.obj,kHumanRiding) : nullptr};
+        out[n].joinOnly=joinOnly;
         std::memcpy(out[n++].pos,static_cast<const unsigned char*>(q.top.obj)+kPosition,12);
     }
     for(int i=0;i<remoteSquadCount && n<most && n<kMaxSquads*2;++i) {
         const auto& q=remoteSquads[i];
         std::snprintf(squadNames[n],sizeof(squadNames[n]),"%s x%d",kClassWords[q.cls],q.alive);
         const bool riding=!HumanOnFoot(static_cast<const unsigned char*>(q.top.obj));
-        out[n]={q.top.obj,squadNames[n],{},false,{},npc::Scripted(q.control),"REMOTE",riding,
-                mapcmd::OffersRecruit(q.control==npc::Control::recruited,npc::Scripted(q.control),false,riding),
+        const bool joinOnly=JoinOnly(q.control,q.top.obj);
+        out[n]={q.top.obj,squadNames[n],{},false,{},npc::Scripted(q.control) && !joinOnly,"REMOTE",riding,
+                mapcmd::OffersRecruit(q.control==npc::Control::recruited,npc::Scripted(q.control),false,riding,joinOnly),
                 q.control==npc::Control::recruited};
+        out[n].joinOnly=joinOnly;
         std::memcpy(out[n++].pos,q.pos,12);
     }
     return n;
@@ -1532,12 +1595,12 @@ int SquadRows(SquadRow* out,int most,SquadTally* tally) noexcept {
         std::snprintf(r.status,sizeof(r.status),"%s",StatusOf(q,ms,buf,sizeof(buf)));
         r.alive=q.alive>0 ? q.alive : 1;
         r.cooldown=q.dismissed ? static_cast<int>((cooldowns.Left(SquadKey(q.top.obj),ms)+999)/1000) : 0;
-        r.now=q.cmd;r.locked=npc::Scripted(q.control);r.riding=SquadRiding(q);
+        r.now=q.cmd;r.locked=npc::Scripted(q.control) && !JoinOnly(q.control,q.top.obj);r.riding=SquadRiding(q);
         r.rank=mapcmd::SquadRank(q.control==npc::Control::recruited,r.locked,r.riding);
     }
     for(int i=0;i<remoteSquadCount && n<kMaxSquads*2;++i) {
         const auto& q=remoteSquads[i];auto& row=all[n++];row={};
-        row.leader=q.top.obj;row.identity=q.top;row.alive=q.alive;row.locked=npc::Scripted(q.control);
+        row.leader=q.top.obj;row.identity=q.top;row.alive=q.alive;row.locked=npc::Scripted(q.control) && !JoinOnly(q.control,q.top.obj);
         row.riding=!HumanOnFoot(static_cast<const unsigned char*>(q.top.obj));
         std::snprintf(row.name,sizeof(row.name),"%s",kClassWords[q.cls]);std::snprintf(row.status,sizeof(row.status),"%s",row.locked ? "SCRIPT" : "REMOTE");
         row.rank=mapcmd::SquadRank(q.control==npc::Control::recruited,row.locked,row.riding);
@@ -1908,13 +1971,15 @@ unsigned char* BoardTarget(unsigned char* top,const unsigned char* requester,ULO
         }
     }
     unsigned char* best=nullptr;float bestD=kBoardFar+1;
-    for(int i=0;i<world.friends;++i) {
-        auto* object=static_cast<unsigned char*>(const_cast<void*>(world.frObject[i]));
-        if(!object || !Readable(object,kSeatCount+8) || !KnownVehicle(object) || object[kDead])continue;
+    const auto consider=[&](const void* candidate) {
+        auto* object=static_cast<unsigned char*>(const_cast<void*>(candidate));
+        if(!object || !Readable(object,kSeatCount+8) || !KnownVehicle(object) || object[kDead])return;
         if(sawVehicle)*sawVehicle=true;
         const float distance=BoardDistance(object,members,count,ms);
         if(distance>=0 && distance<bestD){best=object;bestD=distance;}
-    }
+    };
+    for(int i=0;i<world.friends;++i)consider(world.frObject[i]);
+    for(int i=0;i<world.nobodys;++i)consider(world.nobody[i]);   // the empty ones (team 5): FriendlyVehicle takes them
     return best;
 }
 
@@ -2421,7 +2486,10 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
         const auto* root=RootLeader(top);
         if(root && IsAnyPlayer(root) && root!=caller)return CommandResult(Reason::notOwner);
         const auto control=ControlOf(top,root);
-        if(npc::Scripted(control))return CommandResult(Reason::scripted);
+        // A script's squad takes no order, but the join the stock walk-up would have given it (VanillaRecruit=0:
+        // the map's FOLLOW / RECRUIT is that walk-up now; NativeJoinable). Only the join: nothing else of the script's changes.
+        const bool joinOrder=c.order==Order::follow || c.order==Order::recruit;
+        if(npc::Scripted(control) && !(joinOrder && NativeJoinable(top)))return CommandResult(Reason::scripted);
         const ULONGLONG ms=GameMs();
         Squad* const q=FindSquad(top);
         if(!q || !q->top.Is(top) || ms-q->seen>kOrderSeenMs)return CommandResult(Reason::stale);
@@ -2429,7 +2497,8 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
         const bool recruited=control==npc::Control::recruited;
         unsigned char* members[kMaxSquad];const int count=Members(top,members,kMaxSquad);
         int affected=count;
-        // Its transport (transport.cpp): a far point order (or one given aboard) goes by the paired vehicle; WITHDRAW sends
+        // Its transport (transport.cpp): a point order given aboard goes by the paired vehicle (on foot it walks, however far:
+        // 2026-10-10 the far-order ride was removed); WITHDRAW sends
         // that vehicle off; any other order, once taken, ends the squad's part in a trip (it stays where it is, aboard or
         // not). A refused one leaves the trip as it was (TransportCancel below, after every refusal).
         if(mapcmd::PointOrder(c.order) && std::isfinite(c.at[0]+c.at[1]+c.at[2]) && TransportOrder(top,c)) {
@@ -2654,6 +2723,7 @@ void __fastcall DriverPayloadAim(unsigned char* v,int index,const void* target) 
             native(v,0,target); // keep native tracking/idle behavior, but no unavailable shot
             Put<float>(seat,0x2E4,0.0f);Put<float>(seat,0x2E0,0.0f);
         }
+        if(target)NpcCoaxFire(v,0,target,&FriendInLine);   // the coaxial gun alongside whatever the crew chose (payload.cpp)
         RememberDriverPayload(v);
     } __except(EXCEPTION_EXECUTE_HANDLER) {
         // The selected-list helper restores its temporary pointer in __finally.
@@ -2718,6 +2788,7 @@ void NpcGunnersInput(unsigned char* v) noexcept {
                 const auto w=NpcPayloadSelect(v,i,p.bestD,GunnerAirTarget(p.best),&fire);
                 if(!w)continue;
                 AimSelectedGunner(v,i,p.best,w,fire);
+                NpcCoaxFire(v,i,p.best,&FriendInLine);
             } else reinterpret_cast<SeatFireFn>(image+kSeatFire)(v,static_cast<int>(i),p.best);
             RememberGunnerInputs(v,i,seat);
         }

@@ -184,10 +184,20 @@ bool InFront() noexcept {
 }
 bool Down(int vk) noexcept { return vk>0 && (GetAsyncKeyState(vk)&0x8000)!=0; }
 
+// The magnified vehicle sight's claim on the wheel (sightzoom.cpp: its range setting), and its notches' delta.
+std::atomic<bool> scopeHolds{false};
+std::atomic<ULONGLONG> scopeHeldAt{0};   // wall: a claim not renewed for kScopeHoldMs lapses (the vehicle gone, a pause)
+constexpr ULONGLONG kScopeHoldMs=300;
+std::atomic<int> scopeWheel{0};
 LRESULT CALLBACK WheelProc(HWND w,UINT msg,WPARAM wp,LPARAM lp) {
     if(msg==WM_MOUSEWHEEL && holds.load(std::memory_order_relaxed)) {
         wheel.fetch_add(GET_WHEEL_DELTA_WPARAM(wp),std::memory_order_relaxed);
         return 0;   // the map's: not the game's weapon change
+    }
+    if(msg==WM_MOUSEWHEEL && scopeHolds.load(std::memory_order_relaxed) &&
+       GetTickCount64()-scopeHeldAt.load(std::memory_order_relaxed)<=kScopeHoldMs) {
+        scopeWheel.fetch_add(GET_WHEEL_DELTA_WPARAM(wp),std::memory_order_relaxed);
+        return 0;   // the sight's range drum, not the game's
     }
     return unicodeProc ? CallWindowProcW(prevProc,w,msg,wp,lp) : CallWindowProcA(prevProc,w,msg,wp,lp);
 }
@@ -690,10 +700,10 @@ bool Frame(unsigned char* human) noexcept {
 
 // The player's input for the Tempest's TV (tvguide.cpp): mouse and keys in front, a pad.
 TvInput TvRead(const unsigned char* human) noexcept {
-    TvInput in{InFront(),0.0f,0.0f,0.0f,0.0f,false,false};
+    TvInput in{InFront(),0.0f,0.0f,0.0f,0.0f,false,false,false};
     if(in.front) {
         if(!MouseDelta(human,&in.dx,&in.dy))in.dx=in.dy=0.0f;
-        in.fire=Down(VK_LBUTTON);in.leave=Down(VK_ESCAPE);
+        in.fire=Down(VK_LBUTTON);in.leave=Down(VK_ESCAPE);in.back=Down(VK_RBUTTON);
     }
     XINPUT_STATE pad{};
     if(PadState(&pad)) {
@@ -717,6 +727,7 @@ bool __fastcall MapHumanFrame(unsigned char* human) noexcept {
         const bool open=Frame(human);
         NpcMarkFrame(human,open && game.open);
         DebugSpawnFrame(human);   // the debug spawn tool (off by default: returns before reading a key)
+        InfantryScopeFrame(human);   // a scoped weapon open: the real optic's cue (infantryscope.cpp)
         return TvFrame(human,open && game.open,TvRead(human)) || open;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
@@ -933,6 +944,24 @@ bool MapHidesStockHud(const void* camera) noexcept {
     const bool hidden=maphud::Hides(hudRecord,camera,cameraSession.Generation());
     ReleaseSRWLockShared(&hudLock);
     return hidden;
+}
+int TakeScopeWheel(bool hold) noexcept {
+    if(hold && !subclassed && InFront())Subclass();   // the window's wheel, first wanted here or by the map
+    scopeHolds.store(hold,std::memory_order_relaxed);
+    if(hold)scopeHeldAt.store(GetTickCount64(),std::memory_order_relaxed);
+    static int rest=0;   // part of a notch left over (a smooth wheel's deltas)
+    const int delta=scopeWheel.exchange(0,std::memory_order_relaxed);
+    if(!hold){rest=0;return 0;}
+    rest+=delta;
+    const int notches=rest/WHEEL_DELTA;
+    rest-=notches*WHEEL_DELTA;
+    return notches;
+}
+bool MapPadButtons(std::uint16_t* buttons) noexcept {
+    XINPUT_STATE s{};
+    if(!PadState(&s))return false;
+    *buttons=s.Gamepad.wButtons;
+    return true;
 }
 }  // namespace crew
 

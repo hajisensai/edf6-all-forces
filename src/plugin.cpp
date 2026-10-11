@@ -191,7 +191,9 @@ void Validate(Config& n) noexcept {
     Fix("AirSoftTurns",n.airSoftTurns,0.0f,3.0f);
     Fix("AirSoftCeil",n.airSoftCeil,0.0f,1000.0f);
     Fix("HeliSoftEdge",n.heliSoftEdge,0.0f,1000.0f);
-    if(n.viewDistance!=0.0f)Fix("ViewDistance",n.viewDistance,1000.0f,10000.0f);
+    // -1 (any negative): unlimited (crew.h UnlimitedViewDistance); 0: the mission's own; else from 1000 m, no upper limit.
+    if(n.viewDistance<0.0f)n.viewDistance=kUnlimitedView;
+    else if(n.viewDistance!=0.0f)Fix("ViewDistance",n.viewDistance,1000.0f,1.0e6f);
     Fix("JetSoundVolume",n.jetSoundVolume,0.0f,4.0f);
     Fix("WarnVolume",n.warnVolume,0.0f,4.0f);
     Fix("VehicleEngineVolume",n.vehicleEngineVolume,0.0f,4.0f);
@@ -234,6 +236,9 @@ void Validate(Config& n) noexcept {
     n.freeLookButton=static_cast<int>(FixInt("FreeLookButton",n.freeLookButton,0,255));
     n.sightZoomKey=static_cast<int>(FixInt("SightZoomKey",n.sightZoomKey,0,254));
     n.sightZoomButton=static_cast<int>(FixInt("SightZoomButton",n.sightZoomButton,0,255));
+    n.sightRangeUpKey=static_cast<int>(FixInt("SightRangeUpKey",n.sightRangeUpKey,0,254));
+    n.sightRangeDownKey=static_cast<int>(FixInt("SightRangeDownKey",n.sightRangeDownKey,0,254));
+    n.sightRangeStep=static_cast<int>(FixInt("SightRangeStep",n.sightRangeStep,0,1000));
     n.mapKey=static_cast<int>(FixInt("MapKey",n.mapKey,0,254));
     n.mapButton=static_cast<int>(FixInt("MapButton",n.mapButton,0,0xFFFF));
     if(n.mapViewDistance!=0.0f)Fix("MapViewDistance",n.mapViewDistance,1000.0f,10000.0f);
@@ -291,7 +296,6 @@ void Validate(Config& n) noexcept {
     Fix("NpcRollSec",n.npcRollSec,0.5f,30.0f);
     Fix("NpcRetreatHp",n.npcRetreatHp,0.0f,0.9f);
     Fix("NpcLeash",n.npcLeash,5.0f,500.0f);
-    Fix("TransportAutoRange",n.transportAutoRange,50.0f,2000.0f);
     n.npcSquadMin=static_cast<int>(FixInt("NpcSquadMin",n.npcSquadMin,1,16));
     n.npcSquadMax=static_cast<int>(FixInt("NpcSquadMax",n.npcSquadMax,n.npcSquadMin,32));
     Fix("NpcSquadJoinRange",n.npcSquadJoinRange,0.0f,2000.0f);
@@ -539,6 +543,11 @@ void LoadConfig() noexcept {
     n.sightZoom=ReadBool(L"SightZoom",n.sightZoom);
     n.sightZoomKey=ReadInt(L"SightZoomKey",static_cast<DWORD>(n.sightZoomKey));
     n.sightZoomButton=ReadInt(L"SightZoomButton",static_cast<DWORD>(n.sightZoomButton));
+    n.sightRangeUpKey=ReadInt(L"SightRangeUpKey",static_cast<DWORD>(n.sightRangeUpKey));
+    n.sightRangeDownKey=ReadInt(L"SightRangeDownKey",static_cast<DWORD>(n.sightRangeDownKey));
+    n.sightRangeStep=ReadInt(L"SightRangeStep",static_cast<DWORD>(n.sightRangeStep));
+    n.sightRangePad=ReadBool(L"SightRangePad",n.sightRangePad);
+    n.infantryScope=ReadBool(L"InfantryScope",n.infantryScope);
     n.gunStabilizer=ReadBool(L"GunStabilizer",n.gunStabilizer);
     n.viewDistance=ReadFloat(L"ViewDistance",n.viewDistance);
     n.map=ReadBool(L"Map",n.map);
@@ -619,7 +628,6 @@ void LoadConfig() noexcept {
     n.npcRollSec=ReadFloat(L"NpcRollSec",n.npcRollSec);
     n.npcRetreatHp=ReadFloat(L"NpcRetreatHp",n.npcRetreatHp);
     n.npcLeash=ReadFloat(L"NpcLeash",n.npcLeash);
-    n.transportAutoRange=ReadFloat(L"TransportAutoRange",n.transportAutoRange);
     n.npcSquadSuccession=ReadBool(L"NpcSquadSuccession",n.npcSquadSuccession);
     n.npcSquadMin=ReadInt(L"NpcSquadMin",static_cast<DWORD>(n.npcSquadMin));
     n.npcSquadMax=ReadInt(L"NpcSquadMax",static_cast<DWORD>(n.npcSquadMax));
@@ -642,6 +650,7 @@ void LoadConfig() noexcept {
     n.npcGuardRadius=ReadFloat(L"NpcGuardRadius",n.npcGuardRadius);
     n.npcFreeRange=ReadFloat(L"NpcFreeRange",n.npcFreeRange);
     n.npcRecruitCooldownSec=ReadFloat(L"NpcRecruitCooldownSec",n.npcRecruitCooldownSec);
+    n.vanillaRecruit=ReadBool(L"VanillaRecruit",n.vanillaRecruit);
     n.scriptNpcRecruit=ReadBool(L"ScriptNpcRecruit",n.scriptNpcRecruit);
     n.scriptNpcSettleSec=ReadFloat(L"ScriptNpcSettleSec",n.scriptNpcSettleSec);
     n.tankReturnToPost=ReadBool(L"TankReturnToPost",n.tankReturnToPost);
@@ -692,7 +701,8 @@ void LoadConfig() noexcept {
     Log("CONFIG qmark pointSec=%.0f volume=%.2f vanillaSpot=%d",n.qmarkPointSec,n.qmarkVolume,n.vanillaSpot);
     Log("CONFIG npc formation=%d key=0x%X spacing=%.1f guard=%d",n.npcFormation,n.npcFormationKey,n.npcFormationSpacing,n.npcGuardFormation);
     Log("CONFIG npc pickup key=0x%X range=%.0f sec=%.0f health=%d",n.npcPickupKey,n.npcPickupRange,n.npcPickupSec,n.npcPickupHealth);
-    Log("CONFIG npc guardRadius=%.0f freeRange=%.0f recruitCooldown=%.0fs",n.npcGuardRadius,n.npcFreeRange,n.npcRecruitCooldownSec);
+    Log("CONFIG npc guardRadius=%.0f freeRange=%.0f recruitCooldown=%.0fs vanillaRecruit=%d",n.npcGuardRadius,n.npcFreeRange,
+        n.npcRecruitCooldownSec,n.vanillaRecruit);
     Log("CONFIG scriptNpcRecruit=%d settle=%.1fs",n.scriptNpcRecruit,n.scriptNpcSettleSec);
     Log("CONFIG tankReturnToPost=%d hold=%.1f reverseMax=%.0f",n.tankReturnToPost,n.tankPostHold,n.tankReverseMax);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,
@@ -708,9 +718,10 @@ void LoadConfig() noexcept {
     Log("CONFIG sidecar=%d npcGunner=%d npcRange=%.0f",n.sidecar,n.sidecarNpcGunner,n.sidecarNpcRange);
     Log("CONFIG highCam=%d key=0x%X button=0x%X height=%.0f back=%.0f pitch=%.0f",n.highCam,n.highCamKey,n.highCamButton,n.highCamHeight,
         n.highCamBack,n.highCamPitch);
-    Log("CONFIG sightZoom=%d key=0x%X button=0x%X",n.sightZoom,n.sightZoomKey,n.sightZoomButton);
+    Log("CONFIG sightZoom=%d key=0x%X button=0x%X infantryScope=%d",n.sightZoom,n.sightZoomKey,n.sightZoomButton,n.infantryScope);
     Log("CONFIG nixTorsoTwist=%d",n.nixTorsoTwist);
     Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f",n.map,n.mapKey,n.mapButton,n.mapViewDistance);
+    Log("CONFIG ViewDistance=%.0f (%s)",n.viewDistance,n.viewDistance<0.0f ? "unlimited" : n.viewDistance==0.0f ? "the mission's own" : "m");
     Log("CONFIG damageStats=%d key=0x%X",n.damageStats,n.damageStatsKey);
     Log("CONFIG debugSpawn=%d keys menu=0x%X prev=0x%X next=0x%X category=0x%X spawn=0x%X range=%.0f distance=%.0f",n.debugSpawn,
         n.debugSpawnKey,n.debugSpawnPrevKey,n.debugSpawnNextKey,n.debugSpawnCategoryKey,n.debugSpawnSpawnKey,n.debugSpawnRange,
@@ -931,6 +942,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallProteus();       // the Proteus rework: its weapon mounts, shield barrier, piles and field
     InstallMap();           // the map view (the player's camera overhead, their input held while it is open)
     InstallSightZoom();     // a vehicle gun's sight magnified (the same camera step, chained after the map's)
+    InstallInfantryScope(); // a soldier's zoomed scope drawn as a real optic (the stock crosshair's draw chained)
     InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp), the sidecar's level hook
     InstallGunnerRecoil();  // a remote gunner's recoil on the vehicle's authority (gunnerrecoil.cpp)
     InstallSidecar();       // the sidecar motorcycle's gunner (sidecar.cpp)

@@ -23,6 +23,7 @@ bool HighCamOn(const void*) noexcept{return false;}
 bool TurretCamHighTransition(const void*) noexcept{return false;}
 const unsigned char* PlayerTurretGun(const unsigned char*,const unsigned char*) noexcept{return nullptr;}
 float SightZoomNow(const void*) noexcept{return 1;}
+int SightZoomRange(const void*,float*) noexcept{return 0;}
 int StabState(unsigned char*,unsigned) noexcept{return 0;}
 bool IsSub(const void*) noexcept{return false;}
 bool IsPlayerJet(const void*) noexcept{return false;}
