@@ -17,7 +17,7 @@
 
 ## 修复
 
-`heliaim.h PlayerBankInput` 用课程指令计算压坡：Instructor 的 cyclic 目标速度 × 朝鼠标目标所需的转弯速度。
+`heliaim.h PlayerBankInput` 用航向与速度指令计算压坡：Instructor 的 cyclic 目标速度 × 朝鼠标目标所需的转弯速度。
 转速取已有 `kTurnGain` 和玩家转速上限，投影到原生 row 0 的转向符号；到达目标航向时压坡归零。
 刹停/后飞按目标速度压坡，避免机头已抬起时仍用惯性前飞速度维持前飞压坡。
 `AimFly` 删除测得转速的压坡状态；A/D 横移、原生偏航的速率反馈与逆滞后控制继续使用原路径。
