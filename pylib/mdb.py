@@ -29,9 +29,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def cmpl_decompress(data: bytes) -> bytes:
-    """'CMPL' + u32 BE size + Okumura LZSS (N=4096, F=18, THRESHOLD=2, r starts at N-F, zero window)."""
+    """'CMPL' + u32 BE size + Okumura LZSS (N=4096, F=18, THRESHOLD=2, r starts at N-F, zero window). ValueError on
+    a stream that ends before it has given `size` bytes."""
     if data[:4] != b'CMPL':
         return data
+    if len(data) < 8:
+        raise ValueError('CMPL header cut short')
     size = struct.unpack_from('>I', data, 4)[0]
     win = bytearray(4096)
     r = 0xFEE
@@ -45,12 +48,16 @@ def cmpl_decompress(data: bytes) -> bytes:
             flags = data[i] | 0xFF00
             i += 1
         if flags & 1:
+            if i >= n:
+                break
             c = data[i]
             i += 1
             out.append(c)
             win[r] = c
             r = (r + 1) & 0xFFF
             continue
+        if i + 2 > n:
+            break
         b0, b1 = data[i], data[i + 1]
         i += 2
         off = (b0 << 4) | (b1 >> 4)
@@ -59,6 +66,8 @@ def cmpl_decompress(data: bytes) -> bytes:
             out.append(c)
             win[r] = c
             r = (r + 1) & 0xFFF
+    if len(out) < size:
+        raise ValueError(f'CMPL stream cut short: {len(out)} of {size} bytes')
     return bytes(out[:size])
 
 
@@ -230,10 +239,14 @@ class Rab:
 
 
 def _wstr(b: bytes, p: int) -> str:
+    """The NUL-ended UTF-16 string at `p`; ValueError when it is not (p outside `b`, or no terminator before its end)."""
     e = p
-    while b[e:e + 2] != b'\0\0':
+    while True:
+        if not 0 <= e <= len(b) - 2:
+            raise ValueError(f'UTF-16 string at {p:#x} runs past the end ({len(b):#x} bytes)')
+        if b[e:e + 2] == b'\0\0':
+            return b[p:e].decode('utf-16le')
         e += 2
-    return b[p:e].decode('utf-16le')
 
 
 def _astr(b: bytes, p: int) -> str:

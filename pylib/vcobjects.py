@@ -6,6 +6,7 @@ written where, and who owns it, is pylib/ledger.py.
 """
 from __future__ import annotations
 
+import copy
 import math
 import os
 import re
@@ -166,6 +167,11 @@ class Missile:
     interval: float = 45.0    # frames from one shot (or salvo) to the next
     eject: float = 0.3    # m a frame it leaves the rail at, along the launcher's nose, over the launcher's velocity
     guided: bool = True   # False: an unguided rocket (no lock: src/missile.cpp only burns its motor, it flies straight)
+    # The stock weapon (Root.cpk WEAPON) whose muzzle list (animation_model[2], mab_muzzles) it fires from; None: the
+    # helicopter missile's own four pod muzzles. Offsets are from the holder's bone: a gun-launched missile on a tank's
+    # gun bone with the pods' (1.05..1.76 m aside, 0.67 m down) leaves from beside the hull (the user, 2026-10-10:
+    # 「这个炮射导弹是从坦克车头两边射出去的」).
+    muzzle: str | None = None
 
     def params(self, rounds: int) -> dict[str, float]:
         return {'AmmoSpeed': self.eject, 'AmmoOwnerMove': 1.0, 'AmmoGravityFactor': 0.0, 'AmmoAlive': self.life * 60.0,
@@ -286,7 +292,7 @@ STORES: dict[str, Store] = {
     # body 0.09, fins 0.23 (real 0.105).
     'GLM': Store('LAHAT', 'ground', 0.0, 0.0, Missile('LAHAT', Look('bullet_icbm01', 0.975), burn=2.5, top=300.0, accel=180.0,
                  max_g=15.0, nav=3.0, life=15.0, damage=600.0, blast=6.0, lock_range=1200.0, lock_cone=0.3, lock_time=30.0,
-                 interval=90.0, eject=2.0),
+                 interval=90.0, eject=2.0, muzzle='V_505TANK_CANNON01.SGO'),
                  _local('LAHAT (gun-launched ATGM)', 'LAHAT（砲発射ミサイル）', 'LAHAT（炮射導彈）', 'LAHAT（炮射导弹）',
                         'LAHAT（포발사 미사일）')),
     # An infantry fighting vehicle's autocannon belts (the Grape): its AP the Grape's own smooth-bore round
@@ -1351,9 +1357,20 @@ def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
         else:
             cp.items[i] = value
     cone.items[0] = cone.items[1] = missile.lock_cone
+    if missile.muzzle is not None:
+        _fire_from(game, r, missile.muzzle)
     _look(game, r, missile.look, JET_MISSILE_STOCK)
     _named(r, store)
     return dsgo.write(doc)
+
+
+def _fire_from(game: Game, r: dsgo.Node, stock: str) -> None:
+    """Give weapon root `r` the muzzle list (animation_model[2]) of stock weapon `stock`: one muzzle, else ValueError."""
+    theirs = dsgo.parse(game.read('WEAPON', stock)).root.get('animation_model')
+    mine = r.get('animation_model')
+    if len(mab_muzzles(theirs.items[2].data)) != 1 or theirs.items[0] != mine.items[0]:
+        raise ValueError(f'{stock} 不是单炮口的原版炮')
+    mine.items[2] = copy.deepcopy(theirs.items[2])
 
 
 def _bomb_sgo(game: Game, store: Store, rounds: int) -> bytes:

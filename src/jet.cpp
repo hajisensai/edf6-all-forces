@@ -196,9 +196,9 @@ void Guide(Jet& j,const Kind& kind,const Arms& arms,Jet* mother,const float* pos
     default:
         break;
     }
-    if(j.ferry) {   // the paratroop plane: passes over its point (Ferry), never Patrol's ring round it
+    if(j.ferry) {   // the paratroop plane: passes along its line over its point (Ferry), never Patrol's ring round it
         if(j.mode!=Mode::patrol)SetMode(j,Mode::patrol,ms);
-        *speed=Ferry(j,pos,anchor,height,want);
+        *speed=Ferry(j,pos,height,want);
         return;
     }
     switch(kind.weapon) {
@@ -220,6 +220,9 @@ void Guide(Jet& j,const Kind& kind,const Arms& arms,Jet* mother,const float* pos
     }
 }
 
+// s a charge drone leads its target by (Rotor): 1 / Hover's vertical gain (its wantV[1]: half the gap a second).
+constexpr float kChargeLead=2.0f;
+
 // A rotor craft's step (FlightModel::rotor): kind.alt over its anchor, facing its target: a carrier about its
 // station, a charge at its target; leaving, along `want` (Away's way out, climbing). A carrier's nacelles follow
 // its thrust.
@@ -234,14 +237,20 @@ void Rotor(Jet& j,const Kind& kind,unsigned char* v,Jet* mother,const float* pos
         // itself; sent somewhere (the player's order, CarrierState::order) or thrown (no carrier), kThrownHover over
         // its anchor, waiting there. The anchor is on the ground in both, and twice kDockBelow under it, as before,
         // was under the ground (the drone sank into it, held by HoldOffGround's floor).
-        climb=kind.cruise*0.5f;
+        // At a flyer it climbs as fast as it flies: at half that (12.5 m/s, a doll drone) the flyers it chased kept above
+        // it, climbing with it to the game's ceiling, and it never reached them (2026-10-10 log: y 483 -> 985 m in 46 s,
+        // 28-110 m under its target; the user: the drones and their carrier are to attack the flyers).
+        climb=j.t.target && j.t.flyer ? kind.cruise : kind.cruise*0.5f;
         const float* mp=mother ? reinterpret_cast<const float*>(mother->Vehicle()+kPosition) : nullptr;
         if(j.mode==Mode::recover && mp){goal[0]=mp[0];goal[1]=mp[1]-kDockBelow;goal[2]=mp[2];}
         else if(j.t.target) {
-            std::memcpy(goal,j.t.aim,12);
+            // Where the target will be kChargeLead on (its velocity, PickTarget): Hover closes on its goal at half the gap a
+            // second, which behind a target moving at v stays 2v off it (26 m under a flyer climbing 13 m/s, outside even
+            // the held reach of its charge: Step); led by 1 / that gain it closes in, and over the ground it flies to meet it.
+            for(int i=0;i<3;++i)goal[i]=j.t.aim[i]+j.t.tgtVel[i]*kChargeLead;
             // A doll drone comes in kDollRide over the ground there (still within kDollTrigger of a target on it).
-            const float under=kind.doll ? GroundClearance(goal) : kNoGround;
-            if(under!=kNoGround && under<kDollRide)goal[1]+=kDollRide-under;
+            const float under=GroundClearance(goal);
+            if(under!=kNoGround && kind.doll && under<kDollRide)goal[1]+=kDollRide-under;
         }
         else if(mp && !mother->carrier.ordered){goal[0]=mp[0];goal[1]=mp[1]-kDockBelow*2.0f;goal[2]=mp[2];}
         else{goal[0]=anchor[0];goal[1]=anchor[1]+kThrownHover;goal[2]=anchor[2];}
@@ -474,15 +483,36 @@ void SeeFocus(void* ctx,const void* object,const float*) noexcept {
 // The map's orders (mapcmd.cpp Give). guard / follow / release: ApplyMapCommand. focus: `focus` (the enemy the player
 // marked) attacked first, its order kept (ApplyMapFocus); refused when that is no enemy of it now.
 // A ferry (transport.cpp, the paratroop plane): its command point `at` (ApplyMapCommand's guard), flown at kFerryAlt over
-// it, no target taken (Jet::ferry). Its stick jumps over the point; JetWithdrawNow then sends it off (deleted out of
-// sight, its crew first: support_dispatch.cpp Retire).
-bool JetFerry(const void* vehicle,const float* at) noexcept {
+// it, no target taken (Jet::ferry), in passes along the straight line through it along `heading` (the heading its plan
+// brought it in on), each end off the map (support_entry.h MakePassLine, ferry_line.h). Its stick jumps over the point
+// (transport.cpp); JetFerryDone then lets it fly on to the end of that pass, where it is deleted (JetFrame reaps it; its
+// crew first: support_dispatch.cpp Retire). The same point again (the deployment's Assign after BoardAirborne): kept as
+// it is.
+bool JetFerry(const void* vehicle,const float* at,const float* heading) noexcept {
     __try {
         Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle));
-        if(!j || !at || j->reap)return false;
-        j->ferry=true;j->ferryOut=false;
+        if(!j || !at || !heading || j->reap)return false;
+        if(j->ferry && j->ferryLine.at[0]==at[0] && j->ferryLine.at[1]==at[1] && j->ferryLine.at[2]==at[2])return true;
+        const support::Reach reach{ArrivalHalf(),NearDrawDistance()};
+        support::PassLine line;
+        if(!support::MakePassLine(MapPlayArea(),reach,at,heading,FerryTurn(KindOf(*j)),line)) {
+            Log("JET v=%p ferry to (%.0f,%.0f,%.0f): no line along (%.2f,%.2f) with room to turn off the map at both ends",vehicle,
+                at[0],at[1],at[2],heading[0],heading[2]);
+            return false;
+        }
+        j->ferry=true;j->ferryGone=false;j->ferryLine=line;j->ferryPass=ferry::Pass{};
         ApplyMapCommand(*j,Command{Order::guard,{at[0],at[1],at[2]}},GameMs());
-        Log("JET v=%p ferry to (%.0f,%.0f,%.0f), %.0f m over it",vehicle,at[0],at[1],at[2],kFerryAlt);
+        Log("JET v=%p ferry to (%.0f,%.0f,%.0f), %.0f m over it: passes along (%.2f,%.2f) from %.0f to %.0f m of it",vehicle,at[0],at[1],
+            at[2],kFerryAlt,line.dir[0],line.dir[2],line.lo,line.hi);
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+bool JetFerryDone(const void* vehicle) noexcept {
+    __try {
+        Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle));
+        if(!j || !j->ferry || j->reap)return false;
+        if(!j->ferryPass.done)Log("JET v=%p ferry: stick out, on along the line (%+d) to its end off the map",vehicle,j->ferryPass.dir);
+        j->ferryPass.done=true;
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
@@ -591,9 +621,12 @@ void JetFrame(unsigned char* v) noexcept {
     else j->t.target=nullptr;
     if(j->t.target){const float to[3]={j->t.aim[0]-pos[0],j->t.aim[1]-pos[1],j->t.aim[2]-pos[2]};PickStore(arms,j->t.flyer,Len(to));}
     if(kind.weapon==Weapon::charge && j->t.target && j->mode!=Mode::withdraw && j->mode!=Mode::recover) {
+        // Its run at the target (airchase::Step): within its trigger it goes off; held off it (by its body, from any side)
+        // within its charge's blast, as well; farther out it keeps after it.
         const float to[3]={j->t.aim[0]-pos[0],j->t.aim[1]-pos[1],j->t.aim[2]-pos[2]};
-        const float d=Len(to);
-        if(d<kind.trigger || (walled && d<kind.trigger*kTriggerHeld)){Detonate(*j,mother,d,ms);Blast(*j,v,ms);return;}
+        const float d=Len(to),held=std::fmin(kind.trigger*kTriggerHeld,kind.blast);
+        const airchase::Verdict verdict=airchase::Step(j->t.closing,j->t.target,d,kind.trigger,held,walled,ms);
+        if(verdict==airchase::Verdict::detonate){Detonate(*j,mother,d,ms);Blast(*j,v,ms);return;}
     }
     float lead[3];
     if(j->t.target)Lead(pos,j->t.aim,j->t.tgtVel,arms,lead);
@@ -609,6 +642,7 @@ void JetFrame(unsigned char* v) noexcept {
     if(kind.flight==FlightModel::rotor)Rotor(*j,kind,v,mother,pos,anchor,want,height,hp,hpMax,dt,ms);
     else Wing(*j,kind,v,pos,clear,nose,want,speed,dt,ms);
     HoldOffGround(*j,pos,clear,dt,ms);
+    if(j->ferryGone)j->reap=true;   // past its last pass's end, off the map (Ferry): deleted there
     j->m.ready=true;
     BayFrame(*j,pos);
     if(gunner){v[kFireGun]=0;v[kFireMissile]=0;}   // the gun is the player's (playerjet_crew.inc GunnerFire)

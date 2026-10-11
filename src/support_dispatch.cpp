@@ -255,6 +255,8 @@ bool Foot(float x,float z,float level,float& floor,float height=2.0f) noexcept {
     const float from[3]={x,floor+0.08f,z},to[3]={x,floor+height,z};float hit[3];
     return MapRay(from,to,hit)<0;
 }
+// m: the caller's eye over its feet, and a vehicle's top over its entry's ground (GroundEntryCandidates' sight line).
+constexpr float kCallerEye=1.7f,kVehicleTop=3.0f;
 bool AddUnit(SupportPlan& plan,std::uint32_t resource,std::uint32_t parent,const float* at,const float* heading) noexcept {
     if(plan.count>=support_net::kMaxUnits)return false;
     auto& unit=plan.units[plan.count++];unit={};unit.resourceId=resource;unit.role=parent;Matrix(at,heading,unit.matrix);return true;
@@ -575,17 +577,28 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
     if(vehicle && (!spec || !Cfg().npcBoarding || !SupportVehicleReady(kind,mode))) {
         Refuse(catalog,"vehicle resource not preloaded / NpcBoarding off",L"该车辆的资源或交付能力不可用");return PlanResult::refused;
     }
-    // Entry candidates round the target within the route planner's reach (support_entry.h GroundEntryCandidates),
-    // fixed when the request starts so a caller walking on cannot reshuffle the ones already tried.
+    // Entry candidates round the target within the route planner's reach (support_entry.h GroundEntryCandidates), the
+    // ones the caller cannot see first (past its draw distance, or the map between its eye and the vehicle's top), fixed
+    // when the request starts so a caller walking on cannot reshuffle the ones already tried.
     if(!planning.entriesMade) {
-        planning.entries=support::GroundEntryCandidates(area,target,player.pos);planning.entriesMade=true;
-        Log("SUPPORT plan catalog=%u: %d ground entry candidates round (%.0f,%.0f,%.0f)",catalog,planning.entries.count,target[0],target[1],target[2]);
+        const float eye[3]={player.pos[0],player.pos[1]+kCallerEye,player.pos[2]};
+        planning.entries=support::GroundEntryCandidates(area,target,player.pos,NearDrawDistance(),[&](const float* p) noexcept {
+            const float top[3]={p[0],p[1]+kVehicleTop,p[2]};float hit[3];
+            return MapRay(eye,top,hit)>=0.0f;
+        });
+        planning.entriesMade=true;
+        int unseen=0;for(int i=0;i<planning.entries.count;++i)unseen+=planning.entries.seen[i]!=support::Seen::visible;
+        Log("SUPPORT plan catalog=%u: %d ground entry candidates round (%.0f,%.0f,%.0f), %d of them out of the caller's sight",catalog,
+            planning.entries.count,target[0],target[1],target[2],unseen);
     }
     if(planning.edge>=planning.entries.count) {
-        Refuse(catalog,"no entry candidate connected to the target by a verified route",L"找不到与目的地连通的支援入口（周围 650-950 米内无可达路线）");
+        Refuse(catalog,"no entry candidate connected to the target by a verified route",L"找不到与目的地连通的支援入口（周围 650-950 米及场地边缘无可达路线）");
         return PlanResult::refused;
     }
     float entry[3]={planning.entries.at[planning.edge][0],target[1],planning.entries.at[planning.edge][1]};
+    if(planning.entries.seen[planning.edge]==support::Seen::visible)
+        Log("SUPPORT plan catalog=%u entry %d (%.0f,%.0f): in the caller's sight (no unseen entry left with a route)",catalog,planning.edge,
+            entry[0],entry[2]);
     const auto nextEdge=[&](const char* why) {
         Log("SUPPORT plan catalog=%u entry %d (%.0f,%.0f) rejected: %s",catalog,planning.edge,entry[0],entry[2],why);
         ++planning.edge;Renew(planning.navigation);return PlanResult::pending;
@@ -857,6 +870,11 @@ bool BoardAirborne(Deployment& deployed,bool networked) noexcept {
         if(!deployed.remote) {
             SupportAircraft spec;
             if(!AircraftSpecOf(plan.catalogId,&spec) || !ActivateSupportAircraft(vehicle,spec,plan.target,true))return false;
+            // The paratroop plane flies its passes from the first frame (ferry_line.h): along the line it was planned on
+            // (the heading in its matrix, support_entry.h AirRoute), not the strike body's patrol until every peer acks.
+            if(bool platoon=false,plane=false;TransportCatalog(plan.catalogId,platoon,plane) && plane &&
+               !JetFerry(vehicle,plan.target,plan.units[i].matrix+8))
+                Log("SUPPORT spawn %llu: the paratroop plane has no pass line (it flies its call)",static_cast<unsigned long long>(deployed.id));
             deployed.started=true;
         }
     }
@@ -957,8 +975,8 @@ bool Assign(Deployment& deployed) noexcept {
         }
         if(!deployed.remote) {
             auto* hull=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[0].obj));
-            const bool handed=plane ? JetFerry(hull,plan.target) && TransportParadrop(hull,plan.target)
-                                    : TransportDeliver(hull,tops,squadCount,plan.target);
+            // The plane's passes began at BoardAirborne (JetFerry); its stick is handed the point here.
+            const bool handed=plane ? TransportParadrop(hull,plan.target) : TransportDeliver(hull,tops,squadCount,plan.target);
             if(!handed)Log("SUPPORT deployment %llu: its transport not handed over (it flies its call)",static_cast<unsigned long long>(deployed.id));
             deployed.delivered=true;
         }

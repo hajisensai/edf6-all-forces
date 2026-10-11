@@ -134,6 +134,13 @@ bool NpcMarkEnemy(const void* object,const float*,bool toggle) noexcept {
 PlayerFix player{};
 Config config{};
 const Config& Cfg() noexcept { return config; }   // NpcMarkKey 'Q'
+// The damage statistics' page (damagestats.cpp): its one click target (statsTarget, its code), shown or not, its clicks.
+bool statsShown=false;float statsTarget[4]{};int statsTargetCode=0,statsClicks=0,statsLastCode=0;
+int DamageStatsUiAt(float x,float y) noexcept {
+    return statsTargetCode && x>=statsTarget[0] && x<statsTarget[2] && y>=statsTarget[1] && y<statsTarget[3] ? statsTargetCode : 0;
+}
+void DamageStatsClick(int code) noexcept { ++statsClicks;statsLastCode=code; }
+bool DamageStatsShown() noexcept { return statsShown; }
 namespace {
 int failures=0,cases=0;
 void Check(bool ok,const char* what) noexcept {
@@ -217,6 +224,30 @@ void PointerAndInput() noexcept {
     Check(!game.pointer.placed,"reopened map awaits its new view");
     MapCommandView(vp,800,600);MapCommandFrame(in,centre);
     Check(game.pointer.x==400.0f && game.pointer.y==300.0f,"reopened small viewport starts inside at centre");
+}
+// The damage statistics' page over the map: a click on one of its targets goes to it (not to a map button drawn under it),
+// and while it is shown no order key reaches the units (Y, the sweep's key, does nothing); shut, Y sweeps again.
+void StatsPage() noexcept {
+    ResetMapCommands();view=View{};
+    MapCmdInput in{};in.front=true;in.mouse=true;in.eye[1]=100.0f;
+    float centre[3]{};
+    const float vp[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+    MapCommandView(vp,1280,720);
+    MapCommandFrame(in,centre);   // the pointer at the centre (640, 360)
+    const float rects[4]={600,340,680,380};
+    const int ids[1]={static_cast<int>(mapbtn::Id::sweep)};
+    MapCommandButtons(rects,ids,1);
+    statsTarget[0]=560;statsTarget[1]=300;statsTarget[2]=720;statsTarget[3]=420;statsTargetCode=0x30005;
+    statsShown=true;statsClicks=statsLastCode=0;sweepCalls=0;sweepState=false;
+    const auto click=[&]{inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);};
+    click();
+    Check(statsClicks==1 && statsLastCode==0x30005 && sweepCalls==0,"a click on the stats page's target goes to it, not the button under it");
+    inputstub::keys['Y']=true;MapCommandFrame(in,centre);inputstub::keys['Y']=false;MapCommandFrame(in,centre);
+    Check(sweepCalls==0,"the stats page shown: no order key reaches the units");
+    statsShown=false;statsTargetCode=0;
+    inputstub::keys['Y']=true;MapCommandFrame(in,centre);inputstub::keys['Y']=false;MapCommandFrame(in,centre);
+    Check(sweepCalls==1,"the page shut: Y sweeps again");
+    MapCommandButtons(nullptr,nullptr,0);
 }
 // T on the map: each selected squad that guards cycles its own defence, the march once however many follow; online
 // (orders refused) nothing changes.
@@ -763,7 +794,7 @@ void SelectionCapabilityMask() noexcept {
 }  // namespace
 }  // namespace crew
 int main() {
-    crew::UnitLifetime();crew::PointerAndInput();crew::CameraIsolation();crew::FormationKey();crew::ButtonClicks();
+    crew::UnitLifetime();crew::PointerAndInput();crew::CameraIsolation();crew::FormationKey();crew::ButtonClicks();crew::StatsPage();
     crew::FocusButtonPreservesMark();crew::MarkFromMap();crew::MarkLifetimeAndConfig();
     crew::SupportInput();
     crew::UiCaptureAndSnapshots();crew::RtsClicks();crew::PickOnlyCommandable();crew::FormationMenu();

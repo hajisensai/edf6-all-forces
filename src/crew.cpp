@@ -20,6 +20,7 @@
 // new vehicle), dropped at a new mission (ResetCrew) and reused only once its vehicle has not run its
 // per-frame input for kStaleMs (gone): a full table takes on no new vehicle rather than drop a live one.
 #include "crew.h"
+#include "aim_line_want.h"
 #include "boarding_entrance.h"
 #include "mission_crew.h"
 #include "exit_ground.h"
@@ -263,8 +264,8 @@ bool EnsurePoints(unsigned char* line,std::int32_t segments,const float* at) noe
     return true;
 }
 
-// What a seat's lines get this frame (Want).
-enum class LineWant { keep, hide, show };
+// What a seat's lines get this frame: aim_line_want.h Want.
+using aimline::LineWant;
 
 // Hides the line (its count kept in the vehicle's state; with no room left the line stays as it is), or gives back
 // what was taken (its point buffer first: EnsurePoints).
@@ -283,20 +284,13 @@ void SetLine(State& st,unsigned char* line,LineWant want,const float* at) noexce
     }
 }
 
-// A seat's lines: hidden while an NPC holds the seat, or while it is empty in a vehicle an NPC drives (the 410's door
-// guns, aimed by the plugin with nobody in them), and while the player holds it in an aircraft whose HUD draws a gun
-// sight of its own: one the player-jet flight flies (playerjet.cpp PlayerJetOwnSight: the user, 2026-10-05, "delete
-// the stock gun's two red lines"), a stock helicopter (helisight.cpp PlayerHeliOwnSight: "the heli's sight ours
-// too") or any other stock vehicle (vhud.cpp PlayerStockOwnSight, 2026-10-06: its impact points in their place). The stock line (a count taken away given back) for the player with our sight off (the ini turned off: the
-// next frame). Any other seat is left as it was (as before this list grew): an empty one of a vehicle no NPC drives
-// (one the player got out of keeps its line hidden, nobody there to see it, until they or an NPC sit in it) and a
-// remote player's.
-LineWant Want(Rider rider,bool npcDriven,bool ownSight) noexcept {
-    switch(rider) {
-        case Rider::dummy: return LineWant::hide;
-        case Rider::none: return npcDriven ? LineWant::hide : LineWant::keep;
-        case Rider::player: return ownSight ? LineWant::hide : LineWant::show;
-        default: return LineWant::keep;
+// Who holds a seat, as aim_line_want.h Want reads it: an NPC is a legacy Dummy or a live soldier no machine's player
+// drives (npcai.cpp NpcInSeat: the support's real crews, seated as Rider::other), not the rider's object class alone.
+aimline::Holder LineHolder(const unsigned char* seat) noexcept {
+    switch(SeatRider(seat)) {
+        case Rider::none: return aimline::Holder::empty;
+        case Rider::player: return aimline::Holder::player;
+        default: return NpcInSeat(seat) ? aimline::Holder::npc : aimline::Holder::other;
     }
 }
 
@@ -305,12 +299,12 @@ void AimLines(unsigned char* vehicle) noexcept {
     State* const st=FindState(vehicle);
     if(!st)return;
     const unsigned count=SeatCount(vehicle);
-    const bool npcDriven=count>0 && SeatRider(SeatAt(vehicle,0))==Rider::dummy;
+    const bool npcDriven=NpcDriver(vehicle);
     const bool enabled=Cfg().enabled;
     const bool ownSight=enabled && (PlayerJetOwnSight(vehicle) || PlayerHeliOwnSight(vehicle) || PlayerStockOwnSight(vehicle));
     for(unsigned i=0;i<count && i<16;++i) {
         auto seat=SeatAt(vehicle,i);
-        const LineWant want=enabled ? Want(SeatRider(seat),npcDriven,ownSight) : LineWant::show;
+        const LineWant want=enabled ? aimline::Want(LineHolder(seat),npcDriven,ownSight) : LineWant::show;
         const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
         const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
         if(want==LineWant::keep || n>16 || !Readable(holders,n*8))continue;

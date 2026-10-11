@@ -21,6 +21,7 @@ enum class SzSfx : int {
     footstep,       // a 25 m mech's foot coming down
     land,           // landing from the air
     dash,           // the thrusters' burst of a dash
+    shieldBlock,    // a hit stopped on the raised shield (a heavy plate struck)
     count
 };
 // Loops: set every frame they should sound (`level` 0..1 its loudness and, for the thrusters and the charge, its pitch

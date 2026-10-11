@@ -1,5 +1,5 @@
-"""Developer tool: which EDF4.1 weapons neither EDF5 nor EDF6 has, and how each comes over -> edf41port/weapons.json
-(committed).
+"""Developer tool: which EDF4.1 weapons neither EDF5 nor EDF6 has, and how each comes over -> edf41port/weapons.json,
+its calls (plan P5) -> edf41port/calls.json (both committed).
 
   python -B tools/make_edf41_weapons.py [--edf41 DIR] [--edf5 DIR] [--edf6 DIR]
 
@@ -51,6 +51,9 @@ import sgo  # noqa: E402
 
 STEAM = r'D:\Steam\steamapps\common'
 OUT = os.path.join(HERE, '..', 'edf41port', 'weapons.json')
+# The calls (plan P5) in their own registry: released after edf5port/models.json, so they append after its rows
+# (tools/ported_weapons.py REGISTRIES / RELEASED).
+OUT_CALLS = os.path.join(HERE, '..', 'edf41port', 'calls.json')
 TRANSLATIONS = os.path.join(HERE, '..', 'edf41port', 'translations.json')
 LANGS = ('JA', 'EN', 'CN', 'SC', 'KR')
 ID_PREFIX = 'EDF6VC_E41_'
@@ -476,19 +479,18 @@ def build(edf41: str, edf5: str, edf6: str) -> dict:
             **({'call': call} if call is not None else {}),
         })
     return {'source': "EDF4.1 Root.cpk WEAPON/_WEAPONTABLE.SGO + _WEAPONTEXT.SGO; CN / SC / KR edf41port/translations.json",
-            'weapons': released_first(weapons), 'skipped': skipped}
+            'weapons': weapons, 'skipped': skipped}
 
 
-def released_first(weapons: list[dict]) -> list[dict]:
-    """`weapons` with the ones the registry already lists first, in its order, the new ones after in table order: a
-    released registry's ids stay its prefix (the table rows an install wrote are kept by id and index;
-    tools/selftest.py edf5_weapons_registry)."""
-    if not os.path.isfile(OUT):
-        return weapons
-    with open(OUT, encoding='utf-8') as f:
-        before = [w['id'] for w in json.load(f)['weapons']]
-    at = {wid: k for k, wid in enumerate(before)}
-    return sorted(weapons, key=lambda w: (0, at[w['id']]) if w['id'] in at else (1, 0))
+def is_call(w: dict) -> bool:
+    """A call (plan P5): kept in OUT_CALLS, the registry released after edf5port/models.json."""
+    return 'call' in w or w['category'] == GUNSHIP
+
+
+def write(path: str, data: dict) -> None:
+    with open(path, 'w', encoding='utf-8', newline='\n') as f:
+        json.dump(data, f, ensure_ascii=False, indent=1)
+        f.write('\n')
 
 
 def main() -> int:
@@ -498,10 +500,12 @@ def main() -> int:
     ap.add_argument('--edf6', default=os.path.join(STEAM, 'EARTH DEFENSE FORCE 6'))
     a = ap.parse_args()
     data = build(a.edf41, a.edf5, a.edf6)
-    with open(OUT, 'w', encoding='utf-8', newline='\n') as f:
-        json.dump(data, f, ensure_ascii=False, indent=1)
-        f.write('\n')
+    calls = m5.keep_order(OUT_CALLS, [w for w in data['weapons'] if is_call(w)])
+    data['weapons'] = m5.keep_order(OUT, [w for w in data['weapons'] if not is_call(w)])
+    write(OUT, data)
+    write(OUT_CALLS, {'source': data['source'], 'weapons': calls})
     print(f'{OUT}: {len(data["weapons"])} weapons, {len(data["skipped"])} skipped')
+    print(f'{OUT_CALLS}: {len(calls)} calls')
     reasons: dict[str, int] = {}
     for s in data['skipped']:
         r = s['reason'].split('：')[0]

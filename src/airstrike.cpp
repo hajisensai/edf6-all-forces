@@ -538,11 +538,15 @@ support::Refusal PlanAirSupport(const SupportAircraft& spec,const float* target,
         if(d>0.1f){direction[0]=x/d;direction[2]=z/d;}
     }
     // Air support is created in the air at the route's entry and flies in (2026-10-09, the user: it comes from off
-    // the field; no takeoff). The route (support::AirRoute) already stands its entry over the highest ground of the
-    // whole line plus the altitude; here every aircraft's formation slot (support::AirFormationSlot) must lie inside
-    // the measured area, over its own ground by that altitude, and have the full-size corridor (EntryClear) clear to
-    // its own end over the target.
+    // the field; no takeoff). The route (support::AirRoute) stands its entry off the map: past the ground's edge, inside
+    // the physical square (ArrivalHalf), past the caller's draw distance where that square holds such a place (2026-10-10:
+    // made 180 m inside the ground and 900 m from the caller, the aircraft appeared in plain sight), over the highest
+    // ground of the whole line plus the altitude; here every aircraft's formation slot (support::AirFormationSlot) must lie
+    // inside that square, over its own ground (where it has any) by half the altitude, and have the full-size corridor
+    // (EntryClear) clear to its own end over the target. The paratroop plane's line must also leave the map past the
+    // target with room to turn round (its passes: SupportPassTurn, support::MakePassLine).
     const PlayArea area=MapPlayArea();
+    const support::Reach reach{ArrivalHalf(),NearDrawDistance()};
     const float altitude=spec.heli>=0 ? std::fmax(Cfg().heliHeight,60.0f) : kAboveTarget;
     const float spacing=spec.heli>=0 ? 0.6f : 1.0f;
     const auto entry=[&](const float* from,const float* to) noexcept {
@@ -551,7 +555,7 @@ support::Refusal PlanAirSupport(const SupportAircraft& spec,const float* target,
         support::Route lead{{from[0],from[1],from[2]},{dx/d,0.0f,dz/d}};
         for(int i=0;i<spec.count;++i) {
             float at[3];support::AirFormationSlot(lead,i,spacing,at);
-            if(at[0]<area.lo[0] || at[0]>area.hi[0] || at[2]<area.lo[1] || at[2]>area.hi[1])return false;
+            if(std::fabs(at[0])>reach.half || std::fabs(at[2])>reach.half)return false;
             float ground;
             if(EntryHeight(at[0],at[2],target[1],ground) && ground+altitude*0.5f>at[1])return false;   // over its own ground too
             const float end[3]={at[0]+dx,at[1],at[2]+dz};
@@ -559,7 +563,13 @@ support::Refusal PlanAirSupport(const SupportAircraft& spec,const float* target,
         }
         return true;
     };
-    return support::AirRoute(area,target,observer,direction,altitude,entry,EntryHeight,*route);
+    const auto refusal=support::AirRoute(area,reach,target,observer,direction,altitude,SupportPassTurn(spec),entry,EntryHeight,*route);
+    if(refusal==support::Refusal::none)
+        Log("SUPPORT air entry (%.0f,%.0f,%.0f): %.0f m from the target, %.0f m from the caller (draws to %.0f m: %s), the physical "
+            "square +-%.0f",route->from[0],route->from[1],route->from[2],support::FlatDistance(route->from,target),
+            observer ? support::FlatDistance(route->from,observer) : -1.0f,reach.draw,route->beyond ? "past it" :
+            "none past it in the square, the farthest taken",reach.half);
+    return refusal;
 }
 
 support::Refusal PlanTakeoffSupport(const SupportAircraft& spec,const float* target,const float (*spots)[3],int count,

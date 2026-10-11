@@ -198,6 +198,14 @@ inline constexpr float kGuardFace[3]={-0.1f,0.05f,1.0f},kDrawFace[3]={0.0f,-0.35
 inline constexpr HandPose kShieldBoost={{1.2f,-3.7f,-1.6f},{1.0f,0.0f,0.0f},{0,0,0},{0.6f,0.0f,-1.0f}};
 inline constexpr HandPose kShieldBrace={{3.0f,-3.0f,0.6f},{1.0f,0.0f,0.0f},{0,0,0},{0.0f,-1.0f,-1.0f}};
 constexpr float kMeleeGuard=0.35f;  // of the guard the shield arm holds while the tomahawk is out
+// A hit the shield stops (PoseInput::blocks): its kick's impulse (1/s into the sprung jolt, ~0.5 at its height) and what
+// the jolt does at 1: the shield's wrist kBlockBack m back toward the chest, the chest kBlockLean deg back, the knees in.
+constexpr float kBlockKick=14.0f,kBlockBack=1.6f,kBlockLean=5.0f,kBlockCrouch=0.25f;
+// The shield raised for its missiles (ShieldRaise): out at the left front, the forearm upright, its face onto the aim;
+// apart from the guard's (across the chest, crouched: the user, 2026-10-09 「举盾和右键攻击重叠了」): the wrist kRaiseAhead
+// m ahead of the shoulder, kRaiseOut out to the left, kRaiseUp up.
+// (the forearm upright: the elbow ahead of the shoulder and a little under it, the wrist its forearm's length over it)
+constexpr float kRaiseAhead=2.0f,kRaiseOut=1.2f,kRaiseUp=2.5f;
 
 // The tomahawk's swings: keys over a swing's u (0 .. 1; WindEnd and StrikeEnd are the wind-up's and the strike's ends):
 // the right wrist (as HandPose), the hand's +z (the edge, leading the cut) and +y (the handle toward the blade); the chest's
@@ -269,6 +277,8 @@ struct Anim {
     float glance=0.0f;           // s left of the glance at the special weapon just chosen
     int special=-1;
     float pulse=0.0f;            // 0 .. 1 the funnel packs thrown open (a funnel launched)
+    float kick=0.0f,kickV=0.0f;  // the shield knocked back by a hit it stopped (a sprung jolt: kBlockKick)
+    int blocksSeen=0;
     bool funnelWas[6]{};
     float clock=0.0f;
 };
@@ -388,7 +398,7 @@ inline void StepWeapons(const PoseInput& in,float dt,Anim& a) {
 }
 
 inline void Step(const PoseInput& in,float runSpeed,float dt,Anim& a) {
-    if(!a.started){a=Anim{};a.started=true;a.ready=in.aim;}
+    if(!a.started){a=Anim{};a.started=true;a.ready=in.aim;a.blocksSeen=in.blocks;}   // no jolt for hits before it
     dt=Clamp(dt,0.0f,0.1f);
     a.clock+=dt;
     StepGait(in,runSpeed,dt,a);
@@ -418,6 +428,9 @@ inline void Step(const PoseInput& in,float runSpeed,float dt,Anim& a) {
     for(int k=0;k<6;++k){launched|=in.funnelOut[k] && !a.funnelWas[k];a.funnelWas[k]=in.funnelOut[k];}
     if(launched)a.pulse=1.0f;
     a.pulse=std::fmax(0.0f,a.pulse-1.6f*dt);
+    // a hit stopped on the shield: a jolt back through the arm and the body, sprung back
+    if(in.blocks!=a.blocksSeen){a.kickV+=kBlockKick;a.blocksSeen=in.blocks;}
+    Sway(a.kick,a.kickV,0.0f,140.0f,16.0f,dt);
     // the tanks and the packs swing with the speed's change and the climb
     Sway(a.tank,a.tankV,Clamp(-a.accel*0.012f,-0.35f,0.35f)+0.2f*in.air,60.0f,7.0f,dt);
     Sway(a.pack,a.packV,Clamp(-a.accel*0.006f,-0.2f,0.2f),90.0f,9.0f,dt);
@@ -432,7 +445,7 @@ inline ChestFrame Shoulder(const Pose& p,int side) { return {Of(p.modelPos[Upper
 // The stance and the crouch, the steps planned: each ankle and foot as it stands (turned with the hips), each step's
 // offset along the walk's way, the pelvis's sway. Gait walks them.
 inline void Legs(const PoseInput& in,const Anim& a,Pose* p) {
-    const float feet=1.0f-in.air,cr=a.crouch;
+    const float feet=1.0f-in.air,cr=Clamp(a.crouch+kBlockCrouch*std::fmax(a.kick,0.0f)*feet,0.0f,1.0f);
     for(int side=0;side<2;++side) {
         const Stance& k=kStance[side];
         const float thigh=kCrouchThigh*cr,knee=kCrouchKnee*cr,foot=-kFootFlat*(thigh+knee);
@@ -576,7 +589,7 @@ inline void Torso(const PoseInput& in,float dt,Anim& a,Pose* p) {
     p->rot[kPelvis]=Mul(RotY(hip),Mul(RotZ(-in.bank-a.leanS),RotX(leanF)));
     const float chestYaw=aimYaw+(kGuardTurn*a.guard+a.twist*a.melee)*kDeg;   // where the chest faces, from the facing
     p->rot[kWaist]=RotY(-hip*0.6f+twist+chestYaw*0.4f);
-    p->rot[kChest]=Mul(RotX(breathe-kCannonBack*kDeg*a.brace),RotY(-hip*0.4f+chestYaw*0.6f));
+    p->rot[kChest]=Mul(RotX(breathe-kCannonBack*kDeg*a.brace-kBlockLean*kDeg*a.kick),RotY(-hip*0.4f+chestYaw*0.6f));
     // the head: onto the aim's remainder, a glance at the weapon chosen (0 the shield's missiles: the left; 1 the
     // funnels: up; 2 the chest cannon: down)
     float yaw=Clamp(in.aimYaw*a.ready-chestYaw,-45.0f*kDeg,45.0f*kDeg),pitch=Clamp(in.aimPitch*a.ready,-30.0f*kDeg,30.0f*kDeg)*0.5f;
@@ -605,6 +618,11 @@ inline ArmGoal ShieldFront(const ChestFrame& c,V3 face,float drop) {
     const V3 up=Row(c.rot,1),across=VUnit(VCross(face,up),-Row(c.rot,0));   // to the right of the face
     const V3 flat=VUnit(VPerp(face,up),Row(c.rot,2));
     return {c.at+flat*kFrontAhead+across*kFrontAcross+up*(kFrontUp-drop),VUnit(-across+up*-1.2f),Ident(),face};
+}
+// The left arm's goal with the shield raised out at the left front for its missiles, its face along `face`.
+inline ArmGoal ShieldRaise(const ChestFrame& c,V3 face) {
+    const V3 up=Row(c.rot,1),left=Row(c.rot,0),flat=VUnit(VPerp(face,up),Row(c.rot,2));
+    return {c.at+flat*kRaiseAhead+left*kRaiseOut+up*kRaiseUp,VUnit(flat+left*0.3f+up*-1.0f),Ident(),face};
 }
 // The right arm's goal holding the rifle (or the tomahawk) `hand` turned as given, the wrist at `wrist`.
 inline ArmGoal HandGoal(V3 wrist,V3 pole,const M3& hand) { return {wrist,pole,hand,Row(hand,1)}; }
@@ -684,7 +702,7 @@ inline void Arms(const PoseInput& in,const Rig& rig,float dt,Anim& a,Pose* p) {
     const float guard=std::fmax(a.guard,kMeleeGuard*a.melee);
     left=Blend(left,ShieldFront(cl,Dir(cl,kGuardFace),0.0f),guard);
     const V3 aim=AimDir(in,0.0f);
-    left=Blend(left,ShieldFront(cl,aim,0.0f),a.present);
+    left=Blend(left,ShieldRaise(cl,aim),a.present);
     left=Blend(left,ShieldGoal(cl,kShieldBrace),a.brace);
     // the draw and the put-away: the shield brought in front of the belly, its inner face (the tomahawk's) to the right hand
     float drawU=-1.0f;
@@ -695,6 +713,7 @@ inline void Arms(const PoseInput& in,const Rig& rig,float dt,Anim& a,Pose* p) {
     if(a.stow>=0.0f)support=Smooth(a.stow*5.0f)*(1.0f-Smooth((a.stow-kStowShield)*6.0f));
     left=Blend(left,ShieldFront(cl,Dir(cl,kDrawFace),kDrawDrop),support);
     left=Blend(ShieldGoal(cl,kShieldSide),left,Clamp(a.ready+a.guard,0.0f,1.0f));
+    left.wrist=left.wrist-Row(cl.rot,2)*(kBlockBack*a.kick);   // a stopped hit's jolt
     SolveArm(rig,0,left,p);
     Finish(p);
     const AxeAt stowed=AxeOnShield(rig,*p);

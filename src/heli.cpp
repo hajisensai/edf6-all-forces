@@ -40,6 +40,7 @@
 #include "layout.h"
 #include "memory.h"
 #include "online_authority.h"
+#include "support_aircraft.h"
 #include "npcai.h"
 #include "npc_gunner_aim.h"
 #include "roundaim.h"
@@ -2883,6 +2884,7 @@ int RescueTakeoffPads(float (*out)[3],int most) noexcept {
 }
 
 void HeliFrame(unsigned char* vehicle) noexcept {
+    SupportAircraftFrame(vehicle);   // one of the support's arriving from off the map (jet_spawn.cpp): any machine, any pilot
     for(auto& r:rescues)if(r.phase!=RescuePhase::none && r.ref.Is(vehicle))r.seenFrame=GameFrame();   // RescueHeliAlive
     if(call.phase==CallPhase::assigned && call.ref.Is(vehicle))call.seenFrame=GameFrame();   // a peer's copy too (Replay)
     if(!profileOk || vehicle[kDead])return;

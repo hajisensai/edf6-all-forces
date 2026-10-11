@@ -3,7 +3,7 @@ project(EDF6VehicleCrew VERSION 0.8.0 LANGUAGES CXX)
 set(EDF6_GAME_DIR "" CACHE PATH "Optional EDF6 game directory for read-only generated-asset checks")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/overlay.cpp src/hud.cpp src/launcher.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/fieldshare.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/view.cpp src/mission.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp src/edf5campaign.cpp src/turretaim.cpp src/rounds.cpp src/vhud.cpp src/stockgauge.cpp src/warn.cpp src/payload.cpp src/seatswitch.cpp src/sidecar.cpp src/turretcam.cpp src/vehsound.cpp src/sightzoom.cpp)
+add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/overlay.cpp src/hud.cpp src/launcher.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/legacymap.cpp src/fieldshare.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/view.cpp src/mission.cpp src/mission_watch.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp src/edf5campaign.cpp src/edf5online.cpp src/turretaim.cpp src/rounds.cpp src/vhud.cpp src/stockgauge.cpp src/warn.cpp src/payload.cpp src/seatswitch.cpp src/sidecar.cpp src/turretcam.cpp src/vehsound.cpp src/sightzoom.cpp)
 # The Nix's torso twist (its own line: the source list above is where every feature branch adds).
 target_sources(EDF6VehicleCrew PRIVATE src/nix.cpp)
 # The ground vehicles' ram (its own line, as above).
@@ -14,6 +14,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/stab.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/gunnerrecoil.cpp)
 # The map view (src/map.cpp: the overhead camera, the input hold, the marks it gathers).
 target_sources(EDF6VehicleCrew PRIVATE src/map.cpp)
+# The damage statistics (src/damagestats.cpp: the damage hook and the round tags; the page in src/hud_stats.inc).
+target_sources(EDF6VehicleCrew PRIVATE src/damagestats.cpp)
 # The map's NPC commands (src/mapcmd.cpp, src/mapcmd_logic.h).
 target_sources(EDF6VehicleCrew PRIVATE src/mapcmd.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/support_dispatch.cpp)
@@ -40,6 +42,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/impact.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/playarea.cpp)
 # The stock split missiles (MissileBullet02) split short of a big target's surface.
 target_sources(EDF6VehicleCrew PRIVATE src/splitmissile.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/route_guide.cpp)
 # Which machine runs the plugin's work on an object online (src/online_authority.h, docs/online-re.md section 3).
 target_sources(EDF6VehicleCrew PRIVATE src/online_authority.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/drill_net.cpp)
@@ -181,6 +184,11 @@ add_executable(rounds_check EXCLUDE_FROM_ALL tools/rounds_check.cpp)
 target_compile_options(rounds_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(rounds_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+# The damage statistics' book and page (src/damage_stats.h, tools/damage_stats_check.cpp). Not part of the plugin build:
+# cmake --build build --target damage_stats_check && build\damage_stats_check.exe
+add_executable(damage_stats_check EXCLUDE_FROM_ALL tools/damage_stats_check.cpp)
+target_compile_options(damage_stats_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(damage_stats_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # The map's command buttons (src/map_buttons.h): their layout and the click's button, offline
 # (tools/map_buttons_check.cpp). Not part of the plugin build:
 # cmake --build build --target map_buttons_check && build\map_buttons_check.exe
@@ -251,12 +259,25 @@ add_executable(gunship_muzzle_check EXCLUDE_FROM_ALL tools/gunship_muzzle_check.
 target_compile_options(gunship_muzzle_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(gunship_muzzle_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+# The bullets' candidate collector's verdict for the plugin's jets (src/ownround.h): a jet's own round never on its own
+# airframe (its object or any of its own body ids), wingmen as before, all else stock, offline (tools/own_round_check.cpp).
+# Not part of the plugin build: cmake --build build --target own_round_check && build\own_round_check.exe
+add_executable(own_round_check EXCLUDE_FROM_ALL tools/own_round_check.cpp)
+target_compile_options(own_round_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(own_round_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
 # The exhausts' frame (src/exhaust_pose.h): a jet flown frame by frame in the game's order, its flame's root against its
 # nozzle as drawn, before / after carrying the bone record to this frame (tools/exhaust_pose_check.cpp). Not part of the
 # plugin build: cmake --build build --target exhaust_pose_check && build\exhaust_pose_check.exe
 add_executable(exhaust_pose_check EXCLUDE_FROM_ALL tools/exhaust_pose_check.cpp)
 target_compile_options(exhaust_pose_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(exhaust_pose_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The exhausts' nozzles read off the model (src/exhaust_nozzles.h: its nozzle bones, the stock models' src/nozzles_gen.h)
+# and placed where the game draws them, a carrier's tilting pods too (tools/exhaust_nozzles_check.cpp). Not part of the
+# plugin build: cmake --build build --target exhaust_nozzles_check && build\exhaust_nozzles_check.exe
+add_executable(exhaust_nozzles_check EXCLUDE_FROM_ALL tools/exhaust_nozzles_check.cpp)
+target_compile_options(exhaust_nozzles_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(exhaust_nozzles_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # The gun stabilizer (src/stab.h) on a hull driven over bumps and through turns against the stock aim axis step, the
 # gun's world pointing error with and without it, offline (tools/stab_check.cpp). Not part of the plugin build:
@@ -272,6 +293,11 @@ target_compile_options(stab_native_readback_test PRIVATE /W4 /WX /utf-8 /permiss
 # The Proteus rework's rules (src/proteus_logic.h: the stances and their stagger, the shield's heat / HP / break / refill,
 # who operates each stock weapon mount, the step height) offline (tools/proteus_check.cpp). Not part of the plugin build:
 # cmake --build build --target proteus_check && build\proteus_check.exe
+# What the charge drones and the gunship go for and when a charge drone gives up (tools/air_chase_check.cpp,
+# src/air_chase.h). Not part of the plugin build.
+add_executable(air_chase_check EXCLUDE_FROM_ALL tools/air_chase_check.cpp)
+target_compile_options(air_chase_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(air_chase_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # The flyers' soft edge's rules offline (tools/airbound_check.cpp, src/airbound.h). Not part of the plugin build.
 add_executable(airbound_check EXCLUDE_FROM_ALL tools/airbound_check.cpp)
 target_compile_options(airbound_check PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -459,6 +485,10 @@ add_test(NAME call_pick COMMAND call_pick_test)
 add_executable(support_entry_test tests/support_entry_test.cpp)
 target_compile_options(support_entry_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME support_entry COMMAND support_entry_test)
+# The paratroop plane's passes along one straight line through its drop point (src/ferry_line.h; 2026-10-10).
+add_executable(ferry_line_test tests/ferry_line_test.cpp)
+target_compile_options(ferry_line_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME ferry_line COMMAND ferry_line_test)
 # The support configuration's parse and validation, and the ini it really reads (src/support_config.cpp).
 add_executable(support_config_test tests/support_config_test.cpp)
 target_compile_options(support_config_test PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -501,6 +531,10 @@ set_target_properties(map_hud_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE
 add_executable(armor_hud_check EXCLUDE_FROM_ALL tools/armor_hud_check.cpp)
 target_compile_options(armor_hud_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(armor_hud_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The stock red aim lines per seat: an NPC's hidden, real crews too (tools/aim_line_want_check.cpp).
+add_executable(aim_line_want_check EXCLUDE_FROM_ALL tools/aim_line_want_check.cpp)
+target_compile_options(aim_line_want_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(aim_line_want_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 add_executable(seat_switch_check EXCLUDE_FROM_ALL tools/seat_switch_check.cpp)
 target_compile_options(seat_switch_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(seat_switch_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
@@ -517,6 +551,10 @@ set_target_properties(view_clip_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMA
 add_executable(split_fuse_test tests/split_fuse_test.cpp)
 target_compile_options(split_fuse_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME split_fuse COMMAND split_fuse_test)
+# The stock route guide's field corrections (src/route_guide.h).
+add_executable(route_guide_test tests/route_guide_test.cpp)
+target_compile_options(route_guide_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME route_guide COMMAND route_guide_test)
 # The online gates (src/online_authority.h): their rules on every case, and a source guard that the plugin asks them.
 add_executable(online_authority_test tests/online_authority_test.cpp)
 target_compile_options(online_authority_test PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -566,7 +604,7 @@ add_test(NAME pn COMMAND pn_test)
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
-    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check hover_lift_check view_clip_check npc_ai_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check)
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check hover_lift_check view_clip_check npc_ai_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check own_round_check exhaust_nozzles_check damage_stats_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 add_dependencies(offline_checks transport_runtime_test)
 add_dependencies(offline_checks stab_native_readback_test)
@@ -709,6 +747,15 @@ add_test(NAME npc_core_check COMMAND npc_core_check)
 set(EDF6_NATIVE_DLL "" CACHE FILEPATH "Optional supported EDF.dll for isolated native checks")
 add_test(NAME item_pickup_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/item_pickup_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(item_pickup_native PROPERTIES SKIP_RETURN_CODE 77)
+# The Proteus shield's round carries its model into the IFC (src/ifc_model.h; test hub report #6, the B-key crash):
+# the copy against fake visitors, its wiring in jet_bay.cpp / make_proteus.py, and the contract on the real EDF.dll.
+add_executable(ifc_model_test EXCLUDE_FROM_ALL tests/ifc_model_test.cpp)
+target_compile_options(ifc_model_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks ifc_model_test)
+add_test(NAME ifc_model COMMAND ifc_model_test)
+add_test(NAME ifc_model_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/ifc_model_guard.py")
+add_test(NAME ifc_model_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/ifc_model_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(ifc_model_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME playerjet_recovery COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/playerjet_recovery_check.py"
     --build-dir "${CMAKE_BINARY_DIR}" --negative-controls)
 # Production launch heat and cooling, including the overheat latch before the launch frame's cooling.
@@ -818,6 +865,16 @@ add_test(NAME edf5_campaign_native COMMAND edf5_campaign_native_test "${EDF6_NAT
 add_test(NAME edf5_campaign_partial_install COMMAND edf5_campaign_native_test "${EDF6_NATIVE_DLL}" 3)
 add_test(NAME edf5_campaign_chained COMMAND edf5_campaign_native_test "${EDF6_NATIVE_DLL}" chain)
 add_test(NAME edf5_campaign_foreign_site COMMAND edf5_campaign_native_test "${EDF6_NATIVE_DLL}" foreign)
+# The route guide hook on a private EDF.dll mapping: every constructor call redirected, each caller's guide corrected.
+add_executable(route_guide_native_test EXCLUDE_FROM_ALL tests/route_guide_native_test.cpp)
+target_include_directories(route_guide_native_test PRIVATE src common)
+target_link_libraries(route_guide_native_test PRIVATE edf6common)
+target_compile_options(route_guide_native_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks route_guide_native_test)
+add_test(NAME route_guide_native COMMAND route_guide_native_test "${EDF6_NATIVE_DLL}")
+add_test(NAME route_guide_foreign_site COMMAND route_guide_native_test "${EDF6_NATIVE_DLL}" foreign)
+add_test(NAME route_guide_partial_install COMMAND route_guide_native_test "${EDF6_NATIVE_DLL}" partial)
+set_tests_properties(route_guide_native route_guide_foreign_site route_guide_partial_install PROPERTIES SKIP_RETURN_CODE 77)
 set_tests_properties(edf5_campaign_native edf5_campaign_partial_install edf5_campaign_chained edf5_campaign_foreign_site
                      PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME edf5_campaign_lifecycle COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_edf5_campaign_lifecycle.py")
@@ -845,6 +902,8 @@ target_link_libraries(fieldshare_test PRIVATE edf6common)
 target_compile_options(fieldshare_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME fieldshare COMMAND fieldshare_test)
 add_test(NAME autopilot_driver COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/autopilot/test_drive.py")
+# One real-game test at a time per game folder, first come first served (pylib/gamelease.py, tools/gamequeue.py).
+add_test(NAME game_lease COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/game_lease_test.py")
 
 add_executable(ground_navigation_test tests/ground_navigation_test.cpp)
 target_compile_options(ground_navigation_test PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -987,6 +1046,8 @@ add_dependencies(offline_checks npc_driver_payload_test)
 add_test(NAME npc_driver_payload COMMAND npc_driver_payload_test)
 add_test(NAME npc_driver_payload_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_driver_payload_native.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(npc_driver_payload_native PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME npc_vehicle_ai_native_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_vehicle_ai_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(npc_vehicle_ai_native_audit PROPERTIES SKIP_RETURN_CODE 77)
 add_executable(ground_navigation_runtime_test tests/ground_navigation_runtime_test.cpp src/ground_navigation.cpp)
 target_include_directories(ground_navigation_runtime_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_compile_options(ground_navigation_runtime_test PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -1132,3 +1193,17 @@ add_test(NAME qmark COMMAND qmark_test)
 # The marker's name from the game's own name tag source (src/player_name.cpp), read from EDF.dll without running it.
 add_test(NAME player_name_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/player_name_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(player_name_native PROPERTIES SKIP_RETURN_CODE 77)
+# The mission start's phase watchdog (src/mission_watch.cpp): phases logged, a stuck one reported with a dump.
+add_executable(mission_watch_test tests/mission_watch_test.cpp)
+target_include_directories(mission_watch_test PRIVATE common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_compile_options(mission_watch_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME mission_watch COMMAND mission_watch_test)
+# The EDF5 scripts' player natives online (src/edf5online.cpp) on a private EDF.dll mapping.
+add_executable(edf5_online_native_test EXCLUDE_FROM_ALL tests/edf5_online_native_test.cpp)
+target_include_directories(edf5_online_native_test PRIVATE src common)
+target_link_libraries(edf5_online_native_test PRIVATE edf6common)
+target_compile_options(edf5_online_native_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks edf5_online_native_test)
+add_test(NAME edf5_online_native COMMAND edf5_online_native_test "${EDF6_NATIVE_DLL}")
+add_test(NAME edf5_online_foreign_build COMMAND edf5_online_native_test "${EDF6_NATIVE_DLL}" foreign)
+set_tests_properties(edf5_online_native edf5_online_foreign_build PROPERTIES SKIP_RETURN_CODE 77)

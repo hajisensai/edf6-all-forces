@@ -132,7 +132,7 @@ mapcam::CameraSession cameraSession;
 std::atomic<int> wheel{0};   // WM_MOUSEWHEEL's delta since the game thread last took it
 
 // --- The game thread's own ---
-struct Keys { bool map,esc,centre,padMap,padClose,padCentre; };
+struct Keys { bool map,esc,centre,padMap,padClose,padCentre,stats; };
 struct Game {
     ObjRef human;               // the player the map is for
     bool open,follow,pad;
@@ -504,6 +504,7 @@ void Close(const char* why) noexcept {
     if(!game.open)return;
     game.open=false;
     SuspendMapCommands();
+    DamageStatsShow(false);
     holds.store(false);
     AcquireSRWLockExclusive(&lock);
     pose.open=false;readoutAt=0;
@@ -539,6 +540,22 @@ void Steer(const unsigned char* human,float dt,bool front,const XINPUT_STATE* pa
     // The mark key pressed with the pointer on an enemy marks it (mapcmd.cpp), the map does not turn with it. Asked every
     // frame, in front or not: a release ends the press.
     const bool eat=MapCommandEats(front);
+    // The damage statistics' page over it: the map holds still; the wheel scrolls the page's bars (a notch a row, a fine
+    // wheel's part-notches kept until they make one), the pad's D-pad too, LB / RB turn its tabs, Y its scope.
+    if(DamageStatsShown()) {
+        static int part=0;
+        static WORD padWas=0;
+        part+=wheel.exchange(0);
+        const int notches=part/WHEEL_DELTA;
+        part-=notches*WHEEL_DELTA;
+        const WORD b=pad ? pad->Gamepad.wButtons : static_cast<WORD>(0),edge=static_cast<WORD>(b&~padWas);
+        padWas=b;
+        const int rows=notches+((edge&XINPUT_GAMEPAD_DPAD_UP) ? 1 : 0)-((edge&XINPUT_GAMEPAD_DPAD_DOWN) ? 1 : 0);
+        if(rows)DamageStatsWheel(rows);
+        const int tab=((edge&XINPUT_GAMEPAD_RIGHT_SHOULDER) ? 1 : 0)-((edge&XINPUT_GAMEPAD_LEFT_SHOULDER) ? 1 : 0);
+        if(tab || (edge&XINPUT_GAMEPAD_Y))DamageStatsPad(tab,(edge&XINPUT_GAMEPAD_Y)!=0);
+        return;
+    }
     if(front) {
         ahead=static_cast<float>((Down('W') || Down(VK_UP))-(Down('S') || Down(VK_DOWN)));
         right=static_cast<float>((Down('D') || Down(VK_RIGHT))-(Down('A') || Down(VK_LEFT)));
@@ -577,7 +594,7 @@ void Steer(const unsigned char* human,float dt,bool front,const XINPUT_STATE* pa
 Keys ReadToggles(bool front,const XINPUT_STATE* pad) noexcept {
     const Config& c=Cfg();
     Keys k{};
-    if(front){k.map=Down(c.mapKey);k.esc=Down(VK_ESCAPE);k.centre=Down(VK_SPACE) || Down(VK_HOME);}
+    if(front){k.map=Down(c.mapKey);k.esc=Down(VK_ESCAPE);k.centre=Down(VK_SPACE) || Down(VK_HOME);k.stats=c.damageStats && Down(c.damageStatsKey);}
     if(pad) {
         const WORD b=pad->Gamepad.wButtons;
         k.padMap=c.mapButton>0 && (b&static_cast<WORD>(c.mapButton))==static_cast<WORD>(c.mapButton);
@@ -595,7 +612,7 @@ bool Frame(unsigned char* human) noexcept {
     // One player (a second local player is never held: the map is the first one's while its frames come; the old one
     // is not read, it may be gone).
     if(game.human.obj && game.human.obj!=human && now-game.frameAt<kFreshMs)return false;
-    if(!game.human.Is(human)){Close("another player");game.human=ObjRef::Of(human);game.was=Keys{true,true,true,true,true,true};}
+    if(!game.human.Is(human)){Close("another player");game.human=ObjRef::Of(human);game.was=Keys{true,true,true,true,true,true,true};}
     LARGE_INTEGER t,hz;QueryPerformanceCounter(&t);QueryPerformanceFrequency(&hz);
     float dt=game.last.QuadPart ? static_cast<float>(t.QuadPart-game.last.QuadPart)/static_cast<float>(hz.QuadPart) : 0.0f;
     game.last=t;
@@ -610,22 +627,30 @@ bool Frame(unsigned char* human) noexcept {
     const bool toggle=(k.map && !game.was.map) || (k.padMap && !game.was.padMap);
     const bool close=(k.esc && !game.was.esc) || (k.padClose && !game.was.padClose);
     const bool centre=(k.centre && !game.was.centre) || (k.padCentre && !game.was.padCentre);
+    // The stats key: the map opened on the damage statistics' page, the page shown over an open map, again: both shut.
+    const bool stats=k.stats && !game.was.stats;
+    // Debug=1: which key's edge moved the map (keyboard M / I / Esc, the pad's map / close button), for input reports.
+    if(c.debug && (toggle || close || stats))
+        Log("MAP key edge: map %d, pad map %d, stats %d, esc %d, pad close %d (open %d, front %d, pad read %d)",k.map && !game.was.map,
+            k.padMap && !game.was.padMap,stats,k.esc && !game.was.esc,k.padClose && !game.was.padClose,game.open,front,pad);
     game.was=k;
-    if(game.open && (toggle || close)) {
-        Close(close ? "Esc / B" : "the map key");
+    if(game.open && stats && !DamageStatsShown())DamageStatsShow(true);
+    else if(game.open && (toggle || close || stats)) {
+        Close(close ? "Esc / B" : stats ? "the stats key" : "the map key");
         // The key that closed it is still down: let through now, the stock pad read would take this frame's B as the
         // vehicle's or the soldier's (the seat switch, a stock B action), Esc as the pause menu's. The hold stays on
         // (and the plugin's keys with it, MapHoldsKeys) until every closing key and button is let go.
         game.draining=true;holds.store(true);
     }
     if(game.draining) {
-        if(k.map || k.esc || k.padMap || k.padClose)return true;
+        if(k.map || k.esc || k.padMap || k.padClose || k.stats)return true;
         game.draining=false;holds.store(false);
     }
     if(!game.open) {
-        if(!toggle)return false;
+        if(!toggle && !stats)return false;
         Open(human);
-        game.pad=k.padMap && !k.map;
+        DamageStatsShow(stats);
+        game.pad=k.padMap && !k.map && !stats;
     }
     if(centre)game.follow=true;
     mapcam::View& v=game.view;

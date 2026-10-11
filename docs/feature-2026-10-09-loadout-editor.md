@@ -63,7 +63,7 @@
 - 主炮仍是原版那门（HE 榴弹炮，或换成 A1 的 AP 滑膛炮挂载）。
 - 每个挂点再加一条武器表项和一行挂点行，挂已有的炮弹挂载 `EDF6VC_AP_<n>` / `EDF6VC_HE_<n>` / `EDF6VC_GLM_<n>`。这几种是 `vcobjects.STORES` 的 Shell，由原版炮弹原样拷贝、只改弹数。
 - 炮弹挂点的后坐与主炮相同（与 `make_stock_stores` 同一规则）。
-- 这和原版坦克请求早已用上的「额外挂载」是同一机制：`make_stock_stores` 给 MBT 挂 APFSDS 20 / HE 20 / LAHAT 4。
+- 这和原版坦克请求早已用上的「额外挂载」是同一机制：`make_stock_stores` 给 MBT 挂原版主炮没有的那种炮弹（APFSDS 或 HE）20 / LAHAT 4（2026-10-10 起，见 `docs/feedback-2026-10-10-tank-ammo.md`）。
 
 **谁来切换**
 
@@ -199,7 +199,8 @@ SupportPreset_SQUAD=lance@1E3A8A*2,cannon,rifle@X:FFFFFF
 
 仓库原有的安装器是控制台菜单（`tools/installer.py`，打包成 `EDF6VehicleCrew安装器.exe`），没有 GUI，所以在它上面扩展。
 
-1. 运行安装器，输入 **7**（配置地图支援），再输入 **l**。
+1. 运行安装器，输入 **8**（战前配置：小队编组 / 每人兵种与颜色 / 坦克与战机挂载）。从菜单 **7**（配置地图支援）输入 **l** 进的是同一个编辑器。
+   - 2026-10-10 用户反馈「战斗外配置 npc 和挂载好像没做入口」：原来只有「7 → l」这一条路，而主菜单第 7 项的说明只写了「可呼叫单位 / 兵员武器 / 架数」，看不出编组、颜色、挂载在里面。现在主菜单单列第 8 项（`tools/installer.py` `manage_support(game, loadout_only=True)`，与菜单 7 同一套保存与生成流程），selftest `installer_menu_8_opens_the_loadouts` 钉住。
 2. 屏幕列出 8 个小队预设和 10 个载具挂载的当前内容：
    - 输入数字编辑小队预设（有写法说明，`-` 清除）；
    - 输入 `v1` … `v10` 进入某台载具（**载具 → 挂点 → 武器**）：显示「主炮 / 机炮 + 挂点1 … 挂点n」。

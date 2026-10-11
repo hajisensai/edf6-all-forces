@@ -1,8 +1,15 @@
-// The carrier's nozzle flames (空母喷口火焰): the stock transport's Booster objects on the carrier's four nozzles.
+// The exhaust flames (尾焰) and the arrival's smoke (入场尾烟) of the plugin's aircraft: the stock Booster object (the
+// stock transport's nozzle flame) on each nozzle, the stock LineStripObject (the missiles' smoke ribbon) behind each.
 //
-// The carrier is a V506_HELI shell wearing the V508 transport model scaled x1.6 (jet.cpp Role::carrier). The
-// stock V508 lights its four nozzles with Booster objects its own vehicle class makes; the heli class never
-// does, so the plugin makes the same four Boosters itself (docs/jet-model-re.md §8):
+// Where the nozzles are, the model says (exhaust_nozzles.h; the user, 2026-10-10: 「尾烟和实际不对。尾烟应该跟着模型生成，
+// 而不是用两段可能不同步的代码维护」): the plugin's own models carry them as bones (pylib/jet_models.py with_nozzles: the
+// jets' exits on their body, the carrier's four boosters on its pods, read off the stock V508's SGO at build time), the
+// stock models flown as they are have them measured into src/nozzles_gen.h (tools/gen_nozzles.py). The flames and the
+// smoke both take each nozzle's world matrix from ExhaustOf, worked out once a frame for the vehicle (one set of numbers:
+// the smoke leaves where the flame burns). A model with no nozzles (the Primer fighter, an old install's models made
+// before the nozzle bones) has neither.
+//
+// The Booster (docs/jet-model-re.md §8):
 //   op_new 0x12D85B0(0x410); ctor 0x2CB810(obj, &param) (vtable 0x17A6D58, written at 0x2CB851); the ctor
 //   attaches the booster to param+0x30 with 0x118AF20(parent, child) (child+0x38 = parent, child appended to
 //   the parent's list) and hands a shared reference back in *(param+0x20); the stock caller (0x5E4CA0) then
@@ -10,13 +17,13 @@
 //   Update (vtable slot 5, 0x2CBE30): copies the 64-byte matrix *(+0x3D8) to +0x60 each frame, so the matrix
 //   storage outlives the booster (static here). The flame shows while +0x3EC or +0x3F0 is above a threshold;
 //   +0x3F0 decays by +0x3E8 a frame, +0x3F4 counts down and zeroes +0x3EC at 0. (H)
-// The plugin feeds each nozzle's bone world matrix (unit rows: the x1.6 model scale is in the sizes instead)
-// (turned and moved as the stock nozzle locators are: NozzleMatrix) and every frame sets +0x3EC = thrust share,
-// +0x3F0 = 1, +0x3F4 = 3; a carrier gone for kStaleMs, or dead,
-// has its boosters deleted (BoosterSweep, once a frame from jet.cpp JetReap: also once the last carrier is gone,
-// when no carrier frame runs). (H/M)
+//   The flame leaves along its matrix's +z (the Booster's direction (0,0,1), 0x1765B70) from its origin.
+// The plugin feeds each nozzle's world matrix (unit rows: a scaled model's scale is in the flame's size) and every frame
+// sets +0x3EC = how strongly it burns, +0x3F0 = 1, +0x3F4 = 3; a vehicle gone for kStaleMs, or dead, has its boosters
+// deleted (BoosterSweep, once a frame from jet.cpp JetReap: also once the last jet is gone). (H/M)
 #include "crew.h"
 #include "body506.h"
+#include "exhaust_nozzles.h"
 #include "exhaust_pose.h"
 #include "jet_internal.h"   // FaultLog, BoosterSweep
 #include "memory.h"
@@ -27,6 +34,8 @@
 #include <intrin.h>
 
 namespace crew {
+static_assert(exhaust::kRecStride==kBoneStride && exhaust::kRecLocal==kBoneLocal506 && exhaust::kRecWorld==kBoneWorld506,
+              "exhaust_nozzles.h reads the bone records body506.h describes");
 namespace {
 constexpr unsigned kOpNew=0x12D85B0,kCtor=0x2CB810,kRegister=0x1195A20,kRegister2=0x1197050,kUpdate=0x2CBE30;
 constexpr unsigned kDelete=0x118A1B0,kVtable=0x17A6D58,kVtableLea=0x2CB851;
@@ -34,11 +43,10 @@ constexpr unsigned kParamVtable=0x17AE438,kConstA=0x1765B70,kConstB=0x17A8D80,kC
 constexpr std::size_t kObjectMgr=0x20B2958,kUpdateSlot=5,kSize=0x410;
 constexpr std::size_t kLevel=0x3EC,kPulse=0x3F0,kHold=0x3F4,kObjFlags=0x18;
 constexpr unsigned char kObjDeleted=4;
-constexpr std::size_t kBoneWorld=0xB0;
-constexpr float kFront[2]={56.0f,16.0f},kBack[2]={40.0f,12.0f};   // V508's 35/10 and 25/7.5, x1.6
-constexpr int kMaxCarriers=64,kNozzles=10;  // a vehicle's flames at most: the carriers' 4, the jets' 2, the Sazabi's 10
-constexpr int kCarrierNozzles=4;            // the carrier's (V508's) four boosters
+constexpr int kMaxCarriers=64,kNozzles=10;  // a vehicle's flames at most: a model's (exhaust::kMaxNozzles), the Sazabi's 10
+static_assert(exhaust::kMaxNozzles<=kNozzles,"a model's nozzles all get a flame");
 constexpr ULONGLONG kStaleMs=1000;
+constexpr float kBurnerLength=1.6f;   // the afterburner (the player's boost): the flame this many times as long
 
 const unsigned char kOpNewSig[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0xD9,0xEB,0x0F,0x48,0x8B,0xCB,0xE8,0x47};
 const unsigned char kCtorSig[]={0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57};
@@ -59,56 +67,15 @@ struct Nozzle {
     unsigned char* obj;
     void* ctrl;                // our weak reference
 };
-struct Carrier {
+struct Carrier {               // a vehicle's flames (the name from when only the carriers had them)
     const unsigned char* v;
     const void* ctrl;
     ULONGLONG seen;
     Nozzle n[kNozzles];
-    exhaust::BodyTrack track;   // its body's matrix this frame and the last (exhaust_pose.h: the records are a frame old)
     bool copyLogged;            // FLAME's once-per-jet check of when the booster takes the matrix (JetFrame)
 };
 Carrier carriers[kMaxCarriers];
 bool sigOk=false,broken=false;
-// The jets' nozzles by their mark (pylib/vcobjects.py JETS; read off their models, pylib/jet_models.py NOZZLES, which
-// tools/selftest.py holds this table to): the bomber501 the strike jets and the player's strike jet fly, the interceptor
-// model the interceptors, the enemy fighter and the player's fighter fly, the multirole's, the drones', the gunship's
-// bomber401 (it had none: its mark is its own, 7011, and kBomberNozzles is only looked up under the strike mark). Each
-// flame on its exhaust's exit (its centre, in the exit plane: a flame set back inside the nozzle showed high in it from
-// behind), as big as the engine: width the exit's diameter, length jet_models.FLAME_LENGTH_PER_DIAMETER of it (m); with
-// the afterburner (the player's boost) kBurnerLength times as long.
-struct JetNozzles { float mark; int count; float at[2][3]; float size[2]; };
-constexpr JetNozzles kJetNozzles[]={
-    {7001.0f,2,{{3.58f,2.325f,-12.006f},{-3.58f,2.325f,-12.006f}},{9.197f,1.839f}},
-    {7002.0f,2,{{3.58f,2.325f,-12.006f},{-3.58f,2.325f,-12.006f}},{9.197f,1.839f}},
-    {7202.0f,2,{{3.58f,2.325f,-12.006f},{-3.58f,2.325f,-12.006f}},{9.197f,1.839f}},
-    {7003.0f,2,{{2.327f,1.511f,-7.804f},{-2.327f,1.511f,-7.804f}},{5.976f,1.195f}},
-    {7020.0f,2,{{2.327f,1.511f,-7.804f},{-2.327f,1.511f,-7.804f}},{5.976f,1.195f}},
-    {7201.0f,2,{{2.327f,1.511f,-7.804f},{-2.327f,1.511f,-7.804f}},{5.976f,1.195f}},
-    {7004.0f,2,{{1.916f,1.157f,-0.457f},{-1.916f,1.157f,-0.457f}},{3.69f,0.738f}},
-    {7006.0f,1,{{0.0f,1.255f,-1.261f},{0.0f,0.0f,0.0f}},{1.616f,0.323f}},
-    {7007.0f,1,{{0.0f,1.255f,-1.261f},{0.0f,0.0f,0.0f}},{1.616f,0.323f}},
-    {7008.0f,1,{{0.0f,1.255f,-1.261f},{0.0f,0.0f,0.0f}},{1.616f,0.323f}},
-    {7011.0f,2,{{3.831f,1.44f,-0.913f},{-3.831f,1.44f,-0.913f}},{7.39f,1.478f}},   // the gunship: the stock bomber401 (kBomberNozzles)
-};
-// The stock bombers a strike jet took over (airstrike.cpp) fly their own models under the strike jet's mark (crew.h
-// BomberBody tells them apart): their exits, measured on those models as they are (pylib/jet_models.py STOCK_BOMBERS;
-// mark 0: not looked up by mark).
-constexpr JetNozzles kBomberNozzles[]={
-    {0.0f,2,{{3.831f,1.44f,-0.913f},{-3.831f,1.44f,-0.913f}},{7.39f,1.478f}},   // JetBody::bomber401
-    {0.0f,2,{{3.58f,0.039f,-12.006f},{-3.58f,0.039f,-12.006f}},{9.195f,1.839f}},   // JetBody::bomber501_2
-};
-constexpr float kStrikeMark=7001.0f;
-constexpr float kBurnerLength=1.6f;
-
-const JetNozzles* NozzlesOf(const unsigned char* v,float mark) noexcept {
-    if(mark==kStrikeMark) {
-        const JetBody body=BomberBody(v+kModelInst506);
-        if(body==JetBody::bomber401)return &kBomberNozzles[0];
-        if(body==JetBody::bomber501_2)return &kBomberNozzles[1];
-    }
-    for(const auto& n:kJetNozzles)if(n.mark==mark)return &n;
-    return nullptr;
-}
 
 bool Live(const Nozzle& z) noexcept {
     return z.obj && z.ctrl && Readable(z.obj,kSize) && Readable(z.ctrl,0x10) && At<const void*>(z.obj,0)==image+kVtable &&
@@ -142,7 +109,7 @@ void Drop(Nozzle& z) noexcept {
 
 int MakeFault(const EXCEPTION_POINTERS* e) noexcept {
     const auto r=e->ExceptionRecord;
-    Log("FLAME the game faulted on a carrier booster (%08lX at EDF+%llX): flames are off until the game restarts",r->ExceptionCode,
+    Log("FLAME the game faulted on a booster (%08lX at EDF+%llX): flames are off until the game restarts",r->ExceptionCode,
         static_cast<unsigned long long>(static_cast<const unsigned char*>(r->ExceptionAddress)-image));
     broken=true;
     return EXCEPTION_EXECUTE_HANDLER;
@@ -184,34 +151,6 @@ void Make(Nozzle& z,const unsigned char* v,const float* size) noexcept {
     DropShared(out[1]);
 }
 
-// The bone's world matrix with unit-length rows (the carrier's model scale stays out of the flame size).
-// The stock V508's nozzle locators (its SGO's animation_model[2], the embedded MAB: 'ブースト0'..'ブースト3' on
-// boosterF_l, boosterF_r, boosterB_l, boosterB_r, its `boosts` 0..3): each turned pi about its pod bone's y (all
-// four share the euler (0, pi, 0)) and set back along the pod, at these offsets (the stock's, x1.6: the carrier's
-// model is scaled, its bone rows are not). The game makes the flame's matrix L x BoneWorld (0x6BB5A0, row
-// vectors) and the flame leaves along that matrix's +z (the Booster's direction (0,0,1), 0x1765B70): with the bone
-// alone, as here before, it blew out of the pod's front and from its pivot (docs/jet-model-re.md §8.1).
-constexpr float kNozzleAt[kCarrierNozzles][3]={{3.44f,-0.064f,-9.52f},{-3.44f,-0.064f,-9.52f},{2.32f,0.0f,-6.88f},{-2.32f,0.0f,-6.88f}};
-
-// Nozzle `i`'s flame matrix from its pod bone's world matrix `world` (its record carried to this frame:
-// exhaust_pose.h): with unit rows (the scale is in the sizes), turned pi about its y (x and z negated) and moved to the
-// locator's offset.
-void NozzleMatrix(float* dst,const float* world,int i) noexcept {
-    float b[16];
-    std::memcpy(b,world,64);
-    for(int r=0;r<3;++r) {
-        float* const row=b+r*4;
-        const float l=std::sqrt(row[0]*row[0]+row[1]*row[1]+row[2]*row[2]);
-        if(l>1e-4f)for(int c=0;c<3;++c)row[c]/=l;
-    }
-    const float* t=kNozzleAt[i];
-    for(int c=0;c<3;++c) {
-        dst[c]=-b[c];dst[4+c]=b[4+c];dst[8+c]=-b[8+c];
-        dst[12+c]=b[12+c]+t[0]*b[c]+t[1]*b[4+c]+t[2]*b[8+c];
-    }
-    dst[3]=b[3];dst[7]=b[7];dst[11]=b[11];dst[15]=1.0f;
-}
-
 Carrier* Find(const unsigned char* v,ULONGLONG ms) noexcept {
     const void* const ctrl=At<const void*>(v,kSelfCtrl);
     Carrier* slot=nullptr;
@@ -220,8 +159,7 @@ Carrier* Find(const unsigned char* v,ULONGLONG ms) noexcept {
         if(!c.v && !slot)slot=&c;
     }
     if(!slot)return nullptr;
-    slot->v=v;slot->ctrl=ctrl;slot->seen=ms;
-    slot->track=exhaust::BodyTrack{};slot->copyLogged=false;
+    slot->v=v;slot->ctrl=ctrl;slot->seen=ms;slot->copyLogged=false;
     return slot;
 }
 
@@ -235,89 +173,97 @@ void Sweep(ULONGLONG ms) noexcept {
         c.v=nullptr;c.ctrl=nullptr;
     }
 }
-
-void Frame(const unsigned char* v,unsigned char* const* recs,float intensity,ULONGLONG ms) noexcept {
-    Carrier* const c=Find(v,ms);
-    if(!c)return;
-    c->seen=ms;
-    exhaust::Observe(c->track,GameFrame(),reinterpret_cast<const float*>(v+kMatrix));
-    for(int i=0;i<kCarrierNozzles;++i) {
-        Nozzle& z=c->n[i];
-        if(!recs[i] || !Readable(recs[i]+kBoneWorld,64))continue;
-        float world[16];
-        exhaust::Carry(reinterpret_cast<const float*>(recs[i]+kBoneWorld),c->track,world);
-        NozzleMatrix(z.m,world,i);
-        if(!Live(z)) {
-            DropWeak(z.ctrl);
-            z.obj=nullptr;z.ctrl=nullptr;
-            Make(z,v,i<2 ? kFront : kBack);
-            if(!Live(z))continue;
-        }
-        Put<float>(z.obj,kLevel,intensity);
-        Put<float>(z.obj,kPulse,1.0f);
-        Put<int>(z.obj,kHold,3);
-    }
-}
 }  // namespace
 
 namespace {
-// A jet's exhaust (the user, 2026-10-05: the jets have no flame): the same Booster on each of its nozzles (JetNozzles:
-// by its mark, in its model's frame: x right, y up, z forward), the flame leaving backwards (its matrix: the model's
-// rows turned pi about y, as the carrier's nozzles), `size` its length and width, `intensity` how strongly it burns.
-// The model's frame is its mesh bone's world matrix as drawn (ModelBone; the vehicle's own matrix if none): on the
-// vehicle's matrix the player fighter's two flames showed above and outside its nozzles, and on the root bone ("mdl")
-// both sat in one dot with no direction (the user's pictures, 2026-10-05): the root's record is not kept up as drawn.
-// The mesh bone as drawn is the model's origin itself, at the collision box frame's origin: FLAME logged the player
-// fighter's 1.385 m under and 1.69 m behind the vehicle's origin (its box's centre (0, 1.381, 1.688)), the strike jet's
-// (0, -2.12, -2.72) (its box's (0, 2.123, 2.723)), its rows the vehicle's. The models are bound with it at their origin
-// (pylib/jet_models.py lift_mdb), so the nozzles (in the grounded model's frame) go on it as they are. It is the bone the
-// jet SGO's animation_model_bone_mapping drives (vcobjects.jet_sgo: Jet.body), found by name (kMeshBones): bone 1 on
-// the bombers' models, bone 2 on the drone's (bone 1 its globalSRT node) and the stock BOMBER501_2's (its bomber501_2
-// node). FLAME logs the frame once per jet.
-// That record is the pose of the frame before, a frame of flight behind the body as drawn: it is carried to this
-// frame's body first (ExhaustBasis, exhaust_pose.h), or the flame burned 3.6..4.1 m behind its nozzle on arrival.
-const wchar_t* const kMeshBones[]={L"bomber501",L"bomber401",L"body"};
-const unsigned char* ModelBone(const unsigned char* v) noexcept {
-    const unsigned char* inst=v+kModelInst506;
-    if(!Readable(inst,kInstBones506+8))return nullptr;
-    const auto bones=At<const unsigned char*>(inst,kInstBones506);
-    const auto count=At<std::int32_t>(inst,kInstBoneCount);
-    if(!bones || count<2 || count>256 || !Readable(bones,static_cast<std::size_t>(count)*kBoneStride))return nullptr;
-    const unsigned char* rec=bones+kBoneStride;   // bone 1 when no bone is named so
-    for(std::int32_t i=1;i<count;++i) {
-        const unsigned char* const r=bones+static_cast<std::size_t>(i)*kBoneStride;
-        const auto name=At<const wchar_t*>(r,0);
-        if(!name || !Readable(name,2))continue;
-        bool hit=false;
-        for(const auto* want:kMeshBones)hit=hit || std::wcsncmp(name,want,32)==0;
-        if(hit){rec=r;break;}
-    }
-    const float* m=reinterpret_cast<const float*>(rec+kBoneWorld506);
-    const float l=m[0]*m[0]+m[1]*m[1]+m[2]*m[2];
-    return l>0.01f ? rec : nullptr;   // a matrix the game keeps up (the root's was none)
+// --- Each vehicle's nozzles this frame (ExhaustOf), the one place the flames (JetFrame) and the smoke (SmokeFrame) take
+// them from: found in its model (exhaust::FindNozzles) once per bone array, their world matrices worked out once per game
+// frame (exhaust::NozzleWorld): the parent's record carried to this frame's body (exhaust_pose.h: the records are a frame
+// old; the flames burned 3.6..4.1 m behind their nozzles on arrival, 2026-10-06) and its local as it is now (`parentSeen`:
+// the one it was posed with, seen here the frame before: the carrier's pods tilt in the input step, before this).
+struct Exhaust {
+    const unsigned char* v;
+    const void* ctrl;
+    ULONGLONG seen;
+    const unsigned char* bones;      // the bone records the set was found in (a new array: found again)
+    exhaust::NozzleSet set;
+    exhaust::BodyTrack track;
+    std::uint64_t frame;             // the game frame `world` is of
+    std::uint64_t seenFrame;         // ...and `parentSeen`
+    float parentSeen[exhaust::kMaxNozzles][16];
+    float world[exhaust::kMaxNozzles][16];
+};
+Exhaust exhausts[kMaxCarriers];
+
+// v's model's bone records (its instance's) and their count; false: none readable.
+bool BonesOf(const unsigned char* v,const unsigned char** bones,int* count) noexcept {
+    const unsigned char* const inst=v+kModelInst506;
+    if(!Readable(inst,kInstBoneCount+4))return false;
+    const auto b=At<const unsigned char*>(inst,kInstBones506);
+    const auto n=At<std::int32_t>(inst,kInstBoneCount);
+    if(!b || n<=0 || n>256 || !Readable(b,static_cast<std::size_t>(n)*kBoneStride))return false;
+    *bones=b;*count=n;
+    return true;
 }
-// The frame the exhausts sit in: the mesh bone's world matrix carried to this frame's body (exhaust_pose.h: the
-// record is the pose of the frame before; `t` the body's track, observed this frame) or, without the bone, the
-// vehicle's own matrix (this frame's already); its rows made unit length.
-const unsigned char* ExhaustBasis(const unsigned char* v,const exhaust::BodyTrack& t,float* b) noexcept {
-    const unsigned char* root=ModelBone(v);
-    if(root)exhaust::Carry(reinterpret_cast<const float*>(root+kBoneWorld506),t,b);
-    else std::memcpy(b,v+kMatrix,64);
-    for(int r=0;r<3;++r) {
-        float* const row=b+r*4;
-        const float l=std::sqrt(row[0]*row[0]+row[1]*row[1]+row[2]*row[2]);
-        if(l>1e-4f)for(int k=0;k<3;++k)row[k]/=l;
+
+void Recompute(Exhaust& e,int count,std::uint64_t frame) noexcept {
+    const bool posed=e.seenFrame && e.seenFrame+1==frame;
+    for(int i=0;i<e.set.count;++i) {
+        const int p=e.set.parent[i];
+        if(p<0 || p>=count)continue;
+        const unsigned char* const r=e.bones+static_cast<std::size_t>(p)*kBoneStride;
+        const float* const now=reinterpret_cast<const float*>(r+kBoneLocal506);
+        exhaust::NozzleWorld(e.set.local[i],now,posed ? e.parentSeen[i] : nullptr,reinterpret_cast<const float*>(r+kBoneWorld506),
+                             e.track,e.world[i]);
+        std::memcpy(e.parentSeen[i],now,64);
     }
-    return root;
+    e.seenFrame=frame;
+    e.frame=frame;
 }
+
+// v's nozzles this frame (nullptr: none in its model, or no slot free).
+const Exhaust* ExhaustOf(const unsigned char* v,ULONGLONG ms) noexcept {
+    const void* const ctrl=At<const void*>(v,kSelfCtrl);
+    Exhaust* e=nullptr;
+    Exhaust* slot=nullptr;
+    for(auto& x:exhausts) {
+        if(x.v==v && x.ctrl==ctrl){e=&x;break;}
+        if(!x.v && !slot)slot=&x;
+    }
+    if(!e) {
+        if(!slot)return nullptr;
+        *slot=Exhaust{};slot->v=v;slot->ctrl=ctrl;
+        e=slot;
+    }
+    e->seen=ms;
+    const unsigned char* bones=nullptr;
+    int count=0;
+    if(!BonesOf(v,&bones,&count))return nullptr;
+    if(bones!=e->bones) {   // a model (again): its nozzles found by their names once
+        const exhaust::NozzleSet set=exhaust::FindNozzles(bones,count,[](const wchar_t* name){return name && Readable(name,32);});
+        e->bones=bones;e->set=set;e->seenFrame=0;e->frame=0;
+        if(Cfg().debug)Log("FLAME v=%p %d nozzles (%s)",v,set.count,
+                           set.count ? (set.stock ? "the stock model's: nozzles_gen.h" : "its model's bones") : "none in its model");
+    }
+    if(!e->set.count)return nullptr;
+    const std::uint64_t frame=GameFrame();
+    exhaust::Observe(e->track,frame,reinterpret_cast<const float*>(v+kMatrix));
+    if(e->frame!=frame)Recompute(*e,count,frame);
+    return e;
+}
+
+void ExhaustSweep(ULONGLONG ms) noexcept {
+    for(auto& e:exhausts)if(e.v && ms-e.seen>kStaleMs)e=Exhaust{};
+}
+
 // When the booster takes its matrix (Debug, once a jet moving faster than 30 m/s): its copy (+0x60) against the one
 // written last frame, before this frame's is written. The same: it copies after the input step that writes it, and
 // the flame is where the body is drawn; another: it copied before, and the flame trails one more frame (that much
 // further back than the last frame's flight: logged with it).
-void CopyCheck(Carrier& c,const unsigned char* v) noexcept {
-    if(!c.track.posedOk)return;
-    const float* now=c.track.now+12;
-    const float* was=c.track.posed+12;
+void CopyCheck(Carrier& c,const Exhaust& e,const unsigned char* v) noexcept {
+    if(!e.track.posedOk)return;
+    const float* now=e.track.now+12;
+    const float* was=e.track.posed+12;
     const float step=std::sqrt((now[0]-was[0])*(now[0]-was[0])+(now[1]-was[1])*(now[1]-was[1])+(now[2]-was[2])*(now[2]-was[2]));
     if(step<0.5f)return;   // m a frame: 30 m/s
     c.copyLogged=true;
@@ -328,33 +274,30 @@ void CopyCheck(Carrier& c,const unsigned char* v) noexcept {
         off<0.01f ? "the matrix written last frame: it copies after the input step" : "an older matrix: it copies before the input step",
         off,step);
 }
-void JetFrame(const unsigned char* v,const float (*at)[3],int n,const float* size,float intensity,ULONGLONG ms) noexcept {
+
+// A vehicle's flames (the user, 2026-10-05: the jets have no flame): the Booster on each of its model's nozzles, `intensity`
+// how strongly they burn, `burner` the afterburner (kBurnerLength times as long).
+void JetFrame(const unsigned char* v,float intensity,bool burner,ULONGLONG ms) noexcept {
+    const Exhaust* const e=ExhaustOf(v,ms);
+    if(!e)return;
     Carrier* const c=Find(v,ms);
     if(!c)return;
     const bool fresh=!c->n[0].obj && !c->n[0].ctrl;   // no flame made for it yet
     c->seen=ms;
-    exhaust::Observe(c->track,GameFrame(),reinterpret_cast<const float*>(v+kMatrix));
-    float b[16];
-    const unsigned char* root=ExhaustBasis(v,c->track,b);
-    if(Cfg().debug && !c->copyLogged && Live(c->n[0]))CopyCheck(*c,v);
+    if(Cfg().debug && !c->copyLogged && Live(c->n[0]))CopyCheck(*c,*e,v);
     if(fresh && Cfg().debug) {
         const float* p=reinterpret_cast<const float*>(v+kPosition);
-        const float* vm=reinterpret_cast<const float*>(v+kMatrix);
-        Log("FLAME v=%p bone %s at (%.2f,%.2f,%.2f) from the vehicle's origin; its rows x(%.2f,%.2f,%.2f) y(%.2f,%.2f,%.2f) "
-            "z(%.2f,%.2f,%.2f); the vehicle's z (%.2f,%.2f,%.2f)",v,root ? "found" : "missing (vehicle matrix)",b[12]-p[0],b[13]-p[1],
-            b[14]-p[2],b[0],b[1],b[2],b[4],b[5],b[6],b[8],b[9],b[10],vm[8],vm[9],vm[10]);
+        const float* w=e->world[0];
+        Log("FLAME v=%p nozzle 0 at (%.2f,%.2f,%.2f) from the vehicle's origin, the flame along (%.2f,%.2f,%.2f), %.2f x %.2f m",v,
+            w[12]-p[0],w[13]-p[1],w[14]-p[2],w[8],w[9],w[10],e->set.size[0][0],e->set.size[0][1]);
     }
-    for(int i=0;i<n && i<kNozzles;++i) {
+    for(int i=0;i<e->set.count;++i) {
         Nozzle& z=c->n[i];
-        const float* t=at[i];
-        for(int k=0;k<3;++k) {
-            z.m[k]=-b[k];z.m[4+k]=b[4+k];z.m[8+k]=-b[8+k];
-            z.m[12+k]=b[12+k]+t[0]*b[k]+t[1]*b[4+k]+t[2]*b[8+k];
-        }
-        z.m[3]=z.m[7]=z.m[11]=0.0f;z.m[15]=1.0f;
+        std::memcpy(z.m,e->world[i],sizeof z.m);
         if(!Live(z)) {
             DropWeak(z.ctrl);
             z.obj=nullptr;z.ctrl=nullptr;
+            const float size[2]={e->set.size[i][0]*(burner ? kBurnerLength : 1.0f),e->set.size[i][1]};
             Make(z,v,size);
             if(!Live(z))continue;
         }
@@ -437,12 +380,7 @@ void FlareFlames(const unsigned char* v,const float (*at)[3],const float (*vel)[
 
 void JetFlames(const unsigned char* v,float intensity,bool burner,ULONGLONG ms) noexcept {
     if(!sigOk || broken || !v)return;
-    __try {
-        const JetNozzles* const nz=NozzlesOf(v,BodyMark(v));
-        if(!nz)return;
-        const float size[2]={nz->size[0]*(burner ? kBurnerLength : 1.0f),nz->size[1]};
-        JetFrame(v,nz->at,nz->count,size,intensity,ms);
-    }
+    __try { JetFrame(v,intensity,burner,ms); }
     __except(MakeFault(GetExceptionInformation())) {}
 }
 
@@ -473,16 +411,10 @@ void NozzleFlames(const unsigned char* v,const float (*m)[16],int n,const float 
     __except(MakeFault(GetExceptionInformation())) {}
 }
 
-void CarrierFlames(const unsigned char* v,unsigned char* const* recs,float intensity,ULONGLONG ms) noexcept {
-    if(!sigOk || broken || !v || !recs)return;
-    __try { Frame(v,recs,intensity,ms); }
-    __except(MakeFault(GetExceptionInformation())) {}
-}
-
 void SmokeSweep(ULONGLONG ms) noexcept;   // below, with the arrival's smoke
 void BoosterSweep(ULONGLONG ms) noexcept {
     if(!sigOk || broken)return;
-    __try { Sweep(ms);FlareSweep(ms);SmokeSweep(ms); }
+    __try { Sweep(ms);FlareSweep(ms);SmokeSweep(ms);ExhaustSweep(ms); }
     __except(FaultLog("FLAME sweep",GetExceptionInformation())) {}
 }
 
@@ -512,7 +444,7 @@ constexpr std::size_t kEffectGen=0x20B2980,kTrailCore=0x190,kTrailParamAt=0x30,k
 constexpr int kSmokeLife=150;                              // frames: 2.5 s, 500 m behind a jet at 200 m/s
 constexpr float kSmokeWidth=2.0f,kSmokeGrow=0.04f,kSmokeRise=0.003f;   // m, m a frame, m/s^2-ish drift up a frame
 alignas(16) const float kSmokeFrom[4]={0.92f,0.92f,0.95f,0.55f},kSmokeTo[4]={0.95f,0.95f,0.97f,0.0f};
-constexpr int kSmokeSets=16,kSmokeTrails=2;
+constexpr int kSmokeSets=16,kSmokeTrails=exhaust::kMaxNozzles;   // a trail from every nozzle (the carrier's four too)
 constexpr ULONGLONG kSmokeStaleMs=500;
 const unsigned char kTrailMakeSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x20,0x57};
 const unsigned char kTrailParamsSig[]={0x48,0x89,0x5C,0x24,0x10,0x57,0x48,0x83,0xEC,0x20,0x48,0xC7,0x41,0x2C,0x00,0x00};
@@ -527,7 +459,7 @@ const unsigned char kSmokeNameBytes[]={0x74,0x56,0x04,0x5C,0x59,0x71,0x5F,0x00,0
 bool smokeOk=false;
 
 struct Trail { unsigned char* obj; void* ctrl; };
-struct SmokeSet { const unsigned char* v; const void* ctrl; ULONGLONG seen; Trail t[kSmokeTrails]; exhaust::BodyTrack track; };
+struct SmokeSet { const unsigned char* v; const void* ctrl; ULONGLONG seen; Trail t[kSmokeTrails]; };
 SmokeSet smokeSets[kSmokeSets];
 
 bool TrailLive(const Trail& t) noexcept {
@@ -588,20 +520,12 @@ void SmokeFrame(const unsigned char* v,bool on,ULONGLONG ms) noexcept {
     SmokeSet* const s=SmokeSetOf(v,on,ms);
     if(!s)return;
     if(!on || v[kDead]){SmokeEnd(*s);return;}
-    const JetNozzles* const nz=NozzlesOf(v,BodyMark(v));
-    if(!nz){SmokeEnd(*s);return;}
+    const Exhaust* const e=ExhaustOf(v,ms);   // the flames' nozzles, this frame's (JetFrame takes the same)
+    if(!e){SmokeEnd(*s);return;}
     s->seen=ms;
-    exhaust::Observe(s->track,GameFrame(),reinterpret_cast<const float*>(v+kMatrix));
-    float b[16];
-    ExhaustBasis(v,s->track,b);
-    for(int i=0;i<nz->count && i<kSmokeTrails;++i) {
-        const float* const a=nz->at[i];
-        alignas(16) float m[16];
-        for(int k=0;k<3;++k) {   // as the flame's (JetFrame): turned pi about y, at the exhaust's exit
-            m[k]=-b[k];m[4+k]=b[4+k];m[8+k]=-b[8+k];
-            m[12+k]=b[12+k]+a[0]*b[k]+a[1]*b[4+k]+a[2]*b[8+k];
-        }
-        m[3]=m[7]=m[11]=0.0f;m[15]=1.0f;
+    for(int i=0;i<e->set.count && i<kSmokeTrails;++i) {
+        alignas(16) float m[16];   // the game's matrices are 16-aligned
+        std::memcpy(m,e->world[i],sizeof m);
         Trail& t=s->t[i];
         if(!t.obj && !t.ctrl) {
             TrailMake(t,m);
@@ -671,5 +595,6 @@ void ResetBoosters() noexcept {
         for(auto& t:s.t)DropWeak(t.ctrl);
         s=SmokeSet{};
     }
+    for(auto& e:exhausts)e=Exhaust{};
 }
 }  // namespace crew

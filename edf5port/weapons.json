@@ -34606,102 +34606,87 @@
   {
    "sgo": "npDecoyLauncher_amane",
    "name": "ピュアデコイ·ランチャー〔亜麻音〕",
-   "reason": "EDF6 没有这些资源：app:/Weapon/e_throw_decoyscreen2_amane.cas, app:/Weapon/e_throw_decoyscreen2_amane.rab, app:/weapon/e_throw_decoyscreen2_amane.shkt"
+   "reason": "EDF6 没有、不能从 EDF5 转换：app:/weapon/e_throw_decoyscreen2_amane.shkt（WEAPON/E_THROW_DECOYSCREEN2_AMANE.SHKT: no converter for .SHKT files）"
   },
   {
    "sgo": "npDecoyLauncher_mio",
    "name": "ピュアデコイ·ランチャー〔みお〕",
-   "reason": "EDF6 没有这些资源：app:/Weapon/e_throw_decoyscreen2_mio.cas, app:/Weapon/e_throw_decoyscreen2_mio.rab, app:/weapon/e_throw_decoyscreen2_mio.shkt"
+   "reason": "EDF6 没有、不能从 EDF5 转换：app:/weapon/e_throw_decoyscreen2_mio.shkt（WEAPON/E_THROW_DECOYSCREEN2_MIO.SHKT: no converter for .SHKT files）"
   },
   {
    "sgo": "npDecoyLauncher_setu",
    "name": "ピュアデコイ·ランチャー〔雪〕",
-   "reason": "EDF6 没有这些资源：app:/Weapon/e_throw_decoyscreen2_setu.cas, app:/Weapon/e_throw_decoyscreen2_setu.rab, app:/weapon/e_throw_decoyscreen2_setu.shkt"
+   "reason": "EDF6 没有、不能从 EDF5 转换：app:/weapon/e_throw_decoyscreen2_setu.shkt（WEAPON/E_THROW_DECOYSCREEN2_SETU.SHKT: no converter for .SHKT files）"
   },
   {
    "sgo": "npDecoyLauncher_riho",
    "name": "ピュアデコイ·ランチャー〔理保〕",
-   "reason": "EDF6 没有这些资源：app:/Weapon/e_throw_decoyscreen2_riho.cas, app:/Weapon/e_throw_decoyscreen2_riho.rab, app:/weapon/e_throw_decoyscreen2_riho.shkt"
+   "reason": "EDF6 没有、不能从 EDF5 转换：app:/weapon/e_throw_decoyscreen2_riho.shkt（WEAPON/E_THROW_DECOYSCREEN2_RIHO.SHKT: no converter for .SHKT files）"
   },
   {
    "sgo": "npDecoyLauncher_nao",
    "name": "ピュアデコイ·ランチャー〔ナオ〕",
-   "reason": "EDF6 没有这些资源：app:/Weapon/e_throw_decoyscreen2_nao.cas, app:/Weapon/e_throw_decoyscreen2_nao.rab, app:/weapon/e_throw_decoyscreen2_nao.shkt"
+   "reason": "EDF6 没有、不能从 EDF5 转换：app:/weapon/e_throw_decoyscreen2_nao.shkt（WEAPON/E_THROW_DECOYSCREEN2_NAO.SHKT: no converter for .SHKT files）"
   },
   {
    "sgo": "npDecoyLauncher_airi",
    "name": "ピュアデコイ·ランチャー〔アイリ〕",
-   "reason": "EDF6 没有这些资源：app:/Weapon/e_throw_decoyscreen2_airi.cas, app:/Weapon/e_throw_decoyscreen2_airi.rab, app:/weapon/e_throw_decoyscreen2_airi.shkt"
+   "reason": "EDF6 没有、不能从 EDF5 转换：app:/weapon/e_throw_decoyscreen2_airi.shkt（WEAPON/E_THROW_DECOYSCREEN2_AIRI.SHKT: no converter for .SHKT files）"
   },
   {
    "sgo": "npDecoyLauncher_asuka",
    "name": "ピュアデコイ·ランチャー〔あすか〕",
-   "reason": "EDF6 没有这些资源：app:/Weapon/e_throw_decoyscreen2_asuka.cas, app:/Weapon/e_throw_decoyscreen2_asuka.rab, app:/weapon/e_throw_decoyscreen2_asuka.shkt"
+   "reason": "EDF6 没有、不能从 EDF5 转换：app:/weapon/e_throw_decoyscreen2_asuka.shkt（WEAPON/E_THROW_DECOYSCREEN2_ASUKA.SHKT: no converter for .SHKT files）"
   },
   {
    "sgo": "npDecoyLauncher_nonono",
    "name": "ピュアデコイ·ランチャー〔ノノノ〕",
-   "reason": "EDF6 没有这些资源：app:/Weapon/e_throw_decoyscreen2_nonono.cas, app:/Weapon/e_throw_decoyscreen2_nonono.rab, app:/weapon/e_throw_decoyscreen2_nonono.shkt"
+   "reason": "EDF6 没有、不能从 EDF5 转换：app:/weapon/e_throw_decoyscreen2_nonono.shkt（WEAPON/E_THROW_DECOYSCREEN2_NONONO.SHKT: no converter for .SHKT files）"
   },
   {
    "sgo": "npDecoyLauncher_palewing",
    "name": "デコイ·ランチャー〔ペイルウィング〕",
-   "reason": "EDF6 没有这些资源：app:/Weapon/e_throw_decoyscreen2_palewing.cas, app:/Weapon/e_throw_decoyscreen2_palewing.rab, app:/weapon/e_throw_decoyscreen2_palewing.shkt"
-  },
-  {
-   "sgo": "DLC_Vehicle_Bike",
-   "name": "オメガ·フリージャー",
-   "reason": "EDF6 没有这些资源：app:/Object/v503_bike_omegaz.mrab"
-  },
-  {
-   "sgo": "DLC_Vehicle_Tank41",
-   "name": "ブラッカー ナンバー４．１",
-   "reason": "EDF6 没有这些资源：app:/Object/v505_tankedf4.mrab"
+   "reason": "EDF6 没有、不能从 EDF5 转换：app:/weapon/e_throw_decoyscreen2_palewing.shkt（WEAPON/E_THROW_DECOYSCREEN2_PALEWING.SHKT: no converter for .SHKT files）"
   },
   {
    "sgo": "npDecoyLauncher_reika",
    "name": "ピュアデコイ·ランチャー〔玲香〕",
-   "reason": "EDF6 没有这些资源：app:/Weapon/e_throw_decoyscreen2_reika.cas, app:/Weapon/e_throw_decoyscreen2_reika.rab, app:/weapon/e_throw_decoyscreen2_reika.shkt"
+   "reason": "EDF6 没有、不能从 EDF5 转换：app:/weapon/e_throw_decoyscreen2_reika.shkt（WEAPON/E_THROW_DECOYSCREEN2_REIKA.SHKT: no converter for .SHKT files）"
   },
   {
    "sgo": "npDecoyLauncher_mian",
    "name": "ピュアデコイ·ランチャー〔魅杏〕",
-   "reason": "EDF6 没有这些资源：app:/Weapon/e_throw_decoyscreen2_mian.cas, app:/Weapon/e_throw_decoyscreen2_mian.rab, app:/weapon/e_throw_decoyscreen2_mian.shkt"
+   "reason": "EDF6 没有、不能从 EDF5 转换：app:/weapon/e_throw_decoyscreen2_mian.shkt（WEAPON/E_THROW_DECOYSCREEN2_MIAN.SHKT: no converter for .SHKT files）"
   },
   {
    "sgo": "npDecoyLauncher_rui",
    "name": "ピュアデコイ·ランチャー〔るい〕",
-   "reason": "EDF6 没有这些资源：app:/Weapon/e_throw_decoyscreen2_rui.cas, app:/Weapon/e_throw_decoyscreen2_rui.rab, app:/weapon/e_throw_decoyscreen2_rui.shkt"
+   "reason": "EDF6 没有、不能从 EDF5 转换：app:/weapon/e_throw_decoyscreen2_rui.shkt（WEAPON/E_THROW_DECOYSCREEN2_RUI.SHKT: no converter for .SHKT files）"
   },
   {
    "sgo": "npDecoyLauncher_mari",
    "name": "ピュアデコイ·ランチャー〔魔璃〕",
-   "reason": "EDF6 没有这些资源：app:/Weapon/e_throw_decoyscreen2_mari.cas, app:/Weapon/e_throw_decoyscreen2_mari.rab, app:/weapon/e_throw_decoyscreen2_mari.shkt"
+   "reason": "EDF6 没有、不能从 EDF5 转换：app:/weapon/e_throw_decoyscreen2_mari.shkt（WEAPON/E_THROW_DECOYSCREEN2_MARI.SHKT: no converter for .SHKT files）"
   },
   {
    "sgo": "npDecoyLauncher_haruka",
    "name": "ピュアデコイ·ランチャー〔遙華〕",
-   "reason": "EDF6 没有这些资源：app:/Weapon/e_throw_decoyscreen2_haruka.cas, app:/Weapon/e_throw_decoyscreen2_haruka.rab, app:/weapon/e_throw_decoyscreen2_haruka.shkt"
+   "reason": "EDF6 没有、不能从 EDF5 转换：app:/weapon/e_throw_decoyscreen2_haruka.shkt（WEAPON/E_THROW_DECOYSCREEN2_HARUKA.SHKT: no converter for .SHKT files）"
   },
   {
    "sgo": "npDecoyLauncher_yuu",
    "name": "ピュアデコイ·ランチャー〔ユウ〕",
-   "reason": "EDF6 没有这些资源：app:/Weapon/e_throw_decoyscreen2_yuu.cas, app:/Weapon/e_throw_decoyscreen2_yuu.rab, app:/weapon/e_throw_decoyscreen2_yuu.shkt"
+   "reason": "EDF6 没有、不能从 EDF5 转换：app:/weapon/e_throw_decoyscreen2_yuu.shkt（WEAPON/E_THROW_DECOYSCREEN2_YUU.SHKT: no converter for .SHKT files）"
   },
   {
    "sgo": "npDecoyLauncher_eru",
    "name": "ピュアデコイ·ランチャー〔エル〕",
-   "reason": "EDF6 没有这些资源：app:/Weapon/e_throw_decoyscreen2_eru.cas, app:/Weapon/e_throw_decoyscreen2_eru.rab, app:/weapon/e_throw_decoyscreen2_eru.shkt"
+   "reason": "EDF6 没有、不能从 EDF5 转换：app:/weapon/e_throw_decoyscreen2_eru.shkt（WEAPON/E_THROW_DECOYSCREEN2_ERU.SHKT: no converter for .SHKT files）"
   },
   {
    "sgo": "npDecoyLauncher_uketuke",
    "name": "ピュアデコイ·ランチャー〔受付〕",
-   "reason": "EDF6 没有这些资源：app:/Weapon/e_throw_decoyscreen2_uketuke.cas, app:/Weapon/e_throw_decoyscreen2_uketuke.rab, app:/weapon/e_throw_decoyscreen2_uketuke.shkt"
-  },
-  {
-   "sgo": "DLC_Vehicle_Tank5",
-   "name": "ブラッカー ナンバー５",
-   "reason": "EDF6 没有这些资源：app:/Object/v505_tankedf5.mrab"
+   "reason": "EDF6 没有、不能从 EDF5 转换：app:/weapon/e_throw_decoyscreen2_uketuke.shkt（WEAPON/E_THROW_DECOYSCREEN2_UKETUKE.SHKT: no converter for .SHKT files）"
   }
  ]
 }
