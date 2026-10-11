@@ -37,6 +37,7 @@
 #include "body506.h"
 #include "heliaim.h"
 #include "airbound.h"
+#include "rotor_clear.h"
 #include "layout.h"
 #include "memory.h"
 #include "online_authority.h"
@@ -237,7 +238,11 @@ constexpr float kGunshipRadius=90.0f,kGunshipHeight=40.0f,kGunshipSpeed=10.0f;
 // same layout.h vtables): its reach (see kReach410), its forward guns' reach (0: heliRange), how it attacks (the
 // 506 strafes, the 409 makes rocket runs and circles for its turret, the 410 circles for its door guns), the
 // circle it flies round a target, how far below it its turret gun fires on its own (0: no turret), and how it
-// fires (the nose bytes veh+0x2020/0x2021, or the 410's door gun blocks).
+// fires (the nose bytes veh+0x2020/0x2021, or the 410's door gun blocks), and its rotor's radius (rotor_clear.h: the
+// walls it keeps its blades off).
+// Rotor radii: the 506's disc 4.76 m (docs/player-jet-re.md, its ragdoll); the 410's 20 m across (kReach410); the 409's
+// is not measured, taken a little over the 506's.
+constexpr float kRotor506=4.8f,kRotor409=5.0f,kRotor410=10.0f;
 enum class Attack { strafe, rocketRun, gunship };
 enum class Guns { nose, doors };
 struct HeliType {
@@ -246,12 +251,13 @@ struct HeliType {
     Attack attack;
     float circleRadius,circleHeight,circleSpeed,turretReach;
     Guns guns;
+    float rotor;
 };
 const HeliType kHeliTypes[]={
-    {kVt506,"506",kReachOther,kGun506Range,Attack::strafe,0.0f,0.0f,0.0f,0.0f,Guns::nose},
-    {kVt409,"409",kReachOther,0.0f,Attack::rocketRun,kTurretRadius,kTurretHeight,kTurretSpeed,kTurretReach,Guns::nose},
-    {kVt410,"410",kReach410,0.0f,Attack::gunship,kGunshipRadius,kGunshipHeight,kGunshipSpeed,0.0f,Guns::doors},
-    {kVtHeliBase,"base",kReachOther,0.0f,Attack::strafe,0.0f,0.0f,0.0f,0.0f,Guns::nose},
+    {kVt506,"506",kReachOther,kGun506Range,Attack::strafe,0.0f,0.0f,0.0f,0.0f,Guns::nose,kRotor506},
+    {kVt409,"409",kReachOther,0.0f,Attack::rocketRun,kTurretRadius,kTurretHeight,kTurretSpeed,kTurretReach,Guns::nose,kRotor409},
+    {kVt410,"410",kReach410,0.0f,Attack::gunship,kGunshipRadius,kGunshipHeight,kGunshipSpeed,0.0f,Guns::doors,kRotor410},
+    {kVtHeliBase,"base",kReachOther,0.0f,Attack::strafe,0.0f,0.0f,0.0f,0.0f,Guns::nose,kRotor506},
 };
 const HeliType* TypeOf(const void* vehicle) noexcept {
     if(!Readable(vehicle,8))return nullptr;
@@ -1196,11 +1202,15 @@ template<class F> void LeadPoint(const float* pos,const float* aim,const float* 
 // - a ray straight along the way it flies (and two kAvoidSide to the sides) finds walls: the speed into
 //   one is cut to what stops it kAvoidStop short, the height goes kRoofClear over the wall's top, and it
 //   veers to the clearer side.
+// All those rays leave the body centre with no width, so on top of them the rotor keeps its radius plus a margin
+// off the walls all round (rotor_clear.h), in every mode (landing too, without its climb), and the stop short of
+// a wall ahead counts from the disc's edge, not the centre.
 constexpr float kLookAhead=3.0f,kLookMin=25.0f,kAvoidSide=0.52f;   // s; m; rad (30 deg)
 constexpr float kGroundClear=6.0f,kRoofClear=10.0f,kRoofProbe=150.0f,kAvoidStop=12.0f,kAvoidSteer=8.0f;
+static_assert(rotorclear::kOverRoof==kGroundClear,"rotor_clear.h climbs over a wall as Avoid over the ground");
 // metres to the wall ahead and over the ground (-1: none seen); for the log, the roof ahead and the
-// nearest hit of any kind there with its flags (-1e9: none)
-struct Avoidance { float ahead,clear,roof,anyRoof; std::uint32_t anyFlags; };
+// nearest hit of any kind there with its flags (-1e9: none); the rotor's clearance (rotor_clear.h)
+struct Avoidance { float ahead,clear,roof,anyRoof; std::uint32_t anyFlags; rotorclear::Result rotor; };
 
 float RoofBelow(const float* at,float top,bool any=false,std::uint32_t* flags=nullptr) noexcept {
     const float a[3]={at[0],top,at[2]},b[3]={at[0],top-kRoofProbe*2.0f,at[2]};
@@ -1208,9 +1218,17 @@ float RoofBelow(const float* at,float top,bool any=false,std::uint32_t* flags=nu
     return CastRay(a,b,hit,any,flags)>=0.0f ? hit[1] : -1e9f;
 }
 
-Avoidance Avoid(const float* pos,const float* vel,float* want,float* height,bool land,float stopDecel) noexcept {
-    Avoidance r{-1.0f,-1.0f,-1e9f,-1e9f,0};
-    if(!Cfg().heliAvoid || !rayOk)return r;
+// The rotor's clearance (rotor_clear.h) on the map ray: last, so no push before it sends the blades into a wall.
+rotorclear::Result RotorClear(const float* pos,const float* vel,float rotor,float stopDecel,float* want,float* height,
+                              bool climb) noexcept {
+    const float top=(pos[1]>*height ? pos[1] : *height)+kRoofProbe;
+    return rotorclear::Clear(pos,vel,rotor,stopDecel,want,height,climb,
+        [](const float* a,const float* b,float* hit,float* normal){ return CastRay(a,b,hit,false,nullptr,kMapLayer,normal); },
+        [top](const float* at){ return RoofBelow(at,top); });
+}
+
+Avoidance AvoidMap(const float* pos,const float* vel,float* want,float* height,bool land,float stopDecel,float rotor) noexcept {
+    Avoidance r{-1.0f,-1.0f,-1e9f,-1e9f,0,{-1.0f,{0.0f,0.0f},0,-1e9f}};
     const float down[3]={pos[0],pos[1]-kRoofProbe*2.0f,pos[2]};
     float hit[3];
     if(CastRay(pos,down,hit)>=0.0f) {
@@ -1246,7 +1264,7 @@ Avoidance Avoid(const float* pos,const float* vel,float* want,float* height,bool
         const float beyond[3]={hit[0]+dir[0]*3.0f,0,hit[2]+dir[2]*3.0f};
         const float wall=RoofBelow(beyond,top);
         if(*height<wall+kRoofClear)*height=wall+kRoofClear;
-        const float room=centre-kAvoidStop;
+        const float room=centre-kAvoidStop-rotor;   // from the disc's edge
         const float allowed=room>0.0f ? std::sqrt(2.0f*stopDecel*room) : 0.0f;
         const float into=Dot2(want,dir);
         if(into>allowed){want[0]-=dir[0]*(into-allowed);want[2]-=dir[2]*(into-allowed);}
@@ -1261,6 +1279,15 @@ Avoidance Avoid(const float* pos,const float* vel,float* want,float* height,bool
         const float push=kAvoidSteer*(1.0f-nearest/look);
         want[0]+=perp[0]*push;want[2]+=perp[2]*push;
     }
+    return r;
+}
+
+// `rotor`: its rotor's radius (HeliType::rotor). Landing (and low over the sea) it keeps its blades off the walls but
+// does not climb over them.
+Avoidance Avoid(const float* pos,const float* vel,float* want,float* height,bool land,float stopDecel,float rotor) noexcept {
+    if(!Cfg().heliAvoid || !rayOk)return Avoidance{-1.0f,-1.0f,-1e9f,-1e9f,0,{-1.0f,{0.0f,0.0f},0,-1e9f}};
+    Avoidance r=AvoidMap(pos,vel,want,height,land,stopDecel,rotor);
+    r.rotor=RotorClear(pos,vel,rotor,stopDecel,want,height,!land);
     return r;
 }
 
@@ -2113,7 +2140,8 @@ Control Steer(Heli& h,const Sense& s,Mode mode,Want& w) noexcept {
         w.height=pos[1]+(above ? kUnstick : -kUnstick);
     }
     Control c{};
-    c.avoid=Avoid(pos,h.vel,w.vel,&w.height,land || (mode==Mode::rescue && s.rescueLow),h.stopDecel);
+    c.avoid=Avoid(pos,h.vel,w.vel,&w.height,land || (mode==Mode::rescue && s.rescueLow),h.stopDecel,
+                  h.type ? h.type->rotor : kRotor506);
     if((s.follow || s.engage) && !h.guard && !h.leaving)std::memcpy(h.hold,pos,12);
 
     // Horizontal: the stick for the wanted velocity (full stick flies h.top) plus kBrakeGain per m/s it is
@@ -2121,7 +2149,17 @@ Control Steer(Heli& h,const Sense& s,Mode mode,Want& w) noexcept {
     float forward=0.0f,lateral=0.0f;
     aim::StockStick(w.vel,h.vel,h.top,kBrakeGain,s.fwd,s.right,&forward,&lateral);
     // Aiming, the forward stick is the nose dip (kMaxTilt at full stick), and it creeps along the nose.
-    if(mode==Mode::aim)forward=Clamp((s.dipWant+(s.dipWant-s.dip)*kPitchGain)/kMaxTilt,-1.0f,1.0f);
+    if(mode==Mode::aim) {
+        forward=Clamp((s.dipWant+(s.dipWant-s.dip)*kPitchGain)/kMaxTilt,-1.0f,1.0f);
+        // ...but never on into a wall by its rotor (rotor_clear.h): the nose comes up, back off it, by how far its
+        // clearance is short (the lateral stick already has the push out of it from the wanted velocity).
+        const rotorclear::Result& rc=c.avoid.rotor;
+        const float keep=(h.type ? h.type->rotor : kRotor506)+rotorclear::kMargin;
+        if(rc.nearest>=0.0f && rc.nearest<keep && rc.dir[0]*s.fwd[0]+rc.dir[1]*s.fwd[2]>0.5f) {
+            const float back=-Clamp((keep-rc.nearest)/keep,0.0f,1.0f);
+            if(forward>back)forward=back;
+        }
+    }
 
     // Vertical: the rotor (kRotor) is the lift, and it trails the throttle by seconds (spooling down
     // slower than up). So altitude -> climb rate -> wanted rotor -> a throttle that drives the rotor
@@ -2237,13 +2275,13 @@ void FlyLog(Heli& h,const Sense& s,Mode mode,const Want& w,const Control& c,cons
     h.loggedAt=ms;
     const float speed=std::sqrt(Dot2(h.vel,h.vel)),aimedLead=Dist2(s.aim,s.lead);
     const Avoidance& a=c.avoid;
-    Log("HELI v=%p %s%s flight=%d.%d ammo=%d/%d/%d y=%.1f goal=%.1f vy=%.2f thr=%.3f hover=%.3f rotor=%.3f fwd=%.2f lat=%.2f yaw=%.2f rate=%.0fdeg/s sign=%d%s votes=%d dGoal=%.0f ground=%d target=%p dist=%.0f off=%.0fdeg miss=%.1fdeg pitch=%.0fdeg gun=%d msl=%d spd=%.1f want=%.1f dipWant=%.0fdeg cone=%.1fdeg lead=%.1f tv=%.1f los=%.0fdeg/s ahead=%.0f clear=%.0f roof=%.0f any=%.0f/%X lift=%.0f%s%s",
+    Log("HELI v=%p %s%s flight=%d.%d ammo=%d/%d/%d y=%.1f goal=%.1f vy=%.2f thr=%.3f hover=%.3f rotor=%.3f fwd=%.2f lat=%.2f yaw=%.2f rate=%.0fdeg/s sign=%d%s votes=%d dGoal=%.0f ground=%d target=%p dist=%.0f off=%.0fdeg miss=%.1fdeg pitch=%.0fdeg gun=%d msl=%d spd=%.1f want=%.1f dipWant=%.0fdeg cone=%.1fdeg lead=%.1f tv=%.1f los=%.0fdeg/s ahead=%.0f clear=%.0f roof=%.0f any=%.0f/%X rotorWall=%.1f/%d over=%.0f lift=%.0f%s%s",
         v,s.perched ? "perched " : "",kModeNames[static_cast<int>(mode)],
         s.flight.group,s.flight.wing,s.arms.ammo[0],s.arms.ammo[1],s.arms.ammo[2],pos[1],w.height,h.vel[1],c.throttle,h.hover,c.rotor,
         c.stickF,c.stickL,c.yaw,h.yawRate*180.0f/kPi,h.yawSign,h.yawLocked ? "(locked)" : "",h.votes,w.off,s.grounded,
         s.engage ? h.target.obj : nullptr,s.dist,c.offYaw*180.0f/kPi,shot.miss,-s.dip*180.0f/kPi,shot.gun,shot.missile,
         speed,std::sqrt(Dot2(w.vel,w.vel)),s.dipWant*180.0f/kPi,shot.cone,aimedLead,std::sqrt(Dot2(h.tgtVel,h.tgtVel)),s.losRate*180.0f/kPi,
-        a.ahead,a.clear,a.roof,a.anyRoof,a.anyFlags,h.losLift,s.hidden ? " hidden" : "",s.wallAhead ? " wall" : "");
+        a.ahead,a.clear,a.roof,a.anyRoof,a.anyFlags,a.rotor.nearest,a.rotor.walls,a.rotor.roof,h.losLift,s.hidden ? " hidden" : "",s.wallAhead ? " wall" : "");
     if(s.store)Log("HELI v=%p store: miss=%.1f allowed=%.1f range=%.0f frames=%.0f worth=%d ready=%d aimed=%d ammo=%d",
                    v,s.storePass.miss,s.storeTol,s.storeRange,s.storePass.frames,s.storeWorth,StoreReady(h,s),s.storeAim,h.storeAmmo);
 }
