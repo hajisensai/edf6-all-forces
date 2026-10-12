@@ -5936,6 +5936,31 @@ def legacy_parsers_refuse_malformed_input() -> None:
 
 
 @test
+def mdb_legacy_half2_widened() -> None:
+    """EDF4.1 map parts' half2 vertex elements (format 24: NW_HILLYCITY_LIGHT's station models; no EDF6 model has one)
+    become float2 (12) with the same values: the vertex grows by 4 per such element, the elements keep their order
+    (a half2 before another element moves that one), every other byte is kept, and a mesh without one is untouched."""
+    import struct
+    import mdb
+    import mdb_legacy
+    uv = [(0.75, 0.76806640625), (33.25, -1.1064453125)]   # exact halves (so exact in float)
+    pos = [(1.0, 2.0, 3.0, 1.0), (-6.6015625, 6.0, -35.0, 1.0)]
+    raw = b''.join(struct.pack('<2e', *u) + struct.pack('<4e', *p) for u, p in zip(uv, pos))
+    me = mdb.Mesh(bytes(4), 0, 0, 12, [mdb.VElem(24, 0, 0, 'texcoord'), mdb.VElem(7, 4, 0, 'position')], 0, raw, b'')
+    mdb_legacy._check_mesh(me)
+    mdb_legacy._widen_half2(me)
+    assert me.vsize == 16 and [(e.name, e.fmt, e.offset) for e in me.elems] == [('texcoord', 12, 0), ('position', 7, 8)]
+    assert me.nverts == 2
+    for i in range(2):
+        assert struct.unpack_from('<2f', me.vdata, i * 16) == uv[i]
+        assert struct.unpack_from('<4e', me.vdata, i * 16 + 8) == pos[i]
+    mdb_legacy._check_mesh(me)
+    plain = mdb.Mesh(bytes(4), 0, 0, 8, [mdb.VElem(7, 0, 0, 'position')], 0, struct.pack('<4e', *pos[0]), b'')
+    mdb_legacy._widen_half2(plain)
+    assert plain.vsize == 8 and plain.vdata == struct.pack('<4e', *pos[0])
+
+
+@test
 def ported_assets_of_another_mod_stay() -> None:
     """tools/call_weapons.py on a stand-in game: a model another mod put under the name an EDF5 weapon's asset uses
     (Mods/OBJECT/V505_TANKEDF4.MRAB) survives an install that cannot build that weapon (no EDF5), the uninstall and a
