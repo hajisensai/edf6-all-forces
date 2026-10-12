@@ -70,6 +70,37 @@ class Ledger:
         self._save()
         return path
 
+    def put_new(self, owner: str, rel: str, data: bytes) -> str | None:
+        """Writes `data` only when nothing is at `rel` yet: into a temporary file beside it, then renamed onto the free
+        name (os.rename never replaces on Windows), so a running game that opens the name sees no file or the whole one,
+        and no file already there is ever overwritten. Records `owner` as with put. Returns the path written, None when
+        a file was already there (left as it was)."""
+        assert owner in OWNERS, owner
+        path = self.disk(rel)
+        if os.path.exists(path):
+            return None
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = f'{path}.tmp-{os.getpid()}'
+        try:
+            with open(tmp, 'wb') as f:
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
+            os.rename(tmp, path)
+        except FileExistsError:   # made meanwhile by someone else: theirs stays
+            os.remove(tmp)
+            return None
+        except BaseException:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            raise
+        entry = self.files.setdefault(key(rel), {'owners': []})
+        if owner not in entry['owners']:
+            entry['owners'].append(owner)
+        entry['sha'] = sha256(data)
+        self._save()
+        return path
+
     def need(self, owner: str, rel: str) -> None:
         """Records that `owner`'s own files refer to `rel`, which must exist (written by another owner)."""
         assert owner in OWNERS, owner

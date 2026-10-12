@@ -565,9 +565,23 @@ def build(root: str | None, ini_text: str, game: rootcpk.Game | None = None, pen
     `errors`: given, a file that cannot be made is left out (with its weapons) and its name -> why recorded there, the
     others made all the same: one name the host listed for a jet this machine has not installed (jet_sgo: not
     installed yet) must not stop every coloured soldier of this machine's own presets. Without it the first one raises."""
+    return build_named(root, wanted_files(ini_text, pending), game, errors)
+
+
+def missing_names(root: str, ini_text: str, pending: list[str] = ()) -> list[str]:
+    """The wanted_files names with no file under Mods/OBJECT yet: all the headless generator (installer.py
+    loadout-generate) makes. A name says what its file holds, so one already there is already right."""
+    return [n for n in wanted_files(ini_text, pending) if not os.path.isfile(os.path.join(root, 'Mods', 'OBJECT', n))]
+
+
+def build_named(root: str | None, names: list[str], game: rootcpk.Game | None = None,
+                errors: dict[str, str] | None = None) -> dict[str, bytes]:
+    """build for these wanted_files names (none: nothing read, not even Root.cpk's index)."""
+    if not names:
+        return {}
     game = game or (rootcpk.Game(root) if root else rootcpk.default())
     out: dict[str, bytes] = {}
-    for file in wanted_files(ini_text, pending):
+    for file in names:
         try:
             one = _build_one(root, game, file, out)
         except Exception as e:   # reported to the caller by name, never dropped silently
@@ -599,8 +613,14 @@ def install(root: str, files: dict[str, bytes], keep: list[str] = ()) -> list[st
                 led.need(OWNER, rel)
             continue
         paths.append(led.put(OWNER, rel, data))
-    # The pylon weapons a loaded vehicle carries that another tool wrote (tools/make_jets.py, make_stock_stores.py): needed
-    # by this one too, so releasing theirs never pulls one from under it.
+    needed = _need_pylons(led, files)
+    led.release(OWNER, sorted(before - {ledger.key(rel) for rel in files} - needed))
+    return paths
+
+
+def _need_pylons(led: ledger.Ledger, files: dict[str, bytes]) -> set[str]:
+    """The pylon weapons a loaded vehicle of `files` carries that another tool wrote (tools/make_jets.py,
+    make_stock_stores.py): needed by this one too, so releasing theirs never pulls one from under it. Their ledger keys."""
     needed = set()
     for rel in files:
         what = decode_name(rel.split('/')[-1]) if rel.upper().startswith('OBJECT/') else None
@@ -609,7 +629,16 @@ def install(root: str, files: dict[str, bytes], keep: list[str] = ()) -> list[st
             if weapon not in files and os.path.isfile(led.disk(weapon)):
                 led.need(OWNER, weapon)
                 needed.add(ledger.key(weapon))
-    led.release(OWNER, sorted(before - {ledger.key(rel) for rel in files} - needed))
+    return needed
+
+
+def install_new(root: str, files: dict[str, bytes]) -> list[str]:
+    """Writes the `files` (build_named) whose names are still free, each to a temporary file renamed onto its name
+    (ledger.put_new): never a file overwritten or deleted, nothing released, so the game may be running. Returns the
+    paths written."""
+    led = ledger.Ledger(root)
+    paths = [p for p in (led.put_new(OWNER, rel, data) for rel, data in files.items()) if p]
+    _need_pylons(led, files)
     return paths
 
 

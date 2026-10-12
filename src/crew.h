@@ -542,6 +542,9 @@ struct ObjRef {
 // The plugin's log (EDF6VehicleCrew.log; over kLogMax it is renamed to .log.1 and a new one begun).
 void Log(const char* format,...) noexcept;
 void ReloadConfigIfChanged() noexcept;
+// The ini read again now (the loadout menu saved it: loadout_store.cpp), and its path (Mods/Plugins/EDF6VehicleCrew.ini).
+void ReloadConfigNow() noexcept;
+const wchar_t* ConfigPath() noexcept;
 // The patch primitives and the seat test are common/'s (shared with EDF6AutoTurret).
 inline bool Matches(std::size_t rva,const unsigned char* bytes,std::size_t size) noexcept { return edf::Matches(image,rva,bytes,size); }
 using edf::PatchVtableSlot;

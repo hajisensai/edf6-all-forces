@@ -67,6 +67,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/support_spawn.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/support_variants.cpp)
 # The debug spawn tool (ini DebugSpawn, off by default; src/debug_spawn.h, docs/debug-spawn.md).
 target_sources(EDF6VehicleCrew PRIVATE src/debug_spawn.cpp)
+# The in-game loadout menu's saving: the ini writer, the background variant generator (src/loadout_store.h).
+target_sources(EDF6VehicleCrew PRIVATE src/loadout_store.cpp src/loadout_file.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
@@ -504,6 +506,11 @@ add_test(NAME support_config COMMAND support_config_test)
 add_executable(support_loadout_test tests/support_loadout_test.cpp)
 target_compile_options(support_loadout_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME support_loadout COMMAND support_loadout_test)
+# The loadout menu's ini writer (BOM / CRLF / comments kept, checked with the plugin's parsers), the atomic replace,
+# the generator's status and its hidden process (src/loadout_ini.h, src/loadout_file.cpp).
+add_executable(loadout_writer_test tests/loadout_writer_test.cpp src/loadout_file.cpp)
+target_compile_options(loadout_writer_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME loadout_writer COMMAND loadout_writer_test)
 add_executable(support_policy_test EXCLUDE_FROM_ALL tests/support_policy_test.cpp)
 target_link_libraries(support_policy_test PRIVATE edf6common)
 target_compile_options(support_policy_test PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -577,6 +584,9 @@ set_tests_properties(support_config_ini PROPERTIES ENVIRONMENT PYTHONIOENCODING=
 # files it makes from Root.cpk (read only).
 add_test(NAME support_loadout_ini COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/support_loadout_ini_test.py")
 set_tests_properties(support_loadout_ini PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The installer's headless loadout-generate the in-game menu runs (no prompt, new files only, status file).
+add_test(NAME loadout_generate COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/loadout_generate_test.py")
+set_tests_properties(loadout_generate PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME support_resources COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/support_resource_audit.py")
 set_tests_properties(support_resources PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME online_gate_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/online_gate_guard.py")
