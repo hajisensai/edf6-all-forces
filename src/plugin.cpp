@@ -584,6 +584,7 @@ void LoadConfig() noexcept {
     n.fpAimSnap=ReadBool(L"FirstPersonAimSnap",n.fpAimSnap);
     n.fpMotion=ReadBool(L"FirstPersonMotion",n.fpMotion);
     n.fpCulling=ReadBool(L"FirstPersonCulling",n.fpCulling);
+    n.fpFit=ReadBool(L"FirstPersonFit",n.fpFit);
     n.gunStabilizer=ReadBool(L"GunStabilizer",n.gunStabilizer);
     n.viewDistance=ReadFloat(L"ViewDistance",n.viewDistance);
     n.map=ReadBool(L"Map",n.map);

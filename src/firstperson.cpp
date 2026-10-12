@@ -591,6 +591,44 @@ void Leave() noexcept {
     st=State{};
 }
 
+// The weapon in `hand` (nullptr: none) and whether it hangs on a flipped mount (armsFlip_*: the Fencer's shields).
+const unsigned char* HandWeapon(int hand,bool* flip) noexcept {
+    *flip=false;
+    for(int i=0;i<st.inHandCount;++i) {
+        if(st.handOf[i]!=hand)continue;
+        const unsigned char* w=static_cast<const unsigned char*>(st.inHand[i])-kWeaponModel;
+        const auto mount=At<const unsigned char*>(w,kWeaponMount);
+        const auto name=mount ? At<const wchar_t*>(mount,0) : nullptr;
+        *flip=name && std::wcsncmp(name,L"armsFlip",8)==0;
+        return w;
+    }
+    return nullptr;
+}
+
+// A bulky or long weapon held further off (measured boxes, half sizes right x up x ahead: the Air Raider's limpet gun
+// 0.28 x 0.17 x 0.46 filled half the view at the rifle's grip; the Mag Blaster 0.03 x 0.12 x 0.50 did not), a shield
+// out to the side. `grip` in the camera's frame (x to the left); `dual`: both hands hold one (their grips are already
+// set for the Fencer's big weapons: only a shield is moved).
+void Fit(int hand,bool dual,float* grip) noexcept {
+    bool flip=false;
+    const unsigned char* w=HandWeapon(hand,&flip);
+    if(!w)return;
+    const M4 box=MatrixAt(w+kWeaponModel+kModelBounds);
+    float half[3];
+    for(int r=0;r<3;++r)half[r]=std::sqrt(box.m[r*4]*box.m[r*4]+box.m[r*4+1]*box.m[r*4+1]+box.m[r*4+2]*box.m[r*4+2]);
+    if(!std::isfinite(half[0]+half[1]+half[2]) || half[0]>3.0f || half[1]>3.0f || half[2]>3.0f)return;
+    const float out=hand==kRight ? -1.0f : 1.0f;   // away from the middle, in the camera's x
+    float x=0.0f,y=0.0f,z=0.0f;
+    if(!dual) {
+        const float girth=std::fmax(half[0],half[1]);
+        z=0.8f*std::fmax(0.0f,girth-0.12f)+0.3f*std::fmax(0.0f,half[2]-0.5f);
+        x=0.6f*std::fmax(0.0f,half[0]-0.08f);
+        y=-0.4f*std::fmax(0.0f,half[1]-0.12f);
+    }
+    if(flip){x+=0.22f;z+=0.15f;}
+    grip[0]+=out*x;grip[1]+=y;grip[2]+=z;
+}
+
 // Each hand's T this frame (above: its own weapon's anchor, else the other hand's T, else the aim frame).
 void Views(const unsigned char* h,const unsigned char* cam) noexcept {
     const Config& c=Cfg();
@@ -599,7 +637,8 @@ void Views(const unsigned char* h,const unsigned char* cam) noexcept {
     Hands(h,anchor,anchored);
     const bool both=anchored[kRight] && anchored[kLeft];
     const float gx=both ? c.fpDualGripX : c.fpGripX,gy=both ? c.fpDualGripY : c.fpGripY,gz=both ? c.fpDualGripZ : c.fpGripZ;
-    const float grip[2][3]={{-gx,gy,gz},{gx,gy,gz}};   // right is -x
+    float grip[2][3]={{-gx,gy,gz},{gx,gy,gz}};   // right is -x
+    if(c.fpFit)for(int hand=kRight;hand<=kLeft;++hand)Fit(hand,both,grip[hand]);
     const float hold[3]={-c.fpHoldX,c.fpHoldY,c.fpHoldZ};
     const float pivots[2][3]={{anchored[kRight] ? grip[kRight][0] : kPivot[0],anchored[kRight] ? gy : kPivot[1],anchored[kRight] ? gz : kPivot[2]},
                               {anchored[kLeft] ? grip[kLeft][0] : -kPivot[0],anchored[kLeft] ? gy : kPivot[1],anchored[kLeft] ? gz : kPivot[2]}};
