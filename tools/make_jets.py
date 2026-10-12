@@ -40,6 +40,7 @@ from dataclasses import dataclass
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
+import cockpits  # noqa: E402
 import jet_models  # noqa: E402
 import mdb_jet  # noqa: E402
 import ledger  # noqa: E402
@@ -296,7 +297,7 @@ def build(root: str) -> dict[str, bytes]:
                                  game.read('OBJECT', GUNNER_STOCK))
     check_passenger_seats(plane, 1 + TRANSPORT_PLANE_PASSENGERS, TRANSPORT_PLANE_FILE, 1)
     out[f'OBJECT/{TRANSPORT_PLANE_FILE}'] = plane
-    return out
+    return cockpits.graft_files(game, out)   # its seats' first-person cockpits (pylib/cockpits.py)
 
 
 def medic_gun(stock: bytes, round_stock: bytes) -> bytes:

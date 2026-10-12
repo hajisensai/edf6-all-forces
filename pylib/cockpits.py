@@ -25,7 +25,7 @@ from typing import Callable
 import graft_pure as g
 import obj_model as om
 import texfile
-from mdb import Mdb, Rab, mdb_read, rab_read
+from mdb import Mdb, Rab, cmpl_compress, mdb_read, mdb_write, rab_read, rab_write
 
 Vec3 = tuple[float, float, float]
 
@@ -335,3 +335,32 @@ def fitted(tris, fit: Fit, kit_fn: KitFn) -> Kit:  # noqa: ANN001 - numpy
             raise ValueError(f'seat {fit.seat} ({fit.kit}): parts near the eye show outside: the eye is not inside the hull')
         room = {k: v * SHRINK if k in press else v for k, v in room.items()}
     raise ValueError(f'seat {fit.seat} ({fit.kit}): the kit still crosses the hull after {SHRINK_ROUNDS} rounds')
+
+
+def graft_files(game, files: dict[str, bytes]) -> dict[str, bytes]:  # noqa: ANN001 - rootcpk.Game
+    """A generator's files (tools/make_<x>.py build(): {path under Mods: bytes}) with the cockpits of its vehicles'
+    seats grafted into their models: each OBJECT/<STEM>.MRAB fitted in pylib/cockpit_fits.py gets its model member
+    (<stem>.mdb, else its only .mdb) grafted. Without the cockpit assets the files are as they were (the seats keep
+    the stock camera), with a message."""
+    import cockpit_fits
+    import cockpit_kits
+    import vehicle_optics
+    out = dict(files)
+    for rel, data in files.items():
+        stem = rel.rsplit('/', 1)[-1].rsplit('.', 1)[0].upper()
+        fits = cockpit_fits.FITS.get(stem)
+        if not rel.upper().endswith('.MRAB') or not fits:
+            continue
+        if not assets_present():
+            print(f'{rel}: no cockpits (the model folder has no {ASSET_DIR}/)')
+            continue
+        rab = rab_read(data)
+        mdbs = [f for f in rab.files if f.name.lower().endswith('.mdb')]
+        member = next((f for f in mdbs if f.name.lower() == stem.lower() + '.mdb'), mdbs[0] if len(mdbs) == 1 else None)
+        if member is None:
+            raise ValueError(f'{rel}: which of its models {[f.name for f in mdbs]} has the seats?')
+        md, textures = graft(mdb_read(member.data), fits, cockpit_kits.KITS, game, vehicle_optics.preorder)
+        member.stored = cmpl_compress(mdb_write(md))
+        add_textures(rab, textures)
+        out[rel] = rab_write(rab)
+    return out
