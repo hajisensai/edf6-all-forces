@@ -14,6 +14,11 @@
 //    camera), and the body's bones that are not the arms' collapse onto their own joint, so only the arms draw. The
 //    shadow pass (3) draws them as they are (the body's shadow stays) and the occluder depth pass (0) skips them. The
 //    bones' world matrices (+0xB0), which the muzzles, the shots and the network read, are never touched.
+//  - The muzzle flash (H, fp-render-re.md §5): a shot of the player's weapon (0x696FD0) hands its flash the muzzle's shot
+//    matrix through weapon+0x4C0 (the flash keeps that pointer and copies the matrix each of its 3 updates); the call to
+//    the effect factory there (0x697FD0) is redirected so that, for the player's weapons in first person, the pointer
+//    is a matrix of this file's: the shot matrix through T, kept up to date every camera step. The round itself was
+//    made before that call from the real muzzle.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "firstperson.h"
@@ -63,8 +68,15 @@ constexpr int kMostSets=4,kMostReloadFrames=900;
 // The stock moves by the value they write to +0x5D0 (§3.3; H for the Ranger's sprint and the rolls, L for the Fencer's
 // and the Wing Diver's: Debug=1 logs every change to match them).
 constexpr std::uint32_t kSprints[]={0x29E,0x29,0x3D,0xA38,0x25,0xE39},kRolls[]={0xE3C};
-// The viewmodel turns about a point near the grip (the eye's frame: right, up, ahead, m).
+// The muzzle flash: the shot's call of the effect factory (rcx the factory, rdx, r8 the flash class [weapon+0x480], r9
+// &weapon+0x488: the flash takes its matrix pointer from weapon+0x4C0 = r9+0x38).
+constexpr unsigned kFlashCall=0x697FD0,kEffectCreate=0x1194280;
+constexpr std::size_t kFlashParam=0x488,kFlashMatrix=0x4C0;
+constexpr int kFlashSlots=16,kFlashFrames=8;   // matrices handed out (a flash lives 3 updates)
+// Without a weapon to anchor on (the Fencer's two hands, empty hands) the viewmodel turns about a point near where the
+// hands are (the eye's frame: right, up, ahead, m); with one, about its grip.
 const float kPivot[3]={0.2f,-0.3f,0.4f};
+constexpr unsigned kFencerVt=0x17CF5B8;
 // The arms (the four classes share the names, fp-render-re.md §8): the shoulder, upper and lower arm and their twists,
 // the hand, its fingers, the weapon mounts.
 const wchar_t* const kArmBones[]={L"kata",L"jowan",L"kawan",L"te_",L"fing",L"ring",L"little",L"index",L"middle",
@@ -105,11 +117,15 @@ struct State {
     int reloadLeft;
     fpmotion::State motion;
     M4 moved;                   // the motion as a matrix (fp_view.h MotionMatrix)
+    bool viewOk;                // T this frame (fp_view.h ViewTransform), built by the camera step
+    M4 view;
 };
-ULONGLONG epoch=0;              // a camera step: T rebuilt at the next draw
 State st{};
-struct Drawn { ULONGLONG epoch; bool ok; M4 t; };
-Drawn drawn{};
+// The flashes' matrices: each the shot matrix `src` through T, kept for kFlashFrames camera steps.
+struct alignas(16) Flash { float m[16]; const float* src; int age; };
+Flash flashes[kFlashSlots]{};
+int flashNext=0;
+using CreateFn=void*(__fastcall*)(void*,void*,void*,void*);
 bool toggled=false,keyWas=false;
 int passLog[6]{};
 ULONGLONG passLogAt=0;
@@ -253,9 +269,54 @@ fpmotion::Cue Cues(const unsigned char* h) noexcept {
     return c;
 }
 
-void Motion(const unsigned char* h) noexcept {
+void Motion(const unsigned char* h,const float* pivot) noexcept {
     const fpmotion::Pose p=fpmotion::Advance(st.motion,Cues(h));
-    st.moved=fpview::MotionMatrix(p.x,p.y,p.z,p.pitch,p.yaw,p.roll,kPivot);
+    st.moved=fpview::MotionMatrix(p.x,p.y,p.z,p.pitch,p.yaw,p.roll,pivot);
+}
+
+// The root of the weapon in the first hand as it will be drawn (its draw pose's bone 0: 0x1100B90 writes the weapon's
+// matrix to its first bone record, 0x1100F10 copies it into the draw pose), the anchor of a one-weapon class.
+bool Anchor(const unsigned char* h,M4* out) noexcept {
+    if(At<const unsigned char*>(h,0)==image+kFencerVt)return false;
+    const unsigned char* w=SetWeapon(h,0);
+    if(!w)return false;
+    const auto inst=At<const unsigned char*>(w+kWeaponModel,kBaseLod+kLodInst);
+    if(!inst || At<std::int32_t>(inst,kInstCount)<=0)return false;
+    const auto pose=At<const unsigned char*>(inst,kInstPose);
+    if(!pose)return false;
+    *out=MatrixAt(pose);
+    return true;
+}
+
+// The flashes handed out lately, moved with the viewmodel (their shot matrix through this frame's T).
+void Flashes() noexcept {
+    for(Flash& f:flashes) {
+        if(!f.src || f.age>=kFlashFrames){f.src=nullptr;continue;}
+        ++f.age;
+        if(st.viewOk)std::memcpy(f.m,fpview::Mul(MatrixAt(reinterpret_cast<const unsigned char*>(f.src)),st.view).m,64);
+    }
+}
+
+bool PlayersWeapon(const unsigned char* w) noexcept {
+    for(int i=0;i<st.weaponCount;++i)if(st.weapons[i]==w+kWeaponModel)return true;
+    return false;
+}
+
+// A shot's flash about to be made for weapon `w`: in first person, its matrix pointer is one of the flashes'.
+void Relocate(unsigned char* w) noexcept {
+    if(!st.on || !st.viewOk || !PlayersWeapon(w))return;
+    const auto src=At<const float*>(w,kFlashMatrix);
+    if(!src)return;
+    Flash& f=flashes[flashNext];
+    flashNext=(flashNext+1)%kFlashSlots;
+    f.src=src;f.age=0;
+    std::memcpy(f.m,fpview::Mul(MatrixAt(reinterpret_cast<const unsigned char*>(src)),st.view).m,64);
+    Put<const float*>(w,kFlashMatrix,f.m);
+}
+
+void* __fastcall FlashCreateHook(void* factory,void* a,void* cls,void* param) {
+    __try { Relocate(static_cast<unsigned char*>(param)-kFlashParam); } __except(EXCEPTION_EXECUTE_HANDLER){}
+    return reinterpret_cast<CreateFn>(image+kEffectCreate)(factory,a,cls,param);
 }
 
 // The camera, the player's state given back: the near clip, the look smoothing.
@@ -290,9 +351,15 @@ void Camera(unsigned char* cam) noexcept {
     if(c.fpNear>0.0f){if(!st.nearSet){st.savedNear=At<float>(cam,kCamNear);st.nearSet=true;}Put<float>(cam,kCamNear,c.fpNear);}
     if(c.fpAimSnap){if(!st.smoothSet){st.savedSmooth=At<float>(h,kLookSmooth);st.smoothSet=true;}Put<float>(h,kLookSmooth,1.0f);}
     Gather(h);
-    if(c.fpMotion)Motion(h);
+    M4 anchor;
+    const bool anchored=Anchor(h,&anchor);
+    const float grip[3]={c.fpGripX,c.fpGripY,c.fpGripZ},hold[3]={c.fpHoldX,c.fpHoldY,c.fpHoldZ};
+    if(c.fpMotion)Motion(h,anchored ? grip : kPivot);
     else st.moved=fpview::Identity();
-    ++epoch;
+    const M4 view=MatrixAt(cam+kCamMatrix);
+    st.viewOk=anchored ? fpview::AnchoredTransform(anchor,view,grip,c.fpScale,&st.view,st.moved)
+                       : fpview::ViewTransform(MatrixAt(h+kAim),view,hold,c.fpScale,&st.view,st.moved);
+    Flashes();
 }
 
 void __fastcall CamStepHook(void* camera,void* step) {
@@ -310,16 +377,10 @@ DrawFn NextDraw(const void* model) noexcept {
     return reinterpret_cast<DrawFn>(image+kModelDraw);
 }
 
-// T for this frame (the camera and the aim frame as the last step left them), built once a frame.
+// T for this frame (the camera and the aim frame as the last camera step left them: the draws come before the next).
 bool ViewNow(M4* t) noexcept {
-    if(drawn.epoch!=epoch) {
-        const Config& c=Cfg();
-        const float hold[3]={c.fpHoldX,c.fpHoldY,c.fpHoldZ};
-        drawn.epoch=epoch;
-        drawn.ok=fpview::ViewTransform(MatrixAt(st.human+kAim),MatrixAt(st.cam+kCamMatrix),hold,c.fpScale,&drawn.t,st.moved);
-    }
-    *t=drawn.t;
-    return drawn.ok;
+    *t=st.view;
+    return st.viewOk;
 }
 
 enum class Part { none,body,weapon };
@@ -428,8 +489,10 @@ bool InstallFirstPerson() noexcept {
     if(!camOk){Log("FP off: the camera step not chained");return false;}
     nextCamStep=reinterpret_cast<CamStepFn>(next);
     drawOk=HookDrawOf(reinterpret_cast<void**>(image+kModelVtable));
+    bool changed=false;
+    const bool flashOk=RedirectCall(image+kFlashCall,image+kEffectCreate,reinterpret_cast<void*>(&FlashCreateHook),changed);
     toggled=Cfg().firstPersonStart;
-    Log("FP installed: camera=%d draw=%d start=%d",camOk,drawOk,toggled);
+    Log("FP installed: camera=%d draw=%d flash=%d start=%d",camOk,drawOk,flashOk,toggled);
     return drawOk;
 }
 }  // namespace crew

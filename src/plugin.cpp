@@ -245,6 +245,9 @@ void Validate(Config& n) noexcept {
     Fix("FirstPersonEyeUp",n.fpEyeUp,-0.5f,0.5f);
     Fix("FirstPersonEyeAhead",n.fpEyeAhead,-0.5f,0.5f);
     Fix("FirstPersonEyeEase",n.fpEyeEase,0.02f,1.0f);
+    Fix("FirstPersonGripX",n.fpGripX,-1.0f,1.0f);
+    Fix("FirstPersonGripY",n.fpGripY,-1.0f,1.0f);
+    Fix("FirstPersonGripZ",n.fpGripZ,-1.0f,2.0f);
     Fix("FirstPersonHoldX",n.fpHoldX,-1.0f,1.0f);
     Fix("FirstPersonHoldY",n.fpHoldY,-1.0f,1.0f);
     Fix("FirstPersonHoldZ",n.fpHoldZ,-1.0f,1.0f);
@@ -564,6 +567,9 @@ void LoadConfig() noexcept {
     n.fpEyeUp=ReadFloat(L"FirstPersonEyeUp",n.fpEyeUp);
     n.fpEyeAhead=ReadFloat(L"FirstPersonEyeAhead",n.fpEyeAhead);
     n.fpEyeEase=ReadFloat(L"FirstPersonEyeEase",n.fpEyeEase);
+    n.fpGripX=ReadFloat(L"FirstPersonGripX",n.fpGripX);
+    n.fpGripY=ReadFloat(L"FirstPersonGripY",n.fpGripY);
+    n.fpGripZ=ReadFloat(L"FirstPersonGripZ",n.fpGripZ);
     n.fpHoldX=ReadFloat(L"FirstPersonHoldX",n.fpHoldX);
     n.fpHoldY=ReadFloat(L"FirstPersonHoldY",n.fpHoldY);
     n.fpHoldZ=ReadFloat(L"FirstPersonHoldZ",n.fpHoldZ);
@@ -742,8 +748,8 @@ void LoadConfig() noexcept {
     Log("CONFIG highCam=%d key=0x%X button=0x%X height=%.0f back=%.0f pitch=%.0f",n.highCam,n.highCamKey,n.highCamButton,n.highCamHeight,
         n.highCamBack,n.highCamPitch);
     Log("CONFIG sightZoom=%d key=0x%X button=0x%X infantryScope=%d",n.sightZoom,n.sightZoomKey,n.sightZoomButton,n.infantryScope);
-    Log("CONFIG firstPerson=%d key=0x%X start=%d eye up %.2f ahead %.2f ease %.2f hold (%.2f,%.2f,%.2f) scale %.2f near %.3f aimSnap=%d motion=%d",
-        n.firstPerson,n.firstPersonKey,n.firstPersonStart,n.fpEyeUp,n.fpEyeAhead,n.fpEyeEase,n.fpHoldX,n.fpHoldY,n.fpHoldZ,
+    Log("CONFIG firstPerson=%d key=0x%X start=%d eye up %.2f ahead %.2f ease %.2f grip (%.2f,%.2f,%.2f) hold (%.2f,%.2f,%.2f) scale %.2f near %.3f aimSnap=%d motion=%d",
+        n.firstPerson,n.firstPersonKey,n.firstPersonStart,n.fpEyeUp,n.fpEyeAhead,n.fpEyeEase,n.fpGripX,n.fpGripY,n.fpGripZ,n.fpHoldX,n.fpHoldY,n.fpHoldZ,
         n.fpScale,n.fpNear,n.fpAimSnap,n.fpMotion);
     Log("CONFIG nixTorsoTwist=%d",n.nixTorsoTwist);
     Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f",n.map,n.mapKey,n.mapButton,n.mapViewDistance);

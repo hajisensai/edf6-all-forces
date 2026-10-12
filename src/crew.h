@@ -226,6 +226,9 @@ struct Config {
     float fpEyeUp=0.05f;            // ...the eye this far over the head bone, m
     float fpEyeAhead=0.10f;         // ...and this far ahead of it, m
     float fpEyeEase=0.25f;          // ...the eye follows the head's place in the body this much a frame (the bob filtered)
+    float fpGripX=0.15f;            // ...the weapon in hand held here in the view, m: right (the Fencer: fpHold*)
+    float fpGripY=-0.16f;           // ...up
+    float fpGripZ=0.28f;            // ...ahead
     float fpHoldX=0.0f;             // ...the arms and weapon moved in the aim frame, m: right
     float fpHoldY=0.0f;             // ...up
     float fpHoldZ=0.0f;             // ...ahead

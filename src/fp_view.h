@@ -6,6 +6,10 @@
 //    stock third-person camera turns in), eye the camera's eye in R, C the camera's world matrix. Arms and weapon share
 //    T, so the hand stays on the grip; hold moves the pair in the aim frame; s shrinks it about the eye (the picture is
 //    the same at any s, only nearer: walls in front do not cut it).
+//  - The weapon-anchored transform (the classes with one weapon in hand): T = W⁻¹ · Tr(grip) · S(s) · C with W the held
+//    weapon's root (its grip, the hand's mount) made orthonormal: the weapon sits at `grip` in the camera's frame,
+//    pointing straight ahead, whatever the third-person pose holds it at; the arms follow it, the hands' own animation
+//    (a reload's) on it kept.
 //  - The collapse: a matrix that sends every vertex it weighs to one point (rows 0..2 zero): the body's bones that are
 //    not the arms', so the body draws nothing but its arms (the triangles of the rest are degenerate, no pixel).
 //  - The eye: the head bone's place in the yaw-only body frame, eased (the animation's bob filtered out).
@@ -91,6 +95,33 @@ inline bool ViewTransform(const M4& aim,const M4& camera,const float* hold,float
     float eye[3];
     Point(inv,camera.m+12,eye);
     const M4 t=Mul(Mul(Mul(Mul(inv,Translate(hold[0]-eye[0],hold[1]-eye[1],hold[2]-eye[2])),motion),Scale(scale)),camera);
+    if(!Finite(t))return false;
+    *out=t;
+    return true;
+}
+
+// `a` with its three axes made unit length and square to each other (forward kept, up next, right from them).
+inline bool Orthonormal(const M4& a,M4* out) noexcept {
+    float f[3]={a.m[8],a.m[9],a.m[10]},u[3]={a.m[4],a.m[5],a.m[6]};
+    auto unit=[](float* v){const float l=std::sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);if(!(l>1e-6f))return false;for(int i=0;i<3;++i)v[i]/=l;return true;};
+    if(!unit(f))return false;
+    const float d=u[0]*f[0]+u[1]*f[1]+u[2]*f[2];
+    for(int i=0;i<3;++i)u[i]-=f[i]*d;
+    if(!unit(u))return false;
+    const float r[3]={u[1]*f[2]-u[2]*f[1],u[2]*f[0]-u[0]*f[2],u[0]*f[1]-u[1]*f[0]};
+    M4 o=a;
+    for(int i=0;i<3;++i){o.m[i]=r[i];o.m[4+i]=u[i];o.m[8+i]=f[i];}
+    o.m[3]=o.m[7]=o.m[11]=0.0f;o.m[15]=1.0f;
+    *out=o;
+    return true;
+}
+
+// T anchored on the weapon (above), the motion applied about the grip. False when W is degenerate.
+inline bool AnchoredTransform(const M4& weapon,const M4& camera,const float* grip,float scale,M4* out,
+                              const M4& motion=Identity()) noexcept {
+    M4 w,inv;
+    if(!Orthonormal(weapon,&w) || !InverseAffine(w,&inv))return false;
+    const M4 t=Mul(Mul(Mul(Mul(inv,Translate(grip[0],grip[1],grip[2])),motion),Scale(scale)),camera);
     if(!Finite(t))return false;
     *out=t;
     return true;

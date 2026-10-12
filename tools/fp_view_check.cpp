@@ -5,6 +5,8 @@
 //  - a shrink keeps the picture: a point and its shrunk copy lie on the same ray from the eye, at s times the distance;
 //  - a collapse sends every point to its one place;
 //  - the eye eased in the body frame: the first frame as it is, then a share of the way a frame; a turned body turns it;
+//  - the weapon-anchored transform: the weapon's root lands at the grip in the camera's frame and points along the
+//    camera's forward, whatever way the weapon was held (a tilted, scaled hand matrix as well);
 //  - the motion matrix: none is the identity, the pivot stays where it is under any turn, a pitch up tips ahead up;
 //  - the procedural motion (src/fp_motion.h): nothing happening rests at 0; a shot kicks back and up and settles; a reload
 //    holds it low; a switch dips out of view and comes back; a sprint lowers it; a turn of the view leaves it behind.
@@ -111,6 +113,29 @@ void Eye() {
     Expect(Near(w[0],100.4f) && Near(w[2],50.0f),"the eye back in the world, ahead along the turned body",w[0],w[2]);
 }
 
+void Anchored() {
+    const float at[3]={3.0f,1.1f,-2.0f};
+    M4 weapon=Frame(0.6f,-1.2f,at);   // held tilted, turned away
+    for(int i=0;i<3;++i){weapon.m[i]*=1.3f;weapon.m[4+i]*=1.3f;weapon.m[8+i]*=1.3f;}   // and scaled
+    const float camAt[3]={10.0f,5.0f,7.0f},eye[3]={0.0f,0.0f,0.0f},grip[3]={0.15f,-0.16f,0.28f};
+    const M4 cam=CameraAt(Frame(-0.2f,0.4f,camAt),eye);
+    M4 t;
+    const bool ok=AnchoredTransform(weapon,cam,grip,1.0f,&t);
+    float q[3],want[3];
+    Point(t,at,q);
+    for(int j=0;j<3;++j)want[j]=cam.m[12+j]+grip[0]*cam.m[j]+grip[1]*cam.m[4+j]+grip[2]*cam.m[8+j];
+    const float err=std::fabs(q[0]-want[0])+std::fabs(q[1]-want[1])+std::fabs(q[2]-want[2]);
+    Expect(ok && err<1e-4f,"anchored: the weapon's root at the grip",err);
+    float tip[3],tq[3];
+    for(int j=0;j<3;++j)tip[j]=at[j]+weapon.m[8+j];
+    Point(t,tip,tq);
+    float d[3];
+    for(int j=0;j<3;++j)d[j]=tq[j]-q[j];
+    const float l=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+    const float cosine=(d[0]*cam.m[8]+d[1]*cam.m[9]+d[2]*cam.m[10])/l;
+    Expect(Near(cosine,1.0f,1e-5f),"...pointing along the camera's forward",cosine);
+}
+
 void Motion() {
     const float pivot[3]={0.15f,-0.2f,0.35f};
     const M4 none=MotionMatrix(0,0,0,0,0,0,pivot);
@@ -173,6 +198,7 @@ int main() {
     Singular();
     Collapse_();
     Eye();
+    Anchored();
     Motion();
     Springs();
     std::printf(failures ? "%d FAILED\n" : "all passed\n",failures);
