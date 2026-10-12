@@ -2530,8 +2530,8 @@ void PlayerAssist(unsigned char* v) noexcept {
 // the stock input (slot 55) copies LX, the trigger, LY and RX to the heli and never RY, so the mouse's Y only ever moved
 // the camera (heli-input-re.md §2, §4). After it (HeliFrame runs in its post-hook, crew.cpp InputHook, so slot 57 reads
 // this frame's values) the input block is written in three layers:
-//  1. the attitude wanted (aim::Instructor): the aim's heading and pitch, the cyclic's forward speed for that pitch, the
-//     A / D slide, the collective's climb (W / S, Space, the brake key; let go: the height held);
+//  1. the attitude wanted (aim::Instructor): the mouse's heading and keyboard pitch, the cyclic's forward speed for that pitch, the
+//     A / D slide, the collective's climb (Space / brake key; let go: the height held);
 //  2. the attitude controller: the yaw onto the aim's heading through the native yaw lag's inverse (aim::PlayerYawInput;
 //     + grows the heading angle with a positive max yaw rate, aim::YawSign), the pitch the aim's (PlayerAttitudeHook
 //     hands it to the attitude function alone), the roll the slide's plus a coordinated turn's bank (aim::BankInput);
@@ -2662,8 +2662,9 @@ float SeatAxis(const unsigned char* seat,std::size_t at) noexcept {
 void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos,const float* fwd,const float* right,bool grounded,
             float clear,float dt,ULONGLONG ms) noexcept {
     const float ly=SeatAxis(seat,kSeatLY),ry=SeatAxis(seat,kSeatRY),side=SeatAxis(seat,kSeatLX);
-    // The collective: W / S (the stock's -LY: W gives LY < 0), Space (the stock ascend) and the brake key.
-    const float vert=Clamp((ly<-0.3f ? 1.0f : ly>0.3f ? -1.0f : 0.0f)+(At<float>(seat,kSeatAscend)>0.5f ? 1.0f : 0.0f)-
+    // W/S are cyclic pitch. Only Space and the brake key change collective/height.
+    const float fore=Clamp(-ly,-1.0f,1.0f);
+    const float vert=Clamp((At<float>(seat,kSeatAscend)>0.5f ? 1.0f : 0.0f)-
                            (KeyDown(Cfg().playerJetBrakeKey) ? 1.0f : 0.0f),-1.0f,1.0f);
     const float mx=SeatAxis(seat,kSeatRX),my=Cfg().playerJetInvertPitch ? ry : -ry,k=aim::kPerUnit*Cfg().playerJetMouseSpeed;
     float vp[16];
@@ -2680,13 +2681,13 @@ void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos
     const bool lifting=ms-p.groundAt<kLiftOffMs;   // the NPC's lift-off: straight up, nothing horizontal
     // 1. The attitude wanted.
     float pitch=0.0f;
-    const aim::Want w=aim::Instructor(p.hold,p.aim,fwd,pos,p.vel,vert,side,top,kPlayerClimb,maxTilt,grounded,lifting,clear,&pitch);
+    const aim::Want w=aim::Instructor(p.hold,p.aim,fwd,pos,p.vel,vert,side,top,kPlayerClimb,maxTilt,grounded,lifting,clear,fore,&pitch);
     // 3. (the velocity first: the roll is built on its lateral) The cyclic's stick for the velocity.
     float forward=0.0f,lateral=0.0f;
     aim::StockStick(w.vel,p.vel,top,kBrakeGain,fwd,right,&forward,&lateral);
     if(lifting)forward=lateral=0.0f;
     // 2. The attitude controller. The native yaw channel is a lagged heading offset, not a rate: compensate its current
-    // state and the native spring conversion (aim::PlayerYawInput). The pitch the aim's; the roll the slide's plus the
+    // state and the native spring conversion (aim::PlayerYawInput). The pitch the keyboard's; the roll the slide's plus the
     // turn's bank (the course command, not a feedback from the bank's own native heading transient).
     const float heading=std::atan2(fwd[0],fwd[2]);
     const float maxYaw=At<float>(v,kMaxYaw);
@@ -2698,7 +2699,7 @@ void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos
     const float bank=aim::PlayerBankInput(p.hold.speed,off,rateLimit,maxTilt,fwd,right);
     p.rollIn=grounded ? lateral : Clamp(lateral+bank,-1.0f,1.0f);
     Put<float>(v,kInLateral,lateral);Put<float>(v,kInForward,forward);Put<float>(v,kInW,1.0f);Put<float>(v,kInYaw,yaw);
-    // 3. The collective. On the ground the stock throttle (Space) stands, W spins the rotor up too.
+    // 3. The collective. Space spins up the rotor on the ground; W/S never add lift.
     if(!grounded) {
         const bool learn=p.hold.holding && std::fabs(p.hold.y-pos[1])<6.0f;
         const aim::Rotor rotor{At<float>(v,kLiftPerRotor),At<float>(v,kVertDamp),At<float>(v,kRotorIdle),At<float>(v,kRotorUp),

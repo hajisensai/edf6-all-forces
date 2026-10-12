@@ -101,14 +101,14 @@ float YawIn(Pilot& p,const Heli& h,const aim::Want& w) noexcept {
 // AimFly's frame on the stand-in (heli.cpp AimFly, the same calls in the same order).
 Inputs Fly(Pilot& p,const Heli& h,const Hand& hand,float t,int frame) noexcept {
     const bool held=t>=hand.from && t<hand.to;
-    const float vert=held ? std::fmax(-1.0f,std::fmin(1.0f,hand.fore+hand.vert)) : 0.0f,side=held ? hand.side : 0.0f;
+    const float vert=held ? std::fmax(-1.0f,std::fmin(1.0f,hand.vert)) : 0.0f,side=held ? hand.side : 0.0f;
     MoveAim(p,h,hand,frame);
     const float fwd[3]={std::sin(h.a),0.0f,std::cos(h.a)},right[3]={-std::cos(h.a),0.0f,std::sin(h.a)};
     const bool grounded=h.pos[1]<=0.0f;
     if(grounded)p.groundAt=t;
     const bool lifting=t-p.groundAt<kLiftOffSec;
     float pitch=0.0f;
-    const aim::Want w=aim::Instructor(p.hold,p.aim,fwd,h.pos,h.vel,vert,side,kTop,kPlayerClimb,kMaxTilt,grounded,lifting,h.pos[1],&pitch);
+    const aim::Want w=aim::Instructor(p.hold,p.aim,fwd,h.pos,h.vel,vert,side,kTop,kPlayerClimb,kMaxTilt,grounded,lifting,h.pos[1],held ? hand.fore : 0.0f,&pitch);
     Inputs in{};
     aim::StockStick(w.vel,h.vel,kTop,kBrakeGain,fwd,right,&in.forward,&in.lateral);
     if(lifting)in.forward=in.lateral=0.0f;
@@ -190,8 +190,8 @@ struct Climbed { float rate1,peak,end,overshoot,settle; int reversals; };
 Climbed Collective(Law law,bool stock,float hoverGuess,float sign) noexcept {
     Heli h=Hovering(50.0f,kYawMost,stock);
     Pilot p=Fresh(hoverGuess);
-    // The instructor's collective is W / S; the law before climbed on Space / the brake key (its W / S a speed setpoint).
-    const Hand hand=law==&Fly ? Hand{sign,0,0,0,kClimbSec,0,0,0,0} : Hand{0,0,sign,0,kClimbSec,0,0,0,0};
+    // Space / the brake key command collective independently of pitch.
+    const Hand hand{0,0,sign,0,kClimbSec,0,0,0,0};
     Climbed c{};
     const int frames=static_cast<int>(40.0f/kDt),release=static_cast<int>(kClimbSec/kDt);
     float lastVy=0.0f,trace[2400];
@@ -216,8 +216,8 @@ bool CollectiveSteps() noexcept {
     bool ok=true;
     // The hover the pilot starts from is aim::HoverRotor's (the NPC's learned 0.424 for the 506, within 2 % of the measured
     // gravity's 14.7 m/s^2); the last case starts it 47 % off (the stand-in's 9.8 m/s^2) and must still settle unporpoised.
-    const struct { const char* name; float sign,guess,settle; } cases[]={{"W 3 s, let go",1.0f,kHover,5.0f},
-        {"S 3 s, let go",-1.0f,kHover,5.0f},{"W 3 s, hover guess +47%",1.0f,0.424f,8.0f}};
+    const struct { const char* name; float sign,guess,settle; } cases[]={{"Space 3 s, let go",1.0f,kHover,5.0f},
+        {"Ctrl 3 s, let go",-1.0f,kHover,5.0f},{"Space 3 s, hover guess +47%",1.0f,0.424f,8.0f}};
     for(const auto& k:cases) {
         const Climbed now=Collective(&Fly,false,k.guess,k.sign),was=Collective(&Before,true,k.guess,k.sign);
         // Climbs at once (half the most within 1 s), stops where it is let go (overshoot under 1.5 m), settles within 5 s, no
@@ -241,7 +241,7 @@ bool CyclicStep() noexcept {
     Pilot p=Fresh(kHover);
     const float el=-20.0f*kPi/180.0f;
     const int tilt=static_cast<int>(std::lround(-el/aim::kPerUnit/1.0f));   // frames at a unit of mouse a frame
-    const Hand down{0,0,0,0,0,0,-1.0f,0,tilt},up{0,0,0,0,0,0,1.0f,12.0f,tilt};
+    const Hand down{-el/kMaxTilt,0,0,0,12,0,0,0,0},up{0,0,0,12,18,0,0,0,0};
     const float want=aim::CyclicSpeed(el,kMaxTilt,kTop);
     float peak=0.0f,to90=-1.0f,nose1=0.0f,lowest=50.0f;
     const int frames=static_cast<int>(12.0f/kDt);
@@ -263,7 +263,7 @@ bool CyclicStep() noexcept {
     const bool ok=want>0.4f*kTop && peak<1.05f*want && to90>0.0f && to90<4.0f && noseShare>0.9f && std::fabs(left)<0.5f &&
                   back>-0.5f && 50.0f-lowest<1.0f;
     std::printf("%-28s %-36s want %.1f m/s, peak %.1f, 90%% at %.1f s, nose %.0f%% of the aim 1 s on, after levelling %.2f m/s "
-                "(back at most %.2f), height lost %.2f m  %s\n","mouse down 20 deg, level","flies forward, then stops",want,peak,to90,
+                "(back at most %.2f), height lost %.2f m  %s\n","W pitch, release to level","flies forward, then stops",want,peak,to90,
                 noseShare*100.0f,left,back,50.0f-lowest,ok ? "ok" : "WRONG");
     // The nose the old law gave the same mouse: the stock tilt smoothing 0.005 a frame (3.3 s).
     Heli b=Hovering(50.0f,kYawMost,true);
@@ -279,11 +279,10 @@ bool CyclicStep() noexcept {
 bool Banks() noexcept {
     Heli h=Hovering(50.0f,kYawMost,false);
     Pilot p=Fresh(kHover);
-    const int tilt=static_cast<int>(std::lround(20.0f*kPi/180.0f/aim::kPerUnit));
-    const Hand fly{0,0,0,0,0,0,-1.0f,0,tilt};
+    const Hand fly{20.0f*kPi/180.0f/kMaxTilt,0,0,0,10,0,0,0,0};
     float level=0.0f;
     for(int f=0;f<static_cast<int>(8.0f/kDt);++f){const Inputs in=Fly(p,h,fly,static_cast<float>(f)*kDt,f);level=in.rollIn;Step(h,in);}
-    const Hand sweep{0,0,0,0,0,1.0f,0,8.0f,120};
+    const Hand sweep{20.0f*kPi/180.0f/kMaxTilt,0,0,8,10,1.0f,0,8.0f,120};
     float roll=0.0f,expect=0.0f;
     for(int f=static_cast<int>(8.0f/kDt);f<static_cast<int>(10.0f/kDt);++f) {
         const Inputs in=Fly(p,h,sweep,static_cast<float>(f)*kDt,f);
@@ -331,7 +330,32 @@ bool HoverRotors() noexcept {
     return ok;
 }
 
-// MoveOnScreen: the aim at the screen's right edge, the mouse up and right: the turn is not taken, the climb is.
+// Keyboard pitch is independent of an extreme mouse aim and narrow native tilt limits.
+bool KeyboardPitch() noexcept {
+    bool ok=true;
+    const float aim[3]={0,0.98f,0.2f},nose[3]={0,0,1},pos[3]={0,50,0},vel[3]={0,0,0};
+    const float tilts[]={0.02f,0.04f,0.35f};
+    for(float tilt : tilts) {
+        aim::Hold hold{};float pitch=0;
+        auto w=aim::Instructor(hold,aim,nose,pos,vel,0,0,30,6,tilt,false,false,50,1,&pitch);
+        ok=ok && pitch<0 && std::fabs(pitch+tilt)<1e-6f && hold.speed>29.9f && w.climb==0;
+        w=aim::Instructor(hold,aim,nose,pos,vel,0,0,30,6,tilt,false,false,50,-1,&pitch);
+        ok=ok && pitch>0 && std::fabs(pitch-tilt)<1e-6f && hold.speed< -8.9f && w.climb==0;
+        w=aim::Instructor(hold,aim,nose,pos,vel,0,0,30,6,tilt,false,false,50,0,&pitch);
+        ok=ok && pitch==0 && hold.speed==0 && w.climb==0;
+        w=aim::Instructor(hold,aim,nose,pos,vel,1,0,30,6,tilt,false,false,50,0,&pitch);
+        ok=ok && pitch==0 && w.climb>0;
+        w=aim::Instructor(hold,aim,nose,pos,vel,-1,0,30,6,tilt,false,false,50,0,&pitch);
+        ok=ok && pitch==0 && w.climb<0;
+    }
+    Heli h=Hovering(0,kYawMost,false);h.rotor=kIdle;Pilot p=Fresh(kHover);
+    const Hand onlyW{1,0,0,0,2,0,0,0,0};
+    for(int f=0;f<120;++f)Step(h,Fly(p,h,onlyW,f*kDt,f));
+    ok=ok && h.pos[1]==0 && std::fabs(h.pos[2])<0.01f;
+    std::printf("keyboard pitch / narrow-tilt models / independent collective: %s\n",ok ? "ok" : "WRONG");
+    return ok;
+}
+
 bool MovesPerAxis() noexcept {
     // A plain projection: the camera at the origin looking +z, row vectors, clip (x, y, 0, z): screen x / z, y / z.
     const float vp[16]={1,0,0,0, 0,1,0,0, 0,0,0,1, 0,0,0,0};
@@ -342,7 +366,7 @@ bool MovesPerAxis() noexcept {
     const float mx=-a[0]>0.0f ? 1.0f : -1.0f;   // the turn that takes it on past the edge (heliaim.h RightOf: right lowers x)
     aim::MoveOnScreen(vp,pos,a,mx,1.0f,aim::kPerUnit,dir,800.0f,0.85f);
     const bool on=aim::OnScreen(vp,pos,a,800.0f,0.85f),ok=a[1]>before+0.03f && on;
-    std::printf("%-28s %-36s elevation %+.3f -> %+.3f, on screen %d  %s\n","mouse up and out at the edge","still pitches (axis by axis)",
+    std::printf("%-28s %-36s elevation %+.3f -> %+.3f, on screen %d  %s\n","mouse up and out at the edge","moves aim (axis by axis)",
                 before,a[1],on ? 1 : 0,ok ? "ok" : "WRONG");
     return ok;
 }
@@ -353,11 +377,11 @@ int main() {
     //                                              fore side vert from to   mx    my   mouseAt frames  s     fwd right up turn
     const Scenario scenarios[]={
         {"nothing",                "hovers where it is",              {0, 0, 0, 0,0,     0, 0, 0,0},   10, {0, 0, 0, 0}, kYawMost},
-        {"mouse down 20 deg",      "noses down, flies forward level", {0, 0, 0, 0,0,     0,-1, 0,7},   10, {1, 0, 0, 0}, kYawMost},
-        {"mouse up 20 deg",        "noses up, backs off level",       {0, 0, 0, 0,0,     0, 1, 0,7},   10, {-1,0, 0, 0}, kYawMost},
+        {"mouse down 20 deg",      "aim only, holds level",          {0, 0, 0, 0,0,     0,-1, 0,7},   10, {0, 0, 0, 0}, kYawMost},
+        {"mouse up 20 deg",        "aim only, holds level",          {0, 0, 0, 0,0,     0, 1, 0,7},   10, {0, 0, 0, 0}, kYawMost},
         {"mouse down 2 deg",       "within the dead zone: hovers",    {0, 0, 0, 0,0,     0,-1, 0,1},   10, {0, 0, 0, 0}, kYawMost},
-        {"W 3 s",                  "climbs, then holds",              {1, 0, 0, 0,3,     0, 0, 0,0},   10, {0, 0, 1, 0}, kYawMost},
-        {"S 3 s",                  "descends, then holds",            {-1,0, 0, 0,3,     0, 0, 0,0},   10, {0, 0,-1, 0}, kYawMost},
+        {"W 3 s",                  "nose down, forward",              {1, 0, 0, 0,3,     0, 0, 0,0},   10, {1, 0, 0, 0}, kYawMost},
+        {"S 3 s",                  "nose up, reverse",            {-1,0, 0, 0,3,     0, 0, 0,0},   10, {-1,0, 0, 0}, kYawMost},
         {"mouse right 57 deg",     "turns right onto the aim",        {0, 0, 0, 0,0,     1, 0, 0,20},  10, {2, 2, 0, 1}, kYawMost},
         {"mouse left 57 deg",      "turns left onto the aim",         {0, 0, 0, 0,0,    -1, 0, 0,20},  10, {2, 2, 0,-1}, kYawMost},
         {"D 3 s",                  "sidesteps right",                 {0, 1, 0, 0,3,     0, 0, 0,0},   6,  {0, 1, 0, 0}, kYawMost},
@@ -374,14 +398,14 @@ int main() {
     Heli g=Hovering(0.0f,kYawMost,false);
     g.rotor=kIdle;
     Pilot q=Fresh(kHover);q.groundAt=0.0f;
-    const Hand lift{1,0,0,0,1.2f,0,-1,0,7};
+    const Hand lift{1,0,1,0,1.2f,0,-1,0,7};
     float setMost=0.0f;
     for(int f=0;f<static_cast<int>(1.5f/kDt);++f) {
         Step(g,Fly(q,g,lift,static_cast<float>(f)*kDt,f));
         setMost=std::fmax(setMost,q.hold.speed);
     }
     const bool still=g.pos[1]>0.5f && setMost==0.0f && std::fabs(g.pos[2])<0.5f;
-    std::printf("%-28s %-36s up %+.1f m, fwd %+.1f m, most speed set %.1f m/s  %s\n","W 1.2 s from the ground","lifts straight, no slide",
+    std::printf("%-28s %-36s up %+.1f m, fwd %+.1f m, most speed set %.1f m/s  %s\n","Space + W from the ground","lifts straight, no slide",
                 g.pos[1],g.pos[2],setMost,still ? "ok" : "WRONG");
     bad+=still ? 0 : 1;
     bad+=CollectiveSteps() ? 0 : 1;
@@ -390,6 +414,7 @@ int main() {
     bad+=FollowsTheMouse() ? 0 : 1;
     bad+=HoverRotors() ? 0 : 1;
     bad+=MovesPerAxis() ? 0 : 1;
+    bad+=KeyboardPitch() ? 0 : 1;
     std::printf("%s\n",bad ? "SOME CHECKS FAILED" : "heli_aim_check: all passed");
     return bad ? 1 : 0;
 }
