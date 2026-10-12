@@ -285,24 +285,31 @@ void Targets() {
     int current=-1;
     auto aimOf=[&](int i){return aims[i];};
     auto isCurrent=[&](int i){return i==current;};
-    Check(PickTarget(3,aimOf,isCurrent,eye,anchor,500.0f,150.0f)==1,"the one in reach before the flyer out of it");
+    auto any=[](int){return true;};
+    Check(PickTarget(3,aimOf,isCurrent,any,eye,anchor,500.0f,150.0f)==1,"the one in reach before the flyer out of it");
     current=0;
-    Check(PickTarget(3,aimOf,isCurrent,eye,anchor,500.0f,150.0f)==1,"the flyer held out of reach let go for the one in it");
-    Check(PickTarget(1,aimOf,isCurrent,eye,anchor,500.0f,150.0f)==0,"only the flyer: it, out of reach");
-    Check(PickTarget(3,aimOf,isCurrent,eye,anchor,500.0f,0.0f)==1,"reach unknown: the nearest");
+    Check(PickTarget(3,aimOf,isCurrent,any,eye,anchor,500.0f,150.0f)==1,"the flyer held out of reach let go for the one in it");
+    Check(PickTarget(1,aimOf,isCurrent,any,eye,anchor,500.0f,150.0f)==0,"only the flyer: it, out of reach");
+    Check(PickTarget(3,aimOf,isCurrent,any,eye,anchor,500.0f,0.0f)==1,"reach unknown: the nearest");
     // Both out of reach: the nearer (the ground one at 400 m before the flyer at 900 m).
     current=-1;
     const float far[2][3]={{0.0f,900.0f,30.0f},{400.0f,2.0f,0.0f}};
     auto farOf=[&](int i){return far[i];};
-    Check(PickTarget(2,farOf,isCurrent,eye,anchor,500.0f,150.0f)==1,"none in reach: the nearest");
+    Check(PickTarget(2,farOf,isCurrent,any,eye,anchor,500.0f,150.0f)==1,"none in reach: the nearest");
     // Hysteresis among those in reach.
     const float pair[2][3]={{100.0f,0.0f,0.0f},{0.0f,0.0f,90.0f}};
     auto pairOf=[&](int i){return pair[i];};
     current=0;
-    Check(PickTarget(2,pairOf,isCurrent,eye,anchor,500.0f,150.0f)==0,"the current one kept over one 10 m nearer");
+    Check(PickTarget(2,pairOf,isCurrent,any,eye,anchor,500.0f,150.0f)==0,"the current one kept over one 10 m nearer");
     current=-1;
-    Check(PickTarget(2,pairOf,isCurrent,eye,anchor,500.0f,150.0f)==1,"no current: the nearer");
-    Check(PickTarget(2,pairOf,isCurrent,eye,anchor,50.0f,150.0f)==-1,"out of its scope: none");
+    Check(PickTarget(2,pairOf,isCurrent,any,eye,anchor,500.0f,150.0f)==1,"no current: the nearer");
+    Check(PickTarget(2,pairOf,isCurrent,any,eye,anchor,50.0f,150.0f)==-1,"out of its scope: none");
+    // Fire wasted on one (wasted_fire.h: the shut teleportation ship, hits that hurt nothing): passed over, even held.
+    current=1;
+    auto notOne=[](int i){return i!=1;};
+    Check(PickTarget(3,aimOf,isCurrent,notOne,eye,anchor,500.0f,150.0f)==2,"the one its fire is wasted on passed over, held or not");
+    auto none=[](int){return false;};
+    Check(PickTarget(3,aimOf,isCurrent,none,eye,anchor,500.0f,150.0f)==-1,"fire wasted on all: no target");
     Check(TargetScore(151.0f,150.0f,true)>TargetScore(149.0f,150.0f,false) &&
           TargetScore(140.0f,150.0f,false)<TargetScore(160.0f,150.0f,true),"reach outranks the keep");
 }

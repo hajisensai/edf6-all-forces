@@ -117,6 +117,9 @@ bool VisitEnemies(const unsigned char*,EnemyVisitor visit,void* ctx) noexcept {
     return !simEnemies.empty();
 }
 bool FriendInLine(const float*,const float*,const void*) noexcept { return false; }
+// The enemies a jet's fire is wasted on (src/wastedfire.cpp WastedFire: the shut teleportation ship), as the harness says.
+const void* simWasted=nullptr;
+bool WastedFire(const void*,const void* target) noexcept { return target && target==simWasted; }
 bool GunBarrel(const unsigned char*,const unsigned char*,float*,float*) noexcept { return false; }
 int ReadStores(unsigned char*,Store*,int) noexcept { return 0; }
 void TriggerStore(const Store&) noexcept {}
@@ -533,7 +536,7 @@ int SelfTest(const char* outDir) {
             PickTarget(j,mem.data(),at,anchor,range,kDt,nowMs);
             return j.t.target;
         };
-        struct { const char* what; bool ok; } cases[7]{};
+        struct { const char* what; bool ok; } cases[9]{};
         j.t.target=nullptr;j.carrier.drones=Role::drone;
         cases[0]={"a gun jet: the nearer flyer, 483 m up",pick(Role::fighter,1800.0f)==high.data()};
         j.t.target=nullptr;
@@ -550,6 +553,13 @@ int SelfTest(const char* outDir) {
         cases[5]={"a doll drone: its current target out of its range let go",pick(Role::doll,300.0f)==nullptr};
         j.t.target=nullptr;j.carrier.drones=Role::doll;
         cases[6]={"a doll carrier: drones at the flyer 483 m up",pick(Role::carrier,1800.0f)==high.data()};
+        // Fire wasted on the nearer flyer (the shut teleportation ship, wasted_fire.h): the gun jet takes the other one, and
+        // drops the wasted one it held.
+        j.t.target=nullptr;j.carrier.drones=Role::drone;simWasted=high.data();
+        cases[7]={"a gun jet: the flyer its fire is wasted on passed over",pick(Role::fighter,1800.0f)==low.data()};
+        j.t.target=high.data();
+        cases[8]={"a gun jet: its held target let go once its fire is wasted on it",pick(Role::fighter,1800.0f)==low.data()};
+        simWasted=nullptr;
         for(const auto& c:cases) {
             if(!c.ok)++bad;
             std::printf("limits %-70s %s\n",c.what,c.ok ? "ok" : "FAIL");

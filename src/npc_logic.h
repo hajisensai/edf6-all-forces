@@ -221,12 +221,15 @@ constexpr float kKeepTarget=20.0f,kOutOfReach=100000.0f;
 inline float TargetScore(float dist,float reach,bool current) noexcept {
     return dist-(current ? kKeepTarget : 0.0f)+(reach>0.0f && dist>reach ? kOutOfReach : 0.0f);
 }
-// The index of the target among `n` (aimOf(i): its lock point; isCurrent(i): it is the one held), -1 with none in scope:
-// within `scope` m of `anchor` over the ground (Horiz), ranked by TargetScore from `eye`.
-template<class AimOf,class IsCurrent>
-int PickTarget(int n,AimOf aimOf,IsCurrent isCurrent,const float* eye,const float* anchor,float scope,float reach) noexcept {
+// The index of the target among `n` (aimOf(i): its lock point; isCurrent(i): it is the one held; usable(i): its fire at
+// it not wasted, wasted_fire.h), -1 with none in scope: within `scope` m of `anchor` over the ground (Horiz), ranked by
+// TargetScore from `eye`.
+template<class AimOf,class IsCurrent,class Usable>
+int PickTarget(int n,AimOf aimOf,IsCurrent isCurrent,Usable usable,const float* eye,const float* anchor,float scope,
+               float reach) noexcept {
     int best=-1;float bestScore=0.0f;
     for(int i=0;i<n;++i) {
+        if(!usable(i))continue;
         const float* aim=aimOf(i);
         if(Horiz(anchor,aim)>scope)continue;
         const float score=TargetScore(Dist(eye,aim),reach,isCurrent(i));

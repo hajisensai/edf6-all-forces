@@ -774,7 +774,8 @@ bool Medic(const unsigned char* v) noexcept {
 // any other: the enemies.
 template<class F> bool ForEachTarget(bool medic,const unsigned char* v,F&& f) noexcept {
     if(medic)return ForEachHurtFriend(v,[&](const void* o,const float* a,float share) noexcept { f(o,a,share*kHurtWeight); });
-    return ForEachEnemy(v,[&](const void* o,const float* a) noexcept { f(o,a,0.0f); });
+    // An enemy its fire is wasted on (WastedFire) is no target of its.
+    return ForEachEnemy(v,[&](const void* o,const float* a) noexcept { if(!WastedFire(v,o))f(o,a,0.0f); });
 }
 
 // Would a healing round of `weapon` from `from` to `to` pass within kEnemyClear of an enemy, or burst with one in its blast?

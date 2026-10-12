@@ -91,6 +91,7 @@ void MissionStart() noexcept {
     ResetStabilizer();
     ResetMap();
     ResetDamageStats();
+    ResetWastedFire();
     ResetHeliSight();
     ResetStockHud();
     ResetStockGauges();

@@ -324,11 +324,24 @@ Before Read(const unsigned char* obj) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
     return Before{0.0f,false,false};
 }
+// The hit's attacker (GameDamageInfo +0x10, alive), and whether the hit took HP off a target alive before it, for
+// wastedfire.cpp (a hit that leaves the HP where it was: the game would not let it hurt).
+void NoteWasted(const unsigned char* obj,const unsigned char* gdi,const Before& b) noexcept {
+    __try {
+        if(!b.ok || b.dead || !Readable(gdi,kGdiAttackerCtrl+8))return;
+        const auto ctrl=At<const unsigned char*>(gdi,kGdiAttackerCtrl);
+        if(!ctrl || !Readable(ctrl,0x10) || At<std::int32_t>(ctrl,0x8)<=0)return;
+        const float hp=At<float>(obj,kHp);
+        if(!std::isfinite(hp))return;
+        WastedFireHit(At<const void*>(gdi,kGdiAttacker),obj,hp<b.hp);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
 std::uintptr_t __fastcall DamageHook(unsigned char* obj,unsigned char* gdi,std::uintptr_t r8,std::uintptr_t r9) noexcept {
     const bool on=On();
-    const Before b=on ? Read(obj) : Before{};
+    const Before b=Read(obj);
     const std::uintptr_t r=damageNext(obj,gdi,r8,r9);
     if(on && b.ok)Record(obj,gdi,b.hp,b.dead);
+    NoteWasted(obj,gdi,b);
     return r;
 }
 unsigned char* __fastcall SpawnHook(void* mgr,void* matrix,void* factory,unsigned char* param) noexcept {

@@ -500,9 +500,12 @@ Arms ArmsOf(const unsigned char* h) noexcept {
 // --- The target ---
 struct Pick { const Enemy* e; float dist; };
 // The target in its scope (npc_logic.h PickTarget): the nearest it can reach with `reach` (its longest weapon's).
-Pick PickTarget(const Soldier& s,const float* eye,const float* anchor,float scope,float reach) noexcept {
+// One its fire is wasted on (WastedFire: a teleportation ship's hatch shut, its last hits on it all hurting nothing) is
+// passed over.
+Pick PickTarget(const Soldier& s,const void* self,const float* eye,const float* anchor,float scope,float reach) noexcept {
     const int i=npc::PickTarget(world.enemies,[](int k) noexcept { return world.enemy[k].aim; },
-                                [&s](int k) noexcept { return s.target.Is(world.enemy[k].object); },eye,anchor,scope,reach);
+                                [&s](int k) noexcept { return s.target.Is(world.enemy[k].object); },
+                                [self](int k) noexcept { return !WastedFire(self,world.enemy[k].object); },eye,anchor,scope,reach);
     return i<0 ? Pick{nullptr,0.0f} : Pick{&world.enemy[i],npc::Dist(eye,world.enemy[i].aim)};
 }
 const Enemy* StockTarget(const unsigned char* h) noexcept {
@@ -643,8 +646,11 @@ bool ShotSafe(const unsigned char* h,const Enemy* t,const float* eye,float blast
     if(MapRay(eye,to,hit)>=0.0f)std::memcpy(to,hit,12);
     return npc::ShotClear(eye,to,kSpread,blast,fr,n);
 }
+// Every trigger is taken off a shot at a target its fire is wasted on (WastedFire): the stock AI's own target included.
 void Veto(unsigned char* h,const Enemy* t,const float* eye,const Arms& a) noexcept {
+    const bool wasted=t && WastedFire(h,t->object);
     for(int k=0;k<kHands;++k) {
+        if(wasted)h[kTrigger+k]=0;
         if(!h[kTrigger+k])continue;
         const int w=a.held[k];
         const bool known=w>=0 && w<a.n;
@@ -997,13 +1003,15 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     if(pursuit.forced || pursuit.fightFirst){o.anchor=pos;o.leash=Cfg().npcLeash;o.hold=false;}
     const float* anchor=o.anchor;
     const float engage=npc::EngageRange(a.arm,a.n,Cfg().npcEngageShare);
-    Pick t=engage>0.0f ? PickTarget(s,eye,anchor,o.leash+engage,LongestReach(a)) : Pick{nullptr,0.0f};
+    Pick t=engage>0.0f ? PickTarget(s,h,eye,anchor,o.leash+engage,LongestReach(a)) : Pick{nullptr,0.0f};
     // The mark first (§6.3): always for a squad told to focus on it, else when within its reach plus its leash.
     const Enemy* commandTarget=nullptr;
     if(q && q->cmd.order==Order::focus && npcmark::Alive(q->commandFocus)) {
         for(int i=0;i<world.enemies;++i)if(q->commandFocus.Is(world.enemy[i].object)){commandTarget=&world.enemy[i];break;}
     }
-    if(const Enemy* m=commandTarget ? commandTarget : NearestMark(eye)) {
+    // A mark its fire is wasted on waits (the shut ship's hatch opens, it moves under it): the others fought meanwhile.
+    const Enemy* const marked=commandTarget ? commandTarget : NearestMark(eye);
+    if(const Enemy* m=marked && !WastedFire(h,marked->object) ? marked : nullptr) {
         float reach=0.0f;
         for(int i=0;i<a.n;++i)if(a.arm[i].reach>reach)reach=a.arm[i].reach;
         const bool focus=commandTarget!=nullptr;
@@ -2618,9 +2626,10 @@ constexpr std::size_t kSlotSeatFire=70;
 constexpr unsigned kSeatFire=0x65F6F0;
 const unsigned char kSeatFireSig[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x20,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56};
 using SeatFireFn=void(__fastcall*)(void*,int,const void*);
-struct GunnerPick { const float* from; float reach; const void* best; float bestD; };
+struct GunnerPick { const void* self; const float* from; float reach; const void* best; float bestD; };
 void GunnerVisit(void* ctx,const void* object,const float* aim) {
     auto& p=*static_cast<GunnerPick*>(ctx);
+    if(WastedFire(p.self,object))return;
     const float d=npc::Dist(p.from,aim);
     if(d<=p.reach && d<p.bestD){p.best=object;p.bestD=d;}
 }
@@ -2743,6 +2752,7 @@ void __fastcall DriverPayloadAim(unsigned char* v,int index,const void* target) 
     }
     __try {
         ReleaseDriverPayload(v,true);
+        if(target && WastedFire(v,target))target=nullptr;   // the stock AI's target its fire is wasted on: none
         const auto seat=SeatAt(v,0);
         PayloadFire fire=PayloadFire::other;
         unsigned char* weapon=nullptr;
@@ -2810,9 +2820,9 @@ void NpcGunnersInput(unsigned char* v) noexcept {
             if(Readable(w,kArmReach+4) && At<float>(w,kArmReach)>reach)reach=At<float>(w,kArmReach);
         }
         if(!(reach>0.0f))continue;
-        GunnerPick p{Pos(v),reach,nullptr,1e30f};
+        GunnerPick p{v,Pos(v),reach,nullptr,1e30f};
         const Enemy* const m=world.frame==GameFrame() ? NearestMark(Pos(v)) : nullptr;   // the soldiers' list of this frame only
-        if(m && npc::Dist(Pos(v),m->aim)<=reach){p.best=m->object;p.bestD=npc::Dist(Pos(v),m->aim);}
+        if(m && npc::Dist(Pos(v),m->aim)<=reach && !WastedFire(v,m->object)){p.best=m->object;p.bestD=npc::Dist(Pos(v),m->aim);}
         else VisitEnemies(v,&GunnerVisit,&p);
         if(p.best) {
             if(Cfg().stockStores) {

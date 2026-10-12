@@ -139,13 +139,15 @@ int Guns(unsigned char* v,Gun* guns) noexcept {
     return n;
 }
 
-struct Pick { const float* from; const float* leader; float range,leash; ObjRef keep; const void* best; float score,aim[3]; };
+struct Pick { const float* from; const float* leader; float range,leash; ObjRef keep; const void* best; float score,aim[3];
+             const void* self; };   // self: the robot (WastedFire)
 
 void Consider(void* ctx,const void* object,const float* aim) {
     auto& p=*static_cast<Pick*>(ctx);
     const float d=Dist(p.from,aim);
     if(d>p.range)return;
     if(p.leader && Horiz(p.leader,aim)>p.leash+kLeashSlack)return;
+    if(WastedFire(p.self,object))return;   // its fire wasted on it (wasted_fire.h): no target
     const float score=d-(p.keep.Is(object) ? kKeepTarget : 0.0f);
     if(!p.best || score<p.score){p.best=object;p.score=score;std::memcpy(p.aim,aim,12);}
 }
@@ -253,6 +255,7 @@ void Drive(Robo& r,unsigned char* v,ULONGLONG ms) noexcept {
     }
     // The target: the nearest enemy lock point in range (and near enough to the player).
     Pick p{};p.from=pos;p.leader=leader;p.range=Cfg().groundRange;p.leash=Cfg().groundLeash;p.keep=r.target;
+    p.self=v;
     if(reach>0.0f)VisitEnemies(v,&Consider,&p);
     r.target=ObjRef::Of(p.best);
     const float* aim=p.best ? p.aim : nullptr;
