@@ -1066,7 +1066,7 @@ void EntranceMark(void* drawer,void* ctx,Text* text,const float* vp,float width,
 constexpr unsigned long long kSwitchMs=1500;   // a switch's banner (the store's, EDF6AutoTurret's aim mode's)
 constexpr float kCellW=112.0f,kCellH=48.0f;   // px at 1080 lines: a strip's cell
 constexpr float kRows3[]={-4.0f,0.0f,4.0f};   // a glyph's three rows (the pod's rockets, the gun's rounds)
-struct LoadCell { hudcue::StoreIcon icon; wchar_t text[64]; const float* rgba; bool picked; };
+struct LoadCell { hudcue::StoreIcon icon; wchar_t text[64]; const float* rgba; bool picked; float load=-1.0f; };   // load: hud_cue.h CellLoad
 
 // A store's silhouette round (cx, cy), the nose to the right, `k` px a unit (some 36 x 14 units).
 void StoreGlyph(void* drawer,void* ctx,float cx,float cy,float k,hudcue::StoreIcon icon,const float* rgba) noexcept {
@@ -1198,6 +1198,9 @@ float LoadoutStrip(void* drawer,void* ctx,Text* text,float width,float y,float s
             Seg(drawer,ctx,x+2.0f*s,cy,x+2.0f*s,cy+h,t,kCyan);Seg(drawer,ctx,x1-2.0f*s,cy,x1-2.0f*s,cy+h,t,kCyan);
         }
         StoreGlyph(drawer,ctx,cx,cy+15.0f*s,1.4f*s,c.icon,c.rgba);
+        // Its loading bar under the name, as the stock weapon gauge's (Bar: the HUD's gauge style), amber while it fills;
+        // ready, gone.
+        if(c.load>=0.0f)Bar(drawer,ctx,x+12.0f*s,cy+h-4.5f*s,grid.cell-24.0f*s,3.0f*s,c.load,c.load,kAmber,s);
     }
     return grid.height;
 }
@@ -3079,6 +3082,7 @@ int StockCells(const StockHudReadout& r,LoadCell* cells,int* picked=nullptr) noe
         c.icon=hudcue::ArmIconOf(static_cast<int>(r.arm[i].kind),r.arm[i].lobbed,static_cast<int>(r.arm[i].style),
                                  sight==reticle::Style::cannon || sight==reticle::Style::precision);
         c.picked=i==r.selected;
+        c.load=hudcue::CellLoad(r.arm[i].ammo,r.arm[i].reload,r.arm[i].cycleSec,r.arm[i].cycle);
         if(r.arm[i].name[0]) {
             if(r.arm[i].ammo<=0 && r.arm[i].canReload)_snwprintf_s(c.text,_countof(c.text),_TRUNCATE,L"%ls  %ls",r.arm[i].name,l.text);
             else if(r.arm[i].cycleSec>=0.0f)   // loading the next round (vhud.cpp Cycle): its seconds, amber

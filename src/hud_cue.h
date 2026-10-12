@@ -47,6 +47,14 @@ constexpr StoreIcon ArmIconOf(int kind,bool lobbed,int style=0,bool cannon=false
     if(style!=0)return StoreIcon::energy;
     return kind==2 ? StoreIcon::rocket : kind==3 ? StoreIcon::aam : lobbed ? StoreIcon::bomb : cannon ? StoreIcon::shell : StoreIcon::gun;
 }
+// A weapon cell's loading bar (the user, 2026-10-12: 「两发之间显示『装填 1.8s』，在挂载上加上那种读条呢」): the share loaded,
+// 0..1, or < 0 for no bar. Out of rounds and reloading the magazine (`reload` < 1: vhud.cpp Reload) its share; with rounds,
+// the next round going in (`cycleSec` >= 0: vhud.cpp Cycle, a gun of 0.5 s or more between shots) `cycle`; ready: none.
+constexpr float CellLoad(int ammo,float reload,float cycleSec,float cycle) noexcept {
+    return ammo<=0 ? (reload<1.0f ? (reload<0.0f ? 0.0f : reload) : -1.0f)
+                   : cycleSec>=0.0f ? (cycle<0.0f ? 0.0f : cycle>1.0f ? 1.0f : cycle) : -1.0f;
+}
+
 // The order the loadout strip lays a seat's weapons out in, left to right on the screen (the user, 2026-10-12, a Nix:
 // 「左侧武器放在右边右侧武器放在左边」: the seat lists its right arm's gun first, and the strip drew the list's order). `side`
 // is each weapon's muzzle off the vehicle's middle across the camera's view, m (+ its left: vhud.cpp SideOf; 0 unknown).

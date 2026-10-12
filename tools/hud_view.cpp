@@ -1984,10 +1984,13 @@ int Scenes(const std::wstring& dir) {
         gun.cycle=0.25f;gun.cycleSec=1.8f;gun.aimed=gun.armed=true;gun.bore[0]=-0.08f;gun.bore[2]=1.0f;
         StockArm& mg=sceneStock.arm[1];
         mg.aimed=mg.armed=mg.coFired=true;mg.bore[2]=1.0f;mg.side=-0.3f;
+        StockArm& msl=sceneStock.arm[2];   // out of rounds, its magazine 60 % back in: the same bar
+        msl.ammo=0;msl.reload=0.6f;msl.reloadSec=2.4f;
         sceneStock.selected=-1;sceneStock.sight=1;
         LoadCell cells[kStockArms];int picked=-1;
         const int n=StockCells(sceneStock,cells,&picked);
         failed+=n!=3 || cells[0].icon!=hudcue::StoreIcon::shell || !std::wcsstr(cells[0].text,L"1.8s");
+        failed+=cells[0].load!=0.25f || cells[1].load>=0.0f || cells[2].load!=0.6f;   // loading bars: the gun, none, the magazine
         Prime(ground);
         Scene(dir,L"stock_tank_loading_two_triggers",ground);
         sceneStock.arms=2;sceneStock.selected=0;

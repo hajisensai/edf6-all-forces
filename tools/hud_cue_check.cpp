@@ -53,6 +53,12 @@ int main() {
     Check(ArmIconOf(3,false)==StoreIcon::aam,"a homing missile");
     Check(ArmIconOf(1,true)==StoreIcon::bomb,"a lobbed round");
 
+    // A cell's loading bar (vhud.cpp Reload / Cycle).
+    Check(CellLoad(5,1.0f,1.8f,0.25f)==0.25f,"the next round going in: its share");
+    Check(CellLoad(5,1.0f,-1.0f,1.0f)<0.0f,"ready (or a quick gun): no bar");
+    Check(CellLoad(0,0.4f,-1.0f,1.0f)==0.4f && CellLoad(0,1.0f,-1.0f,1.0f)<0.0f,"the magazine reloading: its share; empty with no reload: no bar");
+    Check(CellLoad(5,1.0f,0.1f,1.7f)==1.0f && CellLoad(0,-0.2f,-1.0f,1.0f)==0.0f,"  kept within 0..1");
+
     // The strip's left-to-right order by the muzzles' sides (+ left of the vehicle's middle, as the camera looks).
     {
         const float nix[2]={-2.1f,2.2f};   // the Nix lists its right arm's rifle first (screenshot 2026-10-12)
