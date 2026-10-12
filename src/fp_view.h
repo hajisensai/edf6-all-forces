@@ -149,11 +149,16 @@ inline void EyeWorld(const M4& body,const float* local,float* out) noexcept {
     for(int j=0;j<3;++j)out[j]=body.m[12+j]+local[0]*body.m[j]+local[1]*body.m[4+j]+local[2]*body.m[8+j];
 }
 
-// --- The arms posed for the first person (two-bone IK) ---
+// --- The arms posed for the first person ---
 // The third-person arm, moved with its weapon to the bottom of the view, reaches back up into it (its shoulder far in
-// front of the eye). The hand stays where the weapon puts it; the shoulder goes to a fixed place beside and below the
-// eye; the elbow is where the upper arm and forearm, at their own lengths, meet, bent toward `pole`. Each segment's
-// bones then turn as a whole (SegmentMap): the upper arm maps shoulder->elbow, the forearm elbow->hand.
+// front of the eye). Two moves bring it out at the view's edge:
+//  - the forearm, the hand and its fingers roll together about the axis of the weapon they hold (TurnAbout, RollAngle)
+//    until the elbow is out and down: the hand keeps its hold round the weapon and the wrist its stock angle (about the
+//    wrist instead, the Wing Diver's hand left the gun's side, measured)
+//    (turning the forearm alone broke the wrist, the user, 2026-10-13, with a screenshot: "the left hand's grip clearly
+//    wrong"; keeping the stock forearm left the Wing Diver's raised elbow, and the upper arm from it, in the middle of
+//    the view, measured);
+//  - the upper arm turns from the elbow toward a place beside and below the eye (ReachShoulder, SegmentMap).
 
 inline void Sub(const float* a,const float* b,float* o) noexcept { for(int i=0;i<3;++i)o[i]=a[i]-b[i]; }
 inline float Dot3(const float* a,const float* b) noexcept { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
@@ -168,31 +173,42 @@ inline void Cross3(const float* a,const float* b,float* o) noexcept {
     o[0]=a[1]*b[2]-a[2]*b[1];o[1]=a[2]*b[0]-a[0]*b[2];o[2]=a[0]*b[1]-a[1]*b[0];
 }
 
-// The elbow for a shoulder `shoulder` (in, out: moved toward the hand when the hand is out of reach) and a hand `hand`,
-// upper arm `upper` and forearm `fore` long, bent toward `pole` (a direction). False when degenerate.
-inline bool SolveElbow(float* shoulder,const float* hand,float upper,float fore,const float* pole,float* elbow) noexcept {
-    if(!(upper>1e-4f) || !(fore>1e-4f))return false;
+// The shoulder an upper arm `upper` long reaches from the elbow `elbow` toward `toward`. False when degenerate.
+inline bool ReachShoulder(const float* elbow,const float* toward,float upper,float* shoulder) noexcept {
     float d[3];
-    Sub(hand,shoulder,d);
-    float dist=Length(d);
-    if(!Unit(d))return false;
-    const float reach=(upper+fore)*0.999f;
-    if(dist>reach){for(int i=0;i<3;++i)shoulder[i]=hand[i]-d[i]*reach;dist=reach;}
-    const float gap=std::fabs(upper-fore)*1.001f;
-    if(dist<gap)dist=gap;
-    // The bend's plane: `pole` made square to the shoulder->hand line.
-    float b[3]={pole[0],pole[1],pole[2]};
-    const float along=Dot3(b,d);
-    for(int i=0;i<3;++i)b[i]-=d[i]*along;
-    if(!Unit(b)) {   // pole along the arm: any square direction
-        const float any[3]={std::fabs(d[1])<0.9f ? 0.0f : 1.0f,std::fabs(d[1])<0.9f ? 1.0f : 0.0f,0.0f};
-        Cross3(d,any,b);
-        if(!Unit(b))return false;
-    }
-    const float a=(upper*upper-fore*fore+dist*dist)/(2.0f*dist);   // along the line from the shoulder
-    const float h=std::sqrt(std::fmax(0.0f,upper*upper-a*a));         // off it, toward the pole
-    for(int i=0;i<3;++i)elbow[i]=shoulder[i]+d[i]*a+b[i]*h;
+    Sub(toward,elbow,d);
+    if(!(upper>1e-4f) || !Unit(d))return false;
+    for(int i=0;i<3;++i)shoulder[i]=elbow[i]+d[i]*upper;
     return true;
+}
+
+// The turn about the unit axis `k` by the angle whose cosine is `c` and sine `sn` (Rodrigues, as rows: p' = p R for
+// row vectors, R the transpose of the column form).
+inline M4 Rotation(const float* k,float c,float sn) noexcept {
+    const float t=1.0f-c;
+    const float m[3][3]={{c+k[0]*k[0]*t,k[0]*k[1]*t-k[2]*sn,k[0]*k[2]*t+k[1]*sn},
+                         {k[1]*k[0]*t+k[2]*sn,c+k[1]*k[1]*t,k[1]*k[2]*t-k[0]*sn},
+                         {k[2]*k[0]*t-k[1]*sn,k[2]*k[1]*t+k[0]*sn,c+k[2]*k[2]*t}};
+    M4 r=Identity();
+    for(int i=0;i<3;++i)for(int j=0;j<3;++j)r.m[i*4+j]=m[j][i];
+    return r;
+}
+
+// The turn by `angle` (rad, right-handed) about the line through `at` along the unit `axis`.
+inline M4 TurnAbout(const float* at,const float* axis,float angle) noexcept {
+    return Mul(Mul(Translate(-at[0],-at[1],-at[2]),Rotation(axis,std::cos(angle),std::sin(angle))),
+               Translate(at[0],at[1],at[2]));
+}
+
+// The angle (rad, right-handed about the unit `axis`) that turns `from` onto `toward`, both seen square to the axis;
+// 0 when either lies along it.
+inline float RollAngle(const float* from,const float* toward,const float* axis) noexcept {
+    float a[3],b[3],k[3];
+    const float fa=Dot3(from,axis),ta=Dot3(toward,axis);
+    for(int i=0;i<3;++i){a[i]=from[i]-axis[i]*fa;b[i]=toward[i]-axis[i]*ta;}
+    if(!Unit(a) || !Unit(b))return 0.0f;
+    Cross3(a,b,k);
+    return std::atan2(Dot3(k,axis),Dot3(a,b));
 }
 
 // The rigid move (no scale) that takes the point `a0` to `a1` and turns the direction a0->b0 onto a1->b1 the shortest
@@ -207,12 +223,7 @@ inline bool SegmentMap(const float* a0,const float* b0,const float* a1,const flo
     M4 r=Identity();
     if(sn>1e-6f) {
         for(int i=0;i<3;++i)k[i]/=sn;
-        const float t=1.0f-c;
-        // Rodrigues, as rows (p' = p R for row vectors: R = transpose of the column form).
-        const float m[3][3]={{c+k[0]*k[0]*t,k[0]*k[1]*t-k[2]*sn,k[0]*k[2]*t+k[1]*sn},
-                             {k[1]*k[0]*t+k[2]*sn,c+k[1]*k[1]*t,k[1]*k[2]*t-k[0]*sn},
-                             {k[2]*k[0]*t-k[1]*sn,k[2]*k[1]*t+k[0]*sn,c+k[2]*k[2]*t}};
-        for(int i=0;i<3;++i)for(int j=0;j<3;++j)r.m[i*4+j]=m[j][i];
+        r=Rotation(k,c,sn);
     } else if(c<0.0f) {   // opposite: half a turn about any square axis
         float any[3]={std::fabs(u[0])<0.9f ? 1.0f : 0.0f,std::fabs(u[0])<0.9f ? 0.0f : 1.0f,0.0f},ax[3];
         Cross3(u,any,ax);

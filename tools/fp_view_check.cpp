@@ -137,24 +137,40 @@ void Anchored() {
 }
 
 void Arms() {
-    float shoulder[3]={0.0f,0.0f,0.0f};
-    const float hand[3]={0.1f,-0.2f,0.4f},pole[3]={1.0f,-1.0f,0.0f};
-    float elbow[3];
-    const bool ok=SolveElbow(shoulder,hand,0.30f,0.27f,pole,elbow);
-    float se[3],eh[3];
-    Sub(elbow,shoulder,se);Sub(hand,elbow,eh);
-    Expect(ok && Near(Length(se),0.30f) && Near(Length(eh),0.27f),"the elbow at the upper arm's and forearm's lengths",Length(se),Length(eh));
-    float sh[3],mid[3],off[3];
-    Sub(hand,shoulder,sh);Unit(sh);
-    Sub(elbow,shoulder,mid);
-    const float a=Dot3(mid,sh);
-    for(int i=0;i<3;++i)off[i]=mid[i]-sh[i]*a;
-    Expect(Dot3(off,pole)>0.0f,"...bent toward the pole",Dot3(off,pole));
-    float far[3]={0.0f,0.0f,-1.0f},e2[3];
-    SolveElbow(far,hand,0.30f,0.27f,pole,e2);
-    float fh[3];
-    Sub(hand,far,fh);
-    Expect(Near(Length(fh),0.57f*0.999f,1e-3f),"out of reach: the shoulder slides toward the hand",Length(fh));
+    const float elbow[3]={-0.1f,-0.1f,0.3f},toward[3]={-0.2f,-0.3f,-0.1f};
+    float shoulder[3],se[3],st[3];
+    const bool ok=ReachShoulder(elbow,toward,0.30f,shoulder);
+    Sub(shoulder,elbow,se);Sub(toward,elbow,st);
+    Expect(ok && Near(Length(se),0.30f),"the shoulder at the upper arm's length from the elbow",Length(se));
+    Unit(se);Unit(st);
+    Expect(Near(Dot3(se,st),1.0f),"...toward the place asked",Dot3(se,st));
+    Expect(!ReachShoulder(elbow,elbow,0.30f,shoulder),"no direction: no shoulder");
+    // The forearm stays: the upper arm's map keeps the elbow where it is.
+    const float s0[3]={0.2f,0.3f,0.1f};   // the stock shoulder: the upper arm is as long as it was
+    float was[3];
+    Sub(elbow,s0,was);
+    M4 up;
+    ReachShoulder(elbow,toward,Length(was),shoulder);
+    float pe[3],ps[3];
+    const bool uok=SegmentMap(s0,elbow,shoulder,elbow,&up);
+    Point(up,elbow,pe);Point(up,s0,ps);
+    Expect(uok && Near(pe[0],elbow[0]) && Near(pe[1],elbow[1]) && Near(pe[2],elbow[2]),"the elbow stays put",pe[0],pe[2]);
+    Expect(Near(ps[0],shoulder[0]) && Near(ps[1],shoulder[1]) && Near(ps[2],shoulder[2]),"...the shoulder lands",ps[0],ps[1]);
+    // The forearm's roll about the weapon's axis through the wrist: the elbow goes the way asked, the wrist stays.
+    const float wrist[3]={0.1f,-0.2f,0.4f},axis[3]={0.0f,0.0f,1.0f},raised[3]={0.0f,0.0f,0.15f};   // elbow up, behind
+    const float up0[3]={wrist[0]+raised[0],wrist[1]+0.2f,wrist[2]-0.15f},want[3]={-1.0f,-1.5f,0.0f};
+    float way[3];
+    Sub(up0,wrist,way);
+    const M4 roll=TurnAbout(wrist,axis,RollAngle(way,want,axis));
+    float e1[3],w1[3],got[3];
+    Point(roll,up0,e1);Point(roll,wrist,w1);
+    Sub(e1,wrist,got);
+    float gotFlat[3]={got[0],got[1],0.0f},wantFlat[3]={want[0],want[1],0.0f};
+    Unit(gotFlat);Unit(wantFlat);
+    Expect(Near(Dot3(gotFlat,wantFlat),1.0f),"a roll takes the elbow out and down",Dot3(gotFlat,wantFlat));
+    Expect(Near(e1[2],up0[2]) && Near(Length(got),Length(way)),"...about the weapon's axis, rigidly",e1[2],Length(got));
+    Expect(Near(w1[0],wrist[0]) && Near(w1[1],wrist[1]) && Near(w1[2],wrist[2]),"...the wrist stays put",w1[0],w1[1]);
+    Expect(RollAngle(want,want,axis)==0.0f,"already that way: no roll",RollAngle(want,want,axis));
     const float a0[3]={1,2,3},b0[3]={1,2,4},a1[3]={-5,0,1},b1[3]={-5,1,1};
     M4 m;
     const bool mok=SegmentMap(a0,b0,a1,b1,&m);
