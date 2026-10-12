@@ -15,6 +15,7 @@
 #include "PluginAPI.h"
 #pragma warning(pop)
 #include "crew.h"
+#include "firstperson.h"
 #include "mod_room.h"
 #include "support_soldier.h"
 #include "airdrop.h"
@@ -240,6 +241,15 @@ void Validate(Config& n) noexcept {
     n.sightRangeDownKey=static_cast<int>(FixInt("SightRangeDownKey",n.sightRangeDownKey,0,254));
     n.sightRangeStep=static_cast<int>(FixInt("SightRangeStep",n.sightRangeStep,0,1000));
     n.mapKey=static_cast<int>(FixInt("MapKey",n.mapKey,0,254));
+    n.firstPersonKey=static_cast<int>(FixInt("FirstPersonKey",n.firstPersonKey,0,254));
+    Fix("FirstPersonEyeUp",n.fpEyeUp,-0.5f,0.5f);
+    Fix("FirstPersonEyeAhead",n.fpEyeAhead,-0.5f,0.5f);
+    Fix("FirstPersonEyeEase",n.fpEyeEase,0.02f,1.0f);
+    Fix("FirstPersonHoldX",n.fpHoldX,-1.0f,1.0f);
+    Fix("FirstPersonHoldY",n.fpHoldY,-1.0f,1.0f);
+    Fix("FirstPersonHoldZ",n.fpHoldZ,-1.0f,1.0f);
+    Fix("FirstPersonScale",n.fpScale,0.05f,1.0f);
+    if(n.fpNear!=0.0f)Fix("FirstPersonNear",n.fpNear,0.005f,0.1f);
     n.mapButton=static_cast<int>(FixInt("MapButton",n.mapButton,0,0xFFFF));
     if(n.mapViewDistance!=0.0f)Fix("MapViewDistance",n.mapViewDistance,1000.0f,10000.0f);
     n.damageStatsKey=static_cast<int>(FixInt("DamageStatsKey",n.damageStatsKey,0,254));
@@ -548,6 +558,18 @@ void LoadConfig() noexcept {
     n.sightRangeStep=ReadInt(L"SightRangeStep",static_cast<DWORD>(n.sightRangeStep));
     n.sightRangePad=ReadBool(L"SightRangePad",n.sightRangePad);
     n.infantryScope=ReadBool(L"InfantryScope",n.infantryScope);
+    n.firstPerson=ReadBool(L"FirstPerson",n.firstPerson);
+    n.firstPersonKey=ReadInt(L"FirstPersonKey",static_cast<DWORD>(n.firstPersonKey));
+    n.firstPersonStart=ReadBool(L"FirstPersonStart",n.firstPersonStart);
+    n.fpEyeUp=ReadFloat(L"FirstPersonEyeUp",n.fpEyeUp);
+    n.fpEyeAhead=ReadFloat(L"FirstPersonEyeAhead",n.fpEyeAhead);
+    n.fpEyeEase=ReadFloat(L"FirstPersonEyeEase",n.fpEyeEase);
+    n.fpHoldX=ReadFloat(L"FirstPersonHoldX",n.fpHoldX);
+    n.fpHoldY=ReadFloat(L"FirstPersonHoldY",n.fpHoldY);
+    n.fpHoldZ=ReadFloat(L"FirstPersonHoldZ",n.fpHoldZ);
+    n.fpScale=ReadFloat(L"FirstPersonScale",n.fpScale);
+    n.fpNear=ReadFloat(L"FirstPersonNear",n.fpNear);
+    n.fpAimSnap=ReadBool(L"FirstPersonAimSnap",n.fpAimSnap);
     n.gunStabilizer=ReadBool(L"GunStabilizer",n.gunStabilizer);
     n.viewDistance=ReadFloat(L"ViewDistance",n.viewDistance);
     n.map=ReadBool(L"Map",n.map);
@@ -719,6 +741,9 @@ void LoadConfig() noexcept {
     Log("CONFIG highCam=%d key=0x%X button=0x%X height=%.0f back=%.0f pitch=%.0f",n.highCam,n.highCamKey,n.highCamButton,n.highCamHeight,
         n.highCamBack,n.highCamPitch);
     Log("CONFIG sightZoom=%d key=0x%X button=0x%X infantryScope=%d",n.sightZoom,n.sightZoomKey,n.sightZoomButton,n.infantryScope);
+    Log("CONFIG firstPerson=%d key=0x%X start=%d eye up %.2f ahead %.2f ease %.2f hold (%.2f,%.2f,%.2f) scale %.2f near %.3f aimSnap=%d",
+        n.firstPerson,n.firstPersonKey,n.firstPersonStart,n.fpEyeUp,n.fpEyeAhead,n.fpEyeEase,n.fpHoldX,n.fpHoldY,n.fpHoldZ,
+        n.fpScale,n.fpNear,n.fpAimSnap);
     Log("CONFIG nixTorsoTwist=%d",n.nixTorsoTwist);
     Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f",n.map,n.mapKey,n.mapButton,n.mapViewDistance);
     Log("CONFIG ViewDistance=%.0f (%s)",n.viewDistance,n.viewDistance<0.0f ? "unlimited" : n.viewDistance==0.0f ? "the mission's own" : "m");
@@ -940,6 +965,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallSpotRay();       // the stock spot (Q): off for this machine's players (VanillaSpot=0), else along the drawn camera
     InstallStabilizer();    // the gun stabilizer, after the aim steps the turret camera chains (it runs from its hook)
     InstallProteus();       // the Proteus rework: its weapon mounts, shield barrier, piles and field
+    InstallFirstPerson();   // first person on foot: the camera step chained inside the map's (its view wins while open)
     InstallMap();           // the map view (the player's camera overhead, their input held while it is open)
     InstallSightZoom();     // a vehicle gun's sight magnified (the same camera step, chained after the map's)
     InstallInfantryScope(); // a soldier's zoomed scope drawn as a real optic (the stock crosshair's draw chained)
