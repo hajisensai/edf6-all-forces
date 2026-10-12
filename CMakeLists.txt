@@ -510,6 +510,11 @@ add_test(NAME support_loadout COMMAND support_loadout_test)
 add_executable(room_menu_test tests/room_menu_test.cpp)
 target_compile_options(room_menu_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME room_menu COMMAND room_menu_test)
+# The room / HQ loadout screen's pure side: element names, keyboard / pad mapping, the input gate, row looks, texts,
+# catalog units, preview and save pairing (src/room_ui_logic.h; src/room_ui.cpp draws with it).
+add_executable(room_ui_test tests/room_ui_test.cpp)
+target_compile_options(room_ui_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME room_ui COMMAND room_ui_test)
 # The loadout menu's ini writer (BOM / CRLF / comments kept, checked with the plugin's parsers), the atomic replace,
 # the generator's status and its hidden process (src/loadout_ini.h, src/loadout_file.cpp).
 add_executable(loadout_writer_test tests/loadout_writer_test.cpp src/loadout_file.cpp)
@@ -591,6 +596,9 @@ set_tests_properties(support_loadout_ini PROPERTIES ENVIRONMENT PYTHONIOENCODING
 # The installer's headless loadout-generate the in-game menu runs (no prompt, new files only, status file).
 add_test(NAME loadout_generate COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/loadout_generate_test.py")
 set_tests_properties(loadout_generate PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The room / HQ menu's layout patch (tools/room_layout.py): stock members unchanged, the names src/room_ui_logic.h uses.
+add_test(NAME room_layout COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_layout_test.py")
+set_tests_properties(room_layout PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME support_resources COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/support_resource_audit.py")
 set_tests_properties(support_resources PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME online_gate_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/online_gate_guard.py")
@@ -670,7 +678,7 @@ target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
 target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks map_command_runtime_check)
 add_dependencies(offline_checks support_dispatch_test)
-add_dependencies(offline_checks support_loadout_test support_config_test support_spawn_test room_menu_test loadout_writer_test)
+add_dependencies(offline_checks support_loadout_test support_config_test support_spawn_test room_menu_test room_ui_test loadout_writer_test)
 add_dependencies(offline_checks support_infantry_route_test)
 add_dependencies(offline_checks support_vehicle_route_test)
 add_dependencies(offline_checks support_policy_test)

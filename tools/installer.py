@@ -487,6 +487,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     proteus = build_asset(cache, make_proteus, '普罗透斯护盾（原版空袭兵电磁碉堡墙；同时撤销旧版生成的模型）')
     bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
     campaign = build_packs(game, campaign_requested or make_edf5_campaign.wanted(game))
+    room = build_room_layouts(game)
     print('\n全部生成完毕，开始写入。')
     if campaign is None and not make_edf5_campaign.wanted(game) and make_edf5_campaign.enabled(game):
         # An opt-out (finished by the packs rebuilt without the campaign) that cannot be: refused before writing.
@@ -536,6 +537,13 @@ def install(game: str, campaign_requested: bool = False) -> None:
     generator = install_generator(game, sys.executable if getattr(sys, 'frozen', False) else None)
     if generator:
         print('写入', generator, '（游戏内战前配置菜单保存后在后台用它生成新文件）')
+    if room is not None:   # the in-game menu's screen: HUiRoom's and HUiHQMain's layouts (never LYT_MAINFRAME: EDF6Coop's)
+        import room_layout
+        written, skipped = room_layout.install(game, room)
+        for path in written:
+            print('写入', path, '（游戏内战前配置菜单的画面）')
+        for path in skipped:
+            print('跳过（别的 mod 的布局，保持原样；这个画面里不显示游戏内战前配置菜单）', path)
     if campaign is not None:   # after the plugin's ini: it sets EDF5CampaignContent and TestRangeContent there
         for path in make_edf5_campaign.install(game, campaign):
             print('写入', path)
@@ -565,6 +573,18 @@ def install(game: str, campaign_requested: bool = False) -> None:
     print('\n安装完成。启动游戏即可。')
     print('联机请同时更新配套 EDF Coop：全军出击房间仅对兼容的 MOD 玩家开放。')
     print('本次模型、挂载、实体瞄具和测试场资源已校验并安装；更新时请运行安装器，不要只替换 DLL。')
+
+
+def build_room_layouts(game: str) -> dict[str, bytes] | None:
+    """The in-game loadout menu's screen (tools/room_layout.py): the room's and the HQ's stock layouts with the menu's
+    elements, from Root.cpk (only read). None (said why) when they cannot be made: the plugin then finds no menu elements
+    and leaves both screens as they are."""
+    import room_layout
+    try:
+        return room_layout.build(game)
+    except (OSError, ValueError, KeyError, AssertionError) as e:
+        print(f'！ 游戏内战前配置菜单的画面布局没有生成（房间 / HQ 里不显示这个菜单，其它不受影响）：{e}')
+        return None
 
 
 def uninstall_stock_stores(game: str) -> None:
@@ -655,6 +675,12 @@ def uninstall(game: str) -> None:
         os.remove(cache)
         print('删除', cache)
     remove_generator(game)
+    import room_layout   # with 1 and 2: without the plugin the menu's panel would only cover the screen
+    deleted, kept = room_layout.remove(game)
+    for path in deleted:
+        print('删除', path)
+    for path in kept:
+        print('保留（之后被别的工具改过）', path)
     remove_plugin(game)
     print('\n卸载完成。')
 
@@ -955,6 +981,12 @@ def _generate_held(game: str) -> int:
         return 1
     for path in written:
         print('写入', path)
+    try:   # the menu's screen, when an install before it did not write it: new files only, as the variants
+        import room_layout
+        for path in room_layout.install_missing(game):
+            print('写入', path)
+    except Exception as e:   # said in the status, never swallowed
+        errors['LYT_HUIONLINEROOM.SGO / LYT_HUIHQMAIN.SGO'] = f'{type(e).__name__}: {e}'
     state, message = generate_summary(written, errors)
     write_generate_status(game, state, len(written), len(errors), message)
     print(generate_line(state, len(written), len(errors)))
