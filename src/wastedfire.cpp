@@ -37,13 +37,20 @@ bool ShutShip(const void* target) noexcept {
 void WastedFireHit(const void* shooter,const void* target,bool hurt) noexcept {
     const ULONGLONG ms=GameMs();
     AcquireSRWLockExclusive(&lock);
-    wastedfire::Hit(book,shooter,target,hurt,ms);
+    const bool held=wastedfire::Hit(book,shooter,target,hurt,ms);
     ReleaseSRWLockExclusive(&lock);
+    // One line a hold (a few a minute at most per pair): the evidence in a player's log that the AI held its fire.
+    if(held)Log("WASTEDFIRE %p: %d hits on %p hurt nothing: its fire at it held %.0f s",shooter,wastedfire::kWastedHits,target,
+                static_cast<double>(wastedfire::kWastedHoldMs)*0.001);
 }
 
 bool WastedFire(const void* shooter,const void* target) noexcept {
     if(!target)return false;
-    if(ShutShip(target))return true;
+    if(ShutShip(target)) {
+        static const void* logged=nullptr;   // one line a ship shut (game thread)
+        if(logged!=target){logged=target;Log("WASTEDFIRE ship %p: its hatch's damage window shut: no target for anyone",target);}
+        return true;
+    }
     const ULONGLONG ms=GameMs();
     AcquireSRWLockShared(&lock);
     const bool wasted=wastedfire::Wasted(book,shooter,target,ms);

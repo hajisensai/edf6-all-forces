@@ -14,6 +14,7 @@ bool gunnerFixture=false,gunnerSession=false,gunnerReady=true;
 int gunnerQueries=0;
 bool InSession() noexcept { return gunnerSession; }
 bool OnlineRunsHere(const void*) noexcept { return true; }
+bool WastedFire(const void*,const void*) noexcept { return false; }   // wastedfire.cpp: no fire wasted here
 online::CopyOwner SetSpawnOwner(online::CopyOwner owner) noexcept { return owner; }
 PlayerFix player{};
 Config commandConfig{};

@@ -217,6 +217,9 @@ unsigned char* chosenGunnerWeapon=nullptr;
 bool suppressGunnerChoice=false;
 PayloadFire chosenGunnerFire=PayloadFire::primary;
 bool FriendInLine(const float*,const float*,const void*) noexcept { return false; }   // heli.cpp's (NpcCoaxFire's check)
+// wastedfire.cpp WastedFire: the target every shooter's fire is wasted on (the shut teleportation ship), as the case sets.
+const void* wastedTarget=nullptr;
+bool WastedFire(const void*,const void* target) noexcept { return target && target==wastedTarget; }
 int coaxCalls=0;   // payload.cpp NpcCoaxFire: called beside every crew aim (no coax on these fixtures)
 bool NpcCoaxFire(unsigned char*,unsigned,const void*,LineBlocked) noexcept { ++coaxCalls;return false; }
 unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float,bool,PayloadFire* fire) noexcept {
@@ -537,6 +540,16 @@ int main() {
         behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
         Expect(result.Accepted() && soldier->target.Is(enemy) && std::strcmp(behavior.move,"combat spot")==0,
             "engage command enters actual production target acquisition and combat movement");
+        // Fire wasted on it (the user 2026-10-12: 「ai还会无脑攻击金色飞船浪费子弹」; wasted_fire.h): no target, its trigger off.
+        // The stock AI (with no target of the plugin's the soldier is the stock's) has it as its own target and fires.
+        wastedTarget=enemy;Put<unsigned char>(human,kTrigger,1);
+        Put<void*>(human,kStockTarget,enemy);Put<void*>(human,kStockTargetCtrl,enemyCtrl);
+        behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
+        Expect(!soldier->target && !behavior.fire && At<unsigned char>(human,kTrigger)==0,
+               "an enemy its fire is wasted on is no target, and the stock AI's shot at it is taken off (production Drive)");
+        wastedTarget=nullptr;Put<void*>(human,kStockTarget,nullptr);Put<void*>(human,kStockTargetCtrl,nullptr);
+        behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
+        Expect(soldier->target.Is(enemy),"no longer wasted: its target again");
         markEnemy=enemy;
         result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::focus,{}},ObjRef::Of(other),ObjRef::Of(enemy));
         Expect(result.Accepted() && commandSquad->commandFocus.Is(enemy) && !NpcMarked(),

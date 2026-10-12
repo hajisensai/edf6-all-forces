@@ -14,6 +14,7 @@ unsigned char* image=nullptr;
 // Offline (online_authority.h): no session, every heli run here, the copies' owner unchanged.
 bool InSession() noexcept { return false; }
 bool OnlineRunsHere(const void*) noexcept { return true; }
+bool WastedFire(const void*,const void*) noexcept { return false; }   // wastedfire.cpp: no fire wasted here
 online::CopyOwner SetSpawnOwner(online::CopyOwner owner) noexcept { return owner; }
 Config inputConfig{};
 ULONGLONG inputTime=10000;

@@ -26,6 +26,10 @@ void Run() {
     Check(!Wasted(book,&soldier,&ship,ms),"three hits that hurt nothing: still fires");
     Hit(book,&soldier,&ship,false,ms+=100);
     Check(Wasted(book,&soldier,&ship,ms),"four hits that hurt nothing: its fire held");
+    // Hits that go on while it is held (the player's own fire: nothing holds it) start no new hold.
+    bool again=false;
+    for(int i=0;i<3*kWastedHits;++i)again=Hit(book,&soldier,&ship,false,ms+1+static_cast<std::uint64_t>(i)) || again;
+    Check(!again,"held: hits meanwhile start no new hold (one log line a hold)");
     Check(!Wasted(book,&gunner,&ship,ms),"another shooter is not held by its hits");
     Check(!Wasted(book,&soldier,&other,ms),"its fire at another target is not held");
     // Held for kWastedHoldMs, then it tries again.

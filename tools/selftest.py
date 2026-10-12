@@ -5068,7 +5068,7 @@ def soft_edge_wired() -> None:
     assert 'anchor=SoftAnchor(*j,anchor,anchorIn);' in jet
     # Targets past it let be; the map's focus target (2026-10-09) only out past the play area's walls, where no jet goes.
     visit = combat.split('void VisitTarget(void* ctx,const void* object,const float* p) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'if(k.focus || PastEdge(*k.j,p))return;' in visit
+    assert 'if(k.focus || PastEdge(*k.j,p) || WastedFire(k.j->Vehicle(),object))return;' in visit
     focus = visit.split('if(k.j->focus.Is(object)) {', 1)[1].split('\n    }\n', 1)[0]
     assert 0 <= focus.find('if(!airbound::Inside(PlayBox(),p))return;') < focus.find('k.focus=true;'), \
         'a focus target out past the play area is waited for, not chased'
@@ -5167,9 +5167,21 @@ def air_chase_wired() -> None:
     assert fire.index('GunsAtTarget(j,v,pos,ms,"its NPC crew");') < fire.index('if(j.t.flyer || ms-j.shells.gunAt<kGunshipGapMs)return;')
     crew = bay.split('bool CrewShell(unsigned char* v,float dt,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'if(!j->t.target)return false;' in crew and 'const bool shell=!j->t.flyer && ' in crew
-    assert 'PickTarget(s,eye,anchor,o.leash+engage,LongestReach(a))' in npcai and 'npc::PickTarget(world.enemies,' in npcai
+    assert 'PickTarget(s,h,eye,anchor,o.leash+engage,LongestReach(a))' in npcai and 'npc::PickTarget(world.enemies,' in npcai
+    # Fire the game will not let hurt its target (docs/feedback-2026-10-12-ai-targeting.md): every AI asks WastedFire, the
+    # damage hook feeds it whatever the statistics' switch, and the offline check runs in CTest.
+    assert '[self](int k) noexcept { return !WastedFire(self,world.enemy[k].object); }' in npcai
+    assert 'const bool wasted=t && WastedFire(h,t->object);' in npcai and 'if(WastedFire(p.self,object))return;' in npcai
+    assert 'if(target && WastedFire(v,target))target=nullptr;' in npcai
+    assert 'if(!WastedFire(v,o))f(o,a,0.0f);' in src('src/heli.cpp')
+    assert 'if(WastedFire(p.self,object))return;' in src('src/ground.cpp')
+    hook = src('src/damagestats.cpp').split('std::uintptr_t __fastcall DamageHook(', 1)[1].split('\n}\n', 1)[0]
+    assert 'const Before b=Read(obj);' in hook and 'NoteWasted(obj,gdi,b);' in hook, 'fed whether the statistics are on or not'
+    assert 'ResetWastedFire();' in src('src/mission.cpp')
     cm = src('CMakeLists.txt')
     assert 'add_executable(air_chase_check EXCLUDE_FROM_ALL tools/air_chase_check.cpp)' in cm
+    assert 'target_sources(EDF6VehicleCrew PRIVATE src/wastedfire.cpp)' in cm
+    assert 'wasted_fire_check' in cm.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0].split(), 'wasted_fire_check runs in CTest'
     assert 'air_chase_check' in cm.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0].split(), 'air_chase_check runs in CTest'
     assert '#include "../src/air_chase.h"' in src('tools/air_chase_check.cpp')
     # The charges' blast radii are their generated charges' (pylib/vcobjects.py jet_guns).

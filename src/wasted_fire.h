@@ -41,15 +41,18 @@ inline Pair* Find(Book& b,const void* shooter,const void* target,bool make) noex
     return oldest;
 }
 
-// A hit by `shooter` on `target` at `ms` settled: it hurt (its HP fell) or not.
-inline void Hit(Book& b,const void* shooter,const void* target,bool hurt,std::uint64_t ms) noexcept {
-    if(!shooter || !target || shooter==target)return;
+// A hit by `shooter` on `target` at `ms` settled: it hurt (its HP fell) or not. True when it starts a hold.
+inline bool Hit(Book& b,const void* shooter,const void* target,bool hurt,std::uint64_t ms) noexcept {
+    if(!shooter || !target || shooter==target)return false;
     Pair* p=Find(b,shooter,target,!hurt);
-    if(!p)return;
-    if(hurt){p->futile=0;p->holdUntil=0;p->hitAt=ms;return;}
+    if(!p)return false;
+    if(hurt){p->futile=0;p->holdUntil=0;p->hitAt=ms;return false;}
     if(ms-p->hitAt>kForgetMs)p->futile=0;
     p->hitAt=ms;
-    if(++p->futile>=kWastedHits){p->futile=0;p->holdUntil=ms+kWastedHoldMs;}
+    if(ms<p->holdUntil)return false;   // held already (a player's own fire goes on): no new hold until it runs out
+    if(++p->futile<kWastedHits)return false;
+    p->futile=0;p->holdUntil=ms+kWastedHoldMs;
+    return true;
 }
 
 // Whether `shooter`'s fire at `target` is wasted at `ms` (its hits on it have hurt nothing lately).
