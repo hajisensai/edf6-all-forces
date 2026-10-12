@@ -289,3 +289,7 @@ mouse feel and the installed-game path still require the integration owner's sub
 - That an AI-ridden V602 really has engine-on (`veh+0x1534 & 2`), and that its weapons fire
   (`weapon+0x8B6`).
 - That the slot 60 call order holds for 506 (it inherits HeliBase slot 60 `0x652630`).
+
+## 2026-10-12 鼠标镜头修正
+
+上文屏幕内恢复逻辑已被 [鼠标镜头缓动跟随](feedback-2026-10-12-heli-mouse-camera.md) 取代：原版直升机镜头追随世界鼠标目标，不把目标推回屏幕；W/S 俯仰、空格/Ctrl 总距保持键盘职责。

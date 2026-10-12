@@ -47,6 +47,19 @@ inline void Move(float* aim,float x,float y,float k) noexcept {
     aim[0]=flat[0]*std::cos(el);aim[1]=std::sin(el);aim[2]=flat[2]*std::cos(el);
 }
 
+// Camera follows the mouse target with an exponential angular ease (80 ms time constant), independent of FPS.
+// Shortest yaw arc also works across +/-pi; never alter the target or pull it back to the hull.
+inline void EaseView(float* view,const float* target,float dt) noexcept {
+    if(!std::isfinite(dt) || dt<=0.0f)return;
+    const float share=1.0f-std::exp(-dt/0.08f);
+    const float yaw=std::atan2(view[0],view[2]),want=std::atan2(target[0],target[2]);
+    const float difference=std::atan2(std::sin(want-yaw),std::cos(want-yaw));
+    const float elevation=std::asin(vec::Clamp(view[1],-1.0f,1.0f));
+    const float pitch=elevation+(std::asin(vec::Clamp(target[1],-1.0f,1.0f))-elevation)*share;
+    const float heading=yaw+difference*share;
+    view[0]=std::sin(heading)*std::cos(pitch);view[1]=std::sin(pitch);view[2]=std::cos(heading)*std::cos(pitch);
+}
+
 // Whether the aim's mark (`mark` m ahead of `pos`) lies within `limit` of the screen's half size (view-projection `vp`,
 // row vectors).
 inline bool OnScreen(const float* vp,const float* pos,const float* aim,float mark,float limit) noexcept {

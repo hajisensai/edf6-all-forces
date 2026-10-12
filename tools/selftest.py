@@ -2148,7 +2148,7 @@ def heli_mouse_aim_wired() -> None:
     # The yaw is the one law apart (2026-10-06, the user: the mouse did not turn the heli): the NPC damps its turn
     # (StockYaw), the player compensates the native angle-state lag/spring (PlayerYawInput).
     assert 'aim::StockYaw(' in steer and 'aim::PlayerYawInput(' in fly and 'aim::StockYaw(' not in fly
-    assert 'aim::MoveOnScreen(' in fly, 'heli.cpp AimFly: the mouse kept on the screen axis by axis'
+    assert 'aim::Move(p.aim,mx,my,k)' in fly and 'MoveOnScreen' not in fly, 'stock heli mouse direction must not be tethered to the screen'
     player = heli.split('void PlayerHeli(', 1)[1].split('\n}\n', 1)[0]
     off = heli.split('void AssistOff(', 1)[1].split('\n}\n', 1)[0]
     assert 'PlayerMouseTune(v,' in player and 'kMaxYaw,a.yaw' in off

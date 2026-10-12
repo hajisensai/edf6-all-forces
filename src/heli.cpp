@@ -2533,20 +2533,19 @@ void PlayerAssist(unsigned char* v) noexcept {
 //  1. the attitude wanted (aim::Instructor): the mouse's heading and keyboard pitch, the cyclic's forward speed for that pitch, the
 //     A / D slide, the collective's climb (Space / brake key; let go: the height held);
 //  2. the attitude controller: the yaw onto the aim's heading through the native yaw lag's inverse (aim::PlayerYawInput;
-//     + grows the heading angle with a positive max yaw rate, aim::YawSign), the pitch the aim's (PlayerAttitudeHook
+//     + grows the heading angle with a positive max yaw rate, aim::YawSign), the pitch the keyboard's (PlayerAttitudeHook
 //     hands it to the attitude function alone), the roll the slide's plus a coordinated turn's bank (aim::BankInput);
 //  3. the native input block: forward / lateral the velocity law's stick (aim::StockStick: the stock heli flies its
 //     velocity directly, docs/aircraft-re.md §2), the throttle the collective through the rotor lag's inverse
 //     (aim::CollectiveThrottle), on the actuators PlayerMouseTune quickens.
 // PlayerAssist's settle runs first: let go of the pitch the heli stops within PlayerHeliStopSec. On the ground (OnGround:
-// contact bit 1 with the map under it, not perched on a body) nothing horizontal and the stock throttle, W or Space
+// contact bit 1 with the map under it, not perched on a body) nothing horizontal and the stock throttle, Space
 // spinning it up to lift off; for kLiftOffMs after it no horizontal stick (the NPC's lift-off).
 // The readout (PlayerHeliHud) is gathered while the mouse flies it, the HUD (ini HeliFlightHud) is on or the warnings are
 // heard (ini WarnAudio, warn.cpp): the mouse's aim is drawn whenever it flies, the HUD around it only with HeliFlightHud.
 constexpr std::size_t kSeatPad=0x2B0,kSeatLX=0x2C0,kSeatLY=0x2C4,kSeatRX=0x2D0,kSeatRY=0x2D4,kSeatAscend=0x2E0;   // §4
 constexpr float kPlayerClimb=6.0f;     // m/s: Space / the brake key (the stock rotor's most is ~8: aircraft-re.md)
-constexpr float kPlayerMark=800.0f;    // m: the aim's mark ahead (playerjet.cpp kAimMark), kept within kAimOnScreen
-constexpr float kAimOnScreen=0.85f;
+constexpr float kPlayerMark=800.0f;    // m: the mouse view direction marked ahead
 constexpr float kMovingSpeed=5.0f;     // m/s: slower, it has no flight path to mark (the HUD shows its drift)
 constexpr float kThreatRadius=20.0f;   // m: a missile's lock point this near it homes on it (playerjet.cpp's)
 constexpr float kGpwsSlack=1.0f;       // m/s over the descent key's sink before the ground-proximity warning counts it
@@ -2563,6 +2562,16 @@ struct Pilot {
     bool flying;                       // the mouse-aim flight wrote its input last frame (logged as it changes)
 };
 Pilot pilots[4];
+// The camera is fetched on another thread. Publish a complete immutable target; only the camera owns its ease state.
+struct PilotView { ObjRef ref;const unsigned char* seat;ULONGLONG ms;float target[3]; };
+SRWLOCK pilotViewLock=SRWLOCK_INIT;
+PilotView pilotView{};
+void PublishPilotView(const PilotView& view) noexcept {
+    AcquireSRWLockExclusive(&pilotViewLock);pilotView=view;ReleaseSRWLockExclusive(&pilotViewLock);
+}
+struct PilotCamera { ObjRef ref;const unsigned char* seat;ULONGLONG ms;float radius,up,dir[3]; };
+PilotCamera pilotCamera{};
+
 
 // In the stock slot-57 physics, 0x654A80 uses input+8 for pitch (0x654E69), then the caller uses the original input+8
 // for forward velocity (0x651E2F). Keep those uses separate only for this frame's local mouse pilot.
@@ -2667,15 +2676,8 @@ void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos
     const float vert=Clamp((At<float>(seat,kSeatAscend)>0.5f ? 1.0f : 0.0f)-
                            (KeyDown(Cfg().playerJetBrakeKey) ? 1.0f : 0.0f),-1.0f,1.0f);
     const float mx=SeatAxis(seat,kSeatRX),my=Cfg().playerJetInvertPitch ? ry : -ry,k=aim::kPerUnit*Cfg().playerJetMouseSpeed;
-    float vp[16];
-    if(LastViewProj(vp)) {
-        // A level nose can itself be outside a downward-looking camera. Recover toward the actual view centre,
-        // not that same invisible nose, when the user moves the mouse; no mouse must not introduce a new pitch.
-        float centre[3]={fwd[0],fwd[1],fwd[2]},eye[3],view[3];
-        if(CameraRay(eye,view))aim::ViewCentreAim(pos,eye,view,kPlayerMark,centre);
-        const bool visible=aim::OnScreen(vp,pos,p.aim,kPlayerMark,kAimOnScreen);
-        if(visible || mx!=0.0f || my!=0.0f)aim::MoveOnScreen(vp,pos,p.aim,mx,my,k,centre,kPlayerMark,kAimOnScreen);
-    } else aim::Move(p.aim,mx,my,k);
+    // A world-held mouse direction: neither the screen boundary nor the moving hull recentres it.
+    if(mx!=0.0f || my!=0.0f)aim::Move(p.aim,mx,my,k);
     const float top=PlayerTop(v),maxTilt=At<float>(v,kPlayerMaxTilt);
     if(grounded)p.groundAt=ms;
     const bool lifting=ms-p.groundAt<kLiftOffMs;   // the NPC's lift-off: straight up, nothing horizontal
@@ -2715,6 +2717,7 @@ void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos
             p.aim[1],p.aim[2],p.pitchIn,p.rollIn,forward,yaw,p.yawRate,bank,state,grounded,lifting);
     }
     p.flying=true;
+    PilotView view{p.ref,seat,ms,{p.aim[0],p.aim[1],p.aim[2]}};PublishPilotView(view);
 }
 
 // The HUD's readout (the flight's state; the threats as the jets' Threats gathers them), published for HudPublish.
@@ -2820,7 +2823,7 @@ void PlayerHeli(unsigned char* v) noexcept {
     if(mouse)AimFly(*p,v,seat,pos,fwd,right,grounded,clear==kNoGround ? -1.0f : clear,dt,ms);
     else {
         if(p->flying)Log("HELI v=%p the mouse-aim flight off: the stock input flies it",v);
-        p->flying=false;std::memcpy(p->aim,fwd,12);p->hold=aim::Hold{};
+        p->flying=false;PublishPilotView({});std::memcpy(p->aim,fwd,12);p->hold=aim::Hold{};
     }
     if(Cfg().heliFlightHud || p->flying || Cfg().warnAudio)PublishHud(*p,v,pos,grounded,clear,keys);   // the aim's square drawn either way
 }
@@ -2894,6 +2897,39 @@ void Replay(unsigned char* v) noexcept {
     Put<float>(v,kInYaw,-SeatAxis(seat,kSeatRX));
 }
 }  // namespace
+
+// Called only by the signature-checked native Type-1 locator camera hook. The flight and camera share one
+// mouse direction: do not integrate input again here or derive it from the rendered view (a feedback loop).
+bool PlayerHeliCamera(const unsigned char* seat,const float* stockEye,const float* stockLook,float* eye,float* look) noexcept {
+    AcquireSRWLockShared(&pilotViewLock);const PilotView view=pilotView;ReleaseSRWLockShared(&pilotViewLock);
+    const auto v=const_cast<unsigned char*>(static_cast<const unsigned char*>(view.ref.obj));
+    const ULONGLONG ms=GameMs();
+    if(!Cfg().enabled || !Cfg().heliMouseAim || !v || seat!=view.seat || ms-view.ms>250 ||
+       !view.ref.Is(v) || v[kDead] || !SeatCount(v) || SeatAt(v,0)!=seat || SeatRider(seat)!=Rider::player ||
+       At<unsigned char>(seat,kSeatPad)!=0 || edf::RemoteRider(At<const unsigned char*>(seat,kSeatRider))) {
+        pilotCamera={};return false;
+    }
+    // The camera-side matrix translation is the model origin, as in the native locator camera, not the input-side
+    // physics centre (sazabi_camera.inc documents the engine's swap between these contexts).
+    const float* pos=reinterpret_cast<const float*>(v+kMatrix)+12;
+    if(pilotCamera.ref.obj!=v || pilotCamera.ref.ctrl!=view.ref.ctrl || pilotCamera.seat!=seat) {
+        float d[3];float squared=0.0f;
+        for(int i=0;i<3;++i){d[i]=stockLook[i]-stockEye[i];squared+=d[i]*d[i];}
+        const float radius=std::sqrt(squared),up=stockLook[1]-pos[1];
+        if(!std::isfinite(radius+up) || radius<0.5f)return false;
+        pilotCamera={view.ref,seat,ms,radius,up,{d[0]/radius,d[1]/radius,d[2]/radius}};
+    }
+    if(ms!=pilotCamera.ms) {
+        aim::EaseView(pilotCamera.dir,view.target,static_cast<float>(ms-pilotCamera.ms)/1000.0f);
+        pilotCamera.ms=ms;
+    }
+    for(int i=0;i<3;++i) {
+        look[i]=pos[i]+(i==1 ? pilotCamera.up : 0.0f);
+        eye[i]=look[i]-pilotCamera.dir[i]*pilotCamera.radius;
+        if(!std::isfinite(eye[i]+look[i]))return false;
+    }
+    return true;
+}
 
 namespace {
 // A sample of a stock-bodied helicopter for the pads (helipad.h): resting on solid ground (GroundClearance within
@@ -3720,6 +3756,7 @@ void ResetHelis() noexcept {
     for(auto& h:helis)h=Heli{};
     for(auto& a:assists)a=Assist{};
     for(auto& p:pilots)p=Pilot{};
+    PublishPilotView({});
     fullLoggedAt=0;
     ResetTrack();
     for(auto& r:rescues)r=Rescue{};

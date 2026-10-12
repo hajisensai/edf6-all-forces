@@ -37,6 +37,7 @@
 // then holds the gun), for every seat it holds, the player's or not; a gun it holds is steered from where it holds it
 // (Steer: stab.cpp StabHeld). All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "heli.h"
 #include "layout.h"
 #include "memory.h"
 #include "turretcam.h"
@@ -711,6 +712,9 @@ float* __fastcall LookHook(const void* point,float* lookOut,unsigned char* cam) 
         // seat's pointer kept past its vehicle (a stale `shared`) must never stand in its way
         if(SazabiCamera(static_cast<const unsigned char*>(point)-kSeatCamLook,reinterpret_cast<const float*>(cam+kCamEye),
                         reinterpret_cast<const float*>(cam+kCamLook),eye,look))
+            Place(lookOut+12,lookOut+28,cam,eye,look);
+        else if(PlayerHeliCamera(static_cast<const unsigned char*>(point)-kSeatCamLook,
+                                 lookOut+28,lookOut+12,eye,look))
             Place(lookOut+12,lookOut+28,cam,eye,look);
         else if(shared.seat && static_cast<const unsigned char*>(point)==shared.seat+kSeatCamLook)
             Camera(static_cast<const unsigned char*>(point)-kSeatCamLook,lookOut+12,cam);
