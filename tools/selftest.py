@@ -5183,6 +5183,14 @@ def air_chase_wired() -> None:
     assert 'add_executable(air_chase_check EXCLUDE_FROM_ALL tools/air_chase_check.cpp)' in cm
     assert 'target_sources(EDF6VehicleCrew PRIVATE src/wastedfire.cpp)' in cm
     assert 'wasted_fire_check' in cm.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0].split(), 'wasted_fire_check runs in CTest'
+    assert 'hit_predict_check' in cm.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0].split(), 'hit_predict_check runs in CTest'
+    assert 'add_test(NAME hit_accept_native COMMAND hit_accept_native_test "${EDF6_NATIVE_DLL}")' in cm
+    # The game's overrides the prediction asks are the side-effect-free ones, gated by their bytes (wastedfire.cpp).
+    wf = src('src/wastedfire.cpp')
+    for rva in ('0x54AA40', '0x4BC8A0', '0x3EE2F0', '0x4F7190', '0x3F6970', '0x401200', '0x4D1790'):
+        assert rva in wf, rva
+    for rva in ('0x504720', '0x51EFB0', '0x4C6650', '0x30E200', '0x374230'):
+        assert rva not in wf, f'{rva} has side effects: never asked'
     assert 'air_chase_check' in cm.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0].split(), 'air_chase_check runs in CTest'
     assert '#include "../src/air_chase.h"' in src('tools/air_chase_check.cpp')
     # The charges' blast radii are their generated charges' (pylib/vcobjects.py jet_guns).

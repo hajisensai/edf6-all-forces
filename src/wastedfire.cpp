@@ -154,7 +154,8 @@ bool Accepts(unsigned char* o,Kind k,const float* at,std::uint32_t body) noexcep
 }
 
 // --- The watch: each target's window and motion, each shooter-target pair's last plan ---
-struct Watched { const void* target; std::uint64_t at; float pos[3],vel[3]; hitpredict::Window w; };
+struct Watched { const void* target; std::uint64_t at,loggedAt; float pos[3],vel[3]; hitpredict::Window w; };
+constexpr std::uint64_t kLogMs=3000;
 constexpr int kWatched=64;
 Watched watched[kWatched]{};
 Watched& Watch(const void* target) noexcept {
@@ -163,7 +164,7 @@ Watched& Watch(const void* target) noexcept {
         if(x.target==target)return x;
         if(x.at<oldest->at)oldest=&x;
     }
-    *oldest=Watched{target,0,{},{},{}};
+    *oldest=Watched{target,0,0,{},{},{}};
     return *oldest;
 }
 struct Plan { const void* shooter; const void* target; std::uint64_t at; hitpredict::Verdict verdict; float aim[3]; bool aimSet; };
@@ -202,6 +203,7 @@ Plan Assess(const void* shooter,const void* target,const float* from,float speed
     if(!pts.n){std::memcpy(pts.p[0],root,12);pts.n=1;}
     // The first lock point whose predicted hit the game takes: its aim point; none: the first one's, not accepted.
     bool accepted=false;float flightMs=0.0f;
+    int rays=0,met=0,onTarget=0;std::uint32_t lastBody=0xFFFFFF;   // for the log line
     for(int i=0;i<pts.n && !accepted;++i) {
         float aim[3];
         const float t=hitpredict::Intercept(from,pts.p[i],w.vel,speed,gravity,aim);
@@ -221,6 +223,7 @@ Plan Assess(const void* shooter,const void* target,const float* from,float speed
                 __except(EXCEPTION_EXECUTE_HANDLER){by=nullptr;}
                 if(by)rayMeetsObjects=true;
             }
+            ++rays;met+=by!=nullptr;onTarget+=by==target;lastBody=body;
             if(by==target)ok=Accepts(o,k,hit,body);
             else if(by)ok=false;                                   // another body first: this one is not where the round goes
             else ok=rayMeetsObjects ? false : Accepts(o,k,aim,0xFFFFFF) || k==Kind::carrier;   // no ray answer: the state only
@@ -230,6 +233,16 @@ Plan Assess(const void* shooter,const void* target,const float* from,float speed
     }
     p.aimSet=accepted;
     p.verdict=hitpredict::Decide(&w.w,ms,flightMs,accepted,now.leftMs);
+    // One line a target every kLogMs: what the ray met and what the game's override said (the evidence a player's log
+    // gives of the prediction: the layer-11 ray meeting these bodies, their ids the override takes).
+    if(k!=Kind::none && k!=Kind::yes && ms-w.loggedAt>=kLogMs) {
+        w.loggedAt=ms;
+        static const char* const kNames[]={"none","yes","never","ship","anchor","generator","fortress part"};
+        Log("WASTEDFIRE plan %p -> %p (%s): window %s left %.0f ms, %d point(s), rays %d met %d on it %d (body %u), "
+            "accepted %d, flight %.0f ms: %s",shooter,target,kNames[static_cast<int>(k)],now.open ? "open" : "shut",
+            static_cast<double>(now.leftMs),pts.n,rays,met,onTarget,lastBody,accepted,static_cast<double>(flightMs),
+            p.verdict==hitpredict::Verdict::fire ? "fire" : p.verdict==hitpredict::Verdict::wait ? "wait" : "skip");
+    }
     return p;
 }
 
