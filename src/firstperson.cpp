@@ -723,12 +723,30 @@ void LogPass(Part part,int pass) noexcept {
     std::memset(passLog,0,sizeof(passLog));passLogAt=now;
 }
 
+// Debug=1: a model not the player's drawn (colour pass) where the weapon in the right hand really is: what it is.
+void NearWeapon(const void* model,int pass) noexcept {
+    static const void* logged[8]{};
+    static int next=0;
+    if(!Cfg().debug || pass!=1 || !st.inHandCount)return;
+    M4 root,gun;
+    if(!RootPose(static_cast<const unsigned char*>(model),&root) || !RootPose(static_cast<const unsigned char*>(st.inHand[0]),&gun))return;
+    const float d[3]={root.m[12]-gun.m[12],root.m[13]-gun.m[13],root.m[14]-gun.m[14]};
+    if(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>0.3f*0.3f)return;
+    for(const void* l:logged)if(l==model)return;
+    logged[next]=model;next=(next+1)%8;
+    const auto weapon=static_cast<const unsigned char*>(st.inHand[0])-kWeaponModel;
+    const long long off=static_cast<const unsigned char*>(model)-weapon;
+    Log("FP a model %p drawn at the weapon %p's place: vtable +0x%llX, weapon%+lld",model,static_cast<const void*>(weapon),
+        static_cast<unsigned long long>(At<const unsigned char*>(model,0)-image),off);
+}
+
 void __fastcall DrawHook(void* model,void* ctx,int pass,void* view) {
     const DrawFn next=NextDraw(model);
     Part part=Part::none;
     int hand=kRight;
     __try { part=PartOf(model,&hand); } __except(EXCEPTION_EXECUTE_HANDLER){part=Part::none;}
     if(part!=Part::none)LogPass(part,pass);
+    else if(st.on){__try { NearWeapon(model,pass); } __except(EXCEPTION_EXECUTE_HANDLER){}}
     if(part==Part::none || pass==3 || pass==4 || pass>5){next(model,ctx,pass,view);return;}
     if(pass==0 || part==Part::stowed)return;   // the occluder depth (not where it is in this picture); put away: unseen
     unsigned char* insts[kMostInsts];
