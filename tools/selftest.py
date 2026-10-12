@@ -1151,6 +1151,19 @@ def sidecar_tub_holds_the_gunner() -> None:
 
 
 @test
+def shkt_check_on_synthetic_data() -> None:
+    """pylib/shkt_check.py without the game (tests/test_shkt_check.py Portable): hull / box geometry, SHKT refs, and
+    an SGO whose ragdoll mapping or accessory names a body its SHKT lacks is an error. The stock-file mutations of the
+    same test file need the game; tools/shkt_check.py checks an installed Mods folder."""
+    import unittest
+    sys.path.insert(0, os.path.join(ROOT, 'tests'))
+    import test_shkt_check
+    suite = unittest.defaultTestLoader.loadTestsFromTestCase(test_shkt_check.Portable)
+    result = unittest.TextTestRunner(stream=io.StringIO(), verbosity=0).run(suite)
+    assert result.wasSuccessful() and result.testsRun == 5, (result.failures, result.errors)
+
+
+@test
 def weapon_marks_agree() -> None:
     """The mod's LockonTargetType marks: one copy in C++ (common/edf/weapon.h), the data tools' copies equal to it."""
     marks = dict(re.findall(r'(kMark\w+)=(\d+)', src('common/edf/weapon.h')))
