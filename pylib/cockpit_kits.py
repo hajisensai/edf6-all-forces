@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import math
 
-from cockpit_shapes import box, cylinder, frame, panel, two_sided
+from cockpit_shapes import box, cylinder, frame, panel, quad, two_sided
 from cockpits import Kit, KitMaterial, Screen
 
 TEX = 'textures/{}.png'
@@ -44,63 +44,61 @@ def _room(cabin: Cabin, want: Cabin, least: Cabin, kit: str) -> Cabin:
 
 
 def tank_gunner(cabin: Cabin) -> Kit:
-    """A tank turret's gunner station in the turret's room: the gunner's sight's eyepiece just below the line of
-    sight, a vision slot ahead in the front wall, the fire-control console to the right, the turret control's two
-    grips below, a guard plate against the gun on the left, the walls and the hatch ring round it."""
+    """A tank turret's gunner station after the real one (an M1A1's, US Army photographs, public domain: textures
+    photo_m1a1*, <model dir>/cockpits/CREDITS_photos.txt; the user, 2026-10-13: "参考现实的座舱或者座舱图片"). A gunner has
+    no window: he sees through his primary sight, so the opening ahead (as wide as the room allows, right of the gun's
+    cradle) is the sight's field, its rim the eyepiece's black rubber with the brow pad on its lower edge, the reticle the
+    HUD's. Round it as the photographs show it, each photograph on a face turned to the eye (the eye does not move
+    inside the turret, so a photograph there reads as the station itself): under the sight the eyepiece and the red
+    handle of the turret control, the black breech guard on the left, the cream turret wall with its fire-control
+    boxes and cables on the right, the wall and hatch ring overhead; the gunner's two screens low right."""
     r = _room(cabin, {'left': 0.9, 'right': 0.9, 'up': 0.35, 'down': 0.8, 'ahead': 0.6, 'back': 0.8},
-              {'left': 0.15, 'right': 0.3, 'up': 0.15, 'down': 0.25, 'ahead': 0.35, 'back': 0.2}, 'tank_gunner')
+              {'left': 0.15, 'right': 0.3, 'up': 0.12, 'down': 0.25, 'ahead': 0.35, 'back': 0.2}, 'tank_gunner')
     L, R, U, D, A, B = r['left'], r['right'], r['up'], r['down'], r['ahead'], r['back']
     parts = []
-    # The front wall at A with its vision slot round the line of sight.
-    sw, sh = min(0.9, 0.85 * (L + R)), min(0.28, 0.6 * (U + 0.14))
-    sx = (L - R) / 2 * 0.3   # the slot a little toward the room's middle
-    wide = L + R
-    mid = (L - R) / 2
-    top_h, low_h = U - sh / 2, D - sh / 2
-    if top_h > 0.01:
-        parts.append(panel('wall_front_top', 'paint_interior', (mid, U - top_h / 2, A), wide, top_h, (0, 0, -1)))
-    parts.append(panel('wall_front_low', 'paint_interior', (mid, -sh / 2 - low_h / 2, A), wide, low_h, (0, 0, -1)))
-    for side, x0, x1 in (('l', sx + sw / 2, L), ('r', -R, sx - sw / 2)):
-        if x1 - x0 > 0.01:
-            parts.append(panel(f'wall_front_{side}', 'paint_interior', ((x0 + x1) / 2, 0.0, A), x1 - x0, sh, (0, 0, -1)))
-    parts.append(frame('slot_frame', 'paint_olive', (sx, 0.0, A - 0.015), sw + 0.06, sh + 0.06, 0.03, (0, 0, -1), 0.03))
-    # The gunner's two read-outs on the front wall under the slot, right of the sight's body (weapons, then status).
-    screens = []
-    scr_h = min(0.14, low_h - 0.06)
-    scr_w = min(0.22, (R - 0.1) / 2 - 0.01)
-    if scr_h > 0.06 and scr_w > 0.1:
-        for kind, x in (('weapons', -0.08 - scr_w / 2), ('status', -0.1 - 1.5 * scr_w)):
-            c = (x, -sh / 2 - 0.04 - scr_h / 2, A - 0.008)
-            screens.append(Screen(kind, c, (0, 0, -1), scr_w, scr_h))
-            parts.append(panel(f'screen_{kind}', 'screen', c, scr_w, scr_h, (0, 0, -1)))
-    # The rest of the shell, seen from inside (no front face: the front wall is that).
+    # The sight's field: from just inside the right wall to just inside the left one, at eye height.
+    x0, x1 = -R + 0.06, L - 0.03          # its right and left edges (+x is left)
+    sw, sh = x1 - x0, min(0.3, 0.55 * (U + D))
+    sx, sy = (x0 + x1) / 2, min(0.0, U - sh / 2 - 0.03)
+    top, low = sy + sh / 2, sy - sh / 2
+    wide, mid = L + R, (L - R) / 2
+    if U - top > 0.01:
+        parts.append(panel('wall_above', 'photo_m1a1tc_turretwall', (mid, (U + top) / 2, A), wide, U - top, (0, 0, -1),
+                           uv=(0.0, 0.0, 1.0, max(0.15, (U - top) / wide))))
+    # Under the sight: the eyepiece and the turret control's handle, the face tipped back toward the eye.
+    under = low + D
+    parts.append(quad('under_sight', 'photo_m1a1gps_gas_controls', (x1, -D, A - 0.18), (x0, -D, A - 0.18),
+                      (x0, low, A), (x1, low, A)))
+    for side, a0, a1 in (('l', x1, L), ('r', -R, x0)):
+        if a1 - a0 > 0.01:
+            parts.append(panel(f'wall_side_{side}', 'photo_m1a1gps_turretwall', ((a0 + a1) / 2, sy, A), a1 - a0, sh, (0, 0, -1)))
+    parts.append(frame('eyepiece_rim', 'rubber', (sx, sy, A - 0.01), sw + 0.05, sh + 0.05, 0.035, (0, 0, -1), 0.05))
+    parts.append(box('brow_pad', 'rubber', (sx, low - 0.03, A - 0.06), (min(0.24, sw * 0.4), 0.035, 0.07)))
+    # The left: the breech guard, black, standing from the floor to the roof, turned to the eye.
+    depth = min(A - 0.02, U + D)   # a square of it, from the front back: a long strip would stretch the photograph
+    parts.append(quad('breech_guard', 'photo_m1a1int_breech', (L, -D, A - 0.02 - depth), (L, -D, A - 0.02),
+                      (L, U, A - 0.02), (L, U, A - 0.02 - depth)))
+    # The right: the turret wall with the fire-control boxes and cables, and its face toward the front.
+    parts.append(quad('wall_right', 'photo_m1a1int_turretwall', (-R, -D, A - 0.02), (-R, -D, -min(B, 0.6)),
+                      (-R, U, -min(B, 0.6)), (-R, U, A - 0.02)))
+    # Overhead and behind: the cream wall (no front face: the faces above are that), the hatch ring.
     parts.append(box('shell', 'paint_interior', (mid, (U - D) / 2, (A - B) / 2), (wide, U + D, A + B), inward=True,
-                     tile=0.8, faces='xXyYZ'))
+                     tile=0.8, faces='yYZ'))
     ring = min(0.28, 0.45 * wide, 0.45 * (A + B))
-    parts.append(cylinder('hatch_ring', 'paint_olive', (mid, U - 0.03, -min(B, 0.5) / 2), (mid, U - 0.005, -min(B, 0.5) / 2),
-                          ring, 20))
-    # The gunner's sight: its eyepiece and brow pad under the line of sight, its body going into the front wall.
-    ez, ey = min(0.18, A - 0.12), -min(0.24, D - 0.08)
-    parts.append(box('sight_body', 'paint_olive', (0.0, ey - 0.02, (ez + A) / 2), (0.1, 0.09, A - ez)))
-    parts.append(cylinder('eyepiece', 'metal_dark', (0.0, ey, ez + 0.03), (0.0, ey, ez - 0.03), 0.03, 16))
-    parts.append(box('brow_pad', 'rubber', (0.0, ey + 0.045, ez - 0.02), (0.12, 0.025, 0.035)))
-    # The guard plate against the gun on the left wall.
-    parts.append(box('gun_guard', 'paint_olive', (L - 0.02, -D / 2, (A - B) / 2), (0.03, D, min(0.9, A + B))))
-    # The fire-control console on the right, turned to the eye; a switch panel above it.
-    cw = min(0.36, 0.8 * R)
-    parts.append(panel('console', 'panel_analog', (-R + cw * 0.45, -min(0.28, D * 0.6), min(0.3, A * 0.6)), cw, cw,
-                       (0.55, 0.35, -0.75)))
-    if U > 0.12:
-        parts.append(panel('switches', 'panel_switches', (-R + 0.03, min(0.06, U * 0.4), min(0.15, A * 0.4)), 0.24,
-                           min(0.24, U + 0.1), (1.0, -0.1, -0.25)))
-    # The turret control's two grips, below and ahead.
-    gy = -min(0.38, D - 0.12)
-    for x in (0.09, -0.09):
-        parts.append(cylinder(f'grip{x}', 'rubber', (x, gy - 0.12, min(0.3, A - 0.1)), (x, gy, min(0.27, A - 0.13)),
-                              0.02, 10))
-    parts.append(box('grip_base', 'metal_dark', (0.0, gy - 0.15, min(0.31, A - 0.09)), (0.26, 0.05, 0.1)))
-    return Kit(parts, _materials('paint_interior', 'paint_olive', 'metal_dark', 'rubber', 'panel_analog',
-                                 'panel_switches', 'screen'), screens=tuple(screens))
+    parts.append(cylinder('hatch_ring', 'paint_olive', (mid, U - 0.03, -min(B, 0.5) / 2),
+                          (mid, U - 0.005, -min(B, 0.5) / 2), ring, 20))
+    # The gunner's two read-outs low right, on the wall's corner, turned to the eye.
+    screens = []
+    scr_w, scr_h = min(0.16, R * 0.4), min(0.1, D * 0.35)
+    if scr_w > 0.08 and scr_h > 0.05:
+        for k, kind in enumerate(('weapons', 'status')):
+            c = (-R + 0.03 + scr_w / 2, -D + 0.06 + scr_h / 2 + k * (scr_h + 0.02), A * 0.55)
+            facing = (0.55, 0.25, -0.8)
+            screens.append(Screen(kind, c, facing, scr_w, scr_h))
+            parts.append(panel(f'screen_{kind}', 'screen', c, scr_w, scr_h, facing))
+    return Kit(parts, _materials('paint_interior', 'paint_olive', 'rubber', 'screen', 'photo_m1a1tc_turretwall',
+                                 'photo_m1a1gps_gas_controls', 'photo_m1a1gps_turretwall', 'photo_m1a1int_breech',
+                                 'photo_m1a1int_turretwall'), screens=tuple(screens))
 
 
 def gun_station(cabin: Cabin) -> Kit:

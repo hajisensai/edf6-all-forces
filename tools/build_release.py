@@ -33,7 +33,7 @@ OUT = os.path.join(ROOT, 'release')
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import installer  # noqa: E402  (PLUGINS: what the exe ships and installs)
 WORK = os.path.join(ROOT, 'build', 'pyinstaller')
-RELEASE_MODELS = ('twin_tank', 'drill_tank', 'sazabi')   # pylib/artillery_model.py MODEL, drill_model / sazabi_model.MODEL_SUBDIR
+RELEASE_MODELS = ('twin_tank', 'drill_tank', 'sazabi', 'cockpits')   # pylib/artillery_model.py MODEL, drill_model / sazabi_model.MODEL_SUBDIR, cockpits.ASSET_DIR
 
 README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
 

@@ -184,7 +184,7 @@ def screen() -> Image.Image:
 
 
 TEXTURES = {
-    'paint_interior': lambda: worn(noise((206, 208, 196), 7, 1), (120, 122, 110), 2),
+    'paint_interior': lambda: worn(noise((214, 212, 198), 5, 1), (176, 174, 160), 2, 18),   # cream enamel, light wear
     'paint_olive': lambda: worn(noise((84, 92, 58), 8, 3), (60, 58, 50), 4),
     'metal_dark': lambda: brushed((54, 56, 58), 5),
     'rubber': lambda: noise((24, 24, 24), 5, 6, 1.5),
