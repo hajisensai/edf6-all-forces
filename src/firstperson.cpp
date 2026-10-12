@@ -35,6 +35,11 @@
 //    with none shares the other's (the Ranger's left hand on the rifle's guard); with none in either, the aim frame.
 //    The body's bones whose name ends in _l take the left T, the others the right. Weapons not in hand (on the back,
 //    put away) are not drawn in the colour passes (their shadow is).
+//  - The batches (H, measured: the Wing Diver's gun was drawn one frame in four): the draw submit 0x11E1630 hands an
+//    object whose +0x18 holds a batch to that batch (it draws its members itself, not through their slot 1); only one
+//    without a batch is drawn by its own draw. In first person each weapon in hand is taken out of its batch (+0x18
+//    cleared, the batch kept) so its draw comes here; the batch goes back when the weapon leaves the hand or the view
+//    leaves first person, if the weapon is still one of the player's (never into a weapon already gone).
 //  - The camera's first row points to the screen's left (measured: a grip at +x drew on the left), so every "right" the
 //    ini and the motion speak of is mirrored into it here (x, yaw and roll negated).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
@@ -96,7 +101,9 @@ constexpr unsigned kAimLineCall=0x6888D9,kAimLineBuild=0x6899F0;
 // Umbra's object transform setter (0x6C06A0 calls it with model+0x110 after an update).
 constexpr unsigned kUmbraPlace=0x11B30C0;
 constexpr std::size_t kModelBounds=0x110,kUmbraObject=0x10;
-constexpr float kEyeBox=2.0f;   // m each way from the eye: the box Umbra gets for the viewmodel's models
+constexpr float kEyeBox=2.0f;
+constexpr std::size_t kBatch=0x18;   // a drawn object's batch (0x11E1630)
+constexpr int kMostUnbatched=8;   // m each way from the eye: the box Umbra gets for the viewmodel's models
 const unsigned char kUmbraPlaceCode[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x08,0x55,0x48,0x8D,0x68,0xA1,0x48,0x81,0xEC,0x90};
 using PlaceFn=void(__fastcall*)(void*,const float*);
 bool placeOk=false;
@@ -126,6 +133,7 @@ Hooked hooked[8]{};
 int hookedCount=0;
 void __fastcall DrawHook(void* model,void* ctx,int pass,void* view);
 bool HookDrawOf(void** vt) noexcept;
+int HandOfModel(const void* model) noexcept;
 
 // --- What the camera step leaves for the draws (game thread only: the draw and the camera step both run on it) ---
 struct State {
@@ -157,6 +165,9 @@ struct State {
     M4 view[2];
     bool shown[2];              // each arm drawn (a free hand off the weapon is not)
 };
+// The weapon models taken out of their batch, with the batch to give back.
+struct Unbatched { const void* model; void* batch; };
+Unbatched unbatched[kMostUnbatched]{};
 State st{};
 // The flashes' matrices: each the shot matrix `src` through T, kept for kFlashFrames camera steps.
 struct alignas(16) Flash { float m[16]; const float* src; int age,hand; };
@@ -164,7 +175,7 @@ Flash flashes[kFlashSlots]{};
 int flashNext=0;
 using CreateFn=void*(__fastcall*)(void*,void*,void*,void*);
 bool toggled=false,keyWas=false;
-int passLog[6]{};
+int passLog[2][6]{};   // the body's draws, the weapons' in hand, by pass
 ULONGLONG passLogAt=0;
 
 bool KeyDown(int vk) noexcept {
@@ -430,6 +441,35 @@ void LogWeapon(const unsigned char* w,int hand) noexcept {
         name ? name : L"?",hand==kLeft ? "left" : "right",At<const void*>(model,kUmbraObject));
 }
 
+bool StillPlayers(const void* model) noexcept {
+    for(int i=0;i<st.weaponCount;++i)if(st.weapons[i]==model)return true;
+    return false;
+}
+
+// The batches back: of the weapons no longer in hand (all: `all`), into those still the player's.
+void Rebatch(bool all) noexcept {
+    for(Unbatched& u:unbatched) {
+        if(!u.model || (!all && HandOfModel(u.model)>=0))continue;
+        if(StillPlayers(u.model) && !At<void*>(u.model,kBatch))Put<void*>(const_cast<void*>(u.model),kBatch,u.batch);
+        u=Unbatched{};
+    }
+}
+
+// The weapons in hand out of their batches (kept).
+void Unbatch() noexcept {
+    for(int i=0;i<st.inHandCount;++i) {
+        void* const batch=At<void*>(st.inHand[i],kBatch);
+        if(!batch)continue;
+        for(Unbatched& u:unbatched) {
+            if(u.model)continue;
+            u=Unbatched{st.inHand[i],batch};
+            Put<void*>(const_cast<void*>(st.inHand[i]),kBatch,nullptr);
+            if(Cfg().debug)Log("FP weapon model %p out of its batch %p",st.inHand[i],batch);
+            break;
+        }
+    }
+}
+
 // The weapons in hand and, for each hand, the root of its weapon as it will be drawn (the draw pose's bone 0:
 // 0x1100B90 writes the weapon's matrix to its first bone record, 0x1100F10 copies it into the draw pose).
 void Hands(const unsigned char* h,M4* anchor,bool* anchored) noexcept {
@@ -517,7 +557,7 @@ void Probe(const bool* anchored,const M4* anchor) noexcept {
 
 // The camera, the player's state given back: the near clip, the look smoothing.
 void Leave() noexcept {
-    if(st.on)PlaceAll(true);
+    if(st.on){PlaceAll(true);Rebatch(true);}
     if(st.cam && st.nearSet)Put<float>(st.cam,kCamNear,st.savedNear);
     if(st.human && st.smoothSet)Put<float>(st.human,kLookSmooth,st.savedSmooth);
     if(st.on)Log("FP view back to the stock camera");
@@ -581,6 +621,8 @@ void Camera(unsigned char* cam) noexcept {
     if(c.fpAimSnap){if(!st.smoothSet){st.savedSmooth=At<float>(h,kLookSmooth);st.smoothSet=true;}Put<float>(h,kLookSmooth,1.0f);}
     Gather(h);
     Views(h,cam);
+    Rebatch(false);
+    Unbatch();
     PlaceAll(false);
     Flashes();
 }
@@ -662,11 +704,12 @@ void Unpose(unsigned char* inst,const float* backup) noexcept {
 
 void LogPass(Part part,int pass) noexcept {
     if(!Cfg().debug || pass<0 || pass>5 || part==Part::stowed)return;
-    passLog[pass]+=part==Part::body ? 1 : 100;
+    ++passLog[part==Part::body ? 0 : 1][pass];
     const ULONGLONG now=GetTickCount64();
     if(now-passLogAt<5000)return;
-    if(passLogAt)Log("FP draws in 5 s by pass (body + 100 x weapons): 0:%d 1:%d 2:%d 3:%d 4:%d 5:%d (weapons held %d)",
-                     passLog[0],passLog[1],passLog[2],passLog[3],passLog[4],passLog[5],st.weaponCount);
+    if(passLogAt)Log("FP draws in 5 s by pass 0/1/2/3/5: body %d/%d/%d/%d/%d, weapons in hand %d/%d/%d/%d/%d (weapons %d)",
+                     passLog[0][0],passLog[0][1],passLog[0][2],passLog[0][3],passLog[0][5],
+                     passLog[1][0],passLog[1][1],passLog[1][2],passLog[1][3],passLog[1][5],st.weaponCount);
     std::memset(passLog,0,sizeof(passLog));passLogAt=now;
 }
 
