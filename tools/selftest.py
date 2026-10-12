@@ -7021,7 +7021,8 @@ def edf41_story_pack_real() -> None:
 def cas_hollow_real() -> None:
     """pylib/cas_graft.hollow on the real E515 CAS (UFO301's under UfoSmall515: 4.1's UFO has no CAS): the same size,
     players and clips (names, durations, frames) as E515's, every clip with no track; and the converted UFO301 / its
-    ace ship exactly that, under the class, with an empty material_animation (E515's names E515's textures)."""
+    ace ship exactly that, under the class, with E515's material_animation (an empty one crashed UfoSmall515's
+    constructor on the real game: slot 0 enabled unchecked, EDF+0x6dc844)."""
     import struct
     import cas_graft
     import cas_legacy as cl
@@ -7047,7 +7048,7 @@ def cas_hollow_real() -> None:
     for name in ('UFO301', 'UFO301ACE'):
         with open(os.path.join(ROOT, 'edf41port', 'objects', 'OBJECT', name + '.SGO'), 'rb') as f:
             d = sgo.load(data=f.read())
-        assert d['xgs_scene_object_class'] == 'UfoSmall515' and d['material_animation'] == []
+        assert d['xgs_scene_object_class'] == 'UfoSmall515' and len(d['material_animation']) >= 1
         assert d['animation_model'][1] == f'app:/object/{name.lower()}.cas'
 
 
