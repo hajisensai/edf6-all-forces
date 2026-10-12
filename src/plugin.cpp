@@ -16,6 +16,7 @@
 #pragma warning(pop)
 #include "crew.h"
 #include "mod_room.h"
+#include "room_ui.h"
 #include "support_soldier.h"
 #include "airdrop.h"
 #include "support_config.h"
@@ -967,6 +968,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallDamageStats();   // the damage function's head and the rounds' spawn (damagestats.cpp): the statistics' page over the map
     InstallRounds();        // the stock vehicles' and helis' impact points: the rounds as the game flies them
     InstallStockGauges();   // the stock weapon gauge where our HUD lists the weapons, the fuel tanks it showed
+    InstallRoomUi();        // the support loadout menu in the online room and the offline HQ (chains both OnUpdates)
     InstallGlyphLock();     // the game's own text, wrong or missing characters (glyphs.cpp)
     InstallEdf5Campaign();  // the EDF5 campaign's mission packs owned (edf5campaign.cpp)
     InstallEdf5Online();    // ...and their missions online: the BVM player natives' online half (edf5online.cpp)

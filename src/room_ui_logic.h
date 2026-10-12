@@ -84,6 +84,21 @@ inline roommenu::Keys KeysDown(const Raw& r,std::uint16_t combo) noexcept {
                           r.right || (b&kPadRight),r.enter || (b&kPadA),r.escape || (b&kPadB),r.insert || (b&kPadX),
                           r.del || (b&kPadY),r.home || (b&kPadBack)};
 }
+// The pad combination's name for the hint ("L3+R3"); empty for none.
+inline void PadComboName(std::uint16_t combo,wchar_t* out,std::size_t n) noexcept {
+    struct Bit { std::uint16_t bit; const wchar_t* name; };
+    static constexpr Bit kBits[]={{0x0100,L"LB"},{0x0200,L"RB"},{0x0040,L"L3"},{0x0080,L"R3"},{0x0020,L"Back"},{0x0010,L"Start"},
+        {0x1000,L"A"},{0x2000,L"B"},{0x4000,L"X"},{0x8000,L"Y"},{0x0001,L"Up"},{0x0002,L"Down"},{0x0004,L"Left"},{0x0008,L"Right"}};
+    if(!out || !n)return;
+    out[0]=0;
+    std::size_t used=0;
+    for(const Bit& b:kBits) {
+        if(!(combo&b.bit))continue;
+        const int w=_snwprintf_s(out+used,n-used,_TRUNCATE,L"%ls%ls",used ? L"+" : L"",b.name);
+        if(w<0)return;
+        used+=static_cast<std::size_t>(w);
+    }
+}
 inline bool AnyDown(const roommenu::Keys& k) noexcept {
     return k.toggle || k.up || k.down || k.left || k.right || k.confirm || k.cancel || k.add || k.remove || k.reset;
 }

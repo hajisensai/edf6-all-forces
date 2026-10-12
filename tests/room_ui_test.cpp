@@ -78,6 +78,11 @@ void Input() {
     Expect(k.toggle && k.cancel,"toggle key; combo 0 never toggles by pad");
     r=Raw{};r.foreground=true;r.padOk=true;r.pad=0x00C0;
     Expect(!KeysDown(r,0).toggle,"combo 0: the pad never toggles");
+    wchar_t name[32];
+    PadComboName(0x00C0,name,32);Expect(Same(name,L"L3+R3"),"combo name L3+R3");
+    PadComboName(static_cast<std::uint16_t>(kPadBack|kPadY),name,32);Expect(Same(name,L"Back+Y"),"combo name Back+Y");
+    PadComboName(0,name,32);Expect(!name[0],"no combo: no name");
+    PadComboName(0xFFFF,name,8);Expect(std::wcslen(name)<8,"a long combination cut to the buffer");
 }
 
 void GateAndPlan() {
