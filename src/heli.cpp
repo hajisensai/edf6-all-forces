@@ -2569,7 +2569,7 @@ PilotView pilotView{};
 void PublishPilotView(const PilotView& view) noexcept {
     AcquireSRWLockExclusive(&pilotViewLock);pilotView=view;ReleaseSRWLockExclusive(&pilotViewLock);
 }
-struct PilotCamera { ObjRef ref;const unsigned char* seat;ULONGLONG ms;float radius,up,dir[3]; };
+struct PilotCamera { ObjRef ref;const unsigned char* seat;ULONGLONG ms;float radius,up,rise,dir[3]; };
 PilotCamera pilotCamera{};
 
 
@@ -2915,9 +2915,9 @@ bool PlayerHeliCamera(const unsigned char* seat,const float* stockEye,const floa
     if(pilotCamera.ref.obj!=v || pilotCamera.ref.ctrl!=view.ref.ctrl || pilotCamera.seat!=seat) {
         float d[3];float squared=0.0f;
         for(int i=0;i<3;++i){d[i]=stockLook[i]-stockEye[i];squared+=d[i]*d[i];}
-        const float radius=std::sqrt(squared),up=stockLook[1]-pos[1];
-        if(!std::isfinite(radius+up) || radius<0.5f)return false;
-        pilotCamera={view.ref,seat,ms,radius,up,{d[0]/radius,d[1]/radius,d[2]/radius}};
+        const float radius=std::sqrt(squared),up=stockLook[1]-pos[1],rise=stockEye[1]-stockLook[1];
+        if(!std::isfinite(radius+up+rise) || radius<0.5f)return false;
+        pilotCamera={view.ref,seat,ms,radius,up,rise,{d[0]/radius,d[1]/radius,d[2]/radius}};
     }
     if(ms!=pilotCamera.ms) {
         aim::EaseView(pilotCamera.dir,view.target,static_cast<float>(ms-pilotCamera.ms)/1000.0f);
@@ -2928,6 +2928,10 @@ bool PlayerHeliCamera(const unsigned char* seat,const float* stockEye,const floa
         eye[i]=look[i]-pilotCamera.dir[i]*pilotCamera.radius;
         if(!std::isfinite(eye[i]+look[i]))return false;
     }
+    // As the existing turret rig does, keep the eye at least at its native height above the model. Lift both
+    // points equally: looking up must not orbit the camera below the aircraft/ground or change the wanted ray.
+    const float raise=pos[1]+pilotCamera.up+pilotCamera.rise-eye[1];
+    if(raise>0.0f){eye[1]+=raise;look[1]+=raise;}
     return true;
 }
 
