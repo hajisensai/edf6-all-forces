@@ -185,6 +185,8 @@ struct State {
     bool shown[2];              // each arm drawn (a free hand off the weapon is not)
     bool axisOk[2];             // a point on the axis of the weapon each hand holds, after T (the weapon's root)
     float axis[2][3];
+    bool onOther[2];            // a free hand drawn on the other hand's weapon, whose bounds after T are otherBox
+    M4 otherBox[2];
 };
 // The weapon models taken out of their batch, with the batch to give back.
 struct Unbatched { const void* model; void* batch; };
@@ -633,6 +635,17 @@ void Fit(int hand,bool dual,float* grip) noexcept {
     grip[0]+=out*x;grip[1]+=y;grip[2]+=z;
 }
 
+// The bounds of the weapon in `hand` through `t` (rows: half axes, row 3 the centre). False: none, or not one.
+bool WeaponBox(int hand,const M4& t,M4* out) noexcept {
+    bool flip=false;
+    const unsigned char* w=HandWeapon(hand,&flip);
+    if(!w)return false;
+    M4 box=MatrixAt(w+kWeaponModel+kModelBounds);
+    box.m[3]=box.m[7]=box.m[11]=0.0f;box.m[15]=1.0f;
+    *out=fpview::Mul(box,t);
+    return fpview::Finite(*out);
+}
+
 // Each hand's T this frame (above: its own weapon's anchor, else the other hand's T, else the aim frame).
 void Views(const unsigned char* h,const unsigned char* cam) noexcept {
     const Config& c=Cfg();
@@ -657,10 +670,12 @@ void Views(const unsigned char* h,const unsigned char* cam) noexcept {
     for(int hand=kRight;hand<=kLeft;++hand) {
         const int other=1-hand;
         st.shown[hand]=true;
+        st.onOther[hand]=false;
         if(st.viewOk[hand])continue;
         if(st.viewOk[other]) {
             st.view[hand]=st.view[other];st.viewOk[hand]=true;
             st.shown[hand]=HandOnWeapon(h,hand,anchor[other]);
+            st.onOther[hand]=st.shown[hand] && WeaponBox(other,st.view[hand],&st.otherBox[hand]);
             st.axisOk[hand]=true;
             for(int i=0;i<3;++i)st.axis[hand][i]=st.axis[other][i];
             continue;
@@ -803,7 +818,8 @@ float saved[kMostInsts][kMostBones*16];
 // little behind, out by half the soldier's own shoulder width (kata_l to kata_r). The way the elbow is rolled toward
 // (seen along the view): out, and more down.
 constexpr float kShoulderDown=-0.24f,kShoulderBack=-0.06f,kElbowOut=1.0f,kElbowDown=-1.5f;
-struct ArmFit { bool ok; M4 upper,fore; };   // after T: the upper arm's move; the forearm's, the hand's and fingers'
+constexpr float kPalm=0.04f;   // m (before the shrink): a holding hand's wrist off the weapon's body
+struct ArmFit { bool ok; M4 upper,fore,hand; };   // after T: the upper arm's move, the forearm's, the hand's and fingers'
 
 int BoneIndex(const unsigned char* inst,const wchar_t* name) noexcept {
     const auto bones=At<const unsigned char*>(inst,kInstBones);
@@ -813,6 +829,31 @@ int BoneIndex(const unsigned char* inst,const wchar_t* name) noexcept {
         if(nm && std::wcscmp(nm,name)==0)return i;
     }
     return -1;
+}
+
+// The free hand `hand` held on the other hand's weapon (fp_view.h, the arms): its wrist `h0` and elbow `e0` after T,
+// the way the elbow is wanted `wantElbow`; `fit`'s hand and forearm moves. False: a degenerate box.
+bool HeldOnOther(int hand,const float* h0,const float* e0,const float* wantElbow,float scale,ArmFit* fit) noexcept {
+    const Config& c=Cfg();
+    const M4& box=st.otherBox[hand];
+    float axis[3]={box.m[8],box.m[9],box.m[10]},move[3];
+    if(!fpview::Unit(axis) || !fpview::SnapToBox(box,h0,kPalm*scale,move))return false;
+    const float* cam=reinterpret_cast<const float*>(st.cam+kCamMatrix);
+    const float down[3]={-cam[4],-cam[5],-cam[6]};
+    const M4 snap=fpview::Translate(move[0],move[1],move[2]);
+    float h1[3],e1[3],way[3];
+    fpview::Point(snap,h0,h1);fpview::Point(snap,e0,e1);
+    fpview::Sub(e1,box.m+12,way);
+    const float deg=3.14159265f/180.0f;
+    const float roll=fpview::ClampedRoll(box.m+12,axis,h1,down,fpview::RollAngle(way,wantElbow,axis),c.fpHoldArc*deg);
+    fit->hand=fpview::Mul(snap,fpview::TurnAbout(box.m+12,axis,roll));
+    float h2[3],e2[3];
+    fpview::Point(fit->hand,h0,h2);fpview::Point(fit->hand,e0,e2);
+    fpview::Sub(e2,h2,way);
+    const float most=c.fpWristMax*deg;
+    const float bend=fpview::Clamp(fpview::RollAngle(way,wantElbow,axis),-most,most);
+    fit->fore=fpview::Mul(fit->hand,fpview::TurnAbout(h2,axis,bend));
+    return true;
 }
 
 // One arm's moves (`hand` kRight / kLeft) from the instance's draw pose (`pose`, before T) and the hand's T.
@@ -840,16 +881,21 @@ ArmFit FitArm(const unsigned char* inst,const float* pose,const M4& t,int hand) 
         wantElbow[i]=out*kElbowOut*right+kElbowDown*up;
     }
     if(!fpview::Unit(ahead))return fit;
-    // The weapon points ahead (the view transform's work): roll the forearm about its axis (through its root; without
-    // a weapon, through the wrist), the elbow seen from that axis.
-    const float* pivot=st.axisOk[hand] ? st.axis[hand] : h0;
-    float elbowWay[3];
-    fpview::Sub(e0,pivot,elbowWay);
-    fit.fore=fpview::TurnAbout(pivot,ahead,fpview::RollAngle(elbowWay,wantElbow,ahead));
-    float e1[3],shoulder[3];
+    float e1[3];
+    if(st.onOther[hand]) {
+        if(!HeldOnOther(hand,h0,e0,wantElbow,scale,&fit))return fit;
+    } else {
+        // The weapon points ahead (the view transform's work): roll the forearm with the hand about its axis (through its
+        // root; without a weapon, through the wrist), the elbow seen from that axis.
+        const float* pivot=st.axisOk[hand] ? st.axis[hand] : h0;
+        float elbowWay[3];
+        fpview::Sub(e0,pivot,elbowWay);
+        fit.fore=fit.hand=fpview::TurnAbout(pivot,ahead,fpview::RollAngle(elbowWay,wantElbow,ahead));
+    }
+    float shoulder[3];
     fpview::Point(fit.fore,e0,e1);
     fit.ok=fpview::ReachShoulder(e1,toward,upper,shoulder) && fpview::SegmentMap(s0,e0,shoulder,e1,&fit.upper) &&
-           fpview::Finite(fit.fore);
+           fpview::Finite(fit.fore) && fpview::Finite(fit.hand);
     return fit;
 }
 
@@ -877,8 +923,9 @@ void Pose(unsigned char* inst,const M4* t,bool body,const float* eye,float* back
         }
         const int hand=left ? kLeft : kRight;
         M4 moved=fpview::Mul(MatrixAt(reinterpret_cast<const unsigned char*>(p)),t[hand]);
-        if(body && fit[hand].ok && name)   // the arm posed for the first person: the upper arm, the rest of the arm
-            moved=fpview::Mul(moved,std::wcsncmp(name,L"jowan",5)==0 ? fit[hand].upper : fit[hand].fore);
+        if(body && fit[hand].ok && name)   // the arm posed for the first person: the upper arm, the forearm, the hand
+            moved=fpview::Mul(moved,std::wcsncmp(name,L"jowan",5)==0 ? fit[hand].upper
+                                    : std::wcsncmp(name,L"kawan",5)==0 ? fit[hand].fore : fit[hand].hand);
         std::memcpy(p,moved.m,64);
     }
 }

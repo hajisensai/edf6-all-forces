@@ -255,6 +255,8 @@ void Validate(Config& n) noexcept {
     Fix("FirstPersonHoldY",n.fpHoldY,-1.0f,1.0f);
     Fix("FirstPersonHoldZ",n.fpHoldZ,-1.0f,1.0f);
     Fix("FirstPersonScale",n.fpScale,0.05f,1.0f);
+    Fix("FirstPersonHoldArc",n.fpHoldArc,0.0f,180.0f);
+    Fix("FirstPersonWristMax",n.fpWristMax,0.0f,90.0f);
     if(n.fpNear!=0.0f)Fix("FirstPersonNear",n.fpNear,0.005f,0.1f);
     n.mapButton=static_cast<int>(FixInt("MapButton",n.mapButton,0,0xFFFF));
     if(n.mapViewDistance!=0.0f)Fix("MapViewDistance",n.mapViewDistance,1000.0f,10000.0f);
@@ -586,6 +588,8 @@ void LoadConfig() noexcept {
     n.fpCulling=ReadBool(L"FirstPersonCulling",n.fpCulling);
     n.fpFit=ReadBool(L"FirstPersonFit",n.fpFit);
     n.fpArmIk=ReadBool(L"FirstPersonArmIk",n.fpArmIk);
+    n.fpHoldArc=ReadFloat(L"FirstPersonHoldArc",n.fpHoldArc);
+    n.fpWristMax=ReadFloat(L"FirstPersonWristMax",n.fpWristMax);
     n.gunStabilizer=ReadBool(L"GunStabilizer",n.gunStabilizer);
     n.viewDistance=ReadFloat(L"ViewDistance",n.viewDistance);
     n.map=ReadBool(L"Map",n.map);

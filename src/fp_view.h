@@ -151,13 +151,17 @@ inline void EyeWorld(const M4& body,const float* local,float* out) noexcept {
 
 // --- The arms posed for the first person ---
 // The third-person arm, moved with its weapon to the bottom of the view, reaches back up into it (its shoulder far in
-// front of the eye). Two moves bring it out at the view's edge:
-//  - the forearm, the hand and its fingers roll together about the axis of the weapon they hold (TurnAbout, RollAngle)
-//    until the elbow is out and down: the hand keeps its hold round the weapon and the wrist its stock angle (about the
-//    wrist instead, the Wing Diver's hand left the gun's side, measured)
-//    (turning the forearm alone broke the wrist, the user, 2026-10-13, with a screenshot: "the left hand's grip clearly
-//    wrong"; keeping the stock forearm left the Wing Diver's raised elbow, and the upper arm from it, in the middle of
-//    the view, measured);
+// front of the eye). The moves that bring it out at the view's edge:
+//  - the hand on its own weapon (the trigger hand): the forearm, the hand and its fingers roll together about the axis
+//    of that weapon (TurnAbout, RollAngle) until the elbow is out and down: the hand keeps its hold and the wrist its
+//    stock angle;
+//  - the free hand on the other hand's weapon (the Ranger's on the rifle's guard, the Wing Diver's): rolled about the
+//    weapon's axis it slid round the gun (the user, 2026-10-13, with a screenshot: the Wing Diver's left hand "left
+//    below the gun, not on it"), so it is held instead: pulled in to the weapon's body when the animation left it
+//    off it (SnapToBox, never pushed out: a box counts a magazine and a sight), slid round the axis only within
+//    `arc` of straight below (ClampedRoll), and what the elbow still wants is taken by the forearm alone, turned about
+//    the wrist by at most `wristMax` (the forearm alone, unbounded, broke the wrist: the same day's screenshot;
+//    forearm and hand turned about the wrist took the Wing Diver's hand off the gun's side, measured);
 //  - the upper arm turns from the elbow toward a place beside and below the eye (ReachShoulder, SegmentMap).
 
 inline void Sub(const float* a,const float* b,float* o) noexcept { for(int i=0;i<3;++i)o[i]=a[i]-b[i]; }
@@ -232,6 +236,43 @@ inline bool SegmentMap(const float* a0,const float* b0,const float* a1,const flo
     }
     *out=Mul(Mul(Translate(-a0[0],-a0[1],-a0[2]),r),Translate(a1[0],a1[1],a1[2]));
     return Finite(*out);
+}
+
+inline float Clamp(float v,float lo,float hi) noexcept { return v<lo ? lo : (v>hi ? hi : v); }
+
+// The move that takes a hand whose wrist is at `wrist` onto the weapon whose bounds are `box` (rows: half axes right,
+// up, ahead; row 3 the centre, all through T): when the wrist lies further from the box's axis than the box's
+// elliptic section there plus `palm`, it is pulled in square to the axis to that distance (and along it into the
+// box's length); nearer, it stays (a box counts a magazine and a sight: never pushed out). False: a degenerate box.
+inline bool SnapToBox(const M4& box,const float* wrist,float palm,float* move) noexcept {
+    float r[3],u[3],f[3];
+    for(int i=0;i<3;++i){r[i]=box.m[i];u[i]=box.m[4+i];f[i]=box.m[8+i];move[i]=0.0f;}
+    const float hr=Length(r),hu=Length(u),hf=Length(f);
+    if(!Unit(r) || !Unit(u) || !Unit(f) || !(hr>1e-4f) || !(hu>1e-4f))return false;
+    float d[3];
+    Sub(wrist,box.m+12,d);
+    const float along=Dot3(d,f),x=Dot3(d,r),y=Dot3(d,u);
+    const float radial=std::sqrt(x*x+y*y);
+    const float clampedAlong=Clamp(along,-hf,hf);
+    if(!(radial>1e-5f)) {
+        for(int i=0;i<3;++i)move[i]=f[i]*(clampedAlong-along);
+        return true;
+    }
+    const float q=std::sqrt((x/hr)*(x/hr)+(y/hu)*(y/hu));   // 1 on the section's ellipse
+    const float reach=radial/q+palm;                         // the surface that way, and the palm's thickness
+    const float k=radial>reach ? reach/radial : 1.0f;
+    for(int i=0;i<3;++i)move[i]=f[i]*(clampedAlong-along)+(r[i]*x+u[i]*y)*(k-1.0f);
+    return true;
+}
+
+// The roll (rad, right-handed about the unit `axis` through `centre`) a hand at `wrist` takes of `want`: its place
+// round the axis kept within `arc` of `down` (a place already outside is brought to the nearer edge).
+inline float ClampedRoll(const float* centre,const float* axis,const float* wrist,const float* down,float want,
+                         float arc) noexcept {
+    float w[3];
+    Sub(wrist,centre,w);
+    const float at=RollAngle(down,w,axis);
+    return Clamp(at+want,-arc,arc)-at;
 }
 }  // namespace fpview
 }  // namespace crew

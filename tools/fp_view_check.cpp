@@ -7,6 +7,9 @@
 //  - the eye eased in the body frame: the first frame as it is, then a share of the way a frame; a turned body turns it;
 //  - the weapon-anchored transform: the weapon's root lands at the grip in the camera's frame and points along the
 //    camera's forward, whatever way the weapon was held (a tilted, scaled hand matrix as well);
+//  - the free hand held on the other hand's weapon: pulled in to the box's body when off it (never pushed out, kept
+//    within its length), slid round its axis only within the arc of straight below (a place outside brought to the
+//    edge), and a roll about the axis keeps the hand's distance from it;
 //  - the motion matrix: none is the identity, the pivot stays where it is under any turn, a pitch up tips ahead up;
 //  - the procedural motion (src/fp_motion.h): nothing happening rests at 0; a shot kicks back and up and settles; a reload
 //    turns it on its side (not down: the grip is below the view's edge); a switch dips out of view and comes back; a sprint lowers it; a turn of the view leaves it behind.
@@ -188,6 +191,39 @@ void Arms() {
     Expect(Near(pb[2],2.0f),"...and lands right",pb[2]);
 }
 
+void Held() {
+    M4 box=Identity();   // a Mag Blaster's: 0.03 x 0.12 x 0.50 m half sizes, centred at the origin, pointing +z
+    box.m[0]=0.03f;box.m[5]=0.12f;box.m[10]=0.50f;
+    const float off[3]={-0.2f,-0.2f,0.2f};
+    float move[3],to[3];
+    const bool ok=SnapToBox(box,off,0.04f,move);
+    for(int i=0;i<3;++i)to[i]=off[i]+move[i];
+    const float q=std::sqrt((0.2f/0.03f)*(0.2f/0.03f)+(0.2f/0.12f)*(0.2f/0.12f));
+    const float want=std::sqrt(0.08f)/q+0.04f,got=std::sqrt(to[0]*to[0]+to[1]*to[1]);
+    Expect(ok && Near(got,want),"a hand off the gun is pulled in to its body and the palm",got,want);
+    Expect(Near(to[0]/to[1],1.0f) && Near(to[2],0.2f),"...square to its axis, the same way round",to[0]/to[1],to[2]);
+    const float in[3]={0.0f,-0.05f,0.1f};
+    SnapToBox(box,in,0.04f,move);
+    Expect(Near(move[0],0) && Near(move[1],0) && Near(move[2],0),"a hand on it stays (never pushed out)",move[1]);
+    const float past[3]={0.0f,-0.1f,0.9f};
+    SnapToBox(box,past,0.04f,move);
+    Expect(Near(past[2]+move[2],0.5f) && Near(move[1],0),"...and is kept within its length",past[2]+move[2]);
+    M4 flat=box;flat.m[5]=0.0f;
+    Expect(!SnapToBox(flat,off,0.04f,move),"a degenerate box: no hold");
+    const float centre[3]={0,0,0},axis[3]={0,0,1},down[3]={0,-1,0},below[3]={0,-0.1f,0};
+    Expect(Near(ClampedRoll(centre,axis,below,down,2.0f,1.0f),1.0f),"the slide round the gun stops at the arc",
+           ClampedRoll(centre,axis,below,down,2.0f,1.0f));
+    Expect(Near(ClampedRoll(centre,axis,below,down,-0.3f,1.0f),-0.3f),"...and is as asked within it",
+           ClampedRoll(centre,axis,below,down,-0.3f,1.0f));
+    const float side[3]={0.1f*std::sin(1.5f),-0.1f*std::cos(1.5f),0.0f};
+    Expect(Near(ClampedRoll(centre,axis,side,down,0.0f,1.0f),-0.5f),"a hand already round the side is brought to the edge",
+           ClampedRoll(centre,axis,side,down,0.0f,1.0f));
+    float r1[3];
+    Point(TurnAbout(centre,axis,0.8f),to,r1);
+    Expect(Near(std::sqrt(r1[0]*r1[0]+r1[1]*r1[1]),got) && Near(r1[2],to[2]),"a roll about the axis keeps the hold",
+           std::sqrt(r1[0]*r1[0]+r1[1]*r1[1]),got);
+}
+
 void Motion() {
     const float pivot[3]={0.15f,-0.2f,0.35f};
     const M4 none=MotionMatrix(0,0,0,0,0,0,pivot);
@@ -252,6 +288,7 @@ int main() {
     Eye();
     Anchored();
     Arms();
+    Held();
     Motion();
     Springs();
     std::printf(failures ? "%d FAILED\n" : "all passed\n",failures);
