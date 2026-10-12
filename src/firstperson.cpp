@@ -28,7 +28,9 @@
 //    in front of the camera (the whole player, shadow too, for half a second). The real box through T was not enough
 //    (the Wing Diver's weapon, that near the eye, was still drawn in one frame in seven): in first person each camera
 //    step hands Umbra a box around the eye for the body and the weapons in hand (the camera inside it: never culled),
-//    and the real boxes back on the way out.
+//    and the real boxes back on the way out. That is done as the frame's render starts (System::update's call of the
+//    render 0x11978D0 at 0x1198FA4, redirected): a weapon's own update (slot 3 -> 0x6C06A0 -> 0x11B30C0) may come after
+//    the camera step and put its real box back (the Wing Diver's gun: drawn one frame in five with it done there).
 //  - Two hands (measured: the Fencer's weapons hung below the view): each weapon in hand (each weapon set's current one)
 //    belongs to the hand its mount bone is on (weapon+0xE88, the record of `arms_r` / `arms_l` / `armsFlip_l`...: the
 //    name's _l), and each hand has its own T anchored on its own weapon, the left grip the right one mirrored. A hand
@@ -102,6 +104,9 @@ constexpr unsigned kAimLineCall=0x6888D9,kAimLineBuild=0x6899F0;
 constexpr unsigned kUmbraPlace=0x11B30C0;
 constexpr std::size_t kModelBounds=0x110,kUmbraObject=0x10;
 constexpr float kEyeBox=2.0f;
+// The frame's render, its call in System::update (rcx the system, dl, r8b).
+constexpr unsigned kRenderCall=0x1198FA4,kRender=0x11978D0;
+using RenderFn=void(__fastcall*)(void*,std::uint8_t,std::uint8_t);
 constexpr std::size_t kBatch=0x18;   // a drawn object's batch (0x11E1630)
 constexpr int kMostUnbatched=8;   // m each way from the eye: the box Umbra gets for the viewmodel's models
 const unsigned char kUmbraPlaceCode[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x08,0x55,0x48,0x8D,0x68,0xA1,0x48,0x81,0xEC,0x90};
@@ -623,8 +628,13 @@ void Camera(unsigned char* cam) noexcept {
     Views(h,cam);
     Rebatch(false);
     Unbatch();
-    PlaceAll(false);
     Flashes();
+}
+
+// The render about to start: the viewmodel's models placed around the eye for Umbra (above).
+void __fastcall RenderHook(void* system,std::uint8_t a,std::uint8_t b) {
+    __try { if(st.on)PlaceAll(false); } __except(EXCEPTION_EXECUTE_HANDLER){}
+    reinterpret_cast<RenderFn>(image+kRender)(system,a,b);
 }
 
 void __fastcall CamStepHook(void* camera,void* step) {
@@ -764,6 +774,7 @@ bool InstallFirstPerson() noexcept {
     const bool flashOk=RedirectCall(image+kFlashCall,image+kEffectCreate,reinterpret_cast<void*>(&FlashCreateHook),changed);
     placeOk=Matches(kUmbraPlace,kUmbraPlaceCode,sizeof(kUmbraPlaceCode));
     const bool lineOk=RedirectCall(image+kAimLineCall,image+kAimLineBuild,reinterpret_cast<void*>(&AimLineHook),changed);
+    placeOk=placeOk && RedirectCall(image+kRenderCall,image+kRender,reinterpret_cast<void*>(&RenderHook),changed);
     toggled=Cfg().firstPersonStart;
     Log("FP installed: camera=%d draw=%d flash=%d aim line=%d culling=%d start=%d",camOk,drawOk,flashOk,lineOk,placeOk,toggled);
     return drawOk;
