@@ -24,6 +24,7 @@ ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 sys.path[:0] = [os.path.join(ROOT, 'tools'), os.path.join(ROOT, 'pylib')]
 import loadout_generator as lg  # noqa: E402
 import menu_preview  # noqa: E402
+import room_layout  # noqa: E402
 import installer  # noqa: E402
 import build_release  # noqa: E402
 
@@ -52,7 +53,7 @@ def imports_of(path: str) -> set[str]:
 
 # What the generator may import (stdlib, and the repository's own SGO / CPK readers the real builder was measured to use).
 ALLOWED = {'__future__', 'contextlib', 'os', 'sys', 'traceback', 'typing', 'msvcrt', 'gamedir', 'modfiles', 'support_loadout',
-           'menu_preview', 'rootcpk'}   # the 3D preview's menu SGOs (stage 7), made like the variants
+           'menu_preview', 'rootcpk', 'room_layout'}   # the preview's menu SGOs (stage 7), the screen's layouts (stage 4)
 got = imports_of(os.path.join(ROOT, 'tools', 'loadout_generator.py'))
 check(got <= ALLOWED, f'loadout_generator imports only {sorted(ALLOWED)}: {sorted(got - ALLOWED)}')
 for heavy in build_release.GENERATOR_EXCLUDES:
@@ -93,6 +94,9 @@ with tempfile.TemporaryDirectory(prefix='edf6vc-slim-') as root:
     for rel in menu_preview.rels():   # the preview's menu SGOs already there (the empty Root.cpk cannot make them)
         os.makedirs(os.path.dirname(os.path.join(root, 'Mods', rel)), exist_ok=True)
         open(os.path.join(root, 'Mods', rel), 'wb').close()
+    os.makedirs(os.path.join(root, 'Mods', 'UI'))
+    for name in room_layout.LAYOUTS:   # the menu screen's layouts already there (the empty Root.cpk cannot make them)
+        open(os.path.join(root, 'Mods', 'UI', name), 'wb').close()
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
         check(lg.run(['loadout-generate', root]) == 0, 'nothing to make: exit 0')

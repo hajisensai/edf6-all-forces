@@ -21,6 +21,7 @@ import installer  # noqa: E402
 import ledger  # noqa: E402
 import menu_preview  # noqa: E402
 import modfiles  # noqa: E402
+import room_layout  # noqa: E402
 import support_loadout as sl  # noqa: E402
 
 checks = 0
@@ -95,7 +96,9 @@ def recording_rename(src: str, dst: str) -> None:
     real_rename(src, dst)
 
 
-saved = (builtins.input, sl._build_one, modfiles.game_running, os.rename, sl.rootcpk.Game)
+saved = (builtins.input, sl._build_one, modfiles.game_running, os.rename, sl.rootcpk.Game, room_layout.build)
+LAYOUTS = {'UI/LYT_HUIONLINEROOM.SGO': b'room layout', 'UI/LYT_HUIHQMAIN.SGO': b'hq layout'}
+room_layout.build = lambda root: dict(LAYOUTS)   # the fake game's Root.cpk is no archive (the real one: room_layout_test)
 builtins.input = no_prompt
 sl._build_one = fake_build_one
 modfiles.game_running = lambda *a: True   # the game "running": the generator does not care
@@ -124,11 +127,13 @@ try:
         written = {os.path.relpath(dst, os.path.join(game, 'Mods')).replace('\\', '/').upper() for _, dst in renames}
         check({w for w in written if not w.startswith('PLUGINS/')} ==
               {'OBJECT/EDF6VC_NPC_LANCE_L_1E3A8A_X.SGO', 'OBJECT/' + PENDING_NAME, 'WEAPON/EDF6VC_AP_25.SGO'} |
-              {w for w in written if w.startswith('OBJECT/EDF6VC_LO_TANK_')}, f'the new files written: {written}')
+              {w for w in written if w.startswith('OBJECT/EDF6VC_LO_TANK_')} | set(LAYOUTS), f'the new files written: {written}')
         check(not [n for d, _, fs in os.walk(game) for n in fs if '.tmp-' in n], 'no temporary file left')
         check(read(sl.pending_path(game)) == pending_before, 'the pending list is left to the plugin (it appends while running)')
         led = ledger.Ledger(game)
-        check(all('loadout' in led.owners(w) for w in written if not w.startswith('PLUGINS/')),
+        check(all('roomui' in led.owners(w) for w in LAYOUTS) and all(read(led.disk(w)) == b for w, b in LAYOUTS.items()),
+              'the missing menu layouts written as new files, owned by roomui in the ledger')
+        check(all('loadout' in led.owners(w) for w in written if not w.startswith(('PLUGINS/', 'UI/'))),
               'the new files are the loadout tool\'s in the ledger: uninstall removes them')
         st = status(game)
         check(st['state'] == 'ok' and st['made'] == '4' and st['failed'] == '0' and st['message'], f'status ok: {st}')
@@ -141,6 +146,13 @@ try:
               'a second run: nothing missing, nothing built or written')
         check({n: read(os.path.join(dp, n)) for dp, _, fs in os.walk(obj) for n in fs} == before, 'every file as it was')
         check(status(game)['message'] == '没有需要生成的文件', 'said so')
+        with open(led.disk('UI/LYT_HUIHQMAIN.SGO'), 'wb') as f:   # a layout already there (another mod's, or ours older)
+            f.write(b'another layout')
+        os.remove(led.disk('UI/LYT_HUIONLINEROOM.SGO'))
+        code, out = run_generate(game)
+        check(code == 0 and read(led.disk('UI/LYT_HUIHQMAIN.SGO')) == b'another layout' and
+              read(led.disk('UI/LYT_HUIONLINEROOM.SGO')) == LAYOUTS['UI/LYT_HUIONLINEROOM.SGO'],
+              'only the missing layout written, the one there never replaced')
 
         # A file made by someone else between the check and the rename: theirs stays.
         def racing_rename(src: str, dst: str) -> None:
@@ -226,7 +238,7 @@ try:
         check(not [n for n in installer.GENERATOR_FILES if os.path.exists(os.path.join(game, 'Mods', 'Plugins', n))],
               "uninstall's remove_generator: the copy, its status file and its lock gone")
 finally:
-    builtins.input, sl._build_one, modfiles.game_running, os.rename, sl.rootcpk.Game = saved
+    builtins.input, sl._build_one, modfiles.game_running, os.rename, sl.rootcpk.Game, room_layout.build = saved
 
 undo = open(os.path.join(ROOT, 'tools', 'installer.py'), encoding='utf-8').read().split('\ndef uninstall(', 1)[1]
 check('remove_generator(game)' in undo.split('\ndef ', 1)[0], 'uninstall removes the generator')

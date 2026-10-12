@@ -124,6 +124,12 @@ def _generate_held(game: str) -> int:
         return 1
     for path in written:
         print('写入', path)
+    try:   # the menu's screen, when an install before it did not write it: new files only, as the variants
+        import room_layout
+        for path in room_layout.install_missing(game):
+            print('写入', path)
+    except Exception as e:   # said in the status, never swallowed
+        errors['LYT_HUIONLINEROOM.SGO / LYT_HUIHQMAIN.SGO'] = f'{type(e).__name__}: {e}'
     state, message = generate_summary(written, errors)
     write_generate_status(game, state, len(written), len(errors), message)
     print(generate_line(state, len(written), len(errors)))

@@ -355,3 +355,100 @@ Coop 侧接口是 edf-coop-stable `feat/room-member-attributes`（`EDF6CoopGetMe
 3. 冻结的精简生成器只在假游戏目录里跑过（无事可做 → ok、缺文件 + 假 Root.cpk → failed 并写原因、用法错 / 非游戏目录 → 退出码 2）；
    用真实 Root.cpk 生成只在 Python 进程内（不写盘）验证过。
 4. 成员显示为「成员 N」（Coop 只有 ProductUserId）；要显示名字需要 Coop 再导出昵称。
+## 阶段 4：画面布局补丁 + 两个画面的 OnUpdate + 色块 / 图标 / 文字驱动（2026-10-12，分支 `feat/rl-screen`，只做了离线验证）
+
+没有启动 / 关闭游戏，没有往游戏目录写任何文件；只读了 Root.cpk、EDF.dll 与游戏目录里的日志。补的逆向事实在
+`docs/room-ui-re.md` §7。
+
+### 布局补丁（`tools/room_layout.py`）
+
+- 读 Root.cpk 的 `UI/LYT_HUIONLINEROOM.SGO`（HUiRoom）与 `UI/LYT_HUIHQMAIN.SGO`（HUiHQMain），加一棵子树，写 `Mods/UI/` 同名文件。
+  `LYT_MAINFRAME` 不碰（断言拒绝）。
+- 新增成员名一律 `vc` 开头、≤ 7 个字符（游戏的 `std::wstring` 就地存放）；原版有同前缀成员就拒绝：
+  `vcRoot`（透明、整屏，插件写 +0x1F8 显隐）→ `vcBack`（`Window_Test01_skin`，GLOBAL 资源组）、`vcHead`、`vcU00..13`（单位列）、
+  `vcR00..13`（行框，内含 `T` 文字 / `A` `B` 色块 `ColorChipBox_skin` / `I` 图标 `HUDIconTexture_skin` / `N` 备注）、`vcS0..3`（状态）、
+  `vcHint`。全部 `Layout` / `TextField`，**没有 `Button`**（不进画面的焦点链）。面板右边界 x = 1128（1920×1080 布局坐标），右侧留给 3D 预览。
+- 子树追加为 BaseFrame 的最后一个子节点（最后绘制，盖在画面上）。用 `pylib/sgo.py write_depth_first` 写：它对两个原版文件逐字节还原；
+  `patch()` 自检「去掉新增部分 == 原版文件」，不符就抛异常、不写。
+- 安装器：`install()` 在「全部生成完毕」之前构建（`build_room_layouts`，Root.cpk 读不了时说明原因、不写布局），写入时
+  `room_layout.install`（台账 owner `roomui`）；已有一份台账不认的布局（别的 mod 的）→ 跳过并说明；卸载（选项 1、2 都）`room_layout.remove`。
+  `loadout-generate`：两份布局缺哪份就 `put_new` 哪份（游戏运行中也安全：从不覆盖已有文件），出错计入状态文件。
+  `tools/build_release.py` 的 hidden imports 加了 `room_layout`。
+
+### 插件（`src/room_ui.{h,cpp}`，纯逻辑 `src/room_ui_logic.h`）
+
+- 安装（`InstallRoomUi`，plugin.cpp 在 `InstallStockGauges` 之后）：先核对全部代码字节——要调的函数（0x8DAD00、0x839600、0x839560、
+  0x8859C0、0x863690、0x839FD0、0x824D40、0x953D80、0x7F63E0 的开头）、取偏移的指令（色块 0x88014D 的 +0x98/+0xA0、字色 0x8BC68C /
+  0x7F890C 的 +0x2B0、显隐 0x7E999C 的 +0x1F8）、两个原版 OnUpdate（0x8FDFE0、0x89F740）；任一不符 `HOOK roomui REFUSED`，两个画面都不动。
+  手柄表的签名（0x1182A00、0x1188315、0x1188A4D）单独核，不符只关手柄（键盘照常）。然后**读两个槽的当前值**，`PatchVtableSlot`（CAS）
+  转调——房间槽此时通常已是 EDF6Coop 的钩子。`roompreview::InstallPreviewHooks()` 也在这里调（阶段 7 前是桩，返回 0）。
+- 每帧（UI 线程）：
+  1. 键盘（游戏在前台、地图没扣住按键时才读）+ 游戏自己的手柄表（两个槽，+0x4C 按住、+0x4D 抑制），`KeysDown` 映射成
+     `room_menu.h Keys`；手柄开关是组合键（默认 L3+R3），组合按住时它的按钮不当别的键。
+  2. `0x8DAD00(this, 真实 ctx)` 非空才 `Step`（含开关）；为空（子画面、对话框、过场）菜单隐藏并冻结，编辑保留。
+  3. 打开（`Act::opened`）：从运行时目录 `SupportCallKey / SupportCallSeats / SupportCallName` 列出有座位或载具键的单位（标签走 hudtext），
+     `Load` 读 ini（`GetPrivateProfileStringW`，`[VehicleCrew]`）；目录为空时退回 `kDefaultUnits`。
+  4. 输入挡板（`TakeInput`）：打开期间、以及关闭后直到所有菜单键松开，拷贝 ctx（0x18 字节）、副本 +8 置空，用副本调下一个 OnUpdate；
+     否则原样转调。
+  5. 保存（`Act::save`）：`CollectSave` → `SaveItems`（与改过的单位逐个配对、核对键名）→ 逐个 `SaveSupportLoadout`；某个失败就停
+     （之前的已写入并标记为已保存），状态行写原因；全部成功后 `MarkSaved`，菜单**留在单位列表**（看生成进度），`StartVariantGeneration`；
+     状态每 0.5 秒读一次 `VariantGenerationStatus`。
+  6. 房间：`roomsync::TickRoomSync` 每帧，`RoomSyncLines` 进状态行；客机（`!OnlineHostOnly()`）加「本局以房主配置为准」。
+     画面对象换了（换房间 / 回 HQ）→ `LeaveRoomSync`、丢弃未保存的编辑；任务开始 `ResetRoomUi`（mission.cpp）只置标志，
+     下一个画面帧（UI 线程）再做，遵守 room_sync.h / room_preview.h「只在 UI 线程调用」的约定。
+  7. 预览：游标在小队的某个士兵行（行 / 字段层）→ `ShowPreview`（规格变了才再调），否则 `HidePreview`；每帧 `TickPreview(显示中)`。
+  8. 绘制：只在值变了时写（缓存每个元素上次写的内容；换画面对象、每次打开菜单时作废重写）。根节点：画面第一帧就藏（布局文件里它是显示的），
+     之后只在显隐变化时写。文字 = 0x839600 取下标 → 0x8859C0 取 TextField → SetText + 字色 +0x2B0（游标行黄、ini 值被拒的单位橙、警告红），
+     显隐写 0x839560 取到的组件；色块 = 组件皮肤 weak_ptr 副本（弱引用 +1）→ `0x824D40(.., L"ColorChipBox", "color", float4)`；
+     图标 = 组件副本（uses +1）→ `0x953D80` → `0x7F63E0(tex, wstring 路径)`，加载失败该图标保持隐藏并记日志（不每帧重试）。
+     找不到 `vcRoot`（没装布局 / 别的 mod 的布局）只记一次日志，画面原样。
+- ini：`RoomLoadout=1`、`RoomLoadoutKey=0x71`（F2；EDF6Coop 在房间用 F3 / F4 / F6 / F7 / F8 / Tab，调试召唤 F5~F9，本插件 ini 里没有别的 F 键）、
+  `RoomLoadoutButton=192`（L3+R3），`plugin.cpp` 读取，日志 `CONFIG roomLoadout=...`。`Enabled=0` 或 `RoomLoadout=0`：不读按键、菜单关闭，
+  根节点照样藏着。
+- 文字：hudtext 新增 `room*` 条目（18 个单位、14 种兵、10 种挂载、各行、状态、提示），四种语言；纯数字 / 符号（`%d. %ls`、`x%d`、
+  `< HE / AP >`）放在 `room_ui_logic.h`，不进翻译表（`hudtext_check` 的「未翻译」规则）。
+- 调色板仍是 `room_menu.h kDefaultPalette`（16 色），**没有**换成游戏 HQ 调色板（0x880010 的色值在 layout+0x780，未读出）。
+
+### EDF6Coop 加载顺序（发现的问题）
+
+设计里「两个 mod 的加载顺序不影响对方」**不成立**：Coop 安装时要求房间槽指向 0x8FDFE0，否则整个 Coop 拒绝（`REFUSED ... nothing was
+changed`）。实际 EDFModLoader 按文件名加载（ModLoader.log：EDF6Coop 先于 EDF6VehicleCrew），Coop 先挂、本插件转调它，没有问题。
+防护：房间槽仍是原版、而 `EDF6Coop.dll` 就在同目录却还没加载时，本插件**不挂房间槽**（日志 REFUSED，HQ 照常），不让 Coop 整个失效。
+根治要 Coop 改成「读当前槽值转调」（edf-coop-stable 的改动，不在本分支）。
+
+### 测试（2026-10-12）
+
+| 测试 | 结果 |
+|---|---|
+| `room_ui`（C++，ctest，`tests/room_ui_test.cpp`） | 599 项全过：元素名（≤7 字符、唯一、与布局一致）、键盘 / 手柄映射与组合键、游戏手柄表读法（两槽、抑制、缺通道）、输入挡板（含关闭键未松开）、被遮挡时冻结、行外观与图标表、字色、四种语言的各行文字、状态行顺序与上限、目录取单位、预览选人、保存配对 |
+| `room_layout`（Python，ctest） | 307 项全过：真实 Root.cpk 两个布局补丁后解析回来、原版成员全部不变、去掉新增部分逐字节等于原版、两次补丁被拒、没有 LYT_MAINFRAME、面板在 x≤1128、头文件里的名字 / 行数 / 图标与生成器一致、图标都在 Root.cpk；台账：覆盖自己的、跳过别人的、`install_missing` 只建缺的、卸载 |
+| `room_ui_sigs`（Python，ctest，EDF.dll 当文件读） | 28 项全过：`room_ui.cpp` 的 18 组签名逐字节等于 EDF.dll，两个槽在文件里指向原版，偏移常量与签名里的指令一致，色块调用点调的是 0x824D40、参数是 L"ColorChipBox" |
+| `loadout_generate`（Python，改） | 47 项全过：新增「缺布局时作为新文件写入、已有的不替换、台账 owner roomui」 |
+| `room_menu` / `loadout_writer` / `support_loadout` / `support_config` / `support_*_ini` | 全过（ctest 10/10） |
+| `hudtext_check` | all ok |
+| `tools/selftest.py` | 172 项：修改前整跑 4 项失败（`release_imports` 缺 hidden import、`map_wired` 新按键读取者、两个安装测试的假 Root.cpk 抛 struct.error），修好后这 4 项单独重跑全过 |
+| 变异 | 去掉挡板的「关闭后锁存」→ room_ui 4 项失败；去掉组合键屏蔽 → 1 项失败；改坏一个签名字节 → room_ui_sigs 失败。均已还原 |
+
+DLL（RelWithDebInfo，Ninja）编译通过，无警告。
+
+### 没在游戏里验证的（全部是静态推断或接口约定）
+
+1. 补丁布局能被游戏加载：`vc*` 元素在两个画面实例化、子树挂 BaseFrame 末尾不影响原有元素的排布与焦点、`Window_Test01_skin` /
+   `ColorChipBox_skin` / `HUDIconTexture_skin` 在两个画面都已加载（房间资源组是否含 GLOBAL 组没逐条核）。
+2. 坐标：元素 pos 相对父元素、1920×1080 布局坐标在别的分辨率按比例缩放；面板不挡住 3D 预览（预览挪到右侧是阶段 7 的事）；
+   字号 18~28 在中文 / 日文下放得下（`font_flag [4,10]` 的含义没解码）。
+3. 显隐：写根节点 +0x1F8=0 能连子节点一起藏、每帧绘制都读它；画面第一帧之前（打开时的滑入过场）面板会不会闪一下。
+4. **没有「初始隐藏」属性**：插件拒绝安装（签名不符，如游戏更新）或没加载时，补丁布局里的面板背景与 28 个色块（模型默认色）会一直显示在
+   房间 / HQ 上。缓解：卸载同时删布局；安装器每次从当前 Root.cpk 重新生成。可选改法（未做）：背景与色块改用贴图皮肤、由插件设贴图，
+   没有插件时什么也不画。
+5. 输入：副本 ctx +8 置空后房间 / HQ 确实不响应键鼠与手柄、网络与成员刷新照常；键盘文字聊天是否另走一路；关闭键松开前一直置空足以防止
+   被当成 cancel；手柄开关组合（L3+R3）在房间里本身没有功能；F2 不是游戏自己的默认键（游戏键位默认值没查到）。
+6. `0x8DAD00` 为空的各种情况（消息框、换装备子画面、开打过场、Coop 的对话框）菜单都会藏起来；房间状态 +0xAC0 没用。
+7. 文字：SetText 在 [tf+0x228]==0（字体未就绪）时直接返回；插件先看 +0x228，为空就不记缓存、下一帧再写（+0x228 的含义是字体是推断）。
+8. 色块：`0x824D40` 的 float4 是 RGBA 0..1（推断）；ColorChipBox 模型的 "color" 参数按 16 字节拷贝；弱引用计数的加减与游戏一致（逐条核了调用点）。
+9. 图标：`0x7F63E0` 同步绑定（宽高立刻可读），首帧显示是否需要等待 GPU 上传；重装 `canon.dds` 等借用图标是否好看；图标元素 80×40 的比例。
+10. 手柄：表里 +0x4C 是按住、+0x4D 抑制（反汇编证实），游戏失去前台时是否置抑制没核；两个槽都读（分屏第二个手柄也能操作菜单）。
+11. 房间同步 / 预览：现在是桩（阶段 6 / 7），调用时机按接口约定；`LeaveRoomSync` 在任务开始后的下一个画面帧才调（UI 线程约定），
+    任务期间不会有画面帧。
+12. 客机判定：`OnlineHostOnly()` 在房间阶段（未进任务）是否已知道主客，没核。
+13. 保存后后台生成器的状态显示（生成中 / 就绪 / 失败）只在菜单打开时看得到。
