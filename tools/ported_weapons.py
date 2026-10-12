@@ -154,12 +154,31 @@ def _names(p: Port) -> dict[str, str]:
     return {lang.lower(): t[0] for lang, t in p.text.items()}
 
 
-def _swap_cues(v: dsgo.Value, cues: dict[str, str]) -> dsgo.Value:
+def _swap_cues(v: dsgo.Value, cues: dict[str, str], t: dsgo.Value = None) -> dsgo.Value:
+    """`v` with each cue of `cues` (one no EDF6 bank holds) swapped for the template's at the same place, `t` (the
+    template's value there). A sound entry holding one, a list such as FireSe [kind, cue, volume, pitch, instances,
+    distance] whose template counterpart holds the new cue, becomes the template's entry whole: its numbers belong to
+    its cue. A looping cue (EDF5's *LS) plays with one instance, every EDF6 weapon using one says 1; under 4.1's 2 the
+    second instance kept sounding after the trigger was let go (2026-10-12, the user). Elsewhere the string alone."""
     if isinstance(v, str):
         return cues.get(v, v)
     if isinstance(v, Node):
-        v.items = [_swap_cues(c, cues) for c in v.items]
+        own = [c for c in v.items if isinstance(c, str) and c in cues]
+        if own and isinstance(t, Node) and all(cues[c] in t.items for c in own):
+            v.items, v.names = copy.deepcopy(t.items), dict(t.names)
+            return v
+        v.items = [_swap_cues(c, cues, _at(t, i, v)) for i, c in enumerate(v.items)]
     return v
+
+
+def _at(t: dsgo.Value, i: int, v: Node) -> dsgo.Value:
+    """The template's counterpart of `v`'s i-th member: by name when it has one, else by position."""
+    if not isinstance(t, Node):
+        return None
+    name = v.names.get(i)
+    if name is not None:   # a key the template lacks: no counterpart
+        return next((t.items[k] for k, n in t.names.items() if n == name), None)
+    return t.items[i] if i < len(t.items) else None
 
 
 class Models:
@@ -268,7 +287,7 @@ def build_sgo(p: Port, stock, root: str | None, models: Models | None = None) ->
         doc.root.set('AmmoDamageAttribute', Node([float(v) for v in p.damage_attribute.values()],
                                                  dict(enumerate(p.damage_attribute))))
     if p.cues:
-        _swap_cues(doc.root, p.cues)
+        _swap_cues(doc.root, p.cues, dsgo.parse(stock(f'WEAPON/{p.template.upper()}.SGO')).root)
     if p.cls == edf5port.SUB and doc.root.get('xgs_scene_object_class') != edf5port.SUB:
         template = dsgo.parse(stock(f'WEAPON/{p.template.upper()}.SGO')).root
         edf5port.to_sub(doc, template)

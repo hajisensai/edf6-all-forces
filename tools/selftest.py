@@ -6104,6 +6104,31 @@ def edf41_weapons_match_developers() -> None:
                 assert isinstance(va, dsgo.Node) == isinstance(vb, dsgo.Node), f'{mine} {k}: {dsgo.to_py(va)} / {dsgo.to_py(vb)}'
         assert dsgo.to_py(a.get('EnergyChargeRequire')) == dsgo.to_py(b.get('EnergyChargeRequire')) == [-1.0, -1.0]
 
+
+@test
+def ported_weapon_swapped_cue_takes_its_entry() -> None:
+    """A cue no EDF6 bank holds is swapped for the template's at the same place, and a sound entry holding it takes the
+    template's entry whole: 4.1's FireSe [0, cue, 0.79, 0.84, 2, 25] under EDF5's looping PA-11LS kept 2 instances,
+    the second sounding on after the trigger was let go (2026-10-12, the user: 「开火后即使停火了还会有空谷传响」); every
+    EDF6 weapon with a looping *LS cue says 1. Where the template's counterpart lacks the new cue only the string is
+    swapped; named members are matched by name, a key the template lacks has no counterpart (no KeyError)."""
+    import copy
+    import dsgo
+    import ported_weapons as pw
+    Node = dsgo.Node
+    cues = {'weapon_Ranger_AF_AF14ST': 'e5w_AF_PA-11LS', 'hit41': 'hit6'}
+    template = Node([Node([0.0, 'e5w_AF_PA-11LS', 1.0, 1.0, 1.0, 25.0]), Node([0.0, 'other6', 1.0, 1.0, 2.0, 25.0]),
+                     5.0], {0: 'FireSe', 1: 'AmmoHitSe', 2: 'Only6'})
+    own = Node([Node([0.0, 'weapon_Ranger_AF_AF14ST', 0.7943, 0.8409, 2.0, 25.0]),
+                Node([0.0, 'hit41', 0.5, 1.0, 2.0, 20.0]), Node(['hit41']), 1.0],
+               {0: 'FireSe', 1: 'AmmoHitSe', 2: 'Nested', 3: 'Only41'})
+    out = pw._swap_cues(copy.deepcopy(own), cues, template)
+    assert out.get('FireSe').items == [0.0, 'e5w_AF_PA-11LS', 1.0, 1.0, 1.0, 25.0]
+    assert out.get('AmmoHitSe').items == [0.0, 'hit6', 0.5, 1.0, 2.0, 20.0]   # the template's entry has other6
+    assert out.get('Nested').items == ['hit6'] and out.get('Only41') == 1.0
+    assert pw._swap_cues(copy.deepcopy(own), cues).get('FireSe').items[4] == 2.0   # no template: the string alone
+
+
 def main() -> int:
     import rootcpk
     game = rootcpk.DEFAULT_GAME
