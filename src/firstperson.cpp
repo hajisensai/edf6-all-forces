@@ -134,7 +134,8 @@ constexpr float kGadgetFar=10.0f,kGadgetHigh=3.7f;   // m from the feet: the sto
 constexpr float kOnWeapon=0.18f;   // m: a free hand's wrist this near its other hand's weapon's axis holds it
 // The arms (the four classes share the names, fp-render-re.md §8): the upper arm, the forearm and their twists, the
 // hand, its fingers, the weapon mounts. Not the shoulder (kata: its pad hangs in front of the view): the arm ends at
-// the shoulder, beside and behind the eye. Ending it at the elbow (the user, 2026-10-13, with a screenshot: "the arm
+// the shoulder, which FitArm puts beside and below the eye (the third-person arm moved with its weapon to the bottom
+// of the view reached back up through the middle of it). Ending it at the elbow (the user, 2026-10-13, with a screenshot: "the arm
 // half shown, clearly hollow") left the forearm's open sleeve in the middle of the view: collapsing the rest onto the
 // eye hides stretched triangles, it does not close a mesh's open end, so the cut must be where the view is not.
 const wchar_t* const kArmBones[]={L"jowan",L"kawan",L"te_",L"fing",L"ring",L"little",L"index",L"middle",
@@ -791,6 +792,52 @@ int InstancesOf(unsigned char* model,unsigned char** out) noexcept {
 
 float saved[kMostInsts][kMostBones*16];
 
+// --- The arms posed for the first person (fp_view.h SolveElbow / SegmentMap) ---
+// The shoulder's place in the eye's frame (right, up, ahead; times the viewmodel's scale): down and a little behind,
+// out by half the soldier's own shoulder width (kata_l to kata_r). The elbow bends out and down.
+constexpr float kShoulderDown=-0.24f,kShoulderBack=-0.06f,kPoleOut=0.6f,kPoleDown=1.0f,kPoleBack=0.2f;
+struct ArmFit { bool ok; M4 upper,fore; };   // the upper arm's and the forearm's moves after T
+
+int BoneIndex(const unsigned char* inst,const wchar_t* name) noexcept {
+    const auto bones=At<const unsigned char*>(inst,kInstBones);
+    const auto n=At<std::int32_t>(inst,kInstCount);
+    for(std::int32_t i=0;bones && i<n && i<kMostBones;++i) {
+        const auto nm=At<const wchar_t*>(bones+static_cast<std::size_t>(i)*kBoneStride,0);
+        if(nm && std::wcscmp(nm,name)==0)return i;
+    }
+    return -1;
+}
+
+// One arm's moves (`hand` kRight / kLeft) from the instance's draw pose (`pose`, before T) and the hand's T.
+ArmFit FitArm(const unsigned char* inst,const float* pose,const M4& t,int hand) noexcept {
+    ArmFit fit{};
+    const wchar_t* const names[2][4]={{L"jowan0_r",L"kawan0_r",L"te_r",L"kata_r"},{L"jowan0_l",L"kawan0_l",L"te_l",L"kata_l"}};
+    int at[4];
+    for(int k=0;k<4;++k)if((at[k]=BoneIndex(inst,names[hand][k]))<0)return fit;
+    const int otherKata=BoneIndex(inst,names[1-hand][3]);
+    if(otherKata<0)return fit;
+    float s0[3],e0[3],h0[3];
+    fpview::Point(t,pose+at[0]*16+12,s0);fpview::Point(t,pose+at[1]*16+12,e0);fpview::Point(t,pose+at[2]*16+12,h0);
+    float d[3];
+    fpview::Sub(e0,s0,d);const float upper=fpview::Length(d);
+    fpview::Sub(h0,e0,d);const float fore=fpview::Length(d);
+    fpview::Sub(pose+at[3]*16+12,pose+otherKata*16+12,d);
+    const Config& c=Cfg();
+    const float half=0.5f*fpview::Length(d),scale=c.fpScale,out=hand==kRight ? 1.0f : -1.0f;
+    // The camera's rows: its first points to the screen's left, so right = -row 0.
+    const float* cam=reinterpret_cast<const float*>(st.cam+kCamMatrix);
+    float shoulder[3],pole[3];
+    for(int i=0;i<3;++i) {
+        const float right=-cam[i],up=cam[4+i],ahead=cam[8+i];
+        shoulder[i]=cam[12+i]+scale*(out*half*right+kShoulderDown*up+kShoulderBack*ahead);
+        pole[i]=out*kPoleOut*right-kPoleDown*up-kPoleBack*ahead;
+    }
+    float elbow[3];
+    if(!fpview::SolveElbow(shoulder,h0,upper,fore,pole,elbow))return fit;
+    fit.ok=fpview::SegmentMap(s0,e0,shoulder,elbow,&fit.upper) && fpview::SegmentMap(e0,h0,elbow,h0,&fit.fore);
+    return fit;
+}
+
 // Every pose of `inst` through T; the body's bones that are not the arms' collapsed onto the eye. A vertex weighed by
 // an arm bone and one of those lies between its arm place and the eye, on the ray the arm place is seen along, so it
 // shows where the arm does (at another depth): no triangle is stretched across the view; one weighed by those alone is
@@ -802,6 +849,8 @@ void Pose(unsigned char* inst,const M4* t,bool body,const float* eye,float* back
     const auto bones=At<const unsigned char*>(inst,kInstBones);
     if(!pose || !bones || n<=0 || n>kMostBones)return;
     std::memcpy(backup,pose,static_cast<std::size_t>(n)*64);
+    ArmFit fit[2]{};
+    if(body && Cfg().fpArmIk)for(int hand=kRight;hand<=kLeft;++hand)fit[hand]=FitArm(inst,backup,t[hand],hand);
     for(std::int32_t i=0;i<n;++i) {
         float* p=pose+i*16;
         const wchar_t* name=At<const wchar_t*>(bones+static_cast<std::size_t>(i)*kBoneStride,0);
@@ -811,7 +860,12 @@ void Pose(unsigned char* inst,const M4* t,bool body,const float* eye,float* back
             std::memcpy(p,fpview::Collapse(eye).m,64);
             continue;
         }
-        const M4 moved=fpview::Mul(MatrixAt(reinterpret_cast<const unsigned char*>(p)),t[left ? kLeft : kRight]);
+        const int hand=left ? kLeft : kRight;
+        M4 moved=fpview::Mul(MatrixAt(reinterpret_cast<const unsigned char*>(p)),t[hand]);
+        if(body && fit[hand].ok && name) {   // the arm posed for the first person: its upper arm and forearm turned
+            if(std::wcsncmp(name,L"jowan",5)==0)moved=fpview::Mul(moved,fit[hand].upper);
+            else if(std::wcsncmp(name,L"kawan",5)==0)moved=fpview::Mul(moved,fit[hand].fore);
+        }
         std::memcpy(p,moved.m,64);
     }
 }

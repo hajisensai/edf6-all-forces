@@ -238,6 +238,7 @@ struct Config {
     float fpScale=0.5f;             // ...shrunk about the eye this much (the same picture, nearer: walls do not cut it)
     float fpNear=0.03f;             // ...the camera's near clip, m (0: the stock 0.1)
     bool fpAimSnap=true;            // ...the aim follows the mouse at once (this machine's look smoothing off)
+    bool fpArmIk=true;              // ...the arms posed for the first person: shoulders beside and below the eye
     bool fpFit=true;                // ...a bulky or long weapon held further off, a shield out to the side
     bool fpCulling=true;            // ...the arms and weapon handed to Umbra around the eye (never culled)
     bool fpMotion=true;             // ...the arms and weapon sway, bob, kick, dip at a reload, a switch, a sprint, a roll

@@ -136,6 +136,42 @@ void Anchored() {
     Expect(Near(cosine,1.0f,1e-5f),"...pointing along the camera's forward",cosine);
 }
 
+void Arms() {
+    float shoulder[3]={0.0f,0.0f,0.0f};
+    const float hand[3]={0.1f,-0.2f,0.4f},pole[3]={1.0f,-1.0f,0.0f};
+    float elbow[3];
+    const bool ok=SolveElbow(shoulder,hand,0.30f,0.27f,pole,elbow);
+    float se[3],eh[3];
+    Sub(elbow,shoulder,se);Sub(hand,elbow,eh);
+    Expect(ok && Near(Length(se),0.30f) && Near(Length(eh),0.27f),"the elbow at the upper arm's and forearm's lengths",Length(se),Length(eh));
+    float sh[3],mid[3],off[3];
+    Sub(hand,shoulder,sh);Unit(sh);
+    Sub(elbow,shoulder,mid);
+    const float a=Dot3(mid,sh);
+    for(int i=0;i<3;++i)off[i]=mid[i]-sh[i]*a;
+    Expect(Dot3(off,pole)>0.0f,"...bent toward the pole",Dot3(off,pole));
+    float far[3]={0.0f,0.0f,-1.0f},e2[3];
+    SolveElbow(far,hand,0.30f,0.27f,pole,e2);
+    float fh[3];
+    Sub(hand,far,fh);
+    Expect(Near(Length(fh),0.57f*0.999f,1e-3f),"out of reach: the shoulder slides toward the hand",Length(fh));
+    const float a0[3]={1,2,3},b0[3]={1,2,4},a1[3]={-5,0,1},b1[3]={-5,1,1};
+    M4 m;
+    const bool mok=SegmentMap(a0,b0,a1,b1,&m);
+    float pa[3],pb[3];
+    Point(m,a0,pa);Point(m,b0,pb);
+    Expect(mok && Near(pa[0],-5) && Near(pa[1],0) && Near(pa[2],1) && Near(pb[0],-5) && Near(pb[1],1) && Near(pb[2],1),
+           "a segment map takes a0 to a1 and b0 to b1",pb[1],pb[2]);
+    const float c0[3]={1,3,3};   // a point beside the segment keeps its distance from it
+    float pc[3],d[3];
+    Point(m,c0,pc);Sub(pc,pa,d);
+    Expect(Near(Length(d),1.0f),"...rigidly (no scale)",Length(d));
+    const float b2[3]={1,2,2};   // turned half round
+    Expect(SegmentMap(a0,b0,a0,b2,&m),"a half turn is a map too");
+    Point(m,b0,pb);
+    Expect(Near(pb[2],2.0f),"...and lands right",pb[2]);
+}
+
 void Motion() {
     const float pivot[3]={0.15f,-0.2f,0.35f};
     const M4 none=MotionMatrix(0,0,0,0,0,0,pivot);
@@ -199,6 +235,7 @@ int main() {
     Collapse_();
     Eye();
     Anchored();
+    Arms();
     Motion();
     Springs();
     std::printf(failures ? "%d FAILED\n" : "all passed\n",failures);
