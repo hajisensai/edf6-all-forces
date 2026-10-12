@@ -85,6 +85,37 @@ void Input() {
     PadComboName(0xFFFF,name,8);Expect(std::wcslen(name)<8,"a long combination cut to the buffer");
 }
 
+// The game's pad table as room_ui.cpp reads it: two slots, a channel object per button, +0x4C held, +0x4D suppressed.
+void PadTable() {
+    static unsigned char channels[2][0x100][0x50]{};
+    const unsigned char* table[2][0x100]{};
+    for(int s=0;s<2;++s)for(const PadChannel& c:kPadChannels)table[s][c.offset]=channels[s][c.offset];
+    const auto read=[&](int slot,std::uint32_t offset) -> const unsigned char* { return table[slot][offset]; };
+    Expect(PadBits(read)==0,"nothing held");
+    channels[0][0x70][kChannelHeld]=1;
+    Expect(PadBits(read)==kPadA,"slot 0 channel 0x70: A (XInput 0x1000)");
+    channels[1][0x58][kChannelHeld]=1;
+    Expect(PadBits(read)==(kPadA|kPadDown),"slot 1's down joins slot 0's A");
+    channels[0][0x70][kChannelSuppressed]=1;
+    Expect(PadBits(read)==kPadDown,"a suppressed channel (the game's own input off) is not held");
+    channels[0][0xB0][kChannelHeld]=channels[0][0xB8][kChannelHeld]=1;
+    Expect(PadBits(read)==(kPadDown|0x00C0),"L3 + R3: the default toggle combination");
+    table[0][0x78]=nullptr;channels[0][0x78][kChannelHeld]=1;
+    Expect(!(PadBits(read)&kPadB),"a channel not made: not held");
+    std::set<std::uint32_t> offsets;std::uint16_t all=0;
+    for(const PadChannel& c:kPadChannels){offsets.insert(c.offset);Expect(!(all&c.bit),"one channel per bit");all=static_cast<std::uint16_t>(all|c.bit);}
+    Expect(offsets.size()==14 && all==0xF3FF,"14 channels: the d-pad, A B X Y, Back Start, LB RB, L3 R3");
+}
+
+void Colours() {
+    ViewRow r;
+    Expect(RowColour(nullptr)==kWhite && RowColour(&r)==kWhite,"plain row white");
+    r.cursor=true;Expect(RowColour(&r)==kCursorColour,"cursor row highlighted");
+    r.cursor=false;r.refused=true;Expect(RowColour(&r)==kRefusedColour,"refused unit marked");
+    r.changed=true;Expect(RowColour(&r)==kWhite,"refused but changed: the edit is what counts");
+    Expect(StatusColour(true)==kWarnColour && StatusColour(false)==kWhite,"status colours");
+}
+
 void GateAndPlan() {
     Gate g;
     Expect(!TakeInput(g,false,false),"shut, nothing held: the room reads");
@@ -260,6 +291,8 @@ void Save() {
 int main() {
     Names();
     Input();
+    PadTable();
+    Colours();
     GateAndPlan();
     Looks();
     Texts();

@@ -44,6 +44,7 @@ from __future__ import annotations
 import contextlib
 import os
 import re
+import struct
 import sys
 import traceback
 import time
@@ -582,7 +583,7 @@ def build_room_layouts(game: str) -> dict[str, bytes] | None:
     import room_layout
     try:
         return room_layout.build(game)
-    except (OSError, ValueError, KeyError, AssertionError) as e:
+    except (OSError, ValueError, KeyError, AssertionError, struct.error) as e:   # struct.error: Root.cpk unreadable
         print(f'！ 游戏内战前配置菜单的画面布局没有生成（房间 / HQ 里不显示这个菜单，其它不受影响）：{e}')
         return None
 

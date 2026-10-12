@@ -599,6 +599,9 @@ set_tests_properties(loadout_generate PROPERTIES ENVIRONMENT PYTHONIOENCODING=ut
 # The room / HQ menu's layout patch (tools/room_layout.py): stock members unchanged, the names src/room_ui_logic.h uses.
 add_test(NAME room_layout COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_layout_test.py")
 set_tests_properties(room_layout PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The room menu screen's code checks (src/room_ui.cpp) against EDF.dll read as a file (skipped without the game).
+add_test(NAME room_ui_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_ui_sig_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(room_ui_sigs PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME support_resources COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/support_resource_audit.py")
 set_tests_properties(support_resources PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME online_gate_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/online_gate_guard.py")

@@ -99,6 +99,24 @@ inline void PadComboName(std::uint16_t combo,wchar_t* out,std::size_t n) noexcep
         used+=static_cast<std::size_t>(w);
     }
 }
+// The game's own pad table (EDF+0x2136530, two slots 0x4A0 apart, a pointer per channel; the channel's +0x4C held,
+// +0x4D suppressed: 0x1182A00 / 0x1188270): which channel is which XInput button (the writer reads wButtons into them).
+struct PadChannel { std::uint32_t offset; std::uint16_t bit; };
+inline constexpr PadChannel kPadChannels[]={
+    {0x50,kPadUp},{0x58,kPadDown},{0x60,kPadLeft},{0x68,kPadRight},{0x70,kPadA},{0x78,kPadB},{0x80,kPadX},{0x88,kPadY},
+    {0x90,kPadBack},{0x98,0x0010},{0xA0,0x0100},{0xA8,0x0200},{0xB0,0x0040},{0xB8,0x0080}};
+inline constexpr std::uint32_t kPadSlotSize=0x4A0;
+inline constexpr std::size_t kChannelHeld=0x4C,kChannelSuppressed=0x4D;
+// The XInput-style button bits held on either slot; `channel(slot, offset)` gives that channel's object (nullptr none).
+template<class Channel> std::uint16_t PadBits(Channel channel) noexcept {
+    std::uint16_t bits=0;
+    for(int slot=0;slot<2;++slot)
+        for(const PadChannel& c:kPadChannels) {
+            const unsigned char* ch=channel(slot,c.offset);
+            if(ch && ch[kChannelHeld] && !ch[kChannelSuppressed])bits=static_cast<std::uint16_t>(bits|c.bit);
+        }
+    return bits;
+}
 inline bool AnyDown(const roommenu::Keys& k) noexcept {
     return k.toggle || k.up || k.down || k.left || k.right || k.confirm || k.cancel || k.add || k.remove || k.reset;
 }
@@ -158,6 +176,15 @@ inline Look LookOf(const ViewRow* r) noexcept {
     else if(r->text==RowText::gunAP)l.icon=StoreIcon(8);
     return l;
 }
+// A text's colour (HUiTextField +0x2B0 font colour, RGBA): the cursor's row yellow, a unit whose ini value was refused
+// orange, a warning red, the rest white (the layout's default).
+inline constexpr std::uint32_t kWhite=0xFFFFFFFFu,kCursorColour=0xFFD84CFFu,kRefusedColour=0xFF9A40FFu,kWarnColour=0xFF6A5AFFu;
+inline std::uint32_t RowColour(const ViewRow* r) noexcept {
+    if(!r)return kWhite;
+    if(r->cursor)return kCursorColour;
+    return r->refused && !r->changed ? kRefusedColour : kWhite;
+}
+inline std::uint32_t StatusColour(bool warn) noexcept { return warn ? kWarnColour : kWhite; }
 // A chip's colour as the game's float4 (RGBA 0..1).
 inline void ChipColour(std::uint32_t rgba,float out[4]) noexcept {
     for(int i=0;i<4;++i)out[i]=static_cast<float>((rgba>>(24-8*i))&0xFF)/255.0f;
