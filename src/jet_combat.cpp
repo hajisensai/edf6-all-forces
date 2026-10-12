@@ -577,23 +577,31 @@ void JetLog(const Jet& j,const unsigned char* v,const float* pos,const Arms& a,f
         j.t.target,j.t.flyer ? "(air)" : "",d,j.t.target ? aim[1] : 0.0f,a.guns,a.missiles,hp,hpMax,
         static_cast<float>(j.fuelMs)*0.001f-static_cast<float>(ms-j.bornAt)*0.001f,v[kFireGun],v[kFireMissile],pos[0],pos[2],
         airbound::Depth(JetSoftBox(j),pos),j.m.edgeBack ? " back" : "");
-    // Each weapon's barrel against the nose: the guns must point where the nose does.
-    if(SeatCount(v)==0)return;
+}
+
+// Each weapon's barrel against the nose (the guns must point where the nose does): true once there were weapons to log.
+// Fixed to the airframe, so jet.cpp logs it once a jet; written with every JetLog line until 2026-10-12, it was 18 672
+// of the 58 835 lines of the testers' report #6.
+bool JetBarrelLog(const unsigned char* v,const float* pos) noexcept {
+    if(SeatCount(v)==0)return false;
     const auto seat=SeatAt(const_cast<unsigned char*>(v),0);
     const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
     const auto count=At<std::uint64_t>(seat,kSeatWeaponCount);
-    if(count>8 || !Readable(holders,count*8))return;
+    if(count>8 || !Readable(holders,count*8))return false;
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    bool any=false;
     for(std::uint64_t i=0;i<count;++i) {
         if(!Readable(holders[i],kHolderWeapon+8))continue;
         const auto w=At<const unsigned char*>(holders[i],kHolderWeapon);
         float at[3],dir[3];
         if(!w)continue;
+        any=true;
         if(!GunBarrel(v,w,at,dir)){Log("JET v=%p gun %llu: no barrel frame",v,static_cast<unsigned long long>(i));continue;}
         Log("JET v=%p gun %llu: dir=(%.2f,%.2f,%.2f) nose=(%.2f,%.2f,%.2f) dot=%.2f at=(%.1f,%.1f,%.1f) from the body",v,
             static_cast<unsigned long long>(i),dir[0],dir[1],dir[2],m[8],m[9],m[10],dir[0]*m[8]+dir[1]*m[9]+dir[2]*m[10],
             at[0]-pos[0],at[1]-pos[1],at[2]-pos[2]);
     }
+    return any;
 }
 
 // A new mission: the flyer memo's objects were the last mission's.

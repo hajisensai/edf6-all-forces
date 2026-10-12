@@ -54,6 +54,7 @@
 #include "hudtext.h"
 #include "rescue_logic.h"
 #include "helipad.h"
+#include "log_once.h"
 #include <cmath>
 #include <cstdarg>
 
@@ -341,14 +342,22 @@ const Signature kWaterSignatures[]={
 };
 bool waterOk=false;
 
-// One play's rays settle the unverified parts (the list's layout at run time, the surface heights): each
-// different answer is logged once.
+// One play's rays settle the unverified parts (the list's layout at run time, the surface heights): each different
+// answer is logged once a mission (ResetHelis clears the table). Compared only with the answer before, as it was until
+// 2026-10-12, a heli over a shore (its probe flipping water/land/water) wrote a line per flip: 26 363 of the 31 723
+// lines of the testers' report #11, the rest pushed out of the 12 MB the installer sends back (log_once.h).
+SeenOnce<32> seaSeen;
 void LogSea(Sea sea,std::size_t areas,float y) noexcept {
-    static Sea lastSea=Sea::unknown;static std::size_t lastAreas=~std::size_t{0};static float lastY=0.0f;
-    if(sea==lastSea && areas==lastAreas && std::fabs(y-lastY)<0.5f)return;
-    lastSea=sea;lastAreas=areas;lastY=y;
-    Log("WATER %s: %zu water area(s) on the map%s%.1f",sea==Sea::water ? "sea" : sea==Sea::land ? "no water here" : "unknown",
-        areas,sea==Sea::water ? ", surface y=" : "",sea==Sea::water ? y : 0.0f);
+    const auto half=static_cast<std::int32_t>(std::lround(sea==Sea::water ? y*2.0f : 0.0f));   // 0.5 m steps
+    const std::uint64_t key=(static_cast<std::uint64_t>(sea)<<56)|(static_cast<std::uint64_t>(areas&0xFFFF)<<32)|
+                            static_cast<std::uint32_t>(half);
+    switch(seaSeen.Check(key)) {
+    case SeenOnce<32>::Verdict::seen:return;
+    case SeenOnce<32>::Verdict::full:Log("WATER: %zu different answers this mission, further ones not logged",seaSeen.Count());return;
+    case SeenOnce<32>::Verdict::fresh:break;
+    }
+    if(sea==Sea::water)Log("WATER sea: %zu water area(s) on the map, surface y=%.1f",areas,y);
+    else Log("WATER %s: %zu water area(s) on the map",sea==Sea::land ? "no water here" : "unknown",areas);
 }
 
 Sea SeaProbe(float x,float z,float* surface) noexcept {
@@ -3762,6 +3771,7 @@ void ResetHelis() noexcept {
     for(auto& p:pilots)p=Pilot{};
     PublishPilotView({});
     fullLoggedAt=0;
+    seaSeen.Clear();
     ResetTrack();
     for(auto& r:rescues)r=Rescue{};
     call=RescueCall{};rescueFrame=0;rescueMadeAt=0;cooldownSaid=false;pads=helipad::Pads{};

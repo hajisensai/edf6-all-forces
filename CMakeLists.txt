@@ -458,6 +458,10 @@ add_executable(support_spawn_test tests/support_spawn_test.cpp)
 target_include_directories(support_spawn_test PRIVATE common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_compile_options(support_spawn_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME support_spawn COMMAND support_spawn_test)
+# A diagnostic logged once per distinct answer (src/log_once.h: heli.cpp LogSea) offline.
+add_executable(log_once_test tests/log_once_test.cpp)
+target_compile_options(log_once_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME log_once COMMAND log_once_test)
 # The debug spawn tool's catalog, menu and placement (src/debug_spawn.h) offline.
 add_executable(debug_spawn_test tests/debug_spawn_test.cpp)
 target_compile_options(debug_spawn_test PRIVATE /W4 /WX /utf-8 /permissive-)
