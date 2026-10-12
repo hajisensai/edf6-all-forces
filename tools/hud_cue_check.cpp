@@ -47,9 +47,24 @@ int main() {
           "laser, beam and maser are not drawn as machine-gun ammunition");
     // The stock rounds (vhud.h RoundKind: none 0, arc 1, rocket 2, homing 3).
     Check(ArmIconOf(1,false)==StoreIcon::gun && ArmIconOf(0,false)==StoreIcon::gun,"a gun's rounds");
+    Check(ArmIconOf(1,false,0,true)==StoreIcon::shell,"a gun laid shot by shot (the 601's 140 mm cannon): one shell");
+    Check(ArmIconOf(1,false,2,true)==StoreIcon::energy && ArmIconOf(3,false,0,true)==StoreIcon::aam,"  not over an energy weapon or a missile");
     Check(ArmIconOf(2,false)==StoreIcon::rocket,"rockets");
     Check(ArmIconOf(3,false)==StoreIcon::aam,"a homing missile");
     Check(ArmIconOf(1,true)==StoreIcon::bomb,"a lobbed round");
+
+    // The strip's left-to-right order by the muzzles' sides (+ left of the vehicle's middle, as the camera looks).
+    {
+        const float nix[2]={-2.1f,2.2f};   // the Nix lists its right arm's rifle first (screenshot 2026-10-12)
+        int o[2];SideOrder(nix,2,o);
+        Check(o[0]==1 && o[1]==0,"a Nix's rifles: the left arm's on the left, the right arm's on the right");
+        const float tank[5]={0.0f,0.0f,0.0f,-0.3f,1.4f};   // main gun, its two stores, the coax (0.3 m right), a left launcher
+        int t[5];SideOrder(tank,5,t);
+        Check(t[0]==4 && t[1]==0 && t[2]==1 && t[3]==2 && t[4]==3,"a tank: the launcher out on the left first, the gun's stores in their R order");
+        const float unknown[3]={0.0f,0.0f,0.0f};
+        int u[3];SideOrder(unknown,3,u);
+        Check(u[0]==0 && u[1]==1 && u[2]==2,"no muzzle read: as the seat lists them");
+    }
 
     // The turret aim overlay follows the fire-control pick when the turret is laid by it (vhud.h sight / turret).
     Check(TurretOverlayOwned(0,0),"the stock main gun picked: the overlay");

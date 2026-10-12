@@ -18,7 +18,7 @@ inline bool Changed(Change& c,int value,unsigned long long now,unsigned long lon
 }
 
 // The silhouettes (a side view, the nose to the right).
-enum class StoreIcon { gun, aamShort, aam, aamLong, agm, agmLight, bomb, rocket, drone, energy, charge };
+enum class StoreIcon { gun, aamShort, aam, aamLong, agm, agmLight, bomb, rocket, drone, energy, charge, shell };
 // A plugin store by its cockpit name (stores.inc: AIM-9X, AIM-120, AIM-54, RIM-162 ESSM, AGM-65, AGM-114, Mk 82,
 // Hydra 70; the gunship's CANNON and GATLING); `role` is StoreRole (air 0, ground 1, bomb 2, rocket 3, gun 4, drone 5, charge 6).
 inline StoreIcon StoreIconOf(const char* name,int role) noexcept {
@@ -40,11 +40,28 @@ inline StoreIcon StoreIconOf(const char* name,int role) noexcept {
 }
 // A stock weapon (a stock vehicle's or heli's: vhud.h StockArm, its label by the round's class, rounds.cpp) by its round
 // (RoundKind as an int: none 0, arc 1, rocket 2, homing 3; `lobbed` a grenade / mortar / napalm class): a rocket the pod,
-// a homing round a missile, a lobbed one a bomb, any other a gun's rounds.
-constexpr StoreIcon ArmIconOf(int kind,bool lobbed,int style=0) noexcept {
+// a homing round a missile, a lobbed one a bomb, an energy weapon (`style` WeaponStyle not projectile) its emitter, a gun
+// laid shot by shot (`cannon`: reticle.h Classify's cannon or precision sight, a tank's main gun) one big shell (the user,
+// 2026-10-12: 「这个榴弹炮图标也不对」), any other a gun's rounds.
+constexpr StoreIcon ArmIconOf(int kind,bool lobbed,int style=0,bool cannon=false) noexcept {
     if(style!=0)return StoreIcon::energy;
-    return kind==2 ? StoreIcon::rocket : kind==3 ? StoreIcon::aam : lobbed ? StoreIcon::bomb : StoreIcon::gun;
+    return kind==2 ? StoreIcon::rocket : kind==3 ? StoreIcon::aam : lobbed ? StoreIcon::bomb : cannon ? StoreIcon::shell : StoreIcon::gun;
 }
+// The order the loadout strip lays a seat's weapons out in, left to right on the screen (the user, 2026-10-12, a Nix:
+// 「左侧武器放在右边右侧武器放在左边」: the seat lists its right arm's gun first, and the strip drew the list's order). `side`
+// is each weapon's muzzle off the vehicle's middle across the camera's view, m (+ its left: vhud.cpp SideOf; 0 unknown).
+// Those more than kSideApart to the left first, then those about the middle, then those to the right, each group in the
+// seat's own order (stable: a turret's stores on one gun keep their R order, and a seat with no muzzle read is as listed).
+constexpr float kSideApart=0.5f;
+inline void SideOrder(const float* side,int n,int* order) noexcept {
+    int k=0;
+    for(int group=0;group<3;++group)
+        for(int i=0;i<n;++i) {
+            const int g=side[i]>kSideApart ? 0 : side[i]<-kSideApart ? 2 : 1;
+            if(g==group)order[k++]=i;
+        }
+}
+
 // Whether a stock vehicle's turret aim overlay (the auto-aim state and keys, the lock box, the range, the lead circle:
 // hud.cpp TurretAimMarks) is the fire-control pick's: arm `sight` (vhud.h StockHudReadout.sight) is the gun the turret is
 // laid by, arm `turret` (turretcam.cpp TurretGun, the one EDF6AutoTurret leads). Not "the first arm" (2026-10-10, the

@@ -624,7 +624,9 @@ unsigned char* PayloadSightPicked(const void* vehicle,unsigned index) noexcept {
     return PayloadSightWeapons(vehicle,index,&weapon,1)>0 ? weapon : nullptr;
 }
 
-int PayloadSightWeapons(const void* vehicle,unsigned index,unsigned char** out,int capacity) noexcept {
+namespace {
+// PayloadSightWeapons (`both` false) and PayloadTriggerWeapons (`both` true: the primary's group, then the secondary's).
+int SeatFireWeapons(const void* vehicle,unsigned index,bool both,unsigned char** out,int capacity) noexcept {
     if(!out || capacity<=0)return 0;
     __try {
         auto* v=static_cast<unsigned char*>(const_cast<void*>(vehicle));
@@ -661,8 +663,7 @@ int PayloadSightWeapons(const void* vehicle,unsigned index,unsigned char** out,i
                 }
                 break;
             }
-        const auto collect=[&](PayloadFire fire) -> int {
-            int count=0;
+        const auto collect=[&](PayloadFire fire,int count=0) -> int {
             for(int i=0;i<r.count && count<capacity;++i)if(r.entry[i].fire==fire) {
                 // Resolve first: an empty native gun can still pull the selected, loaded store.
                 auto* w=redirected(ws[i]);
@@ -673,6 +674,7 @@ int PayloadSightWeapons(const void* vehicle,unsigned index,unsigned char** out,i
             }
             return count;
         };
+        if(both)return collect(PayloadFire::secondary,collect(PayloadFire::primary));
         if(const int count=collect(group))return count;
         // Missing/expired/spent secondary falls back to a real usable primary, never to an old weapon pointer.
         if(group!=PayloadFire::primary)if(const int count=collect(PayloadFire::primary))return count;
@@ -680,6 +682,14 @@ int PayloadSightWeapons(const void* vehicle,unsigned index,unsigned char** out,i
         for(int i=0;i<r.count;++i)if(r.entry[i].fire==PayloadFire::other && usable(i)){out[0]=ws[i];return 1;}
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
     return 0;
+}
+}  // namespace
+
+int PayloadSightWeapons(const void* vehicle,unsigned index,unsigned char** out,int capacity) noexcept {
+    return SeatFireWeapons(vehicle,index,false,out,capacity);
+}
+int PayloadTriggerWeapons(const void* vehicle,unsigned index,unsigned char** out,int capacity) noexcept {
+    return SeatFireWeapons(vehicle,index,true,out,capacity);
 }
 
 bool InstallPayload() noexcept {

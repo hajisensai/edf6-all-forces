@@ -1975,6 +1975,34 @@ int Scenes(const std::wstring& dir) {
     sceneStock.arm[0].style=WeaponStyle::maser;strcpy_s(sceneStock.arm[0].label,"MASER");
     Scene(dir,L"emc_atomic_ray",ground);
     sceneStock=savedStock;
+    // 2026-10-12 feedback: the 601's 140 mm cannon loading its next round (1.8 s: vhud.cpp Cycle) with one shell for its
+    // picture, the coaxial MG picked by the right button and the main gun still marked (its bore cross: OtherTriggerMark);
+    // then a Nix whose seat lists its right arm's rifle first: the strip lays it out on the right (hud_cue.h SideOrder).
+    {
+        StockTank(ground);
+        StockArm& gun=sceneStock.arm[0];
+        gun.cycle=0.25f;gun.cycleSec=1.8f;gun.aimed=gun.armed=true;gun.bore[0]=-0.08f;gun.bore[2]=1.0f;
+        StockArm& mg=sceneStock.arm[1];
+        mg.aimed=mg.armed=mg.coFired=true;mg.bore[2]=1.0f;mg.side=-0.3f;
+        sceneStock.selected=-1;sceneStock.sight=1;
+        LoadCell cells[kStockArms];int picked=-1;
+        const int n=StockCells(sceneStock,cells,&picked);
+        failed+=n!=3 || cells[0].icon!=hudcue::StoreIcon::shell || !std::wcsstr(cells[0].text,L"1.8s");
+        Prime(ground);
+        Scene(dir,L"stock_tank_loading_two_triggers",ground);
+        sceneStock.arms=2;sceneStock.selected=0;
+        for(int i=0;i<2;++i) {
+            StockArm& a=sceneStock.arm[i];a=StockArm{};a.kind=RoundKind::arc;a.style=WeaponStyle::beam;a.ammo=9900;a.ammoMax=10000;
+            a.reload=1.0f;a.reloadSec=-1.0f;a.canReload=true;strcpy_s(a.label,"BEAM");
+        }
+        wcscpy_s(sceneStock.arm[0].name,L"RIFLE (R)");sceneStock.arm[0].side=-2.1f;
+        wcscpy_s(sceneStock.arm[1].name,L"RIFLE (L)");sceneStock.arm[1].side=2.2f;
+        const int m=StockCells(sceneStock,cells,&picked);
+        failed+=m!=2 || std::wcsncmp(cells[0].text,L"RIFLE (L)",9)!=0 || picked!=1;
+        Prime(ground);
+        Scene(dir,L"nix_rifles_left_right",ground);
+    }
+    sceneStock=savedStock;
     failed+=TankSightScenes(dir,ground);
     failed+=SightStyleScenes(dir,ground);
     failed+=GunshipSightScenes(dir,ground);
