@@ -239,7 +239,9 @@ def build_model(game, spec: Model) -> bytes:
     raw = model.data
     if hashlib.sha256(raw).hexdigest() != spec.digest:
         raise ValueError(f'{name}: model geometry differs from the audited optic profile; preserving the other mod')
-    marked = mark_model(mdb_read(raw), spec, game.read('OBJECT', spec.stem+'.SGO'))
+    # The SGO only for a camera lens's locator (a cockpit-only skin's model may have no SGO of its own name).
+    sgo_data = game.read('OBJECT', spec.stem+'.SGO') if any(lens.camera for lens in spec.lenses) else b''
+    marked = mark_model(mdb_read(raw), spec, sgo_data)
     textures: dict[str, bytes] = {}
     if spec.cockpits:
         try:
