@@ -87,7 +87,7 @@ constexpr int kFlashSlots=16,kFlashFrames=8;   // matrices handed out (a flash l
 constexpr unsigned kAimLineCall=0x6888D9,kAimLineBuild=0x6899F0;
 // Umbra's object transform setter (0x6C06A0 calls it with model+0x110 after an update).
 constexpr unsigned kUmbraPlace=0x11B30C0;
-constexpr std::size_t kModelBounds=0x110;
+constexpr std::size_t kModelBounds=0x110,kUmbraObject=0x10;
 const unsigned char kUmbraPlaceCode[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x08,0x55,0x48,0x8D,0x68,0xA1,0x48,0x81,0xEC,0x90};
 using PlaceFn=void(__fastcall*)(void*,const float*);
 bool placeOk=false;
@@ -308,9 +308,30 @@ bool RootPose(const unsigned char* model,M4* out) noexcept {
 // Umbra's place of a model: its bounds through `t` (the viewmodel's), or where they really are (`t` null). The bounds
 // are the box the update computes from the bones (0x11005E0 writes it at the skeleton instance's +0x70 = model+0x110,
 // axes scaled by the extents; 0x6C06A0 hands that to 0x11B30C0, which keeps model+0x110 as it is).
+// Only a model Umbra knows (its object at +0x10: 0x11B2870, the test 0x68FD00 makes before it moves a weapon; a weapon
+// not in hand has none) and a box that is one (finite, sane axes, near the player): a bad one crashed Umbra's
+// visibility thread (umbra_sandlot Camera::resolveVisibility, run 6).
+bool Placeable(const unsigned char* model,const M4& box) noexcept {
+    if(!At<const void*>(model,kUmbraObject) || !fpview::Finite(box))return false;
+    for(int r=0;r<3;++r) {
+        const float* a=box.m+r*4;
+        const float len=std::sqrt(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]);
+        if(!(len>1e-4f && len<50.0f))return false;
+    }
+    const float* at=reinterpret_cast<const float*>(st.human+kPos);
+    const float d[3]={box.m[12]-at[0],box.m[13]-at[1],box.m[14]-at[2]};
+    return d[0]*d[0]+d[1]*d[1]+d[2]*d[2]<100.0f*100.0f;
+}
+
 void Place(const void* model,const M4* t) noexcept {
-    if(!placeOk || !model)return;
-    const M4 box=MatrixAt(static_cast<const unsigned char*>(model)+kModelBounds);
+    if(!placeOk || !model || !st.human)return;
+    const auto m=static_cast<const unsigned char*>(model);
+    const M4 box=MatrixAt(m+kModelBounds);
+    if(!Placeable(m,box)) {
+        static const void* logged=nullptr;
+        if(logged!=model && Cfg().debug && At<const void*>(m,kUmbraObject)){logged=model;Log("FP culling: model %p's box is not one (left alone)",model);}
+        return;
+    }
     const M4 at=t ? fpview::Mul(box,*t) : box;
     reinterpret_cast<PlaceFn>(image+kUmbraPlace)(const_cast<void*>(model),at.m);
 }
