@@ -20,6 +20,7 @@ bool MapHoldsKeys() noexcept { return false; }
 PluginBody BodyOf(const void*) noexcept { return PluginBody::none; }
 bool IsPlayerJet(const void*) noexcept { return false; }
 bool PlayerHeliCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept {return false;}
+bool GunshipGunnerCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept {return false;}
 bool IsHelicopter(const void*) noexcept { return false; }
 bool AiGunner(const unsigned char*,const unsigned char*) noexcept { return false; }
 bool IsFuelTank(const unsigned char*) noexcept { return false; }

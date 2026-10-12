@@ -372,6 +372,24 @@ inline Steer ReturnToPost(const float* pos,const float* right,const float* forwa
     s.throttle=std::fabs(s.bearing)>turnOnSpot ? 0.0f : ramp;
     return s;
 }
+// --- Boarding (npcai.cpp Board) ---
+// The native trigger is a sphere of `reach` round the seat's riding point; the soldier walks to the floor `drop` m under
+// that point and the walk ends once it stands within the returned horizontal distance of the floor point. The old fixed
+// 0.5 m stop ignored the drop: with the riding point high over its floor (drop > sqrt(reach^2 - 0.25)) a walk that had
+// "arrived" 0.3-0.5 m off stood outside the sphere, the soldier waited there and the order lapsed after kBoardMs (the
+// user, 2026-10-12: "有些npc派他上车的时候有几率被卡住导致上不了车" -- the chance being where in the stop circle it
+// arrived). The stop is now the room the sphere actually leaves at that height (its feet up to kBoardFeet over the floor
+// point), kBoardShare of it: anywhere within it is inside the sphere. 0: less room than kBoardStopLeast (the floor out of
+// the sphere, or at its very rim), no stand to walk to.
+constexpr float kBoardStopMost=0.5f,kBoardStopLeast=0.1f,kBoardFeet=0.05f,kBoardShare=0.9f;
+inline float BoardStop(float drop,float reach) noexcept {
+    if(!std::isfinite(drop) || !std::isfinite(reach))return 0.0f;
+    const float up=std::fabs(drop)+kBoardFeet,room=reach*reach-up*up;
+    if(!(room>0.0f))return 0.0f;
+    const float side=std::sqrt(room)*kBoardShare;
+    return side<kBoardStopLeast ? 0.0f : side<kBoardStopMost ? side : kBoardStopMost;
+}
+
 // The seat-0 stick block's values for it, as 0x661020 writes them.
 inline float SteerStick(const Steer& s) noexcept { return -Clamp(s.bearing*10.0f,-1.0f,1.0f); }
 inline float ThrottleStick(const Steer& s) noexcept { return -s.throttle; }

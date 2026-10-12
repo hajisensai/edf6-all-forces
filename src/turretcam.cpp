@@ -716,6 +716,8 @@ float* __fastcall LookHook(const void* point,float* lookOut,unsigned char* cam) 
         else if(PlayerHeliCamera(static_cast<const unsigned char*>(point)-kSeatCamLook,
                                  lookOut+28,lookOut+12,eye,look))
             Place(lookOut+12,lookOut+28,cam,eye,look);
+        else if(GunshipGunnerCamera(static_cast<const unsigned char*>(point)-kSeatCamLook,lookOut+28,lookOut+12,eye,look))
+            Place(lookOut+12,lookOut+28,cam,eye,look);   // the gunship's gun seat: the rider's own view (playerjet_crew.inc)
         else if(shared.seat && static_cast<const unsigned char*>(point)==shared.seat+kSeatCamLook)
             Camera(static_cast<const unsigned char*>(point)-kSeatCamLook,lookOut+12,cam);
         // A seat it does not place: a deployed Proteus raises the stock targets (proteus.cpp), the game eases onto them.
