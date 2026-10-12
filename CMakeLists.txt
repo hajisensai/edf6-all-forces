@@ -594,6 +594,10 @@ add_test(NAME debug_spawn_ini COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DI
 set_tests_properties(debug_spawn_ini PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME debug_spawn_resources COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/debug_spawn_resource_audit.py")
 set_tests_properties(debug_spawn_resources PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The recorded sound pack (tools/sound_pack.py) on a stand-in archive: every clip it names is one the plugin reads, as
+# the plugin reads it (ReadWav), the loops seamless, the recordings' DC out, never louder than the plugin's own clip.
+add_test(NAME sound_pack COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/sound_pack_test.py")
+set_tests_properties(sound_pack PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # It never launches a crewed aircraft without its crew (JetLaunch / HeliLaunch): those come as support calls.
 add_test(NAME debug_spawn_launch_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/debug_spawn_launch_guard.py")
 set_tests_properties(debug_spawn_launch_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
