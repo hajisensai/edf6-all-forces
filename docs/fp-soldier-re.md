@@ -231,3 +231,11 @@ Wing Diver 能量（PaleWing slot 5 `0x5808B0`，M）：当前 `+0x308`、上限
   `fire_model_direction` 统计、士兵 `game_object_camera_setting`（眼睛与注视点在瞄准系里只差 z，例如 Ranger `(-0.6,1.5,0)`/`(-0.6,1.5,-2.5)`，
   Fencer `(-1,1.8,0)`/`(-1,1.8,-3.465)`）由 `pylib/rootcpk.py` + `sgo/dsgo` 从 Root.cpk 只读得到。
 - 没有构建、没有改代码、没有任何实机或两机验证。
+
+---
+
+## 实测（2026-10-12，后台 `drive.py run range`，Ranger，`Debug=1` 的 `FP` 日志）
+
+- 换弹：按换弹后 `w+0xBD4` 进入 3，同帧 `ReloadTime +0x20C` = 100（PA-11），`FireRecoil +0x37C` = 0.075。
+- 冲刺：L3 + 前推进入 `+0x5D0 = 0x29E`（§3.3 的 H 写入点，实测一致）。
+- 摇杆 + A / 摇杆 + B 在测试场没有触发 `0xE3C`（翻滚键位未对上，待键盘实测）。Fencer / Wing Diver 的状态值仍是 L。

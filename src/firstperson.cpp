@@ -19,6 +19,16 @@
 //    the effect factory there (0x697FD0) is redirected so that, for the player's weapons in first person, the pointer
 //    is a matrix of this file's: the shot matrix through T, kept up to date every camera step. The round itself was
 //    made before that call from the real muzzle.
+//  - The aim line (H call, M meaning): a soldier's weapon with a trajectory line (the grenade launchers' red arc) builds
+//    it with 0x6899F0(line, &start, &velocity, &gravity) from its muzzle (the call at 0x6888D9); the call is redirected and,
+//    for a line that starts at the player in first person, its start is moved through T (the viewmodel's muzzle); the
+//    arc keeps its own velocity and gravity. Only the picture moves: the round flies from the real muzzle as before.
+//  - The culling (H setter, measured): Umbra culls a model by its object transform (model+0x110, set by 0x11B30C0). The
+//    real weapon and arms go below the view in a reload's third-person animation and were culled with the viewmodel in
+//    front of the camera; each camera step in first person places the player's models there where they are drawn (their
+//    root's draw pose through T), and puts them back where they really are on the way out.
+//  - The camera's first row points to the screen's left (measured: a grip at +x drew on the left), so every "right" the
+//    ini and the motion speak of is mirrored into it here (x, yaw and roll negated).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "firstperson.h"
@@ -73,9 +83,17 @@ constexpr std::uint32_t kSprints[]={0x29E,0x29,0x3D,0xA38,0x25,0xE39},kRolls[]={
 constexpr unsigned kFlashCall=0x697FD0,kEffectCreate=0x1194280;
 constexpr std::size_t kFlashParam=0x488,kFlashMatrix=0x4C0;
 constexpr int kFlashSlots=16,kFlashFrames=8;   // matrices handed out (a flash lives 3 updates)
+// The aim line's build (a soldier weapon's call of it) and how near the player's chest its start must be to be theirs.
+constexpr unsigned kAimLineCall=0x6888D9,kAimLineBuild=0x6899F0;
+// Umbra's object transform setter (0x6C06A0 calls it with model+0x110 after an update).
+constexpr unsigned kUmbraPlace=0x11B30C0;
+const unsigned char kUmbraPlaceCode[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x08,0x55,0x48,0x8D,0x68,0xA1,0x48,0x81,0xEC,0x90};
+using PlaceFn=void(__fastcall*)(void*,const float*);
+bool placeOk=false;
+constexpr float kAimLineReach=2.0f,kChestUp=1.2f;
 // Without a weapon to anchor on (the Fencer's two hands, empty hands) the viewmodel turns about a point near where the
 // hands are (the eye's frame: right, up, ahead, m); with one, about its grip.
-const float kPivot[3]={0.2f,-0.3f,0.4f};
+const float kPivot[3]={-0.2f,-0.3f,0.4f};   // in the camera's frame: x to the left
 constexpr unsigned kFencerVt=0x17CF5B8;
 // The arms (the four classes share the names, fp-render-re.md §8): the shoulder, upper and lower arm and their twists,
 // the hand, its fingers, the weapon mounts.
@@ -271,7 +289,30 @@ fpmotion::Cue Cues(const unsigned char* h) noexcept {
 
 void Motion(const unsigned char* h,const float* pivot) noexcept {
     const fpmotion::Pose p=fpmotion::Advance(st.motion,Cues(h));
-    st.moved=fpview::MotionMatrix(p.x,p.y,p.z,p.pitch,p.yaw,p.roll,pivot);
+    st.moved=fpview::MotionMatrix(-p.x,p.y,p.z,p.pitch,-p.yaw,-p.roll,pivot);   // right is -x in the camera's frame
+}
+
+// A model's root bone as it will be drawn (its base LOD's draw pose, bone 0).
+bool RootPose(const unsigned char* model,M4* out) noexcept {
+    const auto inst=At<const unsigned char*>(model,kBaseLod+kLodInst);
+    if(!inst || At<std::int32_t>(inst,kInstCount)<=0)return false;
+    const auto pose=At<const unsigned char*>(inst,kInstPose);
+    if(!pose)return false;
+    *out=MatrixAt(pose);
+    return true;
+}
+
+// Umbra's place of a model: through `t` (the viewmodel's), or where it really is (`t` null).
+void Place(const void* model,const M4* t) noexcept {
+    M4 root;
+    if(!placeOk || !model || !RootPose(static_cast<const unsigned char*>(model),&root))return;
+    const M4 at=t ? fpview::Mul(root,*t) : root;
+    reinterpret_cast<PlaceFn>(image+kUmbraPlace)(const_cast<void*>(model),at.m);
+}
+
+void PlaceAll(const M4* t) noexcept {
+    Place(st.body,t);
+    for(int i=0;i<st.weaponCount;++i)Place(st.weapons[i],t);
 }
 
 // The root of the weapon in the first hand as it will be drawn (its draw pose's bone 0: 0x1100B90 writes the weapon's
@@ -279,13 +320,7 @@ void Motion(const unsigned char* h,const float* pivot) noexcept {
 bool Anchor(const unsigned char* h,M4* out) noexcept {
     if(At<const unsigned char*>(h,0)==image+kFencerVt)return false;
     const unsigned char* w=SetWeapon(h,0);
-    if(!w)return false;
-    const auto inst=At<const unsigned char*>(w+kWeaponModel,kBaseLod+kLodInst);
-    if(!inst || At<std::int32_t>(inst,kInstCount)<=0)return false;
-    const auto pose=At<const unsigned char*>(inst,kInstPose);
-    if(!pose)return false;
-    *out=MatrixAt(pose);
-    return true;
+    return w && RootPose(w+kWeaponModel,out);
 }
 
 // The flashes handed out lately, moved with the viewmodel (their shot matrix through this frame's T).
@@ -314,6 +349,25 @@ void Relocate(unsigned char* w) noexcept {
     Put<const float*>(w,kFlashMatrix,f.m);
 }
 
+// The start of a line `start` (x, y, z, w) moved through T into `out` when it is the player's in first person.
+bool MovedStart(const float* start,float* out) noexcept {
+    if(!st.on || !st.viewOk || !st.human)return false;
+    const float* at=reinterpret_cast<const float*>(st.human+kPos);
+    const float d[3]={start[0]-at[0],start[1]-at[1]-kChestUp,start[2]-at[2]};
+    if(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>kAimLineReach*kAimLineReach)return false;
+    fpview::Point(st.view,start,out);
+    out[3]=start[3];
+    return true;
+}
+
+using LineFn=void*(__fastcall*)(void*,const float*,const float*,const float*);
+void* __fastcall AimLineHook(void* line,const float* start,const float* velocity,const float* gravity) {
+    alignas(16) float moved[4];
+    const float* from=start;
+    __try { if(MovedStart(start,moved))from=moved; } __except(EXCEPTION_EXECUTE_HANDLER){from=start;}
+    return reinterpret_cast<LineFn>(image+kAimLineBuild)(line,from,velocity,gravity);
+}
+
 void* __fastcall FlashCreateHook(void* factory,void* a,void* cls,void* param) {
     __try { Relocate(static_cast<unsigned char*>(param)-kFlashParam); } __except(EXCEPTION_EXECUTE_HANDLER){}
     return reinterpret_cast<CreateFn>(image+kEffectCreate)(factory,a,cls,param);
@@ -321,6 +375,7 @@ void* __fastcall FlashCreateHook(void* factory,void* a,void* cls,void* param) {
 
 // The camera, the player's state given back: the near clip, the look smoothing.
 void Leave() noexcept {
+    if(st.on)PlaceAll(nullptr);
     if(st.cam && st.nearSet)Put<float>(st.cam,kCamNear,st.savedNear);
     if(st.human && st.smoothSet)Put<float>(st.human,kLookSmooth,st.savedSmooth);
     if(st.on)Log("FP view back to the stock camera");
@@ -353,12 +408,13 @@ void Camera(unsigned char* cam) noexcept {
     Gather(h);
     M4 anchor;
     const bool anchored=Anchor(h,&anchor);
-    const float grip[3]={c.fpGripX,c.fpGripY,c.fpGripZ},hold[3]={c.fpHoldX,c.fpHoldY,c.fpHoldZ};
+    const float grip[3]={-c.fpGripX,c.fpGripY,c.fpGripZ},hold[3]={-c.fpHoldX,c.fpHoldY,c.fpHoldZ};   // right is -x
     if(c.fpMotion)Motion(h,anchored ? grip : kPivot);
     else st.moved=fpview::Identity();
     const M4 view=MatrixAt(cam+kCamMatrix);
     st.viewOk=anchored ? fpview::AnchoredTransform(anchor,view,grip,c.fpScale,&st.view,st.moved)
                        : fpview::ViewTransform(MatrixAt(h+kAim),view,hold,c.fpScale,&st.view,st.moved);
+    if(st.viewOk)PlaceAll(&st.view);
     Flashes();
 }
 
@@ -491,8 +547,10 @@ bool InstallFirstPerson() noexcept {
     drawOk=HookDrawOf(reinterpret_cast<void**>(image+kModelVtable));
     bool changed=false;
     const bool flashOk=RedirectCall(image+kFlashCall,image+kEffectCreate,reinterpret_cast<void*>(&FlashCreateHook),changed);
+    placeOk=Matches(kUmbraPlace,kUmbraPlaceCode,sizeof(kUmbraPlaceCode));
+    const bool lineOk=RedirectCall(image+kAimLineCall,image+kAimLineBuild,reinterpret_cast<void*>(&AimLineHook),changed);
     toggled=Cfg().firstPersonStart;
-    Log("FP installed: camera=%d draw=%d flash=%d start=%d",camOk,drawOk,flashOk,toggled);
+    Log("FP installed: camera=%d draw=%d flash=%d aim line=%d culling=%d start=%d",camOk,drawOk,flashOk,lineOk,placeOk,toggled);
     return drawOk;
 }
 }  // namespace crew
