@@ -46,7 +46,7 @@
 - `npcpost.cpp AttackRows`：所有座位的武器各一行（座位号写进行里）；单座机甲（维加尔塔、尼克斯）结果不变。
 - `npcpost.cpp EnsureMechAiSetup`：开火原点 `spine` → `neck` → `body`（SGO `begaruta_pilot_class` 里驾驶座的瞄准骨骼）。
 - 诊断（Debug=1，按载具节流）：每台 NPC 驾驶的载具每 10 s 记一行「目标、距离、各座位弹药」；每次上车分配；
-  驾驶座瞄准走了哪条路；NPC 选武器时每件武器被选 / 被跳过的原因（`PAYLOAD npc ... [0:ok 1:out-of-reach]`）。
+
 - 测试用：ini `NpcCrewTest=1`（空车不必玩家先开过就自动派人）；测试场计划 `squads`（玩家身边放 N 支 6 人友军小队）。
 
 ## 验证

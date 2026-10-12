@@ -35,7 +35,6 @@
 #include "retired_loadout.h"
 #include "edf/weapon.h"
 #include <cmath>
-#include <cstdio>
 #include <cstring>
 #include <cwchar>
 
@@ -438,24 +437,6 @@ void PayloadFrame(unsigned char* v) noexcept {
     latest=r;latestMs=ms;PublishSelectableSnapshot(r);
 }
 
-// Debug: why each of a seat's weapons was or was not chosen for an NPC, once in kWhyMs a vehicle and seat (a driver that
-// aims and never fires shows its reason in the log).
-constexpr ULONGLONG kWhyMs=10000;
-struct WhyLogged { ObjRef v; unsigned seat; ULONGLONG at; };
-WhyLogged whyLogged[16]{};
-bool WhyDue(const unsigned char* v,unsigned seat) noexcept {
-    if(!Cfg().debug)return false;
-    const ULONGLONG ms=GameMs();
-    WhyLogged* slot=nullptr;
-    for(auto& e:whyLogged) {
-        if(e.v.Is(v) && e.seat==seat){slot=&e;break;}
-        if(!slot || e.at<slot->at)slot=&e;
-    }
-    if(slot->v.Is(v) && slot->seat==seat && ms-slot->at<kWhyMs)return false;
-    *slot=WhyLogged{ObjRef::Of(v),seat,ms};
-    return true;
-}
-
 // Select only loaded weapons already attached to this seat. The native caller owns
 // aiming/firing; no shot or weapon object is fabricated here.
 unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float distance,bool airborne,PayloadFire* fire) noexcept {
@@ -476,21 +457,12 @@ unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float distance,bo
     PayloadFire ride=PayloadFire::primary;
     for(int i=0;i<r.count;++i)if(r.entry[i].fire==PayloadFire::secondary)ride=PayloadFire::secondary;
     int best=-1;float score=-1.0f;
-    const bool why=WhyDue(v,seat);
-    char whyText[256]{};std::size_t whyUsed=0;
-    const auto note=[&](int i,const char* text) noexcept {
-        if(!why)return;
-        const int n=std::snprintf(whyText+whyUsed,sizeof(whyText)-whyUsed,"%s%d:%s",whyUsed ? " " : "",i,text);
-        if(n>0 && static_cast<std::size_t>(n)<sizeof(whyText)-whyUsed)whyUsed+=static_cast<std::size_t>(n);
-    };
     for(int i=0;i<r.count;++i) {
-        if(r.entry[i].fire==PayloadFire::other){note(i,r.entry[i].coax ? "coax" : "no-trigger");continue;}
-        if(r.entry[i].rounds<=0){note(i,"empty");continue;}
+        if(r.entry[i].fire==PayloadFire::other || r.entry[i].rounds<=0)continue;
         const auto w=ws[i];
-        if(!(At<float>(w,0x89C)>0.0f)){note(i,"no-damage");continue;} // healers never target enemies
+        if(!(At<float>(w,0x89C)>0.0f))continue; // healers never target enemies
         float muzzle[3],dir[3];RoundModel m{};
-        if(!edf::MeanMuzzle(w,64,muzzle,dir)){note(i,"no-muzzle");continue;}
-        if(!ReadRound(w,&m) || m.kind==RoundKind::none){note(i,"no-round");continue;}
+        if(!edf::MeanMuzzle(w,64,muzzle,dir) || !ReadRound(w,&m) || m.kind==RoundKind::none)continue;
         // Native NPC engagement reach. Guided stores also need a reachable lock; an
         // accelerating rocket must not be limited to its initial speed times lifetime.
         float reach=At<float>(w,0x224);
@@ -503,7 +475,7 @@ unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float distance,bo
             if(!std::isfinite(m.speed) || m.speed<=0.0f || m.alive<=0)continue;
             reach=std::fmin(reach,m.speed*static_cast<float>(m.alive));
         }
-        if(!std::isfinite(reach) || reach<distance){note(i,"out-of-reach");continue;}
+        if(!std::isfinite(reach) || reach<distance)continue;
         // No splash dead zone: a vehicle round's blast hurts only what is hostile to its team (the IndirectFireUnit's
         // +0xD0, docs/carrier-laser-re.md; online_authority.h SparesRide), so the vehicle and its side are never in it.
         // A 2x-blast veto kept the Titan's main cannon (30 m) silent against everything inside 60 m (2026-10-10).
@@ -512,21 +484,19 @@ unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float distance,bo
         const StoreSpec* const spec=StoreOf(w);
         const edf::GunRole role=edf::RoleOf(At<std::int32_t>(w,edf::kWeaponMark));   // EDF6AutoTurret's table too
         if(spec && ((airborne && (spec->role==StoreRole::ground || spec->role==StoreRole::bomb || spec->role==StoreRole::rocket)) ||
-                    (!airborne && spec->role==StoreRole::air))){note(i,"wrong-side");continue;}
+                    (!airborne && spec->role==StoreRole::air)))continue;
         // A catalogued gun round (StoreRole::gun, vcobjects.Shell) is a direct-fire round whatever class carries it: the
         // flak's proximity HE flies the stock grenade class (rounds.cpp calls it lobbed) and is meant for aircraft.
         const bool lobbed=m.lobbed && !(spec && spec->role==StoreRole::gun);
-        if(airborne && lobbed){note(i,"lobbed-vs-air");continue;}   // a lobbed round cannot meet an aircraft
+        if(airborne && lobbed)continue;   // a lobbed round cannot meet an aircraft
         // Guided fire at long range, direct fire close up, splash against ground targets.
         float rank=m.kind==RoundKind::homing ? (distance>150.0f ? 4.0f : 2.0f) : airborne ? 3.0f : blast>0.0f ? 3.5f : 2.5f;
         // A gun's preferred side (EDF6AutoTurret's role table) ranks it, never forbids it: the Kepler's flak guns are its
         // only guns, and a veto against ground targets kept its NPC driver from ever firing (2026-10-10).
         if((airborne && role.prefer==edf::Prefer::ground) || (!airborne && role.prefer==edf::Prefer::air))rank-=2.0f;
         if(ws[i]==previous)rank+=0.1f;
-        note(i,"ok");
         if(rank>score){score=rank;best=i;}
     }
-    if(why)Log("PAYLOAD npc v=%p seat %u at %.0f m%s: chose %d of %d [%s]",v,seat,distance,airborne ? " (air)" : "",best,r.count,whyText);
     if(best<0)return nullptr;
     p->weapon=ws[best];
     if(r.entry[best].fire==PayloadFire::store)

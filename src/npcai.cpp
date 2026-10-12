@@ -2789,20 +2789,6 @@ void RememberDriverPayload(unsigned char* v) {
 void __fastcall DriverPayloadAim(unsigned char* v,int index,const void* target) noexcept {
     const auto vt=At<void* const*>(v,0);
     const auto native=reinterpret_cast<SeatFireFn>(vt[kSlotSeatFire]);
-    if(Cfg().debug) {   // which way an NPC driver's seat-0 aim goes, once in 10 s a vehicle (2026-10-12: the 403's never fired)
-        static DrivenLog aimLogged[kDrivenLogged]{};
-        DrivenLog* slot=nullptr;
-        for(auto& e:aimLogged) {
-            if(e.v.Is(v)){slot=&e;break;}
-            if(!slot || e.at<slot->at)slot=&e;
-        }
-        if(!slot->v.Is(v) || GameMs()-slot->at>=kDrivenLogMs) {
-            slot->v=ObjRef::Of(v);slot->at=GameMs();
-            Log("NPCAI driver aim v=%p seat %d target %p%s%s%s",v,index,target,
-                native!=reinterpret_cast<SeatFireFn>(image+kSeatFire) ? " (own seat fire)" : "",
-                index==0 && !RealPayloadDriver(v) ? " (no real AI driver)" : "",driverPayloadReady ? "" : " (not wrapped)");
-        }
-    }
     // Preserve the original virtual dispatch on unmodified classes and occupants.
     if(!driverPayloadReady || !ok || index!=0 || native!=reinterpret_cast<SeatFireFn>(image+kSeatFire) || !RealPayloadDriver(v)) {
         native(v,index,target);return;
