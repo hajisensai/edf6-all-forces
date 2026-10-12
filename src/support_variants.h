@@ -19,4 +19,10 @@ void SupportVariantHello(std::uint32_t* ext,unsigned char* bloom32) noexcept;
 // added once to Mods/Plugins/EDF6VehicleCrew.variants_pending.txt; the installer (menu 7 or 1, the game closed) makes
 // every file listed there from its name (tools/support_loadout.py) and clears the list. Logged.
 void NoteMissingVariant(const wchar_t* file,const char* why) noexcept;
+// Every variant file the current configuration (SupportCfg) can make a plan ask for, whatever is called: each catalog
+// entry's SupportPreset_<KEY> colours (a leader's template every four seats, as SupportLoadoutResource) and its
+// SupportVehicle_<KEY> pylons (the hull its key names, as the plan's HullVariant). Upper-case names (SupportLookFile /
+// VehicleVariantFile), a name possibly more than once. The room pre-sync's host list (room_sync.cpp): a new kind of
+// variant (the crews' colours) adds its names here. Returns how many were given.
+int ForEachConfiguredVariant(void (*each)(void* context,const wchar_t* file),void* context) noexcept;
 }  // namespace crew

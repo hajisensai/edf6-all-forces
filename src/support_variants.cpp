@@ -1,6 +1,7 @@
 // support_variants.h. EDF.dll TimeDateStamp 0x678CCB46: the preload (0x7A3780 on the preload manager 0x20B29A8) is the one
 // support_soldier.cpp and support_spawn.cpp call for the stock templates and hulls, checked by the same bytes.
 #include "support_variants.h"
+#include "support_config.h"
 #include "support_loadout.h"
 #include "support_protocol.h"
 #include "crew.h"
@@ -116,5 +117,20 @@ void NoteMissingVariant(const wchar_t* file,const char* why) noexcept {
     if(_wfopen_s(&out,path,L"ab") || !out)return;
     std::fprintf(out,"%s\r\n",line);
     std::fclose(out);
+}
+int ForEachConfiguredVariant(void (*each)(void* context,const wchar_t* file),void* context) noexcept {
+    if(!each)return 0;
+    const SupportConfig& cfg=SupportCfg();
+    const int units=SupportCallCount()<kSupportConfigUnits ? SupportCallCount() : kSupportConfigUnits;
+    int given=0;
+    wchar_t file[96];
+    for(int i=0;i<units;++i) {
+        const SupportPreset& p=cfg.preset[i];
+        for(int s=0;s<p.count && s<kSupportLoadoutMost;++s)
+            if(p.look[s].On() && SupportLookFile(p.kind[s],s%4==0,p.look[s],file,std::size(file))){each(context,file);++given;}
+        const VehicleLoadout& l=cfg.vehicle[i];
+        if(l.On() && l.body==VehicleBodyOfKey(SupportCallKey(i)) && VehicleVariantFile(l,file,std::size(file))){each(context,file);++given;}
+    }
+    return given;
 }
 }  // namespace crew
