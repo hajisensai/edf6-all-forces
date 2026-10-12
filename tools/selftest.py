@@ -7064,6 +7064,81 @@ def edf41_objects_after_weapons() -> None:
     assert body.index('call_weapons.install(game, weapons)') < body.index('edf41_objects.build(game)')
 
 
+
+@test
+def mdb_insert_bone() -> None:
+    """mdb.insert_bone on a small skinned model: the new bone goes in depth-first file order after its parent's
+    subtree (depth_delta encodes that order: appended at the end it would read as the last bone's child), as the
+    parent's last child, weightless with the parent's bind; every index past it moves up by one in the bones' links,
+    the objects' bones and the skinned vertices' blend indices; inv_bind stays the inverse of the bind and
+    depth_delta the stock rule. rename_bone gives the bone a name-table entry of its own."""
+    import struct
+    import mdb
+    ident = [1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0]
+
+    def bone(i: int, parent: int, sib: int, child: int, name: int, kids: int, y: float) -> mdb.Bone:
+        local = list(ident)
+        local[13] = y
+        return mdb.Bone(i, parent, sib, child, name, kids, 3, 0, 0, 0, 0, local, list(ident), [0.0, 0, 0, 1], [0.0, 0, 0, 1])
+
+    # root(0) -> a(1) -> a1(2); root -> b(3)
+    bones = [bone(0, -1, -1, 1, 0, 2, 0.0), bone(1, 0, 3, 2, 1, 1, 1.0), bone(2, 1, -1, -1, 2, 0, 2.0),
+             bone(3, 0, -1, -1, 3, 0, 3.0)]
+    w = mdb.bind_world(mdb.Mdb(0x20, ['root', 'a', 'a1', 'b'], bones, [], [], []))
+    for b in bones:
+        b.inv_bind = mdb.inverse_affine(w[b.index])
+    d = mdb.depth_of(mdb.Mdb(0x20, [], bones, [], [], []))
+    for i, b in enumerate(bones):
+        b.depth_delta = (d[i + 1] - d[i]) if i + 1 < len(bones) else d[i]
+    vdata = bytes([3, 2, 1, 0]) + struct.pack('<4f', 0.25, 0.25, 0.25, 0.25)
+    mesh = mdb.Mesh(bytes((0, 1, 4, 0)), 0, 0, 20, [mdb.VElem(21, 0, 0, 'BLENDINDICES'), mdb.VElem(1, 4, 0, 'BLENDWEIGHT')],
+                    0, vdata, b'')
+    md = mdb.Mdb(0x20, ['root', 'a', 'a1', 'b'], bones, [mdb.Object(0, 3, [mesh])], [], [])
+    at = mdb.insert_bone(md, 'g', 'a')
+    assert at == 3 and [md.name_of(b.name) for b in md.bones] == ['root', 'a', 'a1', 'g', 'b']
+    assert [(b.parent, b.sibling, b.child) for b in md.bones] == [(-1, -1, 1), (0, 4, 2), (1, 3, -1), (1, -1, -1),
+                                                                   (0, -1, -1)]
+    assert md.bones[1].child_count == 2 and md.objects[0].bone == 4
+    assert list(md.objects[0].meshes[0].vdata[:4]) == [4, 2, 1, 0]
+    w = mdb.bind_world(md)
+    assert all(max(abs(x - y) for x, y in zip(mdb.inverse_affine(w[b.index]), b.inv_bind)) < 1e-6 for b in md.bones)
+    d = mdb.depth_of(md)
+    assert [b.depth_delta for b in md.bones] == [d[i + 1] - d[i] for i in range(4)] + [d[4]]
+    mdb.rename_bone(md, 'b', 'body')
+    assert md.name_of(md.bones[4].name) == 'body' and md.names[3] == 'b'
+
+
+@test
+def edf41_ufo401_real() -> None:
+    """The shipped UFO401 under UfoSmall507: every MDB of its model has the bones the class finds by name (body,
+    gun_side, gun: a missing one, wrong aim or EDF+0x529067), keeps every bone its ragdoll and its MAB locators name
+    (center: kept for them), its 8 sounds (4.1's 7, then E507's eighth), and E507's aim keys."""
+    import json
+    import re
+    import mdb
+    import sgo
+    base = os.path.join(ROOT, 'edf41port', 'objects', 'OBJECT')
+    with open(os.path.join(base, 'UFO401.SGO'), 'rb') as f:
+        d = sgo.load(data=f.read())
+    assert d['xgs_scene_object_class'] == 'UfoSmall507' and len(d['se_table']) == 8
+    assert d['se_table'][-1] == '小型UFO507戦闘モード' and 'aim_range_info' in d and 'move_turn_info' in d
+    assert 'center'.encode('utf-16le') in bytes.fromhex(d['animation_model'][2][4:])
+    with open(os.path.join(base, 'RAGDOLL_UFO401_HAS_HKA.SHKT'), 'rb') as f:
+        ragdoll = {s.decode() for s in re.findall(rb'[A-Za-z_][A-Za-z0-9_]{2,}', f.read())}
+    with open(os.path.join(base, 'UFO401.MRAB'), 'rb') as f:
+        models = [x for x in mdb.rab_read(f.read()).files if x.name.lower().endswith('.mdb')]
+    assert len(models) == 3
+    for x in models:
+        md = mdb.mdb_read(x.data)
+        names = [md.name_of(b.name) for b in md.bones]
+        assert {'body', 'gun_side', 'gun', 'center'} <= set(names), (x.name, names)
+        assert md.bones[names.index('gun')].parent == names.index('gun_side')
+        assert md.bones[names.index('body')].parent == names.index('center')
+        assert {'center', 'partsA_r'} & ragdoll <= set(names)
+    reg = json.load(open(os.path.join(ROOT, 'edf41port', 'objects.json'), encoding='utf-8'))
+    assert any(o['object'] == 'OBJECT/UFO401.SGO' for o in reg['objects'])
+
+
 def main() -> int:
     import rootcpk
     game = rootcpk.DEFAULT_GAME

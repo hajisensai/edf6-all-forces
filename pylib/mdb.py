@@ -667,6 +667,69 @@ def depth_of(md: Mdb) -> list[int]:
     return d
 
 
+def bone_named(md: Mdb, name: str) -> int:
+    """The index of the bone called `name` (ValueError when there is none)."""
+    for b in md.bones:
+        if md.name_of(b.name) == name:
+            return b.index
+    raise ValueError(f'no bone {name}')
+
+
+def rename_bone(md: Mdb, old: str, new: str) -> None:
+    """Bone `old` called `new` (a name-table entry of its own: the old string may name something else too)."""
+    md.bones[bone_named(md, old)].name = len(md.names)
+    md.names.append(new)
+
+
+def insert_bone(md: Mdb, name: str, parent: str) -> int:
+    """A transform-only bone `name` (no mesh, no weight; its local matrix the identity, so it sits where `parent` is)
+    as `parent`'s last child, placed in depth-first file order after `parent`'s subtree, as the stock files keep
+    them (depth_delta encodes that order). Every bone index past it moves up by one: the bones' links, the objects'
+    bones and skinned vertices' blend indices follow. Returns its index."""
+    p = bone_named(md, parent)
+    depth = depth_of(md)
+    at = p + 1
+    while at < len(md.bones) and depth[at] > depth[p]:
+        at += 1
+
+    def moved(i: int) -> int:
+        return i + 1 if i >= at else i
+
+    for b in md.bones:
+        b.parent, b.sibling, b.child = (moved(x) if x >= 0 else x for x in (b.parent, b.sibling, b.child))
+    for ob in md.objects:
+        ob.bone = moved(ob.bone)
+        for me in ob.meshes:
+            idx = [e for e in me.elems if e.name.lower() == 'blendindices']
+            if not idx:
+                continue
+            v = bytearray(me.vdata)
+            for e in idx:
+                if e.fmt != 21:
+                    raise ValueError(f'blend indices in vertex format {e.fmt}')
+                for k in range(me.nverts):
+                    o = k * me.vsize + e.offset
+                    v[o:o + 4] = bytes(moved(x) for x in v[o:o + 4])
+            me.vdata = bytes(v)
+    kids = [b for b in md.bones if b.parent == moved(p)]
+    new = Bone(at, moved(p), -1, -1, len(md.names), 0, 0, 0, 0, 0, 0,
+               [1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0], list(md.bones[p].inv_bind),
+               [0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0])
+    md.names.append(name)
+    if kids:
+        max(kids, key=lambda b: b.index).sibling = at
+    else:
+        md.bones[p].child = at
+    md.bones[p].child_count += 1
+    md.bones.insert(at, new)
+    for i, b in enumerate(md.bones):
+        b.index = i
+    d = depth_of(md)
+    for i, b in enumerate(md.bones):
+        b.depth_delta = (d[i + 1] - d[i]) if i + 1 < len(md.bones) else d[i]
+    return at
+
+
 # ---------------------------------------------------------------------------------------- vertices
 
 def half_to_float(h: int) -> float:

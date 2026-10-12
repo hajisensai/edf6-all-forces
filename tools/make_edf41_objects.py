@@ -39,6 +39,7 @@ import cas_graft  # noqa: E402
 import legacy_assets  # noqa: E402
 import legacy_sgo  # noqa: E402
 import rootcpk  # noqa: E402
+import mdb  # noqa: E402
 import sgo  # noqa: E402
 
 STEAM = r'D:\Steam\steamapps\common'
@@ -56,7 +57,7 @@ ROOTS: dict[str, int] = {
     'VEHICLE501_FORTRESSROBO.SGO': 1, 'VEHICLE501_FORTRESSROBO_AI.SGO': 1,
     'UFOCARRIER301.SGO': 15, 'UFOCARRIER401.SGO': 15,
     'VEHICLE301_TANK_AI.SGO': 13,
-    'UFO301.SGO': 18, 'UFO301ACE.SGO': 6,
+    'UFO301.SGO': 18, 'UFO301ACE.SGO': 6, 'UFO401.SGO': 15,
 }
 
 
@@ -68,6 +69,11 @@ class Alias:
     override: tuple[tuple[str, object], ...] = ()   # keys set to these values whatever 4.1's and the template's are
     own_cas: bool = False     # 4.1's object has no CAS: the template's, every clip hollowed (cas_graft.hollow), as
                               # OBJECT/<root>.CAS: the class's players without the template's motion on its bones
+    bones: tuple[tuple[str, str, str], ...] = ()   # on every MDB of its model RABs, in order: ('rename', old, new)
+                              # or ('insert', name, parent): the bones the class finds by name (mdb.rename_bone /
+                              # insert_bone: a transform-only bone, the indices past it renumbered)
+    mab: tuple[tuple[str, str], ...] = ()   # its MAB's bone names (the locators' nodes) changed in place to these
+    pad: tuple[str, ...] = ()  # list keys 4.1's is shorter in: completed with the template's entries past its end
 
 
 # 4.1's class -> EDF6's (jobs/4bf89026/tmp/alias41: the classes EDF.dll registers, the names each resolves).
@@ -84,6 +90,17 @@ ALIASES: dict[str, Alias] = {
     # battery_config, bullet_object, level_adjust (its weapon and its level scaling) come from E515.
     'UFO301.SGO': Alias('UfoSmall515', 'E515_IMPERIALUFO.SGO', (), (('material_animation', []),), own_cas=True),
     'UFO301ACE.SGO': Alias('UfoSmall515', 'E515_IMPERIALUFO_ACE.SGO', (), (('material_animation', []),), own_cas=True),
+    # UFO401 -> UfoSmall507 (EDF5's gold UFO, its remake). 507 finds bones body (the aim's frame, never moved),
+    # gun_side (yawed toward the target each frame) and gun (pitched) by name, and the MAB locator 銃口 on a bone:
+    # missing, a null write at EDF+0x529067 (jobs/4bf89026/tmp/ufo401/NOTES.txt). 4.1's UFO401 keeps center (its
+    # ragdoll RAGDOLL_UFO401_HAS_HKA.SHKT and its locators name it): a weightless body under it (center's frame),
+    # core -> gun_side (the core turns toward the target), a weightless gun under that (its pitch moves nothing).
+    # Its 7 sounds completed with 507's eighth (battle mode); ai_* / aim_range_info / bullet_* / move_turn_info
+    # come from E507.
+    'UFO401.SGO': Alias('UfoSmall507', 'E507_GOLDUFO.SGO', (),
+                        bones=(('insert', 'body', 'center'), ('rename', 'core', 'gun_side'),
+                               ('insert', 'gun', 'gun_side')),
+                        pad=('se_table',)),
 }
 
 
@@ -214,6 +231,18 @@ def alias(games: Games, root: str, files: dict[str, bytes], a: Alias) -> None:
         members.setdefault(k, v)
     for k, v in a.override:
         members[k] = v
+    for k in a.pad:
+        mine, full = members.get(k), theirs.get(k)
+        if isinstance(mine, list) and isinstance(full, list) and len(mine) < len(full):
+            members[k] = mine + full[len(mine):]
+    if a.bones:
+        for entry in members['animation_model'][0]:
+            rab_rel = rel_of(entry[0])
+            if rab_rel in files:
+                files[rab_rel] = reboned(files[rab_rel], a.bones)
+    if a.mab:
+        model = members['animation_model']
+        model[2] = remabbed(model[2], a.mab)
     am = members.get('animation_model')
     cas = rel_of(am[1]) if isinstance(am, list) and len(am) > 1 and isinstance(am[1], str) else None
     t_am = theirs['animation_model']
@@ -226,6 +255,36 @@ def alias(games: Games, root: str, files: dict[str, bytes], a: Alias) -> None:
     files[rel] = sgo.write_depth_first(version, members)
     if a.players and cas in files:
         files[cas] = cas_graft.graft(files[cas], games.read6(rel_of(t_am[1])), list(a.players))
+
+
+def reboned(rab: bytes, ops: tuple[tuple[str, str, str], ...]) -> bytes:
+    """A model RAB with `ops` (Alias.bones) applied to every MDB in it."""
+    archive = mdb.rab_read(rab)
+    for f in archive.files:
+        if not f.name.lower().endswith('.mdb'):
+            continue
+        md = mdb.mdb_read(f.data)
+        for op, a, b in ops:
+            if op == 'rename':
+                mdb.rename_bone(md, a, b)
+            elif op == 'insert':
+                mdb.insert_bone(md, a, b)
+            else:
+                raise ValueError(f'bone op {op}')
+        f.stored = mdb.cmpl_compress(mdb.mdb_write(md)) if f.stored[:4] == b'CMPL' else mdb.mdb_write(md)
+    return mdb.rab_write(archive)
+
+
+def remabbed(mab: object, names: tuple[tuple[str, str], ...]) -> bytes:
+    """An SGO's MAB block with each bone name (a NUL-terminated UTF-16 string) changed in place."""
+    if not isinstance(mab, bytes):
+        raise ValueError('no MAB block in animation_model[2]')
+    for old, new in names:
+        at = mab.find(old.encode('utf-16le') + b'\0\0')
+        if at < 0 or at % 2:
+            raise ValueError(f'MAB has no bone name {old}')
+        mab = sgo.replace_utf16(mab, at, old, new)
+    return mab
 
 
 def build(edf41: str, edf6: str) -> tuple[dict, dict[str, bytes]]:
