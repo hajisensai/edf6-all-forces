@@ -23,10 +23,10 @@
 //    it with 0x6899F0(line, &start, &velocity, &gravity) from its muzzle (the call at 0x6888D9); the call is redirected and,
 //    for a line that starts at the player in first person, its start is moved through T (the viewmodel's muzzle); the
 //    arc keeps its own velocity and gravity. Only the picture moves: the round flies from the real muzzle as before.
-//  - The culling (H setter, measured): Umbra culls a model by its object transform (model+0x110, set by 0x11B30C0). The
-//    real weapon and arms go below the view in a reload's third-person animation and were culled with the viewmodel in
-//    front of the camera; each camera step in first person places the player's models there where they are drawn (their
-//    root's draw pose through T), and puts them back where they really are on the way out.
+//  - The culling (H setter, measured): Umbra culls a model by its bounds box (model+0x110, handed over by 0x11B30C0).
+//    The real weapon and arms go below the view in a reload's third-person animation and were culled with the viewmodel
+//    in front of the camera (the whole player, shadow too, for half a second); each camera step in first person hands
+//    Umbra the player's boxes through T, and the real ones back on the way out.
 //  - The camera's first row points to the screen's left (measured: a grip at +x drew on the left), so every "right" the
 //    ini and the motion speak of is mirrored into it here (x, yaw and roll negated).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
@@ -87,6 +87,7 @@ constexpr int kFlashSlots=16,kFlashFrames=8;   // matrices handed out (a flash l
 constexpr unsigned kAimLineCall=0x6888D9,kAimLineBuild=0x6899F0;
 // Umbra's object transform setter (0x6C06A0 calls it with model+0x110 after an update).
 constexpr unsigned kUmbraPlace=0x11B30C0;
+constexpr std::size_t kModelBounds=0x110;
 const unsigned char kUmbraPlaceCode[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x08,0x55,0x48,0x8D,0x68,0xA1,0x48,0x81,0xEC,0x90};
 using PlaceFn=void(__fastcall*)(void*,const float*);
 bool placeOk=false;
@@ -95,9 +96,11 @@ constexpr float kAimLineReach=2.0f,kChestUp=1.2f;
 // hands are (the eye's frame: right, up, ahead, m); with one, about its grip.
 const float kPivot[3]={-0.2f,-0.3f,0.4f};   // in the camera's frame: x to the left
 constexpr unsigned kFencerVt=0x17CF5B8;
-// The arms (the four classes share the names, fp-render-re.md §8): the upper and lower arm and their twists, the hand,
-// its fingers, the weapon mounts. Not the shoulder (kata: its pad would hang in front of the view).
-const wchar_t* const kArmBones[]={L"jowan",L"kawan",L"te_",L"fing",L"ring",L"little",L"index",L"middle",
+// The arms (the four classes share the names, fp-render-re.md §8): the forearm and its twists, the hand, its fingers,
+// the weapon mounts, as a first-person game shows them. Not the shoulder (kata: its pad hangs in front of the view) nor
+// the upper arm (jowan: it reaches back to the eye, its guards fill the view's corners); the elbow's vertices, weighed
+// by both, lie on the rays the forearm is seen along (Pose).
+const wchar_t* const kArmBones[]={L"kawan",L"te_",L"fing",L"ring",L"little",L"index",L"middle",
                                   L"thumb",L"arm"};
 
 using CamStepFn=void(__fastcall*)(void*,void*);
@@ -302,11 +305,13 @@ bool RootPose(const unsigned char* model,M4* out) noexcept {
     return true;
 }
 
-// Umbra's place of a model: through `t` (the viewmodel's), or where it really is (`t` null).
+// Umbra's place of a model: its bounds through `t` (the viewmodel's), or where they really are (`t` null). The bounds
+// are the box the update computes from the bones (0x11005E0 writes it at the skeleton instance's +0x70 = model+0x110,
+// axes scaled by the extents; 0x6C06A0 hands that to 0x11B30C0, which keeps model+0x110 as it is).
 void Place(const void* model,const M4* t) noexcept {
-    M4 root;
-    if(!placeOk || !model || !RootPose(static_cast<const unsigned char*>(model),&root))return;
-    const M4 at=t ? fpview::Mul(root,*t) : root;
+    if(!placeOk || !model)return;
+    const M4 box=MatrixAt(static_cast<const unsigned char*>(model)+kModelBounds);
+    const M4 at=t ? fpview::Mul(box,*t) : box;
     reinterpret_cast<PlaceFn>(image+kUmbraPlace)(const_cast<void*>(model),at.m);
 }
 
