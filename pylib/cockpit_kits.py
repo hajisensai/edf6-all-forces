@@ -143,7 +143,7 @@ def _family(module: str) -> dict:
     return __import__(module).KITS
 
 
-for _name in ('cockpit_kits_ground', 'cockpit_kits_air', 'cockpit_kits_mech'):
+for _name in ('cockpit_kits_ground', 'cockpit_kits_air', 'cockpit_kits_mech', 'cockpit_kits_plugin'):
     _more = _family(_name)
     if set(_more) & set(KITS):
         raise ValueError(f'{_name}: kit names taken: {sorted(set(_more) & set(KITS))}')

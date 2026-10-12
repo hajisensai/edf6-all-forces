@@ -32,7 +32,7 @@ FITS: dict[str, tuple[Fit, ...]] = {
 DIGESTS: dict[str, str] = {}
 
 
-for _name in ('cockpit_fits_ground', 'cockpit_fits_air', 'cockpit_fits_mech'):
+for _name in ('cockpit_fits_ground', 'cockpit_fits_air', 'cockpit_fits_mech', 'cockpit_fits_plugin'):
     _mod = __import__(_name)
     for _table, _more in ((FITS, _mod.FITS), (DIGESTS, _mod.DIGESTS)):
         if set(_more) & set(_table):
