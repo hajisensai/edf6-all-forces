@@ -410,6 +410,26 @@ bool HandOnWeapon(const unsigned char* h,int hand,const M4& anchor) noexcept {
     return off[0]*off[0]+off[1]*off[1]+off[2]*off[2]<kOnWeapon*kOnWeapon;
 }
 
+// Debug=1, once a weapon: its model's class (vtable, draw slot, hooked) and the hand it is taken to be in.
+void LogWeapon(const unsigned char* w,int hand) noexcept {
+    static const void* logged[16]{};
+    static int next=0;
+    if(!Cfg().debug)return;
+    for(const void* l:logged)if(l==w)return;
+    logged[next]=w;next=(next+1)%16;
+    const unsigned char* model=w+kWeaponModel;
+    void** vt=At<void**>(model,0);
+    bool hookedHere=false;
+    for(int i=0;i<hookedCount;++i)hookedHere=hookedHere || hooked[i].vtable==vt;
+    const auto mount=At<const unsigned char*>(w,kWeaponMount);
+    const auto name=mount ? At<const wchar_t*>(mount,0) : nullptr;
+    Log("FP weapon %p: vtable +0x%llX (weapon +0x%llX) draw slot +0x%llX hooked=%d mount %ls -> %s hand, umbra %p",
+        static_cast<const void*>(w),static_cast<unsigned long long>(reinterpret_cast<unsigned char*>(vt)-image),
+        static_cast<unsigned long long>(At<const unsigned char*>(w,0)-image),
+        static_cast<unsigned long long>(static_cast<unsigned char*>(vt[kModelDrawSlot])-image),hookedHere,
+        name ? name : L"?",hand==kLeft ? "left" : "right",At<const void*>(model,kUmbraObject));
+}
+
 // The weapons in hand and, for each hand, the root of its weapon as it will be drawn (the draw pose's bone 0:
 // 0x1100B90 writes the weapon's matrix to its first bone record, 0x1100F10 copies it into the draw pose).
 void Hands(const unsigned char* h,M4* anchor,bool* anchored) noexcept {
@@ -422,6 +442,7 @@ void Hands(const unsigned char* h,M4* anchor,bool* anchored) noexcept {
         if(!w)continue;
         const int hand=HandOf(w);
         st.inHand[st.inHandCount]=w+kWeaponModel;st.handOf[st.inHandCount++]=hand;
+        LogWeapon(w,hand);
         if(!anchored[hand])anchored[hand]=RootPose(w+kWeaponModel,&anchor[hand]);
     }
 }
