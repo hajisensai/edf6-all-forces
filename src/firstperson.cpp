@@ -30,7 +30,11 @@
 //    step hands Umbra a box around the eye for the body and the weapons in hand (the camera inside it: never culled),
 //    and the real boxes back on the way out. That is done as the frame's render starts (System::update's call of the
 //    render 0x11978D0 at 0x1198FA4, redirected): a weapon's own update (slot 3 -> 0x6C06A0 -> 0x11B30C0) may come after
-//    the camera step and put its real box back (the Wing Diver's gun: drawn one frame in five with it done there).
+//    the camera step and put its real box back. That was not all: with the camera in the head the Wing Diver's gun was
+//    still left out of the visible set four frames in five (drawn every frame in the third person, measured; the same
+//    with the placement off). So the main view's opaque pass is completed: after its list (0x11E1630 for each object,
+//    pass 1) and before the pass ends (0x11E1590(system, 1), its call at 0x11E2572 redirected), a model of the
+//    viewmodel the pass has not drawn this frame is submitted the same way.
 //  - Two hands (measured: the Fencer's weapons hung below the view): each weapon in hand (each weapon set's current one)
 //    belongs to the hand its mount bone is on (weapon+0xE88, the record of `arms_r` / `arms_l` / `armsFlip_l`...: the
 //    name's _l), and each hand has its own T anchored on its own weapon, the left grip the right one mirrored. A hand
@@ -107,6 +111,14 @@ constexpr float kEyeBox=2.0f;
 // The frame's render, its call in System::update (rcx the system, dl, r8b).
 constexpr unsigned kRenderCall=0x1198FA4,kRender=0x11978D0;
 using RenderFn=void(__fastcall*)(void*,std::uint8_t,std::uint8_t);
+// The main view's opaque pass: each object submitted by 0x11E1630(system, object, 1); the pass ended by
+// 0x11E1590(system, 1), called at 0x11E2572.
+constexpr unsigned kSubmit=0x11E1630,kPassEnd=0x11E1590,kPassEndCall=0x11E2572;
+using SubmitFn=void(__fastcall*)(void*,void*,int);
+using PassEndFn=void(__fastcall*)(void*,int);
+ULONGLONG renderFrame=0;               // the renders started
+struct Drawn1 { const void* model; ULONGLONG frame; };
+Drawn1 drawn1[kMostSets+1]{};          // the viewmodel's models and the render they were last drawn in pass 1 by
 constexpr std::size_t kBatch=0x18;   // a drawn object's batch (0x11E1630)
 constexpr int kMostUnbatched=8;   // m each way from the eye: the box Umbra gets for the viewmodel's models
 const unsigned char kUmbraPlaceCode[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x08,0x55,0x48,0x8D,0x68,0xA1,0x48,0x81,0xEC,0x90};
@@ -641,8 +653,40 @@ void Camera(unsigned char* cam) noexcept {
 
 // The render about to start: the viewmodel's models placed around the eye for Umbra (above).
 void __fastcall RenderHook(void* system,std::uint8_t a,std::uint8_t b) {
+    ++renderFrame;
     __try { if(st.on)PlaceAll(false); } __except(EXCEPTION_EXECUTE_HANDLER){}
     reinterpret_cast<RenderFn>(image+kRender)(system,a,b);
+}
+
+// A model of the viewmodel drawn in the opaque pass this render.
+void Drew1(const void* model) noexcept {
+    Drawn1* free=nullptr;
+    for(Drawn1& d:drawn1) {
+        if(d.model==model){d.frame=renderFrame;return;}
+        if(!free && d.frame!=renderFrame)free=&d;
+    }
+    if(free)*free=Drawn1{model,renderFrame};
+}
+
+bool Drew1Now(const void* model) noexcept {
+    for(const Drawn1& d:drawn1)if(d.model==model && d.frame==renderFrame)return true;
+    return false;
+}
+
+// The opaque pass's end: what of the viewmodel it left out, submitted.
+void __fastcall PassEndHook(void* system,int pass) {
+    __try {
+        if(st.on && pass==1) {
+            const void* models[kMostSets+1];
+            int n=0;
+            models[n++]=st.body;
+            for(int i=0;i<st.inHandCount && n<kMostSets+1;++i)models[n++]=st.inHand[i];
+            for(int i=0;i<n;++i)
+                if(models[i] && At<const void*>(models[i],kUmbraObject) && !Drew1Now(models[i]))
+                    reinterpret_cast<SubmitFn>(image+kSubmit)(system,const_cast<void*>(models[i]),1);
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+    reinterpret_cast<PassEndFn>(image+kPassEnd)(system,pass);
 }
 
 void __fastcall CamStepHook(void* camera,void* step) {
@@ -758,6 +802,7 @@ void __fastcall DrawHook(void* model,void* ctx,int pass,void* view) {
     else if(st.on){__try { NearWeapon(model,pass); } __except(EXCEPTION_EXECUTE_HANDLER){}}
     if(part==Part::none || pass==3 || pass==4 || pass>5){next(model,ctx,pass,view);return;}
     if(pass==0 || part==Part::stowed)return;   // the occluder depth (not where it is in this picture); put away: unseen
+    if(pass==1)Drew1(model);
     unsigned char* insts[kMostInsts];
     int n=0;
     __try {
@@ -802,8 +847,9 @@ bool InstallFirstPerson() noexcept {
     placeOk=Matches(kUmbraPlace,kUmbraPlaceCode,sizeof(kUmbraPlaceCode));
     const bool lineOk=RedirectCall(image+kAimLineCall,image+kAimLineBuild,reinterpret_cast<void*>(&AimLineHook),changed);
     placeOk=placeOk && RedirectCall(image+kRenderCall,image+kRender,reinterpret_cast<void*>(&RenderHook),changed);
+    const bool passOk=placeOk && RedirectCall(image+kPassEndCall,image+kPassEnd,reinterpret_cast<void*>(&PassEndHook),changed);
     toggled=Cfg().firstPersonStart;
-    Log("FP installed: camera=%d draw=%d flash=%d aim line=%d culling=%d start=%d",camOk,drawOk,flashOk,lineOk,placeOk,toggled);
+    Log("FP installed: camera=%d draw=%d flash=%d aim line=%d culling=%d pass=%d start=%d",camOk,drawOk,flashOk,lineOk,placeOk,passOk,toggled);
     return drawOk;
 }
 }  // namespace crew
