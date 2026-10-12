@@ -117,6 +117,7 @@ struct Soldier {
     ULONGLONG seen,loggedAt,rollAt,spotAt,losFrame;
     npc::Control control;
     bool controlSet,homeSet,spotSet,los,noSwitch;
+    bool unarmedSaid;        // "weapons unreadable" logged for this stretch (once, not every kLogMs: it does not change)
     float home[3],spot[3];
     int arm,wantArm,armMiss;
     ObjRef target;
@@ -1097,9 +1098,13 @@ void Think(unsigned char* h,int cls) noexcept {
     if(s->boardV && Board(*s,h,pos,ms))return; // boarding does not depend on readable hand weapons
     const Arms a=ArmsOf(h);
     if(a.n==0) {   // its weapons cannot be read: nothing to fight with that the plugin knows of, so all of it stays stock
-        if(Cfg().debug && ms-s->loggedAt>kLogMs){s->loggedAt=ms;Log("NPCAI %s %p: weapons unreadable, left stock",kSoldiers[cls].name,h);}
+        if(Cfg().debug && !s->unarmedSaid && ms-s->loggedAt>kLogMs) {
+            s->loggedAt=ms;s->unarmedSaid=true;
+            Log("NPCAI %s %p: weapons unreadable, left stock",kSoldiers[cls].name,h);
+        }
         return;
     }
+    s->unarmedSaid=false;
     const Plan p=npc::Scripted(control) ? Scripted(*s,h,a,eye,pos) : Drive(*s,h,kSoldiers[cls],a,root,eye,pos,q,ms);
     if(Cfg().debug && ms-s->loggedAt>kLogMs) {
         s->loggedAt=ms;
