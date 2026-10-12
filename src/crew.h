@@ -229,11 +229,14 @@ struct Config {
     float fpGripX=0.17f;            // ...the weapon in hand held here in the view, m: right (the Fencer: fpHold*)
     float fpGripY=-0.20f;           // ...up
     float fpGripZ=0.40f;            // ...ahead
+    float fpDualGripX=0.28f;        // ...a weapon in each hand (the Fencer): the right one here, the left mirrored, m: right
+    float fpDualGripY=-0.28f;       // ...up
+    float fpDualGripZ=0.55f;        // ...ahead
     float fpHoldX=0.0f;             // ...the arms and weapon moved in the aim frame, m: right
     float fpHoldY=0.0f;             // ...up
     float fpHoldZ=0.0f;             // ...ahead
-    float fpScale=1.0f;             // ...shrunk about the eye this much (the same picture, nearer: walls do not cut it)
-    float fpNear=0.0f;              // ...the camera's near clip, m (0: the stock 0.1)
+    float fpScale=0.5f;             // ...shrunk about the eye this much (the same picture, nearer: walls do not cut it)
+    float fpNear=0.03f;             // ...the camera's near clip, m (0: the stock 0.1)
     bool fpAimSnap=true;            // ...the aim follows the mouse at once (this machine's look smoothing off)
     bool fpMotion=true;             // ...the arms and weapon sway, bob, kick, dip at a reload, a switch, a sprint, a roll
     bool gunStabilizer=true;        // stab.cpp: the guns that should have one hold their world line on the move

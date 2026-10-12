@@ -27,6 +27,12 @@
 //    The real weapon and arms go below the view in a reload's third-person animation and were culled with the viewmodel
 //    in front of the camera (the whole player, shadow too, for half a second); each camera step in first person hands
 //    Umbra the player's boxes through T, and the real ones back on the way out.
+//  - Two hands (measured: the Fencer's weapons hung below the view): each weapon in hand (each weapon set's current one)
+//    belongs to the hand its mount bone is on (weapon+0xE88, the record of `arms_r` / `arms_l` / `armsFlip_l`...: the
+//    name's _l), and each hand has its own T anchored on its own weapon, the left grip the right one mirrored. A hand
+//    with none shares the other's (the Ranger's left hand on the rifle's guard); with none in either, the aim frame.
+//    The body's bones whose name ends in _l take the left T, the others the right. Weapons not in hand (on the back,
+//    put away) are not drawn in the colour passes (their shadow is).
 //  - The camera's first row points to the screen's left (measured: a grip at +x drew on the left), so every "right" the
 //    ini and the motion speak of is mirrored into it here (x, yaw and roll negated).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
@@ -95,7 +101,8 @@ constexpr float kAimLineReach=2.0f,kChestUp=1.2f;
 // Without a weapon to anchor on (the Fencer's two hands, empty hands) the viewmodel turns about a point near where the
 // hands are (the eye's frame: right, up, ahead, m); with one, about its grip.
 const float kPivot[3]={-0.2f,-0.3f,0.4f};   // in the camera's frame: x to the left
-constexpr unsigned kFencerVt=0x17CF5B8;
+constexpr std::size_t kWeaponMount=0xE88;   // the record of the owner's bone the weapon hangs on (0x68AEE9)
+constexpr int kRight=0,kLeft=1;
 // The arms (the four classes share the names, fp-render-re.md §8): the forearm and its twists, the hand, its fingers,
 // the weapon mounts, as a first-person game shows them. Not the shoulder (kata: its pad hangs in front of the view) nor
 // the upper arm (jowan: it reaches back to the eye, its guards fill the view's corners); the elbow's vertices, weighed
@@ -123,6 +130,9 @@ struct State {
     const void* body;           // its body model
     const void* weapons[kMostWeapons];
     int weaponCount;
+    const void* inHand[kMostSets];   // the weapons in hand (each set's current one): their models
+    int handOf[kMostSets];           // ...and the hand each is in (kRight, kLeft)
+    int inHandCount;
     float stock[16];            // the stock matrix this frame (put back before the next step)
     float eyeLocal[3];          // the eased eye in the body frame
     bool fresh;                 // the eye taken as it is next frame
@@ -137,13 +147,13 @@ struct State {
     std::int32_t shots[kMostSets],fire[kMostSets];
     int reloadLeft;
     fpmotion::State motion;
-    M4 moved;                   // the motion as a matrix (fp_view.h MotionMatrix)
-    bool viewOk;                // T this frame (fp_view.h ViewTransform), built by the camera step
-    M4 view;
+    M4 moved[2];                // the motion as a matrix about each hand's grip (fp_view.h MotionMatrix)
+    bool viewOk[2];             // each hand's T this frame (kRight, kLeft), built by the camera step
+    M4 view[2];
 };
 State st{};
 // The flashes' matrices: each the shot matrix `src` through T, kept for kFlashFrames camera steps.
-struct alignas(16) Flash { float m[16]; const float* src; int age; };
+struct alignas(16) Flash { float m[16]; const float* src; int age,hand; };
 Flash flashes[kFlashSlots]{};
 int flashNext=0;
 using CreateFn=void*(__fastcall*)(void*,void*,void*,void*);
@@ -185,12 +195,28 @@ bool ArmBone(const wchar_t* name) noexcept {
     return false;
 }
 
-// Whether this machine's player is to be seen in first person through `cam` now.
-bool Wanted(const unsigned char* cam,const unsigned char* h) noexcept {
+// Why this machine's player is not to be seen in first person through `cam` now (nullptr: they are).
+const char* NotWanted(const unsigned char* cam,const unsigned char* h) noexcept {
     const Config& c=Cfg();
-    if(!c.enabled || !c.firstPerson || !toggled || !h || !IsSoldier(h))return false;
-    if(At<const void*>(cam,kCamTarget)!=h && At<const void*>(cam,kCamTargetRef)!=h)return false;
-    return !h[kDead] && HumanOnFoot(h) && !h[kRagdoll] && At<std::int32_t>(h,kSpecialView)!=1;
+    if(!c.enabled || !c.firstPerson || !toggled)return "off";
+    if(!h || !IsSoldier(h))return "no soldier";
+    if(At<const void*>(cam,kCamTarget)!=h && At<const void*>(cam,kCamTargetRef)!=h)return "another camera";
+    if(h[kDead])return "dead";
+    if(!HumanOnFoot(h))return "riding";
+    if(h[kRagdoll])return "down";
+    if(At<std::int32_t>(h,kSpecialView)==1)return "a class gadget's view";
+    return nullptr;
+}
+
+bool Wanted(const unsigned char* cam,const unsigned char* h) noexcept {
+    const char* why=NotWanted(cam,h);
+    static ULONGLONG at=0;
+    if(why && toggled && h && Cfg().debug && GetTickCount64()-at>=5000) {
+        at=GetTickCount64();
+        Log("FP not on camera %p: %s (special view %d, vtable +0x%llX)",static_cast<const void*>(cam),why,
+            At<std::int32_t>(h,kSpecialView),static_cast<unsigned long long>(At<const unsigned char*>(h,0)-image));
+    }
+    return !why;
 }
 
 void Toggle(const unsigned char* h) noexcept {
@@ -290,9 +316,10 @@ fpmotion::Cue Cues(const unsigned char* h) noexcept {
     return c;
 }
 
-void Motion(const unsigned char* h,const float* pivot) noexcept {
+// The motion this frame about each hand's pivot (right is -x in the camera's frame: x, yaw and roll mirrored).
+void Motion(const unsigned char* h,const float (*pivot)[3]) noexcept {
     const fpmotion::Pose p=fpmotion::Advance(st.motion,Cues(h));
-    st.moved=fpview::MotionMatrix(-p.x,p.y,p.z,p.pitch,-p.yaw,-p.roll,pivot);   // right is -x in the camera's frame
+    for(int hand=kRight;hand<=kLeft;++hand)st.moved[hand]=fpview::MotionMatrix(-p.x,p.y,p.z,p.pitch,-p.yaw,-p.roll,pivot[hand]);
 }
 
 // A model's root bone as it will be drawn (its base LOD's draw pose, bone 0).
@@ -336,17 +363,40 @@ void Place(const void* model,const M4* t) noexcept {
     reinterpret_cast<PlaceFn>(image+kUmbraPlace)(const_cast<void*>(model),at.m);
 }
 
-void PlaceAll(const M4* t) noexcept {
-    Place(st.body,t);
-    for(int i=0;i<st.weaponCount;++i)Place(st.weapons[i],t);
+// The body by the right hand's T (both arms are near it), each weapon in hand by its own hand's; `real`: where they are.
+void PlaceAll(bool real) noexcept {
+    Place(st.body,real || !st.viewOk[kRight] ? nullptr : &st.view[kRight]);
+    for(int i=0;i<st.inHandCount;++i)Place(st.inHand[i],real || !st.viewOk[st.handOf[i]] ? nullptr : &st.view[st.handOf[i]]);
 }
 
-// The root of the weapon in the first hand as it will be drawn (its draw pose's bone 0: 0x1100B90 writes the weapon's
-// matrix to its first bone record, 0x1100F10 copies it into the draw pose), the anchor of a one-weapon class.
-bool Anchor(const unsigned char* h,M4* out) noexcept {
-    if(At<const unsigned char*>(h,0)==image+kFencerVt)return false;
-    const unsigned char* w=SetWeapon(h,0);
-    return w && RootPose(w+kWeaponModel,out);
+// The hand weapon `w` hangs in: the name of its mount bone ends in _l for the left (arms_l, armsFlip_l...).
+int HandOf(const unsigned char* w) noexcept {
+    const auto mount=At<const unsigned char*>(w,kWeaponMount);
+    const auto name=mount ? At<const wchar_t*>(mount,0) : nullptr;
+    const std::size_t n=name ? std::wcslen(name) : 0;
+    return n>=2 && name[n-2]==L'_' && name[n-1]==L'l' ? kLeft : kRight;
+}
+
+// The weapons in hand and, for each hand, the root of its weapon as it will be drawn (the draw pose's bone 0:
+// 0x1100B90 writes the weapon's matrix to its first bone record, 0x1100F10 copies it into the draw pose).
+void Hands(const unsigned char* h,M4* anchor,bool* anchored) noexcept {
+    anchored[kRight]=anchored[kLeft]=false;
+    st.inHandCount=0;
+    auto n=At<std::uint64_t>(h,kSetCount);
+    if(n>kMostSets)n=kMostSets;
+    for(std::uint64_t k=0;k<n;++k) {
+        const unsigned char* w=SetWeapon(h,k);
+        if(!w)continue;
+        const int hand=HandOf(w);
+        st.inHand[st.inHandCount]=w+kWeaponModel;st.handOf[st.inHandCount++]=hand;
+        if(!anchored[hand])anchored[hand]=RootPose(w+kWeaponModel,&anchor[hand]);
+    }
+}
+
+// The hand a weapon model is in, -1: not in hand.
+int HandOfModel(const void* model) noexcept {
+    for(int i=0;i<st.inHandCount;++i)if(st.inHand[i]==model)return st.handOf[i];
+    return -1;
 }
 
 // The flashes handed out lately, moved with the viewmodel (their shot matrix through this frame's T).
@@ -354,34 +404,31 @@ void Flashes() noexcept {
     for(Flash& f:flashes) {
         if(!f.src || f.age>=kFlashFrames){f.src=nullptr;continue;}
         ++f.age;
-        if(st.viewOk)std::memcpy(f.m,fpview::Mul(MatrixAt(reinterpret_cast<const unsigned char*>(f.src)),st.view).m,64);
+        if(st.viewOk[f.hand])std::memcpy(f.m,fpview::Mul(MatrixAt(reinterpret_cast<const unsigned char*>(f.src)),st.view[f.hand]).m,64);
     }
-}
-
-bool PlayersWeapon(const unsigned char* w) noexcept {
-    for(int i=0;i<st.weaponCount;++i)if(st.weapons[i]==w+kWeaponModel)return true;
-    return false;
 }
 
 // A shot's flash about to be made for weapon `w`: in first person, its matrix pointer is one of the flashes'.
 void Relocate(unsigned char* w) noexcept {
-    if(!st.on || !st.viewOk || !PlayersWeapon(w))return;
+    const int hand=st.on ? HandOfModel(w+kWeaponModel) : -1;
+    if(hand<0 || !st.viewOk[hand])return;
     const auto src=At<const float*>(w,kFlashMatrix);
     if(!src)return;
     Flash& f=flashes[flashNext];
     flashNext=(flashNext+1)%kFlashSlots;
-    f.src=src;f.age=0;
-    std::memcpy(f.m,fpview::Mul(MatrixAt(reinterpret_cast<const unsigned char*>(src)),st.view).m,64);
+    f.src=src;f.age=0;f.hand=hand;
+    std::memcpy(f.m,fpview::Mul(MatrixAt(reinterpret_cast<const unsigned char*>(src)),st.view[hand]).m,64);
     Put<const float*>(w,kFlashMatrix,f.m);
 }
 
 // The start of a line `start` (x, y, z, w) moved through T into `out` when it is the player's in first person.
 bool MovedStart(const float* start,float* out) noexcept {
-    if(!st.on || !st.viewOk || !st.human)return false;
+    const int hand=st.viewOk[kRight] ? kRight : kLeft;
+    if(!st.on || !st.viewOk[hand] || !st.human)return false;
     const float* at=reinterpret_cast<const float*>(st.human+kPos);
     const float d[3]={start[0]-at[0],start[1]-at[1]-kChestUp,start[2]-at[2]};
     if(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>kAimLineReach*kAimLineReach)return false;
-    fpview::Point(st.view,start,out);
+    fpview::Point(st.view[hand],start,out);
     out[3]=start[3];
     return true;
 }
@@ -400,25 +447,54 @@ void* __fastcall FlashCreateHook(void* factory,void* a,void* cls,void* param) {
 }
 
 // Debug=1: what the viewmodel is built from, every 5 s (every half second through a reload).
-void Probe(bool anchored,const M4& anchor) noexcept {
+void Probe(const bool* anchored,const M4* anchor) noexcept {
     static ULONGLONG at=0;
     const ULONGLONG now=GetTickCount64();
     if(!Cfg().debug || now-at<(st.reloadLeft>0 ? 500u : 5000u))return;
     at=now;
     const float* eye=reinterpret_cast<const float*>(st.cam+kCamEyeRow);
-    const float* f=anchor.m+8;
-    Log("FP probe anchored=%d view=%d held %p reload %d | root (%.2f,%.2f,%.2f) from the eye, forward length %.3f | act 0x%X",
-        anchored,st.viewOk,static_cast<const void*>(st.held[0]),st.reloadLeft,anchor.m[12]-eye[0],anchor.m[13]-eye[1],
-        anchor.m[14]-eye[2],std::sqrt(f[0]*f[0]+f[1]*f[1]+f[2]*f[2]),st.act);
+    for(int hand=kRight;hand<=kLeft;++hand) {
+        const M4& a=anchor[hand];
+        Log("FP probe %s hand: anchored=%d view=%d | root (%.2f,%.2f,%.2f) from the eye | in hand %d, reload %d, act 0x%X",
+            hand==kRight ? "right" : "left",anchored[hand],st.viewOk[hand],a.m[12]-eye[0],a.m[13]-eye[1],a.m[14]-eye[2],
+            st.inHandCount,st.reloadLeft,st.act);
+    }
 }
 
 // The camera, the player's state given back: the near clip, the look smoothing.
 void Leave() noexcept {
-    if(st.on)PlaceAll(nullptr);
+    if(st.on)PlaceAll(true);
     if(st.cam && st.nearSet)Put<float>(st.cam,kCamNear,st.savedNear);
     if(st.human && st.smoothSet)Put<float>(st.human,kLookSmooth,st.savedSmooth);
     if(st.on)Log("FP view back to the stock camera");
     st=State{};
+}
+
+// Each hand's T this frame (above: its own weapon's anchor, else the other hand's T, else the aim frame).
+void Views(const unsigned char* h,const unsigned char* cam) noexcept {
+    const Config& c=Cfg();
+    M4 anchor[2]={fpview::Identity(),fpview::Identity()};
+    bool anchored[2];
+    Hands(h,anchor,anchored);
+    const bool both=anchored[kRight] && anchored[kLeft];
+    const float gx=both ? c.fpDualGripX : c.fpGripX,gy=both ? c.fpDualGripY : c.fpGripY,gz=both ? c.fpDualGripZ : c.fpGripZ;
+    const float grip[2][3]={{-gx,gy,gz},{gx,gy,gz}};   // right is -x
+    const float hold[3]={-c.fpHoldX,c.fpHoldY,c.fpHoldZ};
+    const float pivots[2][3]={{anchored[kRight] ? grip[kRight][0] : kPivot[0],anchored[kRight] ? gy : kPivot[1],anchored[kRight] ? gz : kPivot[2]},
+                              {anchored[kLeft] ? grip[kLeft][0] : -kPivot[0],anchored[kLeft] ? gy : kPivot[1],anchored[kLeft] ? gz : kPivot[2]}};
+    if(c.fpMotion)Motion(h,pivots);
+    else st.moved[kRight]=st.moved[kLeft]=fpview::Identity();
+    const M4 view=MatrixAt(cam+kCamMatrix);
+    for(int hand=kRight;hand<=kLeft;++hand) {
+        st.viewOk[hand]=anchored[hand] && fpview::AnchoredTransform(anchor[hand],view,grip[hand],c.fpScale,&st.view[hand],st.moved[hand]);
+    }
+    for(int hand=kRight;hand<=kLeft;++hand) {
+        const int other=1-hand;
+        if(st.viewOk[hand])continue;
+        if(st.viewOk[other]){st.view[hand]=st.view[other];st.viewOk[hand]=true;continue;}
+        st.viewOk[hand]=fpview::ViewTransform(MatrixAt(h+kAim),view,hold,c.fpScale,&st.view[hand],st.moved[kRight]);
+    }
+    Probe(anchored,anchor);
 }
 
 void Camera(unsigned char* cam) noexcept {
@@ -428,7 +504,7 @@ void Camera(unsigned char* cam) noexcept {
     if(!Wanted(cam,h)){if(st.on && st.cam==cam)Leave();return;}
     if(!st.on || st.cam!=cam || st.human!=h) {
         Leave();
-        st.on=true;st.cam=cam;st.human=h;st.fresh=true;st.moved=fpview::Identity();
+        st.on=true;st.cam=cam;st.human=h;st.fresh=true;st.moved[kRight]=st.moved[kLeft]=fpview::Identity();
         Log("FP view on %p (player %p)",cam,h);
     }
     std::memcpy(st.stock,cam+kCamMatrix,sizeof(st.stock));
@@ -445,17 +521,9 @@ void Camera(unsigned char* cam) noexcept {
     if(c.fpNear>0.0f){if(!st.nearSet){st.savedNear=At<float>(cam,kCamNear);st.nearSet=true;}Put<float>(cam,kCamNear,c.fpNear);}
     if(c.fpAimSnap){if(!st.smoothSet){st.savedSmooth=At<float>(h,kLookSmooth);st.smoothSet=true;}Put<float>(h,kLookSmooth,1.0f);}
     Gather(h);
-    M4 anchor=fpview::Identity();
-    const bool anchored=Anchor(h,&anchor);
-    const float grip[3]={-c.fpGripX,c.fpGripY,c.fpGripZ},hold[3]={-c.fpHoldX,c.fpHoldY,c.fpHoldZ};   // right is -x
-    if(c.fpMotion)Motion(h,anchored ? grip : kPivot);
-    else st.moved=fpview::Identity();
-    const M4 view=MatrixAt(cam+kCamMatrix);
-    st.viewOk=anchored ? fpview::AnchoredTransform(anchor,view,grip,c.fpScale,&st.view,st.moved)
-                       : fpview::ViewTransform(MatrixAt(h+kAim),view,hold,c.fpScale,&st.view,st.moved);
-    if(st.viewOk)PlaceAll(&st.view);
+    Views(h,cam);
+    PlaceAll(false);
     Flashes();
-    Probe(anchored,anchor);
 }
 
 void __fastcall CamStepHook(void* camera,void* step) {
@@ -473,17 +541,15 @@ DrawFn NextDraw(const void* model) noexcept {
     return reinterpret_cast<DrawFn>(image+kModelDraw);
 }
 
-// T for this frame (the camera and the aim frame as the last camera step left them: the draws come before the next).
-bool ViewNow(M4* t) noexcept {
-    *t=st.view;
-    return st.viewOk;
-}
-
-enum class Part { none,body,weapon };
-Part PartOf(const void* model) noexcept {
+// What a drawn model is to the first person: not the player's, their body, a weapon in a hand, one put away.
+enum class Part { none,body,inHand,stowed };
+Part PartOf(const void* model,int* hand) noexcept {
+    *hand=kRight;
     if(!st.on)return Part::none;
     if(model==st.body)return Part::body;
-    for(int i=0;i<st.weaponCount;++i)if(st.weapons[i]==model)return Part::weapon;
+    if((*hand=HandOfModel(model))>=0)return Part::inHand;
+    *hand=kRight;
+    for(int i=0;i<st.weaponCount;++i)if(st.weapons[i]==model)return Part::stowed;
     return Part::none;
 }
 
@@ -508,7 +574,8 @@ float saved[kMostInsts][kMostBones*16];
 // an arm bone and one of those lies between its arm place and the eye, on the ray the arm place is seen along, so it
 // shows where the arm does (at another depth): no triangle is stretched across the view; one weighed by those alone is
 // a point at the eye, nothing.
-void Pose(unsigned char* inst,const M4& t,bool body,const float* eye,float* backup) noexcept {
+// `t` the two hands' T (a weapon: its hand's twice); the body's bones take the left one when their name ends in _l.
+void Pose(unsigned char* inst,const M4* t,bool body,const float* eye,float* backup) noexcept {
     const auto n=At<std::int32_t>(inst,kInstCount);
     auto pose=At<float*>(inst,kInstPose);
     const auto bones=At<const unsigned char*>(inst,kInstBones);
@@ -516,11 +583,14 @@ void Pose(unsigned char* inst,const M4& t,bool body,const float* eye,float* back
     std::memcpy(backup,pose,static_cast<std::size_t>(n)*64);
     for(std::int32_t i=0;i<n;++i) {
         float* p=pose+i*16;
-        if(body && !ArmBone(At<const wchar_t*>(bones+static_cast<std::size_t>(i)*kBoneStride,0))) {
+        const wchar_t* name=At<const wchar_t*>(bones+static_cast<std::size_t>(i)*kBoneStride,0);
+        if(body && !ArmBone(name)) {
             std::memcpy(p,fpview::Collapse(eye).m,64);
             continue;
         }
-        const M4 moved=fpview::Mul(MatrixAt(reinterpret_cast<const unsigned char*>(p)),t);
+        const std::size_t len=name ? std::wcslen(name) : 0;
+        const bool left=body && len>=2 && name[len-2]==L'_' && name[len-1]==L'l';
+        const M4 moved=fpview::Mul(MatrixAt(reinterpret_cast<const unsigned char*>(p)),t[left ? kLeft : kRight]);
         std::memcpy(p,moved.m,64);
     }
 }
@@ -532,7 +602,7 @@ void Unpose(unsigned char* inst,const float* backup) noexcept {
 }
 
 void LogPass(Part part,int pass) noexcept {
-    if(!Cfg().debug || pass<0 || pass>5)return;
+    if(!Cfg().debug || pass<0 || pass>5 || part==Part::stowed)return;
     passLog[pass]+=part==Part::body ? 1 : 100;
     const ULONGLONG now=GetTickCount64();
     if(now-passLogAt<5000)return;
@@ -544,15 +614,16 @@ void LogPass(Part part,int pass) noexcept {
 void __fastcall DrawHook(void* model,void* ctx,int pass,void* view) {
     const DrawFn next=NextDraw(model);
     Part part=Part::none;
-    __try { part=PartOf(model); } __except(EXCEPTION_EXECUTE_HANDLER){part=Part::none;}
+    int hand=kRight;
+    __try { part=PartOf(model,&hand); } __except(EXCEPTION_EXECUTE_HANDLER){part=Part::none;}
     if(part!=Part::none)LogPass(part,pass);
     if(part==Part::none || pass==3 || pass==4 || pass>5){next(model,ctx,pass,view);return;}
-    if(pass==0)return;   // the occluder depth: not where the body really is in this picture
+    if(pass==0 || part==Part::stowed)return;   // the occluder depth (not where it is in this picture); put away: unseen
     unsigned char* insts[kMostInsts];
     int n=0;
-    M4 t;
     __try {
-        if(ViewNow(&t)) {
+        if(st.viewOk[kRight] && st.viewOk[kLeft]) {
+            const M4 t[2]={part==Part::body ? st.view[kRight] : st.view[hand],part==Part::body ? st.view[kLeft] : st.view[hand]};
             n=InstancesOf(static_cast<unsigned char*>(model),insts);
             const float* eye=reinterpret_cast<const float*>(st.cam+kCamEyeRow);   // the drawn view's eye
             for(int i=0;i<n;++i)Pose(insts[i],t,part==Part::body,eye,saved[i]);

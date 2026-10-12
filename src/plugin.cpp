@@ -248,6 +248,9 @@ void Validate(Config& n) noexcept {
     Fix("FirstPersonGripX",n.fpGripX,-1.0f,1.0f);
     Fix("FirstPersonGripY",n.fpGripY,-1.0f,1.0f);
     Fix("FirstPersonGripZ",n.fpGripZ,-1.0f,2.0f);
+    Fix("FirstPersonDualGripX",n.fpDualGripX,-1.0f,1.0f);
+    Fix("FirstPersonDualGripY",n.fpDualGripY,-1.0f,1.0f);
+    Fix("FirstPersonDualGripZ",n.fpDualGripZ,-1.0f,2.0f);
     Fix("FirstPersonHoldX",n.fpHoldX,-1.0f,1.0f);
     Fix("FirstPersonHoldY",n.fpHoldY,-1.0f,1.0f);
     Fix("FirstPersonHoldZ",n.fpHoldZ,-1.0f,1.0f);
@@ -570,6 +573,9 @@ void LoadConfig() noexcept {
     n.fpGripX=ReadFloat(L"FirstPersonGripX",n.fpGripX);
     n.fpGripY=ReadFloat(L"FirstPersonGripY",n.fpGripY);
     n.fpGripZ=ReadFloat(L"FirstPersonGripZ",n.fpGripZ);
+    n.fpDualGripX=ReadFloat(L"FirstPersonDualGripX",n.fpDualGripX);
+    n.fpDualGripY=ReadFloat(L"FirstPersonDualGripY",n.fpDualGripY);
+    n.fpDualGripZ=ReadFloat(L"FirstPersonDualGripZ",n.fpDualGripZ);
     n.fpHoldX=ReadFloat(L"FirstPersonHoldX",n.fpHoldX);
     n.fpHoldY=ReadFloat(L"FirstPersonHoldY",n.fpHoldY);
     n.fpHoldZ=ReadFloat(L"FirstPersonHoldZ",n.fpHoldZ);
