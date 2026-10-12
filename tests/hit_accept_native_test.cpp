@@ -84,8 +84,9 @@ void Classes() {
     Check(!WindowOf(ship,Kind::carrier).open,"ship, window shut: shut");
     Put<std::uint32_t>(ship,kObjFlags,kNoHitFilter);
     Check(Accepts(ship,Kind::carrier,at,100),"ship with +0x380 0x800: the override skipped, every hit taken");
-    Put<std::uint32_t>(ship,kObjFlags,kInvincible);
-    Check(!WindowOf(ship,Kind::carrier).open,"invincible: shut");
+    Put<std::uint32_t>(ship,kObjFlags,kInvincible);ship[0xD85]=1;
+    Check(!WindowOf(ship,Kind::carrier).open,"invincible with its damage window open: shut");
+    ship[0xD85]=0;
     Put<std::uint32_t>(ship,kObjFlags,0);ship[0xD85]=1;ship[0xD84]=1;Put<std::int32_t>(ship,0xD90,90);
     const WindowNow w=WindowOf(ship,Kind::carrier);
     Check(w.open && std::fabs(w.leftMs-1500.0f)<1.0f,"ship, hatch open with 90 frames on its close timer: 1.5 s left");
