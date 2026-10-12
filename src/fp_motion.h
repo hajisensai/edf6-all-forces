@@ -8,7 +8,8 @@
 //  - bob: walking and running swing it along a figure eight with the distance covered (on the ground only);
 //  - land: a landing dips it as hard as the fall was fast;
 //  - recoil: each shot kicks it back and up by the weapon's own recoil;
-//  - reload: lowered and rolled in while the magazine is changed;
+//  - reload: turned on its side, a little up and in, while the magazine is changed (the grip sits below the view's
+//    edge; lowering it put the whole weapon out of view, measured);
 //  - switch: lowered out of view and raised again when the weapon changes;
 //  - move: a sprint or a dash lowers and turns it in (the stock "run with the gun down"), a roll or an evade drops it.
 #pragma once
@@ -77,8 +78,8 @@ inline Pose Advance(State& s,const Cue& c) noexcept {
         s.z.vel-=kRecoilBack*r;
         s.pitch.vel+=kRecoilUp*r;
     }
-    // Reload: lowered and rolled in while it lasts.
-    if(c.reloading){wy-=0.06f;wp-=0.25f;wr+=0.35f;}
+    // Reload: on its side, a little up and toward the middle, while it lasts.
+    if(c.reloading){wx-=0.03f;wy+=0.02f;wp+=0.10f;wr+=0.45f;}
     // Switch: down out of view, then up.
     if(c.switched)s.switchFrames=kSwitchFrames;
     if(s.switchFrames>0) {

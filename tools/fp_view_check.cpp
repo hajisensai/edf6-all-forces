@@ -9,7 +9,7 @@
 //    camera's forward, whatever way the weapon was held (a tilted, scaled hand matrix as well);
 //  - the motion matrix: none is the identity, the pivot stays where it is under any turn, a pitch up tips ahead up;
 //  - the procedural motion (src/fp_motion.h): nothing happening rests at 0; a shot kicks back and up and settles; a reload
-//    holds it low; a switch dips out of view and comes back; a sprint lowers it; a turn of the view leaves it behind.
+//    turns it on its side (not down: the grip is below the view's edge); a switch dips out of view and comes back; a sprint lowers it; a turn of the view leaves it behind.
 // Exit code 1 when one fails. cmake --build build --target fp_view_check && build\fp_view_check.exe
 #include "../src/fp_view.h"
 #include "../src/fp_motion.h"
@@ -204,7 +204,7 @@ void Springs() {
     Expect(std::fabs(p.z)<1e-3f && std::fabs(p.pitch)<1e-3f,"...and settles",p.z,p.pitch);
     Cue reload=Quiet();reload.reloading=true;
     p=Run(s,reload,60);
-    Expect(p.y<-0.05f && p.roll>0.3f,"a reload holds it low and rolled in",p.y,p.roll);
+    Expect(p.y>=0.0f && p.pitch>0.0f && p.roll>0.4f,"a reload turns it on its side without dropping it out of view",p.y,p.roll);
     s=State{};
     Cue sw=Quiet();sw.switched=true;
     Advance(s,sw);
