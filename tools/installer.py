@@ -437,6 +437,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     import make_jets
     import edf41_objects
     import edf41_maps
+    import edf41_sounds
     import make_katyusha
     import make_sazabi
     import make_proteus
@@ -526,6 +527,10 @@ def install(game: str, campaign_requested: bool = False) -> None:
     written41, skipped_maps = edf41_maps.install(game, root41)
     for name, why in skipped_maps:
         print('  跳过', name, why)
+    print('转换 EDF4.1 的武器音效、语音和字幕（4.1 的武器与任务无线电要用；从已安装的 EDF4.1 转换，语音约 1.6 GB，'
+          '已转换且未变的跳过）……' if root41 else '没有找到 EDF4.1：跳过 4.1 的音效和语音。')
+    for path in edf41_sounds.install(game, root41)[0]:
+        print('写入', path)
     install_autoturret(game, *turret)
     # Mutable stock SGOs are read after every primary writer, outside the expensive model cache.
     # AutoTurret's SGOs were redirected before its own manifest write; never layer another hash over them.
@@ -597,6 +602,7 @@ def uninstall(game: str) -> None:
     import make_jets
     import edf41_objects
     import edf41_maps
+    import edf41_sounds
     import make_katyusha
     import make_sazabi
     import make_proteus
@@ -627,7 +633,7 @@ def uninstall(game: str) -> None:
         make_optics.remove(game)
         remove_autoturret(game)
         import support_loadout
-        for remove in (support_loadout.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_maps.remove,
+        for remove in (support_loadout.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_maps.remove, edf41_sounds.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:
