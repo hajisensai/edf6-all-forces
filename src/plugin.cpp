@@ -851,6 +851,15 @@ void ReloadConfigIfChanged() noexcept {
     if(ini.Changed())LoadConfig();
 }
 
+// The in-game loadout menu wrote the ini (loadout_store.cpp): its values now, not at the next poll; the watch takes
+// the new write time so the poll does not load it twice.
+void ReloadConfigNow() noexcept {
+    ini.Start(iniPath);
+    LoadConfig();
+}
+
+const wchar_t* ConfigPath() noexcept { return iniPath; }
+
 // The player's human. SeePlayer gets a position inside an object: the human's own (the on-foot ride prompt,
 // crew.cpp PromptHook) or the vehicle's they ride (crew.cpp Crew). A vehicle is told by the player in one
 // of its seats (the seat's rider is the human); else the object is the human if it is the player (pad and
