@@ -95,9 +95,9 @@ constexpr float kAimLineReach=2.0f,kChestUp=1.2f;
 // hands are (the eye's frame: right, up, ahead, m); with one, about its grip.
 const float kPivot[3]={-0.2f,-0.3f,0.4f};   // in the camera's frame: x to the left
 constexpr unsigned kFencerVt=0x17CF5B8;
-// The arms (the four classes share the names, fp-render-re.md §8): the shoulder, upper and lower arm and their twists,
-// the hand, its fingers, the weapon mounts.
-const wchar_t* const kArmBones[]={L"kata",L"jowan",L"kawan",L"te_",L"fing",L"ring",L"little",L"index",L"middle",
+// The arms (the four classes share the names, fp-render-re.md §8): the upper and lower arm and their twists, the hand,
+// its fingers, the weapon mounts. Not the shoulder (kata: its pad would hang in front of the view).
+const wchar_t* const kArmBones[]={L"jowan",L"kawan",L"te_",L"fing",L"ring",L"little",L"index",L"middle",
                                   L"thumb",L"arm"};
 
 using CamStepFn=void(__fastcall*)(void*,void*);
@@ -373,6 +373,19 @@ void* __fastcall FlashCreateHook(void* factory,void* a,void* cls,void* param) {
     return reinterpret_cast<CreateFn>(image+kEffectCreate)(factory,a,cls,param);
 }
 
+// Debug=1: what the viewmodel is built from, every 5 s (every half second through a reload).
+void Probe(bool anchored,const M4& anchor) noexcept {
+    static ULONGLONG at=0;
+    const ULONGLONG now=GetTickCount64();
+    if(!Cfg().debug || now-at<(st.reloadLeft>0 ? 500u : 5000u))return;
+    at=now;
+    const float* eye=reinterpret_cast<const float*>(st.cam+kCamEyeRow);
+    const float* f=anchor.m+8;
+    Log("FP probe anchored=%d view=%d held %p reload %d | root (%.2f,%.2f,%.2f) from the eye, forward length %.3f | act 0x%X",
+        anchored,st.viewOk,static_cast<const void*>(st.held[0]),st.reloadLeft,anchor.m[12]-eye[0],anchor.m[13]-eye[1],
+        anchor.m[14]-eye[2],std::sqrt(f[0]*f[0]+f[1]*f[1]+f[2]*f[2]),st.act);
+}
+
 // The camera, the player's state given back: the near clip, the look smoothing.
 void Leave() noexcept {
     if(st.on)PlaceAll(nullptr);
@@ -406,7 +419,7 @@ void Camera(unsigned char* cam) noexcept {
     if(c.fpNear>0.0f){if(!st.nearSet){st.savedNear=At<float>(cam,kCamNear);st.nearSet=true;}Put<float>(cam,kCamNear,c.fpNear);}
     if(c.fpAimSnap){if(!st.smoothSet){st.savedSmooth=At<float>(h,kLookSmooth);st.smoothSet=true;}Put<float>(h,kLookSmooth,1.0f);}
     Gather(h);
-    M4 anchor;
+    M4 anchor=fpview::Identity();
     const bool anchored=Anchor(h,&anchor);
     const float grip[3]={-c.fpGripX,c.fpGripY,c.fpGripZ},hold[3]={-c.fpHoldX,c.fpHoldY,c.fpHoldZ};   // right is -x
     if(c.fpMotion)Motion(h,anchored ? grip : kPivot);
@@ -416,6 +429,7 @@ void Camera(unsigned char* cam) noexcept {
                        : fpview::ViewTransform(MatrixAt(h+kAim),view,hold,c.fpScale,&st.view,st.moved);
     if(st.viewOk)PlaceAll(&st.view);
     Flashes();
+    Probe(anchored,anchor);
 }
 
 void __fastcall CamStepHook(void* camera,void* step) {
@@ -464,8 +478,11 @@ int InstancesOf(unsigned char* model,unsigned char** out) noexcept {
 
 float saved[kMostInsts][kMostBones*16];
 
-// Every pose of `inst` through T; the body's bones that are not the arms' collapsed onto their own joint.
-void Pose(unsigned char* inst,const M4& t,bool body,float* backup) noexcept {
+// Every pose of `inst` through T; the body's bones that are not the arms' collapsed onto the eye. A vertex weighed by
+// an arm bone and one of those lies between its arm place and the eye, on the ray the arm place is seen along, so it
+// shows where the arm does (at another depth): no triangle is stretched across the view; one weighed by those alone is
+// a point at the eye, nothing.
+void Pose(unsigned char* inst,const M4& t,bool body,const float* eye,float* backup) noexcept {
     const auto n=At<std::int32_t>(inst,kInstCount);
     auto pose=At<float*>(inst,kInstPose);
     const auto bones=At<const unsigned char*>(inst,kInstBones);
@@ -474,9 +491,7 @@ void Pose(unsigned char* inst,const M4& t,bool body,float* backup) noexcept {
     for(std::int32_t i=0;i<n;++i) {
         float* p=pose+i*16;
         if(body && !ArmBone(At<const wchar_t*>(bones+static_cast<std::size_t>(i)*kBoneStride,0))) {
-            float at[3];
-            fpview::Point(t,p+12,at);
-            std::memcpy(p,fpview::Collapse(at).m,64);
+            std::memcpy(p,fpview::Collapse(eye).m,64);
             continue;
         }
         const M4 moved=fpview::Mul(MatrixAt(reinterpret_cast<const unsigned char*>(p)),t);
@@ -513,7 +528,8 @@ void __fastcall DrawHook(void* model,void* ctx,int pass,void* view) {
     __try {
         if(ViewNow(&t)) {
             n=InstancesOf(static_cast<unsigned char*>(model),insts);
-            for(int i=0;i<n;++i)Pose(insts[i],t,part==Part::body,saved[i]);
+            const float* eye=reinterpret_cast<const float*>(st.cam+kCamEyeRow);   // the drawn view's eye
+            for(int i=0;i<n;++i)Pose(insts[i],t,part==Part::body,eye,saved[i]);
         }
     } __except(EXCEPTION_EXECUTE_HANDLER){for(int i=0;i<n;++i)Unpose(insts[i],saved[i]);n=0;}
     next(model,ctx,pass,view);
