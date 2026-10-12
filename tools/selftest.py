@@ -4839,7 +4839,9 @@ def npc_ai_wired() -> None:
     body = post.split('void NpcPostInput(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'if(At<const void*>(v,kRoute)){DropPending(v);Relinquish(v);return;}' in body, \
         'a script route must discard the queued waypoint and relinquish the plugin post'
-    assert 'if(!IsOnlineAuthority(v))return;' in body, 'the real driver owner, not a hard-coded host, controls the post'
+    assert 'if(!IsOnlineAuthority(v)){p->active=false;p->wrote=false;return;}' in body, \
+        'clients may publish map rows but must exit before writing vehicle input'
+    assert body.index('p->seen=ms;') < body.index('if(!IsOnlineAuthority(v))') < body.index('Write(v,f,*p,c0,c1);')
     assert body.index('StockDriving(v,f,*p)') < body.index('Write(v,f,*p,c0,c1);')
     move_to = code.split('void MoveTo(', 1)[1].split('\n}\n', 1)[0]
     # Routed (2026-10-09): in kRouteHorizon legs, from the floor under the soldier (RouteStart), still stood while not moving.
