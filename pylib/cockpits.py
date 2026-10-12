@@ -327,15 +327,21 @@ def fitted(tris, fit: Fit, kit_fn: KitFn) -> Kit:  # noqa: ANN001 - numpy
     room = clearance(tris, fit.eye, m)
     for _ in range(SHRINK_ROUNDS + 1):
         kit = kit_fn(room)
-        local = [v.pos for p in kit.parts if p.name not in kit.outside for v in p.verts]
+        inside = [p for p in kit.parts if p.name not in kit.outside]
+        local = [v.pos for p in inside for v in p.verts]
         if not local:   # nothing inside the hull to keep in (a remote station's display)
             return kit
         bad = exposed(tris, [to_model(q, m, fit.scale) for q in local])
         if not bad.any():
             return kit
         press = {side for q, b in zip(local, bad) if b for side in _sides(q, room)}
-        if not press:
-            raise ValueError(f'seat {fit.seat} ({fit.kit}): parts near the eye show outside: the eye is not inside the hull')
+        if not press:   # what shows is not at a wall: a part placed apart from the room's walls (or the eye outside)
+            owners, k = [], 0
+            for p in inside:
+                if bad[k:k + len(p.verts)].any():
+                    owners.append(p.name)
+                k += len(p.verts)
+            raise ValueError(f'seat {fit.seat} ({fit.kit}): parts away from the walls show outside the hull: {owners}')
         room = {k: v * SHRINK if k in press else v for k, v in room.items()}
     raise ValueError(f'seat {fit.seat} ({fit.kit}): the kit still crosses the hull after {SHRINK_ROUNDS} rounds')
 
