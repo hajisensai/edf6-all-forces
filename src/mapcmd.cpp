@@ -206,7 +206,12 @@ bool Give(Game& g,const Entry& e,const Command& order) noexcept {
         else g.affected+=result.affected;
         return result.Accepted();
     }
-    case Owner::tank: return TankCommand(e.u.v,c,g.focus);
+    case Owner::tank: {
+        const auto result=NpcMapCommandForRequester(ObjRef::Of(e.u.v),c,g.requester,g.focus);
+        if(!result.Accepted())g.failure=result.reason;
+        else g.affected+=result.affected;
+        return result.Accepted();
+    }
     }
     return false;
 }

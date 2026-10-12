@@ -96,6 +96,7 @@ bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept { return fal
 bool JetCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }
 bool GroundCommand(const void*,const Command&) noexcept { return false; }
 bool TankCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }
+NpcCommandResult NpcMapCommandForRequester(const ObjRef&,const Command&,const ObjRef&,const ObjRef&) noexcept {return {};}
 bool SquadCommand(const void*,const Command&) noexcept { return false; }
 }
 namespace {

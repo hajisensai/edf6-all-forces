@@ -99,6 +99,10 @@ bool SquadCommand(const void* leader,const Command& c) noexcept {
 }
 const void* tankFocus=nullptr;
 bool TankCommand(const void*,const Command& c,const ObjRef& focus) noexcept {tankFocus=focus.obj;return c.order==Order::focus;}
+NpcCommandResult NpcMapCommandForRequester(const ObjRef& ref,const Command& c,const ObjRef&,const ObjRef& focus) noexcept {
+    const bool accepted=TankCommand(ref.obj,c,focus);
+    return {accepted ? NpcCommandReason::none : NpcCommandReason::failed,accepted ? 1u : 0u};
+}
 // The formations (npcai.cpp): a squad at `guardLeader` guards, the others follow; the calls counted.
 const void* guardLeader=nullptr;
 int guardCalls=0,marchCalls=0;
