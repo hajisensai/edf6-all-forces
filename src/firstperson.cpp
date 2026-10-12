@@ -132,11 +132,12 @@ constexpr std::size_t kWeaponMount=0xE88;   // the record of the owner's bone th
 constexpr int kRight=0,kLeft=1;
 constexpr float kGadgetFar=10.0f,kGadgetHigh=3.7f;   // m from the feet: the stock eye of a gadget's view (VR mod: >10 m, >2 m over the head)
 constexpr float kOnWeapon=0.18f;   // m: a free hand's wrist this near its other hand's weapon's axis holds it
-// The arms (the four classes share the names, fp-render-re.md §8): the forearm and its twists, the hand, its fingers,
-// the weapon mounts, as a first-person game shows them. Not the shoulder (kata: its pad hangs in front of the view) nor
-// the upper arm (jowan: it reaches back to the eye, its guards fill the view's corners); the elbow's vertices, weighed
-// by both, lie on the rays the forearm is seen along (Pose).
-const wchar_t* const kArmBones[]={L"kawan",L"te_",L"fing",L"ring",L"little",L"index",L"middle",
+// The arms (the four classes share the names, fp-render-re.md §8): the upper arm, the forearm and their twists, the
+// hand, its fingers, the weapon mounts. Not the shoulder (kata: its pad hangs in front of the view): the arm ends at
+// the shoulder, beside and behind the eye. Ending it at the elbow (the user, 2026-10-13, with a screenshot: "the arm
+// half shown, clearly hollow") left the forearm's open sleeve in the middle of the view: collapsing the rest onto the
+// eye hides stretched triangles, it does not close a mesh's open end, so the cut must be where the view is not.
+const wchar_t* const kArmBones[]={L"jowan",L"kawan",L"te_",L"fing",L"ring",L"little",L"index",L"middle",
                                   L"thumb",L"arm"};
 
 using CamStepFn=void(__fastcall*)(void*,void*);
