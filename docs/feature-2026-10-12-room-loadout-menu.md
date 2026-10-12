@@ -153,3 +153,80 @@
 3. 游戏运行中生成新文件、再进关卡预载它们，没有实机跑过（设计上关卡开始才扫描，与阶段 1 结论一致）。
 4. 已知小缺口：生成器运行时若同时在游戏外用菜单 7 / 8 保存（只在游戏关闭时生成），两边都改台账 `.edf6vc_files.json`，后写的会盖掉先写的记录，
    被盖掉的文件卸载时不会删（不影响游戏）。
+
+## 阶段 5：乘员 / 驾驶员颜色变体（2026-10-12，分支 `feat/rl-crew-colour`，只做了离线验证）
+
+用户要求：NPC 颜色预设对**所有**支援单位生效，不只是呼叫的小队。没有启动游戏、没有写游戏目录；只读了 Root.cpk（`support_loadout_ini` 用真实模板在内存里生成乘员文件并逐字段核对）。
+
+### 覆盖面（逐条核过生成士兵的全部调用点）
+
+插件里创建支援士兵只有三处：`support_dispatch.cpp SpawnDeployment`（所有呼叫）、`mission_crew_support.cpp Apply`（任务自带载具的支援乘员）、`debug_spawn.cpp`（调试，不在范围）。
+战机 / 直升机 / 运输机的乘员都在 `SpawnDeployment` 里经 `CreateSupportSoldierUnregistered` 生成（`jet_spawn.cpp PrepareSupportAircraft` 只造机体），所以只要计划里每个乘员座位带上变体，生成路径原样接住。
+
+| 路径 | 乘员 | 兵种模板 | 现在 |
+|---|---|---|---|
+| 空中支援（战机、直升机、炮艇、医疗机、救援直升机） | 飞行员 + 门炮手（`AirCrew`） | `SupportAircraftCrewWeapon` 的队员模板 | 每人 `SupportCrewVariant` |
+| 运输机 / 机降（`SQUAD_HELI` 等 4 项） | 飞行员 | 同上 | 飞行员带颜色；乘客仍是小队（`SupportPreset_` 的颜色，原逻辑） |
+| 集装箱投送（`*_AIRDROP` 3 项） | 运输直升机飞行员 | 同上 | 带颜色 |
+| 地面载具（坦克 / 装甲车 / 卡车，有人 / 空车交付） | 驾驶员 + 该单位自带的车组 | `SupportVehicleCrewWeapon` 的队员模板 | 每个车组座位带颜色；组合编组时只有驾驶员是乘员，乘客按预设 |
+| 任务自带载具的支援乘员 | 座位 0 队长、其余队员 | 步枪 `N601_COMMON_RANGER_AF[_LEADER]` | `Build` 给每座位写变体，`Apply` 改走 `ApplySupportSoldierResource(..., look)` |
+
+10-09 文档里「坦克计划的车体带挂点变体、机组不带」的结论随本阶段改为「机组带乘员颜色变体」（没配置乘员颜色时仍然不带，计划与以前逐字节相同）。
+
+### ini
+
+```ini
+SupportCrewColour=1E3A8A                  ; 所有没单独设置的乘员的默认
+SupportCrewColour_TANK_CREWED=X:FFFFFF    ; 该单位的乘员：主色 X（原色）、副色白
+SupportCrewColour_HELI=X                  ; 只写 X：原色，不用默认
+SupportCrewColour_MISSION=FFFFFF          ; 任务自带载具的支援乘员
+```
+
+- 写法 `RRGGBB[:RRGGBB]`，`X` = 原色；空或不写 = 用默认（默认本身空 = 原色）。
+- `support_loadout.h`：`CrewColour`、`ParseCrewColour`、`CrewLookOf`、`HasCrew`（`SQUAD` / `PLATOON` 没有乘员）、`kCrewMissionKey`。
+- `support_config.cpp`：读默认、`_MISSION` 和每个目录键；写错或写在没有乘员的单位上整条作废，HUD / 日志点名（`CONFIG support ... INVALID`），按默认出动。日志多一项 `crew colours=N`。
+- 发布的 `EDF6VehicleCrew.ini` 注释里加了写法说明。
+
+### 联机线格式（选择与理由）
+
+- **每个乘员座位用自己的 `Unit::variant`**，编码就是小队士兵的颜色变体（`LookVariant`），不另占位。载具单位自己的 64 位留给挂点（`kVariantVehicle`），本来就装不下第二份颜色；乘员是独立的计划单位，每人都有一个空着的 64 位。
+- 房主：`SupportCrewVariant` → 生成文件名 → 与小队同一个 `DecideVariant`（本机有文件、全员宣告 `kExtVariants`、每个对端的 Bloom 过滤器都有，才置 `kVariantApplied`；否则原版 + 待生成清单 + 状态提示）。
+- 对端：`Validate` 早就把士兵身上的颜色变体当「可缺省」——缺文件只把那名乘员按原色生成，**从不因乘员颜色拒绝计划**；解不开的变体、乘员身上的挂点变体照旧拒绝。任务乘员计划（`ValidateMissionCrewPlan`）同样只拒绝解不开的。
+- 旧对端：
+  - 没有 `kExtVariants` 的：房主不置 applied，对端读不到 `challenge`，行为与现在一致；
+  - 已有变体支持的（10-09 版）：它的 `VariantFile` / 生成路径对任何士兵资源都解颜色，所以会显示同样的颜色，缺文件进待生成清单；
+  - 任务乘员计划：旧版 `Apply` 不看 `variant`，按原版生成。
+- 没配置乘员颜色：所有变体为 0，计划与以前完全相同（`support_dispatch_test` 钉住）。
+
+### 菜单与编辑器（保持两边一致）
+
+- `src/room_menu.h`：`UnitSpec` 加 `crew`；载具单位末尾一行「乘员颜色」（主色：默认 → X → 调色板；副色：原色 → 调色板），没有载具的乘员（运输类、默认、任务）各成一个乘员单位（`UnitKind::crew`）。一次保存可写两行（挂点 + 乘员），`SaveSet` 扩到 `2*kMostUnits`；解析器拒绝的乘员值单独标 `crewRefused`，不改不回写。快照加 `RowText::crewUnit / crew` 和 `inherit`。
+- `src/loadout_ini.h` / `loadout_store.cpp`：`LoadoutField::crew`，空单位名写 `SupportCrewColour`，`MISSION` 允许；写之前用 `ParseCrewColour` + `HasCrew` 校验。
+- `tools/support_loadout.py`：`parse_crew` / `format_crew` / `crews` / `crew_files`（按单位分 `SupportVehicleCrewWeapon` / `SupportAircraftCrewWeapon` 的兵种，坏武器名回落步枪，与插件同）；`wanted_files` 加入乘员文件，所以安装、菜单 7 / 8 保存、无交互 `loadout-generate`（`missing_names`）都会生成；菜单 8 新增 `c1`…`c18`，顺序与游戏内菜单的 `kDefaultUnits` 相同（测试按源码比对）。
+
+### 测试（`cmake --build build` + `offline_checks` 0 警告；`ctest -j 3`：228 项 100% 通过，其中 36 项需要 EDF.dll / 游戏原生文件，按设计 SKIP）
+
+| 测试 | 项数 | 新增内容 |
+|---|---|---|
+| `support_loadout` | 97（原 78） | 乘员颜色语法、默认与 X 的优先级、`HasCrew`、乘员文件名、座位变体往返 |
+| `support_dispatch` | 249（原 222） | 读 ini（默认 / 单位 / 任务 / X / 写错与写在小队上被点名）；战机飞行员、直升机 X、机降飞行员（乘客不带）、投送直升机飞行员都从文件生成；坦克每个车组座位带色；装甲车组合编组：驾驶员乘员色、乘客预设色；缺文件原版 + 清单 + 状态；旧对端 / 对端缺文件不置 applied；对端缺乘员文件照收计划、那名乘员原色并记清单；乘员身上的挂点被拒；任务乘员队长用 `_L` 文件；没配置时计划无任何变体 |
+| `mission_crew_support` | 27（原 18） | 每座位带变体；离线队长 / 队员从文件生成；缺文件原色不拒绝；房主未 applied 时原色；旧房主计划无变体；挂点变体被拒 |
+| `room_menu` | 205（原 159） | 乘员行 / 乘员单位、字段循环、两行保存、拒绝值保留、重置与取消；原有用例按新单位数（26）更新 |
+| `loadout_writer` | 50（原 44） | 乘员键写入、默认键无后缀、`MISSION`、小队拒绝、坏值拒绝 |
+| `support_loadout_ini`（Python） | 101（原 72） | 乘员键表与 `room_menu.h` / 插件比对、同值同结论、乘员文件推导、`missing_names`、菜单 8 脚本化编辑；有游戏时用真实模板生成乘员队员与任务队长，只有 `soldier_color` 不同 |
+| `loadout_generate` | 43 | 未改，照常通过 |
+
+**变异测试**（先提交 85feffa，再改、编译通过、跑、还原）：
+
+| 变异 | 结果 |
+|---|---|
+| 空中支援的乘员不写 `SupportCrewVariant` | `support_dispatch` 变红（「an aircraft's pilot …」） |
+| 任务乘员 `Apply` 不传颜色路径 | `mission_crew_support` 变红（「offline: the leader and the member …」） |
+| 地面载具车组不写乘员变体 | `support_dispatch` 变红（「the tank's crew …」） |
+
+### 没在游戏里验证的
+
+1. 乘员穿彩色模板在载具 / 飞机座位里是否正常显示（与小队彩色模板同一套文件，只是坐进载具）。
+2. 任务自带载具的支援乘员改走 `ApplySupportSoldierResource` 后的实机生成与上车（逻辑上与原 `ApplySupportSoldierSpawn` 相同：同资源、`local=false`、同 ID）。
+3. 联机双机：乘员变体只在协议替身和计划校验上验证过。
+4. 游戏内菜单的绘制（阶段 4）还没有接乘员行；`room_menu.h` 的快照已经给出 `RowText::crew` / `crewUnit`。
