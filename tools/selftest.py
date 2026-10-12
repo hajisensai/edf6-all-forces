@@ -7017,6 +7017,51 @@ def edf41_story_pack_real() -> None:
     thumbs = mdb.rab_read(files[e5c.PACK41.image]).files
     assert [t.stored for t in thumbs] == [own[f'{r["path"].upper()}.DDS'] for r in rows41]
     assert all(e5c.managed(rel) for rel in files)
+@test
+def cas_hollow_real() -> None:
+    """pylib/cas_graft.hollow on the real E515 CAS (UFO301's under UfoSmall515: 4.1's UFO has no CAS): the same size,
+    players and clips (names, durations, frames) as E515's, every clip with no track; and the converted UFO301 / its
+    ace ship exactly that, under the class, with an empty material_animation (E515's names E515's textures)."""
+    import struct
+    import cas_graft
+    import cas_legacy as cl
+    import cas_pose
+    import sgo
+    if not _e5c_have_game():
+        return
+    import rootcpk
+    import make_edf41_objects as m
+    g6 = m.archives(rootcpk.DEFAULT_GAME)
+    donor = g6['OBJECT/E515_IMPERIALUFO.CAS'].read('OBJECT', 'E515_IMPERIALUFO.CAS')
+    out = cas_graft.hollow(donor)
+    assert len(out) == len(donor)
+    groups = [cas_graft._name(out, at) for at, _ in cl.cas_layout(out).tree.anmgroups]
+    assert groups == [cas_graft._name(donor, at) for at, _ in cl.cas_layout(donor).tree.anmgroups] == ['main']
+    a, b = cas_pose.CasPose(donor), cas_pose.CasPose(out)
+    assert [c.name for c in a.clips] == [c.name for c in b.clips] and len(b.clips) == 5
+    fields = [(struct.unpack_from('<IiffIII', a.data, x.at), struct.unpack_from('<IiffIII', b.data, y.at))
+              for x, y in zip(a.clips, b.clips)]
+    assert all(before[5] > 0 and after[5] == 0 and before[:5] == after[:5] for before, after in fields)
+    with open(os.path.join(ROOT, 'edf41port', 'objects', 'OBJECT', 'UFO301.CAS'), 'rb') as f:
+        assert f.read() == out
+    for name in ('UFO301', 'UFO301ACE'):
+        with open(os.path.join(ROOT, 'edf41port', 'objects', 'OBJECT', name + '.SGO'), 'rb') as f:
+            d = sgo.load(data=f.read())
+        assert d['xgs_scene_object_class'] == 'UfoSmall515' and d['material_animation'] == []
+        assert d['animation_model'][1] == f'app:/object/{name.lower()}.cas'
+
+
+
+@test
+def edf41_objects_after_weapons() -> None:
+    """The installer builds EDF4.1's objects after the weapons are written: a model both ship (EDF5's Blacker No.4.1,
+    OBJECT/V505_TANKEDF4.MRAB, the 4.1 AI tank's look) counts as shared only once call_weapons.install has put it in
+    the ledger as 'calls'. A version whose weapons recorded it in their own manifest only (.edf6vc_calls.json, before
+    the ledger) left it unrecorded; built first, the upgrade's edf41_objects.build saw another mod's file and left the
+    tank out (2026-10-12, the real install)."""
+    text = src('tools/installer.py')
+    body = text[text.index('def install(game: str'):]
+    assert body.index('call_weapons.install(game, weapons)') < body.index('edf41_objects.build(game)')
 
 
 def main() -> int:
