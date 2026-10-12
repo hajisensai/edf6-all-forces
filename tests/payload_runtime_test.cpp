@@ -38,6 +38,24 @@ namespace audio { void LockTone(int,float) noexcept {} }
 }
 namespace crew { bool friendInLine=false; bool FriendInLine(const float*,const float*,const void*) noexcept { return friendInLine; } }
 namespace edf { bool MeanMuzzle(const unsigned char* w,std::uint64_t,float* p,float* d) noexcept { p[0]=p[1]=p[2]=0;d[0]=d[1]=0;d[2]=1;return w[0x102]!=1; } }
+// The coax and the main gun's firing motion (2026-10-12): stand-ins for the 505's / 601's stock slot 48 and its
+// VehicleBase part, reached through 12-byte jumps from their EDF.dll addresses in the stand-in image.
+namespace {
+int stockFiredRuns=0,vehicleFiredRuns=0;
+void __fastcall StockFired(unsigned char*,unsigned char*) { ++stockFiredRuns; }
+void __fastcall VehicleFired(unsigned char*,unsigned char*) { ++vehicleFiredRuns; }
+void JumpAt(unsigned rva,const void* to) {
+    unsigned char code[12]={0x48,0xB8};
+    std::memcpy(code+2,&to,8);
+    code[10]=0xFF;code[11]=0xE0;
+    std::memcpy(crew::image+rva,code,sizeof(code));
+}
+void CallAt(unsigned at,unsigned target) {
+    crew::image[at]=0xE8;
+    const std::int32_t rel=static_cast<std::int32_t>(static_cast<std::int64_t>(target)-(static_cast<std::int64_t>(at)+5));
+    std::memcpy(crew::image+at+1,&rel,sizeof(rel));
+}
+}  // namespace
 int main() {
     using namespace crew;
     int fail=0,checks=0;
@@ -192,6 +210,42 @@ int main() {
         where[2]=80;friendInLine=true;check(!NpcCoaxFire(v,0,enemy,&FriendInLine),"a friend in the line: the coax holds");friendInLine=false;
         check(!NpcCoaxFire(v,0,nullptr),"no target, no burst");
         Put<void*>(v,0,image+kVt403);
+    }
+    // 2026-10-12 「同轴机枪开火的时候主炮会伸缩」: the 505's and the 601's slot 48 play the main gun's firing motion for
+    // whichever holder fired. Chained, a coax holder runs only the VehicleBase part; every other holder the class's own.
+    {
+        DWORD old=0;
+        check(VirtualProtect(image,0x2200000,PAGE_EXECUTE_READWRITE,&old)!=0,"stand-in image executable");
+        JumpAt(kVehicleFired,reinterpret_cast<const void*>(&VehicleFired));
+        for(const auto& c:kMotionClasses) {
+            reinterpret_cast<void**>(image+c.vtable)[kSlotFired]=image+c.fired;
+            JumpAt(c.fired,reinterpret_cast<const void*>(&StockFired));
+            CallAt(c.fired+kFiredVehicleCallAt,kVehicleFired);
+            CallAt(c.motionCall,kPlayMotion);
+        }
+        CallAt(kMotionClasses[1].motionCall,kPlayMotion+0x10);   // the 601's motion call not the one read
+        check(InstallCoaxMotion()==1 && reinterpret_cast<void**>(image+kMotionClasses[1].vtable)[kSlotFired]==image+kMotionClasses[1].fired,
+              "an unread class keeps its stock slot 48");
+        alignas(16) static unsigned char gun[0x1600]{},coax[0x1600]{},mainHolder[0x80]{},coaxHolder[0x80]{},emptyHolder[0x80]{},veh[0x100]{};
+        coax[0x101]=5;                      // StoreRole::coax
+        Put<void*>(mainHolder,kHolderWeapon,gun);Put<void*>(coaxHolder,kHolderWeapon,coax);
+        const auto fire=[&](unsigned char* holder){
+            reinterpret_cast<FiredFn>(reinterpret_cast<void**>(image+kMotionClasses[0].vtable)[kSlotFired])(veh,holder);
+        };
+        check(reinterpret_cast<void**>(image+kMotionClasses[0].vtable)[kSlotFired]!=image+kMotionClasses[0].fired,"the 505's slot 48 chained");
+        stockFiredRuns=vehicleFiredRuns=0;fire(coaxHolder);
+        check(stockFiredRuns==0 && vehicleFiredRuns==1,"a coax round: the VehicleBase part only, no main-gun motion");
+        stockFiredRuns=vehicleFiredRuns=0;fire(mainHolder);
+        check(stockFiredRuns==1 && vehicleFiredRuns==0,"a main-gun round: the class's own slot 48 (motion and hull push) as before");
+        stockFiredRuns=vehicleFiredRuns=0;fire(emptyHolder);
+        check(stockFiredRuns==1 && vehicleFiredRuns==0,"a holder with no weapon read: the class's own slot 48");
+        reinterpret_cast<void**>(image+kMotionClasses[0].vtable)[kSlotFired]=image+kMotionClasses[0].fired;
+        CallAt(kMotionClasses[1].motionCall,kPlayMotion);
+        check(InstallCoaxMotion()==2,"both classes chain on the EDF.dll read");
+        stockFiredRuns=vehicleFiredRuns=0;
+        reinterpret_cast<FiredFn>(reinterpret_cast<void**>(image+kMotionClasses[1].vtable)[kSlotFired])(veh,coaxHolder);
+        check(stockFiredRuns==0 && vehicleFiredRuns==1,"the 601's coax too");
+        VirtualProtect(image,0x2200000,old,&old);
     }
     ResetPayload();check(!PayloadPicked(vehicles[0]),"mission reset clears choices");
     VirtualFree(image,0,MEM_RELEASE);std::printf("payload runtime: %d checks, %d failures\n",checks,fail);return fail ? 1 : 0;
