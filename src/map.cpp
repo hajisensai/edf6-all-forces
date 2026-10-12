@@ -27,6 +27,7 @@
 //    of record [human+0xD40], before its /24); a pad is read through XInput (the hold clears the game's own pad input).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "firstperson.h"
 #include "transport.h"
 #include "airdrop.h"
 #include "layout.h"
@@ -784,11 +785,13 @@ void Camera(unsigned char* cam,std::uint64_t generation) noexcept {
     if(!PutView(cam,camSide.eye,camSide.look)){camSide=CamSide{};cameraSession.Publish(generation,false);}
 }
 
-// The stock HUD held off while the map's view is on this camera (easing in, open, easing back), put back as the game last
-// asked when it is not: after the camera eased back, after a fault (camSide dropped), with the map closed any way.
+// The stock HUD held off while the map's view is on this camera (easing in, open, easing back), or while this camera is
+// a vehicle's first person (firstperson.cpp: its information is on the cockpit's panels), put back as the game last
+// asked when neither is: after the camera eased back, after a fault (camSide dropped), with the map closed any way.
+// One owner of the switch for both, so the scripts' own writes are kept for the end of either hold.
 void StockHud(unsigned char* cam,std::uint64_t generation) noexcept {
     if(!hudOk)return;
-    const bool hide=camSide.shown && camSide.cam==cam && cameraSession.Current(generation);
+    const bool hide=(camSide.shown && camSide.cam==cam && cameraSession.Current(generation)) || FirstPersonHidesStockHud(cam);
     AcquireSRWLockExclusive(&hudLock);
     const bool was=hudRecord.hidden && hudRecord.cam==cam;
     __try { maphud::Step(hudRecord,cam,generation,hide,cam+kCamHudShown); }

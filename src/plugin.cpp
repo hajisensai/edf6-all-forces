@@ -567,6 +567,8 @@ void LoadConfig() noexcept {
     n.sightRangePad=ReadBool(L"SightRangePad",n.sightRangePad);
     n.infantryScope=ReadBool(L"InfantryScope",n.infantryScope);
     n.firstPerson=ReadBool(L"FirstPerson",n.firstPerson);
+    n.fpVehicle=ReadBool(L"FirstPersonVehicle",n.fpVehicle);
+    n.fpHideStockHud=ReadBool(L"FirstPersonHideStockHud",n.fpHideStockHud);
     n.firstPersonKey=ReadInt(L"FirstPersonKey",static_cast<DWORD>(n.firstPersonKey));
     n.firstPersonStart=ReadBool(L"FirstPersonStart",n.firstPersonStart);
     n.fpEyeUp=ReadFloat(L"FirstPersonEyeUp",n.fpEyeUp);

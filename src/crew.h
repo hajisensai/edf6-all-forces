@@ -221,6 +221,8 @@ struct Config {
     bool sightRangePad=true;        // ...and on a pad the d-pad up / down
     bool infantryScope=true;        // a soldier's scoped weapon zoomed: a real optic's eyepiece and reticle (infantryscope.cpp)
     bool firstPerson=true;          // first person on foot: the key switches it (firstperson.cpp)
+    bool fpVehicle=true;            // ...in a vehicle as well: each seat's eye at its station (fp_vehicle.cpp)
+    bool fpHideStockHud=true;       // ...and the stock HUD off there (its information on the cockpit's panels)
     int firstPersonKey=0x56;        // ...its key ('V'; on foot only: the vehicles' V keys are not on foot; 0 none)
     bool firstPersonStart=false;    // ...on from the start
     float fpEyeUp=0.05f;            // ...the eye this far over the head bone, m

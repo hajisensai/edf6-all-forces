@@ -82,7 +82,7 @@ constexpr int kMostBones=256,kMostInsts=4;
 // look smoothing +0x1260 (0.3 a frame; fp-soldier-re.md §5), weapons [+0x1950] (count +0x1960) each with its model at
 // +0xF30.
 constexpr std::size_t kAim=0x60,kBodyFrame=0x5E0,kBodyModel=0x860,kBodyInst=0x900,kRagdoll=0x1180,kSpecialView=0x224,
-                      kLookSmooth=0x1260,kWeapons=0x1950,kWeaponCount=0x1960,kWeaponModel=0xF30;
+                      kLookSmooth=0x1260,kHumanVehicle=0x1548,kWeapons=0x1950,kWeaponCount=0x1960,kWeaponModel=0xF30;
 constexpr unsigned kSoldierVts[]={0x17CDF28,0x17D0FF8,0x17CF5B8,0x17CF100};   // Ranger, Wing Diver, Fencer, Air Raider
 constexpr int kMostWeapons=16;
 // The motion's cues (fp-soldier-re.md §3-4): the smoothed look (pitch, negative up; yaw) +0x1240/+0x1244, the position
@@ -187,6 +187,8 @@ struct State {
     float axis[2][3];
     bool onOther[2];            // a free hand drawn on the other hand's weapon, whose bounds after T are otherBox
     M4 otherBox[2];
+    bool riding;                // in a vehicle: the eye at the seat's station, the rider not drawn (Ride)
+    RideView ride;
 };
 // The weapon models taken out of their batch, with the batch to give back.
 struct Unbatched { const void* model; void* batch; };
@@ -197,7 +199,7 @@ struct alignas(16) Flash { float m[16]; const float* src; int age,hand; };
 Flash flashes[kFlashSlots]{};
 int flashNext=0;
 using CreateFn=void*(__fastcall*)(void*,void*,void*,void*);
-bool toggled=false,keyWas=false;
+bool toggled=false,keyWas=false,keyRode=false;   // keyRode: riding when the key went down
 int passLog[2][6]{};   // the body's draws, the weapons' in hand, by pass
 ULONGLONG passLogAt=0;
 
@@ -244,6 +246,15 @@ bool GadgetView(const unsigned char* cam,const unsigned char* h) noexcept {
     return d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>kGadgetFar*kGadgetFar && d[1]>kGadgetHigh;
 }
 
+// In a vehicle, why its own view keeps the camera (nullptr: none does): the high view over the round's fall and its
+// way back (turretcam.cpp), a physical optic the eye is put at (sightzoom.cpp).
+const char* VehicleYields(const unsigned char* h) noexcept {
+    const void* v=At<const void*>(h,kHumanVehicle);
+    if(HighCamOn(v) || TurretCamHighTransition(v))return "the high view";
+    if(SightZoomMounted(v))return "a mounted optic";
+    return nullptr;
+}
+
 // Why this machine's player is not to be seen in first person through `cam` now (nullptr: they are).
 const char* NotWanted(const unsigned char* cam,const unsigned char* h) noexcept {
     const Config& c=Cfg();
@@ -251,7 +262,7 @@ const char* NotWanted(const unsigned char* cam,const unsigned char* h) noexcept 
     if(!h || !IsSoldier(h))return "no soldier";
     if(At<const void*>(cam,kCamTarget)!=h && At<const void*>(cam,kCamTargetRef)!=h)return "another camera";
     if(h[kDead])return "dead";
-    if(!HumanOnFoot(h))return "riding";
+    if(!HumanOnFoot(h))return c.fpVehicle ? VehicleYields(h) : "riding";
     if(h[kRagdoll])return "down";
     if(GadgetView(cam,h))return "a class gadget's view";
     return nullptr;
@@ -268,10 +279,24 @@ bool Wanted(const unsigned char* cam,const unsigned char* h) noexcept {
     return !why;
 }
 
+// Whether a vehicle the player rides uses the key `vk` itself: the Sazabi's keys (sazabi.cpp; its melee is V too).
+bool KeyTaken(const unsigned char* h,int vk) noexcept {
+    const Config& c=Cfg();
+    if(HumanOnFoot(h) || !IsSazabi(At<const void*>(h,kHumanVehicle)))return false;
+    return vk==c.sazabiMeleeKey || vk==c.sazabiGuardKey || vk==c.sazabiFunnelKey || vk==c.sazabiCannonKey ||
+           vk==c.sazabiDashKey || vk==c.sazabiDescendKey || vk==c.sazabiLockKey;
+}
+
+// The key switches first person on foot and in a vehicle (one switch: the user, 2026-10-13, "共用"), on its release:
+// held while boarding it chose the gunship's gunner seat (GunshipGunnerKey, V too, playerjet.cpp), so a press over
+// which the player got in or out switches nothing (it used to switch on the press, the boarding with it). Where the
+// vehicle uses the key itself (KeyTaken) it is that vehicle's: the switch stays as it was set before boarding.
 void Toggle(const unsigned char* h) noexcept {
     const Config& c=Cfg();
-    const bool down=h && HumanOnFoot(h) && KeyDown(c.firstPersonKey);
-    if(down && !keyWas){toggled=!toggled;Log("FP %s (key 0x%X)",toggled ? "on" : "off",c.firstPersonKey);}
+    const bool riding=h && !HumanOnFoot(h);
+    const bool down=h && KeyDown(c.firstPersonKey) && !KeyTaken(h,c.firstPersonKey);
+    if(down && !keyWas)keyRode=riding;
+    if(!down && keyWas && keyRode==riding){toggled=!toggled;Log("FP %s (key 0x%X)",toggled ? "on" : "off",c.firstPersonKey);}
     keyWas=down;
 }
 
@@ -695,6 +720,29 @@ void Watch(const unsigned char* h) noexcept {
 // The soldier this camera follows (+0x360, the SoldierBase cast of its target: null for a vehicle) when it is this
 // machine's player (measured: PlayerHuman, fed by the board prompt's walk and stale after 2 s, dropped the view out
 // of first person mid-mission with no vehicle near).
+// In a vehicle (camera step, after the stock one): the eye at the seat's station (fp_vehicle.cpp), the rider not drawn:
+// both hands' T the identity and neither arm shown, so every bone of the body collapses onto the eye in the colour
+// passes (they still count as drawn: its secondary physics keep running, fp-render-re.md §3) and its shadow stays.
+// The game puts the rider's own weapons away; the near clip and the look smoothing are the stock ones in a vehicle.
+// False: no eye (the stock camera then).
+bool Ride(unsigned char* cam,unsigned char* h) noexcept {
+    float eye[3];
+    RideView ride{};
+    if(!VehicleEye(h,eye,&ride))return false;
+    if(!st.riding || st.ride.vehicle!=ride.vehicle || st.ride.seat!=ride.seat)
+        Log("FP in a vehicle: %s %p seat %d, eye %s (%.2f %.2f %.2f)",ride.name ? ride.name : "?",static_cast<void*>(ride.vehicle),
+            ride.seat,ride.station ? "at its station" : "at the rider's head",eye[0],eye[1],eye[2]);
+    st.riding=true;st.ride=ride;
+    std::memcpy(cam+kCamEyeRow,eye,12);
+    if(st.nearSet){Put<float>(cam,kCamNear,st.savedNear);st.nearSet=false;}
+    if(st.smoothSet){Put<float>(h,kLookSmooth,st.savedSmooth);st.smoothSet=false;}
+    st.body=h+kBodyModel;st.weaponCount=0;st.inHandCount=0;
+    for(int hand=kRight;hand<=kLeft;++hand) {
+        st.view[hand]=fpview::Identity();st.viewOk[hand]=true;st.shown[hand]=false;st.axisOk[hand]=false;st.onOther[hand]=false;
+    }
+    return true;
+}
+
 unsigned char* CameraPlayer(const unsigned char* cam) noexcept {
     auto h=At<unsigned char*>(cam,kCamTarget);
     return h && IsSoldier(h) && edf::IsPlayer(h) ? h : nullptr;
@@ -712,6 +760,11 @@ void Camera(unsigned char* cam) noexcept {
         Log("FP view on %p (player %p)",cam,h);
     }
     std::memcpy(st.stock,cam+kCamMatrix,sizeof(st.stock));
+    if(!HumanOnFoot(h)) {
+        if(!Ride(cam,h))Leave();
+        return;
+    }
+    if(st.riding){st.riding=false;st.fresh=true;Log("FP on foot again");}
     const unsigned char* head=BoneNamed(h+kBodyInst,L"head");
     const M4 body=MatrixAt(h+kBodyFrame);
     float headAt[3];
@@ -911,7 +964,7 @@ void Pose(unsigned char* inst,const M4* t,bool body,const float* eye,float* back
     if(!pose || !bones || n<=0 || n>kMostBones)return;
     std::memcpy(backup,pose,static_cast<std::size_t>(n)*64);
     ArmFit fit[2]{};
-    if(body && Cfg().fpArmIk)for(int hand=kRight;hand<=kLeft;++hand)fit[hand]=FitArm(inst,backup,t[hand],hand);
+    if(body && Cfg().fpArmIk && !st.riding)for(int hand=kRight;hand<=kLeft;++hand)fit[hand]=FitArm(inst,backup,t[hand],hand);
     for(std::int32_t i=0;i<n;++i) {
         float* p=pose+i*16;
         const wchar_t* name=At<const wchar_t*>(bones+static_cast<std::size_t>(i)*kBoneStride,0);
@@ -1002,6 +1055,7 @@ bool HookDrawOf(void** vt) noexcept {
 }  // namespace
 
 bool FirstPersonOn() noexcept { return st.on; }
+bool FirstPersonHidesStockHud(const void* camera) noexcept { return st.on && st.riding && st.cam==camera && Cfg().fpHideStockHud; }
 
 bool InstallFirstPerson() noexcept {
     if(!Matches(kCamStep,kCamStepCode,sizeof(kCamStepCode)) || !Matches(kModelDraw,kModelDrawCode,sizeof(kModelDrawCode))) {

@@ -10,12 +10,15 @@
 //  - the free hand held on the other hand's weapon: pulled in to the box's body when off it (never pushed out, kept
 //    within its length), slid round its axis only within the arc of straight below (a place outside brought to the
 //    edge), and a roll about the axis keeps the hand's distance from it;
+//  - a vehicle's stations (src/fp_vehicle.h): a seat's own row first, else the vehicle's any-seat row, else none; the
+//    eye rides its bone (turned and moved with it);
 //  - the motion matrix: none is the identity, the pivot stays where it is under any turn, a pitch up tips ahead up;
 //  - the procedural motion (src/fp_motion.h): nothing happening rests at 0; a shot kicks back and up and settles; a reload
 //    turns it on its side (not down: the grip is below the view's edge); a switch dips out of view and comes back; a sprint lowers it; a turn of the view leaves it behind.
 // Exit code 1 when one fails. cmake --build build --target fp_view_check && build\fp_view_check.exe
 #include "../src/fp_view.h"
 #include "../src/fp_motion.h"
+#include "../src/fp_vehicle.h"
 #include <cmath>
 #include <cstdio>
 
@@ -224,6 +227,23 @@ void Held() {
            std::sqrt(r1[0]*r1[0]+r1[1]*r1[1]),got);
 }
 
+void Stations() {
+    using crew::fpveh::Station;
+    const Station t[]={{"403_Tank",-1,L"cannon_main",{0,1,0}},{"403_Tank",1,L"body",{0.5f,2,1}},{"506_Helicopter",0,L"body",{0,1,2}}};
+    const Station* a=crew::fpveh::Find(t,3,"403_Tank",1);
+    const Station* b=crew::fpveh::Find(t,3,"403_Tank",0);
+    const Station* c=crew::fpveh::Find(t,3,"506_Helicopter",2);
+    Expect(a==&t[1],"a seat's own station first");
+    Expect(b==&t[0],"...else the vehicle's any-seat one");
+    Expect(c==nullptr && crew::fpveh::Find(t,3,nullptr,0)==nullptr,"...else none");
+    const float at[3]={0.0f,0.0f,0.0f};
+    M4 turret=Frame(0.0f,1.5707963f,at);   // turned a quarter to the side, then moved
+    turret.m[12]=10.0f;turret.m[13]=2.0f;turret.m[14]=-3.0f;
+    float eye[3];
+    crew::fpveh::EyeOn(turret,t[1].at,eye);
+    Expect(Near(eye[0],10.0f+1.0f) && Near(eye[1],4.0f) && Near(eye[2],-3.0f-0.5f),"the eye rides its bone",eye[0],eye[2]);
+}
+
 void Motion() {
     const float pivot[3]={0.15f,-0.2f,0.35f};
     const M4 none=MotionMatrix(0,0,0,0,0,0,pivot);
@@ -289,6 +309,7 @@ int main() {
     Anchored();
     Arms();
     Held();
+    Stations();
     Motion();
     Springs();
     std::printf(failures ? "%d FAILED\n" : "all passed\n",failures);

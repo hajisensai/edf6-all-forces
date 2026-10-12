@@ -18,7 +18,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/map.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/infantryscope.cpp)
 # First person on foot (src/firstperson.cpp: the camera at the head, the arms and weapon drawn as a viewmodel; the
 # arithmetic in src/fp_view.h, checked offline by tools/fp_view_check.cpp).
-target_sources(EDF6VehicleCrew PRIVATE src/firstperson.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/firstperson.cpp src/fp_vehicle.cpp)
 # The damage statistics (src/damagestats.cpp: the damage hook and the round tags; the page in src/hud_stats.inc).
 target_sources(EDF6VehicleCrew PRIVATE src/damagestats.cpp)
 # The map's NPC commands (src/mapcmd.cpp, src/mapcmd_logic.h).
