@@ -620,9 +620,17 @@ void Watch(const unsigned char* h) noexcept {
     watched=w ? w+kWeaponModel : nullptr;
 }
 
+// The soldier this camera follows (+0x360, the SoldierBase cast of its target: null for a vehicle) when it is this
+// machine's player (measured: PlayerHuman, fed by the board prompt's walk and stale after 2 s, dropped the view out
+// of first person mid-mission with no vehicle near).
+unsigned char* CameraPlayer(const unsigned char* cam) noexcept {
+    auto h=At<unsigned char*>(cam,kCamTarget);
+    return h && IsSoldier(h) && edf::IsPlayer(h) ? h : nullptr;
+}
+
 void Camera(unsigned char* cam) noexcept {
     const Config& c=Cfg();
-    unsigned char* const h=PlayerHuman();
+    unsigned char* const h=CameraPlayer(cam);
     Toggle(h);
     if(!Wanted(cam,h)){if(st.on && st.cam==cam)Leave();if(!st.on)Watch(h);return;}
     watched=nullptr;
