@@ -38,6 +38,9 @@ HUDTEXT(scrClimb,L"V/S %+.1f",L"升降 %+.1f",L"升降 %+.1f",L"昇降 %+.1f")
 HUDTEXT(scrHeading,L"HDG %03d",L"航向 %03d",L"航向 %03d",L"方位 %03d")
 HUDTEXT(scrNoWarn,L"ALL SYSTEMS OK",L"系统正常",L"系統正常",L"システム正常")
 HUDTEXT(scrNoArms,L"NO WEAPONS",L"无武器",L"無武器",L"武装なし")
+HUDTEXT(rwsTitle,L"RWS",L"遥控武器站",L"遙控武器站",L"遠隔操作武器")
+HUDTEXT(rwsAzimuth,L"AZ %+04d",L"方位 %+04d",L"方位 %+04d",L"方位 %+04d")
+HUDTEXT(rwsElevation,L"EL %+03d",L"俯仰 %+03d",L"俯仰 %+03d",L"俯仰 %+03d")
 
 // --- Aim marks and cues ---
 HUDTEXT(launcherLine,L"%d m   %.1f s   ELEV %d",L"%d m   %.1f s   仰角 %d",L"%d m   %.1f s   仰角 %d",L"%d m   %.1f s   仰角 %d")

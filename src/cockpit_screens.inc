@@ -214,6 +214,36 @@ bool HudGlass(const CockpitScreens& c) noexcept {
     return false;
 }
 
+// A remote weapon station's monitor over the whole view (a sensor screen: the eye is the gun's camera): the sensor's 4:3
+// field (ScopeShade's: dark bands, a thin bezel, corner marks, the field of view), a faint green of a monitor over it,
+// the gun's bearing off the hull and its elevation bottom left, the weapon and its rounds top right. The gun's reticle
+// is the aim marks' (StockAimOnly).
+void RwsDisplay(void* drawer,void* ctx,Text* t,float width,float height,float s,const ScreenFeed& f,const Snapshot& snap,
+                Line* lines,int* at) noexcept {
+    const float zoom=snap.stock && snap.stockHud.zoom>1.0f ? snap.stockHud.zoom : 1.0f;
+    ScopeShade(drawer,ctx,t,width,height,s,zoom,true,lines,at);
+    float hx,hy;
+    scopeview::RectHalf(width,height,&hx,&hy);
+    const float cx=width*0.5f,cy=height*0.5f,pad=40.0f*s;
+    Rect(drawer,ctx,cx-hx,cy-hy,cx+hx,cy+hy,kScreenGlow);
+    Label(t,lines,at,cx+hx-pad,cy-hy+pad,2,kLineScale,kScreenInk,L"%ls",Tr(Tx::rwsTitle));
+    if(f.picked>=0 && f.picked<f.cells)Label(t,lines,at,cx+hx-pad,cy-hy+pad+34.0f*s,2,kLineScale,kScreenInk,L"%ls",f.cell[f.picked].text);
+    else if(f.cells>0)Label(t,lines,at,cx+hx-pad,cy-hy+pad+34.0f*s,2,kLineScale,kScreenInk,L"%ls",f.cell[0].text);
+    if(snap.stock && snap.stockHud.aimOk) {
+        const float* a=snap.stockHud.aim;
+        const float gun=sight::HeadingOf(a),hull=sight::HeadingOf(snap.stockHud.hull);
+        float off=gun-hull;
+        while(off>180.0f)off-=360.0f;
+        while(off<-180.0f)off+=360.0f;
+        const float len=std::sqrt(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]);
+        const float el=len>1e-4f ? std::asin(vec::Clamp(a[1]/len,-1.0f,1.0f))/kDeg : 0.0f;
+        Label(t,lines,at,cx-hx+pad,cy+hy-pad-34.0f*s,0,kLineScale,kScreenInk,Tr(Tx::rwsAzimuth),static_cast<int>(std::round(off)));
+        Label(t,lines,at,cx-hx+pad,cy+hy-pad,0,kLineScale,kScreenInk,Tr(Tx::rwsElevation),static_cast<int>(std::round(el)));
+    }
+    if(f.hpMax>0.0f)Label(t,lines,at,cx+hx-pad,cy+hy-pad,2,kLineScale,f.hp<0.3f*f.hpMax ? kRed : kScreenDim,Tr(Tx::scrArmor),
+                          static_cast<int>(f.hp+0.5f),static_cast<int>(f.hpMax+0.5f));
+}
+
 // Every screen of the snapshot's cockpit drawn onto the view (`vp`, width x height) round its eye.
 void DrawCockpitScreens(void* drawer,void* ctx,Text* t,const float* vp,float width,float height,float s,const Snapshot& snap,
                     Line* lines,int* at) noexcept {
@@ -221,9 +251,10 @@ void DrawCockpitScreens(void* drawer,void* ctx,Text* t,const float* vp,float wid
     if(!RayOf(vp,eye,dir))return;
     const ScreenFeed feed=FeedOf(snap);
     const float ts=t ? t->s : s;
+    for(int i=0;i<snap.scr.n;++i)if(snap.scr.s[i].kind==ScreenKind::sensor){RwsDisplay(drawer,ctx,t,width,height,s,feed,snap,lines,at);break;}
     for(int i=0;i<snap.scr.n;++i) {
         const CockpitScreen& c=snap.scr.s[i];
-        if(c.kind==ScreenKind::hud)continue;   // the head-up glass: the HUD's own symbols, on the world
+        if(c.kind==ScreenKind::hud || c.kind==ScreenKind::sensor)continue;   // the head-up glass / the station's monitor: on the view
         float px[4],py[4];
         bool ok=true;
         const float hw=c.w*0.5f,hh=c.h*0.5f,corner[4][2]={{-hw,hh},{hw,hh},{hw,-hh},{-hw,-hh}};   // TL TR BR BL

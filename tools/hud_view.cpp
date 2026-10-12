@@ -1730,6 +1730,17 @@ int CockpitScenes(const std::wstring& dir,const float* ground,const float* pos) 
     sceneScreens.s[sceneScreens.n++]=ScreenAt(ScreenKind::map,sceneHeli.sym.nose,0.13f);
     Prime(pos);Scene(dir,L"cockpit_heli_pilot",pos);
     failed+=ScreensDrawn(L"cockpit_heli_pilot",pos,sceneHeli.sym.nose,1920);
+    // An unmanned gun's station (remote_display): its monitor over the whole view, its title, bearing, elevation, weapon.
+    hasHeli=false;hasStock=true;
+    StockTank(ground);
+    sceneScreens=CockpitScreens{};
+    sceneScreens.s[sceneScreens.n].kind=ScreenKind::sensor;sceneScreens.s[sceneScreens.n].w=0.4f;sceneScreens.s[sceneScreens.n++].h=0.3f;
+    Prime(ground);Scene(dir,L"cockpit_remote_station",ground);
+    int rws=0;
+    for(const Drew& d:drew)rws+=d.text==Tr(Tx::rwsTitle) || d.text.rfind(L"AZ ",0)==0 || d.text.rfind(L"EL ",0)==0 ||
+                                d.text.find(L"CANNON")!=std::wstring::npos;
+    if(hudtext::InUse()==hudtext::Lang::en && rws<4){++failed;std::printf("FAIL cockpit_remote_station: %d of its 4 read-outs\n",rws);}
+    else std::printf("ok  cockpit_remote_station: the station's monitor and its read-outs\n");
     hasScreens=false;hasHeli=false;hasWarn=false;
     return failed;
 }

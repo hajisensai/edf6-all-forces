@@ -19,12 +19,13 @@ FITS: dict[str, tuple[Fit, ...]] = {
     # Blacker (403): the gunner in the turret's dome beside the gun's cradle (measured room: left 0.24 to the cradle,
     # right 0.98, up 0.27, down 0.37, ahead 1.25, back 1.26; the turret's yaw bone cannon_main, so the cockpit turns
     # with the turret, not with the gun's elevation. The stations' first guess, 0.6 m behind the trunnion, was over
-    # the rear deck, outside: the trunnion is behind the dome); the two roof machine guns' gunners at their sights
+    # the rear deck, outside: the trunnion is behind the dome); the two side machine guns are unmanned stations (the
+    # user: "明明是无人炮塔"): their seats see the gun camera's monitor (remote_display), the eye at the guns' sights
     # (the optics' vc_optic_01 / 02, on the guns' pitch bones).
     'VEHICLE403_TANK': (
         Fit(0, 'cannon_main', (-0.45, 1.8, 0.0), 'tank_gunner'),
-        Fit(1, 'MachineGun_A_aim', (1.0311, 2.9768, -0.4158), 'gun_station'),
-        Fit(2, 'MachineGun_B_aim', (-1.0311, 2.9768, -0.4158), 'gun_station'),
+        Fit(1, 'MachineGun_A_aim', (1.0311, 2.9768, -0.4158), 'remote_display'),
+        Fit(2, 'MachineGun_B_aim', (-1.0311, 2.9768, -0.4158), 'remote_display'),
     ),
 }
 

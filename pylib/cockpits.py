@@ -59,7 +59,7 @@ class KitMaterial:
     albedo: str | tuple[int, int, int]
 
 
-SCREEN_KINDS = ('flight', 'weapons', 'status', 'hud', 'map')
+SCREEN_KINDS = ('flight', 'weapons', 'status', 'hud', 'map', 'sensor')
 SCREEN = 'vc_scr_{}_{}_{}x{}'   # seat, kind, width and height in mm: the plugin draws that kind of live read-out there
 
 
@@ -67,7 +67,8 @@ SCREEN = 'vc_scr_{}_{}_{}x{}'   # seat, kind, width and height in mm: the plugin
 class Screen:
     """A face of a kit where the plugin draws live information (src/hud.cpp; the user: "信息全上面板"): `kind` one of
     SCREEN_KINDS (flight: speed, height, heading, attitude; weapons: arms, rounds, reload; status: armour, fuel,
-    warnings; hud: a head-up glass, its symbols collimated on the world; map), a `width` x `height` face at `centre`
+    warnings; hud: a head-up glass, its symbols collimated on the world; map; sensor: the whole view is a remote
+    weapon station's monitor, the eye at the gun's camera), a `width` x `height` face at `centre`
     whose front looks along `facing` (toward the eye), `up` its top, all in the eye's frame. The kit's own part under
     it should be a dark screen texture (textures/screen.png)."""
     kind: str
@@ -327,6 +328,8 @@ def fitted(tris, fit: Fit, kit_fn: KitFn) -> Kit:  # noqa: ANN001 - numpy
     for _ in range(SHRINK_ROUNDS + 1):
         kit = kit_fn(room)
         local = [v.pos for p in kit.parts if p.name not in kit.outside for v in p.verts]
+        if not local:   # nothing inside the hull to keep in (a remote station's display)
+            return kit
         bad = exposed(tris, [to_model(q, m, fit.scale) for q in local])
         if not bad.any():
             return kit

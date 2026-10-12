@@ -22,7 +22,7 @@ bool VehicleEye(unsigned char* human,float* eye,RideView* out) noexcept;
 // draws its live read-outs (hud.cpp CockpitScreens). `off`: the screen's centre from the eye, `right` / `up` its unit
 // axes as seen from its front (world), w x h metres. Relative to the eye, so the draw (a frame after the camera step)
 // puts it round the eye its own view has.
-enum class ScreenKind : std::uint8_t { flight, weapons, status, hud, map };
+enum class ScreenKind : std::uint8_t { flight, weapons, status, hud, map, sensor };   // sensor: a remote station's monitor
 struct CockpitScreen { ScreenKind kind; float off[3],right[3],up[3],w,h; };
 constexpr int kMostScreens=8;
 struct CockpitScreens { int n; CockpitScreen s[kMostScreens]; };

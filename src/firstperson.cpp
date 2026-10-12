@@ -248,11 +248,12 @@ bool GadgetView(const unsigned char* cam,const unsigned char* h) noexcept {
 }
 
 // In a vehicle, why its own view keeps the camera (nullptr: none does): the high view over the round's fall and its
-// way back (turretcam.cpp), a physical optic the eye is put at (sightzoom.cpp).
+// way back (turretcam.cpp), a physical optic zoomed in (sightzoom.cpp: its own reticle; at 1x the seat's cockpit or
+// station monitor is the view, the eye at the same sight).
 const char* VehicleYields(const unsigned char* h) noexcept {
     const void* v=At<const void*>(h,kHumanVehicle);
     if(HighCamOn(v) || TurretCamHighTransition(v))return "the high view";
-    if(SightZoomMounted(v))return "a mounted optic";
+    if(SightZoomMounted(v) && SightZoomNow(v)>1.0f)return "a mounted optic zoomed in";
     return nullptr;
 }
 
