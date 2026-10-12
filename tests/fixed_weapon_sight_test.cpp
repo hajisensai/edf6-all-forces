@@ -40,6 +40,7 @@ bool IsFuelTank(const unsigned char*) noexcept{return false;}
 unsigned char* PayloadPicked(const void*) noexcept{return nullptr;}
 unsigned char* PayloadSightPicked(const void*,unsigned) noexcept{return nullptr;}
 int PayloadSightWeapons(const void*,unsigned,unsigned char**,int) noexcept{return 0;}
+int PayloadTriggerWeapons(const void*,unsigned,unsigned char**,int) noexcept{return 0;}
 // The Proteus's borrowed stock mounts (proteus.cpp): `proteusLent` lent to seat `proteusSeat`.
 const unsigned char* proteusLent=nullptr;unsigned proteusSeat=0;
 int ProteusBorrowedWeapons(const unsigned char*,unsigned seat,const unsigned char** out,int max) noexcept{

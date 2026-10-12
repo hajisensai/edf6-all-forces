@@ -115,6 +115,13 @@ int main() {
     Check(r.count==3 && r.entry[0].fire==PayloadFire::primary && r.entry[1].fire==PayloadFire::secondary && r.entry[2].fire==PayloadFire::store,"Titan holder 0/3 and added store decode distinctly; fuel is excluded");
     Check(PayloadPicked(c.vehicle)==c.weapon[3] && Sight(c)==c.weapon[0],"default sight is main cannon even while payload cycle points at stock secondary");
     Triggers(c,0,0,1);Tick(c);Check(Sight(c)==c.weapon[3],"new LT edge selects real holder s+3");
+    {   // both triggers' guns whichever is picked (the HUD marks each: 「应该两个准星都同时显示才对」)
+        unsigned char* both[kMostPayload]{};
+        Check(PayloadTriggerWeapons(c.vehicle,0,both,kMostPayload)==2 && both[0]==c.weapon[0] && both[1]==c.weapon[3],
+              "trigger weapons: the main gun and the secondary, the LT pick notwithstanding");
+        Check(PayloadTriggerWeapons(c.vehicle,0,both,1)==1 && both[0]==c.weapon[0] && PayloadTriggerWeapons(c.vehicle,0,nullptr,4)==0,
+              "trigger weapons: capacity and null output honoured");
+    }
     Triggers(c,0,1,1);Tick(c);Check(Sight(c)==c.weapon[0],"new RT edge returns to main while LT stays held");
     Triggers(c,0,0,0);Tick(c);Triggers(c,0,1,1);Tick(c);
     Check(Sight(c)==c.weapon[0],"simultaneous fresh RT and LT edges prefer main");
