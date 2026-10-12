@@ -1,7 +1,7 @@
 """Animation groups (CAS "players") an EDF6 class looks up that a ported object's CAS lacks, grafted from an EDF6 CAS
 of that class, each with clips of its own that move nothing.
 
-    graft(target, donor, groups) -> bytes     both EDF6 CAS 0x204 (cas_legacy.cas_from_legacy first for 4.1 / EDF5)
+    graft(target, donor, groups, variables=()) -> bytes     both EDF6 CAS 0x204 (cas_legacy.cas_from_legacy first for 4.1 / EDF5)
 
 Why: EDF.dll resolves a class's players by name (helper 0x1166FB0) and does not check the result: EDF4.1's carrier
 (UfoCarrier301) under EDF6's carrier class (UfoCarrier508) would crash on spawn for want of the players in_ring and
@@ -16,6 +16,16 @@ with no track (the donor's tracks move the donor's bones), after the target's ow
 stays as it was: its structs (re-emitted by cas_legacy._Emit, which lays out every EDF6 CAS again byte for byte), its
 CANM (the clips table grows; every offset past it shifted) and its strings (the new names go after them). With no
 group to graft the result is the target, byte for byte.
+
+Variables (vcontrols) the class resolves by name are grafted the same way: EDF.dll's by-name lookup for a variable
+(0x1167170) answers -1 when the CAS has none, and the setter (0x116de10) multiplies that index by 0x60 and writes
+there: a missing variable the class sets is a write far outside the controller's array (EDF6_Berserker_Large sets
+v_move_angle, v_move_velocity, v_tilt_dir, v_tilt_lerp every frame and v_damage_reaction_ratio when it is hit). The
+float getter (0x1166de0) answers 0.0 for a missing name instead, so a missing getter-only variable is harmless but
+reads as 0 (v_tilt_factor 0 = no lean) instead of the class's tuning. A vcontrol is 0x14 bytes: name, u32 +4 (1 = the
+variable follows a tcontrol, whose index is at +0x10), u32 +8 kind, f32 +0xC initial value, u32 +0x10; the plain
+ones (+4 = 0) are copied as they are, at the end of the target's table, so no index of its own moves. A variable
+that follows a tcontrol is refused: its index would need the same renumbering as a data command's.
 """
 from __future__ import annotations
 
@@ -24,6 +34,12 @@ import struct
 import cas_legacy as cl
 
 CLIP = 28
+MCANM = 0x24
+# Data commands whose +0x10 is a tcontrol index (the 'type' word at +0x14 is 2 then): 0 (play) and 4 (the additive
+# players' clips: damage / additive_action of the Berserker CAS, 67 of 67 in EDF6 equal the mcanm's own +0x20).
+# Any other command in a grafted group has an argument layout this module has not checked: refused.
+TCONTROL_OPS = (0, 4)
+VCONTROL = 0x14
 
 
 def _name(b: bytes, at: int) -> str:
@@ -60,7 +76,28 @@ def _data_of(m: cl.McAnm) -> list[int]:
     return out
 
 
-def graft(target: bytes, donor: bytes, groups: list[str]) -> bytes:
+def variable_names(b: bytes) -> list[str]:
+    """The names of an EDF6 CAS's variables (vcontrols), in table order."""
+    return [_name(b, at) for at in cl.cas_layout(b).tree.vcontrols]
+
+
+def _donor_variables(donor: bytes, ld: cl.CasLayout, want: list[str]) -> list[int]:
+    """The donor's vcontrol addresses (in the donor's own buffer) of the variables `want`, each a plain one."""
+    by_name = {_name(donor, at): at for at in ld.tree.vcontrols}
+    missing = [v for v in want if v not in by_name]
+    if missing:
+        raise ValueError(f'the donor CAS has no variable {missing}')
+    out = [by_name[v] for v in want]
+    for v, at in zip(want, out):
+        if struct.unpack_from('<I', donor, at + 4)[0] != 0:
+            raise ValueError(f'variable {v} follows a tcontrol: not a plain variable, not grafted')
+    return out
+
+
+def graft(target: bytes, donor: bytes, groups: list[str], variables: tuple[str, ...] | list[str] = (),
+          state_aliases: dict[str, list[tuple[str, str]]] | None = None) -> bytes:
+    """`target` with the donor's anmgroups `groups` and plain variables `variables` it lacks (module docstring), and
+    `state_aliases` ({player: [(new state, existing state)]}: see alias_states)."""
     lt, ld = cl.cas_layout(target), cl.cas_layout(donor)
     if lt.version != cl.CAS_6 or ld.version != cl.CAS_6:
         raise ValueError('graft takes EDF6 CAS 0x204 files')
@@ -70,9 +107,14 @@ def graft(target: bytes, donor: bytes, groups: list[str]) -> bytes:
     missing = [g for g in want if g not in by_name]
     if missing:
         raise ValueError(f'the donor CAS has no group {missing}')
+    have_vars = set(variable_names(target))
+    want_vars = [v for v in dict.fromkeys(variables) if v not in have_vars]
     base = len(target)
     b = target + donor
     sd = _shift_layout(ld, base)
+    new_vcontrols = [at + base for at in _donor_variables(donor, ld, want_vars)]
+    own_groups, alias_fields, b = _aliased_groups(target, lt, b, state_aliases or {})
+    synth_at = base + len(donor)       # what is past here is alias_states' own, taken from the target's structs
     donor_groups = [next(x for x in sd.tree.anmgroups if x[0] == by_name[g][0] + base) for g in want]
     # the donor tcontrols those groups name, in the donor's order
     named: list[int] = []
@@ -80,10 +122,13 @@ def graft(target: bytes, donor: bytes, groups: list[str]) -> bytes:
         for m in ms:
             for d in _data_of(m):
                 op, = struct.unpack_from('<I', b, d)
-                if op == 0:
-                    idx, = struct.unpack_from('<I', b, d + 0x10)
-                    if idx not in named:
-                        named.append(idx)
+                if op not in TCONTROL_OPS or struct.unpack_from('<I', b, d + 0x14)[0] != 2:
+                    raise ValueError(f'a grafted group holds data command {op} (type '
+                                     f'{struct.unpack_from("<I", b, d + 0x14)[0]}): its arguments are not known to '
+                                     f'hold only a tcontrol index, so it cannot be renumbered')
+                idx, = struct.unpack_from('<I', b, d + 0x10)
+                if idx not in named:
+                    named.append(idx)
             idx, = struct.unpack_from('<I', b, m.at + 0x20)
             if idx not in named:
                 named.append(idx)
@@ -100,20 +145,25 @@ def graft(target: bytes, donor: bytes, groups: list[str]) -> bytes:
             if all(c != ci for _n, c in clips):
                 clips.append((pose_d.clips[ci].name, ci))
     clip_index = {ci: len(pose_t.clips) + k for k, (_n, ci) in enumerate(clips)}
-    merged = cl.Tree(lt.tree.tcontrols + [sd.tree.tcontrols[i] for i in named], lt.tree.vcontrols, lt.tree.bones,
-                     lt.tree.anmgroups + donor_groups, lt.tree.unnamed)
-    lay = cl.CasLayout(cl.CAS_6, lt.canm_at, {**lt.structs, **sd.structs}, lt.string_fields + sd.string_fields,
-                       lt.strings | sd.strings, lt.canm, lt.strings_at, merged)
+    merged = cl.Tree(lt.tree.tcontrols + [sd.tree.tcontrols[i] for i in named], lt.tree.vcontrols + new_vcontrols,
+                     lt.tree.bones, own_groups + donor_groups, lt.tree.unnamed)
+    lay = cl.CasLayout(cl.CAS_6, lt.canm_at, {**lt.structs, **sd.structs},
+                       lt.string_fields + sd.string_fields + alias_fields, lt.strings | sd.strings, lt.canm,
+                       lt.strings_at, merged)
     emit = cl._Emit(b, lay, cl.COMMON_SIZE[cl.CAS_6])
     area = emit.run()
     struct.pack_into('<I', area, 0x0C, len(merged.tcontrols))   # _Emit keeps the header's counts: set them
+    struct.pack_into('<I', area, 0x14, len(merged.vcontrols))
     struct.pack_into('<I', area, 0x1C, len(merged.anmgroups))
     # renumber what the grafted structs point at (an emitted struct came from the donor when its source did)
+    counts = {at: len(ms) for at, ms in merged.anmgroups}
     for new, old in emit.sources.items():
-        if old < base:
+        if emit.kinds[new] == 'anmgroup':          # an alias adds states to a group of the target's: its count
+            struct.pack_into('<I', area, new + 4, counts[old])
+        if old < base or old >= synth_at:
             continue
         kind = emit.kinds[new]
-        if kind == 'data' and struct.unpack_from('<I', area, new)[0] == 0:
+        if kind == 'data' and struct.unpack_from('<I', area, new)[0] in TCONTROL_OPS:
             idx, = struct.unpack_from('<I', area, new + 0x10)
             struct.pack_into('<I', area, new + 0x10, new_index[idx])
         elif kind == 'mcanm':
@@ -140,6 +190,51 @@ def graft(target: bytes, donor: bytes, groups: list[str]) -> bytes:
         struct.pack_into('<i', canm, clip_at + 4, len(canm) + (len(target) - lt.strings_at) + rel - clip_at)
     struct.pack_into('<I', area, 8, canm_at)
     return bytes(area + canm + target[lt.strings_at:] + extra + tail)
+
+
+def _aliased_groups(target: bytes, lt: cl.CasLayout, b: bytes, aliases: dict[str, list[tuple[str, str]]]
+                    ) -> tuple[list[tuple[int, list[cl.McAnm]]], list[int], bytes]:
+    """(the target's anmgroups with the aliased states added, the new structs' string fields, `b` with those structs
+    appended). A state is an mcanm; the alias is a copy of the existing one under another name: the same tcontrol, the
+    same data, so it plays the same clips. The copy is a 0x24-byte struct appended to `b` with its name pointing at a
+    string appended after it (_Emit re-emits every struct from its source address and re-aims the offsets, so
+    the copy needs only its name field of its own)."""
+    synth = bytearray()
+    fields: list[int] = []
+    groups = []
+    for at, ms in lt.tree.anmgroups:
+        pairs = aliases.get(_name(target, at), [])
+        states = {_name(target, m.at): m for m in ms}
+        more = []
+        for new, old in pairs:
+            if new in states:
+                continue                       # the player has it already: nothing to alias
+            if old not in states:
+                raise ValueError(f'player {_name(target, at)} has no state {old} to alias as {new}')
+            where = len(b) + len(synth)
+            name = new.encode('utf-16le') + b'\0\0'
+            src = bytearray(b[states[old].at:states[old].at + MCANM])
+            struct.pack_into('<i', src, 0, MCANM)                  # the name follows the struct
+            synth += src + name + bytes(-len(name) % 4)
+            fields.append(where)
+            m = states[old]
+            more.append(cl.McAnm(where, m.first, m.more, m.groups))
+        groups.append((at, ms + more))
+    unknown = set(aliases) - {_name(target, at) for at, _ms in lt.tree.anmgroups}
+    if unknown:
+        raise ValueError(f'the target CAS has no player {sorted(unknown)}')
+    return groups, fields, b + bytes(synth)
+
+
+def alias_states(cas: bytes, aliases: dict[str, list[tuple[str, str]]]) -> bytes:
+    """`cas` (EDF6 0x204) with states added to its players as copies of states it has: {player: [(new, existing)]}.
+
+    Why: EDF6_Berserker_Large asks the player main for walk_battle_f / _b / _l / _r by name when it fights, and plays
+    them through 0x116BFC0, which answers false for a state the player lacks (index -1): the robot keeps its last
+    state, so a Hector chasing its target stands in its stand pose and slides. A walking state aliased to its plain
+    walk gives it the walk it already has. Only states whose meaning is continuous movement are worth aliasing: a state
+    the class waits to finish (an appeal, an attack) played as a looping stand would never end."""
+    return graft(cas, cas, [], (), aliases)
 
 
 def hollow(cas: bytes) -> bytes:

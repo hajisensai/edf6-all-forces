@@ -177,3 +177,192 @@ def mab_from_edf5(b: bytes) -> bytes:
     if [(a, t) for a, _b, t in back.offsets] != [(a, t) for a, _b, t in lay.offsets]:
         raise ValueError('MAB 转换后读回的偏移不一致')
     return bytes(out)
+
+
+@dataclass(frozen=True)
+class Locator:
+    """A MAB record: `name` (what the game looks it up by) on bone `node`. Kinds 0 / 1 / 2 / 3 / 4 as in the module
+    docstring: `a` is the +0xC vec4 (the position in the node's frame), `b` the +0x10 vec4 (kinds 1, 2: the extent;
+    EDF6_Berserker's muzzles have 0.1, 0.1, 5.0) or f32 (kinds 0, 3, 4: a radius or scale, 1.0 for an eye position), `c`
+    the +0x14 vec4 (kinds 2, 3, 4: Euler radians, R = Rz Ry Rx; the locator's +Z is the way a muzzle fires)."""
+    name: str
+    node: str
+    kind: int
+    a: tuple[float, float, float, float]
+    b: tuple[float, float, float, float] | float
+    c: tuple[float, float, float, float] | None = None
+
+
+def _text_at(b: bytes, at: int) -> str:
+    e = at
+    while b[e:e + 2] != b'\0\0':
+        e += 2
+    return b[at:e].decode('utf-16le')
+
+
+def _records(b: bytes) -> tuple[Layout, list[tuple[int, int]]]:
+    """(layout, [(list index, record address)] for every record, in file order)."""
+    lay = mab_layout(b)
+    nlists, = struct.unpack_from('<H', b, 0x0C)
+    heads = struct.unpack_from('<I', b, 0x14)[0]
+    out = []
+    pos = heads + 8 * nlists
+    for i in range(nlists):
+        n, = struct.unpack_from('<H', b, heads + 8 * i + 2)
+        out += [(i, r) for r in range(pos, pos + RECORD * n, RECORD)]
+        pos += RECORD * n
+    return lay, out
+
+
+def mab_locators(b: bytes) -> list[tuple[int, Locator]]:
+    """[(list index, Locator)] for every record of the block, in file order."""
+    lay, recs = _records(b)
+    rel = lay.flag == RELATIVE
+
+    def at(r: int, off: int) -> int:
+        return r + _i32(b, r + off) if rel else _i32(b, r + off)
+
+    out = []
+    for i, r in recs:
+        kind = _i32(b, r + 8)
+        vec_10, vec_14 = _RECORD_KINDS[kind]
+        a = struct.unpack_from('<4f', b, at(r, 0xC))
+        bb = struct.unpack_from('<4f', b, at(r, 0x10)) if vec_10 else struct.unpack_from('<f', b, r + 0x10)[0]
+        c = struct.unpack_from('<4f', b, at(r, 0x14)) if vec_14 else None
+        out.append((i, Locator(_text_at(b, at(r, 0)), _text_at(b, at(r, 4)), kind, a, bb, c)))
+    return out
+
+
+def mab_add_locators(b: bytes, new: list[Locator]) -> bytes:
+    """The MAB block `b` (either flag) with the records `new` added at the end of list 0, the locator list.
+
+    Why: EDF.dll finds a locator by name in list 0 (0x6BADD0) and uses the answer without asking whether there was
+    one: EDF6_Berserker_Large reads 目の基準位置 (its eye height) in its constructor and one muzzle per gun_control
+    entry in every gun's setup (0x6D4B90); a block without them gives a null record and a read through it. A 4.1
+    object has neither (its guns are separate objects), so the ported one needs them added.
+
+    Layout: the new records go after list 0's own (the lists' records are contiguous, in list order), their vec4s
+    after the block's last vec4, their strings after its last string. Everything past an insertion point moves, so
+    every offset field is read through mab_layout, the struct holding it and its target moved the same way, and
+    written again (relative to the struct under flag 0x83, from the block's start under 0x03); the list headers'
+    first-record fields and the header's own four offsets are recomputed. Each new record's SGO block is the one the
+    first existing record already points at (shared, as every record of EDF4.1's blocks does: 4.1 Hector's records
+    all point at one). A name or node that is already a string of the block points at it, else the string is added.
+    Nothing existing changes but position: mab_locators of the result starts with the old records."""
+    if not new:
+        return b
+    lay, recs = _records(b)
+    rel = lay.flag == RELATIVE
+    nlists, ntracks, nvec, nstr = struct.unpack_from('<4H', b, 0x0C)
+    heads, tracks, vecs, strs = struct.unpack_from('<4I', b, 0x14)
+    n0, = struct.unpack_from('<H', b, heads + 2)
+    if not recs:
+        raise ValueError('MAB has no record: no SGO block to share')
+    first = recs[0][1]
+    blob = _i32(b, first + 0x1C) + (first if rel else 0)
+    p0 = heads + 8 * nlists + RECORD * n0
+    vec_end = vecs + 16 * nvec
+    k = len(new)
+    texts = {_text_at(b, s): s for s in lay.strings}
+    add_text = bytearray()
+    new_text: dict[str, int] = {}
+    for loc in new:
+        for s in (loc.name, loc.node):
+            if s not in texts and s not in new_text:
+                new_text[s] = len(add_text)
+                add_text += s.encode('utf-16le') + b'\0\0'
+    vec_list: list[tuple[float, ...]] = []
+    for loc in new:
+        vec_10, vec_14 = _RECORD_KINDS[loc.kind]
+        vec_list.append(loc.a)
+        if vec_10:
+            vec_list.append(loc.b)       # type: ignore[arg-type]
+        if vec_14:
+            vec_list.append(loc.c)       # type: ignore[arg-type]
+    m = len(vec_list)
+    grow_rec, grow_vec = RECORD * k, 16 * m
+
+    def f(x: int) -> int:
+        """Where the byte that was at `x` is now."""
+        return x if x < p0 else x + grow_rec if x < vec_end else x + grow_rec + grow_vec
+
+    out = bytearray(b[:p0]) + bytes(grow_rec) + b[p0:vec_end] + bytes(grow_vec) + b[vec_end:] + add_text
+    new_strs = f(strs)
+    struct.pack_into('<4H', out, 0x0C, nlists, ntracks, nvec + m, nstr + len(add_text))
+    struct.pack_into('<4I', out, 0x14, heads, f(tracks), f(vecs), new_strs)
+    moved_heads = {heads + 8 * i + 4 for i in range(nlists)}
+    for at_, base, to in lay.offsets:
+        if at_ in moved_heads:
+            continue
+        struct.pack_into('<i', out, f(at_), f(to) - (f(base) if rel else 0))
+    pos = heads + 8 * nlists
+    for i in range(nlists):
+        h = heads + 8 * i
+        count = struct.unpack_from('<H', b, h + 2)[0] + (k if i == 0 else 0)
+        struct.pack_into('<HH', out, h, i, count)
+        struct.pack_into('<i', out, h + 4, pos - h if rel else pos)
+        pos += RECORD * count
+    vec_at = f(vecs) + 16 * nvec
+    for i, v in enumerate(vec_list):
+        struct.pack_into('<4f', out, vec_at + 16 * i, *v)
+    next_vec = vec_at
+    str_at = new_strs + (len(b) - strs)
+    for j, loc in enumerate(new):
+        r = p0 + RECORD * j
+
+        def put(off: int, to: int) -> None:
+            struct.pack_into('<i', out, r + off, to - r if rel else to)
+
+        def string(s: str) -> int:
+            return f(texts[s]) if s in texts else str_at + new_text[s]
+
+        put(0, string(loc.name))
+        put(4, string(loc.node))
+        struct.pack_into('<i', out, r + 8, loc.kind)
+        vec_10, vec_14 = _RECORD_KINDS[loc.kind]
+        put(0xC, next_vec)
+        next_vec += 16
+        if vec_10:
+            put(0x10, next_vec)
+            next_vec += 16
+        else:
+            struct.pack_into('<f', out, r + 0x10, float(loc.b))        # type: ignore[arg-type]
+        if vec_14:
+            put(0x14, next_vec)
+            next_vec += 16
+        else:
+            struct.pack_into('<i', out, r + 0x14, -1)
+        struct.pack_into('<i', out, r + 0x18, 0)
+        put(0x1C, f(blob))
+    result = bytes(out)
+    mab_layout(result)
+    return result
+
+
+def mab_retarget(b: bytes, name: str, node: str) -> bytes:
+    """The MAB block `b` with every record of list 0 called `name` moved onto bone `node` (its position, extent and
+    angles are in the bone's frame, so they are kept as they are).
+
+    Why: a locator keeps its place in the model but not its bone when the bone is replaced by a finer chain: EDF6's
+    UfoSmall507 fires from the locator 銃口 and expects it on its `gun` bone, which the gun's aim turns, while 4.1's
+    UFO401 hangs every locator on `center`. Only the record's node field changes; the string `node` is the block's
+    own when it has it, else appended past the last string (the string area is the block's end; only the header's
+    size of it grows, nothing moves). ValueError when no record of list 0 has that name."""
+    lay, recs = _records(b)
+    rel = lay.flag == RELATIVE
+    texts = {_text_at(b, s): s for s in lay.strings}
+    out = bytearray(b)
+    if node not in texts:
+        texts[node] = len(out)
+        text = node.encode('utf-16le') + b'\0\0'
+        out += text
+        nlists, ntracks, nvec, nstr = struct.unpack_from('<4H', b, 0x0C)
+        struct.pack_into('<4H', out, 0x0C, nlists, ntracks, nvec, nstr + len(text))
+    hits = [r for i, r in recs if i == 0 and _text_at(b, r + _i32(b, r) if rel else _i32(b, r)) == name]
+    if not hits:
+        raise ValueError(f'MAB has no locator {name}')
+    for r in hits:
+        struct.pack_into('<i', out, r + 4, texts[node] - r if rel else texts[node])
+    result = bytes(out)
+    mab_layout(result)
+    return result

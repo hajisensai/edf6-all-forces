@@ -19,6 +19,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import ledger  # noqa: E402
+import rabpool  # noqa: E402
 from modfiles import sha256, sha256_file  # noqa: E402
 
 OWNER = 'edf41'   # pylib/ledger.py OWNERS
@@ -34,6 +35,19 @@ def bundled(rel: str) -> str:
     if rel in shared:
         return os.path.join(DATA, *shared[rel].split('/'))
     return os.path.join(DATA, 'edf41port', 'objects', *rel.split('/'))
+
+
+def _read_file(path: str) -> bytes:
+    with open(path, 'rb') as f:
+        return f.read()
+
+
+def read(rel: str) -> bytes:
+    """The bytes of Mods path `rel` as the tools ship it: a shared file whole, one of ours through pylib/rabpool.py
+    (an archive rebuilt from its manifest and the shared members)."""
+    if rel in registry().get('shared', {}):
+        return _read_file(bundled(rel))
+    return rabpool.unpack(rel, lambda s: _read_file(os.path.join(DATA, 'edf41port', 'objects', *s.split('/'))))
 
 
 def registry() -> dict:
@@ -67,8 +81,7 @@ def build(root: str) -> tuple[dict[str, bytes], list[tuple[str, str]]]:
             continue
         for rel in obj['files']:
             if rel not in files:
-                with open(bundled(rel), 'rb') as f:
-                    data = f.read()
+                data = read(rel)
                 if hashlib.sha256(data).hexdigest() != reg['files'][rel]:
                     raise ValueError(f'{rel}: not the file the registry lists (a damaged install of the tools)')
                 files[rel] = data
