@@ -601,11 +601,19 @@ void Views(const unsigned char* h,const unsigned char* cam) noexcept {
     Probe(anchored,anchor);
 }
 
+// Debug=1 with the view stock: the weapon in hand's draws counted as well (the same counters), to compare.
+const void* watched=nullptr;
+void Watch(const unsigned char* h) noexcept {
+    const unsigned char* w=Cfg().debug && h ? SetWeapon(h,0) : nullptr;
+    watched=w ? w+kWeaponModel : nullptr;
+}
+
 void Camera(unsigned char* cam) noexcept {
     const Config& c=Cfg();
     unsigned char* const h=PlayerHuman();
     Toggle(h);
-    if(!Wanted(cam,h)){if(st.on && st.cam==cam)Leave();return;}
+    if(!Wanted(cam,h)){if(st.on && st.cam==cam)Leave();if(!st.on)Watch(h);return;}
+    watched=nullptr;
     if(!st.on || st.cam!=cam || st.human!=h) {
         Leave();
         st.on=true;st.cam=cam;st.human=h;st.fresh=true;st.moved[kRight]=st.moved[kLeft]=fpview::Identity();
@@ -746,6 +754,7 @@ void __fastcall DrawHook(void* model,void* ctx,int pass,void* view) {
     int hand=kRight;
     __try { part=PartOf(model,&hand); } __except(EXCEPTION_EXECUTE_HANDLER){part=Part::none;}
     if(part!=Part::none)LogPass(part,pass);
+    else if(!st.on && model==watched)LogPass(Part::inHand,pass);
     else if(st.on){__try { NearWeapon(model,pass); } __except(EXCEPTION_EXECUTE_HANDLER){}}
     if(part==Part::none || pass==3 || pass==4 || pass>5){next(model,ctx,pass,view);return;}
     if(pass==0 || part==Part::stowed)return;   // the occluder depth (not where it is in this picture); put away: unseen
