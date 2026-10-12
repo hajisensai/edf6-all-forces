@@ -53,9 +53,11 @@ MODELS = (
 )
 
 
+# The stock models with cockpits: the optics' own, and those fitted with an audited digest (cockpit_fits DIGESTS). A
+# generated model's stem (the plugin's own vehicles) has no digest: its generator grafts it (cockpits.graft_files).
 MODELS = tuple(replace(m, cockpits=cockpit_fits.FITS.get(m.stem, ())) for m in MODELS) + tuple(
     Model(stem, cockpit_fits.DIGESTS[stem], (), fits) for stem, fits in sorted(cockpit_fits.FITS.items())
-    if stem not in {m.stem for m in MODELS})
+    if stem not in {m.stem for m in MODELS} and stem in cockpit_fits.DIGESTS)
 
 
 def ready(spec: Model) -> bool:
