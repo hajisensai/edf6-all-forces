@@ -18,6 +18,7 @@
 #include "crew.h"
 #include "firstperson.h"
 #include "fp_view.h"
+#include "fp_motion.h"
 #include "map.h"
 #include "memory.h"
 #include <cmath>
@@ -50,6 +51,20 @@ constexpr std::size_t kAim=0x60,kBodyFrame=0x5E0,kBodyModel=0x860,kBodyInst=0x90
                       kLookSmooth=0x1260,kWeapons=0x1950,kWeaponCount=0x1960,kWeaponModel=0xF30;
 constexpr unsigned kSoldierVts[]={0x17CDF28,0x17D0FF8,0x17CF5B8,0x17CF100};   // Ranger, Wing Diver, Fencer, Air Raider
 constexpr int kMostWeapons=16;
+// The motion's cues (fp-soldier-re.md §3-4): the smoothed look (pitch, negative up; yaw) +0x1240/+0x1244, the position
+// +0x90, the character proxy's support +0x711 (2 = in the air), frames on the ground +0x1264 (0 -> 1 = a landing), the
+// action limits +0x5D0 (each stock move writes its own value on entry); the hands' weapon sets [+0x1970] (count +0x1980,
+// 0x150 each, the weapon in hand **(set+0x40)). A weapon: shots fired +0xBD0, its fire state +0xBD4 (3 = a reload's
+// animation starts), ReloadTime +0x20C (frames), FireRecoil +0x37C.
+constexpr std::size_t kLook=0x1240,kPos=0x90,kSupport=0x711,kGroundFrames=0x1264,kActLimit=0x5D0,
+                      kSets=0x1970,kSetCount=0x1980,kSetStride=0x150,kSetWeapon=0x40,
+                      kShotCount=0xBD0,kFireState=0xBD4,kReloadTime=0x20C,kFireRecoil=0x37C;
+constexpr int kMostSets=4,kMostReloadFrames=900;
+// The stock moves by the value they write to +0x5D0 (§3.3; H for the Ranger's sprint and the rolls, L for the Fencer's
+// and the Wing Diver's: Debug=1 logs every change to match them).
+constexpr std::uint32_t kSprints[]={0x29E,0x29,0x3D,0xA38,0x25,0xE39},kRolls[]={0xE3C};
+// The viewmodel turns about a point near the grip (the eye's frame: right, up, ahead, m).
+const float kPivot[3]={0.2f,-0.3f,0.4f};
 // The arms (the four classes share the names, fp-render-re.md §8): the shoulder, upper and lower arm and their twists,
 // the hand, its fingers, the weapon mounts.
 const wchar_t* const kArmBones[]={L"kata",L"jowan",L"kawan",L"te_",L"fing",L"ring",L"little",L"index",L"middle",
@@ -80,8 +95,18 @@ struct State {
     bool fresh;                 // the eye taken as it is next frame
     float savedNear,savedSmooth;
     bool nearSet,smoothSet;
-    ULONGLONG epoch;            // a camera step this frame: T rebuilt at the next draw
+    // The motion: last frame's readings and the springs.
+    bool have;
+    float pitch,yaw,pos[3],vy;
+    std::int32_t groundFrames;
+    std::uint32_t act;
+    const unsigned char* held[kMostSets];
+    std::int32_t shots[kMostSets],fire[kMostSets];
+    int reloadLeft;
+    fpmotion::State motion;
+    M4 moved;                   // the motion as a matrix (fp_view.h MotionMatrix)
 };
+ULONGLONG epoch=0;              // a camera step: T rebuilt at the next draw
 State st{};
 struct Drawn { ULONGLONG epoch; bool ok; M4 t; };
 Drawn drawn{};
@@ -152,6 +177,87 @@ void Gather(unsigned char* h) noexcept {
     }
 }
 
+const unsigned char* SetWeapon(const unsigned char* h,std::uint64_t k) noexcept {
+    const auto sets=At<const unsigned char*>(h,kSets);
+    if(!sets)return nullptr;
+    const auto entry=At<unsigned char* const*>(sets+k*kSetStride,kSetWeapon);
+    return entry ? *entry : nullptr;
+}
+
+fpmotion::Move MoveOf(std::uint32_t act) noexcept {
+    for(std::uint32_t v:kRolls)if(act==v)return fpmotion::Move::roll;
+    for(std::uint32_t v:kSprints)if(act==v)return fpmotion::Move::sprint;
+    return fpmotion::Move::none;
+}
+
+float Wrap(float a) noexcept {
+    while(a>3.14159265f)a-=6.2831853f;
+    while(a<-3.14159265f)a+=6.2831853f;
+    return a;
+}
+
+// The recoil a shot of `w` kicks with (0.3..1 from its FireRecoil).
+float RecoilOf(const unsigned char* w) noexcept {
+    const float r=At<float>(w,kFireRecoil);
+    return std::isfinite(r) ? 0.3f+0.7f*std::fmin(std::fabs(r),1.0f) : 0.5f;
+}
+
+// One hand's weapon this frame: its shots, a reload started.
+void Hand(const unsigned char* w,std::uint64_t k,std::int32_t shots,std::int32_t fire,fpmotion::Cue& c) noexcept {
+    const std::int32_t d=shots-st.shots[k];
+    if(d>0 && d<10){c.shots+=d;c.recoil=std::fmax(c.recoil,RecoilOf(w));}
+    if(fire!=3 || st.fire[k]==3)return;
+    const std::int32_t t=At<std::int32_t>(w,kReloadTime);
+    st.reloadLeft=t>0 ? (t<kMostReloadFrames ? t : kMostReloadFrames) : 0;
+    if(Cfg().debug)Log("FP reload %d frames (FireRecoil %.3f)",t,At<float>(w,kFireRecoil));
+}
+
+// The hands' weapons this frame: shots, a reload started, a switch.
+void Weapons(const unsigned char* h,fpmotion::Cue& c) noexcept {
+    auto n=At<std::uint64_t>(h,kSetCount);
+    if(n>kMostSets)n=kMostSets;
+    for(std::uint64_t k=0;k<n;++k) {
+        const unsigned char* w=SetWeapon(h,k);
+        const std::int32_t shots=w ? At<std::int32_t>(w,kShotCount) : 0,fire=w ? At<std::int32_t>(w,kFireState) : 0;
+        if(st.have && w!=st.held[k] && st.held[k]){c.switched=true;st.reloadLeft=0;}
+        if(st.have && w && w==st.held[k])Hand(w,k,shots,fire,c);
+        st.held[k]=w;st.shots[k]=shots;st.fire[k]=fire;
+    }
+}
+
+// What the soldier did since the last frame (fp_motion.h Cue), the readings kept for the next.
+fpmotion::Cue Cues(const unsigned char* h) noexcept {
+    fpmotion::Cue c{};
+    const float pitch=At<float>(h,kLook),yaw=At<float>(h,kLook+4);
+    float pos[3];
+    std::memcpy(pos,h+kPos,12);
+    const std::int32_t ground=At<std::int32_t>(h,kGroundFrames);
+    const std::uint32_t act=At<std::uint32_t>(h,kActLimit);
+    c.grounded=h[kSupport]!=2;
+    if(st.have) {
+        c.lookYaw=Wrap(yaw-st.yaw);
+        c.lookPitch=-(pitch-st.pitch);
+        const float dx=pos[0]-st.pos[0],dz=pos[2]-st.pos[2];
+        c.speed=std::sqrt(dx*dx+dz*dz);
+        if(c.speed>3.0f)c.speed=0.0f;   // a warp, not a walk
+        if(ground>0 && st.groundFrames==0 && st.vy<0.0f)c.fallSpeed=-st.vy;
+        st.vy=pos[1]-st.pos[1];
+        if(act!=st.act && Cfg().debug)
+            Log("FP act 0x%X -> 0x%X (state %p / %p)",st.act,act,At<const void*>(h,0x1F00),At<const void*>(h,0x2458));
+    }
+    Weapons(h,c);
+    c.reloading=st.reloadLeft>0;
+    if(st.reloadLeft>0)--st.reloadLeft;
+    c.move=MoveOf(act);
+    st.pitch=pitch;st.yaw=yaw;std::memcpy(st.pos,pos,12);st.groundFrames=ground;st.act=act;st.have=true;
+    return c;
+}
+
+void Motion(const unsigned char* h) noexcept {
+    const fpmotion::Pose p=fpmotion::Advance(st.motion,Cues(h));
+    st.moved=fpview::MotionMatrix(p.x,p.y,p.z,p.pitch,p.yaw,p.roll,kPivot);
+}
+
 // The camera, the player's state given back: the near clip, the look smoothing.
 void Leave() noexcept {
     if(st.cam && st.nearSet)Put<float>(st.cam,kCamNear,st.savedNear);
@@ -165,7 +271,11 @@ void Camera(unsigned char* cam) noexcept {
     unsigned char* const h=PlayerHuman();
     Toggle(h);
     if(!Wanted(cam,h)){if(st.on && st.cam==cam)Leave();return;}
-    if(!st.on || st.cam!=cam || st.human!=h){Leave();st.on=true;st.cam=cam;st.human=h;st.fresh=true;Log("FP view on %p (player %p)",cam,h);}
+    if(!st.on || st.cam!=cam || st.human!=h) {
+        Leave();
+        st.on=true;st.cam=cam;st.human=h;st.fresh=true;st.moved=fpview::Identity();
+        Log("FP view on %p (player %p)",cam,h);
+    }
     std::memcpy(st.stock,cam+kCamMatrix,sizeof(st.stock));
     const unsigned char* head=BoneNamed(h+kBodyInst,L"head");
     const M4 body=MatrixAt(h+kBodyFrame);
@@ -180,7 +290,9 @@ void Camera(unsigned char* cam) noexcept {
     if(c.fpNear>0.0f){if(!st.nearSet){st.savedNear=At<float>(cam,kCamNear);st.nearSet=true;}Put<float>(cam,kCamNear,c.fpNear);}
     if(c.fpAimSnap){if(!st.smoothSet){st.savedSmooth=At<float>(h,kLookSmooth);st.smoothSet=true;}Put<float>(h,kLookSmooth,1.0f);}
     Gather(h);
-    ++st.epoch;
+    if(c.fpMotion)Motion(h);
+    else st.moved=fpview::Identity();
+    ++epoch;
 }
 
 void __fastcall CamStepHook(void* camera,void* step) {
@@ -200,11 +312,11 @@ DrawFn NextDraw(const void* model) noexcept {
 
 // T for this frame (the camera and the aim frame as the last step left them), built once a frame.
 bool ViewNow(M4* t) noexcept {
-    if(drawn.epoch!=st.epoch) {
+    if(drawn.epoch!=epoch) {
         const Config& c=Cfg();
         const float hold[3]={c.fpHoldX,c.fpHoldY,c.fpHoldZ};
-        drawn.epoch=st.epoch;
-        drawn.ok=fpview::ViewTransform(MatrixAt(st.human+kAim),MatrixAt(st.cam+kCamMatrix),hold,c.fpScale,&drawn.t);
+        drawn.epoch=epoch;
+        drawn.ok=fpview::ViewTransform(MatrixAt(st.human+kAim),MatrixAt(st.cam+kCamMatrix),hold,c.fpScale,&drawn.t,st.moved);
     }
     *t=drawn.t;
     return drawn.ok;

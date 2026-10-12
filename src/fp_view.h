@@ -70,13 +70,27 @@ inline bool Finite(const M4& a) noexcept {
     return true;
 }
 
-// T (above). False when R is singular or the result is not finite (then nothing is moved).
-inline bool ViewTransform(const M4& aim,const M4& camera,const float* hold,float scale,M4* out) noexcept {
+// The procedural motion (fp_motion.h) as a matrix in the camera's frame (x right, y up, z ahead): turned about `pivot`
+// by pitch (up), yaw (right) and roll (right), then moved by the offset.
+inline M4 MotionMatrix(float x,float y,float z,float pitch,float yaw,float roll,const float* pivot) noexcept {
+    const float cp=std::cos(pitch),sp=std::sin(pitch),cy=std::cos(yaw),sy=std::sin(yaw),cr=std::cos(roll),sr=std::sin(roll);
+    M4 rx=Identity(),ry=Identity(),rz=Identity();
+    rx.m[5]=cp;rx.m[6]=-sp;rx.m[9]=sp;rx.m[10]=cp;     // ahead tips up
+    ry.m[0]=cy;ry.m[2]=-sy;ry.m[8]=sy;ry.m[10]=cy;     // ahead turns right
+    rz.m[0]=cr;rz.m[1]=-sr;rz.m[4]=sr;rz.m[5]=cr;      // up leans right
+    const M4 turn=Mul(Mul(rz,rx),ry);
+    return Mul(Mul(Translate(-pivot[0],-pivot[1],-pivot[2]),turn),Translate(pivot[0]+x,pivot[1]+y,pivot[2]+z));
+}
+
+// T (above), the motion applied in the camera's frame before the shrink. False when R is singular or the result is not
+// finite (then nothing is moved).
+inline bool ViewTransform(const M4& aim,const M4& camera,const float* hold,float scale,M4* out,
+                          const M4& motion=Identity()) noexcept {
     M4 inv;
     if(!InverseAffine(aim,&inv))return false;
     float eye[3];
     Point(inv,camera.m+12,eye);
-    const M4 t=Mul(Mul(Mul(inv,Translate(hold[0]-eye[0],hold[1]-eye[1],hold[2]-eye[2])),Scale(scale)),camera);
+    const M4 t=Mul(Mul(Mul(Mul(inv,Translate(hold[0]-eye[0],hold[1]-eye[1],hold[2]-eye[2])),motion),Scale(scale)),camera);
     if(!Finite(t))return false;
     *out=t;
     return true;

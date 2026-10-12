@@ -4,9 +4,13 @@
 //  - a hold moves every pose by that much along the aim frame's own axes, whatever the frame's yaw and pitch;
 //  - a shrink keeps the picture: a point and its shrunk copy lie on the same ray from the eye, at s times the distance;
 //  - a collapse sends every point to its one place;
-//  - the eye eased in the body frame: the first frame as it is, then a share of the way a frame; a turned body turns it.
+//  - the eye eased in the body frame: the first frame as it is, then a share of the way a frame; a turned body turns it;
+//  - the motion matrix: none is the identity, the pivot stays where it is under any turn, a pitch up tips ahead up;
+//  - the procedural motion (src/fp_motion.h): nothing happening rests at 0; a shot kicks back and up and settles; a reload
+//    holds it low; a switch dips out of view and comes back; a sprint lowers it; a turn of the view leaves it behind.
 // Exit code 1 when one fails. cmake --build build --target fp_view_check && build\fp_view_check.exe
 #include "../src/fp_view.h"
+#include "../src/fp_motion.h"
 #include <cmath>
 #include <cstdio>
 
@@ -106,6 +110,60 @@ void Eye() {
     EyeWorld(body,local,w);
     Expect(Near(w[0],100.4f) && Near(w[2],50.0f),"the eye back in the world, ahead along the turned body",w[0],w[2]);
 }
+
+void Motion() {
+    const float pivot[3]={0.15f,-0.2f,0.35f};
+    const M4 none=MotionMatrix(0,0,0,0,0,0,pivot);
+    float worst=0.0f;
+    const M4 id=Identity();
+    for(int i=0;i<16;++i)worst=std::fmax(worst,std::fabs(none.m[i]-id.m[i]));
+    Expect(worst<1e-6f,"no motion: the identity",worst);
+    float q[3];
+    Point(MotionMatrix(0,0,0,0.4f,-0.3f,0.7f,pivot),pivot,q);
+    Expect(Near(q[0],pivot[0]) && Near(q[1],pivot[1]) && Near(q[2],pivot[2]),"the pivot stays put under a turn",q[0],q[2]);
+    const float zero[3]={0,0,0},ahead[3]={0,0,1};
+    Point(MotionMatrix(0,0,0,0.5f,0,0,zero),ahead,q);
+    Expect(q[1]>0.4f,"a pitch up tips ahead up",q[1]);
+}
+
+using namespace crew::fpmotion;
+Cue Quiet() { return Cue{0,0,0,true,0,0,0,false,false,Move::none}; }
+
+Pose Run(State& s,const Cue& c,int frames) { Pose p{};for(int i=0;i<frames;++i)p=Advance(s,c);return p; }
+
+void Springs() {
+    State s{};
+    Pose p=Run(s,Quiet(),60);
+    Expect(p.x==0 && p.y==0 && p.z==0 && p.pitch==0 && p.yaw==0 && p.roll==0,"nothing happening: at rest",p.y,p.pitch);
+    Cue shot=Quiet();shot.shots=1;shot.recoil=1.0f;
+    p=Advance(s,shot);
+    Pose q=Advance(s,Quiet());
+    Expect(p.z<0 && p.pitch>0 && q.z<p.z,"a shot kicks back and up",p.z,p.pitch);
+    p=Run(s,Quiet(),90);
+    Expect(std::fabs(p.z)<1e-3f && std::fabs(p.pitch)<1e-3f,"...and settles",p.z,p.pitch);
+    Cue reload=Quiet();reload.reloading=true;
+    p=Run(s,reload,60);
+    Expect(p.y<-0.05f && p.roll>0.3f,"a reload holds it low and rolled in",p.y,p.roll);
+    s=State{};
+    Cue sw=Quiet();sw.switched=true;
+    Advance(s,sw);
+    p=Run(s,Quiet(),10);
+    Expect(p.y<-0.1f,"a switch dips it out of view",p.y);
+    p=Run(s,Quiet(),90);
+    Expect(std::fabs(p.y)<1e-3f,"...and brings it back",p.y);
+    s=State{};
+    Cue sprint=Quiet();sprint.move=Move::sprint;sprint.speed=0.3f;
+    p=Run(s,sprint,60);
+    Expect(p.pitch<-0.2f && p.yaw<-0.3f,"a sprint lowers it and turns it in",p.pitch,p.yaw);
+    s=State{};
+    Cue look=Quiet();look.lookYaw=0.05f;
+    p=Advance(s,look);
+    Expect(p.yaw<0,"turning right leaves it behind (to the left)",p.yaw);
+    s=State{};
+    Cue air=Quiet();air.grounded=false;air.speed=0.3f;
+    p=Run(s,air,30);
+    Expect(std::fabs(p.x)<1e-6f && std::fabs(p.y)<1e-6f,"no bob in the air",p.x,p.y);
+}
 }  // namespace
 
 int main() {
@@ -115,6 +173,8 @@ int main() {
     Singular();
     Collapse_();
     Eye();
+    Motion();
+    Springs();
     std::printf(failures ? "%d FAILED\n" : "all passed\n",failures);
     return failures ? 1 : 0;
 }

@@ -232,6 +232,7 @@ struct Config {
     float fpScale=1.0f;             // ...shrunk about the eye this much (the same picture, nearer: walls do not cut it)
     float fpNear=0.0f;              // ...the camera's near clip, m (0: the stock 0.1)
     bool fpAimSnap=true;            // ...the aim follows the mouse at once (this machine's look smoothing off)
+    bool fpMotion=true;             // ...the arms and weapon sway, bob, kick, dip at a reload, a switch, a sprint, a roll
     bool gunStabilizer=true;        // stab.cpp: the guns that should have one hold their world line on the move
     float viewDistance=-1.0f;       // the near camera's far clip, m (view.cpp; stock 1000; 0: as the mission has it; -1: unlimited)
     bool map=true;                  // the map view (map.cpp): an overhead camera over the real world, the player held
