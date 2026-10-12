@@ -127,12 +127,14 @@ try:
         written = {os.path.relpath(dst, os.path.join(game, 'Mods')).replace('\\', '/').upper() for _, dst in renames}
         check({w for w in written if not w.startswith('PLUGINS/')} ==
               {'OBJECT/EDF6VC_NPC_LANCE_L_1E3A8A_X.SGO', 'OBJECT/' + PENDING_NAME, 'WEAPON/EDF6VC_AP_25.SGO'} |
-              {w for w in written if w.startswith('OBJECT/EDF6VC_LO_TANK_')} | set(LAYOUTS), f'the new files written: {written}')
+              {w for w in written if w.startswith('OBJECT/EDF6VC_LO_TANK_')} | set(LAYOUTS) | {room_layout.WHITE.upper()},
+              f'the new files written: {written}')
         check(not [n for d, _, fs in os.walk(game) for n in fs if '.tmp-' in n], 'no temporary file left')
         check(read(sl.pending_path(game)) == pending_before, 'the pending list is left to the plugin (it appends while running)')
         led = ledger.Ledger(game)
-        check(all('roomui' in led.owners(w) for w in LAYOUTS) and all(read(led.disk(w)) == b for w, b in LAYOUTS.items()),
-              'the missing menu layouts written as new files, owned by roomui in the ledger')
+        check(all('roomui' in led.owners(w) for w in [*LAYOUTS, room_layout.WHITE]) and
+              all(read(led.disk(w)) == b for w, b in LAYOUTS.items()) and read(led.disk(room_layout.WHITE)) == room_layout.white_dds(),
+              'the missing menu layouts and the white texture written as new files, owned by roomui in the ledger')
         check(all('loadout' in led.owners(w) for w in written if not w.startswith(('PLUGINS/', 'UI/'))),
               'the new files are the loadout tool\'s in the ledger: uninstall removes them')
         st = status(game)

@@ -29,13 +29,25 @@
 namespace crew::roommenu {
 
 // --- Colours ---
-// The palette a colour field cycles through (stock first, then these). The drawing layer may replace it with the game's
-// HQ palette (the ColorChipBox colours, 0x880010) through Menu::palette; the values are 0xRRGGBB, the ini's spelling.
-inline constexpr int kPaletteMost=32;
+// The palette a colour field cycles through (stock first, then these): the game's own HQ colour-select chips
+// (src/hq_palette.inc, made by tools/hq_palette.py from Root.cpk DEFAULTPACKAGE/CUSTOMCOLOR*.SGO and checked against it by
+// tests/hq_palette_audit.py): the 8 pairs every class offers, then the Ranger's, Wing Diver's and Fencer's own 4 pairs,
+// each pair's primary then secondary, no colour twice. Menu::palette may replace it; the values are 0xRRGGBB, the ini's
+// spelling.
+inline constexpr int kPaletteMost=48;
 struct Palette { int count=0; std::int32_t rgb[kPaletteMost]{}; };
-inline constexpr Palette kDefaultPalette{16,{
-    0xFFFFFF,0xB0B0B0,0x505050,0x101010,0xC0272D,0xE87722,0xF2C230,0x4B5320,
-    0x2E8B57,0x1F7A7A,0x4FA3E0,0x1E3A8A,0x6A3FA0,0xE07AB0,0x6B4423,0xC3B091}};
+inline constexpr std::int32_t kHqColours[]={
+#include "hq_palette.inc"
+};
+inline constexpr int kHqColourCount=static_cast<int>(sizeof(kHqColours)/sizeof(kHqColours[0]));
+static_assert(kHqColourCount>0 && kHqColourCount<=kPaletteMost,"the HQ palette fits a Palette");
+constexpr Palette HqPalette() noexcept {
+    Palette p{};
+    p.count=kHqColourCount;
+    for(int i=0;i<kHqColourCount;++i)p.rgb[i]=kHqColours[i];
+    return p;
+}
+inline constexpr Palette kDefaultPalette=HqPalette();
 // A colour as RGBA for the drawing layer (alpha opaque); stock is 0.
 constexpr std::uint32_t Rgba(std::int32_t colour) noexcept {
     return colour==kStockColour ? 0u : (static_cast<std::uint32_t>(colour&0xFFFFFF)<<8)|0xFFu;
@@ -540,6 +552,7 @@ enum class RowText : std::uint8_t { squadUnit, vehicleUnit, save, ownLoad, soldi
 struct ViewRow {
     RowText text=RowText::save;
     const wchar_t* label=nullptr;   // the unit's, the soldier kind's, the store's label; nullptr none
+    const wchar_t* key=nullptr;     // the unit's key (a unit row, and every row of the open unit); nullptr the save row
     int index=0;                    // the unit / soldier / pylon number (0-based)
     int kind=-1;                    // SupportWeapon, -1 none
     int soldierClass=-1;            // SupportSoldierClass: 0 Ranger, 1 Wing Diver, 2 Fencer
@@ -561,7 +574,7 @@ inline ViewRow UnitRow(const Menu& m,int i) noexcept {
     ViewRow r;r.index=i;r.cursor=i==m.unitAt;
     if(i>=m.unitCount){r.text=RowText::save;return r;}
     const Unit& u=m.unit[i];
-    r.text=IsSquad(u) ? RowText::squadUnit : IsCrewUnit(u) ? RowText::crewUnit : RowText::vehicleUnit;r.label=u.label;
+    r.text=IsSquad(u) ? RowText::squadUnit : IsCrewUnit(u) ? RowText::crewUnit : RowText::vehicleUnit;r.label=u.label;r.key=u.key;
     r.changed=UnitChanged(u);r.refused=u.refused || u.crewRefused;
     return r;
 }
@@ -604,6 +617,7 @@ inline View Snapshot(const Menu& m) noexcept {
     const bool inside=m.level!=Level::units;
     detail::Fill(v.rows,m.rowFirst,RowCount(u),rows,[&](int i) noexcept {
         ViewRow r=IsSquad(u) ? detail::SquadRow(u,i) : detail::VehicleRow(u,i);
+        r.key=u.key;
         r.cursor=inside && i==m.rowAt;
         r.editing=r.cursor && m.level==Level::fields;r.field=r.editing ? m.fieldAt : -1;
         return r;

@@ -10,9 +10,11 @@
 //      +8 (the effective UiInput*) null: the game's own "not the input owner" state (network, members, chat run on);
 //   3. after it: the room's pre-sync ticked (room_sync.h), the preview (room_preview.h) shown for the soldier under the
 //      cursor, and the menu drawn into the elements tools/room_layout.py added (room_ui_logic.h decides what): texts by
-//      HUiTextField::SetText, the chips' colour through the ColorChipBox model skin, icons by the texture skin, every
-//      element's shown flag (+0x1F8), each written only when it changes (Written). The root is hidden from the screen's
-//      first frame on while the menu is not shown: the layout file shows it.
+//      HUiTextField::SetText, the panel, the chips and the icons by their texture skins (the panel and the chips bind
+//      kWhiteTexture and tint it: Skin_Texture +0xF0 / +0x100), every element's shown flag (+0x1F8), each written only
+//      when it changes (Written). The layout draws nothing by itself (empty texts, texture skins with no texture): without
+//      the plugin the screen looks stock. While the menu is not shown everything the plugin set is taken back (texts
+//      emptied, tints transparent, elements and the root hidden).
 // Nothing is patched unless every address checks out (REFUSED in the log: both screens as they are). The slots are read
 // and chained, never assumed stock: EDF6Coop chains the room's too.
 #include "room_ui.h"
@@ -26,6 +28,7 @@
 #include "room_sync.h"
 #include "room_ui_logic.h"
 #include "support_call.h"
+#include "support_config.h"
 #include <atomic>
 #include <cstring>
 #include <cwchar>
@@ -45,12 +48,11 @@ constexpr unsigned kComponentAt=0x839560;   // HUiLayout: (this, shared_ptr<ui::
 constexpr unsigned kTextAt=0x8859C0;        // HUiLayout: (this, shared_ptr<HUiTextField>* out, index), null if no TextField
 constexpr unsigned kSetText=0x863690;       // HUiTextField::SetText(this, const wchar_t*): the literal text
 constexpr unsigned kFind=0x839FD0;          // HUiLayout: (this, shared_ptr<ui::Component>* out, const std::wstring* name)
-constexpr unsigned kModelParam=0x824D40;    // (weak_ptr<Skin>* by value: released by it, const wchar_t* model,
-                                            //  const std::string* param, const void* value): the model skin's parameter
 constexpr unsigned kTextureSkin=0x953D80;   // (shared_ptr<Skin_Texture>* out, shared_ptr<Component>* by value: released by it)
 constexpr unsigned kSetTexture=0x7F63E0;    // Skin_Texture: (this, const std::wstring* path) -> bool
 constexpr std::size_t kShown=0x1F8;         // a Component's shown flag (its constructor sets 1: 0x7E999C)
-constexpr std::size_t kSkinPtr=0x98,kSkinCtrl=0xA0;   // a Component's skin, a weak_ptr (0x88014D)
+constexpr std::size_t kTint=0xF0,kTintFrom=0x100;   // Skin_Texture: RGBA float4s drawn lerp(+0x100, +0xF0, +0xE4) (0x7F707F,
+                                                    // 0x7F70FC; the constructor sets both 1,1,1,1: 0x7F5CD2)
 constexpr std::size_t kTextFont=0x228;      // HUiTextField: SetText returns at once while it is null (0x863690)
 constexpr std::size_t kFontColour=0x2B0;    // HUiTextField: font colour RGBA float4 (0x8BC68C; drawn by 0x7F890C)
 constexpr std::size_t kCtxSize=0x18,kCtxInput=0x8;
@@ -64,22 +66,23 @@ const unsigned char kComponentAtSig[]={0x40,0x57,0x48,0x83,0xEC,0x30,0x48,0x8B,0
 const unsigned char kTextAtSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x30,0x48};
 const unsigned char kSetTextSig[]={0x48,0x83,0xB9,0x28,0x02,0x00,0x00,0x00,0x74,0x11,0x48,0x85,0xD2,0x75,0x07,0x48};
 const unsigned char kFindSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x40,0x48};
-const unsigned char kModelParamSig[]={0x48,0x89,0x5C,0x24,0x10,0x4C,0x89,0x4C,0x24,0x20,0x4C,0x89,0x44,0x24,0x18,0x48};
 const unsigned char kTextureSkinSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57};
 const unsigned char kSetTextureSig[]={0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57};
-// The HQ palette's chip (0x88014D): rax=[comp+98h]; rax=[comp+0A0h]; lock inc [ctrl+0Ch] (a weak ref for the callee);
-// r9 = the float4, r8 = the std::string "color", rdx = L"ColorChipBox", rcx = the weak_ptr copy; call 0x824D40.
-const unsigned char kChipSiteSig[]={0x48,0x8B,0x81,0x98,0x00,0x00,0x00,0x48,0x89,0x45,0xC0,0x48,0x8B,0x81,0xA0,0x00,0x00,0x00,
-    0x48,0x89,0x45,0xC8,0xF0,0xFF,0x40,0x0C,0x4C,0x8D,0x4D,0x70,0x4C,0x8D,0x85,0x80,0x00,0x00,0x00,0x48,0x8D,0x15,0x57,0x0E,0xF8,0x00,
-    0x48,0x8D,0x4D,0xC0,0xE8,0xBE,0x4B,0xFA,0xFF};
+// Skin_Texture's draw (vtable 0x17F6228 slot 3, 0x7F7040): movss xmm3..6,[rdi+100h..10Ch] (0x7F707F), then
+// movss xmm0/xmm1,[rdi+0F0h/0F4h] (0x7F70FC): the tint pair; its constructor's mov dword [rbx+0F0h],1.0 (0x7F5CD2).
+const unsigned char kTintFromSig[]={0xF3,0x0F,0x10,0x9F,0x00,0x01,0x00,0x00,0xF3,0x0F,0x10,0xA7,0x04,0x01,0x00,0x00,
+    0xF3,0x0F,0x10,0xAF,0x08,0x01,0x00,0x00,0xF3,0x0F,0x10,0xB7,0x0C,0x01,0x00,0x00};
+const unsigned char kTintSig[]={0xF3,0x0F,0x10,0x87,0xF0,0x00,0x00,0x00,0xF3,0x0F,0x10,0x8F,0xF4,0x00,0x00,0x00};
+const unsigned char kTintInitSig[]={0xC7,0x83,0xF0,0x00,0x00,0x00,0x00,0x00,0x80,0x3F};
 const unsigned char kFontColourSig[]={0x89,0x81,0xB0,0x02,0x00,0x00};                       // 0x8BC68C: mov [rcx+2B0h],eax
 const unsigned char kFontDrawSig[]={0xF3,0x0F,0x10,0x9B,0xBC,0x02,0x00,0x00};               // 0x7F890C: movss xmm3,[rbx+2BCh]
 const unsigned char kShowSig[]={0xC6,0x87,0xF8,0x01,0x00,0x00,0x01};                        // 0x7E999C: mov byte [rdi+1F8h],1
 const Sig kDrawSigs[]={{kGetInput,kGetInputSig,sizeof(kGetInputSig)},{kFindIndex,kFindIndexSig,sizeof(kFindIndexSig)},
     {kComponentAt,kComponentAtSig,sizeof(kComponentAtSig)},{kTextAt,kTextAtSig,sizeof(kTextAtSig)},
-    {kSetText,kSetTextSig,sizeof(kSetTextSig)},{kFind,kFindSig,sizeof(kFindSig)},{kModelParam,kModelParamSig,sizeof(kModelParamSig)},
+    {kSetText,kSetTextSig,sizeof(kSetTextSig)},{kFind,kFindSig,sizeof(kFindSig)},
     {kTextureSkin,kTextureSkinSig,sizeof(kTextureSkinSig)},{kSetTexture,kSetTextureSig,sizeof(kSetTextureSig)},
-    {0x88014D,kChipSiteSig,sizeof(kChipSiteSig)},{0x8BC68C,kFontColourSig,sizeof(kFontColourSig)},
+    {0x7F707F,kTintFromSig,sizeof(kTintFromSig)},{0x7F70FC,kTintSig,sizeof(kTintSig)},{0x7F5CD2,kTintInitSig,sizeof(kTintInitSig)},
+    {0x8BC68C,kFontColourSig,sizeof(kFontColourSig)},
     {0x7F890C,kFontDrawSig,sizeof(kFontDrawSig)},{0x7E999C,kShowSig,sizeof(kShowSig)}};
 // The screens' own OnUpdates (whatever their slots hold now, these are what the game put there).
 const unsigned char kRoomUpdateSig[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x18,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56};
@@ -117,9 +120,6 @@ WideString Wide(const wchar_t* s) noexcept {
     else{w.ptr=s;w.capacity=w.size;}
     return w;
 }
-// std::string "color" (in place: at most 15 characters).
-struct NarrowString { char text[16]; std::uint64_t size,capacity; };
-constexpr NarrowString kColourParam{{'c','o','l','o','r'},5,15};
 
 using UpdateFn=std::uint64_t(__fastcall*)(unsigned char*,void*);
 using GetInputFn=void*(__fastcall*)(unsigned char*,void*);
@@ -127,7 +127,6 @@ using FindIndexFn=int(__fastcall*)(unsigned char*,const WideString*);
 using AtFn=Shared*(__fastcall*)(unsigned char*,Shared*,int);
 using SetTextFn=void(__fastcall*)(void*,const wchar_t*);
 using FindFn=Shared*(__fastcall*)(unsigned char*,Shared*,const WideString*);
-using ModelParamFn=void(__fastcall*)(Shared*,const wchar_t*,const NarrowString*,const void*);
 using TextureSkinFn=Shared*(__fastcall*)(Shared*,Shared*);
 using SetTextureFn=bool(__fastcall*)(void*,const WideString*);
 
@@ -139,10 +138,14 @@ bool padOk=false;   // the game's pad table checked (else the keyboard alone)
 // changes). Invalid when the screen object changes and when the menu opens: everything written afresh.
 enum Slot : int { kSlotRoot, kSlotHead, kSlotHint, kSlotUnit, kSlotBox=kSlotUnit+kRows, kSlotText=kSlotBox+kRows,
                   kSlotNote=kSlotText+kRows, kSlotStatus=kSlotNote+kRows, kSlotCount=kSlotStatus+kStatusLines };
+enum class RootState : std::uint8_t { unknown, found, missing };
+// The texture-skinned elements: the panel, each row's two chips and its icon.
+enum TexSlot : int { kTexBack, kTexChip, kTexIcon=kTexChip+2*kRows, kTexCount=kTexIcon+kRows };
 struct Written {
     std::uint64_t key[kSlotCount];     // texts and shown flags: Hash
-    std::uint32_t chip[kRows][2];      // a chip's RGBA, 0 hidden
-    const wchar_t* icon[kRows];        // the icon's path, nullptr hidden
+    std::uint64_t tex[kTexCount];      // a textured element's (path, tint, shown): Hash
+    const wchar_t* bound[kTexCount];   // the texture it was given (paths are the constants room_ui_logic.h names)
+    RootState root;                    // whether this screen's layout has the menu (vcRoot)
     bool valid;
 };
 
@@ -221,6 +224,12 @@ std::size_t IniRead(void*,const wchar_t* key,wchar_t* out,std::size_t capacity) 
     return GetPrivateProfileStringW(L"VehicleCrew",key,L"",out,static_cast<DWORD>(capacity),path);
 }
 
+// --- The crews' kinds (what SupportVehicleCrewWeapon / SupportAircraftCrewWeapon say now) ---
+CrewKinds Kinds() noexcept {
+    const SupportConfig& c=SupportCfg();
+    return CrewKinds{c.vehicleCrew,c.aircraftCrew};
+}
+
 // --- The preview ---
 void HidePreview() noexcept {
     if(!st.previewShown)return;
@@ -229,7 +238,7 @@ void HidePreview() noexcept {
 }
 void FollowPreview(bool shown) noexcept {
     roompreview::PreviewSpec p{};
-    if(!shown || !PreviewFor(st.menu,&p)){HidePreview();return;}
+    if(!shown || !PreviewFor(st.menu,&p,Kinds())){HidePreview();return;}
     if(st.previewShown && SamePreview(p,st.preview))return;
     roompreview::ShowPreview(p);
     st.preview=p;st.previewShown=true;
@@ -237,41 +246,37 @@ void FollowPreview(bool shown) noexcept {
 
 // --- The menu's actions ---
 void Opened() noexcept {
-    st.specCount=CatalogUnits(SupportCallCount(),&SupportCallKey,&SupportCallSeats,&SupportCallName,st.specs,rm::kMostUnits);
-    rm::Load(st.menu,st.specCount ? st.specs : rm::kDefaultUnits,st.specCount ? st.specCount : rm::kDefaultUnitCount,&IniRead,nullptr);
+    st.specCount=SupportCallCount()>0 ?
+        CatalogUnits(SupportCallCount(),&SupportCallKey,&SupportCallSeats,&SupportCallName,st.specs,rm::kMostUnits) :
+        DefaultUnits(st.specs,rm::kMostUnits);
+    rm::Load(st.menu,st.specs,st.specCount,&IniRead,nullptr);
     st.menu.pageRows=kRows;
     st.saveNote[0]=0;st.saveWarn=false;
     st.written.valid=false;   // everything written afresh once
     int refused=0;
-    for(int i=0;i<st.menu.unitCount;++i)refused+=st.menu.unit[i].refused;
+    for(int i=0;i<st.menu.unitCount;++i)refused+=st.menu.unit[i].refused+st.menu.unit[i].crewRefused;
     Log("ROOMUI menu opened on the %s screen %p: %d units (%d values the parsers refused, shown stock)",st.room ? "room" : "HQ",
         st.self,st.menu.unitCount,refused);
 }
-// A unit written: what it holds now is what the ini holds.
-void MarkUnitSaved(rm::Unit& u) noexcept {
-    u.refused=false;
-    u.squadLoaded=u.squad;u.vehicleLoaded=u.vehicle;
-}
+SaveItem saveItems[2*rm::kMostUnits];   // rm::SaveSet::line's size   // one per line: a unit's preset / loadout and its crew's colours
 void Save() noexcept {
-    SaveItem items[rm::kMostUnits];
-    const int n=rm::CollectSave(st.menu,&saveSet) ? SaveItems(st.menu,saveSet,items,rm::kMostUnits) : -1;
+    const int n=rm::CollectSave(st.menu,&saveSet) ? SaveItems(st.menu,saveSet,saveItems,static_cast<int>(std::size(saveItems))) : -1;
     if(n<0){NoteSave(Tx::roomSaveRefused,nullptr,true);Log("ROOMUI save refused: a value would not read back as edited");return;}
-    int at=0;
-    for(int i=0;i<st.menu.unitCount && at<n;++i) {
-        rm::Unit& u=st.menu.unit[i];
-        if(!rm::UnitChanged(u))continue;
+    for(int at=0;at<n;++at) {
+        const SaveItem& item=saveItems[at];
         wchar_t why[160]{};
-        if(!SaveSupportLoadout(items[at].field,items[at].unit,items[at].value,why,std::size(why))) {
-            Log("ROOMUI save %ls=%ls failed: %ls (%d of %d written)",items[at].unit,items[at].value,why,at,n);
+        if(!SaveSupportLoadout(item.field,item.unit,item.value,why,std::size(why))) {
+            Log("ROOMUI save %ls (field %d)=%ls failed: %ls (%d of %d written)",item.unit,static_cast<int>(item.field),item.value,why,at,n);
             NoteSave(Tx::roomSaveFailed,why,true);
-            return;   // the units before it are written and marked; this one and the rest stay edited
+            return;   // the lines before it are written and marked; this one and the rest stay edited
         }
-        MarkUnitSaved(u);
-        ++at;
+        MarkItemSaved(st.menu,item);
     }
+    int units=0;
+    for(int at=0;at<n;++at)units+=at==0 || saveItems[at].unitIndex!=saveItems[at-1].unitIndex;
     rm::MarkSaved(st.menu);
     st.menu.open=true;   // stays up on the unit list: the generator's progress is shown
-    _snwprintf_s(st.saveNote,_TRUNCATE,hudtext::Tr(Tx::roomSaved),n);
+    _snwprintf_s(st.saveNote,_TRUNCATE,hudtext::Tr(Tx::roomSaved),units);
     st.saveWarn=false;
     wchar_t why[160]{};
     if(!StartVariantGeneration(why,std::size(why))) {
@@ -279,7 +284,7 @@ void Save() noexcept {
         NoteSave(Tx::roomGenStartFailed,why,true);
     }
     st.genAt=0;   // read its status now
-    Log("ROOMUI saved %d units, generator started",n);
+    Log("ROOMUI saved %d units (%d lines), generator started",units,n);
 }
 void Act(rm::Act a) noexcept {
     switch(a) {
@@ -312,12 +317,13 @@ std::uint64_t Hash(const wchar_t* text,std::uint32_t colour,bool shown) noexcept
     mix(colour);mix(shown ? 0x5A : 0xA5);
     return h;
 }
-// Every element unknown: the next frame writes each once.
+// Every element unknown: the next frame writes each once (the root looked up again).
 void Validate() noexcept {
     if(st.written.valid)return;
     for(auto& k:st.written.key)k=~0ull;
-    for(auto& c:st.written.chip)c[0]=c[1]=~0u;
-    for(auto& p:st.written.icon)p=L"?";   // no path the menu uses
+    for(auto& k:st.written.tex)k=~0ull;
+    for(auto& p:st.written.bound)p=nullptr;
+    st.written.root=RootState::unknown;
     st.written.valid=true;
 }
 // True (and remembered) when `key` is not what slot `i` was last given.
@@ -346,6 +352,7 @@ bool SetShown(unsigned char* self,const wchar_t* name,bool shown) noexcept {
     return found;
 }
 // A TextField's text, font colour and shown flag (the canonical call: index by name, then the TextField at it, 0x886800).
+// No text: the empty text (what SetText gives a null one: 0x86369F), as the layout file has it.
 void SetText(unsigned char* self,int slot,const wchar_t* name,const wchar_t* text,std::uint32_t rgba=kWhite) noexcept {
     const bool shown=text && *text;
     if(!Changed(slot,Hash(text,rgba,shown)))return;
@@ -361,7 +368,7 @@ void SetText(unsigned char* self,int slot,const wchar_t* name,const wchar_t* tex
         // SetText does nothing while the field has no font yet (+0x228 null: its first instruction): not written then.
         done=field.object && *reinterpret_cast<void* const*>(static_cast<unsigned char*>(field.object)+kTextFont);
         if(done) {
-            reinterpret_cast<SetTextFn>(image+kSetText)(field.object,shown ? text : L" ");
+            reinterpret_cast<SetTextFn>(image+kSetText)(field.object,shown ? text : L"");
             float colour[4];
             ChipColour(rgba,colour);
             std::memcpy(static_cast<unsigned char*>(field.object)+kFontColour,colour,sizeof(colour));
@@ -372,80 +379,91 @@ void SetText(unsigned char* self,int slot,const wchar_t* name,const wchar_t* tex
     Release(node);
     if(!done)st.written.key[slot]=~0ull;   // tried again next frame
 }
-// A ColorChipBox chip: the model skin's "color" (the HQ palette's call, 0x88014D) and its shown flag.
-void SetChip(unsigned char* self,int row,int which,const wchar_t* name,bool shown,std::uint32_t rgba) noexcept {
-    const std::uint32_t key=shown ? rgba : 0u;
-    if(st.written.chip[row][which]==key)return;
+// A texture-skinned element (the panel, a chip, an icon: the game's own icon call 0x8C4256: by name, its Skin_Texture
+// 0x953D80, the texture 0x7F63E0): `path` bound once, tinted `rgba` (both tint float4s), and shown. Not shown: the tint
+// transparent and the element hidden (a texture bound stays bound: nothing draws it). A texture the game cannot load
+// leaves the element hidden and is not tried again until what it should show changes.
+void SetTextured(unsigned char* self,int t,const wchar_t* name,const wchar_t* path,std::uint32_t rgba,bool shown) noexcept {
+    shown=shown && path;
+    const std::uint64_t key=shown ? Hash(path,rgba,true) : Hash(nullptr,0,false);
+    if(st.written.tex[t]==key)return;
     Shared c=Find(self,name);
-    bool done=c.object!=nullptr;
+    const bool found=c.object!=nullptr;
+    bool reached=!found,drawn=false;   // no such element: nothing to retry
     __try {
-        if(c.object && shown) {
-            ControlBlock* const ctrl=*reinterpret_cast<ControlBlock**>(static_cast<unsigned char*>(c.object)+kSkinCtrl);
-            if(ctrl) {
-                InterlockedIncrement(&ctrl->weaks);   // the callee's copy: it releases it
-                Shared skin{*reinterpret_cast<void**>(static_cast<unsigned char*>(c.object)+kSkinPtr),ctrl};
-                alignas(16) float colour[4];
-                ChipColour(rgba,colour);
-                reinterpret_cast<ModelParamFn>(image+kModelParam)(&skin,L"ColorChipBox",&kColourParam,colour);
-            } else done=false;
-        }
-        if(c.object)Show(c.object,shown && done);
-    } __except(EXCEPTION_EXECUTE_HANDLER){ done=false; }
-    Release(c);
-    if(done)st.written.chip[row][which]=key;
-}
-// A texture skin's image (the game's own icon call: 0x8C4256: by name, the Skin_Texture, 0x7F63E0) and its shown flag;
-// a texture the game cannot load leaves the icon hidden.
-void SetIcon(unsigned char* self,int row,const wchar_t* name,const wchar_t* path) noexcept {
-    if(st.written.icon[row]==path)return;
-    Shared c=Find(self,name);
-    bool loaded=false;
-    __try {
-        if(c.object && path && c.control) {
+        if(found && c.control) {
             InterlockedIncrement(&c.control->uses);   // the callee's by-value copy: it releases it
             Shared copy=c,tex{};
             reinterpret_cast<TextureSkinFn>(image+kTextureSkin)(&tex,&copy);
             if(tex.object) {
-                const WideString w=Wide(path);
-                loaded=reinterpret_cast<SetTextureFn>(image+kSetTexture)(tex.object,&w);
+                reached=true;
+                if(shown && st.written.bound[t]!=path) {
+                    const WideString w=Wide(path);
+                    if(reinterpret_cast<SetTextureFn>(image+kSetTexture)(tex.object,&w))st.written.bound[t]=path;
+                    else Log("ROOMUI texture %ls not loaded into %ls (the element stays hidden)",path,name);
+                }
+                drawn=shown && st.written.bound[t]==path;
+                float colour[4];
+                ChipColour(drawn ? rgba : 0u,colour);
+                unsigned char* const skin=static_cast<unsigned char*>(tex.object);
+                std::memcpy(skin+kTint,colour,sizeof(colour));
+                std::memcpy(skin+kTintFrom,colour,sizeof(colour));
             }
             Release(tex);
         }
-        if(c.object)Show(c.object,loaded);
-    } __except(EXCEPTION_EXECUTE_HANDLER){ loaded=false; }
-    if(path && !loaded && c.object)Log("ROOMUI icon %ls not loaded (the element stays hidden)",path);
+        if(found)Show(c.object,drawn);
+    } __except(EXCEPTION_EXECUTE_HANDLER){ reached=false; }
     Release(c);
-    if(c.object || !path)st.written.icon[row]=path;   // a failed load is not retried every frame
+    if(reached)st.written.tex[t]=key;
 }
 
+// Row `i` of the row column; nullptr: the row empty (every part emptied and hidden).
 void DrawRow(unsigned char* self,int i,const ViewRow* r) noexcept {
     wchar_t name[kNameMost],line[kLineMost];
     const Look l=LookOf(r);
     RowName(i,Part::box,name);
     if(Changed(kSlotBox+i,l.shown ? 1 : 2))SetShown(self,name,l.shown);
-    if(!l.shown)return;
-    RowLine(*r,line,kLineMost);
+    line[0]=0;
+    if(r)RowLine(*r,line,kLineMost);
     RowName(i,Part::text,name);SetText(self,kSlotText+i,name,line,RowColour(r));
-    NoteLine(*r,line,kLineMost);
+    line[0]=0;
+    if(r)NoteLine(*r,line,kLineMost);
     RowName(i,Part::note,name);SetText(self,kSlotNote+i,name,line,RowColour(r));
-    RowName(i,Part::primary,name);SetChip(self,i,0,name,l.primary,l.primaryRgba);
-    RowName(i,Part::secondary,name);SetChip(self,i,1,name,l.secondary,l.secondaryRgba);
-    RowName(i,Part::icon,name);SetIcon(self,i,name,l.icon);
+    RowName(i,Part::primary,name);SetTextured(self,kTexChip+2*i,name,kWhiteTexture,l.primaryRgba,l.primary);
+    RowName(i,Part::secondary,name);SetTextured(self,kTexChip+2*i+1,name,kWhiteTexture,l.secondaryRgba,l.secondary);
+    RowName(i,Part::icon,name);SetTextured(self,kTexIcon+i,name,l.icon,kIconColour,l.icon!=nullptr);
 }
-// The root's shown flag (the layout file shows it: hidden here from the screen's first frame on); false when this screen's
-// layout has no menu elements.
+// Everything the menu sets taken back: texts empty, tints transparent, elements hidden (the layout's own look: nothing).
+void ClearMenu(unsigned char* self) noexcept {
+    wchar_t name[kNameMost];
+    SetText(self,kSlotHead,kHeadName,nullptr);
+    SetText(self,kSlotHint,kHintName,nullptr);
+    SetTextured(self,kTexBack,kBackName,kWhiteTexture,kPanelColour,false);
+    for(int i=0;i<kRows;++i){UnitName(i,name);SetText(self,kSlotUnit+i,name,nullptr);DrawRow(self,i,nullptr);}
+    for(int i=0;i<kStatusLines;++i){StatusName(i,name);SetText(self,kSlotStatus+i,name,nullptr);}
+}
+// The root's shown flag, and while the menu is not shown everything it set taken back; false when this screen's layout
+// has no menu elements (not looked up again until the screen object changes or the menu opens).
 bool Draw(unsigned char* self,bool shown) noexcept {
     Validate();
-    if(!Changed(kSlotRoot,shown ? 1 : 2))return true;   // as it is: nothing to look up
-    if(SetShown(self,kRootName,shown))return true;
-    if(!st.missingLogged)Log("ROOMUI the %s screen's layout has no menu elements (Mods/UI not installed by the installer, or "
-                             "another mod's layout): the menu is not drawn there",st.room ? "room" : "HQ");
-    st.missingLogged=true;
-    st.written.key[kSlotRoot]=~0ull;   // looked for again next frame (a layout cannot gain them, but it is one lookup)
-    return false;
+    if(st.written.root==RootState::missing)return false;
+    if(Changed(kSlotRoot,shown ? 1 : 2) || st.written.root==RootState::unknown) {
+        if(!SetShown(self,kRootName,shown)) {
+            if(!st.missingLogged)Log("ROOMUI the %s screen's layout has no menu elements (Mods/UI not installed by the installer, "
+                                     "or another mod's layout): the menu is not drawn there",st.room ? "room" : "HQ");
+            st.missingLogged=true;
+            st.written.root=RootState::missing;
+            return false;
+        }
+        st.written.root=RootState::found;
+    }
+    if(!shown)ClearMenu(self);
+    return true;
 }
 void DrawMenu(unsigned char* self) noexcept {
-    const rm::View v=rm::Snapshot(st.menu);
+    rm::View v=rm::Snapshot(st.menu);
+    DressCrewRows(v,st.menu,Kinds());
+    SetTextured(self,kTexBack,kBackName,kWhiteTexture,kPanelColour,true);
     SetText(self,kSlotHead,kHeadName,Title(v.dirty));
     wchar_t name[kNameMost],line[kLineMost];
     for(int i=0;i<kRows;++i) {

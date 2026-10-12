@@ -1,7 +1,9 @@
 """The room / HQ menu screen's code checks (src/room_ui.cpp) against the real EDF.dll, read as a file (never loaded, the
 game never touched): every signature InstallRoomUi compares is the bytes at its address, both OnUpdate slots hold the
-stock functions in the file (the plugin reads the live value and chains whatever is there), and the offsets the comments
-name are in the instructions the signatures cover. An EDF.dll path as the argument, else the game gamedir finds; exit 77
+stock functions in the file (the plugin reads the live value and chains whatever is there), the offsets the comments
+name are in the instructions the signatures cover, and the texture skin the menu's layout uses draws nothing until a
+texture is bound (Skin_Texture's draw skips an element with no texture; a state with an empty path binds none): what
+keeps the screens stock without the plugin. An EDF.dll path as the argument, else the game gamedir finds; exit 77
 (skipped) without one."""
 from __future__ import annotations
 
@@ -57,13 +59,29 @@ for slot, stock in (('kRoomSlot', 'kRoomUpdate'), ('kHqSlot', 'kHqUpdate')):
     check(value == consts[stock], f'{slot} {consts[slot]:#x} holds {value:#x}, not {stock} {consts[stock]:#x}')
 # The offsets the code uses are the ones the checked instructions name.
 check(consts['kPadTable'] == 0x1188315 + 7 + struct.unpack_from('<i', arrays['kPadBaseSig'], 3)[0], 'the pad table is the loop base')
-check(arrays['kChipSiteSig'][3:7] == struct.pack('<I', consts['kSkinPtr']) and
-      arrays['kChipSiteSig'][14:18] == struct.pack('<I', consts['kSkinCtrl']), 'the skin weak_ptr offsets')
+check(arrays['kTintSig'][4:8] == struct.pack('<I', consts['kTint']) and
+      arrays['kTintFromSig'][4:8] == struct.pack('<I', consts['kTintFrom']) and
+      arrays['kTintInitSig'][2:6] == struct.pack('<I', consts['kTint']), 'the tint offsets (+0xF0, +0x100)')
+check('kModelParam' not in consts and 'L"ColorChipBox"' not in src and '0x824D40' not in src,
+      'the model skin call is gone (the chips are texture skins now)')
 check(arrays['kFontColourSig'][2:6] == struct.pack('<I', consts['kFontColour']), 'the font colour offset')
 check(arrays['kShowSig'][2:6] == struct.pack('<I', consts['kShown']), 'the shown flag offset')
 check(arrays['kSetTextSig'][3:7] == struct.pack('<I', consts['kTextFont']), 'the font test SetText starts with is kTextFont')
-ref = 0x880179 + 4 + 5   # call 0x824D40 at the end of the chip site
-check(ref + struct.unpack_from('<i', img, 0x88017E)[0] == consts['kModelParam'], 'the chip site calls the model parameter setter')
-text = 0x880172 + 7 + struct.unpack_from('<i', img, 0x880175)[0]
-check(img[text:text + 26].decode('utf-16le') == 'ColorChipBox\0', 'the chip site names L"ColorChipBox"')
+# Skin_Texture (vtable 0x17F6228): slot 3 is the draw the tint signatures sit in; its constructor sets the tint.
+vt = 0x17F6228
+check(struct.unpack_from('<Q', img, vt + 3 * 8)[0] - base == 0x7F7040, 'Skin_Texture slot 3 is the draw 0x7F7040')
+check(0x7F7040 < 0x7F707F < 0x7F70FC < 0x7F7190, 'the tint reads are in the draw, before its texture test')
+# The draw: rax = [rdi+0A0h] (0x7F7110); test rax,rax / je out; cmp qword [rax],0 / je out (0x7F7190): no texture, no draw.
+check(img[0x7F7110:0x7F7117] == bytes.fromhex('488b87a0000000'), 'the draw reads the bound texture (+0xA0)')
+check(img[0x7F7190:0x7F7193] == bytes.fromhex('4885c0') and img[0x7F7193:0x7F7195] == bytes.fromhex('0f84') and
+      img[0x7F7199:0x7F719D] == bytes.fromhex('48833800') and img[0x7F719D:0x7F719F] == bytes.fromhex('0f84'),
+      'no texture bound: the draw returns before drawing')
+out = 0x7F7195 + 4 + struct.unpack_from('<i', img, 0x7F7195)[0]
+check(out == 0x7F725A and out == 0x7F719F + 4 + struct.unpack_from('<i', img, 0x7F719F)[0], 'both skip to the epilogue')
+# The state change (slot 4, 0x7F7270): a state whose path is empty never calls 0x7F63E0 (cmp qword [rsp+30h],0 / je).
+check(struct.unpack_from('<Q', img, vt + 4 * 8)[0] - base == 0x7F7270, 'Skin_Texture slot 4 is the state change 0x7F7270')
+check(img[0x7F73E3:0x7F73E9] == bytes.fromhex('48837c243000') and img[0x7F73E9] == 0x74 and
+      0x7F73F3 + 5 == 0x7F73F8 and img[0x7F73F3] == 0xE8 and
+      0x7F73F8 + struct.unpack_from('<i', img, 0x7F73F4)[0] == consts['kSetTexture'],
+      'an empty state path: the texture call 0x7F63E0 is jumped over')
 print(f'room_ui_sig_audit: {checks} checks passed')

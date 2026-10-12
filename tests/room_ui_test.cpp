@@ -2,7 +2,9 @@
 // the layout generator's spelling), the keyboard / pad mapping (the toggle combination's buttons do nothing else while
 // held, nothing while the game is behind), the input gate (taken while open, and after closing until every menu key is up),
 // the covered-screen plan, the rows' looks (chips only for a set colour, icons per kind / store / gun), the lines in each
-// language, the catalog's units, the preview's soldier and the save's (field, unit, value) pairing. Exit code 1 when one fails.
+// language, the catalog's units (squads, vehicles, crews, the default and the mission crews), the crew rows (kind, the
+// default's colours worn, lines, chips, icon), the preview's soldier or crew member and the save's (field, unit, value)
+// pairing including a vehicle and its crew written for one unit. Exit code 1 when one fails.
 // cmake --build build --target room_ui_test && build\room_ui_test.exe
 #include "../src/room_ui_logic.h"
 #include <cstdio>
@@ -233,14 +235,93 @@ void Catalog() {
     hudtext::Use(hudtext::Lang::zhCN);
     roommenu::UnitSpec specs[roommenu::kMostUnits];
     const int n=CatalogUnits(10,KeyAt,SeatsAt,NameAt,specs,roommenu::kMostUnits);
-    Expect(n==7,"seats or a vehicle key: 7 of 10 (no gunship, empty transport, rescue)");
-    Expect(n==7 && Same(specs[0].key,L"STRIKE") && specs[0].seats==0 && Same(specs[0].label,L"对地攻击机·守点"),"jet entry");
-    Expect(n==7 && Same(specs[2].key,L"SQUAD") && specs[2].seats==12,"squad entry");
-    Expect(n==7 && Same(specs[6].key,L"TRANSPORT_CREWED") && specs[6].seats==4,"crewed APC riders");
+    Expect(n==12,"every entry with seats, a vehicle or a crew (10), then the default and the mission crews");
+    Expect(n==12 && Same(specs[0].key,L"STRIKE") && specs[0].seats==0 && specs[0].crew && Same(specs[0].label,L"对地攻击机·守点"),"jet entry: a crew");
+    Expect(n==12 && Same(specs[2].key,L"GUNSHIP") && specs[2].crew && Same(specs[2].label,L"名字"),"gunship: a crew, the catalog's name");
+    Expect(n==12 && Same(specs[3].key,L"SQUAD") && specs[3].seats==12 && !specs[3].crew,"squad entry: no crew (HasCrew)");
+    Expect(n==12 && !specs[4].crew,"platoon: no crew");
+    Expect(n==12 && Same(specs[7].key,L"TRANSPORT_CREWED") && specs[7].seats==4 && specs[7].crew,"crewed APC: riders and a crew");
+    Expect(n==12 && Same(specs[10].key,L"") && specs[10].crew && Same(specs[10].label,hudtext::Tr(Tx::roomUnitCrewDefault)),"the default crew");
+    Expect(n==12 && Same(specs[11].key,kCrewMissionKey) && specs[11].crew && Same(specs[11].label,hudtext::Tr(Tx::roomUnitCrewMission)),"the mission crews");
     Expect(CatalogUnits(10,KeyAt,SeatsAt,NameAt,specs,3)==3,"capacity kept");
     roommenu::Menu m;
     roommenu::Load(m,specs,n,nullptr,nullptr);
-    Expect(m.unitCount==7,"the menu loads every catalog unit");
+    Expect(m.unitCount==13,"units: 2 jets, gunship crew, 2 squads, 2 tanks, APC riders + APC crew, 2 crews, default, mission");
+    int crews=0,vehiclesWithCrew=0;
+    for(int i=0;i<m.unitCount;++i){crews+=roommenu::IsCrewUnit(m.unit[i]);vehiclesWithCrew+=m.unit[i].kind==roommenu::UnitKind::vehicle && m.unit[i].hasCrew;}
+    Expect(crews==6 && vehiclesWithCrew==4,"6 crew units; every vehicle has its crew row");
+    // Without a live catalog: room_menu.h's list, labelled in the HUD's language.
+    hudtext::Use(hudtext::Lang::en);
+    const int d=DefaultUnits(specs,roommenu::kMostUnits);
+    Expect(d==roommenu::kDefaultUnitCount && Same(specs[0].label,L"Infantry squad") && Same(specs[d-2].label,L"All support crews (default)") &&
+           Same(specs[d-1].label,L"Mission vehicles' support crews") && specs[d-1].crew,"the default list relabelled");
+    // The real catalog's size fits the menu (support_dispatch.cpp: 37 entries, 2 crewless squads, 10 vehicles).
+    Expect(37+2<=roommenu::kMostUnits && 8+10+(37-2-10)+2<=roommenu::kMostUnits,"37 entries: specs and units fit kMostUnits");
+}
+
+// A crew row: its kind from the crew settings, the default's colours shown when inheriting, its lines, chips and icon.
+void Crews() {
+    const CrewKinds kinds{SupportWeapon::sniper,SupportWeapon::shotgun};
+    Expect(CrewKindOf(L"TANK_CREWED",kinds)==SupportWeapon::sniper && CrewKindOf(L"transport_delivery",kinds)==SupportWeapon::sniper,
+           "a ground vehicle's crew: SupportVehicleCrewWeapon");
+    Expect(CrewKindOf(L"STRIKE",kinds)==SupportWeapon::shotgun && CrewKindOf(L"GUNSHIP",kinds)==SupportWeapon::shotgun,
+           "an aircraft's crew: SupportAircraftCrewWeapon");
+    Expect(CrewKindOf(L"MISSION",kinds)==SupportWeapon::rifle,"the mission crews: riflemen");
+    Expect(CrewKindOf(L"",kinds)==SupportWeapon::sniper,"the default's row: the ground kind");
+    roommenu::Menu m;
+    roommenu::Load(m,roommenu::kDefaultUnits,roommenu::kDefaultUnitCount,nullptr,nullptr);
+    int tank=-1,def=-1,mission=-1;
+    for(int i=0;i<m.unitCount;++i) {
+        if(Same(m.unit[i].key,L"TANK_CREWED"))tank=i;
+        if(Same(m.unit[i].key,L""))def=i;
+        if(Same(m.unit[i].key,kCrewMissionKey))mission=i;
+    }
+    Expect(tank>=0 && def>=0 && mission>=0,"tank, default, mission units");
+    m.unit[def].crew=CrewColour{true,SupportLook{0x112233,0x445566}};
+    m.open=true;m.unitAt=tank;m.level=roommenu::Level::rows;m.rowAt=roommenu::CrewRow(m.unit[tank]);
+    roommenu::View v=roommenu::Snapshot(m);
+    DressCrewRows(v,m,kinds);
+    const ViewRow* r=nullptr;
+    for(int i=0;i<v.rows.count;++i)if(v.rows.row[i].text==RowText::crew)r=&v.rows.row[i];
+    Expect(r && r->inherit && r->kind==static_cast<int>(SupportWeapon::sniper) && r->soldierClass==0,"the tank's crew row: inherits, a sniper");
+    Expect(r && r->primary==0x112233FFu && r->secondary==0x445566FFu,"inheriting: the default's colours shown");
+    Look l=LookOf(r);
+    Expect(l.primary && l.secondary && l.primaryRgba==0x112233FFu && Same(l.icon,L"app:/weapon/icon/srMMF.dds"),"crew chips and the kind's icon");
+    wchar_t out[kLineMost];
+    for(hudtext::Lang lang:{hudtext::Lang::en,hudtext::Lang::zhCN,hudtext::Lang::zhTW,hudtext::Lang::ja}) {
+        hudtext::Use(lang);
+        if(!r)break;
+        RowLine(*r,out,kLineMost);
+        Expect(Has(out,KindLabel(r->kind)) && std::wcslen(out)>std::wcslen(KindLabel(r->kind))+4,"crew line: names the kind");
+        NoteLine(*r,out,kLineMost);
+        Expect(Same(out,hudtext::Tr(Tx::roomCrewDefault)),"inheriting: the note says the default");
+        ViewRow u;u.text=RowText::crewUnit;u.key=L"GUNSHIP";u.label=L"Gunship";
+        UnitLine(u,out,kLineMost);
+        wchar_t want[kLineMost];_snwprintf_s(want,_TRUNCATE,hudtext::Tr(Tx::roomUnitCrewOf),L"Gunship");
+        Expect(Has(out,want),"a catalog entry's crew unit: \"<label>: crew\"");
+        u.key=L"";u.label=hudtext::Tr(Tx::roomUnitCrewDefault);UnitLine(u,out,kLineMost);
+        Expect(Has(out,hudtext::Tr(Tx::roomUnitCrewDefault)) && !Has(out,L"Gunship"),"the default's unit: its own label");
+        u.key=kCrewMissionKey;u.label=hudtext::Tr(Tx::roomUnitCrewMission);u.changed=true;UnitLine(u,out,kLineMost);
+        Expect(Has(out,hudtext::Tr(Tx::roomUnitCrewMission)),"the mission crews' unit, edited");
+    }
+    // Set and both stock (X): no chips, stock noted; editing names the colour field.
+    m.unit[tank].crew=CrewColour{true,SupportLook{}};
+    v=roommenu::Snapshot(m);DressCrewRows(v,m,kinds);
+    r=nullptr;
+    for(int i=0;i<v.rows.count;++i)if(v.rows.row[i].text==RowText::crew)r=&v.rows.row[i];
+    l=LookOf(r);
+    Expect(r && !r->inherit && !l.primary && !l.secondary && l.icon,"X: no chips, the icon stays");
+    hudtext::Use(hudtext::Lang::en);
+    if(r){NoteLine(*r,out,kLineMost);Expect(Same(out,hudtext::Tr(Tx::roomStockColour)),"X: stock noted");}
+    m.level=roommenu::Level::fields;m.fieldAt=1;
+    v=roommenu::Snapshot(m);DressCrewRows(v,m,kinds);
+    for(int i=0;i<v.rows.count;++i)if(v.rows.row[i].text==RowText::crew){NoteLine(v.rows.row[i],out,kLineMost);Expect(Same(out,hudtext::Tr(Tx::roomFieldSecondary)),"editing the crew's colour 2");}
+    // The default's own row: not set is stock, not "as the default".
+    m.unitAt=def;m.level=roommenu::Level::rows;m.rowAt=0;m.unit[def].crew=CrewColour{};
+    v=roommenu::Snapshot(m);DressCrewRows(v,m,kinds);
+    Expect(v.rows.count==1 && v.rows.row[0].text==RowText::crew && v.rows.row[0].inherit && !v.rows.row[0].primary,"the default's row: stock");
+    NoteLine(v.rows.row[0],out,kLineMost);
+    Expect(Same(out,hudtext::Tr(Tx::roomStockColour)),"the default's row noted stock");
 }
 
 void Preview() {
@@ -262,7 +343,28 @@ void Preview() {
     Expect(SamePreview(p,q),"same spec");
     q.look.secondary=0xFFFFFF;Expect(!SamePreview(p,q),"another colour");
     m.unitAt=1;m.rowAt=0;
-    Expect(!PreviewFor(m,&p),"a vehicle: none");
+    Expect(!PreviewFor(m,&p),"a vehicle's gun row: none");
+    // A crew row: the crew's kind, a member, in the colours it wears (its own, else the default's).
+    roommenu::UnitSpec crewed[]={{L"TANK_CREWED",L"t",0,true},{L"STRIKE",L"j",0,true},{L"",L"d",0,true},{kCrewMissionKey,L"m",0,true}};
+    roommenu::Load(m,crewed,4,nullptr,nullptr);
+    m.open=true;m.level=roommenu::Level::rows;
+    const CrewKinds kinds{SupportWeapon::flame,SupportWeapon::rocket};
+    m.unit[2].crew=CrewColour{true,SupportLook{0xABCDEF,kStockColour}};
+    m.unitAt=0;m.rowAt=roommenu::CrewRow(m.unit[0]);
+    Expect(m.rowAt==1 && PreviewFor(m,&p,kinds) && p.kind==SupportWeapon::flame && !p.leader && p.look.primary==0xABCDEF,
+           "the tank's crew: a flamethrower member in the default's colours");
+    m.unit[0].crew=CrewColour{true,SupportLook{0x010203,0x040506}};
+    Expect(PreviewFor(m,&p,kinds) && p.look.primary==0x010203 && p.look.secondary==0x040506,"its own colours once set");
+    m.unit[0].crew=CrewColour{true,SupportLook{}};
+    Expect(PreviewFor(m,&p,kinds) && !p.look.On(),"X: stock, not the default");
+    m.unitAt=1;m.rowAt=roommenu::CrewRow(m.unit[1]);
+    Expect(PreviewFor(m,&p,kinds) && p.kind==SupportWeapon::rocket,"the jet's crew: the aircraft kind");
+    m.unitAt=1;m.rowAt=0;
+    Expect(!PreviewFor(m,&p,kinds),"the jet's guns row: none");
+    m.unitAt=2;m.rowAt=0;
+    Expect(PreviewFor(m,&p,kinds) && p.kind==SupportWeapon::flame && p.look.primary==0xABCDEF,"the default's own row");
+    m.unitAt=3;m.rowAt=0;
+    Expect(PreviewFor(m,&p,kinds) && p.kind==SupportWeapon::rifle && !p.leader && p.look.primary==0xABCDEF,"the mission crews: a rifle member");
 }
 
 void Save() {
@@ -285,6 +387,53 @@ void Save() {
     roommenu::CollectSave(m,&set);
     wcscpy_s(set.line[0].key,L"SupportPreset_PLATOON");
     Expect(SaveItems(m,set,items,roommenu::kMostUnits)==-1,"another unit's key does not pair");
+
+    // One unit, two lines: the tank's loadout and its crew's colours; then a crew alone, the default and the mission crews.
+    roommenu::Load(m,roommenu::kDefaultUnits,roommenu::kDefaultUnitCount,nullptr,nullptr);
+    int def=-1,mission=-1,heliCrew=-1;
+    for(int i=0;i<m.unitCount;++i) {
+        if(Same(m.unit[i].key,L"TANK_CREWED"))tank=i;
+        if(Same(m.unit[i].key,L""))def=i;
+        if(Same(m.unit[i].key,kCrewMissionKey))mission=i;
+        if(Same(m.unit[i].key,L"SQUAD_HELI") && roommenu::IsCrewUnit(m.unit[i]))heliCrew=i;
+    }
+    Expect(def>=0 && mission>=0 && heliCrew>=0,"the crew units");
+    m.unit[tank].vehicle.body=VehicleBody::tank;m.unit[tank].vehicle.apGun=true;
+    m.unit[tank].crew=CrewColour{true,SupportLook{0x1E3A8A,0xFFFFFF}};
+    m.unit[heliCrew].crew=CrewColour{true,SupportLook{}};
+    m.unit[def].crew=CrewColour{true,SupportLook{0xC0272D,kStockColour}};
+    m.unit[mission].crew=CrewColour{true,SupportLook{kStockColour,0x101010}};
+    Expect(roommenu::CollectSave(m,&set) && set.count==5,"five lines: the heli crew, the tank twice, the default, the mission crews");
+    SaveItem many[2*roommenu::kMostUnits];
+    const int k=SaveItems(m,set,many,2*roommenu::kMostUnits);
+    Expect(k==5,"paired");
+    Expect(k==5 && many[0].field==LoadoutField::crew && Same(many[0].unit,L"SQUAD_HELI") && Same(many[0].value,L"X") &&
+           many[0].unitIndex==heliCrew,"the heli crew (units in menu order): X");
+    Expect(k==5 && many[1].field==LoadoutField::vehicle && Same(many[1].unit,L"TANK_CREWED") && Same(many[1].value,L"AP") &&
+           many[1].unitIndex==tank,"the tank's loadout");
+    Expect(k==5 && many[2].field==LoadoutField::crew && Same(many[2].unit,L"TANK_CREWED") && Same(many[2].value,L"1E3A8A:FFFFFF") &&
+           many[2].unitIndex==tank,"then the same unit's crew");
+    Expect(k==5 && many[3].field==LoadoutField::crew && Same(many[3].unit,L"") && Same(many[3].value,L"C0272D") &&
+           LoadoutKey(many[3].field,many[3].unit)==L"SupportCrewColour","the default: SupportCrewColour");
+    Expect(k==5 && Same(many[4].unit,kCrewMissionKey) && Same(many[4].value,L"X:101010") &&
+           LoadoutKey(many[4].field,many[4].unit)==L"SupportCrewColour_MISSION","the mission crews");
+    // Every item's value is one SaveSupportLoadout accepts (loadout_ini.h, the writer's own check).
+    for(int i=0;i<k;++i){wchar_t why[80];Expect(ValidLoadoutValue(many[i].field,many[i].unit,12,many[i].value,why,80),"each value valid for its field");}
+    // Written one by one (room_ui.cpp Save): after the first line only the tank's loadout is saved, its crew still edited.
+    MarkItemSaved(m,many[0]);
+    Expect(!roommenu::UnitChanged(m.unit[heliCrew]) && roommenu::UnitChanged(m.unit[tank]),"the heli crew written, the tank not yet");
+    MarkItemSaved(m,many[1]);
+    Expect(!roommenu::PartChanged(m.unit[tank]) && roommenu::CrewChanged(m.unit[tank]),"the loadout written, the crew still to go");
+    MarkItemSaved(m,many[2]);
+    Expect(!roommenu::UnitChanged(m.unit[tank]),"both written: the tank unchanged");
+    for(int i=3;i<k;++i)MarkItemSaved(m,many[i]);
+    Expect(!roommenu::Dirty(m),"all written: nothing left to save");
+    // A crew alone (its vehicle unchanged) is one crew line; the crew's key for its unit only.
+    m.unit[tank].crew=CrewColour{};
+    Expect(roommenu::CollectSave(m,&set) && set.count==1 && SaveItems(m,set,many,2*roommenu::kMostUnits)==1 &&
+           many[0].field==LoadoutField::crew && Same(many[0].value,L""),"a crew put back to the default: one empty crew line");
+    wcscpy_s(set.line[0].key,L"SupportVehicle_TANK_CREWED");
+    Expect(SaveItems(m,set,many,2*roommenu::kMostUnits)==-1,"a crew line under the vehicle's key does not pair");
 }
 }  // namespace
 
@@ -297,6 +446,7 @@ int main() {
     Looks();
     Texts();
     Catalog();
+    Crews();
     Preview();
     Save();
     std::printf("room_ui: %d checks, %d failed\n",checks,failures);

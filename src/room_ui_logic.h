@@ -4,7 +4,10 @@
 //   input       the keyboard and the XInput pad mapped onto room_menu.h Keys; the toggle's pad combination
 //   gate        when the screen's own input is taken away (the menu open, and after it closes until every menu key is up:
 //               the key that closed it must not reach the room as a cancel)
-//   looks       per row: which of text / chips / icon / note show, the chips' RGBA, the icon's path (docs/room-ui-re.md §3)
+//   looks       per row: which of text / chips / icon / note show, the chips' RGBA, the icon's path (docs/room-ui-re.md §3);
+//               the panel and the chips are the layout's texture skins showing kWhiteTexture tinted (nothing without the
+//               plugin: tools/room_layout.py)
+//   crews       a crew row's soldier kind (SupportVehicleCrewWeapon / SupportAircraftCrewWeapon), the colours it wears
 //   texts       every line in the HUD's language (hudtext.h)
 //   catalog     the units the menu lists, from the live support catalog (support_call.h)
 //   preview     which soldier the 3D view shows (room_preview.h)
@@ -39,6 +42,11 @@ inline constexpr const wchar_t* kRootName=L"vcRoot";
 inline constexpr const wchar_t* kBackName=L"vcBack";
 inline constexpr const wchar_t* kHeadName=L"vcHead";
 inline constexpr const wchar_t* kHintName=L"vcHint";
+// The plain white texture the panel and the chips show, tinted (tools/room_layout.py WHITE: written to Mods/UI by the
+// installer; Root.cpk has no plain one). Without the plugin nothing binds it: the skins draw nothing.
+inline constexpr const wchar_t* kWhiteTexture=L"app:/UI/EDF6VC_WHITE.dds";
+inline constexpr std::uint32_t kPanelColour=0x0C1622D8u;   // the panel: dark blue-grey, 85 % opaque (RGBA)
+inline constexpr std::uint32_t kIconColour=0xFFFFFFFFu;    // an icon as drawn
 enum class Part : wchar_t { box=0, text=L'T', primary=L'A', secondary=L'B', icon=L'I', note=L'N' };
 namespace detail {
 inline bool Name(wchar_t (&out)[kNameMost],wchar_t kind,int i,int digits,wchar_t part) noexcept {
@@ -167,7 +175,7 @@ inline Look LookOf(const ViewRow* r) noexcept {
     Look l;
     if(!r)return l;
     l.shown=true;
-    if(r->text==RowText::soldier) {
+    if(r->text==RowText::soldier || r->text==RowText::crew) {
         l.primary=r->primary!=0;l.secondary=r->secondary!=0;
         l.primaryRgba=r->primary;l.secondaryRgba=r->secondary;
         l.icon=KindIcon(r->kind);
@@ -202,6 +210,8 @@ inline constexpr UnitText kUnitTexts[]={
     {L"MULTIROLE",Tx::roomUnitMultirole},{L"MULTIROLE_F",Tx::roomUnitMultiroleFollow}};
 // The unit's label: the table's in the HUD's language, else `fallback` (the catalog's own name).
 inline const wchar_t* UnitLabel(const wchar_t* key,const wchar_t* fallback) noexcept {
+    if(key && !*key)return hudtext::Tr(Tx::roomUnitCrewDefault);     // SupportCrewColour
+    if(key && !_wcsicmp(key,kCrewMissionKey))return hudtext::Tr(Tx::roomUnitCrewMission);
     for(const auto& u:kUnitTexts)if(key && !_wcsicmp(u.key,key))return hudtext::Tr(u.text);
     return fallback ? fallback : key;
 }
@@ -231,12 +241,17 @@ template<class... A> void Put(wchar_t* out,std::size_t n,const wchar_t* format,A
 }
 }  // namespace detail
 // The unit column's line: the cursor, the label, edited / refused.
+// A crew unit of a catalog entry (not the default's or the mission crews': their labels say it) reads "<label>: crew".
+inline bool CrewOfEntry(const ViewRow& r) noexcept {
+    return r.text==RowText::crewUnit && r.key && *r.key && _wcsicmp(r.key,kCrewMissionKey)!=0;
+}
 inline void UnitLine(const ViewRow& r,wchar_t* out,std::size_t n) noexcept {
-    wchar_t label[kLineMost];
+    wchar_t label[kLineMost],named[kLineMost];
+    detail::Put(named,kLineMost,CrewOfEntry(r) ? hudtext::Tr(Tx::roomUnitCrewOf) : L"%ls",r.label ? r.label : L"?");
     if(r.text==RowText::save)detail::Put(label,kLineMost,L"%ls",hudtext::Tr(Tx::roomSave));
-    else if(r.refused && !r.changed)detail::Put(label,kLineMost,hudtext::Tr(Tx::roomUnitRefused),r.label ? r.label : L"?");
-    else if(r.changed)detail::Put(label,kLineMost,hudtext::Tr(Tx::roomUnitEdited),r.label ? r.label : L"?");
-    else detail::Put(label,kLineMost,L"%ls",r.label ? r.label : L"?");
+    else if(r.refused && !r.changed)detail::Put(label,kLineMost,hudtext::Tr(Tx::roomUnitRefused),named);
+    else if(r.changed)detail::Put(label,kLineMost,hudtext::Tr(Tx::roomUnitEdited),named);
+    else detail::Put(label,kLineMost,L"%ls",named);
     detail::Put(out,n,L"%ls%ls",r.cursor ? kCursor : kNoCursor,label);
 }
 // The row column's text: soldier / gun / pylon / the stock rows.
@@ -252,17 +267,25 @@ inline void RowLine(const ViewRow& r,wchar_t* out,std::size_t n) noexcept {
     case RowText::guns: detail::Put(body,kLineMost,L"%ls",hudtext::Tr(Tx::roomGuns)); break;
     case RowText::ownLoad: detail::Put(body,kLineMost,L"%ls",hudtext::Tr(Tx::roomOwnLoad)); break;
     case RowText::stockVehicle: detail::Put(body,kLineMost,L"%ls",hudtext::Tr(Tx::roomStockVehicle)); break;
+    case RowText::crew: detail::Put(body,kLineMost,hudtext::Tr(Tx::roomCrewRow),KindLabel(r.kind)); break;
     default: body[0]=0; break;
     }
     detail::Put(out,n,L"%ls%ls",r.cursor ? kCursor : kNoCursor,body);
 }
-// The note beside a row: the field being changed, else a pylon's rounds or a soldier's stock colours; empty for none.
+// The note beside a row: the field being changed, else a pylon's rounds, a soldier's or a crew's stock colours, a crew
+// wearing the default's; empty for none.
 inline void NoteLine(const ViewRow& r,wchar_t* out,std::size_t n) noexcept {
     if(!out || !n)return;
     out[0]=0;
     if(r.editing && r.text==RowText::soldier) {
         const Tx t=r.field==0 ? Tx::roomFieldKind : r.field==1 ? Tx::roomFieldPrimary : Tx::roomFieldSecondary;
         detail::Put(out,n,L"%ls",hudtext::Tr(t));
+    } else if(r.editing && r.text==RowText::crew) {
+        detail::Put(out,n,L"%ls",hudtext::Tr(r.field==0 ? Tx::roomFieldPrimary : Tx::roomFieldSecondary));
+    } else if(r.text==RowText::crew) {
+        const bool ownDefault=!r.key || !*r.key;   // the default's own row: not set is stock
+        if(r.inherit && !ownDefault)detail::Put(out,n,L"%ls",hudtext::Tr(Tx::roomCrewDefault));
+        else if(!r.primary && !r.secondary)detail::Put(out,n,L"%ls",hudtext::Tr(Tx::roomStockColour));
     } else if(r.editing && r.text==RowText::pylon) {
         if(r.field==1)detail::Put(out,n,kFieldRounds,r.rounds);
         else detail::Put(out,n,L"%ls",hudtext::Tr(Tx::roomFieldStore));
@@ -310,28 +333,77 @@ inline Status ComposeStatus(bool clientNote,const wchar_t* saveNote,bool saveWar
     return s;
 }
 
-// --- The units: the live catalog's entries a preset or a loadout belongs to ---
+// --- The units: the live catalog's entries a preset, a loadout or a crew's colours belong to ---
 using KeyOf=const wchar_t*(*)(int index) noexcept;
 using SeatsOf=int(*)(int index) noexcept;
 using NameOf=const wchar_t*(*)(int index) noexcept;
-// Every catalog entry with seats (a squad: SupportPreset_<key>) or a vehicle key (SupportVehicle_<key>), in catalog
-// order, labelled in the HUD's language. Returns how many (at most `capacity`).
+// Every catalog entry with seats (a squad: SupportPreset_<key>), a vehicle key (SupportVehicle_<key>) or a crew
+// (support_loadout.h HasCrew: SupportCrewColour_<key>), in catalog order, labelled in the HUD's language; then the
+// default every crew wears (key "") and the mission vehicles' support crews (kCrewMissionKey), as room_menu.h
+// kDefaultUnits ends. Returns how many (at most `capacity`).
 inline int CatalogUnits(int count,KeyOf keyOf,SeatsOf seatsOf,NameOf nameOf,roommenu::UnitSpec* out,int capacity) noexcept {
     int n=0;
     for(int i=0;keyOf && i<count && n<capacity;++i) {
         const wchar_t* key=keyOf(i);
-        if(!key)continue;
+        if(!key || !*key)continue;
         const int seats=seatsOf ? seatsOf(i) : 0;
-        if(seats<=0 && VehicleBodyOfKey(key)==VehicleBody::none)continue;
-        out[n++]=roommenu::UnitSpec{key,UnitLabel(key,nameOf ? nameOf(i) : key),seats>0 ? seats : 0};
+        const bool crew=HasCrew(key);
+        if(seats<=0 && VehicleBodyOfKey(key)==VehicleBody::none && !crew)continue;
+        out[n++]=roommenu::UnitSpec{key,UnitLabel(key,nameOf ? nameOf(i) : key),seats>0 ? seats : 0,crew};
+    }
+    for(const wchar_t* key:{L"",kCrewMissionKey})
+        if(n<capacity)out[n++]=roommenu::UnitSpec{key,UnitLabel(key,key),0,true};
+    return n;
+}
+// room_menu.h kDefaultUnits (the menu without a live catalog) labelled in the HUD's language. Returns how many.
+inline int DefaultUnits(roommenu::UnitSpec* out,int capacity) noexcept {
+    int n=0;
+    for(int i=0;i<roommenu::kDefaultUnitCount && n<capacity;++i) {
+        out[n]=roommenu::kDefaultUnits[i];
+        out[n].label=UnitLabel(out[n].key,out[n].label);
+        ++n;
     }
     return n;
 }
 
-// --- The preview: the soldier under the cursor, in a squad's rows / fields ---
-inline bool PreviewFor(const roommenu::Menu& m,roompreview::PreviewSpec* out) noexcept {
+// --- Crews: the soldier a crew row stands for and the colours it wears ---
+// What the real crews carry (support_config.h SupportVehicleCrewWeapon / SupportAircraftCrewWeapon).
+struct CrewKinds { SupportWeapon ground=SupportWeapon::rifle,air=SupportWeapon::rifle; };
+// The crew of `key`: a ground vehicle's (support_loadout.h IsGroundCrewKey) the ground kind, every other entry's the air
+// kind; the mission vehicles' support crews are always riflemen (mission_crew_support.cpp: N601_COMMON_RANGER_AF[_LEADER]);
+// the default's row ("" : every crew) shows the ground kind.
+inline SupportWeapon CrewKindOf(const wchar_t* key,const CrewKinds& k) noexcept {
+    if(key && !_wcsicmp(key,kCrewMissionKey))return SupportWeapon::rifle;
+    if(!key || !*key || IsGroundCrewKey(key))return k.ground;
+    return k.air;
+}
+// The default every crew without its own colours wears (the menu's working copy of SupportCrewColour); not set: stock.
+inline CrewColour DefaultCrew(const roommenu::Menu& m) noexcept {
+    for(int i=0;i<m.unitCount;++i)
+        if(roommenu::IsCrewUnit(m.unit[i]) && m.unit[i].key && !*m.unit[i].key)return m.unit[i].crew;
+    return CrewColour{};
+}
+// The snapshot's crew rows dressed for drawing: the crew's kind, and a row wearing the default its colours (the chips
+// show what the crew will wear; `inherit` stays set, the note says so).
+inline void DressCrewRows(roommenu::View& v,const roommenu::Menu& m,const CrewKinds& k) noexcept {
+    const SupportLook fallback=CrewLookOf(DefaultCrew(m),CrewColour{});
+    for(int i=0;i<v.rows.count;++i) {
+        ViewRow& r=v.rows.row[i];
+        if(r.text!=RowText::crew)continue;
+        const SupportWeapon kind=CrewKindOf(r.key,k);
+        r.kind=static_cast<int>(kind);r.soldierClass=SupportSoldierClass(kind);
+        if(r.inherit && r.key && *r.key){r.primary=roommenu::Rgba(fallback.primary);r.secondary=roommenu::Rgba(fallback.secondary);}
+    }
+}
+
+// --- The preview: the soldier under the cursor, in a squad's rows / fields; a crew row's crew (a member, not a leader) ---
+inline bool PreviewFor(const roommenu::Menu& m,roompreview::PreviewSpec* out,const CrewKinds& kinds=CrewKinds{}) noexcept {
     if(!m.open || m.level==roommenu::Level::units || m.unitAt<0 || m.unitAt>=m.unitCount)return false;
     const roommenu::Unit& u=m.unit[m.unitAt];
+    if(m.rowAt>=0 && m.rowAt==roommenu::CrewRow(u)) {
+        if(out)*out=roompreview::PreviewSpec{CrewKindOf(u.key,kinds),false,CrewLookOf(u.crew,u.key && *u.key ? DefaultCrew(m) : CrewColour{})};
+        return true;
+    }
     if(!roommenu::IsSquad(u) || m.rowAt<0 || m.rowAt>=u.squad.count)return false;
     if(out)*out=roompreview::PreviewSpec{u.squad.kind[m.rowAt],m.rowAt%4==0,u.squad.look[m.rowAt]};
     return true;
@@ -340,21 +412,34 @@ inline bool SamePreview(const roompreview::PreviewSpec& a,const roompreview::Pre
     return a.kind==b.kind && a.leader==b.leader && a.look==b.look;
 }
 
-// --- Saving: what loadout_store.h SaveSupportLoadout is called with, per changed unit ---
-struct SaveItem { LoadoutField field; const wchar_t* unit; const wchar_t* value; };
-// `set`: CollectSave's (true) for `m`; one item per line, in the same order (the changed units). -1 when they do not pair.
+// --- Saving: what loadout_store.h SaveSupportLoadout is called with, one per line of room_menu.h CollectSave ---
+// `unit` its ini key's unit name; `unitIndex` the menu's unit it came from (MarkItemSaved).
+struct SaveItem { LoadoutField field; const wchar_t* unit; const wchar_t* value; int unitIndex; };
+// `set`: CollectSave's (true) for `m`; one item per line, in the same order (each changed unit's preset / loadout, then
+// its crew's colours). -1 when they do not pair (a line's key is not the unit's key for that field).
 inline int SaveItems(const roommenu::Menu& m,const roommenu::SaveSet& set,SaveItem* out,int capacity) noexcept {
     int n=0;
+    const auto add=[&](LoadoutField field,const roommenu::Unit& u,int index) noexcept {
+        if(n>=set.count || n>=capacity || LoadoutKey(field,u.key)!=set.line[n].key)return false;
+        out[n]=SaveItem{field,u.key,set.line[n].value,index};
+        ++n;
+        return true;
+    };
     for(int i=0;i<m.unitCount;++i) {
         const roommenu::Unit& u=m.unit[i];
-        if(!roommenu::UnitChanged(u))continue;
-        if(n>=set.count || n>=capacity)return -1;
-        const LoadoutField field=roommenu::IsSquad(u) ? LoadoutField::preset : LoadoutField::vehicle;
-        if(LoadoutKey(field,u.key)!=set.line[n].key)return -1;
-        out[n]=SaveItem{field,u.key,set.line[n].value};
-        ++n;
+        if(roommenu::PartChanged(u) && !add(roommenu::IsSquad(u) ? LoadoutField::preset : LoadoutField::vehicle,u,i))return -1;
+        if(roommenu::CrewChanged(u) && !add(LoadoutField::crew,u,i))return -1;
     }
     return n==set.count ? n : -1;
+}
+// One item written: that part of its unit now holds what the ini holds (the rest of the unit stays edited until its
+// own item is written).
+inline void MarkItemSaved(roommenu::Menu& m,const SaveItem& item) noexcept {
+    if(item.unitIndex<0 || item.unitIndex>=m.unitCount)return;
+    roommenu::Unit& u=m.unit[item.unitIndex];
+    if(item.field==LoadoutField::crew){u.crewLoaded=u.crew;u.crewRefused=false;return;}
+    u.refused=false;
+    u.squadLoaded=u.squad;u.vehicleLoaded=u.vehicle;
 }
 
 }  // namespace crew::roomui

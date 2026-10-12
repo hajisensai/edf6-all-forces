@@ -186,7 +186,7 @@ void Navigation() {
     Expect(m.unitAt==m.unitCount,"to the save row");
     Expect(Tap(m,&Keys::confirm)==Act::save && m.open,"save asks the caller to write");
     SaveSet s;
-    Expect(CollectSave(m,&s) && s.count==1 && SaysValue(s,L"SupportPreset_SQUAD",L"fshotgun@C3B091:C3B091"),"the one changed key, its value");
+    Expect(CollectSave(m,&s) && s.count==1 && SaysValue(s,L"SupportPreset_SQUAD",L"fshotgun@516343:516343"),"the one changed key, its value (the HQ palette's last, both fields)");
     MarkSaved(m);
     Expect(!m.open && !Dirty(m),"saved: shut and clean");
     // Open again (the caller reloads on Act::opened): save with nothing changed just closes.
@@ -337,7 +337,7 @@ void CrewColours() {
     Expect(m.unit[m.unitAt].crew.look.primary==kDefaultPalette.rgb[0],"then the palette");
     Tap(m,&Keys::down);Tap(m,&Keys::left);
     Expect(m.unit[m.unitAt].crew.look.secondary==kDefaultPalette.rgb[kDefaultPalette.count-1],"the secondary");
-    Expect(CollectSave(m,&s) && s.count==1 && SaysValue(s,L"SupportCrewColour_TANK_CREWED",L"FFFFFF:C3B091"),"its crew written, the hull not");
+    Expect(CollectSave(m,&s) && s.count==1 && SaysValue(s,L"SupportCrewColour_TANK_CREWED",L"800000:516343"),"its crew written, the hull not (the HQ palette's first and last)");
     Tap(m,&Keys::up);TapN(m,&Keys::left,2);
     Expect(!m.unit[m.unitAt].crew.set,"left past X: back to the default (its secondary with it)");
     Expect(CollectSave(m,&s) && s.count==0 && !Dirty(m),"back as loaded: nothing to write");
@@ -355,8 +355,9 @@ void CrewColours() {
     Tap(m,&Keys::cancel);
     m.unitAt=CrewIndex(m,L"");Tap(m,&Keys::confirm);
     Expect(Tap(m,&Keys::add)==Act::refused && Tap(m,&Keys::remove)==Act::refused,"a crew unit has nothing to add or remove");
-    Tap(m,&Keys::confirm);Tap(m,&Keys::left);Tap(m,&Keys::cancel);Tap(m,&Keys::cancel);
-    Expect(CollectSave(m,&s) && SaysValue(s,L"SupportCrewColour",L"4FA3E0"),"the default's key: SupportCrewColour (left from 1E3A8A: the palette colour before it)");
+    Tap(m,&Keys::confirm);Tap(m,&Keys::right);Tap(m,&Keys::cancel);Tap(m,&Keys::cancel);
+    // 1E3A8A was written by hand (not an HQ colour): it counts as X's place, so right gives the palette's first.
+    Expect(CollectSave(m,&s) && SaysValue(s,L"SupportCrewColour",L"800000"),"the default's key: SupportCrewColour (right from a hand-written 1E3A8A: the palette's first)");
     m.unitAt=UnitIndex(m,L"STRIKE",false);Tap(m,&Keys::confirm);Tap(m,&Keys::down);Tap(m,&Keys::confirm);Tap(m,&Keys::right);
     Tap(m,&Keys::cancel);Tap(m,&Keys::cancel);
     Expect(CollectSave(m,&s) && SaysValue(s,L"SupportCrewColour_STRIKE",L"X") && !Line(s,L"SupportVehicle_STRIKE"),
@@ -460,6 +461,30 @@ void SnapshotAndScroll() {
     Palette hq{};hq.count=2;hq.rgb[0]=0x123456;hq.rgb[1]=0x654321;
     Expect(CycleColour(hq,kStockColour,1)==0x123456 && CycleColour(hq,0x654321,1)==kStockColour && CycleColour(hq,0xABCDEF,-1)==0x654321,
            "a replaced palette; a hand-written colour counts as stock's place");
+    // The default palette is the game's HQ colour-select chips (src/hq_palette.inc; tests/hq_palette_audit.py checks it
+    // against Root.cpk): stock first, then the table in order, every colour once, each one a value the parsers take.
+    Expect(kDefaultPalette.count==kHqColourCount && kHqColourCount==40,"40 HQ colours (8 shared pairs + 3 classes x 4 pairs)");
+    bool same=true,once=true,inRange=true;
+    for(int i=0;i<kDefaultPalette.count;++i) {
+        same=same && kDefaultPalette.rgb[i]==kHqColours[i];
+        inRange=inRange && kDefaultPalette.rgb[i]>=0 && kDefaultPalette.rgb[i]<=0xFFFFFF;
+        for(int j=0;j<i;++j)once=once && kDefaultPalette.rgb[j]!=kDefaultPalette.rgb[i];
+    }
+    Expect(same && once && inRange,"the palette is the table, each colour once, 24-bit");
+    Expect(kDefaultPalette.rgb[0]==0x800000 && kDefaultPalette.rgb[15]==0x333333 && kDefaultPalette.rgb[39]==0x516343,
+           "the order: the shared pairs (#4 red .. #11 grey), then the classes' own (Fencer #3 last)");
+    Expect(CycleColour(kDefaultPalette,kStockColour,1)==kDefaultPalette.rgb[0] && CycleColour(kDefaultPalette,kDefaultPalette.rgb[39],1)==kStockColour &&
+           CycleColour(kDefaultPalette,kStockColour,-1)==kDefaultPalette.rgb[39],"stock first in the cycle, wrapping both ways");
+    std::int32_t c=kStockColour;int steps=0;
+    do{c=CycleColour(kDefaultPalette,c,1);++steps;}while(c!=kStockColour && steps<100);
+    Expect(steps==kDefaultPalette.count+1,"a full cycle visits stock and all 40");
+    wchar_t text[32];SupportPreset back;wchar_t why[8];
+    bool parses=true;
+    for(int i=0;i<kDefaultPalette.count;++i) {
+        SupportPreset p{};p.count=1;p.look[0]=SupportLook{kDefaultPalette.rgb[i],kDefaultPalette.rgb[(i+1)%kDefaultPalette.count]};
+        parses=parses && SerialisePreset(p,text,32) && ParseSupportPreset(text,12,&back,why,8) && SamePreset(back,p);
+    }
+    Expect(parses,"every HQ colour round-trips through the ini");
 }
 }
 
