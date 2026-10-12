@@ -435,7 +435,14 @@ bool HandOnWeapon(const unsigned char* h,int hand,const M4& anchor) noexcept {
     const float along=d[0]*w.m[8]+d[1]*w.m[9]+d[2]*w.m[10];
     if(along<-0.1f || along>1.5f)return false;
     const float off[3]={d[0]-w.m[8]*along,d[1]-w.m[9]*along,d[2]-w.m[10]*along};
-    return off[0]*off[0]+off[1]*off[1]+off[2]*off[2]<kOnWeapon*kOnWeapon;
+    const float dist=std::sqrt(off[0]*off[0]+off[1]*off[1]+off[2]*off[2]);
+    static ULONGLONG at=0;
+    if(Cfg().debug && GetTickCount64()-at>=5000) {
+        at=GetTickCount64();
+        Log("FP free %s hand: wrist %.2f m along the weapon, %.2f m off its axis -> %s",hand==kLeft ? "left" : "right",along,dist,
+            dist<kOnWeapon ? "on it (drawn)" : "off it (not drawn)");
+    }
+    return dist<kOnWeapon;
 }
 
 // Debug=1, once a weapon: its model's class (vtable, draw slot, hooked) and the hand it is taken to be in.
@@ -451,11 +458,14 @@ void LogWeapon(const unsigned char* w,int hand) noexcept {
     for(int i=0;i<hookedCount;++i)hookedHere=hookedHere || hooked[i].vtable==vt;
     const auto mount=At<const unsigned char*>(w,kWeaponMount);
     const auto name=mount ? At<const wchar_t*>(mount,0) : nullptr;
-    Log("FP weapon %p: vtable +0x%llX (weapon +0x%llX) draw slot +0x%llX hooked=%d mount %ls -> %s hand, umbra %p",
+    const M4 box=MatrixAt(model+kModelBounds);
+    float axis[3];
+    for(int r=0;r<3;++r)axis[r]=std::sqrt(box.m[r*4]*box.m[r*4]+box.m[r*4+1]*box.m[r*4+1]+box.m[r*4+2]*box.m[r*4+2]);
+    Log("FP weapon %p: vtable +0x%llX (weapon +0x%llX) draw slot +0x%llX hooked=%d mount %ls -> %s hand, umbra %p, box %.2f x %.2f x %.2f",
         static_cast<const void*>(w),static_cast<unsigned long long>(reinterpret_cast<unsigned char*>(vt)-image),
         static_cast<unsigned long long>(At<const unsigned char*>(w,0)-image),
         static_cast<unsigned long long>(static_cast<unsigned char*>(vt[kModelDrawSlot])-image),hookedHere,
-        name ? name : L"?",hand==kLeft ? "left" : "right",At<const void*>(model,kUmbraObject));
+        name ? name : L"?",hand==kLeft ? "left" : "right",At<const void*>(model,kUmbraObject),axis[0],axis[1],axis[2]);
 }
 
 bool StillPlayers(const void* model) noexcept {
