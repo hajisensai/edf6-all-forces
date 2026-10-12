@@ -290,3 +290,68 @@ SupportCrewColour_MISSION=FFFFFF          ; 任务自带载具的支援乘员
 10. 离线双人分屏：只采纳 index 0；第二个视图不受影响。
 11. 游骑兵生成文件缺失时回退到玩家 P505 模型（Desc 仍是士兵的颜色和武器）。
 12. 翼人队长的红色脸部染色在预览里没有（菜单只有两个颜色通道，原版 p606 菜单 SGO 染全部材质）。
+## 阶段 6：Coop 房间阶段预同步 + 精简生成器（2026-10-12，分支 `feat/rl-sync`，只做了离线验证）
+
+没有启动 / 关闭游戏，没有往游戏目录写任何文件（只读了 Root.cpk 与 `Mods/OBJECT` 里已有的机体 SGO，在内存里生成）。
+Coop 侧接口是 edf-coop-stable `feat/room-member-attributes`（`EDF6CoopGetMemberAttributeApi(1)`），头文件原样拷成
+`src/coop_member_attribute_api.h`。
+
+### 插件：`src/room_sync.cpp` + `src/room_sync_logic.h`
+
+- `room_sync.cpp` 只做接线：从已加载的 `EDF6Coop.dll` 用 `GetModuleHandleW` / `GetProcAddress` 取 `EDF6CoopGetMemberAttributeApi`，
+  要 v1；没有 Coop、旧 Coop 没有这个导出、或返回的表比我们的小 → `SyncState::unavailable`，界面一行「Coop 版本过旧，预同步关闭」，
+  其它行为不变（进关时缺文件照旧走待生成清单）。`room_sync.h` 原有声明一个没改。
+- 全部逻辑在 `room_sync_logic.h`（无 Windows、无游戏内存）的 `Engine`，UI 线程每帧调 `TickRoomSync`，内部节流到 1 Hz。
+- **房主**：`ForEachConfiguredVariant`（新增在 `support_variants.cpp`，命名仍只走 `support_loadout.h` 的 `SupportLookFile` /
+  `VehicleVariantFile`）列出当前配置可能用到的全部变体文件：每个目录项 `SupportPreset_` 里每名有颜色的士兵（每 4 人第一位是队长模板，
+  同 `SupportLoadoutResource`）、`SupportVehicle_` 的挂载（机体与键名一致，同 `HullVariant`）。挂点武器 `EDF6VC_<STORE>_<n>.SGO`
+  不单列：生成器生成载具时一并生成。乘员颜色（阶段 5）加进同一个函数即可。每秒重算，值变了才重新发布（配置热重读、生成完成都会反映）。
+- **线上格式**（值只用可见 ASCII，单值 ≤ 999 字节；本插件共用 5 个键，Coop 每进程上限 16）：
+  - `EDF6X_VCVARIANTS` = `1;<hash>;<条数>;<分段数>;<token,...>`，放不下时续在 `EDF6X_VCVAR1..3` = `<hash>;<token,...>`；
+  - token 是短形式，不是文件名：士兵 = 兵种字母（`a`=rifle … `n`=fshotgun，大写 = 队长模板）+ 主色 + 副色（各 6 位大写十六进制或 `X`），
+    例 `a1E3A8AX` = `EDF6VC_NPC_RIFLE_1E3A8A_X.SGO`；载具 = 机体数字（1 坦克 … 5 多用途）+ 64 位变体 16 位十六进制，
+    例 `14000000000000C81` = `EDF6VC_LO_TANK_4000000000000C81.SGO`；
+  - `<hash>` = 所列 token 以 `,` 连接的 FNV-1a 64，分段之间、成员就绪值与清单之间都靠它对上；
+  - 约 270 个 token 封顶（4 段）；更多的列不下，房主界面显示「N 个文件没能公布」，这些照旧走待生成清单。
+- **校验（值不可信）**：客机只读 `isHost` 成员的值；每个 token 解析成结构 → 用 `support_loadout.h` 的命名函数生成文件名 →
+  文件名再按严格语法解析回来必须一致、token 重新编码必须逐字相同；载具挂载按 `LoadoutOfVariant` 逐字段检查；任何一个不合法、重复、
+  条数或 hash 对不上 → 整份清单作废（「房主的清单格式不对：已忽略」），不记任何文件、不启动生成器。文件名从不当路径用，只交给
+  `NoteMissingVariant`（照旧的待生成清单），生成器再按名字的语法重新解码（`support_loadout.decode_name`）。
+- **每个成员（含房主）**发布 `EDF6X_VCHAVE` = `1;<hash>;<缺几个>;<状态>`（`r` 就绪 / `g` 生成中 / `f` 生成失败 / `n` 没有生成器 /
+  `w` 还没有清单）。缺的 = 清单里 `Mods/OBJECT/<名>` 不存在的。客机把缺的名字记进待生成清单（每房间每个名字一次），房主不记
+  （自己的 ini 已经点名）。然后 `StartVariantGeneration`：同时只一个、两次启动至少隔 5 秒、同一组缺失最多两次（生成器报 ok 但仍缺
+  时再试一次；报 failed 不重试，换了一组缺失才重来）。
+- **界面行**（`RoomSyncLines`，hudtext 四语）：Coop 过旧 / 房主没有预同步 / 清单格式不对 / 等待房主清单 / N 个没能公布 /
+  本机缺 N 个生成中 / 本机生成失败：原因 / 本机找不到生成器 / 成员 X 没有预同步（旧版）/ 成员 X 正在核对清单 / 成员 X 缺 N 个生成中 /
+  成员 X 缺 N 个生成失败 / 全员已就绪（N 个文件）。成员编号 = Coop 的 ordinal + 1（Coop 只给 EOS ProductUserId，没有显示名）。
+- `LeaveRoomSync` 撤回本机发布过的所有键；房主换人时旧房主自动撤回清单、改读新房主的。
+
+### 精简生成器
+
+- `tools/loadout_generator.py`：`loadout-generate` 的全部代码从 `installer.py` 搬来（installer 原样 re-export，行为与测试不变），
+  只依赖 `gamedir` / `modfiles` / `support_loadout`。实测真实构建器（士兵、坦克、四种战机、全部 10 种挂点武器 × 3 种弹数）只导入
+  `cpk crilayla dsgo gamedir graft_pure ledger mdb mdb_jet modfiles rootcpk sgo support_loadout vcobjects`，不碰 numpy / Pillow。
+- `tools/build_release.py`：先 `build_generator()`（PyInstaller 单独冻结 `loadout_generator.py`，排除 numpy、PIL、tkinter、installer、
+  testhub、procmesh、jet_models 等），再把它作为 `plugin/EDF6VehicleCrew.generator.exe` 打进安装器。CI（`.github/workflows/build.yml`）
+  调用方式不变。
+- 实测（本机 PyInstaller 6.22.3 / Python 3.13）：精简生成器 8,921,987 字节（约 8.5 MiB，打包后只含上面 13 个本仓模块，无 numpy / PIL），
+  安装器 152,288,614 字节（发布 zip 168,034,069 字节），安装器内确有 `plugin\EDF6VehicleCrew.generator.exe`。
+  在假游戏目录里 `loadout-generate`：精简版启动到结束约 2.2 秒，安装器约 6.2 秒。以前复制进 `Mods/Plugins` 的是整个安装器（约 150 MB）。
+- 安装（`install_generator(game, generator_source())`）：安装器里有精简版就复制它；没有（开发时手工冻结的旧安装器）就复制安装器自身；
+  从源码运行且 `build/Mods/Plugins` 里没有精简版 → 不复制（菜单显示「找不到生成器」），与阶段 2 相同。
+
+### 测试
+
+| 测试 | 内容 |
+|---|---|
+| `room_sync`（C++，103 项） | 14 兵种 × 队长 × 24 种颜色写法、7 种载具挂载的名字 / token 往返；文档例子逐字；32 个非法名字（路径、小写、全原色、applied 位、坦克挂空空弹、位数不对、多余后缀等）与 21 个非法 token 全拒；清单编码逐字符合文档、长清单分段且每段可见 ASCII ≤ 999、只列得下的前缀、缺段 / 他清单的段 = 等待、篡改 / 重复 / 空 token / 路径 / 条数或 hash 不符 = 整份作废；就绪值往返与矛盾拒绝；生成器启动策略；假 Coop 表上的整房间：房主发布 3 个（重复去掉、非法名丢弃）、客机只记缺的 2 个并只启动一次、1 秒内不重复干活、房主看到「成员 2 缺 2 个生成中」/「成员 3 没有预同步」（中、日文也核对）、生成完全员就绪、房主改配置后成员「正在核对」→ 客机再生成 → 失败不重试并显示原因、房主看到失败、离开撤回全部键、最多 5 个键、Coop 从未拒绝值；202 个文件分段并撤回多余段；恶意清单 / 非房主的清单不记不生成；房主迁移；无 Coop 表、不在房间、独自在房间 |
+| `slim_generator`（Python，49 项） | 生成器导入白名单（含函数内导入）；installer 的 loadout-generate 就是它的；入口只认 `loadout-generate`、不等输入；`generator_source` 三种情况；安装复制精简版；`build_release` 命令单独冻结、排除重模块、先建生成器、打包到 `plugin/` |
+| `loadout_writer` 44 / `loadout_generate` 43 / `support_loadout` 78 / `support_loadout_ini` / `room_menu` 159 / `hudtext_check` / `tools/selftest.py` 172 | 原有，全部通过 |
+
+### 没在游戏里验证的
+
+1. 没有真实 EOS 房间、没有两台机器：成员属性的发布 / 读取时序只在假 Coop 表上跑过；Coop 侧值到达有 1–2 拍延迟，逻辑按「等待」处理。
+2. `TickRoomSync` / `RoomSyncLines` 目前没有调用者（阶段 4 的房间界面接）。
+3. 冻结的精简生成器只在假游戏目录里跑过（无事可做 → ok、缺文件 + 假 Root.cpk → failed 并写原因、用法错 / 非游戏目录 → 退出码 2）；
+   用真实 Root.cpk 生成只在 Python 进程内（不写盘）验证过。
+4. 成员显示为「成员 N」（Coop 只有 ProductUserId）；要显示名字需要 Coop 再导出昵称。

@@ -1,6 +1,7 @@
 // support_variants.h. EDF.dll TimeDateStamp 0x678CCB46: the preload (0x7A3780 on the preload manager 0x20B29A8) is the one
 // support_soldier.cpp and support_spawn.cpp call for the stock templates and hulls, checked by the same bytes.
 #include "support_variants.h"
+#include "support_config.h"
 #include "support_loadout.h"
 #include "support_protocol.h"
 #include "crew.h"
@@ -116,5 +117,41 @@ void NoteMissingVariant(const wchar_t* file,const char* why) noexcept {
     if(_wfopen_s(&out,path,L"ab") || !out)return;
     std::fprintf(out,"%s\r\n",line);
     std::fclose(out);
+}
+namespace {
+using EachVariant=void (*)(void* context,const wchar_t* file);
+// One coloured soldier's file to `each` (nothing for a stock look); 1 when given.
+int GiveLook(SupportWeapon kind,bool leader,const SupportLook& look,EachVariant each,void* context) noexcept {
+    wchar_t file[96];
+    if(!look.On() || !SupportLookFile(kind,leader,look,file,std::size(file)))return 0;
+    each(context,file);
+    return 1;
+}
+// Catalog entry `i`'s crew (SupportCrewVariant: the kind its plan seats, as a member), when it has one.
+int GiveCrew(const SupportConfig& cfg,int i,EachVariant each,void* context) noexcept {
+    const wchar_t* key=SupportCallKey(i);
+    if(!HasCrew(key))return 0;
+    const SupportWeapon kind=IsGroundCrewKey(key) ? cfg.vehicleCrew : cfg.aircraftCrew;
+    return GiveLook(kind,false,cfg.CrewLook(i),each,context);
+}
+}  // namespace
+
+int ForEachConfiguredVariant(EachVariant each,void* context) noexcept {
+    if(!each)return 0;
+    const SupportConfig& cfg=SupportCfg();
+    const int units=SupportCallCount()<kSupportConfigUnits ? SupportCallCount() : kSupportConfigUnits;
+    int given=0;
+    wchar_t file[96];
+    for(int i=0;i<units;++i) {
+        const SupportPreset& p=cfg.preset[i];
+        for(int s=0;s<p.count && s<kSupportLoadoutMost;++s)given+=GiveLook(p.kind[s],s%4==0,p.look[s],each,context);
+        given+=GiveCrew(cfg,i,each,context);
+        const VehicleLoadout& l=cfg.vehicle[i];
+        if(l.On() && l.body==VehicleBodyOfKey(SupportCallKey(i)) && VehicleVariantFile(l,file,std::size(file))){each(context,file);++given;}
+    }
+    // The mission vehicles' support crews (mission_crew_support.cpp): rifle members and their leader.
+    given+=GiveLook(SupportWeapon::rifle,false,cfg.MissionCrewLook(),each,context);
+    given+=GiveLook(SupportWeapon::rifle,true,cfg.MissionCrewLook(),each,context);
+    return given;
 }
 }  // namespace crew

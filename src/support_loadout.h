@@ -187,6 +187,14 @@ inline bool HasCrew(const wchar_t* key) noexcept {
     for(const wchar_t* k:kCrewlessKeys)if(!_wcsicmp(k,key))return false;
     return true;
 }
+// A ground vehicle's crew (support_dispatch.cpp: its driver carries SupportVehicleCrewWeapon); every other crew is an
+// aircraft's (SupportAircraftCrewWeapon). tools/support_loadout.py VEHICLE_CREW_KEYS.
+inline constexpr const wchar_t* kGroundCrewPrefixes[]={L"TANK_",L"TRANSPORT_",L"TRUCK_"};
+inline bool IsGroundCrewKey(const wchar_t* key) noexcept {
+    if(!key)return false;
+    for(const wchar_t* p:kGroundCrewPrefixes)if(!_wcsnicmp(p,key,std::wcslen(p)))return true;
+    return false;
+}
 // One SupportCrewColour value. Empty: true, not set. False: *out not set, `why` says why.
 inline bool ParseCrewColour(const wchar_t* text,CrewColour* out,wchar_t* why,std::size_t whyCapacity) noexcept {
     using namespace loadout_detail;

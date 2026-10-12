@@ -86,8 +86,11 @@ def check_generate(game: str) -> None:
 
 
 def check_wiring() -> None:
+    # install / uninstall live in the installer; loadout-generate's body in the slim generator (tools/loadout_generator.py).
     src = read(os.path.join(ROOT, 'tools', 'installer.py')).decode('utf-8')
-    body = {name: src.split(f'\ndef {name}(', 1)[1].split('\ndef ', 1)[0] for name in ('install', 'uninstall', 'generate_variants')}
+    gen = read(os.path.join(ROOT, 'tools', 'loadout_generator.py')).decode('utf-8')
+    body = {name: src.split(f'\ndef {name}(', 1)[1].split('\ndef ', 1)[0] for name in ('install', 'uninstall')}
+    body['generate_variants'] = gen.split('\ndef generate_variants(', 1)[1].split('\ndef ', 1)[0]
     check('write_menu_preview(game)' in body['install'], 'install writes them')
     check('menu_preview.remove' in body['uninstall'], 'uninstall removes them')
     check('generate_menu_preview(game, errors)' in body['generate_variants'], 'loadout-generate makes missing ones')

@@ -152,6 +152,9 @@ int main() {
         Check(!CrewLookOf(CrewColour{},CrewColour{}).On(),"nothing set: stock");
         Check(!HasCrew(L"SQUAD") && !HasCrew(L"platoon") && HasCrew(L"TANK_CREWED") && HasCrew(L"SQUAD_HELI") && HasCrew(kCrewMissionKey) &&
               !HasCrew(nullptr),"every entry but the infantry squad and platoon brings a crew");
+        Check(IsGroundCrewKey(L"TANK_CREWED") && IsGroundCrewKey(L"transport_delivery") && IsGroundCrewKey(L"TRUCK_CREWED") &&
+              !IsGroundCrewKey(L"SQUAD_HELI") && !IsGroundCrewKey(L"STRIKE_F") && !IsGroundCrewKey(L"TANK") &&
+              !IsGroundCrewKey(nullptr),"ground crews are the tank / transport / truck entries (VEHICLE_CREW_KEYS)");
         CrewColour a{},b2{};a.look.primary=1;
         Check(a==b2,"two crews not set are equal whatever their stale look");
         // A crew wears the same file a squad soldier of its kind would: a member's, the mission's leader's _L.

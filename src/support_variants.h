@@ -30,4 +30,10 @@ std::uint64_t SupportCrewVariant(std::uint32_t catalog,std::uint32_t resource) n
 // list (`remote`: the host's plan). A soldier's colours never refuse anything.
 const wchar_t* SupportSoldierLookPath(std::uint32_t resource,std::uint64_t variant,bool remote,wchar_t* path,
                                       std::size_t capacity) noexcept;
+// Every variant file the current configuration (SupportCfg) can make a plan ask for, whatever is called: each catalog
+// entry's SupportPreset_<KEY> colours (a leader's template every four seats, as SupportLoadoutResource) and its
+// SupportVehicle_<KEY> pylons (the hull its key names, as the plan's HullVariant). Upper-case names (SupportLookFile /
+// VehicleVariantFile), and every crew's colours (SupportCrewColour_*, the mission crews' too: SupportCrewVariant's
+// files). A name possibly more than once. The room pre-sync's host list (room_sync.cpp). Returns how many were given.
+int ForEachConfiguredVariant(void (*each)(void* context,const wchar_t* file),void* context) noexcept;
 }  // namespace crew
