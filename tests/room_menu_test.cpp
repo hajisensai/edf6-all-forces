@@ -139,7 +139,7 @@ void LoadsTheIni() {
     Set(ini,L"SupportVehicle_FIGHTER",L"MK82:6,MK82:6");
     Set(ini,L"SupportVehicle_STRIKE",L"AP:4");   // a tank round on a jet: refused
     Menu m;Load(m,kDefaultUnits,kDefaultUnitCount,Read,&ini);
-    Expect(m.unitCount==18,"8 squads and 10 vehicles");
+    Expect(m.unitCount==26,"8 squads, 10 vehicles, 6 seated entries' crews, the default and the mission crews");
     const Unit& squad=m.unit[UnitIndex(m,L"SQUAD",true)];
     Expect(squad.squad.count==4 && squad.squad.kind[0]==SupportWeapon::wingLance && !squad.refused,"the squad's preset loaded");
     const Unit& apc=m.unit[UnitIndex(m,L"TRANSPORT_CREWED",true)];
@@ -289,11 +289,104 @@ void ResetAndCancel() {
     Expect(!m.unit[UnitIndex(m,L"TRUCK_CREWED",true)].refused,"saved: no longer refused");
 }
 
+int CrewIndex(const Menu& m,const wchar_t* key) {
+    for(int i=0;i<m.unitCount;++i)if(!std::wcscmp(m.unit[i].key,key) && IsCrewUnit(m.unit[i]))return i;
+    return -1;
+}
+// Stage 5: every crew's colours (SupportCrewColour_<KEY>, SupportCrewColour, SupportCrewColour_MISSION).
+void CrewColours() {
+    // The grammar: the shortest value reads back as itself; bad ones refused.
+    const wchar_t* good[][2]={{L"1E3A8A",L"1E3A8A"},{L"1e3a8a:ffffff",L"1E3A8A:FFFFFF"},{L"X",L"X"},{L"x:X",L"X"},
+                              {L"X:FFFFFF",L"X:FFFFFF"},{L" 101010 ",L"101010"},{L"",L""}};
+    for(const auto& g:good) {
+        CrewColour c,back;wchar_t why[160],out[kValueMost];
+        Expect(ParseCrewColour(g[0],&c,why,160),"a crew colour parses");
+        SerialiseCrew(c,out,kValueMost);
+        Expect(!std::wcscmp(out,g[1]) && ParseCrewColour(out,&back,why,160) && back==c,"a crew colour's canonical spelling reads back");
+    }
+    const wchar_t* bads[]={L"12345",L"GGGGGG",L"1E3A8A:",L"1E3A8A,FFFFFF",L"rifle@1E3A8A",L"1E3A8A:FFFFFF:000000"};
+    for(const wchar_t* bad:bads) {
+        CrewColour c;wchar_t why[160];
+        Expect(!ParseCrewColour(bad,&c,why,160) && !c.set && why[0],"a bad crew colour refused and named");
+    }
+    Ini ini;
+    Set(ini,L"SupportCrewColour",L"1E3A8A");
+    Set(ini,L"SupportCrewColour_FIGHTER",L"X:FFFFFF");
+    Set(ini,L"SupportCrewColour_STRIKE",L"bogus");
+    Set(ini,L"SupportVehicle_FIGHTER",L"MK82:6");
+    Menu m;Tap(m,&Keys::toggle);Load(m,kDefaultUnits,kDefaultUnitCount,Read,&ini);
+    const Unit& all=m.unit[CrewIndex(m,L"")];
+    Expect(all.crew.set && all.crew.look.primary==0x1E3A8A && RowCount(all)==1 && FieldCount(all,0)==2,"the default crew colour: one row, two fields");
+    const Unit& fighter=m.unit[UnitIndex(m,L"FIGHTER",false)];
+    Expect(fighter.hasCrew && fighter.crew.set && fighter.crew.look.secondary==0xFFFFFF && RowCount(fighter)==3 && CrewRow(fighter)==2,
+           "a jet: its guns, its pylon, its crew last");
+    Expect(m.unit[UnitIndex(m,L"STRIKE",false)].crewRefused && !m.unit[UnitIndex(m,L"STRIKE",false)].refused,"a bad crew value: refused alone");
+    Expect(CrewIndex(m,L"SQUAD")<0 && CrewIndex(m,L"SQUAD_HELI")>=0 && CrewIndex(m,kCrewMissionKey)>=0 && CrewIndex(m,L"TANK_CREWED")<0,
+           "crews: the seated transports' and the mission's own units, a vehicle's a row of it, none for an infantry squad");
+    SaveSet s;
+    Expect(!Dirty(m) && CollectSave(m,&s) && s.count==0,"nothing changed: nothing written (the refused crew value left alone)");
+    // The tank's crew row: default -> X -> the palette, the secondary, then back to the default.
+    m.unitAt=UnitIndex(m,L"TANK_CREWED",false);Tap(m,&Keys::confirm);
+    Expect(m.level==Level::rows && RowCount(m.unit[m.unitAt])==2,"a stock tank: its stock row and its crew row");
+    Tap(m,&Keys::down);
+    Expect(Tap(m,&Keys::confirm)==Act::moved && m.level==Level::fields && !m.unit[m.unitAt].vehicle.On(),
+           "confirm on the crew row opens its fields, the tank stays stock");
+    Tap(m,&Keys::right);
+    Expect(m.unit[m.unitAt].crew.set && m.unit[m.unitAt].crew.look.primary==kStockColour,"right from the default: X (stock, whatever the default)");
+    Tap(m,&Keys::right);
+    Expect(m.unit[m.unitAt].crew.look.primary==kDefaultPalette.rgb[0],"then the palette");
+    Tap(m,&Keys::down);Tap(m,&Keys::left);
+    Expect(m.unit[m.unitAt].crew.look.secondary==kDefaultPalette.rgb[kDefaultPalette.count-1],"the secondary");
+    Expect(CollectSave(m,&s) && s.count==1 && SaysValue(s,L"SupportCrewColour_TANK_CREWED",L"FFFFFF:C3B091"),"its crew written, the hull not");
+    Tap(m,&Keys::up);TapN(m,&Keys::left,2);
+    Expect(!m.unit[m.unitAt].crew.set,"left past X: back to the default (its secondary with it)");
+    Expect(CollectSave(m,&s) && s.count==0 && !Dirty(m),"back as loaded: nothing to write");
+    Tap(m,&Keys::cancel);
+    Expect(Tap(m,&Keys::add)==Act::changed && CollectSave(m,&s) && s.count==1 && SaysValue(s,L"SupportVehicle_TANK_CREWED",L"HE,AP:20"),
+           "add on the crew row still adds a pylon");
+    Expect(m.rowAt==1 && CrewRow(m.unit[m.unitAt])==2,"the crew row moves after it");
+    Tap(m,&Keys::down);
+    Expect(Tap(m,&Keys::remove)==Act::refused,"the crew row is not a pylon");
+    // Both written on one save: the hull's and its crew's.
+    Tap(m,&Keys::confirm);Tap(m,&Keys::right);Tap(m,&Keys::cancel);
+    Expect(CollectSave(m,&s) && s.count==2 && SaysValue(s,L"SupportVehicle_TANK_CREWED",L"HE,AP:20") &&
+           SaysValue(s,L"SupportCrewColour_TANK_CREWED",L"X"),"a vehicle's pylons and its crew: two lines");
+    // A crew unit: add / remove refused; the default's key has no suffix; the refused one rewritten once changed.
+    Tap(m,&Keys::cancel);
+    m.unitAt=CrewIndex(m,L"");Tap(m,&Keys::confirm);
+    Expect(Tap(m,&Keys::add)==Act::refused && Tap(m,&Keys::remove)==Act::refused,"a crew unit has nothing to add or remove");
+    Tap(m,&Keys::confirm);Tap(m,&Keys::left);Tap(m,&Keys::cancel);Tap(m,&Keys::cancel);
+    Expect(CollectSave(m,&s) && SaysValue(s,L"SupportCrewColour",L"4FA3E0"),"the default's key: SupportCrewColour (left from 1E3A8A: the palette colour before it)");
+    m.unitAt=UnitIndex(m,L"STRIKE",false);Tap(m,&Keys::confirm);Tap(m,&Keys::down);Tap(m,&Keys::confirm);Tap(m,&Keys::right);
+    Tap(m,&Keys::cancel);Tap(m,&Keys::cancel);
+    Expect(CollectSave(m,&s) && SaysValue(s,L"SupportCrewColour_STRIKE",L"X") && !Line(s,L"SupportVehicle_STRIKE"),
+           "a refused crew value replaced once edited, its hull untouched");
+    const View v=Snapshot(m);
+    Expect(v.units.total==m.unitCount+1,"snapshot counts every unit");
+    MarkSaved(m);
+    Expect(!m.unit[UnitIndex(m,L"STRIKE",false)].crewRefused && !Dirty(m),"saved: the crew no longer refused, nothing dirty");
+    // Reset puts the crew back to the default too; cancel restores what was loaded.
+    Tap(m,&Keys::toggle);m.unitAt=UnitIndex(m,L"FIGHTER",false);
+    Tap(m,&Keys::reset);
+    Expect(!m.unit[m.unitAt].crew.set && !m.unit[m.unitAt].vehicle.On(),"reset: the stock jet, its crew the default's");
+    Tap(m,&Keys::cancel);
+    Expect(m.unit[UnitIndex(m,L"FIGHTER",false)].crew.set,"cancel: the loaded crew colour is back");
+    // The snapshot of a crew row and of a crew unit.
+    Tap(m,&Keys::toggle);m.unitAt=UnitIndex(m,L"FIGHTER",false);Tap(m,&Keys::confirm);
+    const View f=Snapshot(m);
+    Expect(f.rows.total==3 && f.rows.row[2].text==RowText::crew && !f.rows.row[2].inherit && f.rows.row[2].primary==0 &&
+           f.rows.row[2].secondary==0xFFFFFFFFu,"the jet's crew row: stock primary, white secondary");
+    Expect(detail::UnitRow(m,CrewIndex(m,kCrewMissionKey)).text==RowText::crewUnit,"crew units are named as such");
+    Discard(m);
+}
+
 // Thousands of random presses: every save the menu collects reads back through the real parsers.
 void RandomPresses() {
     Ini ini;
     Set(ini,L"SupportPreset_PLATOON",L"lance@1E3A8A*4,cannon*4,rifle@X:FFFFFF*4");
     Set(ini,L"SupportVehicle_STRIKE",L"AGM:6,AAM_S:2");
+    Set(ini,L"SupportCrewColour",L"1E3A8A:FFFFFF");
+    Set(ini,L"SupportCrewColour_STRIKE",L"X");
     Menu m;m.pageRows=5;
     Tap(m,&Keys::toggle);Load(m,kDefaultUnits,kDefaultUnitCount,Read,&ini);
     std::uint32_t seed=12345;
@@ -328,14 +421,14 @@ void SnapshotAndScroll() {
     Tap(m,&Keys::toggle);Load(m,kDefaultUnits,kDefaultUnitCount,Read,&ini);
     TapN(m,&Keys::down,5);
     View v=Snapshot(m);
-    Expect(v.units.first==2 && v.units.count==4 && v.units.total==19 && v.units.row[3].cursor,"the unit window follows the cursor");
+    Expect(v.units.first==2 && v.units.count==4 && v.units.total==27 && v.units.row[3].cursor,"the unit window follows the cursor");
     Tap(m,&Keys::up);Tap(m,&Keys::up);Tap(m,&Keys::up);
     Expect(Snapshot(m).units.first==2,"moving inside the window leaves it");
     Tap(m,&Keys::up);
     Expect(Snapshot(m).units.first==1,"past its top it scrolls one");
     TapN(m,&Keys::up,2);
     v=Snapshot(m);
-    Expect(m.unitAt==m.unitCount && v.units.first==15 && v.units.row[3].text==RowText::save && v.units.row[3].cursor,
+    Expect(m.unitAt==m.unitCount && v.units.first==23 && v.units.row[3].text==RowText::save && v.units.row[3].cursor,
            "wrapped to the save row: the last page");
     // The squad: leaders every four, colours as RGBA, stock as 0.
     m.unitAt=UnitIndex(m,L"SQUAD",true);
@@ -357,8 +450,9 @@ void SnapshotAndScroll() {
     m.unitAt=UnitIndex(m,L"TANK_CREWED",false);
     Tap(m,&Keys::confirm);
     v=Snapshot(m);
-    Expect(v.rows.total==3 && v.rows.row[0].text==RowText::gunHE && v.rows.row[1].text==RowText::pylon && v.rows.row[1].store==8 &&
-           v.rows.row[1].rounds==25 && v.rows.row[2].store==10 && v.rows.row[2].rounds==4,"the tank's rows: gun, AP 25, GLM 4");
+    Expect(v.rows.total==4 && v.rows.row[0].text==RowText::gunHE && v.rows.row[1].text==RowText::pylon && v.rows.row[1].store==8 &&
+           v.rows.row[1].rounds==25 && v.rows.row[2].store==10 && v.rows.row[2].rounds==4 && v.rows.row[3].text==RowText::crew &&
+           v.rows.row[3].inherit,"the tank's rows: gun, AP 25, GLM 4, its crew (the default's colours)");
     Tap(m,&Keys::reset);
     v=Snapshot(m);
     Expect(v.dirty && v.units.row[UnitIndex(m,L"TANK_CREWED",false)-v.units.first].changed,"a changed unit is marked, the menu dirty");
@@ -378,6 +472,7 @@ int main() {
     SquadLimits();
     VehicleLimits();
     ResetAndCancel();
+    CrewColours();
     RandomPresses();
     SnapshotAndScroll();
     std::printf("%d checks, %d failed\n",checks,failures);

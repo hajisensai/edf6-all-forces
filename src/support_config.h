@@ -10,6 +10,7 @@
 //   SupportAircraftCount_<KEY>=n        aircraft one call brings (0: the call's own number)
 //   SupportPreset_<KEY>=rifle@1E3A8A*2,rocket   a seated entry's soldiers, colours (support_loadout.h)
 //   SupportVehicle_<KEY>=HE,AP:25       a tank's / jet's pylons before the battle (support_loadout.h)
+//   SupportCrewColour[_<KEY>|_MISSION]=RRGGBB[:RRGGBB]   the real crews' colours (support_loadout.h CrewColour)
 // Weapons: rifle / flame / rocket / shotgun / sniper (or 步枪 / 火焰 / 火箭 / 霰弹 / 狙击): the stock Ranger templates'
 // own AI weapons (support_call.h SupportWeapon). An invalid value keeps the default and is reported (Problems).
 #pragma once
@@ -29,10 +30,18 @@ struct SupportConfig {
     std::uint8_t aircraft[kSupportConfigUnits]{};   // 0: the call's own count
     SupportPreset preset[kSupportConfigUnits]{};    // SupportPreset_<key>; count 0: the entry's own load
     VehicleLoadout vehicle[kSupportConfigUnits]{};  // SupportVehicle_<key>; body none: the vehicle as it always came
+    CrewColour crew[kSupportConfigUnits]{};         // SupportCrewColour_<key>; not set: crewDefault
+    CrewColour crewDefault{},crewMission{};         // SupportCrewColour; SupportCrewColour_MISSION
     wchar_t problems[256]{};                   // the invalid settings, for the HUD and the log; empty: none
     bool Enabled(int catalog) const noexcept {
         return catalog<0 || catalog>=kSupportConfigUnits || !((disabled>>catalog)&1u);
     }
+    // The look the real crew of catalog entry `catalog` wears (support_loadout.h CrewLookOf); MissionCrewLook: the
+    // mission vehicles' support crews'.
+    SupportLook CrewLook(int catalog) const noexcept {
+        return CrewLookOf(catalog>=0 && catalog<kSupportConfigUnits ? crew[catalog] : CrewColour{},crewDefault);
+    }
+    SupportLook MissionCrewLook() const noexcept { return CrewLookOf(crewMission,crewDefault); }
 };
 // Reads one value of the ini (empty when absent); returns its length.
 using SupportIniRead=std::size_t(*)(void* context,const wchar_t* key,wchar_t* out,std::size_t capacity) noexcept;

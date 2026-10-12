@@ -1,5 +1,6 @@
 // The in-game loadout menu's saving (docs/feature-2026-10-12-room-loadout-menu.md, phase 2): what the menu calls.
-//   SaveSupportLoadout     one SupportPreset_<KEY> / SupportVehicle_<KEY> of EDF6VehicleCrew.ini set (empty: removed,
+//   SaveSupportLoadout     one SupportPreset_<KEY> / SupportVehicle_<KEY> / SupportCrewColour[_<KEY>] of EDF6VehicleCrew.ini
+//                          set (empty: removed,
 //                          the stock load), checked with the plugin's own parsers, written atomically, the config reloaded
 //                          at once (loadout_ini.h, loadout_file.h)
 //   StartVariantGeneration the installer's `loadout-generate` started in the background (Mods/Plugins/
