@@ -19,4 +19,15 @@ void SupportVariantHello(std::uint32_t* ext,unsigned char* bloom32) noexcept;
 // added once to Mods/Plugins/EDF6VehicleCrew.variants_pending.txt; the installer (menu 7 or 1, the game closed) makes
 // every file listed there from its name (tools/support_loadout.py) and clears the list. Logged.
 void NoteMissingVariant(const wchar_t* file,const char* why) noexcept;
+// --- Crew colours (support_dispatch.cpp; docs/feature-2026-10-12-room-loadout-menu.md 阶段 5) ---
+// The variant (support_loadout.h LookVariant, kVariantApplied as the host decides it for a squad's soldier) of a real crew
+// soldier of `catalog` (a SupportCallKey entry, or support_net.h kMissionCrewCatalog) made from soldier `resource`: the
+// colours SupportCrewColour_<KEY> / SupportCrewColour give it (SupportConfig::CrewLook). 0: stock, nothing wanted.
+// Each crew seat carries its own (support_net.h Unit::variant), exactly as a squad's soldier does.
+std::uint64_t SupportCrewVariant(std::uint32_t catalog,std::uint32_t resource) noexcept;
+// The CreateObject path (app:/object/...) soldier `resource` carrying `variant` is made from: its look's file when the
+// variant is applied and the file is ready here; else nullptr (stock), and a wanted file missing here goes on the pending
+// list (`remote`: the host's plan). A soldier's colours never refuse anything.
+const wchar_t* SupportSoldierLookPath(std::uint32_t resource,std::uint64_t variant,bool remote,wchar_t* path,
+                                      std::size_t capacity) noexcept;
 }  // namespace crew

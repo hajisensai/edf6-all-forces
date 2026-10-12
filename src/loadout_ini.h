@@ -1,7 +1,7 @@
-// The in-game loadout menu's ini writer, pure part (no Windows, no game): one SupportPreset_<KEY> / SupportVehicle_<KEY>
-// line of EDF6VehicleCrew.ini [VehicleCrew] replaced, added or removed, every other byte of the file kept as it was (the
+// The in-game loadout menu's ini writer, pure part (no Windows, no game): one SupportPreset_<KEY> / SupportVehicle_<KEY> /
+// SupportCrewColour[_<KEY>] line of EDF6VehicleCrew.ini [VehicleCrew] replaced, added or removed, every other byte of the file kept as it was (the
 // BOM, CRLF or LF, comments, other keys and their order). The value is checked with the very parsers the plugin reads it
-// with (support_loadout.h ParseSupportPreset / ParseVehicleLoadout, as support_config.cpp does) before anything is
+// with (support_loadout.h ParseSupportPreset / ParseVehicleLoadout / ParseCrewColour, as support_config.cpp does) before anything is
 // written, so the menu never saves a value the plugin would refuse. src/loadout_store.cpp writes the result atomically
 // and reloads the config; tests/loadout_writer_test.cpp runs this offline. Design: docs/feature-2026-10-12-room-loadout-menu.md.
 #pragma once
@@ -12,7 +12,8 @@
 #include <vector>
 
 namespace crew {
-enum class LoadoutField : std::uint8_t { preset, vehicle };   // SupportPreset_<KEY>, SupportVehicle_<KEY>
+// SupportPreset_<KEY>, SupportVehicle_<KEY>, SupportCrewColour_<KEY> (an empty KEY: SupportCrewColour, every crew's default).
+enum class LoadoutField : std::uint8_t { preset, vehicle, crew };
 
 namespace loadout_ini_detail {
 inline constexpr char kBom[]="\xEF\xBB\xBF";
@@ -65,12 +66,15 @@ inline bool Ended(const std::string& line) noexcept { return !line.empty() && li
 inline bool Blank(const std::string& line) { return Trimmed(line).empty(); }
 }  // namespace loadout_ini_detail
 
-// The ini key of `unit`'s field ("SupportPreset_SQUAD"); empty when `unit` is not [A-Za-z0-9_]+ (at most 64).
+// The ini key of `unit`'s field ("SupportPreset_SQUAD"); empty when `unit` is not [A-Za-z0-9_]+ (at most 64). A crew's
+// with an empty `unit`: the default's, SupportCrewColour.
 inline std::wstring LoadoutKey(LoadoutField field,const wchar_t* unit) {
+    if(field==LoadoutField::crew && unit && !*unit)return L"SupportCrewColour";
     if(!unit || !*unit || std::wcslen(unit)>64)return {};
     for(const wchar_t* p=unit;*p;++p)
         if(!((*p>=L'A' && *p<=L'Z') || (*p>=L'a' && *p<=L'z') || (*p>=L'0' && *p<=L'9') || *p==L'_'))return {};
-    return std::wstring(field==LoadoutField::preset ? L"SupportPreset_" : L"SupportVehicle_")+unit;
+    return std::wstring(field==LoadoutField::preset ? L"SupportPreset_" : field==LoadoutField::vehicle ? L"SupportVehicle_" :
+                        L"SupportCrewColour_")+unit;
 }
 
 // `value` for `unit`'s field, checked as the plugin will read it. `seats`: the entry's (SupportCallSeats; a preset only).
@@ -85,6 +89,11 @@ inline bool ValidLoadoutValue(LoadoutField field,const wchar_t* unit,int seats,c
     if(field==LoadoutField::preset) {
         SupportPreset p;
         return ParseSupportPreset(value,seats,&p,why,capacity);
+    }
+    if(field==LoadoutField::crew) {
+        if(unit && *unit && !HasCrew(unit)){Say(why,capacity,L"该单位没有乘员，只有小队（颜色用 SupportPreset_）");return false;}
+        CrewColour c;
+        return ParseCrewColour(value,&c,why,capacity);
     }
     const VehicleBody body=VehicleBodyOfKey(unit);
     if(body==VehicleBody::none){Say(why,capacity,L"该单位没有可配置的挂点");return false;}

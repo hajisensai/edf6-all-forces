@@ -17,6 +17,9 @@
 // left / right change the field being edited (wrapping); add / remove a soldier or pylon; reset puts the unit stock.
 // Levels: the unit list (its last row is "save"), a unit's rows (soldiers; a vehicle's gun row then its pylons), the
 // fields of one row (kind / primary / secondary; store / rounds; the tank's gun).
+// Crews (阶段 5): a unit whose spec says it brings a crew gets a crew-colour row (SupportCrewColour_<KEY>, support_loadout.h
+// CrewColour): the last row of its vehicle, or a unit of its own (a seated entry's crew, the default for every crew, the
+// mission vehicles' support crews). Its fields: the primary (default -> X -> the palette) and the secondary colour.
 #pragma once
 #include "support_loadout.h"
 #include <cstddef>
@@ -48,34 +51,45 @@ inline std::int32_t CycleColour(const Palette& p,std::int32_t colour,int step) n
 }
 
 // --- The units ---
-// One catalog entry the menu shows: its key (support_dispatch SupportCallKey), label, and the seats a preset may fill
-// (SupportCallSeats). A key with seats is a squad; a key in kVehicleKeys a vehicle (one key may give both).
-struct UnitSpec { const wchar_t* key; const wchar_t* label; int seats; };
+// One catalog entry the menu shows: its key (support_dispatch SupportCallKey), label, the seats a preset may fill
+// (SupportCallSeats), and whether it brings a crew (support_loadout.h HasCrew; its colours SupportCrewColour_<KEY>). A key
+// with seats is a squad; a key in kVehicleKeys a vehicle (one key may give both); a crew without a vehicle a crew unit.
+// The key "" is the default every crew without its own key wears (SupportCrewColour); kCrewMissionKey the mission
+// vehicles' support crews'.
+struct UnitSpec { const wchar_t* key; const wchar_t* label; int seats; bool crew=false; };
 // The entries tools/support_loadout.py SEATS / LABELS and kVehicleKeys list (the installer's menu 8), for a caller
 // without the live catalog and for the tests.
+// The crews (crew true) are tools/support_loadout.py CREW_KEYS, in its order (its menu 8 c1..).
 inline constexpr UnitSpec kDefaultUnits[]={
-    {L"SQUAD",L"步兵小队",12},{L"PLATOON",L"步兵大队",12},{L"TRANSPORT_CREWED",L"装甲运兵车·有人（乘客）",4},
-    {L"TRUCK_CREWED",L"民用轻卡·有人（乘客）",4},{L"SQUAD_HELI",L"直升机机降·小队",12},
-    {L"PLATOON_HELI",L"直升机机降·大队",12},{L"SQUAD_AIRDROP",L"运输机空降·小队",12},
-    {L"PLATOON_AIRDROP",L"运输机空降·大队",12},
-    {L"TANK_CREWED",L"坦克·有人",0},{L"TANK_DELIVERY",L"坦克·空车交付",0},{L"STRIKE",L"对地攻击机·守点",0},
-    {L"STRIKE_F",L"对地攻击机·跟随",0},{L"FIGHTER",L"制空战斗机·守点",0},{L"FIGHTER_F",L"制空战斗机·跟随",0},
-    {L"INTERCEPTOR",L"截击机·守点",0},{L"INTERCEPTOR_F",L"截击机·跟随",0},{L"MULTIROLE",L"多用途机·守点",0},
-    {L"MULTIROLE_F",L"多用途机·跟随",0},
+    {L"SQUAD",L"步兵小队",12},{L"PLATOON",L"步兵大队",12},{L"TRANSPORT_CREWED",L"装甲运兵车·有人（乘客）",4,true},
+    {L"TRUCK_CREWED",L"民用轻卡·有人（乘客）",4,true},{L"SQUAD_HELI",L"直升机机降·小队",12,true},
+    {L"PLATOON_HELI",L"直升机机降·大队",12,true},{L"SQUAD_AIRDROP",L"运输机空降·小队",12,true},
+    {L"PLATOON_AIRDROP",L"运输机空降·大队",12,true},
+    {L"TANK_CREWED",L"坦克·有人",0,true},{L"TANK_DELIVERY",L"坦克·空车交付",0,true},{L"STRIKE",L"对地攻击机·守点",0,true},
+    {L"STRIKE_F",L"对地攻击机·跟随",0,true},{L"FIGHTER",L"制空战斗机·守点",0,true},{L"FIGHTER_F",L"制空战斗机·跟随",0,true},
+    {L"INTERCEPTOR",L"截击机·守点",0,true},{L"INTERCEPTOR_F",L"截击机·跟随",0,true},{L"MULTIROLE",L"多用途机·守点",0,true},
+    {L"MULTIROLE_F",L"多用途机·跟随",0,true},
+    {L"",L"所有支援乘员（默认）",0,true},{kCrewMissionKey,L"任务载具的支援乘员",0,true},
 };
 inline constexpr int kDefaultUnitCount=static_cast<int>(sizeof(kDefaultUnits)/sizeof(kDefaultUnits[0]));
 
 inline constexpr int kMostUnits=48;
+enum class UnitKind : std::uint8_t { squad, vehicle, crew };
 struct Unit {
     const wchar_t* key=nullptr;
     const wchar_t* label=nullptr;
+    UnitKind kind=UnitKind::squad;
     int seats=0;                              // a squad's most soldiers (min of the entry's seats and 12)
-    VehicleBody body=VehicleBody::none;       // none: a squad
+    VehicleBody body=VehicleBody::none;       // a vehicle's
     SupportPreset squad{},squadLoaded{};      // the working copy and what the ini held
     VehicleLoadout vehicle{},vehicleLoaded{};
     bool refused=false;                       // the ini's value was refused by the parser (shown stock)
+    bool hasCrew=false;                       // a crew-colour row: a crew unit's only row, a vehicle's last
+    CrewColour crew{},crewLoaded{};           // SupportCrewColour_<key>
+    bool crewRefused=false;                   // its ini value was refused (shown as the default)
 };
-constexpr bool IsSquad(const Unit& u) noexcept { return u.body==VehicleBody::none; }
+constexpr bool IsSquad(const Unit& u) noexcept { return u.kind==UnitKind::squad; }
+constexpr bool IsCrewUnit(const Unit& u) noexcept { return u.kind==UnitKind::crew; }
 
 // Reads one ini value (support_config.h SupportIniRead's shape: empty when absent); returns its length.
 using IniRead=std::size_t(*)(void* context,const wchar_t* key,wchar_t* out,std::size_t capacity) noexcept;
@@ -170,6 +184,19 @@ inline std::size_t SerialiseVehicle(const VehicleLoadout& l,wchar_t* out,std::si
     if(!n)out[0]=0;
     return n;
 }
+// A crew's colours (tools/support_loadout.py format_crew): not set the empty value; the primary (X for stock), then
+// :secondary when it is not stock.
+inline std::size_t SerialiseCrew(const CrewColour& c,wchar_t* out,std::size_t capacity) noexcept {
+    if(!out || !capacity)return 0;
+    detail::Text t{out,capacity};
+    if(c.set) {
+        t.Colour(c.look.primary);
+        if(c.look.secondary!=kStockColour){t.Put(L':');t.Colour(c.look.secondary);}
+    }
+    const std::size_t n=t.End();
+    if(!n)out[0]=0;
+    return n;
+}
 inline bool SamePreset(const SupportPreset& a,const SupportPreset& b) noexcept {
     if(a.count!=b.count)return false;
     for(int i=0;i<a.count;++i)if(a.kind[i]!=b.kind[i] || !(a.look[i]==b.look[i]))return false;
@@ -180,9 +207,11 @@ inline bool SameVehicle(const VehicleLoadout& a,const VehicleLoadout& b) noexcep
     for(int i=0;i<a.count;++i)if(a.store[i]!=b.store[i] || a.rounds[i]!=b.rounds[i])return false;
     return true;
 }
-inline bool UnitChanged(const Unit& u) noexcept {
-    return IsSquad(u) ? !SamePreset(u.squad,u.squadLoaded) : !SameVehicle(u.vehicle,u.vehicleLoaded);
+inline bool CrewChanged(const Unit& u) noexcept { return u.hasCrew && !(u.crew==u.crewLoaded); }
+inline bool PartChanged(const Unit& u) noexcept {
+    return IsSquad(u) ? !SamePreset(u.squad,u.squadLoaded) : u.kind==UnitKind::vehicle && !SameVehicle(u.vehicle,u.vehicleLoaded);
 }
+inline bool UnitChanged(const Unit& u) noexcept { return PartChanged(u) || CrewChanged(u); }
 inline bool Dirty(const Menu& m) noexcept {
     for(int i=0;i<m.unitCount;++i)if(UnitChanged(m.unit[i]))return true;
     return false;
@@ -194,30 +223,46 @@ inline void IniKey(const Unit& u,wchar_t* out,std::size_t capacity) noexcept {
     Text t{out,capacity};
     t.Puts(IsSquad(u) ? L"SupportPreset_" : L"SupportVehicle_");t.Puts(u.key);t.End();
 }
+// SupportCrewColour_<key>; the default's SupportCrewColour.
+inline void CrewKey(const Unit& u,wchar_t* out,std::size_t capacity) noexcept {
+    Text t{out,capacity};
+    t.Puts(L"SupportCrewColour");
+    if(u.key && *u.key){t.Put(L'_');t.Puts(u.key);}
+    t.End();
+}
 inline void LoadUnit(Unit& u,IniRead read,void* context) noexcept {
     wchar_t key[96],value[kValueMost+64]{},why[8];
-    IniKey(u,key,96);
+    if(!IsCrewUnit(u)) {
+        IniKey(u,key,96);
+        if(read)read(context,key,value,sizeof(value)/sizeof(value[0]));
+        u.refused=IsSquad(u) ? !ParseSupportPreset(value,u.seats,&u.squadLoaded,why,8)
+                             : !ParseVehicleLoadout(value,u.body,&u.vehicleLoaded,why,8);
+        u.squad=u.squadLoaded;u.vehicle=u.vehicleLoaded;
+    }
+    if(!u.hasCrew)return;
+    CrewKey(u,key,96);value[0]=0;
     if(read)read(context,key,value,sizeof(value)/sizeof(value[0]));
-    u.refused=IsSquad(u) ? !ParseSupportPreset(value,u.seats,&u.squadLoaded,why,8)
-                         : !ParseVehicleLoadout(value,u.body,&u.vehicleLoaded,why,8);
-    u.squad=u.squadLoaded;u.vehicle=u.vehicleLoaded;
+    u.crewRefused=!ParseCrewColour(value,&u.crewLoaded,why,8);
+    u.crew=u.crewLoaded;
 }
-inline void AddUnit(Menu& m,const UnitSpec& s,VehicleBody body) noexcept {
+inline void AddUnit(Menu& m,const UnitSpec& s,UnitKind kind,VehicleBody body,bool crew) noexcept {
     if(m.unitCount>=kMostUnits)return;
     Unit& u=m.unit[m.unitCount++];
-    u=Unit{};u.key=s.key;u.label=s.label;u.body=body;
+    u=Unit{};u.key=s.key;u.label=s.label;u.kind=kind;u.body=body;u.hasCrew=crew;
     u.seats=s.seats<kSupportLoadoutMost ? s.seats : kSupportLoadoutMost;
 }
 }  // namespace detail
-// The units of `specs` (a squad for each with seats, a vehicle for each in kVehicleKeys) with the ini's values; the
-// cursor back at the top. `open` is left as it is (call it on Act::opened).
+// The units of `specs` (a squad for each with seats, a vehicle for each in kVehicleKeys, its crew row when the spec
+// brings a crew; a crew unit for a crew without a vehicle) with the ini's values; the cursor back at the top. `open` is
+// left as it is (call it on Act::opened).
 inline void Load(Menu& m,const UnitSpec* specs,int count,IniRead read,void* context) noexcept {
     m.unitCount=0;
     for(int i=0;specs && i<count;++i) {
         if(!specs[i].key)continue;
-        if(specs[i].seats>0)detail::AddUnit(m,specs[i],VehicleBody::none);
+        if(specs[i].seats>0)detail::AddUnit(m,specs[i],UnitKind::squad,VehicleBody::none,false);
         const VehicleBody body=VehicleBodyOfKey(specs[i].key);
-        if(body!=VehicleBody::none)detail::AddUnit(m,specs[i],body);
+        if(body!=VehicleBody::none)detail::AddUnit(m,specs[i],UnitKind::vehicle,body,specs[i].crew);
+        else if(specs[i].crew)detail::AddUnit(m,specs[i],UnitKind::crew,VehicleBody::none,true);
     }
     for(int i=0;i<m.unitCount;++i)detail::LoadUnit(m.unit[i],read,context);
     m.level=Level::units;m.unitAt=m.rowAt=m.fieldAt=m.unitFirst=m.rowFirst=0;
@@ -225,18 +270,26 @@ inline void Load(Menu& m,const UnitSpec* specs,int count,IniRead read,void* cont
 
 // --- Rows and fields of a unit ---
 // A squad's rows: its soldiers (one "own load" row when none). A vehicle's: the gun row (or one "stock" row), its pylons.
+// A crew unit's only row; a vehicle with a crew: its last row. -1: none.
+inline int CrewRow(const Unit& u) noexcept {
+    if(!u.hasCrew)return -1;
+    return IsCrewUnit(u) ? 0 : 1+(u.vehicle.On() ? u.vehicle.count : 0);
+}
 inline int RowCount(const Unit& u) noexcept {
     if(IsSquad(u))return u.squad.count>0 ? u.squad.count : 1;
-    return 1+(u.vehicle.On() ? u.vehicle.count : 0);
+    if(IsCrewUnit(u))return 1;
+    return 1+(u.vehicle.On() ? u.vehicle.count : 0)+(u.hasCrew ? 1 : 0);
 }
 inline int MostRows(const Unit& u) noexcept {
     if(IsSquad(u))return u.seats;
     const VehicleBodyRow* row=VehicleBodyOf(u.body);
     return row ? row->most : 0;
 }
-// Fields of row `r`: a soldier 3 (kind, primary, secondary); a tank's gun 1; a pylon 2 (store, rounds); else 0.
+// Fields of row `r`: a soldier 3 (kind, primary, secondary); a tank's gun 1; a pylon 2 (store, rounds); a crew 2 (primary,
+// secondary); else 0.
 inline int FieldCount(const Unit& u,int r) noexcept {
     if(IsSquad(u))return u.squad.count>0 ? 3 : 0;
+    if(r==CrewRow(u))return 2;
     if(!u.vehicle.On())return 0;
     if(r==0)return VehicleBodyOf(u.body)->tank ? 1 : 0;
     return 2;
@@ -276,6 +329,7 @@ inline Act AddSoldier(Menu& m,Unit& u) noexcept {
     return Act::changed;
 }
 inline Act AddPylon(Menu& m,Unit& u) noexcept {
+    if(IsCrewUnit(u))return Act::refused;
     Materialise(u);
     VehicleLoadout& l=u.vehicle;
     if(l.count>=MostRows(u))return Act::refused;
@@ -292,6 +346,7 @@ inline Act RemoveSoldier(Menu& m,Unit& u) noexcept {
     return Act::changed;
 }
 inline Act RemovePylon(Menu& m,Unit& u) noexcept {
+    if(IsCrewUnit(u))return Act::refused;
     VehicleLoadout& l=u.vehicle;
     if(!l.On() || m.rowAt<1 || m.rowAt>l.count)return Act::refused;
     for(int i=m.rowAt-1;i+1<l.count;++i){l.store[i]=l.store[i+1];l.rounds[i]=l.rounds[i+1];}
@@ -315,8 +370,23 @@ inline void ChangePylon(Menu& m,Unit& u,int step) noexcept {
     for(int k=0;k<n;++k)if(allowed[k]==u.vehicle.store[i])at=k;
     u.vehicle.store[i]=allowed[Wrap(at,step,n)];
 }
+// A crew's primary cycles default (not set) -> X -> the palette (a hand-written colour counts as X's place); its
+// secondary stock -> the palette (changing it on a crew not set sets it, primary X).
+inline void ChangeCrew(Menu& m,CrewColour& c,int step) noexcept {
+    if(m.fieldAt==1) {
+        if(!c.set){c.set=true;c.look=SupportLook{};}
+        c.look.secondary=CycleColour(m.palette,c.look.secondary,step);
+        return;
+    }
+    int at=0;
+    if(c.set){at=1;for(int i=0;i<m.palette.count;++i)if(m.palette.rgb[i]==c.look.primary)at=i+2;}
+    at=Wrap(at,step,m.palette.count+2);
+    if(!at){c=CrewColour{};return;}
+    c.set=true;c.look.primary=at==1 ? kStockColour : m.palette.rgb[at-2];
+}
 inline Act Change(Menu& m,Unit& u,int step) noexcept {
     if(IsSquad(u))ChangeSoldier(m,u,step);
+    else if(m.rowAt==CrewRow(u))ChangeCrew(m,u.crew,step);
     else if(m.rowAt==0)u.vehicle.apGun=!u.vehicle.apGun;
     else ChangePylon(m,u,step);
     return Act::changed;
@@ -341,11 +411,13 @@ inline void Scroll(Menu& m) noexcept {
 // --- The state machine ---
 // Throws away every edit since the ini was loaded (or last saved) and closes.
 inline void Discard(Menu& m) noexcept {
-    for(int i=0;i<m.unitCount;++i){m.unit[i].squad=m.unit[i].squadLoaded;m.unit[i].vehicle=m.unit[i].vehicleLoaded;}
+    for(int i=0;i<m.unitCount;++i) {
+        m.unit[i].squad=m.unit[i].squadLoaded;m.unit[i].vehicle=m.unit[i].vehicleLoaded;m.unit[i].crew=m.unit[i].crewLoaded;
+    }
     m.open=false;m.level=Level::units;
 }
 inline Act ResetUnit(Menu& m,Unit& u) noexcept {
-    u.squad=SupportPreset{};u.vehicle=VehicleLoadout{};
+    u.squad=SupportPreset{};u.vehicle=VehicleLoadout{};u.crew=CrewColour{};
     m.rowAt=m.fieldAt=0;
     if(m.level==Level::fields)m.level=Level::rows;
     return Act::changed;
@@ -367,7 +439,7 @@ inline Act StepUnits(Menu& m,const Keys& k) noexcept {
 // fields open them.
 inline Act EnterRow(Menu& m,Unit& u) noexcept {
     if(IsSquad(u) && !u.squad.count)return AddSoldier(m,u);
-    if(!IsSquad(u) && !u.vehicle.On()){Materialise(u);return Act::changed;}
+    if(u.kind==UnitKind::vehicle && !u.vehicle.On() && m.rowAt!=CrewRow(u)){Materialise(u);return Act::changed;}
     if(!FieldCount(u,m.rowAt))return Act::none;
     m.level=Level::fields;m.fieldAt=0;
     return Act::moved;
@@ -416,8 +488,15 @@ inline Act Step(Menu& m,const Keys& k) noexcept {
 
 // --- Saving ---
 struct SaveLine { wchar_t key[64]; wchar_t value[kValueMost]; };
-struct SaveSet { int count=0; SaveLine line[kMostUnits]; };
+struct SaveSet { int count=0; SaveLine line[2*kMostUnits]; };   // a vehicle's pylons and its crew's colours: two
 namespace detail {
+// The unit's crew colours, checked by the real parser to read back exactly the working copy.
+inline bool SaveCrew(const Unit& u,SaveLine* out) noexcept {
+    CrewKey(u,out->key,64);
+    SerialiseCrew(u.crew,out->value,kValueMost);
+    wchar_t why[8];CrewColour back;
+    return ParseCrewColour(out->value,&back,why,8) && back==u.crew;
+}
 // The unit's value, checked by its real parser to read back exactly the working copy.
 inline bool SaveUnit(const Unit& u,SaveLine* out) noexcept {
     IniKey(u,out->key,64);
@@ -438,9 +517,9 @@ inline bool CollectSave(const Menu& m,SaveSet* out) noexcept {
     if(!out)return false;
     out->count=0;
     for(int i=0;i<m.unitCount;++i) {
-        if(!UnitChanged(m.unit[i]))continue;
-        if(!detail::SaveUnit(m.unit[i],&out->line[out->count])){out->count=0;return false;}
-        ++out->count;
+        const Unit& u=m.unit[i];
+        if(PartChanged(u) && !detail::SaveUnit(u,&out->line[out->count++])){out->count=0;return false;}
+        if(CrewChanged(u) && !detail::SaveCrew(u,&out->line[out->count++])){out->count=0;return false;}
     }
     return true;
 }
@@ -448,14 +527,16 @@ inline bool CollectSave(const Menu& m,SaveSet* out) noexcept {
 inline void MarkSaved(Menu& m) noexcept {
     for(int i=0;i<m.unitCount;++i) {
         Unit& u=m.unit[i];
-        if(UnitChanged(u))u.refused=false;
-        u.squadLoaded=u.squad;u.vehicleLoaded=u.vehicle;
+        if(PartChanged(u))u.refused=false;
+        if(CrewChanged(u))u.crewRefused=false;
+        u.squadLoaded=u.squad;u.vehicleLoaded=u.vehicle;u.crewLoaded=u.crew;
     }
     m.open=false;m.level=Level::units;
 }
 
 // --- The snapshot the drawing layer consumes ---
-enum class RowText : std::uint8_t { squadUnit, vehicleUnit, save, ownLoad, soldier, stockVehicle, gunHE, gunAP, guns, pylon };
+enum class RowText : std::uint8_t { squadUnit, vehicleUnit, save, ownLoad, soldier, stockVehicle, gunHE, gunAP, guns, pylon,
+                                    crewUnit, crew };
 struct ViewRow {
     RowText text=RowText::save;
     const wchar_t* label=nullptr;   // the unit's, the soldier kind's, the store's label; nullptr none
@@ -470,7 +551,8 @@ struct ViewRow {
     bool editing=false;             // its fields are open; `field` the one being changed
     int field=-1;
     bool changed=false;             // a unit edited since it was loaded
-    bool refused=false;             // a unit whose ini value the parser refused
+    bool refused=false;             // a unit whose ini value the parser refused (a crew row: its crew value)
+    bool inherit=false;             // a crew row wearing the default's colours (SupportCrewColour; the default's own: stock)
 };
 struct ViewColumn { int count=0,first=0,total=0; ViewRow row[kPageMost]; };
 struct View { bool open=false,dirty=false; Level level=Level::units; ViewColumn units,rows; };
@@ -479,8 +561,8 @@ inline ViewRow UnitRow(const Menu& m,int i) noexcept {
     ViewRow r;r.index=i;r.cursor=i==m.unitAt;
     if(i>=m.unitCount){r.text=RowText::save;return r;}
     const Unit& u=m.unit[i];
-    r.text=IsSquad(u) ? RowText::squadUnit : RowText::vehicleUnit;r.label=u.label;
-    r.changed=UnitChanged(u);r.refused=u.refused;
+    r.text=IsSquad(u) ? RowText::squadUnit : IsCrewUnit(u) ? RowText::crewUnit : RowText::vehicleUnit;r.label=u.label;
+    r.changed=UnitChanged(u);r.refused=u.refused || u.crewRefused;
     return r;
 }
 inline ViewRow SquadRow(const Unit& u,int i) noexcept {
@@ -492,7 +574,14 @@ inline ViewRow SquadRow(const Unit& u,int i) noexcept {
     r.primary=Rgba(u.squad.look[i].primary);r.secondary=Rgba(u.squad.look[i].secondary);
     return r;
 }
+inline ViewRow CrewViewRow(const Unit& u,int i) noexcept {
+    ViewRow r;r.index=i;r.text=RowText::crew;r.inherit=!u.crew.set;r.refused=u.crewRefused;
+    r.primary=Rgba(u.crew.look.primary);r.secondary=Rgba(u.crew.look.secondary);
+    return r;
+}
+// A vehicle's or a crew unit's row `i`.
 inline ViewRow VehicleRow(const Unit& u,int i) noexcept {
+    if(i==CrewRow(u))return CrewViewRow(u,i);
     ViewRow r;r.index=i;
     if(!u.vehicle.On()){r.text=RowText::stockVehicle;return r;}
     if(i==0){r.text=IsTank(u) ? (u.vehicle.apGun ? RowText::gunAP : RowText::gunHE) : RowText::guns;return r;}

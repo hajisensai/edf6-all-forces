@@ -55,6 +55,24 @@ void Rewrites() {
     Check(ok && out==kIni,"removing an absent key changes nothing");
 }
 
+// Stage 5: a crew's colours, the default's (no key suffix) and the mission crews'; refused where the parser refuses.
+void Crews() {
+    bool ok=false;wchar_t why[200];
+    std::string out=Edit(kIni,LoadoutField::crew,L"TANK_CREWED",0,L"X:FFFFFF",&ok);
+    std::string want=kIni;
+    want.insert(want.find("\r\n\r\n[Other]")+2,"SupportCrewColour_TANK_CREWED=X:FFFFFF\r\n");
+    Check(ok && out==want,"a crew colour added like any other key");
+    out=Edit(kIni,LoadoutField::crew,L"",0,L"1E3A8A",&ok);
+    Check(ok && out.find("\r\nSupportCrewColour=1E3A8A\r\n")!=std::string::npos,"the default's key has no suffix");
+    out=Edit(kIni,LoadoutField::crew,kCrewMissionKey,0,L"FFFFFF",&ok);
+    Check(ok && out.find("SupportCrewColour_MISSION=FFFFFF")!=std::string::npos,"the mission crews' key");
+    Edit(kIni,LoadoutField::crew,L"SQUAD",12,L"1E3A8A",&ok,why);
+    Check(!ok && std::wcsstr(why,L"没有乘员"),"an infantry squad has no crew: refused, said why");
+    Edit(kIni,LoadoutField::crew,L"FIGHTER",0,L"1E3A8A:",&ok,why);
+    Check(!ok && std::wcsstr(why,L"乘员颜色"),"a malformed crew colour refused by the plugin's parser");
+    Check(LoadoutKey(LoadoutField::preset,L"").empty() && LoadoutKey(LoadoutField::vehicle,L"").empty(),"only a crew has a default key");
+}
+
 void Shapes() {
     bool ok=false;
     std::string out=Edit("Enabled=1\nDebug=0",LoadoutField::preset,L"SQUAD",12,L"rifle",&ok);
@@ -161,6 +179,7 @@ void Process() {
 
 int main() {
     Rewrites();
+    Crews();
     Shapes();
     Refusals();
     RoundTrip();
