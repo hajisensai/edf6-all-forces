@@ -1407,9 +1407,8 @@ void LogDrivenVehicle(const unsigned char* h,unsigned char* v) noexcept {
     }
     const auto* target=At<const unsigned char*>(v,kVehicleTarget);
     const float targetAt=Readable(target,kPosition+12) ? npc::Dist(Pos(v),Pos(target)) : -1.0f;
-    // The stock fire gate's bytes (docs/npc-ai-design.md §8.3): TacticsMode +0xE08, engaged +0x4A0, attack permission +0xE09.
-    Log("NPCAI driver %p runs the AI pass of v=%p (not on the AI list); target %p at %.0f m; gate e08=%u 4a0=%u e09=%u; "
-        "rounds left seat:n [%s]",h,v,target,targetAt,v[0xE08],v[0x4A0],v[0xE09],rounds);
+    Log("NPCAI driver %p runs the AI pass of v=%p (not on the AI list); target %p at %.0f m; rounds left seat:n [%s]",h,v,target,
+        targetAt,rounds);
 }
 
 void DriveVehicleAi(unsigned char* h,const float* dt) noexcept {
