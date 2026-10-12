@@ -404,34 +404,9 @@ bool TankCommand(const void* v,const Command& c,const ObjRef& focus) noexcept {
     }
     return false;
 }
-// The object's activation (docs/debug-spawn.md: what CreateEnemy / CreateFriend run on a spawn whose bool is set): +0x4A0 = 1,
-// its slot 26, then 0x54D180. The stock fire gates read that byte as "engaged" (the tanks' 0x6616AA..0x661791, the mechs'
-// 0x63C1C0, the Proteus's seat loop 0x649067: no target reaches the fire step while it is 0; docs/npc-ai-design.md §8.3). A
-// script's CreateVehicle2 / a call-in / a drop leaves it 0 until something else activates the object, so a real NPC driver
-// aimed, turned and never fired (measured 2026-10-12: a Nix and a Vegalta on the range, targets 46-233 m away for 2.5 min,
-// +0x4A0 = 0 the whole time, not one round; once it turned 1 they fired within seconds). The AI an NPC driver runs gets the
-// activation the stock AI vehicles get at their spawn, once (the function returns at once when the byte is set).
-namespace {
-constexpr unsigned kActivate=0x548D50;
-constexpr std::size_t kEngaged=0x4A0;
-const unsigned char kActivateSig[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x80,0xB9,0xA0,0x04,0x00,0x00,0x00,0x48,0x8B,0xD9};   // debug_spawn.cpp
-using ActivateFn=void(__fastcall*)(void*);
-bool ActivateOk() noexcept {
-    static int ok=0;
-    if(!ok)ok=Matches(kActivate,kActivateSig,sizeof(kActivateSig)) ? 1 : -1;
-    return ok>0;
-}
-void EngageForNpcDriver(unsigned char* v) noexcept {
-    if(v[kEngaged] || !ActivateOk())return;
-    reinterpret_cast<ActivateFn>(image+kActivate)(v);
-    Log("NPCPOST v=%p activated for its NPC driver (+0x4A0 %u: the stock fire gates' \"engaged\")",v,v[kEngaged]);
-}
-}  // namespace
-
 bool PrepareNpcVehicleAi(unsigned char* v) noexcept {
     const Family family=FamilyOf(v);
     if(family==Family::none || !NpcDriver(v) || !IsOnlineAuthority(v))return false;
-    EngageForNpcDriver(v);
     if(family==Family::mech && !EnsureMechAiSetup(v))return false;
     for(auto& p:posts)if(p.ref.Is(v) && p.focus) {
         FocusCheck checked{p.focus};
