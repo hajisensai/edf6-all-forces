@@ -568,7 +568,18 @@ int main() {
         Expect(soldier->target.Is(enemy) && !behavior.fire && At<unsigned char>(human,kTrigger)==0 &&
                At<float>(human,kLookPitch)<atLock,
                "a target due to open: kept, aimed up at its weak spot, the trigger held (production Drive)");
-        heldTarget=nullptr;weakAimSet=false;available.held[0]=-1;
+        // Its look already on the weak spot (every other test of the shot passes): held all the same while due to open;
+        // released (open), the shot goes.
+        const float up[3]={weakAim[0]-eyePoint[0],weakAim[1]-eyePoint[1],weakAim[2]-eyePoint[2]};
+        Put<float>(human,kViewPitch,-std::atan2(up[1],std::sqrt(up[0]*up[0]+up[2]*up[2])));Put<float>(human,kViewYaw,std::atan2(up[0],up[2]));
+        available.arm[0]=npc::Arm{100,0,10,false,true,false};
+        behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
+        Expect(!behavior.fire && At<unsigned char>(human,kTrigger)==0,"its look on the weak spot, due to open: still no shot");
+        heldTarget=nullptr;
+        behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
+        Expect(behavior.fire && At<unsigned char>(human,kTrigger)==1,"open: the shot at the weak spot goes");
+        weakAimSet=false;available.held[0]=-1;Put<unsigned char>(human,kTrigger,0);
+        Put<float>(human,kViewPitch,0.0f);Put<float>(human,kViewYaw,0.0f);
         Put<unsigned>(human,kControlMask,kMaskMove);
         markEnemy=enemy;
         result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::focus,{}},ObjRef::Of(other),ObjRef::Of(enemy));
