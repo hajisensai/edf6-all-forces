@@ -22,14 +22,14 @@ Four groups (GROUPS), each written whole or not at all:
              prints '＊＊不明な再生キー＊＊'. The text is read at install from the subtitle plugin the player has in
              EDF4.1/mods/Plugins (subtitles.txt: Simplified, subtitles_zh.txt: Traditional, subtitles_en.txt): CN gets the
              Traditional, SC the Simplified, EN / JA / KR the English (the plugin has no Japanese or Korean text); a key
-             with no line there gets the English line, else its cue name. The speaker column is empty. None of the text is shipped with the tools.
+             with no line there gets the English line, else its cue name. The speaker (name) member is empty. None of the text is shipped with the tools.
 
     build(root6, root41)   -> {path under Mods: bytes}      everything, in memory (the voice AWBs are ~1.6 GB together)
     install(root6, root41, say) -> (written, skipped)       group by group, each written as soon as it is converted
     remove(root6) -> (deleted, kept)
 
 A file of the same name in Mods that the ledger does not record as ours (another mod's) is never written over: that
-group is left out and said so. A group installed by this VERSION from the same EDF4.1 files is not converted again.
+group is left out and said so. A group installed by this version (VERSIONS) from the same EDF4.1 files is not converted again.
 """
 from __future__ import annotations
 
@@ -50,8 +50,10 @@ import rootcpk  # noqa: E402
 from modfiles import load_json, sha256, sha256_file  # noqa: E402
 
 OWNER = 'edf41sound'   # pylib/ledger.py OWNERS
-VERSION = 1            # raise when a converter's output changes: installed groups are converted again
-STAMP = '.edf41sound.json'   # Mods/: {group: {'version': VERSION, 'source': {file: [size, mtime ns]}}}
+# raise a group's number when its converter's output changes: that group (only) is converted again. table 2: the rows
+# gained the 'name' / 'caption' member names the game reads them by (version 1 wrote unnamed [speaker, text] lists).
+VERSIONS = {'weapon': 1, 'voice.JA': 1, 'voice.EN': 1, 'table': 2}
+STAMP = '.edf41sound.json'   # Mods/: {group: {'version': VERSIONS[group], 'source': {file: [size, mtime ns]}}}
 
 Blob = bytes | bytearray
 
@@ -207,16 +209,32 @@ def cue_keys(root41: str) -> list[str]:
     return sorted(keys)
 
 
+def row_schema(rows: dsgo.Node) -> dict[int, str]:
+    """The member names every row of EDF6's voice table carries ({0: 'name', 1: 'caption'}). The game reads a row's
+    speaker and caption BY these names (EDF.dll 0x7B17F0: a column lookup, 0x55A30, that answers -1 for a row without
+    them and leaves the reader with a null node: the access violation of 4.1 mission M126), so a row we add must carry
+    exactly them; the schema is taken from the table itself, and a table whose rows disagree is refused."""
+    schemas = {tuple(sorted(r.names.items())) for r in rows.items}
+    if len(schemas) != 1:
+        raise ValueError(f'the voice table rows have {len(schemas)} different member layouts')
+    schema = dict(next(iter(schemas)))
+    if sorted(schema.values()) != ['caption', 'name'] or sorted(schema) != [0, 1]:
+        raise ValueError(f'the voice table rows are laid out {schema}, expected name / caption')
+    return schema
+
+
 def add_rows(table: bytes, keys: list[str], text: dict[str, str]) -> bytes:
-    """EDF6's voice table (a DSGO: root[0] holds one [speaker, caption] row per key, named by it) with a row more for
-    each of `keys` it lacks. EDF6's rows are not touched; a key EDF6 has keeps EDF6's row."""
+    """EDF6's voice table (a DSGO: root[0] holds one {name: speaker, caption: text} row per key, named by it) with a row
+    more for each of `keys` it lacks. EDF6's rows are not touched; a key EDF6 has keeps EDF6's row."""
     doc = dsgo.parse(table)
     rows = doc.root.items[0]
+    schema = row_schema(rows)
     have = set(rows.names.values())
     for key in keys:
         if key not in have:
+            fields = {'name': '', 'caption': text.get(key) or key}   # 4.1's subtitles have no speaker
             rows.names[len(rows.items)] = key
-            rows.items.append(dsgo.Node(['', text.get(key) or key]))
+            rows.items.append(dsgo.Node([fields[schema[i]] for i in sorted(schema)], dict(schema)))
     return dsgo.write(doc)
 
 
@@ -274,9 +292,9 @@ def _foreign(led: ledger.Ledger, rel: str) -> bool:
 
 
 def _current(led: ledger.Ledger, stamp: dict, group: str, source: dict[str, list[int]]) -> bool:
-    """`group` is installed by this VERSION from these 4.1 files, every file still as written."""
+    """`group` is installed by its current version from these 4.1 files, every file still as written."""
     entry = stamp.get(group, {})
-    if entry.get('version') != VERSION or entry.get('source') != source:
+    if entry.get('version') != VERSIONS[group] or entry.get('source') != source:
         return False
     mine = set(led.owned_by(OWNER))
     return all(ledger.key(rel) in mine and os.path.exists(led.disk(rel)) for rel in GROUPS[group])
@@ -317,7 +335,7 @@ def install(root6: str, root41: str | None, say: Callable[[str], None] = print) 
                 continue
             written.append(led.put(OWNER, rel, data))
         del files
-        stamp[group] = {'version': VERSION, 'source': source}
+        stamp[group] = {'version': VERSIONS[group], 'source': source}
         with open(stamp_path, 'w', encoding='utf-8') as f:
             json.dump(stamp, f, indent=1)
     led.release(OWNER, sorted(set(led.owned_by(OWNER)) - wanted))

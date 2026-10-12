@@ -23,9 +23,15 @@
 // change). Ours is loaded after that call with flag 1, so it goes with them and comes back with the language. The language is
 // the game's own index, dword at EDF+0x20B2B34 into the table at EDF+0x1F56208 (ja, en, kr, cn, sc).
 //
-// Where the files are: both paths are app:/sound/adx/<name> (the game binds that to ./SOUND/PC, as for TIKYUUX_SE.ACB);
-// the installer puts them in Mods/SOUND/PC, which EDFModLoader's redirector (EDF.dll+741C0, "./Mods/" prefix) is expected to
-// serve. A file found only there is said in the log, so a bank that then fails to load is understood.
+// Where the files are, and the path the game is given. The installer writes them to <game>\Mods\SOUND\PC. The game turns a
+// path into a file through its prefix table (EDF.dll 0x6FF0A7..: "APP:/SOUND/ADX" and "app:/sound/adx" -> "./SOUND/PC",
+// then "app:/" -> "/cri_bind/") and EDFModLoader hooks the stream Open it ends in (EDF.dll+741C0, vtable 0x175F0F0 slot 1):
+// ONLY a path that starts "/cri_bind/" is tried again as "./Mods/<rest>". The stock banks' app:/sound/adx/<name> becomes a
+// plain "./sound/pc/<name>" in the game folder, which the redirector never sees: that is why the first real run loaded
+// neither bank (a file only under Mods was "not found" there). So a bank under Mods is asked for as app:/sound/pc/<name>:
+// no "sound/adx" rule matches it, the "app:/" rule gives /cri_bind/sound/pc/<name>, the redirector serves Mods\SOUND\PC\<name>.
+// (The weapon SGO / voice tables in Mods\MISSION reach the game the same way.) 0x7B2500 is void: whether a voice bank got
+// in is read from the SeManager's bank list (std::list at +0xE0, its size at +0xE8) before and after.
 #include "crew.h"
 #include "memory.h"
 
@@ -51,7 +57,8 @@ constexpr int kOurType=0x41;                        // no lookup asks for it; th
 constexpr int kLanguageCount=5;
 
 const wchar_t kWeaponFile[]=L"EDF41_WEAPON_SE.ACB";
-const wchar_t kWeaponPath[]=L"app:/sound/adx/edf41_weapon_se.acb";
+const wchar_t kWeaponPath[]=L"app:/sound/pc/edf41_weapon_se.acb";   // the "/cri_bind/" route, see the top of this file
+constexpr std::size_t kBankListSize=0xE8;           // SeManager: size of the std::list of banks that starts at +0xE0
 
 // MSVC's std::wstring as the game's code reads it (the game builds with the same layout): a pointer or eight inline
 // characters, size, capacity. A capacity of 8 or more makes the callee read the pointer; it copies, never frees ours.
@@ -81,22 +88,17 @@ std::atomic<void*> weaponBankPtr{nullptr};           // set once the bank is loa
 std::atomic<void*> weaponSystem{nullptr};            // the sound system it was loaded into
 std::atomic<long> fallbackHits{0};
 
-// <game>\<sub>\<file> (sub: L"SOUND\\PC" or L"Mods\\SOUND\\PC") is a file.
-bool FileThere(const wchar_t* sub,const wchar_t* file) noexcept {
+// <game>\Mods\SOUND\PC\<file> is a file (the only place the installer writes to).
+bool ModsFileThere(const wchar_t* file) noexcept {
     wchar_t path[MAX_PATH];
     const DWORD n=GetModuleFileNameW(nullptr,path,MAX_PATH);
     wchar_t* slash=n && n<MAX_PATH ? wcsrchr(path,L'\\') : nullptr;
     if(!slash)return false;
     *slash=0;
     wchar_t full[MAX_PATH];
-    if(swprintf_s(full,L"%ls\\%ls\\%ls",path,sub,file)<0)return false;
+    if(swprintf_s(full,L"%ls\\Mods\\SOUND\\PC\\%ls",path,file)<0)return false;
     const DWORD a=GetFileAttributesW(full);
     return a!=INVALID_FILE_ATTRIBUTES && !(a&FILE_ATTRIBUTE_DIRECTORY);
-}
-bool SoundFileThere(const wchar_t* file,bool& onlyInMods) noexcept {
-    const bool mods=FileThere(L"Mods\\SOUND\\PC",file),loose=FileThere(L"SOUND\\PC",file);
-    onlyInMods=mods && !loose;
-    return mods || loose;
 }
 
 const wchar_t* NameOf(const void* name) noexcept {    // a game std::wstring's characters
@@ -109,12 +111,10 @@ void LoadWeaponBank() noexcept {
     if(!system || weaponSystem.load()==system)return;
     weaponSystem.store(system);
     weaponBankPtr.store(nullptr);
-    bool onlyInMods=false;
-    if(!SoundFileThere(kWeaponFile,onlyInMods)) {
-        Log("EDF41SOUND weapon bank %ls not installed: 4.1's weapon sounds are off",kWeaponFile);
+    if(!ModsFileThere(kWeaponFile)) {
+        Log("EDF41SOUND weapon bank Mods\\SOUND\\PC\\%ls not installed: 4.1's weapon sounds are off",kWeaponFile);
         return;
     }
-    if(onlyInMods)Log("EDF41SOUND %ls only under Mods\\SOUND\\PC: served by the mod loader's redirect, if it covers sounds",kWeaponFile);
     const GameString path{kWeaponPath,0,wcslen(kWeaponPath),wcslen(kWeaponPath)};
     BankRef ref{};
     const bool ok=reinterpret_cast<BankLoadFn>(image+kBankLoad)(&ref,&path,kOurType,1,false);
@@ -149,15 +149,17 @@ bool __fastcall LookupHook(void* system,CueRef* out,int type,const void* name) {
     return true;
 }
 
-// The voice file name (L"EDF41_VOICE.JA.AWB") for a language, if both of its files are there.
-bool VoiceFilesThere(const wchar_t* lang,wchar_t* awbName,std::size_t capacity,bool& onlyInMods) noexcept {
+// How many banks the SeManager holds (the std::list's size).
+std::uint64_t BankCount(const void* manager) noexcept {
+    return *reinterpret_cast<const std::uint64_t*>(static_cast<const char*>(manager)+kBankListSize);
+}
+
+// The voice file name (L"EDF41_VOICE.JA.AWB") for a language, if both of its files are in Mods\SOUND\PC.
+bool VoiceFilesThere(const wchar_t* lang,wchar_t* awbName,std::size_t capacity) noexcept {
     wchar_t upper[3]={lang[0]>=L'a' ? static_cast<wchar_t>(lang[0]-32) : lang[0],lang[0] && lang[1]>=L'a' ? static_cast<wchar_t>(lang[1]-32) : lang[1],0};
     wchar_t list[64];
     if(swprintf_s(awbName,capacity,L"EDF41_VOICE.%ls.AWB",upper)<0 || swprintf_s(list,L"EDF41_VOICE.%ls_LIST.AWE",upper)<0)return false;
-    bool a=false,b=false;
-    if(!SoundFileThere(awbName,a) || !SoundFileThere(list,b))return false;
-    onlyInMods=a || b;
-    return true;
+    return ModsFileThere(awbName) && ModsFileThere(list);
 }
 
 // The current language's bank, else (kr / cn / sc, which 4.1 has no recording of) Japanese, else English.
@@ -170,14 +172,17 @@ void LoadVoiceBank(void* manager) noexcept {
     const int tries=index<=1 ? 1 : 3;                  // ja and en have their own; the rest fall back
     for(int i=0;i<tries;++i) {
         wchar_t name[48];
-        bool onlyInMods=false;
-        if(!VoiceFilesThere(order[i],name,48,onlyInMods))continue;
+        if(!VoiceFilesThere(order[i],name,48))continue;
         wchar_t path[96];
-        if(swprintf_s(path,L"app:/sound/adx/%ls",name)<0)return;
-        for(wchar_t* p=path+15;*p;++p)if(*p>=L'A' && *p<=L'Z')*p=static_cast<wchar_t>(*p+32);
+        if(swprintf_s(path,L"app:/sound/pc/%ls",name)<0)return;
+        for(wchar_t* p=path+14;*p;++p)if(*p>=L'A' && *p<=L'Z')*p=static_cast<wchar_t>(*p+32);
+        const std::uint64_t before=BankCount(manager);
         reinterpret_cast<VoiceLoadFn>(image+kVoiceLoad)(manager,path,1);
-        Log("EDF41SOUND voice bank %ls loaded for language %ls (manager=%p)%ls",path,language,manager,
-            onlyInMods ? L" [a file only under Mods\\SOUND\\PC]" : L"");
+        const std::uint64_t after=BankCount(manager);
+        if(after>before)Log("EDF41SOUND voice bank %ls loaded for language %ls (manager=%p, banks %llu -> %llu)",path,language,manager,
+                            static_cast<unsigned long long>(before),static_cast<unsigned long long>(after));
+        else Log("EDF41SOUND voice bank %ls was NOT added for language %ls (manager=%p, banks %llu)",path,language,manager,
+                 static_cast<unsigned long long>(after));
         return;
     }
     Log("EDF41SOUND no EDF41_VOICE bank for language %ls: 4.1's voices are off",language);

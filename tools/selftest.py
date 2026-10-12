@@ -7203,17 +7203,33 @@ def awb_hca_seconds_synthetic() -> None:
 @test
 def edf41_sounds_captions_synthetic() -> None:
     """tools/edf41_sounds.py: the caption key is the cue cut at the first _E / _S; add_rows leaves every row of the table
-    as it was, gives a missing key one [speaker '', text] row (text, else the key) and keeps the row of a key the table has."""
+    as it was, gives a missing key a row with EDF6's own member names (name = '' , caption = text, else the key: the game
+    reads a row BY those names, an unnamed list is a null node and crashed M126) and keeps the row of a key the table has;
+    a table whose rows are not laid out name / caption is refused."""
     import dsgo
     import edf41_sounds as s
     assert [s.cut_key(c) for c in ('A001AA', 'A001AA_E', 'Z105H_S', 'A_E_S', 'VT_B1')] == ['A001AA', 'A001AA', 'Z105H', 'A', 'VT_B1']
-    rows = dsgo.Node([dsgo.Node(['ス', '日本語']), dsgo.Node(['ス', 'hold'])], {0: 'K1', 1: 'K2'})
+
+    def row(name: str, caption: str) -> dsgo.Node:
+        return dsgo.Node([name, caption], {0: 'name', 1: 'caption'})
+
+    rows = dsgo.Node([row('ス', '日本語'), row('ス', 'hold')], {0: 'K1', 1: 'K2'})
     table = dsgo.write(dsgo.Document(dsgo.Node([rows], {0: 'table'}), []))
     out = dsgo.parse(s.add_rows(table, ['K2', 'N1', 'N2'], {'N1': 'text one', 'K2': 'new'}))
     t = out.root.items[0]
     by = {t.names[i]: [str(x) for x in t.items[i].items] for i in t.names}
     assert by == {'K1': ['ス', '日本語'], 'K2': ['ス', 'hold'], 'N1': ['', 'text one'], 'N2': ['', 'N2']}, by
     assert [t.names[0], t.names[1]] == ['K1', 'K2']   # the rows kept their places
+    # the invariant the game depends on: every row, ours included, answers get('name') and get('caption')
+    assert all(r.names == {0: 'name', 1: 'caption'} and r.get('name') == r.items[0] and r.get('caption') == r.items[1] for r in t.items)
+    unnamed = dsgo.Node([dsgo.Node(['ス', 'x'])], {0: 'K1'})
+    bad = dsgo.write(dsgo.Document(dsgo.Node([unnamed], {0: 'table'}), []))
+    try:
+        s.add_rows(bad, ['N1'], {})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('rows without name / caption members are refused')
 
 
 @test
@@ -7244,6 +7260,15 @@ def edf41_sounds_install() -> None:
         assert all(led.owners(rel) == [s.OWNER] for rel in every)
         made.clear()
         assert s.install(game, 'edf41')[0] == [] and not made, made
+        stamp_path = os.path.join(game, 'Mods', s.STAMP)
+        with open(stamp_path, encoding='utf-8') as f:
+            stamp = json.load(f)
+        stamp['table']['version'] = 1   # installed by the version before the rows had member names
+        with open(stamp_path, 'w', encoding='utf-8') as f:
+            json.dump(stamp, f)
+        s.install(game, 'edf41')
+        assert made == ['table'], made   # only the group whose output changed is converted again
+        made.clear()
         s.remove(game)
         other = os.path.join(game, 'Mods', 'SOUND', 'PC', 'EDF41_WEAPON_SE.ACB')
         os.makedirs(os.path.dirname(other), exist_ok=True)
@@ -7368,6 +7393,7 @@ def edf41_voice_real() -> None:
         by = {got.names[i]: got.items[i] for i in got.names}
         assert len(got.items) == len(orig.items) + len(keys) and set(by) == set(orig.names.values()) | set(keys)
         assert all(by[orig.names[i]].items == orig.items[i].items for i in orig.names), lang
+        assert all(r.names == {0: 'name', 1: 'caption'} for r in got.items), lang   # the game reads a row by these names
     en = dsgo.parse(tables[s.table_rel('EN')]).root.items[0]
     row = next(en.items[i] for i in en.names if en.names[i] == 'A001AA')
     line = s.read_captions(s.plugin_path(r41, s.CAPTIONS['EN'])).get('A001AA')
