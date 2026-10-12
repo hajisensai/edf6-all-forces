@@ -35,6 +35,7 @@
 #include "transport.h"
 #include "vhud.h"
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -121,9 +122,10 @@ struct Soldier {
     int arm,wantArm,armMiss;
     ObjRef target;
     const void* losObject;   // what the cached map ray was cast at
-    ObjRef boardV;           // a board order (§7): the vehicle, the seat it was given, when
+    ObjRef boardV;           // a board order (§7): the vehicle, the seat it was given, when it last got nearer
     int boardSeat;
     ULONGLONG boardAt;
+    float boardBest;         // the nearest it has been to its seat's riding point under this order (npc::BoardWalk)
     float fallTo[3];         // the fall-back's point (re-picked every kFallMs)
     ULONGLONG fallAt;
     npc::navigation::State navigation;   // connected ground route, tied to this ObjRef lifetime
@@ -865,7 +867,12 @@ Orders OrdersOf(const Squad* q,const float* anchor) noexcept {
 // seat-clear hook; real soldiers occupy driver seats as well as gunner and passenger seats.
 constexpr unsigned kRideVehicle=0x5765E0;
 constexpr std::size_t kHumanMask=0x31C,kSeatClass=0x30,kSeatEnable=0x34,kHumanSeat=0x1540,kHumanRiding=0x1548;
-constexpr ULONGLONG kBoardMs=20000;        // a board order not done in this long is dropped
+// A board order that has not brought the soldier kBoardProgress m nearer its seat in this long is dropped (the user's
+// report #12, 2026-10-11: no NPC ever got into the Proteus's driver seat or the Barga). Not a deadline for the whole walk:
+// the seats are offered up to kBoardFar (150 m) away and a soldier walks them at ~2.3 m/s (measured: 95 m to the
+// Proteus's driver seat in 48 s), so a fixed 20 s dropped every far order half way and the squad walked them back.
+constexpr ULONGLONG kBoardMs=20000;
+constexpr float kBoardProgress=1.0f;
 const unsigned char kRideSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x18,0x48,0x89,0x7C,0x24,0x20,0x48};
 const unsigned char kRideReleaseSig[]={0x49,0x8B,0x5E,0x08,0x48,0x85,0xDB,0x74,0x27,0x8B,0xC7,0xF0,0x0F,0xC1,0x43,0x08};   // 0x57690D
 bool rideOk=false;
@@ -900,7 +907,12 @@ bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {
     auto v=static_cast<unsigned char*>(const_cast<void*>(s.boardV.obj));
     if(!v || !Readable(v,kSeatCount+8) || !s.boardV.Is(v) || v[kDead] || ms-s.boardAt>kBoardMs || s.boardSeat<0 || static_cast<unsigned>(s.boardSeat)>=SeatCount(v) ||
        !IsOnlineAuthority(h) || !OnlineMaySeatNpc(v) || !SeatTakes(v,static_cast<unsigned>(s.boardSeat),h)) {
-        Log("NPCAI soldier %p: board order dropped (%s)",h,ms-s.boardAt>kBoardMs ? "too long" : "the seat or the vehicle is gone");
+        float at[3]{},reach=0.0f;
+        const bool seen=v && s.boardV.Is(v) && Readable(v,kSeatCount+8) && s.boardSeat>=0 &&
+            SeatPoint(v,static_cast<unsigned>(s.boardSeat),at,&reach);
+        Log("NPCAI soldier %p: board order dropped (%s) seat %d point (%.1f,%.1f,%.1f) reach %.1f soldier (%.1f,%.1f,%.1f) %.1f m off",
+            h,ms-s.boardAt>kBoardMs ? "too long" : "the seat or the vehicle is gone",s.boardSeat,at[0],at[1],at[2],reach,
+            pos[0],pos[1],pos[2],seen ? npc::Dist(pos,at) : -1.0f);
         s.boardV=ObjRef{};
         return false;
     }
@@ -911,7 +923,11 @@ bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {
     }
     // RideVehicle does not check distance itself. Match the seat's real spherical reach, including height;
     // horizontal distance alone would seat a soldier standing on a different floor.
-    if(npc::Dist(pos,at)>=reach) {
+    const float off=npc::Dist(pos,at);
+    npc::BoardWalk walk{s.boardBest,s.boardAt};
+    npc::BoardWalking(walk,off,ms,kBoardMs,kBoardProgress);   // getting nearer renews it (the check above drops a stale one)
+    s.boardBest=walk.best;s.boardAt=walk.since;
+    if(off>=reach) {
         // The native riding point is a trigger centre, not necessarily a walkable foot position.
         // Project only within that trigger's vertical reach, never onto a roof or another floor.
         const float above[3]={at[0],at[1]+0.3f,at[2]},below[3]={at[0],at[1]-reach,at[2]};
@@ -1359,6 +1375,38 @@ bool BargaReady(unsigned char* v,void* const* vt) noexcept {
     return built;
 }
 
+// Each vehicle an NPC driver runs the AI pass of, once in kDrivenLogMs (Debug): its seats' weapons' rounds left, so a
+// log tells which of several driven vehicles fires (the rounds go down) and which only drives.
+constexpr ULONGLONG kDrivenLogMs=10000;
+constexpr int kDrivenLogged=16;
+struct DrivenLog { ObjRef v; ULONGLONG at; };
+DrivenLog drivenLogged[kDrivenLogged]{};
+void LogDrivenVehicle(const unsigned char* h,unsigned char* v) noexcept {
+    if(!Cfg().debug)return;
+    const ULONGLONG ms=GameMs();
+    DrivenLog* slot=nullptr;
+    for(auto& e:drivenLogged) {
+        if(e.v.Is(v)){slot=&e;break;}
+        if(!slot || e.at<slot->at)slot=&e;
+    }
+    if(slot->v.Is(v) && ms-slot->at<kDrivenLogMs)return;
+    slot->v=ObjRef::Of(v);slot->at=ms;
+    char rounds[160]{};std::size_t used=0;
+    for(unsigned k=0;k<SeatCount(v) && k<edf::kMaxSeats;++k) {
+        const unsigned char* seat=SeatAt(v,k);
+        const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
+        const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
+        for(std::uint64_t i=0;i<n && i<4 && Readable(holders,(i+1)*8);++i) {
+            const auto w=Readable(holders[i],kHolderWeapon+8) ? At<const unsigned char*>(holders[i],kHolderWeapon) : nullptr;
+            const int left=Readable(w,kWeaponAmmo+4) ? At<std::int32_t>(w,kWeaponAmmo) : -1;
+            const int wrote=std::snprintf(rounds+used,sizeof(rounds)-used,"%s%u:%d",used ? " " : "",k,left);
+            if(wrote<0 || static_cast<std::size_t>(wrote)>=sizeof(rounds)-used)break;
+            used+=static_cast<std::size_t>(wrote);
+        }
+    }
+    Log("NPCAI driver %p runs the AI pass of v=%p (not on the AI list); rounds left seat:n [%s]",h,v,rounds);
+}
+
 void DriveVehicleAi(unsigned char* h,const float* dt) noexcept {
     static const void* lastV=nullptr;static ULONGLONG lastFrame=0;
     if(!dt || !Cfg().npcBoarding || h[kDead])return;
@@ -1375,8 +1423,7 @@ void DriveVehicleAi(unsigned char* h,const float* dt) noexcept {
     if(lastV==v && lastFrame==frame)return;   // once a frame
     lastV=v;lastFrame=frame;
     if(kind==AiPass::barga && !BargaReady(v,vt))return;
-    static ULONGLONG loggedAt=0;
-    if(GameMs()-loggedAt>10000){loggedAt=GameMs();Log("NPCAI driver %p runs the AI pass of v=%p (not on the AI list)",h,v);}
+    LogDrivenVehicle(h,v);
     reinterpret_cast<AiPassFn>(vt[kSlotAiPass])(v,dt);
     if(kind==AiPass::barga)return;   // its action runs inside its pass
     // The class's AI action when no slot 6 registered one (see above).
@@ -2014,7 +2061,7 @@ bool AssignBoard(unsigned char* v,unsigned char* h,ULONGLONG ms) noexcept {
         ms-s->boardAt<=kBoardMs && SeatTakes(v,static_cast<unsigned>(s->boardSeat),h);
     for(int priority=0;priority<3;++priority)for(unsigned k=0;k<SeatCount(v) && k<edf::kMaxSeats;++k) {
         if(SeatPriority(v,k)!=priority || Reserved(v,k,ms,h) || !SeatTakes(v,k,h))continue;
-        s->seen=ms;s->boardV=ObjRef::Of(v);s->boardSeat=static_cast<int>(k);s->boardAt=ms;
+        s->seen=ms;s->boardV=ObjRef::Of(v);s->boardSeat=static_cast<int>(k);s->boardAt=ms;s->boardBest=FLT_MAX;
         return true;
     }
     return false;

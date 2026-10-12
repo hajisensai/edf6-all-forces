@@ -372,6 +372,15 @@ inline Steer ReturnToPost(const float* pos,const float* right,const float* forwa
     s.throttle=std::fabs(s.bearing)>turnOnSpot ? 0.0f : ramp;
     return s;
 }
+// A board order's walk (npcai.cpp Board): `best` the nearest the soldier has been to its seat's riding point, `since`
+// when it last got `step` m nearer than that. Each frame at `off` m: a new best renews the order. Dropped (false) once
+// `window` ms passed with no such step: a soldier still walking to a seat 150 m off keeps the order however long the walk
+// takes, one held up (blocked, pulled away, fighting) gives it up.
+struct BoardWalk { float best; std::uint64_t since; };
+inline bool BoardWalking(BoardWalk& w,float off,std::uint64_t now,std::uint64_t window,float step) noexcept {
+    if(off<w.best-step){w.best=off;w.since=now;}
+    return now-w.since<=window;
+}
 // The seat-0 stick block's values for it, as 0x661020 writes them.
 inline float SteerStick(const Steer& s) noexcept { return -Clamp(s.bearing*10.0f,-1.0f,1.0f); }
 inline float ThrottleStick(const Steer& s) noexcept { return -s.throttle; }

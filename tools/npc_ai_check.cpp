@@ -307,6 +307,28 @@ void Targets() {
           TargetScore(140.0f,150.0f,false)<TargetScore(160.0f,150.0f,true),"reach outranks the keep");
 }
 
+void Boards() {
+    using namespace npc;
+    // Measured 2026-10-12 (report #12): 95 m to the Proteus's driver seat at ~2.3 m/s, about 41 s.
+    BoardWalk w{1e30f,0};
+    bool kept=true;
+    for(std::uint64_t ms=0;ms<=41000;ms+=100)kept=kept && BoardWalking(w,95.0f-2.3f*static_cast<float>(ms)*0.001f,ms,20000,1.0f);
+    Check(kept,"a soldier walking 95 m keeps its board order past 20 s",w.best);
+    BoardWalk stuck{1e30f,0};
+    bool held=true;
+    for(std::uint64_t ms=0;ms<=19000;ms+=100)held=held && BoardWalking(stuck,40.0f,ms,20000,1.0f);
+    Check(held && !BoardWalking(stuck,40.0f,20100,20000,1.0f),"one that does not get nearer drops it after the window");
+    BoardWalk back{1e30f,0};
+    BoardWalking(back,30.0f,0,20000,1.0f);
+    bool pulled=true;
+    for(std::uint64_t ms=100;ms<=20000;ms+=100)pulled=BoardWalking(back,30.0f+static_cast<float>(ms)*0.001f,ms,20000,1.0f);
+    Check(pulled && !BoardWalking(back,50.0f,20100,20000,1.0f),"one pulled away from its seat drops it after the window");
+    BoardWalk jitter{1e30f,0};
+    BoardWalking(jitter,20.0f,0,20000,1.0f);
+    for(std::uint64_t ms=100;ms<=20000;ms+=100)BoardWalking(jitter,20.0f-0.5f*static_cast<float>(ms%200==0),ms,20000,1.0f);
+    Check(!BoardWalking(jitter,19.5f,20100,20000,1.0f),"jitter under the step does not renew it");
+}
+
 int main() {
     Intent();
     Lanes();
@@ -318,6 +340,7 @@ int main() {
     Marks();
     Posts();
     Targets();
+    Boards();
     std::printf("npc_ai_check: %d cases, %d failures\n",cases,failures);
     return failures ? 1 : 0;
 }
