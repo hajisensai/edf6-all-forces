@@ -3634,8 +3634,10 @@ def pack_install_upgrade_uninstall() -> None:
             # the out-of-game loadouts' files (tools/support_loadout.py): written after the plugin's ini, gone with uninstall 1
             loadout = {'OBJECT/EDF6VC_LO_TANK_4000000000000C81.SGO': b'loaded tank'}
             built_from: list[str] = []
+            # (the stand-in builder's files are what the ini wants: the install's stale-file cleanup keeps them)
             enter(patched(importlib.import_module('support_loadout'),
-                          build=lambda game, text, pending=(), errors=None: (built_from.append(text), dict(loadout))[1]))
+                          build=lambda game, text, pending=(), errors=None: (built_from.append(text), dict(loadout))[1],
+                          wanted_files=lambda text, pending=(): [rel.split('/')[-1] for rel in loadout]))
             with contextlib.redirect_stdout(io.StringIO()):
                 _pack_bundle(bundle, b'v1 ')
                 answers[:] = ['y']   # AT_C: back up the other mod's file and replace it

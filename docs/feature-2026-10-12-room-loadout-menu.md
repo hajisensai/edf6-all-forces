@@ -550,3 +550,126 @@ DLL（RelWithDebInfo，Ninja）编译通过，无警告。
 6. 乘员行：兵种图标、「乘员颜色（兵种）」文字在四种语言下放得下（340 px）；预览显示乘员队员（队长模板不用）。
 7. 一次保存写多行后生成器只启动一次、状态行「已保存 N 个单位」。
 8. 调色板颜色是 `CustomColor` 浮点按 sRGB 直接换算；游戏若按线性色处理，实机颜色会与 HQ 色块略有差别（HQ 绘制还乘了 `[ctx+8]` 的染色，0x7F9D50，未追）。
+## 阶段 R（审查修复）（2026-10-13，分支 `feat/rl-review-fix`，基于 `feat/room-loadout-menu` 72e2b45，只做了离线验证）
+
+没有启动 / 关闭游戏，没有往游戏目录写任何文件；只读了 EDF.dll（析构函数签名）与 Root.cpk（既有测试）。提交：d872936（审查 1–7）、
+fbc9f0b（EDF6Coop 成员属性接口 acda838 的改动），文档另一提交。
+
+### 1.（高）`RoomLoadout=0` / `Enabled=0` 时房间预同步照跑
+
+- 根因：`room_ui.cpp Frame` 无论 `on` 与否都 `TickRoomSync`；`InstallRoomUi` 无论配置都挂钩。
+- 修复：`InstallRoomUi` 在 `RoomLoadout=0` 时**什么都不核、不挂**直接返回（重启生效；ini 注释写明）。运行中 `Enabled` / `RoomLoadout`
+  改成 0：`Off()` 原样转调画面自己的 OnUpdate（原 ctx），不读按键、不调 0x8DAD00、不同步、不预览，只收回本画面画过的东西（`st.drew`）。
+  新增纯逻辑 `room_ui_logic.h PlanSwitches / LeaveOnForget`：只有「在线房间 + 两个开关都开」才 `TickRoomSync`；不再满足时
+  `LeaveRoomSync` 恰好一次（并 `ForgetRoomHostList`，见第 2 条）。新 ini 键 `RoomPreSync=1`（`crew.h roomPreSync`，`plugin.cpp` 读取并记日志）：
+  0 = 不公布、不读房主清单、不自动生成。旧 ini 由安装器既有的 `merge_ini`（`ADDED_HEADER` 段）补入，连同上方注释。
+- 测试：`room_ui` `SwitchesPlan`（12 项）；新 `room_ui_wiring`（`tests/room_ui_wiring_guard.py`，源码守卫：0 时 Install 在任何签名 / 挂钩前返回、
+  Off 帧不调 ReadRaw / GetInput / TickRoomSync / Step / TakeInput / DrawMenu、Tick 只在 `sw.tick` 下、Leave 只两处）；
+  `tools/selftest.py ini_merge_adds_room_presync`。
+
+### 2.（高）生成文件只增不减、关卡开始按目录扫描且 64 个封顶
+
+- 根因：`support_variants.cpp Find` 扫 `Mods/OBJECT/EDF6VC_NPC_*` / `EDF6VC_LO_*`，按名字顺序取前 64 个；预同步只往里加文件，
+  玩家自己的预设会被别人的文件挤出去静默变原版；恶意房主可以让客机无限生成。
+- 数据模型改为「本关能被要的文件」（`src/support_variants_logic.h MissionVariants`，`support_variants.h` 注释）：
+  本机配置（`ForEachConfiguredVariant`，上限 `kConfiguredVariantsMost` = 64×(12+2)+2 = 898）∪ 上一个房间校验过的房主清单
+  （`room_sync` 新增 `HostList` / `ForEachRoomHostVariant`，客机才有；离开房间（开局）仍保留，下个房间的 tick 替换、清单变坏 / 没有清单 /
+  自己成为房主 / 开关关闭时丢弃；另一线程读时走 SRWLOCK 副本；上限 `kHostVariantsMost` 512 = `kSetMost`，static_assert）∪ 待生成清单
+  最新 128 个合法名字（`PendingNames`）。三部分各自封顶，所以并集永远放得下：`kSupportVariantsMost` 64 → 1538。只预载其中磁盘上有的。
+  不再有 `FindFirstFileW`。名字一律过 `ParseVariantFile`（路径、别的文件进不来）。
+- Hello 的 Bloom 过滤器线格式固定 32 字节（256 位、3 个探针，不能加长）。改为：有房主清单时只放「清单 ∩ 本机已预载」（`HelloBloom`），
+  没有时放全部已预载。房主仍只在「所有对端都报有」时应用变体（`DecideVariant` 不变）。误报率（实测 / 理论 (1-e^{-3n/256})^3）：
+  n=10 0.1%、30 约 3%、64 约 15%、128 约 54%。误报的后果与以前相同：士兵颜色对端按原色生成；载具挂载对端 `Validate` 拒绝该计划。
+  有房主清单时 n = 清单里本机有的文件数（通常几十个），比以前「目录里所有文件」小得多。
+- 客机生成上限：`room_sync_logic.h kNotesPerRoom = 128`，每个房间最多往待生成清单记 128 个名字（换清单不重置，离开房间才重置）；
+  超出的计数为 `ownCapped`，不启动生成器，状态 `f`，界面新行 `roomSyncSelfCapped`（四语），日志一次。只记校验过的清单里的名字（原有）。
+- 安装器清理：`support_loadout.stale / remove_stale`：台账里 owner 为 `loadout` 的生成文件，ini 与待生成清单都不再点名的（连同只有它们挂的
+  挂点武器）→ `ledger.release`（别的工具也拥有的只去掉本工具的认领；不在台账里的文件不碰）。安装（1）在 `write_loadout_files` 里、
+  清空待生成清单**之前**执行；菜单 8（有无修改都）提示数量、输入 y 才删；游戏在运行时都不做；都在生成器锁里（第 4 条）。
+- 测试：新 `support_variants`（C++，26 项：名字校验、待生成清单最新 128 个 / BOM / LF / 重复、三部分各在上限时并集 1538 正好放下、
+  某部分超限挤不掉别的、Bloom 限定、误报率表）；`room_sync`（132 项，原 103：每房间 128 上限、换清单仍受限、换房间重新计、
+  `MissionList` 保留 / 丢弃规则）；`installer_lock` 的 stale 一段。
+
+### 3.（高）`IsGroundCrewKey` 前缀匹配把 `*_AIRDROP` 当地面乘员
+
+- 根因：前缀 `TANK_` / `TRANSPORT_` / `TRUCK_` 命中 `TANK_AIRDROP` 等，而集装箱投送的乘员是运输直升机飞行员（`SupportCfg().aircraftCrew`）。
+- 修复：`support_loadout.h kGroundCrewKeys` 显式 6 个键，与 `tools/support_loadout.py VEHICLE_CREW_KEYS` 相同；`room_ui_logic.h CrewKindOf`、
+  `support_variants.cpp GiveCrew` 随之正确。
+- 测试：`support_loadout` 负例（3 个 `*_AIRDROP`、`TANK_CREWED_X`、`TANK_`、空）；`room_ui` `CrewKindOf(*_AIRDROP)` = 空中兵种；
+  `support_loadout_ini`（104 项，原 101）从源码解析 C++ 列表 == Python 列表（同序）、函数体不再有 `_wcsnicmp`、`*_AIRDROP` 不在地面表。
+
+### 4.（中）台账并发写
+
+- 根因：`Ledger` 构造时读一次，之后整文件写回旧快照；安装器流程不拿生成器锁；生成器可能比游戏活得久。
+- 修复：`pylib/ledger.py`：每次修改前 `_refresh`，保存时重读并把本对象自上次读后的改动（加 / 减 owner、改 sha）合并进当前文件
+  （`merge_files` / `_merge_entry`，别人新加的 owner 保留；直接改 `.files` 再 `_save` 的 make_optics / make_proteus 同样合并）。
+  `loadout_generator.wait_generate_lock`（等待最多 `LOCK_WAIT_S` = 120 秒，提示一次，超时拒绝且什么都不写）；`installer.write_game`
+  （安装 / 卸载 / 战役）、`manage_support`（菜单 7 / 8）都在锁里；卸载不再删除自己持有的锁文件（`remove_generator(lock=False)`，
+  放锁后在 `write_game` 里删）。`generate_lock` 先建 `Mods/Plugins`。
+- 测试：新 `installer_lock`（Python，35 项）：旧快照保存不丢别人的条目、别人新加 owner 时 release 不删文件、直接改 `.files` 合并、全释放后删台账、
+  `merge_files` 单元；生成器持锁时安装 / 卸载 / 菜单 8 拒绝且 ini 不变；等待中生成器结束则继续；持锁期间另一个生成器拿不到锁。
+  `loadout_generate`、`slim_generator`（导入白名单加 `time`）随之更新。
+
+### 5.（中）保存逐键读写 + 重读配置（最多约 96 次）
+
+- 修复：`loadout_ini.h EditLoadoutIniAll`：先校验全部（键名、`ValidLoadoutValue`），全部通过才在内存里依次改；`loadout_store.h SaveSupportLoadouts`：
+  读一次、写一次（原子）、`ReloadConfigNow` 一次；`SaveSupportLoadout` = 一条的批量。`room_ui.cpp Save` 一次调用，失败什么都不写、所有行仍是改动，
+  成功后才逐条 `MarkItemSaved`。
+- 测试：`loadout_writer`（66 项，原 50）：批量结果与逐条保存逐字节相同（含同键两次后者生效）、任一条非法（6 个位置）整批不写并点名、
+  坏键、UTF-16、空批；`room_ui_wiring` 源码守卫：一次读 / 写 / 重读，校验在写之前。
+
+### 6.（中）布局生成 / 写入异常中断整个安装
+
+- 修复：`installer.build_room_layouts` 捕获 `Exception`（`TypeError`、`NotImplementedError` 等）打印类型与原因返回 None；
+  新 `write_room_layouts` 包住 `room_layout.install`，失败说明后返回 False，安装继续。去掉不再用的 `import struct`。
+- 测试：`installer_lock`：注入 `TypeError` / `NotImplementedError` / `RuntimeError` / `MemoryError` 到构建与写入，都只提示、不抛；`install()` 只经守卫写布局。
+
+### 7.（低）画面身份靠裸指针
+
+- 根因：新画面可能复用旧画面地址，`Follow` 认为没变，不会 `Forget` / `LeaveRoomSync`。
+- 修复：挂两个画面的标量删除析构（虚表槽 5：HUiRoom 0x180AC68 → 0x8F7510，调 ~HUiRoom 0x8F5950 再 delete 0xCA0；HUiHQMain 0x1804E00 → 0x89F480，
+  内联析构后 delete 0x810），读当前槽值 CAS 转调（与 OnUpdate 同法）；析构里只在「是正在跟随的那个」时置原子标志，下一帧 `Follow`
+  先看标志再比较指针。析构槽挂不上则该画面不挂菜单。新增 3 段签名（含 ~HUiRoom 第一条写的是 HUiRoom 虚表）。
+- 测试：`room_ui_sigs`（49 项，原 35）：两个析构槽是各虚表槽 5、文件里指向原版、~HUiRoom 写入 HUiRoom 虚表、HUiHQMain 析构写入自己的虚表、
+  delete 大小、钩子转调；`room_ui_wiring`：`Follow` 先查析构标志、两个析构都挂、先挂析构再挂 OnUpdate。
+
+### 8. EDF6Coop 成员属性接口变更（edf-coop-stable acda838）
+
+- `src/coop_member_attribute_api.h` 按原样重新拷贝（逐字节相同）。
+- 4096 字节总额：主机清单所有分段合计 `kListBudget = 3800` 字节（含头部）封顶，放不下的照旧计入「没能公布」；就绪值 ≤ `kHaveMost` 40；
+  static_assert 两者之和 ≤ 4096。换短清单时先撤回多余分段再发布（腾出额度）。实测 502 个文件的清单列出 200 多个、总字节 ≤ 3800。
+- 发布失败不再静默：`Publish` 返回 0 时取 `lastError`（`EDF6COOP_MA_HAS(api,lastError)` 才调；旧表为 0），界面行 `roomSyncPublishRefused`
+  （四语，带错误码；5 = 总额满），日志按「键 + 字节数 + 错误码」每种原因一次，下个 tick 重试。
+- 函数表：只要求到 `snapshot`（v1 基础），`lastError` 可选；`room()` 的 size 用本头文件 `sizeof`（≥ 160）。
+- 2 秒合并发送 / 先发布后挂接：逻辑本就以缓存比较、每成员的就绪值带清单 hash；测试加「节流」模式（其他成员只在 `Send()` 后看到值），
+  验证清单 / 就绪值晚到时显示「等待」/「核对中」，到达后才就绪。
+- 测试：`room_sync` `Budget`：最长清单与就绪值在额度内、其他插件占满额度时清单被拒并显示「错误 5」且记日志、腾出额度后重试成功、
+  旧表（无 lastError）可用且显示错误 0、节流下的完整流程。
+
+### 变异测试（先提交 d872936，再改、编译、跑、`git checkout` 还原）
+
+| 变异 | 结果 |
+|---|---|
+| 1a 预同步改回 `if(screen.room)` 每帧 tick | `room_ui_wiring` 红 |
+| 1b `PlanSwitches` 的 tick 改成 `(on \|\| preSync) && room` | `room_ui` 6 项红 |
+| 1c `RoomLoadout=0` 仍安装 | `room_ui_wiring` 红 |
+| 2a 去掉每房间 128 上限 | `room_sync` 6 项红 |
+| 2b 预载集合不含房主清单 | `support_variants` 3 项红 |
+| 2c Hello 过滤器不限定房主清单 | `support_variants` 红 |
+| 3 `IsGroundCrewKey` 改回前缀匹配 | `support_loadout`、`room_ui`、`support_loadout_ini` 红 |
+
+### 结果
+
+`cmake --build build` + `offline_checks` 0 警告；`ctest -j 3`：240 项 100% 通过（新增 `support_variants`、`installer_lock`、`room_ui_wiring`；
+需要游戏原生环境的按设计 SKIP）；`tools/selftest.py` 173/173（新增 `ini_merge_adds_room_presync`）。
+中途发现：`pack_install_upgrade_uninstall` 的替身构建器总是返回坦克文件、而测试的 ini 没有点名它；游戏没在运行时安装里的清理（第 2 条）
+会把它当成不再引用的文件删掉（第一次全跑时游戏恰好在运行，清理跳过，没暴露）。替身同时给出 `wanted_files`，与真构建器一致；
+游戏运行 / 未运行两种状态单独跑都通过，第三次全跑 173/173。
+
+### 没在游戏里验证的
+
+1. 两个析构槽的钩子在实机上是否每次画面销毁都被调用（静态：两个虚表槽 5 是各自类的标量删除析构）；析构所在线程未核（只写原子标志，任何线程都安全）。
+2. `RoomLoadout=0` 时游戏里两个画面完全原样（静态：什么都不挂）。
+3. 开局预载改为点名集合后，房间预同步生成的文件在下一关被预载并被房主应用（逻辑与测试覆盖，未实机）。
+4. EDF6Coop 新接口的额度 / 节流只在假表上验证。
+5. 安装器的锁等待与清理只在假游戏目录里跑过。
