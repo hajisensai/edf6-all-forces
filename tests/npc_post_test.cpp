@@ -31,6 +31,13 @@ int main() {
     // A real allocated image span makes every image+RVA pointer valid C++ pointer arithmetic; no code is executed.
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x1800000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
     Check(image!=nullptr,"fixture image allocated");
+    {   // 0x548D50's stand-in (the activation PrepareNpcVehicleAi runs): its real prologue, then +0x4A0 = 1 and return.
+        static const unsigned char stub[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x80,0xB9,0xA0,0x04,0x00,0x00,0x00,0x48,0x8B,0xD9,
+                                           0xC6,0x83,0xA0,0x04,0x00,0x00,0x01,0x48,0x83,0xC4,0x20,0x5B,0xC3};
+        std::memcpy(image+kActivate,stub,sizeof(stub));
+        DWORD was=0;
+        Check(VirtualProtect(image+kActivate,sizeof(stub),PAGE_EXECUTE_READWRITE,&was)!=0,"stand-in activation executable");
+    }
     std::memcpy(image+kAttackRead,kAttackReadSig,sizeof(kAttackReadSig));
     std::memcpy(image+kAttackRelease,kAttackReleaseSig,sizeof(kAttackReleaseSig));
     alignas(16) unsigned char v[0x2700]{},seat[kSeatStride]{},rider[0x400]{},ctrl[0x20]{},otherCtrl[0x20]{};
@@ -198,6 +205,15 @@ int main() {
         Check(rows[0].seat==1 && rows[1].seat==2 && rows[2].seat==3 && rows[0].weapon==0 && rows[2].maxRange==500.0f,
               "the rows name their own seats");
         Put<void*>(m,kSeats,mseat);Put<std::uint64_t>(m,kSeatCount,1);Put<std::uint64_t>(m,kAttackSize,1);
+    }
+    // An NPC driver's vehicle is activated (+0x4A0, the stock fire gates' "engaged") through the stock 0x548D50, as a
+    // CreateFriend AI vehicle is at its spawn; once. The stand-in: the real prologue, then +0x4A0 = 1 and return.
+    {
+        m[kEngaged]=0;
+        Check(PrepareNpcVehicleAi(m) && m[kEngaged]==1,"an NPC-driven vehicle not yet engaged is activated before its AI pass");
+        m[kEngaged]=2;   // already engaged: 0x548D50 is not run again
+        Check(PrepareNpcVehicleAi(m) && m[kEngaged]==2,"an engaged vehicle is left as it is");
+        m[kEngaged]=0;
     }
     // Turning off automatic return must not remove a crewed vehicle from the command map.
     config.tankReturnToPost=false;ResetNpcPosts();neutral();NpcPostInput(v);
