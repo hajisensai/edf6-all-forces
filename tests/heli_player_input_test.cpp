@@ -391,6 +391,11 @@ int main() {
     Check(std::fabs(lowFps[0]-highFps[0])<1e-5f && lowFps[2]<-0.99f,"ease is frame independent and takes shortest yaw across pi");
     Put<float>(inputVehicle,kMatrix+12*4,20.0f);
     Check(PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook) && cameraLook[0]==20.0f,"orbit translates with aircraft without changing view heading");
+    pilotCamera.dir[0]=0.0f;pilotCamera.dir[1]=std::sin(1.0f);pilotCamera.dir[2]=std::cos(1.0f);
+    Check(PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook) && cameraEye[1]>=stockEye[1],
+          "looking up keeps orbit eye above the aircraft at its native height");
+    Check(std::fabs((cameraLook[1]-cameraEye[1])/pilotCamera.radius-pilotCamera.dir[1])<1e-5f,
+          "height floor lifts both camera points without changing the viewing ray");
     inputSeat[kSeatPad]=1;Check(!PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook),"pad camera remains stock");inputSeat[kSeatPad]=0;
     inputHuman[0x128]=1;Check(!PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook),"remote player's camera is untouched");inputHuman[0x128]=0;
     inputConfig.heliMouseAim=false;Check(!PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook),"disabled flight releases camera");inputConfig.heliMouseAim=true;
