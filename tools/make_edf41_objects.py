@@ -86,10 +86,12 @@ ALIASES: dict[str, Alias] = {
     'UFOCARRIER401.SGO': Alias('UfoCarrier508', 'E508_CARRIER.SGO', ('in_ring', 'out_ring')),
     # UFO301 (and its ace) -> UfoSmall515 (EDF5's imperial UFO): its ufo_* keys are UfoSmall301's own descendants, and
     # it finds no bone by name. It resolves player main (open / close / wakeup) unchecked, and 4.1's UFO has no CAS:
-    # E515's, hollowed. material_animation must be there and may be empty (E515's names E515's textures); config,
-    # battery_config, bullet_object, level_adjust (its weapon and its level scaling) come from E515.
-    'UFO301.SGO': Alias('UfoSmall515', 'E515_IMPERIALUFO.SGO', (), (('material_animation', []),), own_cas=True),
-    'UFO301ACE.SGO': Alias('UfoSmall515', 'E515_IMPERIALUFO_ACE.SGO', (), (('material_animation', []),), own_cas=True),
+    # E515's, hollowed. material_animation, config, battery_config, bullet_object, level_adjust (its weapon and its
+    # level scaling) come from E515. material_animation must not be empty: the constructor builds a slot per element
+    # and enables slot 0 unchecked (EDF+0x534497 -> 0x6dc830: an empty list crashed at EDF+0x6dc844, M143 on the real
+    # game, 2026-10-12); E515's entries name E515's materials, which 4.1's model lacks: looked up by name, skipped.
+    'UFO301.SGO': Alias('UfoSmall515', 'E515_IMPERIALUFO.SGO', (), own_cas=True),
+    'UFO301ACE.SGO': Alias('UfoSmall515', 'E515_IMPERIALUFO_ACE.SGO', (), own_cas=True),
     # UFO401 -> UfoSmall507 (EDF5's gold UFO, its remake). 507 finds bones body (the aim's frame, never moved),
     # gun_side (yawed toward the target each frame) and gun (pitched) by name, and the MAB locator 銃口 on a bone:
     # missing, a null write at EDF+0x529067 (jobs/4bf89026/tmp/ufo401/NOTES.txt). 4.1's UFO401 keeps center (its
