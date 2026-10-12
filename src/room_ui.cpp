@@ -51,6 +51,7 @@ constexpr unsigned kTextureSkin=0x953D80;   // (shared_ptr<Skin_Texture>* out, s
 constexpr unsigned kSetTexture=0x7F63E0;    // Skin_Texture: (this, const std::wstring* path) -> bool
 constexpr std::size_t kShown=0x1F8;         // a Component's shown flag (its constructor sets 1: 0x7E999C)
 constexpr std::size_t kSkinPtr=0x98,kSkinCtrl=0xA0;   // a Component's skin, a weak_ptr (0x88014D)
+constexpr std::size_t kTextFont=0x228;      // HUiTextField: SetText returns at once while it is null (0x863690)
 constexpr std::size_t kFontColour=0x2B0;    // HUiTextField: font colour RGBA float4 (0x8BC68C; drawn by 0x7F890C)
 constexpr std::size_t kCtxSize=0x18,kCtxInput=0x8;
 constexpr unsigned kPadTable=0x2136530;     // two slots of a pointer per pad channel (0x1188315)
@@ -350,22 +351,26 @@ void SetText(unsigned char* self,int slot,const wchar_t* name,const wchar_t* tex
     if(!Changed(slot,Hash(text,rgba,shown)))return;
     const WideString n=Wide(name);
     Shared field{},node{};
+    bool done=false;
     __try {
         const int index=reinterpret_cast<FindIndexFn>(image+kFindIndex)(self,&n);
         if(index>=0) {
             reinterpret_cast<AtFn>(image+kTextAt)(self,&field,index);
             reinterpret_cast<AtFn>(image+kComponentAt)(self,&node,index);
         }
-        if(field.object) {
+        // SetText does nothing while the field has no font yet (+0x228 null: its first instruction): not written then.
+        done=field.object && *reinterpret_cast<void* const*>(static_cast<unsigned char*>(field.object)+kTextFont);
+        if(done) {
             reinterpret_cast<SetTextFn>(image+kSetText)(field.object,shown ? text : L" ");
             float colour[4];
             ChipColour(rgba,colour);
             std::memcpy(static_cast<unsigned char*>(field.object)+kFontColour,colour,sizeof(colour));
         }
         if(node.object)Show(node.object,shown);
-    } __except(EXCEPTION_EXECUTE_HANDLER){}
+    } __except(EXCEPTION_EXECUTE_HANDLER){ done=false; }
     Release(field);
     Release(node);
+    if(!done)st.written.key[slot]=~0ull;   // tried again next frame
 }
 // A ColorChipBox chip: the model skin's "color" (the HQ palette's call, 0x88014D) and its shown flag.
 void SetChip(unsigned char* self,int row,int which,const wchar_t* name,bool shown,std::uint32_t rgba) noexcept {

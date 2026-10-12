@@ -75,3 +75,32 @@ AI 武器自带 `WeaponIcon`（`app:/weapon/icon/<名>`）【证实】：
 ## 6. 布局对象
 
 `0x839FD0` 第一个参数直接传 HUiRoom / HUiHQMain 的 `this`（房间 0x8FEF88；HQ 0x89F21C 结果存 +0x7F0，OnUpdate 0x89F7B5 取用）。补丁元素必须在 `layout_tree` 里才会实例化。【证实】
+
+## 7. 阶段 4 补充（2026-10-12，静态反汇编，`src/room_ui.cpp` 用到的部分）
+
+- **手柄表** `EDF+0x2136530`：两个槽相隔 0x4A0，每个按键一个通道指针；写入 `0x1182A00`（+0x48 模拟量、+0x4C 按住、+0x4D=0），
+  循环 `0x1188270`（基址 `lea r13` 在 0x1188315），从 XInput wButtons 取位。【证实】
+  通道：0x50 / 0x58 / 0x60 / 0x68 上下左右，**0x70 A**（位 0x1000，0x1188A4D）、**0x78 B**（0x2000），0x80 X、0x88 Y、0x90 Back、
+  0x98 Start、0xA0 LB、0xA8 RB、0xB0 L3、0xB8 R3，0x40 / 0x48 扳机；A 是下方键（XInput 布局，无 A/B 互换）。【证实】
+  +0x4C 是「按住」（每帧按当前位重写），+0x4D 非 0 = 被抑制（`0x1183D60` 为假时全部置 1），读取方当作没按。【证实】
+- **按名取组件**：`0x839600(layout, const wstring*)` → 第一个下标或 −1；`0x839560(layout, shared_ptr<Component>* out, idx)` 不转型；
+  `0x8859C0(layout, shared_ptr<HUiTextField>* out, idx)` 动态转型，不是 TextField 时 out 为空；`0x839FD0(layout, out, const wstring*)`
+  = 0x839600 + 0x839560。游戏的标准写法 0x886800：0x839600 → 0x8859C0 → `0x863690 SetText(tf, 字面文字)`（[tf+0x228]==0 时直接返回）。【证实】
+- **色块**：组件的皮肤是 weak_ptr，在组件 +0x98（指针）/ +0xA0（控制块）。HQ 调色板 0x88014D：复制它、`lock inc [ctrl+0xC]`（弱引用），
+  调 `0x824D40(&weak副本, L"ColorChipBox", const std::string* "color"（窄字符串）, const float4*)`，被调方释放这份弱引用；
+  内部转型 Skin_Model、按名找模型与参数、拷最多 16 字节、置脏 +0x48。浮点 RGBA 0..1【推断】。【证实（调用约定）】
+- **贴图**：`0x953D80(shared_ptr<Skin_Texture>* out, shared_ptr<Component> 按值)`（被调方释放传入的副本：调用前 uses+1），
+  `0x7F63E0(Skin_Texture*, const std::wstring* path) → bool`（先拷贝路径，替换 `%LOCALE%`；失败返回 0）。路径 `app:/...`。
+  游戏写法 0x8C4256（`ImgBoard`）；HUD 武器图标 0x836B20 先判文件存在。加载后立刻读宽高：同步绑定【证实】，GPU 上传完成【推断】。
+  染色：+0xF0..+0xFC 与 +0x100..+0x10C 按 +0xE4 插值，要两组都写。
+- **显隐** +0x1F8：0x839FD0 返回的就是布局代码写 +0x1F8 的那个 Component（武器栏经 0x83A140 同一路径）；构造函数置 1（0x7E999C）。【证实】
+- **TextField 字色** +0x2B0..+0x2BC（float4 RGBA，布局属性 `font_color`，默认 1,1,1,1）；绘制每帧乘上（0x7F890C），直接写即生效；
+  游戏高亮行就是这么做的（0x8BC68C）。【证实】
+- **GetInput 0x8DAD00**：返回 ctx+8；过场、[this+0xD8]+0x111==0、[this+0x184]==0、+0x178 弱引用存活、`0x7EBFD0(this+0x160)` 假时返回空。
+  ctx+0x10 = dt（0x84B716）；**ctx+0 不一定是原始 UiInput**（树分发 0x7FB0DD 给子节点的 ctx 是 {&this+0x170, 输入或空, dt}），不要依赖它。
+- **布局属性名**（0x83E000–0x852000 引用的宽字符串）：flag_layout、scroll_bar_info、callback、init_args、…、pos、area、hcoord、vcoord、
+  font_size、line_space、font_border_width、font_border_color、font_color、font_flag、sgo_path、result_callback、hide、disable 等。
+  **没有「初始隐藏」属性**：工厂侧对 +0x1F8 的唯一写入是构造函数的 =1；`disable`=1 让构建函数跳过该元素（不创建，而不是隐藏）。
+- `text` 是文字表键（0x846E30 → 0x7A3500），`text_dr` 是字面文字（0x8471CC）；SetText 不查表。
+- **EDF6Coop 对房间槽的要求**：Coop 安装时要求 0x180AC48 指向 0x8FDFE0，否则整个 Coop 拒绝（multislot `plugin.cpp` SlotTargets）。
+  EDFModLoader 按文件名顺序加载插件（ModLoader.log：EDF6Coop 先于 EDF6VehicleCrew），所以本插件转调 Coop 的钩子。

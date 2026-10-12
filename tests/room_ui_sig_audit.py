@@ -61,6 +61,7 @@ check(arrays['kChipSiteSig'][3:7] == struct.pack('<I', consts['kSkinPtr']) and
       arrays['kChipSiteSig'][14:18] == struct.pack('<I', consts['kSkinCtrl']), 'the skin weak_ptr offsets')
 check(arrays['kFontColourSig'][2:6] == struct.pack('<I', consts['kFontColour']), 'the font colour offset')
 check(arrays['kShowSig'][2:6] == struct.pack('<I', consts['kShown']), 'the shown flag offset')
+check(arrays['kSetTextSig'][3:7] == struct.pack('<I', consts['kTextFont']), 'the font test SetText starts with is kTextFont')
 ref = 0x880179 + 4 + 5   # call 0x824D40 at the end of the chip site
 check(ref + struct.unpack_from('<i', img, 0x88017E)[0] == consts['kModelParam'], 'the chip site calls the model parameter setter')
 text = 0x880172 + 7 + struct.unpack_from('<i', img, 0x880175)[0]
