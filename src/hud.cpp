@@ -20,6 +20,8 @@
 // is the wall clock: a snapshot older than kFreshMs (loading, mission over) is not drawn; nothing is while the game is paused.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "cockpit_canvas.h"
+#include "firstperson.h"
 #include "formation.h"
 #include "map_buttons.h"
 #include "scopeview.h"
@@ -144,7 +146,8 @@ struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool
                   bool nix; NixTorso nixTorso;
                   bool proteus; ProteusReadout proteusRo;
                   bool sazabi; SazabiCue sazabiCue;
-                  bool armor; armorhud::Readout armorRo; };
+                  bool armor; armorhud::Readout armorRo;
+                  bool screens; CockpitScreens scr; };   // a vehicle's first person: its cockpit's screens (cockpit_screens.inc)
 constexpr unsigned kFresh=4;
 Snapshot snaps[3]{};
 std::atomic<unsigned> middle{1};
@@ -222,12 +225,25 @@ constexpr float kNearScale=1.3f,kFarScale=0.7f;
 constexpr ULONGLONG kTrailHoldMs=450;
 constexpr float kTrailRate=0.6f;
 
+// A cockpit screen being drawn (cockpit_screens.inc): every quad's vertices go through the homography from its canvas
+// onto the screen's place on the view (cockpit_canvas.h; draw thread only, on while CockpitScreens lays a screen out).
+canvas::Map screenCanvas{};
+// Every quad of the HUD goes down here: as given (`m` its translation), or with a canvas on, each vertex (moved by
+// `m`'s translation) mapped onto the screen and the translation dropped.
+void Emit(void* drawer,void* ctx,const float* m,const float* rgba,const float* v) noexcept {
+    if(!screenCanvas.on){reinterpret_cast<QuadFn>(image+kQuad)(drawer,ctx,m,rgba,kStrip,v,4,nullptr);return;}
+    alignas(16) const float id[16]={1.0f,0.0f,0.0f,0.0f, 0.0f,1.0f,0.0f,0.0f, 0.0f,0.0f,1.0f,0.0f, 0.0f,0.0f,0.0f,1.0f};
+    alignas(16) float p[12];
+    for(int i=0;i<4;++i){canvas::Point(screenCanvas,v[3*i]+m[12],v[3*i+1]+m[13],&p[3*i],&p[3*i+1]);p[3*i+2]=0.0f;}
+    reinterpret_cast<QuadFn>(image+kQuad)(drawer,ctx,id,rgba,kStrip,p,4,nullptr);
+}
+
 void Rect(void* drawer,void* ctx,float x0,float y0,float x1,float y1,const float* rgba) noexcept {
     if(x1<=x0 || y1<=y0)return;
     alignas(16) const float m[16]={1.0f,0.0f,0.0f,0.0f, 0.0f,1.0f,0.0f,0.0f, 0.0f,0.0f,1.0f,0.0f, x0,y0,0.0f,1.0f};
     const float w=x1-x0,h=y1-y0;
     alignas(16) const float v[12]={0.0f,0.0f,0.0f, w,0.0f,0.0f, 0.0f,h,0.0f, w,h,0.0f};
-    reinterpret_cast<QuadFn>(image+kQuad)(drawer,ctx,m,rgba,kStrip,v,4,nullptr);
+    Emit(drawer,ctx,m,rgba,v);
 }
 float Unit(float v) noexcept { return v<0.0f ? 0.0f : v>1.0f ? 1.0f : v; }
 // A bar: its edge and back, the damage `trail` (a share at least `share`), `share` of it in `fill` with a sheen
@@ -978,7 +994,7 @@ void Seg(void* drawer,void* ctx,float x0,float y0,float x1,float y1,float t,cons
     const float nx=-dy/len*t*0.5f,ny=dx/len*t*0.5f;
     alignas(16) const float m[16]={1.0f,0.0f,0.0f,0.0f, 0.0f,1.0f,0.0f,0.0f, 0.0f,0.0f,1.0f,0.0f, 0.0f,0.0f,0.0f,1.0f};
     alignas(16) const float v[12]={x0-nx,y0-ny,0.0f, x1-nx,y1-ny,0.0f, x0+nx,y0+ny,0.0f, x1+nx,y1+ny,0.0f};
-    reinterpret_cast<QuadFn>(image+kQuad)(drawer,ctx,m,rgba,kStrip,v,4,nullptr);
+    Emit(drawer,ctx,m,rgba,v);
 }
 // A triangle, its tip at (tx, ty), its base `half` either side of (bx, by) (Seg's winding; the strip's second
 // triangle has the tip twice: nothing).
@@ -988,7 +1004,7 @@ void Tri(void* drawer,void* ctx,float bx,float by,float tx,float ty,float half,c
     const float nx=-dy/len*half,ny=dx/len*half;
     alignas(16) const float m[16]={1.0f,0.0f,0.0f,0.0f, 0.0f,1.0f,0.0f,0.0f, 0.0f,0.0f,1.0f,0.0f, 0.0f,0.0f,0.0f,1.0f};
     alignas(16) const float v[12]={bx-nx,by-ny,0.0f, tx,ty,0.0f, bx+nx,by+ny,0.0f, tx,ty,0.0f};
-    reinterpret_cast<QuadFn>(image+kQuad)(drawer,ctx,m,rgba,kStrip,v,4,nullptr);
+    Emit(drawer,ctx,m,rgba,v);
 }
 // An arc of radius `r` round (cx, cy) from angle `from` (rad, 0 to the right, growing clockwise on the screen) over
 // `span`, in `sides` straight pieces; a whole ring with span kTurn.
@@ -3211,6 +3227,7 @@ void HudPublish() noexcept {
     SetStockGaugeCover(textOk && (s.cockpit || (s.stock && !s.cockpit && !s.stockHud.heli) || heliLists || (s.sazabi && !s.cockpit)));
     s.armor=PlayerStockArmor(&s.armorRo);   // the stock armor gauge's numbers while that cover hides it (stockgauge.cpp)
     s.proteus=PlayerProteus(&s.proteusRo);   // the Proteus's stance, shield, field, launcher (proteus.cpp)
+    s.screens=FirstPersonScreens(&s.scr);    // the cockpit's screens in a vehicle's first person (firstperson.cpp)
     if(Cfg().vehicleHud)
         for(const auto& w:work)if(w.ref && ms-w.seen<=kFreshMs)s.d[s.count++]=w.d;
     back=middle.exchange(back|kFresh,std::memory_order_acq_rel)&3u;
@@ -4562,7 +4579,7 @@ alignas(16) const float kScopeBezel[4]={0.75f,0.8f,0.78f,0.55f};
 void Quad4(void* drawer,void* ctx,const scopeview::Quad& q,const float* rgba) noexcept {
     alignas(16) const float m[16]={1.0f,0.0f,0.0f,0.0f, 0.0f,1.0f,0.0f,0.0f, 0.0f,0.0f,1.0f,0.0f, 0.0f,0.0f,0.0f,1.0f};
     alignas(16) const float v[12]={q.x[0],q.y[0],0.0f, q.x[1],q.y[1],0.0f, q.x[2],q.y[2],0.0f, q.x[3],q.y[3],0.0f};
-    reinterpret_cast<QuadFn>(image+kQuad)(drawer,ctx,m,rgba,kStrip,v,4,nullptr);
+    Emit(drawer,ctx,m,rgba,v);
 }
 // The round field's eyepiece round (cx, cy), radius r (see above).
 void Eyepiece(void* drawer,void* ctx,float width,float height,float cx,float cy,float r) noexcept {
@@ -4614,6 +4631,8 @@ static void InfantryScope(void* drawer,void* ctx,Text* text,const float* vp,floa
     scope::Draw(c.look,reticle::Aim{},v,scope::Field{cx,cy,r},&k);
     Render(drawer,ctx,text,s,k,lines,at);
 }
+
+#include "cockpit_screens.inc"
 
 void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierPanel* panels,int count) noexcept {
     // The aim's view (CameraRay) stays the game's while the map's camera shows: the turret, the launcher and the sights
@@ -4675,6 +4694,9 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         const bool storeSwitched=storesShown && hudcue::Changed(storePick,picked,now,kSwitchMs);
         const bool aimFlipped=fresh && snap.turret && hudcue::Changed(aimMode,static_cast<int>(snap.turretAim.mode),now,kSwitchMs);
         const bool rotorHud=snap.cockpit && snap.jet.rotor && Cfg().heliFlightHud;   // a rotor craft: the helicopter HUD
+        // A vehicle's first person: the read-outs are on its cockpit's screens (DrawCockpitScreens below); the HUD's own panels
+        // (strips, annunciator, blocks, tapes) give way, its aim marks and head-up symbols stay on the view.
+        const bool screensOn=fresh && snap.screens,headUp=!screensOn || HudGlass(snap.scr);
         const ULONGLONG launchAt=snap.warned ? snap.warn.launchAt : 0;
         if(now-snap.tick<=kFreshMs && snap.cockpit) {
             if(snap.jet.aiming)AimMarks(drawer,ctx,viewProj,width,height,s,snap.jet);
@@ -4682,43 +4704,44 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             if(!snap.jet.bomb)LockMark(drawer,ctx,viewProj,width,height,s,snap.jet);
             if(snap.jet.rotor && snap.jet.heli.aiming)FlightAim(drawer,ctx,t,viewProj,width,height,s,snap.jet.heli.aim,lines,&at);   // HUD or not
             if(rotorHud) {
-                HeliHud(drawer,ctx,t,viewProj,width,height,s,snap.jet.heli,snap.jet.sym,launchAt,lines,&at);
+                if(headUp)HeliHud(drawer,ctx,t,viewProj,width,height,s,snap.jet.heli,snap.jet.sym,launchAt,lines,&at);
                 if(Cfg().playerJetGunSight)GunSight(drawer,ctx,viewProj,width,height,s,snap.jet.sym);
                 wchar_t stores[128];
                 StoresText(stores,_countof(stores),snap.jet,false);
                 LoadCell cells[kMostStores];
                 const int n=JetCells(snap.jet,cells);
                 Line controls{};JetControls(controls,snap.jet);
-                HeliStrip(drawer,ctx,t,width,height,s,snap.jet.heli,snap.jet.fuel,stores,cells,n,snap.jet.store,storeSwitched,lines,&at,&controls);
+                if(!screensOn)HeliStrip(drawer,ctx,t,width,height,s,snap.jet.heli,snap.jet.fuel,stores,cells,n,snap.jet.store,storeSwitched,lines,&at,&controls);
             } else {
-                FighterHud(drawer,ctx,t,viewProj,width,height,s,snap.jet,launchAt,lines,&at);
-                if(Cfg().playerJetFlightHud)CockpitStrip(drawer,ctx,t,width,height,s,snap.jet,storeSwitched,lines,&at);
-                else Cockpit(drawer,ctx,t,width,height,s,snap.jet,lines,&at);
+                if(headUp)FighterHud(drawer,ctx,t,viewProj,width,height,s,snap.jet,launchAt,lines,&at);
+                else if(Cfg().playerJetGunSight)GunSight(drawer,ctx,viewProj,width,height,s,snap.jet.sym);
+                if(!screensOn && Cfg().playerJetFlightHud)CockpitStrip(drawer,ctx,t,width,height,s,snap.jet,storeSwitched,lines,&at);
+                else if(!screensOn)Cockpit(drawer,ctx,t,width,height,s,snap.jet,lines,&at);
             }
             const bool annunciated=snap.warned && (rotorHud || Cfg().playerJetFlightHud);   // else the old panel's text
-            if(annunciated)Annunciator(drawer,ctx,t,width,height,s,snap.warn,lines,&at);
-            GearPanel(drawer,ctx,t,width,height,s,annunciated,lines,&at,now);
+            if(annunciated && !screensOn)Annunciator(drawer,ctx,t,width,height,s,snap.warn,lines,&at);
+            if(!screensOn)GearPanel(drawer,ctx,t,width,height,s,annunciated,lines,&at,now);
         }
         // A stock heli: the mouse-aim flight's square whenever the mouse flies it (HeliMouseAim), the helicopter HUD round it
         // with HeliFlightHud (off: the takeoff panel, as before).
         const bool heliFresh=now-snap.tick<=kFreshMs && snap.heliFly && !snap.cockpit,heliHud=heliFresh && Cfg().heliFlightHud;
         if(heliFresh && snap.heliHud.f.aiming)FlightAim(drawer,ctx,t,viewProj,width,height,s,snap.heliHud.f.aim,lines,&at);
         if(heliHud) {
-            HeliHud(drawer,ctx,t,viewProj,width,height,s,snap.heliHud.f,snap.heliHud.sym,launchAt,lines,&at);
+            if(headUp)HeliHud(drawer,ctx,t,viewProj,width,height,s,snap.heliHud.f,snap.heliHud.sym,launchAt,lines,&at);
             const bool own=snap.stock && snap.stockHud.heli;   // its weapons, rounds and reloads (vhud.cpp)
             LoadCell cells[kStockArms];
             const int n=own ? StockCells(snap.stockHud,cells) : 0;
             Line controls{};
             if(snap.payload)AircraftControls(controls,snap.payloadHud.keys,snap.payloadHud.choices,snap.payloadHud.switchButton,0,false,false);
-            HeliStrip(drawer,ctx,t,width,height,s,snap.heliHud.f,snap.heliHud.fuel,nullptr,cells,n,own ? snap.stockHud.selected : -1,
-                      storeSwitched,lines,&at,&controls);
-            if(snap.warned)Annunciator(drawer,ctx,t,width,height,s,snap.warn,lines,&at);
+            if(!screensOn)HeliStrip(drawer,ctx,t,width,height,s,snap.heliHud.f,snap.heliHud.fuel,nullptr,cells,n,own ? snap.stockHud.selected : -1,
+                                    storeSwitched,lines,&at,&controls);
+            if(snap.warned && !screensOn)Annunciator(drawer,ctx,t,width,height,s,snap.warn,lines,&at);
         }
-        if(now-snap.tick<=kFreshMs && snap.heli && !snap.cockpit && !heliHud)HeliPanel(drawer,ctx,t,width,height,s,snap.heliCue,lines,&at);
+        if(now-snap.tick<=kFreshMs && snap.heli && !snap.cockpit && !heliHud && !screensOn)HeliPanel(drawer,ctx,t,width,height,s,snap.heliCue,lines,&at);
         // The stock vehicles' HUD up (StockVehicleHud): it carries the drill's line and the gun's marks, so DrillPanel and
         // TurretMark's square give way to it.
         const bool stockHud=now-snap.tick<=kFreshMs && snap.stock && !snap.cockpit && !snap.stockHud.heli;
-        if(now-snap.tick<=kFreshMs && snap.drill && !snap.cockpit && !snap.heli && !stockHud)DrillPanel(drawer,ctx,t,width,height,s,snap.drillCue,lines,&at);
+        if(now-snap.tick<=kFreshMs && snap.drill && !snap.cockpit && !snap.heli && !stockHud && !screensOn)DrillPanel(drawer,ctx,t,width,height,s,snap.drillCue,lines,&at);
         if(now-snap.tick<=kSazabiCueMs && snap.sazabi && !snap.cockpit) {   // the Sazabi's own HUD (it is no stock vehicle)
             SazabiHud(drawer,ctx,t,viewProj,width,height,s,snap.sazabiCue,lines,&at);
         }
@@ -4755,11 +4778,12 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
                                 showTurretOverlay && !physicalSight && snap.turretAim.ownGun && snap.turretAim.mode==edf::aimlink::Mode::leadCircle && snap.turretAim.lead,
                                 fresh && snap.emc ? &snap.emcCue : nullptr,
                                 fresh && snap.proteus ? &snap.proteusRo : nullptr,overhead,snap.armor ? &snap.armorRo : nullptr};
-            StockDockHud(drawer,ctx,t,viewProj,width,height,s,snap.stockHud,x,snap.payload ? &snap.payloadHud : nullptr,
-                         storeSwitched,lines,&at);
+            if(screensOn)StockAimOnly(drawer,ctx,t,viewProj,width,height,s,snap.stockHud,x,lines,&at);
+            else StockDockHud(drawer,ctx,t,viewProj,width,height,s,snap.stockHud,x,snap.payload ? &snap.payloadHud : nullptr,
+                              storeSwitched,lines,&at);
         }
         // The hidden stock armor gauge's numbers for a vehicle whose HUD is no StockBlock (that one has them in it).
-        if(now-snap.tick<=kFreshMs && snap.armor && !stockHud)ArmorPanel(drawer,ctx,t,s,snap.armorRo,lines,&at);
+        if(now-snap.tick<=kFreshMs && snap.armor && !stockHud && !screensOn)ArmorPanel(drawer,ctx,t,s,snap.armorRo,lines,&at);
         QMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         FormationBanner(t,width,height,s,lines,&at);
         SweepBanner(t,width,height,s,lines,&at);
@@ -4772,6 +4796,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             float top=height*0.28f;
             for(int i=0;i<count && i<3;++i)top=Panel(drawer,ctx,t,panels[i],i,count,width,top,s,lines,&at)+10.0f*s;
         }
+        if(screensOn)DrawCockpitScreens(drawer,ctx,t,viewProj,width,height,s,snap,lines,&at);
         if(t && textOk)DrawAll(*t,lines,at);
         FreeText(text);
         DrawLog(shown,count,lines,at,w,h);

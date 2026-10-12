@@ -189,6 +189,7 @@ struct State {
     M4 otherBox[2];
     bool riding;                // in a vehicle: the eye at the seat's cockpit, the rider not drawn (Ride)
     RideView ride;
+    CockpitScreens screens;     // ...and its screens round the eye (VehicleScreens), for the HUD
 };
 // The weapon models taken out of their batch, with the batch to give back.
 struct Unbatched { const void* model; void* batch; };
@@ -734,6 +735,7 @@ bool Ride(unsigned char* cam,unsigned char* h) noexcept {
             static_cast<void*>(ride.vehicle),ride.seat,eye[0],eye[1],eye[2]);
     st.riding=true;st.ride=ride;
     std::memcpy(cam+kCamEyeRow,eye,12);
+    VehicleScreens(ride.vehicle,ride.seat,eye,&st.screens);
     if(st.nearSet){Put<float>(cam,kCamNear,st.savedNear);st.nearSet=false;}
     if(st.smoothSet){Put<float>(h,kLookSmooth,st.savedSmooth);st.smoothSet=false;}
     st.body=h+kBodyModel;st.weaponCount=0;st.inHandCount=0;
@@ -1056,6 +1058,11 @@ bool HookDrawOf(void** vt) noexcept {
 
 bool FirstPersonOn() noexcept { return st.on; }
 bool FirstPersonHidesStockHud(const void* camera) noexcept { return st.on && st.riding && st.cam==camera && Cfg().fpHideStockHud; }
+bool FirstPersonScreens(CockpitScreens* out) noexcept {
+    if(!st.on || !st.riding || !st.screens.n)return false;
+    *out=st.screens;
+    return true;
+}
 
 bool InstallFirstPerson() noexcept {
     if(!Matches(kCamStep,kCamStepCode,sizeof(kCamStepCode)) || !Matches(kModelDraw,kModelDrawCode,sizeof(kModelDrawCode))) {

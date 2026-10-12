@@ -615,13 +615,17 @@ add_test(NAME pn COMMAND pn_test)
 
 # The first person's arithmetic (src/fp_view.h: the viewmodel transform, the collapse, the eye) offline
 # (tools/fp_view_check.cpp). cmake --build build --target fp_view_check && buildp_view_check.exe
+# The cockpit screens' canvas map (src/cockpit_canvas.h), checked offline.
+add_executable(cockpit_canvas_check EXCLUDE_FROM_ALL tools/cockpit_canvas_check.cpp)
+target_compile_options(cockpit_canvas_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(cockpit_canvas_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 add_executable(fp_view_check EXCLUDE_FROM_ALL tools/fp_view_check.cpp)
 target_compile_options(fp_view_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(fp_view_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
-    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check own_round_check exhaust_nozzles_check damage_stats_check fp_view_check)
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check own_round_check exhaust_nozzles_check damage_stats_check fp_view_check cockpit_canvas_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 add_dependencies(offline_checks transport_runtime_test)
 add_dependencies(offline_checks stab_native_readback_test)

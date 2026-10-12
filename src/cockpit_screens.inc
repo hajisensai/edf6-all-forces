@@ -1,0 +1,254 @@
+// The cockpit's screens (included by hud.cpp; the user, 2026-10-13: "关，信息全上面板": in a vehicle's first person the
+// stock HUD is off and the plugin's read-outs are on the cockpit's own screens). Each screen is a rectangle of the
+// vehicle model (a vc_scr_ marker, pylib/cockpits.py Screen; firstperson.h CockpitScreen) round the eye; its corners go
+// through the view-projection onto the view, and what the screen shows is laid out on a canvas (kCanvasH high, as wide as
+// the screen's shape) whose every vertex Emit maps through the homography from the canvas onto that quad (straight lines
+// stay straight: the bars and ticks land on the screen in perspective; cockpit_canvas.h). Text cannot be warped: each line's centre goes
+// through the homography and its size scales by the local stretch there (snapped to kScreenTextStep: the glyph cache).
+// The aim's marks (reticles, lock boxes, impact points) and an aircraft's head-up symbols stay on the view: they are
+// what a sight or a head-up glass shows.
+
+constexpr float kCanvasH=1080.0f;
+constexpr float kScreenTextStep=1.0f/16.0f;
+alignas(16) const float kScreenGlow[4]={0.1f,0.9f,0.45f,0.08f};
+alignas(16) const float kScreenInk[4]={0.4f,1.0f,0.6f,0.95f};
+alignas(16) const float kScreenDim[4]={0.4f,1.0f,0.6f,0.45f};
+
+// What every screen may show, gathered once a draw from the snapshot (whichever vehicle the player is in).
+struct ScreenFeed {
+    float hp=-1.0f,hpMax=0.0f;
+    bool hull=false;float hullHp=0.0f,hullMax=0.0f;   // a vehicle whose hull is counted apart (stock_armor_hud.h)
+    FuelReading fuel{};
+    float speed=-1.0f,clear=-1.0f,climb=0.0f;         // m/s, m over the ground (<0 unknown), m/s
+    bool flies=false;
+    float heading=-1.0f,pitch=0.0f;                   // degrees (<0 unknown), radians up
+    int cells=0,picked=-1;
+    LoadCell cell[kStockArms>kMostStores ? kStockArms : kMostStores];
+    unsigned warn=0;
+    float pos[3]{};
+    int threats=0;
+    float threatAt[kMostThreats][3]{};
+};
+
+void NoseOf(const float* nose,ScreenFeed& f) noexcept {
+    f.heading=sight::HeadingOf(nose);
+    const float len=std::sqrt(nose[0]*nose[0]+nose[1]*nose[1]+nose[2]*nose[2]);
+    f.pitch=len>1e-4f ? std::asin(vec::Clamp(nose[1]/len,-1.0f,1.0f)) : 0.0f;
+}
+
+ScreenFeed FeedOf(const Snapshot& snap) noexcept {
+    ScreenFeed f{};
+    if(snap.cockpit) {   // a plugin aircraft
+        const PlayerJetReadout& j=snap.jet;
+        f.hp=j.hp;f.hpMax=j.hpMax;f.fuel=j.fuel;f.speed=j.speed;f.clear=j.ground ? j.clear : -1.0f;f.climb=j.climb;f.flies=true;
+        NoseOf(j.sym.nose,f);
+        f.cells=JetCells(j,f.cell);f.picked=j.store;
+        std::memcpy(f.pos,j.sym.pos,12);
+        f.threats=j.sym.threats<kMostThreats ? j.sym.threats : kMostThreats;
+        for(int i=0;i<f.threats;++i)std::memcpy(f.threatAt[i],j.sym.threatAt[i],12);
+    } else if(snap.heliFly) {   // a stock heli
+        const HeliFlight& h=snap.heliHud.f;
+        f.hp=h.hp;f.hpMax=h.hpMax;f.fuel=snap.heliHud.fuel;f.speed=h.speed;f.clear=h.ground ? h.clear : -1.0f;f.climb=h.climb;
+        f.flies=true;
+        NoseOf(snap.heliHud.sym.nose,f);
+        std::memcpy(f.pos,snap.heliHud.sym.pos,12);
+    }
+    if(snap.stock) {   // a stock vehicle's (a heli's stores too)
+        const StockHudReadout& r=snap.stockHud;
+        if(!snap.cockpit) {
+            f.cells=StockCells(r,f.cell);f.picked=r.selected;
+            f.threats=r.threats<kStockThreats ? r.threats : kStockThreats;
+            for(int i=0;i<f.threats;++i)std::memcpy(f.threatAt[i],r.threatAt[i],12);
+        }
+        if(!f.flies) {
+            f.hp=r.hp;f.hpMax=r.hpMax;f.fuel=r.fuel;f.speed=r.speed;
+            NoseOf(r.hull,f);
+            std::memcpy(f.pos,r.pos,12);
+        }
+    }
+    if(snap.armor) {
+        f.hp=snap.armorRo.armor.hp;f.hpMax=snap.armorRo.armor.most;
+        f.hull=snap.armorRo.hasHull;f.hullHp=snap.armorRo.hull.hp;f.hullMax=snap.armorRo.hull.most;
+    }
+    if(snap.warned)f.warn=snap.warn.on;
+    return f;
+}
+
+// The canvas's lines [from, *at) onto the view: centre through the map, size by the stretch, as a scale of the HUD's `s`.
+void CanvasText(const canvas::Map& k,Line* lines,int from,int at,float s) noexcept {
+    for(int i=from;i<at;++i) {
+        Line& l=lines[i];
+        const float cx=l.x+l.w*0.5f,cy=l.y+l.h*0.5f,stretch=canvas::Stretch(k,cx,cy);
+        float px,py;
+        canvas::Point(k,cx,cy,&px,&py);
+        const float scale=std::round(l.scale*stretch/s/kScreenTextStep)*kScreenTextStep;
+        const float r=scale>0.0f ? scale*s/(l.scale>1e-4f ? l.scale : 1.0f) : 0.0f;
+        l.scale=scale>kScreenTextStep ? scale : kScreenTextStep;
+        l.w*=r;l.h*=r;l.x=px-l.w*0.5f;l.y=py-l.h*0.5f;
+    }
+}
+
+// --- What each kind shows (canvas units: kCanvasH high, cw wide; text scales in canvas pixels at HUD scale 1) ---
+void ScreenTitle(Text* t,Line* lines,int* at,float cw,const wchar_t* title) noexcept {
+    Label(t,lines,at,cw*0.5f,70.0f,1,2.4f,kScreenDim,L"%ls",title);
+}
+
+void StatusScreen(void* drawer,void* ctx,Text* t,float cw,const ScreenFeed& f,Line* lines,int* at) noexcept {
+    ScreenTitle(t,lines,at,cw,Tr(Tx::scrStatus));
+    float y=200.0f;
+    const float x=70.0f,w=cw-140.0f;
+    if(f.hpMax>0.0f) {
+        const float share=f.hp/f.hpMax;
+        Label(t,lines,at,x,y,0,3.2f,share<0.3f ? kRed : kScreenInk,Tr(Tx::scrArmor),static_cast<int>(f.hp+0.5f),static_cast<int>(f.hpMax+0.5f));
+        Bar(drawer,ctx,x,y+70.0f,w,70.0f,share,share,share<0.3f ? kRed : kScreenInk,1.0f);
+        y+=230.0f;
+    }
+    if(f.hull && f.hullMax>0.0f) {
+        const float share=f.hullHp/f.hullMax;
+        Label(t,lines,at,x,y,0,3.2f,share<0.3f ? kRed : kScreenInk,Tr(Tx::scrHull),static_cast<int>(f.hullHp+0.5f),static_cast<int>(f.hullMax+0.5f));
+        Bar(drawer,ctx,x,y+70.0f,w,70.0f,share,share,share<0.3f ? kRed : kScreenInk,1.0f);
+        y+=230.0f;
+    }
+    if(f.fuel.ok) {
+        const int sec=f.fuel.sec>=0.0f ? static_cast<int>(f.fuel.sec) : -1;
+        if(sec>=0)Label(t,lines,at,x,y,0,3.2f,f.fuel.share<0.2f ? kAmber : kScreenInk,Tr(Tx::scrFuel),sec/60,sec%60);
+        else Label(t,lines,at,x,y,0,3.2f,f.fuel.share<0.2f ? kAmber : kScreenInk,Tr(Tx::scrFuelShare),static_cast<int>(f.fuel.share*100.0f+0.5f));
+        Bar(drawer,ctx,x,y+70.0f,w,50.0f,f.fuel.share,f.fuel.share,f.fuel.share<0.2f ? kAmber : kScreenInk,1.0f);
+        y+=200.0f;
+    }
+    int shown=0;
+    for(int k=0;k<kWarnCount && shown<3 && y<kCanvasH-80.0f;++k) {
+        if(!(f.warn>>k&1u))continue;
+        Label(t,lines,at,cw*0.5f,y+40.0f,1,3.4f,IsWarning(k) ? kRed : kAmber,L"%ls",Tr(kWarnText[k]));
+        y+=110.0f;++shown;
+    }
+    if(!f.warn && y<kCanvasH-80.0f)Label(t,lines,at,cw*0.5f,y+40.0f,1,3.0f,kScreenDim,L"%ls",Tr(Tx::scrNoWarn));
+}
+
+void WeaponsScreen(void* drawer,void* ctx,Text* t,float cw,const ScreenFeed& f,Line* lines,int* at) noexcept {
+    ScreenTitle(t,lines,at,cw,Tr(Tx::scrWeapons));
+    if(!f.cells){Label(t,lines,at,cw*0.5f,kCanvasH*0.5f,1,3.0f,kScreenDim,L"%ls",Tr(Tx::scrNoArms));return;}
+    const int rows=f.cells<6 ? f.cells : 6;
+    const float top=170.0f,row=(kCanvasH-top-40.0f)/static_cast<float>(rows>3 ? rows : 3);
+    for(int i=0;i<rows;++i) {
+        const LoadCell& c=f.cell[i];
+        const float y=top+row*(static_cast<float>(i)+0.5f);
+        if(c.picked)Rect(drawer,ctx,40.0f,y-row*0.42f,cw-40.0f,y+row*0.42f,kScreenGlow);
+        if(c.picked)Tri(drawer,ctx,60.0f,y,100.0f,y,18.0f,kCyan);
+        Label(t,lines,at,120.0f,y,0,row>200.0f ? 3.4f : 2.8f,c.rgba ? c.rgba : kScreenInk,L"%ls",c.text);
+    }
+}
+
+void FlightScreen(void* drawer,void* ctx,Text* t,float cw,const ScreenFeed& f,Line* lines,int* at) noexcept {
+    // The heading tape across the top: a tick each 10 degrees over +-40, the cardinal points named.
+    if(f.heading>=0.0f) {
+        const float cx=cw*0.5f,y=130.0f,span=cw*0.8f;
+        for(int d=-40;d<=40;++d) {
+            const float hd=std::floor(f.heading)+static_cast<float>(d),x=cx+(hd-f.heading)/80.0f*span;
+            const int deg=(static_cast<int>(hd)%360+360)%360;
+            if(deg%10)continue;
+            Seg(drawer,ctx,x,y,x,y+(deg%30 ? 30.0f : 55.0f),5.0f,kScreenInk);
+            if(deg%90==0 && std::fabs(x-cx)>60.0f)   // the cardinal points beside the tape (the readout is under its middle)
+                Label(t,lines,at,x,y-50.0f,1,2.4f,kScreenInk,L"%ls",deg==0 ? L"N" : deg==90 ? L"E" : deg==180 ? L"S" : L"W");
+        }
+        Tri(drawer,ctx,cx,y+95.0f,cx,y+60.0f,18.0f,kCyan);
+        Label(t,lines,at,cx,y+150.0f,1,2.6f,kScreenInk,Tr(Tx::scrHeading),static_cast<int>(f.heading+0.5f)%360);
+    }
+    // The pitch: the horizon line moved by the pitch (`unit` canvas pixels a degree), the boresight fixed in the middle.
+    const float midY=kCanvasH*0.56f,unit=7.0f;
+    if(f.flies) {
+        const float hy=midY+f.pitch/kDeg*unit;
+        for(int p=-30;p<=30;p+=10) {
+            const float y=hy-static_cast<float>(p)*unit,half=p ? cw*0.12f : cw*0.3f;
+            if(y>300.0f && y<kCanvasH*0.8f)Seg(drawer,ctx,cw*0.5f-half,y,cw*0.5f+half,y,p ? 3.0f : 6.0f,p ? kScreenDim : kScreenInk);
+        }
+        Seg(drawer,ctx,cw*0.5f-80.0f,midY,cw*0.5f-25.0f,midY,7.0f,kCyan);
+        Seg(drawer,ctx,cw*0.5f+25.0f,midY,cw*0.5f+80.0f,midY,7.0f,kCyan);
+    }
+    // Speed bottom left, height and climb bottom right, under the pitch.
+    const float rowY=kCanvasH*0.9f;
+    if(f.speed>=0.0f)Label(t,lines,at,60.0f,rowY,0,3.2f,kScreenInk,Tr(Tx::scrSpeed),static_cast<int>(f.speed*3.6f+0.5f));
+    if(f.clear>=0.0f)Label(t,lines,at,cw-60.0f,rowY,2,3.2f,kScreenInk,Tr(Tx::scrHeight),static_cast<int>(f.clear+0.5f));
+    if(f.flies)Label(t,lines,at,cw-60.0f,rowY-170.0f,2,2.6f,kScreenDim,Tr(Tx::scrClimb),f.climb);
+}
+
+void MapScreenOf(void* drawer,void* ctx,Text* t,float cw,const ScreenFeed& f,Line* lines,int* at) noexcept {
+    ScreenTitle(t,lines,at,cw,Tr(Tx::scrMap));
+    const float cx=cw*0.5f,cy=kCanvasH*0.56f,r=kCanvasH*0.38f,range=600.0f;
+    for(int ring=1;ring<=3;++ring)Arc(drawer,ctx,cx,cy,r*static_cast<float>(ring)/3.0f,0.0f,kTurn,ring==3 ? 5.0f : 3.0f,40,kScreenDim);
+    Seg(drawer,ctx,cx,cy-r,cx,cy+r,2.0f,kScreenDim);Seg(drawer,ctx,cx-r,cy,cx+r,cy,2.0f,kScreenDim);
+    Tri(drawer,ctx,cx,cy+20.0f,cx,cy-30.0f,20.0f,kCyan);   // the vehicle, heading up
+    const float hd=(f.heading>=0.0f ? f.heading : 0.0f)*kDeg;
+    for(int i=0;i<f.threats;++i) {   // each threat by its bearing from the heading and its distance (game +x is west)
+        const float dx=f.threatAt[i][0]-f.pos[0],dz=f.threatAt[i][2]-f.pos[2];
+        const float east=-dx,north=dz,dist=std::sqrt(east*east+north*north);
+        const float bearing=std::atan2(east,north)-hd,rr=r*vec::Clamp(dist/range,0.0f,1.0f);
+        const float x=cx+rr*std::sin(bearing),y=cy-rr*std::cos(bearing);
+        Arc(drawer,ctx,x,y,22.0f,0.0f,kTurn,9.0f,10,kRed);
+    }
+    if(f.heading>=0.0f) {   // north on the ring
+        const float x=cx+(r-60.0f)*std::sin(-hd),y=cy-(r-60.0f)*std::cos(-hd);   // inside the ring: clear of the title
+        Label(t,lines,at,x,y,1,2.4f,kScreenInk,L"N");
+    }
+}
+
+// The aim's marks of a stock vehicle alone (StockVehicleHud less its tape, block and scope: those are on the screens).
+void StockAimOnly(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockHudReadout& r,
+                  const StockExtras& x,Line* lines,int* at) noexcept {
+    StockMarks(drawer,ctx,text,vp,width,height,s,r,x,lines,at);
+    if(x.proteus && vec::Dist(x.proteus->pos,r.pos)<2.0f)ProteusMarks(drawer,ctx,text,vp,width,height,s,*x.proteus,lines,at);
+    if(Cfg().playerJetThreatHud && r.threats>0) {
+        PlayerJetSymbols y{};
+        std::memcpy(y.pos,r.pos,12);
+        y.threats=r.threats<kMostThreats ? r.threats : kMostThreats;
+        for(int i=0;i<y.threats && i<kStockThreats;++i){std::memcpy(y.threatAt[i],r.threatAt[i],12);y.threatKind[i]=r.threatKind[i];}
+        std::memcpy(y.nose,r.lookOk ? r.look : r.hull,12);
+        ThreatMarks(drawer,ctx,vp,width,height,s,y);
+    }
+}
+
+// Whether the cockpit has a head-up glass (a hud screen): then the HUD's head-up symbols stay on the view; without one
+// they give way too (their numbers are on the screens) and only the aim's marks stay.
+bool HudGlass(const CockpitScreens& c) noexcept {
+    for(int i=0;i<c.n;++i)if(c.s[i].kind==ScreenKind::hud)return true;
+    return false;
+}
+
+// Every screen of the snapshot's cockpit drawn onto the view (`vp`, width x height) round its eye.
+void DrawCockpitScreens(void* drawer,void* ctx,Text* t,const float* vp,float width,float height,float s,const Snapshot& snap,
+                    Line* lines,int* at) noexcept {
+    float eye[3],dir[3];
+    if(!RayOf(vp,eye,dir))return;
+    const ScreenFeed feed=FeedOf(snap);
+    const float ts=t ? t->s : s;
+    for(int i=0;i<snap.scr.n;++i) {
+        const CockpitScreen& c=snap.scr.s[i];
+        if(c.kind==ScreenKind::hud)continue;   // the head-up glass: the HUD's own symbols, on the world
+        float px[4],py[4];
+        bool ok=true;
+        const float hw=c.w*0.5f,hh=c.h*0.5f,corner[4][2]={{-hw,hh},{hw,hh},{hw,-hh},{-hw,-hh}};   // TL TR BR BL
+        for(int k=0;k<4 && ok;++k) {
+            float p[3],q[4];
+            for(int a=0;a<3;++a)p[a]=eye[a]+c.off[a]+c.right[a]*corner[k][0]+c.up[a]*corner[k][1];
+            for(int a=0;a<4;++a)q[a]=p[0]*vp[a]+p[1]*vp[4+a]+p[2]*vp[8+a]+vp[12+a];
+            ok=q[3]>0.05f;
+            px[k]=width*0.5f*(1.0f+q[0]/q[3]);py[k]=height*0.5f*(1.0f-q[1]/q[3]);
+        }
+        const float cw=kCanvasH*c.w/c.h;
+        if(!ok || !canvas::Onto(screenCanvas,px,py,cw,kCanvasH))continue;
+        const int first=*at;
+        if(t)t->s=1.0f;   // canvas pixels while it is laid out
+        screenCanvas.on=true;
+        Rect(drawer,ctx,0.0f,0.0f,cw,kCanvasH,kScreenGlow);
+        switch(c.kind) {
+            case ScreenKind::status: StatusScreen(drawer,ctx,t,cw,feed,lines,at);break;
+            case ScreenKind::weapons: WeaponsScreen(drawer,ctx,t,cw,feed,lines,at);break;
+            case ScreenKind::flight: FlightScreen(drawer,ctx,t,cw,feed,lines,at);break;
+            case ScreenKind::map: MapScreenOf(drawer,ctx,t,cw,feed,lines,at);break;
+            default: break;
+        }
+        screenCanvas.on=false;
+        if(t)t->s=ts;
+        CanvasText(screenCanvas,lines,first,*at,ts);
+    }
+}

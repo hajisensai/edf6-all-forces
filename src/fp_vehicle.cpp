@@ -42,6 +42,40 @@ int SeatOf(unsigned char* v,const unsigned char* human) noexcept {
 }
 }  // namespace
 
+int VehicleScreens(const unsigned char* v,int seat,const float* eye,CockpitScreens* out) noexcept {
+    out->n=0;
+    const unsigned char* inst=v+kVehicleModel;
+    if(!Readable(inst,kInstCount+4))return 0;
+    const auto bones=At<const unsigned char*>(inst,kInstBones);
+    const auto n=At<std::int32_t>(inst,kInstCount);
+    if(!bones || n<=0 || n>kMostBones || !Readable(bones,static_cast<std::size_t>(n)*kBoneStride))return 0;
+    wchar_t prefix[24];
+    const int len=std::swprintf(prefix,24,L"vc_scr_%d_",seat);
+    static const wchar_t* const kinds[]={L"flight",L"weapons",L"status",L"hud",L"map"};
+    for(std::int32_t i=0;i<n && out->n<kMostScreens;++i) {
+        const unsigned char* rec=bones+static_cast<std::size_t>(i)*kBoneStride;
+        const auto name=At<const wchar_t*>(rec,0);
+        if(!name || std::wcsncmp(name,prefix,static_cast<std::size_t>(len))!=0)continue;
+        const wchar_t* rest=name+len;
+        int kind=-1;
+        for(int k=0;k<5;++k) {
+            const std::size_t kl=std::wcslen(kinds[k]);
+            if(std::wcsncmp(rest,kinds[k],kl)==0 && rest[kl]==L'_'){kind=k;rest+=kl+1;break;}
+        }
+        wchar_t* end=nullptr;
+        const long wmm=kind<0 ? 0 : std::wcstol(rest,&end,10);
+        const long hmm=end && *end==L'x' ? std::wcstol(end+1,nullptr,10) : 0;
+        if(wmm<=0 || hmm<=0)continue;
+        const float* m=reinterpret_cast<const float*>(rec+kBoneWorld);
+        CockpitScreen& c=out->s[out->n];
+        c.kind=static_cast<ScreenKind>(kind);
+        for(int k=0;k<3;++k){c.right[k]=m[k];c.up[k]=m[4+k];c.off[k]=m[12+k]-eye[k];}
+        c.w=wmm*0.001f;c.h=hmm*0.001f;
+        if(std::isfinite(c.off[0]+c.off[1]+c.off[2]+c.right[0]+c.up[1]))++out->n;
+    }
+    return out->n;
+}
+
 bool VehicleEye(unsigned char* human,float* eye,RideView* out) noexcept {
     *out=RideView{};
     if(HumanOnFoot(human))return false;
