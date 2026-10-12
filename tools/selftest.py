@@ -6487,6 +6487,13 @@ def edf41_calls_real() -> None:
     if os.path.isfile(os.path.join(edf6, 'Root.cpk')):
         g6 = rootcpk.Game(edf6)
         have = {f'{d}/{n}'.upper() for d, n in g6.cpk.index}
+    with open(os.path.join(ROOT, 'edf41port', 'objects.json'), encoding='utf-8') as f:
+        ported41 = set(json.load(f)['files'])
+    # 4.1 has no Barga: a call bringing EDF6's (v515_retrobalam, its "Retro Balam") is a Balam call that lost the ported
+    # Balam (2026-10-12, test site #12: 「巴拉姆模型依然是巴尔加」).
+    balam = [w['id'] for w in reg['weapons'] if w.get('call', {}).get('vehicle') == 'v515_retrobalam.sgo']
+    assert not balam, f"4.1's Balam calls bring EDF6's Barga (v515_retrobalam), not the ported Balam: {balam}"
+    assert sum(w.get('call', {}).get('vehicle') == 'vehicle501_fortressrobo.sgo' for w in reg['weapons']) == 4
     by_id = {p.id: p for p in pw.PORTS}
     for w in reg['weapons']:
         if 'call' not in w:
@@ -6500,7 +6507,8 @@ def edf41_calls_real() -> None:
             paths = [x for x in _dsgo_strings(drop) if x.lower().startswith('app:/')]
             assert not any('transporter401' in x.lower() for x in paths), f"{w['id']}: still 4.1's transport"
             if have is not None:
-                gone = [x for x in paths if x.split(':/', 1)[1].upper() not in have]
+                # Or a 4.1 object the install ports into Mods under its own name (edf41port/objects: 4.1's Balam).
+                gone = [x for x in paths if x.split(':/', 1)[1].upper() not in have and x.split(':/', 1)[1].upper() not in ported41]
                 assert not gone, f"{w['id']}: EDF6 lacks {gone}"
         else:
             assert r.get('xgs_scene_object_class') == 'Weapon_RadioContact', w['id']

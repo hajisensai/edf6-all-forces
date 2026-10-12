@@ -289,7 +289,9 @@ class CallTemplates:
     only breaks a tie)."""
 
     # A 4.1 vehicle EDF6 has no call of: the call of its family's.
-    FAMILY = {'vehicle502_groundrobogold.sgo': 'vehicle502_groundrobo.sgo'}
+    # 4.1's Balam (edf41calls.VEHICLES: its own SGO, which EDF6 has no call of): the Barga's, the same class and turrets.
+    FAMILY = {'vehicle502_groundrobogold.sgo': 'vehicle502_groundrobo.sgo',
+              'vehicle501_fortressrobo.sgo': 'v515_retrobalam.sgo'}
 
     def __init__(self, game: rootcpk.Game) -> None:
         self.vehicles: dict[str, list[tuple[float, float, str, dsgo.Node]]] = {}
@@ -362,10 +364,20 @@ def call_entry(g4: rootcpk.Game, file: str, cat41: int, level: float, templates:
         doc = convert(members, {}, call, templates)
     except edf5port.Unsupported as e:
         return f'转换不支持：{e}'
-    missing = sorted(e6.missing({p for p in _dsgo_strings(doc) if p.lower().startswith('app:/')}))
+    missing = sorted(p for p in e6.missing({p for p in _dsgo_strings(doc) if p.lower().startswith('app:/')})
+                     if not ported_object(p))
     if missing:
         return 'EDF6 没有这些资源：' + ', '.join(missing)
     return call, int(found[0]), found[3].get('xgs_scene_object_class'), found[2]
+
+
+def ported_object(path: str) -> bool:
+    """Whether app:/ `path` is one of the 4.1 objects tools/make_edf41_objects.py ports into Mods under 4.1's own name
+    (edf41port/objects.json 'files': installed with every install, tools/edf41_objects.py)."""
+    with open(os.path.join(HERE, '..', 'edf41port', 'objects.json'), encoding='utf-8') as f:
+        files = json.load(f)['files']
+    rel = path.replace('\\', '/').split(':/', 1)[-1].upper()
+    return rel in files
 
 
 def _dsgo_strings(v: object) -> list[str]:

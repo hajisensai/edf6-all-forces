@@ -91,7 +91,8 @@ struct Emc {
     bool sounding;
     emc::Budget budget;
     float breakLeft,end[3];
-    bool endHit;
+    float blast[3],blastDir[3];   // where its end blast goes (emc_plan.h BlastAt, the last one any frame found) and the way
+    bool blastHit;                // ...the beam went then; false: none found yet (open air)
     int breaks,breaksFired,breaksMissed;
 };
 Emc emcs[kMaxEmcs]{};
@@ -194,11 +195,19 @@ void Break(unsigned char* v,Emc& e,const float* from,const float* dir,const emc:
     }
 }
 
+// The end blast's spot from this frame's scan, when it has one (emc_plan.h BlastAt): kept until a later frame finds another.
+void NoteBlast(Emc& e,const float* from,const float* dir,const emc::Scan& s) noexcept {
+    const float d=emc::BlastAt(s);
+    if(!(d>=0.0f))return;
+    for(int i=0;i<3;++i){e.blast[i]=from[i]+dir[i]*d;e.blastDir[i]=dir[i];}
+    e.blastHit=true;
+}
+
 // The beam's frame: its line scanned, the beam steered onto its end, the buildings on it charged every kBreakSec.
 void Beam(unsigned char* v,Emc& e,const float* from,const float* dir,float dt,ULONGLONG ms) noexcept {
     const emc::Scan s=Line(from,dir);
     for(int i=0;i<3;++i)e.end[i]=from[i]+dir[i]*s.end;
-    e.endHit=s.end<emc::kBeamRange-1.0f;
+    NoteBlast(e,from,dir,s);
     RoundSteer(e.beam,from,e.end);
     e.breakLeft-=dt;
     if(e.breakLeft<=0.0f) {
@@ -209,7 +218,7 @@ void Beam(unsigned char* v,Emc& e,const float* from,const float* dir,float dt,UL
     if(Cfg().debug && ms-e.logAt>=kLogMs) {
         e.logAt=ms;
         Log("EMC v=%p beam: %.0f m to its end (%s), %d building(s) on its line (the nearest %.0f m), break charges %d fired, %d not",v,s.end,
-            s.ground ? "the ground" : e.endHit ? "deep in buildings" : "nothing: its reach",s.breaks,s.breaks ? s.at[0] : -1.0f,e.breaksFired,
+            s.ground ? "the ground" : s.end<emc::kBeamRange-1.0f ? "deep in buildings" : "nothing: its reach",s.breaks,s.breaks ? s.at[0] : -1.0f,e.breaksFired,
             e.breaksMissed);
     }
 }
@@ -224,25 +233,25 @@ void Fire(unsigned char* v,Emc& e,unsigned char* weapon,const float* from,const 
     const emc::Scan s=Line(from,dir);
     for(int i=0;i<3;++i)e.end[i]=from[i]+dir[i]*s.end;
     e.beam=EmcFire(EmcRound::beam,v,from,e.end,e.budget.perRound);
+    e.blastHit=false;NoteBlast(e,from,dir,s);
     e.breakLeft=0.0f;e.breaks=e.breaksFired=e.breaksMissed=0;e.logAt=0;
     Log("EMC v=%p fired: %d of %d rounds (burst %d, %.2f damage each) = %.0f damage through every enemy on its line, %d rounds of %.2f over %.1f s; "
         "blast %.0f m, %.0f damage; beam %s, its end %.0f m (%s)",v,e.budget.used,ammo,burst,perHit,e.budget.line,e.budget.rounds,
         e.budget.perRound,c.emcBeamSec,c.emcBlastRadius,e.budget.blast,e.beam.obj ? "made" : "NOT made",s.end,s.ground ? "the ground" : "no ground");
 }
 
-// The beam over: deleted, the blast on what it ended on (nothing there, its reach in the air: none).
-void End(unsigned char* v,Emc& e,const float* from,const float* dir) noexcept {
+// The beam over: deleted, the blast where it last found the ground it ends on or the last building on its line
+// (NoteBlast); only a beam that met nothing at all (open air to its reach every frame) has none.
+void End(unsigned char* v,Emc& e) noexcept {
     RoundDrop(e.beam);
-    const float* f=from;
-    float d=0.0f;
-    for(int i=0;i<3;++i)d+=(e.end[i]-f[i])*dir[i];
-    if(!e.endHit || !(e.budget.blast>0.0f)) {
+    if(!e.blastHit || !(e.budget.blast>0.0f)) {
         Log("EMC v=%p beam over: %d building charge(s) fired (%d not); %s",v,e.breaksFired,e.breaksMissed,
-            e.endHit ? "no blast (EmcBlastShare 0)" : "nothing at its end: no blast");
+            e.blastHit ? "no blast (EmcBlastShare 0)" : "nothing on its line: no blast");
         return;
     }
-    const float a=d-kBlastLead>0.0f ? d-kBlastLead : 0.0f,b=d+kInto;
-    const float p[3]={f[0]+dir[0]*a,f[1]+dir[1]*a,f[2]+dir[2]*a},q[3]={f[0]+dir[0]*b,f[1]+dir[1]*b,f[2]+dir[2]*b};
+    const float* f=e.blast;const float* dir=e.blastDir;
+    const float p[3]={f[0]-dir[0]*kBlastLead,f[1]-dir[1]*kBlastLead,f[2]-dir[2]*kBlastLead};
+    const float q[3]={f[0]+dir[0]*kInto,f[1]+dir[1]*kInto,f[2]+dir[2]*kInto};
     RoundObj blast=EmcFire(EmcRound::blast,v,p,q,e.budget.blast);
     const bool sized=blast.obj && RoundBlast(blast,Cfg().emcBlastRadius);
     Log("EMC v=%p beam over: %d building charge(s) fired (%d not); blast %s at (%.0f,%.0f,%.0f), %.0f damage, %.0f m%s",v,e.breaksFired,
@@ -351,7 +360,7 @@ void EmcFrame(unsigned char* v) noexcept {
             Fire(v,*e,weapon,from,dir);
             break;
         case emc::Event::end:
-            End(v,*e,from,dir);
+            End(v,*e);
             break;
         case emc::Event::none: break;
     }

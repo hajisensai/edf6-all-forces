@@ -102,6 +102,11 @@ constexpr float kFreeboard=15.0f,kDraft=kSubDeckTop-kFreeboard;
 // A player on its deck is up to 830 m from its post: it sets off only past the hull.
 constexpr float kLeash=1500.0f,kStop=1000.0f;  // it sets off after a player this far from its post, stops this near
 constexpr float kCruise=25.0f,kAccel=3.0f,kClimb=8.0f,kSink=4.0f,kClimbAccel=6.0f,kPosGain=0.2f;
+// A called-in carrier surfaces (2026-10-12: the call was refused since #88 for want of an entry; a submarine's entry is
+// coming up from under the water): made with its tower top kSubmerged under the surface (no deeper than the seabed
+// under it lets its box sit), it rises at kSurfaceClimb to its afloat height; until it is there it neither fires nor
+// launches drones.
+constexpr float kSubmerged=20.0f,kSurfaceClimb=12.0f,kSurfaced=1.0f;
 constexpr float kTurnRate=0.05f,kTurnGain=0.8f,kRollGain=1.5f,kMaxPitch=0.05f;   // 3 deg/s, 3 deg
 // Combat.
 constexpr float kRange=2000.0f;              // it engages enemies this far from it
@@ -158,6 +163,7 @@ struct Sub {
     float lin[3],ang[3];
     bool moving,ready,launched;
     bool sea;                     // afloat: it keeps to the water (Follow) and its heading
+    bool surfacing;               // called in under the water and still rising to s.floor (kSurfaceClimb, no fire)
     // Its seat weapons per part (Resolve): the weapon (nullptr: none, or off), resolved from holders `holders`.
     unsigned char* weapon[kSystemCount];
     const void* holders;
@@ -360,7 +366,7 @@ void Bay(Sub& s,const float* m,ULONGLONG ms) noexcept {
         if(d && !JetFlying(d.obj,d.ctrl))d=ObjRef{};
         out+=d ? 1 : 0;
     }
-    if(s.down[droneBay] || !s.hasTarget || out>=kBayDrones || ms-s.droneAt<kBayGapMs)return;
+    if(s.surfacing || s.down[droneBay] || !s.hasTarget || out>=kBayDrones || ms-s.droneAt<kBayGapMs)return;
     s.droneAt=ms;
     float from[3];
     ToWorld(m,kBayLaunch,from);
@@ -685,7 +691,8 @@ void Drive(Sub& s,const float* pos,const float* nose,float dt) noexcept {
     s.lin[2]=Approach(s.lin[2],want[2],kAccel*dt);
     float hold=s.floor,ground=0.0f;
     if(!s.sea && GroundUnder(pos,nose,&ground) && ground+kHullBottom+kClear>hold)hold=ground+kHullBottom+kClear;
-    const float wantY=std::isfinite(hold) ? Clamp(hold-pos[1],-kSink,kClimb) : 0.0f;
+    if(s.surfacing && pos[1]>=hold-kSurfaced)s.surfacing=false;
+    const float wantY=std::isfinite(hold) ? Clamp(hold-pos[1],-kSink,s.surfacing ? kSurfaceClimb : kClimb) : 0.0f;
     s.lin[1]=Approach(s.lin[1],wantY,kClimbAccel*dt);
 }
 
@@ -742,7 +749,7 @@ void FireStep(Sub& s,unsigned char* v,const float* m,ULONGLONG ms) noexcept {
     float path[kTurrets*6]{};
     Turrets(s,v,m,s.dt,on,hasPath,path);
     bool gun=false,missile=false;
-    if(s.hasTarget && Cfg().heliFire) {
+    if(s.hasTarget && Cfg().heliFire && !s.surfacing) {
         // 0x2020 fires both guns: one on the target is enough, so long as neither's line passes a friend.
         bool clear=true,any=false;
         for(int t=0;t<kTurrets;++t) {
@@ -1107,8 +1114,14 @@ unsigned char* SubLaunch(const float* pos,const float* heading) noexcept {
         if(sea==Sea::land){Log("SUB launch: no water at (%.0f,%.0f): the carrier stays away",pos[0],pos[2]);return nullptr;}
         float start[3]={pos[0],pos[1]+kHullBottom+kClear,pos[2]};
         float ground=0.0f;
-        if(GroundUnder(pos,fwd,&ground))start[1]=ground+kHullBottom+kClear;
-        if(sea==Sea::water && start[1]<surface-kDraft)start[1]=surface-kDraft;
+        const bool grounded=GroundUnder(pos,fwd,&ground);
+        if(grounded)start[1]=ground+kHullBottom+kClear;
+        if(sea==Sea::water) {
+            // Under the water, its tower top kSubmerged down, its box no lower than the seabed under it: it surfaces.
+            const float afloat=surface-kDraft,under=surface-kSubmerged-kTop;
+            start[1]=grounded && start[1]>under ? start[1] : under;
+            if(start[1]>afloat)start[1]=afloat;
+        }
         // Rows right, up, forward, position (jet.cpp Launch).
         alignas(16) const float m[16]={fwd[2],0,-fwd[0],0, 0,1,0,0, fwd[0],0,fwd[2],0, start[0],start[1],start[2],1};
         InitParam param{image+kInitParamVtable,{}};
@@ -1133,10 +1146,13 @@ unsigned char* SubLaunch(const float* pos,const float* heading) noexcept {
         }
         *s=Sub{};s->ref=ObjRef::Of(v);s->vehicle=v;s->bornAt=ms;s->launched=true;s->inputAt=ms;
         s->sea=sea==Sea::water;s->floor=s->sea ? surface-kDraft : -INFINITY;
+        s->surfacing=s->sea && start[1]<s->floor-kSurfaced;
         std::memcpy(s->post,start,12);
         Thicken(*s,v);
         Log("SUB v=%p launched at (%.0f,%.0f,%.0f) heading (%.2f,%.2f) %s hp=%.0f driver=%d",v,start[0],start[1],start[2],fwd[0],fwd[2],
-            sea==Sea::water ? "afloat" : "on the ground (water unknown)",At<float>(v,kHp),SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::dummy);
+            sea==Sea::water ? (s->surfacing ? "under the water: surfacing" : "afloat") : "on the ground (water unknown)",At<float>(v,kHp),
+            SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::dummy);
+        if(s->surfacing)Log("SUB v=%p surfaces %.0f m to y=%.0f (water y=%.0f) at %.0f m/s",v,s->floor-start[1],s->floor,surface,kSurfaceClimb);
         return v;
     } __except(EXCEPTION_EXECUTE_HANDLER){return nullptr;}
 }

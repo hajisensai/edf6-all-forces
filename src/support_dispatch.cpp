@@ -1213,6 +1213,15 @@ bool Request(int index,const float* target,const SupportLoadout* load,wchar_t* n
         Refuse(static_cast<std::uint32_t>(index),"disabled by SupportDisabled in EDF6VehicleCrew.ini",
                L"该支援单位已在配置中停用（EDF6VehicleCrew.ini SupportDisabled / 安装器菜单 7）");
     }
+    else if(SupportSubCatalog(index)) {
+        // It surfaces where it is called (SupportSubCallAt), on no plan: from the map, this machine's own copy only, so
+        // online it is the Air Raider's call weapon (replayed on every machine) that brings it.
+        if(InSession())Refuse(static_cast<std::uint32_t>(index),"submarine carrier from the map online",
+                              L"联机时潜水母舰请用空袭兵的呼叫武器（信号弹）召唤");
+        else if(callAt && GameMs()-callAt<kCallCooldown)Status(L"支援调度冷却中（30 秒）");
+        else if(SupportSubCallAt(target,player.at ? player.pos : nullptr,true,note,capacity)){callAt=GameMs();return true;}
+        else return false;
+    }
     else if(InSession() && !LocalAuthority()) {
         localRequest.acceptNotices=true;
         accepted=SubmitSupportRequest(index,target,note,capacity,loadout);
@@ -1244,6 +1253,37 @@ bool Request(int index,const float* target,const SupportLoadout* load,wchar_t* n
 }  // namespace
 bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept {
     return SupportCallComposedAt(index,target,nullptr,note,capacity);
+}
+bool SupportSubCallAt(const float* target,const float* from,bool local,wchar_t* note,std::size_t capacity) noexcept {
+    if(note && capacity)note[0]=0;
+    if(!target || !std::isfinite(target[0]+target[1]+target[2]))return false;
+    // Ahead of the target, away from the caller: the hull's 1664 m clear of them where the water lets it, else nearer.
+    constexpr float kAhead[]={1000.0f,600.0f,300.0f,0.0f};
+    float dir[3]={0.0f,0.0f,1.0f};
+    if(from) {
+        const float dx=target[0]-from[0],dz=target[2]-from[2],l=std::sqrt(dx*dx+dz*dz);
+        if(std::isfinite(l) && l>5.0f){dir[0]=dx/l;dir[2]=dz/l;}
+    }
+    const wchar_t* text=L"目标附近没有水域：潜水母舰只能从水下上浮";
+    bool sawWater=false,surfaced=false;
+    for(const float ahead:kAhead) {
+        const float at[3]={target[0]+dir[0]*ahead,target[1],target[2]+dir[2]*ahead};
+        float surface=0.0f;
+        if(SeaAt(at[0],at[2],&surface)==Sea::land)continue;
+        sawWater=true;
+        surfaced=SubLaunch(at,dir)!=nullptr;
+        Log("SUPPORT submarine carrier at (%.0f,%.0f,%.0f), %.0f m past the target: %s",at[0],at[1],at[2],ahead,
+            surfaced ? "surfacing" : "not made (not preloaded, or carriers out already)");
+        break;
+    }
+    if(surfaced)text=L"潜水母舰正在上浮";
+    else if(sawWater)text=L"潜水母舰无法出动：资源未预载或已有 3 艘在场";
+    else Log("SUPPORT submarine carrier: no water at or past (%.0f,%.0f): refused",target[0],target[2]);
+    if(local) {
+        Status(text);
+        if(note && capacity)_snwprintf_s(note,capacity,_TRUNCATE,L"%ls",status);
+    }
+    return surfaced;
 }
 bool SupportCallComposedAt(int index,const float* target,const SupportLoadout* load,wchar_t* note,std::size_t capacity) noexcept {
     if(note && capacity && index==SupportRescueCatalog()) {

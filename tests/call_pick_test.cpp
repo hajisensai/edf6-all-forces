@@ -29,6 +29,7 @@ float MapRay(const float* from,const float* to,float* hit) noexcept {
 }
 bool MapGroundNear(float x,float z,float,float* out,bool) noexcept {*out=SupportGround(x,z);return supportGround;}
 bool SupportCallAt(int,const float*,wchar_t*,std::size_t) noexcept {return false;}
+bool SupportSubCallAt(const float*,const float*,bool,wchar_t*,std::size_t) noexcept {return false;}
 bool testOnline=true;
 const Config& Cfg() noexcept { return config; }
 bool InSession() noexcept { return testOnline; }
