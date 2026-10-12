@@ -316,6 +316,56 @@ void EntryCase(float offDeg,float over,bool launched,float* gunAt,float* missile
     }
 }
 
+// The air case (the user 2026-10-12: 「战斗机对空能力甚至不如直升机」): a gun jet `role` loaded with air-to-air missiles the
+// game has locked, `range` m from a flyer `up` m over the ground circling at `circle` m/s (a bee, a drone). Over `seconds`:
+// when its guns first fire (-1: never), how many frames they fire, when its first missile goes (-1: never).
+struct AirResult { float gunAt,missileAt; int gunFrames; };
+AirResult AirCase(Role role,float range,float up,float circle,float seconds) {
+    boxes.clear();
+    const Kind& k=KindOf(role);
+    const float at[3]={0.0f,k.alt,-range},dir[3]={0.0f,0.0f,1.0f};
+    std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0);
+    unsigned char* v=mem.data();
+    Jet& j=jets[0];
+    Place(j,v,ctrl.data(),role,at,dir,k.cruise,0.0f);
+    static int targetDummy=0;
+    float aim[3]={0.0f,up,0.0f};
+    j.t.target=&targetDummy;j.t.flyer=true;std::memcpy(j.t.aim,aim,12);std::memcpy(j.t.tgtPrev,aim,12);
+    Arms arms{};arms.gunSpeed=960.0f;arms.gunRange=960.0f;arms.pick=-1;arms.rocket=-1;arms.guns=3600;arms.hasGun=true;
+    arms.hasMissile=true;arms.missiles=2;arms.locked=1;arms.missileRange=1800.0f;
+    const ULONGLONG born=nowMs;
+    AirResult r{-1.0f,-1.0f,0};
+    const float radius=60.0f;
+    for(int f=0;f<static_cast<int>(seconds*60.0f);++f) {
+        nowMs+=16;
+        const float t=static_cast<float>(nowMs-born)*0.001f,w=circle/radius;
+        aim[0]=radius*std::cos(w*t)-radius;aim[2]=radius*std::sin(w*t);
+        for(int i=0;i<3;++i)j.t.tgtVel[i]=0.0f;
+        j.t.tgtVel[0]=-circle*std::sin(w*t);j.t.tgtVel[2]=circle*std::cos(w*t);
+        std::memcpy(j.t.aim,aim,12);
+        const float* pos=reinterpret_cast<const float*>(v+kPosition);
+        const float* m=reinterpret_cast<const float*>(v+kMatrix);
+        float nose[3]={m[8],m[9],m[10]};
+        if(!Normalize(nose)){nose[0]=0;nose[1]=0;nose[2]=1;}
+        j.seen=nowMs;
+        Sense(j,pos,nowMs);
+        const float clear=GroundClearance(pos);
+        float lead[3];Lead(pos,aim,j.t.tgtVel,arms,lead);
+        float want[3]={nose[0],0.0f,nose[2]},speed=k.cruise;
+        bool gunsOk=false,missileOk=false;
+        Attack(j,arms,pos,nose,lead,aim[1]+k.alt,nowMs,want,&speed,&gunsOk,&missileOk);
+        Wing(j,k,v,pos,GroundClearance(pos),nose,want,speed,kDt,nowMs);
+        HoldOffGround(j,pos,clear,kDt,nowMs);
+        j.m.ready=true;
+        Fire(j,v,pos,nose,lead,gunsOk,missileOk,arms,nowMs);
+        if(v[kFireGun]){++r.gunFrames;if(r.gunAt<0.0f)r.gunAt=t;}
+        if(v[kFireMissile] && r.missileAt<0.0f)r.missileAt=t;
+        Move(j,v);
+    }
+    jets[0]=Jet{};
+    return r;
+}
+
 int SelfTest(const char* outDir) {
     const std::string logPath=std::string(outDir)+"/selftest.log";
     logFile=std::fopen(logPath.c_str(),"w");
@@ -506,6 +556,33 @@ int SelfTest(const char* outDir) {
         }
         simEnemies.clear();
         jets[0]=Jet{};
+    }
+    // Air-to-air (the user 2026-10-12: 「战斗机对空能力甚至不如直升机」; the 17:09-17:10 log: three multirole jets on flyers
+    // 22-760 m off, msl=2, missile/crank back and forth, fire=0/0 throughout). A gun jet with missiles left on a flyer in
+    // its guns' reach dogfights it with the guns (and fires its missiles when they lock): it does not turn away from it.
+    // One out past its guns' reach still gets the missiles from standoff.
+    {
+        // From its patrol circle (1400 m out and more, at its height): low flyers (a bee, a drone over the player) and high
+        // ones; it must have its guns on them within 15 s, for 1 s of the 40 at least. One past its guns' reach still gets
+        // the missiles from standoff. Started right over a low one (600 m out) or under a high one close by, its first
+        // pass cannot bring the nose on and it comes round: printed (info), not held to the 15 s. So is a fighter 1400 m out
+        // from one 40 m up: 21 deg under it, steeper than its ground guard lets it dive (Guard: its pull-out from there),
+        // its first pass 10-14 deg high; a strike run at the ground from there misses the same (from 1700 m it does not).
+        const struct { Role role; float range,up,circle; bool missile,held; } runs[]={
+            {Role::multirole,1400.0f,120.0f,8.0f,false,true},
+            {Role::interceptor,1400.0f,350.0f,15.0f,false,true},{Role::fighter,2200.0f,40.0f,10.0f,false,true},
+            {Role::multirole,2600.0f,2.0f,0.0f,false,true},{Role::fighter,1600.0f,400.0f,0.0f,true,true},
+            {Role::fighter,600.0f,80.0f,15.0f,false,false},{Role::multirole,600.0f,80.0f,15.0f,false,false},
+            {Role::interceptor,600.0f,80.0f,15.0f,false,false},{Role::fighter,400.0f,300.0f,25.0f,false,false},
+            {Role::multirole,300.0f,450.0f,8.0f,false,false},{Role::fighter,1400.0f,40.0f,10.0f,false,false}};
+        for(const auto& r:runs) {
+            const AirResult a=AirCase(r.role,r.range,r.up,r.circle,40.0f);
+            const bool ok=r.missile ? a.missileAt>=0.0f && a.missileAt<20.0f : a.gunAt>=0.0f && a.gunAt<15.0f && a.gunFrames>=60;
+            if(r.held && !ok)++bad;
+            std::printf("air %-11s %4.0f m out, %3.0f m up, %2.0f m/s: guns at %.1f s (%d frames), missile at %.1f s %s\n",
+                        KindOf(r.role).name,static_cast<double>(r.range),static_cast<double>(r.up),static_cast<double>(r.circle),
+                        static_cast<double>(a.gunAt),a.gunFrames,static_cast<double>(a.missileAt),!r.held ? "info" : ok ? "ok" : "FAIL");
+        }
     }
     if(logFile)std::fclose(logFile);
     std::printf("%s\n",bad ? "SELFTEST FAILED" : "selftest passed");
