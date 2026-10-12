@@ -3543,6 +3543,7 @@ def pack_install_upgrade_uninstall() -> None:
             enter(patched(at_build, build_files=_at_build_files))
             enter(patched(describe, table_ids=lambda mods: []))
             enter(patched(installer, bundle_dir=lambda: bundle, check_loader=lambda game: None,
+                          find_edf41=lambda game: None,
                           stack_weapons=lambda game: {}, retire_weapons=lambda game: True,
                           ask=lambda prompt: answers.pop(0)))
             enter(patched(call_weapons, recover=lambda game: False, install=lambda game, files: {},
@@ -3559,7 +3560,7 @@ def pack_install_upgrade_uninstall() -> None:
                 ledger.Ledger(game).put(gen.OWNER, 'OBJECT/EDF6TR_FAKE.SGO', b'range object')
                 return []
             enter(patched(gen, install=mission, grand_battle=lambda plan: plan))
-            enter(patched(e5c, build=lambda game, campaign=True, test_range=True: _e5c_stub()))   # its own install / remove / check run for real
+            enter(patched(e5c, build=lambda game, campaign=True, test_range=True, root41=None: _e5c_stub()))   # its own install / remove / check run for real
             enter(patched(e5c.modfiles, refuse_while_running=lambda *a, **k: None))   # the real game may be open
             for group in buildcache.GROUPS:
                 made = (b'mac', {'FAKE_PIECE.MAC': b'piece'}) if group == 'bigmap' else \
@@ -5271,7 +5272,7 @@ def edf5_campaign_build() -> None:
                 assert f.stored == own[e5c.thumb_name(path).upper()].stored, (pack.tag, path)
             assert dsgo.compact(dsgo.parse(files[listed])) == files[listed]
     assert counts == {'main': 110, 'dlc1': 11, 'dlc2': 14}, counts
-    assert {x[1] for x in p['skipped']} == {'DLC/DM015', 'DLC/DM018', 'DLC/DM019', 'DLC/DM020'}, p['skipped']
+    assert {x[1] for x in p['skipped'] if x[0] != e5c.PACK41.group} == {'DLC/DM015', 'DLC/DM018', 'DLC/DM019', 'DLC/DM020'}, p['skipped']
 
 
 @test
@@ -5393,7 +5394,7 @@ def edf5_campaign_interrupted_reinstall() -> None:
         modfiles.atomic_write(e5c.rel_path(root, e5c.CONFIG), other)
         e5c.install(root, e5c.build(root))
         real_plan = e5c.plan
-        shorter = lambda r: {**real_plan(r), 'rows': real_plan(r)['rows'][:-1]}   # an update that writes other bytes
+        shorter = lambda r, root41=None: {**real_plan(r, root41), 'rows': real_plan(r, root41)['rows'][:-1]}   # an update that writes other bytes
         with patched(e5c, plan=shorter):
             update = e5c.build(root)
         with patched(e5c.modfiles, atomic_write=_failing_write(e5c.PACKS[0].txt['CN'])):
@@ -5440,7 +5441,8 @@ def edf5_campaign_refusals() -> None:
         os.remove(e5c.rel_path(root, list_rel))
         os.remove(os.path.join(root, 'Mods', e5c.MANIFEST))
         real_plan = e5c.plan
-        with patched(e5c, plan=lambda r: {**real_plan(r), 'rows': [x for x in real_plan(r)['rows'] if x['group'] != 'dlc2']}):
+        with patched(e5c, plan=lambda r, root41=None: {**real_plan(r, root41),
+                                                  'rows': [x for x in real_plan(r, root41)['rows'] if x['group'] != 'dlc2']}):
             _e5c_refuses(root, 'an empty pack')
         assert not e5c.installed(root), 'a refusal wrote a manifest'
 
@@ -5481,8 +5483,9 @@ def edf5_campaign_plugin_sites() -> None:
 @test
 def edf5_campaign_thumbnails() -> None:
     """Every EDF5 mission in the text has EDF5's own thumbnail in THUMBS (no game needed: the file is committed), each a
-    440x220 DXT1 DDS like EDF6's; pick_thumbs gives a mission EDF5's one, the range its stock 'thumb', a mission THUMBS
-    lacks the stock one on its map, else M046's."""
+    440x220 DXT1 DDS like EDF6's; pick_thumbs gives a mission its own pack's one (EDF5's, or EDF4.1's for the 4.1 story:
+    both games have an M007), the range its stock 'thumb', a mission THUMBS lacks the stock one on its map, else
+    M046's."""
     import mdb
     import struct
     own = e5c.edf5_thumbs()
@@ -5495,15 +5498,21 @@ def edf5_campaign_thumbnails() -> None:
         assert d[:4] == b'DDS ' and struct.unpack_from('<II', d, 12) == (220, 440) and d[84:88] == b'DXT1', name
 
     stock = {n.upper(): mdb.RabFile(n, 0, 0, n.encode()) for n in ('EDF6_M046.dds', 'EDF6_M045.dds', 'EDF6_M010.dds')}
-    rows = [{'key': 'EDF5_OLD_SCRIPT/M001', 'path': 'M001', 'map': 'X.MAC'},
-            {'key': 'EDF5_OLD_SCRIPT/DLC/DM011', 'path': 'DLC/DM011', 'map': None},
-            {'key': 'EDF5_OLD_SCRIPT/M999', 'path': 'M999', 'map': 'X.MAC'},     # not in THUMBS: its map's
-            {'key': 'EDF5_OLD_SCRIPT/M998', 'path': 'M998', 'map': None},        # nothing: M046's
-            {'key': 'EDF6/RANGE', 'map': None, 'thumb': 'EDF6/M045'}]
-    out = e5c.pick_thumbs(rows, own, stock, {'X.MAC': 'EDF6/M010'})
+    with open(e5c.EDF41_THUMBS, 'rb') as f:
+        own41 = {x.name.upper(): x for x in mdb.rab_read(f.read()).files}
+    assert own41['M007.DDS'].stored != own['M007.DDS'].stored   # the two games' M007: why own_thumbs keys by pack
+    rows = [{'group': 'main', 'key': 'EDF5_OLD_SCRIPT/M001', 'path': 'M001', 'map': 'X.MAC'},
+            {'group': 'dlc1', 'key': 'EDF5_OLD_SCRIPT/DLC/DM011', 'path': 'DLC/DM011', 'map': None},
+            {'group': 'main', 'key': 'EDF5_OLD_SCRIPT/M999', 'path': 'M999', 'map': 'X.MAC'},   # not in THUMBS: its map's
+            {'group': 'main', 'key': 'EDF5_OLD_SCRIPT/M998', 'path': 'M998', 'map': None},      # nothing: M046's
+            {'group': 'range', 'key': 'EDF6/RANGE', 'map': None, 'thumb': 'EDF6/M045'},
+            {'group': 'main', 'key': 'EDF5_OLD_SCRIPT/M007', 'path': 'M007', 'map': None},
+            {'group': 'edf41', 'key': 'EDF41/M007', 'path': 'M007', 'map': None}]
+    out = e5c.pick_thumbs(rows, e5c.own_thumbs(), stock, {'X.MAC': 'EDF6/M010'})
     assert [f.name for f in out] == [e5c.thumb_name(r['key']) for r in rows]
     assert [f.stored for f in out] == [own['M001.DDS'].stored, own['DLC_DM011.DDS'].stored, b'EDF6_M010.dds',
-                                       b'EDF6_M046.dds', b'EDF6_M045.dds']
+                                       b'EDF6_M046.dds', b'EDF6_M045.dds', own['M007.DDS'].stored,
+                                       own41['M007.DDS'].stored]
 
 
 @test
@@ -6875,6 +6884,139 @@ def rmpa_legacy_real() -> None:
         kept(_game_read(g5, k))
     for name in EDF41_MISSION_MAPS:
         kept(dict(map_legacy.parse_marc_lenient(_game_read(g41, f'MAP/{name}.MAC'))[1])['map.rmpa'])
+
+
+
+@test
+def edf41_maps_cover_the_scripts() -> None:
+    """Every map and weather EDF4.1's bundled mission scripts load (Map('app:/Map/<map>.mac', '<weather>')) that
+    tools/edf41_maps.py installs has its weather pair: a weather left out would make the game look for a MAE that is not
+    there. The SK_* maps are the ones not installed yet (their heightfields), and the story pack skips their missions."""
+    import re
+    import edf41_maps
+    import make_edf5_campaign as c
+    used: dict[str, set[str]] = {}
+    for m in c.edf41_text()['missions']:
+        strings = c.utf16_strings(c.edf41_script(m['id'], 'MISSION.BVM'))
+        for i, s in enumerate(strings):
+            hit = re.fullmatch(r'(?i)app:/Map/(\w+)\.mac', s.strip())
+            if hit and i + 1 < len(strings):
+                used.setdefault(hit.group(1).upper(), set()).add(strings[i + 1].strip().upper())
+    assert set(edf41_maps.MAPS) <= set(used), sorted(set(edf41_maps.MAPS) - set(used))
+    for name, (_donor, weathers) in edf41_maps.MAPS.items():
+        assert used[name] <= set(weathers), (name, sorted(used[name] - set(weathers)))
+    assert {n for n in used if n not in edf41_maps.MAPS} <= {n for n in used if n.startswith('SK_')} | {'NW_TESTMAP'}
+
+
+@test
+def edf41_maps_install() -> None:
+    """tools/edf41_maps.py on a stand-in game (conversion stubbed): writes every file of every map as edf41maps', a
+    second install converts nothing it already converted from the same EDF4.1 files, a map one of whose files another
+    mod placed is left out and that file untouched, no EDF4.1 writes nothing, removal deletes what it wrote."""
+    import tempfile
+    import edf41_maps
+    import ledger
+
+    class Fake:
+        def fingerprint(self, name: str) -> list[int]:
+            return [len(name), 1]
+
+    converted: list[str] = []
+
+    def convert(name: str, _e41: object, _e6: object) -> dict[str, bytes]:
+        converted.append(name)
+        return {rel: rel.encode() for rel in edf41_maps.files_of(name)}
+
+    with tempfile.TemporaryDirectory() as game, \
+            patched(edf41_maps, convert=convert, Archives=lambda _root: Fake()):
+        os.makedirs(os.path.join(game, 'Mods'))
+        written, skipped = edf41_maps.install(game, None)
+        assert not written and [n for n, _ in skipped] == list(edf41_maps.MAPS) and not converted
+        assert not os.listdir(os.path.join(game, 'Mods'))
+        written, skipped = edf41_maps.install(game, 'edf41')
+        every = [rel for name in edf41_maps.MAPS for rel in edf41_maps.files_of(name)]
+        assert not skipped and converted == list(edf41_maps.MAPS) and len(written) == len(set(every))
+        led = ledger.Ledger(game)
+        assert all(led.owners(rel) == [edf41_maps.OWNER] for rel in every)
+        converted.clear()
+        assert edf41_maps.install(game, 'edf41') == ([], []) and not converted, converted
+        edf41_maps.remove(game)
+        other = os.path.join(game, 'Mods', 'MAP', 'IG_CAVE01.RAB')
+        os.makedirs(os.path.dirname(other), exist_ok=True)
+        with open(other, 'wb') as f:
+            f.write(b'another mod')
+        written, skipped = edf41_maps.install(game, 'edf41')
+        assert [n for n, _ in skipped] == ['IG_CAVE01'] and 'IG_CAVE01' not in converted
+        with open(other, 'rb') as f:
+            assert f.read() == b'another mod'
+        edf41_maps.remove(game)
+        assert os.path.exists(other) and not os.path.exists(os.path.join(game, 'Mods', 'MAP', 'NW_SOUKOGAI01.MAC'))
+
+
+@test
+def edf41_maps_real() -> None:
+    """tools/edf41_maps.py on the games: IG_CAVE01 converts to the files files_of names; the MAC re-parses with every
+    member kept and its map.rmpa in EDF6's format; the weather pair and navmesh are the donor's bytes."""
+    import bigmap
+    import edf41_maps
+    import rmpa_legacy
+    games = _legacy_games()
+    if games is None:
+        return
+    import rootcpk
+    steam = os.path.dirname(rootcpk.DEFAULT_GAME)
+    e41 = edf41_maps.Archives(os.path.join(steam, 'Earth Defense Force 4.1'))
+    e6 = edf41_maps.Archives(rootcpk.DEFAULT_GAME)
+    files = edf41_maps.convert('IG_CAVE01', e41, e6)
+    assert list(files) == edf41_maps.files_of('IG_CAVE01')
+    members = dict(bigmap.Marc.parse(files['MAP/IG_CAVE01.MAC']).files)
+    assert set(members) == {'map.mapb', 'elec_wire_default.erb', 'map.rmpa', 'map.mapo'}
+    assert rmpa_legacy.is_edf6(members['map.rmpa'])
+    assert files['MAP/IG_CAVE01_FINE.MAE'] == e6.read('IG_CAVE501_FINE.MAE')
+    assert files['MAP/IG_CAVE01.NAVMESH.HKT'] == e6.read('IG_CAVE501.NAVMESH.HKT')
+
+
+
+@test
+def edf41_story_pack_real() -> None:
+    """EDF4.1's story pack from the real games (make_edf5_campaign PACK41): with EDF4.1 given it comes after the test
+    range with the next content id, so no installed pack's id moves; an offline and an online mode on its own save
+    file; one row per mission whose map and objects will be there (the 9 maps tools/edf41_maps.py converts), each
+    row's script written under Mods/MISSION/EDF41/<id>/ as bundled, its thumbnail 4.1's picture of it; a mission on a
+    map not converted (SK_*) or naming an object not ported is left out with the reason. Without EDF4.1, no pack."""
+    import dsgo
+    import edf41_maps
+    import gamedir
+    import mdb
+    import rootcpk
+    import sgo
+    if not _e5c_have_game():
+        return
+    root41 = gamedir.find_other(gamedir.EDF41, near=rootcpk.DEFAULT_GAME)
+    if root41 is None:
+        return
+    files, content, p = e5c.build(rootcpk.DEFAULT_GAME, root41=root41)
+    plain, plain_content, _ = e5c.build(rootcpk.DEFAULT_GAME)
+    assert (content.campaign, content.range) == (plain_content.campaign, plain_content.range) and not plain_content.edf41
+    assert content.edf41 == content.range + 1
+    modes = sgo.plain(sgo.read(files[e5c.CONFIG])[1]['ModeList'])
+    ours = [m for m in modes if m[e5c.M_CONTENT] == content.edf41]
+    assert [(m[e5c.M_ONLINE], m[e5c.M_TYPE], m[e5c.M_MST]) for m in ours] == [(0, 0, 'E41M.MST'), (1, 1, 'E41M.MST')]
+    rows41 = [r for r in p['rows'] if r['group'] == e5c.PACK41.group]
+    assert len(rows41) >= 30 and {r['map'] for r in rows41} <= {f'{n}.MAC' for n in edf41_maps.MAPS}
+    assert any(r['path'] == 'M126' for r in rows41)
+    skipped = {path: why for g, path, why in p['skipped'] if g == e5c.PACK41.group}
+    assert skipped and all('缺少' in why for why in skipped.values())
+    listed = dsgo.parse(files[e5c.PACK41.list]).root.get('table').items
+    assert [r.items[2] for r in listed] == [f'EDF41/{r["path"]}' for r in rows41]
+    for r in rows41:
+        for name in r['files']:
+            assert files[f'MISSION/EDF41/{r["path"]}/{name}'] == e5c.edf41_script(r['path'], name)
+    with open(e5c.EDF41_THUMBS, 'rb') as f:
+        own = {x.name.upper(): x.stored for x in mdb.rab_read(f.read()).files}
+    thumbs = mdb.rab_read(files[e5c.PACK41.image]).files
+    assert [t.stored for t in thumbs] == [own[f'{r["path"].upper()}.DDS'] for r in rows41]
+    assert all(e5c.managed(rel) for rel in files)
 
 
 def main() -> int:

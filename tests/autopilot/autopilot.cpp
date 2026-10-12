@@ -505,11 +505,12 @@ int FindRangeMode(const unsigned char* gs,int content) noexcept {
     return -1;
 }
 
-// "mission range": the test range pack's offline mode made current, as SetMode(int) does; false leaves the menu as is.
+// "mission range" / "mission edf41:ROW": that pack's offline mode made current, as SetMode(int) does; false leaves the menu as
+// is.
 bool EnterRangeMode(unsigned char* gs) noexcept {
     const LONG content=InterlockedExchange(&rangeContent,-1);
     if(content<0)return true;   // no range asked: the row alone
-    if(!content){Log("RANGE TestRangeContent=0 in EDF6VehicleCrew.ini (the test range pack is not installed)");return false;}
+    if(!content){Log("RANGE the pack's content id is 0 in EDF6VehicleCrew.ini (the pack is not installed)");return false;}
     const int mode=FindRangeMode(gs,content);
     if(mode<0){Log("RANGE no offline mode with content id %ld",content);return false;}
     if(!edf::Matches(image,kSetMode,kSetModeSig,sizeof(kSetModeSig))){Log("RANGE EDF+%#zx does not match",kSetMode);return false;}
@@ -530,7 +531,7 @@ void* __fastcall CoRoutine(void* out,const std::wstring* decl) {
             const LONG row=InterlockedExchange(&missionRow,-1);
             auto gs=*reinterpret_cast<unsigned char**>(image+kGlobalState);
             if(gs && !EnterRangeMode(gs)) {
-                Log("SCRIPT HQMain: the test range's mode not entered, the menu as is");
+                Log("SCRIPT HQMain: the pack's mode not entered, the menu as is");
                 return realCoRoutine(out,decl);
             }
             if(gs) {
@@ -575,31 +576,35 @@ void Quit() noexcept {
     PostMessageW(window,WM_CLOSE,0,0);
 }
 
-// The test range pack's content id: [VehicleCrew] TestRangeContent of the EDF6VehicleCrew.ini in this DLL's own
-// directory (Mods/Plugins), written by the installer; 0 when the pack is not installed.
-LONG ReadRangeContent() noexcept {
+// A mission pack's content id: [VehicleCrew] `key` of the EDF6VehicleCrew.ini in this DLL's own directory
+// (Mods/Plugins), written by the installer (TestRangeContent, EDF41Content); 0 when the pack is not installed.
+LONG ReadPackContent(const wchar_t* key) noexcept {
     wchar_t ini[MAX_PATH]{};
     if(!GetModuleFileNameW(self,ini,MAX_PATH))return 0;
     wchar_t* slash=wcsrchr(ini,L'\\');
     if(!slash)return 0;
     if(wcscpy_s(slash+1,MAX_PATH-(slash+1-ini),L"EDF6VehicleCrew.ini"))return 0;
-    const UINT id=GetPrivateProfileIntW(L"VehicleCrew",L"TestRangeContent",0,ini);
+    const UINT id=GetPrivateProfileIntW(L"VehicleCrew",key,0,ini);
     return id<=65535 ? static_cast<LONG>(id) : 0;
 }
 
-// "mission <row|RM015|M001|range> [difficulty]": the offline list's row (0-based: RM015 is 13, M001 is 1), difficulty
-// 0-4. RM015 is the stock mission again (the test range left it for its own pack); "range" is that pack's row 0.
+// "mission <row|RM015|M001|range|edf41:ROW> [difficulty]": the offline list's row (0-based: RM015 is 13, M001 is 1),
+// difficulty 0-4. RM015 is the stock mission again (the test range left it for its own pack); "range" is that pack's
+// row 0; "edf41:ROW" row ROW of the EDF4.1 story pack (EDF41Content).
 void AskMission(const char* text) noexcept {
     char name[32]{};int difficulty=1;
     if(sscanf_s(text,"%*s %31s %d",name,static_cast<unsigned>(sizeof(name)),&difficulty)<1)return;
     const bool range=!_stricmp(name,"range");
-    const int row=range ? 0 : !_stricmp(name,"RM015") ? 13 : !_stricmp(name,"M001") ? 1 : std::atoi(name);
+    const bool edf41=!_strnicmp(name,"edf41:",6);
+    const int row=range ? 0 : edf41 ? std::atoi(name+6) : !_stricmp(name,"RM015") ? 13 : !_stricmp(name,"M001") ? 1
+                                                                                                    : std::atoi(name);
     missionDifficulty=difficulty<0 || difficulty>4 ? 1 : difficulty;
-    rangeContent=range ? ReadRangeContent() : -1;
+    rangeContent=range ? ReadPackContent(L"TestRangeContent") : edf41 ? ReadPackContent(L"EDF41Content") : -1;
     missionRow=row;
     Log("MISSION asked: %s row %d, difficulty %ld (applied when the script starts its title)",
-        range ? "the test range pack's" : "offline",row,missionDifficulty);
-    if(range)Log("MISSION the test range's content id %ld (EDF6VehicleCrew.ini TestRangeContent)",rangeContent);
+        range ? "the test range pack's" : edf41 ? "the EDF4.1 story pack's" : "offline",row,missionDifficulty);
+    if(range || edf41)Log("MISSION the pack's content id %ld (EDF6VehicleCrew.ini %s)",rangeContent,
+                          range ? "TestRangeContent" : "EDF41Content");
 }
 
 // One command from <dll>.cmd (the driver writes it, this clears it once done).
