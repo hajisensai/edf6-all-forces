@@ -15,6 +15,7 @@ unsigned char* image=nullptr;
 bool InSession() noexcept { return false; }
 bool OnlineRunsHere(const void*) noexcept { return true; }
 bool WastedFire(const void*,const void*) noexcept { return false; }   // wastedfire.cpp: no fire wasted here
+bool HoldFire(const void*,const void*,const float*,float,float,float*) noexcept { return false; }
 online::CopyOwner SetSpawnOwner(online::CopyOwner owner) noexcept { return owner; }
 Config inputConfig{};
 ULONGLONG inputTime=10000;

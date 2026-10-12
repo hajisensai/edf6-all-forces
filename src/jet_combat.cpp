@@ -137,7 +137,7 @@ void VisitTarget(void* ctx,const void* object,const float* p) noexcept {
         k.focus=true;k.best=object;k.score=-1e30f;std::memcpy(k.aim,p,12);k.flyer=Flies(object,p,k.ms);
         return;
     }
-    if(k.focus || PastEdge(*k.j,p) || WastedFire(k.j->Vehicle(),object))return;   // its fire wasted on it: no target
+    if(k.focus || PastEdge(*k.j,p) || HoldFire(k.j->Vehicle(),object))return;   // no round would hurt it now: no target
     const float d[3]={p[0]-k.anchor[0],p[1]-k.anchor[1],p[2]-k.anchor[2]};
     // A map order bounds the current target too; an uncommanded jet keeps its ordinary pursuit, but a charge drone (or its
     // carrier) is bound by its range always: it does not chase one it cannot catch out of it.

@@ -648,7 +648,7 @@ bool ShotSafe(const unsigned char* h,const Enemy* t,const float* eye,float blast
 }
 // Every trigger is taken off a shot at a target its fire is wasted on (WastedFire): the stock AI's own target included.
 void Veto(unsigned char* h,const Enemy* t,const float* eye,const Arms& a) noexcept {
-    const bool wasted=t && WastedFire(h,t->object);
+    const bool wasted=t && HoldFire(h,t->object);
     for(int k=0;k<kHands;++k) {
         if(wasted)h[kTrigger+k]=0;
         if(!h[kTrigger+k])continue;
@@ -1026,9 +1026,13 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
         p.fire=h[kTrigger]!=0;
     } else if(t.e) {
         p.arm=ChooseArm(s,h,a,t.e,eye,pos);
-        const float dir[3]={t.e->aim[0]-eye[0],t.e->aim[1]-eye[1],t.e->aim[2]-eye[2]};
+        // Aimed at the lock point whose predicted hit the target would take (its weak spot: HoldFire), held while it
+        // would take none (its window shut or due to open: aimed at all the same, ready).
+        Enemy at=*t.e;
+        const bool hold=HoldFire(h,t.e->object,eye,0.0f,0.0f,at.aim);
+        const float dir[3]={at.aim[0]-eye[0],at.aim[1]-eye[1],at.aim[2]-eye[2]};
         if(mask&kMaskLook)Look(h,dir);
-        p.fire=ShotOk(s,h,a,p.arm,*t.e,eye) && (mask&kMaskTrigger);
+        p.fire=!hold && ShotOk(s,h,a,p.arm,at,eye) && (mask&kMaskTrigger);
         h[kTrigger]=p.fire ? 1 : 0;
         Veto(h,t.e,eye,a);   // the second hand (d71) the stock may have pulled, with its own weapon
     } else {
@@ -2752,7 +2756,7 @@ void __fastcall DriverPayloadAim(unsigned char* v,int index,const void* target) 
     }
     __try {
         ReleaseDriverPayload(v,true);
-        if(target && WastedFire(v,target))target=nullptr;   // the stock AI's target its fire is wasted on: none
+        if(target && HoldFire(v,target))target=nullptr;   // the stock AI's target no round would hurt now: none
         const auto seat=SeatAt(v,0);
         PayloadFire fire=PayloadFire::other;
         unsigned char* weapon=nullptr;
@@ -2824,6 +2828,7 @@ void NpcGunnersInput(unsigned char* v) noexcept {
         const Enemy* const m=world.frame==GameFrame() ? NearestMark(Pos(v)) : nullptr;   // the soldiers' list of this frame only
         if(m && npc::Dist(Pos(v),m->aim)<=reach && !WastedFire(v,m->object)){p.best=m->object;p.bestD=npc::Dist(Pos(v),m->aim);}
         else VisitEnemies(v,&GunnerVisit,&p);
+        if(p.best && HoldFire(v,p.best)){p.best=nullptr;}   // no round would hurt it now (HoldFire): the seat idles
         if(p.best) {
             if(Cfg().stockStores) {
                 PayloadFire fire=PayloadFire::other;

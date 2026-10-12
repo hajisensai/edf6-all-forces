@@ -120,6 +120,7 @@ bool FriendInLine(const float*,const float*,const void*) noexcept { return false
 // The enemies a jet's fire is wasted on (src/wastedfire.cpp WastedFire: the shut teleportation ship), as the harness says.
 const void* simWasted=nullptr;
 bool WastedFire(const void*,const void* target) noexcept { return target && target==simWasted; }
+bool HoldFire(const void*,const void* target,const float*,float,float,float*) noexcept { return target && target==simWasted; }
 bool GunBarrel(const unsigned char*,const unsigned char*,float*,float*) noexcept { return false; }
 int ReadStores(unsigned char*,Store*,int) noexcept { return 0; }
 void TriggerStore(const Store&) noexcept {}

@@ -5068,7 +5068,7 @@ def soft_edge_wired() -> None:
     assert 'anchor=SoftAnchor(*j,anchor,anchorIn);' in jet
     # Targets past it let be; the map's focus target (2026-10-09) only out past the play area's walls, where no jet goes.
     visit = combat.split('void VisitTarget(void* ctx,const void* object,const float* p) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'if(k.focus || PastEdge(*k.j,p) || WastedFire(k.j->Vehicle(),object))return;' in visit
+    assert 'if(k.focus || PastEdge(*k.j,p) || HoldFire(k.j->Vehicle(),object))return;' in visit
     focus = visit.split('if(k.j->focus.Is(object)) {', 1)[1].split('\n    }\n', 1)[0]
     assert 0 <= focus.find('if(!airbound::Inside(PlayBox(),p))return;') < focus.find('k.focus=true;'), \
         'a focus target out past the play area is waited for, not chased'
@@ -5171,10 +5171,11 @@ def air_chase_wired() -> None:
     # Fire the game will not let hurt its target (docs/feedback-2026-10-12-ai-targeting.md): every AI asks WastedFire, the
     # damage hook feeds it whatever the statistics' switch, and the offline check runs in CTest.
     assert '[self](int k) noexcept { return !WastedFire(self,world.enemy[k].object); }' in npcai
-    assert 'const bool wasted=t && WastedFire(h,t->object);' in npcai and 'if(WastedFire(p.self,object))return;' in npcai
-    assert 'if(target && WastedFire(v,target))target=nullptr;' in npcai
-    assert 'if(!WastedFire(v,o))f(o,a,0.0f);' in src('src/heli.cpp')
-    assert 'if(WastedFire(p.self,object))return;' in src('src/ground.cpp')
+    assert 'const bool wasted=t && HoldFire(h,t->object);' in npcai and 'if(WastedFire(p.self,object))return;' in npcai
+    assert 'if(target && HoldFire(v,target))target=nullptr;' in npcai and 'if(p.best && HoldFire(v,p.best))' in npcai
+    assert 'const bool hold=HoldFire(h,t.e->object,eye,0.0f,0.0f,at.aim);' in npcai and 'p.fire=!hold && ShotOk(' in npcai
+    assert 'if(!HoldFire(v,o))f(o,a,0.0f);' in src('src/heli.cpp')
+    assert 'if(HoldFire(p.self,object))return;' in src('src/ground.cpp')
     hook = src('src/damagestats.cpp').split('std::uintptr_t __fastcall DamageHook(', 1)[1].split('\n}\n', 1)[0]
     assert 'const Before b=Read(obj);' in hook and 'NoteWasted(obj,gdi,b);' in hook, 'fed whether the statistics are on or not'
     assert 'ResetWastedFire();' in src('src/mission.cpp')

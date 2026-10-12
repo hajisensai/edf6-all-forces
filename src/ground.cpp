@@ -147,7 +147,7 @@ void Consider(void* ctx,const void* object,const float* aim) {
     const float d=Dist(p.from,aim);
     if(d>p.range)return;
     if(p.leader && Horiz(p.leader,aim)>p.leash+kLeashSlack)return;
-    if(WastedFire(p.self,object))return;   // its fire wasted on it (wasted_fire.h): no target
+    if(HoldFire(p.self,object))return;   // no round would hurt it now (hit_predict.h, wasted_fire.h): no target
     const float score=d-(p.keep.Is(object) ? kKeepTarget : 0.0f);
     if(!p.best || score<p.score){p.best=object;p.score=score;std::memcpy(p.aim,aim,12);}
 }

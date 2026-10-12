@@ -220,6 +220,12 @@ bool FriendInLine(const float*,const float*,const void*) noexcept { return false
 // wastedfire.cpp WastedFire: the target every shooter's fire is wasted on (the shut teleportation ship), as the case sets.
 const void* wastedTarget=nullptr;
 bool WastedFire(const void*,const void* target) noexcept { return target && target==wastedTarget; }
+// HoldFire: the same target held, and one due to open (heldTarget) aimed at and held; `aim` the weak spot when set.
+const void* heldTarget=nullptr;float weakAim[3]{};bool weakAimSet=false;
+bool HoldFire(const void*,const void* target,const float*,float,float,float* aim) noexcept {
+    if(aim && weakAimSet && target)std::memcpy(aim,weakAim,12);
+    return target && (target==wastedTarget || target==heldTarget);
+}
 int coaxCalls=0;   // payload.cpp NpcCoaxFire: called beside every crew aim (no coax on these fixtures)
 bool NpcCoaxFire(unsigned char*,unsigned,const void*,LineBlocked) noexcept { ++coaxCalls;return false; }
 unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float,bool,PayloadFire* fire) noexcept {
@@ -550,6 +556,20 @@ int main() {
         wastedTarget=nullptr;Put<void*>(human,kStockTarget,nullptr);Put<void*>(human,kStockTargetCtrl,nullptr);
         behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
         Expect(soldier->target.Is(enemy),"no longer wasted: its target again");
+        // Its window due to open (hit_predict.h wait): kept as the target, aimed at its weak spot, the trigger held; then open:
+        // the shot, still at the weak spot.
+        // The plugin's own aim needs its held weapon known (held[0] -1 leaves the look to the stock AI).
+        heldTarget=enemy;available.held[0]=0;
+        Put<unsigned>(human,kControlMask,kMaskMove|kMaskLook|kMaskTrigger);
+        behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
+        const float atLock=At<float>(human,kLookPitch);   // the look's pitch step toward its lock point (0,0,20)
+        weakAimSet=true;weakAim[0]=0;weakAim[1]=12;weakAim[2]=20;
+        behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
+        Expect(soldier->target.Is(enemy) && !behavior.fire && At<unsigned char>(human,kTrigger)==0 &&
+               At<float>(human,kLookPitch)<atLock,
+               "a target due to open: kept, aimed up at its weak spot, the trigger held (production Drive)");
+        heldTarget=nullptr;weakAimSet=false;available.held[0]=-1;
+        Put<unsigned>(human,kControlMask,kMaskMove);
         markEnemy=enemy;
         result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::focus,{}},ObjRef::Of(other),ObjRef::Of(enemy));
         Expect(result.Accepted() && commandSquad->commandFocus.Is(enemy) && !NpcMarked(),

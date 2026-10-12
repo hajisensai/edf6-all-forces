@@ -43,6 +43,8 @@ bool MapGroundNear(float x,float z,float y,float* h,bool standable=false) noexce
 void LearnMapNormals(const float* standing) noexcept;
 // emc.cpp: the same against the buildings alone (layer 27: no terrain, no units), metres to the nearest or -1.
 float BuildingRay(const float* a,const float* b,float* hit) noexcept;
+// hitpredict.cpp: the nearest object body along a->b (the bullets' object layer 11), metres or -1; `body` its id.
+float ObjectRay(const float* a,const float* b,float* hit,std::uint32_t* body) noexcept;
 // Whether there is water at (x, z) (docs/water-re.md): the game's own water areas; `surface` gets the
 // highest surface there. unknown: the probe is off (EDF.dll differs) or the map's areas are not there.
 enum class Sea { unknown, land, water };

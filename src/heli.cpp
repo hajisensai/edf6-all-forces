@@ -306,6 +306,7 @@ struct alignas(16) RayHits { unsigned char raw[0xA0]; };
 // receives the point. `any`: the nearest hit of any kind instead (log only); `flags` gets its flags.
 // `filter`: the ray's collision filter (its layer; kMapLayer the game's map ray).
 constexpr std::uint32_t kMapLayer=0x16;
+constexpr std::uint32_t kObjectLayer=0x0B;   // the bullets' object layer (ObjectRay)
 // `normal`: the hit's normal (collector +0x40; whose side it faces: map_floor.h Learn).
 float CastRay(const float* a,const float* b,float* hit=nullptr,bool any=false,std::uint32_t* flags=nullptr,
               std::uint32_t filter=kMapLayer,float* normal=nullptr) noexcept {
@@ -775,7 +776,7 @@ bool Medic(const unsigned char* v) noexcept {
 template<class F> bool ForEachTarget(bool medic,const unsigned char* v,F&& f) noexcept {
     if(medic)return ForEachHurtFriend(v,[&](const void* o,const float* a,float share) noexcept { f(o,a,share*kHurtWeight); });
     // An enemy its fire is wasted on (WastedFire) is no target of its.
-    return ForEachEnemy(v,[&](const void* o,const float* a) noexcept { if(!WastedFire(v,o))f(o,a,0.0f); });
+    return ForEachEnemy(v,[&](const void* o,const float* a) noexcept { if(!HoldFire(v,o))f(o,a,0.0f); });
 }
 
 // Would a healing round of `weapon` from `from` to `to` pass within kEnemyClear of an enemy, or burst with one in its blast?
@@ -3627,6 +3628,26 @@ bool InstallDoorGuns() noexcept {
 }
 
 float MapRay(const float* a,const float* b,float* hit) noexcept { return CastRay(a,b,hit); }
+// The nearest object body along a->b: layer 11, the one the bullets' object query filters with (docs/bullet-pass-re.md
+// §2 step 1b), with the plain nearest-hit collector (kHitVtbl: every hit, not the ground filter's). Metres to it, -1 with
+// none; `hit` the point, `body` its id (collector +0x78, 24 bits; docs/raycast-re.md §2.2).
+float ObjectRay(const float* a,const float* b,float* hit,std::uint32_t* body) noexcept {
+    if(!rayOk)return -1.0f;
+    const auto g=At<unsigned char*>(image,kHavokGlobal);
+    if(!Readable(g,0x70) || !At<const void*>(g,0x68))return -1.0f;
+    const RayInput in{{a[0],a[1],a[2],1.0f},{b[0],b[1],b[2],1.0f},kObjectLayer,0,0};
+    RayHits col{};
+    *reinterpret_cast<const void**>(col.raw)=image+kHitVtbl;
+    reinterpret_cast<void(*)(void*)>(image+kHitReset)(&col);
+    reinterpret_cast<void(*)(void*,void*,const RayInput*)>(image+kCastRay)(g+0x10,&col,&in);
+    if(*reinterpret_cast<const std::int32_t*>(col.raw+0x0C)==0)return -1.0f;
+    const float f=*reinterpret_cast<const float*>(col.raw+0x50);
+    if(!std::isfinite(f) || f<0.0f || f>1.0f)return -1.0f;
+    if(hit)std::memcpy(hit,col.raw+0x30,12);
+    if(body)*body=*reinterpret_cast<const std::uint32_t*>(col.raw+0x78)&0xFFFFFFu;
+    const float d[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};
+    return f*std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+}
 // The floor along a map ray (map_floor.h): the hits on a triangle's back skipped once the normals are known to be the
 // triangles' own. Learned from the player's floor (LearnMapNormals): `own` is kept for the run (it is the engine's, not
 // the map's); `facing` is asked again every kRelearnMs (a thin slab or a second body under the floor reads as facing).
