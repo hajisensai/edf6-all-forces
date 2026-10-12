@@ -97,7 +97,8 @@ bool SquadCommand(const void* leader,const Command& c) noexcept {
     squadGot=c;++squadOrders;
     return true;
 }
-bool TankCommand(const void*,const Command&) noexcept {return false;}
+const void* tankFocus=nullptr;
+bool TankCommand(const void*,const Command& c,const ObjRef& focus) noexcept {tankFocus=focus.obj;return c.order==Order::focus;}
 // The formations (npcai.cpp): a squad at `guardLeader` guards, the others follow; the calls counted.
 const void* guardLeader=nullptr;
 int guardCalls=0,marchCalls=0;
@@ -766,6 +767,11 @@ void RemoteCommandResults() noexcept {
     for(int i=0;i<17;++i){Put<void*>(many[i],kSelfCtrl,controls[i]);over.list[i]={CommandUnit{many[i],"remote",{},false,{}},Owner::squad};over.sel.Add(many[i]);}
     Check(Issue(over,Command{Order::engage,{}},&skipped)==0 && skipped==17 && networkSubmits==1,
         "more than sixteen remote squads are rejected before any partial submission");
+    allRemote=false;remoteAuthority=remote;networkSubmits=0;
+    Game remoteVehicle{};remoteVehicle.count=1;remoteVehicle.list[0]={CommandUnit{remote,"vehicle",{},false,{}},Owner::tank};
+    remoteVehicle.sel.Add(remote);
+    Check(Issue(remoteVehicle,Command{Order::focus,{}},&skipped)==0 && !skipped && remoteVehicle.networkQueued==1 && networkSubmits==1,
+          "client ground vehicle commands go to the authenticated authority RPC instead of failing locally");
     allRemote=false;remoteAuthority=nullptr;mapOnline=false;groundReady=false;squadOn=false;ResetMapCommands();
 }
 void SelectionCapabilityMask() noexcept {
@@ -789,6 +795,12 @@ void SelectionCapabilityMask() noexcept {
     selection.list[0].u.riding=true;
     Publish(selection,true,true,point,true);PlayerMapCommands(&r);
     Check(has(Order::dismount) && !has(Order::board) && !has(Order::move),"a riding squad: dismount, not board, no point order");
+    selection.list[0].owner=Owner::tank;selection.list[0].u.riding=false;
+    Publish(selection,true,true,point,true);PlayerMapCommands(&r);
+    Check(has(Order::focus) && has(Order::move) && has(Order::none),"crewed ground vehicle exposes focus and point orders");
+    selection.focus={&foe,nullptr};
+    Check(Give(selection,selection.list[0],Command{Order::focus,{}}) && tankFocus==&foe,
+          "map ground-vehicle dispatch forwards the selected focus identity");
     marked=nullptr;
 }
 }  // namespace

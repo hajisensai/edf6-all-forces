@@ -173,6 +173,9 @@ bool MapHoldsKeys() noexcept { return mapHeld; }
 bool KnownVehicle(const void* v) noexcept { return v==vehicle; }
 bool drivableVehicle=true;   // the stand-in vehicle is a ground one a soldier can drive (npcpost.cpp NpcDrivable)
 bool NpcDrivable(const unsigned char* v) noexcept { return drivableVehicle && v==vehicle; }
+bool PrepareNpcVehicleAi(unsigned char*) noexcept {return true;}
+int tankCommands=0;Command lastTankCommand{};
+bool TankCommand(const void*,const Command& command,const ObjRef&) noexcept {++tankCommands;lastTankCommand=command;return true;}
 float MapRay(const float*,const float*,float* hit) noexcept {
     if(!wall)return -1.0f;hit[0]=0;hit[1]=1.5f;hit[2]=20;return 20;
 }

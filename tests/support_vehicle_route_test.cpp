@@ -9,6 +9,7 @@ bool NpcDriver(const unsigned char* vehicle) noexcept {
     return SeatRider(seat)==Rider::other && !AnyPlayerIn(seat);
 }
 bool IsOnlineAuthority(const void*) noexcept {return true;}
+bool VisitEnemies(const unsigned char*,EnemyVisitor,void*) noexcept {return true;}
 bool ReadCommandUnit(const ObjRef&,const char*,const Command&,bool,CommandUnit*) noexcept {return false;}
 bool wall=false;
 bool bridge=false;

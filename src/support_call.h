@@ -118,6 +118,8 @@ void RescueRequestFailed(const wchar_t* why) noexcept;
 //  - the ground helicopters stood on this mission and none stands on now (helipad.h; heli.cpp): takeoff points.
 int RescueTakeoffPads(float (*out)[3],int most) noexcept;
 void SupportDispatchTick() noexcept;
+// Mission services progress from any actor update, independently of local input ownership.
+void SupportActorFrame(const void* actor) noexcept;
 void ResetSupportDispatch() noexcept;
 void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept;
 // What the map's support bar shows of the catalog (hud.cpp MapSupportBar): an entry's icon, and whether a call can be

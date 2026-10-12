@@ -251,11 +251,12 @@ std::uintptr_t __fastcall RadioStartHook(void* ifc,const void* params) {
             wchar_t note[128]{};
             // The radio callback is replayed for remote players too. Only the actual caller submits
             // one request; the support protocol commits the host-selected entry on every peer.
-            if(!InSession() || IsPlayer(owner))SupportCallAt(static_cast<int>(c-kCalls),target,note,_countof(note));
+            const bool localCaller=!InSession() || IsPlayer(owner);
+            const bool accepted=localCaller && SupportCallAt(static_cast<int>(c-kCalls),target,note,_countof(note));
             SetSpawnOwner(was);
             // A refused custom support must not silently turn into stock bombers (especially underground).
             Put<std::int32_t>(ifc,kIfcPlanes,0);
-            Log("AIRSTRIKE queued support: %ls",note);
+            Log("AIRSTRIKE support call: catalog=%d local=%d accepted=%d",static_cast<int>(c-kCalls),localCaller,accepted);
         }
     } __except(FaultLog("AIRSTRIKE radio call (its bombers fly)",GetExceptionInformation())) { SetSpawnOwner(online::kCopyHost); }
     return result;

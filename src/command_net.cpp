@@ -46,7 +46,7 @@ void Execute(void*,const char* sender,const command_net::Request& request,comman
             ground=MapGroundNear(command.at[0],command.at[2],command.at[1],&y,true) && std::isfinite(y);
             if(ground)command.at[1]=y;
         }
-        if(!IsSoldierClass(ids.units[i].obj))result={NpcCommandReason::unsupported,0};
+        if(!IsSoldierClass(ids.units[i].obj) && !NpcDrivable(static_cast<const unsigned char*>(ids.units[i].obj)))result={NpcCommandReason::unsupported,0};
         else if(!IsOnlineAuthority(ids.units[i].obj))result={NpcCommandReason::notAuthority,0};
         else if(!ground)result={NpcCommandReason::noTarget,0};
         else result=executor(ids.units[i],command,ids.requester,ids.focus);

@@ -45,7 +45,7 @@ bool Send(std::uint32_t peer,const void* bytes,std::size_t size) noexcept {
     replies.push_back(message);return true;
 }
 NpcCommandResult Actual(const ObjRef& unit,const mapcmd::Command& command,const ObjRef& requester,const ObjRef& target) noexcept {
-    ++executed;return NpcSquadCommandForRequester(unit,command,requester,target);
+    ++executed;return NpcMapCommandForRequester(unit,command,requester,target);
 }
 void Setup() {
     Reset();ResetCommandNetwork();replies.clear();executed=0;projectionOk=true;wall+=1000;
@@ -133,5 +133,22 @@ int main() {
     completeRide=true;Board(*soldier,human,Pos(human),now);
     Check(rides==1 && announcedBoards==1 && At<void*>(seats,kSeatRider)==other && At<void*>(seats+edf::kSeatStride,kSeatRider)==human,
         "accepted remote board order walks through real Board/native Ride and seat announcement");
+    const auto vehicleRequest=[&] {
+        Setup();tankCommands=0;drivableVehicle=true;
+        SetActor(3,vehicle,false,0);Put<void*>(vehicle,0,image+0x1000);
+        Put<void*>(SeatAt(vehicle,0),kSeatRider,human);Put<void*>(SeatAt(vehicle,0),kSeatRiderCtrl,controls[0]);
+        auto r=Request(Order::move);std::memcpy(r.request.units[0],ids[3],32);return r;
+    };
+    auto vreq=vehicleRequest();reply=Dispatch(vreq);
+    Check(reply.results[0].reason==0 && tankCommands==1 && lastTankCommand.order==Order::guard,
+          "serialized remote vehicle move resolves actual driver permissions and executes on authority");
+    vreq=vehicleRequest();Put<void*>(human,kLeader,ownerPlayer);reply=Dispatch(vreq);
+    Check(reply.results[0].reason==static_cast<unsigned>(NpcCommandReason::notOwner) && !tankCommands,
+          "remote vehicle request cannot command another player's NPC driver");
+    vreq=vehicleRequest();Put<void*>(vehicle,0x4A8,human);reply=Dispatch(vreq);
+    Check(reply.results[0].reason==static_cast<unsigned>(NpcCommandReason::scripted) && !tankCommands,
+          "remote vehicle RPC preserves mission route ownership");
+    vreq=vehicleRequest();Put<void*>(SeatAt(vehicle,0),kSeatRider,other);reply=Dispatch(vreq);
+    Check(reply.results[0].reason!=0 && !tankCommands,"remote request cannot take over a human driver");
     VirtualFree(image,0,MEM_RELEASE);return failures ? 1 : 0;
 }
