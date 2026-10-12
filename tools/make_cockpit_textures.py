@@ -14,6 +14,7 @@ Textures (512 px unless noted):
     panel_switches   a row of toggle switches, guarded switches and labels
     leather          a seat's brown leather
     canopy_frame     a canopy / window frame's grey, with rivets
+    screen           a dark glass screen in a thin bezel (the plugin draws its live read-out over it: cockpits.Screen)
 """
 from __future__ import annotations
 
@@ -172,6 +173,16 @@ def canopy_frame() -> Image.Image:
     return img
 
 
+def screen() -> Image.Image:
+    img = noise((14, 18, 16), 3, 61, 2.0)
+    d = ImageDraw.Draw(img)
+    d.rectangle((0, 0, SIZE - 1, SIZE - 1), outline=(70, 72, 74), width=14)
+    d.rectangle((14, 14, SIZE - 15, SIZE - 15), outline=(30, 32, 34), width=4)
+    for y in range(18, SIZE - 18, 4):   # faint scan lines
+        d.line((18, y, SIZE - 19, y), fill=(18, 23, 20))
+    return img
+
+
 TEXTURES = {
     'paint_interior': lambda: worn(noise((206, 208, 196), 7, 1), (120, 122, 110), 2),
     'paint_olive': lambda: worn(noise((84, 92, 58), 8, 3), (60, 58, 50), 4),
@@ -182,6 +193,7 @@ TEXTURES = {
     'panel_switches': panel_switches,
     'leather': leather,
     'canopy_frame': canopy_frame,
+    'screen': screen,
 }
 
 

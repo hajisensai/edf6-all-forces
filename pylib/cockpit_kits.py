@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 
 from cockpit_shapes import box, cylinder, frame, panel, two_sided
-from cockpits import Kit, KitMaterial
+from cockpits import Kit, KitMaterial, Screen
 
 TEX = 'textures/{}.png'
 MARGIN = 0.02   # m: a kit's walls this far inside the hull
@@ -64,6 +64,15 @@ def tank_gunner(cabin: Cabin) -> Kit:
         if x1 - x0 > 0.01:
             parts.append(panel(f'wall_front_{side}', 'paint_interior', ((x0 + x1) / 2, 0.0, A), x1 - x0, sh, (0, 0, -1)))
     parts.append(frame('slot_frame', 'paint_olive', (sx, 0.0, A - 0.015), sw + 0.06, sh + 0.06, 0.03, (0, 0, -1), 0.03))
+    # The gunner's two read-outs on the front wall under the slot, right of the sight's body (weapons, then status).
+    screens = []
+    scr_h = min(0.14, low_h - 0.06)
+    scr_w = min(0.22, (R - 0.1) / 2 - 0.01)
+    if scr_h > 0.06 and scr_w > 0.1:
+        for kind, x in (('weapons', -0.08 - scr_w / 2), ('status', -0.1 - 1.5 * scr_w)):
+            c = (x, -sh / 2 - 0.04 - scr_h / 2, A - 0.008)
+            screens.append(Screen(kind, c, (0, 0, -1), scr_w, scr_h))
+            parts.append(panel(f'screen_{kind}', 'screen', c, scr_w, scr_h, (0, 0, -1)))
     # The rest of the shell, seen from inside (no front face: the front wall is that).
     parts.append(box('shell', 'paint_interior', (mid, (U - D) / 2, (A - B) / 2), (wide, U + D, A + B), inward=True,
                      tile=0.8, faces='xXyYZ'))
@@ -71,10 +80,10 @@ def tank_gunner(cabin: Cabin) -> Kit:
     parts.append(cylinder('hatch_ring', 'paint_olive', (mid, U - 0.03, -min(B, 0.5) / 2), (mid, U - 0.005, -min(B, 0.5) / 2),
                           ring, 20))
     # The gunner's sight: its eyepiece and brow pad under the line of sight, its body going into the front wall.
-    ez = min(0.16, A - 0.12)
-    parts.append(box('sight_body', 'paint_olive', (0.0, -0.17, (ez + A) / 2), (0.12, 0.1, A - ez)))
-    parts.append(cylinder('eyepiece', 'metal_dark', (0.0, -0.15, ez + 0.03), (0.0, -0.15, ez - 0.03), 0.032, 16))
-    parts.append(box('brow_pad', 'rubber', (0.0, -0.1, ez - 0.02), (0.13, 0.03, 0.04)))
+    ez, ey = min(0.18, A - 0.12), -min(0.24, D - 0.08)
+    parts.append(box('sight_body', 'paint_olive', (0.0, ey - 0.02, (ez + A) / 2), (0.1, 0.09, A - ez)))
+    parts.append(cylinder('eyepiece', 'metal_dark', (0.0, ey, ez + 0.03), (0.0, ey, ez - 0.03), 0.03, 16))
+    parts.append(box('brow_pad', 'rubber', (0.0, ey + 0.045, ez - 0.02), (0.12, 0.025, 0.035)))
     # The guard plate against the gun on the left wall.
     parts.append(box('gun_guard', 'paint_olive', (L - 0.02, -D / 2, (A - B) / 2), (0.03, D, min(0.9, A + B))))
     # The fire-control console on the right, turned to the eye; a switch panel above it.
@@ -91,7 +100,7 @@ def tank_gunner(cabin: Cabin) -> Kit:
                               0.02, 10))
     parts.append(box('grip_base', 'metal_dark', (0.0, gy - 0.15, min(0.31, A - 0.09)), (0.26, 0.05, 0.1)))
     return Kit(parts, _materials('paint_interior', 'paint_olive', 'metal_dark', 'rubber', 'panel_analog',
-                                 'panel_switches'))
+                                 'panel_switches', 'screen'), screens=tuple(screens))
 
 
 def gun_station(cabin: Cabin) -> Kit:
@@ -109,9 +118,10 @@ def gun_station(cabin: Cabin) -> Kit:
     for x in (0.16, -0.16):
         parts.append(cylinder(f'spade{x}', 'rubber', (x, gy - 0.06, 0.32), (x, gy + 0.07, 0.32), 0.024, 10))
     parts.append(box('spade_bar', 'metal_dark', (0.0, gy, 0.36), (0.36, 0.03, 0.03)))
-    parts.append(panel('readout', 'panel_switches', (-0.36, gy, 0.45), 0.14, 0.14, (0.4, 0.5, -0.75)))
-    return Kit(parts, _materials('paint_olive', 'metal_dark', 'rubber', 'panel_switches'),
-               frozenset(p.name for p in parts))   # open air: all of it is seen from outside
+    readout = Screen('weapons', (-0.36, gy + 0.06, 0.45), (0.4, 0.3, -0.85), 0.16, 0.11)
+    parts.append(two_sided(panel('readout', 'screen', readout.centre, readout.width, readout.height, readout.facing)))
+    return Kit(parts, _materials('paint_olive', 'metal_dark', 'rubber', 'screen'),
+               frozenset(p.name for p in parts), (readout,))   # open air: all of it is seen from outside
 
 
 KITS = {

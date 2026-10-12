@@ -59,14 +59,34 @@ class KitMaterial:
     albedo: str | tuple[int, int, int]
 
 
+SCREEN_KINDS = ('flight', 'weapons', 'status', 'hud', 'map')
+SCREEN = 'vc_scr_{}_{}_{}x{}'   # seat, kind, width and height in mm: the plugin draws that kind of live read-out there
+
+
+@dataclass(frozen=True)
+class Screen:
+    """A face of a kit where the plugin draws live information (src/hud.cpp; the user: "信息全上面板"): `kind` one of
+    SCREEN_KINDS (flight: speed, height, heading, attitude; weapons: arms, rounds, reload; status: armour, fuel,
+    warnings; hud: a head-up glass, its symbols collimated on the world; map), a `width` x `height` face at `centre`
+    whose front looks along `facing` (toward the eye), `up` its top, all in the eye's frame. The kit's own part under
+    it should be a dark screen texture (textures/screen.png)."""
+    kind: str
+    centre: Vec3
+    facing: Vec3
+    width: float
+    height: float
+    up: Vec3 = (0.0, 1.0, 0.0)
+
+
 @dataclass
 class Kit:
     """A cockpit: parts in the eye's frame (obj_model Parts whose `material` names a key of `materials`). `outside`:
     the names of the parts meant to be seen from outside the vehicle too (a gun shield, a canopy frame); every other
-    part must lie inside the hull (fitted())."""
+    part must lie inside the hull (fitted()). `screens`: where its live read-outs are drawn."""
     parts: list[om.Part]
     materials: dict[str, KitMaterial]
     outside: frozenset[str] = frozenset()
+    screens: tuple[Screen, ...] = ()
 
 
 KitFn = Callable[[dict[str, float]], Kit]   # the room round the eye (clearance) -> the kit laid out in it
@@ -123,6 +143,23 @@ def place(part: om.Part, m: list[float], scale: float) -> om.Part:
     return om.Part(part.name, part.material, verts, list(part.tris))
 
 
+def screen_marker(seat: int, scr: Screen) -> str:
+    if scr.kind not in SCREEN_KINDS:
+        raise ValueError(f'screen kind {scr.kind} not one of {SCREEN_KINDS}')
+    return SCREEN.format(seat, scr.kind, round(scr.width * 1000), round(scr.height * 1000))
+
+
+def screen_frame(scr: Screen, fit: Fit) -> list[float]:
+    """A screen's model-space matrix: rows its right (as seen from its front), its up, its facing, its centre."""
+    import cockpit_shapes
+    right, up, facing = cockpit_shapes.basis(scr.facing, scr.up)
+    m = frame(fit)
+
+    def turn(d: Vec3) -> Vec3:
+        return tuple(d[0] * m[c] + d[1] * m[4 + c] + d[2] * m[8 + c] for c in range(3))  # type: ignore[return-value]
+    return [*turn(right), 0.0, *turn(up), 0.0, *turn(facing), 0.0, *to_model(scr.centre, m, fit.scale), 1.0]
+
+
 def texture_name(kit: str, key: str) -> str:
     return f'edf6vc_cpit_{kit}_{key}.dds'.lower()
 
@@ -158,6 +195,8 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
     kit_of = {fit.seat: fitted(hull, fit, kits[fit.kit]) for fit in fits}
     for fit in fits:
         md = vehicle_optics.add_marker(md, fit.bone, MARKER.format(fit.seat), frame(fit))
+        for scr in kit_of[fit.seat].screens:
+            md = vehicle_optics.add_marker(md, fit.bone, screen_marker(fit.seat, scr), screen_frame(scr, fit))
     md = preorder(md)
     tmpl_md, tmpl_mesh = template(game)
     by_material: dict[tuple[str, str], list[tuple[om.Part, list]]] = {}

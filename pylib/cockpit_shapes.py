@@ -53,7 +53,7 @@ def quad(name: str, material: str, a: Vec3, b: Vec3, c: Vec3, d: Vec3,
     return om.Part(name, material, verts, [(0, 1, 2), (0, 2, 3)])
 
 
-def _basis(facing: Vec3, up: Vec3 = (0.0, 1.0, 0.0)) -> tuple[Vec3, Vec3, Vec3]:
+def basis(facing: Vec3, up: Vec3 = (0.0, 1.0, 0.0)) -> tuple[Vec3, Vec3, Vec3]:
     """(right as seen from the front, up, facing) for a face whose front looks along `facing`."""
     f = _unit(facing)
     hint = up if abs(f[0] * up[0] + f[1] * up[1] + f[2] * up[2]) < 0.99 else (0.0, 0.0, 1.0)
@@ -66,7 +66,7 @@ def panel(name: str, material: str, centre: Vec3, width: float, height: float, f
           up: Vec3 = (0.0, 1.0, 0.0), uv: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 1.0)) -> om.Part:
     """A width x height face at `centre` whose front looks along `facing`, its texture upright to one in front of it;
     `uv` the texture's (u0, v0, u1, v1) box on it (v0 the top)."""
-    r, u, _ = _basis(facing, up)
+    r, u, _ = basis(facing, up)
     hw, hh = _mul(r, width / 2), _mul(u, height / 2)
     u0, v0, u1, v1 = uv
     a = _sub(_sub(centre, hw), hh)   # bottom left seen from the front
@@ -102,7 +102,7 @@ def frame(name: str, material: str, centre: Vec3, width: float, height: float, b
           depth: float = 0.04, up: Vec3 = (0.0, 1.0, 0.0)) -> om.Part:
     """The border of a width x height window round `centre`: four bars `bar` wide, `depth` deep, the opening left
     clear (a vision slot, a windshield's frame)."""
-    r, u, f = _basis(facing, up)
+    r, u, f = basis(facing, up)
     side = height - 2 * bar
     bars = ((_mul(u, (height - bar) / 2), width, bar), (_mul(u, -(height - bar) / 2), width, bar),
             (_mul(r, (width - bar) / 2), bar, side), (_mul(r, -(width - bar) / 2), bar, side))
@@ -124,7 +124,7 @@ def cylinder(name: str, material: str, a: Vec3, b: Vec3, radius: float, segs: in
     """A tube of `radius` from a to b, its sides outward, capped at both ends (UV u round it, v along it)."""
     axis = _sub(b, a)
     f = _unit(axis)
-    r, u, _ = _basis(f, (0.0, 1.0, 0.0) if abs(f[1]) < 0.9 else (1.0, 0.0, 0.0))
+    r, u, _ = basis(f, (0.0, 1.0, 0.0) if abs(f[1]) < 0.9 else (1.0, 0.0, 0.0))
     verts, tris = [], []
     for i in range(segs + 1):
         t = 2 * math.pi * i / segs
