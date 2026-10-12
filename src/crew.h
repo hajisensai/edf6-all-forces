@@ -229,9 +229,9 @@ struct Config {
     float fpGripX=0.17f;            // ...the weapon in hand held here in the view, m: right (the Fencer: fpHold*)
     float fpGripY=-0.20f;           // ...up
     float fpGripZ=0.40f;            // ...ahead
-    float fpDualGripX=0.28f;        // ...a weapon in each hand (the Fencer): the right one here, the left mirrored, m: right
-    float fpDualGripY=-0.28f;       // ...up
-    float fpDualGripZ=0.55f;        // ...ahead
+    float fpDualGripX=0.34f;        // ...a weapon in each hand (the Fencer): the right one here, the left mirrored, m: right
+    float fpDualGripY=-0.20f;       // ...up
+    float fpDualGripZ=0.70f;        // ...ahead
     float fpHoldX=0.0f;             // ...the arms and weapon moved in the aim frame, m: right
     float fpHoldY=0.0f;             // ...up
     float fpHoldZ=0.0f;             // ...ahead

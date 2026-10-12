@@ -25,8 +25,10 @@
 //    arc keeps its own velocity and gravity. Only the picture moves: the round flies from the real muzzle as before.
 //  - The culling (H setter, measured): Umbra culls a model by its bounds box (model+0x110, handed over by 0x11B30C0).
 //    The real weapon and arms go below the view in a reload's third-person animation and were culled with the viewmodel
-//    in front of the camera (the whole player, shadow too, for half a second); each camera step in first person hands
-//    Umbra the player's boxes through T, and the real ones back on the way out.
+//    in front of the camera (the whole player, shadow too, for half a second). The real box through T was not enough
+//    (the Wing Diver's weapon, that near the eye, was still drawn in one frame in seven): in first person each camera
+//    step hands Umbra a box around the eye for the body and the weapons in hand (the camera inside it: never culled),
+//    and the real boxes back on the way out.
 //  - Two hands (measured: the Fencer's weapons hung below the view): each weapon in hand (each weapon set's current one)
 //    belongs to the hand its mount bone is on (weapon+0xE88, the record of `arms_r` / `arms_l` / `armsFlip_l`...: the
 //    name's _l), and each hand has its own T anchored on its own weapon, the left grip the right one mirrored. A hand
@@ -94,6 +96,7 @@ constexpr unsigned kAimLineCall=0x6888D9,kAimLineBuild=0x6899F0;
 // Umbra's object transform setter (0x6C06A0 calls it with model+0x110 after an update).
 constexpr unsigned kUmbraPlace=0x11B30C0;
 constexpr std::size_t kModelBounds=0x110,kUmbraObject=0x10;
+constexpr float kEyeBox=2.0f;   // m each way from the eye: the box Umbra gets for the viewmodel's models
 const unsigned char kUmbraPlaceCode[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x08,0x55,0x48,0x8D,0x68,0xA1,0x48,0x81,0xEC,0x90};
 using PlaceFn=void(__fastcall*)(void*,const float*);
 bool placeOk=false;
@@ -103,6 +106,8 @@ constexpr float kAimLineReach=2.0f,kChestUp=1.2f;
 const float kPivot[3]={-0.2f,-0.3f,0.4f};   // in the camera's frame: x to the left
 constexpr std::size_t kWeaponMount=0xE88;   // the record of the owner's bone the weapon hangs on (0x68AEE9)
 constexpr int kRight=0,kLeft=1;
+constexpr float kGadgetFar=10.0f,kGadgetHigh=3.7f;   // m from the feet: the stock eye of a gadget's view (VR mod: >10 m, >2 m over the head)
+constexpr float kOnWeapon=0.18f;   // m: a free hand's wrist this near its other hand's weapon's axis holds it
 // The arms (the four classes share the names, fp-render-re.md §8): the forearm and its twists, the hand, its fingers,
 // the weapon mounts, as a first-person game shows them. Not the shoulder (kata: its pad hangs in front of the view) nor
 // the upper arm (jowan: it reaches back to the eye, its guards fill the view's corners); the elbow's vertices, weighed
@@ -150,6 +155,7 @@ struct State {
     M4 moved[2];                // the motion as a matrix about each hand's grip (fp_view.h MotionMatrix)
     bool viewOk[2];             // each hand's T this frame (kRight, kLeft), built by the camera step
     M4 view[2];
+    bool shown[2];              // each arm drawn (a free hand off the weapon is not)
 };
 State st{};
 // The flashes' matrices: each the shot matrix `src` through T, kept for kFlashFrames camera steps.
@@ -195,6 +201,15 @@ bool ArmBone(const wchar_t* name) noexcept {
     return false;
 }
 
+// The stock step put the camera far off and high over the soldier (the Air Raider's strike view, measured: +0x224 is 1
+// for the Air Raider all the time, so it does not tell): the stock view stays. Called before this file moves the eye.
+bool GadgetView(const unsigned char* cam,const unsigned char* h) noexcept {
+    const float* eye=reinterpret_cast<const float*>(cam+kCamEyeRow);
+    const float* at=reinterpret_cast<const float*>(h+kPos);
+    const float d[3]={eye[0]-at[0],eye[1]-at[1],eye[2]-at[2]};
+    return d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>kGadgetFar*kGadgetFar && d[1]>kGadgetHigh;
+}
+
 // Why this machine's player is not to be seen in first person through `cam` now (nullptr: they are).
 const char* NotWanted(const unsigned char* cam,const unsigned char* h) noexcept {
     const Config& c=Cfg();
@@ -204,7 +219,7 @@ const char* NotWanted(const unsigned char* cam,const unsigned char* h) noexcept 
     if(h[kDead])return "dead";
     if(!HumanOnFoot(h))return "riding";
     if(h[kRagdoll])return "down";
-    if(At<std::int32_t>(h,kSpecialView)==1)return "a class gadget's view";
+    if(GadgetView(cam,h))return "a class gadget's view";
     return nullptr;
 }
 
@@ -332,9 +347,9 @@ bool RootPose(const unsigned char* model,M4* out) noexcept {
     return true;
 }
 
-// Umbra's place of a model: its bounds through `t` (the viewmodel's), or where they really are (`t` null). The bounds
-// are the box the update computes from the bones (0x11005E0 writes it at the skeleton instance's +0x70 = model+0x110,
-// axes scaled by the extents; 0x6C06A0 hands that to 0x11B30C0, which keeps model+0x110 as it is).
+// Umbra's place of a model: a box around `eye` (kEyeBox metres each way), or its real bounds (`eye` null: the box the
+// update computes from the bones, 0x11005E0 at the skeleton instance's +0x70 = model+0x110, axes scaled by the extents;
+// 0x6C06A0 hands that to 0x11B30C0, which keeps model+0x110 as it is).
 // Only a model Umbra knows (its object at +0x10: 0x11B2870, the test 0x68FD00 makes before it moves a weapon; a weapon
 // not in hand has none) and a box that is one (finite, sane axes, near the player): a bad one crashed Umbra's
 // visibility thread (umbra_sandlot Camera::resolveVisibility, run 6).
@@ -350,7 +365,7 @@ bool Placeable(const unsigned char* model,const M4& box) noexcept {
     return d[0]*d[0]+d[1]*d[1]+d[2]*d[2]<100.0f*100.0f;
 }
 
-void Place(const void* model,const M4* t) noexcept {
+void Place(const void* model,const float* eye) noexcept {
     if(!placeOk || !model || !st.human)return;
     const auto m=static_cast<const unsigned char*>(model);
     const M4 box=MatrixAt(m+kModelBounds);
@@ -359,14 +374,16 @@ void Place(const void* model,const M4* t) noexcept {
         if(logged!=model && Cfg().debug && At<const void*>(m,kUmbraObject)){logged=model;Log("FP culling: model %p's box is not one (left alone)",model);}
         return;
     }
-    const M4 at=t ? fpview::Mul(box,*t) : box;
+    M4 at=box;
+    if(eye){at=fpview::Scale(kEyeBox);std::memcpy(at.m+12,eye,12);}
     reinterpret_cast<PlaceFn>(image+kUmbraPlace)(const_cast<void*>(model),at.m);
 }
 
-// The body by the right hand's T (both arms are near it), each weapon in hand by its own hand's; `real`: where they are.
+// The body and the weapons in hand around the eye, or (`real`) where they are.
 void PlaceAll(bool real) noexcept {
-    Place(st.body,real || !st.viewOk[kRight] ? nullptr : &st.view[kRight]);
-    for(int i=0;i<st.inHandCount;++i)Place(st.inHand[i],real || !st.viewOk[st.handOf[i]] ? nullptr : &st.view[st.handOf[i]]);
+    const float* eye=real ? nullptr : reinterpret_cast<const float*>(st.cam+kCamEyeRow);
+    Place(st.body,eye);
+    for(int i=0;i<st.inHandCount;++i)Place(st.inHand[i],eye);
 }
 
 // The hand weapon `w` hangs in: the name of its mount bone ends in _l for the left (arms_l, armsFlip_l...).
@@ -375,6 +392,22 @@ int HandOf(const unsigned char* w) noexcept {
     const auto name=mount ? At<const wchar_t*>(mount,0) : nullptr;
     const std::size_t n=name ? std::wcslen(name) : 0;
     return n>=2 && name[n-2]==L'_' && name[n-1]==L'l' ? kLeft : kRight;
+}
+
+// Whether the hand `hand` without a weapon of its own is on the other hand's weapon (`anchor`: its root; the Ranger's
+// left hand on the rifle's guard): its wrist (te_l / te_r) within kOnWeapon of the weapon's axis, along its first metre
+// and a half ahead of the grip. A free hand off it (the Wing Diver's) is not drawn.
+bool HandOnWeapon(const unsigned char* h,int hand,const M4& anchor) noexcept {
+    const unsigned char* wrist=BoneNamed(h+kBodyInst,hand==kLeft ? L"te_l" : L"te_r");
+    if(!wrist)return false;
+    const float* p=reinterpret_cast<const float*>(wrist+kBoneWorld+48);
+    M4 w;
+    if(!fpview::Orthonormal(anchor,&w))return false;
+    const float d[3]={p[0]-w.m[12],p[1]-w.m[13],p[2]-w.m[14]};
+    const float along=d[0]*w.m[8]+d[1]*w.m[9]+d[2]*w.m[10];
+    if(along<-0.1f || along>1.5f)return false;
+    const float off[3]={d[0]-w.m[8]*along,d[1]-w.m[9]*along,d[2]-w.m[10]*along};
+    return off[0]*off[0]+off[1]*off[1]+off[2]*off[2]<kOnWeapon*kOnWeapon;
 }
 
 // The weapons in hand and, for each hand, the root of its weapon as it will be drawn (the draw pose's bone 0:
@@ -490,8 +523,13 @@ void Views(const unsigned char* h,const unsigned char* cam) noexcept {
     }
     for(int hand=kRight;hand<=kLeft;++hand) {
         const int other=1-hand;
+        st.shown[hand]=true;
         if(st.viewOk[hand])continue;
-        if(st.viewOk[other]){st.view[hand]=st.view[other];st.viewOk[hand]=true;continue;}
+        if(st.viewOk[other]) {
+            st.view[hand]=st.view[other];st.viewOk[hand]=true;
+            st.shown[hand]=HandOnWeapon(h,hand,anchor[other]);
+            continue;
+        }
         st.viewOk[hand]=fpview::ViewTransform(MatrixAt(h+kAim),view,hold,c.fpScale,&st.view[hand],st.moved[kRight]);
     }
     Probe(anchored,anchor);
@@ -584,12 +622,12 @@ void Pose(unsigned char* inst,const M4* t,bool body,const float* eye,float* back
     for(std::int32_t i=0;i<n;++i) {
         float* p=pose+i*16;
         const wchar_t* name=At<const wchar_t*>(bones+static_cast<std::size_t>(i)*kBoneStride,0);
-        if(body && !ArmBone(name)) {
+        const std::size_t len=name ? std::wcslen(name) : 0;
+        const bool left=body && len>=2 && name[len-2]==L'_' && name[len-1]==L'l';
+        if(body && (!ArmBone(name) || !st.shown[left ? kLeft : kRight])) {
             std::memcpy(p,fpview::Collapse(eye).m,64);
             continue;
         }
-        const std::size_t len=name ? std::wcslen(name) : 0;
-        const bool left=body && len>=2 && name[len-2]==L'_' && name[len-1]==L'l';
         const M4 moved=fpview::Mul(MatrixAt(reinterpret_cast<const unsigned char*>(p)),t[left ? kLeft : kRight]);
         std::memcpy(p,moved.m,64);
     }
