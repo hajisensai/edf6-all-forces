@@ -382,7 +382,7 @@ bool Placeable(const unsigned char* model,const M4& box) noexcept {
 }
 
 void Place(const void* model,const float* eye) noexcept {
-    if(!placeOk || !model || !st.human)return;
+    if(!placeOk || !Cfg().fpCulling || !model || !st.human)return;
     const auto m=static_cast<const unsigned char*>(model);
     const M4 box=MatrixAt(m+kModelBounds);
     if(!Placeable(m,box)) {

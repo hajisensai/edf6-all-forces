@@ -583,6 +583,7 @@ void LoadConfig() noexcept {
     n.fpNear=ReadFloat(L"FirstPersonNear",n.fpNear);
     n.fpAimSnap=ReadBool(L"FirstPersonAimSnap",n.fpAimSnap);
     n.fpMotion=ReadBool(L"FirstPersonMotion",n.fpMotion);
+    n.fpCulling=ReadBool(L"FirstPersonCulling",n.fpCulling);
     n.gunStabilizer=ReadBool(L"GunStabilizer",n.gunStabilizer);
     n.viewDistance=ReadFloat(L"ViewDistance",n.viewDistance);
     n.map=ReadBool(L"Map",n.map);
