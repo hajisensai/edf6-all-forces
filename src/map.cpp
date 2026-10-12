@@ -717,11 +717,8 @@ TvInput TvRead(const unsigned char* human) noexcept {
 // Called by the shim (rcx = the soldier) from every soldier's pre-update, the player's or not.
 bool __fastcall MapHumanFrame(unsigned char* human) noexcept {
     __try {
+        SupportActorFrame(human);
         if(!human || !human[kHumanPlayer] || !IsPlayer(human))return false;
-        // Support must progress on foot with no vehicles in the mission, and after the map closes.
-        SeeFrame(human);
-        PlayAreaTick();
-        SupportDispatchTick();
         TransportTick();   // the squads' transports (transport.cpp), after the deliveries that start them
         AirdropTick();     // the transport planes' containers (airdrop.cpp): held under them, let go over their points
         const bool open=Frame(human);

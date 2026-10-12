@@ -19,6 +19,8 @@ bool InSession() noexcept { return sessionOn; }
 bool OnlineHostOnly() noexcept { return !sessionOn || host; }
 bool IsOnlineAuthority(const void*) noexcept { return !sessionOn || host; }
 void Log(const char*,...) noexcept {}
+const void* focusEnemy=nullptr;
+bool VisitEnemies(const unsigned char*,EnemyVisitor visit,void* context) noexcept {if(focusEnemy)visit(context,focusEnemy,nullptr);return true;}
 }
 namespace {
 int checks=0;
@@ -29,6 +31,8 @@ int main() {
     // A real allocated image span makes every image+RVA pointer valid C++ pointer arithmetic; no code is executed.
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x1800000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
     Check(image!=nullptr,"fixture image allocated");
+    std::memcpy(image+kAttackRead,kAttackReadSig,sizeof(kAttackReadSig));
+    std::memcpy(image+kAttackRelease,kAttackReleaseSig,sizeof(kAttackReleaseSig));
     alignas(16) unsigned char v[0x2700]{},seat[kSeatStride]{},rider[0x400]{},ctrl[0x20]{},otherCtrl[0x20]{};
     void* vt[73]{};vt[72]=image+0x661440;
     Put<void**>(v,0,vt);Put<void*>(v,kSelfCtrl,ctrl);
@@ -66,6 +70,7 @@ int main() {
     now+=501;Check(listed()==0 && !TankCommand(v,guard),"stale tank rejected");
     neutral();NpcPostInput(v);sessionOn=true;host=false;neutral();NpcPostInput(v);
     Check(At<float>(seat,0x2C4)==0 && !TankCommand(v,guard),"client cannot drive or command");
+    Check(listed()==1,"client can select the remote NPC vehicle without writing its input");
     host=true;Put<float>(v,kPosition+8,45);neutral();NpcPostInput(v);
     Check(At<float>(seat,0x2C4)>0 && listed()==1,"AI authority can return and command its tank online");
     sessionOn=false;config.customNpcAi=false;Check(listed()==0 && !TankCommand(v,guard),"disabled AI cannot be commanded");
@@ -149,6 +154,39 @@ int main() {
     rider[edf::kHumanPlayer]=0;Put<std::uint16_t>(rider,0x128,0);Put<void*>(rider,0,image+edf::kDummyRiderVtable);
     neutral();NpcPostInput(v);
     Check(posts[0].routeArrival==0 && At<float>(seat,0x2C4)==0,"new NPC after takeover does not resume stale route");
+    // Native firing must never trust a non-null origin outside the current model's bone array.
+    auto* mv=reinterpret_cast<void**>(image+0x17DA960);Put<void**>(m,0,mv);
+    std::memcpy(image+kAttackRead,kAttackReadSig,sizeof(kAttackReadSig));
+    std::memcpy(image+kAttackRelease,kAttackReleaseSig,sizeof(kAttackReleaseSig));
+    alignas(16) unsigned char bones[2*kBoneStride]{},replacement[2*kBoneStride]{};
+    const wchar_t spine[16]=L"spine",body[16]=L"body";
+    Put<const wchar_t*>(bones,0,spine);Put<const wchar_t*>(bones,kBoneStride,body);
+    Put<const wchar_t*>(replacement,0,spine);Put<const wchar_t*>(replacement,kBoneStride,body);
+    Put<void*>(m+kModelInst506,kInstBones506,bones);Put<int>(m+kModelInst506,kInstBoneCount,2);
+    Put<std::uint64_t>(m,kAttackSize,1);Put<std::uintptr_t>(m,kAimOrigin,0x70000481DULL);
+    Check(PrepareNpcVehicleAi(m) && At<void*>(m,kAimOrigin)==bones,"non-null corrupted firing origin restored from actual spine");
+    Put<void*>(m+kModelInst506,kInstBones506,replacement);
+    Check(PrepareNpcVehicleAi(m) && At<void*>(m,kAimOrigin)==replacement,"model replacement refreshes stale firing bone");
+    Put<void*>(m,kAimOrigin,replacement+1);
+    Check(PrepareNpcVehicleAi(m) && At<void*>(m,kAimOrigin)==replacement,"misaligned pointer is not a bone record");
+    Put<void*>(m,kAimOrigin,replacement+kBoneStride);
+    Check(PrepareNpcVehicleAi(m) && At<void*>(m,kAimOrigin)==replacement+kBoneStride,"native valid custom origin is preserved");
+    Put<void*>(m,kAimOrigin,nullptr);Put<const wchar_t*>(replacement,0,body);
+    Check(!PrepareNpcVehicleAi(m) && !At<void*>(m,kAimOrigin),"missing origin prevents native fire instead of dereferencing garbage");
+    Put<const wchar_t*>(replacement,0,spine);
+    Check(PrepareNpcVehicleAi(m),"valid model becomes fire-ready again");
+    // Turning off automatic return must not remove a crewed vehicle from the command map.
+    config.tankReturnToPost=false;ResetNpcPosts();neutral();NpcPostInput(v);
+    Check(listed()==1 && TankCommand(v,guard),"explicit map orders remain available with automatic return off");
+    Put<void*>(target,kSelfCtrl,otherCtrl);Put<int>(otherCtrl,8,1);Put<int>(otherCtrl,12,1);focusEnemy=target;
+    const ObjRef focused=ObjRef::Of(target);Command focus{Order::focus,{0,0,0}};
+    Check(TankCommand(v,focus,focused),"NPC vehicle accepts a live enemy focus");
+    Check(At<int>(otherCtrl,12)==2,"map focus owns one weak reference");
+    Check(PrepareNpcVehicleAi(v) && At<void*>(v,kTarget)==target,"map focus reaches the native AI target");
+    focusEnemy=nullptr;
+    Check(!TankCommand(v,focus,focused),"friendly or absent target cannot be focused");
+    Check(TankCommand(v,Command{}),"release clears focus");
+    Check(At<int>(otherCtrl,12)==2,"clearing map focus releases its reference while native AI retains its own");
     VirtualFree(image,0,MEM_RELEASE);
     std::printf("npc_post_test: %d checks passed\n",checks);
 }

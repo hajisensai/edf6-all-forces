@@ -1369,6 +1369,12 @@ void AirdropTestCall() noexcept {
         target[1],target[2],kAirdropTestAhead,asked ? "accepted" : "refused");
 }
 
+void SupportActorFrame(const void* actor) noexcept {
+    if(!actor)return;
+    SeeFrame(actor);
+    PlayAreaTick();
+    SupportDispatchTick();
+}
 void SupportDispatchTick() noexcept {
     if(dispatchFrame==GameFrame())return;
     dispatchFrame=GameFrame();

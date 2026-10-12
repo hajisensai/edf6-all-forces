@@ -1286,7 +1286,7 @@ void GiveBackDismissed(unsigned char* h) noexcept {
 constexpr unsigned kCarAiPass=0x673300,kMechAiPass=0x643530,kBargaAiPass=0x60A520;
 constexpr unsigned kCarAi=0x661440,kMechAi=0x63C1C0,kProteusAi=0x648F70;
 constexpr std::size_t kSlotCarAi=72,kSlotMechAi=55;
-constexpr std::size_t kCarAction=0x2508,kCarInAction=0x2590,kMechAction=0x1F08,kMechInAction=0x1F90,kMechAimOrigin=0x2008;
+constexpr std::size_t kCarAction=0x2508,kCarInAction=0x2590,kMechAction=0x1F08,kMechInAction=0x1F90;
 using AiActionFn=void(__fastcall*)(void*,int,const float*,void*);
 const unsigned char kCarAiPassSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x20,0x48,0x8B,0xF2,
                                     0x48,0x8B,0xD9,0xE8,0xE6,0x6C,0xED,0xFF};   // ...call 0x54A000
@@ -1365,10 +1365,12 @@ void DriveVehicleAi(unsigned char* h,const float* dt) noexcept {
     auto* seat=At<unsigned char*>(h,kHumanSeat);
     auto* v=At<unsigned char*>(h,kHumanRiding);
     if(!seat || !Readable(v,kSeatCount+8) || v[kDead] || (v[kListFlags]&kInAiList) || !OwnsNpcSeatInput(seat))return;
+    if(seat!=SeatAt(v,0) || !NpcDriver(v))return; // passengers must not run seat-0 AI or take over a human driver
     const auto vt=At<void* const*>(v,0);
     if(!Readable(vt,(kSlotAiPass+1)*8))return;
     const AiPass kind=AiPassOf(vt[kSlotAiPass]);
     if(kind==AiPass::none)return;
+    if(!PrepareNpcVehicleAi(v))return;
     const ULONGLONG frame=GameFrame();
     if(lastV==v && lastFrame==frame)return;   // once a frame
     lastV=v;lastFrame=frame;
@@ -1384,10 +1386,10 @@ void DriveVehicleAi(unsigned char* h,const float* dt) noexcept {
     if(At<const void*>(v,action) || !Readable(vt,(slot+1)*8))return;
     const void* fn=vt[slot];
     if(car ? fn!=image+kCarAi : (fn!=image+kMechAi && fn!=image+kProteusAi))return;
-    if(!car && !At<const void*>(v,kMechAimOrigin))return;   // npcpost.cpp EnsureMechAiSetup sets it first
-    v[inAction]=1;
-    reinterpret_cast<AiActionFn>(const_cast<void*>(fn))(v,1,dt,nullptr);
-    v[inAction]=0;
+    if(!PrepareNpcVehicleAi(v))return; // the native pass may replace the target; refresh before firing
+    const unsigned char previous=v[inAction];v[inAction]=1;
+    __try {reinterpret_cast<AiActionFn>(const_cast<void*>(fn))(v,1,dt,nullptr);}
+    __finally {v[inAction]=previous;}
 }
 
 template<int I> void __fastcall ThinkHook(void* human,const float* dt) {
@@ -1453,7 +1455,7 @@ bool InstallNpcAi() noexcept {
     ok=hooked==kClasses;
     Log("NPCAI soldiers' Think hooked %d/%d%s",hooked,kClasses,ok ? "" : ": the custom AI stays off");
     if(ok)InstallDriverPayload();
-    ConfigureNpcCommandNetwork(ok ? &NpcSquadCommandForRequester : nullptr);
+    ConfigureNpcCommandNetwork(ok ? &NpcMapCommandForRequester : nullptr);
     return ok;
 }
 
@@ -2469,6 +2471,36 @@ void SeeCommandFocus(void* context,const void* object,const float* aim) noexcept
 }
 }
 NpcCommandResult LastNpcCommandResult() noexcept {return lastCommand;}
+NpcCommandResult NpcMapCommandForRequester(const ObjRef& selected,const mapcmd::Command& c,
+    const ObjRef& requester,const ObjRef& focus) noexcept {
+    using Reason=NpcCommandReason;
+    __try {
+        if(IsSoldierClass(selected.obj))return NpcSquadCommandForRequester(selected,c,requester,focus);
+        if(!ok || !Cfg().enabled || !Cfg().customNpcAi)return CommandResult(Reason::disabled);
+        if(!CommandActor(requester,true))return CommandResult(Reason::invalidRequester);
+        auto* v=static_cast<unsigned char*>(const_cast<void*>(selected.obj));
+        if(!npcmark::Alive(selected) || !NpcDrivable(v) || !NpcDriver(v))return CommandResult(Reason::notFound);
+        if(!IsOnlineAuthority(v))return CommandResult(Reason::notAuthority);
+        const int vehicleTeam=At<int>(v,kTeam);
+        if(vehicleTeam!=0 && vehicleTeam!=kTeamFriend && vehicleTeam!=kTeamVehicle)return CommandResult(Reason::notFriendly);
+        if(At<const void*>(v,0x4A8))return CommandResult(Reason::scripted);
+        auto* driver=At<unsigned char*>(SeatAt(v,0),kSeatRider);
+        auto* top=TopNpc(driver);
+        if(!top || !CommandActor(npcmark::Capture(top),false))return CommandResult(Reason::notFound);
+        const auto* caller=static_cast<const unsigned char*>(requester.obj);
+        const int team=At<int>(top,kTeam),callerTeam=At<int>(caller,kTeam);
+        if((team!=0 && team!=kTeamFriend) || (callerTeam!=0 && callerTeam!=kTeamFriend))return CommandResult(Reason::notFriendly);
+        const auto* root=RootLeader(top);
+        if(root && IsAnyPlayer(root) && root!=caller)return CommandResult(Reason::notOwner);
+        if(npc::Scripted(ControlOf(top,root)))return CommandResult(Reason::scripted);
+        const auto* q=FindSquad(top);
+        if(!q || !q->top.Is(top) || GameMs()-q->seen>kOrderSeenMs)return CommandResult(Reason::stale);
+        const Command order{mapcmd::VehicleCommandOf(c.order),{c.at[0],c.at[1],c.at[2]}};
+        if(order.order!=Order::guard && order.order!=Order::none && order.order!=Order::focus)return CommandResult(Reason::unsupported);
+        const bool accepted=TankCommand(v,order,focus);
+        return CommandResult(accepted ? Reason::none : Reason::failed,accepted ? 1u : 0u);
+    } __except(EXCEPTION_EXECUTE_HANDLER){return CommandResult(Reason::failed);}
+}
 ObjRef NpcMarkedIdentity() noexcept {return npcmark::Enabled() && MarkAlive() ? mark.obj : ObjRef{};}
 NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd::Command& c,
     const ObjRef& requester,const ObjRef& focus) noexcept {

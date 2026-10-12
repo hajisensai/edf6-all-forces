@@ -131,7 +131,10 @@ def check_damage(root: str) -> None:
         if 'NoteLocalCopy(' not in body(code_only(read(root, rel)), fn):
             fail(f'{rel} {fn}: a copy is made without its owner recorded (its damage would count on the host only)')
     radio = body(code_only(read(root, 'src/airstrike.cpp')), 'std::uintptr_t __fastcall RadioStartHook(')
-    if 'if(!InSession() || IsPlayer(owner))SupportCallAt(' not in radio:
+    human_frame = body(code_only(read(root, 'src/map.cpp')), 'bool __fastcall MapHumanFrame(')
+    if human_frame.find('SupportActorFrame(human)') < 0 or human_frame.find('SupportActorFrame(human)') > human_frame.find('IsPlayer(human)'):
+        fail('mission support service must advance before filtering local player input')
+    if 'const bool localCaller=!InSession() || IsPlayer(owner);' not in radio or 'localCaller && SupportCallAt(' not in radio:
         fail("src/airstrike.cpp RadioStartHook: a remote radio replay can submit a duplicate support request")
     support = code_only(read(root, 'src/support_dispatch.cpp'))
     dispatch = body(support, 'bool SpawnDeployment(')

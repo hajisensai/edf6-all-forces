@@ -196,7 +196,10 @@ bool SubmitSupportRequest(int,const float*,wchar_t* note,std::size_t size,std::u
     if(configuredHooks.notice)configuredHooks.notice(++noticeRequest,support_net::RequestStatus::accepted);
     _snwprintf_s(note,size,_TRUNCATE,L"request queued");return true;
 }
-void SupportNetTick() noexcept {}
+int protocolTicks=0;
+void SupportNetTick() noexcept {++protocolTicks;}
+void SeeFrame(const void*) noexcept {}
+void PlayAreaTick() noexcept {}
 void ResetSupportNet() noexcept {creationSeen=false;}
 bool ValidateMissionCrewPlan(const SupportPlan&) noexcept {return false;}
 bool ApplyMissionCrewPlan(std::uint64_t,const SupportPlan&,bool) noexcept {return false;}
@@ -917,6 +920,17 @@ int main() {
            "a rescue meanwhile leaves the map's composed load as it was");}
     routeResult=npc::navigation::Result::moving;ResetSupportDispatch();
     }
+    ResetSupportDispatch();testOnline=true;config.enabled=true;
+    const int ticksBefore=protocolTicks;
+    unsigned char remoteActor[0x400]{};remoteActor[kHumanPlayer]=1;
+    ++fixtureMs;SupportActorFrame(remoteActor);
+    check(protocolTicks==ticksBefore+1,"remote actor without local input advances the support protocol");
+    SupportActorFrame(objects[0]);
+    check(protocolTicks==ticksBefore+1,"other actors in the same scene frame do not double-step support");
+    ++fixtureMs;SupportActorFrame(objects[0]);
+    check(protocolTicks==ticksBefore+2,"NPC-only update continues service progress next frame");
+    SupportActorFrame(nullptr);
+    check(protocolTicks==ticksBefore+2,"missing actor cannot create a service frame");
     std::printf("support_dispatch_test: %d checks passed\n",checks);
 }
 #endif

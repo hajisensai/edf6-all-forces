@@ -206,7 +206,12 @@ bool Give(Game& g,const Entry& e,const Command& order) noexcept {
         else g.affected+=result.affected;
         return result.Accepted();
     }
-    case Owner::tank: return TankCommand(e.u.v,c);
+    case Owner::tank: {
+        const auto result=NpcMapCommandForRequester(ObjRef::Of(e.u.v),c,g.requester,g.focus);
+        if(!result.Accepted())g.failure=result.reason;
+        else g.affected+=result.affected;
+        return result.Accepted();
+    }
     }
     return false;
 }
@@ -294,7 +299,7 @@ bool Takes(const Entry& e,Order o) noexcept {
         return true;
     }
     if(mapcmd::DismountOrder(o))return e.u.carries;   // its riding squad's (Give)
-    if(e.owner==Owner::tank)return o==Order::none || mapcmd::PointOrder(o);
+    if(e.owner==Owner::tank)return o==Order::none || o==Order::focus || mapcmd::PointOrder(o);
     if(e.owner==Owner::heli || e.owner==Owner::jet)return mapcmd::AirOrder(o);
     return mapcmd::VehicleOrder(o);
 }
@@ -599,7 +604,7 @@ int Issue(Game& g,const Command& cmd,int* skipped) noexcept {
     }
     if(InSession())for(int i=0;i<g.count;++i) {
         const auto& e=g.list[i];
-        if(g.sel.Has(e.u.v) && e.owner==Owner::squad && Takes(e,cmd.order) && !IsOnlineAuthority(e.u.v)) {
+        if(g.sel.Has(e.u.v) && (e.owner==Owner::squad || e.owner==Owner::tank) && Takes(e,cmd.order) && !IsOnlineAuthority(e.u.v)) {
             if(remotes<kCommandNetUnits){remote[remotes]=ObjRef::Of(e.u.v);remoteSlots[remotes]=slots[i];}++remotes;
         }
     }
@@ -623,7 +628,7 @@ int Issue(Game& g,const Command& cmd,int* skipped) noexcept {
             ++*skipped;continue;
         }
         if(!IsOnlineAuthority(e.u.v)) {
-            if(e.owner==Owner::squad && g.networkQueued)continue;
+            if((e.owner==Owner::squad || e.owner==Owner::tank) && g.networkQueued)continue;
             g.failure=NpcCommandReason::notAuthority;++g.skipRemote;++*skipped;continue;
         }
         Command c=cmd;

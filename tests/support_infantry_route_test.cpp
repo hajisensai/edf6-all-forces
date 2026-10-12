@@ -14,6 +14,7 @@
 #include "../src/support_config.cpp"
 #include <memory>
 namespace crew {
+void PlayAreaTick() noexcept {}
 namespace {bool supportSessionActive=true;}
 support::Policy SupportMissionPolicy() noexcept {return {support::Environment::normal,false};}
 int SupportAirCallCount() noexcept{return 21;}

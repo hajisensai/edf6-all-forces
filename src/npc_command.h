@@ -19,4 +19,6 @@ struct NpcCommandResult { NpcCommandReason reason=NpcCommandReason::failed;std::
 NpcCommandResult NpcSquadCommandForRequester(const ObjRef& leader,const mapcmd::Command& command,
     const ObjRef& requester,const ObjRef& focus) noexcept;
 NpcCommandResult LastNpcCommandResult() noexcept; // most recent local attempt, game thread only
+NpcCommandResult NpcMapCommandForRequester(const ObjRef& unit,const mapcmd::Command& command,
+    const ObjRef& requester,const ObjRef& focus) noexcept;
 }

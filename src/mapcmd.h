@@ -57,7 +57,7 @@ int SquadCommandUnits(CommandUnit* out,int most) noexcept;
 bool SquadCommand(const void* leader,const Command& c) noexcept;
 // npcpost.cpp: the NPC tanks keeping a post (guard moves it; release puts it back on the spawn point).
 int TankCommandUnits(CommandUnit* out,int most) noexcept;
-bool TankCommand(const void* v,const Command& c) noexcept;
+bool TankCommand(const void* v,const Command& c,const ObjRef& focus={}) noexcept;
 // The panel's row of a squad (hud.cpp MapCommands): its members alive, the seconds left of its dismissal's cooldown.
 struct SquadRow { const void* leader; char name[24]; char status[16]; int alive; int cooldown; Command now; bool locked;
     ObjRef identity{}; // game-thread snapshot; the draw passes this unchanged, never recaptures from leader
