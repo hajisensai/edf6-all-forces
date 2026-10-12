@@ -533,6 +533,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     # After the plugin's ini (the presets are the player's) and after every writer of V505_TANK_MISSION (AutoTurret's
     # recoil, the optics' model redirect above): the AP tank is that file with another gun.
     write_loadout_files(game)
+    write_menu_preview(game)
     generator = install_generator(game, sys.executable if getattr(sys, 'frozen', False) else None)
     if generator:
         print('写入', generator, '（游戏内战前配置菜单保存后在后台用它生成新文件）')
@@ -623,8 +624,9 @@ def uninstall(game: str) -> None:
         # First detach stock paths, preserving other writers' fields; consumers keep shared optic models.
         make_optics.remove(game)
         remove_autoturret(game)
+        import menu_preview
         import support_loadout
-        for remove in (support_loadout.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove,
+        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:
@@ -808,6 +810,21 @@ def write_loadout_files(game: str) -> bool:
     return not errors
 
 
+def write_menu_preview(game: str) -> bool:
+    """The room / HQ 3D preview's menu SGOs (tools/menu_preview.py), rewritten only when changed. False (said why) when
+    they cannot be made: the preview then shows Rangers in the player's body; nothing else is affected."""
+    import menu_preview
+    import rootcpk
+    try:
+        files = menu_preview.build(rootcpk.Game(game))
+    except Exception as e:   # never stops the install: said, and the plugin logs the missing file
+        print(f'！ 房间 3D 预览用的游骑兵菜单模型没有生成（预览将显示玩家的游骑兵）：{type(e).__name__}: {e}')
+        return False
+    for written in menu_preview.install(game, files):
+        print('写入', written)
+    return True
+
+
 def manage_support(game: str, loadout_only: bool = False) -> int:
     """Menu 7: the map support's out-of-mission configuration (tools/support_config.py, the plugin's src/support_config.h)
     in the player's EDF6VehicleCrew.ini: callable units, their crews' weapons, aircraft counts. Menu 8 goes straight to
@@ -919,7 +936,22 @@ def generate_variants(game: str) -> tuple[list[str], dict[str, str]]:
     names = support_loadout.missing_names(game, text, support_loadout.read_pending(game))
     errors: dict[str, str] = {}
     files = support_loadout.build_named(game, names, errors=errors)
-    return support_loadout.install_new(game, files), errors
+    return support_loadout.install_new(game, files) + generate_menu_preview(game, errors), errors
+
+
+def generate_menu_preview(game: str, errors: dict[str, str]) -> list[str]:
+    """The preview's menu SGOs (tools/menu_preview.py) when one is missing, as new names only (install_new: the game may
+    be running). A failure goes into `errors` under the file's name. The paths written."""
+    import menu_preview
+    import rootcpk
+    if not menu_preview.missing(game):
+        return []
+    try:
+        files = menu_preview.build(rootcpk.Game(game))
+    except Exception as e:   # reported in the status file like a variant that could not be made
+        errors[menu_preview.RANGER] = f'{type(e).__name__}: {e}'
+        return []
+    return menu_preview.install_new(game, files)
 
 
 def generate_summary(written: list[str], errors: dict[str, str]) -> tuple[str, str]:

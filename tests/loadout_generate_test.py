@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.join(ROOT, 'tools'))
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 import installer  # noqa: E402
 import ledger  # noqa: E402
+import menu_preview  # noqa: E402
 import modfiles  # noqa: E402
 import support_loadout as sl  # noqa: E402
 
@@ -65,6 +66,10 @@ def make_game(root: str) -> str:
         f.write(INI.encode('utf-8'))
     with open(os.path.join(plugins, sl.PENDING), 'wb') as f:
         f.write((PENDING_NAME + '\r\n').encode())
+    for rel in menu_preview.rels():   # the preview's menu SGOs already there (tests/menu_preview_test.py makes them)
+        os.makedirs(os.path.dirname(os.path.join(root, 'Mods', rel)), exist_ok=True)
+        with open(os.path.join(root, 'Mods', rel), 'wb') as f:
+            f.write(b'menu')
     return root
 
 

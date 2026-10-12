@@ -153,3 +153,64 @@
 3. 游戏运行中生成新文件、再进关卡预载它们，没有实机跑过（设计上关卡开始才扫描，与阶段 1 结论一致）。
 4. 已知小缺口：生成器运行时若同时在游戏外用菜单 7 / 8 保存（只在游戏关闭时生成），两边都改台账 `.edf6vc_files.json`，后写的会盖掉先写的记录，
    被盖掉的文件卸载时不会删（不影响游戏）。
+
+## 阶段 7：3D 士兵预览（2026-10-12，分支 `feat/rl-preview`，只做了离线验证）
+
+没有启动 / 关闭游戏，没有往游戏目录写任何文件；只读了 EDF.dll 与 Root.cpk。方案 A（`docs/room-3d-preview-re.md` §4），实现时按反汇编修正了三处（见「与方案 A 的差异」）。
+
+### 菜单模型（`tools/menu_preview.py`）
+
+- 读 Root.cpk 核实：10 个游骑兵模板（含 `_LEADER`）都是 `n601_common_ranger.mrab/.mdb`；翼人 10 个都是 p606、重装 8 个都是 p607，与原版菜单 SGO 相同。
+- 生成 `Mods/MENUOBJECT/EDF6VC_MENU_RANGER.SGO`（P505 菜单 SGO，只换 `animation_model[0]` 为 n601）与 `EDF6VC_MENU_RANGER_L.SGO`
+  （再把 `change_color` 的选择器写成网格名 `p609_proto_ranger_common_head`）。n601 只有 body / head 两个可上色材质：
+  火焰 / 火箭 / 霰弹 / 狙击队长只染头 → `_L`；步枪队长头身都染 = 全部材质 → 普通文件。翼人 / 重装用原版 `p606_WingDiver.SGO` / `p607_fencer.SGO`。
+- 渲染器 0x93C370 对 `change_color[i]` 的第一项：字符串 → 按材质名 0x110D570 查找只染该材质；其它 → 全部材质（静态读码）。
+- 安装（菜单 1）`write_menu_preview`：内容不变不重写，失败只提示、不中断安装；`loadout-generate` 缺文件时以新文件名 `put_new` 生成，失败写入状态；卸载删除（台账 owner `menu_preview`）。
+
+### 插件（`src/room_preview.cpp` + 纯逻辑 `src/room_preview_logic.h`）
+
+- 安装：先核 25 段代码签名（`src/room_preview_signatures.inc`，`tools/room_preview_sigs.py` 从 EDF.dll 生成），不符则 `ROOM preview REFUSED` 且不打补丁；
+  再链接 5 个虚表槽：两个 `std::function` 作业（msg 3 的 lambda_1 0x180FDB0、msg 6 的 lambda_3 0x180FE20，槽 2 `_Do_call` = 0x9424A0 / 0x942590，
+  它们调 `0x93F910(Async+0x28, this+8)` 并置 `Async+0x9C=1`），视图虚表 0x180FA60 的槽 5（析构）与槽 1（每帧更新）。
+- 工作线程：作业的 Async == 已采纳视图的 `view+0xD0`（构造函数建一次，终生不变）且有 override 时，改写 Desc 拷贝：+0x20 / +0x4C 兵种号（游骑兵 0、翼人 1、重装 3），
+  +0x24 / +0x34 两色，+0x44 哨兵 `0x56430000`，+0x48 武器数，+0x50 = 0，+0x54 武器行号；路径用游戏自己的 `wstring::assign` 0x3D450。override 与计数在 SRWLOCK 里。
+- 武器行号在 UI 线程用 0xE1BA0 按名字查（查不到就不挂该武器）：游骑兵 / 翼人一把；重装 `[hShield01, 主武器]`（CONFIG `Weapon_Slot1L` 在前 = 左手盾）。
+- 颜色：`@RRGGBB` → 各字节 /255、alpha 1（与生成器相同）；原色 = 模板 `soldier_color`（游骑兵队长用头色，步枪队长用身体色）。
+- 每帧（视图自己的更新里，视图必然活着）按「想要 / 正在显示」规划（`Step`）：打开时发 msg 8 锁住房间的 msg 6、保存 +0x3EC 并置 0（显示）；
+  换模型发一次 msg 3；同模型只改色且已显示（+0x180 == 兵种、+0x178 == 哨兵）时只对变了的通道发 msg 5；关闭时若还有士兵作业没被工作线程取走就等（最多 180 帧），
+  然后清 override、发 msg 3 重建玩家本人（`GS+0x6E90+player*0x3E60`、`0xD8700(GS, player)`），最后 msg 9 解锁、还原 +0x3EC。
+- 菜单打开时：镜头四个点（+0x2C0 / +0x2D0 / +0x2E0 / +0x2F0）的 x 加 `kCameraShiftX = -0.8`，游戏改写过的点以新值为基准重加，关闭时只还原仍是我们写的值的点；
+  视图自己从输入得到的转向 / 缩放（+0x2A4 / +0x308）每帧放回（菜单占用按键）。
+- 拆除：视图析构钩子清掉一切（不再碰该视图；之后才完成的作业不匹配任何 Async，原样构建）；`TickPreview` 连续 30 帧没来（画面没关菜单就走了）视为关闭并自行放回玩家。
+
+### 与方案 A 的差异
+
+1. 不调 0x8BDE80、不用 `0x119D1B0` 广播：0x8BDE80 就是把 msg 3 广播给所有 UI 对象；改为直接调 index 0 视图自己的 OnMessage（当前虚表槽 3），
+   msg 8 / 9 也只给这个视图（广播的 8 / 9 不判玩家号，会连带分屏的第二个视图）。payload 与 0x8BDE80 相同（outfit ≥ 0 时 0xDE470 原样返回）。
+2. 不挂 OnMessage：构造函数直接 `call 0x93B320` 发第一条 msg 3，看不到；改由每帧更新（槽 1）采纳 `+0x2AC == 0` 的视图。
+3. 不在 0x93F910 打内联补丁：它的调用点是两个 `_Do_call` 与无人引用（无 call / jmp / 指针）的 0x93FFF0，挂这两个虚表槽等价且不改代码字节。
+4. 「等 Async+0x9C」改为不阻塞的计数：发出的士兵作业数 vs 工作线程应用 override 的次数；不在 UI 线程等待。
+
+### 测试
+
+| 测试 | 结果 |
+|---|---|
+| `room_preview`（C++，`tests/room_preview_test.cpp`） | 137 项：14 兵种 × 队长的菜单路径 / 兵种号 / 武器、颜色换算与原色、Desc 逐字节（路径与计数之后的字节不动、计数封顶 6）、镜头偏移（不重复加、被改写重算、精确还原）、规划器（锁一次、每模型建一次、只重发变了的通道、等待 / 超时、放回玩家后解锁） |
+| `room_preview_native`（Python） | 50 项：签名 = EDF.dll 现有字节、5 个虚表槽 = 文档里的函数、OnMessage 跳转表 3/5/6/8/9、两个作业虚表的引用点、GS 全局；表里 14 个武器名都在 WEAPONTABLE.SGO、原版菜单路径与 CONFIG.SGO 拼写一致、生成文件名与 `menu_preview.py` 一致、14 兵种原色与队长头 / 身体色 = 模板 `soldier_color` |
+| `menu_preview`（Python） | 36 项：真 Root.cpk 生成、解析回读、`animation_model[0]` 为 n601、其余键与 P505 相同、队长选择器、二次安装不写、卸载删除、安装器接线 |
+
+### 需实机验证（全部未在游戏里跑过）
+
+1. 本分支没有调用者：`InstallPreviewHooks` / `ShowPreview` / `HidePreview` / `TickPreview` 由阶段 4 的菜单画面调用；没接上之前钩子不装。
+2. `UiHQ_3DModelView` 的槽 1 是否每帧被调（房间与 HQ 都要）；它的 ctx+8 在房间里是否为空（为空时游戏不重算 +0x2B0，镜头偏移不生效）。
+3. 在 UI 帧内（视图更新前）直接调 OnMessage 3 / 5 / 8 / 9 是否安全；不广播 msg 3 是否漏掉了别的对象对它的依赖（如加载中提示）。
+4. EDFModLoader 是否从 `Mods/MENUOBJECT/` 加载新文件名；n601 配菜单 CAS `app:/MenuObject/EDF6ArmySoldier.cas` 的动画是否正常；
+   `_L` 的材质名选择器是否只染头。
+5. 哨兵 outfit 对 msg 5 / msg 6 以外的影响（静态只找到 0x93C21A 一处比较）。
+6. 重装 weapons[0] = 左手盾、选中槽 0 时两手的实际武器；翼人 / 游骑兵只给一把武器（count 1）时的显示。
+7. 镜头偏移方向与幅度（`kCameraShiftX = -0.8` 是猜的）；+0x3EC 置 0 是否让房间里原本隐藏的模型显示出来、是否需要。
+8. 转向 / 缩放放回造成的单帧抖动；视图在房间里是否收到输入。
+9. 画面关闭时工作线程与析构的竞争（析构后才完成的作业：不匹配 override，按原样构建进已无人显示的 Async）。
+10. 离线双人分屏：只采纳 index 0；第二个视图不受影响。
+11. 游骑兵生成文件缺失时回退到玩家 P505 模型（Desc 仍是士兵的颜色和武器）。
+12. 翼人队长的红色脸部染色在预览里没有（菜单只有两个颜色通道，原版 p606 菜单 SGO 染全部材质）。
