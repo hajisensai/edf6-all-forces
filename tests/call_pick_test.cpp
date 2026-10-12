@@ -12,6 +12,8 @@ bool supportSky=true,supportGround=true,supportMeasured=true;
 Sea supportSea=Sea::land;
 Sea SeaAt(float,float,float* surface) noexcept {*surface=1;return supportSea;}
 PlayArea MapPlayArea() noexcept { return {{-1500,-1500},{1500,1500},supportMeasured,0,true}; }
+float HavokHalf() noexcept { return 3000.0f; }   // BigWorld off: the stock world
+float SupportPassTurn(const SupportAircraft& spec) noexcept { return spec.transportPlane ? 266.0f : 0.0f; }   // jet_flight.cpp FerryTurn
 // Ground height under (x, z): flat by default; `supportSlope` m per m rising from the map's centre; `supportStep` a
 // ledge every 30 m outward (no flat ground anywhere). Vertical rays meet that same ground.
 float supportSlope=0,supportStep=0;
@@ -34,7 +36,6 @@ void Log(const char*,...) noexcept {}
 ULONGLONG GameMs() noexcept { return 3600000; }
 int FaultLog(const char*,const EXCEPTION_POINTERS*) noexcept { return EXCEPTION_EXECUTE_HANDLER; }
 bool JetLaunch(JetRole,const float*,const float*,const float*,DWORD,const void*,bool) noexcept { return false; }
-unsigned char* HeliLaunch(HeliBody,const float*,const float*) noexcept { return nullptr; }
 void HeliCalled(unsigned char*,bool,const float*,DWORD) noexcept {}
 unsigned char* SubLaunch(const float*,const float*) noexcept { return nullptr; }
 bool JetLaunchBomber(const float*,const float*,const float*,const BombLoad&,DWORD,const void*,JetBody,const void*) noexcept {
@@ -190,20 +191,36 @@ int main() {
     Put<std::uint64_t>(weapon,kWeaponRxSeed,callnet::Encode(0ull,3));
     Check(CallOf(ifc,remote)==nullptr,"a stock call is never converted, whatever its seed carries");
     const float supportTarget[3]={0,0,0},observer[3]={0,0,100};support::Route route;
+    SupportAircraft call0{},four{};
+    Check(SupportAircraftSpec(0,&call0),"the first flown call has a spec");
+    four=call0;four.count=4;
     // 2026-10-09: air support is made in the air at the edge and flies in; no runway, no ground for a crew.
-    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::none && route.from[1]>=150,
+    Check(PlanAirSupport(call0,supportTarget,observer,&route)==support::Refusal::none && route.from[1]>=150,
           "production entry planner puts the aircraft in the air at the route's height");
+    // Off the map (2026-10-10: made 180 m inside the ground, in plain sight): past the ground's edge (the walls +-1500 stand
+    // kVoidMargin inside it) by kOffMap, inside the physical square (crew.h ArrivalHalf: Havok's 3000 less kArrivalRoom).
+    Check(std::fmax(std::fabs(route.from[0]),std::fabs(route.from[2]))>=1500.0f+area::kVoidMargin+support::kOffMap-0.5f &&
+          std::fabs(route.from[0])<=ArrivalHalf() && std::fabs(route.from[2])<=ArrivalHalf(),"the entry stands off the map, inside the square");
     supportSlope=0.05f;supportStep=2.0f;   // a hillside of ledges: no flat ground anywhere
-    Check(PlanAirSupport(0,supportTarget,observer,&route,4)==support::Refusal::none,"air support needs no flat ground at all");
+    Check(PlanAirSupport(four,supportTarget,observer,&route)==support::Refusal::none,"air support needs no flat ground at all");
     {float slot[3];support::AirFormationSlot(route,3,1.0f,slot);float g=0;MapGroundNear(slot[0],slot[2],0,&g,true);
      Check(slot[1]>=g+75.0f,"every formation slot stands over its own ground");}
     supportSlope=0;supportStep=0;
     supportSky=false;
-    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::noSky,"a roof above the destination refuses air support");
+    Check(PlanAirSupport(call0,supportTarget,observer,&route)==support::Refusal::noSky,"a roof above the destination refuses air support");
     supportSky=true;supportMeasured=false;
-    Check(PlanAirSupport(0,supportTarget,observer,&route,0)==support::Refusal::noArea,"unmeasured bounds cannot be used as an entry");
+    Check(PlanAirSupport(call0,supportTarget,observer,&route)==support::Refusal::noArea,"unmeasured bounds cannot be used as an entry");
     supportMeasured=true;
-    Check(PlanAirSupport(16,supportTarget,observer,&route,0)==support::Refusal::unsupported,"stationary submarine model cannot fake a physical entry");
+    {SupportAircraft sub{};
+     Check(!SupportAircraftSpec(16,&sub) && PlanAirSupport(sub,supportTarget,observer,&route)==support::Refusal::unsupported,
+           "stationary submarine model cannot fake a physical entry");}
+    // One planner for every entry's spec (merge of #100 and #104): #100's paratroop plane has no jet or heli row
+    // (SupportAircraft::transportPlane) and must still plan; a spec that brings no aircraft at all is refused.
+    {SupportAircraft plane{};plane.transportPlane=true;plane.count=1;
+     Check(PlanAirSupport(plane,supportTarget,observer,&route)==support::Refusal::none && route.from[1]>=150,
+           "the transport plane is planned in the air at the edge like any aircraft");
+     SupportAircraft nothing{};nothing.count=1;
+     Check(PlanAirSupport(nothing,supportTarget,observer,&route)==support::Refusal::unsupported,"a spec with no aircraft is refused");}
     // Installation against a private image with the supported native bomber signatures. A restored
     // legacy takeover installs successfully here and mutates these bytes/vtable, failing this check.
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2000000,MEM_RESERVE|MEM_COMMIT,PAGE_EXECUTE_READWRITE));

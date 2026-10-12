@@ -11,6 +11,7 @@ int AircraftPayloadChoice(unsigned char*,const Store*,int,int) noexcept { return
 void ForgetAircraftPayload(const void*) noexcept { if(payloadScenario)++payloadForgets; }
 bool AiGunner(const unsigned char*,const unsigned char*) noexcept { return false; }
 bool NpcDriver(const unsigned char* v) noexcept { return v && SeatCount(v)>0 && SeatRider(SeatAt(const_cast<unsigned char*>(v),0))==Rider::other; }
+bool JetFliesItself(const void*) noexcept { return false; }   // the recovered aircraft are crewed ones, no launched drone
 
 bool ReadRound(const unsigned char*,RoundModel*) noexcept {return false;}
 bool RoundLands(const unsigned char*,const RoundModel&,const float*,const float*,float,float*,float*) noexcept {return false;}
@@ -128,7 +129,6 @@ Jet* FindJet(const unsigned char*) noexcept { MissingRecoveryDependency();return
 void HoldOffGround(Jet&,const float*,float,float,ULONGLONG,float) noexcept { MissingRecoveryDependency(); }
 void Hover(Jet&,const Kind&,const unsigned char*,const float*,const float*,const float*,float,float,float,float,bool) noexcept { MissingRecoveryDependency(); }
 void Thrusters(Jet&,const Kind&,unsigned char*,float,ULONGLONG,float) noexcept { MissingRecoveryDependency(); }
-void DollFrame(int,const unsigned char*,float) noexcept { MissingRecoveryDependency(); }
 bool PlayerLaunchDrone(unsigned char*,const float*,ULONGLONG) noexcept { MissingRecoveryDependency();return false; }
 int RecallDrones(unsigned char*,ULONGLONG) noexcept { MissingRecoveryDependency();return 0; }
 int DronesLeft(const unsigned char*) noexcept { MissingRecoveryDependency();return 0; }

@@ -151,7 +151,7 @@ def build_exe(name: str) -> str:
                 'testhub', 'make_emc', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
                 'cas_pose', 'aircraft_collision', 'support_config', 'support_loadout',
                 'make_sazabi', 'sazabi_model', 'sazabi_arms', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'legacy_assets', 'mdb_legacy', 'cas_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics',
-                'build'):   # every module installer.py imports in a function (selftest release_imports); build is
+                'gamelease', 'build'):   # every module installer.py imports in a function (selftest release_imports); build is
         # autoturret/tools/build.py (--paths above comes before site-packages, where pip's own `build` may be)
         cmd += ['--hidden-import', mod]
     for mod in ('matplotlib', 'pandas', 'tkinter'):  # Pillow builds procedural textures; numpy builds map seams
@@ -162,6 +162,8 @@ def build_exe(name: str) -> str:
     cmd += ['--add-data', f'{recipes}{seps}plugin']
     # the EDF5 campaign's titles and briefings (make_edf5_campaign.TEXT reads them from the bundle when frozen)
     cmd += ['--add-data', f'{os.path.join(ROOT, "edf5campaign", "missions.json")}{seps}edf5campaign']
+    # and EDF5's own thumbnails of those missions (make_edf5_campaign.THUMBS, next to the text)
+    cmd += ['--add-data', f'{os.path.join(ROOT, "edf5campaign", "thumbnails.rab")}{seps}edf5campaign']
     # the earlier games' weapon registries (ported_weapons.DATA is the bundle when frozen)
     # the converted models the EDF5 weapons need (ported_weapons.bundled), so the frozen installer needs no EDF5
     cmd += ['--add-data', f'{os.path.join(ROOT, "edf5port", "assets")}{seps}edf5port/assets']

@@ -198,8 +198,11 @@ SIDE_GUNS: tuple[GunRound, ...] = (CANNON, GATLING)   # src/jet_bay.cpp kSideGun
 GUNSHIP_AIRFRAME = ((0.0, 2.136, 0.0), (25.938, 2.009, 8.078))
 SHELL_STOCK = 'DEMOGUNSHIPFIREE25.SGO'   # the gunship's shells (src/jet_bay.cpp kGunshipSgo), fired as the game has them
 SHELL_HIT = 10.0                         # its hit radius: #7 10 x #8 1
-# The helis the Air Raider's call weapons bring (src/jet.cpp HeliLaunch, tools/call_weapons.py): the stock
-# call-in helis made script-placeable (vcobjects.as_mission_sgo), so RideAi(true) gives them their weapons.
+SHELL_SPEED = 8.0                        # m a frame: #5 (src/gunmuzzle.h kShell, the shell's path off its airframe)
+SHELL_FALL = 0.0                         # #6 AmmoGravityFactor: no fall (its "ballistic" solve is then the straight line)
+# The helis the Air Raider's call weapons and the sea rescue bring (src/jet_spawn.cpp PrepareSupportAircraft,
+# tools/call_weapons.py): the stock call-in helis made script-placeable (vcobjects.as_mission_sgo), so RideAi(true)
+# gives them their weapons.
 HELIS: dict[str, str] = {
     'EDF6VC_HELI_410.SGO': 'VEHICLE410_HELI',
     'EDF6VC_HELI_506.SGO': 'V506_HELI',
@@ -258,7 +261,7 @@ def build(root: str) -> dict[str, bytes]:
         out[f'OBJECT/{name}'] = data
     for model, name in jet_models.ANIMATIONS.items():
         out[f'OBJECT/{name}'] = jet_models.animation(game, model)
-    jet_models.check_nozzles(game)   # the plugin's flames (src/booster.cpp kJetNozzles) on these models' exits
+    # (each model's nozzle bones, the flames' and the arrival smoke's, are checked on its exits by jet_models.build / elevon_archive)
     import primer_fighter_model   # the Primer fighter's own model (not a jet_models recipe)
     arc = primer_fighter_model.build(game)
     primer_fighter_model.check(arc)
@@ -516,8 +519,9 @@ class GunshipMuzzleError(Exception):
 
 
 def check_gunship_muzzle(game: vc.Game) -> None:
-    """Raise GunshipMuzzleError unless the stock bomber401's whole box is GUNSHIP_AIRFRAME and the stock shell's hit radius
-    (#7 x #8) SHELL_HIT: the numbers src/gunmuzzle.h puts the gunship's muzzle off its airframe with."""
+    """Raise GunshipMuzzleError unless the stock bomber401's whole box is GUNSHIP_AIRFRAME, the stock shell's hit radius
+    (#7 x #8) SHELL_HIT and its speed and fall (#5, #6) SHELL_SPEED and SHELL_FALL: the numbers src/gunmuzzle.h puts the
+    gunship's muzzle off its airframe with and follows the shell's path by."""
     import sgo
     box = jet_models.model_box(game, 'bomber401')
     if any(not _same(a, b) for got, want in zip(box, GUNSHIP_AIRFRAME) for a, b in zip(got, want)):
@@ -526,6 +530,9 @@ def check_gunship_muzzle(game: vc.Game) -> None:
     hit = _number(p[7]) * _number(p[8]) if isinstance(p, list) and len(p) == 19 and None not in (_number(p[7]), _number(p[8])) else None
     if hit is None or not _same(hit, SHELL_HIT):
         raise GunshipMuzzleError(f'{SHELL_STOCK} 的命中半径是 {hit}，不是 SHELL_HIT {SHELL_HIT}')
+    flight = (_number(p[5]), _number(p[6])) if isinstance(p, list) and len(p) == 19 else (None, None)
+    if None in flight or not _same(flight[0], SHELL_SPEED) or not _same(flight[1], SHELL_FALL):
+        raise GunshipMuzzleError(f'{SHELL_STOCK} 的弹速 / 重力系数是 {flight}，不是 SHELL_SPEED {SHELL_SPEED} / SHELL_FALL {SHELL_FALL}')
 
 
 class GunRoundError(Exception):

@@ -3,6 +3,7 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
 #include "online_authority.h"
+#include "ownround.h"
 #include <atomic>
 
 namespace crew {
@@ -14,6 +15,9 @@ namespace {
 // bullets' candidate collector (vtable kAddBodySlot, slot 0 addBody kAddBody) leaves out the body of a wingman
 // (kBodyObject: body id -> object) when the bullet's owner (core = collector+kCollectorCore, owner at
 // core+kBulletOwner) is a jet of the same flight; all else is the stock function's (friendly fire stays as it is).
+// A jet's own rounds never hit the jet itself (ownround.h: its object or any of its own body ids), whatever the bullet's
+// "may hit its owner" bit, on which the stock collector's owner test rests (the user, 2026-10-10: 「炮舰机的机炮有可能会
+// 打在自己身上」).
 // The sidecar's passengers' rounds pass through their own bike and its driver (sidecar.cpp SidecarBulletPass) by the
 // same hook: it is installed on its own signatures (InstallBulletPass), not with the jets, whose profile is the heli
 // pilot's.
@@ -34,37 +38,76 @@ bool passOk=false,hooksOk=false;
 // changed by every jet's frame. Not proven to be the same thread, the hook reads only this copy, which the game
 // thread publishes once a frame and whenever an entry comes or goes, under a lock it never holds while reading
 // game memory: no torn entries, no read of the table while a frame rewrites it, no game clock off its thread.
-struct Wingman { const void* vehicle; const void* bombOwner; unsigned flight; bool bombs; };
-struct Flights { int count; Wingman jet[kMaxJets]; };
+// Each entry carries the jet's own body ids (ownround.h: its round never hits any of them).
+struct Flights { int count; ownround::Craft jet[kMaxJets]; };
 Flights flights{};
 SRWLOCK flightsLock=SRWLOCK_INIT;
 std::atomic<int> flown{0};   // flights.count as last published: the hook's quick "no jet out" test
 ULONGLONG publishedFrame=~0ull;
 
-// Whether a round of `owner` is a bomb (or bomblet) of a bomber in `flight`: the stock bombers have no body to
-// hit, ours do, and their bombs leave the bay inside them.
-bool BombOf(const Flights& f,const void* owner,unsigned flight) noexcept {
-    for(int i=0;i<f.count;++i)if(f.jet[i].flight==flight && f.jet[i].bombs && f.jet[i].bombOwner==owner)return true;
-    return false;
+// The body wrappers' ids of jet `v` (game memory: under __try, game thread), into `c`: its flight body (kBody) and every
+// ragdoll part's (kRagdollParts, kRagdollCount, stride kRagdollStride, wrapper +kRagdollBody: body506.cpp AirframeShape,
+// the crash step 0x650119); a wrapper's id at +kWrapperId (0x11B15E0 and 0x108260 read it there). Parts past
+// ownround::kMaxBodies are left out (the V506 ragdoll has 8): the object test still covers them.
+constexpr std::size_t kRagdollParts=0x1398,kRagdollCount=0x13A8,kRagdollStride=0xC0,kRagdollBody=0x50,kWrapperId=0xF0;
+constexpr std::size_t kMaxRagdollParts=64;
+void AddBody(ownround::Craft& c,const unsigned char* wrapper) noexcept {
+    if(!wrapper || c.bodies>=ownround::kMaxBodies || !Readable(wrapper,kWrapperId+4))return;
+    c.body[c.bodies++]=At<std::uint32_t>(wrapper,kWrapperId);
+}
+void OwnBodies(const unsigned char* v,ownround::Craft& c) noexcept {
+    c.bodies=0;
+    __try {
+        if(!Readable(v,kBody+8))return;
+        AddBody(c,At<const unsigned char*>(v,kBody));
+        const auto count=At<std::size_t>(v,kRagdollCount);
+        const auto base=At<const unsigned char*>(v,kRagdollParts);
+        if(!base || count>kMaxRagdollParts)return;
+        for(std::size_t i=0;i<count;++i) {
+            const unsigned char* const part=base+i*kRagdollStride;
+            if(!Readable(part,kRagdollBody+8))break;
+            AddBody(c,At<const unsigned char*>(part,kRagdollBody));
+        }
+    } __except(FaultLog("JET own bodies",GetExceptionInformation())) {}
 }
 
-const Wingman* Find(const Flights& f,const void* v) noexcept {
-    if(!v)return nullptr;
-    for(int i=0;i<f.count;++i)if(f.jet[i].vehicle==v)return &f.jet[i];
-    return nullptr;
-}
-
-// Whether a round of `owner` passes through `target` (a body's object): both of one flight.
+// What the hook kept off, per thread (no counter shared across threads). Own rounds are logged whatever the debug switch
+// (at most every kOwnLogMs, the first at once): a user's log then shows whether a jet's rounds ever came at its own
+// airframe (the user, 2026-10-10: 「炮舰机的机炮有可能会打在自己身上」), and through which body.
+constexpr ULONGLONG kOwnLogMs=5000;
 struct PassLog { ULONGLONG at; unsigned passed,strangers; };
-thread_local PassLog passLog{};   // per thread: no counter shared across threads
-bool Passes(const void* owner,const void* target) noexcept {
+struct OwnLog { ULONGLONG at; unsigned kept,byBody,gunship; const void* jet; std::uint32_t body; };
+thread_local PassLog passLog{};
+thread_local OwnLog ownLog{};
+
+void CountOwn(const ownround::Judged& j,std::uint32_t body) noexcept {
+    ++ownLog.kept;
+    if(j.byBody)++ownLog.byBody;
+    if(j.shooter->gunship)++ownLog.gunship;
+    ownLog.jet=j.shooter->vehicle;ownLog.body=body;
+    const ULONGLONG now=GetTickCount64();
+    if(ownLog.at && now-ownLog.at<kOwnLogMs)return;
+    Log("%s own round kept off its airframe: %u candidate bodies (%u of a gunship, %u by a part's body id only, not its "
+        "object) since the last line; last jet %p body %u",ownLog.gunship ? "GUNSHIP" : "JET",ownLog.kept,ownLog.gunship,
+        ownLog.byBody,ownLog.jet,ownLog.body);
+    ownLog=OwnLog{now,0,0,0,nullptr,0};
+}
+
+// Whether candidate `body` (its object `target`) of a round of `owner` is left out (ownround.h Judge): the jet's own
+// body, or a wingman's.
+bool Passes(const void* owner,const void* target,std::uint32_t body) noexcept {
     AcquireSRWLockShared(&flightsLock);
-    const Wingman* const t=Find(flights,target);
-    const Wingman* const s=t ? Find(flights,owner) : nullptr;
-    const bool pass=t && (s ? s!=t && s->flight==t->flight : owner && BombOf(flights,owner,t->flight));
-    const bool stranger=t && !s && owner && !pass;
+    const ownround::Judged j=ownround::Judge(flights.jet,flights.count,owner,target,body);
+    ownround::Craft shooter{};
+    if(j.shooter)shooter=*j.shooter;
+    const bool stranger=j.verdict==ownround::Verdict::stock && owner && ownround::Find(flights.jet,flights.count,target) &&
+                        !ownround::Find(flights.jet,flights.count,owner);
     ReleaseSRWLockShared(&flightsLock);
-    if(!t)return false;
+    if(j.verdict==ownround::Verdict::own) {
+        CountOwn(ownround::Judged{j.verdict,&shooter,j.byBody},body);
+        return true;
+    }
+    const bool pass=j.verdict==ownround::Verdict::wingman;
     if(pass)++passLog.passed;
     else if(stranger)++passLog.strangers;
     const ULONGLONG now=GetTickCount64();
@@ -75,14 +118,14 @@ bool Passes(const void* owner,const void* target) noexcept {
     return pass;
 }
 
-// The owner of the bullet whose candidate collector this is, and the object of `body` (game memory: under the
-// hook's __try).
+// The owner of the bullet whose candidate collector this is, and the object of `body` (nullptr: it has none; game
+// memory: under the hook's __try). False with no bullet core.
 bool Candidate(void* collector,std::uint32_t body,const void** owner,const void** target) noexcept {
     const auto core=At<const unsigned char*>(collector,kCollectorCore);
     if(!core)return false;
     *owner=At<const void*>(core,kBulletOwner);
     *target=reinterpret_cast<BodyObjectFn>(image+kBodyObject)(body);
-    return *target!=nullptr;
+    return true;
 }
 
 // online_authority.h SparesRide for this candidate: the bullet's owner a player of this machine, the candidate the vehicle
@@ -93,7 +136,7 @@ bool SparesOwnRide(void* collector,std::uint32_t body) noexcept {
     if(!InSession())return false;
     const void* owner=nullptr;
     const void* target=nullptr;
-    if(!Candidate(collector,body,&owner,&target) || !owner)return false;
+    if(!Candidate(collector,body,&owner,&target) || !owner || !target)return false;
     const auto human=static_cast<const unsigned char*>(owner);
     if(!Readable(human,kHumanVehicle+8) || At<const void*>(human,kHumanVehicle)!=target)return false;
     return online::SparesRide(true,IsPlayer(human),target,target);
@@ -119,7 +162,7 @@ void __fastcall AddBodyHook(void* collector,std::uint32_t body) {
         __try {
             const auto core=At<const unsigned char*>(collector,kCollectorCore);
             pass=found && (SidecarBulletPass(owner,target,At<const void*>(core,kBulletOwner+8)) ||
-                (flown.load(std::memory_order_relaxed) && Passes(owner,target)));
+                (flown.load(std::memory_order_relaxed) && Passes(owner,target,body)));
         } __except(FaultLog("SIDECAR pass-through",GetExceptionInformation())) { pass=false; }
     }
     if(!pass)nextAddBody(collector,body);
@@ -134,7 +177,9 @@ void Publish(bool force) noexcept {
     Flights f{};
     for(const auto& j:jets) {
         if(!Flown(j,ms))continue;
-        f.jet[f.count++]=Wingman{j.ref.obj,j.bay.bombOwner,j.flight,j.bay.ifc!=nullptr || ms<j.bay.bombClear};
+        ownround::Craft& c=f.jet[f.count++];
+        c=ownround::Craft{j.ref.obj,j.bay.bombOwner,j.flight,j.bay.ifc!=nullptr || ms<j.bay.bombClear,j.role==Role::gunship,0,{}};
+        OwnBodies(static_cast<const unsigned char*>(j.ref.obj),c);
     }
     AcquireSRWLockExclusive(&flightsLock);
     flights=f;

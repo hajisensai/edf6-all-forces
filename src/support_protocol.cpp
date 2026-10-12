@@ -94,12 +94,37 @@ void Session::ClearTransactions() noexcept {
         if(transactions_[i].token && backend_.hooks.destroy)backend_.hooks.destroy(transactions_[i].token);
         transactions_[i]=Transaction{};
     }
-    nextTransaction_=0;requests_.fill(0);lastRequestAt_.fill(0);nextRequest_=0;
-    replies_.fill(Reply{});localReply_={};
+    nextTransaction_=0;requests_.fill(0);lastRequestAt_.fill(0);nextRequest_=0;rescueAt_.fill(0);
+    replies_.fill(Replies{});localReplies_.fill(Reply{});
 }
 void Session::Stop() noexcept {
     ClearTransactions();running_=false;suspended_=false;epoch_=0;challenge_=0;challenges_.fill(0);peerMissions_.fill(0);peerCaps_.fill(0);
     peerExt_.fill(0);for(auto& b:peerBloom_)b.fill(0);
+    hostCaps_=0;hostCapsKnown_=false;hostRoomBehind_=false;
+}
+std::uint32_t Session::PeersBehind(std::uint32_t* missing) const noexcept {
+    std::uint32_t behind=0,lack=0;
+    for(std::uint32_t i=1;host_ && i<=peers_;++i) {
+        if(!challenges_[i])continue;   // not heard yet
+        const std::uint32_t gap=kFeatures&~Features(peerCaps_[i],peerExt_[i]);
+        if(gap){++behind;lack|=gap;}
+    }
+    if(missing)*missing=lack;
+    return behind;
+}
+std::uint32_t Session::PeersAhead() const noexcept {
+    std::uint32_t ahead=0;
+    // A newer guest: a capability or an extension bit this build does not know (peerExt_ keeps the hello's whole word).
+    for(std::uint32_t i=1;host_ && i<=peers_;++i)if(challenges_[i] && ((peerCaps_[i]&~kCapabilities) || (peerExt_[i]&~kExtensions)))++ahead;
+    return ahead;
+}
+bool Session::RequesterOf(std::uint64_t token,std::uint32_t* peer) const noexcept {
+    if(!token || !peer)return false;
+    for(const auto& t:transactions_)if(t.token==token) {
+        if(t.external || !t.request)return false;
+        *peer=t.requester;return true;
+    }
+    return false;
 }
 bool Session::PeersHave(std::uint32_t caps) const noexcept {
     if(!host_)return true;
@@ -123,7 +148,7 @@ void Session::Suspend() noexcept {
     // copies, including those awaiting finalize: another peer may already have
     // activated them. Only the explicit mission reset may clear that ledger.
     running_=false;suspended_=true;
-    if(localReply_.request && localReply_.status==RequestStatus::accepted)Notice(localReply_.request,RequestStatus::interrupted);
+    for(const auto reply:localReplies_)if(reply.request && reply.status==RequestStatus::accepted)Notice(reply.request,RequestStatus::interrupted);
     for(std::uint32_t i=0;i<kMaxTransactions;++i) {
         auto& t=transactions_[i];
         if(!t.spawned && t.phase!=Phase::empty && t.phase!=Phase::cancelled)Cancel(i+1,false);
@@ -151,7 +176,9 @@ bool Session::Broadcast(Message m) noexcept {
     bool ok=true;for(std::uint32_t i=1;i<=peers_;++i)if(!Send(i,m))ok=false;return ok;
 }
 void Session::Welcome(std::uint32_t peer) noexcept {
-    Message m;m.kind=Kind::welcome;m.challenge=challenges_[peer];m.request=epochSerial_;Send(peer,m);
+    Message m;m.kind=Kind::welcome;m.challenge=challenges_[peer];m.request=epochSerial_;
+    m.catalog=kFeatures;m.ok=PeersBehind(nullptr) ? 1u : 0u;   // this build's features (support_protocol.h kFeatures)
+    Send(peer,m);
 }
 void Session::Cancel(std::uint32_t id,bool broadcast,RequestStatus reason) noexcept {
     if(!id || id>kMaxTransactions)return;
@@ -172,30 +199,43 @@ void Session::Failed(std::uint64_t token,RequestStatus reason) noexcept {
     if(host_)Cancel(id,true,reason);
     else {Cancel(id,false,reason);Message m;m.kind=Kind::result;m.transaction=id;m.index=static_cast<std::uint32_t>(reason);Send(hostPeer_,m);}
 }
-void Session::Notice(std::uint32_t request,RequestStatus status) noexcept {
-    if(!request || request!=nextRequest_)return;
-    if(localReply_.request==request) {
-        if(localReply_.status==status)return;
-        if(localReply_.status>=RequestStatus::refused)return; // terminal rejection never reopens on a late reply
-        if(localReply_.status==RequestStatus::active && status==RequestStatus::accepted)return;
+// The kept status of `request` among `replies` (or the slot it may take: the oldest kept, if older than it), applying
+// the status rules: a terminal one never reopens on a late reply, an active one never goes back to accepted. nullptr:
+// nothing to record (the same status again, a late one, or older than every kept request).
+Session::Reply* Session::Record(Replies& replies,std::uint32_t request,RequestStatus status) noexcept {
+    Reply* oldest=nullptr;
+    for(auto& reply:replies) {
+        if(reply.request==request) {
+            if(reply.status==status || reply.status>=RequestStatus::refused)return nullptr;
+            if(reply.status==RequestStatus::active && status==RequestStatus::accepted)return nullptr;
+            reply.status=status;return &reply;
+        }
+        if(!oldest || reply.request<oldest->request)oldest=&reply;
     }
-    localReply_={request,status,false};
+    if(!oldest || oldest->request>request)return nullptr;
+    *oldest={request,status,false};return oldest;
+}
+void Session::Notice(std::uint32_t request,RequestStatus status) noexcept {
+    // Any of this machine's last kRecentRequests requests: the map's call and the rescue are told apart by their ids.
+    if(!request || request>nextRequest_ || nextRequest_-request>=kRecentRequests)return;
+    if(!Record(localReplies_,request,status))return;
     if(backend_.hooks.notice)backend_.hooks.notice(request,status);
 }
 void Session::ReplyTo(std::uint32_t peer) noexcept {
-    auto& reply=replies_[peer];
-    if(!reply.request)return;
-    Message m;m.kind=Kind::requestStatus;m.request=reply.request;m.index=static_cast<std::uint32_t>(reply.status);
-    reply.dirty=!Send(peer,m);
+    for(auto& reply:replies_[peer]) {
+        if(!reply.request || !reply.dirty)continue;
+        Message m;m.kind=Kind::requestStatus;m.request=reply.request;m.index=static_cast<std::uint32_t>(reply.status);
+        reply.dirty=!Send(peer,m);
+    }
 }
 void Session::Publish(std::uint32_t peer,std::uint32_t request,RequestStatus status) noexcept {
     if(!request)return;
     if(!peer){Notice(request,status);return;}
-    // A newer request has already replaced this UI slot. Its predecessor may
-    // still own actors, but its cancel is not the newer request's outcome.
-    if(replies_[peer].request>request)return;
-    if(replies_[peer].request==request && replies_[peer].status>=RequestStatus::refused)return;
-    replies_[peer]={request,status,true};ReplyTo(peer);
+    // Each of the peer's recent requests keeps its own outcome: a newer request (a rescue after a map call) does not
+    // swallow its predecessor's, and the guest tells them apart by id.
+    Reply* reply=Record(replies_[peer],request,status);
+    if(!reply)return;
+    reply->dirty=true;ReplyTo(peer);
 }
 bool Session::Submit(std::uint32_t catalog,const float* target,std::uint64_t now,std::uint64_t loadout) noexcept {
     if(!target || !Ready() || catalog>=kMissionCrewCatalog || !Point(target) || nextRequest_==UINT32_MAX)return false;
@@ -205,17 +245,36 @@ bool Session::Submit(std::uint32_t catalog,const float* target,std::uint64_t now
     if(host_){const auto before=nextTransaction_;HostRequest(0,m,now);return nextTransaction_!=before;}
     const bool sent=Send(hostPeer_,m);if(!sent)Notice(m.request,RequestStatus::interrupted);return sent;
 }
+bool Session::InFlight(const Transaction& t) const noexcept {
+    return t.phase==Phase::planning || t.phase==Phase::prepared || t.phase==Phase::spawning;
+}
+// Two channels (2026-10-10): the map's (and the mission crew's), one transaction in flight in the whole room and each
+// requester's requests 2 s apart; and, when every peer has kExtRescueChannel, the sea rescue's: one in flight per
+// requester beside anything else, each requester's rescues rescueCooldown_ apart from its last one made. Both draw on
+// the same kMaxTransactions ids and ordinals; a failed one of either rolls back alone (Cancel of its own id).
 void Session::HostRequest(std::uint32_t peer,const Message& m,std::uint64_t now) noexcept {
     if(!m.request || m.catalog>=kMissionCrewCatalog)return;
-    if(m.request<=requests_[peer]) {if(peer && replies_[peer].request==m.request)ReplyTo(peer);return;}
+    if(m.request<=requests_[peer]) {
+        if(peer)for(auto& reply:replies_[peer])if(reply.request==m.request){reply.dirty=true;ReplyTo(peer);}
+        return;
+    }
     requests_[peer]=m.request; // consume even rejected requests; they cannot be replayed later
-    if(!Ready() || (lastRequestAt_[peer] && now-lastRequestAt_[peer]<2000)) {Publish(peer,m.request,RequestStatus::refused);return;}
-    lastRequestAt_[peer]=now;
+    const bool isRescue=backend_.hooks.ownChannel && backend_.hooks.ownChannel(m.catalog);
+    const bool channel=isRescue && PeersHaveExtension(kExtRescueChannel);
+    if(!Ready()) {Publish(peer,m.request,RequestStatus::refused);return;}
+    if(isRescue && rescueAt_[peer] && now-rescueAt_[peer]<rescueCooldown_) {Publish(peer,m.request,RequestStatus::refused);return;}
+    if(!channel) {
+        if(lastRequestAt_[peer] && now-lastRequestAt_[peer]<2000) {Publish(peer,m.request,RequestStatus::refused);return;}
+        lastRequestAt_[peer]=now;
+    }
     if(nextTransaction_>=kMaxTransactions || nextToken_==UINT64_MAX) {Publish(peer,m.request,RequestStatus::refused);return;}
-    for(const auto& t:transactions_)if(t.phase==Phase::planning || t.phase==Phase::prepared || t.phase==Phase::spawning) {
-        Publish(peer,m.request,RequestStatus::refused);return;
+    for(const auto& t:transactions_) {
+        if(!InFlight(t))continue;
+        // The rescue channel: this requester's own rescue in flight blocks it, nothing else. The map's: anything of its own.
+        if(channel ? t.rescue && t.requester==peer : !t.rescue) {Publish(peer,m.request,RequestStatus::refused);return;}
     }
     auto& t=transactions_[nextTransaction_++];t.token=++nextToken_;t.phase=Phase::planning;t.requester=peer;t.request=m.request;t.since=now;
+    t.rescue=channel;
     t.plan.catalogId=m.catalog;std::memcpy(t.plan.target,m.target,sizeof(m.target));t.loadout=m.challenge;
     Publish(peer,m.request,RequestStatus::accepted);
 }
@@ -230,7 +289,7 @@ std::uint64_t Session::SubmitPrepared(const Plan& plan,std::uint64_t now) noexce
                 !std::memcmp(prior.plan.units[j].netId,plan.units[i].netId,32))return 0;
     }
     if(existing!=1)return 0;
-    for(const auto& t:transactions_)if(t.phase==Phase::planning || t.phase==Phase::prepared || t.phase==Phase::spawning)return 0;
+    for(const auto& t:transactions_)if(InFlight(t) && !t.rescue)return 0;
     auto& t=transactions_[nextTransaction_++];t.token=++nextToken_;t.phase=Phase::planning;t.external=true;t.plan=plan;t.since=now;
     return t.token;
 }
@@ -267,6 +326,9 @@ void Session::Advance(std::uint32_t id,std::uint64_t now) noexcept {
     if(t.phase==Phase::spawning) {
         for(std::uint32_t i=0;i<=peers_;++i)if(!t.result[i])return;
         t.phase=Phase::active;t.activated[0]=1;t.since=now;
+        // A rescue made on every machine: its requester's cooldown starts (whichever channel carried it); a cancelled one
+        // starts none.
+        if(!t.external && t.request && backend_.hooks.ownChannel && backend_.hooks.ownChannel(t.plan.catalogId))rescueAt_[t.requester]=now;
         Message m;m.kind=Kind::activate;m.transaction=id;Broadcast(m);
         if(t.request)Publish(t.requester,t.request,RequestStatus::active);
     }
@@ -276,7 +338,8 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
     if(host_ && m.kind==Kind::hello) {
         if(m.request<peerMissions_[peer] || (m.request==peerMissions_[peer] && challenges_[peer]!=m.challenge))return;
         peerMissions_[peer]=m.request;peerCaps_[peer]=m.index;
-        peerExt_[peer]=m.unit.resourceId&kExtensions;std::memcpy(peerBloom_[peer].data(),m.unit.netId,32);
+        // The whole extension word (PeersAhead reads the bits this build does not know) and the variant files' filter.
+        peerExt_[peer]=m.unit.resourceId;std::memcpy(peerBloom_[peer].data(),m.unit.netId,32);
         if(challenges_[peer] && challenges_[peer]!=m.challenge) {
             if(HasSpawned()){Suspend();return;}
             if(epochSerial_==UINT32_MAX){Stop();return;}
@@ -289,6 +352,7 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
     }
     if(!host_ && peer==hostPeer_ && m.kind==Kind::welcome && m.challenge==challenge_ && m.request>=seenEpochSerial_) {
         if(m.request==seenEpochSerial_ && epoch_!=m.epoch)return;
+        hostCaps_=m.catalog;hostRoomBehind_=m.ok!=0;hostCapsKnown_=true;   // the host's kFeatures (0: an older host)
         if(epoch_!=m.epoch){if(HasSpawned()){Suspend();return;}ClearTransactions();epoch_=m.epoch;}
         seenEpochSerial_=m.request;
         return;
@@ -348,12 +412,13 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
 }
 void Session::Tick(std::uint64_t now) noexcept {
     if(!running_)return;
-    if(host_)for(std::uint32_t peer=1;peer<=peers_;++peer)if(replies_[peer].dirty)ReplyTo(peer);
+    if(host_)for(std::uint32_t peer=1;peer<=peers_;++peer)ReplyTo(peer);   // the dirty ones
     // Keep the challenge alive after establishment too: a welcome whose local
     // enqueue failed during another member's mission reset must be recoverable.
     if(!host_ && now-lastHello_>=1000) {
         Message m;m.kind=Kind::hello;m.challenge=challenge_;m.request=missionSerial_;m.index=kCapabilities;
         if(backend_.hooks.variants)backend_.hooks.variants(&m.unit.resourceId,m.unit.netId);
+        m.unit.resourceId|=kExtBuilt;   // the catalog's and the protocol's, announced whatever the variants hook said
         Send(hostPeer_,m);lastHello_=now;
     }
     for(std::uint32_t id=1;id<=kMaxTransactions;++id) {

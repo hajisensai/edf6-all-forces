@@ -429,8 +429,11 @@ unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float distance,bo
             reach=std::fmin(reach,m.speed*static_cast<float>(m.alive));
         }
         if(!std::isfinite(reach) || reach<distance)continue;
+        // No splash dead zone: a vehicle round's blast hurts only what is hostile to its team (the IndirectFireUnit's
+        // +0xD0, docs/carrier-laser-re.md; online_authority.h SparesRide), so the vehicle and its side are never in it.
+        // A 2x-blast veto kept the Titan's main cannon (30 m) silent against everything inside 60 m (2026-10-10).
         const float blast=At<float>(w,0x8B0);
-        if(!std::isfinite(blast) || (blast>0.0f && distance<=blast*2.0f))continue;
+        if(!std::isfinite(blast))continue;
         const StoreSpec* const spec=StoreOf(w);
         const edf::GunRole role=edf::RoleOf(At<std::int32_t>(w,edf::kWeaponMark));   // EDF6AutoTurret's table too
         if(spec && ((airborne && (spec->role==StoreRole::ground || spec->role==StoreRole::bomb || spec->role==StoreRole::rocket)) ||
@@ -438,10 +441,12 @@ unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float distance,bo
         // A catalogued gun round (StoreRole::gun, vcobjects.Shell) is a direct-fire round whatever class carries it: the
         // flak's proximity HE flies the stock grenade class (rounds.cpp calls it lobbed) and is meant for aircraft.
         const bool lobbed=m.lobbed && !(spec && spec->role==StoreRole::gun);
-        if(airborne && (lobbed || role.prefer==edf::Prefer::ground))continue;
-        if(!airborne && role.prefer==edf::Prefer::air)continue;
+        if(airborne && lobbed)continue;   // a lobbed round cannot meet an aircraft
         // Guided fire at long range, direct fire close up, splash against ground targets.
         float rank=m.kind==RoundKind::homing ? (distance>150.0f ? 4.0f : 2.0f) : airborne ? 3.0f : blast>0.0f ? 3.5f : 2.5f;
+        // A gun's preferred side (EDF6AutoTurret's role table) ranks it, never forbids it: the Kepler's flak guns are its
+        // only guns, and a veto against ground targets kept its NPC driver from ever firing (2026-10-10).
+        if((airborne && role.prefer==edf::Prefer::ground) || (!airborne && role.prefer==edf::Prefer::air))rank-=2.0f;
         if(ws[i]==previous)rank+=0.1f;
         if(rank>score){score=rank;best=i;}
     }

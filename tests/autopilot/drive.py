@@ -34,6 +34,9 @@ background"). For measurements, e.g. the big map's memory against the stock test
   python tests/autopilot/drive.py uninstall          remove the plugin, its keys file and its log (game closed)
 
 The game must not be running for install / launch / uninstall (it is the user's: their running game is never touched).
+Every command but mem / shot first waits its turn for the machine's game (pylib/gamelease.py, tools/gamequeue.py):
+another session's run is never installed over or driven. Steps meant as one run (install, launch, key ..., uninstall)
+go under one `python tools/gamequeue.py hold`, with its EDF6_GAME_LEASE set for each step.
 """
 from __future__ import annotations
 
@@ -51,6 +54,7 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 import gamedir  # noqa: E402
+import gamelease  # noqa: E402
 TOOLS = os.path.join(ROOT, 'tools')   # tools/support_config.py (the ini's own editor)
 
 NAME = 'EDF6Autopilot'
@@ -648,7 +652,20 @@ def run_options(argv: list[str]) -> tuple[list[str], dict]:
     return args, options
 
 
+# What touches the game folder or the running game: done holding the machine's game lease (pylib/gamelease.py), so
+# two sessions never install over / drive each other's run. `mem` and `shot` only read.
+LEASED = ('install', 'uninstall', 'launch', 'hide', 'key', 'cmd', 'run')
+
+
 def main(argv: list[str]) -> int:
+    cmd = argv[0] if argv else ''
+    if cmd not in LEASED:
+        return command_main(argv)
+    with gamelease.lease(gamedir.find_or_dev(), 'drive.py ' + ' '.join(argv)):
+        return command_main(argv)
+
+
+def command_main(argv: list[str]) -> int:
     game = gamedir.find_or_dev()
     cmd = argv[0] if argv else ''
     if cmd == 'install':

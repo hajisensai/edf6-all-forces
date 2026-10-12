@@ -275,6 +275,38 @@ void Posts() {
 }
 }  // namespace
 
+// The target (2026-10-10, "一堆npc竟然没有攻击蜜蜂"): the nearest in reach before any out of it, however near; the current one
+// kept over one a little nearer; with none in reach, the nearest of the rest (it closes on it); out of its scope, none.
+void Targets() {
+    using namespace npc;
+    const float eye[3]={0.0f,1.6f,0.0f},anchor[3]={0.0f,0.0f,0.0f};
+    // The log's soldier (reach 150): a flyer 900 m up straight over it, a ground one 140 m off.
+    const float aims[3][3]={{0.0f,900.0f,30.0f},{140.0f,2.0f,0.0f},{400.0f,2.0f,0.0f}};
+    int current=-1;
+    auto aimOf=[&](int i){return aims[i];};
+    auto isCurrent=[&](int i){return i==current;};
+    Check(PickTarget(3,aimOf,isCurrent,eye,anchor,500.0f,150.0f)==1,"the one in reach before the flyer out of it");
+    current=0;
+    Check(PickTarget(3,aimOf,isCurrent,eye,anchor,500.0f,150.0f)==1,"the flyer held out of reach let go for the one in it");
+    Check(PickTarget(1,aimOf,isCurrent,eye,anchor,500.0f,150.0f)==0,"only the flyer: it, out of reach");
+    Check(PickTarget(3,aimOf,isCurrent,eye,anchor,500.0f,0.0f)==1,"reach unknown: the nearest");
+    // Both out of reach: the nearer (the ground one at 400 m before the flyer at 900 m).
+    current=-1;
+    const float far[2][3]={{0.0f,900.0f,30.0f},{400.0f,2.0f,0.0f}};
+    auto farOf=[&](int i){return far[i];};
+    Check(PickTarget(2,farOf,isCurrent,eye,anchor,500.0f,150.0f)==1,"none in reach: the nearest");
+    // Hysteresis among those in reach.
+    const float pair[2][3]={{100.0f,0.0f,0.0f},{0.0f,0.0f,90.0f}};
+    auto pairOf=[&](int i){return pair[i];};
+    current=0;
+    Check(PickTarget(2,pairOf,isCurrent,eye,anchor,500.0f,150.0f)==0,"the current one kept over one 10 m nearer");
+    current=-1;
+    Check(PickTarget(2,pairOf,isCurrent,eye,anchor,500.0f,150.0f)==1,"no current: the nearer");
+    Check(PickTarget(2,pairOf,isCurrent,eye,anchor,50.0f,150.0f)==-1,"out of its scope: none");
+    Check(TargetScore(151.0f,150.0f,true)>TargetScore(149.0f,150.0f,false) &&
+          TargetScore(140.0f,150.0f,false)<TargetScore(160.0f,150.0f,true),"reach outranks the keep");
+}
+
 int main() {
     Intent();
     Lanes();
@@ -285,6 +317,7 @@ int main() {
     Squads();
     Marks();
     Posts();
+    Targets();
     std::printf("npc_ai_check: %d cases, %d failures\n",cases,failures);
     return failures ? 1 : 0;
 }

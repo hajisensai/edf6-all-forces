@@ -197,6 +197,15 @@ bool PlayerMap(MapReadout* o) noexcept { if(hasMap)*o=sceneMap;return hasMap; }
 bool MapOwnsView() noexcept { return hasMap || mapEasing; }
 MapCommandReadout sceneCmd{};
 bool PlayerMapCommands(MapCommandReadout* o) noexcept { if(hasMap)*o=sceneCmd;return hasMap; }
+// The damage statistics (damagestats.cpp): on in every map scene (the map's STATS tab), the page shown in StatsScenes.
+dmgstat::Book sceneBook;dmgstat::View sceneStatsView{};std::uint32_t sceneMissionMs=0;int sceneStatsTargets=0;
+bool DamageStatsRead(dmgstat::Book* b,bool* fresh,dmgstat::View* v,std::uint32_t* ms) noexcept {
+    *fresh=b->serial!=sceneBook.serial;
+    if(*fresh)std::memcpy(b,&sceneBook,sizeof(sceneBook));
+    *v=sceneStatsView;*ms=sceneMissionMs;
+    return true;
+}
+void DamageStatsUi(const float*,const int*,int n,int,int) noexcept { sceneStatsTargets=n; }
 // The NPCs' mark (npcai.cpp): none in these scenes but the ground one (GroundScene sets sceneMark).
 bool sceneMarkOn=false;float sceneMark[3]{};
 bool NpcMarkReadout(float* at) noexcept { if(sceneMarkOn)std::memcpy(at,sceneMark,12);return sceneMarkOn; }
@@ -219,7 +228,19 @@ bool PlayerFormationCue(FormationCue* o) noexcept { if(sceneFormation<0)return f
 // The box sweep banner (npcai.cpp PlayerSweepCue): on in the npc_sweep scenes.
 bool sceneSweepOn=false;SweepCue sceneSweep{};
 bool PlayerSweepCue(SweepCue* o) noexcept { if(sceneSweepOn)*o=sceneSweep;return sceneSweepOn; }
+// The sea rescue's banner (heli.cpp PlayerRescueCue): on in the rescue_banner scene.
+bool sceneRescueOn=false;RescueCue sceneRescue{};
+bool PlayerRescueCue(RescueCue* o) noexcept { if(sceneRescueOn)*o=sceneRescue;return sceneRescueOn; }
+// The room's builds differ (support_net.cpp SupportVersionCue): on in the version_banner scene, under the rescue's line.
+bool sceneVersionOn=false;wchar_t sceneVersion[200]{};
+bool SupportVersionCue(wchar_t* line,std::size_t capacity) noexcept {
+    if(sceneVersionOn)_snwprintf_s(line,capacity,_TRUNCATE,L"%ls",sceneVersion);
+    return sceneVersionOn;
+}
 bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
+// The debug spawn tool's menu (debug_spawn.cpp DebugSpawnReadout): up in the debug_spawn scenes.
+bool sceneDebugSpawnOn=false;DebugSpawnCue sceneDebugSpawn{};
+bool DebugSpawnReadout(DebugSpawnCue* o) noexcept { if(sceneDebugSpawnOn)*o=sceneDebugSpawn;return sceneDebugSpawnOn; }
 void MapCommandView(const float*,float,float) noexcept {}
 // The map's buttons as drawn (hud.cpp MapButtons): the scene's check reads them.
 int sceneButtons=0;float sceneButton[mapbtn::kCount][4]{};int sceneButtonId[mapbtn::kCount]{};
@@ -672,6 +693,93 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     std::fclose(out);out=nullptr;
     hasMap=false;hasMapPayload=false;config.hudScale=previousScale;
     std::printf("%ls\n",path.c_str());
+}
+// The damage statistics' page (hud_stats.inc) on its own scenes: a mission's book as the hook would fill it (my weapons
+// and my vehicle's, a squad's, a support heli, another player; friendly fire, heals on friends and on an enemy, the
+// enemies' attacks, twelve minutes of it), each tab with the pointer on a bar (its tooltip), a bar's breakdown open, the
+// timeline's column picked, at 16:9, 21:9, 4:3 and a narrow split. Each scene: the page's click targets handed over, its
+// tooltip drawn whole, and no two of its lines overlapping (in English; the other languages: none English lacks, Record).
+void StatsBook() {
+    using dmgstat::Group;using dmgstat::Side;
+    dmgstat::Clear(sceneBook);
+    const wchar_t* me=Tr(Tx::statsGroupMe);
+    const wchar_t* allies=Tr(Tx::statsGroupAlly);
+    const wchar_t* others=Tr(Tx::statsGroupTeammate);
+    struct Shot { Side side; const wchar_t* weapon; Group group; const wchar_t* target; float amount; bool heal; int every; };
+    const Shot shots[]={
+        {Side::me,L"AF-99ST",Group::enemy,L"E501_ANT_BLACK",180.0f,false,1},{Side::me,L"AF-99ST",Group::enemy,L"E501_ANT_RED",160.0f,false,2},
+        {Side::me,L"Lysander Z",Group::enemy,L"E520_SPIDER_GIANT",4200.0f,false,9},{Side::me,L"Goliath D2",Group::enemy,L"E501_ANT_RED",2600.0f,false,7},
+        {Side::me,L"Goliath D2",Group::ally,allies,900.0f,false,23},{Side::me,L"Goliath D2",Group::me,me,300.0f,false,31},
+        {Side::myVehicle,L"Blacker A1 120mm Cannon With A Very Long Name",Group::enemy,L"E601_FROG_SOLDIER",3100.0f,false,5},
+        {Side::squad,L"PA-11",Group::enemy,L"E501_ANT_BLACK",95.0f,false,1},{Side::squad,L"PA-11",Group::teammate,others,60.0f,false,17},
+        {Side::support,L"EDF6VC_HELI_GUN",Group::enemy,L"E520_SPIDER_GIANT",520.0f,false,3},
+        {Side::teammate,L"Mirage 15WR",Group::enemy,L"E520_SPIDER_GIANT",330.0f,false,2},
+        {Side::me,L"Life Vendor Gun",Group::me,me,400.0f,true,6},{Side::me,L"Life Vendor Gun",Group::ally,allies,600.0f,true,8},
+        {Side::me,L"Life Vendor Gun",Group::enemy,L"E501_ANT_RED",250.0f,true,13},{Side::enemy,L"E540_QUEEN",Group::enemy,L"E501_ANT_RED",800.0f,true,19},
+        {Side::enemy,L"E501_ANT_RED",Group::me,me,45.0f,false,3},{Side::enemy,L"E501_ANT_RED",Group::ally,allies,40.0f,false,2},
+        {Side::enemy,L"E520_SPIDER_GIANT",Group::myVehicle,Tr(Tx::statsGroupMyVehicle),210.0f,false,5},
+        {Side::enemy,L"E601_FROG_SOLDIER",Group::vehicle,L"APP_VEHICLE_BLACKER",380.0f,false,11},
+    };
+    for(int tick=0;tick<720;++tick)   // a hit a second for twelve minutes, each kind at its own rate
+        for(const Shot& s:shots) {
+            if(tick%s.every)continue;
+            const float wave=1.0f+0.6f*std::sin(static_cast<float>(tick)*0.02f);
+            dmgstat::Add(sceneBook,dmgstat::Hit{s.side,s.weapon,s.group,s.target,s.amount*wave,s.heal,!s.heal && tick%(s.every*4)==0,
+                                                static_cast<std::uint32_t>(tick)*1000u},Tr(Tx::statsOther));
+        }
+    sceneMissionMs=720000u;
+    // A new book each scene (and language): never the serial the draw's last copy holds (damagestats.cpp Reset's rule).
+    static std::uint32_t generation=0;
+    sceneBook.serial+=(++generation)<<20;
+}
+// `pick`: the row whose breakdown is open (a timeline column; -1 none), or `pickName`'s row (a source; a target on the
+// enemies tab) when given.
+int StatsScene(const std::wstring& dir,const wchar_t* name,dmgstat::Tab tab,dmgstat::Scope scope,int pick,float px,float py,int width=1920,
+               const wchar_t* pickName=nullptr) {
+    StatsBook();
+    if(pickName && tab==dmgstat::Tab::enemies){for(int i=0;i<sceneBook.targets;++i)if(dmgstat::SameName(sceneBook.target[i].name,pickName))pick=i;}
+    else if(pickName){for(int i=0;i<sceneBook.sources;++i)if(dmgstat::SameName(sceneBook.source[i].name,pickName))pick=i;}
+    sceneStatsView=dmgstat::View{};
+    sceneStatsView.open=true;sceneStatsView.tab=tab;sceneStatsView.scope=scope;sceneStatsView.pick=pick;
+    sceneMap=MapReadout{};
+    sceneMap.yaw=0.0f;sceneMap.pitch=60.0f*kDeg;sceneMap.height=700.0f;sceneMap.mapKey=0x4D;sceneMap.mapButton=0x20;
+    sceneCmd=MapCommandReadout{};
+    sceneCmd.pointer=px>=0.0f;sceneCmd.px=px;sceneCmd.py=py;
+    hasMap=true;sceneStatsTargets=0;
+    const std::wstring path=dir+L"\\"+name+L".txt";
+    if(_wfopen_s(&out,path.c_str(),L"w") || !out){hasMap=false;return 1;}
+    std::fprintf(out,"W %d 1080\n",width);
+    SetScreen(width,1080);
+    float vp[16];
+    MapCamera(sceneMap,static_cast<float>(width),1080.0f,vp);
+    struct { std::int32_t x,y,w,h; } viewport{0,0,width,1080};
+    Record(name,[&]{HudDraw(vp,image,&viewport,nullptr,0);},width);
+    int failed=0;
+    if(sceneStatsTargets<6){++failed;std::printf("FAIL  %ls: %d click targets handed over\n",name,sceneStatsTargets);}
+    if(hudtext::InUse()==hudtext::Lang::en)
+        for(const auto& p:english[name].overlaps) {
+            ++failed;
+            std::printf("FAIL  %ls: \"%s\" overlaps \"%s\"\n",name,Narrow(english[name].texts[static_cast<std::size_t>(p.second)]).c_str(),
+                        Narrow(english[name].texts[static_cast<std::size_t>(p.first)]).c_str());
+        }
+    std::fclose(out);out=nullptr;
+    hasMap=false;sceneStatsView=dmgstat::View{};
+    std::printf("%ls\n",path.c_str());
+    textFailed+=failed;
+    return failed;
+}
+void StatsScenes(const std::wstring& dir) {
+    using dmgstat::Scope;using dmgstat::Tab;
+    // The rows start 160 px down the page (FrameOf at 1080 lines): the pointer on the second row, on a detail row.
+    StatsScene(dir,L"stats_weapons_hover",Tab::weapons,Scope::mine,-1,700.0f,250.0f);
+    StatsScene(dir,L"stats_weapons_all_detail",Tab::weapons,Scope::everyone,-1,1500.0f,400.0f,1920,L"Goliath D2");
+    StatsScene(dir,L"stats_enemies_detail",Tab::enemies,Scope::everyone,0,300.0f,220.0f);
+    StatsScene(dir,L"stats_taken_hover",Tab::taken,Scope::mine,-1,900.0f,220.0f);
+    StatsScene(dir,L"stats_heals_detail",Tab::heals,Scope::everyone,-1,500.0f,190.0f,1920,L"Life Vendor Gun");
+    StatsScene(dir,L"stats_timeline",Tab::timeline,Scope::everyone,40,600.0f,700.0f);
+    StatsScene(dir,L"stats_weapons_21x9",Tab::weapons,Scope::everyone,0,1200.0f,300.0f,2560);
+    StatsScene(dir,L"stats_weapons_4x3",Tab::weapons,Scope::everyone,0,1100.0f,300.0f,1440);
+    StatsScene(dir,L"stats_timeline_narrow",Tab::timeline,Scope::mine,10,400.0f,600.0f,960);
 }
 void Symbols(PlayerJetSymbols& y,const float* pos,float pitchDeg,float pathDeg) {
     std::memcpy(y.pos,pos,12);
@@ -1577,7 +1685,7 @@ int FullLoadoutScenes(const std::wstring& dir) {
     const Case cases[]={{1920,1080,1},{1440,1080,1.5f},{1024,768,1.5f},{960,1080,2.0f},{1920,1080,3.0f}};
     hasJet=hasHeli=hasWarn=hasStock=hasDrill=hasNix=hasMap=hasEmc=hasProteus=hasSazabi=hasTurret=false;
     hasLauncher=hasHeliSight=hasHighView=hasGunner=false;
-    sceneFormation=-1;sceneSweepOn=false;sceneMarkOn=false;
+    sceneFormation=-1;sceneSweepOn=false;sceneMarkOn=false;sceneRescueOn=false;sceneVersionOn=false;
     for(int heli=0;heli<2;++heli)for(const Case& c:cases) {
         hasStock=true;hasHeli=heli!=0;StockTank(pos);sceneStock.heli=hasHeli;
         sceneStock.arms=kStockArms;sceneStock.selected=0;sceneStock.sight=-1;
@@ -1885,7 +1993,81 @@ int Scenes(const std::wstring& dir) {
         failed+=!(line && apart);
         std::printf("%s  %ls: the sweep line %d, no text overlapping %d\n",line && apart ? "ok  " : "FAIL",name,line,apart);
     }
+    // The sea rescue's banner under both (heli.cpp): why no heli came, the longest line it says.
+    {
+        sceneSweepOn=true;sceneSweep=SweepCue{true,12,7,0x59};sceneRescueOn=true;sceneRescue=RescueCue{};
+        _snwprintf_s(sceneRescue.text,_TRUNCATE,hudtext::Tr(hudtext::Tx::rescueFailed),hudtext::Tr(hudtext::Tx::supportRescueNeedsUpdate),10);
+        sceneRescue.bad=true;
+        Scene(dir,L"rescue_banner",ground);
+        bool line=false,apart=true;
+        for(std::size_t i=0;i<drew.size();++i) {
+            const Drew& p=drew[i];
+            if(p.text==sceneRescue.text)line=line || (p.x0>=0.0f && p.x1<=1920.0f && p.y1<=1080.0f);
+            for(std::size_t k=i+1;k<drew.size();++k) {
+                const Drew& q=drew[k];
+                if(!p.text.empty() && !q.text.empty() && p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1)apart=false;
+            }
+        }
+        failed+=!(line && apart);
+        std::printf("%s  rescue_banner: the rescue line %d, no text overlapping %d\n",line && apart ? "ok  " : "FAIL",line,apart);
+        // The room's builds differ, under it: the longest notice (older guests, every feature named).
+        wchar_t features[160];
+        _snwprintf_s(features,_TRUNCATE,L"%ls%ls%ls%ls%ls%ls%ls",hudtext::Tr(hudtext::Tx::versionFeatRescue),hudtext::Tr(hudtext::Tx::versionListSep),
+                     hudtext::Tr(hudtext::Tx::versionFeatAir),hudtext::Tr(hudtext::Tx::versionListSep),hudtext::Tr(hudtext::Tx::versionFeatLoadout),
+                     hudtext::Tr(hudtext::Tx::versionListSep),hudtext::Tr(hudtext::Tx::versionFeatCommand));
+        wchar_t who[120],what[160];
+        _snwprintf_s(who,_TRUNCATE,hudtext::Tr(hudtext::Tx::versionPeersOlder),2);
+        _snwprintf_s(what,_TRUNCATE,hudtext::Tr(hudtext::Tx::versionUnavailable),features);
+        _snwprintf_s(sceneVersion,_TRUNCATE,L"%ls\n%ls",who,what);
+        sceneVersionOn=true;
+        Scene(dir,L"version_banner",ground);
+        bool shown=false,clear=true;
+        for(std::size_t i=0;i<drew.size();++i) {
+            const Drew& p=drew[i];
+            const bool mine=p.text==who || p.text==what;
+            if(mine && !(p.x0>=0.0f && p.x1<=1920.0f && p.y1<=1080.0f))clear=false;   // every line of it on screen
+            if(p.text==what)shown=true;
+            for(std::size_t k=i+1;k<drew.size();++k) {
+                const Drew& q=drew[k];
+                if(!p.text.empty() && !q.text.empty() && p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1)clear=false;
+            }
+        }
+        failed+=!(shown && clear);
+        std::printf("%s  version_banner: the build line on screen %d, no text overlapping %d\n",shown && clear ? "ok  " : "FAIL",shown,clear);
+        sceneVersionOn=false;sceneRescueOn=false;
+    }
     sceneSweepOn=false;
+    // The debug spawn tool's menu (DebugSpawn=1): the longest category (vehicles, its window scrolled to the middle) and
+    // the enemies with a spawn's result; on the screen and no two texts on each other, the picked row's name drawn.
+    for(int pass=0;pass<2;++pass) {
+        using namespace debugspawn;
+        const Category cat=pass ? Category::enemy : Category::vehicle;
+        sceneDebugSpawnOn=true;
+        sceneDebugSpawn=DebugSpawnCue{};
+        sceneDebugSpawn.open=true;sceneDebugSpawn.category=static_cast<int>(cat);
+        sceneDebugSpawn.count=CountIn(cat);sceneDebugSpawn.pick=pass ? 2 : 8;
+        sceneDebugSpawn.row=RowOf(cat,sceneDebugSpawn.pick);sceneDebugSpawn.ready=pass==0;
+        const int keys[5]={0x77,0x74,0x75,0x76,0x78};
+        std::memcpy(sceneDebugSpawn.keys,keys,sizeof(keys));
+        if(pass){sceneDebugSpawn.status=kDebugSpawnDone;sceneDebugSpawn.statusRow=sceneDebugSpawn.row;}
+        const wchar_t* name=pass ? L"debug_spawn_enemy" : L"debug_spawn_vehicle";
+        Scene(dir,name,ground);
+        bool picked=false,inside=true,apart=true;
+        for(std::size_t i=0;i<drew.size();++i) {
+            const Drew& p=drew[i];
+            if(p.text.empty())continue;
+            if(p.text.find(debugspawn::kEntries[sceneDebugSpawn.row].name)!=std::wstring::npos)picked=true;
+            if(p.x0<0.0f || p.x1>1920.0f || p.y0<0.0f || p.y1>1080.0f)inside=false;
+            for(std::size_t k=i+1;k<drew.size();++k) {
+                const Drew& q=drew[k];
+                if(!q.text.empty() && p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1)apart=false;
+            }
+        }
+        failed+=!(picked && inside && apart);
+        std::printf("%s  %ls: the picked row drawn %d, on the screen %d, no text overlapping %d\n",
+                    picked && inside && apart ? "ok  " : "FAIL",name,picked,inside,apart);
+    }
+    sceneDebugSpawnOn=false;
     sceneFormation=-1;
     sceneMarkOn=false;hasHeli=heliWas;
     std::memcpy(sceneHeli.sym.nose,noseWas,12);
@@ -1901,6 +2083,7 @@ int Scenes(const std::wstring& dir) {
     MapScene(dir,L"map_clickable_payload_4x3",700.0f,60.0f,20.0f,false,9,1440,2.0f,true);
     MapScene(dir,L"map_vehicle_only_controls",700.0f,60.0f,20.0f,false,9,1440,1.5f,true,true);
     MapScene(dir,L"map_online_controls",700.0f,60.0f,20.0f,false,9,1920,1.0f,true,false,true);
+    StatsScenes(dir);
     StockTank(ground);
     failed+=!MapDrawsMapAlone(ground,sceneStock.hull);
     hasStock=false;

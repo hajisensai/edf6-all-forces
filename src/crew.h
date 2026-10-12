@@ -65,6 +65,8 @@ struct Config {
     float rescueBelow=-5.0f;   // ...once they have been below this height (metres) for 1.5 s
     bool boardingGun=true;     // the boarding gun's rounds put the player into the friendly vehicle they hit (boarding.cpp)
     bool rescueAutoBoard=true; // ...and, in the stock board reach of a free door seat, boards them by the stock board path
+    DWORD seaRescueCooldownSec=30;   // a player's rescues stand this far apart (from the last heli made for them); the
+                                     // host's value decides online; the map's support cooldown has nothing to do with it
     float subHullHp=100000.0f; // a submarine carrier's hull HP at the base tier (its SGO's is 30000), times its tier (25 at the highest); 0 = the game's
     float subHeavyHit=1500.0f; // a hit on its hull (no deck part) counts only from a heavy source, or from this much
                                // damage in one hit (0 = only the listed heavy sources, subcarrier.cpp kHeavy)
@@ -122,8 +124,13 @@ struct Config {
     int sazabiLockButton=0x80;      // ...and pad button (the seat's button bits, docs/stores-re.md §4: 0x80 R3; 0 none)
     int sazabiDashKey=0x10;         // ...on the keyboard: the dash (VK_SHIFT; a pad's is A)
     int sazabiDescendKey=0x11;      // ...on the keyboard: down faster in the air (VK_CONTROL)
-    int sazabiSwitchKey=0x52;       // the special the secondary fires: shield missiles, funnels, cannon (R; a pad's LB)
-    int sazabiSwitchButton=0x10;
+    // the specials each on their own key, usable together (the user, 2026-10-09: 「这几个浮游炮之类的应该能一块使用吧」): the
+    // secondary fires the shield missiles; the funnels (R; a pad's LB: what the old SazabiSwitchKey cycled with, read as
+    // its default) and the chest cannon (held: charged, let go: fired; E; a pad's B)
+    int sazabiFunnelKey=0x52;
+    int sazabiFunnelButton=0x10;
+    int sazabiCannonKey=0x45;
+    int sazabiCannonButton=0x02;
     int sazabiMeleeKey=0x56;        // the beam tomahawk swung (V; a pad's X)
     int sazabiMeleeButton=0x04;
     int sazabiGuardKey=0x42;        // held: the shield up (B; a pad's RB)
@@ -213,6 +220,17 @@ struct Config {
     int mapKey=0x4D;                // ...its key ('M'; a Windows virtual-key code, 0: none)
     int mapButton=0x20;             // ...and pad button (XInput button bits: 0x20 Back / View; 0 none)
     float mapViewDistance=6000.0f;  // ...the near camera's far clip while it is open, m (view.cpp; 0: as it is)
+    bool damageStats=true;          // the damage statistics (damagestats.cpp): every hit booked, its page over the map
+    int damageStatsKey=0x49;        // ...the page's key ('I': the map opened on it; a Windows virtual-key code, 0: none)
+    // The debug spawn tool (debug_spawn.cpp): OFF by default. Off: nothing preloaded, no key read, nothing drawn.
+    bool debugSpawn=false;
+    int debugSpawnKey=0x77;         // ...its menu opened / shut (F8; Windows virtual-key codes, 0: none)
+    int debugSpawnPrevKey=0x74;     // ...the row before (F5)
+    int debugSpawnNextKey=0x75;     // ...the row after (F6)
+    int debugSpawnCategoryKey=0x76; // ...the next category (F7)
+    int debugSpawnSpawnKey=0x78;    // ...spawn the row picked (F9)
+    float debugSpawnRange=500.0f;   // ...the crosshair's ground point counts within this, m
+    float debugSpawnDistance=30.0f; // ...else (sky, too far, at the player's feet) this far ahead of the player, m
     bool stockStores=true;          // the stock vehicles' requests carry the stores they should (the installer,
                                     // tools/make_stock_stores.py) and the switch goes round them (payload.cpp)
     bool seatSwitch=true;           // the player moves to another seat of the vehicle they are in (seatswitch.cpp)
@@ -394,6 +412,17 @@ constexpr float kEdgeBuffer=800.0f;
 inline float WorldHalf() noexcept;
 inline float PlayEdge() noexcept { return Cfg().bigWorld>3000.0f ? Cfg().bigWorld-kBigWorldMargin : 3000.0f-kStockEdgeIn; }
 inline float WorldHalf() noexcept { return Cfg().bigWorld>3000.0f ? Cfg().bigWorld : 3000.0f; }    // bigworld.cpp: once a mission, the map's ground on a grid (log)
+// m: the Havok world's half size in fact (bigworld.cpp): ini BigWorld only once its bounds were patched in, else the
+// stock 3000 (WorldHalf takes the ini at its word).
+float HavokHalf() noexcept;
+// m: the square the support arrivals are made and fly their passes in (support_entry.h Reach::half): kArrivalRoom inside
+// both the Havok world (a body past it is no longer simulated) and the jets' deletion (jet.cpp kWorldGoneIn of WorldHalf).
+constexpr float kArrivalRoom=300.0f;
+inline float ArrivalHalf() noexcept { const float h=HavokHalf(),w=WorldHalf();return (h<w ? h : w)-kArrivalRoom; }
+// m: how far the near camera draws (view.cpp: the mission's FarClipZ, 1000 m in every mission, raised to ini
+// ViewDistance); past it only what has the far-render bit is drawn (jet_spawn.cpp FarRender).
+constexpr float kStockFarClip=1000.0f;
+inline float NearDrawDistance() noexcept { return Cfg().viewDistance>kStockFarClip ? Cfg().viewDistance : kStockFarClip; }
 // The camera's view-projection (row vectors, the HUD's) as of the last frame drawn; false before one (hud.cpp).
 bool LastViewProj(float* out) noexcept;
 // The camera's eye and its unit look through the screen's centre, from LastViewProj (hud.cpp); false: no camera yet.
@@ -516,7 +545,8 @@ void ResetPlayer() noexcept;
 bool IsJet(const void* vehicle) noexcept;          // a 506 body from an edf6tr_jet_* SGO
 bool IsPrimerVehicle(const void* vehicle) noexcept;// ...a Primer creature's (an enemy: primer.cpp)
 bool JetInLine(const float* from,const float* to,const void* self) noexcept;   // a wingman in the way (no pass-through)
-void JetFrame(unsigned char* vehicle) noexcept;    // from HeliFrame, NPC-crewed jets only
+void JetFrame(unsigned char* vehicle) noexcept;    // from HeliFrame: NPC-crewed jets, and the plugin's launched drones
+bool JetFliesItself(const void* vehicle) noexcept; // one of the plugin's launched drones: flown with its seats empty (jet_internal.h Unmanned)
 void JetReap(const void* self) noexcept;           // deletes withdrawn jets; call from another object's update
 bool InstallJets() noexcept;
 // jet_hooks.cpp: the bullets' candidate hook (a jet's rounds through its wingmen, a passenger's through their own
@@ -530,12 +560,12 @@ bool ShieldLetsThrough(void* collector,std::uint32_t body) noexcept;
 // shield.cpp: a fast vehicle's velocity (m/s) kept from crossing a hostile shield's face; the speed it lost
 float ShieldBlock(const unsigned char* vehicle,float* vel) noexcept;
 void ShieldVehicle(unsigned char* vehicle) noexcept;   // shield.cpp: the same for a vehicle with no plugin body
-void CarrierFlames(const unsigned char* v,unsigned char* const* recs,float intensity,ULONGLONG ms) noexcept;
-// booster.cpp: a jet's exhaust flames on its nozzles (by its mark), burning `intensity` (0..1), `burner` longer.
+// booster.cpp: an aircraft's exhaust flames on its model's nozzles (exhaust_nozzles.h: a jet's exits, the carrier's four
+// pods), burning `intensity` (0..1), `burner` longer.
 void JetFlames(const unsigned char* v,float intensity,bool burner,ULONGLONG ms) noexcept;
 // booster.cpp: flames on nozzles placed in the world (+z out of each, rows unit), `size[i]` (length, width m) and `level[i]` (0 out .. 1) each; at most 10.
 void NozzleFlames(const unsigned char* v,const float (*m)[16],int n,const float (*size)[2],const float* level,ULONGLONG ms) noexcept;
-void JetSmoke(const unsigned char* v,bool on,ULONGLONG ms) noexcept;   // booster.cpp: an arriving jet's smoke trails
+void JetSmoke(const unsigned char* v,bool on,ULONGLONG ms) noexcept;   // booster.cpp: an arriving aircraft's smoke trails (its flames' nozzles)
 bool JetMotionProps(void* body) noexcept;          // a jet body's own motion properties (no 200 m/s cap); each physics step
 void PreloadJets() noexcept;                       // from the mission's player preload
 // A jet made at run time at `from`, flying along `heading` to work round `target`; false when it cannot
@@ -564,15 +594,18 @@ unsigned char* JetLaunchThrown(ThrownDrone what,const float* at,const float* hea
 // Whether jet.cpp still flies `vehicle` (the object with weak-this control block `ctrl`), alive and not
 // withdrawing.
 bool JetFlying(const void* vehicle,const void* ctrl) noexcept;
-// jet.cpp: the paratroop plane (transport.cpp): on to `at` attacking nothing (a ferry); sent off now (withdrawn: deleted out
-// of sight, its crew by support_dispatch.cpp Retire). False when the plugin does not fly `vehicle`.
-bool JetFerry(const void* vehicle,const float* at) noexcept;
+// jet.cpp: the paratroop plane (transport.cpp): passes over `at` along the straight line through it along `heading`, ends off
+// the map, attacking nothing (a ferry; ferry_line.h); JetFerryDone: its stick is out, on to the end of the pass and deleted
+// there (its crew by support_dispatch.cpp Retire); sent off now (withdrawn: deleted out of sight). False when the plugin
+// does not fly `vehicle` (JetFerry: or no line with room to turn off the map at both ends; JetFerryDone: no ferry).
+bool JetFerry(const void* vehicle,const float* at,const float* heading) noexcept;
+bool JetFerryDone(const void* vehicle) noexcept;
 bool JetWithdrawNow(const void* vehicle,const char* why) noexcept;
-// A helicopter made at run time (EDF6VC_HELI_410 / _506.SGO, tools/make_jets.py) at `from` facing `heading`,
-// friend, NPC pilot: the vehicle, or nullptr (not preloaded this mission, the game failed to build it).
+// The plugin's helicopter bodies (EDF6VC_HELI_410 / _506 / _MEDIC / _TRANSPORT.SGO, tools/make_jets.py). Every one of them
+// is made by the support deployment (support_aircraft.h PrepareSupportAircraft): in the air with its real crew seated at
+// once; the sea rescue too (support_call.h SupportRescueAt). Nothing makes one with an empty or dummy seat.
 enum class HeliBody { brute410, eros506, medic410, transport410 };   // medic410: EDF6VC_HELI_MEDIC (heli.cpp Medic); transport410:
                                                                       // EDF6VC_HELI_TRANSPORT (transport.cpp)
-unsigned char* HeliLaunch(HeliBody body,const float* from,const float* heading) noexcept;
 // A bomber's payload: BombingPlane_Init's arguments (0x5AABB0; speed in metres a frame), which a jet's bomb
 // bay is set up from.
 struct BombLoad { const void* owner; float damage,spread,speed,adjust,reach; const void* param; std::int32_t seed; };
@@ -631,7 +664,8 @@ struct SazabiCue {
     float climb;             // m/s up (+) / down (-)
     bool boosting;           // the thrusters burning (a boost dash, a climb)
     bool overheat;           // the thrusters spent: no boost until it lands and they cool
-    int special;             // the secondary's weapon: 0 shield missiles, 1 funnels, 2 mega particle cannon
+    int special;             // the special used last: 0 shield missiles, 1 funnels, 2 mega particle cannon
+    bool keys;               // the pilot on the keyboard and mouse (else a pad): which bindings the HUD names
     float aimRange;          // m from the muzzle to the aim point
     bool aimHit;             // the centre's ray meets something within the reticle's reach (else the aim is its far end)
     bool centred;            // the camera is the Sazabi's own (sazabi.cpp): the aim point is the screen's centre
@@ -1046,6 +1080,27 @@ bool InstallPlayerJets() noexcept;                      // after InstallSub (it 
 // The local player's human (plugin.cpp, from SeePlayer): the object, or nullptr when not seen for
 // kPlayerHumanMs or no longer the same live player object.
 unsigned char* PlayerHuman() noexcept;
+
+// debug_spawn.cpp (ini DebugSpawn, off by default; src/debug_spawn.h): spawn vehicles, the plugin's aircraft, enemies and
+// friendly soldiers out of thin air where the crosshair points. No hook of its own: PreloadDebugSpawn from the mission's
+// start (mission.cpp), DebugSpawnFrame from the player's frame (map.cpp MapHumanFrame, crew.cpp FrameTick; once a game
+// frame whichever comes first), the menu drawn from the HUD pass (hud.cpp) through DebugSpawnReadout.
+void PreloadDebugSpawn() noexcept;
+void DebugSpawnFrame(unsigned char* human) noexcept;
+struct DebugSpawnCue {
+    bool open;                // the menu is up
+    int category;             // debugspawn::Category shown
+    int row;                  // kEntries index picked (-1 none)
+    int pick,count;           // its place in the category, of how many
+    bool ready;               // the row can be spawned now (preloaded / its module up)
+    int status;               // the last spawn's result, for a moment: DebugSpawnStatus (none: nothing to say)
+    int statusRow;            // ...whose (kEntries index)
+    wchar_t note[96];         // ...a support call's own answer (support_dispatch.cpp SupportCallAt), else empty
+    int keys[5];              // the ini's keys: toggle, prev, next, category, spawn
+};
+enum DebugSpawnStatus : int { kDebugSpawnNone, kDebugSpawnDone, kDebugSpawnFailed, kDebugSpawnOnline, kDebugSpawnNoPlace,
+                                   kDebugSpawnRequested, kDebugSpawnRefused };
+bool DebugSpawnReadout(DebugSpawnCue* out) noexcept;   // any thread; false: nothing to show
 }  // namespace crew
 
 // The core modules' declarations (self-contained; every file that includes crew.h sees them as before).
@@ -1058,6 +1113,7 @@ unsigned char* PlayerHuman() noexcept;
 #include "mapbounds.h"
 #include "payload.h"
 #include "map.h"
+#include "damagestats.h"
 #include "mapcmd.h"
 #include "proteus.h"
 #include "npcai.h"

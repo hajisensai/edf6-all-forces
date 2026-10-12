@@ -228,6 +228,7 @@ constexpr SzSound kSzSfx[static_cast<int>(SzSfx::count)]={
     {SzGroup::move,0.85f,30.0f,1.0f,0.04f},     // footstep
     {SzGroup::move,1.0f,30.0f,1.0f,0.0f},       // land
     {SzGroup::move,0.8f,20.0f,1.0f,0.03f},      // dash
+    {SzGroup::gun,0.85f,20.0f,1.0f,0.06f},      // shieldBlock
 };
 constexpr SzSound kSzLoop[static_cast<int>(SzLoop::count)]={
     {SzGroup::move,0.7f,20.0f,1.0f,0.0f},       // thrusters

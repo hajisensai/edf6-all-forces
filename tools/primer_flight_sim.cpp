@@ -81,7 +81,6 @@ void Publish(bool) noexcept {}
 void HoldRef(const ObjRef&) noexcept {}   // the bodies live as long as the run: no weak references to count
 void DropRef(const ObjRef&) noexcept {}
 }  // namespace jet
-void CarrierFlames(const unsigned char*,unsigned char* const*,float,ULONGLONG) noexcept {}
 void JetFlames(const unsigned char*,float,bool,ULONGLONG) noexcept {}
 // The stand-in world has no smoke emitters or deployable landing gear.
 void JetSmoke(const unsigned char*,bool,ULONGLONG) noexcept {}

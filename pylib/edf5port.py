@@ -22,6 +22,7 @@ they rebalanced.
 """
 from __future__ import annotations
 
+import collections
 import copy
 import struct
 
@@ -138,6 +139,141 @@ def weapon41(members: dict[str, object], names: dict[str, str]) -> dsgo.Document
         if key not in doc.root.names.values():
             doc.root.set(key, Node(list(value)))
     return doc
+
+
+# How a weapon is held, a property of its model and of the soldier's animations, not of its numbers: the hand it is
+# in, the soldier's animations for holding, aiming, switching to, reloading and recoiling (custom_parameter[0]).
+HOLD = ('ModelConstraint', 'BaseAnimation', 'AimAnimation', 'ChangeAnimation', 'ReloadAnimation', 'custom_parameter')
+HOLD_NAMES = ('BaseAnimation', 'AimAnimation', 'ChangeAnimation', 'ReloadAnimation', 'custom_parameter')
+
+
+def _first_text(v: object) -> str | None:
+    if isinstance(v, str):
+        return v
+    if isinstance(v, Node) and v.items and isinstance(v.items[0], str):
+        return v.items[0]
+    return None
+
+
+def _key(v: object) -> object:
+    if isinstance(v, Node):
+        return tuple(_key(x) for x in v.items)
+    if isinstance(v, Blob):
+        return v.data
+    return v
+
+
+def _hold_field(r: Node, f: str, theirs: dsgo.Value) -> None:
+    """Takes `theirs` for HOLD field `f` of the weapon `r`; of custom_parameter only its animation, element 0 of the
+    list form (a Weapon_BasicShoot's [recoil animation, ...]: the rest, and a Weapon_Sub's named form, the call it makes,
+    are the weapon's own)."""
+    if f != 'custom_parameter':
+        r.set(f, copy.deepcopy(theirs))
+        return
+    ours = r.get(f)
+    if _first_text(ours) is not None and _first_text(theirs) is not None and not ours.names and not theirs.names:
+        ours.items[0] = theirs.items[0]
+
+
+def hold_as(doc: dsgo.Document, peers: list[Node], template: Node, known: dict[str, set[str]]) -> None:
+    """Hold the weapon `doc` as EDF6 holds its own (user 2026-10-10: a 4.1 weapon's hands look wrong in EDF6).
+    EDF6 re-made the models it shares with 4.1 / EDF5 and their soldiers' animations: the developers' own weapons on a
+    model name the hand, the holding animations and the MAB block (its muzzles, grips and IK, re-placed: 149 of the
+    4.1 ports differ from a developer block on their model in the locator positions alone, by 1.5 on the median) the
+    re-made model goes with; 4.1's name animations EDF6's soldiers do not have (assault2, bag_*, throw_recoil2 / 3) and
+    put 16 weapons in the right hand EDF6 holds them in the left.
+      `peers` EDF6's weapons on this weapon's model; those of its class give the HOLD fields (the set most of them
+              have), any whose locators include all of this weapon's give the MAB block (the most common such).
+      without a peer of its class, a HOLD name no EDF6 weapon uses (`known`: per HOLD_NAMES field, the names EDF6's
+              weapons use) takes `template`'s (the EDF6 weapon the port's row is built on, of its category).
+    Nothing that is the weapon's own numbers (damage, rate, ammo, range ...) changes."""
+    r = doc.root
+    cls = r.get('xgs_scene_object_class')
+    alike = [p for p in peers if p.get('xgs_scene_object_class') == cls]
+    if alike:
+        sets = collections.Counter(tuple(_key(p.get(f)) if f in p.names.values() else None for f in HOLD) for p in alike)
+        best = sets.most_common(1)[0][0]
+        donor = next(p for p in alike if tuple(_key(p.get(f)) if f in p.names.values() else None for f in HOLD) == best)
+        for f in HOLD:
+            if f in donor.names.values():
+                _hold_field(r, f, donor.get(f))
+    else:
+        for f in HOLD_NAMES:
+            if f in r.names.values() and _first_text(r.get(f)) not in known.get(f, set()) and f in template.names.values():
+                _hold_field(r, f, template.get(f))
+    if 'animation_model' not in r.names.values():
+        return
+    am = r.get('animation_model')
+    block = am.items[2] if isinstance(am, Node) and len(am.items) > 2 else None
+    if not isinstance(block, Blob):
+        return
+    try:
+        ours = {loc for loc, _node in mab_legacy.mab_locator_nodes(block.data)}
+    except (ValueError, struct.error):
+        return   # fit_locators refuses it
+    blocks = collections.Counter()
+    for p in peers:
+        theirs = p.get('animation_model').items[2]
+        try:
+            if ours <= {loc for loc, _node in mab_legacy.mab_locator_nodes(theirs.data)}:
+                blocks[theirs.data] += 1
+        except (ValueError, struct.error, AttributeError):
+            continue
+    if blocks:
+        am.items[2] = Blob(blocks.most_common(1)[0][0], block.kind)
+
+
+def fit_locators(doc: dsgo.Document, bones: list[tuple[str, int]], prefer: dict[str, str] | None = None) -> None:
+    """Hang every locator of the weapon's MAB block (animation_model[2]: the muzzles of list 0, the grips and the rest
+    of the other lists) on a bone its EDF6 model has; `bones` is that model's (name, parent) list.
+    EDF.dll skips a muzzle whose node the model lacks and then takes every shot's muzzle as (shots % muzzles found):
+    none found, the first shot divides by zero (0x69AA20, Weapon_BasicShoot's family; the crash 2026-10-10 on firing a
+    4.1 Wing Diver weapon). EDF6 re-exported many models EDF4.1 / EDF5 share with it, the root bone 'mdl' renamed
+    after the model (p_lazer_LAZR01: 4.1 ['mdl', 'p_lazer_LAZR01'], EDF6 ['p_lazer_LAZR01', 'polymesh']); the
+    developers' own ports of those weapons hang every locator that was on it on the new root and change nothing else
+    in the block (tools/selftest.py ported_weapon_locators_fit). So does this: a missing node becomes the node EDF6's
+    own weapons on that model give a locator of that name (`prefer`: {record name: node}; the Hercules sniper's
+    s_sniper_hercules01, a sibling of body in 4.1, is 'body' in all five of EDF6's), else the model's one root.
+    Every locator of every EDF6 weapon names a bone of its model, and each model has one root (2026-10-10, every
+    weapon file of Root.cpk). Unsupported when the block is not a MAB mab_legacy reads, has no muzzle, or a node is
+    missing and neither a preferred bone nor a single root takes it."""
+    if 'animation_model' not in doc.root.names.values():
+        return
+    am = doc.root.get('animation_model')
+    block = am.items[2] if isinstance(am, Node) and len(am.items) > 2 else None
+    if not isinstance(block, Blob) or block.data[:4] != b'MAB\0':
+        raise Unsupported('animation_model has no MAB block')
+    b = block.data
+    try:
+        mab_legacy.mab_layout(b)   # every offset and string checked before one is followed
+    except (ValueError, struct.error) as e:
+        raise Unsupported(f'MAB block: {e}') from e
+    nlists = struct.unpack_from('<H', b, 0x0C)[0]
+    head, records_end = struct.unpack_from('<II', b, 0x14)
+    if not nlists or not struct.unpack_from('<H', b, head + 2)[0]:
+        raise Unsupported('the MAB block has no muzzle')
+    names = {name for name, _parent in bones}
+    records = range(head + 8 * nlists, records_end, mab_legacy.RECORD)
+    text = {r: (mab_legacy._text_at(b, r + struct.unpack_from('<i', b, r)[0]),
+                mab_legacy._text_at(b, r + struct.unpack_from('<i', b, r + 4)[0])) for r in records}
+    missing = [r for r, (_name, node) in text.items() if node not in names]
+    if not missing:
+        return
+    roots = [name for name, parent in bones if parent == -1]
+    moved: dict[int, str] = {}
+    for r in missing:
+        want = (prefer or {}).get(text[r][0])
+        if want in names:
+            moved[r + 4] = want
+        elif len(roots) == 1:
+            moved[r + 4] = roots[0]
+        else:
+            raise Unsupported(f'locator {text[r][0]!r} on {text[r][1]!r}, not in the model, which has no '
+                              f'preferred bone for it and {len(roots)} root bones')
+    try:
+        am.items[2] = Blob(mab_legacy.mab_set_strings(b, moved), block.kind)
+    except (ValueError, struct.error) as e:   # a layout mab_legacy refuses: this weapon stays out
+        raise Unsupported(f'MAB block: {e}') from e
 
 
 def _curve_field(value: object, at: int | None) -> dsgo.Value:

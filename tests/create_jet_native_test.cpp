@@ -29,12 +29,14 @@ bool HeliLeft(const void*) noexcept {UnexpectedWorldCall();}
 bool ProteusReady() noexcept {UnexpectedWorldCall();}
 bool NpcDriver(const unsigned char*) noexcept {UnexpectedWorldCall();}
 bool SeatNpcRider(unsigned char*,bool) noexcept {UnexpectedWorldCall();}
+bool OnlineMaySeatNpc(const void*) noexcept {UnexpectedWorldCall();}
 void NoteLocalCopy(const void*,const void*) noexcept {UnexpectedWorldCall();}
 bool FixBodyPart506(unsigned char*,const char*) noexcept {UnexpectedWorldCall();}
 int FaultLog(const char*,const EXCEPTION_POINTERS*) noexcept {UnexpectedWorldCall();}
 bool PrepareNpcVehicle(unsigned char*,bool) noexcept {UnexpectedWorldCall();}
 namespace jet {
 Jet jets[kMaxJets]{};
+float FerryTurn(const Kind&) noexcept {UnexpectedWorldCall();}
 bool Alive(const ObjRef&) noexcept {UnexpectedWorldCall();}
 Jet* FindJet(const unsigned char*) noexcept {UnexpectedWorldCall();}
 Jet* NewEntry(unsigned char*,ULONGLONG) noexcept {UnexpectedWorldCall();}
