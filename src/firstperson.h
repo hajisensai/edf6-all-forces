@@ -11,9 +11,9 @@ bool FirstPersonOn() noexcept;        // game thread: the local player's camera 
 // (its information goes on the cockpit's panels instead; the user, 2026-10-13: "关，信息全上面板").
 bool FirstPersonHidesStockHud(const void* camera) noexcept;
 
-// fp_vehicle.cpp (game thread): the eye of `human`'s seat in the vehicle they ride (world, into `eye`). `out`: the
-// vehicle, the seat, the name the station table knows it by, whether a station placed the eye (else the rider's head).
-// False: on foot, or the vehicle or seat cannot be read.
+// fp_vehicle.cpp (game thread): the eye of `human`'s seat in the vehicle they ride (world, into `eye`): the model's
+// `vc_eye_<seat>` marker, put there with the seat's cockpit. `out`: the vehicle, the seat, its class name, whether the
+// marker was found. False: on foot, the vehicle or seat cannot be read, or the seat has no cockpit (no marker).
 struct RideView { unsigned char* vehicle; int seat; const char* name; bool station; };
 bool VehicleEye(unsigned char* human,float* eye,RideView* out) noexcept;
 }  // namespace crew

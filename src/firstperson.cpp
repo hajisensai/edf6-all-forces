@@ -187,7 +187,7 @@ struct State {
     float axis[2][3];
     bool onOther[2];            // a free hand drawn on the other hand's weapon, whose bounds after T are otherBox
     M4 otherBox[2];
-    bool riding;                // in a vehicle: the eye at the seat's station, the rider not drawn (Ride)
+    bool riding;                // in a vehicle: the eye at the seat's cockpit, the rider not drawn (Ride)
     RideView ride;
 };
 // The weapon models taken out of their batch, with the batch to give back.
@@ -720,18 +720,18 @@ void Watch(const unsigned char* h) noexcept {
 // The soldier this camera follows (+0x360, the SoldierBase cast of its target: null for a vehicle) when it is this
 // machine's player (measured: PlayerHuman, fed by the board prompt's walk and stale after 2 s, dropped the view out
 // of first person mid-mission with no vehicle near).
-// In a vehicle (camera step, after the stock one): the eye at the seat's station (fp_vehicle.cpp), the rider not drawn:
+// In a vehicle (camera step, after the stock one): the eye at the seat's cockpit (fp_vehicle.cpp), the rider not drawn:
 // both hands' T the identity and neither arm shown, so every bone of the body collapses onto the eye in the colour
 // passes (they still count as drawn: its secondary physics keep running, fp-render-re.md §3) and its shadow stays.
 // The game puts the rider's own weapons away; the near clip and the look smoothing are the stock ones in a vehicle.
-// False: no eye (the stock camera then).
+// False: no eye (no cockpit in this seat: the stock camera then).
 bool Ride(unsigned char* cam,unsigned char* h) noexcept {
     float eye[3];
     RideView ride{};
     if(!VehicleEye(h,eye,&ride))return false;
     if(!st.riding || st.ride.vehicle!=ride.vehicle || st.ride.seat!=ride.seat)
-        Log("FP in a vehicle: %s %p seat %d, eye %s (%.2f %.2f %.2f)",ride.name ? ride.name : "?",static_cast<void*>(ride.vehicle),
-            ride.seat,ride.station ? "at its station" : "at the rider's head",eye[0],eye[1],eye[2]);
+        Log("FP in a vehicle: %s %p seat %d, eye at its cockpit (%.2f %.2f %.2f)",ride.name ? ride.name : "?",
+            static_cast<void*>(ride.vehicle),ride.seat,eye[0],eye[1],eye[2]);
     st.riding=true;st.ride=ride;
     std::memcpy(cam+kCamEyeRow,eye,12);
     if(st.nearSet){Put<float>(cam,kCamNear,st.savedNear);st.nearSet=false;}
