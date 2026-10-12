@@ -9,6 +9,7 @@
 #include "loadout_store.h"
 #include "support_variants.h"
 #include <Windows.h>
+#include <cstddef>
 #include <cwchar>
 #include <iterator>
 
@@ -37,8 +38,9 @@ const EDF6CoopMemberAttributeApi* Api() noexcept {
     const auto get=coop ? reinterpret_cast<EDF6CoopGetMemberAttributeApiFn>(GetProcAddress(coop,"EDF6CoopGetMemberAttributeApi")) : nullptr;
     const EDF6CoopMemberAttributeApi* table=nullptr;
     __try { table=get ? get(EDF6COOP_MEMBER_ATTRIBUTE_VERSION) : nullptr; } __except(EXCEPTION_EXECUTE_HANDLER) { table=nullptr; }
-    // The table only appends: a smaller one than ours lacks a function we call.
-    if(table && (table->version!=EDF6COOP_MEMBER_ATTRIBUTE_VERSION || table->size<sizeof(EDF6CoopMemberAttributeApi)))table=nullptr;
+    // The table only appends: v1's functions up to snapshot are required; lastError (appended within v1) is optional
+    // (room_sync_logic.h asks EDF6COOP_MA_HAS before calling it).
+    if(table && (table->version!=EDF6COOP_MEMBER_ATTRIBUTE_VERSION || !EDF6COOP_MA_HAS(table,snapshot)))table=nullptr;
     if(!apiLogged) {
         apiLogged=true;
         Log("ROOMSYNC EDF6Coop member attributes %s",table ? "found: room pre-sync on" :

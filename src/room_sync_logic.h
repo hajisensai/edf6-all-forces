@@ -21,8 +21,15 @@
 // (ParseVariantFile) to the same VariantRef and the token re-encodes to the same text: anything else (a path, another
 // name, a malformed colour, a pylon a body cannot carry) refuses the whole list. A name is only ever a file to generate.
 // The pylon weapons a vehicle carries (EDF6VC_<STORE>_<n>.SGO) are not listed: the generator writes them with the vehicle.
-// Up to kListParts values (16 distinct extension keys a process, Coop's limit; this uses five), about 270 tokens; a longer
-// set is listed as far as it fits and the host says how many are left out (those still go through the pending list).
+// Up to kListParts values (16 distinct extension keys a process, Coop's limit; this uses five) and kListBudget bytes in
+// all (Coop's budget: EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE 4096 bytes of every value this process publishes, so the
+// list leaves room for EDF6X_VCHAVE, at most kHaveMost, and a little for another plugin), about 230 tokens; a longer set
+// is listed as far as it fits and the host says how many are left out (those still go through the pending list). A
+// publish Coop refuses anyway (lastError: the budget taken by another plugin, ...) is said on a status line and logged,
+// never lost silently; it is tried again each tick.
+// Coop sends extension values at most once every 2 s, merged (the last value wins), and other members read them a beat
+// or more later: nothing here assumes a published value is visible at once. A member's readiness names the list hash
+// it is about; a value of another list, or none yet, reads as "checking" until the current one arrives.
 // <state>: r ready, g generating (or about to), f the generator failed, n no generator installed, w no list to check yet.
 #pragma once
 #include "coop_member_attribute_api.h"
@@ -52,6 +59,9 @@ inline constexpr std::uint64_t kTickMs=1000;
 inline constexpr std::uint64_t kStartGapMs=5000;      // between two generator starts
 inline constexpr int kAttemptsMost=2;                 // per missing set
 inline constexpr int kLinesMost=8;
+inline constexpr std::size_t kHaveMost=40;            // "1;<16 hex>;<up to 4 digits>;<c>": 24 bytes, with room
+inline constexpr std::size_t kListBudget=3800;        // all list values together (header bytes included)
+static_assert(kListBudget+kHaveMost<=EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE,"the list and the readiness fit Coop's budget");
 
 // The part key i (0 = kKeyList).
 inline void PartKey(int i,char* out,std::size_t capacity) noexcept {
@@ -263,6 +273,7 @@ inline void EncodeList(const VariantSet& set,ListValues* out) noexcept {
     // Lay the tokens out first (each part's room), then write the header with the counts.
     int partOf[kSetMost];
     std::size_t used[kListParts]{};
+    std::size_t total=kHeaderMost;   // every value's bytes so far (each header at its most): within kListBudget
     int part=0,listed=0;
     for(int i=0;i<set.count;++i) {
         char t[24];const std::size_t len=TokenOf(set.ref[i],t,sizeof(t));
@@ -270,12 +281,13 @@ inline void EncodeList(const VariantSet& set,ListValues* out) noexcept {
         const std::size_t room=kValueMost-(part ? kPartHeader : kHeaderMost);
         const std::size_t need=len+(used[part] ? 1 : 0);
         if(used[part]+need>room) {
-            if(part+1>=kListParts)break;
+            if(part+1>=kListParts || total+kPartHeader+len>kListBudget)break;
             ++part;
             if(len>kValueMost-kPartHeader)break;
-            used[part]=len;
+            used[part]=len;total+=kPartHeader+len;
         } else {
-            used[part]+=need;
+            if(total+need>kListBudget)break;
+            used[part]+=need;total+=need;
         }
         partOf[i]=part;++listed;
     }
@@ -442,6 +454,8 @@ inline MemberReady ReadyOf(const EDF6CoopMemberValue& m,std::uint64_t listHash) 
 
 struct Situation {
     bool api=false,inRoom=false,isHost=false;
+    std::uint32_t refused=0;        // a publish Coop refused this tick: its lastError (0 when it has none to give)
+    bool anyRefused=false;
     int members=0;                  // the room's, this machine included
     ListState list=ListState::none; // the host's list (this machine's own when it is the host)
     int listed=0,leftOut=0;         // variants listed / the host's that did not fit
@@ -470,6 +484,7 @@ inline int SelectLines(const Situation& s,LineSpec* out,int capacity) noexcept {
     };
     if(!s.api){put(Tx::roomSyncCoopOld,true);return n;}
     if(!s.inRoom)return n;
+    if(s.anyRefused)put(Tx::roomSyncPublishRefused,true,static_cast<int>(s.refused));
     switch(s.list) {
         case ListState::none:if(!s.isHost)put(Tx::roomSyncHostOld,true);break;
         case ListState::bad:put(Tx::roomSyncHostBad,true);break;
@@ -539,7 +554,7 @@ public:
         s=Situation{};
         s.api=api!=nullptr;
         if(!api){lines_=SelectLines(s,line_,kLinesMost);return;}
-        EDF6CoopRoomState room{};room.size=sizeof(room);
+        EDF6CoopRoomState room{};room.size=sizeof(room);   // at least EDF6COOP_ROOM_STATE_V1_SIZE; Coop writes what it knows
         s.inRoom=api->room(&room) && room.inRoom;
         if(!s.inRoom) {
             if(anyPublished_)Leave(api);
@@ -585,15 +600,29 @@ private:
     // Everything a room leaves behind, but the tick clock and the situation the caller is filling.
     void Reset() noexcept {
         anyPublished_=false;listHash_=0;loggedHash_=0;list_=ListState::none;leftOut_=0;unnamed_=0;full_=0;cappedLogged_=0;
+        refusedLogged_=false;refusedCode_=0;
         own_.count=0;decoded_.count=0;target_.count=0;noted_.count=0;
         plan_=GenPlan{};
         for(auto& v:listPublished_)v[0]=0;
         havePublished_[0]=0;genMessage_[0]=0;
     }
     void Log(const Env& env,const char* text) noexcept { if(env.log)env.log(env.context,text); }
-    bool Publish(const EDF6CoopMemberAttributeApi* api,const char* key,const char* value,char* cache) noexcept {
+    // Coop keeps a value published before its lobby glue runs and sends it later (1); 0 is a refusal (lastError says
+    // why: the budget, the key limit...): said on a line, logged once per new reason, tried again next tick.
+    bool Publish(const EDF6CoopMemberAttributeApi* api,const char* key,const char* value,char* cache,const Env& env) noexcept {
         if(!std::strcmp(cache,value))return true;
-        if(!api->publish(key,value))return false;   // Coop's glue not up yet: tried again next tick
+        if(!api->publish(key,value)) {
+            const std::uint32_t code=EDF6COOP_MA_HAS(api,lastError) && api->lastError ? api->lastError() : 0;
+            situation_.anyRefused=true;situation_.refused=code;
+            if(!refusedLogged_ || refusedCode_!=code) {
+                refusedLogged_=true;refusedCode_=code;
+                char text[128];
+                std::snprintf(text,sizeof(text),"ROOMSYNC EDF6Coop refused %s (%u bytes): error %u",key,
+                              static_cast<unsigned>(std::strlen(value)),static_cast<unsigned>(code));
+                Log(env,text);
+            }
+            return false;
+        }
         std::snprintf(cache,kValueMost+1,"%s",value);anyPublished_=true;
         return true;
     }
@@ -612,11 +641,11 @@ private:
         own_.count=0;unnamed_=0;full_=0;
         if(env.configured)env.configured(env.context,&Engine::AddConfigured,this);
         EncodeList(own_,&values_);
+        for(int p=values_.parts;p<kListParts;++p)Withdraw(api,p);   // first: their bytes leave Coop's budget
         for(int p=0;p<values_.parts;++p) {
             char key[33];PartKey(p,key,sizeof(key));
-            Publish(api,key,values_.value[p],listPublished_[p]);
+            Publish(api,key,values_.value[p],listPublished_[p],env);
         }
-        for(int p=values_.parts;p<kListParts;++p)Withdraw(api,p);
         target_.count=0;
         for(int i=0;i<values_.listed;++i)target_.Add(own_.ref[i]);
         listHash_=values_.hash;list_=ListState::ok;
@@ -708,8 +737,8 @@ private:
             genMessage_[sizeof(genMessage_)/sizeof(genMessage_[0])-1]=0;
         }
         s.ownMissing=have.missing;s.own=have.state;s.genMessage=genMessage_;
-        char value[48];EncodeHave(have,value,sizeof(value));
-        Publish(api,kKeyHave,value,havePublished_);
+        char value[kHaveMost+8];EncodeHave(have,value,sizeof(value));
+        Publish(api,kKeyHave,value,havePublished_,env);
     }
     static void TakeMember(void* context,const EDF6CoopMemberValue* m) noexcept {
         auto* self=static_cast<Engine*>(context);
@@ -725,6 +754,8 @@ private:
     std::uint64_t lastTick_=0,listHash_=0,loggedHash_=0;
     ListState list_=ListState::none;
     int leftOut_=0,unnamed_=0,full_=0,cappedLogged_=0;
+    bool refusedLogged_=false;
+    std::uint32_t refusedCode_=0;
     VariantSet own_,decoded_,target_,noted_;
     VariantSet hostList_;               // HostList(): not cleared by Reset (a mission start leaves the room)
     std::uint64_t hostListHash_=0;

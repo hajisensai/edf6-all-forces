@@ -15,6 +15,7 @@
 // Exit code 1 when one fails.
 // cmake --build build --target room_sync_test && build\room_sync_test.exe
 #include "../src/room_sync_logic.h"
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
@@ -44,6 +45,11 @@ struct FakeLobby {
     bool inRoom=true;
     std::uint64_t generation=1;
     int publishes=0,clears=0,refused=0;
+    // Coop's pacing (one merged extension update every 2 s, read a beat later): with `paced`, what other members read
+    // is `seen`, copied from the members' values only by Send().
+    bool paced=false;
+    std::vector<std::vector<std::pair<std::string,std::string>>> seen;
+    void Send() { seen.clear();for(const auto& m:member)seen.push_back(m.values); }
 };
 FakeLobby lobby;
 
@@ -66,10 +72,20 @@ void SeeKey(const char* key) {
     for(const auto& k:keysSeen)if(k==key)return;
     keysSeen.push_back(key);
 }
+thread_local uint32_t lastError=EDF6COOP_MA_OK;
+uint32_t EDF6COOP_MA_CALL LastError() { return lastError; }
+// Coop's budget: every value this process (member) publishes, the new one counted instead of the one it replaces.
+std::size_t BudgetWith(const FakeMember& m,const char* key,const char* value) {
+    std::size_t total=std::strlen(value);
+    for(const auto& kv:m.values)if(kv.first!=key)total+=kv.second.size();
+    return total;
+}
 uint32_t EDF6COOP_MA_CALL Publish(const char* key,const char* value) {
-    if(!ValidKey(key) || !ValidValue(value)){++lobby.refused;return 0;}
+    if(!ValidKey(key) || !ValidValue(value)){++lobby.refused;lastError=ValidKey(key) ? EDF6COOP_MA_INVALID_VALUE : EDF6COOP_MA_INVALID_KEY;return 0;}
     SeeKey(key);
     auto& m=lobby.member[static_cast<std::size_t>(lobby.current)];
+    if(BudgetWith(m,key,value)>EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE){++lobby.refused;lastError=EDF6COOP_MA_VALUE_BUDGET;return 0;}
+    lastError=EDF6COOP_MA_OK;
     ++lobby.publishes;++lobby.generation;
     for(auto& kv:m.values)if(kv.first==key){kv.second=value;return 1;}
     m.values.push_back({key,value});
@@ -83,7 +99,7 @@ uint32_t EDF6COOP_MA_CALL Clear(const char* key) {
     return 1;
 }
 uint32_t EDF6COOP_MA_CALL Room(EDF6CoopRoomState* out) {
-    if(!out || out->size!=sizeof(EDF6CoopRoomState))return 0;
+    if(!out || out->size<EDF6COOP_ROOM_STATE_V1_SIZE){lastError=EDF6COOP_MA_BAD_ARGUMENT;return 0;}
     const auto& me=lobby.member[static_cast<std::size_t>(lobby.current)];
     out->inRoom=lobby.inRoom;
     out->memberCount=0;
@@ -103,13 +119,20 @@ uint32_t EDF6COOP_MA_CALL Snapshot(const char* key,EDF6CoopMemberValueFn each,vo
         EDF6CoopMemberValue v{};
         v.memberId=m.id.c_str();v.ordinal=m.ordinal;v.isHost=m.host;v.isSelf=static_cast<int>(i)==lobby.current;
         v.value="";
-        for(const auto& kv:m.values)if(kv.first==key){v.hasValue=1;v.value=kv.second.c_str();v.valueBytes=static_cast<uint32_t>(kv.second.size());}
+        // Our own row at once; the others' as last sent when Coop's pacing is on.
+        const auto& values=lobby.paced && static_cast<int>(i)!=lobby.current ?
+            (i<lobby.seen.size() ? lobby.seen[i] : std::vector<std::pair<std::string,std::string>>{}) : m.values;
+        for(const auto& kv:values)if(kv.first==key){v.hasValue=1;v.value=kv.second.c_str();v.valueBytes=static_cast<uint32_t>(kv.second.size());}
         each(context,&v);
     }
     if(generation)*generation=lobby.generation;
     return 1;
 }
-const EDF6CoopMemberAttributeApi kFakeApi={sizeof(EDF6CoopMemberAttributeApi),EDF6COOP_MEMBER_ATTRIBUTE_VERSION,Publish,Clear,Room,Snapshot};
+const EDF6CoopMemberAttributeApi kFakeApi={sizeof(EDF6CoopMemberAttributeApi),EDF6COOP_MEMBER_ATTRIBUTE_VERSION,Publish,Clear,Room,Snapshot,
+                                          LastError};
+// An EDF6Coop built before lastError was appended (still version 1): its table ends at snapshot.
+const EDF6CoopMemberAttributeApi kOldApi={static_cast<uint32_t>(offsetof(EDF6CoopMemberAttributeApi,lastError)),
+                                         EDF6COOP_MEMBER_ATTRIBUTE_VERSION,Publish,Clear,Room,Snapshot,nullptr};
 
 const char* ValueOf(int member,const char* key) {
     for(const auto& kv:lobby.member[static_cast<std::size_t>(member)].values)if(kv.first==key)return kv.second.c_str();
@@ -441,7 +464,7 @@ void Rooms() {
     Expect(lobby.member[1].values.empty(),"the client's keys withdrawn");
     lobby.current=0;host.engine.Leave(&kFakeApi);
     Expect(lobby.member[0].values.empty(),"the host's keys withdrawn");
-    Expect(keysSeen.size()<=5,"at most five extension keys (Coop allows 16 a process)");
+    Expect(keysSeen.size()<=5,"at most five extension keys (Coop allows 16 published a process)");
     Expect(lobby.refused==0,"Coop never refused a key or value");
 }
 
@@ -512,6 +535,79 @@ void MissionList() {
     Expect(!client.engine.HasHostList(),"no list (an older host): none");
 }
 
+// Coop's 4096-byte budget (every value of this process), its error codes, an older table without lastError, and its
+// pacing (values seen by the others only when the merged update goes out).
+void Budget() {
+    // The longest list: within kListBudget in all, the readiness beside it within Coop's budget.
+    const VariantSet big=BigSet(500);
+    ListValues l;EncodeList(big,&l);
+    std::size_t total=0;
+    for(int p=0;p<l.parts;++p)total+=std::strlen(l.value[p]);
+    Expect(total<=kListBudget && total+kHaveMost<=EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE && l.listed<big.count && l.listed>200,
+           "a 502-file list: listed as far as 3800 bytes go (over 200 files), the rest left out");
+    ResetLobby(2);
+    static Machine host;host=Machine{};
+    for(int i=0;i<big.count;++i)host.config.push_back(Name(big.ref[i]));
+    host.files=host.config;
+    Tick(host,0,1000);
+    std::size_t published=0;
+    for(const auto& kv:lobby.member[0].values)published+=kv.second.size();
+    Expect(lobby.refused==0 && published<=EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE && ValueOf(0,kKeyHave),
+           "the host publishes its longest list and its readiness within Coop's budget, nothing refused");
+    Expect(host.engine.Now().leftOut==big.count-l.listed,"what did not fit is counted as left out (said, as before)");
+    // Another plugin of this process takes most of the budget: our list is refused, said, logged, retried.
+    lobby.current=0;
+    host=Machine{};
+    host.config={L"EDF6VC_NPC_RIFLE_1E3A8A_X.SGO"};host.files=host.config;
+    lobby.member[0].values.clear();
+    Publish("EDF6X_OTHER",std::string(999,'a').c_str());Publish("EDF6X_OTHER2",std::string(999,'b').c_str());
+    Publish("EDF6X_OTHER3",std::string(999,'c').c_str());Publish("EDF6X_OTHER4",std::string(999,'d').c_str());Publish("EDF6X_OTHER5",std::string(90,'e').c_str());
+    const int refusedBefore=lobby.refused;
+    Tick(host,0,3000);
+    Expect(lobby.refused>refusedBefore && !ValueOf(0,kKeyList),"over the budget: Coop refuses the list");
+    Expect(HasLine(host,L"EDF6Coop refused this PC's pre-sync value (error 5; 5 = its 4096-byte budget is full): the others do not see it"),
+           "said on a line with its error (never lost silently)");
+    bool logged=false;for(const auto& t:host.log)logged|=t.find("refused EDF6X_VCVARIANTS")!=std::string::npos && t.find("error 5")!=std::string::npos;
+    Expect(logged,"and logged with the key and the error");
+    lobby.current=0;Clear("EDF6X_OTHER");Clear("EDF6X_OTHER2");
+    Tick(host,0,5000);
+    Expect(ValueOf(0,kKeyList) && !HasLine(host,L"EDF6Coop refused this PC's pre-sync value (error 5; 5 = its 4096-byte budget is full): the others do not see it"),
+           "room again: retried and published, the line gone");
+    // An older Coop table (no lastError): still used; a refusal says error 0.
+    ResetLobby(2);
+    static Machine old;old=Machine{};old.config={L"EDF6VC_NPC_RIFLE_1E3A8A_X.SGO"};old.files=old.config;
+    lobby.current=0;
+    Publish("EDF6X_OTHER",std::string(999,'a').c_str());Publish("EDF6X_OTHER2",std::string(999,'b').c_str());
+    Publish("EDF6X_OTHER3",std::string(999,'c').c_str());Publish("EDF6X_OTHER4",std::string(999,'d').c_str());Publish("EDF6X_OTHER5",std::string(90,'e').c_str());
+    Tick(old,0,1000,&kOldApi);
+    Expect(old.engine.State()!=SyncState::unavailable && HasLine(old,L"EDF6Coop refused this PC's pre-sync value (error 0; 5 = its 4096-byte budget is full): the others do not see it"),
+           "a table without lastError: used, never called past its end");
+    // Coop's pacing: the others see a value only once the merged update is sent.
+    ResetLobby(2);
+    lobby.paced=true;lobby.Send();
+    static Machine h,c;h=Machine{};c=Machine{};
+    h.config={L"EDF6VC_NPC_RIFLE_1E3A8A_X.SGO"};h.files=h.config;
+    Tick(h,0,1000);
+    Tick(c,1,1000);
+    Expect(c.engine.Now().list==ListState::none && c.pending.empty(),"the host's list not sent yet: nothing for the client");
+    lobby.Send();
+    Tick(c,1,2000);
+    Tick(h,0,2000);
+    Expect(c.engine.Now().list==ListState::ok && c.pending.size()==1,"sent: the client reads it");
+    Expect(HasLine(h,L"Member 2: checking the list"),"the client's readiness that went out is from before the list: checking");
+    lobby.Send();
+    Tick(h,0,3000);
+    Expect(HasLine(h,L"Member 2: 1 files missing, generating"),"seen a send later");
+    c.Finish();
+    Tick(c,1,3000);
+    Tick(h,0,4000);
+    Expect(HasLine(h,L"Member 2: 1 files missing, generating"),"its newer value not sent yet: the last one still read");
+    lobby.Send();
+    Tick(h,0,5000);
+    Expect(h.engine.State()==SyncState::ready,"sent: ready (nothing assumed visible at once)");
+    lobby.paced=false;
+}
+
 void Hostile() {
     ResetLobby(2);
     static Machine client;client=Machine{};
@@ -577,6 +673,7 @@ int main() {
     Rooms();
     LongList();
     MissionList();
+    Budget();
     Hostile();
     Migration();
     NoCoop();

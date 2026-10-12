@@ -662,6 +662,7 @@ HUDTEXT(statsUnknownEnemy,L"Unknown enemy",L"未知敌人",L"未知敵人",L"不
 
 // --- The room loadout menu's pre-sync line (src/room_sync_logic.h SelectLines; a member is its room ordinal + 1) ---
 HUDTEXT(roomSyncCoopOld,L"EDF6Coop too old (no member attributes): room pre-sync off, missing files go on the pending list",L"EDF6Coop 版本过旧（没有成员属性接口）：房间预同步关闭，缺的文件照旧记入待生成清单",L"EDF6Coop 版本過舊（沒有成員屬性介面）：房間預同步關閉，缺的檔案照舊記入待生成清單",L"EDF6Coop が古い（メンバー属性 API なし）：ルーム事前同期はオフ、不足ファイルは従来どおり生成待ちリストへ")
+HUDTEXT(roomSyncPublishRefused,L"EDF6Coop refused this PC's pre-sync value (error %d; 5 = its 4096-byte budget is full): the others do not see it",L"EDF6Coop 拒绝发布本机的预同步数据（错误 %d；5 = 4096 字节总额已满）：其他成员看不到",L"EDF6Coop 拒絕發布本機的預同步資料（錯誤 %d；5 = 4096 位元組總額已滿）：其他成員看不到",L"EDF6Coop がこのPCの事前同期データを拒否（エラー %d；5 = 4096 バイトの総量超過）：他のメンバーには見えません")
 HUDTEXT(roomSyncHostOld,L"The host has no pre-sync (older All Forces): missing files go on the pending list",L"房主没有预同步（旧版全军出击）：缺的文件照旧记入待生成清单",L"房主沒有預同步（舊版全軍出擊）：缺的檔案照舊記入待生成清單",L"ホストに事前同期なし（旧版 All Forces）：不足ファイルは従来どおり生成待ちリストへ")
 HUDTEXT(roomSyncHostBad,L"The host's file list is malformed: ignored",L"房主公布的文件清单格式不对：已忽略",L"房主公布的檔案清單格式不對：已忽略",L"ホストのファイルリストが不正：無視しました")
 HUDTEXT(roomSyncHostWaiting,L"Waiting for the host's file list",L"等待房主的文件清单",L"等待房主的檔案清單",L"ホストのファイルリスト待ち")
