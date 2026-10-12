@@ -483,12 +483,6 @@ def install(game: str, campaign_requested: bool = False) -> None:
         raise make_edf5_campaign.Refused('无法完成 EDF5 战役停用：任务列表已被其他工具修改，已保留依赖文件。')
     for path in (make_optics.install_models(game, optics) if optics is not None else []):
         print('写入', path)
-    objects41, skipped41 = edf41_objects.build(game)
-    print(f'写入 EDF4.1 的敌人与 NPC（EDF6 没有、4.1 任务要用的 {len(edf41_objects.registry()["objects"])} 种，'
-          '预先转换好，不需要装 4.1；用 4.1 原来的文件名）……')
-    for obj, why in skipped41:
-        print('  跳过', obj, why)
-    edf41_objects.install(game, objects41)
     for path in (make_jets.install(game, jets) if jets is not None else []) + \
             (make_sub.install(game, sub) if sub is not None else []) + \
             (make_katyusha.install(game, katyusha) if katyusha is not None else []) + \
@@ -511,6 +505,15 @@ def install(game: str, campaign_requested: bool = False) -> None:
             print('删除（StockVehicleStores=0：原版载具的请求恢复原样）', path)
     print('写入呼叫武器（武器表只动本插件的行，其它行不动；全部写完或全部不写）……')
     call_weapons.install(game, weapons)
+    # After the weapons: a model both ship (EDF5's Blacker No.4.1, the 4.1 AI tank's look) is shared only once the
+    # weapons' install has recorded it in the ledger; built before, a first upgrade from a version whose weapons
+    # recorded it in their own manifest only would leave the 4.1 tank out (2026-10-12, real install).
+    objects41, skipped41 = edf41_objects.build(game)
+    print(f'写入 EDF4.1 的敌人与 NPC（EDF6 没有、4.1 任务要用的 {len(edf41_objects.registry()["objects"])} 种，'
+          '预先转换好，不需要装 4.1；用 4.1 原来的文件名）……')
+    for obj, why in skipped41:
+        print('  跳过', obj, why)
+    edf41_objects.install(game, objects41)
     install_autoturret(game, *turret)
     # Mutable stock SGOs are read after every primary writer, outside the expensive model cache.
     # AutoTurret's SGOs were redirected before its own manifest write; never layer another hash over them.

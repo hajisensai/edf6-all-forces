@@ -56,6 +56,7 @@ ROOTS: dict[str, int] = {
     'VEHICLE501_FORTRESSROBO.SGO': 1, 'VEHICLE501_FORTRESSROBO_AI.SGO': 1,
     'UFOCARRIER301.SGO': 15, 'UFOCARRIER401.SGO': 15,
     'VEHICLE301_TANK_AI.SGO': 13,
+    'UFO301.SGO': 18, 'UFO301ACE.SGO': 6,
 }
 
 
@@ -64,6 +65,9 @@ class Alias:
     cls: str                  # the EDF6 class the 4.1 object goes under
     template: str             # an EDF6 object of that class (OBJECT/<name>): the keys and CAS players 4.1 lacks
     players: tuple[str, ...]  # CAS players (anmgroups) the class resolves that 4.1's CAS lacks (crash on spawn)
+    override: tuple[tuple[str, object], ...] = ()   # keys set to these values whatever 4.1's and the template's are
+    own_cas: bool = False     # 4.1's object has no CAS: the template's, every clip hollowed (cas_graft.hollow), as
+                              # OBJECT/<root>.CAS: the class's players without the template's motion on its bones
 
 
 # 4.1's class -> EDF6's (jobs/4bf89026/tmp/alias41: the classes EDF.dll registers, the names each resolves).
@@ -74,6 +78,12 @@ ALIASES: dict[str, Alias] = {
     # game_object_destroy_score_adjust from E508_CARRIER (its sounds are in tikyuu4_en_UFOcarrier301.acb, 4.1's bank).
     'UFOCARRIER301.SGO': Alias('UfoCarrier508', 'E508_CARRIER.SGO', ('in_ring', 'out_ring')),
     'UFOCARRIER401.SGO': Alias('UfoCarrier508', 'E508_CARRIER.SGO', ('in_ring', 'out_ring')),
+    # UFO301 (and its ace) -> UfoSmall515 (EDF5's imperial UFO): its ufo_* keys are UfoSmall301's own descendants, and
+    # it finds no bone by name. It resolves player main (open / close / wakeup) unchecked, and 4.1's UFO has no CAS:
+    # E515's, hollowed. material_animation must be there and may be empty (E515's names E515's textures); config,
+    # battery_config, bullet_object, level_adjust (its weapon and its level scaling) come from E515.
+    'UFO301.SGO': Alias('UfoSmall515', 'E515_IMPERIALUFO.SGO', (), (('material_animation', []),), own_cas=True),
+    'UFO301ACE.SGO': Alias('UfoSmall515', 'E515_IMPERIALUFO_ACE.SGO', (), (('material_animation', []),), own_cas=True),
 }
 
 
@@ -202,11 +212,19 @@ def alias(games: Games, root: str, files: dict[str, bytes], a: Alias) -> None:
     members['xgs_scene_object_class'] = a.cls
     for k, v in theirs.items():
         members.setdefault(k, v)
-    files[rel] = sgo.write_depth_first(version, members)
+    for k, v in a.override:
+        members[k] = v
     am = members.get('animation_model')
     cas = rel_of(am[1]) if isinstance(am, list) and len(am) > 1 and isinstance(am[1], str) else None
+    t_am = theirs['animation_model']
+    if a.own_cas:
+        if cas:
+            raise ValueError(f'{root} has a CAS of its own: own_cas is for an object without one')
+        cas = 'OBJECT/' + root.rsplit('.', 1)[0] + '.CAS'
+        files[cas] = cas_graft.hollow(games.read6(rel_of(t_am[1])))
+        members['animation_model'] = [am[0], 'app:/' + cas.lower(), *am[2:]]
+    files[rel] = sgo.write_depth_first(version, members)
     if a.players and cas in files:
-        t_am = theirs['animation_model']
         files[cas] = cas_graft.graft(files[cas], games.read6(rel_of(t_am[1])), list(a.players))
 
 
@@ -252,7 +270,7 @@ def build(edf41: str, edf6: str) -> tuple[dict, dict[str, bytes]]:
             continue
         files.update(out)
         cls = sgo.load(data=out[rel]).get('xgs_scene_object_class')
-        objects.append({'object': rel, 'class': cls, 'missions': uses, 'files': need})
+        objects.append({'object': rel, 'class': cls, 'missions': uses, 'files': list(out)})
     hashes = {r: hashlib.sha256(b).hexdigest() for r, b in files.items()}
     for r, path in shared.items():
         with open(os.path.join(HERE, '..', *path.split('/')), 'rb') as f:
