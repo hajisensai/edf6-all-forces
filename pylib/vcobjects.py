@@ -752,9 +752,13 @@ JETS.update({parked_name(k): replace(JETS[k], parked=True) for k in PARKED_KINDS
 # The gunship (src/jet_internal.h Body::gunship, mark 7011) as a JETS entry, for its requested twin only: the NPC gunship
 # is tools/make_jets.py's (the strike jet in BOMBER401's model with GUNSHIP_MARK and a gunner seat). Its arms and
 # durability the strike jet's (as tools/make_jets.py's), its model the stock bomber401 (52 m across, no gear: it stands
-# on its belly), measured on that model when parked (box_model).
+# on its belly), measured on that model when parked (box_model). It wears that model under a name of its own,
+# GUNSHIP_MODEL_FILE (tools/make_jets.py writes it: pylib/jet_models.py STOCK_COPIES, the stock geometry skinned with its
+# nozzle bones), so its seats' cockpits can be grafted into it; the NPC gunship (tools/make_jets.py GUNSHIP_FILE) too.
 GUNSHIP_JET = 'edf6tr_jet_gunship'   # no _mission: the range never places it (testrange/gen.py)
-JETS[GUNSHIP_JET] = replace(JETS['edf6tr_jet_strike_mission'], mark=7011.0, model=('app:/object/bomber401.mrab', 'bomber401.mdb'),
+GUNSHIP_MODEL_FILE = 'EDF6VC_GUNSHIP.MRAB'
+GUNSHIP_MODEL = ('app:/object/' + GUNSHIP_MODEL_FILE.lower(), 'bomber401.mdb')
+JETS[GUNSHIP_JET] = replace(JETS['edf6tr_jet_strike_mission'], mark=7011.0, model=GUNSHIP_MODEL,
                             body='bomber401', box_model='bomber401')
 # The NPC kinds the Air Raider requests as empty aircraft to fly (tools/calls.py EDF6VC_CALL_FLY_*, the user, 2026-10-06:
 # 「补上空袭的召唤飞机，空母载具」): every kind of src/playerjet_kinds.h kBoardable the player jets' requests do not already

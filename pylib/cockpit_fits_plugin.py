@@ -7,15 +7,15 @@ the bones; the room round each eye measured on the generated model as tools/cock
 one, quoted per row as metres left, right, up, down, ahead, back), and checked with
 `tools/cockpit_preview.py <STEM> --generator <tool>` (the seat's view, the vehicle from outside).
 
-Stems no generator makes yet (the gunship's, the transport plane's and the transport helicopter's models: their SGOs
-point at the stock BOMBER401 / VEHICLE410_HELI models, which graft_files never sees; the stock BOMBER401's meshes are
-not even skinned, so its hull cannot be measured) are fitted on the models their generator would have to make:
-EDF6VC_GUNSHIP / EDF6VC_TRANSPORT_PLANE as jet_models makes EDF6VC_MULTIROLE of BOMBER401 but at full scale, and
-EDF6VC_HELI_TRANSPORT a copy of VEHICLE410_HELI (preview: --stock-model VEHICLE410_HELI.MRAB). They do nothing until
-make_jets writes those files and points the SGOs at them.
+The gunship's, the transport plane's and the transport helicopter's models are the stock ones they fly, under names of
+their own (tools/make_jets.py): EDF6VC_GUNSHIP / EDF6VC_TRANSPORT_PLANE the stock BOMBER401's geometry as it is, its mesh
+skinned (pylib/jet_models.py STOCK_COPIES: the stock is rigid, and a cockpit measures its room against skinned meshes),
+EDF6VC_HELI_TRANSPORT the stock VEHICLE410_HELI archive byte for byte (its digest the 410's: make_jets
+heli_transport_model).
 """
 from __future__ import annotations
 
+from cockpit_fits_air import FITS as _AIR
 from cockpits import Fit
 
 
@@ -32,13 +32,16 @@ def _cabin(bone: str, first: tuple[float, float, float], near: tuple[float, ...]
                  for k, (seat, (eye, yaw)) in enumerate(zip(seats, spots)))
 
 
-# The full-scale BOMBER401 (the gunship's and the transport plane's hull, jet_models' MULTIROLE recipe at scale 1):
-# the flight deck in the cockpit bump, the pilot in the left seat (room 4.18, 5.18, 0.65, 2.67, 2.87, 4.36: the hull
-# is a hall; the deck takes the size it wants); the hold behind it, a passenger on the right-hand bench looking across
-# (yaw 90; after the hold came in off the hull: 3.44 aft, 6.34 forward, up 0.46, down 1.46; across, the hull is open
-# into the wings: the hold's far wall stands 3.2 m off).
-_B401_DECK = (0.5, 3.9, 4.0)
-_B401_HOLD = (-1.3, 3.05, 0.9)
+# The stock BOMBER401 (the gunship's and the transport plane's hull, jet_models.STOCK_COPIES: its own frame, the belly
+# 0.127 m over the origin): the flight deck in the cockpit bump, the pilot in the left seat (room 4.18, 5.18, 0.65, 2.67,
+# 2.87, 4.36: the hull is a hall; the deck takes the size it wants); the hold behind it, a passenger on the right-hand
+# bench looking across (yaw 90; after the hold came in off the hull: 3.44 aft, 6.34 forward, up 0.46, down 1.46; across,
+# the hull is open into the wings: the hold's far wall stands 3.2 m off). (First measured on the MULTIROLE recipe at
+# scale 1, grounded on its landing gear, 0.874 m higher: the same rooms 0.874 m down, in the stock frame. The hold's eye
+# is 2.6 cm under the shifted 2.1765: from 2.18 up the roof its room is measured to is a ledge's edge, and the hold laid
+# out to it comes out over the aft deck, behind the hull's end; under 2.1765 it fits in every eye tried down to 2.0.)
+_B401_DECK = (0.5, 3.03, 4.0)
+_B401_HOLD = (-1.3, 2.15, 0.9)
 
 FITS: dict[str, tuple[Fit, ...]] = {
     # The player's and the NPC interceptors and the enemy fighter (BOMBER501's mesh at 0.65): the front seat of the
@@ -83,22 +86,19 @@ FITS: dict[str, tuple[Fit, ...]] = {
     # Gundam's panoramic monitor does (remote_display): the camera before the head's face, looking ahead over the
     # chest.
     'EDF6VC_SAZABI': (Fit(0, 'sz_head', (0.0, 20.4, 2.4), 'remote_display'),),
-    # Proposed stems (the module docstring): the gunship's pilot and side gunner (its guns are the plugin's shells
-    # leaving from beside the airframe: his seat sees the gun camera's monitor, on the left flank).
+    # The gunship's pilot and side gunner (its guns are the plugin's shells leaving from beside the airframe: his seat
+    # sees the gun camera's monitor, on the left flank).
     'EDF6VC_GUNSHIP': (
         Fit(0, 'bomber401', _B401_DECK, 'plane_deck_gun'),
-        Fit(1, 'bomber401', (2.6, 2.6, 1.0), 'remote_display', 90.0),
+        Fit(1, 'bomber401', (2.6, 1.73, 1.0), 'remote_display', 90.0),
     ),
     # The transport plane's pilot and its twelve passengers in the hold (the far bench 2.7 m across).
     'EDF6VC_TRANSPORT_PLANE': (Fit(0, 'bomber401', _B401_DECK, 'plane_deck'),) + _cabin(
         'bomber401', _B401_HOLD, (0.2, 1.6, -0.5, 2.3, -1.0), 1.4, (0.9, 0.2, 1.6, -0.5, 2.3, -1.0), range(1, 13)),
     # The transport helicopter (410 with ten passengers): the stock 410's pilot and pod guns (pylib/cockpit_fits_air.py
-    # VEHICLE410_HELI) and its cabin, the first passenger on the right-hand bench looking across (yaw 90; after the
-    # hold came in off the round hull: 3.26 aft, 4.52 forward, up 0.60, down 0.92, 1.74 across, 0.29 behind).
-    'EDF6VC_HELI_TRANSPORT': (
-        Fit(0, 'body', (0.0, 2.6, 4.2), 'heli_utility'),
-        Fit(1, 'gunCam_l', (3.337, 1.628, 0.432), 'remote_display'),
-        Fit(2, 'gunCam_r', (-3.337, 1.628, 0.432), 'remote_display'),
-    ) + _cabin('body', (-0.8, 2.0, 0.5), (-0.3, 1.3, -1.1, 2.1), 0.5, (0.5, -0.3, 1.3, -1.1, 2.1), range(3, 13)),
+    # VEHICLE410_HELI, the same model) and its cabin, the first passenger on the right-hand bench looking across (yaw 90;
+    # after the hold came in off the round hull: 3.26 aft, 4.52 forward, up 0.60, down 0.92, 1.74 across, 0.29 behind).
+    'EDF6VC_HELI_TRANSPORT': _AIR['VEHICLE410_HELI'] + _cabin(
+        'body', (-0.8, 2.0, 0.5), (-0.3, 1.3, -1.1, 2.1), 0.5, (0.5, -0.3, 1.3, -1.1, 2.1), range(3, 13)),
 }
 DIGESTS: dict[str, str] = {}

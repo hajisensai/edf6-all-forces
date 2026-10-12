@@ -4,7 +4,9 @@ outside), its screens are of a known kind; one model (the Blacker) is built whol
 (vehicle_optics.build_model): its archive has its textures where the game binds them (obj_model.texture_problems), and a
 vc_eye_<seat> marker and the screens' vc_scr_ markers for every fitted seat, under the bone the fit names.
 
-The plugin's own vehicles (FITS stems their generators make) are left to their generators' builds.
+The plugin's own vehicles (FITS stems their generators make) are left to their generators' builds, but for the ones that
+wear a stock model under a name of their own (tools/make_jets.py: the gunship, the transport plane, the transport
+helicopter), whose fits are laid out on that model as make_jets makes it.
 Exit 77 (skipped) without Root.cpk or without the cockpits' assets (the model folder's cockpits/)."""
 from __future__ import annotations
 
@@ -14,9 +16,12 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
+sys.path.insert(0, os.path.join(HERE, '..', 'tools'))
 import cockpit_fits  # noqa: E402
 import cockpit_kits  # noqa: E402
 import cockpits  # noqa: E402
+import jet_models  # noqa: E402
+import make_jets  # noqa: E402
 import obj_model as om  # noqa: E402
 import rootcpk  # noqa: E402
 import vehicle_optics  # noqa: E402
@@ -38,6 +43,22 @@ def model_of(game, stem: str):  # noqa: ANN001, ANN201
     return mdb_read(next(f for f in arc.files if f.name.lower() == stem.lower() + '.mdb').data)
 
 
+def only_model(data: bytes):  # noqa: ANN201 - mdb.Mdb
+    """The one model of an archive (what cockpits.graft_files grafts when none is named after its stem)."""
+    mdbs = [f for f in rab_read(data).files if f.name.lower().endswith('.mdb')]
+    if len(mdbs) != 1:
+        raise ValueError(f'{len(mdbs)} models in the archive')
+    return mdb_read(mdbs[0].data)
+
+
+def stock_copies(game) -> dict:  # noqa: ANN001 - rootcpk.Game
+    """{stem: model} of the plugin's vehicles that wear a stock model under a name of their own, as tools/make_jets.py
+    makes them (jet_models.stock_copy, make_jets.heli_transport_model)."""
+    out = {file.removesuffix('.MRAB'): only_model(jet_models.stock_copy(game, file)) for file in jet_models.STOCK_COPIES}
+    out[make_jets.TRANSPORT_HELI_MODEL_FILE.removesuffix('.MRAB')] = only_model(make_jets.heli_transport_model(game))
+    return out
+
+
 def main() -> int:
     root = rootcpk.DEFAULT_GAME
     if not os.path.isfile(os.path.join(root, 'Root.cpk')) or not cockpits.assets_present():
@@ -45,12 +66,14 @@ def main() -> int:
         return 77
     game = rootcpk.Game(root)
     stock = {m.stem: m for m in vehicle_optics.MODELS if m.cockpits}
+    copies = stock_copies(game)
+    expect(set(copies) <= set(cockpit_fits.FITS), f'the stock copies {sorted(copies)} are fitted')
     for stem, fits in sorted(cockpit_fits.FITS.items()):
-        if stem not in stock:
+        if stem not in stock and stem not in copies:
             print(f'      {stem}: a generated model (its generator builds it)')
             continue
         started = time.perf_counter()
-        md = model_of(game, stem)
+        md = copies[stem] if stem in copies else model_of(game, stem)
         hull = cockpits.hull_triangles(md)
         for fit in fits:
             try:

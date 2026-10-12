@@ -1375,7 +1375,13 @@ def katyusha_bm13_launcher() -> None:
     if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
         files = make_katyusha.build(rootcpk.DEFAULT_GAME)   # katyusha_model.check + make_katyusha.check
         make_katyusha.check(files)
-        katyusha_kept_whole_bar_the_prune(rootcpk.DEFAULT_GAME, files[f'OBJECT/{make_katyusha.MODEL_FILE}'])
+        # The clean-up's archive against the unpruned one: before the cockpit's graft (cockpits.graft_files, the last
+        # step of the build, adds its own textures; tests/cockpit_build_test.py checks that one).
+        from unittest.mock import patch
+        import cockpits
+        with patch.object(cockpits, 'graft_files', lambda game, made: made):
+            plain = make_katyusha.build(rootcpk.DEFAULT_GAME)
+        katyusha_kept_whole_bar_the_prune(rootcpk.DEFAULT_GAME, plain[f'OBJECT/{make_katyusha.MODEL_FILE}'])
 
 
 def katyusha_kept_whole_bar_the_prune(game_dir: str, arc: bytes) -> None:

@@ -12,7 +12,9 @@ bombers alone.
 Also the player jets (src/playerjet.cpp): EDF6VC_PJET_FIGHTER / _STRIKE.SGO, which the Air Raider's call
 weapons EDF6VC_CALL_PJET_* (tools/call_weapons.py) bring, and EDF6VC_FLY_<KIND>.SGO: the plugin's other aircraft
 (interceptor, fighter, multirole, gunship, drone, the three air carriers) parked empty, which EDF6VC_CALL_FLY_* bring.
-Also the gunship (EDF6VC_JET_GUNSHIP.SGO: the strike jet in BOMBER401's model with the gunship's own mark and a gunner seat), the
+Also the gunship (EDF6VC_JET_GUNSHIP.SGO: the strike jet in BOMBER401's model, its own copy EDF6VC_GUNSHIP.MRAB, with the
+gunship's own mark and a gunner seat), the transports (EDF6VC_JET_TRANSPORT / EDF6VC_HELI_TRANSPORT.SGO in their own copies
+of the stock models, EDF6VC_TRANSPORT_PLANE / EDF6VC_HELI_TRANSPORT.MRAB, which carry their seats' cockpits), the
 blast / doll drone carriers (EDF6VC_JET_BLAST_CARRIER / _DOLL_CARRIER.SGO: the carrier with their marks) and the
 impact charges a crash or a ground vehicle's ram sets off (src/jet_bay.cpp ImpactDamage): EDF6VC_IMPACT_08 / _16 / _32 / _64 / _02 / _04 / _12.SGO, and the gunship's
 side guns' rounds (src/jet_bay.cpp GunShot): the long-range cannon's EDF6VC_GUNSHIP_CANNON.SGO and the 25 mm
@@ -242,6 +244,21 @@ TRANSPORT_HELI_FILE = 'EDF6VC_HELI_TRANSPORT.SGO'
 TRANSPORT_HELI_EXTRA = 10
 TRANSPORT_PLANE_FILE = 'EDF6VC_JET_TRANSPORT.SGO'
 TRANSPORT_PLANE_PASSENGERS = 12
+# The gunship's and the transports' own models, so their seats' first-person cockpits are grafted into them
+# (cockpits.graft_files at the end of build; pylib/cockpit_fits_plugin.py fits them by these files' stems): the stock
+# models they flew, under names of their own (with_model points their SGOs at them; the stock bomber401 the airstrikes
+# take over and the stock 410 the call-ins bring keep theirs):
+#  - the gunship's (vc.GUNSHIP_MODEL_FILE) and the transport plane's (TRANSPORT_PLANE_MODEL_FILE): jet_models.STOCK_COPIES,
+#    the stock bomber401's geometry as it is (skinned, its nozzle bones on: check_stock_copy), so their boxes, collision
+#    asset, muzzle box (GUNSHIP_AIRFRAME), seats and doors stay the stock model's;
+#  - the transport helicopter's (TRANSPORT_HELI_MODEL_FILE): the stock 410's archive byte for byte (heli_transport_model:
+#    the model the 410's cockpit fits were measured on, cockpit_fits.DIGESTS), its bones, locators and animation the 410's.
+#    (It was the stock 410's model, which the installer points at the 410's cockpit model: three seats' cockpits, none for
+#    the passengers.)
+TRANSPORT_PLANE_MODEL_FILE = 'EDF6VC_TRANSPORT_PLANE.MRAB'
+TRANSPORT_HELI_MODEL_FILE = 'EDF6VC_HELI_TRANSPORT.MRAB'
+TRANSPORT_HELI_STOCK = 'VEHICLE410_HELI'   # the stock model's stem (its archive and model member)
+BOMBER401_MODEL = BOMBERS['EDF6VC_BOMBER401.SGO'][0]
 MODEL_FILE = vc.JET_ELEVON_FILE
 MODEL = vc.JET_ELEVON_MODEL
 
@@ -258,6 +275,9 @@ def build(root: str) -> dict[str, bytes]:
     for name, data in vc.portal_lasers(game).items():
         out[f'OBJECT/{name}'] = data
     out[f'OBJECT/{MODEL_FILE}'] = jet_models.elevon_archive(game)   # the elevon bomber, grounded
+    for name in (vc.GUNSHIP_MODEL_FILE, TRANSPORT_PLANE_MODEL_FILE):   # the stock bomber401 under their own names
+        out[f'OBJECT/{name}'] = jet_models.stock_copy(game, name)
+    out[f'OBJECT/{TRANSPORT_HELI_MODEL_FILE}'] = heli_transport_model(game)
     for name, data in jet_models.build(game).items():
         out[f'OBJECT/{name}'] = data
     for model, name in jet_models.ANIMATIONS.items():
@@ -275,7 +295,7 @@ def build(root: str) -> dict[str, bytes]:
         out[f'OBJECT/{name}'] = data
     for name in BOMBERS:
         out[f'OBJECT/{name}'] = bomber_sgo(game, name)
-    gunship = with_mark(bomber_sgo(game, 'EDF6VC_BOMBER401.SGO'), GUNSHIP_MARK)
+    gunship = with_model(with_mark(bomber_sgo(game, 'EDF6VC_BOMBER401.SGO'), GUNSHIP_MARK), vc.GUNSHIP_MODEL)
     gunship = with_gunner_seat(gunship, game.read('OBJECT', GUNNER_STOCK))
     check_gunner_seat(gunship)
     out[f'OBJECT/{GUNSHIP_FILE}'] = gunship
@@ -291,12 +311,16 @@ def build(root: str) -> dict[str, bytes]:
     out[f'WEAPON/{MEDIC_GUN_FILE}'] = medic_gun(game.read('WEAPON', MEDIC_GUN_STOCK), game.read('WEAPON', MEDIC_ROUND_STOCK))
     out[f'OBJECT/{MEDIC_HELI_FILE}'] = medic_heli(out[f'OBJECT/EDF6VC_HELI_410.SGO'])
     heli = with_passenger_seats(out[f'OBJECT/EDF6VC_HELI_410.SGO'], 1, TRANSPORT_HELI_EXTRA)
+    heli = with_model(heli, ('app:/object/' + TRANSPORT_HELI_MODEL_FILE.lower(), model_ref(heli)[1]))
     check_passenger_seats(heli, 3 + TRANSPORT_HELI_EXTRA, TRANSPORT_HELI_FILE, 3)
     out[f'OBJECT/{TRANSPORT_HELI_FILE}'] = heli
     plane = with_passenger_seats(bomber_sgo(game, 'EDF6VC_BOMBER401.SGO'), 0, TRANSPORT_PLANE_PASSENGERS,
                                  game.read('OBJECT', GUNNER_STOCK))
+    plane = with_model(plane, ('app:/object/' + TRANSPORT_PLANE_MODEL_FILE.lower(), BOMBER401_MODEL[1]))
     check_passenger_seats(plane, 1 + TRANSPORT_PLANE_PASSENGERS, TRANSPORT_PLANE_FILE, 1)
     out[f'OBJECT/{TRANSPORT_PLANE_FILE}'] = plane
+    for name in (GUNSHIP_FILE, request_file(vc.GUNSHIP_JET), TRANSPORT_PLANE_FILE, TRANSPORT_HELI_FILE):
+        check_own_model(out, name)
     return cockpits.graft_files(game, out)   # its seats' first-person cockpits (pylib/cockpits.py)
 
 
@@ -348,6 +372,7 @@ def names() -> list[str]:
     """Every path under Mods this tool writes (whether or not installed)."""
     import aircraft_collision
     objects = [*FILES, *BOMBERS, GUNSHIP_FILE, *IMPACT_FILES, *(g.file for g in SIDE_GUNS), *HELIS, MEDIC_HELI_FILE, TRANSPORT_HELI_FILE, TRANSPORT_PLANE_FILE, MODEL_FILE, *MODEL_FILES,
+               vc.GUNSHIP_MODEL_FILE, TRANSPORT_PLANE_MODEL_FILE, TRANSPORT_HELI_MODEL_FILE,
                *vc.PORTAL_LASER_FILES, *aircraft_collision.FILES.values(), *jet_models.ANIMATIONS.values()]
     return [f'OBJECT/{n}' for n in objects] + [f'WEAPON/{n}' for n in (*vc.JET_WEAPON_FILES, MEDIC_GUN_FILE)]
 
@@ -373,6 +398,48 @@ def with_mark(data: bytes, mark: float) -> bytes:
     version, m = sgo.read(data)
     m['mission_setup'][1][0] = mark
     return sgo.write(version, m)
+
+
+def model_ref(data: bytes) -> list[str]:
+    """A vehicle SGO's model: animation_model[0], [archive path, model member]."""
+    import sgo
+    return list(sgo.read(data)[1]['animation_model'][0])
+
+
+def with_model(data: bytes, model: tuple[str, str] | list[str]) -> bytes:
+    """The vehicle SGO `data` wearing `model` ([archive path, model member]) in place of its own: a copy of that model
+    under another name (see TRANSPORT_HELI_MODEL_FILE), so the member must be the one it names now; nothing else changes."""
+    import sgo
+    version, m = sgo.read(data)
+    ref = m['animation_model'][0]
+    if ref[1].lower() != model[1].lower():
+        raise ValueError(f'换模型只换存档：{ref[1]!r} -> {model[1]!r} 不是同一个模型')
+    ref[0], ref[1] = model[0], model[1]
+    return sgo.write(version, m)
+
+
+def check_own_model(files: dict[str, bytes], name: str) -> None:
+    """The SGO OBJECT/`name` of `files` (build) wears a model `files` holds: its archive is one of them, its member in it."""
+    from mdb import rab_read
+    path, member = model_ref(files[f'OBJECT/{name}'])
+    rel = 'OBJECT/' + path.removeprefix('app:/object/').upper()
+    if not path.startswith('app:/object/') or rel not in files:
+        raise ValueError(f'{name}: 模型 {path} 不是本工具写的')
+    if not any(f.name.lower() == member.lower() for f in rab_read(files[rel]).files):
+        raise ValueError(f'{name}: {rel} 里没有 {member}')
+
+
+def heli_transport_model(game: vc.Game) -> bytes:
+    """TRANSPORT_HELI_MODEL_FILE: the stock TRANSPORT_HELI_STOCK archive as it is, its model the one the 410's cockpit
+    fits were measured on (cockpit_fits.DIGESTS), so the transport's seats 0-2 are the 410's and its cabin's fits apply."""
+    import hashlib
+    import cockpit_fits
+    from mdb import rab_read
+    raw = game.read('OBJECT', TRANSPORT_HELI_STOCK + '.MRAB')
+    model = next(f for f in rab_read(raw).files if f.name.lower() == TRANSPORT_HELI_STOCK.lower() + '.mdb')
+    if hashlib.sha256(model.data).hexdigest() != cockpit_fits.DIGESTS[TRANSPORT_HELI_STOCK]:
+        raise ValueError(f'{TRANSPORT_HELI_STOCK}.MRAB 的模型不是座舱量过的那一个')
+    return raw
 
 
 class GunnerSeatError(Exception):
