@@ -53,7 +53,16 @@ MODELS = (
 )
 
 
-MODELS = tuple(replace(m, cockpits=cockpit_fits.FITS.get(m.stem, ())) for m in MODELS)
+MODELS = tuple(replace(m, cockpits=cockpit_fits.FITS.get(m.stem, ())) for m in MODELS) + tuple(
+    Model(stem, cockpit_fits.DIGESTS[stem], (), fits) for stem, fits in sorted(cockpit_fits.FITS.items())
+    if stem not in {m.stem for m in MODELS})
+
+
+def ready(spec: Model) -> bool:
+    """Whether `spec`'s model is built and its SGOs redirected now: it has optics, or its cockpits' assets are there
+    (without them a cockpit-only model would be the stock one under another name). MODELS stays whole for undoing
+    the redirects an earlier install made."""
+    return bool(spec.lenses) or (bool(spec.cockpits) and cockpits.assets_present())
 
 
 def output(spec: Model) -> str:
@@ -243,7 +252,8 @@ def build_model(game, spec: Model) -> bytes:
 
 
 def redirect(data: bytes) -> tuple[bytes, tuple[str, ...]]:
-    """Change only an audited model path; other-mod/custom models have no fallback."""
+    """Change only an audited model path; other-mod/custom models have no fallback. Only a ready() model is pointed
+    at (an already redirected path is recognised for any)."""
     doc = dsgo.parse(data) if data[:4] == b'DSGO' else None
     version, m = sgo.read(data) if doc is None else (None, None)
     try:
@@ -252,6 +262,8 @@ def redirect(data: bytes) -> tuple[bytes, tuple[str, ...]]:
     except (KeyError, TypeError, AttributeError):
         return data, ()
     for spec in MODELS:
+        if not ready(spec) and ref[0].lower() != f'app:/object/{output(spec).lower()}':
+            continue
         if (ref[0].lower() in (f'app:/object/{spec.stem.lower()}.mrab', f'app:/object/{output(spec).lower()}')
                 and ref[1].lower() == spec.stem.lower()+'.mdb'):
             ref[0] = 'app:/object/' + output(spec).lower()

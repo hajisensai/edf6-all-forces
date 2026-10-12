@@ -72,6 +72,25 @@ class Kit:
 KitFn = Callable[[dict[str, float]], Kit]   # the room round the eye (clearance) -> the kit laid out in it
 
 
+def assets_present() -> bool:
+    try:
+        asset_root()
+        return True
+    except CockpitAssetsMissing:
+        return False
+
+
+def model_digest(game, stem: str) -> str:  # noqa: ANN001 - rootcpk.Game
+    """The sha-256 of `stem`.mdb in `stem`.MRAB (a loose Mods copy first, as vehicle_optics.build_model reads it): the
+    geometry a fit was measured on (pylib/cockpit_fits.py DIGESTS)."""
+    import hashlib
+    from pathlib import Path
+    name = stem + '.MRAB'
+    loose = Path(game.root, 'Mods', 'OBJECT', name)
+    arc = rab_read(loose.read_bytes() if loose.is_file() else game.read('OBJECT', name))
+    return hashlib.sha256(next(f for f in arc.files if f.name.lower() == stem.lower() + '.mdb').data).hexdigest()
+
+
 def asset_root() -> str:
     """The cockpits' asset directory (the first model root that has one)."""
     for root in om.model_roots():

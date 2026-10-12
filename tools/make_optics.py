@@ -25,7 +25,7 @@ redirect = optics.redirect
 
 def build_models(root: str) -> dict[str, bytes]:
     game = rootcpk.Game(root)
-    return {'OBJECT/'+optics.output(s): optics.build_model(game, s) for s in optics.MODELS}
+    return {'OBJECT/'+optics.output(s): optics.build_model(game, s) for s in optics.MODELS if optics.ready(s)}
 
 
 def build_stock_redirects(root: str) -> dict[str, bytes]:

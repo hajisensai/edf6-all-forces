@@ -118,3 +118,15 @@ KITS = {
     'tank_gunner': tank_gunner,
     'gun_station': gun_station,
 }
+
+
+def _family(module: str) -> dict:
+    """Another family's kits (pylib/cockpit_kits_<family>.py: each module its own KITS), merged into KITS."""
+    return __import__(module).KITS
+
+
+for _name in ('cockpit_kits_ground', 'cockpit_kits_air', 'cockpit_kits_mech'):
+    _more = _family(_name)
+    if set(_more) & set(KITS):
+        raise ValueError(f'{_name}: kit names taken: {sorted(set(_more) & set(KITS))}')
+    KITS.update(_more)
