@@ -2159,14 +2159,14 @@ def heli_mouse_aim_wired() -> None:
     assert 'kStockLift' not in heli and heli.count('aim::HoverRotor(') >= 3
     hud = src('src/hud.cpp').split('void HeliStrip(', 1)[1].split('\n}\n', 1)[0]
     assert 'Tx::heliKeysAir' in hud and 'KeyName(Cfg().playerJetBrakeKey' in hud, 'hud.cpp HeliStrip: the keys spelt out'
-    # The stock heli's keys (f.collective) are the instructor's: W / S up and down, the nose down forward; the rotor
+    # The stock heli's keys (f.collective) separate W/S pitch from Space/brake collective; the rotor
     # craft's stay the speed setpoint's.
     assert 'f.collective ? Tx::heliKeysInstructor : Tx::heliKeysAir' in hud and 'Tx::heliKeysInstructorLanded' in hud
     texts = src('src/hudtext.inc')
     assert 'SPACE: up' in texts.split('HUDTEXT(heliKeysAir,', 1)[1].split('\n', 1)[0]
     instructor = texts.split('HUDTEXT(heliKeysInstructor,', 1)[1].split('\n', 1)[0]
-    assert 'W / S: up / down' in instructor and 'down: forward' in instructor, instructor
-    assert 'HOLD W / SPACE' in texts.split('HUDTEXT(heliKeysInstructorLanded,', 1)[1].split('\n', 1)[0]
+    assert 'W / S: nose down / up' in instructor and 'MOUSE: aim / heading' in instructor, instructor
+    assert 'HOLD SPACE' in texts.split('HUDTEXT(heliKeysInstructorLanded,', 1)[1].split('\n', 1)[0]
     assert 'f.collective=p.flying' in heli, 'heli.cpp PublishHud: the stock heli says its keys are the instructor\'s'
     assert 'aim::Fly(' in board.split('void HoverAim(', 1)[1].split('\n}\n', 1)[0]
 

@@ -11,7 +11,7 @@
 //    and descend at the craft's most; everything let go it holds its height and flies at the setpoint (0: it stops).
 // What a craft is asked (a horizontal velocity, a climb, a heading) is flown by its own law: the plugin's rotor craft
 // fly Fly's want through jet::Hover (playerjet_board.inc HoverStep). A stock heli (2026-10-09) flies the Instructor
-// below instead (War Thunder's mouse aim: the aim is the heading and pitch wanted, nose down flies forward, W / S the
+// below instead (War Thunder's mouse aim: the aim is the heading and pitch wanted, W / S pitch the nose, Space / brake control the
 // collective), through StockStick, CollectiveThrottle and PlayerYawInput, the pitch and the coordinated roll handed to its
 // attitude function by heli.cpp PlayerAttitudeHook.
 // Pure math (no EDF.dll): tools/heli_aim_check.cpp runs it against the stock heli's flight law (docs/aircraft-re.md) to
@@ -184,12 +184,12 @@ inline Want Fly(Hold& h,const float* aim,const float* nose,const float* pos,cons
 // "before" rows). War Thunder's mouse-aim instructor instead takes the aim as the attitude wanted and flies the controls
 // to it:
 //  - heading: the aim's (the tail rotor, PlayerYawInput);
-//  - pitch: the aim's elevation, at most the craft's max tilt (AimPitch); the cyclic flies it: nose down forward, the
+//  - pitch: W/S command nose down/up inside the craft's native tilt range; the cyclic flies it: nose down forward, the
 //    farther the faster (full tilt the top speed), nose up slows and backs (at most kBackShare of the top), within
 //    kElDead of level it hovers (CyclicSpeed). The stock heli's own forward stick is both its tilt and its speed (its
 //    0x654E69 and 0x651E2F read the same input), so the nose and the motion agree;
 //  - roll: the sidestep's, plus a coordinated turn's bank (BankInput: tan bank = speed x turn rate / g);
-//  - W / S (and Space / the brake key) the collective: climb / descend at the most while held, let go it holds the
+//  - Space / the brake key the collective: climb / descend at the most while held, let go it holds the
 //    height it comes to (Collective, the same hold as Fly's); A / D slide.
 inline float AimPitch(const float* aim,float maxTilt) noexcept {
     if(!(maxTilt>1e-3f) || !std::isfinite(aim[1]))return 0.0f;
@@ -198,9 +198,9 @@ inline float AimPitch(const float* aim,float maxTilt) noexcept {
 
 // The forward speed the cyclic flies at a `pitch` (rad, + nose up) of at most `maxTilt`.
 inline float CyclicSpeed(float pitch,float maxTilt,float top) noexcept {
-    const float span=maxTilt-kElDead,down=-pitch;
-    if(!(span>1e-3f) || std::fabs(down)<=kElDead)return 0.0f;
-    const float past=down>0.0f ? down-kElDead : down+kElDead;
+    const float dead=std::fmin(kElDead,maxTilt*0.1f),span=maxTilt-dead,down=-pitch;
+    if(!(span>1e-3f) || std::fabs(down)<=dead)return 0.0f;
+    const float past=down>0.0f ? down-dead : down+dead;
     return vec::Clamp(past/span,-kBackShare,1.0f)*top;
 }
 
@@ -213,9 +213,10 @@ inline float Collective(Hold& h,const float* pos,const float* vel,float vert,flo
 // The instructor's want (see above) and its pitch (`pitch`, rad, + nose up). `vert` the collective keys (-1..1), `side` A / D.
 // h.speed is the forward speed the cyclic flies (the HUD's speed target).
 inline Want Instructor(Hold& h,const float* aim,const float* nose,const float* pos,const float* vel,float vert,float side,float top,
-                       float most,float maxTilt,bool grounded,bool still,float clear,float* pitch) noexcept {
+                       float most,float maxTilt,bool grounded,bool still,float clear,float fore,float* pitch) noexcept {
     Want w{};
-    *pitch=AimPitch(aim,maxTilt);
+    *pitch=grounded || still || !std::isfinite(fore+maxTilt) || maxTilt<=0.0f ? 0.0f :
+        -vec::Clamp(fore,-1.0f,1.0f)*maxTilt;
     h.pressing=false;
     h.speed=grounded || still ? 0.0f : CyclicSpeed(*pitch,maxTilt,top);
     Course(w,aim,nose,h.speed,side,top,grounded || still);
