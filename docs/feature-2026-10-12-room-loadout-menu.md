@@ -452,3 +452,101 @@ DLL（RelWithDebInfo，Ninja）编译通过，无警告。
     任务期间不会有画面帧。
 12. 客机判定：`OnlineHostOnly()` 在房间阶段（未进任务）是否已知道主客，没核。
 13. 保存后后台生成器的状态显示（生成中 / 就绪 / 失败）只在菜单打开时看得到。
+## 阶段 4b：乘员行上屏、没有插件时什么都不画、游戏 HQ 调色板（2026-10-12，分支 `feat/rl-polish`，只做了离线验证）
+
+没有启动 / 关闭游戏，没有往游戏目录写任何文件；只读了 Root.cpk、DX11.cpk、Chunk01/02.cpk 与 EDF.dll。
+
+### 1. 乘员行（阶段 5 的模型接到画面上）
+
+- `room_ui_logic.h CatalogUnits`：目录里有座位、有载具键、或 `HasCrew` 的条目都列出（`UnitSpec.crew = HasCrew(key)`），末尾补
+  默认（键 `""`）与任务乘员（`kCrewMissionKey`），与 `kDefaultUnits` 相同的结构。真实目录 37 项：小队 8 + 载具 10（各带乘员行）+
+  乘员单位 25 + 默认 / 任务 2 = 45 个单位，≤ `kMostUnits` 48。没有运行时目录时用 `DefaultUnits`（`kDefaultUnits` 按 HUD 语言重贴标签）。
+- 乘员行的兵种：`CrewKindOf`——地面载具（`IsGroundCrewKey`）用 `SupportVehicleCrewWeapon`，其余用 `SupportAircraftCrewWeapon`，
+  任务乘员固定步枪（`N601_COMMON_RANGER_AF`），默认那一行显示地面乘员的兵种（取值来自 `SupportCfg()`）。
+- 绘制（`DressCrewRows` + `LookOf` / `RowLine` / `NoteLine`）：一行「乘员颜色（兵种）」，主 / 副色块，兵种图标；没单独设置的乘员
+  色块显示默认乘员的颜色、备注「同默认」；设成 X 显示「原色」、不画色块；编辑时备注 `< 主色 >` / `< 副色 >`。
+  单位列里目录条目的乘员单位显示「<名字>·乘员」，默认与任务乘员用自己的标签。hudtext 四语新增 5 条（`roomUnitCrewDefault`、
+  `roomUnitCrewMission`、`roomUnitCrewOf`、`roomCrewRow`、`roomCrewDefault`）。`ViewRow` 加了 `key`（单位行与打开单位的每一行）。
+- 预览：光标在乘员行（行 / 字段层）→ 该乘员兵种的**队员**（不是队长），颜色 = 自己的，没设置时默认的（`CrewLookOf`）。
+- 保存：`SaveItems` 按 `CollectSave` 的行逐条配对（每个单位先挂载 / 预设、再乘员；乘员行的键必须是 `LoadoutKey(crew, key)`），
+  每条带 `unitIndex`；`room_ui.cpp Save` 逐条 `SaveSupportLoadout`，每写成一条 `MarkItemSaved` 只标记那一部分（中途失败时，
+  已写的部分不再算改动，没写的仍是改动）。**修了阶段 4 的一个缺陷**：以前按「每个改动单位一条」配对，乘员只改了的单位会被当成
+  `SupportVehicle_` 配对失败，载具 + 乘员都改的单位第二行永远不写。状态行「已保存 N 个单位」按单位数计。
+
+### 2. 没有插件时面板不显示
+
+阶段 4 的布局里背景用 `Window_Test01_skin`、色块用 `ColorChipBox_skin`（模型默认色）、文字默认一个空格；插件没加载或签名不符拒绝时，
+面板背景与 28 个色块会一直盖在房间 / HQ 上。现在：
+
+- 布局（`tools/room_layout.py`）：子树里每个元素的皮肤只有 `Transparent_skin`（什么都不画）和 `HUDIconTexture_skin`；
+  所有 TextField `text_dr ''`（原版布局有 60 个这样的空文本）。背景 `vcBack`、色块 `vcRxxA/B`、图标 `vcRxxI` 都是贴图皮肤。
+- 证据（静态，`tests/room_ui_sig_audit.py` 逐字节核 EDF.dll）：
+  - `HUDIconTexture_skin.sgo` = `{base: '', default: [['', 0]], object_class: Texture}`（Root.cpk 读出，`room_layout_test` 核对）。
+  - `Skin_Texture`（vtable 0x17F6228）槽 3 = 绘制 0x7F7040：`rax=[rdi+0A0h]`（0x7F7110），`test rax,rax / je`、`cmp qword [rax],0 / je`
+    （0x7F7190）都跳到收尾 0x7F725A——没有绑定贴图就不画。【证实】
+  - 槽 4 = 切换状态 0x7F7270：状态路径为空时 `cmp qword [rsp+30h],0 / je` 跳过 0x7F63E0（0x7F73E3），不绑定任何贴图。【证实】
+  - 构造函数 0x7F5C20 把 +0xF0..+0xFC 与 +0x100..+0x10C 都置 1.0（0x7F5CD2）；绘制颜色 = lerp(+0x100, +0xF0, +0xE4) × 组件颜色
+    （0x7F707F / 0x7F70FC）。【证实】+0xA0 所在的 +0x90 对象由 0x1120520 构造，插件调 0x7F63E0 之前为空【推断，与原版 HUD 图标同一用法】。
+- 白贴图：Root.cpk、DX11.cpk、Chunk01/02.cpk 里**没有**纯色的独立 DDS（最小的几张：`DEBUG/GRIDTILE.DDS` 网格、
+  `UI/CHATSHORTCUT_CURSOR.DDS` 光标形状，逐像素读过）。所以安装器新写一个 `Mods/UI/EDF6VC_WHITE.DDS`（8×8，全 FF；头部与
+  `UI/CHATSHORTCUT_CURSOR.DDS` 相同的 32 位无压缩格式：flags、mip、像素格式、caps 逐字节一致，`room_layout_test` 核对），台账 owner
+  `roomui`，安装 / `loadout-generate`（缺了就 `put_new`，不需要 Root.cpk）/ 卸载同布局。插件路径 `app:/UI/EDF6VC_WHITE.dds`
+  （`kWhiteTexture`，测试核对与安装器写的是同一个文件）。
+- 插件（`room_ui.cpp SetTextured`）：按名取组件 → 0x953D80 取 Skin_Texture → 路径变了才 0x7F63E0（失败记日志、元素保持隐藏、
+  不每帧重试）→ 两组染色都写 → +0x1F8。背景染 `kPanelColour`（0x0C1622 85 %），色块染颜色，图标染白色不透明。
+  去掉了 0x824D40（ColorChipBox 模型参数）与 0x88014D 调用点签名；新增 3 段签名（0x7F707F、0x7F70FC、0x7F5CD2）。
+- 收回：菜单不显示的每一帧（关闭、被子画面 / 对话框 / 过场遮住、`RoomLoadout=0`）`ClearMenu` 把插件写过的都收回——文字写空
+  （SetText 对空指针本来就用 L""，0x86369F）、所有贴图元素染色 alpha 0 并隐藏、根节点隐藏；经写入缓存，只有变化时才真正调用。
+  画面对象换了（换房间 / 回 HQ / 开打）时旧画面由游戏销毁，插件不再碰它；新画面从第一帧起就是上面的收回状态。
+  布局里没有 `vcRoot`（没装 / 别的 mod 的布局）记一次日志，之后这个画面对象不再查找任何元素。
+- 文字不显示时写 L""（阶段 4 写的是一个空格）。
+
+### 3. 游戏 HQ 调色板
+
+- 来源（静态，H）：`DEFAULTPACKAGE/CONFIG.SGO` `SoldierInit[class][5][0]` = `App:/DefaultPackage/CustomColor<Ranger|WingDiver|AirRaider|HeavyArmor>.sgo`
+  （0xE07D0 取路径）；键 `CustomColor` = 12 项 × 2 通道（主 / 副）× RGBA 浮点，alpha 全 1。加载器 0xDF1B0（`lea rdx, L"CustomColor"`
+  0xDF3D5）拷进 GameStatus +0x6FB0（每玩家 × 兵种 × 外观 × 通道 0xC4，12 个 float4）；`HUiHQColorSelect`（vtable 0x1800C40）槽 1
+  0x881060 拷到 this+0x790、槽 2 0x880F50 每通道画 12 个色块（`call 0x880010` 0x880FFE，`cmp rbx,0Ch` 0x88100A）。
+  第 4..11 项四个兵种相同，0..3 项各兵种不同。EDF.dll 里没有静态色表。自由调色（`HUiHQColorMake`）改写的是这 12 个槽之一，不是额外条目。
+- 映射：菜单两个颜色字段共用一个循环，所以调色板 = 共有 8 对（每对主色、副色）+ 游骑兵、翼人、重装各自 4 对，去重后 40 色，
+  「原色」仍在循环最前（`CycleColour`）。空降兵（Air Raider）的 4 对不收：支援士兵没有这个兵种。`kPaletteMost` 32 → 48。
+- `tools/hq_palette.py`（`--write`）从 Root.cpk 生成 `src/hq_palette.inc`；`room_menu.h kDefaultPalette = HqPalette()`。
+  浮点 ×255 四舍五入成 RRGGBB（与生成士兵文件的颜色写法相同）。原来 16 个占位色（含 1E3A8A / FFFFFF）不再在循环里；
+  ini 里手写的这类颜色照旧保留，改它时从「原色」的位置开始循环（阶段 3 的既有规则）。
+- `tests/hq_palette_audit.py`（ctest `hq_palette`，没有游戏时 SKIP）：四个文件是 CONFIG 点名的、每兵种 12 对、4..11 共有、
+  `.inc` 与现在从游戏生成的逐字相同、顺序与去重规则、支援兵种的每个颜色都在；EDF.dll 0x678CCB46 时再核 `L"CustomColor"`、
+  0xE07D0 调用、色块循环 12 次。
+
+### 测试（`cmake --build build` + `offline_checks` 0 警告；`ctest -j 3`：237 项 100% 通过，其中 36 项需要游戏原生环境按设计 SKIP）
+
+| 测试 | 结果 |
+|---|---|
+| `room_ui`（C++） | 665 项（原 599）：目录含乘员 / 默认 / 任务（12 个规格、13 个单位）、`DefaultUnits` 重贴标签、乘员兵种（地面 / 空中 / 任务 / 默认）、继承默认色的色块与备注、X 不画色块、默认行本身是原色、四语行文字、乘员单位「名字·乘员」、预览（坦克乘员是队员、用默认色、设置后用自己的、X 是原色、战机乘员空中兵种、任务乘员步枪）、**一次保存同一单位写载具 + 乘员**（直升机乘员、坦克挂载、坦克乘员、默认 `SupportCrewColour`、`SupportCrewColour_MISSION` 五行，逐条 `MarkItemSaved` 后只剩未写部分算改动）、乘员改回默认写空值、乘员行配到载具键被拒、每条值都过 `ValidLoadoutValue` |
+| `room_menu`（C++） | 211 项（原 205）：调色板 = 表、40 色、每色一次、顺序、原色在循环首尾、一圈 41 步、每色经 ini 往返；两条硬编码旧色的用例改为新调色板的首 / 末色 |
+| `room_layout`（Python） | 578 项（原 307）：每个新增元素「默认什么都不画」（皮肤只在 Transparent / HUDIconTexture、文字全空）、判据本身能抓出 Window / ColorChipBox 皮肤与非空文字；Root.cpk 里两种皮肤的定义；白贴图像素与头部格式、不遮蔽原版文件名、插件路径一致；安装 3 个文件、`install_missing` 单独补白贴图 |
+| `room_ui_sigs`（Python） | 35 项（原 28）：新签名逐字节、染色偏移、Skin_Texture 槽 3 / 4、无贴图不画、空路径不绑定、模型皮肤调用已删除 |
+| `hq_palette`（Python，新） | 17 项 |
+| `loadout_generate` | 48 项：新文件里多了白贴图（owner roomui） |
+| `hudtext_check` | all ok |
+| `tools/selftest.py` | 172/172：整合分支上原有 2 项失败（不是本阶段引入，顺手修了）：`release_imports`——`build_release.py` 的 hidden import 缺 `menu_preview`（阶段 7）；`heli_sight_after_aim_lines`——插件读 `SupportCrewColour` / `_MISSION` / `_<单位>` 而发布的 ini 没有这些键、selftest 不认这个前缀（阶段 5）。改：ini 加 `SupportCrewColour=`、`SupportCrewColour_MISSION=`（空 = 原色，与不写相同），selftest 的后缀表加 `SupportCrewColour_`（键 = `CREW_KEYS` + `MISSION`，示例匹配注释里的 `SupportCrewColour_TANK_CREWED=X:FFFFFF`） |
+
+**变异测试**（先提交 6b78a76，再改、跑、还原）：
+
+| 变异 | 结果 |
+|---|---|
+| 布局文字默认改回一个空格 | `room_layout` 变红（「vcHead draws nothing by itself: text ' '」） |
+| 色块皮肤改回 `ColorChipBox_skin` | `room_layout` 变红（「vcR00A draws nothing by itself: skin …ColorChipBox_skin.sgo」） |
+| `SaveItems` 不配乘员行 | `room_ui` 11 项变红（载具 + 乘员两行保存、逐条标记、乘员改回默认等） |
+| `hq_palette.inc` 改一个色值 | `hq_palette` 变红 |
+
+### 没在游戏里验证的（4b 新增；阶段 4 的清单其余各条仍然有效，第 4 条已由本阶段处理）
+
+1. `Mods/UI/EDF6VC_WHITE.DDS` 经 EDFModLoader 重定向后能被 0x7F63E0 加载（新文件名在 `Mods/OBJECT` 已实证，`Mods/UI` 的贴图没有）；
+   8×8 无 mip 的 32 位 DDS 拉伸到 1080×912 的背景是否均匀（单色，理论上没有可见差异）。加载失败时面板与色块不显示、日志 `ROOMUI texture … not loaded`。
+2. 染色 alpha < 1 的背景是否按透明混合（`kPanelColour` 85 %），以及组件颜色（rsi+0xB0）是否为白色。
+3. `HUDIconTexture_skin` 在房间画面的资源组里已加载（阶段 4 只核了 GLOBAL 组的推断）；背景与色块现在都依赖它。
+4. 没有插件 / 插件拒绝时，两个画面与原版完全一样（静态：皮肤不画、文字为空、Transparent 根节点）。要在装了布局、移走 DLL 的情况下各看一次房间与 HQ。
+5. 收回：关菜单、被子画面遮住、`RoomLoadout=0` 时文字与色块立刻消失；再打开时全部重画（写入缓存作废）。
+6. 乘员行：兵种图标、「乘员颜色（兵种）」文字在四种语言下放得下（340 px）；预览显示乘员队员（队长模板不用）。
+7. 一次保存写多行后生成器只启动一次、状态行「已保存 N 个单位」。
+8. 调色板颜色是 `CustomColor` 浮点按 sRGB 直接换算；游戏若按线性色处理，实机颜色会与 HQ 色块略有差别（HQ 绘制还乘了 `[ctx+8]` 的染色，0x7F9D50，未追）。

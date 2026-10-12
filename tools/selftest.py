@@ -2106,8 +2106,10 @@ def heli_sight_after_aim_lines() -> None:
     import support_config
     import support_loadout
     suffixes = {'SupportAircraftCount_': support_config.UNIT_KEYS, 'SupportPreset_': tuple(support_loadout.SEATS),
-                'SupportVehicle_': tuple(support_loadout.VEHICLE_KEYS)}
-    example = {'SupportAircraftCount_': r'\d', 'SupportPreset_': r'[a-z]', 'SupportVehicle_': r'[A-Z]'}   # a count; a kind; a gun
+                'SupportVehicle_': tuple(support_loadout.VEHICLE_KEYS),
+                'SupportCrewColour_': (*support_loadout.CREW_KEYS, support_loadout.MISSION)}   # 阶段 5: the crews' colours
+    example = {'SupportAircraftCount_': r'\d', 'SupportPreset_': r'[a-z]', 'SupportVehicle_': r'[A-Z]',
+               'SupportCrewColour_': r'[0-9A-FX]'}   # a count; a kind; a gun; a colour
 
     def read(key: str) -> bool:
         if f'L"{key}"' in plugin or any(f'L"{key}"' in m for m in modules.values()):

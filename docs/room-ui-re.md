@@ -104,3 +104,19 @@ AI 武器自带 `WeaponIcon`（`app:/weapon/icon/<名>`）【证实】：
 - `text` 是文字表键（0x846E30 → 0x7A3500），`text_dr` 是字面文字（0x8471CC）；SetText 不查表。
 - **EDF6Coop 对房间槽的要求**：Coop 安装时要求 0x180AC48 指向 0x8FDFE0，否则整个 Coop 拒绝（multislot `plugin.cpp` SlotTargets）。
   EDFModLoader 按文件名顺序加载插件（ModLoader.log：EDF6Coop 先于 EDF6VehicleCrew），所以本插件转调 Coop 的钩子。
+
+## 8. 阶段 4b 补充（2026-10-12，静态反汇编 + Root.cpk 数据）
+
+- **Skin_Texture**（vtable 0x17F6228）：构造 0x7F5C20 置 +0xF0..+0xFC、+0x100..+0x10C 为 1.0（0x7F5CD2）；槽 3 绘制 0x7F7040：
+  颜色 = lerp(+0x100, +0xF0, +0xE4) × 组件颜色（rsi+0xB0..），`rax=[rdi+0A0h]` 为空或 `[rax]` 为空时直接收尾（0x7F7190 → 0x7F725A），
+  即**没绑定贴图就什么都不画**；槽 4 状态切换 0x7F7270：状态路径为空不调 0x7F63E0（0x7F73E3），并置 +0xE4=1.0、+0xE8=0。【证实】
+- `HUDIconTexture_skin.sgo` / `LoadingImage_skin.sgo` / `SoldierTypeTexture_skin.sgo` 的 default 路径都是空；`MissionStoryTextBG_skin`
+  是 alpha 0 的 Solid（备选：没用）。【证实（数据）】
+- Root.cpk / DX11.cpk / Chunk01 / Chunk02 里没有纯色独立 DDS；`UI/CHATSHORTCUT_CURSOR.DDS` 是 32 位无压缩（flags 0x81007、
+  像素格式 0x41 / 32 位 / BGRA 掩码、caps 0x1000、无 mip），本 mod 的白贴图用同一格式。【证实（数据）】
+- `SetText(tf, nullptr)` 用空串（0x86369F `lea rdx, L""`）；原版布局 60 个 TextField 是 `text_dr ''`。【证实】
+- **HQ 调色板**：`DEFAULTPACKAGE/CONFIG.SGO` `SoldierInit[class][5][0]` → `App:/DefaultPackage/CustomColor<Class>.sgo`（0xE07D0）；
+  `CustomColor` = 12 × {主, 副} × RGBA；加载器 0xDF1B0（`L"CustomColor"` 0xDF3D5）拷到 GS +0x6FB0 + p*0x3E60 + ((class*4+outfit)*2+ch)*0xC4，
+  选中下标 +0x7070 / +0x7134，初值 = outfit；`HUiHQColorSelect`（vtable 0x1800C40）槽 1 0x881060 拷 12 项到 this+0x790+ch*0xD0，
+  槽 2 0x880F50 每通道 12 个色块（0x880FFE `call 0x880010` → 0x824D40，`cmp rbx,0Ch` 0x88100A）。第 4..11 项各兵种相同。
+  自由调色 `HUiHQColorMake`（vtable 0x1800908）改写 12 个槽之一（0x87D900）。【证实；颜色按 sRGB 换算为推断】
