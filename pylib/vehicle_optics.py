@@ -12,6 +12,9 @@ import hashlib
 from pathlib import Path
 import struct
 
+import cockpit_fits
+import cockpit_kits
+import cockpits
 import dsgo
 import sgo
 from mdb import Bone, Mdb, bind_world, ident, inverse_affine, mdb_read, mdb_write, mmul, rab_read, rab_write, read_elem, cmpl_compress
@@ -32,6 +35,7 @@ class Model:
     stem: str
     digest: str
     lenses: tuple[Lens, ...]
+    cockpits: tuple[cockpits.Fit, ...] = ()   # the seats' first-person cockpits (pylib/cockpit_fits.py)
 
 
 MODELS = (
@@ -47,6 +51,9 @@ MODELS = (
            Lens('vc_optic_01', 'subCannon_A_roll', 'barbette8', (1220, 1221, 1222, 1223)),
            Lens('vc_optic_02', 'subCannon_B_roll', 'barbette8', (3100, 3101, 3102, 3103)))),
 )
+
+
+MODELS = tuple(replace(m, cockpits=cockpit_fits.FITS.get(m.stem, ())) for m in MODELS)
 
 
 def output(spec: Model) -> str:
@@ -184,26 +191,34 @@ def preorder(md: Mdb) -> Mdb:
     return replace(md, bones=bones, objects=objects)
 
 
+def add_marker(md: Mdb, parent_name: str, marker: str, frame: list[float]) -> Mdb:
+    """`md` with a transform-only bone `marker` under `parent_name` whose model-space bind matrix is `frame` (rows: its
+    +x, +y, +z, origin), appended (preorder() puts the skeleton back in DFS order)."""
+    parent = md.bone_index(parent_name)
+    if parent < 0 or md.bone_index(marker) >= 0:
+        raise ValueError(f'unexpected source skeleton for marker {marker} under {parent_name}')
+    local = mmul(frame, inverse_affine(bind_world(md)[parent]))
+    names, bones = list(md.names) + [marker], list(md.bones)
+    bones.append(Bone(len(bones), parent, -1, -1, len(names)-1, 0, 0, 0, 0, 0, 0,
+                      local, inverse_affine(frame), [0.,0.,0.,1.], [0.,0.,0.,1.]))
+    return replace(md, names=names, bones=bones)
+
+
 def mark_model(md: Mdb, spec: Model, sgo_data: bytes) -> Mdb:
-    names, bones = list(md.names), list(md.bones)
     world = bind_world(md)
     for lens in spec.lenses:
         parent = md.bone_index(lens.bone)
-        if parent < 0 or md.bone_index(lens.marker) >= 0:
+        if parent < 0:
             raise ValueError('unexpected source optic skeleton')
         if lens.camera:
-            local = camera_local(sgo_data, lens)
-            frame = mmul(local, world[parent])
+            frame = mmul(camera_local(sgo_data, lens), world[parent])
         else:
             eye, forward = surface(md, lens)
             right = unit(cross(tuple(world[parent][4:7]), forward))
             up = cross(forward, right)
             frame = [*right, 0., *up, 0., *forward, 0., *eye, 1.]
-            local = mmul(frame, inverse_affine(world[parent]))
-        names.append(lens.marker)
-        bones.append(Bone(len(bones), parent, -1, -1, len(names)-1, 0, 0, 0, 0, 0, 0,
-                          local, inverse_affine(frame), [0.,0.,0.,1.], [0.,0.,0.,1.]))
-    return preorder(replace(md, names=names, bones=bones))
+        md = add_marker(md, lens.bone, lens.marker, frame)
+    return preorder(md)
 
 
 def build_model(game, spec: Model) -> bytes:
@@ -216,7 +231,14 @@ def build_model(game, spec: Model) -> bytes:
     if hashlib.sha256(raw).hexdigest() != spec.digest:
         raise ValueError(f'{name}: model geometry differs from the audited optic profile; preserving the other mod')
     marked = mark_model(mdb_read(raw), spec, game.read('OBJECT', spec.stem+'.SGO'))
+    textures: dict[str, bytes] = {}
+    if spec.cockpits:
+        try:
+            marked, textures = cockpits.graft(marked, spec.cockpits, cockpit_kits.KITS, game, preorder)
+        except cockpits.CockpitAssetsMissing as e:   # the optics still; the seats keep the stock camera
+            print(f'{name}: no cockpits ({e})')
     model.stored = cmpl_compress(mdb_write(marked))
+    cockpits.add_textures(arc, textures)
     return rab_write(arc)
 
 
