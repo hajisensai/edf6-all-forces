@@ -144,6 +144,15 @@ check('L"SupportCrewColour"' in config_cpp and 'L"SupportCrewColour_MISSION"' in
       'L"SupportCrewColour_%ls"' in config_cpp, 'the plugin reads the default, the mission\'s and every unit\'s crew colour')
 check(set(sl.VEHICLE_CREW_KEYS) == set(sc.GROUND_KEYS[2:8]) and set(sl.CREW_KEYS) - {'', sl.MISSION} <= set(sc.UNIT_KEYS) and
       not set(sl.CREWLESS) & set(sl.CREW_KEYS), 'the ground vehicles\' crews; every crew key a catalog key with a crew')
+ground_cpp = re.search(r'kGroundCrewKeys\[\]=\{([^}]*)\}', header)
+check(ground_cpp is not None and re.findall(r'L"([A-Z_]+)"', ground_cpp.group(1)) == list(sl.VEHICLE_CREW_KEYS),
+      'the plugin\'s ground crew keys (support_loadout.h kGroundCrewKeys) are VEHICLE_CREW_KEYS, in order')
+ground_fn = re.search(r'inline bool IsGroundCrewKey\(const wchar_t\* key\) noexcept \{(.*?)\n\}', header, re.S)
+check(ground_fn is not None and '_wcsicmp(k,key)' in ground_fn.group(1) and '_wcsnicmp' not in ground_fn.group(1) and
+      'kGroundCrewPrefixes' not in header, 'IsGroundCrewKey matches whole keys, never a prefix')
+check(not {'TANK_AIRDROP', 'TRANSPORT_AIRDROP', 'TRUCK_AIRDROP'} & set(sl.VEHICLE_CREW_KEYS) and
+      all(k in sc.UNIT_KEYS for k in ('TANK_AIRDROP', 'TRANSPORT_AIRDROP', 'TRUCK_AIRDROP')),
+      'the container deliveries (a transport helicopter\'s pilot) are aircraft crews')
 dispatch = read('src/support_dispatch.cpp')
 check(dispatch.count('SupportCfg().vehicleCrew') == 1 and 'crew[i]=i>0 && composed ? SupportLoadoutResource' in dispatch,
       'the ground crews are SupportVehicleCrewWeapon\'s (the only plan using it), every other crew SupportAircraftCrewWeapon\'s')

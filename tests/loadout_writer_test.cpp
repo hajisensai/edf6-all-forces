@@ -102,6 +102,34 @@ void Refusals() {
     Check(Edit(kIni,LoadoutField::preset,L"SQUAD",12,nullptr,&ok)=="unchanged" && !ok,"no value refused");
 }
 
+// A whole menu save at once (EditLoadoutIniAll): the same bytes as the edits one after another; one refused edit (anywhere
+// in the list) and nothing at all is applied, the refused one named.
+void Batch() {
+    const LoadoutEdit edits[]={
+        {LoadoutField::preset,L"SQUAD",12,L"lance@1E3A8A*2,cannon"},{LoadoutField::vehicle,L"TANK_CREWED",0,L"HE,AP:25"},
+        {LoadoutField::vehicle,L"FIGHTER",0,L""},{LoadoutField::crew,L"",0,L"1E3A8A"},{LoadoutField::crew,L"TANK_CREWED",0,L"X:FFFFFF"},
+        {LoadoutField::preset,L"SQUAD",12,L"sniper*3"}};   // the same key twice: the last wins, as one save after another
+    std::string one=kIni;
+    for(const LoadoutEdit& e:edits){bool ok=false;one=Edit(one,e.field,e.unit,e.seats,e.value,&ok);Check(ok,"each edit alone is valid");}
+    std::string all="unchanged";int failed=7;wchar_t why[200]{};
+    Check(EditLoadoutIniAll(kIni,edits,6,&all,&failed,why,200) && all==one && failed==-1,
+          "all edits in one pass: byte for byte what saving them one by one gives");
+    for(int bad=0;bad<6;++bad) {
+        LoadoutEdit broken[6];
+        for(int i=0;i<6;++i)broken[i]=edits[i];
+        broken[bad].value=broken[bad].field==LoadoutField::preset ? L"dragon" : broken[bad].field==LoadoutField::vehicle ?
+                          L"AP:25\r\nEnabled=0" : L"1E3A8A:";
+        all="unchanged";failed=-1;why[0]=0;
+        Check(!EditLoadoutIniAll(kIni,broken,6,&all,&failed,why,200) && all=="unchanged" && failed==bad && why[0],
+              "one refused edit: none applied, it is named and why");
+    }
+    LoadoutEdit unknown[2]={edits[0],{LoadoutField::preset,L"SQ=UAD",12,L"rifle"}};
+    Check(!EditLoadoutIniAll(kIni,unknown,2,&all,&failed,why,200) && failed==1,"a bad key refuses the whole save");
+    std::string utf16("\xFF\xFE[\0V\0",6);all="unchanged";
+    Check(!EditLoadoutIniAll(utf16,edits,1,&all,&failed,why,200) && all=="unchanged" && failed==-1,"a UTF-16 ini: nothing applied");
+    Check(EditLoadoutIniAll(kIni,edits,0,&all,&failed,why,200) && all==kIni,"nothing to save: the text as it was");
+}
+
 std::wstring TempPath(const wchar_t* name) {
     wchar_t dir[MAX_PATH];GetTempPathW(MAX_PATH,dir);
     wchar_t path[MAX_PATH];_snwprintf_s(path,_TRUNCATE,L"%lsedf6vc_loadout_writer_%lu_%ls",dir,GetCurrentProcessId(),name);
@@ -182,6 +210,7 @@ int main() {
     Crews();
     Shapes();
     Refusals();
+    Batch();
     RoundTrip();
     StatusText();
     Process();

@@ -1,11 +1,14 @@
 // support_variants.h. EDF.dll TimeDateStamp 0x678CCB46: the preload (0x7A3780 on the preload manager 0x20B29A8) is the one
 // support_soldier.cpp and support_spawn.cpp call for the stock templates and hulls, checked by the same bytes.
 #include "support_variants.h"
+#include "support_variants_logic.h"
+#include "room_sync.h"
 #include "support_config.h"
 #include "support_loadout.h"
 #include "support_protocol.h"
 #include "crew.h"
 #include "memory.h"
+#include <string>
 #include <cwchar>
 #include <cwctype>
 #include <cstdio>
@@ -17,9 +20,11 @@ namespace {
 constexpr unsigned kPreload=0x7A3780;
 constexpr std::size_t kPreloadMgr=0x20B29A8;
 const unsigned char kPreloadSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48};
-struct Ready { wchar_t file[96]; };
-Ready ready[kSupportVariantsMost]{};
-int readyCount=0;
+static_assert(kConfiguredVariantsMost==kSupportConfigUnits*(kSupportLoadoutMost+2)+2,
+              "ForEachConfiguredVariant's bound: a look per seat, a crew and a loadout per entry, the mission crews' two");
+variants::MissionSet wanted;     // what this mission's plans can ask for (MissionVariants)
+variants::MissionSet ready;      // ...of those, preloaded here
+variants::HostSet hostList;      // the room's host list this mission came from (empty: none)
 unsigned char bloom[kVariantBloomBytes]{};
 wchar_t noted[32][96]{};
 int notedCount=0;
@@ -32,61 +37,65 @@ bool ModsPath(const wchar_t* sub,wchar_t* out,std::size_t capacity) noexcept {
     *slash=0;
     return wcscat_s(out,capacity,L"\\Mods\\")==0 && wcscat_s(out,capacity,sub)==0;
 }
-void Upper(wchar_t* s) noexcept { for(;*s;++s)*s=static_cast<wchar_t>(std::towupper(*s)); }
-void Find(const wchar_t* pattern,void* mgr) noexcept {
+// One file (a variant name MissionVariants gave) preloaded when it is in Mods/OBJECT; true when it was.
+bool PreloadOne(const wchar_t* file,void* mgr) noexcept {
+    wchar_t path[MAX_PATH],sub[128];
+    if(swprintf_s(sub,L"OBJECT\\%ls",file)<0 || !ModsPath(sub,path,std::size(path)))return false;
+    const DWORD a=GetFileAttributesW(path);
+    if(a==INVALID_FILE_ATTRIBUTES || (a&FILE_ATTRIBUTE_DIRECTORY))return false;
+    wchar_t app[128];
+    if(swprintf_s(app,L"app:/object/%ls",file)<0)return false;
+    for(wchar_t* c=app;*c;++c)*c=static_cast<wchar_t>(std::towlower(*c));
+    __try {
+        reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreload)(mgr,app,2,-1);
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        Log("SUPPORT variant %ls: preload fault, left unloaded",file);
+        return false;
+    }
+}
+// The game's preload manager (null: none yet).
+void* PreloadManager() noexcept {
+    void* mgr=nullptr;
+    __try { mgr=At<void*>(image,kPreloadMgr); } __except(EXCEPTION_EXECUTE_HANDLER){mgr=nullptr;}
+    return mgr;
+}
+// The pending list's bytes (empty when there is none).
+std::string PendingText() noexcept {
+    std::string text;
     wchar_t path[MAX_PATH];
-    if(!ModsPath(pattern,path,std::size(path)))return;
-    WIN32_FIND_DATAW found;
-    const HANDLE h=FindFirstFileW(path,&found);
-    if(h==INVALID_HANDLE_VALUE)return;
-    do {
-        if(found.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)continue;
-        if(readyCount>=kSupportVariantsMost) {
-            Log("SUPPORT variant %ls: more than %d variant files, left unloaded (stock where a plan wants it)",found.cFileName,
-                kSupportVariantsMost);
-            continue;
-        }
-        auto& row=ready[readyCount];
-        // Too long a name skipped by its length first: wcscpy_s / swprintf_s on one would not fail with an error code but
-        // call the CRT's invalid parameter handler (no handler set: the game killed on the spot, at a mission's load).
-        if(std::wcslen(found.cFileName)>=std::size(row.file)) {
-            Log("SUPPORT variant %ls: name too long, left unloaded",found.cFileName);
-            continue;
-        }
-        if(wcscpy_s(row.file,found.cFileName))continue;
-        Upper(row.file);
-        wchar_t app[128];
-        if(swprintf_s(app,L"app:/object/%ls",found.cFileName)<0)continue;
-        for(wchar_t* c=app;*c;++c)*c=static_cast<wchar_t>(std::towlower(*c));
-        bool ok=false;
-        __try {
-            reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreload)(mgr,app,2,-1);
-            ok=true;
-        } __except(EXCEPTION_EXECUTE_HANDLER) {
-            Log("SUPPORT variant %ls: preload fault, left unloaded",row.file);
-        }
-        if(!ok)continue;
-        BloomAdd(bloom,VariantHash(row.file));
-        ++readyCount;
-    } while(FindNextFileW(h,&found));
-    FindClose(h);
+    if(!ModsPath(L"Plugins\\EDF6VehicleCrew.variants_pending.txt",path,std::size(path)))return text;
+    FILE* in=nullptr;
+    if(_wfopen_s(&in,path,L"rb") || !in)return text;
+    try {
+        char buf[4096];
+        for(std::size_t n;(n=std::fread(buf,1,sizeof(buf),in))>0 && text.size()<(1u<<20);)text.append(buf,n);   // 1 MiB: its tail
+    } catch(...) { text.clear(); }
+    std::fclose(in);
+    return text;
 }
 }  // namespace
 
 void PreloadSupportVariants() noexcept {
-    readyCount=0;std::memset(bloom,0,sizeof(bloom));notedCount=0;
+    ready.count=0;wanted.count=0;hostList.count=0;std::memset(bloom,0,sizeof(bloom));notedCount=0;
     if(!image || !Matches(kPreload,kPreloadSig,sizeof(kPreloadSig))){Log("SUPPORT variants: preload profile mismatch, none loaded");return;}
-    void* mgr=nullptr;
-    __try { mgr=At<void*>(image,kPreloadMgr); } __except(EXCEPTION_EXECUTE_HANDLER){mgr=nullptr;}
+    void* const mgr=PreloadManager();
     if(!mgr)return;
-    Find(L"OBJECT\\EDF6VC_NPC_*.SGO",mgr);
-    Find(L"OBJECT\\EDF6VC_LO_*.SGO",mgr);
-    if(readyCount)Log("SUPPORT variants: %d generated soldier / vehicle files preloaded",readyCount);
+    roomsync::ForEachRoomHostVariant([](void*,const wchar_t* file) noexcept { hostList.Add(file); },nullptr);
+    const std::string pending=PendingText();
+    const variants::MissionParts parts=variants::MissionVariants(&wanted,
+        [](auto&& put){ForEachConfiguredVariant([](void* c,const wchar_t* f){(*static_cast<decltype(&put)>(c))(f);},&put);},
+        [](auto&& put){for(int i=0;i<hostList.count;++i)put(hostList.name[i]);},
+        pending.data(),pending.size());
+    for(int i=0;i<wanted.count;++i)
+        if(PreloadOne(wanted.name[i],mgr))ready.Add(wanted.name[i]);
+    variants::HelloBloom(ready,&hostList,bloom);
+    Log("SUPPORT variants: %d of %d wanted files preloaded (configured %d, the room host's list %d, pending %d; %d over a bound)%s",
+        ready.count,wanted.count,parts.configured,parts.host,parts.pending,parts.dropped,
+        hostList.count ? "; the hello names the host's list's alone" : "");
 }
 bool SupportVariantReady(const wchar_t* file) noexcept {
-    if(!file)return false;
-    for(int i=0;i<readyCount;++i)if(!_wcsicmp(ready[i].file,file))return true;
-    return false;
+    return file && ready.Has(file);
 }
 void SupportVariantHello(std::uint32_t* ext,unsigned char* bloom32) noexcept {
     if(ext)*ext=support_net::kExtVariants;

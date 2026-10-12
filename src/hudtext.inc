@@ -668,6 +668,7 @@ HUDTEXT(roomSyncHostWaiting,L"Waiting for the host's file list",L"等待房主�
 HUDTEXT(roomSyncLeftOut,L"%d files not announced (list too long): pending list as before",L"%d 个文件没能公布（清单太长）：照旧走待生成清单",L"%d 個檔案沒能公布（清單太長）：照舊走待生成清單",L"%d 個のファイルは未通知（リストが長すぎる）：従来どおり生成待ちリストへ")
 HUDTEXT(roomSyncSelfGenerating,L"This PC: %d files missing, generating",L"本机缺 %d 个文件，生成中",L"本機缺 %d 個檔案，生成中",L"このPC：%d 個のファイルが不足、生成中")
 HUDTEXT(roomSyncSelfFailed,L"This PC: %d files missing, generation failed: %ls",L"本机缺 %d 个文件，生成失败：%ls",L"本機缺 %d 個檔案，生成失敗：%ls",L"このPC：%d 個のファイルが不足、生成失敗：%ls")
+HUDTEXT(roomSyncSelfCapped,L"This PC: %d files over this room's limit of %d: they come stock",L"本机还缺 %d 个文件，超过每个房间最多生成 %d 个的上限：这些按原版出动",L"本機還缺 %d 個檔案，超過每個房間最多產生 %d 個的上限：這些按原版出動",L"このPC：%d 個のファイルがルームの上限 %d 個を超過：これらは原版のまま")
 HUDTEXT(roomSyncSelfNoGenerator,L"This PC: %d files missing, no generator (reinstall)",L"本机缺 %d 个文件，找不到生成器（请重新安装）",L"本機缺 %d 個檔案，找不到生成器（請重新安裝）",L"このPC：%d 個のファイルが不足、生成器なし（再インストールしてください）")
 HUDTEXT(roomSyncMemberOld,L"Member %d has no pre-sync (older All Forces or Coop)",L"成员 %d 没有预同步（旧版全军出击或 Coop）",L"成員 %d 沒有預同步（舊版全軍出擊或 Coop）",L"メンバー %d は事前同期なし（旧版 All Forces か Coop）")
 HUDTEXT(roomSyncMemberSyncing,L"Member %d: checking the list",L"成员 %d 正在核对清单",L"成員 %d 正在核對清單",L"メンバー %d：リスト確認中")

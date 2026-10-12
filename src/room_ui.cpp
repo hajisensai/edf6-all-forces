@@ -42,6 +42,10 @@ namespace rm=roommenu;
 // --- The game's side (EDF.dll 0x678CCB46; docs/room-ui-re.md, the 2026-10-12 RE in 阶段 4) ---
 constexpr unsigned kRoomSlot=0x180AC48,kRoomUpdate=0x8FDFE0;   // HUiRoom vtable 0x180AC40 slot 1 (OnUpdate)
 constexpr unsigned kHqSlot=0x1804DE0,kHqUpdate=0x89F740;       // HUiHQMain vtable 0x1804DD8 slot 1
+// Their scalar deleting destructors (slot 5; (this, flags), bit 0: delete): the screen object's end. A new screen may be
+// made at the address of the one that went: the identity is "the one whose destructor has not run", never the pointer.
+constexpr unsigned kRoomGoneSlot=0x180AC68,kRoomGone=0x8F7510;  // calls ~HUiRoom 0x8F5950, then delete 0xCA0 bytes
+constexpr unsigned kHqGoneSlot=0x1804E00,kHqGone=0x89F480;      // ~HUiHQMain inline, then delete 0x810 bytes
 constexpr unsigned kGetInput=0x8DAD00;      // HUiBase::GetInput(this, ctx): ctx+8, nullptr while covered / in a transition
 constexpr unsigned kFindIndex=0x839600;     // HUiLayout: (this, const std::wstring* name) -> the first index or -1
 constexpr unsigned kComponentAt=0x839560;   // HUiLayout: (this, shared_ptr<ui::Component>* out, index), no cast
@@ -88,7 +92,16 @@ const Sig kDrawSigs[]={{kGetInput,kGetInputSig,sizeof(kGetInputSig)},{kFindIndex
 const unsigned char kRoomUpdateSig[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x18,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56};
 // push rbx; sub rsp,30h; mov rbx,rcx; call 0x84B490 (HUiLayout's update: focus, cancel, buttons)
 const unsigned char kHqUpdateSig[]={0x40,0x53,0x48,0x83,0xEC,0x30,0x48,0x8B,0xD9,0xE8,0x42,0xBD,0xFA,0xFF,0x48,0x8D};
-const Sig kScreenSigs[]={{kRoomUpdate,kRoomUpdateSig,sizeof(kRoomUpdateSig)},{kHqUpdate,kHqUpdateSig,sizeof(kHqUpdateSig)}};
+// HUiRoom's deleting destructor: mov ebx,edx; mov rdi,rcx; call ~HUiRoom (0x8F5950); test bl,1; je; mov edx,0CA0h.
+const unsigned char kRoomGoneSig[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x20,0x8B,0xDA,0x48,0x8B,0xF9,0xE8,0x2C,0xE4,0xFF,
+    0xFF,0xF6,0xC3,0x01,0x74,0x0D,0xBA,0xA0,0x0C,0x00,0x00};
+// ~HUiRoom's first store: lea rax,[HUiRoom's vtable 0x180AC40]; mov [rcx],rax (0x8F5962).
+const unsigned char kRoomDtorSig[]={0x48,0x8D,0x05,0xD7,0x52,0xF1,0x00,0x48,0x89,0x01};
+// HUiHQMain's deleting destructor: lea rax,[its vtable 0x1804DD8]; ...; mov [rcx],rax; mov ebp,edx (0x89F480).
+const unsigned char kHqGoneSig[]={0x48,0x89,0x5C,0x24,0x18,0x55,0x48,0x83,0xEC,0x20,0x48,0x8D,0x05,0x47,0x59,0xF6,0x00,0x48,0x89,
+    0x7C,0x24,0x38,0x48,0x89,0x01,0x8B,0xEA};
+const Sig kScreenSigs[]={{kRoomUpdate,kRoomUpdateSig,sizeof(kRoomUpdateSig)},{kHqUpdate,kHqUpdateSig,sizeof(kHqUpdateSig)},
+    {kRoomGone,kRoomGoneSig,sizeof(kRoomGoneSig)},{0x8F5962,kRoomDtorSig,sizeof(kRoomDtorSig)},{kHqGone,kHqGoneSig,sizeof(kHqGoneSig)}};
 // The pad table: its channel writer 0x1182A00 (+48h value, +4Ch held, +4Dh = 0); the loop's base (0x1188315: lea r13,
 // [0x2136530]); A and B from wButtons bits 12 / 13 into channels +70h / +78h (0x1188A4D).
 const unsigned char kPadWriterSig[]={0xF3,0x0F,0x11,0x49,0x48,0x44,0x88,0x41,0x4C,0xC6,0x41,0x4D,0x00,0xC3};
@@ -122,6 +135,7 @@ WideString Wide(const wchar_t* s) noexcept {
 }
 
 using UpdateFn=std::uint64_t(__fastcall*)(unsigned char*,void*);
+using GoneFn=void*(__fastcall*)(unsigned char*,unsigned);
 using GetInputFn=void*(__fastcall*)(unsigned char*,void*);
 using FindIndexFn=int(__fastcall*)(unsigned char*,const WideString*);
 using AtFn=Shared*(__fastcall*)(unsigned char*,Shared*,int);
@@ -130,8 +144,9 @@ using FindFn=Shared*(__fastcall*)(unsigned char*,Shared*,const WideString*);
 using TextureSkinFn=Shared*(__fastcall*)(Shared*,Shared*);
 using SetTextureFn=bool(__fastcall*)(void*,const WideString*);
 
-struct Screen { const char* name; unsigned slot,stock; bool room; UpdateFn next; bool ok; };
-Screen screens[2]={{"room",kRoomSlot,kRoomUpdate,true,nullptr,false},{"hq",kHqSlot,kHqUpdate,false,nullptr,false}};
+struct Screen { const char* name; unsigned slot,stock,goneSlot,goneStock; bool room; UpdateFn next; GoneFn gone; bool ok; };
+Screen screens[2]={{"room",kRoomSlot,kRoomUpdate,kRoomGoneSlot,kRoomGone,true,nullptr,nullptr,false},
+                   {"hq",kHqSlot,kHqUpdate,kHqGoneSlot,kHqGone,false,nullptr,nullptr,false}};
 bool padOk=false;   // the game's pad table checked (else the keyboard alone)
 
 // What was last written into each element of the screen now (the calls reload a texture / re-lay a text: only when it
@@ -161,6 +176,8 @@ struct State {
     wchar_t saveNote[kLineMost]{};
     bool saveWarn=false;
     bool missingLogged=false;
+    bool drew=false;               // the menu was drawn on this screen object (off: taken back, else never touched)
+    Switches switches{};
     GenerateStatus gen{};
     ULONGLONG genAt=0;
     rm::UnitSpec specs[rm::kMostUnits]{};
@@ -172,6 +189,10 @@ rm::SaveSet saveSet;   // big: not on the stack
 // MissionStart (room_ui.h ResetRoomUi) asks; the next screen frame (the UI thread: room_sync.h's and room_preview.h's
 // contract) does it.
 std::atomic<bool> resetAsked{false};
+// The screen object the menu follows (st.self, published for the destructor hooks, whatever thread runs them) and whether
+// its destructor has run since: the next frame forgets it even when the new screen sits at the same address.
+std::atomic<unsigned char*> followed{nullptr};
+std::atomic<bool> followedGone{false};
 
 void NoteSave(Tx t,const wchar_t* arg,bool warn) noexcept {
     _snwprintf_s(st.saveNote,_TRUNCATE,hudtext::Tr(t),arg ? arg : L"");
@@ -262,23 +283,27 @@ SaveItem saveItems[2*rm::kMostUnits];   // rm::SaveSet::line's size   // one per
 void Save() noexcept {
     const int n=rm::CollectSave(st.menu,&saveSet) ? SaveItems(st.menu,saveSet,saveItems,static_cast<int>(std::size(saveItems))) : -1;
     if(n<0){NoteSave(Tx::roomSaveRefused,nullptr,true);Log("ROOMUI save refused: a value would not read back as edited");return;}
-    for(int at=0;at<n;++at) {
-        const SaveItem& item=saveItems[at];
-        wchar_t why[160]{};
-        if(!SaveSupportLoadout(item.field,item.unit,item.value,why,std::size(why))) {
-            Log("ROOMUI save %ls (field %d)=%ls failed: %ls (%d of %d written)",item.unit,static_cast<int>(item.field),item.value,why,at,n);
-            NoteSave(Tx::roomSaveFailed,why,true);
-            return;   // the lines before it are written and marked; this one and the rest stay edited
-        }
-        MarkItemSaved(st.menu,item);
+    // All lines in one write (all or none: a refused one leaves the file and every edit as they were).
+    static LoadoutSave lines[kLoadoutSaveMost];
+    static_assert(std::size(saveItems)<=kLoadoutSaveMost,"a whole save fits one SaveSupportLoadouts");
+    for(int at=0;at<n;++at)lines[at]=LoadoutSave{saveItems[at].field,saveItems[at].unit,saveItems[at].value};
+    wchar_t why[160]{};
+    int failed=-1;
+    if(!SaveSupportLoadouts(lines,n,&failed,why,std::size(why))) {
+        if(failed>=0)Log("ROOMUI save refused at %ls (field %d)=%ls: %ls (nothing written, %d lines)",saveItems[failed].unit,
+                         static_cast<int>(saveItems[failed].field),saveItems[failed].value,why,n);
+        else Log("ROOMUI save failed: %ls (nothing written, %d lines)",why,n);
+        NoteSave(Tx::roomSaveFailed,why,true);
+        return;   // every line stays edited
     }
+    for(int at=0;at<n;++at)MarkItemSaved(st.menu,saveItems[at]);
     int units=0;
     for(int at=0;at<n;++at)units+=at==0 || saveItems[at].unitIndex!=saveItems[at-1].unitIndex;
     rm::MarkSaved(st.menu);
     st.menu.open=true;   // stays up on the unit list: the generator's progress is shown
     _snwprintf_s(st.saveNote,_TRUNCATE,hudtext::Tr(Tx::roomSaved),units);
     st.saveWarn=false;
-    wchar_t why[160]{};
+    why[0]=0;
     if(!StartVariantGeneration(why,std::size(why))) {
         Log("ROOMUI generator not started: %ls",why);
         NoteSave(Tx::roomGenStartFailed,why,true);
@@ -295,18 +320,30 @@ void Act(rm::Act a) noexcept {
     }
 }
 
-// --- The screen object changed (another room, the HQ, a new instance): the old one's menu goes ---
-void Forget(bool leftRoom) noexcept {
+// --- The screen object changed (another room, the HQ, a new instance, one ended by its destructor): its menu goes ---
+// The old object is never touched (it may be gone): nothing drawn is taken back from it.
+void Forget() noexcept {
     HidePreview();
     if(st.menu.open)rm::Discard(st.menu);
-    if(leftRoom)roomsync::LeaveRoomSync();
-    st.self=nullptr;st.gate=Gate{};st.missingLogged=false;st.written.valid=false;
+    if(LeaveOnForget(st.switches))roomsync::LeaveRoomSync();
+    st.self=nullptr;st.gate=Gate{};st.missingLogged=false;st.written.valid=false;st.drew=false;
+    followed.store(nullptr);
+    followedGone.store(false);
 }
 void Follow(unsigned char* self,bool room) noexcept {
+    if(followedGone.exchange(false) && st.self) {
+        Log("ROOMUI screen %p (%s) ended (its destructor ran): forgotten",st.self,st.room ? "room" : "HQ");
+        Forget();
+    }
     if(self==st.self)return;
     if(st.self)Log("ROOMUI screen %p (%s) replaced by %p (%s)",st.self,st.room ? "room" : "HQ",self,room ? "room" : "HQ");
-    Forget(st.room && st.self);
+    Forget();
     st.self=self;st.room=room;
+    followed.store(self);
+}
+// A screen's destructor (any thread): the one followed is marked gone; nothing else is touched here.
+void NoteGone(unsigned char* self) noexcept {
+    if(self && followed.load()==self)followedGone.store(true);
 }
 
 // --- Drawing ---
@@ -489,20 +526,37 @@ void DrawMenu(unsigned char* self) noexcept {
 }
 
 // --- One frame of either screen ---
+// Off (Enabled / RoomLoadout turned 0 since the load): the screen's own update with its own ctx, nothing read; the menu
+// dropped, the preview put back, and what the menu drew on this screen taken back (write-on-change: once).
+std::uint64_t Off(Screen& screen,unsigned char* self,void* ctx) noexcept {
+    if(st.menu.open){rm::Discard(st.menu);Log("ROOMUI menu closed: RoomLoadout / Enabled turned off");}
+    st.held=rm::Keys{};st.gate=Gate{};
+    HidePreview();
+    roompreview::TickPreview(false);
+    const std::uint64_t result=screen.next(self,ctx);
+    if(st.drew)Draw(self,false);
+    return result;
+}
 std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
     if(resetAsked.exchange(false)) {
         Log("ROOMUI a mission started since the last screen frame: the room is left, the menu dropped");
-        Forget(st.room && st.self);
+        Forget();
         st.held=rm::Keys{};
     }
     Follow(self,screen.room);
     const bool on=Cfg().enabled && Cfg().roomLoadout;
+    const SwitchPlan sw=PlanSwitches(st.switches,on,Cfg().roomPreSync,screen.room);
+    if(sw.leave) {   // a switch turned off: withdrawn, and the next mission does not take the host's list either
+        roomsync::LeaveRoomSync();
+        roomsync::ForgetRoomHostList();
+        Log("ROOMSYNC stopped (Enabled / RoomLoadout / RoomPreSync off): this machine's keys withdrawn, the host's list dropped");
+    }
+    if(sw.pass)return Off(screen,self,ctx);
     hudtext::Use(hudtext::Resolve(Cfg().hudLanguage,GameTextLanguage()));
     bool hasInput=false;
-    if(on)__try { hasInput=reinterpret_cast<GetInputFn>(image+kGetInput)(self,ctx)!=nullptr; } __except(EXCEPTION_EXECUTE_HANDLER){ hasInput=false; }
-    const rm::Keys down=on ? KeysDown(ReadRaw(),static_cast<std::uint16_t>(Cfg().roomLoadoutButton)) : rm::Keys{};
+    __try { hasInput=reinterpret_cast<GetInputFn>(image+kGetInput)(self,ctx)!=nullptr; } __except(EXCEPTION_EXECUTE_HANDLER){ hasInput=false; }
+    const rm::Keys down=KeysDown(ReadRaw(),static_cast<std::uint16_t>(Cfg().roomLoadoutButton));
     const rm::Keys press=rm::Presses(st.held,down);
-    if(!on && st.menu.open){rm::Discard(st.menu);Log("ROOMUI menu closed: RoomLoadout / Enabled turned off");}
     const Plan plan=PlanFrame(hasInput,st.menu.open);
     if(plan.step)Act(rm::Step(st.menu,press));
     const bool take=TakeInput(st.gate,st.menu.open,AnyDown(down));
@@ -513,15 +567,17 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
         std::memset(copy+kCtxInput,0,sizeof(void*));
         result=screen.next(self,copy);
     } else result=screen.next(self,ctx);
-    if(screen.room)roomsync::TickRoomSync();
+    if(sw.tick)roomsync::TickRoomSync();
     const bool shown=PlanFrame(hasInput,st.menu.open).show;
     FollowPreview(shown);
     roompreview::TickPreview(shown);
-    if(Draw(self,shown) && shown)DrawMenu(self);
+    if(Draw(self,shown) && shown){DrawMenu(self);st.drew=true;}
     return result;
 }
 std::uint64_t __fastcall RoomHook(unsigned char* self,void* ctx) { return Frame(screens[0],self,ctx); }
 std::uint64_t __fastcall HqHook(unsigned char* self,void* ctx) { return Frame(screens[1],self,ctx); }
+void* __fastcall RoomGoneHook(unsigned char* self,unsigned flags) { NoteGone(self); return screens[0].gone(self,flags); }
+void* __fastcall HqGoneHook(unsigned char* self,unsigned flags) { NoteGone(self); return screens[1].gone(self,flags); }
 
 bool AllMatch(const Sig* sigs,std::size_t n,const char* what,const char* then) noexcept {
     for(std::size_t i=0;i<n;++i)
@@ -542,7 +598,19 @@ bool CoopStillToLoad() noexcept {
     if(!slash || wcscpy_s(slash+1,static_cast<std::size_t>(std::end(path)-(slash+1)),L"EDF6Coop.dll"))return false;
     return GetFileAttributesW(path)!=INVALID_FILE_ATTRIBUTES && !GetModuleHandleW(L"EDF6Coop.dll");
 }
-bool Chain(Screen& s,void* hook) noexcept {
+// The screen's destructor chained first (whatever its slot holds now): without it a new screen at a dead one's address
+// would inherit its menu, so a screen whose destructor cannot be chained gets no menu.
+bool ChainGone(Screen& s,void* hook) noexcept {
+    void** const slot=reinterpret_cast<void**>(image+s.goneSlot);
+    void* const current=Readable(slot,8) ? *slot : nullptr;
+    if(!current){Log("HOOK roomui REFUSED: the %s screen's destructor slot is not readable / empty",s.name);return false;}
+    if(current!=image+s.goneStock)Log("HOOK roomui: the %s screen's destructor chains onto %p (another plugin)",s.name,current);
+    s.gone=reinterpret_cast<GoneFn>(current);
+    if(PatchVtableSlot(slot,current,hook))return true;
+    Log("HOOK roomui REFUSED: the %s screen's destructor slot could not be patched",s.name);
+    return false;
+}
+bool Chain(Screen& s,void* hook,void* goneHook) noexcept {
     void** const slot=reinterpret_cast<void**>(image+s.slot);
     if(!Readable(slot,8)){Log("HOOK roomui REFUSED: the %s screen's OnUpdate slot is not readable",s.name);return false;}
     void* const current=*slot;
@@ -553,6 +621,7 @@ bool Chain(Screen& s,void* hook) noexcept {
         return false;
     }
     if(current!=image+s.stock)Log("HOOK roomui: the %s screen's OnUpdate chains onto %p (another plugin: EDF6Coop)",s.name,current);
+    if(!ChainGone(s,goneHook))return false;
     s.next=reinterpret_cast<UpdateFn>(current);
     s.ok=PatchVtableSlot(slot,current,hook);
     return s.ok;
@@ -561,13 +630,20 @@ bool Chain(Screen& s,void* hook) noexcept {
 
 bool InstallRoomUi() noexcept {
     constexpr const char* kUntouched="both screens stay as they are";
+    // RoomLoadout=0 at load: nothing is installed, nothing checked (crew.h: both screens untouched; the room pre-sync never
+    // runs). Turning it on takes a restart. Enabled (the plugin's live switch) and RoomLoadout turned 0 later: the frames
+    // pass straight through (Off).
+    if(!Cfg().roomLoadout) {
+        Log("HOOK roomui off (RoomLoadout=0 at load): nothing installed, both screens untouched, no room pre-sync");
+        return false;
+    }
     if(!AllMatch(kDrawSigs,std::size(kDrawSigs),"the layout calls",kUntouched) ||
        !AllMatch(kScreenSigs,std::size(kScreenSigs),"the screens' updates",kUntouched))
         return false;
     padOk=AllMatch(kPadSigs,std::size(kPadSigs),"the pad table","the menu: keyboard only");
     Log("HOOK roomui preview=%d (stage 7; 0: the menu runs without the 3D preview)",roompreview::InstallPreviewHooks());
-    const bool room=Chain(screens[0],reinterpret_cast<void*>(&RoomHook));
-    const bool hq=Chain(screens[1],reinterpret_cast<void*>(&HqHook));
+    const bool room=Chain(screens[0],reinterpret_cast<void*>(&RoomHook),reinterpret_cast<void*>(&RoomGoneHook));
+    const bool hq=Chain(screens[1],reinterpret_cast<void*>(&HqHook),reinterpret_cast<void*>(&HqGoneHook));
     Log("HOOK roomui room=%d hq=%d (the support loadout menu in the online room and the offline HQ)",room,hq);
     return room || hq;
 }

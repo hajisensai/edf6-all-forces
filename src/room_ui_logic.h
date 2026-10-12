@@ -147,6 +147,26 @@ inline bool TakeInput(Gate& g,bool open,bool anyDown) noexcept {
 struct Plan { bool step,show; };
 inline Plan PlanFrame(bool hasInput,bool open) noexcept { return Plan{hasInput,hasInput && open}; }
 
+// --- The switches over one screen frame: Enabled && RoomLoadout (`on`) and RoomPreSync ---
+// Off: the screen's own update is chained with its own ctx and nothing else runs (no key read, no input taken, no
+// pre-sync, no preview; only what the plugin drew on this screen earlier is taken back). The room pre-sync runs only on
+// the online room's screen with both switches on; whenever it stops running (a switch turned off, the HQ, the screen
+// gone) this machine's published keys are withdrawn exactly once (room_sync.h LeaveRoomSync).
+struct Switches { bool syncing=false; };   // the pre-sync ran since the last withdrawal
+struct SwitchPlan { bool pass,tick,leave; };
+inline SwitchPlan PlanSwitches(Switches& s,bool on,bool preSync,bool room) noexcept {
+    const bool tick=on && preSync && room;
+    const SwitchPlan p{!on,tick,s.syncing && !tick};
+    s.syncing=tick;
+    return p;
+}
+// The screen object went (another room, the HQ, a mission): withdrawn when the pre-sync ran, once.
+inline bool LeaveOnForget(Switches& s) noexcept {
+    const bool leave=s.syncing;
+    s.syncing=false;
+    return leave;
+}
+
 // --- Icons (docs/room-ui-re.md §3: the AI weapons' own WeaponIcon; the vehicle stores borrow players' icons) ---
 inline constexpr const wchar_t* kKindIcons[kSupportWeaponCount]={
     L"app:/weapon/icon/AF14.dds",L"app:/weapon/icon/flamethrower.dds",L"app:/weapon/icon/stingray.dds",

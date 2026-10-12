@@ -243,7 +243,8 @@ finally:
     builtins.input, sl._build_one, modfiles.game_running, os.rename, sl.rootcpk.Game, room_layout.build = saved
 
 undo = open(os.path.join(ROOT, 'tools', 'installer.py'), encoding='utf-8').read().split('\ndef uninstall(', 1)[1]
-check('remove_generator(game)' in undo.split('\ndef ', 1)[0], 'uninstall removes the generator')
+check('remove_generator(game, lock=False)' in undo.split('\ndef ', 1)[0],
+      'uninstall removes the generator (its lock file after the flow lets go of it: write_game)')
 store = open(os.path.join(ROOT, 'src', 'loadout_store.cpp'), encoding='utf-8').read()
 check(f'L"{installer.GENERATOR}"' in store and f'L"{installer.GENERATE_STATUS}"' in store, 'the plugin looks for these names')
 check('L"loadout-generate \\"%ls\\""' in store, 'the plugin runs this subcommand with the game directory')

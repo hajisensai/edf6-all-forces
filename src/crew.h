@@ -237,7 +237,9 @@ struct Config {
     int debugSpawnSpawnKey=0x78;    // ...spawn the row picked (F9)
     float debugSpawnRange=500.0f;   // ...the crosshair's ground point counts within this, m
     float debugSpawnDistance=30.0f; // ...else (sky, too far, at the player's feet) this far ahead of the player, m
-    bool roomLoadout=true;          // the room / HQ support loadout menu (room_ui.cpp; 0: both screens untouched)
+    bool roomLoadout=true;          // the room / HQ support loadout menu (room_ui.cpp; 0 at load: nothing installed, both
+                                    // screens untouched; turned 0 later: both screens passed through, nothing read or drawn)
+    bool roomPreSync=true;          // ...and the room pre-sync with it (room_sync.h: generate what the host lists; 0: none)
     int roomLoadoutKey=0x71;        // ...its key (F2; a Windows virtual-key code, 0: none)
     int roomLoadoutButton=0xC0;     // ...and pad combination (XInput button bits, all held: 0xC0 L3 + R3; 0 none)
     bool stockStores=true;          // the stock vehicles' requests carry the stores they should (the installer,

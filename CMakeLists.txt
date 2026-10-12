@@ -529,6 +529,11 @@ add_test(NAME loadout_writer COMMAND loadout_writer_test)
 add_executable(room_sync_test tests/room_sync_test.cpp)
 target_compile_options(room_sync_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME room_sync COMMAND room_sync_test)
+# The mission's variant preload set (configuration + the room host's list + the pending list's newest, never a
+# directory scan) and the hello's filter (src/support_variants_logic.h; the design doc's 阶段 R).
+add_executable(support_variants_test tests/support_variants_test.cpp)
+target_compile_options(support_variants_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME support_variants COMMAND support_variants_test)
 add_executable(support_policy_test EXCLUDE_FROM_ALL tests/support_policy_test.cpp)
 target_link_libraries(support_policy_test PRIVATE edf6common)
 target_compile_options(support_policy_test PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -621,6 +626,12 @@ set_tests_properties(room_layout PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The room menu screen's code checks (src/room_ui.cpp) against EDF.dll read as a file (skipped without the game).
 add_test(NAME room_ui_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_ui_sig_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(room_ui_sigs PROPERTIES SKIP_RETURN_CODE 77)
+# The installer side of the room menu's review fixes: the ledger merged on save, every Mods writer under the generator's
+# lock, the room layouts never stopping an install, stale generated variant files removed (a fake game directory).
+add_test(NAME installer_lock COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/installer_lock_test.py")
+set_tests_properties(installer_lock PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The menu screen's switches (RoomLoadout / RoomPreSync) and screen identity, from its source (no game needed).
+add_test(NAME room_ui_wiring COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_ui_wiring_guard.py")
 # The room menu's palette (src/hq_palette.inc) against the game's HQ colour-select chips (Root.cpk CUSTOMCOLOR*.SGO, EDF.dll
 # read as files; skipped without the game).
 add_test(NAME hq_palette COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/hq_palette_audit.py")

@@ -3039,6 +3039,20 @@ def ini_merge_only_adds() -> None:
 
 
 @test
+def ini_merge_adds_room_presync() -> None:
+    # An ini from before 阶段 R (RoomLoadout but no RoomPreSync): the install adds RoomPreSync=1 with its comment under the
+    # added-settings header, the player's RoomLoadout untouched.
+    shipped = src('EDF6VehicleCrew.ini')
+    user = '[VehicleCrew]\r\nEnabled=1\r\nRoomLoadout=0\r\nRoomLoadoutKey=0x71\r\n'
+    text, added, _ = installer.merge_ini(user, shipped)
+    assert 'RoomPreSync' in added, added
+    tail = text.split(installer.ADDED_HEADER, 1)[1]
+    assert '\r\nRoomPreSync=1\r\n' in tail and tail.index('联机房间预同步') < tail.index('RoomPreSync=1'), 'the comment above it'
+    assert text.startswith(user.rstrip('\r\n')) and '\nRoomLoadout=0\r\n' in text and '\nRoomLoadout=1\r\n' not in text
+    assert installer.merge_ini(text, shipped)[1] == [], 'merge is not idempotent'
+
+
+@test
 def ini_sections_match_windows() -> None:
     import make_stock_stores
     shipped = '[VehicleCrew]\nEnabled=1\nStockHeliStores=0\nNewOption=2\n'

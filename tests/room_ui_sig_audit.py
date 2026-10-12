@@ -57,6 +57,27 @@ for rva_text, name in uses:
 for slot, stock in (('kRoomSlot', 'kRoomUpdate'), ('kHqSlot', 'kHqUpdate')):
     value = struct.unpack_from('<Q', img, consts[slot])[0] - base
     check(value == consts[stock], f'{slot} {consts[slot]:#x} holds {value:#x}, not {stock} {consts[stock]:#x}')
+# The screens' destructors (screen identity: a new screen at a dead one's address is a new screen). Slot 5 of each vtable
+# is its scalar deleting destructor, and the destructor it runs is that class's own (it stores that vtable first).
+for slot, stock, vt in (('kRoomGoneSlot', 'kRoomGone', 0x180AC40), ('kHqGoneSlot', 'kHqGone', 0x1804DD8)):
+    check(consts[slot] == vt + 5 * 8, f'{slot} is slot 5 of the vtable {vt:#x}')
+    value = struct.unpack_from('<Q', img, consts[slot])[0] - base
+    check(value == consts[stock], f'{slot} holds {value:#x}, not {stock} {consts[stock]:#x}')
+check(consts['kRoomSlot'] == 0x180AC40 + 8 and consts['kHqSlot'] == 0x1804DD8 + 8, 'the OnUpdate slots are slot 1 of the same vtables')
+room_gone = arrays['kRoomGoneSig']
+dtor = consts['kRoomGone'] + 20 + struct.unpack_from('<i', room_gone, 16)[0]
+check(room_gone[15] == 0xE8 and dtor == 0x8F5950, f'HUiRoom\'s deleting destructor calls ~HUiRoom 0x8F5950 (got {dtor:#x})')
+check(0x8F5962 - dtor < 0x20 and 0x8F5962 + 7 + struct.unpack_from('<i', arrays['kRoomDtorSig'], 3)[0] == 0x180AC40,
+      '~HUiRoom stores HUiRoom\'s vtable first')
+check(room_gone[25] == 0xBA and struct.unpack_from('<I', room_gone, 26)[0] == 0xCA0, 'HUiRoom is deleted with its size 0xCA0')
+hq_gone = arrays['kHqGoneSig']
+check(consts['kHqGone'] + 17 + struct.unpack_from('<i', hq_gone, 13)[0] == 0x1804DD8 and hq_gone[22:25] == bytes.fromhex('488901'),
+      '~HUiHQMain (inline in its deleting destructor) stores HUiHQMain\'s vtable first')
+check(img[0x89F562:0x89F567] == bytes.fromhex('ba10080000') and img[0x89F55C:0x89F560] == bytes.fromhex('40f6c501'),
+      'HUiHQMain is deleted with its size 0x810 when flags bit 0 is set')
+check('void* __fastcall RoomGoneHook(unsigned char* self,unsigned flags) { NoteGone(self); return screens[0].gone(self,flags); }' in src and
+      'void* __fastcall HqGoneHook(unsigned char* self,unsigned flags) { NoteGone(self); return screens[1].gone(self,flags); }' in src,
+      'both destructor hooks note the end and chain on')
 # The offsets the code uses are the ones the checked instructions name.
 check(consts['kPadTable'] == 0x1188315 + 7 + struct.unpack_from('<i', arrays['kPadBaseSig'], 3)[0], 'the pad table is the loop base')
 check(arrays['kTintSig'][4:8] == struct.pack('<I', consts['kTint']) and

@@ -29,6 +29,7 @@
 #include "hudtext.h"
 #include "room_sync.h"
 #include "support_loadout.h"
+#include "support_variants.h"
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -42,6 +43,10 @@ inline constexpr char kKeyHave[]="EDF6X_VCHAVE";
 inline constexpr int kListParts=4;                    // EDF6X_VCVARIANTS + EDF6X_VCVAR1..3
 inline constexpr std::size_t kValueMost=EDF6COOP_MEMBER_ATTRIBUTE_MAX_VALUE;
 inline constexpr int kSetMost=512;                    // 37 catalog entries x 12 soldiers, the vehicles
+static_assert(kSetMost<=kHostVariantsMost,"the mission preload holds a whole host list (support_variants.h)");
+// A client generates at most this many files a room (each one a name the host's validated list gave): a host cannot make
+// a member write more than this per room, whatever it lists or how often it changes its list. The rest come stock.
+inline constexpr int kNotesPerRoom=128;
 inline constexpr int kMembersMost=64;                 // Coop lists at most Epic's 64
 inline constexpr std::uint64_t kTickMs=1000;
 inline constexpr std::uint64_t kStartGapMs=5000;      // between two generator starts
@@ -441,6 +446,7 @@ struct Situation {
     ListState list=ListState::none; // the host's list (this machine's own when it is the host)
     int listed=0,leftOut=0;         // variants listed / the host's that did not fit
     int ownMissing=0;
+    int ownCapped=0;                // of those, over kNotesPerRoom: never generated in this room
     Ready own=Ready::noList;
     const wchar_t* genMessage=L"";  // the generator's last message
     int others=0;
@@ -471,7 +477,8 @@ inline int SelectLines(const Situation& s,LineSpec* out,int capacity) noexcept {
         case ListState::ok:break;
     }
     if(s.leftOut)put(Tx::roomSyncLeftOut,true,s.leftOut);
-    if(s.list==ListState::ok) {
+    if(s.list==ListState::ok && s.ownCapped)put(Tx::roomSyncSelfCapped,true,s.ownCapped,kNotesPerRoom);
+    if(s.list==ListState::ok && s.ownMissing>s.ownCapped) {
         switch(s.own) {
             case Ready::failed:put(Tx::roomSyncSelfFailed,true,s.ownMissing,0,s.genMessage && *s.genMessage ? s.genMessage : L"-");break;
             case Ready::noGenerator:put(Tx::roomSyncSelfNoGenerator,true,s.ownMissing);break;
@@ -500,7 +507,7 @@ inline void FormatLine(const LineSpec& l,hudtext::Lang lang,SyncLine* out) noexc
     const wchar_t* format=hudtext::Tr(l.tx,lang);
     switch(l.tx) {   // each text's arguments (tools/hudtext_check.cpp keeps every language's the same)
         case hudtext::Tx::roomSyncSelfFailed:_snwprintf_s(out->text,_TRUNCATE,format,l.a,l.s ? l.s : L"");break;
-        case hudtext::Tx::roomSyncMemberGenerating:case hudtext::Tx::roomSyncMemberFailed:
+        case hudtext::Tx::roomSyncMemberGenerating:case hudtext::Tx::roomSyncMemberFailed:case hudtext::Tx::roomSyncSelfCapped:
             _snwprintf_s(out->text,_TRUNCATE,format,l.a,l.b);break;
         default:_snwprintf_s(out->text,_TRUNCATE,format,l.a);break;
     }
@@ -543,6 +550,9 @@ public:
         if(s.isHost)HostList(api,env);
         else ReadHostList(api);
         s.list=list_;s.listed=target_.count;s.leftOut=leftOut_;
+        // The list the next mission's plans come from: a client's validated one; none on the host or without a list.
+        if(!s.isHost && list_==ListState::ok){hostList_=target_;hostListHash_=listHash_;hostListOk_=true;}
+        else ForgetHostList();
         Readiness(api,now,env);
         ReadMembers(api);
         lines_=SelectLines(s,line_,kLinesMost);
@@ -555,6 +565,14 @@ public:
         }
         Reset();
     }
+    // The host's list last validated in a room (a client's; empty: none, or this machine the host): the mission that
+    // starts from that room preloads its files (support_variants.h PreloadSupportVariants) and tells the host it has
+    // exactly those (its hello's filter). Kept when the room is left (a mission starting leaves it); replaced by the next
+    // tick in a room, dropped by ForgetHostList.
+    const VariantSet& HostList() const noexcept { return hostList_; }
+    std::uint64_t HostListHash() const noexcept { return hostListOk_ ? hostListHash_ : 0; }
+    bool HasHostList() const noexcept { return hostListOk_; }
+    void ForgetHostList() noexcept { hostListOk_=false;hostListHash_=0;hostList_.count=0; }
     SyncState State() const noexcept { return StateOf(situation_); }
     int Lines(SyncLine* out,int capacity,hudtext::Lang lang) const noexcept {
         int n=0;
@@ -566,7 +584,7 @@ public:
 private:
     // Everything a room leaves behind, but the tick clock and the situation the caller is filling.
     void Reset() noexcept {
-        anyPublished_=false;listHash_=0;loggedHash_=0;list_=ListState::none;leftOut_=0;unnamed_=0;full_=0;
+        anyPublished_=false;listHash_=0;loggedHash_=0;list_=ListState::none;leftOut_=0;unnamed_=0;full_=0;cappedLogged_=0;
         own_.count=0;decoded_.count=0;target_.count=0;noted_.count=0;
         plan_=GenPlan{};
         for(auto& v:listPublished_)v[0]=0;
@@ -649,20 +667,33 @@ private:
         Situation& s=situation_;
         Have have;
         if(list_==ListState::ok) {
-            int missing=0;std::uint64_t missingHash=kFnvBasis;
+            // `fixable`: the missing files the generator can make (the host's own ini names its own; a client's are the
+            // ones on its pending list: at most kNotesPerRoom a room); the rest (`capped`) stay missing, stock.
+            int missing=0,capped=0;std::uint64_t missingHash=kFnvBasis;
             for(int i=0;i<target_.count;++i) {
                 wchar_t file[96];
                 if(!VariantFileOf(target_.ref[i],file,96))continue;
                 if(env.fileThere && env.fileThere(env.context,file))continue;
                 ++missing;
-                char t[24];missingHash=Fnv(Fnv(missingHash,",",1),t,TokenOf(target_.ref[i],t,sizeof(t)));
                 // The host's own list is its own ini: the generator reads that. A client's goes on the pending list
-                // (the generator reads it too, and the installer's menus as before).
-                if(!s.isHost && !noted_.Has(target_.ref[i]) && noted_.Add(target_.ref[i]) && env.noteMissing)
-                    env.noteMissing(env.context,file);
+                // (the generator reads it too, and the installer's menus as before), never more than kNotesPerRoom.
+                if(!s.isHost && !noted_.Has(target_.ref[i])) {
+                    if(noted_.count>=kNotesPerRoom){++capped;continue;}
+                    noted_.Add(target_.ref[i]);
+                    if(env.noteMissing)env.noteMissing(env.context,file);
+                }
+                char t[24];missingHash=Fnv(Fnv(missingHash,",",1),t,TokenOf(target_.ref[i],t,sizeof(t)));
             }
+            if(capped && capped!=cappedLogged_) {
+                cappedLogged_=capped;
+                char text[128];
+                std::snprintf(text,sizeof(text),"ROOMSYNC %d variant file(s) over this room's limit of %d: not generated, stock",
+                              capped,kNotesPerRoom);
+                Log(env,text);
+            }
+            const int fixable=missing-capped;
             const GenStatus gen=env.generation ? env.generation(env.context) : GenStatus{};
-            if(ShouldStart(plan_,missingHash,missing,gen.state,now)) {
+            if(ShouldStart(plan_,missingHash,fixable,gen.state,now)) {
                 Started(plan_,now);
                 const bool ok=env.startGeneration && env.startGeneration(env.context);
                 char text[96];
@@ -670,7 +701,9 @@ private:
                 Log(env,text);
             }
             const GenStatus after=env.generation ? env.generation(env.context) : gen;
-            have.hash=listHash_;have.missing=missing;have.state=OwnReady(plan_,missingHash,missing,after.state);
+            have.hash=listHash_;have.missing=missing;
+            have.state=fixable>0 || !missing ? OwnReady(plan_,missingHash,fixable,after.state) : Ready::failed;
+            s.ownCapped=capped;
             std::memcpy(genMessage_,after.message,sizeof(genMessage_));
             genMessage_[sizeof(genMessage_)/sizeof(genMessage_[0])-1]=0;
         }
@@ -691,8 +724,11 @@ private:
     bool ticked_=false,anyPublished_=false;
     std::uint64_t lastTick_=0,listHash_=0,loggedHash_=0;
     ListState list_=ListState::none;
-    int leftOut_=0,unnamed_=0,full_=0;
+    int leftOut_=0,unnamed_=0,full_=0,cappedLogged_=0;
     VariantSet own_,decoded_,target_,noted_;
+    VariantSet hostList_;               // HostList(): not cleared by Reset (a mission start leaves the room)
+    std::uint64_t hostListHash_=0;
+    bool hostListOk_=false;
     ListValues values_;
     GenPlan plan_;
     char listPublished_[kListParts][kValueMost+1]{};

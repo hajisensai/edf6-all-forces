@@ -44,10 +44,12 @@ def generate_line(state: str, made: int = 0, failed: int = 0) -> str:
 
 @contextlib.contextmanager
 def generate_lock(game: str) -> Iterator[bool]:
-    """One generator at a time per game: a byte lock on GENERATE_LOCK (released by Windows when the process dies, so a
-    killed generator never leaves it held). Yields False when another one holds it."""
+    """One writer of Mods (and its ledger, pylib/ledger.py) at a time per game: the generator and every installer flow
+    that writes (wait_generate_lock). A byte lock on GENERATE_LOCK (released by Windows when the process dies, so a killed
+    generator never leaves it held). Yields False when another one holds it."""
     import msvcrt
     path = os.path.join(game, 'Mods', 'Plugins', GENERATE_LOCK)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'a+b') as f:
         f.seek(0)
         try:
@@ -60,6 +62,33 @@ def generate_lock(game: str) -> Iterator[bool]:
         finally:
             f.seek(0)
             msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+
+
+LOCK_WAIT_S = 120.0   # how long an installer flow waits for a running generator before it refuses
+
+
+@contextlib.contextmanager
+def wait_generate_lock(game: str, timeout: float | None = None, say=print, poll: float = 0.5) -> Iterator[bool]:
+    """generate_lock for an installer flow that writes Mods: a background generator (the game may have started one and
+    closed since; it outlives the game) is waited for up to `timeout` seconds, said once; then False (the flow refuses,
+    nothing written). The generator itself never waits (exit 3: busy)."""
+    import time
+    timeout = LOCK_WAIT_S if timeout is None else timeout
+    deadline = time.monotonic() + timeout
+    told = False
+    while True:
+        with generate_lock(game) as held:
+            if held:
+                yield True
+                return
+        if time.monotonic() >= deadline:
+            say(f'后台生成器（{GENERATOR}）仍在运行，已等待 {timeout:.0f} 秒：本次没有写入任何文件，请稍后再试。')
+            yield False
+            return
+        if not told:
+            say(f'后台生成器（{GENERATOR}，游戏内战前配置菜单启动的）正在运行：等它结束（最多 {timeout:.0f} 秒）……')
+            told = True
+        time.sleep(poll)
 
 
 def generate_variants(game: str) -> tuple[list[str], dict[str, str]]:

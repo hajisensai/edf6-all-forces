@@ -729,6 +729,28 @@ def install_new(root: str, files: dict[str, bytes]) -> list[str]:
     return paths
 
 
+def stale(root: str, ini_text: str, pending: list[str] = ()) -> list[str]:
+    """This tool's generated files (by the ledger: never a file it does not own) that neither the ini nor the pending list
+    names any more, with the pylon weapons only such vehicles carried: what a room's pre-sync and old configurations
+    leave behind (the plugin preloads only what its configuration, the room host's list and the pending list name,
+    src/support_variants.h). Ledger keys, sorted."""
+    led = ledger.Ledger(root)
+    keep: set[str] = set()
+    for name in wanted_files(ini_text, pending):
+        keep.add(ledger.key('OBJECT/' + name))
+        what = decode_name(name)
+        for store, rounds in (what[1].pylons if what and what[0] == 'lo' else []):
+            keep.add(ledger.key('WEAPON/' + store_file(store, rounds)))
+    return sorted(k for k in led.owned_by(OWNER) if k not in keep)
+
+
+def remove_stale(root: str, ini_text: str, pending: list[str] = ()) -> tuple[list[str], list[str]]:
+    """stale's files released (ledger.release: deleted when no other tool needs them and nobody changed them since):
+    (deleted, kept changed). The game must not be running (it may have them preloaded)."""
+    gone = stale(root, ini_text, pending)
+    return ledger.Ledger(root).release(OWNER, gone) if gone else ([], [])
+
+
 def remove(root: str) -> tuple[list[str], list[str]]:
     """Releases this tool's files: (deleted, kept changed)."""
     led = ledger.Ledger(root)

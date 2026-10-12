@@ -188,11 +188,14 @@ inline bool HasCrew(const wchar_t* key) noexcept {
     return true;
 }
 // A ground vehicle's crew (support_dispatch.cpp: its driver carries SupportVehicleCrewWeapon); every other crew is an
-// aircraft's (SupportAircraftCrewWeapon). tools/support_loadout.py VEHICLE_CREW_KEYS.
-inline constexpr const wchar_t* kGroundCrewPrefixes[]={L"TANK_",L"TRANSPORT_",L"TRUCK_"};
+// aircraft's (SupportAircraftCrewWeapon), the *_AIRDROP entries' too: their crew is the transport helicopter's pilot
+// (support_dispatch.cpp, the container delivery: SupportCfg().aircraftCrew), whatever vehicle the container holds.
+// The exact keys, never a prefix: tools/support_loadout.py VEHICLE_CREW_KEYS (tests/support_loadout_ini_test.py compares).
+inline constexpr const wchar_t* kGroundCrewKeys[]={L"TANK_CREWED",L"TANK_DELIVERY",L"TRANSPORT_CREWED",L"TRANSPORT_DELIVERY",
+                                                   L"TRUCK_CREWED",L"TRUCK_DELIVERY"};
 inline bool IsGroundCrewKey(const wchar_t* key) noexcept {
     if(!key)return false;
-    for(const wchar_t* p:kGroundCrewPrefixes)if(!_wcsnicmp(p,key,std::wcslen(p)))return true;
+    for(const wchar_t* k:kGroundCrewKeys)if(!_wcsicmp(k,key))return true;
     return false;
 }
 // One SupportCrewColour value. Empty: true, not set. False: *out not set, `why` says why.

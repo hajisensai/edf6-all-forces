@@ -52,7 +52,7 @@ def imports_of(path: str) -> set[str]:
 
 
 # What the generator may import (stdlib, and the repository's own SGO / CPK readers the real builder was measured to use).
-ALLOWED = {'__future__', 'contextlib', 'os', 'sys', 'traceback', 'typing', 'msvcrt', 'gamedir', 'modfiles', 'support_loadout',
+ALLOWED = {'__future__', 'contextlib', 'os', 'sys', 'time', 'traceback', 'typing', 'msvcrt', 'gamedir', 'modfiles', 'support_loadout',
            'menu_preview', 'rootcpk', 'room_layout'}   # the preview's menu SGOs (stage 7), the screen's layouts (stage 4)
 got = imports_of(os.path.join(ROOT, 'tools', 'loadout_generator.py'))
 check(got <= ALLOWED, f'loadout_generator imports only {sorted(ALLOWED)}: {sorted(got - ALLOWED)}')

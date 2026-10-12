@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cwchar>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace crew {
@@ -151,5 +152,33 @@ inline bool EditLoadoutIni(const std::string& ini,LoadoutField field,const wchar
     if(RewriteIniKey(ini,"VehicleCrew",loadout_ini_detail::Ascii(key.c_str()),loadout_ini_detail::Ascii(value),out))return true;
     loadout_detail::Say(why,capacity,L"ini 是 UTF-16 编码，菜单不改写它");
     return false;
+}
+
+// One save of the menu: many keys at once (room_ui.cpp Save; loadout_store.h SaveSupportLoadouts).
+struct LoadoutEdit { LoadoutField field; const wchar_t* unit; int seats; const wchar_t* value; };
+// Every edit checked first (its key, ValidLoadoutValue); only when all pass, each applied in turn to the text in memory
+// (RewriteIniKey: the same bytes as one EditLoadoutIni after another). False: *out untouched, nothing to write; `*failed`
+// the edit refused (-1: the file itself, a UTF-16 ini), `why` says why.
+inline bool EditLoadoutIniAll(const std::string& ini,const LoadoutEdit* edits,int count,std::string* out,int* failed,
+                              wchar_t* why,std::size_t capacity) {
+    if(failed)*failed=-1;
+    if(count<0 || (count && !edits)){loadout_detail::Say(why,capacity,L"没有要保存的项");return false;}
+    for(int i=0;i<count;++i) {
+        const LoadoutEdit& e=edits[i];
+        if(LoadoutKey(e.field,e.unit).empty()){if(failed)*failed=i;loadout_detail::Say(why,capacity,L"单位名无效");return false;}
+        if(!ValidLoadoutValue(e.field,e.unit,e.seats,e.value,why,capacity)){if(failed)*failed=i;return false;}
+    }
+    std::string text=ini,next;
+    for(int i=0;i<count;++i) {
+        const LoadoutEdit& e=edits[i];
+        const std::wstring key=LoadoutKey(e.field,e.unit);
+        if(!RewriteIniKey(text,"VehicleCrew",loadout_ini_detail::Ascii(key.c_str()),loadout_ini_detail::Ascii(e.value),&next)) {
+            loadout_detail::Say(why,capacity,L"ini 是 UTF-16 编码，菜单不改写它");
+            return false;
+        }
+        text.swap(next);
+    }
+    *out=std::move(text);
+    return true;
 }
 }  // namespace crew

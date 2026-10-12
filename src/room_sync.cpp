@@ -15,6 +15,19 @@
 namespace crew::roomsync {
 namespace {
 Engine engine;   // the UI thread's (room_sync.h)
+// The engine's HostList() copied for other threads (ForEachRoomHostVariant), under its lock, when its hash changes.
+SRWLOCK hostLock=SRWLOCK_INIT;
+VariantSet hostCopy;
+std::uint64_t hostCopyHash=0;
+void PublishHostList() noexcept {
+    const std::uint64_t hash=engine.HostListHash();
+    if(hash==hostCopyHash)return;
+    AcquireSRWLockExclusive(&hostLock);
+    hostCopy=engine.HostList();
+    if(!hash)hostCopy.count=0;
+    hostCopyHash=hash;
+    ReleaseSRWLockExclusive(&hostLock);
+}
 const EDF6CoopMemberAttributeApi* api=nullptr;
 bool apiLogged=false;
 
@@ -78,8 +91,20 @@ Env TheEnv() noexcept {
 }
 }  // namespace
 
-void TickRoomSync() noexcept { engine.Tick(Api(),GetTickCount64(),TheEnv()); }
+void TickRoomSync() noexcept { engine.Tick(Api(),GetTickCount64(),TheEnv());PublishHostList(); }
 void LeaveRoomSync() noexcept { engine.Leave(Api()); }
+void ForgetRoomHostList() noexcept { engine.ForgetHostList();PublishHostList(); }
+int ForEachRoomHostVariant(void (*each)(void* context,const wchar_t* file),void* context) noexcept {
+    if(!each)return 0;
+    int given=0;
+    AcquireSRWLockShared(&hostLock);
+    for(int i=0;i<hostCopy.count;++i) {
+        wchar_t file[96];
+        if(VariantFileOf(hostCopy.ref[i],file,96)){each(context,file);++given;}
+    }
+    ReleaseSRWLockShared(&hostLock);
+    return given;
+}
 SyncState RoomSyncState() noexcept { return engine.State(); }
 int RoomSyncLines(SyncLine* out,int capacity) noexcept { return engine.Lines(out,capacity,hudtext::InUse()); }
 }  // namespace crew::roomsync

@@ -45,23 +45,35 @@ VariantGenerator* Generator() noexcept {
 }
 }  // namespace
 
-bool SaveSupportLoadout(LoadoutField field,const wchar_t* unit,const wchar_t* value,wchar_t* why,std::size_t capacity) noexcept {
-    // A crew colour may also be every crew's default (unit "") or the mission vehicles' support crews' (kCrewMissionKey).
-    const bool crewOnly=field==LoadoutField::crew && unit && (!*unit || !_wcsicmp(unit,kCrewMissionKey));
-    const int seats=crewOnly ? 0 : unit ? SeatsOf(unit) : -1;
-    if(seats<0){Say(why,capacity,L"没有这个支援单位");return false;}
+bool SaveSupportLoadouts(const LoadoutSave* items,int count,int* failed,wchar_t* why,std::size_t capacity) noexcept {
+    if(failed)*failed=-1;
+    if(count<0 || count>kLoadoutSaveMost || (count && !items)){Say(why,capacity,L"要保存的项太多");return false;}
+    LoadoutEdit edits[kLoadoutSaveMost];
+    for(int i=0;i<count;++i) {
+        const LoadoutSave& s=items[i];
+        // A crew colour may also be every crew's default (unit "") or the mission vehicles' support crews' (kCrewMissionKey).
+        const bool crewOnly=s.field==LoadoutField::crew && s.unit && (!*s.unit || !_wcsicmp(s.unit,kCrewMissionKey));
+        const int seats=crewOnly ? 0 : s.unit ? SeatsOf(s.unit) : -1;
+        if(seats<0){if(failed)*failed=i;Say(why,capacity,L"没有这个支援单位");return false;}
+        edits[i]=LoadoutEdit{s.field,s.unit,seats,s.value};
+    }
     const wchar_t* path=ConfigPath();
     std::string before,after;
     try {
         if(!ReadFileBytes(path,&before)){Say(why,capacity,L"读不到 EDF6VehicleCrew.ini");return false;}
-        if(!EditLoadoutIni(before,field,unit,seats,value,&after,why,capacity))return false;
+        if(!EditLoadoutIniAll(before,edits,count,&after,failed,why,capacity))return false;
     } catch(...) {   // std::string's allocations: out of memory
         Say(why,capacity,L"内存不足");return false;
     }
+    // One write, one reload, whatever the count (the UI thread waits on both).
     if(after!=before && !ReplaceFileAtomic(path,after)){Say(why,capacity,L"写不进 EDF6VehicleCrew.ini");return false;}
-    Log("LOADOUT %ls=%ls saved",LoadoutKey(field,unit).c_str(),value);
+    for(int i=0;i<count;++i)Log("LOADOUT %ls=%ls saved",LoadoutKey(items[i].field,items[i].unit).c_str(),items[i].value);
     ReloadConfigNow();
     return true;
+}
+bool SaveSupportLoadout(LoadoutField field,const wchar_t* unit,const wchar_t* value,wchar_t* why,std::size_t capacity) noexcept {
+    const LoadoutSave one{field,unit,value};
+    return SaveSupportLoadouts(&one,1,nullptr,why,capacity);
 }
 
 bool StartVariantGeneration(wchar_t* why,std::size_t capacity) noexcept {

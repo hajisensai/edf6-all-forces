@@ -568,6 +568,7 @@ void LoadConfig() noexcept {
     n.debugSpawnRange=ReadFloat(L"DebugSpawnRange",n.debugSpawnRange);
     n.debugSpawnDistance=ReadFloat(L"DebugSpawnDistance",n.debugSpawnDistance);
     n.roomLoadout=ReadBool(L"RoomLoadout",n.roomLoadout);
+    n.roomPreSync=ReadBool(L"RoomPreSync",n.roomPreSync);
     n.roomLoadoutKey=ReadInt(L"RoomLoadoutKey",static_cast<DWORD>(n.roomLoadoutKey));
     n.roomLoadoutButton=ReadInt(L"RoomLoadoutButton",static_cast<DWORD>(n.roomLoadoutButton));
     // StockVehicleStores, or the older StockHeliStores (the helicopters alone before 2026-10-07) still set to 1
@@ -732,7 +733,7 @@ void LoadConfig() noexcept {
     Log("CONFIG debugSpawn=%d keys menu=0x%X prev=0x%X next=0x%X category=0x%X spawn=0x%X range=%.0f distance=%.0f",n.debugSpawn,
         n.debugSpawnKey,n.debugSpawnPrevKey,n.debugSpawnNextKey,n.debugSpawnCategoryKey,n.debugSpawnSpawnKey,n.debugSpawnRange,
         n.debugSpawnDistance);
-    Log("CONFIG roomLoadout=%d key=0x%X button=0x%X",n.roomLoadout,n.roomLoadoutKey,n.roomLoadoutButton);
+    Log("CONFIG roomLoadout=%d preSync=%d key=0x%X button=0x%X",n.roomLoadout,n.roomPreSync,n.roomLoadoutKey,n.roomLoadoutButton);
     Log("CONFIG stockStores=%d seatSwitch=%d nextKey=0x%X numberKeys=%d button=0x%X pilot=%d online=%d list=%d",n.stockStores,n.seatSwitch,
         n.seatNextKey,n.seatNumberKeys,n.seatButton,n.seatPilot,n.seatSwitchOnline,n.seatList);
     Log("CONFIG proteus=%d keys mode=0x%X/0x%X shield=0x%X/0x%X launcher=0x%X twoSeats=%d walk x%.2f turn x%.2f step %.1fm shieldSlow %.2f",

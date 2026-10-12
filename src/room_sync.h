@@ -19,5 +19,11 @@ void LeaveRoomSync() noexcept;
 SyncState RoomSyncState() noexcept;
 // Up to `capacity` lines for the menu's status area; returns how many.
 int RoomSyncLines(SyncLine* out,int capacity) noexcept;
+// The pre-sync turned off (RoomPreSync / RoomLoadout / Enabled): the host's list kept for the next mission dropped too.
+void ForgetRoomHostList() noexcept;
+// Any thread (a mission's start): each file of the host's list the last room validated (a client's; none on the host, or
+// when there was no valid list), the names support_loadout.h writes. Kept after the room is left (a mission starting
+// leaves it): what that mission's plans can ask of this machine (support_variants.h PreloadSupportVariants).
+int ForEachRoomHostVariant(void (*each)(void* context,const wchar_t* file),void* context) noexcept;
 
 }  // namespace crew::roomsync

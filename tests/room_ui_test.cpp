@@ -150,6 +150,36 @@ void GateAndPlan() {
     Expect(!TakeInput(gate,m.open,AnyDown(down)),"Esc up: the room reads again");
 }
 
+// The switches: off passes the screen through and never ticks the pre-sync; the pre-sync stops (withdrawn once) when a
+// switch turns off, on the HQ, or when the screen goes.
+void SwitchesPlan() {
+    Switches s;
+    SwitchPlan p=PlanSwitches(s,false,true,true);
+    Expect(p.pass && !p.tick && !p.leave,"RoomLoadout / Enabled off from the start: passed through, no pre-sync, nothing to withdraw");
+    p=PlanSwitches(s,true,true,false);
+    Expect(!p.pass && !p.tick && !p.leave,"the HQ: the menu, never the pre-sync");
+    p=PlanSwitches(s,true,false,true);
+    Expect(!p.pass && !p.tick && !p.leave,"RoomPreSync=0 in the room: the menu without the pre-sync");
+    p=PlanSwitches(s,true,true,true);
+    Expect(!p.pass && p.tick && !p.leave,"both on in the room: the pre-sync ticks");
+    p=PlanSwitches(s,true,true,true);
+    Expect(p.tick && !p.leave,"...every frame");
+    p=PlanSwitches(s,false,true,true);
+    Expect(p.pass && !p.tick && p.leave,"RoomLoadout / Enabled turned off: passed through, the pre-sync withdrawn");
+    p=PlanSwitches(s,false,true,true);
+    Expect(p.pass && !p.tick && !p.leave,"...once");
+    PlanSwitches(s,true,true,true);
+    p=PlanSwitches(s,true,false,true);
+    Expect(!p.pass && !p.tick && p.leave,"RoomPreSync turned off: withdrawn, the menu stays");
+    p=PlanSwitches(s,true,false,true);
+    Expect(!p.leave,"...once");
+    PlanSwitches(s,true,true,true);
+    Expect(LeaveOnForget(s) && !LeaveOnForget(s),"the screen gone while syncing: withdrawn once");
+    Switches never;
+    PlanSwitches(never,true,true,false);
+    Expect(!LeaveOnForget(never),"the HQ screen gone: nothing was published, nothing withdrawn");
+}
+
 void Looks() {
     Expect(!LookOf(nullptr).shown,"no row: hidden");
     ViewRow r;r.text=RowText::soldier;r.kind=static_cast<int>(SupportWeapon::wingLaser);r.primary=0xC0272DFFu;r.secondary=0;
@@ -267,6 +297,9 @@ void Crews() {
     Expect(CrewKindOf(L"STRIKE",kinds)==SupportWeapon::shotgun && CrewKindOf(L"GUNSHIP",kinds)==SupportWeapon::shotgun,
            "an aircraft's crew: SupportAircraftCrewWeapon");
     Expect(CrewKindOf(L"MISSION",kinds)==SupportWeapon::rifle,"the mission crews: riflemen");
+    Expect(CrewKindOf(L"TANK_AIRDROP",kinds)==SupportWeapon::shotgun && CrewKindOf(L"TRANSPORT_AIRDROP",kinds)==SupportWeapon::shotgun &&
+           CrewKindOf(L"truck_airdrop",kinds)==SupportWeapon::shotgun,
+           "a container delivery's crew is the transport helicopter's pilot: SupportAircraftCrewWeapon, not the ground kind");
     Expect(CrewKindOf(L"",kinds)==SupportWeapon::sniper,"the default's row: the ground kind");
     roommenu::Menu m;
     roommenu::Load(m,roommenu::kDefaultUnits,roommenu::kDefaultUnitCount,nullptr,nullptr);
@@ -443,6 +476,7 @@ int main() {
     PadTable();
     Colours();
     GateAndPlan();
+    SwitchesPlan();
     Looks();
     Texts();
     Catalog();

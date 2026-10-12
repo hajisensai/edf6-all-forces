@@ -454,14 +454,62 @@ void LongList() {
     Tick(host,0,1000);
     Expect(ValueOf(0,"EDF6X_VCVAR1") && !ValueOf(0,"EDF6X_VCVAR3"),"202 files: several values, not every part");
     Tick(client,1,1000);
-    Expect(client.engine.Now().list==ListState::ok && static_cast<int>(client.pending.size())==big.count,
-           "the client reads every part and notes every file");
+    Expect(client.engine.Now().list==ListState::ok && static_cast<int>(client.pending.size())==kNotesPerRoom,
+           "the client reads every part and notes the first kNotesPerRoom (128) files: no more a room");
+    Expect(client.engine.Now().ownMissing==big.count && client.engine.Now().ownCapped==big.count-kNotesPerRoom,
+           "the rest counted missing, over the room's limit");
+    Expect(HasLine(client,L"This PC: 74 files over this room's limit of 128: they come stock"),"said, with the limit");
+    Expect(client.starts==1,"the generator started for the noted ones");
+    client.Finish();
+    Tick(client,1,1600);
+    Tick(client,1,9000);
+    Tick(client,1,20000);
+    Expect(client.starts==1 && static_cast<int>(client.pending.size())==kNotesPerRoom,
+           "made what it noted: never started again for files it may not make, nothing more noted");
+    Expect(client.engine.Now().own==Ready::failed && std::strstr(ValueOf(1,kKeyHave),";74;f"),
+           "its readiness: 74 missing, failed (the host keeps those stock)");
+    Expect(!HasLine(client,L"This PC: 74 files missing, generating"),"not said to be generating them");
+    // A new list in the same room: still no more than kNotesPerRoom notes this room.
+    host.config.push_back(Name(Soldier(SupportWeapon::sniper,false,0x0A0B0C,kStockColour)));
+    host.files=host.config;
+    Tick(host,0,22000);
+    Tick(client,1,22000);
+    Expect(static_cast<int>(client.pending.size())==kNotesPerRoom,"a changed list in the same room: the room's limit holds");
+    lobby.current=1;client.engine.Leave(&kFakeApi);
+    Tick(client,1,24000);
+    Expect(static_cast<int>(client.pending.size())==kNotesPerRoom+75,"a new room (left and back): a new limit, the other 75 noted");
     // Fewer: the parts no longer needed are withdrawn.
-    host.config.resize(3);
+    host.config.resize(3);host.files=host.config;
     Tick(host,0,3000);
     Expect(!ValueOf(0,"EDF6X_VCVAR1"),"a shorter list: the extra parts withdrawn");
     Tick(client,1,3000);
     Expect(client.engine.Now().list==ListState::ok && client.engine.Target().count==3,"and the client follows");
+}
+
+// The host's list a client validated is what its next mission preloads (support_variants.h): kept when the room is left
+// (a mission starting leaves it), replaced by the next room's tick, dropped on a bad / no list, on the host, by
+// ForgetHostList (the switch turned off).
+void MissionList() {
+    ResetLobby(2);
+    static Machine host,client;host=Machine{};client=Machine{};
+    host.config={L"EDF6VC_NPC_RIFLE_1E3A8A_X.SGO",L"EDF6VC_LO_TANK_4000000000000C81.SGO"};host.files=host.config;
+    Tick(host,0,1000);
+    Expect(!host.engine.HasHostList(),"the host keeps no host list (its own configuration is its list)");
+    Tick(client,1,1000);
+    Expect(client.engine.HasHostList() && client.engine.HostList().count==2 && client.engine.HostListHash()!=0,
+           "the client keeps the validated list");
+    lobby.current=1;client.engine.Leave(&kFakeApi);
+    Expect(client.engine.HasHostList() && client.engine.HostList().count==2,"the room left (a mission starts): still there");
+    client.engine.ForgetHostList();
+    Expect(!client.engine.HasHostList() && client.engine.HostList().count==0 && !client.engine.HostListHash(),"forgotten on demand");
+    Tick(client,1,3000);
+    Expect(client.engine.HasHostList(),"the next tick in the room: back");
+    lobby.current=0;Publish(kKeyList,"1;0000000000000000;1;1;..\\x");
+    Tick(client,1,5000);
+    Expect(!client.engine.HasHostList(),"the host's list turned bad: dropped (never a stale one)");
+    lobby.member[0].values.clear();
+    Tick(client,1,7000);
+    Expect(!client.engine.HasHostList(),"no list (an older host): none");
 }
 
 void Hostile() {
@@ -528,6 +576,7 @@ int main() {
     HaveAndPlan();
     Rooms();
     LongList();
+    MissionList();
     Hostile();
     Migration();
     NoCoop();

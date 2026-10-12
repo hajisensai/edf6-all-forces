@@ -155,6 +155,9 @@ int main() {
         Check(IsGroundCrewKey(L"TANK_CREWED") && IsGroundCrewKey(L"transport_delivery") && IsGroundCrewKey(L"TRUCK_CREWED") &&
               !IsGroundCrewKey(L"SQUAD_HELI") && !IsGroundCrewKey(L"STRIKE_F") && !IsGroundCrewKey(L"TANK") &&
               !IsGroundCrewKey(nullptr),"ground crews are the tank / transport / truck entries (VEHICLE_CREW_KEYS)");
+        Check(!IsGroundCrewKey(L"TANK_AIRDROP") && !IsGroundCrewKey(L"TRANSPORT_AIRDROP") && !IsGroundCrewKey(L"truck_airdrop") &&
+              !IsGroundCrewKey(L"TANK_CREWED_X") && !IsGroundCrewKey(L"TANK_") && !IsGroundCrewKey(L""),
+              "the container deliveries' crew is the transport helicopter's pilot: an aircraft crew, not ground (no prefix match)");
         CrewColour a{},b2{};a.look.primary=1;
         Check(a==b2,"two crews not set are equal whatever their stale look");
         // A crew wears the same file a squad soldier of its kind would: a member's, the mission's leader's _L.
