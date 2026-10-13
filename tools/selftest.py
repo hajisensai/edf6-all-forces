@@ -2358,8 +2358,13 @@ def proteus_wired() -> None:
         'lookup and active consumers must validate the complete ObjRef; address reuse only selects a free slot'
     assert 'ControlFresh(u,v,GameMs())' in active and 'u.active && !u.net.remote' in active, \
         'replicas require fresh control; the local active path cannot consume stale remote state'
-    # A Proteus no player has ridden is not crewed (the helicopters' rule, crew.cpp Crew).
-    assert 'if(!st.playerAt)return;' in crew, 'every unused parked vehicle waits for its first player driver'
+    # Unused parked vehicles wait for their first player driver unless the explicit test-only opt-in is enabled.
+    assert 'if(!st.playerAt && !Cfg().npcCrewTest)return;' in crew, \
+        'unused parked vehicles require a player driver or the explicit NpcCrewTest opt-in'
+    assert 'bool npcCrewTest=false;' in src('src/crew.h'), 'NpcCrewTest must stay off by default'
+    assert 'n.npcCrewTest=ReadBool(L"NpcCrewTest",n.npcCrewTest);' in plugin, 'the test opt-in must load from config'
+    assert re.search(r'^NpcCrewTest=0\s*$', src('EDF6VehicleCrew.ini'), re.MULTILINE), \
+        'the shipped configuration must not auto-crew unused vehicles'
     # The stock weapons only: no custom rounds, no damage-call redirect, the stock damage path untouched.
     for gone in ('ProteusGunRound', 'ProteusSalvoRound', 'ProteusRoundsReady', 'ProteusDamageThunk', 'kProteusHoldCountdown'):
         for rel in ('src/crew.h', 'src/jet_bay.cpp', 'src/proteus.cpp', 'src/proteus.h', 'src/subcarrier.cpp', 'src/vehsound.cpp'):
