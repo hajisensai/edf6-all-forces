@@ -10,7 +10,6 @@ import json
 import os
 from pathlib import Path
 import sys
-import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'pylib'))
 import ledger
@@ -24,16 +23,16 @@ BACKUP = '.edf6vc_optics_backup'
 redirect = optics.redirect
 
 
+def _build_one(root: str, spec: optics.Model) -> bytes:
+    return optics.build_model(rootcpk.Game(root), spec)
+
+
 def build_models(root: str) -> dict[str, bytes]:
-    game = rootcpk.Game(root)
+    from model_workers import run_jobs
     models = [s for s in optics.MODELS if optics.ready(s)]
-    files: dict[str, bytes] = {}
-    for index, spec in enumerate(models, 1):
-        started = time.perf_counter()
-        print(f'  [{index}/{len(models)}] 生成车型 {spec.stem}……', flush=True)
-        files['OBJECT/'+optics.output(spec)] = optics.build_model(game, spec)
-        print(f'  [{index}/{len(models)}] {spec.stem} 完成（{time.perf_counter()-started:.1f} 秒）', flush=True)
-    return files
+    jobs = [(_build_one, (root, spec), f'{index}/{len(models)} {spec.stem}')
+            for index, spec in enumerate(models, 1)]
+    return {'OBJECT/'+optics.output(spec): data for spec, data in zip(models, run_jobs(jobs))}
 
 
 def build_stock_redirects(root: str) -> dict[str, bytes]:

@@ -220,6 +220,7 @@ def build_exe(name: str, generator: str | None = None) -> str:
     env.pop('PYTHONPATH', None)
     with tempfile.TemporaryDirectory(prefix='edf6vc-package-smoke-') as folder:
         subprocess.run([exe, '--check-package'], cwd=folder, env=env, check=True, timeout=120)
+        subprocess.run([exe, '--check-workers'], cwd=folder, env=env, check=True, timeout=120)
     return exe
 
 

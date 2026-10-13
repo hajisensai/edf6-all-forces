@@ -169,7 +169,8 @@ def texture_name(kit: str, key: str) -> str:
 def albedo_dds(spec: KitMaterial, root: str) -> bytes:
     if isinstance(spec.albedo, tuple):
         return texfile.solid_dxt1(spec.albedo)
-    return om.texture_dds(os.path.join(root, spec.albedo))
+    from texfile_accel import texture_dds
+    return texture_dds(os.path.join(root, spec.albedo))
 
 
 def template(game) -> tuple[Mdb, object]:  # noqa: ANN001 - rootcpk.Game
@@ -237,8 +238,9 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
 
 
 def add_textures(rab: Rab, textures: dict[str, bytes]) -> None:
+    from texfile_accel import compress_texture
     for name, dds in sorted(textures.items()):
-        om.add_texture(rab, name, dds)
+        om.add_texture(rab, name, dds, compressor=compress_texture)
 
 
 # ------------------------------------------------------------------------------------------ the room round an eye
@@ -412,15 +414,36 @@ def fitted(tris, fit: Fit, kit_fn: KitFn) -> Kit:  # noqa: ANN001 - numpy
     raise ValueError(f'seat {fit.seat} ({fit.kit}): the kit still crosses the hull after {SHRINK_ROUNDS} rounds')
 
 
+def _graft_one(root: str, rel: str, data: bytes) -> bytes:
+    import rootcpk
+    import cockpit_fits
+    import cockpit_kits
+    import vehicle_optics
+    game = rootcpk.Game(root)
+    stem = rel.rsplit('/', 1)[-1].rsplit('.', 1)[0].upper()
+    fits = cockpit_fits.FITS[stem]
+    rab = rab_read(data)
+    mdbs = [f for f in rab.files if f.name.lower().endswith('.mdb')]
+    member = next((f for f in mdbs if f.name.lower() == stem.lower() + '.mdb'), mdbs[0] if len(mdbs) == 1 else None)
+    if member is None:
+        raise ValueError(f'{rel}: which of its models {[f.name for f in mdbs]} has the seats?')
+    md, textures = graft(mdb_read(member.data), fits, cockpit_kits.KITS, game, vehicle_optics.preorder)
+    print(f'{rel}：压缩模型与打包贴图……', flush=True)
+    member.stored = cmpl_compress(mdb_write(md))
+    add_textures(rab, textures)
+    return rab_write(rab)
+
+
 def graft_files(game, files: dict[str, bytes]) -> dict[str, bytes]:  # noqa: ANN001 - rootcpk.Game
     """A generator's files (tools/make_<x>.py build(): {path under Mods: bytes}) with the cockpits of its vehicles'
     seats grafted into their models: each OBJECT/<STEM>.MRAB fitted in pylib/cockpit_fits.py gets its model member
     (<stem>.mdb, else its only .mdb) grafted. Without the cockpit assets the files are as they were (the seats keep
     the stock camera), with a message."""
     import cockpit_fits
-    import cockpit_kits
-    import vehicle_optics
+    from model_workers import run_jobs
     out = dict(files)
+    jobs = []
+    paths = []
     for rel, data in files.items():
         stem = rel.rsplit('/', 1)[-1].rsplit('.', 1)[0].upper()
         fits = cockpit_fits.FITS.get(stem)
@@ -429,17 +452,8 @@ def graft_files(game, files: dict[str, bytes]) -> dict[str, bytes]:  # noqa: ANN
         if not assets_present():
             print(f'{rel}: no cockpits (the model folder has no {ASSET_DIR}/)')
             continue
-        started = time.perf_counter()
-        print(f'  {rel}：生成载具座舱……', flush=True)
-        rab = rab_read(data)
-        mdbs = [f for f in rab.files if f.name.lower().endswith('.mdb')]
-        member = next((f for f in mdbs if f.name.lower() == stem.lower() + '.mdb'), mdbs[0] if len(mdbs) == 1 else None)
-        if member is None:
-            raise ValueError(f'{rel}: which of its models {[f.name for f in mdbs]} has the seats?')
-        md, textures = graft(mdb_read(member.data), fits, cockpit_kits.KITS, game, vehicle_optics.preorder)
-        print(f'  {rel}：压缩模型与打包贴图……', flush=True)
-        member.stored = cmpl_compress(mdb_write(md))
-        add_textures(rab, textures)
-        out[rel] = rab_write(rab)
-        print(f'  {rel}：座舱完成（{time.perf_counter()-started:.1f} 秒）', flush=True)
+        paths.append(rel)
+        jobs.append((_graft_one, (game.root, rel, data), rel))
+    for rel, data in zip(paths, run_jobs(jobs)):
+        out[rel] = data
     return out

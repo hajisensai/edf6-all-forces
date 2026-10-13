@@ -1116,6 +1116,11 @@ def check_package() -> int:
         assert all(cockpit_fits.DIGESTS[key] == value for key, value in fits.DIGESTS.items())
         assert all(cockpit_kits.KITS[key] is value for key, value in kits.KITS.items())
     assert make_optics.optics.MODELS
+    import texfile
+    import texfile_accel
+    importlib.import_module('PIL.Image')
+    sample = texfile.Image(1, 1, bytearray((33, 44, 55, 255)))
+    assert texfile_accel.dxt1_dds(sample) == texfile.dxt1_dds(sample)
     print('EDF6VC_PACKAGE_OK cockpit families=4')
     return 0
 
@@ -1123,6 +1128,10 @@ def check_package() -> int:
 def run() -> int:
     if sys.argv[1:] == ['--check-package']:
         return check_package()
+    if sys.argv[1:] == ['--check-workers']:
+        from model_workers import check_entry
+        check_entry()
+        return 0
     if sys.argv[1:2] == ['loadout-generate']:   # the plugin's hidden background run: no banner, no prompt, no window wait
         try:
             return generate_main(sys.argv[2:])
@@ -1148,4 +1157,6 @@ def run() -> int:
 
 
 if __name__ == '__main__':
+    import multiprocessing
+    multiprocessing.freeze_support()
     sys.exit(run())
