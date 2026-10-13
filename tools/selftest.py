@@ -6203,6 +6203,54 @@ def edf41_class_keys() -> None:
 
 
 @test
+def edf41_stale_stock() -> None:
+    """make_edf41_objects.stale_stock / script_sgos: an SGO EDF6's archives serve that the 4.1 missions spawn, whose class
+    lacks no key every OTHER stock SGO of it has, passes; one that does (a 4.1 leftover EDF6's classes cannot load:
+    Transporter401_Formation without se_preset_list crashed MP003 at EDF+0x240AD3, 2026-10-13) is refused unless this
+    port replaces it or EDF6's own missions spawn it (the game loads it); a class with a single member needs that proof.
+    On the real archives (EDF6 and EDF4.1 installed): every stock SGO the 4.1 missions spawn passes or is replaced."""
+    import make_edf41_objects as m
+    import edf41_objects as eo
+
+    # the scripts' strings: BVM text is UTF-16, AC / JSON text is UTF-8
+    wide = 'x app:/Object/Foo.sgo y'.encode('utf-16le') + b'\0\0' + 'app:/object/Bar_2.SGO'.encode('utf-16le')
+    assert m.script_sgos(wide) == {'OBJECT/FOO.SGO', 'OBJECT/BAR_2.SGO'}, m.script_sgos(wide)
+    assert m.script_sgos(b'{"o": "app:/Object/Baz.sgo;app:/Object/Qux.sgo"}') == {'OBJECT/BAZ.SGO', 'OBJECT/QUX.SGO'}
+    assert m.script_sgos(b'app:/object/a.rab') == set()
+
+    full = {'xgs_scene_object_class': 'Box', 'game_object_durability': 1.0, 'se_preset_list': []}
+    stock = {'Box': {'OBJECT/A.SGO': full, 'OBJECT/B.SGO': {k: v for k, v in full.items() if k != 'se_preset_list'}},
+             'Solo': {'OBJECT/S.SGO': {'xgs_scene_object_class': 'Solo'}}}
+    everything = {'OBJECT/A.SGO', 'OBJECT/B.SGO', 'OBJECT/S.SGO'}
+    out = m.stale_stock(stock, everything, set(), set())
+    assert len(out) == 2 and out[0].startswith('OBJECT/B.SGO') and "['se_preset_list']" in out[0], out
+    assert out[1].startswith('OBJECT/S.SGO') and 'no other stock SGO' in out[1], out
+    assert m.stale_stock(stock, everything, {'OBJECT/B.SGO'}, {'OBJECT/S.SGO'}) == [], 'replaced / proven passes'
+    assert m.stale_stock(stock, {'OBJECT/A.SGO'}, set(), set()) == [], 'only what the 4.1 missions spawn is tested'
+
+    # the shipped replacement: registered as replacing the stock file, built from 4.1's SGO under EDF6's class
+    reg = eo.registry()
+    done = {o['object']: o for o in reg['objects']}
+    for root, why in m.STOCK_OVERRIDES.items():
+        o = done.get('OBJECT/' + root)
+        assert o is not None and o.get('replaces_stock') == why, root
+    if not _e5c_have_game() or not _edf41_root():
+        print('skip  edf41_stale_stock (real archives): needs EDF6 and EDF4.1 installed')
+        return
+    import rootcpk
+    games = m.Games(_edf41_root(), rootcpk.DEFAULT_GAME)
+    spawned = m.spawned_objects(games)
+    assert len(spawned) > 100, len(spawned)     # the scan found the missions' objects, not nothing
+    assert 'OBJECT/TRANSPORTER401_FORMATION.SGO' in spawned
+    left = [s for s in m.stale_stock(games.stock_by_class(), spawned, set(done), m.proven_stock(games))
+            if s.split(':')[0] not in m.STOCK_EXEMPT]
+    assert not left, left
+    # and without the replacement the formation is what this test exists to catch
+    bad = m.stale_stock(games.stock_by_class(), spawned, set(), m.proven_stock(games))
+    assert any(s.startswith('OBJECT/TRANSPORTER401_FORMATION.SGO') and 'se_preset_list' in s for s in bad), bad
+
+
+@test
 def edf41_objects_install() -> None:
     """tools/edf41_objects.py on a stand-in game: install writes every object's files as the ledger owner edf41 and
     remove deletes them; a file of the same name another mod put in Mods is never written over, every object needing

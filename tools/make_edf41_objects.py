@@ -22,6 +22,12 @@ over:
   .SHKT         4.1's Havok 2014 packfile as it is (EDF.dll keeps the old readers; real-device check in the plan)
   .ACB          a sound bank, a loose file in <game>/SOUND/PC; EDF6 ships 4.1's (TIKYUU4_*): checked, not copied
 A root with a file none of these carry, or a converter refuses, is left out (listed under 'skipped' with why).
+
+STOCK_OVERRIDES: objects EDF6's archives hold, left over from 4.1 (EDF6's own missions never spawn them), whose class
+EDF6 has since changed: the stock file lacks keys the class reads unchecked and crashes on spawn (Transporter401_
+Formation: se_preset_list, EDF+0x5E9A90, M-P003 2026-10-13). Such a root is built like any other (4.1's SGO under an
+EDF6 template of the class) and shipped under the same Mods path, so it replaces the stock file. build() checks every
+SGO the 4.1 missions spawn (spawned_objects) that EDF6's archives serve: stale_stock refuses one that is not replaced.
 """
 from __future__ import annotations
 
@@ -30,6 +36,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import shutil
 import struct
 import sys
@@ -66,6 +73,17 @@ ROOTS: dict[str, int] = {
     'UFOCARRIER301.SGO': 15, 'UFOCARRIER401.SGO': 15,
     'VEHICLE301_TANK_AI.SGO': 13,
     'UFO301.SGO': 18, 'UFO301ACE.SGO': 6, 'UFO401.SGO': 15,
+    'TRANSPORTER401_FORMATION.SGO': 4,
+}
+# Stock SGOs the 4.1 missions name that no player reaches, with why (stale_stock would otherwise refuse them).
+STOCK_EXEMPT: dict[str, str] = {
+    'OBJECT/ROUTETEST.SGO': "class RouteTest is not registered in EDF.dll at all; only 4.1's developer test mission T_AIROUTE "
+                            "spawns it (no story or mission-list entry)",
+}
+# Roots EDF6's archives also hold, as a stale 4.1 leftover its classes cannot load: root -> why the stock file is wrong.
+STOCK_OVERRIDES: dict[str, str] = {
+    'TRANSPORTER401_FORMATION.SGO': "no se_preset_list: Transporter_Formation's constructor passes it unchecked to the "
+                                    "sound system (EDF+0x5E9A90 -> 0x5E4760 -> 0x7B3310 -> 0x240AD3, a null fault)",
 }
 
 
@@ -403,6 +421,13 @@ ALIASES: dict[str, Alias] = {
     #   tcontrol's index unchecked (0x116DE30 writes at -1 of a missing variable); Hector's CAS has neither, and an
     #   empty list is the loop's own early exit (0x53D184). The states walk_battle_f / b / l / r, which the class asks
     #   for in a fight and a missing state refuses, are Hector's own walks, so it does not stand still while it moves.
+    # Transporter401_Formation (MP003, MP004: 4 transporters carrying the mission's vehicle) stays 4.1's file under the
+    # class it has in EDF6 too. EDF6's stock copy is a leftover without the keys the class now reads: se_preset_list
+    # (its constructor hands the lookup to the sound system unchecked, EDF+0x5E9A90) and boosts, from EDF6's own
+    # V508_TRANSPORT_FORMATION (4 sound names of the resident bank TIKYUUX_SE: flight, booster on / off, container
+    # release, which are 4.1's transporter sounds). EDF.dll reads boosts only in Transporter508's constructor
+    # (0x5E4830): inert here, there because the class-key test (class_keys) asks every key the sibling has.
+    'TRANSPORTER401_FORMATION.SGO': Alias('Transporter_Formation', 'V508_TRANSPORT_FORMATION.SGO', ()),
     **{root: hector_alias(g, l, r) for root, (g, l, r, _n) in HECTOR_VARIANTS.items()},
     # Deiroi (5 variants): EDF6's Deiroi is 4.1's class with every constant moved into the SGO, and its constructor reads
     # deiroi_battery_config / deiroi_moving_settings / bullet_object / charge_param unchecked (EDF+0x319566, 0x31981c): 4.1's
@@ -544,7 +569,7 @@ def check_materials(games: 'Games', files: dict[str, bytes], rel: str, need: dic
                 raise ValueError(f'{rel}: {key}[{i}] animates {mtab_materials(blob)}, the model has {sorted(mats)}')
 
 
-SE_KEYS = ('se_list', 'se_table', 'ufo_se')   # object keys holding SEPRESET names (docs/sound-re.md section 2)
+SE_KEYS = ('se_list', 'se_table', 'ufo_se', 'se_preset_list')   # object keys holding SEPRESET names (docs/sound-re.md section 2)
 RESIDENT_BANKS = ('TIKYUUX_SE.ACB',)           # loaded for every mission (docs/sound-re.md section 1)
 
 
@@ -921,6 +946,81 @@ def check_fracture(members: dict, files: dict[str, bytes], rel: str) -> None:
     gone = [n for n in tuning[-1] if str(n).lower() not in names]
     if gone:
         raise ValueError(f'{rel}: the voxel block names debris models its archive has not: {gone}')
+
+
+def mission_scripts(games: 'Games', edf6: bool) -> list[bytes]:
+    """The mission scripts of EDF4.1 (every MISSION/<id>/*.BVM), or of EDF6's own missions (MISSION/EDF6 and EDF6_DLC:
+    *.AC text, *.JSON), as bytes."""
+    if edf6:
+        want = {'EDF6', 'EDF6_DLC'}
+        return [games.read6(k) for k in sorted(games.have6)
+                if k.split('/')[0] == 'MISSION' and k.count('/') >= 2 and k.split('/')[1] in want
+                and k.endswith(('.AC', '.JSON'))]
+    return [games.read4(k) for k in sorted(games.in4) if k.startswith('MISSION/') and k.endswith('.BVM')]
+
+
+def script_sgos(script: bytes) -> set[str]:
+    """The app:/...sgo paths a mission script names (Mods style): BVM strings are UTF-16, AC / JSON text is UTF-8."""
+    texts = [script.decode('utf-8', 'ignore')]
+    texts += [m.group().decode('utf-16le') for m in re.finditer(rb'(?:[\x20-\x7e]\x00){4,}', script)]
+    return {rel_of(p) for t in texts for p in re.findall(r"(?i)app:/[^\"\s;,'()]+?\.sgo", t)}
+
+
+def sgo_closure(roots: set[str], read: Callable[[str], bytes | None]) -> set[str]:
+    """`roots` and every SGO they name, recursively, through the SGO that `read` gives (None: no such file)."""
+    seen: set[str] = set()
+    todo = sorted(roots)
+    while todo:
+        rel = todo.pop()
+        if rel in seen:
+            continue
+        seen.add(rel)
+        data = read(rel)
+        if data is None:
+            continue
+        try:
+            members = sgo.load(data=data)
+        except Exception:   # noqa: BLE001 - a file this reader does not parse names nothing we can follow
+            continue
+        todo += [rel_of(s) for s in strings(members) if s.lower().startswith('app:/') and s.lower().endswith('.sgo')]
+    return seen
+
+
+def spawned_objects(games: 'Games') -> set[str]:
+    """Every SGO the EDF4.1 missions' scripts spawn, as the game loads it: a path EDF6's archives serve is followed
+    through EDF6's file (its children are what loads), any other through 4.1's."""
+    def read(rel: str) -> bytes | None:
+        return games.read6(rel) if rel in games.have6 else games.read4(rel) if rel in games.in4 else None
+    return sgo_closure({r for s in mission_scripts(games, False) for r in script_sgos(s)}, read)
+
+
+def stale_stock(stock: dict[str, dict[str, dict]], spawned: set[str], overridden: set[str],
+                proven: set[str]) -> list[str]:
+    """The stock EDF6 SGOs (`stock`: stock_by_class) among `spawned` that this port neither replaces (`overridden`) nor
+    can show to load, as 'rel: lacks [keys]' / 'rel: no sibling to test': the class reads its keys by name and several
+    dereference a miss unchecked, so a file lacking a key every OTHER stock SGO of its class has is a leftover its
+    class cannot load (Transporter401_Formation, no se_preset_list: EDF6's own missions never spawn it, its sibling
+    has the key). `proven` (SGOs EDF6's own missions spawn, directly or through the files they name) are loaded by
+    the game, so they pass: that is the only evidence for a class with a single member."""
+    out: list[str] = []
+    for cls, members in sorted(stock.items()):
+        for rel, mine in sorted(members.items()):
+            if rel not in spawned or rel in overridden or rel in proven:
+                continue
+            others = [set(m) for r, m in members.items() if r != rel]
+            if not others:
+                out.append(f'{rel}: class {cls} has no other stock SGO to test against and no EDF6 mission spawns it')
+                continue
+            lacks = sorted(set.intersection(*others) - set(mine))
+            if lacks:
+                out.append(f'{rel}: class {cls} lacks {lacks}, which every other stock SGO of the class has')
+    return out
+
+
+def proven_stock(games: 'Games') -> set[str]:
+    """The SGOs EDF6's own missions spawn (EDF6 and EDF6_DLC scripts), with the SGOs those name: loaded by the game."""
+    return sgo_closure({r for s in mission_scripts(games, True) for r in script_sgos(s)},
+                       lambda rel: games.read6(rel) if rel in games.have6 else None)
 
 
 def class_keys(stock: dict[str, dict[str, dict]], cls: str) -> set[str]:
@@ -1302,7 +1402,7 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
         rel = 'OBJECT/' + root
         if root in STAND_INS or (only and root not in only):
             continue
-        if rel in games.have6:
+        if rel in games.have6 and root not in STOCK_OVERRIDES:
             skipped.append({'object': rel, 'reason': 'EDF6 has it'})
             continue
         need, why = closure(games, rel)
@@ -1353,7 +1453,15 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
         files.update(out)
         cls = sgo.load(data=out[rel]).get('xgs_scene_object_class')
         objects.append({'object': rel, 'class': cls, 'missions': uses, 'files': list(out),
-                        **({'class_keys_from': filled} if filled else {})})
+                        **({'class_keys_from': filled} if filled else {}),
+                        **({'replaces_stock': STOCK_OVERRIDES[root]} if root in STOCK_OVERRIDES else {})})
+    if not only:   # every stock SGO the 4.1 missions spawn is one EDF6 loads, or replaced above
+        stale = stale_stock(games.stock_by_class(), spawned_objects(games), {o['object'] for o in objects},
+                            proven_stock(games))
+        stale = [s for s in stale if s.split(':')[0] not in STOCK_EXEMPT]
+        if stale:
+            raise ValueError('EDF6 archives serve SGOs the 4.1 missions spawn that its classes cannot load '
+                             '(add the root to ROOTS / ALIASES with STOCK_OVERRIDES):\n  ' + '\n  '.join(stale))
     hashes = {r: hashlib.sha256(b).hexdigest() for r, b in files.items()}
     for r, path in shared.items():
         with open(os.path.join(HERE, '..', *path.split('/')), 'rb') as f:

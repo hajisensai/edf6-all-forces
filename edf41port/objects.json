@@ -328,6 +328,16 @@
    ]
   },
   {
+   "object": "OBJECT/TRANSPORTER401_FORMATION.SGO",
+   "class": "Transporter_Formation",
+   "missions": 4,
+   "files": [
+    "OBJECT/TRANSPORTER401_FORMATION.SGO",
+    "OBJECT/TRANSPORTER401.RAB"
+   ],
+   "replaces_stock": "no se_preset_list: Transporter_Formation's constructor passes it unchecked to the sound system (EDF+0x5E9A90 -> 0x5E4760 -> 0x7B3310 -> 0x240AD3, a null fault)"
+  },
+  {
    "object": "OBJECT/HECTOR301CC.SGO",
    "class": "EDF6_Berserker_Large",
    "missions": 14,
@@ -638,6 +648,8 @@
   "OBJECT/RAGDOLL_HECTOR301_HAS_HKA.SHKT": "d8f7cdc19d7de903e7a2913832c6383de5de808e87b29e6deaa4ef41e184c8d5",
   "OBJECT/RAGDOLL_HECTOR401_HAS_HKA.SHKT": "ecae95426d209763d9d9e225c6bb7decbe7ab215dfe5364fa8fb9cd3e429e30d",
   "OBJECT/RAGDOLL_UFO401_HAS_HKA.SHKT": "63143461f75fd7cc99329a87c4920348f04d69065b748e1776653fa1e036fa65",
+  "OBJECT/TRANSPORTER401.RAB": "6fa52fc98b17803c41f2178949b3446fead990165130c004bf75fc0c3508d281",
+  "OBJECT/TRANSPORTER401_FORMATION.SGO": "0d4c8ddf887feefe5f8b9b8006c1af336202fc6cecb41d9bbb9205233bdc7155",
   "OBJECT/UFO301.CAS": "f989b91a821e270a14a13099f13173e95fe9df71df25d8aeaf1763bd4be7661d",
   "OBJECT/UFO301.MRAB": "a6a242c2a16a77250451212065deb35ac7b3c9e357615c19631d906eb89d9afa",
   "OBJECT/UFO301.SGO": "569ae66fa75641f9dc9ea2aeaef5228e99ef86197c41da0bdc550d3f16ccee70",
