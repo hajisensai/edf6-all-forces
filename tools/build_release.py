@@ -176,8 +176,8 @@ def build_exe(name: str, generator: str | None = None) -> str:
     for p in (os.path.join(ROOT, 'tools'), os.path.join(ROOT, 'pylib'), os.path.join(ROOT, 'testrange'),
               os.path.join(ROOT, 'autoturret', 'tools')):
         cmd += ['--paths', p]
-    for mod in ('call_weapons', 'edf41_objects', 'legacy_sgo', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'ragdoll_fit', 'make_chute', 'chute_model', 'obj_model', 'texfile', 'make_drill', 'drill_model', 'make_stock_stores', 'graft_pure', 'primer_fighter_model', 'calls', 'make_sidecar', 'sidecar_model',
-                'make_bigmap', 'bigmap', 'seams', 'fmb', 'hkcms', 'hktag', 'gen', 'rmpa', 'jet_models', 'jet_gear', 'weapons',
+    for mod in ('call_weapons', 'edf41_objects', 'edf41_maps', 'map_legacy', 'rmpa_legacy', 'legacy_sgo', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'ragdoll_fit', 'make_chute', 'chute_model', 'obj_model', 'texfile', 'make_drill', 'drill_model', 'make_stock_stores', 'graft_pure', 'primer_fighter_model', 'calls', 'make_sidecar', 'sidecar_model',
+                'make_bigmap', 'bigmap', 'seams', 'fmb', 'fmb_build', 'hkcms', 'hkcms_build', 'hktag', 'sk_map', 'sk_terrain', 'gen', 'rmpa', 'jet_models', 'jet_gear', 'weapons',
                 'testhub', 'make_emc', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
                 'cas_pose', 'aircraft_collision', 'support_config', 'support_loadout', 'room_layout', 'menu_preview',
                 'make_sazabi', 'sazabi_model', 'sazabi_arms', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'legacy_assets', 'mdb_legacy', 'cas_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics',
@@ -202,6 +202,10 @@ def build_exe(name: str, generator: str | None = None) -> str:
     # EDF4.1's objects converted ahead of time (tools/edf41_objects.py), so the installer needs no EDF4.1
     cmd += ['--add-data', f'{os.path.join(ROOT, "edf41port", "objects")}{seps}edf41port/objects']
     cmd += ['--add-data', f'{os.path.join(ROOT, "edf41port", "objects.json")}{seps}edf41port']
+    # EDF4.1's story pack (tools/make_edf5_campaign.py PACK41): its scripts, titles and pictures
+    cmd += ['--add-data', f'{os.path.join(ROOT, "edf41port", "missions")}{seps}edf41port/missions']
+    for name in ('missions.json', 'missions_thumbnails.rab'):
+        cmd += ['--add-data', f'{os.path.join(ROOT, "edf41port", name)}{seps}edf41port']
     for registry in ('edf5port/weapons.json', 'edf41port/weapons.json', 'edf5port/models.json',
                      'edf41port/calls.json'):   # REGISTRIES
         folder = registry.split('/')[0]

@@ -519,6 +519,7 @@ void LoadConfig() noexcept {
     n.terrainShare=ReadBool(L"TerrainShare",n.terrainShare);
     n.edf5CampaignContent=FixInt("EDF5CampaignContent",ReadInt(L"EDF5CampaignContent",n.edf5CampaignContent),0,65535);
     n.testRangeContent=FixInt("TestRangeContent",ReadInt(L"TestRangeContent",n.testRangeContent),0,65535);
+    n.edf41Content=FixInt("EDF41Content",ReadInt(L"EDF41Content",n.edf41Content),0,65535);
     n.airSoftEdge=ReadFloat(L"AirSoftEdge",n.airSoftEdge);
     n.airSoftTurns=ReadFloat(L"AirSoftTurns",n.airSoftTurns);
     n.airSoftCeil=ReadFloat(L"AirSoftCeil",n.airSoftCeil);

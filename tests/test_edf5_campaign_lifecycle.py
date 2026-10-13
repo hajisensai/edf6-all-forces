@@ -53,7 +53,7 @@ class CampaignLifecycleTests(unittest.TestCase):
 
     def stub_build(self):
         """campaign.build answered by built() (its game reads are not this test's)."""
-        return patch.object(campaign, 'build', side_effect=lambda root, campaign=True, test_range=True:
+        return patch.object(campaign, 'build', side_effect=lambda root, campaign=True, test_range=True, root41=None:
                             self.built(campaign, test_range))
 
     @contextmanager
@@ -71,7 +71,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         with ExitStack() as stack:
             for name, value in {'check_loader': None, 'plugin_files': plugins, 'stack_weapons': {},
                                 'build_autoturret': ({}, False), 'install_autoturret': None,
-                                'build_asset': None}.items():
+                                'build_asset': None, 'find_edf41': None}.items():   # a stand-in game: no EDF4.1
                 stack.enter_context(patch.object(installer, name, return_value=value))
             for module, name, value in ((rootcpk, 'use', None), (call_weapons, 'recover', False),
                                         (call_weapons, 'install', []), (gen, 'install', []),
@@ -88,7 +88,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         campaign.remove(self.root)
         with self.pack() as build:
             installer.install(self.root)
-            build.assert_called_once_with(self.root, campaign=True)
+            build.assert_called_once_with(self.root, campaign=True, root41=None)
         self.assertTrue(campaign.enabled(self.root))
         self.assertTrue(campaign.range_installed(self.root))
         self.assertTrue(campaign.check(self.root))
@@ -124,7 +124,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         self.assertFalse(campaign.check(self.root))
         with self.pack() as build:
             installer.install(self.root)
-            build.assert_called_once_with(self.root, campaign=True)
+            build.assert_called_once_with(self.root, campaign=True, root41=None)
         self.assertTrue(campaign.check(self.root))
 
     def test_interrupted_disable_finishes_on_normal_update(self) -> None:
@@ -141,7 +141,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         self.assertFalse(campaign.check(self.root))
         with self.pack() as build:
             installer.install(self.root)
-            build.assert_called_once_with(self.root, campaign=False)
+            build.assert_called_once_with(self.root, campaign=False, root41=None)
         self.assertFalse(campaign.enabled(self.root))
         self.assertTrue(campaign.range_installed(self.root))
         self.assertTrue(campaign.check(self.root))
@@ -174,7 +174,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         self.assertFalse(campaign.removal_blocked(self.root))
         with self.pack() as build:
             installer.install(self.root)
-            build.assert_called_once_with(self.root, campaign=False)
+            build.assert_called_once_with(self.root, campaign=False, root41=None)
         self.assertFalse(campaign.enabled(self.root))
         self.assertTrue(campaign.range_installed(self.root))
         for rel in (f for pack in campaign.PACKS for f in pack.files()):   # the campaign's: the originals back
@@ -221,7 +221,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         self.assertIn('TestRangeContent=6', self.ini.read_text())   # the range keeps its id without the campaign
         with self.pack() as build:
             installer.install(self.root)
-            build.assert_called_once_with(self.root, campaign=False)
+            build.assert_called_once_with(self.root, campaign=False, root41=None)
         self.assertFalse(campaign.enabled(self.root))
         self.assertTrue(campaign.check(self.root))
 
@@ -235,7 +235,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         self.assertTrue(campaign.check(self.root))
         with self.pack() as build:
             installer.install(self.root)
-            build.assert_called_once_with(self.root, campaign=False)
+            build.assert_called_once_with(self.root, campaign=False, root41=None)
         self.assertEqual(modfiles.read(image), b'foreign image')
         self.assertFalse(campaign.enabled(self.root))
 

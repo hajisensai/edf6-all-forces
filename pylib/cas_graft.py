@@ -142,6 +142,21 @@ def graft(target: bytes, donor: bytes, groups: list[str]) -> bytes:
     return bytes(area + canm + target[lt.strings_at:] + extra + tail)
 
 
+def hollow(cas: bytes) -> bytes:
+    """An EDF6 CAS whose every clip moves nothing: each CANM clip's track count set to 0, in place (the players,
+    states, clips' names, durations and frames as they were; the track data left unread). For a ported object that
+    has no CAS of its own under a class that resolves players by name: its template's CAS, hollowed, gives it the
+    players without the template's motion on bones it does not have."""
+    lay = cl.cas_layout(cas)
+    if lay.version != cl.CAS_6:
+        raise ValueError('hollow takes an EDF6 CAS 0x204')
+    out = bytearray(cas)
+    _sig, _ver, nc, co = struct.unpack_from('<4sIII', out, lay.canm_at)
+    for i in range(nc):
+        struct.pack_into('<I', out, lay.canm_at + co + i * CLIP + 20, 0)
+    return bytes(out)
+
+
 def cl_pose(b: bytes):  # noqa: ANN201 - cas_pose.CasPose
     import cas_pose
     return cas_pose.CasPose(b)

@@ -406,7 +406,12 @@ def build_asset(cache: Any, module: ModuleType, label: str, builder: Any = None)
     return built
 
 
-def build_packs(game: str, campaign: bool) -> tuple | None:
+def find_edf41(game: str) -> str | None:
+    """The player's EDF4.1, looked up once per install (its maps and the EDF4.1 story pack need it)."""
+    return gamedir.find_other(gamedir.EDF41, near=game)
+
+
+def build_packs(game: str, campaign: bool, root41: str | None = None) -> tuple | None:
     """The mission packs to write (make_edf5_campaign.build), or None: the test range's always, the EDF5 campaign's
     when wanted. A refusal of the campaign alone (a mission's resource missing, ...) still registers the range when no
     campaign is installed to keep; the opt-out (`campaign` False) is the packs rebuilt without it."""
@@ -416,7 +421,7 @@ def build_packs(game: str, campaign: bool) -> tuple | None:
     else:
         print('生成测试场任务包（EDF5 战役已停用）……')
     try:
-        return make_edf5_campaign.build(game, campaign=campaign)
+        return make_edf5_campaign.build(game, campaign=campaign, root41=root41)
     except make_edf5_campaign.Refused as e:
         print('！ 不安装任务包：', e)
     if not campaign or make_edf5_campaign.enabled(game):
@@ -442,6 +447,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     import make_chute
     import make_jets
     import edf41_objects
+    import edf41_maps
     import make_katyusha
     import make_sazabi
     import make_proteus
@@ -487,7 +493,8 @@ def install(game: str, campaign_requested: bool = False) -> None:
     sazabi = build_asset(cache, make_sazabi, '沙扎比（模型生成约 1.5 分钟）')
     proteus = build_asset(cache, make_proteus, '普罗透斯护盾（原版空袭兵电磁碉堡墙；同时撤销旧版生成的模型）')
     bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
-    campaign = build_packs(game, campaign_requested or make_edf5_campaign.wanted(game))
+    root41 = find_edf41(game)
+    campaign = build_packs(game, campaign_requested or make_edf5_campaign.wanted(game), root41)
     room = build_room_layouts(game)
     print('\n全部生成完毕，开始写入。')
     if campaign is None and not make_edf5_campaign.wanted(game) and make_edf5_campaign.enabled(game):
@@ -495,12 +502,6 @@ def install(game: str, campaign_requested: bool = False) -> None:
         raise make_edf5_campaign.Refused('无法完成 EDF5 战役停用：任务列表已被其他工具修改，已保留依赖文件。')
     for path in (make_optics.install_models(game, optics) if optics is not None else []):
         print('写入', path)
-    objects41, skipped41 = edf41_objects.build(game)
-    print(f'写入 EDF4.1 的敌人与 NPC（EDF6 没有、4.1 任务要用的 {len(edf41_objects.registry()["objects"])} 种，'
-          '预先转换好，不需要装 4.1；用 4.1 原来的文件名）……')
-    for obj, why in skipped41:
-        print('  跳过', obj, why)
-    edf41_objects.install(game, objects41)
     for path in (make_jets.install(game, jets) if jets is not None else []) + \
             (make_sub.install(game, sub) if sub is not None else []) + \
             (make_katyusha.install(game, katyusha) if katyusha is not None else []) + \
@@ -523,6 +524,21 @@ def install(game: str, campaign_requested: bool = False) -> None:
             print('删除（StockVehicleStores=0：原版载具的请求恢复原样）', path)
     print('写入呼叫武器（武器表只动本插件的行，其它行不动；全部写完或全部不写）……')
     call_weapons.install(game, weapons)
+    # After the weapons: a model both ship (EDF5's Blacker No.4.1, the 4.1 AI tank's look) is shared only once the
+    # weapons' install has recorded it in the ledger; built before, a first upgrade from a version whose weapons
+    # recorded it in their own manifest only would leave the 4.1 tank out (2026-10-12, real install).
+    objects41, skipped41 = edf41_objects.build(game)
+    print(f'写入 EDF4.1 的敌人与 NPC（EDF6 没有、4.1 任务要用的 {len(edf41_objects.registry()["objects"])} 种，'
+          '预先转换好，不需要装 4.1；用 4.1 原来的文件名）……')
+    for obj, why in skipped41:
+        print('  跳过', obj, why)
+    edf41_objects.install(game, objects41)
+    print('转换 EDF4.1 的任务地图（4.1 本篇任务包要用；从已安装的 EDF4.1 转换，城市地图每张约 3–8 分钟，'
+          '山地 / 平原（SK_*）地图每张约 1–2 分钟，已转换且未变的跳过）……' if root41
+          else '没有找到 EDF4.1：跳过 4.1 地图（4.1 本篇任务包需要它）。')
+    written41, skipped_maps = edf41_maps.install(game, root41)
+    for name, why in skipped_maps:
+        print('  跳过', name, why)
     install_autoturret(game, *turret)
     # Mutable stock SGOs are read after every primary writer, outside the expensive model cache.
     # AutoTurret's SGOs were redirected before its own manifest write; never layer another hash over them.
@@ -629,6 +645,7 @@ def uninstall(game: str) -> None:
     import make_chute
     import make_jets
     import edf41_objects
+    import edf41_maps
     import make_katyusha
     import make_sazabi
     import make_proteus
@@ -660,7 +677,7 @@ def uninstall(game: str) -> None:
         remove_autoturret(game)
         import menu_preview
         import support_loadout
-        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove,
+        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_maps.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:

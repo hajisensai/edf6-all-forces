@@ -3667,6 +3667,7 @@ def pack_install_upgrade_uninstall() -> None:
             enter(patched(at_build, build_files=_at_build_files))
             enter(patched(describe, table_ids=lambda mods: []))
             enter(patched(installer, bundle_dir=lambda: bundle, check_loader=lambda game: None,
+                          find_edf41=lambda game: None,
                           stack_weapons=lambda game: {}, retire_weapons=lambda game: True,
                           ask=lambda prompt: answers.pop(0)))
             enter(patched(call_weapons, recover=lambda game: False, install=lambda game, files: {},
@@ -3683,7 +3684,7 @@ def pack_install_upgrade_uninstall() -> None:
                 ledger.Ledger(game).put(gen.OWNER, 'OBJECT/EDF6TR_FAKE.SGO', b'range object')
                 return []
             enter(patched(gen, install=mission, grand_battle=lambda plan: plan))
-            enter(patched(e5c, build=lambda game, campaign=True, test_range=True: _e5c_stub()))   # its own install / remove / check run for real
+            enter(patched(e5c, build=lambda game, campaign=True, test_range=True, root41=None: _e5c_stub()))   # its own install / remove / check run for real
             enter(patched(e5c.modfiles, refuse_while_running=lambda *a, **k: None))   # the real game may be open
             for group in buildcache.GROUPS:
                 made = (b'mac', {'FAKE_PIECE.MAC': b'piece'}) if group == 'bigmap' else \
@@ -5441,7 +5442,7 @@ def edf5_campaign_build() -> None:
                 assert f.stored == own[e5c.thumb_name(path).upper()].stored, (pack.tag, path)
             assert dsgo.compact(dsgo.parse(files[listed])) == files[listed]
     assert counts == {'main': 110, 'dlc1': 11, 'dlc2': 14}, counts
-    assert {x[1] for x in p['skipped']} == {'DLC/DM015', 'DLC/DM018', 'DLC/DM019', 'DLC/DM020'}, p['skipped']
+    assert {x[1] for x in p['skipped'] if x[0] != e5c.PACK41.group} == {'DLC/DM015', 'DLC/DM018', 'DLC/DM019', 'DLC/DM020'}, p['skipped']
 
 
 @test
@@ -5563,7 +5564,7 @@ def edf5_campaign_interrupted_reinstall() -> None:
         modfiles.atomic_write(e5c.rel_path(root, e5c.CONFIG), other)
         e5c.install(root, e5c.build(root))
         real_plan = e5c.plan
-        shorter = lambda r: {**real_plan(r), 'rows': real_plan(r)['rows'][:-1]}   # an update that writes other bytes
+        shorter = lambda r, root41=None: {**real_plan(r, root41), 'rows': real_plan(r, root41)['rows'][:-1]}   # an update that writes other bytes
         with patched(e5c, plan=shorter):
             update = e5c.build(root)
         with patched(e5c.modfiles, atomic_write=_failing_write(e5c.PACKS[0].txt['CN'])):
@@ -5610,7 +5611,8 @@ def edf5_campaign_refusals() -> None:
         os.remove(e5c.rel_path(root, list_rel))
         os.remove(os.path.join(root, 'Mods', e5c.MANIFEST))
         real_plan = e5c.plan
-        with patched(e5c, plan=lambda r: {**real_plan(r), 'rows': [x for x in real_plan(r)['rows'] if x['group'] != 'dlc2']}):
+        with patched(e5c, plan=lambda r, root41=None: {**real_plan(r, root41),
+                                                  'rows': [x for x in real_plan(r, root41)['rows'] if x['group'] != 'dlc2']}):
             _e5c_refuses(root, 'an empty pack')
         assert not e5c.installed(root), 'a refusal wrote a manifest'
 
@@ -5651,8 +5653,9 @@ def edf5_campaign_plugin_sites() -> None:
 @test
 def edf5_campaign_thumbnails() -> None:
     """Every EDF5 mission in the text has EDF5's own thumbnail in THUMBS (no game needed: the file is committed), each a
-    440x220 DXT1 DDS like EDF6's; pick_thumbs gives a mission EDF5's one, the range its stock 'thumb', a mission THUMBS
-    lacks the stock one on its map, else M046's."""
+    440x220 DXT1 DDS like EDF6's; pick_thumbs gives a mission its own pack's one (EDF5's, or EDF4.1's for the 4.1 story:
+    both games have an M007), the range its stock 'thumb', a mission THUMBS lacks the stock one on its map, else
+    M046's."""
     import mdb
     import struct
     own = e5c.edf5_thumbs()
@@ -5665,15 +5668,21 @@ def edf5_campaign_thumbnails() -> None:
         assert d[:4] == b'DDS ' and struct.unpack_from('<II', d, 12) == (220, 440) and d[84:88] == b'DXT1', name
 
     stock = {n.upper(): mdb.RabFile(n, 0, 0, n.encode()) for n in ('EDF6_M046.dds', 'EDF6_M045.dds', 'EDF6_M010.dds')}
-    rows = [{'key': 'EDF5_OLD_SCRIPT/M001', 'path': 'M001', 'map': 'X.MAC'},
-            {'key': 'EDF5_OLD_SCRIPT/DLC/DM011', 'path': 'DLC/DM011', 'map': None},
-            {'key': 'EDF5_OLD_SCRIPT/M999', 'path': 'M999', 'map': 'X.MAC'},     # not in THUMBS: its map's
-            {'key': 'EDF5_OLD_SCRIPT/M998', 'path': 'M998', 'map': None},        # nothing: M046's
-            {'key': 'EDF6/RANGE', 'map': None, 'thumb': 'EDF6/M045'}]
-    out = e5c.pick_thumbs(rows, own, stock, {'X.MAC': 'EDF6/M010'})
+    with open(e5c.EDF41_THUMBS, 'rb') as f:
+        own41 = {x.name.upper(): x for x in mdb.rab_read(f.read()).files}
+    assert own41['M007.DDS'].stored != own['M007.DDS'].stored   # the two games' M007: why own_thumbs keys by pack
+    rows = [{'group': 'main', 'key': 'EDF5_OLD_SCRIPT/M001', 'path': 'M001', 'map': 'X.MAC'},
+            {'group': 'dlc1', 'key': 'EDF5_OLD_SCRIPT/DLC/DM011', 'path': 'DLC/DM011', 'map': None},
+            {'group': 'main', 'key': 'EDF5_OLD_SCRIPT/M999', 'path': 'M999', 'map': 'X.MAC'},   # not in THUMBS: its map's
+            {'group': 'main', 'key': 'EDF5_OLD_SCRIPT/M998', 'path': 'M998', 'map': None},      # nothing: M046's
+            {'group': 'range', 'key': 'EDF6/RANGE', 'map': None, 'thumb': 'EDF6/M045'},
+            {'group': 'main', 'key': 'EDF5_OLD_SCRIPT/M007', 'path': 'M007', 'map': None},
+            {'group': 'edf41', 'key': 'EDF41/M007', 'path': 'M007', 'map': None}]
+    out = e5c.pick_thumbs(rows, e5c.own_thumbs(), stock, {'X.MAC': 'EDF6/M010'})
     assert [f.name for f in out] == [e5c.thumb_name(r['key']) for r in rows]
     assert [f.stored for f in out] == [own['M001.DDS'].stored, own['DLC_DM011.DDS'].stored, b'EDF6_M010.dds',
-                                       b'EDF6_M046.dds', b'EDF6_M045.dds']
+                                       b'EDF6_M046.dds', b'EDF6_M045.dds', own['M007.DDS'].stored,
+                                       own41['M007.DDS'].stored]
 
 
 @test
@@ -6841,6 +6850,31 @@ def legacy_parsers_refuse_malformed_input() -> None:
 
 
 @test
+def mdb_legacy_half2_widened() -> None:
+    """EDF4.1 map parts' half2 vertex elements (format 24: NW_HILLYCITY_LIGHT's station models; no EDF6 model has one)
+    become float2 (12) with the same values: the vertex grows by 4 per such element, the elements keep their order
+    (a half2 before another element moves that one), every other byte is kept, and a mesh without one is untouched."""
+    import struct
+    import mdb
+    import mdb_legacy
+    uv = [(0.75, 0.76806640625), (33.25, -1.1064453125)]   # exact halves (so exact in float)
+    pos = [(1.0, 2.0, 3.0, 1.0), (-6.6015625, 6.0, -35.0, 1.0)]
+    raw = b''.join(struct.pack('<2e', *u) + struct.pack('<4e', *p) for u, p in zip(uv, pos))
+    me = mdb.Mesh(bytes(4), 0, 0, 12, [mdb.VElem(24, 0, 0, 'texcoord'), mdb.VElem(7, 4, 0, 'position')], 0, raw, b'')
+    mdb_legacy._check_mesh(me)
+    mdb_legacy._widen_half2(me)
+    assert me.vsize == 16 and [(e.name, e.fmt, e.offset) for e in me.elems] == [('texcoord', 12, 0), ('position', 7, 8)]
+    assert me.nverts == 2
+    for i in range(2):
+        assert struct.unpack_from('<2f', me.vdata, i * 16) == uv[i]
+        assert struct.unpack_from('<4e', me.vdata, i * 16 + 8) == pos[i]
+    mdb_legacy._check_mesh(me)
+    plain = mdb.Mesh(bytes(4), 0, 0, 8, [mdb.VElem(7, 0, 0, 'position')], 0, struct.pack('<4e', *pos[0]), b'')
+    mdb_legacy._widen_half2(plain)
+    assert plain.vsize == 8 and plain.vdata == struct.pack('<4e', *pos[0])
+
+
+@test
 def ported_assets_of_another_mod_stay() -> None:
     """tools/call_weapons.py on a stand-in game: a model another mod put under the name an EDF5 weapon's asset uses
     (Mods/OBJECT/V505_TANKEDF4.MRAB) survives an install that cannot build that weapon (no EDF5), the uninstall and a
@@ -7138,6 +7172,487 @@ def rmpa_legacy_real() -> None:
         kept(_game_read(g5, k))
     for name in EDF41_MISSION_MAPS:
         kept(dict(map_legacy.parse_marc_lenient(_game_read(g41, f'MAP/{name}.MAC'))[1])['map.rmpa'])
+
+
+
+@test
+def edf41_maps_cover_the_scripts() -> None:
+    """Every map and weather EDF4.1's bundled mission scripts load (Map('app:/Map/<map>.mac', '<weather>')) that
+    tools/edf41_maps.py installs has its weather pair: a weather left out would make the game look for a MAE that is not
+    there. The SK_* maps are installed too (their heightfield becomes an FMB piece, pylib/sk_map.py), so every map the scripts
+    load is covered but NW_TESTMAP, a test map no story mission needs."""
+    import re
+    import edf41_maps
+    import make_edf5_campaign as c
+    used: dict[str, set[str]] = {}
+    for m in c.edf41_text()['missions']:
+        strings = c.utf16_strings(c.edf41_script(m['id'], 'MISSION.BVM'))
+        for i, s in enumerate(strings):
+            hit = re.fullmatch(r'(?i)app:/Map/(\w+)\.mac', s.strip())
+            if hit and i + 1 < len(strings):
+                used.setdefault(hit.group(1).upper(), set()).add(strings[i + 1].strip().upper())
+    assert set(edf41_maps.MAPS) <= set(used), sorted(set(edf41_maps.MAPS) - set(used))
+    for name, (_donor, weathers) in edf41_maps.MAPS.items():
+        assert used[name] <= set(weathers), (name, sorted(used[name] - set(weathers)))
+    assert {n for n in used if n not in edf41_maps.MAPS} <= {'NW_TESTMAP'}, sorted(n for n in used if n not in edf41_maps.MAPS)
+
+
+@test
+def edf41_maps_install() -> None:
+    """tools/edf41_maps.py on a stand-in game (conversion stubbed): writes every file of every map as edf41maps', a
+    second install converts nothing it already converted from the same EDF4.1 files, a map one of whose files another
+    mod placed is left out and that file untouched, no EDF4.1 writes nothing, removal deletes what it wrote."""
+    import tempfile
+    import edf41_maps
+    import ledger
+
+    class Fake:
+        def fingerprint(self, name: str) -> list[int]:
+            return [len(name), 1]
+
+    converted: list[str] = []
+
+    def convert(name: str, _e41: object, _e6: object) -> dict[str, bytes]:
+        converted.append(name)
+        return {rel: rel.encode() for rel in edf41_maps.files_of(name)}
+
+    with tempfile.TemporaryDirectory() as game, \
+            patched(edf41_maps, convert=convert, Archives=lambda _root: Fake()):
+        os.makedirs(os.path.join(game, 'Mods'))
+        written, skipped = edf41_maps.install(game, None)
+        assert not written and [n for n, _ in skipped] == list(edf41_maps.MAPS) and not converted
+        assert not os.listdir(os.path.join(game, 'Mods'))
+        written, skipped = edf41_maps.install(game, 'edf41')
+        every = [rel for name in edf41_maps.MAPS for rel in edf41_maps.files_of(name)]
+        assert not skipped and converted == list(edf41_maps.MAPS) and len(written) == len(set(every))
+        led = ledger.Ledger(game)
+        assert all(led.owners(rel) == [edf41_maps.OWNER] for rel in every)
+        converted.clear()
+        assert edf41_maps.install(game, 'edf41') == ([], []) and not converted, converted
+        edf41_maps.remove(game)
+        other = os.path.join(game, 'Mods', 'MAP', 'IG_CAVE01.RAB')
+        os.makedirs(os.path.dirname(other), exist_ok=True)
+        with open(other, 'wb') as f:
+            f.write(b'another mod')
+        written, skipped = edf41_maps.install(game, 'edf41')
+        assert [n for n, _ in skipped] == ['IG_CAVE01'] and 'IG_CAVE01' not in converted
+        with open(other, 'rb') as f:
+            assert f.read() == b'another mod'
+        edf41_maps.remove(game)
+        assert os.path.exists(other) and not os.path.exists(os.path.join(game, 'Mods', 'MAP', 'NW_SOUKOGAI01.MAC'))
+
+
+@test
+def edf41_maps_real() -> None:
+    """tools/edf41_maps.py on the games: IG_CAVE01 converts to the files files_of names; the MAC re-parses with every
+    member kept and its map.rmpa in EDF6's format; the weather pair and navmesh are the donor's bytes."""
+    import bigmap
+    import edf41_maps
+    import rmpa_legacy
+    games = _legacy_games()
+    if games is None:
+        return
+    import rootcpk
+    steam = os.path.dirname(rootcpk.DEFAULT_GAME)
+    e41 = edf41_maps.Archives(os.path.join(steam, 'Earth Defense Force 4.1'))
+    e6 = edf41_maps.Archives(rootcpk.DEFAULT_GAME)
+    files = edf41_maps.convert('IG_CAVE01', e41, e6)
+    assert list(files) == edf41_maps.files_of('IG_CAVE01')
+    members = dict(bigmap.Marc.parse(files['MAP/IG_CAVE01.MAC']).files)
+    assert set(members) == {'map.mapb', 'elec_wire_default.erb', 'map.rmpa', 'map.mapo'}
+    assert rmpa_legacy.is_edf6(members['map.rmpa'])
+    assert files['MAP/IG_CAVE01_FINE.MAE'] == e6.read('IG_CAVE501_FINE.MAE')
+    assert files['MAP/IG_CAVE01.NAVMESH.HKT'] == e6.read('IG_CAVE501.NAVMESH.HKT')
+
+
+
+@test
+def sk_terrain_real() -> None:
+    """pylib/sk_terrain.py on EDF4.1's seven SK maps: the field is 1001 x 1001 samples of 2 m, its half float heights span
+    exactly the header's lowest / highest (the shader's f16tof32 on the low half), every vertex's stored material is the
+    layer of its largest blend weight and the weights sum to one (a handful of vertices a little off, normalised by the
+    converter), every layer paints with a colour (not a normal map) of
+    the names the field lists and the slice count of its colour array is the number of such names; and the objects the
+    map places stand on the decoded ground (median distance under half a metre, at the field's own placement: the
+    record's origin and height included: SK_VALLEY01's is 118.4 m up) - which also pins the axes: row = z, column = x."""
+    import struct
+    import bigmap
+    import map_legacy
+    import mdb
+    import numpy as np
+    import sk_map
+    import sk_terrain
+    games = _legacy_games()
+    if games is None:
+        return
+    g41 = games[0]
+    for name in ('SK_CRATER01', 'SK_HEIGEN02', 'SK_KAIGAN01', 'SK_SANGAKU01', 'SK_SANGAKU02', 'SK_STEPMOUNTAIN01',
+                 'SK_VALLEY01'):
+        members = dict(map_legacy.parse_marc_lenient(_game_read(g41, f'MAP/{name}.MAC'))[1])
+        shfb = [n for n in members if n.endswith('.shfb')]
+        assert len(shfb) == 1, name
+        s = sk_terrain.parse(members[shfb[0]])
+        assert (s.width, s.height, s.cell) == (1001, 1001, (2.0, 2.0)) and s.extent == (2000.0, 2000.0), name
+        assert abs(float(s.heights.min()) - s.lowest) < 0.3 and abs(float(s.heights.max()) - s.highest) < 0.3, name
+        assert s.blend is not None and s.blend.shape == (1001, 1001, len(s.layers))
+        tot = s.blend.sum(axis=2)
+        assert tot.max() < 1.2 and (tot < 0.5).mean() < 1e-3 and tot.min() > 0, name   # normalised where they are used
+        assert (s.blend.argmax(axis=2) == s.material).mean() > 0.9999, name
+        slice_of = sk_map.color_slices(s.layer_names)
+        assert all(l.color in slice_of and (l.multip < 0 or l.multip in slice_of) for l in s.layers), name
+        cols = [f for f in mdb.rab_read(_game_read(g41, f'MAP/{name}.RAB')).files if f.name.endswith('.cols.dds')]
+        assert len(cols) == 1
+        slices = struct.unpack_from('<I', cols[0].data, 128 + 12)[0]        # the DX10 header's arraySize
+        assert slices == len(slice_of), (name, slices, len(slice_of))
+        assert sk_terrain.lattice(s).shape == (501, 501)
+        if name not in ('SK_HEIGEN02', 'SK_VALLEY01'):
+            continue
+        mac = bigmap.Marc.parse(map_legacy.mac_from_legacy(_game_read(g41, f'MAP/{name}.MAC')))
+        mb = bigmap.MapB(mac.get('map.mapb'))
+        ox, oy, oz = sk_map.field_origin(mac.get('map.mapb'), shfb[0])
+        dy = []
+        for i in range(mb.rec_n):
+            if mb.def_name(mb.def_index(i)) == shfb[0]:
+                continue
+            x, y, z = mb.pos(i)
+            c, r = (x - ox) / s.cell[0], (z - oz) / s.cell[1]
+            if 0 <= c < s.width - 1 and 0 <= r < s.height - 1:
+                c0, r0, fx, fz = int(c), int(r), c - int(c), r - int(r)
+                h = (s.heights[r0, c0] * (1 - fx) * (1 - fz) + s.heights[r0, c0 + 1] * fx * (1 - fz)
+                     + s.heights[r0 + 1, c0] * (1 - fx) * fz + s.heights[r0 + 1, c0 + 1] * fx * fz) + oy
+                dy.append(abs(y - h))
+        assert len(dy) > 200 and float(np.median(dy)) < 0.5 and float(np.mean(np.array(dy) < 1.0)) > 0.8, (name, np.median(dy))
+
+
+@test
+def fmb_build_real() -> None:
+    """pylib/fmb_build.py on SK_HEIGEN02's field (a 100 x 100 cell corner of it, 5 x 5 leaves) with EDF6's IG_HAIKYOPLANE01
+    as the donor: pylib/fmb.py parses it back with its layout checks and its selftest passes (leaf and node AABBs bit exact,
+    the reference CMPL decoders agree, edits round trip); every leaf has what a stock regular grid leaf has (the same
+    header and 0x3C mesh record fields in the same places, 441 vertices of unit normals, 800 triangles wound as the
+    donor's, one 0x50 splat record per cell whose four corners each sum to 255 over the leaf's layer slots, the layer list
+    of 16 bytes), the trailing tables are the donor's two constant ones plus the layer table and shader table in the
+    stock layout (the 4-layer pieces' 21 shader records, the single layer ones' 9), and a leaf lists at most the layers a
+    stock leaf lists."""
+    import struct
+    import fmb
+    import fmb_build
+    import map_legacy
+    import numpy as np
+    import sk_map
+    import sk_terrain
+    games = _legacy_games()
+    if games is None:
+        return
+    g41, _g5, g6 = games
+    members = dict(map_legacy.parse_marc_lenient(_game_read(g41, 'MAP/SK_HEIGEN02.MAC'))[1])
+    s = sk_terrain.parse(members['sk_heigen02_fld2mgrid.shfb'])
+    heights = sk_terrain.lattice(s)[200:301, 200:301]
+    weights = s.blend[::2, ::2][200:301, 200:301]
+    weights = weights / np.maximum(weights.sum(axis=2, keepdims=True), 1e-9)
+    donor = _game_read(g6, 'MAP/' + sk_map.DONOR_FMB)
+    layers = sk_map.layers_of(s)
+    out = fmb_build.build(donor, heights, weights, -200.0, -200.0, 4.0, layers)
+    f = fmb.parse(out)
+    stock = fmb.parse(donor)
+    assert len(f.leaves) == 25 and f.count == 49
+    assert fmb.selftest(out)      # raises on any mismatch, returns what it checked
+    sl = stock.leaves[0]
+    sm = sl.meshes[0]
+    for lf in f.leaves.values():
+        assert struct.unpack_from('<I', lf.blob, 0)[0] == 1 and struct.unpack_from('<I', lf.blob, 0x28)[0] == 1
+        assert struct.unpack_from('<i', lf.blob, 0x2C)[0] == 0x30 == sm.base and len(lf.verts) == 441
+        assert struct.unpack_from('<I', lf.blob, 0x1C)[0] == 800
+        m = lf.meshes[0]
+        n = struct.unpack_from('<I', lf.blob, m.base)[0]
+        assert 1 <= n <= fmb_build.MAX_LAYERS and m.grid[:4] == (4.0, 4.0, 20, 20) and m.grid[6] == n * 0x101
+        assert m.weight_count == 400 and m.layermap_count == 1 and len(m.indices) == 2400
+        assert (m.weight_off - m.base, m.layermap_off - m.base) == (0x3C + 4800, 0x3C + 4800 + 0x50 * 400)
+        nrm = np.array([v[3:] for v in lf.verts])
+        assert abs(np.linalg.norm(nrm, axis=1) - 1).max() < 1e-4 and (nrm[:, 1] > 0).all()
+        for a, b, c in lf.triangles()[:50]:
+            p = [lf.verts[i] for i in (a, b, c)]
+            assert (p[1][2] - p[0][2]) * (p[2][0] - p[0][0]) - (p[1][0] - p[0][0]) * (p[2][2] - p[0][2]) < 0   # the donor's winding
+        rec = np.frombuffer(lf.blob, dtype=np.uint8, count=0x50 * 400, offset=m.weight_off).reshape(-1, 5, 16)
+        assert (rec[:, 0] == 0).all() and (rec[:, 1:, :].sum(axis=2) == 255).all() and (rec[:, 1:, n:] == 0).all()
+        lm = lf.blob[m.layermap_off:m.layermap_off + 16]
+        assert len(set(lm) - {255}) == n and lm[n:] == bytes([255]) * (16 - n)
+    for chunk in f.chunks:
+        assert chunk.kind in (fmb.KIND_NODE, fmb.KIND_LEAF_CMPL)
+    ho, hd = struct.unpack_from('<11I', out, 0), struct.unpack_from('<11I', donor, 0)
+    assert ho[:2] == hd[:2] and ho[3] == hd[3] and ho[7] == hd[7] == 0x100
+    assert out[ho[5]:ho[6]] == donor[hd[5]:hd[6]] and out[ho[6]:ho[8]] == donor[hd[6]:hd[8]]   # tables 2 and 3: the donor's
+    n_layers, off, n_ori, off2 = struct.unpack_from('<4I', out, ho[4])
+    assert (n_layers, off, off2) == (len(layers), 16, 16 + 0x50 * len(layers))
+    assert ho[5] - ho[4] == 16 + 0x50 * n_layers + 0x20 * n_ori
+    counts = sorted({struct.unpack_from('<I', lf.blob, f.leaves[k].meshes[0].base)[0] for k, lf in f.leaves.items()})
+    assert ho[9] == 3 * (2 * len(counts) + 1)
+    sn = struct.unpack_from('<I', donor, 0x24)[0]
+    assert sn == 9      # the donor: one layer, 3 passes x 3 records
+    # the layer table's records are the stock layer record's fields (20 dwords) with the layers' slices and tile orientations
+    rec0 = struct.unpack_from('<20i', out, ho[4] + 16)
+    drec = struct.unpack_from('<20i', donor, hd[4] + 16)
+    assert [rec0[k] == drec[k] for k in (2, 3, 4, 5, 6, 8, 9, 11, 12, 14, 15)] == [True] * 11
+    assert struct.unpack_from('<4f', out, ho[4] + 16 + 0x40) == struct.unpack_from('<4f', donor, hd[4] + 16 + 0x40)
+
+
+@test
+def hkcms_build_real() -> None:
+    """pylib/hkcms_build.py on EDF6's own collision (IG_HEIGEN601's as the donor): the writer re-emits the donor and the
+    stock MADs it was checked on byte for byte, a built terrain / object collision parses with pylib/hktag.py and
+    pylib/hkcms.py, decodes to its input within float rounding, passes hkcms.bound_problems and has the stock ground
+    tile's item structure (selftest in the module: its own lines say what was compared)."""
+    import bigmap
+    import hkcms_build
+    games = _legacy_games()
+    if games is None:
+        return
+    g6 = games[2]
+    mad = _game_read(g6, 'MAP/IG_HEIGEN601.MAD')
+    donor = bigmap.Marc.parse(mad).get('collision.hkt')
+    assert hkcms_build.write_mad(donor) == mad
+    assert len(hkcms_build.selftest(donor)) >= 5
+
+
+@test
+def edf41_sk_maps_real() -> None:
+    """tools/edf41_maps.py on SK_HEIGEN02 from the real games: the files files_of names; the MAC is a map bigmap verifies
+    whose ground def is `sk_heigen02_fld2mgrid.fmep` placed at the origin with the stock .fmep cull distances, its
+    externals.sgo lists the FMB, the field's members are gone and map.rmpa is EDF6's; the FMB is a piece of 625 leaves
+    covering -1000..1000 whose heights are the field's; the MAD holds the ground body (named for the piece, a compound
+    of 2500 tiles) and the objects' bodies, and every compound passes hkcms.bound_problems; the RAB has the colour array
+    under the name EDF6's terrain looks up (<map>_color.dds) and the flat normal map; the weather pair and navmesh are the
+    donor's."""
+    import struct
+    import bigmap
+    import edf41_maps
+    import fmb
+    import hkcms
+    import hktag
+    import map_legacy
+    import mdb
+    import numpy as np
+    import rmpa_legacy
+    import rootcpk
+    import sgo
+    import sk_terrain
+    games = _legacy_games()
+    if games is None:
+        return
+    steam = os.path.dirname(rootcpk.DEFAULT_GAME)
+    e41 = edf41_maps.Archives(os.path.join(steam, 'Earth Defense Force 4.1'))
+    e6 = edf41_maps.Archives(rootcpk.DEFAULT_GAME)
+    name = 'SK_HEIGEN02'
+    files = edf41_maps.convert(name, e41, e6)
+    assert list(files) == edf41_maps.files_of(name) and 'SK_HEIGEN02' in edf41_maps.SK_MAPS
+    mac = bigmap.Marc.parse(files['MAP/SK_HEIGEN02.MAC'])
+    members = dict(mac.files)
+    assert not bigmap.verify(files['MAP/SK_HEIGEN02.MAC'])
+    assert not [n for n in members if n.endswith(('.shfb', '.cols.sgo', '.norm.sgo'))]
+    assert rmpa_legacy.is_edf6(members['map.rmpa'])
+    assert sgo.plain(sgo.read(members['externals.sgo'])[1]) == {'resource': ['sk_heigen02_fld2mgrid.fmb']}
+    mb = bigmap.MapB(members['map.mapb'])
+    ground = [i for i in range(mb.rec_n) if mb.def_name(mb.def_index(i)) == 'sk_heigen02_fld2mgrid.fmep']
+    assert len(ground) == 1 and mb.pos(ground[0]) == (0.0, 0.0, 0.0)
+    d = mb.def_off + mb.def_index(ground[0]) * bigmap.DEF
+    assert struct.unpack_from('<2f', mb.raw, d + 0x18) == (100.0, 1000.0) and mb.def_type(mb.def_index(ground[0])) == 3
+    assert not any(n.endswith('.shfb') for n in (mb.def_name(k) for k in range(mb.def_n)))
+    mo = bigmap.MapO(members['map.mapo'])
+    ent = mo.ent_off + ground[0] * bigmap.ENT
+    pair_at = ent + struct.unpack_from('<i', mo.raw, ent)[0]
+    assert pair_at > ent and struct.unpack_from('<2i', mo.raw, pair_at) == (0, 8)      # the empty grass pair of a stock .fmep entry
+    # the FMB
+    f = fmb.parse(files['MAP/SK_HEIGEN02_FLD2MGRID.FMB'])
+    assert len(f.leaves) == 625 and f.count == 1249
+    pts = np.array(fmb.points(f))
+    assert pts[:, 0].min() == -1000.0 and pts[:, 0].max() == 1000.0 and pts[:, 2].min() == -1000.0
+    s = sk_terrain.parse(dict(map_legacy.parse_marc_lenient(_game_read(games[0], 'MAP/SK_HEIGEN02.MAC'))[1])['sk_heigen02_fld2mgrid.shfb'])
+    lat = sk_terrain.lattice(s)
+    ix, iz = np.rint((pts[:, 0] + 1000) / 4).astype(int), np.rint((pts[:, 2] + 1000) / 4).astype(int)
+    assert np.abs(pts[:, 1] - lat[iz, ix]).max() < 1e-4
+    # the MAD
+    raw = bigmap.Marc.parse(files['MAP/SK_HEIGEN02.MAD']).get('collision.hkt')
+    tag = hktag.Tag(raw)
+    bodies = hkcms.bodies(tag)
+    ground_name = 'sk_heigen02_fld2mgrid.sk_heigen02_fld2mgrid'
+    assert ground_name in bodies and {'sk_rockm01.sk_rockm01', 'sk_knoll01.sk_knoll01'} <= set(bodies)
+    comp = hkcms.Compound(tag, bytearray(raw), bodies[ground_name])
+    assert len(comp.instances) == 2500
+    for k in bodies.values():
+        if tag.item(k)[0] == 'hknpCompoundShape':
+            assert hkcms.bound_problems(tag, raw, k) == []
+    # the RAB
+    rab = {x.name: x for x in mdb.rab_read(files['MAP/SK_HEIGEN02.RAB']).files}
+    assert {'sk_heigen02_color.dds', 'sk_heigen02_normal.dds'} <= set(rab) and not [n for n in rab if '.cols.' in n]
+    color = mdb.cmpl_decompress(rab['sk_heigen02_color.dds'].stored)
+    assert color[:4] == b'DDS ' and struct.unpack_from('<I', color, 128 + 12)[0] == 8
+    assert files['MAP/SK_HEIGEN02_CLOUDY.MAE'] == e6.read('IG_HEIGEN507_CLOUDY.MAE')
+    assert files['MAP/SK_HEIGEN02.NAVMESH.HKT'] == e6.read('IG_HEIGEN507.NAVMESH.HKT')
+
+
+@test
+def edf41_story_pack_real() -> None:
+    """EDF4.1's story pack from the real games (make_edf5_campaign PACK41): with EDF4.1 given it comes after the test
+    range with the next content id, so no installed pack's id moves; an offline and an online mode on its own save
+    file; one row per mission whose map and objects will be there (the maps tools/edf41_maps.py converts), each
+    row's script written under Mods/MISSION/EDF41/<id>/ as bundled, its thumbnail 4.1's picture of it (the 16 maps
+    tools/edf41_maps.py converts, the SK_* ones included: 9 missions on them have a row); a mission naming an object not
+    ported is left out with the reason. Without EDF4.1, no pack."""
+    import dsgo
+    import edf41_maps
+    import gamedir
+    import mdb
+    import rootcpk
+    import sgo
+    if not _e5c_have_game():
+        return
+    root41 = gamedir.find_other(gamedir.EDF41, near=rootcpk.DEFAULT_GAME)
+    if root41 is None:
+        return
+    files, content, p = e5c.build(rootcpk.DEFAULT_GAME, root41=root41)
+    plain, plain_content, _ = e5c.build(rootcpk.DEFAULT_GAME)
+    assert (content.campaign, content.range) == (plain_content.campaign, plain_content.range) and not plain_content.edf41
+    assert content.edf41 == content.range + 1
+    modes = sgo.plain(sgo.read(files[e5c.CONFIG])[1]['ModeList'])
+    ours = [m for m in modes if m[e5c.M_CONTENT] == content.edf41]
+    assert [(m[e5c.M_ONLINE], m[e5c.M_TYPE], m[e5c.M_MST]) for m in ours] == [(0, 0, 'E41M.MST'), (1, 1, 'E41M.MST')]
+    rows41 = [r for r in p['rows'] if r['group'] == e5c.PACK41.group]
+    assert len(rows41) >= 40 and {r['map'] for r in rows41} <= {f'{n}.MAC' for n in edf41_maps.MAPS}
+    assert sum(r['map'].startswith('SK_') for r in rows41) >= 9
+    assert any(r['path'] == 'M126' for r in rows41)
+    skipped = {path: why for g, path, why in p['skipped'] if g == e5c.PACK41.group}
+    assert skipped and all('缺少' in why for why in skipped.values())
+    listed = dsgo.parse(files[e5c.PACK41.list]).root.get('table').items
+    assert [r.items[2] for r in listed] == [f'EDF41/{r["path"]}' for r in rows41]
+    for r in rows41:
+        for name in r['files']:
+            assert files[f'MISSION/EDF41/{r["path"]}/{name}'] == e5c.edf41_script(r['path'], name)
+    with open(e5c.EDF41_THUMBS, 'rb') as f:
+        own = {x.name.upper(): x.stored for x in mdb.rab_read(f.read()).files}
+    thumbs = mdb.rab_read(files[e5c.PACK41.image]).files
+    assert [t.stored for t in thumbs] == [own[f'{r["path"].upper()}.DDS'] for r in rows41]
+    assert all(e5c.managed(rel) for rel in files)
+@test
+def cas_hollow_real() -> None:
+    """pylib/cas_graft.hollow on the real E515 CAS (UFO301's under UfoSmall515: 4.1's UFO has no CAS): the same size,
+    players and clips (names, durations, frames) as E515's, every clip with no track; and the converted UFO301 / its
+    ace ship exactly that, under the class, with E515's material_animation (an empty one crashed UfoSmall515's
+    constructor on the real game: slot 0 enabled unchecked, EDF+0x6dc844)."""
+    import struct
+    import cas_graft
+    import cas_legacy as cl
+    import cas_pose
+    import sgo
+    if not _e5c_have_game():
+        return
+    import rootcpk
+    import make_edf41_objects as m
+    g6 = m.archives(rootcpk.DEFAULT_GAME)
+    donor = g6['OBJECT/E515_IMPERIALUFO.CAS'].read('OBJECT', 'E515_IMPERIALUFO.CAS')
+    out = cas_graft.hollow(donor)
+    assert len(out) == len(donor)
+    groups = [cas_graft._name(out, at) for at, _ in cl.cas_layout(out).tree.anmgroups]
+    assert groups == [cas_graft._name(donor, at) for at, _ in cl.cas_layout(donor).tree.anmgroups] == ['main']
+    a, b = cas_pose.CasPose(donor), cas_pose.CasPose(out)
+    assert [c.name for c in a.clips] == [c.name for c in b.clips] and len(b.clips) == 5
+    fields = [(struct.unpack_from('<IiffIII', a.data, x.at), struct.unpack_from('<IiffIII', b.data, y.at))
+              for x, y in zip(a.clips, b.clips)]
+    assert all(before[5] > 0 and after[5] == 0 and before[:5] == after[:5] for before, after in fields)
+    with open(os.path.join(ROOT, 'edf41port', 'objects', 'OBJECT', 'UFO301.CAS'), 'rb') as f:
+        assert f.read() == out
+    for name in ('UFO301', 'UFO301ACE'):
+        with open(os.path.join(ROOT, 'edf41port', 'objects', 'OBJECT', name + '.SGO'), 'rb') as f:
+            d = sgo.load(data=f.read())
+        assert d['xgs_scene_object_class'] == 'UfoSmall515' and len(d['material_animation']) >= 1
+        assert d['animation_model'][1] == f'app:/object/{name.lower()}.cas'
+
+
+
+@test
+def edf41_objects_after_weapons() -> None:
+    """The installer builds EDF4.1's objects after the weapons are written: a model both ship (EDF5's Blacker No.4.1,
+    OBJECT/V505_TANKEDF4.MRAB, the 4.1 AI tank's look) counts as shared only once call_weapons.install has put it in
+    the ledger as 'calls'. A version whose weapons recorded it in their own manifest only (.edf6vc_calls.json, before
+    the ledger) left it unrecorded; built first, the upgrade's edf41_objects.build saw another mod's file and left the
+    tank out (2026-10-12, the real install)."""
+    text = src('tools/installer.py')
+    body = text[text.index('def install(game: str'):]
+    assert body.index('call_weapons.install(game, weapons)') < body.index('edf41_objects.build(game)')
+
+
+
+@test
+def mdb_insert_bone() -> None:
+    """mdb.insert_bone on a small skinned model: the new bone goes in depth-first file order after its parent's
+    subtree (depth_delta encodes that order: appended at the end it would read as the last bone's child), as the
+    parent's last child, weightless with the parent's bind; every index past it moves up by one in the bones' links,
+    the objects' bones and the skinned vertices' blend indices; inv_bind stays the inverse of the bind and
+    depth_delta the stock rule. rename_bone gives the bone a name-table entry of its own."""
+    import struct
+    import mdb
+    ident = [1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0]
+
+    def bone(i: int, parent: int, sib: int, child: int, name: int, kids: int, y: float) -> mdb.Bone:
+        local = list(ident)
+        local[13] = y
+        return mdb.Bone(i, parent, sib, child, name, kids, 3, 0, 0, 0, 0, local, list(ident), [0.0, 0, 0, 1], [0.0, 0, 0, 1])
+
+    # root(0) -> a(1) -> a1(2); root -> b(3)
+    bones = [bone(0, -1, -1, 1, 0, 2, 0.0), bone(1, 0, 3, 2, 1, 1, 1.0), bone(2, 1, -1, -1, 2, 0, 2.0),
+             bone(3, 0, -1, -1, 3, 0, 3.0)]
+    w = mdb.bind_world(mdb.Mdb(0x20, ['root', 'a', 'a1', 'b'], bones, [], [], []))
+    for b in bones:
+        b.inv_bind = mdb.inverse_affine(w[b.index])
+    d = mdb.depth_of(mdb.Mdb(0x20, [], bones, [], [], []))
+    for i, b in enumerate(bones):
+        b.depth_delta = (d[i + 1] - d[i]) if i + 1 < len(bones) else d[i]
+    vdata = bytes([3, 2, 1, 0]) + struct.pack('<4f', 0.25, 0.25, 0.25, 0.25)
+    mesh = mdb.Mesh(bytes((0, 1, 4, 0)), 0, 0, 20, [mdb.VElem(21, 0, 0, 'BLENDINDICES'), mdb.VElem(1, 4, 0, 'BLENDWEIGHT')],
+                    0, vdata, b'')
+    md = mdb.Mdb(0x20, ['root', 'a', 'a1', 'b'], bones, [mdb.Object(0, 3, [mesh])], [], [])
+    at = mdb.insert_bone(md, 'g', 'a')
+    assert at == 3 and [md.name_of(b.name) for b in md.bones] == ['root', 'a', 'a1', 'g', 'b']
+    assert [(b.parent, b.sibling, b.child) for b in md.bones] == [(-1, -1, 1), (0, 4, 2), (1, 3, -1), (1, -1, -1),
+                                                                   (0, -1, -1)]
+    assert md.bones[1].child_count == 2 and md.objects[0].bone == 4
+    assert list(md.objects[0].meshes[0].vdata[:4]) == [4, 2, 1, 0]
+    w = mdb.bind_world(md)
+    assert all(max(abs(x - y) for x, y in zip(mdb.inverse_affine(w[b.index]), b.inv_bind)) < 1e-6 for b in md.bones)
+    d = mdb.depth_of(md)
+    assert [b.depth_delta for b in md.bones] == [d[i + 1] - d[i] for i in range(4)] + [d[4]]
+    mdb.rename_bone(md, 'b', 'body')
+    assert md.name_of(md.bones[4].name) == 'body' and md.names[3] == 'b'
+
+
+@test
+def edf41_ufo401_real() -> None:
+    """The shipped UFO401 under UfoSmall507: every MDB of its model has the bones the class finds by name (body,
+    gun_side, gun: a missing one, wrong aim or EDF+0x529067), keeps every bone its ragdoll and its MAB locators name
+    (center: kept for them), its 8 sounds (4.1's 7, then E507's eighth), and E507's aim keys."""
+    import json
+    import re
+    import mdb
+    import sgo
+    base = os.path.join(ROOT, 'edf41port', 'objects', 'OBJECT')
+    with open(os.path.join(base, 'UFO401.SGO'), 'rb') as f:
+        d = sgo.load(data=f.read())
+    assert d['xgs_scene_object_class'] == 'UfoSmall507' and len(d['se_table']) == 8
+    assert d['se_table'][-1] == '小型UFO507戦闘モード' and 'aim_range_info' in d and 'move_turn_info' in d
+    assert 'center'.encode('utf-16le') in bytes.fromhex(d['animation_model'][2][4:])
+    with open(os.path.join(base, 'RAGDOLL_UFO401_HAS_HKA.SHKT'), 'rb') as f:
+        ragdoll = {s.decode() for s in re.findall(rb'[A-Za-z_][A-Za-z0-9_]{2,}', f.read())}
+    with open(os.path.join(base, 'UFO401.MRAB'), 'rb') as f:
+        models = [x for x in mdb.rab_read(f.read()).files if x.name.lower().endswith('.mdb')]
+    assert len(models) == 3
+    for x in models:
+        md = mdb.mdb_read(x.data)
+        names = [md.name_of(b.name) for b in md.bones]
+        assert {'body', 'gun_side', 'gun', 'center'} <= set(names), (x.name, names)
+        assert md.bones[names.index('gun')].parent == names.index('gun_side')
+        assert md.bones[names.index('body')].parent == names.index('center')
+        assert {'center', 'partsA_r'} & ragdoll <= set(names)
+    reg = json.load(open(os.path.join(ROOT, 'edf41port', 'objects.json'), encoding='utf-8'))
+    assert any(o['object'] == 'OBJECT/UFO401.SGO' for o in reg['objects'])
 
 
 def main() -> int:
