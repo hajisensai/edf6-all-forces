@@ -468,6 +468,10 @@ add_executable(support_spawn_test tests/support_spawn_test.cpp)
 target_include_directories(support_spawn_test PRIVATE common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_compile_options(support_spawn_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME support_spawn COMMAND support_spawn_test)
+# A diagnostic logged once per distinct answer (src/log_once.h: heli.cpp LogSea) offline.
+add_executable(log_once_test tests/log_once_test.cpp)
+target_compile_options(log_once_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME log_once COMMAND log_once_test)
 # The debug spawn tool's catalog, menu and placement (src/debug_spawn.h) offline.
 add_executable(debug_spawn_test tests/debug_spawn_test.cpp)
 target_compile_options(debug_spawn_test PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -592,6 +596,8 @@ set_tests_properties(support_resources PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME online_gate_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/online_gate_guard.py")
 # The sea rescue comes only through the support deployment (a catalog entry, real pilot seated): no seatless spawner.
 add_test(NAME rescue_support_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/rescue_support_guard.py")
+# The installer's logs send only crash dumps this install wrote (tools/testhub.py dump_matches).
+add_test(NAME testhub_dump_source COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/testhub_dump_source_test.py")
 set_tests_properties(rescue_support_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The rescue's cancel reasons, its takeoff point, and the room's build notice (pure: src/rescue_logic.h, support_entry.h,
 # version_notice.h).

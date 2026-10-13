@@ -219,10 +219,75 @@ def _pe_stamp(path: str) -> str:
     except (OSError, ValueError):
         return '?'
 
+def _pe_image(path: str) -> tuple[int, int] | None:
+    """The PE header's TimeDateStamp and SizeOfImage: what a minidump's module list records of a loaded image."""
+    try:
+        with open(path, 'rb') as f:
+            head = f.read(4096)
+        off = int.from_bytes(head[0x3C:0x40], 'little')
+        if head[off:off + 4] != b'PE\0\0':
+            return None
+        return int.from_bytes(head[off + 8:off + 12], 'little'), int.from_bytes(head[off + 24 + 56:off + 24 + 60], 'little')
+    except (OSError, ValueError):
+        return None
+
+
+def dump_modules(path: str) -> dict[str, tuple[str, int, int]] | None:
+    """A minidump's module list (MINIDUMP_DIRECTORY stream 4): lower-case file name -> (full path, TimeDateStamp,
+    SizeOfImage). None when it is no minidump or has no module list."""
+    try:
+        with open(path, 'rb') as f:
+            data = f.read()
+    except OSError:
+        return None
+    u32 = lambda o: int.from_bytes(data[o:o + 4], 'little')  # noqa: E731
+    if len(data) < 32 or data[:4] != b'MDMP':
+        return None
+    streams, directory = u32(8), u32(12)
+    for i in range(min(streams, 1024)):
+        entry = directory + 12 * i
+        if entry + 12 > len(data) or u32(entry) != 4:   # ModuleListStream
+            continue
+        rva = u32(entry + 8)
+        out: dict[str, tuple[str, int, int]] = {}
+        for m in range(min(u32(rva), 4096)):
+            mod = rva + 4 + 108 * m                       # MINIDUMP_MODULE
+            if mod + 108 > len(data):
+                return None
+            size, stamp, name_rva = u32(mod + 8), u32(mod + 16), u32(mod + 20)
+            length = u32(name_rva)
+            name = data[name_rva + 4:name_rva + 4 + length].decode('utf-16-le', 'replace')
+            out[re.split(r'[\\/]', name)[-1].lower()] = (name, stamp, size)
+        return out
+    return None
+
+
+def dump_matches(path: str, game: str) -> str:
+    """'' when the crash dump is this install's, else why not. A dump is kept by Windows (LocalDumps) or the plugin
+    for days and across reinstalls: report #6 (2026-10-10) sent #5's dump of 10-07, written by another build of the
+    plugin. This install's: its EDF6.exe ran from `game`, and every plugin DLL it had loaded is the one installed
+    now (same PE TimeDateStamp and SizeOfImage)."""
+    mods = dump_modules(path)
+    if mods is None:
+        return '读不出模块列表'
+    exe = mods.get('edf6.exe')
+    if not exe:
+        return '转储里没有 EDF6.exe'
+    if os.path.normcase(os.path.normpath(os.path.dirname(exe[0]))) != os.path.normcase(os.path.normpath(game)):
+        return f'来自另一个游戏目录 {os.path.dirname(exe[0])}'
+    for dll in sorted(glob.glob(os.path.join(game, 'Mods', 'Plugins', '*.dll'))):
+        loaded = mods.get(os.path.basename(dll).lower())
+        now = _pe_image(dll)
+        if loaded and now and (loaded[1], loaded[2]) != now:
+            return (f'{os.path.basename(dll)} 不是现在装的这份（转储里 pe 0x{loaded[1]:08X} / {loaded[2]} 字节，'
+                    f'现在 0x{now[0]:08X} / {now[1]} 字节）')
+    return ''
+
 
 def collect(game: str, build: str = '') -> tuple[bytes, list[str]]:
     """The logs zipped: Mods/Plugins' logs (tails), ini files and DLL versions, the mod loader's log, the
-    install ledgers (Mods/.edf6*.json), and the newest EDF6 crash dump of the last three days. Returns the zip
+    install ledgers (Mods/.edf6*.json), and the newest EDF6 crash dump of the last three days written by this install
+    (dump_matches; crash/dumps.txt says which were left out and why). Returns the zip
     and the names it holds."""
     mem = io.BytesIO()
     names: list[str] = []
@@ -254,8 +319,16 @@ def collect(game: str, build: str = '') -> tuple[bytes, list[str]]:
 
         # The plugin's own dump of a mission start that hung (src/mission_watch.cpp): Windows writes none for a game
         # that hangs and is killed, nor without LocalDumps set up (a tester's machine, 2026-10-10).
+        verdicts: list[str] = []
+
+        def matches(path: str) -> bool:
+            why = dump_matches(path, game)
+            verdicts.append(f'{os.path.basename(path)}  {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(os.path.getmtime(path)))}  '
+                            + (f'来源不符，未上传：{why}' if why else '本次安装'))
+            return not why
+
         for path in sorted(glob.glob(os.path.join(plugins, '*.hang.dmp'))):
-            if time.time() - os.path.getmtime(path) >= DUMP_AGE:
+            if time.time() - os.path.getmtime(path) >= DUMP_AGE or not matches(path):
                 continue
             if os.path.getsize(path) <= DUMP_MAX:
                 with open(path, 'rb') as f:
@@ -265,10 +338,14 @@ def collect(game: str, build: str = '') -> tuple[bytes, list[str]]:
                     f'{os.path.basename(path)}: {os.path.getsize(path)} bytes, over the {DUMP_MAX} limit; left at home\r\n'.encode('utf-8'))
         dumps = [p for p in glob.glob(os.path.join(os.environ.get('LOCALAPPDATA', ''), 'CrashDumps', 'EDF6*.dmp'))
                  if time.time() - os.path.getmtime(p) < DUMP_AGE and os.path.getsize(p) <= DUMP_MAX]
-        if dumps:
-            newest = max(dumps, key=os.path.getmtime)
-            with open(newest, 'rb') as f:
-                add(newest, 'crash/' + os.path.basename(newest), f.read())
+        # The newest of this install's (dump_matches): an older build's dump is named in crash/dumps.txt, not sent.
+        for path in sorted(dumps, key=os.path.getmtime, reverse=True):
+            if matches(path):
+                with open(path, 'rb') as f:
+                    add(path, 'crash/' + os.path.basename(path), f.read())
+                break
+        if verdicts:
+            add('', 'crash/dumps.txt', ('\r\n'.join(verdicts) + '\r\n').encode('utf-8'))
     return mem.getvalue(), names
 
 
