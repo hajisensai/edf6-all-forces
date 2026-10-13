@@ -19844,7 +19844,7 @@
         "items": [
          "app:/Object/v508_transport_formation.sgo",
          0.0,
-         "app:/Object/v515_retrobalam.sgo",
+         "app:/Object/vehicle501_fortressrobo.sgo",
          {
           "items": [
            {
@@ -20020,7 +20020,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon389",
-    "vehicle": "v515_retrobalam.sgo"
+    "vehicle": "vehicle501_fortressrobo.sgo"
    }
   },
   {
@@ -25123,7 +25123,7 @@
         "items": [
          "app:/Object/v508_transport_formation.sgo",
          0.0,
-         "app:/Object/v515_retrobalam.sgo",
+         "app:/Object/vehicle501_fortressrobo.sgo",
          {
           "items": [
            {
@@ -25299,7 +25299,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon389",
-    "vehicle": "v515_retrobalam.sgo"
+    "vehicle": "vehicle501_fortressrobo.sgo"
    }
   },
   {
@@ -30945,7 +30945,7 @@
         "items": [
          "app:/Object/v508_transport_formation.sgo",
          0.0,
-         "app:/Object/v515_retrobalam.sgo",
+         "app:/Object/vehicle501_fortressrobo.sgo",
          {
           "items": [
            {
@@ -31121,7 +31121,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon389",
-    "vehicle": "v515_retrobalam.sgo"
+    "vehicle": "vehicle501_fortressrobo.sgo"
    }
   },
   {
@@ -40577,7 +40577,7 @@
         "items": [
          "app:/Object/v508_transport_formation.sgo",
          0.0,
-         "app:/Object/v515_retrobalam.sgo",
+         "app:/Object/vehicle501_fortressrobo.sgo",
          {
           "items": [
            {
@@ -40753,7 +40753,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon389",
-    "vehicle": "v515_retrobalam.sgo"
+    "vehicle": "vehicle501_fortressrobo.sgo"
    }
   }
  ]

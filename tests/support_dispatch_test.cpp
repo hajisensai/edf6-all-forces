@@ -32,6 +32,10 @@ bool allReady=true,terrain=true,nativeFail=false;
 Sea terrainSea=Sea::land;float waterSurface=0;
 Sea SeaAt(float,float,float* out) noexcept {*out=waterSurface;return terrainSea;}
 #endif
+// The submarine carrier (catalog 16, airKeys "SUB"): surfaces through SubLaunch, never through a plan.
+int subLaunches=0;unsigned char subHull[16]{};
+unsigned char* SubLaunch(const float*,const float*) noexcept {++subLaunches;return subHull;}
+bool SupportSubCatalog(int id) noexcept {return id==16;}
 npc::navigation::Result routeResult=npc::navigation::Result::pending;
 ObjRef Make(bool vehicle=false) noexcept {
     const int slot=made++;auto* o=objects[slot];std::memset(o,0,sizeof(objects[slot]));
@@ -421,6 +425,23 @@ int main() {
     waterSurface=0.2f;check(Foot(0,0,0,footY),"shallow wading matches the navigation allowance");
     terrainSea=Sea::unknown;check(!Foot(0,0,0,footY),"unknown water state is not treated as a safe entry");
     terrainSea=Sea::land;
+    // 2026-10-12 (test site #12: 「潜水母舰在水里也没法召唤」): since #88 the carrier went to the planner, which refused it
+    // (no aircraft). It surfaces where it is called over water, on no plan; over land it is refused; from the map online it
+    // is the call weapon's (replayed on every machine), so the map refuses it there.
+    {
+        const bool wasOnline=testOnline;const int requestsBefore=netRequests;
+        ResetSupportDispatch();testOnline=false;fixtureMs+=40000;subLaunches=0;made=0;
+        check(!SupportCallAt(16,target,note,128) && subLaunches==0 && std::wcsstr(note,L"没有水域")!=nullptr,
+              "submarine carrier over land: refused, nothing made");
+        terrainSea=Sea::water;
+        check(SupportCallAt(16,target,note,128) && subLaunches==1 && !offlinePending && made==0 && std::wcsstr(note,L"上浮")!=nullptr,
+              "submarine carrier over water: it surfaces at once, no plan, no planner objects");
+        check(SupportSubCallAt(target,nullptr,false,note,128) && subLaunches==2,"a radio replay on another machine surfaces its own copy");
+        testOnline=true;
+        check(!SupportCallAt(16,target,note,128) && subLaunches==2 && netRequests==requestsBefore,
+              "online the map refuses it (the call weapon brings it), no host request");
+        testOnline=wasOnline;terrainSea=Sea::land;
+    }
     // 2026-10-09: the host of a world with no other participant deploys locally (no EDF6Coop transport needed, no peer
     // to replicate to); any other online machine still requests through the host.
     ResetSupportDispatch();testOnline=true;soloHost=true;made=0;netRequests=0;registered=0;resourceCount=0;fixtureMs+=40000;

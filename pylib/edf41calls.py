@@ -36,7 +36,12 @@ VEHICLES: dict[str, str] = {
     'vehicle406_begaruta_gold.sgo': 'v504_begaruta_gold.sgo', 'vehicle406_begaruta_green.sgo': 'v504_begaruta.sgo',
     'vehicle302_heli.sgo': 'v506_heli.sgo',
     'vehicle408_motorbike.sgo': 'v503_bike.sgo',
-    'vehicle501_fortressrobo.sgo': 'v515_retrobalam.sgo',
+    # 4.1's Balam itself (2026-10-12, test site #12: 「巴拉姆模型依然是巴尔加」): EDF6's v515_retrobalam is the Barga
+    # (its "Retro Balam"), another, smaller robot; the 4.1 Balam is ported whole, under its own name, by
+    # tools/make_edf41_objects.py (edf41port/objects: the SGO, its model, CAS and SHKT; the same class, and the same
+    # v_501_baram_Cannon01 turrets EDF6's Barga calls carry). The call is made from a Barga call (make_edf41_weapons.py
+    # CallTemplates.FAMILY).
+    'vehicle501_fortressrobo.sgo': 'vehicle501_fortressrobo.sgo',
     'vehicle403_tank.sgo': 'vehicle403_tank.sgo', 'vehicle402_rocket.sgo': 'vehicle402_rocket.sgo',
     'vehicle404_bigtank.sgo': 'vehicle404_bigtank.sgo', 'vehicle502_groundrobogold.sgo': 'vehicle502_groundrobogold.sgo',
 }
