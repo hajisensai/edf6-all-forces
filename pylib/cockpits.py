@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import math
 import os
+import time
 from dataclasses import dataclass, replace
 from typing import Callable
 
@@ -192,12 +193,19 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
         raise ValueError('two cockpits for one seat')
     import vehicle_optics   # the marker bone is the optics' kind (late: vehicle_optics imports this module)
     root = asset_root()
+    print('      座舱：提取车壳三角形……', flush=True)
     hull = hull_triangles(md)
-    kit_of = {fit.seat: fitted(hull, fit, kits[fit.kit]) for fit in fits}
+    kit_of: dict[int, Kit] = {}
+    for fit in fits:
+        started = time.perf_counter()
+        print(f'      席位 {fit.seat}（{fit.kit}）：开始适配座舱……', flush=True)
+        kit_of[fit.seat] = fitted(hull, fit, kits[fit.kit])
+        print(f'      席位 {fit.seat}：适配完成（{time.perf_counter()-started:.1f} 秒）', flush=True)
     for fit in fits:
         md = vehicle_optics.add_marker(md, fit.bone, MARKER.format(fit.seat), frame(fit))
         for scr in kit_of[fit.seat].screens:
             md = vehicle_optics.add_marker(md, fit.bone, screen_marker(fit.seat, scr), screen_frame(scr, fit))
+    print('      座舱：生成骨骼与网格……', flush=True)
     md = preorder(md)
     tmpl_md, tmpl_mesh = template(game)
     by_material: dict[tuple[str, str], list[tuple[om.Part, list]]] = {}
@@ -215,7 +223,10 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
     for (kit_name, key), pieces in sorted(by_material.items()):
         tex = texture_name(kit_name, key)
         if tex not in textures:
+            started = time.perf_counter()
+            print(f'      贴图 {kit_name}/{key}：转换中……', flush=True)
             textures[tex] = albedo_dds(materials[(kit_name, key)], root)
+            print(f'      贴图 {kit_name}/{key}：完成（{time.perf_counter()-started:.1f} 秒）', flush=True)
         md, mi = om.add_material(md, tmpl_md, TEMPLATE_MATERIAL, f'edf6vc_cpit_{kit_name}_{key}',
                                  {'albedo': tex, 'normal': NORMAL_TEX, 'param_r_m_occ_hr': RMO_TEX})
         meshes += om.build_meshes(tmpl_mesh, pieces, mi)
@@ -376,13 +387,16 @@ def fitted(tris, fit: Fit, kit_fn: KitFn) -> Kit:  # noqa: ANN001 - numpy
     (exposed), the walls it presses on are pulled in SHRINK (at most SHRINK_ROUNDS rounds): the room is measured
     straight left, up, ahead ...; a round turret's corners are nearer than that."""
     m = frame(fit)
+    print(f'        席位 {fit.seat}：测量座舱空间……', flush=True)
     room = clearance(tris, fit.eye, m)
-    for _ in range(SHRINK_ROUNDS + 1):
+    for round_index in range(SHRINK_ROUNDS + 1):
+        print(f'        席位 {fit.seat}：适配第 {round_index+1}/{SHRINK_ROUNDS+1} 轮，读取座舱部件……', flush=True)
         kit = kit_fn(room)
         inside = [p for p in kit.parts if p.name not in kit.outside]
         local = [v.pos for p in inside for v in p.verts]
         if not local:   # nothing inside the hull to keep in (a remote station's display)
             return kit
+        print(f'        席位 {fit.seat}：检查 {len(local)} 个顶点是否露出车壳……', flush=True)
         bad = exposed(tris, [to_model(q, m, fit.scale) for q in local])
         if not bad.any():
             return kit
@@ -415,13 +429,17 @@ def graft_files(game, files: dict[str, bytes]) -> dict[str, bytes]:  # noqa: ANN
         if not assets_present():
             print(f'{rel}: no cockpits (the model folder has no {ASSET_DIR}/)')
             continue
+        started = time.perf_counter()
+        print(f'  {rel}：生成载具座舱……', flush=True)
         rab = rab_read(data)
         mdbs = [f for f in rab.files if f.name.lower().endswith('.mdb')]
         member = next((f for f in mdbs if f.name.lower() == stem.lower() + '.mdb'), mdbs[0] if len(mdbs) == 1 else None)
         if member is None:
             raise ValueError(f'{rel}: which of its models {[f.name for f in mdbs]} has the seats?')
         md, textures = graft(mdb_read(member.data), fits, cockpit_kits.KITS, game, vehicle_optics.preorder)
+        print(f'  {rel}：压缩模型与打包贴图……', flush=True)
         member.stored = cmpl_compress(mdb_write(md))
         add_textures(rab, textures)
         out[rel] = rab_write(rab)
+        print(f'  {rel}：座舱完成（{time.perf_counter()-started:.1f} 秒）', flush=True)
     return out

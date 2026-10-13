@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'pylib'))
 import ledger
@@ -25,7 +26,14 @@ redirect = optics.redirect
 
 def build_models(root: str) -> dict[str, bytes]:
     game = rootcpk.Game(root)
-    return {'OBJECT/'+optics.output(s): optics.build_model(game, s) for s in optics.MODELS if optics.ready(s)}
+    models = [s for s in optics.MODELS if optics.ready(s)]
+    files: dict[str, bytes] = {}
+    for index, spec in enumerate(models, 1):
+        started = time.perf_counter()
+        print(f'  [{index}/{len(models)}] 生成车型 {spec.stem}……', flush=True)
+        files['OBJECT/'+optics.output(spec)] = optics.build_model(game, spec)
+        print(f'  [{index}/{len(models)}] {spec.stem} 完成（{time.perf_counter()-started:.1f} 秒）', flush=True)
+    return files
 
 
 def build_stock_redirects(root: str) -> dict[str, bytes]:

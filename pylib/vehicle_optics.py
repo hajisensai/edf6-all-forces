@@ -235,6 +235,7 @@ def mark_model(md: Mdb, spec: Model, sgo_data: bytes) -> Mdb:
 def build_model(game, spec: Model) -> bytes:
     """Preserve loose texture changes only when the model geometry contract matches."""
     name = spec.stem + '.MRAB'
+    print(f'    {name}：读取模型资源……', flush=True)
     loose = Path(game.root, 'Mods', 'OBJECT', name)
     arc = rab_read(loose.read_bytes() if loose.is_file() else game.read('OBJECT', name))
     model = next(f for f in arc.files if f.name.lower() == spec.stem.lower()+'.mdb')
@@ -243,6 +244,7 @@ def build_model(game, spec: Model) -> bytes:
         raise ValueError(f'{name}: model geometry differs from the audited optic profile; preserving the other mod')
     # The SGO only for a camera lens's locator (a cockpit-only skin's model may have no SGO of its own name).
     sgo_data = game.read('OBJECT', spec.stem+'.SGO') if any(lens.camera for lens in spec.lenses) else b''
+    print(f'    {name}：解析几何与生成瞄具骨骼……', flush=True)
     marked = mark_model(mdb_read(raw), spec, sgo_data)
     textures: dict[str, bytes] = {}
     if spec.cockpits:
@@ -250,6 +252,7 @@ def build_model(game, spec: Model) -> bytes:
             marked, textures = cockpits.graft(marked, spec.cockpits, cockpit_kits.KITS, game, preorder)
         except cockpits.CockpitAssetsMissing as e:   # the optics still; the seats keep the stock camera
             print(f'{name}: no cockpits ({e})')
+    print(f'    {name}：压缩模型与打包贴图……', flush=True)
     model.stored = cmpl_compress(mdb_write(marked))
     cockpits.add_textures(arc, textures)
     return rab_write(arc)
