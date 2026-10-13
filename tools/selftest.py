@@ -6895,7 +6895,8 @@ def rmpa_legacy_real() -> None:
 def edf41_maps_cover_the_scripts() -> None:
     """Every map and weather EDF4.1's bundled mission scripts load (Map('app:/Map/<map>.mac', '<weather>')) that
     tools/edf41_maps.py installs has its weather pair: a weather left out would make the game look for a MAE that is not
-    there. The SK_* maps are the ones not installed yet (their heightfields), and the story pack skips their missions."""
+    there. The SK_* maps are installed too (their heightfield becomes an FMB piece, pylib/sk_map.py), so every map the scripts
+    load is covered but NW_TESTMAP, a test map no story mission needs."""
     import re
     import edf41_maps
     import make_edf5_campaign as c
@@ -6909,7 +6910,7 @@ def edf41_maps_cover_the_scripts() -> None:
     assert set(edf41_maps.MAPS) <= set(used), sorted(set(edf41_maps.MAPS) - set(used))
     for name, (_donor, weathers) in edf41_maps.MAPS.items():
         assert used[name] <= set(weathers), (name, sorted(used[name] - set(weathers)))
-    assert {n for n in used if n not in edf41_maps.MAPS} <= {n for n in used if n.startswith('SK_')} | {'NW_TESTMAP'}
+    assert {n for n in used if n not in edf41_maps.MAPS} <= {'NW_TESTMAP'}, sorted(n for n in used if n not in edf41_maps.MAPS)
 
 
 @test
@@ -6982,12 +6983,237 @@ def edf41_maps_real() -> None:
 
 
 @test
+def sk_terrain_real() -> None:
+    """pylib/sk_terrain.py on EDF4.1's seven SK maps: the field is 1001 x 1001 samples of 2 m, its half float heights span
+    exactly the header's lowest / highest (the shader's f16tof32 on the low half), every vertex's stored material is the
+    layer of its largest blend weight and the weights sum to one (a handful of vertices a little off, normalised by the
+    converter), every layer paints with a colour (not a normal map) of
+    the names the field lists and the slice count of its colour array is the number of such names; and the objects the
+    map places stand on the decoded ground (median distance under half a metre, at the field's own placement: the
+    record's origin and height included: SK_VALLEY01's is 118.4 m up) - which also pins the axes: row = z, column = x."""
+    import struct
+    import bigmap
+    import map_legacy
+    import mdb
+    import numpy as np
+    import sk_map
+    import sk_terrain
+    games = _legacy_games()
+    if games is None:
+        return
+    g41 = games[0]
+    for name in ('SK_CRATER01', 'SK_HEIGEN02', 'SK_KAIGAN01', 'SK_SANGAKU01', 'SK_SANGAKU02', 'SK_STEPMOUNTAIN01',
+                 'SK_VALLEY01'):
+        members = dict(map_legacy.parse_marc_lenient(_game_read(g41, f'MAP/{name}.MAC'))[1])
+        shfb = [n for n in members if n.endswith('.shfb')]
+        assert len(shfb) == 1, name
+        s = sk_terrain.parse(members[shfb[0]])
+        assert (s.width, s.height, s.cell) == (1001, 1001, (2.0, 2.0)) and s.extent == (2000.0, 2000.0), name
+        assert abs(float(s.heights.min()) - s.lowest) < 0.3 and abs(float(s.heights.max()) - s.highest) < 0.3, name
+        assert s.blend is not None and s.blend.shape == (1001, 1001, len(s.layers))
+        tot = s.blend.sum(axis=2)
+        assert tot.max() < 1.2 and (tot < 0.5).mean() < 1e-3 and tot.min() > 0, name   # normalised where they are used
+        assert (s.blend.argmax(axis=2) == s.material).mean() > 0.9999, name
+        slice_of = sk_map.color_slices(s.layer_names)
+        assert all(l.color in slice_of and (l.multip < 0 or l.multip in slice_of) for l in s.layers), name
+        cols = [f for f in mdb.rab_read(_game_read(g41, f'MAP/{name}.RAB')).files if f.name.endswith('.cols.dds')]
+        assert len(cols) == 1
+        slices = struct.unpack_from('<I', cols[0].data, 128 + 12)[0]        # the DX10 header's arraySize
+        assert slices == len(slice_of), (name, slices, len(slice_of))
+        assert sk_terrain.lattice(s).shape == (501, 501)
+        if name not in ('SK_HEIGEN02', 'SK_VALLEY01'):
+            continue
+        mac = bigmap.Marc.parse(map_legacy.mac_from_legacy(_game_read(g41, f'MAP/{name}.MAC')))
+        mb = bigmap.MapB(mac.get('map.mapb'))
+        ox, oy, oz = sk_map.field_origin(mac.get('map.mapb'), shfb[0])
+        dy = []
+        for i in range(mb.rec_n):
+            if mb.def_name(mb.def_index(i)) == shfb[0]:
+                continue
+            x, y, z = mb.pos(i)
+            c, r = (x - ox) / s.cell[0], (z - oz) / s.cell[1]
+            if 0 <= c < s.width - 1 and 0 <= r < s.height - 1:
+                c0, r0, fx, fz = int(c), int(r), c - int(c), r - int(r)
+                h = (s.heights[r0, c0] * (1 - fx) * (1 - fz) + s.heights[r0, c0 + 1] * fx * (1 - fz)
+                     + s.heights[r0 + 1, c0] * (1 - fx) * fz + s.heights[r0 + 1, c0 + 1] * fx * fz) + oy
+                dy.append(abs(y - h))
+        assert len(dy) > 200 and float(np.median(dy)) < 0.5 and float(np.mean(np.array(dy) < 1.0)) > 0.8, (name, np.median(dy))
+
+
+@test
+def fmb_build_real() -> None:
+    """pylib/fmb_build.py on SK_HEIGEN02's field (a 100 x 100 cell corner of it, 5 x 5 leaves) with EDF6's IG_HAIKYOPLANE01
+    as the donor: pylib/fmb.py parses it back with its layout checks and its selftest passes (leaf and node AABBs bit exact,
+    the reference CMPL decoders agree, edits round trip); every leaf has what a stock regular grid leaf has (the same
+    header and 0x3C mesh record fields in the same places, 441 vertices of unit normals, 800 triangles wound as the
+    donor's, one 0x50 splat record per cell whose four corners each sum to 255 over the leaf's layer slots, the layer list
+    of 16 bytes), the trailing tables are the donor's two constant ones plus the layer table and shader table in the
+    stock layout (the 4-layer pieces' 21 shader records, the single layer ones' 9), and a leaf lists at most the layers a
+    stock leaf lists."""
+    import struct
+    import fmb
+    import fmb_build
+    import map_legacy
+    import numpy as np
+    import sk_map
+    import sk_terrain
+    games = _legacy_games()
+    if games is None:
+        return
+    g41, _g5, g6 = games
+    members = dict(map_legacy.parse_marc_lenient(_game_read(g41, 'MAP/SK_HEIGEN02.MAC'))[1])
+    s = sk_terrain.parse(members['sk_heigen02_fld2mgrid.shfb'])
+    heights = sk_terrain.lattice(s)[200:301, 200:301]
+    weights = s.blend[::2, ::2][200:301, 200:301]
+    weights = weights / np.maximum(weights.sum(axis=2, keepdims=True), 1e-9)
+    donor = _game_read(g6, 'MAP/' + sk_map.DONOR_FMB)
+    layers = sk_map.layers_of(s)
+    out = fmb_build.build(donor, heights, weights, -200.0, -200.0, 4.0, layers)
+    f = fmb.parse(out)
+    stock = fmb.parse(donor)
+    assert len(f.leaves) == 25 and f.count == 49
+    assert fmb.selftest(out)      # raises on any mismatch, returns what it checked
+    sl = stock.leaves[0]
+    sm = sl.meshes[0]
+    for lf in f.leaves.values():
+        assert struct.unpack_from('<I', lf.blob, 0)[0] == 1 and struct.unpack_from('<I', lf.blob, 0x28)[0] == 1
+        assert struct.unpack_from('<i', lf.blob, 0x2C)[0] == 0x30 == sm.base and len(lf.verts) == 441
+        assert struct.unpack_from('<I', lf.blob, 0x1C)[0] == 800
+        m = lf.meshes[0]
+        n = struct.unpack_from('<I', lf.blob, m.base)[0]
+        assert 1 <= n <= fmb_build.MAX_LAYERS and m.grid[:4] == (4.0, 4.0, 20, 20) and m.grid[6] == n * 0x101
+        assert m.weight_count == 400 and m.layermap_count == 1 and len(m.indices) == 2400
+        assert (m.weight_off - m.base, m.layermap_off - m.base) == (0x3C + 4800, 0x3C + 4800 + 0x50 * 400)
+        nrm = np.array([v[3:] for v in lf.verts])
+        assert abs(np.linalg.norm(nrm, axis=1) - 1).max() < 1e-4 and (nrm[:, 1] > 0).all()
+        for a, b, c in lf.triangles()[:50]:
+            p = [lf.verts[i] for i in (a, b, c)]
+            assert (p[1][2] - p[0][2]) * (p[2][0] - p[0][0]) - (p[1][0] - p[0][0]) * (p[2][2] - p[0][2]) < 0   # the donor's winding
+        rec = np.frombuffer(lf.blob, dtype=np.uint8, count=0x50 * 400, offset=m.weight_off).reshape(-1, 5, 16)
+        assert (rec[:, 0] == 0).all() and (rec[:, 1:, :].sum(axis=2) == 255).all() and (rec[:, 1:, n:] == 0).all()
+        lm = lf.blob[m.layermap_off:m.layermap_off + 16]
+        assert len(set(lm) - {255}) == n and lm[n:] == bytes([255]) * (16 - n)
+    for chunk in f.chunks:
+        assert chunk.kind in (fmb.KIND_NODE, fmb.KIND_LEAF_CMPL)
+    ho, hd = struct.unpack_from('<11I', out, 0), struct.unpack_from('<11I', donor, 0)
+    assert ho[:2] == hd[:2] and ho[3] == hd[3] and ho[7] == hd[7] == 0x100
+    assert out[ho[5]:ho[6]] == donor[hd[5]:hd[6]] and out[ho[6]:ho[8]] == donor[hd[6]:hd[8]]   # tables 2 and 3: the donor's
+    n_layers, off, n_ori, off2 = struct.unpack_from('<4I', out, ho[4])
+    assert (n_layers, off, off2) == (len(layers), 16, 16 + 0x50 * len(layers))
+    assert ho[5] - ho[4] == 16 + 0x50 * n_layers + 0x20 * n_ori
+    counts = sorted({struct.unpack_from('<I', lf.blob, f.leaves[k].meshes[0].base)[0] for k, lf in f.leaves.items()})
+    assert ho[9] == 3 * (2 * len(counts) + 1)
+    sn = struct.unpack_from('<I', donor, 0x24)[0]
+    assert sn == 9      # the donor: one layer, 3 passes x 3 records
+    # the layer table's records are the stock layer record's fields (20 dwords) with the layers' slices and tile orientations
+    rec0 = struct.unpack_from('<20i', out, ho[4] + 16)
+    drec = struct.unpack_from('<20i', donor, hd[4] + 16)
+    assert [rec0[k] == drec[k] for k in (2, 3, 4, 5, 6, 8, 9, 11, 12, 14, 15)] == [True] * 11
+    assert struct.unpack_from('<4f', out, ho[4] + 16 + 0x40) == struct.unpack_from('<4f', donor, hd[4] + 16 + 0x40)
+
+
+@test
+def hkcms_build_real() -> None:
+    """pylib/hkcms_build.py on EDF6's own collision (IG_HEIGEN601's as the donor): the writer re-emits the donor and the
+    stock MADs it was checked on byte for byte, a built terrain / object collision parses with pylib/hktag.py and
+    pylib/hkcms.py, decodes to its input within float rounding, passes hkcms.bound_problems and has the stock ground
+    tile's item structure (selftest in the module: its own lines say what was compared)."""
+    import bigmap
+    import hkcms_build
+    games = _legacy_games()
+    if games is None:
+        return
+    g6 = games[2]
+    mad = _game_read(g6, 'MAP/IG_HEIGEN601.MAD')
+    donor = bigmap.Marc.parse(mad).get('collision.hkt')
+    assert hkcms_build.write_mad(donor) == mad
+    assert len(hkcms_build.selftest(donor)) >= 5
+
+
+@test
+def edf41_sk_maps_real() -> None:
+    """tools/edf41_maps.py on SK_HEIGEN02 from the real games: the files files_of names; the MAC is a map bigmap verifies
+    whose ground def is `sk_heigen02_fld2mgrid.fmep` placed at the origin with the stock .fmep cull distances, its
+    externals.sgo lists the FMB, the field's members are gone and map.rmpa is EDF6's; the FMB is a piece of 625 leaves
+    covering -1000..1000 whose heights are the field's; the MAD holds the ground body (named for the piece, a compound
+    of 2500 tiles) and the objects' bodies, and every compound passes hkcms.bound_problems; the RAB has the colour array
+    under the name EDF6's terrain looks up (<map>_color.dds) and the flat normal map; the weather pair and navmesh are the
+    donor's."""
+    import struct
+    import bigmap
+    import edf41_maps
+    import fmb
+    import hkcms
+    import hktag
+    import map_legacy
+    import mdb
+    import numpy as np
+    import rmpa_legacy
+    import rootcpk
+    import sgo
+    import sk_terrain
+    games = _legacy_games()
+    if games is None:
+        return
+    steam = os.path.dirname(rootcpk.DEFAULT_GAME)
+    e41 = edf41_maps.Archives(os.path.join(steam, 'Earth Defense Force 4.1'))
+    e6 = edf41_maps.Archives(rootcpk.DEFAULT_GAME)
+    name = 'SK_HEIGEN02'
+    files = edf41_maps.convert(name, e41, e6)
+    assert list(files) == edf41_maps.files_of(name) and 'SK_HEIGEN02' in edf41_maps.SK_MAPS
+    mac = bigmap.Marc.parse(files['MAP/SK_HEIGEN02.MAC'])
+    members = dict(mac.files)
+    assert not bigmap.verify(files['MAP/SK_HEIGEN02.MAC'])
+    assert not [n for n in members if n.endswith(('.shfb', '.cols.sgo', '.norm.sgo'))]
+    assert rmpa_legacy.is_edf6(members['map.rmpa'])
+    assert sgo.plain(sgo.read(members['externals.sgo'])[1]) == {'resource': ['sk_heigen02_fld2mgrid.fmb']}
+    mb = bigmap.MapB(members['map.mapb'])
+    ground = [i for i in range(mb.rec_n) if mb.def_name(mb.def_index(i)) == 'sk_heigen02_fld2mgrid.fmep']
+    assert len(ground) == 1 and mb.pos(ground[0]) == (0.0, 0.0, 0.0)
+    d = mb.def_off + mb.def_index(ground[0]) * bigmap.DEF
+    assert struct.unpack_from('<2f', mb.raw, d + 0x18) == (100.0, 1000.0) and mb.def_type(mb.def_index(ground[0])) == 3
+    assert not any(n.endswith('.shfb') for n in (mb.def_name(k) for k in range(mb.def_n)))
+    mo = bigmap.MapO(members['map.mapo'])
+    ent = mo.ent_off + ground[0] * bigmap.ENT
+    pair_at = ent + struct.unpack_from('<i', mo.raw, ent)[0]
+    assert pair_at > ent and struct.unpack_from('<2i', mo.raw, pair_at) == (0, 8)      # the empty grass pair of a stock .fmep entry
+    # the FMB
+    f = fmb.parse(files['MAP/SK_HEIGEN02_FLD2MGRID.FMB'])
+    assert len(f.leaves) == 625 and f.count == 1249
+    pts = np.array(fmb.points(f))
+    assert pts[:, 0].min() == -1000.0 and pts[:, 0].max() == 1000.0 and pts[:, 2].min() == -1000.0
+    s = sk_terrain.parse(dict(map_legacy.parse_marc_lenient(_game_read(games[0], 'MAP/SK_HEIGEN02.MAC'))[1])['sk_heigen02_fld2mgrid.shfb'])
+    lat = sk_terrain.lattice(s)
+    ix, iz = np.rint((pts[:, 0] + 1000) / 4).astype(int), np.rint((pts[:, 2] + 1000) / 4).astype(int)
+    assert np.abs(pts[:, 1] - lat[iz, ix]).max() < 1e-4
+    # the MAD
+    raw = bigmap.Marc.parse(files['MAP/SK_HEIGEN02.MAD']).get('collision.hkt')
+    tag = hktag.Tag(raw)
+    bodies = hkcms.bodies(tag)
+    ground_name = 'sk_heigen02_fld2mgrid.sk_heigen02_fld2mgrid'
+    assert ground_name in bodies and {'sk_rockm01.sk_rockm01', 'sk_knoll01.sk_knoll01'} <= set(bodies)
+    comp = hkcms.Compound(tag, bytearray(raw), bodies[ground_name])
+    assert len(comp.instances) == 2500
+    for k in bodies.values():
+        if tag.item(k)[0] == 'hknpCompoundShape':
+            assert hkcms.bound_problems(tag, raw, k) == []
+    # the RAB
+    rab = {x.name: x for x in mdb.rab_read(files['MAP/SK_HEIGEN02.RAB']).files}
+    assert {'sk_heigen02_color.dds', 'sk_heigen02_normal.dds'} <= set(rab) and not [n for n in rab if '.cols.' in n]
+    color = mdb.cmpl_decompress(rab['sk_heigen02_color.dds'].stored)
+    assert color[:4] == b'DDS ' and struct.unpack_from('<I', color, 128 + 12)[0] == 8
+    assert files['MAP/SK_HEIGEN02_CLOUDY.MAE'] == e6.read('IG_HEIGEN507_CLOUDY.MAE')
+    assert files['MAP/SK_HEIGEN02.NAVMESH.HKT'] == e6.read('IG_HEIGEN507.NAVMESH.HKT')
+
+
+@test
 def edf41_story_pack_real() -> None:
     """EDF4.1's story pack from the real games (make_edf5_campaign PACK41): with EDF4.1 given it comes after the test
     range with the next content id, so no installed pack's id moves; an offline and an online mode on its own save
-    file; one row per mission whose map and objects will be there (the 9 maps tools/edf41_maps.py converts), each
-    row's script written under Mods/MISSION/EDF41/<id>/ as bundled, its thumbnail 4.1's picture of it; a mission on a
-    map not converted (SK_*) or naming an object not ported is left out with the reason. Without EDF4.1, no pack."""
+    file; one row per mission whose map and objects will be there (the maps tools/edf41_maps.py converts), each
+    row's script written under Mods/MISSION/EDF41/<id>/ as bundled, its thumbnail 4.1's picture of it (the 16 maps
+    tools/edf41_maps.py converts, the SK_* ones included: 9 missions on them have a row); a mission naming an object not
+    ported is left out with the reason. Without EDF4.1, no pack."""
     import dsgo
     import edf41_maps
     import gamedir
@@ -7007,7 +7233,8 @@ def edf41_story_pack_real() -> None:
     ours = [m for m in modes if m[e5c.M_CONTENT] == content.edf41]
     assert [(m[e5c.M_ONLINE], m[e5c.M_TYPE], m[e5c.M_MST]) for m in ours] == [(0, 0, 'E41M.MST'), (1, 1, 'E41M.MST')]
     rows41 = [r for r in p['rows'] if r['group'] == e5c.PACK41.group]
-    assert len(rows41) >= 30 and {r['map'] for r in rows41} <= {f'{n}.MAC' for n in edf41_maps.MAPS}
+    assert len(rows41) >= 40 and {r['map'] for r in rows41} <= {f'{n}.MAC' for n in edf41_maps.MAPS}
+    assert sum(r['map'].startswith('SK_') for r in rows41) >= 9
     assert any(r['path'] == 'M126' for r in rows41)
     skipped = {path: why for g, path, why in p['skipped'] if g == e5c.PACK41.group}
     assert skipped and all('缺少' in why for why in skipped.values())
