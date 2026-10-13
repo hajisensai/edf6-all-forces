@@ -6738,6 +6738,32 @@ def edf41_objects_shipped() -> None:
 
 
 @test
+def edf41_motherships_not_faked() -> None:
+    """docs/edf5-weapons-plan.md 8.1: EDF6 has no class that does UfoMother301 / UfoMother401's job (only the UfoMother511
+    family, a ring of units; 4.1's are part lists and a panel grid), so nothing of them is registered: no object of a
+    UfoMother class (an alias on 511 would be a look-alike), no 4.1 mothership SGO, and every mission script that names
+    one names a file the registry lacks, which is what keeps make_edf5_campaign.plan41 skipping it (a mission let through
+    would start without its ship). A native class landing makes this fail on purpose: delete it together with 8.1."""
+    import edf41_objects as eo
+    import make_edf5_campaign as mc
+    reg = eo.registry()
+    assert reg['objects'], 'no object registered: this check is empty'
+    assert not [o['object'] for o in reg['objects'] if o['class'].startswith('UfoMother')], 'a mothership alias'
+    assert not [rel for rel in reg['files'] if rel.upper().startswith('OBJECT/UFOMOTHER')], 'a mothership file shipped'
+    named = {}
+    root = os.path.join(ROOT, 'edf41port', 'missions')
+    for mid in sorted(os.listdir(root)):
+        with open(os.path.join(root, mid, 'MISSION.BVM'), 'rb') as f:
+            for ref in mc.asset_refs(f.read()):
+                if 'ufomother' in ref.lower():
+                    named.setdefault(mid, set()).add(ref)
+    assert len(named) == 21, f'the missions naming a mothership changed: {sorted(named)}'
+    for mid, refs in named.items():
+        for ref in refs:
+            assert ('OBJECT/' + ref.rsplit('/', 1)[-1]).upper() not in reg['files'], (mid, ref)
+
+
+@test
 def edf41_objects_install() -> None:
     """tools/edf41_objects.py on a stand-in game: install writes every object's files as the ledger owner edf41 and
     remove deletes them; a file of the same name another mod put in Mods is never written over, every object needing
