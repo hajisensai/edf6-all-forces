@@ -171,10 +171,34 @@ int main() {
     Check(PrepareNpcVehicleAi(m) && At<void*>(m,kAimOrigin)==replacement,"misaligned pointer is not a bone record");
     Put<void*>(m,kAimOrigin,replacement+kBoneStride);
     Check(PrepareNpcVehicleAi(m) && At<void*>(m,kAimOrigin)==replacement+kBoneStride,"native valid custom origin is preserved");
-    Put<void*>(m,kAimOrigin,nullptr);Put<const wchar_t*>(replacement,0,body);
+    const wchar_t neck[16]=L"neck",arm[16]=L"arm";
+    Put<void*>(m,kAimOrigin,nullptr);Put<const wchar_t*>(replacement,0,arm);Put<const wchar_t*>(replacement,kBoneStride,arm);
     Check(!PrepareNpcVehicleAi(m) && !At<void*>(m,kAimOrigin),"missing origin prevents native fire instead of dereferencing garbage");
-    Put<const wchar_t*>(replacement,0,spine);
-    Check(PrepareNpcVehicleAi(m),"valid model becomes fire-ready again");
+    // V614_PROTEUS_MK2 has no spine: its seat-0 aim bone of begaruta_pilot_class (neck) is the origin (report #12).
+    Put<const wchar_t*>(replacement,kBoneStride,neck);
+    Check(PrepareNpcVehicleAi(m) && At<void*>(m,kAimOrigin)==replacement+kBoneStride,"a model with no spine fires from its neck");
+    Put<void*>(m,kAimOrigin,nullptr);Put<const wchar_t*>(replacement,0,spine);Put<const wchar_t*>(replacement,kBoneStride,body);
+    Check(PrepareNpcVehicleAi(m) && At<void*>(m,kAimOrigin)==replacement,"valid model becomes fire-ready again (spine first)");
+    // The Proteus's weapons are on seats 1-3 and none on seat 0 (vehicle_weapon_setting): its NPC driver's table holds a
+    // row per gunner seat's weapon (its AI think runs the fire entry for seats 1..n-1), not an empty seat-0 table.
+    {
+        alignas(16) static unsigned char pseats[4*kSeatStride]{},pholder[3][0x20]{},pweapon[3][0x230]{};
+        static void* pholders[3][1]{};
+        alignas(16) static unsigned char rowsBuf[4*16]{};
+        std::memcpy(pseats,mseat,kSeatStride);   // seat 0: the same NPC driver, no weapon
+        for(int k=1;k<=3;++k) {
+            unsigned char* const s=pseats+k*kSeatStride;
+            pholders[k-1][0]=pholder[k-1];Put<void*>(pholder[k-1],kHolderWeapon,pweapon[k-1]);Put<float>(pweapon[k-1],kWeaponReach,500.0f);
+            Put<void*>(s,kSeatWeapons,pholders[k-1]);Put<std::uint64_t>(s,kSeatWeaponCount,1);
+        }
+        Put<void*>(m,kSeats,pseats);Put<std::uint64_t>(m,kSeatCount,4);
+        Put<std::uint64_t>(m,kAttackSize,0);Put<void*>(m,kAttackData,rowsBuf);Put<std::uint64_t>(m,kAttackCap,4);
+        Check(PrepareNpcVehicleAi(m) && At<std::uint64_t>(m,kAttackSize)==3,"a Proteus-like mech gets one row per gunner seat weapon");
+        const auto* rows=reinterpret_cast<const AttackRow*>(rowsBuf);
+        Check(rows[0].seat==1 && rows[1].seat==2 && rows[2].seat==3 && rows[0].weapon==0 && rows[2].maxRange==500.0f,
+              "the rows name their own seats");
+        Put<void*>(m,kSeats,mseat);Put<std::uint64_t>(m,kSeatCount,1);Put<std::uint64_t>(m,kAttackSize,1);
+    }
     // Turning off automatic return must not remove a crewed vehicle from the command map.
     config.tankReturnToPost=false;ResetNpcPosts();neutral();NpcPostInput(v);
     Check(listed()==1 && TankCommand(v,guard),"explicit map orders remain available with automatic return off");
