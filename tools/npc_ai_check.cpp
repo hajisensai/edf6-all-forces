@@ -314,7 +314,6 @@ void Targets() {
           TargetScore(140.0f,150.0f,false)<TargetScore(160.0f,150.0f,true),"reach outranks the keep");
 }
 
-<<<<<<< HEAD
 // The boarding walk's stop (BoardStop): standing anywhere within it on the floor under the riding point (and up to the
 // walk's 0.05 m of height slack) is inside the trigger sphere, for every drop the floor ray can give; the old fixed
 // 0.5 m stop is not (the negative control: the case the user hit).
@@ -341,9 +340,6 @@ void Boards() {
     Check(BoardStop(1.2f,reach)==0.0f,"a floor out of the sphere: no stand");
     Check(BoardStop(0.0f,reach)==kBoardStopMost,"a floor-level door keeps the 0.5 m stop");
     Check(BoardStop(std::nanf(""),reach)==0.0f && BoardStop(0.0f,std::nanf(""))==0.0f,"not finite: no stand");
-=======
-void Boards() {
-    using namespace npc;
     // Measured 2026-10-12 (report #12): 95 m to the Proteus's driver seat at ~2.3 m/s, about 41 s.
     BoardWalk w{1e30f,0};
     bool kept=true;
@@ -362,7 +358,6 @@ void Boards() {
     BoardWalking(jitter,20.0f,0,20000,1.0f);
     for(std::uint64_t ms=100;ms<=20000;ms+=100)BoardWalking(jitter,20.0f-0.5f*static_cast<float>(ms%200==0),ms,20000,1.0f);
     Check(!BoardWalking(jitter,19.5f,20100,20000,1.0f),"jitter under the step does not renew it");
->>>>>>> origin/claude/1012-npc-fire
 }
 
 int main() {

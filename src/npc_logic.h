@@ -375,7 +375,6 @@ inline Steer ReturnToPost(const float* pos,const float* right,const float* forwa
     s.throttle=std::fabs(s.bearing)>turnOnSpot ? 0.0f : ramp;
     return s;
 }
-<<<<<<< HEAD
 // --- Boarding (npcai.cpp Board) ---
 // The native trigger is a sphere of `reach` round the seat's riding point; the soldier walks to the floor `drop` m under
 // that point and the walk ends once it stands within the returned horizontal distance of the floor point. The old fixed
@@ -394,7 +393,6 @@ inline float BoardStop(float drop,float reach) noexcept {
     return side<kBoardStopLeast ? 0.0f : side<kBoardStopMost ? side : kBoardStopMost;
 }
 
-=======
 // A board order's walk (npcai.cpp Board): `best` the nearest the soldier has been to its seat's riding point, `since`
 // when it last got `step` m nearer than that. Each frame at `off` m: a new best renews the order. Dropped (false) once
 // `window` ms passed with no such step: a soldier still walking to a seat 150 m off keeps the order however long the walk
@@ -404,7 +402,6 @@ inline bool BoardWalking(BoardWalk& w,float off,std::uint64_t now,std::uint64_t 
     if(off<w.best-step){w.best=off;w.since=now;}
     return now-w.since<=window;
 }
->>>>>>> origin/claude/1012-npc-fire
 // The seat-0 stick block's values for it, as 0x661020 writes them.
 inline float SteerStick(const Steer& s) noexcept { return -Clamp(s.bearing*10.0f,-1.0f,1.0f); }
 inline float ThrottleStick(const Steer& s) noexcept { return -s.throttle; }
