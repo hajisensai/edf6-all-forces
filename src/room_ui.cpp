@@ -25,6 +25,7 @@
 #include "memory.h"
 #include "online_authority.h"
 #include "room_preview.h"
+#include "room_coop_capability.h"
 #include "room_sync.h"
 #include "room_ui_logic.h"
 #include "support_call.h"
@@ -587,16 +588,17 @@ bool AllMatch(const Sig* sigs,std::size_t n,const char* what,const char* then) n
         }
     return true;
 }
-// EDF6Coop beside us but not loaded yet: it would find the room's slot not stock and refuse every patch of its own
-// (it checks the slot points at 0x8FDFE0). EDFModLoader loads the plugins in name order (ModLoader.log: EDF6Coop before
-// EDF6VehicleCrew), so this is not expected; if it happens the room is left to Coop.
+// An older EDF6Coop refuses a room slot another plugin already hooked. Member-attribute ABI v1 arrived together
+// with Coop's chaining support (#33): a disk image exposing it can load after us. Probe its exports without executing
+// or registering it; the real mod loader must still run its initialization. Unknown/old builds retain the guard.
 bool CoopStillToLoad() noexcept {
     wchar_t path[MAX_PATH];
     const wchar_t* ini=ConfigPath();
     if(!ini || wcscpy_s(path,ini))return false;
     wchar_t* slash=wcsrchr(path,L'\\');
     if(!slash || wcscpy_s(slash+1,static_cast<std::size_t>(std::end(path)-(slash+1)),L"EDF6Coop.dll"))return false;
-    return GetFileAttributesW(path)!=INVALID_FILE_ATTRIBUTES && !GetModuleHandleW(L"EDF6Coop.dll");
+    return GetFileAttributesW(path)!=INVALID_FILE_ATTRIBUTES && !GetModuleHandleW(L"EDF6Coop.dll") &&
+           !HasDllExport(path,"EDF6CoopGetMemberAttributeApi");
 }
 // The screen's destructor chained first (whatever its slot holds now): without it a new screen at a dead one's address
 // would inherit its menu, so a screen whose destructor cannot be chained gets no menu.
@@ -616,7 +618,7 @@ bool Chain(Screen& s,void* hook,void* goneHook) noexcept {
     void* const current=*slot;
     if(!current){Log("HOOK roomui REFUSED: the %s screen's OnUpdate slot is empty",s.name);return false;}
     if(s.room && current==image+s.stock && CoopStillToLoad()) {
-        Log("HOOK roomui REFUSED: the room: EDF6Coop.dll is beside us but not loaded yet (it would refuse a chained room slot); "
+        Log("HOOK roomui REFUSED: the room: an older EDF6Coop.dll is beside us but not loaded yet (it would refuse a chained room slot); "
             "the room menu is off this run, the HQ's is not");
         return false;
     }

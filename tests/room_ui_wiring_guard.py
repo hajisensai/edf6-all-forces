@@ -71,6 +71,12 @@ check('void NoteGone(unsigned char* self) noexcept' in src and 'followed.load()=
 chain = body(src, 'bool Chain(Screen& s,void* hook,void* goneHook) noexcept')
 check(chain.find('ChainGone(s,goneHook)') < chain.find('PatchVtableSlot'), 'the destructor chained before the OnUpdate')
 check('&RoomGoneHook' in install and '&HqGoneHook' in install, 'both destructors chained')
+pending_coop = body(src, 'bool CoopStillToLoad() noexcept')
+check('!HasDllExport(path,"EDF6CoopGetMemberAttributeApi")' in pending_coop and
+      '!GetModuleHandleW(L"EDF6Coop.dll")' in pending_coop,
+      'reverse load order: new Coop ABI allowed, only unloaded old/unknown Coop refused')
+check('s.next=reinterpret_cast<UpdateFn>(current);' in chain and 'screen.next(self,copy)' in frame,
+      'the room chains the current slot, including a Coop already loaded')
 
 # A menu save is one write and one reload (not one per key on the UI thread), all lines or none.
 save = body(src, 'void Save() noexcept')
