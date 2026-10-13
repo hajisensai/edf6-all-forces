@@ -231,6 +231,67 @@ constexpr unsigned kAmmoColorInit=0x68D978,kFireCopy=0x69712F;   // the same byt
 const unsigned char kAmmoColorInitCode[]={0x0F,0x28,0x45,0x50,0x0F,0x11,0x86,0xD0,0x08,0x00,0x00};   // movups [rsi+0x8D0]
 const unsigned char kFireCopyCode[]={0x49,0x8D,0x97,0x30,0x08,0x00,0x00};                           // lea rdx,[r15+0x830]
 
+// The main gun's firing motion stays the main gun's (the user, 2026-10-12: 「同轴机枪开火的时候主炮会伸缩」;
+// docs/feedback-2026-10-12-coax-recoil.md). VehicleBase slot 5 0x630250 calls the class's slot 48 for each holder whose
+// gun fired this frame. The Blacker 505's (0x61AEA0) and the Varius 601's (0x620960) slot 48 first run the VehicleBase
+// part 0x62EA10 (the camera kick from the gun's recoil strength +0xBD8), then play the class's firing motion
+// 0x116BFC0(veh+0x1170, [veh+0x2AC0], [veh+0x2AC8], 1) at 0x61AEE6 / 0x6209A6 -- the motion that runs 'cannon_slide',
+// the main gun's recoil travel -- without looking at which holder fired, then push the hull by the mount's BodyRecoil
+// (0x5F9FB0). The coax is one more holder (tools/make_stock_stores.py COAX), so every coax round ran the main gun back
+// and out. For a coax holder only the VehicleBase part runs: the hull push it skips is the coax mount's BodyRecoil
+// [0, 0] (make_stock_stores._params), nothing. The Grape's slot 48 (Car 0x65A740) plays no motion: left alone.
+// Installed after gunnerrecoil.cpp (plugin.cpp), which checks these slots are stock and calls them through the vtable.
+using FiredFn=void(__fastcall*)(unsigned char*,unsigned char*);
+constexpr std::size_t kSlotFired=48;
+constexpr unsigned kVehicleFired=0x62EA10,kPlayMotion=0x116BFC0;
+struct MotionClass { unsigned vtable,fired,motionCall; const char* name; };
+constexpr MotionClass kMotionClasses[]={{0x17DADB0,0x61AEA0,0x61AEE6,"505_Tank"},{0x17DC250,0x620960,0x6209A6,"601_Tank"}};
+constexpr int kMotionClassCount=static_cast<int>(sizeof(kMotionClasses)/sizeof(kMotionClasses[0]));
+constexpr unsigned kFiredVehicleCallAt=0x10;   // fired+0x10: call 0x62EA10 (both classes)
+void* firedNext[kMotionClassCount]{};
+
+bool CoaxHolder(const unsigned char* holder) noexcept {
+    __try {
+        const unsigned char* const w=holder ? At<const unsigned char*>(holder,kHolderWeapon) : nullptr;
+        return w && IsCoax(w);
+    } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
+template<int I> void __fastcall CoaxAwareFired(unsigned char* v,unsigned char* holder) {
+    if(CoaxHolder(holder))reinterpret_cast<FiredFn>(image+kVehicleFired)(v,holder);
+    else reinterpret_cast<FiredFn>(firedNext[I])(v,holder);
+}
+constexpr FiredFn kCoaxAwareFired[]={&CoaxAwareFired<0>,&CoaxAwareFired<1>};
+static_assert(sizeof(kCoaxAwareFired)/sizeof(kCoaxAwareFired[0])==kMotionClassCount,"one hook per class");
+
+// Whether a rel32 call at `at` lands on `target` (RVAs). Under __try (the image may not be EDF.dll).
+bool CallsTo(unsigned at,unsigned target) noexcept {
+    if(image[at]!=0xE8)return false;
+    std::int32_t rel=0;
+    std::memcpy(&rel,image+at+1,sizeof(rel));
+    return static_cast<std::int64_t>(at)+5+rel==static_cast<std::int64_t>(target);
+}
+
+int InstallCoaxMotion() noexcept {
+    int hooked=0;
+    for(int i=0;i<kMotionClassCount;++i) {
+        const MotionClass& c=kMotionClasses[i];
+        bool read=false;
+        __try {
+            read=reinterpret_cast<void**>(image+c.vtable)[kSlotFired]==image+c.fired &&
+                 CallsTo(c.fired+kFiredVehicleCallAt,kVehicleFired) && CallsTo(c.motionCall,kPlayMotion);
+        } __except(EXCEPTION_EXECUTE_HANDLER) { read=false; }
+        if(!read){Log("COAX MOTION %s: slot 48 is not the one read (the coax still runs the main gun's motion)",c.name);continue;}
+        if(!edf::ChainVtableSlot(reinterpret_cast<void**>(image+c.vtable)+kSlotFired,reinterpret_cast<void*>(kCoaxAwareFired[i]),
+                                 &firedNext[i])) {
+            Log("COAX MOTION %s: slot 48 patch failed",c.name);
+            continue;
+        }
+        ++hooked;
+    }
+    return hooked;
+}
+
 // Whether class `c`'s stock input leaves the seat's second fire control unread (the 505, the 601, the Grape: their
 // slot 55 pulls holder 0 on the primary trigger alone, docs/stock-payload-re.md §2), so a coaxial gun can have it.
 constexpr bool FreeSecondary(Class c) noexcept { return c==Class::other; }
@@ -687,6 +748,7 @@ bool InstallPayload() noexcept {
         coaxBeltOk=Matches(kAmmoColorInit,kAmmoColorInitCode,sizeof(kAmmoColorInitCode)) &&
                    Matches(kFireCopy,kFireCopyCode,sizeof(kFireCopyCode));
         Log("HOOK coax belt=%d (a tracer every %d coax rounds)",coaxBeltOk,kCoaxTracerEvery);
+        Log("HOOK coax motion=%d/%d (the coax no longer runs the main gun's firing motion)",InstallCoaxMotion(),kMotionClassCount);
         if(!Matches(kPull,kPullCode,sizeof(kPullCode))) {
             Log("HOOK payload=0 (unexpected EDF.dll code at the holder pull: the stock vehicles' stores do not switch)");
             return false;

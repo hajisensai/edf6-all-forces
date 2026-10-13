@@ -1029,6 +1029,10 @@ add_test(NAME stock_store_recoil COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE
 add_test(NAME stock_store_loadouts COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_stock_store_loadouts.py")
 add_test(NAME stock_store_recoil_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/stock_store_recoil_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(stock_store_recoil_native PROPERTIES SKIP_RETURN_CODE 77)
+# The coax's shot no longer runs the main gun's firing motion (src/payload.cpp InstallCoaxMotion): the native facts it
+# relies on, on the real EDF.dll (docs/feedback-2026-10-12-coax-recoil.md).
+add_test(NAME coax_fire_motion_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/coax_fire_motion_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(coax_fire_motion_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME katyusha_mount COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/katyusha_mount_check.py" "${EDF6_GAME_DIR}")
 set_tests_properties(katyusha_mount PROPERTIES SKIP_RETURN_CODE 77)
 foreach(check IN ITEMS mission_participants_test mission_participant_gate_test)

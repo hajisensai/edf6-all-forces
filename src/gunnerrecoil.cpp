@@ -100,7 +100,9 @@ bool RemoteOperator(unsigned char* v,const unsigned char* weapon) noexcept {
 void Fire(unsigned char* v,int cls,unsigned char* holder,int shots) noexcept {
     unsigned char* weapon=At<unsigned char*>(holder,kHolderWeapon);
     const float kept=At<float>(weapon,kWeaponRecoil);
-    const auto fired=reinterpret_cast<FireFn>(image+kRecoilClasses[cls].fired);
+    // Through the class's vtable, not the stock address: payload.cpp chains the 505's and the 601's slot 48 after this
+    // file's install (the coax holder must not run the main gun's firing motion), and a replayed shot is a shot too.
+    const auto fired=reinterpret_cast<FireFn>(reinterpret_cast<void**>(image+kRecoilClasses[cls].vtable)[kSlotFired]);
     __try {
         for(int s=0;s<shots;++s) {
             Put<float>(weapon,kWeaponRecoil,At<float>(weapon,kWeaponFireRecoil));
