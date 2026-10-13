@@ -18,6 +18,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/map.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/infantryscope.cpp)
 # The damage statistics (src/damagestats.cpp: the damage hook and the round tags; the page in src/hud_stats.inc).
 target_sources(EDF6VehicleCrew PRIVATE src/damagestats.cpp)
+# Fire that cannot hurt its target (src/wastedfire.cpp, src/wasted_fire.h): fed by the damage hook, asked by the AI.
+target_sources(EDF6VehicleCrew PRIVATE src/wastedfire.cpp)
 # The map's NPC commands (src/mapcmd.cpp, src/mapcmd_logic.h).
 target_sources(EDF6VehicleCrew PRIVATE src/mapcmd.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/support_dispatch.cpp)
@@ -295,6 +297,14 @@ target_compile_options(stab_native_readback_test PRIVATE /W4 /WX /utf-8 /permiss
 # The Proteus rework's rules (src/proteus_logic.h: the stances and their stagger, the shield's heat / HP / break / refill,
 # who operates each stock weapon mount, the step height) offline (tools/proteus_check.cpp). Not part of the plugin build:
 # cmake --build build --target proteus_check && build\proteus_check.exe
+# The hit prediction's intercept and window logic (tools/hit_predict_check.cpp, src/hit_predict.h).
+add_executable(hit_predict_check EXCLUDE_FROM_ALL tools/hit_predict_check.cpp)
+target_compile_options(hit_predict_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(hit_predict_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# Fire that cannot hurt its target held (tools/wasted_fire_check.cpp, src/wasted_fire.h).
+add_executable(wasted_fire_check EXCLUDE_FROM_ALL tools/wasted_fire_check.cpp)
+target_compile_options(wasted_fire_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(wasted_fire_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # What the charge drones and the gunship go for and when a charge drone gives up (tools/air_chase_check.cpp,
 # src/air_chase.h). Not part of the plugin build.
 add_executable(air_chase_check EXCLUDE_FROM_ALL tools/air_chase_check.cpp)
@@ -614,7 +624,7 @@ add_test(NAME pn COMMAND pn_test)
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
-    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check own_round_check exhaust_nozzles_check damage_stats_check)
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check hit_predict_check own_round_check exhaust_nozzles_check damage_stats_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 add_dependencies(offline_checks transport_runtime_test)
 add_dependencies(offline_checks stab_native_readback_test)
@@ -876,6 +886,15 @@ add_test(NAME edf5_campaign_partial_install COMMAND edf5_campaign_native_test "$
 add_test(NAME edf5_campaign_chained COMMAND edf5_campaign_native_test "${EDF6_NATIVE_DLL}" chain)
 add_test(NAME edf5_campaign_foreign_site COMMAND edf5_campaign_native_test "${EDF6_NATIVE_DLL}" foreign)
 # The route guide hook on a private EDF.dll mapping: every constructor call redirected, each caller's guide corrected.
+# The hit prediction against the game's own hit-acceptance overrides on a private EDF.dll mapping
+# (tests/hit_accept_native_test.cpp; src/wastedfire.cpp, src/hit_predict.h).
+add_executable(hit_accept_native_test EXCLUDE_FROM_ALL tests/hit_accept_native_test.cpp)
+target_include_directories(hit_accept_native_test PRIVATE src common)
+target_link_libraries(hit_accept_native_test PRIVATE edf6common)
+target_compile_options(hit_accept_native_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks hit_accept_native_test)
+add_test(NAME hit_accept_native COMMAND hit_accept_native_test "${EDF6_NATIVE_DLL}")
+set_tests_properties(hit_accept_native PROPERTIES SKIP_RETURN_CODE 77)
 add_executable(route_guide_native_test EXCLUDE_FROM_ALL tests/route_guide_native_test.cpp)
 target_include_directories(route_guide_native_test PRIVATE src common)
 target_link_libraries(route_guide_native_test PRIVATE edf6common)

@@ -65,6 +65,10 @@ constexpr ULONGLONG kFlyerMemoMs=500;
 // The current target counts as kKeepScale of its distance less kKeepTarget: another must be much nearer
 // to take its place (a fighter switched every 11 s among 32 in one fight, turning hard each time).
 constexpr float kKeepScale=0.6f,kKeepTarget=100.0f;
+// A dogfight (Attack) once begun goes on out to this many times the guns' reach.
+constexpr float kDogfightKeep=1.5f;
+// m: the guns' reach for the fire gate (Fire) and the dogfight (Attack): their rounds' reach, at most the role's gunOpen.
+float GunReach(const Kind& k,const Arms& a) noexcept { return a.gunRange<k.gunOpen ? a.gunRange : k.gunOpen; }
 
 // The target: as the role prefers (Kind::prefer), nearest to the jet among those within `range` of
 // `anchor`, the current one counting nearer (kKeepScale, kKeepTarget).
@@ -133,7 +137,7 @@ void VisitTarget(void* ctx,const void* object,const float* p) noexcept {
         k.focus=true;k.best=object;k.score=-1e30f;std::memcpy(k.aim,p,12);k.flyer=Flies(object,p,k.ms);
         return;
     }
-    if(k.focus || PastEdge(*k.j,p))return;
+    if(k.focus || PastEdge(*k.j,p) || HoldFire(k.j->Vehicle(),object))return;   // no round would hurt it now: no target
     const float d[3]={p[0]-k.anchor[0],p[1]-k.anchor[1],p[2]-k.anchor[2]};
     // A map order bounds the current target too; an uncommanded jet keeps its ordinary pursuit, but a charge drone (or its
     // carrier) is bound by its range always: it does not chase one it cannot catch out of it.
@@ -470,7 +474,16 @@ void Attack(Jet& j,const Arms& arms,const float* pos,const float* nose,const flo
         *missileOk=*gunsOk && arms.missiles>0 && reach>0.0f;
         return;
     }
-    if(arms.missiles>0 && reach>0.0f && ms>=t.gunsUntil) {
+    // A flyer in its guns' reach is a dogfight (Chase: the guns, and the missiles whenever they lock with the nose on it):
+    // the standoff (Missile) is for one out past the guns. Until 2026-10-12 any jet with missiles left stood off at every
+    // flyer and turned away from one nearer than kStandoffIn of the missile's range (some 500 m): EDF's flyers swarm at a
+    // few hundred metres, so it cranked away from them over and over, its guns never free (the 17:09-17:10 log: three
+    // multirole jets on flyers 22-760 m off, fire=0/0 throughout; the user: 「战斗机对空能力甚至不如直升机」). Once in the
+    // dogfight it stays in it out to kDogfightKeep times that reach, so it does not flip between the two at the edge.
+    const float d[3]={t.aim[0]-pos[0],t.aim[1]-pos[1],t.aim[2]-pos[2]};
+    const bool fighting=j.mode==Mode::chase || j.mode==Mode::runOut;
+    const bool dogfight=arms.guns>0 && Len(d)<GunReach(kind,arms)*(fighting ? kDogfightKeep : 1.0f);
+    if(arms.missiles>0 && reach>0.0f && ms>=t.gunsUntil && !dogfight) {
         if(!t.lockSeen || arms.locked>0)t.lockSeen=ms;
         if(ms-t.lockSeen>kNoLockMs) {
             Log("JET v=%p no missile lock in %.0f s: guns for %.0f s",j.Vehicle(),static_cast<float>(kNoLockMs)*0.001f,
@@ -480,7 +493,10 @@ void Attack(Jet& j,const Arms& arms,const float* pos,const float* nose,const flo
         }
         Missile(j,pos,reach,ms,want,speed);
         *missileOk=j.mode==Mode::missile;
-    } else *gunsOk=Chase(j,pos,nose,lead,ms,want,speed);
+        return;
+    }
+    *gunsOk=Chase(j,pos,nose,lead,ms,want,speed);
+    *missileOk=*gunsOk && arms.missiles>0 && reach>0.0f;   // Fire: the nose on it kLockMs, a lock, past kMissileMin
 }
 
 bool WeaponsFree(const Jet& j) noexcept {
@@ -529,7 +545,7 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
         const float miss=dist>1.0f ? std::acos(Clamp(Dot(d,nose)/dist,-1.0f,1.0f)) : 0.0f;
         const float wide=dist>1.0f ? std::atan(kHitRadius/dist) : 1.0f;
         const Kind& k=KindOf(j);
-        const float reach=a.gunRange<k.gunOpen ? a.gunRange : k.gunOpen;
+        const float reach=GunReach(k,a);
         const float path[3]={pos[0]+nose[0]*a.gunRange,pos[1]+nose[1]*a.gunRange,pos[2]+nose[2]*a.gunRange};
         float flight[3]={j.m.vel[0],j.m.vel[1],j.m.vel[2]};
         // The nose rides aoa above the path (JetSteer): the slip allowed is past that.
