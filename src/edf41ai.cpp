@@ -157,8 +157,8 @@ void Tick(void* self) noexcept {
     const bool have=TargetOf(self,target);
     const ULONGLONG now=GetTickCount64();
     std::lock_guard<std::mutex> hold(tableLock);
-    auto it=table.find(self);
-    if(it!=table.end() && !hector::CacheMatches(it->second.ref.ctrl,ref.ctrl,marked))table.erase(it);
+    auto cached=table.find(self);
+    if(cached!=table.end() && !hector::CacheMatches(cached->second.ref.ctrl,ref.ctrl,marked))table.erase(cached);
     Entry* e=Find(self);
     if(e && now-e->last>kStaleMs) {      // another object at this address, or a long pause: start again
         table.erase(self);
