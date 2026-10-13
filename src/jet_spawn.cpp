@@ -1,5 +1,6 @@
 // The jets' bodies (jet.cpp): the SGOs (jet_internal.h kBodies), their preload for a mission, spawning a jet
-// (JetLaunch and the airstrike takeovers) or a called heli, the body's fix-ups and its far rendering.
+// (JetLaunch and the airstrike takeovers) or a support aircraft (PrepareSupportAircraft), the body's fix-ups and its
+// far rendering.
 // Run-time spawning (docs/mission-airstrike-re.md §3): JetLaunch makes a jet exactly like the script's
 // CreateFriend: CreateObject on the preloaded SGO, team friend, RideAi(true). Only RideAi with true reads the
 // SGO's mission_setup (0x633063 -> slot 46), which is what writes the jet mark, the weapons and the heli
@@ -20,9 +21,6 @@ namespace {
 // &matrix, path, &InitParam) -> the object (the manager owns it), SetTeam(object, team, 1).
 constexpr unsigned kPreload=0x7A3780;
 constexpr std::size_t kPreloadMgr=0x20B29A8;
-// The heli starts kHeliClear over the ground: high enough that it does not hit it while its rotor spins
-// up (heli.cpp gives it the hover rotor at once), low enough that it is soon at its working height.
-constexpr float kHeliClear=40.0f;
 const unsigned char kPreloadSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48};
 const unsigned char kCreateObjectSig[]={0x40,0x55,0x53,0x56,0x57,0x41,0x54,0x41,0x56,0x41,0x57,0x48,0x8D,0x6C,0x24,0xD9};
 const unsigned char kSetTeamSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x20,0x41};
@@ -61,12 +59,19 @@ using FindPartFn=std::int32_t(__fastcall*)(void*,const wchar_t*);
 // cameras: the near one 0.1 m to LightEnv FarClipZ (1000 m in every mission) for nodes with mask bit25|bit27,
 // the far one 500 m to 20 km for bit26 only. A vehicle's render node is made with 0x12000000, so a jet circling
 // past 1000 m stops being drawn. The game's own switch for that bit, the one SGO FarRender / use_far_render
-// throw, is 0x11B3020(node,true): the jet's node (the model component at vehicle+0xE40, vtable 0x176B9A8) gets
-// it, and the near pass is unchanged. Checked every frame, set only while the bit is missing, so a node the
-// game rebuilds or resets gets it back. The switch's code is checked at install (kSetFarRenderSig: mov r8d,
-// [rcx+20h]; btr/bts bit 26), as every other function the plugin calls.
-constexpr unsigned kRenderNodeVtable=0x176B9A8,kSetFarRender=0x11B3020;
-constexpr std::size_t kRenderNode=0xE40,kNodeMask=0x20;
+// throw, is 0x11B3020(node,true): the jet's node gets it, and the near pass is unchanged. Checked every frame, set only
+// while the bit is missing, so a node the game rebuilds or resets gets it back. The switch's code is checked at install
+// (kSetFarRenderSig: mov r8d,[rcx+20h]; btr/bts bit 26), as every other function the plugin calls.
+// The node is the vehicle's AnimationModel at vehicle+0xE40 (VehicleBase ctor 0x62958A: lea rcx,[r14+0xE40]; call
+// 0x6B8740), an umbra::Object at its offset 0 (RTTI at 0x17C4030: AnimationModel, bases umbra::Object@0,
+// snapshot::IRecordable@0x70). Its ctor calls the umbra::Object ctor 0x11B2400 (vtable 0x176B9A8) and then writes its own
+// vtable 0x17C4030 over it (0x6B875D), so the check against 0x176B9A8 alone never held for a vehicle: every support
+// aircraft logged `has vtable ...4030, not the model node's: far rendering off for it` and none was far rendered (the
+// 2026-10-10 log; image base ...C400000, 0x...DBC4030 - 0x17C4030). Both are taken now. The stock does the same to its
+// own AnimationModels (0x37BB60 builds one at +0x1160, 0x37BCC2 calls 0x11B3020 on it; 0x5C3A62 / 0x5C3EC7 at +0x5C0).
+// 0x11B3020 passes the node's Umbra::Object* (+0x10) to Umbra Object::setBitmask unchecked: none yet, not set.
+constexpr unsigned kRenderNodeVtable=0x176B9A8,kAnimationModelVtable=0x17C4030,kSetFarRender=0x11B3020;
+constexpr std::size_t kRenderNode=0xE40,kNodeMask=0x20,kNodeUmbra=0x10;
 constexpr unsigned kFarBit=0x04000000;
 const unsigned char kSetFarRenderSig[]={0x44,0x8B,0x41,0x20,0x41,0x8B,0xC0,0x0F,0xBA,0xF0,0x1A,0x41,0x0F,0xBA,0xE8,0x1A};
 bool farOk=false;
@@ -156,8 +161,12 @@ unsigned char* SpawnJet(Body b,const float* m,std::int32_t team) noexcept {
     if(bodyPartOk)FixBodyPart506(v,"JET");
     reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,team,true);
     LevelVehicle(v);
-    SeatNpcRider(v,true);   // a copy this machine just made: never registered, so its own here (online_authority.h)
     const BodyRow& row=Row(b);
+    // A copy this machine just made: never registered, so its own here (online_authority.h). A drone gets the native
+    // init alone (mission_setup, its weapons): no one is seated in it, JetFrame flies it (Unmanned); a crewed body asks
+    // the soldiers near it to walk aboard (SeatNpcRider).
+    if(!Unmanned(row.role))SeatNpcRider(v,true);
+    else if(OnlineMaySeatNpc(v))PrepareNpcVehicle(v,true);
     const bool jet=row.mark>0.0f;
     Role role=Role::fighter;
     if(jet ? IsJetVehicle(v,&role,nullptr) && role==row.role : IsHelicopter(v) && !IsJetVehicle(v,nullptr,nullptr))return v;
@@ -169,6 +178,9 @@ unsigned char* SpawnJet(Body b,const float* m,std::int32_t team) noexcept {
 Jet* Launch(Body b,const float* from,const float* heading,const float* target,DWORD fuelSec,float speed,const void* source,
             float clear) noexcept {
     if(!spawnOk || !Cfg().jetPilot || !Preloaded(b) || !At<void*>(image,kObjectMgr) || !SlotFree())return nullptr;
+    // Made in the air with no one in it, only a drone flies (Unmanned): a crewed body would be an empty hull falling.
+    // Crewed aircraft come through the support deployment with their real crew (support_dispatch.cpp).
+    if(!Unmanned(Row(b).role)){Log("JET launch: %ls is crewed: not launched without its crew (support calls bring it)",Row(b).file);return nullptr;}
     const ULONGLONG ms=GameMs();
     float start[3]={from[0],from[1],from[2]};
     ClearGround(start,clear);
@@ -183,29 +195,37 @@ Jet* Launch(Body b,const float* from,const float* heading,const float* target,DW
     std::memcpy(j->anchor,target,12);j->fuelMs=static_cast<ULONGLONG>(fuelSec)*1000;
     JoinFlight(*j,FlightFor(source,ms));
     for(int i=0;i<3;++i)j->m.vel[i]=m[8+i]*speed;
-    Log("JET v=%p launched: %s (%ls) flight %u wing %d from (%.0f,%.0f,%.0f) at (%.0f,%.0f,%.0f) %.0f m/s fuel=%lus driver=%d hp=%.0f/%.0f",
+    Log("JET v=%p launched: %s (%ls) flight %u wing %d from (%.0f,%.0f,%.0f) at (%.0f,%.0f,%.0f) %.0f m/s fuel=%lus unmanned=%d hp=%.0f/%.0f",
         v,KindOf(*j).name,Row(b).file,j->flight,j->wing,start[0],start[1],start[2],target[0],target[1],target[2],speed,fuelSec,
-        SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::dummy,At<float>(v,kHp),At<float>(v,kHpMax));
+        FliesItself(*j),At<float>(v,kHp),At<float>(v,kHpMax));
     Publish(true);
     return j;
 }
 
-void FarRender(Jet& j,unsigned char* v) noexcept {
-    if(j.farOff || !farOk)return;
+// A vehicle's far rendering on (see kRenderNode): on (or on already), off (not its model node, or the bit did not stick:
+// leave it), or later (its Umbra object not there yet: ask again next frame).
+enum class Far { on, off, later };
+Far FarRenderOn(unsigned char* v,const char* who) noexcept {
+    if(!farOk)return Far::off;
     unsigned char* const node=v+kRenderNode;
     __try {
-        if(At<const void*>(node,0)!=image+kRenderNodeVtable) {
-            Log("JET v=%p render node %p has vtable %p, not the model node's: far rendering off for it",v,node,
-                At<const void*>(node,0));
-            j.farOff=true;
-            return;
+        const void* const vt=At<const void*>(node,0);
+        if(vt!=image+kAnimationModelVtable && vt!=image+kRenderNodeVtable) {
+            Log("%s v=%p render node %p has vtable %p, not the model node's: far rendering off for it",who,v,node,vt);
+            return Far::off;
         }
-        if(At<unsigned>(node,kNodeMask)&kFarBit)return;
+        if(At<unsigned>(node,kNodeMask)&kFarBit)return Far::on;
+        if(!At<const void*>(node,kNodeUmbra))return Far::later;
         reinterpret_cast<void(*)(void*,bool)>(image+kSetFarRender)(node,true);
         const unsigned mask=At<unsigned>(node,kNodeMask);
-        Log("JET v=%p far rendering on: node mask %08x",v,mask);
-        if(!(mask&kFarBit)){Log("JET v=%p far bit did not stick: far rendering off for it",v);j.farOff=true;}
-    } __except(FaultLog("JET far rendering (off for that jet)",GetExceptionInformation())){j.farOff=true;}
+        Log("%s v=%p far rendering on: node mask %08x",who,v,mask);
+        if(!(mask&kFarBit)){Log("%s v=%p far bit did not stick: far rendering off for it",who,v);return Far::off;}
+        return Far::on;
+    } __except(FaultLog("far rendering (off for that vehicle)",GetExceptionInformation())){return Far::off;}
+}
+
+void FarRender(Jet& j,unsigned char* v) noexcept {
+    if(!j.farOff && FarRenderOn(v,"JET")==Far::off)j.farOff=true;
 }
 
 }  // namespace jet
@@ -242,6 +262,18 @@ using namespace jet;
 
 namespace {
 ObjRef supportAircraft[32]{};
+// Made off the map (support_entry.h AirRoute), each one's arrival (SupportAircraftFrame): the move-area clamp held off
+// from its creation (`stockInset` its own inset, put back once inside: a helicopter; a jet keeps none, JetFrame), its far
+// rendering asked for until it is on (or off for good).
+// The clamp (docs/map-edge-re.md: slot 55's base 0x6543A0, in the stock input, which runs before the plugin's frame step:
+// crew.cpp nextInput then HeliStep) teleports a body outside the move area (shrunk by veh+kAreaInset) back onto its edge
+// every frame. JetFrame wrote the jets' kNoInset from their first plugin frame on, after the clamp had already run once:
+// a gunship made at (-1000,209,-150) stood at (-276,211,-150), 454 m from its caller, 0.03 s later (2026-10-10 13:14:42,
+// the move area 1107 x 1313 m round (252,-216) then). So it is written as the hull is made, before any step.
+struct Arrival { float stockInset; bool held,farDone; };
+Arrival arrivals[32]{};
+constexpr std::size_t kAreaInset=0xE00;   // jet.cpp kAreaInset
+constexpr float kNoInset=-1.0e6f;
 Body HeliBodyOf(HeliBody as) noexcept {
     return as==HeliBody::brute410 ? Body::heli410 : as==HeliBody::medic410 ? Body::heliMedic :
            as==HeliBody::transport410 ? Body::heliTransport : Body::heli506;
@@ -277,6 +309,11 @@ unsigned char* PrepareSupportAircraft(const SupportAircraft& spec,const float* m
     if(!valid){reinterpret_cast<DeleteFn>(image+kDelete)(vehicle);return nullptr;}
     *slot=ObjRef::Of(vehicle);
     NoteLocalCopy(vehicle,nullptr);
+    // Off the map it is made: the move-area clamp off before its first step (see Arrival), here as on every machine.
+    Arrival& a=arrivals[slot-supportAircraft];
+    a=Arrival{At<float>(vehicle,kAreaInset),row.mark<=0.0f,false};
+    Put<float>(vehicle,kAreaInset,kNoInset);
+    a.farDone=FarRenderOn(vehicle,"SUPPORT")!=Far::later;
     return vehicle;
 }
 
@@ -300,6 +337,29 @@ bool ActivateSupportAircraft(unsigned char* vehicle,const SupportAircraft& spec,
     JoinFlight(*entry,FlightFor(&supportAircraft,GameMs()));
     ApplyMapCommand(*entry,Command{Order::guard,{target[0],target[1],target[2]}},GameMs());
     return true;
+}
+
+float SupportPassTurn(const SupportAircraft& spec) noexcept {
+    return spec.transportPlane ? FerryTurn(KindOf(Row(Body::transportPlane).role)) : 0.0f;
+}
+
+void SupportAircraftFrame(unsigned char* v) noexcept {
+    for(std::size_t i=0;i<sizeof(supportAircraft)/sizeof(supportAircraft[0]);++i) {
+        if(supportAircraft[i].obj!=v || !Alive(supportAircraft[i]))continue;
+        Arrival& a=arrivals[i];
+        if(!a.farDone)a.farDone=FarRenderOn(v,"SUPPORT")!=Far::later;
+        if(!a.held)return;
+        // A helicopter's clamp back once it is inside what the clamp holds (the move area shrunk by its own inset): from
+        // there on as every other helicopter (the player may fly it; heli.cpp SoftEdge's HeldBox reads the inset).
+        float lo[3],hi[3];
+        const float* pos=reinterpret_cast<const float*>(v+kPosition);
+        const float in=a.stockInset>0.0f ? a.stockInset : 0.0f;
+        if(!MoveAreaBox(lo,hi) || (pos[0]>=lo[0]+in && pos[0]<=hi[0]-in && pos[2]>=lo[2]+in && pos[2]<=hi[2]-in)) {
+            Put<float>(v,kAreaInset,a.stockInset);a.held=false;
+            Log("SUPPORT v=%p inside the move area at (%.0f,%.0f): its clamp back (inset %.1f)",v,pos[0],pos[2],a.stockInset);
+        } else Put<float>(v,kAreaInset,kNoInset);
+        return;
+    }
 }
 
 bool SupportAircraftReady(const SupportAircraft& spec) noexcept {
@@ -434,18 +494,4 @@ unsigned char* JetLaunchThrown(ThrownDrone what,const float* at,const float* hea
     __except(FaultLog("JET thrown drone launch",GetExceptionInformation())){return nullptr;}
 }
 
-unsigned char* HeliLaunch(HeliBody as,const float* from,const float* heading) noexcept {
-    const Body b=HeliBodyOf(as);
-    if(!spawnOk || !Preloaded(b) || !At<void*>(image,kObjectMgr))return nullptr;
-    __try {
-        float start[3]={from[0],from[1],from[2]};
-        ClearGround(start,kHeliClear);
-        alignas(16) float m[16];
-        Facing(heading,start,m);
-        unsigned char* const v=SpawnJet(b,m);
-        NoteLocalCopy(v,nullptr);   // whose its damage is online: the call's / the rescue's (online_authority.h)
-        if(v)Log("HELI v=%p launched: %ls at (%.0f,%.0f,%.0f)",v,Row(b).file,start[0],start[1],start[2]);
-        return v;
-    } __except(FaultLog("HELI launch",GetExceptionInformation())){return nullptr;}
-}
 }  // namespace crew

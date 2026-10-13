@@ -95,6 +95,7 @@ FogEnd 通常 ≥ 5000，对 1–2.5 km 的物体只是部分淡化，不会完�
 - VehicleBase 构造 0x62958a：`lea rcx,[r14+0xe40]; call 0x6b8740`，即模型组件位于 **vehicle+0xe40**（H）。
 - 0x6b8740 是模型组件构造；角色 FarRender 路径直接把模型组件地址（obj+0x8a0）传给 0x11b3020，说明模型组件起始处就是渲染节点（M）。
 - 运行时自检：*(vehicle+0xe40) 应等于 base+0x176b9a8（节点 vtable）。如果不等，就在对象内扫描等于该值的 qword 来定位（M/L：派生节点的 vtable 可能不同）。
+- **更正（2026-10-10，H）**：派生节点的 vtable 确实不同。`vehicle+0xE40` 是 `AnimationModel`（RTTI `.?AVAnimationModel@@`，vtable `0x17C4030`，基类 umbra::Object@0、snapshot::IRecordable@0x70），`0x6B8740` 在调用 `0x11B2400` 之后于 `0x6B875D` 把 vtable 覆盖为 `0x17C4030`。节点就在 `+0xE40`（无间接），校验应认 `0x17C4030`。`0x11B3020` 只改 `+0x20` 后把 `[rcx+0x10]` 交给 `Umbra::Object::setBitmask`，不经虚调用、不判空。原版同样对 AnimationModel 调用（`0x37BCC2` 对 `+0x1160`，`0x5C3EC7` 对 `+0x5C0`）。载具区段内 `0x6B8740` 只有 `0x62958A` 一处调用，每辆载具只有这一个渲染节点。
 - 未确认：模型组件是否还挂有子节点（多 mesh / 部件），子节点需要单独开 bit26（L）。
 
 ## 5. 推荐插件方案

@@ -37,9 +37,12 @@ bool NativeDelete(unsigned char* v) noexcept {
     __try { reinterpret_cast<void(*)(void*)>(image+kDelete)(v);return true; }
     __except(EXCEPTION_EXECUTE_HANDLER){Log("SUPPORT ground: native rollback fault for %p",v);return false;}
 }
+}  // namespace
+
 // Applies setup and destroys its temporary variant even if apply fails. An unreadable destructor
 // disables this resource; it is never silently treated as a ready unarmed/unconfigured vehicle.
-bool ApplySetup(unsigned char* v) noexcept {
+// Shared with the debug spawn (debug_spawn.cpp), which checks the same native code first.
+bool ApplyMissionSetup(unsigned char* v) noexcept {
     alignas(16) unsigned char setup[0x40]{},scratch[0x40]{};
     Put<std::uint16_t>(setup,0x10,0xFFFF);
     bool applied=false,disposed=false;
@@ -62,7 +65,6 @@ bool ApplySetup(unsigned char* v) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("SUPPORT ground: setup disposal fault for %p",v);}
     return applied && disposed;
 }
-}  // namespace
 
 void PreloadSupportVehicles() noexcept {
     for(auto& p:preloaded)p=false;
@@ -112,7 +114,7 @@ unsigned char* SpawnSupportVehicle(SupportVehicleKind kind,SupportCrewMode mode,
         if(!mgr)return nullptr;
         v=reinterpret_cast<CreateFn>(image+kCreate)(mgr,matrix,sgo,&param);
         if(!v)return nullptr;
-        if(At<const void*>(v,0)==image+row->vtable && SeatCount(v)==row->seats && ApplySetup(v)) {
+        if(At<const void*>(v,0)==image+row->vtable && SeatCount(v)==row->seats && ApplyMissionSetup(v)) {
             reinterpret_cast<void(*)(void*,std::int32_t,bool)>(image+kSetTeam)(v,2,true);
             reinterpret_cast<void(__fastcall*)(void*,float)>(image+kSetLevel)(v,1.0f);
             NoteLocalCopy(v,owner);
@@ -136,7 +138,7 @@ unsigned char* SpawnSupportVehicle(SupportVehicleKind kind,SupportCrewMode mode,
 }
 
 // airdrop.cpp: a vehicle the game's container made for the plugin's transport plane gets the same setup step.
-bool ApplySupportVehicleSetup(unsigned char* vehicle) noexcept {return profile && vehicle && ApplySetup(vehicle);}
+bool ApplySupportVehicleSetup(unsigned char* vehicle) noexcept {return profile && vehicle && ApplyMissionSetup(vehicle);}
 
 bool DeleteSupportVehicle(unsigned char* v) noexcept {
     if(!v || !profile)return false;

@@ -95,7 +95,7 @@ struct Game {
     bool eat,eatWas;            // the mark key's press took the enemy under the pointer: not the map's (MapCommandEats)
     ObjRef eatHover;            // ...that enemy's original identity, its lock point
     float eatAt[3];
-    enum class UiKind : std::uint8_t { none,command,squad,payload,support,panel,fold,formation,compose };
+    enum class UiKind : std::uint8_t { none,command,squad,payload,support,panel,fold,formation,compose,stats };
     struct UiHit { UiKind kind=UiKind::none;int id=-1;ObjRef identity{};std::uint64_t token=0;int seat=-1,entry=-1; };
     UiHit uiPress{};
     bool uiLeft=false,uiRight=false,rowPicked=false,suppressLeft=false,suppressRight=false;
@@ -375,6 +375,8 @@ int Marks(const Game& g,const View& v,mapcmd::Mark* out) noexcept {
 
 Game::UiHit UiAt(const View& v,float x,float y) noexcept {
     Game::UiHit hit;
+    // The damage statistics' page (over everything while shown) or the map's STATS tab: its click code.
+    if(const int code=DamageStatsUiAt(x,y)){hit.kind=Game::UiKind::stats;hit.entry=code;return hit;}
     int i=mapbtn::Hit(v.menu,v.menus,x,y);   // drawn over the rest
     if(i>=0){hit.kind=Game::UiKind::formation;hit.entry=v.menuEntry[i];return hit;}
     i=mapbtn::Hit(v.button,v.buttons,x,y);
@@ -423,6 +425,7 @@ void PickFormation(Game& g,int entry) noexcept {
         npc::formation::Name(npc::formation::FromInt(shape)),done);
 }
 void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
+    if(hit.kind==Game::UiKind::stats){DamageStatsClick(hit.entry);return;}
     if(hit.kind==Game::UiKind::command){g.button=hit.id;return;}
     if(hit.kind==Game::UiKind::fold){g.panelOpen=!g.panelOpen;return;}
     if(hit.kind==Game::UiKind::formation){PickFormation(g,hit.entry);return;}
@@ -760,7 +763,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     r.sweepOn=NpcSweepOn();r.healthOn=NpcPickupHealthOn();r.march=NpcMarchShape();
     r.armedOrder=g.armedOrder;r.armed=g.armed;r.supportArmed=g.armedSupport;r.supportPick=g.supportPick;
     r.composeEntry=g.composeEntry;r.composeSeats=g.composeEntry>=0 ? SupportCallSeats(g.composeEntry) : 0;r.compose=g.compose;
-    r.supports=(std::min)(SupportCallCount(),kMapSupports);
+    r.supports=(std::min)(SupportMenuCount(),kMapSupports);   // the sea rescue is no map call
     for(int i=0;i<r.supports;++i) {
         _snwprintf_s(r.support[i].name,_countof(r.support[i].name),_TRUNCATE,L"%ls",SupportCallName(i));
         r.support[i].icon=SupportCallIcon(i);r.support[i].variant=SupportCallVariant(i);
@@ -778,7 +781,9 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     g.requester=in.requester.obj ? in.requester : ObjRef::Of(PlayerHuman());
     CommandNetworkReply(g);
     const ULONGLONG now=GetTickCount64();
-    const Keys k=ReadKeys(in);
+    Keys k=ReadKeys(in);
+    // The damage statistics' page shown: only the pointer's buttons (its clicks); no order key reaches the units under it.
+    if(DamageStatsShown()){const Keys all=k;k=Keys{};k.left=all.left;k.right=all.right;k.shift=all.shift;}
     View v{};
     AcquireSRWLockShared(&viewLock);
     v=view;
@@ -815,7 +820,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     const bool cancel=g.rightClick && (g.armedOrder || g.armedSupport>=0);   // RTS: the right button leaves the targeting
     if(cancel){Arm(g,false,Order::none,-1);g.rightClick=false;Note(g,L"%ls",hudtext::Tr(hudtext::Tx::cmdArmCancelled));}
     if(g.rightClick && g.formationMenu){g.formationMenu=false;g.rightClick=false;}   // ...and closes the formation menu
-    const int supportCount=SupportCallCount();
+    const int supportCount=SupportMenuCount();
     if(supportCount>0) {
         const bool previous=k.supportPrev && !g.was.supportPrev,following=k.supportNext && !g.was.supportNext;
         if(previous || following) {

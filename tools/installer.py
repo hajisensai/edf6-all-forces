@@ -395,7 +395,12 @@ def build_asset(cache: Any, module: ModuleType, label: str, builder: Any = None)
     return built
 
 
-def build_packs(game: str, campaign: bool) -> tuple | None:
+def find_edf41(game: str) -> str | None:
+    """The player's EDF4.1, looked up once per install (its maps and the EDF4.1 story pack need it)."""
+    return gamedir.find_other(gamedir.EDF41, near=game)
+
+
+def build_packs(game: str, campaign: bool, root41: str | None = None) -> tuple | None:
     """The mission packs to write (make_edf5_campaign.build), or None: the test range's always, the EDF5 campaign's
     when wanted. A refusal of the campaign alone (a mission's resource missing, ...) still registers the range when no
     campaign is installed to keep; the opt-out (`campaign` False) is the packs rebuilt without it."""
@@ -405,7 +410,7 @@ def build_packs(game: str, campaign: bool) -> tuple | None:
     else:
         print('生成测试场任务包（EDF5 战役已停用）……')
     try:
-        return make_edf5_campaign.build(game, campaign=campaign)
+        return make_edf5_campaign.build(game, campaign=campaign, root41=root41)
     except make_edf5_campaign.Refused as e:
         print('！ 不安装任务包：', e)
     if not campaign or make_edf5_campaign.enabled(game):
@@ -431,6 +436,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     import make_chute
     import make_jets
     import edf41_objects
+    import edf41_maps
     import make_katyusha
     import make_sazabi
     import make_proteus
@@ -476,7 +482,8 @@ def install(game: str, campaign_requested: bool = False) -> None:
     sazabi = build_asset(cache, make_sazabi, '沙扎比（模型生成约 1.5 分钟）')
     proteus = build_asset(cache, make_proteus, '普罗透斯护盾（原版空袭兵电磁碉堡墙；同时撤销旧版生成的模型）')
     bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
-    campaign = build_packs(game, campaign_requested or make_edf5_campaign.wanted(game))
+    root41 = find_edf41(game)
+    campaign = build_packs(game, campaign_requested or make_edf5_campaign.wanted(game), root41)
     print('\n全部生成完毕，开始写入。')
     if campaign is None and not make_edf5_campaign.wanted(game) and make_edf5_campaign.enabled(game):
         # An opt-out (finished by the packs rebuilt without the campaign) that cannot be: refused before writing.
@@ -514,6 +521,11 @@ def install(game: str, campaign_requested: bool = False) -> None:
     for obj, why in skipped41:
         print('  跳过', obj, why)
     edf41_objects.install(game, objects41)
+    print('转换 EDF4.1 的任务地图（4.1 本篇任务包要用；从已安装的 EDF4.1 转换，城市地图每张约 3–8 分钟，'
+          '已转换且未变的跳过）……' if root41 else '没有找到 EDF4.1：跳过 4.1 地图（4.1 本篇任务包需要它）。')
+    written41, skipped_maps = edf41_maps.install(game, root41)
+    for name, why in skipped_maps:
+        print('  跳过', name, why)
     install_autoturret(game, *turret)
     # Mutable stock SGOs are read after every primary writer, outside the expensive model cache.
     # AutoTurret's SGOs were redirected before its own manifest write; never layer another hash over them.
@@ -584,6 +596,7 @@ def uninstall(game: str) -> None:
     import make_chute
     import make_jets
     import edf41_objects
+    import edf41_maps
     import make_katyusha
     import make_sazabi
     import make_proteus
@@ -614,7 +627,7 @@ def uninstall(game: str) -> None:
         make_optics.remove(game)
         remove_autoturret(game)
         import support_loadout
-        for remove in (support_loadout.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove,
+        for remove in (support_loadout.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_maps.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:
@@ -797,11 +810,14 @@ def write_loadout_files(game: str) -> bool:
     return not errors
 
 
-def manage_support(game: str) -> int:
+def manage_support(game: str, loadout_only: bool = False) -> int:
     """Menu 7: the map support's out-of-mission configuration (tools/support_config.py, the plugin's src/support_config.h)
-    in the player's EDF6VehicleCrew.ini: callable units, their crews' weapons, aircraft counts. The plugin rereads the
-    ini on save, so the game may even be running."""
+    in the player's EDF6VehicleCrew.ini: callable units, their crews' weapons, aircraft counts. Menu 8 goes straight to
+    menu 7's `l`, the pre-battle loadouts (tools/support_loadout.py: squads, each soldier's class and colour, each tank's
+    and jet's pylons), the same edit saved the same way. The plugin rereads the ini on save, so the game may even be
+    running."""
     import support_config
+    import support_loadout
     path = os.path.join(game, 'Mods', 'Plugins', PLUGIN + '.ini')
     if not os.path.isfile(path):
         print('还没有安装插件（找不到 EDF6VehicleCrew.ini），请先选 1 安装。')
@@ -810,7 +826,7 @@ def manage_support(game: str) -> int:
         raw = f.read()
     bom = raw.startswith(b'\xef\xbb\xbf')
     text = (raw[3:] if bom else raw).decode('utf-8', errors='replace')
-    edited = support_config.edit(text, ask)
+    edited = (support_loadout.edit if loadout_only else support_config.edit)(text, ask)
     if edited == text:
         print('没有改动。')
         return 0
@@ -829,18 +845,20 @@ def manage_support(game: str) -> int:
 def main(argv: list[str]) -> int:
     print(f'== {PLUGIN} 安装程序 {build_name()} ==\n')
     mode = argv[0] if argv else ''
-    if mode not in ('install', 'uninstall', 'update', 'logs', 'check', 'campaign', 'support'):
+    if mode not in ('install', 'uninstall', 'update', 'logs', 'check', 'campaign', 'support', 'loadout'):
         pick = ask('输入 1 安装 / 更新，2 卸载，3 下载最新测试版，4 回传日志给开发者，5 检查安装状态，6 管理 EDF5 实验战役，'
-                   '7 配置地图支援（可呼叫单位 / 兵员武器 / 架数），回车退出：')
-        mode = {'1': 'install', '2': 'uninstall', '3': 'update', '4': 'logs', '5': 'check', '6': 'campaign', '7': 'support'}.get(pick, '')
+                   '7 配置地图支援（可呼叫单位 / 兵员武器 / 架数），8 战前配置（小队编组 / 每人兵种与颜色 / 坦克与战机挂载），'
+                   '回车退出：')
+        mode = {'1': 'install', '2': 'uninstall', '3': 'update', '4': 'logs', '5': 'check', '6': 'campaign', '7': 'support',
+                '8': 'loadout'}.get(pick, '')
         if not mode:
             return 0
     if mode == 'check':   # reads only: the game may be running
         game = pick_game()
         return 1 if not game else 0 if check(game) else 1
-    if mode == 'support':   # edits one ini the plugin rereads on save: the game may be running
+    if mode in ('support', 'loadout'):   # edits one ini the plugin rereads on save: the game may be running
         game = pick_game()
-        return 1 if not game else manage_support(game)
+        return 1 if not game else manage_support(game, loadout_only=mode == 'loadout')
     if mode in ('update', 'logs'):
         import testhub
         try:
@@ -854,6 +872,17 @@ def main(argv: list[str]) -> int:
     game = pick_game()
     if not game:
         return 1
+    if getattr(sys, 'frozen', False):   # the player's installer: their machine, nobody to queue behind
+        return write_game(mode, game)
+    import gamelease   # run from source (a developer's session): wait for the game like every other test step
+    with gamelease.lease(game, f'installer.py {mode}'):
+        if modfiles.game_running():
+            print(f'{PROCESS} 正在运行（排队期间别的会话启动了它）。')
+            return 1
+        return write_game(mode, game)
+
+
+def write_game(mode: str, game: str) -> int:
     if mode == 'campaign':
         return manage_campaign(game)
     (install if mode == 'install' else uninstall)(game)

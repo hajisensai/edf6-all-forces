@@ -46,6 +46,10 @@ class DriverTest(unittest.TestCase):
         self.root_patch = patch.object(drive, 'ROOT', str(self.root))
         self.root_patch.start()
         self.addCleanup(self.root_patch.stop)
+        # main() queues for the game (pylib/gamelease.py): this scratch game's queue stays in the temp folder.
+        queue = patch.dict('os.environ', {'EDF6_QUEUE_DIR': str(self.root / 'queues')})
+        queue.start()
+        self.addCleanup(queue.stop)
         self.pid_patch = patch.object(drive, 'game_pids', return_value=[])
         self.pids = self.pid_patch.start()
         self.addCleanup(self.pid_patch.stop)

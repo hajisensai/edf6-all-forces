@@ -128,49 +128,111 @@ def range_writes_every_generated_sgo_its_script_creates() -> None:
 
 
 @test
-def jet_nozzles_on_their_models() -> None:
-    """src/booster.cpp kJetNozzles: each mark's nozzles those of its model (pylib/jet_models.py NOZZLES: on the exit's
-    centre), its flame as big as that engine (width the exit's diameter, length FLAME_LENGTH_PER_DIAMETER of it), and
-    every jet mark has a row."""
+def exhausts_come_from_the_models() -> None:
+    """The flames and the arrival smoke are placed only from the models (the user, 2026-10-10: 「尾烟应该跟着模型生成，而不是
+    用两段可能不同步的代码维护」): src/booster.cpp keeps no nozzle table of its own (the jets' by mark, the carrier's locators,
+    the stock bombers') and takes both from ExhaustOf; the plugin's names for the bones are pylib/jet_models.py's; the stock
+    models' table (src/nozzles_gen.h) is what tools/gen_nozzles.py makes (re-measured with the game, else checked against its
+    own record); every plugin model with an exhaust makes nozzle bones (with the game: on its exits / the V508's boosters)."""
+    import gen_nozzles
     import jet_models
-    from vcobjects import JETS
-    carrier = 'EDF6VC_CARRIER.MRAB'
-    num = r'([-\d.]+)f'
-    vec = r'\{' + num + ',' + num + ',' + num + r'\}'
-    rows = {}
-    for m in re.finditer(r'\{(\d+)\.0f,(\d),\{' + vec + ',' + vec + r'\},\{' + num + ',' + num + r'\}\}',
-                         src('src/booster.cpp')):
-        count = int(m.group(2))
-        at = [tuple(float(m.group(k)) for k in range(3 + 3 * n, 6 + 3 * n)) for n in range(count)]
-        rows[float(m.group(1))] = (at, (float(m.group(9)), float(m.group(10))))
-    bad = []
-    for name, jet in JETS.items():
-        if jet.file is not None and (jet.file not in jet_models.MODELS or jet.file == carrier):
-            continue   # the carrier's four nozzles are its own (CarrierFlames); the Primers' fighter flaps: no exhaust
-        if jet.mark not in rows:
-            bad.append(f'{name}: mark {jet.mark} has no nozzle row')
-            continue
-        want = jet_models.NOZZLES[jet.file or jet.box_model]   # the gunship: the stock bomber401 it flies
-        got, size = rows[jet.mark]
-        d = want[0][1]
-        if len(got) != len(want) or any(abs(a - b) >= 0.005 for g, (w, _d) in zip(got, want) for a, b in zip(g, w)):
-            bad.append(f'{name}: {got}, the model has {[w for w, _d in want]}')
-        if abs(size[1] - d) >= 0.005 or abs(size[0] - jet_models.FLAME_LENGTH_PER_DIAMETER * d) >= 0.01:
-            bad.append(f'{name}: flame {size}, its engine {d} m across')
-    assert len(rows) >= 10, f'{len(rows)} nozzle rows parsed: the pattern no longer reads the table'
-    table = src('src/booster.cpp').split('kBomberNozzles[]={', 1)[1].split('};', 1)[0]
-    for name in ('bomber401', 'bomber501_2'):
-        m = re.search(r'\{0\.0f,(\d),\{' + vec + ',' + vec + r'\},\{' + num + ',' + num + r'\}\},\s*// JetBody::'
-                      + name + r'\n', table)
-        assert m, f'src/booster.cpp kBomberNozzles: no {name} row'
-        want = jet_models.NOZZLES[name]
-        got = [tuple(float(m.group(k)) for k in range(2 + 3 * n, 5 + 3 * n)) for n in range(int(m.group(1)))]
-        d = want[0][1]
-        if len(got) != len(want) or any(abs(a - b) >= 0.005 for g, (w, _d) in zip(got, want) for a, b in zip(g, w)):
-            bad.append(f'{name}: {got}, the model has {[w for w, _d in want]}')
-        if abs(float(m.group(9)) - d) >= 0.005 or abs(float(m.group(8)) - jet_models.FLAME_LENGTH_PER_DIAMETER * d) >= 0.01:
-            bad.append(f'{name}: flame {m.group(8)} x {m.group(9)}, its engine {d} m across')
-    assert not bad, '\n'.join(bad)
+    import rootcpk
+    booster = src('src/booster.cpp')
+    for gone in ('kJetNozzles', 'kBomberNozzles', 'kNozzleAt', 'NozzlesOf', 'ExhaustBasis', 'CarrierFlames'):
+        assert gone not in booster, f'src/booster.cpp: {gone} (a nozzle table or path of its own) is back'
+    assert not hasattr(jet_models, 'NOZZLES'), 'pylib/jet_models.py: a hand-copied NOZZLES table is back'
+    flames = booster.split('void JetFrame(', 1)[1].split('\n}\n', 1)[0]
+    smoke = booster.split('void SmokeFrame(', 1)[1].split('\n}\n', 1)[0]
+    assert 'ExhaustOf(v,ms)' in flames and 'e->world[i]' in flames, 'the flames do not take ExhaustOf\'s nozzles'
+    assert 'ExhaustOf(v,ms)' in smoke and 'e->world[i]' in smoke, 'the smoke does not take ExhaustOf\'s nozzles'
+    header = src('src/exhaust_nozzles.h')
+    prefix = re.search(r'kNozzlePrefix\[\]=L"([^"]+)"', header)
+    most = re.search(r'constexpr int kMaxNozzles=(\d+);', header)
+    assert prefix and prefix.group(1) == jet_models.NOZZLE_BONE, f'{prefix and prefix.group(1)} vs {jet_models.NOZZLE_BONE}'
+    assert most and int(most.group(1)) == jet_models.MAX_NOZZLES, f'{most and most.group(1)} vs {jet_models.MAX_NOZZLES}'
+    assert 'JetFlames(v,' in src('src/jet_flight.cpp').split('void Thrusters(', 1)[1].split('\n}\n', 1)[0], \
+        'the carrier lights its pods\' flames through JetFlames'
+    have = os.path.isfile(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk'))
+    why = gen_nozzles.check(rootcpk.Game(rootcpk.DEFAULT_GAME) if have else None)
+    assert why is None, f'src/nozzles_gen.h is stale ({why}): python tools/gen_nozzles.py'
+    exhaust = [f for f in jet_models.MODELS if f == jet_models.CARRIER_FILE or f in jet_models.NOZZLE_EXITS]
+    assert sorted(exhaust) == sorted(jet_models.MODELS), f'a plugin model without nozzles: {set(jet_models.MODELS) - set(exhaust)}'
+    if have:
+        game = rootcpk.Game(rootcpk.DEFAULT_GAME)
+        for f in [None, *jet_models.MODELS]:
+            md = jet_models._model_of(game, f)
+            want = jet_models.nozzles_for(game, jet_models.strip_nozzles(md), f) if f is not None else \
+                jet_models.exit_nozzles(jet_models.strip_nozzles(md), None)
+            jet_models.check_nozzle_bones(md, want)
+            assert len(want) == (4 if f == jet_models.CARRIER_FILE else 1 if f == 'EDF6VC_DRONE.MRAB' else 2), f'{f}: {len(want)}'
+
+
+def _nozzle_model() -> 'object':
+    """A stand-in jet model: mdl; body (skin) with a pod (skin) and a tail (skin) under it, then the object's bone; one
+    skinned triangle on each skin bone (its blend index that bone), and on the body a hexagonal exhaust rim 0.5 m across
+    the corners round (2, 1) at z -5."""
+    import struct
+    from mdb import Bone, MatParam, MatTex, Material, Mdb, Mesh, Object, VElem
+    import mdb_jet
+    ident = [1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0]
+
+    def at(x: float, y: float, z: float) -> list[float]:
+        return ident[:12] + [x, y, z, 1.0]
+    binds = [ident, ident, at(4.0, 0.0, 1.0), at(0.0, 2.0, -6.0), ident]
+    parents = [-1, 0, 1, 1, 0]
+    kinds = [0, 3, 3, 3, 2]
+    bones = [Bone(i, parents[i], -1, -1, i, 0, kinds[i], 0, int(kinds[i] == 3), 0, 0, list(binds[i]), list(binds[i]),
+                  [0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]) for i in range(5)]
+    for i in (2, 3):   # inverse binds: their binds are translations
+        bones[i].inv_bind = ident[:12] + [-binds[i][12], -binds[i][13], -binds[i][14], 1.0]
+    mdb_jet.link(bones)
+    elems = [VElem(4, 0, 0, 'position'), VElem(1, 12, 0, 'BLENDWEIGHT'), VElem(21, 28, 0, 'BLENDINDICES')]
+    import math
+    pts = [((2.0 + 0.25 * math.cos(k * math.pi / 3), 1.0 + 0.25 * math.sin(k * math.pi / 3), -5.0), 1) for k in range(6)]
+    pts += [((4.0, 0.0, 1.0), 2), ((4.5, 0.0, 1.0), 2), ((4.0, 0.5, 1.0), 2), ((0.0, 2.0, -6.0), 3), ((0.0, 2.5, -6.0), 3),
+            ((0.5, 2.0, -6.0), 3)]
+    rows = b''.join(struct.pack('<3f4f4B', *p, 1.0, 0.0, 0.0, 0.0, bone, 0, 0, 0) for p, bone in pts)
+    tris = struct.pack('<12H', 0, 1, 2, 0, 2, 3, 6, 7, 8, 9, 10, 11)
+    me = Mesh(bytes((0, 1, 1, 0)), 0, 0, 32, elems, 0, rows, tris)
+    mat = Material(0, 0, 0, 3, 'snd_BRDF_Common_Basic', [MatParam([0.5, 0.5, 0.5, 0.0], (0, 0), 'diffuse', 0x402)],
+                   [MatTex(0, 'albedo', (0,) * 5)], 3)
+    return Mdb(0x20, ['mdl', 'body', 'pod', 'tail', 'body_mesh', 'Material'], bones, [Object(4, 4, [me])], [mat], [])
+
+
+@test
+def nozzle_bones_in_a_made_model() -> None:
+    """pylib/jet_models.py with_nozzles on a stand-in model (no game): a nozzle measured on the body's exit rim (its centre,
+    its diameter, the flame FLAME_LENGTH_PER_DIAMETER of it, leaving along -z) and one on the pod (the carrier's kind) are
+    bones nozzle_0 / nozzle_1, transform only and unbounded, right after their parents' subtrees, at those binds with those
+    flames (check_nozzle_bones, also on the model written and read back); the skinned vertices on the bones the insertion
+    moved (the tail's) still on the tail; strip_nozzles gives the model back byte for byte."""
+    import math
+    import jet_models
+    from mdb import bind_world, mdb_read, mdb_write
+    md = _nozzle_model()
+    jet_models.NOZZLE_EXITS['standin'] = (((1.6, 2.4), (0.6, 1.4), (-5.1, -4.9)), False)
+    try:
+        body = jet_models.exit_nozzles(md, 'standin')
+    finally:
+        del jet_models.NOZZLE_EXITS['standin']
+    assert len(body) == 1 and body[0].parent == 'body', body
+    (c, d), = [((body[0].bind[12], body[0].bind[13], body[0].bind[14]), body[0].width)]
+    area = 3 * 3 ** 0.5 / 2 * 0.25 ** 2
+    assert max(abs(a - b) for a, b in zip(c, (2.0, 1.0, -5.0))) < 1e-6 and abs(d - 2 * (area / math.pi) ** 0.5) < 1e-4, (c, d)
+    assert abs(body[0].length - jet_models.FLAME_LENGTH_PER_DIAMETER * d) < 1e-3 and body[0].bind[8:11] == (0.0, 0.0, -1.0), body[0]
+    pod = jet_models.NozzleBone('pod', jet_models.turned_at((4.0, -0.1, -2.0)), 40.0, 12.0)
+    want = [body[0], pod]
+    out = jet_models.with_nozzles(md, want)
+    names = [out.name_of(b.name) for b in out.bones]
+    assert names == ['mdl', 'body', 'pod', 'nozzle_1', 'tail', 'nozzle_0', 'body_mesh'], names
+    jet_models.check_nozzle_bones(out, want)
+    back = mdb_read(mdb_write(out))
+    jet_models.check_nozzle_bones(back, want)
+    assert [x[0] for x in jet_models._skin_names(back)] == ['body'] * 6 + ['pod'] * 3 + ['tail'] * 3, jet_models._skin_names(back)
+    assert back.objects[0].bone == back.bone_index('body_mesh')
+    w = bind_world(back)
+    assert max(abs(a - b) for a, b in zip(w[back.bone_index('nozzle_1')][12:15], (4.0, -0.1, -2.0))) < 1e-5
+    assert mdb_write(jet_models.strip_nozzles(out)) == mdb_write(md), 'strip_nozzles does not give the model back'
 
 
 @test
@@ -1960,6 +2022,21 @@ def boarding_an_empty_aircraft_makes_its_entry() -> None:
     assert 'if(!e){j.active=false;return;}' in hover, 'HoverStep no longer needs the entry: revisit jet::Adopt'
 
 
+@test
+def aim_lines_hide_real_crews() -> None:
+    """An NPC's red aim lines are hidden whoever the NPC is (the user, 2026-10-10: "npc载具红线会显示出来"): the
+    support's crews are real soldiers (Rider::other), so AimLines reads a seat's holder through npcai.cpp NpcInSeat
+    (src/aim_line_want.h, tools/aim_line_want_check.cpp) and "an NPC drives it" through NpcDriver, not through
+    Rider::dummy alone."""
+    crew, npcai = src('src/crew.cpp'), src('src/npcai.cpp')
+    aim = crew.split('void AimLines(', 1)[1].split('\n}\n', 1)[0]
+    holder = crew.split('aimline::Holder LineHolder(', 1)[1].split('\n}\n', 1)[0]
+    assert 'aimline::Want(LineHolder(seat),' in aim and 'npcDriven=NpcDriver(vehicle)' in aim, 'AimLines: holder by NpcInSeat'
+    assert 'NpcInSeat(seat)' in holder and 'Rider::dummy' not in aim, 'LineHolder: an NPC is NpcInSeat, not the Dummy alone'
+    driver = npcai.split('bool NpcDriver(', 1)[1].split('\n}\n', 1)[0]
+    assert 'NpcInSeat(' in driver, 'NpcDriver is NpcInSeat of seat 0 (one test of "an NPC is there")'
+
+
 # The configuration modules src/plugin.cpp's LoadConfig hands EDF6VehicleCrew.ini to, and the call that does it.
 INI_MODULES = {'src/support_config.cpp': 'LoadSupportConfig(iniPath);'}
 
@@ -2663,7 +2740,18 @@ def gunship_muzzle_wired() -> None:
     assert f'kGunshipSgo[]=L"app:/object/{make_jets.SHELL_STOCK.lower()}"' in bay, 'src/jet_bay.cpp kGunshipSgo is SHELL_STOCK'
     fired = re.findall(r'Shell\((kGunshipSgo|gun\.sgo),(?:gunshipReady|gun\.ready),v,(\w+),', bay)
     assert len(fired) == 3 and all(f == 'muzzle' for _sgo, f in fired), f'the gunship fires from its muzzle: {fired}'
-    assert len(re.findall(r'GunshipMuzzle\(v,', bay)) == 4, 'GunshipMuzzle for the side guns, their sight line and both shells'
+    assert len(re.findall(r'GunshipMuzzle\(j,v,', bay)) == 4, 'GunshipMuzzle for the side guns, their sight line and both shells'
+    # The round's path against the flying airframe (the user, 2026-10-10: 「炮舰机的机炮有可能会打在自己身上」): every gunship
+    # round is held by GunshipClears before it is made, its rounds' speeds and fall are make_jets.py's (the shell's held to
+    # the stock file by check_gunship_muzzle), and the side guns' lead speeds are their rounds'.
+    for gun, round_ in (('kCannon', (make_jets.CANNON_SPEED, 0.0, 'kCannonHit')), ('kGatling', (make_jets.GATLING_SPEED, 0.0, 'kGatlingHit')),
+                        ('kShell', (make_jets.SHELL_SPEED, make_jets.SHELL_FALL, 'kShellHit'))):
+        m = re.search(gun + r'\{' + num + ',' + num + r',(\w+)\}', head)
+        assert m and float(m.group(1)) == round_[0] and float(m.group(2)) == round_[1] and m.group(3) == round_[2], f'src/gunmuzzle.h {gun}'
+    assert len(re.findall(r'if\(!GunshipClears\(j,v,', bay)) == 3, "GunshipClears before the side guns' round and both shells"
+    assert 'static_assert(kCannonSpeed==gunmuzzle::kCannon.speed*60.0f' in bay, "the side guns lead by their rounds' speed"
+    muzzle_fn = bay.split('bool GunshipMuzzle(', 1)[1].split('\n}\n', 1)[0]
+    assert 'gunmuzzle::Launch(' in muzzle_fn, 'GunshipMuzzle is gunmuzzle::Launch'
     assert re.search(r'MapRay\(muzzle,at,hit\)', bay), 'the NPC cannon looks along the line its round flies'
     make = bay.split('unsigned char* ShellMake(', 1)[1].split('\n}\n', 1)[0]
     assert 'if(ifcWaitOk)Put<std::int32_t>(ifc,kIfcWait,0);' in make, 'ShellMake zeroes the first-round wait'
@@ -2673,6 +2761,14 @@ def gunship_muzzle_wired() -> None:
     assert 'add_executable(gunship_muzzle_check EXCLUDE_FROM_ALL tools/gunship_muzzle_check.cpp)' in cmake
     checks = cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0]
     assert 'gunship_muzzle_check' in checks.split(), 'CTest runs gunship_muzzle_check'
+    # A plugin jet's own round never on its own airframe (src/ownround.h), whatever the bullet's owner bit: the collector's
+    # hook asks Judge with the candidate's body id, Publish gives every jet its own body ids, the offline check runs.
+    hooks = src('src/jet_hooks.cpp')
+    assert 'ownround::Judge(flights.jet,flights.count,owner,target,body)' in hooks, 'jet_hooks.cpp Passes asks ownround::Judge'
+    assert 'Passes(owner,target,body)' in hooks and 'OwnBodies(static_cast<const unsigned char*>(j.ref.obj),c);' in hooks
+    assert 'own round kept off its airframe' in hooks, 'the own round is logged'
+    assert 'add_executable(own_round_check EXCLUDE_FROM_ALL tools/own_round_check.cpp)' in cmake
+    assert 'own_round_check' in checks.split(), 'CTest runs own_round_check'
     assert '炮舰机的炮口' in src('README.md'), 'README.md: the gunship muzzle'
 
 
@@ -3447,6 +3543,7 @@ def pack_install_upgrade_uninstall() -> None:
             enter(patched(at_build, build_files=_at_build_files))
             enter(patched(describe, table_ids=lambda mods: []))
             enter(patched(installer, bundle_dir=lambda: bundle, check_loader=lambda game: None,
+                          find_edf41=lambda game: None,
                           stack_weapons=lambda game: {}, retire_weapons=lambda game: True,
                           ask=lambda prompt: answers.pop(0)))
             enter(patched(call_weapons, recover=lambda game: False, install=lambda game, files: {},
@@ -3463,7 +3560,7 @@ def pack_install_upgrade_uninstall() -> None:
                 ledger.Ledger(game).put(gen.OWNER, 'OBJECT/EDF6TR_FAKE.SGO', b'range object')
                 return []
             enter(patched(gen, install=mission, grand_battle=lambda plan: plan))
-            enter(patched(e5c, build=lambda game, campaign=True, test_range=True: _e5c_stub()))   # its own install / remove / check run for real
+            enter(patched(e5c, build=lambda game, campaign=True, test_range=True, root41=None: _e5c_stub()))   # its own install / remove / check run for real
             enter(patched(e5c.modfiles, refuse_while_running=lambda *a, **k: None))   # the real game may be open
             for group in buildcache.GROUPS:
                 made = (b'mac', {'FAKE_PIECE.MAC': b'piece'}) if group == 'bigmap' else \
@@ -4289,6 +4386,41 @@ def play_area_wired() -> None:
 
 
 @test
+def damage_stats_wired() -> None:
+    """The damage statistics (src/damagestats.cpp, README 伤害统计, docs/damage-stats-re.md): its ini keys are read,
+    range-checked, shipped and documented; the addresses it hooks are the doc's; it never touches the damage call
+    0x54A586 (subcarrier.cpp's DamageCallReaches needs it stock); with the game present, 0x547C30's head is the bytes
+    the detour copies and each call it redirects is an E8 to the function it expects; it is installed, reset with the
+    mission, built, and its offline checks are wired."""
+    plugin, ini, readme, doc = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md'), src('docs/damage-stats-re.md')
+    code, cmake, mission = src('src/damagestats.cpp'), src('CMakeLists.txt'), src('src/mission.cpp')
+    for key in ('DamageStats', 'DamageStatsKey'):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
+    assert 'FixInt("DamageStatsKey"' in plugin, 'DamageStatsKey is not range-checked'
+    consts = {m.group(1): int(m.group(2), 16) for m in re.finditer(r'\b(k\w+)=(0x[0-9A-F]+)\b', code)}
+    for name in ('kDamage', 'kSpawn', 'kSpawnCall', 'kSettle', 'kArea'):
+        assert f'{consts[name]:#X}'.replace('0X', '0x') in doc, name
+    settle = [int(v, 16) for v in re.search(r'kSettleCalls\[\]=\{([^}]*)\}', code).group(1).split(',')]
+    area = [int(v, 16) for v in re.search(r'kAreaCalls\[\]=\{([^}]*)\}', code).group(1).split(',')]
+    assert settle == [0x232702, 0x23426F] and area == [0x23250E, 0x5425D6, 0x5427BF], (settle, area)
+    assert '0x54A586' not in re.sub(r'//.*', '', code), 'the damage call 0x54A586 must stay stock (subcarrier.cpp DamageCallReaches)'
+    assert 'InstallDamageStats();' in plugin and 'ResetDamageStats();' in mission and 'src/damagestats.cpp' in cmake
+    assert 'add_executable(damage_stats_check' in cmake and 'damage_stats_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0]
+    assert 'StatsScenes(dir);' in src('tools/hud_view.cpp') and 'crew::StatsPage();' in src('tools/map_command_runtime_check.cpp')
+    import rootcpk
+    dll = os.path.join(rootcpk.DEFAULT_GAME, 'EDF.dll')
+    if os.path.exists(dll):
+        import edfre
+        head = bytes(int(b, 16) for b in re.findall(r'0x[0-9A-F]+', re.search(r'kDamageHead\[\]=\{(.*?)\};', code, re.S).group(1)))
+        assert edfre.img[consts['kDamage']:consts['kDamage'] + len(head)] == head, 'the damage function head'
+        for site, target in [(consts['kSpawnCall'], consts['kSpawn'])] + [(s, consts['kSettle']) for s in settle] + \
+                            [(s, consts['kArea']) for s in area]:
+            assert edfre.img[site] == 0xE8, hex(site)
+            rel = int.from_bytes(edfre.img[site + 1:site + 5], 'little', signed=True)
+            assert site + 5 + rel == target, (hex(site), hex(site + 5 + rel), hex(target))
+
+
+@test
 def map_wired() -> None:
     """The map view (src/map.cpp, README 功能 17, docs/camera-re.md §8): its ini keys are read, range-checked, shipped and
     documented; the EDF.dll addresses it patches are the doc's, and with the game present its code signatures are the
@@ -4350,11 +4482,12 @@ def map_wired() -> None:
             want = bytes(int(b, 16) for b in re.findall(r'0x[0-9A-F]+', re.search(rf'{arr}\[\]=\{{(.*?)\}};', code, re.S).group(1)))
             assert edfre.img[at:at + len(want)] == want, (arr, hex(at))
 
-    # Closed by a key: the hold stays until every closing key is let go (the closing B is no seat switch, no stock B action).
+    # Closed by a key: the hold stays until every closing key is let go (the closing B is no seat switch, no stock B action;
+    # the damage statistics' key, which shuts the map from its page, drains the same way).
     frame = code.split('bool Frame(unsigned char* human)', 1)[1].split('\n}\n', 1)[0]
-    shut = frame.index('Close(close ? "Esc / B" : "the map key");')
+    shut = frame.index('Close(close ? "Esc / B" : stats ? "the stats key" : "the map key");')
     assert shut < frame.index('game.draining=true;holds.store(true);') < frame.index(
-        'if(k.map || k.esc || k.padMap || k.padClose)return true;') < frame.index('if(!game.open) {'), 'map: the closing key drains'
+        'if(k.map || k.esc || k.padMap || k.padClose || k.stats)return true;') < frame.index('if(!game.open) {'), 'map: the closing key drains'
     assert 'if(game.draining){game.draining=false;holds.store(false);}' in code.split('void Close(const char* why)', 1)[1].split('\n}', 1)[0]
     # Every key the plugin reads gives way to the map.
     for rel in ('src/heli.cpp', 'src/highcam.cpp', 'src/payload.cpp', 'src/playerjet.cpp', 'src/seatswitch.cpp', 'src/turretcam.cpp',
@@ -4378,7 +4511,9 @@ def map_wired() -> None:
     assert at_readers == ['designate.cpp'], f'a new EDF6AutoTurret key reader: make it give way to the map ({at_readers})'
     readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'GetAsyncKeyState' in src(f'src/{f}')]
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
-                                      'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp', 'sightzoom.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp', 'sightzoom.cpp',
+                                      'debug_spawn.cpp']), f'a new key reader: make it give way to the map ({readers})'
+    assert 'InFront() && !MapHoldsKeys()' in src('src/debug_spawn.cpp'), 'the debug spawn keys give way to the map'
 
     assert 'InstallMap();' in plugin and 'ResetMap();' in mission and 'src/map.cpp' in cmake
     assert 'EXCLUDE_FROM_ALL tools/map_cam_check.cpp' in cmake and '#include "../src/map_cam.h"' in src('tools/map_cam_check.cpp')
@@ -4864,7 +4999,10 @@ def soft_edge_wired() -> None:
     # KeepIn every frame (its state follows the jet); only a gun dive at a ground point inside the soft box keeps its
     # line (KeepIn on a copy, 2026-10-09: bent by the edge the dive never came onto the lead).
     soft_edge = flight.split('void SoftEdge(Jet& j,const float* pos,float* want) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'airbound::KeepIn(soft,pos,j.m.vel,r,react,dive ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);' in soft_edge
+    assert 'airbound::KeepIn(soft,pos,j.m.vel,r,react,dive || line ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);' in soft_edge
+    # And the paratroop plane on its pass line (ferry_line.h, 2026-10-10): its line's ends stand off the map with room to
+    # turn (support_entry.h PassEnd); the soft edge turned it back the moment it was made. Withdrawing, the edge's again.
+    assert 'const bool line=j.ferry && j.mode!=Mode::withdraw;' in soft_edge, 'a ferry on its line keeps it'
     assert 'const bool dive=j.mode==Mode::dive && j.t.target && !j.t.flyer && airbound::Depth(soft,j.t.aim)>=0.0f;' in soft_edge, \
         'only a dive at a ground point inside the soft box is spared the edge'
     assert 'airbound::CapClimb(' in flight
@@ -4890,9 +5028,148 @@ def soft_edge_wired() -> None:
         assert re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme, key
 
 @test
+def support_arrives_from_off_the_map() -> None:
+    """The support's arrival (2026-10-10, the user: 「我叫的支援直接凭空出现了」; docs/feedback-2026-10-10-support-arrival.md).
+    The game-memory halves the offline tests cannot run: the move-area clamp held off as the hull is made (before the stock
+    input's first clamp, which runs before the plugin's frame step) on every machine, and given back to a helicopter once
+    inside; far rendering on the vehicle's AnimationModel node (its own vtable 0x17C4030 over umbra::Object's); the air
+    entry planned off the map in the physical square past the draw distance; the paratroop plane on its pass line from its
+    first frame, its stick by StickStarts, and on to the line's end when it is out; the ground entries the caller cannot
+    see first."""
+    spawn, heli, crew = src('src/jet_spawn.cpp'), src('src/heli.cpp'), src('src/crew.cpp')
+    prep = spawn.split('unsigned char* PrepareSupportAircraft(', 1)[1].split('\n}\n', 1)[0]
+    made = prep.index('CreateJet(body,matrix,&param,variant)')
+    inset = prep.index('Put<float>(vehicle,kAreaInset,kNoInset);')
+    assert made < inset < prep.rindex('return vehicle;'), 'the clamp held off as the hull is made, before it is handed back'
+    assert prep.index('At<float>(vehicle,kAreaInset)') < inset, 'its own inset kept to give back'
+    # The clamp runs in the stock input, before the plugin's frame step: JetFrame's own write came a frame late.
+    step = crew[crew.index('nextInput[I](vehicle,hasInput,a3,a4);'):]
+    assert step.index('nextInput[I](vehicle,hasInput,a3,a4);') < step.index('Guarded(kStepHeli,&HeliStep,v);')
+    frame = heli.split('void HeliFrame(unsigned char* vehicle) noexcept {', 1)[1]
+    assert frame.lstrip().startswith('SupportAircraftFrame(vehicle);'), 'every machine, any pilot: before any branch returns'
+    arrival = spawn.split('void SupportAircraftFrame(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'Put<float>(v,kAreaInset,a.stockInset);a.held=false;' in arrival and 'MoveAreaBox(lo,hi)' in arrival
+    assert 'kAnimationModelVtable=0x17C4030' in spawn and 'vt!=image+kAnimationModelVtable && vt!=image+kRenderNodeVtable' in spawn
+    assert 'if(!At<const void*>(node,kNodeUmbra))return Far::later;' in spawn, 'no Umbra object yet: setBitmask would get a null this'
+    plan = src('src/airstrike.cpp').split('support::Refusal PlanAirSupport(', 1)[1].split('\n}\n', 1)[0]
+    assert 'const support::Reach reach{ArrivalHalf(),NearDrawDistance()};' in plan
+    assert 'std::fabs(at[0])>reach.half || std::fabs(at[2])>reach.half' in plan, 'each formation slot inside the physical square'
+    assert 'at[0]<area.lo[0]' not in plan, 'no slot is held to the map any more'
+    assert 'SupportPassTurn(spec)' in plan
+    crewh = src('src/crew.h')
+    assert 'inline float ArrivalHalf() noexcept { const float h=HavokHalf(),w=WorldHalf();return (h<w ? h : w)-kArrivalRoom; }' in crewh
+    assert 'Cfg().viewDistance>kStockFarClip' in crewh
+    dispatch = src('src/support_dispatch.cpp')
+    board = dispatch.split('bool BoardAirborne(Deployment& deployed,bool networked) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'JetFerry(vehicle,plan.target,plan.units[i].matrix+8)' in board, 'the plane on its line from its first frame'
+    assert 'JetFerry(' not in dispatch.split('bool Assign(Deployment& deployed) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'NearDrawDistance(),[&](const float* p) noexcept {' in dispatch and 'MapRay(eye,top,hit)>=0.0f' in dispatch
+    transport = src('src/transport.cpp')
+    drop = transport.split('void DropFrame(Drop& d,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'transport::StickStarts(along,across,speed,aboard,kChuteBleed)' in drop and 'kDropRadius' not in transport
+    assert 'if(!JetFerryDone(plane))JetWithdrawNow(plane,"paratroopers out");' in drop
+    jet = src('src/jet.cpp')
+    assert 'if(j->ferryGone)j->reap=true;' in jet
+    cm = src('CMakeLists.txt')
+    assert 'add_test(NAME ferry_line COMMAND ferry_line_test)' in cm and 'add_test(NAME support_entry COMMAND support_entry_test)' in cm
+
+@test
+def air_chase_wired() -> None:
+    """The flyers are fought (src/air_chase.h, the user 2026-10-10: "飞行怪在打无人机，但是无人机和一堆npc竟然没有攻击蜜蜂",
+    and, correcting the first fix, which had the gunship take no flyer and the charge drones and their carrier none over a
+    200 m ceiling, given up and shunned when outrun: they are to attack them). No jet's target pick leaves a flyer out; a
+    charge drone (and its carrier) lets go only of a current target out of its range; a charge drone climbs as fast as it
+    flies at a flyer (at half that the flyers kept above it to the ceiling) and its run goes through airchase::Step (held
+    off its target it goes off within its charge's blast, farther out it keeps after it); the gunship's side guns fire at a
+    flyer, its shell only at the ground; the NPC soldiers rank targets in reach first (npc_logic.h PickTarget with their
+    longest reach); the log has the target's height; the offline check is a CTest test."""
+    combat, jet, npcai, bay = src('src/jet_combat.cpp'), src('src/jet.cpp'), src('src/npcai.cpp'), src('src/jet_bay.cpp')
+    visit = combat.split('void VisitTarget(void* ctx,const void* object,const float* p) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert "k.j->cmd.order!=Order::none || k.charges) && Dot(d,d)>k.range*k.range" in visit, 'a charge drone: its current target in range'
+    assert 'const bool flyer=Flies(object,p,k.ms);' in visit
+    for gone in ('Shunned', 'Allowed', 'kChargeCeiling', 'groundOnly', 'UnderCeiling', 'giveUp', 'ShunList'):
+        assert gone not in combat + jet + src('src/air_chase.h') + src('src/jet_internal.h'), f'{gone}: a flyer left out again'
+    charges = combat.split('bool Charges(const Jet& j) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'k.weapon==Weapon::charge' in charges and 'Preloaded(own.body)' in charges
+    assert 'Pick pick{&j,pos,anchor,range,ms,Charges(j),' in combat
+    assert 'bottom[3]={root[0],root[1]-kFlyerDepth,root[2]}' in combat, 'the ground under a high flyer is found'
+    assert 'ty=%.0f' in combat, 'the target height in the jet log'
+    assert 'climb=j.t.target && j.t.flyer ? kind.cruise : kind.cruise*0.5f;' in jet, 'a charge drone at a flyer: its full climb'
+    assert 'for(int i=0;i<3;++i)goal[i]=j.t.aim[i]+j.t.tgtVel[i]*kChargeLead;' in jet, 'a charge drone leads its target'
+    assert 'constexpr float kChargeLead=2.0f;' in jet and 'wantV[1]=Clamp((goal[1]-pos[1])*0.5f,-climb,climb);' in src('src/jet_flight.cpp'), \
+        "the lead is 1 / Hover's vertical gain"
+    assert 'airchase::Step(j->t.closing,j->t.target,d,kind.trigger,held,walled,ms)' in jet
+    assert 'const float d=Len(to),held=std::fmin(kind.trigger*kTriggerHeld,kind.blast);' in jet
+    gun = bay.split('bool GunAtTarget(Jet& j,SideGun g,', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(!gun.ready || !j.t.target)return false;' in gun and 'flyer' not in gun, 'the side guns at a flyer too'
+    fire = bay.split('void GunshipFire(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert fire.index('GunsAtTarget(j,v,pos,ms,"its NPC crew");') < fire.index('if(j.t.flyer || ms-j.shells.gunAt<kGunshipGapMs)return;')
+    crew = bay.split('bool CrewShell(unsigned char* v,float dt,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(!j->t.target)return false;' in crew and 'const bool shell=!j->t.flyer && ' in crew
+    assert 'PickTarget(s,eye,anchor,o.leash+engage,LongestReach(a))' in npcai and 'npc::PickTarget(world.enemies,' in npcai
+    cm = src('CMakeLists.txt')
+    assert 'add_executable(air_chase_check EXCLUDE_FROM_ALL tools/air_chase_check.cpp)' in cm
+    assert 'air_chase_check' in cm.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0].split(), 'air_chase_check runs in CTest'
+    assert '#include "../src/air_chase.h"' in src('tools/air_chase_check.cpp')
+    # The charges' blast radii are their generated charges' (pylib/vcobjects.py jet_guns).
+    vc = src('pylib/vcobjects.py')
+    blast = float(re.search(r"'EDF6VC_BLAST_CHARGE\.SGO': \([\d.]+, ([\d.]+)\)", vc).group(1))
+    doll = float(re.search(r"'EDF6VC_DOLL_CHARGE\.SGO': \([\d.]+, ([\d.]+)\)", vc).group(1))
+    kinds = src('src/jet_internal.h')
+    assert f'kBlastTrigger,false,Body::blast,{blast:.1f}f}}' in kinds, blast
+    assert f'kDollTrigger,true,Body::doll,{doll:.1f}f}}' in kinds, doll
+
+@test
 def installer_recovery_regressions() -> None:
     from test_installer_recovery import run_checks
     run_checks()
+
+
+@test
+def installer_menu_8_opens_the_loadouts() -> None:
+    """The pre-battle loadouts (squads, each soldier's class and colour, each tank's and jet's pylons) have their own
+    main-menu entry (the user, 2026-10-10: “战斗外配置npc和挂载好像没做入口”: it was only menu 7's `l`, and
+    menu 7's line named neither): 8 goes straight to support_loadout.edit and saves the ini the way menu 7 does."""
+    import tempfile
+    sys.path.insert(0, os.path.join(ROOT, 'tools'))
+    import installer
+    import modfiles
+    import support_config
+    import support_loadout
+    with tempfile.TemporaryDirectory() as game:
+        plugins = os.path.join(game, 'Mods', 'Plugins')
+        os.makedirs(plugins)
+        ini = os.path.join(plugins, installer.PLUGIN + '.ini')
+        with open(os.path.join(ROOT, 'EDF6VehicleCrew.ini'), 'rb') as f:
+            original = f.read()
+        with open(ini, 'wb') as f:
+            f.write(original)
+        prompts: list[str] = []
+        opened: list[str] = []
+
+        def ask(prompt: str) -> str:
+            prompts.append(prompt)
+            return '8' if len(prompts) == 1 else ''
+
+        def loadouts(text: str, _ask) -> str:
+            opened.append('loadout')
+            return text + 'SupportPreset_SQUAD=ranger\n'
+
+        def menu_7(text: str, _ask) -> str:
+            opened.append('support')
+            return text
+
+        saved = (installer.ask, installer.pick_game, modfiles.game_running, support_loadout.edit, support_config.edit)
+        installer.ask, installer.pick_game, modfiles.game_running = ask, lambda: game, lambda: True
+        support_loadout.edit, support_config.edit = loadouts, menu_7
+        try:
+            assert installer.main([]) == 0
+        finally:
+            installer.ask, installer.pick_game, modfiles.game_running, support_loadout.edit, support_config.edit = saved
+        assert '8 战前配置' in prompts[0] and '挂载' in prompts[0], prompts[0]
+        assert opened == ['loadout'], opened
+        with open(ini, 'rb') as f:
+            assert f.read() == original + b'SupportPreset_SQUAD=ranger\n'
 
 
 # ---------------------------------------------------------------- the EDF5 campaign (tools/make_edf5_campaign.py)
@@ -4987,11 +5264,15 @@ def edf5_campaign_build() -> None:
                 rootcpk.default().read(r.items[1].split('app:/', 1)[1], 'MISSION.BVM')
             for rel in txt.values():
                 assert len(sgo.read(files[rel])[1]['table']) == len(rows), rel
-            names = [f.name for f in mdb.rab_read(files[image]).files]
-            assert names == [e5c.thumb_name(r.items[2]) for r in rows], pack.tag
+            thumbs = mdb.rab_read(files[image]).files
+            assert [f.name for f in thumbs] == [e5c.thumb_name(r.items[2]) for r in rows], pack.tag
+            own = e5c.edf5_thumbs()   # each mission shows EDF5's own thumbnail, not a stand-in on its map
+            for r, f in zip(rows, thumbs):
+                path = r.items[2].split(f'{e5c.SCRIPTS}/', 1)[1]
+                assert f.stored == own[e5c.thumb_name(path).upper()].stored, (pack.tag, path)
             assert dsgo.compact(dsgo.parse(files[listed])) == files[listed]
     assert counts == {'main': 110, 'dlc1': 11, 'dlc2': 14}, counts
-    assert {x[1] for x in p['skipped']} == {'DLC/DM015', 'DLC/DM018', 'DLC/DM019', 'DLC/DM020'}, p['skipped']
+    assert {x[1] for x in p['skipped'] if x[0] != e5c.PACK41.group} == {'DLC/DM015', 'DLC/DM018', 'DLC/DM019', 'DLC/DM020'}, p['skipped']
 
 
 @test
@@ -5113,7 +5394,7 @@ def edf5_campaign_interrupted_reinstall() -> None:
         modfiles.atomic_write(e5c.rel_path(root, e5c.CONFIG), other)
         e5c.install(root, e5c.build(root))
         real_plan = e5c.plan
-        shorter = lambda r: {**real_plan(r), 'rows': real_plan(r)['rows'][:-1]}   # an update that writes other bytes
+        shorter = lambda r, root41=None: {**real_plan(r, root41), 'rows': real_plan(r, root41)['rows'][:-1]}   # an update that writes other bytes
         with patched(e5c, plan=shorter):
             update = e5c.build(root)
         with patched(e5c.modfiles, atomic_write=_failing_write(e5c.PACKS[0].txt['CN'])):
@@ -5160,7 +5441,8 @@ def edf5_campaign_refusals() -> None:
         os.remove(e5c.rel_path(root, list_rel))
         os.remove(os.path.join(root, 'Mods', e5c.MANIFEST))
         real_plan = e5c.plan
-        with patched(e5c, plan=lambda r: {**real_plan(r), 'rows': [x for x in real_plan(r)['rows'] if x['group'] != 'dlc2']}):
+        with patched(e5c, plan=lambda r, root41=None: {**real_plan(r, root41),
+                                                  'rows': [x for x in real_plan(r, root41)['rows'] if x['group'] != 'dlc2']}):
             _e5c_refuses(root, 'an empty pack')
         assert not e5c.installed(root), 'a refusal wrote a manifest'
 
@@ -5199,12 +5481,49 @@ def edf5_campaign_plugin_sites() -> None:
 
 
 @test
+def edf5_campaign_thumbnails() -> None:
+    """Every EDF5 mission in the text has EDF5's own thumbnail in THUMBS (no game needed: the file is committed), each a
+    440x220 DXT1 DDS like EDF6's; pick_thumbs gives a mission its own pack's one (EDF5's, or EDF4.1's for the 4.1 story:
+    both games have an M007), the range its stock 'thumb', a mission THUMBS lacks the stock one on its map, else
+    M046's."""
+    import mdb
+    import struct
+    own = e5c.edf5_thumbs()
+    text = json.load(open(e5c.TEXT, encoding='utf-8'))
+    paths = [m['path'] for group in ('main', 'dlc1', 'dlc2') for m in text[group]]
+    names = {e5c.thumb_name(x).upper() for x in paths}
+    assert len(paths) == 139 and set(own) == names, sorted(set(own) ^ names)
+    for name, f in own.items():
+        d = f.data
+        assert d[:4] == b'DDS ' and struct.unpack_from('<II', d, 12) == (220, 440) and d[84:88] == b'DXT1', name
+
+    stock = {n.upper(): mdb.RabFile(n, 0, 0, n.encode()) for n in ('EDF6_M046.dds', 'EDF6_M045.dds', 'EDF6_M010.dds')}
+    with open(e5c.EDF41_THUMBS, 'rb') as f:
+        own41 = {x.name.upper(): x for x in mdb.rab_read(f.read()).files}
+    assert own41['M007.DDS'].stored != own['M007.DDS'].stored   # the two games' M007: why own_thumbs keys by pack
+    rows = [{'group': 'main', 'key': 'EDF5_OLD_SCRIPT/M001', 'path': 'M001', 'map': 'X.MAC'},
+            {'group': 'dlc1', 'key': 'EDF5_OLD_SCRIPT/DLC/DM011', 'path': 'DLC/DM011', 'map': None},
+            {'group': 'main', 'key': 'EDF5_OLD_SCRIPT/M999', 'path': 'M999', 'map': 'X.MAC'},   # not in THUMBS: its map's
+            {'group': 'main', 'key': 'EDF5_OLD_SCRIPT/M998', 'path': 'M998', 'map': None},      # nothing: M046's
+            {'group': 'range', 'key': 'EDF6/RANGE', 'map': None, 'thumb': 'EDF6/M045'},
+            {'group': 'main', 'key': 'EDF5_OLD_SCRIPT/M007', 'path': 'M007', 'map': None},
+            {'group': 'edf41', 'key': 'EDF41/M007', 'path': 'M007', 'map': None}]
+    out = e5c.pick_thumbs(rows, e5c.own_thumbs(), stock, {'X.MAC': 'EDF6/M010'})
+    assert [f.name for f in out] == [e5c.thumb_name(r['key']) for r in rows]
+    assert [f.stored for f in out] == [own['M001.DDS'].stored, own['DLC_DM011.DDS'].stored, b'EDF6_M010.dds',
+                                       b'EDF6_M046.dds', b'EDF6_M045.dds', own['M007.DDS'].stored,
+                                       own41['M007.DDS'].stored]
+
+
+@test
 def edf5_campaign_shipped() -> None:
     """Both the frozen installer and source-tools archive must carry the campaign's required text."""
     rel = src('tools/build_release.py')
     assert '"edf5campaign", "missions.json")}{seps}edf5campaign' in rel
     assert "os.path.join(sys._MEIPASS, 'edf5campaign', 'missions.json')" in src('tools/make_edf5_campaign.py')
     assert os.path.isfile(os.path.join(ROOT, 'edf5campaign', 'missions.json'))
+    assert '"edf5campaign", "thumbnails.rab")}{seps}edf5campaign' in rel
+    assert e5c.THUMBS == os.path.join(os.path.dirname(e5c.TEXT), 'thumbnails.rab')
     workflow = src('.github/workflows/build.yml')
     assert re.search(r'foreach \(\$f in git [^\n]*ls-files [^\n)]*\bedf5campaign\b', workflow), \
         'source-tools archive omits the campaign text required by make_edf5_campaign.TEXT'
@@ -5578,6 +5897,10 @@ def edf5_weapons_stack_real() -> None:
         cut = {k for k in built if pw.BY_ID[k].source != 'edf6'}
         return {k: v for k, v in built.items() if k not in cut}, {**why, **{k: 'Unavailable: test' for k in cut}}
 
+    def refused(game_root: str, stock):  # noqa: ANN001, ANN202
+        built, why = edf6_only(game_root, stock)
+        return built, {k: v.replace('Unavailable', 'Unsupported') for k, v in why.items()}
+
     with _stock_only_mods(), patched(pw, build=edf6_only):
         bare = cw.stack(games[0])
     without = cw.row_ids(bare[cw.TABLE])
@@ -5607,9 +5930,15 @@ def edf5_weapons_stack_real() -> None:
         with patched(cw, base=installed, _mods=ours), patched(pw, build=edf6_only):
             kept = cw.stack(games[0])
             retired, _ = cw.retire(games[0], False)
+        with patched(cw, base=installed, _mods=ours), patched(pw, build=refused):
+            refused_out = cw.stack(games[0])
     assert cw.row_ids(kept[cw.TABLE]) == with_edf5, 'a built row an earlier install wrote was not kept'
     assert not any(rel in kept for p in pw.PORTS if p.source != 'edf6' for rel in pw.files(p)), \
         'a kept file was rewritten'
+    # Refused by the conversion, not waiting for a game: the earlier install's SGO (an older conversion's) is not kept.
+    after = cw.row_ids(refused_out[cw.TABLE])
+    assert all(after[with_edf5.index(p.id)] == (p.id if p.source == 'edf6' else pw.retired_id(p.id)) for p in pw.PORTS), \
+        'a weapon the conversion refuses kept the row an earlier install gave it'
     have = cw.row_ids(retired[cw.TABLE])
     assert all(have[with_edf5.index(p.id)] == pw.retired_id(p.id) for p in pw.PORTS)
 
@@ -5756,6 +6085,303 @@ def edf41_weapons_convert_real() -> None:
         strings = [x for x in _dsgo_strings(r) if x in cues41]
         assert all(x in cues6 for x in strings), f'{p.id}: {sorted(set(strings) - cues6)} play nothing in EDF6'
 
+
+
+@test
+def ported_weapon_locators_fit() -> None:
+    """pylib/edf5port.py fit_locators: a locator whose node the weapon's EDF6 model lacks (4.1's root 'mdl', which
+    EDF6 renamed after the model) moves to the model's one root, the block otherwise as the game lays it
+    (mab_legacy.mab_set_strings: strings re-laid in UTF-16 order, the same bytes mab.mab_write gives for the moved
+    block); nothing changes when every node is a bone; no muzzle, or a missing node and no single root: Unsupported.
+    Without this a 4.1 Wing Diver weapon has no muzzle in EDF6 and its first shot divides by zero (EDF.dll 0x69AA20)."""
+    import struct
+    from dataclasses import replace
+    import edf5port
+    import mab
+    import mab_legacy
+    sgo_block = b'SGO\0' + struct.pack('<7I', 0x102, 0, 0x20, 0, 0x20, 0, 0x20)   # every game block's records have one
+    loc = mab.Locator('muzzle', 'mdl', 2, (0.0, 0.1, 1.5, 1.0), (0.05, 0.05, 0.25, 1.0), (0.0, 0.0, 0.0, 1.0), 0, sgo_block)
+    grip = replace(loc, name='grip', node='barrel', pos=(0.0, -0.1, 0.2, 1.0))
+    aim = replace(loc, name='z_aim', pos=(0.0, 0.2, 1.6, 1.0))
+    block = mab.mab_write(mab.Mab((0xF, 0x83, 0), [0, 1, 2], [loc, grip, aim]))
+
+    def doc_of(b: bytes) -> dsgo.Document:
+        root = dsgo.Node([])
+        root.set('animation_model', dsgo.Node([dsgo.Node(['app:/Weapon/w.rab', 'w.mdb']), 'app:/Weapon/w.cas',
+                                               dsgo.Blob(b, 2)]))
+        return dsgo.Document(root, [])
+
+    def block_of(d: dsgo.Document) -> bytes:
+        return d.root.get('animation_model').items[2].data
+
+    d = doc_of(block)
+    edf5port.fit_locators(d, [('w_model', -1), ('barrel', 0), ('polymesh', 0)])
+    moved = mab.Mab((0xF, 0x83, 0), [0, 1, 2], [replace(loc, node='w_model'), grip, replace(aim, node='w_model')])
+    assert block_of(d) == mab.mab_write(moved), 'the moved block is not laid out as the game lays one'
+    assert [n for _name, n, _at in vc.mab_muzzles(block_of(d))] == ['w_model', 'barrel', 'w_model']
+    assert struct.unpack_from('<H', block_of(d), 0x12)[0] == len(block_of(d)) - struct.unpack_from('<I', block_of(d), 0x20)[0]
+    d = doc_of(block)
+    edf5port.fit_locators(d, [('mdl', -1), ('barrel', 0)])
+    assert block_of(d) == block, 'a block whose nodes are all bones changed'
+    d = doc_of(block)
+    edf5port.fit_locators(d, [('w_model', -1), ('barrel', 0), ('slide', 1)], {'muzzle': 'slide', 'grip': 'w_model'})
+    assert [n for _name, n, _at in vc.mab_muzzles(block_of(d))] == ['slide', 'barrel', 'w_model'], \
+        'a preferred bone did not win over the root (or moved a locator whose node is a bone)'
+    d = doc_of(block)
+    edf5port.fit_locators(d, [('a', -1), ('b', -1), ('barrel', 0)], {'muzzle': 'a', 'z_aim': 'b'})
+    assert [n for _name, n, _at in vc.mab_muzzles(block_of(d))] == ['a', 'barrel', 'b'], 'preferred bones, no root'
+    for bones, why in (([('a', -1), ('b', -1), ('barrel', 0)], 'two roots'),
+                       ([], 'no bones')):
+        try:
+            edf5port.fit_locators(doc_of(block), bones)
+        except edf5port.Unsupported:
+            pass
+        else:
+            raise AssertionError(f'{why}: a missing node was not refused')
+    try:
+        edf5port.fit_locators(doc_of(mab.mab_write(mab.Mab((0xF, 0x83, 0), [0, 1, 2], []))), [('w', -1)])
+    except edf5port.Unsupported:
+        pass
+    else:
+        raise AssertionError('a block without a muzzle was taken (EDF.dll divides by the muzzles found)')
+    cut = bytearray(block)   # its records said to run past its end: followed unchecked, a struct.error ends the install
+    struct.pack_into('<I', cut, 0x18, len(block) + 0x1000)
+    try:
+        edf5port.fit_locators(doc_of(bytes(cut)), [('w_model', -1)])
+    except edf5port.Unsupported:
+        pass
+    else:
+        raise AssertionError('a block mab_layout refuses was followed')
+    try:
+        mab_legacy.mab_set_strings(block, {0x24: 'x'})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('mab_set_strings wrote over a field that is not a string offset')
+
+
+
+@test
+def ported_weapons_held_as_edf6() -> None:
+    """pylib/edf5port.py hold_as on hand-made weapons: with EDF6 weapons of its class on its model, the weapon takes the
+    hand and holding animations most of them have, of custom_parameter only the animation (element 0; a Weapon_Sub's
+    named form, the call it makes, untouched), and the MAB block of one whose locators include all of its own; without
+    one of its class, only a holding animation no EDF6 weapon uses takes the template's; its numbers never change."""
+    import edf5port
+    import struct
+    import mab
+
+    def block(*names: str) -> bytes:
+        sgo_block = b'SGO\0' + struct.pack('<7I', 0x102, 0, 0x20, 0, 0x20, 0, 0x20)
+        return mab.mab_write(mab.Mab((0xF, 0x83, 0), [0, 1, 2], [
+            mab.Locator(n, 'body', 2, (0.0, 0.1 * k, 1.0, 1.0), (0.05, 0.05, 0.25, 1.0), (0.0, 0.0, 0.0, 1.0), 0, sgo_block)
+            for k, n in enumerate(names)]))
+
+    def weapon(cls: str, hand: str, base: str, recoil: str, mab_block: bytes, damage: float = 10.0) -> dsgo.Node:
+        r = dsgo.Node([])
+        r.set('xgs_scene_object_class', cls)
+        r.set('ModelConstraint', dsgo.Node([hand]))
+        r.set('BaseAnimation', base)
+        r.set('custom_parameter', dsgo.Node([recoil, 0.0, 0.0, 1.0]))
+        r.set('AmmoDamage', damage)
+        r.set('animation_model', dsgo.Node([dsgo.Node(['app:/Weapon/w.rab', 'w.mdb']), 'c', dsgo.Blob(mab_block, 2)]))
+        return r
+
+    ours_block, theirs_block = block('01'), block('01', 'IK')
+    peers = [weapon('Weapon_BasicShoot', 'arms_l', 'assault', 'assault_recoil1', theirs_block, 99.0) for _ in range(2)]
+    peers.append(weapon('Weapon_BasicShoot', 'arms_r', 'assault', 'assault_recoil1', theirs_block, 99.0))
+    known = {f: {'assault', 'assault_recoil1'} for f in edf5port.HOLD_NAMES}
+    doc = dsgo.Document(weapon('Weapon_BasicShoot', 'arms_r', 'assault2', 'assault_recoil3', ours_block), [])
+    edf5port.hold_as(doc, peers, peers[0], known)
+    r = doc.root
+    assert r.get('ModelConstraint').items == ['arms_l'], 'not the hand most of EDF6\'s weapons on the model use'
+    assert r.get('BaseAnimation') == 'assault' and r.get('custom_parameter').items == ['assault_recoil1', 0.0, 0.0, 1.0]
+    assert r.get('AmmoDamage') == 10.0, 'a number of the weapon\'s own changed'
+    assert r.get('animation_model').items[2].data == theirs_block, 'not the developers\' MAB block (a superset of ours)'
+    # a block whose locators the developers' do not all carry stays ours
+    doc = dsgo.Document(weapon('Weapon_BasicShoot', 'arms_r', 'assault', 'assault_recoil1', block('01', 'extra')), [])
+    edf5port.hold_as(doc, peers, peers[0], known)
+    assert doc.root.get('animation_model').items[2].data == block('01', 'extra')
+    # no peer of its class: only the names no EDF6 weapon uses take the template's
+    template = weapon('Weapon_Throw', 'arms_l', 'assault', 'assault_recoil1', theirs_block)
+    doc = dsgo.Document(weapon('Weapon_Throw', 'arms_r', 'bag', 'assault_recoil1', ours_block), [])
+    edf5port.hold_as(doc, peers, template, known)
+    assert doc.root.get('BaseAnimation') == 'assault' and doc.root.get('ModelConstraint').items == ['arms_r']
+    # a Weapon_Sub's named custom_parameter (the call it makes) is never taken over
+    sub = weapon('Weapon_Sub', 'arms_r', 'assault', 'assault_recoil1', ours_block)
+    named = dsgo.Node(['vehicle_call', 1.0], {0: 'motion', 1: 'speed'})
+    sub.set('custom_parameter', named)
+    peer = weapon('Weapon_Sub', 'arms_r', 'assault', 'assault_recoil1', theirs_block)
+    peer.set('custom_parameter', dsgo.Node(['other_call', 2.0], {0: 'motion', 1: 'speed'}))
+    doc = dsgo.Document(sub, [])
+    edf5port.hold_as(doc, [peer], peer, known)
+    assert doc.root.get('custom_parameter').items == ['vehicle_call', 1.0], 'a Weapon_Sub\'s call was taken over'
+
+@test
+def ported_weapon_locators_fit_real() -> None:
+    """With the games, every ported weapon (EDF5's, EDF4.1's) as installed:
+      - is held as EDF6's own weapons on its model (edf5port.hold_as; user 2026-10-10, a 4.1 weapon's hands looked
+        wrong): its MAB block is a developer block on its model wherever one carries all its locators, its hand and
+        holding animations the set most of EDF6's weapons of its class on its model have, and no holding animation
+        name is one no EDF6 weapon uses;
+      - hangs every locator of its MAB on a bone of its EDF6 model (EDF.dll finds no muzzle otherwise,
+        ported_weapon_locators_fit).
+    And fit_locators alone (hold_as off, as for a model no EDF6 weapon uses) moves a missing node where EDF6's own
+    weapons on that model hang a locator of that name (the Hercules sniper's on 'body', not the root), the strings then
+    the developers' where a developer block is laid out alike."""
+    import collections
+    import edf5port
+    import mab_legacy
+    import ported_weapons as pw
+    import rootcpk
+    edf6 = rootcpk.DEFAULT_GAME
+    if not os.path.isfile(os.path.join(edf6, 'Root.cpk')):
+        print('skip  ported_weapon_locators_fit_real: needs EDF6 installed')
+        return
+    g6 = rootcpk.Game(edf6)
+    stock = lambda rel: g6.read(*rel.split('/'))   # noqa: E731
+    roots = {g.key: pw.game_root(g, edf6) for g in pw.GAMES}
+
+    def strings(b: bytes) -> dict[int, str]:
+        lay = mab_legacy.mab_layout(b)
+        return {at: mab_legacy._text_at(b, to) for at, _base, to in lay.offsets if to >= lay.strings_at}
+
+    def locs(b: bytes) -> set[str]:
+        return {loc for loc, _node in mab_legacy.mab_locator_nodes(b)}
+
+    weapons = tuple(n for d, n in g6.cpk.index if d.upper() == 'WEAPON' and n.upper().endswith('.SGO'))
+    models = pw.Models(stock, weapons)
+    hold, fit = edf5port.hold_as, edf5port.fit_locators
+
+    def build(p: object, held: bool, fitted: bool) -> dsgo.Node:
+        if not held:
+            edf5port.hold_as = lambda *a: None   # noqa: E731
+        if not fitted:
+            edf5port.fit_locators = lambda *a: None   # noqa: E731
+        try:
+            return dsgo.parse(pw.build_sgo(p, stock, roots[p.game], models)).root
+        finally:
+            edf5port.hold_as, edf5port.fit_locators = hold, fit
+
+    built = adopted = held_fields = moved = like = preferred = 0
+    for p in pw.PORTS:
+        try:
+            r = build(p, True, True)
+        except pw.Unavailable:
+            continue
+        built += 1
+        if 'animation_model' not in r.names.values():
+            continue
+        doc = dsgo.Document(r, [])
+        b = r.get('animation_model').items[2].data
+        bones = {n for n, _parent in models.bones(doc)}
+        assert {n for _l, n in mab_legacy.mab_locator_nodes(b)} <= bones, f'{p.id}: locator node(s) not in its model'
+        for f in edf5port.HOLD_NAMES:
+            if f in r.names.values() and edf5port._first_text(r.get(f)) is not None:
+                assert edf5port._first_text(r.get(f)) in models.known[f], f'{p.id} {f}: an animation EDF6 has not'
+        raw = build(p, False, False)
+        raw_block = raw.get('animation_model').items[2].data
+        peers = models.peers(doc)
+        carriers = [q.get('animation_model').items[2].data for q in peers
+                    if locs(raw_block) <= locs(q.get('animation_model').items[2].data)]
+        if carriers:
+            adopted += 1
+            assert b in carriers, f'{p.id}: not the developers\' MAB block for its model'
+        alike = [q for q in peers if q.get('xgs_scene_object_class') == r.get('xgs_scene_object_class')]
+        if alike:
+            held_fields += 1
+            def held(q: dsgo.Node) -> tuple:
+                return tuple(edf5port._key(q.get(f)) if f in q.names.values() else None for f in edf5port.HOLD)
+            best = collections.Counter(held(q) for q in alike).most_common(1)[0][0]
+            donor = next(q for q in alike if held(q) == best)
+            for f in edf5port.HOLD:
+                if f not in donor.names.values():
+                    continue
+                if f == 'custom_parameter':
+                    if edf5port._first_text(r.get(f)) is not None and not r.get(f).names:
+                        assert r.get(f).items[0] == donor.get(f).items[0], f'{p.id}: recoil not EDF6\'s'
+                    continue
+                assert edf5port._key(r.get(f)) == edf5port._key(donor.get(f)), \
+                    f'{p.id} {f}: not as most of EDF6\'s weapons on its model hold it'
+        # fit_locators alone, hold_as off
+        unheld = build(p, False, True).get('animation_model').items[2].data
+        if unheld == raw_block:
+            continue
+        moved += 1
+        want = models.preferred(doc)
+        for (loc, old), (_loc, new) in zip(mab_legacy.mab_locator_nodes(raw_block), mab_legacy.mab_locator_nodes(unheld)):
+            if old not in bones and want.get(loc) in bones:
+                preferred += 1
+                assert new == want[loc], f'{p.id} {loc}: moved to {new}, EDF6\'s weapons on its model use {want[loc]}'
+        same_len = [q.get('animation_model').items[2].data for q in peers
+                    if len(q.get('animation_model').items[2].data) == len(unheld)]
+        if same_len:
+            like += 1
+            assert strings(unheld) in [strings(d) for d in same_len], f'{p.id}: strings not the developers\' block\'s'
+    if not built:
+        print('skip  ported_weapon_locators_fit_real: no ported weapon could be built')
+        return
+    assert adopted > 150 and held_fields > 100 and moved and like and preferred, \
+        (f'{adopted} developer blocks taken, {held_fields} held as EDF6\'s, {moved} fitted, {like} beside a developer '
+         f'block, {preferred} placed as the developers do: this check is (nearly) empty')
+    print(f'  {built} weapons built: {adopted} on the developers\' MAB block, {held_fields} held as EDF6\'s weapons '
+          f'on their model; fit_locators alone: {moved} moved, {like} against the developers\' strings, {preferred} '
+          'locators where the developers put them')
+
+
+@test
+def mab_strings_relaid_as_the_game() -> None:
+    """pylib/mab_legacy.py mab_set_strings lays the string area as EDF6's exporter does (_string_area: Shift-JIS order,
+    each string in its Shift-JIS bytes + 1 UTF-16 units): every weapon MAB of EDF6's Root.cpk, re-laid with nothing
+    renamed, comes back byte for byte (so a renamed block is the game's own layout too)."""
+    import mab_legacy
+    import rootcpk
+    edf6 = rootcpk.DEFAULT_GAME
+    if not os.path.isfile(os.path.join(edf6, 'Root.cpk')):
+        print('skip  mab_strings_relaid_as_the_game: needs EDF6 installed')
+        return
+    g6 = rootcpk.Game(edf6)
+    count = kanji = 0
+    for folder, name in g6.cpk.index:
+        if folder.upper() != 'WEAPON' or not name.upper().endswith('.SGO'):
+            continue
+        r = dsgo.parse(g6.read(folder, name)).root
+        if 'animation_model' not in r.names.values():
+            continue
+        b = r.get('animation_model').items[2].data
+        assert mab_legacy.mab_set_strings(b, {}) == b, f'{name}: its MAB laid out again differs'
+        count += 1
+        kanji += any(not loc.isascii() for loc, _node in mab_legacy.mab_locator_nodes(b))
+    assert count > 1000 and kanji > 100, f'{count} blocks, {kanji} with a kanji name: this check is empty'
+
+
+
+@test
+def ported_weapons_registry_current() -> None:
+    """Every converted weapon the registries keep ('weapon': EDF5's and EDF4.1's, so the install needs neither game)
+    is what pylib/edf5port.py makes of that game's file today, where the game is installed: a converter change without
+    tools/make_edf5_weapons.py / make_edf41_weapons.py run again fails here. Every port not EDF6's own carries one."""
+    import edf5port
+    import gamedir
+    import ported_weapons as pw
+    import rootcpk
+    import sgo
+    lacking = [p.id for p in pw.PORTS if p.source != 'edf6' and p.weapon is None]
+    assert not lacking, f'converted at install time, needing the game: {lacking[:5]}'
+    checked = 0
+    for g in pw.GAMES:
+        root = gamedir.find_other(g.install, near=rootcpk.DEFAULT_GAME)
+        if not root:
+            print(f'skip  ported_weapons_registry_current ({g.name}): not installed')
+            continue
+        game = rootcpk.Game(root)
+        for p in pw.PORTS:
+            if p.game != g.key or p.source == 'edf6':
+                continue
+            members = sgo.read(game.read('WEAPON', p.sgo))[1]
+            assert dsgo.dump(g.convert(members, pw._names(p)).root) == p.weapon, f'{p.id}: registry out of date'
+            checked += 1
+    print(f'  {checked} registry weapons equal to a conversion now')
 
 def _dsgo_strings(v: dsgo.Value) -> list[str]:
     if isinstance(v, str):
@@ -5933,6 +6559,31 @@ def legacy_parsers_refuse_malformed_input() -> None:
         except ValueError:
             continue
         raise AssertionError(f'{name}: not refused')
+
+
+@test
+def mdb_legacy_half2_widened() -> None:
+    """EDF4.1 map parts' half2 vertex elements (format 24: NW_HILLYCITY_LIGHT's station models; no EDF6 model has one)
+    become float2 (12) with the same values: the vertex grows by 4 per such element, the elements keep their order
+    (a half2 before another element moves that one), every other byte is kept, and a mesh without one is untouched."""
+    import struct
+    import mdb
+    import mdb_legacy
+    uv = [(0.75, 0.76806640625), (33.25, -1.1064453125)]   # exact halves (so exact in float)
+    pos = [(1.0, 2.0, 3.0, 1.0), (-6.6015625, 6.0, -35.0, 1.0)]
+    raw = b''.join(struct.pack('<2e', *u) + struct.pack('<4e', *p) for u, p in zip(uv, pos))
+    me = mdb.Mesh(bytes(4), 0, 0, 12, [mdb.VElem(24, 0, 0, 'texcoord'), mdb.VElem(7, 4, 0, 'position')], 0, raw, b'')
+    mdb_legacy._check_mesh(me)
+    mdb_legacy._widen_half2(me)
+    assert me.vsize == 16 and [(e.name, e.fmt, e.offset) for e in me.elems] == [('texcoord', 12, 0), ('position', 7, 8)]
+    assert me.nverts == 2
+    for i in range(2):
+        assert struct.unpack_from('<2f', me.vdata, i * 16) == uv[i]
+        assert struct.unpack_from('<4e', me.vdata, i * 16 + 8) == pos[i]
+    mdb_legacy._check_mesh(me)
+    plain = mdb.Mesh(bytes(4), 0, 0, 8, [mdb.VElem(7, 0, 0, 'position')], 0, struct.pack('<4e', *pos[0]), b'')
+    mdb_legacy._widen_half2(plain)
+    assert plain.vsize == 8 and plain.vdata == struct.pack('<4e', *pos[0])
 
 
 @test
@@ -6132,6 +6783,244 @@ def edf41_objects_install() -> None:
             assert {obj for obj, _why in skipped} == users and shared not in files, skipped
 
 
+# EDF4.1's mission maps (plan P6): the maps EDF4.1's 98 missions load (pylib/map_legacy.py converts their MAC).
+EDF41_MISSION_MAPS = ('IG_CAVE01', 'IG_HORNETCAVE01', 'IG_WRECKTOWN01', 'NW_HILLYCITY_LIGHT', 'NW_KASENJIKI01',
+                      'NW_KOUSOUBLD01', 'NW_SINSUIKOUEN', 'NW_SOUKOGAI01', 'NW_UNDERGROUND01', 'SK_CRATER01',
+                      'SK_HEIGEN02', 'SK_KAIGAN01', 'SK_SANGAKU01', 'SK_SANGAKU02', 'SK_STEPMOUNTAIN01',
+                      'SK_VALLEY01')
+
+
+def _legacy_games() -> tuple[dict, dict, dict] | None:
+    """(EDF4.1, EDF5, EDF6) archives by path, or None off a developer's machine (CI has no game)."""
+    import make_edf41_objects as m
+    import rootcpk
+    steam = os.path.dirname(rootcpk.DEFAULT_GAME)
+    roots = [os.path.join(steam, 'Earth Defense Force 4.1'), os.path.join(steam, 'EARTH DEFENSE FORCE 5'),
+             rootcpk.DEFAULT_GAME]
+    if not all(os.path.isfile(os.path.join(r, 'Root.cpk')) for r in roots):
+        return None
+    g41, g5, g6 = (m.archives(r) for r in roots)
+    return g41, g5, g6
+
+
+def _game_read(games: dict, rel: str) -> bytes:
+    return games[rel.upper()].read(*rel.rsplit('/', 1))
+
+
+def _rmpa_points(tree: object) -> list[tuple]:
+    """Every point of a decoded RMPA (rmpa_legacy.decode5 / decode6): (name, id, position, facing), in order."""
+    out: list[tuple] = []
+    if isinstance(tree, dict):
+        if 'pos' in tree and 'face' in tree:
+            out.append((tree['name'], tree['id'], tuple(tree['pos']), tuple(tree['face'])))
+        for v in tree.values():
+            out += _rmpa_points(v)
+    elif isinstance(tree, list):
+        for v in tree:
+            out += _rmpa_points(v)
+    return out
+
+
+@test
+def map_legacy_real() -> None:
+    """pylib/map_legacy.py on the games: where EDF6 kept an EDF5 map's content its re-laid MAPO / MAPB is EDF6's byte for
+    byte (IG_CAVE501/503/504 MAPO; IG_CAVE503 and IG_TESTLIGHTMAP (EDF5's) MAPB with EDF6's empty scene slots), and every EDF4.1
+    mission map converts to a MAC bigmap reads and verifies, one MAPO entry per MAPB record. The other pairs differ in
+    content EDF6 changed (docs/edf41-map-mac-format.md)."""
+    import bigmap
+    import map_legacy
+    games = _legacy_games()
+    if games is None:
+        return
+    g41, g5, g6 = games
+
+    def members(mac: bytes) -> dict[str, bytes]:
+        return dict(bigmap.Marc.parse(mac).files)
+
+    for name in ('IG_CAVE501', 'IG_CAVE503', 'IG_CAVE504'):
+        new = members(map_legacy.mac_from_legacy(_game_read(g5, f'MAP/{name}.MAC')))
+        assert new['map.mapo'] == members(_game_read(g6, f'MAP/{name}.MAC'))['map.mapo'], name
+    for name, games_from in (('IG_CAVE503', g5), ('IG_TESTLIGHTMAP', g5)):
+        new = members(map_legacy.mac_from_legacy(_game_read(games_from, f'MAP/{name}.MAC'), 'edf6'))
+        assert new['map.mapb'] == members(_game_read(g6, f'MAP/{name}.MAC'))['map.mapb'], name
+    for name in EDF41_MISSION_MAPS:
+        out = map_legacy.mac_from_legacy(_game_read(g41, f'MAP/{name}.MAC'))
+        assert not bigmap.verify(out), (name, bigmap.verify(out)[:3])
+        m = members(out)
+        assert bigmap.MapO(m['map.mapo']).ent_n == bigmap.MapB(m['map.mapb']).rec_n, name
+
+
+@test
+def rmpa_legacy_real() -> None:
+    """pylib/rmpa_legacy.py on the games. EDF6 ships EDF5's missions converted (MISSION/EDF5_OLD_SCRIPT): 65 of the 146
+    come out of rmpa_from_legacy byte for byte, the rest differ only in content EDF6's editor changed
+    (docs/edf41-map-rmpa-format.md), and every output is a full EDF6 RMPA. EDF6's own files pass through unchanged. All
+    of EDF4.1's mission RMPAs (EDF5's MISSION/EDF4.1) and its mission maps' map.rmpa convert keeping every point's
+    name, id, position and facing."""
+    import map_legacy
+    import rmpa_legacy
+    games = _legacy_games()
+    if games is None:
+        return
+    g41, g5, g6 = games
+    pairs = [k for k in g6 if k.startswith('MISSION/EDF5_OLD_SCRIPT/') and k.endswith('.RMPA')
+             and 'MISSION/' + k[len('MISSION/EDF5_OLD_SCRIPT/'):] in g5]
+    assert len(pairs) == 146, len(pairs)
+    same = 0
+    for k in pairs:
+        e6 = _game_read(g6, k)
+        out = rmpa_legacy.rmpa_from_legacy(_game_read(g5, 'MISSION/' + k[len('MISSION/EDF5_OLD_SCRIPT/'):]))
+        assert rmpa_legacy.is_edf6(out), k
+        assert rmpa_legacy.rmpa_from_legacy(e6) == e6, k
+        same += out == e6
+    assert same == 65, same
+
+    def kept(old: bytes) -> bytes:
+        new = rmpa_legacy.rmpa_from_legacy(old)
+        assert rmpa_legacy.is_edf6(new)
+        before, after = _rmpa_points(rmpa_legacy.decode5(old)[0]), _rmpa_points(rmpa_legacy.decode6(new)[0])
+        assert sorted(before) == sorted(after), 'a point was lost or changed'
+        return new
+
+    missions = [k for k in g5 if k.startswith('MISSION/EDF4.1/') and k.endswith('/MISSION.RMPA')]
+    assert len(missions) == 126, len(missions)
+    for k in missions:
+        kept(_game_read(g5, k))
+    for name in EDF41_MISSION_MAPS:
+        kept(dict(map_legacy.parse_marc_lenient(_game_read(g41, f'MAP/{name}.MAC'))[1])['map.rmpa'])
+
+
+
+@test
+def edf41_maps_cover_the_scripts() -> None:
+    """Every map and weather EDF4.1's bundled mission scripts load (Map('app:/Map/<map>.mac', '<weather>')) that
+    tools/edf41_maps.py installs has its weather pair: a weather left out would make the game look for a MAE that is not
+    there. The SK_* maps are the ones not installed yet (their heightfields), and the story pack skips their missions."""
+    import re
+    import edf41_maps
+    import make_edf5_campaign as c
+    used: dict[str, set[str]] = {}
+    for m in c.edf41_text()['missions']:
+        strings = c.utf16_strings(c.edf41_script(m['id'], 'MISSION.BVM'))
+        for i, s in enumerate(strings):
+            hit = re.fullmatch(r'(?i)app:/Map/(\w+)\.mac', s.strip())
+            if hit and i + 1 < len(strings):
+                used.setdefault(hit.group(1).upper(), set()).add(strings[i + 1].strip().upper())
+    assert set(edf41_maps.MAPS) <= set(used), sorted(set(edf41_maps.MAPS) - set(used))
+    for name, (_donor, weathers) in edf41_maps.MAPS.items():
+        assert used[name] <= set(weathers), (name, sorted(used[name] - set(weathers)))
+    assert {n for n in used if n not in edf41_maps.MAPS} <= {n for n in used if n.startswith('SK_')} | {'NW_TESTMAP'}
+
+
+@test
+def edf41_maps_install() -> None:
+    """tools/edf41_maps.py on a stand-in game (conversion stubbed): writes every file of every map as edf41maps', a
+    second install converts nothing it already converted from the same EDF4.1 files, a map one of whose files another
+    mod placed is left out and that file untouched, no EDF4.1 writes nothing, removal deletes what it wrote."""
+    import tempfile
+    import edf41_maps
+    import ledger
+
+    class Fake:
+        def fingerprint(self, name: str) -> list[int]:
+            return [len(name), 1]
+
+    converted: list[str] = []
+
+    def convert(name: str, _e41: object, _e6: object) -> dict[str, bytes]:
+        converted.append(name)
+        return {rel: rel.encode() for rel in edf41_maps.files_of(name)}
+
+    with tempfile.TemporaryDirectory() as game, \
+            patched(edf41_maps, convert=convert, Archives=lambda _root: Fake()):
+        os.makedirs(os.path.join(game, 'Mods'))
+        written, skipped = edf41_maps.install(game, None)
+        assert not written and [n for n, _ in skipped] == list(edf41_maps.MAPS) and not converted
+        assert not os.listdir(os.path.join(game, 'Mods'))
+        written, skipped = edf41_maps.install(game, 'edf41')
+        every = [rel for name in edf41_maps.MAPS for rel in edf41_maps.files_of(name)]
+        assert not skipped and converted == list(edf41_maps.MAPS) and len(written) == len(set(every))
+        led = ledger.Ledger(game)
+        assert all(led.owners(rel) == [edf41_maps.OWNER] for rel in every)
+        converted.clear()
+        assert edf41_maps.install(game, 'edf41') == ([], []) and not converted, converted
+        edf41_maps.remove(game)
+        other = os.path.join(game, 'Mods', 'MAP', 'IG_CAVE01.RAB')
+        os.makedirs(os.path.dirname(other), exist_ok=True)
+        with open(other, 'wb') as f:
+            f.write(b'another mod')
+        written, skipped = edf41_maps.install(game, 'edf41')
+        assert [n for n, _ in skipped] == ['IG_CAVE01'] and 'IG_CAVE01' not in converted
+        with open(other, 'rb') as f:
+            assert f.read() == b'another mod'
+        edf41_maps.remove(game)
+        assert os.path.exists(other) and not os.path.exists(os.path.join(game, 'Mods', 'MAP', 'NW_SOUKOGAI01.MAC'))
+
+
+@test
+def edf41_maps_real() -> None:
+    """tools/edf41_maps.py on the games: IG_CAVE01 converts to the files files_of names; the MAC re-parses with every
+    member kept and its map.rmpa in EDF6's format; the weather pair and navmesh are the donor's bytes."""
+    import bigmap
+    import edf41_maps
+    import rmpa_legacy
+    games = _legacy_games()
+    if games is None:
+        return
+    import rootcpk
+    steam = os.path.dirname(rootcpk.DEFAULT_GAME)
+    e41 = edf41_maps.Archives(os.path.join(steam, 'Earth Defense Force 4.1'))
+    e6 = edf41_maps.Archives(rootcpk.DEFAULT_GAME)
+    files = edf41_maps.convert('IG_CAVE01', e41, e6)
+    assert list(files) == edf41_maps.files_of('IG_CAVE01')
+    members = dict(bigmap.Marc.parse(files['MAP/IG_CAVE01.MAC']).files)
+    assert set(members) == {'map.mapb', 'elec_wire_default.erb', 'map.rmpa', 'map.mapo'}
+    assert rmpa_legacy.is_edf6(members['map.rmpa'])
+    assert files['MAP/IG_CAVE01_FINE.MAE'] == e6.read('IG_CAVE501_FINE.MAE')
+    assert files['MAP/IG_CAVE01.NAVMESH.HKT'] == e6.read('IG_CAVE501.NAVMESH.HKT')
+
+
+
+@test
+def edf41_story_pack_real() -> None:
+    """EDF4.1's story pack from the real games (make_edf5_campaign PACK41): with EDF4.1 given it comes after the test
+    range with the next content id, so no installed pack's id moves; an offline and an online mode on its own save
+    file; one row per mission whose map and objects will be there (the 9 maps tools/edf41_maps.py converts), each
+    row's script written under Mods/MISSION/EDF41/<id>/ as bundled, its thumbnail 4.1's picture of it; a mission on a
+    map not converted (SK_*) or naming an object not ported is left out with the reason. Without EDF4.1, no pack."""
+    import dsgo
+    import edf41_maps
+    import gamedir
+    import mdb
+    import rootcpk
+    import sgo
+    if not _e5c_have_game():
+        return
+    root41 = gamedir.find_other(gamedir.EDF41, near=rootcpk.DEFAULT_GAME)
+    if root41 is None:
+        return
+    files, content, p = e5c.build(rootcpk.DEFAULT_GAME, root41=root41)
+    plain, plain_content, _ = e5c.build(rootcpk.DEFAULT_GAME)
+    assert (content.campaign, content.range) == (plain_content.campaign, plain_content.range) and not plain_content.edf41
+    assert content.edf41 == content.range + 1
+    modes = sgo.plain(sgo.read(files[e5c.CONFIG])[1]['ModeList'])
+    ours = [m for m in modes if m[e5c.M_CONTENT] == content.edf41]
+    assert [(m[e5c.M_ONLINE], m[e5c.M_TYPE], m[e5c.M_MST]) for m in ours] == [(0, 0, 'E41M.MST'), (1, 1, 'E41M.MST')]
+    rows41 = [r for r in p['rows'] if r['group'] == e5c.PACK41.group]
+    assert len(rows41) >= 30 and {r['map'] for r in rows41} <= {f'{n}.MAC' for n in edf41_maps.MAPS}
+    assert any(r['path'] == 'M126' for r in rows41)
+    skipped = {path: why for g, path, why in p['skipped'] if g == e5c.PACK41.group}
+    assert skipped and all('缺少' in why for why in skipped.values())
+    listed = dsgo.parse(files[e5c.PACK41.list]).root.get('table').items
+    assert [r.items[2] for r in listed] == [f'EDF41/{r["path"]}' for r in rows41]
+    for r in rows41:
+        for name in r['files']:
+            assert files[f'MISSION/EDF41/{r["path"]}/{name}'] == e5c.edf41_script(r['path'], name)
+    with open(e5c.EDF41_THUMBS, 'rb') as f:
+        own = {x.name.upper(): x.stored for x in mdb.rab_read(f.read()).files}
+    thumbs = mdb.rab_read(files[e5c.PACK41.image]).files
+    assert [t.stored for t in thumbs] == [own[f'{r["path"].upper()}.DDS'] for r in rows41]
+    assert all(e5c.managed(rel) for rel in files)
 @test
 def cas_hollow_real() -> None:
     """pylib/cas_graft.hollow on the real E515 CAS (UFO301's under UfoSmall515: 4.1's UFO has no CAS): the same size,

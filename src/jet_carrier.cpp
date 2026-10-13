@@ -338,8 +338,18 @@ void DollFree(int i) noexcept {
     } __except(FaultLog("JET doll delete",GetExceptionInformation())){}
 }
 
-void DollFrame(int i,const unsigned char* v,float clear) noexcept {
-    if(i>=0 && i<kMaxJets && dolls[i].obj)DollPose(i,v,clear);
+// Every doll posed under its drone, once a game frame (jet.cpp Sweep), whoever moves the drone this frame: the plugin's
+// NPC flight (JetFrame), the player's (playerjet_board.inc HoverDone), its catch or hail, or nobody (no pilot, the
+// player got out, a copy flown on another machine), the drone then pushed, rammed or falling. The doll is posed by the
+// drone's own matrix, never by the flight step: posed from the flight steps (each called DollFrame) a drone moved
+// without one (bumped, falling with its seat empty, 2026-10-09 "人偶无人机，被碰到的时候会把人偶和无人机分开")
+// left its doll hanging where the last step put it.
+void DollsFollow() noexcept {
+    for(int i=0;i<kMaxJets;++i) {
+        if(!dolls[i].obj || !Alive(jets[i].ref))continue;
+        const unsigned char* const v=jets[i].Vehicle();
+        DollPose(i,v,GroundClearance(reinterpret_cast<const float*>(v+kPosition)));
+    }
 }
 
 void ResetDolls() noexcept {

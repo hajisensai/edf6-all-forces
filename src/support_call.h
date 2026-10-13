@@ -93,7 +93,30 @@ bool SupportCallPreset(int index,SupportLoadout* out) noexcept;
 bool SupportCallComposedAt(int index,const float* target,const SupportLoadout* load,wchar_t* note,std::size_t capacity) noexcept;
 // The catalog entry's stable configuration key (EDF6VehicleCrew.ini SupportDisabled / SupportAircraftCount_<key>).
 const wchar_t* SupportCallKey(int index) noexcept;
+// A map / radio call of entry `index`; the sea rescue entry is refused here and by SupportCallComposedAt (only the
+// rescue's own trigger asks for it).
 bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept;
+// The entries the map's support bar offers and cycles (mapcmd.cpp): every one but the sea rescue, the catalog's last.
+int SupportMenuCount() noexcept;
+// The sea rescue (2026-10-09, the user: 「给救援加一个支援目录项，走正规的呼叫支援流程」): the catalog's last entry,
+// after the airdrops, so every older index keeps its meaning on the wire. heli.cpp's trigger (a local player on foot in
+// the sea, a submarine carrier out) asks for it at the swimmer through the same request path as a map call: offline /
+// a one-player world's host plans it here, any other online machine through the host (support_net, kExtSeaRescue on
+// every peer). One 410 made on the carrier's deck or in the air at the edge, its real pilot and a door gunner made
+// inside it and seated at once; its other door seat is left for the swimmer. Same return and note as SupportCallAt.
+int SupportRescueCatalog() noexcept;
+bool SupportRescueAt(const float* target,wchar_t* note,std::size_t capacity) noexcept;
+// heli.cpp's half of the rescue (the dispatcher calls these, game thread):
+//  - a rescue deployment was made on this machine with every crew seated (`target`: its plan's, the request's point,
+//    identical on every machine). `flown`: this machine runs its flight (offline, the host), else it is a peer's copy.
+//    `requester`: where it is flown, the player who asked (support_net.h SupportTransactionRequester; empty: unknown,
+//    the heli leaves at once).
+//  - this machine's rescue request ended without a heli (refused, timed out, cancelled, interrupted, not made): `why`.
+struct ObjRef;
+void RescueHeliDeployed(unsigned char* vehicle,const float* target,bool flown,const ObjRef& requester) noexcept;
+void RescueRequestFailed(const wchar_t* why) noexcept;
+//  - the ground helicopters stood on this mission and none stands on now (helipad.h; heli.cpp): takeoff points.
+int RescueTakeoffPads(float (*out)[3],int most) noexcept;
 void SupportDispatchTick() noexcept;
 void ResetSupportDispatch() noexcept;
 void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept;

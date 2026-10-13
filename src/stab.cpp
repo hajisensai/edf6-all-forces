@@ -20,9 +20,10 @@
 //    (Blacker 403, Titan 404, the single-seat tank 601, the E551 505) and of the Kepler (603), the Grape's turret (Car),
 //    the gunner seats of the tanks and the mechs; not the artillery (402, a 603 with an indirect-fire weapon), the drill,
 //    the bikes, the mechs' pilots, the Depth Crawler, the Maser, the aircraft.
-//  - Which seats: a rider aboard (the player, an NPC, the dummy rider of an NPC-crewed vehicle) or an empty one
-//    EDF6AutoTurret steers this frame (common/edf/aimlink.h V2 Steers); not one another machine runs (the aim's +0xC0:
-//    the network's input, docs/nix-re.md §3; a remote rider). An EDF6AutoTurret older than the V3 link (its feed-forward
+//  - Which seats: a player aboard, an AI rider (an NPC, the dummy rider of an NPC-crewed vehicle) or an empty seat that
+//    EDF6AutoTurret steers this frame (common/edf/aimlink.h V2 Steers); an AI rider's gun the stock aim 0x65F6F0 lays is
+//    left stock (Wanted); not one another machine runs (the aim's +0xC0: the network's input, docs/nix-re.md §3; a
+//    remote rider). An EDF6AutoTurret older than the V3 link (its feed-forward
 //    would count the hull's turn twice: it predates the stabilizer) keeps the seats it may steer stock.
 //  - Which hull the drawn gun is seen in (stab.h Probe), measured per seat from the muzzle bones: the mount (a gunner's
 //    gun may sit on the main turret) and whether the pose takes a hull that moved on after the aim step (then the
@@ -189,6 +190,12 @@ bool Wanted(const Entry& e,const unsigned char* seat) noexcept {
     const Rider r=SeatRider(seat);
     if(r==Rider::none && AutoTurretSteers(e.v,e.seat)!=1)return false;
     if(r!=Rider::none && edf::RemoteRider(At<const unsigned char*>(seat,kSeatRider)))return false;
+    // An AI rider's gun (a real NPC soldier or the dummy rider) that EDF6AutoTurret does not turn is laid by the stock
+    // seat aim 0x65F6F0, a closed loop that measures its error against the world target every frame: the hull's turn is
+    // already in its command. Holding the gun on top of it counts that turn twice, the command saturates and hunts
+    // (measured 2026-10-10, the Titan's NPC driver: stick +-1 flipping, "on target" never once in 768 aims, no round in
+    // a minute; with GunStabilizer=0 the same seat fired). Such a seat is left stock, as the old EDF6AutoTurret's are.
+    if(r!=Rider::none && !AnyPlayerIn(seat) && AutoTurretSteers(e.v,e.seat)!=1)return false;
     return !LeftToOldAutoTurret(e.v,e.seat);
 }
 

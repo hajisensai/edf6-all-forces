@@ -51,4 +51,8 @@ unsigned char* SpawnSupportVehicle(SupportVehicleKind kind,SupportCrewMode mode,
                                    const float* heading,const void* owner,const wchar_t* variant=nullptr) noexcept;
 // Rollback only a hull returned above, while the caller still owns its live reference, before delivery.
 bool DeleteSupportVehicle(unsigned char* vehicle) noexcept;
+// The independent setup step above, alone: reads the just-created vehicle's mission_setup (0x62D6E0), applies it
+// (slot 46) and destroys the temporary setup by its variant (0x1765220). False when either step failed. The caller has
+// checked those natives (debug_spawn.cpp) and that `vehicle` is a VehicleBase; it deletes the vehicle on false.
+bool ApplyMissionSetup(unsigned char* vehicle) noexcept;
 }  // namespace crew

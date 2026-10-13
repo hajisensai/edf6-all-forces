@@ -29,7 +29,7 @@ class Call:
                          # a thrown one's: the bombs a magazine holds (AmmoCount[0])
     reload: float        # ReloadTime[0], the base of the star curve (a thrown one's: frames, 60 a second)
     level: float         # WEAPONTABLE column 4, same units as docs/weapons.csv level_raw
-    brings: str          # 'jets' (JetLaunch), 'helis' (HeliLaunch), 'sub' (SubLaunch), 'vehicle' (a vehicle request),
+    brings: str          # 'jets' / 'helis' (the support deployment), 'sub' (SubLaunch), 'vehicle' (a vehicle request),
                          # 'throw' (a Robot Bomb whose bomb releases a drone where it lands: JetLaunchThrown)
     log: str = ''        # its name in the plugin's log
     fuel_sec: int = 0    # the plugin's fuel limit for what it brings (0: none)

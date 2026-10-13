@@ -25,6 +25,7 @@
 #include "scopeview.h"
 #include "reticle.h"
 #include "boarding_entrance.h"
+#include "debug_spawn.h"
 #include "gear.h"
 #include "hudscale.h"
 #include "map_cam.h"
@@ -38,6 +39,7 @@
 #include "turretaim.h"
 #include "vecmath.h"
 #include "warn.h"
+#include "support_net.h"
 #include <atomic>
 #include <cmath>
 #include <cstdarg>
@@ -2015,13 +2017,15 @@ void DrillPanel(void* drawer,void* ctx,Text* text,float width,float height,float
 // - Under right (from (C+kSazabiSpecialX, C+kSazabiSpecialY)): the special weapon the secondary fires (SazabiSpecial) on a
 //   panel with a pink edge: its name (the missiles' count), its gauge (the next salvo, the lock's progress under it; the
 //   funnels' pips, filled docked and hollow out, the next launch under them; the cannon's charge in pink, else its
-//   cooldown), and the switch's bindings (ini SazabiSwitchKey / SazabiSwitchButton).
+//   cooldown) (the special used last: every one has its own key), and the bindings of the melee, the guard and the
+//   dash (ini SazabiMeleeKey, SazabiGuardKey, SazabiDashKey; a pad's buttons) (the user, 2026-10-09: 「缺少近战」「缺少冲刺」:
+//   nothing on the screen said where they were).
 // - Lower left (SazabiPanel; its left kSazabiLeft left of C, its bottom at 0.80 H; held on a narrow viewport, and moved
 //   down to the screen's foot when the flight's gauges would meet it): the name, the state tags lit on that row (GUARD,
 //   AIR, TOMAHAWK, LOCK, OVERHEAT), then a row per system, its name at the left and its gauge at the right: the
 //   thrusters, the beam rifle's next shot, the shield missiles (their count, the next salvo, the lock under it), the mega
-//   particle cannon (pink charging, else its cooldown), the funnels' pips; the selected special's row marked (a pink
-//   band, a pointer). A gauge full is green: ready.
+//   particle cannon (pink charging, else its cooldown), the funnels' pips; each row its binding ([key]: the thrusters'
+//   the dash's, the rifle's and the missiles' the fire buttons). A gauge full is green: ready.
 // - The missiles' lock on its target as the jets' (LockAt: a yellow square closing in while it locks, the red diamond).
 alignas(16) const float kSazabiRed[4]={1.0f,0.3f,0.35f,1.0f};
 alignas(16) const float kSazabiPink[4]={1.0f,0.45f,0.75f,1.0f};
@@ -2141,6 +2145,21 @@ void FunnelPips(void* drawer,void* ctx,float x,float y,float w,float h,int fille
     }
 }
 // The rows' names and gauges from the cue (see the top): `rows` gets the names, `g` the gauges.
+// A binding's name for the HUD: the key on the keyboard and mouse, else the pad's button (`button` < 0: the pad's stock
+// fire button, named `pad`).
+void SazabiBinding(bool keys,int vk,int button,const wchar_t* pad,wchar_t* out,int size) noexcept {
+    if(keys)KeyName(vk,out,size);
+    else if(button<0)wcsncpy_s(out,size,pad,_TRUNCATE);
+    else SeatButtonName(button,out,size);
+}
+// `l`'s text followed by its binding.
+void SazabiKeyed(Line& l,bool keys,int vk,int button,const wchar_t* pad) noexcept {
+    wchar_t key[32],label[96];
+    SazabiBinding(keys,vk,button,pad,key,32);
+    if(!key[0])return;   // a pad's stock fire button: not named (the game's own binding)
+    wcsncpy_s(label,96,l.text,_TRUNCATE);
+    Format(l,L"%ls [%ls]",label,key);
+}
 void SazabiRowsOf(const SazabiCue& c,Line* rows,SazabiGauge* g) noexcept {
     const bool low=c.thruster<kSazabiLowThrust,charging=c.cannonCharge>0.0f,empty=c.missiles<=0;
     const float salvo=empty ? 0.0f : Unit(c.missileReady),lock=Unit(c.missileLock);
@@ -2161,9 +2180,13 @@ void SazabiRowsOf(const SazabiCue& c,Line* rows,SazabiGauge* g) noexcept {
     Format(rows[4],L"%ls",Tr(Tx::sazabiFunnels));
     rows[4].rgba=pack>0 ? kWhite : kAmber;
     g[4]=SazabiGauge{0.0f,nullptr,pack,Unit(c.funnelReady),ReadyColour(c.funnelReady)};
+    const Config& k=Cfg();
+    SazabiKeyed(rows[0],c.keys,k.sazabiDashKey,0x01,L"A");
+    SazabiKeyed(rows[1],c.keys,VK_LBUTTON,-1,L"");
+    SazabiKeyed(rows[2],c.keys,VK_RBUTTON,-1,L"");
+    SazabiKeyed(rows[3],c.keys,k.sazabiCannonKey,k.sazabiCannonButton,L"");
+    SazabiKeyed(rows[4],c.keys,k.sazabiFunnelKey,k.sazabiFunnelButton,L"");
 }
-// The panel's row of each special (cue.special: 0 the missiles, 1 the funnels, 2 the cannon).
-constexpr int kSazabiSpecialRow[kSazabiSpecials]={2,4,3};
 // The state tags lit (see the top) into `tags`: how many.
 int SazabiTagsOf(const SazabiCue& c,Line* tags) noexcept {
     int n=0;
@@ -2184,11 +2207,11 @@ void SazabiPanel(void* drawer,void* ctx,Text* text,float width,float height,floa
     Format(*title,L"%ls",Tr(Tx::sazabiTitle));
     title->scale=kTitleScale;title->rgba=kSazabiRed;
     SazabiRowsOf(c,rows,g);
-    const int nTags=SazabiTagsOf(c,tags),n=1+kSazabiRows+nTags,picked=kSazabiSpecialRow[SazabiSpecialOf(c)];
+    const int nTags=SazabiTagsOf(c,tags),n=1+kSazabiRows+nTags;
     for(int i=1;i<n;++i)title[i].scale=i<=kSazabiRows ? kLineScale : kLineScale*0.8f;
     for(int i=0;i<n;++i)title[i].w=title[i].h=0.0f;
     if(text)MeasureAll(*text,title,n);
-    const float pad=10.0f*s,gap=7.0f*s,col=18.0f*s,tagGap=12.0f*s,barW=220.0f*s,barH=12.0f*s,subH=5.0f*s,subGap=2.0f*s,mark=16.0f*s;
+    const float pad=10.0f*s,gap=7.0f*s,col=18.0f*s,tagGap=12.0f*s,barW=160.0f*s,barH=12.0f*s,subH=5.0f*s,subGap=2.0f*s,mark=16.0f*s;
     const float titleH=title->h>0.0f ? title->h : 30.0f*s;
     float nameW=0.0f,tagsW=0.0f,rowH[kSazabiRows],rowsH=0.0f;
     for(int i=0;i<kSazabiRows;++i) {
@@ -2220,10 +2243,6 @@ void SazabiPanel(void* drawer,void* ctx,Text* text,float width,float height,floa
     for(int i=0;i<kSazabiRows;++i) {
         const float lineH=rows[i].h>0.0f ? rows[i].h : 24.0f*s,gauge=barH+(g[i].sub>=0.0f ? subGap+subH : 0.0f);
         const float gy=y+(rowH[i]-gauge)*0.5f;
-        if(i==picked) {   // the selected special: its band and pointer
-            Rect(drawer,ctx,x0+3.0f*s,y-gap*0.5f,x0+w,y+rowH[i]+gap*0.5f,kSazabiPick);
-            Tri(drawer,ctx,x0+pad,y+rowH[i]*0.5f,x0+pad+mark*0.6f,y+rowH[i]*0.5f,5.0f*s,kSazabiPink);
-        }
         rows[i].x=x0+pad+mark;rows[i].y=y+(rowH[i]-lineH)*0.5f;
         if(g[i].pips>=0)FunnelPips(drawer,ctx,bx,gy,barW,barH,g[i].pips,s);
         else Bar(drawer,ctx,bx,gy,barW,barH,g[i].share,g[i].share,g[i].fill,s);
@@ -2234,27 +2253,32 @@ void SazabiPanel(void* drawer,void* ctx,Text* text,float width,float height,floa
 }
 // The special weapon's readout under right of C (see the top).
 void SazabiSpecial(void* drawer,void* ctx,Text* text,float width,float height,float s,const SazabiCue& c,Line* lines,int* at) noexcept {
-    if(*at+2>kMaxLines)return;
+    constexpr int kHints=3;
+    if(*at+1+kHints>kMaxLines)return;
     Line& name=lines[*at];
-    Line& hint=lines[*at+1];
+    Line* const hints=&lines[*at+1];
     const int special=SazabiSpecialOf(c);
     const bool locked=SazabiLockDone(c);
     if(special==0)Format(name,Tr(Tx::sazabiMissiles),c.missiles>0 ? c.missiles : 0);
     else Format(name,L"%ls",Tr(special==1 ? Tx::sazabiFunnels : Tx::sazabiCannon));
     name.rgba=special==0 && c.missiles<=0 ? kRed : special==0 && locked ? kSazabiLocked : kSazabiPink;
     name.scale=kLineScale*0.9f;
-    wchar_t key[32],button[32],both[72];
-    KeyName(Cfg().sazabiSwitchKey,key,32);SeatButtonName(Cfg().sazabiSwitchButton,button,32);
-    std::swprintf(both,72,L"%ls / %ls",key,button);
-    Format(hint,Tr(Tx::sazabiSwitch),both);
-    hint.rgba=kSazabiHint;hint.scale=kLineScale*0.65f;
-    name.w=name.h=hint.w=hint.h=0.0f;
-    if(text)MeasureAll(*text,&name,2);
+    const Config& k=Cfg();
+    const int vk[kHints]={k.sazabiMeleeKey,k.sazabiGuardKey,k.sazabiDashKey},button[kHints]={k.sazabiMeleeButton,k.sazabiGuardButton,0x01};
+    const Tx what[kHints]={Tx::sazabiMeleeKey,Tx::sazabiGuardKey,Tx::sazabiDashKey};
+    for(int i=0;i<kHints;++i) {
+        wchar_t key[32];
+        SazabiBinding(c.keys,vk[i],button[i],L"",key,32);
+        Format(hints[i],Tr(what[i]),key);
+        hints[i].rgba=kSazabiHint;hints[i].scale=kLineScale*0.65f;hints[i].w=hints[i].h=0.0f;
+    }
+    name.w=name.h=0.0f;
+    if(text)MeasureAll(*text,&name,1+kHints);
     const float pad=7.0f*s,gap=5.0f*s,barW=180.0f*s,barH=9.0f*s,subH=4.0f*s,subGap=2.0f*s;
-    const float nameH=name.h>0.0f ? name.h : 22.0f*s,hintH=hint.h>0.0f ? hint.h : 16.0f*s;
+    const float nameH=name.h>0.0f ? name.h : 22.0f*s,hintH=hints[0].h>0.0f ? hints[0].h : 16.0f*s;
     const bool sub=special==0 ? c.hasLock : special==1;   // the lock's progress; the next launch
     const float gaugeH=barH+(sub ? subGap+subH : 0.0f);
-    const float inner=std::fmax(barW,std::fmax(name.w,hint.w)),w=inner+2.0f*pad+3.0f*s,h=pad+nameH+gap+gaugeH+gap+hintH+pad;
+    const float inner=std::fmax(barW,name.w),w=inner+2.0f*pad+3.0f*s,h=pad+nameH+gap+gaugeH+gap+kHints*hintH+pad;
     const float x0=width*0.5f+kSazabiSpecialX*s,y0=height*0.5f+kSazabiSpecialY*s,x=x0+3.0f*s+pad;
     Rect(drawer,ctx,x0,y0,x0+w,y0+h,kPanel);
     Rect(drawer,ctx,x0,y0,x0+3.0f*s,y0+h,kSazabiPink);
@@ -2273,8 +2297,8 @@ void SazabiSpecial(void* drawer,void* ctx,Text* text,float width,float height,fl
         const float share=Unit(charging ? c.cannonCharge : c.cannonReady);
         Bar(drawer,ctx,x,gy,barW,barH,share,share,charging ? kSazabiPink : ReadyColour(share),s);
     }
-    hint.x=x;hint.y=gy+gaugeH+gap;
-    *at+=2;
+    for(int i=0;i<kHints;++i){hints[i].x=x;hints[i].y=gy+gaugeH+gap+static_cast<float>(i)*hintH;}
+    *at+=1+kHints;
 }
 // The whole of it (see the top), the panel last: its lines after the rest's.
 void SazabiHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const SazabiCue& c,
@@ -3485,14 +3509,19 @@ void MapUnits(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
     if(p.dx!=0.0f || p.dy!=0.0f)Tri(drawer,ctx,p.ix-p.dx*5.0f*s,p.iy-p.dy*5.0f*s,p.ix+p.dx*20.0f*s,p.iy+p.dy*20.0f*s,7.0f*s,kWhite);
 }
 
-// Map panels share a viewport-fitted scale and publish the exact opaque UI regions.
-// Text is drawn in a final batch: remove earlier world labels under each panel before that batch.
-float mapUiPanels[16*4]{};int mapUiPanelCount=0;
-void MapUiBox(void* drawer,void* ctx,float x0,float y0,float x1,float y1,Line* lines,int prior) noexcept {
+// Text is drawn in a final batch, over every panel: an opaque panel first empties the earlier lines (world labels) under
+// it, else they would show through on top of it.
+void HideLinesUnder(Line* lines,int prior,float x0,float y0,float x1,float y1) noexcept {
     for(int i=0;i<prior;++i) {
         auto& line=lines[i];
         if(line.x<x1 && line.x+line.w>x0 && line.y<y1 && line.y+line.h>y0)line.text[0]=0;
     }
+}
+
+// Map panels share a viewport-fitted scale and publish the exact opaque UI regions.
+float mapUiPanels[16*4]{};int mapUiPanelCount=0;
+void MapUiBox(void* drawer,void* ctx,float x0,float y0,float x1,float y1,Line* lines,int prior) noexcept {
+    HideLinesUnder(lines,prior,x0,y0,x1,y1);
     Rect(drawer,ctx,x0,y0,x1,y1,kMapBand);
     if(mapUiPanelCount<16) {
         auto* r=mapUiPanels+4*mapUiPanelCount++;r[0]=x0;r[1]=y0;r[2]=x1;r[3]=y1;
@@ -4210,17 +4239,37 @@ void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,
 
 void QMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept;
 
-// The map view open: its marks drawn (true), nothing else of the HUD.
+#include "hud_stats.inc"
+
+// The map's click targets dropped (the map shut, or the stats page over it: nothing under the page takes a click).
+void MapTargetsNone() noexcept {
+    MapCommandButtons(nullptr,nullptr,0);MapCommandSquadButtons(nullptr,nullptr,0);MapCommandSquadFold(nullptr);
+    MapCommandFormationButtons(nullptr,nullptr,0);MapCommandComposeButtons(nullptr,nullptr,0);
+    MapCommandPayloadButtons(nullptr,0,0,nullptr,0);MapCommandSupportButtons(nullptr,nullptr,0);MapCommandUiPanels(nullptr,0);
+}
+
+// The map view open: its marks drawn (true), nothing else of the HUD; the damage statistics' page in their place while it
+// is shown.
 bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
     static MapReadout m;   // the draw thread's (too big for its stack)
-    if(!PlayerMap(&m)){
-        MapCommandButtons(nullptr,nullptr,0);MapCommandSquadButtons(nullptr,nullptr,0);MapCommandSquadFold(nullptr);
-        MapCommandFormationButtons(nullptr,nullptr,0);
-        MapCommandPayloadButtons(nullptr,0,0,nullptr,0);MapCommandSupportButtons(nullptr,nullptr,0);MapCommandUiPanels(nullptr,0);return false;
-    }
+    static dmgstat::Book book;   // the last copy of the statistics (copied again only when they moved)
+    if(!PlayerMap(&m)){MapTargetsNone();DamageStatsUi(nullptr,nullptr,0,0,0);return false;}
     s=hudscale::FitMap(s,width,height);
     if(text)text->s=s;
     mapUiPanelCount=0;mapTip.on=false;
+    bool fresh=false;
+    dmgstat::View statsView{};
+    std::uint32_t missionMs=0;
+    const bool stats=DamageStatsRead(&book,&fresh,&statsView,&missionMs);
+    if(stats && statsView.open) {
+        MapTargetsNone();
+        MapCommandView(vp,width,height);   // the pointer moves on this view
+        MapCommandReadout c{};
+        const bool pointer=PlayerMapCommands(&c) && c.pointer && !m.pad;
+        StatsPage(drawer,ctx,text,width,height,s,book,statsView,missionMs,m.pad,StatsPointer{pointer,c.px,c.py},lines,at);
+        MapCommandUiPanels(mapUiPanels,mapUiPanelCount);
+        return true;
+    }
     MapGrid(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapUnits(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapCommandView(vp,width,height);   // the commands' box, clicks and pointer are found on this view
@@ -4231,6 +4280,8 @@ bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     MapUiBox(drawer,ctx,width-134*s,54*s,width-6*s,174*s,lines,*at);
     MapCompass(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapText(drawer,ctx,text,width,height,s,m,lines,at);
+    if(stats)StatsMapTab(drawer,ctx,text,width,height,s,lines,at);
+    else DamageStatsUi(nullptr,nullptr,0,0,0);
     if(!m.pad)MapTipDraw(drawer,ctx,text,width,height,s,lines,at);   // over everything: drawn last
     MapCommandUiPanels(mapUiPanels,mapUiPanelCount);
     MapCommandReadout pointer{};
@@ -4312,6 +4363,23 @@ void SweepBanner(Text* text,float width,float height,float s,Line* lines,int* at
     if(c.on)Label(text,lines,at,width*0.5f,height*0.5f+222.0f*s,1,kLineScale,kAmber,Tr(Tx::sweepOn),c.left,c.taken,key);
     else Label(text,lines,at,width*0.5f,height*0.5f+222.0f*s,1,kLineScale,kGreen,Tr(Tx::sweepDone),c.taken);
 }
+// The sea rescue (heli.cpp): asked for, on its way, or why no heli came; a moment, under the sweep's banner.
+void RescueCueBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
+    RescueCue c{};
+    if(!PlayerRescueCue(&c))return;
+    Label(text,lines,at,width*0.5f,height*0.5f+254.0f*s,1,kLineScale,c.bad ? kAmber : kGreen,L"%ls",c.text);
+}
+// The room's builds differ (support_net.cpp, version_notice.h): who is older or newer and what does not work because of
+// it, a while after joining (or after a player joined); under the rescue's banner.
+void VersionBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
+    wchar_t line[200];
+    if(!SupportVersionCue(line,_countof(line)))return;
+    // Who, then (after a '\n') what does not work here.
+    wchar_t* second=std::wcschr(line,L'\n');
+    if(second)*second++=0;
+    Label(text,lines,at,width*0.5f,height*0.5f+286.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",line);
+    if(second && *second)Label(text,lines,at,width*0.5f,height*0.5f+314.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",second);
+}
 // The mark key with no enemy near the aim (npcai.cpp SendToPoint): what came of it under the point for a moment (the
 // selected units sent there, how many; none selected; online); the point's own ring is the Q mark's (QMarkHud). An
 // enemy near the aim but not on it: a ring there and the word to aim at it.
@@ -4327,6 +4395,60 @@ void NpcPingHud(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
     if(p.given>=0)Label(text,lines,at,x,y+26.0f*s,1,kLineScale*0.7f,tint,Tr(Tx::npcPingSent),p.given);
     else Label(text,lines,at,x,y+26.0f*s,1,kLineScale*0.7f,tint,L"%ls",
                Tr(p.given==-2 ? Tx::cmdOfflineOnly : p.given==kPingNearEnemy ? Tx::npcPingNearEnemy : Tx::npcPingNoUnit));
+}
+
+// The result line (a spawn's, for a moment): its words, the row's name.
+void DebugSpawnStatusLine(Text* text,Line* lines,int* at,float x,float y,int align,float scale,const DebugSpawnCue& c) noexcept {
+    if(c.status==kDebugSpawnNone || c.statusRow<0 || c.statusRow>=debugspawn::kEntryCount)return;
+    const wchar_t* const name=debugspawn::kEntries[c.statusRow].name;
+    if(c.status==kDebugSpawnRequested || c.status==kDebugSpawnRefused) {   // a support call: its own answer after the name
+        Label(text,lines,at,x,y,align,scale,c.status==kDebugSpawnRequested ? kGreen : kAmber,
+              Tr(c.status==kDebugSpawnRequested ? Tx::debugSpawnRequested : Tx::debugSpawnRefused),name,c.note);
+        return;
+    }
+    const Tx words=c.status==kDebugSpawnDone ? Tx::debugSpawnDone : c.status==kDebugSpawnOnline ? Tx::debugSpawnOnline :
+                   c.status==kDebugSpawnNoPlace ? Tx::debugSpawnNoPlace : Tx::debugSpawnFailed;
+    Label(text,lines,at,x,y,align,scale,c.status==kDebugSpawnDone ? kGreen : kAmber,Tr(words),name);
+}
+// The debug spawn tool's menu (debug_spawn.cpp; ini DebugSpawn, off by default): a panel at the left, its category, a
+// window of its rows round the one picked (an arrow at it; dim when it cannot be made now), the keys, and a spawn's
+// result for a moment (also with the menu shut). Nothing when the tool is off.
+void DebugSpawnHud(void* drawer,void* ctx,Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
+    DebugSpawnCue c{};
+    if(!DebugSpawnReadout(&c))return;
+    const float x=40.0f*s,top=height*0.22f,row=28.0f*s;
+    constexpr int kWindow=10;
+    if(!c.open){DebugSpawnStatusLine(text,lines,at,width*0.5f,height*0.5f+254.0f*s,1,kLineScale,c);return;}
+    if(*at+kWindow+5>kMaxLines)return;
+    using debugspawn::Category;
+    const Category cat=static_cast<Category>(c.category>=0 && c.category<debugspawn::kCategoryCount ? c.category : 0);
+    static const Tx kNames[debugspawn::kCategoryCount]={Tx::debugSpawnVehicles,Tx::debugSpawnAircraft,Tx::debugSpawnEnemies,
+                                                        Tx::debugSpawnSoldiers};
+    static const Tx kHints[debugspawn::kCategoryCount]={Tx::debugSpawnHintVehicle,Tx::debugSpawnHintAircraft,Tx::debugSpawnHintEnemy,
+                                                        Tx::debugSpawnHintSoldier};
+    const int first=c.count<=kWindow ? 0 : (c.pick-kWindow/2<0 ? 0 : (c.pick-kWindow/2+kWindow>c.count ? c.count-kWindow : c.pick-kWindow/2));
+    const int shown=c.count<kWindow ? c.count : kWindow;
+    const int firstLine=*at;
+    Label(text,lines,at,x,top,0,kTitleScale,kTitle,Tr(Tx::debugSpawnTitle),Tr(kNames[static_cast<int>(cat)]),c.pick+1,c.count);
+    for(int i=0;i<shown;++i) {
+        const int index=first+i,entry=debugspawn::RowOf(cat,index);
+        if(entry<0)break;
+        const bool picked=index==c.pick;
+        const float* tint=!picked ? kWhite : c.ready ? kYellow : kAmber;
+        Label(text,lines,at,x,top+row*(i+1.2f),0,kLineScale,tint,L"%ls %ls%ls",picked ? L">" : L"  ",debugspawn::kEntries[entry].name,
+              picked && !c.ready ? Tr(Tx::debugSpawnUnavailable) : L"");
+    }
+    wchar_t k[5][24];
+    for(int i=0;i<5;++i)KeyName(c.keys[i],k[i],_countof(k[i]));
+    Label(text,lines,at,x,top+row*(shown+1.6f),0,kLineScale*0.8f,kTeal,Tr(Tx::debugSpawnKeys),k[1],k[2],k[3],k[4],k[0]);
+    Label(text,lines,at,x,top+row*(shown+2.5f),0,kLineScale*0.8f,kTeal,L"%ls",Tr(kHints[static_cast<int>(cat)]));
+    DebugSpawnStatusLine(text,lines,at,x,top+row*(shown+3.4f),0,kLineScale*0.8f,c);
+    // The panel behind them, as wide as the widest line (the quads go down now, the text over them at DrawAll).
+    float right=x+460.0f*s;
+    for(int i=firstLine;i<*at;++i)if(lines[i].x+lines[i].w+12.0f*s>right)right=lines[i].x+lines[i].w+12.0f*s;
+    const float y0=top-24.0f*s,y1=top+row*(shown+4)+8.0f*s;
+    HideLinesUnder(lines,firstLine,x-12.0f*s,y0,right,y1);   // a Q mark's name tag, a squad's label: not over the menu
+    Rect(drawer,ctx,x-12.0f*s,y0,right,y1,kPanel);
 }
 
 }  // namespace
@@ -4512,7 +4634,10 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         QMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         FormationBanner(t,width,height,s,lines,&at);
         SweepBanner(t,width,height,s,lines,&at);
+        RescueCueBanner(t,width,height,s,lines,&at);
+        VersionBanner(t,width,height,s,lines,&at);
         NpcPingHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
+        DebugSpawnHud(drawer,ctx,t,width,height,s,lines,&at);
         if(Cfg().vehicleHud) {
             if(now-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);
             float top=height*0.28f;

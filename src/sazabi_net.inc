@@ -88,7 +88,8 @@ void AcceptNetwork(Mech& m,unsigned char* v,const sazabi_net::State& s,ULONGLONG
 void ReplayNetwork(Mech& m,unsigned char* v,ULONGLONG ms) noexcept {
     if(!RemoteFresh(m,v,ms)) {
         DropRemoteEffects(m);m.driven=false;m.arms.guard=0;m.arms.swing=-1;m.arms.charge=m.arms.megaLeft=0;
-        m.pose=sazabi::PoseInput{};m.pose.aim=0;Pose(m,v);return;
+        const int blocks=m.pose.blocks;   // a running count (the animator jolts on a change): a reset would read as a hit
+        m.pose=sazabi::PoseInput{};m.pose.aim=0;m.pose.blocks=blocks;Pose(m,v);return;
     }
     Rig(m,v);RootFrame(m,v);
     const auto& s=m.net.state;

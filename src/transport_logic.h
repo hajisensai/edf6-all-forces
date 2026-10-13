@@ -124,14 +124,30 @@ inline Step Advance(const Trip& trip,const View& v,const Tuning& t) noexcept {
 }
 
 // --- The paratroop drop ---
-// The stick: the plane's passengers jump one after another, kJumpEveryMs apart, from when it comes within `radius` m
-// (level) of the drop point until all are out; it never starts once it is past the point by more than `radius` (a plane
-// that missed it goes round: transport.cpp keeps it on its way back over).
+// The stick: the plane's passengers jump one after another, kJumpEveryMs apart, from its start (StickStarts) until all
+// are out, whatever the distance by then.
 inline constexpr std::uint64_t kJumpEveryMs=350;
-inline bool JumpNow(float distance,float radius,int jumped,int total,std::uint64_t ms,std::uint64_t lastJump) noexcept {
-    if(jumped>=total)return false;
-    if(jumped==0)return distance<=radius;
-    return ms>=lastJump+kJumpEveryMs;   // the stick, once begun, goes on whatever the distance
+inline bool JumpNow(int jumped,int total,std::uint64_t ms,std::uint64_t lastJump) noexcept {
+    return jumped<total && ms>=lastJump+kJumpEveryMs;
+}
+// Where the stick starts (2026-10-10: it began anywhere within 400 m of the point, so a plane going by 288 m abeam put its
+// twelve down 250-400 m off it). The plane flies its line over the point (ferry_line.h); the stick starts `StickLead` m
+// short of it along its track: the jumpers' drift (each leaves with kJumpInherit of the plane's way and its canopy bleeds
+// it off at `bleed` a second: ChuteStep, speed / bleed of way in all) and half the stick's length (total - 1 jumps
+// kJumpEveryMs apart at `speed`), so the stick lands centred on the point. Not with the point more than kStickAcross off its
+// track, nor once it is more than kStickWindowS of flight past the start: that pass missed, the next one comes over
+// (ferry_line.h turns it round onto the same line). `along`: m the point lies ahead along its track (negative: behind);
+// `across`: m off the track.
+inline constexpr float kJumpInherit=1.0f,kStickAcross=80.0f,kStickWindowS=1.5f;
+inline float StickLead(float speed,int total,float bleed) noexcept {
+    const float drift=bleed>0.01f ? kJumpInherit*speed/bleed : 0.0f;
+    const float stick=static_cast<float>(total>1 ? total-1 : 0)*speed*static_cast<float>(kJumpEveryMs)*0.001f;
+    return drift+0.5f*stick;
+}
+inline bool StickStarts(float along,float across,float speed,int total,float bleed) noexcept {
+    if(!(speed>1.0f) || std::fabs(across)>kStickAcross)return false;
+    const float lead=StickLead(speed,total,bleed);
+    return along<=lead && along>=lead-speed*kStickWindowS;
 }
 // The canopy's hold on a jumper's velocity (as the player's parachute: playerjet.cpp EjectTick): the fall held to `sink`
 // m/s, the drift bled `bleed` of itself a second (a 60 Hz frame). A Wing Diver has none (she flies down herself).

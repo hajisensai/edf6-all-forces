@@ -71,7 +71,11 @@ from mdb import Mdb, Mesh, VElem, VFMT, cmpl_decompress, mdb_read, mdb_write
 
 LEGACY_VERSION = 0x14
 EDF6_VERSION = 0x20
-_FMT: dict[int, str] = {1: '<4f', 4: '<3f', 7: '<4e', 12: '<2f', 21: '<4B'}
+_FMT: dict[int, str] = {1: '<4f', 4: '<3f', 7: '<4e', 12: '<2f', 21: '<4B', 24: '<2e'}
+# Format 24 is half2 (4 bytes): EDF4.1 map parts use it for texcoords (NW_HILLYCITY_LIGHT's six station models), no
+# EDF6 model does, so _widen_half2 turns it into float2 (12) -- exact, half -> float loses nothing.
+_SIZE: dict[int, int] = {**{k: v[1] for k, v in VFMT.items()}, 24: 4}
+_HALF2, _FLOAT2 = 24, 12
 _BLEND: tuple[str, str] = ('blendweight', 'blendindices')
 _BLEND_FMT: dict[str, int] = {'blendweight': 1, 'blendindices': 21}
 _TYPES_41: frozenset[int] = frozenset({0x000, 0x101, 0x302, 0x303, 0x3FF})
@@ -225,6 +229,32 @@ def _blend_last(me: Mesh) -> None:
     me.elems = elems
 
 
+def _widen_half2(me: Mesh) -> None:
+    """Every half2 element (format 24) as float2 (12), the vertex re-laid in the same element order (_check_mesh has
+    made the elements tile the vertex). A mesh without one is left as it is."""
+    if all(e.fmt != _HALF2 for e in me.elems):
+        return
+    elems = sorted(me.elems, key=lambda e: e.offset)
+    new: list[VElem] = []
+    at = 0
+    for e in elems:
+        fmt = _FLOAT2 if e.fmt == _HALF2 else e.fmt
+        new.append(VElem(fmt, at, e.channel, e.name))
+        at += _SIZE[fmt]
+    out = bytearray(at * me.nverts)
+    for i in range(me.nverts):
+        src, dst = i * me.vsize, i * at
+        for old, e in zip(elems, new):
+            raw = me.vdata[src + old.offset:src + old.offset + _SIZE[old.fmt]]
+            if old.fmt == _HALF2:
+                raw = struct.pack('<2f', *struct.unpack('<2e', raw))
+            out[dst + e.offset:dst + e.offset + len(raw)] = raw
+    by_old = {id(o): n for o, n in zip(elems, new)}
+    me.elems = [by_old[id(e)] for e in me.elems]
+    me.vsize = at
+    me.vdata = bytes(out)
+
+
 def _check_mesh(me: Mesh) -> None:
     if me.vsize <= 0:
         raise ValueError(f'vertex size {me.vsize}')
@@ -237,7 +267,7 @@ def _check_mesh(me: Mesh) -> None:
             raise ValueError(f'unknown vertex format {e.fmt}')
         if e.offset != at:
             raise ValueError('vertex layout does not fill the vertex (gaps or overlaps)')
-        at += VFMT[e.fmt][1]
+        at += _SIZE[e.fmt]
     if at != me.vsize:
         raise ValueError('vertex layout does not fill the vertex (gaps or overlaps)')
     if me.flags[0] or me.flags[3] or me.flags[1] not in (0, 1):
@@ -268,6 +298,7 @@ def mdb_from_legacy(b: bytes, map_part: bool = False) -> bytes:
             raise ValueError('object bone out of range')
         for me in ob.meshes:
             _check_mesh(me)
+            _widen_half2(me)
     if _param_encoding(md) == '41':
         for m in md.materials:
             for p in m.params:

@@ -19,7 +19,7 @@
 #include <cstdint>
 
 namespace crew {
-inline constexpr int kSupportConfigUnits=64;   // catalog entries a bitmask can hold (SupportCallCount is 33: the transports since 2026-10-09)
+inline constexpr int kSupportConfigUnits=64;   // catalog entries a bitmask can hold (SupportCallCount is 37: the transports and airdrops since 2026-10-09, the sea rescue last)
 inline constexpr int kSupportAircraftMost=8;
 struct SupportConfig {
     std::uint64_t disabled=0;                  // bit = catalog index

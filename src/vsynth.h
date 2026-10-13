@@ -624,6 +624,23 @@ inline Wave SaberHit() {
     return Normalized(DcBlock(std::move(x)),1.0f);
 }
 
+// A hit stopped on the Sazabi's raised shield: a heavy plate struck: five inharmonic partials of a thick steel plate
+// ringing out (the highest dying first, 0.12 .. 0.55 s), the strike's bright crack and a low thud under it.
+inline Wave ShieldBlock() {
+    Wave x(static_cast<std::size_t>(Samples(0.9f)),0.0f);
+    Rng r(0x5B1Du);
+    Biquad crackHp=Hp(1800.0f),thudLp=Lp(180.0f);
+    constexpr float hz[5]={233.0f,388.0f,611.0f,947.0f,1430.0f},decay[5]={0.55f,0.4f,0.3f,0.2f,0.12f};
+    constexpr float amp[5]={1.0f,0.8f,0.6f,0.45f,0.3f};
+    for(std::size_t i=0;i<x.size();++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate),w=r.Next();
+        float ring=0.0f;
+        for(int k=0;k<5;++k)ring+=amp[k]*std::sin(kTau*hz[k]*t)*std::exp(-t/decay[k]);
+        x[i]=0.5f*ring*Rise(t,0.0005f)+crackHp.Run(w)*Env(t,0.0005f,0.04f)*2.0f+thudLp.Run(w)*Env(t,0.002f,0.12f)*3.0f;
+    }
+    return Normalized(DcBlock(std::move(x)),1.0f);
+}
+
 // The chest cannon's fan of beams: five zaps 12 ms apart (each a little higher), the crack, a buzz, a big boom
 // (90 to 26 Hz), the body, a long rolling tail and three echoes; driven into a soft limit for its weight.
 inline Wave CannonShot() {

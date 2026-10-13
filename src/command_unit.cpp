@@ -9,8 +9,9 @@ namespace crew {
 bool CommandVehicleLive(const ObjRef& ref) noexcept {
     __try {
         auto* v=static_cast<unsigned char*>(const_cast<void*>(ref.obj));
+        // Its NPC driver at the controls, or a drone of the plugin's, flown with no one aboard (jet_internal.h Unmanned).
         return v && Readable(v,kSeatCount+8) && !v[kDead] && ref.Is(v) && SeatCount(v)>0 &&
-               NpcDriver(v);
+               (NpcDriver(v) || JetFliesItself(v));
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 bool ReadCommandUnit(const ObjRef& ref,const char* name,const Command& cmd,bool air,CommandUnit* out) noexcept {

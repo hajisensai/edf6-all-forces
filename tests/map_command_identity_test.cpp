@@ -5,6 +5,7 @@
 namespace crew {
 void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept {if(out && capacity)out[0]=0;}
 int SupportCallCount() noexcept { return 3; }
+int SupportMenuCount() noexcept { return 3; }
 const wchar_t* SupportCallName(int) noexcept { return L"Support"; }
 SupportIcon SupportCallIcon(int) noexcept { return SupportIcon::jet; }
 SupportVariant SupportCallVariant(int) noexcept { return SupportVariant::none; }
@@ -46,6 +47,7 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& id,const mapcmd::Comm
     return SquadCommand(id.obj,command) ? NpcCommandResult{NpcCommandReason::none,1} : NpcCommandResult{NpcCommandReason::failed,0};
 }
 unsigned char* image=nullptr;
+bool JetFliesItself(const void*) noexcept { return false; }   // no plugin jet in this world (command_unit.cpp)
 bool NpcDriver(const unsigned char* v) noexcept {
     if(!v || !SeatCount(v))return false;
     auto* seat=SeatAt(const_cast<unsigned char*>(v),0);const auto who=SeatRider(seat);
@@ -74,6 +76,10 @@ bool NpcMarkEnemy(const void*,const float*,bool) noexcept { return false; }
 bool VisitEnemiesOf(std::int32_t,EnemyVisitor,void*) noexcept { return true; }
 PlayerFix player{};
 const Config& Cfg() noexcept { static const Config c{};return c; }
+// The damage statistics' page (damagestats.cpp): never shown here.
+int DamageStatsUiAt(float,float) noexcept { return 0; }
+void DamageStatsClick(int) noexcept {}
+bool DamageStatsShown() noexcept { return false; }
 float MapRay(const float*,const float*,float*) noexcept { return -1; }
 float MapFloorRay(const float*,const float*,float*) noexcept { return -1; }
 bool MapGroundNear(float,float,float,float*,bool) noexcept { return false; }
