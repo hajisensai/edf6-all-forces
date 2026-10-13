@@ -55,6 +55,13 @@ inline bool AntiAirClass(const char* cls) noexcept {
     return false;
 }
 
+// EfsBullet / EfsExposureBullet (rounds.cpp's BEAM class) are the game's effect-scripted rounds, not energy weapons as
+// such: the 601 tank's 140 mm cannon fires EfsBullet with AmmoGravityFactor 1 and an 8-18 m AmmoExplosion, the Nix /
+// Proteus lasers EfsExposureBullet with gravity 0 (tests/weapon_style_data_check.py, tools/reticle_check.cpp). One of
+// them that falls is a shell, and gets the cannon's label, sight and drop ladder (the user, 2026-10-12: 「明明是榴弹炮，
+// 怎么显示的光束」).
+constexpr bool FallingEffectShell(bool effectClass,float gravityFactor) noexcept { return effectClass && gravityFactor>0.0f; }
+
 inline Style Classify(const Traits& t) noexcept {
     if(t.homing)return Style::missile;
     if(t.rocket)return Style::rocket;

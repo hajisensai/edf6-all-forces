@@ -26,34 +26,35 @@ void Expect(bool ok,const char* what,double a=0.0,double b=0.0) {
 }
 
 // A vehicle weapon's SGO numbers (Root.cpk WEAPON/<sgo>): AmmoClass, LockonType, FireInterval (frames), AmmoSpeed
-// (m/frame), AmmoExplosion (m), SecondaryFire_Type; the vehicle class it is mounted on (crew.cpp kClasses); the sight
+// (m/frame), AmmoExplosion (m), AmmoGravityFactor, SecondaryFire_Type; the vehicle class it is mounted on (crew.cpp kClasses); the sight
 // it must get. tests/sight_data_audit.py reads these rows and checks the numbers against the game's own files.
-struct Weapon { const char* sgo; const char* ammo; int lock,interval; float speed,blast; int scope; const char* vehicle; Style style; Shell shell; };
+struct Weapon { const char* sgo; const char* ammo; int lock,interval; float speed,blast,gravity; int scope; const char* vehicle; Style style; Shell shell; };
 const Weapon kWeapons[]={
-    {"V_403TANK_CANNON02.SGO","SolidBullet01Rail",0,180,22.5f,0.0f,0,"403_Tank",Style::cannon,Shell::ap},
-    {"V_403TANK_MACHINEGUN.SGO","SolidBullet01",0,4,6.0f,0.0f,0,"403_Tank",Style::autocannon,Shell::ap},
-    {"V_404BIGTANK_MAINCANNON.SGO","RocketBullet01",0,300,8.0f,30.0f,0,"404_Tank",Style::cannon,Shell::he},
-    {"V_404BIGTANK_SUBCANNONSOLID.SGO","SolidBullet01Rail",0,120,6.0f,0.0f,0,"404_Tank",Style::cannon,Shell::ap},
-    {"V_404BIGTANK_GATLING.SGO","SolidBullet01",0,3,4.0f,0.0f,0,"404_Tank",Style::autocannon,Shell::ap},
-    {"V_404BIGTANK_SIDEMISSILE_L.SGO","MissileBullet01",1,720,0.1f,8.0f,0,"404_Tank",Style::missile,Shell::none},
-    {"V_404BIGTANK_SIDEGRENADE_L.SGO","GrenadeBullet01",0,80,0.5f,18.0f,0,"404_Tank",Style::none,Shell::none},
-    {"V_505TANK_CANNON04L.SGO","RocketBullet01",0,120,11.0f,15.0f,0,"505_Tank",Style::cannon,Shell::he},
-    {"V_505TANK_CANNON02S.SGO","SolidBullet01Rail",0,100,24.0f,0.0f,0,"505_Tank",Style::cannon,Shell::ap},
-    {"V601_TANK_CANNON01.SGO","EfsBullet",0,150,10.0f,12.0f,0,"601_Tank",Style::cannon,Shell::beam},
-    {"V_401STRIKER_CANNON.SGO","RocketBullet01",0,20,4.0f,5.0f,0,"VehicleBase",Style::autocannon,Shell::he},
-    {"V603_FLAK_GUN02_L.SGO","SolidBullet01",0,3,6.0f,0.0f,0,"603_Flak",Style::flak,Shell::ap},
-    {"V603_FLAK_GUNH01_DLC_L.SGO","SolidBullet01",0,3,16.0f,0.0f,0,"603_Flak",Style::flak,Shell::ap},
-    {"V603_FLAK_GLGUN01_DLC_L.SGO","GrenadeBullet01_MapNoDamage",0,5,5.0f,4.0f,0,"603_Flak",Style::none,Shell::none},
-    {"V_502_GROUNDROBO_SNIPE01_L.SGO","SolidBullet01",0,120,20.0f,0.0f,0,"502_GroundRobo",Style::precision,Shell::ap},
-    {"V_502_GROUNDROBO_GATLING.SGO","SolidBullet01",0,3,4.0f,0.0f,0,"502_GroundRobo",Style::autocannon,Shell::ap},
-    {"V_502_GROUNDROBO_FLAMEGUN01_L.SGO","FlameBullet02",0,0,1.4f,0.0f,0,"502_GroundRobo",Style::none,Shell::none},
-    {"V_504BEGARUTA_DLC_LONGCANNON015_L.SGO","LaserBullet01",0,80,30.0f,0.0f,1,"504_begaruta",Style::precision,Shell::beam},
-    {"V_504BEGARUTA_DLC2_LONGCANNON015_L.SGO","RocketBullet01",0,80,20.0f,30.0f,1,"504_begaruta",Style::precision,Shell::he},
-    {"V_504BEGARUTA_LONGCANNON01_L.SGO","RocketBullet01",0,160,10.0f,20.0f,0,"504_begaruta",Style::cannon,Shell::he},
-    {"V_504BEGARUTA_ROCKET01_L.SGO","MissileBullet01",0,80,0.1f,8.0f,0,"504_begaruta",Style::rocket,Shell::none},
-    {"V_612_A_LASERRIFLE_DLC2_L.SGO","LaserBullet01",0,10,120.0f,0.0f,0,"612_nix",Style::energy,Shell::beam},
-    {"V_612_LASER_CANNON01_R.SGO","LaserBullet01",0,80,30.0f,0.0f,1,"612_nix",Style::precision,Shell::beam},
-    {"V_612_HOMING_LASER01_L.SGO","HomingLaserBullet01",1,120,4.0f,2.0f,0,"612_nix",Style::missile,Shell::none},
+    {"V_403TANK_CANNON02.SGO","SolidBullet01Rail",0,180,22.5f,0.0f,0.5f,0,"403_Tank",Style::cannon,Shell::ap},
+    {"V_403TANK_MACHINEGUN.SGO","SolidBullet01",0,4,6.0f,0.0f,0.0f,0,"403_Tank",Style::autocannon,Shell::ap},
+    {"V_404BIGTANK_MAINCANNON.SGO","RocketBullet01",0,300,8.0f,30.0f,0.0f,0,"404_Tank",Style::cannon,Shell::he},
+    {"V_404BIGTANK_SUBCANNONSOLID.SGO","SolidBullet01Rail",0,120,6.0f,0.0f,1.0f,0,"404_Tank",Style::cannon,Shell::ap},
+    {"V_404BIGTANK_GATLING.SGO","SolidBullet01",0,3,4.0f,0.0f,0.0f,0,"404_Tank",Style::autocannon,Shell::ap},
+    {"V_404BIGTANK_SIDEMISSILE_L.SGO","MissileBullet01",1,720,0.1f,8.0f,0.75f,0,"404_Tank",Style::missile,Shell::none},
+    {"V_404BIGTANK_SIDEGRENADE_L.SGO","GrenadeBullet01",0,80,0.5f,18.0f,1.0f,0,"404_Tank",Style::none,Shell::none},
+    {"V_505TANK_CANNON04L.SGO","RocketBullet01",0,120,11.0f,15.0f,0.25f,0,"505_Tank",Style::cannon,Shell::he},
+    {"V_505TANK_CANNON02S.SGO","SolidBullet01Rail",0,100,24.0f,0.0f,0.1f,0,"505_Tank",Style::cannon,Shell::ap},
+    {"V601_TANK_CANNON01.SGO","EfsBullet",0,150,10.0f,12.0f,1.0f,0,"601_Tank",Style::cannon,Shell::he},   // a falling effect round: a shell
+    {"V_612_A_LASERRIFLE_L.SGO","EfsExposureBullet",0,1,10.0f,0.0f,0.0f,0,"612_nix",Style::energy,Shell::beam},
+    {"V_401STRIKER_CANNON.SGO","RocketBullet01",0,20,4.0f,5.0f,0.5f,0,"VehicleBase",Style::autocannon,Shell::he},
+    {"V603_FLAK_GUN02_L.SGO","SolidBullet01",0,3,6.0f,0.0f,0.75f,0,"603_Flak",Style::flak,Shell::ap},
+    {"V603_FLAK_GUNH01_DLC_L.SGO","SolidBullet01",0,3,16.0f,0.0f,1.0f,0,"603_Flak",Style::flak,Shell::ap},
+    {"V603_FLAK_GLGUN01_DLC_L.SGO","GrenadeBullet01_MapNoDamage",0,5,5.0f,4.0f,1.0f,0,"603_Flak",Style::none,Shell::none},
+    {"V_502_GROUNDROBO_SNIPE01_L.SGO","SolidBullet01",0,120,20.0f,0.0f,1.0f,0,"502_GroundRobo",Style::precision,Shell::ap},
+    {"V_502_GROUNDROBO_GATLING.SGO","SolidBullet01",0,3,4.0f,0.0f,0.0f,0,"502_GroundRobo",Style::autocannon,Shell::ap},
+    {"V_502_GROUNDROBO_FLAMEGUN01_L.SGO","FlameBullet02",0,0,1.4f,0.0f,0.0f,0,"502_GroundRobo",Style::none,Shell::none},
+    {"V_504BEGARUTA_DLC_LONGCANNON015_L.SGO","LaserBullet01",0,80,30.0f,0.0f,0.0f,1,"504_begaruta",Style::precision,Shell::beam},
+    {"V_504BEGARUTA_DLC2_LONGCANNON015_L.SGO","RocketBullet01",0,80,20.0f,30.0f,0.0f,1,"504_begaruta",Style::precision,Shell::he},
+    {"V_504BEGARUTA_LONGCANNON01_L.SGO","RocketBullet01",0,160,10.0f,20.0f,2.0f,0,"504_begaruta",Style::cannon,Shell::he},
+    {"V_504BEGARUTA_ROCKET01_L.SGO","MissileBullet01",0,80,0.1f,8.0f,0.75f,0,"504_begaruta",Style::rocket,Shell::none},
+    {"V_612_A_LASERRIFLE_DLC2_L.SGO","LaserBullet01",0,10,120.0f,0.0f,0.0f,0,"612_nix",Style::energy,Shell::beam},
+    {"V_612_LASER_CANNON01_R.SGO","LaserBullet01",0,80,30.0f,0.0f,0.0f,1,"612_nix",Style::precision,Shell::beam},
+    {"V_612_HOMING_LASER01_L.SGO","HomingLaserBullet01",1,120,4.0f,2.0f,0.0f,0,"612_nix",Style::missile,Shell::none},
 };
 
 // What vhud.cpp reads for a weapon (rounds.cpp's class table: its label, its kind; LockonType 1 a homing missile).
@@ -64,9 +65,11 @@ reticle::Traits TraitsOf(const Weapon& w) {
     t.homing=(missile && w.lock!=0) || !std::strcmp(a,"MissileBullet02") || !std::strcmp(a,"HomingLaserBullet01");
     t.rocket=missile && w.lock==0;
     t.lobbed=!std::strncmp(a,"GrenadeBullet01",15) || !std::strcmp(a,"NapalmBullet01");
-    t.energy=!std::strcmp(a,"LaserBullet01") || !std::strcmp(a,"EfsBullet") || !std::strcmp(a,"EfsExposureBullet");
+    const bool effect=!std::strcmp(a,"EfsBullet") || !std::strcmp(a,"EfsExposureBullet");
+    const bool shell=reticle::FallingEffectShell(effect,w.gravity);   // rounds.cpp ReadRound: a falling one is CANNON
+    t.energy=!std::strcmp(a,"LaserBullet01") || (effect && !shell);
     t.sprayer=!std::strcmp(a,"FlameBullet02") || !std::strcmp(a,"AcidBullet01") || !std::strcmp(a,"NapalmBullet01");
-    t.shellClass=!std::strcmp(a,"SolidBullet01Rail") || !std::strcmp(a,"RocketBullet01") || !std::strcmp(a,"SolidExpBullet01");
+    t.shellClass=!std::strcmp(a,"SolidBullet01Rail") || !std::strcmp(a,"RocketBullet01") || !std::strcmp(a,"SolidExpBullet01") || shell;
     t.scoped=w.scope==1;t.antiAir=reticle::AntiAirClass(w.vehicle);
     t.interval=w.interval;t.speed=w.speed*60.0f;t.blast=w.blast;
     return t;
