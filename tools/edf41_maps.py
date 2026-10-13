@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import os
+import struct
 import sys
 from typing import Callable
 
@@ -177,8 +178,8 @@ def install(root: str, root41: str | None, say: Callable[[str], None] = print) -
         say(f'  转换 4.1 地图 {name}（借用 EDF6 {MAPS[name][0]} 的天气与寻路网格）……')
         try:
             files = convert(name, e41, e6)
-        except (ValueError, KeyError) as e:
-            skipped.append((name, f'转换失败：{e}'))
+        except (ValueError, KeyError, IndexError, AssertionError, NotImplementedError, struct.error) as e:
+            skipped.append((name, f'转换失败：{type(e).__name__}: {e}'))
             wanted.difference_update(ledger.key(rel) for rel in files_of(name))
             continue
         for rel, data in files.items():
