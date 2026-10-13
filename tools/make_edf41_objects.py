@@ -34,9 +34,11 @@ import shutil
 import struct
 import sys
 from dataclasses import dataclass
+from typing import Callable
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
+import acb  # noqa: E402
 import cas_graft  # noqa: E402
 import dsgo  # noqa: E402
 import legacy_assets  # noqa: E402
@@ -98,10 +100,18 @@ class Alias:
     cas_donors: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = ()   # (EDF6 CAS, players, variables)
                               # grafted after the template's own: what the template's CAS lacks (its sibling has)
     state_aliases: tuple[tuple[str, str, str], ...] = ()   # (player, new state, existing state): cas_graft.alias_states
-    drop: tuple[str, ...] = ()    # template keys not copied (a weak point makes the robot 5x tougher)
+    drop: tuple[str, ...] = ()    # template keys not copied (a weak point makes the robot 5x tougher; an optional
+                                  # key the template sets but 4.1's object does not, e.g. Deiroi's level_adjust 0.7)
     guns: tuple[Gun, ...] = ()    # the weapons: meshes merged into the model, muzzles added, gun_control rebuilt
     eye: tuple[str, tuple[float, float, float]] | None = None   # (bone, position): the locator 目の基準位置
     prune: bool = False       # ship only the files the result names (the closure holds 4.1's weapon objects)
+    material_from: str = ''   # a 4.1 SGO (OBJECT/<this>) whose bare blobs are material_animation here: the object's own
+                              # lights are code-driven in 4.1 and the template's blobs name materials its model lacks
+    se_prefix: tuple[str, str] = ('', '')   # sound names starting with [0] are renamed to start with [1] (4.1's names that
+                                            # SEPRESET.SGO lacks, EDF6's remake's for the same roles)
+    inert_materials: str = ''   # why the kept material_animation binds no material of the model, on purpose (check_materials)
+    material_pairs: tuple[tuple[str, tuple[tuple[int, int], ...]], ...] = ()   # (key, ((4.1 blob index, slot), ...)):
+                              # 4.1's bare MTAB blobs where the class reads [blob, slot] pairs (material_pairs())
 
 
 @dataclass(frozen=True)
@@ -292,22 +302,43 @@ UFO401_OVERRIDE: tuple[tuple[str, object], ...] = (
 )
 
 
+# 4.1's shot of the Deiroi cannon in E509's bullet_object form (PlasmaBullet01 at 0.5/frame, life 1800, size 6.0, blast 10,
+# colour (0.4, 0.4, 3.0, 1)): E509 has 4.0 / 7.0 / (0.8, 0.4, 2.0, 1).
+DEIROI_SHOT: list = ['PlasmaBullet01', [0, [0, 0.5, 1, 1800, 8, 6.0, 2, 10.0, 12, [0.4, 0.4, 3.0, 1.0], 13, 0.5, 14,
+                                            'ディロイプラズマキャノン着弾'], [0, 60]]]
+
+
 # 4.1's class -> EDF6's (jobs/4bf89026/tmp/alias41: the classes EDF.dll registers, the names each resolves).
+MATERIAL_KEYS = ('material_animation', 'unit_material_animation')
+INERT_E515 = ("4.1's UFO301 has no material animation: E515's four entries (Metal, Translucent1) bind nothing on its "
+              "model (the parse skips names it does not find, EDF+0x1104350), the slots only have to exist")
 ALIASES: dict[str, Alias] = {
     # UfoCarrier301 / 401 -> UfoCarrier508 (EDF5's carrier): the same job (hover, open the hatches, drop the enemies
     # the mission names); 508 also turns two rings 4.1's carriers do not have: its players in_ring / out_ring grafted
     # with clips that move nothing; keys UfoCarrier_InRingRotationSpeed, se_fly_name, se_list,
     # game_object_destroy_score_adjust from E508_CARRIER (its sounds are in tikyuu4_en_UFOcarrier301.acb, 4.1's bank).
-    'UFOCARRIER301.SGO': Alias('UfoCarrier508', 'E508_CARRIER.SGO', ('in_ring', 'out_ring')),
-    'UFOCARRIER401.SGO': Alias('UfoCarrier508', 'E508_CARRIER.SGO', ('in_ring', 'out_ring')),
+    'UFOCARRIER301.SGO': Alias('UfoCarrier508', 'E508_CARRIER.SGO', ('in_ring', 'out_ring'), material_pairs=(('material_animation', ((0, 0), (1, 2), (2, 2))),)),
+    # 4.1's 401 animates its lights in code (flash 3.0 decaying 0.05/frame, death 20.0; 0x24d3c0) on ufosurface / ufoglass;
+    # the template's blobs name E508's Metal / Weakpoint, which its model lacks: the 301's (light0_color + scroll_light0
+    # on ufosurface, the same job) are its animation.
+    'UFOCARRIER401.SGO': Alias('UfoCarrier508', 'E508_CARRIER.SGO', ('in_ring', 'out_ring'),
+                               material_from='UFOCARRIER301.SGO',
+                               # se_list names E508's cues (en_Carrier508_*, the bank of E508's game_sound = EDF6's
+                               # UFOCARRIER301.ACB); 4.1's own names (E4キャリア*) are not in EDF6's SEPRESET.SGO and no
+                               # name there plays a Carrier401 cue, so 508's bank joins 401's (M015: the cue's bank unloaded)
+                               override=(('game_sound', ['app:/sound/adx/tikyuu4_en_UFOcarrier401.acb',
+                                                         'app:/sound/adx/tikyuu4_en_UFOcarrier301.acb']),),
+                               material_pairs=(('material_animation', ((0, 0), (1, 2), (2, 2))),)),
     # UFO301 (and its ace) -> UfoSmall515 (EDF5's imperial UFO): its ufo_* keys are UfoSmall301's own descendants, and
     # it finds no bone by name. It resolves player main (open / close / wakeup) unchecked, and 4.1's UFO has no CAS:
     # E515's, hollowed. material_animation, config, battery_config, bullet_object, level_adjust (its weapon and its
     # level scaling) come from E515. material_animation must not be empty: the constructor builds a slot per element
     # and enables slot 0 unchecked (EDF+0x534497 -> 0x6dc830: an empty list crashed at EDF+0x6dc844, M143 on the real
     # game, 2026-10-12); E515's entries name E515's materials, which 4.1's model lacks: looked up by name, skipped.
-    'UFO301.SGO': Alias('UfoSmall515', 'E515_IMPERIALUFO.SGO', (), override=UFO301_OVERRIDE, own_cas=True),
-    'UFO301ACE.SGO': Alias('UfoSmall515', 'E515_IMPERIALUFO_ACE.SGO', (), override=UFO301ACE_OVERRIDE, own_cas=True),
+    'UFO301.SGO': Alias('UfoSmall515', 'E515_IMPERIALUFO.SGO', (), override=UFO301_OVERRIDE, own_cas=True,
+                             inert_materials=INERT_E515),
+    'UFO301ACE.SGO': Alias('UfoSmall515', 'E515_IMPERIALUFO_ACE.SGO', (), override=UFO301ACE_OVERRIDE, own_cas=True,
+                                inert_materials=INERT_E515),
     # UFO401 -> UfoSmall507 (EDF5's gold UFO, its remake). 507 finds bones body (the aim's frame, never moved),
     # gun_side (yawed toward the target each frame) and gun (pitched) by name, and the MAB locator 銃口 on a bone:
     # missing, a null write at EDF+0x529067 (jobs/4bf89026/tmp/ufo401/NOTES.txt). 4.1's UFO401 keeps center (its
@@ -322,6 +353,8 @@ ALIASES: dict[str, Alias] = {
                         bones=(('insert', 'body', 'center'), ('insert', 'gun_side', 'center'),
                                ('insert', 'gun', 'gun_side')),
                         locator_nodes=(('銃口', 'gun'),),
+                        # 4.1's names (EDF4小型UFO*) are not in EDF6's SEPRESET.SGO: silent; the remake's, same roles
+                        se_prefix=('EDF4小型UFO', '小型UFO507'),
                         pad=('se_table',)),
     # Hector (301, cannons on both arms) -> EDF6_Berserker_Large: a walking robot with guns (jobs/4bf89026/tmp/alias41
     # REPORT.md; jobs/4bf89026/tmp/hector41 NOTES.md lists every name the class looks up). The class's template is
@@ -352,7 +385,180 @@ ALIASES: dict[str, Alias] = {
     #   empty list is the loop's own early exit (0x53D184). The states walk_battle_f / b / l / r, which the class asks
     #   for in a fight and a missing state refuses, are Hector's own walks, so it does not stand still while it moves.
     **{root: hector_alias(g, l, r) for root, (g, l, r, _n) in HECTOR_VARIANTS.items()},
+    # Deiroi (5 variants): EDF6's Deiroi is 4.1's class with every constant moved into the SGO, and its constructor reads
+    # deiroi_battery_config / deiroi_moving_settings / bullet_object / charge_param unchecked (EDF+0x319566, 0x31981c): 4.1's
+    # file has none of them. E509_DEIROI_S supplies them; the shot is 4.1's (DEIROI_SHOT). The 0.7 level_adjust is the S
+    # variant's own, so only DEIROI401S keeps it (jobs/4bf89026/tmp/behav_rest/NOTES_direct.md section 2).
+    **{root: Alias('Deiroi', 'E509_DEIROI_S.SGO', (), override=(('bullet_object', DEIROI_SHOT),),
+                   # E509's 4 entries are loop, loop, once, hold (slots 0, 0, 1, 2; 0x31d540): 4.1's loop blob and its other
+                   material_pairs=(('material_animation', ((0, 0), (0, 0), (1, 1), (1, 2))),),
+                   drop=() if root == 'DEIROI401S.SGO' else ('game_object_level_adjust',))
+       for root in ROOTS if root.startswith('DEIROI401')},
+    # AlienTrailer (5 variants) -> E513_SHIELDBEARER, the same object (EDF5's remake): se_list from it (the class reads it
+    # unchecked, EDF+0x30a4d7; 4.1 hard-codes the same six names), and the two unit material animations as [blob, slot]
+    # pairs, three of them (EDF+0x6dc6b0 / 0x312e80).
+    **{root: Alias('AlienTrailer', 'E513_SHIELDBEARER.SGO', (),
+                   material_pairs=tuple((k, ((0, 0), (1, 2), (1, 2))) for k in MATERIAL_KEYS))
+       for root in ROOTS if root.startswith('ALIENTRAILER401')},
 }
+
+# Files that are not roots (the closure of one) but need their class swapped: 4.1's Deiroi beam foot is class
+# DeiroiFootParts_Beam, which EDF6 does not register (only _Battery, _Joint, _Toe); EDF6's Battery reads the shot,
+# charge and firing keys 4.1's part does not have (E509's, with 4.1's numbers: 600 bolts of LaserBullet02, 20 per frame,
+# 30 frames, the range min(L + 200, 400), charge 240 frames; the +1.0 damage term needs a plugin, NOTES_direct.md 2.4).
+PART_ALIASES: dict[str, Alias] = {
+    'DEIROIFOOTPARTS_BEAM.SGO': Alias(
+        'DeiroiFootParts_Battery', 'E509_DEIROIFOOTPARTS_BEAM.SGO', (), override=(
+            ('bullet_object', ['LaserBullet02', [0, [0, 20.0, 1, 30, 8, 1.2, 10, 0.001, 11, 0.9, 12, [1.0, 1.0, 4.0, 1.0]],
+                                                   [0]]]),
+            ('deiroi_battery_config', ['発射口', ['bullet_object', 600, 0.0, 1.0, 0, 'ディロイレーザー照射', 1],
+                                       'charge_param', 240, 0]),
+            ('deiroi_fire_config', [200.0, 1.0, 400.0, 0, [600.0, 0.02]]))),
+}
+
+
+
+def soldier_talk(members: dict) -> None:
+    """AssultSoldier's game_object_talk_setting [sgo, a, b, c]: 4.1 (EDF41 0x28cbd0) c = the variant count, EDF6
+    (EDF+0x545670) b = the variant count and c a bool; read as it is, the voice always plays variant 0."""
+    t = members['game_object_talk_setting']
+    members['game_object_talk_setting'] = [t[0], t[1], t[3], t[2], *t[4:]]
+
+
+# Vehicle501_FortressRobo's keys EDF6 reads in another shape (EDF+0x6025c7: booster_setting is [[name, 0/1], ...] and,
+# non-empty, needs booster_param_list; vehicle_riding_position has 7 items, EDF+0x62b430). The values are the ones EDF6's own
+# object of the class (V515_RETROBALAM) holds, the 4 boosters 4.1 names kept (L1, R1 group 0; L2, R2 group 1).
+V501_FIX: tuple[tuple[str, object], ...] = (
+    ('booster_setting', [['ブースターL1', 0.0], ['ブースターR1', 0.0], ['ブースターL2', 1.0], ['ブースターR2', 1.0]]),
+    ('booster_param_list', [[40.0, 40.0], [10.0, 10.0]]),
+    ('se_damage_scaling', [0.5, 1.0, 2.0, 1.0]),
+    ('vehicle_riding_position',
+     [['搭乗口１', '操縦席１', ['カメラ１', 0.0, 0.0], '501_FORTRESSROBO_DRIVER', 15.0, 0.0, 3.0]]),
+    ('ragdoll_contact', ['バラム衝撃', 2000.0, 0.5, 10.0, 120.0]),
+    ('mission_setup', [[1.0, 1.0], [], []]),   # 4.1's [0, 0] third item is a weapon list in EDF6's reading
+)
+
+
+def set_keys(pairs: tuple[tuple[str, object], ...]) -> Callable[[dict], None]:
+    def apply(members: dict) -> None:
+        for k, v in pairs:
+            members[k] = v
+    return apply
+
+
+# Roots kept as 4.1's own file (the class is EDF6's of the same name) with the keys whose shape or meaning differ fixed.
+PATCHES: dict[str, Callable[[dict], None]] = {
+    'AIARMYSOLDIER_OMG.SGO': soldier_talk, 'AIARMYSOLDIER_OMG_LEADER.SGO': soldier_talk,
+    'VEHICLE501_FORTRESSROBO.SGO': set_keys(V501_FIX), 'VEHICLE501_FORTRESSROBO_AI.SGO': set_keys(V501_FIX),
+}
+
+
+def mtab_materials(blob: bytes) -> list[str]:
+    """The material names an MTAB blob animates (EDF+0x1104350: int32 count at +0xc, entries of 12 bytes at +0x18's
+    offset, each with a relative offset to the material's name, UTF-16, at +4)."""
+    n, base = struct.unpack_from('<ii', blob, 0xc)[0], struct.unpack_from('<i', blob, 0x18)[0]
+    names = []
+    for i in range(n):
+        at = base + 12 * i   # EDF+0x1104408..0x110440c: the offset at +4 is relative to the entry
+        p = at + struct.unpack_from('<i', blob, at + 4)[0]
+        q = p
+        while blob[q:q + 2] != bytes(2):
+            q += 2
+        names.append(blob[p:q].decode('utf-16-le'))
+    return names
+
+
+def material_data(data: bytes) -> tuple[dict[str, list], list[tuple[str, str]]]:
+    """({MATERIAL_KEYS key: its entries}, [(RAB app path, MDB name) of the models]) of an object SGO in either form. An
+    entry is [blob, slot] in a legacy SGO (bytes, int) and (blob, slot) in a DSGO (animation_model/material_animation)."""
+    if data[:4] == b'DSGO':
+        model = dsgo.parse(data).root.get('animation_model')
+        entries = [[c.items[0].data if isinstance(c.items[0], dsgo.Blob) else None, c.items[1]]
+                   for c in model.get('material_animation').items]
+        return {'material_animation': entries}, [(model.items[0].items[0], model.items[0].items[1])]
+    members = sgo.read(data)[1]
+    refs = [tuple(e[:2]) for e in members['animation_model'][0]]
+    for key in ('unit_model', 'small_barrier_model', 'large_barrier_model'):
+        if key in members:
+            refs += [tuple(e[:2]) for e in members[key][0]]
+    return {k: members[k] for k in MATERIAL_KEYS if k in members}, refs
+
+
+def model_materials(games: 'Games', files: dict[str, bytes], refs: list[tuple[str, str]]) -> set[str]:
+    """Every material name of the MDBs `refs` name (4.1's own, or EDF6's when it is EDF6's)."""
+    out: set[str] = set()
+    for rab, name in refs:
+        rel = rel_of(rab)
+        if rel in files:
+            data = files[rel]
+        elif rel in games.have6:
+            data = games.read6(rel)
+        else:
+            continue   # a _light.rab 4.1 does not ship either
+        for f in mdb.rab_read(data).files:
+            if f.name.lower() == name.lower():
+                md = mdb.mdb_read(f.data)
+                out |= {md.name_of(x.name) for x in md.materials}
+    return out
+
+
+def check_materials(games: 'Games', files: dict[str, bytes], rel: str, need: dict[str, int], inert: str = '') -> None:
+    """ValueError when a material animation of `rel` cannot work (like check_states):
+    - an entry is not a [MTAB blob, slot] pair: a bare blob hands EDF+0x6dc050 a null data pointer and the per-frame
+      update derefs it (EDF+0x1101102, the M112 crash of UFOCARRIER301);
+    - the list has fewer entries than the class indexes (`need`: the template's count): the class enables slots by
+      number unchecked (EDF+0x6dc830, mov byte [rdx], 1 with rdx the missing slot's null player, the M113 crash of
+      Hector: 2 entries, the class uses 4);
+    - an entry animates no material its model has, unless `inert` says why that is meant (its blob then binds
+      nothing: EDF+0x1104350 skips the names it does not find, the slot only has to exist)."""
+    found, refs = material_data(files[rel])
+    mats = model_materials(games, files, refs)
+    for key, entries in found.items():
+        if len(entries) < need.get(key, 0):
+            raise ValueError(f'{rel}: {key} has {len(entries)} entries, the class indexes {need[key]}')
+        for i, e in enumerate(entries):
+            blob, slot = e[0], e[1]
+            if not (isinstance(blob, bytes) and blob[16:20] == b'MTAB' and isinstance(slot, (int, float))
+                    and int(slot) in (0, 1, 2)):
+                raise ValueError(f'{rel}: {key}[{i}] is not a [MTAB blob, slot] pair')
+            if not inert and not any(n in mats for n in mtab_materials(blob)):
+                raise ValueError(f'{rel}: {key}[{i}] animates {mtab_materials(blob)}, the model has {sorted(mats)}')
+
+
+SE_KEYS = ('se_list', 'se_table', 'ufo_se')   # object keys holding SEPRESET names (docs/sound-re.md section 2)
+RESIDENT_BANKS = ('TIKYUUX_SE.ACB',)           # loaded for every mission (docs/sound-re.md section 1)
+
+
+def sound_cues(games: 'Games') -> tuple[dict[str, str], dict[str, set[str]]]:
+    """({SEPRESET name: its cue}, {bank file name: its cues}) of the EDF6 install (cached on `games`)."""
+    if not hasattr(games, 'seset'):
+        root = dsgo.parse(games.read6('SOUND/SEPRESET.SGO')).root
+        games.seset = {n: root.items[i].items[0] for i, n in root.names.items()}
+        folder = os.path.join(games.edf6_root, 'SOUND', 'PC')
+        games.banks = {}
+        for name in os.listdir(folder):
+            if name.upper().endswith('.ACB'):
+                with open(os.path.join(folder, name), 'rb') as f:
+                    games.banks[name.upper()] = set(acb.cue_names(f.read()))
+    return games.seset, games.banks
+
+
+def check_sounds(games: 'Games', data: bytes, rel: str) -> None:
+    """ValueError when a sound name of the object (SE_KEYS) cannot play: it is not in SEPRESET.SGO (an empty preset:
+    silent), or its cue is in no bank the object lists in game_sound nor in a resident one (the player the cue names is
+    null: the M015 crash of UFOCARRIER, the sound system derefs it at EDF+0x240AD0 via 0x7B3310 / 0x6ABF50)."""
+    members = dsgo.to_py(dsgo.parse(data).root) if data[:4] == b'DSGO' else sgo.load(data=data)
+    names = [n for k in SE_KEYS for n in strings(members.get(k)) if n]
+    if not names:
+        return
+    seset, banks = sound_cues(games)
+    loaded = set(RESIDENT_BANKS) | {s.rsplit('/', 1)[-1].upper() for s in strings(members.get('game_sound'))}
+    cues = set().union(*(banks.get(b, set()) for b in loaded))
+    for n in names:
+        if n not in seset:
+            raise ValueError(f'{rel}: sound {n!r} is not in SEPRESET.SGO')
+        if seset[n] not in cues:
+            raise ValueError(f'{rel}: sound {n!r} plays cue {seset[n]}, which none of {sorted(loaded)} holds')
 
 
 def strings(v: object) -> list[str]:
@@ -445,6 +651,7 @@ def convert(games: Games, rel: str) -> bytes:
 class StandIn:
     template: str             # the EDF6 object in its place (OBJECT/<name>, 4.1's SGO format)
     model: tuple[str, str]    # its animation_model[0]: (RAB, MDB)
+    override: tuple[tuple[str, object], ...] = ()   # top-level keys set to 4.1's values (the template's differ)
 
 
 # Files these need that the tools already ship elsewhere: Mods path -> path under the tools' data (not copied again).
@@ -453,7 +660,12 @@ SHARED: dict[str, str] = {'OBJECT/V505_TANKEDF4.MRAB': 'edf5port/assets/OBJECT/V
 STAND_INS: dict[str, StandIn] = {
     # 4.1's AI tank (13 missions): class VehicleTank301, keys none of which EDF6's tank (Vehicle505_Tank) has. EDF6's
     # AI tank on EDF5's Blacker No.4.1 model (the same tank, EDF5's remake; P3 ships it converted, SHARED).
-    'VEHICLE301_TANK_AI.SGO': StandIn('V505_TANK_AI.SGO', ('app:/Object/v505_tankedf4.mrab', 'v505_tankedf4.mdb')),
+    'VEHICLE301_TANK_AI.SGO': StandIn('V505_TANK_AI.SGO', ('app:/Object/v505_tankedf4.mrab', 'v505_tankedf4.mdb'), (
+        # 4.1 VehicleTank301's values for the keys EDF6's tank reads the same way (jobs/4bf89026/tmp/behav_rest/
+        # NOTES_tank.md): the route-point radius (4.1 0x290200 tests distance^2 < 3^2), the water line. Its attack
+        # (turn gain, reverse past 126 deg, turret 20 deg/s, aim gate 0.1 rad, the cannon) is EDF6's already.
+        ('game_object_ai_route_update_distance', 3.0),
+        ('car_base_submerge_height', 1.7))),
 }
 
 
@@ -462,6 +674,10 @@ def stand_in(games: Games, s: StandIn) -> tuple[bytes, list[str]]:
     version, members = sgo.read(games.read6('OBJECT/' + s.template))
     am = members['animation_model']
     am[0] = [s.model[0], s.model[1]]
+    for k, v in s.override:
+        if k not in members:
+            raise ValueError(f'{s.template}: no key {k} to override')
+        members[k] = v
     need = [r for r in (rel_of(s.model[0]),) if r not in games.have6]
     missing = [r for r in need if r not in SHARED]
     if missing:
@@ -484,9 +700,20 @@ def alias(games: Games, root: str, files: dict[str, bytes], a: Alias) -> None:
         raise ValueError(f'{a.template}: SGO {t_version:#x}, not {version:#x} as {root}')
     members['xgs_scene_object_class'] = a.cls
     for k, v in theirs.items():
-        members.setdefault(k, v)
+        if k not in a.drop:
+            members.setdefault(k, v)
     for k, v in a.override:
         members[k] = v
+    if a.material_from:
+        members['material_animation'] = sgo.read(legacy_sgo.convert(games.read4('OBJECT/' + a.material_from)))[1][
+            'material_animation']
+    for k, layout in a.material_pairs:
+        members[k] = material_pairs(members[k], layout)
+    if a.se_prefix[0]:
+        for k in SE_KEYS:
+            if k in members:
+                members[k] = [a.se_prefix[1] + n[len(a.se_prefix[0]):] if n.startswith(a.se_prefix[0]) else n
+                              for n in members[k]]
     for k in a.pad:
         mine, full = members.get(k), theirs.get(k)
         if isinstance(mine, list) and isinstance(full, list) and len(mine) < len(full):
@@ -503,7 +730,7 @@ def alias(games: Games, root: str, files: dict[str, bytes], a: Alias) -> None:
         members['animation_model'][2] = mab_legacy.mab_retarget(members['animation_model'][2], locator, node)
     am = members.get('animation_model')
     cas = rel_of(am[1]) if isinstance(am, list) and len(am) > 1 and isinstance(am[1], str) else None
-    t_am = theirs['animation_model']
+    t_am = theirs.get('animation_model')   # a part (animation_model_d) has none: no CAS to graft
     if a.own_cas:
         if cas:
             raise ValueError(f'{root} has a CAS of its own: own_cas is for an object without one')
@@ -511,7 +738,21 @@ def alias(games: Games, root: str, files: dict[str, bytes], a: Alias) -> None:
         files[cas] = cas_graft.hollow(games.read6(rel_of(t_am[1])))
         members['animation_model'] = [am[0], 'app:/' + cas.lower(), *am[2:]]
     files[rel] = sgo.write_depth_first(version, members)
-    graft_cas(games, a, files, cas, rel_of(t_am[1]) if isinstance(t_am[1], str) else '')
+    graft_cas(games, a, files, cas, rel_of(t_am[1]) if t_am and isinstance(t_am[1], str) else '')
+    check_materials(games, files, rel, {k: len(theirs[k]) for k in MATERIAL_KEYS if k in theirs}, a.inert_materials)
+    check_sounds(games, files[rel], rel)
+
+
+def material_pairs(blobs: list, layout: tuple[tuple[int, int], ...]) -> list:
+    """[blob, ...] (4.1's bare MTAB blobs, bytes as sgo.read gives them) -> [[blob, slot], ...], the form the classes'
+    reader takes (EDF+0x6dc6b0 / Deiroi 0x31d540: a sub-array per entry, blob first, int slot at +0x14; a bare blob gave
+    it a null data pointer, which the per-frame update derefs, EDF+0x1101102). `layout` lists the entries the class
+    indexes, each (index of 4.1's blob, slot): 4.1 passes slot 0 with the blob whose first dword is 1 (a loop) and 2 with
+    the others (UfoCarrier301 0x24bb10, Deiroi 0x1de02f / 0x1de06c); the classes index more entries than 4.1 has, so
+    some blobs serve twice. Already pairs: kept."""
+    if not all(isinstance(b, bytes) for b in blobs):
+        return blobs
+    return [[blobs[i], slot] for i, slot in layout]
 
 
 def dsgo_value(v: object) -> dsgo.Value:
@@ -699,8 +940,11 @@ def alias_dsgo(games: 'Games', root: str, files: dict[str, bytes], a: Alias, t_d
     grid.items[1] = dsgo.Node([lo[0] - 0.25, lo[1] - 1.0, lo[2] - 0.25])
     grid.items[2] = dsgo.Node([hi[0] + 0.25, hi[1] + 0.25, hi[2] + 0.25])
     blob = mine['material_animation'][0]
-    slot = 0.0 if struct.unpack_from('<I', blob, 0)[0] == 1 else 2.0
-    model.items[4] = dsgo.Node([dsgo.Node([dsgo.Blob(blob, 2), slot]) for _ in body.materials])
+    # Berserker's base class enables material animation slots by number, unchecked (EDF+0x6dc830): 0 and 2 at spawn and on
+    # a hit (0x348d1d, 0x33ef81 -> 0x6c0200), 1 and 3 elsewhere (0x34b2de, 0x37acde). A list shorter than the template's
+    # (4) hands it the memory past its end: a null player (M113) or whatever text follows (M131, "NT02"). 4.1 has one
+    # animation, its glow: it serves every slot, with the template's mode for each.
+    model.items[4] = dsgo.Node([dsgo.Node([dsgo.Blob(blob, 2), c.items[1]]) for c in t_am.get('material_animation').items])
     out.set('animation_model', model)
 
     if a.guns:
@@ -718,6 +962,8 @@ def alias_dsgo(games: 'Games', root: str, files: dict[str, bytes], a: Alias, t_d
     graft_cas(games, a, files, cas, template_cas)
     check_states(out, files.get(cas), rel)
     files[rel] = dsgo.compact(dsgo.Document(out, doc.pool))
+    check_materials(games, files, rel, {'material_animation': len(t_am.get('material_animation').items)})
+    check_sounds(games, files[rel], rel)
     if a.prune:
         prune(files, rel)
 
@@ -913,6 +1159,21 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
                 alias(games, root, out, ALIASES[root])
             except ValueError as e:
                 why.append(f'alias {ALIASES[root].cls}: {e}')
+        if not why and root in PATCHES:
+            version, members = sgo.read(out[rel])
+            PATCHES[root](members)
+            out[rel] = sgo.write_depth_first(version, members)
+        if not why and root not in ALIASES:
+            try:
+                check_materials(games, out, rel, {})
+                check_sounds(games, out[rel], rel)
+            except ValueError as e:
+                why.append(str(e))
+        for part in [r for r in out if r not in files and r.split('/', 1)[1] in PART_ALIASES]:
+            try:
+                alias(games, part.split('/', 1)[1], out, PART_ALIASES[part.split('/', 1)[1]])
+            except ValueError as e:
+                why.append(f'alias {part}: {e}')
         if why:
             skipped.append({'object': rel, 'reason': '; '.join(why)})
             continue
