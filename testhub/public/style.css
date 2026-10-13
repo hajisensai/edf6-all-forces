@@ -29,7 +29,12 @@ pre, code { background: var(--code); border-radius: 6px; }
 pre { padding: 10px; white-space: pre-wrap; word-break: break-word; margin: 8px 0; font: 13px/1.5 ui-monospace, Consolas, monospace; }
 .badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 99px; border: 1px solid currentColor; }
 .s-todo, .r-info { color: var(--info); } .s-verify, .r-new { color: var(--warn); } .s-pass, .r-pass { color: var(--ok); }
-.s-fail, .r-fail { color: var(--bad); } .s-closed { color: var(--muted); }
+.s-fail, .r-fail { color: var(--bad); } .s-closed { color: var(--muted); } .s-done { color: var(--ok); }
+.h-open { color: var(--info); } .h-doing, .h-verify { color: var(--warn); } .h-done { color: var(--ok); } .h-closed { color: var(--muted); }
+.reportsTable th { font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--line); }
+.reportsTable td { border-bottom: 1px solid var(--line); vertical-align: middle; }
+.reportsTable tr.finished td { opacity: .65; }
+.reportsTable .noteCell { min-width: 12em; overflow-wrap: anywhere; }
 .case { border-top: 1px solid var(--line); padding: 12px 0; }
 .case:first-of-type { border-top: 0; }
 .case h3 { font-size: 15px; margin: 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

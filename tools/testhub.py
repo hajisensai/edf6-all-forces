@@ -10,13 +10,16 @@ The account (given by the developer) is asked once and kept in %APPDATA%/EDF6All
 Developer side:
   python tools/testhub.py state                          builds, cases, the last reports
   python tools/testhub.py pull [--since N] [--out DIR]   reports after #N with their files, into DIR (default tmp/testhub)
-  python tools/testhub.py reply ID TEXT                  answer a report (shown under it on the page)
+  python tools/testhub.py reply ID TEXT [--status S]     answer a report (shown under it on the page), optionally
+                                                         setting its handling status in the same step
+  python tools/testhub.py status ID S                    a report's handling status (the page's 处理状态 column)
   python tools/testhub.py case add TITLE [--steps T] [--status S] [--note T] [--sort N]
   python tools/testhub.py case set ID [--title T] [--steps T] [--status S] [--note T] [--sort N]
   python tools/testhub.py publish ZIP [--channel test] [--notes TEXT] [--commit SHA]
   python tools/testhub.py plan [--group G]                a group's level outline and proposals (players' text fenced)
   python tools/testhub.py digests [DIR]                   upload tools/make_mission_digest.py's output (default tmp/digests)
-  status: todo / verify (fixed, to be checked) / pass / fail / closed.
+  case status: todo / verify (fixed, to be checked) / pass / fail / done / closed.
+  report status: open (待处理) / doing (处理中) / verify (已修待确认) / done (已完成) / closed (不处理).
 The developer's account comes from $EDF6_TESTHUB_AUTH (user:password) or the same json file.
 """
 from __future__ import annotations
@@ -45,6 +48,9 @@ LOG_TAIL = 12 << 20           # the last 12 MB of each log: the plugin's log gro
 DUMP_MAX = 60 << 20           # crash dumps bigger than this stay home
 DUMP_AGE = 3 * 86400
 UPLOAD_MAX = 95 << 20
+PART_SIZE = 32 << 20          # a build bigger than one request goes up in parts this size (R2 multipart: >= 5 MiB;
+                              # the worker holds one part in memory, its limit is 128 MB)
+REPORT_STATUSES = ('open', 'doing', 'verify', 'done', 'closed')
 RESULTS = {'1': ('pass', '修好了'), '2': ('fail', '还有问题'), '3': ('new', '发现新问题'), '4': ('info', '只是补充信息')}
 
 
@@ -320,7 +326,7 @@ def _print_state(st: dict) -> None:
         print(f'case   #{c["id"]} [{c["status"]}] {c["title"]}')
     for r in st['reports'][:10]:
         files = ', '.join(f['name'] for f in r['files'])
-        print(f'report #{r["id"]} case {r["case_id"]} {r["result"]} by {r["author"]} {r["version"]}'
+        print(f'report #{r["id"]} [{r.get("status") or "open"}] case {r["case_id"]} {r["result"]} by {r["author"]} {r["version"]}'
               f'{" reply✓" if r["reply"] else ""}  {r["note"][:80]!r} {files}')
 
 
@@ -405,16 +411,47 @@ def _upload_digests(hub: Hub, folder: str) -> None:
     print(f'\n已上传 {len(index)} 关的脚本整理')
 
 
-def _publish(hub: Hub, zpath: str, channel: str, notes: str, commit: str) -> None:
+def _publish(hub: Hub, zpath: str, channel: str, notes: str, commit: str, part_size: int = PART_SIZE) -> dict:
+    """A build zip into the site: one request when it fits (UPLOAD_MAX, the worker hashes it), otherwise in parts
+    (R2 multipart; the hash is ours, over the whole zip, and the installer checks downloads against it)."""
     name = os.path.basename(zpath)
     stem = name[:-4]
     version = stem.split('-', 1)[1] if '-' in stem else stem
     with open(zpath, 'rb') as f:
         data = f.read()
-    q = urllib.parse.urlencode({'name': name, 'version': version, 'channel': channel, 'commit': commit})
-    with hub.request('PUT', f'/api/build?{q}', data, {'Content-Type': 'application/zip',
-                                                      'X-Notes': urllib.parse.quote(notes)}, timeout=600) as r:
-        print(r.read().decode('utf-8'))
+    meta = {'name': name, 'version': version, 'channel': channel, 'commit': commit}
+    head = {'X-Notes': urllib.parse.quote(notes)}
+    if len(data) <= UPLOAD_MAX:
+        q = urllib.parse.urlencode(meta)
+        with hub.request('PUT', f'/api/build?{q}', data, {'Content-Type': 'application/zip', **head}, timeout=600) as r:
+            out = json.loads(r.read().decode('utf-8'))
+        print(json.dumps(out, ensure_ascii=False))
+        return out
+    sha = hashlib.sha256(data).hexdigest()
+    up = hub.post_json('/api/build/start?' + urllib.parse.urlencode({'name': name}), {})['upload_id']
+    where = urllib.parse.urlencode({'name': name, 'upload_id': up})
+    try:
+        parts = []
+        for n, at in enumerate(range(0, len(data), part_size), 1):
+            with hub.request('PUT', f'/api/build/part?{where}&part={n}', data[at:at + part_size],
+                             {'Content-Type': 'application/octet-stream'}, timeout=600) as r:
+                parts.append(json.loads(r.read().decode('utf-8')))
+            print(f'  part {n}: {min(at + part_size, len(data)) >> 20}/{len(data) >> 20} MB', flush=True)
+        body = json.dumps({'parts': parts, 'size': len(data), 'sha256': sha}).encode('utf-8')
+        q = urllib.parse.urlencode({**meta, 'upload_id': up})
+        with hub.request('POST', f'/api/build/finish?{q}', body, {'Content-Type': 'application/json', **head},
+                         timeout=600) as r:
+            out = json.loads(r.read().decode('utf-8'))
+    except BaseException:
+        try:
+            hub.post_json(f'/api/build/abort?{where}', {})
+        except HubError:
+            pass
+        raise
+    if out.get('sha256') != sha or out.get('size') != len(data):
+        raise HubError(f'测试站记录的 {out} 与本地 {len(data)} 字节 / {sha} 不符')
+    print(json.dumps(out, ensure_ascii=False))
+    return out
 
 
 def main(argv: list[str]) -> int:
@@ -427,6 +464,10 @@ def main(argv: list[str]) -> int:
     p = sub.add_parser('reply')
     p.add_argument('id', type=int)
     p.add_argument('text')
+    p.add_argument('--status', choices=REPORT_STATUSES)
+    p = sub.add_parser('status')
+    p.add_argument('id', type=int)
+    p.add_argument('status', choices=REPORT_STATUSES)
     p = sub.add_parser('case')
     p.add_argument('action', choices=('add', 'set'))
     p.add_argument('target', help='title (add) or id (set)')
@@ -451,7 +492,12 @@ def main(argv: list[str]) -> int:
     elif a.cmd == 'pull':
         _pull(hub, a.since, os.path.normpath(a.out))
     elif a.cmd == 'reply':
-        print(hub.post_json('/api/reply', {'report_id': a.id, 'text': a.text}))
+        body = {'report_id': a.id, 'text': a.text}
+        if a.status:
+            body['status'] = a.status
+        print(hub.post_json('/api/reply', body))
+    elif a.cmd == 'status':
+        print(hub.post_json('/api/report_status', {'report_id': a.id, 'status': a.status}))
     elif a.cmd == 'case':
         body = {k: v for k, v in (('title', a.title), ('steps', a.steps), ('status', a.status),
                                   ('dev_note', a.note), ('sort', a.sort)) if v is not None}

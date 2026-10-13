@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS cases (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT NOT NULL,
   steps TEXT NOT NULL DEFAULT '',
-  status TEXT NOT NULL DEFAULT 'todo', -- todo / verify / pass / fail / closed
+  status TEXT NOT NULL DEFAULT 'todo', -- todo / verify / pass / fail / done / closed
   dev_note TEXT NOT NULL DEFAULT '',
   sort INTEGER NOT NULL DEFAULT 0,
   updated_at INTEGER NOT NULL
@@ -29,7 +29,9 @@ CREATE TABLE IF NOT EXISTS reports (
   source TEXT NOT NULL DEFAULT 'web', -- web / exe
   at INTEGER NOT NULL,
   reply TEXT NOT NULL DEFAULT '',
-  reply_at INTEGER
+  reply_at INTEGER,
+  status TEXT NOT NULL DEFAULT 'open', -- the developer's handling: open / doing / verify / done / closed (migrations/0001)
+  status_at INTEGER
 );
 CREATE TABLE IF NOT EXISTS files (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

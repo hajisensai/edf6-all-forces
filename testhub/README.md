@@ -9,9 +9,13 @@ Cloudflare Worker + D1（测试版、测试项、反馈的元数据）+ R2（安
 |---|---|---|
 | CI | 推 main → 本站 `nightly`；在任意分支手动运行 Build → `test`（修复合并前先发给测试者） | `.github/workflows/build.yml` 的「Mirror to the test site」，需要仓库 secret `EDF6_TESTHUB_AUTH`（开发者账号 `user:password`） |
 | 测试者 | 安装器 3 = 下载最新测试版（校验 SHA-256，解压到 exe 旁边）；4 = 回传日志 | `tools/installer.py` → `tools/testhub.py`。回传带上 Mods/Plugins 的全部 `.log`（各留最后 12 MB）/`.ini`、ModLoader 日志、安装清单、各 DLL 的 sha256 与 PE 时间戳、三天内最新的 EDF6 崩溃转储。游戏开着也能传（插件日志是共享读打开的）。账号第一次输入后存在 `%APPDATA%\EDF6AllForces\testhub.json` |
-| 开发者 | 看反馈、拉日志、回复、改测试项、手动发包 | `python tools/testhub.py state / pull / reply / case add|set / publish`（`EDF6_TESTHUB_AUTH=user:password`） |
+| 开发者 | 看反馈、拉日志、回复、标处理状态、改测试项、手动发包 | `python tools/testhub.py state / pull / reply [--status S] / status ID S / case add|set / publish`（`EDF6_TESTHUB_AUTH=user:password`） |
 
-测试项状态：`todo` 待测 / `verify` 已修待验证 / `pass` / `fail` / `closed`。测试者提交「还有问题」时该项自动变 `fail`。
+测试项状态：`todo` 待测 / `verify` 已修待验证 / `pass` / `fail` / `done` 已完成 / `closed`。测试者提交「还有问题」时该项自动变 `fail`。
+
+反馈的处理状态（页面「反馈记录」上方一览表的「处理状态」列，开发者在表里直接改，其他人只读）：
+`open` 待处理（新反馈默认）/ `doing` 处理中 / `verify` 已修待确认 / `done` 已完成 / `closed` 不处理。
+回复时可以顺手标状态：`testhub.py reply 12 "已在 abc1234 修复" --status done`；单独改用 `testhub.py status 12 done`。
 
 ## 关卡策划（/plan.html）
 
@@ -51,6 +55,7 @@ node node_modules/wrangler/bin/wrangler.js deploy --config wrangler.toml
 一律带 `--config wrangler.toml`（裸 `wrangler deploy` 在没有配置的目录会以目录名新建一个公开 Worker）。
 本地：`.dev.vars` 写 `ACCOUNTS=` 与 `SESSION_SECRET=`，`wrangler d1 execute edf6-testhub --local --file schema.sql`，再 `wrangler dev`。
 `schema.sql` 全是 `IF NOT EXISTS`，加了新表后对线上库再执行一次即可，不动已有数据。
+给已有表加列走 `migrations/`（按编号各执行一次，`--file migrations/0001-report-status.sql`）：`schema.sql` 已含这些列，新建的库不用执行。
 
 测试：`node --test test/auth.test.mjs test/plan.test.mjs`（Node 22.5+，用内置 `node:sqlite` 加载真实 `schema.sql` 模拟 D1）。
 
@@ -58,3 +63,6 @@ node node_modules/wrangler/bin/wrangler.js deploy --config wrangler.toml
 `python tools/make_mission_digest.py` → `EDF6_TESTHUB_AUTH=dev:… python tools/testhub.py digests` → 给 `ACCOUNTS` 里的人加组名。
 
 限制：单次上传（附件合计）≤ 95 MB（Workers 请求上限 100 MB）；R2 只保留最近 15 个测试版（`KEEP_BUILDS`）。
+测试版超过 95 MB（2026-10-10 起安装包约 113 MB，CI 镜像一直 413）时 `testhub.py publish` 自动改走分块：
+`POST /api/build/start` → 每块 32 MB 一次 `PUT /api/build/part` → `POST /api/build/finish`（带各块 etag、总大小和上传方算的整包 SHA-256，
+大小对不上就丢弃）；中途失败调 `/api/build/abort`。整包 SHA-256 由上传方计算（Worker 的 CPU 预算算不完 100 MB+），安装器下载后按它校验。
