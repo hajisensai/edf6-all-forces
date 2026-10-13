@@ -69,7 +69,7 @@ MAPS: dict[str, tuple[str, tuple[str, ...]]] = {
     'NW_SOUKOGAI01': ('NW_DANTI01', ('CLOUDY2', 'EVENING', 'FINE')),
     'SK_HEIGEN02': ('IG_HEIGEN507', ('CLOUDY',)),                                            # a plain
     'SK_VALLEY01': ('IG_TERRACEMOUNTAIN', ('CLOUDY', 'FINE', 'FINECLOUD')),
-    'SK_KAIGAN01': ('IG_KAIGAN502', ('CLOUDY', 'FINE', 'SUNSET')),                           # a coast
+    'SK_KAIGAN01': ('IG_KAIGAN502', ('CLOUDY', 'CLOUDY2', 'FINE', 'SUNSET')),                           # a coast
     'SK_SANGAKU01': ('IG_SANGAKU506', ('FINE', 'FINECLOUD', 'SUNSET')),
     'SK_SANGAKU02': ('IG_SANGAKU506', ('CLOUDY', 'CLOUDY2', 'FINECLOUD', 'SUNSET')),
     'SK_STEPMOUNTAIN01': ('IG_TERRACEMOUNTAIN', ('EVENING', 'FINE', 'FINECLOUD', 'SUNSET')),
