@@ -1,6 +1,6 @@
-"""Cockpit kits for ground vehicles: real cabs cut out of modelled vehicle interiors (an armoured car's, a cab-over
-truck's, a pickup's: tools/prep_cockpit_ground.py, credits in <model dir>/cockpits/CREDITS_ground.txt; the user,
-2026-10-13: "飞机要有真正座舱是举例子，其他所有载具都应该有", "你塞的这些图片太抽象了，全删了吧"), live screens laid onto
+"""Cockpit kits for ground vehicles: real cabs cut out of modelled vehicle interiors (an MRAP's, an armoured car's, a
+cab-over truck's, a pickup's: tools/prep_cockpit_ground.py, credits in <model dir>/cockpits/CREDITS_ground.txt; the
+user, 2026-10-13: "飞机要有真正座舱是举例子，其他所有载具都应该有", "你塞的这些图片太抽象了，全删了吧"), live screens laid onto
 a stock interior (the kei truck's and the trailer truck's cabs and the troop bays are modelled in the stock models
 already), an open-air rider's tablet and a bike rider's screens beside the stock dashboard, each in a real gauge's
 case. A turret's gunner takes cockpit_kits.tank_gunner. pylib/cockpit_kits.py merges KITS; its docstring has the
@@ -205,18 +205,17 @@ def real_cab(cabin: Cabin, spec: CabSpec) -> Kit:
 
 
 CABS: dict[str, CabSpec] = {
-    # An armoured car's driver (SISU GTP, tamminen): the low, wide windscreen of an MRAP, its pillars and roof
-    # plating; 'status' on the dashboard left of the wheel, 'weapons' on the centre console. The Grape's hull narrows
-    # under the sponsons 0.18 m below the eye (to 0.42 m left of it): the room's sides come in there.
-    'apc_cab': CabSpec('sf-sisu-gtp-10seat',
-                       (('status', (0.36, -0.34, 0.82), 0.16, 0.1), ('weapons', (-0.5, -0.46, 0.86), 0.2, 0.13)),
+    # An MRAP's driver (Oshkosh M-ATV, from Squad; 42manako): its dashboard with the gauges behind the wheel, 'status'
+    # on the switch panel left of them, 'weapons' on the control box right of them. The Grape's hull narrows under
+    # the sponsons 0.18 m below the eye (to 0.42 m left of it): the room's sides come in there.
+    'apc_cab': CabSpec('sf-oshkosh-matv',
+                       (('status', (0.195, -0.2, 0.495), 0.1, 0.08), ('weapons', (-0.43, -0.184, 0.49), 0.1, 0.08)),
                        tuck=0.55, knee=0.12),
-    # Another armoured car's (ARHAN P51, Mayess): the yellow instrument panel behind the wheel ('status'), the switch
-    # console right of it ('weapons'), the radio over the windscreen. The Naegling's hull narrows between its tracks
-    # 0.3 m below the eye (the lower side wall 0.36 m left of it).
-    'tracked_cab': CabSpec('sf-arhan-p51',
-                           (('status', (-0.096, -0.213, 0.49), 0.16, 0.07),
-                            ('weapons', (-0.46, -0.27, 0.46), 0.14, 0.09)),
+    # An armoured car's (GAZ-2330 Tigr, from Squad; 42manako; its steering wheel the ATF Dingo's): the high, wide
+    # windscreen, the gauge panel behind the wheel, 'status' on the dashboard right of it, 'weapons' on the switch
+    # panel by the centre. The Naegling's hull narrows between its tracks 0.3 m below the eye (the lower side wall 0.36 m left).
+    'tracked_cab': CabSpec('sf-gaz-tigr',
+                           (('status', (-0.32, -0.27, 0.58), 0.1, 0.07), ('weapons', (-0.55, -0.19, 0.59), 0.13, 0.07)),
                            tuck=0.65, knee=0.25),
     # A cab-over truck's (ARHAN P880, a MAZ; Mayess; mirrored, driven from the right): the big windscreen, the
     # cluster behind the wheel ('status'), the dashboard's display ('weapons').

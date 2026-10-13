@@ -56,6 +56,20 @@ GLASS = re.compile(r'glass|window|transp|windshield|windscreen', re.I)
 
 
 @dataclass(frozen=True)
+class Extra:
+    """A part borrowed from another Sketchfab model `uid` into a cut (a steering wheel a ripped model lost): its mesh
+    nodes whose names match `node`, the source's unit `scale` metres, kept as it is turned in its own vehicle (both
+    sources look along the same axes as the eye: `ahead` +z, `up` +y), its bounding box's centre moved to `at` in the
+    eye frame."""
+    uid: str
+    title: str
+    author: str
+    node: str
+    scale: float
+    at: Vec3
+
+
+@dataclass(frozen=True)
 class Source:
     """A cab cut from Sketchfab model `uid` (<assets>/sketchfab/<uid>/model.glb) into parts/<asset>/: the eye at `eye`
     (the source's coordinates) looking along `ahead` with `up` up, the source's unit `scale` metres; `mirror`: the
@@ -73,15 +87,10 @@ class Source:
     mirror: bool = False
     drop: tuple[str, ...] = ()
     shows: str = ''
+    extras: tuple[Extra, ...] = ()
 
 
 SOURCES = (
-    Source('sf-sisu-gtp-10seat', '7100033510ba4ccebfaac7877b63638e', 'SISU GTP 4x4 Armored Vehicle 10 Seater version',
-           'tamminen', (-0.45, 2.3, 0.59), (-1.0, 0.0, 0.0), (0.0, 1.0, 0.0), ((-1.9, -1.2, -0.9), (0.9, 0.6, 2.0)),
-           drop=('^floor',), shows="an armoured car's driver's station: dashboard, wheel, pillars and roof"),
-    Source('sf-arhan-p51', '6f92e0acc0d44989a6ae3b74fc67cc62', 'ARHAN P51 "VALTRA"', 'Mayess', (27.0, 33.5, -178.0),
-           (0.0, 0.0, 1.0), (0.0, 1.0, 0.0), ((-1.9, -1.3, -1.0), (0.9, 0.7, 1.6)), scale=0.018,
-           shows="an armoured car's driver's station: dashboard with its gauges, wheel, radio console, doors"),
     Source('sf-arhan-p880', 'a85231fbbfac482ea0bb3fc7e2758cd8', 'ARHAN P880 6x6', 'Mayess', (0.2, 0.45, -0.42),
            (0.0, 0.0, 1.0), (0.0, 1.0, 0.0), ((-0.9, -1.4, -0.45), (2.0, 1.0, 1.5)), scale=2.4, mirror=True,
            shows="a cab-over truck's cab (mirrored: driven from the right): dashboard, wheel, the big windscreen's "
@@ -90,6 +99,19 @@ SOURCES = (
            'DanielZhabotinsky', (0.0, 1.42, -0.38), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0),
            ((-0.6, -1.0, -0.7), (1.3, 0.5, 1.3)), mirror=True,
            shows="a pickup's cab (mirrored: driven from the right): dashboard with its gauges, wheel, doors, roof"),
+    # An Oshkosh M-ATV's (from Squad, as its uploader says): a real MRAP's driver's station, its dashboard's gauges,
+    # switch panels and the GPS on its mount.
+    Source('sf-oshkosh-matv', '1585f5837cda40a3944e45c73166d64c', 'Oshkosh M-ATV (woodland)', '42manako',
+           (-0.84, 2.595, 3.244), (-1.0, 0.0, 0.0), (0.0, 1.0, 0.0), ((-1.9, -1.3, -0.7), (0.6, 0.6, 2.0)),
+           scale=0.262, shows="an MRAP's driver's station: dashboard with its gauges, wheel, switch panels, GPS, doors"),
+    # A GAZ-2330 Tigr's (from Squad, as its uploader says): its steering wheel was not exported, the ATF Dingo's (from
+    # Battlefield, the same uploader) is put on its column.
+    Source('sf-gaz-tigr', '2b3a105cf2f64046ac19977ce35c1a5e', 'GAZ-2330 Tigr', '42manako', (2.25, 1.3, -0.7),
+           (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), ((-1.9, -1.3, -0.6), (0.8, 0.6, 1.8)), scale=0.2,
+           drop=('SmokeGrenades', 'KordBase'),
+           shows="an armoured car's driver's station: the gauge panel, switch panels, levers, doors, roof",
+           extras=(Extra('f7ee9b3b50934d1dbb3097a1ea4f4a5c', 'ATF Dingo', '42manako', 'steering', 101.0,
+                         (0.0, -0.41, 0.55)),)),
     # Not a cab: a moped's digital speedometer, seen from 3 units over its LCD (the bikes' screens' cases).
     Source('sf-stage6-speedo', '93432cfe04004b7c854e8eff680afccd', 'DIGITAL SPEEDOMETER STAGE6 R/T', 'emilisbrz',
            (0.0, 3.0, -0.2), (0.0, -1.0, 0.0), (0.0, 0.0, -1.0), ((-1.0, -1.0, 0.0), (1.0, 1.0, 1.0)), scale=0.055,
@@ -176,7 +198,33 @@ def eye_frame(src: Source) -> np.ndarray:
     return np.stack([-left if src.mirror else left, u, a])
 
 
-def cut(src: Source, path: str) -> Cut:
+def borrowed(e: Extra, assets: str, base: int) -> Cut:
+    """The part `e` in the eye frame, its materials numbered from `base`."""
+    path = os.path.join(assets, 'sketchfab', e.uid, 'model.glb')
+    s = gltf.read(path)
+    mats = materials(path, s)
+    names = node_names(gltf._container(path)[0])
+    want = np.array([bool(re.search(e.node, n, re.I)) for n in names])
+    keep = want[s.mesh] & ~np.array([g for _, _, _, g in mats])[s.material]
+    if not keep.any():
+        raise SystemExit(f'{e.uid}: no node matches {e.node}')
+    p = s.positions * e.scale
+    used = s.triangles[keep]
+    q = p[used.reshape(-1)]
+    pos = p - (q.min(0) + q.max(0)) / 2 + np.array(e.at)
+    uv = s.uvs if s.uvs is not None else np.zeros((len(pos), 2))
+    nrm = s.normals if s.normals is not None else np.zeros_like(pos)
+    return Cut(pos, nrm, uv, used, s.material[keep] + base,
+               [(n, srgb(b), tex and texture_png(tex, b)) for n, b, tex, _ in mats])
+
+
+def joined(a: Cut, b: Cut) -> Cut:
+    return Cut(np.vstack([a.pos, b.pos]), np.vstack([a.nrm, b.nrm]), np.vstack([a.uv, b.uv]),
+               np.vstack([a.tris, b.tris + len(a.pos)]), np.concatenate([a.mat, b.mat]), a.materials + b.materials)
+
+
+def cut(src: Source, assets: str) -> Cut:
+    path = os.path.join(assets, 'sketchfab', src.uid, 'model.glb')
     s = gltf.read(path)
     mats = materials(path, s)
     names = node_names(gltf._container(path)[0])
@@ -195,8 +243,11 @@ def cut(src: Source, path: str) -> Cut:
     c = pos[tris].mean(1)
     keep &= ((c >= lo) & (c <= hi)).all(1)
     uv = s.uvs if s.uvs is not None else np.zeros((len(pos), 2))
-    return Cut(pos, nrm, uv, tris[keep], s.material[keep],
-               [(n, srgb(b), tex and texture_png(tex, b)) for n, b, tex, _ in mats])
+    out = Cut(pos, nrm, uv, tris[keep], s.material[keep],
+              [(n, srgb(b), tex and texture_png(tex, b)) for n, b, tex, _ in mats])
+    for e in src.extras:
+        out = joined(out, borrowed(e, assets, len(out.materials)))
+    return out
 
 
 # ------------------------------------------------------------------------------------------ what the eye sees
@@ -374,15 +425,27 @@ def main() -> int:
         credits.append(f'{src.title} by {src.author} ({author}), CC BY 4.0 '
                        f'(https://creativecommons.org/licenses/by/4.0/), via Sketchfab: {page} (cropped/scaled)  ->  '
                        f'parts/{src.asset}/: {src.shows}')
+        notes = []
+        for e in src.extras:
+            em = json.load(open(os.path.join(a.assets, 'sketchfab', e.uid, 'license.json'), encoding='utf-8'))
+            if em['license']['slug'] not in ('by', 'cc0'):
+                raise SystemExit(f'{e.uid}: licence {em["license"]["slug"]} is not CC BY / CC0')
+            line = (f'{e.title} by {e.author} ({em["user"].get("profileUrl", "")}), CC BY 4.0 '
+                    f'(https://creativecommons.org/licenses/by/4.0/), via Sketchfab: {em["viewerUrl"]} (one part: '
+                    f'nodes /{e.node}/, scaled)  ->  parts/{src.asset}/')
+            credits.append('    ' + line)
+            notes.append(line)
         if a.only and a.only != src.asset:
             continue
-        c = subdivide(facing_eye(cut(src, os.path.join(a.assets, 'sketchfab', src.uid, 'model.glb'))))
+        c = subdivide(facing_eye(cut(src, a.assets)))
         dest = os.path.join(a.out, 'parts', src.asset)
         if os.path.isdir(dest):
             shutil.rmtree(dest)
         write_npz(c, dest)
         with open(os.path.join(dest, 'LICENSE.txt'), 'w', encoding='utf-8', newline='\n') as h:
             h.write(LICENSE.format(title=src.title, author=src.author, page=page))
+            for line in notes:
+                h.write(f'\nAlso in cab.npz, from another model: {line}.\n')
         print(f'{src.asset}: {len(c.tris)} triangles -> {dest}')
         if a.view:
             os.makedirs(a.view, exist_ok=True)
