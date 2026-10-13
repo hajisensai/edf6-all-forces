@@ -167,7 +167,8 @@ Watched& Watch(const void* target) noexcept {
     *oldest=Watched{target,0,0,{},{},{}};
     return *oldest;
 }
-struct Plan { const void* shooter; const void* target; std::uint64_t at; hitpredict::Verdict verdict; float aim[3]; bool aimSet; };
+struct Plan { const void* shooter; const void* target; std::uint64_t at; hitpredict::Verdict verdict; float aim[3]; bool aimSet;
+              float from[3],speed,gravity; };
 constexpr int kPlans=128;
 constexpr std::uint64_t kPlanMs=150;   // a pair's plan holds this long (rays a pair at most ~7 a second)
 Plan plans[kPlans]{};
@@ -188,6 +189,7 @@ void SeePoint(void* ctx,const void* object,const float* aim) {
 // at `target`: fire / wait / skip and the point to aim at (its lock point whose predicted hit the game would take).
 Plan Assess(const void* shooter,const void* target,const float* from,float speed,float gravity) noexcept {
     Plan p{shooter,target,0,hitpredict::Verdict::fire,{},false};
+    std::memcpy(p.from,from,12);p.speed=speed;p.gravity=gravity;
     auto o=static_cast<unsigned char*>(const_cast<void*>(target));
     const Kind k=KindOf(o);
     if(!Readable(o,ReachOf(k)))return p;
@@ -250,7 +252,8 @@ const Plan& PlanFor(const void* shooter,const void* target,const float* from,flo
     const std::uint64_t ms=GameMs();
     Plan* oldest=&plans[0];
     for(Plan& p:plans) {
-        if(p.shooter==shooter && p.target==target && ms-p.at<kPlanMs)return p;
+        if(p.shooter==shooter && p.target==target && p.speed==speed && p.gravity==gravity &&
+           std::memcmp(p.from,from,12)==0 && ms-p.at<kPlanMs)return p;
         if(p.at<oldest->at)oldest=&p;
     }
     *oldest=Assess(shooter,target,from,speed,gravity);

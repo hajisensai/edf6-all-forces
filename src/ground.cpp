@@ -277,7 +277,9 @@ void Drive(Robo& r,unsigned char* v,ULONGLONG ms) noexcept {
         const float d=Dist(ref->pos,aim);
         const float wall=MapRay(ref->pos,aim,hit);
         const bool clear=wall<0.0f || wall>d-3.0f;
-        for(int i=0;i<n;++i)fire[i]=OnTarget(v,guns[i],aim,r.firing[i],clear);
+        for(int i=0;i<n;++i)fire[i]=OnTarget(v,guns[i],aim,r.firing[i],clear) &&
+            !HoldFire(v,p.best,guns[i].pos,At<float>(guns[i].weapon,kWeaponSpeed)*60.0f,
+                      At<float>(guns[i].weapon,kWeaponGravity)*14.7f);
     }
     // The input block, as slot 4 leaves it for a pad.
     Put<float>(v,kMove,move[0]);Put<float>(v,kMove+4,0.0f);Put<float>(v,kMove+8,move[1]);Put<float>(v,kMove+12,1.0f);

@@ -467,7 +467,7 @@ const char* ControlName(npc::Control c) noexcept {
 // --- Its weapons (§3.5) ---
 // held[k]: the index in arm[] of the weapon WeaponSet k holds (its trigger kTrigger+k), -1 when not known. held[0] is
 // the one the plugin picks and aims; held[1] is the Fencer's second hand, which only the stock pulls.
-struct Arms { int n=0; int held[kHands]{-1,-1}; npc::Arm arm[kMaxArms]{}; };
+struct Arms { int n=0; int held[kHands]{-1,-1}; npc::Arm arm[kMaxArms]{}; float speed[kMaxArms]{},gravity[kMaxArms]{}; };
 // WeaponSet k's weapon, nullptr when it has none or is not readable.
 const unsigned char* SetWeapon(const unsigned char* h,int k) noexcept {
     if(At<std::uint64_t>(h,kSetCount)<=static_cast<std::uint64_t>(k))return nullptr;
@@ -488,6 +488,9 @@ Arms ArmsOf(const unsigned char* h) noexcept {
         const unsigned char* w=list[i];
         npc::Arm& m=a.arm[i];m=npc::Arm{};
         if(!Readable(w,kWeaponAmmo+4))continue;
+        const float speed=At<float>(w,0x894)*60.0f,factor=At<float>(w,0x8E0);
+        a.speed[i]=std::isfinite(speed) && speed>0.0f ? speed : 0.0f;
+        a.gravity[i]=std::isfinite(factor) && factor>0.0f ? factor*14.7f : 0.0f;
         for(int k=0;k<kHands;++k)if(w==held[k])a.held[k]=i;
         const float reach=At<float>(w,kArmReach),damage=At<float>(w,kArmDamage),blast=At<float>(w,kArmBlast);
         m.reach=std::isfinite(reach) && reach>0.0f ? reach : 0.0f;
@@ -651,12 +654,11 @@ bool ShotSafe(const unsigned char* h,const Enemy* t,const float* eye,float blast
 }
 // Every trigger is taken off a shot at a target its fire is wasted on (WastedFire): the stock AI's own target included.
 void Veto(unsigned char* h,const Enemy* t,const float* eye,const Arms& a) noexcept {
-    const bool wasted=t && HoldFire(h,t->object);
     for(int k=0;k<kHands;++k) {
-        if(wasted)h[kTrigger+k]=0;
         if(!h[kTrigger+k])continue;
         const int w=a.held[k];
         const bool known=w>=0 && w<a.n;
+        if(t && HoldFire(h,t->object,eye,known ? a.speed[w] : 0.0f,known ? a.gravity[w] : 0.0f))h[kTrigger+k]=0;
         if(!ShotSafe(h,t,eye,known ? a.arm[w].blast : LargestBlast(a),known ? a.arm[w].reach : LongestReach(a)))h[kTrigger+k]=0;
     }
 }
@@ -1048,7 +1050,8 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
         // Aimed at the lock point whose predicted hit the target would take (its weak spot: HoldFire), held while it
         // would take none (its window shut or due to open: aimed at all the same, ready).
         Enemy at=*t.e;
-        const bool hold=HoldFire(h,t.e->object,eye,0.0f,0.0f,at.aim);
+        const bool armed=p.arm>=0 && p.arm<a.n;
+        const bool hold=HoldFire(h,t.e->object,eye,armed ? a.speed[p.arm] : 0.0f,armed ? a.gravity[p.arm] : 0.0f,at.aim);
         const float dir[3]={at.aim[0]-eye[0],at.aim[1]-eye[1],at.aim[2]-eye[2]};
         if(mask&kMaskLook)Look(h,dir);
         p.fire=!hold && ShotOk(s,h,a,p.arm,at,eye) && (mask&kMaskTrigger);
@@ -2823,6 +2826,7 @@ void __fastcall DriverPayloadAim(unsigned char* v,int index,const void* target) 
             weapon=NpcPayloadSelect(v,0,npc::Dist(Pos(v),Pos(static_cast<const unsigned char*>(target))),GunnerAirTarget(target),&fire);
         else NpcPayloadSelect(v,0,0.0f,false,&fire); // clear the old redirect on target loss
         Put<float>(seat,0x2E4,0.0f);Put<float>(seat,0x2E0,0.0f);
+        if(weapon && HoldFire(v,target,Pos(v),At<float>(weapon,0x894)*60.0f,At<float>(weapon,0x8E0)*14.7f))weapon=nullptr;
         if(weapon)AimSelectedGunner(v,0,target,weapon,fire);
         else {
             native(v,0,target); // keep native tracking/idle behavior, but no unavailable shot
@@ -2893,6 +2897,7 @@ void NpcGunnersInput(unsigned char* v) noexcept {
                 PayloadFire fire=PayloadFire::other;
                 const auto w=NpcPayloadSelect(v,i,p.bestD,GunnerAirTarget(p.best),&fire);
                 if(!w)continue;
+                if(HoldFire(v,p.best,Pos(v),At<float>(w,0x894)*60.0f,At<float>(w,0x8E0)*14.7f))continue;
                 AimSelectedGunner(v,i,p.best,w,fire);
                 NpcCoaxFire(v,i,p.best,&FriendInLine);
             } else reinterpret_cast<SeatFireFn>(image+kSeatFire)(v,static_cast<int>(i),p.best);

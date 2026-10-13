@@ -164,6 +164,11 @@ void Plans() {
     Check(HoldFire(soldier,ship,eye,20.0f,0.0f,nullptr),"open but shut before a slow round gets there: held");
     nowMs+=200;
     Check(!HoldFire(soldier,ship,eye,1000.0f,0.0f,nullptr),"a fast round in timeShip: fire");
+    Check(HoldFire(soldier,ship,eye,20.0f,0.0f,nullptr),"same-frame slow weapon cannot reuse fast weapon prediction");
+    Check(!HoldFire(soldier,ship,eye,1000.0f,0.0f,nullptr),"same-frame fast weapon cannot reuse slow weapon prediction");
+    const float farEye[3]={0,1.5f,5000};
+    Check(HoldFire(soldier,ship,farEye,1000.0f,0.0f,nullptr),"a different muzzle cannot reuse the close muzzle prediction");
+    Check(!HoldFire(soldier,ship,eye,1000.0f,0.0f,nullptr),"the close muzzle stays fire-ready");
     // Another body first (something in the way): held.
     nowMs+=200;rayBody=7;
     Check(HoldFire(soldier,ship,eye,0.0f,0.0f,nullptr),"another object first in line: held");

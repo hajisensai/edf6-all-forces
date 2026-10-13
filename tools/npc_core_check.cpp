@@ -222,7 +222,9 @@ const void* wastedTarget=nullptr;
 bool WastedFire(const void*,const void* target) noexcept { return target && target==wastedTarget; }
 // HoldFire: the same target held, and one due to open (heldTarget) aimed at and held; `aim` the weak spot when set.
 const void* heldTarget=nullptr;float weakAim[3]{};bool weakAimSet=false;
-bool HoldFire(const void*,const void* target,const float*,float,float,float* aim) noexcept {
+float predictedSpeed=0.0f,predictedGravity=0.0f;
+bool HoldFire(const void*,const void* target,const float*,float speed,float gravity,float* aim) noexcept {
+    predictedSpeed=speed;predictedGravity=gravity;
     if(aim && weakAimSet && target)std::memcpy(aim,weakAim,12);
     return target && (target==wastedTarget || target==heldTarget);
 }
@@ -297,8 +299,11 @@ int main() {
         Reset();Put<void*>(human,kWeapons,list);Put<std::uint64_t>(human,kWeaponCount,3);
         Put<void*>(human,kSets,sets);Put<std::uint64_t>(human,kSetCount,2);
         Put<void*>(sets,kSetWeapon,slot0);Put<void*>(sets+kSetStride,kSetWeapon,slot1);
+        Put<float>(w2,0x894,2.0f);Put<float>(w2,0x8E0,0.5f);
         const Arms both=ArmsOf(human);
         Expect(both.n==3 && both.held[0]==2 && both.held[1]==1,"each WeaponSet's held weapon is found at the native set stride");
+        Expect(both.speed[2]==120.0f && std::fabs(both.gravity[2]-7.35f)<0.001f,
+               "the held weapon's native speed and gravity are converted to metres and seconds");
         Put<std::uint64_t>(human,kSetCount,1);
         Expect(ArmsOf(human).held[1]==-1,"a one-handed soldier has no second hand's weapon");
     }
@@ -560,8 +565,10 @@ int main() {
         // the shot, still at the weak spot.
         // The plugin's own aim needs its held weapon known (held[0] -1 leaves the look to the stock AI).
         heldTarget=enemy;available.held[0]=0;
+        available.speed[0]=120.0f;available.gravity[0]=7.35f;
         Put<unsigned>(human,kControlMask,kMaskMove|kMaskLook|kMaskTrigger);
         behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
+        Expect(predictedSpeed==120.0f && predictedGravity==7.35f,"production Drive predicts using the chosen weapon's ballistics");
         const float atLock=At<float>(human,kLookPitch);   // the look's pitch step toward its lock point (0,0,20)
         weakAimSet=true;weakAim[0]=0;weakAim[1]=12;weakAim[2]=20;
         behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);

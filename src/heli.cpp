@@ -1505,7 +1505,7 @@ void DoorGun(Door& g,const ObjRef& share,bool refill,unsigned char* v,int i,bool
         const float cone=(wide>kDoorCone ? wide : kDoorCone)*(g.firing ? kDoorHold : 1.0f);
         // A healing round onto the player is the point; one past an enemy is not (see Medic).
         fire=!hold && !theirs && Cfg().heliFire && std::fabs(err[0])<cone && std::fabs(err[1])<cone && dist>kDoorMin &&
-             (heals ? !EnemyInLine(v,weapon,gp,lead) : !PlayerInLine(gp,lead));
+             (heals ? !EnemyInLine(v,weapon,gp,lead) : !PlayerInLine(gp,lead) && !HoldFire(v,best,gp,speed,gravity*kGravity));
     } else g.target=ObjRef{};
     if(theirs && !best){g.prevValid=false;return;}   // nobody to heal: their own aim
     Put<float>(blk,0,in[0]);Put<float>(blk,4,in[1]);
@@ -2260,6 +2260,12 @@ Shot Fire(Heli& h,const Sense& s,Mode mode) noexcept {
             if(shot.missile)h.missileAt=s.ms;
         }
     } else h.firing=false;
+    if(shot.gun && !Medic(s.v))shot.gun=!HoldFire(s.v,h.target.obj,pos,s.arms.gunSpeed,s.arms.gunGravity*kGravity);
+    if(shot.missile && !Medic(s.v)) {
+        const unsigned char* w=s.arms.store ? s.arms.store : h.arms[2].weapon;
+        if(Readable(w,kWeaponGravity+4))
+            shot.missile=!HoldFire(s.v,h.target.obj,pos,At<float>(w,kWeaponSpeed)*60.0f,At<float>(w,kWeaponGravity)*kGravity);
+    }
     if(s.type->guns==Guns::nose){s.v[kFireGun]=shot.gun;s.v[kFireMissile]=shot.missile;}
     else if(doorOk && Cfg().heliDoorGuns && SeatCount(s.v)>=3)
         for(int i=0;i<2;++i)DoorGun(h.doors[i],h.target,!h.called,s.v,i,s.grounded || land || rescuing,s.dt,s.ms);

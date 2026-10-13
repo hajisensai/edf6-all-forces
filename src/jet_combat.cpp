@@ -524,6 +524,7 @@ void Bomb(Jet& j,unsigned char* v,const float* pos,const Arms& a,ULONGLONG ms) n
         const float dx=pos[0]+j.m.vel[0]*fall-(t.aim[0]+t.tgtVel[0]*fall),dz=pos[2]+j.m.vel[2]*fall-(t.aim[2]+t.tgtVel[2]*fall);
         const float miss=std::sqrt(dx*dx+dz*dz),hit=At<float>(s.weapon,kWeaponBlast)*kBombHit;
         if(!(miss<hit))return;
+        if(HoldFire(v,t.target,pos,At<float>(s.weapon,kWeaponSpeed)*60.0f,At<float>(s.weapon,kWeaponGravity)*kGravity))return;
         TriggerStore(s);
         j.t.bombAt=ms;
         if(Cfg().debug)Log("JET v=%p bomb: %s, %.0f m over the target, falls %.1f s, %.0f m off (%d left)",v,s.spec->name,over,fall,miss,
@@ -552,8 +553,11 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
         const bool straight=Normalize(flight) && Dot(flight,nose)>std::cos(std::acos(kGunSlip)+std::fabs(j.m.aoa));
         const bool friendly=FriendInLine(pos,path,v);
         gun=gunsOk && straight && a.guns>0 && dist<reach && dist>k.gunClose*0.8f && miss<(wide>kGunCone ? wide : kGunCone) && !friendly;
+        if(gun)gun=!HoldFire(v,t.target,pos,a.gunSpeed,a.gunGravity*kGravity);
         if(gunsOk && straight && !t.flyer && a.rocket>=0 && dist<kRocketOpen && dist>k.gunClose*kRocketClose && miss<kRocketCone &&
-           !friendly && ms-t.rocketAt>kRocketMs) {
+           !friendly && ms-t.rocketAt>kRocketMs &&
+           !HoldFire(v,t.target,pos,At<float>(a.stores[a.rocket].weapon,kWeaponSpeed)*60.0f,
+                     At<float>(a.stores[a.rocket].weapon,kWeaponGravity)*kGravity)) {
             TriggerStore(a.stores[a.rocket]);
             t.rocketAt=ms;
             if(Cfg().debug)Log("JET v=%p rockets: %s, %.0f m, %.1f deg off (%d left)",v,a.stores[a.rocket].spec->name,dist,
@@ -571,6 +575,9 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
         else if(!t.lockAt)t.lockAt=ms;
         missile=missileOk && a.missiles>0 && a.locked>0 && t.lockAt && ms-t.lockAt>=kLockMs && tdist>kMissileMin && tdist<MissileReach(k,a) &&
                 ms-t.missileAt>kMissileMs && !FriendInLine(pos,t.aim,v);
+        if(missile && a.pick>=0)
+            missile=!HoldFire(v,t.target,pos,At<float>(a.stores[a.pick].weapon,kWeaponSpeed)*60.0f,
+                              At<float>(a.stores[a.pick].weapon,kWeaponGravity)*kGravity);
         if(missile) {
             t.missileAt=ms;
             if(Cfg().debug)Log("JET v=%p missiles: %s, %.0f m, %.1f deg off the nose, held %.1f s, %d locked",v,

@@ -5259,9 +5259,11 @@ def air_chase_wired() -> None:
     # Fire the game will not let hurt its target (docs/feedback-2026-10-12-ai-targeting.md): every AI asks WastedFire, the
     # damage hook feeds it whatever the statistics' switch, and the offline check runs in CTest.
     assert '[self](int k) noexcept { return !WastedFire(self,world.enemy[k].object); }' in npcai
-    assert 'const bool wasted=t && HoldFire(h,t->object);' in npcai and 'if(WastedFire(p.self,object))return;' in npcai
+    assert 'HoldFire(h,t->object,eye,known ? a.speed[w]' in npcai and 'if(WastedFire(p.self,object))return;' in npcai
     assert 'if(target && HoldFire(v,target))target=nullptr;' in npcai and 'if(p.best && HoldFire(v,p.best))' in npcai
-    assert 'const bool hold=HoldFire(h,t.e->object,eye,0.0f,0.0f,at.aim);' in npcai and 'p.fire=!hold && ShotOk(' in npcai
+    assert 'HoldFire(h,t.e->object,eye,armed ? a.speed[p.arm]' in npcai and 'p.fire=!hold && ShotOk(' in npcai
+    assert 'p.speed==speed && p.gravity==gravity' in src('src/wastedfire.cpp')
+    assert 'std::memcmp(p.from,from,12)==0' in src('src/wastedfire.cpp'), 'cached plans belong to the same muzzle and weapon'
     assert 'if(!HoldFire(v,o))f(o,a,0.0f);' in src('src/heli.cpp')
     assert 'if(HoldFire(p.self,object))return;' in src('src/ground.cpp')
     hook = src('src/damagestats.cpp').split('std::uintptr_t __fastcall DamageHook(', 1)[1].split('\n}\n', 1)[0]
