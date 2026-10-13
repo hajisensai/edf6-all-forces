@@ -276,6 +276,7 @@ struct Config {
     float proteusFieldPower=25.0f;  // ...an Air Raider's calls charge this many points a second more
     float proteusPriority=0.3f;     // ...walking with the shield up: the allies weigh enemies near it or after it this share of their distance (1: off)
     float proteusPriorityRadius=100.0f;// ...within this of it (m)
+    bool edf41Ai=true;              // EDF4.1 Hector's weapon gating and back-off cycle on the converted Hectors (edf41ai.cpp)
     bool edf41Sound=true;           // EDF4.1's weapon sound effects and voices added to EDF6's banks (edf41sound.cpp), from the game's start
     bool terrainShare=true;         // every placement of one terrain piece drawn from one decode (fieldshare.cpp), from the game's start
     int edf5CampaignContent=0;       // the EDF5 mission packs' first content id (edf5campaign.cpp; 0 = none installed): owned like a DLC
@@ -439,6 +440,8 @@ bool InstallBigWorld() noexcept;
 bool InstallLegacyMap() noexcept;
 // edf41sound.cpp: EDF4.1's weapon SE bank and voice banks beside EDF6's own (plan P7).
 bool InstallEdf41Sound() noexcept;
+// edf41ai.cpp: the converted EDF4.1 Hectors attack as 4.1's do (per-arm range gate, back-off cycle).
+bool InstallEdf41Ai() noexcept;
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
 bool InstallMissiles() noexcept;
 // The stock split missiles (MissileBullet02) split short of a big target's surface (splitmissile.cpp).

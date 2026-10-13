@@ -7895,6 +7895,11 @@ def edf41_hector_guns() -> None:
         assert ai.get('attack').get('range') == 0.0, name          # 4.1 has no melee
         assert ai.get('gun_attack').get('range') == max(reach[(gen, left)], reach[(gen, right)]), name
         assert ai.get('gun_attack').get('interval').get('min') == 300.0, name
+        # the key src/edf41ai.cpp reads: each arm's own range, same weapon class on both arms, 4.1's hector_ai_setting
+        key = top.get('edf41_hector')
+        assert key.get('ranges').items == [reach[(gen, left)], reach[(gen, right)]], name
+        assert key.get('same_weapon') == (1.0 if left == right else 0.0), name
+        assert key.get('ai').items == [720.0, 1440.0, 540.0, 720.0, 150.0, 20.0, 80.0], name
         assert top.get('resource').items == [], name               # the weapon objects are not loaded
         for entry, letter in zip(entries, (left, right)):
             w = m.HECTOR_WEAPONS[(gen, letter)]

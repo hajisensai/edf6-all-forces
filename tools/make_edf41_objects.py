@@ -756,6 +756,7 @@ def hector_fire(games: 'Games', files: dict[str, bytes], mine: dict, out: dsgo.N
     hit_se = entries[0].get('gun_battery').get('bullet').get('hit_se')
     hp_ratio = float(out.get('game_object_durability')) / num(mine['game_object_durability'])
     reach = 0.0
+    ranges: list[float] = []
     for gun, arm, entry in zip(a.guns, arms, entries):
         w = gun.fire
         if rel_of(arm[3]) != 'OBJECT/' + w.sgo:
@@ -776,8 +777,17 @@ def hector_fire(games: 'Games', files: dict[str, bytes], mine: dict, out: dsgo.N
         fire.set('interval', w.interval)
         if w.spread:
             fire.set('accuracy', w.spread)
-        reach = max(reach, num(weapon.get('hector_weapon_range', 0.0)))
+        ranges.append(num(weapon.get('hector_weapon_range', 0.0)))
+        reach = max(reach, ranges[-1])
     set_path(out, 'AiSettings/gun_attack/range', reach)
+    # What Berserker's keys cannot say, for the plugin (src/edf41ai.cpp reads this key through the game's SGO accessors;
+    # the class never looks it up): each arm's own range (4.1 starts only the arms that reach the target), whether the
+    # two arms hold the same weapon class (4.1 then always fires both), and 4.1's hector_ai_setting (back-off cycle).
+    ai = [num(x) for x in mine['hector_ai_setting']]
+    if len(ai) != 7:
+        raise ValueError(f'hector_ai_setting has {len(ai)} numbers, not 7')
+    out.set('edf41_hector', dsgo_value({'ranges': ranges, 'same_weapon': float(a.guns[0].fire.cls == a.guns[1].fire.cls),
+                                        'ai': ai}))
 
 
 def mab_block(block: object) -> bytes:
