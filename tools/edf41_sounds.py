@@ -284,11 +284,11 @@ def missing(group: str, root6: str, root41: str) -> list[str]:
 
 
 def _foreign(led: ledger.Ledger, rel: str) -> bool:
-    """A file in Mods this install must not write over: one no tool of ours wrote, or another of ours'."""
+    """A file no tool of ours wrote, another tool's, or edited since our recorded write: preserve its bytes."""
     if not os.path.exists(led.disk(rel)):
         return False
     owners = led.owners(rel)
-    return not owners or any(o != OWNER for o in owners)
+    return not owners or any(o != OWNER for o in owners) or led.changed(rel)
 
 
 def _current(led: ledger.Ledger, stamp: dict, group: str, source: dict[str, list[int]]) -> bool:

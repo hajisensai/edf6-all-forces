@@ -139,11 +139,11 @@ def _source(name: str, e41: Archives) -> dict[str, list[int]]:
 
 
 def _foreign(led: ledger.Ledger, rel: str) -> bool:
-    """A file in Mods this install must not write over: one no tool of ours wrote, or another of ours'."""
+    """A file no tool of ours wrote, another tool's, or edited since our recorded write: preserve its bytes."""
     if not os.path.exists(led.disk(rel)):
         return False
     owners = led.owners(rel)
-    return not owners or any(o != OWNER for o in owners)
+    return not owners or any(o != OWNER for o in owners) or led.changed(rel)
 
 
 def _current(led: ledger.Ledger, stamp: dict, name: str, source: dict[str, list[int]]) -> bool:
@@ -188,7 +188,11 @@ def install(root: str, root41: str | None, say: Callable[[str], None] = print) -
     for name in MAPS:
         if name in left_out:
             continue
-        source = _source(name, e41)
+        try:
+            source = _source(name, e41)
+        except (ValueError, KeyError) as e:
+            skipped.append((name, f'源地图不可用：{type(e).__name__}: {e}'))
+            continue
         wanted.update(ledger.key(rel) for rel in files_of(name))
         if _current(led, stamp, name, source):
             continue

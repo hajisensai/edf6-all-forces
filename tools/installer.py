@@ -552,8 +552,11 @@ def install(game: str, campaign_requested: bool = False) -> None:
         campaign = build_packs(game, want_campaign, root41, left_out41)
     print('转换 EDF4.1 的武器音效、语音和字幕（4.1 的武器与任务无线电要用；从已安装的 EDF4.1 转换，语音约 1.6 GB，'
           '已转换且未变的跳过）……' if root41 else '没有找到 EDF4.1：跳过 4.1 的音效和语音。')
-    for path in edf41_sounds.install(game, root41)[0]:
+    written_sound, skipped_sound = edf41_sounds.install(game, root41)
+    for path in written_sound:
         print('写入', path)
+    for group, why in skipped_sound:
+        print('  跳过', group, why)
     install_autoturret(game, *turret)
     # Mutable stock SGOs are read after every primary writer, outside the expensive model cache.
     # AutoTurret's SGOs were redirected before its own manifest write; never layer another hash over them.
