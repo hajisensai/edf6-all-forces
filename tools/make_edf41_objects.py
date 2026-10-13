@@ -1184,9 +1184,34 @@ def remabbed(mab: object, names: tuple[tuple[str, str], ...]) -> bytes:
     return mab
 
 
-def build(edf41: str, edf6: str, only: tuple[str, ...] = (), mother_dev: bool = False, mother_far: bool = True) -> tuple[dict, dict[str, bytes]]:
+def mother_as_carrier(far: bool) -> tuple[dict, dict[str, bytes]]:
+    """The isolating experiment (`--mother-dev --mother-as-carrier`): UfoMother301 with EVERYTHING of the shipped 4.1 carrier
+    (model, CAS, ragdoll, material animation, keys: edf41port/objects/OBJECT/UFOCARRIER301.SGO) and only the class name changed.
+    Visible = the model data of the mothership is the problem; invisible = the object (the class, the cloned vtable, the route)
+    is. No file of its own: the carrier's are installed by every install."""
+    rel = 'OBJECT/' + MOTHER_DEV_ROOT
+    with open(os.path.join(FILES, 'OBJECT', 'UFOCARRIER301.SGO'), 'rb') as f:
+        version, members = sgo.read(f.read())
+    members['xgs_scene_object_class'] = 'UfoMother301'
+    if far:
+        members['UfoCarryer_EnableFarRender'] = 1
+        members['spawn_effect_setting'] = [0.0, 80.0, 80.0]
+    else:
+        members.pop('UfoCarryer_EnableFarRender', None)
+        members.pop('spawn_effect_setting', None)
+    files = {rel: sgo.write_depth_first(version, members)}
+    data = {'source': 'dev: the shipped UFOCARRIER301.SGO as UfoMother301 (tools/make_edf41_objects.py --mother-as-carrier)',
+            'objects': [{'object': rel, 'class': 'UfoMother301', 'missions': 6, 'files': [rel]}], 'skipped': [],
+            'files': {rel: hashlib.sha256(files[rel]).hexdigest()}, 'shared': {}}
+    return data, files
+
+
+def build(edf41: str, edf6: str, only: tuple[str, ...] = (), mother_dev: bool = False, mother_far: bool = True,
+          mother_carrier: bool = False) -> tuple[dict, dict[str, bytes]]:
     """The whole conversion; `only` (SGO names like 'HECTOR301CC.SGO') limits it to those roots. `mother_dev`: the
     development-only UfoMother301 prototype instead of the committed set (MOTHER_DEV_*: only that root)."""
+    if mother_dev and mother_carrier:
+        return mother_as_carrier(mother_far)
     games = Games(edf41, edf6)
     roots = {MOTHER_DEV_ROOT: 6} if mother_dev else ROOTS
     aliases = {MOTHER_DEV_ROOT: MOTHER_DEV_ALIAS} if mother_dev else ALIASES
@@ -1268,6 +1293,8 @@ def main() -> int:
     ap.add_argument('--out', help='write objects/ and objects.json under this folder instead of edf41port/')
     ap.add_argument('--only', action='append', default=[], metavar='SGO',
                     help='build only this root (HECTOR301CC.SGO; repeatable)')
+    ap.add_argument('--mother-as-carrier', action='store_true',
+                    help='with --mother-dev: UfoMother301 made of the shipped 4.1 carrier (model and all), only the class differs (isolates model data from object behaviour)')
     ap.add_argument('--mother-no-far', action='store_true',
                     help='with --mother-dev: leave the far-render keys out of the hull (the comparison build)')
     ap.add_argument('--mother-dev', action='store_true',
@@ -1277,9 +1304,11 @@ def main() -> int:
     dev = a.mother_dev
     if a.mother_no_far and not dev:
         raise SystemExit('--mother-no-far goes with --mother-dev')
+    if a.mother_as_carrier and not dev:
+        raise SystemExit('--mother-as-carrier goes with --mother-dev')
     if dev and (a.only or a.out):
         raise SystemExit('--mother-dev takes no --only / --out: it writes edf41port_dev/ only')
-    data, files = build(a.edf41, a.edf6, tuple(r.upper() for r in a.only), mother_dev=dev, mother_far=not a.mother_no_far)
+    data, files = build(a.edf41, a.edf6, tuple(r.upper() for r in a.only), mother_dev=dev, mother_far=not a.mother_no_far, mother_carrier=a.mother_as_carrier)
     base = MOTHER_DEV_OUT if dev else a.out
     out_json, out_files = (os.path.join(base, 'objects.json'), os.path.join(base, 'objects')) if base else (OUT, FILES)
     shutil.rmtree(out_files, ignore_errors=True)

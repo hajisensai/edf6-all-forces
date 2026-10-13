@@ -151,6 +151,9 @@ struct WatchSession {
     std::atomic<int> hits{0};
     const char* base=nullptr;
     const char* tag="";
+    std::atomic<unsigned> seen{0};       // bit per watched field (0, 2, 3 = +0x658, +0x6F8, +0x718) that has had a non-zero write
+    std::atomic<bool> finished{false};   // all three had one
+    ULONGLONG armedAt=0;
 };
 WatchSession watch;
 
@@ -161,20 +164,20 @@ LONG CALLBACK WatchHandler(EXCEPTION_POINTERS* e) noexcept {
     if(!hit)return EXCEPTION_CONTINUE_SEARCH;
     c->Dr6=0;
     const int n=++watch.hits;
-    if(n>120)return EXCEPTION_CONTINUE_EXECUTION;
+    if(n>400)return EXCEPTION_CONTINUE_EXECUTION;
     for(int i=0;i<4;++i) {
         if(!(hit&(1ull<<i)))continue;
         const char* at=watch.base+kWatchAt[i];
         float value=0.0f;
         std::uint32_t raw=0;
         if(Readable(at,4)) { std::memcpy(&raw,at,4); std::memcpy(&value,at,4); }
-        char frames[256];
+        char frames[320];
         int len=std::snprintf(frames,sizeof(frames),"rip EDF+0x%llX",static_cast<unsigned long long>(c->Rip-reinterpret_cast<DWORD64>(image)));
         const bool inEdf=c->Rip>=reinterpret_cast<DWORD64>(image) && c->Rip<reinterpret_cast<DWORD64>(image)+0x22CE000;
         if(!inEdf)len=std::snprintf(frames,sizeof(frames),"rip %p (not EDF.dll: the plugin's own write?)",reinterpret_cast<void*>(c->Rip));
         const std::uint64_t* sp=reinterpret_cast<const std::uint64_t*>(c->Rsp);
         int found=0;
-        for(int k=0;k<48 && found<6 && len>0 && len<static_cast<int>(sizeof(frames))-24 && Readable(sp+k,8);++k) {
+        for(int k=0;k<48 && found<8 && len>0 && len<static_cast<int>(sizeof(frames))-24 && Readable(sp+k,8);++k) {
             const std::uint64_t v=sp[k];
             if(v>reinterpret_cast<std::uint64_t>(image)+0x1000 && v<reinterpret_cast<std::uint64_t>(image)+0x22CE000) {
                 len+=std::snprintf(frames+len,sizeof(frames)-static_cast<std::size_t>(len)," <- EDF+0x%llX",static_cast<unsigned long long>(v-reinterpret_cast<std::uint64_t>(image)));
@@ -182,6 +185,10 @@ LONG CALLBACK WatchHandler(EXCEPTION_POINTERS* e) noexcept {
             }
         }
         Log("EDF41MOTHER watch %s obj+0x%zX written on thread %lu (value after: %.4g, bits 0x%08X): %s",watch.tag,kWatchAt[i],GetCurrentThreadId(),value,raw,frames);
+        if((i==0 || i==2 || i==3) && value!=0.0f) {
+            const unsigned all=watch.seen.fetch_or(1u<<i)|(1u<<i);
+            if(all==((1u<<0)|(1u<<2)|(1u<<3)))watch.finished=true;   // the next Update of any watched object disarms
+        }
     }
     return EXCEPTION_CONTINUE_EXECUTION;
 }
@@ -238,7 +245,7 @@ int SetWatchAll(bool on,const char* base) noexcept {
 void ArmWatch(const char* tag,const char* obj) noexcept {
     static std::atomic<bool> handlerOn{false};
     if(!handlerOn.exchange(true))AddVectoredExceptionHandler(1,&WatchHandler);
-    watch.base=obj; watch.tag=tag; watch.hits=0; watch.active=true;
+    watch.base=obj; watch.tag=tag; watch.hits=0; watch.seen=0; watch.finished=false; watch.armedAt=GetTickCount64(); watch.active=true;
     const int threads=SetWatchAll(true,obj);   // the calling thread is one of them: the helper suspends it while it waits
     const int before=watch.hits.load();
     *reinterpret_cast<volatile std::uint32_t*>(const_cast<char*>(obj)+kWatchAt[0])=0;   // the proof: our own write on this thread
@@ -250,6 +257,18 @@ void DisarmWatch() noexcept {
     if(!watch.active.exchange(false))return;
     SetWatchAll(false,watch.base);
     Log("EDF41MOTHER watch %s disarmed: %d writes seen in all",watch.tag,watch.hits.load());
+}
+
+// Called from the per-frame hooks: disarm when every field has had its non-zero write, the watched object has run `frames`
+// frames (3000), or two minutes have passed since arming.
+void MaybeDisarm(const void* self,std::uint32_t frame) noexcept {
+    if(!watch.active.load())return;
+    const bool mine=watch.base==static_cast<const char*>(self);
+    if(watch.finished.load() || (mine && frame>=3000) || GetTickCount64()-watch.armedAt>120000) {
+        Log("EDF41MOTHER watch %s: stopping (%s; non-zero writes seen for fields 0x%X of +0x658/+0x6F8/+0x718)",watch.tag,
+            watch.finished.load() ? "all three fields written" : (mine && frame>=3000) ? "3000 frames" : "two minutes",watch.seen.load());
+        DisarmWatch();
+    }
 }
 
 // ---- evidence probes -------------------------------------------------------------------------------------------------
@@ -337,7 +356,7 @@ std::uint64_t __fastcall CarrierUpdateProbe(void* self,void* dt) {
         if(at<0 && count<4) { at=count++; seen[at]=self; frames[at]=0; }
         if(at>=0)frame=++frames[at];
     }
-    if(frame==2 && watch.active.load() && watch.base==static_cast<const char*>(self))DisarmWatch();
+    MaybeDisarm(self,at>=0 ? frame : 0);
     if(at>=0 && (frame==2 || frame%600==0))ProbeModel(self,"CONTROL carrier",frame==2 ? "frame 2" : "periodic");
     return result;
 }
@@ -424,7 +443,7 @@ std::uint64_t __fastcall UpdateWrap(void* self,void* dt) {
         e.haveDurability=true;
     }
     if(tick==2)ProbeModel(self,"mothership","frame 2");
-    if(tick==2 && watch.active.load() && watch.base==static_cast<const char*>(self))DisarmWatch();
+    MaybeDisarm(self,tick);
     if(tick%600==0)ProbeModel(self,"mothership","periodic");
     if(tick==1)Log("EDF41MOTHER first update %p durability %.1f destroyed %u pos %.1f %.1f %.1f",self,durability,destroyed,pos[0],pos[1],pos[2]);
     if(changed)Log("EDF41MOTHER durability %p %.1f -> %.1f (destroyed %u)",self,before,durability,destroyed);
