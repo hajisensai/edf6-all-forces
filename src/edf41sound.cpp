@@ -151,6 +151,29 @@ std::uint64_t BankCount(const void* manager) noexcept {
     return *reinterpret_cast<const std::uint64_t*>(static_cast<const char*>(manager)+kBankListSize);
 }
 
+// The SeManager's bank list: std::list nodes {next, prev, value}, value a shared_ptr {Bank*, control} (0x7B2CF6 reads it so).
+struct BankNode {
+    BankNode* next;
+    BankNode* prev;
+    BankRef value;
+};
+constexpr std::size_t kBankListHead=0xE0;
+BankRef voiceBank{};                                 // the bank our last load added (the list's last node right after it)
+
+BankNode* ListHead(void* manager) noexcept {
+    return *reinterpret_cast<BankNode**>(static_cast<char*>(manager)+kBankListHead);
+}
+
+// Our last voice bank is still in the list: 0x7B2CD0 drops a bank only when its byte +0x51 (the load's flag) is set, which
+// ours is like the stock locale banks, so it should be gone by the next pass; if it is not, loading again would add a twin.
+bool VoiceBankStillLoaded(void* manager) noexcept {
+    if(!voiceBank.bank)return false;
+    BankNode* head=ListHead(manager);
+    for(BankNode* n=head->next;n!=head;n=n->next)
+        if(n->value.bank==voiceBank.bank && n->value.control==voiceBank.control)return true;
+    return false;
+}
+
 // The voice file name (L"EDF41_VOICE.JA.AWB") for a language, if both of its files are in Mods\SOUND\PC.
 bool VoiceFilesThere(const wchar_t* lang,wchar_t* awbName,std::size_t capacity) noexcept {
     wchar_t upper[3]={lang[0]>=L'a' ? static_cast<wchar_t>(lang[0]-32) : lang[0],lang[0] && lang[1]>=L'a' ? static_cast<wchar_t>(lang[1]-32) : lang[1],0};
@@ -165,6 +188,11 @@ void LoadVoiceBank(void* manager) noexcept {
     if(index<0 || index>=kLanguageCount)return;
     const wchar_t* language=reinterpret_cast<const wchar_t* const*>(image+kLanguageTable)[index];
     if(!language || !language[0] || !language[1])return;
+    if(VoiceBankStillLoaded(manager)) {
+        Log("EDF41SOUND voice bank %p from the last pass is still loaded (language %ls): not loading a second one",voiceBank.bank,language);
+        return;
+    }
+    voiceBank={};
     const wchar_t* const order[3]={language,L"ja",L"en"};
     const int tries=index<=1 ? 1 : 3;                  // ja and en have their own; the rest fall back
     for(int i=0;i<tries;++i) {
@@ -176,8 +204,11 @@ void LoadVoiceBank(void* manager) noexcept {
         const std::uint64_t before=BankCount(manager);
         reinterpret_cast<VoiceLoadFn>(image+kVoiceLoad)(manager,path,1);
         const std::uint64_t after=BankCount(manager);
-        if(after>before)Log("EDF41SOUND voice bank %ls loaded for language %ls (manager=%p, banks %llu -> %llu)",path,language,manager,
-                            static_cast<unsigned long long>(before),static_cast<unsigned long long>(after));
+        if(after>before) {
+            voiceBank=ListHead(manager)->prev->value;   // 0x7B2500 appends: the last node is ours
+            Log("EDF41SOUND voice bank %ls loaded for language %ls (manager=%p, banks %llu -> %llu, bank %p)",path,language,manager,
+                static_cast<unsigned long long>(before),static_cast<unsigned long long>(after),voiceBank.bank);
+        }
         else Log("EDF41SOUND voice bank %ls was NOT added for language %ls (manager=%p, banks %llu)",path,language,manager,
                  static_cast<unsigned long long>(after));
         return;
