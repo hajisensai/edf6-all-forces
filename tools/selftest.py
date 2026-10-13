@@ -1972,11 +1972,54 @@ def carrier_camera_and_ragdoll_on_its_box_centre() -> None:
                                    [['RagDollProxys.body', 'globalSRT'], [0.0, -1.637, 0.0], [0.0, 0.0, 0.0, 1.0]]]})
     _, inner = sgo.read(vc._jet_ragdoll(blob, 'body', c))
     value = vc._value
+
+    def at(proxy: str) -> list[float]:   # the proxy on the box's centre, in its own place of the V506's rest pose
+        return [round(c[k] + vc.V506_PROXY_LAYOUT[proxy][k], 3) for k in range(3)]
     for e in inner['ragdoll_from_animation']:
-        assert e[0][0] == 'body' and [round(value(x), 3) for x in e[1]] == list(c), e
+        assert e[0][0] == 'body' and [round(value(x), 3) for x in e[1]] == at(e[0][1]), e
+        assert [value(x) for x in e[2]] == [0.0, 0.0, 0.0, 1.0], e
     assert [e[0][0] for e in inner['animation_from_ragdoll']] == ['RagDollProxys.rotor', 'RagDollProxys.body']
     for e in inner['animation_from_ragdoll']:
-        assert e[0][1] == 'body' and [round(value(x), 3) for x in e[1]] == [-x for x in c], e
+        assert e[0][1] == 'body' and [round(value(x), 3) for x in e[1]] == [-x for x in at(e[0][0])], e
+        assert [value(x) for x in e[2]] == [0.0, 0.0, 0.0, 1.0], e
+
+
+@test
+def jet_ragdoll_proxies_in_the_v506_rest_pose() -> None:
+    """pylib/vcobjects.py V506_PROXY_LAYOUT is RAGDOLL_V506_HELI.SHKT's rest pose: every proxy's position less the body
+    proxy's, every orientation the identity, the pose its hinges and slider hold. A jet's proxies all follow one bone; on
+    one point (each still turned by its V506 binding) a destroyed jet's dynamic ragdoll was thrown apart by its own
+    constraints (docs/feedback-2026-10-12-ragdoll-twitch.md). A proxy the layout does not know is refused. The SHKT half
+    needs the game's Root.cpk."""
+    import struct
+    import rootcpk
+    import sgo
+    blob = sgo.write(1, {'ragdoll_from_animation': [[['body', 'RagDollProxys.wing'], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]]],
+                         'animation_from_ragdoll': []})
+    try:
+        vc._jet_ragdoll(blob, 'body', (0.0, 1.0, 0.0))
+        raise AssertionError('an unknown proxy was placed')
+    except ValueError:
+        pass
+    if not os.path.isfile(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    from hktag import Tag
+    t = Tag(rootcpk.Game(rootcpk.DEFAULT_GAME).read('OBJECT', 'RAGDOLL_V506_HELI.SHKT'))
+    scene = t.root_variant('hknpPhysicsSceneData')
+    _, systems, _ = t.item(t.u32(scene + t.offset('hknpPhysicsSceneData', 'systemDatas')))
+    _, system, _ = t.item(t.u32(systems))
+    B = 'hknpPhysicsSystemData::bodyCinfoWithAttachment'
+    _, first, n = t.item(t.u32(system + t.offset('hknpPhysicsSystemData', 'bodyCinfos')))
+    pose = {}
+    for j in range(n):
+        p = first + j * t.size(B)
+        pose[t.cstr(t.u32(p + t.offset(B, 'name')))] = (struct.unpack_from('<3f', t.b, p + t.offset(B, 'position')),
+                                                        struct.unpack_from('<4f', t.b, p + t.offset(B, 'orientation')))
+    assert set(pose) == set(vc.V506_PROXY_LAYOUT), sorted(pose)
+    hull = pose['RagDollProxys.body'][0]
+    for name, (position, turn) in pose.items():
+        assert all(abs(position[k] - hull[k] - vc.V506_PROXY_LAYOUT[name][k]) < 1e-3 for k in range(3)), (name, position)
+        assert all(abs(a - b) < 1e-6 for a, b in zip(turn, (0.0, 0.0, 0.0, 1.0))), (name, turn)
 
 
 @test
