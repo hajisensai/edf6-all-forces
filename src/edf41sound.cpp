@@ -46,7 +46,7 @@ constexpr std::size_t kLanguageIndex=0x20B2B34;     // dword: 0 ja, 1 en, 2 kr, 
 constexpr std::size_t kLanguageTable=0x1F56208;     // wchar_t* [5]: L"ja", L"en", L"kr", L"cn", L"sc"
 constexpr std::size_t kSeManagerGlobal=0x20B2950;   // *(EDF+this): the SeManager (voice banks, list at +0xE0)
 constexpr std::size_t kBankLoad=0x7AA440;           // (out{Bank*,ctrl}, wstring* path, type, flag 1, byte) -> bool
-constexpr std::size_t kLookup=0x7AEAE0;             // (system, out{Bank*,int}, type, wstring* name) -> bool
+constexpr std::size_t kLookup=0x7AEAE0;             // (system, out{Bank*,int}, type, const wchar_t* name) -> bool
 constexpr std::size_t kBankFind=0x7A9F80;           // (Bank*, wchar_t* name) -> cue index or -1
 constexpr std::size_t kSeBankLoad=0x7B2190;         // EDF6's own SE bank, called at kSeBankLoadSite
 constexpr std::size_t kSeBankLoadSite=0x7B09C6;
@@ -78,7 +78,9 @@ struct CueRef {               // 0x7AEAE0's out
 };
 
 using BankLoadFn=bool(__fastcall*)(BankRef* out,const GameString* path,int type,int flag,bool extra);
-using LookupFn=bool(__fastcall*)(void* system,CueRef* out,int type,const void* name);
+// name: the cue's characters (0x7AEAE0 copies them into a local std::wstring with assign(const wchar_t*), 0x7AEB39;
+// the callers pass c_str() values, e.g. 0x7B3D3E's DSGO string at the 0x7B3E83 site)
+using LookupFn=bool(__fastcall*)(void* system,CueRef* out,int type,const wchar_t* name);
 using FindFn=int(__fastcall*)(void* bank,const wchar_t* name);
 using SeLoadFn=std::uint64_t(__fastcall*)(void*,const void*,std::uint64_t,std::uint64_t,std::uint64_t,std::uint64_t);
 using VoiceLoadFn=std::uint64_t(__fastcall*)(void* manager,const wchar_t* path,std::uint64_t flag);
@@ -99,11 +101,6 @@ bool ModsFileThere(const wchar_t* file) noexcept {
     if(swprintf_s(full,L"%ls\\Mods\\SOUND\\PC\\%ls",path,file)<0)return false;
     const DWORD a=GetFileAttributesW(full);
     return a!=INVALID_FILE_ATTRIBUTES && !(a&FILE_ATTRIBUTE_DIRECTORY);
-}
-
-const wchar_t* NameOf(const void* name) noexcept {    // a game std::wstring's characters
-    const auto* s=static_cast<const GameString*>(name);
-    return s->capacity>=8 ? s->data : reinterpret_cast<const wchar_t*>(name);
 }
 
 void LoadWeaponBank() noexcept {
@@ -135,11 +132,11 @@ std::uint64_t __fastcall SeBankLoadHook(void* self,const void* a,std::uint64_t b
 }
 
 // The stock lookup first; only a miss for type 0 asks our bank.
-bool __fastcall LookupHook(void* system,CueRef* out,int type,const void* name) {
+bool __fastcall LookupHook(void* system,CueRef* out,int type,const wchar_t* name) {
     if(reinterpret_cast<LookupFn>(image+kLookup)(system,out,type,name))return true;
     void* bank=weaponBankPtr.load();
     if(type!=0 || !bank || system!=weaponSystem.load())return false;
-    const wchar_t* cue=NameOf(name);
+    const wchar_t* cue=name;
     const int index=reinterpret_cast<FindFn>(image+kBankFind)(bank,cue);
     if(index==-1)return false;
     out->bank=bank;
