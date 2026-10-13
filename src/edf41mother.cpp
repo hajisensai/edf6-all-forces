@@ -166,7 +166,22 @@ void ProbeModel(const void* obj,const char* tag,const char* when) noexcept {
         std::memcpy(&farSq0,w+0x60,4);
         Log("EDF41MOTHER probe %s %p (%s): umbra wrapper %p: Umbra::Object %p, bitmask 0x%08X (bit 26 = far render: %s), cull distance squared %.4g = %.1f m",
             tag,obj,when,static_cast<const void*>(w),*reinterpret_cast<void* const*>(w+0x10),mask,(mask>>26)&1 ? "set" : "clear",farSq0,farSq0>0.0f ? std::sqrt(farSq0) : 0.0f);
-        if(std::strcmp(when,"frame 2")==0)DumpRaw(tag,obj,"umbra wrapper (+0x650)",w,0x70);
+        float f[0x70/4];
+        std::memcpy(f,w,sizeof(f));
+        // Read off the 2026-10-13 dumps of a carrier (visible) and the mothership (not): +0x50..+0x5C is the world centre of the
+        // bounds (the position plus the bones' bound centre), +0x64 a radius (carrier 197, mothership 817: both set), +0x6C 950 for
+        // both; +0x08, +0x44, +0x48 are ~539 / 82 / ~539 on the carrier and 0 on the mothership.
+        Log("EDF41MOTHER probe %s %p (%s): wrapper floats +0x08 %.2f +0x44 %.4g +0x48 %.2f centre %.1f %.1f %.1f radius(+0x64) %.1f +0x6C %.1f",
+            tag,obj,when,f[2],f[0x44/4],f[0x48/4],f[0x50/4],f[0x54/4],f[0x58/4],f[0x64/4],f[0x6C/4]);
+        if(Rd(o+kModelAt,0xC0,"model instance floats")) {
+            float g[0xC0/4];
+            std::memcpy(g,o+kModelAt,sizeof(g));
+            Log("EDF41MOTHER probe %s %p (%s): instance floats +0x08 %.2f +0x28 %.2f +0x70 %.2f +0x84 %.2f +0x88 %.2f +0xB4 %.2f +0xB8 %.2f centre %.1f %.1f %.1f",
+                tag,obj,when,g[2],g[0x28/4],g[0x70/4],g[0x84/4],g[0x88/4],g[0xB4/4],g[0xB8/4],g[0xA0/4],g[0xA4/4],g[0xA8/4]);
+        }
+        const char* umbra=*reinterpret_cast<const char* const*>(w+0x10);
+        if(std::strcmp(when,"frame 2")==0 && umbra && Rd(umbra,0x100,"Umbra::Object"))DumpRaw(tag,obj,"Umbra::Object",umbra,0x100);
+        if(std::strcmp(when,"frame 2")==0 || std::strcmp(when,"periodic")==0)DumpRaw(tag,obj,"umbra wrapper (+0x650)",w,0x70);
     }
     float objM[16];
     std::memcpy(objM,o+kObjMatrixAt,sizeof(objM));
@@ -184,7 +199,8 @@ void ProbeModel(const void* obj,const char* tag,const char* when) noexcept {
     Log("EDF41MOTHER probe %s %p (%s): scene node %p, node rows %.3f %.3f %.3f, node pos %.1f %.1f %.1f, object pos %.1f %.1f %.1f, apart %.1f m, dirty byte %u, node+0x60 (cull distance squared) %.4g = %.1f m",
         tag,obj,when,static_cast<const void*>(node),Len3(nm),Len3(nm+4),Len3(nm+8),nm[12],nm[13],nm[14],objM[12],objM[13],objM[14],std::sqrt(dx*dx+dy*dy+dz*dz),dirty,
         farSq,farSq>0.0f ? std::sqrt(farSq) : 0.0f);
-    if(std::strcmp(when,"frame 2")==0)DumpRaw(tag,obj,"model instance (+0x6F0)",inst,0xC0),DumpRaw(tag,obj,"scene node",node,0xB0);
+    if(std::strcmp(when,"frame 2")==0 || std::strcmp(when,"periodic")==0)DumpRaw(tag,obj,"model instance (+0x6F0)",inst,0xC0);
+    if(std::strcmp(when,"frame 2")==0)DumpRaw(tag,obj,"scene node",node,0xB0);
 }
 
 // Control: the stock carriers' (and the 4.1 carriers') own objects, probed the same way, to compare with the mothership.
@@ -204,7 +220,7 @@ std::uint64_t __fastcall CarrierUpdateProbe(void* self,void* dt) {
         if(at<0 && count<4) { at=count++; seen[at]=self; frames[at]=0; }
         if(at>=0)frame=++frames[at];
     }
-    if(at>=0 && (frame==2 || frame%1800==0))ProbeModel(self,"CONTROL carrier",frame==2 ? "frame 2" : "periodic");
+    if(at>=0 && (frame==2 || frame%600==0))ProbeModel(self,"CONTROL carrier",frame==2 ? "frame 2" : "periodic");
     return result;
 }
 
@@ -290,7 +306,7 @@ std::uint64_t __fastcall UpdateWrap(void* self,void* dt) {
         e.haveDurability=true;
     }
     if(tick==2)ProbeModel(self,"mothership","frame 2");
-    if(tick%1800==0)ProbeModel(self,"mothership","periodic");
+    if(tick%600==0)ProbeModel(self,"mothership","periodic");
     if(tick==1)Log("EDF41MOTHER first update %p durability %.1f destroyed %u pos %.1f %.1f %.1f",self,durability,destroyed,pos[0],pos[1],pos[2]);
     if(changed)Log("EDF41MOTHER durability %p %.1f -> %.1f (destroyed %u)",self,before,durability,destroyed);
     if(tick%kUpdateLogEvery==0) {
