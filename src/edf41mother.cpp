@@ -29,8 +29,10 @@
 #include "memory.h"
 
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cwctype>
 #include <cstring>
 #include <cwchar>
 #include <mutex>
@@ -47,6 +49,12 @@ constexpr std::size_t kNew=0x12D85B0;                 // the game's operator new
 constexpr std::size_t kCarrierCtor=0x4F8690;          // UfoCarrier508::UfoCarrier508(this, createInfo)
 constexpr std::size_t kCarrierVtable=0x17C9DC0;       // its primary vtable
 constexpr std::size_t kCarrierSize=0x1630;
+// Evidence probes (dev switch only), 2026-10-13: the hull was not seen on the real game. The model instance of a carrier is at
+// +0x6F0 (UfoCarrier508's constructor hands it the object's matrix, +0x60, through 0x1100B90: it sets the dirty byte +0xB0 and
+// writes the four rows into the scene node at [instance+0x10], +0xB0..+0xEF); the stream every file open ends in is the object
+// of vtable 0x175F0F0, slot 1 = Open(stream, std::wstring* path, flags) (EDF.dll+741C0; EDFModLoader redirects "/cri_bind/..." there).
+constexpr std::size_t kModelAt=0x6F0,kNodeAt=0x10,kNodeMatrixAt=0xB0,kObjMatrixAt=0x60;
+constexpr std::size_t kStreamVtable=0x175F0F0,kStreamOpenSlot=1;
 constexpr int kSlots=49;
 constexpr int kSlotDtor=0,kSlotUpdate=5,kSlotMessage=9;
 // UfoCarrier508's vtable 0x17C9DC0 as the file has it (slot -> EDF.dll RVA); 7 is the ship AI, 5 Update, 9 OnMessage.
@@ -126,6 +134,75 @@ const void* const factoryTable[3]={reinterpret_cast<const void*>(&FactoryDtor),r
                                    reinterpret_cast<const void*>(&FactoryCreate)};
 Factory factory{factoryTable};
 
+// ---- evidence probes -------------------------------------------------------------------------------------------------
+float Len3(const float* v) noexcept { return std::sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]); }
+
+// What the object's model instance looks like: is there a scene node, where is its matrix (the world position of the drawn model),
+// how big are its rows (a scale of 0 draws nothing), and how far is it from the object's own position.
+void ProbeModel(const void* obj,const char* tag,const char* when) noexcept {
+    const char* o=static_cast<const char*>(obj);
+    if(!Rd(o+kModelAt,0xC0,"model instance") || !Rd(o+kObjMatrixAt,0x40,"object matrix"))return;
+    const char* inst=o+kModelAt;
+    const char* node=*reinterpret_cast<const char* const*>(inst+kNodeAt);
+    const std::uint8_t dirty=*reinterpret_cast<const std::uint8_t*>(inst+0xB0);
+    float objM[16];
+    std::memcpy(objM,o+kObjMatrixAt,sizeof(objM));
+    if(!node || reinterpret_cast<std::uintptr_t>(node)<0x10000) {
+        Log("EDF41MOTHER probe %s %p (%s): the model instance +0x6F0 has NO scene node (node %p): the model was not created; object rows %.3f %.3f %.3f",
+            tag,obj,when,static_cast<const void*>(node),Len3(objM),Len3(objM+4),Len3(objM+8));
+        return;
+    }
+    if(!Rd(node+kNodeMatrixAt,0x40,"scene node matrix")) { Log("EDF41MOTHER probe %s %p (%s): scene node %p unreadable",tag,obj,when,static_cast<const void*>(node)); return; }
+    float nm[16];
+    std::memcpy(nm,node+kNodeMatrixAt,sizeof(nm));
+    const float dx=nm[12]-objM[12],dy=nm[13]-objM[13],dz=nm[14]-objM[14];
+    Log("EDF41MOTHER probe %s %p (%s): scene node %p, node rows %.3f %.3f %.3f, node pos %.1f %.1f %.1f, object pos %.1f %.1f %.1f, apart %.1f m, dirty byte %u",
+        tag,obj,when,static_cast<const void*>(node),Len3(nm),Len3(nm+4),Len3(nm+8),nm[12],nm[13],nm[14],objM[12],objM[13],objM[14],std::sqrt(dx*dx+dy*dy+dz*dz),dirty);
+}
+
+// Control: the stock carriers' (and the 4.1 carriers') own objects, probed the same way, to compare with the mothership.
+void* origCarrierUpdate=nullptr;
+std::uint64_t __fastcall CarrierUpdateProbe(void* self,void* dt) {
+    const std::uint64_t result=reinterpret_cast<UpdateFn>(origCarrierUpdate)(self,dt);
+    static std::mutex lock;
+    static const void* seen[4];
+    static std::uint32_t frames[4];
+    static int count=0;
+    int at=-1;
+    std::uint32_t frame=0;
+    {
+        std::lock_guard<std::mutex> hold(lock);
+        for(int i=0;i<count;++i)
+            if(seen[i]==self)at=i;
+        if(at<0 && count<4) { at=count++; seen[at]=self; frames[at]=0; }
+        if(at>=0)frame=++frames[at];
+    }
+    if(at>=0 && (frame==2 || frame%1800==0))ProbeModel(self,"CONTROL carrier",frame==2 ? "frame 2" : "periodic");
+    return result;
+}
+
+// Every file the game opens whose name has to do with the mothership or the carriers, and whether the open worked.
+using OpenFn=std::uint64_t(__fastcall*)(void*,const void*,void*);
+void* origOpen=nullptr;
+std::atomic<int> opensLogged{0};
+std::uint64_t __fastcall OpenProbe(void* stream,const void* path,void* flags) {
+    const std::uint64_t result=reinterpret_cast<OpenFn>(origOpen)(stream,path,flags);
+    if(opensLogged.load()<80 && Rd(path,0x20,"open path string")) {
+        const char* w=static_cast<const char*>(path);
+        const std::uint64_t size=*reinterpret_cast<const std::uint64_t*>(w+0x10),cap=*reinterpret_cast<const std::uint64_t*>(w+0x18);
+        const wchar_t* text=cap<8 ? reinterpret_cast<const wchar_t*>(w) : *reinterpret_cast<const wchar_t* const*>(w);
+        if(size>0 && size<259 && Rd(text,(size+1)*sizeof(wchar_t),"open path text")) {
+            wchar_t low[260];
+            for(std::uint64_t i=0;i<=size;++i)low[i]=static_cast<wchar_t>(towlower(text[i]));
+            if(std::wcsstr(low,L"mother") || std::wcsstr(low,L"carrier")) {
+                ++opensLogged;
+                Log("EDF41MOTHER file open %ls -> %s (al=%u)",text,(result&0xFF) ? "ok" : "FAILED",static_cast<unsigned>(result&0xFF));
+            }
+        }
+    }
+    return result;
+}
+
 // ---- the wrappers ----------------------------------------------------------------------------------------------
 struct Entry {
     std::uint32_t ticks=0;
@@ -185,6 +262,8 @@ std::uint64_t __fastcall UpdateWrap(void* self,void* dt) {
         e.lastDurability=durability;
         e.haveDurability=true;
     }
+    if(tick==2)ProbeModel(self,"mothership","frame 2");
+    if(tick%1800==0)ProbeModel(self,"mothership","periodic");
     if(tick==1)Log("EDF41MOTHER first update %p durability %.1f destroyed %u pos %.1f %.1f %.1f",self,durability,destroyed,pos[0],pos[1],pos[2]);
     if(changed)Log("EDF41MOTHER durability %p %.1f -> %.1f (destroyed %u)",self,before,durability,destroyed);
     if(tick%kUpdateLogEvery==0) {
@@ -309,6 +388,7 @@ void __fastcall FactoryCreate(Factory*,void* info) noexcept {
     *vptr=&cloneBlock[1];
     const int n=++created;
     LogModel(obj);
+    ProbeModel(obj,"mothership","just created");
     Log("EDF41MOTHER create #%d: UfoMother301 object %p built by UfoCarrier508's constructor, vtable %p -> clone %p; info %p",n,obj,static_cast<void*>(image+kCarrierVtable),static_cast<void*>(&cloneBlock[1]),info);
 }
 
@@ -396,6 +476,16 @@ bool InstallEdf41Mother() noexcept {
     installed=true;
     bool changed=false;
     const bool ok=RedirectCall(image+kRegisterAllSite,image+kRegisterAll,reinterpret_cast<void*>(&RegisterAllHook),changed);
+    if(ok) {
+        // Evidence probes. Both patch a vtable slot only while it still holds the stock function (PatchVtableSlot checks).
+        const auto openSlot=reinterpret_cast<void**>(image+kStreamVtable+kStreamOpenSlot*8);
+        if(Readable(openSlot,8)) { origOpen=*openSlot; Log("EDF41MOTHER file-open probe %s",PatchVtableSlot(openSlot,origOpen,reinterpret_cast<void*>(&OpenProbe)) ? "installed" : "NOT installed"); }
+        const auto carrierUpdate=reinterpret_cast<void**>(image+kCarrierVtable+kSlotUpdate*8);
+        if(Readable(carrierUpdate,8) && *carrierUpdate==image+kStockSlots[kSlotUpdate]) {
+            origCarrierUpdate=*carrierUpdate;
+            Log("EDF41MOTHER control probe on the stock carriers %s",PatchVtableSlot(carrierUpdate,origCarrierUpdate,reinterpret_cast<void*>(&CarrierUpdateProbe)) ? "installed" : "NOT installed");
+        } else Log("EDF41MOTHER control probe not installed: UfoCarrier508's Update slot is not the stock one");
+    }
     // When this runs the game's start-up routine has not reached 0x701859 yet (the manager is null); if it has, the hook
     // can no longer fire and the log says so instead of the registration line.
     const bool late=Readable(image+kManagerGlobal,sizeof(void*)) && *reinterpret_cast<void**>(image+kManagerGlobal)!=nullptr;
