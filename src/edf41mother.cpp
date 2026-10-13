@@ -271,6 +271,59 @@ void MaybeDisarm(const void* self,std::uint32_t frame) noexcept {
     }
 }
 
+// ---- an objective visibility signal -----------------------------------------------------------------------------------
+// The camera's frustum from the last view-projection the HUD saw (hud.cpp LastViewProj, row vectors: clip = p * VP), against the
+// object's own bounding sphere (the Umbra wrapper's centre +0x50..+0x58 and radius +0x64, which the dumps showed set for the
+// mothership as for a carrier). Said with the probe and counted every frame: a screenshot only shows where the autopilot looked.
+enum class View { none, inside, intersects, outside };
+View FrustumTest(const float* centre,float radius,float* distance,const char** outsideOf) noexcept {
+    float vp[16];
+    if(!LastViewProj(vp))return View::none;
+    float eye[3],dir[3];
+    if(!CameraRay(eye,dir))return View::none;
+    const float dx=centre[0]-eye[0],dy=centre[1]-eye[1],dz=centre[2]-eye[2];
+    *distance=std::sqrt(dx*dx+dy*dy+dz*dz);
+    // clip_k = x*m[k] + y*m[4+k] + z*m[8+k] + m[12+k]; the planes of 0 <= z <= w, -w <= x, y <= w
+    struct Plane { int a,b; float sign; const char* name; };
+    static const Plane planes[]={{3,0,1.0f,"left"},{3,0,-1.0f,"right"},{3,1,1.0f,"bottom"},{3,1,-1.0f,"top"},{2,-1,1.0f,"near"},{3,2,-1.0f,"far"}};
+    bool intersects=false;
+    for(const Plane& pl:planes) {
+        float coef[4];
+        for(int j=0;j<4;++j) {
+            const float w=vp[j*4+pl.a];
+            const float o=pl.b>=0 ? vp[j*4+pl.b]*pl.sign : 0.0f;
+            coef[j]=pl.b>=0 ? w+o : w;
+        }
+        const float len=std::sqrt(coef[0]*coef[0]+coef[1]*coef[1]+coef[2]*coef[2]);
+        if(len<1e-9f)continue;
+        const float d=(centre[0]*coef[0]+centre[1]*coef[1]+centre[2]*coef[2]+coef[3])/len;
+        if(d<-radius) { if(outsideOf)*outsideOf=pl.name; return View::outside; }
+        if(d<radius)intersects=true;
+    }
+    return intersects ? View::intersects : View::inside;
+}
+const char* ViewName(View v) noexcept {
+    switch(v) { case View::inside: return "inside"; case View::intersects: return "intersects"; case View::outside: return "outside"; default: return "no camera"; }
+}
+
+struct ViewCount { std::uint32_t frames=0,inside=0,intersects=0,outside=0,near1000=0; };
+void CountView(ViewCount& c,const float* centre,float radius) noexcept {
+    float dist=0.0f;
+    const View v=FrustumTest(centre,radius,&dist,nullptr);
+    ++c.frames;
+    if(v==View::inside)++c.inside; else if(v==View::intersects)++c.intersects; else if(v==View::outside)++c.outside;
+    if(v!=View::none && dist<1000.0f)++c.near1000;
+}
+
+// The object's sphere (wrapper +0x50 centre, +0x64 radius), for the probe lines.
+bool SphereOf(const void* obj,float* centre,float* radius) noexcept {
+    const char* w=static_cast<const char*>(obj)+0x650;
+    if(!Rd(w,0x70,"umbra wrapper sphere"))return false;
+    std::memcpy(centre,w+0x50,12);
+    std::memcpy(radius,w+0x64,4);
+    return std::isfinite(centre[0]+centre[1]+centre[2]+*radius);
+}
+
 // ---- evidence probes -------------------------------------------------------------------------------------------------
 float Len3(const float* v) noexcept { return std::sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]); }
 
@@ -319,6 +372,15 @@ void ProbeModel(const void* obj,const char* tag,const char* when) noexcept {
         if(std::strcmp(when,"frame 2")==0 && umbra && Rd(umbra,0x100,"Umbra::Object"))DumpRaw(tag,obj,"Umbra::Object",umbra,0x100);
         if(std::strcmp(when,"frame 2")==0 || std::strcmp(when,"periodic")==0)DumpRaw(tag,obj,"umbra wrapper (+0x650)",w,0x70);
     }
+    {
+        float centre[3],radius=0.0f,dist=0.0f;
+        const char* outside="";
+        if(SphereOf(obj,centre,&radius)) {
+            const View v=FrustumTest(centre,radius,&dist,&outside);
+            Log("EDF41MOTHER probe %s %p (%s): VIEW bounding sphere (centre %.0f %.0f %.0f, radius %.0f) is %s%s%s the camera frustum, %.0f m from the camera",
+                tag,obj,when,centre[0],centre[1],centre[2],radius,ViewName(v),v==View::outside ? " (outside the " : "",v==View::outside ? outside : "",dist);
+        }
+    }
     float objM[16];
     std::memcpy(objM,o+kObjMatrixAt,sizeof(objM));
     if(!node || reinterpret_cast<std::uintptr_t>(node)<0x10000) {
@@ -357,6 +419,13 @@ std::uint64_t __fastcall CarrierUpdateProbe(void* self,void* dt) {
         if(at>=0)frame=++frames[at];
     }
     MaybeDisarm(self,at>=0 ? frame : 0);
+    if(at>=0) {
+        static ViewCount counts[4];
+        float centre[3],radius=0.0f;
+        if(SphereOf(self,centre,&radius))CountView(counts[at],centre,radius);
+        if(frame%600==0)Log("EDF41MOTHER VIEW CONTROL carrier %p frames %u: inside the camera frustum %u, intersecting %u, outside %u, within 1000 m %u",
+                            self,counts[at].frames,counts[at].inside,counts[at].intersects,counts[at].outside,counts[at].near1000);
+    }
     if(at>=0 && (frame==2 || frame%600==0))ProbeModel(self,"CONTROL carrier",frame==2 ? "frame 2" : "periodic");
     return result;
 }
@@ -427,6 +496,17 @@ std::uint64_t __fastcall DtorWrap(void* self,unsigned flags) {
 }
 
 std::uint64_t __fastcall UpdateWrap(void* self,void* dt) {
+    if(Cfg().edf41MotherPlace>0.0f) {
+        float eye[3],dir[3];
+        char* o=static_cast<char*>(self);
+        if(CameraRay(eye,dir) && Rd(o+kPosAt,12,"object position (place)")) {
+            const float d=Cfg().edf41MotherPlace;
+            const float p[3]={eye[0]+dir[0]*d,eye[1]+dir[1]*d,eye[2]+dir[2]*d};
+            std::memcpy(o+kPosAt,p,12);
+            static std::atomic<bool> said{false};
+            if(!said.exchange(true))Log("EDF41MOTHER place: the mothership is held %.0f m in front of the camera (ini Edf41MotherPlace), first at %.0f %.0f %.0f",d,p[0],p[1],p[2]);
+        }
+    }
     const std::uint64_t result=reinterpret_cast<UpdateFn>(origSlots[kSlotUpdate])(self,dt);
     float durability=0.0f,pos[3]={};
     std::uint8_t destroyed=0;
@@ -441,6 +521,13 @@ std::uint64_t __fastcall UpdateWrap(void* self,void* dt) {
         if(e.haveDurability && (durability<e.lastDurability-0.5f || durability>e.lastDurability+0.5f)) { changed=true; before=e.lastDurability; }
         e.lastDurability=durability;
         e.haveDurability=true;
+    }
+    {
+        static ViewCount counts;
+        float centre[3],radius=0.0f;
+        if(SphereOf(self,centre,&radius))CountView(counts,centre,radius);
+        if(tick%600==0)Log("EDF41MOTHER VIEW mothership %p frames %u: inside the camera frustum %u, intersecting %u, outside %u, within 1000 m %u",
+                           self,counts.frames,counts.inside,counts.intersects,counts.outside,counts.near1000);
     }
     if(tick==2)ProbeModel(self,"mothership","frame 2");
     MaybeDisarm(self,tick);
@@ -560,6 +647,13 @@ void __fastcall FactoryCreate(Factory*,void* info) noexcept {
     AuditLiveTable();
     void* obj=reinterpret_cast<NewFn>(image+kNew)(kCarrierSize);
     if(!obj) { Log("EDF41MOTHER create: out of memory for %zu bytes",kCarrierSize); return; }
+    {
+        // The block comes from the game's allocator without being cleared: what it still holds from an earlier object of the same size.
+        float pre[3]={};
+        const char* ob=static_cast<const char*>(obj);
+        std::memcpy(&pre[0],ob+0x658,4); std::memcpy(&pre[1],ob+0x6F8,4); std::memcpy(&pre[2],ob+0x718,4);
+        Log("EDF41MOTHER create: before the constructor the new block %p already holds wrapper+0x08 %.2f, instance+0x08 %.2f, instance+0x28 %.2f (non-zero = left by an earlier object)",obj,pre[0],pre[1],pre[2]);
+    }
     if(Cfg().edf41MotherWatch==1 && !watch.active.load())ArmWatch("mothership",static_cast<const char*>(obj));
     reinterpret_cast<CtorFn>(image+kCarrierCtor)(obj,info);
     void** vptr=static_cast<void**>(obj);
@@ -587,6 +681,12 @@ void __fastcall CarrierCreateWatch(void* owner,void* info) {
     taken=true;
     void* obj=reinterpret_cast<NewFn>(image+kNew)(kCarrierSize);
     if(!obj)return;
+    {
+        float pre[3]={};
+        const char* ob=static_cast<const char*>(obj);
+        std::memcpy(&pre[0],ob+0x658,4); std::memcpy(&pre[1],ob+0x6F8,4); std::memcpy(&pre[2],ob+0x718,4);
+        Log("EDF41MOTHER CONTROL carrier create: before the constructor the new block %p holds wrapper+0x08 %.2f, instance+0x08 %.2f, instance+0x28 %.2f",obj,pre[0],pre[1],pre[2]);
+    }
     ArmWatch("CONTROL carrier",static_cast<const char*>(obj));
     reinterpret_cast<CtorFn>(image+kCarrierCtor)(obj,info);
 }
