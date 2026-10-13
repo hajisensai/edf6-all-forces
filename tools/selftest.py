@@ -6738,6 +6738,224 @@ def edf41_objects_shipped() -> None:
 
 
 @test
+def edf41_anthill_voxel_body() -> None:
+    """4.1's ant nest under EDF6's AntHill (2026-10-13, M115 on the real game): the class builds a voxel-destruction
+    body from animation_model[3] and the first hit dereferences it unchecked (EDF+0x4EB8D7 loads this+0x848, 0x6CAF22
+    writes through it), so the shipped nest has the block: E517's grid and tuning around Anthill301.mdb's own extent,
+    no debris (E517's chunks are metal), the keys of E517's mech look left out, 4.1's own values kept. check_fracture
+    refuses the nest 4.1 shipped (no block), a box that is not one, tuning of the wrong length and a debris name the
+    archive lacks."""
+    import copy
+    import edf41_objects as eo
+    import make_edf41_objects as m
+    import mdb
+    import sgo
+    rel = 'OBJECT/ANTHILL301.SGO'
+    files = {rel: eo.read(rel), 'OBJECT/ANTHILL301.RAB': eo.read('OBJECT/ANTHILL301.RAB')}
+    top = sgo.load(data=files[rel])
+    assert top['xgs_scene_object_class'] == 'AntHill' and 'AntHill' in m.FRACTURE_CLASSES
+    m.check_fracture(top, files, rel)
+    block = top['animation_model'][3]
+    rab = mdb.rab_read(files['OBJECT/ANTHILL301.RAB'])
+    body = mdb.mdb_read(next(f for f in rab.files if f.name.lower() == 'anthill301.mdb').data)
+    box = [mdb.rigid_extent(body, ax) for ax in range(3)]
+    near = lambda a, b: all(abs(x - y) < 1e-5 for x, y in zip(a, b))   # stored as 4-byte floats, loaded to 6 places
+    assert near(block[1], [lo for lo, _ in box]) and near(block[2], [hi for _, hi in box]), 'the box is not the model\'s extent'
+    assert block[0] == [16, 16, 16] and len(block[3]) == m.FRACTURE_TUNING + 1 and block[3][-1] == [], block
+    # 4.1's own values stay; E517's mech look does not come over; the score adjust both stock nests carry does
+    assert top['game_object_durability'] == 1500.0 and top['game_object_kill_counter'] == 'NestKillCount'
+    assert top['game_object_destroy_score_adjust'] == 0.5
+    assert not {'ant_hill_material_type', 'lighting', 'material_animation'} & set(top), sorted(top)
+    # the refusals
+    def refuses(edit, why: str) -> None:
+        bad = copy.deepcopy(top)
+        edit(bad)
+        try:
+            m.check_fracture(bad, files, rel)
+        except ValueError:
+            return
+        raise AssertionError(f'check_fracture passed {why}')
+    refuses(lambda t: t['animation_model'].pop(3), 'a nest with no block (4.1\'s)')
+    refuses(lambda t: t['animation_model'].__setitem__(3, 5), 'a block that is not a list')
+    refuses(lambda t: t['animation_model'][3][1].__setitem__(0, 99.0), 'a box with min above max')
+    refuses(lambda t: t['animation_model'][3][0].__setitem__(0, 0), 'a grid of zero cells')
+    refuses(lambda t: t['animation_model'][3][3].pop(), 'tuning without its debris list')
+    refuses(lambda t: t['animation_model'][3][3][-1].append('nowhere.mdb'), 'a debris model the archive lacks')
+    # a block of three entries (E615_HORNETNEST_SMALL's form) is the class's own; other classes are not asked
+    short = copy.deepcopy(top)
+    short['animation_model'][3] = short['animation_model'][3][:3]
+    m.check_fracture(short, files, rel)
+    other = copy.deepcopy(top)
+    other['xgs_scene_object_class'] = 'GiantAnt'
+    other['animation_model'].pop(3)
+    m.check_fracture(other, files, rel)
+    # every shipped SGO of such a class passes
+    reg = eo.registry()
+    for obj in reg['objects']:
+        data = eo.read(obj['object'])
+        t = sgo.load(data=data)
+        if t.get('xgs_scene_object_class') in m.FRACTURE_CLASSES:
+            m.check_fracture(t, {r: eo.read(r) for r in obj['files']}, obj['object'])
+
+
+@test
+def edf41_class_keys() -> None:
+    """Every converted object has the top-level keys every stock EDF6 SGO of its class has (the classes read keys by
+    name and several dereference a miss unchecked: Hector's weak_point, the AlienTrailer's se_list at EDF+0x30A4D7,
+    M015 2026-10-13). make_edf41_objects.class_keys / fill_class_keys / check_class_keys: on stand-in stock data the
+    intersection is what all have, a missing key is filled from the nearest-durability stock SGO (only that key; the
+    object's own values stay) and then passes, an unfillable class is refused; on the shipped objects (EDF6 installed)
+    none lacks one."""
+    import make_edf41_objects as m
+    import sgo
+    import edf41_objects as eo
+
+    def make(**kw: object) -> bytes:
+        return sgo.write_depth_first(0x102, kw)
+
+    stock = {'Box': {'OBJECT/A.SGO': sgo.load(data=make(xgs_scene_object_class='Box', game_object_durability=100.0, se=[1], only_a=[2])),
+                     'OBJECT/B.SGO': sgo.load(data=make(xgs_scene_object_class='Box', game_object_durability=900.0, se=[7]))}}
+    blobs = {'OBJECT/A.SGO': make(xgs_scene_object_class='Box', game_object_durability=100.0, se=[1], only_a=[2]),
+             'OBJECT/B.SGO': make(xgs_scene_object_class='Box', game_object_durability=900.0, se=[7])}
+    assert m.class_keys(stock, 'Box') == {'xgs_scene_object_class', 'game_object_durability', 'se'}
+    assert m.class_keys(stock, 'Nothing') == set()
+    mine = make(xgs_scene_object_class='Box', game_object_durability=800.0, own=[5])
+    files = {'OBJECT/X.SGO': mine}
+    try:
+        m.check_class_keys(stock, 'OBJECT/X.SGO', mine)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('check_class_keys passed an object lacking a key every stock SGO has')
+    note = m.fill_class_keys(stock, blobs.__getitem__, 'OBJECT/X.SGO', files)
+    assert note == {'template': 'OBJECT/B.SGO', 'keys': ['se']}, note    # 800 is nearer 900 than 100
+    out = sgo.load(data=files['OBJECT/X.SGO'])
+    assert out['se'] == [7] and out['own'] == [5] and 'only_a' not in out, out
+    m.check_class_keys(stock, 'OBJECT/X.SGO', files['OBJECT/X.SGO'])
+    assert m.fill_class_keys(stock, blobs.__getitem__, 'OBJECT/X.SGO', files) is None
+    # the shipped objects
+    reg = eo.registry()
+    for o in reg['objects']:
+        if o['object'].endswith('.SGO'):
+            assert 'class_keys_from' not in o or o['class_keys_from']['keys'], o
+    if not _e5c_have_game():
+        return
+    import rootcpk
+    games = m.Games(rootcpk.DEFAULT_GAME, rootcpk.DEFAULT_GAME)
+    real = games.stock_by_class()
+    flagged = set()
+    for o in reg['objects']:
+        if o['object'].endswith('.SGO'):
+            try:
+                m.check_class_keys(real, o['object'], eo.read(o['object']))
+            except ValueError:
+                flagged.add(o['object'].split('/')[-1])
+    assert not flagged, sorted(flagged)
+
+
+@test
+def edf41_stale_stock() -> None:
+    """make_edf41_objects.stale_stock / script_sgos: an SGO EDF6's archives serve that the 4.1 missions spawn, whose class
+    lacks no key every OTHER stock SGO of it has, passes; one that does (a 4.1 leftover EDF6's classes cannot load:
+    Transporter401_Formation without se_preset_list crashed MP003 at EDF+0x240AD3, 2026-10-13) is refused unless this
+    port replaces it or EDF6's own missions spawn it (the game loads it); a class with a single member needs that proof.
+    On the real archives (EDF6 and EDF4.1 installed): every stock SGO the 4.1 missions spawn passes or is replaced."""
+    import make_edf41_objects as m
+    import edf41_objects as eo
+
+    # the scripts' strings: BVM text is UTF-16, AC / JSON text is UTF-8
+    wide = 'x app:/Object/Foo.sgo y'.encode('utf-16le') + b'\0\0' + 'app:/object/Bar_2.SGO'.encode('utf-16le')
+    assert m.script_sgos(wide) == {'OBJECT/FOO.SGO', 'OBJECT/BAR_2.SGO'}, m.script_sgos(wide)
+    assert m.script_sgos(b'{"o": "app:/Object/Baz.sgo;app:/Object/Qux.sgo"}') == {'OBJECT/BAZ.SGO', 'OBJECT/QUX.SGO'}
+    assert m.script_sgos(b'app:/object/a.rab') == set()
+
+    full = {'xgs_scene_object_class': 'Box', 'game_object_durability': 1.0, 'se_preset_list': []}
+    stock = {'Box': {'OBJECT/A.SGO': full, 'OBJECT/B.SGO': {k: v for k, v in full.items() if k != 'se_preset_list'}},
+             'Solo': {'OBJECT/S.SGO': {'xgs_scene_object_class': 'Solo'}}}
+    everything = {'OBJECT/A.SGO', 'OBJECT/B.SGO', 'OBJECT/S.SGO'}
+    out = m.stale_stock(stock, everything, set(), set())
+    assert len(out) == 2 and out[0].startswith('OBJECT/B.SGO') and "['se_preset_list']" in out[0], out
+    assert out[1].startswith('OBJECT/S.SGO') and 'no other stock SGO' in out[1], out
+    assert m.stale_stock(stock, everything, {'OBJECT/B.SGO'}, {'OBJECT/S.SGO'}) == [], 'replaced / proven passes'
+    assert m.stale_stock(stock, {'OBJECT/A.SGO'}, set(), set()) == [], 'only what the 4.1 missions spawn is tested'
+
+    # animation_model without a MAB block where every sibling has one (Transporter401_Formation: boosts looked its
+    # locators up through the null MAB, EDF+0x6BAE06, MP003 2026-10-13) is refused unless MAB_LESS says why it works
+    import sgo
+    mab = 'raw:4d414200' + '00' * 8
+    sib = {'xgs_scene_object_class': 'Box', 'animation_model': [['a.mrab', 'a.mdb'], 'a.cas', mab]}
+    stock_mab = {'Box': {'OBJECT/A.SGO': sib}}
+    plain = sgo.write_depth_first(0x102, {'xgs_scene_object_class': 'Box', 'animation_model': [['b.rab', 'b.mdb'], 'b.cas', 0]})
+    with_mab = sgo.write_depth_first(0x102, {'xgs_scene_object_class': 'Box', 'animation_model': [['b.rab', 'b.mdb'], 'b.cas', mab]})
+    m.check_model_mab(stock_mab, 'OBJECT/B.SGO', with_mab)
+    m.check_model_mab({}, 'OBJECT/B.SGO', plain)     # no sibling: nothing to compare
+    try:
+        m.check_model_mab(stock_mab, 'OBJECT/B.SGO', plain)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('check_model_mab passed an animation_model without a MAB block')
+    m.check_model_mab(stock_mab, 'OBJECT/TRANSPORTER401_FORMATION.SGO', plain)   # MAB_LESS: explained
+
+    # a classic SGO of a class whose stock SGOs are all DSGO is refused (Vehicle501_FortressRobo: slot 6 read the root
+    # through the dictionary API a classic SGO leaves empty, EDF+0xD74D9, MP004 2026-10-13); as_dsgo keeps the values
+    import dsgo
+    classic = sgo.write_depth_first(0x102, {'xgs_scene_object_class': 'Box', 'n': [1, 2], 's': 'x', 'f': 1.5})
+    m.check_class_format(set(), 'OBJECT/B.SGO', classic)
+    try:
+        m.check_class_format({'Box'}, 'OBJECT/B.SGO', classic)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('check_class_format passed a classic SGO of a DSGO-only class')
+    converted = m.as_dsgo(classic)
+    assert converted[:4] == b'DSGO' and m.as_dsgo(converted) == converted
+    m.check_class_format({'Box'}, 'OBJECT/B.SGO', converted)
+    back = dsgo.to_py(dsgo.parse(converted).root)
+    assert back == {'xgs_scene_object_class': 'Box', 'n': [1.0, 2.0], 's': 'x', 'f': 1.5}, back
+
+    # the shipped replacement: registered as replacing the stock file, built from 4.1's SGO under EDF6's class
+    reg = eo.registry()
+    done = {o['object']: o for o in reg['objects']}
+    for root, why in m.STOCK_OVERRIDES.items():
+        o = done.get('OBJECT/' + root)
+        assert o is not None and o.get('replaces_stock') == why, root
+    formation = sgo.load(data=eo.read('OBJECT/TRANSPORTER401_FORMATION.SGO'))
+    assert formation['boosts'] == [] and not m.has_mab(formation), 'MAB_LESS is only sound with no booster locators'
+    assert 'OBJECT/TRANSPORTER401.CAS' in done['OBJECT/TRANSPORTER401_FORMATION.SGO']['files']
+    if not _e5c_have_game() or not _edf41_root():
+        print('skip  edf41_stale_stock (real archives): needs EDF6 and EDF4.1 installed')
+        return
+    import rootcpk
+    games = m.Games(_edf41_root(), rootcpk.DEFAULT_GAME)
+    spawned = m.spawned_objects(games)
+    assert len(spawned) > 100, len(spawned)     # the scan found the missions' objects, not nothing
+    assert 'OBJECT/TRANSPORTER401_FORMATION.SGO' in spawned
+    left = [s for s in m.stale_stock(games.stock_by_class(), spawned, set(done), m.proven_stock(games))
+            if s.split(':')[0] not in m.STOCK_EXEMPT]
+    assert not left, left
+    real = games.stock_by_class()
+    for o in reg['objects']:   # every shipped SGO has the MAB block its class's stock SGOs have, or MAB_LESS says why not
+        if o['object'].endswith('.SGO'):
+            m.check_model_mab(real, o['object'], eo.read(o['object']))
+    dsgo_only = games.dsgo_only_classes()
+    assert 'Vehicle501_FortressRobo' in dsgo_only, sorted(dsgo_only)[:5]
+    for o in reg['objects']:   # no shipped classic SGO sits in a class EDF6 only ships as DSGO
+        if o['object'].endswith('.SGO'):
+            m.check_class_format(dsgo_only, o['object'], eo.read(o['object']))
+    # the formation's CAS has the states the class looks up by name (EDF+0x5E4A6A..0x5E4AB0)
+    import cas_graft
+    import cas_legacy as cl
+    cas = eo.read('OBJECT/TRANSPORTER401.CAS')
+    main = [[cas_graft._name(cas, mc.at) for mc in ms] for at, ms in cl.cas_layout(cas).tree.anmgroups
+            if cas_graft._name(cas, at) == 'main']
+    assert main and {'hover_start', 'hover_end', 'fly'} <= set(main[0]), main
+    # and without the replacement the formation is what this test exists to catch
+    bad = m.stale_stock(games.stock_by_class(), spawned, set(), m.proven_stock(games))
+    assert any(s.startswith('OBJECT/TRANSPORTER401_FORMATION.SGO') and 'se_preset_list' in s for s in bad), bad
+
+
+@test
 def edf41_objects_install() -> None:
     """tools/edf41_objects.py on a stand-in game: install writes every object's files as the ledger owner edf41 and
     remove deletes them; a file of the same name another mod put in Mods is never written over, every object needing
@@ -7658,6 +7876,76 @@ def edf41_voice_real() -> None:
     row = next(en.items[i] for i in en.names if en.names[i] == 'A001AA')
     line = s.read_captions(s.plugin_path(r41, s.CAPTIONS['EN'])).get('A001AA')
     assert row.items == ['', line or 'A001AA'], row.items
+@test
+def edf41_rest_behaviour_real() -> None:
+    """The shipped carriers, AI tank, Deiroi, AlienTrailer, Fortress robo and AI rangers read back with the keys
+    the EDF6 classes need in the shape they read them (jobs/4bf89026/tmp/behav_rest/NOTES_*.md): the carrier's and the
+    trailer's material animations as [blob, slot] pairs (a bare blob reached EDF+0x6dc050 as a null), Deiroi's
+    shot / battery / moving keys (unchecked reads at EDF+0x319566, 0x31981c) and its beam foot under
+    DeiroiFootParts_Battery, the trailer's se_list, the robo's booster keys, the rangers' talk setting, the tank's
+    4.1 route radius and water line."""
+    import sgo
+    base = os.path.join(ROOT, 'edf41port', 'objects', 'OBJECT')
+
+    def load(name: str) -> dict:
+        with open(os.path.join(base, name + '.SGO'), 'rb') as f:
+            return sgo.load(data=f.read())
+
+    def plain(v: object) -> object:
+        return [plain(x) for x in v] if isinstance(v, list) else round(v.value, 6) if isinstance(v, sgo.Float) else v
+
+    def pairs(v: list) -> list[int]:
+        assert all(isinstance(x, list) and len(x) == 2 and isinstance(x[1], int) for x in v), 'not [blob, slot] pairs'
+        return [x[1] for x in v]
+
+    assert pairs(load('UFOCARRIER301')['material_animation']) == [0, 2, 2]
+    assert pairs(load('UFOCARRIER401')['material_animation']) == [0, 2, 2]
+    assert load('UFOCARRIER301')['xgs_scene_object_class'] == 'UfoCarrier508'
+    for name in ('DEIROI401', 'DEIROI401S', 'DEIROI401_2', 'DEIROI401L', 'DEIROI401_3'):
+        d = load(name)
+        assert d['xgs_scene_object_class'] == 'Deiroi'
+        shot = plain(d['bullet_object'])
+        assert shot[0] == 'PlasmaBullet01' and shot[1][1][:8] == [0, 0.5, 1, 1800, 8, 6.0, 2, 10.0], shot
+        assert shot[1][1][9] == [0.4, 0.4, 3.0, 1.0] and shot[1][2] == [0, 60]
+        assert plain(d['deiroi_moving_settings']) == [1.2, 0.533333, 0.25]
+        row = plain(d['deiroi_battery_config'])[0]
+        assert row[1][0] == 'bullet_object' and row[2] == 'charge_param' and row[3] == 180, row
+        assert 'charge_param' in d and (('game_object_level_adjust' in d) == (name == 'DEIROI401S')), name
+    beam = load('DEIROIFOOTPARTS_BEAM')
+    assert beam['xgs_scene_object_class'] == 'DeiroiFootParts_Battery'
+    bolt = plain(beam['bullet_object'])
+    assert bolt[0] == 'LaserBullet02' and bolt[1][1][:8] == [0, 20.0, 1, 30, 8, 1.2, 10, 0.001], bolt
+    assert plain(beam['deiroi_battery_config'])[1][1] == 600 and plain(beam['deiroi_battery_config'])[3] == 240
+    assert plain(beam['deiroi_fire_config']) == [200.0, 1.0, 400.0, 0, [600.0, 0.02]]
+    for name in ('ALIENTRAILER401', 'ALIENTRAILER401_L', 'ALIENTRAILER401_FIXED', 'ALIENTRAILER401_FIXEDXL',
+                 'ALIENTRAILER401_XL'):
+        d = load(name)
+        assert len(d['se_list']) == 6 and pairs(d['material_animation']) == pairs(d['unit_material_animation']) == [0, 2, 2]
+        assert d['game_object_kill_counter'] == 'AlienTrailerKillCount'
+    for name in ('VEHICLE501_FORTRESSROBO', 'VEHICLE501_FORTRESSROBO_AI'):
+        d = load(name)
+        assert len(d['booster_setting']) == 4 and all(len(x) == 2 and isinstance(x[1], float) for x in d['booster_setting'])
+        assert plain(d['booster_param_list']) == [[40.0, 40.0], [10.0, 10.0]] and len(d['vehicle_riding_position'][0]) == 7
+        assert plain(d['mission_setup'])[2] == [] and len(d['vehicle_setup'][2]) == 2
+    for name, talk in (('AIARMYSOLDIER_OMG', 0), ('AIARMYSOLDIER_OMG_LEADER', 1)):
+        t = load(name)['game_object_talk_setting']
+        assert t[1] == talk and t[2] > 1 and t[3] in (0, 1) and t[2] == {0: 6, 1: 4}[talk], t
+    # Berserker's base class enables material slots 0..3 by number (EDF+0x6dc830 via 0x348d1d, 0x33ef81, 0x34b2de, 0x37acde):
+    # every Hector variant carries the template's four (M113: 2 entries, a null player; M131: the memory past them)
+    import dsgo
+    for name in ('HECTOR301CC', 'HECTOR301GL', 'HECTOR401LS'):
+        with open(os.path.join(base, name + '.SGO'), 'rb') as f:
+            model = dsgo.parse(f.read()).root.get('animation_model')
+        entries = model.get('material_animation').items
+        assert len(entries) == 4 and [e.items[1] for e in entries] == [0.0, 0.0, 2.0, 2.0], name
+        assert all(isinstance(e.items[0], dsgo.Blob) for e in entries)
+    assert load('UFOCARRIER401')['game_sound'] == ['app:/sound/adx/tikyuu4_en_UFOcarrier401.acb',
+                                                   'app:/sound/adx/tikyuu4_en_UFOcarrier301.acb']
+    assert len(load('DEIROI401')['material_animation']) == 4 and len(load('UFO301')['material_animation']) == 4
+    assert all(n.startswith('小型UFO507') for n in load('UFO401')['se_table'])
+    tank = load('VEHICLE301_TANK_AI')
+    assert plain(tank['game_object_ai_route_update_distance']) == 3.0 and plain(tank['car_base_submerge_height']) == 1.7
+    assert tank['xgs_scene_object_class'] == 'Vehicle505_Tank' and plain(tank['game_object_durability']) == 700.0
 
 
 def _mini_mab(flag: int) -> bytes:
@@ -8085,7 +8373,9 @@ def edf41_hector_alias() -> None:
     for frag in am.items[3].items[3].items[6].items:
         assert frag.lower() in member, frag
         assert not m.missing_textures(rab, mdb.mdb_read(member[frag.lower()].data))
-    assert len(am.items[4].items) == len(model.materials) == 2
+    # the class enables slots 0..3 by number (EDF+0x6dc830): as many entries as the template's four, not one per material
+    # (two crashed the real game, M113 / M131); the model's materials are the two the glow blob names
+    assert len(am.items[4].items) == 4 and len(model.materials) == 2
     located = ml.mab_locators(am.items[2].data)
     names = {l.name: l for _i, l in located}
     assert {'目の基準位置', '砲台１', '砲台２'} <= set(names) and all(l.node in bones for _i, l in located)
