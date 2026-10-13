@@ -718,8 +718,8 @@ def mother_dev_fix(files: dict[str, bytes], far: bool = True) -> None:
     files they name are not shipped), the carrier's two MAB locators added, only the files the SGO still names kept."""
     rel = 'OBJECT/' + MOTHER_DEV_ROOT
     version, members = sgo.read(files[rel])
-    for k in [k for k in members if k.startswith('mp_') or k == 'resource']:
-        del members[k]
+    # mp_* (the parts: [sgo path, euler degrees, position]) and resource stay: the plugin makes the parts from them (phase 2 step 1)
+    # and the six part SGOs, their models, CASs and ragdolls come over with the hull.
     if not far:   # the comparison build: without the far-render keys (E508_CARRIER's own)
         for k in ('UfoCarryer_EnableFarRender', 'spawn_effect_setting'):
             members.pop(k, None)
@@ -734,6 +734,27 @@ def mother_dev_fix(files: dict[str, bytes], far: bool = True) -> None:
     members['edf41_mother_model'] = [am[0][0][1], *ext, len(md.bones)]
     files[rel] = sgo.write_depth_first(version, members)
     prune(files, rel)
+    mother_parts_fix(files)
+
+
+# The part classes (UfoMother301_Hatch / _Panel / _Cannon / _BigCannon) are built by the plugin on EventAnimationObject
+# (src/edf41mother.cpp): its constructor asks the CAS player "main" for the state "default". 4.1's part CASs have no such state:
+# it is an alias of the state the part rests in (the cannon's CAS has only "appear"; the others rest in "close_state").
+MOTHER_PART_REST = {'UFOMOTHER301_CANNON.CAS': 'appear'}
+
+
+def mother_parts_fix(files: dict[str, bytes]) -> None:
+    for rel in [r for r in files if r.startswith('OBJECT/UFOMOTHER301_') and r.endswith('.CAS')]:
+        rest = MOTHER_PART_REST.get(rel.split('/', 1)[1], 'close_state')
+        files[rel] = cas_graft.alias_states(files[rel], {'main': [('default', rest)]})
+    # The panels have no CAS in 4.1 (animation_model[1] is the int 0); EventAnimationObject's constructor asks for the player "main",
+    # so they get the hatch's (its clips name bones the panel's model lacks: nothing binds, the state only has to exist).
+    for rel in [r for r in files if r.startswith('OBJECT/UFOMOTHER301_PANEL') and r.endswith('.SGO')]:
+        version, members = sgo.read(files[rel])
+        am = members['animation_model']
+        if isinstance(am[1], int):
+            am[1] = 'app:/object/UfoMother301_Hatch.cas'
+            files[rel] = sgo.write_depth_first(version, members)
 
 
 def alias(games: Games, root: str, files: dict[str, bytes], a: Alias) -> None:

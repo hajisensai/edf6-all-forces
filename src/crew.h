@@ -278,6 +278,7 @@ struct Config {
     float proteusPriorityRadius=100.0f;// ...within this of it (m)
     bool edf41Ai=true;              // EDF4.1 Hector's weapon gating and back-off cycle on the converted Hectors (edf41ai.cpp)
     float edf41MotherPlace=0.0f;    // development only: the mothership held this many m in front of the camera each frame (0 = its route), to see it
+    int edf41MotherParts=15;        // development only: which part groups the mothership builds as real objects (bit 1 hatches, 2 covers, 4 cannons, 8 main cannon, 16 panels); 0 = none
     bool edf41MotherDev=false;      // development only: EDF4.1's UfoMother301 prototype (edf41mother.cpp); off in every release
     bool edf41Sound=true;           // EDF4.1's weapon sound effects and voices added to EDF6's banks (edf41sound.cpp), from the game's start
     bool terrainShare=true;         // every placement of one terrain piece drawn from one decode (fieldshare.cpp), from the game's start

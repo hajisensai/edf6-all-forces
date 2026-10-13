@@ -291,3 +291,20 @@ EDF6 的对象有 `IRecordable`（snapshot）和 `NetworkObject`。4.1 的部件
 **数据**：UfoMother301.SGO 以 E508_CARRIER 为模板（类名保持 `UfoMother301`）；CAS 补 in_ring/out_ring 与 open_state/close_state（别名到 open/close）；MAB 补 `排出口`、`ダメージエフェクト` 两个定位点（508 的构造函数按名取用不判空）；去掉 `mp_*`、`resource`（部件类还不存在）。已知未解：`UfoCarrier_CorePartsName` 在 301 的 ragdoll 里查不到（索引 -1，类自己有默认），`material_animation` 来自 E508（名字对不上，按名跳过）。
 
 **开发开关**：ini `Edf41MotherDev`（默认 0）。安装器仅在「源码树运行 + 环境变量 `EDF41_MOTHER_DEV=1` + edf41port_dev 存在」时并入开发对象、让战役包放行 M016 / M110 / M210 / M603（M123 / M130 另缺 `sk_*` 地图），并把 ini 写成 1；冻结的安装包、没有变量、没有目录时一律不并入且 ini 写回 0。
+
+## 阶段 2 步骤 1（2026-10-13）：部件作为真对象
+
+代码：`src/edf41mother.cpp`（`SpawnParts` / `MakePart` / `PartUpdateWrap`）；数据：`tools/make_edf41_objects.py` 的 `mother_dev_fix` + `mother_parts_fix`（仍只在 `--mother-dev`）；开关：ini `Edf41MotherParts`（位掩码 1 舱门 / 2 舱盖 / 4 中型炮 / 8 主炮 / 16 板甲 125 块，默认 15；0 = 不建）。
+
+**EDF6 的「按 SGO 路径建子对象」（逆向，H）**：`0x11945E0(manager=[0x20B2958], const float matrix[16], const wchar_t* sgoPath, Context*)`。脚本原生 CreateEnemy（2000，`0x2154C0`）与 `UfoMother511` 的构造（`0x4FE740` 内 `0x4FEF00`）都走它：经资源缓存（`0x20B28D0`）取 SGO 树，`0x119ADE0` 取类名，`0x1195C50` 找工厂，把 `{矩阵, SGO 树, 根节点, 输出 shared_ptr}` 填进 Context（`+8/+0x10/+0x18/+0x20`），调工厂虚表槽 2 `Create`，再把对象插进 manager 的对象表（`manager+0x3B0` 链表，`+0xCB0` 是重入计数）。返回对象指针（已删除的对象返回 0）。Context 是 0x30 字节、首 8 字节为虚表 `0x1762068`、其余清零。对象自己的弱引用是 `+0x28`（对象）/`+0x30`（控制块）。传入的矩阵就是新对象的初始 `+0x60`。
+
+**部件类的底**：`EventAnimationObject`（工厂虚表 `0x17D4CD0`，创建 `0x5B5EE0`：`new(0xC90)` + 构造 `0x5B5FB0`；虚表 `0x17D4D20` 45 槽，槽 0 析构 / 5 Update / 9 OnMessage 与 `UfoCarrier508` 同义）。构造只读 `animation_model`（模型 + CAS，CAS 玩家 `main` 取状态 `default`）与 `ragdoll`；Update `0x5B6D20` 调基类 Update `0x54BE40` 并用 `0x1100B90` 把对象矩阵（`+0x60`）交给模型。所以 4.1 的部件 SGO（同样只有 animation_model / ragdoll / 耐久 / 遭遇 / 镜头键）直接可用，只需要 CAS 有 `default` 状态（`mother_parts_fix`：别名到休息态；炮的 CAS 只有 `appear`；板甲 4.1 没有 CAS，借舱门的）。
+
+**放置**：部件矩阵 = 本地矩阵 × 船体 `+0x60` 矩阵（行向量约定）；本地矩阵 = Rx(A.x)·Ry(A.y)·Rz(A.z)，位置放在最后一行（4.1 的顺序 X、Y、Z；**欧拉约定与 `waist` 节点相对关系未对照实机，截图核对**）。船体不在时（脚本 DeleteObject）部件在下一次 Update 里自己 `0x118A1B0` 删除。
+
+**脚本消息的约定（EDF6，H）**：原生 SetEnemyGenerator / SetInstantEnemyGenerator（2100 / 2101，`0x20FF70` 内 `0x211E90` 起）向对象发消息 `0x20100`，数据块里 `+0x20` 是 SGO 路径宽串、`+0x40` 是整数 1、**`+0x48` 是单元索引**（`UfoMother511` 读的就是 `[data+0x48]`，并把同一条消息转发给第 N 个子单元；4.1 读 `+0x40`，见 1.4——EDF6 的数据块布局不同，舱门的处理要按 `+0x48`）。`UfoCarrier508` 收到 `0x20100` 交给 `[this+0xD60]` 的生成器组件（`0x6E1630`）。当前船体是克隆的 508，所以 `0x20100` 暂由它自己的生成器组件处理。
+
+**验证用任务（读 21 个 MISSION.BVM）**：只有开场的「前一段」就创建并使用母舰的才适合不清波次：
+- **M110**（NW_KOUSOUBLD01，`CreateNeutral` 母舰01 在初始化块里、无任何等待）：紧接着对索引 0..3 各发一条 `SetInstantEnemyGenerator`（Ufo301 ×8），0.25 s 后再 4 条（×10），之后还有 16 条；动作 3、7、4 在后面的计时函数里。生成器与舱门测试用它。
+- **M130**（SK_SANGAKU02，`CreateEnemy` 母舰在初始化块里）：立刻 `ObjectAction` 0 与 14、`SetObjectDurability` 100；约 1–3 s 后 1、2、13、15 在一个计时函数里。动作表与耐久用它。
+- M016 的母舰要等前面的波次（创建在 `Func_11` 链里），autopilot 过不去；M123 / M603 / M210 同理或更晚。
