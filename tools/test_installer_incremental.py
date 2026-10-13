@@ -172,7 +172,7 @@ class IncrementalTests(unittest.TestCase):
                                                        return_value={'OBJECT/EDF6VC_LO_TANK_4000000000000C81.SGO': b'loaded tank'}))
             stack.enter_context(patch.object(make_stock_stores, 'remove', lambda g: ([], [])))
             import make_edf5_campaign   # no Root.cpk here to append to: its files stand in, its install runs for real
-            stack.enter_context(patch.object(make_edf5_campaign, 'build', lambda g, campaign=True, test_range=True, root41=None: (
+            stack.enter_context(patch.object(make_edf5_campaign, 'build', lambda g, campaign=True, test_range=True, root41=None, skip41=(): (
                 {rel: b'stub' for rel in make_edf5_campaign.FILES}, make_edf5_campaign.Contents(3, 6),
                 {'rows': [], 'skipped': []})))
             stack.enter_context(patch.object(make_edf5_campaign.modfiles, 'refuse_while_running', lambda *a, **k: None))
