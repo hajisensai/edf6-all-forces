@@ -48,6 +48,8 @@
 #include "sight.h"
 #include "vehicleram.h"
 #include "playerjet_kinds.h"
+#include "sightzoom.h"
+#include "turretcam.h"
 #include "pjet_catch.h"
 #include "pjet_handling.h"
 #include "hail_glide.h"
@@ -101,6 +103,8 @@ constexpr Kind kKinds[]={
 constexpr float kAutoRotate=20.0f;     // m/s over rotate: it lifts off without the stick...
 constexpr float kAutoThrottle=0.6f;    // ...with the throttle at least this open (not rolling out a landing)
 constexpr float kLiftOffClimb=5.0f;    // m/s up the moment it lifts off
+constexpr ULONGLONG kLiftOffGraceMs=1000;   // ...and its wheels' contact this long after, climbing, is not a touchdown (kTouch at
+                                            // kLiftOffClimb: 0.6 s)
 constexpr float kThrottleRate=1.0f;    // the throttle lever's travel a second (closed to open in 1 s)
 // In the air the throttle is Ace Combat's: held forward (or ascend) it boosts to full, held back it closes and brakes,
 // let go it returns to kCruiseThrottle; on the ground it stays where the stick left it (taxi, hold, roll out).
@@ -254,6 +258,8 @@ struct PJet {
     float savedInset;
     bool insetSaved;
     ULONGLONG lastMs,logAt,crashAt,blockedSince;
+    ULONGLONG liftOffAt;         // game ms it last lifted off its runway (Ground; ReconcileGround's kLiftOffGraceMs)...
+    bool liftedOff;              // ...if it has
     int threat;                  // 2 a missile homing on it, 1 an enemy's missile lock on it, 0 none (StoresStep)
     int flares;                  // flare pairs left (Cfg().playerJetFlares when the entry is made)
     bool flareHeld;
@@ -605,6 +611,7 @@ void Ground(PJet& j,const unsigned char* v,const Stick& s,float clear,float dt) 
     for(int i=0;i<3;++i){j.vel[i]=along[i]*speed;j.omega[i]=up[i]*yaw;}
     if(!belly && j.throttle>0.02f && speed>=k.rotate && (s.pitch>0.2f || (speed>=k.rotate+kAutoRotate && j.throttle>=kAutoThrottle))) {
         j.phase=Phase::air;j.vel[1]=kLiftOffClimb;j.hasAim=false;
+        j.liftOffAt=GameMs();j.liftedOff=true;   // its wheels' contact for kLiftOffGraceMs is not a landing (ReconcileGround)
         Log("PJET v=%p takeoff at %.0f m/s (throttle %.2f, stick %.2f)",v,speed,j.throttle,s.pitch);
         return;
     }
@@ -651,7 +658,10 @@ void Touch(PJet& j,unsigned char* v,float speed,bool water,ULONGLONG ms) noexcep
     Crash(j,v,sink,speed,PastLanding(j,speed),banked,ms,nullptr);
 }
 
+// Native ground support in the air (veh+0x1580 bit 1 within kTouch): a touchdown, even rebounding, except its own wheels
+// leaving the runway in the kLiftOffGraceMs after Ground lifted it off while it climbs (pjet_handling.h OwnLiftOffContact).
 void ReconcileGround(PJet& j,unsigned char* v,float clear,bool water,bool wet,ULONGLONG ms) noexcept {
+    if(handling::OwnLiftOffContact(j.liftedOff,ms-j.liftOffAt,kLiftOffGraceMs,j.vel[1]))return;
     if(j.phase==Phase::air && !water && !wet && (v[0x1580]&2)!=0 && clear!=kNoGround && clear<=kTouch)
         Touch(j,v,Len(j.vel),false,ms);
 }
@@ -1205,9 +1215,22 @@ constexpr float kCatchGain=1.5f,kCatchBrake=40.0f;
 constexpr ULONGLONG kCatchSayMs=2000;
 ULONGLONG catchSaidAt=0,catchReachAt=0;
 
+// `measured` for a record with no frame of its own yet: the velocity jet.cpp's flight gave the airframe (m/s; none known:
+// left as it is, at rest).
+void SeedMeasured(PJet& j,const unsigned char* v) noexcept {
+    const jet::Jet* const e=jet::FindJet(v);
+    if(!e || !std::isfinite(e->m.vel[0]+e->m.vel[1]+e->m.vel[2]))return;
+    std::memcpy(j.measured,e->m.vel,12);
+}
+
 void Board(PJet& j,unsigned char* v,const float* pos,float clear) noexcept {
     j.driven=true;j.blockedSince=0;
     if(!j.insetSaved){j.savedInset=At<float>(v,kAreaInset);j.insetSaved=true;}
+    // A record made this very frame has measured nothing yet (fresh false: Measure needs a frame before it). An NPC's
+    // aircraft has no record until the player sits at its stick (Held / Forget), so taking one over in the air -- the
+    // boarding gun's round, the gunship's seat key -- read 0 m/s and stalled it on the spot (the user, 2026-10-12:
+    // "上npc飞机的时候，速度会清零"). Its motion up to now is the flight that flew it (jet.cpp's entry).
+    if(!j.fresh)SeedMeasured(j,v);
     const float speed=Len(j.measured);
     const bool air=clear==kNoGround || clear>kOffGround;
     j.phase=air ? Phase::air : speed>kParkSpeed ? Phase::rolling : Phase::parked;
@@ -1972,6 +1995,34 @@ bool PlayerGunnerOrder(const void* vehicle,GunnerOrder* out) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
     out->centred=gunner.centred;
     std::memcpy(out->at,gunner.centre,12);std::memcpy(out->home,gunner.home,12);
+    return true;
+}
+
+// The camera hook's side of the gunner's view (playerjet_crew.inc GunnerLook). The eye stands out of the airframe along
+// the view by the stock camera's own distance from its look-at (a distance the native rig keeps clear of the model), the
+// look-at one radius further on: the screen's centre is the rider's direction, the gunship off it.
+bool GunshipGunnerCamera(const unsigned char* seat,const float* stockEye,const float* stockLook,float* eye,float* look) noexcept {
+    AcquireSRWLockShared(&gunnerViewLock);const GunnerView view=gunnerView;ReleaseSRWLockShared(&gunnerViewLock);
+    if(!Cfg().enabled || !view.seat || seat!=view.seat || view.frame+2<GameFrame() || !view.ref.Is(view.vehicle) ||
+       view.vehicle[kDead] || SeatRider(seat)!=Rider::player || At<const void*>(seat,kSeatRider)!=PlayerHuman()) {
+        gunnerRig=GunnerRig{};return false;
+    }
+    const float* pos=reinterpret_cast<const float*>(view.vehicle+kMatrix)+12;   // the model's origin, as the stock camera
+    if(gunnerRig.seat!=seat) {
+        float d[3];
+        for(int i=0;i<3;++i)d[i]=stockLook[i]-stockEye[i];
+        const float out=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]),up=stockLook[1]-pos[1];
+        if(!std::isfinite(out+up) || out<0.5f)return false;
+        gunnerRig=GunnerRig{seat,out,up};
+    }
+    float dir[3];
+    tcam::Dir(view.yaw,view.pitch,dir);
+    for(int i=0;i<3;++i) {
+        const float pivot=pos[i]+(i==1 ? gunnerRig.up : 0.0f);
+        eye[i]=pivot+dir[i]*gunnerRig.out;
+        look[i]=eye[i]+dir[i]*gunnerRig.out;
+        if(!std::isfinite(eye[i]+look[i]))return false;
+    }
     return true;
 }
 

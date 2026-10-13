@@ -36,17 +36,17 @@ for label, fields, mark in (('Katyusha', make_katyusha.ROCKETS, 7303), ('howitze
     assert fields['AmmoClass'] == 'GrenadeBullet01' and fields['AmmoAlive'] >= 600 and fields['LockonTargetType'] == mark
     print(f'PASS generator parameters {label}: indirect fire (not a generated-asset or gameplay test)')
 # The sights' style rows (tools/reticle_check.cpp kWeapons): the numbers its Classify cases are built from must be the
-# game's own (AmmoClass, LockonType, FireInterval, AmmoSpeed, AmmoExplosion, SecondaryFire_Type), so the style each
+# game's own (AmmoClass, LockonType, FireInterval, AmmoSpeed, AmmoExplosion, AmmoGravityFactor, SecondaryFire_Type), so the style each
 # real weapon is checked to get is the one the plugin will pick from what it reads in game.
 import re
-row = re.compile(r'\{"(V[^"]+\.SGO)","([^"]+)",(\d+),(\d+),([\d.]+)f,([\d.]+)f,(\d+),"[^"]+",Style::\w+,Shell::\w+\}')
+row = re.compile(r'\{"(V[^"]+\.SGO)","([^"]+)",(\d+),(\d+),([\d.]+)f,([\d.]+)f,([\d.]+)f,(\d+),"[^"]+",Style::\w+,Shell::\w+\}')
 rows = row.findall((ROOT / 'tools' / 'reticle_check.cpp').read_text(encoding='utf-8'))
 assert len(rows) >= 20, len(rows)
-for name, ammo, lock, interval, speed, blast, scope in rows:
+for name, ammo, lock, interval, speed, blast, gravity, scope in rows:
     f = sgo.load(data=game.read('WEAPON', name))
     got = (f['AmmoClass'], int(f['LockonType']), int(f['FireInterval']), float(f['AmmoSpeed']), float(f['AmmoExplosion']),
-           int(f.get('SecondaryFire_Type', 0)))
-    want = (ammo, int(lock), int(interval), float(speed), float(blast), int(scope))
-    assert got[:3] == want[:3] and abs(got[3]-want[3]) < 1e-3 and abs(got[4]-want[4]) < 1e-3 and got[5] == want[5], (name, got, want)
+           int(f.get('SecondaryFire_Type', 0)), float(f['AmmoGravityFactor']))
+    want = (ammo, int(lock), int(interval), float(speed), float(blast), int(scope), float(gravity))
+    assert got[:3] == want[:3] and abs(got[3]-want[3]) < 1e-3 and abs(got[4]-want[4]) < 1e-3 and got[5] == want[5] and         abs(got[6]-want[6]) < 1e-3, (name, got, want)
     print(f'PASS real Root.cpk {name}: the numbers reticle_check classifies')
 print(f'5 real archive cases + 2 generator parameter cases + {len(rows)} sight style rows passed; no installation writes')

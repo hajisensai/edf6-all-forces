@@ -15,7 +15,9 @@
 #include "PluginAPI.h"
 #pragma warning(pop)
 #include "crew.h"
+#include "firstperson.h"
 #include "mod_room.h"
+#include "room_ui.h"
 #include "support_soldier.h"
 #include "airdrop.h"
 #include "support_config.h"
@@ -191,7 +193,9 @@ void Validate(Config& n) noexcept {
     Fix("AirSoftTurns",n.airSoftTurns,0.0f,3.0f);
     Fix("AirSoftCeil",n.airSoftCeil,0.0f,1000.0f);
     Fix("HeliSoftEdge",n.heliSoftEdge,0.0f,1000.0f);
-    if(n.viewDistance!=0.0f)Fix("ViewDistance",n.viewDistance,1000.0f,10000.0f);
+    // -1 (any negative): unlimited (crew.h UnlimitedViewDistance); 0: the mission's own; else from 1000 m, no upper limit.
+    if(n.viewDistance<0.0f)n.viewDistance=kUnlimitedView;
+    else if(n.viewDistance!=0.0f)Fix("ViewDistance",n.viewDistance,1000.0f,1.0e6f);
     Fix("JetSoundVolume",n.jetSoundVolume,0.0f,4.0f);
     Fix("WarnVolume",n.warnVolume,0.0f,4.0f);
     Fix("VehicleEngineVolume",n.vehicleEngineVolume,0.0f,4.0f);
@@ -234,7 +238,27 @@ void Validate(Config& n) noexcept {
     n.freeLookButton=static_cast<int>(FixInt("FreeLookButton",n.freeLookButton,0,255));
     n.sightZoomKey=static_cast<int>(FixInt("SightZoomKey",n.sightZoomKey,0,254));
     n.sightZoomButton=static_cast<int>(FixInt("SightZoomButton",n.sightZoomButton,0,255));
+    n.sightRangeUpKey=static_cast<int>(FixInt("SightRangeUpKey",n.sightRangeUpKey,0,254));
+    n.sightRangeDownKey=static_cast<int>(FixInt("SightRangeDownKey",n.sightRangeDownKey,0,254));
+    n.sightRangeStep=static_cast<int>(FixInt("SightRangeStep",n.sightRangeStep,0,1000));
     n.mapKey=static_cast<int>(FixInt("MapKey",n.mapKey,0,254));
+    n.firstPersonKey=static_cast<int>(FixInt("FirstPersonKey",n.firstPersonKey,0,254));
+    Fix("FirstPersonEyeUp",n.fpEyeUp,-0.5f,0.5f);
+    Fix("FirstPersonEyeAhead",n.fpEyeAhead,-0.5f,0.5f);
+    Fix("FirstPersonEyeEase",n.fpEyeEase,0.02f,1.0f);
+    Fix("FirstPersonGripX",n.fpGripX,-1.0f,1.0f);
+    Fix("FirstPersonGripY",n.fpGripY,-1.0f,1.0f);
+    Fix("FirstPersonGripZ",n.fpGripZ,-1.0f,2.0f);
+    Fix("FirstPersonDualGripX",n.fpDualGripX,-1.0f,1.0f);
+    Fix("FirstPersonDualGripY",n.fpDualGripY,-1.0f,1.0f);
+    Fix("FirstPersonDualGripZ",n.fpDualGripZ,-1.0f,2.0f);
+    Fix("FirstPersonHoldX",n.fpHoldX,-1.0f,1.0f);
+    Fix("FirstPersonHoldY",n.fpHoldY,-1.0f,1.0f);
+    Fix("FirstPersonHoldZ",n.fpHoldZ,-1.0f,1.0f);
+    Fix("FirstPersonScale",n.fpScale,0.05f,1.0f);
+    Fix("FirstPersonHoldArc",n.fpHoldArc,0.0f,180.0f);
+    Fix("FirstPersonWristMax",n.fpWristMax,0.0f,90.0f);
+    if(n.fpNear!=0.0f)Fix("FirstPersonNear",n.fpNear,0.005f,0.1f);
     n.mapButton=static_cast<int>(FixInt("MapButton",n.mapButton,0,0xFFFF));
     if(n.mapViewDistance!=0.0f)Fix("MapViewDistance",n.mapViewDistance,1000.0f,10000.0f);
     n.damageStatsKey=static_cast<int>(FixInt("DamageStatsKey",n.damageStatsKey,0,254));
@@ -245,6 +269,8 @@ void Validate(Config& n) noexcept {
     n.debugSpawnSpawnKey=static_cast<int>(FixInt("DebugSpawnSpawnKey",n.debugSpawnSpawnKey,0,254));
     Fix("DebugSpawnRange",n.debugSpawnRange,20.0f,3000.0f);
     Fix("DebugSpawnDistance",n.debugSpawnDistance,10.0f,500.0f);
+    n.roomLoadoutKey=static_cast<int>(FixInt("RoomLoadoutKey",n.roomLoadoutKey,0,254));
+    n.roomLoadoutButton=static_cast<int>(FixInt("RoomLoadoutButton",n.roomLoadoutButton,0,0xFFFF));
     n.proteusModeKey=static_cast<int>(FixInt("ProteusModeKey",n.proteusModeKey,0,254));
     n.proteusModeButton=static_cast<int>(FixInt("ProteusModeButton",n.proteusModeButton,0,255));
     n.proteusShieldKey=static_cast<int>(FixInt("ProteusShieldKey",n.proteusShieldKey,0,254));
@@ -291,7 +317,6 @@ void Validate(Config& n) noexcept {
     Fix("NpcRollSec",n.npcRollSec,0.5f,30.0f);
     Fix("NpcRetreatHp",n.npcRetreatHp,0.0f,0.9f);
     Fix("NpcLeash",n.npcLeash,5.0f,500.0f);
-    Fix("TransportAutoRange",n.transportAutoRange,50.0f,2000.0f);
     n.npcSquadMin=static_cast<int>(FixInt("NpcSquadMin",n.npcSquadMin,1,16));
     n.npcSquadMax=static_cast<int>(FixInt("NpcSquadMax",n.npcSquadMax,n.npcSquadMin,32));
     Fix("NpcSquadJoinRange",n.npcSquadJoinRange,0.0f,2000.0f);
@@ -393,6 +418,7 @@ void LoadConfig() noexcept {
     n.vehicleWelding=ReadBool(L"VehicleWelding",n.vehicleWelding);
     n.giantContactCap=ReadBool(L"GiantContactCap",n.giantContactCap);
     n.splitMissileSurface=ReadBool(L"SplitMissileSurface",n.splitMissileSurface);
+    n.routeGuidePath=ReadBool(L"RouteGuidePath",n.routeGuidePath);
     n.stockMissilePN=ReadBool(L"StockMissilePN",n.stockMissilePN);
     n.stockMissileNav=ReadFloat(L"StockMissileNav",n.stockMissileNav);
     if(!(n.stockMissileNav>=2.0f && n.stockMissileNav<=6.0f))n.stockMissileNav=3.0f;
@@ -463,6 +489,8 @@ void LoadConfig() noexcept {
     n.sazabiTestBoard=ReadBool(L"SazabiTestBoard",n.sazabiTestBoard);
     n.airdropTest=static_cast<int>(FixInt("AirdropTest",ReadInt(L"AirdropTest",static_cast<DWORD>(n.airdropTest)),0,3));
     if(n.airdropTest)Log("CONFIG AirdropTest=%d (tests only): a container airdrop asked once a mission",n.airdropTest);
+    n.npcCrewTest=ReadBool(L"NpcCrewTest",n.npcCrewTest);
+    if(n.npcCrewTest)Log("CONFIG NpcCrewTest=1 (tests only): empty vehicles are crewed without a player having driven them");
     n.playerJetRollScale=ReadFloat(L"PlayerJetRollScale",n.playerJetRollScale);
     n.playerJetAimGain=ReadFloat(L"PlayerJetAimGain",n.playerJetAimGain);
     n.playerRotorLift=ReadFloat(L"PlayerRotorLift",n.playerRotorLift);
@@ -490,6 +518,7 @@ void LoadConfig() noexcept {
     n.bigWorld=ReadFloat(L"BigWorld",n.bigWorld);
     n.terrainShare=ReadBool(L"TerrainShare",n.terrainShare);
     n.edf41Sound=ReadBool(L"Edf41Sound",n.edf41Sound);
+    n.edf41Ai=ReadBool(L"Edf41Ai",n.edf41Ai);
     n.edf5CampaignContent=FixInt("EDF5CampaignContent",ReadInt(L"EDF5CampaignContent",n.edf5CampaignContent),0,65535);
     n.testRangeContent=FixInt("TestRangeContent",ReadInt(L"TestRangeContent",n.testRangeContent),0,65535);
     n.edf41Content=FixInt("EDF41Content",ReadInt(L"EDF41Content",n.edf41Content),0,65535);
@@ -540,6 +569,37 @@ void LoadConfig() noexcept {
     n.sightZoom=ReadBool(L"SightZoom",n.sightZoom);
     n.sightZoomKey=ReadInt(L"SightZoomKey",static_cast<DWORD>(n.sightZoomKey));
     n.sightZoomButton=ReadInt(L"SightZoomButton",static_cast<DWORD>(n.sightZoomButton));
+    n.sightRangeUpKey=ReadInt(L"SightRangeUpKey",static_cast<DWORD>(n.sightRangeUpKey));
+    n.sightRangeDownKey=ReadInt(L"SightRangeDownKey",static_cast<DWORD>(n.sightRangeDownKey));
+    n.sightRangeStep=ReadInt(L"SightRangeStep",static_cast<DWORD>(n.sightRangeStep));
+    n.sightRangePad=ReadBool(L"SightRangePad",n.sightRangePad);
+    n.infantryScope=ReadBool(L"InfantryScope",n.infantryScope);
+    n.firstPerson=ReadBool(L"FirstPerson",n.firstPerson);
+    n.fpVehicle=ReadBool(L"FirstPersonVehicle",n.fpVehicle);
+    n.fpHideStockHud=ReadBool(L"FirstPersonHideStockHud",n.fpHideStockHud);
+    n.firstPersonKey=ReadInt(L"FirstPersonKey",static_cast<DWORD>(n.firstPersonKey));
+    n.firstPersonStart=ReadBool(L"FirstPersonStart",n.firstPersonStart);
+    n.fpEyeUp=ReadFloat(L"FirstPersonEyeUp",n.fpEyeUp);
+    n.fpEyeAhead=ReadFloat(L"FirstPersonEyeAhead",n.fpEyeAhead);
+    n.fpEyeEase=ReadFloat(L"FirstPersonEyeEase",n.fpEyeEase);
+    n.fpGripX=ReadFloat(L"FirstPersonGripX",n.fpGripX);
+    n.fpGripY=ReadFloat(L"FirstPersonGripY",n.fpGripY);
+    n.fpGripZ=ReadFloat(L"FirstPersonGripZ",n.fpGripZ);
+    n.fpDualGripX=ReadFloat(L"FirstPersonDualGripX",n.fpDualGripX);
+    n.fpDualGripY=ReadFloat(L"FirstPersonDualGripY",n.fpDualGripY);
+    n.fpDualGripZ=ReadFloat(L"FirstPersonDualGripZ",n.fpDualGripZ);
+    n.fpHoldX=ReadFloat(L"FirstPersonHoldX",n.fpHoldX);
+    n.fpHoldY=ReadFloat(L"FirstPersonHoldY",n.fpHoldY);
+    n.fpHoldZ=ReadFloat(L"FirstPersonHoldZ",n.fpHoldZ);
+    n.fpScale=ReadFloat(L"FirstPersonScale",n.fpScale);
+    n.fpNear=ReadFloat(L"FirstPersonNear",n.fpNear);
+    n.fpAimSnap=ReadBool(L"FirstPersonAimSnap",n.fpAimSnap);
+    n.fpMotion=ReadBool(L"FirstPersonMotion",n.fpMotion);
+    n.fpCulling=ReadBool(L"FirstPersonCulling",n.fpCulling);
+    n.fpFit=ReadBool(L"FirstPersonFit",n.fpFit);
+    n.fpArmIk=ReadBool(L"FirstPersonArmIk",n.fpArmIk);
+    n.fpHoldArc=ReadFloat(L"FirstPersonHoldArc",n.fpHoldArc);
+    n.fpWristMax=ReadFloat(L"FirstPersonWristMax",n.fpWristMax);
     n.gunStabilizer=ReadBool(L"GunStabilizer",n.gunStabilizer);
     n.viewDistance=ReadFloat(L"ViewDistance",n.viewDistance);
     n.map=ReadBool(L"Map",n.map);
@@ -556,6 +616,10 @@ void LoadConfig() noexcept {
     n.debugSpawnSpawnKey=ReadInt(L"DebugSpawnSpawnKey",static_cast<DWORD>(n.debugSpawnSpawnKey));
     n.debugSpawnRange=ReadFloat(L"DebugSpawnRange",n.debugSpawnRange);
     n.debugSpawnDistance=ReadFloat(L"DebugSpawnDistance",n.debugSpawnDistance);
+    n.roomLoadout=ReadBool(L"RoomLoadout",n.roomLoadout);
+    n.roomPreSync=ReadBool(L"RoomPreSync",n.roomPreSync);
+    n.roomLoadoutKey=ReadInt(L"RoomLoadoutKey",static_cast<DWORD>(n.roomLoadoutKey));
+    n.roomLoadoutButton=ReadInt(L"RoomLoadoutButton",static_cast<DWORD>(n.roomLoadoutButton));
     // StockVehicleStores, or the older StockHeliStores (the helicopters alone before 2026-10-07) still set to 1
     n.stockStores=ReadBool(L"StockVehicleStores",n.stockStores) || ReadBool(L"StockHeliStores",false);
     n.seatSwitch=ReadBool(L"SeatSwitch",n.seatSwitch);
@@ -620,7 +684,6 @@ void LoadConfig() noexcept {
     n.npcRollSec=ReadFloat(L"NpcRollSec",n.npcRollSec);
     n.npcRetreatHp=ReadFloat(L"NpcRetreatHp",n.npcRetreatHp);
     n.npcLeash=ReadFloat(L"NpcLeash",n.npcLeash);
-    n.transportAutoRange=ReadFloat(L"TransportAutoRange",n.transportAutoRange);
     n.npcSquadSuccession=ReadBool(L"NpcSquadSuccession",n.npcSquadSuccession);
     n.npcSquadMin=ReadInt(L"NpcSquadMin",static_cast<DWORD>(n.npcSquadMin));
     n.npcSquadMax=ReadInt(L"NpcSquadMax",static_cast<DWORD>(n.npcSquadMax));
@@ -643,6 +706,7 @@ void LoadConfig() noexcept {
     n.npcGuardRadius=ReadFloat(L"NpcGuardRadius",n.npcGuardRadius);
     n.npcFreeRange=ReadFloat(L"NpcFreeRange",n.npcFreeRange);
     n.npcRecruitCooldownSec=ReadFloat(L"NpcRecruitCooldownSec",n.npcRecruitCooldownSec);
+    n.vanillaRecruit=ReadBool(L"VanillaRecruit",n.vanillaRecruit);
     n.scriptNpcRecruit=ReadBool(L"ScriptNpcRecruit",n.scriptNpcRecruit);
     n.scriptNpcSettleSec=ReadFloat(L"ScriptNpcSettleSec",n.scriptNpcSettleSec);
     n.tankReturnToPost=ReadBool(L"TankReturnToPost",n.tankReturnToPost);
@@ -693,7 +757,8 @@ void LoadConfig() noexcept {
     Log("CONFIG qmark pointSec=%.0f volume=%.2f vanillaSpot=%d",n.qmarkPointSec,n.qmarkVolume,n.vanillaSpot);
     Log("CONFIG npc formation=%d key=0x%X spacing=%.1f guard=%d",n.npcFormation,n.npcFormationKey,n.npcFormationSpacing,n.npcGuardFormation);
     Log("CONFIG npc pickup key=0x%X range=%.0f sec=%.0f health=%d",n.npcPickupKey,n.npcPickupRange,n.npcPickupSec,n.npcPickupHealth);
-    Log("CONFIG npc guardRadius=%.0f freeRange=%.0f recruitCooldown=%.0fs",n.npcGuardRadius,n.npcFreeRange,n.npcRecruitCooldownSec);
+    Log("CONFIG npc guardRadius=%.0f freeRange=%.0f recruitCooldown=%.0fs vanillaRecruit=%d",n.npcGuardRadius,n.npcFreeRange,
+        n.npcRecruitCooldownSec,n.vanillaRecruit);
     Log("CONFIG scriptNpcRecruit=%d settle=%.1fs",n.scriptNpcRecruit,n.scriptNpcSettleSec);
     Log("CONFIG tankReturnToPost=%d hold=%.1f reverseMax=%.0f",n.tankReturnToPost,n.tankPostHold,n.tankReverseMax);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,
@@ -709,13 +774,18 @@ void LoadConfig() noexcept {
     Log("CONFIG sidecar=%d npcGunner=%d npcRange=%.0f",n.sidecar,n.sidecarNpcGunner,n.sidecarNpcRange);
     Log("CONFIG highCam=%d key=0x%X button=0x%X height=%.0f back=%.0f pitch=%.0f",n.highCam,n.highCamKey,n.highCamButton,n.highCamHeight,
         n.highCamBack,n.highCamPitch);
-    Log("CONFIG sightZoom=%d key=0x%X button=0x%X",n.sightZoom,n.sightZoomKey,n.sightZoomButton);
+    Log("CONFIG sightZoom=%d key=0x%X button=0x%X infantryScope=%d",n.sightZoom,n.sightZoomKey,n.sightZoomButton,n.infantryScope);
+    Log("CONFIG firstPerson=%d key=0x%X start=%d eye up %.2f ahead %.2f ease %.2f grip (%.2f,%.2f,%.2f) hold (%.2f,%.2f,%.2f) scale %.2f near %.3f aimSnap=%d motion=%d",
+        n.firstPerson,n.firstPersonKey,n.firstPersonStart,n.fpEyeUp,n.fpEyeAhead,n.fpEyeEase,n.fpGripX,n.fpGripY,n.fpGripZ,n.fpHoldX,n.fpHoldY,n.fpHoldZ,
+        n.fpScale,n.fpNear,n.fpAimSnap,n.fpMotion);
     Log("CONFIG nixTorsoTwist=%d",n.nixTorsoTwist);
     Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f",n.map,n.mapKey,n.mapButton,n.mapViewDistance);
+    Log("CONFIG ViewDistance=%.0f (%s)",n.viewDistance,n.viewDistance<0.0f ? "unlimited" : n.viewDistance==0.0f ? "the mission's own" : "m");
     Log("CONFIG damageStats=%d key=0x%X",n.damageStats,n.damageStatsKey);
     Log("CONFIG debugSpawn=%d keys menu=0x%X prev=0x%X next=0x%X category=0x%X spawn=0x%X range=%.0f distance=%.0f",n.debugSpawn,
         n.debugSpawnKey,n.debugSpawnPrevKey,n.debugSpawnNextKey,n.debugSpawnCategoryKey,n.debugSpawnSpawnKey,n.debugSpawnRange,
         n.debugSpawnDistance);
+    Log("CONFIG roomLoadout=%d preSync=%d key=0x%X button=0x%X",n.roomLoadout,n.roomPreSync,n.roomLoadoutKey,n.roomLoadoutButton);
     Log("CONFIG stockStores=%d seatSwitch=%d nextKey=0x%X numberKeys=%d button=0x%X pilot=%d online=%d list=%d",n.stockStores,n.seatSwitch,
         n.seatNextKey,n.seatNumberKeys,n.seatButton,n.seatPilot,n.seatSwitchOnline,n.seatList);
     Log("CONFIG proteus=%d keys mode=0x%X/0x%X shield=0x%X/0x%X launcher=0x%X twoSeats=%d walk x%.2f turn x%.2f step %.1fm shieldSlow %.2f",
@@ -841,6 +911,15 @@ void ReloadConfigIfChanged() noexcept {
     if(ini.Changed())LoadConfig();
 }
 
+// The in-game loadout menu wrote the ini (loadout_store.cpp): its values now, not at the next poll; the watch takes
+// the new write time so the poll does not load it twice.
+void ReloadConfigNow() noexcept {
+    ini.Start(iniPath);
+    LoadConfig();
+}
+
+const wchar_t* ConfigPath() noexcept { return iniPath; }
+
 // The player's human. SeePlayer gets a position inside an object: the human's own (the on-foot ride prompt,
 // crew.cpp PromptHook) or the vehicle's they ride (crew.cpp Crew). A vehicle is told by the player in one
 // of its seats (the seat's rider is the human); else the object is the human if it is the player (pad and
@@ -930,8 +1009,10 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallSpotRay();       // the stock spot (Q): off for this machine's players (VanillaSpot=0), else along the drawn camera
     InstallStabilizer();    // the gun stabilizer, after the aim steps the turret camera chains (it runs from its hook)
     InstallProteus();       // the Proteus rework: its weapon mounts, shield barrier, piles and field
+    InstallFirstPerson();   // first person on foot: the camera step chained inside the map's (its view wins while open)
     InstallMap();           // the map view (the player's camera overhead, their input held while it is open)
     InstallSightZoom();     // a vehicle gun's sight magnified (the same camera step, chained after the map's)
+    InstallInfantryScope(); // a soldier's zoomed scope drawn as a real optic (the stock crosshair's draw chained)
     InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp), the sidecar's level hook
     InstallGunnerRecoil();  // a remote gunner's recoil on the vehicle's authority (gunnerrecoil.cpp)
     InstallSidecar();       // the sidecar motorcycle's gunner (sidecar.cpp)
@@ -941,12 +1022,15 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallDamageStats();   // the damage function's head and the rounds' spawn (damagestats.cpp): the statistics' page over the map
     InstallRounds();        // the stock vehicles' and helis' impact points: the rounds as the game flies them
     InstallStockGauges();   // the stock weapon gauge where our HUD lists the weapons, the fuel tanks it showed
+    InstallRoomUi();        // the support loadout menu in the online room and the offline HQ (chains both OnUpdates)
     InstallGlyphLock();     // the game's own text, wrong or missing characters (glyphs.cpp)
     InstallEdf5Campaign();  // the EDF5 campaign's mission packs owned (edf5campaign.cpp)
+    InstallEdf5Online();    // ...and their missions online: the BVM player natives' online half (edf5online.cpp)
     InstallJetSound();
     InstallVehicleSound();  // the ground vehicles' engines, turrets, loaders and main guns (vehsound.cpp)
     InstallMissiles();
     InstallSplitMissiles(); // the stock split missiles' split distance to the target's surface
+    InstallRouteGuide();    // the stock route guide strip along the navmesh route's corners
     InstallGuidance();      // the stock homing rounds by proportional navigation
     InstallStores();        // before any mission builds a jet: the 506 builds a weapon for every holder, the others their extras
     InstallPayload();       // the stock vehicles' stores: the holder pull lands on the one picked
@@ -954,6 +1038,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallSeatSwitch();    // the player moving between seats (the stock board button's steps, checked)
     InstallBigWorld();
     Log("LEGACYMAP collision migration hooked=%d",InstallLegacyMap());   // EDF4.1 maps (plan P6)
+    InstallEdf41Ai();        // the converted EDF4.1 Hectors' arm gate and back-off cycle (edf41ai.cpp)
     InstallEdf41Sound();     // EDF4.1's weapon SE bank and voice banks (edf41sound.cpp)
     InstallTerrainShare();   // before any map loads: the pieces of one terrain decoded once
     InstallMission();       // the mission's start (Reset*, the preloads) and a trigger of the per-frame hooks

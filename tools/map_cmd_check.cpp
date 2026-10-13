@@ -400,6 +400,10 @@ int main() {
         Check(!OffersRecruit(false,false,false,true),"riding a vehicle: not offered");
         Check(!OffersRecruit(true,false,false,false) && !OffersRecruit(false,true,false,false) && !OffersRecruit(false,false,true,false),
               "the player's own, a script's, a dismissed one: not offered");
+        // VanillaRecruit=0: a script's squad the stock walk-up would have let in is recruited from the map instead.
+        Check(OffersRecruit(false,true,false,false,true),"a script's squad the stock would let in: offered");
+        Check(!OffersRecruit(false,true,true,false,true) && !OffersRecruit(false,true,false,true,true) &&
+              !OffersRecruit(true,true,false,false,true),"...but never cooling down, riding or already the player's");
         // The mark on the body: a ground unit's kBodyLift m up from its feet, a flying one's on it; never the pin's top.
         const float feet[3]={5.0f,20.0f,-7.0f};float mark[3];
         BodyPoint(feet,false,mark);

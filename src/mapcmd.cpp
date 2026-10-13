@@ -206,7 +206,12 @@ bool Give(Game& g,const Entry& e,const Command& order) noexcept {
         else g.affected+=result.affected;
         return result.Accepted();
     }
-    case Owner::tank: return TankCommand(e.u.v,c);
+    case Owner::tank: {
+        const auto result=NpcMapCommandForRequester(ObjRef::Of(e.u.v),c,g.requester,g.focus);
+        if(!result.Accepted())g.failure=result.reason;
+        else g.affected+=result.affected;
+        return result.Accepted();
+    }
     }
     return false;
 }
@@ -282,6 +287,7 @@ const wchar_t* OrderText(Order o) noexcept {
 bool Takes(const Entry& e,Order o) noexcept {
     if(e.u.locked)return false;
     if(e.owner==Owner::squad) {
+        if(e.u.joinOnly)return (o==Order::recruit || o==Order::follow) && e.u.recruitable;   // the script keeps the rest
         if(o==Order::recruit)return e.u.recruitable;
         if(o==Order::dismiss)return e.u.recruited;
         if(o==Order::board)return !e.u.riding;
@@ -293,7 +299,7 @@ bool Takes(const Entry& e,Order o) noexcept {
         return true;
     }
     if(mapcmd::DismountOrder(o))return e.u.carries;   // its riding squad's (Give)
-    if(e.owner==Owner::tank)return o==Order::none || mapcmd::PointOrder(o);
+    if(e.owner==Owner::tank)return o==Order::none || o==Order::focus || mapcmd::PointOrder(o);
     if(e.owner==Owner::heli || e.owner==Owner::jet)return mapcmd::AirOrder(o);
     return mapcmd::VehicleOrder(o);
 }
@@ -598,7 +604,7 @@ int Issue(Game& g,const Command& cmd,int* skipped) noexcept {
     }
     if(InSession())for(int i=0;i<g.count;++i) {
         const auto& e=g.list[i];
-        if(g.sel.Has(e.u.v) && e.owner==Owner::squad && Takes(e,cmd.order) && !IsOnlineAuthority(e.u.v)) {
+        if(g.sel.Has(e.u.v) && (e.owner==Owner::squad || e.owner==Owner::tank) && Takes(e,cmd.order) && !IsOnlineAuthority(e.u.v)) {
             if(remotes<kCommandNetUnits){remote[remotes]=ObjRef::Of(e.u.v);remoteSlots[remotes]=slots[i];}++remotes;
         }
     }
@@ -616,12 +622,13 @@ int Issue(Game& g,const Command& cmd,int* skipped) noexcept {
         Entry& e=g.list[i];
         if(!g.sel.Has(e.u.v))continue;
         if(!Takes(e,cmd.order)) {
-            g.failure=e.u.locked ? NpcCommandReason::scripted : e.u.riding ? NpcCommandReason::riding : NpcCommandReason::unsupported;
-            ++(e.u.locked ? g.skipScript : e.u.riding ? g.skipRiding : g.skipCannot);
+            const bool script=e.u.locked || (e.owner==Owner::squad && e.u.joinOnly);
+            g.failure=script ? NpcCommandReason::scripted : e.u.riding ? NpcCommandReason::riding : NpcCommandReason::unsupported;
+            ++(script ? g.skipScript : e.u.riding ? g.skipRiding : g.skipCannot);
             ++*skipped;continue;
         }
         if(!IsOnlineAuthority(e.u.v)) {
-            if(e.owner==Owner::squad && g.networkQueued)continue;
+            if((e.owner==Owner::squad || e.owner==Owner::tank) && g.networkQueued)continue;
             g.failure=NpcCommandReason::notAuthority;++g.skipRemote;++*skipped;continue;
         }
         Command c=cmd;

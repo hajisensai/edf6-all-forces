@@ -65,6 +65,10 @@ constexpr ULONGLONG kFlyerMemoMs=500;
 // The current target counts as kKeepScale of its distance less kKeepTarget: another must be much nearer
 // to take its place (a fighter switched every 11 s among 32 in one fight, turning hard each time).
 constexpr float kKeepScale=0.6f,kKeepTarget=100.0f;
+// A dogfight (Attack) once begun goes on out to this many times the guns' reach.
+constexpr float kDogfightKeep=1.5f;
+// m: the guns' reach for the fire gate (Fire) and the dogfight (Attack): their rounds' reach, at most the role's gunOpen.
+float GunReach(const Kind& k,const Arms& a) noexcept { return a.gunRange<k.gunOpen ? a.gunRange : k.gunOpen; }
 
 // The target: as the role prefers (Kind::prefer), nearest to the jet among those within `range` of
 // `anchor`, the current one counting nearer (kKeepScale, kKeepTarget).
@@ -133,7 +137,7 @@ void VisitTarget(void* ctx,const void* object,const float* p) noexcept {
         k.focus=true;k.best=object;k.score=-1e30f;std::memcpy(k.aim,p,12);k.flyer=Flies(object,p,k.ms);
         return;
     }
-    if(k.focus || PastEdge(*k.j,p))return;
+    if(k.focus || PastEdge(*k.j,p) || HoldFire(k.j->Vehicle(),object))return;   // no round would hurt it now: no target
     const float d[3]={p[0]-k.anchor[0],p[1]-k.anchor[1],p[2]-k.anchor[2]};
     // A map order bounds the current target too; an uncommanded jet keeps its ordinary pursuit, but a charge drone (or its
     // carrier) is bound by its range always: it does not chase one it cannot catch out of it.
@@ -470,7 +474,16 @@ void Attack(Jet& j,const Arms& arms,const float* pos,const float* nose,const flo
         *missileOk=*gunsOk && arms.missiles>0 && reach>0.0f;
         return;
     }
-    if(arms.missiles>0 && reach>0.0f && ms>=t.gunsUntil) {
+    // A flyer in its guns' reach is a dogfight (Chase: the guns, and the missiles whenever they lock with the nose on it):
+    // the standoff (Missile) is for one out past the guns. Until 2026-10-12 any jet with missiles left stood off at every
+    // flyer and turned away from one nearer than kStandoffIn of the missile's range (some 500 m): EDF's flyers swarm at a
+    // few hundred metres, so it cranked away from them over and over, its guns never free (the 17:09-17:10 log: three
+    // multirole jets on flyers 22-760 m off, fire=0/0 throughout; the user: 「战斗机对空能力甚至不如直升机」). Once in the
+    // dogfight it stays in it out to kDogfightKeep times that reach, so it does not flip between the two at the edge.
+    const float d[3]={t.aim[0]-pos[0],t.aim[1]-pos[1],t.aim[2]-pos[2]};
+    const bool fighting=j.mode==Mode::chase || j.mode==Mode::runOut;
+    const bool dogfight=arms.guns>0 && Len(d)<GunReach(kind,arms)*(fighting ? kDogfightKeep : 1.0f);
+    if(arms.missiles>0 && reach>0.0f && ms>=t.gunsUntil && !dogfight) {
         if(!t.lockSeen || arms.locked>0)t.lockSeen=ms;
         if(ms-t.lockSeen>kNoLockMs) {
             Log("JET v=%p no missile lock in %.0f s: guns for %.0f s",j.Vehicle(),static_cast<float>(kNoLockMs)*0.001f,
@@ -480,7 +493,10 @@ void Attack(Jet& j,const Arms& arms,const float* pos,const float* nose,const flo
         }
         Missile(j,pos,reach,ms,want,speed);
         *missileOk=j.mode==Mode::missile;
-    } else *gunsOk=Chase(j,pos,nose,lead,ms,want,speed);
+        return;
+    }
+    *gunsOk=Chase(j,pos,nose,lead,ms,want,speed);
+    *missileOk=*gunsOk && arms.missiles>0 && reach>0.0f;   // Fire: the nose on it kLockMs, a lock, past kMissileMin
 }
 
 bool WeaponsFree(const Jet& j) noexcept {
@@ -508,6 +524,7 @@ void Bomb(Jet& j,unsigned char* v,const float* pos,const Arms& a,ULONGLONG ms) n
         const float dx=pos[0]+j.m.vel[0]*fall-(t.aim[0]+t.tgtVel[0]*fall),dz=pos[2]+j.m.vel[2]*fall-(t.aim[2]+t.tgtVel[2]*fall);
         const float miss=std::sqrt(dx*dx+dz*dz),hit=At<float>(s.weapon,kWeaponBlast)*kBombHit;
         if(!(miss<hit))return;
+        if(HoldFire(v,t.target,pos,At<float>(s.weapon,kWeaponSpeed)*60.0f,At<float>(s.weapon,kWeaponGravity)*kGravity))return;
         TriggerStore(s);
         j.t.bombAt=ms;
         if(Cfg().debug)Log("JET v=%p bomb: %s, %.0f m over the target, falls %.1f s, %.0f m off (%d left)",v,s.spec->name,over,fall,miss,
@@ -529,15 +546,18 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
         const float miss=dist>1.0f ? std::acos(Clamp(Dot(d,nose)/dist,-1.0f,1.0f)) : 0.0f;
         const float wide=dist>1.0f ? std::atan(kHitRadius/dist) : 1.0f;
         const Kind& k=KindOf(j);
-        const float reach=a.gunRange<k.gunOpen ? a.gunRange : k.gunOpen;
+        const float reach=GunReach(k,a);
         const float path[3]={pos[0]+nose[0]*a.gunRange,pos[1]+nose[1]*a.gunRange,pos[2]+nose[2]*a.gunRange};
         float flight[3]={j.m.vel[0],j.m.vel[1],j.m.vel[2]};
         // The nose rides aoa above the path (JetSteer): the slip allowed is past that.
         const bool straight=Normalize(flight) && Dot(flight,nose)>std::cos(std::acos(kGunSlip)+std::fabs(j.m.aoa));
         const bool friendly=FriendInLine(pos,path,v);
         gun=gunsOk && straight && a.guns>0 && dist<reach && dist>k.gunClose*0.8f && miss<(wide>kGunCone ? wide : kGunCone) && !friendly;
+        if(gun)gun=!HoldFire(v,t.target,pos,a.gunSpeed,a.gunGravity*kGravity);
         if(gunsOk && straight && !t.flyer && a.rocket>=0 && dist<kRocketOpen && dist>k.gunClose*kRocketClose && miss<kRocketCone &&
-           !friendly && ms-t.rocketAt>kRocketMs) {
+           !friendly && ms-t.rocketAt>kRocketMs &&
+           !HoldFire(v,t.target,pos,At<float>(a.stores[a.rocket].weapon,kWeaponSpeed)*60.0f,
+                     At<float>(a.stores[a.rocket].weapon,kWeaponGravity)*kGravity)) {
             TriggerStore(a.stores[a.rocket]);
             t.rocketAt=ms;
             if(Cfg().debug)Log("JET v=%p rockets: %s, %.0f m, %.1f deg off (%d left)",v,a.stores[a.rocket].spec->name,dist,
@@ -555,6 +575,9 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
         else if(!t.lockAt)t.lockAt=ms;
         missile=missileOk && a.missiles>0 && a.locked>0 && t.lockAt && ms-t.lockAt>=kLockMs && tdist>kMissileMin && tdist<MissileReach(k,a) &&
                 ms-t.missileAt>kMissileMs && !FriendInLine(pos,t.aim,v);
+        if(missile && a.pick>=0)
+            missile=!HoldFire(v,t.target,pos,At<float>(a.stores[a.pick].weapon,kWeaponSpeed)*60.0f,
+                              At<float>(a.stores[a.pick].weapon,kWeaponGravity)*kGravity);
         if(missile) {
             t.missileAt=ms;
             if(Cfg().debug)Log("JET v=%p missiles: %s, %.0f m, %.1f deg off the nose, held %.1f s, %d locked",v,
@@ -577,23 +600,31 @@ void JetLog(const Jet& j,const unsigned char* v,const float* pos,const Arms& a,f
         j.t.target,j.t.flyer ? "(air)" : "",d,j.t.target ? aim[1] : 0.0f,a.guns,a.missiles,hp,hpMax,
         static_cast<float>(j.fuelMs)*0.001f-static_cast<float>(ms-j.bornAt)*0.001f,v[kFireGun],v[kFireMissile],pos[0],pos[2],
         airbound::Depth(JetSoftBox(j),pos),j.m.edgeBack ? " back" : "");
-    // Each weapon's barrel against the nose: the guns must point where the nose does.
-    if(SeatCount(v)==0)return;
+}
+
+// Each weapon's barrel against the nose (the guns must point where the nose does): true once there were weapons to log.
+// Fixed to the airframe, so jet.cpp logs it once a jet; written with every JetLog line until 2026-10-12, it was 18 672
+// of the 58 835 lines of the testers' report #6.
+bool JetBarrelLog(const unsigned char* v,const float* pos) noexcept {
+    if(SeatCount(v)==0)return false;
     const auto seat=SeatAt(const_cast<unsigned char*>(v),0);
     const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
     const auto count=At<std::uint64_t>(seat,kSeatWeaponCount);
-    if(count>8 || !Readable(holders,count*8))return;
+    if(count>8 || !Readable(holders,count*8))return false;
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    bool any=false;
     for(std::uint64_t i=0;i<count;++i) {
         if(!Readable(holders[i],kHolderWeapon+8))continue;
         const auto w=At<const unsigned char*>(holders[i],kHolderWeapon);
         float at[3],dir[3];
         if(!w)continue;
+        any=true;
         if(!GunBarrel(v,w,at,dir)){Log("JET v=%p gun %llu: no barrel frame",v,static_cast<unsigned long long>(i));continue;}
         Log("JET v=%p gun %llu: dir=(%.2f,%.2f,%.2f) nose=(%.2f,%.2f,%.2f) dot=%.2f at=(%.1f,%.1f,%.1f) from the body",v,
             static_cast<unsigned long long>(i),dir[0],dir[1],dir[2],m[8],m[9],m[10],dir[0]*m[8]+dir[1]*m[9]+dir[2]*m[10],
             at[0]-pos[0],at[1]-pos[1],at[2]-pos[2]);
     }
+    return any;
 }
 
 // A new mission: the flyer memo's objects were the last mission's.

@@ -132,6 +132,45 @@ int main() {
     unsigned char empty[kVariantBloomBytes]{};
     Check(!BloomHas(empty,VariantHash(have[0])),"an older peer's empty filter has nothing");
 
+    // Crew colours (stage 5): SupportCrewColour[_<KEY>|_MISSION]=RRGGBB[:RRGGBB], X stock; empty: the default's.
+    {
+        CrewColour c;wchar_t cwhy[160];
+        Check(ParseCrewColour(L"",&c,cwhy,160) && !c.set && ParseCrewColour(L"  ",&c,cwhy,160) && !c.set,"empty: the default applies");
+        Check(ParseCrewColour(L"1e3a8a",&c,cwhy,160) && c.set && c.look.primary==0x1E3A8A && c.look.secondary==kStockColour,"a primary");
+        Check(ParseCrewColour(L" X : FFFFFF ",&c,cwhy,160) && c.set && c.look.primary==kStockColour && c.look.secondary==0xFFFFFF,
+              "a secondary alone (X the primary), spaces trimmed");
+        Check(ParseCrewColour(L"x",&c,cwhy,160) && c.set && !c.look.On(),"X alone: stock, whatever the default");
+        const wchar_t* cbad[]={L"12345",L"1E3A8A:",L"GGGGGG",L"1E3A8A,FFFFFF",L"@1E3A8A",L"1E3A8A:FFFFFF:FFFFFF",L"rifle"};
+        for(const wchar_t* t:cbad)
+            Check(!ParseCrewColour(t,&c,cwhy,160) && !c.set && std::wcsstr(cwhy,L"乘员颜色"),"a cbad crew colour refused, the reason named");
+        CrewColour own{},def{};def.set=true;def.look.primary=0x101010;
+        Check(CrewLookOf(own,def).primary==0x101010,"no own colour: the default's");
+        own.set=true;
+        Check(!CrewLookOf(own,def).On(),"its own X: stock, over the default");
+        own.look.secondary=0xFFFFFF;
+        Check(CrewLookOf(own,def).secondary==0xFFFFFF && CrewLookOf(own,def).primary==kStockColour,"its own colours");
+        Check(!CrewLookOf(CrewColour{},CrewColour{}).On(),"nothing set: stock");
+        Check(!HasCrew(L"SQUAD") && !HasCrew(L"platoon") && HasCrew(L"TANK_CREWED") && HasCrew(L"SQUAD_HELI") && HasCrew(kCrewMissionKey) &&
+              !HasCrew(nullptr),"every entry but the infantry squad and platoon brings a crew");
+        Check(IsGroundCrewKey(L"TANK_CREWED") && IsGroundCrewKey(L"transport_delivery") && IsGroundCrewKey(L"TRUCK_CREWED") &&
+              !IsGroundCrewKey(L"SQUAD_HELI") && !IsGroundCrewKey(L"STRIKE_F") && !IsGroundCrewKey(L"TANK") &&
+              !IsGroundCrewKey(nullptr),"ground crews are the tank / transport / truck entries (VEHICLE_CREW_KEYS)");
+        Check(!IsGroundCrewKey(L"TANK_AIRDROP") && !IsGroundCrewKey(L"TRANSPORT_AIRDROP") && !IsGroundCrewKey(L"truck_airdrop") &&
+              !IsGroundCrewKey(L"TANK_CREWED_X") && !IsGroundCrewKey(L"TANK_") && !IsGroundCrewKey(L""),
+              "the container deliveries' crew is the transport helicopter's pilot: an aircraft crew, not ground (no prefix match)");
+        CrewColour a{},b2{};a.look.primary=1;
+        Check(a==b2,"two crews not set are equal whatever their stale look");
+        // A crew wears the same file a squad soldier of its kind would: a member's, the mission's leader's _L.
+        wchar_t file[96];SupportLook clook{0x1E3A8A,kStockColour};
+        Check(SupportLookFile(SupportWeapon::rifle,false,clook,file,96) && !std::wcscmp(file,L"EDF6VC_NPC_RIFLE_1E3A8A_X.SGO") &&
+              SupportLookFile(SupportWeapon::rifle,true,clook,file,96) && !std::wcscmp(file,L"EDF6VC_NPC_RIFLE_L_1E3A8A_X.SGO") &&
+              SupportLookFile(SupportWeapon::sniper,false,clook,file,96) && !std::wcscmp(file,L"EDF6VC_NPC_SNIPER_1E3A8A_X.SGO"),
+              "a crew's files: its kind's template, recoloured");
+        // On the wire a crew seat's own 64-bit variant: a clook, exactly a squad soldier's.
+        SupportLook cback;
+        Check(LookOfVariant(LookVariant(clook)|kVariantApplied,&cback) && cback==clook,"a crew seat's clook travels in its own variant");
+    }
+
     // The jets' preference by their load.
     Check(LoadoutPrefer(Prefer::air,0,6)==Prefer::ground,"a fighter with bombs only goes for the ground");
     Check(LoadoutPrefer(Prefer::ground,4,0)==Prefer::air,"a strike jet with air-to-air only goes for flyers");

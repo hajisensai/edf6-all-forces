@@ -1,7 +1,10 @@
 // The squads' transports (transport.h; the rules and the user's words: transport_logic.h).
 //  - Pairs: a squad (its top NPC) and its vehicle. Made by the map's BOARD (npcai.cpp), a crewed APC / truck's delivery
 //    and a helicopter assault (support_dispatch.cpp TransportDeliver). Let go when either is gone, on WITHDRAW, when the
-//    squad joins another (npcai.cpp Succeed), at a new mission.
+//    squad joins another (npcai.cpp Succeed), at a new mission, and when a support delivery's trip ends at rest (its
+//    vehicle then goes back: Trip::leave, 2026-10-10 "载具送过来以后就会直接回去").
+//    A point order goes by the vehicle only for a squad aboard it (2026-10-10: the far-order ride, which held a squad on
+//    foot in place while a vehicle came for it, was removed: "站原地冷暴力我").
 //  - Trips: one a vehicle at a time, carrying up to kRiders of its paired squads (a 12-soldier platoon is three), each with
 //    the order it carries out once off. The vehicle comes for them (pickup) or they walk to an empty one, they board, it
 //    goes (a ground vehicle along a ground route: GroundNavigate, as a support vehicle comes in; a helicopter's ferry:
@@ -52,6 +55,7 @@ struct Trip {
     ULONGLONG actAt,loggedAt;
     Act last;
     npc::navigation::State nav;
+    bool leave;   // a support delivery: once over, the vehicle goes back (SupportWithdrawVehicle), unpaired
 };
 // `wayLogged`: its way out of the plane logged (the drift StickLead assumes, transport_logic.h kJumpInherit).
 struct Jumper { ObjRef human,canopy; ULONGLONG at; bool flies,wayLogged; };
@@ -98,6 +102,20 @@ TripRider* RiderOf(Trip& t,const void* top) noexcept {
 }
 void Hold(unsigned char* v) noexcept { NpcPrepareVehicleRoutePost(v,Pos(v),kVehicleHold); }
 
+// Every soldier still in a seat of `v` past the driver's put off (the stock get-off, npcai.cpp NpcMoveSeat; a player is
+// never kicked: NpcCanYieldSeat). Returns how many are left in those seats. A delivery's squad need not be on its trip
+// any more when the trip ends (LeaveTrips: an engage / stop / passenger-only DISMOUNT, a merge took it off the list while
+// it was still aboard): the vehicle must not take them home, where Retire / WithdrawGround delete whoever is seated.
+int PassengersOff(unsigned char* v) noexcept {
+    int left=0;
+    for(unsigned seat=1;seat<SeatCount(v);++seat) {
+        unsigned char* const s=SeatAt(v,seat);
+        if(SeatRider(s)!=Rider::other || !IsSoldierClass(At<const void*>(s,kSeatRider)))continue;
+        if(!NpcMoveSeat(v,seat,-1))++left;
+    }
+    return left;
+}
+
 // The trip's end: each rider takes its order on foot (`off`: the riding ones get off first, when the vehicle is at rest),
 // the vehicle waits where it is (a helicopter's ferry ends: it guards the drop point).
 void EndTrip(Trip& t,bool off,const char* why) noexcept {
@@ -108,7 +126,24 @@ void EndTrip(Trip& t,bool off,const char* why) noexcept {
         if(off)NpcSquadDismount(r.top.obj);
         NpcSquadSetOrder(r.top.obj,r.after,false);
     }
-    if(v) {
+    const bool still=v && (t.t.carrier==Carrier::heli ? HeliGrounded(v) : t.speed<=tuning.stopped);
+    int left=0;
+    if(v && t.leave && still) {
+        // Nobody may go back with it: the riders still listed get off, and so does anyone else in a seat past the
+        // driver's (a squad that left the trip while aboard is no longer listed here: LeaveTrips).
+        for(int i=0;i<t.count;++i)if(Live(t.riders[i].top))NpcSquadDismount(t.riders[i].top.obj);
+        left=PassengersOff(v);
+        if(left)Log("TRANSPORT v=%p delivered, but %d still aboard will not get off: it stays",t.vehicle.obj,left);
+    }
+    if(v && t.leave && still && !left) {
+        // The delivery is over and its seats past the driver's are empty: the pairs to it go and it leaves the field (a
+        // helicopter flies off, a truck drives back to its entry; Retire / WithdrawGround remove it out there with its
+        // own crew).
+        for(auto& p:pairs)if(p.vehicle.Is(v))p=Pair{};
+        if(SupportWithdrawVehicle(v))Log("TRANSPORT v=%p delivered: it goes back",t.vehicle.obj);
+        else if(t.t.carrier==Carrier::heli){HeliFerry(v,nullptr,false);HeliStartLeaving(v);}
+        else Hold(v);
+    } else if(v) {
         if(t.t.carrier==Carrier::heli) {
             HeliFerry(v,nullptr,false);
             const float* at=t.t.phase==Phase::pickup || t.t.phase==Phase::boarding ? Pos(v) : t.t.drop;
@@ -116,7 +151,7 @@ void EndTrip(Trip& t,bool off,const char* why) noexcept {
         } else Hold(v);
     }
     Log("TRANSPORT v=%p trip over (%s): %d squad(s) on with their orders",t.vehicle.obj,why,t.count);
-    t.count=0;t.t=transport::Trip{};
+    t.count=0;t.t=transport::Trip{};t.leave=false;
 }
 
 transport::View ViewOf(Trip& t,ULONGLONG ms) noexcept {
@@ -264,7 +299,7 @@ bool StartOrJoin(unsigned char* v,const void* top,const mapcmd::Command& after,b
     Trip* t=nullptr;
     for(auto& row:trips)if(row.count==0){t=&row;break;}
     if(!t){Log("TRANSPORT trips full (%d): squad %p walks",kTrips,top);return false;}
-    t->vehicle=ObjRef::Of(v);t->count=1;t->riders[0]=TripRider{ObjRef::Of(top),after};
+    t->vehicle=ObjRef::Of(v);t->count=1;t->riders[0]=TripRider{ObjRef::Of(top),after};t->leave=false;
     t->sampleAt=0;t->speed=0.0f;t->actAt=0;t->loggedAt=0;t->last=Act::none;t->nav.initialized=false;
     t->t=transport::Trip{};t->t.carrier=CarrierOf(v);
     Aim(*t,v,after,ms);
@@ -402,8 +437,7 @@ bool TransportOrder(const void* top,const mapcmd::Command& c) noexcept {
         if(!IsOnlineAuthority(v))return false;
         SquadSeats s{};
         if(!NpcSquadSeats(top,v,&s) || s.alive<=0)return false;
-        const float distance=transport::Level(Pos(top),c.at);
-        if(!transport::Rides(true,s.aboard>0,distance,Cfg().transportAutoRange))return false;
+        if(!transport::Rides(true,s.aboard>0))return false;   // on foot: it walks, however far
         const ULONGLONG ms=GameMs();
         if(!StartOrJoin(v,top,c,s.aboard>0,ms))return false;
         // Held where it is until the trip lets it go (a move / attack-move would walk it off over its boarding).
@@ -457,7 +491,7 @@ void TransportSucceed(const void* dead,const void* lead) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 
-bool TransportDeliver(const void* vehicle,const void* const* tops,int count,const float* target) noexcept {
+bool TransportDeliver(const void* vehicle,const void* const* tops,int count,const float* target,bool here) noexcept {
     __try {
         if(!Transportable(vehicle) || !tops || count<=0 || !target)return false;
         auto* const v=static_cast<unsigned char*>(const_cast<void*>(vehicle));
@@ -468,7 +502,15 @@ bool TransportDeliver(const void* vehicle,const void* const* tops,int count,cons
             SquadSeats s{};NpcSquadSeats(tops[i],v,&s);
             if(StartOrJoin(v,tops[i],mapcmd::Command{mapcmd::Order::guard,{target[0],target[1],target[2]}},s.aboard>0,ms))++carried;
         }
-        Log("TRANSPORT v=%p delivers %d squad(s) to (%.0f,%.0f,%.0f)",v,carried,target[0],target[1],target[2]);
+        if(Trip* t=carried>0 ? TripOf(v) : nullptr) {
+            t->leave=true;
+            if(here) {   // off where it stands: the drop point is the vehicle's own place
+                std::memcpy(t->t.drop,Pos(v),12);
+                t->t.phase=transport::Begin(t->t.carrier,ViewOf(*t,ms),tuning);t->t.since=ms;t->last=Act::none;
+            }
+        }
+        Log("TRANSPORT v=%p delivers %d squad(s) to (%.0f,%.0f,%.0f)%s: it goes back after",v,carried,target[0],target[1],target[2],
+            here ? ", off where it stands" : "");
         return carried>0;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
@@ -488,7 +530,6 @@ void TransportTick() noexcept {
     if(frame==GameFrame())return;
     frame=GameFrame();
     __try {
-        tuning.autoRange=Cfg().transportAutoRange;
         const ULONGLONG ms=GameMs();
         for(auto& p:pairs)if(p.top && (!Live(p.top) || !Live(p.vehicle))) {
             if(Live(p.top) && !Live(p.vehicle))Log("TRANSPORT squad %p: its transport is gone",p.top.obj);

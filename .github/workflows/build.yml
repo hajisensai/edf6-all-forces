@@ -4,7 +4,8 @@ name: Build
 # pull request, checks the install chain (tools/selftest.py) and that the generated src/calls.inc is current,
 # and packages:
 #  - EDF6VehicleCrew-<version>.zip: the unzip-and-run installer (tools/build_release.py: tools/installer.py frozen by
-#    PyInstaller with the plugin inside), what players download; <version> is CMakeLists.txt project(VERSION);
+#    PyInstaller with the plugin inside, and the slim generator tools/loadout_generator.py frozen on its own and bundled
+#    for install to copy into Mods/Plugins), what players download; <version> is CMakeLists.txt project(VERSION);
 #  - EDF6AllForces-<version>-tools.zip: both plugins and the data builders as Python sources (tools/, pylib/,
 #    testrange/, autoturret/tools/: the weapon and object files are derived from the game's data, so each player
 #    builds them from their own install), for EDF6AutoTurret and for developers.

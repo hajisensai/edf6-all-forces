@@ -173,6 +173,8 @@ bool PlayerStockHud(StockHudReadout* o) noexcept { if(hasStock)*o=sceneStock;ret
 bool PlayerNixTorso(NixTorso* o) noexcept { if(hasNix)*o=sceneNix;return hasNix; }
 bool PlayerProteus(ProteusReadout* o) noexcept { if(hasProteus)*o=sceneProteus;return hasProteus; }
 bool PlayerSazabiCue(SazabiCue* o) noexcept { if(hasSazabi)*o=sceneSazabi;return hasSazabi; }
+bool hasScreens=false;CockpitScreens sceneScreens{};   // a vehicle's first person: its cockpit's screens
+bool FirstPersonScreens(CockpitScreens* o) noexcept { if(hasScreens)*o=sceneScreens;return hasScreens; }
 bool PlayerTurretCam(TurretCamReadout* value) noexcept { if(hasMouseIntent)*value=sceneMouseIntent;return hasMouseIntent; }
 bool SightZoomMounted(const void*) noexcept { return hasMountedOptic; }
 bool PlayerTurretBinding(edf::aimlink::ModeBindingV1* value) noexcept { if(hasModeBinding)*value=sceneModeBinding;return hasModeBinding; }
@@ -189,6 +191,9 @@ float sceneZoom=1.0f;
 float SightZoomNow(const void*) noexcept { return sceneZoom; }
 sightzoom::Kind sceneSight=sightzoom::Kind::optical;
 sightzoom::Kind SightZoomView(const void*) noexcept { return sceneSight; }
+// A soldier's open scope (infantryscope.cpp): on in the infantry_scope scenes.
+bool hasInfantry=false;InfantryScopeCue sceneInfantry{};
+bool InfantryScopeNow(InfantryScopeCue* o) noexcept { if(hasInfantry && o)*o=sceneInfantry;return hasInfantry; }
 bool hasGunner=false;GunnerReadout sceneGunner{};
 bool PlayerGunnerHud(GunnerReadout* o) noexcept { if(hasGunner)*o=sceneGunner;return hasGunner; }
 bool hasHighView=false;
@@ -1053,8 +1058,12 @@ int TankSightScenes(const std::wstring& dir,const float* ground) {
     const auto check=[&](const wchar_t* name,int wantTicks){
         Scene(dir,name,ground);
         bool lrf=false,order=true,apart=true;int ticks=0,lastRange=0;float lastY=-1e9f;
+        const bool zoomed=sceneZoom>1.0f;
         for(const Drew& d:drew) {
-            if(d.text.find(L"1300 m")!=std::wstring::npos)lrf=true;   // Tx::sightRange, in any language
+            // Tx::sightRange in any language; through the optic the computer's LED range (four digits)
+            if(d.text.find(zoomed ? L"1300" : L"1300 m")!=std::wstring::npos)lrf=true;
+            // through the optic the lead ticks' mils are numbered over the cross: the range marks are the ones under it
+            if(zoomed && (d.y0<540.0f || (!d.text.empty() && d.text.back()==L'x')))continue;   // (the data line's power, "3x")
             if(d.text.size()<=2 && !d.text.empty() && d.text[0]>=L'1' && d.text[0]<=L'9') {
                 const int r=std::stoi(d.text);
                 order=order && r>lastRange && d.y0>lastY;   // farther ranges further down
@@ -1079,6 +1088,25 @@ int TankSightScenes(const std::wstring& dir,const float* ground) {
     for(const Drew& d:drew)named=named || d.text.find(L"3x")!=std::wstring::npos;
     failed+=!named;
     std::printf("%s  stock_tank_sight_zoom: the magnification named (3x) %d\n",named ? "ok  " : "FAIL",named);
+    // Through the optic: the eyepiece (its outer black kSides pieces), no green HUD reticle text (the AP/HE tag), the
+    // reticle etched black and its aiming point lit red, the LED data line.
+    {
+        sceneFov=55.0f/6.0f;sceneStock.zoom=6.0f;sceneZoom=6.0f;
+        scopePieces=0;Scene(dir,L"stock_tank_sight_zoom_6x",ground);
+        bool tag=false,ready=false,boreLine=false;
+        for(const Drew& d:drew){tag=tag || d.text==L"AP" || d.text==L"HE";ready=ready || d.text==Tr(Tx::scopeReady);boreLine=boreLine || d.text==Tr(Tx::scopeZeroBore);}
+        const bool ok=scopePieces==scopeview::kSides && !tag && ready;
+        failed+=!ok;
+        std::printf("%s  stock_tank_sight_zoom_6x: eyepiece %d, no HUD tag %d, data line %d\n",ok ? "ok  " : "FAIL",scopePieces,!tag,ready);
+        // The range setting (the wheel: sightzoom.h): named on the data line, ---- at the bore line.
+        sceneStock.zero=400;Scene(dir,L"stock_tank_sight_zoom_range",ground);sceneStock.zero=0;
+        wchar_t zero[32];_snwprintf_s(zero,_countof(zero),_TRUNCATE,Tr(Tx::scopeZero),400);
+        bool named400=false;
+        for(const Drew& d:drew)named400=named400 || d.text==zero;
+        failed+=!(named400 && boreLine);
+        std::printf("%s  stock_tank_sight_zoom_range: the setting named %d, the bore line named %d\n",named400 && boreLine ? "ok  " : "FAIL",named400,boreLine);
+        sceneFov=55.0f/3.0f;sceneStock.zoom=3.0f;sceneZoom=3.0f;   // the fractional ladder below is read through the 3x optic
+    }
     // A 250 m ladder must say 2.5 / 7.5 hundreds, not truncate those ranges to 2 / 7.
     a.ladder={};a.ladder.step=250.0f;a.ladder.ticks=2;
     for(int i=0;i<2;++i) {
@@ -1134,7 +1162,12 @@ int SightStyleScenes(const std::wstring& dir,const float* ground) {
         const std::wstring name=std::wstring(c.name)+(zoomed ? L"_zoom" : L"");
         scopePieces=0;Scene(dir,name.c_str(),ground);
         bool words=true,apart=true;
-        for(const wchar_t* w:c.words) {
+        // Through the optic the round is the data line's (the weapon's name) and the power is named; a flak sight's
+        // lead rings keep their km/h. At 1x the HUD reticle's own words.
+        const wchar_t* zoomWords[3]={L"3x",c.style==reticle::Style::flak ? L"90" : nullptr,c.style==reticle::Style::flak ? L"180" : nullptr};
+        const wchar_t* const* list=zoomed ? zoomWords : c.words;
+        for(int wi=0;wi<3;++wi) {
+            const wchar_t* w=list[wi];
             if(!w)break;
             bool found=false;
             for(const Drew& d:drew)found=found || d.text==w;
@@ -1239,7 +1272,9 @@ int ZoomScenes(const std::wstring& dir,const float* ground) {
     sceneHeliSight.pipper[0]=ground[0];sceneHeliSight.pipper[1]=ground[1];sceneHeliSight.pipper[2]=ground[2]+700.0f;sceneHeliSight.range=700.0f;
     check(L"heli_gun_ladder",0,0);
     sceneFov=55.0f/3.0f;sceneZoom=3.0f;
-    check(L"heli_gun_ladder_zoom",1,1);
+    // The eyepiece names no power of its own (2026-10-11: no drawn rim or label; the optic's data line, a stock
+    // vehicle's, names it): the heli mock (no stock heli carries an optic) shows the field and its ladder.
+    check(L"heli_gun_ladder_zoom",0,1);
     hasHeliSight=false;
     hasJet=true;
     sceneSight=sightzoom::Kind::flight;
@@ -1309,12 +1344,58 @@ int FireControlScenes(const std::wstring& dir,const float* ground) {
             for(int k=0;k<kLauncherRing;++k){const float angle=2*tcam::kPi*k/kLauncherRing;sceneLauncher.ring[k][0]=12*std::cos(angle);sceneLauncher.ring[k][2]=600+12*std::sin(angle);}
         }
         scopePieces=0;Scene(dir,names[i],ground);
-        const int want=i==0 ? scopeview::kSides : i==1 || i==2 ? 4 : 0;
+        // A gun-launched missile / rocket on the seat is looked at through the same optic (2026-10-11): its round field.
+        const int want=i<=2 ? scopeview::kSides : 0;
         const bool right=scopePieces==want && (i==0 ? SightGun(sceneStock,false)==0 : SightGun(sceneStock,false)==-1);
         failed+=!right;
         std::printf("%s fire-control owner %ls: scope quads %d/%d, no fallback optical reticle\n",right ? "ok" : "FAIL",names[i],scopePieces,want);
     }
     hasHighView=hasLauncher=false;sceneSight=sightzoom::Kind::optical;sceneZoom=1;sceneFov=55;
+    StockTank(ground);
+    return failed;
+}
+
+// A soldier's open scope (hud.cpp InfantryScope, infantryscope.h; the user, 2026-10-11): a marksman's rifle at 5.5x (the
+// KFF 50's SecondaryFire_Parameter), a quick-firing rifle's combat optic at 4x, a rocket launcher's at 3x, on foot (no
+// vehicle HUD). Checked: the eyepiece's black all round (kSides pieces), every number etched on the glass inside the
+// field, no two texts overlapping; with no scope open nothing of it.
+int InfantryScopeScenes(const std::wstring& dir,const float* ground) {
+    int failed=0;
+    const bool stockWas=hasStock;
+    hasStock=false;hasJet=hasHeli=hasGunner=hasHeliSight=hasTurret=false;sceneSight=sightzoom::Kind::none;sceneZoom=1.0f;
+    struct Case { const wchar_t* name; scope::Look look; float zoom; int numbers; };
+    const Case cases[]={{L"infantry_scope_marksman",scope::Look::marksman,5.5f,2},{L"infantry_scope_combat",scope::Look::combat,4.0f,1},
+                        {L"infantry_scope_launcher",scope::Look::launcher,3.0f,3}};
+    for(const Case& c:cases) {
+        hasInfantry=true;sceneInfantry=InfantryScopeCue{&sceneInfantry,c.zoom,c.look};
+        sceneFov=55.0f/c.zoom;
+        StockTank(ground);hasStock=false;
+        sceneJet.sym.nose[0]=0.0f;sceneJet.sym.nose[1]=0.0f;sceneJet.sym.nose[2]=1.0f;   // the camera along +Z (Scene)
+        scopePieces=0;Scene(dir,c.name,ground);
+        int numbers=0;bool inside=true,apart=true;
+        const float r=scopeview::Radius(1920.0f,1080.0f);
+        for(std::size_t i=0;i<drew.size();++i) {
+            const Drew& p=drew[i];
+            if(!p.text.empty() && p.text[0]>=L'0' && p.text[0]<=L'9') {
+                ++numbers;
+                const float x=(p.x0+p.x1)*0.5f-960.0f,y=(p.y0+p.y1)*0.5f-540.0f;
+                inside=inside && x*x+y*y<=r*r;
+            }
+            for(std::size_t k=i+1;k<drew.size();++k) {
+                const Drew& q=drew[k];
+                if(!p.text.empty() && !q.text.empty() && p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1){apart=false;std::printf("      overlap: %ls / %ls\n",p.text.c_str(),q.text.c_str());}
+            }
+        }
+        const bool ok=scopePieces==scopeview::kSides && numbers>=c.numbers && inside && apart;
+        failed+=!ok;
+        std::printf("%s  %ls: eyepiece %d, etched numbers %d (want >= %d) inside %d, no text overlapping %d\n",ok ? "ok  " : "FAIL",c.name,
+                    scopePieces,numbers,c.numbers,inside,apart);
+    }
+    hasInfantry=false;scopePieces=0;sceneFov=55.0f;
+    Scene(dir,L"infantry_scope_closed",ground);
+    failed+=scopePieces!=0;
+    std::printf("%s  infantry_scope_closed: no eyepiece %d\n",scopePieces==0 ? "ok  " : "FAIL",scopePieces);
+    hasStock=stockWas;sceneSight=sightzoom::Kind::optical;
     StockTank(ground);
     return failed;
 }
@@ -1574,6 +1655,93 @@ int ArmorDrawn(const wchar_t* scene,bool want,bool hull) {
     if(found!=(want ? 1 : 0)){++failed;std::printf("FAIL armor %ls: the armor line drawn %d times (want %d)\n",scene,found,want ? 1 : 0);}
     if(hulls!=(want && hull ? 1 : 0)){++failed;std::printf("FAIL armor %ls: the hull line drawn %d times\n",scene,hulls);}
     std::printf("%s  armor %s %ls: %s\n",failed ? "FAIL" : "ok",hudtext::Name(hudtext::InUse()),scene,want ? (hull ? "armor + hull, apart" : "armor in the block, apart") : "not drawn");
+    return failed;
+}
+
+// The cockpit's screens (cockpit_screens.inc): a tank gunner's status and weapons screens and a heli pilot's flight and
+// radar screens, each 0.22 x 0.13 m, 0.6 m ahead of the eye and 0.25 m under it, one either side, facing it. Each must
+// get its text, all of it inside the screen's quad on the view; the HUD's own panels (the stock block, the strips) must
+// give way.
+CockpitScreen ScreenAt(ScreenKind kind,const float* fwd,float side) {
+    float f[3]={fwd[0],fwd[1],fwd[2]};
+    const float n=std::sqrt(f[0]*f[0]+f[1]*f[1]+f[2]*f[2]);
+    for(float& v:f)v/=n;
+    const float right[3]={-f[2],0.0f,f[0]};   // fwd x up (game +x is left): the viewer's right, level
+    const float rn=std::sqrt(right[0]*right[0]+right[2]*right[2]);
+    CockpitScreen c{};
+    c.kind=kind;c.w=0.22f;c.h=0.13f;
+    for(int k=0;k<3;++k)c.right[k]=right[k]/rn;
+    c.up[0]=c.right[1]*f[2]-c.right[2]*f[1];c.up[1]=c.right[2]*f[0]-c.right[0]*f[2];c.up[2]=c.right[0]*f[1]-c.right[1]*f[0];
+    for(int k=0;k<3;++k)c.off[k]=f[k]*0.6f-c.up[k]*0.25f+c.right[k]*side;
+    return c;
+}
+
+int ScreensDrawn(const wchar_t* name,const float* pos,const float* fwd,int width) {
+    int failed=0,inside=0;
+    float vp[16],eye[3],dir[3];
+    Camera(pos,fwd,static_cast<float>(width),1080.0f,vp);
+    if(!RayOf(vp,eye,dir)){std::printf("FAIL %ls: no eye in the view\n",name);return 1;}   // as the draw finds it
+    for(int i=0;i<sceneScreens.n;++i) {
+        const CockpitScreen& c=sceneScreens.s[i];
+        float lo[2]={1e9f,1e9f},hi[2]={-1e9f,-1e9f};
+        for(int k=0;k<4;++k) {
+            const float sx=k==1 || k==2 ? 0.5f : -0.5f,sy=k<2 ? 0.5f : -0.5f;
+            float p[3],q[4];
+            for(int a=0;a<3;++a)p[a]=eye[a]+c.off[a]+c.right[a]*c.w*sx+c.up[a]*c.h*sy;
+            for(int a=0;a<4;++a)q[a]=p[0]*vp[a]+p[1]*vp[4+a]+p[2]*vp[8+a]+vp[12+a];
+            const float x=width*0.5f*(1.0f+q[0]/q[3]),y=540.0f*(1.0f-q[1]/q[3]);
+            lo[0]=std::fmin(lo[0],x);lo[1]=std::fmin(lo[1],y);hi[0]=std::fmax(hi[0],x);hi[1]=std::fmax(hi[1],y);
+        }
+        int texts=0;
+        for(const Drew& d:drew) {
+            if(d.text.empty())continue;
+            const float cx=(d.x0+d.x1)*0.5f,cy=(d.y0+d.y1)*0.5f;
+            if(cx<lo[0] || cx>hi[0] || cy<lo[1] || cy>hi[1])continue;
+            ++texts;
+            if(d.x0<lo[0]-2.0f || d.x1>hi[0]+2.0f || d.y0<lo[1]-2.0f || d.y1>hi[1]+2.0f) {
+                ++failed;std::printf("FAIL %ls: screen %d's text \"%s\" spills out of it\n",name,i,Narrow(d.text).c_str());
+            }
+        }
+        if(texts<2){++failed;std::printf("FAIL %ls: screen %d shows %d lines\n",name,i,texts);}
+        inside+=texts;
+    }
+    std::printf("%s  %ls: %d screens, %d lines on them\n",failed ? "FAIL" : "ok",name,sceneScreens.n,inside);
+    return failed;
+}
+
+int CockpitScenes(const std::wstring& dir,const float* ground,const float* pos) {
+    int failed=0;
+    hasJet=hasHeli=hasWarn=hasSazabi=hasDrill=hasNix=hasProteus=false;hasStock=true;
+    StockTank(ground);
+    hasScreens=true;
+    sceneScreens=CockpitScreens{};
+    sceneScreens.s[sceneScreens.n++]=ScreenAt(ScreenKind::weapons,sceneStock.hull,-0.13f);
+    sceneScreens.s[sceneScreens.n++]=ScreenAt(ScreenKind::status,sceneStock.hull,0.13f);
+    Prime(ground);Scene(dir,L"cockpit_tank_gunner",ground);
+    failed+=ScreensDrawn(L"cockpit_tank_gunner",ground,sceneStock.hull,1920);
+    hasStock=false;hasHeli=true;hasWarn=false;
+    sceneHeli=PlayerHeliReadout{};
+    sceneHeli.sym.nose[2]=1.0f;std::memcpy(sceneHeli.sym.pos,pos,12);
+    sceneHeli.f.speed=42.0f;sceneHeli.f.clear=85.0f;sceneHeli.f.climb=2.5f;sceneHeli.f.ground=true;
+    sceneHeli.f.hp=900.0f;sceneHeli.f.hpMax=1200.0f;
+    sceneHeli.fuel.ok=true;sceneHeli.fuel.share=0.6f;sceneHeli.fuel.sec=310.0f;
+    sceneScreens=CockpitScreens{};
+    sceneScreens.s[sceneScreens.n++]=ScreenAt(ScreenKind::flight,sceneHeli.sym.nose,-0.13f);
+    sceneScreens.s[sceneScreens.n++]=ScreenAt(ScreenKind::map,sceneHeli.sym.nose,0.13f);
+    Prime(pos);Scene(dir,L"cockpit_heli_pilot",pos);
+    failed+=ScreensDrawn(L"cockpit_heli_pilot",pos,sceneHeli.sym.nose,1920);
+    // An unmanned gun's station (remote_display): its monitor over the whole view, its title, bearing, elevation, weapon.
+    hasHeli=false;hasStock=true;
+    StockTank(ground);
+    sceneScreens=CockpitScreens{};
+    sceneScreens.s[sceneScreens.n].kind=ScreenKind::sensor;sceneScreens.s[sceneScreens.n].w=0.4f;sceneScreens.s[sceneScreens.n++].h=0.3f;
+    Prime(ground);Scene(dir,L"cockpit_remote_station",ground);
+    int rws=0;
+    for(const Drew& d:drew)rws+=d.text==Tr(Tx::rwsTitle) || d.text.rfind(L"AZ ",0)==0 || d.text.rfind(L"EL ",0)==0 ||
+                                d.text.find(L"CANNON")!=std::wstring::npos;
+    if(hudtext::InUse()==hudtext::Lang::en && rws<4){++failed;std::printf("FAIL cockpit_remote_station: %d of its 4 read-outs\n",rws);}
+    else std::printf("ok  cockpit_remote_station: the station's monitor and its read-outs\n");
+    hasScreens=false;hasHeli=false;hasWarn=false;
     return failed;
 }
 
@@ -1896,11 +2064,43 @@ int Scenes(const std::wstring& dir) {
     sceneStock.arm[0].style=WeaponStyle::maser;strcpy_s(sceneStock.arm[0].label,"MASER");
     Scene(dir,L"emc_atomic_ray",ground);
     sceneStock=savedStock;
+    // 2026-10-12 feedback: the 601's 140 mm cannon loading its next round (1.8 s: vhud.cpp Cycle) with one shell for its
+    // picture, the coaxial MG picked by the right button and the main gun still marked (its bore cross: OtherTriggerMark);
+    // then a Nix whose seat lists its right arm's rifle first: the strip lays it out on the right (hud_cue.h SideOrder).
+    {
+        StockTank(ground);
+        StockArm& gun=sceneStock.arm[0];
+        gun.cycle=0.25f;gun.cycleSec=1.8f;gun.aimed=gun.armed=true;gun.bore[0]=-0.08f;gun.bore[2]=1.0f;
+        StockArm& mg=sceneStock.arm[1];
+        mg.aimed=mg.armed=mg.coFired=true;mg.bore[2]=1.0f;mg.side=-0.3f;
+        StockArm& msl=sceneStock.arm[2];   // out of rounds, its magazine 60 % back in: the same bar
+        msl.ammo=0;msl.reload=0.6f;msl.reloadSec=2.4f;
+        sceneStock.selected=-1;sceneStock.sight=1;
+        LoadCell cells[kStockArms];int picked=-1;
+        const int n=StockCells(sceneStock,cells,&picked);
+        failed+=n!=3 || cells[0].icon!=hudcue::StoreIcon::shell || !std::wcsstr(cells[0].text,L"1.8s");
+        failed+=cells[0].load!=0.25f || cells[1].load>=0.0f || cells[2].load!=0.6f;   // loading bars: the gun, none, the magazine
+        Prime(ground);
+        Scene(dir,L"stock_tank_loading_two_triggers",ground);
+        sceneStock.arms=2;sceneStock.selected=0;
+        for(int i=0;i<2;++i) {
+            StockArm& a=sceneStock.arm[i];a=StockArm{};a.kind=RoundKind::arc;a.style=WeaponStyle::beam;a.ammo=9900;a.ammoMax=10000;
+            a.reload=1.0f;a.reloadSec=-1.0f;a.canReload=true;strcpy_s(a.label,"BEAM");
+        }
+        wcscpy_s(sceneStock.arm[0].name,L"RIFLE (R)");sceneStock.arm[0].side=-2.1f;
+        wcscpy_s(sceneStock.arm[1].name,L"RIFLE (L)");sceneStock.arm[1].side=2.2f;
+        const int m=StockCells(sceneStock,cells,&picked);
+        failed+=m!=2 || std::wcsncmp(cells[0].text,L"RIFLE (L)",9)!=0 || picked!=1;
+        Prime(ground);
+        Scene(dir,L"nix_rifles_left_right",ground);
+    }
+    sceneStock=savedStock;
     failed+=TankSightScenes(dir,ground);
     failed+=SightStyleScenes(dir,ground);
     failed+=GunshipSightScenes(dir,ground);
     failed+=ZoomScenes(dir,ground);
     failed+=FireControlScenes(dir,ground);
+    failed+=InfantryScopeScenes(dir,ground);
     failed+=FixedFireScenes(dir,ground);
     hasDrill=true;
     sceneDrill=DrillCue{1180.0f,1200.0f,0.93f,true,true};
@@ -2118,6 +2318,7 @@ int Scenes(const std::wstring& dir) {
     hasStock=false;
     failed+=SazabiScenes(dir,ground);
     failed+=ArmorScenes(dir,ground,pos);
+    failed+=CockpitScenes(dir,ground,pos);
     // The next language's run begins as this one did: EDF6AutoTurret's mode last seen as auto-aim, and seen long enough
     // ago that no switch's banner (hud_cue.h Changed, a wall-clock kSwitchMs) carries over into its turret scenes.
     hasStock=hasTurret=true;

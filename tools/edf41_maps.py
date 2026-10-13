@@ -6,6 +6,16 @@ Per map (MAPS):
   <MAP>.MAC   pylib/map_legacy.py (MAPB / MAPO in EDF6's layout), its .rmpa members by pylib/rmpa_legacy.py
   <MAP>.MAD   4.1's collision.hkt (Havok 2014) repacked; the plugin migrates it at load (src/legacymap.cpp)
   <MAP>.RAB   pylib/legacy_assets.py, map parts
+
+The SK_* maps (their ground is a heightfield, .shfb, that EDF6 has no loader for) differ in three of those files
+(pylib/sk_map.py, docs/edf41-sk-terrain.md): the ground becomes an EDF6 terrain piece
+  <PIECE>.FMB the field as a mesh (pylib/fmb_build.py: 4 m lattice, 20 x 20 cell leaves, the field's layers as EDF6
+              terrain layers, normals from the heights), placed by the MAC as `<piece>.fmep` like EDF6's own pieces
+  <MAP>.MAD   the ground's collision (the same lattice as 10 x 10 cell tiles) and the map's object bodies rebuilt from the
+              RAB's models, written as EDF6's own Havok 2020 file (pylib/hkcms_build.py): nothing of the 4.1 collision
+              stays, EDF6 loads it like any of its maps
+  <MAP>.RAB   the field's colour array as <map>_color.dds, EDF6's flat normal map as <map>_normal.dds (the two textures
+              EDF6's terrain looks up by the map's name)
   <MAP>_<WEATHER>.MAE / .RAB, <MAP>.NAVMESH(_H).HKT / .NVMD
               the donor EDF6 map's, read from the player's EDF6: EDF6 keeps a map's weather (lights, fog, sky, its
               env-map shapes and textures) in these, which 4.1 has elsewhere, and 4.1 has no navmesh. A donor's MAE
@@ -23,6 +33,7 @@ from __future__ import annotations
 
 import json
 import os
+import struct
 import sys
 from typing import Callable
 
@@ -34,6 +45,7 @@ import legacy_assets  # noqa: E402
 import map_legacy  # noqa: E402
 import rmpa_legacy  # noqa: E402
 import rootcpk  # noqa: E402
+import sk_map  # noqa: E402
 from modfiles import load_json, sha256, sha256_file  # noqa: E402
 
 OWNER = 'edf41maps'   # pylib/ledger.py OWNERS
@@ -42,8 +54,9 @@ STAMP = '.edf41maps.json'   # Mods/: {map: {'version': VERSION, 'source': {4.1 f
 ARCHIVES = ('Root.cpk', 'Chunk01.cpk', 'Chunk02.cpk', 'DX11.cpk')
 NAVMESH = ('NAVMESH.HKT', 'NAVMESH.NVMD', 'NAVMESH_H.HKT', 'NAVMESH_H.NVMD')
 
-# 4.1's mission maps but the SK_* ones (their heightfields, .shfb, EDF6 has no counterpart for: open issue): map ->
-# (the EDF6 donor of weather and navmesh, the weathers 4.1's mission scripts load it with). The donor has every one.
+# 4.1's mission maps: map -> (the EDF6 donor of weather and navmesh, the weathers 4.1's mission scripts load it with).
+# The donor has every one. The SK_* maps are built from the field (SK_MAPS); the weathers are the ones the scripts name
+# (selftest edf41_maps_cover_the_scripts).
 MAPS: dict[str, tuple[str, tuple[str, ...]]] = {
     'IG_CAVE01': ('IG_CAVE501', ('FINE',)),
     'IG_HORNETCAVE01': ('IG_CAVE503', ('FINE',)),
@@ -51,10 +64,18 @@ MAPS: dict[str, tuple[str, tuple[str, ...]]] = {
     'IG_WRECKTOWN01': ('NW_HAIKYO601', ('FINECLOUD', 'CLOUDY', 'CLOUDY2', 'EVENING', 'FINE', 'SUNSET')),   # ruins
     'NW_HILLYCITY_LIGHT': ('NW_DANTI01', ('FINECLOUD', 'CLOUDY', 'CLOUDY2', 'EVENING', 'FINE', 'SUNSET')),
     'NW_KASENJIKI01': ('NW_DANTI01', ('FINECLOUD', 'CLOUDY', 'CLOUDY2', 'EVENING', 'FINE', 'SUNSET')),
-    'NW_KOUSOUBLD01': ('NW_DANTI01', ('CLOUDY', 'CLOUDY2', 'EVENING', 'FINE', 'SUNSET')),
+    'NW_KOUSOUBLD01': ('NW_DANTI01', ('FINECLOUD', 'CLOUDY', 'CLOUDY2', 'EVENING', 'FINE', 'SUNSET')),
     'NW_SINSUIKOUEN': ('NW_DANTI01', ('FINECLOUD', 'CLOUDY2', 'EVENING', 'FINE', 'SUNSET')),
     'NW_SOUKOGAI01': ('NW_DANTI01', ('CLOUDY2', 'EVENING', 'FINE')),
+    'SK_HEIGEN02': ('IG_HEIGEN507', ('CLOUDY',)),                                            # a plain
+    'SK_VALLEY01': ('IG_TERRACEMOUNTAIN', ('CLOUDY', 'FINE', 'FINECLOUD')),
+    'SK_KAIGAN01': ('IG_KAIGAN502', ('CLOUDY', 'CLOUDY2', 'FINE', 'SUNSET')),                           # a coast
+    'SK_SANGAKU01': ('IG_SANGAKU506', ('FINE', 'FINECLOUD', 'SUNSET')),
+    'SK_SANGAKU02': ('IG_SANGAKU506', ('CLOUDY', 'CLOUDY2', 'FINECLOUD', 'SUNSET')),
+    'SK_STEPMOUNTAIN01': ('IG_TERRACEMOUNTAIN', ('EVENING', 'FINE', 'FINECLOUD', 'SUNSET')),
+    'SK_CRATER01': ('IG_CRATER601', ('CLOUDY2',)),
 }
+SK_MAPS = frozenset(n for n in MAPS if n.startswith('SK_'))
 
 
 class Archives:
@@ -82,6 +103,7 @@ def files_of(name: str) -> list[str]:
     """The Mods paths map `name` installs."""
     weathers = MAPS[name][1]
     return ([f'MAP/{name}.{ext}' for ext in ('MAC', 'MAD', 'RAB')]
+            + ([f'MAP/{sk_map.fmb_file(name)}'] if name in SK_MAPS else [])
             + [f'MAP/{name}_{w}.{ext}' for w in weathers for ext in ('MAE', 'RAB')]
             + [f'MAP/{name}.{n}' for n in NAVMESH])
 
@@ -91,10 +113,19 @@ def convert(name: str, e41: Archives, e6: Archives) -> dict[str, bytes]:
     donor, weathers = MAPS[name]
     mac = bigmap.Marc.parse(map_legacy.mac_from_legacy(e41.read(f'{name}.MAC')))
     mac.files = [(n, rmpa_legacy.rmpa_from_legacy(d) if n.lower().endswith('.rmpa') else d) for n, d in mac.files]
-    version, members = map_legacy.parse_marc_lenient(e41.read(f'{name}.MAD'))
-    out = {f'MAP/{name}.MAC': mac.build(),
-           f'MAP/{name}.MAD': bigmap.Marc(version, list(members)).build(),
-           f'MAP/{name}.RAB': legacy_assets.convert(f'MAP/{name}.RAB', e41.read(f'{name}.RAB'), map_part=True)}
+    rab = legacy_assets.convert(f'MAP/{name}.RAB', e41.read(f'{name}.RAB'), map_part=True)
+    fmb_bytes = None
+    if name in SK_MAPS:
+        terrain = sk_map.terrain(mac, rab, e6, name)
+        mac, rab, fmb_bytes = terrain.mac, terrain.rab, terrain.fmb
+        hkt41 = dict(map_legacy.parse_marc_lenient(e41.read(f'{name}.MAD'))[1])['collision.hkt']
+        mad, _missing = sk_map.collision(terrain, hkt41, e6)
+    else:
+        version, members = map_legacy.parse_marc_lenient(e41.read(f'{name}.MAD'))
+        mad = bigmap.Marc(version, list(members)).build()
+    out: dict[str, bytes] = {f'MAP/{name}.MAC': mac.build(), f'MAP/{name}.MAD': mad, f'MAP/{name}.RAB': rab}
+    if fmb_bytes is not None:
+        out[f'MAP/{sk_map.fmb_file(name)}'] = fmb_bytes
     for w in weathers:
         for ext in ('MAE', 'RAB'):
             out[f'MAP/{name}_{w}.{ext}'] = e6.read(f'{donor}_{w}.{ext}')
@@ -108,11 +139,11 @@ def _source(name: str, e41: Archives) -> dict[str, list[int]]:
 
 
 def _foreign(led: ledger.Ledger, rel: str) -> bool:
-    """A file in Mods this install must not write over: one no tool of ours wrote, or another of ours'."""
+    """A file no tool of ours wrote, another tool's, or edited since our recorded write: preserve its bytes."""
     if not os.path.exists(led.disk(rel)):
         return False
     owners = led.owners(rel)
-    return not owners or any(o != OWNER for o in owners)
+    return not owners or any(o != OWNER for o in owners) or led.changed(rel)
 
 
 def _current(led: ledger.Ledger, stamp: dict, name: str, source: dict[str, list[int]]) -> bool:
@@ -124,31 +155,52 @@ def _current(led: ledger.Ledger, stamp: dict, name: str, source: dict[str, list[
     return all(ledger.key(rel) in mine and os.path.exists(led.disk(rel)) for rel in files_of(name))
 
 
+NO_EDF41 = '没有找到 EDF4.1（需要安装 EDF4.1 才能转换它的地图）'
+
+
+def unavailable(root: str, root41: str | None) -> list[tuple[str, str]]:
+    """The maps install leaves out before converting anything, [(map, why)]: all of them without EDF4.1, else those
+    with a file in Mods that is not ours. Conversion itself can still fail (install's skipped list). The one place
+    that decides it: install skips exactly these, and the campaign plan offers only missions whose maps are not here."""
+    if not root41:
+        return [(name, NO_EDF41) for name in MAPS]
+    led = ledger.Ledger(root)
+    out: list[tuple[str, str]] = []
+    for name in MAPS:
+        foreign = [rel for rel in files_of(name) if _foreign(led, rel)]
+        if foreign:
+            out.append((name, f"Mods 里已有别的 MOD 的文件：{', '.join(foreign)}"))
+    return out
+
+
 def install(root: str, root41: str | None, say: Callable[[str], None] = print) -> tuple[list[str], list[tuple[str, str]]]:
     """Every map of MAPS converted and written as OWNER's; (paths written, [(map, why not)])."""
     if not root41:
-        return [], [(name, '没有找到 EDF4.1（需要安装 EDF4.1 才能转换它的地图）') for name in MAPS]
+        return [], unavailable(root, root41)
     e41, e6 = Archives(root41), Archives(root)
     led = ledger.Ledger(root)
     stamp_path = os.path.join(root, 'Mods', STAMP)
     stamp = load_json(stamp_path, {})
     written: list[str] = []
-    skipped: list[tuple[str, str]] = []
+    skipped = unavailable(root, root41)
+    left_out = {name for name, _ in skipped}
     wanted: set[str] = set()
     for name in MAPS:
-        foreign = [rel for rel in files_of(name) if _foreign(led, rel)]
-        if foreign:
-            skipped.append((name, f"Mods 里已有别的 MOD 的文件：{', '.join(foreign)}"))
+        if name in left_out:
             continue
-        source = _source(name, e41)
+        try:
+            source = _source(name, e41)
+        except (ValueError, KeyError) as e:
+            skipped.append((name, f'源地图不可用：{type(e).__name__}: {e}'))
+            continue
         wanted.update(ledger.key(rel) for rel in files_of(name))
         if _current(led, stamp, name, source):
             continue
         say(f'  转换 4.1 地图 {name}（借用 EDF6 {MAPS[name][0]} 的天气与寻路网格）……')
         try:
             files = convert(name, e41, e6)
-        except (ValueError, KeyError) as e:
-            skipped.append((name, f'转换失败：{e}'))
+        except (ValueError, KeyError, IndexError, AssertionError, NotImplementedError, struct.error) as e:
+            skipped.append((name, f'转换失败：{type(e).__name__}: {e}'))
             wanted.difference_update(ledger.key(rel) for rel in files_of(name))
             continue
         for rel, data in files.items():

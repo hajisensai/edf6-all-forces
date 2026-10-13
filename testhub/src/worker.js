@@ -10,7 +10,9 @@ import MISSIONS from './missions.json' with { type: 'json' };
 
 const MAX_UPLOAD = 95 * 1024 * 1024;        // the Workers request limit is 100 MB
 const RESULTS = ['pass', 'fail', 'new', 'info'];
-const STATUSES = ['todo', 'verify', 'pass', 'fail', 'closed'];
+const STATUSES = ['todo', 'verify', 'pass', 'fail', 'done', 'closed'];
+// The developer's handling of a report (the page's 处理状态 column): 待处理 / 处理中 / 已修待确认 / 已完成 / 不处理.
+export const REPORT_STATUSES = ['open', 'doing', 'verify', 'done', 'closed'];
 const PUBLIC_ASSETS = new Set(['/login.html', '/login.js', '/style.css']);
 const SESSION_DAYS = 60;
 
@@ -79,8 +81,13 @@ async function route(request, env) {
   if (path.startsWith('/file/') && method === 'GET') return attachment(env, Number(path.slice(6)));
   if (path === '/api/report' && method === 'POST') return json(await report(request, env, me));
   if (path === '/api/reply' && method === 'POST') { need(dev); return json(await reply(request, env)); }
+  if (path === '/api/report_status' && method === 'POST') { need(dev); return json(await reportStatus(request, env)); }
   if (path === '/api/case' && method === 'POST') { need(dev); return json(await saveCase(request, env)); }
   if (path === '/api/build' && method === 'PUT') { need(dev); return json(await putBuild(request, env, url)); }
+  if (path === '/api/build/start' && method === 'POST') { need(dev); return json(await startBuild(env, url)); }
+  if (path === '/api/build/part' && method === 'PUT') { need(dev); return json(await putBuildPart(request, env, url)); }
+  if (path === '/api/build/finish' && method === 'POST') { need(dev); return json(await finishBuild(request, env, url)); }
+  if (path === '/api/build/abort' && method === 'POST') { need(dev); return json(await abortBuild(env, url)); }
   if (path === '/api/reports' && method === 'GET') { need(dev); return json(await reportsSince(env, Number(url.searchParams.get('since') || 0))); }
   if (path === '/api/plan' || path.startsWith('/api/plan/')) {
     const out = await planRoute(request, env, me, MISSIONS, groupsOf(accounts), path, url);
@@ -197,9 +204,27 @@ async function report(request, env, me) {
   return { id: row.id, files: files.length };
 }
 
+// A reply, and with it (optional) the report's handling status: answering "fixed in …" and marking it done is one step.
 async function reply(request, env) {
-  const { report_id: id, text } = await body(request);
-  const r = await env.DB.prepare('UPDATE reports SET reply = ?2, reply_at = ?3 WHERE id = ?1').bind(Number(id), String(text || ''), Date.now()).run();
+  const { report_id: id, text, status } = await body(request);
+  if (status !== undefined) checkReportStatus(status);
+  const now = Date.now();
+  const r = status === undefined
+    ? await env.DB.prepare('UPDATE reports SET reply = ?2, reply_at = ?3 WHERE id = ?1').bind(Number(id), String(text || ''), now).run()
+    : await env.DB.prepare('UPDATE reports SET reply = ?2, reply_at = ?3, status = ?4, status_at = ?3 WHERE id = ?1')
+      .bind(Number(id), String(text || ''), now, status).run();
+  if (!r.meta.changes) throw new HttpError(404, 'no such report');
+  return { ok: true };
+}
+
+function checkReportStatus(status) {
+  if (!REPORT_STATUSES.includes(status)) throw new HttpError(400, 'status must be one of ' + REPORT_STATUSES.join('/'));
+}
+
+async function reportStatus(request, env) {
+  const { report_id: id, status } = await body(request);
+  checkReportStatus(status);
+  const r = await env.DB.prepare('UPDATE reports SET status = ?2, status_at = ?3 WHERE id = ?1').bind(Number(id), status, Date.now()).run();
   if (!r.meta.changes) throw new HttpError(404, 'no such report');
   return { ok: true };
 }
@@ -233,13 +258,96 @@ async function putBuild(request, env, url) {
   const data = await request.arrayBuffer();
   if (!data.byteLength) throw new HttpError(400, 'empty body');
   const sha = [...new Uint8Array(await crypto.subtle.digest('SHA-256', data))].map((b) => b.toString(16).padStart(2, '0')).join('');
-  await env.FILES.put('builds/' + name, data, { httpMetadata: { contentType: 'application/zip' } });
+  const stored = await env.FILES.put('builds/' + name, data, {
+    httpMetadata: { contentType: 'application/zip' }, onlyIf: new Headers({ 'If-None-Match': '*' }),
+  });
+  if (!stored) throw new HttpError(409, 'build name already published; use a new name');
+  return recordBuild(env, { name, version, channel, commit: q.get('commit') || '', notes, size: data.byteLength, sha });
+}
+
+async function recordBuild(env, b) {
   await env.DB.prepare(
     `INSERT INTO builds (name, version, channel, commit_sha, notes, size, sha256, at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
      ON CONFLICT(name) DO UPDATE SET version = ?2, channel = ?3, commit_sha = ?4, notes = ?5, size = ?6, sha256 = ?7, at = ?8`,
-  ).bind(name, version, channel, q.get('commit') || '', notes, data.byteLength, sha, Date.now()).run();
+  ).bind(b.name, b.version, b.channel, b.commit, b.notes, b.size, b.sha, Date.now()).run();
   await pruneBuilds(env, Number(env.KEEP_BUILDS) || 15);
-  return { name, sha256: sha, size: data.byteLength };
+  return { name: b.name, sha256: b.sha, size: b.size };
+}
+
+// ---- a build bigger than one request (the installer zip passed 100 MB on 2026-10-10, every mirror got 413):
+// R2 multipart in three steps. start -> upload id; part N, one request each (R2: every part but the last at least
+// 5 MiB and all the same size; the client cuts the zip); finish with the parts' etags, the size and the SHA-256 the
+// uploader computed over the whole zip. The worker cannot hash 100+ MB within its CPU budget, so the hash is the
+// uploader's: the installer checks the download against it, which covers the way in as well as the way out.
+
+function buildName(url) {
+  const name = cleanName(url.searchParams.get('name'));
+  if (!/\.zip$/i.test(name)) throw new HttpError(400, 'name=<file>.zip required');
+  return name;
+}
+
+function uploadLocation(url) {
+  const id = url.searchParams.get('upload_id') || '';
+  const match = /^([0-9a-f-]{36}):(.+)$/.exec(id);
+  if (!match) throw new HttpError(400, 'upload_id required (restart older uploads)');
+  return { key: 'build-uploads/' + match[1] + '/' + buildName(url), id: match[2] };
+}
+
+function uploadOf(env, url) {
+  const { key, id } = uploadLocation(url);
+  return env.FILES.resumeMultipartUpload(key, id);
+}
+
+async function startBuild(env, url) {
+  const token = crypto.randomUUID();
+  const up = await env.FILES.createMultipartUpload('build-uploads/' + token + '/' + buildName(url), {
+    httpMetadata: { contentType: 'application/zip' },
+  });
+  return { upload_id: token + ':' + up.uploadId };
+}
+
+async function putBuildPart(request, env, url) {
+  const part = Number(url.searchParams.get('part'));
+  if (!Number.isInteger(part) || part < 1 || part > 10000) throw new HttpError(400, 'part=1..10000 required');
+  if (Number(request.headers.get('content-length') || 0) > MAX_UPLOAD) throw new HttpError(413, `a part is at most ${MAX_UPLOAD >> 20} MB`);
+  const data = await request.arrayBuffer();
+  if (!data.byteLength) throw new HttpError(400, 'empty body');
+  const done = await uploadOf(env, url).uploadPart(part, data);
+  return { part: done.partNumber, etag: done.etag, size: data.byteLength };
+}
+
+async function finishBuild(request, env, url) {
+  const q = url.searchParams;
+  const name = buildName(url);
+  const version = q.get('version') || '';
+  if (!version) throw new HttpError(400, 'version= required');
+  const { parts, size, sha256 } = await body(request);
+  if (!Array.isArray(parts) || !parts.length) throw new HttpError(400, 'parts required');
+  if (!/^[0-9a-f]{64}$/.test(String(sha256 || ''))) throw new HttpError(400, 'sha256 (64 hex digits) required');
+  const list = parts.map((p) => ({ partNumber: Number(p.part), etag: String(p.etag || '') }));
+  const obj = await uploadOf(env, url).complete(list);
+  const { key } = uploadLocation(url);
+  try {
+    if (obj.size !== Number(size)) {
+      throw new HttpError(400, `the parts make ${obj.size} bytes, not ${size}: discarded`);
+    }
+    // Complete into this upload's private key first. Publish a stream only after validation, conditionally:
+    // neither a bad size nor a competing upload may replace an already published build of the same name.
+    const staged = await env.FILES.get(key);
+    const stored = await env.FILES.put('builds/' + name, staged.body, {
+      httpMetadata: { contentType: 'application/zip' }, onlyIf: new Headers({ 'If-None-Match': '*' }),
+    });
+    if (!stored) throw new HttpError(409, 'build name already published; use a new name');
+  } finally {
+    await env.FILES.delete(key);
+  }
+  const notes = decodeURIComponent(request.headers.get('x-notes') || '').slice(0, 20000);
+  return recordBuild(env, { name, version, channel: q.get('channel') || 'nightly', commit: q.get('commit') || '', notes, size: obj.size, sha: sha256 });
+}
+
+async function abortBuild(env, url) {
+  await uploadOf(env, url).abort();
+  return { ok: true };
 }
 
 async function pruneBuilds(env, keep) {

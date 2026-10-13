@@ -171,6 +171,11 @@ bool CameraRay(float* eye,float* dir) noexcept {
 bool HumanOnFoot(const unsigned char* h) noexcept { return !At<void*>(h,kHumanVehicleCtrl); }
 bool MapHoldsKeys() noexcept { return mapHeld; }
 bool KnownVehicle(const void* v) noexcept { return v==vehicle; }
+bool drivableVehicle=true;   // the stand-in vehicle is a ground one a soldier can drive (npcpost.cpp NpcDrivable)
+bool NpcDrivable(const unsigned char* v) noexcept { return drivableVehicle && v==vehicle; }
+bool PrepareNpcVehicleAi(unsigned char*) noexcept {return true;}
+int tankCommands=0;Command lastTankCommand{};
+bool TankCommand(const void*,const Command& command,const ObjRef&) noexcept {++tankCommands;lastTankCommand=command;return true;}
 float MapRay(const float*,const float*,float* hit) noexcept {
     if(!wall)return -1.0f;hit[0]=0;hit[1]=1.5f;hit[2]=20;return 20;
 }
@@ -211,6 +216,20 @@ bool VisitLockPoints(EnemyVisitor visit,void* ctx) noexcept { if(lockOf)visit(ct
 unsigned char* chosenGunnerWeapon=nullptr;
 bool suppressGunnerChoice=false;
 PayloadFire chosenGunnerFire=PayloadFire::primary;
+bool FriendInLine(const float*,const float*,const void*) noexcept { return false; }   // heli.cpp's (NpcCoaxFire's check)
+// wastedfire.cpp WastedFire: the target every shooter's fire is wasted on (the shut teleportation ship), as the case sets.
+const void* wastedTarget=nullptr;
+bool WastedFire(const void*,const void* target) noexcept { return target && target==wastedTarget; }
+// HoldFire: the same target held, and one due to open (heldTarget) aimed at and held; `aim` the weak spot when set.
+const void* heldTarget=nullptr;float weakAim[3]{};bool weakAimSet=false;
+float predictedSpeed=0.0f,predictedGravity=0.0f;
+bool HoldFire(const void*,const void* target,const float*,float speed,float gravity,float* aim) noexcept {
+    predictedSpeed=speed;predictedGravity=gravity;
+    if(aim && weakAimSet && target)std::memcpy(aim,weakAim,12);
+    return target && (target==wastedTarget || target==heldTarget);
+}
+int coaxCalls=0;   // payload.cpp NpcCoaxFire: called beside every crew aim (no coax on these fixtures)
+bool NpcCoaxFire(unsigned char*,unsigned,const void*,LineBlocked) noexcept { ++coaxCalls;return false; }
 unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float,bool,PayloadFire* fire) noexcept {
     if(fire)*fire=chosenGunnerFire;
     if(suppressGunnerChoice)return nullptr;
@@ -280,8 +299,11 @@ int main() {
         Reset();Put<void*>(human,kWeapons,list);Put<std::uint64_t>(human,kWeaponCount,3);
         Put<void*>(human,kSets,sets);Put<std::uint64_t>(human,kSetCount,2);
         Put<void*>(sets,kSetWeapon,slot0);Put<void*>(sets+kSetStride,kSetWeapon,slot1);
+        Put<float>(w2,0x894,2.0f);Put<float>(w2,0x8E0,0.5f);
         const Arms both=ArmsOf(human);
         Expect(both.n==3 && both.held[0]==2 && both.held[1]==1,"each WeaponSet's held weapon is found at the native set stride");
+        Expect(both.speed[2]==120.0f && std::fabs(both.gravity[2]-7.35f)<0.001f,
+               "the held weapon's native speed and gravity are converted to metres and seconds");
         Put<std::uint64_t>(human,kSetCount,1);
         Expect(ArmsOf(human).held[1]==-1,"a one-handed soldier has no second hand's weapon");
     }
@@ -348,7 +370,7 @@ int main() {
     now+=static_cast<ULONGLONG>(config.npcRecruitCooldownSec*1000.0f)+1;++frame;SeeSquad(human,human,0,npc::Control::free,now);
     Expect(!q->dismissed && q->cmd.order==Order::guard,"the cooldown ending does not move it by itself");
     ++frame;++now;SeeSquad(human,human,0,npc::Control::recruited,now);
-    Expect(q->cmd.order==Order::none,"recruited again by the stock walk-up after the cooldown: the hold is dropped and it follows");
+    Expect(q->cmd.order==Order::none,"recruited again after the cooldown: the hold is dropped and it follows");
     Reset();Put<void*>(human,kLeader,nullptr);q=SeeSquad(human,human,0,npc::Control::free,now);
     Expect(SquadCommand(human,Command{Order::guard,{10,0,0}}),"a free squad takes a guard order");
     ++frame;++now;SeeSquad(human,human,0,npc::Control::squad,now);
@@ -402,6 +424,41 @@ int main() {
         result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::engage,{}},ObjRef::Of(dead),{});
         Expect(result.reason==NpcCommandReason::scripted,"live script control blocks commandeering even when the row was previously free");
     }
+    // The stock walk-up recruit off (VanillaRecruit=0, the user 2026-10-11: "删了原版的率领npc机制，和指挥跟随重复了"):
+    // its one gate (+0x548 == 0 ? +0x540 : 0 at 0x596BD8) reads 0 inside the stock Think, the flag put back after it.
+    {
+        Reset();Put<void*>(human,kLeader,nullptr);human[kAutoFollow]=1;
+        static std::uint8_t seenAuto=0xFF;seenAuto=0xFF;
+        struct StockThink { static void __fastcall Run(void* h,const float*) { seenAuto=static_cast<unsigned char*>(h)[kAutoFollow]; } };
+        const ThinkFn keep=nextThink[0];nextThink[0]=&StockThink::Run;
+        const float dt=1.0f/60.0f;
+        ThinkHook<0>(human,&dt);
+        Expect(seenAuto==0 && human[kAutoFollow]==1,"VanillaRecruit=0: the stock Think sees no walk-up flag, the script's flag is put back");
+        config.vanillaRecruit=true;seenAuto=0xFF;ThinkHook<0>(human,&dt);
+        Expect(seenAuto==1 && human[kAutoFollow]==1,"VanillaRecruit=1: the stock walk-up reads the flag as before");
+        config.vanillaRecruit=false;config.customNpcAi=false;seenAuto=0xFF;ThinkHook<0>(human,&dt);
+        Expect(seenAuto==1,"with the custom AI off the stock walk-up stays (the map cannot recruit then)");
+        config.customNpcAi=true;followOk=false;seenAuto=0xFF;ThinkHook<0>(human,&dt);
+        Expect(seenAuto==1,"SetFollow not as read: the stock walk-up stays (the map cannot recruit then)");
+        followOk=true;Put<void*>(human,kLeader,other);seenAuto=0xFF;ThinkHook<0>(human,&dt);
+        Expect(seenAuto==1 && human[kAutoFollow]==1,"a soldier with a leader is left alone (the gate reads 0 for it anyway)");
+        nextThink[0]=keep;
+        // A script's squad the stock would have let in: the map's RECRUIT / FOLLOW is that walk-up now; nothing else.
+        Reset();Put<void*>(human,kLeader,nullptr);playerObj=other;
+        Put<unsigned char>(other,kHumanPlayer,1);Put<void*>(other,kHumanPad,other);Put<int>(other,kTeam,0);
+        Put<unsigned>(human,kObjectFlags,kFixPosition);human[kAutoFollow]=1;
+        SeeSquad(human,human,0,npc::Control::hold,now);
+        Expect(JoinOnly(npc::Control::hold,human),"a held script squad with its walk-up flag is joinable from the map");
+        auto result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::engage,{}},ObjRef::Of(other),{});
+        Expect(result.reason==NpcCommandReason::scripted,"the joinable script squad still takes no other order");
+        result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::recruit,{}},ObjRef::Of(other),{});
+        Expect(result.Accepted() && At<void*>(human,kLeader)==other,"RECRUIT joins it to the requester as the stock walk-up did");
+        Put<void*>(human,kLeader,nullptr);human[kAutoFollow]=0;
+        result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::follow,{}},ObjRef::Of(other),{});
+        Expect(result.reason==NpcCommandReason::scripted && !At<void*>(human,kLeader),"a script squad the stock would not let in stays locked");
+        human[kAutoFollow]=1;config.vanillaRecruit=true;
+        Expect(!JoinOnly(npc::Control::hold,human),"VanillaRecruit=1: a script squad is joined by walking up, as before");
+    }
     // Leader class is not the whole squad: a Wing Diver can lead a Ranger who may occupy the driver seat.
     {
         Reset();Put<void*>(human,kLeader,nullptr);playerObj=other;
@@ -424,6 +481,32 @@ int main() {
         completeRide=true;Board(*child,dead,Pos(dead),now);
         Expect(rides==1 && announcedBoards==1 && At<void*>(dead,kHumanRiding)==vehicle && At<void*>(seats,kSeatRider)==dead,
             "accepted online command reaches real Board/native Ride entry and announces the completed seat transition");
+    }
+    // 2026-10-10 "步兵不乘啊": an empty stock vehicle is nobody's (team 5), which the friends' walk never visits. Team 5's own
+    // walk (NobodyVisit) lists its drivable ground vehicles and BOARD takes them.
+    {
+        Reset();Put<void*>(human,kLeader,nullptr);playerObj=other;drivableVehicle=true;
+        Put<unsigned char>(other,kHumanPlayer,1);Put<void*>(other,kHumanPad,other);Put<int>(other,kTeam,0);
+        Put<int>(human,kTeam,0);Put<int>(vehicle,kTeam,kTeamVehicle);
+        Put<unsigned>(seats,kSeatClass,1);Put<unsigned>(seats,kSeatEnable,1);
+        world.friends=0;world.nobodys=0;
+        FriendWalk walk{kNobodyVtable,&world};
+        NobodyVisit(&walk,vehicle);NobodyVisit(&walk,other);
+        Expect(world.nobodys==1 && world.nobody[0]==vehicle,"team 5's walk keeps the empty ground vehicle, not other objects");
+        drivableVehicle=false;NobodyVisit(&walk,vehicle);drivableVehicle=true;
+        Expect(world.nobodys==1,"team 5's walk leaves aircraft (not NPC-drivable: a parked jet, a rescue helicopter waiting)");
+        SeeSquad(human,human,0,npc::Control::free,now);
+        auto result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::board,{}},ObjRef::Of(other),{});
+        auto* boarding=Entry(human,now);
+        Expect(result.Accepted() && boarding && boarding->boardV.Is(vehicle),
+            "BOARD takes an empty (team 5) vehicle the friends' walk never lists");
+        Reset();Put<void*>(human,kLeader,nullptr);playerObj=other;
+        Put<unsigned char>(other,kHumanPlayer,1);Put<void*>(other,kHumanPad,other);Put<int>(other,kTeam,0);
+        Put<int>(human,kTeam,0);Put<int>(vehicle,kTeam,kTeamVehicle);
+        Put<unsigned>(seats,kSeatClass,1);Put<unsigned>(seats,kSeatEnable,1);
+        world.friends=0;world.nobodys=0;SeeSquad(human,human,0,npc::Control::free,now);
+        result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::board,{}},ObjRef::Of(other),{});
+        Expect(result.reason==NpcCommandReason::noVehicle,"without team 5's walk the same empty vehicle was never found (the bug)");
     }
     // A guest pilots its own vehicle while the host owns the NPCs boarding the gunner seats.
     {
@@ -468,6 +551,43 @@ int main() {
         behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
         Expect(result.Accepted() && soldier->target.Is(enemy) && std::strcmp(behavior.move,"combat spot")==0,
             "engage command enters actual production target acquisition and combat movement");
+        // Fire wasted on it (the user 2026-10-12: 「ai还会无脑攻击金色飞船浪费子弹」; wasted_fire.h): no target, its trigger off.
+        // The stock AI (with no target of the plugin's the soldier is the stock's) has it as its own target and fires.
+        wastedTarget=enemy;Put<unsigned char>(human,kTrigger,1);
+        Put<void*>(human,kStockTarget,enemy);Put<void*>(human,kStockTargetCtrl,enemyCtrl);
+        behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
+        Expect(!soldier->target && !behavior.fire && At<unsigned char>(human,kTrigger)==0,
+               "an enemy its fire is wasted on is no target, and the stock AI's shot at it is taken off (production Drive)");
+        wastedTarget=nullptr;Put<void*>(human,kStockTarget,nullptr);Put<void*>(human,kStockTargetCtrl,nullptr);
+        behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
+        Expect(soldier->target.Is(enemy),"no longer wasted: its target again");
+        // Its window due to open (hit_predict.h wait): kept as the target, aimed at its weak spot, the trigger held; then open:
+        // the shot, still at the weak spot.
+        // The plugin's own aim needs its held weapon known (held[0] -1 leaves the look to the stock AI).
+        heldTarget=enemy;available.held[0]=0;
+        available.speed[0]=120.0f;available.gravity[0]=7.35f;
+        Put<unsigned>(human,kControlMask,kMaskMove|kMaskLook|kMaskTrigger);
+        behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
+        Expect(predictedSpeed==120.0f && predictedGravity==7.35f,"production Drive predicts using the chosen weapon's ballistics");
+        const float atLock=At<float>(human,kLookPitch);   // the look's pitch step toward its lock point (0,0,20)
+        weakAimSet=true;weakAim[0]=0;weakAim[1]=12;weakAim[2]=20;
+        behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
+        Expect(soldier->target.Is(enemy) && !behavior.fire && At<unsigned char>(human,kTrigger)==0 &&
+               At<float>(human,kLookPitch)<atLock,
+               "a target due to open: kept, aimed up at its weak spot, the trigger held (production Drive)");
+        // Its look already on the weak spot (every other test of the shot passes): held all the same while due to open;
+        // released (open), the shot goes.
+        const float up[3]={weakAim[0]-eyePoint[0],weakAim[1]-eyePoint[1],weakAim[2]-eyePoint[2]};
+        Put<float>(human,kViewPitch,-std::atan2(up[1],std::sqrt(up[0]*up[0]+up[2]*up[2])));Put<float>(human,kViewYaw,std::atan2(up[0],up[2]));
+        available.arm[0]=npc::Arm{100,0,10,false,true,false};
+        behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
+        Expect(!behavior.fire && At<unsigned char>(human,kTrigger)==0,"its look on the weak spot, due to open: still no shot");
+        heldTarget=nullptr;
+        behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
+        Expect(behavior.fire && At<unsigned char>(human,kTrigger)==1,"open: the shot at the weak spot goes");
+        weakAimSet=false;available.held[0]=-1;Put<unsigned char>(human,kTrigger,0);
+        Put<float>(human,kViewPitch,0.0f);Put<float>(human,kViewYaw,0.0f);
+        Put<unsigned>(human,kControlMask,kMaskMove);
         markEnemy=enemy;
         result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::focus,{}},ObjRef::Of(other),ObjRef::Of(enemy));
         Expect(result.Accepted() && commandSquad->commandFocus.Is(enemy) && !NpcMarked(),

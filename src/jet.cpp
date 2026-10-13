@@ -648,7 +648,11 @@ void JetFrame(unsigned char* v) noexcept {
     if(gunner){v[kFireGun]=0;v[kFireMissile]=0;}   // the gun is the player's (playerjet_crew.inc GunnerFire)
     else Arm(*j,kind,v,pos,nose,lead,gunsOk,missileOk,arms,ms);
     NpcFlares(*j,v,pos,nose,ms);
-    if(Cfg().debug && ms-j->loggedAt>1000){j->loggedAt=ms;JetLog(*j,v,pos,arms,speed,clear,ms);}
+    if(Cfg().debug && ms-j->loggedAt>1000) {
+        j->loggedAt=ms;
+        JetLog(*j,v,pos,arms,speed,clear,ms);
+        if(!j->barrelsLogged)j->barrelsLogged=JetBarrelLog(v,pos);
+    }
 }
 
 // A reaped jet's NPC pilot is put off and the jet deleted only once the game has taken it as empty: its team then

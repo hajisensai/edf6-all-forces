@@ -19,9 +19,10 @@ void Log(const char*,...) noexcept {}
 bool IsFuelTank(const unsigned char* w) noexcept { return w[0x100]==3; }
 bool IsLoadoutWeapon(const unsigned char* w) noexcept { return w[0x100]==2; }
 bool IsStoreWeapon(const unsigned char* w) noexcept { return w[0x100]==2; }
-const StoreSpec airSpec{L"AA", "AA", StoreRole::air,0,0},groundSpec{L"AG", "AG", StoreRole::ground,0,0},gunSpec{L"HP", "HP", StoreRole::gun,0,0};
+const StoreSpec airSpec{L"AA", "AA", StoreRole::air,0,0},groundSpec{L"AG", "AG", StoreRole::ground,0,0},gunSpec{L"HP", "HP", StoreRole::gun,0,0},
+                coaxSpec{L"MG", "MG", StoreRole::coax,0,0};
 const StoreSpec* StoreOf(const unsigned char* w) noexcept {
-    return w[0x101]==1 ? &airSpec : w[0x101]==2 ? &groundSpec : w[0x101]==3 ? &gunSpec : nullptr;
+    return w[0x101]==1 ? &airSpec : w[0x101]==2 ? &groundSpec : w[0x101]==3 ? &gunSpec : w[0x101]==5 ? &coaxSpec : nullptr;
 }
 int fileQueries=0;
 const wchar_t* WeaponFile(const unsigned char* w,std::size_t* n) noexcept {
@@ -31,11 +32,30 @@ void ClearWeaponLock(unsigned char*) noexcept {}
 int WeaponLock(const unsigned char*,float*,float*) noexcept { return 0; }
 bool ReadRound(const unsigned char* w,RoundModel* m) noexcept {
     // 3: a catalogued gun round of the grenade class (the flak's HE proximity), 4: a stock grenade round
-    *m={};m->kind=w[0x101]==1 || w[0x101]==2 ? RoundKind::homing : RoundKind::arc;m->lobbed=w[0x101]>=3;m->speed=2;m->alive=300;return true;
+    *m={};m->kind=w[0x101]==1 || w[0x101]==2 ? RoundKind::homing : RoundKind::arc;m->lobbed=w[0x101]==3 || w[0x101]==4;m->speed=2;m->alive=300;return true;
 }
 namespace audio { void LockTone(int,float) noexcept {} }
 }
-namespace edf { bool MeanMuzzle(const unsigned char* w,std::uint64_t,float*,float*) noexcept { return w[0x102]!=1; } }
+namespace crew { bool friendInLine=false; bool FriendInLine(const float*,const float*,const void*) noexcept { return friendInLine; } }
+namespace edf { bool MeanMuzzle(const unsigned char* w,std::uint64_t,float* p,float* d) noexcept { p[0]=p[1]=p[2]=0;d[0]=d[1]=0;d[2]=1;return w[0x102]!=1; } }
+// The coax and the main gun's firing motion (2026-10-12): stand-ins for the 505's / 601's stock slot 48 and its
+// VehicleBase part, reached through 12-byte jumps from their EDF.dll addresses in the stand-in image.
+namespace {
+int stockFiredRuns=0,vehicleFiredRuns=0;
+void __fastcall StockFired(unsigned char*,unsigned char*) { ++stockFiredRuns; }
+void __fastcall VehicleFired(unsigned char*,unsigned char*) { ++vehicleFiredRuns; }
+void JumpAt(unsigned rva,const void* to) {
+    unsigned char code[12]={0x48,0xB8};
+    std::memcpy(code+2,&to,8);
+    code[10]=0xFF;code[11]=0xE0;
+    std::memcpy(crew::image+rva,code,sizeof(code));
+}
+void CallAt(unsigned at,unsigned target) {
+    crew::image[at]=0xE8;
+    const std::int32_t rel=static_cast<std::int32_t>(static_cast<std::int64_t>(target)-(static_cast<std::int64_t>(at)+5));
+    std::memcpy(crew::image+at+1,&rel,sizeof(rel));
+}
+}  // namespace
 int main() {
     using namespace crew;
     int fail=0,checks=0;
@@ -117,6 +137,116 @@ int main() {
     check(NpcPayloadSelect(vehicles[1],0,400,true)==weapons[1][1],"gun-role proximity HE is used against aircraft");
     weapons[1][1][0x101]=4;
     check(!NpcPayloadSelect(vehicles[1],0,400,true),"a lobbed round that is no gun store stays off aircraft");
+    // 2026-10-11 「应该有同轴机枪的坦克增加同轴机枪」 / 「用副武器的时候瞄具不会强制切回去」: a Blacker-class seat (its stock
+    // input reads the primary alone) with its main gun, a store on the gun and the coaxial machine gun. The coax rides
+    // the secondary trigger by itself: never one of R / LB's choices, its latch pulled only while that trigger is held,
+    // the main gun's pick untouched; the fire-control view follows the secondary edge to it and back.
+    {
+        ResetPayload();now+=1000;
+        auto v=vehicles[1];Put<void*>(v,0,image+0x1000);   // Class::other (not one of the classes read in §2)
+        auto seat=SeatAt(v,0);
+        for(int i=0;i<3;++i)weapons[1][i][kWeaponTrigger]=0;
+        weapons[1][0][0x100]=0;weapons[1][0][0x101]=0;Put<int>(weapons[1][0],kWeaponAmmo,10);
+        weapons[1][1][0x100]=2;weapons[1][1][0x101]=2;Put<int>(weapons[1][1],kWeaponAmmo,4);
+        weapons[1][2][0x100]=2;weapons[1][2][0x101]=5;Put<int>(weapons[1][2],kWeaponAmmo,3000);
+        Put<int>(weapons[1][2],kWeaponReloadTime,600);
+        Put<const wchar_t*>(weapons[1][1],0x08,L"EDF6VC_GLM_4.SGO");Put<const wchar_t*>(weapons[1][2],0x08,L"EDF6VC_MG505_3000.SGO");
+        coaxBeltOk=true;
+        const auto colour=[&](const unsigned char* w){return reinterpret_cast<const float*>(w+kWeaponAmmoColor);};
+        const auto is=[&](const unsigned char* w,const float* c){return std::memcmp(colour(w),c,sizeof(kCoaxTracer))==0;};
+        Put<std::uint64_t>(seat,kSeatWeaponCount,3);
+        riders[1][edf::kHumanPlayer]=1;Put<void*>(riders[1],edf::kHumanPad,riders[1]);trackedHuman=riders[1];
+        Put<float>(seat,0x2E4,0.0f);Put<float>(seat,0x2E0,0.0f);
+        PayloadFrame(v);PayloadReadout coax{};
+        check(PlayerPayload(&coax) && coax.count==3 && coax.entry[2].coax && coax.entry[2].fire==PayloadFire::secondary,
+              "the coaxial gun is the seat's secondary-trigger weapon");
+        check(coax.choices==2 && !coax.entry[2].selectable && coax.entry[1].selectable,"R / LB cycles the main gun and its stores, never the coax");
+        check(!weapons[1][2][kWeaponTrigger],"no trigger, no coax burst");
+        check(PayloadSightPicked(v,0)==weapons[1][0],"the main gun owns the sight by default");
+        now+=16;Put<float>(seat,0x2E0,1.0f);PayloadFrame(v);
+        check(weapons[1][2][kWeaponTrigger]==1 && !weapons[1][0][kWeaponTrigger] && !weapons[1][1][kWeaponTrigger],
+              "the secondary trigger pulls the coax alone");
+        check(PayloadSightPicked(v,0)==weapons[1][2],"the secondary edge hands the fire-control view to the coax");
+        check(is(weapons[1][2],kCoaxTracer),"3000 left: the round it fires is a tracer (one in five)");
+        check(!is(weapons[1][0],kCoaxTracer) && !is(weapons[1][0],kCoaxBall),"the main gun's colour is never touched");
+        // The belt's rhythm over the next rounds: 2999..2996 ball, 2995 tracer.
+        bool rhythm=true;
+        for(int left=2999;left>=2995;--left) {
+            Put<int>(weapons[1][2],kWeaponAmmo,left);weapons[1][2][kWeaponTrigger]=0;now+=16;PayloadFrame(v);
+            rhythm=rhythm && weapons[1][2][kWeaponTrigger]==1 && is(weapons[1][2],left%5==0 ? kCoaxTracer : kCoaxBall);
+        }
+        check(rhythm,"held, it keeps firing (its own interval paces it), four ball to one tracer");
+        coaxBeltOk=false;Put<int>(weapons[1][2],kWeaponAmmo,2994);std::memcpy(weapons[1][2]+kWeaponAmmoColor,kCoaxTracer,16);
+        weapons[1][2][kWeaponTrigger]=0;now+=16;PayloadFrame(v);
+        check(weapons[1][2][kWeaponTrigger]==1 && is(weapons[1][2],kCoaxTracer),"an unread EDF.dll: the file's tracer on every round, still firing");
+        coaxBeltOk=true;Put<int>(weapons[1][2],kWeaponAmmo,3000);
+        Put<float>(seat,0x2E0,0.0f);weapons[1][2][kWeaponTrigger]=0;now+=16;PayloadFrame(v);
+        check(!weapons[1][2][kWeaponTrigger] && PayloadSightPicked(v,0)==weapons[1][2],"let go: it stops, the view stays on it");
+        Put<float>(seat,0x2E4,1.0f);now+=16;PayloadFrame(v);
+        check(PayloadSightPicked(v,0)==weapons[1][0],"the primary edge takes the view back to the main gun");
+        Put<float>(seat,0x2E4,0.0f);Put<int>(weapons[1][2],kWeaponAmmo,0);Put<int>(weapons[1][2],kWeaponReloadTime,-1);
+        Put<float>(seat,0x2E0,1.0f);now+=16;PayloadFrame(v);
+        check(!weapons[1][2][kWeaponTrigger],"a coax spent for good is not pulled");
+        Put<float>(seat,0x2E0,0.0f);Put<int>(weapons[1][2],kWeaponAmmo,3000);Put<int>(weapons[1][2],kWeaponReloadTime,600);
+        // An NPC crew (2026-10-11: 「ap弹和机枪不冲突吧，两个都用不就好了」): the coax is never the one weapon chosen; it
+        // fires alongside the main gun whenever the gun is laid on the target close enough, a friend not in the line.
+        riders[1][edf::kHumanPlayer]=0;trackedHuman=nullptr;
+        PayloadFire fire=PayloadFire::other;
+        check(NpcPayloadSelect(v,0,80,false,&fire)==weapons[1][0],"an NPC crew keeps its main gun on a close target");
+        alignas(16) unsigned char enemy[0x400]{};
+        float* where=reinterpret_cast<float*>(enemy+kPosition);where[0]=0;where[1]=-0.5f;where[2]=80;
+        weapons[1][0][kWeaponTrigger]=weapons[1][2][kWeaponTrigger]=0;
+        Put<int>(weapons[1][2],kWeaponAmmo,2999);
+        check(NpcCoaxFire(v,0,enemy,&FriendInLine) && weapons[1][2][kWeaponTrigger]==1,"the coax fires alongside it, laid on the target");
+        check(is(weapons[1][2],kCoaxBall),"an NPC's coax belt too: 2999 left, a ball round");
+        Put<int>(weapons[1][2],kWeaponAmmo,3000);
+        PullHook(holders[1][0]);
+        check(weapons[1][0][kWeaponTrigger]==1,"and the main gun's own pull still lands on the main gun");
+        weapons[1][2][kWeaponTrigger]=0;where[0]=30;
+        check(!NpcCoaxFire(v,0,enemy,&FriendInLine) && !weapons[1][2][kWeaponTrigger],"not laid on it (20 degrees off): no coax burst");
+        where[0]=0;where[2]=850;weapons[1][2][kWeaponTrigger]=0;
+        check(NpcCoaxFire(v,0,enemy,&FriendInLine) && weapons[1][2][kWeaponTrigger]==1,"850 m: inside a 7.62 mm coax's reach, it fires");
+        where[2]=950;check(!NpcCoaxFire(v,0,enemy,&FriendInLine),"beyond 900 m (its tracer burns out): the coax holds");
+        where[2]=80;friendInLine=true;check(!NpcCoaxFire(v,0,enemy,&FriendInLine),"a friend in the line: the coax holds");friendInLine=false;
+        check(!NpcCoaxFire(v,0,nullptr),"no target, no burst");
+        Put<void*>(v,0,image+kVt403);
+    }
+    // 2026-10-12 「同轴机枪开火的时候主炮会伸缩」: the 505's and the 601's slot 48 play the main gun's firing motion for
+    // whichever holder fired. Chained, a coax holder runs only the VehicleBase part; every other holder the class's own.
+    {
+        DWORD old=0;
+        check(VirtualProtect(image,0x2200000,PAGE_EXECUTE_READWRITE,&old)!=0,"stand-in image executable");
+        JumpAt(kVehicleFired,reinterpret_cast<const void*>(&VehicleFired));
+        for(const auto& c:kMotionClasses) {
+            reinterpret_cast<void**>(image+c.vtable)[kSlotFired]=image+c.fired;
+            JumpAt(c.fired,reinterpret_cast<const void*>(&StockFired));
+            CallAt(c.fired+kFiredVehicleCallAt,kVehicleFired);
+            CallAt(c.motionCall,kPlayMotion);
+        }
+        CallAt(kMotionClasses[1].motionCall,kPlayMotion+0x10);   // the 601's motion call not the one read
+        check(InstallCoaxMotion()==1 && reinterpret_cast<void**>(image+kMotionClasses[1].vtable)[kSlotFired]==image+kMotionClasses[1].fired,
+              "an unread class keeps its stock slot 48");
+        alignas(16) static unsigned char gun[0x1600]{},coax[0x1600]{},mainHolder[0x80]{},coaxHolder[0x80]{},emptyHolder[0x80]{},veh[0x100]{};
+        coax[0x101]=5;                      // StoreRole::coax
+        Put<void*>(mainHolder,kHolderWeapon,gun);Put<void*>(coaxHolder,kHolderWeapon,coax);
+        const auto fire=[&](unsigned char* holder){
+            reinterpret_cast<FiredFn>(reinterpret_cast<void**>(image+kMotionClasses[0].vtable)[kSlotFired])(veh,holder);
+        };
+        check(reinterpret_cast<void**>(image+kMotionClasses[0].vtable)[kSlotFired]!=image+kMotionClasses[0].fired,"the 505's slot 48 chained");
+        stockFiredRuns=vehicleFiredRuns=0;fire(coaxHolder);
+        check(stockFiredRuns==0 && vehicleFiredRuns==1,"a coax round: the VehicleBase part only, no main-gun motion");
+        stockFiredRuns=vehicleFiredRuns=0;fire(mainHolder);
+        check(stockFiredRuns==1 && vehicleFiredRuns==0,"a main-gun round: the class's own slot 48 (motion and hull push) as before");
+        stockFiredRuns=vehicleFiredRuns=0;fire(emptyHolder);
+        check(stockFiredRuns==1 && vehicleFiredRuns==0,"a holder with no weapon read: the class's own slot 48");
+        reinterpret_cast<void**>(image+kMotionClasses[0].vtable)[kSlotFired]=image+kMotionClasses[0].fired;
+        CallAt(kMotionClasses[1].motionCall,kPlayMotion);
+        check(InstallCoaxMotion()==2,"both classes chain on the EDF.dll read");
+        stockFiredRuns=vehicleFiredRuns=0;
+        reinterpret_cast<FiredFn>(reinterpret_cast<void**>(image+kMotionClasses[1].vtable)[kSlotFired])(veh,coaxHolder);
+        check(stockFiredRuns==0 && vehicleFiredRuns==1,"the 601's coax too");
+        VirtualProtect(image,0x2200000,old,&old);
+    }
     ResetPayload();check(!PayloadPicked(vehicles[0]),"mission reset clears choices");
     VirtualFree(image,0,MEM_RELEASE);std::printf("payload runtime: %d checks, %d failures\n",checks,fail);return fail ? 1 : 0;
 }

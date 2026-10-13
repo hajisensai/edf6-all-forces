@@ -35,6 +35,8 @@ struct CommandUnit { const void* v; const char* name; Command now; bool air; flo
     bool transport=false; // a squad paired with a transport (transport.cpp): it takes point orders aboard and WITHDRAW
     const void* vehicle=nullptr; // a riding squad's vehicle (its top's): a DISMOUNT / DISMOUNT ALL given to that vehicle is its
     bool carries=false;          // a vehicle unit with a riding squad that takes orders aboard (mapcmd.cpp List): it takes them
+    bool joinOnly=false;         // a script's squad the stock walk-up would have let in (VanillaRecruit=0, npcai.cpp
+                                 // NativeJoinable): not locked, but it takes FOLLOW / RECRUIT alone
 };
 bool CommandVehicleLive(const ObjRef& ref) noexcept;
 bool ReadCommandUnit(const ObjRef& ref,const char* name,const Command& cmd,bool air,CommandUnit* out) noexcept;
@@ -55,7 +57,7 @@ int SquadCommandUnits(CommandUnit* out,int most) noexcept;
 bool SquadCommand(const void* leader,const Command& c) noexcept;
 // npcpost.cpp: the NPC tanks keeping a post (guard moves it; release puts it back on the spawn point).
 int TankCommandUnits(CommandUnit* out,int most) noexcept;
-bool TankCommand(const void* v,const Command& c) noexcept;
+bool TankCommand(const void* v,const Command& c,const ObjRef& focus={}) noexcept;
 // The panel's row of a squad (hud.cpp MapCommands): its members alive, the seconds left of its dismissal's cooldown.
 struct SquadRow { const void* leader; char name[24]; char status[16]; int alive; int cooldown; Command now; bool locked;
     ObjRef identity{}; // game-thread snapshot; the draw passes this unchanged, never recaptures from leader

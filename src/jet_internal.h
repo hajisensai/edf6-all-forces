@@ -468,6 +468,7 @@ struct Jet {
     bool thrown=false;
     float reach=0.0f;
     int flares=4;               // flare pairs left (jet.cpp NpcFlares)
+    bool barrelsLogged=false;   // its guns' barrels against its nose logged (JetBarrelLog: once a jet, they do not move)
     ULONGLONG flareAt=0,flareLook=0;   // its last pair; its last look for a missile coming
     PrimerState primer;
     bool cmdMoving=false;       // reach a new map order before taking another target
@@ -649,6 +650,7 @@ bool WeaponsFree(const Jet& j) noexcept;
 void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float* lead,bool gunsOk,bool missileOk,const Arms& a,
           ULONGLONG ms) noexcept;
 void JetLog(const Jet& j,const unsigned char* v,const float* pos,const Arms& a,float speed,float clear,ULONGLONG ms) noexcept;
+bool JetBarrelLog(const unsigned char* v,const float* pos) noexcept;
 void ResetTargets() noexcept;
 
 // --- jet_carrier.cpp ---

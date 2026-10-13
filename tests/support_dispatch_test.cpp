@@ -18,7 +18,8 @@ bool InSession() noexcept {return testOnline;}
 bool OnlineHostOnly() noexcept {return true;}
 ULONGLONG GameMs() noexcept {return fixtureMs;}
 std::uint64_t GameFrame() noexcept {return fixtureMs;}
-void Log(const char*,...) noexcept {}
+int traceLines=0;   // "SUPPORT TRACE" lines (support_dispatch.cpp Trace)
+void Log(const char* f,...) noexcept {if(f && std::strncmp(f,"SUPPORT TRACE",13)==0)++traceLines;}
 unsigned char objects[32][0x3000]{},controls[32][32]{},seats[32][edf::kSeatStride*14]{};
 int made=0,deleted=0,boardRequests=0,activated=0,orders=0,followed=0,netRequests=0,releases=0,routeOrders=0;
 int held=0;bool transactionActive=false;
@@ -31,6 +32,10 @@ bool allReady=true,terrain=true,nativeFail=false;
 Sea terrainSea=Sea::land;float waterSurface=0;
 Sea SeaAt(float,float,float* out) noexcept {*out=waterSurface;return terrainSea;}
 #endif
+// The submarine carrier (catalog 16, airKeys "SUB"): surfaces through SubLaunch, never through a plan.
+int subLaunches=0;unsigned char subHull[16]{};
+unsigned char* SubLaunch(const float*,const float*) noexcept {++subLaunches;return subHull;}
+bool SupportSubCatalog(int id) noexcept {return id==16;}
 npc::navigation::Result routeResult=npc::navigation::Result::pending;
 ObjRef Make(bool vehicle=false) noexcept {
     const int slot=made++;auto* o=objects[slot];std::memset(o,0,sizeof(objects[slot]));
@@ -73,8 +78,9 @@ unsigned char* PrepareSupportAircraft(const SupportAircraft& spec,const float* m
 int delivered=0,deliveredSquads=0,paradrops=0,ferries=0,jetWithdrawals=0,heliLeaves=0;
 const void* deliveredTops[3]{};const void* deliveredHull=nullptr;
 bool transportReady=true,peersTransports=true,heliHull=false,driverAboard=true;
-bool TransportDeliver(const void* v,const void* const* tops,int n,const float*) noexcept {
-    ++delivered;deliveredSquads=n;deliveredHull=v;for(int i=0;i<n && i<3;++i)deliveredTops[i]=tops[i];return n>0;
+bool deliveredHere=false;
+bool TransportDeliver(const void* v,const void* const* tops,int n,const float*,bool here) noexcept {
+    ++delivered;deliveredHere=here;deliveredSquads=n;deliveredHull=v;for(int i=0;i<n && i<3;++i)deliveredTops[i]=tops[i];return n>0;
 }
 bool TransportParadrop(const void*,const float*) noexcept {++paradrops;return true;}
 float ferryHeading[3]{};
@@ -194,7 +200,10 @@ bool SubmitSupportRequest(int,const float*,wchar_t* note,std::size_t size,std::u
     if(configuredHooks.notice)configuredHooks.notice(++noticeRequest,support_net::RequestStatus::accepted);
     _snwprintf_s(note,size,_TRUNCATE,L"request queued");return true;
 }
-void SupportNetTick() noexcept {}
+int protocolTicks=0;
+void SupportNetTick() noexcept {++protocolTicks;}
+void SeeFrame(const void*) noexcept {}
+void PlayAreaTick() noexcept {}
 void ResetSupportNet() noexcept {creationSeen=false;}
 bool ValidateMissionCrewPlan(const SupportPlan&) noexcept {return false;}
 bool ApplyMissionCrewPlan(std::uint64_t,const SupportPlan&,bool) noexcept {return false;}
@@ -208,6 +217,18 @@ int NpcBoardCrew(unsigned char*,unsigned char* const*,int count) noexcept {++boa
 bool NpcPrepareVehicleRoutePost(unsigned char*,const float*,float) noexcept {return true;}
 #endif
 bool NpcReleaseVehicleCrew(unsigned char*) noexcept {++releases;return true;}
+// The stock get-off before a seated soldier is deleted (support_dispatch.cpp Unseat): the seat cleared, counted.
+int unseated=0;
+bool NpcMoveSeat(unsigned char* v,unsigned seat,int to) noexcept {
+    if(to>=0)return false;
+    ++unseated;
+    auto* h=At<unsigned char*>(SeatAt(v,seat),kSeatRider);
+    Put<const void*>(SeatAt(v,seat),kSeatRider,nullptr);
+    if(h)Put<void*>(h,kSoldierVehicle,nullptr);
+    return true;
+}
+int squadOrders=0;mapcmd::Command lastSquadOrder{};
+bool NpcSquadSetOrder(const void*,const mapcmd::Command& c,bool) noexcept {++squadOrders;lastSquadOrder=c;return true;}
 bool SquadCommand(const void*,const Command&) noexcept {++orders;return true;}
 bool NpcPrepareSquadRoute(unsigned char*,const float*,float) noexcept {++routeOrders;return true;}
 bool NpcFinishSquadRoute(unsigned char*,const float*) noexcept {return true;}
@@ -303,6 +324,19 @@ int main() {
     check(!made && offlinePending,"infantry waits for full ground route before creation");
     routeResult=npc::navigation::Result::moving;++fixtureMs;SupportDispatchTick();
     check(made==4 && followed==3 && routeOrders>0 && orders==0,"verified infantry entry creates real squad with three native followers and a short-route order");
+    // 2026-10-10 "我摇的人还没到目的地成棍木了": a walk-in whose route stays blocked held the squad's quiet movement where it stood.
+    // Past kStuckMs without way it is let go with the point as its own guard order (its AI walks / fights on).
+    {
+        auto& d=deployments[0];
+        routeResult=npc::navigation::Result::blocked;squadOrders=0;
+        fixtureMs+=16;SupportDispatchTick();fixtureMs+=kStuckMs/2;SupportDispatchTick();
+        check(!d.delivered && squadOrders==0,"a walk-in briefly without a route keeps its route");
+        fixtureMs+=kStuckMs;SupportDispatchTick();
+        check(d.infantry[0].released && d.delivered && squadOrders==1 && lastSquadOrder.order==mapcmd::Order::guard &&
+              lastSquadOrder.at[0]==d.plan.target[0] && lastSquadOrder.at[2]==d.plan.target[2],
+              "no way past kStuckMs: the squad let go to guard the point on its own");
+        routeResult=npc::navigation::Result::pending;
+    }
     ResetSupportDispatch();made=0;routeResult=npc::navigation::Result::pending;
     SupportCallAt(21,target,note,128);testOnline=true;SupportDispatchTick();
     check(!offlinePending && !made,"entering an online session cancels an uncommitted offline request");
@@ -346,7 +380,7 @@ int main() {
     SupportCallAt(0,target,note,128);const auto firstRequest=noticeRequest;
     check(configuredHooks.notice!=nullptr,"local request status callback is wired");
     Status(L"other peer planning");SupportCallStatus(note,128);
-    check(std::wcsstr(note,L"等待房主")!=nullptr,"accepted means waiting and is not overwritten by another peer's planner");
+    check(std::wcsstr(note,L"调度中")!=nullptr,"accepted means automatic dispatch and is not overwritten by another peer's planner");
     configuredHooks.notice(firstRequest,support_net::RequestStatus::refused);
     Status(L"other peer deployment active");SupportCallStatus(note,128);
     check(std::wcsstr(note,L"房主拒绝")!=nullptr,"local refusal is persistent despite unrelated host deployment progress");
@@ -354,9 +388,9 @@ int main() {
     check(std::wcsstr(note,L"房主拒绝")!=nullptr,"late active cannot reopen the same rejected request");
     SupportCallAt(0,target,note,128);const auto secondRequest=noticeRequest;
     configuredHooks.notice(firstRequest,support_net::RequestStatus::cancelled);SupportCallStatus(note,128);
-    check(std::wcsstr(note,L"等待房主")!=nullptr,"old cancellation cannot overwrite a newer local request");
+    check(std::wcsstr(note,L"调度中")!=nullptr,"old cancellation cannot overwrite a newer local request");
     configuredHooks.notice(secondRequest,support_net::RequestStatus::active);SupportCallStatus(note,128);
-    check(std::wcsstr(note,L"全员对象确认")!=nullptr,"active reports object confirmation rather than claiming arrival");
+    check(std::wcsstr(note,L"已出动")!=nullptr && !std::wcsstr(note,L"已到达"),"active reports deployment rather than claiming arrival");
     submitReady=false;check(!SupportCallAt(0,target,note,128),"pre-id transport refusal returns failure");
     SupportCallStatus(note,128);
     check(std::wcsstr(note,L"联机扩展尚未就绪")!=nullptr,"new pre-id refusal clears the previous active result");
@@ -391,6 +425,23 @@ int main() {
     waterSurface=0.2f;check(Foot(0,0,0,footY),"shallow wading matches the navigation allowance");
     terrainSea=Sea::unknown;check(!Foot(0,0,0,footY),"unknown water state is not treated as a safe entry");
     terrainSea=Sea::land;
+    // 2026-10-12 (test site #12: 「潜水母舰在水里也没法召唤」): since #88 the carrier went to the planner, which refused it
+    // (no aircraft). It surfaces where it is called over water, on no plan; over land it is refused; from the map online it
+    // is the call weapon's (replayed on every machine), so the map refuses it there.
+    {
+        const bool wasOnline=testOnline;const int requestsBefore=netRequests;
+        ResetSupportDispatch();testOnline=false;fixtureMs+=40000;subLaunches=0;made=0;
+        check(!SupportCallAt(16,target,note,128) && subLaunches==0 && std::wcsstr(note,L"没有水域")!=nullptr,
+              "submarine carrier over land: refused, nothing made");
+        terrainSea=Sea::water;
+        check(SupportCallAt(16,target,note,128) && subLaunches==1 && !offlinePending && made==0 && std::wcsstr(note,L"上浮")!=nullptr,
+              "submarine carrier over water: it surfaces at once, no plan, no planner objects");
+        check(SupportSubCallAt(target,nullptr,false,note,128) && subLaunches==2,"a radio replay on another machine surfaces its own copy");
+        testOnline=true;
+        check(!SupportCallAt(16,target,note,128) && subLaunches==2 && netRequests==requestsBefore,
+              "online the map refuses it (the call weapon brings it), no host request");
+        testOnline=wasOnline;terrainSea=Sea::land;
+    }
     // 2026-10-09: the host of a world with no other participant deploys locally (no EDF6Coop transport needed, no peer
     // to replicate to); any other online machine still requests through the host.
     ResetSupportDispatch();testOnline=true;soloHost=true;made=0;netRequests=0;registered=0;resourceCount=0;fixtureMs+=40000;
@@ -538,6 +589,12 @@ int main() {
     check(SupportWithdrawVehicle(objects[0]) && heliLeaves==1,"WITHDRAW: a support helicopter flies off");
     heliHull=false;
     check(!SupportWithdrawVehicle(objects[3]),"a soldier is no support vehicle");
+    // Left with the squad it delivered still seated (2026-10-11 review): the pilot deleted, the four put off, not deleted.
+    ResetSupportDispatch();made=deleted=unseated=0;fixtureMs+=40000;
+    SupportCallAt(29,target,note,128);SupportDispatchTick();
+    check(made==6 && delivered>0,"a squad's helicopter, its squad handed over");
+    aircraftLeft=true;fixtureMs+=1;SupportDispatchTick();aircraftLeft=false;
+    check(deleted==1 && unseated==4,"left with them aboard: its pilot deleted, the four delivered put off");
     // A crewed APC arrived (Broken Arrow, the user 2026-10-09: "卡车之类的运输载具改成断剑那种操作方式"): the soldiers in its
     // passenger seats a squad, handed to it as their transport; its driver stays at the wheel.
     ResetSupportDispatch();made=deleted=followed=delivered=0;fixtureMs+=40000;
@@ -554,13 +611,49 @@ int main() {
         SupportDispatchTick();fixtureMs+=16;SupportDispatchTick();
         check(d.delivered && delivered==1 && deliveredSquads==1 && deliveredTops[0]==first.obj && deliveredHull==apc.obj && followed==1,
               "arrived: its passengers one squad (the second following the first), handed to the APC; the driver not among them");
-        // WITHDRAW: back to its entry (here at once: nobody drives it), its own crew aboard deleted, then the hull.
-        driverAboard=false;deleted=0;
+        // WITHDRAW: back to its entry (here at once: nobody drives it), its own crew aboard deleted, then the hull. The
+        // squad it delivered, still seated (2026-10-11 review: one that left its trip while aboard), is put off, never
+        // deleted with it.
+        driverAboard=false;deleted=0;unseated=0;
         check(SupportWithdrawVehicle(apc.obj) && d.withdrawing,"WITHDRAW: a support APC goes back to its entry");
         fixtureMs+=16;SupportDispatchTick();
-        check(deleted==3,"out: its crew still aboard deleted (all three here)");
+        check(deleted==1 && unseated==2 && !Seated(v,first) && !Seated(v,second),
+              "out: its driver deleted, the two delivered soldiers still aboard put off (not deleted)");
         fixtureMs+=16;SupportDispatchTick();
-        check(deleted==4 && !d.withdrawing,"then the hull");
+        check(deleted==2 && !d.withdrawing,"then the hull");
+        driverAboard=true;routeResult=npc::navigation::Result::pending;
+    }
+    // 2026-10-10 "我摇的人还没到目的地成棍木了": a route that never comes (pending / blocked) held the APC and its passengers
+    // where they stood for good. Past kStuckMs making no way it delivers where it stands; each seated soldier deleted later
+    // is put out of its seat first (Unseat), so no freed rider is left in a seat.
+    ResetSupportDispatch();made=deleted=followed=delivered=unseated=0;deliveredHere=false;fixtureMs+=40000;
+    {
+        auto apc=Make(true),driver=Make(),first=Make(),second=Make();
+        auto& d=deployments[0];d.used=d.assigned=d.started=true;d.id=8;d.born=fixtureMs;
+        d.plan.catalogId=static_cast<unsigned>(GroundStart()+2);d.plan.count=4;
+        d.plan.units[0].resourceId=kVehicle+1;
+        for(unsigned i=1;i<4;++i){d.plan.units[i].resourceId=kSoldier;d.plan.units[i].role=1;}
+        d.objects[0]=apc;d.objects[1]=driver;d.objects[2]=first;d.objects[3]=second;
+        auto* v=static_cast<unsigned char*>(const_cast<void*>(apc.obj));
+        for(unsigned i=0;i<3;++i) {
+            Put<const void*>(SeatAt(v,i),kSeatRider,d.objects[i+1].obj);
+            Put<const void*>(static_cast<unsigned char*>(const_cast<void*>(d.objects[i+1].obj)),kSoldierVehicle,v);
+        }
+        routeResult=npc::navigation::Result::blocked;traceLines=0;
+        SupportDispatchTick();
+        check(traceLines==5,"the trace: a header and one line for each of its four units");
+        fixtureMs+=1000;SupportDispatchTick();
+        check(traceLines==5,"...rate-limited (not every frame)");
+        fixtureMs+=kStuckMs/2;SupportDispatchTick();
+        check(!d.delivered && !delivered && traceLines==10,"no way yet: it waits for its route (traced again)");
+        fixtureMs+=kStuckMs;SupportDispatchTick();
+        check(d.delivered && delivered==1 && deliveredHere && deliveredTops[0]==first.obj,
+              "making no way past kStuckMs: its passengers handed over to get off where it stands");
+        // WITHDRAW (as the delivery's end does): out at the entry, its seated driver put out of the seat before deletion.
+        driverAboard=false;deleted=0;
+        check(SupportWithdrawVehicle(apc.obj),"it goes back");
+        fixtureMs+=16;SupportDispatchTick();
+        check(unseated==3 && deleted==1,"each seated soldier out of its seat; only its driver deleted (the delivered two put off)");
         driverAboard=true;routeResult=npc::navigation::Result::pending;
     }
     // A composed load (the bar's composition panel; the user, 2026-10-09: "支援栏是断剑那种，先点载具，然后选里面的人"; a click
@@ -704,6 +797,114 @@ int main() {
               (deployments[0].plan.units[0].variant&kVariantApplied),"the strike jets are made from their all-bombs file");
         ResetSupportDispatch();
     }
+    {
+        // Stage 5 (docs/feature-2026-10-12-room-loadout-menu.md): every support unit's real crew wears SupportCrewColour_<KEY>
+        // (else SupportCrewColour) - the tank's / transport's / truck's driver and crew, every aircraft's pilot and gunners,
+        // the transports' and airdrops' pilots, the mission vehicles' support crews - each seat its own look variant.
+        wchar_t path[MAX_PATH];GetTempPathW(MAX_PATH,path);wcscat_s(path,L"edf6_crew_colour_test.ini");
+        FILE* out=nullptr;_wfopen_s(&out,path,L"wb");check(out!=nullptr,"crew colour ini written");
+        const char crewText[]="[VehicleCrew]\r\nSupportCrewColour=1E3A8A\r\nSupportCrewColour_TANK_CREWED=X:FFFFFF\r\n"
+                              "SupportCrewColour_SQUAD=123456\r\nSupportCrewColour_FIGHTER=bogus\r\nSupportCrewColour_MISSION=FFFFFF\r\n"
+                              "SupportCrewColour_HELI=X\r\nSupportPreset_TRANSPORT_CREWED=lance@C0272D*2\r\n";
+        std::fwrite(crewText,1,sizeof(crewText)-1,out);std::fclose(out);
+        LoadSupportConfig(path);DeleteFileW(path);
+        const auto& c=SupportCfg();
+        const int tankEntry=GroundStart(),apcEntry=GroundStart()+2;
+        check(c.crewDefault.set && c.crewDefault.look.primary==0x1E3A8A && c.crew[tankEntry].set && c.crew[tankEntry].look.secondary==0xFFFFFF &&
+              c.crewMission.set && c.MissionCrewLook().primary==0xFFFFFF && c.CrewLook(2).primary==0x1E3A8A && !c.CrewLook(10).On(),
+              "crew colours read: the default, a unit's own, the mission's, X over the default");
+        check(!c.crew[21].set && std::wcsstr(c.problems,L"SupportCrewColour_SQUAD") && std::wcsstr(c.problems,L"SupportCrewColour_FIGHTER") &&
+              c.CrewLook(6).primary==0x1E3A8A,"an infantry squad has no crew, a bad value is refused: both named, the default stands");
+        const std::wstring member=L"EDF6VC_NPC_RIFLE_1E3A8A_X.SGO",tankCrew=L"EDF6VC_NPC_RIFLE_X_FFFFFF.SGO",
+                           mission=L"EDF6VC_NPC_RIFLE_FFFFFF_X.SGO",missionLead=L"EDF6VC_NPC_RIFLE_L_FFFFFF_X.SGO",
+                           lance=L"EDF6VC_NPC_LANCE_L_C0272D_X.SGO",lance2=L"EDF6VC_NPC_LANCE_C0272D_X.SGO";
+        const std::wstring memberPath=L"app:/object/edf6vc_npc_rifle_1e3a8a_x.sgo";
+        variantFiles={member,tankCrew,mission,missionLead,lance,lance2};missingNoted.clear();
+        peersNew=true;peersApplyVariants=true;peersHaveFiles=true;testOnline=false;routeResult=npc::navigation::Result::moving;
+        // An aircraft (the strike jet): its pilot made aboard from the coloured file.
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
+        check(SupportCallAt(2,target,note,128),"a strike call queued");SupportDispatchTick();
+        const auto& air=deployments[0].plan;
+        check(air.count==2 && (air.units[1].variant&kVariantApplied) && Validate(air) && lastLooks[0]==memberPath,
+              "an aircraft's pilot: the default crew colour, made from its file");
+        check(!air.units[0].variant || (air.units[0].variant&kVariantVehicle),"the hull carries pylons or nothing, never a look");
+        // X for the helicopter's crew: stock even though the default is set.
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
+        SupportCallAt(10,target,note,128);SupportDispatchTick();
+        check(made>0 && !deployments[0].plan.units[1].variant && lastLooks[0].empty(),"SupportCrewColour_HELI=X: its crew stock");
+        // A transport (helicopter air assault, the call's own riders): its pilot coloured, the riders not (they are a squad).
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
+        check(SupportCallAt(29,target,note,128),"a helicopter assault queued");SupportDispatchTick();
+        const auto& tr=deployments[0].plan;
+        check(tr.count==6 && (tr.units[1].variant&kVariantApplied) && !tr.units[2].variant && lastLooks[0]==memberPath &&
+              lastLooks[1].empty() && Validate(tr),"a transport's pilot coloured, its riders the squad's own");
+        // An airdrop (offline only): its helicopter's pilot.
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
+        check(SupportCallAt(33,target,note,128),"a tank airdrop queued");SupportDispatchTick();
+        check(deployments[0].plan.count==2 && (deployments[0].plan.units[1].variant&kVariantApplied) && lastLooks[0]==memberPath,
+              "an airdrop's pilot coloured");
+        // A tank: its own crew colour on every crew seat (the driver and the call's own crew), the hull no look.
+        ResetSupportDispatch();SupportPlan plan{};
+        check(Plan(static_cast<std::uint32_t>(tankEntry),target,0,&plan)==support_net::PlanResult::ready && plan.count>=2,"a tank planned");
+        bool crewLooks=plan.units[0].resourceId==kVehicle && !plan.units[0].variant;
+        SupportLook look;
+        for(unsigned i=1;i<plan.count;++i)
+            crewLooks=crewLooks && (plan.units[i].variant&kVariantApplied) && LookOfVariant(plan.units[i].variant,&look) &&
+                      look.primary==kStockColour && look.secondary==0xFFFFFF;
+        check(crewLooks && Validate(plan),"the tank's crew: SupportCrewColour_TANK_CREWED on every seat (the plan once said 'its crew none')");
+        wchar_t made1[128];
+        check(SupportSoldierLookPath(plan.units[1].resourceId,plan.units[1].variant,true,made1,128)==made1 &&
+              !std::wcscmp(made1,L"app:/object/edf6vc_npc_rifle_x_ffffff.sgo"),"the crew seat is made from its file (the spawn path's own lookup)");
+        // A crewed APC with a composed load: its driver the crew colour, its passengers the preset's.
+        ResetSupportDispatch();plan={};
+        check(Plan(static_cast<std::uint32_t>(apcEntry),target,PackSupportLoadout(PresetLoadout(c.preset[apcEntry])),&plan)==
+              support_net::PlanResult::ready && plan.count==4,"a crewed APC with two lance passengers");
+        check(LookOfVariant(plan.units[1].variant,&look) && look.primary==0x1E3A8A && LookOfVariant(plan.units[2].variant,&look) &&
+              look.primary==0xC0272D && LookOfVariant(plan.units[3].variant,&look) && look.primary==0xC0272D,
+              "the driver wears the crew colour, the passengers their preset's");
+        // The file missing here: stock, listed, the status says so; the plan still ready (colours are cosmetic).
+        variantFiles.erase(tankCrew);missingNoted.clear();ResetSupportDispatch();plan={};
+        check(Plan(static_cast<std::uint32_t>(tankEntry),target,0,&plan)==support_net::PlanResult::ready &&
+              plan.units[1].variant && !(plan.units[1].variant&kVariantApplied) && !missingNoted.empty() && missingNoted.back()==tankCrew,
+              "a crew file not made yet: stock, wanted, on the pending list");
+        SupportCallStatus(note,128);
+        check(std::wcsstr(note,L"EDF6VC_NPC_RIFLE_X_FFFFFF.SGO")!=nullptr,"the status names the crew file not yet made");
+        variantFiles.insert(tankCrew);
+        // Online: applied only when every peer applies variants and has the file; a peer lacking it never refuses the plan.
+        testOnline=true;soloHost=false;
+        peersApplyVariants=false;ResetSupportDispatch();plan={};
+        Plan(static_cast<std::uint32_t>(tankEntry),target,0,&plan);
+        check(plan.units[1].variant && !(plan.units[1].variant&kVariantApplied),"an older peer in the room: the crew stock, what it wanted kept");
+        peersApplyVariants=true;peersHaveFiles=false;ResetSupportDispatch();plan={};
+        Plan(static_cast<std::uint32_t>(tankEntry),target,0,&plan);
+        check(plan.units[1].variant && !(plan.units[1].variant&kVariantApplied),"a peer without the crew file: stock");
+        peersHaveFiles=true;ResetSupportDispatch();plan={};
+        Plan(static_cast<std::uint32_t>(tankEntry),target,0,&plan);
+        check((plan.units[1].variant&kVariantApplied) && Validate(plan),"every peer has it: applied online");
+        variantFiles.erase(tankCrew);missingNoted.clear();
+        check(Validate(plan),"a peer missing the crew's file still accepts the plan (only pylons refuse)");
+        wchar_t lookPath[128];
+        check(!SupportSoldierLookPath(plan.units[1].resourceId,plan.units[1].variant,true,lookPath,128) && !missingNoted.empty() &&
+              missingNoted.back()==tankCrew,"...it makes that seat stock and lists the file");
+        variantFiles.insert(tankCrew);
+        SupportPlan garbage=plan;garbage.units[1].variant=kVariantApplied|kVariantVehicle|1;
+        check(!Validate(garbage),"pylons on a crew seat refuse the plan");
+        // The mission vehicles' support crews: SupportCrewColour_MISSION, a leader's _L file.
+        check((SupportCrewVariant(support_net::kMissionCrewCatalog,kSupportLeaderResource)&kVariantApplied) &&
+              SupportSoldierLookPath(kSupportLeaderResource,SupportCrewVariant(support_net::kMissionCrewCatalog,kSupportLeaderResource),
+                                     false,lookPath,128) && !std::wcscmp(lookPath,L"app:/object/edf6vc_npc_rifle_l_ffffff_x.sgo"),
+              "the mission crew's leader is made from its own _L file");
+        check(!SupportCrewVariant(21,kSupportRangerResource) && !SupportCrewVariant(2,kSupportVehicleResource),
+              "no crew colour for an infantry squad or a hull");
+        testOnline=false;ResetSupportDispatch();
+        // Nothing configured: exactly the plans of before (no variant on any crew seat).
+        LoadSupportConfig(L"Z:\\nonexistent\\edf6_none.ini");
+        ResetSupportDispatch();plan={};
+        Plan(static_cast<std::uint32_t>(tankEntry),target,0,&plan);
+        bool none=plan.count>=2;for(unsigned i=0;i<plan.count;++i)none=none && !plan.units[i].variant;
+        check(none,"no crew colour configured: no variant anywhere (the plan as it always was)");
+        ResetSupportDispatch();
+    }
     // ---- The sea rescue entry (2026-10-09, the user: 「给救援加一个支援目录项，走正规的呼叫支援流程」; 2026-10-10: no support
     // limits, a gunner, takeoff from the carrier, the requester's own) ----
     {
@@ -806,12 +1007,12 @@ int main() {
     const auto mapRequest=noticeRequest;
     check(SupportRescueAt(sea,note,128) && netRequests==2 && rescueRequest==noticeRequest && !offlinePending,"online: the rescue is a host request");
     configuredHooks.notice(mapRequest,support_net::RequestStatus::active);SupportCallStatus(note,128);
-    check(std::wcsstr(note,L"全员对象确认")!=nullptr && rescueFailed==0,"the map's earlier request still gets its own outcome");
+    check(std::wcsstr(note,L"已出动")!=nullptr && rescueFailed==0,"the map's earlier request still gets its own outcome");
     configuredHooks.notice(rescueRequest,support_net::RequestStatus::refused);
     configuredHooks.notice(noticeRequest,support_net::RequestStatus::timeout);
     check(rescueFailed==1,"the host's refusal reaches the rescue once");
     SupportCallStatus(note,128);
-    check(std::wcsstr(note,L"全员对象确认")!=nullptr,"and is not shown on the map's line");
+    check(std::wcsstr(note,L"已出动")!=nullptr,"and is not shown on the map's line");
     SupportCallAt(0,target,note,128);
     configuredHooks.notice(noticeRequest,support_net::RequestStatus::refused);
     check(rescueFailed==1,"a map call's refusal is no rescue failure");
@@ -848,6 +1049,17 @@ int main() {
            "a rescue meanwhile leaves the map's composed load as it was");}
     routeResult=npc::navigation::Result::moving;ResetSupportDispatch();
     }
+    ResetSupportDispatch();testOnline=true;config.enabled=true;
+    const int ticksBefore=protocolTicks;
+    unsigned char remoteActor[0x400]{};remoteActor[kHumanPlayer]=1;
+    ++fixtureMs;SupportActorFrame(remoteActor);
+    check(protocolTicks==ticksBefore+1,"remote actor without local input advances the support protocol");
+    SupportActorFrame(objects[0]);
+    check(protocolTicks==ticksBefore+1,"other actors in the same scene frame do not double-step support");
+    ++fixtureMs;SupportActorFrame(objects[0]);
+    check(protocolTicks==ticksBefore+2,"NPC-only update continues service progress next frame");
+    SupportActorFrame(nullptr);
+    check(protocolTicks==ticksBefore+2,"missing actor cannot create a service frame");
     std::printf("support_dispatch_test: %d checks passed\n",checks);
 }
 #endif

@@ -112,19 +112,20 @@ struct World {
     }
 };
 
-struct Sweep { float seeGround,lastDown,firstCharge; int charges; bool allDown; };
+struct Sweep { float seeGround,lastDown,firstCharge; int charges; bool allDown; float blast; };   // blast: emc.cpp NoteBlast's, < 0 none
 // The beam fired along the line for `beamSec` with EmcBreak `breakPerSec` (emc.cpp Beam: a scan a frame, the break charges
 // every 0.1 s on the scan's buildings, each a 12 m blast at the face + 2 m).
 Sweep Fire(World w,float beamSec,float breakPerSec) {
     const float from[3]={0.0f,0.0f,0.0f},dir[3]={1.0f,0.0f,0.0f};
     const float charge=breakPerSec*0.1f,radius=12.0f,into=2.0f;
-    Sweep r{-1.0f,-1.0f,-1.0f,0,false};
+    Sweep r{-1.0f,-1.0f,-1.0f,0,false,-1.0f};
     float breakLeft=0.0f;
     for(int f=0;f*kFrameSec<beamSec;++f) {
         w.now=f*kFrameSec;
         const Scan s=ScanLine(from,dir,kBeamRange,[&](const float* a,const float* b){return w.Ray(a[0],b[0],true);},
                               [&](const float* a,const float* b){return w.Ray(a[0],b[0],false);});
         if(r.seeGround<0.0f && s.ground && std::fabs(s.end-w.hill)<0.5f)r.seeGround=w.now;
+        if(BlastAt(s)>=0.0f)r.blast=BlastAt(s);
         breakLeft-=kFrameSec;
         if(breakLeft<=0.0f) {
             breakLeft+=0.1f;
@@ -173,10 +174,16 @@ void SweepChecks() {
         char line[200];
         std::snprintf(line,sizeof(line),"%s: every building down within %.1f s of a 2.5 s beam, the ground seen",c.name,c.wantDown);
         Check(r.allDown && r.lastDown<=c.wantDown && r.seeGround>=0.0f && r.seeGround<=2.5f,line);
+        Check(std::fabs(r.blast-c.w.hill)<0.5f,"the end blast on the ground the beam ends on");
     }
+    // 2026-10-11 22:28:43: 35 break charges fired through a block, the line beyond open to its reach: no blast. The blast
+    // goes on the last building it passed through (README), kept after the charges bring the block down.
+    const Sweep block=Fire(Row(5,100.0f,40.0f,20.0f,1500.0f,-1.0f),2.5f,20000.0f);
+    Check(block.allDown && std::fabs(block.blast-260.0f)<0.5f,
+          "through a block into open air: the blast on the last building (260 m), kept after the block is down");
     World open=Row(0,0.0f,0.0f,0.0f,0.0f,-1.0f);
     const Sweep none=Fire(open,2.5f,20000.0f);
-    Check(none.charges==0 && none.seeGround<0.0f,"open air to its reach: no charge, no ground (no blast at its end)");
+    Check(none.charges==0 && none.seeGround<0.0f && none.blast<0.0f,"open air to its reach: no charge, no ground, no blast");
 }
 
 // The beam turned at `rate` deg/s: its far end (kBeamRange) moves rate x range per second; a break charge every 0.1 s

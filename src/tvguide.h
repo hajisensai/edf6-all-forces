@@ -1,6 +1,8 @@
 // TV guidance for the Air Raider's Tempest cruise missiles (src/tvguide.cpp, docs/tvguide-re.md): the player's own
 // Tempest, once it is out, is flown from its nose; the camera rides it, the soldier stands still (the map's hold),
-// mouse / right stick steer it at its own stock turn, fire boosts it (for good), Esc / B hands it back to its laser.
+// mouse / right stick steer it at its own stock turn, fire boosts it (for good), the right button switches between the
+// missile's view and the player's (the round flies straight on meanwhile, the soldier free), Esc / B hand it back to its
+// laser.
 // Offline only: controls are not replicated. Online missiles retain their existing stock / PN laser guidance.
 #pragma once
 #include <cstdint>
@@ -12,6 +14,9 @@ struct TvInput {
     float dx,dy;       // the game's own mouse delta this frame (mouse units; 0 with none)
     float rx,ry;       // the right stick (-1..1, past its dead zone)
     bool fire,leave;   // left button / right trigger; Esc / B
+    // The right button (2026-10-10 feedback: "没办法切换回原本的视角"; then "要能来回切换电视和玩家视角"): each press switches
+    // between the missile's view and the player's. A press held from before the take (the laser's zoom) is none.
+    bool back;
 };
 // The TV's frame for the player `human` (game thread, the soldier pre-update, after the map's): true while it holds
 // the soldier (TV on, or draining a key that ended it). `mapOpen`: the map took the view (the TV ends).
@@ -24,6 +29,9 @@ bool TvHoldsKeys() noexcept;
 // the one the TV flies. Must run even with Enabled=0 to release a previously owned round safely inside its update.
 // True: round `b` is the TV's (the plugin's own guidance leaves it).
 bool TvSteer(unsigned char* b) noexcept;
+// MissileBullet01's update, after the stock step (missile.cpp): the TV's view from where the round is now (the stock
+// step moved it after TvSteer; a view placed before it was a frame behind and inside the missile's own model).
+void TvAfter(unsigned char* b) noexcept;
 // A new mission: the TV dropped.
 void ResetTv() noexcept;
 }  // namespace crew

@@ -22,6 +22,8 @@ MANIFEST = '.edf6vc_builds.json'
 RECIPES = 'asset_recipes.json'
 GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'chute', 'drill', 'emc', 'sidecar', 'bigmap', 'sazabi', 'proteus', 'optics')
 MODEL_INPUTS = {'artillery': 'twin_tank', 'drill': 'drill_tank', 'sazabi': 'sazabi'}
+# The groups whose models carry first-person cockpits (pylib/cockpits.py): the cockpits' asset folder is an input.
+COCKPIT_GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'drill', 'sidecar', 'sazabi', 'optics')
 
 
 def source_recipes(root: str) -> dict[str, str]:
@@ -80,6 +82,12 @@ def inputs(game: str, group: str) -> dict[str, Any]:
         import vehicle_optics
         result['loose_models'] = {spec.stem: sha256_file(str(Path(game, 'Mods', 'OBJECT', spec.stem+'.MRAB')))
                                   for spec in vehicle_optics.MODELS}
+    if group in COCKPIT_GROUPS:
+        import cockpits
+        folder = cockpits.asset_root() if cockpits.assets_present() else None
+        result['cockpits'] = None if folder is None else {
+            str(p.relative_to(folder)).replace('\\', '/'): sha256_file(str(p))
+            for p in sorted(Path(folder).rglob('*')) if p.is_file()}
     if group in MODEL_INPUTS:
         import obj_model
         folder = obj_model.model_dir(MODEL_INPUTS[group])

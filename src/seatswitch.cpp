@@ -21,8 +21,8 @@
 // pilot seat the stock RideAi seats an NPC pilot (ini SeatPilot; heli.cpp then flies it with the player aboard: it
 // fights round itself), as the gunship's gunner gets one (playerjet_crew.inc EnsurePilot); out of a ground vehicle's
 // with the stock driving AI an NPC driver (Pilot: the map can then send it off). The plugin's aircraft: only
-// the gunship's two seats, its stick taken only where it may be boarded (PlayerJetBoardable: on the ground, or come
-// down for the player); playerjet.cpp tells a move from getting out (no ejection). Offline unless SeatSwitchOnline.
+// the gunship's two seats, its stick taken on the ground and in the air alike (MayTake); playerjet.cpp tells a move from
+// getting out (no ejection). Offline unless SeatSwitchOnline.
 // The prompt (hud.cpp SeatLine): the seats and who holds them. With SeatList (the user, 2026-10-07: "能看到同载具席位
 // 情况", not only switch) the whole ride in a vehicle with more than one seat, SeatSwitch off or online too: reading the
 // seats moves nothing. The keys that move them (or the online lock) ride along only for kPromptMs after boarding and
@@ -204,11 +204,13 @@ void Pilot(unsigned char* v) noexcept {
         (heli ? "an NPC pilot seated" : "an NPC driver seated (the map's tanks)") : "the stock RideAi seated no one");
 }
 
-// Whether a move to `to` may be made now (see the top), the seat's holder `h`.
+// Whether a move to `to` may be made now (see the top), the seat's holder `h`. The gunship's stick is taken in the air
+// too: the player is aboard already, and the flight they take over starts at the speed it flies (playerjet.cpp Board:
+// SeedMeasured). It used to wait for PlayerJetBoardable (on the ground, low and slow), a walk-up rule: a player who went
+// to the gun in flight could not go back ("SEAT 1 TAKEN"; the user, 2026-10-12: "无法切回座位1，显示有人").
 bool MayTake(unsigned char* v,const unsigned char* human,unsigned to,SeatHolder h) noexcept {
     if(h!=SeatHolder::empty && h!=SeatHolder::npc)return false;
-    if(!ClassMay(SeatAt(v,to),human))return false;
-    return BodyOf(v)==PluginBody::none || to!=0 || PlayerJetBoardable(v);   // the gunship's stick: where it may be boarded
+    return ClassMay(SeatAt(v,to),human);
 }
 
 // The seat a press asks for, -1 none: `number` 0..8 a number key, -1 the next-seat key (seat_switch_logic.h: round every

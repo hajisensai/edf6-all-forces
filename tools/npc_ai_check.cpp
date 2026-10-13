@@ -285,29 +285,83 @@ void Targets() {
     int current=-1;
     auto aimOf=[&](int i){return aims[i];};
     auto isCurrent=[&](int i){return i==current;};
-    Check(PickTarget(3,aimOf,isCurrent,eye,anchor,500.0f,150.0f)==1,"the one in reach before the flyer out of it");
+    auto any=[](int){return true;};
+    Check(PickTarget(3,aimOf,isCurrent,any,eye,anchor,500.0f,150.0f)==1,"the one in reach before the flyer out of it");
     current=0;
-    Check(PickTarget(3,aimOf,isCurrent,eye,anchor,500.0f,150.0f)==1,"the flyer held out of reach let go for the one in it");
-    Check(PickTarget(1,aimOf,isCurrent,eye,anchor,500.0f,150.0f)==0,"only the flyer: it, out of reach");
-    Check(PickTarget(3,aimOf,isCurrent,eye,anchor,500.0f,0.0f)==1,"reach unknown: the nearest");
+    Check(PickTarget(3,aimOf,isCurrent,any,eye,anchor,500.0f,150.0f)==1,"the flyer held out of reach let go for the one in it");
+    Check(PickTarget(1,aimOf,isCurrent,any,eye,anchor,500.0f,150.0f)==0,"only the flyer: it, out of reach");
+    Check(PickTarget(3,aimOf,isCurrent,any,eye,anchor,500.0f,0.0f)==1,"reach unknown: the nearest");
     // Both out of reach: the nearer (the ground one at 400 m before the flyer at 900 m).
     current=-1;
     const float far[2][3]={{0.0f,900.0f,30.0f},{400.0f,2.0f,0.0f}};
     auto farOf=[&](int i){return far[i];};
-    Check(PickTarget(2,farOf,isCurrent,eye,anchor,500.0f,150.0f)==1,"none in reach: the nearest");
+    Check(PickTarget(2,farOf,isCurrent,any,eye,anchor,500.0f,150.0f)==1,"none in reach: the nearest");
     // Hysteresis among those in reach.
     const float pair[2][3]={{100.0f,0.0f,0.0f},{0.0f,0.0f,90.0f}};
     auto pairOf=[&](int i){return pair[i];};
     current=0;
-    Check(PickTarget(2,pairOf,isCurrent,eye,anchor,500.0f,150.0f)==0,"the current one kept over one 10 m nearer");
+    Check(PickTarget(2,pairOf,isCurrent,any,eye,anchor,500.0f,150.0f)==0,"the current one kept over one 10 m nearer");
     current=-1;
-    Check(PickTarget(2,pairOf,isCurrent,eye,anchor,500.0f,150.0f)==1,"no current: the nearer");
-    Check(PickTarget(2,pairOf,isCurrent,eye,anchor,50.0f,150.0f)==-1,"out of its scope: none");
+    Check(PickTarget(2,pairOf,isCurrent,any,eye,anchor,500.0f,150.0f)==1,"no current: the nearer");
+    Check(PickTarget(2,pairOf,isCurrent,any,eye,anchor,50.0f,150.0f)==-1,"out of its scope: none");
+    // Fire wasted on one (wasted_fire.h: the shut teleportation ship, hits that hurt nothing): passed over, even held.
+    current=1;
+    auto notOne=[](int i){return i!=1;};
+    Check(PickTarget(3,aimOf,isCurrent,notOne,eye,anchor,500.0f,150.0f)==2,"the one its fire is wasted on passed over, held or not");
+    auto none=[](int){return false;};
+    Check(PickTarget(3,aimOf,isCurrent,none,eye,anchor,500.0f,150.0f)==-1,"fire wasted on all: no target");
     Check(TargetScore(151.0f,150.0f,true)>TargetScore(149.0f,150.0f,false) &&
           TargetScore(140.0f,150.0f,false)<TargetScore(160.0f,150.0f,true),"reach outranks the keep");
 }
 
+// The boarding walk's stop (BoardStop): standing anywhere within it on the floor under the riding point (and up to the
+// walk's 0.05 m of height slack) is inside the trigger sphere, for every drop the floor ray can give; the old fixed
+// 0.5 m stop is not (the negative control: the case the user hit).
+void Boards() {
+    using namespace npc;
+    const float reaches[]={0.6f,1.2f,2.3f,4.0f};
+    for(float reach:reaches) {
+        for(int k=-10;k<=10;++k) {
+            const float drop=reach*0.1f*static_cast<float>(k);
+            const float stop=BoardStop(drop,reach);
+            const float up=std::fabs(drop)+kBoardFeet;
+            if(stop<=0.0f){Check(reach*reach-up*up<(kBoardStopLeast/kBoardShare)*(kBoardStopLeast/kBoardShare)*1.01f,
+                                 "no stand only at the sphere's rim or out of it",reach,drop);continue;}
+            const float worst=std::sqrt(stop*stop+up*up);
+            Check(worst<reach,"arrived anywhere in the stop: inside the trigger",reach,drop);
+            Check(stop<=kBoardStopMost,"never wider than the old stop",stop);
+        }
+    }
+    const float reach=1.0f,drop=0.9f;   // a riding point high over its floor (inside the old floor test: drop < reach)
+    Check(std::sqrt(0.5f*0.5f+drop*drop)>=reach,"negative control: the old 0.5 m stop can arrive outside the trigger");
+    const float stop=BoardStop(drop,reach);
+    Check(stop>=kBoardStopLeast && std::sqrt(stop*stop+(drop+kBoardFeet)*(drop+kBoardFeet))<reach,
+          "that floor: a narrower stop, every arrival inside",stop);
+    Check(BoardStop(1.2f,reach)==0.0f,"a floor out of the sphere: no stand");
+    Check(BoardStop(0.0f,reach)==kBoardStopMost,"a floor-level door keeps the 0.5 m stop");
+    Check(BoardStop(std::nanf(""),reach)==0.0f && BoardStop(0.0f,std::nanf(""))==0.0f,"not finite: no stand");
+    // Measured 2026-10-12 (report #12): 95 m to the Proteus's driver seat at ~2.3 m/s, about 41 s.
+    BoardWalk w{1e30f,0};
+    bool kept=true;
+    for(std::uint64_t ms=0;ms<=41000;ms+=100)kept=kept && BoardWalking(w,95.0f-2.3f*static_cast<float>(ms)*0.001f,ms,20000,1.0f);
+    Check(kept,"a soldier walking 95 m keeps its board order past 20 s",w.best);
+    BoardWalk stuck{1e30f,0};
+    bool held=true;
+    for(std::uint64_t ms=0;ms<=19000;ms+=100)held=held && BoardWalking(stuck,40.0f,ms,20000,1.0f);
+    Check(held && !BoardWalking(stuck,40.0f,20100,20000,1.0f),"one that does not get nearer drops it after the window");
+    BoardWalk back{1e30f,0};
+    BoardWalking(back,30.0f,0,20000,1.0f);
+    bool pulled=true;
+    for(std::uint64_t ms=100;ms<=20000;ms+=100)pulled=BoardWalking(back,30.0f+static_cast<float>(ms)*0.001f,ms,20000,1.0f);
+    Check(pulled && !BoardWalking(back,50.0f,20100,20000,1.0f),"one pulled away from its seat drops it after the window");
+    BoardWalk jitter{1e30f,0};
+    BoardWalking(jitter,20.0f,0,20000,1.0f);
+    for(std::uint64_t ms=100;ms<=20000;ms+=100)BoardWalking(jitter,20.0f-0.5f*static_cast<float>(ms%200==0),ms,20000,1.0f);
+    Check(!BoardWalking(jitter,19.5f,20100,20000,1.0f),"jitter under the step does not renew it");
+}
+
 int main() {
+    Boards();
     Intent();
     Lanes();
     Shots();
@@ -318,6 +372,7 @@ int main() {
     Marks();
     Posts();
     Targets();
+    Boards();
     std::printf("npc_ai_check: %d cases, %d failures\n",cases,failures);
     return failures ? 1 : 0;
 }

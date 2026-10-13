@@ -1,8 +1,10 @@
 // The test page: renders /api/state and posts reports (multipart, with an upload progress bar).
 'use strict';
 
-const STATUS = { todo: '待测', verify: '已修，待验证', pass: '通过', fail: '还有问题', closed: '关闭' };
+const STATUS = { todo: '待测', verify: '已修，待验证', pass: '通过', fail: '还有问题', done: '已完成', closed: '关闭' };
 const RESULT = { pass: '修好了', fail: '还有问题', new: '新问题', info: '补充信息' };
+// The developer's handling of a report (worker.js REPORT_STATUSES).
+const HANDLING = { open: '待处理', doing: '处理中', verify: '已修待确认', done: '已完成', closed: '不处理' };
 const $ = (id) => document.getElementById(id);
 let state = null;
 
@@ -30,10 +32,15 @@ function renderBuilds(builds) {
   $('version').value = b ? b.version + (b.commit_sha ? '+' + b.commit_sha.slice(0, 7) : '') : '';
 }
 
+function handling(r) {
+  const s = r.status || 'open';
+  return `<span class="badge h-${esc(s)}">${HANDLING[s] || esc(s)}</span>`;
+}
+
 function reportHtml(r) {
   const files = r.files.map((f) => `<a href="/file/${f.id}">${esc(f.name)}</a><span class="muted">${size(f.size)}</span>`).join(' ');
-  return `<div class="report">
-    <div class="row"><span class="badge r-${esc(r.result)}">${RESULT[r.result] || esc(r.result)}</span>
+  return `<div class="report" id="r${r.id}">
+    <div class="row"><span class="badge r-${esc(r.result)}">${RESULT[r.result] || esc(r.result)}</span>${handling(r)}
       <span class="muted">#${r.id} · ${esc(r.author)} · ${when(r.at)}${r.version ? ' · ' + esc(r.version) : ''}${r.source === 'exe' ? ' · 安装器回传' : ''}</span></div>
     ${r.note ? `<pre>${esc(r.note)}</pre>` : ''}
     ${files ? `<div class="files">${files}</div>` : ''}
@@ -58,6 +65,47 @@ function renderCases(cases, reports) {
   if (keep !== '') $('case').value = keep;
 }
 
+// One row per report: what the tester said and what became of it (the 处理状态 column). A developer changes the
+// status right in the table; everyone else reads it.
+function reportTable(reports, dev) {
+  if (!reports.length) return '';
+  const rows = reports.map((r) => {
+    const s = r.status || 'open';
+    const cell = dev
+      ? `<select class="small" data-report="${r.id}">${Object.entries(HANDLING).map(([k, v]) =>
+        `<option value="${k}"${k === s ? ' selected' : ''}>${v}</option>`).join('')}</select>`
+      : handling(r);
+    const note = (r.note || '').split('\n')[0];
+    return `<tr class="${s === 'done' || s === 'closed' ? 'finished' : ''}"><td><a href="#r${r.id}">#${r.id}</a></td>
+      <td><span class="badge r-${esc(r.result)}">${RESULT[r.result] || esc(r.result)}</span></td><td>${cell}</td>
+      <td class="noteCell">${esc(note.length > 60 ? note.slice(0, 60) + '…' : note) || '<span class="muted">（只有附件）</span>'}</td>
+      <td class="muted">${esc(r.author)}</td><td class="muted">${when(r.at)}</td><td>${r.reply ? '✓' : ''}</td></tr>`;
+  }).join('');
+  const done = reports.filter((r) => r.status === 'done').length;
+  return `<p class="muted">共 ${reports.length} 条，已完成 ${done} 条。</p>
+    <div class="scroll"><table class="builds reportsTable"><thead><tr><th>#</th><th>结果</th><th>处理状态</th><th>说明</th><th>谁</th><th>时间</th><th>回复</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
+
+async function setHandling(id, status, select) {
+  select.disabled = true;
+  try {
+    const res = await fetch('/api/report_status', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ report_id: id, status }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+    await load();
+  } catch (err) {
+    alert('没改成：' + err.message);
+    select.disabled = false;
+  }
+}
+
+$('reportTable').addEventListener('change', (e) => {
+  const sel = e.target.closest('select[data-report]');
+  if (sel) setHandling(Number(sel.dataset.report), sel.value, sel);
+});
+
 async function load() {
   const res = await fetch('/api/state', { cache: 'no-store' });
   if (res.status === 401) { location.href = '/login.html'; return; }
@@ -65,6 +113,7 @@ async function load() {
   $('me').textContent = state.me.user + (state.me.role === 'dev' ? '（开发者）' : '');
   renderBuilds(state.builds);
   renderCases(state.cases, state.reports);
+  $('reportTable').innerHTML = reportTable(state.reports, state.me.role === 'dev');
   $('reports').innerHTML = state.reports.length ? state.reports.map(reportHtml).join('') : '还没有反馈。';
 }
 

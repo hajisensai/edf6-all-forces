@@ -1,7 +1,9 @@
 """Builds the unzip-and-run release: release/EDF6VehicleCrew-<version>.zip holding
   EDF6VehicleCrew安装器.exe  (tools/installer.py frozen by PyInstaller; inside it every plugin of installer.PLUGINS,
                               EDF6VehicleCrew and EDF6AutoTurret, each its dll + ini, and the data builders,
-                              autoturret/tools/build.py among them)
+                              autoturret/tools/build.py among them; and the slim generator EDF6VehicleCrew.generator.exe,
+                              tools/loadout_generator.py frozen on its own (build_generator), which install copies into
+                              Mods/Plugins for the in-game loadout menu instead of the whole installer)
   说明.txt
   models/<name>/...           the user-supplied vehicle models (RELEASE_MODELS) found by pylib/obj_model.py model_dir()
                               ($EDF6VC_MODELS, models/ in the repository, the developer's folder); the installer reads
@@ -24,6 +26,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import zipfile
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
@@ -33,7 +36,14 @@ OUT = os.path.join(ROOT, 'release')
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import installer  # noqa: E402  (PLUGINS: what the exe ships and installs)
 WORK = os.path.join(ROOT, 'build', 'pyinstaller')
-RELEASE_MODELS = ('twin_tank', 'drill_tank', 'sazabi')   # pylib/artillery_model.py MODEL, drill_model / sazabi_model.MODEL_SUBDIR
+GENERATOR_NAME = os.path.splitext(installer.GENERATOR)[0]   # EDF6VehicleCrew.generator(.exe)
+# What the slim generator must not pull in: PyInstaller follows every import statement, function-level ones too, and
+# vcobjects / mdb import the jets' model builders (numpy, Pillow) in functions the generator never calls (measured: a
+# soldier, a tank, every jet body and every pylon store built from Root.cpk import only cpk, crilayla, dsgo, gamedir,
+# graft_pure, ledger, mdb, mdb_jet, modfiles, rootcpk, sgo, support_loadout, vcobjects).
+GENERATOR_EXCLUDES = ('numpy', 'PIL', 'tkinter', 'matplotlib', 'pandas', 'installer', 'testhub', 'procmesh', 'jet_models',
+                      'aircraft_collision', 'support_config', 'gamelease', 'urllib3', 'requests')
+RELEASE_MODELS = ('twin_tank', 'drill_tank', 'sazabi', 'cockpits')   # pylib/artillery_model.py MODEL, drill_model / sazabi_model.MODEL_SUBDIR, cockpits.ASSET_DIR
 
 README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
 
@@ -126,7 +136,28 @@ def check_bundled() -> None:
                          f'it at run time (python -m pip install {" ".join(missing)})')
 
 
-def build_exe(name: str) -> str:
+def generator_cmd() -> list[str]:
+    """The PyInstaller command of the slim generator (tools/loadout_generator.py alone, onefile, console: the plugin starts
+    it with CREATE_NO_WINDOW)."""
+    cmd = [sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onefile', '--console',
+           '--name', GENERATOR_NAME, '--distpath', os.path.join(WORK, 'gen-dist'),
+           '--workpath', os.path.join(WORK, 'gen-work'), '--specpath', WORK]
+    for p in (os.path.join(ROOT, 'tools'), os.path.join(ROOT, 'pylib')):
+        cmd += ['--paths', p]
+    for mod in GENERATOR_EXCLUDES:
+        cmd += ['--exclude-module', mod]
+    cmd.append(os.path.join(ROOT, 'tools', 'loadout_generator.py'))
+    return cmd
+
+
+def build_generator() -> str:
+    """The slim generator exe (installer.GENERATOR); its path."""
+    os.makedirs(WORK, exist_ok=True)
+    subprocess.run(generator_cmd(), check=True)
+    return os.path.join(WORK, 'gen-dist', installer.GENERATOR)
+
+
+def build_exe(name: str, generator: str | None = None) -> str:
     """name: the zip's name without .zip, bundled as plugin/build_info.json (the installer shows it, and its
     menu 3 compares it with the test site's newest build)."""
     check_bundled()
@@ -147,10 +178,10 @@ def build_exe(name: str) -> str:
               os.path.join(ROOT, 'autoturret', 'tools')):
         cmd += ['--paths', p]
     for mod in ('call_weapons', 'edf41_objects', 'edf41_maps', 'edf41_sounds', 'awe', 'map_legacy', 'rmpa_legacy', 'legacy_sgo', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'ragdoll_fit', 'make_chute', 'chute_model', 'obj_model', 'texfile', 'make_drill', 'drill_model', 'make_stock_stores', 'graft_pure', 'primer_fighter_model', 'calls', 'make_sidecar', 'sidecar_model',
-                'make_bigmap', 'bigmap', 'seams', 'fmb', 'hkcms', 'hktag', 'gen', 'rmpa', 'jet_models', 'jet_gear', 'weapons',
+                'make_bigmap', 'bigmap', 'seams', 'fmb', 'fmb_build', 'hkcms', 'hkcms_build', 'hktag', 'sk_map', 'sk_terrain', 'gen', 'rmpa', 'jet_models', 'jet_gear', 'weapons',
                 'testhub', 'make_emc', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
-                'cas_pose', 'aircraft_collision', 'support_config', 'support_loadout',
-                'make_sazabi', 'sazabi_model', 'sazabi_arms', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'legacy_assets', 'mdb_legacy', 'cas_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics',
+                'cas_pose', 'aircraft_collision', 'support_config', 'support_loadout', 'room_layout', 'menu_preview',
+                'make_sazabi', 'sazabi_model', 'sazabi_arms', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'legacy_assets', 'rabpool', 'mdb_legacy', 'cas_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics',
                 'gamelease', 'build'):   # every module installer.py imports in a function (selftest release_imports); build is
         # autoturret/tools/build.py (--paths above comes before site-packages, where pip's own `build` may be)
         cmd += ['--hidden-import', mod]
@@ -160,6 +191,8 @@ def build_exe(name: str) -> str:
         cmd += ['--add-data', f'{os.path.join(PLUGINS, name)}{seps}plugin']
     cmd += ['--add-data', f'{info}{seps}plugin']
     cmd += ['--add-data', f'{recipes}{seps}plugin']
+    if generator:   # beside the plugin files: installer.generator_source finds it there
+        cmd += ['--add-data', f'{generator}{seps}plugin']
     # the EDF5 campaign's titles and briefings (make_edf5_campaign.TEXT reads them from the bundle when frozen)
     cmd += ['--add-data', f'{os.path.join(ROOT, "edf5campaign", "missions.json")}{seps}edf5campaign']
     # and EDF5's own thumbnails of those missions (make_edf5_campaign.THUMBS, next to the text)
@@ -174,12 +207,20 @@ def build_exe(name: str) -> str:
     cmd += ['--add-data', f'{os.path.join(ROOT, "edf41port", "missions")}{seps}edf41port/missions']
     for name in ('missions.json', 'missions_thumbnails.rab'):
         cmd += ['--add-data', f'{os.path.join(ROOT, "edf41port", name)}{seps}edf41port']
-    for registry in ('edf5port/weapons.json', 'edf41port/weapons.json', 'edf5port/models.json'):   # REGISTRIES
+    for registry in ('edf5port/weapons.json', 'edf41port/weapons.json', 'edf5port/models.json',
+                     'edf41port/calls.json'):   # REGISTRIES
         folder = registry.split('/')[0]
         cmd += ['--add-data', f'{os.path.join(ROOT, *registry.split("/"))}{seps}{folder}']
     cmd.append(os.path.join(ROOT, 'tools', 'installer.py'))
     subprocess.run(cmd, check=True)
-    return os.path.join(WORK, 'dist', EXE_NAME + '.exe')
+    exe = os.path.join(WORK, 'dist', EXE_NAME + '.exe')
+    # A successful PyInstaller build does not prove that lazy runtime imports are
+    # present. Run the actual executable without a checkout or game in its cwd.
+    env = dict(os.environ)
+    env.pop('PYTHONPATH', None)
+    with tempfile.TemporaryDirectory(prefix='edf6vc-package-smoke-') as folder:
+        subprocess.run([exe, '--check-package'], cwd=folder, env=env, check=True, timeout=120)
+    return exe
 
 
 def release_models() -> list[tuple[str, str]]:
@@ -209,7 +250,9 @@ def main(argv: list[str]) -> int:
     for name in plugin_data():
         if not os.path.isfile(os.path.join(PLUGINS, name)):
             raise SystemExit(f'missing {name} in build/Mods/Plugins: run build.cmd first')
-    exe = build_exe(f'EDF6VehicleCrew-{version}{a.suffix}')
+    generator = build_generator()
+    print(f'generator {installer.GENERATOR}: {os.path.getsize(generator)} bytes')
+    exe = build_exe(f'EDF6VehicleCrew-{version}{a.suffix}', generator)
     os.makedirs(OUT, exist_ok=True)
     zpath = os.path.join(OUT, f'EDF6VehicleCrew-{version}{a.suffix}.zip')
     with zipfile.ZipFile(zpath, 'w', zipfile.ZIP_DEFLATED) as z:

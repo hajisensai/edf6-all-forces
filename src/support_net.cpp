@@ -103,8 +103,11 @@ std::uint64_t Nonce(void*) noexcept {
 bool Send(void*,std::uint32_t peer,const support_net::Message& message) noexcept {
     if(!running || !peer || peer>snapshot.peerCount || !api.send)return false;
     unsigned char bytes[support_net::kWireSize]{};
-    return support_net::Encode(message,bytes,sizeof(bytes)) &&
-        api.send(snapshot.generation,&peers[peer],bytes,static_cast<std::uint32_t>(sizeof(bytes)))!=0;
+    const bool encoded=support_net::Encode(message,bytes,sizeof(bytes));
+    const bool sent=encoded && api.send(snapshot.generation,&peers[peer],bytes,static_cast<std::uint32_t>(sizeof(bytes)))!=0;
+    if(!sent)Log("SUPPORT NET send failed: kind=%u peer=%u encoded=%d generation=%llu",
+        static_cast<unsigned>(message.kind),peer,encoded,static_cast<unsigned long long>(snapshot.generation));
+    return sent;
 }
 bool SendCommand(std::uint32_t peer,const void* bytes,std::size_t count) noexcept {
     return running && peer && peer<=snapshot.peerCount && bytes && count &&
@@ -155,6 +158,7 @@ bool Start(const EDF6CoopSnapshot& next,ULONGLONG now) noexcept {
     snapshot=next;running=true;
     commandHostPeer=hostPeer;
     session.Start(next.isHost!=0,next.peerCount,hostPeer,now);
+    Log("SUPPORT NET application started: host=%u peers=%u pending=%u",next.isHost,next.peerCount,session.PendingHandshakes());
     return true;
 }
 void Note(wchar_t* note,std::size_t size,const wchar_t* text) noexcept {
@@ -286,7 +290,12 @@ void SupportNetTick() noexcept {
             if(ReceiveQMarkNetwork(peer,sender.id,bytes,count,now))continue;   // before the support parser, as the commands
             if(ReceiveCommandNetwork(peer,sender.id,bytes,count,now))continue;
             support_net::Message message;
-            if(support_net::Decode(bytes,count,message))session.Receive(peer,message,now);
+            if(support_net::Decode(bytes,count,message)) {
+                const auto pending=session.PendingHandshakes();
+                session.Receive(peer,message,now);
+                if(session.PendingHandshakes()!=pending)Log("SUPPORT NET handshake: kind=%u peer=%u pending=%u ready=%d",
+                    static_cast<unsigned>(message.kind),peer,session.PendingHandshakes(),session.Ready());
+            } else Log("SUPPORT NET malformed application packet: peer=%u bytes=%u",peer,count);
         }
     }
     session.SetRescueCooldown(static_cast<std::uint64_t>(Cfg().seaRescueCooldownSec)*1000);   // the host's own setting decides
@@ -302,12 +311,17 @@ bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::s
         Note(note,size,L"联机参与者同步已暂停，现有支援保留；重新开始关卡后可再呼叫");return false;
     }
     if(catalogId<0 || !running || !session.Ready()) {
-        Note(note,size,L"联机支援尚未就绪：需全房同版全军出击与联机扩展，并完成关卡同步");return false;
+        Log("SUPPORT NET request refused: catalog=%d transport=%d pending=%u ready=%d state=%s",catalogId,running,
+            session.PendingHandshakes(),session.Ready(),transportState);
+        Note(note,size,running ? L"支援自动握手尚未完成：联机通道已连接，但部署协议未就绪" :
+            L"支援联机通道未就绪：当前参与者或认证直连尚未同步");return false;
     }
     if(!session.Submit(static_cast<std::uint32_t>(catalogId),target,GetTickCount64(),loadout)) {
+        Log("SUPPORT NET request not admitted: catalog=%d pending=%u",catalogId,session.PendingHandshakes());
         Note(note,size,L"支援请求未受理：已有部署、调用过快或本关支援额度已满");return false;
     }
-    Note(note,size,L"支援请求已排队，等待房主验证与全员确认");return true;
+    Log("SUPPORT NET request accepted: catalog=%d host=%u",catalogId,snapshot.isHost);
+    Note(note,size,L"支援调度中：规划入场路线并同步部署");return true;
 }
 void ReportSupportFailure(std::uint64_t transaction) noexcept {
     if(transaction) {

@@ -4,8 +4,9 @@ src/payload.cpp, src/stores.cpp, docs/stock-payload-re.md §4). The user, 2026-1
 应该有ap和he，甚至炮射导弹如应有的话）". What each stock vehicle should carry besides its own (LOADOUTS, by CATEGORIES; the
 inventory of every vehicle and why each gets what it gets: docs/feedback-2026-10-09-loadcamp.md):
 
-  main battle tanks (Blacker 505, Varius 601)      APFSDS and HE rounds and a gun-launched LAHAT, from the main gun
-  the Grape 401 (an infantry fighting vehicle)     AP and HE autocannon belts and AGM-114s, from its cannon
+  main battle tanks (Blacker 505, Varius 601)      the round the stock gun is not (APFSDS beside a howitzer, HE beside
+                                                   a smooth-bore) and a gun-launched LAHAT, from the main gun
+  the Grape 401 (an infantry fighting vehicle)     the belt its stock cannon is not (AP or HE) and AGM-114s
   Epsilon railgun 403                              AGM-114s from the railgun (a railgun fires slugs only: no HE round;
                                                    its two gunners keep their machine guns)
   Titan 404                                        AGM-114s on the driver's second control, beside the front gatling
@@ -17,7 +18,11 @@ inventory of every vehicle and why each gets what it gets: docs/feedback-2026-10
 The stores are pylib/vcobjects.py STORES: the jets' missiles and rockets (the files tools/make_jets.py writes, recorded
 here as needed) and the rounds no jet carries (the gun rounds, vcobjects.Shell: the stock vehicle round of that kind
 and tier renamed; the LAHAT), which this tool writes itself (Mods/WEAPON/EDF6VC_<KIND>_<rounds>.SGO).
-The old invented coaxial gun is removed: these models have no independent machine-gun mount.
+The 2026-10-07 coaxial gun (EDF6VC_COAX_MG.SGO, retired: the 403 gunner's AimRecoil on a 505 crashed, and it fired
+from the main gun's own muzzle) stays retired. Since 2026-10-11 the tanks and the Grape carry a real one (COAX:
+EDF6VC_MG<tank>_<belt>.SGO, vcobjects.COAX_MOUNTS: the M240C / Type 74, its barrel and flash hider out of a port on
+the mantlet, EDF6VC_COAX_GUN<tank>.RAB): its own holder on the mantlet's elevating bone, its muzzle on the flash
+hider, a zero BodyRecoil pair, fired by the secondary trigger (src/payload.cpp), never cycled by the switch.
 The original 403/Titan machine guns stay on their existing stock mounts. Each hangs on the bone and seat of the stock holder it fires beside (Mount.like): the switch
 (PlayerJetSwitchKey R, pad LB) goes round that holder's control's stock weapon and the stores, and that control fires
 the one picked (src/payload.cpp). Into <game>/Mods:
@@ -52,6 +57,7 @@ from pathlib import Path
 import re
 import sys
 from dataclasses import dataclass
+from typing import Callable
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
@@ -69,13 +75,38 @@ COAX_MG = 'EDF6VC_COAX_MG.SGO'
 @dataclass(frozen=True)
 class Mount:
     """A store on a stock vehicle: its weapon file (Mods/WEAPON, an EDF6VC_ one) and the stock holder it hangs beside
-    (its bone and seat: it fires from that muzzle, on that holder's control)."""
+    (its bone and seat: it fires from that muzzle, on that holder's control). `other`: a gun round's counterpart, carried
+    instead when the stock weapon beside is already a round of `weapon`'s kind (pick): one holder, one of the pair.
+    The user, 2026-10-10: 「这个he和原本的弹药重复了吧」: most stock tank guns are howitzers, already HE."""
     weapon: str
     like: int
+    other: str | None = None
+    # The bone its holder hangs on when not the stock holder's (a coaxial gun: the mantlet's elevating bone, so it lays
+    # with the gun but does not travel back with the main gun's recoil). None: `like`'s bone.
+    bone: str | None = None
+
+    def options(self) -> tuple[str, ...]:
+        return (self.weapon,) if self.other is None else (self.weapon, self.other)
+
+    def row(self, rows: list) -> list:
+        """Its holder row (vehicle_weapon_setting: [bone, seat]): a copy of `like`'s, its bone `bone` when set."""
+        got = copy.deepcopy(rows[self.like])
+        if self.bone is not None:
+            if isinstance(got, dsgo.Node):
+                got.items[0] = self.bone
+            else:
+                got[0] = self.bone
+        return got
 
 
 def _store(kind: str, rounds: int, like: int) -> Mount:
     return Mount(vc.store_file(kind, rounds), like)
+
+
+def _rounds(ap: str, he: str, rounds: int, like: int) -> Mount:
+    """The gun round the stock gun beside is not: AP beside a bursting gun (and when it is not known), HE beside one
+    that does not burst."""
+    return Mount(vc.store_file(ap, rounds), like, vc.store_file(he, rounds))
 
 
 # Rockets and missiles are recoilless. Keep the BodyRecoil variant, even at zero
@@ -87,11 +118,26 @@ def _store(kind: str, rounds: int, like: int) -> Mount:
 # only, anything else is NO_RECOIL).
 NO_RECOIL = [0.0, 0.0]
 
-# What each kind of stock vehicle carries (a tank's 20 + 20 rounds beside its stock 25-30, an autocannon's belts beside
+# What each kind of stock vehicle carries (a tank's 20 rounds beside its stock 25-30, an autocannon's belt beside
 # its stock 240-800, the flak's beside its stock 1000-1500). The category names the setting it follows:
-# tests/test_stock_store_loadouts.py holds every vehicle of LOADOUTS to its category's kinds.
-_MBT = (_store('AP', 20, 0), _store('HE', 20, 0), _store('GLM', 4, 0))
-_IFV = (_store('AC_AP', 150, 0), _store('AC_HE', 150, 0), _store('AGM_L', 4, 0))
+# tests/test_stock_store_loadouts.py holds every vehicle of LOADOUTS to its category's kinds. A tank or the Grape
+# gets the one round its stock gun is not (_rounds): 22 of the 28 tank requests bring a howitzer (an HE gun already,
+# the HE store's template is one of them), 5 the A series' smooth-bore (AP), one the heat gun.
+_MBT = (_rounds('AP', 'HE', 20, 0), _store('GLM', 4, 0))
+_IFV = (_rounds('AC_AP', 'AC_HE', 150, 0), _store('AGM_L', 4, 0))
+# The coaxial machine guns (the user, 2026-10-11: 「应该有同轴机枪的坦克增加同轴机枪」, 「这个坦克的同轴机枪做的什么玩意，
+# 找现实的模型来做」; vcobjects COAX_MOUNTS / STORES 'MG<tank>'): the real 7.62 mm coax of each class, its ready belt,
+# fired by the secondary trigger (src/payload.cpp). The holder hangs on the bone that elevates the mantlet:
+#   Blacker 505 (its five requests share the v505_tank skeleton): 'cannon' ('cannon_slide' under it is the barrel's
+#     recoil travel); Varius 601: 'cannon'; Grape 401: its 'Barrel' bone is the elevating cannon itself (no recoil bone).
+# The port on each mantlet and the gun's muzzle: vcobjects.COAX_MOUNTS.
+COAX: dict[str, Mount] = {
+    **{s: Mount(vc.store_file('MG505', vc.COAX_MOUNTS['505'].belt), 0, bone='cannon') for s in (
+        'V505_TANK', 'V505_TANK_EDF4', 'V505_TANK_EDF5', 'V505_TANK_EDF6BENEFITS', 'V505_TANK_MPACK2')},
+    'V601_TANK': Mount(vc.store_file('MG601', vc.COAX_MOUNTS['601'].belt), 0, bone='cannon'),
+    **{s: Mount(vc.store_file('MG401', vc.COAX_MOUNTS['401'].belt), 0)
+       for s in ('VEHICLE401_STRIKER', 'VEHICLE401_STRIKER_MPACK2')},
+}
 _FLAK = (_store('FLAK_HE', 500, 0), _store('AAM_S', 2, 0), _store('AAM_M', 4, 0))
 _LAUNCHER = (_store('AAM_M', 4, 0), _store('AGM', 2, 0), _store('RKT', 19, 0))
 _BIKE = (_store('RKT', 19, 0),)
@@ -111,12 +157,14 @@ _BY_CATEGORY: dict[str, tuple[Mount, ...]] = {
     'railgun': (_store('AGM_L', 4, 0),),
     'superheavy': (_store('AGM_L', 4, 3),),   # the driver's front gatling (holder 3): his second control
 }
-LOADOUTS: dict[str, tuple[Mount, ...]] = {stem: _BY_CATEGORY[c] for stem, c in CATEGORIES.items()}
+LOADOUTS: dict[str, tuple[Mount, ...]] = {stem: _BY_CATEGORY[c] + ((COAX[stem],) if stem in COAX else ())
+                                          for stem, c in CATEGORIES.items()}
 LOADOUTS['VEHICLE409_HELI'] = (_store('RKT', 19, 1), _store('AGM_L', 4, 1), _store('AAM_S', 2, 1))   # its missile: holder 1
 # What each category must carry (tests/test_stock_store_loadouts.py): store kinds, or roles ('role:<role>').
 REQUIRED: dict[str, tuple[str, ...]] = {
-    'mbt': ('AP', 'HE', 'GLM'),                          # AP, HE and the gun-launched missile
-    'ifv': ('AC_AP', 'AC_HE', 'role:ground'),            # the autocannon's two belts and an anti-tank missile
+    'mbt': ('AP', 'HE', 'GLM', 'role:coax'),             # AP or HE (whichever the stock gun is not), the gun-launched missile,
+                                                         # the coaxial machine gun
+    'ifv': ('AC_AP', 'AC_HE', 'role:ground', 'role:coax'),   # the autocannon's other belt, an anti-tank missile, the coax
     'flak': ('FLAK_HE', 'role:air'),                     # HE proximity rounds, surface-to-air missiles
     'launcher': ('role:air', 'role:ground', 'role:rocket'),
     'heli': ('role:rocket', 'role:ground', 'role:air'),
@@ -159,13 +207,55 @@ def _path(folder: str, name: str) -> str:
     return f'app:/{folder}/{name.lower()}'
 
 
-def store_paths(stem: str) -> list[str]:
-    return [_path('weapon', m.weapon) for m in LOADOUTS[stem]]
+# The kind of round ('ap' / 'he') a stock weapon fires, by its path in a weapon list; None: not known.
+RoundKind = Callable[[str], 'str | None']
+
+
+def no_round_kind(path: str) -> str | None:
+    return None
+
+
+def stock_round_kind(game: vc.Game) -> RoundKind:
+    """The kind of round the stock weapons of `game` fire: 'he' with a blast radius (AmmoExplosion), 'ap' without."""
+    seen: dict[str, str | None] = {}
+
+    def kind(path: str) -> str | None:
+        name = path.split('/')[-1].upper()
+        if name not in seen:
+            try:
+                d = dsgo.to_py(dsgo.parse(game.read('WEAPON', name)).root)
+                blast = d.get('AmmoExplosion')
+                seen[name] = None if not isinstance(blast, (int, float)) else 'he' if blast > 0 else 'ap'
+            except (KeyError, ValueError, OSError):
+                seen[name] = None
+        return seen[name]
+    return kind
+
+
+def _shell_kind(weapon: str) -> str | None:
+    got = vc.store_of(_path('weapon', weapon))
+    w = vc.STORES[got[0]].weapon if got else None
+    return w.kind if isinstance(w, vc.Shell) else None
+
+
+def _stock_path(entry: object) -> str | None:
+    if isinstance(entry, dsgo.Node):
+        entry = dsgo.to_py(entry)
+    return entry[0] if isinstance(entry, list) and entry and isinstance(entry[0], str) else None
+
+
+def pick(m: Mount, beside: object, kind_of: RoundKind) -> str:
+    """The weapon file mount `m` carries beside stock weapon list entry `beside`: its `other` when that stock weapon
+    already fires `weapon`'s kind of round."""
+    path = _stock_path(beside)
+    if m.other is not None and path is not None and kind_of(path) == _shell_kind(m.weapon):
+        return m.other
+    return m.weapon
 
 
 def store_files() -> list[str]:
     """Every store weapon the loadouts use."""
-    return sorted({m.weapon for load in LOADOUTS.values() for m in load if m.weapon != COAX_MG})
+    return sorted({w for load in LOADOUTS.values() for m in load for w in m.options() if w != COAX_MG})
 
 
 def jet_store_files() -> list[str]:
@@ -184,6 +274,12 @@ def is_shell(weapon: str) -> bool:
     return got is not None and isinstance(vc.STORES[got[0]].weapon, vc.Shell)
 
 
+def is_coax(weapon: str) -> bool:
+    """Whether store weapon file `weapon` is a coaxial machine gun (role 'coax': its own trigger, no hull recoil)."""
+    got = vc.store_of(_path('weapon', weapon))
+    return got is not None and vc.STORES[got[0]].role == 'coax'
+
+
 def _is_body_recoil(v: object) -> bool:
     return (isinstance(v, list) and len(v) == 2
             and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in v))
@@ -194,6 +290,8 @@ def _params(m: Mount, beside: object = None) -> list:
     pair of the stock weapon it fires beside (`beside`, as Python lists), NO_RECOIL when that is no such pair."""
     if m.weapon == COAX_MG:
         raise ValueError('旧同轴机枪没有独立模型挂点；不可重新挂到主炮口')
+    if is_coax(m.weapon):   # a rifle-calibre gun does not rock a tank: the zero BodyRecoil pair (never AimRecoil)
+        return copy.deepcopy(NO_RECOIL)
     if is_shell(m.weapon) and _is_body_recoil(beside):
         return [float(x) for x in beside]
     return copy.deepcopy(NO_RECOIL)
@@ -237,19 +335,20 @@ def _rows_of(m: dict, stem: str) -> list:
     return rows
 
 
-def _derived_sgo(data: bytes, stem: str) -> bytes:
+def _derived_sgo(data: bytes, stem: str, kind_of: RoundKind) -> bytes:
     version, m = sgo.read(data)
     rows = _rows_of(m, stem)
     stock = len(rows)
     own = [x for x in m.get('vehicle_setup', []) if _is_list(x) and len(x) == stock]
     for mount in LOADOUTS[stem]:
-        rows.append(copy.deepcopy(rows[mount.like]))
+        rows.append(mount.row(rows))
         for weapons in own[-1:]:
-            weapons.append([_path('weapon', mount.weapon), _params(mount, _entry_params(weapons[mount.like]))])
+            weapons.append([_path('weapon', pick(mount, weapons[mount.like], kind_of)),
+                            _params(mount, _entry_params(weapons[mount.like]))])
     return sgo.write(version, m)
 
 
-def _derived_dsgo(data: bytes, stem: str) -> bytes:
+def _derived_dsgo(data: bytes, stem: str, kind_of: RoundKind) -> bytes:
     doc = dsgo.parse(data)
     rows = doc.root.get('vehicle_weapon_setting')
     _rows_of({'vehicle_weapon_setting': list(rows.items)}, stem)
@@ -260,15 +359,29 @@ def _derived_dsgo(data: bytes, stem: str) -> bytes:
         setup = None
     own = [x for x in (setup.items if isinstance(setup, dsgo.Node) else []) if _node_is_list(x) and len(x.items) == stock]
     for mount in LOADOUTS[stem]:
-        rows.items.append(copy.deepcopy(rows.items[mount.like]))
+        rows.items.append(mount.row(rows.items))
         for weapons in own[-1:]:
-            weapons.items.append(dsgo.Node([_path('weapon', mount.weapon),
+            weapons.items.append(dsgo.Node([_path('weapon', pick(mount, weapons.items[mount.like], kind_of)),
                                             _node(_params(mount, _entry_params(weapons.items[mount.like])))]))
     return dsgo.write(doc)
 
 
 def _read_any(data: bytes) -> dict:
     return dsgo.to_py(dsgo.parse(data).root) if data[:4] == b'DSGO' else sgo.load(data=data)
+
+
+def model_bones(game: vc.Game, stem: str) -> set[str] | None:
+    """The bone names of `stem`'s model (animation_model[0], Root.cpk OBJECT); None when the model is not in Root.cpk
+    (a DLC tank's: the EDF4 / EDF5 Blackers share the v505_tank skeleton, animation_model[1])."""
+    import mdb
+    model = _read_any(game.read('OBJECT', stem + '.SGO')).get('animation_model')
+    try:
+        name = str(model[0][0]).split('/')[-1].upper()
+        arc = mdb.rab_read(game.read('OBJECT', name))
+    except (KeyError, IndexError, TypeError):
+        return None
+    md = mdb.mdb_read(next(f for f in arc.files if f.name.lower().endswith('.mdb')).data)
+    return {md.name_of(b.name) for b in md.bones}
 
 
 def vehicle_class(game: vc.Game, stem: str) -> str:
@@ -280,7 +393,12 @@ def derived_vehicle(game: vc.Game, stem: str) -> bytes:
     cls = vehicle_class(game, stem)
     if cls not in BUILT_CLASSES:
         raise ValueError(f'{stem}: 载具类 {cls} 的额外挂点插件不会造（src/stores.cpp kBuilds）')
-    made = _derived_dsgo(data, stem) if data[:4] == b'DSGO' else _derived_sgo(data, stem)
+    kind_of = stock_round_kind(game)
+    bones = model_bones(game, stem)
+    for mount in LOADOUTS[stem]:   # a holder on a bone the model lacks is skipped by the game, its weapon never built
+        if mount.bone is not None and bones is not None and mount.bone not in bones:
+            raise ValueError(f'{stem}: 模型没有挂点骨骼 {mount.bone}')
+    made = _derived_dsgo(data, stem, kind_of) if data[:4] == b'DSGO' else _derived_sgo(data, stem, kind_of)
     import make_optics
     return make_optics.redirect(made)[0]
 
@@ -332,9 +450,10 @@ def _request_list(entry: dsgo.Node, rows: int, where: str) -> dsgo.Node:
     return found[0]
 
 
-def request_sgo(data: bytes, name: str, rows: dict[str, int]) -> tuple[bytes, str] | None:
+def request_sgo(data: bytes, name: str, rows: dict[str, int],
+                kind_of: RoundKind = no_round_kind) -> tuple[bytes, str] | None:
     """The request with the stores (see the top) and its vehicle's stem; None: it brings no vehicle of LOADOUTS.
-    `rows`: each stem's stock holders (stock_rows)."""
+    `rows`: each stem's stock holders (stock_rows); `kind_of`: the round its stock weapons fire (pick)."""
     doc = dsgo.parse(data)
     found = _brought(doc)
     if found is None:
@@ -343,12 +462,13 @@ def request_sgo(data: bytes, name: str, rows: dict[str, int]) -> tuple[bytes, st
     weapons = _request_list(entry, rows[stem], name)
     old_vehicle = entry.items[2]
     entry.items[2] = _path('object', derived_name(stem))
+    carried = []
     for mount in LOADOUTS[stem]:
-        weapons.items.append(dsgo.Node([_path('weapon', mount.weapon),
-                                        _node(_params(mount, _entry_params(weapons.items[mount.like])))]))
+        carried.append(_path('weapon', pick(mount, weapons.items[mount.like], kind_of)))
+        weapons.items.append(dsgo.Node([carried[-1], _node(_params(mount, _entry_params(weapons.items[mount.like])))]))
     res = doc.root.get('resource')
     items = [entry.items[2] if isinstance(r, str) and r.lower() == old_vehicle.lower() else r for r in res.items]
-    res.items[:] = items + [p for p in store_paths(stem) if p not in items]
+    res.items[:] = items + [p for p in carried if p not in items]
     return dsgo.write(doc), stem
 
 
@@ -365,7 +485,7 @@ def check(files: dict[str, bytes], rows: dict[str, int]) -> None:
         got = _read_any(data)['vehicle_weapon_setting']
         assert len(got) == rows[stem] + len(LOADOUTS[stem]), (rel, len(got))
         for k, mount in enumerate(LOADOUTS[stem]):
-            assert got[rows[stem] + k] == got[mount.like], (rel, k)
+            assert got[rows[stem] + k] == mount.row(got), (rel, k)
         holders[rel.split('/')[-1].lower()] = len(got)
     own = {f'WEAPON/{f}'.upper() for f in own_store_files()}
     for rel, data in files.items():
@@ -374,7 +494,7 @@ def check(files: dict[str, bytes], rows: dict[str, int]) -> None:
             got = dsgo.to_py(dsgo.parse(data).root)
             assert got.get('AmmoCount') == float(rounds), (rel, got.get('AmmoCount'))
             continue
-        if not rel.startswith('WEAPON/') or rel.upper().endswith(COAX_MG):
+        if not rel.startswith('WEAPON/') or rel.upper().endswith(COAX_MG) or rel.upper().endswith('.RAB'):
             continue
         d = dsgo.to_py(dsgo.parse(data).root)
         entry = next(x for x in d['Ammo_CustomParameter'] if isinstance(x, list) and len(x) >= 4 and isinstance(x[2], str)
@@ -384,13 +504,14 @@ def check(files: dict[str, bytes], rows: dict[str, int]) -> None:
         weapons = next(x for x in entry[3] if _is_list(x))
         assert len(weapons) == rows[stem] + len(LOADOUTS[stem]), (rel, len(weapons))
         assert vehicle in holders or not holders, (rel, vehicle)
-        assert [w[0] for w in weapons[rows[stem]:]] == store_paths(stem), rel
+        carried = [w[0] for w in weapons[rows[stem]:]]
+        assert all(w in [_path('weapon', o) for o in m.options()] for m, w in zip(LOADOUTS[stem], carried)), rel
         for mount, w in zip(LOADOUTS[stem], weapons[rows[stem]:]):
             want = _params(mount, _entry_params(weapons[mount.like]))
             assert _is_body_recoil(w[1]) and w[1] == want, (rel, 'added stores require the BodyRecoil pair', w, want)
-        assert entry[2] in d['resource'] and all(p in d['resource'] for p in store_paths(stem)), rel
-    assert all(m.weapon.upper().startswith('EDF6VC_') for load in LOADOUTS.values() for m in load)
-    assert all(m.weapon != COAX_MG for load in LOADOUTS.values() for m in load), 'no independent coaxial-gun mount'
+        assert entry[2] in d['resource'] and all(p in d['resource'] for p in carried), rel
+    assert all(w.upper().startswith('EDF6VC_') for load in LOADOUTS.values() for m in load for w in m.options())
+    assert all(COAX_MG not in m.options() for load in LOADOUTS.values() for m in load), 'no independent coaxial-gun mount'
 
 
 def requests(game: vc.Game) -> list[str]:
@@ -418,10 +539,11 @@ def build(root: str, overlay: dict[str, bytes] | None = None
     skipped: list[str] = []
     stems: set[str] = set()
     rows = {stem: stock_rows(game, stem) for stem in LOADOUTS}
+    kind_of = stock_round_kind(game)
     for name in requests(game):
         rel = f'WEAPON/{name}'
         if rel.upper() in overlay:
-            made = request_sgo(overlay[rel.upper()], name, rows)
+            made = request_sgo(overlay[rel.upper()], name, rows, kind_of)
             if made is not None:
                 handed[rel], stem = made
                 stems.add(stem)
@@ -429,7 +551,7 @@ def build(root: str, overlay: dict[str, bytes] | None = None
         if os.path.isfile(led.disk(rel)) and OWNER not in led.owners(rel):
             skipped.append(rel)
             continue
-        made = request_sgo(game.read('WEAPON', name), name, rows)
+        made = request_sgo(game.read('WEAPON', name), name, rows, kind_of)
         if made is None:
             continue
         out[rel], stem = made
@@ -442,6 +564,13 @@ def build(root: str, overlay: dict[str, bytes] | None = None
             skipped.append(rel)
             continue
         out[rel] = vc.store_sgo(game, f)
+        shell = vc.STORES[vc.store_of(_path('weapon', f))[0]].weapon
+        if isinstance(shell, vc.Shell) and shell.model is not None and shell.muzzle is not None:   # the coax's own gun
+            model = f'WEAPON/{shell.model}'
+            if os.path.isfile(led.disk(model)) and OWNER not in led.owners(model):
+                skipped.append(model)
+            else:
+                out[model] = vc.coax_model(game, shell.model)
     check({**out, **handed}, rows)
     return out, skipped, handed
 

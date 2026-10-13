@@ -26,6 +26,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 sys.path.insert(0, HERE)
+import cockpits  # noqa: E402
 import ledger  # noqa: E402
 import sazabi_model as sz  # noqa: E402
 import sgo  # noqa: E402
@@ -53,7 +54,7 @@ def build(root: str) -> dict[str, bytes]:
                  **{f'WEAPON/{n}': d for n, d in vc.sazabi_weapons(game).items()},
                  **{f'OBJECT/{n}': d for n, d in vc.sazabi_rounds(game).items()}}
     check(files)
-    return files
+    return cockpits.graft_files(game, files)   # its seats' first-person cockpits (pylib/cockpits.py)
 
 
 def check(files: dict[str, bytes]) -> None:

@@ -39,6 +39,7 @@ from dataclasses import replace
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import ballistics  # noqa: E402
+import cockpits  # noqa: E402
 import dsgo  # noqa: E402
 import katyusha_model  # noqa: E402
 import ledger  # noqa: E402
@@ -267,7 +268,7 @@ def build(root: str) -> dict[str, bytes]:
     files = {f'OBJECT/{MODEL_FILE}': arc, f'OBJECT/{SGO_FILE}': vehicle_sgo(game),
              f'WEAPON/{vc.KATYUSHA_ROCKETS}': rockets_sgo(game)}
     check(files)
-    return files
+    return cockpits.graft_files(game, files)   # its seats' first-person cockpits (pylib/cockpits.py)
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:
