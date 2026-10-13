@@ -6087,6 +6087,123 @@ def edf41_objects_shipped() -> None:
 
 
 @test
+def edf41_anthill_voxel_body() -> None:
+    """4.1's ant nest under EDF6's AntHill (2026-10-13, M115 on the real game): the class builds a voxel-destruction
+    body from animation_model[3] and the first hit dereferences it unchecked (EDF+0x4EB8D7 loads this+0x848, 0x6CAF22
+    writes through it), so the shipped nest has the block: E517's grid and tuning around Anthill301.mdb's own extent,
+    no debris (E517's chunks are metal), the keys of E517's mech look left out, 4.1's own values kept. check_fracture
+    refuses the nest 4.1 shipped (no block), a box that is not one, tuning of the wrong length and a debris name the
+    archive lacks."""
+    import copy
+    import edf41_objects as eo
+    import make_edf41_objects as m
+    import mdb
+    import sgo
+    rel = 'OBJECT/ANTHILL301.SGO'
+    files = {rel: eo.read(rel), 'OBJECT/ANTHILL301.RAB': eo.read('OBJECT/ANTHILL301.RAB')}
+    top = sgo.load(data=files[rel])
+    assert top['xgs_scene_object_class'] == 'AntHill' and 'AntHill' in m.FRACTURE_CLASSES
+    m.check_fracture(top, files, rel)
+    block = top['animation_model'][3]
+    rab = mdb.rab_read(files['OBJECT/ANTHILL301.RAB'])
+    body = mdb.mdb_read(next(f for f in rab.files if f.name.lower() == 'anthill301.mdb').data)
+    box = [mdb.rigid_extent(body, ax) for ax in range(3)]
+    near = lambda a, b: all(abs(x - y) < 1e-5 for x, y in zip(a, b))   # stored as 4-byte floats, loaded to 6 places
+    assert near(block[1], [lo for lo, _ in box]) and near(block[2], [hi for _, hi in box]), 'the box is not the model\'s extent'
+    assert block[0] == [16, 16, 16] and len(block[3]) == m.FRACTURE_TUNING + 1 and block[3][-1] == [], block
+    # 4.1's own values stay; E517's mech look does not come over; the score adjust both stock nests carry does
+    assert top['game_object_durability'] == 1500.0 and top['game_object_kill_counter'] == 'NestKillCount'
+    assert top['game_object_destroy_score_adjust'] == 0.5
+    assert not {'ant_hill_material_type', 'lighting', 'material_animation'} & set(top), sorted(top)
+    # the refusals
+    def refuses(edit, why: str) -> None:
+        bad = copy.deepcopy(top)
+        edit(bad)
+        try:
+            m.check_fracture(bad, files, rel)
+        except ValueError:
+            return
+        raise AssertionError(f'check_fracture passed {why}')
+    refuses(lambda t: t['animation_model'].pop(3), 'a nest with no block (4.1\'s)')
+    refuses(lambda t: t['animation_model'].__setitem__(3, 5), 'a block that is not a list')
+    refuses(lambda t: t['animation_model'][3][1].__setitem__(0, 99.0), 'a box with min above max')
+    refuses(lambda t: t['animation_model'][3][0].__setitem__(0, 0), 'a grid of zero cells')
+    refuses(lambda t: t['animation_model'][3][3].pop(), 'tuning without its debris list')
+    refuses(lambda t: t['animation_model'][3][3][-1].append('nowhere.mdb'), 'a debris model the archive lacks')
+    # a block of three entries (E615_HORNETNEST_SMALL's form) is the class's own; other classes are not asked
+    short = copy.deepcopy(top)
+    short['animation_model'][3] = short['animation_model'][3][:3]
+    m.check_fracture(short, files, rel)
+    other = copy.deepcopy(top)
+    other['xgs_scene_object_class'] = 'GiantAnt'
+    other['animation_model'].pop(3)
+    m.check_fracture(other, files, rel)
+    # every shipped SGO of such a class passes
+    reg = eo.registry()
+    for obj in reg['objects']:
+        data = eo.read(obj['object'])
+        t = sgo.load(data=data)
+        if t.get('xgs_scene_object_class') in m.FRACTURE_CLASSES:
+            m.check_fracture(t, {r: eo.read(r) for r in obj['files']}, obj['object'])
+
+
+@test
+def edf41_class_keys() -> None:
+    """Every converted object has the top-level keys every stock EDF6 SGO of its class has (the classes read keys by
+    name and several dereference a miss unchecked: Hector's weak_point, the AlienTrailer's se_list at EDF+0x30A4D7,
+    M015 2026-10-13). make_edf41_objects.class_keys / fill_class_keys / check_class_keys: on stand-in stock data the
+    intersection is what all have, a missing key is filled from the nearest-durability stock SGO (only that key; the
+    object's own values stay) and then passes, an unfillable class is refused; on the shipped objects (EDF6 installed)
+    only the deferred AlienTrailers (CLASS_KEYS_DEFERRED) lack one."""
+    import make_edf41_objects as m
+    import sgo
+    import edf41_objects as eo
+
+    def make(**kw: object) -> bytes:
+        return sgo.write_depth_first(0x102, kw)
+
+    stock = {'Box': {'OBJECT/A.SGO': sgo.load(data=make(xgs_scene_object_class='Box', game_object_durability=100.0, se=[1], only_a=[2])),
+                     'OBJECT/B.SGO': sgo.load(data=make(xgs_scene_object_class='Box', game_object_durability=900.0, se=[7]))}}
+    blobs = {'OBJECT/A.SGO': make(xgs_scene_object_class='Box', game_object_durability=100.0, se=[1], only_a=[2]),
+             'OBJECT/B.SGO': make(xgs_scene_object_class='Box', game_object_durability=900.0, se=[7])}
+    assert m.class_keys(stock, 'Box') == {'xgs_scene_object_class', 'game_object_durability', 'se'}
+    assert m.class_keys(stock, 'Nothing') == set()
+    mine = make(xgs_scene_object_class='Box', game_object_durability=800.0, own=[5])
+    files = {'OBJECT/X.SGO': mine}
+    try:
+        m.check_class_keys(stock, 'OBJECT/X.SGO', mine)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('check_class_keys passed an object lacking a key every stock SGO has')
+    note = m.fill_class_keys(stock, blobs.__getitem__, 'OBJECT/X.SGO', files)
+    assert note == {'template': 'OBJECT/B.SGO', 'keys': ['se']}, note    # 800 is nearer 900 than 100
+    out = sgo.load(data=files['OBJECT/X.SGO'])
+    assert out['se'] == [7] and out['own'] == [5] and 'only_a' not in out, out
+    m.check_class_keys(stock, 'OBJECT/X.SGO', files['OBJECT/X.SGO'])
+    assert m.fill_class_keys(stock, blobs.__getitem__, 'OBJECT/X.SGO', files) is None
+    # the shipped objects
+    reg = eo.registry()
+    for o in reg['objects']:
+        if o['object'].endswith('.SGO'):
+            assert 'class_keys_from' not in o or o['class_keys_from']['keys'], o
+    if not _e5c_have_game():
+        return
+    import rootcpk
+    games = m.Games(rootcpk.DEFAULT_GAME, rootcpk.DEFAULT_GAME)
+    real = games.stock_by_class()
+    flagged = set()
+    for o in reg['objects']:
+        if o['object'].endswith('.SGO'):
+            try:
+                m.check_class_keys(real, o['object'], eo.read(o['object']))
+            except ValueError:
+                flagged.add(o['object'].split('/')[-1])
+    # what the check flags is what is deferred (the p4b branch fixes the AlienTrailers; drop the entries on merge)
+    assert flagged == set(m.CLASS_KEYS_DEFERRED), sorted(flagged ^ set(m.CLASS_KEYS_DEFERRED))
+
+
+@test
 def edf41_objects_install() -> None:
     """tools/edf41_objects.py on a stand-in game: install writes every object's files as the ledger owner edf41 and
     remove deletes them; a file of the same name another mod put in Mods is never written over, every object needing
