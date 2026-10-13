@@ -731,6 +731,11 @@ bool Ride(unsigned char* cam,unsigned char* h) noexcept {
     float eye[3];
     RideView ride{};
     if(!VehicleEye(h,eye,&ride))return false;
+    // Boarding ends the on-foot viewmodel. Refresh ownership before returning its batches:
+    // a weapon may have been removed since the last camera step. Do this before Ride drops
+    // the weapon lists, otherwise StillPlayers cannot return even a surviving weapon's batch.
+    Gather(h);
+    Rebatch(true);
     if(!st.riding || st.ride.vehicle!=ride.vehicle || st.ride.seat!=ride.seat)
         Log("FP in a vehicle: %s %p seat %d, eye at its cockpit (%.2f %.2f %.2f)",ride.name ? ride.name : "?",
             static_cast<void*>(ride.vehicle),ride.seat,eye[0],eye[1],eye[2]);
