@@ -281,26 +281,78 @@ RAYS = [(x, y, z) for x, y, z in ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), 
 def exposed(tris, points):  # noqa: ANN001, ANN201 - numpy in, a bool per point out
     """Which of `points` (model space) can be seen from outside the vehicle: a ray from the point along one of RAYS
     (the axes and the diagonals) meets no surface of the model. A point enclosed every way (inside the turret, behind
-    the gun's cradle, under the deck) is hidden from any outside viewer."""
+    the gun's cradle, under the deck) is hidden from any outside viewer.
+
+    Each ray is tested (Moller-Trumbore, as a ray meets a triangle) only against the triangles whose shadow on the
+    plane across the ray covers the point's cell of a grid on that plane (_escapes): the same answer as testing every
+    triangle, fast enough for a cockpit cut from a real model (tens of thousands of vertices)."""
     import numpy as np
     pts, back = np.unique(np.round(np.asarray(points, dtype=np.float64), 4), axis=0, return_inverse=True)
-    v0, e1, e2 = tris[:, 0], tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0]
-    exposed = np.zeros(len(pts), dtype=bool)   # noqa: F811 - the result, by unique point
+    tris = np.asarray(tris, dtype=np.float64).reshape(-1, 3, 3)
+    out = np.zeros(len(pts), dtype=bool)   # by unique point
     for d in RAYS:
-        d = np.array(d, dtype=np.float64)
-        pv = np.cross(d, e2)
-        det = np.einsum('ij,ij->i', e1, pv)
-        ok = np.abs(det) > 1e-12
-        inv = np.where(ok, 1.0 / np.where(ok, det, 1.0), 0.0)
-        for k in np.flatnonzero(~exposed):
-            s = pts[k] - v0
-            u = np.einsum('ij,ij->i', s, pv) * inv
-            q = np.cross(s, e1)
-            v = (q @ d) * inv
-            t = np.einsum('ij,ij->i', e2, q) * inv
-            if not (ok & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 1e-4)).any():
-                exposed[k] = True
-    return exposed[back.reshape(-1)]
+        rest = np.flatnonzero(~out)
+        if not len(rest):
+            break
+        out[rest[_escapes(tris, pts[rest], d)]] = True
+    return out[back.reshape(-1)]
+
+
+GRID_CELLS, GRID_CHUNK = 128, 4_000_000   # cells a side of exposed()'s grid; (point, triangle) pairs tested at once
+
+
+def _escapes(tris, pts, d):  # noqa: ANN001, ANN201 - numpy in, a bool per point out
+    """For each of `pts` (n, 3): its ray along `d` meets no triangle of `tris` (m, 3, 3) a little way off (t > 1e-4).
+    Only the triangles whose shadow's bounding box (on the plane across `d`, a little grown) covers the point's grid
+    cell are tested: a triangle the ray meets has the point's shadow in its own, so no hit is missed."""
+    import numpy as np
+    d = np.asarray(d, dtype=np.float64)
+    if not len(tris):
+        return np.ones(len(pts), dtype=bool)
+    a = np.cross(d, np.array([1.0, 0.0, 0.0]) if abs(d[0]) < 0.9 else np.array([0.0, 1.0, 0.0]))
+    a /= np.linalg.norm(a)
+    b = np.cross(d, a)
+    tu, tv, pu, pv = tris @ a, tris @ b, pts @ a, pts @ b
+    lo_u, lo_v = min(tu.min(), pu.min()), min(tv.min(), pv.min())
+    span = max(tu.max() - lo_u, tv.max() - lo_v, pu.max() - lo_u, pv.max() - lo_v, 1e-6)
+    h, eps, top = span / GRID_CELLS * (1 + 1e-9), 1e-7 * span + 1e-9, GRID_CELLS - 1
+
+    def cell(x, lo):  # noqa: ANN001, ANN202
+        return np.floor((x - lo) / h).astype(np.int64).clip(0, top)
+    u0, u1 = cell(tu.min(1) - eps, lo_u), cell(tu.max(1) + eps, lo_u)
+    v0, v1 = cell(tv.min(1) - eps, lo_v), cell(tv.max(1) + eps, lo_v)
+    nu = u1 - u0 + 1
+    count = nu * (v1 - v0 + 1)
+    k = np.arange(count.sum()) - np.repeat(np.cumsum(count) - count, count)
+    cells = (np.repeat(u0, count) + k % np.repeat(nu, count)) * GRID_CELLS + np.repeat(v0, count) + k // np.repeat(nu, count)
+    order = np.argsort(cells, kind='stable')
+    cells, tri_of = cells[order], np.repeat(np.arange(len(tris)), count)[order]
+    pc = cell(pu, lo_u) * GRID_CELLS + cell(pv, lo_v)
+    start = np.searchsorted(cells, pc, 'left')
+    n = np.searchsorted(cells, pc, 'right') - start
+    v0w, e1, e2 = tris[:, 0], tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0]
+    pvec = np.cross(d, e2)
+    det = np.einsum('ij,ij->i', e1, pvec)
+    ok = np.abs(det) > 1e-12
+    inv = np.where(ok, 1.0 / np.where(ok, det, 1.0), 0.0)
+    hit = np.zeros(len(pts), dtype=bool)
+    idx = np.flatnonzero(n)
+    ends = np.cumsum(n[idx])
+    first = 0
+    while first < len(idx):
+        last = max(first + 1, int(np.searchsorted(ends, ends[first] - n[idx[first]] + GRID_CHUNK, 'right')))
+        take = idx[first:last]
+        first = last
+        cnt = n[take]
+        pi = np.repeat(take, cnt)
+        ti = tri_of[np.repeat(start[take], cnt) + np.arange(cnt.sum()) - np.repeat(np.cumsum(cnt) - cnt, cnt)]
+        s = pts[pi] - v0w[ti]
+        u = np.einsum('ij,ij->i', s, pvec[ti]) * inv[ti]
+        q = np.cross(s, e1[ti])
+        v = (q @ d) * inv[ti]
+        t = np.einsum('ij,ij->i', e2[ti], q) * inv[ti]
+        hit[pi[ok[ti] & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 1e-4)]] = True
+    return ~hit
 
 
 SHRINK, SHRINK_ROUNDS = 0.9, 8

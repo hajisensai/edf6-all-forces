@@ -2,42 +2,46 @@
 function of the room round its eye, returning parts in the eye's frame laid out inside that room).
 
 The stock helicopters have no interior: seen from a seat, culled as the game culls, the fuselage vanishes and only a
-few frame strips, the rotor and the guns remain (tools/cabin_view.py). So a helicopter kit supplies the whole cabin:
-the windshield's frame round an open view ahead, the instrument panel under its glare shield, the seat, the cyclic,
-the collective, the pedals, the side consoles and the overhead panel, the tub's walls below the window sills and the
-bulkhead behind. The panel's screens (cockpits.Screen) are where the plugin draws the live read-outs.
+few frame strips, the rotor and the guns remain (tools/cabin_view.py). So a helicopter kit supplies the whole cabin,
+and the pilots' kits are real cockpits: 3D models of the real aircraft's crew station (Sketchfab, CC BY), cut down by
+tools/prep_cockpit_air.py to what the seated eye sees (no crew figures, no canopy glass: the view out is open) and
+stored in the eye's frame in <model dir>/cockpits/parts/<asset>/cockpit.glb with their textures (credits:
+<model dir>/cockpits/CREDITS_air.txt).
 
-A fuselage is round, the room (cockpits.clearance) is measured straight left, right, up and down from the eye: a box
-of that size would stick out of the hull at its corners. So the cabins here have a fuselage's section (Section): the
-full width only at the eye's height (the sills, the door), narrower at the floor and the roof, chamfered between, and
-a pilot's tub narrows toward the nose.
-
-    heli_gunship      an attack helicopter's cockpit (V506 / V602 / 409) after the AH-64D pilot's station: the
-                      photographed panel face (two MFDs: flight, weapons; the up-front display: status), its standby
-                      instruments and lower centre panel, the hood, side consoles, an armoured seat; a high sill; the
-                      helmet's display (IHADSS) as the 'hud' screen, no combiner glass in the view
-    heli_utility      a transport's cockpit (410) after the UH-60M's: the photographed four-MFD panel in two halves
-                      (status, flight, map, a spare), the centre console, the glare shield, the overhead console, a
-                      low sill (no centre windshield post: it would stand on the line of sight)
+    heli_gunship      an attack helicopter's cockpit (V506 / V602 / 409): an AH-64E's front station (its canopy
+                      frame, glare shield, the two MFDs, the TEDAC on its stalk, the up-front display, the side
+                      consoles, the floor and controls); the rear (pilot's) station would look through the front
+                      canopy's frame posts. Screens: the left MFD 'flight', the right 'weapons', the TEDAC 'map', the
+                      up-front display 'status'; the helmet's display (IHADSS) the 'hud', no combiner glass in the view
+    heli_utility      a transport's cockpit (410): a UH-60M's pilot station (the right seat): the four-MFD panel
+                      across the cockpit, the centre console, the overhead frame, the copilot's seat beside. Screens:
+                      the pilot's outer MFD 'flight', his inner one 'map', the copilot's inner one 'status'
     heli_door_left/_right  a door gunner in a transport's cabin at the left / right door, looking out of it (the
                       fit's yaw turns the eye to the door: 90 / -90): the door's frame, the cabin's walls round it,
                       the floor, the roof, the gunner's seat, the gun's control grips under the sight's 'weapons'
                       screen; the cockpit bulkhead with its passage toward the nose, the troop cabin's end toward the
                       tail, the opposite door open across the cabin. No stock helicopter has a crewed door gun (the
                       410's guns are remote pods on its stub wings: cockpit_kits.remote_display), so no stock fit uses
-                      them; they wait for a transport with real door gunners (its walls are still drawn, not photos)
+                      them; they wait for a transport with real door gunners
 
-The panels, consoles, hoods and seats are photographs of real cockpits on faces turned to the eye (the eye never moves
-inside the cockpit, so they read as the real thing): textures/air_uh60_*, air_ah64_*, air_seat.png, cut from public
-domain / CC BY photographs by tools/prep_cockpit_air.py (credits: <model dir>/cockpits/CREDITS_air.txt); the walls and
-the overhead panel are drawn (textures/air_tub, air_overhead: tools/make_cockpit_textures_air.py); the rest are the
-shared textures (tools/make_cockpit_textures.py). Only the remote gun pods' seats (410) use cockpit_kits.remote_display.
+A real cockpit is scaled about the eye to the room the vehicle has round it (cockpits.clearance): from the seat a
+scaled cockpit looks the same (every part keeps its direction from the eye), only nearer. The scale is the one that
+keeps it inside the room left, right, up and down; ahead and behind, what is past the room is left out (the nose
+beyond the glare shield, the seat's back). The screens (cockpits.Screen) sit on the model's displays, measured on it.
+
+The door gunners' walls are drawn (textures/air_tub: tools/make_cockpit_textures_air.py; the rest the shared
+textures, tools/make_cockpit_textures.py).
 """
 from __future__ import annotations
 
+import functools
 import math
+import os
 from dataclasses import dataclass
 
+import numpy as np
+
+import cockpits
 import obj_model as om
 from cockpit_room import TEX, Cabin, _room
 from cockpit_shapes import basis, box, cylinder, frame, merge, panel, quad
@@ -46,16 +50,6 @@ from cockpits import Kit, KitMaterial, Screen
 Vec3 = tuple[float, float, float]
 Vec2 = tuple[float, float]
 
-# The air panel texture's three screen bays (tools/make_cockpit_textures_air.py air_panel): each bay's centre u, their
-# centre v, and the screen's share of the panel's width and height.
-# The displays on the photographed panels (tools/prep_cockpit_air.py SCREENS, measured on the photographs): texture ->
-# display -> its (u0, v0, u1, v1) on the texture.
-PHOTO_SCREENS: dict[str, dict[str, tuple[float, float, float, float]]] = {
-    'air_uh60_panel_l': {'mfd1': (0.0542, 0.1358, 0.3735, 0.6173), 'mfd2': (0.4639, 0.0988, 0.7831, 0.5802)},
-    'air_uh60_panel_r': {'mfd3': (0.259, 0.1235, 0.5723, 0.6173), 'mfd4': (0.6627, 0.2099, 0.9518, 0.679)},
-    'air_ah64_panel': {'mfd_l': (0.0945, 0.3706, 0.4461, 0.8263), 'mfd_r': (0.5867, 0.3706, 0.9383, 0.8263),
-                       'eufd': (0.4662, 0.0289, 0.8037, 0.2141)},
-}
 TILE = 0.8   # m a wall texture's repeat covers
 
 
@@ -154,263 +148,114 @@ def _screen(parts: list[om.Part], screens: list[Screen], kind: str, centre: Vec3
     screens.append(Screen(kind, _add(c, f, 0.001), f, width, height))
 
 
-# ------------------------------------------------------------------------------------------------------- pilots
-def _photo_panel(parts: list[om.Part], screens: list[Screen], name: str, texture: str, centre: Vec3, width: float,
-                 height: float, kinds: dict[str, str]) -> None:
-    """A panel face with a photographed panel's texture (`width` x `height`, facing the eye from `centre`) and a
-    live read-out on each of its displays named in `kinds` (PHOTO_SCREENS[texture]: display -> screen kind)."""
-    facing = _unit((-centre[0], -centre[1], -centre[2]))
-    parts.append(panel(name, texture, centre, width, height, facing))
-    right, up, _ = basis(facing)
-    for display, kind in kinds.items():
-        u0, v0, u1, v1 = PHOTO_SCREENS[texture][display]
-        c = _add(_add(centre, right, ((u0 + u1) / 2 - 0.5) * width), up, (0.5 - (v0 + v1) / 2) * height)
-        _screen(parts, screens, kind, c, facing, (u1 - u0) * width, (v1 - v0) * height)
-
-
-def _hood(parts: list[om.Part], texture: str, mid: float, top: float, lip: float, width: float, depth: float) -> None:
-    """The glare shield over a panel whose top edge is at `top`: a hood from its lip at `lip` (toward the eye)
-    `depth` forward, narrowing toward the nose with the fuselage."""
-    y = top + 0.025
-    hw, hf = width / 2 + 0.02, 0.36 * width
-    corners = [(mid + hw, y, lip), (mid - hw, y, lip), (mid - hf, y, lip + depth), (mid + hf, y, lip + depth)]
-    parts.append(_stretched(wall('glare_shield', texture, corners, toward=(mid, 1.0, lip))))
-    parts.append(beam('glare_lip', 'rubber', (mid + hw, top + 0.012, lip), (mid - hw, top + 0.012, lip), 0.02, 0.025))
-
-
-def _stretched(part: om.Part) -> om.Part:
-    """A four-cornered wall with its texture stretched once over it (its first two corners along the top)."""
-    verts = [om.Vertex(v.pos, v.normal, uv) for v, uv in zip(part.verts, ((1.0, 0.0), (0.0, 0.0), (0.0, 1.0),
-                                                                         (1.0, 1.0)))]
-    return om.Part(part.name, part.material, verts, list(part.tris))
-
-
-def _ah64_panel(parts: list[om.Part], screens: list[Screen], mid: float, top: float, z: float, room_w: float,
-                floor: float) -> float:
-    """An AH-64D pilot's station (the photographed one, tools/prep_cockpit_air.py): the panel face with its two
-    MFDs (flight left, weapons right) under the up-front display's strip (status), the standby instruments on the
-    right, the lower centre panel under it down toward the floor (at `floor` there), the big hood over it all; plain
-    plates fill the panel's width to the walls. Returns the hood's lip z."""
-    w = min(0.44, room_w - 0.16)
-    yc = top - w / 2
-    _photo_panel(parts, screens, 'panel', 'air_ah64_panel', (mid, yc, z), w, w,
-                 {'mfd_l': 'flight', 'mfd_r': 'weapons', 'eufd': 'status'})
-    side = (room_w - w) / 2
-    if side > 0.03:
-        for sign, s in ((1, 'l'), (-1, 'r')):
-            x = mid + sign * (w / 2 + side / 2)
-            parts.append(panel(f'panel_wing_{s}', 'air_tub', (x, yc, z + 0.02), side, w, _unit((-x, -yc, -z)),
-                               uv=(0, 0, side / 0.4, w / 0.4)))
-        sw = min(0.17, side - 0.01)
-        if sw > 0.08:
-            x = mid - (w / 2 + sw / 2 + 0.005)
-            parts.append(panel('standby', 'air_ah64_standby', (x, yc - 0.06, z + 0.01), sw, sw / 2,
-                               _unit((-x, 0.06 - yc, -z))))
-    low = min(0.32, top - w - floor - 0.06)
-    if low > 0.08:
-        parts.append(panel('lower_centre', 'air_ah64_lower', (mid, top - w - 0.01 - low / 2, z + 0.06), low / 2, low,
-                           _unit((0.0, 0.35, -1.0))))
-    lip = z - 0.12
-    _hood(parts, 'air_uh60_hood', mid, top, lip, room_w - 0.02, 0.28)
-    return lip
-
-
-def _uh60_panel(parts: list[om.Part], screens: list[Screen], mid: float, top: float, z: float, room_w: float) -> float:
-    """A UH-60M's instrument panel (the photographed one): its two halves meeting in a shallow V before the eye,
-    four MFDs (status, flight, map; the fourth a spare), the centre console sloping down under it toward the
-    floor, the glare shield over it. Returns the glare shield's lip z."""
-    w = min(1.25, room_w - 0.04)
-    h = w / 2 / 2.05                       # the photographed halves' aspect
-    yc = top - h / 2
-    for sign, s, tex, kinds in ((1, 'l', 'air_uh60_panel_l', {'mfd1': 'status', 'mfd2': 'flight'}),
-                                (-1, 'r', 'air_uh60_panel_r', {'mfd3': 'map'})):
-        _photo_panel(parts, screens, f'panel_{s}', tex, (mid + sign * w / 4, yc, z - w / 4 * 0.18), w / 2, h, kinds)
-    pw = min(0.42, w * 0.4)
-    ya, za, yb, zb = top - h - 0.01, z, top - h - 0.45, z - 0.22
-    corners = [(mid + pw / 2, ya, za), (mid - pw / 2, ya, za), (mid - pw / 2, yb, zb), (mid + pw / 2, yb, zb)]
-    parts.append(_stretched(wall('pedestal', 'air_uh60_pedestal', corners, toward=(mid, 0.3, 0.0))))
-    lip = z - 0.13
-    _hood(parts, 'air_uh60_hood', mid, top, lip, w, 0.3)
-    return lip
-
-
-def _tub(parts: list[om.Part], sec: Section, back: float, front: float, roof_front: float, taper: float,
-         rise: float, drop: float) -> None:
-    """The cabin's shell: the floor, the side walls (a chamfer from the floor to the chine, then up to the sills),
-    the foot well's front wall at `front`, the rear bulkhead at -`back`, the roof back from `roof_front` (the
-    windshield is open ahead of it, the side windows above the sills; it slopes down `drop` to its front). Toward
-    the nose the walls narrow to `taper` of the width and the floor rises `rise`."""
-    def at(z: float, x: float, y: float) -> Vec3:
-        return (x, y, z)
-
-    rear = sec.side(1) + sec.side(-1)
-    nose = [(sec.mid + (x - sec.mid) * taper, y + (rise if y == sec.floor else 0.0)) for x, y in
-            sec.side(1) + sec.side(-1)]
-    lf, lc, lt, _lr, rf, rc, rt, _rr = range(8)
-    names = (('floor', lf, rf), ('chamfer_l', lf, lc), ('wall_l', lc, lt), ('chamfer_r', rf, rc), ('wall_r', rc, rt))
-    for name, i, j in names:
-        parts.append(wall(name, 'air_tub', [at(-back, *rear[i]), at(-back, *rear[j]), at(front, *nose[j]),
-                                            at(front, *nose[i])]))
-    well = [nose[k] for k in (lf, lc, lt, rt, rc, rf)]
-    parts.append(wall('foot_well', 'air_tub', [at(front, *p) for p in well]))
-    parts.append(wall('bulkhead', 'air_tub', [at(-back, *p) for p in sec.ring()]))
-    l_roof, r_roof = sec.side(1)[3], sec.side(-1)[3]
-    parts.append(wall('roof', 'air_tub', [at(-back, *l_roof), at(-back, *r_roof),
-                                          at(roof_front, r_roof[0], r_roof[1] - drop),
-                                          at(roof_front, l_roof[0], l_roof[1] - drop)]))
-
-
-def _canopy(parts: list[om.Part], sec: Section, glare: Vec3, back: float, roof_front: float, taper: float,
-            front: float, drop: float) -> None:
-    """The windshield's and windows' frame round the open view: the front pillars from the glare shield's corners
-    (`glare`: its left corner) to the roof's front, the windshield's top bow, the sill rails, the door pillars
-    beside the head and behind it (each from the sill in to the roof's edge), the bows across. No centre post, even
-    where the real aircraft has one (the UH-60): it would stand on the line of sight."""
-    m = 'canopy_frame'
-    gx, gy, gz = glare
-    zs = gz - 0.22
-
-    def wide(z: float) -> float:   # the tub's width share at z (it narrows toward the nose)
-        return 1.0 + (taper - 1.0) * max(0.0, min(1.0, (z + back) / (front + back)))
-
-    def low(z: float) -> float:    # how far the roof has sloped down at z
-        return drop * max(0.0, min(1.0, (z + back) / (roof_front + back)))
-
-    for sign, s in ((1, 'l'), (-1, 'r')):
-        _f, _c, top, roof = sec.side(sign)
-        g = (sec.mid + sign * (gx - sec.mid), gy, gz)
-        sill_front = (sec.mid + (top[0] - sec.mid) * wide(zs) - sign * 0.02, top[1], zs)
-        parts.append(beam(f'pillar_a_{s}', m, g, (roof[0] - sign * 0.02, roof[1] - 0.02 - drop, roof_front), 0.035))
-        parts.append(beam(f'sill_{s}', m, g, sill_front, 0.03))
-        parts.append(beam(f'rail_{s}', m, sill_front, (top[0] - sign * 0.02, top[1], -back), 0.03))
-        for name, z in (('b', -0.12), ('c', -back + 0.04)):
-            parts.append(beam(f'pillar_{name}_{s}', m, (top[0] - sign * 0.025, top[1], z),
-                              (roof[0] - sign * 0.02, roof[1] - 0.02 - low(z), z), 0.05))
-    rl, rr = sec.side(1)[3], sec.side(-1)[3]
-    for name, z, w in (('bow_front', roof_front, 0.05), ('bow_mid', -0.12, 0.045)):
-        parts.append(beam(name, m, (rl[0] - 0.02, rl[1] - 0.025 - low(z), z), (rr[0] + 0.02, rr[1] - 0.025 - low(z), z),
-                          w))
-
-
-def _controls(parts: list[om.Part], floor: float, collective_x: float, stick_z: float, pedal_z: float,
-              pedal_floor: float) -> None:
-    """The cyclic between the knees (from the floor at `floor`), the collective by the left hand, the pedals in the
-    foot well (its floor at `pedal_floor`)."""
-    parts.append(cylinder('cyclic_boot', 'rubber', (0.0, floor, stick_z + 0.02), (0.0, floor + 0.1, stick_z), 0.05, 10))
-    top = (0.0, -0.47, stick_z - 0.05)
-    parts.append(cylinder('cyclic', 'metal_dark', (0.0, floor + 0.1, stick_z), top, 0.014, 8))
-    parts.append(cylinder('cyclic_grip', 'rubber', top, (0.0, -0.35, stick_z - 0.07), 0.024, 10))
-    parts.append(box('cyclic_head', 'metal_dark', (0.0, -0.335, stick_z - 0.075), (0.045, 0.04, 0.05)))
-    parts.append(box('cyclic_trigger', 'paint_olive', (0.0, -0.37, stick_z - 0.045), (0.012, 0.03, 0.02)))
-    x = collective_x
-    parts.append(box('collective_box', 'metal_dark', (x, -0.78, -0.16), (0.07, 0.08, 0.2)))
-    parts.append(cylinder('collective', 'metal_dark', (x, -0.74, -0.22), (x, -0.6, 0.2), 0.016, 8))
-    parts.append(cylinder('collective_grip', 'rubber', (x, -0.61, 0.15), (x, -0.585, 0.27), 0.026, 10))
-    parts.append(box('collective_head', 'metal_dark', (x, -0.575, 0.29), (0.06, 0.05, 0.06)))
-    for sign, s in ((1, 'l'), (-1, 'r')):
-        px = sign * 0.15
-        parts.append(panel(f'pedal_{s}', 'rubber', (px, pedal_floor + 0.14, pedal_z), 0.09, 0.17, (0, 0.55, -1)))
-        parts.append(beam(f'pedal_arm_{s}', 'metal_dark', (px, pedal_floor + 0.02, pedal_z + 0.1),
-                          (px, pedal_floor + 0.08, pedal_z + 0.03), 0.02))
-
-
-def _overhead(parts: list[om.Part], mid: float, roof: float, z0: float, z1: float, width: float) -> None:
-    """The overhead panel under the roof (breakers, engine levers), leaning toward the eye (its labels read looking
-    up and ahead)."""
-    length = z1 - z0
-    parts.append(box('overhead_box', 'air_tub', (mid, roof - 0.035, (z0 + z1) / 2), (width, 0.07, length),
-                     faces='xXzZ'))
-    parts.append(panel('overhead', 'air_overhead', (mid, roof - 0.07, (z0 + z1) / 2), width, length,
-                       _unit((0.0, -1.0, -0.35)), up=(0, 0, -1)))
-
-
-def _consoles(parts: list[om.Part], sec: Section, z0: float, z1: float, width: float, share: float,
-              texture: str) -> None:
-    """The side consoles under the sills: a block along each wall from the chine up, its top (`texture`: radio,
-    navigation and lighting controls) leaning toward the seat; `share` the tub's width share at its front end (it
-    narrows toward the nose)."""
-    length, top = z1 - z0, sec.top - 0.1
-    h = top - sec.chine
-    for sign, s in ((1, 'l'), (-1, 'r')):
-        w = (sec.w_left if sign > 0 else sec.w_right) * share
-        x = sec.mid + sign * (w - width / 2 - 0.01)
-        parts.append(box(f'console_{s}', 'air_tub', (x, top - h / 2, (z0 + z1) / 2), (width, h, length),
-                         faces=('X' if sign > 0 else 'x') + 'zZ'))
-        parts.append(panel(f'console_top_{s}', texture, (x, top + 0.003, (z0 + z1) / 2), length, width,
-                           (-0.25 * sign, 1.0, 0.0), up=(-sign, 0, 0), uv=(0, 0, max(1.0, round(length / 0.3)), 1)))
-
-
-def _seat(parts: list[om.Part], half: float, pan: float, back_z: float) -> None:
-    """The pilot's armoured seat (mesh cushions in an armour shell): its pan `pan` below the eye, its back at
-    `back_z`, `half` its half width."""
-    parts.append(box('seat_pan', 'air_seat', (0.0, pan + 0.04, back_z + 0.24), (2 * half - 0.06, 0.08, 0.42)))
-    parts.append(box('seat_back', 'air_seat', (0.0, pan + 0.4, back_z + 0.03), (2 * half - 0.08, 0.66, 0.08)))
-    parts.append(box('seat_head', 'air_seat', (0.0, pan + 0.86, back_z + 0.02), (0.26, 0.16, 0.08)))
-    for sign, s in ((1, 'l'), (-1, 'r')):
-        parts.append(box(f'seat_wing_{s}', 'metal_dark', (sign * (half - 0.015), pan + 0.25, back_z + 0.16),
-                         (0.03, 0.42, 0.34)))
-    parts.append(box('seat_shell', 'metal_dark', (0.0, pan + 0.4, back_z - 0.02), (2 * half, 0.74, 0.03)))
-
-
 def _helmet_hud(screens: list[Screen]) -> None:
     """The helmet's display (the AH-64's IHADSS: no combiner glass in the cockpit), its symbols over the view ahead:
     a 'hud' screen with no part, so the forward view stays open."""
     screens.append(Screen('hud', (0.0, -0.02, 0.9), (0.0, 0.0, -1.0), 0.36, 0.27))
 
 
-def _pilot(cabin: Cabin, utility: bool) -> Kit:
-    """A helicopter pilot's cockpit: an AH-64D pilot's station (gunship) or a UH-60M's (utility), centred on the
-    eye. The panel's top stays 10 degrees under the line of sight and the windshield's frame at the view's edges:
-    the view ahead is for flying and aiming."""
-    name = 'heli_utility' if utility else 'heli_gunship'
-    side = 0.9 if utility else 0.6
-    r = _room(cabin, {'left': side, 'right': side, 'up': 0.7, 'down': 1.08, 'ahead': 1.5, 'back': 0.75},
-              {'left': 0.26, 'right': 0.26, 'up': 0.2, 'down': 0.7, 'ahead': 0.65, 'back': 0.3}, name)
-    L, R, U, D, A, B = r['left'], r['right'], r['up'], r['down'], r['ahead'], r['back']
-    mid = (L - R) / 2
-    sill = -0.42 if utility else -0.3
-    sec = Section(mid, L, R, -D, -D + 0.4 * (sill + D), sill, U)
-    taper, rise = 0.72, 0.3
+# ------------------------------------------------------------------------------------------------- real cockpits
+@dataclass(frozen=True)
+class RealCockpit:
+    """A crew station's model (tools/prep_cockpit_air.py ASSETS: `asset` its file under cockpits/, in the eye's frame,
+    metres, at full size) and its displays at full size: (screen kind, centre, the display's normal toward the eye,
+    width, height), measured on the model from the eye. `least`: the room the eye must have (cockpit_room._room)."""
+    asset: str
+    screens: tuple[tuple[str, Vec3, Vec3, float, float], ...]
+    least: Cabin
+    helmet_hud: bool = False
+
+
+REAL: dict[str, RealCockpit] = {
+    'heli_gunship': RealCockpit(
+        'parts/sf-ah64e-cpg/cockpit.glb',
+        (('flight', (0.3406, -0.3964, 0.5635), (-0.173, 0.253, -0.952), 0.155, 0.155),
+         ('weapons', (-0.3361, -0.3949, 0.5538), (0.173, 0.256, -0.951), 0.155, 0.155),
+         ('map', (-0.0185, -0.1989, 0.2964), (0.0, 0.39, -0.921), 0.13, 0.13),
+         ('status', (0.3101, -0.1984, 0.51), (-0.301, 0.309, -0.902), 0.155, 0.075)),
+        {'left': 0.25, 'right': 0.25, 'up': 0.2, 'down': 0.5, 'ahead': 0.6, 'back': 0.15}, helmet_hud=True),
+    'heli_utility': RealCockpit(
+        'parts/sf-uh60m-pilot/cockpit.glb',
+        (('flight', (-0.0952, -0.389, 0.6856), (0.036, 0.0, -0.999), 0.19, 0.115),
+         ('map', (0.1846, -0.3954, 0.7005), (0.036, 0.0, -0.999), 0.19, 0.125),
+         ('status', (0.6874, -0.3895, 0.7004), (-0.035, 0.0, -0.999), 0.19, 0.125)),
+        {'left': 0.3, 'right': 0.2, 'up': 0.2, 'down': 0.5, 'ahead': 0.6, 'back': 0.15}),
+}
+SCALED_BY = ('left', 'right', 'up', 'down')   # the sides a real cockpit is scaled to fit; ahead and back it is cut
+
+
+def _srgb(base: tuple[float, ...]) -> tuple[int, int, int]:
+    return tuple(max(24, int(round(255 * min(1.0, max(0.0, c)) ** (1 / 2.2)))) for c in base[:3])  # type: ignore[return-value]
+
+
+@functools.lru_cache(maxsize=None)
+def _real_mesh(asset: str) -> tuple[tuple[tuple[str, KitMaterial, np.ndarray, np.ndarray, np.ndarray, np.ndarray], ...],
+                                    tuple[tuple[str, float], ...]]:
+    """A prepared cockpit (cockpit.glb in the eye's frame): per material its key, KitMaterial (its PNG beside the
+    file, else its colour), positions, normals, UVs, triangles; and how far it reaches each way from the eye."""
+    import gltf
+    path = os.path.join(cockpits.asset_root(), asset)
+    if not os.path.isfile(path):
+        raise cockpits.CockpitAssetsMissing(f'{path} is missing (tools/prep_cockpit_air.py makes it)')
+    s = gltf.read(path)
+    rel = os.path.dirname(asset)
+    raw, _ = gltf._container(path)
+    images = [img['uri'] for img in raw.get('images', [])]
+    out = []
+    for k, (m, spec) in enumerate(zip(s.materials, raw['materials'])):
+        tris = s.triangles[s.material == k]
+        if not len(tris):
+            continue
+        used, inv = np.unique(tris.reshape(-1), return_inverse=True)
+        tex = spec.get('pbrMetallicRoughness', {}).get('baseColorTexture')
+        mat = KitMaterial(f'{rel}/{images[tex["index"]]}' if tex is not None else _srgb(m.base))
+        uv = s.uvs[used] if s.uvs is not None else np.zeros((len(used), 2))
+        out.append((m.name, mat, s.positions[used], s.normals[used], uv, inv.reshape(-1, 3)))
+    p = s.positions
+    reach = (('left', p[:, 0].max()), ('right', -p[:, 0].min()), ('up', p[:, 1].max()), ('down', -p[:, 1].min()),
+             ('ahead', p[:, 2].max()), ('back', -p[:, 2].min()))
+    return tuple(out), tuple((side, float(v)) for side, v in reach)
+
+
+def _real(cabin: Cabin, name: str) -> Kit:
+    """The real cockpit REAL[name] scaled about the eye to fit the room left, right, up and down, cut to it ahead and
+    behind (a triangle not wholly inside is left out), its screens on its displays."""
+    spec = REAL[name]
+    meshes, reach = _real_mesh(spec.asset)
+    ext = dict(reach)
+    r = _room(cabin, ext, spec.least, name)
+    k = min(1.0, *(r[side] / ext[side] for side in SCALED_BY))
+    lo = np.array([-r['right'], -r['down'], -r['back']])
+    hi = np.array([r['left'], r['up'], r['ahead']])
     parts: list[om.Part] = []
+    mats: dict[str, KitMaterial] = {}
+    for key, mat, pos, nrm, uv, tris in meshes:
+        q = pos * k
+        inside = ((q >= lo) & (q <= hi)).all(1)
+        t = tris[inside[tris].all(1)]
+        if not len(t):
+            continue
+        used, inv = np.unique(t.reshape(-1), return_inverse=True)
+        verts = [om.Vertex(tuple(map(float, q[i])), tuple(map(float, nrm[i])), (float(uv[i, 0]), float(uv[i, 1])))
+                 for i in used]
+        key = f'real_{key}'
+        parts.append(om.Part(key, key, verts, [tuple(map(int, row)) for row in inv.reshape(-1, 3)]))
+        mats[key] = mat
     screens: list[Screen] = []
-    z = min(0.75 if utility else 0.7, A - 0.25)
-    front = min(A, z + 0.2)
-    top = -0.13 * z / 0.7                  # 10 degrees under the line of sight
-    nose_w = 1.0 + (taper - 1.0) * (z + B) / (front + B)   # the tub's width share at the panel
-    room_w = 0.92 * nose_w * (L + R)
-    if utility:
-        lip = _uh60_panel(parts, screens, mid, top, z, room_w)
-    else:
-        lip = _ah64_panel(parts, screens, mid, top, z, room_w, -D + rise * (z + 0.06 + B) / (front + B))
+    for kind, c, facing, w, h in spec.screens:
+        _screen(parts, screens, kind, (c[0] * k, c[1] * k, c[2] * k), facing, w * k, h * k)
+    if spec.helmet_hud:
         _helmet_hud(screens)
-    width = room_w - 0.02
-    roof_front = min(0.3 if utility else 0.12, z - 0.2)
-    drop = 0.3 * U
-    _tub(parts, sec, B, front, roof_front, taper, rise, drop)
-    _canopy(parts, sec, (mid + width / 2, top + 0.03, lip), B, roof_front, taper, front, drop)
-    cw = max(0.08, min(0.2, min(L, R) - 0.3))
-    seat_back = -min(B, 0.45) + 0.06
-    share = lambda zz: 1.0 + (taper - 1.0) * max(0.0, min(1.0, (zz + B) / (front + B)))   # noqa: E731
-    _consoles(parts, sec, seat_back, z - 0.12, cw, share(z - 0.12), 'air_uh60_pedestal' if utility else
-              'air_ah64_console')
-    half = max(0.18, min(0.26, min(L, R) - cw - 0.04))
-    _seat(parts, half, -0.8, seat_back)
-    pedal_z = min(z + 0.12, front - 0.12)
-    rise_at = lambda zz: -D + rise * max(0.0, min(1.0, (zz + B) / (front + B)))   # noqa: E731
-    _controls(parts, rise_at(0.34), min(half + 0.05, L - cw - 0.04), 0.34, pedal_z, rise_at(pedal_z))
-    if utility and U > 0.22:   # a gunship's canopy is glass overhead
-        width_o = min(0.5, 2 * sec.roof_w * min(L, R) - 0.06)
-        _overhead(parts, mid, U - drop * 0.75, -0.12, roof_front - 0.04, width_o)
-    used = {p.material for p in parts}
-    return Kit(parts, _materials(*sorted(used)), screens=tuple(screens))
+    mats.update(_materials('screen'))
+    return Kit(parts, mats, screens=tuple(screens))
 
 
 def heli_gunship(cabin: Cabin) -> Kit:
-    return _pilot(cabin, utility=False)
+    return _real(cabin, 'heli_gunship')
 
 
 def heli_utility(cabin: Cabin) -> Kit:
-    return _pilot(cabin, utility=True)
+    return _real(cabin, 'heli_utility')
 
 
 # --------------------------------------------------------------------------------------------------- door gunners

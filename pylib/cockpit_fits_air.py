@@ -3,7 +3,8 @@
 The stock helicopters' cockpits ride `body` (the fuselage: it pitches and rolls with the flight, the rotor turns on
 its own bone). Eyes: over the seat locator 操縦席１ (tmp/stations/STATIONS.md), at a seated head's height, measured
 with tools/cockpit_fit.py --probe (metres to the hull round the eye noted per row); the hull has no interior, so the
-kit is the whole cabin and the eye only has to sit inside the fuselage with room for it.
+kit is the whole cabin (a real cockpit's model, cockpit_kits_air.py, scaled to the room) and the eye only has to sit
+inside the fuselage with room for it: the more room, the nearer to full size the cockpit is.
 """
 from __future__ import annotations
 
@@ -24,13 +25,16 @@ FITS: dict = {
     # back: the eye a little behind and below the first guess, (0, 2.15, 2.6): room left/right 0.49, up 0.65,
     # down 1.41, ahead 1.23 (at (0, 2.25, 2.7) the canopy's front bow came out through the hull).
     'VEHICLE409_HELI': (Fit(0, 'body', (0.0, 2.15, 2.6), 'heli_gunship'),),
-    # 410 (the transport with the two pod guns): the pilot over the seat locator (0, 2, 4.55) moved back where the
-    # nose is wide enough, (0, 2.6, 4.2): room left/right 0.7, up 0.75, down 1.8, ahead 1.2. The two guns are
+    # 410 (the transport with the two pod guns): the pilot in the right seat as in the UH-60M whose cockpit the kit is
+    # (heli_utility): over the seat locator (0, 2, 4.55) moved back where the nose is wide enough and 0.3 m right of
+    # the centre line, (-0.3, 2.5, 3.8): room left 1.09, right 0.49, up 0.83, down 1.8, ahead 1.47 (the cockpit,
+    # 1.31 m left of the pilot's eye to the far wall and 0.49 right, fits at 0.82 of full size; on the centre line,
+    # room 0.73 either side, only at 0.54). The two guns are
     # pods on the stub wings (gun_emplacement_l/_r at x +-2.77, outside the cabin): nobody stands at them, so their
     # seats get the remote weapon station's display, the eye at the stock gun cameras (カメラ２ / カメラ３ on
     # gunCam_l / gunCam_r, a body child: the stock view turns with the rider's aim, not with the barrel).
     'VEHICLE410_HELI': (
-        Fit(0, 'body', (0.0, 2.6, 4.2), 'heli_utility'),
+        Fit(0, 'body', (-0.3, 2.5, 3.8), 'heli_utility'),
         Fit(1, 'gunCam_l', (3.337, 1.628, 0.432), 'remote_display'),
         Fit(2, 'gunCam_r', (-3.337, 1.628, 0.432), 'remote_display'),
     ),

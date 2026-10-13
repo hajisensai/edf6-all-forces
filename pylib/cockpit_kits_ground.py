@@ -1,10 +1,17 @@
-"""Cockpit kits for ground vehicles: a driver's cab (dashboard, steering wheel or tracked-vehicle yoke, windscreen
-frame, doors below the window line, roof, rear wall), live screens laid onto a stock interior (the kei truck's and the
-trailer truck's cabs and the troop bays are modelled in the stock models already), an open-air rider's tablet and a
-bike rider's screens beside the stock dashboard. A turret's gunner takes cockpit_kits.tank_gunner (the M1A1's station). pylib/cockpit_kits.py
-merges KITS; its docstring has the conventions: a kit is a function of the room round its eye, returning parts in the
-eye's frame (+x left, +y up, +z ahead, metres) laid out inside that room. Textures: tools/make_cockpit_textures.py and
-tools/make_cockpit_textures_ground.py (ground_*).
+"""Cockpit kits for ground vehicles: real cabs cut out of modelled vehicle interiors (an armoured car's, a cab-over
+truck's, a pickup's: tools/prep_cockpit_ground.py, credits in <model dir>/cockpits/CREDITS_ground.txt; the user,
+2026-10-13: "飞机要有真正座舱是举例子，其他所有载具都应该有", "你塞的这些图片太抽象了，全删了吧"), live screens laid onto
+a stock interior (the kei truck's and the trailer truck's cabs and the troop bays are modelled in the stock models
+already), an open-air rider's tablet and a bike rider's screens beside the stock dashboard, each in a real gauge's
+case. A turret's gunner takes cockpit_kits.tank_gunner. pylib/cockpit_kits.py merges KITS; its docstring has the
+conventions: a kit is a function of the room round its eye, returning parts in the eye's frame (+x left, +y up, +z
+ahead, metres) laid out inside that room.
+
+A real cab (CABS) is its source vehicle's driver's station as the seated driver sees it: dashboard, steering wheel,
+pillars, doors, roof, seats, its glass left out (the windscreen is open: the road is seen through it, the vehicle's
+own hull is not drawn from inside). It is scaled down about the eye where the vehicle's cab is smaller than the
+source's (no smaller than CabSpec.least), and cut at the room's walls: what would cross the vehicle's hull is left
+out (from inside the hull is not drawn, so the world shows there).
 
 Every screen (cockpits.Screen) faces the eye, sits below the line of sight within about 45 degrees of straight
 ahead, and has a part of the same size in the `screen` texture under it; the plugin draws the live read-out there.
@@ -14,11 +21,14 @@ from __future__ import annotations
 import functools
 import math
 import os
+from dataclasses import dataclass
 
-from cockpit_room import MARGIN, Cabin, CabinTooSmall, _materials, _room
-from cockpit_shapes import basis, box, cylinder, frame, panel, quad, two_sided
+import numpy as np
+
+from cockpit_room import MARGIN, Cabin, CabinTooSmall, _materials
+from cockpit_shapes import basis, frame, panel, two_sided
 import cockpits
-from cockpits import Kit, KitFn, Screen, Vec3
+from cockpits import Kit, KitFn, KitMaterial, Screen, Vec3
 import obj_model as om
 
 
@@ -49,150 +59,177 @@ def _backing(name: str, s: Screen, rim: float, behind: float) -> om.Part:
     return panel(name, 'metal_dark', c, s.width + 2 * rim, s.height + 2 * rim, s.facing)
 
 
-WHEEL_ASSET = 'parts/oga-steering-wheel-cc0/low_6.obj'   # Savino's CC0 wheel (tools/prep_cockpit_ground.py)
-WHEEL_SCALE = 0.8                                        # its rim 0.49 m across -> 0.39 m, a car's
+# ------------------------------------------------------------------------------------------ real cabs
+
+@dataclass(frozen=True)
+class CabSpec:
+    """A real cab: `asset` (parts/<asset>/cab.npz, tools/prep_cockpit_ground.py) in the eye's frame at full size;
+    `screens`: the live read-outs (kind, centre in the eye's frame, width, height), on the source's instrument
+    cluster and centre console; `tuck`, `knee`: how much of its width the room loses below the eye (squeeze; a hull
+    that narrows between its tracks or wheels)."""
+    asset: str
+    screens: tuple[tuple[str, Vec3, float, float], ...]
+    tuck: float = 0.0
+    knee: float = 0.0
 
 
-@functools.lru_cache(maxsize=1)
-def _wheel_obj() -> tuple[tuple[Vec3, ...], tuple[Vec3, ...], tuple[tuple[int, int, int], ...]]:
-    """The wheel asset's positions, normals and triangles (its own frame: the rim across x and y, +z toward the
-    driver)."""
-    part = om.merge(om.obj_parts(om.read_obj(os.path.join(cockpits.asset_root(), WHEEL_ASSET))), 'wheel')
-    return (tuple(v.pos for v in part.verts), tuple(v.normal for v in part.verts), tuple(part.tris))
+@functools.lru_cache(maxsize=None)
+def _cab_mesh(asset: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, tuple[str, ...],
+                                   np.ndarray]:
+    """A real cab's positions, normals, UVs, triangles, each triangle's material, the materials' texture files (under
+    parts/<asset>/, '' none) and base colours (sRGB)."""
+    path = os.path.join(cockpits.asset_root(), 'parts', asset, 'cab.npz')
+    with np.load(path, allow_pickle=False) as z:
+        return (z['pos'].astype(np.float64), z['nrm'].astype(np.float64), z['uv'].astype(np.float64), z['tris'],
+                z['mat'], tuple(str(t) for t in z['textures']), z['colours'])
 
 
-def _wheel(c: Vec3, n: Vec3) -> om.Part:
-    """The steering wheel at `c`, its face turned along `n` (toward the driver), its top up."""
-    a = _unit(_cross(_cross(n, (0.0, 1.0, 0.0)), n))   # the wheel's up: world up, flattened into its plane
-    b = _cross(a, n)
-    pos, nrm, tris = _wheel_obj()
-
-    def turn(p: Vec3, k: float) -> Vec3:
-        return tuple(k * (p[0] * b[i] + p[1] * a[i] + p[2] * n[i]) for i in range(3))  # type: ignore[return-value]
-    verts = [om.Vertex(tuple(c[i] + q[i] for i in range(3)), turn(m, 1.0), (0.5, 0.5))
-             for q, m in ((turn(p, WHEEL_SCALE), m) for p, m in zip(pos, nrm))]
-    return om.Part('wheel', 'rubber', verts, list(tris))
+SOFT = 0.8   # of the way to a wall, where the cab starts being drawn in toward the eye
+ROUND = 4    # the room's shape the cab is drawn into: |x/X|^4 + |y/Y|^4 + |z/Z|^4 = 1, a box with rounded corners (a
+             # hull's corners are bevelled: the room is measured straight out, its box corners can lie outside)
 
 
-def _unit(v: Vec3) -> Vec3:
-    n = math.sqrt(sum(x * x for x in v))
-    return (v[0] / n, v[1] / n, v[2] / n)
+def squeeze(p: np.ndarray, lo: np.ndarray, hi: np.ndarray, tuck: float = 0.0, knee: float = 0.0) -> np.ndarray:
+    """Eye-frame points `p` (n, 3) drawn in toward the eye so they all lie inside the room lo..hi round it, looking
+    the same from the eye: each point moves along its own sight line. The room is a box with rounded corners (ROUND)
+    whose sides come in by `tuck` of their width from `knee` metres below the eye down (0: at the floor, coming in
+    all the way down from the eye; a tracked hull narrows between its tracks under the sponsons); r, how far
+    out a point is (1 on the room's surface), stays where it is up to SOFT and is compressed smoothly beyond, to just
+    under 1 however far out the point was. Order along a sight line is kept (no surface comes in front of one it was
+    behind), the cab stays whole (no triangle is cut), and nothing crosses the walls."""
+    def inside(q: np.ndarray) -> np.ndarray:   # the room's measure at points q: <= 1 inside
+        ext = np.where(q >= 0, hi, -lo)
+        side = 1.0 - tuck * np.clip(-q[:, 1] / (knee or -lo[1]), 0.0, 1.0)
+        ext = ext * np.stack([side, np.ones(len(q)), np.ones(len(q))], 1)
+        return np.sum((np.abs(q) / ext) ** ROUND, axis=1) ** (1.0 / ROUND)
+    # How far out each point is: 1 / the scale at which its sight line meets the room's surface (the measure grows
+    # along a sight line, so a bisection finds it; without a tuck it is the measure itself).
+    top = 1.0 / np.maximum(inside(p), 1e-12)      # the untucked room is met no later than this
+    a, b = np.zeros(len(p)), top
+    for _ in range(30 if tuck else 0):
+        m = (a + b) / 2
+        ok = inside(p * m[:, None]) <= 1.0
+        a, b = np.where(ok, m, a), np.where(ok, b, m)
+    r = 1.0 / np.maximum(a if tuck else top, 1e-12)
+    out = np.where(r > SOFT, SOFT + (1 - SOFT) * (1 - np.exp(-(r - SOFT) / (1 - SOFT))), r)
+    return p * (out / np.maximum(r, 1e-12))[:, None]
 
 
-def _cross(p: Vec3, q: Vec3) -> Vec3:
-    return (p[1] * q[2] - p[2] * q[1], p[2] * q[0] - p[0] * q[2], p[0] * q[1] - p[1] * q[0])
+def _cab_parts(asset: str, lo: Vec3, hi: Vec3, tuck: float,
+               knee: float) -> tuple[list[om.Part], dict[str, KitMaterial]]:
+    """The cab drawn in to lie inside lo..hi (squeeze), one part per material."""
+    pos, nrm, uv, tris, mat, textures, colours = _cab_mesh(asset)
+    q = squeeze(pos, np.array(lo), np.array(hi), tuck, knee)
+    parts, mats = [], {}
+    for m in np.unique(mat):
+        t = tris[mat == m]
+        used, inv = np.unique(t.reshape(-1), return_inverse=True)
+        verts = [om.Vertex(tuple(map(float, q[i])), tuple(map(float, nrm[i])), (float(uv[i, 0]), float(uv[i, 1])))
+                 for i in used]
+        name = f'cab{m}'
+        parts.append(om.Part(name, name, verts, [tuple(map(int, r)) for r in inv.reshape(-1, 3)]))
+        tex = textures[m]
+        mats[name] = KitMaterial(f'parts/{asset}/{tex}' if tex else tuple(int(c) for c in colours[m]))
+    return parts, mats
 
 
-def _steering(kind: str, c: Vec3, into: float) -> list[om.Part]:
-    """A steering wheel (or a tracked vehicle's yoke) at `c` facing the eye, its column going `into` metres away from
-    the eye into the dashboard."""
-    n = _toward_eye(c)
-    back = tuple(c[k] - n[k] * into for k in range(3))
-    parts = [cylinder('column', 'metal_dark', c, back, 0.03, 10)]
-    if kind == 'wheel':
-        parts.append(_wheel(c, n))
-    else:   # a yoke: a bar across with two upright grips
-        lft, rgt = (c[0] + 0.17, c[1], c[2]), (c[0] - 0.17, c[1], c[2])
-        parts.append(cylinder('yoke_bar', 'metal_dark', lft, rgt, 0.016, 8))
-        for k, end in enumerate((lft, rgt)):
-            parts.append(cylinder(f'yoke_grip{k}', 'rubber', end, (end[0], end[1] + 0.11, end[2] - 0.02), 0.022, 10))
-    return parts
+def _first_hit(corners: np.ndarray, d: np.ndarray, beyond: float) -> float:
+    """How far the ray from the eye along the unit `d` goes before it meets one of the triangles `corners`, not
+    counting hits nearer than `beyond` (inf: none)."""
+    v0, e1, e2 = corners[:, 0], corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0]
+    p = np.cross(d, e2)
+    det = np.einsum('ij,ij->i', e1, p)
+    ok = np.abs(det) > 1e-12
+    inv = np.where(ok, 1.0 / np.where(ok, det, 1.0), 0.0)
+    u = np.einsum('ij,ij->i', -v0, p) * inv
+    q = np.cross(-v0, e1)
+    v = (q @ d) * inv
+    t = np.einsum('ij,ij->i', e2, q) * inv
+    hit = ok & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > beyond)
+    return float(t[hit].min()) if hit.any() else math.inf
 
 
-CAB_MATERIALS = ('metal_dark', 'rubber', 'screen', 'leather', 'ground_dash', 'ground_door', 'ground_headliner',
-                 'ground_floor')
+CAB_LEAST = {'left': 0.15, 'right': 0.15, 'up': 0.1, 'down': 0.3, 'ahead': 0.35, 'back': 0.05}
+OPEN_SIDE = 3.0   # m: how far the cab may reach where the vehicle has no wall (the cut's own box ends it sooner)
+PROUD = 0.008     # m: a screen this far in front of the panel it is laid on
 
 
-def vehicle_cab(cabin: Cabin, steer: str = 'wheel', rake: float = 0.6, crown: float = 1.2, floor: float = 0.75,
-                tuck: float = 0.0, dash: str = 'ground_dash_console') -> Kit:
-    """A driver's cab in the room round the eye: the dashboard across below the line of sight with the instrument
-    cluster (a 'status' screen) behind the steering wheel (or yoke), the 'weapons' screen on the console toward the
-    vehicle's middle (the side with more room), a switch panel on the other side; the raked windscreen's frame ahead
-    (its opening clear: the road is seen through it), the doors up to the window line on both sides (the side windows
-    open above), the roof with its edges sloping down to the doors, the floor and the rear wall with its window.
-    `rake`: how much nearer the windscreen comes per metre up (it crosses the eye's height at the room's 'ahead');
-    `crown`: how far the roof's edges drop per metre they come in; `floor`: the floor at most this far below the eye
-    (a tracked hull narrows between its tracks); `tuck`: how far its sides come in at the floor; `dash`: the photo
-    texture on the dashboard's face (tools/prep_cockpit_ground.py)."""
-    r = _room(cabin, {'left': 0.95, 'right': 0.95, 'up': 0.45, 'down': floor, 'ahead': 0.95, 'back': 0.6},
-              {'left': 0.2, 'right': 0.2, 'up': 0.1, 'down': 0.4, 'ahead': 0.45, 'back': 0.1}, 'vehicle_cab')
-    L, R, U, D, A, B = r['left'], r['right'], r['up'], r['down'], r['ahead'], r['back']
-    wide, mid = L + R, (L - R) / 2
-    top = -min(0.13, 0.25 * D)                # the dashboard's top edge
-    belt = top + 0.06                         # the doors' window line
-    foot, head = A - rake * top, A - rake * U  # the windscreen's foot on the dashboard and its head under the roof
-    face = max(0.32, min(A - 0.3, 0.6))       # the dashboard's face toward the eye
-    inset = min(0.2, 0.4 * min(L, R))         # the roof's flat part in from the doors
-    drop = crown * inset
+def _laid_on(corners: np.ndarray, c: Vec3, w: float, h: float) -> Vec3:
+    """Where a screen meant for `c` (w x h, turned to the eye) goes on the cab at full size: along its sight line,
+    PROUD in front of the panel its centre and corners look at (hits nearer than 0.85 of the way are things in front
+    of the panel, a steering wheel's rim: they stay in front of the screen)."""
+    n = math.sqrt(sum(x * x for x in c))
+    f = np.array(c) / n
+    r, u, _ = basis(_toward_eye(c))
+    depth = math.inf
+    for a, b in ((0, 0), (-1, -1), (-1, 1), (1, -1), (1, 1)):
+        pt = np.array(c) + a * w / 2 * np.array(r) + b * h / 2 * np.array(u)
+        d = pt / np.linalg.norm(pt)
+        depth = min(depth, _first_hit(corners, d, 0.85 * float(np.linalg.norm(pt))) * float(d @ f))
+    k = (depth - PROUD) / n if math.isfinite(depth) else 1.0
+    return (c[0] * k, c[1] * k, c[2] * k)
+
+
+def real_cab(cabin: Cabin, spec: CabSpec) -> Kit:
+    """A real cab in the room round the eye: drawn in toward the eye where it reaches past the walls (squeeze: from
+    the seat it looks as it was), its screens laid on the source's instruments (_laid_on) and drawn in with it."""
+    room = {}
+    for side, least in CAB_LEAST.items():
+        r = cabin[side] - MARGIN if math.isfinite(cabin[side]) else OPEN_SIDE
+        if r < least:
+            raise CabinTooSmall(f'real_cab {spec.asset}: {side} {cabin[side]:.2f} m (needs {least + MARGIN:.2f}): '
+                                f'{cabin}')
+        room[side] = r
+    lo = (-room['right'], -room['down'], -room['back'])
+    hi = (room['left'], room['up'], room['ahead'])
+    cab, cab_mats = _cab_parts(spec.asset, lo, hi, spec.tuck, spec.knee)
+    pos, _, _, tris, _, _, _ = _cab_mesh(spec.asset)
+    full_corners = pos[tris]
     parts: list[om.Part] = []
-    # The windscreen's frame: the A-pillars, the header under the roof, the cowl on the dashboard.
-    tall, deep = U - top, foot - head
-    slant = math.hypot(tall, deep)
-    parts.append(frame('windscreen', 'metal_dark', (mid, (U + top) / 2, (foot + head) / 2 - 0.02), wide - 2 * inset,
-                       slant, 0.06, (0.0, -deep / slant, -tall / slant), 0.04))
-    # The dashboard: its top from the face to the windscreen, its face down to the floor.
-    parts.append(panel('dash_top', 'ground_dash', (mid, top, (face + foot) / 2), wide, foot - face, (0, 1, 0)))
-    lo_l, lo_r = L - tuck, -R + tuck        # the hull's sides at the floor
-    parts.append(quad('dash_face', 'ground_dash', (lo_l, -D, face), (lo_r, -D, face), (-R, top, face), (L, top, face)))
-    # The dashboard's face: a real dashboard's photo (`dash`) across it; the 'status' screen where the instrument
-    # cluster is, behind the wheel; the 'weapons' screen toward the vehicle's middle (the side with more room), where
-    # a centre console's display is.
-    low = top - min(0.32, 0.8 * (top + D))
-    k = (top - low) / (top + D) * tuck        # the sides come in this much at the photo's foot
-    q = (L + R) / (top - low) / ASPECT[dash]   # the photo's middle, cropped to the face's shape
-    if q > 1:
-        ul, ur, vt, vb = 0.0, 1.0, 0.5 - 0.5 / q, 0.5 + 0.5 / q
-    else:
-        ul, ur, vt, vb = 0.5 - 0.5 * q, 0.5 + 0.5 * q, 0.0, 1.0
-    parts.append(quad('dash_photo', dash, (L - k, low, face - 0.002), (-R + k, low, face - 0.002),
-                      (-R, top, face - 0.002), (L, top, face - 0.002), ((ul, vb), (ur, vb), (ur, vt), (ul, vt))))
-    side = 1.0 if L >= R else -1.0
     screens: list[Screen] = []
-    for kind, c, w, h in (('status', (0.0, top - 0.075, face - 0.006), 0.24, 0.1),
-                          ('weapons', (side * min(0.4, 0.6 * (L if side > 0 else R)), top - 0.11, face - 0.006), 0.22,
-                           0.15)):
-        p, s = _screen(kind, c, w, h)
-        parts.append(p)
+    for kind, c, w, h in spec.screens:
+        # Then drawn in with the cab, as far as its most drawn-in corner is: it stays in front of its panel.
+        full = np.array(_laid_on(full_corners, c, w, h))
+        r, u, _ = basis(_toward_eye(c))
+        pts = np.array([full + a * w / 2 * np.array(r) + b * h / 2 * np.array(u)
+                        for a, b in ((0, 0), (-1, -1), (-1, 1), (1, -1), (1, 1))])
+        drawn = np.linalg.norm(squeeze(pts, np.array(lo), np.array(hi), spec.tuck, spec.knee), axis=1)
+        k = float(np.min(drawn / np.linalg.norm(pts, axis=1)))
+        size = float(np.linalg.norm(full)) / math.sqrt(sum(x * x for x in c))
+        p, s = _screen(kind, tuple(map(float, full * k)), w * k * size, h * k * size, None)
+        parts += [p, _backing(f'bezel_{kind}', s, 0.008 * k, 0.003 * k)]
         screens.append(s)
-    # The steering wheel (a real wheel's model) or a tracked vehicle's yoke, below the cluster.
-    wz = min(0.45, face - 0.1)
-    parts += _steering(steer, (0.0, top - 0.14, wz), face - wz + 0.02)
-    # The doors up to the window line, an armrest on each.
-    u = (A + B) / 0.6
-    uv = ((0.0, 1.0), (u, 1.0), (u, 0.0), (0.0, 0.0))
-    parts.append(quad('door_l', 'ground_door', (lo_l, -D, -B), (lo_l, -D, face), (L, belt, A), (L, belt, -B), uv))
-    parts.append(quad('door_r', 'ground_door', (lo_r, -D, face), (lo_r, -D, -B), (-R, belt, -B), (-R, belt, A), uv))
-    for name, x, f in (('door_l', L, (-1, 0, 0)), ('door_r', -R, (1, 0, 0))):
-        parts.append(box(f'arm_{name}', 'leather', (x + 0.04 * f[0], belt - 0.12, (face - B) / 2),
-                         (0.08, 0.05, min(0.5, face + B))))
-    # The roof (its flat middle and its edges sloping down to the doors), the floor, the rear wall below its window
-    # and the window's frame.
-    roof_z = head - 0.02
-    parts.append(panel('roof', 'ground_headliner', (mid, U, (roof_z - B) / 2), wide - 2 * inset, roof_z + B, (0, -1, 0),
-                       uv=(0, 0, wide / 0.8, (roof_z + B) / 0.8)))
-    edge_z = roof_z + rake * drop
-    for name, x, k in (('cant_l', L, 1.0), ('cant_r', -R, -1.0)):
-        hi, lo = (x - k * inset, U), (x, U - drop)
-        a, b, c, d = (hi[0], hi[1], -B), (lo[0], lo[1], -B), (lo[0], lo[1], edge_z), (hi[0], hi[1], roof_z)
-        parts.append(quad(name, 'ground_headliner', b, a, d, c) if k > 0 else quad(name, 'ground_headliner', a, b, c, d))
-    parts.append(panel('floor', 'ground_floor', ((lo_l + lo_r) / 2, -D, (face - B) / 2), lo_l - lo_r, face + B, (0, 1, 0)))
-    parts.append(quad('rear_low', 'ground_door', (lo_r, -D, -B), (lo_l, -D, -B), (L, belt, -B), (-R, belt, -B)))
-    parts.append(frame('rear_window', 'metal_dark', (mid, (U - drop + belt) / 2, -B + 0.02), wide - 2 * inset,
-                       U - drop - belt, 0.08, (0, 0, 1), 0.04))
-    return Kit(parts, _materials(*CAB_MATERIALS, dash), screens=tuple(screens))
+    mats = _materials('screen', 'metal_dark')
+    mats.update(cab_mats)
+    return Kit(parts + cab, mats, screens=tuple(screens))
 
 
-# The photo textures' width / height (tools/prep_cockpit_ground.py CROPS; photo_*: the main set, CREDITS_photos.txt):
-# a photo is laid on a face cropped to the face's shape, never stretched.
-ASPECT = {'ground_dash_console': 3.23, 'photo_mrap_dashboard': 2.0}
+CABS: dict[str, CabSpec] = {
+    # An armoured car's driver (SISU GTP, tamminen): the low, wide windscreen of an MRAP, its pillars and roof
+    # plating; 'status' on the dashboard left of the wheel, 'weapons' on the centre console. The Grape's hull narrows
+    # under the sponsons 0.18 m below the eye (to 0.42 m left of it): the room's sides come in there.
+    'apc_cab': CabSpec('sf-sisu-gtp-10seat',
+                       (('status', (0.36, -0.34, 0.82), 0.16, 0.1), ('weapons', (-0.5, -0.46, 0.86), 0.2, 0.13)),
+                       tuck=0.55, knee=0.12),
+    # Another armoured car's (ARHAN P51, Mayess): the yellow instrument panel behind the wheel ('status'), the switch
+    # console right of it ('weapons'), the radio over the windscreen. The Naegling's hull narrows between its tracks
+    # 0.3 m below the eye (the lower side wall 0.36 m left of it).
+    'tracked_cab': CabSpec('sf-arhan-p51',
+                           (('status', (-0.096, -0.213, 0.49), 0.16, 0.07),
+                            ('weapons', (-0.46, -0.27, 0.46), 0.14, 0.09)),
+                           tuck=0.65, knee=0.25),
+    # A cab-over truck's (ARHAN P880, a MAZ; Mayess; mirrored, driven from the right): the big windscreen, the
+    # cluster behind the wheel ('status'), the dashboard's display ('weapons').
+    'truck_cab': CabSpec('sf-arhan-p880',
+                         (('status', (-0.15, -0.27, 0.63), 0.18, 0.08), ('weapons', (0.3, -0.233, 0.5), 0.16, 0.07))),
+    # A pickup's (Lightbody '85, DanielZhabotinsky; mirrored, driven from the right as the EDF's Japanese trucks
+    # are): the gauges behind the wheel ('status'), the radio in the centre stack ('weapons').
+    'pickup_cab': CabSpec('sf-lightbody-85',
+                          (('status', (0.018, -0.29, 0.85), 0.2, 0.08), ('weapons', (0.36, -0.37, 0.87), 0.16, 0.08))),
+}
 
 
-def _photo(name: str, tex: str, c: Vec3, w: float, h: float, facing: Vec3) -> om.Part:
-    """A w x h face showing the middle of the photo `tex`, cropped to the face's proportions (not stretched)."""
-    k = (w / h) / ASPECT[tex]
-    uv = (0.0, 0.5 - 0.5 / k, 1.0, 0.5 + 0.5 / k) if k > 1 else (0.5 - 0.5 * k, 0.0, 0.5 + 0.5 * k, 1.0)
-    return panel(name, tex, c, w, h, facing, uv=uv)
-
+# ------------------------------------------------------------------------------------------ stock interiors
 
 def stock_dash(cabin: Cabin, status: Vec3, weapons: Vec3 | None = None) -> Kit:
     """Live screens laid onto a cab the stock model has modelled already (dashboard, wheel, seats): a 'status' screen
@@ -235,25 +272,58 @@ def open_rider(cabin: Cabin) -> Kit:
     return Kit(parts, _materials('metal_dark', 'screen'), frozenset(q.name for q in parts), (s,))
 
 
+GAUGE = 'sf-stage6-speedo'      # a moped's digital speedometer (tools/prep_cockpit_ground.py), its LCD ahead of the eye
+GAUGE_LCD = (0.0, -0.0003, 0.1669, 0.1248)   # the LCD's centre in the asset's frame and its width (metres at full size)
+
+
+def _gauge(name: str, s: Screen) -> tuple[list[om.Part], dict[str, KitMaterial]]:
+    """The speedometer's case round the screen `s`: its LCD under the screen, scaled to the screen's width, turned as
+    it is (two-sided: a bike's dashboard is seen from outside too)."""
+    pos, nrm, uv, tris, mat, textures, colours = _cab_mesh(GAUGE)
+    cx, cy, cz, width = GAUGE_LCD
+    k = s.width / width
+    r, u, f = (np.array(v) for v in basis(s.facing))
+    centre = np.array(s.centre) - 0.002 * np.array(s.facing)   # the LCD just behind the read-out
+    # Asset frame: +x the viewer's left (-r), +y up (u), +z away from the viewer (-f).
+    q = centre + k * ((pos[:, :1] - cx) * -r + (pos[:, 1:2] - cy) * u + (pos[:, 2:] - cz) * -f)
+    n = nrm[:, :1] * -r + nrm[:, 1:2] * u + nrm[:, 2:] * -f
+    parts, mats = [], {}
+    for m in np.unique(mat):
+        t = tris[mat == m]
+        used, inv = np.unique(t.reshape(-1), return_inverse=True)
+        verts = [om.Vertex(tuple(map(float, q[i])), tuple(map(float, n[i])), (float(uv[i, 0]), float(uv[i, 1])))
+                 for i in used]
+        key = f'gauge{m}'
+        parts.append(two_sided(om.Part(f'{name}_{key}', key, verts, [tuple(map(int, x)) for x in inv.reshape(-1, 3)])))
+        mats[key] = KitMaterial(f'parts/{GAUGE}/{textures[m]}' if textures[m] else tuple(int(c) for c in colours[m]))
+    return parts, mats
+
+
 def bike_rider(cabin: Cabin, ahead: float, drop: float, spread: float) -> Kit:  # noqa: ARG001 - open air
     """A bike's rider: the stock bike has its dashboard on the handlebars already; a small 'status' screen left of
     its gauges and a 'weapons' one right of them (`spread` out from the middle, `ahead` before the eye, `drop` below
-    it), each in a bezel, two-sided (seen from outside too)."""
+    it), each in a real digital speedometer's case (_gauge), two-sided (seen from outside too)."""
     parts, screens = [], []
+    mats = _materials('screen')
     for kind, x in (('status', spread), ('weapons', -spread)):
-        p, s = _screen(kind, (x, -drop, ahead), 0.11, 0.065, None)
-        parts += [two_sided(p), two_sided(_backing(f'bezel_{kind}', s, 0.008, 0.006))]
+        p, s = _screen(kind, (x, -drop, ahead), 0.11, 0.05, None)
+        case, case_mats = _gauge(f'case_{kind}', s)
+        parts += [two_sided(p)] + case
+        mats.update(case_mats)
         screens.append(s)
-    return Kit(parts, _materials('screen', 'metal_dark'), frozenset(q.name for q in parts), tuple(screens))
+    return Kit(parts, mats, frozenset(q.name for q in parts), tuple(screens))
+
+
+def _cab_kit(name: str, spec: CabSpec) -> KitFn:
+    def kit(cabin: Cabin) -> Kit:
+        return real_cab(cabin, spec)
+    kit.__name__ = name
+    kit.__doc__ = f'{name}: the real cab {spec.asset} (real_cab).'
+    return kit
 
 
 KITS: dict[str, KitFn] = {
-    'vehicle_cab': vehicle_cab,
-    'vehicle_cab_yoke': functools.partial(vehicle_cab, steer='yoke', floor=0.6, dash='photo_mrap_dashboard'),
-    'tracked_cab': functools.partial(vehicle_cab, steer='yoke', floor=0.6, tuck=0.45, dash='photo_mrap_dashboard'),
-    'pickup_cab': functools.partial(vehicle_cab, rake=1.2, crown=1.0),
-    'apc_cab': functools.partial(vehicle_cab, tuck=0.3, crown=2.0, dash='photo_mrap_dashboard'),
-    'truck_cab': functools.partial(vehicle_cab, rake=0.15, crown=0.6, dash='photo_mrap_dashboard'),
+    **{name: _cab_kit(name, spec) for name, spec in CABS.items()},
     'kei_dash': functools.partial(stock_dash, status=(0.2, -0.1, 0.42)),
     'trailer_dash': functools.partial(stock_dash, status=(0.3, -0.24, 0.62)),
     'troop_bay': troop_bay,

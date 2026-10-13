@@ -10,14 +10,12 @@ Textures (512 px unless noted):
     metal_dark       dark gunmetal (breech, grips, mounts), brushed
     rubber           black rubber / brow pads
     panel_switches   a row of toggle switches, guarded switches and labels
-    leather          a seat's brown leather
     canopy_frame     a canopy / window frame's grey, with rivets
     screen           a dark glass screen in a thin bezel (the plugin draws its live read-out over it: cockpits.Screen)
 """
 from __future__ import annotations
 
 import argparse
-import math
 import os
 import random
 import sys
@@ -91,14 +89,6 @@ def panel_switches() -> Image.Image:
     return img
 
 
-def leather() -> Image.Image:
-    img = noise((92, 62, 40), 14, 41, 1.6)
-    d = ImageDraw.Draw(img)
-    for x in range(0, SIZE, 128):
-        d.line((x, 0, x, SIZE), fill=(60, 40, 26), width=4)
-    return img
-
-
 def canopy_frame() -> Image.Image:
     img = worn(noise((92, 96, 98), 8, 51), (60, 62, 64), 52, 30)
     d = ImageDraw.Draw(img)
@@ -124,7 +114,6 @@ TEXTURES = {
     'metal_dark': lambda: brushed((54, 56, 58), 5),
     'rubber': lambda: noise((24, 24, 24), 5, 6, 1.5),
     'panel_switches': panel_switches,
-    'leather': leather,
     'canopy_frame': canopy_frame,
     'screen': screen,
 }

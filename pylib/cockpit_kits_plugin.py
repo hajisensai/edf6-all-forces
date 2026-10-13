@@ -2,372 +2,307 @@
 conventions are its docstring's: a kit is a function of the room round its eye, returning parts in the eye's frame
 laid out inside that room). The plugin's other vehicles take the families' kits (pylib/cockpit_fits_plugin.py: the
 Katyusha's truck cab, the sidecar's bike, the artillery's turret gunner, a camera's monitor for the drones, the
-drill, the Sazabi and the gunship's side gunner).
+drill, the Sazabi and the gunship's side gunner; the transport helicopter's pilot sits in the stock 410's cockpit).
 
-The plugin's aircraft are the stock bombers' and transports' hulls with no interior: seen from a seat the hull is
-not drawn (the game culls its backs), so a kit is the whole cockpit, and the view ahead stays open for flying and
-aiming (the user: "这是为游戏服务的"): every panel's top 11-12 degrees under the line of sight, no canopy bow or post
-across the view ahead, the information on the cockpit's screens (cockpits.Screen).
+Every cockpit here is a real one, cut out of a modelled aircraft (Sketchfab, CC BY 4.0; the user, 2026-10-13: "飞机座舱
+拿不到模型吗", the photographs on boxes were "太抽象了"): tools/prep_cockpit_plugin.py keeps each model's cockpit round
+its seat's eye, in the eye's frame and in metres, as parts/<slug>/cockpit.npz with its textures (credits:
+<model dir>/cockpits/CREDITS_plugin.txt).
 
-    jet_f16           a fighter's cockpit after the F-16A's: its front panel photographed from the seat (threat
-                      scope: 'status', stores control panel: 'weapons'), the HUD on its control panel (a thin
-                      combiner frame round the 'hud' glass), the left auxiliary panel and the side-stick console
-                      (an F-16's, photographed), the tub under the canopy sills, the ejection seat
-    jet_f35           after the F-35's: the panoramic display in its housing (four portals: map, flight, weapons,
-                      status), its throttle and side stick (photographed on the mock-up), the helmet's display as
-                      the 'hud' screen (no combiner glass), the tub, the seat
-    plane_deck        a transport's flight deck after an HC-130H's, from the left (pilot's) seat: the photographed
-                      panel in two halves (the pilot's tablet: 'map', his attitude indicator: 'flight', the engine
-                      display: 'status'), the glare shield, the throttle quadrant, the overhead panel, the
-                      windscreen's posts only at the panel's ends and between its halves, the copilot's seat
-    plane_deck_gun    the same deck for a gunship's pilot: the engine display's lower half is his 'weapons'
-    plane_hold        a C-130's cargo hold round a passenger on the side-wall bench, looking across: the roller
-                      floor, the frames and stringers of the walls and roof (photographed), the troop seats' red
-                      webbing along both walls
-    passenger         another passenger in the same hold: an eye only (the hold is the first passenger's kit)
+    jet_f16           the F-16D Block 60's front cockpit: the up-front controls and the two MFDs (weapons left, map
+                      right), the threat scope ('status'), the data entry display ('flight'), the side consoles, the
+                      side stick, the ejection seat; the HUD's two posts round the line of sight, its glass left out
+                      (the 'hud' screen: the plugin draws its symbols on the world through it)
+    jet_j10s          the J-10S's front cockpit (the plugin's other fighters: a modern three-display panel, the
+                      F-35's stand-in): the three MFDs (map, flight, weapons), the up-front panel's displays
+                      ('status'), the HUD's posts (the 'hud' screen between them); the windscreen's arch left out
+    plane_deck        the C-130J's flight deck from the left (pilot's) seat: its glass panel (the pilot's PFD:
+                      'flight', his nav display: 'map', the engine display: 'status'), the yoke, the pedestal, the
+                      copilot's seat, the overhead console, the side windows' frames; the view ahead over the glare
+                      shield kept open (its HUD and the windscreen's posts there left out)
+    plane_deck_gun    the same deck for a gunship's pilot: the copilot's nav display is his 'weapons'
+    plane_hold        the C-130J's cargo hold round a passenger on the right-hand troop seats, looking across: the
+                      red troop seats along both walls, the roller floor, the walls' insulation and cargo nets, the
+                      roof's ribs and lights
+    heli_cabin        the UH-60M's troop cabin from a forward-facing troop seat: the seats round him, the cabin's
+                      windows, the gunners' seats and the cockpit ahead
+    passenger         another passenger in a hold another seat's kit draws: an eye only
 
-The panels, consoles, floors and walls are photographs of real cockpits on faces turned to the eye (the eye never moves
-inside the cockpit, so they read as the real thing): textures/plugin_*, cut by tools/prep_cockpit_plugin.py from public
-domain / CC BY photographs (credits: <model dir>/cockpits/CREDITS_plugin.txt); the rest are the shared textures
-(tools/make_cockpit_textures.py) and the helicopter cockpits' seat and overhead panel (cockpit_kits_air).
+A vehicle's room is not the real aircraft's (the stock bombers' and transports' hulls the plugin flies are of their own
+size): a cockpit is cut at the room's walls (each triangle clipped there, MARGIN inside the hull) and, where the room
+is smaller than the cockpit needs (Model.full), scaled down about the eye, so from the seat it looks the same, only
+the walls are nearer. A hold that other passengers' eyes sit in has a fixed scale (Model.scale): their places in it
+(pylib/cockpit_fits_plugin.py) are measured on the same model at the same scale. The view ahead stays open for flying
+and aiming (the user: "这是为游戏服务的"): the hull itself is not drawn from inside (the game culls its backs), the
+cockpits' canopy bows, HUD glass and windscreen posts before the line of sight are left out when the model is cut.
 """
 from __future__ import annotations
 
-import math
+import functools
+import os
+from dataclasses import dataclass, replace
 
+import numpy as np
+
+import cockpits
 import obj_model as om
 from cockpit_room import TEX, Cabin, _room
-from cockpit_kits_air import _overhead, _screen, _seat, _stretched, beam, wall
-from cockpit_shapes import basis, box, frame, panel
+from cockpit_shapes import panel
 from cockpits import Kit, KitFn, KitMaterial, Screen
 
 Vec3 = tuple[float, float, float]
-Box = tuple[int, int, int, int]
-UV = tuple[float, float]
-UVBox = tuple[float, float, float, float]
+SIDES = ('left', 'right', 'up', 'down', 'ahead', 'back')
+SCREEN_PROUD = 0.003   # m a screen's read-out stands before the display it is drawn on (no z-fighting)
 
 
-def _px(box: Box, pts: list[tuple[float, float]]) -> list[UV]:
-    """Photograph pixels as (u, v) fractions of the texture cut from `box` (tools/prep_cockpit_plugin.py CROPS)."""
-    x0, y0, x1, y1 = box
-    return [((x - x0) / (x1 - x0), (y - y0) / (y1 - y0)) for x, y in pts]
+@dataclass(frozen=True)
+class ScreenAt:
+    """A live read-out on the model's own display (measured on the cut model, full size, eye frame): its centre, the
+    display's facing (toward the eye), width and height."""
+    kind: str
+    centre: Vec3
+    facing: Vec3
+    width: float
+    height: float
 
 
-def _pxbox(box: Box, b: Box) -> UVBox:
-    (u0, v0), (u1, v1) = _px(box, [(b[0], b[1]), (b[2], b[3])])
-    return (u0, v0, u1, v1)
+@dataclass(frozen=True)
+class Model:
+    """A kit cut from parts/<slug>/cockpit.npz: `want` how far its walls go at full size (the cut box; the room may
+    pull them in), `least` the room it cannot do without (cockpit_room._room), `full` the room it needs at full size
+    (a side with less scales it down, no smaller than `least_scale`; `scale`: always that scale), its screens."""
+    slug: str
+    want: Cabin
+    least: Cabin
+    full: Cabin
+    screens: tuple[ScreenAt, ...] = ()
+    least_scale: float = 0.6
+    scale: float | None = None
+    caps: tuple[str, ...] = ()          # sides ('left', 'right', 'back') whose cut is closed by a plain wall
+    cap_texture: str = 'metal_dark'     # the closing wall's texture (textures/<name>.png)
 
 
-# The panels' boxes in their photographs (tools/prep_cockpit_plugin.py CROPS: change both together), the textures'
-# aspect (height / width) and, measured in the photographs, their face outlines and displays.
-_F16, _C130L, _C130R = (80, 128, 1106, 582), (230, 640, 1920, 1760), (1920, 640, 3610, 1760)
-ASPECT = {'plugin_f16a_panel': 454 / 1026, 'plugin_f35_panel': 0.5, 'plugin_c130_panel_l': 1120 / 1690,
-          'plugin_c130_panel_r': 1120 / 1690, 'plugin_f16_console_l': 740 / 432, 'plugin_f16_console_r': 954 / 782,
-          'plugin_f35_throttle': 620 / 410, 'plugin_f35_stick': 439 / 307}
-F16_OUTLINE = _px(_F16, [(84, 550), (84, 345), (228, 143), (402, 138), (470, 160), (730, 160), (810, 136), (968, 138),
-                         (1102, 340), (1102, 492), (862, 492), (780, 578), (482, 578), (470, 550)])
-F16_COAMING = _px(_F16, [(228, 140), (968, 140)])           # the coaming's top corners
-F16_RWR = _pxbox(_F16, (357, 232, 458, 334))                # the threat warning scope
-F16_SCP = _pxbox(_F16, (292, 398, 443, 512))                # the stores control panel's display
-F16_HUD_BASE = _pxbox(_F16, (470, 160, 730, 175))           # the HUD control panel's top: the HUD stands on it
-F35_GLASS = (0.07 / 1.14, 0.16 / 1.78, 1.07 / 1.14, 1.16 / 1.78)   # the display glass in its housing
-C130_EFB = _pxbox(_C130L, (466, 980, 727, 1375))            # the pilot's tablet
-C130_ADI = _pxbox(_C130L, (905, 772, 1125, 986))            # his attitude indicator
-C130_ENG_HI = _pxbox(_C130R, (1920, 807, 2235, 1205))       # the engine display (its right half's part)
-C130_ENG_LO = _pxbox(_C130R, (1920, 1232, 2235, 1617))
-C130_PILOT_U = (1010 - 230) / 1690                         # the pilot's yoke column on the left half
+@functools.lru_cache(maxsize=None)
+def _cockpit(slug: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, tuple[str, ...],
+                                 np.ndarray]:
+    """The cut model in its eye's frame at full size: positions, normals, UVs, triangles, each triangle's material,
+    the materials' texture files (under parts/<slug>/, '' none) and sRGB base colours."""
+    with np.load(os.path.join(cockpits.asset_root(), 'parts', slug, 'cockpit.npz'), allow_pickle=False) as z:
+        return (z['pos'].astype(np.float64), z['nrm'].astype(np.float64), z['uv'].astype(np.float64),
+                z['tris'].astype(np.int64), z['mat'].astype(np.int64), tuple(str(t) for t in z['textures']),
+                z['colours'])
 
 
-def _materials(parts: list[om.Part], solid: dict[str, tuple[int, int, int]] | None = None) -> dict[str, KitMaterial]:
-    solid = solid or {}
-    return {m: KitMaterial(solid.get(m, TEX.format(m))) for m in sorted({p.material for p in parts})}
+def _clip(pos: np.ndarray, nrm: np.ndarray, uv: np.ndarray, tris: np.ndarray, lo: np.ndarray, hi: np.ndarray
+          ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """The triangles cut to the box lo..hi: wholly inside kept, wholly beyond one of its planes left out, the rest
+    clipped at its planes (new corners interpolated, the pieces fanned). Returns positions, normals, UVs, triangles and
+    each triangle's source triangle."""
+    c = pos[tris]
+    inside = ((c >= lo) & (c <= hi)).all((1, 2))
+    beyond = ((c < lo).all(1) | (c > hi).all(1)).any(1)
+    cross = np.flatnonzero(~inside & ~beyond)
+    out_p, out_n, out_t, out_tri, out_src = [pos], [nrm], [uv], [tris[inside]], [np.flatnonzero(inside)]
+    base = len(pos)
+    planes = [(axis, bound, sign) for axis in range(3) for bound, sign in ((lo[axis], 1.0), (hi[axis], -1.0))]
+    new_p, new_n, new_t, new_tri, new_src = [], [], [], [], []
+    for k in cross:
+        poly = [(pos[i], nrm[i], uv[i]) for i in tris[k]]
+        for axis, bound, sign in planes:
+            if not poly:
+                break
+            nxt = []
+            for j, cur in enumerate(poly):
+                prev = poly[j - 1]
+                dc, dp = sign * (cur[0][axis] - bound), sign * (prev[0][axis] - bound)
+                if (dc >= 0) != (dp >= 0):
+                    t = dp / (dp - dc)
+                    nxt.append(tuple(prev[m] + t * (cur[m] - prev[m]) for m in range(3)))
+                if dc >= 0:
+                    nxt.append(cur)
+            poly = nxt
+        if len(poly) < 3:
+            continue
+        first = base + len(new_p)
+        for p, n, t in poly:
+            new_p.append(p)
+            new_n.append(n)
+            new_t.append(t)
+        for j in range(1, len(poly) - 1):
+            new_tri.append((first, first + j, first + j + 1))
+            new_src.append(k)
+    if new_p:
+        out_p.append(np.array(new_p))
+        out_n.append(np.array(new_n))
+        out_t.append(np.array(new_t))
+        out_tri.append(np.array(new_tri, dtype=np.int64))
+        out_src.append(np.array(new_src, dtype=np.int64))
+    return (np.concatenate(out_p), np.concatenate(out_n), np.concatenate(out_t), np.concatenate(out_tri),
+            np.concatenate(out_src))
 
 
-def _toward(c: Vec3) -> Vec3:
-    n = math.sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2])
-    return (-c[0] / n, -c[1] / n, -c[2] / n)
+def _parts(slug: str, k: float, lo: np.ndarray, hi: np.ndarray) -> tuple[list[om.Part], dict[str, KitMaterial]]:
+    """The cut model scaled `k` about the eye and clipped to lo..hi, one part per material."""
+    pos, nrm, uv, tris, mat, textures, colours = _cockpit(slug)
+    p, n, t, tri, src = _clip(pos * k, nrm, uv, tris, lo, hi)
+    m_of = mat[src]
+    parts, mats = [], {}
+    for m in np.unique(m_of):
+        sel = tri[m_of == m]
+        used, inv = np.unique(sel.reshape(-1), return_inverse=True)
+        nn = n[used] / np.maximum(np.linalg.norm(n[used], axis=1, keepdims=True), 1e-12)
+        verts = [om.Vertex((float(a), float(b), float(c)), (float(d), float(e), float(f)), (float(u), float(v)))
+                 for (a, b, c), (d, e, f), (u, v) in zip(p[used], nn, t[used])]
+        name = f'm{m}'
+        parts.append(om.Part(name, name, verts, [tuple(map(int, r)) for r in inv.reshape(-1, 3)]))
+        mats[name] = KitMaterial(f'parts/{slug}/{textures[m]}' if textures[m] else tuple(int(c) for c in colours[m]))
+    return parts, mats
 
 
-def _on(centre: Vec3, facing: Vec3, width: float, height: float, uv: UV) -> Vec3:
-    """The point at (u, v) on a width x height face at `centre` facing `facing` (its texture upright)."""
-    r, up, _ = basis(facing)
-    du, dv = (uv[0] - 0.5) * width, (0.5 - uv[1]) * height
-    return tuple(centre[k] + r[k] * du + up[k] * dv for k in range(3))  # type: ignore[return-value]
+CAP_AXES = {'left': (0, 1.0), 'right': (0, -1.0), 'back': (2, -1.0)}
 
 
-def _photo_face(name: str, texture: str, centre: Vec3, width: float, height: float,
-                outline: list[UV] | None = None) -> om.Part:
-    """A photographed panel on a face turned to the eye, `width` x `height` at `centre`, cut to its `outline` (u, v
-    round the face; None: the whole rectangle)."""
-    facing = _toward(centre)
-    if outline is None:
-        return panel(name, texture, centre, width, height, facing)
-    if sum((a[0] - b[0]) * (-a[1] - b[1]) for a, b in zip(outline, outline[1:] + outline[:1])) < 0:
-        outline = list(reversed(outline))   # counter-clockwise seen from the front
-    mid = (sum(u for u, _ in outline) / len(outline), sum(v for _, v in outline) / len(outline))
-    verts = [om.Vertex(_on(centre, facing, width, height, uv), facing, uv) for uv in [mid] + outline]
-    n = len(outline)
-    return om.Part(name, texture, verts, [(0, 1 + k, 1 + (k + 1) % n) for k in range(n)])
+def _caps(parts: list[om.Part], mats: dict[str, KitMaterial], model: Model, lo: np.ndarray, hi: np.ndarray) -> None:
+    """A plain wall over each of `model.caps` where the model is cut there (a hold cut short of its real ends would
+    open on the world: the hull is not drawn from inside), as wide and high as the model's cut section, facing the
+    eye."""
+    if not model.caps or not parts:
+        return
+    pts = np.array([v.pos for p in parts for v in p.verts])
+    a, b = pts.min(0), pts.max(0)
+    for side in model.caps:
+        axis, sign = CAP_AXES[side]
+        at = hi[axis] if sign > 0 else lo[axis]
+        if abs((b[axis] if sign > 0 else a[axis]) - at) > 0.01:   # the model ends short of the wall: nothing cut
+            continue
+        u, v = [k for k in range(3) if k != axis]
+        centre = [0.0, 0.0, 0.0]
+        centre[axis] = at - sign * 0.002
+        centre[u], centre[v] = (a[u] + b[u]) / 2, (a[v] + b[v]) / 2
+        size = {u: b[u] - a[u], v: b[v] - a[v]}
+        facing = [0.0, 0.0, 0.0]
+        facing[axis] = -sign
+        width, height = (size[2], size[1]) if axis == 0 else (size[0], size[1])
+        parts.append(panel(f'cap_{side}', 'cap', tuple(centre), width, height, tuple(facing),
+                           uv=(0.0, 0.0, width / 0.8, height / 0.8)))
+        mats['cap'] = KitMaterial(TEX.format(model.cap_texture))
 
 
-def _display(parts: list[om.Part], screens: list[Screen], kind: str, centre: Vec3, width: float, height: float,
-             box: UVBox, inset: float = 0.0) -> None:
-    """A live read-out on a photographed display `box` (u0, v0, u1, v1) of the face at `centre`."""
-    u0, v0, u1, v1 = box
-    facing = _toward(centre)
-    c = _on(centre, facing, width, height, ((u0 + u1) / 2, (v0 + v1) / 2))
-    _screen(parts, screens, kind, c, facing, (u1 - u0) * width - inset, (v1 - v0) * height - inset)
-
-
-def _tub(parts: list[om.Part], left: float, right: float, sill: float, floor: float, back: float, front: float,
-         well_top: float, material: str = 'metal_dark') -> None:
-    """A cockpit's tub round the seat: the side walls from the floor up to the sills (x `left` and -`right`), the
-    floor, the foot well's front wall at `front` up to `well_top` (behind the panel), the bulkhead behind at
-    -`back`; its sills' rails (the canopy's frame, low at the view's sides)."""
-    def side(x: float, name: str) -> None:
-        parts.append(wall(name, material, [(x, floor, -back), (x, floor, front), (x, sill, front), (x, sill, -back)],
-                          tile=0.6))
-    side(left, 'tub_l')
-    side(-right, 'tub_r')
-    parts.append(wall('tub_floor', material, [(left, floor, -back), (-right, floor, -back), (-right, floor, front),
-                                              (left, floor, front)], tile=0.6))
-    parts.append(wall('foot_well', material, [(left, floor, front), (-right, floor, front), (-right, well_top, front),
-                                              (left, well_top, front)], tile=0.6))
-    parts.append(wall('tub_back', material, [(left, floor, -back), (-right, floor, -back), (-right, sill, -back),
-                                             (left, sill, -back)], tile=0.6))
-    for x, s in ((left - 0.015, 'l'), (-right + 0.015, 'r')):
-        parts.append(beam(f'sill_{s}', 'canopy_frame', (x, sill, -back + 0.02), (x, sill, front - 0.08), 0.03))
-
-
-# ---------------------------------------------------------------------------------------------------- fighters
-def _fighter(cabin: Cabin, style: str) -> Kit:
-    """A single-seat fighter's cockpit after the F-16A's (style 'f16') or the F-35's ('f35'), centred on the eye."""
-    name = f'jet_{style}'
-    r = _room(cabin, {'left': 0.55, 'right': 0.55, 'up': 0.35, 'down': 0.85, 'ahead': 0.95, 'back': 0.6},
-              {'left': 0.3, 'right': 0.3, 'up': 0.06, 'down': 0.45, 'ahead': 0.5, 'back': 0.2}, name)
-    L, R, U, D, A, B = r['left'], r['right'], r['up'], r['down'], r['ahead'], r['back']
-    parts: list[om.Part] = []
-    screens: list[Screen] = []
-    half = min(L, R)
-    z = min(0.72 if style == 'f16' else 0.66, A - 0.06)
-    top = -z * math.tan(math.radians(11.0))           # the panel's top 11 degrees under the line of sight
-    floor, sill = -D, max(-D + 0.3, -0.33)
-    texture = 'plugin_f16a_panel' if style == 'f16' else 'plugin_f35_panel'
-    width = min(1.06 * z if style == 'f16' else 0.98 * z, 2 * half - 0.04)
-    height = width * ASPECT[texture]
-    if top - height < floor + 0.08:                   # a shallow tub: the panel smaller, its top where it was
-        height = top - floor - 0.08
-        width = height / ASPECT[texture]
-    centre = (0.0, top - height / 2, z)
-    lip = (top + 0.004, z - 0.02)                      # the glare shield's back edge (y, z)
-    if style == 'f16':
-        parts.append(_photo_face('panel', texture, centre, width, height, F16_OUTLINE))
-        _display(parts, screens, 'status', centre, width, height, F16_RWR, 0.004)
-        _display(parts, screens, 'weapons', centre, width, height, F16_SCP, 0.004)
-        _hud(parts, screens, centre, width, height)
-        coaming = [(0.5 - F16_COAMING[0][0]) * width, (0.5 - F16_COAMING[1][0]) * width]   # x of its left / right ends
+def _model_kit(cabin: Cabin, name: str, model: Model) -> Kit:
+    """`model` laid out in the room round the eye: scaled (Model.full / scale), cut at the walls."""
+    r = _room(cabin, dict(model.want), dict(model.least), name)   # raises where the room is too small
+    if model.scale is not None:
+        k = model.scale
     else:
-        parts.append(_photo_face('panel', texture, centre, width, height))
-        u0, v0, u1, v1 = F35_GLASS
-        portal = (u1 - u0) / 4
-        for k, kind in enumerate(('map', 'flight', 'weapons', 'status')):
-            _display(parts, screens, kind, centre, width, height,
-                     (u0 + k * portal + 0.006, v0 + 0.012, u0 + (k + 1) * portal - 0.006, v1 - 0.012))
-        screens.append(Screen('hud', (0.0, -0.02, 0.9), (0.0, 0.0, -1.0), 0.36, 0.27))   # the helmet's display
-        coaming = [width / 2 - 0.01, -width / 2 + 0.01]
-    # The glare shield: from the coaming forward, narrowing toward the windscreen, low over the panel.
-    depth = min(0.16, A - z - 0.02)
-    if depth > 0.03:
-        xl, xr = coaming
-        corners = [(xl, lip[0], lip[1]), (xr, lip[0], lip[1]), (xr * 0.8, lip[0] - 0.012, lip[1] + depth),
-                   (xl * 0.8, lip[0] - 0.012, lip[1] + depth)]
-        parts.append(wall('glare_shield', 'rubber', corners, toward=(0.0, 1.0, lip[1])))
-    # The side consoles along the tub's walls (switch panels on top), the throttle / side stick photographed on a
-    # face turned to the eye standing on each.
-    sides = (('plugin_f16_console_l', 'plugin_f16_console_r') if style == 'f16' else
-             ('plugin_f35_throttle', 'plugin_f35_stick'))
-    deck = max(floor + 0.15, sill - 0.2)               # the consoles' tops
-    cw = max(0.08, min(0.15, half - 0.3))
-    c0, c1 = -min(B, 0.5) + 0.05, z - 0.14
-    for sign, texture_s, w in ((1, sides[0], 0.15), (-1, sides[1], 0.19)):
-        wall_x = L if sign > 0 else R
-        x = sign * (wall_x - cw / 2)
-        parts.append(box(f'console_{sign}', 'air_tub', (x, (deck + floor) / 2, (c0 + c1) / 2),
-                         (cw, deck - floor, c1 - c0), faces=('X' if sign > 0 else 'x') + 'zZ'))
-        parts.append(panel(f'console_top_{sign}', 'air_ah64_console', (x, deck + 0.002, (c0 + c1) / 2), c1 - c0, cw,
-                           (-0.2 * sign, 1.0, 0.0), up=(-sign, 0, 0), uv=(0, 0, max(1.0, round((c1 - c0) / 0.3)), 1)))
-        h = min(w * ASPECT[texture_s], sill - deck + 0.06, 0.3)
-        w = h / ASPECT[texture_s]
-        c = (sign * (wall_x - cw - w / 2 + 0.05), deck + h / 2, min(0.28, z - 0.28))
-        parts.append(_photo_face(f'grip_{texture_s[7:]}', texture_s, c, w, h))
-    _tub(parts, L, R, sill, floor, min(B, 0.55), z + 0.04, top - 0.55 * height, 'air_tub')
-    # The coaming's cheeks: from the panel's sides out to the sills, so the panel stands in the cockpit's width.
-    edge = top - (F16_OUTLINE[1][1] if style == 'f16' else 0.0) * height   # the panel's side edge's top
-    for sign in (1, -1):
-        px, wx = sign * width / 2, sign * ((L if sign > 0 else R) - 0.005)
-        low = max(top - height, sill - 0.12)
-        parts.append(wall(f'cheek_{sign}', 'air_tub', [(px, max(edge, low + 0.02), z + 0.005), (px, low, z + 0.005),
-                                                      (wx, low, z - 0.18), (wx, sill, z - 0.18)]))
-    seat_half = max(0.17, min(0.25, half - 0.06))
-    pan = max(floor + 0.05, -0.78)
-    if pan + 0.94 < U - 0.02:                          # the ejection seat's head box clears the canopy
-        _seat(parts, seat_half, pan, -min(B, 0.4) + 0.06)
-    return Kit(parts, _materials(parts), screens=tuple(screens))
+        k = max(model.least_scale, min(1.0, *(r[side] / need for side, need in model.full.items())))
+    wall = r
+    lo = np.array([-wall['right'], -wall['down'], -wall['back']])
+    hi = np.array([wall['left'], wall['up'], wall['ahead']])
+    parts, mats = _parts(model.slug, k, lo, hi)
+    _caps(parts, mats, model, lo, hi)
+    screens = []
+    for s in model.screens:
+        f = np.array(s.facing) / np.linalg.norm(s.facing)
+        c = np.array(s.centre) * k + SCREEN_PROUD * f
+        if (c >= lo).all() and (c <= hi).all():
+            screens.append(Screen(s.kind, tuple(map(float, c)), tuple(map(float, f)), s.width * k, s.height * k))
+    return Kit(parts, mats, screens=tuple(screens))
 
 
-def _hud(parts: list[om.Part], screens: list[Screen], centre: Vec3, width: float, height: float) -> None:
-    """The F-16's HUD on its control panel: the stand, two thin posts and a thin frame round the combiner glass (no
-    glass drawn: the 'hud' screen's symbols are drawn on the world through it)."""
-    u0, v0, u1, _ = F16_HUD_BASE
-    base = _on(centre, _toward(centre), width, height, ((u0 + u1) / 2, v0))
-    bw = (u1 - u0) * width
-    parts.append(box('hud_stand', 'metal_dark', (base[0], base[1] + 0.02, base[2] - 0.05), (bw * 0.8, 0.04, 0.1)))
-    gw, gh = 0.75 * bw, 0.13
-    gc = (base[0], base[1] + 0.05 + gh / 2, base[2] - 0.1)
-    facing = (0.0, 0.12, -1.0)
-    parts.append(frame('hud_frame', 'metal_dark', gc, gw, gh, 0.006, facing, 0.008))
-    for s in (1, -1):
-        x = base[0] + s * (gw / 2 - 0.003)
-        parts.append(beam(f'hud_post_{s}', 'metal_dark', (x, base[1] + 0.035, base[2] - 0.08),
-                          (x, gc[1] - gh / 2 + 0.003, gc[2]), 0.008))
-    screens.append(Screen('hud', (gc[0], gc[1], gc[2] - 0.002), facing, gw - 0.014, gh - 0.014))
+def _kit(name: str, model: Model, doc: str) -> KitFn:
+    def kit(cabin: Cabin) -> Kit:
+        return _model_kit(cabin, name, model)
+    kit.__name__, kit.__doc__ = name, doc
+    return kit
 
 
-def jet_f16(cabin: Cabin) -> Kit:
-    return _fighter(cabin, 'f16')
+# ---------------------------------------------------------------------------------------------------- the models
+FIGHTER_WANT = {'left': 0.62, 'right': 0.62, 'up': 0.5, 'down': 1.15, 'ahead': 1.8, 'back': 0.45}
+FIGHTER_LEAST = {'left': 0.3, 'right': 0.3, 'up': 0.06, 'down': 0.4, 'ahead': 0.6, 'back': 0.15}
+# A fighter's panel and consoles: the side consoles 0.5 m out, the MFDs 0.3-0.45 m down and 0.7-0.9 m ahead.
+FIGHTER_FULL = {'left': 0.5, 'right': 0.5, 'down': 0.6, 'ahead': 0.95}
 
+# The F-16D's displays (tools/prep_cockpit_plugin.py F16D; measured on the cut model by casting rays from the eye):
+# the two MFDs, the threat warning scope, the data entry display, the HUD's glass between its posts.
+F16 = Model('plugin_f16d', FIGHTER_WANT, FIGHTER_LEAST, FIGHTER_FULL, (
+    ScreenAt('weapons', (0.178, -0.309, 0.889), (0.0, 0.113, -0.994), 0.11, 0.11),
+    ScreenAt('map', (-0.179, -0.309, 0.889), (0.0, 0.113, -0.994), 0.11, 0.11),
+    ScreenAt('status', (0.156, -0.179, 0.893), (0.0, 0.113, -0.994), 0.052, 0.052),
+    ScreenAt('flight', (-0.133, -0.104, 0.733), (0.018, 0.259, -0.966), 0.064, 0.028),
+    ScreenAt('hud', (0.0, 0.05, 0.70), (0.0, 0.0, -1.0), 0.14, 0.15),
+))
+# The J-10S's: its three MFDs, the up-front control panel's displays, the HUD's glass between its posts.
+J10 = Model('plugin_j10s', FIGHTER_WANT, FIGHTER_LEAST, FIGHTER_FULL, (
+    ScreenAt('map', (0.157, -0.440, 0.708), (0.0, 0.174, -0.985), 0.115, 0.105),
+    ScreenAt('flight', (-0.010, -0.454, 0.705), (0.0, 0.174, -0.985), 0.115, 0.095),
+    ScreenAt('weapons', (-0.177, -0.440, 0.708), (0.0, 0.174, -0.985), 0.115, 0.105),
+    ScreenAt('status', (-0.016, -0.242, 0.567), (0.0, -0.276, -0.961), 0.062, 0.07),
+    ScreenAt('hud', (0.0, -0.095, 0.625), (0.0, 0.0, -1.0), 0.16, 0.13),
+))
 
-def jet_f35(cabin: Cabin) -> Kit:
-    return _fighter(cabin, 'f35')
+# The same cockpit for a seat in a narrow canopy bump (the multirole's: closed only 0.23 m either side of the eye and
+# 0.18 m over it, seen along the diagonals): the walls that close, the cockpit scaled to them (from the seat it looks
+# the same, its consoles cut where a full-size one's would be 0.5 m out).
+J10_NARROW = replace(J10, want={**FIGHTER_WANT, 'left': 0.25, 'right': 0.25, 'up': 0.2, 'back': 0.38},
+                     least={**FIGHTER_LEAST, 'left': 0.15, 'right': 0.15}, least_scale=0.4)
 
+# The C-130J's flight deck from the left seat (tools/prep_cockpit_plugin.py C130_DECK): the windscreens 1-1.3 m ahead,
+# the overhead console 0.3-0.9 m up; a lower roof scales it down (the stock bomber's cockpit bump: 0.64 m over the eye).
+# Its displays: the pilot's PFD, the engine display, the two displays right of it (nav, the copilot's).
+DECK_SCREENS = (
+    ScreenAt('flight', (0.022, -0.475, 0.854), (0.0, 0.0, -1.0), 0.17, 0.14),
+    ScreenAt('status', (-0.483, -0.530, 0.851), (0.0, 0.0, -1.0), 0.17, 0.23),
+    ScreenAt('map', (-0.727, -0.531, 0.851), (0.0, 0.0, -1.0), 0.2, 0.25),
+)
+DECK = Model('plugin_c130_deck', {'left': 1.4, 'right': 3.2, 'up': 1.2, 'down': 1.3, 'ahead': 2.3, 'back': 1.4},
+             {'left': 0.3, 'right': 0.5, 'up': 0.2, 'down': 0.5, 'ahead': 0.7, 'back': 0.3},
+             {'left': 1.2, 'up': 1.0, 'down': 1.1, 'ahead': 1.4}, DECK_SCREENS, least_scale=0.5)
+DECK_GUN = replace(DECK, screens=DECK_SCREENS + (
+    ScreenAt('weapons', (-1.018, -0.577, 0.856), (0.0, 0.0, -1.0), 0.22, 0.28),))
 
-# ----------------------------------------------------------------------------------------------- flight decks
-def _deck(cabin: Cabin, gunship: bool) -> Kit:
-    """A transport's flight deck from the left seat, after an HC-130H's: the pilot's eye over his yoke column, the
-    panel's two halves (the right half the copilot's, angled to the eye like the left), the cabin to his right."""
-    name = 'plane_deck_gun' if gunship else 'plane_deck'
-    r = _room(cabin, {'left': 0.65, 'right': 1.75, 'up': 0.75, 'down': 1.1, 'ahead': 1.3, 'back': 0.9},
-              {'left': 0.3, 'right': 0.55, 'up': 0.2, 'down': 0.6, 'ahead': 0.65, 'back': 0.3}, name)
-    L, R, U, D, A, B = r['left'], r['right'], r['up'], r['down'], r['ahead'], r['back']
-    parts: list[om.Part] = []
-    screens: list[Screen] = []
-    z = min(0.85, A - 0.1)
-    top = -z * math.tan(math.radians(12.0))
-    # Each half's width: a real one about 0.95 m, the pilot's column at C130_PILOT_U of the left one.
-    half = min(0.95, (L - 0.03) / C130_PILOT_U, (R - 0.05) / (2 - C130_PILOT_U))
-    h = half * ASPECT['plugin_c130_panel_l']
-    if top - h < -D + 0.3:
-        h = top + D - 0.3
-        half = h / ASPECT['plugin_c130_panel_l']
-    xl = (C130_PILOT_U - 0.5) * half                  # the left half's centre x (+x is left)
-    xr = xl - half                                     # the right half's
-    yc = top - h / 2
-    left_c, right_c = (xl, yc, z), (xr, yc, z - 0.08)
-    parts.append(_photo_face('panel_l', 'plugin_c130_panel_l', left_c, half, h))
-    parts.append(_photo_face('panel_r', 'plugin_c130_panel_r', right_c, half, h))
-    _display(parts, screens, 'map', left_c, half, h, C130_EFB, 0.006)
-    _display(parts, screens, 'flight', left_c, half, h, C130_ADI, 0.004)
-    _display(parts, screens, 'status', right_c, half, h, C130_ENG_HI, 0.004)
-    if gunship:
-        _display(parts, screens, 'weapons', right_c, half, h, C130_ENG_LO, 0.004)
-    # The glare shield over both halves, the fabric cover stretched once over it.
-    lip, depth = z - 0.06, min(0.3, A - z - 0.05)
-    edge_l, edge_r = xl + half / 2, xr - half / 2
-    if depth > 0.05:
-        corners = [(edge_l, top + 0.02, lip), (edge_r, top + 0.02, lip - 0.08), (edge_r * 0.9, top + 0.0, lip + depth),
-                   (edge_l * 0.9, top + 0.0, lip + depth)]
-        parts.append(_stretched(wall('glare_shield', 'plugin_c130_glare', corners, toward=(0.0, 1.0, lip))))
-    # The throttle quadrant on the pedestal between the seats, sloping down toward them.
-    pc = (xl + xr) / 2
-    pw = min(0.5, half * 0.55)
-    ya, za, yb, zb = top - h - 0.01, z - 0.04, top - h - 0.5, z - 0.45
-    if yb > -D + 0.05:
-        corners = [(pc + pw / 2, ya, za), (pc - pw / 2, ya, za), (pc - pw / 2, yb, zb), (pc + pw / 2, yb, zb)]
-        parts.append(_stretched(wall('pedestal', 'plugin_c130_pedestal', corners, toward=(pc, 0.4, 0.0))))
-        parts.append(box('pedestal_box', 'metal_dark', (pc, (yb - D) / 2, zb + 0.15), (pw, yb + D, 0.3), faces='xXZ'))
-    # The windscreen: posts at the panel's two ends and between its halves (not before the pilot), the roof.
-    roof, roof_front = U, max(-B + 0.1, z - 0.22)
-    for k, (x, zp) in enumerate(((edge_l, lip), ((xl + xr) / 2, lip - 0.04), (edge_r, lip - 0.08))):
-        x = min(max(x, -R + 0.04), L - 0.04)
-        parts.append(beam(f'post_{k}', 'canopy_frame', (x, top + 0.02, zp), (x, roof - 0.03, roof_front), 0.03))
-    parts.append(wall('roof', 'air_tub', [(L, roof, -B), (-R, roof, -B), (-R, roof, roof_front),
-                                          (L, roof, roof_front)]))
-    parts.append(beam('bow', 'canopy_frame', (L - 0.02, roof - 0.03, roof_front), (-R + 0.02, roof - 0.03, roof_front),
-                      0.04))
-    if U > 0.35:
-        _overhead(parts, pc, roof, -min(B, 0.5) + 0.1, roof_front - 0.03, min(0.55, 0.6 * (L + R)))
-    # The walls under the side windows, the floor, the bulkhead behind the seats, the side window's post.
-    sill = max(-D + 0.3, -0.3)
-    _tub(parts, L, R, sill, -D, min(B, 0.85), z + 0.05, top - h, 'air_tub')
-    parts.append(wall('bulkhead', 'air_tub', [(L, sill, -min(B, 0.85)), (-R, sill, -min(B, 0.85)),
-                                              (-R, roof, -min(B, 0.85)), (L, roof, -min(B, 0.85))]))
-    parts.append(beam('post_side', 'canopy_frame', (L - 0.03, sill, -0.1), (L - 0.03, roof - 0.03, -0.1), 0.05))
-    # The seats: the pilot's behind him, the copilot's across the pedestal.
-    pan = max(-D + 0.05, -0.8)
-    _seat(parts, 0.24, pan, -min(B, 0.45) + 0.06)
-    cx = 2 * pc
-    if -cx < R - 0.25:
-        parts.append(box('copilot_pan', 'air_seat', (cx, pan + 0.04, -0.1), (0.44, 0.08, 0.42)))
-        parts.append(box('copilot_back', 'air_seat', (cx, pan + 0.4, -0.33), (0.42, 0.66, 0.08)))
-    return Kit(parts, _materials(parts), screens=tuple(screens))
+# The C-130J's hold (C130_HOLD) in the stock bomber's hull at HOLD_SCALE (its section there is 2.5 m high: a real
+# hold's 3 m does not fit; from the seat it looks the same): the walls where the hull closes round the first
+# passenger's eye (pylib/cockpit_fits_plugin.py), the hold's cut ends closed. HOLD_SEATS: the other passengers' places
+# on the two troop-seat runs at full size, in the first one's eye frame (along the hold: + toward the tail; the far run
+# 2.3 m across, facing back), one seat (0.45 m) apart.
+HOLD_SCALE = 0.76
+HOLD = Model('plugin_c130_hold', {'left': 1.35, 'right': 1.0, 'up': 1.48, 'down': 0.98, 'ahead': 2.18, 'back': 0.38},
+             {'left': 0.5, 'right': 0.5, 'up': 0.4, 'down': 0.5, 'ahead': 0.8, 'back': 0.15}, {}, scale=HOLD_SCALE,
+             caps=('left', 'right'))
+HOLD_ALONG = (0.45, -0.45, 0.9, -0.9, 1.35)          # the first run's other seats (the first passenger's at 0)
+HOLD_FAR_ALONG = (0.0, 0.45, -0.45, 0.9, -0.9, 1.35)  # the far run's
+HOLD_ACROSS = 2.30                                    # the far run's eyes, ahead of the first one's
 
+# The UH-60M's troop cabin (UH60_CABIN) in the 410's hull at CABIN_SCALE, the walls where the hull closes round the
+# first passenger's eye, its cut end behind closed. CABIN_SEATS: the other passengers' places at full size in the first
+# one's eye frame (x left, z ahead) and their facing (0 ahead, 180 back): the rest of his forward-facing row (one seat,
+# 0.5 m, apart), the gunners' row before it (facing back), the row behind it, back to back with it (its passengers look
+# out of the cabin's side windows: facing back they would face the cut end 0.3 m off).
+CABIN_SCALE = 0.6
+CABIN = Model('plugin_uh60_cabin', {'left': 0.96, 'right': 0.66, 'up': 0.71, 'down': 0.81, 'ahead': 1.96, 'back': 0.81},
+              {'left': 0.4, 'right': 0.3, 'up': 0.3, 'down': 0.4, 'ahead': 0.6, 'back': 0.3}, {}, scale=CABIN_SCALE,
+              caps=('back',))
+CABIN_SEATS: tuple[tuple[float, float, float], ...] = (
+    (1.0, 0.0, 0.0), (0.5, 0.0, 0.0), (-0.5, 0.0, 0.0),
+    (0.89, 1.38, 180.0), (0.23, 1.38, 180.0), (-0.47, 1.38, 180.0),
+    (1.0, -0.57, 90.0), (0.5, -0.57, 90.0), (-0.5, -0.57, -90.0),
+)
 
-def plane_deck(cabin: Cabin) -> Kit:
-    return _deck(cabin, gunship=False)
-
-
-def plane_deck_gun(cabin: Cabin) -> Kit:
-    return _deck(cabin, gunship=True)
-
-
-# ---------------------------------------------------------------------------------------------------- the hold
-def plane_hold(cabin: Cabin) -> Kit:
-    """A C-130's cargo hold round a passenger seated on the troop seats along one side wall, looking across the
-    hold (the fit's yaw turns him to it): in the eye's frame ahead is the far wall, back his own wall, left and
-    right the hold's two ends (the cockpit's bulkhead, the closed ramp)."""
-    r = _room(cabin, {'left': 2.2, 'right': 2.2, 'up': 1.4, 'down': 1.05, 'ahead': 3.2, 'back': 0.5},
-              {'left': 0.5, 'right': 0.5, 'up': 0.4, 'down': 0.5, 'ahead': 0.8, 'back': 0.15}, 'plane_hold')
-    L, R, U, D, A, B = r['left'], r['right'], r['up'], r['down'], r['ahead'], r['back']
-    parts: list[om.Part] = []
-    # The hold's section across (z, y): the side walls upright, the roof's corners chamfered (a fuselage is round:
-    # a box's corners would stand out of it), the floor's a little.
-    top = min(0.35 * (U + D), 0.3 * (A + B) + 0.2)
-    cn, cf, low = min(top, 0.9 * B + 0.2), min(top, 0.5 * A), 0.12
-    ring = [(-B, -D + low), (-B, U - cn), (-B + min(cn, 0.9 * B), U), (A - cf, U), (A, U - cf), (A, -D + low),
-            (A - low, -D), (-B + min(low, 0.5 * B), -D)]
-    names = ('wall_near', 'roof_near', 'roof', 'roof_far', 'wall_far', 'chamfer_far', 'floor', 'chamfer_near')
-    textures = {'roof': ('plugin_c130_roof', 2.2), 'floor': ('plugin_c130_floor', 1.4)}
-    for k, name in enumerate(names):
-        (z0, y0), (z1, y1) = ring[k], ring[(k + 1) % len(ring)]
-        tex, tile = textures.get(name, ('plugin_c130_wall', 0.9))
-        parts.append(wall(name, tex, [(L, y0, z0), (L, y1, z1), (-R, y1, z1), (-R, y0, z0)], tile=tile))
-    for name, x in (('end_l', L), ('end_r', -R)):
-        parts.append(wall(name, 'air_tub', [(x, y, z) for z, y in ring]))
-    # The troop seats along both walls: the webbing seat on its rail, the webbing back against the wall.
-    seat_y = -D + min(0.42, 0.45 * (D + U))
-    for tag, z, s in (('near', -B, 1.0), ('far', A, -1.0)):
-        depth = min(0.4, 0.4 * (A + B) - 0.05)
-        parts.append(box(f'seat_{tag}', 'plugin_webbing', (L / 2 - R / 2, seat_y, z + s * depth / 2),
-                         (L + R - 0.1, 0.03, depth)))
-        parts.append(box(f'rail_{tag}', 'metal_dark', (L / 2 - R / 2, seat_y - 0.03, z + s * (depth - 0.02)),
-                         (L + R - 0.1, 0.04, 0.04)))
-        back_h = min(0.6, U - seat_y - 0.1)
-        parts.append(panel(f'back_{tag}', 'plugin_webbing', (L / 2 - R / 2, seat_y + 0.05 + back_h / 2, z + s * 0.03),
-                           L + R - 0.1, back_h, (0.0, 0.0, s), uv=(0, 0, (L + R) / 0.5, back_h / 0.5)))
-    return Kit(parts, _materials(parts))
+KITS: dict[str, KitFn] = {
+    'jet_f16': _kit('jet_f16', F16, "The F-16D Block 60's front cockpit (see the module's docstring)."),
+    'jet_j10s': _kit('jet_j10s', J10, "The J-10S's front cockpit, a modern fighter's (see the module's docstring)."),
+    'jet_j10s_narrow': _kit('jet_j10s_narrow', J10_NARROW, "The J-10S's front cockpit in a narrow canopy bump."),
+    'plane_deck': _kit('plane_deck', DECK, "The C-130J's flight deck from the pilot's seat."),
+    'plane_deck_gun': _kit('plane_deck_gun', DECK_GUN, "The C-130J's flight deck for a gunship's pilot."),
+    'plane_hold': _kit('plane_hold', HOLD, "The C-130J's cargo hold round its first passenger."),
+    'heli_cabin': _kit('heli_cabin', CABIN, "The UH-60M's troop cabin round its first passenger."),
+}
 
 
 def passenger(cabin: Cabin) -> Kit:
-    """Another passenger in a hold another seat's kit (plane_hold) draws: only his eye."""
+    """Another passenger in a hold another seat's kit (plane_hold, heli_cabin) draws: only his eye."""
     del cabin
     return Kit([], {})
 
 
-KITS: dict[str, KitFn] = {
-    'jet_f16': jet_f16,
-    'jet_f35': jet_f35,
-    'plane_deck': plane_deck,
-    'plane_deck_gun': plane_deck_gun,
-    'plane_hold': plane_hold,
-    'passenger': passenger,
-}
+KITS['passenger'] = passenger

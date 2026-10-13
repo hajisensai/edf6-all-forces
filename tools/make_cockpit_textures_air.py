@@ -4,15 +4,13 @@ drawn here (no third-party image), so it carries no licence of anyone else's.
 
     python tools/make_cockpit_textures_air.py [--out <model dir>/cockpits/textures]
 
-Textures (512 px; the panels, consoles and seats are photographs: tools/prep_cockpit_air.py):
+Textures (512 px; the cockpits themselves are real models: tools/prep_cockpit_air.py):
     air_tub        a helicopter cockpit tub's dark grey: panel seams, rivet rows, scuffs
-    air_overhead   an overhead panel: rows of circuit breakers, a few toggles and engine control levers' slots
 """
 from __future__ import annotations
 
 import argparse
 import os
-import random
 import sys
 
 from PIL import Image, ImageDraw
@@ -55,30 +53,8 @@ def air_tub() -> Image.Image:
     return img
 
 
-def air_overhead() -> Image.Image:
-    img = base.noise((42, 44, 46), 4, 131)
-    d = ImageDraw.Draw(img)
-    rnd = random.Random(133)
-    for row in range(5):
-        y0 = 10 + row * 100
-        subpanel(d, (8, y0, SIZE - 8, y0 + 92), (32, 34, 36))
-        d.text((22, y0 + 10), ['DC BUS', 'AC BUS', 'FUEL', 'ENG', 'LIGHTS'][row], fill=LABEL)
-        for k in range(9):
-            x, y = 50 + k * 50, y0 + 58
-            if row == 3 and k in (3, 4, 5):
-                d.rectangle((x - 8, y - 30, x + 8, y + 26), fill=(10, 10, 10))   # an engine lever's slot
-                d.rectangle((x - 12, y - 6, x + 12, y + 6), fill=(200, 200, 195) if k != 4 else (200, 40, 30))
-            elif rnd.random() < 0.75:
-                d.ellipse((x - 10, y - 10, x + 10, y + 10), fill=(225, 225, 220))   # a breaker's collar
-                d.ellipse((x - 7, y - 7, x + 7, y + 7), fill=(14, 14, 14))
-            else:
-                base.toggle(d, x, y, rnd.random() < 0.5, False)
-    return img
-
-
 TEXTURES = {
     'air_tub': air_tub,
-    'air_overhead': air_overhead,
 }
 
 

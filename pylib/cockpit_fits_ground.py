@@ -1,14 +1,14 @@
 """Cockpit fits for the ground family (pylib/cockpit_fits.py merges FITS and DIGESTS; its docstring has the rules).
 Eyes measured with tools/cockpit_fit.py (--search / --probe) from the seats in tmp/stations/STATIONS.md, each checked
-with tools/cockpit_preview.py (previews in tmp/cockpit_preview/ground/). Rooms quoted: metres to the hull left, right,
+with tools/cockpit_preview.py (previews in tmp/cockpit_preview/real_ground/). Rooms quoted: metres to the hull left, right,
 up, down, ahead, back of the eye. The Japanese trucks drive on the right (their stock driver's seat is at -x)."""
 from __future__ import annotations
 
 from cockpits import Fit
 
 _PICKUP = (
-    # The driver fires the bed's weapon himself; his cab on the body (room 1.19, 0.55, 0.54, 1.10, 1.14, 0.91; the
-    # windscreen is steeply raked, the roof curves down to the doors: pickup_cab).
+    # The driver fires the bed's weapon himself; his cab on the body (room 1.19, 0.55, 0.54, 1.10, 1.14, 0.91): a real
+    # pickup's cab, driven from the right (pickup_cab).
     Fit(0, 'body', (-0.32, 1.55, 0.0), 'pickup_cab'),
 )
 _KEI = (
@@ -21,9 +21,9 @@ _KEI = (
     Fit(4, 'body', (0.4, 1.55, -2.25), 'open_rider'),
 )
 _RESCUE = (
-    # The driver up front behind the big windows (room 1.95, 1.95, 1.46, 2.55, 0.80, 3.05: a tracked vehicle's yoke);
-    # the four in the stock-modelled ambulance bay (benches, monitor).
-    Fit(0, 'body', (0.0, 3.4, 2.2), 'vehicle_cab_yoke'),
+    # The driver up front behind the big windows (room 1.95, 1.95, 1.46, 2.55, 0.80, 3.05): a cab-over truck's cab,
+    # its big windscreen under the hull's (truck_cab); the four in the stock-modelled ambulance bay (benches, monitor).
+    Fit(0, 'body', (0.0, 3.4, 2.2), 'truck_cab'),
     Fit(1, 'body', (0.48, 2.541, -3.5), 'troop_bay_l'),
     Fit(2, 'body', (-0.48, 2.541, -3.5), 'troop_bay_r'),
     Fit(3, 'body', (0.48, 2.541, -2.2), 'troop_bay'),
@@ -31,20 +31,22 @@ _RESCUE = (
 )
 _NAEGLING = (
     # The launcher's crew sits in the front hull (the rocket turret behind has no room: up 0.03 at its roof); the
-    # driver-operator front left (room 0.91, 1.61, 0.66, 1.29, 1.90, 5.14), a tracked vehicle's yoke.
+    # driver-operator front left (room 0.91, 1.61, 0.66, 1.29, 1.90, 5.14): an armoured car's driver's station, the
+    # room's sides tucked in between the tracks (tracked_cab).
     Fit(0, 'body', (0.35, 1.6, 1.4), 'tracked_cab'),
 )
 _E551 = (
-    # The gunner in the turret right of the gun, as an M1A1's (room 1.69, 0.79, 0.34, 0.32, 1.68, 2.52; a low turret
-    # whose roof slopes down ahead: the station comes in to 1.52, 0.57, 0.25, 0.29 off its slopes); the gun's cradle
-    # fills the vision block's left third, as a breech beside a real gunner does.
-    Fit(0, 'cannon_main', (-0.45, 1.7, 0.6), 'tank_gunner'),
+    # The gunner in the turret left of the gun, as a T-62's (the kit's station is one: room 0.49, 1.99, 0.34, 0.39,
+    # 1.45, 2.52; a low turret whose roof slopes down ahead: the kit comes in to 0.35 left, 0.25 up, 0.29 down off its
+    # slopes); 0.3 m further out than beside the cradle, so the gun's breech stands at the right of the view, not
+    # across its middle.
+    Fit(0, 'cannon_main', (0.75, 1.7, 0.6), 'tank_gunner'),
 )
 
 FITS: dict[str, tuple[Fit, ...]] = {
-    # Grape (401): the driver front left in the hull (the remote turret has no room; room 0.74, 1.64, 0.48, 0.80,
-    # 1.63, 0.92; the hull leaks at its seams, so the cab comes in a lot: apc_cab, tucked in at the floor); the four in the stock-modelled troop bay (seats 1/3 and 2/4 share a seat locator: their cameras
-    # sit 0.12 m left / right of it).
+    # Grape (401): the driver front left in the hull (the remote turret has no room; room 0.91, 1.51, 0.48, 0.80,
+    # 1.93, 0.62): an MRAP's driver's station, tucked in under the sponsons (apc_cab); the four in the stock-modelled
+    # troop bay (seats 1/3 and 2/4 share a seat locator: their cameras sit 0.12 m left / right of it).
     'VEHICLE401_STRIKER': (
         Fit(0, 'mainBody', (0.3, 1.3, 1.6), 'apc_cab'),
         Fit(1, 'mainBody', (0.4, 1.5, -1.79), 'troop_bay_l'),
@@ -53,18 +55,18 @@ FITS: dict[str, tuple[Fit, ...]] = {
         Fit(4, 'mainBody', (-0.4, 1.5, -0.772), 'troop_bay'),
     ),
     'VEHICLE402_ROCKET': _NAEGLING,
-    # Titan (404): the commander-gunner in the main turret right of the gun (room 5.42, 2.42, 0.46, 1.31, 2.41, 9.49:
+    # Titan (404): the commander-gunner in the main turret left of the gun (room 2.42, 5.42, 0.46, 1.31, 2.41, 9.49:
     # the turret is a hall, the kit takes what it wants of it; on the axis the gun's breech filled the slot 0.85 m
     # ahead); the two side cannons are unmanned sub-turrets: their seats see the guns' camera monitors
     # (remote_display), the eye at each turret's sight glass (the optics' vc_optic_01 / 02) on the gun's pitch bone.
     'VEHICLE404_BIGTANK': (
-        Fit(0, 'cannon_main', (-1.5, 5.0, 2.0), 'tank_gunner'),
+        Fit(0, 'cannon_main', (1.5, 5.0, 2.0), 'tank_gunner'),
         Fit(1, 'subCannon_A_aim', (2.0396, 7.6543, -3.9414), 'remote_display'),
         Fit(2, 'subCannon_B_aim', (-2.0396, 7.6543, -3.9414), 'remote_display'),
     ),
     'V402_ROCKET_EDF6BENEFITS': _NAEGLING,
     # Bikes (503, 613): the rider (hidden by the plugin) at the stations' crouched-rider eye; the stock dashboard on
-    # the handlebars stays, two small screens beside its gauges.
+    # the handlebars stays, two small screens beside its gauges, each in a real digital speedometer's case.
     'V503_BIKE': (Fit(0, 'body', (0.0, 1.586, -0.069), 'bike_rider'),),
     'V503_BIKE_EDF6BENEFITS': (Fit(0, 'body', (0.0, 1.586, -0.069), 'bike_rider'),),
     'V613_BIKE': (Fit(0, 'body', (0.0, 1.626, -0.048), 'bike_rider'),),
@@ -79,7 +81,8 @@ FITS: dict[str, tuple[Fit, ...]] = {
     'V513_TRAILERTRUCK01CAB': (
         Fit(0, 'body', (-0.75, 2.45, 2.1), 'trailer_dash'),
     ),
-    # Robo truck (607): the driver in the flat-fronted cab (room 1.97, 0.77, 1.12, 0.70, 0.94, 1.21).
+    # Robo truck (607): the driver in the flat-fronted cab (room 1.97, 0.77, 1.12, 0.70, 0.94, 1.21): a cab-over
+    # truck's cab (truck_cab).
     'V607_ROBOTRUCK': (
         Fit(0, 'body', (-0.6, 2.05, 3.0), 'truck_cab'),
     ),
@@ -89,10 +92,11 @@ FITS: dict[str, tuple[Fit, ...]] = {
     'V603_FLAK': (
         Fit(0, 'cannon_main', (0.3, 2.2, 0.0), 'tank_gunner'),
     ),
-    # Maser (510): the operator in the front of the turret's box right of its axis (room 0.44, 1.82, 1.31, 1.53, 0.75,
-    # 6.60); higher up, under the emitter's boom, the slot looked into the boom and its struts came through the room.
+    # Maser (510): the operator in the front of the turret's box left of its axis (room 1.82, 0.44, 1.31, 1.53, 0.75,
+    # 6.60: the box is symmetric); higher up, under the emitter's boom, the view looked into the boom and its struts
+    # came through the room.
     'V510_MASER': (
-        Fit(0, 'cannon_main', (-1.0, 5.5, 1.5), 'tank_gunner'),
+        Fit(0, 'cannon_main', (1.0, 5.5, 1.5), 'tank_gunner'),
     ),
     'V601_TANK': (
         # The gunner on the turret's axis behind the gun (the stock turret is hollow, no breech; room 1.26, 1.26, 0.42,

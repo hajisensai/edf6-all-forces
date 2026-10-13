@@ -1,164 +1,285 @@
-"""Developer-only: the plugin vehicles' cockpit photographs (pylib/cockpit_kits_plugin.py), cut from real cockpit
-photographs on Wikimedia Commons (public domain US Air Force / DoD photos, a public domain F-35 mock-up photo and
-one CC BY 2.0 photo of the F-16A at the National Museum of the US Air Force), perspective-corrected and resized
-with PIL into <model dir>/cockpits/textures/plugin_*.png, and their credits into
-<model dir>/cockpits/CREDITS_plugin.txt.
-The installer reads only the PNGs.
+"""Prepare the plugin's own vehicles' cockpits (pylib/cockpit_kits_plugin.py) in <model dir>/cockpits/ (a developer
+step, like tools/prep_cockpit_mech.py), and write CREDITS_plugin.txt.
 
-    python tools/prep_cockpit_plugin.py [--src D:/APP/edf6-cockpit-assets/plugin-photos] [--out <model dir>/cockpits]
+Each cockpit is cut out of a downloaded Sketchfab model of the real aircraft with its cockpit modelled (CC BY 4.0,
+the licence checked in the model's API record, license.json beside the download): only read, pylib/gltf.py parses the
+GLB; nothing in it is run.
 
-The source folder holds each photograph as downloaded (<slug>/original.jpg, or a 2400 px rendition of it) and
-meta.json (each one's Commons page, author and licence, read from the Commons API). The photographs are data: only
-decoded, cropped and resized here.
+What is kept of a model (ASSETS), in its seat's eye frame (+x left, +y up, +z ahead, metres, the eye at the origin):
+the triangles of its cockpit materials (`keep`; not `drop`) that reach into the box `box` round the eye, less the
+ones in any of `cut` (by the centre or two corners) and the ones reaching into `view` (the canopy's bows, a HUD's
+glass, a windscreen's posts: what would stand in the view ahead), and of those only the ones facing the eye (the
+game culls the others; the eye never moves inside the cockpit; a double-sided material's back faces are turned to
+the eye instead). Written to parts/<slug>/cockpit.npz
+(float32 positions, normals, texture coordinates, int32 triangles, int16 each triangle's material, the materials'
+texture files and sRGB base colours) with the base colour textures (at most 1024 px, PNG, the material's colour
+factor multiplied in) and LICENSE.txt. The kit cuts it to each vehicle's room and scales it down where that is small.
 
-Textures (CROPS: a region of a photograph seen straight on; RECTS: a region of a photograph seen at an angle, mapped
-through the perspective that makes one of its flat faces upright):
-    plugin_f16a_panel        an F-16A's front panel seen from the pilot's eye (the HUD controls, the threat
-                             warning scope, the stores control panel, the flight and engine instruments)
-    plugin_f16_console_l/_r  an F-16's left auxiliary panel (landing gear, brakes, stores jettison) and its right
-                             console with the side stick
-    plugin_f35_panel         an F-35's panoramic cockpit display in its housing, the keypad display under it
-    plugin_f35_throttle / _stick   the F-35's throttle on its left console, its side stick on the right one
-    plugin_c130_panel_l / _r an HC-130H's instrument panel (glass engine displays, the pilots' tablets), its two halves
-    plugin_c130_pedestal     its throttle quadrant
-    plugin_c130_glare        its glare shield's fabric cover
-    plugin_c130_floor        a C-130's cargo floor (roller tracks, tie-down plates) seen from above
-    plugin_c130_wall         a C-130 cargo hold's side wall (frames, stringers, the troop seats' rails)
-    plugin_c130_roof         the hold's roof (frames, cable runs, lights)
-
-PANELS (cockpit_kits_plugin.py reads them): the face outline of a panel texture, and where its displays are, as
-(u, v) fractions of the texture, so the kits shape the panel like the photographed one and put the live read-outs
-(cockpits.Screen) on the photographed displays.
+    python tools/prep_cockpit_plugin.py [--src D:/APP/edf6-cockpit-assets] [--out <model dir>/cockpits] [--only slug]
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
+import io
 import json
 import os
 import sys
+from dataclasses import dataclass
 
-from PIL import Image, ImageFilter
+import numpy as np
+from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
+import gltf  # noqa: E402
 import obj_model as om  # noqa: E402
 
-SRC = r'D:\APP\edf6-cockpit-assets\plugin-photos'
-Box = tuple[int, int, int, int]                                          # x0, y0, x1, y1 in the photograph's pixels
-Quad = tuple[tuple[float, float], tuple[float, float], tuple[float, float], tuple[float, float]]   # TL, TR, BR, BL
+Vec3 = tuple[float, float, float]
+Box = tuple[Vec3, Vec3]   # eye frame: (lowest x, y, z), (highest x, y, z): x left, y up, z ahead
+MAX_TEX = 1024
+AXES = {'+x': (1, 0, 0), '-x': (-1, 0, 0), '+y': (0, 1, 0), '-y': (0, -1, 0), '+z': (0, 0, 1), '-z': (0, 0, -1)}
 
-# Straight-on regions: texture -> (slug, box, width of the texture). cockpit_kits_plugin.PANELS measures the
-# panels' outlines and displays in these boxes (the photographs' pixels): change both together.
-CROPS: dict[str, tuple[str, Box, int]] = {
-    # The F-16A at the NMUSAF, from the seat (1300 x 870): the panel from the coaming to the knees.
-    'plugin_f16a_panel': ('f16a_nmusaf', (80, 128, 1106, 582), 512),
-    # The F-16 at Asian Aerospace 2006 (3072 x 2304, from over the left sill).
-    'plugin_f16_console_l': ('f16_asian', (330, 1560, 762, 2300), 256),
-    'plugin_f16_console_r': ('f16_asian', (2290, 1350, 3072, 2304), 384),
-    # The F-35 mock-up (2048 x 1536, from the right, above).
-    'plugin_f35_throttle': ('f35_mockup', (590, 880, 1000, 1500), 256),
-    'plugin_f35_stick': ('f35_mockup', (1317, 488, 1624, 927), 256),
-    # The HC-130H (a 3840 x 2560 rendition, straight on from between the seats): the panel under the glare shield.
-    'plugin_c130_panel_l': ('hc130h_glass', (230, 640, 1920, 1760), 512),
-    'plugin_c130_panel_r': ('hc130h_glass', (1920, 640, 3610, 1760), 512),
-    'plugin_c130_pedestal': ('hc130h_glass', (1430, 1750, 2560, 2560), 512),
-    'plugin_c130_glare': ('hc130h_glass', (900, 470, 2900, 600), 512),
-    # A C-130's hold: its floor from above beside a loadmaster (a 3840 x 2555 rendition), its right wall and roof
-    # through a fisheye lens looking aft (4000 x 2600; the wall is the least bent part of the frame).
-    'plugin_c130_floor': ('c130_floor', (2400, 100, 3780, 1700), 448),
-    'plugin_c130_wall': ('c130_cabin', (3060, 150, 3960, 2450), 200),
-    'plugin_c130_roof': ('c130_cabin', (950, 0, 3050, 560), 512),
+
+@dataclass(frozen=True)
+class Asset:
+    """A cockpit cut from a Sketchfab model `uid` (sketchfab/<uid>/model.glb under --src): the eye at `eye` (the
+    model's own coordinates), the aircraft's nose along `ahead` and its top along `up` there (axis names), `scale`
+    metres per model unit; what is kept (see the module's docstring). `what`: the credit's note of what was cut."""
+    uid: str
+    title: str
+    eye: Vec3
+    ahead: str
+    up: str
+    scale: float
+    box: Box
+    keep: tuple[str, ...] = ()          # material name parts kept (none: every material)
+    drop: tuple[str, ...] = ()          # material name parts left out
+    drop_nodes: tuple[str, ...] = ()    # mesh node name parts left out
+    cut: tuple[Box, ...] = ()           # eye-frame boxes whose triangles are left out
+    view: tuple[float, float, float, float] | None = None   # the view ahead kept open: yaw left, yaw right, lowest
+                                                            # pitch, highest pitch (degrees); what reaches into it
+                                                            # (farther than 0.2 m) is left out
+    what: str = ''
+
+
+# The F-16D Block 60's front seat (the model 1:1, its nose -z): its cockpit materials (cock*, ins*) round the pilot's
+# eye 0.13 m before the headrest, less the canopy's glass and the HUD's combiner glass (its symbols are drawn by the
+# plugin on the world, the 'hud' screen), and nothing of the rear seat's cockpit behind the front seat's bulkhead.
+F16D = Asset('ea8edb08d79e4eafa9c794c581f88cf3', 'General Dynamics F-16D Block 60', (0.0, 2.6, -3.4), '-z', '+y', 1.0,
+             ((-0.62, -1.15, -0.42), (0.62, 0.55, 1.75)), keep=('cock', 'ins'), drop=('glass',),
+             what="the front seat's cockpit only; the canopy and the HUD's glass left out")
+# The Chengdu J-10S's front seat (the model 1:1, nose -z): a modern fighter's three-display panel (the plugin's other
+# fighters: the F-35's stand-ins), its cockpit materials (cock*) less the canopy, the HUD glass and the windscreen's
+# arch (it crossed the view ahead 3 degrees over the line of sight; the HUD's posts stay).
+J10S = Asset('aa7c517fbded47439a526cafb78b4618', 'Chengdu J-10S', (0.0, 1.08, -3.17), '-z', '+y', 1.0,
+             ((-0.62, -1.15, -0.42), (0.62, 0.55, 1.75)), keep=('cock',), drop=('glass', 'HUD'),
+             cut=(((0.15, -0.13, 0.35), (1.0, 0.6, 1.9)), ((-1.0, -0.13, 0.35), (-0.15, 0.6, 1.9)),
+                  ((0.3, -0.32, 0.35), (1.0, 0.6, 1.9)), ((-1.0, -0.32, 0.35), (-0.3, 0.6, 1.9)),
+                  ((-0.15, 0.0, 0.35), (0.15, 0.6, 1.9))),
+             what="the front seat's cockpit only; the canopy, the windscreen's arch and the HUD's glass left out")
+# The C-130J's flight deck from the left (pilot's) seat (model units 0.0505 m: 40.4 m span over 800 units; nose +z):
+# the eye 0.77 m over the seat's cushion, so the glare shield is 10-12 degrees under the line of sight; the view ahead
+# kept open over it (40 degrees left, 18 right, 9 down to 32 up: the overhead console stays): the pilot's HUD (an
+# opaque slab in this model, right on the line of sight 0.4 m ahead), the windscreen's posts and the bar under the
+# eyebrow windows left out.
+C130_SCALE = 40.41 / 800.0
+C130_DECK = Asset('223b4ff4abb945038fe35726bedd0db1', 'Lockheed Martin C130J "Super Hercules"',
+                  (11.0, 78.5, 158.0), '+z', '+y', C130_SCALE, ((-3.2, -1.3, -1.4), (1.4, 1.2, 2.2)),
+                  view=(40.0, 18.0, -9.0, 32.0),
+                  what="the flight deck only; the pilot's HUD and the windscreen's frame ahead left out")
+# The C-130J's cargo hold round a passenger in the middle of the right-hand troop seats' aft run (it stands against
+# the wall; forward of the side door the hold widens and the seats stand off it), looking across (the eye turned to
+# +x): his back 0.3 m off the wall, 0.8 m over the seat; the far wall 2.6 m off, the run 1.4 m either way.
+C130_HOLD = Asset('223b4ff4abb945038fe35726bedd0db1', 'Lockheed Martin C130J "Super Hercules"',
+                  (-23.5, 50.0, -32.0), '+x', '+y', C130_SCALE, ((-2.2, -1.4, -0.45), (2.2, 1.9, 2.8)),
+                  what='the cargo hold only')
+# The UH-60M's troop cabin from the right-hand middle seat of the forward-facing row (model units 8.09 m: the cabin's
+# 2.2 m width over 0.27 units; nose +z): the crew figures and the windows' glass left out.
+UH60_SCALE = 8.09
+UH60_CABIN = Asset('12b4e525676a49678ac3006b360c8750', 'Sikorsky UH-60M Blackhawk', (-0.029, -0.075, 0.31), '+z', '+y',
+                   UH60_SCALE, ((-1.2, -1.3, -2.4), (1.6, 0.95, 3.4)), drop=('Plt', 'mat_6-', 'mat_7-'),
+                   what="the troop cabin and the cockpit ahead of it; the crew figures and the windows' glass left out")
+
+ASSETS: dict[str, Asset] = {
+    'plugin_f16d': F16D,
+    'plugin_j10s': J10S,
+    'plugin_c130_deck': C130_DECK,
+    'plugin_c130_hold': C130_HOLD,
+    'plugin_uh60_cabin': UH60_CABIN,
 }
 
-# Angled regions: texture -> (slug, the face's corners TL TR BR BL in the photograph, the texture's (u, v) box of that
-# face's rectangle (u0, v0, u1, v1; beyond 0..1: the region round it), the texture's size).
-RECTS: dict[str, tuple[str, Quad, tuple[float, float, float, float], tuple[int, int]]] = {
-    # The F-35's display glass (20 x 8 in): the housing round it and the keypad display below.
-    'plugin_f35_panel': ('f35_mockup', ((448, 327), (1023, 174), (1066, 436), (508, 679)), (-0.07, -0.16, 1.07, 1.62),
-                         (512, 256)),
-}
-
-CREDIT_USE: dict[str, list[str]] = {}
-for _t, (_slug, *_r) in {**CROPS, **RECTS}.items():
-    CREDIT_USE.setdefault(_slug, []).append(_t)
+LICENSE = """{title} by {author}, CC BY 4.0
+Source: {page} (via Sketchfab)
+Licence: Creative Commons Attribution 4.0 (CC BY 4.0), https://creativecommons.org/licenses/by/4.0/
+Changes: {what}; turned into the seat's eye frame and scaled to metres, triangles facing away from the eye left out
+(a double-sided material's turned to it); textures resized and re-saved as PNG. The EDF6 plugin's cockpit builder
+(pylib/cockpit_kits_plugin.py) cuts it to each vehicle's room.
+"""
 
 
-def homography(src: list[tuple[float, float]], dst: list[tuple[float, float]]) -> list[float]:
-    """The 8 coefficients of the projective map taking each `src` point to its `dst` point (PIL's PERSPECTIVE data
-    when src are output pixels and dst photograph pixels)."""
-    import numpy as np
-    a, b = [], []
-    for (x, y), (u, v) in zip(src, dst):
-        a.append([x, y, 1, 0, 0, 0, -u * x, -u * y])
-        b.append(u)
-        a.append([0, 0, 0, x, y, 1, -v * x, -v * y])
-        b.append(v)
-    return [float(c) for c in np.linalg.solve(np.array(a, dtype=float), np.array(b, dtype=float))]
+def default_out() -> str:
+    return os.path.join(om.DEV_MODELS, 'cockpits')
 
 
-def rect(img: Image.Image, quad: Quad, box: tuple[float, float, float, float], size: tuple[int, int]) -> Image.Image:
-    """The photograph round the flat face `quad` (TL, TR, BR, BL), the face upright: the texture spans the face's
-    (u, v) `box` (0..1 the face itself)."""
-    u0, v0, u1, v1 = box
-    w, h = size
-
-    def at(u: float, v: float) -> tuple[float, float]:
-        return ((u - u0) / (u1 - u0) * w, (v - v0) / (v1 - v0) * h)
-    face = [at(0, 0), at(1, 0), at(1, 1), at(0, 1)]
-    out = img.transform(size, Image.Transform.PERSPECTIVE, homography(face, list(quad)), Image.Resampling.BICUBIC)
-    return out.filter(ImageFilter.UnsharpMask(radius=1.0, percent=50, threshold=2))
+def basis(a: Asset) -> np.ndarray:
+    """Rows: the eye frame's left, up and ahead in the model's axes (left = up x ahead: a rotation, winding kept)."""
+    ahead, up = np.array(AXES[a.ahead], dtype=np.float64), np.array(AXES[a.up], dtype=np.float64)
+    return np.stack([np.cross(up, ahead), up, ahead])
 
 
-def crop(img: Image.Image, box: Box, width: int) -> Image.Image:
-    part = img.crop(box)
-    w = min(width, 512)
-    h = max(4, min(512, 4 * round(part.height * w / part.width / 4)))
-    return part.resize((w, h), Image.Resampling.LANCZOS).filter(
-        ImageFilter.UnsharpMask(radius=1.0, percent=40, threshold=2))
+def node_names(path: str) -> list[str]:
+    """Each mesh node's name in gltf.read's walk order (Scene.mesh indexes it)."""
+    g, _ = gltf._container(path)  # noqa: SLF001 - the same JSON gltf.read walks
+    names: list[str] = []
+
+    def walk(i: int) -> None:
+        n = g['nodes'][i]
+        if 'mesh' in n:
+            names.append(n.get('name') or g['meshes'][n['mesh']].get('name', ''))
+        for c in n.get('children', []):
+            walk(c)
+    for r in g['scenes'][g.get('scene', 0)]['nodes']:
+        walk(r)
+    return names
 
 
-def credits(meta: dict) -> str:
-    lines = ["The plugin's own vehicles' cockpits (pylib/cockpit_kits_plugin.py): third-party material", '']
-    for slug, d in sorted(meta.items()):
-        if slug not in CREDIT_USE:
+def double_sided(path: str) -> list[bool]:
+    g, _ = gltf._container(path)  # noqa: SLF001
+    return [bool(m.get('doubleSided')) for m in g.get('materials', [])]
+
+
+def inside(c: np.ndarray, box: Box) -> np.ndarray:
+    return ((c >= np.array(box[0])) & (c <= np.array(box[1]))).all(1)
+
+
+def in_view(p: np.ndarray, view: tuple[float, float, float, float]) -> np.ndarray:
+    left, right, low, high = view
+    flat = np.hypot(p[:, 0], p[:, 2])
+    pitch = np.degrees(np.arctan2(p[:, 1], flat))
+    yaw = np.degrees(np.arctan2(p[:, 0], np.maximum(p[:, 2], 1e-9)))   # + left
+    return (p[:, 2] > 0.2) & (yaw <= left) & (yaw >= -right) & (pitch >= low) & (pitch <= high)
+
+
+def view_cone(centre: np.ndarray, corners: np.ndarray, view: tuple[float, float, float, float]) -> np.ndarray:
+    return in_view(centre, view) | np.logical_or.reduce([in_view(corners[:, k], view) for k in range(3)])
+
+
+def cut_out(a: Asset, path: str, scene: gltf.Scene) -> dict[str, np.ndarray]:
+    """The asset's kept triangles in the eye frame: positions, normals, UVs, triangles, materials."""
+    m = basis(a)
+    pos = (scene.positions - np.array(a.eye)) @ m.T * a.scale
+    if scene.normals is None:
+        raise SystemExit(f'{a.uid}: the model has no normals')
+    nrm = scene.normals @ m.T
+    tri = scene.triangles.copy()
+    corners = pos[tri]
+    centre = corners.mean(1)
+    names = [mt.name.lower() for mt in scene.materials]
+    lo_box, hi_box = np.array(a.box[0]), np.array(a.box[1])
+    keep = ((corners.max(1) >= lo_box) & (corners.min(1) <= hi_box)).all(1)   # reaching into the box (the kit clips)
+    if a.keep:
+        keep &= np.isin(scene.material, [k for k, n in enumerate(names) if any(s.lower() in n for s in a.keep)])
+    if a.drop:
+        keep &= ~np.isin(scene.material, [k for k, n in enumerate(names) if any(s.lower() in n for s in a.drop)])
+    if a.drop_nodes:
+        nodes = node_names(path)
+        dropped = [k for k, n in enumerate(nodes) if any(s.lower() in n.lower() for s in a.drop_nodes)]
+        keep &= ~np.isin(scene.mesh, dropped)
+    for box in a.cut:   # by its centre or two of its corners (a long sliver's centre can lie outside)
+        corners_in = sum(inside(corners[:, k], box).astype(int) for k in range(3))
+        keep &= ~(inside(centre, box) | (corners_in >= 2))
+    if a.view is not None:
+        keep &= ~view_cone(centre, corners, a.view)
+    face = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
+    toward = (face * -corners[:, 0]).sum(1) > 0          # the eye on its front side (counter-clockwise front)
+    sided = np.array(double_sided(path) + [False])[np.minimum(scene.material, len(scene.materials))]
+    flip = keep & ~toward & sided
+    tri[flip] = tri[flip][:, ::-1]                       # a double-sided face seen from its back: turned to the eye
+    keep &= toward | sided
+    tris, mats = tri[keep], scene.material[keep]
+    if flip.any():   # the turned faces' corners need their normals turned too: give them corners of their own
+        turned = flip[keep]
+        extra = tris[turned].reshape(-1)
+        base = len(pos)
+        pos = np.vstack([pos, pos[extra]])
+        nrm = np.vstack([nrm, -nrm[extra]])
+        uvs = scene.uvs if scene.uvs is not None else np.full((base, 2), 0.5)
+        uvs = np.vstack([uvs, uvs[extra]])
+        tris[turned] = base + np.arange(len(extra)).reshape(-1, 3)
+    else:
+        uvs = scene.uvs if scene.uvs is not None else np.full((len(pos), 2), 0.5)
+    used, inv = np.unique(tris.reshape(-1), return_inverse=True)
+    return {'pos': pos[used].astype(np.float32), 'nrm': nrm[used].astype(np.float32),
+            'uv': uvs[used].astype(np.float32),
+            'tris': inv.reshape(-1, 3).astype(np.int32), 'mat': mats.astype(np.int16)}
+
+
+def textures(scene: gltf.Scene, used: set[int], dest: str) -> tuple[list[str], np.ndarray]:
+    """Each material's base colour texture as a PNG in `dest` (its colour factor multiplied in; '' none; identical
+    images saved once) and the materials' sRGB base colours."""
+    names, saved = [], {}
+    for k, mat in enumerate(scene.materials):
+        if k not in used or not mat.texture:
+            names.append('')
             continue
-        lic = d['license']
-        federal = 'U.S.' in d['artist'] + d['credit']
-        note = ' (work of the US federal government)' if lic.lower().startswith('public') and federal else ''
-        url = {'CC BY 2.0': ' (https://creativecommons.org/licenses/by/2.0/)'}.get(lic, '')
-        lines.append(f"Photograph by {d['artist']}, {lic}{url}{note}")
-        uses = ', '.join(t + '.png' for t in CREDIT_USE[slug])
-        lines.append(f"    {d['page']} (cropped, perspective-corrected and resized: cockpits/textures/{uses})")
-    lines += ['', 'plugin_webbing.png is drawn by tools/make_cockpit_textures_plugin.py.']
-    return '\n'.join(lines) + '\n'
+        key = hashlib.sha256(mat.texture + repr(mat.base[:3]).encode()).hexdigest()
+        if key not in saved:
+            img = Image.open(io.BytesIO(mat.texture)).convert('RGB')
+            img.thumbnail((MAX_TEX, MAX_TEX), Image.LANCZOS)
+            if any(abs(c - 1.0) > 1e-3 for c in mat.base[:3]):
+                f = np.array([min(1.0, max(0.0, c)) ** (1 / 2.2) for c in mat.base[:3]])
+                img = Image.fromarray((np.asarray(img, dtype=np.float32) * f).clip(0, 255).astype(np.uint8))
+            saved[key] = f'tex{len(saved)}.png'
+            img.save(os.path.join(dest, saved[key]))
+        names.append(saved[key])
+    colours = np.array([[round(255 * min(1.0, max(0.0, c)) ** (1 / 2.2)) for c in m.base[:3]] for m in scene.materials],
+                       dtype=np.uint8)
+    return names, colours
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--src', default=SRC)
-    ap.add_argument('--out', default=os.path.join(om.DEV_MODELS, 'cockpits'))
-    args = ap.parse_args()
-    meta = json.load(open(os.path.join(args.src, 'meta.json'), encoding='utf-8'))
-    for slug in CREDIT_USE:
-        lic = meta[slug]['license']
-        if not (lic.lower().startswith('public') or lic.startswith('CC BY ') or lic.startswith('CC0')) or 'SA' in lic:
-            raise SystemExit(f'{slug}: licence {lic} is not public domain, CC0 or CC BY')
-    tex = os.path.join(args.out, 'textures')
-    os.makedirs(tex, exist_ok=True)
-    photos: dict[str, Image.Image] = {}
-
-    def photo(slug: str) -> Image.Image:
-        if slug not in photos:
-            photos[slug] = Image.open(os.path.join(args.src, meta[slug]['file'])).convert('RGB')
-        return photos[slug]
-    made = {name: crop(photo(slug), box, width) for name, (slug, box, width) in CROPS.items()}
-    made.update({name: rect(photo(slug), quad, box, size) for name, (slug, quad, box, size) in RECTS.items()})
-    for name, img in sorted(made.items()):
-        path = os.path.join(tex, name + '.png')
-        img.save(path)
-        print(path, img.size)
-    with open(os.path.join(args.out, 'CREDITS_plugin.txt'), 'w', encoding='utf-8') as h:
-        h.write(credits(meta))
+    ap.add_argument('--src', default=r'D:\APP\edf6-cockpit-assets')
+    ap.add_argument('--out', default=None)
+    ap.add_argument('--only', action='append', help='only this asset slug (the credits still name all)')
+    a = ap.parse_args()
+    out = a.out or default_out()
+    credits = ["The plugin's own vehicles' cockpits (pylib/cockpit_kits_plugin.py): third-party material", '']
+    scenes: dict[str, gltf.Scene] = {}
+    for slug, asset in ASSETS.items():
+        src = os.path.join(a.src, 'sketchfab', asset.uid, 'model.glb')
+        with open(os.path.join(os.path.dirname(src), 'license.json'), encoding='utf-8') as h:
+            meta = json.load(h)
+        if meta['license']['slug'] not in ('by', 'cc0'):
+            raise SystemExit(f'{asset.uid}: licence {meta["license"]["slug"]}: not used')
+        author = meta['user']['displayName']
+        page = meta.get('viewerUrl') or f'https://sketchfab.com/3d-models/{asset.uid}'
+        dest = os.path.join(out, 'parts', slug)
+        title = meta.get('name') or asset.title
+        credits.append(f'{title} by {author}, CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), via '
+                       f'Sketchfab: {page} ({asset.what}; cropped/scaled)  ->  parts/{slug}/cockpit.npz, '
+                       f'parts/{slug}/tex*.png')
+        if a.only and slug not in a.only:
+            continue
+        if asset.uid not in scenes:
+            scenes[asset.uid] = gltf.read(src)
+        scene = scenes[asset.uid]
+        data = cut_out(asset, src, scene)
+        os.makedirs(dest, exist_ok=True)
+        for old in os.listdir(dest):
+            if old.startswith('tex') and old.endswith('.png'):
+                os.remove(os.path.join(dest, old))
+        names, colours = textures(scene, set(int(k) for k in np.unique(data['mat'])), dest)
+        np.savez_compressed(os.path.join(dest, 'cockpit.npz'), textures=np.array(names), colours=colours,
+                            material_names=np.array([m.name for m in scene.materials]), **data)
+        with open(os.path.join(dest, 'LICENSE.txt'), 'w', encoding='utf-8', newline='\n') as h:
+            h.write(LICENSE.format(title=title, author=author, page=page, what=asset.what))
+        lo, hi = data['pos'].min(0), data['pos'].max(0)
+        print(f'{slug}: {len(data["tris"])} triangles of {len(scene.triangles)}, {sum(1 for n in names if n)} textured '
+              f'materials, extent {lo.round(2)} .. {hi.round(2)} -> {dest}')
+    with open(os.path.join(out, 'CREDITS_plugin.txt'), 'w', encoding='utf-8', newline='\n') as h:
+        h.write('\n'.join(credits) + '\n')
     return 0
 
 
