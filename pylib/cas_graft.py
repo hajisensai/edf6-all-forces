@@ -226,6 +226,12 @@ def _aliased_groups(target: bytes, lt: cl.CasLayout, b: bytes, aliases: dict[str
     return groups, fields, b + bytes(synth)
 
 
+def states(cas: bytes) -> dict[str, set[str]]:
+    """{player: its state names} of a CAS."""
+    lt = cl.cas_layout(cas)
+    return {_name(cas, at): {_name(cas, m.at) for m in ms} for at, ms in lt.tree.anmgroups}
+
+
 def alias_states(cas: bytes, aliases: dict[str, list[tuple[str, str]]]) -> bytes:
     """`cas` (EDF6 0x204) with states added to its players as copies of states it has: {player: [(new, existing)]}.
 
