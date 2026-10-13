@@ -32,6 +32,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <cwchar>
 #include <mutex>
 #include <unordered_map>
 
@@ -46,8 +47,6 @@ constexpr std::size_t kNew=0x12D85B0;                 // the game's operator new
 constexpr std::size_t kCarrierCtor=0x4F8690;          // UfoCarrier508::UfoCarrier508(this, createInfo)
 constexpr std::size_t kCarrierVtable=0x17C9DC0;       // its primary vtable
 constexpr std::size_t kCarrierSize=0x1630;
-// The game's SGO accessors, as src/edf41ai.cpp uses them (the object's tree is the member at +0xA8; a handle is {tree, node index}).
-constexpr std::size_t kChildByName=0xD7480,kChildCount=0x53060,kChildIndex=0x52DE0,kNodeFloat=0x52F30,kNodeString=0x551E0,kTreeAt=0xA8;
 constexpr int kSlots=49;
 constexpr int kSlotDtor=0,kSlotUpdate=5,kSlotMessage=9;
 // UfoCarrier508's vtable 0x17C9DC0 as the file has it (slot -> EDF.dll RVA); 7 is the ship AI, 5 Update, 9 OnMessage.
@@ -71,11 +70,6 @@ constexpr Print kPrints[]={
     {kRegisterFactory,{0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x74}},
     {kNew,{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B}},
     {kCarrierCtor,{0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57}},
-    {kChildByName,{0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83}},
-    {kChildCount,{0x48,0x8B,0x11,0x44,0x8B,0x49,0x08,0x4C}},
-    {kChildIndex,{0x4C,0x8B,0x09,0x44,0x8B,0x51,0x08,0x44}},
-    {kNodeFloat,{0x48,0x83,0xEC,0x28,0xE8,0x17,0x00,0x00}},
-    {kNodeString,{0x48,0x83,0xEC,0x28,0x4C,0x8B,0xD1,0xE8}},
     {0x4F8A70,{0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83}},   // slot 0
     {0x4F9540,{0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83}},   // slot 5
     {0x4F93E0,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74}},   // slot 9
@@ -252,50 +246,51 @@ void AuditLiveTable() noexcept {
     Log("EDF41MOTHER at creation, %d of %d UfoCarrier508 slots are patched by someone; the clone uses the stock functions",differ,kSlots);
 }
 
-// ---- reading the object's own SGO back (what the game was given) ----------------------------------------------------
-struct Handle { void* tree; std::uint32_t index; std::uint32_t pad; };
-using ChildByNameFn=Handle*(__fastcall*)(const Handle*,Handle*,const wchar_t*);
-using ChildCountFn=int(__fastcall*)(const Handle*);
-using ChildIndexFn=std::uint32_t(__fastcall*)(const Handle*,std::uint32_t);
-using NodeFloatFn=float(__fastcall*)(const Handle*);
-using NodeStringFn=const wchar_t*(__fastcall*)(const Handle*);
-
-bool KeyOf(const Handle& parent,const wchar_t* key,Handle& out) noexcept {
-    out={nullptr,0xFFFFFFFFu,0};
-    reinterpret_cast<ChildByNameFn>(image+kChildByName)(&parent,&out,key);
-    return out.tree!=nullptr;
-}
-bool Nth(const Handle& parent,int i,Handle& out) noexcept {
-    const int n=reinterpret_cast<ChildCountFn>(image+kChildCount)(&parent);
-    if(i<0 || i>=n)return false;
-    out={parent.tree,reinterpret_cast<ChildIndexFn>(image+kChildIndex)(&parent,static_cast<std::uint32_t>(i)),0};
-    return true;
+// ---- what model the object holds ---------------------------------------------------------------------------------------
+// Why not the game's SGO accessors: 0xD7480 (and 0x53060 / 0x52DE0 / 0x52F30 / 0x551E0, which src/edf41ai.cpp uses on the
+// Berserker) walk a DSGO (a dictionary: count at tree+0x18, index table at +8, 0x28-byte nodes at +0x28); this object's SGO is
+// a plain one (UfoCarrier508's constructor reads it through 0x528A0 / 0x52790: blob + [blob+0xC] + index * 12), and a plain
+// tree handed to 0xD7480 faulted at EDF+0xD74D9 (2026-10-13 real run, dump EDF6.exe.119468). Where the document sits in the
+// object was not established, so nothing here calls the game to read it: the object's memory is searched, every word
+// checked with Readable first, for a pointer to (or a pointer in a block pointed to by) the wide name the constructor was
+// given, and where it is found is said.
+bool WideEquals(const void* at,const wchar_t* text) noexcept {
+    const std::size_t n=std::wcslen(text);
+    if(!Readable(at,(n+1)*sizeof(wchar_t)))return false;
+    return std::wmemcmp(static_cast<const wchar_t*>(at),text,n+1)==0;
 }
 
-// Said at creation: the model the game was given (animation_model[0][0] = archive, MDB) and the file's own measure of it
-// (edf41_mother_model = [mdb, half extents x y z, bones], written by tools/make_edf41_objects.py from the converted MDB).
+// Offsets of `obj` (and of blocks it points to, as "+a/+b") that hold a pointer to `text`; at most `max` lines.
+int FindName(const char* obj,std::size_t size,const wchar_t* text,char (*where)[40],int max) noexcept {
+    int found=0;
+    for(std::size_t a=0;a+8<=size && found<max;a+=8) {
+        const char* p=*reinterpret_cast<const char* const*>(obj+a);
+        if(reinterpret_cast<std::uintptr_t>(p)<0x10000 || !Readable(p,8))continue;
+        if(WideEquals(p,text)) { std::snprintf(where[found++],40,"+0x%zX",a); continue; }
+        if(!Readable(p,0x80))continue;
+        for(std::size_t b=0;b+8<=0x80 && found<max;b+=8) {
+            const char* q=*reinterpret_cast<const char* const*>(p+b);
+            if(reinterpret_cast<std::uintptr_t>(q)<0x10000 || !Readable(q,8))continue;
+            if(WideEquals(q,text))std::snprintf(where[found++],40,"+0x%zX/+0x%zX",a,b);
+        }
+    }
+    return found;
+}
+
+// Said at creation. The names are what tools/make_edf41_objects.py wrote into the SGO (the archive and the MDB of
+// animation_model[0][0]); the half extents of that MDB are in the SGO as edf41_mother_model and in the log of the generator.
 void LogModel(void* obj) noexcept {
-    const Handle root{static_cast<char*>(obj)+kTreeAt,0,0};
-    if(!Rd(static_cast<char*>(obj)+kTreeAt,8,"object SGO tree"))return;
-    Handle model{},first{},pair{},rab{},mdbName{};
-    if(KeyOf(root,L"animation_model",model) && Nth(model,0,first) && Nth(first,0,pair) && Nth(pair,0,rab) && Nth(pair,1,mdbName)) {
-        const wchar_t* a=reinterpret_cast<NodeStringFn>(image+kNodeString)(&rab);
-        const wchar_t* b=reinterpret_cast<NodeStringFn>(image+kNodeString)(&mdbName);
-        if(Rd(a,2,"model archive name") && Rd(b,2,"model name"))
-            Log("EDF41MOTHER object %p was given the model %ls / %ls",obj,a,b);
-    } else Log("EDF41MOTHER object %p: animation_model could not be read back from its SGO",obj);
-    Handle info{},name{},ex{},ey{},ez{},bones{};
-    if(KeyOf(root,L"edf41_mother_model",info) && Nth(info,0,name) && Nth(info,1,ex) && Nth(info,2,ey) && Nth(info,3,ez) && Nth(info,4,bones)) {
-        const wchar_t* n=reinterpret_cast<NodeStringFn>(image+kNodeString)(&name);
-        if(Rd(n,2,"edf41_mother_model name"))
-            Log("EDF41MOTHER object %p model %ls: half extents %.1f %.1f %.1f m (the converted MDB), %.0f bones; at 600 m up it needs the far pass (UfoCarryer_EnableFarRender)",
-                obj,n,reinterpret_cast<NodeFloatFn>(image+kNodeFloat)(&ex),reinterpret_cast<NodeFloatFn>(image+kNodeFloat)(&ey),
-                reinterpret_cast<NodeFloatFn>(image+kNodeFloat)(&ez),reinterpret_cast<NodeFloatFn>(image+kNodeFloat)(&bones));
-    } else Log("EDF41MOTHER object %p: no edf41_mother_model key in its SGO",obj);
-    Handle farFlag{};
-    if(KeyOf(root,L"UfoCarryer_EnableFarRender",farFlag))
-        Log("EDF41MOTHER object %p UfoCarryer_EnableFarRender = %.0f",obj,reinterpret_cast<NodeFloatFn>(image+kNodeFloat)(&farFlag));
-    else Log("EDF41MOTHER object %p: UfoCarryer_EnableFarRender is not set (the hull may be clipped at 1000 m)",obj);
+    const char* base=static_cast<const char*>(obj);
+    if(!Rd(base,kCarrierSize,"new object memory"))return;
+    static const wchar_t* const names[]={L"MotherShip301Body.mdb",L"app:/Object/UfoMother301.mrab",L"app:/object/UfoMother301.mrab",L"UfoMother301.mrab"};
+    int total=0;
+    for(const wchar_t* name:names) {
+        char where[4][40];
+        const int n=FindName(base,kCarrierSize,name,where,4);
+        total+=n;
+        for(int i=0;i<n;++i)Log("EDF41MOTHER object %p holds the name %ls at %s",obj,name,where[i]);
+    }
+    if(!total)Log("EDF41MOTHER object %p: none of the 4.1 model names is held by its first %zu bytes (searched two pointer levels)",obj,kCarrierSize);
 }
 
 // ---- the creation ----------------------------------------------------------------------------------------------

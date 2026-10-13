@@ -6816,7 +6816,10 @@ def edf41_mother_plugin_contract() -> None:
     assert 'if(!Cfg().edf41MotherDev)' in cpp.split('bool InstallEdf41Mother()', 1)[1].split('BuildClone', 1)[0]
     for rva in ('kRegisterAllSite', 'kRegisterAll', 'kRegisterFactory', 'kNew', 'kCarrierCtor'):
         assert re.search(rf'\{{{rva},\{{0x', cpp), f'{rva} has no fingerprint in kPrints'
-    assert cpp.count('Rd(') >= 10 and 'Readable(image+p.rva,8)' in cpp
+    assert cpp.count('Rd(') >= 8 and 'Readable(image+p.rva,8)' in cpp
+    # The DSGO accessors (0xD7480 ...) fault on a plain SGO such as this object's (EDF+0xD74D9, 2026-10-13): never called here.
+    code = re.sub(r'//[^\n]*', '', cpp)   # comments may name the accessors; the code must not call them
+    assert not re.search(r'0xD7480|kChildByName|0x53060|0x52DE0|0x52F30|0x551E0', code)
     assert m.MOTHER_DEV_ALIAS.template == 'E508_CARRIER.SGO' and 'UfoCarrier508' in cpp
     # The clone is the stock class: built from the file's table, not the live one this plugin patches (carrierlaser.cpp
     # ShipAiHook takes slot 7 of the same vtable; the 2026-10-13 real run turned the prototype off on it).
