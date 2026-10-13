@@ -124,21 +124,38 @@ def _current(led: ledger.Ledger, stamp: dict, name: str, source: dict[str, list[
     return all(ledger.key(rel) in mine and os.path.exists(led.disk(rel)) for rel in files_of(name))
 
 
+NO_EDF41 = '没有找到 EDF4.1（需要安装 EDF4.1 才能转换它的地图）'
+
+
+def unavailable(root: str, root41: str | None) -> list[tuple[str, str]]:
+    """The maps install leaves out before converting anything, [(map, why)]: all of them without EDF4.1, else those
+    with a file in Mods that is not ours. Conversion itself can still fail (install's skipped list). The one place
+    that decides it: install skips exactly these, and the campaign plan offers only missions whose maps are not here."""
+    if not root41:
+        return [(name, NO_EDF41) for name in MAPS]
+    led = ledger.Ledger(root)
+    out: list[tuple[str, str]] = []
+    for name in MAPS:
+        foreign = [rel for rel in files_of(name) if _foreign(led, rel)]
+        if foreign:
+            out.append((name, f"Mods 里已有别的 MOD 的文件：{', '.join(foreign)}"))
+    return out
+
+
 def install(root: str, root41: str | None, say: Callable[[str], None] = print) -> tuple[list[str], list[tuple[str, str]]]:
     """Every map of MAPS converted and written as OWNER's; (paths written, [(map, why not)])."""
     if not root41:
-        return [], [(name, '没有找到 EDF4.1（需要安装 EDF4.1 才能转换它的地图）') for name in MAPS]
+        return [], unavailable(root, root41)
     e41, e6 = Archives(root41), Archives(root)
     led = ledger.Ledger(root)
     stamp_path = os.path.join(root, 'Mods', STAMP)
     stamp = load_json(stamp_path, {})
     written: list[str] = []
-    skipped: list[tuple[str, str]] = []
+    skipped = unavailable(root, root41)
+    left_out = {name for name, _ in skipped}
     wanted: set[str] = set()
     for name in MAPS:
-        foreign = [rel for rel in files_of(name) if _foreign(led, rel)]
-        if foreign:
-            skipped.append((name, f"Mods 里已有别的 MOD 的文件：{', '.join(foreign)}"))
+        if name in left_out:
             continue
         source = _source(name, e41)
         wanted.update(ledger.key(rel) for rel in files_of(name))
