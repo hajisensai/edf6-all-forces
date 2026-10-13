@@ -26,6 +26,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import zipfile
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
@@ -212,7 +213,14 @@ def build_exe(name: str, generator: str | None = None) -> str:
         cmd += ['--add-data', f'{os.path.join(ROOT, *registry.split("/"))}{seps}{folder}']
     cmd.append(os.path.join(ROOT, 'tools', 'installer.py'))
     subprocess.run(cmd, check=True)
-    return os.path.join(WORK, 'dist', EXE_NAME + '.exe')
+    exe = os.path.join(WORK, 'dist', EXE_NAME + '.exe')
+    # A successful PyInstaller build does not prove that lazy runtime imports are
+    # present. Run the actual executable without a checkout or game in its cwd.
+    env = dict(os.environ)
+    env.pop('PYTHONPATH', None)
+    with tempfile.TemporaryDirectory(prefix='edf6vc-package-smoke-') as folder:
+        subprocess.run([exe, '--check-package'], cwd=folder, env=env, check=True, timeout=120)
+    return exe
 
 
 def release_models() -> list[tuple[str, str]]:
