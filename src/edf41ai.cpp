@@ -68,6 +68,7 @@ using MoveToFn=bool(__fastcall*)(void* self,const float* goal,float a,float b,fl
 using GunStartFn=void(__fastcall*)(void* gun);
 
 struct Entry {
+    ObjRef ref;
     hector::Config cfg;
     hector::Cycle cycle;
     hector::Rng rng;
@@ -139,23 +140,33 @@ float FlatDistance(void* self,const float* target) noexcept {
 // The entry of a 4.1 Hector, or null. Call with tableLock held.
 Entry* Find(const void* self) noexcept {
     const auto it=table.find(self);
-    return it==table.end() ? nullptr : &it->second;
+    return it==table.end() || !hector::CacheMatches(it->second.ref.ctrl,ObjRef::Of(self).ctrl,true)
+        ? nullptr : &it->second;
 }
 
 void Tick(void* self) noexcept {
+    hector::Config cfg;
+    const bool marked=ReadConfig(self,cfg);
+    const ObjRef ref=ObjRef::Of(self);
+    if(!marked || !ref.ctrl) {
+        std::lock_guard<std::mutex> hold(tableLock);
+        table.erase(self);
+        return;
+    }
     float target[3];
     const bool have=TargetOf(self,target);
     const ULONGLONG now=GetTickCount64();
     std::lock_guard<std::mutex> hold(tableLock);
+    auto it=table.find(self);
+    if(it!=table.end() && !hector::CacheMatches(it->second.ref.ctrl,ref.ctrl,marked))table.erase(it);
     Entry* e=Find(self);
     if(e && now-e->last>kStaleMs) {      // another object at this address, or a long pause: start again
         table.erase(self);
         e=nullptr;
     }
     if(!e) {
-        hector::Config cfg;
-        if(!ReadConfig(self,cfg))return;
         e=&table[self];
+        e->ref=ref;
         e->cfg=cfg;
         e->rng.Seed(reinterpret_cast<std::uintptr_t>(self)^(now*0x9E3779B97F4A7C15ull));
         e->cycle=hector::Begin(cfg,e->rng);

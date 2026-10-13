@@ -24,6 +24,15 @@ int main() {
     using namespace hector;
     Rng rng;
     rng.Seed(12345);
+    // --- lifecycle: a respawn at the same object address must not inherit the previous arm gate/cycle.
+    {
+        int first=0,second=0;
+        Check(CacheMatches(&first,&first,true),"same live marked instance retains its cycle");
+        Check(!CacheMatches(&first,&second,true),"new Hector control block at reused address resets cycle");
+        Check(!CacheMatches(&first,&second,false),"stock Berserker at reused address is not a Hector");
+        Check(!CacheMatches(&first,&first,false),"removed marker invalidates even matching identity");
+        Check(!CacheMatches(nullptr,nullptr,true),"missing native identity cannot retain state");
+    }
     // --- the pick
     {
         Config c=Cannon301Launcher();
