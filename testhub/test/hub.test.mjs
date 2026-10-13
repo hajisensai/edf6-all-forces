@@ -38,7 +38,12 @@ function r2() {
   });
   return {
     objects, uploads,
-    async put(key, data) { objects.set(key, new Uint8Array(data instanceof ArrayBuffer ? data : await new Response(data).arrayBuffer())); },
+    async put(key, data, options = {}) {
+      const bytes = new Uint8Array(data instanceof ArrayBuffer ? data : await new Response(data).arrayBuffer());
+      if (options.onlyIf?.get('If-None-Match') === '*' && objects.has(key)) return null;
+      objects.set(key, bytes);
+      return { key, size: bytes.length };
+    },
     async get(key) {
       const v = objects.get(key);
       return v ? { body: v, size: v.length, httpMetadata: {} } : null;
@@ -152,13 +157,60 @@ test('builds in parts: a size that does not add up is discarded; bad requests ar
   assert.equal(bad.status, 400);
   const { upload_id: up2 } = await (await call(e, `/api/build/start?name=${name}`, { method: 'POST', data: {} })).json();
   assert.equal((await call(e, `/api/build/abort?name=${name}&upload_id=${up2}`, { method: 'POST', data: {} })).status, 200);
-  assert.equal(e.FILES.uploads.has(up2), false);
+  assert.equal(e.FILES.uploads.size, 0);
+});
+
+test('failed and competing multipart uploads preserve a published build and its metadata', async () => {
+  const e = env();
+  const name = 'protected.zip';
+  const original = new Uint8Array([1, 2, 3]);
+  assert.equal((await call(e, `/api/build?name=${name}&version=original`, { method: 'PUT', raw: original })).status, 200);
+  const old = (await (await call(e, '/api/state')).json()).builds[0];
+  const upload = async (size) => {
+    const { upload_id: up } = await (await call(e, `/api/build/start?name=${name}`, { method: 'POST', data: {} })).json();
+    const part = await (await call(e, `/api/build/part?name=${name}&upload_id=${up}&part=1`, {
+      method: 'PUT', raw: new Uint8Array([9, 8]),
+    })).json();
+    return call(e, `/api/build/finish?name=${name}&version=replacement&upload_id=${up}`, {
+      method: 'POST', data: { parts: [part], size, sha256: 'a'.repeat(64) },
+    });
+  };
+  assert.equal((await upload(3)).status, 400);
+  assert.equal((await upload(2)).status, 409);
+  assert.equal((await call(e, `/api/build?name=${name}&version=replacement`, {
+    method: 'PUT', raw: new Uint8Array([9]),
+  })).status, 409);
+  assert.deepEqual(new Uint8Array(await (await call(e, '/dl/' + name)).arrayBuffer()), original);
+  assert.deepEqual((await (await call(e, '/api/state')).json()).builds[0], old);
+  assert.deepEqual([...e.FILES.objects.keys()], ['builds/' + name]);
+  assert.equal(e.FILES.uploads.size, 0);
+});
+
+test('uploads started together have isolated staging keys and only one publishes the name', async () => {
+  const e = env();
+  const name = 'race.zip';
+  const starts = await Promise.all([1, 2].map(async (byte) => {
+    const { upload_id: up } = await (await call(e, `/api/build/start?name=${name}`, { method: 'POST', data: {} })).json();
+    const part = await (await call(e, `/api/build/part?name=${name}&upload_id=${up}&part=1`, {
+      method: 'PUT', raw: new Uint8Array([byte]),
+    })).json();
+    return { up, part, byte };
+  }));
+  assert.notEqual(starts[0].up, starts[1].up);
+  const finishes = await Promise.all(starts.map(({ up, part, byte }) => call(e,
+    `/api/build/finish?name=${name}&version=v${byte}&upload_id=${up}`, {
+      method: 'POST', data: { parts: [part], size: 1, sha256: String(byte).repeat(64) },
+    })));
+  assert.deepEqual(finishes.map((r) => r.status).sort(), [200, 409]);
+  const winner = starts[finishes.findIndex((r) => r.status === 200)];
+  assert.deepEqual(new Uint8Array(await (await call(e, '/dl/' + name)).arrayBuffer()), new Uint8Array([winner.byte]));
+  assert.deepEqual([...e.FILES.objects.keys()], ['builds/' + name]);
 });
 
 test('migration 0001 adds the handling status to a database made before it, keeping the reports', () => {
   const db = new DatabaseSync(':memory:');
   const schema = readFileSync(new URL('../schema.sql', import.meta.url), 'utf8');
-  const before = schema.replace(/,\n\s*status TEXT NOT NULL DEFAULT 'open'[^\n]*\n\s*status_at INTEGER\n/, '\n');
+  const before = schema.replace(/,\r?\n\s*status TEXT NOT NULL DEFAULT 'open'[^\n]*\n\s*status_at INTEGER\r?\n/, '\n');
   assert.notEqual(before, schema);
   db.exec(before);
   db.prepare("INSERT INTO reports (author, result, note, at) VALUES ('t', 'fail', 'old', 1)").run();

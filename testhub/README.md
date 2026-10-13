@@ -66,3 +66,5 @@ node node_modules/wrangler/bin/wrangler.js deploy --config wrangler.toml
 测试版超过 95 MB（2026-10-10 起安装包约 113 MB，CI 镜像一直 413）时 `testhub.py publish` 自动改走分块：
 `POST /api/build/start` → 每块 32 MB 一次 `PUT /api/build/part` → `POST /api/build/finish`（带各块 etag、总大小和上传方算的整包 SHA-256，
 大小对不上就丢弃）；中途失败调 `/api/build/abort`。整包 SHA-256 由上传方计算（Worker 的 CPU 预算算不完 100 MB+），安装器下载后按它校验。
+每次分块上传在独立临时对象完成并核对大小，再用流和原子条件写入发布对象；失败不会覆盖或删除已有同名包。
+已发布文件名不可复用（单次上传和分块上传均返回 409），重发请使用新的构建文件名。升级前尚未完成的上传需重新 start；upload_id 对客户端仍是不透明字符串。

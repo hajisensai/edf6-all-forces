@@ -258,7 +258,10 @@ async function putBuild(request, env, url) {
   const data = await request.arrayBuffer();
   if (!data.byteLength) throw new HttpError(400, 'empty body');
   const sha = [...new Uint8Array(await crypto.subtle.digest('SHA-256', data))].map((b) => b.toString(16).padStart(2, '0')).join('');
-  await env.FILES.put('builds/' + name, data, { httpMetadata: { contentType: 'application/zip' } });
+  const stored = await env.FILES.put('builds/' + name, data, {
+    httpMetadata: { contentType: 'application/zip' }, onlyIf: new Headers({ 'If-None-Match': '*' }),
+  });
+  if (!stored) throw new HttpError(409, 'build name already published; use a new name');
   return recordBuild(env, { name, version, channel, commit: q.get('commit') || '', notes, size: data.byteLength, sha });
 }
 
@@ -283,15 +286,24 @@ function buildName(url) {
   return name;
 }
 
-function uploadOf(env, url) {
+function uploadLocation(url) {
   const id = url.searchParams.get('upload_id') || '';
-  if (!id) throw new HttpError(400, 'upload_id required');
-  return env.FILES.resumeMultipartUpload('builds/' + buildName(url), id);
+  const match = /^([0-9a-f-]{36}):(.+)$/.exec(id);
+  if (!match) throw new HttpError(400, 'upload_id required (restart older uploads)');
+  return { key: 'build-uploads/' + match[1] + '/' + buildName(url), id: match[2] };
+}
+
+function uploadOf(env, url) {
+  const { key, id } = uploadLocation(url);
+  return env.FILES.resumeMultipartUpload(key, id);
 }
 
 async function startBuild(env, url) {
-  const up = await env.FILES.createMultipartUpload('builds/' + buildName(url), { httpMetadata: { contentType: 'application/zip' } });
-  return { upload_id: up.uploadId };
+  const token = crypto.randomUUID();
+  const up = await env.FILES.createMultipartUpload('build-uploads/' + token + '/' + buildName(url), {
+    httpMetadata: { contentType: 'application/zip' },
+  });
+  return { upload_id: token + ':' + up.uploadId };
 }
 
 async function putBuildPart(request, env, url) {
@@ -314,9 +326,20 @@ async function finishBuild(request, env, url) {
   if (!/^[0-9a-f]{64}$/.test(String(sha256 || ''))) throw new HttpError(400, 'sha256 (64 hex digits) required');
   const list = parts.map((p) => ({ partNumber: Number(p.part), etag: String(p.etag || '') }));
   const obj = await uploadOf(env, url).complete(list);
-  if (obj.size !== Number(size)) {
-    await env.FILES.delete('builds/' + name);
-    throw new HttpError(400, `the parts make ${obj.size} bytes, not ${size}: discarded`);
+  const { key } = uploadLocation(url);
+  try {
+    if (obj.size !== Number(size)) {
+      throw new HttpError(400, `the parts make ${obj.size} bytes, not ${size}: discarded`);
+    }
+    // Complete into this upload's private key first. Publish a stream only after validation, conditionally:
+    // neither a bad size nor a competing upload may replace an already published build of the same name.
+    const staged = await env.FILES.get(key);
+    const stored = await env.FILES.put('builds/' + name, staged.body, {
+      httpMetadata: { contentType: 'application/zip' }, onlyIf: new Headers({ 'If-None-Match': '*' }),
+    });
+    if (!stored) throw new HttpError(409, 'build name already published; use a new name');
+  } finally {
+    await env.FILES.delete(key);
   }
   const notes = decodeURIComponent(request.headers.get('x-notes') || '').slice(0, 20000);
   return recordBuild(env, { name, version, channel: q.get('channel') || 'nightly', commit: q.get('commit') || '', notes, size: obj.size, sha: sha256 });
