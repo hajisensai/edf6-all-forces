@@ -28,6 +28,7 @@
 #include "crew.h"
 #include "memory.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -53,7 +54,7 @@ constexpr std::size_t kCarrierSize=0x1630;
 // +0x6F0 (UfoCarrier508's constructor hands it the object's matrix, +0x60, through 0x1100B90: it sets the dirty byte +0xB0 and
 // writes the four rows into the scene node at [instance+0x10], +0xB0..+0xEF); the stream every file open ends in is the object
 // of vtable 0x175F0F0, slot 1 = Open(stream, std::wstring* path, flags) (EDF.dll+741C0; EDFModLoader redirects "/cri_bind/..." there).
-constexpr std::size_t kModelAt=0x6F0,kNodeAt=0x10,kNodeMatrixAt=0xB0,kObjMatrixAt=0x60;
+constexpr std::size_t kWrapperAt=0x650,kModelAt=0x6F0,kNodeAt=0x10,kNodeMatrixAt=0xB0,kObjMatrixAt=0x60;
 constexpr std::size_t kStreamVtable=0x175F0F0,kStreamOpenSlot=1;
 constexpr int kSlots=49;
 constexpr int kSlotDtor=0,kSlotUpdate=5,kSlotMessage=9;
@@ -137,6 +138,17 @@ Factory factory{factoryTable};
 // ---- evidence probes -------------------------------------------------------------------------------------------------
 float Len3(const float* v) noexcept { return std::sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]); }
 
+// A raw dump of `size` bytes (a field-by-field comparison of the mothership's with the stock carriers' is read off two of these).
+void DumpRaw(const char* tag,const void* obj,const char* what,const char* at,std::size_t size) noexcept {
+    if(!Rd(at,size,"raw dump"))return;
+    for(std::size_t o=0;o<size;o+=32) {
+        std::uint64_t q[4]={};
+        std::memcpy(q,at+o,std::min<std::size_t>(32,size-o));
+        Log("EDF41MOTHER dump %s %p %s +0x%02zX: %016llX %016llX %016llX %016llX",tag,obj,what,o,
+            static_cast<unsigned long long>(q[0]),static_cast<unsigned long long>(q[1]),static_cast<unsigned long long>(q[2]),static_cast<unsigned long long>(q[3]));
+    }
+}
+
 // What the object's model instance looks like: is there a scene node, where is its matrix (the world position of the drawn model),
 // how big are its rows (a scale of 0 draws nothing), and how far is it from the object's own position.
 void ProbeModel(const void* obj,const char* tag,const char* when) noexcept {
@@ -145,6 +157,17 @@ void ProbeModel(const void* obj,const char* tag,const char* when) noexcept {
     const char* inst=o+kModelAt;
     const char* node=*reinterpret_cast<const char* const*>(inst+kNodeAt);
     const std::uint8_t dirty=*reinterpret_cast<const std::uint8_t*>(inst+0xB0);
+    // The object's Umbra wrapper (+0x650): the Umbra::Object, the bitmask that picks the cameras (near / far pass) and the cull distance.
+    if(Rd(o+kWrapperAt,0x70,"umbra wrapper")) {
+        const char* w=o+kWrapperAt;
+        std::uint32_t mask=0;
+        float farSq0=0.0f;
+        std::memcpy(&mask,w+0x20,4);
+        std::memcpy(&farSq0,w+0x60,4);
+        Log("EDF41MOTHER probe %s %p (%s): umbra wrapper %p: Umbra::Object %p, bitmask 0x%08X (bit 26 = far render: %s), cull distance squared %.4g = %.1f m",
+            tag,obj,when,static_cast<const void*>(w),*reinterpret_cast<void* const*>(w+0x10),mask,(mask>>26)&1 ? "set" : "clear",farSq0,farSq0>0.0f ? std::sqrt(farSq0) : 0.0f);
+        if(std::strcmp(when,"frame 2")==0)DumpRaw(tag,obj,"umbra wrapper (+0x650)",w,0x70);
+    }
     float objM[16];
     std::memcpy(objM,o+kObjMatrixAt,sizeof(objM));
     if(!node || reinterpret_cast<std::uintptr_t>(node)<0x10000) {
@@ -156,8 +179,12 @@ void ProbeModel(const void* obj,const char* tag,const char* when) noexcept {
     float nm[16];
     std::memcpy(nm,node+kNodeMatrixAt,sizeof(nm));
     const float dx=nm[12]-objM[12],dy=nm[13]-objM[13],dz=nm[14]-objM[14];
-    Log("EDF41MOTHER probe %s %p (%s): scene node %p, node rows %.3f %.3f %.3f, node pos %.1f %.1f %.1f, object pos %.1f %.1f %.1f, apart %.1f m, dirty byte %u",
-        tag,obj,when,static_cast<const void*>(node),Len3(nm),Len3(nm+4),Len3(nm+8),nm[12],nm[13],nm[14],objM[12],objM[13],objM[14],std::sqrt(dx*dx+dy*dy+dz*dz),dirty);
+    float farSq=-1.0f;
+    if(Rd(node+0x60,4,"scene node cull distance"))std::memcpy(&farSq,node+0x60,4);
+    Log("EDF41MOTHER probe %s %p (%s): scene node %p, node rows %.3f %.3f %.3f, node pos %.1f %.1f %.1f, object pos %.1f %.1f %.1f, apart %.1f m, dirty byte %u, node+0x60 (cull distance squared) %.4g = %.1f m",
+        tag,obj,when,static_cast<const void*>(node),Len3(nm),Len3(nm+4),Len3(nm+8),nm[12],nm[13],nm[14],objM[12],objM[13],objM[14],std::sqrt(dx*dx+dy*dy+dz*dz),dirty,
+        farSq,farSq>0.0f ? std::sqrt(farSq) : 0.0f);
+    if(std::strcmp(when,"frame 2")==0)DumpRaw(tag,obj,"model instance (+0x6F0)",inst,0xC0),DumpRaw(tag,obj,"scene node",node,0xB0);
 }
 
 // Control: the stock carriers' (and the 4.1 carriers') own objects, probed the same way, to compare with the mothership.

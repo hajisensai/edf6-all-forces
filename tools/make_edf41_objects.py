@@ -713,13 +713,16 @@ MOTHER_DEV_LOCATORS = (
 )
 
 
-def mother_dev_fix(files: dict[str, bytes]) -> None:
+def mother_dev_fix(files: dict[str, bytes], far: bool = True) -> None:
     """The prototype's hull SGO: the keys its parts need (mp_*, resource) taken out (no part class exists yet, and the
     files they name are not shipped), the carrier's two MAB locators added, only the files the SGO still names kept."""
     rel = 'OBJECT/' + MOTHER_DEV_ROOT
     version, members = sgo.read(files[rel])
     for k in [k for k in members if k.startswith('mp_') or k == 'resource']:
         del members[k]
+    if not far:   # the comparison build: without the far-render keys (E508_CARRIER's own)
+        for k in ('UfoCarryer_EnableFarRender', 'spawn_effect_setting'):
+            members.pop(k, None)
     am = members['animation_model']
     am[2] = mab_legacy.mab_add_locators(mab_block(am[2]), list(MOTHER_DEV_LOCATORS))
     # What the plugin logs back at creation to show the game was given this model: [mdb name, half extents x y z, bones]
@@ -1181,7 +1184,7 @@ def remabbed(mab: object, names: tuple[tuple[str, str], ...]) -> bytes:
     return mab
 
 
-def build(edf41: str, edf6: str, only: tuple[str, ...] = (), mother_dev: bool = False) -> tuple[dict, dict[str, bytes]]:
+def build(edf41: str, edf6: str, only: tuple[str, ...] = (), mother_dev: bool = False, mother_far: bool = True) -> tuple[dict, dict[str, bytes]]:
     """The whole conversion; `only` (SGO names like 'HECTOR301CC.SGO') limits it to those roots. `mother_dev`: the
     development-only UfoMother301 prototype instead of the committed set (MOTHER_DEV_*: only that root)."""
     games = Games(edf41, edf6)
@@ -1219,7 +1222,7 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = (), mother_dev: bool = 
             try:
                 alias(games, root, out, aliases[root])
                 if mother_dev:
-                    mother_dev_fix(out)
+                    mother_dev_fix(out, mother_far)
             except ValueError as e:
 
                 why.append(f'alias {aliases[root].cls}: {e}')
@@ -1265,14 +1268,18 @@ def main() -> int:
     ap.add_argument('--out', help='write objects/ and objects.json under this folder instead of edf41port/')
     ap.add_argument('--only', action='append', default=[], metavar='SGO',
                     help='build only this root (HECTOR301CC.SGO; repeatable)')
+    ap.add_argument('--mother-no-far', action='store_true',
+                    help='with --mother-dev: leave the far-render keys out of the hull (the comparison build)')
     ap.add_argument('--mother-dev', action='store_true',
                     help='DEVELOPMENT ONLY: the UfoMother301 prototype, written to edf41port_dev/ '
                          '(never to edf41port/, never part of a release)')
     a = ap.parse_args()
     dev = a.mother_dev
+    if a.mother_no_far and not dev:
+        raise SystemExit('--mother-no-far goes with --mother-dev')
     if dev and (a.only or a.out):
         raise SystemExit('--mother-dev takes no --only / --out: it writes edf41port_dev/ only')
-    data, files = build(a.edf41, a.edf6, tuple(r.upper() for r in a.only), mother_dev=dev)
+    data, files = build(a.edf41, a.edf6, tuple(r.upper() for r in a.only), mother_dev=dev, mother_far=not a.mother_no_far)
     base = MOTHER_DEV_OUT if dev else a.out
     out_json, out_files = (os.path.join(base, 'objects.json'), os.path.join(base, 'objects')) if base else (OUT, FILES)
     shutil.rmtree(out_files, ignore_errors=True)
