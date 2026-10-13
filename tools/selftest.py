@@ -6896,8 +6896,11 @@ def edf41_maps_cover_the_scripts() -> None:
     import edf41_maps
     import make_edf5_campaign as c
     used: dict[str, set[str]] = {}
-    for m in c.edf41_text()['missions']:
-        strings = c.utf16_strings(c.edf41_script(m['id'], 'MISSION.BVM'))
+    for m, script in ((m, s) for m in c.edf41_text()['missions'] for s in ('MISSION.BVM', 'BEFORE.BVM')
+                      if os.path.exists(os.path.join(c.EDF41, 'missions', m['id'], s))):
+        # both scripts the pack ships load the map (BEFORE.BVM too: M190's asks NW_KOUSOUBLD01 for FineCloud,
+        # which the list lacked; the game's map::Environment faulted on the missing weather, 2026-10-13)
+        strings = c.utf16_strings(c.edf41_script(m['id'], script))
         for i, s in enumerate(strings):
             hit = re.fullmatch(r'(?i)app:/Map/(\w+)\.mac', s.strip())
             if hit and i + 1 < len(strings):
