@@ -4,10 +4,13 @@ rates), goes through build and check. The plugin's clip table is read from src/j
 from __future__ import annotations
 
 import os
+import json
+import shutil
 import struct
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
 import numpy as np
@@ -111,10 +114,29 @@ class SoundPackTest(unittest.TestCase):
 
     def test_skip_leaves_a_clip_to_the_plugin(self) -> None:
         out = os.path.join(self.tmp.name, 'skipped')
+        os.makedirs(out)
+        # A full build was already here: --skip must also remove its old generated WAV.
+        shutil.copyfile(os.path.join(self.out, sp.file_name('gun_near')), os.path.join(out, sp.file_name('gun_near')))
         infos = sp.build(self.zip, out, None, {'gun_near'})
         self.assertNotIn('gun_near', [i['clip'] for i in infos])
         self.assertFalse(os.path.exists(os.path.join(out, sp.file_name('gun_near'))))
         self.assertEqual(sp.check(out), [])
+        with open(os.path.join(out, 'sound_pack.json'), encoding='utf-8') as f:
+            self.assertEqual(json.load(f)['skipped'], ['gun_near'])
+        game = os.path.join(self.tmp.name, 'game')
+        plugins = os.path.join(game, 'Mods', 'Plugins')
+        os.makedirs(plugins)
+        with open(os.path.join(plugins, sp.PLUGIN + '.dll'), 'wb') as f:
+            f.write(b'not run')
+        # Installed before this explicit skip; an unrelated custom sound must remain the player's.
+        for clip in ('gun_near', 'tracks'):
+            with open(os.path.join(plugins, sp.file_name(clip)), 'wb') as f:
+                f.write(b'previous custom override')
+        with patch.object(sp, 'game_running', return_value=False):
+            sp.install(out, game)
+        self.assertFalse(os.path.exists(os.path.join(plugins, sp.file_name('gun_near'))))
+        with open(os.path.join(plugins, sp.file_name('tracks')), 'rb') as f:
+            self.assertEqual(f.read(), b'previous custom override')
         with self.assertRaises(SystemExit):
             sp.build(self.zip, out, None, {'no_such_clip'})
 

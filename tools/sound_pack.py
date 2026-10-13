@@ -16,7 +16,9 @@ another game's sounds, so only this recipe is kept here, never the sounds: the p
   python tools/sound_pack.py install OUT GAME   copy them into GAME/Mods/Plugins (refused while EDF6.exe runs)
   python tools/sound_pack.py remove GAME        take this pack's WAVs out again: the plugin makes its own sounds
 
-One clip back to the plugin's own: delete its WAV from Mods/Plugins (or build with --skip CLIP).
+One clip back to the plugin's own: delete its WAV from Mods/Plugins (or build with --skip CLIP, then install the pack).
+An explicit skip removes the old generated WAV from reused OUT and records it in the manifest; install removes that
+clip's previous override from the game. Other custom sounds absent from the pack stay as they are.
 """
 from __future__ import annotations
 
@@ -394,6 +396,10 @@ def build(zip_path: str, out: str, reference_dir: Optional[str], skip: set[str])
     infos = []
     for r in MAPPING:
         if r.clip in skip:
+            # OUT may be reused after an earlier full build. Its old override must not survive an explicit skip.
+            stale = os.path.join(out, file_name(r.clip))
+            if os.path.isfile(stale):
+                os.remove(stale)
             continue
         y, info = build_clip(a, r, table, reference_dir)
         with open(os.path.join(out, info['file']), 'wb') as f:
@@ -402,7 +408,8 @@ def build(zip_path: str, out: str, reference_dir: Optional[str], skip: set[str])
         off = '' if info['vs_plugin_db'] is None else f'  {info["vs_plugin_db"]:+.1f} dB vs the plugin\'s'
         print(f'{info["file"]:44s} {info["seconds"]:6.2f} s  peak {info["peak"]:.2f}{off}')
     with open(os.path.join(out, 'sound_pack.json'), 'w', encoding='utf-8') as f:
-        json.dump({'archive_sha256': sha256_file(zip_path), 'clips': infos}, f, ensure_ascii=False, indent=1)
+        json.dump({'archive_sha256': sha256_file(zip_path), 'clips': infos, 'skipped': sorted(skip)}, f,
+                  ensure_ascii=False, indent=1)
     return infos
 
 
@@ -495,6 +502,18 @@ def install(out: str, game: str) -> None:
     errors = check(out)
     if errors:
         raise SystemExit('not installed:\n  ' + '\n  '.join(errors))
+    # Only explicit skips restore a previous install to synthesis. A missing WAV alone may be a partial pack,
+    # and must not remove the player's other custom overrides.
+    manifest = os.path.join(out, 'sound_pack.json')
+    skipped = []
+    if os.path.isfile(manifest):
+        with open(manifest, encoding='utf-8') as f:
+            skipped = json.load(f).get('skipped', [])
+        allowed = {r.clip for r in MAPPING}
+        if not isinstance(skipped, list) or any(not isinstance(c, str) or c not in allowed for c in skipped):
+            raise SystemExit('not installed: invalid skipped clips in sound_pack.json')
+        if any(os.path.isfile(os.path.join(out, file_name(c))) for c in skipped):
+            raise SystemExit('not installed: a skipped clip still has a WAV; rebuild the pack')
     for name in pack_files():
         src = os.path.join(out, name)
         if os.path.isfile(src):
@@ -502,6 +521,11 @@ def install(out: str, game: str) -> None:
             if sha256_file(src) != sha256_file(os.path.join(plugins, name)):
                 raise SystemExit(f'{name}: the copy differs')
             print(f'installed {name}')
+    for clip in skipped:
+        path = os.path.join(plugins, file_name(clip))
+        if os.path.isfile(path):
+            os.remove(path)
+            print(f'restored plugin sound {clip}')
 
 
 def remove(game: str) -> None:
