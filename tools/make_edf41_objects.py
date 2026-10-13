@@ -105,6 +105,8 @@ class Alias:
     template: str             # an EDF6 object of that class (OBJECT/<name>): the keys and CAS players 4.1 lacks
     players: tuple[str, ...]  # CAS players (anmgroups) the class resolves that 4.1's CAS lacks (crash on spawn)
     override: tuple[tuple[str, object], ...] = ()   # keys set to these values whatever 4.1's and the template's are
+    stock_cas: bool = False   # its CAS is a file EDF6's archives also hold (so the closure skips it): 4.1's own, converted, is
+                              # shipped under the same path with the grafts below, replacing the stock copy
     own_cas: bool = False     # 4.1's object has no CAS: the template's, every clip hollowed (cas_graft.hollow), as
                               # OBJECT/<root>.CAS: the class's players without the template's motion on its bones
     bones: tuple[tuple[str, str, str], ...] = ()   # on every MDB of its model RABs, in order: ('rename', old, new)
@@ -422,12 +424,19 @@ ALIASES: dict[str, Alias] = {
     #   empty list is the loop's own early exit (0x53D184). The states walk_battle_f / b / l / r, which the class asks
     #   for in a fight and a missing state refuses, are Hector's own walks, so it does not stand still while it moves.
     # Transporter401_Formation (MP003, MP004: 4 transporters carrying the mission's vehicle) stays 4.1's file under the
-    # class it has in EDF6 too. EDF6's stock copy is a leftover without the keys the class now reads: se_preset_list
-    # (its constructor hands the lookup to the sound system unchecked, EDF+0x5E9A90) and boosts, from EDF6's own
-    # V508_TRANSPORT_FORMATION (4 sound names of the resident bank TIKYUUX_SE: flight, booster on / off, container
-    # release, which are 4.1's transporter sounds). EDF.dll reads boosts only in Transporter508's constructor
-    # (0x5E4830): inert here, there because the class-key test (class_keys) asks every key the sibling has.
-    'TRANSPORTER401_FORMATION.SGO': Alias('Transporter_Formation', 'V508_TRANSPORT_FORMATION.SGO', ()),
+    # class it has in EDF6 too. EDF6's stock copy is a leftover that the class cannot load, found one crash at a time on
+    # the real game (2026-10-13), each by the same cause: the class reads keys and names unchecked.
+    #  - se_preset_list (constructor, EDF+0x5E9A90, null to the sound system): EDF6's V508_TRANSPORT_FORMATION's 4 names
+    #    (flight, booster on / off, container release; cues of the resident bank TIKYUUX_SE).
+    #  - boosts: read for each transporter by 0x5E4830 (0x5E4AE9, unchecked), and every entry is a MAB locator looked up
+    #    in animation_model[2] (0x6BADD0 reads [model+0x280], EDF+0x6BAE06 rax=0). 4.1's model has no MAB (item 0)
+    #    and no booster locators; EDF6's 6 entries name locators of V508's MAB. Empty: the loop's own exit (count 0).
+    #  - CAS main states hover_start, hover_end (0x5E4A6A..0x5E4AB0 look the states up by name, required): 4.1's
+    #    Transporter401.CAS has only fly in main. Both are fly (aliases: the transporter flies, which is all 4.1 shows),
+    #    shipped as OBJECT/TRANSPORTER401.CAS over the stock copy (stock_cas).
+    'TRANSPORTER401_FORMATION.SGO': Alias('Transporter_Formation', 'V508_TRANSPORT_FORMATION.SGO', (),
+                                          override=(('boosts', []),), stock_cas=True,
+                                          state_aliases=(('main', 'hover_start', 'fly'), ('main', 'hover_end', 'fly'))),
     **{root: hector_alias(g, l, r) for root, (g, l, r, _n) in HECTOR_VARIANTS.items()},
     # Deiroi (5 variants): EDF6's Deiroi is 4.1's class with every constant moved into the SGO, and its constructor reads
     # deiroi_battery_config / deiroi_moving_settings / bullet_object / charge_param unchecked (EDF+0x319566, 0x31981c): 4.1's
@@ -794,6 +803,8 @@ def alias(games: Games, root: str, files: dict[str, bytes], a: Alias) -> None:
     am = members.get('animation_model')
     cas = rel_of(am[1]) if isinstance(am, list) and len(am) > 1 and isinstance(am[1], str) else None
     t_am = theirs.get('animation_model')   # a part (animation_model_d) has none: no CAS to graft
+    if a.stock_cas and cas and cas not in files:
+        files[cas] = convert(games, cas) if cas in games.in4 else games.read6(cas)
     if a.own_cas:
         if cas:
             raise ValueError(f'{root} has a CAS of its own: own_cas is for an object without one')
@@ -1080,6 +1091,35 @@ def check_class_keys(stock: dict[str, dict[str, dict]], rel: str, data: bytes) -
     need = missing_class_keys(stock, sgo.load(data=data))
     if need:
         raise ValueError(f'{rel}: lacks {need}, which every EDF6 SGO of its class has')
+
+
+# Objects whose animation_model has no MAB block (item 2 is 0) while every stock SGO of their class has one, with why that
+# works: the class looks MAB locators up by name through a pointer a missing MAB leaves null (EDF+0x6BAE06), and the
+# object names none.
+MAB_LESS: dict[str, str] = {
+    'TRANSPORTER401_FORMATION.SGO': 'boosts is empty: no booster locator is looked up (0x5E4830 -> 0x6BADD0)',
+}
+
+
+def has_mab(members: dict) -> bool:
+    """True when animation_model[2] is a MAB block (a 'raw:' hex string in an SGO read, or bytes)."""
+    am = members.get('animation_model')
+    blk = am[2] if isinstance(am, list) and len(am) > 2 else None
+    return (isinstance(blk, str) and blk.startswith('raw:4d414200')) or (isinstance(blk, bytes) and blk[:4] == b'MAB\0')
+
+
+def check_model_mab(stock: dict[str, dict[str, dict]], rel: str, data: bytes) -> None:
+    """ValueError when the SGO `data` has no MAB block in animation_model[2] and every other stock SGO of its class has
+    one, unless MAB_LESS says why it works (Transporter401_Formation: its boosts named locators in a MAB it did not
+    have, the null read at EDF+0x6BAE06, MP003 2026-10-13). DSGO results and classes without a stock sibling are
+    not compared."""
+    if data[:4] == b'DSGO':
+        return
+    members = sgo.load(data=data)
+    siblings = [m for r, m in stock.get(str(members.get('xgs_scene_object_class')), {}).items() if r != rel]
+    if siblings and all(has_mab(m) for m in siblings) and not has_mab(members) and rel.split('/')[-1] not in MAB_LESS:
+        raise ValueError(f'{rel}: animation_model has no MAB block, which every other stock SGO of its class has '
+                         '(the class looks locators up in it unchecked)')
 
 
 def remove_key(node: dsgo.Node, key: str) -> None:
@@ -1440,6 +1480,7 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
                 stock = games.stock_by_class()   # from the nearest one (only those keys), then all are required
                 filled = fill_class_keys(stock, games.read6, rel, out)
                 check_class_keys(stock, rel, out[rel])
+                check_model_mab(stock, rel, out[rel])
                 check_fracture(sgo.load(data=out[rel]), out, rel)
             except ValueError as e:
                 why.append(str(e))

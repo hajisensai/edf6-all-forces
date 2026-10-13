@@ -6228,12 +6228,33 @@ def edf41_stale_stock() -> None:
     assert m.stale_stock(stock, everything, {'OBJECT/B.SGO'}, {'OBJECT/S.SGO'}) == [], 'replaced / proven passes'
     assert m.stale_stock(stock, {'OBJECT/A.SGO'}, set(), set()) == [], 'only what the 4.1 missions spawn is tested'
 
+    # animation_model without a MAB block where every sibling has one (Transporter401_Formation: boosts looked its
+    # locators up through the null MAB, EDF+0x6BAE06, MP003 2026-10-13) is refused unless MAB_LESS says why it works
+    import sgo
+    mab = 'raw:4d414200' + '00' * 8
+    sib = {'xgs_scene_object_class': 'Box', 'animation_model': [['a.mrab', 'a.mdb'], 'a.cas', mab]}
+    stock_mab = {'Box': {'OBJECT/A.SGO': sib}}
+    plain = sgo.write_depth_first(0x102, {'xgs_scene_object_class': 'Box', 'animation_model': [['b.rab', 'b.mdb'], 'b.cas', 0]})
+    with_mab = sgo.write_depth_first(0x102, {'xgs_scene_object_class': 'Box', 'animation_model': [['b.rab', 'b.mdb'], 'b.cas', mab]})
+    m.check_model_mab(stock_mab, 'OBJECT/B.SGO', with_mab)
+    m.check_model_mab({}, 'OBJECT/B.SGO', plain)     # no sibling: nothing to compare
+    try:
+        m.check_model_mab(stock_mab, 'OBJECT/B.SGO', plain)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('check_model_mab passed an animation_model without a MAB block')
+    m.check_model_mab(stock_mab, 'OBJECT/TRANSPORTER401_FORMATION.SGO', plain)   # MAB_LESS: explained
+
     # the shipped replacement: registered as replacing the stock file, built from 4.1's SGO under EDF6's class
     reg = eo.registry()
     done = {o['object']: o for o in reg['objects']}
     for root, why in m.STOCK_OVERRIDES.items():
         o = done.get('OBJECT/' + root)
         assert o is not None and o.get('replaces_stock') == why, root
+    formation = sgo.load(data=eo.read('OBJECT/TRANSPORTER401_FORMATION.SGO'))
+    assert formation['boosts'] == [] and not m.has_mab(formation), 'MAB_LESS is only sound with no booster locators'
+    assert 'OBJECT/TRANSPORTER401.CAS' in done['OBJECT/TRANSPORTER401_FORMATION.SGO']['files']
     if not _e5c_have_game() or not _edf41_root():
         print('skip  edf41_stale_stock (real archives): needs EDF6 and EDF4.1 installed')
         return
@@ -6245,6 +6266,17 @@ def edf41_stale_stock() -> None:
     left = [s for s in m.stale_stock(games.stock_by_class(), spawned, set(done), m.proven_stock(games))
             if s.split(':')[0] not in m.STOCK_EXEMPT]
     assert not left, left
+    real = games.stock_by_class()
+    for o in reg['objects']:   # every shipped SGO has the MAB block its class's stock SGOs have, or MAB_LESS says why not
+        if o['object'].endswith('.SGO'):
+            m.check_model_mab(real, o['object'], eo.read(o['object']))
+    # the formation's CAS has the states the class looks up by name (EDF+0x5E4A6A..0x5E4AB0)
+    import cas_graft
+    import cas_legacy as cl
+    cas = eo.read('OBJECT/TRANSPORTER401.CAS')
+    main = [[cas_graft._name(cas, mc.at) for mc in ms] for at, ms in cl.cas_layout(cas).tree.anmgroups
+            if cas_graft._name(cas, at) == 'main']
+    assert main and {'hover_start', 'hover_end', 'fly'} <= set(main[0]), main
     # and without the replacement the formation is what this test exists to catch
     bad = m.stale_stock(games.stock_by_class(), spawned, set(), m.proven_stock(games))
     assert any(s.startswith('OBJECT/TRANSPORTER401_FORMATION.SGO') and 'se_preset_list' in s for s in bad), bad
