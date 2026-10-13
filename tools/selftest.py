@@ -6246,6 +6246,23 @@ def edf41_stale_stock() -> None:
         raise AssertionError('check_model_mab passed an animation_model without a MAB block')
     m.check_model_mab(stock_mab, 'OBJECT/TRANSPORTER401_FORMATION.SGO', plain)   # MAB_LESS: explained
 
+    # a classic SGO of a class whose stock SGOs are all DSGO is refused (Vehicle501_FortressRobo: slot 6 read the root
+    # through the dictionary API a classic SGO leaves empty, EDF+0xD74D9, MP004 2026-10-13); as_dsgo keeps the values
+    import dsgo
+    classic = sgo.write_depth_first(0x102, {'xgs_scene_object_class': 'Box', 'n': [1, 2], 's': 'x', 'f': 1.5})
+    m.check_class_format(set(), 'OBJECT/B.SGO', classic)
+    try:
+        m.check_class_format({'Box'}, 'OBJECT/B.SGO', classic)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('check_class_format passed a classic SGO of a DSGO-only class')
+    converted = m.as_dsgo(classic)
+    assert converted[:4] == b'DSGO' and m.as_dsgo(converted) == converted
+    m.check_class_format({'Box'}, 'OBJECT/B.SGO', converted)
+    back = dsgo.to_py(dsgo.parse(converted).root)
+    assert back == {'xgs_scene_object_class': 'Box', 'n': [1.0, 2.0], 's': 'x', 'f': 1.5}, back
+
     # the shipped replacement: registered as replacing the stock file, built from 4.1's SGO under EDF6's class
     reg = eo.registry()
     done = {o['object']: o for o in reg['objects']}
@@ -6270,6 +6287,11 @@ def edf41_stale_stock() -> None:
     for o in reg['objects']:   # every shipped SGO has the MAB block its class's stock SGOs have, or MAB_LESS says why not
         if o['object'].endswith('.SGO'):
             m.check_model_mab(real, o['object'], eo.read(o['object']))
+    dsgo_only = games.dsgo_only_classes()
+    assert 'Vehicle501_FortressRobo' in dsgo_only, sorted(dsgo_only)[:5]
+    for o in reg['objects']:   # no shipped classic SGO sits in a class EDF6 only ships as DSGO
+        if o['object'].endswith('.SGO'):
+            m.check_class_format(dsgo_only, o['object'], eo.read(o['object']))
     # the formation's CAS has the states the class looks up by name (EDF+0x5E4A6A..0x5E4AB0)
     import cas_graft
     import cas_legacy as cl

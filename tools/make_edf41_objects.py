@@ -647,6 +647,7 @@ class Games:
         self.in6 = archives(edf6)
         self.have6 = set(self.in6)
         self._stock: dict[str, dict[str, dict]] | None = None
+        self._formats: dict[str, set[bool]] = {}   # class -> {is a DSGO} over its stock SGOs
 
     def stock_by_class(self) -> dict[str, dict[str, dict]]:
         """EDF6's own top-level SGOs by xgs_scene_object_class: {class: {OBJECT/<name>: members}} (read once)."""
@@ -662,7 +663,14 @@ class Games:
                 cls = members.get('xgs_scene_object_class')
                 if isinstance(cls, str):
                     self._stock.setdefault(cls, {})[rel] = members
+                    self._formats.setdefault(cls, set()).add(self.read6(rel)[:4] == b'DSGO')
         return self._stock
+
+    def dsgo_only_classes(self) -> set[str]:
+        """The classes whose every stock SGO is a DSGO (EDF6's own form): their code reads the object through the
+        dictionary API (EDF+0xD7480), which a classic SGO does not feed."""
+        self.stock_by_class()
+        return {c for c, f in self._formats.items() if f == {True}}
 
     def sound(self, rel: str) -> bool:
         return os.path.isfile(os.path.join(self.edf6_root, 'SOUND', 'PC', rel.rsplit('/', 1)[-1]))
@@ -1032,6 +1040,27 @@ def proven_stock(games: 'Games') -> set[str]:
     """The SGOs EDF6's own missions spawn (EDF6 and EDF6_DLC scripts), with the SGOs those name: loaded by the game."""
     return sgo_closure({r for s in mission_scripts(games, True) for r in script_sgos(s)},
                        lambda rel: games.read6(rel) if rel in games.have6 else None)
+
+
+def as_dsgo(data: bytes) -> bytes:
+    """The classic SGO `data` as a DSGO with the same values (numbers become doubles, raw blocks Blobs: dsgo_value)."""
+    if data[:4] == b'DSGO':
+        return data
+    _version, members = sgo.read(data)
+    root = dsgo.Node([])
+    for k, v in members.items():
+        root.set(k, dsgo_value(v))
+    return dsgo.compact(dsgo.Document(root, []))
+
+
+def check_class_format(dsgo_classes: set[str], rel: str, data: bytes) -> None:
+    """ValueError when the SGO `data` is a classic SGO of a class whose every stock SGO is a DSGO: the class reads its
+    object through the dictionary API (EDF+0xD7480 over the table at object+0xA8), which a classic SGO leaves empty;
+    a constructor that does not guard it (Vehicle501_FortressRobo slot 6, 0x609E98: ai_attack_interval, then
+    ai_attack_setting) faults on the null default table (MP004 2026-10-13, EDF+0xD74D9)."""
+    cls = str(sgo.load(data=data).get('xgs_scene_object_class'))
+    if data[:4] != b'DSGO' and cls in dsgo_classes:
+        raise ValueError(f'{rel}: a classic SGO of class {cls}, whose every stock SGO is a DSGO')
 
 
 def class_keys(stock: dict[str, dict[str, dict]], cls: str) -> set[str]:
@@ -1479,6 +1508,9 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
             try:   # the keys every stock SGO of the class has (class_keys): what an alias or patch left out is filled
                 stock = games.stock_by_class()   # from the nearest one (only those keys), then all are required
                 filled = fill_class_keys(stock, games.read6, rel, out)
+                if out[rel][:4] != b'DSGO' and str(sgo.load(data=out[rel]).get('xgs_scene_object_class')) in games.dsgo_only_classes():
+                    out[rel] = as_dsgo(out[rel])
+                check_class_format(games.dsgo_only_classes(), rel, out[rel])
                 check_class_keys(stock, rel, out[rel])
                 check_model_mab(stock, rel, out[rel])
                 check_fracture(sgo.load(data=out[rel]), out, rel)
