@@ -7006,12 +7006,16 @@ def edf41_objects_shipped() -> None:
     assert listed == set(reg['files']), 'the registry lists files no object needs, or the reverse'
     root = os.path.join(ROOT, 'edf41port', 'objects')
     shipped = {os.path.relpath(os.path.join(d, f), root).replace(os.sep, '/') for d, _, fs in os.walk(root) for f in fs}
-    own = listed - set(reg.get('shared', {}))
+    import rabpool
+    own = {s for rel in listed - set(reg.get('shared', {})) for s in rabpool.stored(rel)}
+    for s in sorted(own):   # every member an archive's manifest names, and no member none does
+        if s.endswith(rabpool.MANIFEST):
+            with open(os.path.join(root, *s.split('/')), encoding='utf-8') as f:
+                own |= {f'{rabpool.MEMBERS}/{row[-1]}' for row in json.load(f)['files']}
     assert shipped == own, f'shipped but unlisted: {sorted(shipped - own)[:5]}; listed, not shipped: {sorted(own - shipped)[:5]}'
     assert all(os.path.isfile(eo.bundled(r)) for r in reg.get('shared', {})), 'a shared file is not shipped where named'
     for rel in listed:
-        with open(eo.bundled(rel), 'rb') as f:
-            data = f.read()
+        data = eo.read(rel)
         assert hashlib.sha256(data).hexdigest() == reg['files'][rel], rel
         if rel.endswith('.SGO'):
             assert not legacy_sgo.mab_blocks(data), f'{rel}: a MAB block still in 4.1\'s form'
@@ -7628,7 +7632,8 @@ def mdb_insert_bone() -> None:
 def edf41_ufo401_real() -> None:
     """The shipped UFO401 under UfoSmall507: every MDB of its model has the bones the class finds by name (body,
     gun_side, gun: a missing one, wrong aim or EDF+0x529067), keeps every bone its ragdoll and its MAB locators name
-    (center: kept for them), its 8 sounds (4.1's 7, then E507's eighth), and E507's aim keys."""
+    (center: kept for them; core is not renamed and the added bones are weightless), its 8 sounds (4.1's 7, then
+    E507's eighth), E507's aim keys, the muzzle locator 銃口 on gun, and 4.1 Ufo10's pattern / ai_info / bullet_info."""
     import json
     import re
     import mdb
@@ -7641,16 +7646,41 @@ def edf41_ufo401_real() -> None:
     assert 'center'.encode('utf-16le') in bytes.fromhex(d['animation_model'][2][4:])
     with open(os.path.join(base, 'RAGDOLL_UFO401_HAS_HKA.SHKT'), 'rb') as f:
         ragdoll = {s.decode() for s in re.findall(rb'[A-Za-z_][A-Za-z0-9_]{2,}', f.read())}
-    with open(os.path.join(base, 'UFO401.MRAB'), 'rb') as f:
-        models = [x for x in mdb.rab_read(f.read()).files if x.name.lower().endswith('.mdb')]
+    import edf41_objects
+    models = [x for x in mdb.rab_read(edf41_objects.read('OBJECT/UFO401.MRAB')).files if x.name.lower().endswith('.mdb')]
     assert len(models) == 3
     for x in models:
         md = mdb.mdb_read(x.data)
         names = [md.name_of(b.name) for b in md.bones]
         assert {'body', 'gun_side', 'gun', 'center'} <= set(names), (x.name, names)
         assert md.bones[names.index('gun')].parent == names.index('gun_side')
+        assert md.bones[names.index('gun_side')].parent == names.index('center')
         assert md.bones[names.index('body')].parent == names.index('center')
+        # 4.1's core mesh never turns toward the target: core is still core, and the three added bones are weightless
+        assert 'core' in names and names.count('core') == 1
+        added = {names.index(n) for n in ('body', 'gun_side', 'gun')}
+        assert all(md.bones[i].kind == 0 for i in added)
+        for ob in md.objects:
+            for me in ob.meshes:
+                idx, weight = mdb.read_elem(me, 'BLENDINDICES'), mdb.read_elem(me, 'BLENDWEIGHT')
+                if idx and weight:
+                    assert not any(w > 0 and int(i) in added for ws, iv in zip(weight, idx) for w, i in zip(ws, iv)), x.name
         assert {'center', 'partsA_r'} & ragdoll <= set(names)
+    # the muzzle locator is on gun (507 fires along its bone: the aim shows in the shots), the others stay on center
+    import mab_legacy as ml
+    mab = d['animation_model'][2]
+    nodes = {l.name: l.node for _i, l in ml.mab_locators(bytes.fromhex(mab[4:]) if isinstance(mab, str) else mab)}
+    assert nodes['銃口'] == 'gun' and set(nodes.values()) == {'gun', 'center'}, nodes
+    # 4.1 Ufo10's attack in 507's keys: pattern 0 (its attack pass), the tint formula 1, speed / interval / damage / turn
+    def plain(v: object) -> object:
+        return [plain(x) for x in v] if isinstance(v, list) else round(v.value, 6) if isinstance(v, sgo.Float) else v
+    assert d['ai_attack_pattern'] == 0 and d['bullet_pattern'] == 1
+    assert plain(d['ai_info']) == [[[2, 0.00375], [1, 0.2625]], 200.0, [600, 1200], [40.0, 20.0], [0.1, 1.5], [150, 210]]
+    bi = plain(d['bullet_info'])
+    assert bi[0] == -1 and bi[2] == 1 and bi[3] == [-1, 0.0] and bi[4:6] == [0.4, 1800.0] and bi[7] == 30, bi
+    assert bi[1] == [[2, 0.02], [1, 0.8], [3, 10.0], [1, 1.0], [5, 2.0]] and bi[6] == [[2, 0.071429], [5, 1.0]]
+    assert bi[10] == [[2, 0.0008], [1, -0.0018], [2, 0.06], [1, 0.0018]] and bi[11] == 0.0 and bi[13] == 0.0
+    assert d['bullet_class'] == 'LaserBullet01' and len(d['bullet_custom_param']) == 11
     reg = json.load(open(os.path.join(ROOT, 'edf41port', 'objects.json'), encoding='utf-8'))
     assert any(o['object'] == 'OBJECT/UFO401.SGO' for o in reg['objects'])
 
@@ -7913,6 +7943,623 @@ def edf41_voice_real() -> None:
     row = next(en.items[i] for i in en.names if en.names[i] == 'A001AA')
     line = s.read_captions(s.plugin_path(r41, s.CAPTIONS['EN'])).get('A001AA')
     assert row.items == ['', line or 'A001AA'], row.items
+
+
+def _mini_mab(flag: int) -> bytes:
+    """A small MAB block in the layout of pylib/mab_legacy.py's docstring, with every part a block can have: two
+    records in list 0 (a kind 0 and a kind 2), one in list 1, a track of two keys, vec4s, SGO blocks, strings. `flag`
+    0x03: offsets from the block's start; 0x83: from the struct holding them."""
+    import struct
+    sgo_block = b'SGO\0' + struct.pack('<7I', 0x102, 0, 0x20, 0, 0x20, 0, 0x20)
+    heads, nlists = 0x24, 4
+    rec0 = heads + 8 * nlists                      # list 0: 2 records, list 1: 1 record
+    tracks = rec0 + 3 * 0x20
+    keys = tracks + 0x10
+    keys_end = keys + 2 * 0x10
+    vecs = (keys_end + 15) // 16 * 16
+    vec = [(0.0, 7.0, 0.0, 1.0), (0.0, 1.0, 2.0, 1.0), (0.5, 0.5, 1.0, 1.0), (0.1, 0.2, 0.3, 1.0), (1.0, 2.0, 3.0, 1.0)]
+    vec_end = vecs + 16 * len(vec)
+    blob_at = [vec_end, vec_end + 0x20]            # one for the records, one for the keys
+    strs = vec_end + 0x40
+    texts = ['chest', 'bang', 'waist', 'react', 'head', 'aim', 'trk', 'k0', 'k1']
+    text_at: dict[str, int] = {}
+    pool = bytearray()
+    for t in texts:
+        text_at[t] = strs + len(pool)
+        pool += t.encode('utf-16le') + b'\0\0'
+    out = bytearray(strs + len(pool))
+    struct.pack_into('<4sII4H4I', out, 0, b'MAB\0', 0x0F, flag, nlists, 1, len(vec), len(pool), heads, tracks, vecs, strs)
+    rel = flag == 0x83
+
+    def put(at: int, base: int, to: int) -> None:
+        struct.pack_into('<i', out, at, to - base if rel else to)
+
+    for i, (n, first) in enumerate([(2, rec0), (1, rec0 + 0x40), (0, tracks), (0, tracks)]):
+        struct.pack_into('<HH', out, heads + 8 * i, i, n)
+        put(heads + 8 * i + 4, heads + 8 * i, first)
+    recs = [('bang', 'chest', 0, [0], None), ('react', 'waist', 2, [1, 2, 3], None), ('aim', 'head', 0, [4], None)]
+    for k, (name, node, kind, vi, _x) in enumerate(recs):
+        r = rec0 + 0x20 * k
+        put(r, r, text_at[name])
+        put(r + 4, r, text_at[node])
+        struct.pack_into('<i', out, r + 8, kind)
+        put(r + 0xC, r, vecs + 16 * vi[0])
+        if kind == 2:
+            put(r + 0x10, r, vecs + 16 * vi[1])
+            put(r + 0x14, r, vecs + 16 * vi[2])
+        else:
+            struct.pack_into('<f', out, r + 0x10, 1.0)
+            struct.pack_into('<i', out, r + 0x14, -1)
+        put(r + 0x1C, r, blob_at[0])
+    put(tracks, tracks, keys)
+    put(tracks + 4, tracks, keys_end)
+    put(tracks + 8, tracks, text_at['trk'])
+    struct.pack_into('<i', out, tracks + 0xC, 2)
+    for k in range(2):
+        key = keys + 0x10 * k
+        put(key, key, text_at[f'k{k}'])
+        struct.pack_into('<f', out, key + 4, 0.5 * k)
+        put(key + 0xC, key, blob_at[1])
+    out[keys_end:vecs] = bytes([0xBA]) * (vecs - keys_end)
+    for i, v in enumerate(vec):
+        struct.pack_into('<4f', out, vecs + 16 * i, *v)
+    for at in blob_at:
+        out[at:at + 0x20] = sgo_block
+    for t, at in text_at.items():
+        out[at:at + 2 * len(t) + 2] = t.encode('utf-16le') + b'\0\0'
+    return bytes(out)
+
+
+def _f32_plain(x: float) -> float:
+    """`x` rounded to float32, as a plain float (_f32 above gives an sgo value)."""
+    import struct
+    return struct.unpack('<f', struct.pack('<f', x))[0]
+
+
+@test
+def mab_add_locators_synthetic() -> None:
+    """pylib/mab_legacy.mab_add_locators on a small block of either flag (0x03: absolute offsets, 0x83: relative to
+    the struct): the added records come last in list 0 with the vec4s they were given, a name or node the block
+    holds is shared and a new one appended; every record, track and key that was there reads back the same (they only
+    moved), the other lists keep their records, the block passes mab_layout, and adding nothing is the block itself.
+    The next added block is built on the result, so the header's counts and offsets are right for a second run."""
+    import dataclasses
+    import mab_legacy as ml
+    for flag in (0x03, 0x83):
+        raw = _mini_mab(flag)
+        before = ml.mab_locators(raw)
+        assert [(i, l.name, l.node) for i, l in before] == [(0, 'bang', 'chest'), (0, 'react', 'waist'), (1, 'aim', 'head')]
+        assert ml.mab_add_locators(raw, []) == raw
+        eye = ml.Locator('eye', 'chest', 0, (0.0, 29.0, 0.0, 1.0), 1.0)
+        muzzle = ml.Locator('muzzle', 'arm', 2, (0.0, 0.0, 26.9, 1.0), (0.1, 0.1, 5.0, 1.0), (0.0, 0.0, 0.0, 1.0))
+        out = ml.mab_add_locators(raw, [eye, muzzle])
+        ml.mab_layout(out)
+        got = ml.mab_locators(out)
+        assert [(i, l.name) for i, l in got] == [(0, 'bang'), (0, 'react'), (0, 'eye'), (0, 'muzzle'), (1, 'aim')], flag
+        assert got[0] == before[0] and got[1] == before[1] and got[4] == before[2]
+        assert got[2][1].a == eye.a and got[2][1].b == 1.0 and got[2][1].c is None
+        assert got[3][1].node == 'arm' and got[3][1].a == tuple(_f32_plain(x) for x in muzzle.a) and got[3][1].c == muzzle.c
+        # 'chest' is a string the block has: the node shares it; 'arm' is new and is the last string
+        assert out.count('chest'.encode('utf-16le') + b'\0\0') == 1 and out.endswith('arm'.encode('utf-16le') + b'\0\0')
+        # the track and its keys are in the layout the reader checks (mab_layout above), their strings unchanged
+        assert all(s.encode('utf-16le') + b'\0\0' in out for s in ('k0', 'k1', 'trk'))
+        again = ml.mab_add_locators(out, [dataclasses.replace(eye, name='eye2')])
+        assert [l.name for _i, l in ml.mab_locators(again)][-2:] == ['eye2', 'aim'], 'a second run'
+        after_again = ml.mab_locators(again)
+        assert after_again[:4] == got[:4] and after_again[5] == got[4]
+
+
+@test
+def mab_add_locators_real() -> None:
+    """mab_add_locators on every MAB block of EDF6's OBJECT SGOs (DSGO and SGO, 0x83) and of EDF4.1's (0x03 once
+    converted is 0x83; 0x03 as it stands): the result passes mab_layout, the old records are the first of their lists
+    in order, and a list-0 locator added reads back. These blocks have tracks, keys and every record kind."""
+    import dsgo
+    import legacy_sgo
+    import mab_legacy as ml
+    import make_edf41_objects as m
+    import rootcpk
+    import sgo
+    if not _e5c_have_game():
+        return
+    g6 = m.archives(rootcpk.DEFAULT_GAME)
+    blocks: list[bytes] = []
+    for rel, game in sorted(g6.items()):
+        if not (rel.startswith('OBJECT/') and rel.endswith('.SGO')) or len(blocks) >= 60:
+            continue
+        data = game.read(*rel.rsplit('/', 1))
+        try:
+            if data[:4] == b'DSGO':
+                block = dsgo.parse(data).root.get('animation_model').items[2].data
+            else:
+                block = sgo.read(data)[1]['animation_model'][2]
+        except (KeyError, IndexError, AttributeError, ValueError):
+            continue
+        if isinstance(block, bytes) and block[:4] == b'MAB\0':
+            blocks.append(block)
+    assert len(blocks) >= 40, len(blocks)
+    new = [ml.Locator('テスト', 'zz_node', 2, (1.0, 2.0, 3.0, 1.0), (0.1, 0.1, 5.0, 1.0), (0.0, 0.0, 0.0, 1.0))]
+    for block in blocks:
+        before = ml.mab_locators(block)
+        if not before:
+            continue
+        out = ml.mab_add_locators(block, new)
+        after = ml.mab_locators(out)
+        n0 = sum(1 for i, _l in before if i == 0)
+        assert after[:n0] == before[:n0] and after[n0][1].name == 'テスト' and after[n0 + 1:] == before[n0:], 'records'
+    edf41 = _edf41_root()
+    if edf41:
+        g4 = m.archives(edf41)
+        seen = 0
+        for rel, game in sorted(g4.items()):
+            if rel.startswith('OBJECT/') and rel.endswith('.SGO') and seen < 40:
+                data = game.read(*rel.rsplit('/', 1))
+                for raw in (data, legacy_sgo.convert(data)):    # 4.1's own block (0x03), and EDF6's form of it
+                    block = sgo.read(raw)[1].get('animation_model')
+                    block = block[2] if isinstance(block, list) and len(block) > 2 else None
+                    if isinstance(block, bytes) and block[:4] == b'MAB\0' and ml.mab_locators(block):
+                        out = ml.mab_add_locators(block, new)
+                        ml.mab_layout(out)
+                        assert 'テスト' in [l.name for _i, l in ml.mab_locators(out)]
+                        seen += 1
+        assert seen >= 20, seen
+
+
+def _edf41_root() -> str | None:
+    import gamedir
+    import rootcpk
+    return gamedir.find_other(gamedir.EDF41, near=rootcpk.DEFAULT_GAME) or None
+
+
+@test
+def cas_graft_variables_and_states_real() -> None:
+    """pylib/cas_graft: variables and state aliases. EDF4.1 Hector's CAS (converted) gets the Berserker class's
+    players damage and random from the Large CAS and additive_action from the TypeA CAS, the variables its constructor
+    sets (appended after Hector's own, so no index of its own moves; the initial values are the donor's), and
+    walk_battle_* as copies of the walks. Grafting nothing is the CAS byte for byte; the result is again a CAS the
+    layout reader and the pose reader take, with the clips of its own as they were and a trackless clip per grafted
+    tcontrol; a variable that follows a tcontrol (vt_*) is refused, and so is a group holding a data command whose
+    arguments are not known to be a tcontrol index."""
+    import struct
+    import cas_graft
+    import cas_legacy as cl
+    import cas_pose
+    import make_edf41_objects as m
+    import rootcpk
+    edf41 = _edf41_root()
+    if not _e5c_have_game() or not edf41:
+        print('skip  cas_graft_variables_and_states_real: needs EDF6 and EDF4.1 installed')
+        return
+    g6, g4 = m.archives(rootcpk.DEFAULT_GAME), m.archives(edf41)
+    rd = lambda rel: g6[rel].read(*rel.rsplit('/', 1))   # noqa: E731
+    hector = cl.cas_from_legacy(g4['OBJECT/HECTOR.CAS'].read('OBJECT', 'HECTOR.CAS'))
+    large, type_a = rd('OBJECT/E602_BERSERKER_LARGE.CAS'), rd('OBJECT/E602_BERSERKER.CAS')
+    assert cas_graft.graft(hector, large, [], ()) == hector
+    own_vars = cas_graft.variable_names(hector)
+    names = ('v_move_angle', 'v_tilt_dir', 'v_tilt_lerp', 'v_damage_reaction_ratio', 'v_tilt_factor', 'v_tilt_lerp_factor')
+    out = cas_graft.graft(hector, large, ['damage', 'random'], names)
+    out = cas_graft.graft(out, type_a, ['additive_action'], ('v_move_velocity',))
+    out = cas_graft.alias_states(out, {'main': [('walk_battle_f', 'walk_f'), ('walk_battle_b', 'walk_b')]})
+    lay = cl.cas_layout(out)
+    groups = {cas_graft._name(out, at): ms for at, ms in lay.tree.anmgroups}
+    assert {'main', 'damage', 'random', 'additive_action'} <= set(groups), sorted(groups)
+    state = lambda g: [cas_graft._name(out, mc.at) for mc in groups[g]]   # noqa: E731
+    assert state('damage') == ['damageA', 'damageB', 'damageC']
+    own_main = [cas_graft._name(hector, mc.at) for at, ms in cl.cas_layout(hector).tree.anmgroups
+                if cas_graft._name(hector, at) == 'main' for mc in ms]
+    assert state('main') == own_main + ['walk_battle_f', 'walk_battle_b']
+    new_vars = cas_graft.variable_names(out)
+    assert new_vars[:len(own_vars)] == own_vars and new_vars[len(own_vars):] == list(names) + ['v_move_velocity']
+    # the donor's initial values, and the +4 word 0 (a plain variable)
+    donor_init = {cas_graft._name(large, at): struct.unpack_from('<I', large, at + 0xC)[0] for at in cl.cas_layout(large).tree.vcontrols}
+    for at in lay.tree.vcontrols[len(own_vars):]:
+        n = cas_graft._name(out, at)
+        assert struct.unpack_from('<I', out, at + 4)[0] == 0
+        if n in donor_init:
+            assert struct.unpack_from('<I', out, at + 0xC)[0] == donor_init[n], n
+    # a walk alias is the walk: the same tcontrol word, the same first-anmdata bytes, a name of its own
+    by = {cas_graft._name(out, mc.at): mc for mc in groups['main']}
+    for a_, b_ in (('walk_f', 'walk_battle_f'), ('walk_b', 'walk_battle_b')):
+        x, y = by[a_], by[b_]
+        assert out[x.at + 0x18:x.at + 0x24] == out[y.at + 0x18:y.at + 0x24] and out[x.first.at + 4:x.first.at + 0x20] == out[y.first.at + 4:y.first.at + 0x20]
+    p0, p1 = cas_pose.CasPose(hector), cas_pose.CasPose(out)
+    assert [(c.name, [t.name for t in c.tracks]) for c in p1.clips[:len(p0.clips)]] == [(c.name, [t.name for t in c.tracks]) for c in p0.clips]
+    assert all(not c.tracks for c in p1.clips[len(p0.clips):]) and len(p1.clips) > len(p0.clips)
+    assert cas_graft.graft(out, out, [], ()) == out, 'the result is a stable CAS'
+    # refusals
+    for v in ('vt_walk_battle_f', 'v_no_such'):
+        try:
+            cas_graft.graft(hector, large, [], (v,))
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f'{v} was grafted')
+    # a group of the donor with a data command other than 0 / 4 is refused (its arguments are not known)
+    refused = 0
+    has = {cas_graft._name(hector, at) for at, _ms in cl.cas_layout(hector).tree.anmgroups}
+    for rel in ('OBJECT/DIRTY_MAN01.CAS', 'OBJECT/E503_FROG.CAS', 'OBJECT/EDF6ARMYSOLDIER.CAS'):
+        donor = rd(rel)
+        for at, ms in cl.cas_layout(donor).tree.anmgroups:
+            ops = {struct.unpack_from('<I', donor, d)[0] for mc in ms for d in cas_graft._data_of(mc)}
+            if ops - set(cas_graft.TCONTROL_OPS) and cas_graft._name(donor, at) not in has:
+                try:
+                    cas_graft.graft(hector, donor, [cas_graft._name(donor, at)], ())
+                except ValueError:
+                    refused += 1
+                else:
+                    raise AssertionError(f'{rel}: a group with data commands {sorted(ops)} was grafted')
+    assert refused >= 1, refused
+
+
+def _mini_mdb(rigid: bool) -> object:
+    """A tiny EDF6 model: root mdl, a skinned root 'body' bone and an arm chain (rigid=False), or mdl and one rigid
+    bone 'part' holding one unskinned triangle (rigid=True)."""
+    import struct
+    import mdb
+    ident = [1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0]
+
+    def bone(i: int, parent: int, sib: int, child: int, name: int, kids: int, kind: int, dd: int, y: float) -> object:
+        local = list(ident)
+        local[13] = y
+        return mdb.Bone(i, parent, sib, child, name, kids, kind, dd, 1 if kind else 0, 0, 0, local, list(ident),
+                        [1.0, 1.0, 1.0, 1.0], [0.0, 0.0, 0.0, 1.0])
+
+    def half4(x: float, y: float, z: float) -> bytes:
+        return b''.join(struct.pack('<e', v) for v in (x, y, z, 1.0))
+
+    tri = half4(0, 0, 0) + half4(1, 0, 0) + half4(0, 0, 4)
+    mesh = mdb.Mesh(bytes(4), 0, 0, 8, [mdb.VElem(7, 0, 0, 'position')], 0, tri, struct.pack('<3H', 0, 1, 2))
+    mat = mdb.Material(0, 0, 0, 1, 'snd_Test', [mdb.MatParam([1.0, 1.0, 1.0, 0.0], (0, 0), 'diffuse', 0x0201)],
+                       [mdb.MatTex(0, 'albedo', (0, 0, 0, 0, 0))], 3)
+    tex = [mdb.Texture(0, 'part_df_dds', 'part_df.dds', 0)]
+    if rigid:
+        bones = [bone(0, -1, -1, 1, 0, 1, 0, 1, 0.0), bone(1, 0, -1, -1, 2, 0, 1, 0, 0.0)]
+        return mdb.Mdb(0x20, ['mdl', 'ufosurface', 'part'], bones, [mdb.Object(2, 1, [mesh])], [mat], tex)
+    # mdl(0) -> body(1) -> arm(2); mdl -> other(3)
+    bones = [bone(0, -1, -1, 1, 0, 2, 0, 1, 0.0), bone(1, 0, 3, 2, 1, 1, 2, 1, 2.0), bone(2, 1, -1, -1, 2, 0, 0, -1, 5.0),
+             bone(3, 0, -1, -1, 3, 0, 3, 0, 0.0)]
+    names = ['mdl', 'body', 'arm', 'other']
+    own = mdb.Mesh(bytes(4), 0, 0, 8, [mdb.VElem(7, 0, 0, 'position')], 0, tri, struct.pack('<3H', 0, 1, 2))
+    return mdb.Mdb(0x20, names, bones, [mdb.Object(1, 3, [own])], [mdb.Material(0, 0, 0, 1, 'snd_Test', [], [], 3)], [])
+
+
+@test
+def mdb_graft_rigid() -> None:
+    """pylib/mdb.graft_rigid on a tiny model: the donor's rigid bone becomes a rigid-mesh bone (kind 1, the donor's
+    bounds, identity inverse bind as every stock rigid bone has) under the named parent, last child, in depth-first
+    order; its texture, material, object and mesh are copied with indices remapped (a texture the target already has
+    by filename is shared; a second graft of the same weapon shares the first one's material); the target's own
+    object and bones keep their meaning; the file writes and reads back; a skinned or multi-bone donor is refused.
+    rigid_extent measures the donor's barrel."""
+    import mdb
+    body, donor = _mini_mdb(False), _mini_mdb(True)
+    assert mdb.rigid_extent(donor, 2) == (0.0, 4.0)
+    a = mdb.graft_rigid(body, donor, 'arm', 'gun_arm')
+    b = mdb.graft_rigid(body, donor, 'body', 'gun_body')
+    assert body.name_of(body.bones[a].name) == 'gun_arm' and body.bones[a].kind == 1 and body.bones[a].parent == 2
+    assert body.bones[a].inv_bind == mdb.ident() and body.bones[a].bounded == 1 and body.bones[a].half == [1.0, 1.0, 1.0, 1.0]
+    assert body.bones[2].child == a and body.bones[2].child_count == 1
+    assert [body.name_of(x.name) for x in body.bones] == ['mdl', 'body', 'arm', 'gun_arm', 'gun_body', 'other']
+    assert body.objects[0].bone == 5, 'the skinned object follows its bone to its new index'
+    assert [(o.bone, o.meshes[0].material) for o in body.objects[1:]] == [(a, 1), (b, 1)]
+    assert len(body.materials) == 2 and len(body.textures) == 1 and body.materials[1].textures[0].texture == 0
+    depth = mdb.depth_of(body)
+    assert depth == [0, 1, 2, 3, 2, 1] and [x.depth_delta for x in body.bones] == [1, 1, 1, -1, -1, 1]
+    out = mdb.mdb_write(body)
+    back = mdb.mdb_read(out)
+    assert mdb.mdb_write(back) == out and len(back.objects) == 3
+    skinned = _mini_mdb(True)
+    skinned.objects[0].meshes[0].flags = bytes([0, 1, 1, 0])
+    try:
+        mdb.graft_rigid(_mini_mdb(False), skinned, 'arm', 'x')
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('a skinned donor was grafted')
+    try:
+        mdb.graft_rigid(_mini_mdb(False), _mini_mdb(False), 'arm', 'x')
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('a donor of several bones was grafted')
+
+
+@test
+def edf41_alias_dsgo_helpers() -> None:
+    """tools/make_edf41_objects: the DSGO path's small parts. dsgo_value (numbers become doubles, lists and dicts
+    Nodes, raw blocks Blobs, a MAB still in 4.1's form converted), node_path / set_path (names and list indices, a name
+    not there yet is added), remove_key (the other members keep their names), prune (only the files the root names,
+    through the SGOs it names, stay) and Gun / Alias defaults (the old aliases are untouched)."""
+    import dsgo
+    import make_edf41_objects as m
+    import mab_legacy as ml
+    import sgo
+    v = m.dsgo_value({'a': [1, sgo.Float(b'\0\0\x80\x3f'), 'x', b'abc'], 'b': 2.5})
+    assert isinstance(v, dsgo.Node) and v.names == {0: 'a', 1: 'b'}
+    assert v.get('a').items[:3] == [1.0, 1.0, 'x'] and v.get('a').items[3] == dsgo.Blob(b'abc', 2)
+    raw03 = _mini_mab(0x03)
+    assert m.dsgo_value(raw03).data == ml.mab_from_edf5(raw03) and m.dsgo_value(_mini_mab(0x83)).data == _mini_mab(0x83)
+    m.set_path(v, 'a/0', 5.0)
+    m.set_path(v, 'c', dsgo.Node([1.0]))
+    assert m.node_path(v, 'a/0') == 5.0 and m.node_path(v, 'c/0') == 1.0
+    m.remove_key(v, 'a')
+    assert v.names == {0: 'b', 1: 'c'} and v.get('b') == 2.5 and v.get('c').items == [1.0]
+    m.remove_key(v, 'nothing')
+    files = {'OBJECT/X.SGO': sgo.write_depth_first(0x102, {'xgs_scene_object_class': 'C', 'm': ['app:/object/y.cas', 'app:/Object/Z.SGO'],
+                                                           'r': 'app:/object/gone.mrab'}),
+             'OBJECT/Z.SGO': sgo.write_depth_first(0x102, {'t': 'app:/object/ragdoll.shkt'}),
+             'OBJECT/Y.CAS': b'cas', 'OBJECT/RAGDOLL.SHKT': b's', 'OBJECT/UNUSED.SGO': sgo.write_depth_first(0x102, {'t': 'app:/object/never.cas'}),
+             'OBJECT/NEVER.CAS': b'n', 'OBJECT/GONE.MRAB': b'g'}
+    del files['OBJECT/GONE.MRAB']
+    m.prune(files, 'OBJECT/X.SGO')
+    assert set(files) == {'OBJECT/X.SGO', 'OBJECT/Z.SGO', 'OBJECT/Y.CAS', 'OBJECT/RAGDOLL.SHKT'}, sorted(files)
+    old = [a for k, a in m.ALIASES.items() if k.startswith(('UFO', 'UFOCARRIER'))]
+    assert old and all(not a.guns and not a.drop and not a.variables and not a.cas_donors and not a.prune for a in old)
+
+
+@test
+def edf41_hector_alias() -> None:
+    """HECTOR301CC under EDF6_Berserker_Large, built from the games (tools/make_edf41_objects.py build, only that
+    root): not skipped; and every name the class looks up that is unchecked in EDF.dll (jobs/4bf89026/tmp/hector41
+    NOTES.md) is satisfied: the CAS players main / damage / random / additive_action, the variables set every frame and
+    the getters' tunings, the states the class asks for in a fight, the damage reaction's states, the locators
+    (eye, one muzzle per gun_control entry) on bones the model has, the bone and ragdoll-body names the SGO gives,
+    the damage map's debris models and every texture the model binds. The weak point is gone and the damage reaction
+    is the capped one (one entry, min 0.05, ExplosionDownBorder 10)."""
+    import struct
+    import cas_graft
+    import cas_legacy as cl
+    import dsgo
+    import mab_legacy as ml
+    import make_edf41_objects as m
+    import mdb
+    import rootcpk
+    import sgo
+    edf41 = _edf41_root()
+    if not _e5c_have_game() or not edf41:
+        print('skip  edf41_hector_alias: needs EDF6 and EDF4.1 installed')
+        return
+    data, files = m.build(edf41, rootcpk.DEFAULT_GAME, ('HECTOR301CC.SGO',))
+    assert not data['skipped'] and [o['object'] for o in data['objects']] == ['OBJECT/HECTOR301CC.SGO'], data['skipped']
+    assert set(files) == {'OBJECT/HECTOR301CC.SGO', 'OBJECT/HECTOR.CAS', 'OBJECT/HECTOR301CC.MRAB',
+                          'OBJECT/RAGDOLL_HECTOR301_HAS_HKA.SHKT'}, sorted(files)
+    root = dsgo.parse(files['OBJECT/HECTOR301CC.SGO']).root
+    top = sgo.load(data=files['OBJECT/HECTOR301CC.SGO'])
+    assert top['xgs_scene_object_class'] == 'EDF6_Berserker_Large'
+    # weak_point present with every member the class's setup dereferences (0x34C580: a missing one crashed M153 on
+    # spawn, 2026-10-13), and neutral: no hit is 0.2x or 1.5x
+    wp = top['weak_point']
+    assert {'damage_esb', 'body', 'noweak_damage_multiply', 'weak_damage_multiply'} <= set(wp), wp
+    assert wp['noweak_damage_multiply'] == 1.0 and wp['weak_damage_multiply'] == 1.0, wp
+    # the state played on first sight is one of Hector's (an encount_appeal_* of the template's faulted M153)
+    assert top['BerserkerSettings']['EncountAnimations'] == ['wakeup'], top['BerserkerSettings']
+    m.check_states(root, files['OBJECT/HECTOR.CAS'], 'HECTOR301CC')
+    try:
+        m.check_states(root, None, 'no CAS')
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('check_states passed a state against no CAS')
+    # the CAS
+    cas = files['OBJECT/HECTOR.CAS']
+    lay = cl.cas_layout(cas)
+    players = {cas_graft._name(cas, at): [cas_graft._name(cas, mc.at) for mc in ms] for at, ms in lay.tree.anmgroups}
+    assert {'main', 'damage', 'random', 'additive_action'} <= set(players)
+    variables = set(cas_graft.variable_names(cas))
+    assert {'v_angle', 'v_turn_speed', 'v_move_angle', 'v_move_velocity', 'v_tilt_dir', 'v_tilt_lerp', 'v_damage_reaction_ratio',
+            'v_tilt_factor', 'v_tilt_lerp_factor', 'v_walk_animation_speed', 'v_turn_animation_speed'} <= variables
+    assert {'stand', 'turn_l', 'turn_r', 'walk_f', 'walk_b', 'walk_l', 'walk_r', 'walk_battle_f', 'walk_battle_b',
+            'walk_battle_l', 'walk_battle_r'} <= set(players['main'])
+    reaction = top['BasicAnimationCharacterSettings']['DamageReaction']
+    assert len(reaction) == 1 and reaction[0]['user_param'][0] == 'damage'
+    assert set(reaction[0]['user_param'][1]) <= set(players['damage'])
+    adjust = top['BerserkerSettings']['DamageReactionAdjust']
+    assert adjust['min'] == 0.05 and adjust['scale'] == 10.0 and top['BerserkerSettings']['ExplosionDownBorder'] == 10.0
+    assert top['WalkingEnemyBase']['RandomAnimationTrack'] == [], 'its variables are not in the CAS'
+    # the model, the MAB, the ragdoll
+    rab = files['OBJECT/HECTOR301CC.MRAB']
+    archive = mdb.rab_read(rab)
+    member = {f.name.lower(): f for f in archive.files}
+    am = root.get('animation_model')
+    assert am.items[0].items[0].lower() == 'app:/object/hector301cc.mrab' and am.items[1] == 'app:/object/Hector.cas'
+    model = mdb.mdb_read(member[am.items[0].items[1].lower()].data)
+    assert [f.name for f in archive.files if f.name.lower().endswith('.mdb') and f.folder == 1 and 'fragment' not in f.name.lower()] == ['Hector301.mdb']
+    bones = {model.name_of(b.name) for b in model.bones}
+    assert {'waist', 'arms_l', 'arms_r', 'Hector301', 'gun_arms_l', 'gun_arms_r'} <= bones
+    assert not m.missing_textures(rab, model), m.missing_textures(rab, model)
+    for frag in am.items[3].items[3].items[6].items:
+        assert frag.lower() in member, frag
+        assert not m.missing_textures(rab, mdb.mdb_read(member[frag.lower()].data))
+    assert len(am.items[4].items) == len(model.materials) == 2
+    located = ml.mab_locators(am.items[2].data)
+    names = {l.name: l for _i, l in located}
+    assert {'目の基準位置', '砲台１', '砲台２'} <= set(names) and all(l.node in bones for _i, l in located)
+    assert [c['gun_battery']['muzzle']['shape'] for c in top['gun_control']] == ['砲台１', '砲台２']
+    assert names['砲台１'].node == 'arms_l' and names['砲台２'].node == 'arms_r' and names['砲台１'].a[2] > 20.0
+    wk = top['WalkingEnemyBase']['InterpolateNode']
+    assert wk in bones and top['BerserkerSettings']['WakeupNode'][0] in bones
+    shkt = files['OBJECT/RAGDOLL_HECTOR301_HAS_HKA.SHKT']
+    for body in top['BerserkerSettings']['DownRagdollBodies'] + top['BerserkerSettings']['NoSeparationBodies']:
+        assert body.encode() in shkt, body
+    # the file is a DSGO the writer reproduces
+    assert dsgo.write(dsgo.parse(files['OBJECT/HECTOR301CC.SGO'])) == files['OBJECT/HECTOR301CC.SGO']
+    assert struct.unpack_from('<I', cas, 4)[0] == 0x204
+
+
+@test
+def edf41_hector_guns() -> None:
+    """Every generated Hector variant (edf41port/objects, read back) fires what 4.1's arms hold: each gun_control
+    entry's bullet is the factory of its HectorWeapon row with the row's speed, lifetime, damage coefficient
+    (`coef * V11`, the form EDF6's own bullets use) and blast, fire.count / interval / accuracy are the row's, the
+    AI's gun range is the longer of the two guns' hector_weapon_range, the common walking numbers are 4.1's, and
+    no variant has melee. Shields fire a 0-damage bullet. With the games installed the table is also checked
+    against 4.1's own SGOs (the arms' content, the weapon classes, ranges and custom parameters)."""
+    import struct
+    import dsgo
+    import make_edf41_objects as m
+    import mdb
+    factory = {'plasma': 'PlasmaBullet01', 'solid': 'SolidBullet02', 'rocket': 'RocketBullet01'}
+    rocket_damage = {'C': 40.0, 'L': 10.0}               # 4.1's bullet_custom_param[1] of the rocket weapons
+    reach = {('301', 'C'): 2000.0, ('301', 'G'): 150.0, ('301', 'L'): 150.0,
+             ('401', 'C'): 2000.0, ('401', 'G'): 250.0, ('401', 'L'): 250.0, ('401', 'S'): 0.0}
+    spread_shape = {'301': [0.5, 1.0, 0.5, 1.0], '401': [0.25, 0.5, 0.25, 1.0]}
+    base = os.path.join(ROOT, 'edf41port', 'objects', 'OBJECT')
+
+    def coef(blob: object) -> float:
+        assert isinstance(blob, dsgo.Blob) and len(blob.data) == 28, blob
+        kind, value, var, idx, mul, end = struct.unpack('<IdIIII', blob.data)
+        assert (kind, var, idx, mul, end) == (1, 3, 11, 7, 0)     # coefficient * V11
+        return value
+
+    assert len(m.HECTOR_VARIANTS) == 20 and all(r in m.ROOTS and r in m.ALIASES for r in m.HECTOR_VARIANTS)
+    for name, (gen, left, right, _missions) in m.HECTOR_VARIANTS.items():
+        with open(os.path.join(base, name), 'rb') as f:
+            top = dsgo.parse(f.read()).root
+        entries = top.get('gun_control').items
+        assert len(entries) == 2, name
+        assert top.get('xgs_scene_object_class') == 'EDF6_Berserker_Large'
+        assert top.get('WalkingEnemyBase').get('MoveSpeed').items == [6.0, 0.1], name
+        assert top.get('WalkingEnemyBase').get('TurnSpeed').items == [0.03, 0.03], name
+        ai = top.get('AiSettings')
+        assert ai.get('attack').get('range') == 0.0, name          # 4.1 has no melee
+        assert ai.get('gun_attack').get('range') == max(reach[(gen, left)], reach[(gen, right)]), name
+        assert ai.get('gun_attack').get('interval').get('min') == 300.0, name
+        # the key src/edf41ai.cpp reads: each arm's own range, same weapon class on both arms, 4.1's hector_ai_setting
+        key = top.get('edf41_hector')
+        assert key.get('ranges').items == [reach[(gen, left)], reach[(gen, right)]], name
+        assert key.get('same_weapon') == (1.0 if left == right else 0.0), name
+        assert key.get('ai').items == [720.0, 1440.0, 540.0, 720.0, 150.0, 20.0, 80.0], name
+        assert top.get('resource').items == [], name               # the weapon objects are not loaded
+        for entry, letter in zip(entries, (left, right)):
+            w = m.HECTOR_WEAPONS[(gen, letter)]
+            battery = entry.get('gun_battery')
+            bullet, fire = battery.get('bullet'), battery.get('fire')
+            assert battery.get('charge').get('time') == 1.0, name
+            if w.bullet == 'none':                                   # a shield: nothing hurts
+                assert bullet.get('factory') == 'SolidBullet02' and coef(bullet.get('damage')) == 0.0, name
+                continue
+            assert bullet.get('factory') == factory[w.bullet], name
+            assert bullet.get('speed') == w.speed and bullet.get('alive_time') == w.alive, (name, letter)
+            assert fire.get('count') == w.count and fire.get('interval') == w.interval, (name, letter)
+            want = w.damage if w.damage is not None else rocket_damage[letter]
+            got = bullet.get('damage')
+            assert coef(got.items[0] if isinstance(got, dsgo.Node) else got) == want, (name, letter)
+            if w.spread:
+                assert fire.get('accuracy') == w.spread, (name, letter)
+            if w.bullet == 'solid':
+                assert bullet.get('custom_parameter').items == spread_shape[gen], (name, letter)
+            if w.bullet == 'rocket':
+                assert bullet.get('explosion_radius') == w.radius[0] and bullet.get('custom_parameter').items[3] == 0.0
+            if w.bullet == 'plasma':
+                assert bullet.get('gravity_factor') == 0.0 and isinstance(bullet.get('explosion_radius'), dsgo.Blob)
+    # 401's weapons are skinned: their bones come over with blend indices that stay inside the bone table
+    for name in ('HECTOR401CS.SGO', 'HECTOR401LG.SGO'):
+        import edf41_objects
+        archive = mdb.rab_read(edf41_objects.read('OBJECT/' + name.replace('.SGO', '.MRAB')))
+        body = next(x for x in archive.files if x.name.lower() == 'hector401.mdb')
+        md = mdb.mdb_read(body.data)
+        names = {md.name_of(b.name) for b in md.bones}
+        assert {'gun_arms_l_gun_arms', 'gun_arms_r_gun_arms'} <= names, name
+        for ob in md.objects:
+            for me in ob.meshes:
+                for e in (x for x in me.elems if x.name.lower() == 'blendindices'):
+                    top_index = max(me.vdata[k * me.vsize + e.offset + j] for k in range(me.nverts) for j in range(4))
+                    assert top_index < len(md.bones), name
+    edf41 = _edf41_root()
+    if not _e5c_have_game() or not edf41:
+        print('skip  edf41_hector_guns (table against 4.1): needs EDF6 and EDF4.1 installed')
+        return
+    import rootcpk
+    import sgo
+    games = m.Games(edf41, rootcpk.DEFAULT_GAME)
+    for name, (gen, left, right, _missions) in m.HECTOR_VARIANTS.items():
+        mine = sgo.load(data=games.read4('OBJECT/' + name))
+        for arm, letter in zip(mine['hector_weapon'], (left, right)):
+            w = m.HECTOR_WEAPONS[(gen, letter)]
+            assert m.rel_of(arm[3]) == 'OBJECT/' + w.sgo, (name, arm[3])
+            weapon = sgo.load(data=games.read4('OBJECT/' + w.sgo))
+            assert weapon['xgs_scene_object_class'] == w.cls
+            assert m.num(weapon['hector_weapon_range']) == reach[(gen, letter)], (name, letter)
+            if w.bullet == 'solid':
+                assert [m.num(x) for x in weapon['bullet_custom_param']] == spread_shape[gen]
+            if w.bullet == 'rocket':
+                assert m.num(weapon['bullet_custom_param'][1]) == rocket_damage[letter]
+
+
+@test
+def edf41_ufo301_behaviour() -> None:
+    """The shipped UFO301 / UFO301ACE (edf41port, read back) fire as 4.1's UfoSmall301 does through UfoSmall515's
+    keys: six muzzles (3 per side), 4 volleys one every 3 frames; bullet_object BeamBullet01 (the ace LaserBullet02) with
+    speed 0.65 per frame and 300 frames of life; config [60, 1.0, [10, 130], [10, 30]]; the sound table; the ace's
+    level_adjust; and E515's four material_animation entries (an empty list crashed the constructor)."""
+    import sgo
+    base = os.path.join(ROOT, 'edf41port', 'objects', 'OBJECT')
+    for name, cls, sounds in (('UFO301', 'BeamBullet01', 7), ('UFO301ACE', 'LaserBullet02', 8)):
+        with open(os.path.join(base, name + '.SGO'), 'rb') as f:
+            d = sgo.load(data=f.read())
+        assert d['xgs_scene_object_class'] == 'UfoSmall515', name
+        battery = d['battery_config']
+        assert [b[0] for b in battery] == ['muzzleL01', 'muzzleL02', 'muzzleL03', 'muzzleR01', 'muzzleR02', 'muzzleR03']
+        for _muzzle, slot, delay in battery:
+            key, shots, _a, _cool, _b, _c, period, per_fire, spread = slot
+            assert (key, shots, period, per_fire, spread, delay) == ('bullet_object', 4, 3, 1, 0, 0), name
+        assert d['bullet_object'][0] == cls, name
+        pairs = dict(zip(d['bullet_object'][1][1][0::2], d['bullet_object'][1][1][1::2]))
+        assert abs(pairs[0] - 0.65) < 1e-6 and pairs[1] == 300 and abs(pairs[8] - 0.33) < 1e-6, (name, pairs)
+        assert [round(x, 3) for x in pairs[12]] == [1.1, 0.051, 0.051, 1.0], name
+        assert d['config'] == [60, 1.0, [10.0, 130.0], [10.0, 30.0]], name
+        assert len(d['ufo_se']) == sounds, name
+        assert len(d['material_animation']) == 4, name
+    with open(os.path.join(base, 'UFO301ACE.SGO'), 'rb') as f:
+        ace = sgo.load(data=f.read())
+    assert [round(float(x), 6) for x in ace['level_adjust']] == [1.5, 0.038462, 4.5, 0.0, 1.0]
+    assert ace['bullet_object'][1][2] == [1]
+
+
+@test
+def rabpool_round_trip() -> None:
+    """pylib/rabpool.py: two archives sharing a member ship it once and both come back byte for byte; a file that
+    is not an archive passes as it is; an archive mdb.rab_write would lay out otherwise is refused."""
+    import mdb
+    import rabpool
+    shared = mdb.RabFile('tex.dds', 0, 0, b'T' * 64)
+    a = mdb.rab_write(mdb.Rab(1, ['TEXTURE', 'MODEL'], [shared, mdb.RabFile('a.mdb', 1, 0, b'A' * 9)]))
+    b = mdb.rab_write(mdb.Rab(1, ['TEXTURE', 'MODEL'], [shared, mdb.RabFile('b.mdb', 1, 0, b'B' * 7, (0, 3))]))
+    files = {'OBJECT/A.MRAB': a, 'OBJECT/B.RAB': b, 'OBJECT/X.SGO': b'sgo'}
+    packed = rabpool.pack(files)
+    members = [k for k in packed if k.startswith(rabpool.MEMBERS + '/')]
+    assert len(members) == 3, members   # tex.dds once
+    assert set(packed) - set(members) == {'OBJECT/A.MRAB.members.json', 'OBJECT/B.RAB.members.json', 'OBJECT/X.SGO'}
+    for rel, data in files.items():
+        assert rabpool.unpack(rel, packed.__getitem__) == data, rel
+        assert all(s in packed for s in rabpool.stored(rel)), rel
+    try:
+        rabpool.pack({'OBJECT/C.MRAB': a + b'tail'})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('an archive rab_write does not rebuild was packed')
+
+
+@test
+def mab_retarget_synthetic() -> None:
+    """pylib/mab_legacy.mab_retarget on the small block of either flag: only the named record's node changes, onto a
+    string the block holds or one appended at its end (the block stays a valid layout); a name it lacks is refused."""
+    import mab_legacy as ml
+    for flag in (0x03, 0x83):
+        mini = _mini_mab(flag)
+        before = {l.name: l for _i, l in ml.mab_locators(mini)}
+        for node in ('head', 'gun'):                    # one the block has, one it does not
+            out = ml.mab_retarget(mini, 'bang', node)
+            after = {l.name: l for _i, l in ml.mab_locators(out)}
+            assert after['bang'].node == node and set(after) == set(before)
+            assert all(after[n] == before[n] for n in before if n != 'bang')
+        assert ml.mab_retarget(mini, 'bang', 'chest') == mini
+        try:
+            ml.mab_retarget(mini, 'nothing', 'gun')
+        except ValueError:
+            continue
+        raise AssertionError('a locator the block lacks was retargeted')
 
 
 def main() -> int:
