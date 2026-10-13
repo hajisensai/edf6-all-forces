@@ -195,6 +195,11 @@ HECTOR_COMMON: tuple[tuple[str, object], ...] = (
      [{'border': 0.0, 'user_param': ['damage', ['damageA', 'damageB', 'damageC']]}]),
     # 4.1 has no melee (no grapple / stomp / melee string in EDF41.exe)
     ('AiSettings/attack/range', 0.0),
+    # weak_point kept (the class's setup 0x34C580 dereferences a missing key or member: 0x34CEFC -> {null, -1} ->
+    # 0x551E0, the 2026-10-13 M153 crash) but without effect: no hit is a weak or a non-weak one any more. Its body
+    # ragdoll_eye is none of Hector's (0x6EA670 gives -1, which both readers, 0x34E06F and 0x34E6C0, take as no body).
+    ('weak_point/noweak_damage_multiply', 1.0),
+    ('weak_point/weak_damage_multiply', 1.0),
     # hector_ai_setting [720, 1440, 540, 720, 150, 20, 80]: the stop radius is drawn from 20..80 (approach distance);
     # a weapon is picked every 300 + rand(300) frames (gun_attack interval 300..600)
     ('AiSettings/move/approach/distance', {'min': 20.0, 'max': 80.0}),
@@ -216,7 +221,7 @@ def hector_alias(generation: str, left: str, right: str) -> 'Alias':
         cas_donors=(('OBJECT/E602_BERSERKER.CAS', ('additive_action',), ('v_move_velocity',)),),
         state_aliases=(('main', 'walk_battle_f', 'walk_f'), ('main', 'walk_battle_b', 'walk_b'),
                        ('main', 'walk_battle_l', 'walk_l'), ('main', 'walk_battle_r', 'walk_r')),
-        drop=('weak_point',), guns=guns, eye=(f'Hector{generation}', (0.0, 29.0, 0.0)), prune=True)
+        guns=guns, eye=(f'Hector{generation}', (0.0, 29.0, 0.0)), prune=True)
 
 
 def ufo301_bullet(cls: str, custom: list, hit: str | None) -> list:
@@ -328,10 +333,9 @@ ALIASES: dict[str, Alias] = {
     #   aim forward); the cannons' meshes become objects on bones gun_arms_l / gun_arms_r under the arm bones.
     #   The bone and ragdoll-body names the template's SGO gives in Berserker's terms: Hector's own.
     # What 4.1's Hector does that the class would otherwise do differently:
-    #   weak_point is dropped: its noweak_damage_multiply 0.2 applies to every hit that is not on its body (ragdoll_eye,
-    #   a body Hector's ragdoll has none of), so with it Hector takes 0.2x = 5x tougher (the report's measure); the
-    #   weak-point setup (0x34C580) reads the key's body first and skips the whole block when the key is not there
-    #   (0x34CEFC).
+    #   weak_point is neutral (both multipliers 1.0): the template's noweak_damage_multiply 0.2 applies to every hit
+    #   that is not on its body (ragdoll_eye, a body Hector's ragdoll has none of), so with it Hector takes 0.2x = 5x
+    #   tougher. The key itself must stay: the setup (0x34C580) dereferences a missing one (0x34CEFC -> 0x551E0).
     #   The lean when hit: 4.1 hard-codes a spring in EDF41.exe with no cap (impulse 40 x damage / max HP, +0.06 x
     #   that to the position, pull 5%, damping 0.9), so a barrage or an explosion piles up and bends the robot over
     #   backwards. The class blends one additive reaction clip by clamp(damage / HP x scale, min, 1): DamageReaction
