@@ -6154,7 +6154,7 @@ def edf41_class_keys() -> None:
     M015 2026-10-13). make_edf41_objects.class_keys / fill_class_keys / check_class_keys: on stand-in stock data the
     intersection is what all have, a missing key is filled from the nearest-durability stock SGO (only that key; the
     object's own values stay) and then passes, an unfillable class is refused; on the shipped objects (EDF6 installed)
-    only the deferred AlienTrailers (CLASS_KEYS_DEFERRED) lack one."""
+    none lacks one."""
     import make_edf41_objects as m
     import sgo
     import edf41_objects as eo
@@ -6199,8 +6199,7 @@ def edf41_class_keys() -> None:
                 m.check_class_keys(real, o['object'], eo.read(o['object']))
             except ValueError:
                 flagged.add(o['object'].split('/')[-1])
-    # what the check flags is what is deferred (the p4b branch fixes the AlienTrailers; drop the entries on merge)
-    assert flagged == set(m.CLASS_KEYS_DEFERRED), sorted(flagged ^ set(m.CLASS_KEYS_DEFERRED))
+    assert not flagged, sorted(flagged)
 
 
 @test
@@ -6396,6 +6395,78 @@ def edf41_ufo401_real() -> None:
     assert d['bullet_class'] == 'LaserBullet01' and len(d['bullet_custom_param']) == 11
     reg = json.load(open(os.path.join(ROOT, 'edf41port', 'objects.json'), encoding='utf-8'))
     assert any(o['object'] == 'OBJECT/UFO401.SGO' for o in reg['objects'])
+
+
+@test
+def edf41_rest_behaviour_real() -> None:
+    """The shipped carriers, AI tank, Deiroi, AlienTrailer, Fortress robo and AI rangers read back with the keys
+    the EDF6 classes need in the shape they read them (jobs/4bf89026/tmp/behav_rest/NOTES_*.md): the carrier's and the
+    trailer's material animations as [blob, slot] pairs (a bare blob reached EDF+0x6dc050 as a null), Deiroi's
+    shot / battery / moving keys (unchecked reads at EDF+0x319566, 0x31981c) and its beam foot under
+    DeiroiFootParts_Battery, the trailer's se_list, the robo's booster keys, the rangers' talk setting, the tank's
+    4.1 route radius and water line."""
+    import sgo
+    base = os.path.join(ROOT, 'edf41port', 'objects', 'OBJECT')
+
+    def load(name: str) -> dict:
+        with open(os.path.join(base, name + '.SGO'), 'rb') as f:
+            return sgo.load(data=f.read())
+
+    def plain(v: object) -> object:
+        return [plain(x) for x in v] if isinstance(v, list) else round(v.value, 6) if isinstance(v, sgo.Float) else v
+
+    def pairs(v: list) -> list[int]:
+        assert all(isinstance(x, list) and len(x) == 2 and isinstance(x[1], int) for x in v), 'not [blob, slot] pairs'
+        return [x[1] for x in v]
+
+    assert pairs(load('UFOCARRIER301')['material_animation']) == [0, 2, 2]
+    assert pairs(load('UFOCARRIER401')['material_animation']) == [0, 2, 2]
+    assert load('UFOCARRIER301')['xgs_scene_object_class'] == 'UfoCarrier508'
+    for name in ('DEIROI401', 'DEIROI401S', 'DEIROI401_2', 'DEIROI401L', 'DEIROI401_3'):
+        d = load(name)
+        assert d['xgs_scene_object_class'] == 'Deiroi'
+        shot = plain(d['bullet_object'])
+        assert shot[0] == 'PlasmaBullet01' and shot[1][1][:8] == [0, 0.5, 1, 1800, 8, 6.0, 2, 10.0], shot
+        assert shot[1][1][9] == [0.4, 0.4, 3.0, 1.0] and shot[1][2] == [0, 60]
+        assert plain(d['deiroi_moving_settings']) == [1.2, 0.533333, 0.25]
+        row = plain(d['deiroi_battery_config'])[0]
+        assert row[1][0] == 'bullet_object' and row[2] == 'charge_param' and row[3] == 180, row
+        assert 'charge_param' in d and (('game_object_level_adjust' in d) == (name == 'DEIROI401S')), name
+    beam = load('DEIROIFOOTPARTS_BEAM')
+    assert beam['xgs_scene_object_class'] == 'DeiroiFootParts_Battery'
+    bolt = plain(beam['bullet_object'])
+    assert bolt[0] == 'LaserBullet02' and bolt[1][1][:8] == [0, 20.0, 1, 30, 8, 1.2, 10, 0.001], bolt
+    assert plain(beam['deiroi_battery_config'])[1][1] == 600 and plain(beam['deiroi_battery_config'])[3] == 240
+    assert plain(beam['deiroi_fire_config']) == [200.0, 1.0, 400.0, 0, [600.0, 0.02]]
+    for name in ('ALIENTRAILER401', 'ALIENTRAILER401_L', 'ALIENTRAILER401_FIXED', 'ALIENTRAILER401_FIXEDXL',
+                 'ALIENTRAILER401_XL'):
+        d = load(name)
+        assert len(d['se_list']) == 6 and pairs(d['material_animation']) == pairs(d['unit_material_animation']) == [0, 2, 2]
+        assert d['game_object_kill_counter'] == 'AlienTrailerKillCount'
+    for name in ('VEHICLE501_FORTRESSROBO', 'VEHICLE501_FORTRESSROBO_AI'):
+        d = load(name)
+        assert len(d['booster_setting']) == 4 and all(len(x) == 2 and isinstance(x[1], float) for x in d['booster_setting'])
+        assert plain(d['booster_param_list']) == [[40.0, 40.0], [10.0, 10.0]] and len(d['vehicle_riding_position'][0]) == 7
+        assert plain(d['mission_setup'])[2] == [] and len(d['vehicle_setup'][2]) == 2
+    for name, talk in (('AIARMYSOLDIER_OMG', 0), ('AIARMYSOLDIER_OMG_LEADER', 1)):
+        t = load(name)['game_object_talk_setting']
+        assert t[1] == talk and t[2] > 1 and t[3] in (0, 1) and t[2] == {0: 6, 1: 4}[talk], t
+    # Berserker's base class enables material slots 0..3 by number (EDF+0x6dc830 via 0x348d1d, 0x33ef81, 0x34b2de, 0x37acde):
+    # every Hector variant carries the template's four (M113: 2 entries, a null player; M131: the memory past them)
+    import dsgo
+    for name in ('HECTOR301CC', 'HECTOR301GL', 'HECTOR401LS'):
+        with open(os.path.join(base, name + '.SGO'), 'rb') as f:
+            model = dsgo.parse(f.read()).root.get('animation_model')
+        entries = model.get('material_animation').items
+        assert len(entries) == 4 and [e.items[1] for e in entries] == [0.0, 0.0, 2.0, 2.0], name
+        assert all(isinstance(e.items[0], dsgo.Blob) for e in entries)
+    assert load('UFOCARRIER401')['game_sound'] == ['app:/sound/adx/tikyuu4_en_UFOcarrier401.acb',
+                                                   'app:/sound/adx/tikyuu4_en_UFOcarrier301.acb']
+    assert len(load('DEIROI401')['material_animation']) == 4 and len(load('UFO301')['material_animation']) == 4
+    assert all(n.startswith('小型UFO507') for n in load('UFO401')['se_table'])
+    tank = load('VEHICLE301_TANK_AI')
+    assert plain(tank['game_object_ai_route_update_distance']) == 3.0 and plain(tank['car_base_submerge_height']) == 1.7
+    assert tank['xgs_scene_object_class'] == 'Vehicle505_Tank' and plain(tank['game_object_durability']) == 700.0
 
 
 def _mini_mab(flag: int) -> bytes:
@@ -6823,7 +6894,9 @@ def edf41_hector_alias() -> None:
     for frag in am.items[3].items[3].items[6].items:
         assert frag.lower() in member, frag
         assert not m.missing_textures(rab, mdb.mdb_read(member[frag.lower()].data))
-    assert len(am.items[4].items) == len(model.materials) == 2
+    # the class enables slots 0..3 by number (EDF+0x6dc830): as many entries as the template's four, not one per material
+    # (two crashed the real game, M113 / M131); the model's materials are the two the glow blob names
+    assert len(am.items[4].items) == 4 and len(model.materials) == 2
     located = ml.mab_locators(am.items[2].data)
     names = {l.name: l for _i, l in located}
     assert {'目の基準位置', '砲台１', '砲台２'} <= set(names) and all(l.node in bones for _i, l in located)
