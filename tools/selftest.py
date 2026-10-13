@@ -7196,6 +7196,266 @@ def edf41_ufo401_real() -> None:
     assert any(o['object'] == 'OBJECT/UFO401.SGO' for o in reg['objects'])
 
 
+# ---------------------------------------------------------------- EDF4.1 sounds (tools/edf41_sounds.py)
+
+
+def _awe1(cues: list[tuple[str, int]]) -> bytes:
+    """A version 1 AWE of (name, wave id) cues in the order given, laid out as EDF4.1 writes it."""
+    import struct
+    n = len(cues)
+    ids_at = 0x14 + 4 * n
+    at = ids_at + 2 * n
+    offs = []
+    for i, (name, _w) in enumerate(cues):
+        offs.append(at - (0x14 + 4 * i))
+        at += len(name) + 1
+    return (b'AWBE' + struct.pack('<HHIII', 0x100, 0, n, 0x14, ids_at) + struct.pack(f'<{n}I', *offs)
+            + struct.pack(f'<{n}H', *(w for _, w in cues)) + b''.join(name.encode() + b'\0' for name, _ in cues))
+
+
+@test
+def awe_v1_to_v2_synthetic() -> None:
+    """pylib/awe.py: a version 1 list read and written as version 2 keeps every name and wave id, sorts by name, gains the
+    float table at the offsets the header gives, and is padded to an even size."""
+    import struct
+    import awe
+    v1 = _awe1([('B002', 7), ('A001_E', 3), ('A001', 5)])
+    cues = awe.read_awe(v1)
+    assert [(c.name, c.wave, c.seconds) for c in cues] == [('B002', 7, 0.0), ('A001_E', 3, 0.0), ('A001', 5, 0.0)]
+    timed = [awe.Cue(c.name, c.wave, 1.5 + i) for i, c in enumerate(cues)]
+    v2 = awe.write_awe2(timed)
+    assert v2[:4] == b'AWBE' and struct.unpack_from('<HHIIII', v2, 4) == (0x200, 0, 3, 0x18, 0x18 + 12, 0x18 + 18)
+    back = awe.read_awe(v2)
+    assert [c.name for c in back] == ['A001', 'A001_E', 'B002'] and [c.wave for c in back] == [5, 3, 7]
+    assert [c.seconds for c in back] == [3.5, 2.5, 1.5]
+    assert len(v2) % 2 == 0 and awe.write_awe2(back) == v2
+    assert len(awe.write_awe2([awe.Cue('AB', 1, 1.0)])) % 2 == 0 and len(awe.write_awe2([awe.Cue('A', 1, 1.0)])) % 2 == 0
+
+
+@test
+def awb_hca_seconds_synthetic() -> None:
+    """pylib/awe.py: wave ranges from an AFS2 header (aligned starts, ends as stored) and a HCA's playing time (blocks'
+    samples less the two mutes), with plain or high-bit-masked chunk tags."""
+    import struct
+    import awe
+
+    def hca(blocks: int, mute_head: int, mute_tail: int, mask: int = 0) -> bytes:
+        tag = bytes(c | mask for c in b'fmt') + b'\0'
+        return b'HCA\0\x03\0\0\x60' + tag + b'\x01' + (48000).to_bytes(3, 'big') + struct.pack('>IHH', blocks, mute_head, mute_tail)
+
+    assert awe.hca_seconds(hca(100, 0, 0)) == 102400 / 48000
+    assert awe.hca_seconds(hca(100, 128, 654, 0x80)) == (102400 - 782) / 48000
+    header = (b'AFS2' + bytes([2, 4, 2, 0]) + struct.pack('<IHH', 2, 0x20, 0) + struct.pack('<2H', 4, 9)
+              + struct.pack('<3I', 0x30, 0x61, 0x90))
+    assert awe.afs2_waves(header) == {4: (0x40, 0x61), 9: (0x80, 0x90)}
+    try:
+        awe.hca_seconds(b'HCA\0')
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('a header without fmt is refused')
+
+
+@test
+def edf41_sounds_captions_synthetic() -> None:
+    """tools/edf41_sounds.py: the caption key is the cue cut at the first _E / _S; add_rows leaves every row of the table
+    as it was, gives a missing key a row with EDF6's own member names (name = '' , caption = text, else the key: the game
+    reads a row BY those names, an unnamed list is a null node and crashed M126) and keeps the row of a key the table has;
+    a table whose rows are not laid out name / caption is refused."""
+    import dsgo
+    import edf41_sounds as s
+    assert [s.cut_key(c) for c in ('A001AA', 'A001AA_E', 'Z105H_S', 'A_E_S', 'VT_B1')] == ['A001AA', 'A001AA', 'Z105H', 'A', 'VT_B1']
+
+    def row(name: str, caption: str) -> dsgo.Node:
+        return dsgo.Node([name, caption], {0: 'name', 1: 'caption'})
+
+    rows = dsgo.Node([row('ス', '日本語'), row('ス', 'hold')], {0: 'K1', 1: 'K2'})
+    table = dsgo.write(dsgo.Document(dsgo.Node([rows], {0: 'table'}), []))
+    out = dsgo.parse(s.add_rows(table, ['K2', 'N1', 'N2'], {'N1': 'text one', 'K2': 'new'}))
+    t = out.root.items[0]
+    by = {t.names[i]: [str(x) for x in t.items[i].items] for i in t.names}
+    assert by == {'K1': ['ス', '日本語'], 'K2': ['ス', 'hold'], 'N1': ['', 'text one'], 'N2': ['', 'N2']}, by
+    assert [t.names[0], t.names[1]] == ['K1', 'K2']   # the rows kept their places
+    # the invariant the game depends on: every row, ours included, answers get('name') and get('caption')
+    assert all(r.names == {0: 'name', 1: 'caption'} and r.get('name') == r.items[0] and r.get('caption') == r.items[1] for r in t.items)
+    unnamed = dsgo.Node([dsgo.Node(['ス', 'x'])], {0: 'K1'})
+    bad = dsgo.write(dsgo.Document(dsgo.Node([unnamed], {0: 'table'}), []))
+    try:
+        s.add_rows(bad, ['N1'], {})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('rows without name / caption members are refused')
+
+
+@test
+def edf41_sounds_install() -> None:
+    """tools/edf41_sounds.py on a stand-in game (conversion stubbed): writes every file of every group as edf41sound's, a
+    second install converts nothing it converted already, a group one of whose files another mod placed is left out
+    and that file untouched, no EDF4.1 writes nothing, a group with a source missing is left out, removal deletes what it wrote."""
+    import tempfile
+    import edf41_sounds as s
+    import ledger
+    made: list[str] = []
+
+    def make(group: str, _r6: str, _r41: str) -> dict[str, bytes]:
+        made.append(group)
+        return {rel: group.encode() + rel.encode() for rel in s.GROUPS[group]}
+
+    with tempfile.TemporaryDirectory() as game, \
+            patched(s, make=make, missing=lambda g, *_: ['X.AWB'] if g == 'voice.EN' else [], sources_of=lambda *_: [],
+                    fingerprint=lambda _p: {'f': [1, 2]}):
+        os.makedirs(os.path.join(game, 'Mods'))
+        written, skipped = s.install(game, None)
+        assert not written and [g for g, _ in skipped] == list(s.GROUPS) and not os.listdir(os.path.join(game, 'Mods'))
+        written, skipped = s.install(game, 'edf41')
+        assert [g for g, _ in skipped] == ['voice.EN'] and 'voice.EN' not in made
+        every = [rel for g, rels in s.GROUPS.items() if g != 'voice.EN' for rel in rels]
+        assert len(written) == len(every) and set(made) == set(s.GROUPS) - {'voice.EN'}
+        led = ledger.Ledger(game)
+        assert all(led.owners(rel) == [s.OWNER] for rel in every)
+        made.clear()
+        assert s.install(game, 'edf41')[0] == [] and not made, made
+        stamp_path = os.path.join(game, 'Mods', s.STAMP)
+        with open(stamp_path, encoding='utf-8') as f:
+            stamp = json.load(f)
+        stamp['table']['version'] = 1   # installed by the version before the rows had member names
+        with open(stamp_path, 'w', encoding='utf-8') as f:
+            json.dump(stamp, f)
+        s.install(game, 'edf41')
+        assert made == ['table'], made   # only the group whose output changed is converted again
+        made.clear()
+        s.remove(game)
+        other = os.path.join(game, 'Mods', 'SOUND', 'PC', 'EDF41_WEAPON_SE.ACB')
+        os.makedirs(os.path.dirname(other), exist_ok=True)
+        with open(other, 'wb') as f:
+            f.write(b'another mod')
+        written, skipped = s.install(game, 'edf41')
+        assert 'weapon' in [g for g, _ in skipped] and 'weapon' not in made
+        with open(other, 'rb') as f:
+            assert f.read() == b'another mod'
+        s.remove(game)
+        assert os.path.exists(other) and not os.path.exists(os.path.join(game, 'Mods', 'MISSION', 'EDF6_VOICETABLE.SC.SGO'))
+
+
+def _sound_games() -> tuple[str, str] | None:
+    """(EDF6, EDF4.1) folders, or None off a developer's machine (CI has no game)."""
+    import gamedir
+    import rootcpk
+    r41 = gamedir.find_other(gamedir.EDF41, rootcpk.DEFAULT_GAME)
+    sound = os.path.join(rootcpk.DEFAULT_GAME, 'SOUND', 'PC', 'TIKYUUX_SE.ACB')
+    return (rootcpk.DEFAULT_GAME, r41) if r41 and os.path.isfile(sound) else None
+
+
+@test
+def edf6_awe_lists_round_trip() -> None:
+    """pylib/awe.py reads and writes EDF6's own lists: every version 2 AWE in SOUND/PC comes back byte for byte, and
+    EDF6's version 1 TIKYUU6_VOICE_LIST.AWE with the JA list's seconds becomes the JA list (the 4.1 -> 6 conversion)."""
+    import awe
+    games = _sound_games()
+    if games is None:
+        return
+    folder = os.path.join(games[0], 'SOUND', 'PC')
+    checked = 0
+    for name in sorted(os.listdir(folder)):
+        if name.upper().endswith('.AWE'):
+            with open(os.path.join(folder, name), 'rb') as f:
+                data = f.read()
+            if data[4:6] == b'\x00\x02':
+                assert awe.write_awe2(awe.read_awe(data)) == data, name
+                checked += 1
+    assert checked >= 10, checked
+    with open(os.path.join(folder, 'TIKYUU6_VOICE_LIST.AWE'), 'rb') as f:
+        v1 = awe.read_awe(f.read())
+    with open(os.path.join(folder, 'TIKYUU6_VOICE.JA_LIST.AWE'), 'rb') as f:
+        ja = f.read()
+    secs = {c.name: c.seconds for c in awe.read_awe(ja)}
+    assert awe.write_awe2([awe.Cue(c.name, c.wave, secs[c.name]) for c in v1]) == ja
+
+
+@test
+def edf41_weapon_bank_real() -> None:
+    """tools/edf41_sounds.py weapon bank from the real games: parses with pylib/acb.py, keeps 4.1's 1469 cue names, has
+    EDF6's AcfMd5Hash, a Name and AcbGuid unlike EDF6's SE bank, and differs from 4.1's file in exactly those three places."""
+    import acb
+    import edf41_sounds as s
+    games = _sound_games()
+    if games is None:
+        return
+    r6, r41 = games
+    out = s.weapon_bank(r6, r41)
+    assert list(out) == [s.WEAPON_REL]
+    new = out[s.WEAPON_REL]
+    with open(s.sound_path(r41, s.SE_BANK), 'rb') as f:
+        old = f.read()
+    with open(s.sound_path(r6, s.SE_BANK), 'rb') as f:
+        e6 = f.read()
+    assert len(new) == len(old) and acb.cue_names(new) == acb.cue_names(old) and len(acb.cue_names(new)) == 1469
+    _, new_data, row = s.utf_fields(new)
+    _, e6_data, row6 = s.utf_fields(e6)
+
+    def field(buf: bytes, base: int, r: dict, key: str) -> bytes:
+        return buf[base + r[key][0]:base + r[key][0] + 16]
+
+    assert field(new, new_data, row, 'AcfMd5Hash') == field(e6, e6_data, row6, 'AcfMd5Hash')
+    assert row['Name'] == 'tikyuu41_W' and row['Name'] != row6['Name']
+    assert field(new, new_data, row, 'AcbGuid') != field(e6, e6_data, row6, 'AcbGuid')
+    pool = s.utf_fields(old)[0]
+    name_at = pool + old[pool:].find(s.OLD_NAME)
+    allowed = set(range(name_at, name_at + 10)) | {new_data + row[k][0] + j for k in ('AcfMd5Hash', 'AcbGuid') for j in range(16)}
+    diff = [i for i in range(len(old)) if old[i] != new[i]]
+    assert diff and set(diff) <= allowed, len(diff)
+
+
+@test
+def edf41_voice_real() -> None:
+    """tools/edf41_sounds.py EN voice bank and the five tables from the real games: the AWB is 4.1's with only the version
+    byte changed (2, as EDF6 writes it); the list is a version 2 AWE with 4.1's names and wave ids, sorted, and a length
+    for each cue taken from its wave's HCA header; every table keeps all EDF6 rows and gains a row per 4.1 key."""
+    import dsgo
+    import awe
+    import edf41_sounds as s
+    import rootcpk
+    games = _sound_games()
+    if games is None:
+        return
+    r6, r41 = games
+    awb_name, awe_name = s.VOICES['EN']
+    bank = s.voice_bank(r41, 'EN')
+    awb_rel, awe_rel = s.voice_rels('EN')
+    awb = bank[awb_rel]
+    with open(s.sound_path(r41, awb_name), 'rb') as f:
+        head = f.read(1 << 20)
+        f.seek(-(1 << 20), 2)
+        tail = f.read()
+    assert awb[4] == 2 and head[4] == 1 and bytes(awb[:4]) + bytes(awb[5:1 << 20]) == head[:4] + head[5:]
+    assert bytes(awb[-(1 << 20):]) == tail
+    with open(s.sound_path(r41, awe_name), 'rb') as f:
+        v1 = awe.read_awe(f.read())
+    v2 = awe.read_awe(bank[awe_rel])
+    assert sorted((c.name, c.wave) for c in v1) == [(c.name, c.wave) for c in v2]
+    assert awe.write_awe2(v2) == bank[awe_rel] and all(0.1 < c.seconds < 120 for c in v2)
+    waves = awe.afs2_waves(awb)
+    c = v2[len(v2) // 2]
+    start = waves[c.wave][0]
+    assert abs(c.seconds - awe.hca_seconds(bytes(awb[start:start + 0x100]))) < 1e-5   # stored as a float32
+    del bank, awb
+    tables = s.voice_tables(r6, r41)
+    keys = s.cue_keys(r41)
+    game = rootcpk.Game(r6)
+    for lang in s.CAPTIONS:
+        orig = dsgo.parse(game.read('MISSION', f'EDF6_VOICETABLE.{lang}.SGO')).root.items[0]
+        got = dsgo.parse(tables[s.table_rel(lang)]).root.items[0]
+        by = {got.names[i]: got.items[i] for i in got.names}
+        assert len(got.items) == len(orig.items) + len(keys) and set(by) == set(orig.names.values()) | set(keys)
+        assert all(by[orig.names[i]].items == orig.items[i].items for i in orig.names), lang
+        assert all(r.names == {0: 'name', 1: 'caption'} for r in got.items), lang   # the game reads a row by these names
+    en = dsgo.parse(tables[s.table_rel('EN')]).root.items[0]
+    row = next(en.items[i] for i in en.names if en.names[i] == 'A001AA')
+    line = s.read_captions(s.plugin_path(r41, s.CAPTIONS['EN'])).get('A001AA')
+    assert row.items == ['', line or 'A001AA'], row.items
+
+
 def _mini_mab(flag: int) -> bytes:
     """A small MAB block in the layout of pylib/mab_legacy.py's docstring, with every part a block can have: two
     records in list 0 (a kind 0 and a kind 2), one in list 1, a track of two keys, vec4s, SGO blocks, strings. `flag`
@@ -7675,6 +7935,11 @@ def edf41_hector_guns() -> None:
         assert ai.get('attack').get('range') == 0.0, name          # 4.1 has no melee
         assert ai.get('gun_attack').get('range') == max(reach[(gen, left)], reach[(gen, right)]), name
         assert ai.get('gun_attack').get('interval').get('min') == 300.0, name
+        # the key src/edf41ai.cpp reads: each arm's own range, same weapon class on both arms, 4.1's hector_ai_setting
+        key = top.get('edf41_hector')
+        assert key.get('ranges').items == [reach[(gen, left)], reach[(gen, right)]], name
+        assert key.get('same_weapon') == (1.0 if left == right else 0.0), name
+        assert key.get('ai').items == [720.0, 1440.0, 540.0, 720.0, 150.0, 20.0, 80.0], name
         assert top.get('resource').items == [], name               # the weapon objects are not loaded
         for entry, letter in zip(entries, (left, right)):
             w = m.HECTOR_WEAPONS[(gen, letter)]
