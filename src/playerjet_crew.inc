@@ -22,12 +22,51 @@
 //    empty, its call resumed: it takes off); a pilot seat found empty under them gets the stock RideAi (EnsurePilot).
 //  - Leaving the gun (GunnerLeft): over kEjectFrom the parachute (EjectStart, no catch); the gunship goes on with its call
 //    under its NPC pilot, on its pilot's team again.
-//  - Moving between the two seats aboard (seatswitch.cpp, the seat key: to the gun at any time, to the stick where it may be
-//    boarded) is no leaving: no parachute, no ejection (AboardElsewhere); the NPC in the seat taken changes places.
+//  - Moving between the two seats aboard (seatswitch.cpp, the seat key: either way at any time; the stick taken over in the
+//    air at the speed the NPC flew it, playerjet.cpp SeedMeasured) is no leaving: no parachute, no ejection
+//    (AboardElsewhere); the NPC in the seat taken changes places.
 constexpr ULONGLONG kGunnerCentreMs=30000;   // the pylon turn stays round the point last shelled this long
 constexpr std::size_t kSeatFire=0x2E4;       // the seat's primary trigger (docs/heli-input-re.md §3: >= kSeatFireOn fires)
 constexpr float kSeatFireOn=0.8f;
 constexpr ULONGLONG kGunnerLogMs=2000;
+constexpr std::size_t kSeatAimStick=0x2D0;   // the rider's aim stick (the mouse's per-frame share), docs/camera-re.md §4
+
+// The gunner's view (the user, 2026-10-12: "从座位1切换到座位2以后无法开火，并且视野无法动"). The gun seat shares the pilot
+// seat's camera locators (docs/player-jet-re.md §11.1), so the stock Type-1 seat camera only follows the airframe: the
+// rider's mouse turned nothing, and the screen's centre -- the gun's aim (GroundSight) -- stayed wherever the hull
+// pointed, often at no ground within reach, so the trigger fired nothing. The view is the rider's own: a world-held
+// heading and elevation (turretcam.h's convention), turned by their aim stick at TurretCamRate as the turret camera turns
+// (slower by the sight's magnification, sightzoom.h), written here once a game frame; the camera hook (GunnerCamera,
+// turretcam.cpp LookHook) places the eye just out of the airframe along it, so the gunship never hides the cross.
+struct GunnerView { ObjRef ref; const unsigned char* vehicle; const unsigned char* seat; float yaw,pitch; ULONGLONG frame; };
+GunnerView gunnerView{};
+SRWLOCK gunnerViewLock=SRWLOCK_INIT;
+struct GunnerRig { const unsigned char* seat; float out,up; } gunnerRig{};   // the camera hook's own (its thread)
+
+void GunnerViewOff() noexcept {
+    AcquireSRWLockExclusive(&gunnerViewLock);gunnerView=GunnerView{};ReleaseSRWLockExclusive(&gunnerViewLock);
+}
+
+// A frame of the gunner's view: begun on the view as it is drawn, then turned by the rider's stick.
+void GunnerLook(unsigned char* v) noexcept {
+    const unsigned char* const seat=SeatAt(v,kGunnerSeat);
+    AcquireSRWLockShared(&gunnerViewLock);const GunnerView was=gunnerView;ReleaseSRWLockShared(&gunnerViewLock);
+    float yaw=was.yaw,pitch=was.pitch;
+    if(was.seat!=seat || !was.ref.Is(v)) {
+        float eye[3],dir[3];
+        if(!CameraRay(eye,dir))return;
+        yaw=tcam::YawOf(dir);pitch=tcam::PitchOf(dir);
+    }
+    const float x=At<float>(seat,kSeatAimStick),y=At<float>(seat,kSeatAimStick+4);
+    const float rate=sightzoom::Rate(Cfg().turretCamRate*tcam::kPi/180.0f/60.0f,SightZoomNow(v));
+    if(std::isfinite(x) && std::isfinite(y)) {
+        yaw=tcam::Wrap(yaw+x*rate);
+        pitch=vec::Clamp(pitch-y*rate,-tcam::kPitchMost,tcam::kPitchMost);
+    }
+    AcquireSRWLockExclusive(&gunnerViewLock);
+    gunnerView=GunnerView{ObjRef::Of(v),v,seat,yaw,pitch,GameFrame()};
+    ReleaseSRWLockExclusive(&gunnerViewLock);
+}
 
 struct Gunner {
     ObjRef ref;                  // the gunship the player sits at the gun of
@@ -82,6 +121,7 @@ void GunnerLeft(bool alive,const char* how) noexcept {
     Log("GUNNER v=%p the player left the gun: %s (%.0f m over the ground)%s",v,how,gunner.clear==kNoGround ? -1.0f : gunner.clear,
         high ? ": out under the parachute" : "");
     gunner=Gunner{};
+    GunnerViewOff();
 }
 
 void GunnerBoarded(unsigned char* v) noexcept {
@@ -182,7 +222,7 @@ void GunnerFrame(unsigned char* v) noexcept {
     const bool mine=gunner.ref.Is(v);
     const bool aboard=!v[kDead] && SeatRider(SeatAt(v,kGunnerSeat))==Rider::player;
     // Moved to the stick (seatswitch.cpp): not out of the gunship, no parachute; the pilot's path (Fly: Board) takes it.
-    if(mine && !aboard && !v[kDead] && AboardElsewhere(v,kGunnerSeat)){Log("GUNNER v=%p the player moved to another seat",v);gunner=Gunner{};return;}
+    if(mine && !aboard && !v[kDead] && AboardElsewhere(v,kGunnerSeat)){Log("GUNNER v=%p the player moved to another seat",v);gunner=Gunner{};GunnerViewOff();return;}
     if(mine && !aboard){GunnerLeft(true,v[kDead] ? "the gunship destroyed" : "got out");return;}
     if(!aboard)return;
     if(!mine)GunnerBoarded(v);
@@ -193,6 +233,7 @@ void GunnerFrame(unsigned char* v) noexcept {
     if(const jet::Jet* e=jet::FindJet(v))std::memcpy(gunner.vel,e->m.vel,12);
     gunner.clear=GroundClearance(pos);
     EnsurePilot(v);
+    GunnerLook(v);
     GunnerFire(v,pos,ms);
 }
 

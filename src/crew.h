@@ -937,6 +937,9 @@ enum class GunnerGun : int { shells, cannon, gatling, count };
 struct GunnerReadout { float sight[3]; bool ground,inReach,ready; float range,wait; float centre[3]; bool centred; GunnerGun gun; unsigned guns;
                        float zoom; };
 bool PlayerGunnerHud(GunnerReadout* out) noexcept;
+// The gunship gunner's seat camera (playerjet_crew.inc GunnerLook): from turretcam.cpp's native Type-1 seat camera hook,
+// the eye and look-at for the local player at the gun; false for any other seat (the stock camera stays).
+bool GunshipGunnerCamera(const unsigned char* seat,const float* stockEye,const float* stockLook,float* eye,float* look) noexcept;
 // The vehicle class (crew.cpp kClasses) of an object by its vtable, -1 for anything else (a board-able vehicle or not).
 int VehicleClassOf(const void* object) noexcept;
 // The boarding gun (boarding.cpp): a real friendly hit suppresses damage and asks the game thread to board the

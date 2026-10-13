@@ -914,13 +914,15 @@ bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {
     if(npc::Dist(pos,at)>=reach) {
         // The native riding point is a trigger centre, not necessarily a walkable foot position.
         // Project only within that trigger's vertical reach, never onto a roof or another floor.
+        // Stop near enough that arriving anywhere in the stop circle is inside the trigger (npc_logic.h BoardStop).
         const float above[3]={at[0],at[1]+0.3f,at[2]},below[3]={at[0],at[1]-reach,at[2]};
         float walkAt[3];
-        if(MapFloorRay(above,below,walkAt)<0.0f || npc::Dist(walkAt,at)>=reach) {
+        const float stop=MapFloorRay(above,below,walkAt)<0.0f ? 0.0f : npc::BoardStop(at[1]-walkAt[1],reach);
+        if(stop<=0.0f) {
             Stand(h); // nextThink already wrote native movement; a rejected entrance must hold, not reuse that intent.
             return true;
         }
-        MoveTo(h,pos,walkAt,0.5f);
+        MoveTo(h,pos,walkAt,stop);
         return true;
     }
     auto ctrl=At<unsigned char*>(v,kSelfCtrl);

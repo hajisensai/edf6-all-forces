@@ -307,7 +307,36 @@ void Targets() {
           TargetScore(140.0f,150.0f,false)<TargetScore(160.0f,150.0f,true),"reach outranks the keep");
 }
 
+// The boarding walk's stop (BoardStop): standing anywhere within it on the floor under the riding point (and up to the
+// walk's 0.05 m of height slack) is inside the trigger sphere, for every drop the floor ray can give; the old fixed
+// 0.5 m stop is not (the negative control: the case the user hit).
+void Boards() {
+    using namespace npc;
+    const float reaches[]={0.6f,1.2f,2.3f,4.0f};
+    for(float reach:reaches) {
+        for(int k=-10;k<=10;++k) {
+            const float drop=reach*0.1f*static_cast<float>(k);
+            const float stop=BoardStop(drop,reach);
+            const float up=std::fabs(drop)+kBoardFeet;
+            if(stop<=0.0f){Check(reach*reach-up*up<(kBoardStopLeast/kBoardShare)*(kBoardStopLeast/kBoardShare)*1.01f,
+                                 "no stand only at the sphere's rim or out of it",reach,drop);continue;}
+            const float worst=std::sqrt(stop*stop+up*up);
+            Check(worst<reach,"arrived anywhere in the stop: inside the trigger",reach,drop);
+            Check(stop<=kBoardStopMost,"never wider than the old stop",stop);
+        }
+    }
+    const float reach=1.0f,drop=0.9f;   // a riding point high over its floor (inside the old floor test: drop < reach)
+    Check(std::sqrt(0.5f*0.5f+drop*drop)>=reach,"negative control: the old 0.5 m stop can arrive outside the trigger");
+    const float stop=BoardStop(drop,reach);
+    Check(stop>=kBoardStopLeast && std::sqrt(stop*stop+(drop+kBoardFeet)*(drop+kBoardFeet))<reach,
+          "that floor: a narrower stop, every arrival inside",stop);
+    Check(BoardStop(1.2f,reach)==0.0f,"a floor out of the sphere: no stand");
+    Check(BoardStop(0.0f,reach)==kBoardStopMost,"a floor-level door keeps the 0.5 m stop");
+    Check(BoardStop(std::nanf(""),reach)==0.0f && BoardStop(0.0f,std::nanf(""))==0.0f,"not finite: no stand");
+}
+
 int main() {
+    Boards();
     Intent();
     Lanes();
     Shots();

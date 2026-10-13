@@ -125,7 +125,8 @@ bool LockingOn(const void*) noexcept { if(!payloadScenario)MissingRecoveryDepend
 int BreakLocks(const void*,float) noexcept { MissingRecoveryDependency();return 0; }
 int LockersOf(const void*,float (*)[3],int) noexcept { MissingRecoveryDependency();return 0; }
 bool Alive(const ObjRef& r) noexcept {return r && r.Is(r.obj) && !At<unsigned char>(r.obj,kDead);}
-Jet* FindJet(const unsigned char*) noexcept { MissingRecoveryDependency();return nullptr; }
+bool seedScenario=false;Jet* seedJet=nullptr;   // the NPC flight's entry a takeover finds (or none)
+Jet* FindJet(const unsigned char*) noexcept { if(!seedScenario)MissingRecoveryDependency();return seedJet; }
 void HoldOffGround(Jet&,const float*,float,float,ULONGLONG,float) noexcept { MissingRecoveryDependency(); }
 void Hover(Jet&,const Kind&,const unsigned char*,const float*,const float*,const float*,float,float,float,float,bool) noexcept { MissingRecoveryDependency(); }
 void Thrusters(Jet&,const Kind&,unsigned char*,float,ULONGLONG,float) noexcept { MissingRecoveryDependency(); }
@@ -405,6 +406,30 @@ int main() {
     ResetJet(j);j.vel[1]=-2.0f;j.liftOffAt=recoveryTime;j.liftedOff=true;recoveryVehicle[0x1580]=2;
     ReconcileGround(j,recoveryVehicle,0.5f,false,false,recoveryTime+100);
     Check(j.phase==Phase::rolling,"takeoff: sinking back onto its contacts within the lift-off window still lands");
+    // Taken over in the air (the user, 2026-10-12: "上npc飞机的时候，速度会清零"): an NPC's aircraft has no record until
+    // the player sits at its stick, so Board runs on a record that has measured nothing (fresh false). Its velocity is the
+    // NPC flight's (jet.cpp's entry), not zero; with no entry, or one not finite, the record keeps what it had.
+    jet::seedScenario=true;
+    jet::Jet flying{};flying.m.vel[0]=0.0f;flying.m.vel[1]=-2.0f;flying.m.vel[2]=120.0f;
+    const float seedPos[3]={0.0f,400.0f,0.0f};
+    j=PJet{};j.vehicle=recoveryVehicle;j.ref=ObjRef::Of(recoveryVehicle);j.kind=&kKinds[0];
+    jet::seedJet=&flying;
+    Board(j,recoveryVehicle,seedPos,400.0f);
+    Check(j.phase==Phase::air && j.vel[2]==120.0f && j.vel[1]==-2.0f && j.measured[2]==120.0f,
+          "taken over in the air: it flies on at the NPC flight's velocity");
+    j=PJet{};j.vehicle=recoveryVehicle;j.ref=ObjRef::Of(recoveryVehicle);j.kind=&kKinds[0];
+    j.fresh=true;j.measured[2]=80.0f;
+    Board(j,recoveryVehicle,seedPos,400.0f);
+    Check(j.vel[2]==80.0f,"a record with a frame of its own keeps its measured velocity");
+    j=PJet{};j.vehicle=recoveryVehicle;j.ref=ObjRef::Of(recoveryVehicle);j.kind=&kKinds[0];
+    jet::seedJet=nullptr;
+    Board(j,recoveryVehicle,seedPos,400.0f);
+    Check(j.vel[0]==0.0f && j.vel[1]==0.0f && j.vel[2]==0.0f,"no flight entry: nothing made up");
+    flying.m.vel[2]=std::nanf("");jet::seedJet=&flying;
+    j=PJet{};j.vehicle=recoveryVehicle;j.ref=ObjRef::Of(recoveryVehicle);j.kind=&kKinds[0];
+    Board(j,recoveryVehicle,seedPos,400.0f);
+    Check(std::isfinite(j.vel[2]) && j.vel[2]==0.0f,"a flight velocity not finite is not taken");
+    jet::seedScenario=false;jet::seedJet=nullptr;
     VirtualFree(image,0,MEM_RELEASE);
     std::printf("playerjet_recovery: %d production-path checks passed; takeoff%s\n",checks,takeoffLine);
     return 0;
