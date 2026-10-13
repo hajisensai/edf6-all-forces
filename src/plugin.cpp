@@ -1039,6 +1039,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallBigWorld();
     Log("LEGACYMAP collision migration hooked=%d",InstallLegacyMap());   // EDF4.1 maps (plan P6)
     InstallEdf41Ai();        // the converted EDF4.1 Hectors' arm gate and back-off cycle (edf41ai.cpp)
+    InstallEdf41Fortress();  // the converted EDF4.1 fortress: standing, its drop through the core hatch (edf41fortress.cpp)
     InstallEdf41Sound();     // EDF4.1's weapon SE bank and voice banks (edf41sound.cpp)
     InstallTerrainShare();   // before any map loads: the pieces of one terrain decoded once
     InstallMission();       // the mission's start (Reset*, the preloads) and a trigger of the per-frame hooks

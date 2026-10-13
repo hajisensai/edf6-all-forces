@@ -488,6 +488,8 @@ bool InstallLegacyMap() noexcept;
 bool InstallEdf41Sound() noexcept;
 // edf41ai.cpp: the converted EDF4.1 Hectors attack as 4.1's do (per-arm range gate, back-off cycle).
 bool InstallEdf41Ai() noexcept;
+// edf41fortress.cpp: the converted EDF4.1 four-legged fortress stands from the start and drops through its core hatch.
+bool InstallEdf41Fortress() noexcept;
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
 bool InstallMissiles() noexcept;
 // The stock split missiles (MissileBullet02) split short of a big target's surface (splitmissile.cpp).
