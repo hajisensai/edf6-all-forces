@@ -167,6 +167,59 @@ constexpr SupportLook PresetLookFor(const SupportPreset& p,const SupportLoadout&
     return i>=0 && i<p.count && i<load.count && load.soldier[i]==p.kind[i] ? p.look[i] : SupportLook{};
 }
 
+// --- Crew colours (docs/feature-2026-10-12-room-loadout-menu.md 阶段 5) ---
+// Every support unit's real crew (a vehicle's driver and crew, an aircraft's pilot and door gunners, a transport's pilot,
+// the mission vehicles' support crews) wears one look, the same generated soldier file a preset's soldier would:
+//   SupportCrewColour_<KEY>=RRGGBB[:RRGGBB]   that unit's crew (X a colour left stock; X alone: stock, whatever the default)
+//   SupportCrewColour=RRGGBB[:RRGGBB]         every crew without its own key
+//   SupportCrewColour_MISSION=...             the mission vehicles' support crews (src/mission_crew_support.cpp)
+// Empty or absent: the default (the global one's: stock). A squad's soldiers are not a crew (SupportPreset_ colours them).
+struct CrewColour {
+    bool set=false;     // false: the default applies
+    SupportLook look{};
+    constexpr bool operator==(const CrewColour& o) const noexcept { return set==o.set && (!set || look==o.look); }
+};
+inline constexpr const wchar_t* kCrewMissionKey=L"MISSION";
+// The catalog entries that bring no crew, only soldiers (support_dispatch.cpp: the infantry squad and platoon).
+inline constexpr const wchar_t* kCrewlessKeys[]={L"SQUAD",L"PLATOON"};
+inline bool HasCrew(const wchar_t* key) noexcept {
+    if(!key)return false;
+    for(const wchar_t* k:kCrewlessKeys)if(!_wcsicmp(k,key))return false;
+    return true;
+}
+// A ground vehicle's crew (support_dispatch.cpp: its driver carries SupportVehicleCrewWeapon); every other crew is an
+// aircraft's (SupportAircraftCrewWeapon), the *_AIRDROP entries' too: their crew is the transport helicopter's pilot
+// (support_dispatch.cpp, the container delivery: SupportCfg().aircraftCrew), whatever vehicle the container holds.
+// The exact keys, never a prefix: tools/support_loadout.py VEHICLE_CREW_KEYS (tests/support_loadout_ini_test.py compares).
+inline constexpr const wchar_t* kGroundCrewKeys[]={L"TANK_CREWED",L"TANK_DELIVERY",L"TRANSPORT_CREWED",L"TRANSPORT_DELIVERY",
+                                                   L"TRUCK_CREWED",L"TRUCK_DELIVERY"};
+inline bool IsGroundCrewKey(const wchar_t* key) noexcept {
+    if(!key)return false;
+    for(const wchar_t* k:kGroundCrewKeys)if(!_wcsicmp(k,key))return true;
+    return false;
+}
+// One SupportCrewColour value. Empty: true, not set. False: *out not set, `why` says why.
+inline bool ParseCrewColour(const wchar_t* text,CrewColour* out,wchar_t* why,std::size_t whyCapacity) noexcept {
+    using namespace loadout_detail;
+    CrewColour c{};
+    if(why && whyCapacity)why[0]=0;
+    const wchar_t *a=text ? text : L"",*b=a+std::wcslen(a);Trim(a,b);
+    bool parsed=true;
+    if(a<b) {
+        const wchar_t* colon=Find(a,b,L':');
+        c.set=true;
+        if(!Colour(a,colon,&c.look.primary) || (colon<b && !Colour(colon+1,b,&c.look.secondary))) {
+            parsed=false;Say(why,whyCapacity,L"乘员颜色应为 RRGGBB 或 RRGGBB:RRGGBB（X = 原色）：",a,b);
+        }
+    }
+    if(out)*out=parsed ? c : CrewColour{};
+    return parsed;
+}
+// The look a crew wears: its own key's when set, else the default's.
+constexpr SupportLook CrewLookOf(const CrewColour& own,const CrewColour& fallback) noexcept {
+    return own.set ? own.look : fallback.set ? fallback.look : SupportLook{};
+}
+
 // --- Vehicle pylons ---
 // The stores a pylon may carry (pylib/vcobjects.py STORES: the files EDF6VC_<NAME>_<rounds>.SGO the plugin already
 // knows, src/stores.inc kStores), a code each (1..15, 0 = none) for the 64-bit variant. `jet` / `tank`: whom it may go on

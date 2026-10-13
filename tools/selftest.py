@@ -2168,8 +2168,10 @@ def heli_sight_after_aim_lines() -> None:
     import support_config
     import support_loadout
     suffixes = {'SupportAircraftCount_': support_config.UNIT_KEYS, 'SupportPreset_': tuple(support_loadout.SEATS),
-                'SupportVehicle_': tuple(support_loadout.VEHICLE_KEYS)}
-    example = {'SupportAircraftCount_': r'\d', 'SupportPreset_': r'[a-z]', 'SupportVehicle_': r'[A-Z]'}   # a count; a kind; a gun
+                'SupportVehicle_': tuple(support_loadout.VEHICLE_KEYS),
+                'SupportCrewColour_': (*support_loadout.CREW_KEYS, support_loadout.MISSION)}   # 阶段 5: the crews' colours
+    example = {'SupportAircraftCount_': r'\d', 'SupportPreset_': r'[a-z]', 'SupportVehicle_': r'[A-Z]',
+               'SupportCrewColour_': r'[0-9A-FX]'}   # a count; a kind; a gun; a colour
 
     def read(key: str) -> bool:
         if f'L"{key}"' in plugin or any(f'L"{key}"' in m for m in modules.values()):
@@ -3099,6 +3101,20 @@ def ini_merge_only_adds() -> None:
 
 
 @test
+def ini_merge_adds_room_presync() -> None:
+    # An ini from before 阶段 R (RoomLoadout but no RoomPreSync): the install adds RoomPreSync=1 with its comment under the
+    # added-settings header, the player's RoomLoadout untouched.
+    shipped = src('EDF6VehicleCrew.ini')
+    user = '[VehicleCrew]\r\nEnabled=1\r\nRoomLoadout=0\r\nRoomLoadoutKey=0x71\r\n'
+    text, added, _ = installer.merge_ini(user, shipped)
+    assert 'RoomPreSync' in added, added
+    tail = text.split(installer.ADDED_HEADER, 1)[1]
+    assert '\r\nRoomPreSync=1\r\n' in tail and tail.index('联机房间预同步') < tail.index('RoomPreSync=1'), 'the comment above it'
+    assert text.startswith(user.rstrip('\r\n')) and '\nRoomLoadout=0\r\n' in text and '\nRoomLoadout=1\r\n' not in text
+    assert installer.merge_ini(text, shipped)[1] == [], 'merge is not idempotent'
+
+
+@test
 def ini_sections_match_windows() -> None:
     import make_stock_stores
     shipped = '[VehicleCrew]\nEnabled=1\nStockHeliStores=0\nNewOption=2\n'
@@ -3680,8 +3696,10 @@ def pack_install_upgrade_uninstall() -> None:
             # the out-of-game loadouts' files (tools/support_loadout.py): written after the plugin's ini, gone with uninstall 1
             loadout = {'OBJECT/EDF6VC_LO_TANK_4000000000000C81.SGO': b'loaded tank'}
             built_from: list[str] = []
+            # (the stand-in builder's files are what the ini wants: the install's stale-file cleanup keeps them)
             enter(patched(importlib.import_module('support_loadout'),
-                          build=lambda game, text, pending=(), errors=None: (built_from.append(text), dict(loadout))[1]))
+                          build=lambda game, text, pending=(), errors=None: (built_from.append(text), dict(loadout))[1],
+                          wanted_files=lambda text, pending=(): [rel.split('/')[-1] for rel in loadout]))
             with contextlib.redirect_stdout(io.StringIO()):
                 _pack_bundle(bundle, b'v1 ')
                 answers[:] = ['y']   # AT_C: back up the other mod's file and replace it
@@ -4614,9 +4632,10 @@ def map_wired() -> None:
     readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'GetAsyncKeyState' in src(f'src/{f}')]
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
                                       'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp', 'sightzoom.cpp',
-                                      'debug_spawn.cpp', 'firstperson.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'debug_spawn.cpp', 'firstperson.cpp', 'room_ui.cpp']), f'a new key reader: make it give way to the map ({readers})'
     assert 'InFront() && !MapHoldsKeys()' in src('src/debug_spawn.cpp'), 'the debug spawn keys give way to the map'
     assert 'if(vk<=0 || MapHoldsKeys())return false;' in src('src/firstperson.cpp'), 'the first person key gives way to the map'
+    assert 'Foreground() && !MapHoldsKeys()' in src('src/room_ui.cpp'), 'the room menu keys give way to the map'
 
     assert 'InstallMap();' in plugin and 'ResetMap();' in mission and 'src/map.cpp' in cmake
     assert 'EXCLUDE_FROM_ALL tools/map_cam_check.cpp' in cmake and '#include "../src/map_cam.h"' in src('tools/map_cam_check.cpp')

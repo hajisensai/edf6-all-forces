@@ -492,8 +492,9 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
             const unsigned parent=plan.count+1;
             if(!AddUnit(plan,kAircraft+kSupportAirborneOffset+catalog,0,at,route.heading)){Refuse(catalog,"plan full",L"支援单位过多");return PlanResult::refused;}
             plan.units[plan.count-1].variant=HullVariant(catalog);   // its pylons (SupportVehicle_<key>)
-            for(unsigned c=0;c<AirCrew(catalog,spec);++c)if(!AddUnit(plan,crew,parent,at,route.heading)) {
-                Refuse(catalog,"plan full",L"支援单位过多");return PlanResult::refused;
+            for(unsigned c=0;c<AirCrew(catalog,spec);++c) {
+                if(!AddUnit(plan,crew,parent,at,route.heading)){Refuse(catalog,"plan full",L"支援单位过多");return PlanResult::refused;}
+                plan.units[plan.count-1].variant=SupportCrewVariant(catalog,crew);   // its pilot's / gunners' colours
             }
         }
         Log("SUPPORT plan catalog=%u ready: %d aircraft in the air at (%.0f,%.0f,%.0f) heading (%.2f,%.2f), %u units",catalog,spec.count,
@@ -529,6 +530,7 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
         const auto crew=UseConfiguredLoadout() ? SupportSoldierResource(SupportCfg().aircraftCrew,false) : kSupportRangerResource;
         if(!AddUnit(plan,kAircraft+kSupportAirborneOffset+catalog,0,route.from,route.heading) ||
            !AddUnit(plan,crew,1,route.from,route.heading)){Refuse(catalog,"plan full",L"支援单位过多");return PlanResult::refused;}
+        plan.units[1].variant=SupportCrewVariant(catalog,crew);   // its pilot's colours (the riders' are the preset's)
         const unsigned riders=composed ? static_cast<unsigned>(load.count) : TransportRiders(platoon);
         for(unsigned i=0;i<riders;++i) {
             const auto resource=composed ? SupportLoadoutResource(load,static_cast<int>(i)) : InfantryResource(platoon,i);
@@ -575,6 +577,7 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
         const auto crew=UseConfiguredLoadout() ? SupportSoldierResource(SupportCfg().aircraftCrew,false) : kSupportRangerResource;
         if(!AddUnit(plan,kAircraft+kSupportAirborneOffset+catalog,0,route.from,route.heading) ||
            !AddUnit(plan,crew,1,route.from,route.heading)){Refuse(catalog,"plan full",L"支援单位过多");return PlanResult::refused;}
+        plan.units[1].variant=SupportCrewVariant(catalog,crew);   // its pilot's colours
         Log("SUPPORT plan catalog=%u ready: a transport helicopter carrying a container (%ls) in the air at (%.0f,%.0f,%.0f) heading "
             "(%.2f,%.2f)",catalog,spec->sgo,route.from[0],route.from[1],route.from[2],route.heading[0],route.heading[2]);
         *out=plan;planning.active=false;return PlanResult::ready;
@@ -634,10 +637,12 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
         if(!AddUnit(plan,kVehicle+static_cast<unsigned>(kind),0,entry,heading) ||
            !AddCrew(plan,1,entry,heading,count,spec->halfWidth,crew,0.55f))
             return nextEdge("no level ground for the crew");
-        // The hull's pylons (SupportVehicle_<key>), the passengers' colours (unit 1 is the driver, 2.. the composed load).
+        // The hull's pylons (SupportVehicle_<key>); its crew's colours (SupportCrewColour: the driver, and every seat when
+        // the call brings its own crew), a composed load's passengers' the preset's (unit 1 is the driver, 2.. the load).
         plan.units[plan.count-count-1].variant=HullVariant(catalog);
-        for(unsigned i=1;composed && i<count;++i)
-            plan.units[plan.count-count+i].variant=SoldierVariant(catalog,load,static_cast<int>(i-1),crew[i]);
+        for(unsigned i=0;i<count;++i)
+            plan.units[plan.count-count+i].variant=i>0 && composed ? SoldierVariant(catalog,load,static_cast<int>(i-1),crew[i]) :
+                                                                       SupportCrewVariant(catalog,crew[i]);
     } else {
         const bool platoon=catalog!=static_cast<unsigned>(AirCount());
         const unsigned count=composed ? static_cast<unsigned>(load.count) : platoon ? 12u : 4u;
@@ -1618,5 +1623,26 @@ void ResetSupportDispatch() noexcept {
     // MissionStart runs during preload, before native players are created. Installing lazily on the
     // first player frame would miss the creation callback and discard its admission observation.
     Configure();
+}
+std::uint64_t SupportCrewVariant(std::uint32_t catalog,std::uint32_t resource) noexcept {
+    // Only a crew (support_loadout.h HasCrew): an infantry squad's soldiers wear their preset's colours.
+    const bool mission=catalog==support_net::kMissionCrewCatalog;
+    if(!IsSupportSoldierResource(resource) || (!mission && !HasCrew(SupportCallKey(static_cast<int>(catalog)))))return 0;
+    const SupportLook look=mission ? SupportCfg().MissionCrewLook() :
+                           catalog<static_cast<unsigned>(kSupportConfigUnits) ? SupportCfg().CrewLook(static_cast<int>(catalog)) :
+                           SupportLook{};
+    if(!look.On())return 0;
+    wchar_t file[96];
+    if(!SupportLookFile(SupportSoldierWeapon(resource),IsSupportLeaderResource(resource),look,file,_countof(file)))return 0;
+    return DecideVariant(catalog,file,LookVariant(look));
+}
+const wchar_t* SupportSoldierLookPath(std::uint32_t resource,std::uint64_t variant,bool remote,wchar_t* path,
+                                      std::size_t capacity) noexcept {
+    SupportLook look;wchar_t file[96];
+    if(!variant || !path || !IsSupportSoldierResource(resource) || !LookOfVariant(variant,&look))return nullptr;
+    const SupportWeapon kind=SupportSoldierWeapon(resource);const bool leader=IsSupportLeaderResource(resource);
+    if(!SupportLookFile(kind,leader,look,file,_countof(file)) || !SupportLookFile(kind,leader,look,path,capacity,true))return nullptr;
+    if(!SupportVariantReady(file)){NoteMissingVariant(file,remote ? "the host's preset" : "this machine's own preset");return nullptr;}
+    return variant&kVariantApplied ? path : nullptr;
 }
 } // namespace crew

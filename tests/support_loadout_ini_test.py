@@ -131,6 +131,67 @@ shipped = read('EDF6VehicleCrew.ini')
 check(re.search(r'SupportPreset_[A-Z_]+=[a-z]', shipped) and re.search(r'SupportVehicle_[A-Z_]+=[A-Z]', shipped) and
       'SupportTankRounds' not in shipped, 'the shipped ini documents both keys (and no retired one)')
 
+# Crew colours (stage 5; docs/feature-2026-10-12-room-loadout-menu.md): the same keys, grammar, files and editor rows.
+menu = read('src/room_menu.h')
+crew_specs = re.findall(r'\{(L"[A-Z_]*"|kCrewMissionKey),L"[^"]+",\d+,true\}', menu)
+check([s[2:-1] if s.startswith('L"') else sl.MISSION for s in crew_specs] == list(sl.CREW_KEYS),
+      'the crews the in-game menu lists are the installer menu 8 ones, in its order')
+check('kCrewMissionKey=L"' + sl.MISSION + '"' in header and
+      re.search(r'kCrewlessKeys\[\]=\{([^}]*)\}', header).group(1) == ','.join(f'L"{k}"' for k in sl.CREWLESS),
+      'the mission key and the crewless keys equal the plugin\'s')
+config_cpp = read('src/support_config.cpp')
+check('L"SupportCrewColour"' in config_cpp and 'L"SupportCrewColour_MISSION"' in config_cpp and
+      'L"SupportCrewColour_%ls"' in config_cpp, 'the plugin reads the default, the mission\'s and every unit\'s crew colour')
+check(set(sl.VEHICLE_CREW_KEYS) == set(sc.GROUND_KEYS[2:8]) and set(sl.CREW_KEYS) - {'', sl.MISSION} <= set(sc.UNIT_KEYS) and
+      not set(sl.CREWLESS) & set(sl.CREW_KEYS), 'the ground vehicles\' crews; every crew key a catalog key with a crew')
+ground_cpp = re.search(r'kGroundCrewKeys\[\]=\{([^}]*)\}', header)
+check(ground_cpp is not None and re.findall(r'L"([A-Z_]+)"', ground_cpp.group(1)) == list(sl.VEHICLE_CREW_KEYS),
+      'the plugin\'s ground crew keys (support_loadout.h kGroundCrewKeys) are VEHICLE_CREW_KEYS, in order')
+ground_fn = re.search(r'inline bool IsGroundCrewKey\(const wchar_t\* key\) noexcept \{(.*?)\n\}', header, re.S)
+check(ground_fn is not None and '_wcsicmp(k,key)' in ground_fn.group(1) and '_wcsnicmp' not in ground_fn.group(1) and
+      'kGroundCrewPrefixes' not in header, 'IsGroundCrewKey matches whole keys, never a prefix')
+check(not {'TANK_AIRDROP', 'TRANSPORT_AIRDROP', 'TRUCK_AIRDROP'} & set(sl.VEHICLE_CREW_KEYS) and
+      all(k in sc.UNIT_KEYS for k in ('TANK_AIRDROP', 'TRANSPORT_AIRDROP', 'TRUCK_AIRDROP')),
+      'the container deliveries (a transport helicopter\'s pilot) are aircraft crews')
+dispatch = read('src/support_dispatch.cpp')
+check(dispatch.count('SupportCfg().vehicleCrew') == 1 and 'crew[i]=i>0 && composed ? SupportLoadoutResource' in dispatch,
+      'the ground crews are SupportVehicleCrewWeapon\'s (the only plan using it), every other crew SupportAircraftCrewWeapon\'s')
+for value, canonical in (('1E3A8A', '1E3A8A'), ('1e3a8a:ffffff', '1E3A8A:FFFFFF'), ('X', 'X'), ('x:X', 'X'), ('X:FFFFFF', 'X:FFFFFF'),
+                         (' 101010 ', '101010'), ('', '')):
+    look = sl.parse_crew(value)
+    check(sl.format_crew(look) == canonical and sl.parse_crew(sl.format_crew(look)) == look,
+          f'crew colour {value!r}: the canonical spelling the in-game menu writes')
+check(sl.parse_crew('') is None and sl.parse_crew('X') == (-1, -1), 'empty: the default; X: stock over it')
+for bad in ('12345', 'GGGGGG', '1E3A8A:', '1E3A8A,FFFFFF', 'rifle@1E3A8A', '1E3A8A:FFFFFF:000000', '@1E3A8A'):
+    check(refused(sl.parse_crew, bad), f'crew colour {bad!r} refused as in the plugin')
+check(re.search(r'"12345",L"GGGGGG",L"1E3A8A:",L"1E3A8A,FFFFFF"', read('tests/room_menu_test.cpp')) is not None,
+      'the C++ tests refuse the same values')
+crew_ini = ('[VehicleCrew]\r\nSupportCrewColour=1E3A8A\r\nSupportCrewColour_TANK_CREWED=X:FFFFFF\r\nSupportCrewColour_HELI=X\r\n'
+            'SupportCrewColour_MISSION=FFFFFF\r\nSupportCrewColour_FIGHTER=bogus\r\nSupportCrewColour_SQUAD=123456\r\n'
+            'SupportAircraftCrewWeapon=sniper\r\nSupportVehicleCrewWeapon=nonsense\r\n')
+check(sl.crew_files(crew_ini) ==
+      ['EDF6VC_NPC_RIFLE_FFFFFF_X.SGO', 'EDF6VC_NPC_RIFLE_L_FFFFFF_X.SGO', 'EDF6VC_NPC_SNIPER_1E3A8A_X.SGO',
+       'EDF6VC_NPC_RIFLE_X_FFFFFF.SGO', 'EDF6VC_NPC_RIFLE_1E3A8A_X.SGO'],
+      'crew files: the mission\'s rifle member and leader, the aircraft crews\' sniper (the default; X stock), the tank\'s own, '
+      'the other ground crews\' default (a bad crew weapon: the rifle, as the plugin)')
+check(sl.crew_files('[VehicleCrew]\r\nSupportCrewColour_TANK_CREWED=X\r\n') == [] and sl.crew_files('') == [],
+      'no colour anywhere: no crew file')
+check(all(f in sl.wanted_files(crew_ini) for f in sl.crew_files(crew_ini)) and all(sl.decode_name(f) for f in sl.crew_files(crew_ini)),
+      'the crew files are wanted (installer and loadout-generate) and decodable (a peer\'s pending list)')
+with tempfile.TemporaryDirectory(prefix='edf6vc-crew-') as root:
+    os.makedirs(os.path.join(root, 'Mods', 'OBJECT'))
+    open(os.path.join(root, 'Mods', 'OBJECT', 'EDF6VC_NPC_RIFLE_X_FFFFFF.SGO'), 'wb').close()
+    missing = sl.missing_names(root, crew_ini)
+    check('EDF6VC_NPC_SNIPER_1E3A8A_X.SGO' in missing and 'EDF6VC_NPC_RIFLE_X_FFFFFF.SGO' not in missing,
+          'loadout-generate makes the crew files not there yet, never the ones already made')
+# The editor: menu 8 c<n> (the same crews as the in-game menu).
+answers = iter(['l', 'c7', '1e3a8a:ffffff', 'c17', 'X', 'c18', 'zz', 'c3', '-', ''])
+crew_out = sc.edit('[VehicleCrew]\r\nSupportCrewColour_SQUAD_HELI=101010\r\n', lambda _prompt: next(answers, ''))
+check(sl.get(crew_out, 'SupportCrewColour_TANK_CREWED') == '1E3A8A:FFFFFF' and sl.get(crew_out, 'SupportCrewColour') == 'X' and
+      sl.get(crew_out, 'SupportCrewColour_MISSION') == '' and sl.get(crew_out, 'SupportCrewColour_SQUAD_HELI') == '',
+      'c7 the tank crew, c17 the default (X), a bad value not written, - clears the helicopter assault\'s crew')
+check('SupportCrewColour' in read('EDF6VehicleCrew.ini'), 'the shipped ini documents the crew colours')
+
 # The pending list (src/support_variants.cpp writes it, this tool clears what it made).
 with tempfile.TemporaryDirectory(prefix='edf6vc-pending-') as root:
     os.makedirs(os.path.join(root, 'Mods', 'Plugins'))
@@ -192,6 +253,13 @@ if game is not None:
         made = sgo.load(data=files['OBJECT/' + sl.look_file('lance', leader, (0x1E3A8A, -1))])
         stock = sgo.load(data=game.read('OBJECT', 'N606_AIPALEWING_LANCE' + ('_LEADER' if leader else '') + '.SGO'))
         check({k for k in stock if made[k] != stock[k]} == {'soldier_color'}, 'a coloured soldier: only soldier_color differs')
+    crew_made = sl.build(None, '[VehicleCrew]\r\nSupportCrewColour=1E3A8A:FFFFFF\r\n', game)
+    for name in ('EDF6VC_NPC_RIFLE_1E3A8A_FFFFFF.SGO',):
+        made = sgo.load(data=crew_made['OBJECT/' + name])
+        stock = sgo.load(data=game.read('OBJECT', 'N601_COMMON_RANGER_AF.SGO'))
+        check({k for k in stock if made[k] != stock[k]} == {'soldier_color'}, 'a coloured crew member: only soldier_color differs')
+    check(set(crew_made) == {'OBJECT/EDF6VC_NPC_RIFLE_1E3A8A_FFFFFF.SGO', 'OBJECT/EDF6VC_NPC_RIFLE_L_1E3A8A_FFFFFF.SGO'},
+          'the default crew colour: the rifle crew member and the mission crews\' rifle leader')
     made = sgo.load(data=files['OBJECT/EDF6VC_LO_TANK_4000000000000C81.SGO'])
     check([w[0] for w in made['mission_setup'][2]] == [sl.HE_GUN, 'app:/weapon/edf6vc_ap_25.sgo'] and
           len(made['vehicle_weapon_setting']) == 2 and made['mission_setup'][2][1][1] == made['mission_setup'][2][0][1],

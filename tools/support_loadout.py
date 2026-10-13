@@ -5,6 +5,9 @@ the ini on every save):
   SupportPreset_<KEY>=lance@1E3A8A*4,cannon*4      a seated entry's soldiers in seat order, colours, counts
   SupportVehicle_<KEY>=HE,AP:25                    a tank's main gun (HE / AP) and the rounds on its pylons beside it
   SupportVehicle_<KEY>=MK82:6,MK82:6               a jet's pylons (the guns always aboard); GUNS: the guns alone
+  SupportCrewColour_<KEY>=1E3A8A[:FFFFFF]          a support unit's real crew's colours (X stock; X alone: stock over the
+  SupportCrewColour=...                            default); the default of every crew; SupportCrewColour_MISSION the
+                                                   mission vehicles' support crews (docs/feature-2026-10-12-room-loadout-menu.md)
 This module validates every value the way the plugin does (tests/support_loadout_ini_test.py keeps the tables equal to
 the C++ ones), so a value the editor writes is never one the plugin would refuse.
 
@@ -69,6 +72,19 @@ SEATS: dict[str, int] = {'SQUAD': 12, 'PLATOON': 12, 'TRANSPORT_CREWED': 4, 'TRU
 LABELS = {'SQUAD': '步兵小队', 'PLATOON': '步兵大队', 'TRANSPORT_CREWED': '装甲运兵车·有人（乘客）',
           'TRUCK_CREWED': '民用轻卡·有人（乘客）', 'SQUAD_HELI': '直升机机降·小队', 'PLATOON_HELI': '直升机机降·大队',
           'SQUAD_AIRDROP': '运输机空降·小队', 'PLATOON_AIRDROP': '运输机空降·大队'}
+
+# Crews (src/support_loadout.h CrewColour; the plugin reads SupportCrewColour_<KEY> for every catalog key but these, the
+# default SupportCrewColour and SupportCrewColour_MISSION). A crew wears its kind's coloured member template: a ground
+# vehicle's crew SupportVehicleCrewWeapon's, every other crew SupportAircraftCrewWeapon's (src/support_dispatch.cpp Plan),
+# the mission vehicles' support crews the rifle (its first seat a leader: src/mission_crew_support.cpp Build).
+CREWLESS = ('SQUAD', 'PLATOON')                             # kCrewlessKeys
+MISSION = 'MISSION'                                         # kCrewMissionKey
+VEHICLE_CREW_KEYS = ('TANK_CREWED', 'TANK_DELIVERY', 'TRANSPORT_CREWED', 'TRANSPORT_DELIVERY', 'TRUCK_CREWED', 'TRUCK_DELIVERY')
+# The crews the editors list (src/room_menu.h kDefaultUnits' crew entries, in its order; '' the default).
+CREW_KEYS: tuple[str, ...] = ('TRANSPORT_CREWED', 'TRUCK_CREWED', 'SQUAD_HELI', 'PLATOON_HELI', 'SQUAD_AIRDROP',
+                              'PLATOON_AIRDROP', 'TANK_CREWED', 'TANK_DELIVERY', 'STRIKE', 'STRIKE_F', 'FIGHTER', 'FIGHTER_F',
+                              'INTERCEPTOR', 'INTERCEPTOR_F', 'MULTIROLE', 'MULTIROLE_F', '', MISSION)
+CREW_LABELS = {'': '所有支援乘员（默认）', MISSION: '任务载具的支援乘员'}
 
 # src/support_loadout.h kLoadStores: (code, name, label, role, on jets, on tanks).
 LOAD_STORES: tuple[tuple[int, str, str, str, bool, bool], ...] = (
@@ -206,6 +222,75 @@ def format_preset(soldiers: list[Soldier]) -> str:
 def look_file(k: str, leader: bool, look: Look) -> str:
     """src/support_loadout.h SupportLookFile."""
     return f'EDF6VC_NPC_{k.upper()}{"_L" if leader else ""}_{_colour_text(look[0])}_{_colour_text(look[1])}.SGO'
+
+
+# ------------------------------------------------------------------------------------------------ crew colours
+
+
+def crew_key(key: str) -> str:
+    """The ini key of `key`'s crew colours ('' the default's)."""
+    return 'SupportCrewColour' + ('_' + key if key else '')
+
+
+def parse_crew(text: str) -> Look | None:
+    """A SupportCrewColour value as the plugin reads it (ParseCrewColour): None empty (the default applies), else the look
+    (X alone: stock, over the default)."""
+    t = text.strip()
+    if not t:
+        return None
+    primary, colon, secondary = t.partition(':')
+    try:
+        return _colour(primary), (_colour(secondary) if colon else STOCK)
+    except Invalid:
+        raise Invalid(f'乘员颜色应为 RRGGBB 或 RRGGBB:RRGGBB（X = 原色）：{t}') from None
+
+
+def format_crew(look: Look | None) -> str:
+    """The shortest value (SerialiseCrew): empty for the default, the primary, then :secondary when not stock."""
+    if look is None:
+        return ''
+    return _colour_text(look[0]) + ('' if look[1] == STOCK else ':' + _colour_text(look[1]))
+
+
+def _crew_weapon(text: str, key: str) -> str:
+    """The crews' kind the plugin reads (support_config.cpp ReadWeapon: a Ranger's name or label; anything else the rifle)."""
+    import support_config
+    value = get(text, key)
+    for name, label in support_config.WEAPONS:
+        if value.lower() == name or value == label:
+            return name
+    return 'rifle'
+
+
+def crews(text: str) -> dict[str, Look | None]:
+    """Every crew's own valid colours in the ini, {key: look or None (not set)}: the catalog keys with a crew, '' the
+    default and MISSION; an invalid value is not set (the plugin ignores it too)."""
+    import support_config
+    out: dict[str, Look | None] = {}
+    for key in ('', MISSION) + tuple(k for k in support_config.UNIT_KEYS if k not in CREWLESS):
+        try:
+            out[key] = parse_crew(get(text, crew_key(key)))
+        except Invalid:
+            out[key] = None
+    return out
+
+
+def crew_files(text: str) -> list[str]:
+    """The coloured soldiers every crew wears (support_dispatch.cpp SupportCrewVariant): each crew's own colours, else the
+    default's, as its kind's member template; the mission crews' rifle member and leader."""
+    own = crews(text)
+    default = own['']
+    kinds = {'vehicle': _crew_weapon(text, 'SupportVehicleCrewWeapon'), 'aircraft': _crew_weapon(text, 'SupportAircraftCrewWeapon')}
+    out: list[str] = []
+    for key, look in own.items():
+        look = look if look is not None else default
+        if key == '' or look is None or look == (STOCK, STOCK):
+            continue
+        if key == MISSION:
+            out += [look_file('rifle', False, look), look_file('rifle', True, look)]
+        else:
+            out.append(look_file(kinds['vehicle' if key in VEHICLE_CREW_KEYS else 'aircraft'], False, look))
+    return list(dict.fromkeys(out))
 
 
 # ------------------------------------------------------------------------------------------------ vehicle pylons
@@ -371,13 +456,15 @@ def vehicles(text: str) -> dict[str, Loadout]:
 
 
 def wanted_files(text: str, pending: list[str] = ()) -> list[str]:
-    """Every generated file the ini's presets and loadouts need, then the pending list's (decodable ones), in order."""
+    """Every generated file the ini's presets, loadouts and crew colours need, then the pending list's (decodable ones), in
+    order."""
     out: list[str] = []
     for soldiers in presets(text).values():
         for i, (k, look) in enumerate(soldiers):
             if look != (STOCK, STOCK):
                 out.append(look_file(k, i % 4 == 0, look))
     out += [vehicle_file(l) for l in vehicles(text).values()]
+    out += crew_files(text)
     out += [p.strip().upper() for p in pending if decode_name(p)]
     return list(dict.fromkeys(out))
 
@@ -565,9 +652,23 @@ def build(root: str | None, ini_text: str, game: rootcpk.Game | None = None, pen
     `errors`: given, a file that cannot be made is left out (with its weapons) and its name -> why recorded there, the
     others made all the same: one name the host listed for a jet this machine has not installed (jet_sgo: not
     installed yet) must not stop every coloured soldier of this machine's own presets. Without it the first one raises."""
+    return build_named(root, wanted_files(ini_text, pending), game, errors)
+
+
+def missing_names(root: str, ini_text: str, pending: list[str] = ()) -> list[str]:
+    """The wanted_files names with no file under Mods/OBJECT yet: all the headless generator (installer.py
+    loadout-generate) makes. A name says what its file holds, so one already there is already right."""
+    return [n for n in wanted_files(ini_text, pending) if not os.path.isfile(os.path.join(root, 'Mods', 'OBJECT', n))]
+
+
+def build_named(root: str | None, names: list[str], game: rootcpk.Game | None = None,
+                errors: dict[str, str] | None = None) -> dict[str, bytes]:
+    """build for these wanted_files names (none: nothing read, not even Root.cpk's index)."""
+    if not names:
+        return {}
     game = game or (rootcpk.Game(root) if root else rootcpk.default())
     out: dict[str, bytes] = {}
-    for file in wanted_files(ini_text, pending):
+    for file in names:
         try:
             one = _build_one(root, game, file, out)
         except Exception as e:   # reported to the caller by name, never dropped silently
@@ -599,8 +700,14 @@ def install(root: str, files: dict[str, bytes], keep: list[str] = ()) -> list[st
                 led.need(OWNER, rel)
             continue
         paths.append(led.put(OWNER, rel, data))
-    # The pylon weapons a loaded vehicle carries that another tool wrote (tools/make_jets.py, make_stock_stores.py): needed
-    # by this one too, so releasing theirs never pulls one from under it.
+    needed = _need_pylons(led, files)
+    led.release(OWNER, sorted(before - {ledger.key(rel) for rel in files} - needed))
+    return paths
+
+
+def _need_pylons(led: ledger.Ledger, files: dict[str, bytes]) -> set[str]:
+    """The pylon weapons a loaded vehicle of `files` carries that another tool wrote (tools/make_jets.py,
+    make_stock_stores.py): needed by this one too, so releasing theirs never pulls one from under it. Their ledger keys."""
     needed = set()
     for rel in files:
         what = decode_name(rel.split('/')[-1]) if rel.upper().startswith('OBJECT/') else None
@@ -609,8 +716,39 @@ def install(root: str, files: dict[str, bytes], keep: list[str] = ()) -> list[st
             if weapon not in files and os.path.isfile(led.disk(weapon)):
                 led.need(OWNER, weapon)
                 needed.add(ledger.key(weapon))
-    led.release(OWNER, sorted(before - {ledger.key(rel) for rel in files} - needed))
+    return needed
+
+
+def install_new(root: str, files: dict[str, bytes]) -> list[str]:
+    """Writes the `files` (build_named) whose names are still free, each to a temporary file renamed onto its name
+    (ledger.put_new): never a file overwritten or deleted, nothing released, so the game may be running. Returns the
+    paths written."""
+    led = ledger.Ledger(root)
+    paths = [p for p in (led.put_new(OWNER, rel, data) for rel, data in files.items()) if p]
+    _need_pylons(led, files)
     return paths
+
+
+def stale(root: str, ini_text: str, pending: list[str] = ()) -> list[str]:
+    """This tool's generated files (by the ledger: never a file it does not own) that neither the ini nor the pending list
+    names any more, with the pylon weapons only such vehicles carried: what a room's pre-sync and old configurations
+    leave behind (the plugin preloads only what its configuration, the room host's list and the pending list name,
+    src/support_variants.h). Ledger keys, sorted."""
+    led = ledger.Ledger(root)
+    keep: set[str] = set()
+    for name in wanted_files(ini_text, pending):
+        keep.add(ledger.key('OBJECT/' + name))
+        what = decode_name(name)
+        for store, rounds in (what[1].pylons if what and what[0] == 'lo' else []):
+            keep.add(ledger.key('WEAPON/' + store_file(store, rounds)))
+    return sorted(k for k in led.owned_by(OWNER) if k not in keep)
+
+
+def remove_stale(root: str, ini_text: str, pending: list[str] = ()) -> tuple[list[str], list[str]]:
+    """stale's files released (ledger.release: deleted when no other tool needs them and nobody changed them since):
+    (deleted, kept changed). The game must not be running (it may have them preloaded)."""
+    gone = stale(root, ini_text, pending)
+    return ledger.Ledger(root).release(OWNER, gone) if gone else ([], [])
 
 
 def remove(root: str) -> tuple[list[str], list[str]]:
@@ -691,7 +829,41 @@ def summary(text: str) -> str:
         except Invalid as e:
             shown = f'（无效，插件按原版挂载：{e}）'
         rows.append(f'   v{i}. {VEHICLE_LABELS[key]}（{key}）：{shown}')
+    rows.append('  乘员颜色（载具驾驶员 / 机组 / 飞行员；空 = 用默认，默认空 = 原色）：')
+    for i, key in enumerate(CREW_KEYS, 1):
+        rows.append(f'   c{i}. {_crew_label(key)}（{crew_key(key)}）：{_describe_crew(text, key)}')
     return '\n'.join(rows)
+
+
+def _crew_label(key: str) -> str:
+    return CREW_LABELS.get(key) or VEHICLE_LABELS.get(key) or LABELS.get(key, key)
+
+
+def _describe_crew(text: str, key: str) -> str:
+    try:
+        look = parse_crew(get(text, crew_key(key)))
+    except Invalid as e:
+        return f'（无效，插件按默认：{e}）'
+    if look is None:
+        return '（原色）' if key == '' else '（默认）'
+    return '原色' if look == (STOCK, STOCK) else f'主色 {_colour_text(look[0])}，副色 {_colour_text(look[1])}'
+
+
+CREW_HELP = '  写法：RRGGBB 或 RRGGBB:RRGGBB（主色:副色，X = 原色；只写 X = 原色、不用默认）；直接回车 = 不改；- = 清除（用默认）。'
+
+
+def edit_crew(text: str, key: str, ask: Callable[[str], str]) -> str:
+    """One crew's colours (SupportCrewColour[_<KEY>]): only a value the plugin accepts is written."""
+    print(CREW_HELP)
+    value = ask(f'{_crew_label(key)} 乘员颜色 = ').strip()
+    if not value:
+        return text
+    if value == '-':
+        return put(text, crew_key(key), '')
+    look = parse_crew(value)
+    text = put(text, crew_key(key), format_crew(look))
+    assert parse_crew(get(text, crew_key(key))) == look   # what the plugin reads back
+    return text
 
 
 HELP = ('  写法：兵种[@主色[:副色]][*人数]，逗号分隔，按座位顺序，每 4 人第一位是队长。\n'
@@ -766,7 +938,7 @@ def edit(text: str, ask: Callable[[str], str]) -> str:
     """The loadout menu: `ask(prompt) -> str` until an empty answer. Returns the edited text (validated values only)."""
     while True:
         print(summary(text))
-        pick = ask('输入编号编辑小队预设，v编号编辑载具挂载（如 v1），回车返回：').strip().lower()
+        pick = ask('输入编号编辑小队预设，v编号编辑载具挂载（如 v1），c编号编辑乘员颜色（如 c1），回车返回：').strip().lower()
         if not pick:
             return text
         try:
@@ -782,6 +954,8 @@ def edit(text: str, ask: Callable[[str], str]) -> str:
                 text = put(text, 'SupportPreset_' + key, format_preset(parse_preset(value, SEATS[key])))
             elif pick.startswith('v') and pick[1:].isdigit() and 1 <= int(pick[1:]) <= len(VEHICLE_KEYS):
                 text = edit_vehicle(text, list(VEHICLE_KEYS)[int(pick[1:]) - 1], ask)
+            elif pick.startswith('c') and pick[1:].isdigit() and 1 <= int(pick[1:]) <= len(CREW_KEYS):
+                text = edit_crew(text, CREW_KEYS[int(pick[1:]) - 1], ask)
             else:
                 raise Invalid(f'不认识“{pick}”')
         except Invalid as e:
