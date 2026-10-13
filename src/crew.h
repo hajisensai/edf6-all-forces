@@ -277,6 +277,7 @@ struct Config {
     float proteusPriority=0.3f;     // ...walking with the shield up: the allies weigh enemies near it or after it this share of their distance (1: off)
     float proteusPriorityRadius=100.0f;// ...within this of it (m)
     bool edf41Ai=true;              // EDF4.1 Hector's weapon gating and back-off cycle on the converted Hectors (edf41ai.cpp)
+    bool edf41MotherWatch=false;    // development only: hardware write watch on the hull's model fields while its constructor runs (edf41mother.cpp)
     bool edf41MotherDev=false;      // development only: EDF4.1's UfoMother301 prototype (edf41mother.cpp); off in every release
     bool edf41Sound=true;           // EDF4.1's weapon sound effects and voices added to EDF6's banks (edf41sound.cpp), from the game's start
     bool terrainShare=true;         // every placement of one terrain piece drawn from one decode (fieldshare.cpp), from the game's start

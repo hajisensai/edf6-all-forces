@@ -415,6 +415,78 @@ void LogModel(void* obj) noexcept {
     if(!total)Log("EDF41MOTHER object %p: none of the 4.1 model names is held by its first %zu bytes (searched two pointer levels)",obj,kCarrierSize);
 }
 
+// ---- hardware write watch (dev, ini Edf41MotherWatch=1) -----------------------------------------------------------------
+// Which EDF.dll code writes the model fields that differ between a carrier (static non-zero values: wrapper +0x08 539.46,
+// +0x48 539.21, instance +0x08 465.09, +0x28 507.37, +0xB4 68.37) and the mothership (zero)? Debug registers DR0..DR3 are set on
+// the hull's own copies of four of them before UfoCarrier508's constructor runs on it; every write (the constructor's zeroing
+// too) comes back as a single-step exception, and its address (EDF RVA), the new value and the nearest return addresses on the
+// stack are logged. Only while the constructor runs; the registers are cleared right after.
+constexpr std::size_t kWatchAt[4]={0x658,0x698,0x718,0x7A4};   // object offsets: wrapper+0x08, wrapper+0x48, instance+0x28, instance+0xB4
+std::atomic<bool> watchActive{false};
+std::atomic<int> watchHits{0};
+const char* watchBase=nullptr;
+
+LONG CALLBACK WatchHandler(EXCEPTION_POINTERS* e) noexcept {
+    if(!watchActive.load() || e->ExceptionRecord->ExceptionCode!=EXCEPTION_SINGLE_STEP)return EXCEPTION_CONTINUE_SEARCH;
+    CONTEXT* c=e->ContextRecord;
+    const DWORD64 hit=c->Dr6&0xF;
+    if(!hit)return EXCEPTION_CONTINUE_SEARCH;
+    c->Dr6=0;
+    const int n=++watchHits;
+    if(n>80)return EXCEPTION_CONTINUE_EXECUTION;
+    for(int i=0;i<4;++i) {
+        if(!(hit&(1ull<<i)))continue;
+        const char* at=watchBase+kWatchAt[i];
+        float value=0.0f;
+        std::uint32_t raw=0;
+        if(Readable(at,4)) { std::memcpy(&raw,at,4); std::memcpy(&value,at,4); }
+        char frames[256];
+        int len=std::snprintf(frames,sizeof(frames),"rip EDF+0x%llX",static_cast<unsigned long long>(c->Rip-reinterpret_cast<DWORD64>(image)));
+        const std::uint64_t* sp=reinterpret_cast<const std::uint64_t*>(c->Rsp);
+        int found=0;
+        for(int k=0;k<48 && found<6 && len>0 && len<static_cast<int>(sizeof(frames))-24 && Readable(sp+k,8);++k) {
+            const std::uint64_t v=sp[k];
+            if(v>reinterpret_cast<std::uint64_t>(image)+0x1000 && v<reinterpret_cast<std::uint64_t>(image)+0x22CE000) {
+                len+=std::snprintf(frames+len,sizeof(frames)-static_cast<std::size_t>(len)," <- EDF+0x%llX",static_cast<unsigned long long>(v-reinterpret_cast<std::uint64_t>(image)));
+                ++found;
+            }
+        }
+        Log("EDF41MOTHER watch obj+0x%zX written (value after: %.4g, bits 0x%08X): %s",kWatchAt[i],value,raw,frames);
+    }
+    return EXCEPTION_CONTINUE_EXECUTION;
+}
+
+struct DebugJob { HANDLE target; const void* addr[4]; bool on; };
+DWORD WINAPI DebugJobMain(void* p) {
+    DebugJob* j=static_cast<DebugJob*>(p);
+    if(SuspendThread(j->target)==static_cast<DWORD>(-1))return 1;
+    CONTEXT c{};
+    c.ContextFlags=CONTEXT_DEBUG_REGISTERS;
+    if(GetThreadContext(j->target,&c)) {
+        if(j->on) {
+            c.Dr0=reinterpret_cast<DWORD64>(j->addr[0]); c.Dr1=reinterpret_cast<DWORD64>(j->addr[1]);
+            c.Dr2=reinterpret_cast<DWORD64>(j->addr[2]); c.Dr3=reinterpret_cast<DWORD64>(j->addr[3]);
+            // each enabled locally, break on write (01), length 4 (11)
+            c.Dr7=0x1|0x4|0x10|0x40|(0x1ull<<16)|(0x3ull<<18)|(0x1ull<<20)|(0x3ull<<22)|(0x1ull<<24)|(0x3ull<<26)|(0x1ull<<28)|(0x3ull<<30);
+            c.Dr6=0;
+        } else { c.Dr7=0; c.Dr6=0; }
+        SetThreadContext(j->target,&c);
+    }
+    ResumeThread(j->target);
+    return 0;
+}
+bool SetWatch(bool on,const char* base) noexcept {
+    HANDLE self=nullptr;
+    if(!DuplicateHandle(GetCurrentProcess(),GetCurrentThread(),GetCurrentProcess(),&self,THREAD_ALL_ACCESS,FALSE,0))return false;
+    DebugJob job{self,{base+kWatchAt[0],base+kWatchAt[1],base+kWatchAt[2],base+kWatchAt[3]},on};
+    HANDLE helper=CreateThread(nullptr,0,&DebugJobMain,&job,0,nullptr);
+    if(!helper) { CloseHandle(self); return false; }
+    WaitForSingleObject(helper,5000);
+    CloseHandle(helper);
+    CloseHandle(self);
+    return true;
+}
+
 // ---- the creation ----------------------------------------------------------------------------------------------
 void __fastcall FactoryCreate(Factory*,void* info) noexcept {
     if(!info || !Rd(info,0x28,"createInfo")) { Log("EDF41MOTHER create: no create info (%p), nothing made",info); return; }
@@ -422,7 +494,21 @@ void __fastcall FactoryCreate(Factory*,void* info) noexcept {
     AuditLiveTable();
     void* obj=reinterpret_cast<NewFn>(image+kNew)(kCarrierSize);
     if(!obj) { Log("EDF41MOTHER create: out of memory for %zu bytes",kCarrierSize); return; }
+    const bool watching=Cfg().edf41MotherWatch;
+    if(watching) {
+        static std::atomic<bool> handlerOn{false};
+        if(!handlerOn.exchange(true))AddVectoredExceptionHandler(1,&WatchHandler);
+        watchBase=static_cast<const char*>(obj);
+        watchHits=0;
+        watchActive=true;
+        Log("EDF41MOTHER watch %s on obj %p (+0x658 +0x698 +0x718 +0x7A4) for the constructor",SetWatch(true,watchBase) ? "set" : "NOT set",obj);
+    }
     reinterpret_cast<CtorFn>(image+kCarrierCtor)(obj,info);
+    if(watching) {
+        SetWatch(false,watchBase);
+        watchActive=false;
+        Log("EDF41MOTHER watch cleared: %d writes seen during the constructor",watchHits.load());
+    }
     void** vptr=static_cast<void**>(obj);
     if(!Rd(vptr,sizeof(void*),"new object") || *vptr!=image+kCarrierVtable) {
         Log("EDF41MOTHER create: object %p has vtable %p, not UfoCarrier508's %p: left as the class made it",obj,Rd(vptr,sizeof(void*),"new object")?*vptr:nullptr,static_cast<void*>(image+kCarrierVtable));
