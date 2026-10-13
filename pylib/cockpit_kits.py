@@ -2,7 +2,7 @@
 vehicle's own surfaces are left, right, up, down, ahead and back, measured from the model, cockpits.clearance)
 returning a Kit: its parts in the eye's frame (+x left, +y up, +z ahead, metres, the eye at the origin) and its
 materials (textures under <model dir>/cockpits/, drawn by tools/make_cockpit_textures.py or prepared from CC0 / CC-BY
-sources by tools/prep_cockpit.py; credits in <model dir>/cockpits/CREDITS.txt).
+sources by tools/prep_cockpit_<family>.py; credits in <model dir>/cockpits/CREDITS_*.txt).
 
 A kit lays itself out inside that room, MARGIN short of the hull, so no part of it shows through the vehicle from
 outside; a part meant to be seen outside too (a gun shield, a canopy frame) is two-sided. Every kit leaves the view
@@ -14,34 +14,9 @@ from __future__ import annotations
 
 import math
 
+from cockpit_room import MARGIN, Cabin, _materials, _room
 from cockpit_shapes import box, cylinder, frame, panel, quad, two_sided
-from cockpits import Kit, KitMaterial, Screen
-
-TEX = 'textures/{}.png'
-MARGIN = 0.02   # m: a kit's walls this far inside the hull
-
-Cabin = dict[str, float]   # 'left', 'right', 'up', 'down', 'ahead', 'back': metres to the hull (inf: open)
-
-
-class CabinTooSmall(ValueError):
-    """The eye of a fit has no room for its kit: the eye is outside the hull or in a wall (fix the fit)."""
-
-
-def _materials(*names: str) -> dict[str, KitMaterial]:
-    return {n: KitMaterial(TEX.format(n)) for n in names}
-
-
-def _room(cabin: Cabin, want: Cabin, least: Cabin, kit: str) -> Cabin:
-    """Each side's wall: where the kit wants it, pulled in to MARGIN short of the hull; a side with less room than
-    `least` (or open, inf, where the kit needs a hull) is an error."""
-    out = {}
-    for side, w in want.items():
-        room = cabin[side] - MARGIN
-        if not math.isfinite(cabin[side]) or room < least[side]:
-            raise CabinTooSmall(f'{kit}: {side} {cabin[side]:.2f} m (needs {least[side] + MARGIN:.2f}): {cabin}')
-        out[side] = min(w, room)
-    return out
-
+from cockpits import Kit, Screen
 
 def tank_gunner(cabin: Cabin) -> Kit:
     """A tank turret's gunner station after the real one (an M1A1's, US Army photographs, public domain: textures
@@ -56,17 +31,18 @@ def tank_gunner(cabin: Cabin) -> Kit:
               {'left': 0.15, 'right': 0.3, 'up': 0.12, 'down': 0.25, 'ahead': 0.35, 'back': 0.2}, 'tank_gunner')
     L, R, U, D, A, B = r['left'], r['right'], r['up'], r['down'], r['ahead'], r['back']
     parts = []
-    # The sight's field: from just inside the right wall to just inside the left one, at eye height.
+    # The sight's field: from just inside the right wall to just inside the left one, and by angle from the eye (a game's
+    # view first: about 27 degrees up to 19 down, most of the screen's height, as far as the room allows), not by a size
+    # in metres (0.3 m at 0.5 m ahead was a slit across a third of the screen).
     x0, x1 = -R + 0.06, L - 0.03          # its right and left edges (+x is left)
-    sw, sh = x1 - x0, min(0.3, 0.55 * (U + D))
-    sx, sy = (x0 + x1) / 2, min(0.0, U - sh / 2 - 0.03)
-    top, low = sy + sh / 2, sy - sh / 2
+    top, low = min(U - 0.03, 0.5 * A), max(-D + 0.1, -0.35 * A)
+    sw, sh = x1 - x0, top - low
+    sx, sy = (x0 + x1) / 2, (top + low) / 2
     wide, mid = L + R, (L - R) / 2
     if U - top > 0.01:
         parts.append(panel('wall_above', 'photo_m1a1tc_turretwall', (mid, (U + top) / 2, A), wide, U - top, (0, 0, -1),
                            uv=(0.0, 0.0, 1.0, max(0.15, (U - top) / wide))))
     # Under the sight: the eyepiece and the turret control's handle, the face tipped back toward the eye.
-    under = low + D
     parts.append(quad('under_sight', 'photo_m1a1gps_gas_controls', (x1, -D, A - 0.18), (x0, -D, A - 0.18),
                       (x0, low, A), (x1, low, A)))
     for side, a0, a1 in (('l', x1, L), ('r', -R, x0)):

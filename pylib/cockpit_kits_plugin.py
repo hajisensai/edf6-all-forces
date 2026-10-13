@@ -36,7 +36,7 @@ from __future__ import annotations
 import math
 
 import obj_model as om
-from cockpit_kits import TEX, Cabin, _room
+from cockpit_room import TEX, Cabin, _room
 from cockpit_kits_air import _overhead, _screen, _seat, _stretched, beam, wall
 from cockpit_shapes import basis, box, frame, panel
 from cockpits import Kit, KitFn, KitMaterial, Screen

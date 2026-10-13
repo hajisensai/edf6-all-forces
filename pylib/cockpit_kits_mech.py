@@ -30,7 +30,7 @@ import numpy as np
 
 import cockpits
 import obj_model as om
-from cockpit_kits import MARGIN, Cabin, _materials, _room
+from cockpit_room import MARGIN, Cabin, _materials, _room
 from cockpit_shapes import box, frame, merge, panel
 from cockpits import Kit, KitMaterial, Screen
 

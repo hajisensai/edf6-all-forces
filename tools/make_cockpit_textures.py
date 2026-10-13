@@ -9,8 +9,6 @@ Textures (512 px unless noted):
     paint_olive      olive drab (frames, consoles), with chips
     metal_dark       dark gunmetal (breech, grips, mounts), brushed
     rubber           black rubber / brow pads
-    panel_analog     a console of round gauges, switches and lamps (the needles at rest; V4 turns real ones)
-    panel_mfd        two green multi-function screens with bezels and push buttons
     panel_switches   a row of toggle switches, guarded switches and labels
     leather          a seat's brown leather
     canopy_frame     a canopy / window frame's grey, with rivets
@@ -63,23 +61,6 @@ def brushed(base: tuple[int, int, int], seed: int) -> Image.Image:
     return noise(base, 18, seed, 0.0).resize((24, SIZE), Image.BILINEAR).resize((SIZE, SIZE), Image.BILINEAR)
 
 
-def gauge(d: ImageDraw.ImageDraw, cx: int, cy: int, r: int, label: str, value: float, seed: int) -> None:
-    """A round gauge: bezel, black face, white ticks over 270 degrees, a needle at `value` (0..1)."""
-    d.ellipse((cx - r - 6, cy - r - 6, cx + r + 6, cy + r + 6), fill=(60, 62, 60))
-    d.ellipse((cx - r - 2, cy - r - 2, cx + r + 2, cy + r + 2), fill=(25, 25, 25))
-    d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(12, 12, 14))
-    for k in range(28):
-        a = math.radians(225 - 270 * k / 27)
-        long = k % 3 == 0
-        r0 = r * (0.72 if long else 0.82)
-        d.line((cx + r0 * math.cos(a), cy - r0 * math.sin(a), cx + 0.92 * r * math.cos(a), cy - 0.92 * r * math.sin(a)),
-               fill=(230, 230, 220), width=3 if long else 1)
-    a = math.radians(225 - 270 * value)
-    d.line((cx, cy, cx + 0.78 * r * math.cos(a), cy - 0.78 * r * math.sin(a)), fill=(245, 120, 30), width=4)
-    d.ellipse((cx - 6, cy - 6, cx + 6, cy + 6), fill=(80, 80, 80))
-    d.text((cx - 3 * len(label), cy + r // 3), label, fill=(220, 220, 210))
-
-
 def toggle(d: ImageDraw.ImageDraw, x: int, y: int, up: bool, guard: bool) -> None:
     d.ellipse((x - 9, y - 9, x + 9, y + 9), fill=(150, 150, 145))
     d.rectangle((x - 3, y - 22 if up else y, x + 3, y if up else y + 22), fill=(215, 215, 210))
@@ -91,52 +72,6 @@ def lamp(d: ImageDraw.ImageDraw, x: int, y: int, colour: tuple[int, int, int], o
     c = colour if on else tuple(v // 4 for v in colour)
     d.rectangle((x - 14, y - 9, x + 14, y + 9), fill=(30, 30, 30))
     d.rectangle((x - 11, y - 6, x + 11, y + 6), fill=c)
-
-
-def panel_analog() -> Image.Image:
-    img = noise((52, 58, 50), 6, 11)
-    d = ImageDraw.Draw(img)
-    rnd = random.Random(5)
-    labels = ['RPM', 'OIL', 'TEMP', 'FUEL', 'AMP', 'HYD', 'PSI', 'ELEV']
-    for k, (cx, cy) in enumerate([(90, 110), (256, 110), (422, 110), (90, 300), (256, 300), (422, 300)]):
-        gauge(d, cx, cy, 64, labels[k], rnd.random(), k)
-    for k in range(8):
-        lamp(d, 48 + k * 60, 430, [(220, 40, 30), (240, 180, 30), (40, 200, 60)][k % 3], rnd.random() < 0.4)
-    for k in range(8):
-        toggle(d, 48 + k * 60, 480, rnd.random() < 0.5, k in (2, 6))
-    for x in (8, SIZE - 8):
-        for y in (8, SIZE - 8):
-            d.ellipse((x - 4, y - 4, x + 4, y + 4), fill=(110, 110, 105))
-    return img
-
-
-def panel_mfd() -> Image.Image:
-    img = noise((38, 40, 42), 5, 21)
-    d = ImageDraw.Draw(img)
-    for k, x0 in enumerate((16, 266)):
-        d.rectangle((x0, 40, x0 + 230, 360), fill=(20, 20, 22), outline=(90, 90, 92), width=4)
-        d.rectangle((x0 + 22, 62, x0 + 208, 338), fill=(6, 22, 8))
-        g = (70, 255, 90)
-        cx, cy = x0 + 115, 200
-        if k == 0:   # an attitude scale
-            for p in range(-3, 4):
-                y = cy + p * 30
-                d.line((cx - (40 if p else 70), y, cx + (40 if p else 70), y), fill=g, width=2)
-            d.polygon([(cx, cy - 8), (cx - 12, cy + 6), (cx + 12, cy + 6)], outline=g)
-        else:        # a radar / map scope
-            for rr in (40, 80, 110):
-                d.ellipse((cx - rr, cy - rr, cx + rr, cy + rr), outline=g, width=1)
-            d.line((cx, cy, cx + 90, cy - 60), fill=g, width=2)
-            for _ in range(5):
-                a, rr = random.random() * 6.28, random.random() * 100
-                d.rectangle((cx + rr * math.cos(a) - 3, cy + rr * math.sin(a) - 3, cx + rr * math.cos(a) + 3,
-                             cy + rr * math.sin(a) + 3), fill=g)
-        for b in range(5):   # bezel buttons
-            for side in (x0 + 4, x0 + 214):
-                d.rectangle((side, 80 + b * 52, side + 12, 104 + b * 52), fill=(150, 150, 150))
-    for k in range(10):
-        toggle(d, 40 + k * 48, 440, k % 2 == 0, k == 9)
-    return img
 
 
 def panel_switches() -> Image.Image:
@@ -188,8 +123,6 @@ TEXTURES = {
     'paint_olive': lambda: worn(noise((84, 92, 58), 8, 3), (60, 58, 50), 4),
     'metal_dark': lambda: brushed((54, 56, 58), 5),
     'rubber': lambda: noise((24, 24, 24), 5, 6, 1.5),
-    'panel_analog': panel_analog,
-    'panel_mfd': panel_mfd,
     'panel_switches': panel_switches,
     'leather': leather,
     'canopy_frame': canopy_frame,

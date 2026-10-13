@@ -39,7 +39,7 @@ import math
 from dataclasses import dataclass
 
 import obj_model as om
-from cockpit_kits import TEX, Cabin, _room
+from cockpit_room import TEX, Cabin, _room
 from cockpit_shapes import basis, box, cylinder, frame, merge, panel, quad
 from cockpits import Kit, KitMaterial, Screen
 
