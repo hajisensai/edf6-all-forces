@@ -4640,7 +4640,10 @@ def map_wired() -> None:
                                       'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp', 'sightzoom.cpp',
                                       'debug_spawn.cpp', 'firstperson.cpp', 'room_ui.cpp']), f'a new key reader: make it give way to the map ({readers})'
     assert 'InFront() && !MapHoldsKeys()' in src('src/debug_spawn.cpp'), 'the debug spawn keys give way to the map'
-    assert 'if(vk<=0 || MapHoldsKeys())return false;' in src('src/firstperson.cpp'), 'the first person key gives way to the map'
+    fp = src('src/firstperson.cpp')
+    key_input = fp.split('bool KeyInputAllowed() noexcept {', 1)[1].split('\n}', 1)[0]
+    assert 'if(MapHoldsKeys())return false;' in key_input
+    assert '!KeyInputAllowed()' in fp and 'keyWas=false;keyCancelled=down;return;' in fp, 'map input cancels the FP key gesture'
     assert 'Foreground() && !MapHoldsKeys()' in src('src/room_ui.cpp'), 'the room menu keys give way to the map'
 
     assert 'InstallMap();' in plugin and 'ResetMap();' in mission and 'src/map.cpp' in cmake
