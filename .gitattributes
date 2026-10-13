@@ -1,1 +1,3 @@
 edf41port/objects/_members/** binary
+edf41port/objects.json -text
+edf41port/objects/**/*.members.json -text
