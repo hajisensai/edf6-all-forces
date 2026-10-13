@@ -6818,6 +6818,13 @@ def edf41_mother_plugin_contract() -> None:
         assert re.search(rf'\{{{rva},\{{0x', cpp), f'{rva} has no fingerprint in kPrints'
     assert cpp.count('Rd(') >= 10 and 'Readable(image+p.rva,8)' in cpp
     assert m.MOTHER_DEV_ALIAS.template == 'E508_CARRIER.SGO' and 'UfoCarrier508' in cpp
+    # The clone is the stock class: built from the file's table, not the live one this plugin patches (carrierlaser.cpp
+    # ShipAiHook takes slot 7 of the same vtable; the 2026-10-13 real run turned the prototype off on it).
+    stock = [int(x, 16) for x in re.search(r'kStockSlots\[kSlots\]=\{([^}]*)\}', cpp).group(1).replace('\n', ' ').split(',')]
+    laser = src('src/carrierlaser.cpp')
+    ai, slot = (int(re.search(rf'{k}=(\w+)', laser).group(1), 0) for k in ('kShipAi', 'kShipAiSlot'))
+    assert len(stock) == 49 and stock[slot] == ai, (len(stock), slot)
+    assert 'GetModuleHandleExW' in cpp and 'is outside EDF.dll' not in cpp
 
 
 @test

@@ -48,6 +48,14 @@ constexpr std::size_t kCarrierVtable=0x17C9DC0;       // its primary vtable
 constexpr std::size_t kCarrierSize=0x1630;
 constexpr int kSlots=49;
 constexpr int kSlotDtor=0,kSlotUpdate=5,kSlotMessage=9;
+// UfoCarrier508's vtable 0x17C9DC0 as the file has it (slot -> EDF.dll RVA); 7 is the ship AI, 5 Update, 9 OnMessage.
+constexpr std::uint32_t kStockSlots[kSlots]={
+    0x54B010, 0x4F8A70, 0x54BE10, 0x4F9530, 0x4F72F0, 0x4F9540, 0x4F91C0, 0x4F6D70, 0x54A290, 0x4F93E0, 0x54AA50, 0x54A970,
+    0x266BE0, 0x54ABE0, 0x54C4B0, 0x54A330, 0x4F7190, 0x54AA30, 0x4F9250, 0x54A510, 0x54A4B0, 0x54AAC0, 0x54ABD0, 0x266BB0,
+    0x266BC0, 0x266970, 0x54A320, 0x266BF0, 0x54A240, 0x54A260, 0x54A250, 0x54A2E0, 0x266BD0, 0x266960, 0x54F8D0, 0x54F8E0,
+    0x54C800, 0x54CAA0, 0x54C900, 0x267180, 0x54CBE0, 0x54CBC0, 0x54CBD0, 0x54CB60, 0x54C6E0, 0x4F37F0, 0x4F90A0, 0x4F3FD0,
+    0x4F7D30};
+
 constexpr std::size_t kDurabilityAt=0x2F8,kDestroyedAt=0x2E8,kPosAt=0x90;
 constexpr std::uint32_t kMsgDamage=0xF0000000u,kMsgAction=0x1000000Du,kMsgParts=0x10000017u,kMsgGenerator=0x20100u;
 constexpr std::uint32_t kUpdateLogEvery=600;          // frames between the state lines of an object
@@ -221,10 +229,27 @@ std::uint64_t __fastcall MessageWrap(void* self,std::uint32_t msg,void* data) {
     return result;
 }
 
+// The first time an object is made (every plugin hook is in by then): which slots of UfoCarrier508's live table differ from the
+// stock ones the clone was built from. Information only: the clone does not follow them (BuildClone).
+void AuditLiveTable() noexcept {
+    static std::atomic<bool> done{false};
+    if(done.exchange(true))return;
+    const void* const* vt=reinterpret_cast<const void* const*>(image+kCarrierVtable);
+    if(!Rd(vt,sizeof(void*)*kSlots,"UfoCarrier508 vtable at creation"))return;
+    int differ=0;
+    for(int i=0;i<kSlots;++i)
+        if(vt[i]!=image+kStockSlots[i]) {
+            ++differ;
+            Log("EDF41MOTHER at creation, UfoCarrier508 slot %d is %p (stock %p): not followed by the mothership",i,vt[i],static_cast<void*>(image+kStockSlots[i]));
+        }
+    Log("EDF41MOTHER at creation, %d of %d UfoCarrier508 slots are patched by someone; the clone uses the stock functions",differ,kSlots);
+}
+
 // ---- the creation ----------------------------------------------------------------------------------------------
 void __fastcall FactoryCreate(Factory*,void* info) noexcept {
     if(!info || !Rd(info,0x28,"createInfo")) { Log("EDF41MOTHER create: no create info (%p), nothing made",info); return; }
     if(!installed.load()) { Log("EDF41MOTHER create: the vtable was not built, nothing made"); return; }
+    AuditLiveTable();
     void* obj=reinterpret_cast<NewFn>(image+kNew)(kCarrierSize);
     if(!obj) { Log("EDF41MOTHER create: out of memory for %zu bytes",kCarrierSize); return; }
     reinterpret_cast<CtorFn>(image+kCarrierCtor)(obj,info);
@@ -269,16 +294,27 @@ bool BuildClone() noexcept {
             return false;
         }
     }
+    // The clone is the STOCK class, built from the table of its slots as the file has them (kStockSlots), not from the live
+    // vtable: this plugin patches slot 7 of UfoCarrier508's own table (carrierlaser.cpp ShipAiHook, the ship AI for the
+    // teleportation laser: it recognises ships by the old vptr and steps the laser's state machine once a frame, so on a
+    // mothership it would only add a second step per frame), and a clone taken before or after that patch would differ.
+    // The live table is compared slot by slot; what differs is logged and left out of the clone.
     const void* const* vt=reinterpret_cast<const void* const*>(image+kCarrierVtable);
     if(!Readable(vt-1,sizeof(void*)*(kSlots+1))) { Log("EDF41MOTHER the UfoCarrier508 vtable is not readable: prototype off"); return false; }
     cloneBlock[0]=const_cast<void*>(vt[-1]);
+    HMODULE self=nullptr;
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,reinterpret_cast<LPCWSTR>(&BuildClone),&self);
     for(int i=0;i<kSlots;++i) {
-        origSlots[i]=const_cast<void*>(vt[i]);
-        const auto at=reinterpret_cast<std::uintptr_t>(origSlots[i]);
-        if(at<reinterpret_cast<std::uintptr_t>(image) || at>=reinterpret_cast<std::uintptr_t>(image)+0x22CE000) {
-            Log("EDF41MOTHER vtable slot %d (%p) is outside EDF.dll: prototype off",i,origSlots[i]);
-            return false;
+        void* const stock=image+kStockSlots[i];
+        void* const live=const_cast<void*>(vt[i]);
+        if(!Readable(stock,8)) { Log("EDF41MOTHER stock slot %d (EDF.dll+0x%X) is not readable: prototype off",i,kStockSlots[i]); return false; }
+        if(live!=stock) {
+            HMODULE owner=nullptr;
+            GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,reinterpret_cast<LPCWSTR>(live),&owner);
+            Log("EDF41MOTHER vtable slot %d of UfoCarrier508 is patched (%p, %s): the mothership keeps the stock function EDF.dll+0x%X",
+                i,live,owner && owner==self ? "this plugin's hook" : "another module",kStockSlots[i]);
         }
+        origSlots[i]=stock;
     }
     constexpr std::size_t kStub=32;
     unsigned char code[kSlots*kStub];

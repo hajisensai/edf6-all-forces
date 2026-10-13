@@ -697,7 +697,12 @@ MOTHER_DEV_OUT = os.path.join(HERE, '..', 'edf41port_dev')
 # (setdefault), and the MAB locators 排出口 and ダメージエフェクト by name without asking whether they exist (EDF+0x4F60DD, 0x4F874D
 # -> 0x6BADD0): 4.1's hull has neither (only ターゲット), so the carrier's two are added on the hull's waist bone.
 MOTHER_DEV_ALIAS = Alias('UfoMother301', 'E508_CARRIER.SGO', ('in_ring', 'out_ring'),
-                         state_aliases=(('main', 'close_state', 'close'), ('main', 'open_state', 'open')))
+                         state_aliases=(('main', 'close_state', 'close'), ('main', 'open_state', 'open')),
+                         # se_list names E508's cues (the bank of UFOCARRIER301.ACB): its bank joins the mothership's own
+                         override=(('game_sound', ['app:/sound/adx/tikyuu4_en_MotherShip.acb',
+                                                   'app:/sound/adx/tikyuu4_en_UFOcarrier301.acb']),),
+                         inert_materials="the 4.1 mothership has no material animation (its lights are code-driven): E508's "
+                                         "entries (Metal, Weakpoint) bind nothing on its model, the slots only have to exist (prototype)")
 MOTHER_DEV_LOCATORS = (
     mab_legacy.Locator('排出口', 'waist', 2, (0.0, -40.0, 0.0, 1.0), (5.0, 5.0, 5.0, 1.0), (0.0, 0.0, 3.1415927, 1.0)),
     mab_legacy.Locator('ダメージエフェクト', 'waist', 4, (0.0, -40.0, 0.0, 1.0), 80.0, (0.0, -1.2, 0.0, 1.0)),
