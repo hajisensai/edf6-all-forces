@@ -271,47 +271,80 @@ void MaybeDisarm(const void* self,std::uint32_t frame) noexcept {
     }
 }
 
+float Len3(const float* v) noexcept { return std::sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]); }
+
 // ---- an objective visibility signal -----------------------------------------------------------------------------------
-// The camera's frustum from the last view-projection the HUD saw (hud.cpp LastViewProj, row vectors: clip = p * VP), against the
-// object's own bounding sphere (the Umbra wrapper's centre +0x50..+0x58 and radius +0x64, which the dumps showed set for the
-// mothership as for a carrier). Said with the probe and counted every frame: a screenshot only shows where the autopilot looked.
-enum class View { none, inside, intersects, outside };
-View FrustumTest(const float* centre,float radius,float* distance,const char** outsideOf) noexcept {
-    float vp[16];
-    if(!LastViewProj(vp))return View::none;
-    float eye[3],dir[3];
-    if(!CameraRay(eye,dir))return View::none;
-    const float dx=centre[0]-eye[0],dy=centre[1]-eye[1],dz=centre[2]-eye[2];
-    *distance=std::sqrt(dx*dx+dy*dy+dz*dz);
-    // clip_k = x*m[k] + y*m[4+k] + z*m[8+k] + m[12+k]; the planes of 0 <= z <= w, -w <= x, y <= w
-    struct Plane { int a,b; float sign; const char* name; };
-    static const Plane planes[]={{3,0,1.0f,"left"},{3,0,-1.0f,"right"},{3,1,1.0f,"bottom"},{3,1,-1.0f,"top"},{2,-1,1.0f,"near"},{3,2,-1.0f,"far"}};
-    bool intersects=false;
-    for(const Plane& pl:planes) {
-        float coef[4];
-        for(int j=0;j<4;++j) {
-            const float w=vp[j*4+pl.a];
-            const float o=pl.b>=0 ? vp[j*4+pl.b]*pl.sign : 0.0f;
-            coef[j]=pl.b>=0 ? w+o : w;
-        }
-        const float len=std::sqrt(coef[0]*coef[0]+coef[1]*coef[1]+coef[2]*coef[2]);
-        if(len<1e-9f)continue;
-        const float d=(centre[0]*coef[0]+centre[1]*coef[1]+centre[2]*coef[2]+coef[3])/len;
-        if(d<-radius) { if(outsideOf)*outsideOf=pl.name; return View::outside; }
-        if(d<radius)intersects=true;
+// The camera comes from the game itself (docs/view-distance-re.md 2.2, nothing of the plugin's HUD needed): the scene system
+// (EDF+0x20B2958) holds four camera slots of 0x188 bytes from +0x4D8, each a weak_ptr {camera, control block}; the camera's
+// near-pass Umbra wrapper is at camera+0x70: +0x00..+0x3F the cameraToWorld matrix (rows: right, up, forward, position), +0x58..
+// the frustum (left, right, top, bottom, near, far, type; camera+0x28 / +0x2C are near / far). Slot 0 is the first live one.
+// The object's own bounding sphere (the Umbra wrapper's centre +0x50 and radius +0x64, set for the mothership as for a carrier)
+// is tested against the view cone (a conservative test that needs no sign convention of the frustum's sides), and counted every
+// frame: a screenshot only shows where the autopilot looked.
+constexpr std::size_t kSceneGlobal=0x20B2958,kCameraSlots=0x4D8,kCameraSlotSize=0x188,kCameraWrapper=0x70;
+struct GameCam { float eye[3],fwd[3],tanHalf,nearClip,farClip; int slot; };
+bool GameCamera(GameCam& cam) noexcept {
+    if(!Rd(image+kSceneGlobal,8,"scene system global"))return false;
+    const char* scene=*reinterpret_cast<const char* const*>(image+kSceneGlobal);
+    if(!scene)return false;
+    for(int i=0;i<4;++i) {
+        const char* slot=scene+kCameraSlots+static_cast<std::size_t>(i)*kCameraSlotSize;
+        if(!Rd(slot,16,"camera slot"))return false;
+        const char* obj=*reinterpret_cast<const char* const*>(slot);
+        const char* ctrl=*reinterpret_cast<const char* const*>(slot+8);
+        if(!obj || !ctrl || !Rd(ctrl,16,"camera control block") || *reinterpret_cast<const std::int32_t*>(ctrl+8)<=0)continue;   // empty or expired
+        if(!Rd(obj+kCameraWrapper,0x80,"camera wrapper"))continue;
+        float m[16],fr[7];
+        std::memcpy(m,obj+kCameraWrapper,sizeof(m));
+        std::memcpy(fr,obj+kCameraWrapper+0x58,sizeof(fr));
+        bool sane=true;
+        for(float v:m)sane=sane && std::isfinite(v);
+        for(float v:fr)sane=sane && std::isfinite(v);
+        const float lr=Len3(m),lu=Len3(m+4),lf=Len3(m+8);
+        sane=sane && lr>0.9f && lr<1.1f && lu>0.9f && lu<1.1f && lf>0.9f && lf<1.1f && fr[4]>0.0f && fr[5]>fr[4];
+        if(!sane)continue;
+        const float hx=std::fmax(std::fabs(fr[0]),std::fabs(fr[1]))/fr[4],hy=std::fmax(std::fabs(fr[2]),std::fabs(fr[3]))/fr[4];
+        for(int k=0;k<3;++k) { cam.eye[k]=m[12+k]; cam.fwd[k]=m[8+k]/lf; }
+        cam.tanHalf=std::sqrt(hx*hx+hy*hy);
+        cam.nearClip=fr[4]; cam.farClip=fr[5]; cam.slot=i;
+        static std::atomic<bool> said{false};
+        if(!said.exchange(true))
+            Log("EDF41MOTHER camera source: the game's own camera slot %d (scene system +0x%zX, wrapper +0x70 cameraToWorld, frustum near %.2f far %.0f, half angle of the view diagonal %.1f deg); eye %.0f %.0f %.0f forward %.2f %.2f %.2f",
+                i,kCameraSlots+static_cast<std::size_t>(i)*kCameraSlotSize,fr[4],fr[5],std::atan(cam.tanHalf)*57.29578f,cam.eye[0],cam.eye[1],cam.eye[2],cam.fwd[0],cam.fwd[1],cam.fwd[2]);
+        return true;
     }
-    return intersects ? View::intersects : View::inside;
-}
-const char* ViewName(View v) noexcept {
-    switch(v) { case View::inside: return "inside"; case View::intersects: return "intersects"; case View::outside: return "outside"; default: return "no camera"; }
+    return false;
 }
 
-struct ViewCount { std::uint32_t frames=0,inside=0,intersects=0,outside=0,near1000=0; };
+enum class View { none, inside, intersects, outside, beyondFar };
+View FrustumTest(const float* centre,float radius,float* distance,const char** detail) noexcept {
+    GameCam cam{};
+    if(!GameCamera(cam))return View::none;
+    const float d[3]={centre[0]-cam.eye[0],centre[1]-cam.eye[1],centre[2]-cam.eye[2]};
+    const float dist=Len3(d);
+    *distance=dist;
+    if(dist<=radius)return View::intersects;                       // the camera is inside the sphere
+    if(dist-radius>cam.farClip) { if(detail)*detail="beyond the camera far plane"; return View::beyondFar; }
+    const float cosA=(d[0]*cam.fwd[0]+d[1]*cam.fwd[1]+d[2]*cam.fwd[2])/dist;
+    const float angle=std::acos(std::fmax(-1.0f,std::fmin(1.0f,cosA)));
+    const float angular=std::asin(std::fmin(1.0f,radius/dist));
+    const float half=std::atan(cam.tanHalf);
+    static char text[64];
+    std::snprintf(text,sizeof(text),"%.0f deg off the view axis, sphere spans %.0f deg, view half %.0f deg",angle*57.29578f,angular*57.29578f,half*57.29578f);
+    if(detail)*detail=text;
+    if(angle-angular>half)return View::outside;
+    return angle+angular<=half ? View::inside : View::intersects;
+}
+const char* ViewName(View v) noexcept {
+    switch(v) { case View::inside: return "inside"; case View::intersects: return "intersects"; case View::outside: return "outside"; case View::beyondFar: return "beyond far"; default: return "unknown (no camera)"; }
+}
+
+struct ViewCount { std::uint32_t frames=0,inside=0,intersects=0,outside=0,near1000=0,noCamera=0; };
 void CountView(ViewCount& c,const float* centre,float radius) noexcept {
     float dist=0.0f;
     const View v=FrustumTest(centre,radius,&dist,nullptr);
     ++c.frames;
-    if(v==View::inside)++c.inside; else if(v==View::intersects)++c.intersects; else if(v==View::outside)++c.outside;
+    if(v==View::inside)++c.inside; else if(v==View::intersects)++c.intersects; else if(v==View::outside || v==View::beyondFar)++c.outside; else ++c.noCamera;
     if(v!=View::none && dist<1000.0f)++c.near1000;
 }
 
@@ -325,8 +358,6 @@ bool SphereOf(const void* obj,float* centre,float* radius) noexcept {
 }
 
 // ---- evidence probes -------------------------------------------------------------------------------------------------
-float Len3(const float* v) noexcept { return std::sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]); }
-
 // A raw dump of `size` bytes (a field-by-field comparison of the mothership's with the stock carriers' is read off two of these).
 void DumpRaw(const char* tag,const void* obj,const char* what,const char* at,std::size_t size) noexcept {
     if(!Rd(at,size,"raw dump"))return;
@@ -374,11 +405,11 @@ void ProbeModel(const void* obj,const char* tag,const char* when) noexcept {
     }
     {
         float centre[3],radius=0.0f,dist=0.0f;
-        const char* outside="";
+        const char* outside=nullptr;
         if(SphereOf(obj,centre,&radius)) {
             const View v=FrustumTest(centre,radius,&dist,&outside);
-            Log("EDF41MOTHER probe %s %p (%s): VIEW bounding sphere (centre %.0f %.0f %.0f, radius %.0f) is %s%s%s the camera frustum, %.0f m from the camera",
-                tag,obj,when,centre[0],centre[1],centre[2],radius,ViewName(v),v==View::outside ? " (outside the " : "",v==View::outside ? outside : "",dist);
+            Log("EDF41MOTHER probe %s %p (%s): VIEW bounding sphere (centre %.0f %.0f %.0f, radius %.0f) is %s for the game's camera, %.0f m away%s%s",
+                tag,obj,when,centre[0],centre[1],centre[2],radius,ViewName(v),dist,(outside && *outside) ? " - " : "",(outside && *outside) ? outside : "");
         }
     }
     float objM[16];
@@ -423,8 +454,8 @@ std::uint64_t __fastcall CarrierUpdateProbe(void* self,void* dt) {
         static ViewCount counts[4];
         float centre[3],radius=0.0f;
         if(SphereOf(self,centre,&radius))CountView(counts[at],centre,radius);
-        if(frame%600==0)Log("EDF41MOTHER VIEW CONTROL carrier %p frames %u: inside the camera frustum %u, intersecting %u, outside %u, within 1000 m %u",
-                            self,counts[at].frames,counts[at].inside,counts[at].intersects,counts[at].outside,counts[at].near1000);
+        if(frame%600==0)Log("EDF41MOTHER VIEW CONTROL carrier %p frames %u: in the view %u, partly %u, outside %u, no camera %u, within 1000 m %u",
+                            self,counts[at].frames,counts[at].inside,counts[at].intersects,counts[at].outside,counts[at].noCamera,counts[at].near1000);
     }
     if(at>=0 && (frame==2 || frame%600==0))ProbeModel(self,"CONTROL carrier",frame==2 ? "frame 2" : "periodic");
     return result;
@@ -497,11 +528,11 @@ std::uint64_t __fastcall DtorWrap(void* self,unsigned flags) {
 
 std::uint64_t __fastcall UpdateWrap(void* self,void* dt) {
     if(Cfg().edf41MotherPlace>0.0f) {
-        float eye[3],dir[3];
+        GameCam cam{};
         char* o=static_cast<char*>(self);
-        if(CameraRay(eye,dir) && Rd(o+kPosAt,12,"object position (place)")) {
+        if(GameCamera(cam) && Rd(o+kPosAt,12,"object position (place)")) {
             const float d=Cfg().edf41MotherPlace;
-            const float p[3]={eye[0]+dir[0]*d,eye[1]+dir[1]*d,eye[2]+dir[2]*d};
+            const float p[3]={cam.eye[0]+cam.fwd[0]*d,cam.eye[1]+cam.fwd[1]*d,cam.eye[2]+cam.fwd[2]*d};
             std::memcpy(o+kPosAt,p,12);
             static std::atomic<bool> said{false};
             if(!said.exchange(true))Log("EDF41MOTHER place: the mothership is held %.0f m in front of the camera (ini Edf41MotherPlace), first at %.0f %.0f %.0f",d,p[0],p[1],p[2]);
@@ -526,8 +557,8 @@ std::uint64_t __fastcall UpdateWrap(void* self,void* dt) {
         static ViewCount counts;
         float centre[3],radius=0.0f;
         if(SphereOf(self,centre,&radius))CountView(counts,centre,radius);
-        if(tick%600==0)Log("EDF41MOTHER VIEW mothership %p frames %u: inside the camera frustum %u, intersecting %u, outside %u, within 1000 m %u",
-                           self,counts.frames,counts.inside,counts.intersects,counts.outside,counts.near1000);
+        if(tick%600==0)Log("EDF41MOTHER VIEW mothership %p frames %u: in the view %u, partly %u, outside %u, no camera %u, within 1000 m %u",
+                           self,counts.frames,counts.inside,counts.intersects,counts.outside,counts.noCamera,counts.near1000);
     }
     if(tick==2)ProbeModel(self,"mothership","frame 2");
     MaybeDisarm(self,tick);
@@ -647,13 +678,6 @@ void __fastcall FactoryCreate(Factory*,void* info) noexcept {
     AuditLiveTable();
     void* obj=reinterpret_cast<NewFn>(image+kNew)(kCarrierSize);
     if(!obj) { Log("EDF41MOTHER create: out of memory for %zu bytes",kCarrierSize); return; }
-    {
-        // The block comes from the game's allocator without being cleared: what it still holds from an earlier object of the same size.
-        float pre[3]={};
-        const char* ob=static_cast<const char*>(obj);
-        std::memcpy(&pre[0],ob+0x658,4); std::memcpy(&pre[1],ob+0x6F8,4); std::memcpy(&pre[2],ob+0x718,4);
-        Log("EDF41MOTHER create: before the constructor the new block %p already holds wrapper+0x08 %.2f, instance+0x08 %.2f, instance+0x28 %.2f (non-zero = left by an earlier object)",obj,pre[0],pre[1],pre[2]);
-    }
     if(Cfg().edf41MotherWatch==1 && !watch.active.load())ArmWatch("mothership",static_cast<const char*>(obj));
     reinterpret_cast<CtorFn>(image+kCarrierCtor)(obj,info);
     void** vptr=static_cast<void**>(obj);
@@ -681,12 +705,6 @@ void __fastcall CarrierCreateWatch(void* owner,void* info) {
     taken=true;
     void* obj=reinterpret_cast<NewFn>(image+kNew)(kCarrierSize);
     if(!obj)return;
-    {
-        float pre[3]={};
-        const char* ob=static_cast<const char*>(obj);
-        std::memcpy(&pre[0],ob+0x658,4); std::memcpy(&pre[1],ob+0x6F8,4); std::memcpy(&pre[2],ob+0x718,4);
-        Log("EDF41MOTHER CONTROL carrier create: before the constructor the new block %p holds wrapper+0x08 %.2f, instance+0x08 %.2f, instance+0x28 %.2f",obj,pre[0],pre[1],pre[2]);
-    }
     ArmWatch("CONTROL carrier",static_cast<const char*>(obj));
     reinterpret_cast<CtorFn>(image+kCarrierCtor)(obj,info);
 }
