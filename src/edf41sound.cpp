@@ -28,15 +28,25 @@
 // then "app:/" -> "/cri_bind/") and EDFModLoader hooks the stream Open it ends in (EDF.dll+741C0, vtable 0x175F0F0 slot 1):
 // ONLY a path that starts "/cri_bind/" is tried again as "./Mods/<rest>". The stock banks' app:/sound/adx/<name> becomes a
 // plain "./sound/pc/<name>" in the game folder, which the redirector never sees: that is why the first real run loaded
-// neither bank (a file only under Mods was "not found" there). So a bank under Mods is asked for as app:/sound/pc/<name>:
+// neither bank (a file only under Mods was "not found" there). So the weapon bank is asked for as app:/sound/pc/<name>:
 // no "sound/adx" rule matches it, the "app:/" rule gives /cri_bind/sound/pc/<name>, the redirector serves Mods\SOUND\PC\<name>.
-// (The weapon SGO / voice tables in Mods\MISSION reach the game the same way.) 0x7B2500 is void: whether a voice bank got
-// in is read from the SeManager's bank list (std::list at +0xE0, its size at +0xE8) before and after.
+// (The weapon SGO / voice tables in Mods\MISSION reach the game the same way.) That works for the weapon ACB because the game
+// reads the whole file itself, through that stream. A voice bank does not: SoundBank::Initialize (0x7AB580) checks the AWB
+// exists (0x50E20) and reads the _LIST.AWE (0x84E80) through the game's stream, but the AWB's table of contents is opened by
+// CRI's own file system, criAtomAwb_LoadToc (0xFEC2D4, call at 0x7AB845), with the translated narrow path: CRI never goes
+// through 0x741C0, so "/cri_bind/SOUND/PC/EDF41_VOICE.JA.AWB" is a file that does not exist and the TOC load returns NULL
+// (measured: exists=1, AWE read and accepted, toc=NULL). Initialize fails, 0x7AA440 answers {NULL, NULL}, and 0x7B2500, which
+// does not look at the result, still appends that empty node to the SeManager's list, where it stays (0x7B2CD0 drops only
+// nodes 0x7AA5C0 accepts, and an empty one it does not). So a voice bank is asked for by the path CRI can open itself, the
+// same form the stock voice banks end up as ("./SOUND/PC/<name>", relative to the game folder, which is the working
+// directory): "./Mods/SOUND/PC/<name>". No prefix rule matches it, the game's stream and CRI both open it as is. Should a
+// load still fail, the empty node 0x7B2500 appended is taken out again the way 0x7B2CD0 removes one.
 #include "crew.h"
 #include "memory.h"
 
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <cwchar>
 
 namespace crew {
@@ -158,20 +168,84 @@ struct BankNode {
     BankRef value;
 };
 constexpr std::size_t kBankListHead=0xE0;
-BankRef voiceBank{};                                 // the bank our last load added (the list's last node right after it)
+constexpr std::size_t kGameDelete=0x12D85EC;        // the game's operator delete(void*, size_t): 0x7B2D3A frees a node with it
+constexpr std::size_t kNodeSize=0x20;               // 0x7B25DE allocates a node of this size
+constexpr std::size_t kAweCheck=0x7A8050;           // (AWE bytes, int) -> bool: the list's header check
+constexpr std::size_t kAweCheckSite=0x7AB708;       // in SoundBank::Initialize (0x7AB580)
+constexpr std::size_t kAwbToc=0xFEC2D4;             // criAtomAwb_LoadToc(binder, const char* path, work, size) -> handle
+constexpr std::size_t kAwbTocSite=0x7AB845;
+constexpr std::size_t kCueInBank=0x7AA150;          // (BankRef*, const char* key) -> cue id or -1
+constexpr std::size_t kCueInBankSites[]={0x7B2B97,0x7B2C67};   // the SeManager's two walks of its list (0x7B2B00, 0x7B2C00)
+
+using GameDeleteFn=void(__cdecl*)(void*,std::size_t);
+using AweCheckFn=bool(__fastcall*)(const void* awe,int arg);
+using AwbTocFn=void*(__fastcall*)(void* binder,const char* path,void* work,std::uint64_t size);
+using CueInBankFn=int(__fastcall*)(const BankRef* bank,const char* key);
+
+std::atomic<void*> voiceBankPtr{nullptr};            // the bank our last load put in the list (null when it failed)
+std::atomic<long> voiceHits{0};
+
+// What SoundBank::Initialize did with OUR files (recorded only while LoadVoiceBank's call runs, on that thread), so a
+// failed load can say which step refused it.
+struct VoiceLoadTrace {
+    bool active;
+    int aweChecked;      // -1 not reached (AWB missing or AWE not read), else the check's answer
+    int tocTried;        // 0 not reached, 1 tried
+    void* toc;           // the AWB's table of contents (NULL: CRI could not open / read the AWB)
+    char tocPath[128];
+};
+thread_local VoiceLoadTrace trace{};
+
+bool __fastcall AweCheckHook(const void* awe,int arg) {
+    const bool ok=reinterpret_cast<AweCheckFn>(image+kAweCheck)(awe,arg);
+    if(trace.active)trace.aweChecked=ok ? 1 : 0;
+    return ok;
+}
+
+void* __fastcall AwbTocHook(void* binder,const char* path,void* work,std::uint64_t size) {
+    void* toc=reinterpret_cast<AwbTocFn>(image+kAwbToc)(binder,path,work,size);
+    if(trace.active) {
+        trace.tocTried=1;
+        trace.toc=toc;
+        strncpy_s(trace.tocPath,path ? path : "(null)",_TRUNCATE);
+    }
+    return toc;
+}
+
+// The script's voice key looked up bank by bank; log when OUR bank is the one that answers.
+int __fastcall CueInBankHook(const BankRef* bank,const char* key) {
+    const int cue=reinterpret_cast<CueInBankFn>(image+kCueInBank)(bank,key);
+    void* ours=voiceBankPtr.load();
+    if(cue!=-1 && ours && bank && bank->bank==ours) {
+        const long hits=++voiceHits;
+        if(hits<=8 || (hits&(hits-1))==0)Log("EDF41SOUND voice cue '%s' answered by 4.1's voice bank %p (cue 0x%X, hit %ld)",key ? key : "?",ours,cue,hits);
+    }
+    return cue;
+}
 
 BankNode* ListHead(void* manager) noexcept {
     return *reinterpret_cast<BankNode**>(static_cast<char*>(manager)+kBankListHead);
 }
 
-// Our last voice bank is still in the list: 0x7B2CD0 drops a bank only when its byte +0x51 (the load's flag) is set, which
-// ours is like the stock locale banks, so it should be gone by the next pass; if it is not, loading again would add a twin.
-bool VoiceBankStillLoaded(void* manager) noexcept {
-    if(!voiceBank.bank)return false;
-    BankNode* head=ListHead(manager);
-    for(BankNode* n=head->next;n!=head;n=n->next)
-        if(n->value.bank==voiceBank.bank && n->value.control==voiceBank.control)return true;
-    return false;
+// 0x7B2500 appended a node whose load failed ({NULL, NULL}: 0x7AA440's out when Initialize fails, 0x7A92F4). Nothing ever
+// removes it (0x7B2CD0 keeps what 0x7AA5C0 refuses), so take it out the way 0x7B2CD0 removes one: unlink, size - 1, the
+// game's own delete of the 0x20-byte node. With both members NULL there is no reference to drop (0x7B2D23 / 0x7B2D2C).
+bool DropEmptyNode(void* manager,BankNode* node) noexcept {
+    if(node->value.bank || node->value.control)return false;
+    node->prev->next=node->next;
+    node->next->prev=node->prev;
+    --*reinterpret_cast<std::uint64_t*>(static_cast<char*>(manager)+kBankListSize);
+    reinterpret_cast<GameDeleteFn>(image+kGameDelete)(node,kNodeSize);
+    return true;
+}
+
+// Which step of SoundBank::Initialize refused our files (from the trace).
+const char* FailureReason() noexcept {
+    if(trace.aweChecked<0)return "the AWB was not found or the _LIST.AWE not read through the game's file stream";
+    if(trace.aweChecked==0)return "the _LIST.AWE was refused by the header check 0x7A8050 (not a version 2 AWBE)";
+    if(!trace.tocTried)return "Initialize stopped before the AWB's table of contents";
+    if(!trace.toc)return "CRI could not open the AWB (criAtomAwb_LoadToc returned NULL for the path)";
+    return "the AWB's TOC loaded but the bank has more than 0x10000 cues or no CRI handle (0x7AB8A9)";
 }
 
 // The voice file name (L"EDF41_VOICE.JA.AWB") for a language, if both of its files are in Mods\SOUND\PC.
@@ -182,35 +256,51 @@ bool VoiceFilesThere(const wchar_t* lang,wchar_t* awbName,std::size_t capacity) 
     return ModsFileThere(awbName) && ModsFileThere(list);
 }
 
-// The current language's bank, else (kr / cn / sc, which 4.1 has no recording of) Japanese, else English.
+// Load one bank file (its name in Mods\SOUND\PC) the way the locale banks load; say what happened.
+void LoadVoiceFile(void* manager,const wchar_t* name,const wchar_t* language) noexcept {
+    wchar_t path[96];
+    if(swprintf_s(path,L"./Mods/SOUND/PC/%ls",name)<0)return;   // the path CRI opens itself, see the top of this file
+    const std::uint64_t before=BankCount(manager);
+    trace={};
+    trace.active=true;
+    trace.aweChecked=-1;
+    reinterpret_cast<VoiceLoadFn>(image+kVoiceLoad)(manager,path,1);
+    trace.active=false;
+    const std::uint64_t after=BankCount(manager);
+    if(after!=before+1) {
+        Log("EDF41SOUND voice bank %ls: the list went %llu -> %llu, not one more (language %ls): 4.1's voices are off",path,
+            static_cast<unsigned long long>(before),static_cast<unsigned long long>(after),language);
+        return;
+    }
+    BankNode* node=ListHead(manager)->prev;            // 0x7B2500 appends: the last node is the one it just added
+    if(node->value.bank) {
+        voiceBankPtr.store(node->value.bank);
+        Log("EDF41SOUND voice bank %ls loaded for language %ls (manager=%p, banks %llu -> %llu, bank %p, toc %p)",path,language,manager,
+            static_cast<unsigned long long>(before),static_cast<unsigned long long>(after),node->value.bank,trace.toc);
+        return;
+    }
+    const bool dropped=DropEmptyNode(manager,node);
+    Log("EDF41SOUND ERROR voice bank %ls FAILED to load for language %ls: %s (AWE check %d, TOC path '%s' -> %p). The empty node "
+        "0x7B2500 appended was %s (banks now %llu): 4.1's voices are off",path,language,FailureReason(),trace.aweChecked,
+        trace.tocTried ? trace.tocPath : "-",trace.toc,dropped ? "removed" : "NOT removed (it holds a control block)",
+        static_cast<unsigned long long>(BankCount(manager)));
+}
+
+// The current language's bank, else (kr / cn / sc, which 4.1 has no recording of) Japanese, else English. The previous
+// pass's bank is gone by now: 0x7B2CD0 unloaded it with the locale banks at the start of this pass (it was loaded with the
+// same flag 1).
 void LoadVoiceBank(void* manager) noexcept {
+    voiceBankPtr.store(nullptr);
     const int index=*reinterpret_cast<const int*>(image+kLanguageIndex);
     if(index<0 || index>=kLanguageCount)return;
     const wchar_t* language=reinterpret_cast<const wchar_t* const*>(image+kLanguageTable)[index];
     if(!language || !language[0] || !language[1])return;
-    if(VoiceBankStillLoaded(manager)) {
-        Log("EDF41SOUND voice bank %p from the last pass is still loaded (language %ls): not loading a second one",voiceBank.bank,language);
-        return;
-    }
-    voiceBank={};
     const wchar_t* const order[3]={language,L"ja",L"en"};
     const int tries=index<=1 ? 1 : 3;                  // ja and en have their own; the rest fall back
     for(int i=0;i<tries;++i) {
         wchar_t name[48];
         if(!VoiceFilesThere(order[i],name,48))continue;
-        wchar_t path[96];
-        if(swprintf_s(path,L"app:/sound/pc/%ls",name)<0)return;
-        for(wchar_t* p=path+14;*p;++p)if(*p>=L'A' && *p<=L'Z')*p=static_cast<wchar_t>(*p+32);
-        const std::uint64_t before=BankCount(manager);
-        reinterpret_cast<VoiceLoadFn>(image+kVoiceLoad)(manager,path,1);
-        const std::uint64_t after=BankCount(manager);
-        if(after>before) {
-            voiceBank=ListHead(manager)->prev->value;   // 0x7B2500 appends: the last node is ours
-            Log("EDF41SOUND voice bank %ls loaded for language %ls (manager=%p, banks %llu -> %llu, bank %p)",path,language,manager,
-                static_cast<unsigned long long>(before),static_cast<unsigned long long>(after),voiceBank.bank);
-        }
-        else Log("EDF41SOUND voice bank %ls was NOT added for language %ls (manager=%p, banks %llu)",path,language,manager,
-                 static_cast<unsigned long long>(after));
+        LoadVoiceFile(manager,name,language);
         return;
     }
     Log("EDF41SOUND no EDF41_VOICE bank for language %ls: 4.1's voices are off",language);
@@ -235,8 +325,14 @@ bool InstallEdf41Sound() noexcept {
     for(const std::size_t site:kLookupSites)
         lookups+=RedirectCall(image+site,image+kLookup,reinterpret_cast<void*>(&LookupHook),changed) ? 1 : 0;
     const bool voice=RedirectCall(image+kVoiceLoadSite,image+kVoiceLoad,reinterpret_cast<void*>(&VoiceLoadHook),changed);
-    Log("EDF41SOUND hooked: se bank load=%d lookups=%d/%d voice load=%d",ok ? 1 : 0,lookups,
-        static_cast<int>(sizeof(kLookupSites)/sizeof(kLookupSites[0])),voice ? 1 : 0);
+    // what Initialize did with our voice files (for the failure log) and which voice cues our bank answers
+    const bool aweProbe=RedirectCall(image+kAweCheckSite,image+kAweCheck,reinterpret_cast<void*>(&AweCheckHook),changed);
+    const bool tocProbe=RedirectCall(image+kAwbTocSite,image+kAwbToc,reinterpret_cast<void*>(&AwbTocHook),changed);
+    int cueProbes=0;
+    for(const std::size_t site:kCueInBankSites)
+        cueProbes+=RedirectCall(image+site,image+kCueInBank,reinterpret_cast<void*>(&CueInBankHook),changed) ? 1 : 0;
+    Log("EDF41SOUND hooked: se bank load=%d lookups=%d/%d voice load=%d (awe check=%d awb toc=%d voice cue=%d/2)",ok ? 1 : 0,lookups,
+        static_cast<int>(sizeof(kLookupSites)/sizeof(kLookupSites[0])),voice ? 1 : 0,aweProbe ? 1 : 0,tocProbe ? 1 : 0,cueProbes);
     return ok && voice && lookups>0;
 }
 }  // namespace crew
