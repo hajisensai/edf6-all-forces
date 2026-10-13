@@ -3560,7 +3560,7 @@ def pack_install_upgrade_uninstall() -> None:
                 ledger.Ledger(game).put(gen.OWNER, 'OBJECT/EDF6TR_FAKE.SGO', b'range object')
                 return []
             enter(patched(gen, install=mission, grand_battle=lambda plan: plan))
-            enter(patched(e5c, build=lambda game, campaign=True, test_range=True, root41=None: _e5c_stub()))   # its own install / remove / check run for real
+            enter(patched(e5c, build=lambda game, campaign=True, test_range=True, root41=None, skip41=(): _e5c_stub()))   # its own install / remove / check run for real
             enter(patched(e5c.modfiles, refuse_while_running=lambda *a, **k: None))   # the real game may be open
             for group in buildcache.GROUPS:
                 made = (b'mac', {'FAKE_PIECE.MAC': b'piece'}) if group == 'bigmap' else \
@@ -5394,7 +5394,7 @@ def edf5_campaign_interrupted_reinstall() -> None:
         modfiles.atomic_write(e5c.rel_path(root, e5c.CONFIG), other)
         e5c.install(root, e5c.build(root))
         real_plan = e5c.plan
-        shorter = lambda r, root41=None: {**real_plan(r, root41), 'rows': real_plan(r, root41)['rows'][:-1]}   # an update that writes other bytes
+        shorter = lambda r, root41=None, skip41=(): {**real_plan(r, root41, skip41), 'rows': real_plan(r, root41, skip41)['rows'][:-1]}   # an update that writes other bytes
         with patched(e5c, plan=shorter):
             update = e5c.build(root)
         with patched(e5c.modfiles, atomic_write=_failing_write(e5c.PACKS[0].txt['CN'])):
@@ -5441,8 +5441,8 @@ def edf5_campaign_refusals() -> None:
         os.remove(e5c.rel_path(root, list_rel))
         os.remove(os.path.join(root, 'Mods', e5c.MANIFEST))
         real_plan = e5c.plan
-        with patched(e5c, plan=lambda r, root41=None: {**real_plan(r, root41),
-                                                  'rows': [x for x in real_plan(r, root41)['rows'] if x['group'] != 'dlc2']}):
+        with patched(e5c, plan=lambda r, root41=None, skip41=(): {**real_plan(r, root41, skip41),
+                                                  'rows': [x for x in real_plan(r, root41, skip41)['rows'] if x['group'] != 'dlc2']}):
             _e5c_refuses(root, 'an empty pack')
         assert not e5c.installed(root), 'a refusal wrote a manifest'
 
@@ -7030,8 +7030,11 @@ def edf41_maps_cover_the_scripts() -> None:
     import edf41_maps
     import make_edf5_campaign as c
     used: dict[str, set[str]] = {}
-    for m in c.edf41_text()['missions']:
-        strings = c.utf16_strings(c.edf41_script(m['id'], 'MISSION.BVM'))
+    for m, script in ((m, s) for m in c.edf41_text()['missions'] for s in ('MISSION.BVM', 'BEFORE.BVM')
+                      if os.path.exists(os.path.join(c.EDF41, 'missions', m['id'], s))):
+        # both scripts the pack ships load the map (BEFORE.BVM too: M190's asks NW_KOUSOUBLD01 for FineCloud,
+        # which the list lacked; the game's map::Environment faulted on the missing weather, 2026-10-13)
+        strings = c.utf16_strings(c.edf41_script(m['id'], script))
         for i, s in enumerate(strings):
             hit = re.fullmatch(r'(?i)app:/Map/(\w+)\.mac', s.strip())
             if hit and i + 1 < len(strings):
