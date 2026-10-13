@@ -48,7 +48,7 @@ import sys
 import traceback
 import time
 from types import ModuleType
-from typing import Any, Iterator
+from typing import Any, Iterator, Mapping
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 for _p in (HERE, os.path.join(HERE, '..', 'pylib'), os.path.join(HERE, '..', 'testrange'),
@@ -411,7 +411,8 @@ def find_edf41(game: str) -> str | None:
     return gamedir.find_other(gamedir.EDF41, near=game)
 
 
-def build_packs(game: str, campaign: bool, root41: str | None = None) -> tuple | None:
+def build_packs(game: str, campaign: bool, root41: str | None = None,
+                skip41: Mapping[str, str] | None = None) -> tuple | None:
     """The mission packs to write (make_edf5_campaign.build), or None: the test range's always, the EDF5 campaign's
     when wanted. A refusal of the campaign alone (a mission's resource missing, ...) still registers the range when no
     campaign is installed to keep; the opt-out (`campaign` False) is the packs rebuilt without it."""
@@ -421,7 +422,7 @@ def build_packs(game: str, campaign: bool, root41: str | None = None) -> tuple |
     else:
         print('生成测试场任务包（EDF5 战役已停用）……')
     try:
-        return make_edf5_campaign.build(game, campaign=campaign, root41=root41)
+        return make_edf5_campaign.build(game, campaign=campaign, root41=root41, skip41=skip41 or {})
     except make_edf5_campaign.Refused as e:
         print('！ 不安装任务包：', e)
     if not campaign or make_edf5_campaign.enabled(game):
@@ -495,7 +496,10 @@ def install(game: str, campaign_requested: bool = False) -> None:
     proteus = build_asset(cache, make_proteus, '普罗透斯护盾（原版空袭兵电磁碉堡墙；同时撤销旧版生成的模型）')
     bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
     root41 = find_edf41(game)
-    campaign = build_packs(game, campaign_requested or make_edf5_campaign.wanted(game), root41)
+    want_campaign = campaign_requested or make_edf5_campaign.wanted(game)
+    # What EDF4.1's objects and maps will leave out, as far as it can be told now; settled after they are written.
+    skip41 = make_edf5_campaign.unavailable41(game, root41)
+    campaign = build_packs(game, want_campaign, root41, skip41)
     room = build_room_layouts(game)
     print('\n全部生成完毕，开始写入。')
     if campaign is None and not make_edf5_campaign.wanted(game) and make_edf5_campaign.enabled(game):
@@ -540,6 +544,12 @@ def install(game: str, campaign_requested: bool = False) -> None:
     written41, skipped_maps = edf41_maps.install(game, root41)
     for name, why in skipped_maps:
         print('  跳过', name, why)
+    # The pack's rows may name only what is on disk now: objects and maps left out (a shared file's owner only known
+    # after the weapons' install, a map whose conversion failed) take their missions out of the pack, rebuilt here.
+    left_out41 = {**dict(skipped41), **dict(skipped_maps)}
+    if campaign is not None and root41 and left_out41.keys() != skip41.keys():
+        print('  4.1 的地图或敌人没有装全，重新生成 4.1 本篇任务包（不含用到它们的任务）……')
+        campaign = build_packs(game, want_campaign, root41, left_out41)
     print('转换 EDF4.1 的武器音效、语音和字幕（4.1 的武器与任务无线电要用；从已安装的 EDF4.1 转换，语音约 1.6 GB，'
           '已转换且未变的跳过）……' if root41 else '没有找到 EDF4.1：跳过 4.1 的音效和语音。')
     for path in edf41_sounds.install(game, root41)[0]:
