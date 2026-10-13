@@ -1,6 +1,22 @@
 // Production Ride / Gather / Rebatch on synthetic native layouts: boarding must return a
 // surviving on-foot weapon's batch, without writing a weapon removed in this frame.
+#include "../src/crew.h"
+namespace {
+bool keyDown=false,focused=true,mapOwnsKeys=false,onFoot=true,sazabi=false;
+SHORT TestGetAsyncKeyState(int) { return keyDown ? static_cast<SHORT>(0x8000) : 0; }
+HWND TestGetForegroundWindow() { return nullptr; }
+DWORD TestGetWindowThreadProcessId(HWND,LPDWORD pid) { *pid=focused ? 42 : 43;return 0; }
+DWORD TestGetCurrentProcessId() { return 42; }
+}
+#define GetAsyncKeyState TestGetAsyncKeyState
+#define GetForegroundWindow TestGetForegroundWindow
+#define GetWindowThreadProcessId TestGetWindowThreadProcessId
+#define GetCurrentProcessId TestGetCurrentProcessId
 #include "../src/firstperson.cpp"
+#undef GetAsyncKeyState
+#undef GetForegroundWindow
+#undef GetWindowThreadProcessId
+#undef GetCurrentProcessId
 #include <cstdio>
 
 namespace edf {
@@ -14,13 +30,13 @@ unsigned char* image=nullptr;
 Config config{};
 const Config& Cfg() noexcept { return config; }
 void Log(const char*,...) noexcept {}
-bool IsSazabi(const void*) noexcept { return false; }
+bool IsSazabi(const void*) noexcept { return sazabi; }
 bool HighCamOn(const void*) noexcept { return false; }
 bool TurretCamHighTransition(const void*) noexcept { return false; }
 float SightZoomNow(const void*) noexcept { return 1.0f; }
 bool SightZoomMounted(const void*) noexcept { return false; }
-bool HumanOnFoot(const unsigned char*) noexcept { return false; }
-bool MapHoldsKeys() noexcept { return false; }
+bool HumanOnFoot(const unsigned char*) noexcept { return onFoot; }
+bool MapHoldsKeys() noexcept { return mapOwnsKeys; }
 bool haveEye=true;
 bool VehicleEye(unsigned char*,float* eye,RideView* out) noexcept {
     if(!haveEye)return false;
@@ -60,5 +76,39 @@ int main() {
     check(Ride(cam,human) && At<void*>(model,kBatch)==&replacement,"boarding preserves a replacement batch owned by the game");
     reset();haveEye=false;
     check(!Ride(cam,human) && !At<void*>(model,kBatch) && unbatched[0].model==model,"no cockpit leaves the on-foot state for Leave to restore");
+    st.on=true;st.riding=true;st.cam=cam;st.screens.n=0;
+    check(!FirstPersonHidesStockHud(cam),"an eye-only passenger seat keeps the stock HUD");
+    st.screens.n=1;
+    check(FirstPersonHidesStockHud(cam),"a seat with replacement screens hides the stock HUD");
+    config.fpHideStockHud=false;
+    check(!FirstPersonHidesStockHud(cam),"the hide stock HUD preference still controls fitted screens");
+    config.fpHideStockHud=true;
+    check(!FirstPersonHidesStockHud(human),"another camera's HUD is never hidden");
+    camOk=drawOk=true;
+    const auto resetKey=[&](){toggled=false;keyWas=false;keyCancelled=false;keyDown=false;focused=true;mapOwnsKeys=false;onFoot=true;sazabi=false;};
+    resetKey();keyDown=true;Toggle(human);keyDown=false;Toggle(human);
+    check(toggled,"an uninterrupted physical press and release toggles first person");
+    resetKey();keyDown=true;Toggle(human);focused=false;Toggle(human);
+    check(!toggled,"losing focus while held does not act as release");
+    focused=true;Toggle(human);keyDown=false;Toggle(human);
+    check(!toggled,"returning focus while held discards the interrupted gesture");
+    keyDown=true;Toggle(human);keyDown=false;Toggle(human);
+    check(toggled,"a fresh gesture after focus returns still works");
+    resetKey();keyDown=true;Toggle(human);mapOwnsKeys=true;Toggle(human);
+    check(!toggled,"map input ownership does not act as release");
+    mapOwnsKeys=false;Toggle(human);keyDown=false;Toggle(human);
+    check(!toggled,"closing the map while held discards the interrupted gesture");
+    resetKey();keyDown=true;Toggle(human);Toggle(nullptr);keyDown=false;Toggle(human);
+    check(!toggled,"a missing player cancels without toggling");
+    resetKey();keyDown=true;Toggle(human);onFoot=false;keyDown=false;Toggle(human);
+    check(!toggled,"holding the view key across boarding does not toggle");
+    keyDown=true;Toggle(human);keyDown=false;Toggle(human);
+    check(toggled,"a new press and release in the vehicle still toggles");
+    resetKey();onFoot=false;sazabi=true;keyDown=true;Toggle(human);keyDown=false;Toggle(human);
+    check(!toggled,"the Sazabi melee key keeps ownership of its press");
+    toggled=true;camOk=true;drawOk=false;
+    check(std::strcmp(NotWanted(cam,human),"hooks unavailable")==0,"a camera hook without a draw hook cannot activate first person");
+    camOk=false;drawOk=true;
+    check(std::strcmp(NotWanted(cam,human),"hooks unavailable")==0,"a draw hook without a camera hook cannot activate first person");
     return failed ? 1 : 0;
 }

@@ -200,15 +200,15 @@ struct alignas(16) Flash { float m[16]; const float* src; int age,hand; };
 Flash flashes[kFlashSlots]{};
 int flashNext=0;
 using CreateFn=void*(__fastcall*)(void*,void*,void*,void*);
-bool toggled=false,keyWas=false,keyRode=false;   // keyRode: riding when the key went down
+bool toggled=false,keyWas=false,keyRode=false,keyCancelled=false;   // keyRode: riding when the key went down
 int passLog[2][6]{};   // the body's draws, the weapons' in hand, by pass
 ULONGLONG passLogAt=0;
 
-bool KeyDown(int vk) noexcept {
-    if(vk<=0 || MapHoldsKeys())return false;
+bool KeyInputAllowed() noexcept {
+    if(MapHoldsKeys())return false;
     DWORD pid=0;
     GetWindowThreadProcessId(GetForegroundWindow(),&pid);
-    return pid==GetCurrentProcessId() && (GetAsyncKeyState(vk)&0x8000)!=0;
+    return pid==GetCurrentProcessId();
 }
 
 bool IsSoldier(const unsigned char* h) noexcept {
@@ -260,6 +260,7 @@ const char* VehicleYields(const unsigned char* h) noexcept {
 // Why this machine's player is not to be seen in first person through `cam` now (nullptr: they are).
 const char* NotWanted(const unsigned char* cam,const unsigned char* h) noexcept {
     const Config& c=Cfg();
+    if(!camOk || !drawOk)return "hooks unavailable";
     if(!c.enabled || !c.firstPerson || !toggled)return "off";
     if(!h || !IsSoldier(h))return "no soldier";
     if(At<const void*>(cam,kCamTarget)!=h && At<const void*>(cam,kCamTargetRef)!=h)return "another camera";
@@ -295,8 +296,15 @@ bool KeyTaken(const unsigned char* h,int vk) noexcept {
 // vehicle uses the key itself (KeyTaken) it is that vehicle's: the switch stays as it was set before boarding.
 void Toggle(const unsigned char* h) noexcept {
     const Config& c=Cfg();
+    const bool down=c.firstPersonKey>0 && (GetAsyncKeyState(c.firstPersonKey)&0x8000)!=0;
+    // Loss of input ownership cancels this gesture; it is not a key release. If the
+    // physical key is still held when focus/the map returns, wait for its release
+    // before allowing another gesture, so the held boarding/map key cannot toggle.
+    if(!h || !c.enabled || !c.firstPerson || !camOk || !drawOk || !KeyInputAllowed() || KeyTaken(h,c.firstPersonKey)) {
+        keyWas=false;keyCancelled=down;return;
+    }
+    if(keyCancelled){if(!down)keyCancelled=false;return;}
     const bool riding=h && !HumanOnFoot(h);
-    const bool down=h && KeyDown(c.firstPersonKey) && !KeyTaken(h,c.firstPersonKey);
     if(down && !keyWas)keyRode=riding;
     if(!down && keyWas && keyRode==riding){toggled=!toggled;Log("FP %s (key 0x%X)",toggled ? "on" : "off",c.firstPersonKey);}
     keyWas=down;
@@ -1063,7 +1071,9 @@ bool HookDrawOf(void** vt) noexcept {
 }  // namespace
 
 bool FirstPersonOn() noexcept { return st.on; }
-bool FirstPersonHidesStockHud(const void* camera) noexcept { return st.on && st.riding && st.cam==camera && Cfg().fpHideStockHud; }
+bool FirstPersonHidesStockHud(const void* camera) noexcept {
+    return st.on && st.riding && st.cam==camera && st.screens.n>0 && Cfg().fpHideStockHud;
+}
 bool FirstPersonScreens(CockpitScreens* out) noexcept {
     if(!st.on || !st.riding || !st.screens.n)return false;
     *out=st.screens;
