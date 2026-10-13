@@ -62,6 +62,8 @@ constexpr std::size_t kCreateFromPath=0x11945E0;      // Object* (manager, const
 constexpr std::size_t kSgoKey=0x528A0;                // node* (SgoRoot* = object+0xA0, const wchar_t* key); null when the key is absent
 constexpr std::size_t kDeleteObject=0x118A1B0;        // marks a scene object deleted (bit 4 of +0x18); what the script's DeleteObject does
 constexpr std::size_t kCreateContextVtable=0x1762068; // the 0x30-byte context the script natives and UfoMother511 hand to the creation
+constexpr std::size_t kSetCasState=0x116C2D0;         // bool (CasPlayers* = object+0x8F0, int player = [object+0xC80], const wchar_t* state, int)
+constexpr std::size_t kCasAt=0x8F0,kCasPlayerAt=0xC80;
 constexpr std::size_t kSgoAt=0xA0,kMatrixAt=0x60,kFlagsAt=0x18;
 constexpr std::size_t kPartCtor=0x5B5FB0;             // EventAnimationObject::EventAnimationObject(this, createInfo)
 constexpr std::size_t kPartVtable=0x17D4D20;
@@ -101,6 +103,7 @@ constexpr Print kPrints[]={
     {kCreateFromPath,{0x40,0x55,0x53,0x56,0x57,0x41,0x54,0x41}},
     {kSgoKey,{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B}},
     {kDeleteObject,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},
+    {kSetCasState,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},
     {kPartCtor,{0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57}},
     {0x5B6BB0,{0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x74}},   // part slot 0
     {0x5B6D20,{0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83}},   // part slot 5
@@ -219,6 +222,8 @@ bool GameCamera(GameCam& cam) noexcept {
         const float lr=Len3(m),lu=Len3(m+4),lf=Len3(m+8);
         sane=sane && lr>0.9f && lr<1.1f && lu>0.9f && lu<1.1f && lf>0.9f && lf<1.1f && fr[4]>0.0f && fr[5]>fr[4];
         if(!sane)continue;
+        // Before the first frame the game's camera is the identity (eye 0 0 0, looking down +Z): not a view, skip it.
+        if(m[12]==0.0f && m[13]==0.0f && m[14]==0.0f && m[0]==1.0f && m[5]==1.0f && m[10]==1.0f)continue;
         const float hx=std::fmax(std::fabs(fr[0]),std::fabs(fr[1]))/fr[4],hy=std::fmax(std::fabs(fr[2]),std::fabs(fr[3]))/fr[4];
         for(int k=0;k<3;++k) { cam.eye[k]=m[12+k]; cam.fwd[k]=m[8+k]/lf; }
         cam.tanHalf=std::sqrt(hx*hx+hy*hy);
@@ -306,6 +311,116 @@ void LocalMatrix(const float* euler,const float* position,float* out) noexcept {
     MultiplyRows(m,rz,m);
     m[12]=position[0]; m[13]=position[1]; m[14]=position[2]; m[15]=1.0f;
     std::memcpy(out,m,sizeof(m));
+}
+
+// ---- the generators ----------------------------------------------------------------------------------------------
+// The script's SetEnemyGenerator / SetInstantEnemyGenerator (natives 2100 / 2101) send the mothership message 0x20100 with a block:
+// +0x08 int kind (2101: 1), +0x10 int count, +0x14 int interval in frames (seconds * 60), +0x18 float, +0x1C byte flag,
+// +0x20 std::wstring (the enemy's SGO path), +0x40 int 1, +0x48 int the hatch index (EDF.dll 0x211E90 / 0x212017; UfoMother511 reads
+// [data+0x48] and forwards the message to that ring unit; UfoCarrier508 hands it to its one generator component, 0x6E1630, which
+// reads +0x40). The clone of the carrier has that one component; the mothership has four hatches, so the job is taken here: for the
+// hatch it names, the hatch opens, one enemy is made at the hatch every `interval` frames, the hatch closes after the last.
+struct GenJob { int hatch; wchar_t path[260]; int remaining; int interval; int countdown; bool opened; int closeIn; bool done; int made; };
+std::unordered_map<const void*,std::vector<GenJob>> genJobs;
+std::unordered_set<const void*> partsBuilt;      // hulls whose SpawnParts has run
+std::atomic<int> generatorLogged{0};
+
+bool QueueGenerator(void* hullObj,const char* d) noexcept {
+    if(!(Cfg().edf41MotherParts&1))return false;                     // no hatch objects: the carrier's own generator keeps the message
+    if(!Rd(d,0x50,"generator message block"))return false;
+    GenJob j{};
+    std::int32_t kind,count,frames,index;
+    float level;
+    std::memcpy(&kind,d+8,4); std::memcpy(&count,d+0x10,4); std::memcpy(&frames,d+0x14,4); std::memcpy(&level,d+0x18,4); std::memcpy(&index,d+0x48,4);
+    const std::uint8_t flag=static_cast<std::uint8_t>(d[0x1C]);
+    std::uint64_t size=0,capacity=0;
+    std::memcpy(&size,d+0x30,8); std::memcpy(&capacity,d+0x38,8);
+    const wchar_t* text=capacity<8 ? reinterpret_cast<const wchar_t*>(d+0x20) : *reinterpret_cast<const wchar_t* const*>(d+0x20);
+    if(size==0 || size>=260 || !Rd(text,(size+1)*sizeof(wchar_t),"generator enemy path")) { Fail("a generator message without a readable enemy path"); return false; }
+    if(count<=0 || count>256 || index<0 || index>=64) { Fail("a generator message with a count or hatch index out of range"); return false; }
+    std::wmemcpy(j.path,text,static_cast<std::size_t>(size)); j.path[size]=L'\0';
+    j.hatch=index; j.remaining=count; j.interval=frames>0 ? frames : 1; j.countdown=0; j.opened=false; j.closeIn=0; j.done=false; j.made=0;
+    if(generatorLogged.fetch_add(1)<24)
+        Log("EDF41MOTHER generator job on %p: hatch %d, %d x %ls every %d frames (block: kind %d, level %.2f, flag %u, +0x40 = %d)",hullObj,index,count,j.path,j.interval,kind,level,flag,*reinterpret_cast<const std::int32_t*>(d+0x40));
+    std::lock_guard<std::mutex> hold(partLock);
+    genJobs[hullObj].push_back(j);
+    return true;
+}
+
+// The hatch part `index` of the hull (0 when there is none).
+void* HatchPartOf(const void* hullObj,int index) noexcept {          // partLock held
+    const auto it=partsOfHull.find(hullObj);
+    if(it==partsOfHull.end())return nullptr;
+    for(void* part:it->second) {
+        const auto r=partOf.find(part);
+        if(r!=partOf.end() && r->second.group==kGroupHatch && r->second.index==index)return part;
+    }
+    return nullptr;
+}
+
+bool PlayState(void* part,const wchar_t* state) noexcept {
+    char* o=static_cast<char*>(part);
+    if(!Rd(o+kCasPlayerAt,4,"part CAS player index") || !Rd(o+kCasAt,8,"part CAS players"))return false;
+    const int casPlayer=*reinterpret_cast<const std::int32_t*>(o+kCasPlayerAt);
+    return reinterpret_cast<bool(__fastcall*)(void*,int,const wchar_t*,int)>(image+kSetCasState)(o+kCasAt,casPlayer,state,0);
+}
+
+// One enemy at the hatch: the hull's orientation, the hatch's position, a step below it, spread on a ring so they do not overlap.
+bool SpawnFromHatch(void* hullObj,void* hatchPart,const wchar_t* path,int n) noexcept {
+    const char* h=static_cast<const char*>(hullObj);
+    const char* p=static_cast<const char*>(hatchPart);
+    if(!Rd(h+kMatrixAt,64,"hull matrix (generator)") || !Rd(p+kMatrixAt,64,"hatch matrix (generator)"))return false;
+    float m[16];
+    std::memcpy(m,h+kMatrixAt,sizeof(m));
+    const float* hatchPos=reinterpret_cast<const float*>(p+kMatrixAt+0x30);
+    const float angle=static_cast<float>(n)*2.39996f,radius=4.0f+static_cast<float>(n%5)*2.0f;
+    m[12]=hatchPos[0]+std::cos(angle)*radius; m[13]=hatchPos[1]-12.0f; m[14]=hatchPos[2]+std::sin(angle)*radius; m[15]=1.0f;
+    if(!Readable(image+kManagerGlobal,8) || !*reinterpret_cast<void**>(image+kManagerGlobal))return false;
+    void* manager=*reinterpret_cast<void**>(image+kManagerGlobal);
+    alignas(16) unsigned char context[0x30]={};
+    const std::uint64_t vt=reinterpret_cast<std::uint64_t>(image+kCreateContextVtable);
+    std::memcpy(context,&vt,8);
+    return reinterpret_cast<CreateFromPathFn>(image+kCreateFromPath)(manager,m,path,context)!=nullptr;
+}
+
+void RunGenerators(void* hullObj) noexcept {
+    struct Act { void* hatch; bool open,close,spawn; wchar_t path[260]; int n; int index; };
+    std::vector<Act> acts;
+    {
+        std::lock_guard<std::mutex> hold(partLock);
+        const auto it=genJobs.find(hullObj);
+        if(it==genJobs.end())return;
+        const bool built=partsBuilt.count(hullObj)!=0;
+        for(GenJob& j:it->second) {
+            if(j.done)continue;
+            void* hatch=HatchPartOf(hullObj,j.hatch);
+            if(!hatch) {
+                if(built) { Log("EDF41MOTHER generator job on %p: the hull has no hatch %d, dropped",hullObj,j.hatch); j.done=true; }
+                continue;
+            }
+            Act a{hatch,false,false,false,{},j.made,j.hatch};
+            if(!j.opened) { a.open=true; j.opened=true; }
+            if(j.remaining>0) {
+                if(j.countdown<=0) {
+                    a.spawn=true; std::wmemcpy(a.path,j.path,260);
+                    --j.remaining; ++j.made; j.countdown=j.interval;
+                    if(j.remaining==0)j.closeIn=90;
+                } else --j.countdown;
+            } else if(j.closeIn>0 && --j.closeIn==0) { a.close=true; j.done=true; }
+            if(a.open || a.close || a.spawn)acts.push_back(a);
+        }
+        auto& v=it->second;
+        v.erase(std::remove_if(v.begin(),v.end(),[](const GenJob& j){ return j.done; }),v.end());
+    }
+    for(const Act& a:acts) {
+        if(a.open) { const bool ok=PlayState(a.hatch,L"open"); Log("EDF41MOTHER hatch %d %p: open (CAS state %s)",a.index,a.hatch,ok ? "set" : "REFUSED"); }
+        if(a.spawn) {
+            const bool ok=SpawnFromHatch(hullObj,a.hatch,a.path,a.n);
+            static std::atomic<int> said{0};
+            if(said.fetch_add(1)<40)Log("EDF41MOTHER hatch %d: enemy #%d %ls %s",a.index,a.n+1,a.path,ok ? "made" : "NOT made");
+        }
+        if(a.close) { const bool ok=PlayState(a.hatch,L"close"); Log("EDF41MOTHER hatch %d %p: close (CAS state %s)",a.index,a.hatch,ok ? "set" : "REFUSED"); }
+    }
 }
 
 // ---- the parts: reading the hull's SGO and making them ---------------------------------------------------------
@@ -414,6 +529,8 @@ void SpawnParts(void* hullObj) noexcept {
     if(mask&16)panels=MakeGroup(hullObj,L"mp_Panel",kGroupPanel,true);
     Log("EDF41MOTHER parts of %p made in %llu ms (ini Edf41MotherParts=%d): %d hatches, %d covers, %d cannons, %d main cannon, %d panels",
         hullObj,static_cast<unsigned long long>(GetTickCount64()-t0),mask,hatches,covers,cannons,big,panels);
+    std::lock_guard<std::mutex> hold(partLock);
+    partsBuilt.insert(hullObj);
 }
 
 // ---- the wrappers ----------------------------------------------------------------------------------------------
@@ -459,6 +576,8 @@ std::uint64_t __fastcall DtorWrap(void* self,unsigned flags) {
     {
         std::lock_guard<std::mutex> hold(partLock);
         liveHulls.erase(self);
+        genJobs.erase(self);
+        partsBuilt.erase(self);
         const auto it=partsOfHull.find(self);
         if(it!=partsOfHull.end()) {
             Log("EDF41MOTHER hull %p gone: its %zu parts delete themselves on their next update",self,it->second.size());
@@ -504,6 +623,7 @@ std::uint64_t __fastcall UpdateWrap(void* self,void* dt) {
     }
     if(tick==1)Log("EDF41MOTHER first update %p durability %.1f destroyed %u pos %.1f %.1f %.1f",self,durability,destroyed,pos[0],pos[1],pos[2]);
     if(tick==1)SpawnParts(self);
+    RunGenerators(self);
     if(changed)Log("EDF41MOTHER durability %p %.1f -> %.1f (destroyed %u)",self,before,durability,destroyed);
     if(tick%kUpdateLogEvery==0) {
         Log("EDF41MOTHER update %p frame %u durability %.1f destroyed %u pos %.1f %.1f %.1f",self,tick,durability,destroyed,pos[0],pos[1],pos[2]);
@@ -545,10 +665,8 @@ std::uint64_t __fastcall MessageWrap(void* self,std::uint32_t msg,void* data) {
         const std::int32_t action=*static_cast<const std::int32_t*>(data);
         Log("EDF41MOTHER ObjectAction %p action %d = %s (message 0x%X)",self,action,ActionMeaning(action),msg);
     }
-    else if(msg==kMsgGenerator && data && Rd(static_cast<const char*>(data)+0x40,4,"generator message data")) {
-        // 4.1 sends the hatch index at +0x40 and expects the hatch's world transform back (docs/edf41-ufomother301.md 1.4).
-        static std::atomic<int> said{0};
-        if(said.fetch_add(1)<16)Log("EDF41MOTHER generator position asked from %p: index %d (message 0x%X, data %p)",self,*reinterpret_cast<const std::int32_t*>(static_cast<const char*>(data)+0x40),msg,data);
+    else if(msg==kMsgGenerator && data) {
+        if(QueueGenerator(self,static_cast<const char*>(data)))return 1;   // handled: the hatches do it, not the carrier's one generator
     }
     else if(msg==kMsgParts && data && Rd(data,8,"parts message data"))
         Log("EDF41MOTHER GetPartsObject %p group %d index %d",self,static_cast<const std::int32_t*>(data)[0],static_cast<const std::int32_t*>(data)[1]);
