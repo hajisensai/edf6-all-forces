@@ -6667,6 +6667,15 @@ def edf41_hector_alias() -> None:
     wp = top['weak_point']
     assert {'damage_esb', 'body', 'noweak_damage_multiply', 'weak_damage_multiply'} <= set(wp), wp
     assert wp['noweak_damage_multiply'] == 1.0 and wp['weak_damage_multiply'] == 1.0, wp
+    # the state played on first sight is one of Hector's (an encount_appeal_* of the template's faulted M153)
+    assert top['BerserkerSettings']['EncountAnimations'] == ['wakeup'], top['BerserkerSettings']
+    m.check_states(root, files['OBJECT/HECTOR.CAS'], 'HECTOR301CC')
+    try:
+        m.check_states(root, None, 'no CAS')
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('check_states passed a state against no CAS')
     # the CAS
     cas = files['OBJECT/HECTOR.CAS']
     lay = cl.cas_layout(cas)

@@ -198,6 +198,9 @@ HECTOR_COMMON: tuple[tuple[str, object], ...] = (
     # weak_point kept (the class's setup 0x34C580 dereferences a missing key or member: 0x34CEFC -> {null, -1} ->
     # 0x551E0, the 2026-10-13 M153 crash) but without effect: no hit is a weak or a non-weak one any more. Its body
     # ragdoll_eye is none of Hector's (0x6EA670 gives -1, which both readers, 0x34E06F and 0x34E6C0, take as no body).
+    # what it plays on first sight of a target: 4.1's Hector wakes up (its CAS states: sleep, wakeup, stand, walk,
+    # turn); the template's encount_appeal_* are not Hector's, resolve to -1 and fault when played (STATE_KEYS)
+    ('BerserkerSettings/EncountAnimations', ['wakeup']),
     ('weak_point/noweak_damage_multiply', 1.0),
     ('weak_point/weak_damage_multiply', 1.0),
     # hector_ai_setting [720, 1440, 540, 720, 150, 20, 80]: the stop radius is drawn from 20..80 (approach distance);
@@ -558,6 +561,26 @@ def set_path(node: dsgo.Node, path: str, value: dsgo.Value) -> None:
         parent.set(last, value)
 
 
+# SGO keys whose strings the class resolves to CAS states once, at construction, and later plays by that index alone:
+# a name the CAS lacks resolves to -1 and the play faults (BerserkerSettings.EncountAnimations: 0x33D4AD stores it at
+# +0x18D4, 0x33F861 plays it on first sight with no name to fall back on; the 2026-10-13 M153 crash).
+STATE_KEYS = ('BerserkerSettings/EncountAnimations',)
+
+
+def check_states(out: dsgo.Node, cas: bytes | None, rel: str) -> None:
+    """ValueError when a STATE_KEYS entry of `out` names a state no player of `cas` has."""
+    have = set().union(*cas_graft.states(cas).values()) if cas else set()
+    for key in STATE_KEYS:
+        try:
+            names = node_path(out, key)
+        except KeyError:
+            continue
+        values = names.items if isinstance(names, dsgo.Node) else []
+        missing = [n for n in values if isinstance(n, str) and n not in have]
+        if missing:
+            raise ValueError(f'{rel}: {key} names states its CAS has not: {missing}')
+
+
 def remove_key(node: dsgo.Node, key: str) -> None:
     """The member `key` of a DSGO dictionary taken out (the others keep their names)."""
     at = next((i for i, n in node.names.items() if n == key), None)
@@ -693,6 +716,7 @@ def alias_dsgo(games: 'Games', root: str, files: dict[str, bytes], a: Alias, t_d
     cas = rel_of(am[1])
     template_cas = rel_of(t_am.items[1])
     graft_cas(games, a, files, cas, template_cas)
+    check_states(out, files.get(cas), rel)
     files[rel] = dsgo.compact(dsgo.Document(out, doc.pool))
     if a.prune:
         prune(files, rel)
