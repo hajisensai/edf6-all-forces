@@ -39,12 +39,13 @@ void ReadField(const std::string& line,GenerateStatus* s) noexcept {
 }
 }  // namespace
 
-bool ReadFileBytes(const wchar_t* path,std::string* out) noexcept {
+bool ReadFileBytes(const wchar_t* path,std::string* out,FILETIME* written) noexcept {
+    if(written)*written=FILETIME{};
     const HANDLE file=CreateFileW(path,GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,
                                   FILE_ATTRIBUTE_NORMAL,nullptr);
     if(file==INVALID_HANDLE_VALUE)return false;
     LARGE_INTEGER size{};
-    bool ok=GetFileSizeEx(file,&size) && size.QuadPart<(64ll<<20);
+    bool ok=GetFileSizeEx(file,&size) && size.QuadPart<(64ll<<20) && (!written || GetFileTime(file,nullptr,nullptr,written));
     if(ok) {
         out->assign(static_cast<std::size_t>(size.QuadPart),'\0');
         DWORD got=0;
@@ -104,6 +105,10 @@ bool VariantGenerator::Start(const wchar_t* exe,const wchar_t* args,wchar_t* why
     }
     CloseHandle(pi.hThread);
     process_=pi.hProcess;
+    FILETIME ended{},kernel{},user{};
+    // Read the actual process creation time, even when the child has already written its result and exited.
+    // GetSystemTime here would incorrectly classify a very fast child's final state as stale.
+    if(!GetProcessTimes(process_,&started_,&ended,&kernel,&user))started_=FILETIME{};
     ran_=false;
     return true;
 }
@@ -111,6 +116,7 @@ bool VariantGenerator::Start(const wchar_t* exe,const wchar_t* args,wchar_t* why
 // What a finished (or never started) generator left: a run of ours without a final state failed; so did a `running`
 // nobody of ours is still writing (a generator killed with the game).
 static void Settle(GenerateStatus* s,bool ran,DWORD exitCode) noexcept {
+    if(ran && exitCode && s->state==GenerateState::ok)s->state=GenerateState::idle;
     if(s->state==GenerateState::ok || s->state==GenerateState::failed || (!ran && s->state==GenerateState::idle))return;
     s->state=GenerateState::failed;
     if(!ran)Say(s->message,std::size(s->message),L"上次生成没有完成，请重新生成");
@@ -122,7 +128,13 @@ GenerateStatus VariantGenerator::Status(const wchar_t* statusPath) noexcept {
     const bool running=Running();
     if(!running)Reap();
     std::string text;
-    GenerateStatus s=statusPath && ReadFileBytes(statusPath,&text) ? ParseGenerateStatus(text) : GenerateStatus{};
+    FILETIME written{};
+    const bool read=statusPath && ReadFileBytes(statusPath,&text,&written);
+    // Read the timestamp on the same handle as the bytes: atomic replacement must not pair an old result with the
+    // new file's timestamp. A child that exits before writing running/final must not reuse the last run's result.
+    const bool current=(!process_ && !ran_) || ((started_.dwHighDateTime || started_.dwLowDateTime) &&
+                                              CompareFileTime(&written,&started_)>=0);
+    GenerateStatus s=read && current ? ParseGenerateStatus(text) : GenerateStatus{};
     if(!running) {
         Settle(&s,ran_,exitCode_);
         return s;

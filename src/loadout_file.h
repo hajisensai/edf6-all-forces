@@ -10,7 +10,7 @@
 
 namespace crew {
 // The whole file into *out. Opened sharing read / write / delete, so the generator's rename over it never fails.
-bool ReadFileBytes(const wchar_t* path,std::string* out) noexcept;
+bool ReadFileBytes(const wchar_t* path,std::string* out,FILETIME* written=nullptr) noexcept;
 // `bytes` to `path` through a temporary file beside it and MoveFileExW(REPLACE_EXISTING | WRITE_THROUGH): a reader sees
 // the old file or the new one, never a part. False (the temporary removed, `path` untouched) on any failure.
 bool ReplaceFileAtomic(const wchar_t* path,const std::string& bytes) noexcept;
@@ -40,5 +40,6 @@ private:
     HANDLE process_=nullptr;
     bool ran_=false;
     DWORD exitCode_=0;
+    FILETIME started_{};   // the process's creation time: older status files belong to a previous run
 };
 }  // namespace crew

@@ -201,6 +201,32 @@ void Process() {
     VariantGenerator fresh;
     Check(fresh.Status(status.c_str()).state==GenerateState::failed,"a stale `running` nobody writes: failed, not running forever");
     Check(!fresh.Start(L"C:\\no\\such\\generator.exe",L"x",why,200) && why[0],"a missing generator refused, why named");
+    // A new run may die before Python writes its first `running` status (or exit busy without touching the file).
+    // Leave a prior final result with an explicitly old timestamp, then run a real child that writes nothing.
+    for(const char* state:{"ok","failed"}) {
+        Check(ReplaceFileAtomic(status.c_str(),std::string("state=")+state+"\nmade=99\nmessage=previous run\n"),
+              "a prior final result written");
+        HANDLE old=CreateFileW(status.c_str(),FILE_WRITE_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
+                               nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+        const FILETIME past{1,0};
+        Check(old!=INVALID_HANDLE_VALUE && SetFileTime(old,nullptr,nullptr,&past),"the prior result predates the new child");
+        CloseHandle(old);
+        Check(g.Start(cmd,L"/c exit 3",why,200),"a child starts then exits busy without a status write");
+        WaitDone(g);
+        s=g.Status(status.c_str());
+        Check(s.state==GenerateState::failed && s.made==0 && std::wcsstr(s.message,L"另一个生成器"),
+              "a stale final result is not attributed to the new busy child");
+        Check(g.Start(cmd,L"/c exit 0",why,200),"a child exits zero without writing a current final state");
+        WaitDone(g);
+        s=g.Status(status.c_str());
+        Check(s.state==GenerateState::failed && s.made==0 && std::wcsstr(s.message,L"0"),
+              "even zero exit needs a final state written by this run");
+    }
+    const std::wstring badOk=L"/c (echo state=ok)>\""+status+L"\" & exit 7";
+    Check(g.Start(cmd,badOk.c_str(),why,200),"a child writes ok but exits nonzero");
+    WaitDone(g);
+    s=g.Status(status.c_str());
+    Check(s.state==GenerateState::failed && std::wcsstr(s.message,L"7"),"nonzero exit cannot claim success");
     DeleteFileW(status.c_str());
 }
 }  // namespace
