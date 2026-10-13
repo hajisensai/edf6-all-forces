@@ -699,8 +699,12 @@ MOTHER_DEV_OUT = os.path.join(HERE, '..', 'edf41port_dev')
 MOTHER_DEV_ALIAS = Alias('UfoMother301', 'E508_CARRIER.SGO', ('in_ring', 'out_ring'),
                          state_aliases=(('main', 'close_state', 'close'), ('main', 'open_state', 'open')),
                          # se_list names E508's cues (the bank of UFOCARRIER301.ACB): its bank joins the mothership's own
+                         # The hull is 757 m across and flies 600 m up: past 1000 m from the camera the near pass clips it
+                         # (docs/view-distance-re.md section 3; the 2026-10-13 real run showed an empty sky). EDF6's own far
+                         # carrier E508_CARRIER_FAR.SGO differs from E508_CARRIER.SGO in exactly these two keys.
                          override=(('game_sound', ['app:/sound/adx/tikyuu4_en_MotherShip.acb',
-                                                   'app:/sound/adx/tikyuu4_en_UFOcarrier301.acb']),),
+                                                   'app:/sound/adx/tikyuu4_en_UFOcarrier301.acb']),
+                                   ('UfoCarryer_EnableFarRender', 1), ('spawn_effect_setting', [0.0, 80.0, 80.0])),
                          inert_materials="the 4.1 mothership has no material animation (its lights are code-driven): E508's "
                                          "entries (Metal, Weakpoint) bind nothing on its model, the slots only have to exist (prototype)")
 MOTHER_DEV_LOCATORS = (
@@ -718,6 +722,13 @@ def mother_dev_fix(files: dict[str, bytes]) -> None:
         del members[k]
     am = members['animation_model']
     am[2] = mab_legacy.mab_add_locators(mab_block(am[2]), list(MOTHER_DEV_LOCATORS))
+    # What the plugin logs back at creation to show the game was given this model: [mdb name, half extents x y z, bones]
+    # (src/edf41mother.cpp; read from the file, so a different model in the archive changes it).
+    rab_rel = rel_of(am[0][0][0])
+    body = next(f for f in mdb.rab_read(files[rab_rel]).files if f.name.lower() == am[0][0][1].lower())
+    md = mdb.mdb_read(body.data)
+    ext = [max(abs(x) for x in mdb.rigid_extent(md, ax)) for ax in range(3)]
+    members['edf41_mother_model'] = [am[0][0][1], *ext, len(md.bones)]
     files[rel] = sgo.write_depth_first(version, members)
     prune(files, rel)
 

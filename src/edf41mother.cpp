@@ -46,6 +46,8 @@ constexpr std::size_t kNew=0x12D85B0;                 // the game's operator new
 constexpr std::size_t kCarrierCtor=0x4F8690;          // UfoCarrier508::UfoCarrier508(this, createInfo)
 constexpr std::size_t kCarrierVtable=0x17C9DC0;       // its primary vtable
 constexpr std::size_t kCarrierSize=0x1630;
+// The game's SGO accessors, as src/edf41ai.cpp uses them (the object's tree is the member at +0xA8; a handle is {tree, node index}).
+constexpr std::size_t kChildByName=0xD7480,kChildCount=0x53060,kChildIndex=0x52DE0,kNodeFloat=0x52F30,kNodeString=0x551E0,kTreeAt=0xA8;
 constexpr int kSlots=49;
 constexpr int kSlotDtor=0,kSlotUpdate=5,kSlotMessage=9;
 // UfoCarrier508's vtable 0x17C9DC0 as the file has it (slot -> EDF.dll RVA); 7 is the ship AI, 5 Update, 9 OnMessage.
@@ -69,6 +71,11 @@ constexpr Print kPrints[]={
     {kRegisterFactory,{0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x74}},
     {kNew,{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B}},
     {kCarrierCtor,{0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57}},
+    {kChildByName,{0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83}},
+    {kChildCount,{0x48,0x8B,0x11,0x44,0x8B,0x49,0x08,0x4C}},
+    {kChildIndex,{0x4C,0x8B,0x09,0x44,0x8B,0x51,0x08,0x44}},
+    {kNodeFloat,{0x48,0x83,0xEC,0x28,0xE8,0x17,0x00,0x00}},
+    {kNodeString,{0x48,0x83,0xEC,0x28,0x4C,0x8B,0xD1,0xE8}},
     {0x4F8A70,{0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83}},   // slot 0
     {0x4F9540,{0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83}},   // slot 5
     {0x4F93E0,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74}},   // slot 9
@@ -245,6 +252,52 @@ void AuditLiveTable() noexcept {
     Log("EDF41MOTHER at creation, %d of %d UfoCarrier508 slots are patched by someone; the clone uses the stock functions",differ,kSlots);
 }
 
+// ---- reading the object's own SGO back (what the game was given) ----------------------------------------------------
+struct Handle { void* tree; std::uint32_t index; std::uint32_t pad; };
+using ChildByNameFn=Handle*(__fastcall*)(const Handle*,Handle*,const wchar_t*);
+using ChildCountFn=int(__fastcall*)(const Handle*);
+using ChildIndexFn=std::uint32_t(__fastcall*)(const Handle*,std::uint32_t);
+using NodeFloatFn=float(__fastcall*)(const Handle*);
+using NodeStringFn=const wchar_t*(__fastcall*)(const Handle*);
+
+bool KeyOf(const Handle& parent,const wchar_t* key,Handle& out) noexcept {
+    out={nullptr,0xFFFFFFFFu,0};
+    reinterpret_cast<ChildByNameFn>(image+kChildByName)(&parent,&out,key);
+    return out.tree!=nullptr;
+}
+bool Nth(const Handle& parent,int i,Handle& out) noexcept {
+    const int n=reinterpret_cast<ChildCountFn>(image+kChildCount)(&parent);
+    if(i<0 || i>=n)return false;
+    out={parent.tree,reinterpret_cast<ChildIndexFn>(image+kChildIndex)(&parent,static_cast<std::uint32_t>(i)),0};
+    return true;
+}
+
+// Said at creation: the model the game was given (animation_model[0][0] = archive, MDB) and the file's own measure of it
+// (edf41_mother_model = [mdb, half extents x y z, bones], written by tools/make_edf41_objects.py from the converted MDB).
+void LogModel(void* obj) noexcept {
+    const Handle root{static_cast<char*>(obj)+kTreeAt,0,0};
+    if(!Rd(static_cast<char*>(obj)+kTreeAt,8,"object SGO tree"))return;
+    Handle model{},first{},pair{},rab{},mdbName{};
+    if(KeyOf(root,L"animation_model",model) && Nth(model,0,first) && Nth(first,0,pair) && Nth(pair,0,rab) && Nth(pair,1,mdbName)) {
+        const wchar_t* a=reinterpret_cast<NodeStringFn>(image+kNodeString)(&rab);
+        const wchar_t* b=reinterpret_cast<NodeStringFn>(image+kNodeString)(&mdbName);
+        if(Rd(a,2,"model archive name") && Rd(b,2,"model name"))
+            Log("EDF41MOTHER object %p was given the model %ls / %ls",obj,a,b);
+    } else Log("EDF41MOTHER object %p: animation_model could not be read back from its SGO",obj);
+    Handle info{},name{},ex{},ey{},ez{},bones{};
+    if(KeyOf(root,L"edf41_mother_model",info) && Nth(info,0,name) && Nth(info,1,ex) && Nth(info,2,ey) && Nth(info,3,ez) && Nth(info,4,bones)) {
+        const wchar_t* n=reinterpret_cast<NodeStringFn>(image+kNodeString)(&name);
+        if(Rd(n,2,"edf41_mother_model name"))
+            Log("EDF41MOTHER object %p model %ls: half extents %.1f %.1f %.1f m (the converted MDB), %.0f bones; at 600 m up it needs the far pass (UfoCarryer_EnableFarRender)",
+                obj,n,reinterpret_cast<NodeFloatFn>(image+kNodeFloat)(&ex),reinterpret_cast<NodeFloatFn>(image+kNodeFloat)(&ey),
+                reinterpret_cast<NodeFloatFn>(image+kNodeFloat)(&ez),reinterpret_cast<NodeFloatFn>(image+kNodeFloat)(&bones));
+    } else Log("EDF41MOTHER object %p: no edf41_mother_model key in its SGO",obj);
+    Handle farFlag{};
+    if(KeyOf(root,L"UfoCarryer_EnableFarRender",farFlag))
+        Log("EDF41MOTHER object %p UfoCarryer_EnableFarRender = %.0f",obj,reinterpret_cast<NodeFloatFn>(image+kNodeFloat)(&farFlag));
+    else Log("EDF41MOTHER object %p: UfoCarryer_EnableFarRender is not set (the hull may be clipped at 1000 m)",obj);
+}
+
 // ---- the creation ----------------------------------------------------------------------------------------------
 void __fastcall FactoryCreate(Factory*,void* info) noexcept {
     if(!info || !Rd(info,0x28,"createInfo")) { Log("EDF41MOTHER create: no create info (%p), nothing made",info); return; }
@@ -260,6 +313,7 @@ void __fastcall FactoryCreate(Factory*,void* info) noexcept {
     }
     *vptr=&cloneBlock[1];
     const int n=++created;
+    LogModel(obj);
     Log("EDF41MOTHER create #%d: UfoMother301 object %p built by UfoCarrier508's constructor, vtable %p -> clone %p; info %p",n,obj,static_cast<void*>(image+kCarrierVtable),static_cast<void*>(&cloneBlock[1]),info);
 }
 
