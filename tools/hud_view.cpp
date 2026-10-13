@@ -173,6 +173,8 @@ bool PlayerStockHud(StockHudReadout* o) noexcept { if(hasStock)*o=sceneStock;ret
 bool PlayerNixTorso(NixTorso* o) noexcept { if(hasNix)*o=sceneNix;return hasNix; }
 bool PlayerProteus(ProteusReadout* o) noexcept { if(hasProteus)*o=sceneProteus;return hasProteus; }
 bool PlayerSazabiCue(SazabiCue* o) noexcept { if(hasSazabi)*o=sceneSazabi;return hasSazabi; }
+bool hasScreens=false;CockpitScreens sceneScreens{};   // a vehicle's first person: its cockpit's screens
+bool FirstPersonScreens(CockpitScreens* o) noexcept { if(hasScreens)*o=sceneScreens;return hasScreens; }
 bool PlayerTurretCam(TurretCamReadout* value) noexcept { if(hasMouseIntent)*value=sceneMouseIntent;return hasMouseIntent; }
 bool SightZoomMounted(const void*) noexcept { return hasMountedOptic; }
 bool PlayerTurretBinding(edf::aimlink::ModeBindingV1* value) noexcept { if(hasModeBinding)*value=sceneModeBinding;return hasModeBinding; }
@@ -1656,6 +1658,93 @@ int ArmorDrawn(const wchar_t* scene,bool want,bool hull) {
     return failed;
 }
 
+// The cockpit's screens (cockpit_screens.inc): a tank gunner's status and weapons screens and a heli pilot's flight and
+// radar screens, each 0.22 x 0.13 m, 0.6 m ahead of the eye and 0.25 m under it, one either side, facing it. Each must
+// get its text, all of it inside the screen's quad on the view; the HUD's own panels (the stock block, the strips) must
+// give way.
+CockpitScreen ScreenAt(ScreenKind kind,const float* fwd,float side) {
+    float f[3]={fwd[0],fwd[1],fwd[2]};
+    const float n=std::sqrt(f[0]*f[0]+f[1]*f[1]+f[2]*f[2]);
+    for(float& v:f)v/=n;
+    const float right[3]={-f[2],0.0f,f[0]};   // fwd x up (game +x is left): the viewer's right, level
+    const float rn=std::sqrt(right[0]*right[0]+right[2]*right[2]);
+    CockpitScreen c{};
+    c.kind=kind;c.w=0.22f;c.h=0.13f;
+    for(int k=0;k<3;++k)c.right[k]=right[k]/rn;
+    c.up[0]=c.right[1]*f[2]-c.right[2]*f[1];c.up[1]=c.right[2]*f[0]-c.right[0]*f[2];c.up[2]=c.right[0]*f[1]-c.right[1]*f[0];
+    for(int k=0;k<3;++k)c.off[k]=f[k]*0.6f-c.up[k]*0.25f+c.right[k]*side;
+    return c;
+}
+
+int ScreensDrawn(const wchar_t* name,const float* pos,const float* fwd,int width) {
+    int failed=0,inside=0;
+    float vp[16],eye[3],dir[3];
+    Camera(pos,fwd,static_cast<float>(width),1080.0f,vp);
+    if(!RayOf(vp,eye,dir)){std::printf("FAIL %ls: no eye in the view\n",name);return 1;}   // as the draw finds it
+    for(int i=0;i<sceneScreens.n;++i) {
+        const CockpitScreen& c=sceneScreens.s[i];
+        float lo[2]={1e9f,1e9f},hi[2]={-1e9f,-1e9f};
+        for(int k=0;k<4;++k) {
+            const float sx=k==1 || k==2 ? 0.5f : -0.5f,sy=k<2 ? 0.5f : -0.5f;
+            float p[3],q[4];
+            for(int a=0;a<3;++a)p[a]=eye[a]+c.off[a]+c.right[a]*c.w*sx+c.up[a]*c.h*sy;
+            for(int a=0;a<4;++a)q[a]=p[0]*vp[a]+p[1]*vp[4+a]+p[2]*vp[8+a]+vp[12+a];
+            const float x=width*0.5f*(1.0f+q[0]/q[3]),y=540.0f*(1.0f-q[1]/q[3]);
+            lo[0]=std::fmin(lo[0],x);lo[1]=std::fmin(lo[1],y);hi[0]=std::fmax(hi[0],x);hi[1]=std::fmax(hi[1],y);
+        }
+        int texts=0;
+        for(const Drew& d:drew) {
+            if(d.text.empty())continue;
+            const float cx=(d.x0+d.x1)*0.5f,cy=(d.y0+d.y1)*0.5f;
+            if(cx<lo[0] || cx>hi[0] || cy<lo[1] || cy>hi[1])continue;
+            ++texts;
+            if(d.x0<lo[0]-2.0f || d.x1>hi[0]+2.0f || d.y0<lo[1]-2.0f || d.y1>hi[1]+2.0f) {
+                ++failed;std::printf("FAIL %ls: screen %d's text \"%s\" spills out of it\n",name,i,Narrow(d.text).c_str());
+            }
+        }
+        if(texts<2){++failed;std::printf("FAIL %ls: screen %d shows %d lines\n",name,i,texts);}
+        inside+=texts;
+    }
+    std::printf("%s  %ls: %d screens, %d lines on them\n",failed ? "FAIL" : "ok",name,sceneScreens.n,inside);
+    return failed;
+}
+
+int CockpitScenes(const std::wstring& dir,const float* ground,const float* pos) {
+    int failed=0;
+    hasJet=hasHeli=hasWarn=hasSazabi=hasDrill=hasNix=hasProteus=false;hasStock=true;
+    StockTank(ground);
+    hasScreens=true;
+    sceneScreens=CockpitScreens{};
+    sceneScreens.s[sceneScreens.n++]=ScreenAt(ScreenKind::weapons,sceneStock.hull,-0.13f);
+    sceneScreens.s[sceneScreens.n++]=ScreenAt(ScreenKind::status,sceneStock.hull,0.13f);
+    Prime(ground);Scene(dir,L"cockpit_tank_gunner",ground);
+    failed+=ScreensDrawn(L"cockpit_tank_gunner",ground,sceneStock.hull,1920);
+    hasStock=false;hasHeli=true;hasWarn=false;
+    sceneHeli=PlayerHeliReadout{};
+    sceneHeli.sym.nose[2]=1.0f;std::memcpy(sceneHeli.sym.pos,pos,12);
+    sceneHeli.f.speed=42.0f;sceneHeli.f.clear=85.0f;sceneHeli.f.climb=2.5f;sceneHeli.f.ground=true;
+    sceneHeli.f.hp=900.0f;sceneHeli.f.hpMax=1200.0f;
+    sceneHeli.fuel.ok=true;sceneHeli.fuel.share=0.6f;sceneHeli.fuel.sec=310.0f;
+    sceneScreens=CockpitScreens{};
+    sceneScreens.s[sceneScreens.n++]=ScreenAt(ScreenKind::flight,sceneHeli.sym.nose,-0.13f);
+    sceneScreens.s[sceneScreens.n++]=ScreenAt(ScreenKind::map,sceneHeli.sym.nose,0.13f);
+    Prime(pos);Scene(dir,L"cockpit_heli_pilot",pos);
+    failed+=ScreensDrawn(L"cockpit_heli_pilot",pos,sceneHeli.sym.nose,1920);
+    // An unmanned gun's station (remote_display): its monitor over the whole view, its title, bearing, elevation, weapon.
+    hasHeli=false;hasStock=true;
+    StockTank(ground);
+    sceneScreens=CockpitScreens{};
+    sceneScreens.s[sceneScreens.n].kind=ScreenKind::sensor;sceneScreens.s[sceneScreens.n].w=0.4f;sceneScreens.s[sceneScreens.n++].h=0.3f;
+    Prime(ground);Scene(dir,L"cockpit_remote_station",ground);
+    int rws=0;
+    for(const Drew& d:drew)rws+=d.text==Tr(Tx::rwsTitle) || d.text.rfind(L"AZ ",0)==0 || d.text.rfind(L"EL ",0)==0 ||
+                                d.text.find(L"CANNON")!=std::wstring::npos;
+    if(hudtext::InUse()==hudtext::Lang::en && rws<4){++failed;std::printf("FAIL cockpit_remote_station: %d of its 4 read-outs\n",rws);}
+    else std::printf("ok  cockpit_remote_station: the station's monitor and its read-outs\n");
+    hasScreens=false;hasHeli=false;hasWarn=false;
+    return failed;
+}
+
 int ArmorScenes(const std::wstring& dir,const float* ground,const float* pos) {
     int failed=0;
     // The low mark as the stock gauge sets it (+0xB01 at or under 0.25), and the colours that follow it.
@@ -2229,6 +2318,7 @@ int Scenes(const std::wstring& dir) {
     hasStock=false;
     failed+=SazabiScenes(dir,ground);
     failed+=ArmorScenes(dir,ground,pos);
+    failed+=CockpitScenes(dir,ground,pos);
     // The next language's run begins as this one did: EDF6AutoTurret's mode last seen as auto-aim, and seen long enough
     // ago that no switch's banner (hud_cue.h Changed, a wall-clock kSwitchMs) carries over into its turret scenes.
     hasStock=hasTurret=true;
