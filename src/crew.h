@@ -277,6 +277,7 @@ struct Config {
     float proteusPriority=0.3f;     // ...walking with the shield up: the allies weigh enemies near it or after it this share of their distance (1: off)
     float proteusPriorityRadius=100.0f;// ...within this of it (m)
     bool edf41Ai=true;              // EDF4.1 Hector's weapon gating and back-off cycle on the converted Hectors (edf41ai.cpp)
+    bool edf41MotherDev=false;      // development only: EDF4.1's UfoMother301 prototype (edf41mother.cpp); off in every release
     bool edf41Sound=true;           // EDF4.1's weapon sound effects and voices added to EDF6's banks (edf41sound.cpp), from the game's start
     bool terrainShare=true;         // every placement of one terrain piece drawn from one decode (fieldshare.cpp), from the game's start
     int edf5CampaignContent=0;       // the EDF5 mission packs' first content id (edf5campaign.cpp; 0 = none installed): owned like a DLC
@@ -442,6 +443,8 @@ bool InstallLegacyMap() noexcept;
 bool InstallEdf41Sound() noexcept;
 // edf41ai.cpp: the converted EDF4.1 Hectors attack as 4.1's do (per-arm range gate, back-off cycle).
 bool InstallEdf41Ai() noexcept;
+// edf41mother.cpp: UfoMother301 (EDF4.1's mothership), phase 1 prototype, only with ini Edf41MotherDev=1.
+bool InstallEdf41Mother() noexcept;
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
 bool InstallMissiles() noexcept;
 // The stock split missiles (MissileBullet02) split short of a big target's surface (splitmissile.cpp).

@@ -279,3 +279,15 @@ EDF6 的对象有 `IRecordable`（snapshot）和 `NetworkObject`。4.1 的部件
 - 调研脚本与反汇编：`C:\Users\wrds\.claude\jobs\4bf89026\tmp\mother41\`（任务脚本的动作 / 部件使用表 `all.py`）；本轮新增的：`D:\APP\vs_claude_code\mother-scratch\`（`ctor301.txt` 船体构造，`cannon_all.txt` / `big_all.txt` / `hatch_all.txt` / `panel_all.txt` 各部件区段反汇编，`fn_*.txt` 单函数）。
 - 任务脚本：`edf41port/missions/<id>/MISSION.BVM`（EDF5 对 4.1 重编的脚本，原生函数号三代相同）。
 - 4.1 → 6 对照表（已核）：`ObjectAction` 3200：4.1 消息 0x80000009 → EDF6 消息 0x1000000d；`GetPartsObject` 3300：0x80000012 → 0x10000017；生成器位置 0x20100（两边同号，EDF6 的 511 OnMessage 里有）。
+
+## 阶段 1 原型（2026-10-13）：工厂登记 + 克隆虚表，仅开发开关
+
+代码：`src/edf41mother.cpp`；数据：`python -B tools/make_edf41_objects.py --mother-dev` → `edf41port_dev/`（git 忽略，不进安装包）。
+
+**登记（风险 3，已定）**：用游戏自己的登记函数，不改表、不钩查找。`EDF.dll` 0x1194410（按 SGO 建对象）读类名（0x119ADE0）→ `GetSceneObjectFactory` 0x1195C50（类名字节的 FNV-1a 哈希进 manager+0x2C8 的 unordered_map，找不到就记 `xgs::game::System::GetSceneObjectFactory` 并返回空）→ 调工厂虚表槽 2 `Create(factory, createInfo)`。游戏自己的类由 0x79D570 在启动时登记（0x701859 处的 call）：每个类一个只有虚表 {析构, 取名, 创建} 的 8 字节工厂、一个 shared_ptr 控制块（虚表、use@+8、weak@+0xC、对象@+0x10）、再调 `RegisterSceneObjectFactory` 0x119AF00(manager=[0x20B2958], &{工厂, 控制块})。我们钩 0x701859（RedirectCall，校验被换的目标），原函数返回后用同一个 0x119AF00 登记 `UfoMother301`，再用 0x1195C50 回查并记 `lookup gives ... OK/FAILED`。
+
+**克隆虚表（风险 2）**：船体由 UfoCarrier508 自己的构造函数（0x4F8690，0x1630 字节）造，字段全部按类的做法初始化；之后只把主虚表指针（+0，次表 +0x120 不动）改成 0x17C9DC0 的拷贝（49 槽，RTTI 指针一并拷贝，dynamic_cast 仍认 UfoCarrier508）。接管：槽 0（析构）、槽 5（Update(dt)，类自己的，内部调 GameObjectBase::Update 0x54BE40）、槽 9（OnMessage(msg,data)，三步 SendMessage 0x1DA480 用槽 10/9/11）；伤害是槽 9 收到的消息 0xF0000000（基类 0x54A530 → ApplyDamage 0x547C30），ObjectAction 是 0x1000000D（int），GetPartsObject 是 0x10000017。其余 46 槽继承，每个换成「lock inc 计数 + jmp 原函数」的存根，日志里能看到游戏真正调用了哪些槽。
+
+**数据**：UfoMother301.SGO 以 E508_CARRIER 为模板（类名保持 `UfoMother301`）；CAS 补 in_ring/out_ring 与 open_state/close_state（别名到 open/close）；MAB 补 `排出口`、`ダメージエフェクト` 两个定位点（508 的构造函数按名取用不判空）；去掉 `mp_*`、`resource`（部件类还不存在）。已知未解：`UfoCarrier_CorePartsName` 在 301 的 ragdoll 里查不到（索引 -1，类自己有默认），`material_animation` 来自 E508（名字对不上，按名跳过）。
+
+**开发开关**：ini `Edf41MotherDev`（默认 0）。安装器仅在「源码树运行 + 环境变量 `EDF41_MOTHER_DEV=1` + edf41port_dev 存在」时并入开发对象、让战役包放行 M016 / M110 / M210 / M603（M123 / M130 另缺 `sk_*` 地图），并把 ini 写成 1；冻结的安装包、没有变量、没有目录时一律不并入且 ini 写回 0。

@@ -469,6 +469,38 @@ def stand_in(games: Games, s: StandIn) -> tuple[bytes, list[str]]:
     return sgo.write_depth_first(version, members), need
 
 
+# ---- development only: UfoMother301 (docs/edf41-ufomother301.md, phase 1) -------------------------------------------------
+# The hull as the plugin's prototype class (src/edf41mother.cpp: UfoCarrier508's constructor, a cloned vtable) wants it. It
+# is built ONLY by `--mother-dev` and written to edf41port_dev/, never to edf41port/: the committed
+# registry, the installer bundle (tools/build_release.py names the edf41port files one by one) and the 6 missions stay as
+# they are (selftest edf41_motherships_not_faked, edf41_mother_dev_isolated).
+MOTHER_DEV_ROOT = 'UFOMOTHER301.SGO'
+MOTHER_DEV_OUT = os.path.join(HERE, '..', 'edf41port_dev')
+# UfoCarrier508's constructor and its base read: CAS players in_ring / out_ring (grafted), the main player's states
+# open_state / close_state (the mothership's CAS names them show / hide ... open / close: aliased), the keys of E508_CARRIER
+# (setdefault), and the MAB locators 排出口 and ダメージエフェクト by name without asking whether they exist (EDF+0x4F60DD, 0x4F874D
+# -> 0x6BADD0): 4.1's hull has neither (only ターゲット), so the carrier's two are added on the hull's waist bone.
+MOTHER_DEV_ALIAS = Alias('UfoMother301', 'E508_CARRIER.SGO', ('in_ring', 'out_ring'),
+                         state_aliases=(('main', 'close_state', 'close'), ('main', 'open_state', 'open')))
+MOTHER_DEV_LOCATORS = (
+    mab_legacy.Locator('排出口', 'waist', 2, (0.0, -40.0, 0.0, 1.0), (5.0, 5.0, 5.0, 1.0), (0.0, 0.0, 3.1415927, 1.0)),
+    mab_legacy.Locator('ダメージエフェクト', 'waist', 4, (0.0, -40.0, 0.0, 1.0), 80.0, (0.0, -1.2, 0.0, 1.0)),
+)
+
+
+def mother_dev_fix(files: dict[str, bytes]) -> None:
+    """The prototype's hull SGO: the keys its parts need (mp_*, resource) taken out (no part class exists yet, and the
+    files they name are not shipped), the carrier's two MAB locators added, only the files the SGO still names kept."""
+    rel = 'OBJECT/' + MOTHER_DEV_ROOT
+    version, members = sgo.read(files[rel])
+    for k in [k for k in members if k.startswith('mp_') or k == 'resource']:
+        del members[k]
+    am = members['animation_model']
+    am[2] = mab_legacy.mab_add_locators(mab_block(am[2]), list(MOTHER_DEV_LOCATORS))
+    files[rel] = sgo.write_depth_first(version, members)
+    prune(files, rel)
+
+
 def alias(games: Games, root: str, files: dict[str, bytes], a: Alias) -> None:
     """In `files` (the converted closure of OBJECT/`root`): its SGO under class a.cls with a.template's keys it
     lacks, its CAS with a.template's players it lacks (when the CAS is one of the files; else EDF6's own is used).
@@ -887,12 +919,15 @@ def remabbed(mab: object, names: tuple[tuple[str, str], ...]) -> bytes:
     return mab
 
 
-def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict[str, bytes]]:
-    """The whole conversion; `only` (SGO names like 'HECTOR301CC.SGO') limits it to those roots."""
+def build(edf41: str, edf6: str, only: tuple[str, ...] = (), mother_dev: bool = False) -> tuple[dict, dict[str, bytes]]:
+    """The whole conversion; `only` (SGO names like 'HECTOR301CC.SGO') limits it to those roots. `mother_dev`: the
+    development-only UfoMother301 prototype instead of the committed set (MOTHER_DEV_*: only that root)."""
     games = Games(edf41, edf6)
+    roots = {MOTHER_DEV_ROOT: 6} if mother_dev else ROOTS
+    aliases = {MOTHER_DEV_ROOT: MOTHER_DEV_ALIAS} if mother_dev else ALIASES
     objects, skipped, files = [], [], {}
     shared: dict[str, str] = {}
-    for root, s in STAND_INS.items():
+    for root, s in ({} if mother_dev else STAND_INS).items():
         if only and root not in only:
             continue
         rel = 'OBJECT/' + root
@@ -902,7 +937,7 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
             shared[r] = SHARED[r]
         objects.append({'object': rel, 'class': sgo.load(data=data).get('xgs_scene_object_class'),
                         'missions': ROOTS.get(root, 0), 'files': [rel] + need, 'stand_in': s.template})
-    for root, uses in ROOTS.items():
+    for root, uses in roots.items():
         rel = 'OBJECT/' + root
         if root in STAND_INS or (only and root not in only):
             continue
@@ -918,11 +953,13 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
                 out[r] = files[r] if r in files else convert(games, r)
             except ValueError as e:
                 why.append(f'{r}: {e}')
-        if not why and root in ALIASES:
+        if not why and root in aliases:
             try:
-                alias(games, root, out, ALIASES[root])
+                alias(games, root, out, aliases[root])
+                if mother_dev:
+                    mother_dev_fix(out)
             except ValueError as e:
-                why.append(f'alias {ALIASES[root].cls}: {e}')
+                why.append(f'alias {aliases[root].cls}: {e}')
         if why:
             skipped.append({'object': rel, 'reason': '; '.join(why)})
             continue
@@ -949,9 +986,16 @@ def main() -> int:
     ap.add_argument('--out', help='write objects/ and objects.json under this folder instead of edf41port/')
     ap.add_argument('--only', action='append', default=[], metavar='SGO',
                     help='build only this root (HECTOR301CC.SGO; repeatable)')
+    ap.add_argument('--mother-dev', action='store_true',
+                    help='DEVELOPMENT ONLY: the UfoMother301 prototype, written to edf41port_dev/ '
+                         '(never to edf41port/, never part of a release)')
     a = ap.parse_args()
-    data, files = build(a.edf41, a.edf6, tuple(r.upper() for r in a.only))
-    out_json, out_files = (os.path.join(a.out, 'objects.json'), os.path.join(a.out, 'objects')) if a.out else (OUT, FILES)
+    dev = a.mother_dev
+    if dev and (a.only or a.out):
+        raise SystemExit('--mother-dev takes no --only / --out: it writes edf41port_dev/ only')
+    data, files = build(a.edf41, a.edf6, tuple(r.upper() for r in a.only), mother_dev=dev)
+    base = MOTHER_DEV_OUT if dev else a.out
+    out_json, out_files = (os.path.join(base, 'objects.json'), os.path.join(base, 'objects')) if base else (OUT, FILES)
     shutil.rmtree(out_files, ignore_errors=True)
     for rel, b in rabpool.pack(files).items():   # archives as manifests over shared members (pylib/rabpool.py)
         path = os.path.join(out_files, *rel.split('/'))

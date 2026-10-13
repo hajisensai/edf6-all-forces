@@ -491,6 +491,7 @@ void LoadConfig() noexcept {
     n.terrainShare=ReadBool(L"TerrainShare",n.terrainShare);
     n.edf41Sound=ReadBool(L"Edf41Sound",n.edf41Sound);
     n.edf41Ai=ReadBool(L"Edf41Ai",n.edf41Ai);
+    n.edf41MotherDev=ReadBool(L"Edf41MotherDev",n.edf41MotherDev);
     n.edf5CampaignContent=FixInt("EDF5CampaignContent",ReadInt(L"EDF5CampaignContent",n.edf5CampaignContent),0,65535);
     n.testRangeContent=FixInt("TestRangeContent",ReadInt(L"TestRangeContent",n.testRangeContent),0,65535);
     n.edf41Content=FixInt("EDF41Content",ReadInt(L"EDF41Content",n.edf41Content),0,65535);
@@ -957,6 +958,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     Log("LEGACYMAP collision migration hooked=%d",InstallLegacyMap());   // EDF4.1 maps (plan P6)
     InstallEdf41Ai();        // the converted EDF4.1 Hectors' arm gate and back-off cycle (edf41ai.cpp)
     InstallEdf41Sound();     // EDF4.1's weapon SE bank and voice banks (edf41sound.cpp)
+    InstallEdf41Mother();    // UfoMother301 prototype, development only (ini Edf41MotherDev=1; edf41mother.cpp)
     InstallTerrainShare();   // before any map loads: the pieces of one terrain decoded once
     InstallMission();       // the mission's start (Reset*, the preloads) and a trigger of the per-frame hooks
     InstallLoadout(iniPath);

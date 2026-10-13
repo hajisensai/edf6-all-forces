@@ -522,6 +522,9 @@ def install(game: str, campaign_requested: bool = False) -> None:
     for obj, why in skipped41:
         print('  跳过', obj, why)
     edf41_objects.install(game, objects41)
+    if edf41_objects.dev_enabled():
+        print('开发开关：EDF41_MOTHER_DEV=1，已把 edf41port_dev 里的 UfoMother301 原型并入（仅开发用，发布版没有）。')
+    edf41_objects.set_dev_flag(game, edf41_objects.dev_enabled())   # ini Edf41MotherDev: 1 only with the variable and the folder
     print('转换 EDF4.1 的任务地图（4.1 本篇任务包要用；从已安装的 EDF4.1 转换，城市地图每张约 3–8 分钟，'
           '已转换且未变的跳过）……' if root41 else '没有找到 EDF4.1：跳过 4.1 地图（4.1 本篇任务包需要它）。')
     written41, skipped_maps = edf41_maps.install(game, root41)
