@@ -1099,7 +1099,30 @@ def offer_error_report(text: str) -> None:
         print(f'发送失败：{e}')
 
 
+def check_package() -> int:
+    """Load the installation's cockpit chain without selecting or writing a game.
+
+    The release builder runs this from the frozen executable in an empty folder,
+    so modules accidentally available only in a developer checkout cannot help.
+    """
+    import importlib
+    import make_optics
+    cockpit_fits = make_optics.optics.cockpit_fits
+    cockpit_kits = make_optics.optics.cockpit_kits
+    for family in ('ground', 'air', 'mech', 'plugin'):
+        fits = importlib.import_module('cockpit_fits_' + family)
+        kits = importlib.import_module('cockpit_kits_' + family)
+        assert all(cockpit_fits.FITS[key] == value for key, value in fits.FITS.items())
+        assert all(cockpit_fits.DIGESTS[key] == value for key, value in fits.DIGESTS.items())
+        assert all(cockpit_kits.KITS[key] is value for key, value in kits.KITS.items())
+    assert make_optics.optics.MODELS
+    print('EDF6VC_PACKAGE_OK cockpit families=4')
+    return 0
+
+
 def run() -> int:
+    if sys.argv[1:] == ['--check-package']:
+        return check_package()
     if sys.argv[1:2] == ['loadout-generate']:   # the plugin's hidden background run: no banner, no prompt, no window wait
         try:
             return generate_main(sys.argv[2:])

@@ -33,9 +33,15 @@ FITS: dict[str, tuple[Fit, ...]] = {
 DIGESTS: dict[str, str] = {}
 
 
-for _name in ('cockpit_fits_ground', 'cockpit_fits_air', 'cockpit_fits_mech', 'cockpit_fits_plugin'):
-    _mod = __import__(_name)
+import cockpit_fits_ground
+import cockpit_fits_air
+import cockpit_fits_mech
+import cockpit_fits_plugin
+
+# These are a fixed part of the registry, not runtime extensions. Explicit imports
+# let the frozen installer include the families through its normal import graph.
+for _mod in (cockpit_fits_ground, cockpit_fits_air, cockpit_fits_mech, cockpit_fits_plugin):
     for _table, _more in ((FITS, _mod.FITS), (DIGESTS, _mod.DIGESTS)):
         if set(_more) & set(_table):
-            raise ValueError(f'{_name}: stems fitted twice: {sorted(set(_more) & set(_table))}')
+            raise ValueError(f'{_mod.__name__}: stems fitted twice: {sorted(set(_more) & set(_table))}')
         _table.update(_more)

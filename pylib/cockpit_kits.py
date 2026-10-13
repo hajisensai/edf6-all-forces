@@ -266,13 +266,15 @@ KITS = {
 }
 
 
-def _family(module: str) -> dict:
-    """Another family's kits (pylib/cockpit_kits_<family>.py: each module its own KITS), merged into KITS."""
-    return __import__(module).KITS
+# Keep these below the helpers: the family modules import them from this module.
+# Explicit imports also make every fixed family visible to PyInstaller.
+import cockpit_kits_ground
+import cockpit_kits_air
+import cockpit_kits_mech
+import cockpit_kits_plugin
 
-
-for _name in ('cockpit_kits_ground', 'cockpit_kits_air', 'cockpit_kits_mech', 'cockpit_kits_plugin'):
-    _more = _family(_name)
+for _mod in (cockpit_kits_ground, cockpit_kits_air, cockpit_kits_mech, cockpit_kits_plugin):
+    _more = _mod.KITS
     if set(_more) & set(KITS):
-        raise ValueError(f'{_name}: kit names taken: {sorted(set(_more) & set(KITS))}')
+        raise ValueError(f'{_mod.__name__}: kit names taken: {sorted(set(_more) & set(KITS))}')
     KITS.update(_more)
