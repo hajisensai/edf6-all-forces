@@ -143,6 +143,7 @@ struct Config {
     bool sazabiTestBoard=false;     // tests (testrange/run_test.py): the player put into the first empty Sazabi seen
     int airdropTest=0;              // tests (tests/autopilot): 1-3 = a container airdrop of the tank / APC / truck asked
                                     // once a mission near the player, then the player put into what it brings
+    bool npcCrewTest=false;         // tests (tests/autopilot): auto-crew also for empty vehicles no player has driven yet
     bool heliMouseAim=true;         // a heli or rotor craft the player flies on the keyboard and mouse: the mouse-aim flight (heliaim.h; off: the stock / keys)
     bool heliFlightHud=true;        // ...and the helicopter HUD (hud.cpp HeliHud) in place of the takeoff panel / the jet cockpit (off: those)
     float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take its kinetic energy's damage times this (0: none)
@@ -220,6 +221,32 @@ struct Config {
     int sightRangeStep=0;           // ...its step, m (0: graduated, 25 m to 300, 50 m to 1000, 100 m beyond: sightzoom.h)
     bool sightRangePad=true;        // ...and on a pad the d-pad up / down
     bool infantryScope=true;        // a soldier's scoped weapon zoomed: a real optic's eyepiece and reticle (infantryscope.cpp)
+    bool firstPerson=true;          // first person on foot: the key switches it (firstperson.cpp)
+    bool fpVehicle=true;            // ...in a vehicle as well: each seat's eye at its station (fp_vehicle.cpp)
+    bool fpHideStockHud=true;       // ...and the stock HUD off there (its information on the cockpit's panels)
+    int firstPersonKey=0x56;        // ...its key ('V'; on foot only: the vehicles' V keys are not on foot; 0 none)
+    bool firstPersonStart=false;    // ...on from the start
+    float fpEyeUp=0.05f;            // ...the eye this far over the head bone, m
+    float fpEyeAhead=0.10f;         // ...and this far ahead of it, m
+    float fpEyeEase=0.25f;          // ...the eye follows the head's place in the body this much a frame (the bob filtered)
+    float fpGripX=0.17f;            // ...the weapon in hand held here in the view, m: right (the Fencer: fpHold*)
+    float fpGripY=-0.20f;           // ...up
+    float fpGripZ=0.40f;            // ...ahead
+    float fpDualGripX=0.34f;        // ...a weapon in each hand (the Fencer): the right one here, the left mirrored, m: right
+    float fpDualGripY=-0.20f;       // ...up
+    float fpDualGripZ=0.70f;        // ...ahead
+    float fpHoldX=0.0f;             // ...the arms and weapon moved in the aim frame, m: right
+    float fpHoldY=0.0f;             // ...up
+    float fpHoldZ=0.0f;             // ...ahead
+    float fpScale=0.5f;             // ...shrunk about the eye this much (the same picture, nearer: walls do not cut it)
+    float fpNear=0.03f;             // ...the camera's near clip, m (0: the stock 0.1)
+    bool fpAimSnap=true;            // ...the aim follows the mouse at once (this machine's look smoothing off)
+    bool fpArmIk=true;              // ...the arms posed for the first person: shoulders beside and below the eye
+    float fpHoldArc=60.0f;          // ...a free hand on the other hand's weapon slides round it this far from below, deg
+    float fpWristMax=30.0f;         // ...and its forearm turns about the wrist at most this much, deg
+    bool fpFit=true;                // ...a bulky or long weapon held further off, a shield out to the side
+    bool fpCulling=true;            // ...the arms and weapon handed to Umbra around the eye (never culled)
+    bool fpMotion=true;             // ...the arms and weapon sway, bob, kick, dip at a reload, a switch, a sprint, a roll
     bool gunStabilizer=true;        // stab.cpp: the guns that should have one hold their world line on the move
     float viewDistance=-1.0f;       // the near camera's far clip, m (view.cpp; stock 1000; 0: as the mission has it; -1: unlimited)
     bool map=true;                  // the map view (map.cpp): an overhead camera over the real world, the player held
@@ -237,6 +264,11 @@ struct Config {
     int debugSpawnSpawnKey=0x78;    // ...spawn the row picked (F9)
     float debugSpawnRange=500.0f;   // ...the crosshair's ground point counts within this, m
     float debugSpawnDistance=30.0f; // ...else (sky, too far, at the player's feet) this far ahead of the player, m
+    bool roomLoadout=true;          // the room / HQ support loadout menu (room_ui.cpp; 0 at load: nothing installed, both
+                                    // screens untouched; turned 0 later: both screens passed through, nothing read or drawn)
+    bool roomPreSync=true;          // ...and the room pre-sync with it (room_sync.h: generate what the host lists; 0: none)
+    int roomLoadoutKey=0x71;        // ...its key (F2; a Windows virtual-key code, 0: none)
+    int roomLoadoutButton=0xC0;     // ...and pad combination (XInput button bits, all held: 0xC0 L3 + R3; 0 none)
     bool stockStores=true;          // the stock vehicles' requests carry the stores they should (the installer,
                                     // tools/make_stock_stores.py) and the switch goes round them (payload.cpp)
     bool seatSwitch=true;           // the player moves to another seat of the vehicle they are in (seatswitch.cpp)
@@ -282,9 +314,12 @@ struct Config {
     float proteusFieldPower=25.0f;  // ...an Air Raider's calls charge this many points a second more
     float proteusPriority=0.3f;     // ...walking with the shield up: the allies weigh enemies near it or after it this share of their distance (1: off)
     float proteusPriorityRadius=100.0f;// ...within this of it (m)
+    bool edf41Ai=true;              // EDF4.1 Hector's weapon gating and back-off cycle on the converted Hectors (edf41ai.cpp)
+    bool edf41Sound=true;           // EDF4.1's weapon sound effects and voices added to EDF6's banks (edf41sound.cpp), from the game's start
     bool terrainShare=true;         // every placement of one terrain piece drawn from one decode (fieldshare.cpp), from the game's start
     int edf5CampaignContent=0;       // the EDF5 mission packs' first content id (edf5campaign.cpp; 0 = none installed): owned like a DLC
     int testRangeContent=0;          // the test range mission pack's content id (offline and online modes; 0 = not installed): owned the same way
+    int edf41Content=0;              // the EDF4.1 story pack's content id (offline and online modes; 0 = not installed): owned the same way
     float bigWorld=0.0f;            // the physics world +-this many m instead of +-3000 (bigworld.cpp), from the game's start;
                                     // 0: stock. At 10000 parked vehicles fell through the ground (2026-10-04): an experiment
     // The flyers' soft edge (airbound.h): the band inside the play edge where the NPC jets and helis turn back.
@@ -449,6 +484,10 @@ bool CameraRayOf(const void* human,float* eye,float* dir) noexcept;
 bool InstallBigWorld() noexcept;
 // legacymap.cpp: EDF4.1 maps' Havok 2014 collision migrated to hknp on the map path (plan P6).
 bool InstallLegacyMap() noexcept;
+// edf41sound.cpp: EDF4.1's weapon SE bank and voice banks beside EDF6's own (plan P7).
+bool InstallEdf41Sound() noexcept;
+// edf41ai.cpp: the converted EDF4.1 Hectors attack as 4.1's do (per-arm range gate, back-off cycle).
+bool InstallEdf41Ai() noexcept;
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
 bool InstallMissiles() noexcept;
 // The stock split missiles (MissileBullet02) split short of a big target's surface (splitmissile.cpp).
@@ -542,6 +581,9 @@ struct ObjRef {
 // The plugin's log (EDF6VehicleCrew.log; over kLogMax it is renamed to .log.1 and a new one begun).
 void Log(const char* format,...) noexcept;
 void ReloadConfigIfChanged() noexcept;
+// The ini read again now (the loadout menu saved it: loadout_store.cpp), and its path (Mods/Plugins/EDF6VehicleCrew.ini).
+void ReloadConfigNow() noexcept;
+const wchar_t* ConfigPath() noexcept;
 // The patch primitives and the seat test are common/'s (shared with EDF6AutoTurret).
 inline bool Matches(std::size_t rva,const unsigned char* bytes,std::size_t size) noexcept { return edf::Matches(image,rva,bytes,size); }
 using edf::PatchVtableSlot;
@@ -937,6 +979,9 @@ enum class GunnerGun : int { shells, cannon, gatling, count };
 struct GunnerReadout { float sight[3]; bool ground,inReach,ready; float range,wait; float centre[3]; bool centred; GunnerGun gun; unsigned guns;
                        float zoom; };
 bool PlayerGunnerHud(GunnerReadout* out) noexcept;
+// The gunship gunner's seat camera (playerjet_crew.inc GunnerLook): from turretcam.cpp's native Type-1 seat camera hook,
+// the eye and look-at for the local player at the gun; false for any other seat (the stock camera stays).
+bool GunshipGunnerCamera(const unsigned char* seat,const float* stockEye,const float* stockLook,float* eye,float* look) noexcept;
 // The vehicle class (crew.cpp kClasses) of an object by its vtable, -1 for anything else (a board-able vehicle or not).
 int VehicleClassOf(const void* object) noexcept;
 // The boarding gun (boarding.cpp): a real friendly hit suppresses damage and asks the game thread to board the

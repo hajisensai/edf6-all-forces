@@ -19,6 +19,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import ledger  # noqa: E402
+import rabpool  # noqa: E402
 from modfiles import sha256, sha256_file  # noqa: E402
 
 OWNER = 'edf41'   # pylib/ledger.py OWNERS
@@ -36,6 +37,19 @@ def bundled(rel: str) -> str:
     return os.path.join(DATA, 'edf41port', 'objects', *rel.split('/'))
 
 
+def _read_file(path: str) -> bytes:
+    with open(path, 'rb') as f:
+        return f.read()
+
+
+def read(rel: str) -> bytes:
+    """The bytes of Mods path `rel` as the tools ship it: a shared file whole, one of ours through pylib/rabpool.py
+    (an archive rebuilt from its manifest and the shared members)."""
+    if rel in registry().get('shared', {}):
+        return _read_file(bundled(rel))
+    return rabpool.unpack(rel, lambda s: _read_file(os.path.join(DATA, 'edf41port', 'objects', *s.split('/'))))
+
+
 def registry() -> dict:
     with open(REGISTRY, encoding='utf-8') as f:
         return json.load(f)
@@ -51,24 +65,35 @@ def _not_ours(led: ledger.Ledger, rel: str, sha: str) -> bool:
     return not owners or (bool(others) and sha256_file(led.disk(rel)) != sha)
 
 
-def build(root: str) -> tuple[dict[str, bytes], list[tuple[str, str]]]:
-    """The files of every registered object (each checked against the registry's SHA-256), but those of an object
-    one of whose files is in Mods and is not ours: another mod's (the ledger knows no owner of it), or another of our
-    tools' with other bytes. One of our tools' with these very bytes (the Blacker No.4.1 model the EDF5 weapons install
-    too) is shared: install records edf41 as needing it as well."""
+def unavailable(root: str) -> list[tuple[str, str]]:
+    """The objects build leaves out, [(object, why)]: those one of whose files is in Mods and is not ours (another
+    mod's: the ledger knows no owner of it, or another of our tools' with other bytes). The one place that decides it:
+    build writes exactly the rest, and the campaign plan (tools/make_edf5_campaign.py plan41) offers only missions
+    whose objects are not here."""
     reg = registry()
     led = ledger.Ledger(root)
-    files: dict[str, bytes] = {}
-    skipped: list[tuple[str, str]] = []
+    out: list[tuple[str, str]] = []
     for obj in reg['objects']:
         foreign = [rel for rel in obj['files'] if _not_ours(led, rel, reg['files'][rel])]
         if foreign:
-            skipped.append((obj['object'], f"another mod's file in Mods: {', '.join(foreign)}"))
+            out.append((obj['object'], f"another mod's file in Mods: {', '.join(foreign)}"))
+    return out
+
+
+def build(root: str) -> tuple[dict[str, bytes], list[tuple[str, str]]]:
+    """The files of every registered object (each checked against the registry's SHA-256) but those of the objects
+    unavailable() names. One of our tools' files with these very bytes (the Blacker No.4.1 model the EDF5 weapons
+    install too) is shared: install records edf41 as needing it as well."""
+    reg = registry()
+    skipped = unavailable(root)
+    left_out = {obj for obj, _ in skipped}
+    files: dict[str, bytes] = {}
+    for obj in reg['objects']:
+        if obj['object'] in left_out:
             continue
         for rel in obj['files']:
             if rel not in files:
-                with open(bundled(rel), 'rb') as f:
-                    data = f.read()
+                data = read(rel)
                 if hashlib.sha256(data).hexdigest() != reg['files'][rel]:
                     raise ValueError(f'{rel}: not the file the registry lists (a damaged install of the tools)')
                 files[rel] = data

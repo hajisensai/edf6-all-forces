@@ -70,10 +70,25 @@ int PlayerSeatOf(unsigned char* v) noexcept {
     return -1;
 }
 
+// The round loaded between shots (the user, 2026-10-12: 「载具加个装填时间显示」): after a shot the weapon waits +0xE0C
+// frames, set to FireInterval (+0x36C; docs/sound-re.md §9.2), before the next. Shown for a gun laid shot by shot (an
+// interval of kShownCycleFrames or more: the tank guns, the howitzers, the long cannons), not a machine gun's 3-5 frames;
+// a wait longer than the interval is no loading (the Proteus' taken-over launcher holds 1e9: proteus.h).
+constexpr std::int32_t kShownCycleFrames=30;
+void Cycle(const unsigned char* w,StockArm& a) noexcept {
+    a.cycle=1.0f;a.cycleSec=-1.0f;
+    const float cool=At<float>(w,kCooldown);
+    const std::int32_t interval=At<std::int32_t>(w,kFireInterval);
+    if(a.ammo<=0 || interval<kShownCycleFrames || !(cool>0.0f) || cool>static_cast<float>(interval))return;
+    a.cycle=vec::Clamp(1.0f-cool/static_cast<float>(interval),0.0f,1.0f);
+    a.cycleSec=cool/60.0f;
+}
+
 // The reload as 0x692100 shows it: while empty (and not cooling down, nor fed from elsewhere), the share done.
 void Reload(const unsigned char* w,StockArm& a) noexcept {
     a.reload=1.0f;a.reloadSec=-1.0f;
     a.canReload=At<std::int32_t>(w,kReloadFrames)>=0;
+    Cycle(w,a);
     if(a.ammo>0 || At<float>(w,kCooldown)>=1.1920929e-7f || At<const void*>(w,kAmmoSource))return;
     const float charge=At<float>(w,kChargeTime);
     if(charge>0.0f) {
@@ -84,6 +99,21 @@ void Reload(const unsigned char* w,StockArm& a) noexcept {
     if(full<=0)return;
     a.reload=vec::Clamp(1.0f-static_cast<float>(left)/static_cast<float>(full),0.0f,1.0f);
     a.reloadSec=left>0 ? static_cast<float>(left)/60.0f : 0.0f;
+}
+
+// How far left of the vehicle's middle `centre` its weapon `w`'s first muzzle is, m, across the camera's view `look` (the
+// strip's order, hud_cue.h SideOrder); 0 unknown. Left is up x look: (look z, 0, -look x), as the hull's row 0 is its left
+// (turretcam.h) for its row 1 up and row 2 its nose.
+float SideOf(const unsigned char* w,const float* centre,const float* look) noexcept {
+    const auto muzzles=At<const unsigned char*>(w,edf::kMuzzles);
+    const auto count=At<std::uint64_t>(w,edf::kMuzzleCount);
+    if(!count || count>kMostMuzzles || !Readable(muzzles,edf::kMuzzleStride))return 0.0f;
+    float pos[3],dir[3];
+    float left[3]={look[2],0.0f,-look[0]};
+    if(!edf::MuzzleFrame(w,muzzles,pos,dir) || !vec::Normalize(left))return 0.0f;
+    const float off[3]={pos[0]-centre[0],pos[1]-centre[1],pos[2]-centre[2]};
+    const float side=vec::Dot(off,left);
+    return std::isfinite(side) ? side : 0.0f;
 }
 
 // The enemy under the view (see the top): each enemy's lock point off the camera's ray (`eye`, `look`), the nearest
@@ -282,6 +312,10 @@ void StockHudFrame(unsigned char* v) noexcept {
     const unsigned char* const turret=PlayerTurretGun(v,seat);
     unsigned char* fired[kStockArms]{};
     const int firing=PayloadSightWeapons(v,r.seat,fired,kStockArms);
+    // Every trigger's weapons (the main gun and the coaxial gun / hull gatling on the other button): each keeps its marks
+    // whichever is the fire-control pick (the user, 2026-10-12: 「应该两个准星都同时显示才对」).
+    unsigned char* triggered[kStockArms]{};
+    const int triggers=PayloadTriggerWeapons(v,r.seat,triggered,kStockArms);
     // SetStockSelectedStore's index is the holder's, the arms' skip the tank: its arm found as the list is walked.
     const int store=selection.vehicle==v && selection.seat==r.seat && GameFrame()-selection.frame<=2 ? selection.store : -1;
     int pickedArm=-1,storeArm=-1;
@@ -301,7 +335,9 @@ void StockHudFrame(unsigned char* v) noexcept {
             const auto freedom=weaponmount::Of(v,seat,holders[i]);
             a.physicalOnly=!(freedom.known && freedom.yaw && freedom.pitch);
             for(int k=0;k<firing;++k)if(fired[k]==w)a.coFired=true;
-            Arm(w,!r.heli && a.coFired,a,w==sight && !(HighCamOn(v) || TurretCamHighTransition(v)),antiAir);
+            for(int k=0;k<triggers;++k)if(triggered[k]==w)a.armed=true;
+            Arm(w,!r.heli && (a.coFired || a.armed),a,w==sight && !(HighCamOn(v) || TurretCamHighTransition(v)),antiAir);
+            a.side=SideOf(w,r.pos,r.lookOk ? r.look : r.hull);
             if(!r.aimOk && a.aimed){std::memcpy(r.aim,a.bore,12);r.aimOk=true;}
         }
     // A Proteus seat also works the stock mounts it borrows (proteus.cpp: the driver both cannons with nobody at the
@@ -312,6 +348,7 @@ void StockHudFrame(unsigned char* v) noexcept {
         for(int i=0;i<lent && r.arms<kStockArms;++i) {
             auto& a=r.arm[r.arms++];a.coFired=true;
             Arm(borrowed[i],true,a,false);
+            a.side=SideOf(borrowed[i],r.pos,r.lookOk ? r.look : r.hull);
             if(!r.aimOk && a.aimed){std::memcpy(r.aim,a.bore,12);r.aimOk=true;}
         }
     }

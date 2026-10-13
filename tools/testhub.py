@@ -10,13 +10,16 @@ The account (given by the developer) is asked once and kept in %APPDATA%/EDF6All
 Developer side:
   python tools/testhub.py state                          builds, cases, the last reports
   python tools/testhub.py pull [--since N] [--out DIR]   reports after #N with their files, into DIR (default tmp/testhub)
-  python tools/testhub.py reply ID TEXT                  answer a report (shown under it on the page)
+  python tools/testhub.py reply ID TEXT [--status S]     answer a report (shown under it on the page), optionally
+                                                         setting its handling status in the same step
+  python tools/testhub.py status ID S                    a report's handling status (the page's 处理状态 column)
   python tools/testhub.py case add TITLE [--steps T] [--status S] [--note T] [--sort N]
   python tools/testhub.py case set ID [--title T] [--steps T] [--status S] [--note T] [--sort N]
   python tools/testhub.py publish ZIP [--channel test] [--notes TEXT] [--commit SHA]
   python tools/testhub.py plan [--group G]                a group's level outline and proposals (players' text fenced)
   python tools/testhub.py digests [DIR]                   upload tools/make_mission_digest.py's output (default tmp/digests)
-  status: todo / verify (fixed, to be checked) / pass / fail / closed.
+  case status: todo / verify (fixed, to be checked) / pass / fail / done / closed.
+  report status: open (待处理) / doing (处理中) / verify (已修待确认) / done (已完成) / closed (不处理).
 The developer's account comes from $EDF6_TESTHUB_AUTH (user:password) or the same json file.
 """
 from __future__ import annotations
@@ -45,6 +48,9 @@ LOG_TAIL = 12 << 20           # the last 12 MB of each log: the plugin's log gro
 DUMP_MAX = 60 << 20           # crash dumps bigger than this stay home
 DUMP_AGE = 3 * 86400
 UPLOAD_MAX = 95 << 20
+PART_SIZE = 32 << 20          # a build bigger than one request goes up in parts this size (R2 multipart: >= 5 MiB;
+                              # the worker holds one part in memory, its limit is 128 MB)
+REPORT_STATUSES = ('open', 'doing', 'verify', 'done', 'closed')
 RESULTS = {'1': ('pass', '修好了'), '2': ('fail', '还有问题'), '3': ('new', '发现新问题'), '4': ('info', '只是补充信息')}
 
 
@@ -213,10 +219,75 @@ def _pe_stamp(path: str) -> str:
     except (OSError, ValueError):
         return '?'
 
+def _pe_image(path: str) -> tuple[int, int] | None:
+    """The PE header's TimeDateStamp and SizeOfImage: what a minidump's module list records of a loaded image."""
+    try:
+        with open(path, 'rb') as f:
+            head = f.read(4096)
+        off = int.from_bytes(head[0x3C:0x40], 'little')
+        if head[off:off + 4] != b'PE\0\0':
+            return None
+        return int.from_bytes(head[off + 8:off + 12], 'little'), int.from_bytes(head[off + 24 + 56:off + 24 + 60], 'little')
+    except (OSError, ValueError):
+        return None
+
+
+def dump_modules(path: str) -> dict[str, tuple[str, int, int]] | None:
+    """A minidump's module list (MINIDUMP_DIRECTORY stream 4): lower-case file name -> (full path, TimeDateStamp,
+    SizeOfImage). None when it is no minidump or has no module list."""
+    try:
+        with open(path, 'rb') as f:
+            data = f.read()
+    except OSError:
+        return None
+    u32 = lambda o: int.from_bytes(data[o:o + 4], 'little')  # noqa: E731
+    if len(data) < 32 or data[:4] != b'MDMP':
+        return None
+    streams, directory = u32(8), u32(12)
+    for i in range(min(streams, 1024)):
+        entry = directory + 12 * i
+        if entry + 12 > len(data) or u32(entry) != 4:   # ModuleListStream
+            continue
+        rva = u32(entry + 8)
+        out: dict[str, tuple[str, int, int]] = {}
+        for m in range(min(u32(rva), 4096)):
+            mod = rva + 4 + 108 * m                       # MINIDUMP_MODULE
+            if mod + 108 > len(data):
+                return None
+            size, stamp, name_rva = u32(mod + 8), u32(mod + 16), u32(mod + 20)
+            length = u32(name_rva)
+            name = data[name_rva + 4:name_rva + 4 + length].decode('utf-16-le', 'replace')
+            out[re.split(r'[\\/]', name)[-1].lower()] = (name, stamp, size)
+        return out
+    return None
+
+
+def dump_matches(path: str, game: str) -> str:
+    """'' when the crash dump is this install's, else why not. A dump is kept by Windows (LocalDumps) or the plugin
+    for days and across reinstalls: report #6 (2026-10-10) sent #5's dump of 10-07, written by another build of the
+    plugin. This install's: its EDF6.exe ran from `game`, and every plugin DLL it had loaded is the one installed
+    now (same PE TimeDateStamp and SizeOfImage)."""
+    mods = dump_modules(path)
+    if mods is None:
+        return '读不出模块列表'
+    exe = mods.get('edf6.exe')
+    if not exe:
+        return '转储里没有 EDF6.exe'
+    if os.path.normcase(os.path.normpath(os.path.dirname(exe[0]))) != os.path.normcase(os.path.normpath(game)):
+        return f'来自另一个游戏目录 {os.path.dirname(exe[0])}'
+    for dll in sorted(glob.glob(os.path.join(game, 'Mods', 'Plugins', '*.dll'))):
+        loaded = mods.get(os.path.basename(dll).lower())
+        now = _pe_image(dll)
+        if loaded and now and (loaded[1], loaded[2]) != now:
+            return (f'{os.path.basename(dll)} 不是现在装的这份（转储里 pe 0x{loaded[1]:08X} / {loaded[2]} 字节，'
+                    f'现在 0x{now[0]:08X} / {now[1]} 字节）')
+    return ''
+
 
 def collect(game: str, build: str = '') -> tuple[bytes, list[str]]:
     """The logs zipped: Mods/Plugins' logs (tails), ini files and DLL versions, the mod loader's log, the
-    install ledgers (Mods/.edf6*.json), and the newest EDF6 crash dump of the last three days. Returns the zip
+    install ledgers (Mods/.edf6*.json), and the newest EDF6 crash dump of the last three days written by this install
+    (dump_matches; crash/dumps.txt says which were left out and why). Returns the zip
     and the names it holds."""
     mem = io.BytesIO()
     names: list[str] = []
@@ -248,8 +319,16 @@ def collect(game: str, build: str = '') -> tuple[bytes, list[str]]:
 
         # The plugin's own dump of a mission start that hung (src/mission_watch.cpp): Windows writes none for a game
         # that hangs and is killed, nor without LocalDumps set up (a tester's machine, 2026-10-10).
+        verdicts: list[str] = []
+
+        def matches(path: str) -> bool:
+            why = dump_matches(path, game)
+            verdicts.append(f'{os.path.basename(path)}  {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(os.path.getmtime(path)))}  '
+                            + (f'来源不符，未上传：{why}' if why else '本次安装'))
+            return not why
+
         for path in sorted(glob.glob(os.path.join(plugins, '*.hang.dmp'))):
-            if time.time() - os.path.getmtime(path) >= DUMP_AGE:
+            if time.time() - os.path.getmtime(path) >= DUMP_AGE or not matches(path):
                 continue
             if os.path.getsize(path) <= DUMP_MAX:
                 with open(path, 'rb') as f:
@@ -259,10 +338,14 @@ def collect(game: str, build: str = '') -> tuple[bytes, list[str]]:
                     f'{os.path.basename(path)}: {os.path.getsize(path)} bytes, over the {DUMP_MAX} limit; left at home\r\n'.encode('utf-8'))
         dumps = [p for p in glob.glob(os.path.join(os.environ.get('LOCALAPPDATA', ''), 'CrashDumps', 'EDF6*.dmp'))
                  if time.time() - os.path.getmtime(p) < DUMP_AGE and os.path.getsize(p) <= DUMP_MAX]
-        if dumps:
-            newest = max(dumps, key=os.path.getmtime)
-            with open(newest, 'rb') as f:
-                add(newest, 'crash/' + os.path.basename(newest), f.read())
+        # The newest of this install's (dump_matches): an older build's dump is named in crash/dumps.txt, not sent.
+        for path in sorted(dumps, key=os.path.getmtime, reverse=True):
+            if matches(path):
+                with open(path, 'rb') as f:
+                    add(path, 'crash/' + os.path.basename(path), f.read())
+                break
+        if verdicts:
+            add('', 'crash/dumps.txt', ('\r\n'.join(verdicts) + '\r\n').encode('utf-8'))
     return mem.getvalue(), names
 
 
@@ -320,7 +403,7 @@ def _print_state(st: dict) -> None:
         print(f'case   #{c["id"]} [{c["status"]}] {c["title"]}')
     for r in st['reports'][:10]:
         files = ', '.join(f['name'] for f in r['files'])
-        print(f'report #{r["id"]} case {r["case_id"]} {r["result"]} by {r["author"]} {r["version"]}'
+        print(f'report #{r["id"]} [{r.get("status") or "open"}] case {r["case_id"]} {r["result"]} by {r["author"]} {r["version"]}'
               f'{" reply✓" if r["reply"] else ""}  {r["note"][:80]!r} {files}')
 
 
@@ -405,16 +488,47 @@ def _upload_digests(hub: Hub, folder: str) -> None:
     print(f'\n已上传 {len(index)} 关的脚本整理')
 
 
-def _publish(hub: Hub, zpath: str, channel: str, notes: str, commit: str) -> None:
+def _publish(hub: Hub, zpath: str, channel: str, notes: str, commit: str, part_size: int = PART_SIZE) -> dict:
+    """A build zip into the site: one request when it fits (UPLOAD_MAX, the worker hashes it), otherwise in parts
+    (R2 multipart; the hash is ours, over the whole zip, and the installer checks downloads against it)."""
     name = os.path.basename(zpath)
     stem = name[:-4]
     version = stem.split('-', 1)[1] if '-' in stem else stem
     with open(zpath, 'rb') as f:
         data = f.read()
-    q = urllib.parse.urlencode({'name': name, 'version': version, 'channel': channel, 'commit': commit})
-    with hub.request('PUT', f'/api/build?{q}', data, {'Content-Type': 'application/zip',
-                                                      'X-Notes': urllib.parse.quote(notes)}, timeout=600) as r:
-        print(r.read().decode('utf-8'))
+    meta = {'name': name, 'version': version, 'channel': channel, 'commit': commit}
+    head = {'X-Notes': urllib.parse.quote(notes)}
+    if len(data) <= UPLOAD_MAX:
+        q = urllib.parse.urlencode(meta)
+        with hub.request('PUT', f'/api/build?{q}', data, {'Content-Type': 'application/zip', **head}, timeout=600) as r:
+            out = json.loads(r.read().decode('utf-8'))
+        print(json.dumps(out, ensure_ascii=False))
+        return out
+    sha = hashlib.sha256(data).hexdigest()
+    up = hub.post_json('/api/build/start?' + urllib.parse.urlencode({'name': name}), {})['upload_id']
+    where = urllib.parse.urlencode({'name': name, 'upload_id': up})
+    try:
+        parts = []
+        for n, at in enumerate(range(0, len(data), part_size), 1):
+            with hub.request('PUT', f'/api/build/part?{where}&part={n}', data[at:at + part_size],
+                             {'Content-Type': 'application/octet-stream'}, timeout=600) as r:
+                parts.append(json.loads(r.read().decode('utf-8')))
+            print(f'  part {n}: {min(at + part_size, len(data)) >> 20}/{len(data) >> 20} MB', flush=True)
+        body = json.dumps({'parts': parts, 'size': len(data), 'sha256': sha}).encode('utf-8')
+        q = urllib.parse.urlencode({**meta, 'upload_id': up})
+        with hub.request('POST', f'/api/build/finish?{q}', body, {'Content-Type': 'application/json', **head},
+                         timeout=600) as r:
+            out = json.loads(r.read().decode('utf-8'))
+    except BaseException:
+        try:
+            hub.post_json(f'/api/build/abort?{where}', {})
+        except HubError:
+            pass
+        raise
+    if out.get('sha256') != sha or out.get('size') != len(data):
+        raise HubError(f'测试站记录的 {out} 与本地 {len(data)} 字节 / {sha} 不符')
+    print(json.dumps(out, ensure_ascii=False))
+    return out
 
 
 def main(argv: list[str]) -> int:
@@ -427,6 +541,10 @@ def main(argv: list[str]) -> int:
     p = sub.add_parser('reply')
     p.add_argument('id', type=int)
     p.add_argument('text')
+    p.add_argument('--status', choices=REPORT_STATUSES)
+    p = sub.add_parser('status')
+    p.add_argument('id', type=int)
+    p.add_argument('status', choices=REPORT_STATUSES)
     p = sub.add_parser('case')
     p.add_argument('action', choices=('add', 'set'))
     p.add_argument('target', help='title (add) or id (set)')
@@ -451,7 +569,12 @@ def main(argv: list[str]) -> int:
     elif a.cmd == 'pull':
         _pull(hub, a.since, os.path.normpath(a.out))
     elif a.cmd == 'reply':
-        print(hub.post_json('/api/reply', {'report_id': a.id, 'text': a.text}))
+        body = {'report_id': a.id, 'text': a.text}
+        if a.status:
+            body['status'] = a.status
+        print(hub.post_json('/api/reply', body))
+    elif a.cmd == 'status':
+        print(hub.post_json('/api/report_status', {'report_id': a.id, 'status': a.status}))
     elif a.cmd == 'case':
         body = {k: v for k, v in (('title', a.title), ('steps', a.steps), ('status', a.status),
                                   ('dev_note', a.note), ('sort', a.sort)) if v is not None}

@@ -752,9 +752,13 @@ JETS.update({parked_name(k): replace(JETS[k], parked=True) for k in PARKED_KINDS
 # The gunship (src/jet_internal.h Body::gunship, mark 7011) as a JETS entry, for its requested twin only: the NPC gunship
 # is tools/make_jets.py's (the strike jet in BOMBER401's model with GUNSHIP_MARK and a gunner seat). Its arms and
 # durability the strike jet's (as tools/make_jets.py's), its model the stock bomber401 (52 m across, no gear: it stands
-# on its belly), measured on that model when parked (box_model).
+# on its belly), measured on that model when parked (box_model). It wears that model under a name of its own,
+# GUNSHIP_MODEL_FILE (tools/make_jets.py writes it: pylib/jet_models.py STOCK_COPIES, the stock geometry skinned with its
+# nozzle bones), so its seats' cockpits can be grafted into it; the NPC gunship (tools/make_jets.py GUNSHIP_FILE) too.
 GUNSHIP_JET = 'edf6tr_jet_gunship'   # no _mission: the range never places it (testrange/gen.py)
-JETS[GUNSHIP_JET] = replace(JETS['edf6tr_jet_strike_mission'], mark=7011.0, model=('app:/object/bomber401.mrab', 'bomber401.mdb'),
+GUNSHIP_MODEL_FILE = 'EDF6VC_GUNSHIP.MRAB'
+GUNSHIP_MODEL = ('app:/object/' + GUNSHIP_MODEL_FILE.lower(), 'bomber401.mdb')
+JETS[GUNSHIP_JET] = replace(JETS['edf6tr_jet_strike_mission'], mark=7011.0, model=GUNSHIP_MODEL,
                             body='bomber401', box_model='bomber401')
 # The NPC kinds the Air Raider requests as empty aircraft to fly (tools/calls.py EDF6VC_CALL_FLY_*, the user, 2026-10-06:
 # 「补上空袭的召唤飞机，空母载具」): every kind of src/playerjet_kinds.h kBoardable the player jets' requests do not already
@@ -1123,6 +1127,18 @@ def _rebone(v, names: set[str], to: str = JET_ROOT_BONE):
 
 
 JET_BODY_BONE = 'bomber501'
+# The V506 ragdoll's rest pose (RAGDOLL_V506_HELI.SHKT: each body's position less the body proxy's, every orientation
+# the identity), which its constraints hold; tools/selftest.py checks it against the game's file.
+V506_PROXY_LAYOUT: dict[str, tuple[float, float, float]] = {
+    'RagDollProxys.body': (0.0, 0.0, 0.0),
+    'RagDollProxys.rearWheelSus': (-0.0005, -1.347, -7.2468),
+    'RagDollProxys.rotor': (0.0, 1.5602, 0.0),
+    'RagDollProxys.bend_roterA': (0.0, 1.5602, 0.5158),
+    'RagDollProxys.bend_roterB': (-0.5158, 1.5602, 0.0),
+    'RagDollProxys.bend_roterC': (0.0, 1.5602, -0.5158),
+    'RagDollProxys.bend_roterD': (0.5158, 1.5602, 0.0),
+    'RagDollProxys.tailRotor': (0.4356, 1.6471, -7.15),
+}
 
 
 def _dead_effect(effects: list) -> list:
@@ -1154,12 +1170,24 @@ def _jet_ragdoll(blob: bytes, body: str = JET_BODY_BONE, centre: list[float] | t
     (3.49 m over it), a heli-sized body hanging under the plane (the user, 2026-10-06: 「碰撞体积也是」在空母底下). Every
     proxy goes on `centre` (proxy = bone o (centre)), every bone it drives back off it (bone = proxy o (-centre)), so
     the two bindings stay each other's inverse and the proxies keep their places relative to each other. None: the
-    V506's offsets as they are (a model jet_models does not measure: the Primer creatures, the submarine carrier)."""
+    V506's offsets as they are (a model jet_models does not measure: the Primer creatures, the submarine carrier).
+    With `centre`, each proxy goes where the ragdoll's own rest pose has it relative to the body proxy
+    (V506_PROXY_LAYOUT), upright: the SHKT's hinges and slider hold exactly that pose. The V506 gets it from bones of
+    its own; one fuselage bone with the same offset for all put the eight proxies on one point, each still turned by its
+    V506 binding, so the moment a destroyed aircraft's ragdoll went dynamic its constraints threw the parts apart: the
+    wreck left the ground within 6 frames (2026-10-12 probe, docs/feedback-2026-10-12-ragdoll-twitch.md; the user:
+    「飞机炸的时候，尸体布娃娃会抽搐」). In the rest pose it lies still until the dead effect's steps."""
     version, inner = sgo.read(blob)
     up = None if centre is None else [float(c) for c in centre]
 
     def offset(e: list, sign: float) -> list:
-        return e[1:] if up is None else [[sign * c for c in up]] + e[2:]
+        if up is None:
+            return e[1:]
+        proxy = e[0][1] if sign > 0 else e[0][0]
+        if proxy not in V506_PROXY_LAYOUT:
+            raise ValueError(f'{proxy} is no proxy of the V506 ragdoll (V506_PROXY_LAYOUT)')
+        rest = V506_PROXY_LAYOUT[proxy]
+        return [[sign * (up[k] + rest[k]) for k in range(3)], [0.0, 0.0, 0.0, 1.0]] + e[3:]
     inner['ragdoll_from_animation'] = [[[body, e[0][1]]] + offset(e, 1.0) for e in inner['ragdoll_from_animation']]
     drive: dict[str, list] = {}
     for e in inner['animation_from_ragdoll']:

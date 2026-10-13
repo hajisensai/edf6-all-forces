@@ -35,16 +35,20 @@ which support units can be called, their real crews' stock weapons, how many air
 out-of-game loadouts (tools/support_loadout.py: each seated call's soldiers and their colours, each support tank's and jet's
 pylons) and, with the game closed, writes the files those need (and the ones an online host's presets needed here: the
 plugin's pending list). Install writes them too.
+`loadout-generate <game>` is the in-game loadout menu's (src/loadout_store.cpp): it runs the copy install leaves beside the
+plugin (GENERATOR) hidden, and that makes only the variant files not there yet, as new names, the game running or not
+(loadout_generate).
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import sys
 import traceback
 import time
 from types import ModuleType
-from typing import Any
+from typing import Any, Iterator, Mapping
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 for _p in (HERE, os.path.join(HERE, '..', 'pylib'), os.path.join(HERE, '..', 'testrange'),
@@ -65,6 +69,13 @@ PLUGIN_FILES = ('.dll', '.ini')            # shipped
 # What a plugin writes beside itself: its log, the log rotated away (src/plugin.cpp RotateLog), the Primers' trace
 # (src/primer.cpp TraceFile, ini PrimerTrace).
 PLUGIN_RUNTIME = ('.log', '.log.1', '.primer.csv', '.variants_pending.txt')
+# The in-game loadout menu's generator (the installer copied: install_generator), its status file and its lock
+# (loadout_generate); uninstall removes them (remove_generator).
+# The generator itself is tools/loadout_generator.py (frozen on its own, small: build_release.py GENERATOR_EXE).
+from loadout_generator import (GENERATE_LOCK, GENERATE_STATUS, GENERATOR, generate_line, generate_lock, wait_generate_lock,  # noqa: E402,F401
+                               generate_main, generate_menu_preview, generate_summary, generate_variants, loadout_generate,
+                               write_generate_status)
+GENERATOR_FILES = (GENERATOR, GENERATE_STATUS, GENERATE_LOCK)
 ADDED_HEADER = '; ---- 新版本新增的设置（安装器补入，默认值）----'
 # Settings whose shipped default became on (the user, 2026-10-07: "还有什么默认是关的，都打开，都装mod了，肯定要打开啊"):
 # key -> (the old default, the new one). An existing ini still holding the old default gets the new one, once: the
@@ -395,7 +406,13 @@ def build_asset(cache: Any, module: ModuleType, label: str, builder: Any = None)
     return built
 
 
-def build_packs(game: str, campaign: bool) -> tuple | None:
+def find_edf41(game: str) -> str | None:
+    """The player's EDF4.1, looked up once per install (its maps and the EDF4.1 story pack need it)."""
+    return gamedir.find_other(gamedir.EDF41, near=game)
+
+
+def build_packs(game: str, campaign: bool, root41: str | None = None,
+                skip41: Mapping[str, str] | None = None) -> tuple | None:
     """The mission packs to write (make_edf5_campaign.build), or None: the test range's always, the EDF5 campaign's
     when wanted. A refusal of the campaign alone (a mission's resource missing, ...) still registers the range when no
     campaign is installed to keep; the opt-out (`campaign` False) is the packs rebuilt without it."""
@@ -405,7 +422,7 @@ def build_packs(game: str, campaign: bool) -> tuple | None:
     else:
         print('生成测试场任务包（EDF5 战役已停用）……')
     try:
-        return make_edf5_campaign.build(game, campaign=campaign)
+        return make_edf5_campaign.build(game, campaign=campaign, root41=root41, skip41=skip41 or {})
     except make_edf5_campaign.Refused as e:
         print('！ 不安装任务包：', e)
     if not campaign or make_edf5_campaign.enabled(game):
@@ -431,6 +448,8 @@ def install(game: str, campaign_requested: bool = False) -> None:
     import make_chute
     import make_jets
     import edf41_objects
+    import edf41_maps
+    import edf41_sounds
     import make_katyusha
     import make_sazabi
     import make_proteus
@@ -476,19 +495,18 @@ def install(game: str, campaign_requested: bool = False) -> None:
     sazabi = build_asset(cache, make_sazabi, '沙扎比（模型生成约 1.5 分钟）')
     proteus = build_asset(cache, make_proteus, '普罗透斯护盾（原版空袭兵电磁碉堡墙；同时撤销旧版生成的模型）')
     bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
-    campaign = build_packs(game, campaign_requested or make_edf5_campaign.wanted(game))
+    root41 = find_edf41(game)
+    want_campaign = campaign_requested or make_edf5_campaign.wanted(game)
+    # What EDF4.1's objects and maps will leave out, as far as it can be told now; settled after they are written.
+    skip41 = make_edf5_campaign.unavailable41(game, root41)
+    campaign = build_packs(game, want_campaign, root41, skip41)
+    room = build_room_layouts(game)
     print('\n全部生成完毕，开始写入。')
     if campaign is None and not make_edf5_campaign.wanted(game) and make_edf5_campaign.enabled(game):
         # An opt-out (finished by the packs rebuilt without the campaign) that cannot be: refused before writing.
         raise make_edf5_campaign.Refused('无法完成 EDF5 战役停用：任务列表已被其他工具修改，已保留依赖文件。')
     for path in (make_optics.install_models(game, optics) if optics is not None else []):
         print('写入', path)
-    objects41, skipped41 = edf41_objects.build(game)
-    print(f'写入 EDF4.1 的敌人与 NPC（EDF6 没有、4.1 任务要用的 {len(edf41_objects.registry()["objects"])} 种，'
-          '预先转换好，不需要装 4.1；用 4.1 原来的文件名）……')
-    for obj, why in skipped41:
-        print('  跳过', obj, why)
-    edf41_objects.install(game, objects41)
     for path in (make_jets.install(game, jets) if jets is not None else []) + \
             (make_sub.install(game, sub) if sub is not None else []) + \
             (make_katyusha.install(game, katyusha) if katyusha is not None else []) + \
@@ -511,6 +529,34 @@ def install(game: str, campaign_requested: bool = False) -> None:
             print('删除（StockVehicleStores=0：原版载具的请求恢复原样）', path)
     print('写入呼叫武器（武器表只动本插件的行，其它行不动；全部写完或全部不写）……')
     call_weapons.install(game, weapons)
+    # After the weapons: a model both ship (EDF5's Blacker No.4.1, the 4.1 AI tank's look) is shared only once the
+    # weapons' install has recorded it in the ledger; built before, a first upgrade from a version whose weapons
+    # recorded it in their own manifest only would leave the 4.1 tank out (2026-10-12, real install).
+    objects41, skipped41 = edf41_objects.build(game)
+    print(f'写入 EDF4.1 的敌人与 NPC（EDF6 没有、4.1 任务要用的 {len(edf41_objects.registry()["objects"])} 种，'
+          '预先转换好，不需要装 4.1；用 4.1 原来的文件名）……')
+    for obj, why in skipped41:
+        print('  跳过', obj, why)
+    edf41_objects.install(game, objects41)
+    print('转换 EDF4.1 的任务地图（4.1 本篇任务包要用；从已安装的 EDF4.1 转换，城市地图每张约 3–8 分钟，'
+          '山地 / 平原（SK_*）地图每张约 1–2 分钟，已转换且未变的跳过）……' if root41
+          else '没有找到 EDF4.1：跳过 4.1 地图（4.1 本篇任务包需要它）。')
+    written41, skipped_maps = edf41_maps.install(game, root41)
+    for name, why in skipped_maps:
+        print('  跳过', name, why)
+    # The pack's rows may name only what is on disk now: objects and maps left out (a shared file's owner only known
+    # after the weapons' install, a map whose conversion failed) take their missions out of the pack, rebuilt here.
+    left_out41 = {**dict(skipped41), **dict(skipped_maps)}
+    if campaign is not None and root41 and left_out41.keys() != skip41.keys():
+        print('  4.1 的地图或敌人没有装全，重新生成 4.1 本篇任务包（不含用到它们的任务）……')
+        campaign = build_packs(game, want_campaign, root41, left_out41)
+    print('转换 EDF4.1 的武器音效、语音和字幕（4.1 的武器与任务无线电要用；从已安装的 EDF4.1 转换，语音约 1.6 GB，'
+          '已转换且未变的跳过）……' if root41 else '没有找到 EDF4.1：跳过 4.1 的音效和语音。')
+    written_sound, skipped_sound = edf41_sounds.install(game, root41)
+    for path in written_sound:
+        print('写入', path)
+    for group, why in skipped_sound:
+        print('  跳过', group, why)
     install_autoturret(game, *turret)
     # Mutable stock SGOs are read after every primary writer, outside the expensive model cache.
     # AutoTurret's SGOs were redirected before its own manifest write; never layer another hash over them.
@@ -523,6 +569,12 @@ def install(game: str, campaign_requested: bool = False) -> None:
     # After the plugin's ini (the presets are the player's) and after every writer of V505_TANK_MISSION (AutoTurret's
     # recoil, the optics' model redirect above): the AP tank is that file with another gun.
     write_loadout_files(game)
+    write_menu_preview(game)
+    generator = install_generator(game, generator_source())
+    if generator:
+        print('写入', generator, '（游戏内战前配置菜单保存后在后台用它生成新文件）')
+    if room is not None:   # the in-game menu's screen: HUiRoom's and HUiHQMain's layouts (never LYT_MAINFRAME: EDF6Coop's)
+        write_room_layouts(game, room)
     if campaign is not None:   # after the plugin's ini: it sets EDF5CampaignContent and TestRangeContent there
         for path in make_edf5_campaign.install(game, campaign):
             print('写入', path)
@@ -554,6 +606,36 @@ def install(game: str, campaign_requested: bool = False) -> None:
     print('本次模型、挂载、实体瞄具和测试场资源已校验并安装；更新时请运行安装器，不要只替换 DLL。')
 
 
+def build_room_layouts(game: str) -> dict[str, bytes] | None:
+    """The in-game loadout menu's screen (tools/room_layout.py): the room's and the HQ's stock layouts with the menu's
+    elements, from Root.cpk (only read). None (said why) when they cannot be made, whatever the reason (a malformed
+    layout raises TypeError in the SGO reader, a compression the CPK reader does not do NotImplementedError...): the
+    plugin then finds no menu elements and leaves both screens as they are, and the install goes on."""
+    try:
+        import room_layout
+        return room_layout.build(game)
+    except Exception as e:   # never stops the install: said, as write_menu_preview
+        print(f'！ 游戏内战前配置菜单的画面布局没有生成（房间 / HQ 里不显示这个菜单，其它不受影响）：{type(e).__name__}: {e}')
+        return None
+
+
+def write_room_layouts(game: str, room: dict[str, bytes]) -> bool:
+    """build_room_layouts' files written (room_layout.install: ours replaced, another mod's left). False (said why) when
+    the write fails: those screens show no menu, the install goes on (each layout is written atomically: a failure leaves
+    the old file or none)."""
+    try:
+        import room_layout
+        written, skipped = room_layout.install(game, room)
+    except Exception as e:   # never stops the install: said, as write_menu_preview
+        print(f'！ 游戏内战前配置菜单的画面布局没有写入（房间 / HQ 里不显示这个菜单，其它不受影响）：{type(e).__name__}: {e}')
+        return False
+    for path in written:
+        print('写入', path, '（游戏内战前配置菜单的画面）')
+    for path in skipped:
+        print('跳过（别的 mod 的布局，保持原样；这个画面里不显示游戏内战前配置菜单）', path)
+    return True
+
+
 def uninstall_stock_stores(game: str) -> None:
     """The stock vehicles' stores taken back (make_stock_stores) while EDF6AutoTurret's data stays: its flak requests,
     which bring this tool's vehicle with the stores, rewritten first as it builds them alone (through its manifest), so
@@ -581,6 +663,8 @@ def uninstall(game: str) -> None:
     import make_chute
     import make_jets
     import edf41_objects
+    import edf41_maps
+    import edf41_sounds
     import make_katyusha
     import make_sazabi
     import make_proteus
@@ -610,8 +694,9 @@ def uninstall(game: str) -> None:
         # First detach stock paths, preserving other writers' fields; consumers keep shared optic models.
         make_optics.remove(game)
         remove_autoturret(game)
+        import menu_preview
         import support_loadout
-        for remove in (support_loadout.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove,
+        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_maps.remove, edf41_sounds.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:
@@ -641,6 +726,13 @@ def uninstall(game: str) -> None:
     if choice == '1' and os.path.isfile(cache):   # what it describes is gone; with 2 the models stay and it holds
         os.remove(cache)
         print('删除', cache)
+    remove_generator(game, lock=False)   # the lock: held by this flow, removed after it (write_game)
+    import room_layout   # with 1 and 2: without the plugin the menu's panel would only cover the screen
+    deleted, kept = room_layout.remove(game)
+    for path in deleted:
+        print('删除', path)
+    for path in kept:
+        print('保留（之后被别的工具改过）', path)
     remove_plugin(game)
     print('\n卸载完成。')
 
@@ -789,9 +881,60 @@ def write_loadout_files(game: str) -> bool:
         print(f'！ {name} 没有生成（留在待生成清单里，插件按原版出动）：{why}')
     for written in support_loadout.install(game, files, keep=['OBJECT/' + name for name in errors]):
         print('写入', written)
+    cleanup_variants(game)   # before the pending list is cleared: what it names is still wanted this time
     for name in support_loadout.clear_pending(game, files):
         print('已生成联机时房主预设需要、本机缺少的文件', name)
     return not errors
+
+
+def _ini_text(game: str) -> str | None:
+    return _text(os.path.join(game, 'Mods', 'Plugins', PLUGIN + '.ini'))
+
+
+def cleanup_variants(game: str) -> int:
+    """The generated soldier / vehicle files (this tool's, by the ledger) that neither the ini nor the pending list names
+    any more deleted (support_loadout.remove_stale): a room's pre-sync only ever adds them. Only with the game closed and
+    under the generator's lock (the caller's: install, menu 8). Returns how many were deleted."""
+    import support_loadout
+    text = _ini_text(game)
+    if text is None or modfiles.game_running():
+        return 0
+    deleted, kept = support_loadout.remove_stale(game, text, support_loadout.read_pending(game))
+    for path in deleted:
+        print('删除（不再被 ini / 待生成清单引用的生成文件）', path)
+    for path in kept:
+        print('保留（之后被别的工具改过）', path)
+    return len(deleted)
+
+
+def offer_variant_cleanup(game: str) -> int:
+    """Menu 8: the stale generated files (cleanup_variants) counted and removed when the player says so; never while the
+    game runs. Returns how many were deleted."""
+    import support_loadout
+    text = _ini_text(game)
+    if text is None or modfiles.game_running():
+        return 0
+    stale = support_loadout.stale(game, text, support_loadout.read_pending(game))
+    if not stale:
+        return 0
+    if ask(f'有 {len(stale)} 个生成的士兵 / 载具文件已不被 ini 或待生成清单引用（房间预同步等留下的）。输入 y 删除；其它 = 保留：').lower() != 'y':
+        return 0
+    return cleanup_variants(game)
+
+
+def write_menu_preview(game: str) -> bool:
+    """The room / HQ 3D preview's menu SGOs (tools/menu_preview.py), rewritten only when changed. False (said why) when
+    they cannot be made: the preview then shows Rangers in the player's body; nothing else is affected."""
+    import menu_preview
+    import rootcpk
+    try:
+        files = menu_preview.build(rootcpk.Game(game))
+    except Exception as e:   # never stops the install: said, and the plugin logs the missing file
+        print(f'！ 房间 3D 预览用的游骑兵菜单模型没有生成（预览将显示玩家的游骑兵）：{type(e).__name__}: {e}')
+        return False
+    for written in menu_preview.install(game, files):
+        print('写入', written)
+    return True
 
 
 def manage_support(game: str, loadout_only: bool = False) -> int:
@@ -813,17 +956,72 @@ def manage_support(game: str, loadout_only: bool = False) -> int:
     edited = (support_loadout.edit if loadout_only else support_config.edit)(text, ask)
     if edited == text:
         print('没有改动。')
+        if loadout_only and not modfiles.game_running():
+            with wait_generate_lock(game) as held:
+                if held:
+                    offer_variant_cleanup(game)
         return 0
-    modfiles.atomic_write(path, (b'\xef\xbb\xbf' if bom else b'') + edited.encode('utf-8'))
-    print(f'已保存 {path}：下一次在地图呼叫支援时生效。')
-    # The presets' colours and the AP tank need generated files, read at a mission's start: written only with the game
-    # closed (the installer never writes game files under a running game).
-    if modfiles.game_running():
-        print('游戏正在运行：带颜色的士兵模板 / 配了挂载的载具文件没有生成。退出游戏后再进菜单 7 保存一次（或选 1 安装）即可；'
-              '在那之前这些士兵 / 坦克按原版出动（兵种、编组照常生效）。')
-    else:
-        write_loadout_files(game)
+    # The ini, the generated files and the ledger: one writer at a time with the background generator (it reads the ini
+    # and writes Mods and the ledger; it may be running, started by the game).
+    with wait_generate_lock(game) as held:
+        if not held:
+            return 1
+        modfiles.atomic_write(path, (b'\xef\xbb\xbf' if bom else b'') + edited.encode('utf-8'))
+        print(f'已保存 {path}：下一次在地图呼叫支援时生效。')
+        # The presets' colours and the AP tank need generated files, read at a mission's start: written only with the game
+        # closed (the installer never writes game files under a running game).
+        if modfiles.game_running():
+            print('游戏正在运行：带颜色的士兵模板 / 配了挂载的载具文件没有生成。退出游戏后再进菜单 7 保存一次（或选 1 安装）即可；'
+                  '在那之前这些士兵 / 坦克按原版出动（兵种、编组照常生效）。')
+        else:
+            write_loadout_files(game)   # ...and the files no longer named go (cleanup_variants)
     return 0
+
+
+# ---------------------------------------------------------------- the in-game menu's generator (loadout-generate)
+
+
+def generator_source() -> str | None:
+    """The exe install_generator copies: the slim generator tools/build_release.py bundles beside the plugin files
+    (tools/loadout_generator.py frozen alone, a few MB), else the frozen installer itself (an exe built without it: it
+    takes `loadout-generate` too), else none (run from source with no slim exe in build/Mods/Plugins)."""
+    slim = os.path.join(bundle_dir(), GENERATOR)
+    if os.path.isfile(slim):
+        return slim
+    return sys.executable if getattr(sys, 'frozen', False) else None
+
+
+def install_generator(game: str, exe: str | None) -> str | None:
+    """`exe` (generator_source) copied beside the plugin as GENERATOR: the in-game loadout menu and the room pre-sync
+    (src/loadout_store.cpp, src/room_sync.cpp) run it hidden as `loadout-generate <game>`. None: nothing copied, the menu
+    says the generator is missing. Rewritten only when it differs. Returns the path written."""
+    if not exe or not os.path.isfile(exe):
+        return None
+    dst = os.path.join(game, 'Mods', 'Plugins', GENERATOR)
+    data = modfiles.read(exe)
+    if os.path.normcase(os.path.abspath(exe)) == os.path.normcase(os.path.abspath(dst)) or modfiles.sha256_file(dst) == modfiles.sha256(data):
+        return None
+    try:
+        modfiles.atomic_write(dst, data)
+    except OSError as e:   # the old copy still running (started by the game just closed): kept, said, the rest installed
+        print(f'！ 没能更新 {dst}（{e}）：它可能还在运行，稍后重新安装即可')
+        return None
+    return dst
+
+
+def remove_generator(game: str, lock: bool = True) -> None:
+    """install_generator's copy, its status file and (`lock`) its lock. One still in use (a generator the game just closed
+    started, still finishing) is kept and said: uninstall goes on. Uninstall holds the lock while it runs: it removes the
+    lock file only after letting go of it (write_game)."""
+    for name in GENERATOR_FILES if lock else [n for n in GENERATOR_FILES if n != GENERATE_LOCK]:
+        path = os.path.join(game, 'Mods', 'Plugins', name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            os.remove(path)
+            print('删除', path)
+        except OSError as e:
+            print(f'！ 没能删除 {path}（{e}）：生成器可能还在运行，结束后手动删除即可')
 
 
 def main(argv: list[str]) -> int:
@@ -867,9 +1065,20 @@ def main(argv: list[str]) -> int:
 
 
 def write_game(mode: str, game: str) -> int:
-    if mode == 'campaign':
-        return manage_campaign(game)
-    (install if mode == 'install' else uninstall)(game)
+    """The flows that write Mods (and its ledger): under the generator's lock (pylib/ledger.py), waiting a while for a
+    background generator the game started (it outlives the game), else refused with nothing written."""
+    with wait_generate_lock(game) as held:
+        if not held:
+            return 1
+        if mode == 'campaign':
+            return manage_campaign(game)
+        (install if mode == 'install' else uninstall)(game)
+    if mode == 'uninstall':   # its lock file, now nobody holds it
+        lock = os.path.join(game, 'Mods', 'Plugins', GENERATE_LOCK)
+        with contextlib.suppress(OSError):
+            if os.path.isfile(lock) and not os.path.isfile(os.path.join(game, 'Mods', 'Plugins', PLUGIN + '.dll')):
+                os.remove(lock)
+                print('删除', lock)
     return 0
 
 
@@ -891,6 +1100,13 @@ def offer_error_report(text: str) -> None:
 
 
 def run() -> int:
+    if sys.argv[1:2] == ['loadout-generate']:   # the plugin's hidden background run: no banner, no prompt, no window wait
+        try:
+            return generate_main(sys.argv[2:])
+        except Exception:
+            traceback.print_exc()
+            print(generate_line('failed'))
+            return 1
     try:
         code = main(sys.argv[1:])
     except SystemExit as e:  # the tools report refusals this way

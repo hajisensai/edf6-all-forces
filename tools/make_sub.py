@@ -25,6 +25,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
+import cockpits  # noqa: E402
 import jet_models  # noqa: E402
 import ledger  # noqa: E402
 import vcobjects as vc  # noqa: E402
@@ -83,7 +84,7 @@ def build(root: str) -> dict[str, bytes]:
     check_sgo(data)
     out[f'OBJECT/{MODEL_FILE}'] = arc
     out[f'OBJECT/{SGO_FILE}'] = data
-    return out
+    return cockpits.graft_files(game, out)   # its seats' first-person cockpits (pylib/cockpits.py)
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:

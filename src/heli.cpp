@@ -54,6 +54,7 @@
 #include "hudtext.h"
 #include "rescue_logic.h"
 #include "helipad.h"
+#include "log_once.h"
 #include <cmath>
 #include <cstdarg>
 
@@ -306,6 +307,7 @@ struct alignas(16) RayHits { unsigned char raw[0xA0]; };
 // receives the point. `any`: the nearest hit of any kind instead (log only); `flags` gets its flags.
 // `filter`: the ray's collision filter (its layer; kMapLayer the game's map ray).
 constexpr std::uint32_t kMapLayer=0x16;
+constexpr std::uint32_t kObjectLayer=0x0B;   // the bullets' object layer (ObjectRay)
 // `normal`: the hit's normal (collector +0x40; whose side it faces: map_floor.h Learn).
 float CastRay(const float* a,const float* b,float* hit=nullptr,bool any=false,std::uint32_t* flags=nullptr,
               std::uint32_t filter=kMapLayer,float* normal=nullptr) noexcept {
@@ -341,14 +343,22 @@ const Signature kWaterSignatures[]={
 };
 bool waterOk=false;
 
-// One play's rays settle the unverified parts (the list's layout at run time, the surface heights): each
-// different answer is logged once.
+// One play's rays settle the unverified parts (the list's layout at run time, the surface heights): each different
+// answer is logged once a mission (ResetHelis clears the table). Compared only with the answer before, as it was until
+// 2026-10-12, a heli over a shore (its probe flipping water/land/water) wrote a line per flip: 26 363 of the 31 723
+// lines of the testers' report #11, the rest pushed out of the 12 MB the installer sends back (log_once.h).
+SeenOnce<32> seaSeen;
 void LogSea(Sea sea,std::size_t areas,float y) noexcept {
-    static Sea lastSea=Sea::unknown;static std::size_t lastAreas=~std::size_t{0};static float lastY=0.0f;
-    if(sea==lastSea && areas==lastAreas && std::fabs(y-lastY)<0.5f)return;
-    lastSea=sea;lastAreas=areas;lastY=y;
-    Log("WATER %s: %zu water area(s) on the map%s%.1f",sea==Sea::water ? "sea" : sea==Sea::land ? "no water here" : "unknown",
-        areas,sea==Sea::water ? ", surface y=" : "",sea==Sea::water ? y : 0.0f);
+    const auto half=static_cast<std::int32_t>(std::lround(sea==Sea::water ? y*2.0f : 0.0f));   // 0.5 m steps
+    const std::uint64_t key=(static_cast<std::uint64_t>(sea)<<56)|(static_cast<std::uint64_t>(areas&0xFFFF)<<32)|
+                            static_cast<std::uint32_t>(half);
+    switch(seaSeen.Check(key)) {
+    case SeenOnce<32>::Verdict::seen:return;
+    case SeenOnce<32>::Verdict::full:Log("WATER: %zu different answers this mission, further ones not logged",seaSeen.Count());return;
+    case SeenOnce<32>::Verdict::fresh:break;
+    }
+    if(sea==Sea::water)Log("WATER sea: %zu water area(s) on the map, surface y=%.1f",areas,y);
+    else Log("WATER %s: %zu water area(s) on the map",sea==Sea::land ? "no water here" : "unknown",areas);
 }
 
 Sea SeaProbe(float x,float z,float* surface) noexcept {
@@ -774,7 +784,8 @@ bool Medic(const unsigned char* v) noexcept {
 // any other: the enemies.
 template<class F> bool ForEachTarget(bool medic,const unsigned char* v,F&& f) noexcept {
     if(medic)return ForEachHurtFriend(v,[&](const void* o,const float* a,float share) noexcept { f(o,a,share*kHurtWeight); });
-    return ForEachEnemy(v,[&](const void* o,const float* a) noexcept { f(o,a,0.0f); });
+    // An enemy its fire is wasted on (WastedFire) is no target of its.
+    return ForEachEnemy(v,[&](const void* o,const float* a) noexcept { if(!HoldFire(v,o))f(o,a,0.0f); });
 }
 
 // Would a healing round of `weapon` from `from` to `to` pass within kEnemyClear of an enemy, or burst with one in its blast?
@@ -1494,7 +1505,7 @@ void DoorGun(Door& g,const ObjRef& share,bool refill,unsigned char* v,int i,bool
         const float cone=(wide>kDoorCone ? wide : kDoorCone)*(g.firing ? kDoorHold : 1.0f);
         // A healing round onto the player is the point; one past an enemy is not (see Medic).
         fire=!hold && !theirs && Cfg().heliFire && std::fabs(err[0])<cone && std::fabs(err[1])<cone && dist>kDoorMin &&
-             (heals ? !EnemyInLine(v,weapon,gp,lead) : !PlayerInLine(gp,lead));
+             (heals ? !EnemyInLine(v,weapon,gp,lead) : !PlayerInLine(gp,lead) && !HoldFire(v,best,gp,speed,gravity*kGravity));
     } else g.target=ObjRef{};
     if(theirs && !best){g.prevValid=false;return;}   // nobody to heal: their own aim
     Put<float>(blk,0,in[0]);Put<float>(blk,4,in[1]);
@@ -2249,6 +2260,12 @@ Shot Fire(Heli& h,const Sense& s,Mode mode) noexcept {
             if(shot.missile)h.missileAt=s.ms;
         }
     } else h.firing=false;
+    if(shot.gun && !Medic(s.v))shot.gun=!HoldFire(s.v,h.target.obj,pos,s.arms.gunSpeed,s.arms.gunGravity*kGravity);
+    if(shot.missile && !Medic(s.v)) {
+        const unsigned char* w=s.arms.store ? s.arms.store : h.arms[2].weapon;
+        if(Readable(w,kWeaponGravity+4))
+            shot.missile=!HoldFire(s.v,h.target.obj,pos,At<float>(w,kWeaponSpeed)*60.0f,At<float>(w,kWeaponGravity)*kGravity);
+    }
     if(s.type->guns==Guns::nose){s.v[kFireGun]=shot.gun;s.v[kFireMissile]=shot.missile;}
     else if(doorOk && Cfg().heliDoorGuns && SeatCount(s.v)>=3)
         for(int i=0;i<2;++i)DoorGun(h.doors[i],h.target,!h.called,s.v,i,s.grounded || land || rescuing,s.dt,s.ms);
@@ -3626,6 +3643,26 @@ bool InstallDoorGuns() noexcept {
 }
 
 float MapRay(const float* a,const float* b,float* hit) noexcept { return CastRay(a,b,hit); }
+// The nearest object body along a->b: layer 11, the one the bullets' object query filters with (docs/bullet-pass-re.md
+// §2 step 1b), with the plain nearest-hit collector (kHitVtbl: every hit, not the ground filter's). Metres to it, -1 with
+// none; `hit` the point, `body` its id (collector +0x78, 24 bits; docs/raycast-re.md §2.2).
+float ObjectRay(const float* a,const float* b,float* hit,std::uint32_t* body) noexcept {
+    if(!rayOk)return -1.0f;
+    const auto g=At<unsigned char*>(image,kHavokGlobal);
+    if(!Readable(g,0x70) || !At<const void*>(g,0x68))return -1.0f;
+    const RayInput in{{a[0],a[1],a[2],1.0f},{b[0],b[1],b[2],1.0f},kObjectLayer,0,0};
+    RayHits col{};
+    *reinterpret_cast<const void**>(col.raw)=image+kHitVtbl;
+    reinterpret_cast<void(*)(void*)>(image+kHitReset)(&col);
+    reinterpret_cast<void(*)(void*,void*,const RayInput*)>(image+kCastRay)(g+0x10,&col,&in);
+    if(*reinterpret_cast<const std::int32_t*>(col.raw+0x0C)==0)return -1.0f;
+    const float f=*reinterpret_cast<const float*>(col.raw+0x50);
+    if(!std::isfinite(f) || f<0.0f || f>1.0f)return -1.0f;
+    if(hit)std::memcpy(hit,col.raw+0x30,12);
+    if(body)*body=*reinterpret_cast<const std::uint32_t*>(col.raw+0x78)&0xFFFFFFu;
+    const float d[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};
+    return f*std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+}
 // The floor along a map ray (map_floor.h): the hits on a triangle's back skipped once the normals are known to be the
 // triangles' own. Learned from the player's floor (LearnMapNormals): `own` is kept for the run (it is the engine's, not
 // the map's); `facing` is asked again every kRelearnMs (a thin slab or a second body under the floor reads as facing).
@@ -3762,6 +3799,7 @@ void ResetHelis() noexcept {
     for(auto& p:pilots)p=Pilot{};
     PublishPilotView({});
     fullLoggedAt=0;
+    seaSeen.Clear();
     ResetTrack();
     for(auto& r:rescues)r=Rescue{};
     call=RescueCall{};rescueFrame=0;rescueMadeAt=0;cooldownSaid=false;pads=helipad::Pads{};

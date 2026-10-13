@@ -67,6 +67,10 @@ unsigned char* PayloadSightPicked(const void* vehicle,unsigned seat) noexcept;
 // Applies live store redirects and deduplicates final weapons; the first is the single optic owner above.
 // Returns entries written (at most capacity); null output/nonpositive capacity returns 0. Does not fire.
 int PayloadSightWeapons(const void* vehicle,unsigned seat,unsigned char** out,int capacity) noexcept;
+// Every weapon a trigger of the player's seat fires now: the primary's group, then the secondary's (a tank's coaxial gun,
+// the Titan's hull gatling), store redirects applied, deduplicated; whichever is the fire-control pick. The HUD marks each
+// (the user, 2026-10-12: 「应该两个准星都同时显示才对」). Same contract as PayloadSightWeapons otherwise.
+int PayloadTriggerWeapons(const void* vehicle,unsigned seat,unsigned char** out,int capacity) noexcept;
 // Authoritative NPC seat: choose an existing, loaded, reachable weapon for this target.
 // Call before native seat aiming/firing; writes no trigger. nullptr means none is usable.
 // `fire` reports the native trigger control to use (primary or secondary).

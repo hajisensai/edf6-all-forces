@@ -2,6 +2,8 @@
 #include "mission_crew.h"
 #include "mission_crew_team.h"
 #include "support_soldier.h"
+#include "support_loadout.h"
+#include "support_variants.h"
 #include "real_driver_native.h"
 #include "online_authority.h"
 #include "memory.h"
@@ -12,6 +14,7 @@
 namespace crew {
 namespace {
 constexpr unsigned kSoldier=1,kLeader=2;
+static_assert(kSoldier==kSupportRangerResource && kLeader==kSupportLeaderResource,"the crew are the rifle templates' soldier resources");
 struct Deployment { std::uint64_t transaction; ObjRef vehicle; ObjRef crew[15]; unsigned count; bool applied,remote,restorePending; bool boarded[15]; };
 Deployment deployments[128]{};
 bool teamReady=false;
@@ -39,6 +42,9 @@ bool Build(unsigned char* v,SupportPlan* out) noexcept {
         float at[3],reach=0;
         if(!SeatPoint(v,seat,at,&reach) || !std::isfinite(at[0]+at[1]+at[2]+reach) || reach<=0)return false;
         auto& unit=out->units[out->count++];unit.resourceId=seat==0 ? kLeader : kSoldier;unit.role=1;
+        // Its colours (SupportCrewColour_MISSION, else SupportCrewColour): a look variant as a support crew's
+        // (support_variants.h SupportCrewVariant). An older peer ignores it and makes the stock soldier.
+        unit.variant=SupportCrewVariant(support_net::kMissionCrewCatalog,unit.resourceId);
         unit.matrix[0]=unit.matrix[5]=unit.matrix[10]=unit.matrix[15]=1;
         std::memcpy(unit.matrix+12,at,12);
     }
@@ -81,7 +87,10 @@ bool Apply(std::uint64_t tx,const SupportPlan& plan,bool remote,unsigned char* v
     *d=Deployment{};d->transaction=tx;d->vehicle=ObjRef::Of(v);d->remote=remote;
     for(unsigned i=1;i<plan.count;++i) {
         const auto& u=plan.units[i];ObjRef soldier;
-        if(!ApplySupportSoldierSpawn(u.matrix,u.resourceId==kLeader,InSession() ? u.netId : nullptr,&soldier)) {
+        // Coloured when the host applied its look and the file is here; else stock (and listed): colours never refuse.
+        wchar_t path[128];
+        const wchar_t* look=SupportSoldierLookPath(u.resourceId,u.variant,remote,path,sizeof(path)/sizeof(path[0]));
+        if(!ApplySupportSoldierResource(u.matrix,u.resourceId,InSession() ? u.netId : nullptr,false,&soldier,look)) {
             DestroyMissionCrewPlan(tx);return false;
         }
         d->crew[d->count++]=soldier;
@@ -122,6 +131,7 @@ bool ValidateMissionCrewPlan(const SupportPlan& p) noexcept {
     for(unsigned i=1;i<p.count;++i) {
         const auto& u=p.units[i];
         if((u.resourceId!=kSoldier && u.resourceId!=kLeader) || u.role!=1)return false;
+        if(u.variant && !LookOfVariant(u.variant,nullptr))return false;   // a crew carries a look or nothing
         bool entrance=false;
         for(unsigned seat=0;seat<SeatCount(v);++seat) {
             float at[3],reach=0;

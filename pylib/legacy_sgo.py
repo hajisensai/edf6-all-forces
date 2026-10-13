@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import struct
 
+import dsgo
 import mab_legacy
 import sgo
 
@@ -19,6 +20,10 @@ import sgo
 def _blobs(v: object) -> list[bytes]:
     if isinstance(v, bytes):
         return [v]
+    if isinstance(v, dsgo.Blob):
+        return [v.data]
+    if isinstance(v, dsgo.Node):
+        return [b for x in v.items for b in _blobs(x)]
     if isinstance(v, dict):
         return [b for x in v.values() for b in _blobs(x)]
     if isinstance(v, list):
@@ -27,10 +32,15 @@ def _blobs(v: object) -> list[bytes]:
 
 
 def mab_blocks(data: bytes) -> list[bytes]:
-    """The earlier games' MAB blocks (flag 0x03) the SGO `data` holds, each once."""
-    if data[:4] != b'SGO\0':
+    """The earlier games' MAB blocks (flag 0x03) the SGO or DSGO `data` holds, each once (a DSGO: an alias built on
+    an EDF6 template in that form, Hector on E602_BERSERKER_LARGE)."""
+    members: object
+    if data[:4] == b'DSGO':
+        members = dsgo.parse(data).root
+    elif data[:4] == b'SGO\0':
+        _version, members = sgo.read(data)
+    else:
         raise ValueError('not an SGO')
-    _version, members = sgo.read(data)
     out: list[bytes] = []
     for b in _blobs(members):
         if b[:4] == b'MAB\0' and struct.unpack_from('<I', b, 8)[0] == mab_legacy.LEGACY and b not in out:

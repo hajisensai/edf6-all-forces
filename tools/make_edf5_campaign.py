@@ -47,7 +47,7 @@ import os
 import re
 import struct
 import sys
-from typing import Callable, NamedTuple, TypeVar
+from typing import Callable, Collection, Mapping, NamedTuple, TypeVar, Union
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 for _p in (os.path.join(HERE, '..', 'pylib'),):
@@ -65,11 +65,18 @@ TEXT = (os.path.join(sys._MEIPASS, 'edf5campaign', 'missions.json') if getattr(s
 # EDF5's own thumbnails of these missions (EDF5's three offline IMAGE.RABs merged, names as EDF5 has them: the
 # mission's path with '/' as '_', M001.dds, DLC_DM011.dds); tools/make_edf5_campaign_text.py, committed like TEXT.
 THUMBS = os.path.join(os.path.dirname(TEXT), 'thumbnails.rab')
+# EDF4.1's story (plan P6, tools/make_edf41_missions.py): its 89 missions' scripts (EDF5's recompile, RMPA in EDF6's
+# format), titles and pictures, committed and bundled like TEXT. Installed under Mods/MISSION/EDF41/<id>/.
+EDF41 = os.path.join(os.path.dirname(os.path.dirname(TEXT)), 'edf41port')
+EDF41_TEXT = os.path.join(EDF41, 'missions.json')
+EDF41_THUMBS = os.path.join(EDF41, 'missions_thumbnails.rab')
+EDF41_FOLDER = 'EDF41'
 MANIFEST = '.edf5campaign.json'
 DISABLED = '.edf5campaign-disabled'
 INI = os.path.join('Plugins', 'EDF6VehicleCrew.ini')
 INI_KEY = 'EDF5CampaignContent'
 RANGE_INI_KEY = 'TestRangeContent'
+EDF41_INI_KEY = 'EDF41Content'
 LANGS = ('CN', 'EN', 'JA', 'KR', 'SC')
 CONFIG = 'DEFAULTPACKAGE/CONFIG.SGO'
 TEXTS = {lang: f'ETC/TEXTTABLE_STEAM.{lang}.TXT_SGO' for lang in LANGS}   # app:/etc/TextTable_steam.%LOCALE%.txt_sgo
@@ -83,6 +90,8 @@ FIRST_CONTENT = 3   # EDF.dll knows contents 0..2 (0xE3F80's names, MAINSCRIPT's
 # thumbnails], 8 online, 9 content id, 10 mode type (0 offline scenario, 1 online).
 M_NAME, M_DESC, M_MST, M_FILES, M_ONLINE, M_CONTENT, M_TYPE = 0, 1, 5, 6, 8, 9, 10
 T = TypeVar('T')
+# What the EDF4.1 install leaves out after all: object rels ('OBJECT/X.SGO') and map names, or each with its reason.
+Skip41 = Union[Collection[str], Mapping[str, str]]
 
 
 OFFLINE, ONLINE = 'Offline', 'Online'   # a mode's kind: its file names, its text keys, ModeList members 8 and 10
@@ -172,7 +181,24 @@ RANGE_ROW = {'group': 'range', 'key': f'EDF6/{RANGE_MISSION}', 'map': None, 'thu
                        'KR': '탁 트인 평원. 탈것은 시작 지점 근처에, 표적은 멀리(일부는 공중)에 있습니다.\n'
                              '이 미션은 끝나지 않습니다. 시험이 끝나면 일시 정지 메뉴에서 철수하십시오.',
                        'SC': '开阔的平原，载具停在出生点附近，靶子在远处（一部分在空中）。\n这一关不会结束：测完从暂停菜单撤退。'}}
-FILES = (CONFIG, *TEXTS.values(), *(f for p in (*PACKS, RANGE) for f in p.files()))
+# EDF4.1's story: its own pack, slotted after the test range so no installed pack's content id moves. Its missions
+# need EDF4.1's maps, converted at install from the player's EDF4.1 (tools/edf41_maps.py): a mission whose map or
+# objects will not be there is left out, and without EDF4.1 the pack is not built at all (not a refusal).
+_UNVERIFIED_41 = {'CN': '（EDF5 重新編譯的 4.1 任務腳本；地圖由已安裝的 EDF4.1 轉換，天氣與尋路借用 EDF6 地圖；尚未逐關實機驗證）',
+                  'EN': " (EDF5's recompile of the 4.1 missions; maps converted from your EDF4.1, weather and AI paths "
+                        "borrowed from EDF6 maps; not every mission has been verified in game)",
+                  'JA': '（EDF5 で再コンパイルされた 4.1 のミッション。マップはインストール済みの EDF4.1 から変換、天候と経路は EDF6 '
+                        'のマップを流用。全ミッションの動作は未確認）',
+                  'KR': ' (EDF5에서 재컴파일된 4.1 미션, 맵은 설치된 EDF4.1에서 변환, 날씨와 경로는 EDF6 맵을 차용, 모든 미션의 동작은 미확인)',
+                  'SC': '（EDF5 重新编译的 4.1 任务脚本；地图由已安装的 EDF4.1 转换，天气与寻路借用 EDF6 地图；尚未逐关实机验证）'}
+PACK41 = Pack('edf41', 'EDF41', 'E41M.MST', 0,
+              {'CN': 'EDF4.1 本篇', 'EN': 'EDF4.1 Main Story', 'JA': 'EDF4.1 本編', 'KR': 'EDF4.1 본편', 'SC': 'EDF4.1 本篇'},
+              {lang: d + _UNVERIFIED_41[lang] for lang, d in {
+                  'CN': '遊玩 EDF4.1 本篇。', 'EN': 'Play the EDF4.1 story.', 'JA': 'EDF4.1 の本編をプレイします。',
+                  'KR': 'EDF4.1 본편을 플레이합니다.', 'SC': '游玩 EDF4.1 本篇。'}.items()},
+              (OFFLINE, ONLINE))
+SLOTS = (*PACKS, RANGE, PACK41)   # each pack's content id: the first free id + its index here
+FILES = (CONFIG, *TEXTS.values(), *(f for p in (*PACKS, RANGE) for f in p.files()))   # every build writes these
 # The 2026-10-07 version's files (appended to EDF6's own offline list): put back, never written any more.
 LEGACY_LIST = 'MISSION/MISSIONLIST.OFFLINE.LIST.SGO'
 LEGACY = (LEGACY_LIST, 'MISSION/MISSIONLIST.OFFLINE.IMAGE.RAB',
@@ -188,10 +214,17 @@ class Refused(RuntimeError):
 
 
 class Contents(NamedTuple):
-    """The content ids the plugin owns (its ini): the first EDF5 pack's (0 = the campaign is not installed) and the
-    test range's."""
+    """The content ids the plugin owns (its ini): the first EDF5 pack's (0 = the campaign is not installed), the
+    test range's and EDF4.1's story's."""
     campaign: int
     range: int
+    edf41: int = 0
+
+
+def managed(rel: str) -> bool:
+    """A file this tool writes: FILES, or one of the EDF4.1 story's (only with EDF4.1: its pack's lists and texts,
+    its missions' scripts)."""
+    return rel in FILES or rel in PACK41.files() or rel.upper().startswith(f'MISSION/{EDF41_FOLDER}/')
 
 
 # ------------------------------------------------------------------------------------------- reading
@@ -301,7 +334,7 @@ def new_row(i: int, row: dict) -> dsgo.Node:
                       row['bgm'], float(row['progress']), float(row['flags'])], {10: 'flags'})
 
 
-def plan(root: str) -> dict:
+def plan(root: str, root41: str | None = None, skip41: Skip41 = frozenset()) -> dict:
     """What would be installed (rows by pack, skipped missions), from the game and the text; nothing written."""
     game = rootcpk.Game(root)
     text = json.load(open(TEXT, encoding='utf-8'))
@@ -324,7 +357,77 @@ def plan(root: str) -> dict:
                          'flags': FLAGS, 'progress': m['progress'], 'map': first_map(bvm),
                          'title': {lang: m['title'][lang] for lang in LANGS},
                          'brief': {lang: m['brief'][lang] for lang in LANGS}})
-    return {'rows': rows, 'skipped': skipped}
+    rows41, skipped41 = plan41(root, maps, root41, skip41)
+    return {'rows': rows + rows41, 'skipped': skipped + skipped41}
+
+
+def find_edf41(root: str) -> str | None:
+    """The player's EDF4.1 (pylib/gamedir.py), for the entry points that stand for the player's machine."""
+    import gamedir
+    return gamedir.find_other(gamedir.EDF41, near=root)
+
+
+def edf41_text() -> dict:
+    with open(EDF41_TEXT, encoding='utf-8') as f:
+        return json.load(f)
+
+
+def edf41_script(mid: str, name: str) -> bytes:
+    with open(os.path.join(EDF41, 'missions', mid, name), 'rb') as f:
+        return f.read()
+
+
+def unavailable41(root: str, root41: str | None) -> dict[str, str]:
+    """What the install of EDF4.1's objects and maps will leave out, as plan41's `skip41` (key -> why): the object
+    rels and map names edf41_objects.unavailable and edf41_maps.unavailable name."""
+    import edf41_maps
+    import edf41_objects
+    if not root41:   # no 4.1 pack at all (plan41): nothing to leave out of it
+        return {}
+    return {**dict(edf41_objects.unavailable(root)), **dict(edf41_maps.unavailable(root, root41))}
+
+
+def plan41(root: str, maps: set[str], root41: str | None,
+           skip41: Skip41 = frozenset()) -> tuple[list[dict], list[tuple[str, str, str]]]:
+    """EDF4.1's story rows: the missions whose map and files will all be there. Its maps come from the player's
+    EDF4.1 at `root41` (tools/edf41_maps.py MAPS, converted at install), its objects from edf41_objects; without
+    EDF4.1 (None), none. `skip41` names what the install will NOT write after all (edf41_objects.unavailable /
+    edf41_maps.unavailable, a map whose conversion failed): object rels like 'OBJECT/VEHICLE301_TANK_AI.SGO', map
+    names like 'NW_KOUSOUBLD01' (a dict gives the reason of each). A mission naming any of them, in MISSION.BVM or
+    BEFORE.BVM, is skipped, and says so."""
+    import edf41_maps
+    import edf41_objects
+    if not root41:
+        return [], [(PACK41.group, '*', '没有找到 EDF4.1（4.1 本篇的地图要从已安装的 EDF4.1 转换）')]
+    why = {k.upper(): (skip41[k] if isinstance(skip41, Mapping) else '') for k in skip41}
+    names = {(d.upper(), n.upper()) for name in ('Root.cpk', 'Chunk01.cpk', 'Chunk02.cpk')
+             if os.path.isfile(os.path.join(root, name)) for d, n in cpk.Cpk(os.path.join(root, name)).index}
+    names |= {tuple(rel.upper().rsplit('/', 1)) for rel in edf41_objects.registry()['files']}
+    names -= {tuple(k.rsplit('/', 1)) for k in why if '/' in k}
+    maps41 = (maps | {f'{name}.MAC' for name in edf41_maps.MAPS}) - {f'{k}.MAC' for k in why if '/' not in k}
+    missions = edf41_text()['missions']
+    rows, skipped = [], []
+    for i, m in enumerate(missions):
+        bvm = edf41_script(m['id'], 'MISSION.BVM')
+        gone = missing_assets(names, maps41, bvm)
+        if 'BEFORE.BVM' in m['files']:   # loads maps and objects too; not every mission has one
+            gone += missing_assets(names, maps41, edf41_script(m['id'], 'BEFORE.BVM'))
+        if gone:
+            skipped.append((PACK41.group, m['id'], '缺少 ' + ', '.join(sorted({_gone41(ref, why) for ref in gone}))))
+            continue
+        rows.append({'group': PACK41.group, 'path': m['id'], 'key': f'{EDF41_FOLDER}/{m["id"]}', 'bgm': BGM,
+                     'flags': FLAGS, 'progress': round(i / len(missions), 4), 'map': first_map(bvm),
+                     'title': m['title'], 'brief': m['brief'], 'files': m['files']})
+    return rows, skipped
+
+
+def _gone41(ref: str, why: dict[str, str]) -> str:
+    """A missing asset's text; one `skip41` named says it was not installed, and why."""
+    folder, _, name = ref.replace(chr(92), '/').rpartition('/')
+    key = name.upper().removesuffix('.MAC') if folder.upper() == 'MAP' else f'{folder}/{name}'.upper()
+    if key not in why:
+        return ref
+    return f'{ref}（未安装' + (f'：{why[key]}' if why[key] else '') + '）'
 
 
 def parsed(rel: str, read: Callable[[], T]) -> T:
@@ -359,15 +462,26 @@ def edf5_thumbs() -> dict[str, mdb.RabFile]:
         return {x.name.upper(): x for x in mdb.rab_read(f.read()).files}
 
 
+def own_thumbs() -> dict[str, mdb.RabFile]:
+    """Each pack's own mission pictures by '<group>:<NAME>' (EDF5's and EDF4.1's mission ids overlap: M007)."""
+    with open(EDF41_THUMBS, 'rb') as f:
+        edf41 = {x.name.upper(): x for x in mdb.rab_read(f.read()).files}
+    edf5 = edf5_thumbs()
+    out = {f'{pack.group}:{n}': x for pack in PACKS for n, x in edf5.items()}
+    out.update({f'{PACK41.group}:{n}': x for n, x in edf41.items()})
+    return out
+
+
 def pick_thumbs(rows: list[dict], own: dict[str, mdb.RabFile], stock: dict[str, mdb.RabFile],
                 by_map: dict[str, str]) -> list[mdb.RabFile]:
     """A thumbnail per row, named by its key (EDF.dll 0xE0D80): a row with a stock 'thumb' (the range) shows that one;
-    an EDF5 mission EDF5's own (`own`, THUMBS: 440x220 DXT1 like EDF6's), else a stock mission's on its map, else
-    M046's. `own` and `stock` by upper-case name, `by_map` map file -> stock key (stock_maps)."""
+    a mission its own (`own`: EDF5's THUMBS, EDF4.1's EDF41_THUMBS, 440x220 DXT1 like EDF6's), else a stock mission's
+    on its map, else M046's. `own` by '<group>:<NAME>' (own_thumbs), `stock` by upper-case name, `by_map` map file ->
+    stock key (stock_maps)."""
     fallback = stock.get(thumb_name('EDF6/M046').upper()) or next(iter(stock.values()))
     out = []
     for r in rows:
-        mine = None if r.get('thumb') else own.get(thumb_name(r.get('path', '')).upper())
+        mine = None if r.get('thumb') else own.get(f"{r.get('group')}:{thumb_name(r.get('path', '')).upper()}")
         src = mine or stock.get(thumb_name(r.get('thumb') or by_map.get(r['map'] or '', '')).upper(), fallback)
         out.append(mdb.RabFile(thumb_name(r['key']), src.folder, src.flag, src.stored, src.unk))
     return out
@@ -378,7 +492,7 @@ def pack_image(game: rootcpk.Game, rows: list[dict], kind: str = OFFLINE) -> byt
     rab = mdb.rab_read(game.read('MISSION', f'MISSIONLIST.{kind.upper()}.IMAGE.RAB'))
     listed = dsgo.parse(game.read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO')).root.get('table').items
     by_map = stock_maps(game, listed) if any(not r.get('thumb') for r in rows) else {}
-    own = edf5_thumbs() if any(r.get('path') for r in rows) else {}
+    own = own_thumbs() if any(r.get('path') for r in rows) else {}
     rab.files = pick_thumbs(rows, own, {f.name.upper(): f for f in rab.files}, by_map)
     return mdb.rab_write(rab)
 
@@ -421,13 +535,13 @@ def mode_entry(template: list, pack: Pack, content: int, kind: str = OFFLINE) ->
 
 def ours_in(table: list) -> list[str]:
     """Modes in `table` naming a pack's files (none of this tool's: base_bytes reads what it replaced)."""
-    stems = tuple(f'app:/mission/missionlist_{p.tag.lower()}.' for p in (*PACKS, RANGE))
+    stems = tuple(f'app:/mission/missionlist_{p.tag.lower()}.' for p in SLOTS)
     return [str(e[M_NAME]) for e in table if str(e[M_FILES][0]).lower().startswith(stems)]
 
 
 def pack_config(data: bytes, packs: tuple[Pack, ...] = PACKS) -> tuple[bytes, dict[str, int]]:
     """config.sgo with the packs' modes appended (the modes before them untouched) and each pack's content id (by
-    tag): after every id in the table, each pack at its fixed place in (*PACKS, RANGE) whichever packs are given. A
+    tag): after every id in the table, each pack at its fixed place in SLOTS whichever packs are given. A
     room's mode is its content id: the test range's must not move to the EDF5 story's when a player opted out of the
     campaign (the host on M01, the guest on the range)."""
     ver, members = sgo.read(data)
@@ -445,7 +559,7 @@ def pack_config(data: bytes, packs: tuple[Pack, ...] = PACKS) -> tuple[bytes, di
         if 0 not in stock[kind]:
             raise Refused(f'CONFIG.SGO 里没有{"在线" if kind == ONLINE else "离线"}剧情模式：不知道任务包按什么取难度参数。')
     ids = {}
-    slots = {p.tag: k for k, p in enumerate((*PACKS, RANGE))}
+    slots = {p.tag: k for k, p in enumerate(SLOTS)}
     for pack in packs:
         ids[pack.tag] = content + slots[pack.tag]
         for kind in pack.kinds:
@@ -471,7 +585,8 @@ def legacy_blocked(root: str, manifest: dict) -> bool:
     return entry is not None and data is not None and not ours(entry, data) and not restored(entry, data)
 
 
-def build(root: str, campaign: bool = True, test_range: bool = True) -> tuple[dict[str, bytes], Contents, dict]:
+def build(root: str, campaign: bool = True, test_range: bool = True,
+          root41: str | None = None, skip41: Skip41 = frozenset()) -> tuple[dict[str, bytes], Contents, dict]:
     """The files to write (rel under Mods -> bytes), the content ids, and the plan: with `campaign` the three EDF5
     packs, with `test_range` the test range's after them (the EDF5 ids first, as before the range had a pack)."""
     if not (campaign or test_range):
@@ -480,13 +595,15 @@ def build(root: str, campaign: bool = True, test_range: bool = True) -> tuple[di
     if legacy_blocked(root, manifest):
         raise Refused('旧版 EDF5 战役追加过的离线任务列表之后被其他工具改过，不能还原：不改成任务包。')
     game = rootcpk.Game(root)
-    p = plan(root) if campaign else {'rows': [], 'skipped': []}
+    p = plan(root, root41, skip41) if campaign else {'rows': [], 'skipped': []}
     by_pack = {pack.group: [r for r in p['rows'] if r['group'] == pack.group] for pack in PACKS}
     empty = [pack.tag for pack in PACKS if campaign and not by_pack[pack.group]]
     if empty:
         raise Refused(f'没有可安装的任务：{", ".join(empty)}（不写入空任务包）。')
     by_pack[RANGE.group] = [range_row(game)] if test_range else []
-    packs = (*(PACKS if campaign else ()), *((RANGE,) if test_range else ()))
+    by_pack[PACK41.group] = [r for r in p['rows'] if r['group'] == PACK41.group]
+    with41 = campaign and bool(by_pack[PACK41.group])
+    packs = (*(PACKS if campaign else ()), *((RANGE,) if test_range else ()), *((PACK41,) if with41 else ()))
     config, ids = parsed(CONFIG, lambda: pack_config(base_bytes(root, game, CONFIG, manifest), packs))
     out = {CONFIG: config}
     for lang, rel in TEXTS.items():
@@ -496,7 +613,10 @@ def build(root: str, campaign: bool = True, test_range: bool = True) -> tuple[di
         if len(rows) > 512:
             raise Refused(f'{pack.tag} 有 {len(rows)} 关，超过存档 512 关的容量。')
         out.update(pack_files(game, pack, rows))
-    return out, Contents(ids.get(PACKS[0].tag, 0), ids.get(RANGE.tag, 0)), p
+    for r in by_pack[PACK41.group] if with41 else ():
+        for name in r['files']:
+            out[f'MISSION/{EDF41_FOLDER}/{r["path"]}/{name}'] = edf41_script(r['path'], name)
+    return out, Contents(ids.get(PACKS[0].tag, 0), ids.get(RANGE.tag, 0), ids.get(PACK41.tag, 0)), p
 
 
 # ------------------------------------------------------------------------------------------- writing
@@ -525,14 +645,15 @@ def key_setting(text: str, name: str) -> tuple[list[str], int | None, int]:
 
 
 def set_content(root: str, value: Contents) -> str | None:
-    """Set the plugin's [VehicleCrew] EDF5CampaignContent and TestRangeContent; the old row cap (EDF5CampaignRows, read
+    """Set the plugin's [VehicleCrew] EDF5CampaignContent, TestRangeContent and EDF41Content; the old row cap (EDF5CampaignRows, read
     by no plugin since) goes to 0. Unrelated sections and settings are kept."""
     path = os.path.join(root, 'Mods', INI)
     if not os.path.isfile(path):
         return None
     with open(path, encoding='utf-8-sig') as f:
         text = f.read()
-    for name, v in ((INI_KEY, value.campaign), (RANGE_INI_KEY, value.range), (LEGACY_INI_KEY, 0)):
+    for name, v in ((INI_KEY, value.campaign), (RANGE_INI_KEY, value.range), (EDF41_INI_KEY, value.edf41),
+                    (LEGACY_INI_KEY, 0)):
         lines, key, end = key_setting(text, name)
         if key is None and name == LEGACY_INI_KEY:
             continue
@@ -573,7 +694,7 @@ def _put_back(root: str, rel: str, entry: dict) -> str | None:
 
 
 def manifest_record(content: Contents, files: dict[str, dict]) -> dict:
-    return {'version': 2, 'content': content.campaign, 'range': content.range, 'files': files}
+    return {'version': 2, 'content': content.campaign, 'range': content.range, 'edf41': content.edf41, 'files': files}
 
 
 def install(root: str, built: tuple[dict[str, bytes], Contents, dict] | None = None) -> list[str]:
@@ -667,11 +788,12 @@ def remove(root: str, *, remember_disabled: bool = False) -> tuple[list[str], li
     return done, kept
 
 
-def set_packs(root: str, campaign: bool, test_range: bool) -> list[str]:
+def set_packs(root: str, campaign: bool, test_range: bool, root41: str | None = None,
+              skip41: Skip41 = frozenset()) -> list[str]:
     """The mode table with exactly these packs: rebuilt from what it replaced, or put back as it was when there are
     none. Raises Refused when it cannot be rebuilt (nothing written) or put back (a table changed since)."""
     if campaign or test_range:
-        return install(root, build(root, campaign, test_range))
+        return install(root, build(root, campaign, test_range, root41, skip41))
     done, kept = remove(root)
     if kept:
         raise Refused('模式表（CONFIG.SGO）或旧版任务列表被其他工具改过，不能还原：保留任务包文件。')
@@ -742,21 +864,24 @@ def check(root: str) -> bool:
     # The installed packs' files must be as written; a record kept for a retired file another tool changed since
     # (a pack taken out, what it replaced kept to put back) is reported, not a fault.
     current = {CONFIG, *TEXTS.values(), *(f for p in PACKS if enabled(root) for f in p.files()),
-               *(RANGE.files() if range_installed(root) else ())}
+               *(RANGE.files() if range_installed(root) else ()),
+               *(f for f in files if manifest.get('edf41') and managed(f) and f not in FILES)}
 
     def foreign(rel: str, entry: dict) -> bool:   # a retired file someone changed since: kept, its record with it
         data = modfiles.read(rel_path(root, rel))
         return rel not in current and data is not None and not ours(entry, data) and not restored(entry, data)
 
-    kept = [rel for rel, e in files.items() if 'also' not in e and rel in FILES and foreign(rel, e)]
+    kept = [rel for rel, e in files.items() if 'also' not in e and managed(rel) and foreign(rel, e)]
     bad = [rel for rel, e in files.items() if rel not in kept and (
-        'also' in e or rel not in FILES or rel not in current or modfiles.sha256_file(rel_path(root, rel)) != e['sha'])]
+        'also' in e or not managed(rel) or rel not in current or modfiles.sha256_file(rel_path(root, rel)) != e['sha'])]
     for rel in kept:
         print('  保留（别的工具改过，卸载时不动）', rel)
-    wanted_ids = ((INI_KEY, manifest.get('content', 0)), (RANGE_INI_KEY, manifest.get('range', 0)))
+    wanted_ids = ((INI_KEY, manifest.get('content', 0)), (RANGE_INI_KEY, manifest.get('range', 0)),
+                  (EDF41_INI_KEY, manifest.get('edf41', 0)))
     values = {name: ini_value(root, name) for name, _ in wanted_ids}
     ids_ok = all(values[name] == want for name, want in wanted_ids)
-    packs = (['EDF5 战役 3 个'] if enabled(root) else []) + (['测试场'] if range_installed(root) else [])
+    packs = ((['EDF5 战役 3 个'] if enabled(root) else []) + (['测试场'] if range_installed(root) else [])
+             + (['EDF4.1 本篇'] if manifest.get('edf41') else []))
     print(f'任务包：{"、".join(packs) or "无"}，{len(files)} 个文件，缺失、被改过或待还原 {len(bad)}；'
           + '，'.join(f'{name}=' + ('（缺失）' if values[name] is None else str(values[name]))
                      + ('' if values[name] == want else f'（应为 {want}）') for name, want in wanted_ids))
@@ -776,7 +901,8 @@ def main(argv: list[str]) -> int:
             print('保留（之后被别的工具改过）', path)
         return 0
     if '--list' in argv:
-        p = plan(root)
+        root41 = find_edf41(root)
+        p = plan(root, root41, unavailable41(root, root41))
         for r in p['rows']:
             print(r['group'], r['path'], r['map'], r['title']['SC'])
         for g, path, why in p['skipped']:
@@ -784,7 +910,8 @@ def main(argv: list[str]) -> int:
         print(len(p['rows']), '关')
         return 0
     try:
-        built = build(root)
+        root41 = find_edf41(root)
+        built = build(root, root41=root41, skip41=unavailable41(root, root41))
     except Refused as e:
         print('没有安装：', e)
         return 1
@@ -802,8 +929,12 @@ def summary(built: tuple[dict[str, bytes], Contents, dict]) -> str:
     if not content.campaign:
         return out
     counts = '、'.join(f'{pack.name["SC"]} {sum(r["group"] == pack.group for r in built[2]["rows"])} 关' for pack in PACKS)
+    out41 = ''
+    if content.edf41:
+        n41 = sum(r['group'] == PACK41.group for r in built[2]['rows'])
+        out41 = f'；{PACK41.name["SC"]} {n41} 关（内容编号 {content.edf41}）'
     return (f'EDF5 任务包：{counts}（离线模式的「任务包」列表里选择；内容编号 {content.campaign}–'
-            f'{content.campaign + len(PACKS) - 1}）；' + out)
+            f'{content.campaign + len(PACKS) - 1}）{out41}；' + out)
 
 
 if __name__ == '__main__':

@@ -154,6 +154,26 @@ SupportConfig ParseSupportConfig(SupportIniRead read,void* context,SupportKeyOf 
             Problem(c,key,text,fallback);
         }
     }
+    // SupportCrewColour[_<key>|_MISSION] (support_loadout.h CrewColour): a crew's colours; a bad one: the default's.
+    const auto readCrew=[&](const wchar_t* key,CrewColour& out,bool crewless) noexcept {
+        if(!read(context,key,text,std::size(text)))return;
+        wchar_t why[160];
+        if(!ParseCrewColour(text,&out,why,std::size(why))) {
+            wchar_t fallback[192];_snwprintf_s(fallback,_TRUNCATE,L"默认乘员颜色（%ls）",why);
+            Problem(c,key,text,fallback);
+        } else if(crewless && out.set) {
+            out=CrewColour{};Problem(c,key,text,L"原色（该单位没有乘员，只有小队）");
+        }
+    };
+    readCrew(L"SupportCrewColour",c.crewDefault,false);
+    readCrew(L"SupportCrewColour_MISSION",c.crewMission,false);
+    for(int i=0;keyOf && i<units;++i) {
+        const wchar_t* unit=keyOf(i);
+        if(!unit)continue;
+        wchar_t key[96];
+        _snwprintf_s(key,_TRUNCATE,L"SupportCrewColour_%ls",unit);
+        readCrew(key,c.crew[i],!HasCrew(unit));
+    }
     return c;
 }
 
@@ -180,12 +200,14 @@ void LoadSupportConfig(const wchar_t* iniPath) noexcept {
         for(int i=0;i<p.count;++i)if(p.look[i].On())++looks;
     }
     for(const auto& v:next->vehicle)vehicles+=v.On();
+    int crews=next->crewMission.set+next->crewDefault.set;
+    for(const auto& k:next->crew)crews+=k.set;
     Log("CONFIG support disabled=%016llX squad=%ls leader=%ls platoon=%ls/%ls/%ls vehicleCrew=%ls aircraftCrew=%ls "
-        "presets=%d (coloured soldiers %d) vehicle loadouts=%d%s%s",
+        "presets=%d (coloured soldiers %d) vehicle loadouts=%d crew colours=%d%s%s",
         static_cast<unsigned long long>(next->disabled),SupportWeaponName(next->squad),SupportWeaponName(next->leader),
         SupportWeaponName(next->platoon[0]),SupportWeaponName(next->platoon[1]),SupportWeaponName(next->platoon[2]),
         SupportWeaponName(next->vehicleCrew),SupportWeaponName(next->aircraftCrew),presets,looks,
-        vehicles,
+        vehicles,crews,
         problems[0] ? " INVALID: " : "",problems);
     publishedSupport.store(next,std::memory_order_release);
 }

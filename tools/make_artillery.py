@@ -33,6 +33,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import artillery_model  # noqa: E402
+import cockpits  # noqa: E402
 import dsgo  # noqa: E402
 import ledger  # noqa: E402
 import ragdoll_fit  # noqa: E402
@@ -366,7 +367,7 @@ def build(root: str) -> dict[str, bytes]:
         mount = None if folder is None else gun_mount(md, info['barrels'][side])
         files[f'WEAPON/{path.split("/")[-1].upper()}'] = howitzer_sgo(game, stock, mount)
     check(files, game)
-    return files
+    return cockpits.graft_files(game, files)   # its seats' first-person cockpits (pylib/cockpits.py)
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:

@@ -139,13 +139,15 @@ int Guns(unsigned char* v,Gun* guns) noexcept {
     return n;
 }
 
-struct Pick { const float* from; const float* leader; float range,leash; ObjRef keep; const void* best; float score,aim[3]; };
+struct Pick { const float* from; const float* leader; float range,leash; ObjRef keep; const void* best; float score,aim[3];
+             const void* self; };   // self: the robot (WastedFire)
 
 void Consider(void* ctx,const void* object,const float* aim) {
     auto& p=*static_cast<Pick*>(ctx);
     const float d=Dist(p.from,aim);
     if(d>p.range)return;
     if(p.leader && Horiz(p.leader,aim)>p.leash+kLeashSlack)return;
+    if(HoldFire(p.self,object))return;   // no round would hurt it now (hit_predict.h, wasted_fire.h): no target
     const float score=d-(p.keep.Is(object) ? kKeepTarget : 0.0f);
     if(!p.best || score<p.score){p.best=object;p.score=score;std::memcpy(p.aim,aim,12);}
 }
@@ -253,6 +255,7 @@ void Drive(Robo& r,unsigned char* v,ULONGLONG ms) noexcept {
     }
     // The target: the nearest enemy lock point in range (and near enough to the player).
     Pick p{};p.from=pos;p.leader=leader;p.range=Cfg().groundRange;p.leash=Cfg().groundLeash;p.keep=r.target;
+    p.self=v;
     if(reach>0.0f)VisitEnemies(v,&Consider,&p);
     r.target=ObjRef::Of(p.best);
     const float* aim=p.best ? p.aim : nullptr;
@@ -274,7 +277,9 @@ void Drive(Robo& r,unsigned char* v,ULONGLONG ms) noexcept {
         const float d=Dist(ref->pos,aim);
         const float wall=MapRay(ref->pos,aim,hit);
         const bool clear=wall<0.0f || wall>d-3.0f;
-        for(int i=0;i<n;++i)fire[i]=OnTarget(v,guns[i],aim,r.firing[i],clear);
+        for(int i=0;i<n;++i)fire[i]=OnTarget(v,guns[i],aim,r.firing[i],clear) &&
+            !HoldFire(v,p.best,guns[i].pos,At<float>(guns[i].weapon,kWeaponSpeed)*60.0f,
+                      At<float>(guns[i].weapon,kWeaponGravity)*14.7f);
     }
     // The input block, as slot 4 leaves it for a pad.
     Put<float>(v,kMove,move[0]);Put<float>(v,kMove+4,0.0f);Put<float>(v,kMove+8,move[1]);Put<float>(v,kMove+12,1.0f);

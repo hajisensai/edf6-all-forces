@@ -165,7 +165,7 @@ void Rules() {
     struct BoreCase { const char* what; GunFacts f; Bore bore; };
     const BoreCase bores[]={
         {"the Blacker's cannon (RocketBullet01, 120 frames, 350)",{Round::cannon,false,false,120,1,0.8f,350.0f,8.0f,8.0f},Bore::tank},
-        {"the E551's cannon (EfsBullet, 150 frames, 400)",{Round::beam,false,false,150,1,0.8f,400.0f,12.0f,8.0f},Bore::tank},
+        {"the 601's 140 mm cannon (EfsBullet that falls: CANNON, 150 frames, 400)",{Round::cannon,false,false,150,1,0.8f,400.0f,12.0f,8.0f},Bore::tank},
         {"the Begaruta's long cannon (RocketBullet01, 160 frames, 400)",{Round::cannon,false,false,160,1,0.8f,400.0f,20.0f,6.0f},Bore::tank},
         {"the Titan's main gun (RocketBullet01, 300 frames, 750, blast 30)",{Round::cannon,false,false,300,1,1.0f,750.0f,30.0f,6.0f},Bore::heavy},
         {"the Titan's sub gun (RocketBullet01, 80 frames, 200)",{Round::cannon,false,false,80,1,0.9f,200.0f,8.0f,8.0f},Bore::medium},

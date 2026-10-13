@@ -35,6 +35,7 @@
 #include "transport.h"
 #include "vhud.h"
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -117,13 +118,15 @@ struct Soldier {
     ULONGLONG seen,loggedAt,rollAt,spotAt,losFrame;
     npc::Control control;
     bool controlSet,homeSet,spotSet,los,noSwitch;
+    bool unarmedSaid;        // "weapons unreadable" logged for this stretch (once, not every kLogMs: it does not change)
     float home[3],spot[3];
     int arm,wantArm,armMiss;
     ObjRef target;
     const void* losObject;   // what the cached map ray was cast at
-    ObjRef boardV;           // a board order (§7): the vehicle, the seat it was given, when
+    ObjRef boardV;           // a board order (§7): the vehicle, the seat it was given, when it last got nearer
     int boardSeat;
     ULONGLONG boardAt;
+    float boardBest;         // the nearest it has been to its seat's riding point under this order (npc::BoardWalk)
     float fallTo[3];         // the fall-back's point (re-picked every kFallMs)
     ULONGLONG fallAt;
     npc::navigation::State navigation;   // connected ground route, tied to this ObjRef lifetime
@@ -464,7 +467,7 @@ const char* ControlName(npc::Control c) noexcept {
 // --- Its weapons (§3.5) ---
 // held[k]: the index in arm[] of the weapon WeaponSet k holds (its trigger kTrigger+k), -1 when not known. held[0] is
 // the one the plugin picks and aims; held[1] is the Fencer's second hand, which only the stock pulls.
-struct Arms { int n=0; int held[kHands]{-1,-1}; npc::Arm arm[kMaxArms]{}; };
+struct Arms { int n=0; int held[kHands]{-1,-1}; npc::Arm arm[kMaxArms]{}; float speed[kMaxArms]{},gravity[kMaxArms]{}; };
 // WeaponSet k's weapon, nullptr when it has none or is not readable.
 const unsigned char* SetWeapon(const unsigned char* h,int k) noexcept {
     if(At<std::uint64_t>(h,kSetCount)<=static_cast<std::uint64_t>(k))return nullptr;
@@ -485,6 +488,9 @@ Arms ArmsOf(const unsigned char* h) noexcept {
         const unsigned char* w=list[i];
         npc::Arm& m=a.arm[i];m=npc::Arm{};
         if(!Readable(w,kWeaponAmmo+4))continue;
+        const float speed=At<float>(w,0x894)*60.0f,factor=At<float>(w,0x8E0);
+        a.speed[i]=std::isfinite(speed) && speed>0.0f ? speed : 0.0f;
+        a.gravity[i]=std::isfinite(factor) && factor>0.0f ? factor*14.7f : 0.0f;
         for(int k=0;k<kHands;++k)if(w==held[k])a.held[k]=i;
         const float reach=At<float>(w,kArmReach),damage=At<float>(w,kArmDamage),blast=At<float>(w,kArmBlast);
         m.reach=std::isfinite(reach) && reach>0.0f ? reach : 0.0f;
@@ -500,9 +506,12 @@ Arms ArmsOf(const unsigned char* h) noexcept {
 // --- The target ---
 struct Pick { const Enemy* e; float dist; };
 // The target in its scope (npc_logic.h PickTarget): the nearest it can reach with `reach` (its longest weapon's).
-Pick PickTarget(const Soldier& s,const float* eye,const float* anchor,float scope,float reach) noexcept {
+// One its fire is wasted on (WastedFire: a teleportation ship's hatch shut, its last hits on it all hurting nothing) is
+// passed over.
+Pick PickTarget(const Soldier& s,const void* self,const float* eye,const float* anchor,float scope,float reach) noexcept {
     const int i=npc::PickTarget(world.enemies,[](int k) noexcept { return world.enemy[k].aim; },
-                                [&s](int k) noexcept { return s.target.Is(world.enemy[k].object); },eye,anchor,scope,reach);
+                                [&s](int k) noexcept { return s.target.Is(world.enemy[k].object); },
+                                [self](int k) noexcept { return !WastedFire(self,world.enemy[k].object); },eye,anchor,scope,reach);
     return i<0 ? Pick{nullptr,0.0f} : Pick{&world.enemy[i],npc::Dist(eye,world.enemy[i].aim)};
 }
 const Enemy* StockTarget(const unsigned char* h) noexcept {
@@ -643,11 +652,13 @@ bool ShotSafe(const unsigned char* h,const Enemy* t,const float* eye,float blast
     if(MapRay(eye,to,hit)>=0.0f)std::memcpy(to,hit,12);
     return npc::ShotClear(eye,to,kSpread,blast,fr,n);
 }
+// Every trigger is taken off a shot at a target its fire is wasted on (WastedFire): the stock AI's own target included.
 void Veto(unsigned char* h,const Enemy* t,const float* eye,const Arms& a) noexcept {
     for(int k=0;k<kHands;++k) {
         if(!h[kTrigger+k])continue;
         const int w=a.held[k];
         const bool known=w>=0 && w<a.n;
+        if(t && HoldFire(h,t->object,eye,known ? a.speed[w] : 0.0f,known ? a.gravity[w] : 0.0f))h[kTrigger+k]=0;
         if(!ShotSafe(h,t,eye,known ? a.arm[w].blast : LargestBlast(a),known ? a.arm[w].reach : LongestReach(a)))h[kTrigger+k]=0;
     }
 }
@@ -865,7 +876,12 @@ Orders OrdersOf(const Squad* q,const float* anchor) noexcept {
 // seat-clear hook; real soldiers occupy driver seats as well as gunner and passenger seats.
 constexpr unsigned kRideVehicle=0x5765E0;
 constexpr std::size_t kHumanMask=0x31C,kSeatClass=0x30,kSeatEnable=0x34,kHumanSeat=0x1540,kHumanRiding=0x1548;
-constexpr ULONGLONG kBoardMs=20000;        // a board order not done in this long is dropped
+// A board order that has not brought the soldier kBoardProgress m nearer its seat in this long is dropped (the user's
+// report #12, 2026-10-11: no NPC ever got into the Proteus's driver seat or the Barga). Not a deadline for the whole walk:
+// the seats are offered up to kBoardFar (150 m) away and a soldier walks them at ~2.3 m/s (measured: 95 m to the
+// Proteus's driver seat in 48 s), so a fixed 20 s dropped every far order half way and the squad walked them back.
+constexpr ULONGLONG kBoardMs=20000;
+constexpr float kBoardProgress=1.0f;
 const unsigned char kRideSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x18,0x48,0x89,0x7C,0x24,0x20,0x48};
 const unsigned char kRideReleaseSig[]={0x49,0x8B,0x5E,0x08,0x48,0x85,0xDB,0x74,0x27,0x8B,0xC7,0xF0,0x0F,0xC1,0x43,0x08};   // 0x57690D
 bool rideOk=false;
@@ -900,7 +916,12 @@ bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {
     auto v=static_cast<unsigned char*>(const_cast<void*>(s.boardV.obj));
     if(!v || !Readable(v,kSeatCount+8) || !s.boardV.Is(v) || v[kDead] || ms-s.boardAt>kBoardMs || s.boardSeat<0 || static_cast<unsigned>(s.boardSeat)>=SeatCount(v) ||
        !IsOnlineAuthority(h) || !OnlineMaySeatNpc(v) || !SeatTakes(v,static_cast<unsigned>(s.boardSeat),h)) {
-        Log("NPCAI soldier %p: board order dropped (%s)",h,ms-s.boardAt>kBoardMs ? "too long" : "the seat or the vehicle is gone");
+        float at[3]{},reach=0.0f;
+        const bool seen=v && s.boardV.Is(v) && Readable(v,kSeatCount+8) && s.boardSeat>=0 &&
+            SeatPoint(v,static_cast<unsigned>(s.boardSeat),at,&reach);
+        Log("NPCAI soldier %p: board order dropped (%s) seat %d point (%.1f,%.1f,%.1f) reach %.1f soldier (%.1f,%.1f,%.1f) %.1f m off",
+            h,ms-s.boardAt>kBoardMs ? "too long" : "the seat or the vehicle is gone",s.boardSeat,at[0],at[1],at[2],reach,
+            pos[0],pos[1],pos[2],seen ? npc::Dist(pos,at) : -1.0f);
         s.boardV=ObjRef{};
         return false;
     }
@@ -911,16 +932,22 @@ bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {
     }
     // RideVehicle does not check distance itself. Match the seat's real spherical reach, including height;
     // horizontal distance alone would seat a soldier standing on a different floor.
-    if(npc::Dist(pos,at)>=reach) {
+    const float off=npc::Dist(pos,at);
+    npc::BoardWalk walk{s.boardBest,s.boardAt};
+    npc::BoardWalking(walk,off,ms,kBoardMs,kBoardProgress);   // getting nearer renews it (the check above drops a stale one)
+    s.boardBest=walk.best;s.boardAt=walk.since;
+    if(off>=reach) {
         // The native riding point is a trigger centre, not necessarily a walkable foot position.
         // Project only within that trigger's vertical reach, never onto a roof or another floor.
+        // Stop near enough that arriving anywhere in the stop circle is inside the trigger (npc_logic.h BoardStop).
         const float above[3]={at[0],at[1]+0.3f,at[2]},below[3]={at[0],at[1]-reach,at[2]};
         float walkAt[3];
-        if(MapFloorRay(above,below,walkAt)<0.0f || npc::Dist(walkAt,at)>=reach) {
+        const float stop=MapFloorRay(above,below,walkAt)<0.0f ? 0.0f : npc::BoardStop(at[1]-walkAt[1],reach);
+        if(stop<=0.0f) {
             Stand(h); // nextThink already wrote native movement; a rejected entrance must hold, not reuse that intent.
             return true;
         }
-        MoveTo(h,pos,walkAt,0.5f);
+        MoveTo(h,pos,walkAt,stop);
         return true;
     }
     auto ctrl=At<unsigned char*>(v,kSelfCtrl);
@@ -997,13 +1024,15 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     if(pursuit.forced || pursuit.fightFirst){o.anchor=pos;o.leash=Cfg().npcLeash;o.hold=false;}
     const float* anchor=o.anchor;
     const float engage=npc::EngageRange(a.arm,a.n,Cfg().npcEngageShare);
-    Pick t=engage>0.0f ? PickTarget(s,eye,anchor,o.leash+engage,LongestReach(a)) : Pick{nullptr,0.0f};
+    Pick t=engage>0.0f ? PickTarget(s,h,eye,anchor,o.leash+engage,LongestReach(a)) : Pick{nullptr,0.0f};
     // The mark first (§6.3): always for a squad told to focus on it, else when within its reach plus its leash.
     const Enemy* commandTarget=nullptr;
     if(q && q->cmd.order==Order::focus && npcmark::Alive(q->commandFocus)) {
         for(int i=0;i<world.enemies;++i)if(q->commandFocus.Is(world.enemy[i].object)){commandTarget=&world.enemy[i];break;}
     }
-    if(const Enemy* m=commandTarget ? commandTarget : NearestMark(eye)) {
+    // A mark its fire is wasted on waits (the shut ship's hatch opens, it moves under it): the others fought meanwhile.
+    const Enemy* const marked=commandTarget ? commandTarget : NearestMark(eye);
+    if(const Enemy* m=marked && !WastedFire(h,marked->object) ? marked : nullptr) {
         float reach=0.0f;
         for(int i=0;i<a.n;++i)if(a.arm[i].reach>reach)reach=a.arm[i].reach;
         const bool focus=commandTarget!=nullptr;
@@ -1018,9 +1047,14 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
         p.fire=h[kTrigger]!=0;
     } else if(t.e) {
         p.arm=ChooseArm(s,h,a,t.e,eye,pos);
-        const float dir[3]={t.e->aim[0]-eye[0],t.e->aim[1]-eye[1],t.e->aim[2]-eye[2]};
+        // Aimed at the lock point whose predicted hit the target would take (its weak spot: HoldFire), held while it
+        // would take none (its window shut or due to open: aimed at all the same, ready).
+        Enemy at=*t.e;
+        const bool armed=p.arm>=0 && p.arm<a.n;
+        const bool hold=HoldFire(h,t.e->object,eye,armed ? a.speed[p.arm] : 0.0f,armed ? a.gravity[p.arm] : 0.0f,at.aim);
+        const float dir[3]={at.aim[0]-eye[0],at.aim[1]-eye[1],at.aim[2]-eye[2]};
         if(mask&kMaskLook)Look(h,dir);
-        p.fire=ShotOk(s,h,a,p.arm,*t.e,eye) && (mask&kMaskTrigger);
+        p.fire=!hold && ShotOk(s,h,a,p.arm,at,eye) && (mask&kMaskTrigger);
         h[kTrigger]=p.fire ? 1 : 0;
         Veto(h,t.e,eye,a);   // the second hand (d71) the stock may have pulled, with its own weapon
     } else {
@@ -1097,9 +1131,13 @@ void Think(unsigned char* h,int cls) noexcept {
     if(s->boardV && Board(*s,h,pos,ms))return; // boarding does not depend on readable hand weapons
     const Arms a=ArmsOf(h);
     if(a.n==0) {   // its weapons cannot be read: nothing to fight with that the plugin knows of, so all of it stays stock
-        if(Cfg().debug && ms-s->loggedAt>kLogMs){s->loggedAt=ms;Log("NPCAI %s %p: weapons unreadable, left stock",kSoldiers[cls].name,h);}
+        if(Cfg().debug && !s->unarmedSaid && ms-s->loggedAt>kLogMs) {
+            s->loggedAt=ms;s->unarmedSaid=true;
+            Log("NPCAI %s %p: weapons unreadable, left stock",kSoldiers[cls].name,h);
+        }
         return;
     }
+    s->unarmedSaid=false;
     const Plan p=npc::Scripted(control) ? Scripted(*s,h,a,eye,pos) : Drive(*s,h,kSoldiers[cls],a,root,eye,pos,q,ms);
     if(Cfg().debug && ms-s->loggedAt>kLogMs) {
         s->loggedAt=ms;
@@ -1359,6 +1397,42 @@ bool BargaReady(unsigned char* v,void* const* vt) noexcept {
     return built;
 }
 
+// Each vehicle an NPC driver runs the AI pass of, once in kDrivenLogMs (Debug): its seats' weapons' rounds left, so a
+// log tells which of several driven vehicles fires (the rounds go down) and which only drives.
+constexpr ULONGLONG kDrivenLogMs=10000;
+constexpr std::size_t kVehicleTarget=0x518;   // the vehicle AI's target (npcpost.cpp kTarget: the native target ObjRef)
+constexpr int kDrivenLogged=16;
+struct DrivenLog { ObjRef v; ULONGLONG at; };
+DrivenLog drivenLogged[kDrivenLogged]{};
+void LogDrivenVehicle(const unsigned char* h,unsigned char* v) noexcept {
+    if(!Cfg().debug)return;
+    const ULONGLONG ms=GameMs();
+    DrivenLog* slot=nullptr;
+    for(auto& e:drivenLogged) {
+        if(e.v.Is(v)){slot=&e;break;}
+        if(!slot || e.at<slot->at)slot=&e;
+    }
+    if(slot->v.Is(v) && ms-slot->at<kDrivenLogMs)return;
+    slot->v=ObjRef::Of(v);slot->at=ms;
+    char rounds[160]{};std::size_t used=0;
+    for(unsigned k=0;k<SeatCount(v) && k<edf::kMaxSeats;++k) {
+        const unsigned char* seat=SeatAt(v,k);
+        const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
+        const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
+        for(std::uint64_t i=0;i<n && i<4 && Readable(holders,(i+1)*8);++i) {
+            const auto w=Readable(holders[i],kHolderWeapon+8) ? At<const unsigned char*>(holders[i],kHolderWeapon) : nullptr;
+            const int left=Readable(w,kWeaponAmmo+4) ? At<std::int32_t>(w,kWeaponAmmo) : -1;
+            const int wrote=std::snprintf(rounds+used,sizeof(rounds)-used,"%s%u:%d",used ? " " : "",k,left);
+            if(wrote<0 || static_cast<std::size_t>(wrote)>=sizeof(rounds)-used)break;
+            used+=static_cast<std::size_t>(wrote);
+        }
+    }
+    const auto* target=At<const unsigned char*>(v,kVehicleTarget);
+    const float targetAt=Readable(target,kPosition+12) ? npc::Dist(Pos(v),Pos(target)) : -1.0f;
+    Log("NPCAI driver %p runs the AI pass of v=%p (not on the AI list); target %p at %.0f m; rounds left seat:n [%s]",h,v,target,
+        targetAt,rounds);
+}
+
 void DriveVehicleAi(unsigned char* h,const float* dt) noexcept {
     static const void* lastV=nullptr;static ULONGLONG lastFrame=0;
     if(!dt || !Cfg().npcBoarding || h[kDead])return;
@@ -1375,8 +1449,7 @@ void DriveVehicleAi(unsigned char* h,const float* dt) noexcept {
     if(lastV==v && lastFrame==frame)return;   // once a frame
     lastV=v;lastFrame=frame;
     if(kind==AiPass::barga && !BargaReady(v,vt))return;
-    static ULONGLONG loggedAt=0;
-    if(GameMs()-loggedAt>10000){loggedAt=GameMs();Log("NPCAI driver %p runs the AI pass of v=%p (not on the AI list)",h,v);}
+    LogDrivenVehicle(h,v);
     reinterpret_cast<AiPassFn>(vt[kSlotAiPass])(v,dt);
     if(kind==AiPass::barga)return;   // its action runs inside its pass
     // The class's AI action when no slot 6 registered one (see above).
@@ -2014,7 +2087,8 @@ bool AssignBoard(unsigned char* v,unsigned char* h,ULONGLONG ms) noexcept {
         ms-s->boardAt<=kBoardMs && SeatTakes(v,static_cast<unsigned>(s->boardSeat),h);
     for(int priority=0;priority<3;++priority)for(unsigned k=0;k<SeatCount(v) && k<edf::kMaxSeats;++k) {
         if(SeatPriority(v,k)!=priority || Reserved(v,k,ms,h) || !SeatTakes(v,k,h))continue;
-        s->seen=ms;s->boardV=ObjRef::Of(v);s->boardSeat=static_cast<int>(k);s->boardAt=ms;
+        s->seen=ms;s->boardV=ObjRef::Of(v);s->boardSeat=static_cast<int>(k);s->boardAt=ms;s->boardBest=FLT_MAX;
+        if(Cfg().debug)Log("NPCAI soldier %p: board order v=%p seat %u",h,v,k);
         return true;
     }
     return false;
@@ -2618,9 +2692,10 @@ constexpr std::size_t kSlotSeatFire=70;
 constexpr unsigned kSeatFire=0x65F6F0;
 const unsigned char kSeatFireSig[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x20,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56};
 using SeatFireFn=void(__fastcall*)(void*,int,const void*);
-struct GunnerPick { const float* from; float reach; const void* best; float bestD; };
+struct GunnerPick { const void* self; const float* from; float reach; const void* best; float bestD; };
 void GunnerVisit(void* ctx,const void* object,const float* aim) {
     auto& p=*static_cast<GunnerPick*>(ctx);
+    if(WastedFire(p.self,object))return;
     const float d=npc::Dist(p.from,aim);
     if(d<=p.reach && d<p.bestD){p.best=object;p.bestD=d;}
 }
@@ -2743,6 +2818,7 @@ void __fastcall DriverPayloadAim(unsigned char* v,int index,const void* target) 
     }
     __try {
         ReleaseDriverPayload(v,true);
+        if(target && HoldFire(v,target))target=nullptr;   // the stock AI's target no round would hurt now: none
         const auto seat=SeatAt(v,0);
         PayloadFire fire=PayloadFire::other;
         unsigned char* weapon=nullptr;
@@ -2750,6 +2826,7 @@ void __fastcall DriverPayloadAim(unsigned char* v,int index,const void* target) 
             weapon=NpcPayloadSelect(v,0,npc::Dist(Pos(v),Pos(static_cast<const unsigned char*>(target))),GunnerAirTarget(target),&fire);
         else NpcPayloadSelect(v,0,0.0f,false,&fire); // clear the old redirect on target loss
         Put<float>(seat,0x2E4,0.0f);Put<float>(seat,0x2E0,0.0f);
+        if(weapon && HoldFire(v,target,Pos(v),At<float>(weapon,0x894)*60.0f,At<float>(weapon,0x8E0)*14.7f))weapon=nullptr;
         if(weapon)AimSelectedGunner(v,0,target,weapon,fire);
         else {
             native(v,0,target); // keep native tracking/idle behavior, but no unavailable shot
@@ -2810,15 +2887,17 @@ void NpcGunnersInput(unsigned char* v) noexcept {
             if(Readable(w,kArmReach+4) && At<float>(w,kArmReach)>reach)reach=At<float>(w,kArmReach);
         }
         if(!(reach>0.0f))continue;
-        GunnerPick p{Pos(v),reach,nullptr,1e30f};
+        GunnerPick p{v,Pos(v),reach,nullptr,1e30f};
         const Enemy* const m=world.frame==GameFrame() ? NearestMark(Pos(v)) : nullptr;   // the soldiers' list of this frame only
-        if(m && npc::Dist(Pos(v),m->aim)<=reach){p.best=m->object;p.bestD=npc::Dist(Pos(v),m->aim);}
+        if(m && npc::Dist(Pos(v),m->aim)<=reach && !WastedFire(v,m->object)){p.best=m->object;p.bestD=npc::Dist(Pos(v),m->aim);}
         else VisitEnemies(v,&GunnerVisit,&p);
+        if(p.best && HoldFire(v,p.best)){p.best=nullptr;}   // no round would hurt it now (HoldFire): the seat idles
         if(p.best) {
             if(Cfg().stockStores) {
                 PayloadFire fire=PayloadFire::other;
                 const auto w=NpcPayloadSelect(v,i,p.bestD,GunnerAirTarget(p.best),&fire);
                 if(!w)continue;
+                if(HoldFire(v,p.best,Pos(v),At<float>(w,0x894)*60.0f,At<float>(w,0x8E0)*14.7f))continue;
                 AimSelectedGunner(v,i,p.best,w,fire);
                 NpcCoaxFire(v,i,p.best,&FriendInLine);
             } else reinterpret_cast<SeatFireFn>(image+kSeatFire)(v,static_cast<int>(i),p.best);

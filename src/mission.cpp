@@ -12,6 +12,7 @@
 #include "gear.h"
 #include "memory.h"
 #include "playarea.h"
+#include "room_ui.h"
 #include "sazabi_sound.h"
 #include "support_spawn.h"
 #include "support_soldier.h"
@@ -91,9 +92,11 @@ void MissionStart() noexcept {
     ResetStabilizer();
     ResetMap();
     ResetDamageStats();
+    ResetWastedFire();
     ResetHeliSight();
     ResetStockHud();
     ResetStockGauges();
+    ResetRoomUi();          // the room / HQ screen is gone: its menu and room sync go on the next screen frame
     ResetPayload();
     ResetSeatSwitch();
     ResetGear();

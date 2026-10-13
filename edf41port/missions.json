@@ -1,0 +1,2246 @@
+{
+ "source": "scripts: EDF5 MISSION/EDF4.1 (RMPA in EDF6 format); text, pictures: EDF4.1 MISSION/MISSION*.",
+ "missions": [
+  {
+   "id": "M190",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA",
+    "BEFORE.BVM",
+    "BEFORE.RMPA"
+   ],
+   "title": {
+    "CN": "Reconvene",
+    "EN": "Reconvene",
+    "JA": "再召集",
+    "KR": "Reconvene",
+    "SC": "Reconvene"
+   },
+   "brief": {
+    "CN": "Emergency dispatch request: We have reports of giant insect sightings. Probably a prank after so many years, but better safe than sorry.",
+    "EN": "Emergency dispatch request: We have reports of giant insect sightings. Probably a prank after so many years, but better safe than sorry.",
+    "JA": "緊急出動要請です。詳細は不明。７年前に絶滅したはずの巨大生物を見た者がいるとの情報があります。ありえない話ですが、とにかく現地に向かってください。",
+    "KR": "Emergency dispatch request: We have reports of giant insect sightings. Probably a prank after so many years, but better safe than sorry.",
+    "SC": "Emergency dispatch request: We have reports of giant insect sightings. Probably a prank after so many years, but better safe than sorry."
+   },
+   "sha": {
+    "MISSION.BVM": "da0a8eab179eeb12645de59f2ccfb6fbcb6100817ae9ab546c27adcdfabdf2ad",
+    "MISSION.RMPA": "c479d3fc060bbf74c157d77045ee3f43c79537c5500b9283da7e5427c55b25ec",
+    "BEFORE.BVM": "3c5468fb209f1e4b5e64344b4e483a1778b7d1df5df938cef3a41319d89d8834",
+    "BEFORE.RMPA": "e95154c9d53f441ae32753149623339321ec1928e380264f2b4740a0c9bb7bcd"
+   }
+  },
+  {
+   "id": "M515",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Spreading Disaster",
+    "EN": "Spreading Disaster",
+    "JA": "広がる災厄",
+    "KR": "Spreading Disaster",
+    "SC": "Spreading Disaster"
+   },
+   "brief": {
+    "CN": "Dispatch request from the civilians: Huge monsters have appeared in the city. Be careful; they spit a powerful acid that can cause serious damage. Good luck out there!",
+    "EN": "Dispatch request from the civilians: Huge monsters have appeared in the city. Be careful; they spit a powerful acid that can cause serious damage. Good luck out there!",
+    "JA": "市民から出動要請です。市街地に巨大生物が出現。ただちに現地に向かってください。なお、巨大生物が吐き出す体液は強力な酸です。まともに浴びれば無事では済みません。十分に注意してください。",
+    "KR": "Dispatch request from the civilians: Huge monsters have appeared in the city. Be careful; they spit a powerful acid that can cause serious damage. Good luck out there!",
+    "SC": "Dispatch request from the civilians: Huge monsters have appeared in the city. Be careful; they spit a powerful acid that can cause serious damage. Good luck out there!"
+   },
+   "sha": {
+    "MISSION.BVM": "6e9e29ab844fb09365f50e4806e1e494191c71383e25b92c4d19d462c7ca88ae",
+    "MISSION.RMPA": "9429fa17485d53c039af44ea7cb56c938c14f31a7c74937a588125e483de2cfb"
+   }
+  },
+  {
+   "id": "M191",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Winged War Goddess",
+    "EN": "Winged War Goddess",
+    "JA": "翼の戦姫",
+    "KR": "Winged War Goddess",
+    "SC": "Winged War Goddess"
+   },
+   "brief": {
+    "CN": "Gigantic alien creatures have appeared in a residential area. You must protect the civilians!",
+    "EN": "Gigantic alien creatures have appeared in a residential area. You must protect the civilians!",
+    "JA": "住宅地に巨大生物が出現しました。現地はパニック状態です。巨大生物と交戦し、市民を守ってください。",
+    "KR": "Gigantic alien creatures have appeared in a residential area. You must protect the civilians!",
+    "SC": "Gigantic alien creatures have appeared in a residential area. You must protect the civilians!"
+   },
+   "sha": {
+    "MISSION.BVM": "726329b931f31e6c5d7d2e044568ef7adee6d57484f29e911c21324279f5468e",
+    "MISSION.RMPA": "2eec1a047689e39b7332f5d95cb341dbc9407eed67c8c782e4a983d77817d269"
+   }
+  },
+  {
+   "id": "M192",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA",
+    "BEFORE.BVM",
+    "BEFORE.RMPA"
+   ],
+   "title": {
+    "CN": "Setting Sun",
+    "EN": "Setting Sun",
+    "JA": "落日",
+    "KR": "Setting Sun",
+    "SC": "Setting Sun"
+   },
+   "brief": {
+    "CN": "We've lost communication with the Wing Diver team. Head to their last known location and support them as needed.",
+    "EN": "We've lost communication with the Wing Diver team. Head to their last known location and support them as needed.",
+    "JA": "ウイングダイバーチームからの連絡が途絶えました。何かがおこったとしか考えられません。現地に向かい、ウイングダイバーを支援してください。",
+    "KR": "We've lost communication with the Wing Diver team. Head to their last known location and support them as needed.",
+    "SC": "We've lost communication with the Wing Diver team. Head to their last known location and support them as needed."
+   },
+   "sha": {
+    "MISSION.BVM": "e77cebfd8e49c3a7fbfd00b8db8e936d6cc73b5283c0c79576e79454d75bf7d4",
+    "MISSION.RMPA": "c44d6162acde1b82aba1c1eabd2020c795610ade067d19829eae5b270bbcc712",
+    "BEFORE.BVM": "91b0a57145150f61e7755a0e09ddd3889b8b1669ce7b128a73aa68ee42be78c1",
+    "BEFORE.RMPA": "9b26cc8939b956cdf65a62369f5bd50ff2b8542ba8af3c898c12f666828d50eb"
+   }
+  },
+  {
+   "id": "M104",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Wind Shear",
+    "EN": "Wind Shear",
+    "JA": "遮風地帯",
+    "KR": "Wind Shear",
+    "SC": "Wind Shear"
+   },
+   "brief": {
+    "CN": "Emergency support request: The Wing Diver team is engaged with a very strong enemy and is taking heavy casualties. Their engagement location is not far from here. You are to head out immediately, destroy the monsters, and rescue the surviving Wing Divers.",
+    "EN": "Emergency support request: The Wing Diver team is engaged with a very strong enemy and is taking heavy casualties. Their engagement location is not far from here. You are to head out immediately, destroy the monsters, and rescue the surviving Wing Divers.",
+    "JA": "たった今、ウイングダイバーチームからの通信が入りました。救援要請です。ただちに現地に向かってください。各地でウイングダイバーチームが壊滅したとの報告が入っていますが……救援要請のあった場所はさほど離れていません。今なら、間に合うはずです。巨大生物を殲滅し、生存しているウイングダイバーを救助してください。",
+    "KR": "Emergency support request: The Wing Diver team is engaged with a very strong enemy and is taking heavy casualties. Their engagement location is not far from here. You are to head out immediately, destroy the monsters, and rescue the surviving Wing Divers.",
+    "SC": "Emergency support request: The Wing Diver team is engaged with a very strong enemy and is taking heavy casualties. Their engagement location is not far from here. You are to head out immediately, destroy the monsters, and rescue the surviving Wing Divers."
+   },
+   "sha": {
+    "MISSION.BVM": "1f1eaa8f0f821fd864f08a49a1f9ee13ad209651d7f26ce96017fafd7134cd81",
+    "MISSION.RMPA": "8e28ba8261cf676ca6f63794516c3a856ff626cc4d4f77fd8a3e0cf001a42a7f"
+   }
+  },
+  {
+   "id": "M105",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Underground Cave",
+    "EN": "Underground Cave",
+    "JA": "地下洞",
+    "KR": "Underground Cave",
+    "SC": "Underground Cave"
+   },
+   "brief": {
+    "CN": "A giant insect nest has spread out under the city. We cannot allow it to remain intact! We must begin infiltrating their burrows. Move out immediately and report to the local Ranger team for further instructions.",
+    "EN": "A giant insect nest has spread out under the city. We cannot allow it to remain intact! We must begin infiltrating their burrows. Move out immediately and report to the local Ranger team for further instructions.",
+    "JA": "巨大生物の巣は市街地の地下まで広がっているようです。このまま巣穴を放置することは許されません。これより巣穴への突入作戦を開始します。ただちに出動してください。現地ではレンジャーチームが先導します。共に行動してください。",
+    "KR": "A giant insect nest has spread out under the city. We cannot allow it to remain intact! We must begin infiltrating their burrows. Move out immediately and report to the local Ranger team for further instructions.",
+    "SC": "A giant insect nest has spread out under the city. We cannot allow it to remain intact! We must begin infiltrating their burrows. Move out immediately and report to the local Ranger team for further instructions."
+   },
+   "sha": {
+    "MISSION.BVM": "0891c73892466c6b94dd98bb32052f4afbc2d1b0e2cb40335028553fe57c82ff",
+    "MISSION.RMPA": "05425dbddbe918bb82ce6fe6e8e79c2489e9198c41cedf97d157e27751466958"
+   }
+  },
+  {
+   "id": "M106",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Eruption",
+    "EN": "Eruption",
+    "JA": "凶蟲噴出",
+    "KR": "Eruption",
+    "SC": "Eruption"
+   },
+   "brief": {
+    "CN": "Emergency support request: Giant spiders have emerged from underground. They've invaded the city and are attacking civilians. These are a formidable enemy and there are a great many of them, so the Air Raiders are taking point. Air Raiders, move out!",
+    "EN": "Emergency support request: Giant spiders have emerged from underground. They've invaded the city and are attacking civilians. These are a formidable enemy and there are a great many of them, so the Air Raiders are taking point. Air Raiders, move out!",
+    "JA": "地底から蜘蛛型巨大生物が出現。市街地に侵入し、市民を襲っています。ただちに現地に向かってください。蜘蛛型の巨大生物は強敵であり、しかも大群です。これを殲滅するため、支援部隊が出動しています。支援の要請はエアレイダーに一任されます。エアレイダー、出撃願います。",
+    "KR": "Emergency support request: Giant spiders have emerged from underground. They've invaded the city and are attacking civilians. These are a formidable enemy and there are a great many of them, so the Air Raiders are taking point. Air Raiders, move out!",
+    "SC": "Emergency support request: Giant spiders have emerged from underground. They've invaded the city and are attacking civilians. These are a formidable enemy and there are a great many of them, so the Air Raiders are taking point. Air Raiders, move out!"
+   },
+   "sha": {
+    "MISSION.BVM": "ee046e6c070ca9a5646d41e7806517795f61c30df9885479a7feb7f03b0aed65",
+    "MISSION.RMPA": "082e71fa584e7425add9442cf49a20aae6eb412e79c53e46753cad94630a008b"
+   }
+  },
+  {
+   "id": "M107",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Retaliation",
+    "EN": "Retaliation",
+    "JA": "凶蟲飛散",
+    "KR": "Retaliation",
+    "SC": "Retaliation"
+   },
+   "brief": {
+    "CN": "Giant insects have shown up in a residential area. EDF soldiers are already engaged in battle there. Please head out to the scene.",
+    "EN": "Giant insects have shown up in a residential area. EDF soldiers are already engaged in battle there. Please head out to the scene.",
+    "JA": "住宅地に巨大生物が出現。すでに先行部隊が交戦中です。すぐに応援に向かってください。",
+    "KR": "Giant insects have shown up in a residential area. EDF soldiers are already engaged in battle there. Please head out to the scene.",
+    "SC": "Giant insects have shown up in a residential area. EDF soldiers are already engaged in battle there. Please head out to the scene."
+   },
+   "sha": {
+    "MISSION.BVM": "4f980fb787ff52f05cc9da05dea83e3e2c926184a35ce3489755b09ed237f088",
+    "MISSION.RMPA": "14b72eae834b88226a5418fcc3c942d485925ca2b838faaf74d9d97daafe332f"
+   }
+  },
+  {
+   "id": "M108",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Beach Fear",
+    "EN": "Beach Fear",
+    "JA": "海辺の怪",
+    "KR": "Beach Fear",
+    "SC": "Beach Fear"
+   },
+   "brief": {
+    "CN": "Dispatch request to the port area. Enormous creatures known as 'Retiarii' have been spotted. You're to go investigate.",
+    "EN": "Dispatch request to the port area. Enormous creatures known as 'Retiarii' have been spotted. You're to go investigate.",
+    "JA": "港湾地帯に出動要請。レタリウスと呼ばれる巨大生物が出現したようです。現地へ向かってください。",
+    "KR": "Dispatch request to the port area. Enormous creatures known as 'Retiarii' have been spotted. You're to go investigate.",
+    "SC": "Dispatch request to the port area. Enormous creatures known as 'Retiarii' have been spotted. You're to go investigate."
+   },
+   "sha": {
+    "MISSION.BVM": "1a44cfb9bd681da01a4ce425f5182f7bd855f2858ce59db0922e22eea4c480c8",
+    "MISSION.RMPA": "0c3815312d2295fe29ec3a9990e773ee07894517e48c57cd0ced2b11e00ee27f"
+   }
+  },
+  {
+   "id": "M016",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA",
+    "BEFORE.BVM",
+    "BEFORE.RMPA"
+   ],
+   "title": {
+    "CN": "The Return",
+    "EN": "The Return",
+    "JA": "異邦人の帰還",
+    "KR": "The Return",
+    "SC": "The Return"
+   },
+   "brief": {
+    "CN": "Destroy the giant creatures in the city! The Ravager mothership is approaching the area. Our Air Force will engage the ships. Ground troops, focus on the creatures.",
+    "EN": "Destroy the giant creatures in the city! The Ravager mothership is approaching the area. Our Air Force will engage the ships. Ground troops, focus on the creatures.",
+    "JA": "市街地に侵入した巨大生物を殲滅します。フォーリナーのマザーシップが作戦エリアに近づいており、空軍がこれを迎撃します。地上部隊は巨大生物との戦闘に専念してください。",
+    "KR": "Destroy the giant creatures in the city! The Ravager mothership is approaching the area. Our Air Force will engage the ships. Ground troops, focus on the creatures.",
+    "SC": "Destroy the giant creatures in the city! The Ravager mothership is approaching the area. Our Air Force will engage the ships. Ground troops, focus on the creatures."
+   },
+   "sha": {
+    "MISSION.BVM": "b3ff994ad188a41d830d2950518f7220f3077b294e014b2203c31035ee23bea9",
+    "MISSION.RMPA": "7323934ea4131de49d71d07fc2487f1bd74209226780e81297380bf5d0061fff",
+    "BEFORE.BVM": "3d975fc728152ec5841ac5259ebe4d21511a202b9531d3042c54241bf0d4604d",
+    "BEFORE.RMPA": "18b39acc56e58280d617e99ed0c1c571b97e425aeea6a9db133a50c0809621a6"
+   }
+  },
+  {
+   "id": "M110",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Air Force",
+    "EN": "Air Force",
+    "JA": "対空戦",
+    "KR": "Air Force",
+    "SC": "Air Force"
+   },
+   "brief": {
+    "CN": "The mothership is launching flying drones that appear to be targeting people indiscriminately. They act as terrifying slaughter machines that never tire, and they must be stopped before they eliminate all the civilians!",
+    "EN": "The mothership is launching flying drones that appear to be targeting people indiscriminately. They act as terrifying slaughter machines that never tire, and they must be stopped before they eliminate all the civilians!",
+    "JA": "マザーシップが飛行ドローンを投下し続けています。飛行ドローンは人間を攻撃する自動兵器。放置すれば、半永久的に人間を襲い続けるでしょう。人類が絶滅するまで戦い続ける恐るべき敵。疲れを知らない殺戮マシンです。絶対に今ここで全滅させねばなりません。",
+    "KR": "The mothership is launching flying drones that appear to be targeting people indiscriminately. They act as terrifying slaughter machines that never tire, and they must be stopped before they eliminate all the civilians!",
+    "SC": "The mothership is launching flying drones that appear to be targeting people indiscriminately. They act as terrifying slaughter machines that never tire, and they must be stopped before they eliminate all the civilians!"
+   },
+   "sha": {
+    "MISSION.BVM": "4c2ab98daadb01fe65a361d53ce7ef092f140c769a3d8a389a3faf91a9525f57",
+    "MISSION.RMPA": "f9b2bda37772220148b711969f3a80274074cfa211f5a5d277ed71b6f00ca4c7"
+   }
+  },
+  {
+   "id": "M111_2",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Day of the Demons",
+    "EN": "Day of the Demons",
+    "JA": "魔の降る日",
+    "KR": "Day of the Demons",
+    "SC": "Day of the Demons"
+   },
+   "brief": {
+    "CN": "Ravager transport ships are flying over the city. They must intend to drop more aliens on the population! Head out and protect the civilians from attack.",
+    "EN": "Ravager transport ships are flying over the city. They must intend to drop more aliens on the population! Head out and protect the civilians from attack.",
+    "JA": "フォーリナーの輸送船が市街地上空を飛行しています。再び巨大生物の投下を開始するつもりかもしれません。現地に向かい、巨大生物の脅威から市民を守ってください。",
+    "KR": "Ravager transport ships are flying over the city. They must intend to drop more aliens on the population! Head out and protect the civilians from attack.",
+    "SC": "Ravager transport ships are flying over the city. They must intend to drop more aliens on the population! Head out and protect the civilians from attack."
+   },
+   "sha": {
+    "MISSION.BVM": "7746f888b47b05a8d21aa19d3dfdfc19c1290924293704069721116e15d225d8",
+    "MISSION.RMPA": "1f6e2355de9f048494f3589889a1c2501307f09bad276451d1b3a22768824b58"
+   }
+  },
+  {
+   "id": "M112",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Takedown",
+    "EN": "Takedown",
+    "JA": "円盤撃墜作戦",
+    "KR": "Takedown",
+    "SC": "Takedown"
+   },
+   "brief": {
+    "CN": "The enemy transport ships are continuing their drops and causing more damage. Our aircraft haven't made a dent due to the transport ships' thick armor, but intel may have a solution: We must attack through the open hatches when they make their drops, destroying them from the inside. The hatches are only accessible from the ground, so this mission is in your hands. Take long-range weapons and move out!",
+    "EN": "The enemy transport ships are continuing their drops and causing more damage. Our aircraft haven't made a dent due to the transport ships' thick armor, but intel may have a solution: We must attack through the open hatches when they make their drops, destroying them from the inside. The hatches are only accessible from the ground, so this mission is in your hands. Take long-range weapons and move out!",
+    "JA": "敵輸送船が巨大生物の投下を続けています。このままでは被害が拡大する一方です。しかし、輸送船は厚い装甲に守られており、航空機による攻撃では、効果的な打撃を与えることができません。唯一のチャンスは巨大生物を投下する瞬間。開いたハッチを攻撃し、内部を破壊することです。地上部隊にしかあの輸送船は落とせません。これより、歩兵による輸送船撃墜作戦を開始します。射程距離の長い武器を装備し、出撃してください。",
+    "KR": "The enemy transport ships are continuing their drops and causing more damage. Our aircraft haven't made a dent due to the transport ships' thick armor, but intel may have a solution: We must attack through the open hatches when they make their drops, destroying them from the inside. The hatches are only accessible from the ground, so this mission is in your hands. Take long-range weapons and move out!",
+    "SC": "The enemy transport ships are continuing their drops and causing more damage. Our aircraft haven't made a dent due to the transport ships' thick armor, but intel may have a solution: We must attack through the open hatches when they make their drops, destroying them from the inside. The hatches are only accessible from the ground, so this mission is in your hands. Take long-range weapons and move out!"
+   },
+   "sha": {
+    "MISSION.BVM": "a0cd890410945b5a43a7368d32652ea385b8abb4ec69ac9d7c6e4f5a4999bffa",
+    "MISSION.RMPA": "2659c328d93b6084c1c96f7690cbc95342b038622c59f068b96b20bdc79eeebe"
+   }
+  },
+  {
+   "id": "M123",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Preventing Landfall",
+    "EN": "Preventing Landfall",
+    "JA": "上陸阻止作戦",
+    "KR": "Preventing Landfall",
+    "SC": "Preventing Landfall"
+   },
+   "brief": {
+    "CN": "We have confirmation that the mothership is traveling offshore and have dropped several 'Hectors' -- walking battle soldiers -- that are attempting to make landfall. We'll set up a shore defense and coordinate with aerial troops for support from above.",
+    "EN": "We have confirmation that the mothership is traveling offshore and have dropped several 'Hectors' -- walking battle soldiers -- that are attempting to make landfall. We'll set up a shore defense and coordinate with aerial troops for support from above.",
+    "JA": "洋上を進む敵マザーシップを確認。マザーシップは、歩行型戦闘兵器ヘクトルを多数投下。ヘクトルは海岸から上陸しようとしています。なんとしても上陸を阻止しなければなりません。これより、水際での迎撃作戦を開始します。これは空軍との共同作戦です。空からの援護が期待できます。",
+    "KR": "We have confirmation that the mothership is traveling offshore and have dropped several 'Hectors' -- walking battle soldiers -- that are attempting to make landfall. We'll set up a shore defense and coordinate with aerial troops for support from above.",
+    "SC": "We have confirmation that the mothership is traveling offshore and have dropped several 'Hectors' -- walking battle soldiers -- that are attempting to make landfall. We'll set up a shore defense and coordinate with aerial troops for support from above."
+   },
+   "sha": {
+    "MISSION.BVM": "73a7723f32ad461d3c42a7aa80b9607f7277914e8901c838f44d5d2446b97ea2",
+    "MISSION.RMPA": "a5ecec614314669a42d8e7c04eb471820dd580db93eda94c3d71de89644ff903"
+   }
+  },
+  {
+   "id": "M115",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Land Collapse",
+    "EN": "Land Collapse",
+    "JA": "大地崩落",
+    "KR": "Land Collapse",
+    "SC": "Land Collapse"
+   },
+   "brief": {
+    "CN": "The aliens are digging tunnels to infiltrate the city's underbelly. At least one tunnel entrance has already been confirmed. Alien monsters have been emerging from it, and soon the city will be overrun! We need to destroy this tunnel entrance and stop any more of these filthy creatures from emerging. You are to head out immediately!",
+    "EN": "The aliens are digging tunnels to infiltrate the city's underbelly. At least one tunnel entrance has already been confirmed. Alien monsters have been emerging from it, and soon the city will be overrun! We need to destroy this tunnel entrance and stop any more of these filthy creatures from emerging. You are to head out immediately!",
+    "JA": "巨大生物はトンネルを掘り、地下を移動しているようです。市街地に「トンネルから地上へ出るための出口」が確認されました。そこから巨大生物が次々と出現しているとのことです。このままでは市街地が巨大生物の拠点となってしまうでしょう。地下トンネルの出口を破壊し、巨大生物を地底に封じ込める必要があります。ただちに現地へ向かってください。",
+    "KR": "The aliens are digging tunnels to infiltrate the city's underbelly. At least one tunnel entrance has already been confirmed. Alien monsters have been emerging from it, and soon the city will be overrun! We need to destroy this tunnel entrance and stop any more of these filthy creatures from emerging. You are to head out immediately!",
+    "SC": "The aliens are digging tunnels to infiltrate the city's underbelly. At least one tunnel entrance has already been confirmed. Alien monsters have been emerging from it, and soon the city will be overrun! We need to destroy this tunnel entrance and stop any more of these filthy creatures from emerging. You are to head out immediately!"
+   },
+   "sha": {
+    "MISSION.BVM": "4356dae43afb19e9d720ef9f8ecd95bfa9819c8befc3f8969ae757415acc044c",
+    "MISSION.RMPA": "3e8292adf5ef0ba647e15275601f27bf97978e007cc16ab4897222972a16f3aa"
+   }
+  },
+  {
+   "id": "M117",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Fortress Siege",
+    "EN": "Fortress Siege",
+    "JA": "要塞破壊作戦",
+    "KR": "Fortress Siege",
+    "SC": "Fortress Siege"
+   },
+   "brief": {
+    "CN": "The Ravagers have begun a serious offensive, attacking several areas simultaneously. Here, they seem to be utilizing a giant walking fortress bristling with weapons that's roughly 200 meters in length. The attack aircraft Midnight has been dispatched to destroy it, but we are to aid them by taking out the fortress' legs, then eliminating any remaining enemies. Ground forces, move out!",
+    "EN": "The Ravagers have begun a serious offensive, attacking several areas simultaneously. Here, they seem to be utilizing a giant walking fortress bristling with weapons that's roughly 200 meters in length. The attack aircraft Midnight has been dispatched to destroy it, but we are to aid them by taking out the fortress' legs, then eliminating any remaining enemies. Ground forces, move out!",
+    "JA": "フォーリナーが本格的な侵攻作戦を開始したようです。敵戦闘兵器が各地で攻撃を開始。この地にも巨大な四足歩行要塞が迫っています。全長２００メートル。圧倒的な巨体に無数の武装を持つ恐るべき相手です。これを撃破すべく、戦術爆撃機ミッドナイトの出撃準備が始まっています。我々地上部隊の目的は歩行要塞の足止め、そしてそれ以外の敵を撃破し、被害を最小限に抑えることです。これより歩行要塞撃破作戦を開始します。",
+    "KR": "The Ravagers have begun a serious offensive, attacking several areas simultaneously. Here, they seem to be utilizing a giant walking fortress bristling with weapons that's roughly 200 meters in length. The attack aircraft Midnight has been dispatched to destroy it, but we are to aid them by taking out the fortress' legs, then eliminating any remaining enemies. Ground forces, move out!",
+    "SC": "The Ravagers have begun a serious offensive, attacking several areas simultaneously. Here, they seem to be utilizing a giant walking fortress bristling with weapons that's roughly 200 meters in length. The attack aircraft Midnight has been dispatched to destroy it, but we are to aid them by taking out the fortress' legs, then eliminating any remaining enemies. Ground forces, move out!"
+   },
+   "sha": {
+    "MISSION.BVM": "bdf1ed8a16cef4a77655b44340f82225a37070a38bb066ce295f623db42f454d",
+    "MISSION.RMPA": "29aa66d36d59f13af2ee9e55f5861fdb0acf5b61e8a6f32c6c7544d657036bd5"
+   }
+  },
+  {
+   "id": "M118",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Valley Shadows",
+    "EN": "Valley Shadows",
+    "JA": "谷に潜む影",
+    "KR": "Valley Shadows",
+    "SC": "Valley Shadows"
+   },
+   "brief": {
+    "CN": "We have a confirmed sighting of at least one flying enemy transport ship. We will sortie in the mountain region, where you'll rendezvous with a Ranger team. Make sure to equip long-range weapons to attack the transport ships!",
+    "EN": "We have a confirmed sighting of at least one flying enemy transport ship. We will sortie in the mountain region, where you'll rendezvous with a Ranger team. Make sure to equip long-range weapons to attack the transport ships!",
+    "JA": "飛行中の敵輸送船を確認。山岳地帯で待ち構え、攻撃をおこないます。現地に向かい、レンジャーチームと共同で輸送船を撃墜してください。なお、輸送船を破壊するためには、射程の長い火器が必要です。装備に注意してください。",
+    "KR": "We have a confirmed sighting of at least one flying enemy transport ship. We will sortie in the mountain region, where you'll rendezvous with a Ranger team. Make sure to equip long-range weapons to attack the transport ships!",
+    "SC": "We have a confirmed sighting of at least one flying enemy transport ship. We will sortie in the mountain region, where you'll rendezvous with a Ranger team. Make sure to equip long-range weapons to attack the transport ships!"
+   },
+   "sha": {
+    "MISSION.BVM": "3ce181c06f1576ec021d26eee63bf1e77cf86f313e935402d23404392011658c",
+    "MISSION.RMPA": "6c0c31712774857f089aeb3dfc47e939784c2f9aac058c77c9b665e190303cc9"
+   }
+  },
+  {
+   "id": "M113",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Artillery",
+    "EN": "Artillery",
+    "JA": "巨砲",
+    "KR": "Artillery",
+    "SC": "Artillery"
+   },
+   "brief": {
+    "CN": "Hector troop variants, probably long-range support models, have begun a ferocious assault, and they're armed with plasma cannons. We have to stop the Hectors from making landfall and destroy them. Good luck!",
+    "EN": "Hector troop variants, probably long-range support models, have begun a ferocious assault, and they're armed with plasma cannons. We have to stop the Hectors from making landfall and destroy them. Good luck!",
+    "JA": "ヘクトルの軍団が侵攻を開始。各地で激しい戦闘が始まっています。我々は港湾地帯に現れたヘクトルの上陸を阻止、殲滅します。このヘクトルは強力なプラズマ砲を装備した長距離支援型のようです。十分に注意してください。",
+    "KR": "Hector troop variants, probably long-range support models, have begun a ferocious assault, and they're armed with plasma cannons. We have to stop the Hectors from making landfall and destroy them. Good luck!",
+    "SC": "Hector troop variants, probably long-range support models, have begun a ferocious assault, and they're armed with plasma cannons. We have to stop the Hectors from making landfall and destroy them. Good luck!"
+   },
+   "sha": {
+    "MISSION.BVM": "e38526fcbd4882d09eeb6798d8fe834f333590b1ed34adbd35571e4a1f0224b0",
+    "MISSION.RMPA": "906235f4a5e4bf3746d3eef18c667a56863b52ebefe807feba89079b1fee21c9"
+   }
+  },
+  {
+   "id": "M015",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA",
+    "BEFORE.BVM",
+    "BEFORE.RMPA"
+   ],
+   "title": {
+    "CN": "Breaking Through",
+    "EN": "Breaking Through",
+    "JA": "防御スクリーン突破作戦",
+    "KR": "Breaking Through",
+    "SC": "Breaking Through"
+   },
+   "brief": {
+    "CN": "New walking-machine variants have reached the city. They continue to march unharmed despite multiple airstrikes; it would seem they have some sort of energy screen that blocks attacks. If we don't find a way to destroy these screens, we won't stand a chance. Ground troops are ordered to find some means of penetrating their shields and taking out these machines.",
+    "EN": "New walking-machine variants have reached the city. They continue to march unharmed despite multiple airstrikes; it would seem they have some sort of energy screen that blocks attacks. If we don't find a way to destroy these screens, we won't stand a chance. Ground troops are ordered to find some means of penetrating their shields and taking out these machines.",
+    "JA": "敵の新型歩行マシンが市街地に接近。数度の空爆にも関わらず、無傷のまま進軍を続けています。このマシンは周囲に防御スクリーンを展開し、攻撃を遮断する能力があるようです。このまま防御スクリーンを破ることができなければ、人類に勝ち目はありません。これより、地上部隊による防御スクリーン突破作戦を開始します。なんとしても新型歩行マシンを破壊してください。",
+    "KR": "New walking-machine variants have reached the city. They continue to march unharmed despite multiple airstrikes; it would seem they have some sort of energy screen that blocks attacks. If we don't find a way to destroy these screens, we won't stand a chance. Ground troops are ordered to find some means of penetrating their shields and taking out these machines.",
+    "SC": "New walking-machine variants have reached the city. They continue to march unharmed despite multiple airstrikes; it would seem they have some sort of energy screen that blocks attacks. If we don't find a way to destroy these screens, we won't stand a chance. Ground troops are ordered to find some means of penetrating their shields and taking out these machines."
+   },
+   "sha": {
+    "MISSION.BVM": "b84a6deb458991eaa90c97b2dde7ecc07f6fb77ae00929e0c479f7fe505ebb49",
+    "MISSION.RMPA": "aae83b3f4efebe6926f2ff0ef11ecb305d74c2a3525e4acf129b08b4be826492",
+    "BEFORE.BVM": "621b0b6a82d6ff7b8441885dbfe6582124b81d952ce839e2c5d55a7c2cb0aaf0",
+    "BEFORE.RMPA": "0dfa41f4d2ed5727a873649dad41b6e3a3e985973939299cdc2695b0de2591aa"
+   }
+  },
+  {
+   "id": "M008",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Shining Stronghold",
+    "EN": "Shining Stronghold",
+    "JA": "光の堅陣",
+    "KR": "Shining Stronghold",
+    "SC": "Shining Stronghold"
+   },
+   "brief": {
+    "CN": "The Ravager transport ships have dropped something in the mountains. Intel has confirmed it's a defensive screen. We are dispatching Fencers to the location. Storm Team will provide support.",
+    "EN": "The Ravager transport ships have dropped something in the mountains. Intel has confirmed it's a defensive screen. We are dispatching Fencers to the location. Storm Team will provide support.",
+    "JA": "フォーリナーの輸送船が山岳部に何かを投下しました。調査に向かったスカウトチームの報告によると、防御スクリーンが確認されたようです。ただちにフェンサーを現地に派遣します。ストームチームも同行してください。",
+    "KR": "The Ravager transport ships have dropped something in the mountains. Intel has confirmed it's a defensive screen. We are dispatching Fencers to the location. Storm Team will provide support.",
+    "SC": "The Ravager transport ships have dropped something in the mountains. Intel has confirmed it's a defensive screen. We are dispatching Fencers to the location. Storm Team will provide support."
+   },
+   "sha": {
+    "MISSION.BVM": "25e4427eab2765268bb420dc4c58169773f2439a1fe6ead4ae625484182d5d69",
+    "MISSION.RMPA": "9ef220dade003849fe5b62a4bea26c943a48a89a313348501b10609044f35ef8"
+   }
+  },
+  {
+   "id": "M116",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Into the Depths",
+    "EN": "Into the Depths",
+    "JA": "地の底へ",
+    "KR": "Into the Depths",
+    "SC": "Into the Depths"
+   },
+   "brief": {
+    "CN": "The giant insects just keep coming. Things will only worsen as long as they have their nest, so we need to strike them where they live! We will infiltrate the nest from the same point as last time, following the same route. When we're as deep as we can go, we'll attack. We have no idea what to expect, so be careful!",
+    "EN": "The giant insects just keep coming. Things will only worsen as long as they have their nest, so we need to strike them where they live! We will infiltrate the nest from the same point as last time, following the same route. When we're as deep as we can go, we'll attack. We have no idea what to expect, so be careful!",
+    "JA": "巨大生物は増え続けています。地下の巣穴を破壊しない限り、状況は悪化する一方です。再度の突入作戦を敢行し、巨大生物の増殖を止める必要があります。前回と同じポイントから巣穴へと突入。途中までは同じルートをたどり、さらに奥へ。前回到達できなかった深部まで進攻します。何が待っているか想像もつきません。十分に注意してください。",
+    "KR": "The giant insects just keep coming. Things will only worsen as long as they have their nest, so we need to strike them where they live! We will infiltrate the nest from the same point as last time, following the same route. When we're as deep as we can go, we'll attack. We have no idea what to expect, so be careful!",
+    "SC": "The giant insects just keep coming. Things will only worsen as long as they have their nest, so we need to strike them where they live! We will infiltrate the nest from the same point as last time, following the same route. When we're as deep as we can go, we'll attack. We have no idea what to expect, so be careful!"
+   },
+   "sha": {
+    "MISSION.BVM": "6ac2fae71e48007d3d1838c7b50c059ad2db4cbad0d73e8155fc87fd9637c863",
+    "MISSION.RMPA": "0b75b7ef422ec16e3d1634195c5f2ecd757e7017442d5279c4337e282fa0525e"
+   }
+  },
+  {
+   "id": "M126",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "A Trap",
+    "EN": "A Trap",
+    "JA": "奈落の罠",
+    "KR": "A Trap",
+    "SC": "A Trap"
+   },
+   "brief": {
+    "CN": "The infiltration was a success, but we're greatly outnumbered, so our casualties could be high. The enemy is on familiar ground, after all, which gives them the edge. Expect an attack at any moment while you're in that nest. Try to use the terrain to your advantage.",
+    "EN": "The infiltration was a success, but we're greatly outnumbered, so our casualties could be high. The enemy is on familiar ground, after all, which gives them the edge. Expect an attack at any moment while you're in that nest. Try to use the terrain to your advantage.",
+    "JA": "巣穴への侵入に成功。想定より多数の巨大生物が生息しており、我々の被害も予想以上です。敵は巣穴を熟知しており、獲物を不利な地形に誘導。そこに足を踏み入れた瞬間を狙って攻撃を開始するようです。なるべく不利な地形にはとどまらないよう注意してください。",
+    "KR": "The infiltration was a success, but we're greatly outnumbered, so our casualties could be high. The enemy is on familiar ground, after all, which gives them the edge. Expect an attack at any moment while you're in that nest. Try to use the terrain to your advantage.",
+    "SC": "The infiltration was a success, but we're greatly outnumbered, so our casualties could be high. The enemy is on familiar ground, after all, which gives them the edge. Expect an attack at any moment while you're in that nest. Try to use the terrain to your advantage."
+   },
+   "sha": {
+    "MISSION.BVM": "7675470b3bef588616435f19c78e45a30a8dab1cfc1a7d24de57ff12b240e6cb",
+    "MISSION.RMPA": "57328269ee6b79492164f5a3f0a6eb52b48d1c369bd4adc420f72c14d1e8f0e7"
+   }
+  },
+  {
+   "id": "M131",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Giant Robots",
+    "EN": "Giant Robots",
+    "JA": "巨人兵団",
+    "KR": "Giant Robots",
+    "SC": "Giant Robots"
+   },
+   "brief": {
+    "CN": "The Ravagers' combat Hectors have entered a residential area. Some EDF units have already engaged them in battle, but a new group of Hectors has arrived, surrounding our soldiers. They're sitting ducks out there! Please go rescue them.",
+    "EN": "The Ravagers' combat Hectors have entered a residential area. Some EDF units have already engaged them in battle, but a new group of Hectors has arrived, surrounding our soldiers. They're sitting ducks out there! Please go rescue them.",
+    "JA": "フォーリナーの戦闘兵器ヘクトルが市街地に侵入。すでに先行部隊との戦闘が始まっています。ですが新たなヘクトル部隊が到着。先行部隊は包囲されつつあるようです。このままでは全滅もありえます。ただちに救援に向かってください。",
+    "KR": "The Ravagers' combat Hectors have entered a residential area. Some EDF units have already engaged them in battle, but a new group of Hectors has arrived, surrounding our soldiers. They're sitting ducks out there! Please go rescue them.",
+    "SC": "The Ravagers' combat Hectors have entered a residential area. Some EDF units have already engaged them in battle, but a new group of Hectors has arrived, surrounding our soldiers. They're sitting ducks out there! Please go rescue them."
+   },
+   "sha": {
+    "MISSION.BVM": "b8553e99dcaebdda95252c94c6d3222ca47f85932bded252ea252f9553251ddd",
+    "MISSION.RMPA": "4f2cf3ba250f859afafca79ba7b51524a2831ba847244bda4a96dbd0db45c8ef"
+   }
+  },
+  {
+   "id": "M130",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Anchored",
+    "EN": "Anchored",
+    "JA": "停泊",
+    "KR": "Anchored",
+    "SC": "Anchored"
+   },
+   "brief": {
+    "CN": "It seems that the Ravagers' army that entered our defense line is under the direct command of the mothership. If we can shoot it down, we can cause a great deal of chaos in their ranks. Currently, the mothership is hovering around the mountain area, flanked by transport ships. Approach from the ground and destroy the whole fleet.",
+    "EN": "It seems that the Ravagers' army that entered our defense line is under the direct command of the mothership. If we can shoot it down, we can cause a great deal of chaos in their ranks. Currently, the mothership is hovering around the mountain area, flanked by transport ships. Approach from the ground and destroy the whole fleet.",
+    "JA": "我々の防衛エリアに侵攻してきたフォーリナーの軍団は、マザーシップによって指揮されているようです。マザーシップを撃破できれば、敵に大きなダメージを与えることができるでしょう。現在、マザーシップは輸送船団と共に山岳部に停泊しています。地上から接近し、マザーシップと輸送船団を撃破してください。",
+    "KR": "It seems that the Ravagers' army that entered our defense line is under the direct command of the mothership. If we can shoot it down, we can cause a great deal of chaos in their ranks. Currently, the mothership is hovering around the mountain area, flanked by transport ships. Approach from the ground and destroy the whole fleet.",
+    "SC": "It seems that the Ravagers' army that entered our defense line is under the direct command of the mothership. If we can shoot it down, we can cause a great deal of chaos in their ranks. Currently, the mothership is hovering around the mountain area, flanked by transport ships. Approach from the ground and destroy the whole fleet."
+   },
+   "sha": {
+    "MISSION.BVM": "f28d6140ef04b2683c0080050bf8f72abc1ba87a97b6317a77e1415548330831",
+    "MISSION.RMPA": "5f3a4ab34de387256b6b08d7530fc0db781767afb2514ade6e577a62edeaea8a"
+   }
+  },
+  {
+   "id": "M405",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Silver City",
+    "EN": "Silver City",
+    "JA": "銀糸の都",
+    "KR": "Silver City",
+    "SC": "Silver City"
+   },
+   "brief": {
+    "CN": "We have confirmed underground tunnel entrances in the city, from which giant creatures have emerged...but there are also Retiarii in the area. They've made webs and are lying in wait for anyone encroaching upon 'their' territory. It may be difficult, but we must destroy the tunnel entrances to save the civilians!",
+    "EN": "We have confirmed underground tunnel entrances in the city, from which giant creatures have emerged...but there are also Retiarii in the area. They've made webs and are lying in wait for anyone encroaching upon 'their' territory. It may be difficult, but we must destroy the tunnel entrances to save the civilians!",
+    "JA": "市街地に地下トンネルの出口を確認。中から巨大生物が出現しています。…………。問題は該当エリアにレタリウスがいることです。レタリウスはネットを作り、侵入者を待ち構えています。おそらくトンネルの出口の破壊は、非常に困難でしょう。それでもやらねばなりません。人々を守るために。",
+    "KR": "We have confirmed underground tunnel entrances in the city, from which giant creatures have emerged...but there are also Retiarii in the area. They've made webs and are lying in wait for anyone encroaching upon 'their' territory. It may be difficult, but we must destroy the tunnel entrances to save the civilians!",
+    "SC": "We have confirmed underground tunnel entrances in the city, from which giant creatures have emerged...but there are also Retiarii in the area. They've made webs and are lying in wait for anyone encroaching upon 'their' territory. It may be difficult, but we must destroy the tunnel entrances to save the civilians!"
+   },
+   "sha": {
+    "MISSION.BVM": "87024661e1fcfab4ca4614c4e383614fc400ca721a8f02637de3f29fc7ede1ea",
+    "MISSION.RMPA": "090ac4381dc7f0a2c6b0afb37884d39dec31048b5175d4af944c4a48e37ef96d"
+   }
+  },
+  {
+   "id": "M120",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Crimson",
+    "EN": "Crimson",
+    "JA": "赤色",
+    "KR": "Crimson",
+    "SC": "Crimson"
+   },
+   "brief": {
+    "CN": "We have confirmed a large number of giant aliens, and we're leading them to an uninhabited part of the coast to contain the damage. Fencers will deploy to block the enemy, and our snipers -- who are already in place -- will use that chance to exterminate them all. We want Storm Team to support.",
+    "EN": "We have confirmed a large number of giant aliens, and we're leading them to an uninhabited part of the coast to contain the damage. Fencers will deploy to block the enemy, and our snipers -- who are already in place -- will use that chance to exterminate them all. We want Storm Team to support.",
+    "JA": "巨大生物の大群を確認。被害を抑えるため、民家のない海岸に誘導中です。海岸にはスナイパーを配置。巨大生物を待ち伏せ、殲滅する作戦です。さらにフェンサーチームも現地へ向かっています。フェンサーが敵を防ぎ、その間にスナイパーが敵を全滅させる計画です。ストームチームも作戦に参加してください。",
+    "KR": "We have confirmed a large number of giant aliens, and we're leading them to an uninhabited part of the coast to contain the damage. Fencers will deploy to block the enemy, and our snipers -- who are already in place -- will use that chance to exterminate them all. We want Storm Team to support.",
+    "SC": "We have confirmed a large number of giant aliens, and we're leading them to an uninhabited part of the coast to contain the damage. Fencers will deploy to block the enemy, and our snipers -- who are already in place -- will use that chance to exterminate them all. We want Storm Team to support."
+   },
+   "sha": {
+    "MISSION.BVM": "ee5eb82a1df6cf4a5c32a6157db059b7768104a58cb5ce8fabf385dd75961800",
+    "MISSION.RMPA": "6422a3c867150826c60f87897384b7c47fd8a9bde994b93d9049f356dfa2082b"
+   }
+  },
+  {
+   "id": "MP001",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Assault",
+    "EN": "Assault",
+    "JA": "急襲",
+    "KR": "Assault",
+    "SC": "Assault"
+   },
+   "brief": {
+    "CN": "The enemy transport ships are gathering over a residential area. Command headquarters believes it'll be too hard to fight against them with only ground troops, so they've made a support request to the combat aircraft Midnight. It'll attack the transport ships with armor-piercing Grind Buster missiles while the infantry units will focus on eliminating the giant insects and attacking the ships from the ground.",
+    "EN": "The enemy transport ships are gathering over a residential area. Command headquarters believes it'll be too hard to fight against them with only ground troops, so they've made a support request to the combat aircraft Midnight. It'll attack the transport ships with armor-piercing Grind Buster missiles while the infantry units will focus on eliminating the giant insects and attacking the ships from the ground.",
+    "JA": "市街地上空に、敵輸送船が集結しています。かなりの大船団のようです。地上部隊だけで対抗するのは難しいと判断し、攻撃機ミッドナイトに出撃要請をおこないました。装甲貫通弾グラインドバスターにより、輸送船団を攻撃します。歩兵部隊は投下された巨大生物を殲滅しつつ、地上から輸送船を攻撃してください。",
+    "KR": "The enemy transport ships are gathering over a residential area. Command headquarters believes it'll be too hard to fight against them with only ground troops, so they've made a support request to the combat aircraft Midnight. It'll attack the transport ships with armor-piercing Grind Buster missiles while the infantry units will focus on eliminating the giant insects and attacking the ships from the ground.",
+    "SC": "The enemy transport ships are gathering over a residential area. Command headquarters believes it'll be too hard to fight against them with only ground troops, so they've made a support request to the combat aircraft Midnight. It'll attack the transport ships with armor-piercing Grind Buster missiles while the infantry units will focus on eliminating the giant insects and attacking the ships from the ground."
+   },
+   "sha": {
+    "MISSION.BVM": "90fc9075c21fce72190d661a7c5a483ec4047c9814c4a30e59ca3fabc0e00ebb",
+    "MISSION.RMPA": "a75f7b3b8c791bdb2681e234cda0fe83f64a2dbfc4d94c6dfd6b108d6aba6218"
+   }
+  },
+  {
+   "id": "M150",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "High-speed",
+    "EN": "High-speed",
+    "JA": "高速船",
+    "KR": "High-speed",
+    "SC": "High-speed"
+   },
+   "brief": {
+    "CN": "High-capacity flying drones called 'Reds' have invaded the city. They seem more advanced than what we've fought to date. Direct the three snipers stationed in the area to destroy the enemy, and support as needed.",
+    "EN": "High-capacity flying drones called 'Reds' have invaded the city. They seem more advanced than what we've fought to date. Direct the three snipers stationed in the area to destroy the enemy, and support as needed.",
+    "JA": "レッドカラーと呼ばれる高性能飛行ドローンが市街地に侵入しました。かつて出現したものより、さらに強化された新型のようです。現地にはスナイパー３名が待機しています。彼らを指揮し、敵を撃破してください。",
+    "KR": "High-capacity flying drones called 'Reds' have invaded the city. They seem more advanced than what we've fought to date. Direct the three snipers stationed in the area to destroy the enemy, and support as needed.",
+    "SC": "High-capacity flying drones called 'Reds' have invaded the city. They seem more advanced than what we've fought to date. Direct the three snipers stationed in the area to destroy the enemy, and support as needed."
+   },
+   "sha": {
+    "MISSION.BVM": "a5a8e9bb3bc90585399243b77e7242811605890efadd8df0d0d427e72f8f0c1a",
+    "MISSION.RMPA": "e73b359f53205aed1574463acb18ef66fd27be0f716cfc3aa9601579e3b62490"
+   }
+  },
+  {
+   "id": "M119",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Brute Force",
+    "EN": "Brute Force",
+    "JA": "ブルートフォース作戦",
+    "KR": "Brute Force",
+    "SC": "Brute Force"
+   },
+   "brief": {
+    "CN": "The Ravagers are consolidating their forces, and this is the first time they've ever gathered in such great quantities. We can't even count the number of Hectors! But this is good for us. We're ready. We'll attack them head-on and crush them, both from the plains and from the air. The troops will fan out from Zones 1 to 5, while Storm Team will fight in Zone 2. This will become known as 'Operation Brute Force.'",
+    "EN": "The Ravagers are consolidating their forces, and this is the first time they've ever gathered in such great quantities. We can't even count the number of Hectors! But this is good for us. We're ready. We'll attack them head-on and crush them, both from the plains and from the air. The troops will fan out from Zones 1 to 5, while Storm Team will fight in Zone 2. This will become known as 'Operation Brute Force.'",
+    "JA": "フォーリナーが兵力を集結させています。これほどの大軍団が一箇所に集まるのは初めてのことです。ヘクトルの数は数えきれません。ですが、これは我々にとって好都合です。決戦の準備は整いました。正面から迎え撃ち、敵軍を打ち破ります。戦場は平原。陸と空からの同時攻撃です。歩兵部隊はゾーン１からゾーン５に分散して展開。ストームチームはゾーン２の戦闘に参加してください。なお、この作戦をブルートフォース作戦と命名します。",
+    "KR": "The Ravagers are consolidating their forces, and this is the first time they've ever gathered in such great quantities. We can't even count the number of Hectors! But this is good for us. We're ready. We'll attack them head-on and crush them, both from the plains and from the air. The troops will fan out from Zones 1 to 5, while Storm Team will fight in Zone 2. This will become known as 'Operation Brute Force.'",
+    "SC": "The Ravagers are consolidating their forces, and this is the first time they've ever gathered in such great quantities. We can't even count the number of Hectors! But this is good for us. We're ready. We'll attack them head-on and crush them, both from the plains and from the air. The troops will fan out from Zones 1 to 5, while Storm Team will fight in Zone 2. This will become known as 'Operation Brute Force.'"
+   },
+   "sha": {
+    "MISSION.BVM": "2f5f0f3f765adc8896a1e769f458637747e71ca8227b4f1e6d340abffd1e8bdd",
+    "MISSION.RMPA": "11b08dd916f2d8d6cf5c1a8f372bac54347af2c452c3745f0613357cd344cc28"
+   }
+  },
+  {
+   "id": "M124",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Charge Phase 1",
+    "EN": "Charge Phase 1",
+    "JA": "突入作戦フェイズ１",
+    "KR": "Charge Phase 1",
+    "SC": "Charge Phase 1"
+   },
+   "brief": {
+    "CN": "We succeeded in dealing a massive blow to the Ravagers, but must destroy the nests and exterminate the enemy before they can regroup. So it's time to enter the nests and find their queen! This will be a large-scale infiltration of their tunnels. The first phase will be to look for a route into the depths of the tunnels and secure it so troops can follow.",
+    "EN": "We succeeded in dealing a massive blow to the Ravagers, but must destroy the nests and exterminate the enemy before they can regroup. So it's time to enter the nests and find their queen! This will be a large-scale infiltration of their tunnels. The first phase will be to look for a route into the depths of the tunnels and secure it so troops can follow.",
+    "JA": "フォーリナーに大きな打撃を与えることに成功しました。敵が再び戦力を整える前に、まず巨大生物の巣穴を破壊、掃討しておく必要があります。そのためには巣穴深部へと潜り、巨大生物の女王を見つけ出さねばなりません。大規模な地底侵入作戦を敢行します。ファーストフェイズである本作戦では、深部へと続くルートを探索。後続部隊のために突入路を確保します。",
+    "KR": "We succeeded in dealing a massive blow to the Ravagers, but must destroy the nests and exterminate the enemy before they can regroup. So it's time to enter the nests and find their queen! This will be a large-scale infiltration of their tunnels. The first phase will be to look for a route into the depths of the tunnels and secure it so troops can follow.",
+    "SC": "We succeeded in dealing a massive blow to the Ravagers, but must destroy the nests and exterminate the enemy before they can regroup. So it's time to enter the nests and find their queen! This will be a large-scale infiltration of their tunnels. The first phase will be to look for a route into the depths of the tunnels and secure it so troops can follow."
+   },
+   "sha": {
+    "MISSION.BVM": "c83db44f5e32d1863971bb55a9b619d549e8db5738ec0cdcd2f59f505e5ac31c",
+    "MISSION.RMPA": "e65a66e03bdecc783a6a7efed57887e828c4fa92725553931c04c9fa101f64c2"
+   }
+  },
+  {
+   "id": "M147",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Charge Phase 2",
+    "EN": "Charge Phase 2",
+    "JA": "突入作戦フェイズ２",
+    "KR": "Charge Phase 2",
+    "SC": "Charge Phase 2"
+   },
+   "brief": {
+    "CN": "We have successfully infiltrated the nests. However, the deeper we go, the more intense the resistance is. We've lost contact with almost half our troops. The enemy has started acting in groups to flush us out, and using traps to defeat our forces at every turn. Each squad needs to be careful and eliminate any nearby foes.",
+    "EN": "We have successfully infiltrated the nests. However, the deeper we go, the more intense the resistance is. We've lost contact with almost half our troops. The enemy has started acting in groups to flush us out, and using traps to defeat our forces at every turn. Each squad needs to be careful and eliminate any nearby foes.",
+    "JA": "巣穴深部への侵入に成功しました。ですが、深く潜れば潜るほど巨大生物の攻撃が激化。すでに半数近い部隊と連絡が途絶えています。巨大生物は侵入者を排除するため、組織だった行動を開始しているようです。侵入者を罠にかけて分断。各個撃破しています。このままでは被害が増える一方です。各小隊は十分に注意し、付近の巨大生物を掃討してください。",
+    "KR": "We have successfully infiltrated the nests. However, the deeper we go, the more intense the resistance is. We've lost contact with almost half our troops. The enemy has started acting in groups to flush us out, and using traps to defeat our forces at every turn. Each squad needs to be careful and eliminate any nearby foes.",
+    "SC": "We have successfully infiltrated the nests. However, the deeper we go, the more intense the resistance is. We've lost contact with almost half our troops. The enemy has started acting in groups to flush us out, and using traps to defeat our forces at every turn. Each squad needs to be careful and eliminate any nearby foes."
+   },
+   "sha": {
+    "MISSION.BVM": "e01d7be1975b0eb9c2384a1d5710127e7b8abc1d5a8fc512ba3425976a82af6f",
+    "MISSION.RMPA": "f1c1b6665cbcf661471a14b4800d46048c9e854c72bf0657fe80c21097b7b1b3"
+   }
+  },
+  {
+   "id": "M127",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Charge Phase 3",
+    "EN": "Charge Phase 3",
+    "JA": "突入作戦フェイズ３",
+    "KR": "Charge Phase 3",
+    "SC": "Charge Phase 3"
+   },
+   "brief": {
+    "CN": "Though we've lost over half of our troops, we've finally arrived at the deepest part of the nest, so we now enter the final stages of this operation. The queen is somewhere in this area, surrounded by her minions. Storm Team is to link up with the Ranger team to consolidate our strength and find her.",
+    "EN": "Though we've lost over half of our troops, we've finally arrived at the deepest part of the nest, so we now enter the final stages of this operation. The queen is somewhere in this area, surrounded by her minions. Storm Team is to link up with the Ranger team to consolidate our strength and find her.",
+    "JA": "巣穴最深部へと到達。作戦は最終段階に入ります。このエリアのどこかに巨大生物の女王がいるはずです。巨大生物を掃討しながら、女王を探し、撃破します。ですが、突入部隊の半数以上がすでに全滅、または撤退しており、残る戦力は多くありません。ストームチームは戦闘中のレンジャーチームと合流し、戦力を整えた上で女王の元に向かってください。",
+    "KR": "Though we've lost over half of our troops, we've finally arrived at the deepest part of the nest, so we now enter the final stages of this operation. The queen is somewhere in this area, surrounded by her minions. Storm Team is to link up with the Ranger team to consolidate our strength and find her.",
+    "SC": "Though we've lost over half of our troops, we've finally arrived at the deepest part of the nest, so we now enter the final stages of this operation. The queen is somewhere in this area, surrounded by her minions. Storm Team is to link up with the Ranger team to consolidate our strength and find her."
+   },
+   "sha": {
+    "MISSION.BVM": "589cd949fd78fb0a844398e41c8f27b9c3399d5a0987064e71ce82c3ed08aa16",
+    "MISSION.RMPA": "b9f874d6991236c6c30c98b9289128d083b461491bfd6e1c80ae7084d7b9574d"
+   }
+  },
+  {
+   "id": "M603",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Thunder",
+    "EN": "Thunder",
+    "JA": "雷鳴",
+    "KR": "Thunder",
+    "SC": "Thunder"
+   },
+   "brief": {
+    "CN": "Enemy motherships have invaded the city! Though formidable, if we can shoot them down, the Ravagers will suffer a great blow. The hopes of our allies across the world lie with us, so they've offered their support. We're all in this together, after all! We must destroy the motherships, but we'll also have to deal with their escorts. Focus on the defense squads first, then strike hard.",
+    "EN": "Enemy motherships have invaded the city! Though formidable, if we can shoot them down, the Ravagers will suffer a great blow. The hopes of our allies across the world lie with us, so they've offered their support. We're all in this together, after all! We must destroy the motherships, but we'll also have to deal with their escorts. Focus on the defense squads first, then strike hard.",
+    "JA": "市街地に敵マザーシップが侵攻してきました。マザーシップの戦闘能力は凄まじく、多くの被害が出ています。ですが、これを撃墜することができれば、フォーリナーに大きな打撃を与えるだけでなく、世界各地で戦い続ける仲間たちの希望となることができるでしょう。地球全土がマザーシップ船団の攻撃にさらされています。たった一隻の撃沈に手間取るわけにはいきません。ただちに作戦を開始します。目標はマザーシップの破壊ですが、しかし周囲に多数の護衛部隊を確認しています。最優先すべきは護衛部隊の殲滅。マザーシップの撃沈はそれからです。",
+    "KR": "Enemy motherships have invaded the city! Though formidable, if we can shoot them down, the Ravagers will suffer a great blow. The hopes of our allies across the world lie with us, so they've offered their support. We're all in this together, after all! We must destroy the motherships, but we'll also have to deal with their escorts. Focus on the defense squads first, then strike hard.",
+    "SC": "Enemy motherships have invaded the city! Though formidable, if we can shoot them down, the Ravagers will suffer a great blow. The hopes of our allies across the world lie with us, so they've offered their support. We're all in this together, after all! We must destroy the motherships, but we'll also have to deal with their escorts. Focus on the defense squads first, then strike hard."
+   },
+   "sha": {
+    "MISSION.BVM": "3e7567756d6dce771f4f7ddce7c10331c4cd84e3edbe22404f605187896bb205",
+    "MISSION.RMPA": "f83b563a7d919b996aea120eefc4c0ee0ee80e15ea0c8ece6c6c6f56937969a4"
+   }
+  },
+  {
+   "id": "M309",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Infiltration",
+    "EN": "Infiltration",
+    "JA": "魔都潜入",
+    "KR": "Infiltration",
+    "SC": "Infiltration"
+   },
+   "brief": {
+    "CN": "The Retiarii have invaded the business district! The Wing Divers launched a counter-offensive, but were forced to retreat as spider-like aliens emerged from underground tunnels in the area. Nearby squads are hurrying to help, but they may not be enough. Support the Wing Divers!",
+    "EN": "The Retiarii have invaded the business district! The Wing Divers launched a counter-offensive, but were forced to retreat as spider-like aliens emerged from underground tunnels in the area. Nearby squads are hurrying to help, but they may not be enough. Support the Wing Divers!",
+    "JA": "レタリウスがビル街に侵入。ウイングダイバーが攻撃をおこないましたが、大きな被害を出して退却しました。周辺に地下トンネルがあり、そこから蜘蛛型の巨大生物までが出現しているようです。付近にいるチームはすぐに現地へ急行。ウイングダイバーの生存者を救出してください。",
+    "KR": "The Retiarii have invaded the business district! The Wing Divers launched a counter-offensive, but were forced to retreat as spider-like aliens emerged from underground tunnels in the area. Nearby squads are hurrying to help, but they may not be enough. Support the Wing Divers!",
+    "SC": "The Retiarii have invaded the business district! The Wing Divers launched a counter-offensive, but were forced to retreat as spider-like aliens emerged from underground tunnels in the area. Nearby squads are hurrying to help, but they may not be enough. Support the Wing Divers!"
+   },
+   "sha": {
+    "MISSION.BVM": "f3d7c3561fa6cdfeea823e1699e42184c79fa7aa198e53dbc9d5ebfe78ea286e",
+    "MISSION.RMPA": "311630dc7930d49618b928df1383c70abe7e16d81ed106edf707b730693df385"
+   }
+  },
+  {
+   "id": "M206",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Convergence",
+    "EN": "Convergence",
+    "JA": "異邦人集結",
+    "KR": "Convergence",
+    "SC": "Convergence"
+   },
+   "brief": {
+    "CN": "The Ravagers' transport ships are gathering over a residential area, and our intel says that the size of the enemy army is the largest it's yet been! They're likely planning a full-scale attack, so we need to strike them first, before it's too late. This is more dangerous than any other mission to date, so take every precaution out there!",
+    "EN": "The Ravagers' transport ships are gathering over a residential area, and our intel says that the size of the enemy army is the largest it's yet been! They're likely planning a full-scale attack, so we need to strike them first, before it's too late. This is more dangerous than any other mission to date, so take every precaution out there!",
+    "JA": "フォーリナーの輸送船が市街地上空に集結しています。報告によると「かつてない規模の軍団」とのことです。おそらく総攻撃の前兆だと考えられます。敵の準備が整うまで、ただ見ているわけにはいきません。こちらから攻撃をかけ、集結中の敵部隊に打撃を与えます。これまでにないほど危険な任務です。十分に注意してください。",
+    "KR": "The Ravagers' transport ships are gathering over a residential area, and our intel says that the size of the enemy army is the largest it's yet been! They're likely planning a full-scale attack, so we need to strike them first, before it's too late. This is more dangerous than any other mission to date, so take every precaution out there!",
+    "SC": "The Ravagers' transport ships are gathering over a residential area, and our intel says that the size of the enemy army is the largest it's yet been! They're likely planning a full-scale attack, so we need to strike them first, before it's too late. This is more dangerous than any other mission to date, so take every precaution out there!"
+   },
+   "sha": {
+    "MISSION.BVM": "db08eabbeeb873bed53f7a0d9767c817b59541b173600ffcd4ae5a1198de6e59",
+    "MISSION.RMPA": "4fd09b95946756fb3e2cad5fb8dfe28f720c70ca2a5d731202b3da4caf5dd1b8"
+   }
+  },
+  {
+   "id": "M153",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Inferno",
+    "EN": "Inferno",
+    "JA": "烈火",
+    "KR": "Inferno",
+    "SC": "Inferno"
+   },
+   "brief": {
+    "CN": "The intensity of the Ravagers' invasions keeps increasing, and we're becoming overwhelmed. This battle will be the most difficult by far. The Ranger team has lost its commander from an enemy attack, and is now in total disarray. It's only a matter of time before it's completely wiped out, so go and offer your support immediately. Good luck, Storm Team!",
+    "EN": "The intensity of the Ravagers' invasions keeps increasing, and we're becoming overwhelmed. This battle will be the most difficult by far. The Ranger team has lost its commander from an enemy attack, and is now in total disarray. It's only a matter of time before it's completely wiped out, so go and offer your support immediately. Good luck, Storm Team!",
+    "JA": "フォーリナーの大侵攻は激しさを増すばかりです。圧倒的な大軍がこの地に迫っています。この戦いはこれまでで最も苛烈なものとなるでしょう。ですが、迎え撃つはずのレンジャーチームは敵の攻撃によって指揮官を失い、混乱状態に陥っているとのこと。このままでは全滅も時間の問題です。ただちに援護に向かってください。ストームチームの健闘を祈ります。",
+    "KR": "The intensity of the Ravagers' invasions keeps increasing, and we're becoming overwhelmed. This battle will be the most difficult by far. The Ranger team has lost its commander from an enemy attack, and is now in total disarray. It's only a matter of time before it's completely wiped out, so go and offer your support immediately. Good luck, Storm Team!",
+    "SC": "The intensity of the Ravagers' invasions keeps increasing, and we're becoming overwhelmed. This battle will be the most difficult by far. The Ranger team has lost its commander from an enemy attack, and is now in total disarray. It's only a matter of time before it's completely wiped out, so go and offer your support immediately. Good luck, Storm Team!"
+   },
+   "sha": {
+    "MISSION.BVM": "4c71da46e90d4faf90156d5554ae33e26b5cae843d6f1aef1e9475fd81fa8abc",
+    "MISSION.RMPA": "c73c9df09a43bb477dee2bbba86a57996c1eec5d28d10b3c95fff137bd035eab"
+   }
+  },
+  {
+   "id": "M210",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Starship",
+    "EN": "Starship",
+    "JA": "星船",
+    "KR": "Starship",
+    "SC": "Starship"
+   },
+   "brief": {
+    "CN": "Preparations for a coordinated global attack on the alien motherships are almost complete, though bear in mind the enemy's ships are powerful fortresses with massive firepower. There is no guarantee of victory, and we'll all need to exercise extreme caution. We'll take the lead, with the goal of shooting as many as possible out of the sky. If we're successful, we'll be praised throughout history as the saviors of all humanity!",
+    "EN": "Preparations for a coordinated global attack on the alien motherships are almost complete, though bear in mind the enemy's ships are powerful fortresses with massive firepower. There is no guarantee of victory, and we'll all need to exercise extreme caution. We'll take the lead, with the goal of shooting as many as possible out of the sky. If we're successful, we'll be praised throughout history as the saviors of all humanity!",
+    "JA": "世界各地でマザーシップへの攻撃作戦が開始されます。すでに攻撃準備は完了しているはずですが、いまだ戦闘は始まっていません。相手は圧倒的な戦闘能力を持った要塞。勝てる保証はなく、各エリアは慎重を期しているものと思われます。我々が先陣をきり、この地に飛来したマザーシップを撃沈しなければなりません。もし作戦が成功すれば、後に続く者たちに大きな希望を与えることができるでしょう。健闘を祈ります。",
+    "KR": "Preparations for a coordinated global attack on the alien motherships are almost complete, though bear in mind the enemy's ships are powerful fortresses with massive firepower. There is no guarantee of victory, and we'll all need to exercise extreme caution. We'll take the lead, with the goal of shooting as many as possible out of the sky. If we're successful, we'll be praised throughout history as the saviors of all humanity!",
+    "SC": "Preparations for a coordinated global attack on the alien motherships are almost complete, though bear in mind the enemy's ships are powerful fortresses with massive firepower. There is no guarantee of victory, and we'll all need to exercise extreme caution. We'll take the lead, with the goal of shooting as many as possible out of the sky. If we're successful, we'll be praised throughout history as the saviors of all humanity!"
+   },
+   "sha": {
+    "MISSION.BVM": "3fcb7768fe72c0c54ab788ff2a0850205346629fa35726553b56b9c53ab01870",
+    "MISSION.RMPA": "54fdd9f739266143b8c10767ac0f7158df374f40e91fc556b0ccdec1886a2673"
+   }
+  },
+  {
+   "id": "M307",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "High Density",
+    "EN": "High Density",
+    "JA": "密集地帯",
+    "KR": "High Density",
+    "SC": "High Density"
+   },
+   "brief": {
+    "CN": "The alien motherships have been destroyed -- two of them! The Ravagers will be in shock after this turn of events! However...many of the giant insects have gone to nest and are still multiplying. A tunnel entrance has been discovered at the port area, and although we've beaten back the Ravagers, we cannot rest until these evil spawn are all destroyed! We must clean out the underground tunnels.",
+    "EN": "The alien motherships have been destroyed -- two of them! The Ravagers will be in shock after this turn of events! However...many of the giant insects have gone to nest and are still multiplying. A tunnel entrance has been discovered at the port area, and although we've beaten back the Ravagers, we cannot rest until these evil spawn are all destroyed! We must clean out the underground tunnels.",
+    "JA": "マザーシップの撃墜に成功。世界各地で同様の戦いがおこなわれ、結果、２隻のマザーシップを破壊したとのことです。フォーリナーは予想以上の被害に顔を青くしていることでしょう。ですが……最悪の事態になりました。フォーリナーが投下した巨大生物は地下に潜り、増殖を始めているようです。港湾地帯に地下トンネルの出口が出現。多数の巨大生物が出現しています。フォーリナーを撃退しても巨大生物を根絶しない限り、人類に安息の日々は訪れません。ただちに掃討作戦を開始。地下トンネルの出口を破壊します。",
+    "KR": "The alien motherships have been destroyed -- two of them! The Ravagers will be in shock after this turn of events! However...many of the giant insects have gone to nest and are still multiplying. A tunnel entrance has been discovered at the port area, and although we've beaten back the Ravagers, we cannot rest until these evil spawn are all destroyed! We must clean out the underground tunnels.",
+    "SC": "The alien motherships have been destroyed -- two of them! The Ravagers will be in shock after this turn of events! However...many of the giant insects have gone to nest and are still multiplying. A tunnel entrance has been discovered at the port area, and although we've beaten back the Ravagers, we cannot rest until these evil spawn are all destroyed! We must clean out the underground tunnels."
+   },
+   "sha": {
+    "MISSION.BVM": "a5a88d9b330a5854d013022e921dbb74f91dc9705c079840d552be1a60e1a313",
+    "MISSION.RMPA": "8cb0c3681a483532a49cdccee2946ebbc168b25a97f6b4c140cd6775a14c051a"
+   }
+  },
+  {
+   "id": "MP002",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Dozing Beast",
+    "EN": "Dozing Beast",
+    "JA": "微睡みの魔獣",
+    "KR": "Dozing Beast",
+    "SC": "Dozing Beast"
+   },
+   "brief": {
+    "CN": "Erginus, which destroyed that residential area, suddenly went completely silent, as if it's taking a hiatus. We shouldn't pass up this opportunity. With air strikes, we can destroy Erginus once and for all! EDF tactical bombers are now preparing for the air raid. Just in case things go wrong, though, we'll deploy Ranger units as well. They are to approach Erginus and await further orders.",
+    "EN": "Erginus, which destroyed that residential area, suddenly went completely silent, as if it's taking a hiatus. We shouldn't pass up this opportunity. With air strikes, we can destroy Erginus once and for all! EDF tactical bombers are now preparing for the air raid. Just in case things go wrong, though, we'll deploy Ranger units as well. They are to approach Erginus and await further orders.",
+    "JA": "市街地を荒らしまわったエルギヌスが、突如活動を休止。完全に動きを止めました。このチャンスを逃す手はありません。空爆によって、エルギヌスを撃破します。現在、爆撃機の編隊が出撃準備中です。さらに万一の備えとして、歩兵部隊を現地に派遣します。歩兵部隊はエルギヌスに接近後、命令を待ってください。",
+    "KR": "Erginus, which destroyed that residential area, suddenly went completely silent, as if it's taking a hiatus. We shouldn't pass up this opportunity. With air strikes, we can destroy Erginus once and for all! EDF tactical bombers are now preparing for the air raid. Just in case things go wrong, though, we'll deploy Ranger units as well. They are to approach Erginus and await further orders.",
+    "SC": "Erginus, which destroyed that residential area, suddenly went completely silent, as if it's taking a hiatus. We shouldn't pass up this opportunity. With air strikes, we can destroy Erginus once and for all! EDF tactical bombers are now preparing for the air raid. Just in case things go wrong, though, we'll deploy Ranger units as well. They are to approach Erginus and await further orders."
+   },
+   "sha": {
+    "MISSION.BVM": "adcb5a5407c249148e3a244768c68001bcf5f66e5e96b818b83470ada2a2ad9f",
+    "MISSION.RMPA": "8757f91338c79e46978904e9abc06b412f395ff01b7a4b07141ce8da8405c6e7"
+   }
+  },
+  {
+   "id": "M501",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Crossing",
+    "EN": "Crossing",
+    "JA": "渡橋作戦",
+    "KR": "Crossing",
+    "SC": "Crossing"
+   },
+   "brief": {
+    "CN": "We have confirmed large enemy numbers emerging from tunnels in the mountain area. We must destroy them before they strike! There appear to be three tunnel entrances, which can be reached by crossing the bridge from the mission start point. Be aware that Ravager combat troops are supporting the creatures. Before the bridge is sealed off, cross the valley and destroy the tunnel entrances!",
+    "EN": "We have confirmed large enemy numbers emerging from tunnels in the mountain area. We must destroy them before they strike! There appear to be three tunnel entrances, which can be reached by crossing the bridge from the mission start point. Be aware that Ravager combat troops are supporting the creatures. Before the bridge is sealed off, cross the valley and destroy the tunnel entrances!",
+    "JA": "山岳部に巨大生物を確認。地下トンネルの出口から地上へと出てくるようです。もし放置すれば、山岳部は巨大生物で埋め尽くされるでしょう。ただちに破壊する必要があります。スカウトチームの報告によると、地下トンネルの出口は３つ。作戦開始地点から橋を渡り、谷を越えた場所にあります。問題は、フォーリナーの戦闘兵器が巨大生物を守っていることです。橋を封鎖される前に、谷を越え、トンネルの出口を破壊してください。",
+    "KR": "We have confirmed large enemy numbers emerging from tunnels in the mountain area. We must destroy them before they strike! There appear to be three tunnel entrances, which can be reached by crossing the bridge from the mission start point. Be aware that Ravager combat troops are supporting the creatures. Before the bridge is sealed off, cross the valley and destroy the tunnel entrances!",
+    "SC": "We have confirmed large enemy numbers emerging from tunnels in the mountain area. We must destroy them before they strike! There appear to be three tunnel entrances, which can be reached by crossing the bridge from the mission start point. Be aware that Ravager combat troops are supporting the creatures. Before the bridge is sealed off, cross the valley and destroy the tunnel entrances!"
+   },
+   "sha": {
+    "MISSION.BVM": "f90ad5fb15f119fcee5961c781ed64ec97498de56a39f6d0c40234020011e5cf",
+    "MISSION.RMPA": "99e43973963699129286487dd1539ee008a9b539314af0b940856eaf853489e7"
+   }
+  },
+  {
+   "id": "M128",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Search",
+    "EN": "Search",
+    "JA": "掃討作戦",
+    "KR": "Search",
+    "SC": "Search"
+   },
+   "brief": {
+    "CN": "The clean-up operation will now commence. Engage all enemies in the city! The arrival of reinforcements has been delayed, so we'll have to continue the attack with the Ranger and Storm teams only.",
+    "EN": "The clean-up operation will now commence. Engage all enemies in the city! The arrival of reinforcements has been delayed, so we'll have to continue the attack with the Ranger and Storm teams only.",
+    "JA": "巨大生物掃討作戦を開始します。市街地に侵入した巨大生物を殲滅してください。なお、本作戦への参加が期待されていたペイルチームは到着が遅れており、レンジャーチームとストームチームだけで攻撃をおこないます。",
+    "KR": "The clean-up operation will now commence. Engage all enemies in the city! The arrival of reinforcements has been delayed, so we'll have to continue the attack with the Ranger and Storm teams only.",
+    "SC": "The clean-up operation will now commence. Engage all enemies in the city! The arrival of reinforcements has been delayed, so we'll have to continue the attack with the Ranger and Storm teams only."
+   },
+   "sha": {
+    "MISSION.BVM": "b0bffaa2c0ef699ad2cbf7055b8f5274d85622fb8b140b812d2d4aed8aecb64d",
+    "MISSION.RMPA": "ad9131584752097417d83fea6834953b6942f4df0d9e8ce34e251c97122fd66e"
+   }
+  },
+  {
+   "id": "M137",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Waterside Bugs",
+    "EN": "Waterside Bugs",
+    "JA": "水辺の飛蟲",
+    "KR": "Waterside Bugs",
+    "SC": "Waterside Bugs"
+   },
+   "brief": {
+    "CN": "Huge alien creatures have been confirmed along the river that runs through the city. They seem to have made several entrances to their tunnels by the river. You must hurry to the area and destroy these tunnels! Flying types have also been spotted nearby, so good luck.",
+    "EN": "Huge alien creatures have been confirmed along the river that runs through the city. They seem to have made several entrances to their tunnels by the river. You must hurry to the area and destroy these tunnels! Flying types have also been spotted nearby, so good luck.",
+    "JA": "市街地を流れる川沿いに、巨大生物の姿が確認されました。巨大生物は地下トンネルを通って移動。川に沿って多数の出口を作っているようです。ただちに現地に急行し、地下トンネルの出口を破壊してください。なお、巨大生物の中に、飛行型の姿が確認されています。十分に注意してください。",
+    "KR": "Huge alien creatures have been confirmed along the river that runs through the city. They seem to have made several entrances to their tunnels by the river. You must hurry to the area and destroy these tunnels! Flying types have also been spotted nearby, so good luck.",
+    "SC": "Huge alien creatures have been confirmed along the river that runs through the city. They seem to have made several entrances to their tunnels by the river. You must hurry to the area and destroy these tunnels! Flying types have also been spotted nearby, so good luck."
+   },
+   "sha": {
+    "MISSION.BVM": "0a224c128ef671bcfbea40a0d257424fcea768bc5f0e421d2875d3a3e37086bf",
+    "MISSION.RMPA": "ae2044fd1fc9d35a654a94a083130212026162812a33786c8d4473b85211c988"
+   }
+  },
+  {
+   "id": "M012",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Annihilation",
+    "EN": "Annihilation",
+    "JA": "殲滅",
+    "KR": "Annihilation",
+    "SC": "Annihilation"
+   },
+   "brief": {
+    "CN": "Attack the enemy transports seen in the mountain area.",
+    "EN": "Attack the enemy transports seen in the mountain area.",
+    "JA": "山岳部に敵の輸送船を確認。ただちに撃墜作戦を開始します。",
+    "KR": "Attack the enemy transports seen in the mountain area.",
+    "SC": "Attack the enemy transports seen in the mountain area."
+   },
+   "sha": {
+    "MISSION.BVM": "3dccff86e8a27fd6a8287e34da1eee790372d40feb4572e55540c594ce17297a",
+    "MISSION.RMPA": "55518386dfad732d5ad33f7190a28296856a2bb74439a987e1006aecf07235c4"
+   }
+  },
+  {
+   "id": "M009",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Natural Calamity",
+    "EN": "Natural Calamity",
+    "JA": "天変",
+    "KR": "Natural Calamity",
+    "SC": "Natural Calamity"
+   },
+   "brief": {
+    "CN": "Engage the Ravagers' flying drones that have entered the city.",
+    "EN": "Engage the Ravagers' flying drones that have entered the city.",
+    "JA": "市街地にフォーリナーの飛行ドローンが飛来しました。迎撃作戦を開始します。",
+    "KR": "Engage the Ravagers' flying drones that have entered the city.",
+    "SC": "Engage the Ravagers' flying drones that have entered the city."
+   },
+   "sha": {
+    "MISSION.BVM": "c4dbc8dc74f26f658f4ce696e3126cb5b27dd19ce439a4d135d586b2b9b53e10",
+    "MISSION.RMPA": "87fff0d4723a4e8303606897dd83afc8a8074aac39eb3ca240225b1d82293617"
+   }
+  },
+  {
+   "id": "M019",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Steel Beast",
+    "EN": "Steel Beast",
+    "JA": "鋼の獣",
+    "KR": "Steel Beast",
+    "SC": "Steel Beast"
+   },
+   "brief": {
+    "CN": "Earth Eaters have appeared over the city. Go forth and engage!",
+    "EN": "Earth Eaters have appeared over the city. Go forth and engage!",
+    "JA": "市街地上空にアースイーターが出現。現地へ向かってください。",
+    "KR": "Earth Eaters have appeared over the city. Go forth and engage!",
+    "SC": "Earth Eaters have appeared over the city. Go forth and engage!"
+   },
+   "sha": {
+    "MISSION.BVM": "e197cc906ccba64c1db79463f0fa68611fe2eda784763c968b50289d686e09c8",
+    "MISSION.RMPA": "1ab6f319420138a2dcc674226d4736c0e5c7073d38f6fdd089983f1c812e1b5a"
+   }
+  },
+  {
+   "id": "M205",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Void Ship",
+    "EN": "Void Ship",
+    "JA": "虚無の船",
+    "KR": "Void Ship",
+    "SC": "Void Ship"
+   },
+   "brief": {
+    "CN": "We have confirmed a new Ravager transport ship, and it's several times bigger than any previously encountered model. And of course, it can also hold vast numbers of giant monsters. You are to proceed and engage immediately.",
+    "EN": "We have confirmed a new Ravager transport ship, and it's several times bigger than any previously encountered model. And of course, it can also hold vast numbers of giant monsters. You are to proceed and engage immediately.",
+    "JA": "フォーリナーの新型輸送船を確認。大型です。これまでの輸送船に比べ、全長は倍以上。大量の巨大生物を積載しているようです。撃墜しなければ、計り知れない被害が出ると予想されます。ただちに現地へ向かってください。",
+    "KR": "We have confirmed a new Ravager transport ship, and it's several times bigger than any previously encountered model. And of course, it can also hold vast numbers of giant monsters. You are to proceed and engage immediately.",
+    "SC": "We have confirmed a new Ravager transport ship, and it's several times bigger than any previously encountered model. And of course, it can also hold vast numbers of giant monsters. You are to proceed and engage immediately."
+   },
+   "sha": {
+    "MISSION.BVM": "5d6f893a041548fc0e6ab604834df65a4e4f5217d861bb42e71c06ebe32b7be7",
+    "MISSION.RMPA": "370971c4ae78acb71086f63ff100732f2cd7b03444e584f7cf989f244efa7505"
+   }
+  },
+  {
+   "id": "M129",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Blue Fighters",
+    "EN": "Blue Fighters",
+    "JA": "青き衛士",
+    "KR": "Blue Fighters",
+    "SC": "Blue Fighters"
+   },
+   "brief": {
+    "CN": "A large Ravager transport ship is located over the city, and is dropping Hectors. The report says that this is the same new type as what was seen in Europe yesterday, and the troops initially sent in were all defeated. It's protected by an electromagnetic shield, so it won't be an easy target. Good luck!",
+    "EN": "A large Ravager transport ship is located over the city, and is dropping Hectors. The report says that this is the same new type as what was seen in Europe yesterday, and the troops initially sent in were all defeated. It's protected by an electromagnetic shield, so it won't be an easy target. Good luck!",
+    "JA": "フォーリナーの大型輸送船が市街地上空に飛来。ヘクトルを投下しています。報告では……新型です！　先日、欧州に同タイプが出現。応戦した部隊は全滅しています。データによると、装甲表面が電磁バリアで覆われ、容易には破壊できないとのこと。かつてない強敵です。十分に注意してください。",
+    "KR": "A large Ravager transport ship is located over the city, and is dropping Hectors. The report says that this is the same new type as what was seen in Europe yesterday, and the troops initially sent in were all defeated. It's protected by an electromagnetic shield, so it won't be an easy target. Good luck!",
+    "SC": "A large Ravager transport ship is located over the city, and is dropping Hectors. The report says that this is the same new type as what was seen in Europe yesterday, and the troops initially sent in were all defeated. It's protected by an electromagnetic shield, so it won't be an easy target. Good luck!"
+   },
+   "sha": {
+    "MISSION.BVM": "5fcdfb199a2c7bee22eca106fbddd47d35c5c9bcb856318d339d084eaf108c5c",
+    "MISSION.RMPA": "fd0fe8a14ff19d7fd5ccedae8fde259ab1479cf533b6c067dfe1b19ad8687596"
+   }
+  },
+  {
+   "id": "M135",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Earth Defenders",
+    "EN": "Earth Defenders",
+    "JA": "大地の守護者",
+    "KR": "Earth Defenders",
+    "SC": "Earth Defenders"
+   },
+   "brief": {
+    "CN": "We have confirmed that the aliens are continuing to move, so we'll mobilize and engage them in the mountains. The Ravagers have dropped Shield Bearers, who are moving in to defend the giant insects. That will make the going much more treacherous. Good luck!",
+    "EN": "We have confirmed that the aliens are continuing to move, so we'll mobilize and engage them in the mountains. The Ravagers have dropped Shield Bearers, who are moving in to defend the giant insects. That will make the going much more treacherous. Good luck!",
+    "JA": "移動を続ける巨大生物の一群を確認。山岳部で待ち構え、これを殲滅します。なお、フォーリナーは巨大生物の上空にシールドベアラーを投下。現在、シールドベアラーは巨大生物を守るように移動しています。防御スクリーンに守られた巨大生物は脅威です。十分に注意してください。",
+    "KR": "We have confirmed that the aliens are continuing to move, so we'll mobilize and engage them in the mountains. The Ravagers have dropped Shield Bearers, who are moving in to defend the giant insects. That will make the going much more treacherous. Good luck!",
+    "SC": "We have confirmed that the aliens are continuing to move, so we'll mobilize and engage them in the mountains. The Ravagers have dropped Shield Bearers, who are moving in to defend the giant insects. That will make the going much more treacherous. Good luck!"
+   },
+   "sha": {
+    "MISSION.BVM": "0c88684df02345f4d590ffcdb161f7ad3f26300432a76010739540ba94753b54",
+    "MISSION.RMPA": "562837cbc63718ac5e9b5b9a74a4d25aa0e2f56525e7919470b9e03ad382ef02"
+   }
+  },
+  {
+   "id": "M516",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Mountain Pass Trap",
+    "EN": "Mountain Pass Trap",
+    "JA": "山道の罠",
+    "KR": "Mountain Pass Trap",
+    "SC": "Mountain Pass Trap"
+   },
+   "brief": {
+    "CN": "Our focus is now on the insects gathered in the mountains. An attack squad was sent, but they were forced back with casualties. The Retiarius units now form the hub of the enemy army, making it quite difficult to advance. We'll send Air Forces, a cannon squad, and transport units, and the Air Raiders will coordinate with these support squads. Good luck!",
+    "EN": "Our focus is now on the insects gathered in the mountains. An attack squad was sent, but they were forced back with casualties. The Retiarius units now form the hub of the enemy army, making it quite difficult to advance. We'll send Air Forces, a cannon squad, and transport units, and the Air Raiders will coordinate with these support squads. Good luck!",
+    "JA": "山岳部に集結している巨大生物を掃討します。すでに一度、攻撃部隊が派遣されているのですが、多くの負傷者を出して退却する結果となりました。敵の中にレタリウスがおり、それが攻撃を困難にしている要因のようです。しかし、今作戦では空軍、砲兵隊、輸送部隊が出動しており、万全の状態です。エアレイダーは支援部隊と連携をとり、敵を撃破してください。",
+    "KR": "Our focus is now on the insects gathered in the mountains. An attack squad was sent, but they were forced back with casualties. The Retiarius units now form the hub of the enemy army, making it quite difficult to advance. We'll send Air Forces, a cannon squad, and transport units, and the Air Raiders will coordinate with these support squads. Good luck!",
+    "SC": "Our focus is now on the insects gathered in the mountains. An attack squad was sent, but they were forced back with casualties. The Retiarius units now form the hub of the enemy army, making it quite difficult to advance. We'll send Air Forces, a cannon squad, and transport units, and the Air Raiders will coordinate with these support squads. Good luck!"
+   },
+   "sha": {
+    "MISSION.BVM": "f19c1b8395999b30ff6b175209dc25253ede32be2f8a12c0a91c95d49e4c1a4e",
+    "MISSION.RMPA": "47618d273dee6bed5129c6a22829509508dc8bac261e9229ab88f441cee051be"
+   }
+  },
+  {
+   "id": "M133",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Fortress Frenzy",
+    "EN": "Fortress Frenzy",
+    "JA": "要塞猛進",
+    "KR": "Fortress Frenzy",
+    "SC": "Fortress Frenzy"
+   },
+   "brief": {
+    "CN": "The infamous quadruped fortress took the city by surprise, with many citizens unable to evacuate. Many were lost. We'll engage the enemy on the spot and give the remaining civilians time to escape. Just remember: Only ground troops stand between that fortress and the lives of our people, since our Air Forces are heavily depleted. This will be a decisive battle. We must destroy the quadruped fortress! Help buy some time.",
+    "EN": "The infamous quadruped fortress took the city by surprise, with many citizens unable to evacuate. Many were lost. We'll engage the enemy on the spot and give the remaining civilians time to escape. Just remember: Only ground troops stand between that fortress and the lives of our people, since our Air Forces are heavily depleted. This will be a decisive battle. We must destroy the quadruped fortress! Help buy some time.",
+    "JA": "新たな四足歩行要塞が市街地に接近。市民の避難が遅れており、このままでは計り知れない被害が出てしまいます。敵を足止めし、市民が逃げるための時間を稼がねばなりません。ですが、頼みの空軍は消耗が激しく、支援は難しいとのことです。もはや地上部隊だけで、あの怪物を食い止めるしか手がありません。決死の作戦になるでしょう。四足歩行要塞を破壊する必要はありません。なんとか時間を稼いでください。",
+    "KR": "The infamous quadruped fortress took the city by surprise, with many citizens unable to evacuate. Many were lost. We'll engage the enemy on the spot and give the remaining civilians time to escape. Just remember: Only ground troops stand between that fortress and the lives of our people, since our Air Forces are heavily depleted. This will be a decisive battle. We must destroy the quadruped fortress! Help buy some time.",
+    "SC": "The infamous quadruped fortress took the city by surprise, with many citizens unable to evacuate. Many were lost. We'll engage the enemy on the spot and give the remaining civilians time to escape. Just remember: Only ground troops stand between that fortress and the lives of our people, since our Air Forces are heavily depleted. This will be a decisive battle. We must destroy the quadruped fortress! Help buy some time."
+   },
+   "sha": {
+    "MISSION.BVM": "b90c48c6fb6122b49029b98589607bb868a78f0aa938b83fb9b06065b117a4e7",
+    "MISSION.RMPA": "a5d3972204c7fd2091562d2d4516b042a25ac34b8db2274aba4474242250b3a4"
+   }
+  },
+  {
+   "id": "M121",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Pincer",
+    "EN": "Pincer",
+    "JA": "挟撃",
+    "KR": "Pincer",
+    "SC": "Pincer"
+   },
+   "brief": {
+    "CN": "Emergency report: A Hector squad has approached, and there is another to the rear. We must hide in the valley! If you have to fight any Hectors with their shields equipped, try to target areas outside of cover, like their left arms.",
+    "EN": "Emergency report: A Hector squad has approached, and there is another to the rear. We must hide in the valley! If you have to fight any Hectors with their shields equipped, try to target areas outside of cover, like their left arms.",
+    "JA": "緊急通信です！　ヘクトルの部隊が接近中。さらに後方に別働隊。このままでは挟撃されます。急ぎ、谷間に身を隠してください。無事の帰還を祈ります。万一、盾を装備したヘクトルと交戦せざるを得ない時は、左腕を狙うなど、防御の及ばない箇所を攻撃してください。",
+    "KR": "Emergency report: A Hector squad has approached, and there is another to the rear. We must hide in the valley! If you have to fight any Hectors with their shields equipped, try to target areas outside of cover, like their left arms.",
+    "SC": "Emergency report: A Hector squad has approached, and there is another to the rear. We must hide in the valley! If you have to fight any Hectors with their shields equipped, try to target areas outside of cover, like their left arms."
+   },
+   "sha": {
+    "MISSION.BVM": "dc2a9c81a693de22b99f94fdae7579bf2a3757ae5bc0916ee53c4e3101ee23c1",
+    "MISSION.RMPA": "999d25d53da348ec4efaf3cab79826f895e74e073c60a2c5011feba739e1c5e8"
+   }
+  },
+  {
+   "id": "M122",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Ravages of War",
+    "EN": "Ravages of War",
+    "JA": "戦禍拡大",
+    "KR": "Ravages of War",
+    "SC": "Ravages of War"
+   },
+   "brief": {
+    "CN": "Since their flying units appeared, the giant insects have been more active, digging tunnels under the city and building more and more entrances into them. We have an emergency report from the city: They've confirmed the location of at least one tunnel entrance. Go investigate.",
+    "EN": "Since their flying units appeared, the giant insects have been more active, digging tunnels under the city and building more and more entrances into them. We have an emergency report from the city: They've confirmed the location of at least one tunnel entrance. Go investigate.",
+    "JA": "飛行型の出現以後、巨大生物の動きは活発になっているようです。市街地の下をトンネルを掘って移動し、出口を作って地上へと侵攻してきます。たった今、市街地からの緊急通報が入りました。地下トンネルの出口を確認したとのこと。ただちに現地に向かってください。",
+    "KR": "Since their flying units appeared, the giant insects have been more active, digging tunnels under the city and building more and more entrances into them. We have an emergency report from the city: They've confirmed the location of at least one tunnel entrance. Go investigate.",
+    "SC": "Since their flying units appeared, the giant insects have been more active, digging tunnels under the city and building more and more entrances into them. We have an emergency report from the city: They've confirmed the location of at least one tunnel entrance. Go investigate."
+   },
+   "sha": {
+    "MISSION.BVM": "081f184a09be0890ea21a07fd3e0764bfbd0ed229ca4705240f5bb6d473001ef",
+    "MISSION.RMPA": "9973ec8dc850ba679d9cf0f78dd264e777d08d614a99e4a6a72e33e75fe4c192"
+   }
+  },
+  {
+   "id": "MP003",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Crash",
+    "EN": "Crash",
+    "JA": "激突",
+    "KR": "Crash",
+    "SC": "Crash"
+   },
+   "brief": {
+    "CN": "To fight against Erginus, command headquarters decided to make use of our new Walking Fortress Balam. It's in transit right now. This is a variation on the Walking Fortress X4, with a height of around 50 meters. We'll crash it into Erginus, and boom, history! Storm Team, head out to the scene and support the operation.",
+    "EN": "To fight against Erginus, command headquarters decided to make use of our new Walking Fortress Balam. It's in transit right now. This is a variation on the Walking Fortress X4, with a height of around 50 meters. We'll crash it into Erginus, and boom, history! Storm Team, head out to the scene and support the operation.",
+    "JA": "エルギヌスに対抗するため、要塞バラムの実戦投入が決定しました。現在、作戦エリアへと輸送中です。要塞バラムは移動要塞Ｘ４のスモールタイプであり、全長５０メートルの移動基地です。これをエルギヌスに衝突させることで、エルギヌスを撃破します。ストームチームは現地へ急行し、作戦遂行を補助してください。",
+    "KR": "To fight against Erginus, command headquarters decided to make use of our new Walking Fortress Balam. It's in transit right now. This is a variation on the Walking Fortress X4, with a height of around 50 meters. We'll crash it into Erginus, and boom, history! Storm Team, head out to the scene and support the operation.",
+    "SC": "To fight against Erginus, command headquarters decided to make use of our new Walking Fortress Balam. It's in transit right now. This is a variation on the Walking Fortress X4, with a height of around 50 meters. We'll crash it into Erginus, and boom, history! Storm Team, head out to the scene and support the operation."
+   },
+   "sha": {
+    "MISSION.BVM": "b657e900d4776627b81277c9462f450332e40733cb0dfc00ee508668ac08a5f3",
+    "MISSION.RMPA": "dca5bb26d171bedea23c10ed7b68942d8b81c477630d475c133a2aabc0407074"
+   }
+  },
+  {
+   "id": "M312",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Air Mobilization",
+    "EN": "Air Mobilization",
+    "JA": "空挺結集",
+    "KR": "Air Mobilization",
+    "SC": "Air Mobilization"
+   },
+   "brief": {
+    "CN": "Ravager aerial squads are terrorizing the city -- mostly flying drones, but several Reds are confirmed as well. We'll meet them with an attack of our own, however! Get out there, and take some anti-aircraft equipment with you.",
+    "EN": "Ravager aerial squads are terrorizing the city -- mostly flying drones, but several Reds are confirmed as well. We'll meet them with an attack of our own, however! Get out there, and take some anti-aircraft equipment with you.",
+    "JA": "フォーリナーの航空部隊が市街地上空に侵入。飛行ドローンを中心にした編成ですが、レッドカラーも数機確認されています。これより迎撃作戦を開始。対空装備で出撃してください。",
+    "KR": "Ravager aerial squads are terrorizing the city -- mostly flying drones, but several Reds are confirmed as well. We'll meet them with an attack of our own, however! Get out there, and take some anti-aircraft equipment with you.",
+    "SC": "Ravager aerial squads are terrorizing the city -- mostly flying drones, but several Reds are confirmed as well. We'll meet them with an attack of our own, however! Get out there, and take some anti-aircraft equipment with you."
+   },
+   "sha": {
+    "MISSION.BVM": "06dc73945194278b41aaffe4f70ee6e124a6927e0a9571cc830c58d13f55f8bf",
+    "MISSION.RMPA": "456b8a103106f76b4739bcee2e422be8ffea3418cd2e77f5716473b6e617e04e"
+   }
+  },
+  {
+   "id": "M132",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Bug Invasion",
+    "EN": "Bug Invasion",
+    "JA": "凶蟲大侵攻",
+    "KR": "Bug Invasion",
+    "SC": "Bug Invasion"
+   },
+   "brief": {
+    "CN": "We have confirmed spider-type giant insects. A Wing Diver squad is already in combat, but they're heavily outnumbered and will be wiped out in no time at this rate. Head to the location, and consider this a rescue mission.",
+    "EN": "We have confirmed spider-type giant insects. A Wing Diver squad is already in combat, but they're heavily outnumbered and will be wiped out in no time at this rate. Head to the location, and consider this a rescue mission.",
+    "JA": "蜘蛛型巨大生物を確認。すでにウイングダイバー隊が交戦中です。しかし、敵はウイングダイバーの殲滅能力を上回るほどの大群とのこと。このままではウイングダイバー隊が全滅してしまいます。ただちに救援に向かってください。",
+    "KR": "We have confirmed spider-type giant insects. A Wing Diver squad is already in combat, but they're heavily outnumbered and will be wiped out in no time at this rate. Head to the location, and consider this a rescue mission.",
+    "SC": "We have confirmed spider-type giant insects. A Wing Diver squad is already in combat, but they're heavily outnumbered and will be wiped out in no time at this rate. Head to the location, and consider this a rescue mission."
+   },
+   "sha": {
+    "MISSION.BVM": "4a9300caeb95f7589141db3e9addbdeabd2854f85ffc9b2f2ce0008dbffa7afe",
+    "MISSION.RMPA": "f8e064877dc837601910689c730cdf1a814c1ecda32ada68fb546b047906a694"
+   }
+  },
+  {
+   "id": "M143",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Transport Ship Surprise Attack",
+    "EN": "Transport Ship Surprise Attack",
+    "JA": "輸送船急襲作戦",
+    "KR": "Transport Ship Surprise Attack",
+    "SC": "Transport Ship Surprise Attack"
+   },
+   "brief": {
+    "CN": "A large enemy fleet is at the coast, dropping giant insects. The transports are protected by numerous defense squads, so a head-on attack won't be possible. Air Forces, cannons, and transport units will all deploy. The ground troops and Air Raiders will target these large transports, and the Air Raiders will also maintain contact with the support squads. Good luck!",
+    "EN": "A large enemy fleet is at the coast, dropping giant insects. The transports are protected by numerous defense squads, so a head-on attack won't be possible. Air Forces, cannons, and transport units will all deploy. The ground troops and Air Raiders will target these large transports, and the Air Raiders will also maintain contact with the support squads. Good luck!",
+    "JA": "敵の大型輸送船が港湾地帯に飛来。巨大生物を投下し続けています。ただちに阻止する必要がありますが……大型輸送船は多数の護衛部隊に守られており、うかつな攻撃はできません。ですが、空軍、砲兵、輸送部隊による支援準備が整いました。エアレイダーを含む地上部隊によって、大型輸送船を撃破します。これより作戦を開始。エアレイダーは支援部隊と連携をとり、敵を撃破してください。",
+    "KR": "A large enemy fleet is at the coast, dropping giant insects. The transports are protected by numerous defense squads, so a head-on attack won't be possible. Air Forces, cannons, and transport units will all deploy. The ground troops and Air Raiders will target these large transports, and the Air Raiders will also maintain contact with the support squads. Good luck!",
+    "SC": "A large enemy fleet is at the coast, dropping giant insects. The transports are protected by numerous defense squads, so a head-on attack won't be possible. Air Forces, cannons, and transport units will all deploy. The ground troops and Air Raiders will target these large transports, and the Air Raiders will also maintain contact with the support squads. Good luck!"
+   },
+   "sha": {
+    "MISSION.BVM": "4a3c0fe0d5601ce11f8e499bde9fe41196709e975c6e5cb3924b653101aa380c",
+    "MISSION.RMPA": "c37be660d85828afeb233991e4fb13ef5f4e428a7670b3dfe951644a4fd0fabf"
+   }
+  },
+  {
+   "id": "M144",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Bug King",
+    "EN": "Bug King",
+    "JA": "魔蟲の王",
+    "KR": "Bug King",
+    "SC": "Bug King"
+   },
+   "brief": {
+    "CN": "Spider-type insects have infiltrated the city, creating panic amongst the residents. Deploy and assist.",
+    "EN": "Spider-type insects have infiltrated the city, creating panic amongst the residents. Deploy and assist.",
+    "JA": "蜘蛛型巨大生物が市街地に侵入しました。街はパニック状態に陥っています。ただちに現地に向かい殲滅作戦に参加してください。",
+    "KR": "Spider-type insects have infiltrated the city, creating panic amongst the residents. Deploy and assist.",
+    "SC": "Spider-type insects have infiltrated the city, creating panic amongst the residents. Deploy and assist."
+   },
+   "sha": {
+    "MISSION.BVM": "5fc1b46ef57e0deedde490cab1d981d0f7e3014f37ccd724b56e0f7779e15485",
+    "MISSION.RMPA": "75e317f5edf27b117657bc54a5a9536d727e0ed629edb230f4382df3da44ac58"
+   }
+  },
+  {
+   "id": "M602",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Crazy Skies",
+    "EN": "Crazy Skies",
+    "JA": "狂える空",
+    "KR": "Crazy Skies",
+    "SC": "Crazy Skies"
+   },
+   "brief": {
+    "CN": "The Earth Eaters are spreading across the globe, leaving charred cities in their wake. The damage they've caused is incalculable. We must face the threat that they will soon completely surround us. But they can be defeated before that happens! Combat has already begun in many locations, and we're to follow suit in our own area. Ground troops should attack the turrets and Earth Eaters alike. Godspeed to all!",
+    "EN": "The Earth Eaters are spreading across the globe, leaving charred cities in their wake. The damage they've caused is incalculable. We must face the threat that they will soon completely surround us. But they can be defeated before that happens! Combat has already begun in many locations, and we're to follow suit in our own area. Ground troops should attack the turrets and Earth Eaters alike. Godspeed to all!",
+    "JA": "アースイーターは世界各地に広がり続けています。すでに多くの大都市が壊滅。被害は想像を絶しています。信じられないことですが、このままでは本当に地球は覆いつくされてしまいます。もはや文明崩壊も時間の問題です。今すぐにアースイーターを破壊しなければなりません。すでに各地で攻撃作戦が開始されています。我々はこの地に出現したアースイーターを攻撃。撃沈します。地上部隊は下部の砲台を破壊し、アースイーターに損傷を与えてください。各員の健闘を祈ります。",
+    "KR": "The Earth Eaters are spreading across the globe, leaving charred cities in their wake. The damage they've caused is incalculable. We must face the threat that they will soon completely surround us. But they can be defeated before that happens! Combat has already begun in many locations, and we're to follow suit in our own area. Ground troops should attack the turrets and Earth Eaters alike. Godspeed to all!",
+    "SC": "The Earth Eaters are spreading across the globe, leaving charred cities in their wake. The damage they've caused is incalculable. We must face the threat that they will soon completely surround us. But they can be defeated before that happens! Combat has already begun in many locations, and we're to follow suit in our own area. Ground troops should attack the turrets and Earth Eaters alike. Godspeed to all!"
+   },
+   "sha": {
+    "MISSION.BVM": "ae4bed3e67c3d4b62c84dec8115ec63771f261c7a352f7c7c3b3f3626a90f9f0",
+    "MISSION.RMPA": "4bbba624a2419c32b31a1a120e8ffacba44b8ef70f9339036240c4c8b392b9d7"
+   }
+  },
+  {
+   "id": "M306",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "The Fleet Below",
+    "EN": "The Fleet Below",
+    "JA": "眼下の船団",
+    "KR": "The Fleet Below",
+    "SC": "The Fleet Below"
+   },
+   "brief": {
+    "CN": "Ravager transport ships in the mountain are making giant insect drops, and the insects are headed for the city. If this problem isn't squashed right here and now, they'll spread their terror far and wide. We must engage them immediately!",
+    "EN": "Ravager transport ships in the mountain are making giant insect drops, and the insects are headed for the city. If this problem isn't squashed right here and now, they'll spread their terror far and wide. We must engage them immediately!",
+    "JA": "山岳部でフォーリナーの輸送船を確認。巨大生物を投下しているようです。投下された巨大生物は、すでに移動を開始。一部は市街地に向かっているとのことです。このまま輸送船を放置すれば被害は広がり続けるでしょう。ただちに撃墜作戦を開始します。",
+    "KR": "Ravager transport ships in the mountain are making giant insect drops, and the insects are headed for the city. If this problem isn't squashed right here and now, they'll spread their terror far and wide. We must engage them immediately!",
+    "SC": "Ravager transport ships in the mountain are making giant insect drops, and the insects are headed for the city. If this problem isn't squashed right here and now, they'll spread their terror far and wide. We must engage them immediately!"
+   },
+   "sha": {
+    "MISSION.BVM": "ce7f0d0de3225f3f6ae6a3d22f8c98d1d79257663ae07db3aebe448fcccd7b47",
+    "MISSION.RMPA": "ba353ea4ad2ae2f5c8887364e8546345f0c923eaba3d88ffb0e8763b39448418"
+   }
+  },
+  {
+   "id": "M162",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Ill Omen",
+    "EN": "Ill Omen",
+    "JA": "滅びの予兆",
+    "KR": "Ill Omen",
+    "SC": "Ill Omen"
+   },
+   "brief": {
+    "CN": "The transport ships we shot down managed to drop a large number of insects, and they're now all over the city. We need to conduct a thorough search and destroy operation. Success can only be achieved by completely annihilating the giant insects.",
+    "EN": "The transport ships we shot down managed to drop a large number of insects, and they're now all over the city. We need to conduct a thorough search and destroy operation. Success can only be achieved by completely annihilating the giant insects.",
+    "JA": "前作戦で撃墜した輸送船は、多数の巨大生物を投下していました。その一部が市街地に侵入。被害が広がっています。ただちに現地に向かい、巨大生物を掃討しなければなりません。輸送船はすでに破壊しました。後は一定数の巨大生物を倒せば任務完了です。",
+    "KR": "The transport ships we shot down managed to drop a large number of insects, and they're now all over the city. We need to conduct a thorough search and destroy operation. Success can only be achieved by completely annihilating the giant insects.",
+    "SC": "The transport ships we shot down managed to drop a large number of insects, and they're now all over the city. We need to conduct a thorough search and destroy operation. Success can only be achieved by completely annihilating the giant insects."
+   },
+   "sha": {
+    "MISSION.BVM": "e4eeed32f1aba92db6d893faf842356cb857ef66af5c35d97ec34d05c67bc7fd",
+    "MISSION.RMPA": "66c633cf5e92b0539d164774e78b1ded776667893c0d9e44d766964db86296d9"
+   }
+  },
+  {
+   "id": "M164",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "City of Horror",
+    "EN": "City of Horror",
+    "JA": "竜の舞う街",
+    "KR": "City of Horror",
+    "SC": "City of Horror"
+   },
+   "brief": {
+    "CN": "A group of dragons is attacking civilians indiscriminately. Proceed to the location on a rescue mission. The dragons have massive combat capability, far beyond that of the giant insects we've encountered thus far. They are formidable foes, but we won't be deterred! Prepare to deploy!",
+    "EN": "A group of dragons is attacking civilians indiscriminately. Proceed to the location on a rescue mission. The dragons have massive combat capability, far beyond that of the giant insects we've encountered thus far. They are formidable foes, but we won't be deterred! Prepare to deploy!",
+    "JA": "ドラゴンの群れが市街地上空に飛来。人々を襲っています。ただちに救援に向かってください。ドラゴンは、これまで出現した巨大生物とは比べ物にならない高い戦闘能力を持っているようです。恐ろしい相手ですが……もはや我々には戦い抜くしか道はありません。各員の奮闘を期待します。",
+    "KR": "A group of dragons is attacking civilians indiscriminately. Proceed to the location on a rescue mission. The dragons have massive combat capability, far beyond that of the giant insects we've encountered thus far. They are formidable foes, but we won't be deterred! Prepare to deploy!",
+    "SC": "A group of dragons is attacking civilians indiscriminately. Proceed to the location on a rescue mission. The dragons have massive combat capability, far beyond that of the giant insects we've encountered thus far. They are formidable foes, but we won't be deterred! Prepare to deploy!"
+   },
+   "sha": {
+    "MISSION.BVM": "053f6cd8873605dccc07ea74ff5cec47ca157e34a99934851937d4463c6e1d3d",
+    "MISSION.RMPA": "d21988c6942bda6d905668ac4560e0c6940175c14afeb567e95c0ff59de6a348"
+   }
+  },
+  {
+   "id": "M601",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Mountains Ablaze",
+    "EN": "Mountains Ablaze",
+    "JA": "炎上する山",
+    "KR": "Mountains Ablaze",
+    "SC": "Mountains Ablaze"
+   },
+   "brief": {
+    "CN": "Ravager combat machines have been confirmed in the mountains and are protecting the dragon teams. We cannot allow their numbers to increase any further! The enemy are concentrating their attacks on our base, costing us the majority of our force and breaking off all contact with our squads. We're now isolated, with no hope for support. We have only ground troops to depend on!",
+    "EN": "Ravager combat machines have been confirmed in the mountains and are protecting the dragon teams. We cannot allow their numbers to increase any further! The enemy are concentrating their attacks on our base, costing us the majority of our force and breaking off all contact with our squads. We're now isolated, with no hope for support. We have only ground troops to depend on!",
+    "JA": "山岳部にフォーリナーの戦闘マシンが確認されました。おそらくドラゴンの群れを守っているようです。これ以上の増殖を許すわけにはいきません。ただちに殲滅作戦を開始します。なお、現在すべての支援部隊が壊滅的な被害を受け、連絡が途絶えている状態です。敵は我々の拠点を集中的に攻撃。ＥＤＦは戦力の大部分を失いました。今や我々は孤立しており、支援は期待できません。地上部隊だけで作戦を開始します。",
+    "KR": "Ravager combat machines have been confirmed in the mountains and are protecting the dragon teams. We cannot allow their numbers to increase any further! The enemy are concentrating their attacks on our base, costing us the majority of our force and breaking off all contact with our squads. We're now isolated, with no hope for support. We have only ground troops to depend on!",
+    "SC": "Ravager combat machines have been confirmed in the mountains and are protecting the dragon teams. We cannot allow their numbers to increase any further! The enemy are concentrating their attacks on our base, costing us the majority of our force and breaking off all contact with our squads. We're now isolated, with no hope for support. We have only ground troops to depend on!"
+   },
+   "sha": {
+    "MISSION.BVM": "9a2080ad0b1fa942ffc83be63e2ffee7ac4d6a36a1807ab303ed512eb41caf24",
+    "MISSION.RMPA": "4e856d6bd877a68d83373f8e4bb042a3568de44d656d6ed53c7b65794506f699"
+   }
+  },
+  {
+   "id": "M308",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Breaking Through",
+    "EN": "Breaking Through",
+    "JA": "敵中突破",
+    "KR": "Breaking Through",
+    "SC": "Breaking Through"
+   },
+   "brief": {
+    "CN": "A large number of Retiarius have surrounded the city with a web and are slowly making it their nest. We've sent an assault squad to rescue the civilians who could not evacuate, and I want Storm Team to support them.",
+    "EN": "A large number of Retiarius have surrounded the city with a web and are slowly making it their nest. We've sent an assault squad to rescue the civilians who could not evacuate, and I want Storm Team to support them.",
+    "JA": "市街地に多数のレタリウスが侵入。街はネットで覆われ、さながらレタリウスの巣と化しています。逃げ遅れた市民を救出するため、突入部隊が編成されました。ただちに作戦を開始します。ストームチームは突入部隊を援護してください。",
+    "KR": "A large number of Retiarius have surrounded the city with a web and are slowly making it their nest. We've sent an assault squad to rescue the civilians who could not evacuate, and I want Storm Team to support them.",
+    "SC": "A large number of Retiarius have surrounded the city with a web and are slowly making it their nest. We've sent an assault squad to rescue the civilians who could not evacuate, and I want Storm Team to support them."
+   },
+   "sha": {
+    "MISSION.BVM": "3517b8f117886ec658790034ccdb0f798b7457677d0cd9be4b071d39199f61ca",
+    "MISSION.RMPA": "5fbdcea32e64ff48537dda64975c932271b645b4446b8dcb558090e6e2529497"
+   }
+  },
+  {
+   "id": "M140",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Bug Tower",
+    "EN": "Bug Tower",
+    "JA": "飛蟲の塔",
+    "KR": "Bug Tower",
+    "SC": "Bug Tower"
+   },
+   "brief": {
+    "CN": "This is rather surprising info: We've confirmed an enemy nest in the mountains. It appears to be home to countless flying creatures. Head out and investigate.",
+    "EN": "This is rather surprising info: We've confirmed an enemy nest in the mountains. It appears to be home to countless flying creatures. Head out and investigate.",
+    "JA": "驚くべき情報です。山岳部に巨大生物の巣が発見されました。おそらく飛行型巨大生物の巣だと思われます。詳細は不明。ただちに現地に向かってください。",
+    "KR": "This is rather surprising info: We've confirmed an enemy nest in the mountains. It appears to be home to countless flying creatures. Head out and investigate.",
+    "SC": "This is rather surprising info: We've confirmed an enemy nest in the mountains. It appears to be home to countless flying creatures. Head out and investigate."
+   },
+   "sha": {
+    "MISSION.BVM": "6c655208c63bab31fd2dd523bca2ecfbf639a5b09dfc2bd6334907eb4f49a70d",
+    "MISSION.RMPA": "fe39bde38637b60c85d9664e2db23ab696bdbeb20d5dde9b7e35d5a017787306"
+   }
+  },
+  {
+   "id": "M134",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Fortress Attack",
+    "EN": "Fortress Attack",
+    "JA": "重装要塞追撃戦",
+    "KR": "Fortress Attack",
+    "SC": "Fortress Attack"
+   },
+   "brief": {
+    "CN": "We failed to destroy the quadruped fortress, so now we will attempt to change its route. It is currently nearing our defense perimeter. This fortress is flanked by Hectors bearing particle stream cannons, and its armor is too much even for our Grind Busters. We'll have to attack its weak point, which can only be achieved with ground troops. If we fail, the city will be destroyed. Move out, and good luck!",
+    "EN": "We failed to destroy the quadruped fortress, so now we will attempt to change its route. It is currently nearing our defense perimeter. This fortress is flanked by Hectors bearing particle stream cannons, and its armor is too much even for our Grind Busters. We'll have to attack its weak point, which can only be achieved with ground troops. If we fail, the city will be destroyed. Move out, and good luck!",
+    "JA": "先に撃破に失敗した四足歩行要塞が進路を変更。再び我々の防衛エリアに接近中です。情報によると、この歩行要塞は強化型とのこと。その装甲は、グラインドバスターをはじき返すほどです。もはや弱点を狙うしか手がありません。それができるのは地上部隊のみ。危険な任務ですが、このままでは市街地は壊滅です。ただちに作戦を開始します。\n！！　さらに今入った情報によると、この歩行要塞は粒子ストリーム砲を装備した強力なヘクトルを搭載しているようです。十分に注意してください。",
+    "KR": "We failed to destroy the quadruped fortress, so now we will attempt to change its route. It is currently nearing our defense perimeter. This fortress is flanked by Hectors bearing particle stream cannons, and its armor is too much even for our Grind Busters. We'll have to attack its weak point, which can only be achieved with ground troops. If we fail, the city will be destroyed. Move out, and good luck!",
+    "SC": "We failed to destroy the quadruped fortress, so now we will attempt to change its route. It is currently nearing our defense perimeter. This fortress is flanked by Hectors bearing particle stream cannons, and its armor is too much even for our Grind Busters. We'll have to attack its weak point, which can only be achieved with ground troops. If we fail, the city will be destroyed. Move out, and good luck!"
+   },
+   "sha": {
+    "MISSION.BVM": "f704f95bcd1229f735764daaf55056cb0303f2b79958ebdf86819e34e83eb2cc",
+    "MISSION.RMPA": "e948aceaa761edfbf19e2e7a94b96d3bdcdeeca7ed7573251d4a5bf52f6414d4"
+   }
+  },
+  {
+   "id": "M517",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Mountain Liberation",
+    "EN": "Mountain Liberation",
+    "JA": "山岳解放戦",
+    "KR": "Mountain Liberation",
+    "SC": "Mountain Liberation"
+   },
+   "brief": {
+    "CN": "Giant insects are gathering in the mountains over a wide area -- an extremely disturbing number of them. We'll engage immediately. Dragon-types are also confirmed. Good luck!",
+    "EN": "Giant insects are gathering in the mountains over a wide area -- an extremely disturbing number of them. We'll engage immediately. Dragon-types are also confirmed. Good luck!",
+    "JA": "山岳地帯に巨大生物が集結中。かなり広範囲に分散していますが、驚くべき大群です。ただちに殲滅作戦を開始。なお、ドラゴン型の姿も確認されています。十分に注意してください。",
+    "KR": "Giant insects are gathering in the mountains over a wide area -- an extremely disturbing number of them. We'll engage immediately. Dragon-types are also confirmed. Good luck!",
+    "SC": "Giant insects are gathering in the mountains over a wide area -- an extremely disturbing number of them. We'll engage immediately. Dragon-types are also confirmed. Good luck!"
+   },
+   "sha": {
+    "MISSION.BVM": "076c5f5ace1ac9d3e4c92a0735714eeb0aaab46e7e8d4dcf3eec7233e9fcba12",
+    "MISSION.RMPA": "701ad1b786b8fca841fc8837b75738fe01a748d1510205c92ceb5bba92898c93"
+   }
+  },
+  {
+   "id": "MP004",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Battle of Giants",
+    "EN": "Battle of Giants",
+    "JA": "巨人たちの戦場",
+    "KR": "Battle of Giants",
+    "SC": "Battle of Giants"
+   },
+   "brief": {
+    "CN": "It seems Erginus had friends and family. We've spotted over a dozen of them, and so we've been herding them toward open ground. Our plan is to deploy numerous Balams at once and destroy the Erginuses in one fierce battle. We're sending Ranger units as well. Balams are effective against Erginus, but they can't deal with giant insects, so it's up to the Rangers to eliminate those threats.",
+    "EN": "It seems Erginus had friends and family. We've spotted over a dozen of them, and so we've been herding them toward open ground. Our plan is to deploy numerous Balams at once and destroy the Erginuses in one fierce battle. We're sending Ranger units as well. Balams are effective against Erginus, but they can't deal with giant insects, so it's up to the Rangers to eliminate those threats.",
+    "JA": "現在までに確認されたエルギヌスは約２０体。このうち１０体のエルギヌスを平原に誘導。多数のバラムを投入して、一気に殲滅する作戦です。凄まじい戦闘となることが予想されます。歩兵部隊も本作戦に参加。バラムチームを援護してください。バラムはエルギヌスに対して有効な兵器ですが、巨大生物の群れには対抗できません。歩兵部隊の主な任務は巨大生物の殲滅です。",
+    "KR": "It seems Erginus had friends and family. We've spotted over a dozen of them, and so we've been herding them toward open ground. Our plan is to deploy numerous Balams at once and destroy the Erginuses in one fierce battle. We're sending Ranger units as well. Balams are effective against Erginus, but they can't deal with giant insects, so it's up to the Rangers to eliminate those threats.",
+    "SC": "It seems Erginus had friends and family. We've spotted over a dozen of them, and so we've been herding them toward open ground. Our plan is to deploy numerous Balams at once and destroy the Erginuses in one fierce battle. We're sending Ranger units as well. Balams are effective against Erginus, but they can't deal with giant insects, so it's up to the Rangers to eliminate those threats."
+   },
+   "sha": {
+    "MISSION.BVM": "dc5b65aebf4ed49c8fc616bbf985af9a21b53ad8413ac4c2d79cfef02e7aa3a0",
+    "MISSION.RMPA": "85e240e68b916204af62d21bb0f0fd25e2b40227341959c742a9a56936cabb34"
+   }
+  },
+  {
+   "id": "M305",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Sniper Attack",
+    "EN": "Sniper Attack",
+    "JA": "高所狙撃戦",
+    "KR": "Sniper Attack",
+    "SC": "Sniper Attack"
+   },
+   "brief": {
+    "CN": "Large transport ships are dropping drones, and the Wing Divers aren't as effective against flying enemies. We'll have to destroy these giant transport ships from above! Storm Team should equip sniper rifles for the task. Deploy to the top of the buildings, and a defense squad will cover you. Just don't leave your station, even if you encounter resistance! If you're successful, we'll drop a Wing Diver team to kill any remaining giant insects. ",
+    "EN": "Large transport ships are dropping drones, and the Wing Divers aren't as effective against flying enemies. We'll have to destroy these giant transport ships from above! Storm Team should equip sniper rifles for the task. Deploy to the top of the buildings, and a defense squad will cover you. Just don't leave your station, even if you encounter resistance! If you're successful, we'll drop a Wing Diver team to kill any remaining giant insects. ",
+    "JA": "大型輸送船が飛行ドローンを投下しています。飛行する敵が相手では、ウイングダイバーチームはその力を発揮できません。そのため、高所からの狙撃で大型輸送船の破壊を試みます。ストームチームはスナイパー装備で出撃。輸送船を撃破してください。狙撃ポイントはとあるビルの屋上です。狙撃中の安全を確保するため、護衛部隊が同行します。なお、目標はあくまでも大型輸送船の破壊です。もし巨大生物に遭遇しても絶対に持ち場を離れないでください。輸送船の破壊に成功すれば、ただちにウイングダイバーチームを投入。残った巨大生物を殲滅する計画です。",
+    "KR": "Large transport ships are dropping drones, and the Wing Divers aren't as effective against flying enemies. We'll have to destroy these giant transport ships from above! Storm Team should equip sniper rifles for the task. Deploy to the top of the buildings, and a defense squad will cover you. Just don't leave your station, even if you encounter resistance! If you're successful, we'll drop a Wing Diver team to kill any remaining giant insects. ",
+    "SC": "Large transport ships are dropping drones, and the Wing Divers aren't as effective against flying enemies. We'll have to destroy these giant transport ships from above! Storm Team should equip sniper rifles for the task. Deploy to the top of the buildings, and a defense squad will cover you. Just don't leave your station, even if you encounter resistance! If you're successful, we'll drop a Wing Diver team to kill any remaining giant insects. "
+   },
+   "sha": {
+    "MISSION.BVM": "54e55acbb33b30b43140b5c1824a18d4a96927c7be312816fb52d0553489fc46",
+    "MISSION.RMPA": "db880833006ea27c5afc2af87842657ab914b944c1758d638110688cb85e11a2"
+   }
+  },
+  {
+   "id": "M414",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Towering Beast",
+    "EN": "Towering Beast",
+    "JA": "そびえる機獣",
+    "KR": "Towering Beast",
+    "SC": "Towering Beast"
+   },
+   "brief": {
+    "CN": "The Ravagers' combat squads have invaded the city. They appear to consist of both Deroys and Hectors. Go with the Ranger team and enga-- Ah, wait; we've just received new intelligence! It's an enhanced model of the Deroy, with longer legs and multiple laser cannons. Recommended course of action is to attack the legs first, then destroy the lasers.",
+    "EN": "The Ravagers' combat squads have invaded the city. They appear to consist of both Deroys and Hectors. Go with the Ranger team and enga-- Ah, wait; we've just received new intelligence! It's an enhanced model of the Deroy, with longer legs and multiple laser cannons. Recommended course of action is to attack the legs first, then destroy the lasers.",
+    "JA": "フォーリナーの戦闘部隊が市街地に侵入しました。ディロイ、ヘクトル、などの混成部隊のようです。レンジャーチームと共に現地へ向かい、迎撃作戦に参加してください。\n！？　今、新たな情報が入りました。どうやらディロイは強化型のようです。これまで確認されたタイプに比べ、脚部が長く、多数のレーザー砲を装備しているとのこと。まず脚部を攻撃し、レーザー砲を破壊してください。",
+    "KR": "The Ravagers' combat squads have invaded the city. They appear to consist of both Deroys and Hectors. Go with the Ranger team and enga-- Ah, wait; we've just received new intelligence! It's an enhanced model of the Deroy, with longer legs and multiple laser cannons. Recommended course of action is to attack the legs first, then destroy the lasers.",
+    "SC": "The Ravagers' combat squads have invaded the city. They appear to consist of both Deroys and Hectors. Go with the Ranger team and enga-- Ah, wait; we've just received new intelligence! It's an enhanced model of the Deroy, with longer legs and multiple laser cannons. Recommended course of action is to attack the legs first, then destroy the lasers."
+   },
+   "sha": {
+    "MISSION.BVM": "cc87b66c9c84f12d9ec6e2e507aca9b51be80a9dd3d7ad9a531f7e38ae118488",
+    "MISSION.RMPA": "8379b6274b74b4677665691e6565df71454b1fbb456ab27fc4cdce8c3ddaf626"
+   }
+  },
+  {
+   "id": "M417",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Teeth of the Universe",
+    "EN": "Teeth of the Universe",
+    "JA": "天地の牙",
+    "KR": "Teeth of the Universe",
+    "SC": "Teeth of the Universe"
+   },
+   "brief": {
+    "CN": "At least one large transport ship has been confirmed to be dropping dragons, and the Ravagers have the power to manipulate even them. We have to act decisively! This will be a dangerous mission, but we need your immediate assistance.",
+    "EN": "At least one large transport ship has been confirmed to be dropping dragons, and the Ravagers have the power to manipulate even them. We have to act decisively! This will be a dangerous mission, but we need your immediate assistance.",
+    "JA": "大型輸送船を確認。ただちに撃墜作戦を開始します。なお、この輸送船はドラゴン型を投下しているようです。ついにフォーリナーはドラゴン型をすら自由に操る力を得たのです。このまま放置するわけにはいきません。危険な任務ですが、ただちに出撃願います。",
+    "KR": "At least one large transport ship has been confirmed to be dropping dragons, and the Ravagers have the power to manipulate even them. We have to act decisively! This will be a dangerous mission, but we need your immediate assistance.",
+    "SC": "At least one large transport ship has been confirmed to be dropping dragons, and the Ravagers have the power to manipulate even them. We have to act decisively! This will be a dangerous mission, but we need your immediate assistance."
+   },
+   "sha": {
+    "MISSION.BVM": "793541520b09c6bc9f088a244659a68bad20fa8a33af3c2a590f637121e2f5e1",
+    "MISSION.RMPA": "351e424ee48b98b73436c131c8f039857a0fb7f6f2bcb26ba7d869eeb6c9c437"
+   }
+  },
+  {
+   "id": "M007",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Giant Ship",
+    "EN": "Giant Ship",
+    "JA": "巨神船",
+    "KR": "Giant Ship",
+    "SC": "Giant Ship"
+   },
+   "brief": {
+    "CN": "The Ravagers' giant battleship is approaching the city. We must intercept it before it can cause untold damage. We'll meet them on the battlefield and show them what-for!",
+    "EN": "The Ravagers' giant battleship is approaching the city. We must intercept it before it can cause untold damage. We'll meet them on the battlefield and show them what-for!",
+    "JA": "フォーリナーの巨大戦艦が市街地に接近中。このままでは計り知れない被害が出ます。なんとしても巨大戦艦の侵攻を止めねばなりません。これより迎撃作戦を開始します。",
+    "KR": "The Ravagers' giant battleship is approaching the city. We must intercept it before it can cause untold damage. We'll meet them on the battlefield and show them what-for!",
+    "SC": "The Ravagers' giant battleship is approaching the city. We must intercept it before it can cause untold damage. We'll meet them on the battlefield and show them what-for!"
+   },
+   "sha": {
+    "MISSION.BVM": "ff8c7678837570cfc86019be48e17474789f4ea061bf6cd9e46a6a46d81dcf95",
+    "MISSION.RMPA": "45d738f850e94096473bc45ca76a6c1a15cbea0f415b48225ae7d34fe29aaaf3"
+   }
+  },
+  {
+   "id": "M145",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Spearhead",
+    "EN": "Spearhead",
+    "JA": "強行突入",
+    "KR": "Spearhead",
+    "SC": "Spearhead"
+   },
+   "brief": {
+    "CN": "We have destroyed half of the giant insects that have gathered in the mountains. However, intel reports that the Ravagers have dropped Shield Bearers, meaning there's now a shield screen protecting the remaining giant insects. We must go to the mountains again and wipe out the rest of those foul creatures!",
+    "EN": "We have destroyed half of the giant insects that have gathered in the mountains. However, intel reports that the Ravagers have dropped Shield Bearers, meaning there's now a shield screen protecting the remaining giant insects. We must go to the mountains again and wipe out the rest of those foul creatures!",
+    "JA": "山岳地帯に集結した巨大生物の半数を撃破しました。いえ……地上部隊による攻撃、そして空爆がおこなわれたにも関わらず、まだ半数が残っているというべきでしょう。フォーリナーは山岳部にシールドベアラーを投下。防御スクリーンが巨大生物を守っているようです。山岳部に再突入。シールドベアラーごと巨大生物を殲滅します。",
+    "KR": "We have destroyed half of the giant insects that have gathered in the mountains. However, intel reports that the Ravagers have dropped Shield Bearers, meaning there's now a shield screen protecting the remaining giant insects. We must go to the mountains again and wipe out the rest of those foul creatures!",
+    "SC": "We have destroyed half of the giant insects that have gathered in the mountains. However, intel reports that the Ravagers have dropped Shield Bearers, meaning there's now a shield screen protecting the remaining giant insects. We must go to the mountains again and wipe out the rest of those foul creatures!"
+   },
+   "sha": {
+    "MISSION.BVM": "e3487ff679fc023f3e4722f5524419241fabeff13997bf0a1fe1d4c75c275d6b",
+    "MISSION.RMPA": "9f45e1081899dcef0ddb1de6755c733bbcb97476f09d8bfac1016bc5d81f5965"
+   }
+  },
+  {
+   "id": "M141",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Tower Siege",
+    "EN": "Tower Siege",
+    "JA": "巨塔破壊作戦",
+    "KR": "Tower Siege",
+    "SC": "Tower Siege"
+   },
+   "brief": {
+    "CN": "The damage from the flying insects is spreading. According to reports, the flying insects are coming from their nest in the mountains. We need to make a stand! Move out and completely destroy the nest.",
+    "EN": "The damage from the flying insects is spreading. According to reports, the flying insects are coming from their nest in the mountains. We need to make a stand! Move out and completely destroy the nest.",
+    "JA": "飛行型巨大生物による被害が拡大しています。報告によると、山岳部にある巣から次々と飛行型巨大生物が飛び立っているとのこと。これ以上、巣を放置するわけにはいきません。ただちに作戦を開始。今度こそ巣を完全に破壊します。",
+    "KR": "The damage from the flying insects is spreading. According to reports, the flying insects are coming from their nest in the mountains. We need to make a stand! Move out and completely destroy the nest.",
+    "SC": "The damage from the flying insects is spreading. According to reports, the flying insects are coming from their nest in the mountains. We need to make a stand! Move out and completely destroy the nest."
+   },
+   "sha": {
+    "MISSION.BVM": "98107036c474518a1e9aeebc73d27ad4a768cca4346b0c33326207ccee0d45f8",
+    "MISSION.RMPA": "1dd35bf4d86d69273fd9168202097c4408f31ba36dace5735ce95574c3a36556"
+   }
+  },
+  {
+   "id": "M146",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Den of Thieves",
+    "EN": "Den of Thieves",
+    "JA": "闇の魔窟",
+    "KR": "Den of Thieves",
+    "SC": "Den of Thieves"
+   },
+   "brief": {
+    "CN": "The results were not as we anticipated. The tower is only part of the nest -- the rest of it extends underground, so we must attack there too or the tower will be rebuilt and any chance we had to completely destroy their nest will be gone! This is our one and only opportunity. We'll begin our infiltration right away.",
+    "EN": "The results were not as we anticipated. The tower is only part of the nest -- the rest of it extends underground, so we must attack there too or the tower will be rebuilt and any chance we had to completely destroy their nest will be gone! This is our one and only opportunity. We'll begin our infiltration right away.",
+    "JA": "予想外の結果となりました。塔のようにそびえ立っていたのは、巣の一部分にすぎないようです。飛行型巨大生物の巣は、地底まで広がっています。完全に破壊するためには、地底への進撃が必要です。このまま時間が経過すれば、塔が再建され、地底突入は不可能になるでしょう。チャンスは今しかありません。地底への突入作戦を開始します。",
+    "KR": "The results were not as we anticipated. The tower is only part of the nest -- the rest of it extends underground, so we must attack there too or the tower will be rebuilt and any chance we had to completely destroy their nest will be gone! This is our one and only opportunity. We'll begin our infiltration right away.",
+    "SC": "The results were not as we anticipated. The tower is only part of the nest -- the rest of it extends underground, so we must attack there too or the tower will be rebuilt and any chance we had to completely destroy their nest will be gone! This is our one and only opportunity. We'll begin our infiltration right away."
+   },
+   "sha": {
+    "MISSION.BVM": "629ee47169887ad32fc0b06f46226926101e436219693882dafd6d53d2732566",
+    "MISSION.RMPA": "e4f2dd96089b1a7c6930040d2fcfb77bd2ff5e26c96360259665a8c2e2caf98b"
+   }
+  },
+  {
+   "id": "M158",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Death Queen",
+    "EN": "Death Queen",
+    "JA": "殺戮の女王",
+    "KR": "Death Queen",
+    "SC": "Death Queen"
+   },
+   "brief": {
+    "CN": "We have arrived in the depths of the nest. The queen is somewhere in this area and may have evolved into something stronger than we can even imagine. Intel has named her the 'Death Queen.' Now that we're close, it's time we make our attack. Good luck!",
+    "EN": "We have arrived in the depths of the nest. The queen is somewhere in this area and may have evolved into something stronger than we can even imagine. Intel has named her the 'Death Queen.' Now that we're close, it's time we make our attack. Good luck!",
+    "JA": "巣穴の深部に到着しました。このエリアに巨大生物の女王がいるはずです。しかも、女王は進化し、より強力になっている可能性があります。我々は、この未知の生物をデスクイーンと命名しました。作戦目標はデスクイーンの発見、そして撃破です。健闘を祈ります。",
+    "KR": "We have arrived in the depths of the nest. The queen is somewhere in this area and may have evolved into something stronger than we can even imagine. Intel has named her the 'Death Queen.' Now that we're close, it's time we make our attack. Good luck!",
+    "SC": "We have arrived in the depths of the nest. The queen is somewhere in this area and may have evolved into something stronger than we can even imagine. Intel has named her the 'Death Queen.' Now that we're close, it's time we make our attack. Good luck!"
+   },
+   "sha": {
+    "MISSION.BVM": "cca61ba0619a8d3909ba8145e8133ddd7802b690e126571b7d00dfeaf85c61ea",
+    "MISSION.RMPA": "c947e165d8cc715434e4a0705ca0b222b7954c8c660de5b628138131c05c097b"
+   }
+  },
+  {
+   "id": "M412",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Machine Squad",
+    "EN": "Machine Squad",
+    "JA": "機獣師団",
+    "KR": "Machine Squad",
+    "SC": "Machine Squad"
+   },
+   "brief": {
+    "CN": "The large enemy transport ships are approaching from the coast and must plan to drop Deroys onto the land. We have to defeat them here! The only targets are the Deroys; the transport ships themselves would divert too much firepower. Due to the size of the Deroys, moving them seems to be problematic for the enemy, so the ships are only dropping smaller versions. Small or no, however, they have multiple lasers on their legs, so be careful, and good luck!",
+    "EN": "The large enemy transport ships are approaching from the coast and must plan to drop Deroys onto the land. We have to defeat them here! The only targets are the Deroys; the transport ships themselves would divert too much firepower. Due to the size of the Deroys, moving them seems to be problematic for the enemy, so the ships are only dropping smaller versions. Small or no, however, they have multiple lasers on their legs, so be careful, and good luck!",
+    "JA": "敵大型輸送船が海上から港湾地帯に侵入。戦闘マシンディロイを投下するための上陸だと思われます。ディロイを市街地に入れるわけにはいきません。ここで破壊します。作戦目標はディロイの破壊のみ。大型輸送船を攻撃する必要はありません。なお、ディロイは大きすぎて運搬が難しいらしく、大型輸送船から投下されているのは小型タイプとのことです。ですが、小さいとはいえ、脚部に多数のレーザー砲を確認しています。十分に注意してください。",
+    "KR": "The large enemy transport ships are approaching from the coast and must plan to drop Deroys onto the land. We have to defeat them here! The only targets are the Deroys; the transport ships themselves would divert too much firepower. Due to the size of the Deroys, moving them seems to be problematic for the enemy, so the ships are only dropping smaller versions. Small or no, however, they have multiple lasers on their legs, so be careful, and good luck!",
+    "SC": "The large enemy transport ships are approaching from the coast and must plan to drop Deroys onto the land. We have to defeat them here! The only targets are the Deroys; the transport ships themselves would divert too much firepower. Due to the size of the Deroys, moving them seems to be problematic for the enemy, so the ships are only dropping smaller versions. Small or no, however, they have multiple lasers on their legs, so be careful, and good luck!"
+   },
+   "sha": {
+    "MISSION.BVM": "7ed400e38eb635a10a5858fb6c6cfedeca4549e560329da7e0d8b4f7215f29b8",
+    "MISSION.RMPA": "2f1c53fde9443763ef2c48e11c5bd7c90252ff91a1f8cf7a8dc93aa2a6a19b03"
+   }
+  },
+  {
+   "id": "M165",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Monster Party",
+    "EN": "Monster Party",
+    "JA": "竜の宴",
+    "KR": "Monster Party",
+    "SC": "Monster Party"
+   },
+   "brief": {
+    "CN": "The dragon swarm is approaching, and their numbers are staggering! We sent fighters to meet them, but they were wiped out in seconds, and the dragons are still approaching. We're now the only ones who can defend the city...",
+    "EN": "The dragon swarm is approaching, and their numbers are staggering! We sent fighters to meet them, but they were wiped out in seconds, and the dragons are still approaching. We're now the only ones who can defend the city...",
+    "JA": "ドラゴンの群れが接近中。……恐ろしい数です。ファイターが迎撃を試みましたが……わずか数分で全滅。ドラゴンは市街地に向かっています。\n…………。\nもはや街を守れるのは我々しかいません。ただちに作戦を開始します。",
+    "KR": "The dragon swarm is approaching, and their numbers are staggering! We sent fighters to meet them, but they were wiped out in seconds, and the dragons are still approaching. We're now the only ones who can defend the city...",
+    "SC": "The dragon swarm is approaching, and their numbers are staggering! We sent fighters to meet them, but they were wiped out in seconds, and the dragons are still approaching. We're now the only ones who can defend the city..."
+   },
+   "sha": {
+    "MISSION.BVM": "1bb95360a4f4aeb307bd6f8abcaa845b59530ce72c9931549c22a7a51e1d942e",
+    "MISSION.RMPA": "4f9858def8c4ba38c237fb03f668a6b1757497639e79a55bf9ee09220f4e8547"
+   }
+  },
+  {
+   "id": "M017",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Labyrinth of Light",
+    "EN": "Labyrinth of Light",
+    "JA": "光の迷宮",
+    "KR": "Labyrinth of Light",
+    "SC": "Labyrinth of Light"
+   },
+   "brief": {
+    "CN": "A large transport ship has arrived at the port. We attempted an attack, but the ship has seven shield screen generators to create a strong defense. We need to get past the shield screen and take down the ship. It won't be easy, but it's up to you. Good luck!",
+    "EN": "A large transport ship has arrived at the port. We attempted an attack, but the ship has seven shield screen generators to create a strong defense. We need to get past the shield screen and take down the ship. It won't be easy, but it's up to you. Good luck!",
+    "JA": "港湾地帯に大型輸送船が飛来。撃破作戦が試みられましたが、大型輸送船は７つの防御スクリーン発生装置を投下。周囲一帯を防御スクリーンで何重にも覆い、守りを固めているようです。これより作戦を開始。防御スクリーンをこえ、敵大型輸送船を撃破します。敵の防御は鉄壁です。十分に注意してください。",
+    "KR": "A large transport ship has arrived at the port. We attempted an attack, but the ship has seven shield screen generators to create a strong defense. We need to get past the shield screen and take down the ship. It won't be easy, but it's up to you. Good luck!",
+    "SC": "A large transport ship has arrived at the port. We attempted an attack, but the ship has seven shield screen generators to create a strong defense. We need to get past the shield screen and take down the ship. It won't be easy, but it's up to you. Good luck!"
+   },
+   "sha": {
+    "MISSION.BVM": "82955dc7c77309eec5c2ebf860163171cf371591ceea722119b27a177c260814",
+    "MISSION.RMPA": "8768f8aacbc0e39b1d1cc343e7789fc26331ac91f1fb870006ae765934eecaff"
+   }
+  },
+  {
+   "id": "M142",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "City Flaws",
+    "EN": "City Flaws",
+    "JA": "人都瓦解",
+    "KR": "City Flaws",
+    "SC": "City Flaws"
+   },
+   "brief": {
+    "CN": "A group of giant insects has invaded a residential area, and must be stopped. Our scout team has spotted flying insects and even a Death Queen in their midst, so be very careful!",
+    "EN": "A group of giant insects has invaded a residential area, and must be stopped. Our scout team has spotted flying insects and even a Death Queen in their midst, so be very careful!",
+    "JA": "巨大生物の群れが市街地に侵入しました。ただちに現地に向かってください。なお、スカウトの報告によると、飛行型巨大生物、そしてデスクイーンの姿が確認されているようです。十分に注意してください。",
+    "KR": "A group of giant insects has invaded a residential area, and must be stopped. Our scout team has spotted flying insects and even a Death Queen in their midst, so be very careful!",
+    "SC": "A group of giant insects has invaded a residential area, and must be stopped. Our scout team has spotted flying insects and even a Death Queen in their midst, so be very careful!"
+   },
+   "sha": {
+    "MISSION.BVM": "ca545917c7e0c7db27e4fd0ae90c81a876cdcb0719a8e74cd6a8072072e9af67",
+    "MISSION.RMPA": "87a43bf610b0b685540b0f5b630011106ca397a4bc46b3fdd91da41b57f18f5c"
+   }
+  },
+  {
+   "id": "M518",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Monster Camp",
+    "EN": "Monster Camp",
+    "JA": "竜撃陣",
+    "KR": "Monster Camp",
+    "SC": "Monster Camp"
+   },
+   "brief": {
+    "CN": "Multiple giant insects have been confirmed in the mountains. We must destroy them before they approach the city. Deploy and engage immediately!",
+    "EN": "Multiple giant insects have been confirmed in the mountains. We must destroy them before they approach the city. Deploy and engage immediately!",
+    "JA": "山岳地帯に多数の巨大生物を確認。市街地に移動する前に撃破する必要があります。ただちに戦闘準備を開始してください。これより地上部隊による巨大生物殲滅作戦を開始します。",
+    "KR": "Multiple giant insects have been confirmed in the mountains. We must destroy them before they approach the city. Deploy and engage immediately!",
+    "SC": "Multiple giant insects have been confirmed in the mountains. We must destroy them before they approach the city. Deploy and engage immediately!"
+   },
+   "sha": {
+    "MISSION.BVM": "65178d80e13b958a70152ee90ffec93e8655716603a61f830b6bbf1f9a7b28ee",
+    "MISSION.RMPA": "fa555252357ec30d8489679656a1d08cf02b7c12c54c8dcaf6384826b699a8ff"
+   }
+  },
+  {
+   "id": "M201",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Fallen Flagship",
+    "EN": "Fallen Flagship",
+    "JA": "墜ちた旗艦",
+    "KR": "Fallen Flagship",
+    "SC": "Fallen Flagship"
+   },
+   "brief": {
+    "CN": "The Ravagers' Brain has been found. Our aerial units tried to attack it, but the Earth Eaters intercepted them. It's now up to you. There are escorts all around the area, in anticipation of attacks. Destroy them, then take out that slimy cerebrum once and for all. Its weak point is its head, so use long-range weapons that can target its topmost point. The future of mankind depends on the success of this mission!",
+    "EN": "The Ravagers' Brain has been found. Our aerial units tried to attack it, but the Earth Eaters intercepted them. It's now up to you. There are escorts all around the area, in anticipation of attacks. Destroy them, then take out that slimy cerebrum once and for all. Its weak point is its head, so use long-range weapons that can target its topmost point. The future of mankind depends on the success of this mission!",
+    "JA": "ついにブレインを発見。しかし、空軍による攻撃はアースイーターに遮られ、失敗しました。これより地上部隊による攻撃を開始します。ブレイン周囲には地上からの攻撃にそなえて護衛部隊が配置されているようです。これを撃破し、ブレインを攻撃します。ブレインの弱点は上部です。射程の長い武器で上部を狙撃してください。この作戦に人類の未来がかかっています。各員の奮闘を期待します。",
+    "KR": "The Ravagers' Brain has been found. Our aerial units tried to attack it, but the Earth Eaters intercepted them. It's now up to you. There are escorts all around the area, in anticipation of attacks. Destroy them, then take out that slimy cerebrum once and for all. Its weak point is its head, so use long-range weapons that can target its topmost point. The future of mankind depends on the success of this mission!",
+    "SC": "The Ravagers' Brain has been found. Our aerial units tried to attack it, but the Earth Eaters intercepted them. It's now up to you. There are escorts all around the area, in anticipation of attacks. Destroy them, then take out that slimy cerebrum once and for all. Its weak point is its head, so use long-range weapons that can target its topmost point. The future of mankind depends on the success of this mission!"
+   },
+   "sha": {
+    "MISSION.BVM": "863e02ea5e0bcf55f78a21fd6b6490497b933a3d9500930034462a8bdfab6b06",
+    "MISSION.RMPA": "7dec47e16c3370b895c67241cd2a2fe6bdd3f66f380a7849d42f72feb950a376"
+   }
+  },
+  {
+   "id": "M304",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Heaven's Army",
+    "EN": "Heaven's Army",
+    "JA": "天の兵団",
+    "KR": "Heaven's Army",
+    "SC": "Heaven's Army"
+   },
+   "brief": {
+    "CN": "Three large transport ships have come to the residential area. No other enemies have been spotted. This is our chance to attack, since there's no visible fleet flanking the enemy. We'll deploy units with anti-air weapons and take them down!",
+    "EN": "Three large transport ships have come to the residential area. No other enemies have been spotted. This is our chance to attack, since there's no visible fleet flanking the enemy. We'll deploy units with anti-air weapons and take them down!",
+    "JA": "大型輸送船が市街地に飛来。３隻です。他に敵は確認できません。護衛部隊がいない今がチャンスです。対空装備の部隊を出動させ、撃墜作戦をおこないます。",
+    "KR": "Three large transport ships have come to the residential area. No other enemies have been spotted. This is our chance to attack, since there's no visible fleet flanking the enemy. We'll deploy units with anti-air weapons and take them down!",
+    "SC": "Three large transport ships have come to the residential area. No other enemies have been spotted. This is our chance to attack, since there's no visible fleet flanking the enemy. We'll deploy units with anti-air weapons and take them down!"
+   },
+   "sha": {
+    "MISSION.BVM": "2a4150a596540c9d35fea4877299bf77f329c195e576d9cfb30b92f7bf57cc6f",
+    "MISSION.RMPA": "e457627f69a187cafdca5be6a8de7cccb9c57754138b297f7475a2bc4b5431c4"
+   }
+  },
+  {
+   "id": "M138",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Encircling",
+    "EN": "Encircling",
+    "JA": "円陣",
+    "KR": "Encircling",
+    "SC": "Encircling"
+   },
+   "brief": {
+    "CN": "There are enemy transport ships hanging over the city, and the Air Force was unable to stop them. They're dropping giant insects, and we're being completely overrun. Perhaps they feel they've won the fight and are trying to finish us off? But we won't stand idly by on the eve of our destruction! All those who can fight, head out and engage! Attack the transport ships from the ground!",
+    "EN": "There are enemy transport ships hanging over the city, and the Air Force was unable to stop them. They're dropping giant insects, and we're being completely overrun. Perhaps they feel they've won the fight and are trying to finish us off? But we won't stand idly by on the eve of our destruction! All those who can fight, head out and engage! Attack the transport ships from the ground!",
+    "JA": "敵輸送船団が飛来。すでに空軍に阻止する力は残されておらず、市街地上空への侵入を許しました。輸送船団は巨大生物の投下を開始。もはや敵のなすがまま。壊滅を待つだけです。敵は人類との戦いに勝利し、掃討戦に入ろうとしているのでしょう。ですが、このまま滅ぼされるのを待つわけにはいきません。戦闘可能な部隊はただちに現地に向かってください。地上からの攻撃によって輸送船団を撃墜します。",
+    "KR": "There are enemy transport ships hanging over the city, and the Air Force was unable to stop them. They're dropping giant insects, and we're being completely overrun. Perhaps they feel they've won the fight and are trying to finish us off? But we won't stand idly by on the eve of our destruction! All those who can fight, head out and engage! Attack the transport ships from the ground!",
+    "SC": "There are enemy transport ships hanging over the city, and the Air Force was unable to stop them. They're dropping giant insects, and we're being completely overrun. Perhaps they feel they've won the fight and are trying to finish us off? But we won't stand idly by on the eve of our destruction! All those who can fight, head out and engage! Attack the transport ships from the ground!"
+   },
+   "sha": {
+    "MISSION.BVM": "22e003bbc085321328dd6c80d443e28d645b28685b48dd87e68303d6513811aa",
+    "MISSION.RMPA": "bd2d07c31ce80ae617f820677789ba0cd417a46bfdf3d7c76eaa0af9fa785a19"
+   }
+  },
+  {
+   "id": "M166",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Divine",
+    "EN": "Divine",
+    "JA": "神竜",
+    "KR": "Divine",
+    "SC": "Divine"
+   },
+   "brief": {
+    "CN": "A group of dragons has arrived in the city, and we've lost contact with the squad that engaged them. Take their place and clear out the dragons!",
+    "EN": "A group of dragons has arrived in the city, and we've lost contact with the squad that engaged them. Take their place and clear out the dragons!",
+    "JA": "ドラゴンの群れが市街地上空に飛来。応戦した部隊からの連絡が途絶えました。ただちに現地へ向かい、ドラゴンを殲滅してください。",
+    "KR": "A group of dragons has arrived in the city, and we've lost contact with the squad that engaged them. Take their place and clear out the dragons!",
+    "SC": "A group of dragons has arrived in the city, and we've lost contact with the squad that engaged them. Take their place and clear out the dragons!"
+   },
+   "sha": {
+    "MISSION.BVM": "c3900fbd640429e089a71111894ce6f3abd5bf600765804e809fe9fbb9c62e85",
+    "MISSION.RMPA": "3b2154426c5bd54e20c93fcaff7ae9be49439e920f238ee83710d37104410c1c"
+   }
+  },
+  {
+   "id": "M149",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "The Threat",
+    "EN": "The Threat",
+    "JA": "廃都の脅威",
+    "KR": "The Threat",
+    "SC": "The Threat"
+   },
+   "brief": {
+    "CN": "Ranger 7 has encountered a large group of giant insects. They've been forced to retreat and are now surrounded, with more bugs arriving by the minute. Head out and support the team!",
+    "EN": "Ranger 7 has encountered a large group of giant insects. They've been forced to retreat and are now surrounded, with more bugs arriving by the minute. Head out and support the team!",
+    "JA": "レンジャー７が巨大生物の大群と遭遇。敵を牽制しつつ退却を繰り返していますが、しだいに包囲されつつあるようです。巨大生物の数は増え続けています。ただちに救援に向かってください。",
+    "KR": "Ranger 7 has encountered a large group of giant insects. They've been forced to retreat and are now surrounded, with more bugs arriving by the minute. Head out and support the team!",
+    "SC": "Ranger 7 has encountered a large group of giant insects. They've been forced to retreat and are now surrounded, with more bugs arriving by the minute. Head out and support the team!"
+   },
+   "sha": {
+    "MISSION.BVM": "261a87cf0d11367293f1ba7537939c41c1d2a344b9f2df3ea6262ca7e666ae38",
+    "MISSION.RMPA": "49e1302ce9cf96fd01baa108ae4d33f4e12f1ac8125cc8daee0b85bc1efd9357"
+   }
+  },
+  {
+   "id": "M411",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Battle to the Death",
+    "EN": "Battle to the Death",
+    "JA": "死の戦列",
+    "KR": "Battle to the Death",
+    "SC": "Battle to the Death"
+   },
+   "brief": {
+    "CN": "The Ravagers' fleet is approaching from the sea and must not be allowed to reach the city. Ground forces will be deployed along the coast and keep them from making landfall. Head out immediately. Consider this a decisive battle -- meaning, don't lose!",
+    "EN": "The Ravagers' fleet is approaching from the sea and must not be allowed to reach the city. Ground forces will be deployed along the coast and keep them from making landfall. Head out immediately. Consider this a decisive battle -- meaning, don't lose!",
+    "JA": "フォーリナーの大船団が海上を進んでいます。これだけの大軍が市街地に侵入すれば、被害の規模は想像もできません。これより作戦を開始。地上部隊は水際に展開。敵を待ち構え、上陸を阻止します。ただちに現地に向かってください。\n…………。決死の作戦です。無事の帰還を祈ります。",
+    "KR": "The Ravagers' fleet is approaching from the sea and must not be allowed to reach the city. Ground forces will be deployed along the coast and keep them from making landfall. Head out immediately. Consider this a decisive battle -- meaning, don't lose!",
+    "SC": "The Ravagers' fleet is approaching from the sea and must not be allowed to reach the city. Ground forces will be deployed along the coast and keep them from making landfall. Head out immediately. Consider this a decisive battle -- meaning, don't lose!"
+   },
+   "sha": {
+    "MISSION.BVM": "6005643bc1021700e9b2a4317cbd56de9f4dcc724f419896fffcce9c2c4b5d2c",
+    "MISSION.RMPA": "5390586cb925b48db79febda65778374b593c9fc8e67238bf4c3f3605ed683ab"
+   }
+  },
+  {
+   "id": "M152",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Massive Mobilization",
+    "EN": "Massive Mobilization",
+    "JA": "大結集",
+    "KR": "Massive Mobilization",
+    "SC": "Massive Mobilization"
+   },
+   "brief": {
+    "CN": "The Ravagers have started mobilizing an army, most likely as a prelude to a massive attack. And sadly, we're depleted. We can't defend against an all-out attack like this! Though...there may be a way. A surprise attack before the enemy finishes their preparations. Our very survival hangs in the balance. You may join this battle if you wish -- participation is voluntary.",
+    "EN": "The Ravagers have started mobilizing an army, most likely as a prelude to a massive attack. And sadly, we're depleted. We can't defend against an all-out attack like this! Though...there may be a way. A surprise attack before the enemy finishes their preparations. Our very survival hangs in the balance. You may join this battle if you wish -- participation is voluntary.",
+    "JA": "フォーリナーの軍団が集結をはじめました。おそらく総攻撃の前触れだと思われます。すでに、我々に戦力らしい戦力はなく、総攻撃を受ければひとたまりもありません。このままでは全滅を待つだけです。方法は一つ。敵の準備が整う前に、決死の覚悟で奇襲攻撃をおこなうのです。……まさにイチかバチか……生還の難しい戦闘です。作戦への参加は自由。戦意ある者だけ戦場へと赴いてください。",
+    "KR": "The Ravagers have started mobilizing an army, most likely as a prelude to a massive attack. And sadly, we're depleted. We can't defend against an all-out attack like this! Though...there may be a way. A surprise attack before the enemy finishes their preparations. Our very survival hangs in the balance. You may join this battle if you wish -- participation is voluntary.",
+    "SC": "The Ravagers have started mobilizing an army, most likely as a prelude to a massive attack. And sadly, we're depleted. We can't defend against an all-out attack like this! Though...there may be a way. A surprise attack before the enemy finishes their preparations. Our very survival hangs in the balance. You may join this battle if you wish -- participation is voluntary."
+   },
+   "sha": {
+    "MISSION.BVM": "c403d68195454b95bb8b3a7562f151c81f2a0443f89f4326bcfdb6e0ff7f0289",
+    "MISSION.RMPA": "46fcd339a3f5f8e6b943c368215fd70a208c26017db980e7be160810931f2a64"
+   }
+  },
+  {
+   "id": "M207",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Scorching",
+    "EN": "Scorching",
+    "JA": "灼熱",
+    "KR": "Scorching",
+    "SC": "Scorching"
+   },
+   "brief": {
+    "CN": "Those of us who've managed to survive continue the battle unabated. However, the end is almost here. The enemy's army will soon be upon us. We're outnumbered, almost everything we have has been destroyed, and we have little hope of victory. But we will see this battle through to the end! Join us if you wish to die with honor!",
+    "EN": "Those of us who've managed to survive continue the battle unabated. However, the end is almost here. The enemy's army will soon be upon us. We're outnumbered, almost everything we have has been destroyed, and we have little hope of victory. But we will see this battle through to the end! Join us if you wish to die with honor!",
+    "JA": "我々はなんとか生き延び、戦いを続けてきました。しかし、どうやら最後の時が来たようです。敵の大軍がすぐそこまで迫っています。もはや多勢に無勢。勝ち目はありません。すでに守るものもなく、希望もありません。それでも我々は出撃します。作戦への参加は自由。戦意ある者だけ戦場へと赴いてください。",
+    "KR": "Those of us who've managed to survive continue the battle unabated. However, the end is almost here. The enemy's army will soon be upon us. We're outnumbered, almost everything we have has been destroyed, and we have little hope of victory. But we will see this battle through to the end! Join us if you wish to die with honor!",
+    "SC": "Those of us who've managed to survive continue the battle unabated. However, the end is almost here. The enemy's army will soon be upon us. We're outnumbered, almost everything we have has been destroyed, and we have little hope of victory. But we will see this battle through to the end! Join us if you wish to die with honor!"
+   },
+   "sha": {
+    "MISSION.BVM": "7ec0c34c43ec8e7b8cdb58fa1bcc60aa696f2460e3bd223586c792cfd93da491",
+    "MISSION.RMPA": "dc4d2a2cba5abc5620a4a91e43440b409c4f12b2b6fc04ef0926762dd32e5f1e"
+   }
+  },
+  {
+   "id": "M018",
+   "files": [
+    "MISSION.BVM",
+    "MISSION.RMPA"
+   ],
+   "title": {
+    "CN": "Star Eaters",
+    "EN": "Star Eaters",
+    "JA": "星喰らい",
+    "KR": "Star Eaters",
+    "SC": "Star Eaters"
+   },
+   "brief": {
+    "CN": "EDF groups across the globe have perished. The only remaining force is on the aircraft carrier Despina. Without support or supplies, we don't have the power to continue the fight. But if we'll be dead tomorrow, then today we make our stand! We're going to attack the Earth Eaters with everything we've got, the last threads of humanity hanging in the balance. The difference in our fighting capacities is dramatic, and failure is almost assured, but we will not give up. Prepare for battle, you brave EDF soldiers. For all you've done and all you have yet to do...I salute you!",
+    "EN": "EDF groups across the globe have perished. The only remaining force is on the aircraft carrier Despina. Without support or supplies, we don't have the power to continue the fight. But if we'll be dead tomorrow, then today we make our stand! We're going to attack the Earth Eaters with everything we've got, the last threads of humanity hanging in the balance. The difference in our fighting capacities is dramatic, and failure is almost assured, but we will not give up. Prepare for battle, you brave EDF soldiers. For all you've done and all you have yet to do...I salute you!",
+    "JA": "各地のＥＤＦは壊滅。残された戦力は空母デスピナと我々歩兵部隊のみです。支援もなく、補給もつき、戦いを継続する力がもはや我々にはありません。ですが、明日戦う力がないのなら、今日、最後の戦いに挑むまでです。これよりアースイーター破壊作戦を開始します。人類の運命を決める戦いです。いえ……戦力差は圧倒的で、勝敗は戦う前から明白。運命はすでに決まっているといっても過言ではないでしょう。それでも我々は諦めることをよしとしません。ただちに戦闘準備願います。……勇敢なるＥＤＦの戦士たち……これまで、そしてこれからの奮戦に敬意を表します。……ありがとう。",
+    "KR": "EDF groups across the globe have perished. The only remaining force is on the aircraft carrier Despina. Without support or supplies, we don't have the power to continue the fight. But if we'll be dead tomorrow, then today we make our stand! We're going to attack the Earth Eaters with everything we've got, the last threads of humanity hanging in the balance. The difference in our fighting capacities is dramatic, and failure is almost assured, but we will not give up. Prepare for battle, you brave EDF soldiers. For all you've done and all you have yet to do...I salute you!",
+    "SC": "EDF groups across the globe have perished. The only remaining force is on the aircraft carrier Despina. Without support or supplies, we don't have the power to continue the fight. But if we'll be dead tomorrow, then today we make our stand! We're going to attack the Earth Eaters with everything we've got, the last threads of humanity hanging in the balance. The difference in our fighting capacities is dramatic, and failure is almost assured, but we will not give up. Prepare for battle, you brave EDF soldiers. For all you've done and all you have yet to do...I salute you!"
+   },
+   "sha": {
+    "MISSION.BVM": "f3ddd92543fc488fb20ab85d757b5a6c344319a47000a4c093b4baadc63b159e",
+    "MISSION.RMPA": "8aab683d3dc8caddad478ff32d1daa9b3e7535fd0d12df193375b6aa85a78339"
+   }
+  }
+ ]
+}

@@ -667,6 +667,192 @@ def depth_of(md: Mdb) -> list[int]:
     return d
 
 
+def bone_named(md: Mdb, name: str) -> int:
+    """The index of the bone called `name` (ValueError when there is none)."""
+    for b in md.bones:
+        if md.name_of(b.name) == name:
+            return b.index
+    raise ValueError(f'no bone {name}')
+
+
+def rename_bone(md: Mdb, old: str, new: str) -> None:
+    """Bone `old` called `new` (a name-table entry of its own: the old string may name something else too)."""
+    md.bones[bone_named(md, old)].name = len(md.names)
+    md.names.append(new)
+
+
+def insert_bone(md: Mdb, name: str, parent: str) -> int:
+    """A transform-only bone `name` (no mesh, no weight; its local matrix the identity, so it sits where `parent` is)
+    as `parent`'s last child, placed in depth-first file order after `parent`'s subtree, as the stock files keep
+    them (depth_delta encodes that order). Every bone index past it moves up by one: the bones' links, the objects'
+    bones and skinned vertices' blend indices follow. Returns its index."""
+    p = bone_named(md, parent)
+    depth = depth_of(md)
+    at = p + 1
+    while at < len(md.bones) and depth[at] > depth[p]:
+        at += 1
+
+    def moved(i: int) -> int:
+        return i + 1 if i >= at else i
+
+    for b in md.bones:
+        b.parent, b.sibling, b.child = (moved(x) if x >= 0 else x for x in (b.parent, b.sibling, b.child))
+    for ob in md.objects:
+        ob.bone = moved(ob.bone)
+        for me in ob.meshes:
+            idx = [e for e in me.elems if e.name.lower() == 'blendindices']
+            if not idx:
+                continue
+            v = bytearray(me.vdata)
+            for e in idx:
+                if e.fmt != 21:
+                    raise ValueError(f'blend indices in vertex format {e.fmt}')
+                for k in range(me.nverts):
+                    o = k * me.vsize + e.offset
+                    v[o:o + 4] = bytes(moved(x) for x in v[o:o + 4])
+            me.vdata = bytes(v)
+    kids = [b for b in md.bones if b.parent == moved(p)]
+    new = Bone(at, moved(p), -1, -1, len(md.names), 0, 0, 0, 0, 0, 0,
+               [1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0], list(md.bones[p].inv_bind),
+               [0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0])
+    md.names.append(name)
+    if kids:
+        max(kids, key=lambda b: b.index).sibling = at
+    else:
+        md.bones[p].child = at
+    md.bones[p].child_count += 1
+    md.bones.insert(at, new)
+    for i, b in enumerate(md.bones):
+        b.index = i
+    d = depth_of(md)
+    for i, b in enumerate(md.bones):
+        b.depth_delta = (d[i + 1] - d[i]) if i + 1 < len(md.bones) else d[i]
+    return at
+
+
+def rigid_extent(md: Mdb, axis: int) -> tuple[float, float]:
+    """(min, max) of the positions of every vertex of every object of `md`, along `axis` (0 x, 1 y, 2 z), in the
+    frame of the bone each object hangs on. ValueError when a mesh has no readable position."""
+    lo, hi = math.inf, -math.inf
+    for ob in md.objects:
+        for me in ob.meshes:
+            pos = read_elem(me, 'position')
+            if not pos:
+                raise ValueError('a mesh with no readable position')
+            lo, hi = min(lo, min(p[axis] for p in pos)), max(hi, max(p[axis] for p in pos))
+    return lo, hi
+
+
+def _adopt_objects(md: Mdb, donor: Mdb, bone_of: dict[int, int], remap_blend: dict[int, int] | None = None) -> None:
+    """`donor`'s objects added to `md`: its textures (by filename: one `md` has already is shared), the materials the
+    meshes use (params and texture slots, textures renumbered; an identical one is shared) and each object with its
+    meshes (vertex and index data as they are), hung on bone `bone_of[donor bone]` of `md`. With `remap_blend` (donor
+    bone -> md bone) the meshes' blend indices are rewritten through it (a skinned donor)."""
+    by_file = {t.filename.lower(): t.index for t in md.textures}
+    tex_map: dict[int, int] = {}
+    for t in donor.textures:
+        key = t.filename.lower()
+        if key not in by_file:
+            by_file[key] = len(md.textures)
+            md.textures.append(Texture(len(md.textures), t.name, t.filename, t.unk))
+        tex_map[t.index] = by_file[key]
+    mat_map: dict[int, int] = {}
+    for ob in donor.objects:
+        for me in ob.meshes:
+            if me.material in mat_map:
+                continue
+            m = donor.materials[me.material]
+            params = [MatParam(list(p.value), p.unk, p.name, p.type) for p in m.params]
+            texs = [MatTex(tex_map[t.texture], t.kind, t.unk) for t in m.textures]
+            same = next((x.index for x in md.materials if (x.b2, x.b3, x.shader, x.params, x.textures, x.unk) ==
+                         (m.b2, m.b3, m.shader, params, texs, m.unk)), None)
+            if same is None:     # a second gun of the same kind shares the first one's material
+                md.names.append(donor.name_of(m.name))
+                same = len(md.materials)
+                md.materials.append(Material(same, m.b2, m.b3, len(md.names) - 1, m.shader, params, texs, m.unk))
+            mat_map[me.material] = same
+    for ob in donor.objects:
+        md.names.append(donor.name_of(ob.name))
+        meshes = []
+        for me in ob.meshes:
+            vdata = me.vdata
+            if remap_blend is not None:
+                v = bytearray(vdata)
+                for e in (x for x in me.elems if x.name.lower() == 'blendindices'):
+                    for k in range(me.nverts):
+                        o = k * me.vsize + e.offset
+                        v[o:o + 4] = bytes(remap_blend[x] for x in v[o:o + 4])
+                vdata = bytes(v)
+            meshes.append(Mesh(me.flags, mat_map[me.material], me.unk08, me.vsize,
+                               [VElem(e.fmt, e.offset, e.channel, e.name) for e in me.elems],
+                               me.mesh_index, vdata, me.indices))
+        md.objects.append(Object(len(md.names) - 1, bone_of[ob.bone], meshes))
+        if md.buffer_order is not None:
+            k = len(md.objects) - 1
+            for order in md.buffer_order:
+                order += [(k, j) for j in range(len(meshes))]
+
+
+def graft_skinned(md: Mdb, donor: Mdb, parent: str, prefix: str) -> list[int]:
+    """`donor` (a skinned model: EDF4.1's Hector401 weapons, an object bone and skin bones on gun_arms / gun_top ...)
+    added to `md` under bone `parent`: every donor bone but its root `mdl` as a bone `<prefix>_<name>` with the
+    donor's matrices, kind and bounds (the skin bones' inverse binds are the donor's: the donor's model frame is
+    placed on `parent`'s), in the donor's hierarchy, and its objects with their blend indices rewritten to those
+    bones (a zero-weight slot's index 0, the donor root, to `parent`). Returns the new bones' indices.
+    Raises ValueError for a donor whose root has no children."""
+    names = {b.index: f'{prefix}_{donor.name_of(b.name)}' for b in donor.bones if b.parent >= 0}
+    if not names:
+        raise ValueError('the donor has no bone below its root')
+    for b in donor.bones:
+        if b.parent >= 0:
+            insert_bone(md, names[b.index], names[b.parent] if b.parent in names else parent)
+    for b in donor.bones:
+        if b.parent < 0:
+            continue
+        nb = md.bones[bone_named(md, names[b.index])]
+        nb.kind, nb.bounded = b.kind, b.bounded
+        nb.local, nb.inv_bind = list(b.local), list(b.inv_bind)
+        nb.half, nb.centre = list(b.half), list(b.centre)
+    to_md = {b.index: bone_named(md, names[b.index]) for b in donor.bones if b.parent >= 0}
+    to_md[0] = bone_named(md, parent)
+    _adopt_objects(md, donor, to_md, to_md)
+    return [to_md[i] for i in sorted(names)]
+
+
+def graft_rigid(md: Mdb, donor: Mdb, parent: str, name: str) -> int:
+    """`donor`'s one rigid (unskinned) object added to `md` as a rigid-mesh bone `name`, the last child of `parent`,
+    its local matrix the identity (so the donor's vertices, which sit in its own bone's frame, sit in `parent`'s) and
+    its inverse bind the identity too (what every stock rigid-mesh bone has, wherever it hangs). Returns the new
+    bone's index.
+
+    Why: EDF4.1's Hector carries its guns as separate objects, each a model of its own (Hector301cannon.mdb: bones mdl
+    and one rigid-mesh bone; one unskinned mesh, 48-byte vertices) that the game hangs on the arm bones arms_l /
+    arms_r. A port to EDF6's EDF6_Berserker_Large has no sub-objects, so the guns' meshes become part of the body's
+    model: a rigid object on a bone under each arm node.
+
+    What is copied, remapped to the target's tables: the bone's bounds (half, centre, bounded: kind 1), the textures
+    (by filename: one the target has already is shared), the materials the meshes use (their params and texture
+    slots, textures renumbered), the object and its meshes (vertex and index data as they are). The names get table
+    entries of their own (as rename_bone does). Raises ValueError for a donor that is not one rigid object on one
+    rigid-mesh bone, or for a mesh with blend indices (a skinned one would need the donor's bones)."""
+    rigid = [b for b in donor.bones if b.kind == 1]
+    if len(donor.objects) != 1 or len(rigid) != 1 or donor.objects[0].bone != rigid[0].index:
+        raise ValueError('the donor is not one object on one rigid-mesh bone')
+    ob = donor.objects[0]
+    for me in ob.meshes:
+        if me.flags[1] or any(e.name.lower() in ('blendindices', 'blendweight') for e in me.elems):
+            raise ValueError('the donor mesh is skinned')
+    at = insert_bone(md, name, parent)
+    bone = md.bones[at]
+    src = rigid[0]
+    bone.kind, bone.bounded = src.kind, src.bounded
+    bone.half, bone.centre = list(src.half), list(src.centre)
+    bone.inv_bind = ident()    # a rigid-mesh bone's is the identity in every stock model (54 of 54 off the origin)
+
+    _adopt_objects(md, donor, {ob.bone: at})
+    return at
+
+
 # ---------------------------------------------------------------------------------------- vertices
 
 def half_to_float(h: int) -> float:

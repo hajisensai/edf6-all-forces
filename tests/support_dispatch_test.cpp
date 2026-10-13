@@ -32,6 +32,10 @@ bool allReady=true,terrain=true,nativeFail=false;
 Sea terrainSea=Sea::land;float waterSurface=0;
 Sea SeaAt(float,float,float* out) noexcept {*out=waterSurface;return terrainSea;}
 #endif
+// The submarine carrier (catalog 16, airKeys "SUB"): surfaces through SubLaunch, never through a plan.
+int subLaunches=0;unsigned char subHull[16]{};
+unsigned char* SubLaunch(const float*,const float*) noexcept {++subLaunches;return subHull;}
+bool SupportSubCatalog(int id) noexcept {return id==16;}
 npc::navigation::Result routeResult=npc::navigation::Result::pending;
 ObjRef Make(bool vehicle=false) noexcept {
     const int slot=made++;auto* o=objects[slot];std::memset(o,0,sizeof(objects[slot]));
@@ -421,6 +425,23 @@ int main() {
     waterSurface=0.2f;check(Foot(0,0,0,footY),"shallow wading matches the navigation allowance");
     terrainSea=Sea::unknown;check(!Foot(0,0,0,footY),"unknown water state is not treated as a safe entry");
     terrainSea=Sea::land;
+    // 2026-10-12 (test site #12: 「潜水母舰在水里也没法召唤」): since #88 the carrier went to the planner, which refused it
+    // (no aircraft). It surfaces where it is called over water, on no plan; over land it is refused; from the map online it
+    // is the call weapon's (replayed on every machine), so the map refuses it there.
+    {
+        const bool wasOnline=testOnline;const int requestsBefore=netRequests;
+        ResetSupportDispatch();testOnline=false;fixtureMs+=40000;subLaunches=0;made=0;
+        check(!SupportCallAt(16,target,note,128) && subLaunches==0 && std::wcsstr(note,L"没有水域")!=nullptr,
+              "submarine carrier over land: refused, nothing made");
+        terrainSea=Sea::water;
+        check(SupportCallAt(16,target,note,128) && subLaunches==1 && !offlinePending && made==0 && std::wcsstr(note,L"上浮")!=nullptr,
+              "submarine carrier over water: it surfaces at once, no plan, no planner objects");
+        check(SupportSubCallAt(target,nullptr,false,note,128) && subLaunches==2,"a radio replay on another machine surfaces its own copy");
+        testOnline=true;
+        check(!SupportCallAt(16,target,note,128) && subLaunches==2 && netRequests==requestsBefore,
+              "online the map refuses it (the call weapon brings it), no host request");
+        testOnline=wasOnline;terrainSea=Sea::land;
+    }
     // 2026-10-09: the host of a world with no other participant deploys locally (no EDF6Coop transport needed, no peer
     // to replicate to); any other online machine still requests through the host.
     ResetSupportDispatch();testOnline=true;soloHost=true;made=0;netRequests=0;registered=0;resourceCount=0;fixtureMs+=40000;
@@ -774,6 +795,114 @@ int main() {
         check(SupportCallAt(2,target,note,128),"a strike call queued");SupportDispatchTick();
         check(made>0 && lastAircraftVariant==L"app:/object/edf6vc_lo_strike_4000000000056562.sgo" &&
               (deployments[0].plan.units[0].variant&kVariantApplied),"the strike jets are made from their all-bombs file");
+        ResetSupportDispatch();
+    }
+    {
+        // Stage 5 (docs/feature-2026-10-12-room-loadout-menu.md): every support unit's real crew wears SupportCrewColour_<KEY>
+        // (else SupportCrewColour) - the tank's / transport's / truck's driver and crew, every aircraft's pilot and gunners,
+        // the transports' and airdrops' pilots, the mission vehicles' support crews - each seat its own look variant.
+        wchar_t path[MAX_PATH];GetTempPathW(MAX_PATH,path);wcscat_s(path,L"edf6_crew_colour_test.ini");
+        FILE* out=nullptr;_wfopen_s(&out,path,L"wb");check(out!=nullptr,"crew colour ini written");
+        const char crewText[]="[VehicleCrew]\r\nSupportCrewColour=1E3A8A\r\nSupportCrewColour_TANK_CREWED=X:FFFFFF\r\n"
+                              "SupportCrewColour_SQUAD=123456\r\nSupportCrewColour_FIGHTER=bogus\r\nSupportCrewColour_MISSION=FFFFFF\r\n"
+                              "SupportCrewColour_HELI=X\r\nSupportPreset_TRANSPORT_CREWED=lance@C0272D*2\r\n";
+        std::fwrite(crewText,1,sizeof(crewText)-1,out);std::fclose(out);
+        LoadSupportConfig(path);DeleteFileW(path);
+        const auto& c=SupportCfg();
+        const int tankEntry=GroundStart(),apcEntry=GroundStart()+2;
+        check(c.crewDefault.set && c.crewDefault.look.primary==0x1E3A8A && c.crew[tankEntry].set && c.crew[tankEntry].look.secondary==0xFFFFFF &&
+              c.crewMission.set && c.MissionCrewLook().primary==0xFFFFFF && c.CrewLook(2).primary==0x1E3A8A && !c.CrewLook(10).On(),
+              "crew colours read: the default, a unit's own, the mission's, X over the default");
+        check(!c.crew[21].set && std::wcsstr(c.problems,L"SupportCrewColour_SQUAD") && std::wcsstr(c.problems,L"SupportCrewColour_FIGHTER") &&
+              c.CrewLook(6).primary==0x1E3A8A,"an infantry squad has no crew, a bad value is refused: both named, the default stands");
+        const std::wstring member=L"EDF6VC_NPC_RIFLE_1E3A8A_X.SGO",tankCrew=L"EDF6VC_NPC_RIFLE_X_FFFFFF.SGO",
+                           mission=L"EDF6VC_NPC_RIFLE_FFFFFF_X.SGO",missionLead=L"EDF6VC_NPC_RIFLE_L_FFFFFF_X.SGO",
+                           lance=L"EDF6VC_NPC_LANCE_L_C0272D_X.SGO",lance2=L"EDF6VC_NPC_LANCE_C0272D_X.SGO";
+        const std::wstring memberPath=L"app:/object/edf6vc_npc_rifle_1e3a8a_x.sgo";
+        variantFiles={member,tankCrew,mission,missionLead,lance,lance2};missingNoted.clear();
+        peersNew=true;peersApplyVariants=true;peersHaveFiles=true;testOnline=false;routeResult=npc::navigation::Result::moving;
+        // An aircraft (the strike jet): its pilot made aboard from the coloured file.
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
+        check(SupportCallAt(2,target,note,128),"a strike call queued");SupportDispatchTick();
+        const auto& air=deployments[0].plan;
+        check(air.count==2 && (air.units[1].variant&kVariantApplied) && Validate(air) && lastLooks[0]==memberPath,
+              "an aircraft's pilot: the default crew colour, made from its file");
+        check(!air.units[0].variant || (air.units[0].variant&kVariantVehicle),"the hull carries pylons or nothing, never a look");
+        // X for the helicopter's crew: stock even though the default is set.
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
+        SupportCallAt(10,target,note,128);SupportDispatchTick();
+        check(made>0 && !deployments[0].plan.units[1].variant && lastLooks[0].empty(),"SupportCrewColour_HELI=X: its crew stock");
+        // A transport (helicopter air assault, the call's own riders): its pilot coloured, the riders not (they are a squad).
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
+        check(SupportCallAt(29,target,note,128),"a helicopter assault queued");SupportDispatchTick();
+        const auto& tr=deployments[0].plan;
+        check(tr.count==6 && (tr.units[1].variant&kVariantApplied) && !tr.units[2].variant && lastLooks[0]==memberPath &&
+              lastLooks[1].empty() && Validate(tr),"a transport's pilot coloured, its riders the squad's own");
+        // An airdrop (offline only): its helicopter's pilot.
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
+        check(SupportCallAt(33,target,note,128),"a tank airdrop queued");SupportDispatchTick();
+        check(deployments[0].plan.count==2 && (deployments[0].plan.units[1].variant&kVariantApplied) && lastLooks[0]==memberPath,
+              "an airdrop's pilot coloured");
+        // A tank: its own crew colour on every crew seat (the driver and the call's own crew), the hull no look.
+        ResetSupportDispatch();SupportPlan plan{};
+        check(Plan(static_cast<std::uint32_t>(tankEntry),target,0,&plan)==support_net::PlanResult::ready && plan.count>=2,"a tank planned");
+        bool crewLooks=plan.units[0].resourceId==kVehicle && !plan.units[0].variant;
+        SupportLook look;
+        for(unsigned i=1;i<plan.count;++i)
+            crewLooks=crewLooks && (plan.units[i].variant&kVariantApplied) && LookOfVariant(plan.units[i].variant,&look) &&
+                      look.primary==kStockColour && look.secondary==0xFFFFFF;
+        check(crewLooks && Validate(plan),"the tank's crew: SupportCrewColour_TANK_CREWED on every seat (the plan once said 'its crew none')");
+        wchar_t made1[128];
+        check(SupportSoldierLookPath(plan.units[1].resourceId,plan.units[1].variant,true,made1,128)==made1 &&
+              !std::wcscmp(made1,L"app:/object/edf6vc_npc_rifle_x_ffffff.sgo"),"the crew seat is made from its file (the spawn path's own lookup)");
+        // A crewed APC with a composed load: its driver the crew colour, its passengers the preset's.
+        ResetSupportDispatch();plan={};
+        check(Plan(static_cast<std::uint32_t>(apcEntry),target,PackSupportLoadout(PresetLoadout(c.preset[apcEntry])),&plan)==
+              support_net::PlanResult::ready && plan.count==4,"a crewed APC with two lance passengers");
+        check(LookOfVariant(plan.units[1].variant,&look) && look.primary==0x1E3A8A && LookOfVariant(plan.units[2].variant,&look) &&
+              look.primary==0xC0272D && LookOfVariant(plan.units[3].variant,&look) && look.primary==0xC0272D,
+              "the driver wears the crew colour, the passengers their preset's");
+        // The file missing here: stock, listed, the status says so; the plan still ready (colours are cosmetic).
+        variantFiles.erase(tankCrew);missingNoted.clear();ResetSupportDispatch();plan={};
+        check(Plan(static_cast<std::uint32_t>(tankEntry),target,0,&plan)==support_net::PlanResult::ready &&
+              plan.units[1].variant && !(plan.units[1].variant&kVariantApplied) && !missingNoted.empty() && missingNoted.back()==tankCrew,
+              "a crew file not made yet: stock, wanted, on the pending list");
+        SupportCallStatus(note,128);
+        check(std::wcsstr(note,L"EDF6VC_NPC_RIFLE_X_FFFFFF.SGO")!=nullptr,"the status names the crew file not yet made");
+        variantFiles.insert(tankCrew);
+        // Online: applied only when every peer applies variants and has the file; a peer lacking it never refuses the plan.
+        testOnline=true;soloHost=false;
+        peersApplyVariants=false;ResetSupportDispatch();plan={};
+        Plan(static_cast<std::uint32_t>(tankEntry),target,0,&plan);
+        check(plan.units[1].variant && !(plan.units[1].variant&kVariantApplied),"an older peer in the room: the crew stock, what it wanted kept");
+        peersApplyVariants=true;peersHaveFiles=false;ResetSupportDispatch();plan={};
+        Plan(static_cast<std::uint32_t>(tankEntry),target,0,&plan);
+        check(plan.units[1].variant && !(plan.units[1].variant&kVariantApplied),"a peer without the crew file: stock");
+        peersHaveFiles=true;ResetSupportDispatch();plan={};
+        Plan(static_cast<std::uint32_t>(tankEntry),target,0,&plan);
+        check((plan.units[1].variant&kVariantApplied) && Validate(plan),"every peer has it: applied online");
+        variantFiles.erase(tankCrew);missingNoted.clear();
+        check(Validate(plan),"a peer missing the crew's file still accepts the plan (only pylons refuse)");
+        wchar_t lookPath[128];
+        check(!SupportSoldierLookPath(plan.units[1].resourceId,plan.units[1].variant,true,lookPath,128) && !missingNoted.empty() &&
+              missingNoted.back()==tankCrew,"...it makes that seat stock and lists the file");
+        variantFiles.insert(tankCrew);
+        SupportPlan garbage=plan;garbage.units[1].variant=kVariantApplied|kVariantVehicle|1;
+        check(!Validate(garbage),"pylons on a crew seat refuse the plan");
+        // The mission vehicles' support crews: SupportCrewColour_MISSION, a leader's _L file.
+        check((SupportCrewVariant(support_net::kMissionCrewCatalog,kSupportLeaderResource)&kVariantApplied) &&
+              SupportSoldierLookPath(kSupportLeaderResource,SupportCrewVariant(support_net::kMissionCrewCatalog,kSupportLeaderResource),
+                                     false,lookPath,128) && !std::wcscmp(lookPath,L"app:/object/edf6vc_npc_rifle_l_ffffff_x.sgo"),
+              "the mission crew's leader is made from its own _L file");
+        check(!SupportCrewVariant(21,kSupportRangerResource) && !SupportCrewVariant(2,kSupportVehicleResource),
+              "no crew colour for an infantry squad or a hull");
+        testOnline=false;ResetSupportDispatch();
+        // Nothing configured: exactly the plans of before (no variant on any crew seat).
+        LoadSupportConfig(L"Z:\\nonexistent\\edf6_none.ini");
+        ResetSupportDispatch();plan={};
+        Plan(static_cast<std::uint32_t>(tankEntry),target,0,&plan);
+        bool none=plan.count>=2;for(unsigned i=0;i<plan.count;++i)none=none && !plan.units[i].variant;
+        check(none,"no crew colour configured: no variant anywhere (the plan as it always was)");
         ResetSupportDispatch();
     }
     // ---- The sea rescue entry (2026-10-09, the user: 「给救援加一个支援目录项，走正规的呼叫支援流程」; 2026-10-10: no support

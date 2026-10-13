@@ -53,7 +53,7 @@ class CampaignLifecycleTests(unittest.TestCase):
 
     def stub_build(self):
         """campaign.build answered by built() (its game reads are not this test's)."""
-        return patch.object(campaign, 'build', side_effect=lambda root, campaign=True, test_range=True:
+        return patch.object(campaign, 'build', side_effect=lambda root, campaign=True, test_range=True, root41=None, skip41=():
                             self.built(campaign, test_range))
 
     @contextmanager
@@ -71,7 +71,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         with ExitStack() as stack:
             for name, value in {'check_loader': None, 'plugin_files': plugins, 'stack_weapons': {},
                                 'build_autoturret': ({}, False), 'install_autoturret': None,
-                                'build_asset': None}.items():
+                                'build_asset': None, 'find_edf41': None}.items():   # a stand-in game: no EDF4.1
                 stack.enter_context(patch.object(installer, name, return_value=value))
             for module, name, value in ((rootcpk, 'use', None), (call_weapons, 'recover', False),
                                         (call_weapons, 'install', []), (gen, 'install', []),
@@ -88,7 +88,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         campaign.remove(self.root)
         with self.pack() as build:
             installer.install(self.root)
-            build.assert_called_once_with(self.root, campaign=True)
+            build.assert_called_once_with(self.root, campaign=True, root41=None, skip41={})
         self.assertTrue(campaign.enabled(self.root))
         self.assertTrue(campaign.range_installed(self.root))
         self.assertTrue(campaign.check(self.root))
@@ -124,7 +124,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         self.assertFalse(campaign.check(self.root))
         with self.pack() as build:
             installer.install(self.root)
-            build.assert_called_once_with(self.root, campaign=True)
+            build.assert_called_once_with(self.root, campaign=True, root41=None, skip41={})
         self.assertTrue(campaign.check(self.root))
 
     def test_interrupted_disable_finishes_on_normal_update(self) -> None:
@@ -141,7 +141,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         self.assertFalse(campaign.check(self.root))
         with self.pack() as build:
             installer.install(self.root)
-            build.assert_called_once_with(self.root, campaign=False)
+            build.assert_called_once_with(self.root, campaign=False, root41=None, skip41={})
         self.assertFalse(campaign.enabled(self.root))
         self.assertTrue(campaign.range_installed(self.root))
         self.assertTrue(campaign.check(self.root))
@@ -174,7 +174,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         self.assertFalse(campaign.removal_blocked(self.root))
         with self.pack() as build:
             installer.install(self.root)
-            build.assert_called_once_with(self.root, campaign=False)
+            build.assert_called_once_with(self.root, campaign=False, root41=None, skip41={})
         self.assertFalse(campaign.enabled(self.root))
         self.assertTrue(campaign.range_installed(self.root))
         for rel in (f for pack in campaign.PACKS for f in pack.files()):   # the campaign's: the originals back
@@ -221,7 +221,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         self.assertIn('TestRangeContent=6', self.ini.read_text())   # the range keeps its id without the campaign
         with self.pack() as build:
             installer.install(self.root)
-            build.assert_called_once_with(self.root, campaign=False)
+            build.assert_called_once_with(self.root, campaign=False, root41=None, skip41={})
         self.assertFalse(campaign.enabled(self.root))
         self.assertTrue(campaign.check(self.root))
 
@@ -235,7 +235,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         self.assertTrue(campaign.check(self.root))
         with self.pack() as build:
             installer.install(self.root)
-            build.assert_called_once_with(self.root, campaign=False)
+            build.assert_called_once_with(self.root, campaign=False, root41=None, skip41={})
         self.assertEqual(modfiles.read(image), b'foreign image')
         self.assertFalse(campaign.enabled(self.root))
 
@@ -468,6 +468,115 @@ class CampaignLifecycleTests(unittest.TestCase):
         gen.uninstall(self.root, unregister=False)
         self.assertFalse(any(gen.ours(self.root, m) for m in gen.LEGACY_SLOTS))
         self.assertTrue(os.path.isfile(other))
+
+
+TANK = 'OBJECT/VEHICLE301_TANK_AI.SGO'   # the object the real game faulted on (M515, M190), 2026-10-13
+ANTHILL = 'OBJECT/ANTHILL301.SGO'
+
+
+def bvm(*refs: str) -> bytes:
+    """A mission script stand-in: the app:/ files it names, as the game's scripts hold them (UTF-16 strings)."""
+    return b''.join(f'app:/{ref}'.encode('utf-16-le') for ref in refs)
+
+
+# id -> (MISSION.BVM refs, BEFORE.BVM refs or None for a mission without one, like M515)
+MISSIONS41 = {
+    'M001': (('Object/Vehicle301_tank_ai.sgo',), None),
+    'M002': (('Object/ANTHILL301.SGO',), None),
+    'M003': (('Map/NW_KOUSOUBLD01.mac', 'Map/NW_KOUSOUBLD01.mac'), None),
+    'M004': (('Map/IG_CAVE01.mac',), ('Object/Vehicle301_tank_ai.sgo',)),   # only BEFORE.BVM names the tank
+    'M005': (('Map/IG_CAVE01.mac',), None),
+}
+
+
+class Edf41SkipTests(unittest.TestCase):
+    """What the EDF4.1 install leaves out takes the missions using it out of the pack (plan41), whichever script of
+    the mission names it; the installer rebuilds the pack when a map's conversion fails."""
+
+    def setUp(self) -> None:
+        temp = tempfile.TemporaryDirectory(prefix='edf6-edf41-skip-')
+        self.addCleanup(temp.cleanup)
+        self.root = temp.name   # no archives here: only the 4.1 objects and maps are "installed"
+        os.makedirs(os.path.join(self.root, 'Mods'))
+        text = {'missions': [{'id': mid, 'files': ['MISSION.BVM'] + (['BEFORE.BVM'] if before else []),
+                              'title': {}, 'brief': {}} for mid, (_m, before) in MISSIONS41.items()]}
+
+        def script(mid: str, name: str) -> bytes:
+            mission, before = MISSIONS41[mid]
+            return bvm(*(mission if name == 'MISSION.BVM' else before))
+
+        for target, value in (('edf41_text', lambda: text), ('edf41_script', script)):
+            started = patch.object(campaign, target, value)
+            started.start()
+            self.addCleanup(started.stop)
+
+    def planned(self, skip41: object = frozenset()) -> tuple[list[str], dict[str, str]]:
+        rows, skipped = campaign.plan41(self.root, set(), 'edf41', skip41)   # type: ignore[arg-type]
+        return [r['path'] for r in rows], {path: why for _g, path, why in skipped}
+
+    def test_everything_installed_offers_every_mission(self) -> None:
+        self.assertEqual(self.planned()[0], list(MISSIONS41))
+
+    def test_object_left_out_removes_its_missions_only(self) -> None:
+        paths, skipped = self.planned({TANK: "another mod's file in Mods: OBJECT/V505_TANKEDF4.MRAB"})
+        self.assertEqual(paths, ['M002', 'M003', 'M005'])
+        self.assertIn('V505_TANKEDF4.MRAB', skipped['M001'])   # says which object, and why
+        self.assertIn('未安装', skipped['M001'])
+
+    def test_object_made_unavailable_by_a_foreign_file(self) -> None:
+        import edf41_objects
+        theirs = 'OBJECT/V505_TANKEDF4.MRAB'
+        modfiles.atomic_write(os.path.join(self.root, 'Mods', *theirs.split('/')), b'another mod')
+        left_out = dict(edf41_objects.unavailable(self.root))
+        self.assertIn(TANK, left_out)
+        self.assertEqual(left_out.keys(), dict(edf41_objects.build(self.root)[1]).keys())   # build skips the same
+        self.assertEqual(self.planned(campaign.unavailable41(self.root, 'edf41'))[0], ['M002', 'M003', 'M005'])
+
+    def test_map_left_out_removes_its_missions_only(self) -> None:
+        paths, skipped = self.planned({'NW_KOUSOUBLD01': '转换失败：x'})
+        self.assertEqual(paths, ['M001', 'M002', 'M004', 'M005'])
+        self.assertIn('NW_KOUSOUBLD01', skipped['M003'])
+        self.assertIn('转换失败', skipped['M003'])
+
+    def test_map_made_unavailable_by_a_foreign_file(self) -> None:
+        import edf41_maps
+        self.assertEqual(edf41_maps.unavailable(self.root, None)[0][0], next(iter(edf41_maps.MAPS)))
+        self.assertEqual(edf41_maps.unavailable(self.root, 'edf41'), [])
+        theirs = edf41_maps.files_of('NW_KOUSOUBLD01')[0]
+        modfiles.atomic_write(os.path.join(self.root, 'Mods', *theirs.split('/')), b'another mod')
+        self.assertEqual([name for name, _ in edf41_maps.unavailable(self.root, 'edf41')], ['NW_KOUSOUBLD01'])
+        self.assertEqual(self.planned(campaign.unavailable41(self.root, 'edf41'))[0], ['M001', 'M002', 'M004', 'M005'])
+
+    def test_asset_only_before_bvm_names_counts(self) -> None:
+        paths, skipped = self.planned({TANK: ''})
+        self.assertNotIn('M004', paths)
+        self.assertIn('M004', skipped)
+
+    def test_failed_map_conversion_rebuilds_the_pack_without_its_missions(self) -> None:
+        """The installer, on a stand-in game: the pack is built before the maps convert; NW_KOUSOUBLD01 fails, and
+        the pack that is written has no mission of it."""
+        import edf41_maps
+        calls: list[object] = []
+
+        def build(root: str, campaign: bool = True, test_range: bool = True, root41: str | None = None,
+                  skip41: object = frozenset()) -> tuple:
+            calls.append(set(skip41))   # type: ignore[call-overload]
+            paths, _ = self.planned(skip41)
+            built = list(pack_case.built(campaign, test_range))
+            built[2] = {'rows': [{'group': 'edf41', 'path': p} for p in paths], 'skipped': []}
+            return tuple(built)
+
+        installed: list[tuple] = []
+        pack_case = CampaignLifecycleTests('test_default_install_enables_campaign')
+        pack_case.setUp()
+        self.addCleanup(pack_case.doCleanups)
+        with pack_case.pack(),                 patch.object(installer, 'find_edf41', return_value='edf41'),                 patch.object(edf41_maps, 'install', return_value=([], [('NW_KOUSOUBLD01', '转换失败：x')])),                 patch.object(campaign, 'build', side_effect=build),                 patch.object(campaign, 'install', side_effect=lambda game, built: installed.append(built) or []):
+            installer.install(pack_case.root)
+        self.assertEqual(len(calls), 2, calls)
+        self.assertNotIn('NW_KOUSOUBLD01', calls[0])
+        self.assertIn('NW_KOUSOUBLD01', calls[1])
+        self.assertEqual(len(installed), 1)
+        self.assertEqual([r['path'] for r in installed[0][2]['rows']], ['M001', 'M002', 'M004', 'M005'])
 
 
 if __name__ == '__main__':

@@ -25,4 +25,18 @@ void DamageStatsWheel(int notches) noexcept;
 // map.cpp, a pad on the page (it has no pointer): LB / RB a tab before / after (`tabStep`), Y the other scope.
 void DamageStatsPad(int tabStep,bool flipScope) noexcept;
 void DamageStatsShow(bool shown) noexcept;
+
+// wastedfire.cpp (wasted_fire.h): fire that cannot hurt its target. The damage hook reports every hit it settles with an
+// attacker (WastedFireHit: whether it took HP off); the AI asks WastedFire before it picks a target or fires. True when
+// the game is not letting the target be hurt at all (a teleportation ship with its hatch's damage window shut), or when
+// this shooter's last hits on it all hurt nothing (wasted_fire.h). Game thread.
+void WastedFireHit(const void* shooter,const void* target,bool hurt) noexcept;
+bool WastedFire(const void* shooter,const void* target) noexcept;
+// The trigger's question (hit_predict.h): true unless a round fired now from `from` (null: the shooter's eye) at `speed`
+// m/s dropping `gravity` m/s^2 (0: a straight line) would be taken by the target when it gets there: shut now (also while
+// its window is due to open: the target kept, the trigger held), its predicted hit refused, or wasted as above. `aim`
+// (optional) gets the point to aim at for the hit it would take (its weak spot's lock point, led).
+bool HoldFire(const void* shooter,const void* target,const float* from=nullptr,float speed=0.0f,float gravity=0.0f,
+              float* aim=nullptr) noexcept;
+void ResetWastedFire() noexcept;      // mission.cpp MissionStart: the last mission's objects forgotten
 }  // namespace crew

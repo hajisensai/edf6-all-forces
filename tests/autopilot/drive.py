@@ -8,7 +8,7 @@ background"). For measurements, e.g. the big map's memory against the stock test
                                                      pad_a ... pad_rt: the autopilot's virtual pad)
   python tests/autopilot/drive.py shot FILE.png      the game window's picture (PrintWindow, never the screen)
   python tests/autopilot/drive.py mem [N]            the plugin's last N MEM rows
-  python tests/autopilot/drive.py cmd TEXT           one command to the plugin: mem, quit, mission ROW|RM015|M001|range [0-4]
+  python tests/autopilot/drive.py cmd TEXT           one command to the plugin: mem, quit, mission ROW|RM015|M001|range|edf41:ROW [0-4]
   python tests/autopilot/drive.py run [MISSION] [DIFFICULTY] [SECONDS] [LOG]
         one go: install, ask the mission (default range: the test range's own mission pack, by the content id in the
         installed EDF6VehicleCrew.ini; RM015, M001 or a row: the stock offline list), launch in the background, stay
