@@ -250,15 +250,16 @@ bool GadgetView(const unsigned char* cam,const unsigned char* h) noexcept {
 }
 
 // In a vehicle, why its own view keeps the camera (nullptr: none does): the high view over the round's fall and its
-// way back (turretcam.cpp), a physical optic zoomed in (sightzoom.cpp: its own reticle; at 1x the seat's cockpit or
-// station monitor is the view, the eye at the same sight).
+// way back (turretcam.cpp), the seat's mounted optic (sightzoom.cpp: War Thunder's gunner sight, at every
+// magnification while first person is on: the view on the gun, its reticle; the seats without one see from their
+// cockpit or station monitor).
 // A seat without its cockpit's eye (no vc_eye_ marker: fp_vehicle.cpp) keeps the stock camera too, as a reason here:
 // found only in the camera step (Ride), it turned first person on and off again every frame (measured 2026-10-14: the
 // gunship's gun seat, "FP view on" / "back to the stock camera" 190 times a minute).
 const char* VehicleYields(unsigned char* h) noexcept {
     const void* v=At<const void*>(h,kHumanVehicle);
     if(HighCamOn(v) || TurretCamHighTransition(v))return "the high view";
-    if(SightZoomMounted(v) && SightZoomNow(v)>1.0f)return "a mounted optic zoomed in";
+    if(SightZoomMounted(v))return "the gunner's sight";   // at 1x too in first person (FirstPersonGunnerSight)
     float eye[3];
     RideView ride{};
     if(!VehicleEye(h,eye,&ride))return "no cockpit in this seat";
@@ -1080,6 +1081,10 @@ bool HookDrawOf(void** vt) noexcept {
 }  // namespace
 
 bool FirstPersonOn() noexcept { return st.on; }
+bool FirstPersonGunnerSight() noexcept {
+    const Config& c=Cfg();
+    return camOk && drawOk && c.enabled && c.firstPerson && c.fpVehicle && toggled;
+}
 bool FirstPersonHidesStockHud(const void* camera) noexcept {
     return st.on && st.riding && st.cam==camera && st.screens.n>0 && Cfg().fpHideStockHud;
 }

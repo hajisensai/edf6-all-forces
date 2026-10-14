@@ -22,6 +22,7 @@
 #include "turretaim.h"
 #include "edf/patch.h"
 #include "edf/weapon.h"
+#include "firstperson.h"
 #include "memory.h"
 
 namespace crew {
@@ -54,6 +55,9 @@ Toggle toggle{};
 // seat's aim (seat+0xE0), what SightLayStep is told apart by before anything else is read.
 struct Cue { ObjRef vehicle,human; unsigned seat; float zoom; Capability sight; int zero=0; const unsigned char* aim=nullptr; };
 Cue cue{};
+// The sight is up (its camera, its lay, its reticle): magnified, or at 1x in a vehicle's first person (War Thunder's
+// gunner sight: firstperson.h FirstPersonGunnerSight). Otherwise at 1x the turret camera has the view and the gun.
+bool Up(const Cue& c) noexcept { return c.zoom>1.0f || FirstPersonGunnerSight(); }
 // The lay (sightzoom.h LayStep): the superelevation the seat's gun carries over the line of sight now, as SightLayStep
 // last turned it (game thread, under cueLock; the camera reads it). Not engaged: the aim step never reached it (its hooks
 // are not in, stab.cpp RemapAimAxis cannot map the axis): the camera falls back to the set range's whole angle.
@@ -228,7 +232,7 @@ void __fastcall CamStepHook(void* cam,void* step) {
     __try {
         auto c=static_cast<unsigned char*>(cam);
         Capability live{};
-        if(!Current(state,&live) || !(state.zoom>1.0f) || !live.mounted || !opticLookTo)return;
+        if(!Current(state,&live) || !Up(state) || !live.mounted || !opticLookTo)return;
         const void* human=state.human.obj;
         if(At<const void*>(c,kCamTargetRef)!=human && At<const void*>(c,kCamTarget)!=human)return;
         const float before=At<float>(c,kCamFov);
@@ -343,7 +347,7 @@ bool SightZoomCanMount(const void* vehicle,unsigned seat) noexcept {
 bool SightZoomMounted(const void* vehicle) noexcept {
     if(MapOwnsView())return false;
     const Cue c=Snapshot();
-    __try { return (!vehicle || c.vehicle.obj==vehicle) && c.sight.mounted && c.zoom>1.0f && Current(c); }
+    __try { return (!vehicle || c.vehicle.obj==vehicle) && c.sight.mounted && Up(c) && Current(c); }
     __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
@@ -369,7 +373,7 @@ int SightZoomRange(const void* vehicle,float* angle) noexcept {
     const Cue c=Snapshot();
     __try {
         Capability live{};
-        if((vehicle && c.vehicle.obj!=vehicle) || !(c.zoom>1.0f) || !Current(c,&live) || !live.mounted)return 0;
+        if((vehicle && c.vehicle.obj!=vehicle) || !Up(c) || !Current(c,&live) || !live.mounted)return 0;
         const auto w=static_cast<const unsigned char*>(live.weapon);
         if(angle)*angle=LaidFor(c,w);
         return ZeroFor(w,c.zero);   // the range this weapon is laid for (held to its reach)
@@ -383,7 +387,7 @@ void SightLayStep(unsigned char* aim,float before) noexcept {
     __try {
         if(At<unsigned char>(aim,kAimNetwork)!=0)return;   // the network steps this aim (docs/nix-re.md §3): not ours
         Capability live{};
-        const bool sighted=c.zoom>1.0f && Current(c,&live) && live.mounted;
+        const bool sighted=Up(c) && Current(c,&live) && live.mounted;
         AcquireSRWLockShared(&cueLock);
         LayState l=lay;
         ReleaseSRWLockShared(&cueLock);
