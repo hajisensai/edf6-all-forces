@@ -46,8 +46,8 @@
    - 隐藏：NPC 坐的座位；NPC 驾驶时的空座位；玩家坐、且这架有自己的瞄准具（插件飞机 `PlayerJetOwnSight` 或原版直升机
      `PlayerHeliOwnSight`）。
    - 恢复（先 `EnsurePoints` 再写回段数）：玩家坐、且没有自己的瞄准具——包括 ini 改成 0 后的下一帧。
-   - 不动：没人驾驶的载具上的空座位（玩家下机后，这个座位的红线保持隐藏，没人看得见；玩家再坐上来时按上面两条处理）、
-     远程玩家（`Rider::other`）。这和以前完全一样，只是把原来的「改写 rider 再判断」拆成了显式的三种结果。
+   - 不动：远程玩家（`Rider::other`）。（2026-10-14 前「没人驾驶的载具上的空座位」也在这里，见文末同日一节：
+     空座位现在一律隐藏。）
    - 瞄准具只认「线现在被隐藏」的炮（`crew.cpp` `HiddenAimGuns`：座位武器里有 `WeaponAimLine` 且段数为 0），所以输入钩子里
      `HeliSightFrame` 排在 `AimLines` 之后（`tools/selftest.py` `heli_sight_after_aim_lines` 检查顺序）。原版就没有红线的炮
      （`V_409HELI_GATLING01` 的 `custom_parameter` 为空）没有可替换的东西，不画瞄准具。
@@ -63,3 +63,14 @@
 - 远程玩家（`Rider::other` 且是某台机器的玩家）仍「不动」，与原来一致。
 - 测试：`tools/aim_line_want_check.cpp`（9 项，含「旧判据会把真实机组的线留着」以复现报告）；selftest `aim_lines_hide_real_crews` 钉住接线（变异：`npcDriven` 退回只认替身、`LineHolder` 退回只认替身，两处都变红）。
 - 未实测：没有进游戏看。
+
+## 2026-10-14：没人坐的飞机仍有红线
+
+用户：「飞机在外面会有红色预瞄线」。
+
+- 根因：`aim_line_want.h` `Want` 对空座位只在「驾驶座是 NPC」（`NpcDriver`）时隐藏，其余「不动」；`Weapon_VehicleShoot`
+  构造时段数就大于 0，从没被隐藏过的空座位原版照常画线。于是请求来的空机、插件自己飞的无人机（座位全空，`JetFliesItself`）、
+  机组还在走去登机的支援机，红线都一直画着。
+- 修复：空座位一律隐藏（谁驾驶都一样，空座位上没有人需要这条线）；`npcDriven` 参数随之删除。玩家坐上来时仍按「隐藏 / 恢复」
+  两条处理（`SetLine` 记着段数，`EnsurePoints` 后写回）。离线：`tools/aim_line_want_check.cpp` 新增空座位与旧规则复现两条。
+- 已知限制：每辆载具最多记 12 条被隐藏的线（`crew.cpp` `kLinesPerVehicle`），超出的线保持原样。

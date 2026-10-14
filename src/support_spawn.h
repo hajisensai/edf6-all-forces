@@ -33,10 +33,10 @@ constexpr const SupportVehicleSpec* SupportVehicleInfo(SupportVehicleKind kind) 
 constexpr bool SupportVehicleModeAvailable(SupportCrewMode mode) noexcept {
     return mode==SupportCrewMode::soldiers || mode==SupportCrewMode::unmanned;
 }
+// Underground none of these hulls (support_policy.h Allowed: only soldiers walk in there; the drill tank is a request).
 constexpr bool SupportVehicleEnvironmentAllowed(SupportVehicleKind kind,SupportEnvironment env) noexcept {
     const auto row=SupportVehicleInfo(kind);
-    return row && (env==SupportEnvironment::surface || env==SupportEnvironment::underground ||
-                   (env==SupportEnvironment::wasteland && row->wasteland));
+    return row && (env==SupportEnvironment::surface || (env==SupportEnvironment::wasteland && row->wasteland));
 }
 // Called on the mission's preload thread; clears last mission's readiness before native preloads.
 void PreloadSupportVehicles() noexcept;

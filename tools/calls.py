@@ -41,6 +41,11 @@ class Call:
     jet: str = ''
     # ...or the pylib/vcobjects.py GROUND_VEHICLES entry it brings (a vehicle request of a ground vehicle; `mark` 0).
     ground: str = ''
+    # A vehicle request the game lets the player use underground (its SGO's use_underground, the native weapon +0x228
+    # that EDF.dll 0x690DB0 reads with the scene's underground flag). Underground only the drill tank comes (the user,
+    # 2026-10-14: 「地底也能召唤飞机……应该只能召唤地底的钻地战车这种」): every other request is written 0, whatever its
+    # template had (the Freed bike's, the sidecar's template, is 1).
+    underground: bool = False
     # brings 'throw': the drone its bomb releases (src/crew.h ThrownDrone); `mark` is then throw_mark(code).
     drone: str = ''
 
@@ -120,7 +125,8 @@ CALLS: tuple[Call, ...] = (
     Call('EDF6VC_CALL_ARTILLERY', 0, 'artillery', False, 0, 8000, 1.2, 'vehicle', vehicle='EDF6VC_ARTILLERY',
          ground='artillery'),
     # Appended 2026-10-05: the drill tank (tools/make_drill.py, src/drill.cpp), requested like the Blacker.
-    Call('EDF6VC_CALL_DRILL', 0, 'drill', False, 0, 7000, 1.0, 'vehicle', vehicle='EDF6VC_DRILL', ground='drill'),
+    Call('EDF6VC_CALL_DRILL', 0, 'drill', False, 0, 7000, 1.0, 'vehicle', vehicle='EDF6VC_DRILL', ground='drill',
+         underground=True),
     # Appended 2026-10-05: Robot Bombs (clones of the stock Patroller, eWeapon217) whose bomb releases one of the
     # plugin's drones where it lands (src/airstrike.cpp kThrows, src/jet_spawn.cpp JetLaunchThrown).
     Call('EDF6VC_CALL_THROW_BLAST', throw_mark(0xD61), 'throw_blast', False, 6, 900, 1.2, 'throw', 'thrown blast drone', 90,

@@ -60,7 +60,7 @@ HUDTEXT(scopeFovMedium,L"MFOV %.0fx",L"中视场 %.0fx",L"中視場 %.0fx",L"中
 HUDTEXT(scopeFovWide,L"WFOV %.0fx",L"宽视场 %.0fx",L"寬視場 %.0fx",L"広視野 %.0fx")
 HUDTEXT(gunnerShells,L"SHELLS",L"炮弹",L"砲彈",L"砲弾")
 HUDTEXT(gunnerCannon,L"CANNON",L"加农炮",L"加農砲",L"キャノン")
-HUDTEXT(gunnerGatling,L"GATLING",L"加特林",L"加特林",L"ガトリング")
+HUDTEXT(gunnerGatling,L"GATLING",L"加特林机枪",L"加特林機槍",L"ガトリング")
 HUDTEXT(gunnerNoGround,L"%ls   NO GROUND IN SIGHT",L"%ls   视野内没有地面",L"%ls   視野內沒有地面",L"%ls   地面が見えない")
 HUDTEXT(gunnerOutOfRange,L"%ls   %d m   OUT OF RANGE",L"%ls   %d m   超出射程",L"%ls   %d m   超出射程",L"%ls   %d m   射程外")
 HUDTEXT(gunnerReady,L"%ls   %d m   READY",L"%ls   %d m   就绪",L"%ls   %d m   就緒",L"%ls   %d m   発射可")
@@ -357,6 +357,8 @@ HUDTEXT(boardingHailing,L"CALLED: LANDING  %d m",L"已呼叫：正在降落  %d 
 HUDTEXT(controlUnbound,L"unbound",L"未绑定",L"未綁定",L"未割当")
 HUDTEXT(controlStores,L"[%ls] stores",L"[%ls] 切换挂载",L"[%ls] 切換掛載",L"[%ls] 兵装切替")
 HUDTEXT(controlTarget,L"[%ls] next target",L"[%ls] 切换目标",L"[%ls] 切換目標",L"[%ls] 目標切替")
+HUDTEXT(controlGuns,L"[%ls] switch gun",L"[%ls] 切换火炮",L"[%ls] 切換火砲",L"[%ls] 火砲切替")
+HUDTEXT(controlGatlingHold,L"[%ls] hold: gatling",L"[%ls] 按住：加特林机枪",L"[%ls] 按住：加特林機槍",L"[%ls] 長押し：ガトリング")
 HUDTEXT(controlFlares,L"[%ls] flares",L"[%ls] 热诱弹",L"[%ls] 熱誘彈",L"[%ls] フレア")
 HUDTEXT(controlFlaresKeyboard,L"[keyboard %ls] flares",L"[键盘 %ls] 热诱弹",L"[鍵盤 %ls] 熱誘彈",L"[キーボード %ls] フレア")
 

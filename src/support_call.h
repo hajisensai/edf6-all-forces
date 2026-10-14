@@ -105,6 +105,10 @@ bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capac
 bool SupportSubCallAt(const float* target,const float* from,bool local,wchar_t* note,std::size_t capacity) noexcept;
 // The entries the map's support bar offers and cycles (mapcmd.cpp): every one but the sea rescue, the catalog's last.
 int SupportMenuCount() noexcept;
+// Why the mission's rules (support_policy.h Allowed) keep entry `index` from coming now, nullptr when they let it: the
+// bar shows such an entry dimmed and does not arm it, and a request of it is refused at once. Underground only soldiers
+// (the user, 2026-10-14: 「只留步兵+钻地车」; the drill tank is the Air Raider's vehicle request). Not the rescue's.
+const wchar_t* SupportCallForbidden(int index) noexcept;
 // The sea rescue (2026-10-09, the user: 「给救援加一个支援目录项，走正规的呼叫支援流程」): the catalog's last entry,
 // after the airdrops, so every older index keeps its meaning on the wire. heli.cpp's trigger (a local player on foot in
 // the sea, a submarine carrier out) asks for it at the swimmer through the same request path as a map call: offline /
