@@ -60,7 +60,7 @@ compose = C.WINFUNCTYPE(None, C.c_void_p, C.c_void_p)(base+0x1100B90)
 partial = C.WINFUNCTYPE(None, C.c_void_p, C.c_int)(base+0x1100010)
 try:
     checked = 0
-    for spec in optics.MODELS:
+    for spec in (s for s in optics.MODELS if s.lenses):   # cockpit-only models have no optic tree (nor always an SGO)
         stock = mdb_read(next(f for f in rab_read(game.read('OBJECT', spec.stem+'.MRAB')).files
                               if f.name.lower() == spec.stem.lower()+'.mdb').data)
         md = mdb_read(mdb_write(optics.mark_model(stock, spec, game.read('OBJECT', spec.stem+'.SGO'))))
@@ -88,9 +88,12 @@ try:
         root = ident()
         root[12:15] = [10.,20.,30.]
         put(pose, '<16f', *root)
-        compose(inst, pose)
         expected = bind_world(md)
         for lens in spec.lenses:
+            # Each lens from a fresh full pose: the previous lens's simulated turret turn
+            # moves every marker under its parent (403's main sight sits on the turret,
+            # above both machine guns' markers).
+            compose(inst, pose)
             i = md.bone_index(lens.marker)
             result = matrix(records+i*0x110+0xB0)
             want = mmul(expected[i], root)
@@ -98,7 +101,6 @@ try:
             checked += 1
             # Simulate the real turret updater writing its parent's world,
             # then only refreshing that parent's contiguous descendants.
-            compose(inst, pose)
             parent = md.bones[i].parent
             turn = [0.,0.,-1.,0., 0.,1.,0.,0., 1.,0.,0.,0., 0.,0.,0.,1.]
             moved = mmul(turn, matrix(records+parent*0x110+0xB0))
