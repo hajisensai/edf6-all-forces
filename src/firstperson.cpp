@@ -202,7 +202,8 @@ struct alignas(16) Flash { float m[16]; const float* src; int age,hand; };
 Flash flashes[kFlashSlots]{};
 int flashNext=0;
 using CreateFn=void*(__fastcall*)(void*,void*,void*,void*);
-bool toggled=false,keyWas=false,keyRode=false,keyCancelled=false;   // keyRode: riding when the key went down
+std::atomic<bool> toggled{false};   // read by FirstPersonGunnerSight on the draw thread too
+bool keyWas=false,keyRode=false,keyCancelled=false;   // keyRode: riding when the key went down
 int passLog[2][6]{};   // the body's draws, the weapons' in hand, by pass
 ULONGLONG passLogAt=0;
 
@@ -315,7 +316,7 @@ void Toggle(const unsigned char* h) noexcept {
     if(keyCancelled){if(!down)keyCancelled=false;return;}
     const bool riding=h && !HumanOnFoot(h);
     if(down && !keyWas)keyRode=riding;
-    if(!down && keyWas && keyRode==riding){toggled=!toggled;Log("FP %s (key 0x%X)",toggled ? "on" : "off",c.firstPersonKey);}
+    if(!down && keyWas && keyRode==riding){const bool on=!toggled.load();toggled.store(on);Log("FP %s (key 0x%X)",on ? "on" : "off",c.firstPersonKey);}
     keyWas=down;
 }
 
@@ -1112,7 +1113,7 @@ bool InstallFirstPerson() noexcept {
     placeOk=placeOk && RedirectCall(image+kRenderCall,image+kRender,reinterpret_cast<void*>(&RenderHook),changed);
     const bool passOk=placeOk && RedirectCall(image+kPassEndCall,image+kPassEnd,reinterpret_cast<void*>(&PassEndHook),changed);
     toggled=Cfg().firstPersonStart;
-    Log("FP installed: camera=%d draw=%d flash=%d aim line=%d culling=%d pass=%d start=%d",camOk,drawOk,flashOk,lineOk,placeOk,passOk,toggled);
+    Log("FP installed: camera=%d draw=%d flash=%d aim line=%d culling=%d pass=%d start=%d",camOk,drawOk,flashOk,lineOk,placeOk,passOk,toggled.load());
     return drawOk;
 }
 }  // namespace crew

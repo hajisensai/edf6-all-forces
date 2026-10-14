@@ -138,10 +138,15 @@ SHORT WINAPI KeyState(int vk) {
 // never reach them. Not through their import slots any more: another module rewrites those after the game starts
 // (measured: EDF6VehicleCrew's GetAsyncKeyState slot replaced 2.1 s in, the desktop's M, I, V and Esc then reached it).
 // A plugin built before the export gets the import slots as before, checked again every second.
+// V2 hands the virtual pad over too (EDF6VehicleCrew's map reads the pad through its own XInput, which the virtual pad
+// above does not reach: the user's real pad did instead).
 using SetInputSourceFn=void(__cdecl*)(AsyncKeyFn,HWND(WINAPI*)());
-struct PluginInput { const wchar_t* module; const char* setter; bool handed,patched; };
-PluginInput pluginInputs[]={{L"EDF6VehicleCrew.dll","EDF6VehicleCrew_SetInputSourceV1",false,false},
-                            {L"EDF6AutoTurret.dll","EDF6AutoTurret_SetInputSourceV1",false,false}};
+using SetInputSourceV2Fn=void(__cdecl*)(AsyncKeyFn,HWND(WINAPI*)(),DWORD(WINAPI*)(DWORD,void*));
+DWORD WINAPI FakeXInputGetState(DWORD user,struct PadState* state);
+DWORD WINAPI PadSource(DWORD user,void* state){return FakeXInputGetState(user,static_cast<PadState*>(state));}
+struct PluginInput { const wchar_t* module; const char* setter; const char* setterV2; bool handed,patched; };
+PluginInput pluginInputs[]={{L"EDF6VehicleCrew.dll","EDF6VehicleCrew_SetInputSourceV1","EDF6VehicleCrew_SetInputSourceV2",false,false},
+                            {L"EDF6AutoTurret.dll","EDF6AutoTurret_SetInputSourceV1",nullptr,false,false}};
 ULONGLONG slotCheckAt=0;
 void PluginInputTick() noexcept {
     const ULONGLONG now=GetTickCount64();
@@ -151,6 +156,12 @@ void PluginInputTick() noexcept {
         if(p.handed)continue;
         const HMODULE m=GetModuleHandleW(p.module);
         if(!m)continue;
+        if(const auto set=p.setterV2 ? reinterpret_cast<SetInputSourceV2Fn>(GetProcAddress(m,p.setterV2)) : nullptr) {
+            set(&KeyState,&Foreground,&PadSource);
+            p.handed=true;
+            Log("BACKGROUND %ls's input handed over, the virtual pad too (%s)",p.module,p.setterV2);
+            continue;
+        }
         if(const auto set=reinterpret_cast<SetInputSourceFn>(GetProcAddress(m,p.setter))) {
             set(&KeyState,&Foreground);
             p.handed=true;

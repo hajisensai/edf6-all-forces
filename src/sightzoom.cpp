@@ -309,7 +309,9 @@ void SightZoomFrame(unsigned char* v,unsigned seat,bool padButton) noexcept {
     toggle.held=down;
     // The range setting, while the sight is magnified: the wheel (swallowed then: map.cpp TakeScopeWheel) and the
     // keys on the keyboard and mouse, the d-pad on a pad; one step a notch or a press (sightzoom.h NextZero).
-    const bool scoped=sightzoom::At(toggle.step)>1.0f;
+    // At 1x too in a vehicle's first person (War Thunder's gunner sight: its range is set at any magnification; the
+    // sight lays the gun by it, so a range that could not be turned there left the rounds short of the reticle).
+    const bool scoped=sightzoom::At(toggle.step)>1.0f || FirstPersonGunnerSight();
     int notches=TakeScopeWheel(scoped);   // the wheel whichever input the seat is on (a pad player's mouse too)
     const bool up=scoped && keys && KeyHeld(c.sightRangeUpKey),downKey=scoped && keys && KeyHeld(c.sightRangeDownKey);
     notches+=(up && !toggle.upHeld ? 1 : 0)-(downKey && !toggle.downHeld ? 1 : 0);

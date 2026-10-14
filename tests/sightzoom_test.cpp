@@ -287,6 +287,9 @@ int wmain(int argc,wchar_t** argv){
     // magnified; each notch a step of the graduated drum (25 m to 300, 50 m to 1000, 100 m beyond) up to the round's reach;
     // the camera's line of sight is laid under the bore by
     // the round's superelevation for that range, the setting kept across the seat's weapons and dropped with the seat.
+    Setup();gunnerSight=true;roundSpeed=10.0f;roundFactor=1.0f;Button(0);
+    Check(wheelHeld,"first person at 1x: the gunner's sight takes the wheel (its range)");
+    wheelNotches=3;Button(0);Check(SightZoomRange(vehicle)==75,"first person at 1x: three notches set 75 m, as magnified");
     Setup();Button(0);Check(!wheelHeld,"at 1x the wheel stays the game's");
     roundSpeed=10.0f;roundFactor=1.0f;Zoom();Check(wheelHeld,"magnified, the sight takes the wheel");
     wheelNotches=3;Button(0);float angle=0.0f;

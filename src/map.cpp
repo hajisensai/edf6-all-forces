@@ -230,12 +230,14 @@ bool PadState(XINPUT_STATE* s) noexcept {
         if(m)xinputGet=reinterpret_cast<XInputGetStateFn>(GetProcAddress(m,"XInputGetState"));
         Log("MAP XInput %s",xinputGet ? "found" : "not found: no pad on the map");
     }
-    if(!xinputGet)return false;
-    if(xinputGet(padIndex,s)==ERROR_SUCCESS)return true;
+    // A background host's pad instead (edf/input_source.h): the desktop's real pad never reaches a background game.
+    const auto get=edf::PadSource() ? reinterpret_cast<XInputGetStateFn>(edf::PadSource()) : xinputGet;
+    if(!get)return false;
+    if(get(padIndex,s)==ERROR_SUCCESS)return true;
     const ULONGLONG now=GetTickCount64();
     if(now-padSearchAt<2000)return false;
     padSearchAt=now;
-    for(DWORD i=0;i<XUSER_MAX_COUNT;++i)if(xinputGet(i,s)==ERROR_SUCCESS){padIndex=i;return true;}
+    for(DWORD i=0;i<XUSER_MAX_COUNT;++i)if(get(i,s)==ERROR_SUCCESS){padIndex=i;return true;}
     return false;
 }
 float Stick(SHORT v) noexcept {

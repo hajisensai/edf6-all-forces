@@ -629,6 +629,7 @@ add_test(NAME cockpit_build COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}
 set_tests_properties(cockpit_build PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 3600)
 add_test(NAME cabin_view COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cabin_view_test.py")
 add_test(NAME gltf_glb COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/gltf_glb_test.py")
+add_test(NAME input_source_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/input_source_guard_test.py")
 add_test(NAME support_config_ini COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/support_config_ini_test.py")
 # The menu prints Chinese: UTF-8 like the workflow's other Python steps, not the runner's cp1252 console.
 set_tests_properties(support_config_ini PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
