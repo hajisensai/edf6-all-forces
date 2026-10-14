@@ -319,8 +319,8 @@ struct Config {
     bool edf41Ai=true;              // EDF4.1 Hector's weapon gating and back-off cycle on the converted Hectors (edf41ai.cpp)
     float edf41MotherPlace=0.0f;    // development only: the mothership held this many m in front of the camera each frame (0 = its route), to see it
     bool edf41MotherBulletProbe=false;   // development only: log every bullet class the game spawns and the head of its creation info (edf41mother.cpp)
-    int edf41MotherParts=15;        // development only: which part groups the mothership builds as real objects (bit 1 hatches, 2 covers, 4 cannons, 8 main cannon, 16 panels); 0 = none
-    bool edf41MotherDev=false;      // development only: EDF4.1's UfoMother301 prototype (edf41mother.cpp); off in every release
+    int edf41MotherParts=31;        // which part groups the mothership builds as real objects (bit 1 hatches, 2 covers, 4 cannons, 8 main cannon, 16 panels); 0 = none
+    bool edf41Mother=true;          // EDF4.1's UfoMother301 and its part classes (edf41mother.cpp)
     bool edf41Sound=true;           // EDF4.1's weapon sound effects and voices added to EDF6's banks (edf41sound.cpp), from the game's start
     bool edf41VoiceProbe=false;     // development only: log each voice key the game looks up in each bank and each caption it finds (edf41sound.cpp)
     bool terrainShare=true;         // every placement of one terrain piece drawn from one decode (fieldshare.cpp), from the game's start
@@ -505,7 +505,7 @@ bool InstallEdf41SmallDragon() noexcept;
 bool InstallEdf41Insects() noexcept;
 // edf41natives.cpp: EDF4.1 script natives EDF6's BVM executor lacks (SetEncountReportRadius as table 1 id 3003).
 bool InstallEdf41Natives() noexcept;
-// edf41mother.cpp: UfoMother301 (EDF4.1's mothership), phase 1 prototype, only with ini Edf41MotherDev=1.
+// edf41mother.cpp: UfoMother301 (EDF4.1's mothership) and its part classes, registered in the game's own factory table.
 bool InstallEdf41Mother() noexcept;
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
 bool InstallMissiles() noexcept;

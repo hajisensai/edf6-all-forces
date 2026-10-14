@@ -7041,22 +7041,18 @@ def edf41_objects_shipped() -> None:
 
 @test
 def edf41_motherships_not_faked() -> None:
-    """docs/edf5-weapons-plan.md 8.1: EDF6 has no class that does UfoMother301 / UfoMother401's job (only the UfoMother511
-    family, a ring of units; 4.1's are part lists and a panel grid), so nothing of them is registered: no object of a
-    UfoMother class (an alias on 511 would be a look-alike), no 4.1 mothership SGO, and every mission script that names
-    one names a file the registry lacks, which is what keeps make_edf5_campaign.plan41 skipping it (a mission let through
-    would start without its ship). A native class landing makes this fail on purpose: delete it together with 8.1."""
+    """EDF6 has no class that does UfoMother401's job (4.1's panel grid; the EDF6 UfoMother511 family is a ring of units), and
+    the plugin implements none yet: nothing of it is registered, and every mission script that names one names a file the
+    registry lacks, which is what keeps make_edf5_campaign.plan41 skipping it (a mission let through would start without its
+    ship). UfoMother301 is the plugin's own class (src/edf41mother.cpp): its SGO keeps 4.1's class name and is registered
+    (edf41_mother_plugin_contract)."""
     import edf41_objects as eo
     import make_edf5_campaign as mc
-    saved = os.environ.pop(eo.DEV_ENV, None)   # the development switch (edf41_mother_dev_isolated) is not this check's business
-    try:
-        reg = eo.registry()
-    finally:
-        if saved is not None:
-            os.environ[eo.DEV_ENV] = saved
+    reg = eo.registry()
     assert reg['objects'], 'no object registered: this check is empty'
-    assert not [o['object'] for o in reg['objects'] if o['class'].startswith('UfoMother')], 'a mothership alias'
-    assert not [rel for rel in reg['files'] if rel.upper().startswith('OBJECT/UFOMOTHER')], 'a mothership file shipped'
+    mothers = {o['object']: o['class'] for o in reg['objects'] if o['class'].startswith('UfoMother')}
+    assert mothers == {'OBJECT/UFOMOTHER301.SGO': 'UfoMother301'}, mothers
+    assert not [rel for rel in reg['files'] if rel.upper().startswith('OBJECT/UFOMOTHER401')], 'a 401 mothership file shipped'
     named = {}
     root = os.path.join(ROOT, 'edf41port', 'missions')
     for mid in sorted(os.listdir(root)):
@@ -7067,115 +7063,45 @@ def edf41_motherships_not_faked() -> None:
     assert len(named) == 21, f'the missions naming a mothership changed: {sorted(named)}'
     for mid, refs in named.items():
         for ref in refs:
-            assert ('OBJECT/' + ref.rsplit('/', 1)[-1]).upper() not in reg['files'], (mid, ref)
-
-
-@test
-def edf41_mother_dev_isolated() -> None:
-    """The UfoMother301 prototype (docs/edf41-ufomother301.md phase 1) cannot reach a release: its data is built only by
-    `make_edf41_objects.py --mother-dev` into edf41port_dev/ (git-ignored; tools/build_release.py bundles the edf41port files
-    one by one and never names it); the committed registry and the generator's default roots have no mothership; the install
-    adds the dev objects only from the source tree with EDF41_MOTHER_DEV=1 and the folder present, never in the frozen
-    installer; the plugin's switch is off by default and the shipped ini says 0."""
-    import make_edf41_objects as m
-    import edf41_objects as eo
-    gitignore, release = src('.gitignore'), src('tools/build_release.py')
-    assert re.search(r'^edf41port_dev/$', gitignore, re.M), '.gitignore must list edf41port_dev/'
-    assert 'edf41port_dev' not in release, 'the release bundle must not name the development folder'
-    assert not re.search(r'"edf41port"\)\}\{seps\}', release), 'build_release must not bundle the whole edf41port folder'
-    assert not any('MOTHER' in r.upper() for r in m.ROOTS) and not any('MOTHER' in r.upper() for r in m.ALIASES)
-    assert os.path.basename(os.path.normpath(m.MOTHER_DEV_OUT)) == 'edf41port_dev' and m.MOTHER_DEV_ROOT == 'UFOMOTHER301.SGO'
-    assert not any('MOTHER' in rel.upper() for rel in json.load(open(os.path.join(ROOT, 'edf41port', 'objects.json'), encoding='utf-8'))['files'])
-    plugin, crew, ini = src('src/plugin.cpp'), src('src/crew.h'), src('EDF6VehicleCrew.ini')
-    assert 'bool edf41MotherDev=false;' in crew and 'ReadBool(L"Edf41MotherDev"' in plugin
-    assert re.search(r'^Edf41MotherDev=0$', ini, re.M), 'the shipped ini must say Edf41MotherDev=0'
-    saved = os.environ.pop(eo.DEV_ENV, None)
-    frozen = getattr(sys, 'frozen', None)
-    try:
-        assert not eo.dev_enabled(), 'no variable: no dev objects'
-        os.environ[eo.DEV_ENV] = '1'
-        sys.frozen = True   # type: ignore[attr-defined]
-        assert not eo.dev_enabled(), 'the frozen installer never adds dev objects'
-    finally:
-        if frozen is None:
-            del sys.frozen   # type: ignore[attr-defined]
-        else:
-            sys.frozen = frozen   # type: ignore[attr-defined]
-        os.environ.pop(eo.DEV_ENV, None)
-        if saved is not None:
-            os.environ[eo.DEV_ENV] = saved
+            rel = ('OBJECT/' + ref.rsplit('/', 1)[-1]).upper()
+            assert (rel in reg['files']) == (rel == 'OBJECT/UFOMOTHER301.SGO'), (mid, ref)
 
 
 @test
 def edf41_mother_plugin_contract() -> None:
     """src/edf41mother.cpp is built, installed and agrees with the data: the class name its factory answers with is the one the
-    generator's SGO carries, the dev switch gates the install, and every EDF.dll function it calls is checked against its
-    bytes (kPrints) before anything is hooked or called."""
+    generator's SGO carries (and the registry's), the ini switch Edf41Mother (on by default, shipped 1) gates the install, the
+    development folder and environment switch are gone, and every EDF.dll function it calls is checked against its bytes
+    (kPrints) before anything is hooked or called."""
+    import edf41_objects as eo
     import make_edf41_objects as m
     cpp, plugin, cmake = src('src/edf41mother.cpp'), src('src/plugin.cpp'), src('CMakeLists.txt')
     assert 'src/edf41mother.cpp' in cmake and 'InstallEdf41Mother();' in plugin
-    assert f'L"{m.MOTHER_DEV_ALIAS.cls}"' in cpp, 'the factory must answer with the class name the SGO carries'
-    assert 'if(!Cfg().edf41MotherDev)' in cpp.split('bool InstallEdf41Mother()', 1)[1].split('BuildClone', 1)[0]
-    for rva in ('kRegisterAllSite', 'kRegisterAll', 'kRegisterFactory', 'kNew', 'kCarrierCtor'):
-        assert re.search(rf'\{{{rva},\{{0x', cpp), f'{rva} has no fingerprint in kPrints'
-    assert cpp.count('Rd(') >= 8 and 'Readable(image+p.rva,8)' in cpp
+    assert f'L"{m.MOTHER301_ALIAS.cls}"' in cpp, 'the factory must answer with the class name the SGO carries'
+    assert m.ROOTS[m.MOTHER301_ROOT] and m.ALIASES[m.MOTHER301_ROOT] is m.MOTHER301_ALIAS
+    assert any(o['object'] == 'OBJECT/' + m.MOTHER301_ROOT and o['class'] == m.MOTHER301_ALIAS.cls
+               for o in eo.registry()['objects'])
+    assert 'if(!Cfg().edf41Mother)' in cpp.split('bool InstallEdf41Mother()', 1)[1].split('BuildClone', 1)[0]
+    crew, ini = src('src/crew.h'), src('EDF6VehicleCrew.ini')
+    assert 'bool edf41Mother=true;' in crew and 'ReadBool(L"Edf41Mother"' in plugin
+    assert re.search(r'^Edf41Mother=1$', ini, re.M) and re.search(r'^Edf41MotherParts=31$', ini, re.M)
+    assert not hasattr(eo, 'DEV_ENV') and not hasattr(m, 'MOTHER_DEV_OUT')
+    assert 'edf41port_dev' not in src('tools/build_release.py') + src('tools/installer.py')
+    shared = src('src/edf41classes.cpp')   # the factory registration and the clones (shared with the other 4.1 classes)
+    assert 'src/edf41classes.cpp' in cmake and '#include "edf41classes.h"' in cpp
+    for rva in ('kRegisterAllSite', 'kRegisterAll', 'kRegisterFactory', 'kNew', 'kCarrierCtor', 'kEaoCtor'):
+        assert re.search(rf'\{{{rva},\{{0x', shared), f'{rva} has no fingerprint in kPrints'
+    assert cpp.count('Rd(') >= 8 and 'Readable(image+p.rva,8)' in shared
     # The DSGO accessors (0xD7480 ...) fault on a plain SGO such as this object's (EDF+0xD74D9, 2026-10-13): never called here.
-    code = re.sub(r'//[^\n]*', '', cpp)   # comments may name the accessors; the code must not call them
+    code = re.sub(r'//[^\n]*', '', cpp + shared)   # comments may name the accessors; the code must not call them
     assert not re.search(r'0xD7480|kChildByName|0x53060|0x52DE0|0x52F30|0x551E0', code)
-    assert m.MOTHER_DEV_ALIAS.template == 'E508_CARRIER.SGO' and 'UfoCarrier508' in cpp
+    assert m.MOTHER301_ALIAS.template == 'E508_CARRIER.SGO' and 'UfoCarrier508' in cpp
     # The clone is the stock class: built from the file's table, not the live one this plugin patches (carrierlaser.cpp
     # ShipAiHook takes slot 7 of the same vtable; the 2026-10-13 real run turned the prototype off on it).
-    stock = [int(x, 16) for x in re.search(r'kStockSlots\[kSlots\]=\{([^}]*)\}', cpp).group(1).replace('\n', ' ').split(',')]
+    stock = [int(x, 16) for x in re.search(r'kCarrierSlots\[49\]=\{([^}]*)\}', shared).group(1).replace('\n', ' ').split(',')]
     laser = src('src/carrierlaser.cpp')
     ai, slot = (int(re.search(rf'{k}=(\w+)', laser).group(1), 0) for k in ('kShipAi', 'kShipAiSlot'))
     assert len(stock) == 49 and stock[slot] == ai, (len(stock), slot)
-    assert 'GetModuleHandleExW' in cpp and 'is outside EDF.dll' not in cpp
-
-
-@test
-def edf41_mother_dev_registry_and_flag() -> None:
-    """With the switch on (variable, source tree, folder) edf41_objects.registry() holds the dev objects and read() takes
-    their bytes from the dev folder (what make_edf5_campaign.plan41 then lets M016 through on); set_dev_flag writes
-    Edf41MotherDev=1 / 0 into the game's ini and leaves every other line and a missing ini alone."""
-    import hashlib
-    import edf41_objects as eo
-    payload = b'SGO dev object'
-    with tempfile.TemporaryDirectory() as tmp:
-        dev = os.path.join(tmp, 'dev')
-        os.makedirs(os.path.join(dev, 'objects', 'OBJECT'))
-        with open(os.path.join(dev, 'objects', 'OBJECT', 'UFOX.SGO'), 'wb') as f:
-            f.write(payload)
-        with open(os.path.join(dev, 'objects.json'), 'w', encoding='utf-8') as f:
-            json.dump({'objects': [{'object': 'OBJECT/UFOX.SGO', 'class': 'UfoMother301', 'missions': 1, 'files': ['OBJECT/UFOX.SGO']}],
-                       'files': {'OBJECT/UFOX.SGO': hashlib.sha256(payload).hexdigest()}, 'shared': {}, 'skipped': []}, f)
-        saved_dir, saved_env = eo.DEV_DIR, os.environ.get(eo.DEV_ENV)
-        try:
-            eo.DEV_DIR = dev
-            os.environ.pop(eo.DEV_ENV, None)
-            assert 'OBJECT/UFOX.SGO' not in eo.registry()['files']
-            os.environ[eo.DEV_ENV] = '1'
-            reg = eo.registry()
-            assert 'OBJECT/UFOX.SGO' in reg['files'] and reg['dev'] == ['OBJECT/UFOX.SGO'], reg.get('dev')
-            assert any(o['object'] == 'OBJECT/UFOX.SGO' for o in reg['objects'])
-            assert eo.read('OBJECT/UFOX.SGO') == payload
-            assert len(reg['objects']) == len(json.load(open(eo.REGISTRY, encoding='utf-8'))['objects']) + 1
-        finally:
-            eo.DEV_DIR = saved_dir
-            os.environ.pop(eo.DEV_ENV, None)
-            if saved_env is not None:
-                os.environ[eo.DEV_ENV] = saved_env
-        game = os.path.join(tmp, 'game')
-        assert eo.set_dev_flag(game, True) is None, 'no ini: nothing written'
-        path = os.path.join(game, eo.DEV_INI)
-        os.makedirs(os.path.dirname(path))
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write('[VehicleCrew]\nEdf41Ai=1\nEdf41MotherDev=0\n[Other]\nEdf41MotherDev=5\n')
-        assert eo.set_dev_flag(game, True) == path
-        text = open(path, encoding='utf-8').read()
-        assert 'Edf41MotherDev=1' in text and 'Edf41Ai=1' in text and '[Other]\nEdf41MotherDev=5' in text, text
-        assert eo.set_dev_flag(game, True) is None, 'already 1'
-        assert eo.set_dev_flag(game, False) == path and 'Edf41MotherDev=0' in open(path, encoding='utf-8').read()
-        assert eo.set_dev_flag(game, False) is None
 
 
 @test

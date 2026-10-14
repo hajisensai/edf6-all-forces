@@ -33,6 +33,7 @@
 //     it had when this was written, every game pointer goes through Readable, and a failure is logged and the stock
 //     path is left alone.
 #include "crew.h"
+#include "edf41classes.h"
 #include "memory.h"
 
 #include <algorithm>
@@ -49,95 +50,27 @@
 
 namespace crew {
 namespace {
-constexpr std::size_t kRegisterAllSite=0x701859;      // call 0x79D570 in the start-up routine
-constexpr std::size_t kRegisterAll=0x79D570;          // registers the game's scene object factories
-constexpr std::size_t kRegisterFactory=0x119AF00;     // RegisterSceneObjectFactory(manager, shared_ptr<Factory>*)
-constexpr std::size_t kGetFactory=0x1195C50;          // GetSceneObjectFactory(manager, const wchar_t* name)
-constexpr std::size_t kManagerGlobal=0x20B2958;       // the manager (xgs::game::System's scene object registry)
-constexpr std::size_t kNew=0x12D85B0;                 // the game's operator new(size)
-constexpr std::size_t kCarrierCtor=0x4F8690;          // UfoCarrier508::UfoCarrier508(this, createInfo)
-constexpr std::size_t kCarrierVtable=0x17C9DC0;       // its primary vtable
-constexpr std::size_t kCarrierSize=0x1630;
+using namespace edf41c;
+constexpr std::size_t kManagerGlobal=0x20B2958;       // the scene system
 constexpr std::size_t kCreateFromPath=0x11945E0;      // Object* (manager, const float matrix[16], const wchar_t* sgoPath, CreateContext*)
 constexpr std::size_t kSgoKey=0x528A0;                // node* (SgoRoot* = object+0xA0, const wchar_t* key); null when the key is absent
 constexpr std::size_t kDeleteObject=0x118A1B0;        // marks a scene object deleted (bit 4 of +0x18); what the script's DeleteObject does
 constexpr std::size_t kCreateContextVtable=0x1762068; // the 0x30-byte context the script natives and UfoMother511 hand to the creation
 constexpr std::size_t kSetCasState=0x116C2D0;         // bool (CasPlayers* = object+0x8F0, int player = [object+0xC80], const wchar_t* state, int)
 constexpr std::size_t kCasAt=0x8F0,kCasPlayerAt=0xC80;
-constexpr std::size_t kSgoAt=0xA0,kMatrixAt=0x60,kFlagsAt=0x18;
-constexpr std::size_t kPartCtor=0x5B5FB0;             // EventAnimationObject::EventAnimationObject(this, createInfo)
-constexpr std::size_t kPartVtable=0x17D4D20;
-constexpr std::size_t kPartSize=0xC90;
 constexpr int kSlots=49,kPartSlots=45;
-constexpr int kSlotDtor=0,kSlotUpdate=5,kSlotMessage=9;
-// EventAnimationObject's vtable 0x17D4D20 as the file has it: the same slot meaning as UfoCarrier508's (0 dtor, 5 Update, 9 OnMessage).
-constexpr std::uint32_t kPartStockSlots[kPartSlots]={
-    0x5B6BB0, 0x5B64F0, 0x54BE10, 0x5B6D10, 0x5B6A10, 0x5B6D20, 0x125270, 0x54A000, 0x54A290, 0x5B6540, 0x54AA50, 0x54A970,
-    0x266BE0, 0x54ABE0, 0x54C4B0, 0x54A330, 0x54AA40, 0x54AA30, 0x54A280, 0x54A510, 0x54A4B0, 0x54AAC0, 0x5B6BA0, 0x266BB0,
-    0x266BC0, 0x266970, 0x54A320, 0x266BF0, 0x54A240, 0x54A260, 0x54A250, 0x54A2E0, 0x266BD0, 0x266960, 0x54F8D0, 0x54F8E0,
-    0x54C800, 0x54CAA0, 0x54C900, 0x267180, 0x54CBE0, 0x54CBC0, 0x54CBD0, 0x54CB60, 0x54C6E0};
-// UfoCarrier508's vtable 0x17C9DC0 as the file has it (slot -> EDF.dll RVA); 7 is the ship AI, 5 Update, 9 OnMessage.
-constexpr std::uint32_t kStockSlots[kSlots]={
-    0x54B010, 0x4F8A70, 0x54BE10, 0x4F9530, 0x4F72F0, 0x4F9540, 0x4F91C0, 0x4F6D70, 0x54A290, 0x4F93E0, 0x54AA50, 0x54A970,
-    0x266BE0, 0x54ABE0, 0x54C4B0, 0x54A330, 0x4F7190, 0x54AA30, 0x4F9250, 0x54A510, 0x54A4B0, 0x54AAC0, 0x54ABD0, 0x266BB0,
-    0x266BC0, 0x266970, 0x54A320, 0x266BF0, 0x54A240, 0x54A260, 0x54A250, 0x54A2E0, 0x266BD0, 0x266960, 0x54F8D0, 0x54F8E0,
-    0x54C800, 0x54CAA0, 0x54C900, 0x267180, 0x54CBE0, 0x54CBC0, 0x54CBD0, 0x54CB60, 0x54C6E0, 0x4F37F0, 0x4F90A0, 0x4F3FD0,
-    0x4F7D30};
 
-constexpr std::size_t kDurabilityAt=0x2F8,kDestroyedAt=0x2E8,kPosAt=0x90;
-constexpr std::uint32_t kMsgDamage=0xF0000000u,kMsgAction=0x1000000Du,kMsgParts=0x10000017u,kMsgGenerator=0x20100u;
 constexpr std::uint32_t kUpdateLogEvery=600;          // frames between the state lines of an object
 constexpr int kMaxMessageKinds=64;
 
-struct Print { std::size_t rva; unsigned char bytes[8]; };
-// The bytes of every EDF.dll function we call or replace, as they are in the build this plugin is for.
-constexpr Print kPrints[]={
-    {kRegisterAllSite,{0xE8,0x12,0xBD,0x09,0x00,0xE8,0xED,0xCF}},
-    {kRegisterAll,{0x40,0x55,0x53,0x56,0x57,0x48,0x8D,0xAC}},
-    {kRegisterFactory,{0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x74}},
-    {kNew,{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B}},
-    {kCarrierCtor,{0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57}},
-    {0x4F8A70,{0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83}},   // slot 0
-    {0x4F9540,{0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83}},   // slot 5
-    {0x4F93E0,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74}},   // slot 9
-    {kCreateFromPath,{0x40,0x55,0x53,0x56,0x57,0x41,0x54,0x41}},
-    {kSgoKey,{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B}},
-    {kDeleteObject,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},
-    {kSetCasState,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},
-    {kPartCtor,{0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57}},
-    {0x5B6BB0,{0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x74}},   // part slot 0
-    {0x5B6D20,{0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83}},   // part slot 5
-    {0x5B6540,{0x48,0x89,0x5C,0x24,0x20,0x55,0x56,0x57}},   // part slot 9
-};
-
-using NewFn=void*(__fastcall*)(std::size_t);
-using CtorFn=void*(__fastcall*)(void*,void*);
-using RegisterFn=void(__fastcall*)(void*,void*);
-using GetFactoryFn=void*(__fastcall*)(void*,const wchar_t*);
-using RegisterAllFn=std::uint64_t(__fastcall*)(void*,void*,void*,void*);
-using DtorFn=std::uint64_t(__fastcall*)(void*,unsigned);
-using UpdateFn=std::uint64_t(__fastcall*)(void*,void*);
-using MessageFn=std::uint64_t(__fastcall*)(void*,std::uint32_t,void*);
 using CreateFromPathFn=void*(__fastcall*)(void*,const float*,const wchar_t*,void*);
 using SgoKeyFn=const void*(__fastcall*)(void*,const wchar_t*);
 using DeleteObjectFn=void(__fastcall*)(void*);
 using BulletSpawnFn=void*(__fastcall*)(void*,const float*,void*,void*);
 
-// A stock class whose vtable is cloned: the table as the file has it, the class's own functions, the clone the objects' vptr points
-// at ([0] the RTTI pointer, then the slots), and a call counter per slot (the counting stubs).
-struct StockClass {
-    const char* tag;
-    std::size_t vtable;
-    int slots;
-    const std::uint32_t* rvas;
-    void* orig[64];
-    void* block[65];
-    std::atomic<std::uint32_t> calls[64];
-    std::uint32_t seen[64];
-};
-StockClass hull{"UfoCarrier508",kCarrierVtable,kSlots,kStockSlots,{},{},{},{}};
-StockClass partClass{"EventAnimationObject",kPartVtable,kPartSlots,kPartStockSlots,{},{},{},{}};
-std::atomic<bool> installed{false},registered{false};
+Clone hull{"UfoCarrier508",kCarrierVtable,kSlots,kCarrierSlots,{},{},{}};
+Clone partClass{"EventAnimationObject",kEaoVtable,kPartSlots,kEaoSlots,{},{},{}};
+std::uint32_t hullSeen[64];
 std::atomic<int> created{0};
 
 // Said once per kind of failure per run (a per-frame check must not fill the log).
@@ -156,39 +89,6 @@ bool Rd(const void* p,std::size_t size,const char* what) noexcept {
     if(Readable(p,size))return true;
     Fail(what);
     return false;
-}
-
-// ---- the factories ---------------------------------------------------------------------------------------------
-// Five classes, one factory object each (8 bytes, only a vtable): the hull and the four part classes. A factory knows its index by
-// its address in the array.
-constexpr int kFactoryCount=5;
-constexpr int kHullFactory=0,kHatchFactory=1,kPanelFactory=2,kCannonFactory=3,kBigCannonFactory=4;
-const wchar_t* const kClassNames[kFactoryCount]={L"UfoMother301",L"UfoMother301_Hatch",L"UfoMother301_Panel",L"UfoMother301_Cannon",L"UfoMother301_BigCannon"};
-struct Factory { const void* const* vtable; };
-// The shared_ptr control block the game's own registrations make (0x79D5C0): vtable, use count at +8, weak count at +0xC, object at +0x10.
-struct Control { const void* const* vtable; std::atomic<std::int32_t> use; std::atomic<std::int32_t> weak; void* object; };
-void __fastcall ControlDestroy(void*) noexcept {}   // never reached: the counts start far from 1
-void __fastcall ControlDelete(void*) noexcept {}
-const void* const controlTable[2]={reinterpret_cast<const void*>(&ControlDestroy),reinterpret_cast<const void*>(&ControlDelete)};
-Factory factories[kFactoryCount];
-Control controls[kFactoryCount];
-
-void* __fastcall FactoryDtor(Factory* self,unsigned) noexcept { return self; }
-const wchar_t* __fastcall FactoryName(Factory* self) noexcept {
-    const std::ptrdiff_t at=self-factories;
-    return at>=0 && at<kFactoryCount ? kClassNames[at] : L"UfoMother301";
-}
-void __fastcall FactoryCreate(Factory* self,void* info) noexcept;
-const void* const factoryTable[3]={reinterpret_cast<const void*>(&FactoryDtor),reinterpret_cast<const void*>(&FactoryName),
-                                   reinterpret_cast<const void*>(&FactoryCreate)};
-void InitFactories() noexcept {
-    for(int i=0;i<kFactoryCount;++i) {
-        factories[i].vtable=factoryTable;
-        controls[i].vtable=controlTable;
-        controls[i].use=0x40000000;
-        controls[i].weak=0x40000000;
-        controls[i].object=&factories[i];
-    }
 }
 
 float Len3(const float* v) noexcept { return std::sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]); }
@@ -627,9 +527,9 @@ void DumpSlots() noexcept {
     bool any=false;
     for(int i=0;i<kSlots && n>0 && n<static_cast<int>(sizeof(line))-16;++i) {
         const std::uint32_t now=hull.calls[i].load(std::memory_order_relaxed);
-        if(now!=hull.seen[i]) {
-            n+=std::snprintf(line+n,sizeof(line)-static_cast<std::size_t>(n)," %d:+%u",i,now-hull.seen[i]);
-            hull.seen[i]=now;
+        if(now!=hullSeen[i]) {
+            n+=std::snprintf(line+n,sizeof(line)-static_cast<std::size_t>(n)," %d:+%u",i,now-hullSeen[i]);
+            hullSeen[i]=now;
             any=true;
         }
     }
@@ -764,9 +664,9 @@ void AuditLiveTable() noexcept {
     if(!Rd(vt,sizeof(void*)*kSlots,"UfoCarrier508 vtable at creation"))return;
     int differ=0;
     for(int i=0;i<kSlots;++i)
-        if(vt[i]!=image+kStockSlots[i]) {
+        if(vt[i]!=image+kCarrierSlots[i]) {
             ++differ;
-            Log("EDF41MOTHER at creation, UfoCarrier508 slot %d is %p (stock %p): not followed by the mothership",i,vt[i],static_cast<void*>(image+kStockSlots[i]));
+            Log("EDF41MOTHER at creation, UfoCarrier508 slot %d is %p (stock %p): not followed by the mothership",i,vt[i],static_cast<void*>(image+kCarrierSlots[i]));
         }
     Log("EDF41MOTHER at creation, %d of %d UfoCarrier508 slots are patched by someone; the clone uses the stock functions",differ,kSlots);
 }
@@ -819,43 +719,27 @@ std::uint64_t __fastcall PartMessageWrap(void* self,std::uint32_t msg,void* data
     return reinterpret_cast<MessageFn>(partClass.orig[kSlotMessage])(self,msg,data);
 }
 
-void CreatePart(Factory* self,void* info) noexcept {
-    const int cls=static_cast<int>(self-factories);
-    void* obj=reinterpret_cast<NewFn>(image+kNew)(kPartSize);
-    if(!obj) { Log("EDF41MOTHER create %ls: out of memory",kClassNames[cls]); return; }
-    reinterpret_cast<CtorFn>(image+kPartCtor)(obj,info);
-    void** vptr=static_cast<void**>(obj);
-    if(!Rd(vptr,sizeof(void*),"new part") || *vptr!=image+kPartVtable) {
-        Log("EDF41MOTHER create %ls: object %p has vtable %p, not EventAnimationObject's %p: left as the class made it",kClassNames[cls],obj,Rd(vptr,sizeof(void*),"new part")?*vptr:nullptr,static_cast<void*>(image+kPartVtable));
-        return;
-    }
-    *vptr=&partClass.block[1];
+void CreatePart(const wchar_t* cls,void* info) noexcept {
+    void* obj=CloneObject(partClass,kEaoCtor,kEaoSize,info);
     static std::atomic<int> said{0};
-    if(said.fetch_add(1)<6)Log("EDF41MOTHER create %ls: part %p built by EventAnimationObject's constructor, vtable -> clone %p",kClassNames[cls],obj,static_cast<void*>(&partClass.block[1]));
+    if(obj && said.fetch_add(1)<6)Log("EDF41MOTHER create %ls: part %p built by EventAnimationObject's constructor, vtable -> clone",cls,obj);
 }
+void CreateHatch(void* info) noexcept { CreatePart(L"UfoMother301_Hatch",info); }
+void CreatePanel(void* info) noexcept { CreatePart(L"UfoMother301_Panel",info); }
+void CreateCannon(void* info) noexcept { CreatePart(L"UfoMother301_Cannon",info); }
+void CreateBigCannon(void* info) noexcept { CreatePart(L"UfoMother301_BigCannon",info); }
 
-void __fastcall FactoryCreate(Factory* self,void* info) noexcept {
-    if(!info || !Rd(info,0x28,"createInfo")) { Log("EDF41MOTHER create: no create info (%p), nothing made",info); return; }
-    if(!installed.load()) { Log("EDF41MOTHER create: the vtable was not built, nothing made"); return; }
-    if(self!=&factories[kHullFactory]) { CreatePart(self,info); return; }
+void CreateHull(void* info) noexcept {
     AuditLiveTable();
-    void* obj=reinterpret_cast<NewFn>(image+kNew)(kCarrierSize);
-    if(!obj) { Log("EDF41MOTHER create: out of memory for %zu bytes",kCarrierSize); return; }
-    reinterpret_cast<CtorFn>(image+kCarrierCtor)(obj,info);
-    void** vptr=static_cast<void**>(obj);
-    if(!Rd(vptr,sizeof(void*),"new object") || *vptr!=image+kCarrierVtable) {
-        Log("EDF41MOTHER create: object %p has vtable %p, not UfoCarrier508's %p: left as the class made it",obj,Rd(vptr,sizeof(void*),"new object")?*vptr:nullptr,static_cast<void*>(image+kCarrierVtable));
-        return;
-    }
-    *vptr=&hull.block[1];
+    void* obj=CloneObject(hull,kCarrierCtor,kCarrierSize,info);
+    if(!obj)return;
     {
         std::lock_guard<std::mutex> hold(partLock);
         liveHulls.insert(obj);
     }
     const int n=++created;
-    Log("EDF41MOTHER create #%d: UfoMother301 object %p built by UfoCarrier508's constructor, vtable %p -> clone %p; info %p",n,obj,static_cast<void*>(image+kCarrierVtable),static_cast<void*>(&hull.block[1]),info);
+    Log("EDF41MOTHER create #%d: UfoMother301 object %p built by UfoCarrier508's constructor, vtable -> clone %p",n,obj,static_cast<void*>(&hull.block[1]));
 }
-
 
 // ---- bullet probe (dev, ini Edf41MotherBulletProbe) ----------------------------------------------------------------
 // Every bullet the game makes goes through 0x1194280(manager, matrix, bulletFactory, info) (the 507 family at 0x52C9B1, the E510
@@ -901,102 +785,20 @@ void* __fastcall BulletSpawnProbe(void* manager,const float* matrix,void* factor
     return reinterpret_cast<BulletSpawnFn>(image+kBulletSpawn)(manager,matrix,factory,info);
 }
 
-// ---- the registration -----------------------------------------------------------------------------------------
-bool RegisterFactoryNow() noexcept {
-    if(registered.exchange(true))return true;
-    void* manager=nullptr;
-    if(!Rd(image+kManagerGlobal,sizeof(void*),"manager global") || (manager=*reinterpret_cast<void**>(image+kManagerGlobal))==nullptr) {
-        Log("EDF41MOTHER register: the scene object manager does not exist yet; UfoMother301 is not registered");
-        registered=false;
-        return false;
-    }
-    if(!Rd(manager,0x300,"manager object")) { registered=false; return false; }
-    bool all=true;
-    for(int i=0;i<kFactoryCount;++i) {
-        struct Shared { void* object; void* control; } shared{&factories[i],&controls[i]};
-        reinterpret_cast<RegisterFn>(image+kRegisterFactory)(manager,&shared);
-        void* found=reinterpret_cast<GetFactoryFn>(image+kGetFactory)(manager,kClassNames[i]);
-        Log("EDF41MOTHER registered %ls with manager %p: lookup gives %p (ours %p) -> %s",kClassNames[i],manager,found,static_cast<void*>(&factories[i]),found==&factories[i] ? "OK" : "FAILED");
-        all=all && found==&factories[i];
-    }
-    return all;
-}
-
-std::uint64_t __fastcall RegisterAllHook(void* a,void* b,void* c,void* d) {
-    const std::uint64_t result=reinterpret_cast<RegisterAllFn>(image+kRegisterAll)(a,b,c,d);
-    RegisterFactoryNow();
-    return result;
-}
-
-// Counting stubs for the slots we do not wrap: mov rax,&count / lock inc [rax] / mov rax,orig / jmp rax.
-// The clone is the STOCK class, built from the table of its slots as the file has them (c.rvas), not from the live vtable: this
-// plugin patches slot 7 of UfoCarrier508's own table (carrierlaser.cpp ShipAiHook, the ship AI for the teleportation laser: it
-// recognises ships by the old vptr and steps the laser's state machine once a frame, so on a mothership it would only add a second
-// step per frame), and a clone taken before or after that patch would differ. The live table is compared slot by slot; what differs
-// is logged and left out of the clone.
-bool BuildTable(StockClass& c,void* dtor,void* update,void* message) noexcept {
-    const void* const* vt=reinterpret_cast<const void* const*>(image+c.vtable);
-    if(!Readable(vt-1,sizeof(void*)*static_cast<std::size_t>(c.slots+1))) { Log("EDF41MOTHER the %s vtable is not readable: prototype off",c.tag); return false; }
-    c.block[0]=const_cast<void*>(vt[-1]);
-    HMODULE self=nullptr;
-    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,reinterpret_cast<LPCWSTR>(&BuildTable),&self);
-    for(int i=0;i<c.slots;++i) {
-        void* const stock=image+c.rvas[i];
-        void* const live=const_cast<void*>(vt[i]);
-        if(!Readable(stock,8)) { Log("EDF41MOTHER stock slot %d of %s (EDF.dll+0x%X) is not readable: prototype off",i,c.tag,c.rvas[i]); return false; }
-        if(live!=stock) {
-            HMODULE owner=nullptr;
-            GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,reinterpret_cast<LPCWSTR>(live),&owner);
-            Log("EDF41MOTHER vtable slot %d of %s is patched (%p, %s): the clone keeps the stock function EDF.dll+0x%X",
-                i,c.tag,live,owner && owner==self ? "this plugin's hook" : "another module",c.rvas[i]);
-        }
-        c.orig[i]=stock;
-    }
-    constexpr std::size_t kStub=32;
-    unsigned char code[64*kStub];
-    std::memset(code,0xCC,sizeof(code));
-    for(int i=0;i<c.slots;++i) {
-        unsigned char* s=code+static_cast<std::size_t>(i)*kStub;
-        const std::uint64_t counter=reinterpret_cast<std::uint64_t>(&c.calls[i]),target=reinterpret_cast<std::uint64_t>(c.orig[i]);
-        s[0]=0x48; s[1]=0xB8; std::memcpy(s+2,&counter,8);     // mov rax, counter
-        s[10]=0xF0; s[11]=0xFF; s[12]=0x00;                     // lock inc dword ptr [rax]
-        s[13]=0x48; s[14]=0xB8; std::memcpy(s+15,&target,8);   // mov rax, original
-        s[23]=0xFF; s[24]=0xE0;                                 // jmp rax
-    }
-    unsigned char* stubs=static_cast<unsigned char*>(AllocateNearCode(image,code,static_cast<std::size_t>(c.slots)*kStub));
-    if(!stubs) { Log("EDF41MOTHER no executable page for the %s counting stubs: prototype off",c.tag); return false; }
-    for(int i=0;i<c.slots;++i)
-        c.block[1+i]=stubs+static_cast<std::size_t>(i)*kStub;
-    c.block[1+kSlotDtor]=dtor;
-    c.block[1+kSlotUpdate]=update;
-    c.block[1+kSlotMessage]=message;
-    return true;
-}
-
-bool BuildClone() noexcept {
-    for(const Print& p:kPrints) {
-        if(!Readable(image+p.rva,8) || std::memcmp(image+p.rva,p.bytes,8)!=0) {
-            Log("EDF41MOTHER the code at EDF.dll+0x%zX is not what this was written for: prototype off",p.rva);
-            return false;
-        }
-    }
-    return BuildTable(hull,reinterpret_cast<void*>(&DtorWrap),reinterpret_cast<void*>(&UpdateWrap),reinterpret_cast<void*>(&MessageWrap))
-        && BuildTable(partClass,reinterpret_cast<void*>(&PartDtorWrap),reinterpret_cast<void*>(&PartUpdateWrap),reinterpret_cast<void*>(&PartMessageWrap));
-}
 }  // namespace
 
 bool InstallEdf41Mother() noexcept {
-    if(!Cfg().edf41MotherDev) {
-        Log("EDF41MOTHER off (ini Edf41MotherDev=0)");
+    if(!Cfg().edf41Mother) {
+        Log("EDF41MOTHER off (ini Edf41Mother=0)");
         return false;
     }
-    InitFactories();
-    if(!BuildClone())return false;
-    installed=true;
-    bool changed=false;
-    const bool ok=RedirectCall(image+kRegisterAllSite,image+kRegisterAll,reinterpret_cast<void*>(&RegisterAllHook),changed);
-    if(ok) {
+    if(!BuildClone(hull,&DtorWrap,&UpdateWrap,&MessageWrap) || !BuildClone(partClass,&PartDtorWrap,&PartUpdateWrap,&PartMessageWrap)) {
+        Log("EDF41MOTHER the vtable clones could not be built: off");
+        return false;
     }
+    const bool ok=AddFactory(L"UfoMother301",&CreateHull) && AddFactory(L"UfoMother301_Hatch",&CreateHatch)
+        && AddFactory(L"UfoMother301_Panel",&CreatePanel) && AddFactory(L"UfoMother301_Cannon",&CreateCannon)
+        && AddFactory(L"UfoMother301_BigCannon",&CreateBigCannon);
     if(ok && Cfg().edf41MotherBulletProbe) {
         int hooked=0;
         for(const std::size_t site:kBulletSites) {
@@ -1005,11 +807,7 @@ bool InstallEdf41Mother() noexcept {
         }
         Log("EDF41MOTHER bullet probe: %d of %zu bullet spawn call sites hooked",hooked,sizeof(kBulletSites)/sizeof(kBulletSites[0]));
     }
-    // When this runs the game's start-up routine has not reached 0x701859 yet (the manager is null); if it has, the hook
-    // can no longer fire and the log says so instead of the registration line.
-    const bool late=Readable(image+kManagerGlobal,sizeof(void*)) && *reinterpret_cast<void**>(image+kManagerGlobal)!=nullptr;
-    Log("EDF41MOTHER development switch ON: vtable clone built (%d slots, wrapped %d/%d/%d), register hook %s%s",kSlots,kSlotDtor,kSlotUpdate,kSlotMessage,ok ? "installed" : "FAILED",
-        late ? " (WARNING: the scene object manager already exists, the game's registration ran before this plugin: UfoMother301 will not be registered)" : "");
+    Log("EDF41MOTHER on: UfoMother301 and its four part classes %s",ok ? "queued for the game's registration" : "NOT registered");
     return ok;
 }
 }  // namespace crew

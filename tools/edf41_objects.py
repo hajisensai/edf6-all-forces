@@ -48,66 +48,13 @@ def read(rel: str) -> bytes:
     reg = registry()
     if rel in reg.get('shared', {}):
         return _read_file(bundled(rel))
-    base = os.path.join(DEV_DIR, 'objects') if rel in reg.get('dev', ()) else os.path.join(DATA, 'edf41port', 'objects')
+    base = os.path.join(DATA, 'edf41port', 'objects')
     return rabpool.unpack(rel, lambda s: _read_file(os.path.join(base, *s.split('/'))))
-
-
-# ---- development only: the UfoMother301 prototype (docs/edf41-ufomother301.md) --------------------------------------------
-# `python tools/make_edf41_objects.py --mother-dev` writes edf41port_dev/ (git-ignored, not in the installer bundle, which
-# names the edf41port files one by one: tools/build_release.py). An install from the source tree with EDF41_MOTHER_DEV=1 in
-# its environment adds those objects to the registry (so the campaign lets M016 through, make_edf5_campaign.plan41) and sets
-# the plugin's ini Edf41MotherDev=1; without the variable, in the frozen installer, or without the folder, nothing changes:
-# the registry is the committed one and the ini key is 0.
-DEV_DIR = os.path.join(HERE, '..', 'edf41port_dev')
-DEV_ENV = 'EDF41_MOTHER_DEV'
-DEV_INI = os.path.join('Mods', 'Plugins', 'EDF6VehicleCrew.ini')
-DEV_INI_KEY = 'Edf41MotherDev'
-
-
-def dev_enabled() -> bool:
-    """Whether this run adds the development objects: from the source tree only, the variable set to 1, the folder there."""
-    return (not getattr(sys, 'frozen', False) and os.environ.get(DEV_ENV) == '1'
-            and os.path.isfile(os.path.join(DEV_DIR, 'objects.json')))
-
-
-def _dev_registry() -> dict:
-    with open(os.path.join(DEV_DIR, 'objects.json'), encoding='utf-8') as f:
-        return json.load(f)
 
 
 def registry() -> dict:
     with open(REGISTRY, encoding='utf-8') as f:
-        reg = json.load(f)
-    if dev_enabled():
-        dev = _dev_registry()
-        reg['objects'] = reg['objects'] + dev['objects']
-        reg['files'] = {**reg['files'], **dev['files']}
-        reg['dev'] = sorted(dev['files'])
-    return reg
-
-
-def set_dev_flag(root: str, on: bool) -> str | None:
-    """The plugin's ini Edf41MotherDev set to 1 / 0 (the file is the game's Mods/Plugins one; unrelated lines kept).
-    None when there is no ini yet, or the key is not there and `on` is false (nothing to turn off)."""
-    import make_edf5_campaign
-    import modfiles
-    path = os.path.join(root, DEV_INI)
-    if not os.path.isfile(path):
-        return None
-    with open(path, encoding='utf-8-sig') as f:
-        text = f.read()
-    lines, key, end = make_edf5_campaign.key_setting(text, DEV_INI_KEY)
-    if key is None and not on:
-        return None
-    line = f'{DEV_INI_KEY}={1 if on else 0}'
-    if key is None:
-        lines.insert(end, line)
-    elif lines[key] == line:
-        return None
-    else:
-        lines[key] = line
-    modfiles.atomic_write(path, (chr(10).join(lines) + chr(10)).encode('utf-8'))
-    return path
+        return json.load(f)
 
 
 def _not_ours(led: ledger.Ledger, rel: str, sha: str) -> bool:
@@ -170,6 +117,5 @@ def install(root: str, files: dict[str, bytes]) -> list[str]:
 
 
 def remove(root: str) -> tuple[list[str], list[str]]:
-    set_dev_flag(root, False)
     led = ledger.Ledger(root)
     return led.release(OWNER, sorted(set(led.owned_by(OWNER))), writer=True)
