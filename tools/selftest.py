@@ -7091,7 +7091,11 @@ def edf41_mother_plugin_contract() -> None:
     assert 'src/edf41classes.cpp' in cmake and '#include "edf41classes.h"' in cpp
     for rva in ('kRegisterAllSite', 'kRegisterAll', 'kRegisterFactory', 'kNew', 'kCarrierCtor', 'kEaoCtor'):
         assert re.search(rf'\{{{rva},\{{0x', shared), f'{rva} has no fingerprint in kPrints'
-    assert cpp.count('Rd(') >= 8 and 'Readable(image+p.rva,8)' in shared
+    assert (cpp + shared).count('Rd(') >= 8 and 'Readable(image+p.rva,8)' in shared
+    # Real runs (2026-10-15): EventAnimationObject's slot 22 lets SetTeam set team 6 only, so the parts' clone must take
+    # GameObjectBase's (else no part is ever an enemy or gets a target); the hull's damage filter is 4.1's (slot 16)
+    assert 'AllowAnyTeam(partClass);' in cpp and 'SetSlot(c,22,image+kAnyTeam)' in shared
+    assert 'SetSlot(hullClass,kSlotAccept,' in cpp and 'kSlotAccept=16' in cpp
     # The DSGO accessors (0xD7480 ...) fault on a plain SGO such as this object's (EDF+0xD74D9, 2026-10-13): never called here.
     code = re.sub(r'//[^\n]*', '', cpp + shared)   # comments may name the accessors; the code must not call them
     assert not re.search(r'0xD7480|kChildByName|0x53060|0x52DE0|0x52F30|0x551E0', code)
