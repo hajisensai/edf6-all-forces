@@ -124,3 +124,24 @@ EDF5 武器 SGO 是 v0x102、类型化数值；EDF6 是 DSGO（数值全为 doub
 - `.ACB`：4.1 的音效库（TIKYUU4_*）EDF6 作为散文件放在 `SOUND/PC`，只核对存在，不复制。
 
 15 个对象、45 个文件、约 62 MB，转换好放进 `edf41port/objects/`，随工具发布，玩家不需要装 4.1。安装（`tools/edf41_objects.py`，账本 owner `edf41`）按 4.1 原来的文件名写进 `Mods/OBJECT`，4.1 任务脚本可直接引用；Mods 里已有别的 mod 放的同名文件时不覆盖，用到它的对象整个跳过并说明。测试：`edf41_objects_shipped`（登记表与文件双向一致、哈希、MAB 0x83、MDB 0x20）、`edf41_objects_install`（替身游戏上安装 / 卸载、不覆盖别人的文件）。
+
+### 8.1 第三层：母舰 UfoMother301 / UfoMother401 系列（2026-10-13 调查；结论：数据层做不了，需要原生类）
+
+**要什么**：301 母舰（M016 M110 M123 M130 M210 M603）和地球吞噬者 401 系列（`UfoMother401` 与 M009 / M012 / M019 / M132 / M142 / M145 / M149 / M201 / M308 / M312 / M412 / M516 / M518 / M602 的专用变体，另有 M013 / M519 / FLATLAYOUT），共 21 关要它们。`plan41` 现在把这些关按「缺少 Object/UfoMother…sgo」跳过。
+
+**为什么不能像第二层那样「借壳」**（EDF6 `EDF.dll` 与 `EDF41.exe` 的 RTTI、反汇编核对）：
+
+| | 4.1 | EDF6 |
+|---|---|---|
+| 母舰类 | `UfoMother301`、`UfoMother401`（+ 部件类 `_Hatch` `_Panel` `_BigCannon` `_Cannon` `_PartsBase` / `_Core` `_Generator` `_FinalCannon01` `_FinalGenerator` `_GunBattery_{PlasmaCannon,RapidCannon,SmallLaser,Sniper}` `_Panel01` `_PanelBase` `_WeakPanel`） | 只有 `UfoMother511` 一族 12 个类（`…Barrier` `…BulletModule` `…CoreBigCannon` `…CoreSmallCannon` `…GeneratorModule` `…HatchModule` `…PartsBase` `…RingUnitParts` `…RingUnitParts_DummyRing`）；RTTI 里没有 Panel、没有读 `mp_*` / `panel_definition` / `action_list` 的类 |
+| 数据形状 | 301：`mp_Weakpoint` `mp_HatchLow` `mp_HatchMiddle` `mp_HatchEmission` `mp_Panel`×4 组（数百块，各自位置 / 朝向）`mp_Cannon` `mp_BigCannon` `mp_PanelParameter`，部件是独立子对象，按 SGO 里写的坐标摆。构造函数 `EDF41.exe` 0x24ece0。401：`panel_definition`（板种类表）+ `panel_layout_map*`（19 列的板布局网格，多张）+ `action_list`（见下）。 | 511：核心 + 环（`ring_info` / `ring_layout_list` 按环公式排 5 种 `RingUnitParts`，环单元自带炮与屏障）+ `core_parts`（4 门歼灭炮）+ `hatch_auto_open_close` 自动循环。部件位置由环公式决定，SGO 不能逐个指定。 |
+| 脚本动作 | 301：`ObjectAction` 消息处理在虚表槽 6（`EDF41.exe` 0x250870，消息 0x80000009，跳转表 0x250f6c，18 个动作）。0 / 1 / 2 往 +0x868 队列里排三段序列（函数对象 0x251e50 / 0x251e90 / 0x251ef0）；3 / 4 调 0x251bc0(this, 0, 1/0)；5 / 6 / 7 对 +0xa88 那组部件置 / 清标志 +0x901 / +0x902；8–12 对 +0xaa8 那组置 / 清 +0x900（仅耐久 > 0 的）/ +0x901 / +0x902；13–17 对 +0xac8 那组同理。也就是「分组启停部件」。401：动作号 n 就是 `action_list[n]`，条目只有 8 种形：`[0, 布局名]` 换板布局（44 条）、`[1, 位移, 速度…]` 平移（34 条）、`[2]` `[3]` `[4]` `[5]` `[6]` `[7]` 无参（26 / 9 / 10 / 18 / 16 / 1 条）。 | 511 的动作枚举 `UfoMother511_Action` 是另一套（舱门 / 环 / 屏障），没有「某组炮启停」，也没有「换板布局」。 |
+
+**把 301 挂到 `UfoMother511` 上会怎样**：类名可以在 SGO 里改成 `UfoMother511`（`Alias.cls` 就是这么做的），但 511 在出生时按环公式摆 5 层环单元（E511 的炮、屏障、转动），4.1 的 `mp_Cannon` 逐个坐标的炮、板甲、`mp_HatchEmission` 都没有对应槽位；动作号即使按表重映射，「炮组启停」也没有对应物，出来的是一艘带 4.1 船身模型的 E511。这是「长得像」，不是 4.1 的攻击方式和行为，所以**没有做**（用户 2026-10-13：「攻击方式和行为要还原」）。401 连可借的类都没有（板网格 + 数据驱动动作）。`MovingFortress`（歩行要塞，有 `parts_setting` 逐个挂炮、`core_hatch_interval`）与 `EDF6_GrandMother`（臂 / 门 / 弱点）各只覆盖一小块，且前者是腿式地面单位，也不是 4.1 母舰的行为。
+
+**关里用到的接口**（`EDF41` 任务脚本即 EDF5 重编的 BVM，原生函数号三代相同；`tmp/mother41` 的反汇编）：`CreateEnemy` 2000 / `CreateNeutral` 1020 创建；`ObjectAction` 3200（301：M016 用 3 4 7；M110 用 3 7 4；M130 用 0 2 13 14 15 16；M210 用 3 5 8 10 13 15；M603 共 12 次。401：M009 用 2–6、M012 用 0 3 4 5 6 8、其余关 0 / 2–7）；`GetPartsObject` 3300（M018 一次；M210 十一次，组 0 / 1 的 0–9 号部件，拿到部件对象再各自设耐久）；`Factor_ObjectDurability` 9200（部件耐久比例触发）；`SetEnemyGenerator` 2100 / `SetInstantEnemyGenerator` 2101（舱门出兵）；`SetAiRoute` 3101 / `SetAiMoveSpeed` 3100 / `Factor_AiMoveEnd` 9300（母舰沿路线飞）；`LookCameraToObject` 420。这些号码本身不用改（原生函数号 EDF6 也认），**要改的是 `ObjectAction` 的第二个实参**，但在没有同语义的 EDF6 动作可映射的前提下，没有可写的重映射表。
+
+**数据层做不了的清单与插件钩子**（不伪造）：
+1. 新增原生类 `UfoMother301`（与其 `_Hatch` / `_Panel` / `_BigCannon` / `_Cannon` 部件类）和 `UfoMother401`（与 `_Core` / `_Generator` / `_FinalCannon01` / `_FinalGenerator` / `_GunBattery_*` / `_Panel01` / `_WeakPanel`）。EDF6 的类工厂形状（`UfoMother511` 为例）：工厂对象虚表 `EDF.dll` 0x17ca200，槽 1 取类名（0x4fd900，返回宽字符串 `UfoMother511`），槽 2 创建（0x4fd910：分配 0x2110 字节，构造函数 0x4fe740），虚表在一个静态注册函数里取地址（引用点 0xfc14ba、0x50a1e7）。插件要做的是注册同形状的工厂并实现对象本体（`ObjectAction` 消息槽、SGO 加载、部件摆放、炮 / 舱门 / 板的碰撞与耐久）；这是新写一个类，不是改数据。
+2. 4.1 的行为细节只部分还原（动作 0 / 1 / 2 的三段序列、0x251bc0 的两种模式、三组部件标志位的含义没有逐条读完），真要写类之前要先把 0x24ece0（构造）、0x250870（消息）、0x251bc0、0x254c20 与各部件类的更新函数读完。
+3. 在原生类存在之前，涉及母舰的 21 关保持跳过；`edf41_motherships_not_faked`（selftest）钉住这一点：登记表里不得出现任何 `UfoMother*` 类，也不得出现 4.1 母舰的 SGO，否则关卡会放行却刷不出船。

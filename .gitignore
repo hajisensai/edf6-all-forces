@@ -14,3 +14,6 @@ testrange/testrange.json
 testrange/runs/
 # User-supplied vehicle models (pylib/obj_model.py model_dir): never committed
 models/
+
+# Development-only data (tools/make_edf41_objects.py --mother-dev): never committed, never in a release
+edf41port_dev/
