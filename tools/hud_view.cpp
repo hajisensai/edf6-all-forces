@@ -2065,7 +2065,7 @@ int Scenes(const std::wstring& dir) {
     Scene(dir,L"emc_atomic_ray",ground);
     sceneStock=savedStock;
     // 2026-10-12 feedback: the 601's 140 mm cannon loading its next round (1.8 s: vhud.cpp Cycle) with one shell for its
-    // picture, the coaxial MG picked by the right button and the main gun still marked (its bore cross: OtherTriggerMark);
+    // picture, the coaxial MG picked by the right button and the main gun still marked (its own full sight since 2026-10-14);
     // then a Nix whose seat lists its right arm's rifle first: the strip lays it out on the right (hud_cue.h SideOrder).
     {
         StockTank(ground);
@@ -2081,6 +2081,12 @@ int Scenes(const std::wstring& dir) {
         failed+=n!=3 || cells[0].icon!=hudcue::StoreIcon::shell || !std::wcsstr(cells[0].text,L"1.8s");
         failed+=cells[0].load!=0.25f || cells[1].load>=0.0f || cells[2].load!=0.6f;   // loading bars: the gun, none, the magazine
         Prime(ground);
+        // 2026-10-14 (「泰坦用机枪的时候，镇魂炮的瞄具就没了」): the main gun on the other trigger keeps its own full sight
+        // with the machine gun picked (hud.cpp OtherTriggerSight), the machine gun fired with it none of its own.
+        {   // a copy with the cannon's ladder (this scene's has none: no gun sight to keep, picked or not)
+            StockHudReadout probe=sceneStock;probe.arm[0].ladder.ticks=3;
+            failed+=!OtherTriggerSight(probe,0,false) || OtherTriggerSight(probe,1,false) || OtherTriggerSight(sceneStock,0,false);
+        }
         Scene(dir,L"stock_tank_loading_two_triggers",ground);
         sceneStock.arms=2;sceneStock.selected=0;
         for(int i=0;i<2;++i) {

@@ -216,6 +216,16 @@ bool IsRescue(std::uint32_t catalog) noexcept {return catalog==RescueCatalog();}
 // Entries that bring aircraft made in the air as a flown call does (crew groups, formation): the flown calls, and the
 // rescue. The transports and the airdrops have their own plans (TransportCatalog / AirdropCatalog).
 bool AirCatalog(std::uint32_t catalog) noexcept {return catalog<static_cast<unsigned>(AirCount()) || IsRescue(catalog);}
+// What an entry brings, as the mission's support rules read it (support_policy.h Allowed): an aircraft (the flown calls,
+// the transports, the airdrops' helicopter), a support hull (a tank / an APC military, the light truck civilian), or
+// soldiers walking in.
+support::Capability CapabilityOf(std::uint32_t catalog) noexcept {
+    SupportVehicleKind kind{};SupportCrewMode mode{};bool platoon=false,plane=false;
+    if(AirCatalog(catalog) || TransportCatalog(catalog,platoon,plane) || AirdropCatalog(catalog,kind))return support::Capability::air;
+    if(GroundCatalog(catalog,kind,mode))
+        return SupportVehicleInfo(kind)->wasteland ? support::Capability::civilianGround : support::Capability::militaryGround;
+    return support::Capability::infantry;
+}
 constexpr std::uint32_t kRescueFuelSec=900;   // the rescue heli's fuel (heli.cpp leaves on it), as the rescue always had
 // The rescue's takeoff points (support_entry.h TakeoffRoute picks the nearest it can climb out of, all alike): the
 // submarine carrier's deck nearest the swimmer, kDeckInset further into the deck than its nearest edge so the whole 410
@@ -588,8 +598,9 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
     if(!area.ground){Refuse(catalog,"no ground found round the map's centre",L"无法测定本图的地面范围，无法规划支援入口");return PlanResult::refused;}
     SupportVehicleKind kind{};SupportCrewMode mode{};const bool vehicle=GroundCatalog(catalog,kind,mode);
     const auto* spec=vehicle ? SupportVehicleInfo(kind) : nullptr;
-    if(vehicle && !support::Allowed(SupportMissionPolicy(),spec && spec->wasteland ? support::Capability::civilianGround : support::Capability::militaryGround)) {
-        Refuse(catalog,"mission forbids external military support",L"本关限制外部军事支援；可选择步兵或民用轻卡");return PlanResult::refused;
+    if(vehicle && !support::Allowed(SupportMissionPolicy(),CapabilityOf(catalog))) {
+        Refuse(catalog,"mission forbids this vehicle (external military support, or underground)",SupportCallForbidden(static_cast<int>(catalog)));
+        return PlanResult::refused;
     }
     if(vehicle && (!spec || !Cfg().npcBoarding || !SupportVehicleReady(kind,mode))) {
         Refuse(catalog,"vehicle resource not preloaded / NpcBoarding off",L"该车辆的资源或交付能力不可用");return PlanResult::refused;
@@ -664,8 +675,7 @@ bool Validate(const SupportPlan& plan) noexcept {
     if(!support_net::ValidPlan(plan,false) || plan.catalogId>=static_cast<unsigned>(SupportCallCount()) || !SupportSoldiersReady())return false;
     SupportAircraft aircraft;SupportVehicleKind kind{};SupportCrewMode mode{};
     const bool air=AirCatalog(plan.catalogId),ground=GroundCatalog(plan.catalogId,kind,mode);
-    const auto capability=air ? support::Capability::air : ground ?
-        (SupportVehicleInfo(kind)->wasteland ? support::Capability::civilianGround : support::Capability::militaryGround) : support::Capability::infantry;
+    const auto capability=CapabilityOf(plan.catalogId);
     const auto member=[](std::uint32_t id) noexcept {return IsSupportSoldierResource(id) && !IsSupportLeaderResource(id);};
     // Unit variants (support_loadout.h): a look on a soldier, pylons on the entry's own hull, each one that decodes. A hull
     // made from its loaded file must have it here: another weapon list than the host's would not be the same vehicle (a
@@ -1139,6 +1149,16 @@ bool SupportWithdrawVehicle(const void* vehicle) noexcept {
 }
 int SupportCallCount() noexcept {return AirCount()+2+kSupportVehicleCount*2+kTransportEntries+kAirdropEntries+1;}
 int SupportMenuCount() noexcept {return SupportCallCount()-1;}   // the rescue (last) is no map call
+const wchar_t* SupportCallForbidden(int index) noexcept {
+    if(index<0 || index>=SupportCallCount() || IsRescue(static_cast<std::uint32_t>(index)))return nullptr;
+    const auto policy=SupportMissionPolicy();
+    // The submarine carrier surfaces from the water on no plan (SupportSubCallAt): only a cave keeps it (no sea there).
+    const bool allowed=SupportSubCatalog(index) ? !policy.underground : support::Allowed(policy,CapabilityOf(static_cast<std::uint32_t>(index)));
+    if(allowed)return nullptr;
+    if(policy.underground)return L"地下只能呼叫步兵支援；钻地战车请用空袭兵的载具请求呼叫";
+    if(policy.environment==support::Environment::unknown)return L"无法读取本关的支援限制：只能呼叫步兵或民用轻卡";
+    return L"本关限制外部支援：只能呼叫步兵或民用轻卡";
+}
 int SupportRescueCatalog() noexcept {return static_cast<int>(RescueCatalog());}
 const wchar_t* SupportCallKey(int index) noexcept {
     if(index<0)return nullptr;
@@ -1217,6 +1237,10 @@ bool Request(int index,const float* target,const SupportLoadout* load,wchar_t* n
         // Known before any request leaves this machine: the host would refuse it with no detail.
         Refuse(static_cast<std::uint32_t>(index),"disabled by SupportDisabled in EDF6VehicleCrew.ini",
                L"该支援单位已在配置中停用（EDF6VehicleCrew.ini SupportDisabled / 安装器菜单 7）");
+    }
+    else if(const wchar_t* why=SupportCallForbidden(index)) {
+        // The mission's rules, known here before anything is planned or sent (the host's Plan / Validate ask them too).
+        Refuse(static_cast<std::uint32_t>(index),"the mission's support rules (support_policy.h Allowed)",why);
     }
     else if(SupportSubCatalog(index)) {
         // It surfaces where it is called (SupportSubCallAt), on no plan: from the map, this machine's own copy only, so

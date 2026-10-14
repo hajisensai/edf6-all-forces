@@ -299,12 +299,11 @@ void AimLines(unsigned char* vehicle) noexcept {
     State* const st=FindState(vehicle);
     if(!st)return;
     const unsigned count=SeatCount(vehicle);
-    const bool npcDriven=NpcDriver(vehicle);
     const bool enabled=Cfg().enabled;
     const bool ownSight=enabled && (PlayerJetOwnSight(vehicle) || PlayerHeliOwnSight(vehicle) || PlayerStockOwnSight(vehicle));
     for(unsigned i=0;i<count && i<16;++i) {
         auto seat=SeatAt(vehicle,i);
-        const LineWant want=enabled ? aimline::Want(LineHolder(seat),npcDriven,ownSight) : LineWant::show;
+        const LineWant want=enabled ? aimline::Want(LineHolder(seat),ownSight) : LineWant::show;
         const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
         const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
         if(want==LineWant::keep || n>16 || !Readable(holders,n*8))continue;

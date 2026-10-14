@@ -803,6 +803,25 @@ void GunnerMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     line.scale=kLineScale;line.rgba=g.ground && g.inReach ? (g.ready ? kGreen : kYellow) : kRed;line.w=line.h=0.0f;
     if(text)MeasureAll(*text,&line,1);
     line.x=sx-line.w*0.5f;line.y=sy+22.0f*s;
+    // Its controls (the user, 2026-10-14: the gatling was there behind a key the HUD never named): the switch key while
+    // there is another gun to go to, the secondary fire for the gatling.
+    if(*at>=kMaxLines)return;
+    Line& keys=lines[(*at)++];
+    Format(keys,L"");
+    wchar_t key[32];
+    if(more) {
+        if(g.keys)KeyName(Cfg().playerJetSwitchKey,key,32);else SeatButtonName(0x10,key,32);   // pad LB (playerjet_crew.inc)
+        Append(keys,Tr(Tx::controlGuns),key);
+    }
+    if(g.guns&(1u<<static_cast<int>(GunnerGun::gatling))) {
+        if(g.keys)wcsncpy_s(key,Tr(Tx::controlSecondaryFire),_TRUNCATE);else SeatButtonName(0x20,key,32);   // pad RB
+        if(keys.text[0])Append(keys,L"   ");
+        Append(keys,Tr(Tx::controlGatlingHold),key);
+    }
+    if(!keys.text[0]){--*at;return;}
+    keys.scale=kLineScale*0.75f;keys.rgba=kCyan;keys.w=keys.h=0.0f;
+    if(text)MeasureAll(*text,&keys,1);
+    keys.x=sx-keys.w*0.5f;keys.y=line.y+24.0f*s;
 }
 
 // A lock (stores.h StoreLock: `lock` 2 locked, 1 locking at `progress`, on the lock point `p`): locking, a yellow
@@ -2758,13 +2777,21 @@ void ProteusMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,
 // The seat's sight gun (GunReticle's): the picked weapon when its style is a gun sight (reticle.h GunStyle: not a
 // flamethrower's, a grenade's, a missile's) with a ladder (a beam needs none); -1 for none. Not the gun EDF6AutoTurret's lead circle is on
 // (`leadGun`: arm 0 has its marks).
+// Whether arm `i` can carry a gun sight of its own (the style, the ladder; not the lead circle's gun).
+bool SightCapable(const StockHudReadout& r,int i,bool leadGun) noexcept {
+    if(i<0 || i>=r.arms || i>=kStockArms)return false;
+    const StockArm& a=r.arm[i];
+    return a.aimed && !a.physicalOnly && !a.lofted && !a.lobbed && a.kind==RoundKind::arc && reticle::GunStyle(a.reticle) &&
+           (a.shell==reticle::Shell::beam || a.ladder.ticks>0) && !(i==0 && leadGun);
+}
 int SightGun(const StockHudReadout& r,bool leadGun) noexcept {
-    const auto sights=[&](int i){
-        const StockArm& a=r.arm[i];
-        return a.aimed && !a.physicalOnly && !a.lofted && !a.lobbed && a.kind==RoundKind::arc && reticle::GunStyle(a.reticle) &&
-               (a.shell==reticle::Shell::beam || a.ladder.ticks>0) && !(i==0 && leadGun);
-    };
-    return r.sight>=0 && r.sight<r.arms && r.sight<kStockArms && sights(r.sight) ? r.sight : -1;
+    return SightCapable(r,r.sight,leadGun) ? r.sight : -1;
+}
+// A gun on the seat's other trigger keeps its own full sight (the user, 2026-10-14: 「切换武器的时候会把瞄具取消到。比如泰坦
+// 用机枪的时候，镇魂炮的瞄具就没了」): which trigger was pulled last only says which one is picked (its name bracketed,
+// the magnified scope's field), not which gun may be aimed. One fired with the pick (coFired) is the pick's marks.
+bool OtherTriggerSight(const StockHudReadout& r,int i,bool leadGun) noexcept {
+    return i!=r.sight && i>=0 && i<r.arms && i<kStockArms && r.arm[i].armed && !r.arm[i].coFired && SightCapable(r,i,leadGun);
 }
 
 // The bore cross of a gun on the seat's other trigger (StockMarks), dimmer than the pick's, its name under it.
@@ -2794,6 +2821,12 @@ void StockMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
             // A gun on the other trigger (the main gun while the coaxial gun is picked, and the other way round): its own
             // bore cross, moving with its barrel, named, as well as where it lands (the user, 2026-10-12: 「泰坦的炮口准星
             // 不会随着炮管动 ... 应该两个准星都同时显示才对」). Not in a magnified scope (that field is the pick's).
+            if(!x.high && !scopeNow.on && OtherTriggerSight(r,i,x.leadGun)) {
+                wchar_t name[32];
+                ArmName(a,false,name,_countof(name));
+                StockMark(drawer,ctx,text,vp,width,height,s,a,name,true,lines,at);   // its own sight, unbracketed
+                continue;
+            }
             if(!x.high && !a.coFired && !scopeNow.on && a.kind==RoundKind::arc)OtherTriggerMark(drawer,ctx,text,vp,width,height,s,a,lines,at);
             PhysicalPaths(drawer,ctx,text,vp,width,height,s,a.path,a.paths,i==selected,lines,at);
             continue;
@@ -4198,15 +4231,16 @@ void MapSupportBar(void* drawer,void* ctx,Text* text,float width,float s,float t
         const bool hover=c.pointer && c.px>=q.x0 && c.px<q.x1 && c.py>=q.y0 && c.py<q.y1;
         if(lit || hover)Rect(drawer,ctx,q.x0,q.y0,q.x1,q.y1,lit ? kBtnLit : kMapBoxFill);
         const float mid=(q.y0+q.y1)*0.5f;
-        MapSupportIcon(drawer,ctx,c.support[g.first].icon,q.x0+(4.0f+kSupIcon*0.5f)*s,mid,kSupIcon*s,s,tint);
+        // The row itself (left of its chips): its first variant, or the one [ ] picked last within it.
+        pickOf[k]=c.supportPick>=g.first && c.supportPick<g.first+g.count ? c.supportPick : g.first;
+        const float* rowTint=c.support[pickOf[k]].allowed ? tint : kMapOrderDim;   // one the mission forbids: dimmed
+        MapSupportIcon(drawer,ctx,c.support[g.first].icon,q.x0+(4.0f+kSupIcon*0.5f)*s,mid,kSupIcon*s,s,rowTint);
         wchar_t base[40]{};   // the name before its "·" (map_buttons.h BaseLength)
         const int most=static_cast<int>(_countof(base))-1,len=mapbtn::BaseLength(names[g.first])<most ? mapbtn::BaseLength(names[g.first]) : most;
         std::wmemcpy(base,names[g.first],static_cast<std::size_t>(len));
         const float textRight=g.count>1 ? chip[g.first].x0-4.0f*s : q.x1-4.0f*s;
-        Label(text,lines,at,q.x0+(8.0f+kSupIcon)*s,mid,0,kLineScale*0.7f,tint,L"%ls",base);
+        Label(text,lines,at,q.x0+(8.0f+kSupIcon)*s,mid,0,kLineScale*0.7f,rowTint,L"%ls",base);
         if(*at>0)MapFitLabel(text,lines[*at-1],q.x0+(8.0f+kSupIcon)*s,textRight);
-        // The row itself (left of its chips): its first variant, or the one [ ] picked last within it.
-        pickOf[k]=c.supportPick>=g.first && c.supportPick<g.first+g.count ? c.supportPick : g.first;
         body[k]=mapbtn::Rect{q.x0,q.y0,textRight,q.y1};
         MapTipSet(c,body[k].x0,body[k].y0,body[k].x1,body[k].y1,Tr(Tx::supportTip),names[pickOf[k]]);
     }
@@ -4220,7 +4254,8 @@ void MapSupportBar(void* drawer,void* ctx,Text* text,float width,float s,float t
             const float t=1.2f*s;const float* edge=lit ? kWhite : kMapOrderDim;
             Seg(drawer,ctx,q.x0,q.y0,q.x1,q.y0,t,edge);Seg(drawer,ctx,q.x1,q.y0,q.x1,q.y1,t,edge);
             Seg(drawer,ctx,q.x1,q.y1,q.x0,q.y1,t,edge);Seg(drawer,ctx,q.x0,q.y1,q.x0,q.y0,t,edge);
-            MapVariantIcon(drawer,ctx,c.support[e].variant,(q.x0+q.x1)*0.5f,(q.y0+q.y1)*0.5f,(q.y1-q.y0)*0.8f,s,tint);
+            MapVariantIcon(drawer,ctx,c.support[e].variant,(q.x0+q.x1)*0.5f,(q.y0+q.y1)*0.5f,(q.y1-q.y0)*0.8f,s,
+                           c.support[e].allowed ? tint : kMapOrderDim);
             MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::supportTip),names[e]);
             hit(q,e);
         }

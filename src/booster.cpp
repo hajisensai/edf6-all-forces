@@ -19,8 +19,9 @@
 //   +0x3F0 decays by +0x3E8 a frame, +0x3F4 counts down and zeroes +0x3EC at 0. (H)
 //   The flame leaves along its matrix's +z (the Booster's direction (0,0,1), 0x1765B70) from its origin.
 // The plugin feeds each nozzle's world matrix (unit rows: a scaled model's scale is in the flame's size) and every frame
-// sets +0x3EC = how strongly it burns, +0x3F0 = 1, +0x3F4 = 3; a vehicle gone for kStaleMs, or dead, has its boosters
-// deleted (BoosterSweep, once a frame from jet.cpp JetReap: also once the last jet is gone). (H/M)
+// sets +0x3EC = how strongly it burns, +0x3F0 = 1, +0x3F4 = 3 while it burns (0, 0 when not: it burns down); a vehicle
+// gone for kStaleMs, or dead, has its boosters deleted (BoosterSweep, once a frame from jet.cpp JetReap: also once the
+// last jet is gone). (H/M)
 #include "crew.h"
 #include "body506.h"
 #include "exhaust_nozzles.h"
@@ -66,6 +67,7 @@ struct Nozzle {
     alignas(16) float m[16];   // the matrix the booster copies each frame: never freed
     unsigned char* obj;
     void* ctrl;                // our weak reference
+    bool burner;               // JetFrame: made the afterburner's length (the constructor's size is its length for good)
 };
 struct Carrier {               // a vehicle's flames (the name from when only the carriers had them)
     const unsigned char* v;
@@ -282,7 +284,8 @@ void JetFrame(const unsigned char* v,float intensity,bool burner,ULONGLONG ms) n
     if(!e)return;
     Carrier* const c=Find(v,ms);
     if(!c)return;
-    const bool fresh=!c->n[0].obj && !c->n[0].ctrl;   // no flame made for it yet
+    const bool lit=intensity>0.0f;
+    const bool fresh=lit && !c->n[0].obj && !c->n[0].ctrl;   // its first flame is made this frame
     c->seen=ms;
     if(Cfg().debug && !c->copyLogged && Live(c->n[0]))CopyCheck(*c,*e,v);
     if(fresh && Cfg().debug) {
@@ -291,19 +294,26 @@ void JetFrame(const unsigned char* v,float intensity,bool burner,ULONGLONG ms) n
         Log("FLAME v=%p nozzle 0 at (%.2f,%.2f,%.2f) from the vehicle's origin, the flame along (%.2f,%.2f,%.2f), %.2f x %.2f m",v,
             w[12]-p[0],w[13]-p[1],w[14]-p[2],w[8],w[9],w[10],e->set.size[0][0],e->set.size[0][1]);
     }
+    // The flame's length is the size the booster was made with (Make: param +0x40, copied by the constructor); nothing
+    // later changes it, so the afterburner going on or off makes the nozzle's booster anew at the other length (it was
+    // made once: a jet's flame kept the length it had when first lit, 2026-10-14). Not burning (`intensity` 0: idle,
+    // parked) it burns down as NozzleFlames' do, instead of the pulse holding it lit at any throttle.
     for(int i=0;i<e->set.count;++i) {
         Nozzle& z=c->n[i];
         std::memcpy(z.m,e->world[i],sizeof z.m);
+        if(Live(z) && lit && z.burner!=burner)Drop(z);
         if(!Live(z)) {
+            if(!lit)continue;   // nothing to light: none made until it burns
             DropWeak(z.ctrl);
             z.obj=nullptr;z.ctrl=nullptr;
             const float size[2]={e->set.size[i][0]*(burner ? kBurnerLength : 1.0f),e->set.size[i][1]};
             Make(z,v,size);
             if(!Live(z))continue;
+            z.burner=burner;
         }
         Put<float>(z.obj,kLevel,intensity);
-        Put<float>(z.obj,kPulse,1.0f);
-        Put<int>(z.obj,kHold,3);
+        Put<float>(z.obj,kPulse,lit ? 1.0f : 0.0f);
+        Put<int>(z.obj,kHold,lit ? 3 : 0);
     }
 }
 }  // namespace

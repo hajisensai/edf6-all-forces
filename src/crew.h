@@ -976,8 +976,10 @@ bool PlayerGunnerOrder(const void* vehicle,GunnerOrder* out) noexcept;
 // guns there to switch between (a bit each, 1 << GunnerGun; the shells always). False with the player not at a gunship's gun.
 enum class GunnerGun : int { shells, cannon, gatling, count };
 // zoom: the sight's magnification (sightzoom.cpp; 1 none).
+// keys: the rider plays on the keyboard and mouse (the controls row names their keys); gatlingHeld: the secondary fire
+// held, the gatling firing whatever gun is picked (`gun` is then the gatling).
 struct GunnerReadout { float sight[3]; bool ground,inReach,ready; float range,wait; float centre[3]; bool centred; GunnerGun gun; unsigned guns;
-                       float zoom; };
+                       float zoom; bool keys,gatlingHeld; };
 bool PlayerGunnerHud(GunnerReadout* out) noexcept;
 // The gunship gunner's seat camera (playerjet_crew.inc GunnerLook): from turretcam.cpp's native Type-1 seat camera hook,
 // the eye and look-at for the local player at the gun; false for any other seat (the stock camera stays).
