@@ -258,15 +258,32 @@ def build_model(game, spec: Model) -> bytes:
     return rab_write(arc)
 
 
+def _model_reference(animation: object) -> list[object] | None:
+    """The primary archive/model pair, including stock model-list wrappers."""
+    items = animation.items if isinstance(animation, dsgo.Node) else animation
+    if not isinstance(items, list) or not items:
+        return None
+    value = items[0]
+    while True:
+        ref = value.items if isinstance(value, dsgo.Node) else value
+        if not isinstance(ref, list) or not ref:
+            return None
+        if len(ref) >= 2 and isinstance(ref[0], str) and isinstance(ref[1], str):
+            return ref
+        value = ref[0]
+
+
 def redirect(data: bytes) -> tuple[bytes, tuple[str, ...]]:
     """Change only an audited model path; other-mod/custom models have no fallback. Only a ready() model is pointed
     at (an already redirected path is recognised for any)."""
     doc = dsgo.parse(data) if data[:4] == b'DSGO' else None
     version, m = sgo.read(data) if doc is None else (None, None)
     try:
-        animation = doc.root.get('animation_model').items if doc else m['animation_model']
-        ref = animation[0].items if doc else animation[0]
+        animation = doc.root.get('animation_model') if doc else m['animation_model']
     except (KeyError, TypeError, AttributeError):
+        return data, ()
+    ref = _model_reference(animation)
+    if ref is None:
         return data, ()
     for spec in MODELS:
         if not ready(spec) and ref[0].lower() != f'app:/object/{output(spec).lower()}':
@@ -282,8 +299,11 @@ def model_path(data: bytes) -> str | None:
     doc = dsgo.parse(data) if data[:4] == b'DSGO' else None
     try:
         if doc:
-            return doc.root.get('animation_model').items[0].items[0]
-        return sgo.read(data)[1]['animation_model'][0][0]
+            animation = doc.root.get('animation_model')
+        else:
+            animation = sgo.read(data)[1]['animation_model']
+        ref = _model_reference(animation)
+        return ref[0] if ref is not None else None
     except (KeyError, TypeError, AttributeError):
         return None
 
@@ -297,8 +317,8 @@ def restore_path(data: bytes, path: str | None = None) -> bytes:
     path = path or 'app:/object/'+spec.stem.lower()+'.mrab'
     if data[:4] == b'DSGO':
         doc = dsgo.parse(data)
-        doc.root.get('animation_model').items[0].items[0] = path
+        _model_reference(doc.root.get('animation_model'))[0] = path
         return dsgo.write(doc)
     version, m = sgo.read(data)
-    m['animation_model'][0][0] = path
+    _model_reference(m['animation_model'])[0] = path
     return sgo.write(version, m)
