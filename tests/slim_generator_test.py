@@ -146,9 +146,11 @@ try:
 finally:
     subprocess.run, build_release.check_bundled = real_run, real_check
 check(gen == os.path.join(build_release.WORK, 'gen-dist', lg.GENERATOR), 'build_generator returns its exe')
-check(len(ran) == 3 and ran[0] == cmd, 'the generator built first')
+check(len(ran) == 4 and ran[0] == cmd, 'the generator built first')
 check(ran[2] == [os.path.join(build_release.WORK, 'dist', build_release.EXE_NAME + '.exe'), '--check-package'],
       'the actual frozen installer is checked before packaging')
+check(ran[3] == [os.path.join(build_release.WORK, 'dist', build_release.EXE_NAME + '.exe'), '--check-workers'],
+      'the actual frozen worker entry is checked before packaging')
 check(f'{gen}{os.pathsep}plugin' in ran[1], 'the installer bundles it beside the plugin files (installer.bundle_dir)')
 main_src = open(os.path.join(ROOT, 'tools', 'build_release.py'), encoding='utf-8').read().split('def main(', 1)[1]
 check(main_src.index('build_generator()') < main_src.index('build_exe('), 'main builds the generator before the installer')
