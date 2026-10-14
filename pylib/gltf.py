@@ -10,8 +10,9 @@
     scene.mesh                each triangle's mesh node (tools/prep_sazabi_rifle.py picks the rifle out by it)
 
 Only what a static export uses: no skins, no animations, no sparse accessors, no Draco or meshopt compression, only
-the base colour texture (a normal or metallic map is ignored with its factors kept), triangle primitives (mode 4)
-only. Anything else is an error, not a guess.
+the base colour texture (a normal or metallic map is ignored with its factors kept; a material in the older
+KHR_materials_pbrSpecularGlossiness workflow gives its diffuse texture and factor as the base colour), triangle
+primitives (mode 4) only. Anything else is an error, not a guess.
 """
 from __future__ import annotations
 
@@ -28,6 +29,7 @@ NORMALIZED = {5121: 255.0, 5123: 65535.0, 5120: 127.0, 5122: 32767.0}   # a norm
 WIDTH = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3, 'VEC4': 4, 'MAT4': 16}
 TRIANGLES = 4
 GLB_MAGIC, GLB_JSON, GLB_BIN = 0x46546C67, 0x4E4F534A, 0x004E4942
+SPEC_GLOSS = 'KHR_materials_pbrSpecularGlossiness'   # Sketchfab's exports of older models: diffuse instead of base colour
 COMPRESSED = ('KHR_draco_mesh_compression', 'EXT_meshopt_compression')
 
 
@@ -133,6 +135,10 @@ def _materials(g: dict, buffers: list[bytes] | None = None, base_dir: str = '') 
         em = tuple(float(x) for x in m.get('emissiveFactor', (0.0, 0.0, 0.0)))
         texture, mime = None, ''
         tex = pbr.get('baseColorTexture')
+        sg = m.get('extensions', {}).get(SPEC_GLOSS)
+        if sg is not None:   # the older specular-glossiness workflow: its diffuse is the base colour
+            base = tuple(float(x) for x in sg.get('diffuseFactor', (1.0, 1.0, 1.0, 1.0)))
+            tex = sg.get('diffuseTexture', tex)
         if tex is not None and buffers is not None:
             source = g['textures'][tex['index']].get('source')
             if source is not None:

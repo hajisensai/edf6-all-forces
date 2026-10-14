@@ -9,13 +9,13 @@ Every cockpit here is a real one, cut out of a modelled aircraft (Sketchfab, CC 
 its seat's eye, in the eye's frame and in metres, as parts/<slug>/cockpit.npz with its textures (credits:
 <model dir>/cockpits/CREDITS_plugin.txt).
 
-    jet_f16           the F-16D Block 60's front cockpit: the up-front controls and the two MFDs (weapons left, map
-                      right), the threat scope ('status'), the data entry display ('flight'), the side consoles, the
-                      side stick, the ejection seat; the HUD's two posts round the line of sight, its glass left out
-                      (the 'hud' screen: the plugin draws its symbols on the world through it)
-    jet_j10s          the J-10S's front cockpit (the plugin's other fighters: a modern three-display panel, the
-                      F-35's stand-in): the three MFDs (map, flight, weapons), the up-front panel's displays
-                      ('status'), the HUD's posts (the 'hud' screen between them); the windscreen's arch left out
+    jet_f16           War Thunder's F-16A Block 15 cockpit (the game's own model; the user, 2026-10-14: "座舱和模型
+                      干脆直接也搬战雷的吧"), every fighter's (the interceptor, the fighter / strike jet, the Primer
+                      fighter): the instrument panel with its radar display ('weapons'), the threat warning scope
+                      ('status'), the display under the panel between the knees ('flight'), the side consoles with the
+                      throttle and the side stick, the canopy rails, the ejection seat; the HUD's two posts round the
+                      line of sight, its glass left out (the 'hud' screen: the plugin draws its symbols on the world)
+    jet_f16_narrow    the same cockpit for the multirole's narrow canopy bump (scaled to its walls)
     plane_deck        the C-130J's flight deck from the left (pilot's) seat: its glass panel (the pilot's PFD:
                       'flight', his nav display: 'map', the engine display: 'status'), the yoke, the pedestal, the
                       copilot's seat, the overhead console, the side windows' frames; the view ahead over the glare
@@ -35,6 +35,10 @@ the walls are nearer. A hold that other passengers' eyes sit in has a fixed scal
 (pylib/cockpit_fits_plugin.py) are measured on the same model at the same scale. The view ahead stays open for flying
 and aiming (the user: "这是为游戏服务的"): the hull itself is not drawn from inside (the game culls its backs), the
 cockpits' canopy bows, HUD glass and windscreen posts before the line of sight are left out when the model is cut.
+A fighter's cockpit and the flight deck are closed tubs (Model.sill, cockpit_tub.tub): a floor and walls up to the
+canopy's sill round the cut model, so looking down or aside under the sill the eye meets the cockpit, never the
+world through the undrawn hull (a cut takes the model's floor away where the room is shallower than the real
+cockpit; cockpits.leaks checks it).
 """
 from __future__ import annotations
 
@@ -48,6 +52,7 @@ import cockpits
 import obj_model as om
 from cockpit_room import TEX, Cabin, _room
 from cockpit_shapes import panel
+from cockpit_tub import TUB_TEXTURE, tub
 from cockpits import Kit, KitFn, KitMaterial, Screen
 
 Vec3 = tuple[float, float, float]
@@ -80,6 +85,7 @@ class Model:
     scale: float | None = None
     caps: tuple[str, ...] = ()          # sides ('left', 'right', 'back') whose cut is closed by a plain wall
     cap_texture: str = 'metal_dark'     # the closing wall's texture (textures/<name>.png)
+    sill: float | None = None           # a closed tub's canopy sill, degrees of pitch (Kit.sill; cockpit_tub.tub)
 
 
 @functools.lru_cache(maxsize=None)
@@ -200,13 +206,17 @@ def _model_kit(cabin: Cabin, name: str, model: Model) -> Kit:
     hi = np.array([wall['left'], wall['up'], wall['ahead']])
     parts, mats = _parts(model.slug, k, lo, hi)
     _caps(parts, mats, model, lo, hi)
+    if model.sill is not None:
+        parts.append(tub(lo, hi, model.sill))
+        mats['tub'] = KitMaterial(TEX.format(TUB_TEXTURE))
     screens = []
     for s in model.screens:
         f = np.array(s.facing) / np.linalg.norm(s.facing)
         c = np.array(s.centre) * k + SCREEN_PROUD * f
         if (c >= lo).all() and (c <= hi).all():
             screens.append(Screen(s.kind, tuple(map(float, c)), tuple(map(float, f)), s.width * k, s.height * k))
-    return Kit(parts, mats, screens=tuple(screens))
+    return Kit(parts, mats, screens=tuple(screens), sill=model.sill,
+               conform=frozenset({'tub'}) if model.sill is not None else frozenset())
 
 
 def _kit(name: str, model: Model, doc: str) -> KitFn:
@@ -221,34 +231,31 @@ FIGHTER_WANT = {'left': 0.62, 'right': 0.62, 'up': 0.5, 'down': 1.15, 'ahead': 1
 FIGHTER_LEAST = {'left': 0.3, 'right': 0.3, 'up': 0.06, 'down': 0.4, 'ahead': 0.6, 'back': 0.15}
 # A fighter's panel and consoles: the side consoles 0.5 m out, the MFDs 0.3-0.45 m down and 0.7-0.9 m ahead.
 FIGHTER_FULL = {'left': 0.5, 'right': 0.5, 'down': 0.6, 'ahead': 0.95}
+# A fighter's canopy sill seen from the seat (a bubble canopy's rail at the shoulder, 0.25 m under the eye and 0.5 m
+# out): under it the tub (the floor, the side consoles' walls, the seat's bulkhead), over it the canopy.
+FIGHTER_SILL = -25.0
 
-# The F-16D's displays (tools/prep_cockpit_plugin.py F16D; measured on the cut model by casting rays from the eye):
-# the two MFDs, the threat warning scope, the data entry display, the HUD's glass between its posts.
-F16 = Model('plugin_f16d', FIGHTER_WANT, FIGHTER_LEAST, FIGHTER_FULL, (
-    ScreenAt('weapons', (0.178, -0.309, 0.889), (0.0, 0.113, -0.994), 0.11, 0.11),
-    ScreenAt('map', (-0.179, -0.309, 0.889), (0.0, 0.113, -0.994), 0.11, 0.11),
-    ScreenAt('status', (0.156, -0.179, 0.893), (0.0, 0.113, -0.994), 0.052, 0.052),
-    ScreenAt('flight', (-0.133, -0.104, 0.733), (0.018, 0.259, -0.966), 0.064, 0.028),
-    ScreenAt('hud', (0.0, 0.05, 0.70), (0.0, 0.0, -1.0), 0.14, 0.15),
-))
-# The J-10S's: its three MFDs, the up-front control panel's displays, the HUD's glass between its posts.
-J10 = Model('plugin_j10s', FIGHTER_WANT, FIGHTER_LEAST, FIGHTER_FULL, (
-    ScreenAt('map', (0.157, -0.440, 0.708), (0.0, 0.174, -0.985), 0.115, 0.105),
-    ScreenAt('flight', (-0.010, -0.454, 0.705), (0.0, 0.174, -0.985), 0.115, 0.095),
-    ScreenAt('weapons', (-0.177, -0.440, 0.708), (0.0, 0.174, -0.985), 0.115, 0.105),
-    ScreenAt('status', (-0.016, -0.242, 0.567), (0.0, -0.276, -0.961), 0.062, 0.07),
-    ScreenAt('hud', (0.0, -0.095, 0.625), (0.0, 0.0, -1.0), 0.16, 0.13),
-))
+# The War Thunder F-16A's displays (tools/prep_cockpit_plugin.py WT_F16A; measured on the model by casting rays from
+# the eye): the radar display left of the panel's centre, the threat warning scope over it, the display under the
+# panel between the knees, the HUD's glass between its two posts.
+F16 = Model('plugin_wt_f16a', FIGHTER_WANT, FIGHTER_LEAST, FIGHTER_FULL, (
+    ScreenAt('weapons', (0.178, -0.426, 0.876), (0.0, 0.18, -0.984), 0.13, 0.10),
+    ScreenAt('status', (0.1425, -0.309, 0.880), (0.0, 0.18, -0.984), 0.07, 0.07),
+    ScreenAt('flight', (0.0, -0.581, 0.685), (0.0, 0.765, -0.644), 0.105, 0.095),
+    ScreenAt('hud', (0.0, -0.03, 0.79), (0.0, 0.0, -1.0), 0.14, 0.15),
+), sill=FIGHTER_SILL)
 
 # The same cockpit for a seat in a narrow canopy bump (the multirole's: closed only 0.23 m either side of the eye and
 # 0.18 m over it, seen along the diagonals): the walls that close, the cockpit scaled to them (from the seat it looks
 # the same, its consoles cut where a full-size one's would be 0.5 m out).
-J10_NARROW = replace(J10, want={**FIGHTER_WANT, 'left': 0.25, 'right': 0.25, 'up': 0.2, 'back': 0.38},
+F16_NARROW = replace(F16, want={**FIGHTER_WANT, 'left': 0.25, 'right': 0.25, 'up': 0.2, 'back': 0.38},
                      least={**FIGHTER_LEAST, 'left': 0.15, 'right': 0.15}, least_scale=0.4)
 
 # The C-130J's flight deck from the left seat (tools/prep_cockpit_plugin.py C130_DECK): the windscreens 1-1.3 m ahead,
 # the overhead console 0.3-0.9 m up; a lower roof scales it down (the stock bomber's cockpit bump: 0.64 m over the eye).
+# DECK_SILL: the side windows' lower frames seen from the left seat; under them the deck's floor and walls are closed.
 # Its displays: the pilot's PFD, the engine display, the two displays right of it (nav, the copilot's).
+DECK_SILL = -25.0
 DECK_SCREENS = (
     ScreenAt('flight', (0.022, -0.475, 0.854), (0.0, 0.0, -1.0), 0.17, 0.14),
     ScreenAt('status', (-0.483, -0.530, 0.851), (0.0, 0.0, -1.0), 0.17, 0.23),
@@ -256,7 +263,7 @@ DECK_SCREENS = (
 )
 DECK = Model('plugin_c130_deck', {'left': 1.4, 'right': 3.2, 'up': 1.2, 'down': 1.3, 'ahead': 2.3, 'back': 1.4},
              {'left': 0.3, 'right': 0.5, 'up': 0.2, 'down': 0.5, 'ahead': 0.7, 'back': 0.3},
-             {'left': 1.2, 'up': 1.0, 'down': 1.1, 'ahead': 1.4}, DECK_SCREENS, least_scale=0.5)
+             {'left': 1.2, 'up': 1.0, 'down': 1.1, 'ahead': 1.4}, DECK_SCREENS, least_scale=0.5, sill=DECK_SILL)
 DECK_GUN = replace(DECK, screens=DECK_SCREENS + (
     ScreenAt('weapons', (-1.018, -0.577, 0.856), (0.0, 0.0, -1.0), 0.22, 0.28),))
 
@@ -288,15 +295,17 @@ CABIN_SEATS: tuple[tuple[float, float, float], ...] = (
     (1.0, -0.57, 90.0), (0.5, -0.57, 90.0), (-0.5, -0.57, -90.0),
 )
 
-KITS: dict[str, KitFn] = {
-    'jet_f16': _kit('jet_f16', F16, "The F-16D Block 60's front cockpit (see the module's docstring)."),
-    'jet_j10s': _kit('jet_j10s', J10, "The J-10S's front cockpit, a modern fighter's (see the module's docstring)."),
-    'jet_j10s_narrow': _kit('jet_j10s_narrow', J10_NARROW, "The J-10S's front cockpit in a narrow canopy bump."),
-    'plane_deck': _kit('plane_deck', DECK, "The C-130J's flight deck from the pilot's seat."),
-    'plane_deck_gun': _kit('plane_deck_gun', DECK_GUN, "The C-130J's flight deck for a gunship's pilot."),
-    'plane_hold': _kit('plane_hold', HOLD, "The C-130J's cargo hold round its first passenger."),
-    'heli_cabin': _kit('heli_cabin', CABIN, "The UH-60M's troop cabin round its first passenger."),
+# kit name -> (its model, its doc): the kits cut from real models (tests/cockpit_build_test.py lays each out in the
+# rooms its model accepts).
+MODELS: dict[str, tuple[Model, str]] = {
+    'jet_f16': (F16, "War Thunder's F-16A Block 15 cockpit, every fighter's (see the module's docstring)."),
+    'jet_f16_narrow': (F16_NARROW, "War Thunder's F-16A Block 15 cockpit in a narrow canopy bump."),
+    'plane_deck': (DECK, "The C-130J's flight deck from the pilot's seat."),
+    'plane_deck_gun': (DECK_GUN, "The C-130J's flight deck for a gunship's pilot."),
+    'plane_hold': (HOLD, "The C-130J's cargo hold round its first passenger."),
+    'heli_cabin': (CABIN, "The UH-60M's troop cabin round its first passenger."),
 }
+KITS: dict[str, KitFn] = {name: _kit(name, model, doc) for name, (model, doc) in MODELS.items()}
 
 
 def passenger(cabin: Cabin) -> Kit:
