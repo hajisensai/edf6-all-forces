@@ -945,6 +945,22 @@ std::uint64_t __fastcall PartDtor(void* self,unsigned flags) {
     return reinterpret_cast<DtorFn>(partClass.orig[kSlotDtor])(self,flags);
 }
 
+// M123 (2026-10-15) crashed in the stock retarget (0x54C4F9 -> 0x5E0F20) on a part whose team field +0x314 held a float (0.93):
+// until the writer is found, a part's team is checked around each step of its frame, logged where it went wrong and put back
+// (a team out of range indexes the team table out of bounds).
+void TeamGuard(void* self,Part& p,const char* where) noexcept {
+    const std::int32_t t=I(self,kTeamAt);
+    if(t>=-1 && t<16)return;
+    const std::int32_t fix=p.team>=-1 && p.team<16 ? p.team : 1;
+    static std::atomic<int> said{0};
+    if(said.fetch_add(1)<12) {
+        float asFloat;
+        std::memcpy(&asFloat,&t,4);
+        Log("EDF41MOTHER part %s #%d %p: team field %08X (as a float %.4f) %s; frame %d state %d; +0x310 %.4f +0x318 %d; put back to %d",
+            kGroupNames[p.group],p.index,self,static_cast<unsigned>(t),asFloat,where,p.frames,p.state,F(self,0x310),I(self,0x318),fix);
+    }
+    std::memcpy(static_cast<char*>(self)+kTeamAt,&fix,4);
+}
 std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
     std::lock_guard<std::recursive_mutex> hold(lock);
     Part* p=PartOf(self);
@@ -954,11 +970,15 @@ std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
         if(!p->gone) { DeleteObject(self); p->gone=true; }
         return reinterpret_cast<UpdateFn>(partClass.orig[kSlotUpdate])(self,dt);
     }
+    TeamGuard(self,*p,"before its update");
     if(!p->gone)Place(self,*p);
+    TeamGuard(self,*p,"after Place");
     const std::uint64_t r=reinterpret_cast<UpdateFn>(partClass.orig[kSlotUpdate])(self,dt);
     p=PartOf(self);
     h=p ? HullOf(p->hull) : nullptr;
+    if(p)TeamGuard(self,*p,"after the class's update");
     if(p && h && !p->gone)PartFrame(self,*p,*h);
+    if(p)TeamGuard(self,*p,"after PartFrame");
     return r;
 }
 
@@ -983,11 +1003,11 @@ void CreatePart(void* info) noexcept { CloneObject(partClass,kEaoCtor,kEaoSize,i
 void CreateHull(void* info) noexcept {
     void* obj=CloneObject(hullClass,kCarrierCtor,kCarrierSize,info);
     if(!obj)return;
-    {
-        std::lock_guard<std::recursive_mutex> hold(lock);
-        hulls[obj];
-    }
     Log("EDF41MOTHER create #%d: UfoMother301 %p on UfoCarrier508's constructor",++created,obj);
+    // The parts are made here, as 4.1's constructor makes them (0x24FFF0) and EDF6's UfoMother511 makes its ring units in its own
+    // (0x4FE740 -> 0x4FEF00): M603 and M993 send ObjectAction / GetPartsObject on the creation frame, before any Update.
+    std::lock_guard<std::recursive_mutex> hold(lock);
+    SpawnParts(obj,hulls[obj]);
 }
 }  // namespace
 
