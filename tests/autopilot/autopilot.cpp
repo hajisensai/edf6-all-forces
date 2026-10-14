@@ -119,8 +119,16 @@ BOOL WINAPI KeyboardState(PBYTE keys) {
     return TRUE;
 }
 
+// Desktop keys this stand-in kept from EDF6VehicleCrew (down on the desktop, not held by the autopilot), by key: said
+// once a key (the user, 2026-10-14: "桌面键盘漏进后台": the proof the plugin's reads come here and are answered here).
+volatile LONG keptFromPlugin[kKeyCodes]{};
+using AsyncKeyFn=SHORT(WINAPI*)(int);
+AsyncKeyFn realAsyncKey=nullptr;
 SHORT WINAPI KeyState(int vk) {
-    return vk>=0 && vk<kKeyCodes && held[vk] ? static_cast<SHORT>(0x8000) : 0;
+    const bool mine=vk>=0 && vk<kKeyCodes && held[vk];
+    if(!mine && vk>=0 && vk<kKeyCodes && realAsyncKey && (realAsyncKey(vk)&0x8000) && !InterlockedExchange(&keptFromPlugin[vk],1))
+        Log("BACKGROUND the desktop's key 0x%X kept from EDF6VehicleCrew",vk);
+    return mine ? static_cast<SHORT>(0x8000) : 0;
 }
 
 // EDF6VehicleCrew reads its own keys (the map's M, the damage statistics' I, ...) with GetAsyncKeyState and checks
@@ -132,8 +140,22 @@ void PatchPluginInput() noexcept {
     if(!crew)return;
     pluginInput=true;
     const bool fore=PatchImport(crew,"USER32.dll","GetForegroundWindow",reinterpret_cast<void*>(&Foreground))!=nullptr;
-    const bool keys=PatchImport(crew,"USER32.dll","GetAsyncKeyState",reinterpret_cast<void*>(&KeyState))!=nullptr;
+    realAsyncKey=reinterpret_cast<AsyncKeyFn>(PatchImport(crew,"USER32.dll","GetAsyncKeyState",reinterpret_cast<void*>(&KeyState)));
+    const bool keys=realAsyncKey!=nullptr;
     Log("BACKGROUND EDF6VehicleCrew's input: foreground=%d asyncKeys=%d",fore,keys);
+}
+
+// Once a second: EDF6VehicleCrew's key slot still ours (another loader or a re-bind would hand it the desktop's keys);
+// put back and said if not.
+ULONGLONG slotCheckAt=0;
+void CheckPluginInput() noexcept {
+    const ULONGLONG now=GetTickCount64();
+    if(now-slotCheckAt<1000)return;
+    slotCheckAt=now;
+    const HMODULE crew=GetModuleHandleW(L"EDF6VehicleCrew.dll");
+    if(!crew)return;
+    void* const was=PatchImport(crew,"USER32.dll","GetAsyncKeyState",reinterpret_cast<void*>(&KeyState));
+    if(was && was!=reinterpret_cast<void*>(&KeyState))Log("BACKGROUND EDF6VehicleCrew's GetAsyncKeyState slot was %p, not the stand-in: put back",was);
 }
 
 // --- The system mouse and the desktop's activation stay the user's (2026-10-10: a background run pulled the user's
@@ -680,6 +702,7 @@ DWORD WINAPI Loop(void*) {
         PollCommand();
         if(!padIn)InstallPad();
         if(!pluginInput)PatchPluginInput();
+        else CheckPluginInput();
         autopilot::AirdropProbeTick();
         Sleep(15);
     }

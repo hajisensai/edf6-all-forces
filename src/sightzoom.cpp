@@ -49,7 +49,8 @@ CamStepFn nextCamStep=nullptr;
 bool installed=false;
 
 struct Capability { sightzoom::Kind kind; const void* weapon; bool mounted=false; };
-struct Toggle { ObjRef ref,human; const void* v; unsigned seat; int step; bool held; Capability sight; int zero=0; bool upHeld=false,downHeld=false; std::uint16_t pad=0; };
+struct Toggle { ObjRef ref,human; const void* v; unsigned seat; int step; bool held; Capability sight; int zero=0; bool upHeld=false,downHeld=false; std::uint16_t pad=0;
+                bool fresh=false; };   // fresh: the seat just taken (Debug=1 says its sight once)
 Toggle toggle{};
 // Publish the entire seat identity together: a camera must not combine another seat's zoom and timestamp. `aim` the
 // seat's aim (seat+0xE0), what SightLayStep is told apart by before anything else is read.
@@ -289,7 +290,11 @@ void SightZoomFrame(unsigned char* v,unsigned seat,bool padButton) noexcept {
     // trigger's gun and the switch's stores share it (SameScope). A weapon that cannot be looked at through the
     // optic (an indirect round, the overhead view) shows 1x while it is picked; the step is kept for the next one.
     if(!toggle.ref.Is(v) || !toggle.human.Is(PlayerHuman()) || toggle.seat!=seat)
-        toggle=Toggle{ObjRef::Of(v),ObjRef::Of(PlayerHuman()),v,seat,0,true,sight};
+        toggle=Toggle{ObjRef::Of(v),ObjRef::Of(PlayerHuman()),v,seat,0,true,sight,0,false,false,0,true};
+    if(c.debug && (toggle.fresh || toggle.sight.kind!=sight.kind || toggle.sight.mounted!=sight.mounted || toggle.sight.weapon!=sight.weapon))
+        Log("SIGHTZOOM v=%p seat %u: sight kind %d, weapon %p, optic %s",v,seat,static_cast<int>(sight.kind),sight.weapon,
+            sight.mounted ? "mounted" : "none (no vc_optic_ on its mount's chain)");
+    toggle.fresh=false;
     toggle.sight=sight;
     if(!sightzoom::Magnifies(sight.kind) || !sight.mounted){toggle.held=true;TakeScopeWheel(false);Publish(v,seat,1.0f);return;}
     if(GamePaused()){toggle.held=true;TakeScopeWheel(false);Publish(v,seat,sightzoom::At(toggle.step));return;}
