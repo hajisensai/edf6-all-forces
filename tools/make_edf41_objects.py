@@ -140,6 +140,9 @@ class Alias:
                               # before the grafts (the player keeps its clips: it animates as in 4.1)
     rename_states: tuple[tuple[str, str, str], ...] = ()   # (player, 4.1's state, the class's name): cas_graft.rename_state,
                               # in order, before the grafts and the state aliases
+    add_locators: tuple['mab_legacy.Locator', ...] = ()   # MAB locators the class looks up unchecked that 4.1's MAB lacks
+                              # (mab_legacy.mab_add_locators; SGO path)
+    post: 'Callable[[dict], None] | None' = None   # last, on the SGO's members (SGO path): keys computed from the result
 
 
 @dataclass(frozen=True)
@@ -599,6 +602,83 @@ ALIASES['ALIEN4LEGTANK301.SGO'] = FORTRESS_ALIAS
 ROOTS['ALIEN4LEGTANK301.SGO'] = 4
 
 
+# --------------------------------------------------------------------------------------------------------- the giant dragon
+# DragonBig401 (4.1's giant dragon, M166) -> DragonSmall, the class EDF6 kept of the pair (jobs/4bf89026/tmp/dragon41/
+# NOTES.md). 4.1's DragonBig and DragonSmall are sibling classes of one design: the same AI states (wander, circle 70 over
+# the target, approach, climb away, a third of the landings stay on the ground), the same body states (take off on the MAB
+# event 飛行開始, fly, glide on 滑空開始 with the timed wing beat, land, hit, blown off, get up, die), the same SGO keys and the
+# same speed formulas (walk clamp(Base (1 + (s - 1) Up), 0.1, 1) x 60, fly the same within 0.2..2: 4.1 0x1efd50, EDF6
+# 0x334660), and the insectbase_* keys mean the same (InsectBase 0x22b8ea / EDF6 0x4a6830). EDF6's DragonSmall IS 4.1's
+# DragonSmall ported (0x334660 = 4.1 0x1fb910, 0x339180 = 0x1f7080). What differs, and how:
+#   - the keys EDF6's class reads unchecked that DragonBig's file lacks (0x528A0, then a load through the node: EDF+0x32e53e,
+#     0x32e556, 0x32e5df, 0x32e72e, 0x33925c, 0x339269): the blood colours 4.1 hard-codes for DragonBig ((0.5, 0.15, 0.5, 1),
+#     0xab7e00), the death blood scale it uses (0.35 x 5 = 1.75, 0x1ed710), the ragdoll reaction scale that gives 4.1's
+#     impulse (EDF6 min(dmg, 20) x 4 x scale against 4.1's dmg x 10: 2.5), and the small dragon's fireball and bite tunings,
+#     which DragonBig has no use for: harmless values (the fireball is not fired: src/edf41dragon.cpp; the bite never closes:
+#     DragonBig's MAB has none of the 捕食判定* events that open its hit box).
+#   - the MAB locator 捕食判定 the constructor reads unchecked (EDF+0x32e84a) and 捕食固定位置 (used while holding a prey), on
+#     head and on the jaw ago, where EDF6's small dragon has them.
+#   - CAS states the class plays that DragonBig has no clip for: capture (its ground attack: EDF6 only ever enters the
+#     capture state on the ground, 0x33599e) is DragonBig's ground_attack, the fire-breathing clip; glide_fly (the timed
+#     wing beat over the glide, 0x33a454) is glide_wingbeat; fly_damage_large (blown off in the air) is blow_off; damage_3 /
+#     fly_damage_3 (a third random hit clip) are damage_1 / fly_damage_1.
+#   - se_table in the class's order (0 hurt roar, 1 hit effect, 2 death roar, 3 blood, 4 fireball shot, 5 fireball hit,
+#     6..8 the bite): 4.1's names (ドラゴン大*, ドラゴン炎のブレス着弾) are not in EDF6's SEPRESET.SGO; the small dragon's of the
+#     same roles, the flame hit EDF6's grey flame thrower's.
+#   - the flame: 4.1 breathes FlameBullet02, one a frame, between the MAB events 火炎開始 and 火炎終了 of its three attack clips
+#     (0x1ee7c0 / 0x1ee7e0, 0x1ed530); EDF6's class hard-codes FlameBullet01 fireballs (0x33ae30 -> 0x32dd60) and registers no
+#     火炎* event. edf41_dragon tells the plugin each attack state's flame window (from DragonBig's MAB, read here) and the flame
+#     (edf41_flame: the bullet in the form 0x329e80 reads, 4.1's numbers: speed 2 per frame, life 360 frames, size 4, hit stop
+#     0.95, colour (10, 10, 10, 1) fading to (-5, -10, -10, 0), custom [0, 0.24, 0.997, 1, end colour], 0x1ed3e3..0x1ed474).
+DRAGON_FLAME_STATES = (('capture', 'ground_attack'), ('fly_attack', 'fly_attack'), ('fly_glide_attack', 'fly_glide_attack'))
+DRAGON_FLAME: list = ['FlameBullet02', [0, [0, 2.0, 1, 360, 8, 4.0, 11, 0.95, 12, [10.0, 10.0, 10.0, 1.0]],
+                                       [0, 0.24, 0.997, 1, [-5.0, -10.0, -10.0, 0.0]]]]
+DRAGON_OVERRIDE: tuple[tuple[str, object], ...] = (
+    ('dragon_DeadBloodScale', 1.75),
+    ('dragon_BloodColor', [0.5, 0.15, 0.5, 1.0]),
+    ('dragon_DeadBloodColor', [0.5, 0.15, 0.5, 1.0]),
+    ('dragon_RagdollReactionScale', 2.5),
+    ('dragon_AttackBulletSetting', [4.0, 2.0, 1.0e6, 0.2, 0.0]),
+    ('dragom_AttackCaptureSetting', [1.0, 0.0, 0.0, 1.0]),
+    ('se_table', ['ドラゴン小ｖダメージ大', 'ドラゴン小ヒットエフェクト', 'ドラゴン小ｖ死亡大', '敵共通血しぶき大', 'ドラゴン火炎弾発射',
+                  'グレイ火炎放射命中', 'ドラゴン小噛みつき', 'ドラゴン小噛まれダメージ', 'ドラゴン小噛まれ飛行中の風']),
+    ('edf41_flame', DRAGON_FLAME),
+    # 4.1's collision numbers; its sound (ドラゴン大衝突) has no SEPRESET name: the small dragon's
+    ('ragdoll_contact', ['ドラゴン小衝突', 2000.0, 0.5, 10.0, 120]),
+)
+def dragon_flame_windows(mab: bytes) -> list:
+    """edf41_dragon: [[CAS state, flame start, flame end], ...] for DRAGON_FLAME_STATES, the times of 火炎開始 / 火炎終了 on the
+    clip's MAB track (the clip time the plugin compares with the main player's)."""
+    events = mab_legacy.mab_events(mab)
+    out = []
+    for state, clip in DRAGON_FLAME_STATES:
+        keys = dict(events.get(clip, []))
+        if '火炎開始' not in keys or '火炎終了' not in keys:
+            raise ValueError(f'MAB track {clip} has no 火炎開始 / 火炎終了: {events.get(clip)}')
+        out.append([state, float(keys['火炎開始']), float(keys['火炎終了'])])
+    return out
+
+
+def dragon_marks(members: dict) -> None:
+    """DragonBig's plugin key: its attack states' flame windows (dragon_flame_windows)."""
+    members['edf41_dragon'] = dragon_flame_windows(members['animation_model'][2])
+
+
+DRAGON_ALIAS = Alias(
+    'DragonSmall', 'DRAGONSMALL401.SGO', (), override=DRAGON_OVERRIDE,
+    state_aliases=(('main', 'capture', 'ground_attack'), ('main', 'glide_fly', 'glide_wingbeat'),
+                   ('main', 'fly_damage_large', 'blow_off'), ('main', 'damage_3', 'damage_1'),
+                   ('main', 'fly_damage_3', 'fly_damage_1')),
+    add_locators=(mab_legacy.Locator('捕食判定', 'head', 0, (0.0, 0.0, 0.5, 1.0), 2.0),
+                  mab_legacy.Locator('捕食固定位置', 'ago', 2, (0.0, -0.1, 0.8, 1.0), (0.1, 0.1, 0.5, 1.0),
+                                     (0.7853982, 1.5707964, 0.7853982, 1.0))),
+    post=dragon_marks)
+
+
+ALIASES['DRAGONBIG401.SGO'] = DRAGON_ALIAS
+ROOTS['DRAGONBIG401.SGO'] = 1
+
+
 
 def soldier_talk(members: dict) -> None:
     """AssultSoldier's game_object_talk_setting [sgo, a, b, c]: 4.1 (EDF41 0x28cbd0) c = the variant count, EDF6
@@ -937,6 +1017,8 @@ def alias(games: Games, root: str, files: dict[str, bytes], a: Alias) -> None:
         model[2] = remabbed(model[2], a.mab)
     for locator, node in a.locator_nodes:
         members['animation_model'][2] = mab_legacy.mab_retarget(members['animation_model'][2], locator, node)
+    if a.add_locators:
+        members['animation_model'][2] = mab_legacy.mab_add_locators(members['animation_model'][2], list(a.add_locators))
     am = members.get('animation_model')
     cas = rel_of(am[1]) if isinstance(am, list) and len(am) > 1 and isinstance(am[1], str) else None
     t_am = theirs.get('animation_model')   # a part (animation_model_d) has none: no CAS to graft
@@ -948,6 +1030,8 @@ def alias(games: Games, root: str, files: dict[str, bytes], a: Alias) -> None:
         cas = 'OBJECT/' + root.rsplit('.', 1)[0] + '.CAS'
         files[cas] = cas_graft.hollow(games.read6(rel_of(t_am[1])))
         members['animation_model'] = [am[0], 'app:/' + cas.lower(), *am[2:]]
+    if a.post:
+        a.post(members)
     files[rel] = sgo.write_depth_first(version, members)
     check_fracture(members, files, rel)
     graft_cas(games, a, files, cas, rel_of(t_am[1]) if t_am and isinstance(t_am[1], str) else '')

@@ -490,6 +490,8 @@ bool InstallEdf41Sound() noexcept;
 bool InstallEdf41Ai() noexcept;
 // edf41fortress.cpp: the converted EDF4.1 four-legged fortress stands from the start and drops through its core hatch.
 bool InstallEdf41Fortress() noexcept;
+// edf41dragon.cpp: the converted EDF4.1 giant dragon breathes 4.1's flame stream and keeps 4.1's ranges and glide pass.
+bool InstallEdf41Dragon() noexcept;
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
 bool InstallMissiles() noexcept;
 // The stock split missiles (MissileBullet02) split short of a big target's surface (splitmissile.cpp).
