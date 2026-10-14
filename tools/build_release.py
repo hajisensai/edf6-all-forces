@@ -136,6 +136,19 @@ def check_bundled() -> None:
                          f'it at run time (python -m pip install {" ".join(missing)})')
 
 
+# native/cmpl.cpp built by build.cmd: mdb.cmpl_compress's encoder, 70 times the pure Python one (which spent most of an
+# install's model generation: 35 of a 40-second cockpit model, measured 2026-10-14). Both exes load it from _MEIPASS.
+CMPL_DLL = os.path.join(ROOT, 'build', 'pylib', 'edf6cmpl.dll')
+
+
+def cmpl_binary() -> list[str]:
+    """PyInstaller's --add-binary for CMPL_DLL; fails the build when build.cmd has not made it (the frozen exes would
+    fall back to the pure Python encoder and every install would take minutes longer)."""
+    if not os.path.isfile(CMPL_DLL):
+        raise SystemExit(f'build_release: {CMPL_DLL} missing; run build.cmd first')
+    return ['--add-binary', f'{CMPL_DLL}{os.pathsep}.']
+
+
 def generator_cmd() -> list[str]:
     """The PyInstaller command of the slim generator (tools/loadout_generator.py alone, onefile, console: the plugin starts
     it with CREATE_NO_WINDOW)."""
@@ -146,6 +159,7 @@ def generator_cmd() -> list[str]:
         cmd += ['--paths', p]
     for mod in GENERATOR_EXCLUDES:
         cmd += ['--exclude-module', mod]
+    cmd += cmpl_binary()
     cmd.append(os.path.join(ROOT, 'tools', 'loadout_generator.py'))
     return cmd
 
@@ -190,6 +204,7 @@ def build_exe(name: str, generator: str | None = None) -> str:
     for name in plugin_data():
         cmd += ['--add-data', f'{os.path.join(PLUGINS, name)}{seps}plugin']
     cmd += ['--add-data', f'{info}{seps}plugin']
+    cmd += cmpl_binary()
     cmd += ['--add-data', f'{recipes}{seps}plugin']
     if generator:   # beside the plugin files: installer.generator_source finds it there
         cmd += ['--add-data', f'{generator}{seps}plugin']

@@ -28,7 +28,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # --------------------------------------------------------------------------------------------- CMPL
 
 
-def cmpl_decompress(data: bytes) -> bytes:
+def cmpl_decompress_py(data: bytes) -> bytes:
     """'CMPL' + u32 BE size + Okumura LZSS (N=4096, F=18, THRESHOLD=2, r starts at N-F, zero window). ValueError on
     a stream that ends before it has given `size` bytes."""
     if data[:4] != b'CMPL':
@@ -71,7 +71,7 @@ def cmpl_decompress(data: bytes) -> bytes:
     return bytes(out[:size])
 
 
-def cmpl_compress(data: bytes) -> bytes:
+def cmpl_compress_py(data: bytes) -> bytes:
     """Okumura's LZSS.C encoder (binary search trees), the classic 1989 public-domain algorithm.
     `verify --cmpl` shows it reproduces the game's CMPL streams byte for byte (EDF.dll encoder 0x3F350)."""
     N, F, TH, NIL = 4096, 18, 2, 4096
@@ -213,6 +213,62 @@ def cmpl_compress(data: bytes) -> bytes:
     if cptr > 1:
         out += code[:cptr]
     return bytes(out)
+
+
+_NATIVE: object = None   # ctypes.CDLL once loaded, False when there is none
+
+
+def _native() -> object:
+    """native/cmpl.cpp's DLL (the same encoder in C++: the pure Python one spends minutes of every install), or None.
+    Found beside the frozen installer's modules (build_release bundles it) or in a dev checkout's build/pylib."""
+    global _NATIVE
+    if _NATIVE is None:
+        _NATIVE = False
+        import ctypes
+        base = getattr(sys, '_MEIPASS', None)
+        path = os.path.join(base, 'edf6cmpl.dll') if base else os.path.join(HERE, '..', 'build', 'pylib', 'edf6cmpl.dll')
+        if os.name == 'nt' and os.path.isfile(path):
+            lib = ctypes.CDLL(os.path.abspath(path))
+            lib.edf6_cmpl_bound.restype = ctypes.c_size_t
+            lib.edf6_cmpl_bound.argtypes = (ctypes.c_size_t,)
+            lib.edf6_cmpl_compress.restype = ctypes.c_size_t
+            lib.edf6_cmpl_compress.argtypes = (ctypes.c_char_p, ctypes.c_size_t, ctypes.c_void_p)
+            lib.edf6_cmpl_decompress.restype = ctypes.c_size_t
+            lib.edf6_cmpl_decompress.argtypes = (ctypes.c_char_p, ctypes.c_size_t, ctypes.c_void_p, ctypes.c_size_t)
+            _NATIVE = lib
+    return _NATIVE or None
+
+
+def native_cmpl() -> bool:
+    """Whether cmpl_compress / cmpl_decompress run natively (the installer's package check requires it)."""
+    return _native() is not None
+
+
+def cmpl_compress(data: bytes) -> bytes:
+    """cmpl_compress_py's bytes, natively when native/cmpl.cpp's DLL is there."""
+    lib = _native()
+    if lib is None:
+        return cmpl_compress_py(data)
+    import ctypes
+    data = bytes(data)
+    out = ctypes.create_string_buffer(lib.edf6_cmpl_bound(len(data)))
+    size = lib.edf6_cmpl_compress(data, len(data), out)   # before .raw: that is a copy
+    return out.raw[:size]
+
+
+def cmpl_decompress(data: bytes) -> bytes:
+    """cmpl_decompress_py's bytes (and its ValueErrors), natively when native/cmpl.cpp's DLL is there."""
+    lib = _native()
+    if lib is None or data[:4] != b'CMPL' or len(data) < 8:
+        return cmpl_decompress_py(data)
+    import ctypes
+    data = bytes(data)
+    size = struct.unpack_from('>I', data, 4)[0]
+    out = ctypes.create_string_buffer(size)
+    got = lib.edf6_cmpl_decompress(data[8:], len(data) - 8, out, size)
+    if got < size:
+        raise ValueError(f'CMPL stream cut short: {got} of {size} bytes')
+    return out.raw
 
 
 # ---------------------------------------------------------------------------------------------- RAB

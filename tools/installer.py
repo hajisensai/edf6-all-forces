@@ -1121,6 +1121,10 @@ def check_package() -> int:
     importlib.import_module('PIL.Image')
     sample = texfile.Image(1, 1, bytearray((33, 44, 55, 255)))
     assert texfile_accel.dxt1_dds(sample) == texfile.dxt1_dds(sample)
+    import mdb
+    assert mdb.native_cmpl(), 'edf6cmpl.dll not bundled: models would use the pure Python CMPL encoder'
+    probe = bytes(range(256)) * 40 + b'EDF6' * 300
+    assert mdb.cmpl_compress(probe) == mdb.cmpl_compress_py(probe)
     print('EDF6VC_PACKAGE_OK cockpit families=4')
     return 0
 
