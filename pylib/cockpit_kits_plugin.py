@@ -35,15 +35,14 @@ the walls are nearer. A hold that other passengers' eyes sit in has a fixed scal
 (pylib/cockpit_fits_plugin.py) are measured on the same model at the same scale. The view ahead stays open for flying
 and aiming (the user: "这是为游戏服务的"): the hull itself is not drawn from inside (the game culls its backs), the
 cockpits' canopy bows, HUD glass and windscreen posts before the line of sight are left out when the model is cut.
-A fighter's cockpit and the flight deck are closed tubs (Model.sill, _tub): a floor and walls up to the canopy's sill
-round the cut model, so looking down or aside under the sill the eye meets the cockpit, never the world through the
-undrawn hull (a cut takes the model's floor away where the room is shallower than the real cockpit; cockpits.leaks
-checks it).
+A fighter's cockpit and the flight deck are closed tubs (Model.sill, cockpit_tub.tub): a floor and walls up to the
+canopy's sill round the cut model, so looking down or aside under the sill the eye meets the cockpit, never the
+world through the undrawn hull (a cut takes the model's floor away where the room is shallower than the real
+cockpit; cockpits.leaks checks it).
 """
 from __future__ import annotations
 
 import functools
-import math
 import os
 from dataclasses import dataclass, replace
 
@@ -52,7 +51,8 @@ import numpy as np
 import cockpits
 import obj_model as om
 from cockpit_room import TEX, Cabin, _room
-from cockpit_shapes import merge, panel
+from cockpit_shapes import panel
+from cockpit_tub import TUB_TEXTURE, tub
 from cockpits import Kit, KitFn, KitMaterial, Screen
 
 Vec3 = tuple[float, float, float]
@@ -85,7 +85,7 @@ class Model:
     scale: float | None = None
     caps: tuple[str, ...] = ()          # sides ('left', 'right', 'back') whose cut is closed by a plain wall
     cap_texture: str = 'metal_dark'     # the closing wall's texture (textures/<name>.png)
-    sill: float | None = None           # a closed tub's canopy sill, degrees of pitch (Kit.sill; _tub)
+    sill: float | None = None           # a closed tub's canopy sill, degrees of pitch (Kit.sill; cockpit_tub.tub)
 
 
 @functools.lru_cache(maxsize=None)
@@ -194,67 +194,6 @@ def _caps(parts: list[om.Part], mats: dict[str, KitMaterial], model: Model, lo: 
         mats['cap'] = KitMaterial(TEX.format(model.cap_texture))
 
 
-TUB_TEXTURE, TUB_STRIPS, TUB_INSET = 'air_tub', 12, 0.002   # textures/<name>.png; strips a wall's top is drawn in
-
-
-def _tub_wall(name: str, axis: int, at: float, along: int, span: tuple[float, float], floor: float, roof: float,
-              sill: float) -> list[om.Part]:
-    """The wall in the plane `axis` = `at` (eye frame), from `span[0]` to `span[1]` along the axis `along`, from the
-    floor up to where the sill's cone (pitch `sill` degrees from the eye) meets it (no higher than the roof), in
-    TUB_STRIPS upright strips (on a flat wall that cone is a curve), its front toward the eye."""
-    slope = math.tan(math.radians(sill))
-    ts = np.linspace(span[0], span[1], TUB_STRIPS + 1)
-    tops = [min(roof, max(floor, slope * math.hypot(at, t))) for t in ts]
-    facing = [0.0, 0.0, 0.0]
-    facing[axis] = -math.copysign(1.0, at)
-
-    def pt(t: float, y: float) -> Vec3:
-        p = [0.0, y, 0.0]
-        p[axis], p[along] = at, t
-        return (p[0], p[1], p[2])
-    out = []
-    for k in range(TUB_STRIPS):
-        if max(tops[k], tops[k + 1]) - floor > 1e-4:
-            out += _face(f'{name}{k}', 'tub', [pt(ts[k], floor), pt(ts[k + 1], floor), pt(ts[k + 1], tops[k + 1]),
-                                               pt(ts[k], tops[k])], tuple(facing))
-    return out
-
-
-def _tub(lo: np.ndarray, hi: np.ndarray, sill: float) -> om.Part:
-    """A closed cockpit tub round the eye in the box lo..hi (the room the model is cut to; the user, 2026-10-14:
-    "固定翼的底部是空白，完全能看过去" and "照着人家完全照搬": a real cockpit's tub, as DCS and War Thunder draw theirs): the
-    floor, and the four walls up to the canopy's sill (pitch `sill` from the eye), TUB_INSET inside the box, all facing
-    the eye. The model cut to the box stands in it; where the cut took the model's own floor or side walls away (a room
-    smaller than the real cockpit), or the model never had them (it was modelled to be seen through glass from above),
-    the tub is what the eye meets instead of the world: the hull itself is not drawn from inside."""
-    (x0, y0, z0), (x1, y1, z1) = lo + TUB_INSET, hi - TUB_INSET
-    parts = _face('tub_floor', 'tub', [(x0, y0, z0), (x1, y0, z0), (x1, y0, z1), (x0, y0, z1)], (0.0, 1.0, 0.0))
-    for name, axis, at, along, span in (('tub_left', 0, x1, 2, (z0, z1)), ('tub_right', 0, x0, 2, (z0, z1)),
-                                        ('tub_back', 2, z0, 0, (x0, x1)), ('tub_front', 2, z1, 0, (x0, x1))):
-        parts += _tub_wall(name, axis, at, along, span, y0, y1, sill)
-    return merge(parts, 'tub')
-
-
-def _face(name: str, material: str, pts: list[Vec3], facing: Vec3) -> list[om.Part]:
-    """The flat convex polygon `pts` (its corners in order; repeated ones count once) with its front toward
-    `facing`, UVs laid flat on it one repeat per 0.8 m; none when it has no area."""
-    ring = [p for k, p in enumerate(pts) if math.dist(p, pts[k - 1]) > 1e-6]
-    if len(ring) < 3:
-        return []
-    n = np.cross(np.subtract(ring[1], ring[0]), np.subtract(ring[2], ring[0]))
-    if len(ring) == 4 and np.linalg.norm(n) < 1e-9:
-        ring = ring[1:] + ring[:1]
-        n = np.cross(np.subtract(ring[1], ring[0]), np.subtract(ring[2], ring[0]))
-    if np.linalg.norm(n) < 1e-9:
-        return []
-    if float(np.dot(n, facing)) < 0:
-        ring = ring[::-1]
-    axes = [i for i in range(3) if abs(facing[i]) < 0.5]
-    f = tuple(float(c) for c in np.array(facing) / np.linalg.norm(facing))
-    verts = [om.Vertex(p, f, (p[axes[0]] / 0.8, -p[axes[1]] / 0.8)) for p in ring]
-    return [om.Part(name, material, verts, [(0, k, k + 1) for k in range(1, len(ring) - 1)])]
-
-
 def _model_kit(cabin: Cabin, name: str, model: Model) -> Kit:
     """`model` laid out in the room round the eye: scaled (Model.full / scale), cut at the walls."""
     r = _room(cabin, dict(model.want), dict(model.least), name)   # raises where the room is too small
@@ -268,7 +207,7 @@ def _model_kit(cabin: Cabin, name: str, model: Model) -> Kit:
     parts, mats = _parts(model.slug, k, lo, hi)
     _caps(parts, mats, model, lo, hi)
     if model.sill is not None:
-        parts.append(_tub(lo, hi, model.sill))
+        parts.append(tub(lo, hi, model.sill))
         mats['tub'] = KitMaterial(TEX.format(TUB_TEXTURE))
     screens = []
     for s in model.screens:
@@ -276,7 +215,8 @@ def _model_kit(cabin: Cabin, name: str, model: Model) -> Kit:
         c = np.array(s.centre) * k + SCREEN_PROUD * f
         if (c >= lo).all() and (c <= hi).all():
             screens.append(Screen(s.kind, tuple(map(float, c)), tuple(map(float, f)), s.width * k, s.height * k))
-    return Kit(parts, mats, screens=tuple(screens), sill=model.sill)
+    return Kit(parts, mats, screens=tuple(screens), sill=model.sill,
+               conform=frozenset({'tub'}) if model.sill is not None else frozenset())
 
 
 def _kit(name: str, model: Model, doc: str) -> KitFn:

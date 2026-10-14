@@ -124,6 +124,7 @@ def main() -> int:
                     kit = cockpits.fitted(hull, replace(fit, kit=alt), cockpit_kits.KITS[alt])
                     expect({s.kind for s in kit.screens} <= set(cockpits.SCREEN_KINDS),
                            f'{stem} seat {fit.seat} as {alt} (no seat of its own yet): laid out inside the hull')
+                    closed(f'{stem} seat {fit.seat} as {alt}', kit)
                 except Exception as e:  # noqa: BLE001
                     expect(False, f'{stem} seat {fit.seat} as {alt}: {e}')
         print(f'      {stem}: {time.perf_counter() - started:.1f} s', flush=True)

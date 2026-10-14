@@ -86,12 +86,17 @@ class Kit:
     part must lie inside the hull (fitted()). `screens`: where its live read-outs are drawn. `sill`: a closed tub's
     (an aircraft cockpit's) canopy sill, degrees of pitch from the eye: every line of sight further down than that
     meets the kit (leaks()); above it the canopy (the world, through the hull the game does not draw from inside).
-    None: no such promise (an open gun mount, a cab whose windows reach the floor)."""
+    None: no such promise (an open gun mount, a cab whose windows reach the floor). `windows`: the real glass under
+    the sill the eye may see out through (a helicopter's chin window; eye-frame triangles, cockpit_tub): the tub leaves
+    those lines open and leaks() lets them through. `conform`: the names of parts (a tub) whose corners fitted() may pull
+    toward the eye where they would show outside the hull: along its line of sight a corner covers the same view."""
     parts: list[om.Part]
     materials: dict[str, KitMaterial]
     outside: frozenset[str] = frozenset()
     screens: tuple[Screen, ...] = ()
     sill: float | None = None
+    windows: tuple[tuple[Vec3, Vec3, Vec3], ...] = ()
+    conform: frozenset[str] = frozenset()
 
 
 KitFn = Callable[[dict[str, float]], Kit]   # the room round the eye (clearance) -> the kit laid out in it
@@ -359,6 +364,7 @@ def _escapes(tris, pts, d):  # noqa: ANN001, ANN201 - numpy in, a bool per point
     return ~hit
 
 
+EDGE = 1e-6   # leaks(): how far past a face's edge (in its barycentric terms) a line still meets it
 LEAK_STEP, SILL_MARGIN = 5.0, 5.0   # degrees between leaks()'s lines of sight; how far under the sill they start
 
 
@@ -374,7 +380,8 @@ def leaks(kit: Kit, step: float = LEAK_STEP) -> list[tuple[float, float]]:
     """The lines of sight from the eye (sight_lines: yaw, pitch) under the kit's sill that meet no front face of the
     kit (the game draws only front faces, and none of the hull from inside): there the world shows through the floor
     or the walls of a cockpit meant to be closed (Kit.sill; the user, 2026-10-14: "固定翼的底部是空白，完全能看过去").
-    Empty for a kit without a sill."""
+    A line out through the kit's real glass (Kit.windows: a chin window) is a view, not a leak. Empty for a kit
+    without a sill."""
     import numpy as np
     if kit.sill is None:
         return []
@@ -402,11 +409,34 @@ def leaks(kit: Kit, step: float = LEAK_STEP) -> list[tuple[float, float]]:
         v = (d @ q.T) * inv
         t = (e2 * q).sum(1)[None, :] * inv
         front = (d @ normal.T) < 0
-        met[a:a + chunk] = (ok & front & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 1e-4)).any(1)
+        e = EDGE   # a line along the edge two faces share meets them (rounding must not open a crack)
+        met[a:a + chunk] = (ok & front & (u >= -e) & (v >= -e) & (u + v <= 1 + e) & (t > 1e-4)).any(1)
+    if kit.windows:
+        from cockpit_tub import through
+        met |= through(dirs, kit.windows)
     return [ln for ln, m in zip(lines, met) if not m]
 
 
 SHRINK, SHRINK_ROUNDS = 0.9, 8
+CONFORM_ROUNDS = 12   # rounds of pulling a conforming part's exposed corners SHRINK toward the eye
+
+
+def _conform(tris, kit: Kit, m: list[float], scale: float) -> None:  # noqa: ANN001 - numpy
+    """Pulls the corners of the kit's conforming parts (Kit.conform: a tub laid on the room's box, whose corners
+    stand outside a hull that narrows) that can be seen from outside toward the eye, SHRINK a round, until they are
+    inside. From the eye nothing changes: a triangle covers the view its corners' directions span, at any distance."""
+    parts = [p for p in kit.parts if p.name in kit.conform]
+    for _ in range(CONFORM_ROUNDS):
+        verts = [(p, i) for p in parts for i in range(len(p.verts))]
+        if not verts:
+            return
+        bad = exposed(tris, [to_model(p.verts[i].pos, m, scale) for p, i in verts])
+        if not bad.any():
+            return
+        for (p, i), b in zip(verts, bad):
+            if b:
+                v = p.verts[i]
+                p.verts[i] = om.Vertex(tuple(c * SHRINK for c in v.pos), v.normal, v.uv)
 
 
 def _sides(p: Vec3, room: dict[str, float]) -> list[str]:
@@ -430,6 +460,8 @@ def fitted(tris, fit: Fit, kit_fn: KitFn) -> Kit:  # noqa: ANN001 - numpy
     room = clearance(tris, fit.eye, m)
     for _ in range(SHRINK_ROUNDS + 1):
         kit = kit_fn(room)
+        if kit.conform:
+            _conform(tris, kit, m, fit.scale)
         inside = [p for p in kit.parts if p.name not in kit.outside]
         local = [v.pos for p in inside for v in p.verts]
         if not local:   # nothing inside the hull to keep in (a remote station's display)

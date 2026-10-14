@@ -61,6 +61,8 @@ class Spec:
     drop_nodes: tuple[int, ...]
     box: dict[str, float]
     what: str
+    glass: tuple[int, ...] = ()   # the materials (of drop_materials) that are its windows' glass: kept as the kit's
+                                  # windows (cockpits.Kit.windows), the lines of sight its tub leaves open
 
 
 # War Thunder's AH-64A (the game's own model as shared on Sketchfab, 1:1, metres, nose +z, +x the crew's left; the
@@ -72,11 +74,11 @@ WT_ASSETS: dict[str, Spec] = {
     # The front (copilot / gunner) station: the eye 0.75 m over the seat's cushion, the TADS sight's hood 0.4 m ahead.
     'wt-ah64a-cpg': Spec(_WT_AH64A, 1.0, (0.0, 0.65, 2.75), (0, 0, 1), (0, 1, 0), _WT_AH64A_DROP, (),
                          {'left': 0.8, 'right': 0.8, 'up': 0.75, 'down': 1.35, 'ahead': 2.0, 'back': 0.45},
-                         "War Thunder's AH-64A front (copilot / gunner) station"),
+                         "War Thunder's AH-64A front (copilot / gunner) station", glass=(0,)),
     # The rear (pilot's) station, higher, looking over the front station.
     'wt-ah64a-pilot': Spec(_WT_AH64A, 1.0, (0.0, 0.95, 1.45), (0, 0, 1), (0, 1, 0), _WT_AH64A_DROP, (),
                            {'left': 0.8, 'right': 0.8, 'up': 0.75, 'down': 1.35, 'ahead': 2.0, 'back': 0.45},
-                           "War Thunder's AH-64A rear (pilot's) station"),
+                           "War Thunder's AH-64A rear (pilot's) station", glass=(0,)),
 }
 
 # The earlier gunship station (sf-ah64e-cpg) no longer backs a kit; it stays while its part is in the model folder,
@@ -95,7 +97,7 @@ ASSETS: dict[str, Spec] = {
     'sf-uh60m-pilot': Spec('12b4e525676a49678ac3006b360c8750', 5.6, (-0.0714, -0.0457, 0.6), (0, 0, 1), (0, 1, 0),
                            (6, 7), (0,),
                            {'left': 1.4, 'right': 0.5, 'up': 0.6, 'down': 1.05, 'ahead': 1.5, 'back': 0.55},
-                           "a UH-60M's pilot station (the right seat)"),
+                           "a UH-60M's pilot station (the right seat)", glass=(6, 7)),
 }
 
 
@@ -118,6 +120,19 @@ def cut(spec: Spec, scene: gltf.Scene) -> tuple[np.ndarray, np.ndarray, np.ndarr
     keep = ((corners >= lo) & (corners <= hi)).all(2).all(1)
     keep &= ~np.isin(scene.material, spec.drop_materials) & ~np.isin(scene.mesh, spec.drop_nodes)
     return pos, nrm, uv, scene.triangles[keep], scene.material[keep]
+
+
+def glass_of(spec: Spec, scene: gltf.Scene) -> list[float]:
+    """The station's window glass (Spec.glass) in the eye frame, metres, inside its box: flat (x, y, z) corners, three a
+    triangle, at 1 mm (the kit's windows, stored in the cockpit file's asset extras)."""
+    m = _frame(spec)
+    pos = (scene.positions - np.array(spec.eye)) @ m.T * spec.scale
+    b = spec.box
+    lo = np.array([-b['right'], -b['down'], -b['back']])
+    hi = np.array([b['left'], b['up'], b['ahead']])
+    corners = pos[scene.triangles[np.isin(scene.material, spec.glass)]]
+    corners = corners[((corners >= lo) & (corners <= hi)).all(2).all(1)]
+    return [round(float(c), 3) for c in corners.reshape(-1)]
 
 
 CUBE_FACES = [((0, 0, 1), (0, 1, 0)), ((0, 0, -1), (0, 1, 0)), ((1, 0, 0), (0, 1, 0)), ((-1, 0, 0), (0, 1, 0)),
@@ -250,8 +265,10 @@ def prepare(slug: str, spec: Spec, src: str, out: str) -> str:
         materials.append(entry)
     page = record.get('viewerUrl') or f'https://sketchfab.com/3d-models/{spec.uid}'
     credit = f'{name} by {author}, {label}'
-    write_glb(os.path.join(dest, 'cockpit.glb'), prims, materials, images,
-              {'author': author, 'license': label, 'source': page, 'title': name})
+    extras = {'author': author, 'license': label, 'source': page, 'title': name}
+    if spec.glass:
+        extras['glass'] = glass_of(spec, scene)
+    write_glb(os.path.join(dest, 'cockpit.glb'), prims, materials, images, extras)
     with open(os.path.join(dest, 'LICENSE.txt'), 'w', encoding='utf-8', newline='\n') as h:
         h.write(f'{credit}\nSource: {page} (via Sketchfab)\nLicence: {label}, {url}\n'
                 f'Changes: cut down to {spec.what} (crew figures, glass and everything the seated eye cannot see left '
