@@ -148,9 +148,11 @@ struct Hull {
     int hitFrames=0;
     float lastDurability=-1.0f;
     int weakBone=-2,weakBody=-2;
+    std::vector<std::pair<int,Wave>> pending;   // generators that came before the parts were made
     std::uint64_t rng=0;
 };
 std::recursive_mutex lock;
+int shotCount[5]={},removedCount[5]={};   // bullets fired and parts removed, for the periodic line
 std::unordered_map<void*,Hull> hulls;
 std::unordered_map<void*,Part> parts;
 
@@ -160,6 +162,13 @@ bool Throttle(Hull& h,int slot) noexcept { const int old=h.throttle[slot]; h.thr
 // The hull's team as its parts take it (4.1 0x250520): -1 or 3 (neutral) -> 1, else the hull's.
 std::int32_t PartTeam(void* hull) noexcept { const std::int32_t t=I(hull,kTeamAt); return t==-1 || t==3 ? 1 : t; }
 bool HullAlive(void* hull) noexcept { return F(hull,kDurabilityAt)>0.0f; }
+// A part's end (4.1 0x56BBC0): deleted by the game's own DeleteObject; the record goes when its destructor runs.
+void Remove(void* obj,Part& p) noexcept {
+    DeleteObject(obj);
+    p.gone=true;
+    ++removedCount[p.group];
+    if(p.group==kBigCannon)Log("EDF41MOTHER main cannon %p removed: the hull's weak point can be hit",obj);
+}
 
 // A custom parameter node of a part's SGO, copied once for the bullets (keyed by the node: parts of one SGO share it).
 const SgoNode* Custom(const SgoNode* node) noexcept {
@@ -206,7 +215,7 @@ void BigCannonShot(void* obj,Part& p,int f) noexcept {
     b.speed=20.0f; b.life=60; b.damage=5000.0f; b.size=50.0f;
     b.explosion=heavy ? 100.0f : 0.0f;
     b.custom=Custom(Child(custom,heavy ? 1 : 0));
-    Fire(obj,m,b);
+    if(Fire(obj,m,b))++shotCount[kBigCannon];
 }
 
 void CannonRocket(void* obj,Part& p,float s) noexcept {
@@ -230,7 +239,7 @@ void CannonRocket(void* obj,Part& p,float s) noexcept {
     const float color[4]={1.0f,0.5f,0.25f,1.0f};
     std::memcpy(r.color,color,16);
     r.custom=Custom(Key(obj,L"mp_CannonCustomParameter"));
-    Fire(obj,m,r);
+    if(Fire(obj,m,r))++shotCount[kCannon];
 }
 
 void CannonBeam(void* obj,Part& p,float s) noexcept {
@@ -261,7 +270,7 @@ void CannonBeam(void* obj,Part& p,float s) noexcept {
     const float color[4]={0.1f*c,1.2f*c,0.1f*c,1.0f};
     std::memcpy(r.color,color,16);
     r.custom=Custom(Key(obj,L"mpc_BeamBulletCustomParam"));
-    Fire(obj,m,r);
+    if(Fire(obj,m,r))++shotCount[kCannon];
 }
 
 void PanelShot(void* obj,Part& p,float s) noexcept {
@@ -288,7 +297,7 @@ void PanelShot(void* obj,Part& p,float s) noexcept {
     r.factory=factory;
     r.custom=Custom(Key(obj,L"mp_BulletCustomParameter"));
     AimMatrix(from,dir,m);
-    Fire(obj,m,r);
+    if(Fire(obj,m,r))++shotCount[kPanel];
 }
 
 // A point near the part (4.1 picks one inside its physics shell: 0x337A60).
@@ -353,7 +362,7 @@ void BigCannonTick(void* obj,Part& p) noexcept {
                 BigExplosion(at,dir,3.0f,1.0f);
                 if(f==360)PlaySe(p.hull,L"母船UFO砲台爆発",at);
             }
-            if(f>420) { DeleteObject(obj); p.gone=true; }
+            if(f>420) { Remove(obj,p); }
             break;
         default: Switch(p,kBigClosed); break;
     }
@@ -402,7 +411,7 @@ void CannonTick(void* obj,Part& p,Hull& h,float s) noexcept {
                     if(k%2==0)PlaySe(p.hull,L"母船UFO中型砲台爆発",at);
                 }
             }
-            if(f>320) { DeleteObject(obj); p.gone=true; }
+            if(f>320) { Remove(obj,p); }
             break;
         default: Switch(p,kCanDormant); break;
     }
@@ -460,8 +469,7 @@ void PanelTick(void* obj,Part& p,Hull& h,float s) noexcept {
                 RandomDown(p,kPi,dir);
                 Explosion(pos,dir,10.0f);
                 PlaySe(p.hull,L"母船UFOパネル爆発",pos);
-                DeleteObject(obj);
-                p.gone=true;
+                Remove(obj,p);
             }
             break;
         default: Switch(p,kPanDormant); break;
@@ -550,6 +558,7 @@ void HatchTick(void* obj,Part& p) noexcept {
 
 // The 0x20100 block (EDF6 = 4.1's offsets + 8, SPEC2 5.2): +0x08 kind (2100: 0, standing; 2101: 1, once), +0x0C the delay
 // between waves, +0x10 count, +0x14 interval (frames), +0x18 level, +0x20 std::wstring the SGO, +0x48 the hatch.
+void AssignWave(Hull& h,int index,const Wave& w) noexcept;
 bool QueueGenerator(void* hullObj,const char* d) noexcept {
     if(!Rd(d,0x50,"generator message block"))return false;
     std::int32_t kind,delay,count,frames,index;
@@ -563,13 +572,22 @@ bool QueueGenerator(void* hullObj,const char* d) noexcept {
     if(count<=0 || count>4096 || index<0 || index>=64) { Fail("a generator message with a count or hatch index out of range"); return false; }
     Hull* h=HullOf(hullObj);
     if(!h)return false;
-    Part* hatch=nullptr;
-    for(void* o:h->parts) { Part* p=PartOf(o); if(p && p->group==kHatch && p->index==index) { hatch=p; break; } }
-    if(!hatch) { Log("EDF41MOTHER generator for hatch %d: the hull has no such hatch, dropped",index); return true; }
     Wave w;
     std::wmemcpy(w.path,text,static_cast<std::size_t>(size)); w.path[size]=L'\0';
     w.count=count; w.interval=(std::max)(1,frames); w.delay=(std::max)(0,delay); w.level=level>0.0f && std::isfinite(level) ? level : 1.0f;
     w.active=true; w.kind=kind;
+    static std::atomic<int> said{0};
+    if(said.fetch_add(1)<24)Log("EDF41MOTHER generator on hatch %d: %d x %ls every %d frames, kind %d, wave delay %d, level %.2f%s",index,count,w.path,
+                                w.interval,kind,delay,level,h->built ? "" : " (before the parts are made: kept until they are)");
+    if(!h->built) { h->pending.emplace_back(index,w); return true; }   // the script asks on the creation frame, before the parts
+    AssignWave(*h,index,w);
+    return true;
+}
+void AssignWave(Hull& h,int index,const Wave& w) noexcept {
+    Part* hatch=nullptr;
+    for(void* o:h.parts) { Part* p=PartOf(o); if(p && p->group==kHatch && p->index==index) { hatch=p; break; } }
+    if(!hatch) { Log("EDF41MOTHER generator for hatch %d: the hull has no such hatch, dropped",index); return; }
+    const int kind=w.kind;
     if(kind==0)hatch->permanent=w;
     if(kind!=0 || !hatch->current.active) {
         hatch->current=w;
@@ -577,9 +595,6 @@ bool QueueGenerator(void* hullObj,const char* d) noexcept {
         hatch->delayLeft=kind==0 ? w.delay : 0;
         hatch->intervalLeft=0;
     }
-    static std::atomic<int> said{0};
-    if(said.fetch_add(1)<24)Log("EDF41MOTHER generator on hatch %d: %d x %ls every %d frames, kind %d, wave delay %d, level %.2f",index,count,w.path,w.interval,kind,delay,level);
-    return true;
 }
 
 // ---- ObjectAction (4.1 0x250870, 18 entries) and GetPartsObject ------------------------------------------------------
@@ -848,6 +863,8 @@ std::uint64_t __fastcall HullUpdate(void* self,void* dt) {
         Log("EDF41MOTHER hull %p first update: durability %.0f / %.0f, level %.2f (raw %.2f), team %d, pos %.0f %.0f %.0f",self,
             F(self,kDurabilityAt),F(self,kMaxDurabilityAt),F(self,kLevelAt),F(self,kRawLevelAt),I(self,kTeamAt),pos[0],pos[1],pos[2]);
         SpawnParts(self,h);
+        for(const auto& job:h.pending)AssignWave(h,job.first,job.second);
+        h.pending.clear();
     }
     for(int& t:h.throttle)if(t>0)--t;
     if(HullAlive(self))Spin(self,h);
@@ -865,8 +882,9 @@ std::uint64_t __fastcall HullUpdate(void* self,void* dt) {
     if(h.ticks%1800==0) {
         int alive[5]={},dead[5]={};
         for(void* o:h.parts) { Part* p=PartOf(o); if(p)(p->dead ? dead : alive)[p->group]++; }
-        Log("EDF41MOTHER hull %p frame %u: durability %.0f, yaw rate %.5f; parts alive / destroyed: cannons %d/%d, main %d/%d, panels %d/%d",self,h.ticks,
-            F(self,kDurabilityAt),h.yawRate,alive[kCannon],dead[kCannon],alive[kBigCannon],dead[kBigCannon],alive[kPanel],dead[kPanel]);
+        Log("EDF41MOTHER hull %p frame %u: durability %.0f, yaw rate %.5f; parts alive / destroyed: cannons %d/%d, main %d/%d, panels %d/%d; fired: main %d, cannons %d, panels %d; removed: main %d, cannons %d, panels %d",self,h.ticks,
+            F(self,kDurabilityAt),h.yawRate,alive[kCannon],dead[kCannon],alive[kBigCannon],dead[kBigCannon],alive[kPanel],dead[kPanel],
+            shotCount[kBigCannon],shotCount[kCannon],shotCount[kPanel],removedCount[kBigCannon],removedCount[kCannon],removedCount[kPanel]);
     }
     return result;
 }
@@ -907,7 +925,6 @@ std::uint64_t __fastcall PartDtor(void* self,unsigned flags) {
         if(p) {
             Hull* h=HullOf(p->hull);
             if(h)h->parts.erase(std::remove(h->parts.begin(),h->parts.end(),self),h->parts.end());
-            if(p->group==kBigCannon)Log("EDF41MOTHER main cannon %p removed: the hull's weak point can be hit",self);
             parts.erase(self);
         }
     }
