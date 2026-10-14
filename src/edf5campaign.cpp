@@ -10,7 +10,8 @@
 // game's own handling of a mode. EDF5CampaignContent=0 (no packs installed): the native answer alone.
 // The test range (testrange/gen.py) is a mission pack of its own too, no longer laid over RM015: an offline and an
 // online mode sharing one content id, TestRangeContent (0: not installed), owned through the same hook. So is EDF4.1's
-// story (plan P6), slotted after the range so no installed pack's id moves: EDF41Content (0: not installed).
+// story (plan P6), slotted after the range so no installed pack's id moves, and its two DLC mission packs right after
+// it: EDF41Content .. +2 (0: not installed).
 // Another plugin may have redirected a site first (EDF6Coop logs the lobby join's 0x8EC659 and loads before us, by
 // name): its call is chained, ours asking it instead of 0xD92B0. A site redirected inside EDF.dll is another build.
 #include "crew.h"
@@ -29,6 +30,7 @@ using OwnedFn=bool(__fastcall*)(std::uintptr_t,int);
 // EDF.dll TimeDateStamp 0x678CCB46.
 constexpr unsigned kOwned=0xD92B0;   // (mgr, content id): whether the player owns the content
 constexpr int kPacks=3;              // EDF5's story, DLC1, DLC2: content ids EDF5CampaignContent .. +2
+constexpr int kPacks41=3;            // EDF4.1's story, Mission Pack 1, Mission Pack 2: EDF41Content .. +2
 // mov r8,[rcx+0xE0]; mov rcx,r8; mov rax,[r8+8]: the owned set's head and root
 const unsigned char kOwnedSig[]={0x4C,0x8B,0x81,0xE0,0x00,0x00,0x00,0x49,0x8B,0xC8,0x49,0x8B,0x40,0x08};
 constexpr unsigned kSites[]={
@@ -43,13 +45,15 @@ constexpr unsigned kSites[]={
 bool campaignReady=false;
 OwnedFn prior[std::size(kSites)]{};   // what each site called before us: 0xD92B0, or another plugin's hook of it
 
-// first: the EDF5 packs' first id, range: the test range's id, edf41: EDF4.1's story's (each 0 when not installed).
+// first: the EDF5 packs' first id, range: the test range's id, edf41: the first of EDF4.1's packs' ids (its story's;
+// its two DLC packs follow) (each 0 when not installed).
 constexpr bool Ours(int id,int first,int range,int edf41=0) noexcept {
-    return (first>0 && id>=first && id<first+kPacks) || (range>0 && id==range) || (edf41>0 && id==edf41);
+    return (first>0 && id>=first && id<first+kPacks) || (range>0 && id==range) || (edf41>0 && id>=edf41 && id<edf41+kPacks41);
 }
 static_assert(Ours(3,3,0) && Ours(5,3,0) && !Ours(6,3,0) && !Ours(2,3,0) && !Ours(0,0,0) && !Ours(3,0,0));
 static_assert(Ours(7,3,7) && !Ours(6,3,7) && Ours(4,0,4) && !Ours(0,0,0) && !Ours(5,0,4));
-static_assert(Ours(7,3,6,7) && !Ours(8,3,6,7) && Ours(7,0,0,7) && !Ours(0,3,6,0) && !Ours(7,3,6,0));
+static_assert(Ours(7,3,6,7) && Ours(8,3,6,7) && Ours(9,3,6,7) && !Ours(10,3,6,7) && Ours(7,0,0,7) && !Ours(0,3,6,0)
+              && !Ours(7,3,6,0));
 
 // One hook per site, each asking what that site called before (so a chained plugin still sees every call).
 template<std::size_t I> bool __fastcall OwnedHook(std::uintptr_t mgr,int id) {
@@ -96,9 +100,10 @@ bool InstallEdf5Campaign() noexcept {
     // A near-thunk allocation/protection failure can occur after earlier calls were redirected. Keep those
     // redirected calls on the native answer until every call is installed, including a half-written call.
     campaignReady=done==static_cast<int>(std::size(kSites));
-    Log("HOOK edf5 campaign=%d (%d/%d calls: the mission packs' content %d..%d owned, test range %d, EDF4.1 %d)",
+    Log("HOOK edf5 campaign=%d (%d/%d calls: the mission packs' content %d..%d owned, test range %d, EDF4.1 %d..%d)",
         campaignReady,done,static_cast<int>(std::size(kSites)),Cfg().edf5CampaignContent,
-        Cfg().edf5CampaignContent+kPacks-1,Cfg().testRangeContent,Cfg().edf41Content);
+        Cfg().edf5CampaignContent+kPacks-1,Cfg().testRangeContent,Cfg().edf41Content,
+        Cfg().edf41Content>0 ? Cfg().edf41Content+kPacks41-1 : 0);
     return campaignReady;
 }
 }  // namespace crew

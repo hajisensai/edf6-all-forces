@@ -52,7 +52,7 @@ from modfiles import load_json, sha256, sha256_file  # noqa: E402
 OWNER = 'edf41sound'   # pylib/ledger.py OWNERS
 # raise a group's number when its converter's output changes: that group (only) is converted again. table 2: the rows
 # gained the 'name' / 'caption' member names the game reads them by (version 1 wrote unnamed [speaker, text] lists).
-VERSIONS = {'weapon': 1, 'voice.JA': 1, 'voice.EN': 1, 'table': 2}
+VERSIONS = {'weapon': 1, 'voice.JA': 1, 'voice.EN': 1, 'table': 3}
 STAMP = '.edf41sound.json'   # Mods/: {group: {'version': VERSIONS[group], 'source': {file: [size, mtime ns]}}}
 
 Blob = bytes | bytearray
@@ -223,16 +223,29 @@ def row_schema(rows: dsgo.Node) -> dict[int, str]:
     return schema
 
 
+# Keys the EDF5-era mission scripts (EDF6's EDF5_OLD_SCRIPT runtime: the EDF5 packs, the 4.1 packs, EDF6's own 146) play
+# through the voice path that EDF6's table has no row for: the radio's open and close beeps (each radio line is
+# MusenBegin, the line, MusenEnd). The caption lookup (EDF.dll 0x7B17F0) answers a key without a row with
+# '＊＊不明な再生キー＊＊' shown for 5 s, so every radio line was followed by it (2026-10-14, DM202 / M104: the row
+# lookup 0x55A30 answered -1 for exactly these two). NO_SUBTITLE is the engine's own mark for a voice without a
+# subtitle: 0x5DD5F8 compares the caption with it and shows nothing.
+SILENT_KEYS = ('MusenBegin', 'MusenEnd')
+NO_SUBTITLE = '***no_subtitle***'
+
+
 def add_rows(table: bytes, keys: list[str], text: dict[str, str]) -> bytes:
     """EDF6's voice table (a DSGO: root[0] holds one {name: speaker, caption: text} row per key, named by it) with a row
-    more for each of `keys` it lacks. EDF6's rows are not touched; a key EDF6 has keeps EDF6's row."""
+    more for each of `keys` it lacks, and a NO_SUBTITLE row for each of SILENT_KEYS it lacks. EDF6's rows are not touched;
+    a key EDF6 has keeps EDF6's row."""
     doc = dsgo.parse(table)
     rows = doc.root.items[0]
     schema = row_schema(rows)
     have = set(rows.names.values())
-    for key in keys:
+    for key in [*keys, *(k for k in SILENT_KEYS if k not in keys)]:
         if key not in have:
-            fields = {'name': '', 'caption': text.get(key) or key}   # 4.1's subtitles have no speaker
+            caption = NO_SUBTITLE if key in SILENT_KEYS else text.get(key) or key
+            fields = {'name': '', 'caption': caption}   # 4.1's subtitles have no speaker
+            have.add(key)
             rows.names[len(rows.items)] = key
             rows.items.append(dsgo.Node([fields[schema[i]] for i in sorted(schema)], dict(schema)))
     return dsgo.write(doc)

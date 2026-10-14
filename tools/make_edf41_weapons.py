@@ -1,7 +1,7 @@
 """Developer tool: which EDF4.1 weapons neither EDF5 nor EDF6 has, and how each comes over -> edf41port/weapons.json,
 its calls (plan P5) -> edf41port/calls.json (both committed).
 
-  python -B tools/make_edf41_weapons.py [--edf41 DIR] [--edf5 DIR] [--edf6 DIR]
+  python -B tools/make_edf41_weapons.py [--edf41 DIR] [--edf5 DIR] [--edf6 DIR] [--zh DIR]
 
 Runs once on a machine with the three games; the JSON is a registry tools/ported_weapons.py installs from, each weapon
 converted here (pylib/edf5port.py weapon41) and kept in it ('weapon'), so the install needs no EDF4.1 (2026-10-10 user:
@@ -24,8 +24,9 @@ template whose bomber run is laid out as its own. Template, AmmoDamageAttribute:
 play nothing; pylib/acb.py) takes the template's cue at the same place ('cues'); a weapon with one the template has no
 cue for stays out.
 Texts: names and descriptions JA / EN are 4.1's, CN / SC / KR translated (edf41port/translations.json; 4.1 has no
-Chinese or Korean). 4.1 writes the stats inside the description (a FixedFont block, 'label：value'); each line EDF6's own
-texts show the same way (its label and format, matched with its numbers) becomes an EDF6 stat line [label, value] in
+Chinese or Korean), except the SC name: the Simplified Chinese community patch's where it names the weapon (--zh: its
+mods folder, default <EDF4.1>/mods; pylib/edf41zh.py), and the CN name that in Traditional (OpenCC).
+4.1 writes the stats inside the description (a FixedFont block, 'label：value'); each line EDF6's own texts show the same way (its label and format, matched with its numbers) becomes an EDF6 stat line [label, value] in
 all five languages (STAT_FORMATS, from EDF6's texts aligned row by row); a line EDF6 has no form for stays in the
 description, in its language for JA / EN and in English for the others.
 """
@@ -44,6 +45,7 @@ sys.path.insert(0, HERE)
 import acb  # noqa: E402
 import dsgo  # noqa: E402
 import edf41calls as ec  # noqa: E402
+import edf41zh  # noqa: E402
 import edf5port  # noqa: E402
 import make_edf5_weapons as m5  # noqa: E402
 import rootcpk  # noqa: E402
@@ -388,8 +390,21 @@ def _dsgo_strings(v: object) -> list[str]:
     return []
 
 
-def build(edf41: str, edf5: str, edf6: str) -> dict:
+def chinese_names(t: dict, zh: 'edf41zh.WeaponNames', file: str, ja: str) -> dict[str, str]:
+    """CN / SC names of 4.1's weapon `file` (its own 'name'[0] `ja`): the patch's (SC; CN its Traditional, when OpenCC
+    is there), else edf41port/translations.json's `t`."""
+    names = {L: t[L][0] for L in ('CN', 'SC')}
+    sc = zh.sc(file, ja)
+    if sc is not None:
+        names['SC'] = sc
+        names['CN'] = edf41zh.traditional(sc) or names['CN']
+    return names
+
+
+def build(edf41: str, edf5: str, edf6: str, zh: str) -> dict:
+    """The registries' data; `zh` the Chinese patch's mods folder."""
     g4 = rootcpk.Game(edf41)
+    zh_names = edf41zh.WeaponNames(zh)
     g5 = rootcpk.Game(edf5)
     e6 = m5.Edf6(edf6)
     subs = e6.sub_categories()
@@ -477,7 +492,7 @@ def build(edf41: str, edf5: str, edf6: str) -> dict:
         t = translated[file]
         desc = {'JA': desc_ja, 'EN': desc_en, **{L: t[L][1] for L in ('CN', 'SC', 'KR')}}
         extra = {'JA': left_ja, 'EN': left_en, 'CN': left_en, 'SC': left_en, 'KR': left_en}
-        names = {'JA': ja, 'EN': en, **{L: t[L][0] for L in ('CN', 'SC', 'KR')}}
+        names = {'JA': ja, 'EN': en, 'KR': t['KR'][0], **chinese_names(t, zh_names, file, own['name'][0])}
         entry_text = {L: [names[L], '\n'.join(extra[L] + ([''] if extra[L] else []) + [desc[L]]), stats[L]]
                       for L in LANGS}
         weapons.append({
@@ -490,7 +505,9 @@ def build(edf41: str, edf5: str, edf6: str) -> dict:
             'weapon': dsgo.dump(convert(members, {L.lower(): names[L] for L in LANGS}, call, templates)),
             **({'call': call} if call is not None else {}),
         })
-    return {'source': "EDF4.1 Root.cpk WEAPON/_WEAPONTABLE.SGO + _WEAPONTEXT.SGO; CN / SC / KR edf41port/translations.json",
+    cn = 'CN names their OpenCC s2tw (pylib/edf41zh.py)' if edf41zh.available() else 'CN names translations.json (no OpenCC)'
+    return {'source': "EDF4.1 Root.cpk WEAPON/_WEAPONTABLE.SGO + _WEAPONTEXT.SGO; CN / SC / KR edf41port/translations.json; "
+                      f"SC names {edf41zh.PATCH} {zh_names.note()}, {cn}",
             'weapons': weapons, 'skipped': skipped}
 
 
@@ -510,8 +527,9 @@ def main() -> int:
     ap.add_argument('--edf41', default=os.path.join(STEAM, 'Earth Defense Force 4.1'))
     ap.add_argument('--edf5', default=os.path.join(STEAM, 'EARTH DEFENSE FORCE 5'))
     ap.add_argument('--edf6', default=os.path.join(STEAM, 'EARTH DEFENSE FORCE 6'))
+    ap.add_argument('--zh', help="the Simplified Chinese patch's mods folder (default: <EDF4.1>/mods, a patched 4.1)")
     a = ap.parse_args()
-    data = build(a.edf41, a.edf5, a.edf6)
+    data = build(a.edf41, a.edf5, a.edf6, a.zh or edf41zh.default_dir(a.edf41))
     calls = m5.keep_order(OUT_CALLS, [w for w in data['weapons'] if is_call(w)])
     data['weapons'] = m5.keep_order(OUT, [w for w in data['weapons'] if not is_call(w)])
     write(OUT, data)

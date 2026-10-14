@@ -191,7 +191,7 @@ def build_exe(name: str, generator: str | None = None) -> str:
     for p in (os.path.join(ROOT, 'tools'), os.path.join(ROOT, 'pylib'), os.path.join(ROOT, 'testrange'),
               os.path.join(ROOT, 'autoturret', 'tools')):
         cmd += ['--paths', p]
-    for mod in ('call_weapons', 'edf41_objects', 'edf41_maps', 'edf41_sounds', 'awe', 'map_legacy', 'rmpa_legacy', 'legacy_sgo', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'ragdoll_fit', 'make_chute', 'chute_model', 'obj_model', 'texfile', 'make_drill', 'drill_model', 'make_stock_stores', 'graft_pure', 'primer_fighter_model', 'calls', 'make_sidecar', 'sidecar_model',
+    for mod in ('call_weapons', 'edf41_objects', 'edf41_maps', 'edf41_sounds', 'edf5_dlc', 'awe', 'map_legacy', 'rmpa_legacy', 'legacy_sgo', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'ragdoll_fit', 'make_chute', 'chute_model', 'obj_model', 'texfile', 'make_drill', 'drill_model', 'make_stock_stores', 'graft_pure', 'primer_fighter_model', 'calls', 'make_sidecar', 'sidecar_model',
                 'make_bigmap', 'bigmap', 'seams', 'fmb', 'fmb_build', 'hkcms', 'hkcms_build', 'hktag', 'sk_map', 'sk_terrain', 'gen', 'rmpa', 'jet_models', 'jet_gear', 'weapons',
                 'testhub', 'make_emc', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
                 'cas_pose', 'aircraft_collision', 'support_config', 'support_loadout', 'room_layout', 'menu_preview',
@@ -215,6 +215,8 @@ def build_exe(name: str, generator: str | None = None) -> str:
     # the earlier games' weapon registries (ported_weapons.DATA is the bundle when frozen)
     # the converted models the EDF5 weapons need (ported_weapons.bundled), so the frozen installer needs no EDF5
     cmd += ['--add-data', f'{os.path.join(ROOT, "edf5port", "assets")}{seps}edf5port/assets']
+    # EDF5 Mission Pack 1's maps and fortress pre-generated (tools/edf5_dlc.py), so the installer needs no EDF5
+    cmd += ['--add-data', f'{os.path.join(ROOT, "edf5port", "dlc")}{seps}edf5port/dlc']
     # EDF4.1's objects converted ahead of time (tools/edf41_objects.py), so the installer needs no EDF4.1
     cmd += ['--add-data', f'{os.path.join(ROOT, "edf41port", "objects")}{seps}edf41port/objects']
     cmd += ['--add-data', f'{os.path.join(ROOT, "edf41port", "objects.json")}{seps}edf41port']
@@ -222,6 +224,11 @@ def build_exe(name: str, generator: str | None = None) -> str:
     cmd += ['--add-data', f'{os.path.join(ROOT, "edf41port", "missions")}{seps}edf41port/missions']
     for name in ('missions.json', 'missions_thumbnails.rab'):
         cmd += ['--add-data', f'{os.path.join(ROOT, "edf41port", name)}{seps}edf41port']
+    # ...and its two DLC mission packs' (PACKS41: edf41port/mp01, edf41port/mp02), the same three parts each
+    for pack in ('mp01', 'mp02'):
+        cmd += ['--add-data', f'{os.path.join(ROOT, "edf41port", pack, "missions")}{seps}edf41port/{pack}/missions']
+        for name in ('missions.json', 'missions_thumbnails.rab'):
+            cmd += ['--add-data', f'{os.path.join(ROOT, "edf41port", pack, name)}{seps}edf41port/{pack}']
     for registry in ('edf5port/weapons.json', 'edf41port/weapons.json', 'edf5port/models.json',
                      'edf41port/calls.json'):   # REGISTRIES
         folder = registry.split('/')[0]

@@ -50,6 +50,10 @@ target_sources(EDF6VehicleCrew PRIVATE src/playarea.cpp)
 # The stock split missiles (MissileBullet02) split short of a big target's surface.
 target_sources(EDF6VehicleCrew PRIVATE src/splitmissile.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/route_guide.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/edf41natives.cpp)
+# The DLC's EDF4.1 small dragons: the hit reaction on 4.1's ragdoll bodies (src/edf41smalldragon.cpp).
+target_sources(EDF6VehicleCrew PRIVATE src/edf41smalldragon.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/edf41insects.cpp)
 # Which machine runs the plugin's work on an object online (src/online_authority.h, docs/online-re.md section 3).
 target_sources(EDF6VehicleCrew PRIVATE src/online_authority.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/drill_net.cpp)

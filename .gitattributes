@@ -1,3 +1,6 @@
 edf41port/objects/_members/** binary
 edf41port/objects.json -text
 edf41port/objects/**/*.members.json -text
+edf5port/dlc/blobs/** binary
+edf5port/dlc/registry.json -text
+edf5port/dlc/**/*.members.json -text
