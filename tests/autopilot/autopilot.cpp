@@ -39,9 +39,10 @@ HMODULE self=nullptr;
 wchar_t keysPath[MAX_PATH]{},logPath[MAX_PATH]{},cmdPath[MAX_PATH]{};
 // What the autopilot holds: codes 0x00-0xFF are virtual keys, 0x100 + n the virtual pad's button bit n (XInput
 // wButtons), 0x110 / 0x111 its left / right trigger (kPadLeftTrigger, kPadRightTrigger), 0x112-0x115 its left stick all
-// the way up / down / right / left.
+// the way up / down / right / left, 0x116-0x119 its right stick (the look) half way up / down / right / left.
 constexpr int kKeyCodes=0x100,kPadBase=0x100,kPadLeftTrigger=0x110,kPadRightTrigger=0x111,kStickUp=0x112,kStickDown=0x113,
-              kStickRight=0x114,kStickLeft=0x115,kInputCodes=0x116;
+              kStickRight=0x114,kStickLeft=0x115,kLookUp=0x116,kLookDown=0x117,kLookRight=0x118,kLookLeft=0x119,
+              kInputCodes=0x11A;
 volatile LONG held[kInputCodes]{};
 volatile HWND gameWindow=nullptr;
 ULONGLONG started=0;
@@ -375,6 +376,8 @@ DWORD WINAPI FakeXInputGetState(DWORD user,PadState* state) {
     state->pad.rightTrigger=held[kPadRightTrigger] ? 255 : 0;
     state->pad.ly=held[kStickUp] ? 32767 : held[kStickDown] ? -32768 : 0;
     state->pad.lx=held[kStickRight] ? 32767 : held[kStickLeft] ? -32768 : 0;
+    state->pad.ry=held[kLookUp] ? 16384 : held[kLookDown] ? -16384 : 0;
+    state->pad.rx=held[kLookRight] ? 16384 : held[kLookLeft] ? -16384 : 0;
     state->packet=static_cast<DWORD>(InterlockedIncrement(&padPacket));
     return ERROR_SUCCESS;
 }
