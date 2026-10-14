@@ -92,6 +92,8 @@ struct Bullet {
     float color[4]={1.0f,1.0f,1.0f,1.0f};   // +0xD0
     float explosion=0.0f;         // +0xB0 explosion radius (0: none; 4.1 +0x70, the bullet core init 0x231CC0 reads it)
     float gravity=0.0f;           // +0xE0 (4.1 +0xA0)
+    float radiusFactor=-1.0f;     // +0xC4 collision radius factor (4.1 +0x80); < 0: the default
+    float speedFactor=-1.0f;      // +0xC8 (4.1 +0x84); < 0: the default
     const SgoNode* custom=nullptr;// +0xE8 (tag +0xF8 = 1); must outlive the bullet (Persist)
 };
 // One bullet along the matrix's +Z from its position, owned by `owner` (its team and weak pointer); false when the
@@ -200,5 +202,20 @@ void Quake(const float* pos,float strength,float radius) noexcept;
 // its life ends, docs/decoy-blast-re.md 1.4), still, 1 frame of life, blast radius `radius` (InitParam +0xB0), `damage`. Its
 // explosion is drawn too.
 bool Blast(void* owner,const float* pos,float radius,float damage) noexcept;
+// The skeleton rebuilt from `matrix` (0x1100B90 on EventAnimationObject's +0x660): called after the stock Update it draws the
+// model there instead of at +0x60 (scaled, or hidden at a tiny scale); the ragdoll stays where the stock Update put it.
+bool ModelMatrix(void* object,const float* matrix) noexcept;
+// Far rendering on for an EventAnimationObject's model node (+0x5C0; 0x11B3020, the switch of the SGO's FarRender): past 1000 m
+// from the camera the near pass draws nothing. True once set (or set already); false: ask again next frame.
+bool FarRender(void* object) noexcept;
+
+// Weak references through the game's shared_ptr control block (use +8, weak +0xC, vtable {destroy, delete}).
+struct WeakRef { void* object=nullptr; void* control=nullptr; };
+void WeakSet(WeakRef& w,const void* object) noexcept;          // from the object's own weak pointer (+0x28 / +0x30)
+void WeakReset(WeakRef& w) noexcept;
+bool WeakAlive(const WeakRef& w) noexcept;                     // use count > 0 and not deleted
+// The object's weak pointer written to `out` ({object, control}: what GetPartsObject's message 0x10000017 returns at +8), one
+// weak count taken for the receiver.
+bool WeakOut(const void* object,void* out) noexcept;
 
 }  // namespace crew::edf41c

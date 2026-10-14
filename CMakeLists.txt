@@ -7,6 +7,8 @@ add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/
 target_sources(EDF6VehicleCrew PRIVATE src/edf41robo.cpp)
 # The Nix's torso twist (its own line: the source list above is where every feature branch adds).
 target_sources(EDF6VehicleCrew PRIVATE src/nix.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/edf41mother401.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/edf41deiroi.cpp)
 # The ground vehicles' ram (its own line, as above).
 target_sources(EDF6VehicleCrew PRIVATE src/vehicleram.cpp)
 # The gun stabilizer (its own line, as the Nix's).

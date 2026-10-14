@@ -409,6 +409,8 @@ bool Fire(void* owner,const float* matrix,const Bullet& b) noexcept {
     std::memcpy(param+0x9C,&b.damage,4);
     if(b.explosion>0.0f)std::memcpy(param+0xB0,&b.explosion,4);
     if(b.gravity!=0.0f)std::memcpy(param+0xE0,&b.gravity,4);
+    if(b.radiusFactor>=0.0f)std::memcpy(param+0xC4,&b.radiusFactor,4);
+    if(b.speedFactor>=0.0f)std::memcpy(param+0xC8,&b.speedFactor,4);
     std::memcpy(param+0xC0,&b.size,4);
     std::memcpy(param+0xCC,&b.hitStop,4);
     std::memcpy(param+0xD0,b.color,16);
@@ -858,4 +860,81 @@ bool Blast(void* owner,const float* pos,float radius,float damage) noexcept {
     AimMatrix(pos,dir,m);
     return Fire(owner,m,b);
 }
+// ---- more EDF6 primitives (the 401 mothership; PRIMITIVES.md 1c, 7 and docs/view-distance-re.md) --------------------------
+namespace {
+constexpr std::size_t kSkeletonFromMatrix=0x1100B90,kSetFarRender=0x11B3020;
+constexpr Print kMorePrints[]={
+    {kSkeletonFromMatrix,{0xC6,0x81,0xB0,0x00,0x00,0x00,0x01,0x0F}},{kSetFarRender,{0x44,0x8B,0x41,0x20,0x41,0x8B,0xC0,0x0F}},
+};
+std::atomic<int> moreState{0};
+bool More() noexcept {
+    int s=moreState.load();
+    if(s)return s==1;
+    for(const Print& p:kMorePrints)
+        if(!Readable(image+p.rva,8) || std::memcmp(image+p.rva,p.bytes,8)!=0) {
+            Log("EDF41CLASS the code at EDF.dll+0x%zX is not what this was written for: model matrices, far rendering and activation are off",p.rva);
+            moreState=2;
+            return false;
+        }
+    moreState=1;
+    return Prims();
+}
+bool NotDeleted(const void* object) noexcept {
+    const char* o=static_cast<const char*>(object);
+    return object && Readable(o+kFlagsAt,1) && !(o[kFlagsAt]&4);
+}
+}  // namespace
+
+bool ModelMatrix(void* object,const float* matrix) noexcept {
+    if(!More() || !NotDeleted(object))return false;
+    alignas(16) float m[16];
+    std::memcpy(m,matrix,sizeof(m));
+    At<void(__fastcall*)(void*,const float*)>(kSkeletonFromMatrix)(static_cast<char*>(object)+kEaoSkeleton,m);
+    return true;
+}
+bool FarRender(void* object) noexcept {
+    constexpr std::uint32_t kFarBit=0x04000000u;
+    if(!More() || !NotDeleted(object))return false;
+    char* node=static_cast<char*>(object)+kEaoModel;
+    if(!Rd(node,0x28,"model node"))return false;
+    if(*reinterpret_cast<const std::uint32_t*>(node+0x20)&kFarBit)return true;
+    if(!*reinterpret_cast<void* const*>(node+0x10))return false;   // its Umbra object is not there yet
+    At<void(__fastcall*)(void*,bool)>(kSetFarRender)(node,true);
+    return (*reinterpret_cast<const std::uint32_t*>(node+0x20)&kFarBit)!=0;
+}
+
+void WeakSet(WeakRef& w,const void* object) noexcept {
+    WeakReset(w);
+    const char* o=static_cast<const char*>(object);
+    if(!object || !Rd(o+kWeakSelfAt,16,"weak self"))return;
+    void* obj=*reinterpret_cast<void* const*>(o+kWeakSelfAt);
+    void* ctrl=*reinterpret_cast<void* const*>(o+kWeakSelfAt+8);
+    if(!ctrl || !Rd(ctrl,16,"weak control block"))return;
+    reinterpret_cast<std::atomic<std::int32_t>*>(static_cast<char*>(ctrl)+0xC)->fetch_add(1);
+    w.object=obj;
+    w.control=ctrl;
+}
+void WeakReset(WeakRef& w) noexcept {
+    if(w.control && Readable(w.control,16)) {
+        auto* weak=reinterpret_cast<std::atomic<std::int32_t>*>(static_cast<char*>(w.control)+0xC);
+        if(weak->fetch_sub(1)==1) {   // the last reference of any kind: the block deletes itself (vtable slot 1)
+            void* const* vt=*reinterpret_cast<void* const* const*>(w.control);
+            if(vt && Readable(vt,16))reinterpret_cast<void(__fastcall*)(void*)>(vt[1])(w.control);
+        }
+    }
+    w=WeakRef{};
+}
+bool WeakAlive(const WeakRef& w) noexcept {
+    if(!w.control || !Readable(w.control,16) || *reinterpret_cast<const std::int32_t*>(static_cast<char*>(w.control)+8)<=0)return false;
+    return NotDeleted(w.object);
+}
+bool WeakOut(const void* object,void* out) noexcept {
+    WeakRef w;
+    WeakSet(w,object);
+    if(!w.control || !Rd(out,16,"weak out")) { WeakReset(w); return false; }
+    std::memcpy(out,&w.object,8);
+    std::memcpy(static_cast<char*>(out)+8,&w.control,8);
+    return true;   // the weak count WeakSet took goes with it
+}
+
 }  // namespace crew::edf41c

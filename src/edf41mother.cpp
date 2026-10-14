@@ -156,6 +156,12 @@ int shotCount[5]={},removedCount[5]={};   // bullets fired and parts removed, fo
 std::unordered_map<void*,Hull> hulls;
 std::unordered_map<void*,Part> parts;
 
+// Liveness by the objects' own weak references (edf41c::WeakRef): the game frees a deleted object without calling slot 0
+// (M123: the script deletes the mothership at the end of its route; its parts then read freed memory). Keyed by object.
+std::unordered_map<void*,WeakRef> refs;
+void Forget(void* o) noexcept { const auto it=refs.find(o); if(it!=refs.end()) { WeakReset(it->second); refs.erase(it); } }
+void Track(void* o) noexcept { Forget(o); WeakSet(refs[o],o); }
+bool Live(void* o) noexcept { const auto it=refs.find(o); return it!=refs.end() && WeakAlive(it->second); }
 Hull* HullOf(void* h) noexcept { const auto it=hulls.find(h); return it==hulls.end() ? nullptr : &it->second; }
 Part* PartOf(void* p) noexcept { const auto it=parts.find(p); return it==parts.end() ? nullptr : &it->second; }
 bool Throttle(Hull& h,int slot) noexcept { const int old=h.throttle[slot]; h.throttle[slot]=16; return old==0; }
@@ -637,7 +643,7 @@ bool GetParts(Hull& h,char* data) noexcept {
     void* found=nullptr;
     for(void* o:h.parts) {
         Part* p=PartOf(o);
-        if(!p || p->gone)continue;
+        if(!p || p->gone || !Live(o))continue;
         if(group==0 && p->group==kBigCannon) { found=o; break; }
         if(group==1 && p->group==kCannon && p->index==index) { found=o; break; }
     }
@@ -665,7 +671,8 @@ bool MakePart(void* hullObj,Hull& h,const SgoNode* entry,int group,int index,int
     void* part=CreateFromPath(world,path);
     if(!part) { Log("EDF41MOTHER part %s #%d (%ls): the game made nothing",kGroupNames[group],index,path); return false; }
     rec.state=group==kBigCannon ? kBigClosed : group==kCannon ? kCanDormant : group==kPanel ? kPanDormant : kHatClosed;
-    parts[part]=rec;
+    parts[part]=rec;   // a record left at this address by an object freed without its destructor is replaced
+    Track(part);
     h.parts.push_back(part);
     return true;
 }
@@ -802,7 +809,7 @@ void Force(void* hullObj,Hull& h) noexcept {
     if((force&1) && h.ticks==300) { for(int a:{3,5,8,10,13,15})ApplyAction(hullObj,h,a); Log("EDF41MOTHER dev force: every group enabled, attack on"); }
     const auto kill=[&](int group,int every) {
         int n=0,killed=0;
-        for(void* o:h.parts) { Part* p=PartOf(o); if(p && p->group==group && !p->dead && (n++%every)==0) { SetF(o,kDurabilityAt,0.0f); ++killed; } }
+        for(void* o:h.parts) { Part* p=PartOf(o); if(p && p->group==group && !p->dead && Live(o) && (n++%every)==0) { SetF(o,kDurabilityAt,0.0f); ++killed; } }
         Log("EDF41MOTHER dev force: %d %s destroyed",killed,kGroupNames[group]);
     };
     if((force&2) && h.ticks==3600)kill(kBigCannon,1);
@@ -817,6 +824,7 @@ std::uint64_t __fastcall HullDtor(void* self,unsigned flags) {
         Hull* h=HullOf(self);
         if(h)Log("EDF41MOTHER hull %p gone: its %zu parts go with it",self,h->parts.size());
         hulls.erase(self);
+        Forget(self);
     }
     return reinterpret_cast<DtorFn>(hullClass.orig[kSlotDtor])(self,flags);
 }
@@ -922,7 +930,7 @@ bool __fastcall HullAccept(void* self,const void* gdi) {
     std::lock_guard<std::recursive_mutex> hold(lock);
     Hull* h=HullOf(self);
     if(!h)return false;
-    for(void* o:h->parts) { Part* p=PartOf(o); if(p && p->group==kBigCannon && !p->gone)return false; }
+    for(void* o:h->parts) { Part* p=PartOf(o); if(p && p->group==kBigCannon && !p->gone && Live(o))return false; }
     void* ragdoll=static_cast<char*>(self)+kCarrierRagdoll;
     if(h->weakBody==-2) {
         h->weakBody=RagdollBody(ragdoll,L"weak");
@@ -941,6 +949,7 @@ std::uint64_t __fastcall PartDtor(void* self,unsigned flags) {
             if(h)h->parts.erase(std::remove(h->parts.begin(),h->parts.end(),self),h->parts.end());
             parts.erase(self);
         }
+        Forget(self);
     }
     return reinterpret_cast<DtorFn>(partClass.orig[kSlotDtor])(self,flags);
 }
@@ -965,7 +974,7 @@ std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
     std::lock_guard<std::recursive_mutex> hold(lock);
     Part* p=PartOf(self);
     if(!p)return reinterpret_cast<UpdateFn>(partClass.orig[kSlotUpdate])(self,dt);
-    Hull* h=HullOf(p->hull);
+    Hull* h=Live(p->hull) ? HullOf(p->hull) : nullptr;
     if(!h) {   // the hull is gone (destroyed, or the script deleted it): the part goes with it (4.1 0x56BBC0)
         if(!p->gone) { DeleteObject(self); p->gone=true; }
         return reinterpret_cast<UpdateFn>(partClass.orig[kSlotUpdate])(self,dt);
@@ -975,7 +984,7 @@ std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
     TeamGuard(self,*p,"after Place");
     const std::uint64_t r=reinterpret_cast<UpdateFn>(partClass.orig[kSlotUpdate])(self,dt);
     p=PartOf(self);
-    h=p ? HullOf(p->hull) : nullptr;
+    h=p && Live(p->hull) ? HullOf(p->hull) : nullptr;
     if(p)TeamGuard(self,*p,"after the class's update");
     if(p && h && !p->gone)PartFrame(self,*p,*h);
     if(p)TeamGuard(self,*p,"after PartFrame");
@@ -999,6 +1008,20 @@ std::uint64_t __fastcall PartMessage(void* self,std::uint32_t msg,void* data) {
 }
 
 // ---- the creation ---------------------------------------------------------------------------------------------------
+// The records of objects the game has freed (no destructor call): dropped when a new hull is made.
+void Prune() noexcept {
+    for(auto it=hulls.begin();it!=hulls.end();) {
+        if(Live(it->first)) { ++it; continue; }
+        for(void* o:it->second.parts) { parts.erase(o); Forget(o); }
+        Forget(it->first);
+        it=hulls.erase(it);
+    }
+    for(auto it=parts.begin();it!=parts.end();) {
+        if(Live(it->first) || (it->second.hull && hulls.count(it->second.hull))) { ++it; continue; }
+        Forget(it->first);
+        it=parts.erase(it);
+    }
+}
 void CreatePart(void* info) noexcept { CloneObject(partClass,kEaoCtor,kEaoSize,info); }
 void CreateHull(void* info) noexcept {
     void* obj=CloneObject(hullClass,kCarrierCtor,kCarrierSize,info);
@@ -1007,6 +1030,9 @@ void CreateHull(void* info) noexcept {
     // The parts are made here, as 4.1's constructor makes them (0x24FFF0) and EDF6's UfoMother511 makes its ring units in its own
     // (0x4FE740 -> 0x4FEF00): M603 and M993 send ObjectAction / GetPartsObject on the creation frame, before any Update.
     std::lock_guard<std::recursive_mutex> hold(lock);
+    Prune();
+    hulls.erase(obj);   // a record left at this address by a hull freed without its destructor
+    Track(obj);
     SpawnParts(obj,hulls[obj]);
 }
 }  // namespace

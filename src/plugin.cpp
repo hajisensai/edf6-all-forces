@@ -537,6 +537,11 @@ void LoadConfig() noexcept {
     n.edf41MotherForce=static_cast<int>(FixInt("Edf41MotherForce",ReadInt(L"Edf41MotherForce",n.edf41MotherForce),0,15));
     n.edf41MotherPlace=ReadFloat(L"Edf41MotherPlace",n.edf41MotherPlace);
     n.edf41MotherParts=static_cast<int>(FixInt("Edf41MotherParts",ReadInt(L"Edf41MotherParts",n.edf41MotherParts),0,31));
+    n.edf41Mother401=ReadBool(L"Edf41Mother401",n.edf41Mother401);
+    n.edf41Mother401Dev=static_cast<int>(FixInt("Edf41Mother401Dev",ReadInt(L"Edf41Mother401Dev",n.edf41Mother401Dev),0,63));
+    n.edf41Mother401DevKill=ReadFloat(L"Edf41Mother401DevKill",n.edf41Mother401DevKill);
+    n.edf41Mother401DevAction=static_cast<int>(FixInt("Edf41Mother401DevAction",ReadInt(L"Edf41Mother401DevAction",n.edf41Mother401DevAction),0,63));
+    n.edf41Mother401Place=ReadFloat(L"Edf41Mother401Place",n.edf41Mother401Place);
     n.edf5CampaignContent=FixInt("EDF5CampaignContent",ReadInt(L"EDF5CampaignContent",n.edf5CampaignContent),0,65535);
     n.testRangeContent=FixInt("TestRangeContent",ReadInt(L"TestRangeContent",n.testRangeContent),0,65535);
     n.edf41Content=FixInt("EDF41Content",ReadInt(L"EDF41Content",n.edf41Content),0,65535);
@@ -1075,6 +1080,8 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallEdf41Sound();     // EDF4.1's weapon SE bank and voice banks (edf41sound.cpp)
     InstallEdf41Mother();    // EDF4.1's UfoMother301 (ini Edf41Mother; edf41mother.cpp)
     InstallEdf41Robo();      // EDF4.1's UfoRobo (ini Edf41Robo; edf41robo.cpp)
+    InstallEdf41Deiroi();    // a stock crash 4.1's M412 reaches (edf41deiroi.cpp)
+    InstallEdf41Mother401(); // EDF4.1's UfoMother401 (ini Edf41Mother401; edf41mother401.cpp)
     InstallTerrainShare();   // before any map loads: the pieces of one terrain decoded once
     InstallMission();       // the mission's start (Reset*, the preloads) and a trigger of the per-frame hooks
     InstallLoadout(iniPath);
