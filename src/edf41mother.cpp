@@ -775,7 +775,12 @@ void AuditLiveTable() noexcept {
 std::uint64_t __fastcall PartDtorWrap(void* self,unsigned flags) {
     {
         std::lock_guard<std::mutex> hold(partLock);
-        partOf.erase(self);
+        const auto it=partOf.find(self);
+        if(it!=partOf.end()) {   // off its hull's list too: a part shot off first must not be deleted again by RunDeath
+            const auto h=partsOfHull.find(it->second.hull);
+            if(h!=partsOfHull.end())h->second.erase(std::remove(h->second.begin(),h->second.end(),self),h->second.end());
+            partOf.erase(it);
+        }
     }
     return reinterpret_cast<DtorFn>(partClass.orig[kSlotDtor])(self,flags);
 }
