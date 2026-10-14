@@ -318,8 +318,8 @@ struct Config {
     float proteusPriorityRadius=100.0f;// ...within this of it (m)
     bool edf41Ai=true;              // EDF4.1 Hector's weapon gating and back-off cycle on the converted Hectors (edf41ai.cpp)
     float edf41MotherPlace=0.0f;    // development only: the mothership held this many m in front of the camera each frame (0 = its route), to see it
-    bool edf41MotherBulletProbe=false;   // development only: log every bullet class the game spawns and the head of its creation info (edf41mother.cpp)
     int edf41MotherParts=31;        // which part groups the mothership builds as real objects (bit 1 hatches, 2 covers, 4 cannons, 8 main cannon, 16 panels); 0 = none
+    int edf41MotherForce=0;         // development only: force the mothership's actions / part deaths the autopilot cannot cause (edf41mother.cpp Force)
     bool edf41Mother=true;          // EDF4.1's UfoMother301 and its part classes (edf41mother.cpp)
     bool edf41Mother401=true;       // EDF4.1's UfoMother401 (the Earth Eater) and its eleven part classes (edf41mother401.cpp)
     int edf41Mother401Dev=0;        // development only (bits): 1 attack always allowed, 2 short attack waits, 4 panels in place at once,

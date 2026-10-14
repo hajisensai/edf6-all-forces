@@ -170,9 +170,17 @@ void BigExplosion(const float* pos,const float* dir,float size,float k) noexcept
 
 // Drop the object's game_object_drop_item once (0x548AE0); for an object that dies outside ApplyDamage.
 void DropItems(void* object) noexcept;
+// Activate an object (0x548D50, what CreateEnemy's `active` argument and EDF6's own generator 0x6E3381 call; sets +0x4A0).
+void Activate(void* object) noexcept;
+// The main CAS player of an EventAnimationObject (players *(+0x8F0+0x60), 0x160 each, index [+0xC80]): its clip has played to
+// the end (time +0xE8 >= length +0xF0); `length` receives the clip length in frames when not null.
+bool AnimDone(const void* object,float* length=nullptr) noexcept;
 
 // Replace one more slot of a built clone (slot 16 Accept(obj, GDI*) -> bool: the per-body damage filter; slot 6 OnLevel).
 void SetSlot(Clone& c,int slot,void* fn) noexcept;
+// SetTeam (0x54EE70) first asks slot 22 (+0xB0) whether the object may take the team; EventAnimationObject's (0x5B6BA0) says yes
+// to team 6 only, so a clone of it never becomes an enemy. This points the clone's slot 22 at GameObjectBase's (0x54ABD0, true).
+void AllowAnyTeam(Clone& c) noexcept;
 
 // The skeleton rebuilt from `matrix` (0x1100B90 on EventAnimationObject's +0x660): called after the stock Update it draws the
 // model there instead of at +0x60 (scaled, or hidden at a tiny scale); the ragdoll stays where the stock Update put it.

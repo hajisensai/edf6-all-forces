@@ -528,8 +528,8 @@ void LoadConfig() noexcept {
     n.edf41VoiceProbe=ReadBool(L"Edf41VoiceProbe",n.edf41VoiceProbe);
     n.edf41Ai=ReadBool(L"Edf41Ai",n.edf41Ai);
     n.edf41Mother=ReadBool(L"Edf41Mother",n.edf41Mother);
+    n.edf41MotherForce=static_cast<int>(FixInt("Edf41MotherForce",ReadInt(L"Edf41MotherForce",n.edf41MotherForce),0,15));
     n.edf41MotherPlace=ReadFloat(L"Edf41MotherPlace",n.edf41MotherPlace);
-    n.edf41MotherBulletProbe=ReadBool(L"Edf41MotherBulletProbe",n.edf41MotherBulletProbe);
     n.edf41MotherParts=static_cast<int>(FixInt("Edf41MotherParts",ReadInt(L"Edf41MotherParts",n.edf41MotherParts),0,31));
     n.edf41Mother401=ReadBool(L"Edf41Mother401",n.edf41Mother401);
     n.edf41Mother401Dev=static_cast<int>(FixInt("Edf41Mother401Dev",ReadInt(L"Edf41Mother401Dev",n.edf41Mother401Dev),0,63));
