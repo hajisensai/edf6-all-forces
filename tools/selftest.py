@@ -7221,6 +7221,12 @@ def edf41_robo_plugin_contract() -> None:
     message = cpp.split('MessageWrap(void* self', 1)[1].split('\n}\n', 1)[0]
     assert 'msg==kMsgDamage' in message and 'it->second.body==kS4)return 0;' in message
     assert 'action==0' in message and 'action==1' in message and 'action==2' in message
+    # ObjectAction is never handed to EventAnimationObject's OnMessage (it throws without an `action` table: M411, 2026-10-15)
+    action = message.split('if(msg==kMsgAction', 1)[1].split('if(msg==kMsgDamage', 1)[0]
+    assert re.search(r'return 1;\s*\}\s*\}\s*$', action), action
+    assert 'kSlotTeam=22' in cpp and 'kGobCanChangeTeam=0x54ABD0' in cpp and 'SetSlot(roboClass,kSlotTeam' in cpp
+    # the ground ray passes the robot's own ragdoll bodies (they lifted it on the M411 run)
+    assert 'GroundHit(knee,to,hit,ragdoll) || GroundHit(top,knee,hit,ragdoll)' in cpp
     for name in m.ROBO_LOCATORS[:6] + ('左足歩行衝撃', '右足歩行衝撃', 'ロックオン'):
         assert name in cpp or name.startswith('muzzle_'), name   # the muzzles come from the SGO's settings
     for rva in ('kStateByName', 'kPlayStateIndex', 'kCastRay', 'kHitReset', 'kGroundAdd', 'kAddLockTarget', 'kWind', 'kQuake'):

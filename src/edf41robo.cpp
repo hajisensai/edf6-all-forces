@@ -831,8 +831,8 @@ void Move(Robo& r) noexcept {
             r.fall-=0.008f;
             r.pos[1]+=r.fall;
             float hit[3];
-            const float from[3]={r.pos[0],r.pos[1]+100.0f,r.pos[2]},to[3]={r.pos[0],r.pos[1],r.pos[2]};
-            if(GroundHit(from,to,hit)) { r.pos[1]=hit[1]; r.fall=0.0f; }
+            const float from[3]={r.pos[0],r.pos[1]+2.0f,r.pos[2]},to[3]={r.pos[0],r.pos[1],r.pos[2]};
+            if(GroundHit(from,to,hit,static_cast<char*>(r.obj)+kEaoRagdoll)) { r.pos[1]=hit[1]; r.fall=0.0f; }
             return;
         }
         r.yaw=WrapPi(r.yaw+r.yawRate);
@@ -860,8 +860,13 @@ void Move(Robo& r) noexcept {
         }
     }
     float hit[3];
-    const float from[3]={r.pos[0],r.pos[1]+100.0f,r.pos[2]},to[3]={r.pos[0],r.pos[1]-(r.landed ? 1.0f : 0.0f),r.pos[2]};
-    if(GroundHit(from,to,hit)) {
+    // 4.1 casts from 100 m above the feet down to them (1 m below once landed). Its filter misses its own bodies; EDF6's map
+    // ray does not, and a body the ray meets above the feet lifted the robot every frame (M411 real run 2026-10-15): the feet's
+    // part (2 m above them down) first, then the rest of 4.1's segment (sunk into a slope: back up), own ragdoll bodies passed.
+    void* ragdoll=static_cast<char*>(r.obj)+kEaoRagdoll;
+    const float knee[3]={r.pos[0],r.pos[1]+2.0f,r.pos[2]},to[3]={r.pos[0],r.pos[1]-(r.landed ? 1.0f : 0.0f),r.pos[2]};
+    const float top[3]={r.pos[0],r.pos[1]+100.0f,r.pos[2]};
+    if(GroundHit(knee,to,hit,ragdoll) || GroundHit(top,knee,hit,ragdoll)) {
         r.pos[1]=hit[1];
         r.fall=0.0f;
         r.landed=true;
@@ -970,6 +975,16 @@ bool Setup(Robo& r) noexcept {
     FindLocator(Model(r.obj),L"右足歩行衝撃",&r.footR);
     FindLocator(Model(r.obj),L"ロックオン",&r.lockOn);
     SetLevel(r);
+    // The team. EventAnimationObject's constructor registers the object on team 6 (hostile to nobody, never a target, not
+    // counted: PRIMITIVES 7); the real M415 run (2026-10-15) found the robots still on 6 at their first update, firing bullets
+    // of team 6. 4.1's robot is an enemy whatever made it: team 6 becomes the enemy team 1 (registered); a team a script set
+    // otherwise is kept.
+    std::int32_t team0=0;
+    if(Readable(o+kTeamAt,4))std::memcpy(&team0,o+kTeamAt,4);
+    if(team0==6) {
+        const bool ok=SetTeam(r.obj,1,true);
+        Log("EDF41ROBO %p team 6 (EventAnimationObject's) -> enemy team 1 %s",r.obj,ok ? "set" : "NOT set");
+    }
     r.lockPoint=AddLockPoint(r.obj);
     r.driveOn=edf41c::PlaySe(r.obj,L"ロボ駆動音",r.pos,&r.drive);   // se_table[0], looped (its cue loops)
     Reroll(r);
@@ -997,13 +1012,14 @@ void Place(Robo& r) noexcept {
     r.pos[0]=eye[0]+fwd[0]/h*d;
     r.pos[2]=eye[2]+fwd[2]/h*d;
     r.pos[1]=eye[1]+(r.form==0 ? 150.0f : 50.0f);
+    std::memcpy(r.stepPos,r.pos,12);   // a step under way goes on from here
     r.yaw=std::atan2(eye[0]-r.pos[0],eye[2]-r.pos[2]);
     Log("EDF41ROBO %p placed %.0f m in front of the camera (ini Edf41RoboPlace): %.0f %.0f %.0f",r.obj,d,r.pos[0],r.pos[1],r.pos[2]);
 }
 
 void Tick(Robo& r) noexcept {
     ++r.ticks;
-    if(r.ticks==1)Place(r);
+    if(!r.placed && r.ticks<=600)Place(r);   // the camera may not be a view yet on the first frames
     // dev: transform this long after the creation, as the script's ObjectAction 0 would
     const float after=Cfg().edf41RoboTransformAfter;
     if(after>0.0f && !r.forcedTransform && r.form==0 && r.ticks>=static_cast<std::uint32_t>(after*60.0f)) {
@@ -1104,6 +1120,10 @@ std::uint64_t __fastcall MessageWrap(void* self,std::uint32_t msg,void* data) {
                     r.approach=true;
                 } else if(action==2)r.approach=true;
             }
+            // Never handed on: EventAnimationObject's OnMessage (0x5B6540) answers 0x1000000D from its SGO's `action` table,
+            // which this object has not, and throws (EDF+0x5B6A01, M411's ObjectAction 1 on the real game 2026-10-15). 4.1's
+            // base did nothing with 0 / 1 / 2 either.
+            return 1;
         }
     }
     if(msg==kMsgDamage) {
@@ -1118,6 +1138,8 @@ std::uint64_t __fastcall MessageWrap(void* self,std::uint32_t msg,void* data) {
 // before a durability percentage, native 3019): EventAnimationObject's is `return true` (0x125270) and never scales the
 // durability; 4.1's 0x2744B0 makes it 12000 x s x the difficulty: UfoCarrier508's formula (0x4F6D00) does the same in EDF6.
 constexpr int kSlotOnLevel=6;
+constexpr int kSlotTeam=22;
+constexpr std::size_t kGobCanChangeTeam=0x54ABD0;
 using OnLevelFn=bool(__fastcall*)(void*);
 bool __fastcall OnLevelWrap(void* self) {
     const bool r=reinterpret_cast<OnLevelFn>(roboClass.orig[kSlotOnLevel])(self);
@@ -1154,6 +1176,12 @@ bool InstallEdf41Robo() noexcept {
         return false;
     }
     SetSlot(roboClass,kSlotOnLevel,reinterpret_cast<void*>(&OnLevelWrap));
+    // Slot 22 (CanChangeTeam, asked by SetTeam 0x54EE70): EventAnimationObject's 0x5B6BA0 allows team 6 only (cmp edx,6;
+    // sete al), so CreateEnemy's SetTeam(1) left the robots on team 6 (M415 / M411 real runs 2026-10-15: not targeted, their
+    // bullets of team 6). GameObjectBase's own 0x54ABD0 (mov al,1; ret: every team), as UfoCarrier508's table has it.
+    static const unsigned char kRetTrue[3]={0xB0,0x01,0xC3};   // mov al,1; ret
+    if(Readable(image+kGobCanChangeTeam,3) && std::memcmp(image+kGobCanChangeTeam,kRetTrue,3)==0)SetSlot(roboClass,kSlotTeam,image+kGobCanChangeTeam);
+    else Log("EDF41ROBO EDF.dll+0x%zX is not GameObjectBase's CanChangeTeam: the robot keeps EventAnimationObject's team",kGobCanChangeTeam);
     const bool ok=AddFactory(L"UfoRobo",&CreateRobo);
     Log("EDF41ROBO on: UfoRobo %s",ok ? "queued for the game's registration" : "NOT registered");
     return ok;

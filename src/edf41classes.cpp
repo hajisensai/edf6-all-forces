@@ -733,22 +733,43 @@ bool ClipRewind(void* object) noexcept {
     return true;
 }
 
-bool GroundHit(const float* from,const float* to,float* hit) noexcept {
-    if(!RoboPrims())return false;
+bool GroundHit(const float* from,const float* to,float* hit,void* skipRagdoll) noexcept {
+    if(!RoboPrims() || (skipRagdoll && !Prims()))return false;
     char* g=static_cast<char*>(Manager());
     if(!g || !Rd(g,0x70,"physics world") || !*reinterpret_cast<void* const*>(g+0x68))return false;
     struct alignas(16) RayInput { float from[4],to[4]; std::uint32_t filter,unk24; std::uint64_t pad; };
     struct alignas(16) RayHits { unsigned char raw[0xA0]; };
-    const RayInput in{{from[0],from[1],from[2],1.0f},{to[0],to[1],to[2],1.0f},kMapLayer,0,0};
-    RayHits col{};
-    *reinterpret_cast<const void**>(col.raw)=image+kGroundCollector;
-    reinterpret_cast<void(*)(void*)>(image+kHitReset)(&col);
-    reinterpret_cast<void(*)(void*,void*,const RayInput*)>(image+kCastRay)(g+0x10,&col,&in);
-    if(*reinterpret_cast<const std::int32_t*>(col.raw+0x0C)==0)return false;
-    const float f=*reinterpret_cast<const float*>(col.raw+0x50);
-    if(!std::isfinite(f) || f<0.0f || f>1.0f)return false;
-    std::memcpy(hit,col.raw+0x30,12);
-    return std::isfinite(hit[0]+hit[1]+hit[2]);
+    float a[3]={from[0],from[1],from[2]};
+    // The ground collector keeps the nearest hit with flags & 2, the caller's own ragdoll bodies included (the UfoRobo M411 run,
+    // 2026-10-15: each frame's ray met the robot's feet and lifted it a little more): a hit on one of `skipRagdoll`'s bodies
+    // (collector +0x78 the body id, heli.cpp ObjectRay; 0x6EA430 maps it) is passed and the ray cast again from just below it.
+    for(int pass=0;pass<8;++pass) {
+        const RayInput in{{a[0],a[1],a[2],1.0f},{to[0],to[1],to[2],1.0f},kMapLayer,0,0};
+        RayHits col{};
+        *reinterpret_cast<const void**>(col.raw)=image+kGroundCollector;
+        reinterpret_cast<void(*)(void*)>(image+kHitReset)(&col);
+        reinterpret_cast<void(*)(void*,void*,const RayInput*)>(image+kCastRay)(g+0x10,&col,&in);
+        if(*reinterpret_cast<const std::int32_t*>(col.raw+0x0C)==0)return false;
+        const float f=*reinterpret_cast<const float*>(col.raw+0x50);
+        if(!std::isfinite(f) || f<0.0f || f>1.0f)return false;
+        std::memcpy(hit,col.raw+0x30,12);
+        if(!std::isfinite(hit[0]+hit[1]+hit[2]))return false;
+        // the body id as 0x6EA430 compares it (the body's +0xF0, the whole dword; heli.cpp masks it to 24 bits for its own use)
+        const std::uint32_t body=*reinterpret_cast<const std::uint32_t*>(col.raw+0x78);
+        const auto byId=reinterpret_cast<int(__fastcall*)(void*,std::uint32_t)>(image+kBodyById);
+        int own=skipRagdoll ? byId(skipRagdoll,body) : -1;
+        if(own<0 && skipRagdoll)own=byId(skipRagdoll,body&0xFFFFFFu);
+        static std::atomic<int> said{0};
+        if(skipRagdoll && said.fetch_add(1)<12)
+            Log("EDF41CLASS ground ray pass %d from %.1f %.1f %.1f to y %.1f: hit %.1f %.1f %.1f body %06X flags %08X -> own body %d",pass,a[0],a[1],a[2],
+                to[1],hit[0],hit[1],hit[2],body,*reinterpret_cast<const std::uint32_t*>(col.raw+0x9C),own);
+        if(own<0)return true;
+        const float d[3]={to[0]-a[0],to[1]-a[1],to[2]-a[2]};
+        const float l=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+        if(l<1e-3f)return false;
+        for(int k=0;k<3;++k)a[k]=hit[k]+d[k]/l*0.25f;
+    }
+    return false;
 }
 
 bool CameraNow(float* eye,float* forward) noexcept {

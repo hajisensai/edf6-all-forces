@@ -177,7 +177,8 @@ bool ClipNow(const void* object,int* state,float* time,float* length) noexcept; 
 // The main player's clip back to its start (+0xE8 = 0): 0x116BFC0 asked for the state already playing may keep its clock.
 bool ClipRewind(void* object) noexcept;
 // The nearest map hit (terrain / buildings: 0x11A7EE0 with the ground collector 0x179CBE8, filter 0x16, as heli.cpp) on from -> to.
-bool GroundHit(const float* from,const float* to,float* hit) noexcept;
+// `skipRagdoll` (a ragdoll component, EAO +0xAA0): hits on its own bodies are passed.
+bool GroundHit(const float* from,const float* to,float* hit,void* skipRagdoll=nullptr) noexcept;
 // The game's own camera (scene system +0x4D8 slots, wrapper +0x70: edf41mother.cpp GameCamera): eye and unit forward.
 bool CameraNow(float* eye,float* forward) noexcept;
 // A lock point of the object's own (AddLockTarget 0x547A50(object): the object keeps it in its list +0x360; the lock search
