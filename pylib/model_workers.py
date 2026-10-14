@@ -34,6 +34,15 @@ def worker_count() -> int:
     return workers_for(os.cpu_count() or 1, available)
 
 
+def utf8_pipes() -> None:
+    """stdout / stderr as UTF-8 when they are a pipe or a file: the installer speaks Chinese, and a redirected stream
+    otherwise takes the ANSI code page (cp1252 on CI and English Windows: UnicodeEncodeError on the first line).
+    A console is left alone: Python writes it with WriteConsoleW whatever the code page."""
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None and not stream.isatty() and hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8')
+
+
 class _TaggedOutput:
     def __init__(self, stream: TextIO, label: str) -> None:
         self.stream, self.label, self.pending = stream, label, ''
@@ -54,6 +63,7 @@ class _TaggedOutput:
 
 def _run(job: Job) -> bytes:
     function, arguments, label = job
+    utf8_pipes()   # a spawned child's streams are its own (frozen children also pass the installer's __main__)
     started = time.perf_counter()
     output = _TaggedOutput(sys.stdout, label)
     with contextlib.redirect_stdout(output):
