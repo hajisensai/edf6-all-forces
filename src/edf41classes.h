@@ -173,5 +173,8 @@ bool AnimDone(const void* object,float* length=nullptr) noexcept;
 
 // Replace one more slot of a built clone (slot 16 Accept(obj, GDI*) -> bool: the per-body damage filter; slot 6 OnLevel).
 void SetSlot(Clone& c,int slot,void* fn) noexcept;
+// SetTeam (0x54EE70) first asks slot 22 (+0xB0) whether the object may take the team; EventAnimationObject's (0x5B6BA0) says yes
+// to team 6 only, so a clone of it never becomes an enemy. This points the clone's slot 22 at GameObjectBase's (0x54ABD0, true).
+void AllowAnyTeam(Clone& c) noexcept;
 
 }  // namespace crew::edf41c

@@ -191,7 +191,14 @@ void Matrix(void* obj,float* out) noexcept { std::memcpy(out,static_cast<char*>(
 // ---- firing -------------------------------------------------------------------------------------------------------
 bool AimAt(void* part,float* aim) noexcept {
     void* t=Target(part);
-    return t && AimPoint(t,aim);
+    if(t && AimPoint(t,aim))return true;
+    static std::atomic<int> said{0};
+    if(said.fetch_add(1)<6) {
+        const char* o=static_cast<const char*>(part);
+        Log("EDF41MOTHER part %p has no target to fire at: team %d, flags +0x380 %08X, active %u, retarget %d/%d, target ptr %p",part,
+            I(part,kTeamAt),static_cast<unsigned>(I(part,kFlags380)),static_cast<unsigned>(static_cast<unsigned char>(o[0x4A0])),I(part,0x510),I(part,0x514),t);
+    }
+    return false;
 }
 
 // The main cannon's shot f of the sweep (4.1 0x2570C0): direction (sin q, -cos q cos phi, -cos q sin phi), q = (f/30 - 1) 1.5,
@@ -251,8 +258,9 @@ void CannonBeam(void* obj,Part& p,float s) noexcept {
     if(p.hatchBones[k]==-2) {
         wchar_t bone[32]=L"";
         const SgoNode* e=Child(muzzles,k);
-        if(!Text(Child(e,0),bone,32) || !Vec(Child(e,1),p.beamOffsets[k],3)) { p.hatchBones[k]=-1; return; }
+        if(!Text(Child(e,0),bone,32) || !Vec(Child(e,1),p.beamOffsets[k],3)) { p.hatchBones[k]=-1; Fail("a cannon's mpc_FireBeamSetting entry is not [bone, offset]"); return; }
         p.hatchBones[k]=BoneIndex(static_cast<char*>(obj)+kEaoSkeleton,bone);
+        if(p.hatchBones[k]<0)Log("EDF41MOTHER cannon %p has no bone %ls for beam muzzle %d",obj,bone,k);
     }
     float b[16];
     if(!BoneMatrix(static_cast<char*>(obj)+kEaoSkeleton,p.hatchBones[k],b))return;
@@ -721,7 +729,13 @@ void Masking(void* obj,Part& p) noexcept {
     SetFlag(obj,kNoHpLoss,immune);
     const bool reg=!immune && !p.statik;
     const std::int32_t team=PartTeam(p.hull);
-    if(reg!=p.registered || team!=p.team) {
+    const std::int32_t now=I(obj,kTeamAt);
+    const bool registeredNow=(static_cast<std::uint32_t>(I(obj,kFlags380))&0x40u)!=0;
+    if(reg!=p.registered || team!=p.team || now!=team || registeredNow!=reg) {
+        if(p.team==team && now!=team) {   // set before, changed since by someone else: say so once
+            static std::atomic<int> said{0};
+            if(said.fetch_add(1)<4)Log("EDF41MOTHER part %p: its team was %d, set back to %d",obj,now,team);
+        }
         SetTeam(obj,team,reg);
         p.registered=reg;
         p.team=team;
@@ -987,6 +1001,7 @@ bool InstallEdf41Mother() noexcept {
         return false;
     }
     SetSlot(hullClass,kSlotAccept,reinterpret_cast<void*>(&HullAccept));
+    AllowAnyTeam(partClass);   // the parts take the hull's team (EventAnimationObject's slot 22 takes team 6 only)
     const bool ok=AddFactory(L"UfoMother301",&CreateHull) && AddFactory(L"UfoMother301_Hatch",&CreatePart)
         && AddFactory(L"UfoMother301_Panel",&CreatePart) && AddFactory(L"UfoMother301_Cannon",&CreatePart)
         && AddFactory(L"UfoMother301_BigCannon",&CreatePart);

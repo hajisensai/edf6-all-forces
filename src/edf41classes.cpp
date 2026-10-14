@@ -679,6 +679,13 @@ bool AnimDone(const void* object,float* length) noexcept {
     return t+0.5f>=len;
 }
 
+void AllowAnyTeam(Clone& c) noexcept {
+    constexpr std::size_t kAnyTeam=0x54ABD0;   // mov al,1; ret
+    static const unsigned char want[3]={0xB0,0x01,0xC3};
+    if(Readable(image+kAnyTeam,3) && std::memcmp(image+kAnyTeam,want,3)==0)SetSlot(c,22,image+kAnyTeam);
+    else Log("EDF41CLASS GameObjectBase's slot 22 is not what this was written for: %s keeps its team rule",c.tag);
+}
+
 void SetSlot(Clone& c,int slot,void* fn) noexcept {
     if(slot>=0 && slot<c.slots && fn)c.block[1+slot]=fn;
 }
