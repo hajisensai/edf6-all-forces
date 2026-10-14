@@ -1162,5 +1162,7 @@ def run() -> int:
 
 if __name__ == '__main__':
     import multiprocessing
+    from model_workers import utf8_pipes
+    utf8_pipes()   # before freeze_support: the frozen model workers start here too
     multiprocessing.freeze_support()
     sys.exit(run())
