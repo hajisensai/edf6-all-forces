@@ -141,6 +141,7 @@ struct Config {
     float sazabiCannonDamage=300.0f;   // a mega particle beam's round at full charge (90 rounds a beam, 5 beams)
     float sazabiFunnelDamage=500.0f;   // a funnel beam's round (6 rounds a shot)
     bool sazabiTestBoard=false;     // tests (testrange/run_test.py): the player put into the first empty Sazabi seen
+    char testBoardVehicle[32]{};    // tests (tests/autopilot): the player put once a mission into the first vehicle whose class name has this
     int airdropTest=0;              // tests (tests/autopilot): 1-3 = a container airdrop of the tank / APC / truck asked
                                     // once a mission near the player, then the player put into what it brings
     bool npcCrewTest=false;         // tests (tests/autopilot): auto-crew also for empty vehicles no player has driven yet
@@ -228,7 +229,7 @@ struct Config {
     bool firstPersonStart=false;    // ...on from the start
     float fpEyeUp=0.05f;            // ...the eye this far over the head bone, m
     float fpEyeAhead=0.10f;         // ...and this far ahead of it, m
-    float fpEyeEase=0.25f;          // ...the eye follows the head's place in the body this much a frame (the bob filtered)
+    float fpViewHeightEase=0.05f;   // ...the eye's height follows the head's this much a frame (Call of Duty's view height)
     float fpGripX=0.17f;            // ...the weapon in hand held here in the view, m: right (the Fencer: fpHold*)
     float fpGripY=-0.20f;           // ...up
     float fpGripZ=0.40f;            // ...ahead

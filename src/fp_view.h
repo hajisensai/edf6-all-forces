@@ -12,7 +12,9 @@
 //    (a reload's) on it kept.
 //  - The collapse: a matrix that sends every vertex it weighs to one point (rows 0..2 zero): the body's bones that are
 //    not the arms', so the body draws nothing but its arms (the triangles of the rest are degenerate, no pixel).
-//  - The eye: the head bone's place in the yaw-only body frame, eased (the animation's bob filtered out).
+//  - The eye (Call of Duty's: a view height over the body's own axis): on the yaw-only body frame's up axis, `ahead` in
+//    front of it, at the head bone's height eased (the user, 2026-10-14: the Fencer's view shook: its head's sway in the
+//    walk and the dash, followed by a quarter a frame, went into the camera).
 #pragma once
 #include <cmath>
 #include <cstring>
@@ -134,15 +136,15 @@ inline M4 Collapse(const float* at) noexcept {
     return r;
 }
 
-// The eye's place in the body frame `body` (rows right, up, forward, position; yaw only) from the head bone's world
-// position, pushed `up` and `ahead` metres, eased toward it by `ease` (0..1 a frame) from `local` (in, out). The first
-// frame (`fresh`) takes it as it is.
+// The eye's place in the body frame `body` (rows right, up, forward, position; yaw only): on its up axis `ahead` metres
+// in front, at the head bone's height (world position `head`) pushed `up`, the height eased toward it by `ease` (0..1 a
+// frame) from `local` (in, out). The head's sway to the sides and back and forth is not followed. The first frame
+// (`fresh`) takes the height as it is.
 inline void EaseEye(const M4& body,const float* head,float up,float ahead,float ease,bool fresh,float* local) noexcept {
     const float rel[3]={head[0]-body.m[12],head[1]-body.m[13],head[2]-body.m[14]};
-    float want[3];
-    for(int i=0;i<3;++i)want[i]=rel[0]*body.m[i*4]+rel[1]*body.m[i*4+1]+rel[2]*body.m[i*4+2];
-    want[1]+=up;want[2]+=ahead;
-    for(int i=0;i<3;++i)local[i]=fresh ? want[i] : local[i]+(want[i]-local[i])*ease;
+    const float height=rel[0]*body.m[4]+rel[1]*body.m[5]+rel[2]*body.m[6]+up;
+    local[0]=0.0f;local[2]=ahead;
+    local[1]=fresh ? height : local[1]+(height-local[1])*ease;
 }
 
 inline void EyeWorld(const M4& body,const float* local,float* out) noexcept {
