@@ -5,6 +5,8 @@
 #include <initializer_list>
 namespace crew {
 void MissionCrewVehicleFrame(unsigned char*) noexcept {}
+void BoardingRequest(unsigned char*) noexcept {}   // TestBoardVehicle (off here)
+bool HumanOnFoot(const unsigned char*) noexcept { return true; }
 void SupportDispatchTick() noexcept {}
 void ResetMissionCrew() noexcept {}
 bool InstallMissionCrewHooks(const unsigned*,std::size_t) noexcept { return true; }

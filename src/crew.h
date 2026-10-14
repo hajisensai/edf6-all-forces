@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include "edf/input_source.h"
 #include "edf/layout.h"
 #include "edf/patch.h"
 #include "gunsight.h"

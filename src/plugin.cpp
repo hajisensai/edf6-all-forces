@@ -970,6 +970,12 @@ unsigned char* PlayerHuman() noexcept {
 }
 }  // namespace crew
 
+// A background host's keyboard and foreground window for this plugin (common/edf/input_source.h); null: user32's.
+extern "C" __declspec(dllexport) void __cdecl EDF6VehicleCrew_SetInputSourceV1(edf::AsyncKeyFn key,edf::ForegroundFn window) {
+    edf::SetInputSource(key,window);
+    crew::Log("INPUT keyboard and foreground window %s",key || window ? "handed over by the host (a background run)" : "user32's again");
+}
+
 extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     using namespace crew;
     if(!info)return false;

@@ -180,10 +180,10 @@ ULONGLONG padSearchAt=0;
 
 bool InFront() noexcept {
     DWORD pid=0;
-    GetWindowThreadProcessId(GetForegroundWindow(),&pid);
+    GetWindowThreadProcessId(edf::ForegroundWindow(),&pid);
     return pid==GetCurrentProcessId();
 }
-bool Down(int vk) noexcept { return vk>0 && (GetAsyncKeyState(vk)&0x8000)!=0; }
+bool Down(int vk) noexcept { return vk>0 && (edf::AsyncKey(vk)&0x8000)!=0; }
 
 // The magnified vehicle sight's claim on the wheel (sightzoom.cpp: its range setting), and its notches' delta.
 std::atomic<bool> scopeHolds{false};
@@ -206,7 +206,7 @@ LRESULT CALLBACK WheelProc(HWND w,UINT msg,WPARAM wp,LPARAM lp) {
 // The game's window (in front: the map was just opened by its key) subclassed for the wheel, once.
 void Subclass() noexcept {
     if(subclassed)return;
-    const HWND w=GetForegroundWindow();
+    const HWND w=edf::ForegroundWindow();
     DWORD pid=0;
     if(!w || !GetWindowThreadProcessId(w,&pid) || pid!=GetCurrentProcessId())return;
     unicodeProc=IsWindowUnicode(w)!=FALSE;

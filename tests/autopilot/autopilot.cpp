@@ -119,43 +119,53 @@ BOOL WINAPI KeyboardState(PBYTE keys) {
     return TRUE;
 }
 
-// Desktop keys this stand-in kept from EDF6VehicleCrew (down on the desktop, not held by the autopilot), by key: said
-// once a key (the user, 2026-10-14: "桌面键盘漏进后台": the proof the plugin's reads come here and are answered here).
+// Desktop keys this stand-in kept from the plugins (down on the desktop, not held by the autopilot), by key: said once
+// a key (the user, 2026-10-14: "桌面键盘漏进后台").
 volatile LONG keptFromPlugin[kKeyCodes]{};
 using AsyncKeyFn=SHORT(WINAPI*)(int);
-AsyncKeyFn realAsyncKey=nullptr;
+const AsyncKeyFn realAsyncKey=&GetAsyncKeyState;
 SHORT WINAPI KeyState(int vk) {
     const bool mine=vk>=0 && vk<kKeyCodes && held[vk];
-    if(!mine && vk>=0 && vk<kKeyCodes && realAsyncKey && (realAsyncKey(vk)&0x8000) && !InterlockedExchange(&keptFromPlugin[vk],1))
-        Log("BACKGROUND the desktop's key 0x%X kept from EDF6VehicleCrew",vk);
+    if(!mine && vk>=0 && vk<kKeyCodes && (realAsyncKey(vk)&0x8000) && !InterlockedExchange(&keptFromPlugin[vk],1))
+        Log("BACKGROUND the desktop's key 0x%X kept from the plugins",vk);
     return mine ? static_cast<SHORT>(0x8000) : 0;
 }
 
-// EDF6VehicleCrew reads its own keys (the map's M, the damage statistics' I, ...) with GetAsyncKeyState and checks
-// GetForegroundWindow itself, through its own imports: those two are pointed here too once it is loaded (it loads after
-// this plugin), so a background run can press the plugin's keys the way it presses the game's.
-bool pluginInput=false;
-void PatchPluginInput() noexcept {
-    const HMODULE crew=GetModuleHandleW(L"EDF6VehicleCrew.dll");
-    if(!crew)return;
-    pluginInput=true;
-    const bool fore=PatchImport(crew,"USER32.dll","GetForegroundWindow",reinterpret_cast<void*>(&Foreground))!=nullptr;
-    realAsyncKey=reinterpret_cast<AsyncKeyFn>(PatchImport(crew,"USER32.dll","GetAsyncKeyState",reinterpret_cast<void*>(&KeyState)));
-    const bool keys=realAsyncKey!=nullptr;
-    Log("BACKGROUND EDF6VehicleCrew's input: foreground=%d asyncKeys=%d",fore,keys);
-}
-
-// Once a second: EDF6VehicleCrew's key slot still ours (another loader or a re-bind would hand it the desktop's keys);
-// put back and said if not.
+// The plugins read their own keys (EDF6VehicleCrew: the map's M, the damage statistics' I, ...; EDF6AutoTurret: its
+// designation keys) and check the foreground window themselves, through one source each (common/edf/input_source.h):
+// each is handed this file's stand-ins through its exported <Plugin>_SetInputSourceV1 once it is loaded (they load
+// after this plugin), so a background run presses the plugins' keys the way it presses the game's and the desktop's
+// never reach them. Not through their import slots any more: another module rewrites those after the game starts
+// (measured: EDF6VehicleCrew's GetAsyncKeyState slot replaced 2.1 s in, the desktop's M, I, V and Esc then reached it).
+// A plugin built before the export gets the import slots as before, checked again every second.
+using SetInputSourceFn=void(__cdecl*)(AsyncKeyFn,HWND(WINAPI*)());
+struct PluginInput { const wchar_t* module; const char* setter; bool handed,patched; };
+PluginInput pluginInputs[]={{L"EDF6VehicleCrew.dll","EDF6VehicleCrew_SetInputSourceV1",false,false},
+                            {L"EDF6AutoTurret.dll","EDF6AutoTurret_SetInputSourceV1",false,false}};
 ULONGLONG slotCheckAt=0;
-void CheckPluginInput() noexcept {
+void PluginInputTick() noexcept {
     const ULONGLONG now=GetTickCount64();
-    if(now-slotCheckAt<1000)return;
-    slotCheckAt=now;
-    const HMODULE crew=GetModuleHandleW(L"EDF6VehicleCrew.dll");
-    if(!crew)return;
-    void* const was=PatchImport(crew,"USER32.dll","GetAsyncKeyState",reinterpret_cast<void*>(&KeyState));
-    if(was && was!=reinterpret_cast<void*>(&KeyState))Log("BACKGROUND EDF6VehicleCrew's GetAsyncKeyState slot was %p, not the stand-in: put back",was);
+    const bool recheck=now-slotCheckAt>=1000;
+    if(recheck)slotCheckAt=now;
+    for(PluginInput& p:pluginInputs) {
+        if(p.handed)continue;
+        const HMODULE m=GetModuleHandleW(p.module);
+        if(!m)continue;
+        if(const auto set=reinterpret_cast<SetInputSourceFn>(GetProcAddress(m,p.setter))) {
+            set(&KeyState,&Foreground);
+            p.handed=true;
+            Log("BACKGROUND %ls's input handed over (%s)",p.module,p.setter);
+            continue;
+        }
+        if(p.patched && !recheck)continue;
+        const void* fore=PatchImport(m,"USER32.dll","GetForegroundWindow",reinterpret_cast<void*>(&Foreground));
+        const void* keys=PatchImport(m,"USER32.dll","GetAsyncKeyState",reinterpret_cast<void*>(&KeyState));
+        if(!p.patched)Log("BACKGROUND %ls has no %s (an older build): its import slots patched, foreground=%d asyncKeys=%d",
+                          p.module,p.setter,fore!=nullptr,keys!=nullptr);
+        else if((fore && fore!=reinterpret_cast<const void*>(&Foreground)) || (keys && keys!=reinterpret_cast<const void*>(&KeyState)))
+            Log("BACKGROUND %ls's import slots were replaced (%p, %p): put back",p.module,fore,keys);
+        p.patched=true;
+    }
 }
 
 // --- The system mouse and the desktop's activation stay the user's (2026-10-10: a background run pulled the user's
@@ -701,8 +711,7 @@ DWORD WINAPI Loop(void*) {
         }
         PollCommand();
         if(!padIn)InstallPad();
-        if(!pluginInput)PatchPluginInput();
-        else CheckPluginInput();
+        PluginInputTick();
         autopilot::AirdropProbeTick();
         Sleep(15);
     }

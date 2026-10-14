@@ -130,8 +130,8 @@ Mech* Make(unsigned char* v) noexcept {
 bool KeyDown(int vk) noexcept {   // playerjet.cpp KeyDown
     if(vk<=0 || MapHoldsKeys())return false;
     DWORD pid=0;
-    GetWindowThreadProcessId(GetForegroundWindow(),&pid);
-    return pid==GetCurrentProcessId() && (GetAsyncKeyState(vk)&0x8000)!=0;
+    GetWindowThreadProcessId(edf::ForegroundWindow(),&pid);
+    return pid==GetCurrentProcessId() && (edf::AsyncKey(vk)&0x8000)!=0;
 }
 float Axis(const unsigned char* seat,std::size_t at) noexcept {
     const float x=At<float>(seat,at);

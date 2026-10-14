@@ -209,7 +209,7 @@ ULONGLONG passLogAt=0;
 bool KeyInputAllowed() noexcept {
     if(MapHoldsKeys())return false;
     DWORD pid=0;
-    GetWindowThreadProcessId(GetForegroundWindow(),&pid);
+    GetWindowThreadProcessId(edf::ForegroundWindow(),&pid);
     return pid==GetCurrentProcessId();
 }
 
@@ -305,7 +305,7 @@ bool KeyTaken(const unsigned char* h,int vk) noexcept {
 // vehicle uses the key itself (KeyTaken) it is that vehicle's: the switch stays as it was set before boarding.
 void Toggle(const unsigned char* h) noexcept {
     const Config& c=Cfg();
-    const bool down=c.firstPersonKey>0 && (GetAsyncKeyState(c.firstPersonKey)&0x8000)!=0;
+    const bool down=c.firstPersonKey>0 && (edf::AsyncKey(c.firstPersonKey)&0x8000)!=0;
     // Loss of input ownership cancels this gesture; it is not a key release. If the
     // physical key is still held when focus/the map returns, wait for its release
     // before allowing another gesture, so the held boarding/map key cannot toggle.

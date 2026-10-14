@@ -133,7 +133,7 @@ MapCommandReadout readout{};
 ULONGLONG readoutAt=0;
 SRWLOCK lock=SRWLOCK_INIT;
 
-bool Down(int vk) noexcept { return (GetAsyncKeyState(vk)&0x8000)!=0; }
+bool Down(int vk) noexcept { return (edf::AsyncKey(vk)&0x8000)!=0; }
 
 // Every unit that takes an order now, in a stable order (the vehicles' addresses).
 void List(Game& g) noexcept {

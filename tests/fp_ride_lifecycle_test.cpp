@@ -8,13 +8,9 @@ HWND TestGetForegroundWindow() { return nullptr; }
 DWORD TestGetWindowThreadProcessId(HWND,LPDWORD pid) { *pid=focused ? 42 : 43;return 0; }
 DWORD TestGetCurrentProcessId() { return 42; }
 }
-#define GetAsyncKeyState TestGetAsyncKeyState
-#define GetForegroundWindow TestGetForegroundWindow
 #define GetWindowThreadProcessId TestGetWindowThreadProcessId
 #define GetCurrentProcessId TestGetCurrentProcessId
 #include "../src/firstperson.cpp"
-#undef GetAsyncKeyState
-#undef GetForegroundWindow
 #undef GetWindowThreadProcessId
 #undef GetCurrentProcessId
 #include <cstdio>
@@ -47,6 +43,7 @@ int VehicleScreens(const unsigned char*,int,const float*,CockpitScreens* out) no
 
 int main() {
     using namespace crew;
+    edf::SetInputSource(&TestGetAsyncKeyState,&TestGetForegroundWindow);   // the plugin's key source (edf/input_source.h)
     unsigned char human[0x2100]{},cam[0x400]{},weapon[0x1400]{};
     void* vt[2]{};
     unsigned char* list[]={weapon};
