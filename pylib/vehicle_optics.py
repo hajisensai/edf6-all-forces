@@ -235,6 +235,7 @@ def mark_model(md: Mdb, spec: Model, sgo_data: bytes) -> Mdb:
 def build_model(game, spec: Model) -> bytes:
     """Preserve loose texture changes only when the model geometry contract matches."""
     name = spec.stem + '.MRAB'
+    print(f'    {name}：读取模型资源……', flush=True)
     loose = Path(game.root, 'Mods', 'OBJECT', name)
     arc = rab_read(loose.read_bytes() if loose.is_file() else game.read('OBJECT', name))
     model = next(f for f in arc.files if f.name.lower() == spec.stem.lower()+'.mdb')
@@ -243,6 +244,7 @@ def build_model(game, spec: Model) -> bytes:
         raise ValueError(f'{name}: model geometry differs from the audited optic profile; preserving the other mod')
     # The SGO only for a camera lens's locator (a cockpit-only skin's model may have no SGO of its own name).
     sgo_data = game.read('OBJECT', spec.stem+'.SGO') if any(lens.camera for lens in spec.lenses) else b''
+    print(f'    {name}：解析几何与生成瞄具骨骼……', flush=True)
     marked = mark_model(mdb_read(raw), spec, sgo_data)
     textures: dict[str, bytes] = {}
     if spec.cockpits:
@@ -250,9 +252,25 @@ def build_model(game, spec: Model) -> bytes:
             marked, textures = cockpits.graft(marked, spec.cockpits, cockpit_kits.KITS, game, preorder)
         except cockpits.CockpitAssetsMissing as e:   # the optics still; the seats keep the stock camera
             print(f'{name}: no cockpits ({e})')
+    print(f'    {name}：压缩模型与打包贴图……', flush=True)
     model.stored = cmpl_compress(mdb_write(marked))
     cockpits.add_textures(arc, textures)
     return rab_write(arc)
+
+
+def _model_reference(animation: object) -> list[object] | None:
+    """The primary archive/model pair, including stock model-list wrappers."""
+    items = animation.items if isinstance(animation, dsgo.Node) else animation
+    if not isinstance(items, list) or not items:
+        return None
+    value = items[0]
+    while True:
+        ref = value.items if isinstance(value, dsgo.Node) else value
+        if not isinstance(ref, list) or not ref:
+            return None
+        if len(ref) >= 2 and isinstance(ref[0], str) and isinstance(ref[1], str):
+            return ref
+        value = ref[0]
 
 
 def redirect(data: bytes) -> tuple[bytes, tuple[str, ...]]:
@@ -261,9 +279,11 @@ def redirect(data: bytes) -> tuple[bytes, tuple[str, ...]]:
     doc = dsgo.parse(data) if data[:4] == b'DSGO' else None
     version, m = sgo.read(data) if doc is None else (None, None)
     try:
-        animation = doc.root.get('animation_model').items if doc else m['animation_model']
-        ref = animation[0].items if doc else animation[0]
+        animation = doc.root.get('animation_model') if doc else m['animation_model']
     except (KeyError, TypeError, AttributeError):
+        return data, ()
+    ref = _model_reference(animation)
+    if ref is None:
         return data, ()
     for spec in MODELS:
         if not ready(spec) and ref[0].lower() != f'app:/object/{output(spec).lower()}':
@@ -279,8 +299,11 @@ def model_path(data: bytes) -> str | None:
     doc = dsgo.parse(data) if data[:4] == b'DSGO' else None
     try:
         if doc:
-            return doc.root.get('animation_model').items[0].items[0]
-        return sgo.read(data)[1]['animation_model'][0][0]
+            animation = doc.root.get('animation_model')
+        else:
+            animation = sgo.read(data)[1]['animation_model']
+        ref = _model_reference(animation)
+        return ref[0] if ref is not None else None
     except (KeyError, TypeError, AttributeError):
         return None
 
@@ -294,8 +317,8 @@ def restore_path(data: bytes, path: str | None = None) -> bytes:
     path = path or 'app:/object/'+spec.stem.lower()+'.mrab'
     if data[:4] == b'DSGO':
         doc = dsgo.parse(data)
-        doc.root.get('animation_model').items[0].items[0] = path
+        _model_reference(doc.root.get('animation_model'))[0] = path
         return dsgo.write(doc)
     version, m = sgo.read(data)
-    m['animation_model'][0][0] = path
+    _model_reference(m['animation_model'])[0] = path
     return sgo.write(version, m)
