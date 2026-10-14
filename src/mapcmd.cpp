@@ -440,8 +440,9 @@ void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
             Note(g,L"%ls",hudtext::Tr(hudtext::Tx::supportLoadoutTooMany));
         return;
     }
-    if(hit.kind==Game::UiKind::support) {   // its row or chip: armed (again: disarmed)
+    if(hit.kind==Game::UiKind::support) {   // its row or chip: armed (again: disarmed); one the mission forbids: why
         const bool again=g.armedSupport==hit.entry;
+        if(const wchar_t* why=again ? nullptr : SupportCallForbidden(hit.entry)){Note(g,L"%ls",why);return;}
         Arm(g,false,Order::none,again ? -1 : hit.entry);
         if(!again){g.supportPick=hit.entry;Note(g,hudtext::Tr(hudtext::Tx::cmdSupportArmed),SupportCallName(hit.entry));}
         return;
@@ -773,7 +774,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     r.supports=(std::min)(SupportMenuCount(),kMapSupports);   // the sea rescue is no map call
     for(int i=0;i<r.supports;++i) {
         _snwprintf_s(r.support[i].name,_countof(r.support[i].name),_TRUNCATE,L"%ls",SupportCallName(i));
-        r.support[i].icon=SupportCallIcon(i);r.support[i].variant=SupportCallVariant(i);
+        r.support[i].icon=SupportCallIcon(i);r.support[i].variant=SupportCallVariant(i);r.support[i].allowed=!SupportCallForbidden(i);
     }
     r.supportReady=SupportCallReadiness();
     SupportCallStatus(r.supportStatus,_countof(r.supportStatus));

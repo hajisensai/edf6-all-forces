@@ -1,6 +1,7 @@
 """Optic resource/transaction regressions; --game also checks actual Root.cpk models."""
 from pathlib import Path
 import copy
+from dataclasses import replace
 import math
 import struct
 import sys
@@ -176,7 +177,9 @@ class RealModels(unittest.TestCase):
     def setUpClass(cls):
         cls.game = rootcpk.default()
         cls.models = []
-        for spec in optics.MODELS:
+        # The optic markers alone: the seats' cockpits grafted into the same models add their own geometry and
+        # textures (checked by tests/cockpit_build_test.py), and cockpit-only models have no optic to check.
+        for spec in (replace(s, cockpits=()) for s in optics.MODELS if s.lenses):
             raw = cls.game.read('OBJECT', spec.stem+'.MRAB')
             old_arc = rab_read(raw)
             old = mdb_read(next(f for f in old_arc.files if f.name.lower() == spec.stem.lower()+'.mdb').data)
@@ -237,7 +240,8 @@ class RealModels(unittest.TestCase):
 
     def test_real_holder_ancestry_selects_only_its_own_optic(self):
         expected = {'V505_TANK': ['vc_optic_00'], 'V601_TANK': ['vc_optic_00'],
-                    'VEHICLE403_TANK': [None, 'vc_optic_01', 'vc_optic_02'],
+                    'V505_TANK_EDF6BENEFITS': ['vc_optic_00'], 'VEHICLE401_STRIKER': ['vc_optic_00'],
+                    'VEHICLE403_TANK': ['vc_optic_00', 'vc_optic_01', 'vc_optic_02'],
                     'VEHICLE404_BIGTANK': ['vc_optic_00', 'vc_optic_01', 'vc_optic_02', None, None, None]}
         for spec, _a, _b, _old, md in self.models:
             data = self.game.read('OBJECT', spec.stem+'.SGO')

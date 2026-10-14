@@ -13,7 +13,8 @@ unsigned char* image=nullptr;Config config{};PlayerFix player{{0,0,0},2,1};
 const Config& Cfg() noexcept {return config;}
 bool testOnline=false;ULONGLONG fixtureMs=1000;
 support::Environment missionEnvironment=support::Environment::normal;
-support::Policy SupportMissionPolicy() noexcept {return {missionEnvironment,false};}
+bool missionUnderground=false;
+support::Policy SupportMissionPolicy() noexcept {return {missionEnvironment,missionUnderground};}
 bool InSession() noexcept {return testOnline;}
 bool OnlineHostOnly() noexcept {return true;}
 ULONGLONG GameMs() noexcept {return fixtureMs;}
@@ -961,10 +962,29 @@ int main() {
     ResetSupportDispatch();fixtureMs+=40000;made=0;
     check(SupportRescueAt(sea,note,128) && made==3,"a mission that forbids external air support still gets its rescue");
     {SupportPlan rescuePlan=deployments[0].plan;check(Validate(rescuePlan),"and a peer validates it there");}
-    check(SupportCallAt(0,target,note,128),"a map air call there is queued");
-    SupportDispatchTick();
-    check(made==3 && std::wcsstr(status,L"本关限制"),"and still refused by the mission's rule");
+    // The mission's rule refuses a map call at once (SupportCallForbidden): nothing queued, planned or made.
+    check(!SupportCallAt(0,target,note,128) && !offlinePending && made==3 && std::wcsstr(status,L"本关限制"),
+          "a map air call there is refused at once by the mission's rule");
+    check(SupportCallForbidden(0) && !SupportCallForbidden(AirCount()) && !SupportCallForbidden(AirCount()+1),
+          "NO_SUPPORT: the air call forbidden, the infantry not");
     missionEnvironment=support::Environment::normal;
+    // Underground (the user, 2026-10-14: 「只留步兵+钻地车」): only soldiers; the aircraft, the support hulls, the
+    // transports, the airdrops and the submarine carrier all refused at once, said as underground.
+    missionUnderground=true;
+    ResetSupportDispatch();fixtureMs+=40000;made=0;
+    {
+        bool othersForbidden=true;
+        for(int i=0;i<SupportMenuCount();++i)
+            if(!InfantryCatalog(static_cast<std::uint32_t>(i)))othersForbidden=othersForbidden && SupportCallForbidden(i);
+        check(othersForbidden && !SupportCallForbidden(AirCount()) && !SupportCallForbidden(AirCount()+1),
+              "underground every map call but the infantry is forbidden");
+        check(SupportCallForbidden(16) && !SupportCallForbidden(SupportRescueCatalog()),"the submarine carrier too; the rescue is not the map's");
+    }
+    check(!SupportCallAt(0,target,note,128) && !offlinePending && std::wcsstr(status,L"地下"),"an air call underground: refused, said why");
+    check(!SupportCallAt(GroundStart(),target,note,128) && !offlinePending && std::wcsstr(status,L"地下"),"a tank underground: refused");
+    check(SupportCallAt(AirCount(),target,note,128) && offlinePending,"the infantry underground: planned");
+    missionUnderground=false;
+    ResetSupportDispatch();fixtureMs+=40000;made=0;
     // Takeoff from the carrier's deck (2026-10-10, the user: 「能从机场起飞就从机场起飞吧」): the deck spot nearest the
     // swimmer, moved into the deck, handed to the takeoff planner; the hull made on it.
     ResetSupportDispatch();fixtureMs+=40000;made=0;carrierOut=true;takeoffSpots=-1;

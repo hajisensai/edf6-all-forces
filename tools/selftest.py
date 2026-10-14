@@ -2135,7 +2135,9 @@ def aim_lines_hide_real_crews() -> None:
     crew, npcai = src('src/crew.cpp'), src('src/npcai.cpp')
     aim = crew.split('void AimLines(', 1)[1].split('\n}\n', 1)[0]
     holder = crew.split('aimline::Holder LineHolder(', 1)[1].split('\n}\n', 1)[0]
-    assert 'aimline::Want(LineHolder(seat),' in aim and 'npcDriven=NpcDriver(vehicle)' in aim, 'AimLines: holder by NpcInSeat'
+    assert 'aimline::Want(LineHolder(seat),ownSight)' in aim, 'AimLines: holder by NpcInSeat'
+    want = src('src/aim_line_want.h').split('constexpr LineWant Want(', 1)[1].split('\n}\n', 1)[0]
+    assert 'case Holder::empty: return LineWant::hide;' in want, 'an empty seat hides its line whoever drives (2026-10-14)'
     assert 'NpcInSeat(seat)' in holder and 'Rider::dummy' not in aim, 'LineHolder: an NPC is NpcInSeat, not the Dummy alone'
     driver = npcai.split('bool NpcDriver(', 1)[1].split('\n}\n', 1)[0]
     assert 'NpcInSeat(' in driver, 'NpcDriver is NpcInSeat of seat 0 (one test of "an NPC is there")'

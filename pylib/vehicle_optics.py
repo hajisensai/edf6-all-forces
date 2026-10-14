@@ -28,6 +28,10 @@ class Lens:
     material: str = ''
     faces: tuple[int, ...] = ()
     camera: str = ''
+    # A window set at an angle to the bore (a turret dome's vision block, its pane on a facet of the dome): the
+    # marker's origin is still the pane's centroid, its +z the parent bone's own +z (the turret's bore line), not the
+    # pane's normal, which only has to face the front (within 37 degrees of it). The runtime reads only the origin.
+    bore: bool = False
 
 
 @dataclass(frozen=True)
@@ -43,13 +47,24 @@ MODELS = (
           (Lens('vc_optic_00', 'cannon_main', 'Light02'),)),
     Model('V601_TANK', '40b34d84fe525dc29553132e02afcdd5af7a860f300a24fe526a12a8269a8935',
           (Lens('vc_optic_00', 'cannon_main', 'v601_body', tuple(range(475, 483))),)),
+    # E551 (EDF6 preorder paint): the same turret geometry and Light02 periscope pane as V505_TANK.
+    Model('V505_TANK_EDF6BENEFITS', '430b46f3686ab37283e4dabbb9a2a39741553db397184c314f572a7a2a65fe2f',
+          (Lens('vc_optic_00', 'cannon_main', 'Light02'),)),
+    # Blacker main gun: the left (+x, the gunner's side) vision block on the turret dome's roof edge, Material4
+    # object/mesh 2/0 triangles 1586-1587 (its pane: the atlas's framed silver block at uv (0.23-0.28, 0.33-0.35)),
+    # on the turret's yaw bone; the pane faces 30 degrees outboard of the bore, so the marker looks along the bore.
     Model('VEHICLE403_TANK', '6de3f5b56bc7acb0d80b2d05a395d9ab4970a931f9966f69cb511055a9cf1baa',
-          (Lens('vc_optic_01', 'MachineGun_A_aim', camera='カメラ２'),
+          (Lens('vc_optic_00', 'cannon_main', 'Material4', (1586, 1587), bore=True),
+           Lens('vc_optic_01', 'MachineGun_A_aim', camera='カメラ２'),
            Lens('vc_optic_02', 'MachineGun_B_aim', camera='カメラ３'))),
     Model('VEHICLE404_BIGTANK', '23cfe876e973a16b46a41e40eb8c78eac363f1593af2f5d385545c270a055753',
           (Lens('vc_optic_00', 'cannon_aim', 'barbette8', (768, 769)),
            Lens('vc_optic_01', 'subCannon_A_roll', 'barbette8', (1220, 1221, 1222, 1223)),
            Lens('vc_optic_02', 'subCannon_B_roll', 'barbette8', (3100, 3101, 3102, 3103)))),
+    # Grape remote turret: the sight head's window on the turret roof (the cylinder left of the gun, its tinted pane
+    # at uv (0.973-0.991, 0.522-0.555)), Material6 object/mesh 0/3 triangles 4905-4906, on the turret's yaw bone.
+    Model('VEHICLE401_STRIKER', 'f54ebc238331b9b357ee6b01ad74ec8f4d442695a3db66bfeea69ff5f81fe0f9',
+          (Lens('vc_optic_00', 'Battery', 'Material6', (4905, 4906)),)),
 )
 
 
@@ -134,7 +149,7 @@ def surface(md: Mdb, lens: Lens):
     total = sum(t[3] for t in faces)
     centre = tuple(sum(sum(p[k] for p in t[1])/3*t[3] for t in faces)/total for k in range(3))
     normal = unit(tuple(sum(t[2][k] for t in faces) for k in range(3)))
-    if normal[2] < .95 or total < .005:
+    if normal[2] < (.8 if lens.bore else .95) or total < .005:
         raise ValueError('optic surface no longer faces forward or is too small')
     return centre, normal
 
@@ -225,6 +240,8 @@ def mark_model(md: Mdb, spec: Model, sgo_data: bytes) -> Mdb:
             frame = mmul(camera_local(sgo_data, lens), world[parent])
         else:
             eye, forward = surface(md, lens)
+            if lens.bore:
+                forward = unit(tuple(world[parent][8:11]))
             right = unit(cross(tuple(world[parent][4:7]), forward))
             up = cross(forward, right)
             frame = [*right, 0., *up, 0., *forward, 0., *eye, 1.]

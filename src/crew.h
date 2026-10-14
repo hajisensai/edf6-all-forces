@@ -160,6 +160,7 @@ struct Config {
     int playerJetHailKey=0x48;      // ...and this key calls the nearest one down to them ('H'; 0: off)
     bool gunshipBoardGunner=false;  // the gunship's board button takes its gunner seat (off: its pilot seat; playerjet_crew.inc)
     int gunshipGunnerKey=0x56;      // ...the other seat while this key is held ('V'; 0: none)
+    int gunshipGatlingKey=0x02;     // at the gun, the gatling while this key is held (the right mouse button; pad RB; 0: none)
     bool jetSound=true;             // the jets' engine sound (jetsound.cpp)
     bool jetEntrySmoke=true;        // a called jet arriving trails smoke from its exhausts (booster.cpp JetSmoke)
     float jetSoundVolume=1.0f;      // ...its volume, times the game's own for that sound
@@ -995,8 +996,9 @@ bool PlayerGunnerOrder(const void* vehicle,GunnerOrder* out) noexcept;
 // guns there to switch between (a bit each, 1 << GunnerGun; the shells always). False with the player not at a gunship's gun.
 enum class GunnerGun : int { shells, cannon, gatling, count };
 // zoom: the sight's magnification (sightzoom.cpp; 1 none).
+// keys: the rider plays on the keyboard and mouse (the controls row names their keys).
 struct GunnerReadout { float sight[3]; bool ground,inReach,ready; float range,wait; float centre[3]; bool centred; GunnerGun gun; unsigned guns;
-                       float zoom; };
+                       float zoom; bool keys; };
 bool PlayerGunnerHud(GunnerReadout* out) noexcept;
 // The gunship gunner's seat camera (playerjet_crew.inc GunnerLook): from turretcam.cpp's native Type-1 seat camera hook,
 // the eye and look-at for the local player at the gun; false for any other seat (the stock camera stays).

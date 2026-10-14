@@ -143,7 +143,7 @@ volatile LONG inputsHooked=0;      // EnsureInputs has run (once)
 // is never handed to another vehicle's line at a reused address and never overwritten while still owed.
 constexpr std::size_t kWeaponAimLine=0x1638,kAimLineSegments=0x130;
 constexpr unsigned kAimLineVtable=0x17E2418;
-constexpr int kLinesPerVehicle=12;
+constexpr int kLinesPerVehicle=32;   // every empty seat's lines are hidden too (aim_line_want.h): room for all of them
 struct HiddenLine { const unsigned char* line; std::int32_t segments; };
 
 struct State {
@@ -299,12 +299,11 @@ void AimLines(unsigned char* vehicle) noexcept {
     State* const st=FindState(vehicle);
     if(!st)return;
     const unsigned count=SeatCount(vehicle);
-    const bool npcDriven=NpcDriver(vehicle);
     const bool enabled=Cfg().enabled;
     const bool ownSight=enabled && (PlayerJetOwnSight(vehicle) || PlayerHeliOwnSight(vehicle) || PlayerStockOwnSight(vehicle));
     for(unsigned i=0;i<count && i<16;++i) {
         auto seat=SeatAt(vehicle,i);
-        const LineWant want=enabled ? aimline::Want(LineHolder(seat),npcDriven,ownSight) : LineWant::show;
+        const LineWant want=enabled ? aimline::Want(LineHolder(seat),ownSight) : LineWant::show;
         const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
         const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
         if(want==LineWant::keep || n>16 || !Readable(holders,n*8))continue;

@@ -322,6 +322,7 @@ def vehicle_sgo(template: bytes, call: Call, tier: tuple[float, float], *, fallb
     voice lines]; `resource` preloads the same paths."""
     doc = dsgo.parse(template)
     r = doc.root
+    r.set('use_underground', 1.0 if call.underground else 0.0)   # calls.Call.underground: the drill tank's alone
     r.get('ReloadTime').items[0] = float(call.reload)
     req = r.get('Ammo_CustomParameter').items[4]
     stock_vehicle = req.items[2]

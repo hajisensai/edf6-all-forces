@@ -10,7 +10,9 @@ OBJECT/<STEM>.MRAB kept under --out (reused by later runs: --rebuild makes it ag
 cockpits.graft_files as the generator does it: kit and fit changes show without rebuilding the generator's output.
 
     python tools/cockpit_preview.py VEHICLE403_TANK [--out tmp/cockpit_preview] [--size 1280x720] [--fov 70]
-    python tools/cockpit_preview.py EDF6VC_INTERCEPTOR --generator make_jets [--rebuild] [--seat 0]
+    python tools/cockpit_preview.py EDF6VC_INTERCEPTOR --generator make_jets [--rebuild] [--seat 0] [--around]
+        --around: each seat's view also turned down and to the sides (AROUND: <stem>_seat<n>_<name>.png), where a
+        cockpit without its floor or walls shows the world through the hull
     python tools/cockpit_preview.py EDF6VC_GUNSHIP --stock-model BOMBER401.MRAB
         a stem fitted for a model a generator is to make as a copy of a stock one (Root.cpk's OBJECT/<that>), grafted
         as graft_files would graft the copy
@@ -30,6 +32,12 @@ import cockpits  # noqa: E402
 import rootcpk  # noqa: E402
 import vehicle_optics as optics  # noqa: E402
 from mdb import bind_world, mdb_read, rab_read  # noqa: E402
+
+
+# The seat's view turned (yaw left, pitch up, degrees: cabin_view.py --turn): straight down, down past each knee,
+# out each side under the canopy's sill, back down over each shoulder.
+AROUND = (('down', 0, -85), ('down_left', 50, -50), ('down_right', -50, -50), ('left', 90, -30),
+          ('right', -90, -30), ('back_left', 150, -40), ('back_right', -150, -40))
 
 
 def render(archive: str, model: str, out: str, extra: list[str]) -> None:
@@ -84,6 +92,7 @@ def main() -> int:
     ap.add_argument('--stock-model', help="Root.cpk's OBJECT/<file> as the model the stem's generator makes")
     ap.add_argument('--seat', type=int, action='append', help='only these seats (and no outside views)')
     ap.add_argument('--no-outside', action='store_true')
+    ap.add_argument('--around', action='store_true', help='each seat also looking down and to the sides (AROUND)')
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     game = rootcpk.Game(args.game)
@@ -120,6 +129,9 @@ def main() -> int:
                ['--bone', marker, '--eye-local', '0,0,0', '--cull', *common])
         render(archive, model, os.path.join(args.out, f'{stem}_seat{fit.seat}_inside.png'),
                ['--bone', marker, '--eye-local', '0,0,0', '--mark-back', *common])
+        for view, yaw, pitch in AROUND if args.around else ():
+            render(archive, model, os.path.join(args.out, f'{stem}_seat{fit.seat}_{view}.png'),
+                   ['--bone', marker, '--eye-local', '0,0,0', f'--turn={yaw},{pitch}', '--cull', *common])
     if args.seat or args.no_outside:
         return 0
     size, look = (outside_size(md) if args.generator or args.stock_model else (12.0, 1.5))

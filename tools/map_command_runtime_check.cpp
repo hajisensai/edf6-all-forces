@@ -17,6 +17,8 @@ const wchar_t* SupportCallName(int) noexcept { return L"Support"; }
 SupportIcon SupportCallIcon(int) noexcept { return SupportIcon::jet; }
 SupportVariant SupportCallVariant(int) noexcept { return SupportVariant::none; }
 SupportReadiness SupportCallReadiness() noexcept { return {SupportReady::ready,0}; }
+int forbiddenEntry=-1;   // the entry the stub mission forbids (underground: an aircraft), -1 none
+const wchar_t* SupportCallForbidden(int index) noexcept { return index==forbiddenEntry ? L"underground: soldiers only" : nullptr; }
 int supportCalls=0,supportChosen=-1;float supportTarget[3]{};SupportLoadout supportLoad{};
 bool SupportCallComposedAt(int index,const float* target,const SupportLoadout* load,wchar_t* note,std::size_t capacity) noexcept {
     ++supportCalls;supportChosen=index;std::memcpy(supportTarget,target,12);supportLoad=load ? *load : SupportLoadout{};
@@ -666,6 +668,19 @@ void RtsClicks() noexcept {
     Check(supportCalls==1 && supportChosen==2 && game.armedSupport<0 && game.sel.Has(squadObj),
           "armed, a left click on the map calls that support there, the selection kept");
     Check(supportLoad.count==0,"a support with no seats is called with no composed load");
+    // One the mission forbids (the user, 2026-10-14: underground only soldiers): published dimmed, its click says why and
+    // arms nothing, so no map click can call it.
+    {
+        forbiddenEntry=2;supportCalls=0;
+        MapCommandSupportButtons(rows,entries,2);
+        in.dx=(100.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(243.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);
+        in.dx=in.dy=0.0f;
+        left();
+        MapCommandReadout rf{};
+        Check(game.armedSupport<0 && PlayerMapCommands(&rf) && !rf.support[2].allowed && rf.support[0].allowed &&
+              std::wcsstr(game.note,L"underground") && !supportCalls,"a support the mission forbids: dimmed, its click says why, not armed");
+        forbiddenEntry=-1;
+    }
     // The composition panel (the user, 2026-10-09: "支援栏是断剑那种，先点载具，然后选里面的人并且可以点多次，直到座位满"; a click a
     // whole squad): a support with seats (the stub's entry 1: eight) armed opens it from its preset (one squad); a kind's
     // click adds a squad, none past the seats; a squad's click takes it out; the left click on the map sends the load.

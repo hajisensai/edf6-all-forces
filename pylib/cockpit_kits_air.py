@@ -8,11 +8,16 @@ tools/prep_cockpit_air.py to what the seated eye sees (no crew figures, no canop
 stored in the eye's frame in <model dir>/cockpits/parts/<asset>/cockpit.glb with their textures (credits:
 <model dir>/cockpits/CREDITS_air.txt).
 
-    heli_gunship      an attack helicopter's cockpit (V506 / V602 / 409): an AH-64E's front station (its canopy
-                      frame, glare shield, the two MFDs, the TEDAC on its stalk, the up-front display, the side
-                      consoles, the floor and controls); the rear (pilot's) station would look through the front
-                      canopy's frame posts. Screens: the left MFD 'flight', the right 'weapons', the TEDAC 'map', the
-                      up-front display 'status'; the helmet's display (IHADSS) the 'hud', no combiner glass in the view
+    heli_gunship      an attack helicopter's cockpit (V506 / V602 / 409): War Thunder's AH-64A front (copilot /
+                      gunner) station (the game's own model; the user, 2026-10-14: "座舱和模型干脆直接也搬战雷的吧"): its
+                      canopy frame, glare shield, the TADS sight's hood on its stalk, the instrument panel, the side
+                      consoles, the seat and floor. Screens: the TADS hood's face 'weapons', the panel under it on the
+                      stalk 'status', the switch panel left of it 'flight'; the helmet's display (IHADSS) the 'hud',
+                      no combiner glass in the view
+    heli_gunship_pilot  the same helicopter's rear (pilot's) station, looking over the front station: its video
+                      display 'flight', the panel left of it 'weapons', the lower right panel 'status', the IHADSS
+                      'hud'. No stock gunship has a second seat (their one seat flies and aims: heli_gunship, the
+                      clearer view), so no stock fit uses it yet
     heli_utility      a transport's cockpit (410): a UH-60M's pilot station (the right seat): the four-MFD panel
                       across the cockpit, the centre console, the overhead frame, the copilot's seat beside. Screens:
                       the pilot's outer MFD 'flight', his inner one 'map', the copilot's inner one 'status'
@@ -25,7 +30,12 @@ stored in the eye's frame in <model dir>/cockpits/parts/<asset>/cockpit.glb with
                       them; they wait for a transport with real door gunners
 
 A real cockpit is scaled about the eye to the room the vehicle has round it (cockpits.clearance): from the seat a
-scaled cockpit looks the same (every part keeps its direction from the eye), only nearer. The scale is the one that
+scaled cockpit looks the same (every part keeps its direction from the eye), only nearer. Under its canopy's sill
+(RealCockpit.sill, measured on the model: the lowest edge of its side and front glass seen from the eye) a real
+cockpit is a closed tub (cockpit_tub.tub: a floor and walls on the room's box, their corners pulled toward the eye
+where a narrowing hull would show them, cockpits.Kit.conform), so looking down the eye never sees the world through
+the hull the game does not draw from inside; the model's own glass under the sill (the UH-60M's chin windows at the
+pilot's feet) stays a window (Kit.windows: the tub leaves it open, cockpits.leaks counts it as a view). The scale is the one that
 keeps it inside the room left, right, up and down; ahead and behind, what is past the room is left out (the nose
 beyond the glare shield, the seat's back). The screens (cockpits.Screen) sit on the model's displays, measured on it.
 
@@ -45,6 +55,7 @@ import cockpits
 import obj_model as om
 from cockpit_room import TEX, Cabin, _room
 from cockpit_shapes import basis, box, cylinder, frame, merge, panel, quad
+from cockpit_tub import TUB_TEXTURE, tub
 from cockpits import Kit, KitMaterial, Screen
 
 Vec3 = tuple[float, float, float]
@@ -164,22 +175,29 @@ class RealCockpit:
     screens: tuple[tuple[str, Vec3, Vec3, float, float], ...]
     least: Cabin
     helmet_hud: bool = False
+    sill: float | None = None     # the canopy's sill (Kit.sill): under it a closed tub (cockpit_tub) less the glass
 
 
 REAL: dict[str, RealCockpit] = {
+    # War Thunder's AH-64A (tools/prep_cockpit_air.py WT_ASSETS), its displays measured by casting rays from the eye.
     'heli_gunship': RealCockpit(
-        'parts/sf-ah64e-cpg/cockpit.glb',
-        (('flight', (0.3406, -0.3964, 0.5635), (-0.173, 0.253, -0.952), 0.155, 0.155),
-         ('weapons', (-0.3361, -0.3949, 0.5538), (0.173, 0.256, -0.951), 0.155, 0.155),
-         ('map', (-0.0185, -0.1989, 0.2964), (0.0, 0.39, -0.921), 0.13, 0.13),
-         ('status', (0.3101, -0.1984, 0.51), (-0.301, 0.309, -0.902), 0.155, 0.075)),
-        {'left': 0.25, 'right': 0.25, 'up': 0.2, 'down': 0.5, 'ahead': 0.6, 'back': 0.15}, helmet_hud=True),
+        'parts/wt-ah64a-cpg/cockpit.glb',
+        (('weapons', (0.041, -0.305, 0.40), (0.0, 0.373, -0.928), 0.16, 0.10),
+         ('status', (0.031, -0.445, 0.397), (0.0, 0.639, -0.769), 0.10, 0.05),
+         ('flight', (0.40, -0.575, 0.755), (0.0, -0.075, -0.997), 0.18, 0.14)),
+        {'left': 0.25, 'right': 0.25, 'up': 0.2, 'down': 0.5, 'ahead': 0.6, 'back': 0.15}, helmet_hud=True, sill=-43.0),
+    'heli_gunship_pilot': RealCockpit(
+        'parts/wt-ah64a-pilot/cockpit.glb',
+        (('flight', (0.0, -0.40, 0.505), (0.0, 0.098, -0.995), 0.12, 0.075),
+         ('weapons', (0.235, -0.41, 0.508), (0.0, 0.098, -0.995), 0.13, 0.07),
+         ('status', (-0.356, -0.585, 0.487), (0.0, 0.099, -0.995), 0.11, 0.09)),
+        {'left': 0.25, 'right': 0.25, 'up': 0.2, 'down': 0.5, 'ahead': 0.6, 'back': 0.15}, helmet_hud=True, sill=-49.0),
     'heli_utility': RealCockpit(
         'parts/sf-uh60m-pilot/cockpit.glb',
         (('flight', (-0.0952, -0.389, 0.6856), (0.036, 0.0, -0.999), 0.19, 0.115),
          ('map', (0.1846, -0.3954, 0.7005), (0.036, 0.0, -0.999), 0.19, 0.125),
          ('status', (0.6874, -0.3895, 0.7004), (-0.035, 0.0, -0.999), 0.19, 0.125)),
-        {'left': 0.3, 'right': 0.2, 'up': 0.2, 'down': 0.5, 'ahead': 0.6, 'back': 0.15}),
+        {'left': 0.3, 'right': 0.2, 'up': 0.2, 'down': 0.5, 'ahead': 0.6, 'back': 0.15}, sill=-40.0),
 }
 SCALED_BY = ('left', 'right', 'up', 'down')   # the sides a real cockpit is scaled to fit; ahead and back it is cut
 
@@ -190,9 +208,10 @@ def _srgb(base: tuple[float, ...]) -> tuple[int, int, int]:
 
 @functools.lru_cache(maxsize=None)
 def _real_mesh(asset: str) -> tuple[tuple[tuple[str, KitMaterial, np.ndarray, np.ndarray, np.ndarray, np.ndarray], ...],
-                                    tuple[tuple[str, float], ...]]:
+                                    tuple[tuple[str, float], ...], np.ndarray]:
     """A prepared cockpit (cockpit.glb in the eye's frame): per material its key, KitMaterial (its PNG beside the
-    file, else its colour), positions, normals, UVs, triangles; and how far it reaches each way from the eye."""
+    file, else its colour), positions, normals, UVs, triangles; how far it reaches each way from the eye; its windows'
+    glass (n, 3, 3: the asset's extras, tools/prep_cockpit_air.py glass_of)."""
     import gltf
     path = os.path.join(cockpits.asset_root(), asset)
     if not os.path.isfile(path):
@@ -214,14 +233,15 @@ def _real_mesh(asset: str) -> tuple[tuple[tuple[str, KitMaterial, np.ndarray, np
     p = s.positions
     reach = (('left', p[:, 0].max()), ('right', -p[:, 0].min()), ('up', p[:, 1].max()), ('down', -p[:, 1].min()),
              ('ahead', p[:, 2].max()), ('back', -p[:, 2].min()))
-    return tuple(out), tuple((side, float(v)) for side, v in reach)
+    glass = np.asarray(s.extras.get('glass', []), dtype=np.float64).reshape(-1, 3, 3)
+    return tuple(out), tuple((side, float(v)) for side, v in reach), glass
 
 
 def _real(cabin: Cabin, name: str) -> Kit:
     """The real cockpit REAL[name] scaled about the eye to fit the room left, right, up and down, cut to it ahead and
     behind (a triangle not wholly inside is left out), its screens on its displays."""
     spec = REAL[name]
-    meshes, reach = _real_mesh(spec.asset)
+    meshes, reach, glass = _real_mesh(spec.asset)
     ext = dict(reach)
     r = _room(cabin, ext, spec.least, name)
     k = min(1.0, *(r[side] / ext[side] for side in SCALED_BY))
@@ -247,11 +267,21 @@ def _real(cabin: Cabin, name: str) -> Kit:
     if spec.helmet_hud:
         _helmet_hud(screens)
     mats.update(_materials('screen'))
-    return Kit(parts, mats, screens=tuple(screens))
+    windows: tuple = ()
+    if spec.sill is not None:
+        windows = tuple(tuple(tuple(map(float, c)) for c in t) for t in glass * k)
+        parts.append(tub(lo, hi, spec.sill, glass * k))
+        mats['tub'] = KitMaterial(TEX.format(TUB_TEXTURE))
+    return Kit(parts, mats, screens=tuple(screens), sill=spec.sill, windows=windows,
+               conform=frozenset({'tub'}) if spec.sill is not None else frozenset())
 
 
 def heli_gunship(cabin: Cabin) -> Kit:
     return _real(cabin, 'heli_gunship')
+
+
+def heli_gunship_pilot(cabin: Cabin) -> Kit:
+    return _real(cabin, 'heli_gunship_pilot')
 
 
 def heli_utility(cabin: Cabin) -> Kit:
@@ -367,6 +397,7 @@ def heli_door_right(cabin: Cabin) -> Kit:
 
 KITS: dict = {
     'heli_gunship': heli_gunship,
+    'heli_gunship_pilot': heli_gunship_pilot,
     'heli_utility': heli_utility,
     'heli_door_left': heli_door_left,
     'heli_door_right': heli_door_right,

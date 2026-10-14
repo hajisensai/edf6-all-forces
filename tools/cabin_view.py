@@ -4,6 +4,9 @@ only --out.
 
     python tools/cabin_view.py ARCHIVE MODEL.mdb --eye x,y,z --look x,y,z --out out.png
         [--bone NAME --eye-local x,y,z]   eye = eye_local x the bone's bind world; no --look: along the bone's +z row
+        [--turn yaw,pitch]                with --bone and no --look: the view turned from the bone's +z row, degrees
+                                          (yaw toward its +x, the left; pitch toward its +y), the camera's up turned
+                                          with it (looking straight down, the bone's +z is the top of the picture)
         [--up x,y,z | --bone-up]          the camera's up (world +y by default; --bone-up: the bone's +y row, so it rolls)
         [--fov 70] [--size 1280x720] [--near 0.02] [--cull | --mark-back] [--no-ground]
         [--pose "bone=axis:deg,..."]      the main model's pose, as pylib/model_view.py --pose
@@ -276,6 +279,15 @@ def sample(img: np.ndarray, uv: np.ndarray) -> np.ndarray:
     return ((img[y0, x0] * (1 - fx) + img[y0, x1] * fx) * (1 - fy) + (img[y1, x0] * (1 - fx) + img[y1, x1] * fx) * fy)
 
 
+def turned(m: np.ndarray, yaw: float, pitch: float) -> tuple[np.ndarray, np.ndarray]:
+    """The bone `m`'s view (its +z row) turned `yaw` degrees toward its +x and `pitch` toward its +y, and the camera's
+    up turned with it (unit vectors, world space)."""
+    left, up, ahead = (m[k, :3] / np.linalg.norm(m[k, :3]) for k in range(3))
+    y, p = math.radians(yaw), math.radians(pitch)
+    flat = math.cos(y) * ahead + math.sin(y) * left
+    return math.cos(p) * flat + math.sin(p) * up, -math.sin(p) * flat + math.cos(p) * up
+
+
 def render(scene: Scene, eye: np.ndarray, look: np.ndarray, up: np.ndarray, fov: float, w: int, h: int, near: float,
            cull: bool, mark_back: bool = False) -> tuple[Image.Image, dict]:
     """The frame from `eye` towards `look`, and counts/timings for the label."""
@@ -381,6 +393,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument('--eye-local', type=vec3, default=np.zeros(3))
     ap.add_argument('--up', type=vec3, default=np.array([0.0, 1.0, 0.0]))
     ap.add_argument('--bone-up', action='store_true', help="the camera's up is the bone's +y row")
+    ap.add_argument('--turn', help="yaw,pitch degrees from the bone's +z row (with --bone, no --look)")
     ap.add_argument('--fov', type=float, default=70.0, help='vertical, degrees')
     ap.add_argument('--size', default='1280x720')
     ap.add_argument('--near', type=float, default=0.02)
@@ -406,6 +419,11 @@ def main(argv: list[str]) -> int:
         eye = eye[:3]
         look = a.look if a.look is not None else eye + m[2, :3] / np.linalg.norm(m[2, :3])
         up = m[1, :3] / np.linalg.norm(m[1, :3]) if a.bone_up else a.up
+        if a.turn:
+            if a.look is not None:
+                ap.error("--turn turns the bone's own view: no --look")
+            ahead, up = turned(m, *(float(x) for x in a.turn.split(',')))
+            look = eye + ahead
     else:
         if a.eye is None or a.look is None:
             ap.error('give --eye and --look, or --bone [--eye-local] [--look]')
