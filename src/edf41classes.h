@@ -25,10 +25,7 @@ bool AddFactory(const wchar_t* className,CreateFn create) noexcept;
 bool Ready() noexcept;     // the fingerprints matched and the registration hook is in
 
 // ---- cloned vtables ---------------------------------------------------------------------------------------------
-constexpr int kSlotDtor=0,kSlotUpdate=5,kSlotMessage=9,kSlotAccept=16,kSlotDamaged=18;   // 16 / 18: PRIMITIVES.md 2c
-// Slot 22 (+0xB0) bool TeamAllowed(obj, team): SetTeam 0x54EE70 changes nothing when it answers false. EventAnimationObject's
-// (0x5B6BA0) allows only team 6, so a clone that is to be an enemy (CreateEnemy's SetTeam(1), a part's) replaces it (0x54ABD0: true).
-constexpr int kSlotTeamAllowed=22;
+constexpr int kSlotDtor=0,kSlotUpdate=5,kSlotMessage=9;
 struct Clone {
     const char* tag;
     std::size_t vtable;            // the stock class's primary vtable (EDF.dll RVA)
@@ -188,7 +185,6 @@ bool ModelMatrix(void* object,const float* matrix) noexcept;
 // Far rendering on for an EventAnimationObject's model node (+0x5C0; 0x11B3020, the switch of the SGO's FarRender): past 1000 m
 // from the camera the near pass draws nothing. True once set (or set already); false: ask again next frame.
 bool FarRender(void* object) noexcept;
-bool Activate(void* object) noexcept;                          // 0x548D50: what a spawner / the script's "active" flag does
 
 // Weak references through the game's shared_ptr control block (use +8, weak +0xC, vtable {destroy, delete}).
 struct WeakRef { void* object=nullptr; void* control=nullptr; };

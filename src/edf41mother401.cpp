@@ -50,6 +50,7 @@ namespace {
 using namespace edf41c;
 
 constexpr int kEaoSlotCount=45;
+constexpr int kSlotAccept=16,kSlotDamaged=18;            // ApplyDamage 0x547C30: 16 bool Accept(obj, GDI*) before the HP change, 18 after
 constexpr std::size_t kRagdollAt=0xAA0;                 // EventAnimationObject's ragdoll component
 constexpr std::size_t kCasAt=0x8F0,kCasPlayerAt=0xC80;  // CAS players (+0x60 the players, 0x160 each: time +0xE8, length +0xF0)
 constexpr float kFps=60.0f;
@@ -1298,9 +1299,6 @@ void __fastcall PartDamaged(void* self,void* gdi) {
     Destroy(*p,0);
 }
 
-// slot 22: any team (EventAnimationObject's own 0x5B6BA0 allows only 6, so CreateEnemy's SetTeam(1) and the parts' would not take)
-bool __fastcall AnyTeam(void*,std::int32_t) { return true; }
-
 std::uint64_t __fastcall PartMessage(void* self,std::uint32_t msg,void* data) {
     return reinterpret_cast<MessageFn>(partClone.orig[kSlotMessage])(self,msg,data);
 }
@@ -1342,8 +1340,8 @@ bool InstallEdf41Mother401() noexcept {
     SetSlot(hullClone,kSlotAccept,reinterpret_cast<void*>(&HullAccept));
     SetSlot(partClone,kSlotAccept,reinterpret_cast<void*>(&PartAccept));
     SetSlot(partClone,kSlotDamaged,reinterpret_cast<void*>(&PartDamaged));
-    SetSlot(hullClone,kSlotTeamAllowed,reinterpret_cast<void*>(&AnyTeam));
-    SetSlot(partClone,kSlotTeamAllowed,reinterpret_cast<void*>(&AnyTeam));
+    AllowAnyTeam(hullClone);   // EventAnimationObject's slot 22 allows only team 6: CreateEnemy's SetTeam(1) and the parts' would not take
+    AllowAnyTeam(partClone);
     struct Reg { const wchar_t* name; CreateFn fn; };
     const Reg regs[]={
         {L"UfoMother401",&CreateHull},

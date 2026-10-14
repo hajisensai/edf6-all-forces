@@ -694,10 +694,9 @@ void SetSlot(Clone& c,int slot,void* fn) noexcept {
 
 // ---- more EDF6 primitives (the 401 mothership; PRIMITIVES.md 1c, 7 and docs/view-distance-re.md) --------------------------
 namespace {
-constexpr std::size_t kSkeletonFromMatrix=0x1100B90,kSetFarRender=0x11B3020,kActivate=0x548D50;
+constexpr std::size_t kSkeletonFromMatrix=0x1100B90,kSetFarRender=0x11B3020;
 constexpr Print kMorePrints[]={
     {kSkeletonFromMatrix,{0xC6,0x81,0xB0,0x00,0x00,0x00,0x01,0x0F}},{kSetFarRender,{0x44,0x8B,0x41,0x20,0x41,0x8B,0xC0,0x0F}},
-    {kActivate,{0x40,0x53,0x48,0x83,0xEC,0x20,0x80,0xB9}},
 };
 std::atomic<int> moreState{0};
 bool More() noexcept {
@@ -734,11 +733,6 @@ bool FarRender(void* object) noexcept {
     if(!*reinterpret_cast<void* const*>(node+0x10))return false;   // its Umbra object is not there yet
     At<void(__fastcall*)(void*,bool)>(kSetFarRender)(node,true);
     return (*reinterpret_cast<const std::uint32_t*>(node+0x20)&kFarBit)!=0;
-}
-bool Activate(void* object) noexcept {
-    if(!More() || !NotDeleted(object))return false;
-    At<void(__fastcall*)(void*)>(kActivate)(object);
-    return true;
 }
 
 void WeakSet(WeakRef& w,const void* object) noexcept {
