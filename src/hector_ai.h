@@ -18,6 +18,12 @@ namespace hector {
 constexpr int kArms=2;
 constexpr unsigned kArmLeft=1u,kArmRight=2u;       // PickArms' mask: arms_l is gun_control's entry 0
 
+// An address alone is not an instance: the game's weak-this control block changes on respawn/reuse.
+// A missing Hector marker must also invalidate state, even if the control block still matches.
+constexpr bool CacheMatches(const void* cachedControl,const void* liveControl,bool marked) noexcept {
+    return marked && liveControl && cachedControl==liveControl;
+}
+
 // hector_ai_setting [720, 1440, 540, 720, 150, 20, 80] of the 4.1 object, and what each arm holds.
 struct Config {
     float range[kArms]{};       // hector_weapon_range of arms_l, arms_r

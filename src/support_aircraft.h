@@ -13,6 +13,9 @@ int SupportAirCallCount() noexcept;
 const wchar_t* SupportAirCallName(int index) noexcept;
 const wchar_t* SupportAirCallKey(int index) noexcept;
 bool SupportAircraftSpec(int catalog,SupportAircraft* out) noexcept;
+// Whether call `catalog` brings the submarine carrier (no aircraft: SupportAircraftSpec is false for it; it surfaces,
+// support_call.h SupportSubCallAt).
+bool SupportSubCatalog(int catalog) noexcept;
 // `spec`: what the entry brings (its kind, and spec.count aircraft: every one's formation slot, support_entry.h
 // AirFormationSlot, is checked); the dispatcher's, so an entry the call table does not hold (the sea rescue) plans the same.
 // route->from: the lead's place IN THE AIR at the edge, at the route's height; route->heading toward the target.

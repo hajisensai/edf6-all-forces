@@ -20,8 +20,19 @@ bool ReadNativeObjectId(const unsigned char* p,unsigned char* id) noexcept {std:
 unsigned char* MissionVehicleById(const unsigned char* id) noexcept {return id && id[0]==5 && !vehicle[kDead] ? vehicle : nullptr;}
 unsigned char* PlayerHuman() noexcept {return vehicle;}
 bool SeatPoint(const unsigned char*,unsigned seat,float* at,float* reach) noexcept {at[0]=static_cast<float>(seat*2);at[1]=at[2]=0;*reach=3;return true;}
-bool ApplySupportSoldierSpawn(const float*,bool,const unsigned char*,ObjRef* out) noexcept {
+// The crew colours (support_dispatch.cpp, stage 5): the host's variant for each crew seat, and the file a peer makes it from.
+std::uint32_t crewCatalogAsked=0;std::uint64_t crewVariant=0;bool lookHere=true;
+const wchar_t* looks[15]{};std::uint32_t resources[15]{};const wchar_t* kLookPath=L"app:/object/edf6vc_npc_rifle_1e3a8a_x.sgo";
+std::uint64_t SupportCrewVariant(std::uint32_t catalog,std::uint32_t resource) noexcept {
+    crewCatalogAsked=catalog;return IsSupportSoldierResource(resource) ? crewVariant : 0;
+}
+const wchar_t* SupportSoldierLookPath(std::uint32_t,std::uint64_t variant,bool,wchar_t*,std::size_t) noexcept {
+    return variant && (variant&kVariantApplied) && lookHere ? kLookPath : nullptr;
+}
+bool ApplySupportSoldierResource(const float*,std::uint32_t resource,const unsigned char*,bool local,ObjRef* out,const wchar_t* look) noexcept {
     if(failAt && spawned+1==failAt)return false;
+    if(local)return false;   // the mission crew is never a local-only soldier (as ApplySupportSoldierSpawn was)
+    looks[spawned]=look;resources[spawned]=resource;
     Put<void*>(people[spawned],kSelfCtrl,pctrl[spawned]);Put<int>(pctrl[spawned],8,1);
     *out=ObjRef::Of(people[spawned++]);return true;
 }
@@ -70,6 +81,23 @@ int main(){using namespace crew;image=static_cast<unsigned char*>(VirtualAlloc(n
  Reset();sessionFlag=true;Build(vehicle,&p);active=false;ApplyMissionCrewPlan(10,p,true);
  Check(unholds==0,"remote actor remains held before reliable activation");active=true;Tick(vehicle);
  Check(unholds==2 && boards==0,"remote activation releases hold without generating seat messages");
+ // Crew colours (SupportCrewColour_MISSION): each seat carries the host's look variant; a peer makes it from the file.
+ Reset();sessionFlag=true;crewVariant=LookVariant({0x1E3A8A,kStockColour})|kVariantApplied;Build(vehicle,&p);
+ Check(crewCatalogAsked==support_net::kMissionCrewCatalog && p.units[1].variant && p.units[2].variant &&
+       LookOfVariant(p.units[1].variant,nullptr),"each mission crew seat carries its colours' variant");
+ Check(ValidateMissionCrewPlan(p),"a coloured mission crew plan is accepted");
+ Reset();crewVariant=LookVariant({0x1E3A8A,kStockColour})|kVariantApplied;
+ Check(Request(vehicle,false) && spawned==2 && looks[0]==kLookPath && looks[1]==kLookPath && resources[0]==2 && resources[1]==1,
+       "offline: the leader and the member made from their coloured files, as the rifle templates' resources");
+ Reset();crewVariant=LookVariant({0x1E3A8A,kStockColour})|kVariantApplied;lookHere=false;
+ Check(Request(vehicle,false) && spawned==2 && !looks[0] && !looks[1],"a colour file missing here: the crew comes stock, never refused");
+ lookHere=true;
+ Reset();sessionFlag=true;crewVariant=LookVariant({0x1E3A8A,kStockColour});Build(vehicle,&p);
+ Check(ApplyMissionCrewPlan(11,p,true) && !looks[0],"a look the host did not apply: stock");
+ Reset();sessionFlag=true;crewVariant=0;Build(vehicle,&p);
+ Check(!p.units[1].variant && ApplyMissionCrewPlan(12,p,true) && !looks[0],"no crew colour: stock, no variant (an older host's plan)");
+ p.units[1].variant=kVariantApplied|kVariantVehicle|1;Check(!ValidateMissionCrewPlan(p),"pylons on a mission crew soldier are refused");
+ crewVariant=0;
  VirtualFree(image,0,MEM_RELEASE);std::printf("mission_crew_support: %d checks passed\n",checks);
 }
 

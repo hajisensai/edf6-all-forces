@@ -221,12 +221,15 @@ constexpr float kKeepTarget=20.0f,kOutOfReach=100000.0f;
 inline float TargetScore(float dist,float reach,bool current) noexcept {
     return dist-(current ? kKeepTarget : 0.0f)+(reach>0.0f && dist>reach ? kOutOfReach : 0.0f);
 }
-// The index of the target among `n` (aimOf(i): its lock point; isCurrent(i): it is the one held), -1 with none in scope:
-// within `scope` m of `anchor` over the ground (Horiz), ranked by TargetScore from `eye`.
-template<class AimOf,class IsCurrent>
-int PickTarget(int n,AimOf aimOf,IsCurrent isCurrent,const float* eye,const float* anchor,float scope,float reach) noexcept {
+// The index of the target among `n` (aimOf(i): its lock point; isCurrent(i): it is the one held; usable(i): its fire at
+// it not wasted, wasted_fire.h), -1 with none in scope: within `scope` m of `anchor` over the ground (Horiz), ranked by
+// TargetScore from `eye`.
+template<class AimOf,class IsCurrent,class Usable>
+int PickTarget(int n,AimOf aimOf,IsCurrent isCurrent,Usable usable,const float* eye,const float* anchor,float scope,
+               float reach) noexcept {
     int best=-1;float bestScore=0.0f;
     for(int i=0;i<n;++i) {
+        if(!usable(i))continue;
         const float* aim=aimOf(i);
         if(Horiz(anchor,aim)>scope)continue;
         const float score=TargetScore(Dist(eye,aim),reach,isCurrent(i));
@@ -371,6 +374,33 @@ inline Steer ReturnToPost(const float* pos,const float* right,const float* forwa
     }
     s.throttle=std::fabs(s.bearing)>turnOnSpot ? 0.0f : ramp;
     return s;
+}
+// --- Boarding (npcai.cpp Board) ---
+// The native trigger is a sphere of `reach` round the seat's riding point; the soldier walks to the floor `drop` m under
+// that point and the walk ends once it stands within the returned horizontal distance of the floor point. The old fixed
+// 0.5 m stop ignored the drop: with the riding point high over its floor (drop > sqrt(reach^2 - 0.25)) a walk that had
+// "arrived" 0.3-0.5 m off stood outside the sphere, the soldier waited there and the order lapsed after kBoardMs (the
+// user, 2026-10-12: "有些npc派他上车的时候有几率被卡住导致上不了车" -- the chance being where in the stop circle it
+// arrived). The stop is now the room the sphere actually leaves at that height (its feet up to kBoardFeet over the floor
+// point), kBoardShare of it: anywhere within it is inside the sphere. 0: less room than kBoardStopLeast (the floor out of
+// the sphere, or at its very rim), no stand to walk to.
+constexpr float kBoardStopMost=0.5f,kBoardStopLeast=0.1f,kBoardFeet=0.05f,kBoardShare=0.9f;
+inline float BoardStop(float drop,float reach) noexcept {
+    if(!std::isfinite(drop) || !std::isfinite(reach))return 0.0f;
+    const float up=std::fabs(drop)+kBoardFeet,room=reach*reach-up*up;
+    if(!(room>0.0f))return 0.0f;
+    const float side=std::sqrt(room)*kBoardShare;
+    return side<kBoardStopLeast ? 0.0f : side<kBoardStopMost ? side : kBoardStopMost;
+}
+
+// A board order's walk (npcai.cpp Board): `best` the nearest the soldier has been to its seat's riding point, `since`
+// when it last got `step` m nearer than that. Each frame at `off` m: a new best renews the order. Dropped (false) once
+// `window` ms passed with no such step: a soldier still walking to a seat 150 m off keeps the order however long the walk
+// takes, one held up (blocked, pulled away, fighting) gives it up.
+struct BoardWalk { float best; std::uint64_t since; };
+inline bool BoardWalking(BoardWalk& w,float off,std::uint64_t now,std::uint64_t window,float step) noexcept {
+    if(off<w.best-step){w.best=off;w.since=now;}
+    return now-w.since<=window;
 }
 // The seat-0 stick block's values for it, as 0x661020 writes them.
 inline float SteerStick(const Steer& s) noexcept { return -Clamp(s.bearing*10.0f,-1.0f,1.0f); }

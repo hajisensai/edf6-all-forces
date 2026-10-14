@@ -574,7 +574,7 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     if(!st.emptySince)st.emptySince=now;
     // Every first-use parked vehicle belongs to the waiting player, not only helicopters/Proteus.
     // An existing mission NPC is untouched above; a player must have driven seat 0 before auto-crew is eligible.
-    if(!st.playerAt)return;
+    if(!st.playerAt && !Cfg().npcCrewTest)return;   // NpcCrewTest: tests only (tests/autopilot)
     // Wait out the delay since it emptied, since a player left it and since a bump (the player is
     // walking up to the seat it reserved).
     ULONGLONG since=st.emptySince;

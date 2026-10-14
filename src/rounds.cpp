@@ -177,6 +177,8 @@ bool ReadRound(const unsigned char* w,RoundModel* out) noexcept {
     m.label=c ? c->label : "WPN";
     m.rtti=c ? c->rtti : nullptr;
     m.style=c && (c->cls==Cls::laser || c->vtable==0x179F9D8) ? WeaponStyle::laser : c && c->cls==Cls::beam ? WeaponStyle::beam : WeaponStyle::projectile;
+    // A falling effect round is a shell (reticle.h FallingEffectShell: the 601 tank's 140 mm cannon), not a beam.
+    if(c && reticle::FallingEffectShell(c->cls==Cls::beam,m.factor)){m.style=WeaponStyle::projectile;m.label="CANNON";}
     // The atomic ray cannon deliberately fires SolidBullet01 in the stock SGO.
     // Its actual weapon class, not that carrier projectile, owns the beam behavior.
     if(maserOk && At<const unsigned char*>(w,0)==image+kMaserWeaponVtable){m.style=WeaponStyle::maser;m.label="MASER";}

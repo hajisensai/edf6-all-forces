@@ -9,6 +9,8 @@ name inside the archive, CMPL-compressed like pylib/mdb_jet.py does); every othe
   EDF6VC_MULTIROLE.MRAB    BOMBER401.MRAB         bomber401.mdb    skinned (jet_gear.skin_rigid), landing gear, x 0.5
   EDF6VC_CARRIER.MRAB      V508_TRANSPORT.MRAB    v508_transport.mdb  x 1.6
   EDF6VC_DRONE.MRAB        PD607_DRONE_AIRSTRIKE.MRAB  pd607_Drone_airstrike.mdb  x 3.0, root bone renamed `mdl`, `body` levelled
+  EDF6VC_GUNSHIP.MRAB, EDF6VC_TRANSPORT_PLANE.MRAB  BOMBER401.MRAB  bomber401.mdb  x 1, skinned, nozzle bones (STOCK_COPIES:
+                           the stock geometry, for their cockpits)
 
 The fixed-wing models carry retractable landing gear (pylib/jet_gear.py, Recipe.gear): three legs grafted from a stock
 helicopter's gear, extended in the bind pose, the wheels the model's lowest points (so the grounded model stands on
@@ -536,6 +538,62 @@ def _make_model_of(game, file: str | None) -> Mdb:  # noqa: ANN001 - rootcpk.Gam
 # boxes are in the lifted frame.
 STOCK_BOMBERS: dict[str, tuple[str, str]] = {'bomber401': ('BOMBER401.MRAB', 'bomber401.mdb'),
                                              'bomber501_2': ('BOMBER501.MRAB', 'bomber501_2.mdb')}
+# The gunship's and the transport plane's own models (tools/make_jets.py: vcobjects.GUNSHIP_MODEL_FILE,
+# make_jets.TRANSPORT_PLANE_MODEL_FILE): the stock bomber401 they fly, its geometry as it is (no scale, no grounding, no
+# gear: their boxes, their collision asset (aircraft_collision's 'bomber401'), the gunship's muzzle box (make_jets
+# GUNSHIP_AIRFRAME) and their flight stay the stock model's), under names of their own so their seats' cockpits can be
+# grafted into them (cockpits.graft_files, pylib/cockpit_fits_plugin.py) while the stock bomber the airstrikes take over
+# stays as it is. Two changes, neither moving a vertex (check_stock_copy): its rigid mesh skinned (jet_gear.skin_rigid, as
+# the multirole's: a cockpit measures its room against the skinned meshes and is skinned to the body bone itself), and its
+# nozzles as bones of its own (with_nozzles, measured as tools/gen_nozzles.py measures the stock: src/nozzles_gen.h knows
+# the stock bomber401 by its bone count, 2, which the skinning and the cockpits' marker bones change, so without bones of
+# its own it would fly without its flames; src/exhaust_nozzles.h FindNozzles takes a model's own bones first).
+STOCK_COPIES: dict[str, str] = {'EDF6VC_GUNSHIP.MRAB': 'bomber401', 'EDF6VC_TRANSPORT_PLANE.MRAB': 'bomber401'}
+
+
+def stock_copy_model(src: Mdb, key: str) -> Mdb:
+    """The stock bomber `src` (STOCK_BOMBERS[key]'s model) as STOCK_COPIES makes it: skinned, its nozzle bones on."""
+    return with_nozzles(jet_gear.skin_rigid(src), exit_nozzles(src, key))
+
+
+def stock_copy(game, file: str) -> bytes:  # noqa: ANN001 - rootcpk.Game
+    """The archive STOCK_COPIES[file]: the stock bomber's archive with its model made by stock_copy_model, checked."""
+    key = STOCK_COPIES[file]
+    arc, member = STOCK_BOMBERS[key]
+    raw = game.read('OBJECT', arc)
+    src = mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == member).data)
+    out = replace_member(raw, member, mdb_write(stock_copy_model(src, key)))
+    check_stock_copy(raw, out, key)
+    return out
+
+
+def check_stock_copy(raw: bytes, arc: bytes, key: str) -> None:
+    """Re-read a STOCK_COPIES archive `arc` made of the stock archive `raw`: the same members in the same order, every one
+    but the model byte-identical; the model round-trips and carries exactly the stock's nozzles (check_nozzle_bones, the
+    exits measured on the stock model); without them its bones are the stock's two and skin_rigid's mesh bone, the stock's
+    two bound where they were, and every vertex where the stock model draws it (the same list, to 1e-5 m)."""
+    member = STOCK_BOMBERS[key][1]
+    a, b = rab_read(raw), rab_read(arc)
+    assert rab_write(b) == arc
+    assert [f.name for f in a.files] == [f.name for f in b.files], 'the members changed'
+    for fa, fb in zip(a.files, b.files):
+        if fa.name.lower() != member:
+            assert fa.stored == fb.stored, f'{fa.name} changed'
+    src = mdb_read(next(f for f in a.files if f.name.lower() == member).data)
+    data = next(f for f in b.files if f.name.lower() == member).data
+    new = mdb_read(data)
+    assert mdb_write(new) == data, 'the model does not round-trip'
+    check_nozzle_bones(new, exit_nozzles(src, key))
+    bare = strip_nozzles(new)
+    stock = [src.name_of(x.name) for x in src.bones]
+    assert [bare.name_of(x.name) for x in bare.bones] == stock + [stock[1] + '_mesh'], 'not the stock skeleton, skinned'
+    assert mesh_bone(bare) == mesh_bone(src) == 1, 'the mesh bone moved'
+    w0, w1 = bind_world(src), bind_world(bare)
+    assert all(max(abs(x - y) for x, y in zip(w0[k], w1[k])) < 1e-6 for k in range(len(w0))), 'a stock bone moved'
+    p0, p1 = bind_positions(src), bind_positions(bare)
+    assert len(p0) == len(p1) and all(max(abs(x - y) for x, y in zip(u, v)) < 1e-5 for u, v in zip(p0, p1)), 'a vertex moved'
+
+
 # Their fuselages' half widths (fuselage_box): the elevon bomber's (same mesh, x 1) and the multirole's (unscaled).
 STOCK_FUSELAGE_X: dict[str, float] = {'bomber401': 2.5, 'bomber501_2': ELEVON_FUSELAGE_X}
 FLAME_LENGTH_PER_DIAMETER = 5.0

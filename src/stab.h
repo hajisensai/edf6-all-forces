@@ -133,11 +133,15 @@ struct Hold {
 // next input step. Reconcile that actuator tracking difference in the PREVIOUS pose basis, rather
 // than treating it as another hull correction. Do not update last/seen: the following Step must still
 // compensate this frame's parent motion and apply the player's/NPC's new command independently.
+// The held line turned by `delta` rad on axis `axis` (the aim's senses), in the basis the last step aimed the gun for:
+// a turn of the axis made outside the command (Readback; another writer's, sightzoom.cpp's lay) is held from then on.
+inline void Shift(Hold& h,int axis,float delta) noexcept {
+    if(!h.live || axis<0 || axis>1 || !std::isfinite(delta) || delta==0.0f)return;
+    float ref[2];Angles(h.seen,h.ref,ref);ref[axis]+=delta;Dir(h.seen,ref,h.ref);
+}
 inline void Readback(Hold& h,const Stops& stops,int axis,float commanded,float measured) noexcept {
     if(!h.live || axis<0 || axis>1 || !std::isfinite(commanded) || !std::isfinite(measured))return;
-    const float delta=Diff(stops,measured,commanded);
-    if(delta==0.0f)return;
-    float ref[2];Angles(h.seen,h.ref,ref);ref[axis]+=delta;Dir(h.seen,ref,h.ref);
+    Shift(h,axis,Diff(stops,measured,commanded));
 }
 
 // One step after the stock one. `stops` the axes' ends, `before` / `after` the angles around the stock step (its turn

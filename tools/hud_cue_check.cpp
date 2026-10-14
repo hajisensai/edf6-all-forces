@@ -47,9 +47,36 @@ int main() {
           "laser, beam and maser are not drawn as machine-gun ammunition");
     // The stock rounds (vhud.h RoundKind: none 0, arc 1, rocket 2, homing 3).
     Check(ArmIconOf(1,false)==StoreIcon::gun && ArmIconOf(0,false)==StoreIcon::gun,"a gun's rounds");
+    Check(ArmIconOf(1,false,0,true)==StoreIcon::shell,"a gun laid shot by shot (the 601's 140 mm cannon): one shell");
+    Check(ArmIconOf(1,false,2,true)==StoreIcon::energy && ArmIconOf(3,false,0,true)==StoreIcon::aam,"  not over an energy weapon or a missile");
     Check(ArmIconOf(2,false)==StoreIcon::rocket,"rockets");
     Check(ArmIconOf(3,false)==StoreIcon::aam,"a homing missile");
     Check(ArmIconOf(1,true)==StoreIcon::bomb,"a lobbed round");
+
+    // A cell's loading bar (vhud.cpp Reload / Cycle).
+    Check(CellLoad(5,1.0f,1.8f,0.25f)==0.25f,"the next round going in: its share");
+    Check(CellLoad(5,1.0f,-1.0f,1.0f)<0.0f,"ready (or a quick gun): no bar");
+    Check(CellLoad(0,0.4f,-1.0f,1.0f)==0.4f && CellLoad(0,1.0f,-1.0f,1.0f)<0.0f,"the magazine reloading: its share; empty with no reload: no bar");
+    Check(CellLoad(5,1.0f,0.1f,1.7f)==1.0f && CellLoad(0,-0.2f,-1.0f,1.0f)==0.0f,"  kept within 0..1");
+
+    // The strip's left-to-right order by the muzzles' sides (+ left of the vehicle's middle, as the camera looks).
+    {
+        const float nix[2]={-2.1f,2.2f};   // the Nix lists its right arm's rifle first (screenshot 2026-10-12)
+        int o[2];SideOrder(nix,2,o);
+        Check(o[0]==1 && o[1]==0,"a Nix's rifles: the left arm's on the left, the right arm's on the right");
+        const float tank[5]={0.0f,0.0f,0.0f,-0.3f,1.4f};   // main gun, its two stores, the coax (0.3 m right), a left launcher
+        int t[5];SideOrder(tank,5,t);
+        Check(t[0]==4 && t[1]==0 && t[2]==1 && t[3]==2 && t[4]==3,"a tank: the launcher out on the left first, the gun's stores in their R order");
+        const float unknown[3]={0.0f,0.0f,0.0f};
+        int u[3];SideOrder(unknown,3,u);
+        Check(u[0]==0 && u[1]==1 && u[2]==2,"no muzzle read: as the seat lists them");
+    }
+
+    // The turret aim overlay follows the fire-control pick when the turret is laid by it (vhud.h sight / turret).
+    Check(TurretOverlayOwned(0,0),"the stock main gun picked: the overlay");
+    Check(TurretOverlayOwned(2,2),"a store on the main gun's holder picked (APFSDS / HE): the overlay, not only arm 0");
+    Check(!TurretOverlayOwned(3,0),"a pick the turret does not turn with (the Titan's hull gatling): none");
+    Check(!TurretOverlayOwned(-1,-1) && !TurretOverlayOwned(0,-1),"no pick, or no turret gun: none");
 
     std::printf("hud_cue_check: %d cases, %d failures\n",cases,failures);
     return failures ? 1 : 0;

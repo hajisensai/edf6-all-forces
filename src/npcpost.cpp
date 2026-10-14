@@ -30,6 +30,7 @@
 #include "online_authority.h"
 #include "memory.h"
 #include "npc_logic.h"
+#include "npc_mark.h"
 #include <cmath>
 #include <cstring>
 #include <cwchar>
@@ -60,7 +61,7 @@ constexpr int kMaxPosts=64;
 
 enum class Family : std::uint8_t { none, carBase, mech, barga };
 // wrote/last: the plugin's last write to the two channels it drives (steer / throttle, the Barga's turn / forward).
-struct Post { ObjRef ref; ULONGLONG seen,loggedAt; float at[3],home[3]; bool commanded; bool active; Command cmd; bool wrote; float last[2]; float routeArrival; };
+struct Post { ObjRef ref; ULONGLONG seen,loggedAt; float at[3],home[3]; bool commanded; bool active; Command cmd; bool wrote; float last[2]; float routeArrival; ObjRef focus{}; };
 Post posts[kMaxPosts]{};
 struct PendingPost { ObjRef ref; float at[3]; float routeArrival; };
 PendingPost pendingPosts[kMaxPosts]{};
@@ -88,7 +89,7 @@ Post* PostOf(const unsigned char* v,ULONGLONG ms) noexcept {
     }
     // After a player or script drove it, even the old spawn goal nearby is no longer its post.
     const bool resumed=slot->ref.Is(v);
-    *slot=Post{};
+    npcmark::Assign(slot->focus,{});*slot=Post{};
     slot->ref=ObjRef::Of(v);
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     const float* goal=reinterpret_cast<const float*>(v+kStockGoal);   // a CarBase's only
@@ -138,7 +139,9 @@ bool BargaWalkOk() noexcept {
 
 bool Available(const Post& p,ULONGLONG ms) noexcept {
     const auto v=static_cast<const unsigned char*>(p.ref.obj);
-    return Cfg().enabled && Cfg().customNpcAi && Cfg().tankReturnToPost && IsOnlineAuthority(v) &&
+    if(!Readable(v,kTeam+4))return false;
+    const int team=At<int>(v,kTeam);
+    return (team==0 || team==kTeamFriend || team==kTeamVehicle) && Cfg().enabled && Cfg().customNpcAi &&
         p.seen && ms-p.seen<=500 && Readable(v,kMatrix+64) && p.ref.Is(v) && !v[kDead] && FamilyOf(v)!=Family::none &&
         !At<const void*>(v,kRoute) && NpcDriver(v);
 }
@@ -154,7 +157,7 @@ bool HadRoutePost(const unsigned char* v) noexcept {
 void Relinquish(const unsigned char* v) noexcept {
     for(auto& p:posts)if(p.ref.Is(v)) {
         const ObjRef ref=p.ref;
-        p=Post{};p.ref=ref; // retain only the identity so a later NPC starts at its new position
+        npcmark::Assign(p.focus,{});p=Post{};p.ref=ref; // retain only the identity so a later NPC starts at its new position
     }
 }
 }  // namespace
@@ -169,15 +172,22 @@ namespace {
 // fills the table (0x642DBC: the container at veh+0x1FE8, data +0x1FF0, capacity +0x1FF8, size +0x2000, 16-byte rows)
 // from the SGO's `ai_attack_setting` only for a mech spawned as an AI (V504_BEGARUTA_AI has it; every _MISSION / call-in
 // SGO and every Nix SGO lack it). A player-called mech with a real NPC soldier at the wheel therefore aims, turns and
-// walks but never fires. The plugin gives such a mech the rows the stock AI version carries: one per seat-0 weapon, from
-// 0 to that weapon's own range. A table the SGO filled (size > 0) is never touched.
+// walks but never fires. The plugin gives such a mech the rows the stock AI version carries: one per weapon of every seat,
+// from 0 to that weapon's own range. Every seat, not seat 0's alone: the Proteus's AI think 0x648F70 runs the same entry
+// 0x63AC40 for seats 1..n-1 (0x649055..0x6490AA) and VEHICLE407_BIGBEGARUTA_AI's rows are seats 0, 1, 2 and 3; the
+// Proteus's _MISSION / call-in seat 0 holds no weapon (its guns and launcher are seats 1-3: vehicle_weapon_setting), so
+// seat-0 rows alone left an NPC-driven Proteus with an empty table, never firing (report #12, 2026-10-11). A table the
+// SGO filled (size > 0) is never touched.
 // The same slot 6 block also sets the fire step's aim origin, veh+0x2008 = the `spine` bone's record (0x642C1B..0x642CA8:
-// 0x11002A0 finds the index, 0x1100280 the record): with it null 0x63AED9 faults every frame. Set the same way here.
+// 0x11002A0 finds the index, 0x1100280 the record): with it null 0x63AED9 faults every frame. Set the same way here; a
+// model with no `spine` (V614_PROTEUS_MK2: body, neck; the stock never runs its AI) takes its seat-0 aim bone of the SGO's
+// begaruta_pilot_class (`neck`, then `body`) instead (kAimOriginBones).
 constexpr std::size_t kAttackTable=0x1FE8,kAttackData=0x1FF0,kAttackCap=0x1FF8,kAttackSize=0x2000;
 constexpr unsigned kAttackRead=0x63B274,kAttackRelease=0x646300,kGameNew=0x12D85B0;
 constexpr std::size_t kWeaponReach=0x224;   // npcai.cpp kArmReach
 constexpr std::size_t kAimOrigin=0x2008;
-constexpr std::uint64_t kAttackRows=16;     // the seat holder limit npcai.cpp uses
+constexpr std::uint64_t kAttackRows=16;     // the seat holder limit npcai.cpp uses (and the rows of all seats together)
+constexpr const wchar_t* kAimOriginBones[]={L"spine",L"neck",L"body"};
 const unsigned char kAttackReadSig[]={0x49,0x8B,0x9F,0xF0,0x1F,0x00,0x00,0x45,0x32,0xC0,0x49,0x8B,0x8F,0x00,0x20,0x00,0x00,
                                       0x48,0xC1,0xE1,0x04,0x48,0x03,0xCB,0x44,0x88,0x44,0x24,0x31,0x48,0x3B,0xD9,0x74,0x7A,
                                       0x48,0x63,0x43,0x08,0x49,0x3B,0xC5,0x75,0x09,0x48,0x63,0x43,0x0C};
@@ -197,19 +207,22 @@ bool AttackTableOk() noexcept {
     return ok>0;
 }
 
-// The rows for seat 0's weapons (holder order = the fire step's weapon index); 0 when it has none with a range.
+// The rows for every seat's weapons (seat index, holder order = the fire step's weapon index); 0 when none has a range.
 std::uint64_t AttackRows(unsigned char* v,AttackRow* rows) noexcept {
-    unsigned char* const seat=SeatAt(v,0);
-    const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
-    const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
-    if(!n || n>kAttackRows || !Readable(holders,n*8))return 0;
     std::uint64_t count=0;
-    for(std::uint64_t i=0;i<n;++i) {
-        if(!Readable(holders[i],kHolderWeapon+8))continue;
-        const auto w=At<const unsigned char*>(holders[i],kHolderWeapon);
-        if(!Readable(w,kWeaponReach+4))continue;
-        const float reach=At<float>(w,kWeaponReach);
-        if(std::isfinite(reach) && reach>0.0f)rows[count++]=AttackRow{0.0f,reach,0,static_cast<std::int32_t>(i)};
+    for(unsigned k=0;k<SeatCount(v) && k<edf::kMaxSeats;++k) {
+        unsigned char* const seat=SeatAt(v,k);
+        const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
+        const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
+        if(!n || n>kAttackRows || !Readable(holders,n*8))continue;
+        for(std::uint64_t i=0;i<n && count<kAttackRows;++i) {
+            if(!Readable(holders[i],kHolderWeapon+8))continue;
+            const auto w=At<const unsigned char*>(holders[i],kHolderWeapon);
+            if(!Readable(w,kWeaponReach+4))continue;
+            const float reach=At<float>(w,kWeaponReach);
+            if(std::isfinite(reach) && reach>0.0f)
+                rows[count++]=AttackRow{0.0f,reach,static_cast<std::int32_t>(k),static_cast<std::int32_t>(i)};
+        }
     }
     return count;
 }
@@ -230,31 +243,41 @@ unsigned char* BoneRecordNamed(unsigned char* v,const wchar_t* name) noexcept {
     return nullptr;
 }
 
-void EnsureMechAiSetup(unsigned char* v) noexcept {
-    if(!Readable(v,kAttackSize+8) || !AttackTableOk())return;
-    if(!At<const void*>(v,kAimOrigin)) {
-        unsigned char* const spine=BoneRecordNamed(v,L"spine");
-        if(!spine)return;   // no origin: the fire step must not run with the table (the AI action checks it: npcai.cpp)
-        Put<unsigned char*>(v,kAimOrigin,spine);
+bool EnsureMechAiSetup(unsigned char* v) noexcept {
+    if(!Readable(v,kAimOrigin+8) || !AttackTableOk())return false;
+    const auto* inst=v+kModelInst506;
+    const auto bones=At<unsigned char*>(inst,kInstBones506);
+    const auto boneCount=At<std::int32_t>(inst,kInstBoneCount);
+    const auto validOrigin=[bones,boneCount](const void* origin) noexcept {
+        if(!bones || boneCount<=0 || boneCount>256 || !Readable(bones,static_cast<std::size_t>(boneCount)*kBoneStride))return false;
+        const auto begin=reinterpret_cast<std::uintptr_t>(bones),at=reinterpret_cast<std::uintptr_t>(origin);
+        return at>=begin && at-begin<static_cast<std::size_t>(boneCount)*kBoneStride && (at-begin)%kBoneStride==0;
+    };
+    if(!validOrigin(At<const void*>(v,kAimOrigin))) {
+        unsigned char* origin=nullptr;
+        for(const wchar_t* name:kAimOriginBones)if(!origin && validOrigin(BoneRecordNamed(v,name)))origin=BoneRecordNamed(v,name);
+        Put<unsigned char*>(v,kAimOrigin,origin);
+        if(!origin)return false;
     }
-    if(At<std::uint64_t>(v,kAttackSize))return;
+    if(At<std::uint64_t>(v,kAttackSize))return true;
     AttackRow rows[kAttackRows];
     const std::uint64_t count=AttackRows(v,rows);
-    if(!count)return;
+    if(!count)return false;
     auto data=At<AttackRow*>(v,kAttackData);
     if(!data || At<std::uint64_t>(v,kAttackCap)<count) {
         // Grown as 0x642970 grows it: the game's operator new (below 0x1000 bytes, as here, unaligned), so the stock
         // release 0x646300 and the vehicle's destructor free it.
         auto fresh=static_cast<AttackRow*>(reinterpret_cast<GameNewFn>(image+kGameNew)(count*sizeof(AttackRow)));
-        if(!fresh)return;
+        if(!fresh)return false;
         if(data)reinterpret_cast<AttackReleaseFn>(image+kAttackRelease)(v+kAttackTable);
         data=fresh;
         Put<AttackRow*>(v,kAttackData,data);Put<std::uint64_t>(v,kAttackCap,count);
     }
     std::memcpy(data,rows,count*sizeof(AttackRow));
     Put<std::uint64_t>(v,kAttackSize,count);
-    Log("NPCPOST v=%p mech attack table: %llu row(s) for its NPC driver (the SGO has no ai_attack_setting), first reach %.0f m",
-        v,static_cast<unsigned long long>(count),rows[0].maxRange);
+    Log("NPCPOST v=%p mech attack table: %llu row(s) for its NPC driver (the SGO has no ai_attack_setting), seats %d..%d, first reach %.0f m",
+        v,static_cast<unsigned long long>(count),rows[0].seat,rows[count-1].seat,rows[0].maxRange);
+    return true;
 }
 }  // namespace
 
@@ -262,7 +285,6 @@ void NpcPostInput(unsigned char* v) noexcept {
     if(!Cfg().customNpcAi || v[kDead])return;
     const Family f=FamilyOf(v);
     if(f==Family::mech && NpcDriver(v) && IsOnlineAuthority(v))EnsureMechAiSetup(v);   // before the stock AI fires
-    if(!Cfg().tankReturnToPost)return;
     if(f==Family::none || (f==Family::barga && !BargaWalkOk()))return;
     if(!NpcDriver(v)) {
         // Not NPC-driven (the player took the wheel, or nobody): its post is forgotten; an NPC later starts from where it is.
@@ -272,16 +294,17 @@ void NpcPostInput(unsigned char* v) noexcept {
         return;
     }
     if(At<const void*>(v,kRoute)){DropPending(v);Relinquish(v);return;} // even a short script route invalidates the old post
-    if(!IsOnlineAuthority(v))return; // the real driver determines vehicle authority
     const ULONGLONG ms=GameMs();
     Post* const p=PostOf(v,ms);
     if(!p)return;
     p->seen=ms;
+    if(!IsOnlineAuthority(v)){p->active=false;p->wrote=false;return;} // clients publish read-only map rows
     for(auto& request:pendingPosts)if(request.ref.Is(v)) {
         std::memcpy(p->at,request.at,12);p->commanded=true;p->routeArrival=request.routeArrival;
         p->cmd=Command{Order::guard,{request.at[0],request.at[1],request.at[2]}};
         request=PendingPost{};break;
     }
+    if(!Cfg().tankReturnToPost && !p->commanded && !p->routeArrival){TakeBack(v,f,*p);return;}
     const bool reads=f!=Family::carBase || (At<std::uint32_t>(v,kDriveMode)&1);   // a CarBase's slot 55 reads the stick
     // The Barga's stock AI walks after its target (the tanks' and the mechs' only turn): an NPC-driven Barga fights where
     // it stands, up to NpcLeash from its post (the soldiers' own leash round their anchor), and past it the plugin takes
@@ -356,20 +379,51 @@ int TankCommandUnits(CommandUnit* out,int most) noexcept {
     for(const auto& p:posts)
         if(n<most && Available(p,ms) && ReadCommandUnit(p.ref,FamilyOf(static_cast<const unsigned char*>(p.ref.obj))==Family::carBase ?
                                                           "TANK" : "MECH",p.cmd,false,&out[n])) {
-            out[n].status=p.active ? "RETURNING" : "AT POST";++n;
+            out[n].status=!IsOnlineAuthority(p.ref.obj) ? "REMOTE" : p.active ? "RETURNING" : "AT POST";++n;
         }
     return n;
 }
-bool TankCommand(const void* v,const Command& c) noexcept {
-    if(c.order!=Order::guard && c.order!=Order::none)return false;
-    if(!NpcPostCommand(v,c.order==Order::guard ? c.at : nullptr))return false;
-    for(auto& p:posts)if(p.ref.Is(v))p.cmd=c;
+namespace {
+struct FocusCheck { ObjRef ref;bool seen=false; };
+void SeePostFocus(void* context,const void* object,const float*) noexcept {
+    auto& f=*static_cast<FocusCheck*>(context);if(f.ref.Is(object))f.seen=true;
+}
+}
+bool TankCommand(const void* v,const Command& c,const ObjRef& focus) noexcept {
+    if(!IsOnlineAuthority(v))return false;
+    if(c.order!=Order::guard && c.order!=Order::none && c.order!=Order::focus)return false;
+    for(auto& p:posts)if(p.ref.Is(v) && Available(p,GameMs())) {
+        if(c.order==Order::focus) {
+            FocusCheck checked{focus};
+            if(!npcmark::Alive(focus) || !VisitEnemies(static_cast<const unsigned char*>(v),&SeePostFocus,&checked) || !checked.seen)return false;
+            npcmark::Assign(p.focus,focus);p.cmd=c;return true;
+        }
+        npcmark::Assign(p.focus,{});
+        if(!NpcPostCommand(v,c.order==Order::guard ? c.at : nullptr))return false;
+        p.cmd=c;return true;
+    }
+    return false;
+}
+bool PrepareNpcVehicleAi(unsigned char* v) noexcept {
+    const Family family=FamilyOf(v);
+    if(family==Family::none || !NpcDriver(v) || !IsOnlineAuthority(v))return false;
+    if(family==Family::mech && !EnsureMechAiSetup(v))return false;
+    for(auto& p:posts)if(p.ref.Is(v) && p.focus) {
+        FocusCheck checked{p.focus};
+        if(!npcmark::Alive(p.focus) || !VisitEnemies(v,&SeePostFocus,&checked) || !checked.seen) {
+            npcmark::Assign(p.focus,{});p.cmd=Command{};break;
+        }
+        ObjRef native{At<const void*>(v,kTarget),At<const void*>(v,kTarget+8)};
+        npcmark::Assign(native,p.focus);
+        Put<const void*>(v,kTarget,native.obj);Put<const void*>(v,kTarget+8,native.ctrl);
+        break;
+    }
     return true;
 }
 
 void ResetNpcPosts() noexcept {
     for(auto& p:pendingPosts)p=PendingPost{};
-    for(auto& p:posts)p=Post{};
+    for(auto& p:posts){npcmark::Assign(p.focus,{});p=Post{};}
     fullLoggedAt=0;
 }
 }  // namespace crew

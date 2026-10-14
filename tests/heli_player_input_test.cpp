@@ -14,6 +14,8 @@ unsigned char* image=nullptr;
 // Offline (online_authority.h): no session, every heli run here, the copies' owner unchanged.
 bool InSession() noexcept { return false; }
 bool OnlineRunsHere(const void*) noexcept { return true; }
+bool WastedFire(const void*,const void*) noexcept { return false; }   // wastedfire.cpp: no fire wasted here
+bool HoldFire(const void*,const void*,const float*,float,float,float*) noexcept { return false; }
 online::CopyOwner SetSpawnOwner(online::CopyOwner owner) noexcept { return owner; }
 Config inputConfig{};
 ULONGLONG inputTime=10000;
@@ -242,7 +244,7 @@ int main() {
     // controller through full acceleration/braking, including the original high-damping failure. The instructor's
     // cyclic: the aim pitched down the full tilt flies the top speed, level it stops.
     const float fullTilt=At<float>(inputVehicle,kPlayerMaxTilt);
-    const auto pitchAim=[&](float el){pilot.aim[0]=0.0f;pilot.aim[1]=std::sin(el);pilot.aim[2]=std::cos(el);};
+    const auto pitchAim=[&](float el){pilot.aim[0]=pilot.aim[1]=0.0f;pilot.aim[2]=1.0f;Put<float>(inputSeat,kSeatLY,el/fullTilt);};
     // The stock actuators the player's frames quicken (PlayerMouseTune) and put back.
     Put<float>(inputVehicle,kRotorUp,0.001f);Put<float>(inputVehicle,kRotorDown,0.0007f);Put<float>(inputVehicle,kTiltSmooth,0.005f);
     Put<float>(inputVehicle,kLiftPerRotor,34.0f/60.0f);Put<float>(inputVehicle,kVertDamp,0.95f);Put<float>(inputVehicle,kRotorIdle,0.13f);
@@ -278,7 +280,11 @@ int main() {
               "grounded controller leaves the native takeoff throttle and clears forward motion");
         Put<float>(inputSeat,kSeatLY,-1.0f);
         AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,true,0.0f,1.0f/60.0f,inputTime);
-        Check(At<float>(inputVehicle,kInThrottle)==1.0f && At<float>(inputVehicle,kInForward)==0.0f,"W on the ground spins the rotor up to lift off");
+        Check(At<float>(inputVehicle,kInThrottle)==0.75f && pilot.pitchIn==0.0f,"W on the ground does not change collective or pitch the parked helicopter");
+        Put<float>(inputSeat,kSeatAscend,1.0f);
+        AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,true,0.0f,1.0f/60.0f,inputTime);
+        Check(At<float>(inputVehicle,kInThrottle)==1.0f && At<float>(inputVehicle,kInForward)==0.0f,"Space takes off vertically even while W is held");
+        Put<float>(inputSeat,kSeatAscend,0.0f);
         Put<float>(inputSeat,kSeatLY,0.0f);pitchAim(0.0f);
         PlayerMouseTune(inputVehicle,false);
         Check(At<float>(inputVehicle,kRotorUp)==0.001f && At<float>(inputVehicle,kRotorDown)==0.0007f &&
@@ -301,40 +307,44 @@ int main() {
     pilot.hold={};pilot.vel[0]=pilot.vel[1]=pilot.vel[2]=0.0f;
     Put<float>(inputVehicle,kSpeedGain,20.0f);Put<float>(inputVehicle,kBlend,1.0f);
     // Stock slot 55 has already copied W into movement input. Production AimFly replaces the movement setpoint with the
-    // cyclic's (the aim level: none) and W is the collective; the attitude hook gets the aim's pitch.
+    // keyboard cyclic; W no longer changes the collective, and the attitude hook receives keyboard pitch.
     Put<float>(inputSeat,kSeatLY,-1.0f);
     const float throttleLevel=0.424f;Put<float>(inputVehicle,kRotor,throttleLevel);
     AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
     float* movement=reinterpret_cast<float*>(inputVehicle+kInLateral);
     unsigned char contact=0;
     PlayerAttitudeHook(inputVehicle+kHeadRight,inputVehicle,movement,&contact);
-    Check(pilot.hold.speed==0.0f && movement[2]==0.0f && recordedInput[2]==0.0f && At<float>(inputVehicle,kInThrottle)>throttleLevel,
-          "W raises the collective without pitching the nose or moving forward");
+    Check(pilot.hold.speed>0.0f && movement[2]>0.0f && recordedInput[2]>0.0f && pilot.hold.holding,
+          "W pitches nose down and flies forward while keeping height");
     Check(recordedInput[1]==movement[1] && recordedInput[3]==movement[3] && recordedInput[4]==movement[4],
           "throttle, w and yaw reach the attitude function unchanged");
-    Put<float>(inputSeat,kSeatLY,0.0f);Put<float>(inputSeat,kSeatRY,-1.0f);
+    Put<float>(inputSeat,kSeatLY,1.0f);Put<float>(inputSeat,kSeatRY,1.0f);
     for(int frame=0;frame<3;++frame)AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
     PlayerAttitudeHook(inputVehicle+kHeadRight,inputVehicle,movement,&contact);
-    Check(pilot.aim[1]>0.0f && recordedInput[2]<0.0f && pilot.hold.speed<0.0f && movement[2]<0.0f,
-          "mouse up raises the nose and the cyclic backs off");
-    Put<float>(inputSeat,kSeatRY,1.0f);
+    Check(pilot.aim[1]<0.0f && recordedInput[2]<0.0f && pilot.hold.speed<0.0f && movement[2]<0.0f,
+          "S raises the nose and backs off even when mouse aims down");
+    Put<float>(inputSeat,kSeatLY,-1.0f);Put<float>(inputSeat,kSeatRY,-1.0f);
     for(int frame=0;frame<6;++frame)AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
     PlayerAttitudeHook(inputVehicle+kHeadRight,inputVehicle,movement,&contact);
-    Check(pilot.aim[1]<0.0f && recordedInput[2]>0.0f && pilot.hold.speed>0.0f && movement[2]>0.0f,
-          "mouse down lowers the nose through the stock pitch sign and the cyclic flies forward");
+    Check(pilot.aim[1]>0.0f && recordedInput[2]>0.0f && pilot.hold.speed>0.0f && movement[2]>0.0f,
+          "W lowers the nose and flies forward even when mouse aims up");
     // A coordinated turn: flying forward with the nose turning toward row 0 (a slide's way), the roll the attitude gets is
     // the lateral plus the bank into the turn; the movement's lateral stays the velocity law's.
     Put<float>(inputSeat,kSeatRY,0.0f);
-    pilot.vel[2]=15.0f;pilot.turn=0.0f;
-    const float turned=0.02f;   // rad a frame toward row 0 (right = (-1, 0, 0) here)
-    const float swung[3]={-std::sin(turned),0.0f,std::cos(turned)};
+    pilot.vel[2]=15.0f;
+    const float turned=0.2f;   // course wanted toward row 0 (right = (-1, 0, 0) here)
+    pilot.aim[0]=-std::sin(turned)*std::cos(0.3f);pilot.aim[1]=-std::sin(0.3f);pilot.aim[2]=std::cos(turned)*std::cos(0.3f);
     for(int frame=0;frame<20;++frame) {
-        pilot.prevFwd[0]=0.0f;pilot.prevFwd[1]=0.0f;pilot.prevFwd[2]=1.0f;
-        AimFly(pilot,inputVehicle,inputSeat,pos,swung,right,false,100.0f,1.0f/60.0f,inputTime);
+        AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
     }
     PlayerAttitudeHook(inputVehicle+kHeadRight,inputVehicle,movement,&contact);
-    Check(pilot.turn>0.5f && recordedInput[0]>movement[0]+0.1f,"turning toward row 0 banks the way a slide there rolls it");
-    pilot.vel[2]=0.0f;pilot.turn=0.0f;std::memcpy(pilot.prevFwd,forward,12);
+    Check(recordedInput[0]>movement[0]+0.1f,"course wanted toward row 0 banks the way a slide there rolls it");
+    pitchAim(-0.3f);pilot.yawRate=1.0f;
+    AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
+    PlayerAttitudeHook(inputVehicle+kHeadRight,inputVehicle,movement,&contact);
+    Check(std::fabs(recordedInput[0]-movement[0])<1e-5f,"on course a measured yaw transient cannot feed its own bank");
+    pilot.yawRate=0.0f;
+    pilot.vel[2]=0.0f;
     pitchAim(0.0f);
 
     inputSeat[kSeatPad]=1;CheckPassThrough("pad control retains stock pitch");inputSeat[kSeatPad]=0;
@@ -345,22 +355,53 @@ int main() {
     inputConfig.heliMouseAim=false;CheckPassThrough("disabled mouse mode retains stock pitch");inputConfig.heliMouseAim=true;
     inputConfig.enabled=false;CheckPassThrough("disabled plugin retains stock pitch");inputConfig.enabled=true;
 
-    // A 30-degree downward camera: the level nose is above its vertical FOV. The old fallback was that same
-    // off-screen nose, so every attempted mouse movement was undone and the square never reappeared.
-    const float c=std::sqrt(0.75f),s=0.5f;
-    const float downward[16]={1,0,0,0, 0,2.5f*c,-s,-s, 0,2.5f*s,c,c, 0,0,-0.1f,0};
-    std::memcpy(inputVP,downward,sizeof(downward));testView=true;
-    pilot.aim[0]=pilot.aim[1]=0.0f;pilot.aim[2]=1.0f;
+    // A downward native Type-1 camera initializes once, then follows the world mouse direction without a screen tether.
+    const float stockEye[3]={0.0f,10.0f,-10.0f},stockLook[3]={0.0f,5.0f,0.0f};
+    float cameraEye[3],cameraLook[3];
+    pilotCamera={};
+    PublishPilotView({pilot.ref,inputSeat,inputTime,{pilot.aim[0],pilot.aim[1],pilot.aim[2]}});
+    Check(PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook),"local current-frame pilot owns the locator camera");
+    Check(pilotCamera.dir[1]<0.0f && std::fabs(cameraEye[1]-10.0f)<1e-5f,"orbit starts from native camera elevation and distance");
+    testView=true;std::memset(inputVP,0,sizeof(inputVP)); // Every aim is outside this projection.
+    Put<float>(inputSeat,kSeatRX,1.0f);Put<float>(inputSeat,kSeatRY,-0.1f);
+    for(int frame=0;frame<180;++frame)AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
+    const float heldAim[3]={pilot.aim[0],pilot.aim[1],pilot.aim[2]};
+    Check(std::fabs(heldAim[0])>0.1f,"mouse yaw moves freely despite an entirely off-screen aim");
+    Check(At<float>(inputSeat,kSeatRX)==1.0f && At<float>(inputSeat,kSeatRY)==-0.1f,"flight preserves native seat mouse input");
+    Check(PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook),"camera follows the changed mouse heading and elevation");
+    const float initialViewX=pilotCamera.dir[0];
+    inputTime+=16;PublishPilotView({pilot.ref,inputSeat,inputTime,{heldAim[0],heldAim[1],heldAim[2]}});
+    Check(PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook) && pilotCamera.dir[0]!=initialViewX &&
+          std::fabs(pilotCamera.dir[0]-heldAim[0])>0.001f,"camera eases toward mouse instead of jumping to it");
+    const float once=pilotCamera.dir[0];
+    PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook);
+    Check(pilotCamera.dir[0]==once,"multiple camera fetches in one game frame do not speed up easing");
     Put<float>(inputSeat,kSeatRX,0.0f);Put<float>(inputSeat,kSeatRY,0.0f);
-    Check(!aim::OnScreen(inputVP,pos,pilot.aim,kPlayerMark,kAimOnScreen),"regression camera starts with the level nose off-screen");
-    AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
-    Check(pilot.aim[1]==0.0f,"a camera looking down alone does not command a descent");
-    Put<float>(inputSeat,kSeatRX,0.5f);Put<float>(inputSeat,kSeatRY,0.2f);
-    AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
-    Check(aim::OnScreen(inputVP,pos,pilot.aim,kPlayerMark,kAimOnScreen),"mouse movement recovers an aim inside the downward camera view");
-    const float oldX=pilot.aim[0];
-    AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
-    Check(pilot.aim[0]!=oldX && aim::OnScreen(inputVP,pos,pilot.aim,kPlayerMark,kAimOnScreen),"subsequent mouse movement remains effective and visible");
+    const float turnedNose[3]={1.0f,0.0f,0.0f},turnedRight[3]={0.0f,0.0f,1.0f};
+    for(int frame=0;frame<180;++frame) {
+        inputTime+=16;
+        AimFly(pilot,inputVehicle,inputSeat,pos,turnedNose,turnedRight,false,100.0f,1.0f/60.0f,inputTime);
+        Check(PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook),"camera remains owned with released mouse");
+    }
+    for(int i=0;i<3;++i)Check(pilot.aim[i]==heldAim[i],"released mouse is not recentered by camera bounds or hull turning");
+    for(int i=0;i<3;++i)Check(std::fabs(pilotCamera.dir[i]-heldAim[i])<1e-5f,"camera converges to released mouse direction without reversing");
+    // One second of smoothing is independent of camera FPS, including a wrap across +/-pi.
+    const float target[3]={-0.1f,0.0f,-std::sqrt(0.99f)};
+    float lowFps[3]={0.1f,0.0f,-std::sqrt(0.99f)},highFps[3]={lowFps[0],lowFps[1],lowFps[2]};
+    for(int i=0;i<30;++i)aim::EaseView(lowFps,target,1.0f/30.0f);
+    for(int i=0;i<144;++i)aim::EaseView(highFps,target,1.0f/144.0f);
+    Check(std::fabs(lowFps[0]-highFps[0])<1e-5f && lowFps[2]<-0.99f,"ease is frame independent and takes shortest yaw across pi");
+    Put<float>(inputVehicle,kMatrix+12*4,20.0f);
+    Check(PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook) && cameraLook[0]==20.0f,"orbit translates with aircraft without changing view heading");
+    pilotCamera.dir[0]=0.0f;pilotCamera.dir[1]=std::sin(1.0f);pilotCamera.dir[2]=std::cos(1.0f);
+    Check(PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook) && cameraEye[1]>=stockEye[1],
+          "looking up keeps orbit eye above the aircraft at its native height");
+    Check(std::fabs((cameraLook[1]-cameraEye[1])/pilotCamera.radius-pilotCamera.dir[1])<1e-5f,
+          "height floor lifts both camera points without changing the viewing ray");
+    inputSeat[kSeatPad]=1;Check(!PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook),"pad camera remains stock");inputSeat[kSeatPad]=0;
+    inputHuman[0x128]=1;Check(!PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook),"remote player's camera is untouched");inputHuman[0x128]=0;
+    inputConfig.heliMouseAim=false;Check(!PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook),"disabled flight releases camera");inputConfig.heliMouseAim=true;
+    inputTime+=251;Check(!PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook),"stale flight never owns camera");inputTime-=251;
     CheckDroneFrame();
     VirtualFree(trampoline,0,MEM_RELEASE);VirtualFree(image,0,MEM_RELEASE);
     std::printf("heli_player_input: %d production-path checks passed (%d attitude calls)\n",checks,calls);

@@ -22,6 +22,12 @@ over:
   .SHKT         4.1's Havok 2014 packfile as it is (EDF.dll keeps the old readers; real-device check in the plan)
   .ACB          a sound bank, a loose file in <game>/SOUND/PC; EDF6 ships 4.1's (TIKYUU4_*): checked, not copied
 A root with a file none of these carry, or a converter refuses, is left out (listed under 'skipped' with why).
+
+STOCK_OVERRIDES: objects EDF6's archives hold, left over from 4.1 (EDF6's own missions never spawn them), whose class
+EDF6 has since changed: the stock file lacks keys the class reads unchecked and crashes on spawn (Transporter401_
+Formation: se_preset_list, EDF+0x5E9A90, M-P003 2026-10-13). Such a root is built like any other (4.1's SGO under an
+EDF6 template of the class) and shipped under the same Mods path, so it replaces the stock file. build() checks every
+SGO the 4.1 missions spawn (spawned_objects) that EDF6's archives serve: stale_stock refuses one that is not replaced.
 """
 from __future__ import annotations
 
@@ -30,9 +36,11 @@ import copy
 import hashlib
 import json
 import os
+import re
 import shutil
 import struct
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Callable
 
@@ -65,6 +73,17 @@ ROOTS: dict[str, int] = {
     'UFOCARRIER301.SGO': 15, 'UFOCARRIER401.SGO': 15,
     'VEHICLE301_TANK_AI.SGO': 13,
     'UFO301.SGO': 18, 'UFO301ACE.SGO': 6, 'UFO401.SGO': 15,
+    'TRANSPORTER401_FORMATION.SGO': 4,
+}
+# Stock SGOs the 4.1 missions name that no player reaches, with why (stale_stock would otherwise refuse them).
+STOCK_EXEMPT: dict[str, str] = {
+    'OBJECT/ROUTETEST.SGO': "class RouteTest is not registered in EDF.dll at all; only 4.1's developer test mission T_AIROUTE "
+                            "spawns it (no story or mission-list entry)",
+}
+# Roots EDF6's archives also hold, as a stale 4.1 leftover its classes cannot load: root -> why the stock file is wrong.
+STOCK_OVERRIDES: dict[str, str] = {
+    'TRANSPORTER401_FORMATION.SGO': "no se_preset_list: Transporter_Formation's constructor passes it unchecked to the "
+                                    "sound system (EDF+0x5E9A90 -> 0x5E4760 -> 0x7B3310 -> 0x240AD3, a null fault)",
 }
 
 
@@ -86,6 +105,8 @@ class Alias:
     template: str             # an EDF6 object of that class (OBJECT/<name>): the keys and CAS players 4.1 lacks
     players: tuple[str, ...]  # CAS players (anmgroups) the class resolves that 4.1's CAS lacks (crash on spawn)
     override: tuple[tuple[str, object], ...] = ()   # keys set to these values whatever 4.1's and the template's are
+    stock_cas: bool = False   # its CAS is a file EDF6's archives also hold (so the closure skips it): 4.1's own, converted, is
+                              # shipped under the same path with the grafts below, replacing the stock copy
     own_cas: bool = False     # 4.1's object has no CAS: the template's, every clip hollowed (cas_graft.hollow), as
                               # OBJECT/<root>.CAS: the class's players without the template's motion on its bones
     bones: tuple[tuple[str, str, str], ...] = ()   # on every MDB of its model RABs, in order: ('rename', old, new)
@@ -101,7 +122,10 @@ class Alias:
                               # grafted after the template's own: what the template's CAS lacks (its sibling has)
     state_aliases: tuple[tuple[str, str, str], ...] = ()   # (player, new state, existing state): cas_graft.alias_states
     drop: tuple[str, ...] = ()    # template keys not copied (a weak point makes the robot 5x tougher; an optional
-                                  # key the template sets but 4.1's object does not, e.g. Deiroi's level_adjust 0.7)
+                                  # key the template sets but 4.1's object does not, e.g. Deiroi's level_adjust 0.7;
+                                  # the SGO path too: the keys of a template's look that 4.1's object does not share)
+    fracture: bool = False    # a voxel-destruction body: animation_model[3] built from the model's extent and the
+                              # template's tuning (fracture_block); FRACTURE_CLASSES need it
     guns: tuple[Gun, ...] = ()    # the weapons: meshes merged into the model, muzzles added, gun_control rebuilt
     eye: tuple[str, tuple[float, float, float]] | None = None   # (bone, position): the locator 目の基準位置
     prune: bool = False       # ship only the files the result names (the closure holds 4.1's weapon objects)
@@ -356,6 +380,21 @@ ALIASES: dict[str, Alias] = {
                         # 4.1's names (EDF4小型UFO*) are not in EDF6's SEPRESET.SGO: silent; the remake's, same roles
                         se_prefix=('EDF4小型UFO', '小型UFO507'),
                         pad=('se_table',)),
+    # AntHill301 (4.1's ant nest, 14 missions) -> AntHill, the class 4.1's nest has under the same name. EDF6's class
+    # breaks its body into voxels when it is hit: animation_model[3] holds the grid and the model's bounding box, and
+    # the class keeps the object it builds from it in a member read unchecked on every hit (EDF+0x4EB8D7 loads this+
+    # 0x848, 0x6CAF22 writes through it: a null one crashed M115 on the first damage, 2026-10-13). 4.1's SGO has no
+    # such block. The grid and the tuning (the six min/max pairs the block's sub-list holds) are E517_ANTHILL's, the
+    # box is Anthill301.mdb's own extent, and the debris list is empty: E517's chunks are metal (a mech nest), and an
+    # empty list is the class's own early exit (this+0x5C0's member +0x310 counts them, tested before use) and what
+    # E615_HORNETNEST_SMALL's 3-entry block leaves too. game_object_destroy_score_adjust (both stock nests have it)
+    # comes from E517; its ant_hill_material_type 1 (mech: no dust), lighting and material_animation (the
+    # mech-damage textures of E517's model) are not 4.1's dirt nest's: dropped, so a hit raises the dirt-dust effect
+    # (type 0, the default; the class reads all three optionally, EDF+0x4E9EB2 / 0x4E9F4E / 0x4EA452). Ant
+    # spawning is not in this object: 4.1's missions drive it from their scripts (AntHill301.sgo carries no
+    # generator data, and neither class reads any).
+    'ANTHILL301.SGO': Alias('AntHill', 'E517_ANTHILL.SGO', (),
+                            drop=('ant_hill_material_type', 'lighting', 'material_animation'), fracture=True),
     # Hector (301, cannons on both arms) -> EDF6_Berserker_Large: a walking robot with guns (jobs/4bf89026/tmp/alias41
     # REPORT.md; jobs/4bf89026/tmp/hector41 NOTES.md lists every name the class looks up). The class's template is
     # EDF6's own DSGO, so the result is a DSGO (alias_dsgo). What the class resolves that 4.1's Hector lacks:
@@ -384,6 +423,20 @@ ALIASES: dict[str, Alias] = {
     #   tcontrol's index unchecked (0x116DE30 writes at -1 of a missing variable); Hector's CAS has neither, and an
     #   empty list is the loop's own early exit (0x53D184). The states walk_battle_f / b / l / r, which the class asks
     #   for in a fight and a missing state refuses, are Hector's own walks, so it does not stand still while it moves.
+    # Transporter401_Formation (MP003, MP004: 4 transporters carrying the mission's vehicle) stays 4.1's file under the
+    # class it has in EDF6 too. EDF6's stock copy is a leftover that the class cannot load, found one crash at a time on
+    # the real game (2026-10-13), each by the same cause: the class reads keys and names unchecked.
+    #  - se_preset_list (constructor, EDF+0x5E9A90, null to the sound system): EDF6's V508_TRANSPORT_FORMATION's 4 names
+    #    (flight, booster on / off, container release; cues of the resident bank TIKYUUX_SE).
+    #  - boosts: read for each transporter by 0x5E4830 (0x5E4AE9, unchecked), and every entry is a MAB locator looked up
+    #    in animation_model[2] (0x6BADD0 reads [model+0x280], EDF+0x6BAE06 rax=0). 4.1's model has no MAB (item 0)
+    #    and no booster locators; EDF6's 6 entries name locators of V508's MAB. Empty: the loop's own exit (count 0).
+    #  - CAS main states hover_start, hover_end (0x5E4A6A..0x5E4AB0 look the states up by name, required): 4.1's
+    #    Transporter401.CAS has only fly in main. Both are fly (aliases: the transporter flies, which is all 4.1 shows),
+    #    shipped as OBJECT/TRANSPORTER401.CAS over the stock copy (stock_cas).
+    'TRANSPORTER401_FORMATION.SGO': Alias('Transporter_Formation', 'V508_TRANSPORT_FORMATION.SGO', (),
+                                          override=(('boosts', []),), stock_cas=True,
+                                          state_aliases=(('main', 'hover_start', 'fly'), ('main', 'hover_end', 'fly'))),
     **{root: hector_alias(g, l, r) for root, (g, l, r, _n) in HECTOR_VARIANTS.items()},
     # Deiroi (5 variants): EDF6's Deiroi is 4.1's class with every constant moved into the SGO, and its constructor reads
     # deiroi_battery_config / deiroi_moving_settings / bullet_object / charge_param unchecked (EDF+0x319566, 0x31981c): 4.1's
@@ -525,7 +578,7 @@ def check_materials(games: 'Games', files: dict[str, bytes], rel: str, need: dic
                 raise ValueError(f'{rel}: {key}[{i}] animates {mtab_materials(blob)}, the model has {sorted(mats)}')
 
 
-SE_KEYS = ('se_list', 'se_table', 'ufo_se')   # object keys holding SEPRESET names (docs/sound-re.md section 2)
+SE_KEYS = ('se_list', 'se_table', 'ufo_se', 'se_preset_list')   # object keys holding SEPRESET names (docs/sound-re.md section 2)
 RESIDENT_BANKS = ('TIKYUUX_SE.ACB',)           # loaded for every mission (docs/sound-re.md section 1)
 
 
@@ -593,6 +646,31 @@ class Games:
         self.in4 = archives(edf41)
         self.in6 = archives(edf6)
         self.have6 = set(self.in6)
+        self._stock: dict[str, dict[str, dict]] | None = None
+        self._formats: dict[str, set[bool]] = {}   # class -> {is a DSGO} over its stock SGOs
+
+    def stock_by_class(self) -> dict[str, dict[str, dict]]:
+        """EDF6's own top-level SGOs by xgs_scene_object_class: {class: {OBJECT/<name>: members}} (read once)."""
+        if self._stock is None:
+            self._stock = {}
+            for rel in sorted(self.have6):
+                if not (rel.startswith('OBJECT/') and rel.endswith('.SGO') and rel.count('/') == 1):
+                    continue
+                try:
+                    members = sgo.load(data=self.read6(rel))
+                except Exception:   # noqa: BLE001 - an SGO this reader does not parse is no class evidence
+                    continue
+                cls = members.get('xgs_scene_object_class')
+                if isinstance(cls, str):
+                    self._stock.setdefault(cls, {})[rel] = members
+                    self._formats.setdefault(cls, set()).add(self.read6(rel)[:4] == b'DSGO')
+        return self._stock
+
+    def dsgo_only_classes(self) -> set[str]:
+        """The classes whose every stock SGO is a DSGO (EDF6's own form): their code reads the object through the
+        dictionary API (EDF+0xD7480), which a classic SGO does not feed."""
+        self.stock_by_class()
+        return {c for c, f in self._formats.items() if f == {True}}
 
     def sound(self, rel: str) -> bool:
         return os.path.isfile(os.path.join(self.edf6_root, 'SOUND', 'PC', rel.rsplit('/', 1)[-1]))
@@ -774,6 +852,8 @@ def alias(games: Games, root: str, files: dict[str, bytes], a: Alias) -> None:
     for k, v in theirs.items():
         if k not in a.drop:
             members.setdefault(k, v)
+    if a.fracture:
+        members['animation_model'] = with_fracture(files, members['animation_model'], theirs['animation_model'], root)
     for k, v in a.override:
         members[k] = v
     if a.material_from:
@@ -803,6 +883,8 @@ def alias(games: Games, root: str, files: dict[str, bytes], a: Alias) -> None:
     am = members.get('animation_model')
     cas = rel_of(am[1]) if isinstance(am, list) and len(am) > 1 and isinstance(am[1], str) else None
     t_am = theirs.get('animation_model')   # a part (animation_model_d) has none: no CAS to graft
+    if a.stock_cas and cas and cas not in files:
+        files[cas] = convert(games, cas) if cas in games.in4 else games.read6(cas)
     if a.own_cas:
         if cas:
             raise ValueError(f'{root} has a CAS of its own: own_cas is for an object without one')
@@ -810,6 +892,7 @@ def alias(games: Games, root: str, files: dict[str, bytes], a: Alias) -> None:
         files[cas] = cas_graft.hollow(games.read6(rel_of(t_am[1])))
         members['animation_model'] = [am[0], 'app:/' + cas.lower(), *am[2:]]
     files[rel] = sgo.write_depth_first(version, members)
+    check_fracture(members, files, rel)
     graft_cas(games, a, files, cas, rel_of(t_am[1]) if t_am and isinstance(t_am[1], str) else '')
     check_materials(games, files, rel, {k: len(theirs[k]) for k in MATERIAL_KEYS if k in theirs}, a.inert_materials)
     check_sounds(games, files[rel], rel)
@@ -892,6 +975,252 @@ def check_states(out: dsgo.Node, cas: bytes | None, rel: str) -> None:
         missing = [n for n in values if isinstance(n, str) and n not in have]
         if missing:
             raise ValueError(f'{rel}: {key} names states its CAS has not: {missing}')
+
+
+# Classes whose body is a voxel-destruction object (VoxelBody, this+0x5C0 of an AntHill): animation_model[3] builds it
+# (EDF+0x6BDD1B allocates it only when that entry is a list; 0x6B8843 starts the member null) and the damage path
+# dereferences it unchecked (EDF+0x4EB8D7 -> 0x6CAF22; the 2026-10-13 M115 crash on a 4.1 nest without the entry).
+FRACTURE_CLASSES = ('AntHill',)
+# The sub-list of the block: six (min, max) pairs of tuning and the debris models' names. The class reads all seven
+# entries once the block has a sub-list (EDF+0x6BE2B7..0x6BEBBE, no per-entry length test).
+FRACTURE_TUNING = 6
+
+
+def fracture_block(rab_bytes: bytes, mdb_name: str, template: list) -> list:
+    """animation_model[3] for an object whose model is `mdb_name` in `rab_bytes`: `template`'s grid and tuning around
+    the model's own bounding box, no debris. `template` is another AntHill's block (E517_ANTHILL's)."""
+    grid, _lo, _hi, tuning = template[:4]
+    if len(grid) != 3 or len(tuning) != FRACTURE_TUNING + 1:
+        raise ValueError(f'the template block is not [grid, min, max, [6 pairs, debris]]: {template!r}')
+    by_name = {f.name.lower(): f for f in mdb.rab_read(rab_bytes).files}
+    body = mdb.mdb_read(by_name[mdb_name.lower()].data)
+    box = [mdb.rigid_extent(body, ax) for ax in range(3)]
+    return [list(grid), [float(lo) for lo, _ in box], [float(hi) for _, hi in box],
+            [list(p) for p in tuning[:FRACTURE_TUNING]] + [[]]]
+
+
+def with_fracture(files: dict[str, bytes], model: list, template_model: list, root: str) -> list:
+    """`model` (animation_model of 4.1's object: [models, cas, mab]) with the voxel block as its fourth entry."""
+    if len(model) != 3:
+        raise ValueError(f'{root}: animation_model has {len(model)} entries, not 4.1\'s 3: the block is added, not replaced')
+    if len(template_model) < 4 or not isinstance(template_model[3], list):
+        raise ValueError(f'{root}: the template has no voxel block (animation_model[3])')
+    entry = model[0]
+    block = fracture_block(files[rel_of(entry[0])], entry[1], template_model[3])
+    return [*model, block]
+
+
+def check_fracture(members: dict, files: dict[str, bytes], rel: str) -> None:
+    """ValueError when `members` (an SGO's top level) is of a FRACTURE_CLASSES class and its animation_model[3] is
+    not a block the class can build its body from: a list of [grid (3 positive ints), min (3), max (3, above min)]
+    with, when it has a sub-list, six pairs and a debris list whose every name is a model of the object's archive."""
+    if members.get('xgs_scene_object_class') not in FRACTURE_CLASSES:
+        return
+    am = members.get('animation_model')
+    block = am[3] if isinstance(am, list) and len(am) > 3 else None
+    if not isinstance(block, list) or len(block) < 3:
+        raise ValueError(f'{rel}: no voxel block in animation_model[3]: the first hit dereferences a null body')
+    grid, lo, hi = block[:3]
+    ok = (isinstance(grid, list) and len(grid) == 3 and all(isinstance(g, (int, float)) and g >= 1 for g in grid)
+          and isinstance(lo, list) and isinstance(hi, list) and len(lo) == len(hi) == 3
+          and all(isinstance(v, (int, float)) for v in lo + hi) and all(a < b for a, b in zip(lo, hi)))
+    if not ok:
+        raise ValueError(f'{rel}: the voxel block\'s grid / box is malformed: {block[:3]!r}')
+    if len(block) == 3:
+        return
+    tuning = block[3]
+    pairs = tuning[:FRACTURE_TUNING] if isinstance(tuning, list) else []
+    if (len(tuning) != FRACTURE_TUNING + 1 or not isinstance(tuning[-1], list)
+            or any(not isinstance(p, list) or len(p) != 2 for p in pairs)):
+        raise ValueError(f'{rel}: the voxel block\'s tuning is not six pairs and a debris list: {tuning!r}')
+    names = {f.name.lower() for f in mdb.rab_read(files[rel_of(am[0][0])]).files}
+    gone = [n for n in tuning[-1] if str(n).lower() not in names]
+    if gone:
+        raise ValueError(f'{rel}: the voxel block names debris models its archive has not: {gone}')
+
+
+def mission_scripts(games: 'Games', edf6: bool) -> list[bytes]:
+    """The mission scripts of EDF4.1 (every MISSION/<id>/*.BVM), or of EDF6's own missions (MISSION/EDF6 and EDF6_DLC:
+    *.AC text, *.JSON), as bytes."""
+    if edf6:
+        want = {'EDF6', 'EDF6_DLC'}
+        return [games.read6(k) for k in sorted(games.have6)
+                if k.split('/')[0] == 'MISSION' and k.count('/') >= 2 and k.split('/')[1] in want
+                and k.endswith(('.AC', '.JSON'))]
+    return [games.read4(k) for k in sorted(games.in4) if k.startswith('MISSION/') and k.endswith('.BVM')]
+
+
+def script_sgos(script: bytes) -> set[str]:
+    """The app:/...sgo paths a mission script names (Mods style): BVM strings are UTF-16, AC / JSON text is UTF-8."""
+    texts = [script.decode('utf-8', 'ignore')]
+    texts += [m.group().decode('utf-16le') for m in re.finditer(rb'(?:[\x20-\x7e]\x00){4,}', script)]
+    return {rel_of(p) for t in texts for p in re.findall(r"(?i)app:/[^\"\s;,'()]+?\.sgo", t)}
+
+
+def sgo_closure(roots: set[str], read: Callable[[str], bytes | None]) -> set[str]:
+    """`roots` and every SGO they name, recursively, through the SGO that `read` gives (None: no such file)."""
+    seen: set[str] = set()
+    todo = sorted(roots)
+    while todo:
+        rel = todo.pop()
+        if rel in seen:
+            continue
+        seen.add(rel)
+        data = read(rel)
+        if data is None:
+            continue
+        try:
+            members = sgo.load(data=data)
+        except Exception:   # noqa: BLE001 - a file this reader does not parse names nothing we can follow
+            continue
+        todo += [rel_of(s) for s in strings(members) if s.lower().startswith('app:/') and s.lower().endswith('.sgo')]
+    return seen
+
+
+def spawned_objects(games: 'Games') -> set[str]:
+    """Every SGO the EDF4.1 missions' scripts spawn, as the game loads it: a path EDF6's archives serve is followed
+    through EDF6's file (its children are what loads), any other through 4.1's."""
+    def read(rel: str) -> bytes | None:
+        return games.read6(rel) if rel in games.have6 else games.read4(rel) if rel in games.in4 else None
+    return sgo_closure({r for s in mission_scripts(games, False) for r in script_sgos(s)}, read)
+
+
+def stale_stock(stock: dict[str, dict[str, dict]], spawned: set[str], overridden: set[str],
+                proven: set[str]) -> list[str]:
+    """The stock EDF6 SGOs (`stock`: stock_by_class) among `spawned` that this port neither replaces (`overridden`) nor
+    can show to load, as 'rel: lacks [keys]' / 'rel: no sibling to test': the class reads its keys by name and several
+    dereference a miss unchecked, so a file lacking a key every OTHER stock SGO of its class has is a leftover its
+    class cannot load (Transporter401_Formation, no se_preset_list: EDF6's own missions never spawn it, its sibling
+    has the key). `proven` (SGOs EDF6's own missions spawn, directly or through the files they name) are loaded by
+    the game, so they pass: that is the only evidence for a class with a single member."""
+    out: list[str] = []
+    for cls, members in sorted(stock.items()):
+        for rel, mine in sorted(members.items()):
+            if rel not in spawned or rel in overridden or rel in proven:
+                continue
+            others = [set(m) for r, m in members.items() if r != rel]
+            if not others:
+                out.append(f'{rel}: class {cls} has no other stock SGO to test against and no EDF6 mission spawns it')
+                continue
+            lacks = sorted(set.intersection(*others) - set(mine))
+            if lacks:
+                out.append(f'{rel}: class {cls} lacks {lacks}, which every other stock SGO of the class has')
+    return out
+
+
+def proven_stock(games: 'Games') -> set[str]:
+    """The SGOs EDF6's own missions spawn (EDF6 and EDF6_DLC scripts), with the SGOs those name: loaded by the game."""
+    return sgo_closure({r for s in mission_scripts(games, True) for r in script_sgos(s)},
+                       lambda rel: games.read6(rel) if rel in games.have6 else None)
+
+
+def as_dsgo(data: bytes) -> bytes:
+    """The classic SGO `data` as a DSGO with the same values (numbers become doubles, raw blocks Blobs: dsgo_value)."""
+    if data[:4] == b'DSGO':
+        return data
+    _version, members = sgo.read(data)
+    root = dsgo.Node([])
+    for k, v in members.items():
+        root.set(k, dsgo_value(v))
+    return dsgo.compact(dsgo.Document(root, []))
+
+
+def check_class_format(dsgo_classes: set[str], rel: str, data: bytes) -> None:
+    """ValueError when the SGO `data` is a classic SGO of a class whose every stock SGO is a DSGO: the class reads its
+    object through the dictionary API (EDF+0xD7480 over the table at object+0xA8), which a classic SGO leaves empty;
+    a constructor that does not guard it (Vehicle501_FortressRobo slot 6, 0x609E98: ai_attack_interval, then
+    ai_attack_setting) faults on the null default table (MP004 2026-10-13, EDF+0xD74D9)."""
+    cls = str(sgo.load(data=data).get('xgs_scene_object_class'))
+    if data[:4] != b'DSGO' and cls in dsgo_classes:
+        raise ValueError(f'{rel}: a classic SGO of class {cls}, whose every stock SGO is a DSGO')
+
+
+def class_keys(stock: dict[str, dict[str, dict]], cls: str) -> set[str]:
+    """The top-level keys every stock EDF6 SGO of class `cls` has. The classes read their keys by name and several
+    dereference a miss unchecked (named lookup -1, then a load through it: Hector's weak_point, EDF+0x551E0; the
+    AlienTrailer's se_list, EDF+0x30A4D7; the AntHill's voxel block, 0x4EB8D7): a key all of them have is a key the
+    class may count on."""
+    sets = [set(m) for m in stock.get(cls, {}).values()]
+    return set.intersection(*sets) if sets else set()
+
+
+def missing_class_keys(stock: dict[str, dict[str, dict]], members: dict) -> list[str]:
+    return sorted(class_keys(stock, str(members.get('xgs_scene_object_class'))) - set(members))
+
+
+def fill_class_keys(stock: dict[str, dict[str, dict]], read: Callable[[str], bytes], rel: str,
+                    files: dict[str, bytes]) -> dict | None:
+    """The keys of `files[rel]` (a 4.1 SGO under an EDF6 class, converted) that every stock SGO of its class has and
+    it lacks, taken from the stock SGO of that class whose game_object_durability is nearest its own (ties: by
+    name): {'template', 'keys'} for what was filled, None when nothing was missing. Only those keys: what 4.1's
+    object has stays, and what the class does with the rest is what check_class_keys then finds already settled.
+    `read` gives a stock SGO's bytes. A DSGO result (an alias's) is not filled: the alias carries its own keys, and
+    check_class_keys still tests it. When the template is a DSGO (the classes EDF6 wrote in its own form: a key may
+    be a named dictionary, which 4.1's SGO has no form for) the object becomes a DSGO with the same values (numbers
+    as doubles, dsgo_value) and the template's keys added."""
+    data = files[rel]
+    if data[:4] == b'DSGO':
+        return None
+    version, members = sgo.read(data)
+    need = missing_class_keys(stock, members)
+    if not need:
+        return None
+    dur = sgo.plain(members.get('game_object_durability'))   # a Float (4 stored bytes) to a number
+    near = lambda item: (abs(item[1].get('game_object_durability', 0.0) - dur) if isinstance(dur, (int, float)) else 0.0, item[0])
+    name, theirs = min(stock[members['xgs_scene_object_class']].items(), key=near)
+    t_data = read(name)
+    if t_data[:4] == b'DSGO':
+        root = dsgo.Node([])
+        for k, v in members.items():
+            root.set(k, dsgo_value(v))
+        donor = dsgo.parse(t_data).root
+        for k in need:
+            root.set(k, copy.deepcopy(donor.get(k)))
+        files[rel] = dsgo.compact(dsgo.Document(root, []))
+        return {'template': name, 'keys': need, 'as': 'DSGO'}
+    t_version, full = sgo.read(t_data)
+    if t_version != version:
+        raise ValueError(f'{rel}: {name} is SGO {t_version:#x}, not {version:#x}')
+    for k in need:
+        members[k] = full[k]
+    files[rel] = sgo.write_depth_first(version, members)
+    return {'template': name, 'keys': need}
+
+
+def check_class_keys(stock: dict[str, dict[str, dict]], rel: str, data: bytes) -> None:
+    """ValueError when the SGO `data` lacks a key every stock SGO of its class has."""
+    need = missing_class_keys(stock, sgo.load(data=data))
+    if need:
+        raise ValueError(f'{rel}: lacks {need}, which every EDF6 SGO of its class has')
+
+
+# Objects whose animation_model has no MAB block (item 2 is 0) while every stock SGO of their class has one, with why that
+# works: the class looks MAB locators up by name through a pointer a missing MAB leaves null (EDF+0x6BAE06), and the
+# object names none.
+MAB_LESS: dict[str, str] = {
+    'TRANSPORTER401_FORMATION.SGO': 'boosts is empty: no booster locator is looked up (0x5E4830 -> 0x6BADD0)',
+}
+
+
+def has_mab(members: dict) -> bool:
+    """True when animation_model[2] is a MAB block (a 'raw:' hex string in an SGO read, or bytes)."""
+    am = members.get('animation_model')
+    blk = am[2] if isinstance(am, list) and len(am) > 2 else None
+    return (isinstance(blk, str) and blk.startswith('raw:4d414200')) or (isinstance(blk, bytes) and blk[:4] == b'MAB\0')
+
+
+def check_model_mab(stock: dict[str, dict[str, dict]], rel: str, data: bytes) -> None:
+    """ValueError when the SGO `data` has no MAB block in animation_model[2] and every other stock SGO of its class has
+    one, unless MAB_LESS says why it works (Transporter401_Formation: its boosts named locators in a MAB it did not
+    have, the null read at EDF+0x6BAE06, MP003 2026-10-13). DSGO results and classes without a stock sibling are
+    not compared."""
+    if data[:4] == b'DSGO':
+        return
+    members = sgo.load(data=data)
+    siblings = [m for r, m in stock.get(str(members.get('xgs_scene_object_class')), {}).items() if r != rel]
+    if siblings and all(has_mab(m) for m in siblings) and not has_mab(members) and rel.split('/')[-1] not in MAB_LESS:
+        raise ValueError(f'{rel}: animation_model has no MAB block, which every other stock SGO of its class has '
+                         '(the class looks locators up in it unchecked)')
 
 
 def remove_key(node: dsgo.Node, key: str) -> None:
@@ -1252,7 +1581,7 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = (), mother_dev: bool = 
         rel = 'OBJECT/' + root
         if root in STAND_INS or (only and root not in only):
             continue
-        if rel in games.have6:
+        if rel in games.have6 and root not in STOCK_OVERRIDES:
             skipped.append({'object': rel, 'reason': 'EDF6 has it'})
             continue
         need, why = closure(games, rel)
@@ -1287,7 +1616,19 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = (), mother_dev: bool = 
                 alias(games, part.split('/', 1)[1], out, PART_ALIASES[part.split('/', 1)[1]])
             except ValueError as e:
                 why.append(f'alias {part}: {e}')
-
+        filled = None
+        if not why:
+            try:   # the keys every stock SGO of the class has (class_keys): what an alias or patch left out is filled
+                stock = games.stock_by_class()   # from the nearest one (only those keys), then all are required
+                filled = fill_class_keys(stock, games.read6, rel, out)
+                if out[rel][:4] != b'DSGO' and str(sgo.load(data=out[rel]).get('xgs_scene_object_class')) in games.dsgo_only_classes():
+                    out[rel] = as_dsgo(out[rel])
+                check_class_format(games.dsgo_only_classes(), rel, out[rel])
+                check_class_keys(stock, rel, out[rel])
+                check_model_mab(stock, rel, out[rel])
+                check_fracture(sgo.load(data=out[rel]), out, rel)
+            except ValueError as e:
+                why.append(str(e))
         if why:
             skipped.append({'object': rel, 'reason': '; '.join(why)})
             continue
@@ -1297,7 +1638,16 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = (), mother_dev: bool = 
             continue
         files.update(out)
         cls = sgo.load(data=out[rel]).get('xgs_scene_object_class')
-        objects.append({'object': rel, 'class': cls, 'missions': uses, 'files': list(out)})
+        objects.append({'object': rel, 'class': cls, 'missions': uses, 'files': list(out),
+                        **({'class_keys_from': filled} if filled else {}),
+                        **({'replaces_stock': STOCK_OVERRIDES[root]} if root in STOCK_OVERRIDES else {})})
+    if not only:   # every stock SGO the 4.1 missions spawn is one EDF6 loads, or replaced above
+        stale = stale_stock(games.stock_by_class(), spawned_objects(games), {o['object'] for o in objects},
+                            proven_stock(games))
+        stale = [s for s in stale if s.split(':')[0] not in STOCK_EXEMPT]
+        if stale:
+            raise ValueError('EDF6 archives serve SGOs the 4.1 missions spawn that its classes cannot load '
+                             '(add the root to ROOTS / ALIASES with STOCK_OVERRIDES):\n  ' + '\n  '.join(stale))
     hashes = {r: hashlib.sha256(b).hexdigest() for r, b in files.items()}
     for r, path in shared.items():
         with open(os.path.join(HERE, '..', *path.split('/')), 'rb') as f:

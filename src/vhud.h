@@ -64,6 +64,9 @@ struct StockArm {
     float reload;                // 0..1 share reloaded while it reloads (ammo 0); 1 not reloading
     float reloadSec;             // seconds left of it, < 0 unknown
     bool canReload;              // ReloadTime >= 0: it reloads once empty (else EMPTY is the end)
+    float side=0.0f;             // m its first muzzle is left of the vehicle's middle across the camera's view (- right; 0 unknown)
+    float cycle=1.0f;            // 0..1 share of the round loaded since the last shot (rounds left, a gun laid shot by shot)
+    float cycleSec=-1.0f;        // seconds until it can fire again, < 0 ready (or a quick gun: no loading to show)
     RoundKind kind;
     bool lobbed,lofted;          // lofted: the Katyusha's launcher (launcher.cpp draws its point)
     bool aimed;                  // `bore` and the rest below were worked out this frame
@@ -71,6 +74,7 @@ struct StockArm {
     bool ranged,inReach;         // optional articulated-gun target lead; independent of physical `at`/`hit`
     float bore[3],at[3],lead[3],range,flight;   // first real barrel path; at/range/flight never replaced by target selection
     bool physicalOnly=true,coFired=false; // fixed/partial/unknown mount; this weapon shares the active trigger
+    bool armed=false;            // on one of the seat's triggers now (payload.cpp PayloadTriggerWeapons): its marks are drawn too
     float targetRange=0;         // optional articulated-gun lead cue, never replaces physical path data above
     int paths=0;
     roundaim::Impact path[roundaim::kSightPaths]{};
@@ -90,10 +94,12 @@ struct StockHudReadout {
     float speed;                 // m/s, level (its own position's change)
     float hp,hpMax;
     float zoom;                  // the sight's magnification (sightzoom.cpp SightZoomNow: 1 none)
+    int zero;                    // its range setting, m (sightzoom.cpp SightZoomRange: 0 the bore line)
     int stab;                    // the seat's gun stabilizer (stab.cpp StabState): 1 holding, 2 outrun by the hull, 0 none
     FuelReading fuel;            // its fuel tank (a bike's; a heli's is HeliStrip's, PlayerHeliReadout), not among the arms
     int arms,selected;           // selected: secondary payload/list selection (-1 none)
     int sight=-1;               // independently selected actual primary/secondary fire-control weapon
+    int turret=-1;              // the arm the seat's turret is laid by (crew.h PlayerTurretGun; -1 none)
     StockArm arm[kStockArms];
     int threats;                 // 2 a missile homing on it, 1 a jet's lock (missile.cpp, jet.cpp: as the jets' threat ring)
     float threatAt[kStockThreats][3];

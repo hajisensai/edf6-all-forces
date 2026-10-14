@@ -9,7 +9,9 @@
 namespace crew {
 // Preserve native store role ids 0..3; special actions have their own semantics,
 // rather than borrowing bomb merely to get an aiming-point cross.
-enum class StoreRole { air, ground, bomb, rocket, gun, drone, charge };
+// coax: a tank's / an IFV's coaxial machine gun, fired by its own (secondary) trigger, never one of the switch's choices
+// (payload.cpp).
+enum class StoreRole { air, ground, bomb, rocket, gun, drone, charge, coax };
 struct StoreSpec {
     const wchar_t* prefix;   // its weapon files' names: prefix + rounds + ".SGO" (vcobjects.store_file)
     const char* name;        // shown in the cockpit

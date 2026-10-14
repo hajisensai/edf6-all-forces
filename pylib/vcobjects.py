@@ -6,6 +6,7 @@ written where, and who owns it, is pylib/ledger.py.
 """
 from __future__ import annotations
 
+import copy
 import math
 import os
 import re
@@ -166,6 +167,11 @@ class Missile:
     interval: float = 45.0    # frames from one shot (or salvo) to the next
     eject: float = 0.3    # m a frame it leaves the rail at, along the launcher's nose, over the launcher's velocity
     guided: bool = True   # False: an unguided rocket (no lock: src/missile.cpp only burns its motor, it flies straight)
+    # The stock weapon (Root.cpk WEAPON) whose muzzle list (animation_model[2], mab_muzzles) it fires from; None: the
+    # helicopter missile's own four pod muzzles. Offsets are from the holder's bone: a gun-launched missile on a tank's
+    # gun bone with the pods' (1.05..1.76 m aside, 0.67 m down) leaves from beside the hull (the user, 2026-10-10:
+    # 「这个炮射导弹是从坦克车头两边射出去的」).
+    muzzle: str | None = None
 
     def params(self, rounds: int) -> dict[str, float]:
         return {'AmmoSpeed': self.eject, 'AmmoOwnerMove': 1.0, 'AmmoGravityFactor': 0.0, 'AmmoAlive': self.life * 60.0,
@@ -212,8 +218,18 @@ class Shell:
     the kind of round is the template's, not a guess."""
     template: str           # Root.cpk WEAPON file
     ammo_class: str         # its AmmoClass
-    kind: str               # 'ap' (no blast, penetrating) or 'he' (a blast radius)
+    kind: str               # 'ap' (no blast, penetrating), 'he' (a blast radius) or 'mg' (a machine gun's ball: no blast)
     extra: tuple[tuple[str, float], ...] = ()
+    # A coaxial gun's muzzle: (the template's single muzzle where it is, where it goes) in the frame of the holder bone
+    # it hangs on (make_stock_stores COAX: the gun mantlet's elevating bone, measured on each tank's model). None: the
+    # template's muzzle as it is.
+    muzzle: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None
+    # The gun's own model (Mods/WEAPON, coax_model): a coaxial machine gun seen in the mantlet, its muzzle on muzzle's
+    # point. None: the template's model (v_null: none to see).
+    model: str | None = None
+    # Its round's colour (AmmoColor) and its muzzle flash's (MuzzleFlash_CustomParameter[8]); None: the template's.
+    colour: tuple[float, float, float, float] | None = None
+    flash: tuple[float, float, float, float] | None = None
 
     def params(self, rounds: int) -> dict[str, float]:
         return {'AmmoCount': float(rounds), **dict(self.extra)}
@@ -237,6 +253,115 @@ class Store:
 def _local(en: str, ja: str, cn: str, sc: str, kr: str) -> tuple[tuple[str, str], ...]:
     return (('en', en), ('ja', ja), ('cn', cn), ('sc', sc), ('kr', kr))
 
+
+# --- the coaxial machine guns (the user, 2026-10-11: 「应该有同轴机枪的坦克增加同轴机枪」, then 「这个坦克的同轴机枪做的
+# 什么玩意，找现实的模型来做」) ---
+# A real tank's coax is a 7.62 mm general-purpose machine gun inside the gun mantlet beside the main gun (M240C on the
+# M1 Abrams, the LAV-25 and the Bradley; MG3 on the Leopard 2; PKT on the T-72; the Type 74 on the Type 10), locked
+# parallel to the main gun so it elevates and traverses with it. Outside, all that shows is the end of its barrel
+# and its flash hider standing out of a small port collar on the mantlet's face: the receiver, the feed and the
+# ammunition box are inside the turret. The 2026-10-11 model was none of that (docs/coax-feedback-2026-10-11.md): the
+# Begaruta mech's whole hand gun shrunk to a quarter, stock, grip and 0.3 m magazine and all, stuck outside the turret,
+# its bone's own 1.3 scale left in so it stood 1.25 m long and 30% further out than the muzzle point it was put on.
+@dataclass(frozen=True)
+class CoaxGun:
+    """A real coaxial machine gun: what it fires (7.62 x 51 mm) and the part of it outside the mantlet (m)."""
+    name: str           # the real gun
+    interval: float     # frames from one round to the next (60 a second): its cyclic rate
+    speed: float        # m/s at the muzzle (M80 ball)
+    reach: float        # m: its rounds live this far (the gun's effective reach as a vehicle coax)
+    barrel_r: float     # the barrel's outer radius where it leaves the port
+    bare: float         # bare barrel from the port collar's face to the flash hider
+    hider_r: float      # the flash hider's outer radius
+    hider: float        # its length
+
+    @property
+    def rpm(self) -> float:
+        return 3600.0 / self.interval
+
+    @property
+    def outside(self) -> float:
+        """m of gun outside the port collar: bare barrel and flash hider."""
+        return self.bare + self.hider
+
+
+# The M240C (FN MAG; the coax of the M1 Abrams, the LAV-25, the Bradley): 650-950 rounds a minute cyclic, here 720
+# (a round every 5 frames), 853 m/s with M80 ball, 1100 m effective on a vehicle mount (the M62 tracer burns ~900 m);
+# a 0.63 m barrel, 24 mm across at the muzzle, a 0.1 m flash hider about 30 mm across.
+M240C = CoaxGun('M240C', interval=5.0, speed=853.0, reach=1100.0, barrel_r=0.012, bare=0.14, hider_r=0.015,
+                hider=0.10)
+# The Type 74 vehicle machine gun (the coax of Japan's Type 74 / 90 / 10 tanks): about 1000 a minute, here 900
+# (a round every 4 frames), 7.62 x 51 mm at about 855 m/s, a barrel and flash hider of the M240's size.
+TYPE74 = CoaxGun('Type 74', interval=4.0, speed=855.0, reach=1100.0, barrel_r=0.012, bare=0.12, hider_r=0.016,
+                 hider=0.09)
+
+
+@dataclass(frozen=True)
+class CoaxMount:
+    """A coax on one stock tank: its gun, the centre of its port on the face of the elevating part of the mantlet
+    (the holder bone's frame: +x the vehicle's left, so a port right of the gun is at -x; +z along the bore; measured
+    on each model by casting rays at the mantlet from ahead, docs/coax-feedback-2026-10-11.md §2), the port collar's
+    radius and how far it stands proud of the face and reaches back into it (the faces slope), and its belt."""
+    gun: CoaxGun
+    port: tuple[float, float, float]
+    collar_r: float
+    collar_out: float
+    collar_in: float
+    belt: int           # rounds in the ready belt (AmmoCount; then ReloadTime COAX_BELT_CHANGE to change it)
+
+    @property
+    def muzzle(self) -> tuple[float, float, float]:
+        """The flash hider's front face: where the rounds come out (the muzzle locator)."""
+        x, y, z = self.port
+        return (x, y, round(z + self.collar_out + self.gun.outside, 4))
+
+
+COAX_BELT_CHANGE = 600.0   # frames (10 s) for the loader to change the belt
+# The rounds: red-orange tracer (NATO M62 / M276 burn red); every round in the game's file is a tracer, the plugin
+# dims four in five to ball (src/payload.cpp CoaxBelt: a coax belt is linked four ball to one tracer). Keep these two
+# colours and COAX_TRACER_EVERY equal to src/payload.cpp's kCoaxTracer / kCoaxBall / kCoaxTracerEvery (tested).
+COAX_TRACER = (3.0, 1.0, 0.35, 1.0)
+COAX_BALL = (0.3, 0.28, 0.26, 0.1)
+COAX_TRACER_EVERY = 5
+COAX_FLASH = (2.4, 1.7, 0.9, 1.0)   # a rifle-calibre muzzle flash: orange (the template's is green)
+COAX_SIZE = 0.15                    # AmmoSize: a thin streak (the template's 0.3 ball); contact radius still 0.15:
+COAX_HIT = 1.0                      # AmmoHitSizeAdjust (0.3 x 0.5 before)
+COAX_SPREAD = 0.006                 # FireAccuracy: a mounted gun's tight burst (the template's 0.025 a gunner's)
+COAX_MOUNTS: dict[str, CoaxMount] = {
+    # Blacker 505 (the M1 Abrams' class; its five requests share the v505_tank skeleton): the elevating 'cannon'
+    # bone's mantlet is 0.55 m wide (|x| <= 0.275; beyond it the turret cheeks, which do not elevate), its face a
+    # flat nose 0.64 m ahead between y -0.10 and -0.02, the barrel's root collar inside |x| 0.17: the port right of
+    # the bore 0.22 m on that nose. (A real M1's gun shield is wider and its coax sits further out; on this model
+    # anything past 0.275 m would be on the turret and would not lay with the gun.)
+    '505': CoaxMount(M240C, (-0.22, -0.06, 0.64), collar_r=0.035, collar_out=0.03, collar_in=0.04, belt=3000),
+    # Varius 601 (a Type 10 class tank): its 'cannon' bone carries a coax housing modelled right of the gun, its front
+    # face 1.80-1.84 m ahead over x -0.30..-0.22, y 0.00..0.16: the port in its middle.
+    '601': CoaxMount(TYPE74, (-0.26, 0.08, 1.84), collar_r=0.03, collar_out=0.03, collar_in=0.05, belt=3000),
+    # Grape 401 (an LAV-25 / Bradley class IFV): its 'Barrel' bone is the elevating autocannon itself (its root sleeve
+    # 0.1 m round, 0.35 m ahead); the turret face right of it 0.18-0.24 m ahead (it slopes): the port 0.18 m right of
+    # the bore, the collar riding on the gun as the mount's shield does.
+    '401': CoaxMount(M240C, (-0.18, 0.0, 0.21), collar_r=0.03, collar_out=0.04, collar_in=0.06, belt=2200),
+}
+COAX_GUN_STOCK = 'V_504_H_MACHINEGUN.RAB'   # the model's template: only its gunmetal material and texture are used
+COAX_GUN_NODE = 'v_Null'   # the template's muzzle node (V_403TANK_MACHINEGUN's MAB): the model's gun bone named so
+COAX_GUN_TINTS = {'collar': (58, 62, 62), 'barrel': (30, 31, 33), 'hider': (24, 24, 26), 'bore': (10, 10, 12)}
+
+
+def coax_model_name(tank: str) -> str:
+    return f'EDF6VC_COAX_GUN{tank}.RAB'
+
+
+def _coax_store(tank: str, mount: CoaxMount) -> 'Store':
+    gun = mount.gun
+    step = gun.speed / 60.0   # m a frame
+    extra = (('AmmoSpeed', round(step, 3)), ('AmmoAlive', float(math.ceil(gun.reach / step))),
+             ('FireInterval', gun.interval), ('ReloadTime', COAX_BELT_CHANGE), ('FireAccuracy', COAX_SPREAD),
+             ('AmmoSize', COAX_SIZE), ('AmmoHitSizeAdjust', COAX_HIT))
+    shell = Shell('V_403TANK_MACHINEGUN.SGO', 'SolidBullet01', 'mg', extra, ((0.0, 0.2, 2.47), mount.muzzle),
+                  coax_model_name(tank), COAX_TRACER, COAX_FLASH)
+    g = gun.name
+    return Store(f'{g} coax', 'coax', 0.0, 0.0, shell,
+                 _local(f'Coaxial MG ({g})', f'同軸機銃（{g}）', f'同軸機槍（{g}）', f'同轴机枪（{g}）', f'동축 기관총（{g}）'))
 
 STORES: dict[str, Store] = {
     # Short-range air-to-air, infrared, high off-boresight (AIM-9X): quick to lock, very agile, light warhead. 3.02 m.
@@ -286,7 +411,7 @@ STORES: dict[str, Store] = {
     # body 0.09, fins 0.23 (real 0.105).
     'GLM': Store('LAHAT', 'ground', 0.0, 0.0, Missile('LAHAT', Look('bullet_icbm01', 0.975), burn=2.5, top=300.0, accel=180.0,
                  max_g=15.0, nav=3.0, life=15.0, damage=600.0, blast=6.0, lock_range=1200.0, lock_cone=0.3, lock_time=30.0,
-                 interval=90.0, eject=2.0),
+                 interval=90.0, eject=2.0, muzzle='V_505TANK_CANNON01.SGO'),
                  _local('LAHAT (gun-launched ATGM)', 'LAHAT（砲発射ミサイル）', 'LAHAT（炮射導彈）', 'LAHAT（炮射导弹）',
                         'LAHAT（포발사 미사일）')),
     # An infantry fighting vehicle's autocannon belts (the Grape): its AP the Grape's own smooth-bore round
@@ -302,6 +427,13 @@ STORES: dict[str, Store] = {
     # proximity fuse in effect; it does not harm the map.
     'FLAK_HE': Store('HE-PROX', 'gun', 0.0, 0.0, Shell('V603_FLAK_GLGUN01_DLC_L.SGO', 'GrenadeBullet01_MapNoDamage', 'he'),
                      _local('HE proximity', '近接信管榴弾', '近炸引信高爆彈', '近炸引信高爆弹', '근접신관 고폭탄')),
+    # A tank's / an IFV's coaxial machine gun (COAX_MOUNTS above): fired on its own trigger (src/payload.cpp: the
+    # secondary trigger, the main gun staying loaded). The stock Epsilon gunner's machine gun (V_403TANK_MACHINEGUN:
+    # SolidBullet01, 6 a round: the lightest round of any stock vehicle gun, a rifle round's; its own tank machine gun
+    # sound) with the real gun's rate, muzzle velocity and reach, a red-orange tracer, an orange flash, a tight cone,
+    # its ready belt changed in 10 s; the muzzle on the flash hider of its own model (coax_model). Its holder is on the
+    # elevating bone (no recoil travel with the main gun); recoilless on the hull (make_stock_stores._params).
+    **{f'MG{tank}': _coax_store(tank, mount) for tank, mount in COAX_MOUNTS.items()},
 }
 JET_MISSILE_STOCK, JET_BOMB_STOCK = JET_MISSILE_STOCK, 'V_409HELI_BOMB01.SGO'
 
@@ -620,9 +752,13 @@ JETS.update({parked_name(k): replace(JETS[k], parked=True) for k in PARKED_KINDS
 # The gunship (src/jet_internal.h Body::gunship, mark 7011) as a JETS entry, for its requested twin only: the NPC gunship
 # is tools/make_jets.py's (the strike jet in BOMBER401's model with GUNSHIP_MARK and a gunner seat). Its arms and
 # durability the strike jet's (as tools/make_jets.py's), its model the stock bomber401 (52 m across, no gear: it stands
-# on its belly), measured on that model when parked (box_model).
+# on its belly), measured on that model when parked (box_model). It wears that model under a name of its own,
+# GUNSHIP_MODEL_FILE (tools/make_jets.py writes it: pylib/jet_models.py STOCK_COPIES, the stock geometry skinned with its
+# nozzle bones), so its seats' cockpits can be grafted into it; the NPC gunship (tools/make_jets.py GUNSHIP_FILE) too.
 GUNSHIP_JET = 'edf6tr_jet_gunship'   # no _mission: the range never places it (testrange/gen.py)
-JETS[GUNSHIP_JET] = replace(JETS['edf6tr_jet_strike_mission'], mark=7011.0, model=('app:/object/bomber401.mrab', 'bomber401.mdb'),
+GUNSHIP_MODEL_FILE = 'EDF6VC_GUNSHIP.MRAB'
+GUNSHIP_MODEL = ('app:/object/' + GUNSHIP_MODEL_FILE.lower(), 'bomber401.mdb')
+JETS[GUNSHIP_JET] = replace(JETS['edf6tr_jet_strike_mission'], mark=7011.0, model=GUNSHIP_MODEL,
                             body='bomber401', box_model='bomber401')
 # The NPC kinds the Air Raider requests as empty aircraft to fly (tools/calls.py EDF6VC_CALL_FLY_*, the user, 2026-10-06:
 # 「补上空袭的召唤飞机，空母载具」): every kind of src/playerjet_kinds.h kBoardable the player jets' requests do not already
@@ -991,6 +1127,18 @@ def _rebone(v, names: set[str], to: str = JET_ROOT_BONE):
 
 
 JET_BODY_BONE = 'bomber501'
+# The V506 ragdoll's rest pose (RAGDOLL_V506_HELI.SHKT: each body's position less the body proxy's, every orientation
+# the identity), which its constraints hold; tools/selftest.py checks it against the game's file.
+V506_PROXY_LAYOUT: dict[str, tuple[float, float, float]] = {
+    'RagDollProxys.body': (0.0, 0.0, 0.0),
+    'RagDollProxys.rearWheelSus': (-0.0005, -1.347, -7.2468),
+    'RagDollProxys.rotor': (0.0, 1.5602, 0.0),
+    'RagDollProxys.bend_roterA': (0.0, 1.5602, 0.5158),
+    'RagDollProxys.bend_roterB': (-0.5158, 1.5602, 0.0),
+    'RagDollProxys.bend_roterC': (0.0, 1.5602, -0.5158),
+    'RagDollProxys.bend_roterD': (0.5158, 1.5602, 0.0),
+    'RagDollProxys.tailRotor': (0.4356, 1.6471, -7.15),
+}
 
 
 def _dead_effect(effects: list) -> list:
@@ -1022,12 +1170,24 @@ def _jet_ragdoll(blob: bytes, body: str = JET_BODY_BONE, centre: list[float] | t
     (3.49 m over it), a heli-sized body hanging under the plane (the user, 2026-10-06: 「碰撞体积也是」在空母底下). Every
     proxy goes on `centre` (proxy = bone o (centre)), every bone it drives back off it (bone = proxy o (-centre)), so
     the two bindings stay each other's inverse and the proxies keep their places relative to each other. None: the
-    V506's offsets as they are (a model jet_models does not measure: the Primer creatures, the submarine carrier)."""
+    V506's offsets as they are (a model jet_models does not measure: the Primer creatures, the submarine carrier).
+    With `centre`, each proxy goes where the ragdoll's own rest pose has it relative to the body proxy
+    (V506_PROXY_LAYOUT), upright: the SHKT's hinges and slider hold exactly that pose. The V506 gets it from bones of
+    its own; one fuselage bone with the same offset for all put the eight proxies on one point, each still turned by its
+    V506 binding, so the moment a destroyed aircraft's ragdoll went dynamic its constraints threw the parts apart: the
+    wreck left the ground within 6 frames (2026-10-12 probe, docs/feedback-2026-10-12-ragdoll-twitch.md; the user:
+    「飞机炸的时候，尸体布娃娃会抽搐」). In the rest pose it lies still until the dead effect's steps."""
     version, inner = sgo.read(blob)
     up = None if centre is None else [float(c) for c in centre]
 
     def offset(e: list, sign: float) -> list:
-        return e[1:] if up is None else [[sign * c for c in up]] + e[2:]
+        if up is None:
+            return e[1:]
+        proxy = e[0][1] if sign > 0 else e[0][0]
+        if proxy not in V506_PROXY_LAYOUT:
+            raise ValueError(f'{proxy} is no proxy of the V506 ragdoll (V506_PROXY_LAYOUT)')
+        rest = V506_PROXY_LAYOUT[proxy]
+        return [[sign * (up[k] + rest[k]) for k in range(3)], [0.0, 0.0, 0.0, 1.0]] + e[3:]
     inner['ragdoll_from_animation'] = [[[body, e[0][1]]] + offset(e, 1.0) for e in inner['ragdoll_from_animation']]
     drive: dict[str, list] = {}
     for e in inner['animation_from_ragdoll']:
@@ -1321,14 +1481,171 @@ def _shell_sgo(game: Game, store: Store, rounds: int) -> bytes:
     if r.get('AmmoClass') != shell.ammo_class:
         raise ValueError(f'{shell.template} 的弹类是 {r.get("AmmoClass")}，不是 {shell.ammo_class}')
     blast = r.get('AmmoExplosion')
-    if (shell.kind == 'ap') != (not blast) or (shell.kind == 'ap' and r.get('AmmoIsPenetration') != 1.0):
+    if shell.kind == 'mg':
+        if blast:
+            raise ValueError(f'{shell.template}: 机枪弹不应有爆炸半径')
+    elif (shell.kind == 'ap') != (not blast) or (shell.kind == 'ap' and r.get('AmmoIsPenetration') != 1.0):
         raise ValueError(f'{shell.template}: {shell.kind} 弹应{"穿透且无爆炸" if shell.kind == "ap" else "有爆炸半径"}')
     for key, value in shell.params(rounds).items():
         if r.get(key) is None:
             raise ValueError(f'{shell.template} 缺少 {key}')
         r.set(key, value)
+    if shell.colour is not None:
+        colour = r.get('AmmoColor')
+        if not isinstance(colour, dsgo.Node) or len(colour.items) != 4:
+            raise ValueError(f'{shell.template} 的 AmmoColor 不是 4 个数')
+        colour.items[:] = [float(c) for c in shell.colour]
+    if shell.flash is not None:
+        flash = r.get('MuzzleFlash_CustomParameter')
+        if not (isinstance(flash, dsgo.Node) and len(flash.items) == 10 and isinstance(flash.items[8], dsgo.Node)
+                and len(flash.items[8].items) == 4):
+            raise ValueError(f'{shell.template} 的枪口焰参数不是预期的 10 项')
+        flash.items[8].items[:] = [float(c) for c in shell.flash]
+    if shell.muzzle is not None:
+        _move_muzzle(r, shell.template, *shell.muzzle)
+    if shell.model is not None:   # its own gun to see (coax_model), its muzzle node COAX_GUN_NODE as the template's
+        ref = r.get('animation_model').items[0]
+        ref.items[0] = 'app:/Weapon/' + shell.model.lower()
+        ref.items[1] = shell.model.rsplit('.', 1)[0].lower() + '.mdb'
     _named(r, store)
     return dsgo.write(doc)
+
+
+def _move_muzzle(r: dsgo.Node, template: str, was: tuple[float, float, float], at: tuple[float, float, float]) -> None:
+    """Move weapon root `r`'s single muzzle (animation_model[2], mab_muzzles) from `was` to `at`: ValueError unless the
+    template has exactly one muzzle, it is at `was`, and no other locator of the block shares its vec4."""
+    model = r.get('animation_model')
+    block = bytearray(model.items[2].data)
+    muzzles = mab_muzzles(bytes(block))
+    if len(muzzles) != 1:
+        raise ValueError(f'{template} 不是单炮口的武器')
+    vec = muzzles[0][2]
+    got = struct.unpack_from('<3f', block, vec)
+    if any(abs(g - w) > 1e-3 for g, w in zip(got, was)):
+        raise ValueError(f'{template} 的炮口在 {got}，不是 {was}')
+    # Every list's records (0x20 each, from the lists' headers to the u32 at 0x18; pylib/mab.py) name their three vec4s
+    # at +0xC / +0x10 / +0x14, each vec4 stored once: the muzzle's must be named by its own record alone.
+    heads, end = struct.unpack_from('<2I', block, 0x14)
+    first = heads + 8 * struct.unpack_from('<H', block, 0x0C)[0]
+    users = [(rec, off) for rec in range(first, end, 0x20) for off in (0xC, 0x10, 0x14)
+             if rec + struct.unpack_from('<i', block, rec + off)[0] == vec]
+    if len(users) != 1:
+        raise ValueError(f'{template} 的炮口坐标被 {len(users)} 处共用')
+    struct.pack_into('<3f', block, vec, *at)
+    model.items[2] = dsgo.Blob(bytes(block), model.items[2].kind)
+
+
+def _coax_mount_of(name: str) -> CoaxMount:
+    for tank, mount in COAX_MOUNTS.items():
+        if coax_model_name(tank).lower() == name.lower():
+            return mount
+    raise ValueError(f'{name} 不是同轴机枪模型')
+
+
+def coax_parts(mount: CoaxMount, segs: int = 14) -> dict[str, list]:
+    """The coax as it shows outside the mantlet, in the holder bone's frame (CoaxMount.port), as procmesh Parts by
+    COAX_GUN_TINTS: the port collar (from collar_in behind the face to collar_out proud of it, the barrel's hole in its
+    face), the bare barrel out of the hole, the flash hider (a short taper up from the barrel, its face with the bore's
+    dark mouth), the bore. Every surface has its own vertices at its edges (crisp caps: the smooth normals of procmesh
+    would round a shared rim)."""
+    from procmesh import Part
+    gun = mount.gun
+    x, y, z = mount.port
+    skin = [(1, 1.0)]
+    parts = {k: Part(0, tint) for k, tint in COAX_GUN_TINTS.items()}
+
+    def ring(part, zz: float, r: float, k: int) -> list[int]:
+        return [part.add((x + r * math.cos(2 * math.pi * s / segs), y + r * math.sin(2 * math.pi * s / segs), zz),
+                         skin, (s / segs, k)) for s in range(segs)]
+
+    def side(part, z0: float, r0: float, z1: float, r1: float, inward: bool = False) -> None:
+        """The surface between two rings (z0, r0) -> (z1, r1), facing out (or in: a hole's wall)."""
+        a, b = ring(part, z0, r0, 0), ring(part, z1, r1, 1)
+        for s in range(segs):
+            t = (s + 1) % segs
+            quad = ((a[s], b[s], b[t]), (a[s], b[t], a[t]))
+            for tri in quad:
+                part.tris.append(tri[::-1] if inward else tri)
+
+    def annulus(part, zz: float, r_out: float, r_in: float, forward: bool = True) -> None:
+        """A flat ring at zz between r_in and r_out (r_in 0: a disc), facing +z (or -z)."""
+        o = ring(part, zz, r_out, 0)
+        if r_in <= 0.0:
+            c = part.add((x, y, zz), skin, (0.5, 0.5))
+            for s in range(segs):
+                tri = (c, o[s], o[(s + 1) % segs])
+                part.tris.append(tri if not forward else tri[::-1])
+            return
+        i = ring(part, zz, r_in, 1)
+        for s in range(segs):
+            t = (s + 1) % segs
+            for tri in ((o[s], i[s], i[t]), (o[s], i[t], o[t])):
+                part.tris.append(tri if not forward else tri[::-1])
+
+    hole = gun.barrel_r + 0.006                 # the port's hole round the barrel
+    back, face = z - mount.collar_in, z + mount.collar_out
+    c = parts['collar']
+    side(c, back, mount.collar_r, face, mount.collar_r)
+    annulus(c, face, mount.collar_r, hole)
+    annulus(c, back, mount.collar_r, 0.0, forward=False)
+    side(parts['bore'], face, hole, face - 0.03, hole, inward=True)   # the hole's dark wall
+    annulus(parts['bore'], face - 0.03, hole, 0.0)                    # and its bottom
+    hider0 = face + gun.bare
+    b = parts['barrel']
+    side(b, face - 0.03, gun.barrel_r, hider0, gun.barrel_r)
+    h = parts['hider']
+    taper = min(0.015, gun.hider / 4)
+    side(h, hider0, gun.barrel_r, hider0 + taper, gun.hider_r)
+    muzzle = hider0 + gun.hider
+    side(h, hider0 + taper, gun.hider_r, muzzle, gun.hider_r)
+    bore_r = 0.0055                             # the flash hider's mouth (7.62 mm bore, its cone opening out)
+    annulus(h, muzzle, gun.hider_r, bore_r)
+    side(parts['bore'], muzzle, bore_r, muzzle - 0.04, bore_r * 0.7, inward=True)
+    annulus(parts['bore'], muzzle - 0.04, bore_r * 0.7, 0.0)
+    return parts
+
+
+def coax_model(game: Game, name: str) -> bytes:
+    """The coaxial gun's model `name` (coax_model_name, its COAX_MOUNTS mount): coax_parts made a rigid model in the
+    stock COAX_GUN_STOCK archive in place of its gun (its gunmetal material, each part's UVs on the even patch of its
+    texture nearest the part's tint, procmesh.uv_boxes), its gun bone named COAX_GUN_NODE (the muzzle locator's node)
+    with no scale (the stock bone's 1.3: the 2026-10-11 model stood 30% out of place), its bounds the parts', its model
+    member named after `name` (each archive its own; the textures are the stock gun's, by the archive's texture map)."""
+    import mdb
+    import procmesh
+    import numpy as np
+    mount = _coax_mount_of(name)
+    rab = mdb.rab_read(game.read('WEAPON', COAX_GUN_STOCK))
+    member = next(f for f in rab.files if f.name.lower().endswith('.mdb'))
+    md = mdb.mdb_read(member.data)
+    if len(md.objects) != 1 or len(md.objects[0].meshes) != 1 or len(md.bones) != 2 or md.bones[1].kind != 1:
+        raise ValueError(f'{COAX_GUN_STOCK} 不是预期的单网格机枪模型')
+    tmpl = md.objects[0].meshes[0]
+    if tmpl.flags[1] or {e.name.lower() for e in tmpl.elems} != {'position', 'normal', 'binormal', 'tangent', 'texcoord'}:
+        raise ValueError(f'{COAX_GUN_STOCK} 的网格不是预期的刚体顶点格式')
+    albedos = procmesh.albedos(rab, md)
+    meshes, every = [], []
+    for k, part in enumerate(p for p in coax_parts(mount).values() if p.pos):
+        boxes = procmesh.uv_boxes(md, albedos, part.tint)
+        vdata, idx = procmesh.pack(part, tmpl, boxes, 1.0)
+        meshes.append(mdb.Mesh(tmpl.flags, tmpl.material, tmpl.unk08, tmpl.vsize, tmpl.elems, k, vdata, idx))
+        every.extend(part.pos)
+    pts = np.array(every)
+    lo, hi = pts.min(axis=0), pts.max(axis=0)
+    gun = md.bones[1]
+    gun.local = mdb.ident()
+    gun.inv_bind = mdb.ident()
+    gun.half = [float(v) for v in (hi - lo) / 2] + [1.0]
+    gun.centre = [float(v) for v in (hi + lo) / 2] + [1.0]
+    names = list(md.names)
+    names[gun.name] = COAX_GUN_NODE
+    md = replace(md, names=names, objects=[replace(md.objects[0], meshes=meshes)])
+    data = mdb.mdb_write(md)
+    if mdb.mdb_write(mdb.mdb_read(data)) != data:
+        raise ValueError(f'{name}: 模型写回不一致')
+    member.stored = mdb.cmpl_compress(data)
+    member.name = name.rsplit('.', 1)[0].lower() + '.mdb'
+    return mdb.rab_write(rab)
 
 
 def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
@@ -1351,9 +1668,20 @@ def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
         else:
             cp.items[i] = value
     cone.items[0] = cone.items[1] = missile.lock_cone
+    if missile.muzzle is not None:
+        _fire_from(game, r, missile.muzzle)
     _look(game, r, missile.look, JET_MISSILE_STOCK)
     _named(r, store)
     return dsgo.write(doc)
+
+
+def _fire_from(game: Game, r: dsgo.Node, stock: str) -> None:
+    """Give weapon root `r` the muzzle list (animation_model[2]) of stock weapon `stock`: one muzzle, else ValueError."""
+    theirs = dsgo.parse(game.read('WEAPON', stock)).root.get('animation_model')
+    mine = r.get('animation_model')
+    if len(mab_muzzles(theirs.items[2].data)) != 1 or theirs.items[0] != mine.items[0]:
+        raise ValueError(f'{stock} 不是单炮口的原版炮')
+    mine.items[2] = copy.deepcopy(theirs.items[2])
 
 
 def _bomb_sgo(game: Game, store: Store, rounds: int) -> bytes:

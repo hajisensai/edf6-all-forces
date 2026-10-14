@@ -21,7 +21,9 @@ bool CameraRay(float*,float*) noexcept{return false;}
 PluginBody BodyOf(const void*) noexcept{return PluginBody::none;}
 bool HighCamOn(const void*) noexcept{return false;}
 bool TurretCamHighTransition(const void*) noexcept{return false;}
+const unsigned char* PlayerTurretGun(const unsigned char*,const unsigned char*) noexcept{return nullptr;}
 float SightZoomNow(const void*) noexcept{return 1;}
+int SightZoomRange(const void*,float*) noexcept{return 0;}
 int StabState(unsigned char*,unsigned) noexcept{return 0;}
 bool IsSub(const void*) noexcept{return false;}
 bool IsPlayerJet(const void*) noexcept{return false;}
@@ -38,6 +40,7 @@ bool IsFuelTank(const unsigned char*) noexcept{return false;}
 unsigned char* PayloadPicked(const void*) noexcept{return nullptr;}
 unsigned char* PayloadSightPicked(const void*,unsigned) noexcept{return nullptr;}
 int PayloadSightWeapons(const void*,unsigned,unsigned char**,int) noexcept{return 0;}
+int PayloadTriggerWeapons(const void*,unsigned,unsigned char**,int) noexcept{return 0;}
 // The Proteus's borrowed stock mounts (proteus.cpp): `proteusLent` lent to seat `proteusSeat`.
 const unsigned char* proteusLent=nullptr;unsigned proteusSeat=0;
 int ProteusBorrowedWeapons(const unsigned char*,unsigned seat,const unsigned char** out,int max) noexcept{

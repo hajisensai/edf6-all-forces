@@ -12,6 +12,9 @@ import hashlib
 from pathlib import Path
 import struct
 
+import cockpit_fits
+import cockpit_kits
+import cockpits
 import dsgo
 import sgo
 from mdb import Bone, Mdb, bind_world, ident, inverse_affine, mdb_read, mdb_write, mmul, rab_read, rab_write, read_elem, cmpl_compress
@@ -32,6 +35,7 @@ class Model:
     stem: str
     digest: str
     lenses: tuple[Lens, ...]
+    cockpits: tuple[cockpits.Fit, ...] = ()   # the seats' first-person cockpits (pylib/cockpit_fits.py)
 
 
 MODELS = (
@@ -47,6 +51,20 @@ MODELS = (
            Lens('vc_optic_01', 'subCannon_A_roll', 'barbette8', (1220, 1221, 1222, 1223)),
            Lens('vc_optic_02', 'subCannon_B_roll', 'barbette8', (3100, 3101, 3102, 3103)))),
 )
+
+
+# The stock models with cockpits: the optics' own, and those fitted with an audited digest (cockpit_fits DIGESTS). A
+# generated model's stem (the plugin's own vehicles) has no digest: its generator grafts it (cockpits.graft_files).
+MODELS = tuple(replace(m, cockpits=cockpit_fits.FITS.get(m.stem, ())) for m in MODELS) + tuple(
+    Model(stem, cockpit_fits.DIGESTS[stem], (), fits) for stem, fits in sorted(cockpit_fits.FITS.items())
+    if stem not in {m.stem for m in MODELS} and stem in cockpit_fits.DIGESTS)
+
+
+def ready(spec: Model) -> bool:
+    """Whether `spec`'s model is built and its SGOs redirected now: it has optics, or its cockpits' assets are there
+    (without them a cockpit-only model would be the stock one under another name). MODELS stays whole for undoing
+    the redirects an earlier install made."""
+    return bool(spec.lenses) or (bool(spec.cockpits) and cockpits.assets_present())
 
 
 def output(spec: Model) -> str:
@@ -184,52 +202,92 @@ def preorder(md: Mdb) -> Mdb:
     return replace(md, bones=bones, objects=objects)
 
 
+def add_marker(md: Mdb, parent_name: str, marker: str, frame: list[float]) -> Mdb:
+    """`md` with a transform-only bone `marker` under `parent_name` whose model-space bind matrix is `frame` (rows: its
+    +x, +y, +z, origin), appended (preorder() puts the skeleton back in DFS order)."""
+    parent = md.bone_index(parent_name)
+    if parent < 0 or md.bone_index(marker) >= 0:
+        raise ValueError(f'unexpected source skeleton for marker {marker} under {parent_name}')
+    local = mmul(frame, inverse_affine(bind_world(md)[parent]))
+    names, bones = list(md.names) + [marker], list(md.bones)
+    bones.append(Bone(len(bones), parent, -1, -1, len(names)-1, 0, 0, 0, 0, 0, 0,
+                      local, inverse_affine(frame), [0.,0.,0.,1.], [0.,0.,0.,1.]))
+    return replace(md, names=names, bones=bones)
+
+
 def mark_model(md: Mdb, spec: Model, sgo_data: bytes) -> Mdb:
-    names, bones = list(md.names), list(md.bones)
     world = bind_world(md)
     for lens in spec.lenses:
         parent = md.bone_index(lens.bone)
-        if parent < 0 or md.bone_index(lens.marker) >= 0:
+        if parent < 0:
             raise ValueError('unexpected source optic skeleton')
         if lens.camera:
-            local = camera_local(sgo_data, lens)
-            frame = mmul(local, world[parent])
+            frame = mmul(camera_local(sgo_data, lens), world[parent])
         else:
             eye, forward = surface(md, lens)
             right = unit(cross(tuple(world[parent][4:7]), forward))
             up = cross(forward, right)
             frame = [*right, 0., *up, 0., *forward, 0., *eye, 1.]
-            local = mmul(frame, inverse_affine(world[parent]))
-        names.append(lens.marker)
-        bones.append(Bone(len(bones), parent, -1, -1, len(names)-1, 0, 0, 0, 0, 0, 0,
-                          local, inverse_affine(frame), [0.,0.,0.,1.], [0.,0.,0.,1.]))
-    return preorder(replace(md, names=names, bones=bones))
+        md = add_marker(md, lens.bone, lens.marker, frame)
+    return preorder(md)
 
 
 def build_model(game, spec: Model) -> bytes:
     """Preserve loose texture changes only when the model geometry contract matches."""
     name = spec.stem + '.MRAB'
+    print(f'    {name}：读取模型资源……', flush=True)
     loose = Path(game.root, 'Mods', 'OBJECT', name)
     arc = rab_read(loose.read_bytes() if loose.is_file() else game.read('OBJECT', name))
     model = next(f for f in arc.files if f.name.lower() == spec.stem.lower()+'.mdb')
     raw = model.data
     if hashlib.sha256(raw).hexdigest() != spec.digest:
         raise ValueError(f'{name}: model geometry differs from the audited optic profile; preserving the other mod')
-    marked = mark_model(mdb_read(raw), spec, game.read('OBJECT', spec.stem+'.SGO'))
+    # The SGO only for a camera lens's locator (a cockpit-only skin's model may have no SGO of its own name).
+    sgo_data = game.read('OBJECT', spec.stem+'.SGO') if any(lens.camera for lens in spec.lenses) else b''
+    print(f'    {name}：解析几何与生成瞄具骨骼……', flush=True)
+    marked = mark_model(mdb_read(raw), spec, sgo_data)
+    textures: dict[str, bytes] = {}
+    if spec.cockpits:
+        try:
+            marked, textures = cockpits.graft(marked, spec.cockpits, cockpit_kits.KITS, game, preorder)
+        except cockpits.CockpitAssetsMissing as e:   # the optics still; the seats keep the stock camera
+            print(f'{name}: no cockpits ({e})')
+    print(f'    {name}：压缩模型与打包贴图……', flush=True)
     model.stored = cmpl_compress(mdb_write(marked))
+    cockpits.add_textures(arc, textures)
     return rab_write(arc)
 
 
+def _model_reference(animation: object) -> list[object] | None:
+    """The primary archive/model pair, including stock model-list wrappers."""
+    items = animation.items if isinstance(animation, dsgo.Node) else animation
+    if not isinstance(items, list) or not items:
+        return None
+    value = items[0]
+    while True:
+        ref = value.items if isinstance(value, dsgo.Node) else value
+        if not isinstance(ref, list) or not ref:
+            return None
+        if len(ref) >= 2 and isinstance(ref[0], str) and isinstance(ref[1], str):
+            return ref
+        value = ref[0]
+
+
 def redirect(data: bytes) -> tuple[bytes, tuple[str, ...]]:
-    """Change only an audited model path; other-mod/custom models have no fallback."""
+    """Change only an audited model path; other-mod/custom models have no fallback. Only a ready() model is pointed
+    at (an already redirected path is recognised for any)."""
     doc = dsgo.parse(data) if data[:4] == b'DSGO' else None
     version, m = sgo.read(data) if doc is None else (None, None)
     try:
-        animation = doc.root.get('animation_model').items if doc else m['animation_model']
-        ref = animation[0].items if doc else animation[0]
+        animation = doc.root.get('animation_model') if doc else m['animation_model']
     except (KeyError, TypeError, AttributeError):
         return data, ()
+    ref = _model_reference(animation)
+    if ref is None:
+        return data, ()
     for spec in MODELS:
+        if not ready(spec) and ref[0].lower() != f'app:/object/{output(spec).lower()}':
+            continue
         if (ref[0].lower() in (f'app:/object/{spec.stem.lower()}.mrab', f'app:/object/{output(spec).lower()}')
                 and ref[1].lower() == spec.stem.lower()+'.mdb'):
             ref[0] = 'app:/object/' + output(spec).lower()
@@ -241,8 +299,11 @@ def model_path(data: bytes) -> str | None:
     doc = dsgo.parse(data) if data[:4] == b'DSGO' else None
     try:
         if doc:
-            return doc.root.get('animation_model').items[0].items[0]
-        return sgo.read(data)[1]['animation_model'][0][0]
+            animation = doc.root.get('animation_model')
+        else:
+            animation = sgo.read(data)[1]['animation_model']
+        ref = _model_reference(animation)
+        return ref[0] if ref is not None else None
     except (KeyError, TypeError, AttributeError):
         return None
 
@@ -256,8 +317,8 @@ def restore_path(data: bytes, path: str | None = None) -> bytes:
     path = path or 'app:/object/'+spec.stem.lower()+'.mrab'
     if data[:4] == b'DSGO':
         doc = dsgo.parse(data)
-        doc.root.get('animation_model').items[0].items[0] = path
+        _model_reference(doc.root.get('animation_model'))[0] = path
         return dsgo.write(doc)
     version, m = sgo.read(data)
-    m['animation_model'][0][0] = path
+    _model_reference(m['animation_model'])[0] = path
     return sgo.write(version, m)

@@ -819,7 +819,7 @@ def add_material(md: Mdb, template: Mdb, template_material: str, name: str,
     return replace(md, names=names, textures=texs, materials=list(md.materials) + [mat]), mat.index
 
 
-def add_texture(rab: Rab, filename: str, dds: bytes) -> list[str]:
+def add_texture(rab: Rab, filename: str, dds: bytes, *, compressor: Callable[[bytes], bytes] = cmpl_compress) -> list[str]:
     """Add texture `filename` ('x.dds') to `rab` as the game stores it: `x.dds` (HD-TEXTURE, flag 1) and
     `x.lod.dds` (TEXTURE, flag 0, the mip tail texfile.texture_pair cuts), CMPL-compressed, each placed by
     mdb.insert_member (folder-table order: the .lod before the model, which binds its textures when it loads). An
@@ -831,7 +831,7 @@ def add_texture(rab: Rab, filename: str, dds: bytes) -> list[str]:
         if folder not in rab.folders:
             rab.folders.append(folder)
         rab.files = [f for f in rab.files if f.name.lower() != name.lower()]
-        insert_member(rab, RabFile(name, rab.folders.index(folder), flag, cmpl_compress(data)))
+        insert_member(rab, RabFile(name, rab.folders.index(folder), flag, compressor(data)))
         added.append(name)
     return added
 

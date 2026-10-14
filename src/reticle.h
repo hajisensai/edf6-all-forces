@@ -55,6 +55,13 @@ inline bool AntiAirClass(const char* cls) noexcept {
     return false;
 }
 
+// EfsBullet / EfsExposureBullet (rounds.cpp's BEAM class) are the game's effect-scripted rounds, not energy weapons as
+// such: the 601 tank's 140 mm cannon fires EfsBullet with AmmoGravityFactor 1 and an 8-18 m AmmoExplosion, the Nix /
+// Proteus lasers EfsExposureBullet with gravity 0 (tests/weapon_style_data_check.py, tools/reticle_check.cpp). One of
+// them that falls is a shell, and gets the cannon's label, sight and drop ladder (the user, 2026-10-12: 「明明是榴弹炮，
+// 怎么显示的光束」).
+constexpr bool FallingEffectShell(bool effectClass,float gravityFactor) noexcept { return effectClass && gravityFactor>0.0f; }
+
 inline Style Classify(const Traits& t) noexcept {
     if(t.homing)return Style::missile;
     if(t.rocket)return Style::rocket;
@@ -121,12 +128,14 @@ inline bool Turned(const float* bore,float angle,float* out) noexcept {
 }
 
 // --- The sketch: what a style draws, in screen pixels, for hud.cpp to render. ---
-enum class Ink : std::uint8_t { main, dim, hot };   // the HUD's green, its dim green, amber
+// The HUD's green, its dim green, amber; and a magnified optic's own (scopereticle.h): the reticle etched black on the
+// glass (and dimmer), its illuminated aiming point (red), the fire-control computer's display (LED orange).
+enum class Ink : std::uint8_t { main, dim, hot, etch, etchDim, lit, led, ledDim };
 struct Stroke { float x0,y0,x1,y1,w; Ink ink; };
 struct Circle { float x,y,r,w; Ink ink; };
 struct Dot { float x,y,r; Ink ink; };
 struct Note { float x,y; int align; float scale; Ink ink; wchar_t text[16]; };   // align: 0 left, 1 centred, 2 right
-constexpr int kMostStrokes=128,kMostCircles=8,kMostDots=64,kMostNotes=16;
+constexpr int kMostStrokes=360,kMostCircles=12,kMostDots=200,kMostNotes=40;
 struct Sketch {
     Stroke stroke[kMostStrokes]; int strokes=0;
     Circle circle[kMostCircles]; int circles=0;

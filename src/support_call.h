@@ -96,6 +96,13 @@ const wchar_t* SupportCallKey(int index) noexcept;
 // A map / radio call of entry `index`; the sea rescue entry is refused here and by SupportCallComposedAt (only the
 // rescue's own trigger asks for it).
 bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept;
+// The submarine carrier's call (support_aircraft.h SupportSubCatalog): it comes up out of the water (subcarrier.cpp
+// SubLaunch: made under the surface, it rises), not through the support planner (it has no aircraft, crew or route to
+// plan). Placed kSubAhead past `target` away from `from` (the caller), else nearer, at the first spot that is not land:
+// the hull clear of the caller where the water lets it. `local`: this machine's own call (its status is shown); a radio
+// call is replayed on every machine, each surfacing its own copy (the caller's: airstrike.cpp sets the spawn owner).
+// False: no water near the target, its files not preloaded, or kMaxSubs out already.
+bool SupportSubCallAt(const float* target,const float* from,bool local,wchar_t* note,std::size_t capacity) noexcept;
 // The entries the map's support bar offers and cycles (mapcmd.cpp): every one but the sea rescue, the catalog's last.
 int SupportMenuCount() noexcept;
 // The sea rescue (2026-10-09, the user: 「给救援加一个支援目录项，走正规的呼叫支援流程」): the catalog's last entry,
@@ -118,6 +125,8 @@ void RescueRequestFailed(const wchar_t* why) noexcept;
 //  - the ground helicopters stood on this mission and none stands on now (helipad.h; heli.cpp): takeoff points.
 int RescueTakeoffPads(float (*out)[3],int most) noexcept;
 void SupportDispatchTick() noexcept;
+// Mission services progress from any actor update, independently of local input ownership.
+void SupportActorFrame(const void* actor) noexcept;
 void ResetSupportDispatch() noexcept;
 void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept;
 // What the map's support bar shows of the catalog (hud.cpp MapSupportBar): an entry's icon, and whether a call can be

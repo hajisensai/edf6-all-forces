@@ -90,6 +90,12 @@ public:
     void Failed(std::uint64_t token,RequestStatus reason=RequestStatus::cancelled) noexcept;
     bool IsActive(std::uint64_t token) const noexcept;
     bool Ready() const noexcept;
+    std::uint32_t PendingHandshakes() const noexcept {
+        if(!running_)return peers_+1;
+        if(!host_)return epoch_ ? 0u : 1u;
+        std::uint32_t missing=0;for(std::uint32_t i=1;i<=peers_;++i)if(!challenges_[i])++missing;
+        return missing;
+    }
     std::uint64_t Epoch() const noexcept { return epoch_; }
     std::uint32_t ActiveCount() const noexcept;
     // Host: whether every peer of this session announced all of `caps` in its current hello (no peer: true).

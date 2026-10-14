@@ -106,5 +106,11 @@ Scan ScanLine(const float* from,const float* dir,float range,MapRay map,Building
     s.end=along;
     return s;
 }
+
+// Where the beam's end blast goes, in metres along the line of scan `s`: the ground it ends on, else the last building it
+// passes through (README「在它照到的地面（或最后一栋建筑）上爆出」), else none (< 0: open air to its reach). The beam
+// keeps the last one it found (emc.cpp Beam): its break charges bring the buildings down, so by its last frame the line
+// may be empty where it went through a whole block (2026-10-11: 35 charges fired, "nothing at its end: no blast").
+inline float BlastAt(const Scan& s) noexcept { return s.ground ? s.end : s.breaks>0 ? s.at[s.breaks-1] : -1.0f; }
 }  // namespace emc
 }  // namespace crew

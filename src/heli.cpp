@@ -37,6 +37,7 @@
 #include "body506.h"
 #include "heliaim.h"
 #include "airbound.h"
+#include "rotor_clear.h"
 #include "layout.h"
 #include "memory.h"
 #include "online_authority.h"
@@ -53,6 +54,7 @@
 #include "hudtext.h"
 #include "rescue_logic.h"
 #include "helipad.h"
+#include "log_once.h"
 #include <cmath>
 #include <cstdarg>
 
@@ -237,7 +239,11 @@ constexpr float kGunshipRadius=90.0f,kGunshipHeight=40.0f,kGunshipSpeed=10.0f;
 // same layout.h vtables): its reach (see kReach410), its forward guns' reach (0: heliRange), how it attacks (the
 // 506 strafes, the 409 makes rocket runs and circles for its turret, the 410 circles for its door guns), the
 // circle it flies round a target, how far below it its turret gun fires on its own (0: no turret), and how it
-// fires (the nose bytes veh+0x2020/0x2021, or the 410's door gun blocks).
+// fires (the nose bytes veh+0x2020/0x2021, or the 410's door gun blocks), and its rotor's radius (rotor_clear.h: the
+// walls it keeps its blades off).
+// Rotor radii: the 506's disc 4.76 m (docs/player-jet-re.md, its ragdoll); the 410's 20 m across (kReach410); the 409's
+// is not measured, taken a little over the 506's.
+constexpr float kRotor506=4.8f,kRotor409=5.0f,kRotor410=10.0f;
 enum class Attack { strafe, rocketRun, gunship };
 enum class Guns { nose, doors };
 struct HeliType {
@@ -246,12 +252,13 @@ struct HeliType {
     Attack attack;
     float circleRadius,circleHeight,circleSpeed,turretReach;
     Guns guns;
+    float rotor;
 };
 const HeliType kHeliTypes[]={
-    {kVt506,"506",kReachOther,kGun506Range,Attack::strafe,0.0f,0.0f,0.0f,0.0f,Guns::nose},
-    {kVt409,"409",kReachOther,0.0f,Attack::rocketRun,kTurretRadius,kTurretHeight,kTurretSpeed,kTurretReach,Guns::nose},
-    {kVt410,"410",kReach410,0.0f,Attack::gunship,kGunshipRadius,kGunshipHeight,kGunshipSpeed,0.0f,Guns::doors},
-    {kVtHeliBase,"base",kReachOther,0.0f,Attack::strafe,0.0f,0.0f,0.0f,0.0f,Guns::nose},
+    {kVt506,"506",kReachOther,kGun506Range,Attack::strafe,0.0f,0.0f,0.0f,0.0f,Guns::nose,kRotor506},
+    {kVt409,"409",kReachOther,0.0f,Attack::rocketRun,kTurretRadius,kTurretHeight,kTurretSpeed,kTurretReach,Guns::nose,kRotor409},
+    {kVt410,"410",kReach410,0.0f,Attack::gunship,kGunshipRadius,kGunshipHeight,kGunshipSpeed,0.0f,Guns::doors,kRotor410},
+    {kVtHeliBase,"base",kReachOther,0.0f,Attack::strafe,0.0f,0.0f,0.0f,0.0f,Guns::nose,kRotor506},
 };
 const HeliType* TypeOf(const void* vehicle) noexcept {
     if(!Readable(vehicle,8))return nullptr;
@@ -300,6 +307,7 @@ struct alignas(16) RayHits { unsigned char raw[0xA0]; };
 // receives the point. `any`: the nearest hit of any kind instead (log only); `flags` gets its flags.
 // `filter`: the ray's collision filter (its layer; kMapLayer the game's map ray).
 constexpr std::uint32_t kMapLayer=0x16;
+constexpr std::uint32_t kObjectLayer=0x0B;   // the bullets' object layer (ObjectRay)
 // `normal`: the hit's normal (collector +0x40; whose side it faces: map_floor.h Learn).
 float CastRay(const float* a,const float* b,float* hit=nullptr,bool any=false,std::uint32_t* flags=nullptr,
               std::uint32_t filter=kMapLayer,float* normal=nullptr) noexcept {
@@ -335,14 +343,22 @@ const Signature kWaterSignatures[]={
 };
 bool waterOk=false;
 
-// One play's rays settle the unverified parts (the list's layout at run time, the surface heights): each
-// different answer is logged once.
+// One play's rays settle the unverified parts (the list's layout at run time, the surface heights): each different
+// answer is logged once a mission (ResetHelis clears the table). Compared only with the answer before, as it was until
+// 2026-10-12, a heli over a shore (its probe flipping water/land/water) wrote a line per flip: 26 363 of the 31 723
+// lines of the testers' report #11, the rest pushed out of the 12 MB the installer sends back (log_once.h).
+SeenOnce<32> seaSeen;
 void LogSea(Sea sea,std::size_t areas,float y) noexcept {
-    static Sea lastSea=Sea::unknown;static std::size_t lastAreas=~std::size_t{0};static float lastY=0.0f;
-    if(sea==lastSea && areas==lastAreas && std::fabs(y-lastY)<0.5f)return;
-    lastSea=sea;lastAreas=areas;lastY=y;
-    Log("WATER %s: %zu water area(s) on the map%s%.1f",sea==Sea::water ? "sea" : sea==Sea::land ? "no water here" : "unknown",
-        areas,sea==Sea::water ? ", surface y=" : "",sea==Sea::water ? y : 0.0f);
+    const auto half=static_cast<std::int32_t>(std::lround(sea==Sea::water ? y*2.0f : 0.0f));   // 0.5 m steps
+    const std::uint64_t key=(static_cast<std::uint64_t>(sea)<<56)|(static_cast<std::uint64_t>(areas&0xFFFF)<<32)|
+                            static_cast<std::uint32_t>(half);
+    switch(seaSeen.Check(key)) {
+    case SeenOnce<32>::Verdict::seen:return;
+    case SeenOnce<32>::Verdict::full:Log("WATER: %zu different answers this mission, further ones not logged",seaSeen.Count());return;
+    case SeenOnce<32>::Verdict::fresh:break;
+    }
+    if(sea==Sea::water)Log("WATER sea: %zu water area(s) on the map, surface y=%.1f",areas,y);
+    else Log("WATER %s: %zu water area(s) on the map",sea==Sea::land ? "no water here" : "unknown",areas);
 }
 
 Sea SeaProbe(float x,float z,float* surface) noexcept {
@@ -768,7 +784,8 @@ bool Medic(const unsigned char* v) noexcept {
 // any other: the enemies.
 template<class F> bool ForEachTarget(bool medic,const unsigned char* v,F&& f) noexcept {
     if(medic)return ForEachHurtFriend(v,[&](const void* o,const float* a,float share) noexcept { f(o,a,share*kHurtWeight); });
-    return ForEachEnemy(v,[&](const void* o,const float* a) noexcept { f(o,a,0.0f); });
+    // An enemy its fire is wasted on (WastedFire) is no target of its.
+    return ForEachEnemy(v,[&](const void* o,const float* a) noexcept { if(!HoldFire(v,o))f(o,a,0.0f); });
 }
 
 // Would a healing round of `weapon` from `from` to `to` pass within kEnemyClear of an enemy, or burst with one in its blast?
@@ -1196,11 +1213,15 @@ template<class F> void LeadPoint(const float* pos,const float* aim,const float* 
 // - a ray straight along the way it flies (and two kAvoidSide to the sides) finds walls: the speed into
 //   one is cut to what stops it kAvoidStop short, the height goes kRoofClear over the wall's top, and it
 //   veers to the clearer side.
+// All those rays leave the body centre with no width, so on top of them the rotor keeps its radius plus a margin
+// off the walls all round (rotor_clear.h), in every mode (landing too, without its climb), and the stop short of
+// a wall ahead counts from the disc's edge, not the centre.
 constexpr float kLookAhead=3.0f,kLookMin=25.0f,kAvoidSide=0.52f;   // s; m; rad (30 deg)
 constexpr float kGroundClear=6.0f,kRoofClear=10.0f,kRoofProbe=150.0f,kAvoidStop=12.0f,kAvoidSteer=8.0f;
+static_assert(rotorclear::kOverRoof==kGroundClear,"rotor_clear.h climbs over a wall as Avoid over the ground");
 // metres to the wall ahead and over the ground (-1: none seen); for the log, the roof ahead and the
-// nearest hit of any kind there with its flags (-1e9: none)
-struct Avoidance { float ahead,clear,roof,anyRoof; std::uint32_t anyFlags; };
+// nearest hit of any kind there with its flags (-1e9: none); the rotor's clearance (rotor_clear.h)
+struct Avoidance { float ahead,clear,roof,anyRoof; std::uint32_t anyFlags; rotorclear::Result rotor; };
 
 float RoofBelow(const float* at,float top,bool any=false,std::uint32_t* flags=nullptr) noexcept {
     const float a[3]={at[0],top,at[2]},b[3]={at[0],top-kRoofProbe*2.0f,at[2]};
@@ -1208,9 +1229,17 @@ float RoofBelow(const float* at,float top,bool any=false,std::uint32_t* flags=nu
     return CastRay(a,b,hit,any,flags)>=0.0f ? hit[1] : -1e9f;
 }
 
-Avoidance Avoid(const float* pos,const float* vel,float* want,float* height,bool land,float stopDecel) noexcept {
-    Avoidance r{-1.0f,-1.0f,-1e9f,-1e9f,0};
-    if(!Cfg().heliAvoid || !rayOk)return r;
+// The rotor's clearance (rotor_clear.h) on the map ray: last, so no push before it sends the blades into a wall.
+rotorclear::Result RotorClear(const float* pos,const float* vel,float rotor,float stopDecel,float* want,float* height,
+                              bool climb,float push) noexcept {
+    const float top=(pos[1]>*height ? pos[1] : *height)+kRoofProbe;
+    return rotorclear::Clear(pos,vel,rotor,stopDecel,want,height,climb,
+        [](const float* a,const float* b,float* hit,float* normal){ return CastRay(a,b,hit,false,nullptr,kMapLayer,normal); },
+        [top](const float* at){ return RoofBelow(at,top); },push);
+}
+
+Avoidance AvoidMap(const float* pos,const float* vel,float* want,float* height,bool land,float stopDecel,float rotor) noexcept {
+    Avoidance r{-1.0f,-1.0f,-1e9f,-1e9f,0,{-1.0f,{0.0f,0.0f},0,-1e9f}};
     const float down[3]={pos[0],pos[1]-kRoofProbe*2.0f,pos[2]};
     float hit[3];
     if(CastRay(pos,down,hit)>=0.0f) {
@@ -1246,7 +1275,7 @@ Avoidance Avoid(const float* pos,const float* vel,float* want,float* height,bool
         const float beyond[3]={hit[0]+dir[0]*3.0f,0,hit[2]+dir[2]*3.0f};
         const float wall=RoofBelow(beyond,top);
         if(*height<wall+kRoofClear)*height=wall+kRoofClear;
-        const float room=centre-kAvoidStop;
+        const float room=centre-kAvoidStop-rotor;   // from the disc's edge
         const float allowed=room>0.0f ? std::sqrt(2.0f*stopDecel*room) : 0.0f;
         const float into=Dot2(want,dir);
         if(into>allowed){want[0]-=dir[0]*(into-allowed);want[2]-=dir[2]*(into-allowed);}
@@ -1261,6 +1290,17 @@ Avoidance Avoid(const float* pos,const float* vel,float* want,float* height,bool
         const float push=kAvoidSteer*(1.0f-nearest/look);
         want[0]+=perp[0]*push;want[2]+=perp[2]*push;
     }
+    return r;
+}
+
+// `rotor`: its rotor's radius (HeliType::rotor). Landing (and low over the sea) it keeps its blades off the walls but
+// does not climb over them; `push`: the share of the rotor's push out of them it takes (rotorclear::PushShare: none
+// landing or lifting off).
+Avoidance Avoid(const float* pos,const float* vel,float* want,float* height,bool land,float stopDecel,float rotor,
+                float push) noexcept {
+    if(!Cfg().heliAvoid || !rayOk)return Avoidance{-1.0f,-1.0f,-1e9f,-1e9f,0,{-1.0f,{0.0f,0.0f},0,-1e9f}};
+    Avoidance r=AvoidMap(pos,vel,want,height,land,stopDecel,rotor);
+    r.rotor=RotorClear(pos,vel,rotor,stopDecel,want,height,!land,push);
     return r;
 }
 
@@ -1465,7 +1505,7 @@ void DoorGun(Door& g,const ObjRef& share,bool refill,unsigned char* v,int i,bool
         const float cone=(wide>kDoorCone ? wide : kDoorCone)*(g.firing ? kDoorHold : 1.0f);
         // A healing round onto the player is the point; one past an enemy is not (see Medic).
         fire=!hold && !theirs && Cfg().heliFire && std::fabs(err[0])<cone && std::fabs(err[1])<cone && dist>kDoorMin &&
-             (heals ? !EnemyInLine(v,weapon,gp,lead) : !PlayerInLine(gp,lead));
+             (heals ? !EnemyInLine(v,weapon,gp,lead) : !PlayerInLine(gp,lead) && !HoldFire(v,best,gp,speed,gravity*kGravity));
     } else g.target=ObjRef{};
     if(theirs && !best){g.prevValid=false;return;}   // nobody to heal: their own aim
     Put<float>(blk,0,in[0]);Put<float>(blk,4,in[1]);
@@ -2113,7 +2153,10 @@ Control Steer(Heli& h,const Sense& s,Mode mode,Want& w) noexcept {
         w.height=pos[1]+(above ? kUnstick : -kUnstick);
     }
     Control c{};
-    c.avoid=Avoid(pos,h.vel,w.vel,&w.height,land || (mode==Mode::rescue && s.rescueLow),h.stopDecel);
+    // The rotor's push out of a wall: none landing, on the ground or lifting off, eased in after (rotor_clear.h PushShare).
+    const float push=rotorclear::PushShare(land,s.grounded ? 0 : s.ms-h.groundAt,kLiftOffMs);
+    c.avoid=Avoid(pos,h.vel,w.vel,&w.height,land || (mode==Mode::rescue && s.rescueLow),h.stopDecel,
+                  h.type ? h.type->rotor : kRotor506,push);
     if((s.follow || s.engage) && !h.guard && !h.leaving)std::memcpy(h.hold,pos,12);
 
     // Horizontal: the stick for the wanted velocity (full stick flies h.top) plus kBrakeGain per m/s it is
@@ -2121,7 +2164,17 @@ Control Steer(Heli& h,const Sense& s,Mode mode,Want& w) noexcept {
     float forward=0.0f,lateral=0.0f;
     aim::StockStick(w.vel,h.vel,h.top,kBrakeGain,s.fwd,s.right,&forward,&lateral);
     // Aiming, the forward stick is the nose dip (kMaxTilt at full stick), and it creeps along the nose.
-    if(mode==Mode::aim)forward=Clamp((s.dipWant+(s.dipWant-s.dip)*kPitchGain)/kMaxTilt,-1.0f,1.0f);
+    if(mode==Mode::aim) {
+        forward=Clamp((s.dipWant+(s.dipWant-s.dip)*kPitchGain)/kMaxTilt,-1.0f,1.0f);
+        // ...but never on into a wall by its rotor (rotor_clear.h): the nose comes up, back off it, by how far its
+        // clearance is short (the lateral stick already has the push out of it from the wanted velocity).
+        const rotorclear::Result& rc=c.avoid.rotor;
+        const float keep=(h.type ? h.type->rotor : kRotor506)+rotorclear::kMargin;
+        if(rc.nearest>=0.0f && rc.nearest<keep && rc.dir[0]*s.fwd[0]+rc.dir[1]*s.fwd[2]>0.5f) {
+            const float back=-Clamp((keep-rc.nearest)/keep,0.0f,1.0f);
+            if(forward>back)forward=back;
+        }
+    }
 
     // Vertical: the rotor (kRotor) is the lift, and it trails the throttle by seconds (spooling down
     // slower than up). So altitude -> climb rate -> wanted rotor -> a throttle that drives the rotor
@@ -2207,6 +2260,12 @@ Shot Fire(Heli& h,const Sense& s,Mode mode) noexcept {
             if(shot.missile)h.missileAt=s.ms;
         }
     } else h.firing=false;
+    if(shot.gun && !Medic(s.v))shot.gun=!HoldFire(s.v,h.target.obj,pos,s.arms.gunSpeed,s.arms.gunGravity*kGravity);
+    if(shot.missile && !Medic(s.v)) {
+        const unsigned char* w=s.arms.store ? s.arms.store : h.arms[2].weapon;
+        if(Readable(w,kWeaponGravity+4))
+            shot.missile=!HoldFire(s.v,h.target.obj,pos,At<float>(w,kWeaponSpeed)*60.0f,At<float>(w,kWeaponGravity)*kGravity);
+    }
     if(s.type->guns==Guns::nose){s.v[kFireGun]=shot.gun;s.v[kFireMissile]=shot.missile;}
     else if(doorOk && Cfg().heliDoorGuns && SeatCount(s.v)>=3)
         for(int i=0;i<2;++i)DoorGun(h.doors[i],h.target,!h.called,s.v,i,s.grounded || land || rescuing,s.dt,s.ms);
@@ -2237,13 +2296,13 @@ void FlyLog(Heli& h,const Sense& s,Mode mode,const Want& w,const Control& c,cons
     h.loggedAt=ms;
     const float speed=std::sqrt(Dot2(h.vel,h.vel)),aimedLead=Dist2(s.aim,s.lead);
     const Avoidance& a=c.avoid;
-    Log("HELI v=%p %s%s flight=%d.%d ammo=%d/%d/%d y=%.1f goal=%.1f vy=%.2f thr=%.3f hover=%.3f rotor=%.3f fwd=%.2f lat=%.2f yaw=%.2f rate=%.0fdeg/s sign=%d%s votes=%d dGoal=%.0f ground=%d target=%p dist=%.0f off=%.0fdeg miss=%.1fdeg pitch=%.0fdeg gun=%d msl=%d spd=%.1f want=%.1f dipWant=%.0fdeg cone=%.1fdeg lead=%.1f tv=%.1f los=%.0fdeg/s ahead=%.0f clear=%.0f roof=%.0f any=%.0f/%X lift=%.0f%s%s",
+    Log("HELI v=%p %s%s flight=%d.%d ammo=%d/%d/%d y=%.1f goal=%.1f vy=%.2f thr=%.3f hover=%.3f rotor=%.3f fwd=%.2f lat=%.2f yaw=%.2f rate=%.0fdeg/s sign=%d%s votes=%d dGoal=%.0f ground=%d target=%p dist=%.0f off=%.0fdeg miss=%.1fdeg pitch=%.0fdeg gun=%d msl=%d spd=%.1f want=%.1f dipWant=%.0fdeg cone=%.1fdeg lead=%.1f tv=%.1f los=%.0fdeg/s ahead=%.0f clear=%.0f roof=%.0f any=%.0f/%X rotorWall=%.1f/%d over=%.0f lift=%.0f%s%s",
         v,s.perched ? "perched " : "",kModeNames[static_cast<int>(mode)],
         s.flight.group,s.flight.wing,s.arms.ammo[0],s.arms.ammo[1],s.arms.ammo[2],pos[1],w.height,h.vel[1],c.throttle,h.hover,c.rotor,
         c.stickF,c.stickL,c.yaw,h.yawRate*180.0f/kPi,h.yawSign,h.yawLocked ? "(locked)" : "",h.votes,w.off,s.grounded,
         s.engage ? h.target.obj : nullptr,s.dist,c.offYaw*180.0f/kPi,shot.miss,-s.dip*180.0f/kPi,shot.gun,shot.missile,
         speed,std::sqrt(Dot2(w.vel,w.vel)),s.dipWant*180.0f/kPi,shot.cone,aimedLead,std::sqrt(Dot2(h.tgtVel,h.tgtVel)),s.losRate*180.0f/kPi,
-        a.ahead,a.clear,a.roof,a.anyRoof,a.anyFlags,h.losLift,s.hidden ? " hidden" : "",s.wallAhead ? " wall" : "");
+        a.ahead,a.clear,a.roof,a.anyRoof,a.anyFlags,a.rotor.nearest,a.rotor.walls,a.rotor.roof,h.losLift,s.hidden ? " hidden" : "",s.wallAhead ? " wall" : "");
     if(s.store)Log("HELI v=%p store: miss=%.1f allowed=%.1f range=%.0f frames=%.0f worth=%d ready=%d aimed=%d ammo=%d",
                    v,s.storePass.miss,s.storeTol,s.storeRange,s.storePass.frames,s.storeWorth,StoreReady(h,s),s.storeAim,h.storeAmmo);
 }
@@ -2488,23 +2547,22 @@ void PlayerAssist(unsigned char* v) noexcept {
 // the stock input (slot 55) copies LX, the trigger, LY and RX to the heli and never RY, so the mouse's Y only ever moved
 // the camera (heli-input-re.md §2, §4). After it (HeliFrame runs in its post-hook, crew.cpp InputHook, so slot 57 reads
 // this frame's values) the input block is written in three layers:
-//  1. the attitude wanted (aim::Instructor): the aim's heading and pitch, the cyclic's forward speed for that pitch, the
-//     A / D slide, the collective's climb (W / S, Space, the brake key; let go: the height held);
+//  1. the attitude wanted (aim::Instructor): the mouse's heading and keyboard pitch, the cyclic's forward speed for that pitch, the
+//     A / D slide, the collective's climb (Space / brake key; let go: the height held);
 //  2. the attitude controller: the yaw onto the aim's heading through the native yaw lag's inverse (aim::PlayerYawInput;
-//     + grows the heading angle with a positive max yaw rate, aim::YawSign), the pitch the aim's (PlayerAttitudeHook
+//     + grows the heading angle with a positive max yaw rate, aim::YawSign), the pitch the keyboard's (PlayerAttitudeHook
 //     hands it to the attitude function alone), the roll the slide's plus a coordinated turn's bank (aim::BankInput);
 //  3. the native input block: forward / lateral the velocity law's stick (aim::StockStick: the stock heli flies its
 //     velocity directly, docs/aircraft-re.md §2), the throttle the collective through the rotor lag's inverse
 //     (aim::CollectiveThrottle), on the actuators PlayerMouseTune quickens.
 // PlayerAssist's settle runs first: let go of the pitch the heli stops within PlayerHeliStopSec. On the ground (OnGround:
-// contact bit 1 with the map under it, not perched on a body) nothing horizontal and the stock throttle, W or Space
+// contact bit 1 with the map under it, not perched on a body) nothing horizontal and the stock throttle, Space
 // spinning it up to lift off; for kLiftOffMs after it no horizontal stick (the NPC's lift-off).
 // The readout (PlayerHeliHud) is gathered while the mouse flies it, the HUD (ini HeliFlightHud) is on or the warnings are
 // heard (ini WarnAudio, warn.cpp): the mouse's aim is drawn whenever it flies, the HUD around it only with HeliFlightHud.
 constexpr std::size_t kSeatPad=0x2B0,kSeatLX=0x2C0,kSeatLY=0x2C4,kSeatRX=0x2D0,kSeatRY=0x2D4,kSeatAscend=0x2E0;   // §4
 constexpr float kPlayerClimb=6.0f;     // m/s: Space / the brake key (the stock rotor's most is ~8: aircraft-re.md)
-constexpr float kPlayerMark=800.0f;    // m: the aim's mark ahead (playerjet.cpp kAimMark), kept within kAimOnScreen
-constexpr float kAimOnScreen=0.85f;
+constexpr float kPlayerMark=800.0f;    // m: the mouse view direction marked ahead
 constexpr float kMovingSpeed=5.0f;     // m/s: slower, it has no flight path to mark (the HUD shows its drift)
 constexpr float kThreatRadius=20.0f;   // m: a missile's lock point this near it homes on it (playerjet.cpp's)
 constexpr float kGpwsSlack=1.0f;       // m/s over the descent key's sink before the ground-proximity warning counts it
@@ -2517,11 +2575,20 @@ struct Pilot {
     aim::Hold hold;
     float hover;                       // the rotor that holds its height (learned, StockThrottle)
     float prevHeading,yawRate;
-    float prevFwd[3],turn;             // the level nose last frame; its turn toward row 0 (rad/s, BankInput)
     float pitchIn,rollIn;              // the attitude the controller asks this frame (PlayerAttitudeHook's pitch / roll input)
     bool flying;                       // the mouse-aim flight wrote its input last frame (logged as it changes)
 };
 Pilot pilots[4];
+// The camera is fetched on another thread. Publish a complete immutable target; only the camera owns its ease state.
+struct PilotView { ObjRef ref;const unsigned char* seat;ULONGLONG ms;float target[3]; };
+SRWLOCK pilotViewLock=SRWLOCK_INIT;
+PilotView pilotView{};
+void PublishPilotView(const PilotView& view) noexcept {
+    AcquireSRWLockExclusive(&pilotViewLock);pilotView=view;ReleaseSRWLockExclusive(&pilotViewLock);
+}
+struct PilotCamera { ObjRef ref;const unsigned char* seat;ULONGLONG ms;float radius,up,rise,dir[3]; };
+PilotCamera pilotCamera{};
+
 
 // In the stock slot-57 physics, 0x654A80 uses input+8 for pitch (0x654E69), then the caller uses the original input+8
 // for forward velocity (0x651E2F). Keep those uses separate only for this frame's local mouse pilot.
@@ -2592,7 +2659,7 @@ Pilot* PilotOf(unsigned char* v,const float* fwd,ULONGLONG ms) noexcept {
     for(auto& x:pilots)if(!p && (!x.ref || x.ref.Is(v) || ms-x.seen>kAssistStaleMs))p=&x;
     if(!p)return nullptr;
     *p=Pilot{};p->ref=ObjRef::Of(v);p->lastMs=p->seen=ms;
-    std::memcpy(p->aim,fwd,12);std::memcpy(p->prevFwd,fwd,12);
+    std::memcpy(p->aim,fwd,12);
     const float lift=At<float>(v,kLiftPerRotor),mass=At<float>(v,kLiftMass);   // the takeoff cue's hover speed
     p->hover=aim::HoverRotor(lift,mass);
     p->prevHeading=std::atan2(fwd[0],fwd[2]);
@@ -2621,45 +2688,37 @@ float SeatAxis(const unsigned char* seat,std::size_t at) noexcept {
 void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos,const float* fwd,const float* right,bool grounded,
             float clear,float dt,ULONGLONG ms) noexcept {
     const float ly=SeatAxis(seat,kSeatLY),ry=SeatAxis(seat,kSeatRY),side=SeatAxis(seat,kSeatLX);
-    // The collective: W / S (the stock's -LY: W gives LY < 0), Space (the stock ascend) and the brake key.
-    const float vert=Clamp((ly<-0.3f ? 1.0f : ly>0.3f ? -1.0f : 0.0f)+(At<float>(seat,kSeatAscend)>0.5f ? 1.0f : 0.0f)-
+    // W/S are cyclic pitch. Only Space and the brake key change collective/height.
+    const float fore=Clamp(-ly,-1.0f,1.0f);
+    const float vert=Clamp((At<float>(seat,kSeatAscend)>0.5f ? 1.0f : 0.0f)-
                            (KeyDown(Cfg().playerJetBrakeKey) ? 1.0f : 0.0f),-1.0f,1.0f);
     const float mx=SeatAxis(seat,kSeatRX),my=Cfg().playerJetInvertPitch ? ry : -ry,k=aim::kPerUnit*Cfg().playerJetMouseSpeed;
-    float vp[16];
-    if(LastViewProj(vp)) {
-        // A level nose can itself be outside a downward-looking camera. Recover toward the actual view centre,
-        // not that same invisible nose, when the user moves the mouse; no mouse must not introduce a new pitch.
-        float centre[3]={fwd[0],fwd[1],fwd[2]},eye[3],view[3];
-        if(CameraRay(eye,view))aim::ViewCentreAim(pos,eye,view,kPlayerMark,centre);
-        const bool visible=aim::OnScreen(vp,pos,p.aim,kPlayerMark,kAimOnScreen);
-        if(visible || mx!=0.0f || my!=0.0f)aim::MoveOnScreen(vp,pos,p.aim,mx,my,k,centre,kPlayerMark,kAimOnScreen);
-    } else aim::Move(p.aim,mx,my,k);
+    // A world-held mouse direction: neither the screen boundary nor the moving hull recentres it.
+    if(mx!=0.0f || my!=0.0f)aim::Move(p.aim,mx,my,k);
     const float top=PlayerTop(v),maxTilt=At<float>(v,kPlayerMaxTilt);
     if(grounded)p.groundAt=ms;
     const bool lifting=ms-p.groundAt<kLiftOffMs;   // the NPC's lift-off: straight up, nothing horizontal
     // 1. The attitude wanted.
     float pitch=0.0f;
-    const aim::Want w=aim::Instructor(p.hold,p.aim,fwd,pos,p.vel,vert,side,top,kPlayerClimb,maxTilt,grounded,lifting,clear,&pitch);
+    const aim::Want w=aim::Instructor(p.hold,p.aim,fwd,pos,p.vel,vert,side,top,kPlayerClimb,maxTilt,grounded,lifting,clear,fore,&pitch);
     // 3. (the velocity first: the roll is built on its lateral) The cyclic's stick for the velocity.
     float forward=0.0f,lateral=0.0f;
     aim::StockStick(w.vel,p.vel,top,kBrakeGain,fwd,right,&forward,&lateral);
     if(lifting)forward=lateral=0.0f;
     // 2. The attitude controller. The native yaw channel is a lagged heading offset, not a rate: compensate its current
-    // state and the native spring conversion (aim::PlayerYawInput). The pitch the aim's; the roll the slide's plus the
-    // turn's bank (the nose's turn toward row 0, measured, times the forward speed).
+    // state and the native spring conversion (aim::PlayerYawInput). The pitch the keyboard's; the roll the slide's plus the
+    // turn's bank (the course command, not a feedback from the bank's own native heading transient).
     const float heading=std::atan2(fwd[0],fwd[2]);
     const float maxYaw=At<float>(v,kMaxYaw);
     const float spring=At<float>(v,kPlayerYawSpring),blend=At<float>(v,kYawSmooth),state=At<float>(v,kPlayerYawState);
     const float rateLimit=Cfg().heliYawRate>0.0f ? Cfg().heliYawRate*kPi/180.0f : std::fabs(maxYaw)*spring*60.0f;
-    const float yaw=aim::PlayerYawInput(Wrap(std::atan2(w.face[0],w.face[2])-heading),p.yawRate,rateLimit,maxYaw,state,blend,spring);
-    const float turnNow=((fwd[0]-p.prevFwd[0])*right[0]+(fwd[2]-p.prevFwd[2])*right[2])/dt;
-    std::memcpy(p.prevFwd,fwd,12);
-    if(std::isfinite(turnNow))p.turn+=(turnNow-p.turn)*0.3f;
-    const float along=p.vel[0]*fwd[0]+p.vel[2]*fwd[2];
+    const float off=Wrap(std::atan2(w.face[0],w.face[2])-heading);
+    const float yaw=aim::PlayerYawInput(off,p.yawRate,rateLimit,maxYaw,state,blend,spring);
     p.pitchIn=maxTilt>1e-3f ? Clamp(-pitch/maxTilt,-1.0f,1.0f) : 0.0f;
-    p.rollIn=grounded ? lateral : Clamp(lateral+aim::BankInput(along,p.turn,maxTilt),-1.0f,1.0f);
+    const float bank=aim::PlayerBankInput(p.hold.speed,off,rateLimit,maxTilt,fwd,right);
+    p.rollIn=grounded ? lateral : Clamp(lateral+bank,-1.0f,1.0f);
     Put<float>(v,kInLateral,lateral);Put<float>(v,kInForward,forward);Put<float>(v,kInW,1.0f);Put<float>(v,kInYaw,yaw);
-    // 3. The collective. On the ground the stock throttle (Space) stands, W spins the rotor up too.
+    // 3. The collective. Space spins up the rotor on the ground; W/S never add lift.
     if(!grounded) {
         const bool learn=p.hold.holding && std::fabs(p.hold.y-pos[1])<6.0f;
         const aim::Rotor rotor{At<float>(v,kLiftPerRotor),At<float>(v,kVertDamp),At<float>(v,kRotorIdle),At<float>(v,kRotorUp),
@@ -2671,10 +2730,11 @@ void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos
     if(Cfg().debug && ms-p.inputLogAt>=1000) {
         p.inputLogAt=ms;
         Log("HELI INPUT v=%p mouse=(%.3f,%.3f) vert=%.0f side=%.2f set=%.2f climb=%.2f aim=(%.3f,%.3f,%.3f) pitch=%.3f roll=%.3f "
-            "move=%.3f yaw=%.3f rate=%.3f turn=%.3f state=%.4f ground=%d lift=%d",v,mx,my,vert,side,p.hold.speed,w.climb,p.aim[0],
-            p.aim[1],p.aim[2],p.pitchIn,p.rollIn,forward,yaw,p.yawRate,p.turn,state,grounded,lifting);
+            "move=%.3f yaw=%.3f rate=%.3f bank=%.3f state=%.4f ground=%d lift=%d",v,mx,my,vert,side,p.hold.speed,w.climb,p.aim[0],
+            p.aim[1],p.aim[2],p.pitchIn,p.rollIn,forward,yaw,p.yawRate,bank,state,grounded,lifting);
     }
     p.flying=true;
+    PilotView view{p.ref,seat,ms,{p.aim[0],p.aim[1],p.aim[2]}};PublishPilotView(view);
 }
 
 // The HUD's readout (the flight's state; the threats as the jets' Threats gathers them), published for HudPublish.
@@ -2780,7 +2840,7 @@ void PlayerHeli(unsigned char* v) noexcept {
     if(mouse)AimFly(*p,v,seat,pos,fwd,right,grounded,clear==kNoGround ? -1.0f : clear,dt,ms);
     else {
         if(p->flying)Log("HELI v=%p the mouse-aim flight off: the stock input flies it",v);
-        p->flying=false;std::memcpy(p->aim,fwd,12);p->hold=aim::Hold{};
+        p->flying=false;PublishPilotView({});std::memcpy(p->aim,fwd,12);p->hold=aim::Hold{};
     }
     if(Cfg().heliFlightHud || p->flying || Cfg().warnAudio)PublishHud(*p,v,pos,grounded,clear,keys);   // the aim's square drawn either way
 }
@@ -2854,6 +2914,43 @@ void Replay(unsigned char* v) noexcept {
     Put<float>(v,kInYaw,-SeatAxis(seat,kSeatRX));
 }
 }  // namespace
+
+// Called only by the signature-checked native Type-1 locator camera hook. The flight and camera share one
+// mouse direction: do not integrate input again here or derive it from the rendered view (a feedback loop).
+bool PlayerHeliCamera(const unsigned char* seat,const float* stockEye,const float* stockLook,float* eye,float* look) noexcept {
+    AcquireSRWLockShared(&pilotViewLock);const PilotView view=pilotView;ReleaseSRWLockShared(&pilotViewLock);
+    const auto v=const_cast<unsigned char*>(static_cast<const unsigned char*>(view.ref.obj));
+    const ULONGLONG ms=GameMs();
+    if(!Cfg().enabled || !Cfg().heliMouseAim || !v || seat!=view.seat || ms-view.ms>250 ||
+       !view.ref.Is(v) || v[kDead] || !SeatCount(v) || SeatAt(v,0)!=seat || SeatRider(seat)!=Rider::player ||
+       At<unsigned char>(seat,kSeatPad)!=0 || edf::RemoteRider(At<const unsigned char*>(seat,kSeatRider))) {
+        pilotCamera={};return false;
+    }
+    // The camera-side matrix translation is the model origin, as in the native locator camera, not the input-side
+    // physics centre (sazabi_camera.inc documents the engine's swap between these contexts).
+    const float* pos=reinterpret_cast<const float*>(v+kMatrix)+12;
+    if(pilotCamera.ref.obj!=v || pilotCamera.ref.ctrl!=view.ref.ctrl || pilotCamera.seat!=seat) {
+        float d[3];float squared=0.0f;
+        for(int i=0;i<3;++i){d[i]=stockLook[i]-stockEye[i];squared+=d[i]*d[i];}
+        const float radius=std::sqrt(squared),up=stockLook[1]-pos[1],rise=stockEye[1]-stockLook[1];
+        if(!std::isfinite(radius+up+rise) || radius<0.5f)return false;
+        pilotCamera={view.ref,seat,ms,radius,up,rise,{d[0]/radius,d[1]/radius,d[2]/radius}};
+    }
+    if(ms!=pilotCamera.ms) {
+        aim::EaseView(pilotCamera.dir,view.target,static_cast<float>(ms-pilotCamera.ms)/1000.0f);
+        pilotCamera.ms=ms;
+    }
+    for(int i=0;i<3;++i) {
+        look[i]=pos[i]+(i==1 ? pilotCamera.up : 0.0f);
+        eye[i]=look[i]-pilotCamera.dir[i]*pilotCamera.radius;
+        if(!std::isfinite(eye[i]+look[i]))return false;
+    }
+    // As the existing turret rig does, keep the eye at least at its native height above the model. Lift both
+    // points equally: looking up must not orbit the camera below the aircraft/ground or change the wanted ray.
+    const float raise=pos[1]+pilotCamera.up+pilotCamera.rise-eye[1];
+    if(raise>0.0f){eye[1]+=raise;look[1]+=raise;}
+    return true;
+}
 
 namespace {
 // A sample of a stock-bodied helicopter for the pads (helipad.h): resting on solid ground (GroundClearance within
@@ -3546,6 +3643,26 @@ bool InstallDoorGuns() noexcept {
 }
 
 float MapRay(const float* a,const float* b,float* hit) noexcept { return CastRay(a,b,hit); }
+// The nearest object body along a->b: layer 11, the one the bullets' object query filters with (docs/bullet-pass-re.md
+// §2 step 1b), with the plain nearest-hit collector (kHitVtbl: every hit, not the ground filter's). Metres to it, -1 with
+// none; `hit` the point, `body` its id (collector +0x78, 24 bits; docs/raycast-re.md §2.2).
+float ObjectRay(const float* a,const float* b,float* hit,std::uint32_t* body) noexcept {
+    if(!rayOk)return -1.0f;
+    const auto g=At<unsigned char*>(image,kHavokGlobal);
+    if(!Readable(g,0x70) || !At<const void*>(g,0x68))return -1.0f;
+    const RayInput in{{a[0],a[1],a[2],1.0f},{b[0],b[1],b[2],1.0f},kObjectLayer,0,0};
+    RayHits col{};
+    *reinterpret_cast<const void**>(col.raw)=image+kHitVtbl;
+    reinterpret_cast<void(*)(void*)>(image+kHitReset)(&col);
+    reinterpret_cast<void(*)(void*,void*,const RayInput*)>(image+kCastRay)(g+0x10,&col,&in);
+    if(*reinterpret_cast<const std::int32_t*>(col.raw+0x0C)==0)return -1.0f;
+    const float f=*reinterpret_cast<const float*>(col.raw+0x50);
+    if(!std::isfinite(f) || f<0.0f || f>1.0f)return -1.0f;
+    if(hit)std::memcpy(hit,col.raw+0x30,12);
+    if(body)*body=*reinterpret_cast<const std::uint32_t*>(col.raw+0x78)&0xFFFFFFu;
+    const float d[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};
+    return f*std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+}
 // The floor along a map ray (map_floor.h): the hits on a triangle's back skipped once the normals are known to be the
 // triangles' own. Learned from the player's floor (LearnMapNormals): `own` is kept for the run (it is the engine's, not
 // the map's); `facing` is asked again every kRelearnMs (a thin slab or a second body under the floor reads as facing).
@@ -3680,7 +3797,9 @@ void ResetHelis() noexcept {
     for(auto& h:helis)h=Heli{};
     for(auto& a:assists)a=Assist{};
     for(auto& p:pilots)p=Pilot{};
+    PublishPilotView({});
     fullLoggedAt=0;
+    seaSeen.Clear();
     ResetTrack();
     for(auto& r:rescues)r=Rescue{};
     call=RescueCall{};rescueFrame=0;rescueMadeAt=0;cooldownSaid=false;pads=helipad::Pads{};

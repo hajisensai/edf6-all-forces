@@ -31,6 +31,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 sys.path.insert(0, HERE)
+import cockpits  # noqa: E402
 import drill_model  # noqa: E402
 import dsgo  # noqa: E402
 import ledger  # noqa: E402
@@ -240,7 +241,7 @@ def build(root: str, models: str | None = None) -> dict[str, bytes]:
         files[f'OBJECT/{SGO_FILE}'] = vehicle_sgo(game, [f'app:/Object/{MODEL_FILE.lower()}', MODEL_MDB])
         files[f'WEAPON/{BIT_FILE}'] = bit_sgo(game, plain=False)
     check(files, game)
-    return files
+    return cockpits.graft_files(game, files)   # its seats' first-person cockpits (pylib/cockpits.py)
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:

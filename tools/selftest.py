@@ -571,11 +571,48 @@ def boarding_debug_gun_parameters_and_text() -> None:
     damage = dsgo.Node(['damage', '', dsgo.Node([242.0, 999.0, 0.5, 2.0, -1.0])])
     lines.append(damage)
     row = dsgo.Node(['title', 'description', dsgo.Node(lines)])
-    expected = [cw.GUN_CURVES[key] * unit for key, unit in units.items()] + [1500.0, 242.0]
+    reach = cw.GUN_CURVES['AmmoSpeed'] * cw.GUN_SCALARS['AmmoAlive']
+    assert reach == 90000.0, reach
+    expected = [cw.GUN_CURVES[key] * unit for key, unit in units.items()] + [reach, 242.0]
     for lang in cw.LANGS:
         changed = cw._text_row(row, gun, lang, gun=cw.gun_stats(template))
         assert [st.items[2].items[0] for st in changed.items[2].items] == expected, lang
         assert changed.items[2].items[-1] == damage, 'damage and its star parameters stay unchanged'
+
+
+@test
+def boarding_gun_range_unlimited() -> None:
+    """The boarding rifle shoots as far as anything can be (the user, 2026-10-11: "登车狙击枪的射击距离应该是无限远"):
+    its reach (AmmoSpeed x AmmoAlive, its only range limit) is past the unlimited view distance at the largest
+    BigWorld (src/crew.h UnlimitedViewDistance) and the stock far pass, with half again to spare (a fire modifier
+    may scale a round's life, docs/boarding-re.md §2); its life stays a direct-fire round's (src/highcam.cpp, src/sightzoom.cpp: 600 frames is indirect fire) and
+    flat (no drop). Only the boarding guns get it: GUN_LIFE is read by gun_sgo / gun_stats alone."""
+    import ast
+    plugin, crew_h = src('src/plugin.cpp'), src('src/crew.h')
+    most = re.search(r'Fix\("BigWorld",n\.bigWorld,([\d.]+)f,([\d.]+)f\)', plugin)
+    assert most, 'BigWorld clamp not found in src/plugin.cpp'
+    diag = re.search(r'UnlimitedViewDistance\(\) noexcept \{ const float d=([\d.]+)f\*WorldHalf\(\)', crew_h)
+    far = re.search(r'kStockDistantFar=([\d.]+)f', crew_h)
+    assert diag and far, 'src/crew.h UnlimitedViewDistance changed'
+    farthest = max(float(diag.group(1)) * float(most.group(2)), float(far.group(1)))
+    speed, life = cw.GUN_CURVES['AmmoSpeed'], cw.GUN_SCALARS['AmmoAlive']
+    assert life == cw.GUN_LIFE and life == int(life), life
+    assert speed * life >= 1.5 * farthest, (speed * life, farthest)
+    indirect = int(re.search(r'kIndirectLife=(\d+);', src('src/highcam.cpp')).group(1))
+    assert 'round.alive>=600' in src('src/sightzoom.cpp')
+    assert life < min(indirect, 600), 'the boarding rifle would count as indirect fire'
+    assert cw.GUN_SCALARS['AmmoGravityFactor'] == 0.0 and cw.GUN_SCALARS['AmmoIsPenetration'] == 0.0
+    # 10 shots a second, each alive `life` frames: few rounds in flight.
+    assert life / cw.GUN_CURVES['FireInterval'] <= 20
+    tree = ast.parse(src('tools/call_weapons.py'))
+    users = {f.name for f in ast.walk(tree) if isinstance(f, ast.FunctionDef)
+             for n in ast.walk(f) if isinstance(n, ast.Name) and n.id in ('GUN_LIFE', 'GUN_SCALARS', 'GUN_CURVES')}
+    assert users == {'gun_sgo', 'gun_stats'}, users
+    for lang in ('SC', 'CN', 'JA', 'EN'):
+        assert f'{speed * life / 1000:.0f} ' in calls.KINDS['boarding_gun'][lang][1], lang
+    for c in calls.CALLS:
+        if c.brings == 'gun':
+            assert calls.call_description(c, 'SC').startswith(calls.KINDS['boarding_gun']['SC'][1])
 
 
 @test
@@ -606,6 +643,10 @@ def boarding_all_classes_stock_resources() -> None:
         assert weapon.get('AmmoExplosion') == weapon.get('AmmoGravityFactor') == 0
         assert weapon.get('SecondaryFire_Type') == 1
         assert weapon.get('Ammo_CustomParameter').items == []
+        # The range (the user, 2026-10-11: unlimited): the real weapon's speed x life, no falloff over it.
+        assert weapon.get('AmmoAlive') == cw.GUN_LIFE and weapon.get('AmmoSpeed').items[0] == cw.GUN_CURVES['AmmoSpeed']
+        assert weapon.get('AmmoSpeed').items[1:] == original.get('AmmoSpeed').items[1:], 'star curve kept'
+        assert dsgo.to_py(weapon.get('AmmoDamageReduce')) == [1.0, 1.0], (call.id, 'damage falls off with range')
         for lang, rel in zip(cw.LANGS, cw.TEXTS):
             texts = cw._rows(dsgo.parse(cw.stock(game, rel)), rel)
             cw._text_row(texts[index], call, lang, gun=cw.gun_stats(template))
@@ -1110,6 +1151,19 @@ def sidecar_tub_holds_the_gunner() -> None:
 
 
 @test
+def shkt_check_on_synthetic_data() -> None:
+    """pylib/shkt_check.py without the game (tests/test_shkt_check.py Portable): hull / box geometry, SHKT refs, and
+    an SGO whose ragdoll mapping or accessory names a body its SHKT lacks is an error. The stock-file mutations of the
+    same test file need the game; tools/shkt_check.py checks an installed Mods folder."""
+    import unittest
+    sys.path.insert(0, os.path.join(ROOT, 'tests'))
+    import test_shkt_check
+    suite = unittest.defaultTestLoader.loadTestsFromTestCase(test_shkt_check.Portable)
+    result = unittest.TextTestRunner(stream=io.StringIO(), verbosity=0).run(suite)
+    assert result.wasSuccessful() and result.testsRun == 5, (result.failures, result.errors)
+
+
+@test
 def weapon_marks_agree() -> None:
     """The mod's LockonTargetType marks: one copy in C++ (common/edf/weapon.h), the data tools' copies equal to it."""
     marks = dict(re.findall(r'(kMark\w+)=(\d+)', src('common/edf/weapon.h')))
@@ -1334,7 +1388,13 @@ def katyusha_bm13_launcher() -> None:
     if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
         files = make_katyusha.build(rootcpk.DEFAULT_GAME)   # katyusha_model.check + make_katyusha.check
         make_katyusha.check(files)
-        katyusha_kept_whole_bar_the_prune(rootcpk.DEFAULT_GAME, files[f'OBJECT/{make_katyusha.MODEL_FILE}'])
+        # The clean-up's archive against the unpruned one: before the cockpit's graft (cockpits.graft_files, the last
+        # step of the build, adds its own textures; tests/cockpit_build_test.py checks that one).
+        from unittest.mock import patch
+        import cockpits
+        with patch.object(cockpits, 'graft_files', lambda game, made: made):
+            plain = make_katyusha.build(rootcpk.DEFAULT_GAME)
+        katyusha_kept_whole_bar_the_prune(rootcpk.DEFAULT_GAME, plain[f'OBJECT/{make_katyusha.MODEL_FILE}'])
 
 
 def katyusha_kept_whole_bar_the_prune(game_dir: str, arc: bytes) -> None:
@@ -1918,11 +1978,54 @@ def carrier_camera_and_ragdoll_on_its_box_centre() -> None:
                                    [['RagDollProxys.body', 'globalSRT'], [0.0, -1.637, 0.0], [0.0, 0.0, 0.0, 1.0]]]})
     _, inner = sgo.read(vc._jet_ragdoll(blob, 'body', c))
     value = vc._value
+
+    def at(proxy: str) -> list[float]:   # the proxy on the box's centre, in its own place of the V506's rest pose
+        return [round(c[k] + vc.V506_PROXY_LAYOUT[proxy][k], 3) for k in range(3)]
     for e in inner['ragdoll_from_animation']:
-        assert e[0][0] == 'body' and [round(value(x), 3) for x in e[1]] == list(c), e
+        assert e[0][0] == 'body' and [round(value(x), 3) for x in e[1]] == at(e[0][1]), e
+        assert [value(x) for x in e[2]] == [0.0, 0.0, 0.0, 1.0], e
     assert [e[0][0] for e in inner['animation_from_ragdoll']] == ['RagDollProxys.rotor', 'RagDollProxys.body']
     for e in inner['animation_from_ragdoll']:
-        assert e[0][1] == 'body' and [round(value(x), 3) for x in e[1]] == [-x for x in c], e
+        assert e[0][1] == 'body' and [round(value(x), 3) for x in e[1]] == [-x for x in at(e[0][0])], e
+        assert [value(x) for x in e[2]] == [0.0, 0.0, 0.0, 1.0], e
+
+
+@test
+def jet_ragdoll_proxies_in_the_v506_rest_pose() -> None:
+    """pylib/vcobjects.py V506_PROXY_LAYOUT is RAGDOLL_V506_HELI.SHKT's rest pose: every proxy's position less the body
+    proxy's, every orientation the identity, the pose its hinges and slider hold. A jet's proxies all follow one bone; on
+    one point (each still turned by its V506 binding) a destroyed jet's dynamic ragdoll was thrown apart by its own
+    constraints (docs/feedback-2026-10-12-ragdoll-twitch.md). A proxy the layout does not know is refused. The SHKT half
+    needs the game's Root.cpk."""
+    import struct
+    import rootcpk
+    import sgo
+    blob = sgo.write(1, {'ragdoll_from_animation': [[['body', 'RagDollProxys.wing'], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]]],
+                         'animation_from_ragdoll': []})
+    try:
+        vc._jet_ragdoll(blob, 'body', (0.0, 1.0, 0.0))
+        raise AssertionError('an unknown proxy was placed')
+    except ValueError:
+        pass
+    if not os.path.isfile(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    from hktag import Tag
+    t = Tag(rootcpk.Game(rootcpk.DEFAULT_GAME).read('OBJECT', 'RAGDOLL_V506_HELI.SHKT'))
+    scene = t.root_variant('hknpPhysicsSceneData')
+    _, systems, _ = t.item(t.u32(scene + t.offset('hknpPhysicsSceneData', 'systemDatas')))
+    _, system, _ = t.item(t.u32(systems))
+    B = 'hknpPhysicsSystemData::bodyCinfoWithAttachment'
+    _, first, n = t.item(t.u32(system + t.offset('hknpPhysicsSystemData', 'bodyCinfos')))
+    pose = {}
+    for j in range(n):
+        p = first + j * t.size(B)
+        pose[t.cstr(t.u32(p + t.offset(B, 'name')))] = (struct.unpack_from('<3f', t.b, p + t.offset(B, 'position')),
+                                                        struct.unpack_from('<4f', t.b, p + t.offset(B, 'orientation')))
+    assert set(pose) == set(vc.V506_PROXY_LAYOUT), sorted(pose)
+    hull = pose['RagDollProxys.body'][0]
+    for name, (position, turn) in pose.items():
+        assert all(abs(position[k] - hull[k] - vc.V506_PROXY_LAYOUT[name][k]) < 1e-3 for k in range(3)), (name, position)
+        assert all(abs(a - b) < 1e-6 for a, b in zip(turn, (0.0, 0.0, 0.0, 1.0))), (name, turn)
 
 
 @test
@@ -2065,8 +2168,10 @@ def heli_sight_after_aim_lines() -> None:
     import support_config
     import support_loadout
     suffixes = {'SupportAircraftCount_': support_config.UNIT_KEYS, 'SupportPreset_': tuple(support_loadout.SEATS),
-                'SupportVehicle_': tuple(support_loadout.VEHICLE_KEYS)}
-    example = {'SupportAircraftCount_': r'\d', 'SupportPreset_': r'[a-z]', 'SupportVehicle_': r'[A-Z]'}   # a count; a kind; a gun
+                'SupportVehicle_': tuple(support_loadout.VEHICLE_KEYS),
+                'SupportCrewColour_': (*support_loadout.CREW_KEYS, support_loadout.MISSION)}   # 阶段 5: the crews' colours
+    example = {'SupportAircraftCount_': r'\d', 'SupportPreset_': r'[a-z]', 'SupportVehicle_': r'[A-Z]',
+               'SupportCrewColour_': r'[0-9A-FX]'}   # a count; a kind; a gun; a colour
 
     def read(key: str) -> bool:
         if f'L"{key}"' in plugin or any(f'L"{key}"' in m for m in modules.values()):
@@ -2107,7 +2212,7 @@ def heli_mouse_aim_wired() -> None:
     # The yaw is the one law apart (2026-10-06, the user: the mouse did not turn the heli): the NPC damps its turn
     # (StockYaw), the player compensates the native angle-state lag/spring (PlayerYawInput).
     assert 'aim::StockYaw(' in steer and 'aim::PlayerYawInput(' in fly and 'aim::StockYaw(' not in fly
-    assert 'aim::MoveOnScreen(' in fly, 'heli.cpp AimFly: the mouse kept on the screen axis by axis'
+    assert 'aim::Move(p.aim,mx,my,k)' in fly and 'MoveOnScreen' not in fly, 'stock heli mouse direction must not be tethered to the screen'
     player = heli.split('void PlayerHeli(', 1)[1].split('\n}\n', 1)[0]
     off = heli.split('void AssistOff(', 1)[1].split('\n}\n', 1)[0]
     assert 'PlayerMouseTune(v,' in player and 'kMaxYaw,a.yaw' in off
@@ -2118,14 +2223,14 @@ def heli_mouse_aim_wired() -> None:
     assert 'kStockLift' not in heli and heli.count('aim::HoverRotor(') >= 3
     hud = src('src/hud.cpp').split('void HeliStrip(', 1)[1].split('\n}\n', 1)[0]
     assert 'Tx::heliKeysAir' in hud and 'KeyName(Cfg().playerJetBrakeKey' in hud, 'hud.cpp HeliStrip: the keys spelt out'
-    # The stock heli's keys (f.collective) are the instructor's: W / S up and down, the nose down forward; the rotor
+    # The stock heli's keys (f.collective) separate W/S pitch from Space/brake collective; the rotor
     # craft's stay the speed setpoint's.
     assert 'f.collective ? Tx::heliKeysInstructor : Tx::heliKeysAir' in hud and 'Tx::heliKeysInstructorLanded' in hud
     texts = src('src/hudtext.inc')
     assert 'SPACE: up' in texts.split('HUDTEXT(heliKeysAir,', 1)[1].split('\n', 1)[0]
     instructor = texts.split('HUDTEXT(heliKeysInstructor,', 1)[1].split('\n', 1)[0]
-    assert 'W / S: up / down' in instructor and 'down: forward' in instructor, instructor
-    assert 'HOLD W / SPACE' in texts.split('HUDTEXT(heliKeysInstructorLanded,', 1)[1].split('\n', 1)[0]
+    assert 'W / S: nose down / up' in instructor and 'MOUSE: aim / heading' in instructor, instructor
+    assert 'HOLD SPACE' in texts.split('HUDTEXT(heliKeysInstructorLanded,', 1)[1].split('\n', 1)[0]
     assert 'f.collective=p.flying' in heli, 'heli.cpp PublishHud: the stock heli says its keys are the instructor\'s'
     assert 'aim::Fly(' in board.split('void HoverAim(', 1)[1].split('\n}\n', 1)[0]
 
@@ -2253,8 +2358,13 @@ def proteus_wired() -> None:
         'lookup and active consumers must validate the complete ObjRef; address reuse only selects a free slot'
     assert 'ControlFresh(u,v,GameMs())' in active and 'u.active && !u.net.remote' in active, \
         'replicas require fresh control; the local active path cannot consume stale remote state'
-    # A Proteus no player has ridden is not crewed (the helicopters' rule, crew.cpp Crew).
-    assert 'if(!st.playerAt)return;' in crew, 'every unused parked vehicle waits for its first player driver'
+    # Unused parked vehicles wait for their first player driver unless the explicit test-only opt-in is enabled.
+    assert 'if(!st.playerAt && !Cfg().npcCrewTest)return;' in crew, \
+        'unused parked vehicles require a player driver or the explicit NpcCrewTest opt-in'
+    assert 'bool npcCrewTest=false;' in src('src/crew.h'), 'NpcCrewTest must stay off by default'
+    assert 'n.npcCrewTest=ReadBool(L"NpcCrewTest",n.npcCrewTest);' in plugin, 'the test opt-in must load from config'
+    assert re.search(r'^NpcCrewTest=0\s*$', src('EDF6VehicleCrew.ini'), re.MULTILINE), \
+        'the shipped configuration must not auto-crew unused vehicles'
     # The stock weapons only: no custom rounds, no damage-call redirect, the stock damage path untouched.
     for gone in ('ProteusGunRound', 'ProteusSalvoRound', 'ProteusRoundsReady', 'ProteusDamageThunk', 'kProteusHoldCountdown'):
         for rel in ('src/crew.h', 'src/jet_bay.cpp', 'src/proteus.cpp', 'src/proteus.h', 'src/subcarrier.cpp', 'src/vehsound.cpp'):
@@ -2996,6 +3106,20 @@ def ini_merge_only_adds() -> None:
 
 
 @test
+def ini_merge_adds_room_presync() -> None:
+    # An ini from before 阶段 R (RoomLoadout but no RoomPreSync): the install adds RoomPreSync=1 with its comment under the
+    # added-settings header, the player's RoomLoadout untouched.
+    shipped = src('EDF6VehicleCrew.ini')
+    user = '[VehicleCrew]\r\nEnabled=1\r\nRoomLoadout=0\r\nRoomLoadoutKey=0x71\r\n'
+    text, added, _ = installer.merge_ini(user, shipped)
+    assert 'RoomPreSync' in added, added
+    tail = text.split(installer.ADDED_HEADER, 1)[1]
+    assert '\r\nRoomPreSync=1\r\n' in tail and tail.index('联机房间预同步') < tail.index('RoomPreSync=1'), 'the comment above it'
+    assert text.startswith(user.rstrip('\r\n')) and '\nRoomLoadout=0\r\n' in text and '\nRoomLoadout=1\r\n' not in text
+    assert installer.merge_ini(text, shipped)[1] == [], 'merge is not idempotent'
+
+
+@test
 def ini_sections_match_windows() -> None:
     import make_stock_stores
     shipped = '[VehicleCrew]\nEnabled=1\nStockHeliStores=0\nNewOption=2\n'
@@ -3578,8 +3702,10 @@ def pack_install_upgrade_uninstall() -> None:
             # the out-of-game loadouts' files (tools/support_loadout.py): written after the plugin's ini, gone with uninstall 1
             loadout = {'OBJECT/EDF6VC_LO_TANK_4000000000000C81.SGO': b'loaded tank'}
             built_from: list[str] = []
+            # (the stand-in builder's files are what the ini wants: the install's stale-file cleanup keeps them)
             enter(patched(importlib.import_module('support_loadout'),
-                          build=lambda game, text, pending=(), errors=None: (built_from.append(text), dict(loadout))[1]))
+                          build=lambda game, text, pending=(), errors=None: (built_from.append(text), dict(loadout))[1],
+                          wanted_files=lambda text, pending=(): [rel.split('/')[-1] for rel in loadout]))
             with contextlib.redirect_stdout(io.StringIO()):
                 _pack_bundle(bundle, b'v1 ')
                 answers[:] = ['y']   # AT_C: back up the other mod's file and replace it
@@ -4138,7 +4264,7 @@ def stock_payload_and_seats_wired() -> None:
     want = sorted(c.replace('Vehicle', '', 1).lstrip('_') if c != 'VehicleHelicopter409' else 'Helicopter409'
                   for c in mss.BUILT_CLASSES if c != 'Vehicle506_Helicopter')
     assert sorted(builds) == want, (builds, want)
-    assert 'if(IsStoreWeapon(w))return PayloadFire::store;' in payload and 'return StoreOf(w)!=nullptr;' in stores
+    assert 'if(IsStoreWeapon(w))return playerSeat && FreeSecondary(c) && IsCoax(w) ? PayloadFire::secondary : PayloadFire::store;' in payload and 'return StoreOf(w)!=nullptr;' in stores
     hook = src('src/crew.cpp').split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
     # The disabled branch also calls AimLines to restore native lines. Check the
     # enabled pipeline's ordering, not that earlier ownership-cleanup call.
@@ -4512,8 +4638,13 @@ def map_wired() -> None:
     readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'GetAsyncKeyState' in src(f'src/{f}')]
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
                                       'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp', 'sightzoom.cpp',
-                                      'debug_spawn.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'debug_spawn.cpp', 'firstperson.cpp', 'room_ui.cpp']), f'a new key reader: make it give way to the map ({readers})'
     assert 'InFront() && !MapHoldsKeys()' in src('src/debug_spawn.cpp'), 'the debug spawn keys give way to the map'
+    fp = src('src/firstperson.cpp')
+    key_input = fp.split('bool KeyInputAllowed() noexcept {', 1)[1].split('\n}', 1)[0]
+    assert 'if(MapHoldsKeys())return false;' in key_input
+    assert '!KeyInputAllowed()' in fp and 'keyWas=false;keyCancelled=down;return;' in fp, 'map input cancels the FP key gesture'
+    assert 'Foreground() && !MapHoldsKeys()' in src('src/room_ui.cpp'), 'the room menu keys give way to the map'
 
     assert 'InstallMap();' in plugin and 'ResetMap();' in mission and 'src/map.cpp' in cmake
     assert 'EXCLUDE_FROM_ALL tools/map_cam_check.cpp' in cmake and '#include "../src/map_cam.h"' in src('tools/map_cam_check.cpp')
@@ -4674,6 +4805,10 @@ def stock_guidance_wired() -> None:
     assert 'kCamStep' not in src('src/tvguide.cpp'), 'one camera hook: the map\'s'
     assert 'holds.load(std::memory_order_relaxed) || TvHoldsKeys()' in m
     assert 'if(!TvSteer(static_cast<unsigned char*>(b)) && Cfg().enabled)Guide(' in src('src/missile.cpp')
+    # 2026-10-10: the view placed after the stock step (it was a frame behind, inside the missile); the right button hands back.
+    ms_src = src('src/missile.cpp')
+    assert ms_src.index('nextUpdate(b,a2,a3,a4);') < ms_src.index('TvAfter(static_cast<unsigned char*>(b));'), 'TV view after the step'
+    assert 'in.back=Down(VK_RBUTTON);' in m, 'the right button hands the TV back'
     crew, vini, readme = src('src/crew.h'), src('EDF6VehicleCrew.ini'), src('README.md')
     for field, key in (('stockMissilePN', 'StockMissilePN'), ('playerLockByView', 'PlayerLockByView'),
                        ('tempestTv', 'TempestTv')):
@@ -4795,7 +4930,9 @@ def npc_ai_wired() -> None:
     body = post.split('void NpcPostInput(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'if(At<const void*>(v,kRoute)){DropPending(v);Relinquish(v);return;}' in body, \
         'a script route must discard the queued waypoint and relinquish the plugin post'
-    assert 'if(!IsOnlineAuthority(v))return;' in body, 'the real driver owner, not a hard-coded host, controls the post'
+    assert 'if(!IsOnlineAuthority(v)){p->active=false;p->wrote=false;return;}' in body, \
+        'clients may publish map rows but must exit before writing vehicle input'
+    assert body.index('p->seen=ms;') < body.index('if(!IsOnlineAuthority(v))') < body.index('Write(v,f,*p,c0,c1);')
     assert body.index('StockDriving(v,f,*p)') < body.index('Write(v,f,*p,c0,c1);')
     move_to = code.split('void MoveTo(', 1)[1].split('\n}\n', 1)[0]
     # Routed (2026-10-09): in kRouteHorizon legs, from the floor under the soldier (RouteStart), still stood while not moving.
@@ -4886,6 +5023,17 @@ def npc_ai_wired() -> None:
         assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
     for key, default in (('TankReturnToPost', '1'), ('TankPostHold', '6'), ('TankReverseMax', '30')):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
+    # The stock walk-up recruit off (VanillaRecruit=0, the user 2026-10-11: "删了原版的率领npc机制"): +0x540 hidden only
+    # around the stock Think (whose 0x596BD8 gate it feeds), put back right after; a script's squad the stock would let
+    # in takes the map's join alone.
+    hook = code.split('void __fastcall ThinkHook(void* human,const float* dt)', 1)[1].split('\n}', 1)[0]
+    assert hook.index('HideWalkUp(') < hook.index('nextThink[I](human,dt);') < hook.index('h[kAutoFollow]=walkUp;')
+    walk = code.split('bool WalkUpOff() noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'followOk' in walk and 'Cfg().customNpcAi' in walk and '!Cfg().vanillaRecruit' in walk, \
+        'the walk-up stays when the map cannot recruit (AI off, SetFollow not as read) or VanillaRecruit=1'
+    assert '!(joinOrder && NativeJoinable(top))' in cmd.split('switch', 1)[0]
+    assert 'if(e.u.joinOnly)return (o==Order::recruit || o==Order::follow) && e.u.recruitable;' in takes
+    assert 'L"VanillaRecruit"' in plugin and re.search(r'^VanillaRecruit=0\s*$', ini, re.M) and 'VanillaRecruit' in readme and 'VanillaRecruit' in doc
 
 
 @test
@@ -5011,7 +5159,7 @@ def soft_edge_wired() -> None:
     assert 'anchor=SoftAnchor(*j,anchor,anchorIn);' in jet
     # Targets past it let be; the map's focus target (2026-10-09) only out past the play area's walls, where no jet goes.
     visit = combat.split('void VisitTarget(void* ctx,const void* object,const float* p) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'if(k.focus || PastEdge(*k.j,p))return;' in visit
+    assert 'if(k.focus || PastEdge(*k.j,p) || HoldFire(k.j->Vehicle(),object))return;' in visit
     focus = visit.split('if(k.j->focus.Is(object)) {', 1)[1].split('\n    }\n', 1)[0]
     assert 0 <= focus.find('if(!airbound::Inside(PlayBox(),p))return;') < focus.find('k.focus=true;'), \
         'a focus target out past the play area is waited for, not chased'
@@ -5058,12 +5206,16 @@ def support_arrives_from_off_the_map() -> None:
     assert 'SupportPassTurn(spec)' in plan
     crewh = src('src/crew.h')
     assert 'inline float ArrivalHalf() noexcept { const float h=HavokHalf(),w=WorldHalf();return (h<w ? h : w)-kArrivalRoom; }' in crewh
-    assert 'Cfg().viewDistance>kStockFarClip' in crewh
+    assert 'const float v=ViewDistanceWanted();return v>kStockFarClip ? v : kStockFarClip;' in crewh
+    # 2026-10-10 "改成无限": ViewDistance -1 (the default) reaches past the world's diagonal and the stock far pass end.
+    assert 'float viewDistance=-1.0f;' in crewh and re.search(r'^ViewDistance=-1', src('EDF6VehicleCrew.ini'), re.M)
+    assert 'Cfg().viewDistance<0.0f ? UnlimitedViewDistance()' in crewh
     dispatch = src('src/support_dispatch.cpp')
     board = dispatch.split('bool BoardAirborne(Deployment& deployed,bool networked) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'JetFerry(vehicle,plan.target,plan.units[i].matrix+8)' in board, 'the plane on its line from its first frame'
     assert 'JetFerry(' not in dispatch.split('bool Assign(Deployment& deployed) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'NearDrawDistance(),[&](const float* p) noexcept {' in dispatch and 'MapRay(eye,top,hit)>=0.0f' in dispatch
+    # Visibility was explicitly removed from support admission on 2026-10-11.
+    # support_entry CTest verifies observer/draw/occlusion cannot affect entry selection.
     transport = src('src/transport.cpp')
     drop = transport.split('void DropFrame(Drop& d,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'transport::StickStarts(along,across,speed,aboard,kChuteBleed)' in drop and 'kDropRadius' not in transport
@@ -5106,9 +5258,32 @@ def air_chase_wired() -> None:
     assert fire.index('GunsAtTarget(j,v,pos,ms,"its NPC crew");') < fire.index('if(j.t.flyer || ms-j.shells.gunAt<kGunshipGapMs)return;')
     crew = bay.split('bool CrewShell(unsigned char* v,float dt,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'if(!j->t.target)return false;' in crew and 'const bool shell=!j->t.flyer && ' in crew
-    assert 'PickTarget(s,eye,anchor,o.leash+engage,LongestReach(a))' in npcai and 'npc::PickTarget(world.enemies,' in npcai
+    assert 'PickTarget(s,h,eye,anchor,o.leash+engage,LongestReach(a))' in npcai and 'npc::PickTarget(world.enemies,' in npcai
+    # Fire the game will not let hurt its target (docs/feedback-2026-10-12-ai-targeting.md): every AI asks WastedFire, the
+    # damage hook feeds it whatever the statistics' switch, and the offline check runs in CTest.
+    assert '[self](int k) noexcept { return !WastedFire(self,world.enemy[k].object); }' in npcai
+    assert 'HoldFire(h,t->object,eye,known ? a.speed[w]' in npcai and 'if(WastedFire(p.self,object))return;' in npcai
+    assert 'if(target && HoldFire(v,target))target=nullptr;' in npcai and 'if(p.best && HoldFire(v,p.best))' in npcai
+    assert 'HoldFire(h,t.e->object,eye,armed ? a.speed[p.arm]' in npcai and 'p.fire=!hold && ShotOk(' in npcai
+    assert 'p.speed==speed && p.gravity==gravity' in src('src/wastedfire.cpp')
+    assert 'std::memcmp(p.from,from,12)==0' in src('src/wastedfire.cpp'), 'cached plans belong to the same muzzle and weapon'
+    assert 'if(!HoldFire(v,o))f(o,a,0.0f);' in src('src/heli.cpp')
+    assert 'if(HoldFire(p.self,object))return;' in src('src/ground.cpp')
+    hook = src('src/damagestats.cpp').split('std::uintptr_t __fastcall DamageHook(', 1)[1].split('\n}\n', 1)[0]
+    assert 'const Before b=Read(obj);' in hook and 'NoteWasted(obj,gdi,b);' in hook, 'fed whether the statistics are on or not'
+    assert 'ResetWastedFire();' in src('src/mission.cpp')
     cm = src('CMakeLists.txt')
     assert 'add_executable(air_chase_check EXCLUDE_FROM_ALL tools/air_chase_check.cpp)' in cm
+    assert 'target_sources(EDF6VehicleCrew PRIVATE src/wastedfire.cpp)' in cm
+    assert 'wasted_fire_check' in cm.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0].split(), 'wasted_fire_check runs in CTest'
+    assert 'hit_predict_check' in cm.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0].split(), 'hit_predict_check runs in CTest'
+    assert 'add_test(NAME hit_accept_native COMMAND hit_accept_native_test "${EDF6_NATIVE_DLL}")' in cm
+    # The game's overrides the prediction asks are the side-effect-free ones, gated by their bytes (wastedfire.cpp).
+    wf = src('src/wastedfire.cpp')
+    for rva in ('0x54AA40', '0x4BC8A0', '0x3EE2F0', '0x4F7190', '0x3F6970', '0x401200', '0x4D1790'):
+        assert rva in wf, rva
+    for rva in ('0x504720', '0x51EFB0', '0x4C6650', '0x30E200', '0x374230'):
+        assert rva not in wf, f'{rva} has side effects: never asked'
     assert 'air_chase_check' in cm.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0].split(), 'air_chase_check runs in CTest'
     assert '#include "../src/air_chase.h"' in src('tools/air_chase_check.cpp')
     # The charges' blast radii are their generated charges' (pylib/vcobjects.py jet_guns).
@@ -6356,6 +6531,111 @@ def mab_strings_relaid_as_the_game() -> None:
 
 
 
+
+@test
+def edf41_calls_convert() -> None:
+    """pylib/edf41calls.py on hand-made calls: a vehicle request becomes its EDF6 template's call (class, transport,
+    voices) with the EDF6 vehicle in its place, 4.1's settings with the weapons renamed to EDF6's (a weapon EDF6 split
+    in two: a row each) when laid out as the template's, else the template's, and 4.1's use (AmmoCount, ReloadTime,
+    EnergyChargeRequire as [v, v]); a bomber call takes 4.1's bomber run when laid out as the template's, else refused."""
+    import edf41calls as ec
+    import edf5port
+
+    def call(acp: list, extra: dict | None = None) -> dsgo.Node:
+        r = dsgo.Node([])
+        r.set('xgs_scene_object_class', 'Weapon_Sub')
+        r.set('Ammo_CustomParameter', edf5port.to_value(acp))
+        r.set('AmmoCount', 1.0)
+        r.set('ReloadTime', 600.0)
+        for k, v in (extra or {}).items():
+            r.set(k, v)
+        return r
+
+    template = call([0.05, 180.0, 120.0, 1.0, ['app:/Object/v508_transport.sgo', 'app:/object/v509_transportbox.sgo',
+                     'app:/Object/v504_begaruta.sgo', [[0.5, 0.7], [[ 'app:/weapon/v_504begaruta_cannon01_l.sgo', 1.0],
+                                                                     ['app:/weapon/v_504begaruta_cannon01_r.sgo', 1.0]]]],
+                     ['輸送部隊目標確認', '輸送部隊発射', '輸送部隊攻撃後']])
+    mine = {'Ammo_CustomParameter': [0.05, 180, 120, 1, ['app:/Object/Transporter401.sgo', 'app:/object/Transporter401_ContainerM.sgo',
+                                     'app:/Object/Vehicle406_Begaruta_red.sgo', [[0.4, 0.6], [['app:/weapon/v_406begaruta_cannon01.sgo', 2.0]]]],
+                                     ['x', '輸送部隊発射ベガルタ', 'y']],
+            'AmmoCount': 3, 'ReloadTime': 900, 'EnergyChargeRequire': -1.0}
+    r = ec.vehicle_call(mine, template, ec.VEHICLES['vehicle406_begaruta_red.sgo']).root
+    acp = r.get('Ammo_CustomParameter')
+    drop = acp.items[4]
+    assert drop.items[0] == 'app:/Object/v508_transport.sgo' and drop.items[2] == 'app:/Object/v504_begaruta_red.sgo'
+    assert dsgo.to_py(drop.items[3]) == [[0.4, 0.6], [['app:/weapon/v_504begaruta_cannon01_l.sgo', 2.0],
+                                                      ['app:/weapon/v_504begaruta_cannon01_r.sgo', 2.0]]], dsgo.to_py(drop.items[3])
+    assert dsgo.to_py(acp.items[5]) == ['輸送部隊目標確認', '輸送部隊発射', '輸送部隊攻撃後'], 'not the template\'s voices'
+    assert r.get('AmmoCount') == 3 and r.get('ReloadTime') == 900 and dsgo.to_py(r.get('EnergyChargeRequire')) == [-1.0, -1.0]
+    assert template.get('Ammo_CustomParameter').items[4].items[2] == 'app:/Object/v504_begaruta.sgo', 'the template changed'
+    odd = dict(mine, Ammo_CustomParameter=mine['Ammo_CustomParameter'][:4] + [mine['Ammo_CustomParameter'][4][:3] + [[0.4]]]
+               + mine['Ammo_CustomParameter'][5:])
+    r = ec.vehicle_call(odd, template, 'v504_begaruta_red.sgo').root
+    assert dsgo.to_py(r.get('Ammo_CustomParameter').items[4].items[3]) == dsgo.to_py(template.get('Ammo_CustomParameter').items[4].items[3])
+    bomber = call([30.0, 1.0, ['app:/object/Bomber501.sgo', 2.0, [1.0]], ['a']])
+    r = ec.bomber_call({'Ammo_CustomParameter': [0.05, 120, 180, 2, ['app:/object/Bomber401.sgo', 3, [5.0]]]}, bomber).root
+    assert dsgo.to_py(r.get('Ammo_CustomParameter').items[2]) == ['app:/object/Bomber401.sgo', 3, [5.0]]
+    try:
+        ec.bomber_call({'Ammo_CustomParameter': [0.05, 120, 180, 2, ['app:/object/Bomber401.sgo', 3]]}, bomber)
+    except edf5port.Unsupported:
+        pass
+    else:
+        raise AssertionError('a bomber run laid out otherwise was taken')
+
+
+@test
+def edf41_calls_real() -> None:
+    """The registry's EDF4.1 calls (plan P5): every 4.1 vehicle request is a Weapon_Sub bringing an EDF6 vehicle with
+    EDF6's transport, its weapons all EDF6's; every bomber call a Weapon_RadioContact running a Bomber401; the Whale
+    gunship's calls in EDF6's gunship category; none left out for want of a template."""
+    import collections
+    import edf41calls as ec
+    import ported_weapons as pw
+    import rootcpk
+    with open(os.path.join(ROOT, 'edf41port', 'weapons.json'), encoding='utf-8') as f:
+        reg = json.load(f)
+    # The calls ship in their own registry, released after edf5port/models.json (ported_weapons.REGISTRIES).
+    stray = [w['id'] for w in reg['weapons'] if 'call' in w or w['category'] == 311]
+    assert not stray, f'edf41port/weapons.json holds P5 calls (they belong in edf41port/calls.json): {stray[:5]}'
+    with open(os.path.join(ROOT, 'edf41port', 'calls.json'), encoding='utf-8') as f:
+        reg['weapons'] = json.load(f)['weapons']
+    kinds = collections.Counter(w['call']['kind'] for w in reg['weapons'] if 'call' in w)
+    assert kinds['vehicle'] == 65 and kinds['bomber'] == 11, kinds
+    assert not [s for s in reg['skipped'] if '呼叫' in s['reason']], 'a call left out'
+    gunships = [w for w in reg['weapons'] if w['category'] == 311]
+    assert len(gunships) == 8 and all(w['class'] == 'Weapon_BasicShoot' for w in gunships)
+    edf6 = rootcpk.DEFAULT_GAME
+    have = None
+    if os.path.isfile(os.path.join(edf6, 'Root.cpk')):
+        g6 = rootcpk.Game(edf6)
+        have = {f'{d}/{n}'.upper() for d, n in g6.cpk.index}
+    with open(os.path.join(ROOT, 'edf41port', 'objects.json'), encoding='utf-8') as f:
+        ported41 = set(json.load(f)['files'])
+    # 4.1 has no Barga: a call bringing EDF6's (v515_retrobalam, its "Retro Balam") is a Balam call that lost the ported
+    # Balam (2026-10-12, test site #12: 「巴拉姆模型依然是巴尔加」).
+    balam = [w['id'] for w in reg['weapons'] if w.get('call', {}).get('vehicle') == 'v515_retrobalam.sgo']
+    assert not balam, f"4.1's Balam calls bring EDF6's Barga (v515_retrobalam), not the ported Balam: {balam}"
+    assert sum(w.get('call', {}).get('vehicle') == 'vehicle501_fortressrobo.sgo' for w in reg['weapons']) == 4
+    by_id = {p.id: p for p in pw.PORTS}
+    for w in reg['weapons']:
+        if 'call' not in w:
+            continue
+        r = dsgo.load(by_id[w['id']].weapon)
+        acp = r.get('Ammo_CustomParameter')
+        if w['call']['kind'] == 'vehicle':
+            assert r.get('xgs_scene_object_class') == 'Weapon_Sub', w['id']
+            drop = acp.items[4]
+            assert ec.leaf(drop.items[2]) == w['call']['vehicle'], w['id']
+            paths = [x for x in _dsgo_strings(drop) if x.lower().startswith('app:/')]
+            assert not any('transporter401' in x.lower() for x in paths), f"{w['id']}: still 4.1's transport"
+            if have is not None:
+                # Or a 4.1 object the install ports into Mods under its own name (edf41port/objects: 4.1's Balam).
+                gone = [x for x in paths if x.split(':/', 1)[1].upper() not in have and x.split(':/', 1)[1].upper() not in ported41]
+                assert not gone, f"{w['id']}: EDF6 lacks {gone}"
+        else:
+            assert r.get('xgs_scene_object_class') == 'Weapon_RadioContact', w['id']
+            assert ec.leaf(acp.items[2].items[0]) == 'bomber401.sgo', w['id']
+
 @test
 def ported_weapons_registry_current() -> None:
     """Every converted weapon the registries keep ('weapon': EDF5's and EDF4.1's, so the install needs neither game)
@@ -6375,11 +6655,24 @@ def ported_weapons_registry_current() -> None:
             print(f'skip  ported_weapons_registry_current ({g.name}): not installed')
             continue
         game = rootcpk.Game(root)
+        calls = {}
+        for key, registry in pw.REGISTRIES:
+            if key != g.key:
+                continue
+            with open(os.path.join(ROOT, *registry.split('/')), encoding='utf-8') as f:
+                calls.update({w['id']: w['call'] for w in json.load(f)['weapons'] if 'call' in w})
+        templates = None
         for p in pw.PORTS:
             if p.game != g.key or p.source == 'edf6':
                 continue
             members = sgo.read(game.read('WEAPON', p.sgo))[1]
-            assert dsgo.dump(g.convert(members, pw._names(p)).root) == p.weapon, f'{p.id}: registry out of date'
+            if p.id in calls:   # an EDF6 call made of a 4.1 vehicle request / bomber call (plan P5)
+                import make_edf41_weapons as m41
+                templates = templates or m41.CallTemplates(rootcpk.Game(rootcpk.DEFAULT_GAME))
+                made = m41.convert(members, pw._names(p), calls[p.id], templates)
+            else:
+                made = g.convert(members, pw._names(p)).root
+            assert dsgo.dump(made) == p.weapon, f'{p.id}: registry out of date'
             checked += 1
     print(f'  {checked} registry weapons equal to a conversion now')
 
@@ -6874,6 +7167,224 @@ def edf41_mother_dev_registry_and_flag() -> None:
         assert eo.set_dev_flag(game, True) is None, 'already 1'
         assert eo.set_dev_flag(game, False) == path and 'Edf41MotherDev=0' in open(path, encoding='utf-8').read()
         assert eo.set_dev_flag(game, False) is None
+
+
+@test
+def edf41_anthill_voxel_body() -> None:
+    """4.1's ant nest under EDF6's AntHill (2026-10-13, M115 on the real game): the class builds a voxel-destruction
+    body from animation_model[3] and the first hit dereferences it unchecked (EDF+0x4EB8D7 loads this+0x848, 0x6CAF22
+    writes through it), so the shipped nest has the block: E517's grid and tuning around Anthill301.mdb's own extent,
+    no debris (E517's chunks are metal), the keys of E517's mech look left out, 4.1's own values kept. check_fracture
+    refuses the nest 4.1 shipped (no block), a box that is not one, tuning of the wrong length and a debris name the
+    archive lacks."""
+    import copy
+    import edf41_objects as eo
+    import make_edf41_objects as m
+    import mdb
+    import sgo
+    rel = 'OBJECT/ANTHILL301.SGO'
+    files = {rel: eo.read(rel), 'OBJECT/ANTHILL301.RAB': eo.read('OBJECT/ANTHILL301.RAB')}
+    top = sgo.load(data=files[rel])
+    assert top['xgs_scene_object_class'] == 'AntHill' and 'AntHill' in m.FRACTURE_CLASSES
+    m.check_fracture(top, files, rel)
+    block = top['animation_model'][3]
+    rab = mdb.rab_read(files['OBJECT/ANTHILL301.RAB'])
+    body = mdb.mdb_read(next(f for f in rab.files if f.name.lower() == 'anthill301.mdb').data)
+    box = [mdb.rigid_extent(body, ax) for ax in range(3)]
+    near = lambda a, b: all(abs(x - y) < 1e-5 for x, y in zip(a, b))   # stored as 4-byte floats, loaded to 6 places
+    assert near(block[1], [lo for lo, _ in box]) and near(block[2], [hi for _, hi in box]), 'the box is not the model\'s extent'
+    assert block[0] == [16, 16, 16] and len(block[3]) == m.FRACTURE_TUNING + 1 and block[3][-1] == [], block
+    # 4.1's own values stay; E517's mech look does not come over; the score adjust both stock nests carry does
+    assert top['game_object_durability'] == 1500.0 and top['game_object_kill_counter'] == 'NestKillCount'
+    assert top['game_object_destroy_score_adjust'] == 0.5
+    assert not {'ant_hill_material_type', 'lighting', 'material_animation'} & set(top), sorted(top)
+    # the refusals
+    def refuses(edit, why: str) -> None:
+        bad = copy.deepcopy(top)
+        edit(bad)
+        try:
+            m.check_fracture(bad, files, rel)
+        except ValueError:
+            return
+        raise AssertionError(f'check_fracture passed {why}')
+    refuses(lambda t: t['animation_model'].pop(3), 'a nest with no block (4.1\'s)')
+    refuses(lambda t: t['animation_model'].__setitem__(3, 5), 'a block that is not a list')
+    refuses(lambda t: t['animation_model'][3][1].__setitem__(0, 99.0), 'a box with min above max')
+    refuses(lambda t: t['animation_model'][3][0].__setitem__(0, 0), 'a grid of zero cells')
+    refuses(lambda t: t['animation_model'][3][3].pop(), 'tuning without its debris list')
+    refuses(lambda t: t['animation_model'][3][3][-1].append('nowhere.mdb'), 'a debris model the archive lacks')
+    # a block of three entries (E615_HORNETNEST_SMALL's form) is the class's own; other classes are not asked
+    short = copy.deepcopy(top)
+    short['animation_model'][3] = short['animation_model'][3][:3]
+    m.check_fracture(short, files, rel)
+    other = copy.deepcopy(top)
+    other['xgs_scene_object_class'] = 'GiantAnt'
+    other['animation_model'].pop(3)
+    m.check_fracture(other, files, rel)
+    # every shipped SGO of such a class passes
+    reg = eo.registry()
+    for obj in reg['objects']:
+        data = eo.read(obj['object'])
+        t = sgo.load(data=data)
+        if t.get('xgs_scene_object_class') in m.FRACTURE_CLASSES:
+            m.check_fracture(t, {r: eo.read(r) for r in obj['files']}, obj['object'])
+
+
+@test
+def edf41_class_keys() -> None:
+    """Every converted object has the top-level keys every stock EDF6 SGO of its class has (the classes read keys by
+    name and several dereference a miss unchecked: Hector's weak_point, the AlienTrailer's se_list at EDF+0x30A4D7,
+    M015 2026-10-13). make_edf41_objects.class_keys / fill_class_keys / check_class_keys: on stand-in stock data the
+    intersection is what all have, a missing key is filled from the nearest-durability stock SGO (only that key; the
+    object's own values stay) and then passes, an unfillable class is refused; on the shipped objects (EDF6 installed)
+    none lacks one."""
+    import make_edf41_objects as m
+    import sgo
+    import edf41_objects as eo
+
+    def make(**kw: object) -> bytes:
+        return sgo.write_depth_first(0x102, kw)
+
+    stock = {'Box': {'OBJECT/A.SGO': sgo.load(data=make(xgs_scene_object_class='Box', game_object_durability=100.0, se=[1], only_a=[2])),
+                     'OBJECT/B.SGO': sgo.load(data=make(xgs_scene_object_class='Box', game_object_durability=900.0, se=[7]))}}
+    blobs = {'OBJECT/A.SGO': make(xgs_scene_object_class='Box', game_object_durability=100.0, se=[1], only_a=[2]),
+             'OBJECT/B.SGO': make(xgs_scene_object_class='Box', game_object_durability=900.0, se=[7])}
+    assert m.class_keys(stock, 'Box') == {'xgs_scene_object_class', 'game_object_durability', 'se'}
+    assert m.class_keys(stock, 'Nothing') == set()
+    mine = make(xgs_scene_object_class='Box', game_object_durability=800.0, own=[5])
+    files = {'OBJECT/X.SGO': mine}
+    try:
+        m.check_class_keys(stock, 'OBJECT/X.SGO', mine)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('check_class_keys passed an object lacking a key every stock SGO has')
+    note = m.fill_class_keys(stock, blobs.__getitem__, 'OBJECT/X.SGO', files)
+    assert note == {'template': 'OBJECT/B.SGO', 'keys': ['se']}, note    # 800 is nearer 900 than 100
+    out = sgo.load(data=files['OBJECT/X.SGO'])
+    assert out['se'] == [7] and out['own'] == [5] and 'only_a' not in out, out
+    m.check_class_keys(stock, 'OBJECT/X.SGO', files['OBJECT/X.SGO'])
+    assert m.fill_class_keys(stock, blobs.__getitem__, 'OBJECT/X.SGO', files) is None
+    # the shipped objects
+    reg = eo.registry()
+    for o in reg['objects']:
+        if o['object'].endswith('.SGO'):
+            assert 'class_keys_from' not in o or o['class_keys_from']['keys'], o
+    if not _e5c_have_game():
+        return
+    import rootcpk
+    games = m.Games(rootcpk.DEFAULT_GAME, rootcpk.DEFAULT_GAME)
+    real = games.stock_by_class()
+    flagged = set()
+    for o in reg['objects']:
+        if o['object'].endswith('.SGO'):
+            try:
+                m.check_class_keys(real, o['object'], eo.read(o['object']))
+            except ValueError:
+                flagged.add(o['object'].split('/')[-1])
+    assert not flagged, sorted(flagged)
+
+
+@test
+def edf41_stale_stock() -> None:
+    """make_edf41_objects.stale_stock / script_sgos: an SGO EDF6's archives serve that the 4.1 missions spawn, whose class
+    lacks no key every OTHER stock SGO of it has, passes; one that does (a 4.1 leftover EDF6's classes cannot load:
+    Transporter401_Formation without se_preset_list crashed MP003 at EDF+0x240AD3, 2026-10-13) is refused unless this
+    port replaces it or EDF6's own missions spawn it (the game loads it); a class with a single member needs that proof.
+    On the real archives (EDF6 and EDF4.1 installed): every stock SGO the 4.1 missions spawn passes or is replaced."""
+    import make_edf41_objects as m
+    import edf41_objects as eo
+
+    # the scripts' strings: BVM text is UTF-16, AC / JSON text is UTF-8
+    wide = 'x app:/Object/Foo.sgo y'.encode('utf-16le') + b'\0\0' + 'app:/object/Bar_2.SGO'.encode('utf-16le')
+    assert m.script_sgos(wide) == {'OBJECT/FOO.SGO', 'OBJECT/BAR_2.SGO'}, m.script_sgos(wide)
+    assert m.script_sgos(b'{"o": "app:/Object/Baz.sgo;app:/Object/Qux.sgo"}') == {'OBJECT/BAZ.SGO', 'OBJECT/QUX.SGO'}
+    assert m.script_sgos(b'app:/object/a.rab') == set()
+
+    full = {'xgs_scene_object_class': 'Box', 'game_object_durability': 1.0, 'se_preset_list': []}
+    stock = {'Box': {'OBJECT/A.SGO': full, 'OBJECT/B.SGO': {k: v for k, v in full.items() if k != 'se_preset_list'}},
+             'Solo': {'OBJECT/S.SGO': {'xgs_scene_object_class': 'Solo'}}}
+    everything = {'OBJECT/A.SGO', 'OBJECT/B.SGO', 'OBJECT/S.SGO'}
+    out = m.stale_stock(stock, everything, set(), set())
+    assert len(out) == 2 and out[0].startswith('OBJECT/B.SGO') and "['se_preset_list']" in out[0], out
+    assert out[1].startswith('OBJECT/S.SGO') and 'no other stock SGO' in out[1], out
+    assert m.stale_stock(stock, everything, {'OBJECT/B.SGO'}, {'OBJECT/S.SGO'}) == [], 'replaced / proven passes'
+    assert m.stale_stock(stock, {'OBJECT/A.SGO'}, set(), set()) == [], 'only what the 4.1 missions spawn is tested'
+
+    # animation_model without a MAB block where every sibling has one (Transporter401_Formation: boosts looked its
+    # locators up through the null MAB, EDF+0x6BAE06, MP003 2026-10-13) is refused unless MAB_LESS says why it works
+    import sgo
+    mab = 'raw:4d414200' + '00' * 8
+    sib = {'xgs_scene_object_class': 'Box', 'animation_model': [['a.mrab', 'a.mdb'], 'a.cas', mab]}
+    stock_mab = {'Box': {'OBJECT/A.SGO': sib}}
+    plain = sgo.write_depth_first(0x102, {'xgs_scene_object_class': 'Box', 'animation_model': [['b.rab', 'b.mdb'], 'b.cas', 0]})
+    with_mab = sgo.write_depth_first(0x102, {'xgs_scene_object_class': 'Box', 'animation_model': [['b.rab', 'b.mdb'], 'b.cas', mab]})
+    m.check_model_mab(stock_mab, 'OBJECT/B.SGO', with_mab)
+    m.check_model_mab({}, 'OBJECT/B.SGO', plain)     # no sibling: nothing to compare
+    try:
+        m.check_model_mab(stock_mab, 'OBJECT/B.SGO', plain)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('check_model_mab passed an animation_model without a MAB block')
+    m.check_model_mab(stock_mab, 'OBJECT/TRANSPORTER401_FORMATION.SGO', plain)   # MAB_LESS: explained
+
+    # a classic SGO of a class whose stock SGOs are all DSGO is refused (Vehicle501_FortressRobo: slot 6 read the root
+    # through the dictionary API a classic SGO leaves empty, EDF+0xD74D9, MP004 2026-10-13); as_dsgo keeps the values
+    import dsgo
+    classic = sgo.write_depth_first(0x102, {'xgs_scene_object_class': 'Box', 'n': [1, 2], 's': 'x', 'f': 1.5})
+    m.check_class_format(set(), 'OBJECT/B.SGO', classic)
+    try:
+        m.check_class_format({'Box'}, 'OBJECT/B.SGO', classic)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('check_class_format passed a classic SGO of a DSGO-only class')
+    converted = m.as_dsgo(classic)
+    assert converted[:4] == b'DSGO' and m.as_dsgo(converted) == converted
+    m.check_class_format({'Box'}, 'OBJECT/B.SGO', converted)
+    back = dsgo.to_py(dsgo.parse(converted).root)
+    assert back == {'xgs_scene_object_class': 'Box', 'n': [1.0, 2.0], 's': 'x', 'f': 1.5}, back
+
+    # the shipped replacement: registered as replacing the stock file, built from 4.1's SGO under EDF6's class
+    reg = eo.registry()
+    done = {o['object']: o for o in reg['objects']}
+    for root, why in m.STOCK_OVERRIDES.items():
+        o = done.get('OBJECT/' + root)
+        assert o is not None and o.get('replaces_stock') == why, root
+    formation = sgo.load(data=eo.read('OBJECT/TRANSPORTER401_FORMATION.SGO'))
+    assert formation['boosts'] == [] and not m.has_mab(formation), 'MAB_LESS is only sound with no booster locators'
+    assert 'OBJECT/TRANSPORTER401.CAS' in done['OBJECT/TRANSPORTER401_FORMATION.SGO']['files']
+    if not _e5c_have_game() or not _edf41_root():
+        print('skip  edf41_stale_stock (real archives): needs EDF6 and EDF4.1 installed')
+        return
+    import rootcpk
+    games = m.Games(_edf41_root(), rootcpk.DEFAULT_GAME)
+    spawned = m.spawned_objects(games)
+    assert len(spawned) > 100, len(spawned)     # the scan found the missions' objects, not nothing
+    assert 'OBJECT/TRANSPORTER401_FORMATION.SGO' in spawned
+    left = [s for s in m.stale_stock(games.stock_by_class(), spawned, set(done), m.proven_stock(games))
+            if s.split(':')[0] not in m.STOCK_EXEMPT]
+    assert not left, left
+    real = games.stock_by_class()
+    for o in reg['objects']:   # every shipped SGO has the MAB block its class's stock SGOs have, or MAB_LESS says why not
+        if o['object'].endswith('.SGO'):
+            m.check_model_mab(real, o['object'], eo.read(o['object']))
+    dsgo_only = games.dsgo_only_classes()
+    assert 'Vehicle501_FortressRobo' in dsgo_only, sorted(dsgo_only)[:5]
+    for o in reg['objects']:   # no shipped classic SGO sits in a class EDF6 only ships as DSGO
+        if o['object'].endswith('.SGO'):
+            m.check_class_format(dsgo_only, o['object'], eo.read(o['object']))
+    # the formation's CAS has the states the class looks up by name (EDF+0x5E4A6A..0x5E4AB0)
+    import cas_graft
+    import cas_legacy as cl
+    cas = eo.read('OBJECT/TRANSPORTER401.CAS')
+    main = [[cas_graft._name(cas, mc.at) for mc in ms] for at, ms in cl.cas_layout(cas).tree.anmgroups
+            if cas_graft._name(cas, at) == 'main']
+    assert main and {'hover_start', 'hover_end', 'fly'} <= set(main[0]), main
+    # and without the replacement the formation is what this test exists to catch
+    bad = m.stale_stock(games.stock_by_class(), spawned, set(), m.proven_stock(games))
+    assert any(s.startswith('OBJECT/TRANSPORTER401_FORMATION.SGO') and 'se_preset_list' in s for s in bad), bad
 
 
 @test
@@ -7539,7 +8050,6 @@ def edf41_ufo401_real() -> None:
     assert any(o['object'] == 'OBJECT/UFO401.SGO' for o in reg['objects'])
 
 
-
 # ---------------------------------------------------------------- EDF4.1 sounds (tools/edf41_sounds.py)
 
 
@@ -7798,9 +8308,6 @@ def edf41_voice_real() -> None:
     row = next(en.items[i] for i in en.names if en.names[i] == 'A001AA')
     line = s.read_captions(s.plugin_path(r41, s.CAPTIONS['EN'])).get('A001AA')
     assert row.items == ['', line or 'A001AA'], row.items
-
-
-
 @test
 def edf41_rest_behaviour_real() -> None:
     """The shipped carriers, AI tank, Deiroi, AlienTrailer, Fortress robo and AI rangers read back with the keys
@@ -7871,7 +8378,6 @@ def edf41_rest_behaviour_real() -> None:
     tank = load('VEHICLE301_TANK_AI')
     assert plain(tank['game_object_ai_route_update_distance']) == 3.0 and plain(tank['car_base_submerge_height']) == 1.7
     assert tank['xgs_scene_object_class'] == 'Vehicle505_Tank' and plain(tank['game_object_durability']) == 700.0
-
 
 
 def _mini_mab(flag: int) -> bytes:

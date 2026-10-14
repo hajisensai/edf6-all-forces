@@ -3,10 +3,12 @@
 // 飞下来不用降落伞" -- the way Broken Arrow handles infantry and its transport:
 //  - a squad is paired with one vehicle (its transport: a truck, an APC, a transport helicopter), by boarding it (the map's
 //    BOARD), by a crewed transport's delivery or a helicopter assault (support_dispatch.cpp);
-//  - a point order (move / attack-move / guard) for a paired squad farther than the auto range goes by its transport: the
-//    vehicle comes for the squad (or the squad walks to an empty one), the squad boards, the vehicle drives / flies to a
-//    point short of the order's (the standoff), stops (lands), the squad gets off and carries out the order on foot, the
-//    vehicle waits there. Nearer, the squad walks (and one aboard gets off first);
+//  - a point order (move / attack-move / guard) for a paired squad aboard its vehicle goes by it: the vehicle drives /
+//    flies to a point short of the order's (the standoff), stops (lands), the squad gets off and carries out the order on
+//    foot. A squad on foot always walks (2026-10-10, the user: the far-order ride, TransportAutoRange, is gone -- a far
+//    move left the squad standing while it waited for a vehicle to come: "站原地冷暴力我");
+//  - a support delivery (a crewed truck / APC, a transport helicopter) goes back once its passengers are off (the same
+//    day: "载具送过来以后就会直接回去"): it is not left as their transport;
 //  - its transport is withdrawn on order (a support vehicle leaves the field and is removed);
 //  - a paratroop drop: a transport plane flies over the point and its passengers jump one after another (a stick); every
 //    class but the Wing Diver comes down under a parachute, a Wing Diver flies down on her own.
@@ -24,7 +26,6 @@ enum class Phase : std::uint8_t { none, pickup, boarding, moving, landing, unloa
 const char* const kPhaseNames[]={"none","pickup","boarding","moving","landing","unloading"};
 
 struct Tuning {
-    float autoRange=200.0f;        // m: a point order farther than this from the squad goes by its transport (ini)
     float groundReach=40.0f;       // m: a ground vehicle this near the squad's top: board it
     float heliReach=45.0f;         // m: a landed helicopter this near: board it
     float groundStandoff=40.0f;    // m short of the order's point the vehicle stops (no closer than the point itself)
@@ -60,10 +61,10 @@ struct Step { Phase next; Act act; };
 
 inline float Level(const float* a,const float* b) noexcept { return std::hypot(a[0]-b[0],a[2]-b[2]); }
 
-// Whether a point order `distance` m from the squad's top goes by its transport: the squad is paired and aboard it now,
-// or the point is past the auto range.
-inline bool Rides(bool paired,bool aboardAny,float distance,float autoRange) noexcept {
-    return paired && (aboardAny || distance>autoRange);
+// Whether a point order goes by the squad's transport: only when it is paired and aboard it now (a squad on foot walks,
+// however far: no vehicle is sent for it).
+inline bool Rides(bool paired,bool aboardAny) noexcept {
+    return paired && aboardAny;
 }
 
 // The drop point for an order to `target` with the vehicle at `from`: `standoff` m short of it along the way in, never

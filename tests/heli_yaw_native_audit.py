@@ -148,3 +148,78 @@ old_error, fixed_error = closed_loop(False), closed_loop(True)
 assert old_error > .5, 'negative control must reproduce continuing Brute oscillation'
 assert fixed_error < .01, 'compensated controller must settle under the complete native attitude law'
 print(f'Native Brute closed loop: late heading error {math.degrees(old_error):.3f} -> {math.degrees(fixed_error):.3f} deg')
+
+
+def banked_loop(command_bank: bool, pitch: float, angular_blend: float, target_heading: float) -> tuple[float, float, int]:
+    """Full native pitch/roll/yaw, with the recorded angular velocity integrated on all three axes.
+
+    The former level-only audit cannot exercise the bank-to-heading feedback. Keep forward speed
+    according to the instructor's cyclic speed, release the mouse on a fixed course, and compare measured-turn vs course-command
+    banking. Havok collisions, camera and translation are outside this fixture.
+    """
+    import numpy as np
+    attitude, inputs, contact = buf(0x100), buf(32), buf(1)
+    for destination in (attitude, matrix):
+        C.memset(destination, 0, 64)
+        for i in (0, 5, 10, 15):
+            C.c_float.from_address(destination+i*4).value = 1.
+    limit, tilt = math.radians(50.), .61
+    for offset, value in ((0x60, .15), (0x64, angular_blend), (0x74, limit), (0x78, .005), (0x80, tilt), (0x84, .05)):
+        C.c_float.from_address(attitude+offset).value = value
+    native = C.WINFUNCTYPE(None, C.c_void_p, C.c_void_p, C.c_void_p, C.c_void_p)(base+0x654A80)
+    C.c_float.from_address(inputs+12).value = 1.
+    C.c_float.from_address(inputs+8).value = pitch/tilt
+    old_velocity[:] = [0., 0., 0.]
+    rotation = np.eye(3)
+    previous = measured = error = late_bank = 0.
+    flips = last_sign = 0
+    for frame in range(2400):
+        heading = math.atan2(C.c_float.from_address(attitude+32).value, C.c_float.from_address(attitude+40).value)
+        measured += (math.remainder(heading-previous, 2*math.pi)*60.-measured)*.3
+        previous = heading
+        wanted = max(-limit, min(limit, 2.*math.remainder(target_heading-heading, 2*math.pi)))
+        demand = max(-limit, min(limit, wanted+1.5*(wanted-measured)))
+        state = C.c_float.from_address(attitude+0x44).value
+        command = (demand/9.-state*.995)/(limit*.005)
+        # Native identity heading rows have row 0 toward increasing atan2 heading (PlayerBankInput's sense).
+        past = pitch-.05 if pitch > .05 else pitch+.05 if pitch < -.05 else 0.
+        speed = max(-.3, min(1., past/(tilt-.05)))*18.5   # heliaim.h CyclicSpeed, native positive pitch is nose down
+        bank = max(-1., min(1., math.atan(speed*(wanted if command_bank else measured)/9.8)/tilt))
+        C.c_float.from_address(inputs).value = bank
+        C.c_float.from_address(inputs+16).value = max(-1., min(1., command))
+        native(attitude, wrapper, inputs, contact)
+        # Rodrigues integration of the recorded world angular velocity. Row matrices are the transpose.
+        delta = np.array(recorded)/60.
+        angle = float(np.linalg.norm(delta))
+        if angle > 1e-12:
+            x, y, z = delta/angle
+            cross = np.array(((0., -z, y), (z, 0., -x), (-y, x, 0.)))
+            rotation = (np.eye(3)+math.sin(angle)*cross+(1.-math.cos(angle))*(cross@cross))@rotation
+        old_velocity[:] = recorded[:]
+        transform = np.eye(4)
+        transform[:3, :3] = rotation.T
+        C.memmove(matrix, struct.pack('<16f', *transform.ravel()), 64)
+        if frame >= 1200:
+            actual_heading = math.atan2(rotation[0, 2], rotation[2, 2])
+            error = max(error, abs(math.remainder(actual_heading-target_heading, 2*math.pi)))
+            late_bank = max(late_bank, abs(bank))
+            sign = 1 if bank > .05 else -1 if bank < -.05 else 0
+            if sign and last_sign and sign != last_sign:
+                flips += 1
+            if sign:
+                last_sign = sign
+    return error, late_bank, flips
+
+
+before_bank = banked_loop(False, .4, .025, .4)
+assert before_bank[1] > .9 and before_bank[2] >= 10, 'negative control must reproduce repeated full left/right banking'
+worst_heading = worst_bank = 0.
+for pitch in (-.6, -.4, 0., .4, .6):
+    for blend in (.025, .125):
+        for heading in (-.4, .4):
+            error, bank, flips = banked_loop(True, pitch, blend, heading)
+            assert error < math.radians(.1) and bank < .01 and flips == 0, (pitch, blend, heading, error, bank, flips)
+            worst_heading = max(worst_heading, error)
+            worst_bank = max(worst_bank, bank)
+print(f'Native 3D bank loop: old {before_bank[2]} reversals, full bank {before_bank[1]:.3f}; '
+      f'20 course-command cases settle, worst late heading {math.degrees(worst_heading):.4f} deg, bank {worst_bank:.4f}')

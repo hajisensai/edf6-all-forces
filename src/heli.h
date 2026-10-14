@@ -25,6 +25,8 @@ bool PlayerHeliCue(HeliCue* out) noexcept;           // the player's, as of the 
 // The plugin seated an NPC pilot: it flies this heli. False when its table is full of live helis (the heli is
 // then left to the stock game: it sits where it is).
 bool HeliCrewed(const void* vehicle) noexcept;
+// Native Type-1 seat camera: orbit by the current local mouse pilot, preserving native collision.
+bool PlayerHeliCamera(const unsigned char* seat,const float* stockEye,const float* stockLook,float* eye,float* look) noexcept;
 void HeliFrame(unsigned char* vehicle) noexcept;   // after the stock input, NPC-crewed helicopters only
 // Checks only (no patch): the flight's own code, and which of avoidance, the water probe, the rescue's seat
 // reach and board button and the delete of called helis can be used. False: no heli is flown.
@@ -41,6 +43,8 @@ bool MapGroundNear(float x,float z,float y,float* h,bool standable=false) noexce
 void LearnMapNormals(const float* standing) noexcept;
 // emc.cpp: the same against the buildings alone (layer 27: no terrain, no units), metres to the nearest or -1.
 float BuildingRay(const float* a,const float* b,float* hit) noexcept;
+// hitpredict.cpp: the nearest object body along a->b (the bullets' object layer 11), metres or -1; `body` its id.
+float ObjectRay(const float* a,const float* b,float* hit,std::uint32_t* body) noexcept;
 // Whether there is water at (x, z) (docs/water-re.md): the game's own water areas; `surface` gets the
 // highest surface there. unknown: the probe is off (EDF.dll differs) or the map's areas are not there.
 enum class Sea { unknown, land, water };

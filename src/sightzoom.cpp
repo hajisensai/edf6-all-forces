@@ -9,11 +9,17 @@
 //    is switched off, the view is restored on the next camera step, including its no-target branch.
 //  - A new seat or vehicle starts at 1x; a new mission too (ResetSightZoom).
 //  - Shared pad bindings belong to the high view or the Sazabi's hard lock; zoom remains available on a separate binding.
+//  - The range drum is laid on the gun (sightzoom.h LayStep): SightLayStep, from every seat aim's step after the stock
+//    step and the stabilizer (stab.cpp StepHook), turns the player's sighted seat's own pitch axis by the change of the
+//    superelevation at a gun drive's pace (stab.cpp RemapAimAxis maps it onto the bones and moves the stabilizer's held
+//    line with it); the camera lowers the bore by what the gun carries, so the reticle stays on the target as the
+//    barrel climbs.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "layout.h"
 #include "sightzoom.h"
 #include "optic_mount.h"
+#include "turretaim.h"
 #include "edf/patch.h"
 #include "edf/weapon.h"
 #include "memory.h"
@@ -28,7 +34,10 @@ const unsigned char kFovWriteCode[]={0xF3,0x0F,0x10,0x05,0x12,0xD1,0x66,0x01,0xF
 const unsigned char kCamStepCode[]={0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57,0x41,0x56,0x41,0x57,0x48,0x81,0xEC,0x90};
 // The seat's input (docs/stores-re.md §4): 1 = a pad (0 keyboard and mouse), the pad's button bits.
 constexpr std::size_t kSeatPad=0x2B0,kSeatButtons=0x2E8;
+constexpr std::uint16_t kDpadUp=0x0001,kDpadDown=0x0002;   // XInput's wButtons (XINPUT_GAMEPAD_DPAD_*)
 constexpr std::size_t kCamMatrix=0x220;
+// The seat aim's params {brake, accel, top} (docs/nix-re.md §3, stab.cpp kAimParams): top, rad/frame, at +8.
+constexpr std::size_t kAimParams=0x90,kAimNetwork=0xC0;   // +0xC0 non-zero: the network gives this aim its input
 constexpr unsigned kLookTo=0x4E220;
 const unsigned char kLookToCode[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x81,0xEC,0x90,0x00,0x00,0x00,0x0F,0x10,0x0A};
 using LookToFn=float*(__fastcall*)(float*,const float*);
@@ -39,11 +48,17 @@ CamStepFn nextCamStep=nullptr;
 bool installed=false;
 
 struct Capability { sightzoom::Kind kind; const void* weapon; bool mounted=false; };
-struct Toggle { ObjRef ref,human; const void* v; unsigned seat; int step; bool held; Capability sight; };
+struct Toggle { ObjRef ref,human; const void* v; unsigned seat; int step; bool held; Capability sight; int zero=0; bool upHeld=false,downHeld=false; std::uint16_t pad=0; };
 Toggle toggle{};
-// Publish the entire seat identity together: a camera must not combine another seat's zoom and timestamp.
-struct Cue { ObjRef vehicle,human; unsigned seat; float zoom; Capability sight; };
+// Publish the entire seat identity together: a camera must not combine another seat's zoom and timestamp. `aim` the
+// seat's aim (seat+0xE0), what SightLayStep is told apart by before anything else is read.
+struct Cue { ObjRef vehicle,human; unsigned seat; float zoom; Capability sight; int zero=0; const unsigned char* aim=nullptr; };
 Cue cue{};
+// The lay (sightzoom.h LayStep): the superelevation the seat's gun carries over the line of sight now, as SightLayStep
+// last turned it (game thread, under cueLock; the camera reads it). Not engaged: the aim step never reached it (its hooks
+// are not in, stab.cpp RemapAimAxis cannot map the axis): the camera falls back to the set range's whole angle.
+struct LayState { ObjRef vehicle,human; unsigned seat=0; const unsigned char* aim=nullptr; float laid=0.0f; bool engaged=false; };
+LayState lay{};
 SRWLOCK cueLock=SRWLOCK_INIT;
 // Camera-thread state only. The original step may leave FOV untouched when its target expires.
 struct Applied { void* camera; float before,written; float matrixBefore[16],matrixWritten[16]; bool view=false; } applied{};
@@ -102,6 +117,43 @@ Capability SeatCapability(const unsigned char* v,unsigned index) noexcept {
     return found;
 }
 
+// An arc gun's round for the range setting (its speed, its fall a frame: AmmoGravityFactor x the world's gravity); false
+// for a guided or motor round, an energy weapon (nothing to lay over).
+bool ArcOf(const unsigned char* w,float* speed,float* drop) noexcept {
+    RoundModel m{};float g[3];
+    if(!w || !ReadRound(w,&m) || m.kind!=RoundKind::arc || m.lobbed || !(m.speed>0.0f) || !(m.factor>0.0f) || !edf::WorldGravity(image,g))
+        return false;
+    *speed=m.speed;*drop=m.factor*std::fabs(g[1])/3600.0f;
+    return *drop>0.0f && std::isfinite(*drop);
+}
+// The farthest the setting goes for weapon `w`: its round's reach (speed x life), and for an arc round no farther than
+// it lands on the level (sightzoom.h BallisticReach); 0 not known (kZeroMost).
+int ReachOf(const unsigned char* w) noexcept {
+    RoundModel m{};
+    if(!w || !ReadRound(w,&m) || !(m.speed>0.0f) || m.alive<=0)return 0;
+    float reach=m.speed*static_cast<float>(m.alive),speed=0.0f,drop=0.0f;
+    if(ArcOf(w,&speed,&drop)){const float most=sightzoom::BallisticReach(speed,drop);if(most>0.0f && most<reach)reach=most;}
+    return reach>=sightzoom::kZeroStep && reach<1e6f ? static_cast<int>(reach) : 0;
+}
+// The setting `zero` as it holds for weapon `w`: no farther than that weapon reaches. The seat keeps one setting for all
+// its weapons (the drum is the sight's) and it is held to the reach only when it is turned (NextZero), so a setting made
+// on the cannon is past the coaxial gun's reach when the trigger changes (review of #137: ZeroAngle went to 45 degrees
+// there and the view looked into the ground); the weapon looked through now is held to its own.
+int ZeroFor(const unsigned char* w,int zero) noexcept {
+    if(zero<=0)return 0;
+    const int reach=ReachOf(w);
+    return reach>0 && zero>reach ? reach : zero;
+}
+// The sight's superelevation for weapon `w` at the setting `zero` (sightzoom.h ZeroAngle), 0 for a round with nothing
+// to lay over.
+float ZeroOf(const unsigned char* w,int zero) noexcept {
+    zero=ZeroFor(w,zero);
+    float speed=0.0f,drop=0.0f;
+    if(zero<=0 || !ArcOf(w,&speed,&drop))return 0.0f;
+    const float a=sightzoom::ZeroAngle(speed,drop,static_cast<float>(zero));
+    return std::isfinite(a) && a<0.785398163f ? a : 0.0f;
+}
+
 Cue Snapshot() noexcept {
     AcquireSRWLockShared(&cueLock);
     const Cue c=cue;
@@ -109,7 +161,16 @@ Cue Snapshot() noexcept {
     return c;
 }
 
-bool Current(const Cue& c) noexcept {
+// Whether two capabilities are the same scope as far as the camera and the player see it: one physical optic per seat
+// (the user, 2026-10-11: "用副武器的时候瞄具不会强制切回去，而是两边共用才对"). The primary gun, the coaxial gun on the
+// secondary trigger and the stores the switch picks all look through the seat's one sight, so picking another weapon
+// keeps the view, the magnification and the eye; only losing the optic, an overhead / indirect view or no weapon end it.
+bool SameScope(const Capability& a,const Capability& b) noexcept {
+    return a.kind!=sightzoom::Kind::none && b.kind!=sightzoom::Kind::none && a.mounted==b.mounted &&
+           sightzoom::Magnifies(a.kind)==sightzoom::Magnifies(b.kind);
+}
+
+bool Current(const Cue& c,Capability* live=nullptr) noexcept {
     if(!Cfg().enabled || !Cfg().sightZoom || !c.vehicle)return false;
     const unsigned char* human=PlayerHuman();
     if(!human || !c.human.Is(human) || human[kDead])return false;
@@ -120,7 +181,9 @@ bool Current(const Cue& c) noexcept {
     const unsigned char* seat=SeatAt(v,c.seat);
     if(SeatRider(seat)!=Rider::player || At<const void*>(seat,kSeatRider)!=human)return false;
     const Capability now=SeatCapability(v,c.seat);
-    return now.kind!=sightzoom::Kind::none && now.kind==c.sight.kind && now.weapon==c.sight.weapon && now.mounted==c.sight.mounted;
+    if(!SameScope(now,c.sight))return false;
+    if(live)*live=now;
+    return true;
 }
 
 bool KeyHeld(int vk) noexcept {
@@ -130,8 +193,19 @@ bool KeyHeld(int vk) noexcept {
     return pid==GetCurrentProcessId() && (GetAsyncKeyState(vk)&0x8000)!=0;
 }
 
+// The superelevation the camera lays the line of sight under the bore by for cue `c`, weapon `w`: what the gun carries
+// now (the lay engaged on this seat), else the set range's whole angle (the aim step's hooks are not in).
+float LaidFor(const Cue& c,const unsigned char* w) noexcept {
+    AcquireSRWLockShared(&cueLock);
+    const LayState l=lay;
+    ReleaseSRWLockShared(&cueLock);
+    if(l.engaged && l.vehicle.obj==c.vehicle.obj && l.human.obj==c.human.obj && l.seat==c.seat && l.aim==c.aim &&
+       std::isfinite(l.laid))return l.laid;
+    return ZeroOf(w,c.zero);
+}
+
 void Publish(unsigned char* v,unsigned seat,float zoom) noexcept {
-    const Cue next{ObjRef::Of(v),ObjRef::Of(PlayerHuman()),seat,zoom,toggle.sight};
+    const Cue next{ObjRef::Of(v),ObjRef::Of(PlayerHuman()),seat,zoom,toggle.sight,toggle.zero,SeatAt(v,seat)+kSeatAim};
     AcquireSRWLockExclusive(&cueLock);
     cue=next;
     ReleaseSRWLockExclusive(&cueLock);
@@ -153,7 +227,8 @@ void __fastcall CamStepHook(void* cam,void* step) {
     const Cue state=Snapshot();
     __try {
         auto c=static_cast<unsigned char*>(cam);
-        if(!Current(state) || !(state.zoom>1.0f) || !state.sight.mounted || !opticLookTo)return;
+        Capability live{};
+        if(!Current(state,&live) || !(state.zoom>1.0f) || !live.mounted || !opticLookTo)return;
         const void* human=state.human.obj;
         if(At<const void*>(c,kCamTargetRef)!=human && At<const void*>(c,kCamTarget)!=human)return;
         const float before=At<float>(c,kCamFov);
@@ -161,8 +236,11 @@ void __fastcall CamStepHook(void* cam,void* step) {
         const auto vehicle=static_cast<const unsigned char*>(state.vehicle.obj);
         optic::Pose pose;
         if(!optic::Mounted(vehicle,SeatAt(const_cast<unsigned char*>(vehicle),state.seat),
-                           static_cast<const unsigned char*>(state.sight.weapon),&pose))return;
+                           static_cast<const unsigned char*>(live.weapon),&pose))return;
+        // The line of sight under the bore by the superelevation the gun carries (sightzoom.h LayStep, Lowered): as the
+        // lay raises the barrel the bore climbs and the line of sight stays on the target.
         alignas(16) float direction[4]={pose.direction[0],pose.direction[1],pose.direction[2],0};
+        sightzoom::Lowered(pose.direction,LaidFor(state,static_cast<const unsigned char*>(live.weapon)),direction);
         alignas(16) float matrix[16];
         opticLookTo(matrix,direction);
         for(float value:matrix)if(!std::isfinite(value))return;
@@ -203,20 +281,41 @@ void SightZoomFrame(unsigned char* v,unsigned seat,bool padButton) noexcept {
     if(sight.kind==sightzoom::Kind::none){ResetSightZoom();return;}
     // A seat just taken: 1x, a key held while boarding no press. Wall time is not
     // ownership: pausing or a slow frame cannot erase the player's scope choice.
-    if(!toggle.ref.Is(v) || !toggle.human.Is(PlayerHuman()) || toggle.seat!=seat ||
-       toggle.sight.kind!=sight.kind || toggle.sight.weapon!=sight.weapon)
+    // The magnification belongs to the seat's sight, not to the weapon last fired: the primary, the secondary
+    // trigger's gun and the switch's stores share it (SameScope). A weapon that cannot be looked at through the
+    // optic (an indirect round, the overhead view) shows 1x while it is picked; the step is kept for the next one.
+    if(!toggle.ref.Is(v) || !toggle.human.Is(PlayerHuman()) || toggle.seat!=seat)
         toggle=Toggle{ObjRef::Of(v),ObjRef::Of(PlayerHuman()),v,seat,0,true,sight};
-    if(!sightzoom::Magnifies(sight.kind) || !sight.mounted){toggle.step=0;toggle.held=true;Publish(v,seat,1.0f);return;}
-    if(GamePaused()){toggle.held=true;Publish(v,seat,sightzoom::At(toggle.step));return;}
+    toggle.sight=sight;
+    if(!sightzoom::Magnifies(sight.kind) || !sight.mounted){toggle.held=true;TakeScopeWheel(false);Publish(v,seat,1.0f);return;}
+    if(GamePaused()){toggle.held=true;TakeScopeWheel(false);Publish(v,seat,sightzoom::At(toggle.step));return;}
     const bool keys=At<unsigned char>(s,kSeatPad)==0;
     const bool down=keys ? KeyHeld(c.sightZoomKey)
                          : padButton && c.sightZoomButton && (At<std::uint16_t>(s,kSeatButtons)&static_cast<std::uint16_t>(c.sightZoomButton))!=0;
-    if(MapHoldsKeys()){toggle.held=true;Publish(v,seat,sightzoom::At(toggle.step));return;}
+    if(MapHoldsKeys()){toggle.held=true;TakeScopeWheel(false);Publish(v,seat,sightzoom::At(toggle.step));return;}
     if(down && !toggle.held) {
         toggle.step=sightzoom::Next(toggle.step);
         Log("SIGHTZOOM v=%p seat %u: %.0fx by the %s",v,seat,sightzoom::At(toggle.step),keys ? "key" : "pad button");
     }
     toggle.held=down;
+    // The range setting, while the sight is magnified: the wheel (swallowed then: map.cpp TakeScopeWheel) and the
+    // keys on the keyboard and mouse, the d-pad on a pad; one step a notch or a press (sightzoom.h NextZero).
+    const bool scoped=sightzoom::At(toggle.step)>1.0f;
+    int notches=TakeScopeWheel(scoped);   // the wheel whichever input the seat is on (a pad player's mouse too)
+    const bool up=scoped && keys && KeyHeld(c.sightRangeUpKey),downKey=scoped && keys && KeyHeld(c.sightRangeDownKey);
+    notches+=(up && !toggle.upHeld ? 1 : 0)-(downKey && !toggle.downHeld ? 1 : 0);
+    toggle.upHeld=up;toggle.downHeld=downKey;
+    std::uint16_t pad=0;
+    if(scoped && !keys && c.sightRangePad && MapPadButtons(&pad)) {
+        const std::uint16_t edge=static_cast<std::uint16_t>(pad&~toggle.pad);
+        notches+=((edge&kDpadUp) ? 1 : 0)-((edge&kDpadDown) ? 1 : 0);
+    }
+    toggle.pad=pad;
+    if(notches) {
+        const int was=toggle.zero;
+        toggle.zero=sightzoom::NextZero(toggle.zero,notches,ReachOf(static_cast<const unsigned char*>(sight.weapon)),c.sightRangeStep);
+        if(toggle.zero!=was)Log("SIGHTZOOM v=%p seat %u: range set %d m",v,seat,toggle.zero);
+    }
     Publish(v,seat,sightzoom::At(toggle.step));
 }
 
@@ -264,10 +363,67 @@ sightzoom::Kind SightZoomView(const void* vehicle) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){return sightzoom::Kind::none;}
 }
 
+int SightZoomRange(const void* vehicle,float* angle) noexcept {
+    if(angle)*angle=0.0f;
+    if(MapOwnsView())return 0;
+    const Cue c=Snapshot();
+    __try {
+        Capability live{};
+        if((vehicle && c.vehicle.obj!=vehicle) || !(c.zoom>1.0f) || !Current(c,&live) || !live.mounted)return 0;
+        const auto w=static_cast<const unsigned char*>(live.weapon);
+        if(angle)*angle=LaidFor(c,w);
+        return ZeroFor(w,c.zero);   // the range this weapon is laid for (held to its reach)
+    } __except(EXCEPTION_EXECUTE_HANDLER){return 0;}
+}
+
+void SightLayStep(unsigned char* aim,float before) noexcept {
+    if(!installed || !aim)return;
+    const Cue c=Snapshot();
+    if(aim!=c.aim)return;   // every seat aim in the world comes here: only the player's magnified sight's is laid
+    __try {
+        if(At<unsigned char>(aim,kAimNetwork)!=0)return;   // the network steps this aim (docs/nix-re.md §3): not ours
+        Capability live{};
+        const bool sighted=c.zoom>1.0f && Current(c,&live) && live.mounted;
+        AcquireSRWLockShared(&cueLock);
+        LayState l=lay;
+        ReleaseSRWLockShared(&cueLock);
+        const bool same=l.engaged && l.vehicle.Is(c.vehicle.obj) && l.human.obj==c.human.obj && l.seat==c.seat && l.aim==aim;
+        if(!sighted) {
+            // Out of the sight (1x, an indirect pick, another seat): the barrel stays where it is; the turret camera's
+            // own steering (turretcam.cpp) has the gun again. Laid anew when the sight comes up.
+            if(l.engaged){AcquireSRWLockExclusive(&cueLock);lay=LayState{};ReleaseSRWLockExclusive(&cueLock);}
+            return;
+        }
+        const auto w=static_cast<const unsigned char*>(live.weapon);
+        const float want=ZeroOf(w,c.zero);
+        if(!same) {
+            // The sight comes up on a gun that already carries its setting (the turret camera laid it by the arc at 1x,
+            // or the player before): the line of sight goes under the bore by the whole angle at once, as it always did;
+            // from here on every change of the setting or of the weapon's round is laid on the gun.
+            if(!AimAxisAdjustable())return;
+            l=LayState{c.vehicle,c.human,c.seat,aim,want,true};
+        } else if(AutoTurretSteers(c.vehicle.obj,c.seat)!=1) {   // EDF6AutoTurret laying on a lock already solves the arc
+            float* axis=reinterpret_cast<float*>(aim+kAimAxes+kAxisStride);   // the pitch axis {min, max, angle, rate}
+            const float top=At<float>(aim,kAimParams+8);   // the turret's top rate (rad/frame), the stock params' third
+            const float rate=std::isfinite(top) && top>0.0f && top<sightzoom::kLayRate ? top : sightzoom::kLayRate;
+            const sightzoom::Lay step=sightzoom::LayStep(want,l.laid,rate,axis[2],axis[0],axis[1]);
+            if(step.angle!=axis[2] && !RemapAimAxis(aim,1,before,step.angle))return;
+            if(Cfg().debug && step.laid!=l.laid && step.laid==want)
+                Log("SIGHTZOOM v=%p seat %u: gun laid %.2f deg over the line of sight for %d m",c.vehicle.obj,c.seat,want*57.29578f,ZeroFor(w,c.zero));
+            l.laid=step.laid;
+        }
+        AcquireSRWLockExclusive(&cueLock);
+        lay=l;
+        ReleaseSRWLockExclusive(&cueLock);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
+
 void ResetSightZoom() noexcept {
     toggle=Toggle{};
+    TakeScopeWheel(false);
     AcquireSRWLockExclusive(&cueLock);
     cue=Cue{};
+    lay=LayState{};
     ReleaseSRWLockExclusive(&cueLock);
     // The camera hook still owns its last FOV write until that camera next steps.
 }

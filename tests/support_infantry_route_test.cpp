@@ -14,6 +14,7 @@
 #include "../src/support_config.cpp"
 #include <memory>
 namespace crew {
+void PlayAreaTick() noexcept {}
 namespace {bool supportSessionActive=true;}
 support::Policy SupportMissionPolicy() noexcept {return {support::Environment::normal,false};}
 int SupportAirCallCount() noexcept{return 21;}
@@ -21,6 +22,8 @@ const wchar_t* SupportAirCallName(int) noexcept{return L"air";}
 const wchar_t* SupportAirCallKey(int) noexcept{return L"AIR";}
 bool SupportSoloHostWorld() noexcept{return false;}
 bool SupportAircraftSpec(int,SupportAircraft*) noexcept{return false;}
+bool SupportSubCatalog(int) noexcept{return false;}
+unsigned char* SubLaunch(const float*,const float*) noexcept{return nullptr;}
 support::Refusal PlanAirSupport(const SupportAircraft&,const float*,const float*,support::Route*) noexcept{return support::Refusal::unsupported;}
 unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float*,const wchar_t*) noexcept{return nullptr;}
 bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool) noexcept{return false;}
@@ -40,7 +43,7 @@ void RescueRequestFailed(const wchar_t*) noexcept{}
 bool SupportPeersAcceptTransports() noexcept{return true;}
 bool SupportPeersAcceptLoadout() noexcept{return true;}
 bool SupportAircraftReady(const SupportAircraft&) noexcept{return false;}
-bool TransportDeliver(const void*,const void* const*,int,const float*) noexcept{return false;}
+bool TransportDeliver(const void*,const void* const*,int,const float*,bool) noexcept{return false;}
 bool TransportParadrop(const void*,const float*) noexcept{return false;}
 bool JetFerry(const void*,const float*,const float*) noexcept{return false;}
 bool AirdropReady(SupportVehicleKind) noexcept{return false;}

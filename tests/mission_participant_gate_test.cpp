@@ -5,6 +5,12 @@ namespace crew {
 unsigned char* image=nullptr;
 bool session=true;
 bool InSession() noexcept { return session; }
+// edf5online.cpp: the EDF5 loop's online pad/split (on while bvmOnline) and the created player reported back.
+bool bvmOnline=false;
+int madeCalls=0,madeIndex=-2;
+const void* madeObj=reinterpret_cast<const void*>(1);
+bool Edf5BvmOnlinePlayerArgs(int,int* pad,int* split) noexcept { if(!bvmOnline)return false;*pad=-1;*split=1;return true; }
+void Edf5BvmOnlinePlayerMade(int index,const void* made) noexcept { ++madeCalls;madeIndex=index;madeObj=made; }
 }
 namespace {
 int checks=0,calls=0,admissions=0;
@@ -19,7 +25,7 @@ void Created(int index,const crew::ObjRef& ref) noexcept {
 }
 crew::ObjRef* __fastcall Original(void* context,crew::ObjRef* out,const float* matrix,int index,int a5,int a6,int a7,bool a8,int a9,void* a10) {
     ++calls;Check(context==reinterpret_cast<void*>(1) && matrix==reinterpret_cast<float*>(2) && index==7 &&
-        a5==-5 && a6==6 && a7==-7 && a8 && a9==9 && a10==reinterpret_cast<void*>(10),"all ten Win64 ABI arguments preserved");
+        (crew::bvmOnline ? a5==-1 && a6==1 : a5==-5 && a6==6) && a7==-7 && a8 && a9==9 && a10==reinterpret_cast<void*>(10),"all ten Win64 ABI arguments preserved");
     *out=emptyResult ? crew::ObjRef{} : crew::ObjRef{actor,actorCtrl};return out;
 }
 }
@@ -44,6 +50,14 @@ int main() {
     Check(creations==1,"allowed but failed creation does not produce a world identity");
     emptyResult=false;Put<LONG>(actorCtrl,8,0);invoke();
     Check(creations==1,"expired creation weak result is not observed");
+    Check(madeCalls==0,"outside an online EDF5 loop nothing is reported to it");
+    // An online EDF5 creation (edf5online.cpp): the pad and split it gives reach the native call, the player made is
+    // reported back; a refused one is reported as none.
+    bvmOnline=true;Put<LONG>(actorCtrl,8,1);admitValue=true;const int made=calls;invoke();
+    Check(calls==made+1 && madeCalls==1 && madeIndex==7 && madeObj==actor,"online EDF5 pad/split passed, the player reported");
+    admitValue=false;invoke();
+    Check(calls==made+1 && madeCalls==2 && madeObj==nullptr,"a refused online EDF5 player reported as none, not created");
+    bvmOnline=false;
     Check(std::memcmp(image+kUpperCall+5,kCallerBytes+5,sizeof(kCallerBytes)-5)==0,"consumer instructions remain unchanged");
     VirtualFree(image,0,MEM_RELEASE);
     std::printf("mission_participant_gate_test: %d checks passed\n",checks);
