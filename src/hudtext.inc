@@ -359,7 +359,6 @@ HUDTEXT(controlStores,L"[%ls] stores",L"[%ls] 切换挂载",L"[%ls] 切換掛載
 HUDTEXT(controlTarget,L"[%ls] next target",L"[%ls] 切换目标",L"[%ls] 切換目標",L"[%ls] 目標切替")
 HUDTEXT(controlGuns,L"[%ls] switch gun",L"[%ls] 切换火炮",L"[%ls] 切換火砲",L"[%ls] 火砲切替")
 HUDTEXT(controlGatlingHold,L"[%ls] hold: gatling",L"[%ls] 按住：加特林机枪",L"[%ls] 按住：加特林機槍",L"[%ls] 長押し：ガトリング")
-HUDTEXT(controlSecondaryFire,L"secondary fire",L"副射击",L"副射擊",L"サブ射撃")
 HUDTEXT(controlFlares,L"[%ls] flares",L"[%ls] 热诱弹",L"[%ls] 熱誘彈",L"[%ls] フレア")
 HUDTEXT(controlFlaresKeyboard,L"[keyboard %ls] flares",L"[键盘 %ls] 热诱弹",L"[鍵盤 %ls] 熱誘彈",L"[キーボード %ls] フレア")
 

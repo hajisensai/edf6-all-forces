@@ -814,7 +814,7 @@ void GunnerMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,f
         Append(keys,Tr(Tx::controlGuns),key);
     }
     if(g.guns&(1u<<static_cast<int>(GunnerGun::gatling))) {
-        if(g.keys)wcsncpy_s(key,Tr(Tx::controlSecondaryFire),_TRUNCATE);else SeatButtonName(0x20,key,32);   // pad RB
+        if(g.keys)KeyName(Cfg().gunshipGatlingKey,key,32);else SeatButtonName(0x20,key,32);   // pad RB
         if(keys.text[0])Append(keys,L"   ");
         Append(keys,Tr(Tx::controlGatlingHold),key);
     }
@@ -2790,8 +2790,11 @@ int SightGun(const StockHudReadout& r,bool leadGun) noexcept {
 // A gun on the seat's other trigger keeps its own full sight (the user, 2026-10-14: 「切换武器的时候会把瞄具取消到。比如泰坦
 // 用机枪的时候，镇魂炮的瞄具就没了」): which trigger was pulled last only says which one is picked (its name bracketed,
 // the magnified scope's field), not which gun may be aimed. One fired with the pick (coFired) is the pick's marks.
+// A missile / rocket picked keeps the screen to its own marks (StockMarks' rule): the other gun only its bore cross then.
 bool OtherTriggerSight(const StockHudReadout& r,int i,bool leadGun) noexcept {
-    return i!=r.sight && i>=0 && i<r.arms && i<kStockArms && r.arm[i].armed && !r.arm[i].coFired && SightCapable(r,i,leadGun);
+    const bool pickIsGun=r.sight<0 || r.sight>=r.arms || r.sight>=kStockArms || r.arm[r.sight].kind==RoundKind::arc;
+    return pickIsGun && i!=r.sight && i>=0 && i<r.arms && i<kStockArms && r.arm[i].armed && !r.arm[i].coFired &&
+           SightCapable(r,i,leadGun);
 }
 
 // The bore cross of a gun on the seat's other trigger (StockMarks), dimmer than the pick's, its name under it.

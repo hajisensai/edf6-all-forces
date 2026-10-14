@@ -143,7 +143,7 @@ volatile LONG inputsHooked=0;      // EnsureInputs has run (once)
 // is never handed to another vehicle's line at a reused address and never overwritten while still owed.
 constexpr std::size_t kWeaponAimLine=0x1638,kAimLineSegments=0x130;
 constexpr unsigned kAimLineVtable=0x17E2418;
-constexpr int kLinesPerVehicle=12;
+constexpr int kLinesPerVehicle=32;   // every empty seat's lines are hidden too (aim_line_want.h): room for all of them
 struct HiddenLine { const unsigned char* line; std::int32_t segments; };
 
 struct State {

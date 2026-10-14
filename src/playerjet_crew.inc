@@ -28,9 +28,10 @@
 constexpr ULONGLONG kGunnerCentreMs=30000;   // the pylon turn stays round the point last shelled this long
 constexpr std::size_t kSeatFire=0x2E4;       // the seat's primary trigger (docs/heli-input-re.md §3: >= kSeatFireOn fires)
 constexpr float kSeatFireOn=0.8f;
-// The seat's secondary fire: its button word's bit 0x20 (docs/heli-input-re.md §3; the pad's RB, the keyboard's secondary
-// fire key: the bit the pilot's stores fire on, the 506's fire byte +0x2021).
-constexpr std::uint16_t kButtonSecondary=0x20;
+// The gatling's button on a pad: RB, the seat button word's bit 0x20 (docs/heli-input-re.md §3). On the keyboard the
+// ini's GunshipGatlingKey (the right mouse button), read as the switch key is (GunnerPick): which keys the gun seat's
+// button row takes from the keyboard is not traced.
+constexpr std::uint16_t kButtonRB=0x20;
 constexpr ULONGLONG kGunnerLogMs=2000;
 constexpr std::size_t kSeatAimStick=0x2D0;   // the rider's aim stick (the mouse's per-frame share), docs/camera-re.md §4
 
@@ -187,17 +188,20 @@ void GunnerPick(unsigned char* v,const unsigned char* seat) noexcept {
 // The gun (see the file comment): the trigger fires the picked gun at the ground sight, the pylon turn moves to what
 // was fired at. The secondary fire held fires the gatling, whatever gun is picked (the user, 2026-10-14: 「炮舰机的炮火位
 // 没办法用机枪开火，只能用炮」: the gatling was only behind the switch key, which the HUD did not name; asked, 「副射击=
-// 加特林」): the pilot's machine guns are the primary trigger, the gunner's the secondary, the shells / cannon the primary.
+// 加特林」): GunshipGatlingKey (the right mouse button; a pad's RB), the shells / cannon the primary trigger.
 void GunnerFire(unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
     const unsigned char* const seat=SeatAt(v,kGunnerSeat);
     const float trigger=At<float>(seat,kSeatFire);
-    const bool gatling=(At<std::uint16_t>(seat,kSeatButtons)&kButtonSecondary)!=0 && GunThere(GunnerGun::gatling);
+    const bool keys=At<unsigned char>(seat,kSeatPad)==0;
+    const bool held=keys ? KeyDown(Cfg().gunshipGatlingKey) :
+                           (At<std::uint16_t>(seat,kSeatButtons)&kButtonRB)!=0;
+    const bool gatling=held && GunThere(GunnerGun::gatling);
     const bool pull=gatling || (std::isfinite(trigger) && trigger>=kSeatFireOn);
     GunnerPick(v,seat);
     const GunnerGun gun=gatling ? GunnerGun::gatling : gunner.gun;
     GunnerReadout& r=gunner.hud;
     r=GunnerReadout{};
-    r.gun=gun;r.keys=At<unsigned char>(seat,kSeatPad)==0;r.gatlingHeld=gatling;
+    r.gun=gun;r.keys=keys;
     for(int g=0;g<static_cast<int>(GunnerGun::count);++g)
         if(GunThere(static_cast<GunnerGun>(g)))r.guns|=1u<<g;
     r.ground=GroundSight(r.sight);

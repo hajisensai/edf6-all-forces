@@ -2086,6 +2086,8 @@ int Scenes(const std::wstring& dir) {
         {   // a copy with the cannon's ladder (this scene's has none: no gun sight to keep, picked or not)
             StockHudReadout probe=sceneStock;probe.arm[0].ladder.ticks=3;
             failed+=!OtherTriggerSight(probe,0,false) || OtherTriggerSight(probe,1,false) || OtherTriggerSight(sceneStock,0,false);
+            probe.arm[1].kind=RoundKind::homing;   // a missile picked: no gun reticle under its marks
+            failed+=OtherTriggerSight(probe,0,false);
         }
         Scene(dir,L"stock_tank_loading_two_triggers",ground);
         sceneStock.arms=2;sceneStock.selected=0;

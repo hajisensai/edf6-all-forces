@@ -18,13 +18,14 @@ enum class LineWant : std::uint8_t { keep, hide, show };
 // a support aircraft whose crew is still walking aboard; the user, 2026-10-14: 「飞机在外面会有红色预瞄线」). Hidden too
 // while the player holds it in a vehicle whose HUD draws a sight of its own (`ownSight`: PlayerJetOwnSight /
 // PlayerHeliOwnSight / PlayerStockOwnSight), given back for the player with no sight of ours (the ini turned off: the next
-// frame; the count was kept when it was hidden, crew.cpp SetLine). A remote player's seat is left as it is: theirs to see.
+// frame; the count was kept when it was hidden, crew.cpp SetLine). A remote player's seat gets back what we hid while it
+// was empty and is not hidden: theirs to see (SetLine gives back only a line it hid).
 constexpr LineWant Want(Holder holder,bool ownSight) noexcept {
     switch(holder) {
         case Holder::npc:
         case Holder::empty: return LineWant::hide;
         case Holder::player: return ownSight ? LineWant::hide : LineWant::show;
-        default: return LineWant::keep;
+        default: return LineWant::show;
     }
 }
 

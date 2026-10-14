@@ -48,6 +48,9 @@ constexpr int kMaxCarriers=64,kNozzles=10;  // a vehicle's flames at most: a mod
 static_assert(exhaust::kMaxNozzles<=kNozzles,"a model's nozzles all get a flame");
 constexpr ULONGLONG kStaleMs=1000;
 constexpr float kBurnerLength=1.6f;   // the afterburner (the player's boost): the flame this many times as long
+// The afterburner's state held this long before the flames are made anew at its length: an NPC's commanded speed
+// (jet_combat.cpp's chase, jet_carrier.cpp's drones) and a pad trigger round 0.95 cross the line frame after frame.
+constexpr ULONGLONG kBurnerSettleMs=400;
 
 const unsigned char kOpNewSig[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0xD9,0xEB,0x0F,0x48,0x8B,0xCB,0xE8,0x47};
 const unsigned char kCtorSig[]={0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57};
@@ -75,6 +78,8 @@ struct Carrier {               // a vehicle's flames (the name from when only th
     ULONGLONG seen;
     Nozzle n[kNozzles];
     bool copyLogged;            // FLAME's once-per-jet check of when the booster takes the matrix (JetFrame)
+    bool burner;                // the afterburner as last asked (JetFrame), since burnerAt
+    ULONGLONG burnerAt;
 };
 Carrier carriers[kMaxCarriers];
 bool sigOk=false,broken=false;
@@ -161,7 +166,7 @@ Carrier* Find(const unsigned char* v,ULONGLONG ms) noexcept {
         if(!c.v && !slot)slot=&c;
     }
     if(!slot)return nullptr;
-    slot->v=v;slot->ctrl=ctrl;slot->seen=ms;slot->copyLogged=false;
+    slot->v=v;slot->ctrl=ctrl;slot->seen=ms;slot->copyLogged=false;slot->burner=false;slot->burnerAt=ms;
     return slot;
 }
 
@@ -286,6 +291,8 @@ void JetFrame(const unsigned char* v,float intensity,bool burner,ULONGLONG ms) n
     if(!c)return;
     const bool lit=intensity>0.0f;
     const bool fresh=lit && !c->n[0].obj && !c->n[0].ctrl;   // its first flame is made this frame
+    if(burner!=c->burner){c->burner=burner;c->burnerAt=ms;}
+    const bool settled=ms-c->burnerAt>=kBurnerSettleMs;   // a booster made anew only for a state that holds
     c->seen=ms;
     if(Cfg().debug && !c->copyLogged && Live(c->n[0]))CopyCheck(*c,*e,v);
     if(fresh && Cfg().debug) {
@@ -301,7 +308,7 @@ void JetFrame(const unsigned char* v,float intensity,bool burner,ULONGLONG ms) n
     for(int i=0;i<e->set.count;++i) {
         Nozzle& z=c->n[i];
         std::memcpy(z.m,e->world[i],sizeof z.m);
-        if(Live(z) && lit && z.burner!=burner)Drop(z);
+        if(Live(z) && lit && settled && z.burner!=burner)Drop(z);
         if(!Live(z)) {
             if(!lit)continue;   // nothing to light: none made until it burns
             DropWeak(z.ctrl);

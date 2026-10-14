@@ -5,7 +5,7 @@
 //  - an empty seat: hidden, whoever drives (the user, 2026-10-14: 「飞机在外面会有红色预瞄线」: a requested aircraft
 //    delivered empty, a drone the plugin flies with no one seated, an aircraft whose crew is still walking aboard);
 //  - the player: hidden only where our sight replaces it, given back otherwise;
-//  - another machine's player: left as it is.
+//  - another machine's player: given back (it may have been hidden while the seat was empty).
 // The old readings (the seat's rider class alone; an empty seat kept unless an NPC drove) are checked to reproduce the
 // reports, so this fails if they stop doing so. Exit code 1 when one fails.
 // cmake --build build --target aim_line_want_check && build\aim_line_want_check.exe
@@ -48,7 +48,7 @@ int main() {
                you{Read::player,false};
     // A support tank: a real soldier drives, a real soldier at the gun.
     Expect(Want(Now(realCrew),false)==LineWant::hide,"a real soldier's gun: hidden");
-    Expect(Want(Old(realCrew),false)==LineWant::keep,"the old reading left a real crew's line drawn (the 2026-10-10 report)");
+    Expect(Want(Old(realCrew),false)!=LineWant::hide,"the old reading left a real crew's line drawn (the 2026-10-10 report)");
     Expect(Want(Now(dummy),false)==LineWant::hide,"a mission script's Dummy: hidden as before");
     // Empty seats: the 410's door guns aimed by the plugin, and the aircraft nobody sits in (2026-10-14).
     Expect(Want(Now(empty),false)==LineWant::hide,"an empty door gun of an NPC-driven heli: hidden");
@@ -57,8 +57,8 @@ int main() {
     // The player: getting in after the seat was hidden empty gives it back without our sight, keeps it hidden with it.
     Expect(Want(Now(you),true)==LineWant::hide,"the player with our sight: hidden");
     Expect(Want(Now(you),false)==LineWant::show,"the player without our sight: given back");
-    // Another machine's player (online): theirs to see.
-    Expect(Want(Now(remotePlayer),false)==LineWant::keep,"another machine's player: left as it is");
+    // Another machine's player (online): theirs to see, given back if hidden while the seat was empty.
+    Expect(Want(Now(remotePlayer),false)==LineWant::show,"another machine's player: given back");
     std::printf("%d/%d checks passed\n",checks-failures,checks);
     return failures ? 1 : 0;
 }

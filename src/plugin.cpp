@@ -151,6 +151,7 @@ void Validate(Config& n) noexcept {
     n.playerJetFlareKey=static_cast<int>(FixInt("PlayerJetFlareKey",n.playerJetFlareKey,0,254));
     n.playerJetHailKey=static_cast<int>(FixInt("PlayerJetHailKey",n.playerJetHailKey,0,254));
     n.gunshipGunnerKey=static_cast<int>(FixInt("GunshipGunnerKey",n.gunshipGunnerKey,0,254));
+    n.gunshipGatlingKey=static_cast<int>(FixInt("GunshipGatlingKey",n.gunshipGatlingKey,0,254));
     n.playerJetFlares=static_cast<int>(FixInt("PlayerJetFlares",n.playerJetFlares,0,99));
     n.playerJetGearKey=static_cast<int>(FixInt("PlayerJetGearKey",n.playerJetGearKey,0,254));
     n.playerJetGearButton=static_cast<int>(FixInt("PlayerJetGearButton",n.playerJetGearButton,0,255));
@@ -445,6 +446,7 @@ void LoadConfig() noexcept {
     n.playerJetHailKey=ReadInt(L"PlayerJetHailKey",static_cast<DWORD>(n.playerJetHailKey));
     n.gunshipBoardGunner=ReadBool(L"GunshipBoardGunner",n.gunshipBoardGunner);
     n.gunshipGunnerKey=ReadInt(L"GunshipGunnerKey",static_cast<DWORD>(n.gunshipGunnerKey));
+    n.gunshipGatlingKey=ReadInt(L"GunshipGatlingKey",static_cast<DWORD>(n.gunshipGatlingKey));
     n.playerJetFlares=ReadInt(L"PlayerJetFlares",static_cast<DWORD>(n.playerJetFlares));
     n.playerJetGearKey=ReadInt(L"PlayerJetGearKey",static_cast<DWORD>(n.playerJetGearKey));
     n.playerJetGearButton=ReadInt(L"PlayerJetGearButton",static_cast<DWORD>(n.playerJetGearButton));
@@ -743,8 +745,8 @@ void LoadConfig() noexcept {
     Log("CONFIG playerJet gearKey=0x%X gearButton=0x%X",n.playerJetGearKey,n.playerJetGearButton);
     Log("CONFIG vehicleSound=%d engine=%.2f turret=%.2f reload=%.2f gun=%.2f mg=%.2f missile=%.2f",n.vehicleSound,n.vehicleEngineVolume,
         n.vehicleTurretVolume,n.vehicleReloadVolume,n.vehicleGunVolume,n.vehicleMgVolume,n.vehicleMissileVolume);
-    Log("CONFIG playerJetAll=%d hailKey=0x%X gunshipBoardGunner=%d gunnerKey=0x%X",n.playerJetAll,n.playerJetHailKey,n.gunshipBoardGunner,
-        n.gunshipGunnerKey);
+    Log("CONFIG playerJetAll=%d hailKey=0x%X gunshipBoardGunner=%d gunnerKey=0x%X gatlingKey=0x%X",n.playerJetAll,n.playerJetHailKey,
+        n.gunshipBoardGunner,n.gunshipGunnerKey,n.gunshipGatlingKey);
     Log("CONFIG jet pilot=%d fuel=%lus sortie=%lus airRaider=%d missionStrike=%d throwDrones=%d",n.jetPilot,n.jetFuelSec,
         n.jetSortieSec,n.jetAirRaider,n.jetMissionStrike,n.throwDrones);
     Log("CONFIG primer=%d hpScale=%.2f fire=%d trace=%d centipede linkMax=%d linkRange=%.0f woundDamage=%.1f blood=%.2f",n.primer,
