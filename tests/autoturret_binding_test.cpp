@@ -6,12 +6,8 @@ SHORT Key(int vk) noexcept{return vk>=0&&vk<256&&down[vk]?static_cast<SHORT>(0x8
 HWND Window() noexcept{return nullptr;}
 DWORD Process(HWND,LPDWORD pid) noexcept{*pid=GetCurrentProcessId();return 1;}
 }
-#define GetAsyncKeyState bindingkeys::Key
-#define GetForegroundWindow bindingkeys::Window
 #define GetWindowThreadProcessId bindingkeys::Process
 #include "../autoturret/src/designate.cpp"
-#undef GetAsyncKeyState
-#undef GetForegroundWindow
 #undef GetWindowThreadProcessId
 #include "../src/crew.h"
 #include <cstdio>
@@ -49,6 +45,7 @@ extern "C" bool __cdecl EDF6VehicleCrew_SightBindingV1(const void*,unsigned,bool
 extern "C" bool __cdecl EDF6VehicleCrew_TurretObserverV1(const void*,unsigned);
 int main(){
     using namespace autoturret;int checked=0,failed=0;
+    edf::SetInputSource(&bindingkeys::Key,&bindingkeys::Window);   // the plugins' key source (edf/input_source.h)
     auto expect=[&](bool pass,const char* text){++checked;if(!pass){++failed;std::printf("FAIL %s\n",text);}};
     unsigned char v[0x800]{},seats[edf::kSeatStride*2]{},h[0x400]{},ctrl[16]{};
     crew::human=h;crew::testConfig.enabled=crew::testConfig.sightZoom=true;crew::testConfig.sightZoomKey='Z';crew::testConfig.sightZoomButton=128;

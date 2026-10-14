@@ -164,8 +164,8 @@ Pick* FindPick(const void* v) noexcept {
 bool KeyDown(int vk) noexcept {
     if(vk<=0 || MapHoldsKeys())return false;   // the map view holds the player's keys (map.cpp)
     DWORD pid=0;
-    GetWindowThreadProcessId(GetForegroundWindow(),&pid);
-    return pid==GetCurrentProcessId() && (GetAsyncKeyState(vk)&0x8000)!=0;
+    GetWindowThreadProcessId(edf::ForegroundWindow(),&pid);
+    return pid==GetCurrentProcessId() && (edf::AsyncKey(vk)&0x8000)!=0;
 }
 
 // The reload as the stock gauge 0x692100 reckons it (see the top).
@@ -413,7 +413,7 @@ bool Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* co
     const bool keys=At<unsigned char>(seat,kSeatPad)==0;
     // During a map hold follow the physical key only to drain its edge; do not replay it on close.
     const int vk=Cfg().playerJetSwitchKey;
-    const bool down=keys ? (MapHoldsKeys() ? vk>0 && (GetAsyncKeyState(vk)&0x8000)!=0 : KeyDown(vk)) :
+    const bool down=keys ? (MapHoldsKeys() ? vk>0 && (edf::AsyncKey(vk)&0x8000)!=0 : KeyDown(vk)) :
         (At<std::uint16_t>(seat,kSeatButtons)&kButtonLB)!=0;
     const bool press=!MapHoldsKeys() && down && !p.held;
     p.held=down;

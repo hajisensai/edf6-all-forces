@@ -375,8 +375,8 @@ void SetMarchShape(npc::formation::Shape s,const char* by) noexcept {
 bool KeyHeld(int vk) noexcept {
     if(vk<=0)return false;
     DWORD pid=0;
-    GetWindowThreadProcessId(GetForegroundWindow(),&pid);
-    return pid==GetCurrentProcessId() && (GetAsyncKeyState(vk)&0x8000)!=0;
+    GetWindowThreadProcessId(edf::ForegroundWindow(),&pid);
+    return pid==GetCurrentProcessId() && (edf::AsyncKey(vk)&0x8000)!=0;
 }
 
 void FormationTick() noexcept {
@@ -2926,8 +2926,8 @@ bool NpcMarkOwn(const void** object,float* at) noexcept {
 void NpcMarkFrame(unsigned char* human,bool mapOpen) noexcept {
     const Config& c=Cfg();
     DWORD pid=0;
-    GetWindowThreadProcessId(GetForegroundWindow(),&pid);
-    const bool down=c.npcMarkKey>0 && pid==GetCurrentProcessId() && (GetAsyncKeyState(c.npcMarkKey)&0x8000)!=0;
+    GetWindowThreadProcessId(edf::ForegroundWindow(),&pid);
+    const bool down=c.npcMarkKey>0 && pid==GetCurrentProcessId() && (edf::AsyncKey(c.npcMarkKey)&0x8000)!=0;
     // Held is followed while the map holds the keys too: a press made in the map (mapcmd.cpp) and still down when it
     // closes is not a second press on foot.
     // On foot and riding alike (the stock spot it replaces was both; EDF6AutoTurret's lock on the same key reads the key

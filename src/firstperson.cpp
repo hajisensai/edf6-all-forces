@@ -95,8 +95,10 @@ constexpr std::size_t kLook=0x1240,kPos=0x90,kSupport=0x711,kGroundFrames=0x1264
                       kShotCount=0xBD0,kFireState=0xBD4,kReloadTime=0x20C,kFireRecoil=0x37C;
 constexpr int kMostSets=4,kMostReloadFrames=900;
 // The stock moves by the value they write to +0x5D0 (§3.3; H for the Ranger's sprint and the rolls, L for the Fencer's
-// and the Wing Diver's: Debug=1 logs every change to match them).
-constexpr std::uint32_t kSprints[]={0x29E,0x29,0x3D,0xA38,0x25,0xE39},kRolls[]={0xE3C};
+// and the Wing Diver's: Debug=1 logs every change to match them). Only the Ranger's is a sprint (a run held); the
+// Fencer's (0xA38 its dash, measured 2026-10-14: 0.2 s a press, toggling at each one) and the Wing Diver's are bursts
+// of thrust: a dash (fp_motion.h).
+constexpr std::uint32_t kSprints[]={0x29E},kDashes[]={0x29,0x3D,0xA38,0x25,0xE39},kRolls[]={0xE3C};
 // The muzzle flash: the shot's call of the effect factory (rcx the factory, rdx, r8 the flash class [weapon+0x480], r9
 // &weapon+0x488: the flash takes its matrix pointer from weapon+0x4C0 = r9+0x38).
 constexpr unsigned kFlashCall=0x697FD0,kEffectCreate=0x1194280;
@@ -200,14 +202,15 @@ struct alignas(16) Flash { float m[16]; const float* src; int age,hand; };
 Flash flashes[kFlashSlots]{};
 int flashNext=0;
 using CreateFn=void*(__fastcall*)(void*,void*,void*,void*);
-bool toggled=false,keyWas=false,keyRode=false,keyCancelled=false;   // keyRode: riding when the key went down
+std::atomic<bool> toggled{false};   // read by FirstPersonGunnerSight on the draw thread too
+bool keyWas=false,keyRode=false,keyCancelled=false;   // keyRode: riding when the key went down
 int passLog[2][6]{};   // the body's draws, the weapons' in hand, by pass
 ULONGLONG passLogAt=0;
 
 bool KeyInputAllowed() noexcept {
     if(MapHoldsKeys())return false;
     DWORD pid=0;
-    GetWindowThreadProcessId(GetForegroundWindow(),&pid);
+    GetWindowThreadProcessId(edf::ForegroundWindow(),&pid);
     return pid==GetCurrentProcessId();
 }
 
@@ -248,17 +251,24 @@ bool GadgetView(const unsigned char* cam,const unsigned char* h) noexcept {
 }
 
 // In a vehicle, why its own view keeps the camera (nullptr: none does): the high view over the round's fall and its
-// way back (turretcam.cpp), a physical optic zoomed in (sightzoom.cpp: its own reticle; at 1x the seat's cockpit or
-// station monitor is the view, the eye at the same sight).
-const char* VehicleYields(const unsigned char* h) noexcept {
+// way back (turretcam.cpp), the seat's mounted optic (sightzoom.cpp: War Thunder's gunner sight, at every
+// magnification while first person is on: the view on the gun, its reticle; the seats without one see from their
+// cockpit or station monitor).
+// A seat without its cockpit's eye (no vc_eye_ marker: fp_vehicle.cpp) keeps the stock camera too, as a reason here:
+// found only in the camera step (Ride), it turned first person on and off again every frame (measured 2026-10-14: the
+// gunship's gun seat, "FP view on" / "back to the stock camera" 190 times a minute).
+const char* VehicleYields(unsigned char* h) noexcept {
     const void* v=At<const void*>(h,kHumanVehicle);
     if(HighCamOn(v) || TurretCamHighTransition(v))return "the high view";
-    if(SightZoomMounted(v) && SightZoomNow(v)>1.0f)return "a mounted optic zoomed in";
+    if(SightZoomMounted(v))return "the gunner's sight";   // at 1x too in first person (FirstPersonGunnerSight)
+    float eye[3];
+    RideView ride{};
+    if(!VehicleEye(h,eye,&ride))return "no cockpit in this seat";
     return nullptr;
 }
 
 // Why this machine's player is not to be seen in first person through `cam` now (nullptr: they are).
-const char* NotWanted(const unsigned char* cam,const unsigned char* h) noexcept {
+const char* NotWanted(const unsigned char* cam,unsigned char* h) noexcept {
     const Config& c=Cfg();
     if(!camOk || !drawOk)return "hooks unavailable";
     if(!c.enabled || !c.firstPerson || !toggled)return "off";
@@ -271,7 +281,7 @@ const char* NotWanted(const unsigned char* cam,const unsigned char* h) noexcept 
     return nullptr;
 }
 
-bool Wanted(const unsigned char* cam,const unsigned char* h) noexcept {
+bool Wanted(const unsigned char* cam,unsigned char* h) noexcept {
     const char* why=NotWanted(cam,h);
     static ULONGLONG at=0;
     if(why && toggled && h && Cfg().debug && GetTickCount64()-at>=5000) {
@@ -296,7 +306,7 @@ bool KeyTaken(const unsigned char* h,int vk) noexcept {
 // vehicle uses the key itself (KeyTaken) it is that vehicle's: the switch stays as it was set before boarding.
 void Toggle(const unsigned char* h) noexcept {
     const Config& c=Cfg();
-    const bool down=c.firstPersonKey>0 && (GetAsyncKeyState(c.firstPersonKey)&0x8000)!=0;
+    const bool down=c.firstPersonKey>0 && (edf::AsyncKey(c.firstPersonKey)&0x8000)!=0;
     // Loss of input ownership cancels this gesture; it is not a key release. If the
     // physical key is still held when focus/the map returns, wait for its release
     // before allowing another gesture, so the held boarding/map key cannot toggle.
@@ -306,7 +316,7 @@ void Toggle(const unsigned char* h) noexcept {
     if(keyCancelled){if(!down)keyCancelled=false;return;}
     const bool riding=h && !HumanOnFoot(h);
     if(down && !keyWas)keyRode=riding;
-    if(!down && keyWas && keyRode==riding){toggled=!toggled;Log("FP %s (key 0x%X)",toggled ? "on" : "off",c.firstPersonKey);}
+    if(!down && keyWas && keyRode==riding){const bool on=!toggled.load();toggled.store(on);Log("FP %s (key 0x%X)",on ? "on" : "off",c.firstPersonKey);}
     keyWas=down;
 }
 
@@ -334,6 +344,7 @@ const unsigned char* SetWeapon(const unsigned char* h,std::uint64_t k) noexcept 
 fpmotion::Move MoveOf(std::uint32_t act) noexcept {
     for(std::uint32_t v:kRolls)if(act==v)return fpmotion::Move::roll;
     for(std::uint32_t v:kSprints)if(act==v)return fpmotion::Move::sprint;
+    for(std::uint32_t v:kDashes)if(act==v)return fpmotion::Move::dash;
     return fpmotion::Move::none;
 }
 
@@ -786,7 +797,7 @@ void Camera(unsigned char* cam) noexcept {
     float headAt[3];
     if(head)std::memcpy(headAt,head+kBoneWorld+48,12);
     else {const float up[3]={0.0f,1.7f,0.0f};fpview::EyeWorld(body,up,headAt);}
-    fpview::EaseEye(body,headAt,c.fpEyeUp,c.fpEyeAhead,c.fpEyeEase,st.fresh,st.eyeLocal);
+    fpview::EaseEye(body,headAt,c.fpEyeUp,c.fpEyeAhead,c.fpViewHeightEase,st.fresh,st.eyeLocal);
     st.fresh=false;
     float eye[3];
     fpview::EyeWorld(body,st.eyeLocal,eye);
@@ -1071,6 +1082,10 @@ bool HookDrawOf(void** vt) noexcept {
 }  // namespace
 
 bool FirstPersonOn() noexcept { return st.on; }
+bool FirstPersonGunnerSight() noexcept {
+    const Config& c=Cfg();
+    return camOk && drawOk && c.enabled && c.firstPerson && c.fpVehicle && toggled;
+}
 bool FirstPersonHidesStockHud(const void* camera) noexcept {
     return st.on && st.riding && st.cam==camera && st.screens.n>0 && Cfg().fpHideStockHud;
 }
@@ -1098,7 +1113,7 @@ bool InstallFirstPerson() noexcept {
     placeOk=placeOk && RedirectCall(image+kRenderCall,image+kRender,reinterpret_cast<void*>(&RenderHook),changed);
     const bool passOk=placeOk && RedirectCall(image+kPassEndCall,image+kPassEnd,reinterpret_cast<void*>(&PassEndHook),changed);
     toggled=Cfg().firstPersonStart;
-    Log("FP installed: camera=%d draw=%d flash=%d aim line=%d culling=%d pass=%d start=%d",camOk,drawOk,flashOk,lineOk,placeOk,passOk,toggled);
+    Log("FP installed: camera=%d draw=%d flash=%d aim line=%d culling=%d pass=%d start=%d",camOk,drawOk,flashOk,lineOk,placeOk,passOk,toggled.load());
     return drawOk;
 }
 }  // namespace crew

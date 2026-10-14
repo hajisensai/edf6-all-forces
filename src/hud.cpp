@@ -4712,7 +4712,8 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         const sightzoom::Kind sightKind=SightZoomView();
         const float sightMagnification=SightZoomNow(nullptr);
         const sightzoom::Mask sightMask=sightzoom::MaskOf(sightKind);
-        const bool scopeOverlay=sightMagnification>1.0f && sightMask!=sightzoom::Mask::none;
+        // Magnified, or the mounted optic up at 1x in a vehicle's first person (War Thunder's gunner sight).
+        const bool scopeOverlay=(sightMagnification>1.0f || SightZoomMounted(nullptr)) && sightMask!=sightzoom::Mask::none;
         scopeNow=ScopeNow{};
         {   // A validated seat/weapon chooses the mask. Aircraft/mechs keep their own HUD; overhead has no optic.
             const Snapshot& z=Latest();
