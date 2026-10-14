@@ -8291,7 +8291,8 @@ def edf41_story_pack_real() -> None:
     assert sum(r['map'].startswith('SK_') for r in rows41) >= 9
     assert any(r['path'] == 'M126' for r in rows41)
     skipped = {path: why for g, path, why in p['skipped'] if g == e5c.PACK41.group}
-    assert skipped and all('缺少' in why for why in skipped.values())
+    # 2026-10-15: the motherships (301, 401) and UfoRobo are the plugin's own classes: no story mission is left out any more
+    assert not skipped and len(rows41) == len(e5c.edf41_text()['missions']) == 89, skipped
     listed = dsgo.parse(files[e5c.PACK41.list]).root.get('table').items
     assert [r.items[2] for r in listed] == [f'EDF41/{r["path"]}' for r in rows41]
     for r in rows41:
