@@ -475,7 +475,11 @@ void GunTick(Robo& r,Gun& g,int group) noexcept {
 // ---- CAS ------------------------------------------------------------------------------------------------------------
 bool Play(Robo& r,int state,const wchar_t* why) noexcept {
     if(state<0)return false;
+    int before=-1;
+    float t=0.0f,len=0.0f;
+    ClipNow(r.obj,&before,&t,&len);
     const bool ok=PlayStateIndex(r.obj,state);
+    if(ok && before==state)ClipRewind(r.obj);   // the same state again (a second walk_f_lr): from its start
     r.evState=-2;     // the events start over with the new clip
     if(r.logged<400) { ++r.logged; Log("EDF41ROBO %p plays %ls (state %d) %s",r.obj,why,state,ok ? "" : "REFUSED"); }
     return ok;

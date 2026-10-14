@@ -174,6 +174,8 @@ void SetSlot(Clone& c,int slot,void* fn) noexcept;
 int StateIndex(void* object,const wchar_t* state) noexcept;                 // 0x11664F0(cas, player, name, 1); -1: none
 bool PlayStateIndex(void* object,int state) noexcept;                       // 0x116BFC0(cas, player, state, 0)
 bool ClipNow(const void* object,int* state,float* time,float* length) noexcept;   // +0x104 state, +0xE8 time, +0xF0 length
+// The main player's clip back to its start (+0xE8 = 0): 0x116BFC0 asked for the state already playing may keep its clock.
+bool ClipRewind(void* object) noexcept;
 // The nearest map hit (terrain / buildings: 0x11A7EE0 with the ground collector 0x179CBE8, filter 0x16, as heli.cpp) on from -> to.
 bool GroundHit(const float* from,const float* to,float* hit) noexcept;
 // The game's own camera (scene system +0x4D8 slots, wrapper +0x70: edf41mother.cpp GameCamera): eye and unit forward.

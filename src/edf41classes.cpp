@@ -725,6 +725,14 @@ bool ClipNow(const void* object,int* state,float* time,float* length) noexcept {
     return std::isfinite(*time) && std::isfinite(*length);
 }
 
+bool ClipRewind(void* object) noexcept {
+    char* p=const_cast<char*>(MainPlayer(object));
+    if(!p)return false;
+    const float zero=0.0f;
+    std::memcpy(p+kCasPlayerTime,&zero,4);
+    return true;
+}
+
 bool GroundHit(const float* from,const float* to,float* hit) noexcept {
     if(!RoboPrims())return false;
     char* g=static_cast<char*>(Manager());

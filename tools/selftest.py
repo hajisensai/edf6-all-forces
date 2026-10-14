@@ -7105,6 +7105,132 @@ def edf41_mother_plugin_contract() -> None:
 
 
 @test
+def edf41_robo_registered() -> None:
+    """4.1's UfoRobo (the ship that turns into the robot アルゴ) is the plugin's own class (src/edf41robo.cpp): its SGO keeps
+    4.1's class name and keys, is registered with its closure, and is named by exactly the five missions it unlocks (story M007 /
+    M411, DLC pack 1 M415 / M416, pack 2 M010; make_edf5_campaign.plan41 skips a mission whose object file is not registered).
+    What robo_fix adds is there and agrees with the files: the CAS has `default` (EventAnimationObject's constructor plays it)
+    and every state the plugin plays, the moving clips' root bone has no track left (the plugin moves the object), every
+    edf41_robo_events state is a CAS state, every se event and class sound is an edf41_se name with 4.1's cue, and there is
+    no material_animation (4.1's bare MTAB blob, which EDF6's material code faults on)."""
+    import cas_graft
+    import cas_pose
+    import edf41_objects as eo
+    import make_edf41_objects as m
+    import make_edf5_campaign as mc
+    import mab_legacy
+    import sgo
+    reg = eo.registry()
+    rel = 'OBJECT/' + m.ROBO_ROOT
+    robo = [o for o in reg['objects'] if o['object'] == rel]
+    assert robo and robo[0]['class'] == 'UfoRobo' and m.ROOTS[m.ROBO_ROOT] == 2, robo
+    assert m.ROBO_ROOT not in m.ALIASES and m.NATIVE_FIXES[m.ROBO_ROOT] is m.robo_fix
+    assert sorted(robo[0]['files']) == sorted([rel, 'OBJECT/UFOROBO401.RAB', 'OBJECT/UFOROBO401.CAS',
+                                               'OBJECT/RAGDOLL_UFOROBO401_HAS_HKA.SHKT']), robo[0]['files']
+    naming = []
+    for base in ('missions', 'mp01/missions', 'mp02/missions'):
+        root = os.path.join(ROOT, 'edf41port', *base.split('/'))
+        for mid in sorted(os.listdir(root)):
+            for script in ('MISSION.BVM', 'BEFORE.BVM'):
+                path = os.path.join(root, mid, script)
+                if os.path.isfile(path):
+                    with open(path, 'rb') as f:
+                        if any(r.lower().endswith('uforobo401.sgo') for r in mc.asset_refs(f.read())):
+                            naming.append(f'{base.split("/")[0]}/{mid}')
+    assert sorted(set(naming)) == ['missions/M007', 'missions/M411', 'mp01/M415', 'mp01/M416', 'mp02/M010'], naming
+    top = sgo.load(data=eo.read(rel))
+    assert top['xgs_scene_object_class'] == 'UfoRobo' and 'material_animation' not in top
+    for key in ('robo_attack_table', 'robo_small_muzzle_setting', 'robo_middle_muzzle_setting', 'robo_large_muzzle_setting',
+                'small_bullet_class', 'cannon_bullet_class', 'genocide_bullet_class', 'se_table', 'game_sound'):
+        assert key in top, key
+    assert len(top['robo_attack_table']) == 8 and top['game_object_durability'] == 12000.0
+    cas = eo.read('OBJECT/UFOROBO401.CAS')
+    states = cas_graft.states(cas)['main']
+    assert set(m.ROBO_STATES) <= states, sorted(set(m.ROBO_STATES) - states)
+    assert cas_graft.state_clips(cas)['main']['default'] == cas_graft.state_clips(cas)['main']['ship']
+    # root motion: one table per moving state, its clip's root bone without tracks
+    pose = cas_pose.CasPose(cas)
+    clips = cas_graft.state_clips(cas)['main']
+    motion = {s: (length, keys) for s, length, keys in top['edf41_robo_motion']}
+    assert set(motion) == {'walk_f_nl', 'walk_f_lr', 'walk_f_rl', 'walk_f_ln', 'walk_f_rn', 'walk_b_nl', 'walk_b_lr',
+                           'walk_b_rl', 'walk_b_ln', 'walk_b_rn', 'side_step_l', 'side_step_r', 'turn_l45', 'turn_r45',
+                           'turn_l90', 'turn_r90', 'turn_l180', 'turn_r180'}, sorted(motion)
+    by_name = {c.name: c for c in pose.clips}
+    for state, (length, keys) in motion.items():
+        clip = by_name[clips[state][0]]
+        assert all(t.translation == -1 and t.rotation == -1 for t in clip.tracks if t.name == m.ROBO_ROOT_BONE), state
+        assert len(keys) % 3 == 0 and len(keys) // 3 <= m.ROBO_MOST_MOTION_KEYS and length > 0, state
+        assert keys[:3] == [0.0, 0.0, 0.0], state
+    near = lambda a, b: abs(a - b) < 0.01
+    assert near(motion['walk_f_nl'][1][-2], 50.0) and near(motion['walk_b_lr'][1][-2], -100.0)
+    assert near(motion['side_step_l'][1][-3], 80.0) and near(motion['turn_l90'][1][-1], 1.5708)
+    assert near(motion['turn_r180'][1][-1], -3.1416)
+    # events: CAS states, known kinds, the MAB's own times
+    se = {e[0]: e for e in top['edf41_se']}
+    kinds = set(m.ROBO_EVENTS.values())
+    for state, clip, keys in top['edf41_robo_events']:
+        assert state in states and 0 <= clip < len(clips[state]) and len(keys) <= m.ROBO_MOST_EVENTS, state
+        for t, kind, text, a, b, c in keys:
+            assert kind in kinds, (state, kind)
+            if kind == m.ROBO_EVENTS['se']:
+                assert text in se, (state, text)
+    events = {(s, n): keys for s, n, keys in top['edf41_robo_events']}
+    hits = [k for k in events[('attack_stomp_r', 0)] if k[1] == m.ROBO_EVENTS['攻撃判定']]
+    assert hits and hits[0][2] == '右足歩行衝撃' and hits[0][3] == 40.0 and hits[0][4] == 3.0 and hits[0][5] == 2.0, hits
+    genocide = [k for k in events[('attack_fire_genocide', 0)] if k[1] == m.ROBO_EVENTS['ジェノサイド砲発射']]
+    assert genocide and genocide[0][3] == 346.0, genocide
+    mab = mab_legacy.mab_events(bytes.fromhex(top['animation_model'][2][4:]) if isinstance(top['animation_model'][2], str)
+                                else top['animation_model'][2])
+    assert ('砲撃開始', mab['attack_fire_cross'][2][1]) in mab['attack_fire_cross']
+    for name in list(top['se_table']) + list(m.ROBO_CLASS_SE) + [top['ragdoll_contact'][0]]:
+        assert name in se, name
+    assert se['ロボ駆動音'][1] == 'en_Robo_moveDriving' and se['ロボ飛行形態バスター砲チャージ'][3] == 1.5
+    assert all(len(e) == 7 and e[1].startswith(('en_Robo_', 'common_damages_')) for e in top['edf41_se'])
+    # CLASS_NAMES holds every shipped robot to the plugin's names
+    assert m.CLASS_NAMES['UfoRobo'].states == m.ROBO_STATES and m.CLASS_NAMES['UfoRobo'].locators == m.ROBO_LOCATORS
+
+
+@test
+def edf41_robo_plugin_contract() -> None:
+    """src/edf41robo.cpp is built, installed and agrees with the data: the factory answers with the SGO's class name, the
+    keys it reads are the ones robo_fix writes, its table limits are robo_fix's, the ini switch Edf41Robo (on, shipped 1)
+    gates it and its development switches ship off, it builds on EventAnimationObject's constructor with the HP block of
+    that class cleared and its durability sized by level (slot 6), the transform refuses damage, ObjectAction 0 / 1 / 2
+    follow 4.1, and every EDF.dll function the shared module calls for it is fingerprinted."""
+    import make_edf41_objects as m
+    cpp, plugin, cmake, crew = src('src/edf41robo.cpp'), src('src/plugin.cpp'), src('CMakeLists.txt'), src('src/crew.h')
+    shared, ini = src('src/edf41classes.cpp'), src('EDF6VehicleCrew.ini')
+    assert 'target_sources(EDF6VehicleCrew PRIVATE src/edf41robo.cpp)' in cmake and 'InstallEdf41Robo();' in plugin
+    assert 'bool InstallEdf41Robo() noexcept;' in crew and 'bool edf41Robo=true;' in crew and 'ReadBool(L"Edf41Robo"' in plugin
+    assert 'if(!Cfg().edf41Robo)' in cpp.split('bool InstallEdf41Robo()', 1)[1].split('BuildClone', 1)[0]
+    assert 'AddFactory(L"UfoRobo"' in cpp and 'CloneObject(roboClass,kEaoCtor,kEaoSize,info)' in cpp
+    assert re.search(r'^Edf41Robo=1$', ini, re.M)
+    for key, off in (('Edf41RoboLevel', '0'), ('Edf41RoboGunEvery', '0'), ('Edf41RoboAttack', '-1'), ('Edf41RoboPlace', '0'),
+                     ('Edf41RoboTransformAfter', '0')):
+        assert re.search(rf'^{key}={re.escape(off)}$', ini, re.M), key
+        assert f'L"{key}"' in plugin, key
+    for key in ('edf41_robo_events', 'edf41_robo_motion', 'robo_attack_table', 'robo_small_muzzle_setting',
+                'robo_middle_muzzle_setting', 'robo_large_muzzle_setting', 'small_bullet_custom_param',
+                'cannon_bullet_custom_param', 'genocide_bullet_custom_param'):
+        assert f'L"{key}"' in cpp, key
+    for name, value in (('kMostEvents', m.ROBO_MOST_EVENTS), ('kMostMotionKeys', m.ROBO_MOST_MOTION_KEYS)):
+        assert re.search(rf'constexpr int {name}={value};', cpp), name
+    for kind, value in m.ROBO_EVENTS.items():   # EventKind follows ROBO_EVENTS
+        assert re.search(rf'kEv\w+={value}', cpp), kind
+    assert 'SetFlag(obj,kNoHpLoss,false)' in cpp and 'SetSlot(roboClass,kSlotOnLevel' in cpp and 'SizeDurability(self)' in cpp
+    message = cpp.split('MessageWrap(void* self', 1)[1].split('\n}\n', 1)[0]
+    assert 'msg==kMsgDamage' in message and 'it->second.body==kS4)return 0;' in message
+    assert 'action==0' in message and 'action==1' in message and 'action==2' in message
+    for name in m.ROBO_LOCATORS[:6] + ('左足歩行衝撃', '右足歩行衝撃', 'ロックオン'):
+        assert name in cpp or name.startswith('muzzle_'), name   # the muzzles come from the SGO's settings
+    for rva in ('kStateByName', 'kPlayStateIndex', 'kCastRay', 'kHitReset', 'kGroundAdd', 'kAddLockTarget', 'kWind', 'kQuake'):
+        assert re.search(rf'\{{{rva},\{{0x', shared), f'{rva} has no fingerprint'
+    code = re.sub(r'//[^\n]*', '', cpp)
+    assert not re.search(r'0xD7480|0x53060|0x52DE0|0x52F30', code), 'a DSGO accessor on a classic SGO'
+    assert 'std::min(' not in code and 'std::max(' not in code   # windows.h macros
+
+
+@test
 def edf41_anthill_voxel_body() -> None:
     """4.1's ant nest under EDF6's AntHill (2026-10-13, M115 on the real game): the class builds a voxel-destruction
     body from animation_model[3] and the first hit dereferences it unchecked (EDF+0x4EB8D7 loads this+0x848, 0x6CAF22
