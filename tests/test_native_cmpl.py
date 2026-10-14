@@ -59,6 +59,12 @@ class NativeCmplTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             mdb.cmpl_decompress(b'CMPL\x00')
         self.assertEqual(mdb.cmpl_decompress(b'raw bytes'), b'raw bytes')
+        huge = b'CMPL' + b'\xff' * 4 + bytes(40)   # a corrupt size: the reference's error, not a 4 GiB buffer
+        with self.assertRaises(ValueError) as fast:
+            mdb.cmpl_decompress(huge)
+        with self.assertRaises(ValueError) as slow:
+            mdb.cmpl_decompress_py(huge)
+        self.assertEqual(str(fast.exception), str(slow.exception))
 
 
 if __name__ == '__main__':

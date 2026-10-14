@@ -223,11 +223,12 @@ def _native() -> object:
     Found beside the frozen installer's modules (build_release bundles it) or in a dev checkout's build/pylib."""
     global _NATIVE
     if _NATIVE is None:
-        _NATIVE = False
         import ctypes
         base = getattr(sys, '_MEIPASS', None)
         path = os.path.join(base, 'edf6cmpl.dll') if base else os.path.join(HERE, '..', 'build', 'pylib', 'edf6cmpl.dll')
-        if os.name == 'nt' and os.path.isfile(path):
+        if not (os.name == 'nt' and os.path.isfile(path)):
+            _NATIVE = False
+        else:   # a DLL there that does not load raises, every time: never half native, half Python
             lib = ctypes.CDLL(os.path.abspath(path))
             lib.edf6_cmpl_bound.restype = ctypes.c_size_t
             lib.edf6_cmpl_bound.argtypes = (ctypes.c_size_t,)
@@ -264,6 +265,8 @@ def cmpl_decompress(data: bytes) -> bytes:
     import ctypes
     data = bytes(data)
     size = struct.unpack_from('>I', data, 4)[0]
+    if size > 9 * len(data) + 64:   # beyond LZSS's 144 bytes per 17 (a corrupt header): its ValueError, no 4 GiB buffer
+        return cmpl_decompress_py(data)
     out = ctypes.create_string_buffer(size)
     got = lib.edf6_cmpl_decompress(data[8:], len(data) - 8, out, size)
     if got < size:
