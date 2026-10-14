@@ -9,13 +9,13 @@ Every cockpit here is a real one, cut out of a modelled aircraft (Sketchfab, CC 
 its seat's eye, in the eye's frame and in metres, as parts/<slug>/cockpit.npz with its textures (credits:
 <model dir>/cockpits/CREDITS_plugin.txt).
 
-    jet_f16           the F-16D Block 60's front cockpit: the up-front controls and the two MFDs (weapons left, map
-                      right), the threat scope ('status'), the data entry display ('flight'), the side consoles, the
-                      side stick, the ejection seat; the HUD's two posts round the line of sight, its glass left out
-                      (the 'hud' screen: the plugin draws its symbols on the world through it)
-    jet_j10s          the J-10S's front cockpit (the plugin's other fighters: a modern three-display panel, the
-                      F-35's stand-in): the three MFDs (map, flight, weapons), the up-front panel's displays
-                      ('status'), the HUD's posts (the 'hud' screen between them); the windscreen's arch left out
+    jet_f16           War Thunder's F-16A Block 15 cockpit (the game's own model; the user, 2026-10-14: "座舱和模型
+                      干脆直接也搬战雷的吧"), every fighter's (the interceptor, the fighter / strike jet, the Primer
+                      fighter): the instrument panel with its radar display ('weapons'), the threat warning scope
+                      ('status'), the display under the panel between the knees ('flight'), the side consoles with the
+                      throttle and the side stick, the canopy rails, the ejection seat; the HUD's two posts round the
+                      line of sight, its glass left out (the 'hud' screen: the plugin draws its symbols on the world)
+    jet_f16_narrow    the same cockpit for the multirole's narrow canopy bump (scaled to its walls)
     plane_deck        the C-130J's flight deck from the left (pilot's) seat: its glass panel (the pilot's PFD:
                       'flight', his nav display: 'map', the engine display: 'status'), the yoke, the pedestal, the
                       copilot's seat, the overhead console, the side windows' frames; the view ahead over the glare
@@ -295,28 +295,20 @@ FIGHTER_FULL = {'left': 0.5, 'right': 0.5, 'down': 0.6, 'ahead': 0.95}
 # out): under it the tub (the floor, the side consoles' walls, the seat's bulkhead), over it the canopy.
 FIGHTER_SILL = -25.0
 
-# The F-16D's displays (tools/prep_cockpit_plugin.py F16D; measured on the cut model by casting rays from the eye):
-# the two MFDs, the threat warning scope, the data entry display, the HUD's glass between its posts.
-F16 = Model('plugin_f16d', FIGHTER_WANT, FIGHTER_LEAST, FIGHTER_FULL, (
-    ScreenAt('weapons', (0.178, -0.309, 0.889), (0.0, 0.113, -0.994), 0.11, 0.11),
-    ScreenAt('map', (-0.179, -0.309, 0.889), (0.0, 0.113, -0.994), 0.11, 0.11),
-    ScreenAt('status', (0.156, -0.179, 0.893), (0.0, 0.113, -0.994), 0.052, 0.052),
-    ScreenAt('flight', (-0.133, -0.104, 0.733), (0.018, 0.259, -0.966), 0.064, 0.028),
-    ScreenAt('hud', (0.0, 0.05, 0.70), (0.0, 0.0, -1.0), 0.14, 0.15),
-), sill=FIGHTER_SILL)
-# The J-10S's: its three MFDs, the up-front control panel's displays, the HUD's glass between its posts.
-J10 = Model('plugin_j10s', FIGHTER_WANT, FIGHTER_LEAST, FIGHTER_FULL, (
-    ScreenAt('map', (0.157, -0.440, 0.708), (0.0, 0.174, -0.985), 0.115, 0.105),
-    ScreenAt('flight', (-0.010, -0.454, 0.705), (0.0, 0.174, -0.985), 0.115, 0.095),
-    ScreenAt('weapons', (-0.177, -0.440, 0.708), (0.0, 0.174, -0.985), 0.115, 0.105),
-    ScreenAt('status', (-0.016, -0.242, 0.567), (0.0, -0.276, -0.961), 0.062, 0.07),
-    ScreenAt('hud', (0.0, -0.095, 0.625), (0.0, 0.0, -1.0), 0.16, 0.13),
+# The War Thunder F-16A's displays (tools/prep_cockpit_plugin.py WT_F16A; measured on the model by casting rays from
+# the eye): the radar display left of the panel's centre, the threat warning scope over it, the display under the
+# panel between the knees, the HUD's glass between its two posts.
+F16 = Model('plugin_wt_f16a', FIGHTER_WANT, FIGHTER_LEAST, FIGHTER_FULL, (
+    ScreenAt('weapons', (0.178, -0.426, 0.876), (0.0, 0.18, -0.984), 0.13, 0.10),
+    ScreenAt('status', (0.1425, -0.309, 0.880), (0.0, 0.18, -0.984), 0.07, 0.07),
+    ScreenAt('flight', (0.0, -0.581, 0.685), (0.0, 0.765, -0.644), 0.105, 0.095),
+    ScreenAt('hud', (0.0, -0.03, 0.79), (0.0, 0.0, -1.0), 0.14, 0.15),
 ), sill=FIGHTER_SILL)
 
 # The same cockpit for a seat in a narrow canopy bump (the multirole's: closed only 0.23 m either side of the eye and
 # 0.18 m over it, seen along the diagonals): the walls that close, the cockpit scaled to them (from the seat it looks
 # the same, its consoles cut where a full-size one's would be 0.5 m out).
-J10_NARROW = replace(J10, want={**FIGHTER_WANT, 'left': 0.25, 'right': 0.25, 'up': 0.2, 'back': 0.38},
+F16_NARROW = replace(F16, want={**FIGHTER_WANT, 'left': 0.25, 'right': 0.25, 'up': 0.2, 'back': 0.38},
                      least={**FIGHTER_LEAST, 'left': 0.15, 'right': 0.15}, least_scale=0.4)
 
 # The C-130J's flight deck from the left seat (tools/prep_cockpit_plugin.py C130_DECK): the windscreens 1-1.3 m ahead,
@@ -366,9 +358,8 @@ CABIN_SEATS: tuple[tuple[float, float, float], ...] = (
 # kit name -> (its model, its doc): the kits cut from real models (tests/cockpit_build_test.py lays each out in the
 # rooms its model accepts).
 MODELS: dict[str, tuple[Model, str]] = {
-    'jet_f16': (F16, "The F-16D Block 60's front cockpit (see the module's docstring)."),
-    'jet_j10s': (J10, "The J-10S's front cockpit, a modern fighter's (see the module's docstring)."),
-    'jet_j10s_narrow': (J10_NARROW, "The J-10S's front cockpit in a narrow canopy bump."),
+    'jet_f16': (F16, "War Thunder's F-16A Block 15 cockpit, every fighter's (see the module's docstring)."),
+    'jet_f16_narrow': (F16_NARROW, "War Thunder's F-16A Block 15 cockpit in a narrow canopy bump."),
     'plane_deck': (DECK, "The C-130J's flight deck from the pilot's seat."),
     'plane_deck_gun': (DECK_GUN, "The C-130J's flight deck for a gunship's pilot."),
     'plane_hold': (HOLD, "The C-130J's cargo hold round its first passenger."),

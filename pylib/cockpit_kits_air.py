@@ -8,11 +8,16 @@ tools/prep_cockpit_air.py to what the seated eye sees (no crew figures, no canop
 stored in the eye's frame in <model dir>/cockpits/parts/<asset>/cockpit.glb with their textures (credits:
 <model dir>/cockpits/CREDITS_air.txt).
 
-    heli_gunship      an attack helicopter's cockpit (V506 / V602 / 409): an AH-64E's front station (its canopy
-                      frame, glare shield, the two MFDs, the TEDAC on its stalk, the up-front display, the side
-                      consoles, the floor and controls); the rear (pilot's) station would look through the front
-                      canopy's frame posts. Screens: the left MFD 'flight', the right 'weapons', the TEDAC 'map', the
-                      up-front display 'status'; the helmet's display (IHADSS) the 'hud', no combiner glass in the view
+    heli_gunship      an attack helicopter's cockpit (V506 / V602 / 409): War Thunder's AH-64A front (copilot /
+                      gunner) station (the game's own model; the user, 2026-10-14: "座舱和模型干脆直接也搬战雷的吧"): its
+                      canopy frame, glare shield, the TADS sight's hood on its stalk, the instrument panel, the side
+                      consoles, the seat and floor. Screens: the TADS hood's face 'weapons', the panel under it on the
+                      stalk 'status', the switch panel left of it 'flight'; the helmet's display (IHADSS) the 'hud',
+                      no combiner glass in the view
+    heli_gunship_pilot  the same helicopter's rear (pilot's) station, looking over the front station: its video
+                      display 'flight', the panel left of it 'weapons', the lower right panel 'status', the IHADSS
+                      'hud'. No stock gunship has a second seat (their one seat flies and aims: heli_gunship, the
+                      clearer view), so no stock fit uses it yet
     heli_utility      a transport's cockpit (410): a UH-60M's pilot station (the right seat): the four-MFD panel
                       across the cockpit, the centre console, the overhead frame, the copilot's seat beside. Screens:
                       the pilot's outer MFD 'flight', his inner one 'map', the copilot's inner one 'status'
@@ -167,12 +172,18 @@ class RealCockpit:
 
 
 REAL: dict[str, RealCockpit] = {
+    # War Thunder's AH-64A (tools/prep_cockpit_air.py WT_ASSETS), its displays measured by casting rays from the eye.
     'heli_gunship': RealCockpit(
-        'parts/sf-ah64e-cpg/cockpit.glb',
-        (('flight', (0.3406, -0.3964, 0.5635), (-0.173, 0.253, -0.952), 0.155, 0.155),
-         ('weapons', (-0.3361, -0.3949, 0.5538), (0.173, 0.256, -0.951), 0.155, 0.155),
-         ('map', (-0.0185, -0.1989, 0.2964), (0.0, 0.39, -0.921), 0.13, 0.13),
-         ('status', (0.3101, -0.1984, 0.51), (-0.301, 0.309, -0.902), 0.155, 0.075)),
+        'parts/wt-ah64a-cpg/cockpit.glb',
+        (('weapons', (0.041, -0.305, 0.40), (0.0, 0.373, -0.928), 0.16, 0.10),
+         ('status', (0.031, -0.445, 0.397), (0.0, 0.639, -0.769), 0.10, 0.05),
+         ('flight', (0.40, -0.575, 0.755), (0.0, -0.075, -0.997), 0.18, 0.14)),
+        {'left': 0.25, 'right': 0.25, 'up': 0.2, 'down': 0.5, 'ahead': 0.6, 'back': 0.15}, helmet_hud=True),
+    'heli_gunship_pilot': RealCockpit(
+        'parts/wt-ah64a-pilot/cockpit.glb',
+        (('flight', (0.0, -0.40, 0.505), (0.0, 0.098, -0.995), 0.12, 0.075),
+         ('weapons', (0.235, -0.41, 0.508), (0.0, 0.098, -0.995), 0.13, 0.07),
+         ('status', (-0.356, -0.585, 0.487), (0.0, 0.099, -0.995), 0.11, 0.09)),
         {'left': 0.25, 'right': 0.25, 'up': 0.2, 'down': 0.5, 'ahead': 0.6, 'back': 0.15}, helmet_hud=True),
     'heli_utility': RealCockpit(
         'parts/sf-uh60m-pilot/cockpit.glb',
@@ -252,6 +263,10 @@ def _real(cabin: Cabin, name: str) -> Kit:
 
 def heli_gunship(cabin: Cabin) -> Kit:
     return _real(cabin, 'heli_gunship')
+
+
+def heli_gunship_pilot(cabin: Cabin) -> Kit:
+    return _real(cabin, 'heli_gunship_pilot')
 
 
 def heli_utility(cabin: Cabin) -> Kit:
@@ -367,6 +382,7 @@ def heli_door_right(cabin: Cabin) -> Kit:
 
 KITS: dict = {
     'heli_gunship': heli_gunship,
+    'heli_gunship_pilot': heli_gunship_pilot,
     'heli_utility': heli_utility,
     'heli_door_left': heli_door_left,
     'heli_door_right': heli_door_right,

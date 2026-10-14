@@ -6,7 +6,8 @@ vc_eye_<seat> marker and the screens' vc_scr_ markers for every fitted seat, und
 
 The plugin's own vehicles (FITS stems their generators make) are left to their generators' builds, but for the ones that
 wear a stock model under a name of their own (tools/make_jets.py: the gunship, the transport plane, the transport
-helicopter), whose fits are laid out on that model as make_jets makes it.
+helicopter), whose fits are laid out on that model as make_jets makes it. A kit no seat takes yet (ALTERNATES) is laid
+out in the seats of the kit it stands beside.
 A kit that promises a closed tub (an aircraft cockpit: Kit.sill) is closed under its sill: every line of sight from the
 eye further down meets a front face of the kit (cockpits.leaks; the user, 2026-10-14: "固定翼的底部是空白，完全能看过去"),
 in every seat fitted above and, for the kits cut from real models (cockpit_kits_plugin.MODELS: the plugin's jets, whose
@@ -17,6 +18,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+from dataclasses import replace
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
@@ -34,6 +36,9 @@ import vehicle_optics  # noqa: E402
 from mdb import mdb_read, rab_read  # noqa: E402
 
 failures = 0
+# Kits no stock seat takes yet, laid out where a seat of the kit named takes its place: the AH-64A's rear (pilot's)
+# station in the gunships' one seat (cockpit_kits_air heli_gunship_pilot).
+ALTERNATES: dict[str, tuple[str, ...]] = {'heli_gunship': ('heli_gunship_pilot',)}
 
 
 def expect(ok: bool, what: str) -> None:
@@ -114,6 +119,13 @@ def main() -> int:
                 closed(f'{stem} seat {fit.seat} ({fit.kit})', kit)
             except Exception as e:  # noqa: BLE001 - every seat reported, then the count fails the test
                 expect(False, f'{stem} seat {fit.seat} ({fit.kit}): {e}')
+            for alt in ALTERNATES.get(fit.kit, ()):
+                try:
+                    kit = cockpits.fitted(hull, replace(fit, kit=alt), cockpit_kits.KITS[alt])
+                    expect({s.kind for s in kit.screens} <= set(cockpits.SCREEN_KINDS),
+                           f'{stem} seat {fit.seat} as {alt} (no seat of its own yet): laid out inside the hull')
+                except Exception as e:  # noqa: BLE001
+                    expect(False, f'{stem} seat {fit.seat} as {alt}: {e}')
         print(f'      {stem}: {time.perf_counter() - started:.1f} s', flush=True)
 
     spec = stock['VEHICLE403_TANK']

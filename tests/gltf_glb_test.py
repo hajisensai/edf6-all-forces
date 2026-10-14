@@ -83,6 +83,17 @@ def main() -> int:
         expect(s2.materials[0].texture == PNG and s2.materials[0].texture_mime == 'image/png',
                '...its texture from a data URI')
 
+        g4, blob4 = document(False)
+        g4['extensionsUsed'] = [gltf.SPEC_GLOSS]
+        g4['materials'] = [{'name': 'old', 'extensions': {gltf.SPEC_GLOSS: {
+            'diffuseTexture': {'index': 0}, 'diffuseFactor': [0.5, 0.25, 1.0, 1.0]}}}]
+        path4 = os.path.join(d, 'd.glb')
+        with open(path4, 'wb') as h:
+            h.write(glb(g4, blob4))
+        m4 = gltf.read(path4).materials[0]
+        expect(m4.texture == PNG and m4.texture_mime == 'image/png' and m4.base == (0.5, 0.25, 1.0, 1.0),
+               'a specular-glossiness material: its diffuse texture and factor as the base colour')
+
         g3, blob3 = document(False)
         g3['extensionsUsed'] = ['KHR_draco_mesh_compression']
         path3 = os.path.join(d, 'c.glb')

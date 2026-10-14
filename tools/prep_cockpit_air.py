@@ -63,7 +63,26 @@ class Spec:
     what: str
 
 
+# War Thunder's AH-64A (the game's own model as shared on Sketchfab, 1:1, metres, nose +z, +x the crew's left; the
+# user, 2026-10-14: "座舱和模型干脆直接也搬战雷的吧"): its two tandem stations. Left out: its blended materials (0, 2, 4, 6,
+# 7: the canopy's glass, the glare shields' and the tail's decals), the rotor overhead (the box).
+_WT_AH64A = '486f3845d88647abae002e1222788686'
+_WT_AH64A_DROP = (0, 2, 4, 6, 7)
+WT_ASSETS: dict[str, Spec] = {
+    # The front (copilot / gunner) station: the eye 0.75 m over the seat's cushion, the TADS sight's hood 0.4 m ahead.
+    'wt-ah64a-cpg': Spec(_WT_AH64A, 1.0, (0.0, 0.65, 2.75), (0, 0, 1), (0, 1, 0), _WT_AH64A_DROP, (),
+                         {'left': 0.8, 'right': 0.8, 'up': 0.75, 'down': 1.35, 'ahead': 2.0, 'back': 0.45},
+                         "War Thunder's AH-64A front (copilot / gunner) station"),
+    # The rear (pilot's) station, higher, looking over the front station.
+    'wt-ah64a-pilot': Spec(_WT_AH64A, 1.0, (0.0, 0.95, 1.45), (0, 0, 1), (0, 1, 0), _WT_AH64A_DROP, (),
+                           {'left': 0.8, 'right': 0.8, 'up': 0.75, 'down': 1.35, 'ahead': 2.0, 'back': 0.45},
+                           "War Thunder's AH-64A rear (pilot's) station"),
+}
+
+# The earlier gunship station (sf-ah64e-cpg) no longer backs a kit; it stays while its part is in the model folder,
+# so its credits still name it.
 ASSETS: dict[str, Spec] = {
+    **WT_ASSETS,
     # A tandem AH-64E: the front (copilot / gunner) station, its eye over the seat (the rear, pilot's station looks
     # through the front canopy's frame posts, a few degrees either side of the sight line). Left out: the crew
     # (materials 5, 20, 24, 30, 31, 34; their harness, nodes 211 / 220), the canopy glass (22, 33, 35).
