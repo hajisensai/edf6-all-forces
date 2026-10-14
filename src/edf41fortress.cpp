@@ -47,7 +47,8 @@ constexpr int kCoreGenerator=1;
 constexpr std::size_t kStepChoiceAt=0x1970;  // int: 0 / 1 left, 3 / 4 right, other straight (0x4C3244)
 constexpr std::size_t kCasAt=0x910;          // the CAS controller (0x4CB5C4); players at *(+0x60), 0x160 each
 constexpr std::size_t kMainPlayerAt=0x14D0;  // int: the main player's index
-constexpr std::size_t kPlayers=0x60,kPlayerSize=0x160,kPlayerTime=0x100,kPlayerState=0x104;
+constexpr std::size_t kPlayers=0x60,kPlayerSize=0x160,kPlayerState=0x104;
+constexpr std::size_t kPlayerTime=0xE8;      // the clip time (the CAS update 0x1165B40 adds the advance at +0xF4; a new clip zeroes it)
 constexpr int kStraight=2,kLeft=0,kRight=3;
 
 using UpdateFn=std::uint64_t(__fastcall*)(void* self,void* dt);
