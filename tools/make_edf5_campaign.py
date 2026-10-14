@@ -8,8 +8,9 @@ offline and online (more than one player: split screen offline as the stock mode
 EDF6's Root.cpk holds EDF5's scripts (MISSION/EDF5_OLD_SCRIPT/<id>/MISSION.BVM), subtitles
 (MISSION/EDF6_VOICETABLE.*.SGO), and nearly all of EDF5's maps and objects. Its loose SOUND/PC/ directory holds
 the voice banks TIKYUU5_VOICE.*.AWB. Script strings only add SetUndergroundSoundReverve compared with EDF5;
-that does not establish native bytecode compatibility or completion of every mission. Four DLC missions lack
-resources and are excluded.
+that does not establish native bytecode compatibility or completion of every mission. Four DLC missions need what
+EDF6 lacks (two maps, the DLC fortress): tools/edf5_dlc.py installs it, pre-generated; one whose part it leaves out
+is excluded and says why.
 
 The packs are modes of the game's mode table (docs/mission-list-re.md §7, static): the mission-pack dialog
 (RoomFilter_ContentsName, "任务包") lists every offline mode of DefaultPackage/config.sgo's ModeList, named by its
@@ -197,7 +198,46 @@ PACK41 = Pack('edf41', 'EDF41', 'E41M.MST', 0,
                   'CN': '遊玩 EDF4.1 本篇。', 'EN': 'Play the EDF4.1 story.', 'JA': 'EDF4.1 の本編をプレイします。',
                   'KR': 'EDF4.1 본편을 플레이합니다.', 'SC': '游玩 EDF4.1 本篇。'}.items()},
               (OFFLINE, ONLINE))
-SLOTS = (*PACKS, RANGE, PACK41)   # each pack's content id: the first free id + its index here
+
+# EDF4.1's two DLC mission packs (tools/make_edf41_missions.py --dlc, from the DLC archives of a 4.1 that has them;
+# committed like the story): packs of their own, as 4.1 had them, slotted right after the story so the three 4.1
+# packs' content ids run EDF41Content .. +2 (src/edf5campaign.cpp owns that run). Their maps are 4.1's story maps
+# (converted from the player's EDF4.1, as the story's); the player needs no 4.1 DLC. Like the 4.1 DLC, their
+# difficulty ranges are those of EDF6's own DLCs (`like` 1 / 2).
+def _names41(part: dict[str, str]) -> tuple[dict[str, str], dict[str, str]]:
+    desc = {'CN': f'遊玩 EDF4.1 {part["CN"]}。', 'EN': f'Play EDF4.1 {part["EN"]}.',
+            'JA': f'EDF4.1 {part["JA"]}をプレイします。', 'KR': f'EDF4.1 {part["KR"]}을(를) 플레이합니다.',
+            'SC': f'游玩 EDF4.1 {part["SC"]}。'}
+    return ({lang: f'EDF4.1 {part[lang]}' for lang in LANGS},
+            {lang: desc[lang] + _UNVERIFIED_41_DLC[lang] for lang in LANGS})
+
+
+_UNVERIFIED_41_DLC = {'CN': '（4.1 任務包的腳本轉換為 EDF5 格式；地圖由已安裝的 EDF4.1 轉換；尚未逐關實機驗證）',
+                      'EN': " (the 4.1 mission pack's scripts converted to EDF5's form; maps converted from your EDF4.1; "
+                            'not every mission has been verified in game)',
+                      'JA': '（4.1 ミッションパックのスクリプトを EDF5 形式に変換。マップはインストール済みの EDF4.1 から変換。'
+                            '全ミッションの動作は未確認）',
+                      'KR': ' (4.1 미션 팩 스크립트를 EDF5 형식으로 변환, 맵은 설치된 EDF4.1에서 변환, 모든 미션의 동작은 미확인)',
+                      'SC': '（4.1 任务包的脚本转换为 EDF5 格式；地图由已安装的 EDF4.1 转换；尚未逐关实机验证）'}
+PACK41_MP01 = Pack('edf41mp01', 'EDF41MP01', 'E4P1.MST', 1,
+                   *_names41({'CN': '任務包１', 'EN': 'Mission Pack 1', 'JA': 'ミッションパック１', 'KR': '미션 팩 1',
+                              'SC': '任务包１'}), (OFFLINE, ONLINE))
+PACK41_MP02 = Pack('edf41mp02', 'EDF41MP02', 'E4P2.MST', 2,
+                   *_names41({'CN': '任務包２', 'EN': 'Mission Pack 2', 'JA': 'ミッションパック２', 'KR': '미션 팩 2',
+                              'SC': '任务包２'}), (OFFLINE, ONLINE))
+
+
+class Pack41(NamedTuple):
+    """A 4.1 pack's committed data (missions.json, missions/<id>/, missions_thumbnails.rab) and its Mods folder
+    (MISSION/<folder>/<id>/)."""
+    pack: Pack
+    data: str
+    folder: str
+
+
+PACKS41 = (Pack41(PACK41, EDF41, EDF41_FOLDER), Pack41(PACK41_MP01, os.path.join(EDF41, 'mp01'), 'EDF41MP01'),
+           Pack41(PACK41_MP02, os.path.join(EDF41, 'mp02'), 'EDF41MP02'))
+SLOTS = (*PACKS, RANGE, *(p.pack for p in PACKS41))   # each pack's content id: the first free id + its index here
 FILES = (CONFIG, *TEXTS.values(), *(f for p in (*PACKS, RANGE) for f in p.files()))   # every build writes these
 # The 2026-10-07 version's files (appended to EDF6's own offline list): put back, never written any more.
 LEGACY_LIST = 'MISSION/MISSIONLIST.OFFLINE.LIST.SGO'
@@ -224,7 +264,7 @@ class Contents(NamedTuple):
 def managed(rel: str) -> bool:
     """A file this tool writes: FILES, or one of the EDF4.1 story's (only with EDF4.1: its pack's lists and texts,
     its missions' scripts)."""
-    return rel in FILES or rel in PACK41.files() or rel.upper().startswith(f'MISSION/{EDF41_FOLDER}/')
+    return rel in FILES or any(rel in p.pack.files() or rel.upper().startswith(f'MISSION/{p.folder}/') for p in PACKS41)
 
 
 # ------------------------------------------------------------------------------------------- reading
@@ -338,8 +378,11 @@ def plan(root: str, root41: str | None = None, skip41: Skip41 = frozenset()) -> 
     """What would be installed (rows by pack, skipped missions), from the game and the text; nothing written."""
     game = rootcpk.Game(root)
     text = json.load(open(TEXT, encoding='utf-8'))
-    maps = map_names(root, game)
-    names = root_names(game)
+    # EDF5 Mission Pack 1's maps and fortress EDF6 lacks, as far as tools/edf5_dlc.py will write them (else why not)
+    import edf5_dlc
+    maps5, names5, why5 = edf5_dlc.offered(root)
+    maps = map_names(root, game) | maps5
+    names = root_names(game) | names5
     rows, skipped = [], []
     for pack in PACKS:
         for m in text[pack.group]:
@@ -351,7 +394,7 @@ def plan(root: str, root41: str | None = None, skip41: Skip41 = frozenset()) -> 
                 continue
             gone = missing_assets(names, maps, bvm)
             if gone:
-                skipped.append((pack.group, m['path'], '缺少 ' + ', '.join(sorted(set(gone)))))
+                skipped.append((pack.group, m['path'], '缺少 ' + ', '.join(sorted({_gone41(r, why5) for r in gone}))))
                 continue
             rows.append({'group': pack.group, 'path': m['path'], 'key': f'{SCRIPTS}/{m["path"]}', 'bgm': BGM,
                          'flags': FLAGS, 'progress': m['progress'], 'map': first_map(bvm),
@@ -367,13 +410,17 @@ def find_edf41(root: str) -> str | None:
     return gamedir.find_other(gamedir.EDF41, near=root)
 
 
-def edf41_text() -> dict:
-    with open(EDF41_TEXT, encoding='utf-8') as f:
+def edf41_text(data: str = EDF41) -> dict:
+    """A 4.1 pack's missions.json (`data`: its Pack41.data); a pack whose data is not committed has none."""
+    path = os.path.join(data, 'missions.json')
+    if not os.path.isfile(path):
+        return {'missions': []}
+    with open(path, encoding='utf-8') as f:
         return json.load(f)
 
 
-def edf41_script(mid: str, name: str) -> bytes:
-    with open(os.path.join(EDF41, 'missions', mid, name), 'rb') as f:
+def edf41_script(mid: str, name: str, data: str = EDF41) -> bytes:
+    with open(os.path.join(data, 'missions', mid, name), 'rb') as f:
         return f.read()
 
 
@@ -405,19 +452,24 @@ def plan41(root: str, maps: set[str], root41: str | None,
     names |= {tuple(rel.upper().rsplit('/', 1)) for rel in edf41_objects.registry()['files']}
     names -= {tuple(k.rsplit('/', 1)) for k in why if '/' in k}
     maps41 = (maps | {f'{name}.MAC' for name in edf41_maps.MAPS}) - {f'{k}.MAC' for k in why if '/' not in k}
-    missions = edf41_text()['missions']
     rows, skipped = [], []
-    for i, m in enumerate(missions):
-        bvm = edf41_script(m['id'], 'MISSION.BVM')
-        gone = missing_assets(names, maps41, bvm)
-        if 'BEFORE.BVM' in m['files']:   # loads maps and objects too; not every mission has one
-            gone += missing_assets(names, maps41, edf41_script(m['id'], 'BEFORE.BVM'))
-        if gone:
-            skipped.append((PACK41.group, m['id'], '缺少 ' + ', '.join(sorted({_gone41(ref, why) for ref in gone}))))
-            continue
-        rows.append({'group': PACK41.group, 'path': m['id'], 'key': f'{EDF41_FOLDER}/{m["id"]}', 'bgm': BGM,
-                     'flags': FLAGS, 'progress': round(i / len(missions), 4), 'map': first_map(bvm),
-                     'title': m['title'], 'brief': m['brief'], 'files': m['files']})
+    for p41 in PACKS41:   # the story, then the two DLC packs (no data committed: no rows)
+        text41 = edf41_text(p41.data)
+        missions = text41['missions']
+        # a mission its converter refused (a 4.1 script native EDF6's script runtime has no entry for: pylib/bvm41.py)
+        skipped += [(p41.pack.group, r['id'], f'脚本没法转换：{r["why"]}') for r in text41.get('refused', [])]
+        for i, m in enumerate(missions):
+            bvm = edf41_script(m['id'], 'MISSION.BVM', p41.data)
+            gone = missing_assets(names, maps41, bvm)
+            if 'BEFORE.BVM' in m['files']:   # loads maps and objects too; not every mission has one
+                gone += missing_assets(names, maps41, edf41_script(m['id'], 'BEFORE.BVM', p41.data))
+            if gone:
+                skipped.append((p41.pack.group, m['id'],
+                                '缺少 ' + ', '.join(sorted({_gone41(ref, why) for ref in gone}))))
+                continue
+            rows.append({'group': p41.pack.group, 'path': m['id'], 'key': f'{p41.folder}/{m["id"]}', 'bgm': BGM,
+                         'flags': FLAGS, 'progress': round(i / len(missions), 4), 'map': first_map(bvm),
+                         'title': m['title'], 'brief': m['brief'], 'files': m['files']})
     return rows, skipped
 
 
@@ -464,11 +516,13 @@ def edf5_thumbs() -> dict[str, mdb.RabFile]:
 
 def own_thumbs() -> dict[str, mdb.RabFile]:
     """Each pack's own mission pictures by '<group>:<NAME>' (EDF5's and EDF4.1's mission ids overlap: M007)."""
-    with open(EDF41_THUMBS, 'rb') as f:
-        edf41 = {x.name.upper(): x for x in mdb.rab_read(f.read()).files}
     edf5 = edf5_thumbs()
     out = {f'{pack.group}:{n}': x for pack in PACKS for n, x in edf5.items()}
-    out.update({f'{PACK41.group}:{n}': x for n, x in edf41.items()})
+    for p41 in PACKS41:
+        path = os.path.join(p41.data, 'missions_thumbnails.rab')
+        if os.path.isfile(path):
+            with open(path, 'rb') as f:
+                out.update({f'{p41.pack.group}:{x.name.upper()}': x for x in mdb.rab_read(f.read()).files})
     return out
 
 
@@ -601,9 +655,10 @@ def build(root: str, campaign: bool = True, test_range: bool = True,
     if empty:
         raise Refused(f'没有可安装的任务：{", ".join(empty)}（不写入空任务包）。')
     by_pack[RANGE.group] = [range_row(game)] if test_range else []
-    by_pack[PACK41.group] = [r for r in p['rows'] if r['group'] == PACK41.group]
-    with41 = campaign and bool(by_pack[PACK41.group])
-    packs = (*(PACKS if campaign else ()), *((RANGE,) if test_range else ()), *((PACK41,) if with41 else ()))
+    for p41 in PACKS41:
+        by_pack[p41.pack.group] = [r for r in p['rows'] if r['group'] == p41.pack.group]
+    with41 = [p41 for p41 in PACKS41 if campaign and by_pack[p41.pack.group]]
+    packs = (*(PACKS if campaign else ()), *((RANGE,) if test_range else ()), *(p41.pack for p41 in with41))
     config, ids = parsed(CONFIG, lambda: pack_config(base_bytes(root, game, CONFIG, manifest), packs))
     out = {CONFIG: config}
     for lang, rel in TEXTS.items():
@@ -613,10 +668,21 @@ def build(root: str, campaign: bool = True, test_range: bool = True,
         if len(rows) > 512:
             raise Refused(f'{pack.tag} 有 {len(rows)} 关，超过存档 512 关的容量。')
         out.update(pack_files(game, pack, rows))
-    for r in by_pack[PACK41.group] if with41 else ():
-        for name in r['files']:
-            out[f'MISSION/{EDF41_FOLDER}/{r["path"]}/{name}'] = edf41_script(r['path'], name)
-    return out, Contents(ids.get(PACKS[0].tag, 0), ids.get(RANGE.tag, 0), ids.get(PACK41.tag, 0)), p
+    for p41 in with41:
+        for r in by_pack[p41.pack.group]:
+            for name in r['files']:
+                out[f'MISSION/{p41.folder}/{r["path"]}/{name}'] = edf41_script(r['path'], name, p41.data)
+    return out, Contents(ids.get(PACKS[0].tag, 0), ids.get(RANGE.tag, 0), edf41_content(ids)), p
+
+
+def edf41_content(ids: dict[str, int]) -> int:
+    """EDF41Content: the first of the 4.1 packs' run of content ids (the story's slot), when any 4.1 pack is in;
+    the plugin owns EDF41Content .. +len(PACKS41)-1. 0: none."""
+    slots = {p.tag: k for k, p in enumerate(SLOTS)}
+    for p41 in PACKS41:
+        if p41.pack.tag in ids:
+            return ids[p41.pack.tag] - slots[p41.pack.tag] + slots[PACK41.tag]
+    return 0
 
 
 # ------------------------------------------------------------------------------------------- writing
@@ -881,7 +947,9 @@ def check(root: str) -> bool:
     values = {name: ini_value(root, name) for name, _ in wanted_ids}
     ids_ok = all(values[name] == want for name, want in wanted_ids)
     packs = ((['EDF5 战役 3 个'] if enabled(root) else []) + (['测试场'] if range_installed(root) else [])
-             + (['EDF4.1 本篇'] if manifest.get('edf41') else []))
+             + ([p41.pack.name['SC'] for p41 in PACKS41
+                 if any(managed(f) and f.upper().startswith(f'MISSION/{p41.folder}/') for f in files)]
+                if manifest.get('edf41') else []))
     print(f'任务包：{"、".join(packs) or "无"}，{len(files)} 个文件，缺失、被改过或待还原 {len(bad)}；'
           + '，'.join(f'{name}=' + ('（缺失）' if values[name] is None else str(values[name]))
                      + ('' if values[name] == want else f'（应为 {want}）') for name, want in wanted_ids))
@@ -931,8 +999,12 @@ def summary(built: tuple[dict[str, bytes], Contents, dict]) -> str:
     counts = '、'.join(f'{pack.name["SC"]} {sum(r["group"] == pack.group for r in built[2]["rows"])} 关' for pack in PACKS)
     out41 = ''
     if content.edf41:
-        n41 = sum(r['group'] == PACK41.group for r in built[2]['rows'])
-        out41 = f'；{PACK41.name["SC"]} {n41} 关（内容编号 {content.edf41}）'
+        slots = {p.tag: k for k, p in enumerate(SLOTS)}
+        for p41 in PACKS41:
+            n41 = sum(r['group'] == p41.pack.group for r in built[2]['rows'])
+            if n41:
+                cid = content.edf41 + slots[p41.pack.tag] - slots[PACK41.tag]
+                out41 += f'；{p41.pack.name["SC"]} {n41} 关（内容编号 {cid}）'
     return (f'EDF5 任务包：{counts}（离线模式的「任务包」列表里选择；内容编号 {content.campaign}–'
             f'{content.campaign + len(PACKS) - 1}）{out41}；' + out)
 

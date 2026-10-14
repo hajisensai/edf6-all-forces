@@ -9,7 +9,7 @@ background"). For measurements, e.g. the big map's memory against the stock test
                                                      left stick, look_*: its right stick)
   python tests/autopilot/drive.py shot FILE.png      the game window's picture (PrintWindow, never the screen)
   python tests/autopilot/drive.py mem [N]            the plugin's last N MEM rows
-  python tests/autopilot/drive.py cmd TEXT           one command to the plugin: mem, quit, mission ROW|RM015|M001|range|edf41:ROW [0-4]
+  python tests/autopilot/drive.py cmd TEXT           one command to the plugin: mem, quit, mission ROW|RM015|M001|range|edf41:ROW|edf41mp01:ROW|edf41mp02:ROW [0-4]
   python tests/autopilot/drive.py run [MISSION] [DIFFICULTY] [SECONDS] [LOG]
         one go: install, ask the mission (default range: the test range's own mission pack, by the content id in the
         installed EDF6VehicleCrew.ini; RM015, M001 or a row: the stock offline list), launch in the background, stay
@@ -376,22 +376,132 @@ def remove_loadout(path: str, payload: bytes) -> None:
     print('removed', path)
 
 
+def steam_launching_title(steam: str | None = None, language: str | None = None) -> str | None:
+    """The title of Steam's launch progress window ("Launching...") in the client's language: the string
+    GameAction_LaunchingDialog_Title of steamui/localization/steamui_<language>-json.js. None (with the reason printed)
+    when it cannot be read; the launch then moves no Steam window."""
+    import re
+    import winreg
+    try:
+        if steam is None or language is None:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Valve\Steam') as k:
+                steam = steam or winreg.QueryValueEx(k, 'SteamPath')[0]
+                language = language or winreg.QueryValueEx(k, 'Language')[0]
+        path = os.path.join(steam, 'steamui', 'localization', f'steamui_{language}-json.js')
+        with open(path, encoding='utf-8') as f:
+            text = f.read()
+    except OSError as e:
+        print("Steam's launch window title not read:", e)
+        return None
+    m = re.search(r'"GameAction_LaunchingDialog_Title":"((?:[^"\\]|\\.)*)"', text)
+    if not m:
+        print("Steam's launch window title not in", path)
+        return None
+    return json.loads(f'"{m.group(1)}"')
+
+
+def is_steam_launching_window(title: str, cls: str, exe: str, launching: str | None) -> bool:
+    """Steam's launch progress window and nothing else: the Steam web helper's SDL window with exactly that title. Any
+    other Steam window (a cloud-save conflict, a prompt) can ask the user something and stays where Steam puts it."""
+    return launching is not None and title == launching and cls == 'SDL_app' and exe.lower() == 'steamwebhelper.exe'
+
+
+WINEVENTPROC = ctypes.WINFUNCTYPE(None, wt.HANDLE, wt.DWORD, wt.HWND, wt.LONG, wt.LONG, wt.DWORD, wt.DWORD)
+
+
+def window_exe(hwnd: int) -> str:
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel32.OpenProcess.restype = wt.HANDLE
+    pid = wt.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    h = kernel32.OpenProcess(0x1000, False, pid.value)   # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return ''
+    try:
+        buf = ctypes.create_unicode_buffer(1024)
+        size = wt.DWORD(len(buf))
+        return buf.value.rsplit('\\', 1)[-1] if kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)) else ''
+    finally:
+        kernel32.CloseHandle(h)
+
+
+class SteamLaunchWindowMover:
+    """While the game starts, moves Steam's launch progress window off screen as it is shown (a WinEvent hook, so it
+    is gone before it is seen) the way the game's own window is (hide). Started before the steam:// launch, stopped
+    once the game's window is there."""
+
+    def __init__(self, launching: str | None) -> None:
+        self.launching = launching
+        self.moved = 0
+        self.thread_id = 0
+        self.ready = threading.Event()
+        self.thread = threading.Thread(target=self.run, daemon=True)
+
+    def on_event(self, _hook: int, _event: int, hwnd: int, obj: int, _child: int, _thread: int, _time: int) -> None:
+        if obj != 0 or not hwnd or user32.GetAncestor(hwnd, 2) != hwnd:   # OBJID_WINDOW, GA_ROOT: top-level only
+            return
+        title = ctypes.create_unicode_buffer(256)
+        user32.GetWindowTextW(hwnd, title, 256)
+        cls = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(hwnd, cls, 256)
+        if is_steam_launching_window(title.value, cls.value, window_exe(hwnd), self.launching):
+            hide(hwnd)
+            self.moved += 1
+
+    def run(self) -> None:
+        user32.SetWinEventHook.restype = wt.HANDLE
+        user32.SetWinEventHook.argtypes = [wt.DWORD, wt.DWORD, wt.HMODULE, WINEVENTPROC, wt.DWORD, wt.DWORD, wt.DWORD]
+        user32.UnhookWinEvent.argtypes = [wt.HANDLE]
+        user32.GetAncestor.restype, user32.GetAncestor.argtypes = wt.HWND, [wt.HWND, wt.UINT]
+        user32.GetWindowTextW.argtypes = [wt.HWND, wt.LPWSTR, ctypes.c_int]
+        user32.GetClassNameW.argtypes = [wt.HWND, wt.LPWSTR, ctypes.c_int]
+        user32.GetMessageW.argtypes = [ctypes.POINTER(wt.MSG), wt.HWND, wt.UINT, wt.UINT]
+        user32.DispatchMessageW.argtypes = [ctypes.POINTER(wt.MSG)]
+        user32.PostThreadMessageW.argtypes = [wt.DWORD, wt.UINT, wt.WPARAM, wt.LPARAM]
+        callback = WINEVENTPROC(self.on_event)
+        # EVENT_OBJECT_SHOW .. EVENT_OBJECT_NAMECHANGE (a title set after the show), WINEVENT_OUTOFCONTEXT
+        hook = user32.SetWinEventHook(0x8002, 0x800C, None, callback, 0, 0, 0)
+        self.thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
+        self.ready.set()
+        msg = wt.MSG()
+        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            user32.DispatchMessageW(ctypes.byref(msg))
+        if hook:
+            user32.UnhookWinEvent(hook)
+
+    def start(self) -> 'SteamLaunchWindowMover':
+        if self.launching is not None:
+            self.thread.start()
+            self.ready.wait(5)
+        return self
+
+    def stop(self) -> None:
+        if self.thread.is_alive():
+            user32.PostThreadMessageW(self.thread_id, 0x0012, 0, 0)   # WM_QUIT
+            self.thread.join(5)
+
+
 def launch() -> None:
     require_closed()
     before = user32.GetForegroundWindow()
-    os.startfile(f'steam://rungameid/{APP_ID}')
-    # Steam dialogs can authorize cloud-save conflicts or unrelated actions. Shape,
-    # color and window title are not semantic identity: leave all confirmations to
-    # the user and only wait for the game this command requested.
-    deadline = time.time() + 150
-    while time.time() < deadline:
-        hwnd = game_window()
-        if hwnd:
-            hide(hwnd)
-            user32.SetForegroundWindow(before)
-            print('window', hex(hwnd), 'off screen')
-            return
-        time.sleep(0.5)
+    # The game only runs launched by Steam (started directly, even with Steam's environment, it stops at a white
+    # window and an integrity error), so steam://; Steam's own launch progress window goes off screen as it shows.
+    mover = SteamLaunchWindowMover(steam_launching_title()).start()
+    try:
+        os.startfile(f'steam://rungameid/{APP_ID}')
+        # Steam dialogs can authorize cloud-save conflicts or unrelated actions: leave all confirmations to the
+        # user and only wait for the game this command requested.
+        deadline = time.time() + 150
+        while time.time() < deadline:
+            hwnd = game_window()
+            if hwnd:
+                hide(hwnd)
+                user32.SetForegroundWindow(before)
+                print('window', hex(hwnd), 'off screen; Steam launch windows moved off screen:', mover.moved)
+                return
+            time.sleep(0.5)
+    finally:
+        mover.stop()
     raise SystemExit('no game window in 150 s')
 
 

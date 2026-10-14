@@ -212,15 +212,85 @@ void* __fastcall AwbTocHook(void* binder,const char* path,void* work,std::uint64
     return toc;
 }
 
-// The script's voice key looked up bank by bank; log when OUR bank is the one that answers.
+// The script's voice key looked up bank by bank; log when OUR bank is the one that answers (with the dev probe, every
+// lookup: the key, the bank, the answer).
+std::atomic<long> probeLookups{0};
 int __fastcall CueInBankHook(const BankRef* bank,const char* key) {
     const int cue=reinterpret_cast<CueInBankFn>(image+kCueInBank)(bank,key);
+    if(Cfg().edf41VoiceProbe && ++probeLookups<=3000)
+        Log("EDF41SOUND probe lookup '%s' in bank %p -> %d",key ? key : "?",bank ? bank->bank : nullptr,cue);
     void* ours=voiceBankPtr.load();
     if(cue!=-1 && ours && bank && bank->bank==ours) {
         const long hits=++voiceHits;
         if(hits<=8 || (hits&(hits-1))==0)Log("EDF41SOUND voice cue '%s' answered by 4.1's voice bank %p (cue 0x%X, hit %ld)",key ? key : "?",ours,cue,hits);
     }
     return cue;
+}
+
+// The caption lookup (0x7B17F0: (voice table owner, out, key wstring*) -> out {name wstring, caption wstring, ...}) at its
+// three call sites (the subtitle's two 0x5DB6A7 / 0x5DB99F, 0x5DD5C5): with the dev probe, the key it was given and what came
+// back. The MSVC wstring: 16 bytes of inline buffer or a pointer, size at +0x10, capacity at +0x18 (inline below 8).
+constexpr std::size_t kCaption=0x7B17F0;
+constexpr std::size_t kCaptionSites[]={0x5DB6A7,0x5DB99F,0x5DD5C5};
+using CaptionFn=void*(__fastcall*)(void*,void*,void*);
+std::atomic<long> probeCaptions{0};
+void WideOf(const void* s,wchar_t* out,std::size_t room) noexcept {
+    out[0]=0;
+    if(!s)return;
+    const char* p=static_cast<const char*>(s);
+    const std::uint64_t size=*reinterpret_cast<const std::uint64_t*>(p+0x10);
+    const std::uint64_t cap=*reinterpret_cast<const std::uint64_t*>(p+0x18);
+    const wchar_t* text=cap>=8 ? *reinterpret_cast<wchar_t* const*>(p) : reinterpret_cast<const wchar_t*>(p);
+    const std::size_t n=size<room-1 ? static_cast<std::size_t>(size) : room-1;
+    for(std::size_t i=0;i<n;++i)out[i]=text[i];
+    out[n]=0;
+}
+// Inside the caption lookup: its row lookup by the cut key (0x7B1AD8: 0x55A30(table handle, const wchar_t* name) -> row or -1),
+// whichever caller asked; with the dev probe, every name and its answer.
+constexpr std::size_t kRowByName=0x55A30,kRowByNameSite=0x7B1AD8;
+using RowByNameFn=int(__fastcall*)(void*,const wchar_t*);
+std::atomic<long> probeRows{0};
+int __fastcall RowByNameHook(void* table,const wchar_t* name) {
+    const int row=reinterpret_cast<RowByNameFn>(image+kRowByName)(table,name);
+    if(++probeRows<=2000)Log("EDF41SOUND probe row '%ls' -> %d (table %p, thread %lu)",name ? name : L"?",row,table,GetCurrentThreadId());
+    return row;
+}
+
+// The bank walks' play calls (0x7B2BED -> 0x7AA9F0, 0x7B2CB8 -> 0x7AA700: (BankRef*, {cue, ...}*, a, b[, c]) -> started):
+// with the dev probe, whether a cue our 4.1 voice bank answered actually started playing.
+constexpr std::size_t kPlayA=0x7AA9F0,kPlayASite=0x7B2BED,kPlayB=0x7AA700,kPlayBSite=0x7B2CB8;
+using PlayAFn=bool(__fastcall*)(const BankRef*,const int*,void*,void*,void*);
+using PlayBFn=bool(__fastcall*)(const BankRef*,const int*,void*,void*);
+std::atomic<long> probePlays{0};
+void LogPlay(const char* which,const BankRef* bank,const int* cue,bool started) noexcept {
+    void* ours=voiceBankPtr.load();
+    const bool ourBank=bank && ours && bank->bank==ours;
+    if(++probePlays<=3000 && (ourBank || !started))
+        Log("EDF41SOUND probe play %s bank %p%s cue %d -> started %d",which,bank ? bank->bank : nullptr,ourBank ? " (4.1 voice)" : "",
+            cue ? *cue : -1,started ? 1 : 0);
+}
+bool __fastcall PlayAHook(const BankRef* bank,const int* cue,void* a,void* b,void* c) {
+    const bool r=reinterpret_cast<PlayAFn>(image+kPlayA)(bank,cue,a,b,c);
+    LogPlay("A",bank,cue,r);
+    return r;
+}
+bool __fastcall PlayBHook(const BankRef* bank,const int* cue,void* a,void* b) {
+    const bool r=reinterpret_cast<PlayBFn>(image+kPlayB)(bank,cue,a,b);
+    LogPlay("B",bank,cue,r);
+    return r;
+}
+
+void* __fastcall CaptionHook(void* owner,void* out,void* key) {
+    wchar_t k[64];
+    WideOf(key,k,64);   // read before the call: it cuts the key in place (0x7B1A19)
+    void* r=reinterpret_cast<CaptionFn>(image+kCaption)(owner,out,key);
+    if(++probeCaptions<=600) {
+        wchar_t name[48],caption[48];
+        WideOf(out,name,48);
+        WideOf(static_cast<char*>(out)+0x20,caption,48);
+        Log("EDF41SOUND probe caption key '%ls' -> name '%ls' caption '%ls'",k,name,caption);
+    }
+    return r;
 }
 
 BankNode* ListHead(void* manager) noexcept {
@@ -331,6 +401,16 @@ bool InstallEdf41Sound() noexcept {
     int cueProbes=0;
     for(const std::size_t site:kCueInBankSites)
         cueProbes+=RedirectCall(image+site,image+kCueInBank,reinterpret_cast<void*>(&CueInBankHook),changed) ? 1 : 0;
+    if(Cfg().edf41VoiceProbe) {
+        int captions=0;
+        for(const std::size_t site:kCaptionSites)
+            captions+=RedirectCall(image+site,image+kCaption,reinterpret_cast<void*>(&CaptionHook),changed) ? 1 : 0;
+        const bool rows=RedirectCall(image+kRowByNameSite,image+kRowByName,reinterpret_cast<void*>(&RowByNameHook),changed);
+        const bool playA=RedirectCall(image+kPlayASite,image+kPlayA,reinterpret_cast<void*>(&PlayAHook),changed);
+        const bool playB=RedirectCall(image+kPlayBSite,image+kPlayB,reinterpret_cast<void*>(&PlayBHook),changed);
+        Log("EDF41SOUND probe on: play calls %d/%d",playA ? 1 : 0,playB ? 1 : 0);
+        Log("EDF41SOUND probe on: caption sites %d/3, row lookup %d",captions,rows ? 1 : 0);
+    }
     Log("EDF41SOUND hooked: se bank load=%d lookups=%d/%d voice load=%d (awe check=%d awb toc=%d voice cue=%d/2)",ok ? 1 : 0,lookups,
         static_cast<int>(sizeof(kLookupSites)/sizeof(kLookupSites[0])),voice ? 1 : 0,aweProbe ? 1 : 0,tocProbe ? 1 : 0,cueProbes);
     return ok && voice && lookups>0;

@@ -527,6 +527,7 @@ void LoadConfig() noexcept {
     n.bigWorld=ReadFloat(L"BigWorld",n.bigWorld);
     n.terrainShare=ReadBool(L"TerrainShare",n.terrainShare);
     n.edf41Sound=ReadBool(L"Edf41Sound",n.edf41Sound);
+    n.edf41VoiceProbe=ReadBool(L"Edf41VoiceProbe",n.edf41VoiceProbe);
     n.edf41Ai=ReadBool(L"Edf41Ai",n.edf41Ai);
     n.edf5CampaignContent=FixInt("EDF5CampaignContent",ReadInt(L"EDF5CampaignContent",n.edf5CampaignContent),0,65535);
     n.testRangeContent=FixInt("TestRangeContent",ReadInt(L"TestRangeContent",n.testRangeContent),0,65535);
@@ -1060,6 +1061,9 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallEdf41Ai();        // the converted EDF4.1 Hectors' arm gate and back-off cycle (edf41ai.cpp)
     InstallEdf41Fortress();  // the converted EDF4.1 fortress: standing, its drop through the core hatch (edf41fortress.cpp)
     InstallEdf41Dragon();    // the converted EDF4.1 giant dragon: its flame stream, ranges and glide pass (edf41dragon.cpp)
+    InstallEdf41Insects();   // the DLC's EDF4.1 queen bee and Nephilas: needle speed, thread scatter (edf41insects.cpp)
+    InstallEdf41SmallDragon();  // the DLC's EDF4.1 small dragons: the hit reaction on 4.1's ragdoll bodies (edf41smalldragon.cpp)
+    InstallEdf41Natives();   // EDF4.1 script natives the BVM executor lacks: SetEncountReportRadius (edf41natives.cpp)
     InstallEdf41Sound();     // EDF4.1's weapon SE bank and voice banks (edf41sound.cpp)
     InstallTerrainShare();   // before any map loads: the pieces of one terrain decoded once
     InstallMission();       // the mission's start (Reset*, the preloads) and a trigger of the per-frame hooks

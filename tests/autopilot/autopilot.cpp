@@ -636,19 +636,26 @@ LONG ReadPackContent(const wchar_t* key) noexcept {
 
 // "mission <row|RM015|M001|range|edf41:ROW> [difficulty]": the offline list's row (0-based: RM015 is 13, M001 is 1),
 // difficulty 0-4. RM015 is the stock mission again (the test range left it for its own pack); "range" is that pack's
-// row 0; "edf41:ROW" row ROW of the EDF4.1 story pack (EDF41Content).
+// row 0; "edf41:ROW" row ROW of the EDF4.1 story pack (EDF41Content), "edf41mp01:ROW" / "edf41mp02:ROW" of its
+// Mission Pack 1 / 2 (EDF41Content + 1 / + 2: the plugin's run of the three 4.1 packs).
 void AskMission(const char* text) noexcept {
     char name[32]{};int difficulty=1;
     if(sscanf_s(text,"%*s %31s %d",name,static_cast<unsigned>(sizeof(name)),&difficulty)<1)return;
     const bool range=!_stricmp(name,"range");
-    const bool edf41=!_strnicmp(name,"edf41:",6);
-    const int row=range ? 0 : edf41 ? std::atoi(name+6) : !_stricmp(name,"RM015") ? 13 : !_stricmp(name,"M001") ? 1
+    // which of the 4.1 packs: -1 none, 0 the story, 1 / 2 its mission packs
+    const int pack41=!_strnicmp(name,"edf41:",6) ? 0 : !_strnicmp(name,"edf41mp01:",10) ? 1
+                    : !_strnicmp(name,"edf41mp02:",10) ? 2 : -1;
+    const bool edf41=pack41>=0;
+    const char* rowText=pack41==0 ? name+6 : name+10;
+    const int row=range ? 0 : edf41 ? std::atoi(rowText) : !_stricmp(name,"RM015") ? 13 : !_stricmp(name,"M001") ? 1
                                                                                                     : std::atoi(name);
     missionDifficulty=difficulty<0 || difficulty>4 ? 1 : difficulty;
-    rangeContent=range ? ReadPackContent(L"TestRangeContent") : edf41 ? ReadPackContent(L"EDF41Content") : -1;
+    const long first41=edf41 ? ReadPackContent(L"EDF41Content") : -1;
+    rangeContent=range ? ReadPackContent(L"TestRangeContent") : edf41 ? (first41>0 ? first41+pack41 : first41) : -1;
     missionRow=row;
     Log("MISSION asked: %s row %d, difficulty %ld (applied when the script starts its title)",
-        range ? "the test range pack's" : edf41 ? "the EDF4.1 story pack's" : "offline",row,missionDifficulty);
+        range ? "the test range pack's" : pack41==0 ? "the EDF4.1 story pack's" : pack41==1 ? "the EDF4.1 Mission Pack 1's"
+        : pack41==2 ? "the EDF4.1 Mission Pack 2's" : "offline",row,missionDifficulty);
     if(range || edf41)Log("MISSION the pack's content id %ld (EDF6VehicleCrew.ini %s)",rangeContent,
                           range ? "TestRangeContent" : "EDF41Content");
 }
