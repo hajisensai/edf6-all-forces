@@ -161,6 +161,7 @@ struct Part {
     int state=sNone,frames=0;
     float Time() const noexcept { return static_cast<float>(frames)/kFps; }
     bool seen=false;           // first Update done
+    std::uint32_t lastTick=0;  // hullTick at its last Update
     bool farDone=false;
     int farTries=0;
 
@@ -218,10 +219,14 @@ std::uint64_t nextId=1;
 std::atomic<int> hullsMade{0},partsMade{0};
 
 Part* Find(const void* o) noexcept { const auto it=byObj.find(o); return it==byObj.end() ? nullptr : it->second.get(); }
+std::uint32_t hullTick=0;   // one per hull Update: the clock of the staleness test (a paused game stops it too)
 Part* ById(std::uint64_t id) noexcept {
     if(!id)return nullptr;
     const auto it=byId.find(id);
-    return it==byId.end() || it->second->gone ? nullptr : it->second;
+    // a deleted object keeps its record until the game destroys it, and one the game takes out of its update list (a dead one) is
+    // never updated again: either is gone (300 hull frames without an Update)
+    if(it==byId.end() || it->second->gone || Deleted(it->second->obj))return nullptr;
+    return it->second->seen && hullTick-it->second->lastTick>300u ? nullptr : it->second;
 }
 
 int DevBits() noexcept { return Cfg().edf41Mother401Dev; }
@@ -583,7 +588,11 @@ bool CasDone(Part& p) noexcept {
 void FireFrom(Part& p,const float* from,const float* dir,const Bullet& b) noexcept {
     float m[16];
     AimMatrix(from,dir,m);
-    if(!Fire(p.obj,m,b))Fail("a 401 bullet was not made");
+    if(!Fire(p.obj,m,b)) { Fail("a 401 bullet was not made"); return; }
+    static std::atomic<int> said[12];
+    if(said[static_cast<int>(p.kind)].fetch_add(1)<2)
+        Log("EDF41M401 %s %p fires %ls from %.0f %.0f %.0f toward %.2f %.2f %.2f (damage %.2f, speed %.2f)",KindName(p.kind),p.obj,b.factory,
+            from[0],from[1],from[2],dir[0],dir[1],dir[2],b.damage,b.speed);
 }
 void MuzzleWorld(Part& p,float* out) noexcept { Point(p.muzzle,F(p.obj,kMatrixAt),out); }
 void Down(Part& p,float* out) noexcept { const float* y=F(p.obj,kMatrixAt+16); out[0]=-y[0]; out[1]=-y[1]; out[2]=-y[2]; }
@@ -659,6 +668,11 @@ void SetupBullets(Part& p) noexcept {
 // ---- state enter actions -------------------------------------------------------------------------------------------------
 void Enter(Part& p,int state) noexcept {
     Exit(p);
+    if(state==sCore1 || state==sCore2 || state==sCore4 || state==sFlyAway || state==sGbDestroyed || state==sBcCharge || state==sFcGenoCharge
+       || state==sFcLightCharge || state==sGenOpen || state==sFgCharge) {
+        static std::atomic<int> said{0};
+        if(said.fetch_add(1)<60)Log("EDF41M401 %s %p state %d",KindName(p.kind),p.obj,state);
+    }
     p.state=state;
     p.frames=0;
     switch(state) {
@@ -977,6 +991,21 @@ void HullFirst(Part& h) noexcept {
 
 void HullLogic(Part& h) noexcept {
     ++h.hullFrames;
+    // the hull's team as the script left it (the class's constructor registers 6; a script's SetTeam may come after the first
+    // touch): the parts follow (4.1 slot 13 0x260900 hands the team to every panel, Panel01 to its batteries)
+    const std::int32_t team=*reinterpret_cast<const std::int32_t*>(F(h.obj,kTeamAt));
+    if(team!=h.team) {
+        Log("EDF41M401 hull %p team %d -> %d: its parts follow",h.obj,h.team,team);
+        h.team=team;
+        for(const Cell& c:h.cells) {
+            Part* p=ById(c.panel);
+            if(!p || p->killed || p->vanishing)continue;
+            p->team=team;
+            SetTeam(p->obj,team,true);
+            for(const Part::Mount& m:p->mounts)
+                if(Part* b=ById(m.battery); b && !b->killed) { b->team=team; SetTeam(b->obj,team,true); }
+        }
+    }
     if(h.throttle>0)--h.throttle;
     // spin (0x261170): yaw speed +2e-7 per frame up to 0.0002 rad per frame
     if(h.spin) { h.yawAccel=std::min(0.0002f,h.yawAccel+2e-7f); h.yawTarget+=h.yawAccel; }
@@ -1023,7 +1052,11 @@ void HullLogic(Part& h) noexcept {
     for(const Cell& c:h.cells)
         if(const Part* p=ById(c.panel)) { for(int k=0;k<3;++k)avg[k]+=F(p->obj,kPosAt)[k]; cnt+=1; }
     if(cnt>0) { for(float& v:avg)v/=cnt; MoveSound(h.ambient,avg); }
-    // the dev kill switches
+    // the dev switches at Edf41Mother401DevKill seconds
+    if((DevBits()&32) && h.hullFrames==static_cast<std::uint32_t>(std::max(1.0f,Cfg().edf41Mother401DevKill*kFps))) {
+        Log("EDF41M401 dev: ObjectAction %d",Cfg().edf41Mother401DevAction);
+        Action(h,Cfg().edf41Mother401DevAction);
+    }
     if((DevBits()&24) && !h.dying && h.hullFrames==static_cast<std::uint32_t>(std::max(1.0f,Cfg().edf41Mother401DevKill*kFps))) {
         if((DevBits()&8) && core) { Log("EDF41M401 dev: the Core is destroyed"); Destroy(*core,0); }
         if(DevBits()&16)
@@ -1036,12 +1069,14 @@ void HullLogic(Part& h) noexcept {
 
 std::uint64_t __fastcall HullUpdate(void* self,void* dt) {
     const LARGE_INTEGER t0=Now();
+    ++hullTick;
     bool del=false;
     {
         std::lock_guard<std::recursive_mutex> hold(lock);
         Part* h=Find(self);
         if(h && OnlineRunsHere(self)) {
             if(!h->seen) { h->seen=true; HullFirst(*h); }
+            h->lastTick=hullTick;
             HullLogic(*h);
             if(h->dying) {
                 bool any=false;
@@ -1063,7 +1098,11 @@ std::uint64_t __fastcall HullUpdate(void* self,void* dt) {
     std::memcpy(m,hidden,sizeof(m));
     std::memcpy(m+12,F(self,kPosAt),12);
     ModelMatrix(self,m);
-    if(del) { Log("EDF41M401 hull %p: every panel is gone, the hull goes",self); DeleteObject(self); }
+    if(del) {
+        Log("EDF41M401 hull %p: every panel is gone, the hull goes",self);
+        { std::lock_guard<std::recursive_mutex> hold(lock); if(Part* h=Find(self))h->gone=true; }
+        DeleteObject(self);
+    }
     (void)t0;
     return r;
 }
@@ -1190,6 +1229,7 @@ std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
                 }
             }
             ++p->frames;
+            p->lastTick=hullTick;
         }
     }
     const LARGE_INTEGER t1=Now();
@@ -1206,7 +1246,10 @@ std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
         std::lock_guard<std::recursive_mutex> hold(lock);
         partUsOurs+=Us(t0,t1); partUsStock+=Us(t1,t2); ++partCalls;
     }
-    if(del)DeleteObject(self);
+    if(del) {
+        { std::lock_guard<std::recursive_mutex> hold(lock); if(Part* p=Find(self))p->gone=true; }
+        DeleteObject(self);
+    }
     return r;
 }
 
@@ -1234,7 +1277,7 @@ void __fastcall PartDamaged(void* self,void* gdi) {
         Enter(*p,sGbDestroyed);
         return;
     }
-    Log("EDF41M401 %s %p destroyed",KindName(p->kind),self);
+    Log("EDF41M401 %s %p destroyed by damage",KindName(p->kind),self);
     Part* h=HullOf(*p);
     if(p->kind==Kind::weak && h) {   // 0x2715a0
         float q[3];
@@ -1255,6 +1298,9 @@ void __fastcall PartDamaged(void* self,void* gdi) {
     Destroy(*p,0);
 }
 
+// slot 22: any team (EventAnimationObject's own 0x5B6BA0 allows only 6, so CreateEnemy's SetTeam(1) and the parts' would not take)
+bool __fastcall AnyTeam(void*,std::int32_t) { return true; }
+
 std::uint64_t __fastcall PartMessage(void* self,std::uint32_t msg,void* data) {
     return reinterpret_cast<MessageFn>(partClone.orig[kSlotMessage])(self,msg,data);
 }
@@ -1264,6 +1310,7 @@ void Register(void* obj,Kind kind) noexcept {
     std::lock_guard<std::recursive_mutex> hold(lock);
     auto rec=std::make_unique<Part>();
     rec->id=nextId++;
+    rec->lastTick=hullTick;
     rec->obj=obj;
     rec->kind=kind;
     // GetPartsObject's group (+0x4d0): BigCannon01 1, WeakPanel 2, Core 3, the generators 0, the rest -1 (SPEC 1.5 / notes A, B)
@@ -1295,6 +1342,8 @@ bool InstallEdf41Mother401() noexcept {
     SetSlot(hullClone,kSlotAccept,reinterpret_cast<void*>(&HullAccept));
     SetSlot(partClone,kSlotAccept,reinterpret_cast<void*>(&PartAccept));
     SetSlot(partClone,kSlotDamaged,reinterpret_cast<void*>(&PartDamaged));
+    SetSlot(hullClone,kSlotTeamAllowed,reinterpret_cast<void*>(&AnyTeam));
+    SetSlot(partClone,kSlotTeamAllowed,reinterpret_cast<void*>(&AnyTeam));
     struct Reg { const wchar_t* name; CreateFn fn; };
     const Reg regs[]={
         {L"UfoMother401",&CreateHull},

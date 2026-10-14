@@ -7204,6 +7204,8 @@ def edf41_mother401_plugin_contract() -> None:
     for cls in classes:
         assert f'{{L"{cls}",' in cpp, f'no factory for {cls}'
     assert 'SetSlot(partClone,kSlotAccept,' in cpp and 'SetSlot(partClone,kSlotDamaged,' in cpp and 'SetSlot(hullClone,kSlotAccept,' in cpp
+    # EventAnimationObject's slot 22 allows only team 6: without the replacement no SetTeam (CreateEnemy's, the parts') takes
+    assert 'SetSlot(hullClone,kSlotTeamAllowed,' in cpp and 'SetSlot(partClone,kSlotTeamAllowed,' in cpp
     shared = src('src/edf41classes.cpp')
     for rva in ('kSkeletonFromMatrix', 'kSetFarRender', 'kActivate', 'kSetTeam', 'kSetLevel', 'kGetTarget', 'kBodyById',
                 'kBodyByName', 'kCueLookup', 'kPresetPlay', 'kFlame', 'kExplosionBig', 'kDifficulty'):

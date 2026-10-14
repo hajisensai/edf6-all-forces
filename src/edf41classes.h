@@ -26,6 +26,9 @@ bool Ready() noexcept;     // the fingerprints matched and the registration hook
 
 // ---- cloned vtables ---------------------------------------------------------------------------------------------
 constexpr int kSlotDtor=0,kSlotUpdate=5,kSlotMessage=9,kSlotAccept=16,kSlotDamaged=18;   // 16 / 18: PRIMITIVES.md 2c
+// Slot 22 (+0xB0) bool TeamAllowed(obj, team): SetTeam 0x54EE70 changes nothing when it answers false. EventAnimationObject's
+// (0x5B6BA0) allows only team 6, so a clone that is to be an enemy (CreateEnemy's SetTeam(1), a part's) replaces it (0x54ABD0: true).
+constexpr int kSlotTeamAllowed=22;
 struct Clone {
     const char* tag;
     std::size_t vtable;            // the stock class's primary vtable (EDF.dll RVA)

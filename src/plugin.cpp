@@ -532,8 +532,9 @@ void LoadConfig() noexcept {
     n.edf41MotherBulletProbe=ReadBool(L"Edf41MotherBulletProbe",n.edf41MotherBulletProbe);
     n.edf41MotherParts=static_cast<int>(FixInt("Edf41MotherParts",ReadInt(L"Edf41MotherParts",n.edf41MotherParts),0,31));
     n.edf41Mother401=ReadBool(L"Edf41Mother401",n.edf41Mother401);
-    n.edf41Mother401Dev=static_cast<int>(FixInt("Edf41Mother401Dev",ReadInt(L"Edf41Mother401Dev",n.edf41Mother401Dev),0,31));
+    n.edf41Mother401Dev=static_cast<int>(FixInt("Edf41Mother401Dev",ReadInt(L"Edf41Mother401Dev",n.edf41Mother401Dev),0,63));
     n.edf41Mother401DevKill=ReadFloat(L"Edf41Mother401DevKill",n.edf41Mother401DevKill);
+    n.edf41Mother401DevAction=static_cast<int>(FixInt("Edf41Mother401DevAction",ReadInt(L"Edf41Mother401DevAction",n.edf41Mother401DevAction),0,63));
     n.edf41Mother401Place=ReadFloat(L"Edf41Mother401Place",n.edf41Mother401Place);
     n.edf5CampaignContent=FixInt("EDF5CampaignContent",ReadInt(L"EDF5CampaignContent",n.edf5CampaignContent),0,65535);
     n.testRangeContent=FixInt("TestRangeContent",ReadInt(L"TestRangeContent",n.testRangeContent),0,65535);
