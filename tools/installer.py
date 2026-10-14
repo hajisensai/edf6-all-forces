@@ -539,6 +539,9 @@ def install(game: str, campaign_requested: bool = False) -> None:
     for obj, why in skipped41:
         print('  跳过', obj, why)
     edf41_objects.install(game, objects41)
+    if edf41_objects.dev_enabled():
+        print('开发开关：EDF41_MOTHER_DEV=1，已把 edf41port_dev 里的 UfoMother301 原型并入（仅开发用，发布版没有）。')
+    edf41_objects.set_dev_flag(game, edf41_objects.dev_enabled())   # ini Edf41MotherDev: 1 only with the variable and the folder
     # EDF5 Mission Pack 1's two maps and DLC fortress (pre-generated, the members EDF6 ships read from it): what the
     # campaign plan offered DM015 / DM018 / DM019 / DM020 on (make_edf5_campaign.plan asks edf5_dlc.offered)
     files5, skipped5 = edf5_dlc.build(game)
