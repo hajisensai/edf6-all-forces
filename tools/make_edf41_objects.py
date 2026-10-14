@@ -1360,7 +1360,25 @@ MOTHER301_LOCATORS = (
 )
 
 
-def mother301_fix(files: dict[str, bytes]) -> None:
+def se41_table(games: 'Games', prefixes: tuple[str, ...]) -> list[list]:
+    """4.1's SEPRESET entries whose name starts with one of `prefixes`, as the plugin's SGO key edf41_se wants them:
+    [[name, cue, volume, pitch, a, b, c], ...] (src/edf41classes.h PlaySe: EDF6's SEPRESET has none of 4.1's names; the cues
+    are in the tikyuu4_* banks EDF6 ships)."""
+    data = games.read4('SOUND/SEPRESET.SGO')
+    try:
+        table = sgo.load(data=data)
+    except Exception:   # noqa: BLE001 - 4.1's classic SGO through the converter
+        table = sgo.load(data=legacy_sgo.convert(data))
+    out = []
+    for name, v in sorted(table.items()):
+        if name.startswith(prefixes) and isinstance(v, list) and len(v) >= 6 and isinstance(v[0], str):
+            out.append([name, v[0], *(float(x) for x in v[1:6])])
+    if not out:
+        raise ValueError(f'4.1 SEPRESET has no entry starting with {prefixes}')
+    return out
+
+
+def mother301_fix(games: 'Games', files: dict[str, bytes]) -> None:
     """The hull SGO after the alias: the carrier's two MAB locators added, the model's size recorded for the plugin's log,
     only the files the SGO names kept, the part classes' CAS and model fixes (mother_parts_fix)."""
     rel = 'OBJECT/' + MOTHER301_ROOT
@@ -1376,6 +1394,7 @@ def mother301_fix(files: dict[str, bytes]) -> None:
     md = mdb.mdb_read(body.data)
     ext = [max(abs(x) for x in mdb.rigid_extent(md, ax)) for ax in range(3)]
     members['edf41_mother_model'] = [am[0][0][1], *ext, len(md.bones)]
+    members['edf41_se'] = se41_table(games, ('母船UFO',))   # the hull's table: its parts play from it too
     files[rel] = sgo.write_depth_first(version, members)
     prune(files, rel)
     mother_parts_fix(files)
@@ -1405,7 +1424,7 @@ def mother_parts_fix(files: dict[str, bytes]) -> None:
 # Native classes the plugin implements (src/edf41mother.cpp ...): their root's alias, then this fix of the converted files.
 ROOTS[MOTHER301_ROOT] = 6   # M016 M110 M123 M130 M210 M603 (DLC pack 1's M993 names the same story file)
 ALIASES[MOTHER301_ROOT] = MOTHER301_ALIAS
-NATIVE_FIXES: dict[str, Callable[[dict[str, bytes]], None]] = {MOTHER301_ROOT: mother301_fix}
+NATIVE_FIXES: dict[str, Callable[['Games', dict[str, bytes]], None]] = {MOTHER301_ROOT: mother301_fix}
 
 
 # ---- UfoRobo, EDF4.1's transforming ship / walking robot (docs/edf41-uforobo.md) -----------------------------------------
@@ -1437,19 +1456,9 @@ ROBO_LOCATORS = ('muzzle_small_l', 'muzzle_small_r', 'muzzle_middle_l', 'muzzle_
                  '左足歩行衝撃', 'ロックオン')
 # The plugin's own limits (src/edf41robo.cpp): longer tables are refused there, so they are refused here.
 ROBO_MOST_EVENTS = 24        # kMostEvents: per clip
-ROBO_MOST_SE = 64            # kMostSe
+ROBO_SE_PREFIXES = ('ロボ',)   # 4.1's SEPRESET entries copied into edf41_se (se41_table): every name the robot plays
 ROBO_MOST_MOTION_KEYS = 512  # kMostMotionKeys
 
-
-def sepreset41(games: Games) -> dict[str, list]:
-    """EDF4.1's SOUND/SEPRESET.SGO: {name: [cue, volume, pitch, ...]} (read once)."""
-    if not hasattr(games, 'seset41'):
-        data = games.read4('SOUND/SEPRESET.SGO')
-        try:
-            games.seset41 = sgo.load(data=data)
-        except Exception:   # noqa: BLE001 - the classic reader refuses 4.1's form: convert it first
-            games.seset41 = sgo.load(data=legacy_sgo.convert(data))
-    return games.seset41
 
 
 def robo_events(cas: bytes, mab: bytes) -> list:
@@ -1511,8 +1520,8 @@ def robo_fix(games: Games, files: dict[str, bytes]) -> None:
     - CAS: main gets `default` (EventAnimationObject's constructor plays it; 4.1's class starts in ship) as an alias of
       ship; the root bone's tracks of the moving clips dropped (robo_motion);
     - edf41_robo_events (robo_events), edf41_robo_motion (robo_motion); material_animation dropped (below);
-    - edf41_se: [[4.1 SEPRESET name, cue, volume, pitch], ...] for every name the object plays (se_table, ragdoll_contact,
-      the MAB's se events, ROBO_CLASS_SE): EDF6's SEPRESET has none of 4.1's robot names (EDF6 ships the bank,
+    - edf41_se: [[4.1 SEPRESET name, cue, volume, pitch, inner, reference, cull], ...] for every name the object plays (se_table, ragdoll_contact,
+      the MAB's se events, ROBO_CLASS_SE; se41_table's form, all of 4.1's ロボ* entries): EDF6's SEPRESET has none of 4.1's robot names (EDF6 ships the bank,
       TIKYUU4_EN_UFOROBO.ACB, with every en_Robo_* cue, but no preset naming them), so the plugin plays the cues by name
       with 4.1's volume and pitch; check_sounds holds each cue to the banks the object loads."""
     rel = 'OBJECT/' + ROBO_ROOT
@@ -1529,24 +1538,20 @@ def robo_fix(games: Games, files: dict[str, bytes]) -> None:
     members['edf41_robo_motion'], moved = robo_motion(cas)
     cas = cas_pose.strip_bone(cas, moved, ROBO_ROOT_BONE)
     files[cas_rel] = cas_graft.alias_states(cas, {'main': [('default', 'ship')]})
-    seset = sepreset41(games)
+    table = se41_table(games, ROBO_SE_PREFIXES)
     names = list(strings(members.get('se_table'))) + [members['ragdoll_contact'][0]] + list(ROBO_CLASS_SE)
     names += [e[2] for _s, _n, keys in members['edf41_robo_events'] for e in keys if e[1] == ROBO_EVENTS['se']]
-    table = []
-    for n in dict.fromkeys(names):
-        p = seset.get(n)
-        if not (isinstance(p, list) and len(p) >= 3 and isinstance(p[0], str)):
-            raise ValueError(f'{rel}: sound {n!r} is not in EDF4.1\'s SEPRESET.SGO')
-        table.append([n, p[0], float(p[1].value if isinstance(p[1], sgo.Float) else p[1]),
-                      float(p[2].value if isinstance(p[2], sgo.Float) else p[2])])
-    if len(table) > ROBO_MOST_SE:
-        raise ValueError(f'{rel}: {len(table)} sounds, the plugin takes {ROBO_MOST_SE}')
-    members['edf41_se'] = table
+    missing = sorted(set(names) - {e[0] for e in table})
+    if missing:
+        raise ValueError(f'{rel}: sounds {missing} are not in EDF4.1\'s SEPRESET.SGO')
+    # only what the robot plays: 4.1 also has ロボ３６０停止 (en_Robo_fire360_shotStop), which no MAB event or code plays and
+    # EDF6's bank lacks (check_sounds holds every edf41_se cue to the loaded banks)
+    members['edf41_se'] = [e for e in table if e[0] in set(names)]
     files[rel] = sgo.write_depth_first(version, members)
 
 
 ROOTS[ROBO_ROOT] = 2   # M007 M411 (DLC pack 1's M415 / M416 and pack 2's M010 name the same story file)
-NATIVE_ROOT_FIXES: dict[str, Callable[['Games', dict[str, bytes]], None]] = {ROBO_ROOT: robo_fix}
+NATIVE_FIXES[ROBO_ROOT] = robo_fix   # no alias: build() runs it on the converted closure before the checks
 
 def alias(games: Games, root: str, files: dict[str, bytes], a: Alias) -> None:
     """In `files` (the converted closure of OBJECT/`root`): its SGO under class a.cls with a.template's keys it
@@ -2565,16 +2570,16 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
             try:
                 alias(games, root, out, ALIASES[root])
                 if root in NATIVE_FIXES:
-                    NATIVE_FIXES[root](out)
+                    NATIVE_FIXES[root](games, out)
             except ValueError as e:
                 why.append(f'alias {ALIASES[root].cls}: {e}')
         if not why and root in PATCHES:
             version, members = sgo.read(out[rel])
             PATCHES[root](members)
             out[rel] = sgo.write_depth_first(version, members)
-        if not why and root in NATIVE_ROOT_FIXES:
+        if not why and root in NATIVE_FIXES and root not in ALIASES:   # a native class without an alias (UfoRobo)
             try:
-                NATIVE_ROOT_FIXES[root](games, out)
+                NATIVE_FIXES[root](games, out)
             except ValueError as e:
                 why.append(f'native class: {e}')
         if not why and root not in ALIASES:

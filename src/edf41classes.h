@@ -49,9 +49,8 @@ extern const std::uint32_t kEaoSlots[45];
 extern const std::uint32_t kCarrierSlots[49];
 
 // ---- object fields (GameObjectBase) ------------------------------------------------------------------------------
-// max durability is +0x2F4 (ApplyDamage clamps to [+0x2F0, +0x2F4], 0x548162; +0x2FC is an int set to 0: PRIMITIVES.md)
 constexpr std::size_t kMatrixAt=0x60,kPosAt=0x90,kSgoAt=0xA0,kFlagsAt=0x18,kDestroyedAt=0x2E8,kDurabilityAt=0x2F8,
-                      kMaxDurabilityAt=0x2F4,kTeamAt=0x314,kWeakSelfAt=0x28;
+                      kMaxDurabilityAt=0x2F4,kBaseDurabilityAt=0x2EC,kTeamAt=0x314,kWeakSelfAt=0x28;
 constexpr std::uint32_t kMsgDamage=0xF0000000u,kMsgAction=0x1000000Du,kMsgParts=0x10000017u,kMsgGenerator=0x20100u;
 
 // ---- SGO --------------------------------------------------------------------------------------------------------
@@ -103,67 +102,92 @@ bool Fire(void* owner,const float* matrix,const Bullet& b) noexcept;
 // The position of the nearest live player human to `from` (offline: the local one); false when none is seen.
 bool NearestPlayer(const float* from,float* out) noexcept;
 
-// ---- CAS player (EventAnimationObject / UfoCarrier508 layout: players *(object+0x8F0+0x60), 0x160 each, index [+0xC80]) --
-// The main player's state index of `state` (0x11664F0(cas, player, name, 1)); -1 when the CAS has none.
-int StateIndex(void* object,const wchar_t* state) noexcept;
-// The main player now: its state index (+0x104), clip time (+0xE8) and clip length (+0xF0); false when unreadable.
-bool ClipNow(const void* object,int* state,float* time,float* length) noexcept;
-// Play state index `state` on the main player (0x116BFC0(cas, player, state, 0); false for a state the player lacks).
-bool PlayStateIndex(void* object,int state) noexcept;
+// ---- EDF6 primitives (docs/edf41-classes.md section 2, read from EDF.dll; H unless noted) -----------------------------------
+// Object bases: EventAnimationObject model +0x5C0, skeleton +0x660, ragdoll +0xAA0; UfoCarrier508 model +0x650, skeleton +0x6F0,
+// ragdoll +0xB60.
+constexpr std::size_t kEaoModel=0x5C0,kEaoSkeleton=0x660,kEaoRagdoll=0xAA0;
+constexpr std::size_t kCarrierModel=0x650,kCarrierSkeleton=0x6F0,kCarrierRagdoll=0xB60;
+constexpr std::size_t kFlags380=0x380,kRawLevelAt=0x498,kLevelAt=0x49C;
+// +0x380 flags: bit 0 no HP loss (EventAnimationObject's ctor sets it), 0x80 never a target, 0x800 invulnerable (slots 16 / 17
+// skipped, only forced damage), 0x2000 not counted as an enemy.
+constexpr std::uint32_t kNoHpLoss=1u,kNotTarget=0x80u,kInvulnerable=0x800u,kNotCounted=0x2000u;
+void SetFlag(void* object,std::uint32_t bits,bool on) noexcept;
 
-// ---- MAB locators ---------------------------------------------------------------------------------------------------
-// A locator of the object's model by name: EDF.dll 0x6BADD0(model holder, &handle, list 0, name) fills {record, bone} and
-// answers whether the name was found (a miss leaves the handle null, which 0x6BB5A0 would dereference: Locate refuses it);
-// 0x6BB5A0(&handle, out) gives its world matrix (the bone's world matrix times the record's offset: DragonSmall's 発射口,
-// edf41dragon.cpp). The holder is the class's model object: EventAnimationObject +0x5C0 (its constructor 0x5B5FB0 builds it
-// with 0x6B8740 and loads animation_model into it with 0x6BB890), DragonSmall +0x630; the MAB is at holder+0x280.
-constexpr std::size_t kEaoModelAt=0x5C0;
-struct Locator { const void* record=nullptr; const void* bone=nullptr; };
-bool Locate(void* object,std::size_t modelAt,const wchar_t* name,Locator* out) noexcept;
-bool LocatorMatrix(const Locator& l,float* out) noexcept;   // row-major, rows x y z position
+// MAB locator: found once by name on a model component (0x6BADD0), evaluated each frame (0x6BB5A0: locator x bone world).
+struct LocatorHandle { const void* entry; void* bone; };
+bool FindLocator(void* model,const wchar_t* name,LocatorHandle* out) noexcept;
+bool LocatorMatrix(const LocatorHandle& h,float* out) noexcept;
+// A bone's world matrix (record +0xB0) by name on a skeleton (model+0xA0); fresh after the stock Update. -1 / false: none.
+int BoneIndex(void* skeleton,const wchar_t* name) noexcept;
+bool BoneMatrix(void* skeleton,int index,float* out) noexcept;
 
-// ---- GameObjectBase services (jobs/14618f05/tmp/re6/PRIMITIVES.md) ------------------------------------------------------
-constexpr std::size_t kLevelAt=0x49C;          // effective level (default 10 = level 1; SetLevel 0x54E740 writes it)
-constexpr std::size_t kObjFlagsAt=0x380;       // bit 0: no HP loss (EventAnimationObject's ctor sets it), 0x80 not a target
-constexpr std::size_t kBaseDurabilityAt=0x2EC; // game_object_durability as read
-bool ObjectLevel(const void* object,float* level) noexcept;
-// UfoCarrier508's level scaling (0x4F6D00): max = 0xD7720(*(EDF+0x20B2890), base x level / 10), current = max.
-bool ScaleDurability(void* object) noexcept;
-// The object's current target (GameObjectBase keeps it, renewed every 60 frames: 0x30C0F0) and its aim point (its first lock
-// point, else its origin); false when it has none.
-bool Target(void* object,float* aim) noexcept;
-// SetTeam 0x54EE70(object, team, register).
-bool SetTeam(void* object,int team,bool reg) noexcept;
-// A lock point of the object (AddLockTarget 0x547A50: the object keeps it in +0x360); its position (+0x10) is the caller's
-// to keep up to date. Null when it could not be made.
-void* AddLockPoint(void* object) noexcept;
-void SetLockPoint(void* lockPoint,const float* pos) noexcept;
+// Team (0x54EE70 SetTeam(obj, team, register)); level (0x54E740 SetLevel(obj, level): raw level x level_adjust -> +0x498,
+// difficulty-scaled -> +0x49C, s = +0x49C / 10) and durability the way UfoCarrier508 sizes itself (0x4F6D00: max =
+// 0xD7720(game status, base x s), written to max and current).
+bool SetTeam(void* object,std::int32_t team,bool registered) noexcept;
+void SetLevel(void* object,float rawLevel) noexcept;
+float LevelS(const void* object) noexcept;                     // +0x49C / 10 (4.1's s)
+void SizeDurability(void* object) noexcept;                    // the carrier's formula on the object's own base durability
+float Difficulty(float x) noexcept;                            // 0xD7720: x times the difficulty / online durability factor
 
-// ---- sounds -----------------------------------------------------------------------------------------------------------
-// A cue by its ACB name (what FireSe does, 0x7B3EA0): a preset (0x7B3200) given the cue the sound system finds by name
-// (0x7AEAE0; every loaded bank, the object's game_sound ones included), volume +0x74 and pitch +0x70, played at `pos` by
-// 0x7B4510. `handle` (16 bytes, zeroed) keeps a loop so it can follow (SoundFollow 0x7A8C20) and stop (SoundStop 0x7A8CD0).
-struct SoundHandle { void* ctrl=nullptr; void* inst=nullptr; };
-bool PlayCue(const wchar_t* cue,const float* pos,float volume,float pitch,SoundHandle* handle=nullptr) noexcept;
-void SoundFollow(SoundHandle& h,const float* pos) noexcept;
-void SoundStop(SoundHandle& h,int fadeFrames) noexcept;
+// The stock target (GameObjectBase::Update retargets every 60 frames: the nearest live hostile registered object), read with
+// 0x30C0F0; its aim point = its first lock point, else its +0x90.
+void* Target(void* object) noexcept;
+bool AimPoint(const void* target,float* out) noexcept;
 
-// ---- effects (EffectGenUtil *(EDF+0x20B2980): visual only, no damage, no sound) --------------------------------------
-void EffectExplosion(const float* pos,const float* dir,float size) noexcept;   // 0x2E5ED0 (the script's Explosion)
-void EffectExplosionBig(const float* pos,const float* dir,float size) noexcept;// 0x2E7A30 (wind, blaze, quake)
-void EffectSmoke(const float* pos,float size) noexcept;                        // 0x2E4D90 ExplosionWind (煙_01)
-void EffectQuake(const float* pos,float strength,float radius) noexcept;       // 0x2E9B30
+// The ragdoll body (index) a damage message hit: the sub-hit nearest the hit centre (GDI +0x78 records of 0x30, body id
+// +0x20), mapped by 0x6EA430; and a body's index by name (0x6EA670). -1: none.
+int HitBody(void* ragdoll,const void* damageInfo) noexcept;
+int RagdollBody(void* ragdoll,const wchar_t* name) noexcept;
+// GDI (the data of 0xF0000000): +0x30 hit centre, +0x50 damage, +0x60 u16 flags (0x40 forced).
+constexpr std::size_t kGdiCentre=0x30,kGdiDamage=0x50,kGdiFlags=0x60;
 
-// ---- damage ----------------------------------------------------------------------------------------------------------
-// Area damage of `owner` (its team, its weak pointer) at `pos`: a GrenadeBullet01 with custom parameter #0 = 1 (it explodes
-// when its life ends, docs/decoy-blast-re.md 1.4) that does not move and lives 1 frame, blast radius `radius`, `damage`.
-bool Blast(void* owner,const float* pos,float radius,float damage) noexcept;
+// Sounds: a raw ACB cue by name (the lookup 0x7AEAE0 over every loaded bank, a SePreset filled as FireSe 0x7B3EA0 does) played
+// once at a point, or kept in `handle` to follow (0x7A8C20) and stop (0x7A8CD0).
+struct SoundHandle { void* control=nullptr; void* instance=nullptr; };
+// The preset's numbers (SePreset +0x74 volume, +0x70 pitch, +0x10 / +0x14 / +0x18 the three distance values; defaults 0x7B3200's).
+struct SeParams { float volume=1.0f,pitch=1.0f,inner=1.0f,reference=1000.0f,cull=4.0f; };
+bool PlayCue(const wchar_t* cue,const float* pos,SoundHandle* handle=nullptr,const SeParams& params=SeParams{}) noexcept;
+// 4.1's sound by its SEPRESET name (母船UFOパネルキャノン ...): EDF6's SEPRESET lacks 4.1's names, so tools/make_edf41_objects.py
+// copies 4.1's entries into the object's SGO key edf41_se ([[name, cue, volume, pitch, a, b, c], ...]); `table` is the object
+// whose SGO holds it (a part plays from its hull's table).
+bool PlaySe(const void* table,const wchar_t* name,const float* pos,SoundHandle* handle=nullptr) noexcept;
+void MoveSound(SoundHandle& handle,const float* pos) noexcept;
+void StopSound(SoundHandle& handle,int fadeFrames=4) noexcept;
 
-// ---- the world ----------------------------------------------------------------------------------------------------
-// The nearest map hit (terrain / buildings: EDF.dll 0x11A7EE0 with the ground collector 0x179CBE8, filter 0x16, as the
-// game's own internal_GetGroundPosition and heli.cpp) on the segment from -> to; false when none.
+// Visual effects (EffectGenUtil *(EDF+0x20B2980); no damage, no sound): 4.1 0x1b16b0 fire burst -> Flame 0x2E7FF0, 0x1b1ba0
+// smoke and fire -> Blazing 0x2E0B70, 0x1b2070 directed explosion -> Explosion 0x2E5ED0, 0x1b2ab0 big -> Explosion_Big 0x2E7A30
+// (the look of each: M).
+void FireBurst(const float* pos,const float* dir,float size) noexcept;
+void Blazing(const float* pos,const float* dir,float size) noexcept;
+void Explosion(const float* pos,const float* dir,float size) noexcept;
+void BigExplosion(const float* pos,const float* dir,float size,float k) noexcept;
+
+// Drop the object's game_object_drop_item once (0x548AE0); for an object that dies outside ApplyDamage.
+void DropItems(void* object) noexcept;
+
+// Replace one more slot of a built clone (slot 16 Accept(obj, GDI*) -> bool: the per-body damage filter; slot 6 OnLevel).
+void SetSlot(Clone& c,int slot,void* fn) noexcept;
+
+// ---- CAS player, the world, lock points, more effects, area damage (added for UfoRobo, src/edf41robo.cpp) ------------------
+// The main player (EventAnimationObject / UfoCarrier508 layout: players *(object+0x8F0+0x60), 0x160 each, index [+0xC80]).
+int StateIndex(void* object,const wchar_t* state) noexcept;                 // 0x11664F0(cas, player, name, 1); -1: none
+bool PlayStateIndex(void* object,int state) noexcept;                       // 0x116BFC0(cas, player, state, 0)
+bool ClipNow(const void* object,int* state,float* time,float* length) noexcept;   // +0x104 state, +0xE8 time, +0xF0 length
+// The nearest map hit (terrain / buildings: 0x11A7EE0 with the ground collector 0x179CBE8, filter 0x16, as heli.cpp) on from -> to.
 bool GroundHit(const float* from,const float* to,float* hit) noexcept;
 // The game's own camera (scene system +0x4D8 slots, wrapper +0x70: edf41mother.cpp GameCamera): eye and unit forward.
 bool CameraNow(float* eye,float* forward) noexcept;
+// A lock point of the object's own (AddLockTarget 0x547A50(object): the object keeps it in its list +0x360; the lock search
+// takes it while the object is hostile). EventAnimationObject registers none; the caller keeps its position (+0x10) current.
+void* AddLockPoint(void* object) noexcept;
+void SetLockPoint(void* lockPoint,const float* pos) noexcept;
+// More EffectGenUtil effects: ExplosionWind 0x2E4D90 (煙_01: dust / smoke), the camera quake 0x2E9B30(egu, pos, strength, radius, 1).
+void Smoke(const float* pos,float size) noexcept;
+void Quake(const float* pos,float strength,float radius) noexcept;
+// Area damage of `owner` (its team and weak pointer) at `pos`: a GrenadeBullet01 with custom parameter #0 = 1 (it explodes when
+// its life ends, docs/decoy-blast-re.md 1.4), still, 1 frame of life, blast radius `radius` (InitParam +0xB0), `damage`. Its
+// explosion is drawn too.
+bool Blast(void* owner,const float* pos,float radius,float damage) noexcept;
 
 }  // namespace crew::edf41c

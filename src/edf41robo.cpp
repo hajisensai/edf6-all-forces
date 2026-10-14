@@ -54,7 +54,6 @@ Clone roboClass{"EventAnimationObject",kEaoVtable,kSlots,kEaoSlots,{},{},{}};
 
 constexpr float kPi=3.14159265f;
 constexpr int kMostEvents=24;          // per clip (tools/make_edf41_objects.py ROBO_MOST_EVENTS)
-constexpr int kMostSe=64;              // ROBO_MOST_SE
 constexpr int kMostMotionKeys=512;     // ROBO_MOST_MOTION_KEYS
 
 // ---- once-per-kind log ------------------------------------------------------------------------------------------
@@ -68,6 +67,8 @@ void Fail(const char* what) noexcept {
     if(count<48)said[count++]=what;
     Log("EDF41ROBO check failed: %s",what);
 }
+
+void* Model(void* object) noexcept { return static_cast<char*>(object)+kEaoModel; }
 
 // ---- small vector helpers ---------------------------------------------------------------------------------------
 float Len3(const float* v) noexcept { return std::sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]); }
@@ -95,14 +96,13 @@ enum EventKind : int { kEvSe=0, kEvSeStop=1, kEvHit=2, kEvBeamStart=3, kEvBeamEn
 struct Event { float t; int kind; std::wstring text; float a,b,c; };
 struct ClipEvents { std::wstring state; int stateIndex=-1; int clip=0; std::vector<Event> events; };
 struct Motion { std::wstring state; int stateIndex=-1; float length=0.0f; std::vector<float> keys; };   // x z yaw per key
-struct Se { std::wstring name,cue; float volume=1.0f,pitch=1.0f; };
 struct AttackEntry { std::wstring state; int stateIndex=-1; float dmin,dmax,amin,amax; };
 
 // ---- the four gun groups (4.1 0x27AE00 / 0x27B0A0) --------------------------------------------------------------
 enum GunState : int { kG0=0, kG1=1, kG2=2 };
 enum GunGroup : int { kSmall=0, kMiddle=1, kLarge=2, kGenocide=3 };
 const char* const kGunNames[4]={"small","middle","large","genocide"};
-struct Muzzle { std::wstring locator,aimBone; Locator loc; bool found=false; };
+struct Muzzle { std::wstring locator,aimBone; LocatorHandle loc{}; bool found=false; };
 struct Gun {
     Muzzle muzzle[2];
     int muzzles=0;
@@ -143,12 +143,11 @@ struct Robo {
     // the data
     std::vector<ClipEvents> clipEvents;
     std::vector<Motion> motions;
-    std::vector<Se> se;
     std::vector<AttackEntry> attacks;
     int stShip=-1,stTransform=-1,stStand=-1,stFall=-1,stFallLand=-1,stDead=-1;
     int stWalkF[5]={-1,-1,-1,-1,-1},stWalkB[5]={-1,-1,-1,-1,-1};   // nl lr rl ln rn
     int stSideL=-1,stSideR=-1,stTurnL[3]={-1,-1,-1},stTurnR[3]={-1,-1,-1};
-    Locator footL,footR,lockOn;
+    LocatorHandle footL{},footR{},lockOn{};
     void* lockPoint=nullptr;     // the lock point the plugin keeps on ロックオン (EventAnimationObject has none)
     SoundHandle drive;           // se_table[0], the drive hum, from birth (4.1 +0x1560)
     bool driveOn=false;
@@ -207,21 +206,9 @@ int RandInt(Robo& r,int n) noexcept { return n<=0 ? 0 : static_cast<int>(Random0
 float Rand(Robo& r) noexcept { return Random01(r.rng); }
 
 // ---- sounds ---------------------------------------------------------------------------------------------------------
-const Se* SeOf(const Robo& r,const wchar_t* name) noexcept {
-    for(const Se& e:r.se)
-        if(e.name==name)return &e;
-    return nullptr;
-}
+// 4.1's sound by its SEPRESET name, from the object's edf41_se (edf41classes.h PlaySe).
 void PlaySe(Robo& r,const wchar_t* name,const float* at) noexcept {
-    const Se* e=name ? SeOf(r,name) : nullptr;
-    if(!e) {
-        if(name && *name)Fail("a sound the object's edf41_se does not name");
-        return;
-    }
-    if(!PlayCue(e->cue.c_str(),at,e->volume,e->pitch) && r.logged<400) {
-        ++r.logged;
-        Log("EDF41ROBO %p sound %ls (cue %ls) not played",r.obj,e->name.c_str(),e->cue.c_str());
-    }
+    if(name && *name)edf41c::PlaySe(r.obj,name,at,nullptr);
 }
 
 // ---- reading the SGO ------------------------------------------------------------------------------------------------
@@ -271,17 +258,6 @@ bool ReadData(Robo& r) noexcept {
         m.stateIndex=StateIndex(o,m.state.c_str());
         r.motions.push_back(std::move(m));
     }
-    // edf41_se: [[name, cue, volume, pitch], ...]
-    const SgoNode* se=Key(o,L"edf41_se");
-    if(Count(se)>kMostSe)return false;
-    for(int i=0;i<Count(se);++i) {
-        const SgoNode* e=Child(se,i);
-        Se s;
-        s.name=TextOf(Child(e,0));
-        s.cue=TextOf(Child(e,1));
-        if(s.name.empty() || s.cue.empty() || !Float(Child(e,2),&s.volume) || !Float(Child(e,3),&s.pitch))return false;
-        r.se.push_back(std::move(s));
-    }
     // robo_attack_table: [[[state], [dmin, dmax], [amin, amax]], ...]
     const SgoNode* at=Key(o,L"robo_attack_table");
     for(int i=0;i<Count(at);++i) {
@@ -294,7 +270,7 @@ bool ReadData(Robo& r) noexcept {
         a.stateIndex=StateIndex(o,a.state.c_str());
         r.attacks.push_back(a);
     }
-    if(r.clipEvents.empty() || r.motions.empty() || r.se.empty() || r.attacks.empty())return false;
+    if(r.clipEvents.empty() || r.motions.empty() || r.attacks.empty() || !Key(o,L"edf41_se"))return false;
     // CAS states (4.1 0x2732B0)
     r.stShip=StateIndex(o,L"ship"); r.stTransform=StateIndex(o,L"transform"); r.stStand=StateIndex(o,L"stand");
     r.stFall=StateIndex(o,L"fall"); r.stFallLand=StateIndex(o,L"fall_land"); r.stDead=StateIndex(o,L"dead");
@@ -317,7 +293,7 @@ bool ReadMuzzles(Robo& r,Gun& g,const wchar_t* key) noexcept {
         z.locator=TextOf(Child(Child(m,i),0));
         z.aimBone=TextOf(Child(Child(m,i),1));
         if(z.locator.empty())return false;
-        z.found=Locate(r.obj,kEaoModelAt,z.locator.c_str(),&z.loc);
+        z.found=FindLocator(Model(r.obj),z.locator.c_str(),&z.loc);
         if(!z.found)Log("EDF41ROBO %p muzzle %ls of %ls: no such locator",r.obj,z.locator.c_str(),key);
         ++g.muzzles;
     }
@@ -334,8 +310,7 @@ bool ReadBullet(Robo& r,Gun& g,const wchar_t* cls,const wchar_t* custom) noexcep
 
 // ---- level and the bullets' numbers (4.1 0x2744B0 / 0x2790F0) ------------------------------------------------------
 void SetLevel(Robo& r) noexcept {
-    float level=0.0f;
-    r.level=ObjectLevel(r.obj,&level) && level>0.0f ? level : 10.0f;
+    r.level=LevelS(r.obj)*10.0f;   // GameObjectBase +0x49C (SetLevel's difficulty-scaled level; 10 = level 1)
     if(Cfg().edf41RoboLevel>0.0f)r.level=Cfg().edf41RoboLevel;
     r.s=r.level/10.0f;
     const float s=r.s;
@@ -602,7 +577,7 @@ void BodyEnter(Robo& r,int s) noexcept {
     case kS11: {
         r.flags=1;
         const float up[3]={0.0f,1.0f,0.0f};
-        EffectExplosionBig(r.pos,up,2.0f);   // 4.1 0x1B2AB0 at the ragdoll's first body, size 2
+        BigExplosion(r.pos,up,2.0f,1.0f);   // 4.1 0x1B2AB0 at the ragdoll's first body, size 2
         PlaySe(r,L"ロボ死亡",r.pos);
         break;
     }
@@ -810,7 +785,7 @@ void AiTick(Robo& r) noexcept {
     float p[3];
     // GameObjectBase's target (the nearest hostile registered object, renewed every 60 frames: 4.1's base does the same at
     // 0x28D7F4), aimed at its first lock point; the player when the object has none yet.
-    r.haveTarget=Target(r.obj,p) || NearestPlayer(r.pos,p);
+    r.haveTarget=AimPoint(Target(r.obj),p) || NearestPlayer(r.pos,p);
     if(r.haveTarget)std::memcpy(r.target,p,12);
     switch(r.ai) {
     case kA0:
@@ -918,13 +893,13 @@ void RaiseEvent(Robo& r,const Event& e) noexcept {
     case kEvSeStop:
         break;   // 4.1 stops the channel's loop (ロボ３６０発射); the cues the plugin plays are one-shots
     case kEvHit: {   // 4.1 0x277790: damage x s at the locator, radius scale x the locator's size
-        Locator l;
+        LocatorHandle l{};
         float m[16];
-        if(!Locate(r.obj,kEaoModelAt,e.text.c_str(),&l) || !LocatorMatrix(l,m)) { Fail("an attack range locator is missing"); break; }
+        if(!FindLocator(Model(r.obj),e.text.c_str(),&l) || !LocatorMatrix(l,m)) { Fail("an attack range locator is missing"); break; }
         const float size=(std::max)(Len3(m),1.0f);
         const float radius=e.b*size,damage=e.a*r.s;
-        EffectQuake(m+12,e.c,radius*10.0f);            // 4.1 0x5689F0 (message 0x80000018), quake default 0.2
-        EffectSmoke(m+12,e.b*size*0.7f);               // 4.1 0x1B7140, the dust: scale x size x 0.7
+        Quake(m+12,e.c,radius*10.0f);            // 4.1 0x5689F0 (message 0x80000018), quake default 0.2
+        Smoke(m+12,e.b*size*0.7f);               // 4.1 0x1B7140, the dust: scale x size x 0.7
         // The damage: a still grenade blast (Blast). Its explosion is drawn too, so it goes off only when the target is within
         // reach of the circle; 4.1's area damage (0x28B930) draws nothing.
         const float d[3]={r.target[0]-m[12],r.target[1]-m[13],r.target[2]-m[14]};
@@ -987,12 +962,12 @@ bool Setup(Robo& r) noexcept {
         && ReadBullet(r,sm,L"small_bullet_class",L"small_bullet_custom_param") && ReadBullet(r,md,L"cannon_bullet_class",L"cannon_bullet_custom_param")
         && ReadBullet(r,lg,L"cannon_bullet_class",L"cannon_bullet_custom_param") && ReadBullet(r,gn,L"genocide_bullet_class",L"genocide_bullet_custom_param");
     if(!guns) { Log("EDF41ROBO %p: the gun keys are not what 4.1's SGO has: left as it is",r.obj); return false; }
-    Locate(r.obj,kEaoModelAt,L"左足歩行衝撃",&r.footL);
-    Locate(r.obj,kEaoModelAt,L"右足歩行衝撃",&r.footR);
-    Locate(r.obj,kEaoModelAt,L"ロックオン",&r.lockOn);
+    FindLocator(Model(r.obj),L"左足歩行衝撃",&r.footL);
+    FindLocator(Model(r.obj),L"右足歩行衝撃",&r.footR);
+    FindLocator(Model(r.obj),L"ロックオン",&r.lockOn);
     SetLevel(r);
     r.lockPoint=AddLockPoint(r.obj);
-    if(const Se* d=SeOf(r,L"ロボ駆動音"))r.driveOn=PlayCue(d->cue.c_str(),r.pos,d->volume,d->pitch,&r.drive);
+    r.driveOn=edf41c::PlaySe(r.obj,L"ロボ駆動音",r.pos,&r.drive);   // se_table[0], looped (its cue loops)
     Reroll(r);
     RerollSide(r);
     BodyEnter(r,kS0);
@@ -1001,8 +976,8 @@ bool Setup(Robo& r) noexcept {
     std::int32_t team=0;
     if(Readable(o+kTeamAt,4))std::memcpy(&team,o+kTeamAt,4);
     Log("EDF41ROBO %p set up: pos %.0f %.0f %.0f yaw %.2f scale %.2f level %.2f (s %.2f) durability %.0f team %d lock point %p drive %d; %zu event clips, %zu motions, %zu sounds, %zu attacks; muzzles %d/%d/%d/%d feet %d/%d",
-        r.obj,r.pos[0],r.pos[1],r.pos[2],r.yaw,r.scale,r.level,r.s,durability,team,r.lockPoint,r.driveOn ? 1 : 0,r.clipEvents.size(),r.motions.size(),r.se.size(),
-        r.attacks.size(),sm.muzzles,md.muzzles,lg.muzzles,gn.muzzles,r.footL.record ? 1 : 0,r.footR.record ? 1 : 0);
+        r.obj,r.pos[0],r.pos[1],r.pos[2],r.yaw,r.scale,r.level,r.s,durability,team,r.lockPoint,r.driveOn ? 1 : 0,r.clipEvents.size(),r.motions.size(),static_cast<std::size_t>(Count(Key(r.obj,L"edf41_se"))),
+        r.attacks.size(),sm.muzzles,md.muzzles,lg.muzzles,gn.muzzles,r.footL.entry ? 1 : 0,r.footR.entry ? 1 : 0);
     return true;
 }
 
@@ -1040,9 +1015,9 @@ void Tick(Robo& r) noexcept {
             Log("EDF41ROBO %p destroyed (%s form) at its frame %u",r.obj,r.form ? "robot" : "ship",r.ticks);
             PlaySe(r,r.form ? L"ロボ死亡" : L"ロボ飛行形態死亡",r.pos);
             const float back[3]={-std::sin(r.yaw),0.0f,-std::cos(r.yaw)},up[3]={0.0f,1.0f,0.0f};
-            if(r.form)EffectExplosion(r.pos,up,2.0f*r.s);      // 4.1 0x1B2070 at a hit point
-            else EffectExplosionBig(r.pos,back,2.0f);          // 4.1: towards -forward, size 2
-            SoundStop(r.drive,60);
+            if(r.form)Explosion(r.pos,up,2.0f*r.s);      // 4.1 0x1B2070 at a hit point
+            else BigExplosion(r.pos,back,2.0f,0.75f);          // 4.1: towards -forward, size 2
+            StopSound(r.drive,60);
             BodySet(r,kS10);
         }
     }
@@ -1052,7 +1027,7 @@ void Tick(Robo& r) noexcept {
     Move(r);
     for(int g=0;g<4;++g)GunTick(r,r.gun[g],g);
     WriteMatrix(r);
-    SoundFollow(r.drive,r.pos);
+    MoveSound(r.drive,r.pos);
     if(r.ticks%600==0) {
         float durability=0.0f;
         const char* o=static_cast<const char*>(r.obj);
@@ -1068,7 +1043,7 @@ std::uint64_t __fastcall DtorWrap(void* self,unsigned flags) {
     {
         std::lock_guard<std::mutex> hold(lock);
         auto it=robos.find(self);
-        if(it!=robos.end()) { SoundStop(it->second.drive,1); robos.erase(it); }
+        if(it!=robos.end()) { StopSound(it->second.drive,1); robos.erase(it); }
     }
     Log("EDF41ROBO destructor %p",self);
     return reinterpret_cast<DtorFn>(roboClass.orig[kSlotDtor])(self,flags);
@@ -1096,7 +1071,7 @@ std::uint64_t __fastcall UpdateWrap(void* self,void* dt) {
             Events(r);
             WriteMatrix(r);
             float m[16];
-            if(r.lockPoint && r.lockOn.record && LocatorMatrix(r.lockOn,m))SetLockPoint(r.lockPoint,m+12);   // the class's update leaves the matrix alone; keep ours for the next frame's draw
+            if(r.lockPoint && r.lockOn.entry && LocatorMatrix(r.lockOn,m))SetLockPoint(r.lockPoint,m+12);   // the class's update leaves the matrix alone; keep ours for the next frame's draw
         }
     }
     return result;
@@ -1143,10 +1118,10 @@ using OnLevelFn=bool(__fastcall*)(void*);
 bool __fastcall OnLevelWrap(void* self) {
     const bool r=reinterpret_cast<OnLevelFn>(roboClass.orig[kSlotOnLevel])(self);
     float level=0.0f,max=0.0f;
-    const bool ok=ScaleDurability(self);
-    ObjectLevel(self,&level);
+    SizeDurability(self);
+    level=LevelS(self)*10.0f;
     if(Readable(static_cast<char*>(self)+kMaxDurabilityAt,4))std::memcpy(&max,static_cast<char*>(self)+kMaxDurabilityAt,4);
-    Log("EDF41ROBO %p level %.2f: durability %s %.0f",self,level,ok ? "scaled to" : "NOT scaled, stays",max);
+    Log("EDF41ROBO %p level %.2f: durability sized to %.0f (UfoCarrier508's formula)",self,level,max);
     return r;
 }
 
@@ -1154,8 +1129,7 @@ void CreateRobo(void* info) noexcept {
     void* obj=CloneObject(roboClass,kEaoCtor,kEaoSize,info);
     if(!obj)return;
     // EventAnimationObject's constructor sets +0x380 bit 0 (0x5B6406: hits take no HP); 4.1's robot loses its durability.
-    char* o=static_cast<char*>(obj);
-    if(Readable(o+kObjFlagsAt,4))*reinterpret_cast<std::uint32_t*>(o+kObjFlagsAt)&=~1u;
+    SetFlag(obj,kNoHpLoss,false);
     {
         std::lock_guard<std::mutex> hold(lock);
         Robo& r=robos[obj];
@@ -1175,7 +1149,7 @@ bool InstallEdf41Robo() noexcept {
         Log("EDF41ROBO the vtable clone could not be built: off");
         return false;
     }
-    roboClass.block[1+kSlotOnLevel]=reinterpret_cast<void*>(&OnLevelWrap);
+    SetSlot(roboClass,kSlotOnLevel,reinterpret_cast<void*>(&OnLevelWrap));
     const bool ok=AddFactory(L"UfoRobo",&CreateRobo);
     Log("EDF41ROBO on: UfoRobo %s",ok ? "queued for the game's registration" : "NOT registered");
     return ok;
