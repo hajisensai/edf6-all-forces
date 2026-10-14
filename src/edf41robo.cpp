@@ -196,6 +196,7 @@ struct Robo {
     // dev
     bool placed=false,forcedTransform=false;
     int logged=0;
+    std::uint32_t events=0,hits=0,blasts=0;   // MAB events raised, 攻撃判定 among them, blasts let off
 };
 
 std::mutex lock;
@@ -614,33 +615,32 @@ void BodyTick(Robo& r) noexcept {
     case kS4: if(r.bodyFrames>2 && ClipEnded(r))BodySet(r,kS5); break;
     case kS5: if(r.landed)BodySet(r,kS6); break;
     case kS6: if(r.bodyFrames>2 && ClipEnded(r))BodySet(r,kS7); break;
-    case kS7: {
+    case kS7: {   // 4.1 0x278810
+        // the move: 0 none (|x| and |z| under 0.5), 1 / 2 sideways (x >= 0 / x < 0), 3 / 4 forward / back (z >= 0 / z < 0)
         const float ax=std::fabs(r.cmdX),az=std::fabs(r.cmdZ);
-        const bool move=ax>=0.5f || az>=0.5f;
-        const bool side=move && ax>az;
-        const bool fwd=move && !side && r.cmdZ>0.0f,back=move && !side && r.cmdZ<0.0f;
+        const int mv=(ax<0.5f && az<0.5f) ? 0 : ax>az ? (r.cmdX<0.0f ? 2 : 1) : (r.cmdZ<0.0f ? 4 : 3);
         const int phase=FootPhase(r);
-        if(phase==0) {
-            if(fwd) { Step(r,r.stWalkF[0],0); break; }
-            if(back) { Step(r,r.stWalkB[0],1); break; }
-            if(side) { Step(r,r.cmdX>0.0f ? r.stSideL : r.stSideR,r.chain); break; }
-            if(r.turn) {
-                const int k=(std::min)(3,std::abs(r.turn))-1;
-                Step(r,r.turn>0 ? r.stTurnL[k] : r.stTurnR[k],r.chain);
-                break;
-            }
-            if(r.cmdAttack>=0 && r.cmdAttack<static_cast<int>(r.attacks.size())) {
-                r.pendingState=r.attacks[static_cast<std::size_t>(r.cmdAttack)].stateIndex;
-                BodySet(r,kS9);
-            }
+        if(phase==1 || phase==2) {   // a foot ahead: carry on (lr / rl) or bring it back (ln / rn); +0x328 the backward chain
+            const int on=phase==1 ? 1 : 2,home=phase==1 ? 3 : 4;
+            if(mv==3 && r.chain==0)Step(r,r.stWalkF[on],0);
+            else if(mv==4 && r.chain==1)Step(r,r.stWalkB[on],1);
+            else if(r.chain==0)Step(r,r.stWalkF[home],0);
+            else Step(r,r.stWalkB[home],1);
             break;
         }
-        // a foot ahead: carry on (lr / rl) or bring it back (ln / rn)
-        const int on=phase==1 ? 1 : 2,home=phase==1 ? 3 : 4;
-        if(fwd && r.chain==0)Step(r,r.stWalkF[on],0);
-        else if(back && r.chain==1)Step(r,r.stWalkB[on],1);
-        else if(r.chain==1)Step(r,r.stWalkB[home],0);
-        else Step(r,r.stWalkF[home],0);
+        // feet together: the move's first step, then a turn replaces it, else an attack does (the same frame, in this order)
+        if(mv==3)Step(r,r.stWalkF[0],0);
+        else if(mv==4)Step(r,r.stWalkB[0],1);
+        else if(mv==1)Step(r,r.stSideL,0);
+        else if(mv==2)Step(r,r.stSideR,0);
+        if(r.turn) {
+            const int k=(std::min)(3,std::abs(r.turn))-1;
+            if(r.body==kS8)r.body=kS7;   // the step just chosen is replaced
+            Step(r,r.turn>0 ? r.stTurnL[k] : r.stTurnR[k],0);
+        } else if(r.cmdAttack>=0 && r.cmdAttack<static_cast<int>(r.attacks.size())) {
+            r.pendingState=r.attacks[static_cast<std::size_t>(r.cmdAttack)].stateIndex;
+            BodySet(r,kS9);
+        }
         break;
     }
     case kS8:
@@ -895,6 +895,7 @@ void WriteMatrix(Robo& r) noexcept {
 
 // ---- the clips' MAB events -------------------------------------------------------------------------------------------
 void RaiseEvent(Robo& r,const Event& e) noexcept {
+    ++r.events;
     switch(e.kind) {
     case kEvSe:
         PlaySe(r,e.text.c_str(),r.pos);
@@ -912,8 +913,9 @@ void RaiseEvent(Robo& r,const Event& e) noexcept {
         // The damage: a still grenade blast (Blast). Its explosion is drawn too, so it goes off only when the target is within
         // reach of the circle; 4.1's area damage (0x28B930) draws nothing.
         const float d[3]={r.target[0]-m[12],r.target[1]-m[13],r.target[2]-m[14]};
-        if(r.haveTarget && Len3(d)<=radius+10.0f)Blast(r.obj,m+12,radius,damage);
-        if(r.logged<400) { ++r.logged; Log("EDF41ROBO %p hit %ls at %.0f %.0f %.0f radius %.1f damage %.1f",r.obj,e.text.c_str(),m[12],m[13],m[14],radius,damage); }
+        const bool inReach=r.haveTarget && Len3(d)<=radius+10.0f;
+        if(inReach && Blast(r.obj,m+12,radius,damage))++r.blasts;
+        if(++r.hits<=24) { Log("EDF41ROBO %p hit %ls at %.0f %.0f %.0f radius %.1f damage %.1f%s",r.obj,e.text.c_str(),m[12],m[13],m[14],radius,damage,inReach ? " (blast: the target is within reach)" : ""); }
         break;
     }
     case kEvBeamStart: {   // 4.1 0x277C10: the hand guns fire until 砲撃終了
@@ -1052,10 +1054,10 @@ void Tick(Robo& r) noexcept {
         float durability=0.0f;
         const char* o=static_cast<const char*>(r.obj);
         if(Readable(o+kDurabilityAt,4))std::memcpy(&durability,o+kDurabilityAt,4);
-        Log("EDF41ROBO %p frame %u: %s / %s, form %d, pos %.0f %.0f %.0f yaw %.2f, target %s %.0f m, durability %.0f, guns %d%d%d%d rounds %u/%u/%u/%u",
+        Log("EDF41ROBO %p frame %u: %s / %s, form %d, pos %.0f %.0f %.0f yaw %.2f, target %s %.0f m, durability %.0f, guns %d%d%d%d rounds %u/%u/%u/%u, MAB events %u (hits %u, blasts %u)",
             r.obj,r.ticks,kBodyNames[r.body],kAiNames[r.ai],r.form,r.pos[0],r.pos[1],r.pos[2],r.yaw,r.haveTarget ? "seen" : "none",
             r.haveTarget ? TargetDistance(r) : 0.0f,durability,r.gun[0].state,r.gun[1].state,r.gun[2].state,r.gun[3].state,
-            r.gun[0].shots,r.gun[1].shots,r.gun[2].shots,r.gun[3].shots);
+            r.gun[0].shots,r.gun[1].shots,r.gun[2].shots,r.gun[3].shots,r.events,r.hits,r.blasts);
     }
 }
 
