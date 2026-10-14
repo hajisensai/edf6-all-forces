@@ -418,7 +418,7 @@ def build_packs(game: str, campaign: bool, root41: str | None = None,
     campaign is installed to keep; the opt-out (`campaign` False) is the packs rebuilt without it."""
     import make_edf5_campaign
     if campaign:
-        print('生成任务包：测试场，以及可选实验 EDF5 战役（本篇、DLC1、DLC2 三个独立任务包；原始 BVM 脚本尚未逐关验证，缺少资源的 4 关不会安装）……')
+        print('生成任务包：测试场，以及可选实验 EDF5 战役（本篇、DLC1、DLC2 三个独立任务包；原始 BVM 脚本尚未逐关验证；资源装不全的任务不会安装，并说明原因）……')
     else:
         print('生成测试场任务包（EDF5 战役已停用）……')
     try:
@@ -450,6 +450,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     import edf41_objects
     import edf41_maps
     import edf41_sounds
+    import edf5_dlc
     import make_katyusha
     import make_sazabi
     import make_proteus
@@ -541,6 +542,14 @@ def install(game: str, campaign_requested: bool = False) -> None:
     if edf41_objects.dev_enabled():
         print('开发开关：EDF41_MOTHER_DEV=1，已把 edf41port_dev 里的 UfoMother301 原型并入（仅开发用，发布版没有）。')
     edf41_objects.set_dev_flag(game, edf41_objects.dev_enabled())   # ini Edf41MotherDev: 1 only with the variable and the folder
+    # EDF5 Mission Pack 1's two maps and DLC fortress (pre-generated, the members EDF6 ships read from it): what the
+    # campaign plan offered DM015 / DM018 / DM019 / DM020 on (make_edf5_campaign.plan asks edf5_dlc.offered)
+    files5, skipped5 = edf5_dlc.build(game)
+    print('写入 EDF5 任务包１缺的两张地图和要塞（预先生成，不需要装 EDF5；EDF6 已有的部分从 EDF6 读取）……')
+    for group, why in skipped5:
+        print('  跳过', group, why)
+    for path in edf5_dlc.install(game, files5):
+        print('写入', path)
     print('转换 EDF4.1 的任务地图（4.1 本篇任务包要用；从已安装的 EDF4.1 转换，城市地图每张约 3–8 分钟，'
           '山地 / 平原（SK_*）地图每张约 1–2 分钟，已转换且未变的跳过）……' if root41
           else '没有找到 EDF4.1：跳过 4.1 地图（4.1 本篇任务包需要它）。')
@@ -668,6 +677,7 @@ def uninstall(game: str) -> None:
     import edf41_objects
     import edf41_maps
     import edf41_sounds
+    import edf5_dlc
     import make_katyusha
     import make_sazabi
     import make_proteus
@@ -699,7 +709,7 @@ def uninstall(game: str) -> None:
         remove_autoturret(game)
         import menu_preview
         import support_loadout
-        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_maps.remove, edf41_sounds.remove,
+        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_maps.remove, edf41_sounds.remove, edf5_dlc.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:
@@ -800,6 +810,10 @@ def check(game: str) -> bool:
     for k in changed:
         print('  被改过', k)
     ok &= check_range(game)
+    import edf5_dlc   # what of EDF5 Mission Pack 1's content is in (its files are in the ledger count above)
+    print()
+    for line in edf5_dlc.status(game):
+        print(line)
     import make_edf5_campaign
     print()
     ok &= make_edf5_campaign.check(game)
@@ -843,7 +857,7 @@ def manage_campaign(game: str) -> int:
     """Menu 6: explicit experimental campaign opt-in or removal, without uninstalling the plugins."""
     import make_edf5_campaign
     print('EDF5 战役默认开启：普通安装 / 更新会加上 EDF5 本篇、DLC1、DLC2 三个独立任务包（离线模式的「任务包」里选）；手动停用后保留停用选择。')
-    print('原始 BVM 脚本尚未逐关验证，不能保证所有任务可以正常游玩；缺少资源的 4 关不会安装。')
+    print('原始 BVM 脚本尚未逐关验证，不能保证所有任务可以正常游玩；资源装不全的任务不会安装（安装时说明原因）。')
     print('当前状态：' + ('已启用' if make_edf5_campaign.enabled(game) else '未启用'))
     choice = ask('输入 1 启用 / 更新实验战役（同时更新插件），2 停用战役（保留插件），其它 = 取消：')
     if choice == '1':

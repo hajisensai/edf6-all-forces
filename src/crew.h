@@ -322,10 +322,11 @@ struct Config {
     int edf41MotherParts=15;        // development only: which part groups the mothership builds as real objects (bit 1 hatches, 2 covers, 4 cannons, 8 main cannon, 16 panels); 0 = none
     bool edf41MotherDev=false;      // development only: EDF4.1's UfoMother301 prototype (edf41mother.cpp); off in every release
     bool edf41Sound=true;           // EDF4.1's weapon sound effects and voices added to EDF6's banks (edf41sound.cpp), from the game's start
+    bool edf41VoiceProbe=false;     // development only: log each voice key the game looks up in each bank and each caption it finds (edf41sound.cpp)
     bool terrainShare=true;         // every placement of one terrain piece drawn from one decode (fieldshare.cpp), from the game's start
     int edf5CampaignContent=0;       // the EDF5 mission packs' first content id (edf5campaign.cpp; 0 = none installed): owned like a DLC
     int testRangeContent=0;          // the test range mission pack's content id (offline and online modes; 0 = not installed): owned the same way
-    int edf41Content=0;              // the EDF4.1 story pack's content id (offline and online modes; 0 = not installed): owned the same way
+    int edf41Content=0;              // the first of the EDF4.1 packs' content ids (the story; its Mission Pack 1 and 2 are +1, +2; offline and online modes; 0 = not installed): owned the same way
     float bigWorld=0.0f;            // the physics world +-this many m instead of +-3000 (bigworld.cpp), from the game's start;
                                     // 0: stock. At 10000 parked vehicles fell through the ground (2026-10-04): an experiment
     // The flyers' soft edge (airbound.h): the band inside the play edge where the NPC jets and helis turn back.
@@ -496,6 +497,16 @@ bool InstallEdf41Sound() noexcept;
 bool InstallEdf41Ai() noexcept;
 // edf41mother.cpp: UfoMother301 (EDF4.1's mothership), phase 1 prototype, only with ini Edf41MotherDev=1.
 bool InstallEdf41Mother() noexcept;
+// edf41fortress.cpp: the converted EDF4.1 four-legged fortress stands from the start and drops through its core hatch.
+bool InstallEdf41Fortress() noexcept;
+// edf41dragon.cpp: the converted EDF4.1 giant dragon breathes 4.1's flame stream and keeps 4.1's ranges and glide pass.
+bool InstallEdf41Dragon() noexcept;
+// edf41smalldragon.cpp: the DLC's EDF4.1 small dragons' hit reaction drives 4.1's ragdoll bodies (koshi, spine1, spine2), not mune.
+bool InstallEdf41SmallDragon() noexcept;
+// edf41insects.cpp: the DLC's EDF4.1 queen bee and Nephilas: 4.1's needle speed and thread scatter.
+bool InstallEdf41Insects() noexcept;
+// edf41natives.cpp: EDF4.1 script natives EDF6's BVM executor lacks (SetEncountReportRadius as table 1 id 3003).
+bool InstallEdf41Natives() noexcept;
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
 bool InstallMissiles() noexcept;
 // The stock split missiles (MissileBullet02) split short of a big target's surface (splitmissile.cpp).

@@ -501,11 +501,14 @@ class Edf41SkipTests(unittest.TestCase):
         text = {'missions': [{'id': mid, 'files': ['MISSION.BVM'] + (['BEFORE.BVM'] if before else []),
                               'title': {}, 'brief': {}} for mid, (_m, before) in MISSIONS41.items()]}
 
-        def script(mid: str, name: str) -> bytes:
+        def script(mid: str, name: str, data: str = campaign.EDF41) -> bytes:
             mission, before = MISSIONS41[mid]
             return bvm(*(mission if name == 'MISSION.BVM' else before))
 
-        for target, value in (('edf41_text', lambda: text), ('edf41_script', script)):
+        def missions(data: str = campaign.EDF41) -> dict:   # the story's missions; the DLC packs have none here
+            return text if data == campaign.EDF41 else {'missions': []}
+
+        for target, value in (('edf41_text', missions), ('edf41_script', script)):
             started = patch.object(campaign, target, value)
             started.start()
             self.addCleanup(started.stop)

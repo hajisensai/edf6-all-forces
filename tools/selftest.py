@@ -26,6 +26,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import lzma
 import os
 import re
 import shutil
@@ -5453,8 +5454,9 @@ def edf5_campaign_build() -> None:
                 path = r.items[2].split(f'{e5c.SCRIPTS}/', 1)[1]
                 assert f.stored == own[e5c.thumb_name(path).upper()].stored, (pack.tag, path)
             assert dsgo.compact(dsgo.parse(files[listed])) == files[listed]
-    assert counts == {'main': 110, 'dlc1': 11, 'dlc2': 14}, counts
-    assert {x[1] for x in p['skipped'] if x[0] != e5c.PACK41.group} == {'DLC/DM015', 'DLC/DM018', 'DLC/DM019', 'DLC/DM020'}, p['skipped']
+    assert counts == {'main': 110, 'dlc1': 15, 'dlc2': 14}, counts
+    # EDF5 Mission Pack 1's four (maps and fortress pre-generated: tools/edf5_dlc.py) are offered too
+    assert not [x for x in p['skipped'] if x[0] in {pk.group for pk in e5c.PACKS}], p['skipped']
 
 
 @test
@@ -7440,6 +7442,219 @@ def edf41_objects_install() -> None:
             assert {obj for obj, _why in skipped} == users and shared not in files, skipped
 
 
+@test
+def edf41_dlc_objects() -> None:
+    """EDF4.1's DLC objects (make_edf41_objects.DLC_ROOTS: what the two mission packs' listed missions spawn, mp01:/ and
+    mp02:/ in 4.1, under OBJECT/EDF41MP01/ and OBJECT/EDF41MP02/ here, pylib/edf41dlc.py): every root registered under its
+    pack's folder and nothing else there, no shipped file naming a DLC mount (mp0N:/ would resolve to nothing in EDF6), no
+    UfoMother401 object (EDF6 has no class for 4.1's 401 mothership: M809 / MP503 stay unplayable, not faked), and every
+    file a DLC object names is shipped by the registry or (games installed) EDF6's own, with the models it names inside
+    the archive the game will load (DragonSmall401.mrab is EDF5's frog dragon in EDF6: the DLC's dragons ship 4.1's, moved
+    into the pack's folder). With EDF4.1 installed, DLC_ROOTS is what the packs' mission scripts name."""
+    import edf41dlc
+    import rootcpk
+    import edf41_objects as eo
+    import make_edf41_objects as m
+    import mdb
+    import sgo
+    reg = eo.registry()
+    objects = {o['object']: o for o in reg['objects']}
+    folders = {f for _, f in edf41dlc.PACKS.values()}
+    for root in m.DLC_ROOTS:
+        assert root.split('/')[0] in folders, root
+        assert 'OBJECT/' + root in objects, f'DLC root {root} is not registered'
+    pack_objects = {o for o in objects if m.pack_folder(o)}
+    assert pack_objects == {'OBJECT/' + r for r in m.DLC_ROOTS}, sorted(pack_objects ^ {'OBJECT/' + r for r in m.DLC_ROOTS})
+    assert not any('UFOMOTHER401' in rel for rel in reg['files']), 'a 401 mothership file is registered'
+    assert not set(m.DLC_EXCLUDED) & {o.split('/', 1)[1] for o in objects}
+    mount = re.compile(rb'(?i)mp0\d:/|m\x00p\x000\x00\d\x00:\x00/\x00')
+    for rel in reg['files']:
+        assert not mount.search(eo.read(rel)), f'{rel} names a DLC mount'
+    # the references of each DLC object
+    games = m.Games(_edf41_root(), rootcpk.DEFAULT_GAME) if _e5c_have_game() and _edf41_root() else None
+    for root in m.DLC_ROOTS:
+        rel = 'OBJECT/' + root
+        top = sgo.load(data=eo.read(rel))
+        refs = {m.rel_of(s) for s in m.strings(top) if s.lower().startswith('app:/') and os.path.splitext(s)[1]}
+        for r in sorted(refs):
+            if r in reg['files']:
+                assert r in objects[rel]['files'] or r.endswith('.SGO'), f'{rel} names {r}, not among its files'
+                continue
+            assert not m.pack_folder(r), f'{rel} names {r} in a pack folder that is not shipped'
+            if games is None:
+                continue
+            ok = (r in games.have6 or (r.endswith('.ACB') and games.sound(r))
+                  or not games.has4(r))   # a file 4.1 itself lacks (GiantBee_light.mrab ...): the game runs without it
+            assert ok, f'{rel} names {r}: neither shipped nor EDF6\'s'
+        if games is None:
+            continue
+        am = top.get('animation_model')
+        for e in m.model_entries(am[0] if isinstance(am, list) and am else []):
+            r = m.rel_of(e[0])
+            if r in reg['files']:
+                data = eo.read(r)
+            elif r in games.have6:
+                data = games.read6(r)
+            else:
+                assert not games.has4(r), f'{rel}: model archive {r} is nowhere'
+                continue
+            names = {f.name.lower() for f in mdb.rab_read(data).files}
+            want = [e[1]] + [lod[0] for lod in (e[2] if len(e) > 2 and isinstance(e[2], list) else [])]
+            assert all(str(n).lower() in names for n in want), f'{rel}: {r} as the game loads it lacks {want}'
+    if games is None:
+        print('skip  edf41_dlc_objects (real archives): needs EDF6 and EDF4.1 with its DLC installed')
+        return
+    found = m.dlc_mission_roots(games)
+    assert {r: n for r, n in found.items() if r not in m.DLC_EXCLUDED} == m.DLC_ROOTS, found
+    assert set(m.DLC_EXCLUDED) <= set(found), found
+
+
+@test
+def edf41_dlc_insects() -> None:
+    """The DLC's insects and nests on EDF6's classes (make_edf41_objects.DLC_INSECT_PATCHES, NEST_41_KEYS): Nephila02L's
+    thread gravity and spread as 4.1's setup defaults them (3.0, 0.1) where EDF6's would be 0.5, 03L's own four kept;
+    every Nephila and the queen carry the plugin keys src/edf41insects.cpp reads (4.1's random_speed, 4.1's needle base
+    0.4), and only they; ragdoll_contact as EDF6's own copies of these objects; the nests count into AntHillKillCount
+    with 4.1's score. The plugin's key names and constants are the converter's."""
+    import edf41_objects as eo
+    import make_edf41_objects as m
+    import sgo
+    reg = eo.registry()
+    objects = {o['object'] for o in reg['objects']}
+
+    def top(root: str) -> dict:
+        return {k: sgo.plain(v) for k, v in sgo.load(data=eo.read('OBJECT/' + root)).items()}
+
+    assert set(m.DLC_INSECT_PATCHES) <= set(m.DLC_ROOTS) and set(m.DLC_INSECT_PATCHES) <= set(m.PATCHES)
+    by_class: dict[str, list[str]] = {}
+    for root in m.DLC_ROOTS:
+        assert 'OBJECT/' + root in objects, root
+        by_class.setdefault(str(top(root)['xgs_scene_object_class']), []).append(root)
+    # every DLC object of the audited classes is handled (SpiderNet: nothing differs)
+    for cls in ('GiantAnt', 'GiantBee', 'Nephila', 'BigNest'):
+        assert set(by_class[cls]) <= set(m.DLC_INSECT_PATCHES), (cls, by_class[cls])
+    for root in by_class['Nephila']:
+        t = top(root)
+        assert t['edf41_random_speed'] == [0.01], root
+        ap = t['nephila_ex_attack_param']
+        assert len(ap) == 4 and ap[2:] == ([3.0, 0.1] if 'NEPHILA02L' in root else [0.5, 0.025]), (root, ap)
+    for root in by_class['GiantBee']:
+        t = top(root)
+        assert t['insectbase_Type'] == 1 and t['edf41_needle_base'] == [0.4], root
+        assert t['ragdoll_contact'][1] == 8000.0 and t['game_object_ai_route_update_distance'] == 160.0, root
+    for root in by_class['GiantAnt']:
+        want = 12000.0 if 'SB' in root else 8000.0
+        assert top(root)['ragdoll_contact'][1] == want, root
+    for root in by_class['AntHill'] + by_class['BigNest']:
+        t = top(root)
+        assert t['game_object_kill_counter'] == 'AntHillKillCount', root
+        assert t.get('game_object_destroy_score_adjust', 1.0) == 1.0, root
+    # the plugin keys appear on no other shipped object
+    for o in reg['objects']:
+        rel = o['object']
+        if rel.endswith('.SGO') and rel.split('/', 1)[1] not in m.DLC_INSECT_PATCHES:
+            data = eo.read(rel)
+            assert 'edf41_random_speed'.encode('utf-16le') not in data and b'edf41_random_speed' not in data, rel
+            assert 'edf41_needle_base'.encode('utf-16le') not in data and b'edf41_needle_base' not in data, rel
+    with open(os.path.join(ROOT, 'src', 'edf41insects.cpp'), encoding='utf-8') as f:
+        cpp = f.read()
+    assert 'L"edf41_random_speed"' in cpp and 'L"edf41_needle_base"' in cpp
+    assert m.DLC_NEEDLE_BASE == 0.4 and m.DLC_NEPHILA_GRAVITY == 3.0 and m.DLC_NEPHILA_SPREAD == 0.1
+    for site in ('0x422830', '0x41B66B', '0x41EBA0', '0x4E3805', '0x27C362', '0x27C3AF', '0x10D0', '0x1764'):
+        assert site in cpp, site
+    with open(os.path.join(ROOT, 'src', 'plugin.cpp'), encoding='utf-8') as f:
+        assert 'InstallEdf41Insects();' in f.read()
+    with open(os.path.join(ROOT, 'CMakeLists.txt'), encoding='utf-8') as f:
+        assert 'src/edf41insects.cpp' in f.read()
+
+
+@test
+def edf41_class_names() -> None:
+    """make_edf41_objects.check_class_names: an object whose class looks a name up unchecked (CLASS_NAMES: a CAS state or
+    variable, a MAB locator, a ragdoll body, the bone wakeup_node names) has it in its files. DLC M805 2026-10-14: EDF6's
+    DragonSmall hands the ragdoll bodies koshi and mune to 0x4A8570 on a hit and dereferences a miss (EDF+0x6E42EB); 4.1's
+    small-dragon ragdolls have koshi, spine1, spine2, no mune. The DLC's three _HS dragons ship 4.1's own model, CAS, MAB
+    and ragdoll with edf41_ragdoll_bodies = 4.1's own list for that reaction (koshi, spine1, spine2: EDF41.exe 0x1fb06b..
+    0x1fb0eb), which src/edf41smalldragon.cpp hands the class instead (its key name, limits and hooked site agree with the
+    converter's). The shipped DragonSmall objects (DragonBig401 and the three) pass; the same dragon without the key (what
+    crashed), a key naming a body the ragdoll lacks or too many names, a wakeup_node no bone has, a ragdoll body named only
+    as a prefix, and a missing state are refused. capture_* are needed only by an object whose MAB raises 捕食判定開始
+    (DragonBig401's does not: it never bites)."""
+    import edf41_objects as eo
+    import make_edf41_objects as m
+    import sgo
+    assert m.ragdoll_body(b'xRagDollProxys.mune\r\x02', 'mune')          # a 2014 packfile: a tag byte after the name
+    assert m.ragdoll_body(b'RagDollProxys.mune\0RagDo', 'mune')          # EDF6's own: NUL-terminated
+    assert not m.ragdoll_body(b'RagDollProxys.mune2\0', 'mune')          # a longer name is another body
+    assert not m.ragdoll_body(b'RagDollProxys.koshi\0', 'mune')
+    plugin = src('src/edf41smalldragon.cpp')   # the plugin reads the key the converter writes, with the same limits
+    spec = m.CLASS_NAMES['DragonSmall']
+    assert f'L"{spec.bodies_key}"' in plugin, spec.bodies_key
+    assert f'kMostBodies={m.SMALL_DRAGON_MOST_BODIES};' in plugin and f'kLongestName={m.SMALL_DRAGON_LONGEST_BODY};' in plugin
+    assert 'kSite=0x33962C;' in plugin and 'kPartialRagdoll=0x4A8570;' in plugin
+    assert re.search(r'^\s*InstallEdf41SmallDragon\(\);', src('src/plugin.cpp'), re.M), 'the hook is not installed'
+    assert 'src/edf41smalldragon.cpp' in src('CMakeLists.txt')
+    assert 'mune' not in m.SMALL_DRAGON_BODIES and len(m.SMALL_DRAGON_BODIES) <= m.SMALL_DRAGON_MOST_BODIES
+    reg = eo.registry()
+    dragons = [o for o in reg['objects'] if o['class'] == 'DragonSmall']
+    hs = ('OBJECT/EDF41MP01/DRAGONSMALL401_HS.SGO', 'OBJECT/EDF41MP01/REDSMALLDRAGON_HS.SGO',
+          'OBJECT/EDF41MP01/YERROWSMALLDRAGON_HS.SGO')
+    assert {o['object'] for o in dragons} >= {'OBJECT/DRAGONBIG401.SGO', *hs}, dragons
+    models = {hs[0]: 'SmallDragon401Green.mdb', hs[1]: 'RedSmallDragon.mdb', hs[2]: 'YerrowSmallDragon.mdb'}
+    import cas_graft
+    for rel in hs:   # 4.1's look and the plugin's key; the random reactions name states of the CAS shipped with them
+        top = sgo.load(data=eo.read(rel))
+        assert top.get(spec.bodies_key) == list(m.SMALL_DRAGON_BODIES), (rel, top.get(spec.bodies_key))
+        assert m.model_entries(top['animation_model'][0])[0][1] == models[rel], top['animation_model'][0]
+        assert 'smalldragon' in top['ragdoll'][0].lower() and 'frogdragon' not in top['ragdoll'][0].lower(), top['ragdoll']
+        cas = eo.read(m.rel_of(top['animation_model'][1]))
+        reactions = set(m.strings(top['RandomReactionTable']))
+        assert reactions and reactions <= cas_graft.states(cas)['random_reaction'], (rel, reactions)
+    if not _e5c_have_game() or not _edf41_root():
+        print('skip  edf41_class_names (real archives): needs EDF6 and EDF4.1 installed')
+        return
+    import rootcpk
+    games = m.Games(_edf41_root(), rootcpk.DEFAULT_GAME)
+    for o in reg['objects']:     # every shipped object of a class CLASS_NAMES knows
+        if o['object'].endswith('.SGO'):
+            m.check_class_names(games, {r: eo.read(r) for r in o['files']}, o['object'])
+
+    def refused(files: dict[str, bytes], rel: str, why: str) -> None:
+        try:
+            m.check_class_names(games, files, rel)
+        except ValueError as e:
+            assert why in str(e), e
+            return
+        raise AssertionError(f'check_class_names passed {rel} without {why}')
+
+    rel = hs[0]
+    shipped = {r: eo.read(r) for r in next(o for o in reg['objects'] if o['object'] == rel)['files']}
+    assert 'OBJECT/RAGDOLL_SMALLDRAGON401_HAS_HKA.SHKT' in shipped   # 4.1's ragdoll: koshi, spine1, spine2, no mune
+
+    def variant(change: 'Callable[[dict], None]') -> dict[str, bytes]:
+        version, members = sgo.read(shipped[rel])
+        change(members)
+        return {**shipped, rel: sgo.write_depth_first(version, members)}
+
+    refused(variant(lambda mem: mem.pop(spec.bodies_key)), rel, 'ragdoll body mune')    # the crash, without the plugin's key
+    refused(variant(lambda mem: mem.__setitem__(spec.bodies_key, ['koshi', 'mune'])), rel, 'ragdoll body mune')
+    refused(variant(lambda mem: mem.__setitem__(spec.bodies_key, ['koshi'] * (m.SMALL_DRAGON_MOST_BODIES + 1))), rel,
+            spec.bodies_key)
+    refused(variant(lambda mem: mem.__setitem__('wakeup_node', 'mune')), rel, "bone 'mune' (wakeup_node)")
+    version, members = sgo.read(eo.read(rel))
+    members['xgs_scene_object_class'] = 'DragonSmall'
+    cas = 'OBJECT/EDF41MP01/BARE.CAS'                       # a CAS with none of the class's states
+    members['animation_model'] = [members['animation_model'][0], 'app:/object/EDF41MP01/bare.cas',
+                                  *members['animation_model'][2:]]
+    import cas_graft
+    bare = cas_graft.hollow(games.read6('OBJECT/DRAGONSMALL401.CAS'))
+    names = set().union(*cas_graft.states(bare).values())
+    if 'wakeup' in names:   # hollow keeps the states: rename one away to have a missing state
+        bare = cas_graft.rename_state(bare, next(p for p, s in cas_graft.states(bare).items() if 'wakeup' in s),
+                                      'wakeup', 'wakeup_gone')
+    refused({rel: sgo.write_depth_first(version, members), cas: bare}, rel, 'state wakeup')
+
+
 # EDF4.1's mission maps (plan P6): the maps EDF4.1's 98 missions load (pylib/map_legacy.py converts their MAC).
 EDF41_MISSION_MAPS = ('IG_CAVE01', 'IG_HORNETCAVE01', 'IG_WRECKTOWN01', 'NW_HILLYCITY_LIGHT', 'NW_KASENJIKI01',
                       'NW_KOUSOUBLD01', 'NW_SINSUIKOUEN', 'NW_SOUKOGAI01', 'NW_UNDERGROUND01', 'SK_CRATER01',
@@ -7550,7 +7765,7 @@ def rmpa_legacy_real() -> None:
 
 @test
 def edf41_maps_cover_the_scripts() -> None:
-    """Every map and weather EDF4.1's bundled mission scripts load (Map('app:/Map/<map>.mac', '<weather>')) that
+    """Every map and weather EDF4.1's bundled mission scripts (the story's and the DLC packs') load (Map('app:/Map/<map>.mac', '<weather>')) that
     tools/edf41_maps.py installs has its weather pair: a weather left out would make the game look for a MAE that is not
     there. The SK_* maps are installed too (their heightfield becomes an FMB piece, pylib/sk_map.py), so every map the scripts
     load is covered but NW_TESTMAP, a test map no story mission needs."""
@@ -7558,11 +7773,15 @@ def edf41_maps_cover_the_scripts() -> None:
     import edf41_maps
     import make_edf5_campaign as c
     used: dict[str, set[str]] = {}
-    for m, script in ((m, s) for m in c.edf41_text()['missions'] for s in ('MISSION.BVM', 'BEFORE.BVM')
-                      if os.path.exists(os.path.join(c.EDF41, 'missions', m['id'], s))):
+    # every 4.1 pack: the story and its two DLC mission packs (the DLC's M203 asked SK_HEIGEN02 for cloudy2, which the
+    # list, made from the story's scripts alone, lacked: the game faulted at EDF+0x161AE2 parsing the missing weather,
+    # 2026-10-14)
+    for p41, m, script in ((p41, m, s) for p41 in c.PACKS41 for m in c.edf41_text(p41.data)['missions']
+                           for s in ('MISSION.BVM', 'BEFORE.BVM')
+                           if os.path.exists(os.path.join(p41.data, 'missions', m['id'], s))):
         # both scripts the pack ships load the map (BEFORE.BVM too: M190's asks NW_KOUSOUBLD01 for FineCloud,
         # which the list lacked; the game's map::Environment faulted on the missing weather, 2026-10-13)
-        strings = c.utf16_strings(c.edf41_script(m['id'], script))
+        strings = c.utf16_strings(c.edf41_script(m['id'], script, p41.data))
         for i, s in enumerate(strings):
             hit = re.fullmatch(r'(?i)app:/Map/(\w+)\.mac', s.strip())
             if hit and i + 1 < len(strings):
@@ -8057,6 +8276,65 @@ def edf41_ufo401_real() -> None:
     assert any(o['object'] == 'OBJECT/UFO401.SGO' for o in reg['objects'])
 
 
+@test
+def edf41_ufo401ace_real() -> None:
+    """The shipped DLC ace UFO401 (EDF41MP02/UFO401ACE.SGO) under UfoSmall507: UFO401's model and recipe with 4.1 Ufo10's
+    two ace keys in 507's own keys (tools/make_edf41_objects.py UFO401ACE_ALIAS): the red tint as
+    animation_model_param_change_table (every parameter it sets is one every material of each ufo401 MDB has), the
+    flight speed 0.001875 L + 0.63125, engage distance 600, bolts down to every frame, reaction_scale 0.3; its own
+    durability 300 / level_adjust 5; ufo401_ex_* gone. ufo401_ex_keys refuses a shape or a part 507 cannot carry, and
+    Ufo10's defaults give UFO401's recipe."""
+    import json
+    import mdb
+    import sgo
+    import edf41_objects
+    import make_edf41_objects as m
+
+    def plain(v: object) -> object:
+        return [plain(x) for x in v] if isinstance(v, list) else round(v.value, 6) if isinstance(v, sgo.Float) else v
+    base = os.path.join(ROOT, 'edf41port', 'objects', 'OBJECT')
+    with open(os.path.join(base, 'EDF41MP02', 'UFO401ACE.SGO'), 'rb') as f:
+        ace = sgo.load(data=f.read())
+    with open(os.path.join(base, 'UFO401.SGO'), 'rb') as f:
+        story = sgo.load(data=f.read())
+    assert ace['xgs_scene_object_class'] == 'UfoSmall507'
+    assert not [k for k in ace if k.startswith('ufo401_ex')]
+    tint = plain(ace['animation_model_param_change_table'])
+    assert tint == [[0, 'fall_off_offset', [0.0]], [0, 'fall_off_scale', [1.0]], [0, 'diffuse', [0.8, 0.05, 0.1, 1.0]]]
+    assert ace['animation_model'][0][0].lower() == 'app:/object/ufo401.mrab'
+    models = [x for x in mdb.rab_read(edf41_objects.read('OBJECT/UFO401.MRAB')).files if x.name.lower().endswith('.mdb')]
+    for x in models:
+        md = mdb.mdb_read(x.data)
+        assert md.materials and all({e[1] for e in tint} <= {p.name for p in mt.params} for mt in md.materials), x.name
+    ai, bi = plain(ace['ai_info']), plain(ace['bullet_info'])
+    assert ai[0] == [[2, 0.001875], [1, 0.63125]] and ai[1] == 600.0 and ai[2:] == plain(story['ai_info'])[2:]
+    assert bi[1] == [[2, 0.02], [1, 0.8], [3, 10.0], [1, 1.0], [5, 1.0]]
+    assert bi[0] == plain(story['bullet_info'])[0] and bi[2:] == plain(story['bullet_info'])[2:]
+    assert plain(ace['reaction_scale']) == 0.3 and 'reaction_scale' not in story
+    assert plain(ace['game_object_durability']) == 300.0 and plain(ace['game_object_level_adjust']) == 5.0
+    for k in ('ai_attack_pattern', 'bullet_pattern', 'bullet_class', 'se_table', 'aim_range_info', 'move_turn_info'):
+        assert ace[k] == story[k], k
+    # the converter's mapping: Ufo10's defaults are UFO401's recipe; the ace's values; refusals
+    m.ufo401_recipe_is_default()
+    assert m.ufo401_ex_keys([[0.5, 0.15], [1.0, 0.002, 5.0], 600.0, [10.0, 0.2, 1], 0.3]) == (
+        [[2, 0.001875], [1, 0.63125]], 600.0, [[2, 0.02], [1, 0.8], [3, 10.0], [1, 1.0], [5, 1.0]], 0.3)
+    for bad in ([[0.5, 0.15], [1.0, 0.004, 5.0], 600.0, [10.0, 0.2, 1], 0.3], [[0.5], [1.0, 0.002, 5.0], 600.0,
+                [10.0, 0.2, 1], 0.3], [[0.5, 0.15], [1.0, 0.002, 5.0], 600.0, [10.0, 0.2, 1]]):
+        try:
+            m.ufo401_ex_keys(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f'ufo401_ex_keys took {bad}')
+    for bad_members in ({'ufo401_ex_ChangeColor': [[0, 'diffuse', [1.0] * 5]]}, {'ufo401_ex_ChangeColor': [[0, 'diffuse', [1.0]]]}):
+        try:
+            m.ufo401_ace(dict(bad_members))
+        except ValueError:
+            continue
+        raise AssertionError(f'ufo401_ace took {bad_members}')
+    reg = json.load(open(os.path.join(ROOT, 'edf41port', 'objects.json'), encoding='utf-8'))
+    assert any(o['object'] == 'OBJECT/EDF41MP02/UFO401ACE.SGO' and o['class'] == 'UfoSmall507' for o in reg['objects'])
+
+
 # ---------------------------------------------------------------- EDF4.1 sounds (tools/edf41_sounds.py)
 
 
@@ -8135,8 +8413,21 @@ def edf41_sounds_captions_synthetic() -> None:
     out = dsgo.parse(s.add_rows(table, ['K2', 'N1', 'N2'], {'N1': 'text one', 'K2': 'new'}))
     t = out.root.items[0]
     by = {t.names[i]: [str(x) for x in t.items[i].items] for i in t.names}
-    assert by == {'K1': ['ス', '日本語'], 'K2': ['ス', 'hold'], 'N1': ['', 'text one'], 'N2': ['', 'N2']}, by
+    # the radio's beeps (MusenBegin / MusenEnd, played through the voice path by every EDF5-era script) get a row marked
+    # with the engine's no-subtitle text: without one the game showed '＊＊不明な再生キー＊＊' for 5 s after every radio line
+    silent = {k: ['', s.NO_SUBTITLE] for k in s.SILENT_KEYS}
+    assert s.SILENT_KEYS == ('MusenBegin', 'MusenEnd') and s.NO_SUBTITLE == '***no_subtitle***'
+    assert by == {'K1': ['ス', '日本語'], 'K2': ['ス', 'hold'], 'N1': ['', 'text one'], 'N2': ['', 'N2'], **silent}, by
     assert [t.names[0], t.names[1]] == ['K1', 'K2']   # the rows kept their places
+    # a table that has them keeps its own rows (no second row of a key)
+    again = dsgo.parse(s.add_rows(s.add_rows(table, ['N1'], {}), ['N1'], {})).root.items[0]
+    assert sorted(again.names.values()) == sorted(['K1', 'K2', 'N1', *s.SILENT_KEYS]), sorted(again.names.values())
+    # 0x5DD5F8 compares the caption with exactly this text: the engine must still carry it (when the game is installed)
+    import rootcpk
+    dll = os.path.join(rootcpk.DEFAULT_GAME, 'EDF.dll')
+    if os.path.isfile(dll):
+        with open(dll, 'rb') as f:
+            assert s.NO_SUBTITLE.encode('utf-16le') in f.read(), 'EDF.dll no longer knows the no-subtitle mark'
     # the invariant the game depends on: every row, ours included, answers get('name') and get('caption')
     assert all(r.names == {0: 'name', 1: 'caption'} and r.get('name') == r.items[0] and r.get('caption') == r.items[1] for r in t.items)
     unnamed = dsgo.Node([dsgo.Node(['ス', 'x'])], {0: 'K1'})
@@ -8308,8 +8599,10 @@ def edf41_voice_real() -> None:
         orig = dsgo.parse(game.read('MISSION', f'EDF6_VOICETABLE.{lang}.SGO')).root.items[0]
         got = dsgo.parse(tables[s.table_rel(lang)]).root.items[0]
         by = {got.names[i]: got.items[i] for i in got.names}
-        assert len(got.items) == len(orig.items) + len(keys) and set(by) == set(orig.names.values()) | set(keys)
+        added = set(keys) | (set(s.SILENT_KEYS) - set(orig.names.values()))
+        assert len(got.items) == len(orig.items) + len(added) and set(by) == set(orig.names.values()) | added
         assert all(by[orig.names[i]].items == orig.items[i].items for i in orig.names), lang
+        assert all(by[k].items == ['', s.NO_SUBTITLE] for k in s.SILENT_KEYS if k not in orig.names.values()), lang
         assert all(r.names == {0: 'name', 1: 'caption'} for r in got.items), lang   # the game reads a row by these names
     en = dsgo.parse(tables[s.table_rel('EN')]).root.items[0]
     row = next(en.items[i] for i in en.names if en.names[i] == 'A001AA')
@@ -8855,7 +9148,8 @@ def edf41_hector_guns() -> None:
         assert (kind, var, idx, mul, end) == (1, 3, 11, 7, 0)     # coefficient * V11
         return value
 
-    assert len(m.HECTOR_VARIANTS) == 20 and all(r in m.ROOTS and r in m.ALIASES for r in m.HECTOR_VARIANTS)
+    # 21: the 20 the story's missions name and HECTOR401SS (shields on both arms; the story's M202 and DLC pack 1's M203)
+    assert len(m.HECTOR_VARIANTS) == 21 and all(r in m.ROOTS and r in m.ALIASES for r in m.HECTOR_VARIANTS)
     for name, (gen, left, right, _missions) in m.HECTOR_VARIANTS.items():
         with open(os.path.join(base, name), 'rb') as f:
             top = dsgo.parse(f.read()).root
@@ -9004,6 +9298,393 @@ def mab_retarget_synthetic() -> None:
         except ValueError:
             continue
         raise AssertionError('a locator the block lacks was retargeted')
+
+
+@test
+def edf41_dlc_packs() -> None:
+    """EDF4.1's two DLC mission packs (tools/make_edf41_missions.py --dlc -> edf41port/mp01, mp02): packs of their own
+    slotted right after the 4.1 story so the three 4.1 packs' content ids run EDF41Content .. +2, which the plugin owns
+    as a run (src/edf5campaign.cpp kPacks41) and autopilot can enter (edf41mp01:ROW); their committed scripts are 4.1's
+    converted (pylib/bvm41.py): no DLC mount (mp01:/) left, the stack balanced under EDF6's natives, every object they
+    name under the packs' folders registered (edf41port/objects.json); the release bundles them; a mission the
+    converter refused is listed with its reason, never shipped."""
+    import hashlib
+    import bvm41
+    import edf41_objects
+    tags = [p.tag for p in e5c.SLOTS]
+    assert tags[-3:] == ['EDF41', 'EDF41MP01', 'EDF41MP02'], tags   # appended: no installed pack's content id moves
+    assert [p.pack for p in e5c.PACKS41] == [e5c.PACK41, e5c.PACK41_MP01, e5c.PACK41_MP02]
+    assert e5c.edf41_content({'EDF41MP02': 12}) == 10 and e5c.edf41_content({'EDF41': 7}) == 7
+    assert e5c.edf41_content({}) == 0
+    assert e5c.managed('MISSION/EDF41MP01/M401/MISSION.BVM') and e5c.managed(e5c.PACK41_MP02.files()[0])
+    plugin = src('src/edf5campaign.cpp')
+    assert 'constexpr int kPacks41=3;' in plugin and '(edf41>0 && id>=edf41 && id<edf41+kPacks41)' in plugin
+    assert 'Ours(9,3,6,7) && !Ours(10,3,6,7)' in plugin
+    auto = src('tests/autopilot/autopilot.cpp')
+    assert '"edf41mp01:",10' in auto and 'first41+pack41' in auto
+    release = src('tools/build_release.py')
+    assert "for pack in ('mp01', 'mp02'):" in release
+    registry = {rel.upper() for rel in edf41_objects.registry()['files']}
+    # left out on purpose, with the reason (the 401 mothership): its missions are skipped by the planner instead
+    excluded = {s['object'].upper() for s in edf41_objects.registry().get('skipped', []) if s.get('reason')}
+    for p41 in e5c.PACKS41[1:]:
+        text = e5c.edf41_text(p41.data)
+        assert text['missions'], p41.data
+        for r in text.get('refused', []):
+            assert r['id'] not in {m['id'] for m in text['missions']} and r['why'], r
+        for m in text['missions']:
+            for name in m['files']:
+                data = e5c.edf41_script(m['id'], name, p41.data)
+                assert hashlib.sha256(data).hexdigest() == m['sha'][name], (p41.folder, m['id'], name)
+                if not name.endswith('.BVM'):
+                    continue
+                strings = e5c.utf16_strings(data)
+                assert not [s for s in strings if re.search(r'(?i)mp0\d:/', s)], (m['id'], name)
+                assert bvm41.stack_check(bvm41.parse(data)) == [], (m['id'], name)
+                for ref in e5c.asset_refs(data):
+                    if re.match(r'(?i)Object/EDF41MP0\d/', ref):
+                        assert ref.upper() in registry | excluded, (m['id'], ref)
+
+
+@test
+def edf41_zh_patch_rows() -> None:
+    """pylib/edf41zh.py on synthetic data: the Chinese patch's MISSIONTEXT rows are taken only when they are 4.1's rows
+    (the same count, each row's JA pair 4.1's, a Chinese title), its files found whatever their case
+    (411380/mission/MissionText.SGO), and Traditional Chinese (CN) in EDF6's own forms (鎗, 砲, 回復, 雷射, 「」)."""
+    import edf41zh
+    orig = [['遮風地帯', 'JA brief', ' Wind Shear', 'EN brief', 'x', 'y'], ['追跡', 'JA 2', 'Tracking', 'EN 2', 'x', 'y']]
+    patch = [['遮風地帯', 'JA brief', ' 风切变 ', '简报', 'x', 'y'], ['追跡', 'JA 2', '追踪', '简报二', 'x', 'y']]
+    assert edf41zh.merge_rows(orig, patch, 't') == [('风切变', '简报'), ('追踪', '简报二')]
+    refusals = (patch[:1],                                                    # a row short
+                [patch[0], ['追跡', 'another JA brief', '追踪', 'b']],          # another version's row
+                [patch[1], patch[0]],                                         # rows in another order
+                [patch[0], ['追跡', 'JA 2', 'Tracking', 'EN 2']])               # left in English
+    for bad in refusals:
+        try:
+            edf41zh.merge_rows(orig, bad, 't')
+        except SystemExit:
+            continue
+        raise AssertionError(f'taken: {bad}')
+    with tempfile.TemporaryDirectory() as zh:
+        os.makedirs(os.path.join(zh, '411380', 'mission'))
+        with open(os.path.join(zh, '411380', 'mission', 'MissionText.SGO'), 'wb') as f:
+            f.write(b'x')
+        found = edf41zh.locate(zh, '411380', 'mission', 'MISSIONTEXT.SGO')
+        assert found.endswith(os.path.join('411380', 'mission', 'MissionText.SGO')), found
+        assert edf41zh.note(zh, found).startswith('mods/411380/mission/MissionText.SGO (sha256 ')
+        try:
+            edf41zh.locate(zh, 'mission', 'MISSIONTEXT.SGO')
+            raise AssertionError('a file the patch lacks was found')
+        except SystemExit as e:
+            assert '--zh' in str(e), e
+    if not edf41zh.available():
+        print('skip  edf41_zh_patch_rows (Traditional): no OpenCC (pip install opencc-python-reimplemented)')
+        return
+    for sc, cn in (('火焰枪', '火焰鎗'), ('高周波回复枪', '高週波回復鎗'), ('激光炮', '雷射砲'), ('“风切变”', '「風切變」')):
+        assert edf41zh.traditional(sc) == cn, (sc, edf41zh.traditional(sc))
+
+
+@test
+def edf41_zh_mission_texts() -> None:
+    """The 4.1 port's committed mission texts (tools/make_edf41_missions.py, story and --dlc): SC the Simplified
+    Chinese patch's (story M104 风切变, Mission Pack 1's first mission 空中攻势), CN its Traditional, KR English, and
+    'source' naming the patch file; JA / EN 4.1's own, row for row (where EDF4.1 is installed); the scripts the ones
+    each sha names (only the text came from the patch)."""
+    import hashlib
+    import edf41dlc
+    import edf41zh
+    import gamedir
+    import rootcpk
+    import sgo
+    packs = {p41.folder: e5c.edf41_text(p41.data) for p41 in e5c.PACKS41}
+    by_id = {f: {m['id']: m for m in t['missions']} for f, t in packs.items()}
+    m104 = by_id['EDF41']['M104']
+    assert (m104['title']['JA'], m104['title']['EN'], m104['title']['SC']) == ('遮風地帯', 'Wind Shear', '风切变'), m104['title']
+    assert packs['EDF41MP01']['missions'][0]['title']['SC'] == '空中攻势', packs['EDF41MP01']['missions'][0]['title']
+    where = {'EDF41': 'mods/mission/MISSIONTEXT.SGO', 'EDF41MP01': 'mods/410780/mission/MISSIONTEXT.SGO',
+             'EDF41MP02': 'mods/411380/mission/MissionText.SGO'}
+    for p41 in e5c.PACKS41:
+        text = packs[p41.folder]
+        assert where[p41.folder] in text['source'] and edf41zh.PATCH in text['source'], text['source']
+        for m in text['missions']:
+            for k in ('title', 'brief'):
+                assert edf41zh.CJK.search(m[k]['SC']), (p41.folder, m['id'], k)
+                assert m[k]['KR'] == m[k]['EN'], (p41.folder, m['id'], k)
+                if edf41zh.available():
+                    assert m[k]['CN'] == edf41zh.traditional(m[k]['SC']), (p41.folder, m['id'], k)
+            for name in m['files']:
+                data = e5c.edf41_script(m['id'], name, p41.data)
+                assert hashlib.sha256(data).hexdigest() == m['sha'][name], (p41.folder, m['id'], name)
+    root41 = gamedir.find_other(gamedir.EDF41, near=rootcpk.DEFAULT_GAME)
+    if root41 is None:
+        print('skip  edf41_zh_mission_texts (JA / EN against 4.1): EDF4.1 not installed')
+        return
+    from make_edf41_objects import archives
+    g41 = archives(root41)
+    tables = {'EDF41': g41['MISSION/MISSIONTEXT.SGO'].read('MISSION', 'MISSIONTEXT.SGO')}
+    for dlc in edf41dlc.find(root41).values():
+        tables[dlc.folder] = dlc.read('MISSION/MISSIONTEXT.SGO')
+    for folder, blob in tables.items():
+        rows = sgo.plain(sgo.read(blob)[1])['table']
+        shipped = packs[folder]['missions']
+        refused = {r['id'] for r in packs[folder].get('refused', [])}
+        assert len(shipped) + len(refused) == len(rows), (folder, len(shipped), len(rows))
+        if refused:   # rows of refused missions are not in missions.json: match the rest by their JA title
+            rows = [r for r in rows if r[0] in {m['title']['JA'] for m in shipped}]
+        for m, row in zip(shipped, rows):
+            assert (m['title']['JA'], m['brief']['JA'], m['title']['EN'], m['brief']['EN']) == \
+                (row[0], row[1], row[2].strip(), row[3]), (folder, m['id'])
+
+
+@test
+def edf41_zh_weapon_names() -> None:
+    """The 4.1 weapons' committed names (tools/make_edf41_weapons.py -> edf41port/weapons.json, calls.json): SC the
+    Simplified Chinese patch's where it names the weapon (フュージョンブラスター 融合爆裂枪), CN its Traditional
+    (融合爆裂鎗), the converted weapon named as its texts (name.sc / name.cn), 'source' naming the patch; JA / EN
+    4.1's _WEAPONTEXT names (where EDF4.1 is installed)."""
+    import edf41zh
+    import gamedir
+    import rootcpk
+    import sgo
+    weapons = []
+    for name in ('weapons.json', 'calls.json'):
+        with open(os.path.join(ROOT, 'edf41port', name), encoding='utf-8') as f:
+            data = json.load(f)
+        assert "mods/weapon/*.SGO 'name'[1]" in data['source'] and edf41zh.PATCH in data['source'], data['source']
+        weapons += data['weapons']
+    with open(os.path.join(ROOT, 'edf41port', 'translations.json'), encoding='utf-8') as f:
+        translated = json.load(f)
+    by_sgo = {w['sgo']: w for w in weapons}
+    fusion = by_sgo['Weapon003.sgo']['text']
+    assert (fusion['JA'][0], fusion['SC'][0]) == ('フュージョンブラスター', '融合爆裂枪'), fusion['SC']
+    patched = 0
+    for w in weapons:
+        t = w['text']
+        assert t['KR'][0] == translated[w['sgo']]['KR'][0], w['id']
+        if t['SC'][0] != translated[w['sgo']]['SC'][0]:
+            patched += 1
+            assert edf41zh.CJK.search(t['SC'][0]), w['id']
+            if edf41zh.available():
+                assert t['CN'][0] == edf41zh.traditional(t['SC'][0]), w['id']
+        doc = w['weapon']   # a dsgo dump: {'items': [...], 'names': {index: key}}
+        names = {k: doc['items'][int(i)] for i, k in doc['names'].items() if k in ('name.sc', 'name.cn')}
+        assert names == {'name.sc': t['SC'][0], 'name.cn': t['CN'][0]}, (w['id'], names)
+    assert patched > 250, patched
+    root41 = gamedir.find_other(gamedir.EDF41, near=rootcpk.DEFAULT_GAME)
+    if root41 is None:
+        print('skip  edf41_zh_weapon_names (JA / EN against 4.1): EDF4.1 not installed')
+        return
+    texts = sgo.load(data=rootcpk.Game(root41).read('WEAPON', '_WEAPONTEXT.SGO'))['text_table']
+    for w in weapons:
+        row = texts[w['edf41_row']]
+        assert (w['text']['JA'][0], w['text']['EN'][0]) == (row[0], row[2]), w['id']
+
+
+# ------------------------------------------------------------------ EDF5 Mission Pack 1 maps and fortress (tools/edf5_dlc.py)
+class _FakeEdf6:
+    """tools/edf5_dlc.Edf6 over in-memory archives {archive: {Mods path: bytes}} (no .cpk to build)."""
+    archives: dict[str, dict[str, bytes]] = {}
+
+    def __init__(self, root: str) -> None:
+        self.where = {rel.upper(): a for a, files in self.archives.items() for rel in files}
+
+    def missing(self, archive: str, rel: str) -> str | None:
+        return None if rel in self.archives.get(archive, {}) else f'no {rel} in {archive}'
+
+    def read(self, archive: str, rel: str) -> bytes:
+        return self.archives[archive][rel]
+
+    def stamp(self, archive: str) -> tuple[str, int, int]:   # changes with the content: the hash caches see an update
+        import hashlib
+        return archive, int(hashlib.sha256(repr(sorted(self.archives[archive].items())).encode()).hexdigest()[:12], 16), 0
+
+
+def _edf5dlc_data(out: str) -> tuple[dict[str, bytes], dict[str, dict[str, bytes]]]:
+    """A small data set written to `out` with tools/edf5_dlc.pack: map MAP/TESTMAP (a RAB with one member of its own
+    and one EDF6 ships, a file stored whole, a weather taken whole from EDF6) and an object group. Returns (the final
+    bytes of the files made here, the stand-in EDF6 archives)."""
+    import hashlib
+    import edf5_dlc
+    import mdb
+    shared = b'edf6 texture' * 50
+    noise = b''.join(hashlib.sha256(bytes([i])).digest() for i in range(100))   # xz keeps it: several parts
+    edf6 = {'Chunk01.cpk': {'MAP/DONOR.RAB': mdb.rab_write(mdb.Rab(272, ['TEXTURE'], [
+        mdb.RabFile('pad.dds', 0, 0, b'pad'), mdb.RabFile('ground.dds', 0, 0, shared)])),
+        'MAP/DONOR_FINE.MAE': b'donor weather'},
+        'Root.cpk': {'OBJECT/STOCK.MRAB': b'stock model'}}
+    rab = mdb.rab_write(mdb.Rab(272, ['TEXTURE', 'MODEL'], [
+        mdb.RabFile('own.dds', 0, 0, b'only in EDF5' * 40), mdb.RabFile('ground.dds', 0, 0, shared),
+        mdb.RabFile('part.mdb', 1, 0, b'a model' * 30)]))
+    made = {'MAP/TESTMAP.RAB': rab, 'MAP/TESTMAP.FMB': noise + bytes(30000), 'OBJECT/TEST_DLC.SGO': b'sgo'}
+    sources = {modfiles.sha256(shared): ['Chunk01.cpk', 'MAP/DONOR.RAB', 1, 'ground.dds']}
+    whole = {'MAP/TESTMAP_FINE.MAE': {'kind': 'edf6', 'archive': 'Chunk01.cpk', 'path': 'MAP/DONOR_FINE.MAE',
+                                      'sha': modfiles.sha256(b'donor weather')}}
+    groups = {'TESTMAP': {'kind': 'map', 'missions': ['DLC/DM018'], 'needs': [],
+                          'files': ['MAP/TESTMAP.FMB', 'MAP/TESTMAP.RAB', 'MAP/TESTMAP_FINE.MAE']},
+              'OBJECT/TEST_DLC.SGO': {'kind': 'object', 'missions': ['DLC/DM015'], 'needs': ['OBJECT/STOCK.MRAB'],
+                                      'files': ['OBJECT/TEST_DLC.SGO']}}
+    with patched(edf5_dlc, PART=1000):   # the FMB's blob in several parts
+        stored, stats = edf5_dlc.pack(groups, made, whole, sources)
+    assert stats['shared'] == len(shared), stats
+    for rel, data in stored.items():
+        path = os.path.join(out, *rel.split('/'))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'wb') as f:
+            f.write(data)
+    return made, edf6
+
+
+@contextlib.contextmanager
+def _edf5dlc_game() -> Iterator[tuple[str, dict[str, bytes], dict[str, dict[str, bytes]]]]:
+    """A stand-in game (Mods empty) with _edf5dlc_data as the tools' data and its EDF6 archives as the player's."""
+    import edf5_dlc
+    with tempfile.TemporaryDirectory(prefix='edf6vc-e5d-') as tmp:
+        data, game = os.path.join(tmp, 'data'), os.path.join(tmp, 'game')
+        os.makedirs(os.path.join(game, 'Mods'))
+        made, edf6 = _edf5dlc_data(data)
+        _FakeEdf6.archives = edf6
+        with patched(edf5_dlc, DLC=data, Edf6=_FakeEdf6):
+            yield game, made, edf6
+
+
+@test
+def edf5_dlc_round_trip() -> None:
+    """tools/edf5_dlc.py rebuilds what pack stored byte for byte: a RAB from its manifest (a member from the store, one
+    read from the player's EDF6 and SHA-checked), a file stored compressed in several parts, a file taken whole from
+    EDF6; the RAB's EDF6 member is not in the store, and a stored part damaged is refused, not installed."""
+    import edf5_dlc
+    with _edf5dlc_game() as (game, made, edf6):
+        reg = edf5_dlc.registry()
+        blob = reg['blobs'][modfiles.sha256(made['MAP/TESTMAP.FMB'])]
+        assert reg['files']['MAP/TESTMAP.FMB']['kind'] == 'blob' and blob['parts'] > 1 and blob['codec'] == 'xz', blob
+        rows = edf5_dlc.manifest('MAP/TESTMAP.RAB')['files']
+        assert [r[6] is None for r in rows] == [True, False, True], rows
+        assert modfiles.sha256(edf6['Chunk01.cpk']['MAP/DONOR.RAB']) not in reg['blobs']
+        files, skipped = edf5_dlc.build(game)
+        assert not skipped and set(files) == {*made, 'MAP/TESTMAP_FINE.MAE'}, (skipped, list(files))
+        for rel, data in made.items():
+            assert files[rel] == data, rel
+        assert files['MAP/TESTMAP_FINE.MAE'] == b'donor weather'
+        sha = modfiles.sha256(made['MAP/TESTMAP.FMB'])
+        part = os.path.join(edf5_dlc.DLC, *edf5_dlc.blob_name(sha, reg['blobs'][sha]['codec'], 0).split('/'))
+        with open(part, 'r+b') as f:
+            f.write(b'\0\0\0\0')
+        try:
+            files['MAP/TESTMAP.FMB']
+        except (lzma.LZMAError, ValueError):   # the xz stream or the store's own check refuses it
+            pass
+        else:
+            raise AssertionError('a damaged blob part was put together')
+
+
+@test
+def edf5_dlc_edf6_changed() -> None:
+    """A member the data reads from the player's EDF6 that holds other bytes there now (EDF6 updated), or an EDF6 file a
+    group needs that is gone, leaves that group out with the reason; the other group is installed. A group already
+    installed with its final bytes needs no source any more."""
+    import edf5_dlc
+    import mdb
+    with _edf5dlc_game() as (game, made, edf6):
+        donor = mdb.rab_read(edf6['Chunk01.cpk']['MAP/DONOR.RAB'])
+        donor.files[1].stored = b'patched by an update'
+        edf6['Chunk01.cpk']['MAP/DONOR.RAB'] = mdb.rab_write(donor)
+        why = dict(edf5_dlc.unavailable(game))
+        assert set(why) == {'TESTMAP'} and 'ground.dds' in why['TESTMAP'], why
+        files, skipped = edf5_dlc.build(game)
+        assert 'MAP/TESTMAP.RAB' not in files and 'OBJECT/TEST_DLC.SGO' in files, list(files)
+        edf5_dlc.install(game, files)
+        del edf6['Root.cpk']['OBJECT/STOCK.MRAB']
+        why = dict(edf5_dlc.unavailable(game))
+        assert 'OBJECT/STOCK.MRAB' in why['OBJECT/TEST_DLC.SGO'], why
+    with _edf5dlc_game() as (game, made, edf6):
+        edf5_dlc.install(game, edf5_dlc.build(game)[0])
+        edf6['Chunk01.cpk']['MAP/DONOR_FINE.MAE'] = b'another weather'
+        assert edf5_dlc.unavailable(game) == [], 'an installed map needs its EDF6 sources again'
+        os.remove(os.path.join(game, 'Mods', 'MAP', 'TESTMAP_FINE.MAE'))
+        why = dict(edf5_dlc.unavailable(game))
+        assert 'DONOR_FINE.MAE' in why.get('TESTMAP', ''), why
+
+
+@test
+def edf5_dlc_ownership() -> None:
+    """tools/edf5_dlc.py install writes every file as the ledger owner edf5dlc, a second install writes nothing, remove
+    deletes them; a file of the same name another mod put in Mods is never written over: its group is left out (said
+    why), the other installed."""
+    import edf5_dlc
+    with _edf5dlc_game() as (game, made, edf6):
+        files, skipped = edf5_dlc.build(game)
+        written = edf5_dlc.install(game, files)
+        led = ledger.Ledger(game)
+        assert len(written) == len(files) and {ledger.key(r) for r in files} == set(led.owned_by(edf5_dlc.OWNER))
+        assert edf5_dlc.install(game, edf5_dlc.build(game)[0]) == [], 'a second install rewrote files it already holds'
+        deleted, kept = edf5_dlc.remove(game)
+        assert not kept and len(deleted) == len(files) and not ledger.Ledger(game).owned_by(edf5_dlc.OWNER)
+        theirs = os.path.join(game, 'Mods', 'MAP', 'TESTMAP.FMB')
+        modfiles.atomic_write(theirs, b'another mod')
+        files, skipped = edf5_dlc.build(game)
+        assert [g for g, _ in skipped] == ['TESTMAP'] and 'MAP/TESTMAP.FMB' in skipped[0][1], skipped
+        edf5_dlc.install(game, files)
+        assert modfiles.read(theirs) == b'another mod', "another mod's file was written over"
+        assert set(ledger.Ledger(game).owned_by(edf5_dlc.OWNER)) == {'OBJECT/TEST_DLC.SGO'}
+        ours = os.path.join(game, 'Mods', 'OBJECT', 'TEST_DLC.SGO')   # ours, edited by someone since: kept
+        modfiles.atomic_write(ours, b'edited by hand')
+        files, skipped = edf5_dlc.build(game)
+        assert {g for g, _ in skipped} == {'TESTMAP', 'OBJECT/TEST_DLC.SGO'} and not list(files), skipped
+        edf5_dlc.install(game, files)
+        assert modfiles.read(ours) == b'edited by hand', 'a file someone edited since our write was written over'
+
+
+@test
+def edf5_dlc_campaign_offers_the_four() -> None:
+    """make_edf5_campaign.plan offers DM015 / DM018 / DM019 / DM020 (Mission Pack 1) when tools/edf5_dlc.py will write
+    their maps and fortress, and skips one whose part it leaves out, saying why (as the EDF4.1 packs' Skip41)."""
+    import edf5_dlc
+    reg = edf5_dlc.registry()
+    maps = {f'{g}.MAC' for g, x in reg['groups'].items() if x['kind'] == 'map'}
+    names = {tuple(rel.split('/', 1)) for x in reg['groups'].values() if x['kind'] == 'object' for rel in x['files']}
+    four = {'DLC/DM015', 'DLC/DM018', 'DLC/DM019', 'DLC/DM020'}
+    with _e5c_game() as (root, _game):
+        with patched(edf5_dlc, offered=lambda _root: (maps, names, {})):
+            p = e5c.plan(root)
+        dlc1 = {r['path'] for r in p['rows'] if r['group'] == 'dlc1'}
+        assert four <= dlc1, sorted(four - dlc1)
+        assert not [s for s in p['skipped'] if s[0] == 'dlc1'], p['skipped']
+        assert {m for x in reg['groups'].values() for m in x['missions']} == four, reg['groups']
+        with patched(edf5_dlc, offered=lambda _root: (maps - {'IG_DESERT508.MAC'}, names, {'IG_DESERT508': '测试'})):
+            p = e5c.plan(root)
+        why = {s[1]: s[2] for s in p['skipped'] if s[0] == 'dlc1'}
+        assert set(why) == {'DLC/DM018', 'DLC/DM020'} and all('未安装：测试' in w for w in why.values()), why
+
+
+@test
+def edf5_dlc_shipped() -> None:
+    """The committed data (tools/make_edf5_dlc.py -> edf5port/dlc): every file its groups name has an entry, every blob
+    every part, every RAB a manifest whose rows name a stored blob or an EDF6 source, and no committed file is 50 MB or
+    more (no git LFS)."""
+    import edf5_dlc
+    reg = edf5_dlc.registry()
+    assert set(reg['groups']) == {'IG_DESERT508', 'NG_DLC_EDFROOM03', 'OBJECT/E510_DLC_FORTRESS.SGO'}, list(reg['groups'])
+    shipped = set()
+    for top, _dirs, names in os.walk(edf5_dlc.DLC):
+        for n in names:
+            path = os.path.join(top, n)
+            assert os.path.getsize(path) < 50 * 2**20, path
+            shipped.add(os.path.relpath(path, edf5_dlc.DLC).replace(os.sep, '/'))
+    want = {edf5_dlc.REGISTRY}
+    for sha, b in reg['blobs'].items():
+        want |= {edf5_dlc.blob_name(sha, b['codec'], i) for i in range(b['parts'])}
+    for g in reg['groups'].values():
+        for rel in g['files']:
+            entry = reg['files'][rel]
+            if entry['kind'] == 'rab':
+                want.add(rel + edf5_dlc.MEMBERS)
+                for row in edf5_dlc.manifest(rel)['files']:
+                    assert row[6] or row[5] in reg['blobs'], (rel, row)
+            elif entry['kind'] == 'blob':
+                assert entry['sha'] in reg['blobs'], rel
+            else:
+                assert entry['kind'] == 'edf6' and entry['path'].startswith('MAP/'), (rel, entry)
+    assert shipped == want, (sorted(shipped - want)[:5], sorted(want - shipped)[:5])
 
 
 def main() -> int:

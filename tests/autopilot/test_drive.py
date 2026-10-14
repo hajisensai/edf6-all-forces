@@ -299,10 +299,30 @@ class DriverTest(unittest.TestCase):
     def test_launch_never_confirms_steam_dialogs(self):
         u = Mock()
         with patch.object(drive, 'user32', u), patch.object(drive.os, 'startfile') as start, \
+             patch.object(drive, 'steam_launching_title', return_value=None), \
              patch.object(drive, 'game_window', return_value=123), patch.object(drive, 'hide'):
             drive.launch()
         start.assert_called_once_with('steam://rungameid/2291060')
         u.PostMessageW.assert_not_called()
+
+    def test_steam_launching_title_from_the_clients_localization(self):
+        with tempfile.TemporaryDirectory() as steam:
+            folder = Path(steam, 'steamui', 'localization')
+            folder.mkdir(parents=True)
+            folder.joinpath('steamui_schinese-json.js').write_text(
+                'var x={"GameAction_Launching":"Launching","GameAction_LaunchingDialog_Title":"\\u542f\\u52a8\\u4e2d...",'
+                '"GameAction_LaunchingDialog_Starting":"x"}', encoding='utf-8')
+            self.assertEqual(drive.steam_launching_title(steam, 'schinese'), '启动中...')
+            self.assertIsNone(drive.steam_launching_title(steam, 'english'))   # no file: nothing is moved
+
+    def test_only_steams_launch_progress_window_is_moved(self):
+        t = 'Launching...'
+        self.assertTrue(drive.is_steam_launching_window(t, 'SDL_app', 'steamwebhelper.exe', t))
+        self.assertTrue(drive.is_steam_launching_window(t, 'SDL_app', 'SteamWebHelper.EXE', t))
+        for title, cls, exe, launching in ((t, 'SDL_app', 'steamwebhelper.exe', None),        # title unknown
+                                           ('Cloud Sync Conflict', 'SDL_app', 'steamwebhelper.exe', t),
+                                           (t, 'SDL_app', 'chrome.exe', t), (t, 'Other', 'steamwebhelper.exe', t)):
+            self.assertFalse(drive.is_steam_launching_window(title, cls, exe, launching), (title, cls, exe, launching))
 
     def test_nudge_tells_a_pulled_cursor_from_a_free_one(self):
         def fake_user32(pull):

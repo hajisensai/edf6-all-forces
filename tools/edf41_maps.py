@@ -54,7 +54,8 @@ STAMP = '.edf41maps.json'   # Mods/: {map: {'version': VERSION, 'source': {4.1 f
 ARCHIVES = ('Root.cpk', 'Chunk01.cpk', 'Chunk02.cpk', 'DX11.cpk')
 NAVMESH = ('NAVMESH.HKT', 'NAVMESH.NVMD', 'NAVMESH_H.HKT', 'NAVMESH_H.NVMD')
 
-# 4.1's mission maps: map -> (the EDF6 donor of weather and navmesh, the weathers 4.1's mission scripts load it with).
+# 4.1's mission maps: map -> (the EDF6 donor of weather and navmesh, the weathers 4.1's mission scripts load it with:
+# the story's and its two DLC mission packs', selftest edf41_maps_cover_the_scripts).
 # The donor has every one. The SK_* maps are built from the field (SK_MAPS); the weathers are the ones the scripts name
 # (selftest edf41_maps_cover_the_scripts).
 MAPS: dict[str, tuple[str, tuple[str, ...]]] = {
@@ -65,15 +66,15 @@ MAPS: dict[str, tuple[str, tuple[str, ...]]] = {
     'NW_HILLYCITY_LIGHT': ('NW_DANTI01', ('FINECLOUD', 'CLOUDY', 'CLOUDY2', 'EVENING', 'FINE', 'SUNSET')),
     'NW_KASENJIKI01': ('NW_DANTI01', ('FINECLOUD', 'CLOUDY', 'CLOUDY2', 'EVENING', 'FINE', 'SUNSET')),
     'NW_KOUSOUBLD01': ('NW_DANTI01', ('FINECLOUD', 'CLOUDY', 'CLOUDY2', 'EVENING', 'FINE', 'SUNSET')),
-    'NW_SINSUIKOUEN': ('NW_DANTI01', ('FINECLOUD', 'CLOUDY2', 'EVENING', 'FINE', 'SUNSET')),
-    'NW_SOUKOGAI01': ('NW_DANTI01', ('CLOUDY2', 'EVENING', 'FINE')),
-    'SK_HEIGEN02': ('IG_HEIGEN507', ('CLOUDY',)),                                            # a plain
+    'NW_SINSUIKOUEN': ('NW_DANTI01', ('FINECLOUD', 'CLOUDY', 'CLOUDY2', 'EVENING', 'FINE', 'SUNSET')),
+    'NW_SOUKOGAI01': ('NW_DANTI01', ('FINECLOUD', 'CLOUDY2', 'EVENING', 'FINE')),
+    'SK_HEIGEN02': ('IG_HEIGEN507', ('CLOUDY', 'CLOUDY2', 'SUNSET')),                        # a plain
     'SK_VALLEY01': ('IG_TERRACEMOUNTAIN', ('CLOUDY', 'FINE', 'FINECLOUD')),
     'SK_KAIGAN01': ('IG_KAIGAN502', ('CLOUDY', 'CLOUDY2', 'FINE', 'SUNSET')),                           # a coast
-    'SK_SANGAKU01': ('IG_SANGAKU506', ('FINE', 'FINECLOUD', 'SUNSET')),
+    'SK_SANGAKU01': ('IG_SANGAKU506', ('CLOUDY2', 'EVENING', 'FINE', 'FINECLOUD', 'SUNSET')),
     'SK_SANGAKU02': ('IG_SANGAKU506', ('CLOUDY', 'CLOUDY2', 'FINECLOUD', 'SUNSET')),
-    'SK_STEPMOUNTAIN01': ('IG_TERRACEMOUNTAIN', ('EVENING', 'FINE', 'FINECLOUD', 'SUNSET')),
-    'SK_CRATER01': ('IG_CRATER601', ('CLOUDY2',)),
+    'SK_STEPMOUNTAIN01': ('IG_TERRACEMOUNTAIN', ('CLOUDY2', 'EVENING', 'FINE', 'FINECLOUD', 'SUNSET')),
+    'SK_CRATER01': ('IG_CRATER601', ('CLOUDY2', 'SUNSET')),
 }
 SK_MAPS = frozenset(n for n in MAPS if n.startswith('SK_'))
 
