@@ -83,11 +83,15 @@ class Screen:
 class Kit:
     """A cockpit: parts in the eye's frame (obj_model Parts whose `material` names a key of `materials`). `outside`:
     the names of the parts meant to be seen from outside the vehicle too (a gun shield, a canopy frame); every other
-    part must lie inside the hull (fitted()). `screens`: where its live read-outs are drawn."""
+    part must lie inside the hull (fitted()). `screens`: where its live read-outs are drawn. `sill`: a closed tub's
+    (an aircraft cockpit's) canopy sill, degrees of pitch from the eye: every line of sight further down than that
+    meets the kit (leaks()); above it the canopy (the world, through the hull the game does not draw from inside).
+    None: no such promise (an open gun mount, a cab whose windows reach the floor)."""
     parts: list[om.Part]
     materials: dict[str, KitMaterial]
     outside: frozenset[str] = frozenset()
     screens: tuple[Screen, ...] = ()
+    sill: float | None = None
 
 
 KitFn = Callable[[dict[str, float]], Kit]   # the room round the eye (clearance) -> the kit laid out in it
@@ -353,6 +357,53 @@ def _escapes(tris, pts, d):  # noqa: ANN001, ANN201 - numpy in, a bool per point
         t = np.einsum('ij,ij->i', e2[ti], q) * inv[ti]
         hit[pi[ok[ti] & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 1e-4)]] = True
     return ~hit
+
+
+LEAK_STEP, SILL_MARGIN = 5.0, 5.0   # degrees between leaks()'s lines of sight; how far under the sill they start
+
+
+def sight_lines(sill: float, step: float = LEAK_STEP) -> list[tuple[float, float]]:
+    """(yaw left, pitch up) in degrees: every `step` round the eye, from straight down to SILL_MARGIN under `sill`."""
+    top = sill - SILL_MARGIN
+    pitches = [-90.0 + step * k for k in range(int((top + 90.0) // step) + 1)]
+    yaws = [-180.0 + step * k for k in range(int(360 // step))]
+    return [(yaw, p) for p in pitches for yaw in ([0.0] if p <= -90.0 else yaws)]
+
+
+def leaks(kit: Kit, step: float = LEAK_STEP) -> list[tuple[float, float]]:
+    """The lines of sight from the eye (sight_lines: yaw, pitch) under the kit's sill that meet no front face of the
+    kit (the game draws only front faces, and none of the hull from inside): there the world shows through the floor
+    or the walls of a cockpit meant to be closed (Kit.sill; the user, 2026-10-14: "固定翼的底部是空白，完全能看过去").
+    Empty for a kit without a sill."""
+    import numpy as np
+    if kit.sill is None:
+        return []
+    lines = sight_lines(kit.sill, step)
+    tris = [np.asarray([v.pos for v in p.verts], dtype=np.float64)[np.asarray(p.tris, dtype=np.int64)]
+            for p in kit.parts if p.tris]
+    if not tris:
+        return lines
+    t3 = np.concatenate(tris)
+    v0, e1, e2 = t3[:, 0], t3[:, 1] - t3[:, 0], t3[:, 2] - t3[:, 0]
+    normal = np.cross(e1, e2)
+    yaw, pitch = (np.radians([ln[k] for ln in lines]) for k in (0, 1))
+    dirs = np.stack([np.sin(yaw) * np.cos(pitch), np.sin(pitch), np.cos(yaw) * np.cos(pitch)], 1)
+    met = np.zeros(len(dirs), dtype=bool)
+    chunk = max(1, 2_000_000 // len(t3))
+    s = -v0                                   # the eye (the origin) from each triangle's first corner
+    q = np.cross(s, e1)
+    for a in range(0, len(dirs), chunk):
+        d = dirs[a:a + chunk]                 # (n, 3) against (m, ...) -> (n, m)
+        p = np.cross(d[:, None, :], e2[None, :, :])
+        det = np.einsum('mj,nmj->nm', e1, p)
+        ok = np.abs(det) > 1e-12
+        inv = np.where(ok, 1.0 / np.where(ok, det, 1.0), 0.0)
+        u = np.einsum('mj,nmj->nm', s, p) * inv
+        v = (d @ q.T) * inv
+        t = (e2 * q).sum(1)[None, :] * inv
+        front = (d @ normal.T) < 0
+        met[a:a + chunk] = (ok & front & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 1e-4)).any(1)
+    return [ln for ln, m in zip(lines, met) if not m]
 
 
 SHRINK, SHRINK_ROUNDS = 0.9, 8

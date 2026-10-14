@@ -7,6 +7,10 @@ vc_eye_<seat> marker and the screens' vc_scr_ markers for every fitted seat, und
 The plugin's own vehicles (FITS stems their generators make) are left to their generators' builds, but for the ones that
 wear a stock model under a name of their own (tools/make_jets.py: the gunship, the transport plane, the transport
 helicopter), whose fits are laid out on that model as make_jets makes it.
+A kit that promises a closed tub (an aircraft cockpit: Kit.sill) is closed under its sill: every line of sight from the
+eye further down meets a front face of the kit (cockpits.leaks; the user, 2026-10-14: "固定翼的底部是空白，完全能看过去"),
+in every seat fitted above and, for the kits cut from real models (cockpit_kits_plugin.MODELS: the plugin's jets, whose
+models their generators make), in every room from the least to the most the kit takes.
 Exit 77 (skipped) without Root.cpk or without the cockpits' assets (the model folder's cockpits/)."""
 from __future__ import annotations
 
@@ -19,6 +23,8 @@ sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 sys.path.insert(0, os.path.join(HERE, '..', 'tools'))
 import cockpit_fits  # noqa: E402
 import cockpit_kits  # noqa: E402
+import cockpit_kits_plugin  # noqa: E402
+import cockpit_room  # noqa: E402
 import cockpits  # noqa: E402
 import jet_models  # noqa: E402
 import make_jets  # noqa: E402
@@ -59,12 +65,36 @@ def stock_copies(game) -> dict:  # noqa: ANN001 - rootcpk.Game
     return out
 
 
+def closed(what: str, kit) -> None:  # noqa: ANN001 - cockpits.Kit
+    if kit.sill is None:
+        return
+    open_lines = cockpits.leaks(kit)
+    shown = ', '.join(f'({y:+.0f},{p:+.0f})' for y, p in open_lines[:6])
+    expect(not open_lines, f'{what}: closed under its sill ({kit.sill:+.0f} deg)'
+           + (f': {len(open_lines)} lines of sight (yaw, pitch) see through, e.g. {shown}' if open_lines else ''))
+
+
+def rooms(model) -> list[tuple[str, dict[str, float]]]:  # noqa: ANN001 - cockpit_kits_plugin.Model
+    """The rooms (metres to the hull) `model` takes, named: the most it uses, the least it accepts, half way, and each
+    side at its least with the others at their most."""
+    most = {k: v + cockpit_room.MARGIN for k, v in model.want.items()}
+    least = {k: v + cockpit_room.MARGIN + 1e-3 for k, v in model.least.items()}
+    out = [('most', most), ('least', least), ('half', {k: (most[k] + least[k]) / 2 for k in most})]
+    out += [(f'{k} least', {**most, k: least[k]}) for k in most]
+    return out
+
+
 def main() -> int:
     root = rootcpk.DEFAULT_GAME
     if not os.path.isfile(os.path.join(root, 'Root.cpk')) or not cockpits.assets_present():
         print('SKIP: Root.cpk and the cockpits\' assets (the model folder\'s cockpits/) are needed')
         return 77
     game = rootcpk.Game(root)
+    for name, (model, _) in sorted(cockpit_kits_plugin.MODELS.items()):
+        if model.sill is None:
+            continue
+        for label, room in rooms(model):
+            closed(f'{name} in the room {label}', cockpit_kits.KITS[name](room))
     stock = {m.stem: m for m in vehicle_optics.MODELS if m.cockpits}
     copies = stock_copies(game)
     expect(set(copies) <= set(cockpit_fits.FITS), f'the stock copies {sorted(copies)} are fitted')
@@ -81,6 +111,7 @@ def main() -> int:
                 kinds = {s.kind for s in kit.screens}
                 expect(kinds <= set(cockpits.SCREEN_KINDS),
                        f'{stem} seat {fit.seat} ({fit.kit} on {fit.bone}): laid out inside the hull, screens {sorted(kinds)}')
+                closed(f'{stem} seat {fit.seat} ({fit.kit})', kit)
             except Exception as e:  # noqa: BLE001 - every seat reported, then the count fails the test
                 expect(False, f'{stem} seat {fit.seat} ({fit.kit}): {e}')
         print(f'      {stem}: {time.perf_counter() - started:.1f} s', flush=True)
