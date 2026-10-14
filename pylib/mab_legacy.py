@@ -295,6 +295,27 @@ def mab_locators(b: bytes) -> list[tuple[int, Locator]]:
     return out
 
 
+def mab_events(b: bytes) -> dict[str, list[tuple[str, float]]]:
+    """{track name (a CAS clip's name): [(key string, f32 time), ...]} of the block (either flag): the animation events the
+    game raises as the clip plays past each key's time (DragonBig's 火炎開始 / 火炎終了 on fly_attack)."""
+    lay = mab_layout(b)
+    rel = lay.flag == RELATIVE
+    ntracks, = struct.unpack_from('<H', b, 0x0E)
+    tracks, = struct.unpack_from('<I', b, 0x18)
+
+    def target(field_at: int, base: int) -> int:
+        return _i32(b, field_at) + (base if rel else 0)
+
+    out: dict[str, list[tuple[str, float]]] = {}
+    for i in range(ntracks):
+        t = tracks + TRACK * i
+        first, count = target(t, t), _i32(b, t + 0xC)
+        keys = [(first + KEY * j) for j in range(count)]
+        out[_text_at(b, target(t + 8, t))] = [(_text_at(b, target(k, k)), struct.unpack_from('<f', b, k + 4)[0])
+                                              for k in keys]
+    return out
+
+
 def mab_add_locators(b: bytes, new: list[Locator]) -> bytes:
     """The MAB block `b` (either flag) with the records `new` added at the end of list 0, the locator list.
 

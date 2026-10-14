@@ -136,6 +136,13 @@ class Alias:
     inert_materials: str = ''   # why the kept material_animation binds no material of the model, on purpose (check_materials)
     material_pairs: tuple[tuple[str, tuple[tuple[int, int], ...]], ...] = ()   # (key, ((4.1 blob index, slot), ...)):
                               # 4.1's bare MTAB blobs where the class reads [blob, slot] pairs (material_pairs())
+    rename_players: tuple[tuple[str, str], ...] = ()   # (4.1's player, the class's name for it): cas_graft.rename_group,
+                              # before the grafts (the player keeps its clips: it animates as in 4.1)
+    rename_states: tuple[tuple[str, str, str], ...] = ()   # (player, 4.1's state, the class's name): cas_graft.rename_state,
+                              # in order, before the grafts and the state aliases
+    add_locators: tuple['mab_legacy.Locator', ...] = ()   # MAB locators the class looks up unchecked that 4.1's MAB lacks
+                              # (mab_legacy.mab_add_locators; SGO path)
+    post: 'Callable[[dict], None] | None' = None   # last, on the SGO's members (SGO path): keys computed from the result
 
 
 @dataclass(frozen=True)
@@ -468,6 +475,208 @@ PART_ALIASES: dict[str, Alias] = {
                                        'charge_param', 240, 0]),
             ('deiroi_fire_config', [200.0, 1.0, 400.0, 0, [600.0, 0.02]]))),
 }
+
+
+# ------------------------------------------------------------------------------------------------ the four-legged fortress
+# Alien4LegTank301 (4.1's walking fortress, M117 M133 M134 M152) -> MovingFortress, EDF5's remake of it (E510_FORTRESS:
+# its large cannon's game_sound is 4.1's tikyuu4_en_4LegTank.acb; jobs/4bf89026/tmp/fortress41/NOTES.md, NOTES_e6.md).
+# What both classes share, read in both binaries: the body takes damage only through its core body while the belly hatch is
+# open (4.1 slot 10 0x1ca260, EDF6 slot 16 0x4c6650); the hatch opens ahead of an ObjectGenerator's drop and closes when
+# the batch is out (4.1 0x1cbc20..0x1cbe70, EDF6 0x4caa20..0x4ca8f0, driven by generators[1]); movement is the CAS root
+# motion of one whole clip at a time (no speed constant in either); the wander cycle is the same code (walk timer, then a
+# stop of lerp(2400, 1200, t) + rand(lerp(4500, 2400, t)) frames, t = clamp((level - 30) / 100, 0, 1): 4.1 0x1cbf50 and
+# E510's ai_battle_config[1], number for number); parts ride MAB locators and are switched on and off by group.
+# What the port sets (the rest is 4.1's file, the class's other keys E510's):
+#   generators: 4.1 has one generator, at 発生位置; the class needs two (gen[0] drives a generator hatch 4.1's fortress does
+#     not have, gen[1] the core hatch). Both at 発生位置; the plugin (src/edf41fortress.cpp) routes the mission's drop to gen[1].
+#   ai_battle_config: 4.1's first walk is 3600 + rand(3600) frames ([0] = [rand, base]); groups 0 (cannons) and 1 (gatling)
+#     start as the fight starts (4.1 0x1cc5c0: enabled on entry; a threshold of 1.0 is met at full health) and group 2 (the
+#     bits) at half health (4.1: HP / HPmax <= 0.5, once).
+#   ai_move_limit: 4.1 turns back toward the map's centre 150 inside its bounds (0x1cc110) when facing > 60 deg off.
+#   parts_setting: 4.1's [group, locator, SGO] as the class's [mode mask 3 (standing or not), 0 (stored, unread), group,
+#     locator, SGO].
+#   collision_patches, moving_collision_setting_sp, orthotic: E510's name its own locators; 4.1 has none: empty (the class
+#     loops over them).
+#   CAS: 4.1's player hatch is the class's core_hatch; 4.1's clips under the class's state names (walk -> walk_f, turn_l /
+#     turn_r (a turn while walking) -> walk_fwd_l / walk_fwd_r, turn_ll / turn_rr (a turn on the spot) -> turn_l / turn_r,
+#     down -> destroy); the states the class plays that 4.1 has no clip for alias 4.1's stand (ground, wakeup, walk_start,
+#     walk_end: the class waits for them to end, stand ends in 20 frames) or walk (walk_b / walk_l / walk_r, a controller's
+#     only); core_hatch open_state (held open while dropping) replays open, 4.1 holds the opened pose without a clip. The
+#     players generator_hatch and circle (E510's ring), which the class plays unchecked, are grafted from E510 with clips that
+#     move nothing, with v_circle_animation_speed.
+#   se_table / blow_se: 4.1's fortress sounds ("４足歩行メカ*") have no name in EDF6's SEPRESET.SGO: E510's (the same roles in
+#     EDF5's remake: core hit, core destroyed, explosion, running; footfall), from E510's bank, which game_sound adds.
+FORTRESS_BANKS = ['app:/sound/adx/tikyuu4_en_4LegTank.acb', 'app:/sound/adx/tikyuu5_en_fortress.acb']
+FORTRESS_PARTS_SETTING = [[3, 0, 0, 'キャノン右', 'app:/object/Alien4LegTank301_Cannon.sgo'],
+                          [3, 0, 0, 'キャノン左', 'app:/object/Alien4LegTank301_Cannon.sgo'],
+                          [3, 0, 1, 'ガトリング', 'app:/object/Alien4LegTank301_Gatling.sgo'],
+                          *[[3, 0, 2, f'bit0{i}', 'app:/object/Alien4LegTank301_Bit.sgo'] for i in range(1, 6)]]
+FORTRESS_OVERRIDE: tuple[tuple[str, object], ...] = (
+    ('generators', [['発生位置'], ['発生位置']]),
+    ('ai_battle_config', [[3600, 3600], [[2400, 1200], [4500, 2400]], [[0, 1.0], [1, 1.0], [2, 0.5]]]),
+    ('ai_move_limit', [150.0, 150.0]),
+    ('parts_setting', FORTRESS_PARTS_SETTING),
+    ('collision_patches', []), ('moving_collision_setting_sp', []), ('orthotic', []),
+    ('game_sound', FORTRESS_BANKS),
+    # the plugin's mark (src/edf41fortress.cpp reads it through the class's own key lookup 0x528A0; the class never asks)
+    ('edf41_fortress', 1),
+)
+FORTRESS_ALIAS = Alias(
+    'MovingFortress', 'E510_FORTRESS.SGO', ('generator_hatch', 'circle'), override=FORTRESS_OVERRIDE,
+    variables=('v_circle_animation_speed',),
+    rename_players=(('hatch', 'core_hatch'),),
+    rename_states=(('main', 'walk', 'walk_f'), ('main', 'turn_l', 'walk_fwd_l'), ('main', 'turn_r', 'walk_fwd_r'),
+                   ('main', 'turn_ll', 'turn_l'), ('main', 'turn_rr', 'turn_r'), ('main', 'down', 'destroy')),
+    state_aliases=(('main', 'ground', 'stand'), ('main', 'wakeup', 'stand'), ('main', 'walk_start', 'stand'),
+                   ('main', 'walk_end', 'stand'), ('main', 'walk_b', 'walk_f'), ('main', 'walk_l', 'walk_f'),
+                   ('main', 'walk_r', 'walk_f'), ('core_hatch', 'open_state', 'open')))
+# debris (E510's rubble at the locator 瓦礫基準点, which 4.1's MAB has not) stays: the class reads it only on a script command
+# (0x1000000d / 1) 4.1's missions never send, and every stock SGO of the class has it (class_keys).
+
+
+@dataclass(frozen=True)
+class FortressPart:
+    """One kind of 4.1 fortress part as a MovingFortress_Battery (the class every E510 turret is). 4.1's parts follow their
+    locator rigidly and fire on their own clock (NOTES.md 1.8); the Battery does the same with: battery_config [muzzle,
+    fire row, charge effect, charge frames] (0x4d3cb0: a wait of rand(0..attack[0][1]) frames, the charge, then the fire
+    row: [bullet key, frames of firing, a, damage, shot sound, loop sound, frames between shots, bullets per shot, spread];
+    the damage the factory gets is `damage + 7 L / 100`, 0x4d3fd5), aim_config [min, max (x pitch, y yaw, in pi), turn
+    speed], the muzzle and pivot locators AIM_TARGET / AIM / AIM_AXIS it looks up by name in its own MAB (0x4cf4e5..
+    0x4cf51f, unchecked), and fort_parts_destroy_info, read unchecked when it dies (0x4d44e7), whose [5] names list-0
+    locators of its MAB (0x6badd0)."""
+    template: str                          # an EDF6 MovingFortress_Battery SGO: the keys 4.1's part lacks
+    bullet: list                           # [factory, [type, [kv...], custom]]: the part's 'bullet_edf41'
+    fire: list                             # battery_config[1] (its bullet key is 'bullet_edf41')
+    charge: int                            # battery_config[3]
+    wait: int                              # attack [[0, wait]]: rand(0..wait) frames before each charge
+    aim: list                              # aim_config
+    muzzle: tuple[str, tuple[float, float, float], tuple[float, float, float]]   # (bone, position, AIM pivot)
+    destroy: list                          # fort_parts_destroy_info
+    durability: float | None = None        # None: 4.1's
+    hidden: str = ''                       # 4.1's part has no model (the cannon): a model of this name with no mesh, in
+                                           # an archive of its own, carries the part (the class reads a model and a ragdoll)
+
+
+FORTRESS_HIT_SE = '歩行要塞プラズマキャノン着弾'   # TIKYUUX_SE, resident
+FORTRESS_PARTS: dict[str, FortressPart] = {
+    # Cannon (2, group 0): 4.1's never aims and fires along its locator's +Z (the barrels gun_l / gun_r point), one huge
+    # slow plasma ball every 181 + 600 frames (0x1cff60..0x1d00b0), damage 2000 whatever the level (0x1cfc79), not
+    # destructible (no model, no ragdoll, no HP: +0x321 = 1). bullet_setting [PlasmaBullet01, size 30 (and blast 2 x 30),
+    # speed 5, life 1800, colour, custom [1, 120]]. Here: no aim (aim_config all 0), the 780-frame period as the charge and a
+    # wait of rand(0..1); the model is meshless and the HP out of reach.
+    'ALIEN4LEGTANK301_CANNON.SGO': FortressPart(
+        'E510_FORTRESS_PARTS_SMALLCANNON3.SGO',
+        ['PlasmaBullet01', [0, [0, 5.0, 1, 1800, 8, 30.0, 2, 60.0, 12, [2.0, 2.0, 5.0, 1.0], 13, 0.0, 14, FORTRESS_HIT_SE],
+                            [1, 120]]],
+        ['bullet_edf41', 0, 0.0, 2000.0, '歩行要塞プラズマキャノン発射', 0, 15], 780, 1,
+        [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], 0.0], ('Alien4LegTank301bit', (0.0, 0.0, 10.0), (0.0, 0.0, 0.0)),
+        [180, 120, 2.0, 1.0, 2000.0, ['爆破A']], durability=1.0e8, hidden='Alien4LegTank301cannon.mdb'),
+    # Gatling (group 1): BeamBullet01 every 16 frames for 600 frames (speed 3, life 180, blast 8, size 3, colour (1.5, 1,
+    # 0.25)), after a 600-frame spin-up, then 600 frames of spin-down and 600 + rand(600) idle (0x1d1c10..0x1d1ff0): the
+    # 1800 fixed frames between bursts are the charge and the rand(600) the wait. Damage 50 x s (0x1d0ff0; the host's
+    # d + 0.07 L has another slope: the s = 1 value). HP 700 (4.1's). Its barrel 銃身 points down the model's -Z (rotated pi
+    # about X), so AIM_TARGET sits there.
+    'ALIEN4LEGTANK301_GATLING.SGO': FortressPart(
+        'E510_FORTRESS_PARTS_SMALLCANNON1_AA.SGO',
+        ['BeamBullet01', [0, [0, 3.0, 1, 180, 8, 3.0, 2, 8.0, 10, 0.001, 11, 0.5, 12, [1.5, 1.0, 0.25, 1.0], 13, 0.0, 14,
+                              '歩行要塞ビーム小着弾'],
+                          [0, [1.5, 1.0, 0.25, 1.0], [1.5, 1.0, 0.25, 1.0], 1.5, 3.0, 1.5, 30]]],
+        ['bullet_edf41', 600, 0.0, 50.0, '歩行要塞ビーム小発射', 0, 16, 1, 0.0], 1800, 600,
+        [[-1.0, -1.0, 0.0], [1.0, 1.0, 0.0], 0.01], ('aim', (0.0, 0.0, -17.35), (0.0, 0.0, 0.0)),
+        [180, 120, 2.0, 1.0, 2000.0, ['爆破A']]),
+    # Bit (5, group 2): a fixed laser turret on the waist (not a drone), LaserBullet02 every 16 frames for 300 frames, then
+    # at once again (0x1cee70..0x1cf190): speed 15, life 30, size 1, colour (2, 0.3, 0.3); damage 2 + 4 (s - 1). Its aim
+    # follows the target with inertia (an angular acceleration of 0.0005 (1 + 0.4 (s - 1)), damping ~1): a slow turn.
+    'ALIEN4LEGTANK301_BIT.SGO': FortressPart(
+        'E510_FORTRESS_PARTS_SMALLCANNON1_AA.SGO',
+        ['LaserBullet02', [0, [0, 15.0, 1, 30, 8, 1.0, 10, 0.001, 11, 0.5, 12, [2.0, 0.3, 0.3, 1.0]], [1]]],
+        ['bullet_edf41', 300, 0.0, 2.0, '歩行要塞ビーム小発射', 0, 16, 1, 0.0], 1, 1,
+        [[-1.0, -1.0, 0.0], [1.0, 1.0, 0.0], 0.005], ('Alien4LegTank301bit', (0.0, 0.0, 3.45), (0.0, 0.0, 0.0)),
+        [180, 120, 2.0, 1.0, 2000.0, ['爆破A']]),
+}
+# Template keys a part does not take: the template's pedestal sub-part and starting angle, its custom bullet tuning. (The
+# other weapons' bullet_* / charge_effect_* stay: every stock Battery SGO carries the whole set, unused but for the one
+# battery_config names; class_keys holds the port to the set.)
+FORTRESS_PART_DROP = ('subparts', 'initial_local_angle', 'custom_bullet', 'bullet_custom_param')
+ALIASES['ALIEN4LEGTANK301.SGO'] = FORTRESS_ALIAS
+ROOTS['ALIEN4LEGTANK301.SGO'] = 4
+
+
+# --------------------------------------------------------------------------------------------------------- the giant dragon
+# DragonBig401 (4.1's giant dragon, M166) -> DragonSmall, the class EDF6 kept of the pair (jobs/4bf89026/tmp/dragon41/
+# NOTES.md). 4.1's DragonBig and DragonSmall are sibling classes of one design: the same AI states (wander, circle 70 over
+# the target, approach, climb away, a third of the landings stay on the ground), the same body states (take off on the MAB
+# event 飛行開始, fly, glide on 滑空開始 with the timed wing beat, land, hit, blown off, get up, die), the same SGO keys and the
+# same speed formulas (walk clamp(Base (1 + (s - 1) Up), 0.1, 1) x 60, fly the same within 0.2..2: 4.1 0x1efd50, EDF6
+# 0x334660), and the insectbase_* keys mean the same (InsectBase 0x22b8ea / EDF6 0x4a6830). EDF6's DragonSmall IS 4.1's
+# DragonSmall ported (0x334660 = 4.1 0x1fb910, 0x339180 = 0x1f7080). What differs, and how:
+#   - the keys EDF6's class reads unchecked that DragonBig's file lacks (0x528A0, then a load through the node: EDF+0x32e53e,
+#     0x32e556, 0x32e5df, 0x32e72e, 0x33925c, 0x339269): the blood colours 4.1 hard-codes for DragonBig ((0.5, 0.15, 0.5, 1),
+#     0xab7e00), the death blood scale it uses (0.35 x 5 = 1.75, 0x1ed710), the ragdoll reaction scale that gives 4.1's
+#     impulse (EDF6 min(dmg, 20) x 4 x scale against 4.1's dmg x 10: 2.5), and the small dragon's fireball and bite tunings,
+#     which DragonBig has no use for: harmless values (the fireball is not fired: src/edf41dragon.cpp; the bite never closes:
+#     DragonBig's MAB has none of the 捕食判定* events that open its hit box).
+#   - the MAB locator 捕食判定 the constructor reads unchecked (EDF+0x32e84a) and 捕食固定位置 (used while holding a prey), on
+#     head and on the jaw ago, where EDF6's small dragon has them.
+#   - CAS states the class plays that DragonBig has no clip for: capture (its ground attack: EDF6 only ever enters the
+#     capture state on the ground, 0x33599e) is DragonBig's ground_attack, the fire-breathing clip; glide_fly (the timed
+#     wing beat over the glide, 0x33a454) is glide_wingbeat; fly_damage_large (blown off in the air) is blow_off; damage_3 /
+#     fly_damage_3 (a third random hit clip) are damage_1 / fly_damage_1.
+#   - se_table in the class's order (0 hurt roar, 1 hit effect, 2 death roar, 3 blood, 4 fireball shot, 5 fireball hit,
+#     6..8 the bite): 4.1's names (ドラゴン大*, ドラゴン炎のブレス着弾) are not in EDF6's SEPRESET.SGO; the small dragon's of the
+#     same roles, the flame hit EDF6's grey flame thrower's.
+#   - the flame: 4.1 breathes FlameBullet02, one a frame, between the MAB events 火炎開始 and 火炎終了 of its three attack clips
+#     (0x1ee7c0 / 0x1ee7e0, 0x1ed530); EDF6's class hard-codes FlameBullet01 fireballs (0x33ae30 -> 0x32dd60) and registers no
+#     火炎* event. edf41_dragon tells the plugin each attack state's flame window (from DragonBig's MAB, read here) and the flame
+#     (edf41_flame: the bullet in the form 0x329e80 reads, 4.1's numbers: speed 2 per frame, life 360 frames, size 4, hit stop
+#     0.95, colour (10, 10, 10, 1) fading to (-5, -10, -10, 0), custom [0, 0.24, 0.997, 1, end colour], 0x1ed3e3..0x1ed474).
+DRAGON_FLAME_STATES = (('capture', 'ground_attack'), ('fly_attack', 'fly_attack'), ('fly_glide_attack', 'fly_glide_attack'))
+DRAGON_FLAME: list = ['FlameBullet02', [0, [0, 2.0, 1, 360, 8, 4.0, 11, 0.95, 12, [10.0, 10.0, 10.0, 1.0]],
+                                       [0, 0.24, 0.997, 1, [-5.0, -10.0, -10.0, 0.0]]]]
+DRAGON_OVERRIDE: tuple[tuple[str, object], ...] = (
+    ('dragon_DeadBloodScale', 1.75),
+    ('dragon_BloodColor', [0.5, 0.15, 0.5, 1.0]),
+    ('dragon_DeadBloodColor', [0.5, 0.15, 0.5, 1.0]),
+    ('dragon_RagdollReactionScale', 2.5),
+    ('dragon_AttackBulletSetting', [4.0, 2.0, 1.0e6, 0.2, 0.0]),
+    ('dragom_AttackCaptureSetting', [1.0, 0.0, 0.0, 1.0]),
+    ('se_table', ['ドラゴン小ｖダメージ大', 'ドラゴン小ヒットエフェクト', 'ドラゴン小ｖ死亡大', '敵共通血しぶき大', 'ドラゴン火炎弾発射',
+                  'グレイ火炎放射命中', 'ドラゴン小噛みつき', 'ドラゴン小噛まれダメージ', 'ドラゴン小噛まれ飛行中の風']),
+    ('edf41_flame', DRAGON_FLAME),
+    # 4.1's collision numbers; its sound (ドラゴン大衝突) has no SEPRESET name: the small dragon's
+    ('ragdoll_contact', ['ドラゴン小衝突', 2000.0, 0.5, 10.0, 120]),
+)
+def dragon_flame_windows(mab: bytes) -> list:
+    """edf41_dragon: [[CAS state, flame start, flame end], ...] for DRAGON_FLAME_STATES, the times of 火炎開始 / 火炎終了 on the
+    clip's MAB track (the clip time the plugin compares with the main player's)."""
+    events = mab_legacy.mab_events(mab)
+    out = []
+    for state, clip in DRAGON_FLAME_STATES:
+        keys = dict(events.get(clip, []))
+        if '火炎開始' not in keys or '火炎終了' not in keys:
+            raise ValueError(f'MAB track {clip} has no 火炎開始 / 火炎終了: {events.get(clip)}')
+        out.append([state, float(keys['火炎開始']), float(keys['火炎終了'])])
+    return out
+
+
+def dragon_marks(members: dict) -> None:
+    """DragonBig's plugin key: its attack states' flame windows (dragon_flame_windows)."""
+    members['edf41_dragon'] = dragon_flame_windows(members['animation_model'][2])
+
+
+DRAGON_ALIAS = Alias(
+    'DragonSmall', 'DRAGONSMALL401.SGO', (), override=DRAGON_OVERRIDE,
+    state_aliases=(('main', 'capture', 'ground_attack'), ('main', 'glide_fly', 'glide_wingbeat'),
+                   ('main', 'fly_damage_large', 'blow_off'), ('main', 'damage_3', 'damage_1'),
+                   ('main', 'fly_damage_3', 'fly_damage_1')),
+    add_locators=(mab_legacy.Locator('捕食判定', 'head', 0, (0.0, 0.0, 0.5, 1.0), 2.0),
+                  mab_legacy.Locator('捕食固定位置', 'ago', 2, (0.0, -0.1, 0.8, 1.0), (0.1, 0.1, 0.5, 1.0),
+                                     (0.7853982, 1.5707964, 0.7853982, 1.0))),
+    post=dragon_marks)
+
+
+ALIASES['DRAGONBIG401.SGO'] = DRAGON_ALIAS
+ROOTS['DRAGONBIG401.SGO'] = 1
 
 
 
@@ -808,6 +1017,8 @@ def alias(games: Games, root: str, files: dict[str, bytes], a: Alias) -> None:
         model[2] = remabbed(model[2], a.mab)
     for locator, node in a.locator_nodes:
         members['animation_model'][2] = mab_legacy.mab_retarget(members['animation_model'][2], locator, node)
+    if a.add_locators:
+        members['animation_model'][2] = mab_legacy.mab_add_locators(members['animation_model'][2], list(a.add_locators))
     am = members.get('animation_model')
     cas = rel_of(am[1]) if isinstance(am, list) and len(am) > 1 and isinstance(am[1], str) else None
     t_am = theirs.get('animation_model')   # a part (animation_model_d) has none: no CAS to graft
@@ -819,11 +1030,102 @@ def alias(games: Games, root: str, files: dict[str, bytes], a: Alias) -> None:
         cas = 'OBJECT/' + root.rsplit('.', 1)[0] + '.CAS'
         files[cas] = cas_graft.hollow(games.read6(rel_of(t_am[1])))
         members['animation_model'] = [am[0], 'app:/' + cas.lower(), *am[2:]]
+    if a.post:
+        a.post(members)
     files[rel] = sgo.write_depth_first(version, members)
     check_fracture(members, files, rel)
     graft_cas(games, a, files, cas, rel_of(t_am[1]) if t_am and isinstance(t_am[1], str) else '')
     check_materials(games, files, rel, {k: len(theirs[k]) for k in MATERIAL_KEYS if k in theirs}, a.inert_materials)
     check_sounds(games, files[rel], rel)
+
+
+def hidden_model(rab: bytes, donor_mdb: str, name: str) -> bytes:
+    """A model archive holding one model `name`: `donor_mdb` of `rab` (its bones, so the donor's ragdoll fits) with no mesh,
+    material or texture: a part the class needs a model for where 4.1's has none (FortressPart.hidden)."""
+    archive = mdb.rab_read(rab)
+    f = next(x for x in archive.files if x.name.lower() == donor_mdb.lower())
+    md = mdb.mdb_read(f.data)
+    for ob in md.objects:
+        ob.meshes = []
+    md.materials, md.textures, md.buffer_order = [], [], None
+    raw = mdb.mdb_write(md)
+    one = mdb.RabFile(name, f.folder, f.flag, mdb.cmpl_compress(raw) if f.stored[:4] == b'CMPL' else raw)
+    return mdb.rab_write(mdb.Rab(archive.version, archive.folders, [one]))
+
+
+def fortress_part(games: 'Games', files: dict[str, bytes], root: str, p: FortressPart) -> None:
+    """files['OBJECT/' + root] (4.1's fortress part, converted) as a MovingFortress_Battery doing what 4.1's part does
+    (FortressPart): p.template's keys but the other weapons', 4.1's model (or a meshless one, p.hidden), ragdoll, HP and
+    material animation, its MAB with the locators the class looks up, the weapon, aim and timing of p."""
+    rel = 'OBJECT/' + root
+    version, mine = sgo.read(files[rel])
+    t_version, theirs = sgo.read(games.read6('OBJECT/' + p.template))
+    if t_version != version:
+        raise ValueError(f'{p.template}: SGO {t_version:#x}, not {version:#x} as {root}')
+    out = {k: v for k, v in theirs.items() if k not in FORTRESS_PART_DROP}
+    for k, v in mine.items():
+        if k.startswith('game_object_') or k in ('animation_model', 'ragdoll'):
+            out[k] = v
+    out['xgs_scene_object_class'] = theirs['xgs_scene_object_class']
+    t_am = theirs['animation_model']
+    if p.hidden:
+        donor = sgo.read(files['OBJECT/ALIEN4LEGTANK301_BIT.SGO'])[1]   # the bit: the smallest model and ragdoll of the set
+        body_rab = rel_of(donor['animation_model'][0][0][0])
+        own = 'OBJECT/' + root.rsplit('.', 1)[0] + '.MRAB'
+        files[own] = hidden_model(files[body_rab], donor['animation_model'][0][0][1], p.hidden)
+        mab = donor['animation_model'][2]
+        out['animation_model'] = [[['app:/Object/' + own.rsplit('/', 1)[-1].lower(), p.hidden]], 0, mab,
+                                  [list(t_am[3][0]), [-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]]]
+        out['ragdoll'] = donor['ragdoll']
+        out['material_animation'] = theirs['material_animation']
+    else:
+        am = mine['animation_model']
+        entry = am[0][0]
+        body = mdb.mdb_read(next(f for f in mdb.rab_read(files[rel_of(entry[0])]).files
+                                 if f.name.lower() == entry[1].lower()).data)
+        box = [mdb.rigid_extent(body, ax) for ax in range(3)]
+        out['animation_model'] = [am[0], 0, am[2], [list(t_am[3][0]), [float(lo) for lo, _ in box],
+                                                    [float(hi) for _, hi in box]]]
+        out['material_animation'] = material_pairs(mine['material_animation'], ((0, 0), (1, 0), (1, 1)))
+    bone, at, pivot = p.muzzle
+    out['animation_model'][2] = mab_legacy.mab_add_locators(out['animation_model'][2], [
+        mab_legacy.Locator('AIM_TARGET', bone, 0, (*at, 1.0), 5.0),
+        mab_legacy.Locator('AIM', bone, 0, (*pivot, 1.0), 5.0),
+        mab_legacy.Locator('AIM_AXIS', bone, 2, (*pivot, 1.0), (5.0, 5.0, 5.0, 1.0), (0.0, 0.0, 0.0, 1.0)),
+        mab_legacy.Locator('爆破A', bone, 0, (*pivot, 1.0), 3.0)])
+    if p.durability is not None:
+        out['game_object_durability'] = p.durability
+    out['game_sound'] = FORTRESS_BANKS
+    out['bullet_edf41'] = p.bullet
+    out['battery_config'] = ['AIM_TARGET', p.fire, 'charge_effect_std', p.charge]
+    out['attack'] = [[0, p.wait]]
+    out['attack_target_range'] = [0, 100000]
+    out['aim_config'] = p.aim
+    out['fort_parts_destroy_info'] = p.destroy
+    files[rel] = sgo.write_depth_first(version, dict(sorted(out.items())))
+    stock = games.stock_by_class()
+    check_class_keys(stock, rel, files[rel])
+    check_materials(games, files, rel, {'material_animation': len(theirs['material_animation'])},
+                    "the meshless cannon binds no material: the template's entries only have to exist" if p.hidden else '')
+    check_sounds(games, files[rel], rel)
+    check_battery(files, rel)
+
+
+def check_battery(files: dict[str, bytes], rel: str) -> None:
+    """ValueError when a MovingFortress_Battery SGO cannot fire or die: every name the class reads unchecked must be there:
+    the bullet key battery_config[1][0] names (0x4d403e), the charge effect key [2], the locators AIM_TARGET / AIM /
+    AIM_AXIS (0x4cf4e5..), the muzzle [0] and each fort_parts_destroy_info[5] locator (0x6badd0, list 0 of its MAB)."""
+    members = sgo.read(files[rel])[1]
+    cfg = members.get('battery_config')
+    if not isinstance(cfg, list) or len(cfg) != 4:
+        raise ValueError(f'{rel}: battery_config is not [muzzle, fire row, charge effect, charge frames]')
+    for key in (cfg[1][0], cfg[2], 'attack', 'aim_config', 'ragdoll', 'se_table', 'fort_parts_destroy_info'):
+        if key not in members:
+            raise ValueError(f'{rel}: no key {key}, which the class reads unchecked')
+    names = {loc.name for lst, loc in mab_legacy.mab_locators(members['animation_model'][2]) if lst == 0}
+    want = {'AIM_TARGET', 'AIM', 'AIM_AXIS', cfg[0], *members['fort_parts_destroy_info'][5]}
+    if want - names:
+        raise ValueError(f'{rel}: its MAB has no locator {sorted(want - names)}')
 
 
 def material_pairs(blobs: list, layout: tuple[tuple[int, int], ...]) -> list:
@@ -1421,6 +1723,10 @@ def graft_cas(games: 'Games', a: Alias, files: dict[str, bytes], cas: str | None
     (a.cas_donors) that it lacks (cas_graft.graft)."""
     if not cas or cas not in files:
         return
+    for old, new in a.rename_players:
+        files[cas] = cas_graft.rename_group(files[cas], old, new)
+    for player, old, new in a.rename_states:
+        files[cas] = cas_graft.rename_state(files[cas], player, old, new)
     if a.players or a.variables:
         files[cas] = cas_graft.graft(files[cas], games.read6(template_cas), list(a.players), a.variables)
     for donor, players, variables in a.cas_donors:
@@ -1513,6 +1819,11 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
                 alias(games, part.split('/', 1)[1], out, PART_ALIASES[part.split('/', 1)[1]])
             except ValueError as e:
                 why.append(f'alias {part}: {e}')
+        for part in [r for r in out if r.split('/', 1)[1] in FORTRESS_PARTS] if not why else []:
+            try:
+                fortress_part(games, out, part.split('/', 1)[1], FORTRESS_PARTS[part.split('/', 1)[1]])
+            except ValueError as e:
+                why.append(f'fortress part {part}: {e}')
         filled = None
         if not why:
             try:   # the keys every stock SGO of the class has (class_keys): what an alias or patch left out is filled

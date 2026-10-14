@@ -40,6 +40,9 @@ MCANM = 0x24
 # Any other command in a grafted group has an argument layout this module has not checked: refused.
 TCONTROL_OPS = (0, 4)
 VCONTROL = 0x14
+# An mcanm's +0x20 when it names no tcontrol (the bits of -1.0f): the states that play their clip only through their data
+# command (E510_FORTRESS.CAS: core_hatch / generator_hatch open_state, circle rotation_add). Kept as it is.
+NO_TCONTROL = 0xBF800000
 
 
 def _name(b: bytes, at: int) -> str:
@@ -130,7 +133,7 @@ def graft(target: bytes, donor: bytes, groups: list[str], variables: tuple[str, 
                 if idx not in named:
                     named.append(idx)
             idx, = struct.unpack_from('<I', b, m.at + 0x20)
-            if idx not in named:
+            if idx != NO_TCONTROL and idx not in named:
                 named.append(idx)
     named.sort()
     t_count = len(lt.tree.tcontrols)
@@ -168,7 +171,8 @@ def graft(target: bytes, donor: bytes, groups: list[str], variables: tuple[str, 
             struct.pack_into('<I', area, new + 0x10, new_index[idx])
         elif kind == 'mcanm':
             idx, = struct.unpack_from('<I', area, new + 0x20)
-            struct.pack_into('<I', area, new + 0x20, new_index[idx])
+            if idx != NO_TCONTROL:
+                struct.pack_into('<I', area, new + 0x20, new_index[idx])
         elif kind == 'tcontrol_anim':
             ci, = struct.unpack_from('<I', area, new)
             struct.pack_into('<I', area, new, clip_index[ci])
@@ -241,6 +245,48 @@ def alias_states(cas: bytes, aliases: dict[str, list[tuple[str, str]]]) -> bytes
     walk gives it the walk it already has. Only states whose meaning is continuous movement are worth aliasing: a state
     the class waits to finish (an appeal, an attack) played as a looping stand would never end."""
     return graft(cas, cas, [], (), aliases)
+
+
+def rename_group(cas: bytes, old: str, new: str) -> bytes:
+    """`cas` (EDF6 0x204) with its player `old` named `new`: the name appended to the strings at the end of the file and
+    the anmgroup's name offset (+0, relative to the struct) aimed at it; every other byte as it was (the old name stays
+    where it was, unreferenced by this player). Its states, clips and tracks are untouched, so the player animates as it
+    did. Why: a class looks a player up by name (0x1166FB0) and the ported object's player that does the job has another
+    name (4.1's fortress opens its belly hatch with `hatch`; EDF6's MovingFortress plays `core_hatch`)."""
+    lay = cl.cas_layout(cas)
+    if lay.version != cl.CAS_6:
+        raise ValueError('rename_group takes an EDF6 CAS 0x204')
+    return _renamed(cas, [at for at, _ms in lay.tree.anmgroups], old, new, 'player')
+
+
+def rename_state(cas: bytes, player: str, old: str, new: str) -> bytes:
+    """rename_group for a state (an mcanm, its name offset at +0 too) of the player `player`. Why: the ported object's
+    clip that does a job the class asks for by another name, where that name is taken by a clip doing another job
+    (4.1's fortress turns in place with turn_ll and turns while walking with turn_l; MovingFortress asks for turn_l to
+    turn in place and walk_fwd_l to turn while walking): renamed in order, turn_l -> walk_fwd_l, then turn_ll -> turn_l."""
+    lay = cl.cas_layout(cas)
+    if lay.version != cl.CAS_6:
+        raise ValueError('rename_state takes an EDF6 CAS 0x204')
+    groups = [ms for at, ms in lay.tree.anmgroups if _name(cas, at) == player]
+    if len(groups) != 1:
+        raise ValueError(f'the CAS has {len(groups)} players named {player}')
+    return _renamed(cas, [m.at for m in groups[0]], old, new, f'state of {player}')
+
+
+def _renamed(cas: bytes, structs: list[int], old: str, new: str, what: str) -> bytes:
+    """`cas` with the one struct of `structs` named `old` (its +0 a name offset relative to it) named `new`: the name
+    appended to the strings at the end of the file, every other byte as it was."""
+    if any(_name(cas, at) == new for at in structs):
+        raise ValueError(f'the CAS has a {what} {new} already')
+    found = [at for at in structs if _name(cas, at) == old]
+    if len(found) != 1:
+        raise ValueError(f'the CAS has {len(found)} {what} named {old}')
+    out = bytearray(cas)
+    out += bytes(len(out) % 2)
+    name_at = len(out)
+    out += new.encode('utf-16le') + b'\0\0'
+    struct.pack_into('<i', out, found[0], name_at - found[0])
+    return bytes(out)
 
 
 def hollow(cas: bytes) -> bytes:
