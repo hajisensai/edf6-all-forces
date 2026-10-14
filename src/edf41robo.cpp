@@ -1138,8 +1138,6 @@ std::uint64_t __fastcall MessageWrap(void* self,std::uint32_t msg,void* data) {
 // before a durability percentage, native 3019): EventAnimationObject's is `return true` (0x125270) and never scales the
 // durability; 4.1's 0x2744B0 makes it 12000 x s x the difficulty: UfoCarrier508's formula (0x4F6D00) does the same in EDF6.
 constexpr int kSlotOnLevel=6;
-constexpr int kSlotTeam=22;
-constexpr std::size_t kGobCanChangeTeam=0x54ABD0;
 using OnLevelFn=bool(__fastcall*)(void*);
 bool __fastcall OnLevelWrap(void* self) {
     const bool r=reinterpret_cast<OnLevelFn>(roboClass.orig[kSlotOnLevel])(self);
@@ -1176,12 +1174,9 @@ bool InstallEdf41Robo() noexcept {
         return false;
     }
     SetSlot(roboClass,kSlotOnLevel,reinterpret_cast<void*>(&OnLevelWrap));
-    // Slot 22 (CanChangeTeam, asked by SetTeam 0x54EE70): EventAnimationObject's 0x5B6BA0 allows team 6 only (cmp edx,6;
-    // sete al), so CreateEnemy's SetTeam(1) left the robots on team 6 (M415 / M411 real runs 2026-10-15: not targeted, their
-    // bullets of team 6). GameObjectBase's own 0x54ABD0 (mov al,1; ret: every team), as UfoCarrier508's table has it.
-    static const unsigned char kRetTrue[3]={0xB0,0x01,0xC3};   // mov al,1; ret
-    if(Readable(image+kGobCanChangeTeam,3) && std::memcmp(image+kGobCanChangeTeam,kRetTrue,3)==0)SetSlot(roboClass,kSlotTeam,image+kGobCanChangeTeam);
-    else Log("EDF41ROBO EDF.dll+0x%zX is not GameObjectBase's CanChangeTeam: the robot keeps EventAnimationObject's team",kGobCanChangeTeam);
+    // Slot 22 (CanChangeTeam, asked by SetTeam 0x54EE70): EventAnimationObject's 0x5B6BA0 allows team 6 only, so CreateEnemy's
+    // SetTeam(1) left the robots on team 6 (M415 / M411 real runs 2026-10-15): GameObjectBase's (every team).
+    AllowAnyTeam(roboClass);
     const bool ok=AddFactory(L"UfoRobo",&CreateRobo);
     Log("EDF41ROBO on: UfoRobo %s",ok ? "queued for the game's registration" : "NOT registered");
     return ok;

@@ -534,8 +534,8 @@ void LoadConfig() noexcept {
     n.edf41RoboAttack=static_cast<int>(FixInt("Edf41RoboAttack",ReadInt(L"Edf41RoboAttack",n.edf41RoboAttack),-1,15));
     n.edf41RoboPlace=ReadFloat(L"Edf41RoboPlace",n.edf41RoboPlace);
     n.edf41RoboTransformAfter=ReadFloat(L"Edf41RoboTransformAfter",n.edf41RoboTransformAfter);
+    n.edf41MotherForce=static_cast<int>(FixInt("Edf41MotherForce",ReadInt(L"Edf41MotherForce",n.edf41MotherForce),0,15));
     n.edf41MotherPlace=ReadFloat(L"Edf41MotherPlace",n.edf41MotherPlace);
-    n.edf41MotherBulletProbe=ReadBool(L"Edf41MotherBulletProbe",n.edf41MotherBulletProbe);
     n.edf41MotherParts=static_cast<int>(FixInt("Edf41MotherParts",ReadInt(L"Edf41MotherParts",n.edf41MotherParts),0,31));
     n.edf5CampaignContent=FixInt("EDF5CampaignContent",ReadInt(L"EDF5CampaignContent",n.edf5CampaignContent),0,65535);
     n.testRangeContent=FixInt("TestRangeContent",ReadInt(L"TestRangeContent",n.testRangeContent),0,65535);
