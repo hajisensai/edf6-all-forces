@@ -121,6 +121,7 @@ using MessageFn=std::uint64_t(__fastcall*)(void*,std::uint32_t,void*);
 using CreateFromPathFn=void*(__fastcall*)(void*,const float*,const wchar_t*,void*);
 using SgoKeyFn=const void*(__fastcall*)(void*,const wchar_t*);
 using DeleteObjectFn=void(__fastcall*)(void*);
+using BulletSpawnFn=void*(__fastcall*)(void*,const float*,void*,void*);
 
 // A stock class whose vtable is cloned: the table as the file has it, the class's own functions, the clone the objects' vptr points
 // at ([0] the RTTI pointer, then the slots), and a call counter per slot (the counting stubs).
@@ -282,7 +283,7 @@ bool SphereOf(const void* obj,float* centre,float* radius) noexcept {
 // A part's place is not stored in the object (its class has no field for it): this table is keyed by the part object. `local` is the
 // part's matrix relative to the hull (rotation from the euler degrees, the position in the last row, row-vector convention like the
 // game's own matrices); the part's world matrix is local * the hull's matrix at +0x60.
-struct PartRec { const void* hull; float local[16]; int group; int index; };
+struct PartRec { const void* hull; float local[16]; int group; int index; bool enabled, attack, boost; };
 std::mutex partLock;
 std::unordered_map<const void*,PartRec> partOf;                        // part object -> where it hangs
 std::unordered_map<const void*,std::vector<void*>> partsOfHull;        // hull object -> its parts, in creation order
@@ -423,6 +424,74 @@ void RunGenerators(void* hullObj) noexcept {
     }
 }
 
+// ---- ObjectAction 3..17 ------------------------------------------------------------------------------------------
+// 4.1 (docs/edf41-ufomother301.md 1.4): groups of five, BigCannon 3..7, Cannon 8..12, Panel 13..17: +0 enable (flag 0x900 = 1), +1
+// disable (0x900 = 0), +2 attack on (0x901 = 1), +3 attack off, +4 boost (0x902 = 1); only parts that are still alive (durability > 0)
+// take it. The flags live in the part's record. The visible part: a main cannon opens when enabled and closes when disabled, a
+// cannon shows (CAS state "appear") when enabled. The firing the flags allow comes with the bullets.
+void ApplyAction(void* hullObj,int action) noexcept {
+    if(action<3 || action>17)return;
+    const int group=(action-3)/5==0 ? kGroupBigCannon : (action-3)/5==1 ? kGroupCannon : kGroupPanel;
+    const int what=(action-3)%5;
+    struct Play { void* part; const wchar_t* state; };
+    std::vector<Play> play;
+    int touched=0;
+    {
+        std::lock_guard<std::mutex> hold(partLock);
+        const auto it=partsOfHull.find(hullObj);
+        if(it==partsOfHull.end())return;
+        for(void* part:it->second) {
+            const auto r=partOf.find(part);
+            if(r==partOf.end() || r->second.group!=group)continue;
+            const char* o=static_cast<const char*>(part);
+            float durability=0.0f;
+            if(Readable(o+kDurabilityAt,4))std::memcpy(&durability,o+kDurabilityAt,4);
+            if(!(durability>0.0f))continue;
+            PartRec& rec=r->second;
+            ++touched;
+            switch(what) {
+                case 0: rec.enabled=true;  if(group==kGroupBigCannon)play.push_back({part,L"open"}); else if(group==kGroupCannon)play.push_back({part,L"appear"}); break;
+                case 1: rec.enabled=false; if(group==kGroupBigCannon)play.push_back({part,L"close"}); break;
+                case 2: rec.attack=true; break;
+                case 3: rec.attack=false; break;
+                default: rec.boost=true; break;
+            }
+        }
+    }
+    for(const Play& p:play)PlayState(p.part,p.state);
+    Log("EDF41MOTHER action %d on %p: %s %s -> %d parts changed (%zu played a state)",action,hullObj,kGroupNames[group],
+        what==0 ? "enable" : what==1 ? "disable" : what==2 ? "attack on" : what==3 ? "attack off" : "boost",touched,play.size());
+}
+
+// ---- the hull's death takes its parts with it -----------------------------------------------------------------------
+// The first frame the hull reports destroyed, its parts are deleted one after another (every 3 frames, panels first). 4.1 lets them
+// fall and explode (docs 1.6, not read to the end); this is the stand-in so no part is left hanging in the air.
+std::unordered_map<const void*,std::uint32_t> dyingSince;     // hull -> its tick when the death was noticed
+void RunDeath(void* hullObj,std::uint32_t tick,bool destroyed) noexcept {
+    std::vector<void*> doomed;
+    {
+        std::lock_guard<std::mutex> hold(partLock);
+        if(destroyed && !dyingSince.count(hullObj)) {
+            dyingSince[hullObj]=tick;
+            genJobs.erase(hullObj);
+            Log("EDF41MOTHER hull %p destroyed at its frame %u: its parts go, one every 3 frames",hullObj,tick);
+        }
+        const auto d=dyingSince.find(hullObj);
+        if(d==dyingSince.end())return;
+        const auto it=partsOfHull.find(hullObj);
+        if(it==partsOfHull.end())return;
+        const std::uint32_t n=(tick-d->second)/3+1;
+        auto& v=it->second;
+        for(std::size_t k=0;k<n && !v.empty();++k) { doomed.push_back(v.back()); v.pop_back(); }
+    }
+    for(void* part:doomed) {
+        const char* o=static_cast<const char*>(part);
+        if(Readable(o+kFlagsAt,1) && !(o[kFlagsAt]&4))reinterpret_cast<DeleteObjectFn>(image+kDeleteObject)(part);
+        std::lock_guard<std::mutex> hold(partLock);
+        partOf.erase(part);
+    }
+}
+
 // ---- the parts: reading the hull's SGO and making them ---------------------------------------------------------
 // An SGO node is 12 bytes {int type, int a, uint b}: 0 array (a children at node + b), 1 int and 2 float (value at node + 8),
 // 3 UTF-16 string (a characters at node + b). Every node is checked with Readable before it is read.
@@ -461,7 +530,7 @@ bool MakePart(void* hullObj,const SgoNode* entry,int group,int index) noexcept {
         Fail("a part entry of the hull's SGO is not [path, euler, position]");
         return false;
     }
-    PartRec rec{hullObj,{},group,index};
+    PartRec rec{hullObj,{},group,index,false,false,false};
     LocalMatrix(euler,position,rec.local);
     float world[16];
     const char* h=static_cast<const char*>(hullObj);
@@ -578,6 +647,7 @@ std::uint64_t __fastcall DtorWrap(void* self,unsigned flags) {
         liveHulls.erase(self);
         genJobs.erase(self);
         partsBuilt.erase(self);
+        dyingSince.erase(self);
         const auto it=partsOfHull.find(self);
         if(it!=partsOfHull.end()) {
             Log("EDF41MOTHER hull %p gone: its %zu parts delete themselves on their next update",self,it->second.size());
@@ -623,6 +693,7 @@ std::uint64_t __fastcall UpdateWrap(void* self,void* dt) {
     }
     if(tick==1)Log("EDF41MOTHER first update %p durability %.1f destroyed %u pos %.1f %.1f %.1f",self,durability,destroyed,pos[0],pos[1],pos[2]);
     if(tick==1)SpawnParts(self);
+    RunDeath(self,tick,destroyed!=0);
     RunGenerators(self);
     if(changed)Log("EDF41MOTHER durability %p %.1f -> %.1f (destroyed %u)",self,before,durability,destroyed);
     if(tick%kUpdateLogEvery==0) {
@@ -664,6 +735,7 @@ std::uint64_t __fastcall MessageWrap(void* self,std::uint32_t msg,void* data) {
     if(msg==kMsgAction && data && Rd(data,4,"action message data")) {
         const std::int32_t action=*static_cast<const std::int32_t*>(data);
         Log("EDF41MOTHER ObjectAction %p action %d = %s (message 0x%X)",self,action,ActionMeaning(action),msg);
+        ApplyAction(self,action);
     }
     else if(msg==kMsgGenerator && data) {
         if(QueueGenerator(self,static_cast<const char*>(data)))return 1;   // handled: the hatches do it, not the carrier's one generator
@@ -785,6 +857,50 @@ void __fastcall FactoryCreate(Factory* self,void* info) noexcept {
 }
 
 
+// ---- bullet probe (dev, ini Edf41MotherBulletProbe) ----------------------------------------------------------------
+// Every bullet the game makes goes through 0x1194280(manager, matrix, bulletFactory, info) (the 507 family at 0x52C9B1, the E510
+// fortress, the E511 mothership ...). `info` is a creation context like the one a script spawn hands 0x11945E0 ({vtable, matrix*,
+// 0, 0, out*, ...}) with the bullet's settings after it; the bullet base constructor (0x22E9C0) reads +0x30 (a matrix copy), +0x38 /
+// +0x40 (the owner's weak pointer) and +0x1A0. This logs the bullet class and the first bytes of `info` the first times each class is
+// made, so the layout can be read off a real fortress / UFO fight instead of guessed.
+constexpr std::size_t kBulletSpawn=0x1194280;
+constexpr std::size_t kBulletSites[]={0x84c5a,0x97785,0x97c3c,0x98252,0x9ab41,0x9ae4e,0x9b2cf,0x9b78a,0x9f29f,0x1018d1,0x247bf7,0x2666a3,
+    0x2a4291,0x2a42f2,0x2a4932,0x2a4998,0x2b9f68,0x3525a3,0x3e742a,0x40e073,0x4362af,0x43d4da,0x491342,0x4a0ecd,0x4a11ce,0x4ace88,
+    0x4b2c2c,0x4e3805,0x510eb9,0x510f5d,0x511165,0x52c9b1,0x690b3f,0x69799f,0x697fd0,0x6b125d,0x6d025a,0x6d331d};
+void* __fastcall BulletSpawnProbe(void* manager,const float* matrix,void* factory,void* info) {
+    static std::mutex lock;
+    static const void* seenFactory[48];
+    static int seenCount[48];
+    static int kinds=0;
+    int at=-1;
+    {
+        std::lock_guard<std::mutex> hold(lock);
+        for(int i=0;i<kinds;++i)
+            if(seenFactory[i]==factory)at=i;
+        if(at<0 && kinds<48) { at=kinds++; seenFactory[at]=factory; seenCount[at]=0; }
+        if(at>=0)++seenCount[at];
+    }
+    const int n=at>=0 ? seenCount[at] : 0;
+    if(at>=0 && (n<=2 || n%200==0) && factory && Readable(factory,8)) {
+        const void* const* vt=*reinterpret_cast<const void* const* const*>(factory);
+        const wchar_t* name=L"?";
+        if(vt && Readable(vt,24) && Readable(vt[1],8))name=reinterpret_cast<const wchar_t*(__fastcall*)(void*)>(vt[1])(factory);
+        const bool sane=Readable(name,8);
+        Log("EDF41MOTHER bullet #%d of %ls (factory %p): matrix pos %.1f %.1f %.1f, info %p",n,sane ? name : L"?",factory,
+            matrix && Readable(matrix,64) ? matrix[12] : 0.0f,matrix && Readable(matrix,64) ? matrix[13] : 0.0f,matrix && Readable(matrix,64) ? matrix[14] : 0.0f,info);
+        if(n<=2 && info && Readable(info,0x1C0)) {
+            const unsigned char* b=static_cast<const unsigned char*>(info);
+            for(std::size_t o=0;o<0x1C0;o+=32) {
+                std::uint64_t q[4];
+                std::memcpy(q,b+o,32);
+                Log("EDF41MOTHER bullet info +0x%03zX: %016llX %016llX %016llX %016llX",o,static_cast<unsigned long long>(q[0]),static_cast<unsigned long long>(q[1]),
+                    static_cast<unsigned long long>(q[2]),static_cast<unsigned long long>(q[3]));
+            }
+        }
+    }
+    return reinterpret_cast<BulletSpawnFn>(image+kBulletSpawn)(manager,matrix,factory,info);
+}
+
 // ---- the registration -----------------------------------------------------------------------------------------
 bool RegisterFactoryNow() noexcept {
     if(registered.exchange(true))return true;
@@ -880,6 +996,14 @@ bool InstallEdf41Mother() noexcept {
     bool changed=false;
     const bool ok=RedirectCall(image+kRegisterAllSite,image+kRegisterAll,reinterpret_cast<void*>(&RegisterAllHook),changed);
     if(ok) {
+    }
+    if(ok && Cfg().edf41MotherBulletProbe) {
+        int hooked=0;
+        for(const std::size_t site:kBulletSites) {
+            bool c=false;
+            if(Readable(image+site,5) && static_cast<unsigned char>(image[site])==0xE8 && RedirectCall(image+site,image+kBulletSpawn,reinterpret_cast<void*>(&BulletSpawnProbe),c))++hooked;
+        }
+        Log("EDF41MOTHER bullet probe: %d of %zu bullet spawn call sites hooked",hooked,sizeof(kBulletSites)/sizeof(kBulletSites[0]));
     }
     // When this runs the game's start-up routine has not reached 0x701859 yet (the manager is null); if it has, the hook
     // can no longer fire and the log says so instead of the registration line.
