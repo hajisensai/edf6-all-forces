@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import math
 import os
+import time
 from dataclasses import dataclass, replace
 from typing import Callable
 
@@ -168,7 +169,8 @@ def texture_name(kit: str, key: str) -> str:
 def albedo_dds(spec: KitMaterial, root: str) -> bytes:
     if isinstance(spec.albedo, tuple):
         return texfile.solid_dxt1(spec.albedo)
-    return om.texture_dds(os.path.join(root, spec.albedo))
+    from texfile_accel import texture_dds
+    return texture_dds(os.path.join(root, spec.albedo))
 
 
 def template(game) -> tuple[Mdb, object]:  # noqa: ANN001 - rootcpk.Game
@@ -192,12 +194,19 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
         raise ValueError('two cockpits for one seat')
     import vehicle_optics   # the marker bone is the optics' kind (late: vehicle_optics imports this module)
     root = asset_root()
+    print('      座舱：提取车壳三角形……', flush=True)
     hull = hull_triangles(md)
-    kit_of = {fit.seat: fitted(hull, fit, kits[fit.kit]) for fit in fits}
+    kit_of: dict[int, Kit] = {}
+    for fit in fits:
+        started = time.perf_counter()
+        print(f'      席位 {fit.seat}（{fit.kit}）：开始适配座舱……', flush=True)
+        kit_of[fit.seat] = fitted(hull, fit, kits[fit.kit])
+        print(f'      席位 {fit.seat}：适配完成（{time.perf_counter()-started:.1f} 秒）', flush=True)
     for fit in fits:
         md = vehicle_optics.add_marker(md, fit.bone, MARKER.format(fit.seat), frame(fit))
         for scr in kit_of[fit.seat].screens:
             md = vehicle_optics.add_marker(md, fit.bone, screen_marker(fit.seat, scr), screen_frame(scr, fit))
+    print('      座舱：生成骨骼与网格……', flush=True)
     md = preorder(md)
     tmpl_md, tmpl_mesh = template(game)
     by_material: dict[tuple[str, str], list[tuple[om.Part, list]]] = {}
@@ -215,7 +224,10 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
     for (kit_name, key), pieces in sorted(by_material.items()):
         tex = texture_name(kit_name, key)
         if tex not in textures:
+            started = time.perf_counter()
+            print(f'      贴图 {kit_name}/{key}：转换中……', flush=True)
             textures[tex] = albedo_dds(materials[(kit_name, key)], root)
+            print(f'      贴图 {kit_name}/{key}：完成（{time.perf_counter()-started:.1f} 秒）', flush=True)
         md, mi = om.add_material(md, tmpl_md, TEMPLATE_MATERIAL, f'edf6vc_cpit_{kit_name}_{key}',
                                  {'albedo': tex, 'normal': NORMAL_TEX, 'param_r_m_occ_hr': RMO_TEX})
         meshes += om.build_meshes(tmpl_mesh, pieces, mi)
@@ -226,8 +238,9 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
 
 
 def add_textures(rab: Rab, textures: dict[str, bytes]) -> None:
+    from texfile_accel import compress_texture
     for name, dds in sorted(textures.items()):
-        om.add_texture(rab, name, dds)
+        om.add_texture(rab, name, dds, compressor=compress_texture)
 
 
 # ------------------------------------------------------------------------------------------ the room round an eye
@@ -376,13 +389,16 @@ def fitted(tris, fit: Fit, kit_fn: KitFn) -> Kit:  # noqa: ANN001 - numpy
     (exposed), the walls it presses on are pulled in SHRINK (at most SHRINK_ROUNDS rounds): the room is measured
     straight left, up, ahead ...; a round turret's corners are nearer than that."""
     m = frame(fit)
+    print(f'        席位 {fit.seat}：测量座舱空间……', flush=True)
     room = clearance(tris, fit.eye, m)
-    for _ in range(SHRINK_ROUNDS + 1):
+    for round_index in range(SHRINK_ROUNDS + 1):
+        print(f'        席位 {fit.seat}：适配第 {round_index+1}/{SHRINK_ROUNDS+1} 轮，读取座舱部件……', flush=True)
         kit = kit_fn(room)
         inside = [p for p in kit.parts if p.name not in kit.outside]
         local = [v.pos for p in inside for v in p.verts]
         if not local:   # nothing inside the hull to keep in (a remote station's display)
             return kit
+        print(f'        席位 {fit.seat}：检查 {len(local)} 个顶点是否露出车壳……', flush=True)
         bad = exposed(tris, [to_model(q, m, fit.scale) for q in local])
         if not bad.any():
             return kit
@@ -398,15 +414,36 @@ def fitted(tris, fit: Fit, kit_fn: KitFn) -> Kit:  # noqa: ANN001 - numpy
     raise ValueError(f'seat {fit.seat} ({fit.kit}): the kit still crosses the hull after {SHRINK_ROUNDS} rounds')
 
 
+def _graft_one(root: str, rel: str, data: bytes) -> bytes:
+    import rootcpk
+    import cockpit_fits
+    import cockpit_kits
+    import vehicle_optics
+    game = rootcpk.Game(root)
+    stem = rel.rsplit('/', 1)[-1].rsplit('.', 1)[0].upper()
+    fits = cockpit_fits.FITS[stem]
+    rab = rab_read(data)
+    mdbs = [f for f in rab.files if f.name.lower().endswith('.mdb')]
+    member = next((f for f in mdbs if f.name.lower() == stem.lower() + '.mdb'), mdbs[0] if len(mdbs) == 1 else None)
+    if member is None:
+        raise ValueError(f'{rel}: which of its models {[f.name for f in mdbs]} has the seats?')
+    md, textures = graft(mdb_read(member.data), fits, cockpit_kits.KITS, game, vehicle_optics.preorder)
+    print(f'{rel}：压缩模型与打包贴图……', flush=True)
+    member.stored = cmpl_compress(mdb_write(md))
+    add_textures(rab, textures)
+    return rab_write(rab)
+
+
 def graft_files(game, files: dict[str, bytes]) -> dict[str, bytes]:  # noqa: ANN001 - rootcpk.Game
     """A generator's files (tools/make_<x>.py build(): {path under Mods: bytes}) with the cockpits of its vehicles'
     seats grafted into their models: each OBJECT/<STEM>.MRAB fitted in pylib/cockpit_fits.py gets its model member
     (<stem>.mdb, else its only .mdb) grafted. Without the cockpit assets the files are as they were (the seats keep
     the stock camera), with a message."""
     import cockpit_fits
-    import cockpit_kits
-    import vehicle_optics
+    from model_workers import run_jobs
     out = dict(files)
+    jobs = []
+    paths = []
     for rel, data in files.items():
         stem = rel.rsplit('/', 1)[-1].rsplit('.', 1)[0].upper()
         fits = cockpit_fits.FITS.get(stem)
@@ -415,13 +452,8 @@ def graft_files(game, files: dict[str, bytes]) -> dict[str, bytes]:  # noqa: ANN
         if not assets_present():
             print(f'{rel}: no cockpits (the model folder has no {ASSET_DIR}/)')
             continue
-        rab = rab_read(data)
-        mdbs = [f for f in rab.files if f.name.lower().endswith('.mdb')]
-        member = next((f for f in mdbs if f.name.lower() == stem.lower() + '.mdb'), mdbs[0] if len(mdbs) == 1 else None)
-        if member is None:
-            raise ValueError(f'{rel}: which of its models {[f.name for f in mdbs]} has the seats?')
-        md, textures = graft(mdb_read(member.data), fits, cockpit_kits.KITS, game, vehicle_optics.preorder)
-        member.stored = cmpl_compress(mdb_write(md))
-        add_textures(rab, textures)
-        out[rel] = rab_write(rab)
+        paths.append(rel)
+        jobs.append((_graft_one, (game.root, rel, data), rel))
+    for rel, data in zip(paths, run_jobs(jobs)):
+        out[rel] = data
     return out

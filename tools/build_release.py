@@ -136,6 +136,19 @@ def check_bundled() -> None:
                          f'it at run time (python -m pip install {" ".join(missing)})')
 
 
+# native/cmpl.cpp built by build.cmd: mdb.cmpl_compress's encoder, 70 times the pure Python one (which spent most of an
+# install's model generation: 35 of a 40-second cockpit model, measured 2026-10-14). Both exes load it from _MEIPASS.
+CMPL_DLL = os.path.join(ROOT, 'build', 'pylib', 'edf6cmpl.dll')
+
+
+def cmpl_binary() -> list[str]:
+    """PyInstaller's --add-binary for CMPL_DLL; fails the build when build.cmd has not made it (the frozen exes would
+    fall back to the pure Python encoder and every install would take minutes longer)."""
+    if not os.path.isfile(CMPL_DLL):
+        raise SystemExit(f'build_release: {CMPL_DLL} missing; run build.cmd first')
+    return ['--add-binary', f'{CMPL_DLL}{os.pathsep}.']
+
+
 def generator_cmd() -> list[str]:
     """The PyInstaller command of the slim generator (tools/loadout_generator.py alone, onefile, console: the plugin starts
     it with CREATE_NO_WINDOW)."""
@@ -146,6 +159,7 @@ def generator_cmd() -> list[str]:
         cmd += ['--paths', p]
     for mod in GENERATOR_EXCLUDES:
         cmd += ['--exclude-module', mod]
+    cmd += cmpl_binary()
     cmd.append(os.path.join(ROOT, 'tools', 'loadout_generator.py'))
     return cmd
 
@@ -181,7 +195,7 @@ def build_exe(name: str, generator: str | None = None) -> str:
                 'make_bigmap', 'bigmap', 'seams', 'fmb', 'fmb_build', 'hkcms', 'hkcms_build', 'hktag', 'sk_map', 'sk_terrain', 'gen', 'rmpa', 'jet_models', 'jet_gear', 'weapons',
                 'testhub', 'make_emc', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
                 'cas_pose', 'aircraft_collision', 'support_config', 'support_loadout', 'room_layout', 'menu_preview',
-                'make_sazabi', 'sazabi_model', 'sazabi_arms', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'legacy_assets', 'rabpool', 'mdb_legacy', 'cas_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics',
+                'make_sazabi', 'sazabi_model', 'sazabi_arms', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'legacy_assets', 'rabpool', 'mdb_legacy', 'cas_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics', 'texfile_accel', 'model_workers', 'mdb',
                 'gamelease', 'build'):   # every module installer.py imports in a function (selftest release_imports); build is
         # autoturret/tools/build.py (--paths above comes before site-packages, where pip's own `build` may be)
         cmd += ['--hidden-import', mod]
@@ -190,6 +204,7 @@ def build_exe(name: str, generator: str | None = None) -> str:
     for name in plugin_data():
         cmd += ['--add-data', f'{os.path.join(PLUGINS, name)}{seps}plugin']
     cmd += ['--add-data', f'{info}{seps}plugin']
+    cmd += cmpl_binary()
     cmd += ['--add-data', f'{recipes}{seps}plugin']
     if generator:   # beside the plugin files: installer.generator_source finds it there
         cmd += ['--add-data', f'{generator}{seps}plugin']
@@ -220,6 +235,7 @@ def build_exe(name: str, generator: str | None = None) -> str:
     env.pop('PYTHONPATH', None)
     with tempfile.TemporaryDirectory(prefix='edf6vc-package-smoke-') as folder:
         subprocess.run([exe, '--check-package'], cwd=folder, env=env, check=True, timeout=120)
+        subprocess.run([exe, '--check-workers'], cwd=folder, env=env, check=True, timeout=120)
     return exe
 
 
