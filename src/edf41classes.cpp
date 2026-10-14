@@ -13,6 +13,7 @@
 #include <cwchar>
 #include <deque>
 #include <mutex>
+#include <string>
 #include <vector>
 
 namespace crew::edf41c {
@@ -437,5 +438,230 @@ bool NearestPlayer(const float* from,float* out) noexcept {
     if(!h || !Rd(h+kPosAt,12,"player position"))return false;
     std::memcpy(out,h+kPosAt,12);
     return std::isfinite(out[0]+out[1]+out[2]);
+}
+
+// ---- EDF6 primitives (re6/PRIMITIVES.md) --------------------------------------------------------------------------
+namespace {
+constexpr std::size_t kFindLocator=0x6BADD0,kLocatorMatrix=0x6BB5A0,kBoneIndex=0x11002A0,kSetTeam=0x54EE70,kSetLevel=0x54E740,
+    kDifficulty=0xD7720,kGameStatus=0x20B2890,kGetTarget=0x30C0F0,kBodyByName=0x6EA670,kBodyById=0x6EA430,kPresetInit=0x7B3200,
+    kCueLookup=0x7AEAE0,kSoundSystem=0x20B2948,kPresetPlay=0x7B4510,kSoundMove=0x7A8C20,kSoundStop=0x7A8CD0,kEffects=0x20B2980,
+    kFlame=0x2E7FF0,kBlazing=0x2E0B70,kExplosion=0x2E5ED0,kExplosionBig=0x2E7A30,kDropItems=0x548AE0;
+constexpr Print kPrimPrints[]={
+    {kFindLocator,{0x40,0x53,0x55,0x56,0x57,0x41,0x56,0x41}},{kLocatorMatrix,{0x48,0x8B,0xC4,0x48,0x89,0x70,0x10,0x48}},
+    {kBoneIndex,{0x48,0x8B,0x09,0xE9,0xB8,0x7D,0x00,0x00}},{kSetTeam,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},
+    {kSetLevel,{0x48,0x8B,0xC4,0x48,0x89,0x58,0x18,0x55}},{kDifficulty,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74}},
+    {kGetTarget,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},{kBodyByName,{0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x6C}},
+    {kBodyById,{0x4C,0x8B,0x41,0x78,0x45,0x33,0xC9,0x48}},{kPresetInit,{0x48,0x83,0xEC,0x18,0x45,0x33,0xC9,0xC7}},
+    {kCueLookup,{0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57}},{kPresetPlay,{0x48,0x83,0xEC,0x48,0x48,0x8B,0x41,0x20}},
+    {kSoundMove,{0x4C,0x8B,0x41,0x08,0x4D,0x85,0xC0,0x74}},{kSoundStop,{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B}},
+    {kFlame,{0x48,0x8B,0xC4,0x48,0x89,0x58,0x08,0x48}},{kBlazing,{0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57}},
+    {kExplosion,{0x48,0x8B,0xC4,0x55,0x53,0x56,0x57,0x41}},{kExplosionBig,{0x48,0x8B,0xC4,0x55,0x53,0x56,0x57,0x41}},
+    {kDropItems,{0x48,0x8B,0xC4,0x48,0x89,0x58,0x18,0x48}},
+    {kParamCtor,{0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x74}},{kParamDtor,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74}},
+    {kWeakAssign,{0x48,0x89,0x74,0x24,0x20,0x57,0x48,0x83}},{kSpawn,{0x40,0x53,0x55,0x56,0x57,0x41,0x56,0x48}},
+};
+std::atomic<int> primState{0};   // 0 unchecked, 1 good, 2 refused
+bool Prims() noexcept {
+    int s=primState.load();
+    if(s)return s==1;
+    for(const Print& p:kPrimPrints)
+        if(!Readable(image+p.rva,8) || std::memcmp(image+p.rva,p.bytes,8)!=0) {
+            Log("EDF41CLASS the code at EDF.dll+0x%zX is not what this was written for: effects, sounds, teams and targets are off",p.rva);
+            primState=2;
+            return false;
+        }
+    primState=1;
+    return true;
+}
+template<class F> F At(std::size_t rva) noexcept { return reinterpret_cast<F>(image+rva); }
+void* Global(std::size_t rva) noexcept { return Readable(image+rva,8) ? *reinterpret_cast<void**>(image+rva) : nullptr; }
+}  // namespace
+
+void SetFlag(void* object,std::uint32_t bits,bool on) noexcept {
+    char* o=static_cast<char*>(object);
+    if(!object || !Rd(o+kFlags380,4,"object flags +0x380"))return;
+    std::uint32_t& f=*reinterpret_cast<std::uint32_t*>(o+kFlags380);
+    f=on ? (f|bits) : (f&~bits);
+}
+
+bool FindLocator(void* model,const wchar_t* name,LocatorHandle* out) noexcept {
+    *out={nullptr,nullptr};
+    if(!Prims() || !model || !Rd(model,8,"model component"))return false;
+    return At<bool(__fastcall*)(void*,LocatorHandle*,int,const wchar_t*)>(kFindLocator)(model,out,0,name) && out->entry && out->bone;
+}
+bool LocatorMatrix(const LocatorHandle& h,float* out) noexcept {
+    if(!Prims() || !h.entry || !h.bone)return false;
+    alignas(16) float m[16];
+    At<float*(__fastcall*)(const LocatorHandle*,float*)>(kLocatorMatrix)(&h,m);
+    std::memcpy(out,m,sizeof(m));
+    return std::isfinite(m[12]+m[13]+m[14]);
+}
+int BoneIndex(void* skeleton,const wchar_t* name) noexcept {
+    if(!Prims() || !skeleton || !Rd(skeleton,0x28,"skeleton"))return -1;
+    const std::wstring n(name);
+    const int i=At<int(__fastcall*)(void*,const std::wstring*)>(kBoneIndex)(skeleton,&n);
+    const std::int64_t count=*reinterpret_cast<const std::int64_t*>(static_cast<char*>(skeleton)+0x20);
+    return i>=0 && i<count ? i : -1;
+}
+bool BoneMatrix(void* skeleton,int index,float* out) noexcept {
+    if(index<0 || !skeleton || !Rd(skeleton,0x28,"skeleton"))return false;
+    const char* records=*reinterpret_cast<char* const*>(static_cast<char*>(skeleton)+0x10);
+    const std::int64_t count=*reinterpret_cast<const std::int64_t*>(static_cast<char*>(skeleton)+0x20);
+    if(index>=count)return false;
+    const char* rec=records+static_cast<std::size_t>(index)*0x110;
+    if(!records || !Rd(rec+0xB0,64,"bone record"))return false;
+    std::memcpy(out,rec+0xB0,64);
+    return std::isfinite(out[12]+out[13]+out[14]);
+}
+
+bool SetTeam(void* object,std::int32_t team,bool reg) noexcept {
+    if(!Prims() || !object)return false;
+    return At<bool(__fastcall*)(void*,std::int32_t,bool)>(kSetTeam)(object,team,reg);
+}
+void SetLevel(void* object,float rawLevel) noexcept {
+    if(Prims() && object)At<void(__fastcall*)(void*,float)>(kSetLevel)(object,rawLevel);
+}
+float LevelS(const void* object) noexcept {
+    const char* o=static_cast<const char*>(object);
+    if(!object || !Rd(o+kLevelAt,4,"object level"))return 1.0f;
+    float l;
+    std::memcpy(&l,o+kLevelAt,4);
+    return std::isfinite(l) && l>0.0f ? l/10.0f : 1.0f;
+}
+float Difficulty(float x) noexcept {
+    void* gs=Global(kGameStatus);
+    if(!Prims() || !gs)return x;
+    return At<float(__fastcall*)(void*,float)>(kDifficulty)(gs,x);
+}
+void SizeDurability(void* object) noexcept {
+    char* o=static_cast<char*>(object);
+    if(!object || !Rd(o+kBaseDurabilityAt,16,"object durability fields"))return;
+    float base;
+    std::memcpy(&base,o+kBaseDurabilityAt,4);
+    const float max=Difficulty(base*LevelS(object));
+    if(!(max>0.0f) || !std::isfinite(max))return;
+    std::memcpy(o+kMaxDurabilityAt,&max,4);
+    std::memcpy(o+kDurabilityAt,&max,4);
+}
+
+void* Target(void* object) noexcept {
+    if(!Prims() || !object)return nullptr;
+    return At<void*(__fastcall*)(void*)>(kGetTarget)(object);
+}
+bool AimPoint(const void* target,float* out) noexcept {
+    const char* t=static_cast<const char*>(target);
+    if(!target || !Rd(t+0x360,0x20,"target lock points") || !Rd(t+kPosAt,12,"target position"))return false;
+    const std::size_t count=*reinterpret_cast<const std::size_t*>(t+0x378);
+    const char* first=count ? *reinterpret_cast<char* const*>(t+0x368) : nullptr;
+    const char* point=first && Readable(first,8) ? *reinterpret_cast<char* const*>(first) : nullptr;
+    if(point && Rd(point+0x10,12,"lock point"))std::memcpy(out,point+0x10,12);
+    else std::memcpy(out,t+kPosAt,12);
+    return std::isfinite(out[0]+out[1]+out[2]);
+}
+
+int HitBody(void* ragdoll,const void* damageInfo) noexcept {
+    const char* g=static_cast<const char*>(damageInfo);
+    if(!Prims() || !ragdoll || !g || !Rd(g,0x90,"damage info"))return -1;
+    const char* recs=*reinterpret_cast<char* const*>(g+0x78);
+    const std::size_t n=*reinterpret_cast<const std::size_t*>(g+0x88);
+    if(!recs || n==0 || n>256 || !Rd(recs,n*0x30,"damage sub-hits"))return -1;
+    const float* c=reinterpret_cast<const float*>(g+kGdiCentre);
+    std::uint32_t body=0;
+    float best=3.4e38f;
+    for(std::size_t i=0;i<n;++i) {
+        const float* p=reinterpret_cast<const float*>(recs+i*0x30);
+        const float d=(p[0]-c[0])*(p[0]-c[0])+(p[1]-c[1])*(p[1]-c[1])+(p[2]-c[2])*(p[2]-c[2]);
+        if(d<best) { best=d; body=*reinterpret_cast<const std::uint32_t*>(recs+i*0x30+0x20); }
+    }
+    return At<int(__fastcall*)(void*,std::uint32_t)>(kBodyById)(ragdoll,body);
+}
+int RagdollBody(void* ragdoll,const wchar_t* name) noexcept {
+    if(!Prims() || !ragdoll || !Rd(ragdoll,0x90,"ragdoll"))return -1;
+    return At<int(__fastcall*)(void*,const wchar_t*)>(kBodyByName)(ragdoll,name);
+}
+
+bool PlayCue(const wchar_t* cue,const float* pos,SoundHandle* handle,const SeParams& params) noexcept {
+    void* system=Global(kSoundSystem);
+    if(!Prims() || !system || !cue || !*cue)return false;
+    alignas(16) unsigned char preset[0x80];
+    At<void*(__fastcall*)(void*)>(kPresetInit)(preset);
+    struct { void* bank; std::int32_t cue; std::int32_t pad; } ref{nullptr,-1,0};
+    if(!At<bool(__fastcall*)(void*,void*,int,const wchar_t*)>(kCueLookup)(system,&ref,0,cue) || !ref.bank) {
+        static std::atomic<int> said{0};
+        if(said.fetch_add(1)<16)Log("EDF41CLASS no sound cue %ls in the loaded banks",cue);
+        return false;
+    }
+    for(std::size_t at=0x20;at<=0x60;at+=0x10)std::memcpy(preset+at,&ref,16);
+    std::memcpy(preset+0x74,&params.volume,4);
+    std::memcpy(preset+0x70,&params.pitch,4);
+    std::memcpy(preset+0x10,&params.inner,4);
+    std::memcpy(preset+0x14,&params.reference,4);
+    std::memcpy(preset+0x18,&params.cull,4);
+    alignas(16) float p[4]={pos[0],pos[1],pos[2],1.0f};
+    At<void(__fastcall*)(void*,const float*,void*)>(kPresetPlay)(preset,p,handle);
+    return true;
+}
+bool PlaySe(const void* table,const wchar_t* name,const float* pos,SoundHandle* handle) noexcept {
+    const SgoNode* list=Key(table,L"edf41_se");
+    const int n=Count(list);
+    wchar_t text[96],cue[96];
+    for(int i=0;i<n;++i) {
+        const SgoNode* e=Child(list,i);
+        if(Count(e)<7 || !Text(Child(e,0),text,96) || std::wcscmp(text,name)!=0)continue;
+        SeParams p;
+        if(!Text(Child(e,1),cue,96) || !Float(Child(e,2),&p.volume) || !Float(Child(e,3),&p.pitch) || !Float(Child(e,4),&p.inner)
+           || !Float(Child(e,5),&p.reference) || !Float(Child(e,6),&p.cull))break;
+        return PlayCue(cue,pos,handle,p);
+    }
+    static std::atomic<int> said{0};
+    if(said.fetch_add(1)<16)Log("EDF41CLASS no 4.1 sound preset %ls in the object's edf41_se",name);
+    return false;
+}
+void MoveSound(SoundHandle& handle,const float* pos) noexcept {
+    if(!Prims() || !handle.instance)return;
+    alignas(16) float p[4]={pos[0],pos[1],pos[2],1.0f};
+    At<void(__fastcall*)(SoundHandle*,const float*)>(kSoundMove)(&handle,p);
+}
+void StopSound(SoundHandle& handle,int fadeFrames) noexcept {
+    if(!Prims() || !handle.instance)return;
+    At<void(__fastcall*)(SoundHandle*,int)>(kSoundStop)(&handle,fadeFrames);
+}
+
+void FireBurst(const float* pos,const float* dir,float size) noexcept {
+    void* egu=Global(kEffects);
+    if(!Prims() || !egu)return;
+    alignas(16) float p[4]={pos[0],pos[1],pos[2],1.0f},d[4]={dir[0],dir[1],dir[2],1.0f};
+    At<void(__fastcall*)(void*,const float*,const float*,float)>(kFlame)(egu,p,d,size);
+}
+void Blazing(const float* pos,const float* dir,float size) noexcept {
+    void* egu=Global(kEffects);
+    if(!Prims() || !egu)return;
+    alignas(16) float p[4]={pos[0],pos[1],pos[2],1.0f},d[4]={dir[0],dir[1],dir[2],1.0f};
+    At<void(__fastcall*)(void*,const float*,const float*,float,bool,int)>(kBlazing)(egu,p,d,size,false,0);
+}
+void Explosion(const float* pos,const float* dir,float size) noexcept {
+    void* egu=Global(kEffects);
+    if(!Prims() || !egu)return;
+    alignas(16) float p[4]={pos[0],pos[1],pos[2],1.0f},d[4]={dir[0],dir[1],dir[2],1.0f};
+    alignas(16) const float white[4]={1.0f,1.0f,1.0f,1.0f};
+    At<void(__fastcall*)(void*,const float*,const float*,float,float,const float*,float)>(kExplosion)(egu,p,d,size,1.0f,white,1.0f);
+}
+void BigExplosion(const float* pos,const float* dir,float size,float k) noexcept {
+    void* egu=Global(kEffects);
+    if(!Prims() || !egu)return;
+    alignas(16) float p[4]={pos[0],pos[1],pos[2],1.0f},d[4]={dir[0],dir[1],dir[2],1.0f};
+    At<void(__fastcall*)(void*,const float*,const float*,float,float,bool)>(kExplosionBig)(egu,p,d,size,k,false);
+}
+
+void DropItems(void* object) noexcept {
+    char* o=static_cast<char*>(object);
+    if(!Prims() || !object || !Rd(o+0x590,1,"object items dropped") || o[0x590])return;
+    alignas(16) float p[4]={0,0,0,1};
+    std::memcpy(p,o+kPosAt,12);
+    At<void(__fastcall*)(void*,const float*)>(kDropItems)(object,p);
+}
+
+void SetSlot(Clone& c,int slot,void* fn) noexcept {
+    if(slot>=0 && slot<c.slots && fn)c.block[1+slot]=fn;
 }
 }  // namespace crew::edf41c

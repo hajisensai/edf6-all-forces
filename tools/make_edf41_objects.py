@@ -1352,7 +1352,25 @@ MOTHER301_LOCATORS = (
 )
 
 
-def mother301_fix(files: dict[str, bytes]) -> None:
+def se41_table(games: 'Games', prefixes: tuple[str, ...]) -> list[list]:
+    """4.1's SEPRESET entries whose name starts with one of `prefixes`, as the plugin's SGO key edf41_se wants them:
+    [[name, cue, volume, pitch, a, b, c], ...] (src/edf41classes.h PlaySe: EDF6's SEPRESET has none of 4.1's names; the cues
+    are in the tikyuu4_* banks EDF6 ships)."""
+    data = games.read4('SOUND/SEPRESET.SGO')
+    try:
+        table = sgo.load(data=data)
+    except Exception:   # noqa: BLE001 - 4.1's classic SGO through the converter
+        table = sgo.load(data=legacy_sgo.convert(data))
+    out = []
+    for name, v in sorted(table.items()):
+        if name.startswith(prefixes) and isinstance(v, list) and len(v) >= 6 and isinstance(v[0], str):
+            out.append([name, v[0], *(float(x) for x in v[1:6])])
+    if not out:
+        raise ValueError(f'4.1 SEPRESET has no entry starting with {prefixes}')
+    return out
+
+
+def mother301_fix(games: 'Games', files: dict[str, bytes]) -> None:
     """The hull SGO after the alias: the carrier's two MAB locators added, the model's size recorded for the plugin's log,
     only the files the SGO names kept, the part classes' CAS and model fixes (mother_parts_fix)."""
     rel = 'OBJECT/' + MOTHER301_ROOT
@@ -1368,6 +1386,7 @@ def mother301_fix(files: dict[str, bytes]) -> None:
     md = mdb.mdb_read(body.data)
     ext = [max(abs(x) for x in mdb.rigid_extent(md, ax)) for ax in range(3)]
     members['edf41_mother_model'] = [am[0][0][1], *ext, len(md.bones)]
+    members['edf41_se'] = se41_table(games, ('母船UFO',))   # the hull's table: its parts play from it too
     files[rel] = sgo.write_depth_first(version, members)
     prune(files, rel)
     mother_parts_fix(files)
@@ -1397,7 +1416,7 @@ def mother_parts_fix(files: dict[str, bytes]) -> None:
 # Native classes the plugin implements (src/edf41mother.cpp ...): their root's alias, then this fix of the converted files.
 ROOTS[MOTHER301_ROOT] = 6   # M016 M110 M123 M130 M210 M603 (DLC pack 1's M993 names the same story file)
 ALIASES[MOTHER301_ROOT] = MOTHER301_ALIAS
-NATIVE_FIXES: dict[str, Callable[[dict[str, bytes]], None]] = {MOTHER301_ROOT: mother301_fix}
+NATIVE_FIXES: dict[str, Callable[['Games', dict[str, bytes]], None]] = {MOTHER301_ROOT: mother301_fix}
 
 def alias(games: Games, root: str, files: dict[str, bytes], a: Alias) -> None:
     """In `files` (the converted closure of OBJECT/`root`): its SGO under class a.cls with a.template's keys it
@@ -2414,7 +2433,7 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
             try:
                 alias(games, root, out, ALIASES[root])
                 if root in NATIVE_FIXES:
-                    NATIVE_FIXES[root](out)
+                    NATIVE_FIXES[root](games, out)
             except ValueError as e:
                 why.append(f'alias {ALIASES[root].cls}: {e}')
         if not why and root in PATCHES:
