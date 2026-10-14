@@ -245,7 +245,7 @@ void Validate(Config& n) noexcept {
     n.firstPersonKey=static_cast<int>(FixInt("FirstPersonKey",n.firstPersonKey,0,254));
     Fix("FirstPersonEyeUp",n.fpEyeUp,-0.5f,0.5f);
     Fix("FirstPersonEyeAhead",n.fpEyeAhead,-0.5f,0.5f);
-    Fix("FirstPersonEyeEase",n.fpEyeEase,0.02f,1.0f);
+    Fix("FirstPersonViewHeightEase",n.fpViewHeightEase,0.02f,1.0f);
     Fix("FirstPersonGripX",n.fpGripX,-1.0f,1.0f);
     Fix("FirstPersonGripY",n.fpGripY,-1.0f,1.0f);
     Fix("FirstPersonGripZ",n.fpGripZ,-1.0f,2.0f);
@@ -348,7 +348,8 @@ void IgnoreRetired() noexcept {
     struct Retired { const wchar_t* key; const char* why; };
     static const Retired kRetired[]={{L"HeliMoveGain",kGainsFixed},{L"HeliBrakeGain",kGainsFixed},{L"HeliClimbGain",kGainsFixed},
                                      {L"HeliHoverLearn",kGainsFixed},{L"HeliMousePitch","superseded by HeliMouseAim"},
-                                     {L"DrillHeatSec","superseded by DrillOverheatSec (30 s by default: 12 s overheated too soon)"}};
+                                     {L"DrillHeatSec","superseded by DrillOverheatSec (30 s by default: 12 s overheated too soon)"},
+                                     {L"FirstPersonEyeEase","superseded by FirstPersonViewHeightEase (the eye no longer follows the head's sway)"}};
     constexpr int kCount=static_cast<int>(sizeof(kRetired)/sizeof(kRetired[0]));
     static bool said[kCount]{};
     for(int i=0;i<kCount;++i) {
@@ -487,6 +488,12 @@ void LoadConfig() noexcept {
     n.sazabiCannonDamage=ReadFloat(L"SazabiCannonDamage",n.sazabiCannonDamage);
     n.sazabiFunnelDamage=ReadFloat(L"SazabiFunnelDamage",n.sazabiFunnelDamage);
     n.sazabiTestBoard=ReadBool(L"SazabiTestBoard",n.sazabiTestBoard);
+    {
+        wchar_t text[32]{};
+        GetPrivateProfileStringW(L"VehicleCrew",L"TestBoardVehicle",L"",text,32,iniPath);
+        for(int i=0;i<31 && text[i];++i)n.testBoardVehicle[i]=text[i]<0x80 ? static_cast<char>(text[i]) : '?';
+        if(n.testBoardVehicle[0])Log("CONFIG TestBoardVehicle=%s (tests only): the player put into the first such vehicle",n.testBoardVehicle);
+    }
     n.airdropTest=static_cast<int>(FixInt("AirdropTest",ReadInt(L"AirdropTest",static_cast<DWORD>(n.airdropTest)),0,3));
     if(n.airdropTest)Log("CONFIG AirdropTest=%d (tests only): a container airdrop asked once a mission",n.airdropTest);
     n.npcCrewTest=ReadBool(L"NpcCrewTest",n.npcCrewTest);
@@ -581,7 +588,7 @@ void LoadConfig() noexcept {
     n.firstPersonStart=ReadBool(L"FirstPersonStart",n.firstPersonStart);
     n.fpEyeUp=ReadFloat(L"FirstPersonEyeUp",n.fpEyeUp);
     n.fpEyeAhead=ReadFloat(L"FirstPersonEyeAhead",n.fpEyeAhead);
-    n.fpEyeEase=ReadFloat(L"FirstPersonEyeEase",n.fpEyeEase);
+    n.fpViewHeightEase=ReadFloat(L"FirstPersonViewHeightEase",n.fpViewHeightEase);
     n.fpGripX=ReadFloat(L"FirstPersonGripX",n.fpGripX);
     n.fpGripY=ReadFloat(L"FirstPersonGripY",n.fpGripY);
     n.fpGripZ=ReadFloat(L"FirstPersonGripZ",n.fpGripZ);
@@ -776,7 +783,7 @@ void LoadConfig() noexcept {
         n.highCamBack,n.highCamPitch);
     Log("CONFIG sightZoom=%d key=0x%X button=0x%X infantryScope=%d",n.sightZoom,n.sightZoomKey,n.sightZoomButton,n.infantryScope);
     Log("CONFIG firstPerson=%d key=0x%X start=%d eye up %.2f ahead %.2f ease %.2f grip (%.2f,%.2f,%.2f) hold (%.2f,%.2f,%.2f) scale %.2f near %.3f aimSnap=%d motion=%d",
-        n.firstPerson,n.firstPersonKey,n.firstPersonStart,n.fpEyeUp,n.fpEyeAhead,n.fpEyeEase,n.fpGripX,n.fpGripY,n.fpGripZ,n.fpHoldX,n.fpHoldY,n.fpHoldZ,
+        n.firstPerson,n.firstPersonKey,n.firstPersonStart,n.fpEyeUp,n.fpEyeAhead,n.fpViewHeightEase,n.fpGripX,n.fpGripY,n.fpGripZ,n.fpHoldX,n.fpHoldY,n.fpHoldZ,
         n.fpScale,n.fpNear,n.fpAimSnap,n.fpMotion);
     Log("CONFIG nixTorsoTwist=%d",n.nixTorsoTwist);
     Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f",n.map,n.mapKey,n.mapButton,n.mapViewDistance);
@@ -962,6 +969,16 @@ unsigned char* PlayerHuman() noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){return nullptr;}
 }
 }  // namespace crew
+
+// A background host's keyboard, foreground window and pad for this plugin (common/edf/input_source.h); null: its own.
+extern "C" __declspec(dllexport) void __cdecl EDF6VehicleCrew_SetInputSourceV2(edf::AsyncKeyFn key,edf::ForegroundFn window,
+                                                                             edf::PadStateFn pad) {
+    edf::SetInputSource(key,window,pad);
+    crew::Log("INPUT keyboard, foreground window and pad %s",key || window || pad ? "handed over by the host (a background run)" : "its own again");
+}
+extern "C" __declspec(dllexport) void __cdecl EDF6VehicleCrew_SetInputSourceV1(edf::AsyncKeyFn key,edf::ForegroundFn window) {
+    EDF6VehicleCrew_SetInputSourceV2(key,window,nullptr);
+}
 
 extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     using namespace crew;

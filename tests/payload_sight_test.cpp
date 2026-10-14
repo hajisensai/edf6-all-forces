@@ -7,12 +7,10 @@ SHORT Key(int vk) noexcept { return vk>=0 && vk<256 && keys[vk] ? static_cast<SH
 HWND Window() noexcept { return nullptr; }
 DWORD Process(HWND,LPDWORD pid) noexcept { *pid=GetCurrentProcessId();return 1; }
 }
-#define GetAsyncKeyState sightinput::Key
-#define GetForegroundWindow sightinput::Window
 #define GetWindowThreadProcessId sightinput::Process
 #include "../src/payload.cpp"
-#undef GetAsyncKeyState
-#undef GetForegroundWindow
+// The plugin's key source (edf/input_source.h) at load: payload_click_test includes this file with its own main.
+const bool sightInputHanded=(edf::SetInputSource(&sightinput::Key,&sightinput::Window),true);
 #undef GetWindowThreadProcessId
 #include <cstdio>
 namespace crew {

@@ -21,6 +21,7 @@
 #include "PluginAPI.h"
 #pragma warning(pop)
 #include "edf/host.h"
+#include "edf/input_source.h"
 #include "append_log.h"
 #include "turret.h"
 
@@ -906,6 +907,12 @@ int HookFlak() noexcept {
     return 1+HookGrenade()+HookRocket();
 }
 }  // namespace autoturret
+
+// A background host's keyboard and foreground window for this plugin (common/edf/input_source.h); null: user32's.
+extern "C" __declspec(dllexport) void __cdecl EDF6AutoTurret_SetInputSourceV1(edf::AsyncKeyFn key,edf::ForegroundFn window) {
+    edf::SetInputSource(key,window);
+    autoturret::Log("INPUT keyboard and foreground window %s",key || window ? "handed over by the host (a background run)" : "user32's again");
+}
 
 extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     using namespace autoturret;

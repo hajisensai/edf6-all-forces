@@ -14,12 +14,8 @@ SHORT Key(int vk) noexcept { return vk>=0 && vk<256 && down[vk] ? static_cast<SH
 HWND Window() noexcept { return nullptr; }
 DWORD Process(HWND,LPDWORD pid) noexcept { *pid=GetCurrentProcessId();return 1; }
 }
-#define GetAsyncKeyState aimkeys::Key
-#define GetForegroundWindow aimkeys::Window
 #define GetWindowThreadProcessId aimkeys::Process
 #include "../autoturret/src/designate.cpp"
-#undef GetAsyncKeyState
-#undef GetForegroundWindow
 #undef GetWindowThreadProcessId
 #include <cstdio>
 
@@ -104,6 +100,7 @@ void Look(float x,float y,float z) { viewAt[0]=x;viewAt[1]=y;viewAt[2]=z; }
 }  // namespace
 
 int main() {
+    edf::SetInputSource(&aimkeys::Key,&aimkeys::Window);   // the plugin's key source (edf/input_source.h)
     relation[1]=kEnemyRelation;
     viewRay=&View;turretObserver=&Observer;
     const ULONGLONG now=GetTickCount64();

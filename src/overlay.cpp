@@ -23,7 +23,7 @@ wchar_t text[128]{};
 ULONGLONG shownAt=0;
 
 bool GameInFront(HWND* game) noexcept {
-    const HWND w=GetForegroundWindow();
+    const HWND w=edf::ForegroundWindow();
     DWORD pid=0;
     if(!w || w==banner || !GetWindowThreadProcessId(w,&pid) || pid!=GetCurrentProcessId())return false;
     *game=w;
@@ -82,8 +82,8 @@ DWORD WINAPI PickerThread(void*) {
         HWND game=nullptr;
         const Config& cfg=Cfg();   // one snapshot per poll
         const bool front=cfg.enabled && !MapHoldsKeys() && GameInFront(&game);   // the map view holds the keys (map.cpp)
-        const bool next=front && cfg.callNextKey && (GetAsyncKeyState(static_cast<int>(cfg.callNextKey))&0x8000);
-        const bool prev=front && cfg.callPrevKey && (GetAsyncKeyState(static_cast<int>(cfg.callPrevKey))&0x8000);
+        const bool next=front && cfg.callNextKey && (edf::AsyncKey(static_cast<int>(cfg.callNextKey))&0x8000);
+        const bool prev=front && cfg.callPrevKey && (edf::AsyncKey(static_cast<int>(cfg.callPrevKey))&0x8000);
         const int step=(next && !nextDown) ? 1 : (prev && !prevDown) ? -1 : 0;
         nextDown=next;prevDown=prev;
         if(step) {

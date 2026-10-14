@@ -201,9 +201,9 @@ void NoteSave(Tx t,const wchar_t* arg,bool warn) noexcept {
 }
 
 // --- Input ---
-bool KeyDown(int vk) noexcept { return vk>0 && (GetAsyncKeyState(vk)&0x8000)!=0; }
+bool KeyDown(int vk) noexcept { return vk>0 && (edf::AsyncKey(vk)&0x8000)!=0; }
 bool Foreground() noexcept {
-    const HWND w=GetForegroundWindow();
+    const HWND w=edf::ForegroundWindow();
     DWORD pid=0;
     if(w)GetWindowThreadProcessId(w,&pid);
     return pid==GetCurrentProcessId();
