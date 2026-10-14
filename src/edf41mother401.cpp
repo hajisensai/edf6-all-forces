@@ -25,6 +25,9 @@
 //
 // Online: the classes run where the object's simulation runs (OnlineRunsHere); elsewhere the hull lays out nothing. 4.1's own
 // network sync (action numbers, state indices) is not ported.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include "crew.h"
 #include "edf41classes.h"
 #include "memory.h"
@@ -170,7 +173,7 @@ struct Part {
     float target[3]={},velocity[3]={},yawAccel=0.0f,yaw=0.0f,yawTarget=0.0f,yawNow=0.0f;
     int actionCount[64]={};
     int throttle=0;
-    SeHandle ambient;
+    SoundHandle ambient;
     int team=-1;
     std::uint32_t hullFrames=0;
     double usOurs=0.0,usStock=0.0;
@@ -195,7 +198,7 @@ struct Part {
     std::vector<Mount> mounts;
     bool mountsMade=false;
     int countdown=0,minWait=0,maxWait=0;
-    SeHandle loopA,loopB;
+    SoundHandle loopA,loopB;
     Bullet shot,shot2;
     float spread=0.0f,turn=0.0f,aim[3]={0,-1,0};
     Generator gen;
@@ -236,15 +239,16 @@ void ReadCues(Part& p) noexcept {
         p.se.push_back(c);
     }
 }
-void PlaySeAt(Part& p,int i,const float* pos,SeHandle* loop=nullptr) noexcept {
+void PlaySeAt(Part& p,int i,const float* pos,SoundHandle* loop=nullptr) noexcept {
     if(i<0 || i>=static_cast<int>(p.se.size()) || !p.se[static_cast<std::size_t>(i)].name[0])return;
     const Cue& c=p.se[static_cast<std::size_t>(i)];
-    if(!PlayCue(c.name,pos,loop,c.volume,c.pitch,c.inner,c.reach)) {
+    SeParams sp; sp.volume=c.volume; sp.pitch=c.pitch; sp.inner=c.inner; sp.reference=c.reach;
+    if(!PlayCue(c.name,pos,loop,sp)) {
         static std::atomic<int> said{0};
         if(said.fetch_add(1)<8)Log("EDF41M401 cue %ls of %s did not play (no bank holds it?)",c.name,KindName(p.kind));
     }
 }
-void PlaySe(Part& p,int i,SeHandle* loop=nullptr) noexcept { PlaySeAt(p,i,F(p.obj,kPosAt),loop); }
+void PlaySe(Part& p,int i,SoundHandle* loop=nullptr) noexcept { PlaySeAt(p,i,F(p.obj,kPosAt),loop); }
 bool Vec3Key(const void* o,const wchar_t* key,float* out) noexcept { return Vec(Key(o,key),out,3); }
 const SgoNode* PersistKey(const void* o,const wchar_t* key) noexcept {
     static std::unordered_map<const SgoNode*,const SgoNode*> cache;
@@ -261,9 +265,9 @@ const SgoNode* PersistKey(const void* o,const wchar_t* key) noexcept {
 void Enter(Part& p,int state) noexcept;
 void Exit(Part& p) noexcept {
     switch(p.state) {
-        case sBcCharge: case sFcGenoCharge: case sFcLightCharge: case sGbCharge: StopSe(p.loopA,4); break;
-        case sBcFire: case sGbFire: StopSe(p.loopB,30); break;
-        case sFgCharge: StopSe(p.loopA,180); break;
+        case sBcCharge: case sFcGenoCharge: case sFcLightCharge: case sGbCharge: StopSound(p.loopA,4); break;
+        case sBcFire: case sGbFire: StopSound(p.loopB,30); break;
+        case sFgCharge: StopSound(p.loopA,180); break;
         default: break;
     }
 }
@@ -271,7 +275,7 @@ void Exit(Part& p) noexcept {
 // ---- the panels' common machinery (4.1 PanelBase) -------------------------------------------------------------------------
 void Unregister(Part& p) noexcept {
     SetTeam(p.obj,p.team<0 ? 1 : p.team,false);
-    if(Rd(F(p.obj,kObjFlagsAt),4,"part flags"))*reinterpret_cast<std::uint32_t*>(F(p.obj,kObjFlagsAt))|=kObjNotTarget;
+    if(Rd(F(p.obj,kFlags380),4,"part flags"))*reinterpret_cast<std::uint32_t*>(F(p.obj,kFlags380))|=kNotTarget;
 }
 // 0x26fce0: vanish after `seconds` (no reward: HP 0 written, no kill).
 void Vanish(Part& p,float seconds) noexcept {
@@ -585,7 +589,8 @@ void MuzzleWorld(Part& p,float* out) noexcept { Point(p.muzzle,F(p.obj,kMatrixAt
 void Down(Part& p,float* out) noexcept { const float* y=F(p.obj,kMatrixAt+16); out[0]=-y[0]; out[1]=-y[1]; out[2]=-y[2]; }
 bool AimAt(Part& p,const float* from,float* dir) noexcept {
     float t[3];
-    if(!Target(p.obj,t))return false;
+    void* who=Target(p.obj);
+    if(!who || !AimPoint(who,t))return false;
     dir[0]=t[0]-from[0]; dir[1]=t[1]-from[1]; dir[2]=t[2]-from[2];
     return Norm(dir);
 }
@@ -709,11 +714,11 @@ bool TickPanel(Part& p) noexcept {
             break;
         case sDestroyWait: if(--p.destroyIn<=0)Enter(p,sBurn); break;
         case sBurn:
-            if(f<180 && f%8==0) { float q[3]; RandomNear(p,80.0f,q); const float up[3]={0,1,0}; EffectFlame(q,up,8.0f); }
+            if(f<180 && f%8==0) { float q[3]; RandomNear(p,80.0f,q); const float up[3]={0,1,0}; FireBurst(q,up,8.0f); }
             if(f>p.burnUntil)Enter(p,sFall);
             break;
         case sFall:
-            if(f==p.fallAt-60) { PlaySe(p,4); const float down[3]={0,-1,0}; EffectExplosionBig(F(p.obj,kPosAt),down,0.5f,1.5f); }
+            if(f==p.fallAt-60) { PlaySe(p,4); const float down[3]={0,-1,0}; BigExplosion(F(p.obj,kPosAt),down,0.5f,1.5f); }
             if(f>p.fallAt)return true;
             break;
         case sFlyAway: if(p.cur[1]>1000.0f)return true; break;
@@ -727,7 +732,7 @@ bool TickPanel(Part& p) noexcept {
                 float v[3]={std::cos(a)*70.0f,0.0f,std::sin(a)*70.0f};
                 const float q[3]={pos[0]+v[0],pos[1]+500.0f-static_cast<float>(n)*29.1667f,pos[2]+v[2]};
                 Norm(v);
-                EffectExplosion(q,v,20.0f);
+                Explosion(q,v,20.0f);
             }
             break;
         }
@@ -739,7 +744,7 @@ bool TickPanel(Part& p) noexcept {
                 const float a=Random01(p.rng)*2.0f*kPi;
                 const float d[3]={std::cos(a),0.0f,std::sin(a)};
                 const float q[3]={pos[0],pos[1]-200.0f+static_cast<float>(n)*133.333f,pos[2]};
-                EffectExplosionBig(q,d,5.0f,1.0f);
+                BigExplosion(q,d,5.0f,1.0f);
             }
             if(n>=3 && t>6.0f)return true;
             break;
@@ -750,9 +755,9 @@ bool TickPanel(Part& p) noexcept {
             break;
         case sBcOpen: if(CasDone(p) || f>600)Enter(p,sBcRelay); break;
         case sBcRelay: Enter(p,sBcCharge); break;
-        case sBcCharge: MoveSe(p.loopA,F(p.obj,kPosAt)); if(t>5.0f)Enter(p,sBcFire); break;
+        case sBcCharge: MoveSound(p.loopA,F(p.obj,kPosAt)); if(t>5.0f)Enter(p,sBcFire); break;
         case sBcFire:
-            MoveSe(p.loopB,F(p.obj,kPosAt));
+            MoveSound(p.loopB,F(p.obj,kPosAt));
             if((f&1)==0) { float from[3],dir[3]; MuzzleWorld(p,from); Down(p,dir); FireFrom(p,from,dir,p.shot); }
             if(f>600)Enter(p,sBcClose);
             break;
@@ -764,9 +769,9 @@ bool TickPanel(Part& p) noexcept {
                 Enter(p,Rand(p.rng,3)==0 ? sFcGenoCharge : sFcLightCharge);
             }
             break;
-        case sFcGenoCharge: MoveSe(p.loopA,F(p.obj,kPosAt)); if(t>5.0f)Enter(p,sFcGenoFire); break;
+        case sFcGenoCharge: MoveSound(p.loopA,F(p.obj,kPosAt)); if(t>5.0f)Enter(p,sFcGenoFire); break;
         case sFcGenoFire: { float from[3],dir[3]; MuzzleWorld(p,from); Down(p,dir); FireFrom(p,from,dir,p.shot); Enter(p,sFcIdle); break; }
-        case sFcLightCharge: MoveSe(p.loopA,F(p.obj,kPosAt)); if(t>5.0f)Enter(p,sFcLightFire); break;
+        case sFcLightCharge: MoveSound(p.loopA,F(p.obj,kPosAt)); if(t>5.0f)Enter(p,sFcLightFire); break;
         case sFcLightFire:
             if(f%16==0) {
                 float from[3],dir[3],out[3];
@@ -787,7 +792,7 @@ bool TickPanel(Part& p) noexcept {
         case sGenClose: if(CasDone(p) || f>600)Enter(p,sGenIdle); break;
         // FinalGenerator
         case sFgIdle: if(p.gen.active && p.arrived && p.gen.delay<=180)Enter(p,sFgCharge); break;
-        case sFgCharge: MoveSe(p.loopA,F(p.obj,kPosAt)); if(p.gen.waveDone)Enter(p,sFgIdle); break;
+        case sFgCharge: MoveSound(p.loopA,F(p.obj,kPosAt)); if(p.gen.waveDone)Enter(p,sFgIdle); break;
         default: break;
     }
     return false;
@@ -800,11 +805,12 @@ bool TickBattery(Part& b) noexcept {
         case sGbIdle: {
             if(!b.batteryAttack)break;
             float aim[3];
-            if(!Target(b.obj,aim) || Dist(aim,F(b.obj,kPosAt))>=b.range)break;
+            void* who=Target(b.obj);
+            if(!who || !AimPoint(who,aim) || Dist(aim,F(b.obj,kPosAt))>=b.range)break;
             if(--b.countdown<0) { b.countdown=b.minWait+Rand(b.rng,b.maxWait-b.minWait); Enter(b,b.kind==Kind::rapid ? sGbCharge : sGbFire); }
             break;
         }
-        case sGbCharge: MoveSe(b.loopA,F(b.obj,kPosAt)); if(t>=b.charge)Enter(b,sGbFire); break;
+        case sGbCharge: MoveSound(b.loopA,F(b.obj,kPosAt)); if(t>=b.charge)Enter(b,sGbFire); break;
         case sGbFire: {
             float from[3],dir[3];
             MuzzleWorld(b,from);
@@ -818,7 +824,7 @@ bool TickBattery(Part& b) noexcept {
                 Enter(b,sGbIdle);
                 break;
             }
-            MoveSe(b.loopB,F(b.obj,kPosAt));
+            MoveSound(b.loopB,F(b.obj,kPosAt));
             float want[3];
             if(!AimAt(b,from,want))Down(b,want);
             const float d=std::max(-1.0f,std::min(1.0f,want[0]*b.aim[0]+want[1]*b.aim[1]+want[2]*b.aim[2]));
@@ -835,11 +841,11 @@ bool TickBattery(Part& b) noexcept {
             break;
         }
         case sGbDestroyed:
-            if(f<180 && f%16==0) { float q[3]; RandomNear(b,10.0f,q); const float up[3]={0,1,0}; EffectFlame(q,up,4.0f); }
+            if(f<180 && f%16==0) { float q[3]; RandomNear(b,10.0f,q); const float up[3]={0,1,0}; FireBurst(q,up,4.0f); }
             if(f>b.destroyedFor)Enter(b,sGbFall);
             break;
         case sGbFall:
-            if(f==b.deleteAt-60) { PlaySe(b,2); const float down[3]={0,-1,0}; EffectExplosion(F(b.obj,kPosAt),down,10.0f); }
+            if(f==b.deleteAt-60) { PlaySe(b,2); const float down[3]={0,-1,0}; Explosion(F(b.obj,kPosAt),down,10.0f); }
             if(f>b.deleteAt)return true;
             break;
         default: break;
@@ -854,27 +860,25 @@ void InitPart(Part& p) noexcept {
     p.hasSpawn=Vec3Key(p.obj,L"edf41_401_spawn",p.spawnAt);
     Vec3Key(p.obj,L"edf41_401_weak",p.weakPt);
     wchar_t weak[32];
-    p.weakBody=Text(Key(p.obj,L"weakpoint"),weak,32) ? BodyByName(static_cast<char*>(p.obj)+kRagdollAt,weak) : -1;
+    p.weakBody=Text(Key(p.obj,L"weakpoint"),weak,32) ? RagdollBody(static_cast<char*>(p.obj)+kRagdollAt,weak) : -1;
     p.wholeHits=p.kind==Kind::finalCannon || p.kind==Kind::finalGenerator || IsBattery(p.kind);
     // HP: 4.1 0x26f9f0 / 0x269a80, durability x s (1) x the difficulty rows: EDF6's durability x difficulty x players (0xD7720);
     // EventAnimationObject never sizes itself by level (its slot 6 is a stub), so it is written here.
     const float base=Readable(F(p.obj,kBaseDurabilityAt),4) ? *F(p.obj,kBaseDurabilityAt) : 1000.0f;
-    const float hp=DurabilityFactor(base);
+    const float hp=Difficulty(base);
     *F(p.obj,kMaxDurabilityAt)=hp;
     *F(p.obj,kDurabilityAt)=hp;
-    std::uint32_t* flags=reinterpret_cast<std::uint32_t*>(F(p.obj,kObjFlagsAt));
+    std::uint32_t* flags=reinterpret_cast<std::uint32_t*>(F(p.obj,kFlags380));
     const bool canHurt=p.wholeHits || p.weakBody>=0;
-    if(canHurt)*flags&=~kObjNoHpLoss;
-    *flags|=kObjNotCounted;                       // the parts never hold up "every enemy dead"
-    if(!canHurt)*flags|=kObjNotTarget;            // Panel01 armour: nothing aims at what takes no damage
+    if(canHurt)*flags&=~kNoHpLoss;
+    *flags|=kNotCounted;                       // the parts never hold up "every enemy dead"
+    if(!canHurt)*flags|=kNotTarget;            // Panel01 armour: nothing aims at what takes no damage
     p.burnUntil=180+Rand(p.rng,240);              // +0x4c8
     p.fallAt=180+Rand(p.rng,120);                 // +0x4c4
     switch(p.kind) {
-        case Kind::weak: p.group=2; break;
-        case Kind::core: p.group=3; break;
-        case Kind::bigCannon: p.group=1; SetupBullets(p); Enter(p,sBcIdle); break;
-        case Kind::generator: p.group=0; p.gen.needTrigger=true; Enter(p,sGenIdle); break;
-        case Kind::finalGenerator: p.group=0; Enter(p,sFgIdle); break;
+        case Kind::bigCannon: SetupBullets(p); Enter(p,sBcIdle); break;
+        case Kind::generator: p.gen.needTrigger=true; Enter(p,sGenIdle); break;
+        case Kind::finalGenerator: Enter(p,sFgIdle); break;
         case Kind::finalCannon: SetupBullets(p); Enter(p,sFcIdle); break;
         default: break;
     }
@@ -937,7 +941,7 @@ void Forget(const void* self) noexcept {
     const auto it=byObj.find(self);
     if(it==byObj.end())return;
     Part& p=*it->second;
-    StopSe(p.loopA,0); StopSe(p.loopB,0); StopSe(p.ambient,0);
+    StopSound(p.loopA,0); StopSound(p.loopB,0); StopSound(p.ambient,0);
     for(WeakRef& w:p.gen.slots)WeakReset(w);
     byId.erase(p.id);
     byObj.erase(it);
@@ -958,10 +962,14 @@ void HullFirst(Part& h) noexcept {
     const float* m=F(h.obj,kMatrixAt);
     h.yaw=h.yawTarget=h.yawNow=std::atan2(m[8],m[10]);   // only the yaw (4.1: atan2(m[0x80], m[0x88]))
     std::memcpy(h.target,m+12,12);
+    float yawOnly[16];   // a spawn point whose face looks down (M012, M308 ...) does not tilt the ship: 4.1 builds a yaw matrix
+    RotY(h.yaw,yawOnly);
+    std::memcpy(yawOnly+12,h.target,12);
+    std::memcpy(F(h.obj,kMatrixAt),yawOnly,sizeof(yawOnly));
     h.seed=static_cast<std::uint32_t>(static_cast<std::int32_t>(m[12]+m[14]));
     h.rng=0x9E3779B97F4A7C15ull^h.seed;
     h.team=Readable(F(h.obj,kTeamAt),4) ? *reinterpret_cast<const std::int32_t*>(F(h.obj,kTeamAt)) : -1;
-    *reinterpret_cast<std::uint32_t*>(F(h.obj,kObjFlagsAt))|=kObjNotTarget;   // nothing aims at the invisible controller
+    *reinterpret_cast<std::uint32_t*>(F(h.obj,kFlags380))|=kNotTarget;   // nothing aims at the invisible controller
     PlaySe(h,0,&h.ambient);
     Log("EDF41M401 hull %p first update: at %.0f %.0f %.0f yaw %.1f deg, team %d, level %.2f, %d actions, ini Edf41Mother401Dev=%d",h.obj,
         m[12],m[13],m[14],h.yaw*57.29578f,h.team,*F(h.obj,kLevelAt),Count(Key(h.obj,L"action_list")),DevBits());
@@ -996,8 +1004,9 @@ void HullLogic(Part& h) noexcept {
         *F(h.obj,kDurabilityAt)=std::max(0.0f,*F(core->obj,kDurabilityAt));
         if(!h.dying && (core->killed || Hp(core->obj)<=0.0f)) {
             h.dying=true;
-            StopSe(h.ambient,120);
+            StopSound(h.ambient,120);
             *F(h.obj,kDurabilityAt)=0.0f;
+            static_cast<char*>(h.obj)[kDestroyedAt]=1;   // the script's "destroyed" (9201) sees the ship die with its Core
             int n=0;
             for(const Cell& c:h.cells) {
                 Part* p=ById(c.panel);
@@ -1013,7 +1022,7 @@ void HullLogic(Part& h) noexcept {
     float avg[3]={},cnt=0;
     for(const Cell& c:h.cells)
         if(const Part* p=ById(c.panel)) { for(int k=0;k<3;++k)avg[k]+=F(p->obj,kPosAt)[k]; cnt+=1; }
-    if(cnt>0) { for(float& v:avg)v/=cnt; MoveSe(h.ambient,avg); }
+    if(cnt>0) { for(float& v:avg)v/=cnt; MoveSound(h.ambient,avg); }
     // the dev kill switches
     if((DevBits()&24) && !h.dying && h.hullFrames==static_cast<std::uint32_t>(std::max(1.0f,Cfg().edf41Mother401DevKill*kFps))) {
         if((DevBits()&8) && core) { Log("EDF41M401 dev: the Core is destroyed"); Destroy(*core,0); }
@@ -1021,7 +1030,7 @@ void HullLogic(Part& h) noexcept {
             for(const Cell& c:h.cells)
                 if(Part* p=ById(c.panel); p && p->kind==Kind::weak && !p->killed) { Log("EDF41M401 dev: a weak panel is destroyed"); p->killed=true; Unregister(*p);
                     *F(p->obj,kDurabilityAt)=0.0f; const float down[3]={0,-1,0}; float q[3]; std::memcpy(q,F(p->obj,kPosAt),12); q[1]-=20.0f;
-                    EffectExplosion(q,down,15.0f); AreaDestroy(h,F(p->obj,kPosAt),200.0f); Destroy(*p,0); break; }
+                    Explosion(q,down,15.0f); AreaDestroy(h,F(p->obj,kPosAt),200.0f); Destroy(*p,0); break; }
     }
 }
 
@@ -1113,9 +1122,8 @@ void MovePanel(Part& p,const Part& h) noexcept {
     }
     if(p.triggered && p.delay>0)--p.delay;
     if(p.triggered && p.delay<=0) {
-        if(!p.arrived && p.mode==0 && p.frames>=0 && p.cur[1]==1000.0f && Part* hh=ById(p.hull)) {
-            if(hh->throttle==0) { PlaySe(p,0); hh->throttle=180; }
-        }
+        Part* hh=ById(p.hull);
+        if(hh && !p.arrived && p.mode==0 && p.cur[1]==1000.0f && hh->throttle==0) { PlaySe(p,0); hh->throttle=180; }
         if(p.mode==0 && !p.arrived) {
             const float d[3]={p.dst[0]-p.cur[0],p.dst[1]-p.cur[1],p.dst[2]-p.cur[2]};
             if(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>1e-4f) {
@@ -1233,16 +1241,16 @@ void __fastcall PartDamaged(void* self,void* gdi) {
         std::memcpy(q,F(self,kPosAt),12);
         q[1]-=20.0f;
         const float down[3]={0,-1,0},up[3]={0,1,0};
-        EffectExplosion(q,down,15.0f);
+        Explosion(q,down,15.0f);
         q[1]-=20.0f;
-        EffectBlazing(q,up,1.0f);
+        Blazing(q,up,1.0f);
         p->killed=true;   // its own destroy below, not the blast's
         AreaDestroy(*h,F(self,kPosAt),200.0f);
         p->killed=false;
     }
     if(p->kind==Kind::core) {        // 0x264490: an explosion where it was hit
         const char* g=static_cast<const char*>(gdi);
-        if(Rd(g+0x30,16,"core hit point")) { const float up[3]={0,1,0}; EffectExplosionBig(reinterpret_cast<const float*>(g+0x30),up,2.5f,1.0f); }
+        if(Rd(g+0x30,16,"core hit point")) { const float up[3]={0,1,0}; BigExplosion(reinterpret_cast<const float*>(g+0x30),up,2.5f,1.0f); }
     }
     Destroy(*p,0);
 }
@@ -1258,6 +1266,8 @@ void Register(void* obj,Kind kind) noexcept {
     rec->id=nextId++;
     rec->obj=obj;
     rec->kind=kind;
+    // GetPartsObject's group (+0x4d0): BigCannon01 1, WeakPanel 2, Core 3, the generators 0, the rest -1 (SPEC 1.5 / notes A, B)
+    rec->group=kind==Kind::bigCannon ? 1 : kind==Kind::weak ? 2 : kind==Kind::core ? 3 : (kind==Kind::generator || kind==Kind::finalGenerator) ? 0 : -1;
     byId[rec->id]=rec.get();
     byObj[obj]=std::move(rec);
 }
@@ -1278,13 +1288,13 @@ template<Kind K> void CreatePart(void* info) noexcept {
 
 bool InstallEdf41Mother401() noexcept {
     if(!Cfg().edf41Mother401) { Log("EDF41M401 off (ini Edf41Mother401=0)"); return false; }
-    if(!BuildClone(hullClone,&HullDtor,&HullUpdate,&HullMessage) || !BuildClone(partClone,&PartDtor,&PartUpdate,&PartMessage)
-       || !SetSlot(hullClone,kSlotAcceptDamage,reinterpret_cast<void*>(&HullAccept))
-       || !SetSlot(partClone,kSlotAcceptDamage,reinterpret_cast<void*>(&PartAccept))
-       || !SetSlot(partClone,kSlotDamaged,reinterpret_cast<void*>(&PartDamaged))) {
+    if(!BuildClone(hullClone,&HullDtor,&HullUpdate,&HullMessage) || !BuildClone(partClone,&PartDtor,&PartUpdate,&PartMessage)) {
         Log("EDF41M401 the vtable clones could not be built: off");
         return false;
     }
+    SetSlot(hullClone,kSlotAccept,reinterpret_cast<void*>(&HullAccept));
+    SetSlot(partClone,kSlotAccept,reinterpret_cast<void*>(&PartAccept));
+    SetSlot(partClone,kSlotDamaged,reinterpret_cast<void*>(&PartDamaged));
     struct Reg { const wchar_t* name; CreateFn fn; };
     const Reg regs[]={
         {L"UfoMother401",&CreateHull},

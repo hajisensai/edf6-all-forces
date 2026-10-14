@@ -321,6 +321,11 @@ struct Config {
     bool edf41MotherBulletProbe=false;   // development only: log every bullet class the game spawns and the head of its creation info (edf41mother.cpp)
     int edf41MotherParts=31;        // which part groups the mothership builds as real objects (bit 1 hatches, 2 covers, 4 cannons, 8 main cannon, 16 panels); 0 = none
     bool edf41Mother=true;          // EDF4.1's UfoMother301 and its part classes (edf41mother.cpp)
+    bool edf41Mother401=true;       // EDF4.1's UfoMother401 (the Earth Eater) and its eleven part classes (edf41mother401.cpp)
+    int edf41Mother401Dev=0;        // development only (bits): 1 attack always allowed, 2 short attack waits, 4 panels in place at once,
+                                    // 8 the Core destroyed / 16 a weak panel destroyed after edf41Mother401DevKill seconds
+    float edf41Mother401DevKill=60.0f;
+    float edf41Mother401Place=0.0f; // development only: the 401 hull held this many m above the player (0 = where the script put it)
     bool edf41Sound=true;           // EDF4.1's weapon sound effects and voices added to EDF6's banks (edf41sound.cpp), from the game's start
     bool edf41VoiceProbe=false;     // development only: log each voice key the game looks up in each bank and each caption it finds (edf41sound.cpp)
     bool terrainShare=true;         // every placement of one terrain piece drawn from one decode (fieldshare.cpp), from the game's start
@@ -507,6 +512,7 @@ bool InstallEdf41Insects() noexcept;
 bool InstallEdf41Natives() noexcept;
 // edf41mother.cpp: UfoMother301 (EDF4.1's mothership) and its part classes, registered in the game's own factory table.
 bool InstallEdf41Mother() noexcept;
+bool InstallEdf41Mother401() noexcept;   // edf41mother401.cpp
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
 bool InstallMissiles() noexcept;
 // The stock split missiles (MissileBullet02) split short of a big target's surface (splitmissile.cpp).

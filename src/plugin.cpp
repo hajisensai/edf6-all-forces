@@ -531,6 +531,10 @@ void LoadConfig() noexcept {
     n.edf41MotherPlace=ReadFloat(L"Edf41MotherPlace",n.edf41MotherPlace);
     n.edf41MotherBulletProbe=ReadBool(L"Edf41MotherBulletProbe",n.edf41MotherBulletProbe);
     n.edf41MotherParts=static_cast<int>(FixInt("Edf41MotherParts",ReadInt(L"Edf41MotherParts",n.edf41MotherParts),0,31));
+    n.edf41Mother401=ReadBool(L"Edf41Mother401",n.edf41Mother401);
+    n.edf41Mother401Dev=static_cast<int>(FixInt("Edf41Mother401Dev",ReadInt(L"Edf41Mother401Dev",n.edf41Mother401Dev),0,31));
+    n.edf41Mother401DevKill=ReadFloat(L"Edf41Mother401DevKill",n.edf41Mother401DevKill);
+    n.edf41Mother401Place=ReadFloat(L"Edf41Mother401Place",n.edf41Mother401Place);
     n.edf5CampaignContent=FixInt("EDF5CampaignContent",ReadInt(L"EDF5CampaignContent",n.edf5CampaignContent),0,65535);
     n.testRangeContent=FixInt("TestRangeContent",ReadInt(L"TestRangeContent",n.testRangeContent),0,65535);
     n.edf41Content=FixInt("EDF41Content",ReadInt(L"EDF41Content",n.edf41Content),0,65535);
@@ -1068,6 +1072,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallEdf41Natives();   // EDF4.1 script natives the BVM executor lacks: SetEncountReportRadius (edf41natives.cpp)
     InstallEdf41Sound();     // EDF4.1's weapon SE bank and voice banks (edf41sound.cpp)
     InstallEdf41Mother();    // EDF4.1's UfoMother301 (ini Edf41Mother; edf41mother.cpp)
+    InstallEdf41Mother401(); // EDF4.1's UfoMother401 (ini Edf41Mother401; edf41mother401.cpp)
     InstallTerrainShare();   // before any map loads: the pieces of one terrain decoded once
     InstallMission();       // the mission's start (Reset*, the preloads) and a trigger of the per-frame hooks
     InstallLoadout(iniPath);

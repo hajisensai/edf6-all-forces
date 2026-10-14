@@ -25,7 +25,7 @@ bool AddFactory(const wchar_t* className,CreateFn create) noexcept;
 bool Ready() noexcept;     // the fingerprints matched and the registration hook is in
 
 // ---- cloned vtables ---------------------------------------------------------------------------------------------
-constexpr int kSlotDtor=0,kSlotUpdate=5,kSlotMessage=9,kSlotAcceptDamage=16,kSlotDamaged=18;
+constexpr int kSlotDtor=0,kSlotUpdate=5,kSlotMessage=9,kSlotAccept=16,kSlotDamaged=18;   // 16 / 18: PRIMITIVES.md 2c
 struct Clone {
     const char* tag;
     std::size_t vtable;            // the stock class's primary vtable (EDF.dll RVA)
@@ -39,9 +39,6 @@ using DtorFn=std::uint64_t(__fastcall*)(void*,unsigned);
 using UpdateFn=std::uint64_t(__fastcall*)(void*,void*);
 using MessageFn=std::uint64_t(__fastcall*)(void*,std::uint32_t,void*);
 bool BuildClone(Clone& c,DtorFn dtor,UpdateFn update,MessageFn message) noexcept;
-// Another slot of a built clone pointed at `fn` (EventAnimationObject: 16 bool Accept(obj, GameDamageInfo*), the filter ApplyDamage
-// 0x547C30 asks before the HP changes; 18 void OnDamaged(obj, GameDamageInfo*), after). False when the slot is out of range.
-bool SetSlot(Clone& c,int slot,void* fn) noexcept;
 // new(size), ctor(obj, createInfo), then the vptr pointed at the clone; null (and logged) when the class made something else.
 void* CloneObject(Clone& c,std::size_t ctor,std::size_t size,void* createInfo) noexcept;
 
@@ -52,14 +49,8 @@ extern const std::uint32_t kEaoSlots[45];
 extern const std::uint32_t kCarrierSlots[49];
 
 // ---- object fields (GameObjectBase) ------------------------------------------------------------------------------
-// (jobs/14618f05/tmp/re6/PRIMITIVES.md: +0x2EC the SGO durability, +0x2F0 the floor (the script's SetObjectDurability 3020,
-// 0x2288C0, writes it as a percentage of the max), +0x2F4 the max (ApplyDamage clamps to [+0x2F0, +0x2F4]; +0x2FC is an int 0),
-// +0x380 flags (bit 0 no HP loss: EventAnimationObject's constructor sets it; 0x80 not a target; 0x2000 not counted as an
-// enemy; 0x800 only forced damage), +0x498 raw level, +0x49C level (10 = level 1).)
 constexpr std::size_t kMatrixAt=0x60,kPosAt=0x90,kSgoAt=0xA0,kFlagsAt=0x18,kDestroyedAt=0x2E8,kDurabilityAt=0x2F8,
-                      kMaxDurabilityAt=0x2F4,kMinDurabilityAt=0x2F0,kBaseDurabilityAt=0x2EC,kTeamAt=0x314,kWeakSelfAt=0x28,
-                      kObjFlagsAt=0x380,kRawLevelAt=0x498,kLevelAt=0x49C;
-constexpr std::uint32_t kObjNoHpLoss=1u,kObjNotTarget=0x80u,kObjNotCounted=0x2000u;
+                      kMaxDurabilityAt=0x2F4,kBaseDurabilityAt=0x2EC,kTeamAt=0x314,kWeakSelfAt=0x28;
 constexpr std::uint32_t kMsgDamage=0xF0000000u,kMsgAction=0x1000000Du,kMsgParts=0x10000017u,kMsgGenerator=0x20100u;
 
 // ---- SGO --------------------------------------------------------------------------------------------------------
@@ -109,50 +100,92 @@ struct Bullet {
 // factory is unknown.
 bool Fire(void* owner,const float* matrix,const Bullet& b) noexcept;
 
-// ---- game objects (PRIMITIVES.md 3, 6, 7) ---------------------------------------------------------------------------
-bool SetTeam(void* object,int team,bool registered) noexcept;   // 0x54EE70: +0x314, the team's set (hostility, enemy count)
-bool SetLevel(void* object,float level) noexcept;               // 0x54E740: raw level x level_adjust -> +0x498, +0x49C
-bool Activate(void* object) noexcept;                           // 0x548D50: what the script's "active" flag does
-float DurabilityFactor(float x) noexcept;                       // 0xD7720: x x difficulty durability x online players (x when unknown)
-// The object's current target (GameObjectBase keeps the nearest live hostile, refreshed every 60 frames; 0x30C0F0) and its aim point
-// (the target's first lock point, else its origin). Null when none.
-void* Target(void* object,float* aim) noexcept;
-// The ragdoll body (index) the damage info's sub-hit nearest its centre struck (0x6EA430 on the body id); -1 when none. `ragdoll`
-// is the object's ragdoll component (EventAnimationObject +0xAA0).
-int HitBody(void* ragdoll,const void* damageInfo) noexcept;
-int BodyByName(void* ragdoll,const wchar_t* name) noexcept;     // 0x6EA670, -1 when absent
-// The skeleton rebuilt from `matrix` (0x1100B90 on EventAnimationObject's +0x660): after the stock Update, it draws the model
-// there instead of at +0x60 (a scaled or hidden model; the ragdoll stays where the stock Update put it).
-bool ModelMatrix(void* object,const float* matrix) noexcept;
-// Far rendering on for an EventAnimationObject's model node (+0x5C0; 0x11B3020, the SGO FarRender switch): past 1000 m from the
-// camera the near pass no longer draws it. True once set (or set already); false: try again next frame.
-bool FarRender(void* object) noexcept;
-
-// ---- weak references (the game's shared_ptr control block: use +8, weak +0xC, vtable {destroy, delete}) --------------
-struct WeakRef { void* object=nullptr; void* control=nullptr; };
-void WeakSet(WeakRef& w,const void* object) noexcept;    // from the object's own weak pointer (+0x28 / +0x30); empty on failure
-void WeakReset(WeakRef& w) noexcept;
-bool WeakAlive(const WeakRef& w) noexcept;               // use count > 0 and not deleted
-// Writes the object's weak pointer to `out` ({object, control}, as GetPartsObject's message wants it), one weak count taken.
-bool WeakOut(const void* object,void* out) noexcept;
-
-// ---- sounds (PRIMITIVES.md 4) ------------------------------------------------------------------------------------
-// A cue of a loaded ACB by its name (the bank an object's game_sound loads; 4.1's own banks through edf41sound.cpp), at `pos`,
-// 4.1's preset numbers (volume, pitch, the inner and reference distances). With `loop`, the handle to move and stop it.
-struct SeHandle { void* control=nullptr; void* instance=nullptr; };
-
-bool PlayCue(const wchar_t* cue,const float* pos,SeHandle* handle,float volume=1.0f,float pitch=1.0f,float inner=1.0f,float reach=1000.0f) noexcept;
-void MoveSe(SeHandle& h,const float* pos) noexcept;
-void StopSe(SeHandle& h,int fadeFrames) noexcept;        // stops and releases
-
-// ---- effects (EffectGenUtil, PRIMITIVES.md 5; visual only) ----------------------------------------------------------
-void EffectFlame(const float* pos,const float* dir,float size) noexcept;          // 0x2E7FF0 (4.1 0x1b16b0)
-void EffectBlazing(const float* pos,const float* dir,float size) noexcept;        // 0x2E0B70 (4.1 0x1b1ba0, smoke + fire)
-void EffectExplosion(const float* pos,const float* dir,float size) noexcept;      // 0x2E5ED0 (4.1 0x1b2070)
-void EffectExplosionBig(const float* pos,const float* dir,float size,float a) noexcept;   // 0x2E7A30 (4.1 0x1b2ab0)
-
 // ---- the player -------------------------------------------------------------------------------------------------
 // The position of the nearest live player human to `from` (offline: the local one); false when none is seen.
 bool NearestPlayer(const float* from,float* out) noexcept;
+
+// ---- EDF6 primitives (docs/edf41-classes.md section 2, read from EDF.dll; H unless noted) -----------------------------------
+// Object bases: EventAnimationObject model +0x5C0, skeleton +0x660, ragdoll +0xAA0; UfoCarrier508 model +0x650, skeleton +0x6F0,
+// ragdoll +0xB60.
+constexpr std::size_t kEaoModel=0x5C0,kEaoSkeleton=0x660,kEaoRagdoll=0xAA0;
+constexpr std::size_t kCarrierModel=0x650,kCarrierSkeleton=0x6F0,kCarrierRagdoll=0xB60;
+constexpr std::size_t kFlags380=0x380,kRawLevelAt=0x498,kLevelAt=0x49C;
+// +0x380 flags: bit 0 no HP loss (EventAnimationObject's ctor sets it), 0x80 never a target, 0x800 invulnerable (slots 16 / 17
+// skipped, only forced damage), 0x2000 not counted as an enemy.
+constexpr std::uint32_t kNoHpLoss=1u,kNotTarget=0x80u,kInvulnerable=0x800u,kNotCounted=0x2000u;
+void SetFlag(void* object,std::uint32_t bits,bool on) noexcept;
+
+// MAB locator: found once by name on a model component (0x6BADD0), evaluated each frame (0x6BB5A0: locator x bone world).
+struct LocatorHandle { const void* entry; void* bone; };
+bool FindLocator(void* model,const wchar_t* name,LocatorHandle* out) noexcept;
+bool LocatorMatrix(const LocatorHandle& h,float* out) noexcept;
+// A bone's world matrix (record +0xB0) by name on a skeleton (model+0xA0); fresh after the stock Update. -1 / false: none.
+int BoneIndex(void* skeleton,const wchar_t* name) noexcept;
+bool BoneMatrix(void* skeleton,int index,float* out) noexcept;
+
+// Team (0x54EE70 SetTeam(obj, team, register)); level (0x54E740 SetLevel(obj, level): raw level x level_adjust -> +0x498,
+// difficulty-scaled -> +0x49C, s = +0x49C / 10) and durability the way UfoCarrier508 sizes itself (0x4F6D00: max =
+// 0xD7720(game status, base x s), written to max and current).
+bool SetTeam(void* object,std::int32_t team,bool registered) noexcept;
+void SetLevel(void* object,float rawLevel) noexcept;
+float LevelS(const void* object) noexcept;                     // +0x49C / 10 (4.1's s)
+void SizeDurability(void* object) noexcept;                    // the carrier's formula on the object's own base durability
+float Difficulty(float x) noexcept;                            // 0xD7720: x times the difficulty / online durability factor
+
+// The stock target (GameObjectBase::Update retargets every 60 frames: the nearest live hostile registered object), read with
+// 0x30C0F0; its aim point = its first lock point, else its +0x90.
+void* Target(void* object) noexcept;
+bool AimPoint(const void* target,float* out) noexcept;
+
+// The ragdoll body (index) a damage message hit: the sub-hit nearest the hit centre (GDI +0x78 records of 0x30, body id
+// +0x20), mapped by 0x6EA430; and a body's index by name (0x6EA670). -1: none.
+int HitBody(void* ragdoll,const void* damageInfo) noexcept;
+int RagdollBody(void* ragdoll,const wchar_t* name) noexcept;
+// GDI (the data of 0xF0000000): +0x30 hit centre, +0x50 damage, +0x60 u16 flags (0x40 forced).
+constexpr std::size_t kGdiCentre=0x30,kGdiDamage=0x50,kGdiFlags=0x60;
+
+// Sounds: a raw ACB cue by name (the lookup 0x7AEAE0 over every loaded bank, a SePreset filled as FireSe 0x7B3EA0 does) played
+// once at a point, or kept in `handle` to follow (0x7A8C20) and stop (0x7A8CD0).
+struct SoundHandle { void* control=nullptr; void* instance=nullptr; };
+// The preset's numbers (SePreset +0x74 volume, +0x70 pitch, +0x10 / +0x14 / +0x18 the three distance values; defaults 0x7B3200's).
+struct SeParams { float volume=1.0f,pitch=1.0f,inner=1.0f,reference=1000.0f,cull=4.0f; };
+bool PlayCue(const wchar_t* cue,const float* pos,SoundHandle* handle=nullptr,const SeParams& params=SeParams{}) noexcept;
+// 4.1's sound by its SEPRESET name (母船UFOパネルキャノン ...): EDF6's SEPRESET lacks 4.1's names, so tools/make_edf41_objects.py
+// copies 4.1's entries into the object's SGO key edf41_se ([[name, cue, volume, pitch, a, b, c], ...]); `table` is the object
+// whose SGO holds it (a part plays from its hull's table).
+bool PlaySe(const void* table,const wchar_t* name,const float* pos,SoundHandle* handle=nullptr) noexcept;
+void MoveSound(SoundHandle& handle,const float* pos) noexcept;
+void StopSound(SoundHandle& handle,int fadeFrames=4) noexcept;
+
+// Visual effects (EffectGenUtil *(EDF+0x20B2980); no damage, no sound): 4.1 0x1b16b0 fire burst -> Flame 0x2E7FF0, 0x1b1ba0
+// smoke and fire -> Blazing 0x2E0B70, 0x1b2070 directed explosion -> Explosion 0x2E5ED0, 0x1b2ab0 big -> Explosion_Big 0x2E7A30
+// (the look of each: M).
+void FireBurst(const float* pos,const float* dir,float size) noexcept;
+void Blazing(const float* pos,const float* dir,float size) noexcept;
+void Explosion(const float* pos,const float* dir,float size) noexcept;
+void BigExplosion(const float* pos,const float* dir,float size,float k) noexcept;
+
+// Drop the object's game_object_drop_item once (0x548AE0); for an object that dies outside ApplyDamage.
+void DropItems(void* object) noexcept;
+
+// Replace one more slot of a built clone (slot 16 Accept(obj, GDI*) -> bool: the per-body damage filter; slot 6 OnLevel).
+void SetSlot(Clone& c,int slot,void* fn) noexcept;
+
+// The skeleton rebuilt from `matrix` (0x1100B90 on EventAnimationObject's +0x660): called after the stock Update it draws the
+// model there instead of at +0x60 (scaled, or hidden at a tiny scale); the ragdoll stays where the stock Update put it.
+bool ModelMatrix(void* object,const float* matrix) noexcept;
+// Far rendering on for an EventAnimationObject's model node (+0x5C0; 0x11B3020, the switch of the SGO's FarRender): past 1000 m
+// from the camera the near pass draws nothing. True once set (or set already); false: ask again next frame.
+bool FarRender(void* object) noexcept;
+bool Activate(void* object) noexcept;                          // 0x548D50: what a spawner / the script's "active" flag does
+
+// Weak references through the game's shared_ptr control block (use +8, weak +0xC, vtable {destroy, delete}).
+struct WeakRef { void* object=nullptr; void* control=nullptr; };
+void WeakSet(WeakRef& w,const void* object) noexcept;          // from the object's own weak pointer (+0x28 / +0x30)
+void WeakReset(WeakRef& w) noexcept;
+bool WeakAlive(const WeakRef& w) noexcept;                     // use count > 0 and not deleted
+// The object's weak pointer written to `out` ({object, control}: what GetPartsObject's message 0x10000017 returns at +8), one
+// weak count taken for the receiver.
+bool WeakOut(const void* object,void* out) noexcept;
 
 }  // namespace crew::edf41c

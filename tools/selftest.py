@@ -7041,18 +7041,25 @@ def edf41_objects_shipped() -> None:
 
 @test
 def edf41_motherships_not_faked() -> None:
-    """EDF6 has no class that does UfoMother401's job (4.1's panel grid; the EDF6 UfoMother511 family is a ring of units), and
-    the plugin implements none yet: nothing of it is registered, and every mission script that names one names a file the
-    registry lacks, which is what keeps make_edf5_campaign.plan41 skipping it (a mission let through would start without its
-    ship). UfoMother301 is the plugin's own class (src/edf41mother.cpp): its SGO keeps 4.1's class name and is registered
-    (edf41_mother_plugin_contract)."""
+    """Both of 4.1's motherships are the plugin's own classes (UfoMother301: src/edf41mother.cpp; UfoMother401, the Earth
+    Eater, and its eleven part classes: src/edf41mother401.cpp), not stood in by an EDF6 class (EDF6's UfoMother511 family is a
+    ring of units, nothing like either): every mothership registered keeps 4.1's class name, the 401's parts keep theirs, and
+    every mission script that names a mothership names a registered file (make_edf5_campaign.plan41 lets them through)."""
     import edf41_objects as eo
     import make_edf5_campaign as mc
+    import sgo
     reg = eo.registry()
     assert reg['objects'], 'no object registered: this check is empty'
     mothers = {o['object']: o['class'] for o in reg['objects'] if o['class'].startswith('UfoMother')}
-    assert mothers == {'OBJECT/UFOMOTHER301.SGO': 'UfoMother301'}, mothers
-    assert not [rel for rel in reg['files'] if rel.upper().startswith('OBJECT/UFOMOTHER401')], 'a 401 mothership file shipped'
+    import make_edf41_objects as m
+    want = {'OBJECT/UFOMOTHER301.SGO': 'UfoMother301'}
+    want.update({'OBJECT/' + r: 'UfoMother401' for r in (*m.MOTHER401_ROOTS, *m.MOTHER401_DLC_ROOTS)})
+    assert mothers == want, sorted(set(mothers.items()) ^ set(want.items()))
+    parts = {sgo.load(data=eo.read(rel)).get('xgs_scene_object_class') for rel in reg['files']
+             if rel.endswith('.SGO') and 'UFOMOTHER401_' in rel} - {'UfoMother401'}   # the DLC hulls are UFOMOTHER401_DLC_*
+    assert parts == {'UfoMother401_' + c for c in ('Panel01', 'WeakPanel', 'Core', 'BigCannon01', 'Generator', 'FinalCannon01',
+                                                   'FinalGenerator', 'GunBattery_SmallLaser', 'GunBattery_Sniper',
+                                                   'GunBattery_PlasmaCannon', 'GunBattery_RapidCannon')}, parts
     named = {}
     root = os.path.join(ROOT, 'edf41port', 'missions')
     for mid in sorted(os.listdir(root)):
@@ -7064,7 +7071,9 @@ def edf41_motherships_not_faked() -> None:
     for mid, refs in named.items():
         for ref in refs:
             rel = ('OBJECT/' + ref.rsplit('/', 1)[-1]).upper()
-            assert (rel in reg['files']) == (rel == 'OBJECT/UFOMOTHER301.SGO'), (mid, ref)
+            assert rel in reg['files'], (mid, ref)
+    for root in m.MOTHER401_DLC_ROOTS:
+        assert 'OBJECT/' + root in reg['files'], root
 
 
 @test
@@ -7102,6 +7111,107 @@ def edf41_mother_plugin_contract() -> None:
     laser = src('src/carrierlaser.cpp')
     ai, slot = (int(re.search(rf'{k}=(\w+)', laser).group(1), 0) for k in ('kShipAi', 'kShipAiSlot'))
     assert len(stock) == 49 and stock[slot] == ai, (len(stock), slot)
+
+
+@test
+def edf41_mother401_data() -> None:
+    """The 401 mothership's shipped data is what src/edf41mother401.cpp reads (tools/make_edf41_objects.py mother401_fix): every
+    variant (MOTHER401_ROOTS, MOTHER401_DLC_ROOTS) keeps 4.1's class and keys (action_list, panel_definition, the layout maps its
+    action_list names, 19 x 19) and has the model and ragdoll EventAnimationObject's constructor reads unchecked; every panel
+    definition names a shipped part SGO; every part SGO has a CAS whose main player has the state default (the constructor asks
+    for it), edf41_401_se parallel to se_table (cues of EDF6's own Earth Eater bank, 4.1's preset numbers), its muzzle / spawn
+    point / battery mounts where its class needs them, and a weakpoint body its ragdoll has."""
+    import cas_graft
+    import edf41_objects as eo
+    import make_edf41_objects as m
+    import sgo
+    reg = eo.registry()
+    files = set(reg['files'])
+    roots = ['OBJECT/' + r for r in (*m.MOTHER401_ROOTS, *m.MOTHER401_DLC_ROOTS)]
+    assert len(roots) == 17 and all(r in files for r in roots), [r for r in roots if r not in files]
+    parts: set[str] = set()
+    for rel in roots:
+        top = sgo.load(data=eo.read(rel))
+        assert top['xgs_scene_object_class'] == 'UfoMother401', rel
+        am, rd = top.get('animation_model'), top.get('ragdoll')
+        assert isinstance(am, list) and m.rel_of(am[0][0][0]) in files and m.rel_of(am[1]) in files, rel
+        assert isinstance(rd, list) and m.rel_of(rd[0]) in files, rel
+        defs = top['panel_definition']
+        for d in defs:
+            if isinstance(d[0], str):
+                assert m.rel_of(d[0]) in files, (rel, d[0])
+                parts.add(m.rel_of(d[0]))
+        maps = 0
+        for a in top['action_list']:
+            if a[0] == 0:
+                grid = top[a[1]]
+                assert len(grid) == 19 and all(len(row) == 19 for row in grid), (rel, a[1])
+                assert all(0 <= v < len(defs) for row in grid for v in row), (rel, a[1])
+                maps += 1
+            assert a[0] in range(8), (rel, a)
+        assert maps, rel
+        assert [x[0] for x in top['edf41_401_se']] == ['en_EE_ambient'], rel
+    for rel in list(parts):   # the batteries Panel01 hangs
+        for d in sgo.load(data=eo.read(rel)).get('parts_define', []):
+            if isinstance(d[0], str):
+                parts.add(m.rel_of(d[0]))
+    classes = set()
+    for rel in sorted(parts):
+        top = sgo.load(data=eo.read(rel))
+        cls = top['xgs_scene_object_class']
+        classes.add(cls)
+        am = top['animation_model']
+        cas = m.rel_of(am[1])
+        assert cas in files and 'default' in cas_graft.states(eo.read(cas)).get('main', set()), (rel, cas)
+        assert m.rel_of(top['ragdoll'][0]) in files, rel
+        se, table = top.get('edf41_401_se'), top.get('se_table')
+        assert isinstance(se, list) and len(se) == len(table), rel
+        for name, entry in zip(table, se):
+            assert (entry == 0) == (not isinstance(name, str)), (rel, name, entry)
+            assert entry == 0 or entry[0].startswith(('en_EE_', 'common_')), (rel, entry)
+        if cls in ('UfoMother401_BigCannon01', 'UfoMother401_FinalCannon01') or cls.startswith('UfoMother401_GunBattery_'):
+            assert len(top['edf41_401_muzzle']) == 3, rel
+        if cls in ('UfoMother401_Generator', 'UfoMother401_FinalGenerator'):
+            assert len(top['edf41_401_spawn']) == 3, rel
+        if 'parts_define' in top:
+            assert len(top['edf41_401_mounts']) >= 10, rel
+        if 'weakpoint' in top:
+            assert len(top['edf41_401_weak']) == 3, rel
+            assert m.ragdoll_body(eo.read(m.rel_of(top['ragdoll'][0])), top['weakpoint']), (rel, top['weakpoint'])
+    assert len(classes) == 11, classes
+
+
+@test
+def edf41_mother401_plugin_contract() -> None:
+    """src/edf41mother401.cpp is built and installed (its own CMake line, InstallEdf41Mother401 next to InstallEdf41Mother), gated
+    by the ini switch Edf41Mother401 (on, shipped 1; its development switches shipped 0), registers a factory for every class the
+    401 data carries, replaces the slots the shared clone machinery documents (16 the damage filter, 18 after the damage), and
+    every EDF.dll function the shared module calls for it has a fingerprint."""
+    import edf41_objects as eo
+    import sgo
+    cpp, plugin, cmake, crew, ini = (src(r) for r in ('src/edf41mother401.cpp', 'src/plugin.cpp', 'CMakeLists.txt', 'src/crew.h',
+                                                       'EDF6VehicleCrew.ini'))
+    assert 'target_sources(EDF6VehicleCrew PRIVATE src/edf41mother401.cpp)' in cmake
+    assert 'InstallEdf41Mother401();' in plugin and 'bool InstallEdf41Mother401() noexcept;' in crew
+    assert plugin.index('InstallEdf41Mother();') < plugin.index('InstallEdf41Mother401();')
+    assert 'bool edf41Mother401=true;' in crew and 'ReadBool(L"Edf41Mother401"' in plugin
+    assert re.search(r'^Edf41Mother401=1$', ini, re.M) and re.search(r'^Edf41Mother401Dev=0$', ini, re.M)
+    assert re.search(r'^Edf41Mother401Place=0$', ini, re.M)
+    assert 'if(!Cfg().edf41Mother401)' in cpp.split('bool InstallEdf41Mother401()', 1)[1].split('BuildClone', 1)[0]
+    classes = {sgo.load(data=eo.read(rel)).get('xgs_scene_object_class') for rel in eo.registry()['files']
+               if rel.endswith('.SGO') and 'UFOMOTHER401' in rel}
+    assert len(classes) == 12, classes
+    for cls in classes:
+        assert f'{{L"{cls}",' in cpp, f'no factory for {cls}'
+    assert 'SetSlot(partClone,kSlotAccept,' in cpp and 'SetSlot(partClone,kSlotDamaged,' in cpp and 'SetSlot(hullClone,kSlotAccept,' in cpp
+    shared = src('src/edf41classes.cpp')
+    for rva in ('kSkeletonFromMatrix', 'kSetFarRender', 'kActivate', 'kSetTeam', 'kSetLevel', 'kGetTarget', 'kBodyById',
+                'kBodyByName', 'kCueLookup', 'kPresetPlay', 'kFlame', 'kExplosionBig', 'kDifficulty'):
+        assert re.search(rf'\{{{rva},\{{0x', shared), f'{rva} has no fingerprint'
+    assert 'kMaxDurabilityAt=0x2F4' in src('src/edf41classes.h')
+    code = re.sub(r'//[^\n]*', '', cpp)
+    assert not re.search(r'0xD7480|0x53060|0x52DE0|0x52F30|0x551E0', code)   # the DSGO accessors fault on a plain SGO
+    assert 'OnlineRunsHere(self)' in cpp
 
 
 @test
@@ -7373,7 +7483,7 @@ def edf41_dlc_objects() -> None:
     """EDF4.1's DLC objects (make_edf41_objects.DLC_ROOTS: what the two mission packs' listed missions spawn, mp01:/ and
     mp02:/ in 4.1, under OBJECT/EDF41MP01/ and OBJECT/EDF41MP02/ here, pylib/edf41dlc.py): every root registered under its
     pack's folder and nothing else there, no shipped file naming a DLC mount (mp0N:/ would resolve to nothing in EDF6), no
-    UfoMother401 object (EDF6 has no class for 4.1's 401 mothership: M809 / MP503 stay unplayable, not faked), and every
+    pack object left out (DLC_EXCLUDED is empty: the 401 mothership of M809 / MP503 is the plugin's class), and every
     file a DLC object names is shipped by the registry or (games installed) EDF6's own, with the models it names inside
     the archive the game will load (DragonSmall401.mrab is EDF5's frog dragon in EDF6: the DLC's dragons ship 4.1's, moved
     into the pack's folder). With EDF4.1 installed, DLC_ROOTS is what the packs' mission scripts name."""
@@ -7391,7 +7501,8 @@ def edf41_dlc_objects() -> None:
         assert 'OBJECT/' + root in objects, f'DLC root {root} is not registered'
     pack_objects = {o for o in objects if m.pack_folder(o)}
     assert pack_objects == {'OBJECT/' + r for r in m.DLC_ROOTS}, sorted(pack_objects ^ {'OBJECT/' + r for r in m.DLC_ROOTS})
-    assert not any('UFOMOTHER401' in rel for rel in reg['files']), 'a 401 mothership file is registered'
+    assert not m.DLC_EXCLUDED, m.DLC_EXCLUDED
+    assert {'EDF41MP02/UFOMOTHER401_DLC_M809.SGO', 'EDF41MP02/UFOMOTHER401_DLC_MP503.SGO'} <= set(m.DLC_ROOTS)
     assert not set(m.DLC_EXCLUDED) & {o.split('/', 1)[1] for o in objects}
     mount = re.compile(rb'(?i)mp0\d:/|m\x00p\x000\x00\d\x00:\x00/\x00')
     for rel in reg['files']:

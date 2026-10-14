@@ -13,6 +13,7 @@
 #include <cwchar>
 #include <deque>
 #include <mutex>
+#include <string>
 #include <vector>
 
 namespace crew::edf41c {
@@ -51,26 +52,6 @@ constexpr Print kPrints[]={
     {0x5B6BB0,{0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x74}},   // EventAnimationObject slot 0
     {0x5B6D20,{0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83}},   // slot 5
     {0x5B6540,{0x48,0x89,0x5C,0x24,0x20,0x55,0x56,0x57}},   // slot 9
-    // jobs/14618f05/tmp/re6/PRIMITIVES.md
-    {0x54EE70,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},   // SetTeam
-    {0x54E740,{0x48,0x8B,0xC4,0x48,0x89,0x58,0x18,0x55}},   // SetLevel
-    {0x548D50,{0x40,0x53,0x48,0x83,0xEC,0x20,0x80,0xB9}},   // activate
-    {0xD7720,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74}},    // durability x difficulty x players
-    {0x30C0F0,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},   // GetTarget
-    {0x6EA670,{0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x6C}},   // ragdoll body by name
-    {0x6EA430,{0x4C,0x8B,0x41,0x78,0x45,0x33,0xC9,0x48}},   // ragdoll body by Havok id
-    {0x1100B90,{0xC6,0x81,0xB0,0x00,0x00,0x00,0x01,0x0F}},  // skeleton from a matrix
-    {0x11B3020,{0x44,0x8B,0x41,0x20,0x41,0x8B,0xC0,0x0F}},  // setFarRender
-    {0x7B3200,{0x48,0x83,0xEC,0x18,0x45,0x33,0xC9,0xC7}},   // SePreset init
-    {0x7AEAE0,{0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57}},   // cue by name
-    {0x7B4510,{0x48,0x83,0xEC,0x48,0x48,0x8B,0x41,0x20}},   // play a preset
-    {0x7A8C20,{0x4C,0x8B,0x41,0x08,0x4D,0x85,0xC0,0x74}},   // move a handle
-    {0x7A8CD0,{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B}},   // stop a handle
-    {0x7A8730,{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B}},   // release a handle
-    {0x2E7FF0,{0x48,0x8B,0xC4,0x48,0x89,0x58,0x08,0x48}},   // Flame
-    {0x2E0B70,{0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57}},   // Blazing
-    {0x2E5ED0,{0x48,0x8B,0xC4,0x55,0x53,0x56,0x57,0x41}},   // Explosion
-    {0x2E7A30,{0x48,0x8B,0xC4,0x55,0x53,0x56,0x57,0x41}},   // Explosion_Big
 };
 
 using NewFn=void*(__fastcall*)(std::size_t);
@@ -452,101 +433,289 @@ bool Fire(void* owner,const float* matrix,const Bullet& b) noexcept {
     return true;
 }
 
-bool SetSlot(Clone& c,int slot,void* fn) noexcept {
-    if(slot<0 || slot>=c.slots || !fn)return false;
-    c.block[1+slot]=fn;
-    return true;
+// ---- the player -------------------------------------------------------------------------------------------------
+bool NearestPlayer(const float* from,float* out) noexcept {
+    (void)from;
+    const unsigned char* h=PlayerHuman();
+    if(!h || !Rd(h+kPosAt,12,"player position"))return false;
+    std::memcpy(out,h+kPosAt,12);
+    return std::isfinite(out[0]+out[1]+out[2]);
 }
 
-// ---- game objects (jobs/14618f05/tmp/re6/PRIMITIVES.md 3, 6, 7) -------------------------------------------------------
+// ---- EDF6 primitives (re6/PRIMITIVES.md) --------------------------------------------------------------------------
 namespace {
-constexpr std::size_t kSetTeam=0x54EE70,kSetLevel=0x54E740,kActivate=0x548D50,kDurabilityFactor=0xD7720,kGameState=0x20B2890,
-                      kGetTarget=0x30C0F0,kBodyByName=0x6EA670,kBodyById=0x6EA430,kSkeleton=0x1100B90,kSkeletonAt=0x660,
-                      kSetFarRender=0x11B3020,kModelNodeAt=0x5C0,kSoundSystem=0x20B2948,kSeInit=0x7B3200,kCueByName=0x7AEAE0,
-                      kSePlay=0x7B4510,kSeMove=0x7A8C20,kSeStop=0x7A8CD0,kSeRelease=0x7A8730,kEffectGen=0x20B2980,
-                      kFlame=0x2E7FF0,kBlazing=0x2E0B70,kExplosion=0x2E5ED0,kExplosionBig=0x2E7A30;
-constexpr std::uint32_t kFarBit=0x04000000u;
-template<class F> F Fn(std::size_t rva) noexcept { return reinterpret_cast<F>(image+rva); }
-bool Live(const void* object,const char* what) noexcept {
-    const char* o=static_cast<const char*>(object);
-    return object && Fingerprints() && Rd(o+kFlagsAt,1,what) && !(o[kFlagsAt]&4);
+constexpr std::size_t kFindLocator=0x6BADD0,kLocatorMatrix=0x6BB5A0,kBoneIndex=0x11002A0,kSetTeam=0x54EE70,kSetLevel=0x54E740,
+    kDifficulty=0xD7720,kGameStatus=0x20B2890,kGetTarget=0x30C0F0,kBodyByName=0x6EA670,kBodyById=0x6EA430,kPresetInit=0x7B3200,
+    kCueLookup=0x7AEAE0,kSoundSystem=0x20B2948,kPresetPlay=0x7B4510,kSoundMove=0x7A8C20,kSoundStop=0x7A8CD0,kEffects=0x20B2980,
+    kFlame=0x2E7FF0,kBlazing=0x2E0B70,kExplosion=0x2E5ED0,kExplosionBig=0x2E7A30,kDropItems=0x548AE0;
+constexpr Print kPrimPrints[]={
+    {kFindLocator,{0x40,0x53,0x55,0x56,0x57,0x41,0x56,0x41}},{kLocatorMatrix,{0x48,0x8B,0xC4,0x48,0x89,0x70,0x10,0x48}},
+    {kBoneIndex,{0x48,0x8B,0x09,0xE9,0xB8,0x7D,0x00,0x00}},{kSetTeam,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},
+    {kSetLevel,{0x48,0x8B,0xC4,0x48,0x89,0x58,0x18,0x55}},{kDifficulty,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74}},
+    {kGetTarget,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},{kBodyByName,{0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x6C}},
+    {kBodyById,{0x4C,0x8B,0x41,0x78,0x45,0x33,0xC9,0x48}},{kPresetInit,{0x48,0x83,0xEC,0x18,0x45,0x33,0xC9,0xC7}},
+    {kCueLookup,{0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57}},{kPresetPlay,{0x48,0x83,0xEC,0x48,0x48,0x8B,0x41,0x20}},
+    {kSoundMove,{0x4C,0x8B,0x41,0x08,0x4D,0x85,0xC0,0x74}},{kSoundStop,{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B}},
+    {kFlame,{0x48,0x8B,0xC4,0x48,0x89,0x58,0x08,0x48}},{kBlazing,{0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57}},
+    {kExplosion,{0x48,0x8B,0xC4,0x55,0x53,0x56,0x57,0x41}},{kExplosionBig,{0x48,0x8B,0xC4,0x55,0x53,0x56,0x57,0x41}},
+    {kDropItems,{0x48,0x8B,0xC4,0x48,0x89,0x58,0x18,0x48}},
+    {kParamCtor,{0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x74}},{kParamDtor,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74}},
+    {kWeakAssign,{0x48,0x89,0x74,0x24,0x20,0x57,0x48,0x83}},{kSpawn,{0x40,0x53,0x55,0x56,0x57,0x41,0x56,0x48}},
+};
+std::atomic<int> primState{0};   // 0 unchecked, 1 good, 2 refused
+bool Prims() noexcept {
+    int s=primState.load();
+    if(s)return s==1;
+    for(const Print& p:kPrimPrints)
+        if(!Readable(image+p.rva,8) || std::memcmp(image+p.rva,p.bytes,8)!=0) {
+            Log("EDF41CLASS the code at EDF.dll+0x%zX is not what this was written for: effects, sounds, teams and targets are off",p.rva);
+            primState=2;
+            return false;
+        }
+    primState=1;
+    return true;
 }
-void* Global(std::size_t rva) noexcept {
-    return Readable(image+rva,8) ? *reinterpret_cast<void**>(image+rva) : nullptr;
+template<class F> F At(std::size_t rva) noexcept { return reinterpret_cast<F>(image+rva); }
+void* Global(std::size_t rva) noexcept { return Readable(image+rva,8) ? *reinterpret_cast<void**>(image+rva) : nullptr; }
+}  // namespace
+
+void SetFlag(void* object,std::uint32_t bits,bool on) noexcept {
+    char* o=static_cast<char*>(object);
+    if(!object || !Rd(o+kFlags380,4,"object flags +0x380"))return;
+    std::uint32_t& f=*reinterpret_cast<std::uint32_t*>(o+kFlags380);
+    f=on ? (f|bits) : (f&~bits);
+}
+
+bool FindLocator(void* model,const wchar_t* name,LocatorHandle* out) noexcept {
+    *out={nullptr,nullptr};
+    if(!Prims() || !model || !Rd(model,8,"model component"))return false;
+    return At<bool(__fastcall*)(void*,LocatorHandle*,int,const wchar_t*)>(kFindLocator)(model,out,0,name) && out->entry && out->bone;
+}
+bool LocatorMatrix(const LocatorHandle& h,float* out) noexcept {
+    if(!Prims() || !h.entry || !h.bone)return false;
+    alignas(16) float m[16];
+    At<float*(__fastcall*)(const LocatorHandle*,float*)>(kLocatorMatrix)(&h,m);
+    std::memcpy(out,m,sizeof(m));
+    return std::isfinite(m[12]+m[13]+m[14]);
+}
+int BoneIndex(void* skeleton,const wchar_t* name) noexcept {
+    if(!Prims() || !skeleton || !Rd(skeleton,0x28,"skeleton"))return -1;
+    const std::wstring n(name);
+    const int i=At<int(__fastcall*)(void*,const std::wstring*)>(kBoneIndex)(skeleton,&n);
+    const std::int64_t count=*reinterpret_cast<const std::int64_t*>(static_cast<char*>(skeleton)+0x20);
+    return i>=0 && i<count ? i : -1;
+}
+bool BoneMatrix(void* skeleton,int index,float* out) noexcept {
+    if(index<0 || !skeleton || !Rd(skeleton,0x28,"skeleton"))return false;
+    const char* records=*reinterpret_cast<char* const*>(static_cast<char*>(skeleton)+0x10);
+    const std::int64_t count=*reinterpret_cast<const std::int64_t*>(static_cast<char*>(skeleton)+0x20);
+    if(index>=count)return false;
+    const char* rec=records+static_cast<std::size_t>(index)*0x110;
+    if(!records || !Rd(rec+0xB0,64,"bone record"))return false;
+    std::memcpy(out,rec+0xB0,64);
+    return std::isfinite(out[12]+out[13]+out[14]);
+}
+
+bool SetTeam(void* object,std::int32_t team,bool reg) noexcept {
+    if(!Prims() || !object)return false;
+    return At<bool(__fastcall*)(void*,std::int32_t,bool)>(kSetTeam)(object,team,reg);
+}
+void SetLevel(void* object,float rawLevel) noexcept {
+    if(Prims() && object)At<void(__fastcall*)(void*,float)>(kSetLevel)(object,rawLevel);
+}
+float LevelS(const void* object) noexcept {
+    const char* o=static_cast<const char*>(object);
+    if(!object || !Rd(o+kLevelAt,4,"object level"))return 1.0f;
+    float l;
+    std::memcpy(&l,o+kLevelAt,4);
+    return std::isfinite(l) && l>0.0f ? l/10.0f : 1.0f;
+}
+float Difficulty(float x) noexcept {
+    void* gs=Global(kGameStatus);
+    if(!Prims() || !gs)return x;
+    return At<float(__fastcall*)(void*,float)>(kDifficulty)(gs,x);
+}
+void SizeDurability(void* object) noexcept {
+    char* o=static_cast<char*>(object);
+    if(!object || !Rd(o+kBaseDurabilityAt,16,"object durability fields"))return;
+    float base;
+    std::memcpy(&base,o+kBaseDurabilityAt,4);
+    const float max=Difficulty(base*LevelS(object));
+    if(!(max>0.0f) || !std::isfinite(max))return;
+    std::memcpy(o+kMaxDurabilityAt,&max,4);
+    std::memcpy(o+kDurabilityAt,&max,4);
+}
+
+void* Target(void* object) noexcept {
+    if(!Prims() || !object)return nullptr;
+    return At<void*(__fastcall*)(void*)>(kGetTarget)(object);
+}
+bool AimPoint(const void* target,float* out) noexcept {
+    const char* t=static_cast<const char*>(target);
+    if(!target || !Rd(t+0x360,0x20,"target lock points") || !Rd(t+kPosAt,12,"target position"))return false;
+    const std::size_t count=*reinterpret_cast<const std::size_t*>(t+0x378);
+    const char* first=count ? *reinterpret_cast<char* const*>(t+0x368) : nullptr;
+    const char* point=first && Readable(first,8) ? *reinterpret_cast<char* const*>(first) : nullptr;
+    if(point && Rd(point+0x10,12,"lock point"))std::memcpy(out,point+0x10,12);
+    else std::memcpy(out,t+kPosAt,12);
+    return std::isfinite(out[0]+out[1]+out[2]);
+}
+
+int HitBody(void* ragdoll,const void* damageInfo) noexcept {
+    const char* g=static_cast<const char*>(damageInfo);
+    if(!Prims() || !ragdoll || !g || !Rd(g,0x90,"damage info"))return -1;
+    const char* recs=*reinterpret_cast<char* const*>(g+0x78);
+    const std::size_t n=*reinterpret_cast<const std::size_t*>(g+0x88);
+    if(!recs || n==0 || n>256 || !Rd(recs,n*0x30,"damage sub-hits"))return -1;
+    const float* c=reinterpret_cast<const float*>(g+kGdiCentre);
+    std::uint32_t body=0;
+    float best=3.4e38f;
+    for(std::size_t i=0;i<n;++i) {
+        const float* p=reinterpret_cast<const float*>(recs+i*0x30);
+        const float d=(p[0]-c[0])*(p[0]-c[0])+(p[1]-c[1])*(p[1]-c[1])+(p[2]-c[2])*(p[2]-c[2]);
+        if(d<best) { best=d; body=*reinterpret_cast<const std::uint32_t*>(recs+i*0x30+0x20); }
+    }
+    return At<int(__fastcall*)(void*,std::uint32_t)>(kBodyById)(ragdoll,body);
+}
+int RagdollBody(void* ragdoll,const wchar_t* name) noexcept {
+    if(!Prims() || !ragdoll || !Rd(ragdoll,0x90,"ragdoll"))return -1;
+    return At<int(__fastcall*)(void*,const wchar_t*)>(kBodyByName)(ragdoll,name);
+}
+
+bool PlayCue(const wchar_t* cue,const float* pos,SoundHandle* handle,const SeParams& params) noexcept {
+    void* system=Global(kSoundSystem);
+    if(!Prims() || !system || !cue || !*cue)return false;
+    alignas(16) unsigned char preset[0x80];
+    At<void*(__fastcall*)(void*)>(kPresetInit)(preset);
+    struct { void* bank; std::int32_t cue; std::int32_t pad; } ref{nullptr,-1,0};
+    if(!At<bool(__fastcall*)(void*,void*,int,const wchar_t*)>(kCueLookup)(system,&ref,0,cue) || !ref.bank) {
+        static std::atomic<int> said{0};
+        if(said.fetch_add(1)<16)Log("EDF41CLASS no sound cue %ls in the loaded banks",cue);
+        return false;
+    }
+    for(std::size_t at=0x20;at<=0x60;at+=0x10)std::memcpy(preset+at,&ref,16);
+    std::memcpy(preset+0x74,&params.volume,4);
+    std::memcpy(preset+0x70,&params.pitch,4);
+    std::memcpy(preset+0x10,&params.inner,4);
+    std::memcpy(preset+0x14,&params.reference,4);
+    std::memcpy(preset+0x18,&params.cull,4);
+    alignas(16) float p[4]={pos[0],pos[1],pos[2],1.0f};
+    At<void(__fastcall*)(void*,const float*,void*)>(kPresetPlay)(preset,p,handle);
+    return true;
+}
+bool PlaySe(const void* table,const wchar_t* name,const float* pos,SoundHandle* handle) noexcept {
+    const SgoNode* list=Key(table,L"edf41_se");
+    const int n=Count(list);
+    wchar_t text[96],cue[96];
+    for(int i=0;i<n;++i) {
+        const SgoNode* e=Child(list,i);
+        if(Count(e)<7 || !Text(Child(e,0),text,96) || std::wcscmp(text,name)!=0)continue;
+        SeParams p;
+        if(!Text(Child(e,1),cue,96) || !Float(Child(e,2),&p.volume) || !Float(Child(e,3),&p.pitch) || !Float(Child(e,4),&p.inner)
+           || !Float(Child(e,5),&p.reference) || !Float(Child(e,6),&p.cull))break;
+        return PlayCue(cue,pos,handle,p);
+    }
+    static std::atomic<int> said{0};
+    if(said.fetch_add(1)<16)Log("EDF41CLASS no 4.1 sound preset %ls in the object's edf41_se",name);
+    return false;
+}
+void MoveSound(SoundHandle& handle,const float* pos) noexcept {
+    if(!Prims() || !handle.instance)return;
+    alignas(16) float p[4]={pos[0],pos[1],pos[2],1.0f};
+    At<void(__fastcall*)(SoundHandle*,const float*)>(kSoundMove)(&handle,p);
+}
+void StopSound(SoundHandle& handle,int fadeFrames) noexcept {
+    if(!Prims() || !handle.instance)return;
+    At<void(__fastcall*)(SoundHandle*,int)>(kSoundStop)(&handle,fadeFrames);
+}
+
+void FireBurst(const float* pos,const float* dir,float size) noexcept {
+    void* egu=Global(kEffects);
+    if(!Prims() || !egu)return;
+    alignas(16) float p[4]={pos[0],pos[1],pos[2],1.0f},d[4]={dir[0],dir[1],dir[2],1.0f};
+    At<void(__fastcall*)(void*,const float*,const float*,float)>(kFlame)(egu,p,d,size);
+}
+void Blazing(const float* pos,const float* dir,float size) noexcept {
+    void* egu=Global(kEffects);
+    if(!Prims() || !egu)return;
+    alignas(16) float p[4]={pos[0],pos[1],pos[2],1.0f},d[4]={dir[0],dir[1],dir[2],1.0f};
+    At<void(__fastcall*)(void*,const float*,const float*,float,bool,int)>(kBlazing)(egu,p,d,size,false,0);
+}
+void Explosion(const float* pos,const float* dir,float size) noexcept {
+    void* egu=Global(kEffects);
+    if(!Prims() || !egu)return;
+    alignas(16) float p[4]={pos[0],pos[1],pos[2],1.0f},d[4]={dir[0],dir[1],dir[2],1.0f};
+    alignas(16) const float white[4]={1.0f,1.0f,1.0f,1.0f};
+    At<void(__fastcall*)(void*,const float*,const float*,float,float,const float*,float)>(kExplosion)(egu,p,d,size,1.0f,white,1.0f);
+}
+void BigExplosion(const float* pos,const float* dir,float size,float k) noexcept {
+    void* egu=Global(kEffects);
+    if(!Prims() || !egu)return;
+    alignas(16) float p[4]={pos[0],pos[1],pos[2],1.0f},d[4]={dir[0],dir[1],dir[2],1.0f};
+    At<void(__fastcall*)(void*,const float*,const float*,float,float,bool)>(kExplosionBig)(egu,p,d,size,k,false);
+}
+
+void DropItems(void* object) noexcept {
+    char* o=static_cast<char*>(object);
+    if(!Prims() || !object || !Rd(o+0x590,1,"object items dropped") || o[0x590])return;
+    alignas(16) float p[4]={0,0,0,1};
+    std::memcpy(p,o+kPosAt,12);
+    At<void(__fastcall*)(void*,const float*)>(kDropItems)(object,p);
+}
+
+void SetSlot(Clone& c,int slot,void* fn) noexcept {
+    if(slot>=0 && slot<c.slots && fn)c.block[1+slot]=fn;
+}
+
+// ---- more EDF6 primitives (the 401 mothership; PRIMITIVES.md 1c, 7 and docs/view-distance-re.md) --------------------------
+namespace {
+constexpr std::size_t kSkeletonFromMatrix=0x1100B90,kSetFarRender=0x11B3020,kActivate=0x548D50;
+constexpr Print kMorePrints[]={
+    {kSkeletonFromMatrix,{0xC6,0x81,0xB0,0x00,0x00,0x00,0x01,0x0F}},{kSetFarRender,{0x44,0x8B,0x41,0x20,0x41,0x8B,0xC0,0x0F}},
+    {kActivate,{0x40,0x53,0x48,0x83,0xEC,0x20,0x80,0xB9}},
+};
+std::atomic<int> moreState{0};
+bool More() noexcept {
+    int s=moreState.load();
+    if(s)return s==1;
+    for(const Print& p:kMorePrints)
+        if(!Readable(image+p.rva,8) || std::memcmp(image+p.rva,p.bytes,8)!=0) {
+            Log("EDF41CLASS the code at EDF.dll+0x%zX is not what this was written for: model matrices, far rendering and activation are off",p.rva);
+            moreState=2;
+            return false;
+        }
+    moreState=1;
+    return Prims();
+}
+bool NotDeleted(const void* object) noexcept {
+    const char* o=static_cast<const char*>(object);
+    return object && Readable(o+kFlagsAt,1) && !(o[kFlagsAt]&4);
 }
 }  // namespace
 
-bool SetTeam(void* object,int team,bool registered) noexcept {
-    if(!Live(object,"SetTeam object"))return false;
-    return reinterpret_cast<bool(__fastcall*)(void*,int,bool)>(image+kSetTeam)(object,team,registered);
-}
-bool SetLevel(void* object,float level) noexcept {
-    if(!Live(object,"SetLevel object") || !std::isfinite(level))return false;
-    reinterpret_cast<void(__fastcall*)(void*,float)>(image+kSetLevel)(object,level);
-    return true;
-}
-bool Activate(void* object) noexcept {
-    if(!Live(object,"Activate object"))return false;
-    reinterpret_cast<void(__fastcall*)(void*)>(image+kActivate)(object);
-    return true;
-}
-float DurabilityFactor(float x) noexcept {
-    void* gs=Global(kGameState);
-    if(!gs || !Fingerprints())return x;
-    const float r=reinterpret_cast<float(__fastcall*)(void*,float)>(image+kDurabilityFactor)(gs,x);
-    return std::isfinite(r) && r>0.0f ? r : x;
-}
-void* Target(void* object,float* aim) noexcept {
-    if(!Live(object,"Target object"))return nullptr;
-    char* t=reinterpret_cast<char*(__fastcall*)(void*)>(image+kGetTarget)(object);
-    if(!t || !Rd(t+kPosAt,16,"target position") || !Rd(t+0x368,0x18,"target lock points"))return nullptr;
-    const float* p=reinterpret_cast<const float*>(t+kPosAt);
-    if(*reinterpret_cast<const std::uint64_t*>(t+0x378)) {
-        const char* const* first=*reinterpret_cast<const char* const* const*>(t+0x368);
-        if(first && Rd(first,8,"target lock point") && *first && Rd(*first+0x10,12,"target lock point position"))
-            p=reinterpret_cast<const float*>(*first+0x10);
-    }
-    if(aim)std::memcpy(aim,p,12);
-    return t;
-}
-int HitBody(void* ragdoll,const void* damageInfo) noexcept {
-    const char* g=static_cast<const char*>(damageInfo);
-    if(!ragdoll || !g || !Fingerprints() || !Rd(g+0x30,16,"damage centre") || !Rd(g+0x78,0x18,"damage sub-hits"))return -1;
-    const char* recs=*reinterpret_cast<const char* const*>(g+0x78);
-    const std::uint64_t n=*reinterpret_cast<const std::uint64_t*>(g+0x88);
-    if(!recs || n==0 || n>4096 || !Rd(recs,static_cast<std::size_t>(n)*0x30,"damage sub-hit records"))return -1;
-    const float* c=reinterpret_cast<const float*>(g+0x30);
-    std::uint32_t body=0;
-    float best=3.4e38f;
-    for(std::uint64_t i=0;i<n;++i) {
-        const float* q=reinterpret_cast<const float*>(recs+i*0x30);
-        const float d=(q[0]-c[0])*(q[0]-c[0])+(q[1]-c[1])*(q[1]-c[1])+(q[2]-c[2])*(q[2]-c[2]);
-        if(d<best) { best=d; std::memcpy(&body,recs+i*0x30+0x20,4); }
-    }
-    return reinterpret_cast<int(__fastcall*)(void*,std::uint32_t)>(image+kBodyById)(ragdoll,body);
-}
-int BodyByName(void* ragdoll,const wchar_t* name) noexcept {
-    if(!ragdoll || !Fingerprints() || !Rd(ragdoll,0x90,"ragdoll"))return -1;
-    return reinterpret_cast<int(__fastcall*)(void*,const wchar_t*)>(image+kBodyByName)(ragdoll,name);
-}
 bool ModelMatrix(void* object,const float* matrix) noexcept {
-    if(!Live(object,"model matrix object"))return false;
+    if(!More() || !NotDeleted(object))return false;
     alignas(16) float m[16];
     std::memcpy(m,matrix,sizeof(m));
-    reinterpret_cast<void(__fastcall*)(void*,const float*)>(image+kSkeleton)(static_cast<char*>(object)+kSkeletonAt,m);
+    At<void(__fastcall*)(void*,const float*)>(kSkeletonFromMatrix)(static_cast<char*>(object)+kEaoSkeleton,m);
     return true;
 }
 bool FarRender(void* object) noexcept {
-    if(!Live(object,"far render object"))return false;
-    char* node=static_cast<char*>(object)+kModelNodeAt;
+    constexpr std::uint32_t kFarBit=0x04000000u;
+    if(!More() || !NotDeleted(object))return false;
+    char* node=static_cast<char*>(object)+kEaoModel;
     if(!Rd(node,0x28,"model node"))return false;
     if(*reinterpret_cast<const std::uint32_t*>(node+0x20)&kFarBit)return true;
-    if(!*reinterpret_cast<void* const*>(node+0x10))return false;
-    reinterpret_cast<void(__fastcall*)(void*,bool)>(image+kSetFarRender)(node,true);
+    if(!*reinterpret_cast<void* const*>(node+0x10))return false;   // its Umbra object is not there yet
+    At<void(__fastcall*)(void*,bool)>(kSetFarRender)(node,true);
     return (*reinterpret_cast<const std::uint32_t*>(node+0x20)&kFarBit)!=0;
 }
+bool Activate(void* object) noexcept {
+    if(!More() || !NotDeleted(object))return false;
+    At<void(__fastcall*)(void*)>(kActivate)(object);
+    return true;
+}
 
-// ---- weak references --------------------------------------------------------------------------------------------
 void WeakSet(WeakRef& w,const void* object) noexcept {
     WeakReset(w);
     const char* o=static_cast<const char*>(object);
@@ -561,7 +730,7 @@ void WeakSet(WeakRef& w,const void* object) noexcept {
 void WeakReset(WeakRef& w) noexcept {
     if(w.control && Readable(w.control,16)) {
         auto* weak=reinterpret_cast<std::atomic<std::int32_t>*>(static_cast<char*>(w.control)+0xC);
-        if(weak->fetch_sub(1)==1) {
+        if(weak->fetch_sub(1)==1) {   // the last reference of any kind: the block deletes itself (vtable slot 1)
             void* const* vt=*reinterpret_cast<void* const* const*>(w.control);
             if(vt && Readable(vt,16))reinterpret_cast<void(__fastcall*)(void*)>(vt[1])(w.control);
         }
@@ -570,8 +739,7 @@ void WeakReset(WeakRef& w) noexcept {
 }
 bool WeakAlive(const WeakRef& w) noexcept {
     if(!w.control || !Readable(w.control,16) || *reinterpret_cast<const std::int32_t*>(static_cast<char*>(w.control)+8)<=0)return false;
-    const char* o=static_cast<const char*>(w.object);
-    return o && Readable(o+kFlagsAt,1) && !(o[kFlagsAt]&4);
+    return NotDeleted(w.object);
 }
 bool WeakOut(const void* object,void* out) noexcept {
     WeakRef w;
@@ -582,68 +750,4 @@ bool WeakOut(const void* object,void* out) noexcept {
     return true;   // the weak count WeakSet took goes with it
 }
 
-// ---- sounds: a raw ACB cue as FireSe 0x7B3EA0 plays one (SePreset 0x80 bytes: +0x00 the position (0x7B4510 writes it), +0x10 inner
-// distance, +0x14 reference distance, +0x18 cull, +0x20 the cue {Bank*, index}, +0x70 pitch, +0x74 volume) -----------------
-bool PlayCue(const wchar_t* name,const float* pos,SeHandle* loop,float volume,float pitch,float inner,float reach) noexcept {
-    void* system=Global(kSoundSystem);
-    if(!system || !Fingerprints() || !name || !name[0])return false;
-    alignas(16) unsigned char p[0x80]={};
-    reinterpret_cast<void*(__fastcall*)(void*)>(image+kSeInit)(p);
-    struct Cue { void* bank; std::int32_t index; std::int32_t pad; } cue{nullptr,-1,0};
-    if(!reinterpret_cast<bool(__fastcall*)(void*,Cue*,int,const wchar_t*)>(image+kCueByName)(system,&cue,0,name) || !cue.bank)return false;
-    std::memcpy(p+0x20,&cue,16);
-    std::memcpy(p+0x10,&inner,4);
-    std::memcpy(p+0x14,&reach,4);
-    std::memcpy(p+0x70,&pitch,4);
-    std::memcpy(p+0x74,&volume,4);
-    alignas(16) float at[4]={pos[0],pos[1],pos[2],1.0f};
-    SeHandle scratch;
-    if(loop)StopSe(*loop,0);
-    SeHandle* h=loop ? loop : &scratch;
-    reinterpret_cast<void(__fastcall*)(void*,const float*,SeHandle*)>(image+kSePlay)(p,at,h);
-    if(!loop && scratch.control)reinterpret_cast<void(__fastcall*)(SeHandle*)>(image+kSeRelease)(&scratch);
-    return true;
-}
-void MoveSe(SeHandle& h,const float* pos) noexcept {
-    if(!h.control || !Fingerprints())return;
-    alignas(16) float at[4]={pos[0],pos[1],pos[2],1.0f};
-    reinterpret_cast<void(__fastcall*)(SeHandle*,const float*)>(image+kSeMove)(&h,at);
-}
-void StopSe(SeHandle& h,int fadeFrames) noexcept {
-    if(!h.control || !Fingerprints()) { h=SeHandle{}; return; }
-    reinterpret_cast<void(__fastcall*)(SeHandle*,int)>(image+kSeStop)(&h,fadeFrames);
-    reinterpret_cast<void(__fastcall*)(SeHandle*)>(image+kSeRelease)(&h);
-    h=SeHandle{};
-}
-
-// ---- effects ----------------------------------------------------------------------------------------------------
-namespace {
-void* Egu() noexcept { return Fingerprints() ? Global(kEffectGen) : nullptr; }
-struct V4 { alignas(16) float v[4]; V4(const float* p,float w) noexcept : v{p[0],p[1],p[2],w} {} };
-}  // namespace
-void EffectFlame(const float* pos,const float* dir,float size) noexcept {
-    if(void* e=Egu()) { V4 p(pos,1.0f),d(dir,1.0f); reinterpret_cast<void(__fastcall*)(void*,const float*,const float*,float)>(image+kFlame)(e,p.v,d.v,size); }
-}
-void EffectBlazing(const float* pos,const float* dir,float size) noexcept {
-    if(void* e=Egu()) { V4 p(pos,1.0f),d(dir,1.0f); reinterpret_cast<void(__fastcall*)(void*,const float*,const float*,float,bool,int)>(image+kBlazing)(e,p.v,d.v,size,false,0); }
-}
-void EffectExplosion(const float* pos,const float* dir,float size) noexcept {
-    if(void* e=Egu()) {
-        V4 p(pos,1.0f),d(dir,1.0f);
-        alignas(16) const float white[4]={1.0f,1.0f,1.0f,1.0f};
-        reinterpret_cast<void(__fastcall*)(void*,const float*,const float*,float,float,const float*,float)>(image+kExplosion)(e,p.v,d.v,size,1.0f,white,1.0f);
-    }
-}
-void EffectExplosionBig(const float* pos,const float* dir,float size,float a) noexcept {
-    if(void* e=Egu()) { V4 p(pos,1.0f),d(dir,1.0f); reinterpret_cast<void(__fastcall*)(void*,const float*,const float*,float,float,bool)>(image+kExplosionBig)(e,p.v,d.v,size,a,false); }
-}
-
-// ---- the player -------------------------------------------------------------------------------------------------
-bool NearestPlayer(const float* from,float* out) noexcept {
-    (void)from;
-    const unsigned char* h=PlayerHuman();
-    if(!h || !Rd(h+kPosAt,12,"player position"))return false;
-    std::memcpy(out,h+kPosAt,12);
-    return std::isfinite(out[0]+out[1]+out[2]);
-}
 }  // namespace crew::edf41c
