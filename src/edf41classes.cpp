@@ -689,4 +689,173 @@ void AllowAnyTeam(Clone& c) noexcept {
 void SetSlot(Clone& c,int slot,void* fn) noexcept {
     if(slot>=0 && slot<c.slots && fn)c.block[1+slot]=fn;
 }
+
+// ---- CAS player, the world, lock points, more effects, area damage (UfoRobo) -------------------------------------------------
+namespace {
+constexpr std::size_t kStateByName=0x11664F0,kPlayStateIndex=0x116BFC0;
+constexpr std::size_t kCasPlayers=0x60,kCasPlayerSize=0x160,kCasPlayerTime=0xE8,kCasPlayerLength=0xF0,kCasPlayerState=0x104;
+constexpr std::size_t kCastRay=0x11A7EE0,kHitReset=0xFDF00,kGroundCollector=0x179CBE8,kGroundAdd=0x208850;
+constexpr std::uint32_t kMapLayer=0x16;
+constexpr std::size_t kCameraSlots=0x4D8,kCameraSlotSize=0x188;
+constexpr std::size_t kAddLockTarget=0x547A50,kWind=0x2E4D90,kQuake=0x2E9B30,kEffectGen=0x20B2980;
+constexpr Print kRoboPrints[]={
+    {kStateByName,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x7C}},{kPlayStateIndex,{0x40,0x53,0x41,0x54,0x41,0x56,0x41,0x57}},
+    {kCastRay,{0x40,0x53,0x56,0x57,0x48,0x81,0xEC,0xA0}},{kHitReset,{0x33,0xD2,0xB8,0xFF,0xFF,0x00,0x00,0x89}},
+    {kGroundAdd,{0xF6,0x42,0x6C,0x02,0x0F,0x85,0x26,0xB1}},{kAddLockTarget,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C}},
+    {kWind,{0x48,0x8B,0xC4,0x48,0x89,0x58,0x10,0x48}},{kQuake,{0xF3,0x0F,0x10,0x05,0xD0,0xEC,0x47,0x01}},
+};
+std::atomic<int> roboPrimState{0};
+bool RoboPrims() noexcept {
+    int s=roboPrimState.load();
+    if(s)return s==1;
+    for(const Print& p:kRoboPrints)
+        if(!Readable(image+p.rva,8) || std::memcmp(image+p.rva,p.bytes,8)!=0) {
+            Log("EDF41CLASS the code at EDF.dll+0x%zX is not what this was written for: CAS clocks, the ground ray and lock points are off",p.rva);
+            roboPrimState=2;
+            return false;
+        }
+    roboPrimState=1;
+    return true;
+}
+const char* MainPlayer(const void* object) noexcept {
+    const char* o=static_cast<const char*>(object);
+    if(!object || !Rd(o+kCasPlayerAt,4,"CAS player index") || !Rd(o+kCasAt+kCasPlayers,8,"CAS player array"))return nullptr;
+    const int index=*reinterpret_cast<const std::int32_t*>(o+kCasPlayerAt);
+    const char* players=*reinterpret_cast<const char* const*>(o+kCasAt+kCasPlayers);
+    if(index<0 || index>64 || !players)return nullptr;
+    const char* p=players+static_cast<std::size_t>(index)*kCasPlayerSize;
+    return Rd(p,kCasPlayerSize,"CAS player") ? p : nullptr;
+}
+const SgoNode kGrenadeCustom[7]={{0,6,12},{1,0,1},{2,0,0},{2,0,0},{2,0,0},{2,0,0},{1,0,0}};   // [1, 0, 0, 0, 0, 0]
+}  // namespace
+
+int StateIndex(void* object,const wchar_t* state) noexcept {
+    char* o=static_cast<char*>(object);
+    if(!RoboPrims() || !MainPlayer(object))return -1;
+    const int casPlayer=*reinterpret_cast<const std::int32_t*>(o+kCasPlayerAt);
+    return reinterpret_cast<int(__fastcall*)(void*,int,const wchar_t*,bool)>(image+kStateByName)(o+kCasAt,casPlayer,state,true);
+}
+bool PlayStateIndex(void* object,int state) noexcept {
+    char* o=static_cast<char*>(object);
+    if(state<0 || !RoboPrims() || !MainPlayer(object))return false;
+    const int casPlayer=*reinterpret_cast<const std::int32_t*>(o+kCasPlayerAt);
+    return reinterpret_cast<bool(__fastcall*)(void*,int,int,int)>(image+kPlayStateIndex)(o+kCasAt,casPlayer,state,0);
+}
+bool ClipNow(const void* object,int* state,float* time,float* length) noexcept {
+    const char* p=MainPlayer(object);
+    if(!p)return false;
+    std::memcpy(time,p+kCasPlayerTime,4);
+    std::memcpy(length,p+kCasPlayerLength,4);
+    std::memcpy(state,p+kCasPlayerState,4);
+    return std::isfinite(*time) && std::isfinite(*length);
+}
+
+bool ClipRewind(void* object) noexcept {
+    char* p=const_cast<char*>(MainPlayer(object));
+    if(!p)return false;
+    const float zero=0.0f;
+    std::memcpy(p+kCasPlayerTime,&zero,4);
+    return true;
+}
+
+bool GroundHit(const float* from,const float* to,float* hit,void* skipRagdoll) noexcept {
+    if(!RoboPrims() || (skipRagdoll && !Prims()))return false;
+    char* g=static_cast<char*>(Manager());
+    if(!g || !Rd(g,0x70,"physics world") || !*reinterpret_cast<void* const*>(g+0x68))return false;
+    struct alignas(16) RayInput { float from[4],to[4]; std::uint32_t filter,unk24; std::uint64_t pad; };
+    struct alignas(16) RayHits { unsigned char raw[0xA0]; };
+    float a[3]={from[0],from[1],from[2]};
+    // The ground collector keeps the nearest hit with flags & 2, the caller's own ragdoll bodies included (the UfoRobo M411 run,
+    // 2026-10-15: each frame's ray met the robot's feet and lifted it a little more): a hit on one of `skipRagdoll`'s bodies
+    // (collector +0x78 the body id, heli.cpp ObjectRay; 0x6EA430 maps it) is passed and the ray cast again from just below it.
+    for(int pass=0;pass<8;++pass) {
+        const RayInput in{{a[0],a[1],a[2],1.0f},{to[0],to[1],to[2],1.0f},kMapLayer,0,0};
+        RayHits col{};
+        *reinterpret_cast<const void**>(col.raw)=image+kGroundCollector;
+        reinterpret_cast<void(*)(void*)>(image+kHitReset)(&col);
+        reinterpret_cast<void(*)(void*,void*,const RayInput*)>(image+kCastRay)(g+0x10,&col,&in);
+        if(*reinterpret_cast<const std::int32_t*>(col.raw+0x0C)==0)return false;
+        const float f=*reinterpret_cast<const float*>(col.raw+0x50);
+        if(!std::isfinite(f) || f<0.0f || f>1.0f)return false;
+        std::memcpy(hit,col.raw+0x30,12);
+        if(!std::isfinite(hit[0]+hit[1]+hit[2]))return false;
+        // the body id as 0x6EA430 compares it (the body's +0xF0, the whole dword; heli.cpp masks it to 24 bits for its own use)
+        const std::uint32_t body=*reinterpret_cast<const std::uint32_t*>(col.raw+0x78);
+        const auto byId=reinterpret_cast<int(__fastcall*)(void*,std::uint32_t)>(image+kBodyById);
+        int own=skipRagdoll ? byId(skipRagdoll,body) : -1;
+        if(own<0 && skipRagdoll)own=byId(skipRagdoll,body&0xFFFFFFu);
+        static std::atomic<int> said{0};
+        if(skipRagdoll && said.fetch_add(1)<12)
+            Log("EDF41CLASS ground ray pass %d from %.1f %.1f %.1f to y %.1f: hit %.1f %.1f %.1f body %06X flags %08X -> own body %d",pass,a[0],a[1],a[2],
+                to[1],hit[0],hit[1],hit[2],body,*reinterpret_cast<const std::uint32_t*>(col.raw+0x9C),own);
+        if(own<0)return true;
+        const float d[3]={to[0]-a[0],to[1]-a[1],to[2]-a[2]};
+        const float l=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+        if(l<1e-3f)return false;
+        for(int k=0;k<3;++k)a[k]=hit[k]+d[k]/l*0.25f;
+    }
+    return false;
+}
+
+bool CameraNow(float* eye,float* forward) noexcept {
+    const char* scene=static_cast<const char*>(Manager());
+    if(!scene)return false;
+    for(int i=0;i<4;++i) {
+        const char* slot=scene+kCameraSlots+static_cast<std::size_t>(i)*kCameraSlotSize;
+        if(!Rd(slot,16,"camera slot"))return false;
+        const char* obj=*reinterpret_cast<const char* const*>(slot);
+        const char* ctrl=*reinterpret_cast<const char* const*>(slot+8);
+        if(!obj || !ctrl || !Readable(ctrl,16) || *reinterpret_cast<const std::int32_t*>(ctrl+8)<=0)continue;
+        if(!Readable(obj+0x70,0x40))continue;
+        float m[16];
+        std::memcpy(m,obj+0x70,sizeof(m));
+        const float lf=std::sqrt(m[8]*m[8]+m[9]*m[9]+m[10]*m[10]);
+        if(!std::isfinite(lf+m[12]+m[13]+m[14]) || lf<0.9f || lf>1.1f)continue;
+        if(m[12]==0.0f && m[13]==0.0f && m[14]==0.0f && m[0]==1.0f && m[5]==1.0f && m[10]==1.0f)continue;   // not a view yet
+        for(int k=0;k<3;++k) { eye[k]=m[12+k]; forward[k]=m[8+k]/lf; }
+        return true;
+    }
+    return false;
+}
+
+void* AddLockPoint(void* object) noexcept {
+    if(!object || !RoboPrims() || !Rd(static_cast<char*>(object)+0x360,0x20,"lock point list"))return nullptr;
+    void* p=reinterpret_cast<void*(__fastcall*)(void*)>(image+kAddLockTarget)(object);
+    return p && Readable(p,0x50) ? p : nullptr;
+}
+void SetLockPoint(void* lockPoint,const float* pos) noexcept {
+    if(!lockPoint || !Readable(static_cast<char*>(lockPoint)+0x10,16))return;
+    const float p[4]={pos[0],pos[1],pos[2],1.0f};
+    std::memcpy(static_cast<char*>(lockPoint)+0x10,p,16);
+}
+
+void Smoke(const float* pos,float size) noexcept {
+    if(!RoboPrims() || !Readable(image+kEffectGen,8))return;
+    void* egu=*reinterpret_cast<void* const*>(image+kEffectGen);
+    if(!egu)return;
+    alignas(16) const float p[4]={pos[0],pos[1],pos[2],1.0f},d[4]={0.0f,1.0f,0.0f,1.0f};
+    reinterpret_cast<void(__fastcall*)(void*,const float*,const float*,float)>(image+kWind)(egu,p,d,size);
+}
+void Quake(const float* pos,float strength,float radius) noexcept {
+    if(!RoboPrims() || !Readable(image+kEffectGen,8))return;
+    void* egu=*reinterpret_cast<void* const*>(image+kEffectGen);
+    if(!egu)return;
+    alignas(16) const float p[4]={pos[0],pos[1],pos[2],1.0f};
+    reinterpret_cast<void(__fastcall*)(void*,const float*,float,float,int)>(image+kQuake)(egu,p,strength,radius,1);
+}
+
+bool Blast(void* owner,const float* pos,float radius,float damage) noexcept {
+    Bullet b;
+    b.factory=L"GrenadeBullet01";
+    b.speed=0.001f;   // still; not 0, so its heading stays a direction
+    b.life=1;
+    b.damage=damage>0.0f ? damage : 0.0f;
+    b.explosion=radius;
+    b.size=1.0f;
+    b.custom=kGrenadeCustom;
+    const float dir[3]={0.0f,-1.0f,0.0f};
+    float m[16];
+    AimMatrix(pos,dir,m);
+    return Fire(owner,m,b);
+}
 }  // namespace crew::edf41c

@@ -321,6 +321,12 @@ struct Config {
     int edf41MotherParts=31;        // which part groups the mothership builds as real objects (bit 1 hatches, 2 covers, 4 cannons, 8 main cannon, 16 panels); 0 = none
     int edf41MotherForce=0;         // development only: force the mothership's actions / part deaths the autopilot cannot cause (edf41mother.cpp Force)
     bool edf41Mother=true;          // EDF4.1's UfoMother301 and its part classes (edf41mother.cpp)
+    bool edf41Robo=true;            // EDF4.1's UfoRobo, the transforming ship / robot (edf41robo.cpp)
+    float edf41RoboLevel=0.0f;      // development only: the robot's level for its guns' numbers (0 = the object's own)
+    int edf41RoboGunEvery=0;        // development only: the ship's volleys in turn every n frames, the robot's knee / shoulder guns every n (0 = 4.1's timers)
+    int edf41RoboAttack=-1;         // development only: the robot's attack every 10 s, always robo_attack_table entry n (-1 = 4.1's choice)
+    float edf41RoboPlace=0.0f;      // development only: the robot put this many m in front of the camera when it appears (0 = where the script puts it)
+    float edf41RoboTransformAfter=0.0f;   // development only: transform this many s after it appears, as ObjectAction 0 (0 = when the script says)
     bool edf41Sound=true;           // EDF4.1's weapon sound effects and voices added to EDF6's banks (edf41sound.cpp), from the game's start
     bool edf41VoiceProbe=false;     // development only: log each voice key the game looks up in each bank and each caption it finds (edf41sound.cpp)
     bool terrainShare=true;         // every placement of one terrain piece drawn from one decode (fieldshare.cpp), from the game's start
@@ -507,6 +513,7 @@ bool InstallEdf41Insects() noexcept;
 bool InstallEdf41Natives() noexcept;
 // edf41mother.cpp: UfoMother301 (EDF4.1's mothership) and its part classes, registered in the game's own factory table.
 bool InstallEdf41Mother() noexcept;
+bool InstallEdf41Robo() noexcept;      // edf41robo.cpp: EDF4.1's UfoRobo (ini Edf41Robo)
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
 bool InstallMissiles() noexcept;
 // The stock split missiles (MissileBullet02) split short of a big target's surface (splitmissile.cpp).

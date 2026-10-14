@@ -53,6 +53,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import acb  # noqa: E402
 import cas_graft  # noqa: E402
+import cas_pose  # noqa: E402
 import dsgo  # noqa: E402
 import edf41dlc  # noqa: E402
 import legacy_assets  # noqa: E402
@@ -1052,12 +1053,19 @@ def check_sounds(games: 'Games', data: bytes, rel: str) -> None:
     null: the M015 crash of UFOCARRIER, the sound system derefs it at EDF+0x240AD0 via 0x7B3310 / 0x6ABF50)."""
     members = dsgo.to_py(dsgo.parse(data).root) if data[:4] == b'DSGO' else sgo.load(data=data)
     names = [n for k in SE_KEYS for n in strings(members.get(k)) if n]
-    if not names:
+    own = {e[0]: e[1] for e in members.get('edf41_se', []) if isinstance(e, list) and len(e) >= 2}
+    if not names and not own:
         return
     seset, banks = sound_cues(games)
     loaded = set(RESIDENT_BANKS) | {s.rsplit('/', 1)[-1].upper() for s in strings(members.get('game_sound'))}
     cues = set().union(*(banks.get(b, set()) for b in loaded))
+    # edf41_se: 4.1 SEPRESET names a plugin class plays itself, by the cue's name (robo_fix): each cue must be in a bank
+    for n, cue in own.items():
+        if cue not in cues:
+            raise ValueError(f'{rel}: sound {n!r} (edf41_se) plays cue {cue}, which none of {sorted(loaded)} holds')
     for n in names:
+        if n in own:
+            continue
         if n not in seset:
             raise ValueError(f'{rel}: sound {n!r} is not in SEPRESET.SGO')
         if seset[n] not in cues:
@@ -1418,6 +1426,133 @@ ROOTS[MOTHER301_ROOT] = 6   # M016 M110 M123 M130 M210 M603 (DLC pack 1's M993 n
 ALIASES[MOTHER301_ROOT] = MOTHER301_ALIAS
 NATIVE_FIXES: dict[str, Callable[['Games', dict[str, bytes]], None]] = {MOTHER301_ROOT: mother301_fix}
 
+
+# ---- UfoRobo, EDF4.1's transforming ship / walking robot (docs/edf41-uforobo.md) -----------------------------------------
+# EDF6 has no class that flies and walks as one object (the script keeps one handle across the transformation: M007 registers
+# its durability events on it after ObjectAction 0). The plugin registers UfoRobo itself (src/edf41robo.cpp: the object on
+# EventAnimationObject's constructor, which reads only animation_model and ragdoll, under a cloned vtable) and runs 4.1's state
+# machines. No alias: the SGO keeps 4.1's class name and every 4.1 key the plugin reads (robo_*_muzzle_setting,
+# robo_attack_table, se_table, the bullet classes and custom parameters, ik_control_info, game_object_durability). robo_fix adds
+# what EventAnimationObject and the plugin need (below).
+ROBO_ROOT = 'UFOROBO401.SGO'
+ROBO_ROOT_BONE = 'globalSRT'
+# The MAB events the plugin raises itself, as it plays the clips (EDF6's EventAnimationObject registers no handler for 4.1's
+# events): kind numbers of edf41_robo_events (src/edf41robo.cpp EventKind). 4.1 registers 攻撃判定 / 砲撃開始 / 砲撃終了 /
+# ジェノサイド砲発射 (EDF41.exe 0x2732B0 -> 0x277790 / 0x277C10 / 0x277D90 / 0x277DB0); se / se_stop are the engine's own.
+ROBO_EVENTS = {'se': 0, 'se_stop': 1, '攻撃判定': 2, '砲撃開始': 3, '砲撃終了': 4, 'ジェノサイド砲発射': 5}
+# SEPRESET names 4.1's class code plays by name (the guns' charge / shot / hit cues, the flying buster charge: EDF41.exe
+# 0x27B0A0 / 0x2744B0 / 0x278480), besides se_table, ragdoll_contact and the MAB's se events.
+ROBO_CLASS_SE = ('ロボ小ビームチャージ', 'ロボ小ビーム発射', 'ロボビーム着弾小', 'ロボ飛行形態中型キャノンチャージ', 'ロボ肩ビーム発射',
+                 'ロボビーム着弾中', 'ロボバスター砲発射', 'ロボビーム着弾大', 'ロボ飛行形態バスター砲チャージ')
+# Names the plugin looks up in the files and uses (check_class_names holds the object to them): the CAS states its state
+# machines play (and default, which EventAnimationObject's constructor plays), the muzzle / attack range / foot locators.
+ROBO_STATES = ('default', 'ship', 'transform', 'stand', 'fall', 'fall_land', 'walk_f_nl', 'walk_f_lr', 'walk_f_rl',
+               'walk_f_ln', 'walk_f_rn', 'walk_b_nl', 'walk_b_lr', 'walk_b_rl', 'walk_b_ln', 'walk_b_rn', 'side_step_l',
+               'side_step_r', 'turn_l45', 'turn_r45', 'turn_l90', 'turn_r90', 'turn_l180', 'turn_r180', 'attack_chop_l',
+               'attack_chop_r', 'attack_stomp_l', 'attack_stomp_r', 'attack_fire360', 'attack_fire_cross',
+               'attack_fire_genocide', 'attack_fire_straight', 'dead')
+ROBO_LOCATORS = ('muzzle_small_l', 'muzzle_small_r', 'muzzle_middle_l', 'muzzle_middle_r', 'muzzle_big_l', 'muzzle_big_r',
+                 '右手攻撃範囲', '右手攻撃範囲2', '右手攻撃範囲3', '左手攻撃範囲', '左手攻撃範囲2', '左手攻撃範囲3', '右足歩行衝撃',
+                 '左足歩行衝撃', 'ロックオン')
+# The plugin's own limits (src/edf41robo.cpp): longer tables are refused there, so they are refused here.
+ROBO_MOST_EVENTS = 24        # kMostEvents: per clip
+ROBO_SE_PREFIXES = ('ロボ',)   # 4.1's SEPRESET entries copied into edf41_se (se41_table): every name the robot plays
+ROBO_MOST_MOTION_KEYS = 512  # kMostMotionKeys
+
+
+
+def robo_events(cas: bytes, mab: bytes) -> list:
+    """edf41_robo_events: [[CAS state, clip number in the state, [[time, kind, text, a, b, c], ...]], ...] for every state of
+    the CAS's main player whose clips have MAB events: the clips a state plays (its play data command's tcontrol, in order;
+    attack_fire_genocide plays attack_fire_genocide_charge then attack_fire_genocide), each with its track's keys (ROBO_EVENTS
+    kinds; time in clip units, the CAS player's +0xE8). se: text the 4.1 SEPRESET name; 攻撃判定: text the locator, a damage
+    (default 10), b scale (1), c quake (0.2: EDF41.exe 0x277790); 砲撃開始 / ジェノサイド砲発射: a charge_frame."""
+    clips = cas_graft.state_clips(cas)['main']
+    tracks = mab_legacy.mab_event_params(mab)
+    out = []
+    for state, names in sorted(clips.items()):
+        for n, clip in enumerate(names):
+            keys = []
+            for key, time, p in tracks.get(clip, []):
+                if key not in ROBO_EVENTS:
+                    raise ValueError(f'MAB track {clip}: event {key} is not one the plugin raises')
+                kind = ROBO_EVENTS[key]
+                text = p.get('name', p.get('collision', ''))
+                a = float(p.get('damage', 10.0) if kind == 2 else p.get('charge_frame', 0) if kind in (3, 5) else
+                          p.get('channel', 0))
+                b = float(p.get('scale', 1.0))
+                c = float(p.get('quake', 0.2))
+                keys.append([float(time), kind, str(text), a, b, c])
+            if keys:
+                if len(keys) > ROBO_MOST_EVENTS:
+                    raise ValueError(f'MAB track {clip}: {len(keys)} events, the plugin takes {ROBO_MOST_EVENTS}')
+                out.append([state, n, keys])
+    return out
+
+
+def robo_motion(cas: bytes) -> tuple[list, set[str]]:
+    """(edf41_robo_motion, the clips it covers): [[CAS state, clip length, [x, z, yaw, ...] per key], ...] for the states whose
+    one clip moves the root bone (ROBO_ROOT_BONE: the walks, side steps and turns), relative to the clip's start (cas_pose
+    root_motion). 4.1 moves the object by the clip's root motion (EDF41.exe 0x276DFA reads the player's root motion; the
+    robot's horizontal speed is that motion x 60, turned by the yaw it had when the step began, 0x324); the plugin does the
+    same from these keys and the bone's own tracks are dropped (cas_pose.strip_bone) so the model does not move twice."""
+    pose = cas_pose.CasPose(cas)
+    by_name = {c.name: c for c in pose.clips}
+    out, moved = [], set()
+    for state, names in sorted(cas_graft.state_clips(cas)['main'].items()):
+        motions = [(n, cas_pose.root_motion(pose, by_name[n], ROBO_ROOT_BONE)) for n in names]
+        motions = [(n, m) for n, m in motions if m]
+        if not motions:
+            continue
+        if len(names) != 1:
+            raise ValueError(f'CAS state {state} moves the root over {len(names)} clips: the plugin follows one')
+        name, keys = motions[0]
+        if len(keys) > ROBO_MOST_MOTION_KEYS:
+            raise ValueError(f'clip {name}: {len(keys)} root motion keys, the plugin takes {ROBO_MOST_MOTION_KEYS}')
+        duration, _step, _frames = cas_pose.clip_info(pose, by_name[name])
+        out.append([state, float(duration), [round(v, 4) for k in keys for v in k]])
+        moved.add(name)
+    return out, moved
+
+
+def robo_fix(games: Games, files: dict[str, bytes]) -> None:
+    """UfoRobo401's files for the plugin's class (src/edf41robo.cpp):
+    - CAS: main gets `default` (EventAnimationObject's constructor plays it; 4.1's class starts in ship) as an alias of
+      ship; the root bone's tracks of the moving clips dropped (robo_motion);
+    - edf41_robo_events (robo_events), edf41_robo_motion (robo_motion); material_animation dropped (below);
+    - edf41_se: [[4.1 SEPRESET name, cue, volume, pitch, inner, reference, cull], ...] for every name the object plays (se_table, ragdoll_contact,
+      the MAB's se events, ROBO_CLASS_SE; se41_table's form, all of 4.1's ロボ* entries): EDF6's SEPRESET has none of 4.1's robot names (EDF6 ships the bank,
+      TIKYUU4_EN_UFOROBO.ACB, with every en_Robo_* cue, but no preset naming them), so the plugin plays the cues by name
+      with 4.1's volume and pitch; check_sounds holds each cue to the banks the object loads."""
+    rel = 'OBJECT/' + ROBO_ROOT
+    version, members = sgo.read(files[rel])
+    am = members['animation_model']
+    cas_rel = rel_of(am[1])
+    mab = mab_block(am[2])
+    cas = files[cas_rel]
+    # material_animation: 4.1's class drives it itself (EDF41.exe 0x2713F0 / 0x273FB2, the hull's lights) as a bare MTAB blob,
+    # the form EDF6's material code faults on (check_materials); EventAnimationObject's constructor does not read the key
+    # and the plugin does not drive the lights: dropped.
+    members.pop('material_animation', None)
+    members['edf41_robo_events'] = robo_events(cas, mab)
+    members['edf41_robo_motion'], moved = robo_motion(cas)
+    cas = cas_pose.strip_bone(cas, moved, ROBO_ROOT_BONE)
+    files[cas_rel] = cas_graft.alias_states(cas, {'main': [('default', 'ship')]})
+    table = se41_table(games, ROBO_SE_PREFIXES)
+    names = list(strings(members.get('se_table'))) + [members['ragdoll_contact'][0]] + list(ROBO_CLASS_SE)
+    names += [e[2] for _s, _n, keys in members['edf41_robo_events'] for e in keys if e[1] == ROBO_EVENTS['se']]
+    missing = sorted(set(names) - {e[0] for e in table})
+    if missing:
+        raise ValueError(f'{rel}: sounds {missing} are not in EDF4.1\'s SEPRESET.SGO')
+    # only what the robot plays: 4.1 also has ロボ３６０停止 (en_Robo_fire360_shotStop), which no MAB event or code plays and
+    # EDF6's bank lacks (check_sounds holds every edf41_se cue to the loaded banks)
+    members['edf41_se'] = [e for e in table if e[0] in set(names)]
+    files[rel] = sgo.write_depth_first(version, members)
+
+
+ROOTS[ROBO_ROOT] = 2   # M007 M411 (DLC pack 1's M415 / M416 and pack 2's M010 name the same story file)
+NATIVE_FIXES[ROBO_ROOT] = robo_fix   # no alias: build() runs it on the converted closure before the checks
+
 def alias(games: Games, root: str, files: dict[str, bytes], a: Alias) -> None:
     """In `files` (the converted closure of OBJECT/`root`): its SGO under class a.cls with a.template's keys it
     lacks, its CAS with a.template's players it lacks (when the CAS is one of the files; else EDF6's own is used).
@@ -1677,6 +1812,8 @@ class ClassNames:
 # The range's other strings are SGO keys, MAB event names and their parameters' keys, or another class's (ダメージ判定 at
 # 0x32DA55 is DeiroiFootParts_Toe's).
 CLASS_NAMES: dict[str, ClassNames] = {
+    # The plugin's own class (src/edf41robo.cpp): what it looks up by name (ROBO_STATES / ROBO_LOCATORS above).
+    'UfoRobo': ClassNames(states=ROBO_STATES, locators=ROBO_LOCATORS),
     'DragonSmall': ClassNames(
         states=('capture', 'damage_1', 'damage_2', 'damage_3', 'dead', 'down', 'fly', 'fly_attack', 'fly_begin',
                 'fly_damage_1', 'fly_damage_2', 'fly_damage_3', 'fly_damage_large', 'glide', 'glide_end', 'glide_fly',
@@ -2440,6 +2577,11 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
             version, members = sgo.read(out[rel])
             PATCHES[root](members)
             out[rel] = sgo.write_depth_first(version, members)
+        if not why and root in NATIVE_FIXES and root not in ALIASES:   # a native class without an alias (UfoRobo)
+            try:
+                NATIVE_FIXES[root](games, out)
+            except ValueError as e:
+                why.append(f'native class: {e}')
         if not why and root not in ALIASES:
             try:
                 check_materials(games, out, rel, {})

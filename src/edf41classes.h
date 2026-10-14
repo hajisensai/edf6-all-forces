@@ -177,4 +177,28 @@ void SetSlot(Clone& c,int slot,void* fn) noexcept;
 // to team 6 only, so a clone of it never becomes an enemy. This points the clone's slot 22 at GameObjectBase's (0x54ABD0, true).
 void AllowAnyTeam(Clone& c) noexcept;
 
+// ---- CAS player, the world, lock points, more effects, area damage (added for UfoRobo, src/edf41robo.cpp) ------------------
+// The main player (EventAnimationObject / UfoCarrier508 layout: players *(object+0x8F0+0x60), 0x160 each, index [+0xC80]).
+int StateIndex(void* object,const wchar_t* state) noexcept;                 // 0x11664F0(cas, player, name, 1); -1: none
+bool PlayStateIndex(void* object,int state) noexcept;                       // 0x116BFC0(cas, player, state, 0)
+bool ClipNow(const void* object,int* state,float* time,float* length) noexcept;   // +0x104 state, +0xE8 time, +0xF0 length
+// The main player's clip back to its start (+0xE8 = 0): 0x116BFC0 asked for the state already playing may keep its clock.
+bool ClipRewind(void* object) noexcept;
+// The nearest map hit (terrain / buildings: 0x11A7EE0 with the ground collector 0x179CBE8, filter 0x16, as heli.cpp) on from -> to.
+// `skipRagdoll` (a ragdoll component, EAO +0xAA0): hits on its own bodies are passed.
+bool GroundHit(const float* from,const float* to,float* hit,void* skipRagdoll=nullptr) noexcept;
+// The game's own camera (scene system +0x4D8 slots, wrapper +0x70: edf41mother.cpp GameCamera): eye and unit forward.
+bool CameraNow(float* eye,float* forward) noexcept;
+// A lock point of the object's own (AddLockTarget 0x547A50(object): the object keeps it in its list +0x360; the lock search
+// takes it while the object is hostile). EventAnimationObject registers none; the caller keeps its position (+0x10) current.
+void* AddLockPoint(void* object) noexcept;
+void SetLockPoint(void* lockPoint,const float* pos) noexcept;
+// More EffectGenUtil effects: ExplosionWind 0x2E4D90 (煙_01: dust / smoke), the camera quake 0x2E9B30(egu, pos, strength, radius, 1).
+void Smoke(const float* pos,float size) noexcept;
+void Quake(const float* pos,float strength,float radius) noexcept;
+// Area damage of `owner` (its team and weak pointer) at `pos`: a GrenadeBullet01 with custom parameter #0 = 1 (it explodes when
+// its life ends, docs/decoy-blast-re.md 1.4), still, 1 frame of life, blast radius `radius` (InitParam +0xB0), `damage`. Its
+// explosion is drawn too.
+bool Blast(void* owner,const float* pos,float radius,float damage) noexcept;
+
 }  // namespace crew::edf41c
