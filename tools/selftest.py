@@ -9500,6 +9500,8 @@ def edf5_dlc_campaign_offers_the_four() -> None:
     """make_edf5_campaign.plan offers DM015 / DM018 / DM019 / DM020 (Mission Pack 1) when tools/edf5_dlc.py will write
     their maps and fortress, and skips one whose part it leaves out, saying why (as the EDF4.1 packs' Skip41)."""
     import edf5_dlc
+    if not _e5c_have_game():   # the plan reads the real game's Root.cpk: a developer's machine (CI has no game)
+        return
     reg = edf5_dlc.registry()
     maps = {f'{g}.MAC' for g, x in reg['groups'].items() if x['kind'] == 'map'}
     names = {tuple(rel.split('/', 1)) for x in reg['groups'].values() if x['kind'] == 'object' for rel in x['files']}
