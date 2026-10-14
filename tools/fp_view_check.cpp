@@ -107,13 +107,18 @@ void Eye() {
     const float head[3]={100.3f,1.6f,50.0f};   // 0.3 m ahead of the body, 1.6 m up
     float local[3]={0.0f,0.0f,0.0f};
     EaseEye(body,head,0.05f,0.1f,0.25f,true,local);
-    Expect(Near(local[1],1.65f) && Near(local[2],0.4f),"the first frame: the head's place as it is, pushed up and ahead",local[1],local[2]);
+    Expect(Near(local[0],0.0f) && Near(local[1],1.65f) && Near(local[2],0.1f),
+           "the first frame: on the body's axis at the head's height pushed up, ahead of the axis (not of the head)",local[1],local[2]);
     const float lower[3]={100.3f,1.2f,50.0f};
     EaseEye(body,lower,0.05f,0.1f,0.25f,false,local);
     Expect(Near(local[1],1.55f),"then a quarter of the way to a lower head",local[1]);
+    const float swayed[3]={100.7f,1.2f,50.4f};   // the head thrown forward and to the side (a dash, a stomp)
+    float before[3]={local[0],local[1],local[2]};
+    EaseEye(body,swayed,0.05f,0.1f,0.25f,false,local);
+    Expect(Near(local[0],before[0]) && Near(local[2],before[2]),"the head's sway forward and sideways does not move the eye",local[0],local[2]);
     float w[3];
     EyeWorld(body,local,w);
-    Expect(Near(w[0],100.4f) && Near(w[2],50.0f),"the eye back in the world, ahead along the turned body",w[0],w[2]);
+    Expect(Near(w[0],100.1f) && Near(w[2],50.0f),"the eye back in the world, ahead along the turned body",w[0],w[2]);
 }
 
 void Anchored() {
@@ -268,6 +273,16 @@ void Springs() {
     Cue sprint=Quiet();sprint.move=Move::sprint;sprint.speed=0.3f;
     p=Run(s,sprint,60);
     Expect(p.pitch<-0.2f && p.yaw<-0.3f,"a sprint lowers it and turns it in",p.pitch,p.yaw);
+    s=State{};
+    Cue dash=Quiet();dash.move=Move::dash;dash.speed=0.3f;
+    float most=0.0f;
+    for(int i=0;i<60;++i) {   // dash after dash (the Fencer's: 0.2 s each, toggling)
+        dash.move=(i/12)%2 ? Move::none : Move::dash;
+        p=Advance(s,dash);
+        most=std::fmax(most,std::fmax(std::fabs(p.pitch),std::fmax(std::fabs(p.yaw),std::fabs(p.roll))));
+    }
+    Expect(most<1e-6f,"a dash keeps the weapon aimed: no turn, however often it toggles",most);
+    Expect(p.z<=0.0f && p.z>-0.06f,"...only dragged back a little",p.z);
     s=State{};
     Cue look=Quiet();look.lookYaw=0.05f;
     p=Advance(s,look);

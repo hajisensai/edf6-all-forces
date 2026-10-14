@@ -11,13 +11,16 @@
 //  - reload: turned on its side, a little up and in, while the magazine is changed (the grip sits below the view's
 //    edge; lowering it put the whole weapon out of view, measured);
 //  - switch: lowered out of view and raised again when the weapon changes;
-//  - move: a sprint or a dash lowers and turns it in (the stock "run with the gun down"), a roll or an evade drops it.
+//  - move: the Ranger's sprint lowers and turns it in (Call of Duty's sprint: a run held, the gun down); a burst of
+//    thrust (the Fencer's dash and boost, the Wing Diver's flight) is Titanfall 2's / DOOM Eternal's dash: the weapon
+//    stays aimed, only dragged back a little by the push (the user, 2026-10-14: the Fencer's dash took the sprint's
+//    turn and swung its two weapons across the view, again at every dash); a roll or an evade drops it.
 #pragma once
 #include <cmath>
 
 namespace crew {
 namespace fpmotion {
-enum class Move { none,sprint,roll };
+enum class Move { none,sprint,dash,roll };
 
 // What the soldier did this frame.
 struct Cue {
@@ -88,6 +91,7 @@ inline Pose Advance(State& s,const Cue& c) noexcept {
     }
     // The stock moves.
     if(c.move==Move::sprint){wx+=0.05f;wy-=0.06f;wp-=0.35f;wyaw-=0.45f;wr+=0.2f;}
+    if(c.move==Move::dash){wy-=0.015f;wz-=0.04f;}
     if(c.move==Move::roll){wy-=0.15f;wp-=0.5f;}
     Step(s.x,wx,kK,kD);Step(s.y,wy,kK,kD);Step(s.z,wz,kK,kD);
     Step(s.pitch,wp,kK,kD);Step(s.yaw,wyaw,kK,kD);Step(s.roll,wr,kK,kD);

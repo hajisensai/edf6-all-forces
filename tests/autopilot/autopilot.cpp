@@ -39,9 +39,10 @@ HMODULE self=nullptr;
 wchar_t keysPath[MAX_PATH]{},logPath[MAX_PATH]{},cmdPath[MAX_PATH]{};
 // What the autopilot holds: codes 0x00-0xFF are virtual keys, 0x100 + n the virtual pad's button bit n (XInput
 // wButtons), 0x110 / 0x111 its left / right trigger (kPadLeftTrigger, kPadRightTrigger), 0x112-0x115 its left stick all
-// the way up / down / right / left.
+// the way up / down / right / left, 0x116-0x119 its right stick (the look) half way up / down / right / left.
 constexpr int kKeyCodes=0x100,kPadBase=0x100,kPadLeftTrigger=0x110,kPadRightTrigger=0x111,kStickUp=0x112,kStickDown=0x113,
-              kStickRight=0x114,kStickLeft=0x115,kInputCodes=0x116;
+              kStickRight=0x114,kStickLeft=0x115,kLookUp=0x116,kLookDown=0x117,kLookRight=0x118,kLookLeft=0x119,
+              kInputCodes=0x11A;
 volatile LONG held[kInputCodes]{};
 volatile HWND gameWindow=nullptr;
 ULONGLONG started=0;
@@ -118,21 +119,64 @@ BOOL WINAPI KeyboardState(PBYTE keys) {
     return TRUE;
 }
 
+// Desktop keys this stand-in kept from the plugins (down on the desktop, not held by the autopilot), by key: said once
+// a key (the user, 2026-10-14: "桌面键盘漏进后台").
+volatile LONG keptFromPlugin[kKeyCodes]{};
+using AsyncKeyFn=SHORT(WINAPI*)(int);
+const AsyncKeyFn realAsyncKey=&GetAsyncKeyState;
 SHORT WINAPI KeyState(int vk) {
-    return vk>=0 && vk<kKeyCodes && held[vk] ? static_cast<SHORT>(0x8000) : 0;
+    const bool mine=vk>=0 && vk<kKeyCodes && held[vk];
+    if(!mine && vk>=0 && vk<kKeyCodes && (realAsyncKey(vk)&0x8000) && !InterlockedExchange(&keptFromPlugin[vk],1))
+        Log("BACKGROUND the desktop's key 0x%X kept from the plugins",vk);
+    return mine ? static_cast<SHORT>(0x8000) : 0;
 }
 
-// EDF6VehicleCrew reads its own keys (the map's M, the damage statistics' I, ...) with GetAsyncKeyState and checks
-// GetForegroundWindow itself, through its own imports: those two are pointed here too once it is loaded (it loads after
-// this plugin), so a background run can press the plugin's keys the way it presses the game's.
-bool pluginInput=false;
-void PatchPluginInput() noexcept {
-    const HMODULE crew=GetModuleHandleW(L"EDF6VehicleCrew.dll");
-    if(!crew)return;
-    pluginInput=true;
-    const bool fore=PatchImport(crew,"USER32.dll","GetForegroundWindow",reinterpret_cast<void*>(&Foreground))!=nullptr;
-    const bool keys=PatchImport(crew,"USER32.dll","GetAsyncKeyState",reinterpret_cast<void*>(&KeyState))!=nullptr;
-    Log("BACKGROUND EDF6VehicleCrew's input: foreground=%d asyncKeys=%d",fore,keys);
+// The plugins read their own keys (EDF6VehicleCrew: the map's M, the damage statistics' I, ...; EDF6AutoTurret: its
+// designation keys) and check the foreground window themselves, through one source each (common/edf/input_source.h):
+// each is handed this file's stand-ins through its exported <Plugin>_SetInputSourceV1 once it is loaded (they load
+// after this plugin), so a background run presses the plugins' keys the way it presses the game's and the desktop's
+// never reach them. Not through their import slots any more: another module rewrites those after the game starts
+// (measured: EDF6VehicleCrew's GetAsyncKeyState slot replaced 2.1 s in, the desktop's M, I, V and Esc then reached it).
+// A plugin built before the export gets the import slots as before, checked again every second.
+// V2 hands the virtual pad over too (EDF6VehicleCrew's map reads the pad through its own XInput, which the virtual pad
+// above does not reach: the user's real pad did instead).
+using SetInputSourceFn=void(__cdecl*)(AsyncKeyFn,HWND(WINAPI*)());
+using SetInputSourceV2Fn=void(__cdecl*)(AsyncKeyFn,HWND(WINAPI*)(),DWORD(WINAPI*)(DWORD,void*));
+DWORD WINAPI FakeXInputGetState(DWORD user,struct PadState* state);
+DWORD WINAPI PadSource(DWORD user,void* state){return FakeXInputGetState(user,static_cast<PadState*>(state));}
+struct PluginInput { const wchar_t* module; const char* setter; const char* setterV2; bool handed,patched; };
+PluginInput pluginInputs[]={{L"EDF6VehicleCrew.dll","EDF6VehicleCrew_SetInputSourceV1","EDF6VehicleCrew_SetInputSourceV2",false,false},
+                            {L"EDF6AutoTurret.dll","EDF6AutoTurret_SetInputSourceV1",nullptr,false,false}};
+ULONGLONG slotCheckAt=0;
+void PluginInputTick() noexcept {
+    const ULONGLONG now=GetTickCount64();
+    const bool recheck=now-slotCheckAt>=1000;
+    if(recheck)slotCheckAt=now;
+    for(PluginInput& p:pluginInputs) {
+        if(p.handed)continue;
+        const HMODULE m=GetModuleHandleW(p.module);
+        if(!m)continue;
+        if(const auto set=p.setterV2 ? reinterpret_cast<SetInputSourceV2Fn>(GetProcAddress(m,p.setterV2)) : nullptr) {
+            set(&KeyState,&Foreground,&PadSource);
+            p.handed=true;
+            Log("BACKGROUND %ls's input handed over, the virtual pad too (%s)",p.module,p.setterV2);
+            continue;
+        }
+        if(const auto set=reinterpret_cast<SetInputSourceFn>(GetProcAddress(m,p.setter))) {
+            set(&KeyState,&Foreground);
+            p.handed=true;
+            Log("BACKGROUND %ls's input handed over (%s)",p.module,p.setter);
+            continue;
+        }
+        if(p.patched && !recheck)continue;
+        const void* fore=PatchImport(m,"USER32.dll","GetForegroundWindow",reinterpret_cast<void*>(&Foreground));
+        const void* keys=PatchImport(m,"USER32.dll","GetAsyncKeyState",reinterpret_cast<void*>(&KeyState));
+        if(!p.patched)Log("BACKGROUND %ls has no %s (an older build): its import slots patched, foreground=%d asyncKeys=%d",
+                          p.module,p.setter,fore!=nullptr,keys!=nullptr);
+        else if((fore && fore!=reinterpret_cast<const void*>(&Foreground)) || (keys && keys!=reinterpret_cast<const void*>(&KeyState)))
+            Log("BACKGROUND %ls's import slots were replaced (%p, %p): put back",p.module,fore,keys);
+        p.patched=true;
+    }
 }
 
 // --- The system mouse and the desktop's activation stay the user's (2026-10-10: a background run pulled the user's
@@ -375,6 +419,8 @@ DWORD WINAPI FakeXInputGetState(DWORD user,PadState* state) {
     state->pad.rightTrigger=held[kPadRightTrigger] ? 255 : 0;
     state->pad.ly=held[kStickUp] ? 32767 : held[kStickDown] ? -32768 : 0;
     state->pad.lx=held[kStickRight] ? 32767 : held[kStickLeft] ? -32768 : 0;
+    state->pad.ry=held[kLookUp] ? 16384 : held[kLookDown] ? -16384 : 0;
+    state->pad.rx=held[kLookRight] ? 16384 : held[kLookLeft] ? -16384 : 0;
     state->packet=static_cast<DWORD>(InterlockedIncrement(&padPacket));
     return ERROR_SUCCESS;
 }
@@ -676,7 +722,7 @@ DWORD WINAPI Loop(void*) {
         }
         PollCommand();
         if(!padIn)InstallPad();
-        if(!pluginInput)PatchPluginInput();
+        PluginInputTick();
         autopilot::AirdropProbeTick();
         Sleep(15);
     }

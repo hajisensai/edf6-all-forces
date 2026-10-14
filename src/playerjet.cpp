@@ -422,8 +422,8 @@ struct Stick { float turn,pitch,throttle,yaw,roll; float lx,ly,rx,ry,ascend; boo
 bool KeyDown(int vk) noexcept {
     if(vk<=0 || MapHoldsKeys())return false;   // the map view holds the player's keys (map.cpp)
     DWORD pid=0;
-    GetWindowThreadProcessId(GetForegroundWindow(),&pid);
-    return pid==GetCurrentProcessId() && (GetAsyncKeyState(vk)&0x8000)!=0;
+    GetWindowThreadProcessId(edf::ForegroundWindow(),&pid);
+    return pid==GetCurrentProcessId() && (edf::AsyncKey(vk)&0x8000)!=0;
 }
 float Raw(const unsigned char* seat,std::size_t at) noexcept {
     const float x=At<float>(seat,at);
@@ -1039,7 +1039,7 @@ bool AircraftSwitchHeld(unsigned char* v,bool sampled) noexcept {
     const auto seat=SeatAt(v,0);
     if(At<unsigned char>(seat,kSeatPad)!=0)return (At<std::uint16_t>(seat,kSeatButtons)&kButtonLB)!=0;
     const int key=Cfg().playerJetSwitchKey;
-    return key>0 && (GetAsyncKeyState(key)&0x8000)!=0; // drain physical edge while the map owns input
+    return key>0 && (edf::AsyncKey(key)&0x8000)!=0; // drain physical edge while the map owns input
 }
 
 int ApplyAircraftPayloadChoice(PJet& j,unsigned char* v,const Store* st,int n) noexcept {

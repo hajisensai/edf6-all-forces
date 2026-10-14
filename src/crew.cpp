@@ -535,9 +535,27 @@ float Distance2(const unsigned char* vehicle,const float* pos) noexcept {
     return d[0]*d[0]+d[1]*d[1]+d[2]*d[2];
 }
 
+// TestBoardVehicle (tests only, tests/autopilot): kTestBoardMs after the first vehicle of that class is seen (the player
+// has landed), the player on foot is put into it once a mission, as the boarding gun puts them (BoardingRequest).
+constexpr ULONGLONG kTestBoardMs=6000;
+bool testBoarded=false;
+ULONGLONG testBoardSeen=0;
+void TestBoard(unsigned char* vehicle,int cls) noexcept {
+    const char* want=Cfg().testBoardVehicle;
+    if(!want[0] || testBoarded || !std::strstr(kClasses[cls].name,want))return;
+    const ULONGLONG ms=GameMs();
+    if(!testBoardSeen)testBoardSeen=ms;
+    unsigned char* const human=PlayerHuman();
+    if(ms-testBoardSeen<kTestBoardMs || !human || !HumanOnFoot(human))return;
+    testBoarded=true;
+    Log("TESTBOARD v=%p %s: the player put into it",vehicle,kClasses[cls].name);
+    BoardingRequest(vehicle);
+}
+
 void Crew(unsigned char* vehicle,int cls) noexcept {
     MissionCrewVehicleFrame(vehicle);
     if(!Readable(vehicle,kSeatCount+8,true) || vehicle[kDead])return;
+    TestBoard(vehicle,cls);
     const auto now=GameMs();
     const unsigned count=SeatCount(vehicle);
     // anyPlayer: a player of any machine aboard (no NPC driver for it); localPlayer: this machine's (its fix).
@@ -969,6 +987,7 @@ void ResetCrew() noexcept {
     for(auto& s:states)s=State{};
     fullLoggedAt=0;
     for(auto& p:doorLogged)p=nullptr;
+    testBoarded=false;testBoardSeen=0;
 }
 int VehicleClassOf(const void* object) noexcept { return ClassOf(object); }
 }  // namespace crew

@@ -180,10 +180,10 @@ ULONGLONG padSearchAt=0;
 
 bool InFront() noexcept {
     DWORD pid=0;
-    GetWindowThreadProcessId(GetForegroundWindow(),&pid);
+    GetWindowThreadProcessId(edf::ForegroundWindow(),&pid);
     return pid==GetCurrentProcessId();
 }
-bool Down(int vk) noexcept { return vk>0 && (GetAsyncKeyState(vk)&0x8000)!=0; }
+bool Down(int vk) noexcept { return vk>0 && (edf::AsyncKey(vk)&0x8000)!=0; }
 
 // The magnified vehicle sight's claim on the wheel (sightzoom.cpp: its range setting), and its notches' delta.
 std::atomic<bool> scopeHolds{false};
@@ -206,7 +206,7 @@ LRESULT CALLBACK WheelProc(HWND w,UINT msg,WPARAM wp,LPARAM lp) {
 // The game's window (in front: the map was just opened by its key) subclassed for the wheel, once.
 void Subclass() noexcept {
     if(subclassed)return;
-    const HWND w=GetForegroundWindow();
+    const HWND w=edf::ForegroundWindow();
     DWORD pid=0;
     if(!w || !GetWindowThreadProcessId(w,&pid) || pid!=GetCurrentProcessId())return;
     unicodeProc=IsWindowUnicode(w)!=FALSE;
@@ -230,12 +230,14 @@ bool PadState(XINPUT_STATE* s) noexcept {
         if(m)xinputGet=reinterpret_cast<XInputGetStateFn>(GetProcAddress(m,"XInputGetState"));
         Log("MAP XInput %s",xinputGet ? "found" : "not found: no pad on the map");
     }
-    if(!xinputGet)return false;
-    if(xinputGet(padIndex,s)==ERROR_SUCCESS)return true;
+    // A background host's pad instead (edf/input_source.h): the desktop's real pad never reaches a background game.
+    const auto get=edf::PadSource() ? reinterpret_cast<XInputGetStateFn>(edf::PadSource()) : xinputGet;
+    if(!get)return false;
+    if(get(padIndex,s)==ERROR_SUCCESS)return true;
     const ULONGLONG now=GetTickCount64();
     if(now-padSearchAt<2000)return false;
     padSearchAt=now;
-    for(DWORD i=0;i<XUSER_MAX_COUNT;++i)if(xinputGet(i,s)==ERROR_SUCCESS){padIndex=i;return true;}
+    for(DWORD i=0;i<XUSER_MAX_COUNT;++i)if(get(i,s)==ERROR_SUCCESS){padIndex=i;return true;}
     return false;
 }
 float Stick(SHORT v) noexcept {

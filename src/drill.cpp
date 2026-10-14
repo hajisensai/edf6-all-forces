@@ -212,8 +212,8 @@ float SegmentGap(const float* p,const float* a,const float* b) noexcept {
 bool KeyHeld(int vk) noexcept {
     if(vk<=0 || MapHoldsKeys())return false;   // the map view holds the player's keys (map.cpp)
     DWORD pid=0;
-    GetWindowThreadProcessId(GetForegroundWindow(),&pid);
-    return pid==GetCurrentProcessId() && (GetAsyncKeyState(vk)&0x8000)!=0;
+    GetWindowThreadProcessId(edf::ForegroundWindow(),&pid);
+    return pid==GetCurrentProcessId() && (edf::AsyncKey(vk)&0x8000)!=0;
 }
 
 bool Is505(const void* v) noexcept { return At<const unsigned char*>(v,0)==image+kVt505; }

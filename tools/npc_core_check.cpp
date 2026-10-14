@@ -6,12 +6,8 @@ SHORT Key(int) noexcept { return down ? static_cast<SHORT>(0x8000) : 0; }
 HWND Window() noexcept { return nullptr; }
 DWORD Process(HWND,LPDWORD pid) noexcept { *pid=GetCurrentProcessId();return 1; }
 }
-#define GetAsyncKeyState markinput::Key
-#define GetForegroundWindow markinput::Window
 #define GetWindowThreadProcessId markinput::Process
 #include "../src/npcai.cpp"
-#undef GetAsyncKeyState
-#undef GetForegroundWindow
 #undef GetWindowThreadProcessId
 #include <cmath>
 #include <cstdio>
@@ -244,6 +240,7 @@ bool VisitEnemies(const unsigned char*,EnemyVisitor visit,void* ctx) noexcept {
 }
 #ifndef SUPPORT_INFANTRY_NATIVE_TEST
 int main() {
+    edf::SetInputSource(&markinput::Key,&markinput::Window);   // the plugin's key source (edf/input_source.h)
     using namespace crew;
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2200000,MEM_RESERVE|MEM_COMMIT,PAGE_EXECUTE_READWRITE));
     if(!image)return 2;

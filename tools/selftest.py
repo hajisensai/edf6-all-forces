@@ -4469,7 +4469,9 @@ def map_commands_wired() -> None:
     the crawlers' leader); the box (Ctrl + left drag) never pans the map; its offline check (tools/map_cmd_check.cpp) is
     built and run by CTest; the README says the keys."""
     code, mapc, cmake, readme = src('src/mapcmd.cpp'), src('src/map.cpp'), src('CMakeLists.txt'), src('README.md')
-    assert code.count('GetAsyncKeyState') == 1 and 'Down(VK_TAB)' in code.split('Keys ReadKeys(', 1)[1].split('\n}', 1)[0]
+    # Keys come through the plugin's input source (common/edf/input_source.h), so a background host's keyboard is read.
+    assert code.count('edf::AsyncKey(') == 1 and 'GetAsyncKeyState' not in code
+    assert 'Down(VK_TAB)' in code.split('Keys ReadKeys(', 1)[1].split('\n}', 1)[0]
     frame = mapc.split('bool Frame(unsigned char* human)', 1)[1].split('\n}\n', 1)[0]
     assert frame.index('if(!game.open) {') < frame.index('MapCommandFrame(in,onto)'), 'the commands read keys only with the map open'
     # The box (Ctrl + left drag) never pans: the map's left drag gives way to it (the user, 2026-10-06: "操作 需要一个框选吧").
@@ -4633,9 +4635,14 @@ def map_wired() -> None:
     design = src('autoturret/src/designate.cpp')
     assert 'link::Resolve(link::kCrewDll,link::kInputHeld,inputHeld,heldTried) && inputHeld()' in design
     assert 'if(vk<=0 || vk>0xFE || MapHolds())return false;' in design.split('bool KeyHeld(int vk)', 1)[1].split('\n}', 1)[0]
-    at_readers = [f for f in os.listdir(os.path.join(ROOT, 'autoturret', 'src')) if 'GetAsyncKeyState' in src(f'autoturret/src/{f}')]
+    # Every key reader goes through the input source (edf::AsyncKey, common/edf/input_source.h): a direct user32 call
+    # would read the desktop's keyboard into a background run and would escape this census.
+    direct = [f'{d}/{f}' for d in ('src', 'autoturret/src') for f in os.listdir(os.path.join(ROOT, d))
+              if f.endswith(('.cpp', '.h')) and re.search(r'GetAsyncKeyState\s*\(', src(f'{d}/{f}'))]
+    assert direct == [], f'read keys through edf::AsyncKey, not user32 ({direct})'
+    at_readers = [f for f in os.listdir(os.path.join(ROOT, 'autoturret', 'src')) if 'AsyncKey(' in src(f'autoturret/src/{f}')]
     assert at_readers == ['designate.cpp'], f'a new EDF6AutoTurret key reader: make it give way to the map ({at_readers})'
-    readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'GetAsyncKeyState' in src(f'src/{f}')]
+    readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'edf::AsyncKey(' in src(f'src/{f}')]
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
                                       'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp', 'sightzoom.cpp',
                                       'debug_spawn.cpp', 'firstperson.cpp', 'room_ui.cpp']), f'a new key reader: make it give way to the map ({readers})'

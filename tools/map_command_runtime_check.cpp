@@ -5,9 +5,7 @@ namespace inputstub {
 bool keys[256]{};
 SHORT Down(int key) noexcept { return key>=0 && key<256 && keys[key] ? static_cast<SHORT>(0x8000) : 0; }
 }
-#define GetAsyncKeyState inputstub::Down
 #include "../src/mapcmd.cpp"
-#undef GetAsyncKeyState
 #include "../src/map_stock_hud.h"
 #include <cstdio>
 
@@ -810,6 +808,7 @@ void SelectionCapabilityMask() noexcept {
 }  // namespace
 }  // namespace crew
 int main() {
+    edf::SetInputSource(&inputstub::Down,nullptr);   // the plugin's key source (edf/input_source.h)
     crew::UnitLifetime();crew::PointerAndInput();crew::CameraIsolation();crew::FormationKey();crew::ButtonClicks();crew::StatsPage();
     crew::FocusButtonPreservesMark();crew::MarkFromMap();crew::MarkLifetimeAndConfig();
     crew::SupportInput();

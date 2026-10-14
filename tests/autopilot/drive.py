@@ -5,7 +5,8 @@ background"). For measurements, e.g. the big map's memory against the stock test
   python tests/autopilot/drive.py install            copy build/tools/EDF6Autopilot.dll into <game>/Mods/Plugins
   python tests/autopilot/drive.py launch             start the game (Steam), then put its window off screen, at the back
   python tests/autopilot/drive.py key VK[+VK] [ms]   hold the keys (hex virtual-key codes, or names: enter esc up ...;
-                                                     pad_a ... pad_rt: the autopilot's virtual pad)
+                                                     pad_a ... pad_rt: the autopilot's virtual pad; stick_*: its
+                                                     left stick, look_*: its right stick)
   python tests/autopilot/drive.py shot FILE.png      the game window's picture (PrintWindow, never the screen)
   python tests/autopilot/drive.py mem [N]            the plugin's last N MEM rows
   python tests/autopilot/drive.py cmd TEXT           one command to the plugin: mem, quit, mission ROW|RM015|M001|range|edf41:ROW [0-4]
@@ -67,7 +68,9 @@ KEYS = {'enter': 0x0D, 'esc': 0x1B, 'space': 0x20, 'left': 0x25, 'up': 0x26, 'ri
         'pad_lb': 0x108, 'pad_rb': 0x109, 'pad_a': 0x10C, 'pad_b': 0x10D, 'pad_x': 0x10E, 'pad_y': 0x10F,
         'pad_lt': 0x110, 'pad_rt': 0x111,
         # its left stick pushed all the way (the autopilot's PadState: up, down, right, left)
-        'stick_up': 0x112, 'stick_down': 0x113, 'stick_right': 0x114, 'stick_left': 0x115}
+        'stick_up': 0x112, 'stick_down': 0x113, 'stick_right': 0x114, 'stick_left': 0x115,
+        # its right stick (the look) pushed half way
+        'look_up': 0x116, 'look_down': 0x117, 'look_right': 0x118, 'look_left': 0x119}
 user32 = ctypes.WinDLL('user32', use_last_error=True)
 gdi32 = ctypes.WinDLL('gdi32')
 # ctypes otherwise defaults to C int, truncating Win64 HWND/HDC/HGDIOBJ values.

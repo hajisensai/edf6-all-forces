@@ -23,6 +23,7 @@
 #include "turret.h"
 #include "aimmath.h"
 #include "edf/aimlink.h"
+#include "edf/input_source.h"
 
 namespace autoturret {
 namespace {
@@ -86,8 +87,8 @@ bool MapHolds() noexcept { return link::Resolve(link::kCrewDll,link::kInputHeld,
 bool KeyHeld(int vk) noexcept {
     if(vk<=0 || vk>0xFE || MapHolds())return false;
     DWORD pid=0;
-    GetWindowThreadProcessId(GetForegroundWindow(),&pid);
-    return pid==GetCurrentProcessId() && (GetAsyncKeyState(vk)&0x8000)!=0;
+    GetWindowThreadProcessId(edf::ForegroundWindow(),&pid);
+    return pid==GetCurrentProcessId() && (edf::AsyncKey(vk)&0x8000)!=0;
 }
 
 bool Held(const unsigned char* seat,bool keys,int vk,int button) noexcept {

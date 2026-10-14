@@ -99,10 +99,10 @@ bool CheckProfile() noexcept {
 
 bool InFront() noexcept {
     DWORD pid=0;
-    GetWindowThreadProcessId(GetForegroundWindow(),&pid);
+    GetWindowThreadProcessId(edf::ForegroundWindow(),&pid);
     return pid==GetCurrentProcessId();
 }
-bool Down(int vk) noexcept { return vk>0 && vk<255 && (GetAsyncKeyState(vk)&0x8000)!=0; }
+bool Down(int vk) noexcept { return vk>0 && vk<255 && (edf::AsyncKey(vk)&0x8000)!=0; }
 
 // The map's support catalog entry (support_dispatch.cpp SupportCallKey) of kSupportCalls[call], -1 none (not in this
 // build's catalog: a renamed call).
