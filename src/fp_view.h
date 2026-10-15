@@ -52,6 +52,11 @@ inline M4 Scale(float s) noexcept {
     return r;
 }
 
+// Move a signed lateral grip inward without crossing the centre line.
+inline float CenteredGrip(float lateral,float inward) noexcept {
+    return std::copysign(std::fmax(0.0f,std::fabs(lateral)-inward),lateral);
+}
+
 // The inverse of an affine matrix (the 3x3 part inverted in full: a scaled frame inverts too). False when singular.
 inline bool InverseAffine(const M4& a,M4* out) noexcept {
     const float* m=a.m;

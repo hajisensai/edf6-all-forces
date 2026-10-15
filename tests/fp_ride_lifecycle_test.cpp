@@ -31,6 +31,11 @@ bool RedirectCall(unsigned char*,void*,void*,bool&) noexcept { return false; }
 namespace crew {
 unsigned char* image=nullptr;
 Config config{};
+void VehicleLookSetReady(bool) noexcept {}
+bool observeCamera=false;
+bool VehicleLookCamera(const unsigned char*,float* matrix) noexcept {
+    if(!observeCamera)return false;matrix[8]+=.1f;return true;
+}
 const Config& Cfg() noexcept { return config; }
 void Log(const char*,...) noexcept {}
 bool IsSazabi(const void*) noexcept { return sazabi; }
@@ -192,5 +197,13 @@ int main() {
     check(std::strcmp(NotWanted(cam,human),"hooks unavailable")==0,"a camera hook without a draw hook cannot activate first person");
     camOk=false;drawOk=true;
     check(std::strcmp(NotWanted(cam,human),"hooks unavailable")==0,"a draw hook without a camera hook cannot activate first person");
+    st=State{};camOk=drawOk=false;observeCamera=true;
+    const auto nativeCamera=fpview::Identity();std::memcpy(cam+kCamMatrix,nativeCamera.m,64);
+    nextCamStep=[](void*,void*){};
+    CamStepHook(cam,nullptr);CamStepHook(cam,nullptr);
+    check(std::fabs(At<float>(cam,kCamMatrix+32)-.1f)<1e-6f,
+          "a native camera branch that leaves its matrix untouched cannot accumulate observation rotations");
+    observeCamera=false;CamStepHook(cam,nullptr);
+    check(std::memcmp(cam+kCamMatrix,nativeCamera.m,64)==0,"observation restores the last native camera when released");
     return failed ? 1 : 0;
 }

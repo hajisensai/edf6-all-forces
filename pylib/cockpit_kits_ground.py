@@ -357,6 +357,7 @@ def _cab_kit(name: str, spec: CabSpec) -> KitFn:
 
 
 KITS: dict[str, KitFn] = {
+    'sedan_cab': lambda cabin: stock_dash(cabin, (0.22, -0.29, 0.43)),
     **{name: _cab_kit(name, spec) for name, spec in CABS.items()},
     'kei_cab': _cab_kit('kei_cab', CABS['pickup_cab']),
     'trailer_cab': _cab_kit('trailer_cab', CABS['truck_cab']),

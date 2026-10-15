@@ -36,6 +36,7 @@ FITS: dict[str, tuple[Fit, ...]] = {
     'V608_OLDROBOT': (Fit(0, 'mune', (0.0, 7.2, -0.2), 'mech_oldrobot'),),
     'VEHICLE502_GROUNDROBO': GROUNDROBO,
     'VEHICLE502_GROUNDROBOGOLD': GROUNDROBO,
+    'V605_BARGA_CANNON': BALAM,  # same enclosed chest station, measured on the cannon model
     'V515_RETROBALAM': BALAM,
     'V515_RETROBALAM_GREEN': BALAM,
     'V515_RETROBALAM_GOLD': BALAM,
@@ -55,6 +56,7 @@ FITS: dict[str, tuple[Fit, ...]] = {
 }
 
 DIGESTS: dict[str, str] = {
+    'V605_BARGA_CANNON': '16d0f3aa0ea1611d72b2426b4249df0c68d884f70cd10f9fc10f24669ce28c24',
     'V515_RETROBALAM': '523667315adf5e9eaa48a082f820a6764f065d3d4a34510fcd3249e6a538133b',
     'V515_RETROBALAM_GREEN': '85355689c9fb7307eacf73082223fb7994558f57499ac5f0e528ae2e3a7ccff9',
     'V515_RETROBALAM_GOLD': 'ee8058ef915280f1960cb593068c297826d120cacc18705cb47068c56ff0dca2',

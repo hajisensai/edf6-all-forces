@@ -81,6 +81,10 @@ README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
 联机一起玩：
   所有玩家还需安装配套新版 EDF Coop；缺少兼容接口时会提示并停止创建/加入联机房间，单机可用。
   全军出击房间对原版公开搜索隐藏，邀请和直连同样检查兼容性，避免原版客户端载入 MOD 对象崩溃。
+  载具观察：按住鼠标中键／手柄 L3，再移动鼠标／右摇杆，只转视角，武器保持原操纵方向；松开回正。
+  新增空袭兵呼叫「民用轿车」（无武器、单驾驶席），V 切第一人称；手柄 LT 加速、左摇杆转向、LB 倒车。
+  本包补齐原版蓝色尼克斯等换色型号的座舱安装，以及加农炮型巴尔加的座舱。
+
   房间里每个人都要装同一个版本（同一个安装包），地图、关卡和载具才一致。
   测试场关卡不限制兵种和武器，各自选自己的。
   武器表只动本插件自己的行（已有的行原地更新，新的追加在末尾），别的 MOD 的行原样保留，
@@ -191,7 +195,7 @@ def build_exe(name: str, generator: str | None = None) -> str:
     for p in (os.path.join(ROOT, 'tools'), os.path.join(ROOT, 'pylib'), os.path.join(ROOT, 'testrange'),
               os.path.join(ROOT, 'autoturret', 'tools')):
         cmd += ['--paths', p]
-    for mod in ('call_weapons', 'edf41_objects', 'edf41_maps', 'edf41_sounds', 'edf5_dlc', 'awe', 'map_legacy', 'rmpa_legacy', 'legacy_sgo', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'ragdoll_fit', 'make_chute', 'chute_model', 'obj_model', 'texfile', 'make_drill', 'drill_model', 'make_stock_stores', 'graft_pure', 'primer_fighter_model', 'calls', 'make_sidecar', 'sidecar_model',
+    for mod in ('call_weapons', 'edf41_objects', 'edf41_maps', 'edf41_sounds', 'edf5_dlc', 'awe', 'map_legacy', 'rmpa_legacy', 'legacy_sgo', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'ragdoll_fit', 'make_chute', 'chute_model', 'obj_model', 'texfile', 'make_drill', 'drill_model', 'make_stock_stores', 'graft_pure', 'primer_fighter_model', 'calls', 'make_sidecar', 'sidecar_model', 'make_sedan',
                 'make_bigmap', 'bigmap', 'seams', 'fmb', 'fmb_build', 'hkcms', 'hkcms_build', 'hktag', 'sk_map', 'sk_terrain', 'gen', 'rmpa', 'jet_models', 'jet_gear', 'weapons',
                 'testhub', 'make_emc', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
                 'cas_pose', 'aircraft_collision', 'support_config', 'support_loadout', 'room_layout', 'menu_preview',

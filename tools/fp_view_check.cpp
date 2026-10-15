@@ -295,6 +295,18 @@ void Springs() {
     Cue look=Quiet();look.lookYaw=0.05f;
     p=Advance(s,look);
     Expect(p.yaw<0,"turning right leaves it behind (to the left)",p.yaw);
+    s=State{};look.lookYaw=2.0f;look.lookPitch=-2.0f;
+    float maximum=0;
+    for(int i=0;i<600;++i) {
+        if(i%15==0){look.lookYaw=-look.lookYaw;look.lookPitch=-look.lookPitch;}
+        p=Advance(s,look);maximum=std::fmax(maximum,std::fmax(std::fabs(p.yaw),std::fabs(p.pitch)));
+    }
+    Expect(maximum<0.02f,"rapid alternating turns stay below 1.15 degrees at default sway",maximum);
+    s=State{};look.sway=0;p=Run(s,look,60);
+    Expect(p.yaw==0 && p.pitch==0,"zero sway only disables turn motion",p.yaw,p.pitch);
+    look.shots=1;look.recoil=1;p=Advance(s,look);
+    Expect(p.pitch>.09f,"turn sway disabled still preserves recoil",p.pitch);
+
     s=State{};
     Cue air=Quiet();air.grounded=false;air.speed=0.3f;
     p=Run(s,air,30);
@@ -303,6 +315,11 @@ void Springs() {
 }  // namespace
 
 int main() {
+    Expect(Near(CenteredGrip(.17f,.07f),.10f) && Near(CenteredGrip(.34f,.07f),.27f),
+           "existing default grip values upgrade toward the centre",CenteredGrip(.17f,.07f));
+    Expect(CenteredGrip(.02f,.07f)==0 && Near(CenteredGrip(-.17f,.07f),-.10f),
+           "centering never crosses the midline and preserves handedness",CenteredGrip(-.17f,.07f));
+
     // A melee blade's authored rotation and swing must survive, while its grip stays at the requested placement.
     for(float swing:{-.8f,0.0f,.9f}) {
         const float origin[3]={4,2,-7},eye[3]={0,1.7f,.1f},wrist[3]={.3f,1.2f,.5f},grip[3]={.3f,-.25f,.4f};

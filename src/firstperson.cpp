@@ -53,6 +53,7 @@
 #include "crew.h"
 #include "firstperson.h"
 #include "fp_view.h"
+#include "vehicle_look.h"
 #include "fp_motion.h"
 #include "fp_skin_gpu.h"
 #include "map.h"
@@ -409,7 +410,7 @@ void Weapons(const unsigned char* h,fpmotion::Cue& c) noexcept {
 
 // What the soldier did since the last frame (fp_motion.h Cue), the readings kept for the next.
 fpmotion::Cue Cues(const unsigned char* h) noexcept {
-    fpmotion::Cue c{};
+    fpmotion::Cue c{};c.sway=Cfg().fpSway;
     const float pitch=At<float>(h,kLook),yaw=At<float>(h,kLook+4);
     float pos[3];
     std::memcpy(pos,h+kPos,12);
@@ -715,7 +716,7 @@ void Views(const unsigned char* h,const unsigned char* cam) noexcept {
     bool anchored[2];
     Hands(h,anchor,anchored);
     const bool both=anchored[kRight] && anchored[kLeft];
-    const float gx=both ? c.fpDualGripX : c.fpGripX,gy=both ? c.fpDualGripY : c.fpGripY,gz=both ? c.fpDualGripZ : c.fpGripZ;
+    const float gx=fpview::CenteredGrip(both ? c.fpDualGripX : c.fpGripX,c.fpCenter),gy=both ? c.fpDualGripY : c.fpGripY,gz=both ? c.fpDualGripZ : c.fpGripZ;
     float grip[2][3]={{-gx,gy,gz},{gx,gy,gz}};   // right is -x
     if(c.fpFit)for(int hand=kRight;hand<=kLeft;++hand)Fit(hand,both,grip[hand]);
     const float hold[3]={-c.fpHoldX,c.fpHoldY,c.fpHoldZ};
@@ -786,6 +787,7 @@ bool Ride(unsigned char* cam,unsigned char* h) noexcept {
     HookDrawOf(At<void**>(ride.vehicle+0xE40,0));
     // The eye marker is also the seat's frame: cockpit, eye and horizon must roll/pitch together.
     std::memcpy(cam+kCamMatrix,ride.frame,64);
+    VehicleLookCamera(h,reinterpret_cast<float*>(cam+kCamMatrix));
     VehicleScreens(ride.vehicle,ride.seat,eye,&st.screens);
     if(st.nearSet){Put<float>(cam,kCamNear,st.savedNear);st.nearSet=false;}
     if(st.smoothSet){Put<float>(h,kLookSmooth,st.savedSmooth);st.smoothSet=false;}
@@ -875,11 +877,23 @@ void __fastcall PassEndHook(void* system,int pass) {
     reinterpret_cast<PassEndFn>(image+kPassEnd)(system,pass);
 }
 
+struct LookApplied { void* cam=nullptr;float before[16]{},written[16]{}; } lookApplied;
 void __fastcall CamStepHook(void* camera,void* step) {
     auto cam=static_cast<unsigned char*>(camera);
+    if(lookApplied.cam==cam && std::memcmp(cam+kCamMatrix,lookApplied.written,64)==0)
+        std::memcpy(cam+kCamMatrix,lookApplied.before,64);
+    if(lookApplied.cam==cam)lookApplied=LookApplied{};
     if(st.on && st.cam==cam)std::memcpy(cam+kCamMatrix,st.stock,sizeof(st.stock));
     nextCamStep(camera,step);
-    __try { Camera(cam); }
+    __try {
+        Camera(cam);
+        if(!st.on || st.cam!=cam || !st.riding) {
+            LookApplied record;record.cam=cam;std::memcpy(record.before,cam+kCamMatrix,64);
+            if(VehicleLookCamera(CameraPlayer(cam),reinterpret_cast<float*>(cam+kCamMatrix))) {
+                std::memcpy(record.written,cam+kCamMatrix,64);lookApplied=record;
+            }
+        }
+    }
     __except(EXCEPTION_EXECUTE_HANDLER){st=State{};}
 }
 
@@ -1189,6 +1203,7 @@ bool InstallFirstPerson() noexcept {
     void* next=nullptr;
     auto slot=reinterpret_cast<void**>(image+kCamVtable)+kCamStepSlot;
     camOk=edf::ChainVtableSlot(slot,reinterpret_cast<void*>(&CamStepHook),&next);
+    VehicleLookSetReady(camOk);
     if(!camOk){Log("FP off: the camera step not chained");return false;}
     nextCamStep=reinterpret_cast<CamStepFn>(next);
     drawOk=HookDrawOf(reinterpret_cast<void**>(image+kModelVtable));

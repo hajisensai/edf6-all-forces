@@ -20,6 +20,7 @@
 // new vehicle), dropped at a new mission (ResetCrew) and reused only once its vehicle has not run its
 // per-frame input for kStaleMs (gone): a full table takes on no new vehicle rather than drop a live one.
 #include "crew.h"
+#include "vehicle_look.h"
 #include "aim_line_want.h"
 #include "boarding_entrance.h"
 #include "mission_crew.h"
@@ -817,6 +818,7 @@ void FrameTick() noexcept {
 
 template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,void* a3,void* a4) {
     LARGE_INTEGER t0,t1,t2;QueryPerformanceCounter(&t0);
+    VehicleLookInput observation(static_cast<unsigned char*>(vehicle));
     // The drill tank's trigger is its drill's: taken off the seat before the stock input reads it (drill.cpp).
     if(Cfg().enabled)Guarded(kStepDrill,&DrillInput,static_cast<unsigned char*>(vehicle));
     // The EMC's trigger is its charge's (emc.cpp): the same, the stock burst never starts.

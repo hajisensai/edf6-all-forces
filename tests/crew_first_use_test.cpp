@@ -4,6 +4,8 @@
 #include <cstdlib>
 #include <initializer_list>
 namespace crew {
+VehicleLookInput::VehicleLookInput(unsigned char*) noexcept {}
+VehicleLookInput::~VehicleLookInput() noexcept {}
 void MissionCrewVehicleFrame(unsigned char*) noexcept {}
 void BoardingRequest(unsigned char*) noexcept {}   // TestBoardVehicle (off here)
 bool HumanOnFoot(const unsigned char*) noexcept { return true; }

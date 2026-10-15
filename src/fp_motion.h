@@ -33,6 +33,7 @@ struct Cue {
     bool reloading;
     bool switched;              // the weapon in hand changed this frame
     Move move;
+    float sway=0.20f;           // turn-only motion strength; zero disables sway, other motion is retained
 };
 
 // The viewmodel's offset and turn now.
@@ -67,9 +68,11 @@ inline float Clamp(float v,float lo,float hi) noexcept { return v<lo ? lo : v>hi
 inline Pose Advance(State& s,const Cue& c) noexcept {
     // Wanted rest of each channel this frame.
     float wx=0.0f,wy=0.0f,wz=0.0f,wp=0.0f,wyaw=0.0f,wr=0.0f;
-    // Sway: a kick against the look, the spring brings it back.
-    s.yaw.vel+=Clamp(-c.lookYaw*kSwayGain,-kSwayMost,kSwayMost);
-    s.pitch.vel+=Clamp(-c.lookPitch*kSwayGain,-kSwayMost,kSwayMost);
+    // Sway is a bounded target, not accumulated velocity: rapid repeated turns
+    // must never wind the weapon up into a large swing. Recoil has its own channels.
+    const float sway=Clamp(c.sway,0,1);
+    wyaw+=Clamp(-c.lookYaw*kSwayGain,-kSwayMost,kSwayMost)*sway;
+    wp+=Clamp(-c.lookPitch*kSwayGain,-kSwayMost,kSwayMost)*sway;
     // Bob: along the distance walked.
     const float pace=c.grounded ? Clamp(c.speed/kBobRun,0.0f,1.0f) : 0.0f;
     s.phase=std::fmod(s.phase+c.speed/kBobStride*6.2831853f,6.2831853f);

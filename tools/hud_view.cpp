@@ -40,6 +40,7 @@
 #include <vector>
 
 namespace crew {
+bool VehicleLookHint(bool*) noexcept { return false; }
 unsigned char* image=nullptr;
 PlayerFix player{};
 namespace {

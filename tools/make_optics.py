@@ -39,9 +39,8 @@ def build_stock_redirects(root: str) -> dict[str, bytes]:
     """Cheap current-SGO pass, deliberately excluded from the model cache."""
     game = rootcpk.Game(root)
     files = {}
-    stems = tuple(s.stem for s in optics.MODELS)
     for name in game.names('OBJECT'):
-        if not name.upper().endswith('.SGO') or not name.upper().startswith(stems):
+        if not name.upper().endswith('.SGO'):
             continue
         loose = Path(root, 'Mods', 'OBJECT', name)
         source = loose.read_bytes() if loose.is_file() else game.read('OBJECT', name)

@@ -243,6 +243,8 @@ struct Config {
     float fpHoldZ=0.0f;             // ...ahead
     float fpScale=0.5f;             // ...shrunk about the eye this much (the same picture, nearer: walls do not cut it)
     float fpNear=0.03f;             // ...the camera's near clip, m (0: the stock 0.1)
+    float fpCenter=0.07f;          // ...move each grip toward the centre, m; added separately so existing ini defaults upgrade
+    float fpSway=0.20f;            // ...look-induced weapon sway, 0 none..1 full; recoil/bob unchanged
     bool fpAimSnap=true;            // ...the aim follows the mouse at once (this machine's look smoothing off)
     bool fpArmIk=true;              // ...the arms posed for the first person: shoulders beside and below the eye
     float fpHoldArc=60.0f;          // ...a free hand on the other hand's weapon slides round it this far from below, deg

@@ -22,6 +22,7 @@
 #include "crew.h"
 #include "cockpit_canvas.h"
 #include "firstperson.h"
+#include "vehicle_look.h"
 #include "formation.h"
 #include "map_buttons.h"
 #include "scopeview.h"
@@ -141,6 +142,7 @@ struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool
                   bool payload; PayloadReadout payloadHud;
                   bool warned; Warnings warn;
                   bool seats; SeatPrompt seatPrompt;
+                    bool lookHint,lookKeys;
                   bool entrance; BoardingEntrance boardingEntrance;
                   bool turretCamOk; TurretCamReadout turretCam;
                   bool nix; NixTorso nixTorso;
@@ -3294,6 +3296,7 @@ void HudPublish() noexcept {
     s.stock=PlayerStockHud(&s.stockHud);   // the stock vehicles' HUD (StockVehicleHud; a heli's stores)
     s.warned=WarnLatest(&s.warn);   // the aircraft's warnings (warn.cpp WarnTick, this frame's: it runs first)
     s.seats=PlayerSeatPrompt(&s.seatPrompt);
+    s.lookHint=VehicleLookHint(&s.lookKeys);
     s.entrance=PlayerBoardingEntrance(&s.boardingEntrance);
     s.turretCamOk=PlayerTurretCam(&s.turretCam);   // the turret camera (turretcam.cpp): the gun's mark, free look
     s.nix=PlayerNixTorso(&s.nixTorso);   // the Nix's legs and torso (nix.cpp): the stock HUD's hull / turret ring
@@ -4841,6 +4844,11 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             HeliGunSight(drawer,ctx,t,viewProj,width,height,s,snap.heliAim,lines,&at);
         if(fresh && snap.launcher && launcherSight)LauncherMarks(drawer,ctx,t,viewProj,width,height,s,snap.launch,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.highCam && !snap.cockpit)HighCamHint(t,width,height,s,snap.highCamOn,snap.highCamKeys,lines,&at);
+        if(now-snap.tick<=kFreshMs && snap.lookHint) {
+            wchar_t key[32];
+            if(snap.lookKeys)KeyName(Cfg().freeLookKey,key,32);else SeatButtonName(Cfg().freeLookButton,key,32);
+            Label(t,lines,&at,width*0.5f,height*0.86f,1,kLineScale*0.85f*s,kWhite,Tr(Tx::vehicleLookHold),key);
+        }
         if(now-snap.tick<=kFreshMs && snap.seats)SeatLine(t,width,height,snap.seatPrompt,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.entrance)EntranceMark(drawer,ctx,t,viewProj,width,height,s,snap.boardingEntrance,lines,&at);
         if(fresh && snap.turretCamOk && !mountedOptic && !snap.cockpit && !launcherSight && !overhead && !gunnerSight && !mechSight)
