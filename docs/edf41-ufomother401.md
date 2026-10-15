@@ -34,8 +34,10 @@ ragdoll、耐久）为底，虚表克隆（45 槽）：0 析构、5 Update、9 O
 **为什么船体用 EventAnimationObject 而不是 301 的 UfoCarrier508**：401 船体什么都不画、不挨打，508 会带进它的生成器组件、锁定点、se_list 和
 「只在舱门开时、只认核心刚体」的伤害规则（PRIMITIVES 2d），全是 401 不要的；EAO 只有模型 + ragdoll + 耐久，最便宜。它的构造对
 `animation_model` / `ragdoll` 不判空（缺 ragdoll 时 0x5B61ED 抛异常），所以数据给船体一个本套最小部件的模型与 ragdoll（小激光炮台，约 10×30），
-插件每帧在 stock Update 之后用 0x1100B90 把骨架按 1e-4 缩放重建（看不见），槽 16 恒假（不挨打），+0x380 置 0x80（不当目标）。剩下一个
-小碰撞体在船体原点（核心格内部），与 4.1 的「无碰撞」差这一点。
+插件每帧在 stock Update 之后用 0x1100B90 把骨架按 1e-4 缩放重建（看不见），槽 16 恒假（不挨打），+0x380 置 0x80（不当目标）。借来的 ragdoll
+第一次 Update 时用 `Ragdoll::Disable` 0x6E97C0（每个刚体 +0xA4 清零、模式 0：0x6ED480 → 0x11B1710 把它移出物理世界；EDF6_Jormungand_
+AdditionalParts 0x38B321 在对象虚函数里这样调，无世界锁）拿出物理世界，船体原点不再有碰撞体，与 4.1 的「无碰撞」一致（H；实机见记录：600 帧时
+刚体仍在世界外）。
 
 ### 2.2 数据（`tools/make_edf41_objects.py`）
 - 根：`MOTHER401_ROOTS`（15 个故事变体）+ `MOTHER401_DLC_ROOTS`（任务包 2 的 M809 / MP503，也在 `DLC_ROOTS` 里，`DLC_EXCLUDED` 清空）。没有 EDF6
@@ -44,11 +46,18 @@ ragdoll、耐久）为底，虚表克隆（45 槽）：0 析构、5 Update、9 O
   - 没有 CAS 的部件（4.1 只有 CannonPanel、FlatPanel 两个 CAS）给 `UfoMother401_Still.cas` = FlatPanel 的 CAS 清空轨道（`cas_graft.hollow`），
     两个真 CAS 加 `default` → `close_state`；
   - 从 4.1 的 MAB 定位点算出插件要的点（节点绑定矩阵 × 定位点位置；面板是刚体）：`edf41_401_mounts`（砲台，每个）、`edf41_401_muzzle`（発射口）、
-    `edf41_401_spawn`（出現位置 / 排出位置）、`edf41_401_weak`（weakpoint 骨骼）；
+    `edf41_401_spawn`（出現位置 / 排出位置）、`edf41_401_weak`（weakpoint 骨骼）、`edf41_401_lock`（锁定点：MAB 的第 1 张表 `ターゲット`，EDF6 的
+    锁定点组件 0x6C74E0 正是把这张表逐项交给 AddLockTarget 0x547A50；能挨打的部件各一个，Panel01 没有）；
+  - 充能光 `edf41_401_charge`（`MOTHER401_GLOWS`）：BigCannon01 / FinalCannon01 / FinalGenerator 每种颜色一个 EDF6 `gunbattery::ChargeEffect_StdParticle`
+    节点（E510 炮台 `charge_effect_std` 的格式 `[[], ['ChargeEffect_StdParticle', [[键, 值…], [se]]]]`），参数是 4.1 粒子块的原数：EDF6 的
+    解析表 0x303710 / 0x3039B0 写的偏移与 4.1 的块一致（键 12 → +0xC4/+0xC8/+0xCC = 80 / 100 / −25，键 13 → 颜色 +0xE0 与 +0x100 = (0,0,0,1)，
+    键 8 → +0x50 = 1，键 11 → +0xB8/+0xBC = 0，键 15 → `Particle3_k.dds`，H）；整数 4 / 4 / 2 放键 2 / 3 / 4（EDF6 自己的充能光是 30 / 30 / 2 的同一
+    形状；4.1 的 +8/+0xC/+0x10 与 EDF6 的 +8/+0xC/+0x14 哪个对哪个按这个形状取，M）。颜色：BigCannon (1,1,3,1)；FinalCannon 歼灭弹充能
+    (10,1,5,1)、闪电充能 (1,1,5,1)、闪电发射 (2,2,10,1)；FinalGenerator (1,10,5,1)（notes_A 1.5、notes_B 1.4 / 3.1）；
   - 音效：EDF6 **自带** `TIKYUU4_EN_EARTHEATER.ACB`（36 个 cue，en_EE_*），但 EDF6 的 SEPRESET 没有 4.1 的 `EE…` 名字；`edf41_401_se` 与
     `se_table` 等长，每项是 4.1 SEPRESET 的 `[cue, 音量, 音高, 近, 远, 优先]`（构建时核对 cue 在本对象 game_sound 的库或常驻库里）。
     `check_sounds` 对插件类（`PLUGIN_SOUND_CLASSES`）跳过 se_table。
-- 4.1 的 `_light.mrab` 4.1 自己也没有（模型列表第二项缺失，照 301 不管）；`material_animation` 是裸 blob，EAO 不读，插件也不放（见 4）。
+- 4.1 的 `_light.mrab` 4.1 自己也没有（模型列表第二项缺失，照 301 不管）。`material_animation`（4.1 三个裸 MTAB 块）原样留着，插件自己放（2.4）。
 
 ### 2.3 船体
 - 第一次被碰（第一帧或第一条消息）：只留偏航的矩阵、种子 `(int)(x+z)`、队伍（脚本 SetTeam 之后的 +0x314）、环境音 `en_EE_ambient`（循环，跟随面板平均位置）。
@@ -67,18 +76,45 @@ ragdoll、耐久）为底，虚表克隆（45 槽）：0 析构、5 Update、9 O
 - 移动、状态机、开火、生成器照第 1 节一比一，帧计数按每次 Update 一帧（60 fps）。子弹按 SPEC2 第 7 节换算（速度 +0x94、寿命 +0x98、伤害 +0x9C、
   爆炸半径 +0xB0、大小 +0xC0、+0xC4、+0xC8、+0xCC、颜色 +0xD0、自定义 +0xE8）；方向：BigCannon / 歼灭弹沿面板 −Y，闪电 / 炮台瞄 GameObjectBase
   的目标（0x30C0F0，每 60 帧取最近敌对）再在锥内随机。FinalCannon 的音用 SGO 的 6–11（4.1 代码用 0–5，见 SPEC 1.6，按原意 +6）。
-- 受伤：槽 16 —— 消失 / 毁坏中拒；FinalCannon / FinalGenerator / 炮台整块都算；其余只认 `HitBody`（伤害信息子命中最近点的刚体 0x6EA430）==
-  `weakpoint` 刚体（0x6EA670）。槽 18 —— HP>0 播受伤音；HP≤0：WeakPanel 向下爆炸 + 200 m 连锁、Core 命中点大爆炸，然后进入毁坏 / Core 死亡。
-- 生成器：自写 4.1 组件（类型 0 只补死掉的槽，弱引用跟踪），敌人在出生点、随机偏航，`SetLevel(块 +0x18)`、`SetTeam(1, true)`（不论船体中立与否都是
-  敌人：M009 等中立母舰放的 UFO 要打玩家），`+0x1C` 置位时 0x548D50（脚本的 active）。Generator 的「open 动画长度」取 150 帧（MAB 事件，M）。
-- 特效：Flame / Blazing / Explosion / Explosion_Big（EffectGenUtil，PRIMITIVES 5），尺寸照 4.1 的数（外观对应 M）。
+- 受伤：槽 16 —— 消失 / 毁坏中拒；面板飞行开始前拒（4.1 在 0x270110 延迟走完时才用 0x26fab0 建物理壳，在格位上方 1000 等着的面板打不到）；
+  FinalCannon / FinalGenerator / 炮台整块都算；其余只认 `HitBody`（伤害信息子命中最近点的刚体 0x6EA430）== `weakpoint` 刚体。EDF6 的刚体名是 SHKT
+  代理名 `RagDollProxys.<weakpoint>`（0x6EA670 整名比较；用 4.1 的裸名查不到，第三轮之前所有弱点部件因此都打不坏）。槽 18 —— HP>0 播受伤音并放
+  受击闪材质动画；HP≤0：死亡材质动画，WeakPanel 向下爆炸 + 10 个 StencilLight + 烟 + 200 m 连锁、Core 命中点大爆炸，然后进入毁坏 / Core 死亡。
+  掉落：部件死在 ApplyDamage 里，`game_object_drop_item` 照常掉（实机：M018 结算拾得武器 30 / 装甲 62）。
+- 锁定点：第一次 Update 用 `AddLockPoint`（AddLockTarget 0x547A50）给有 `edf41_401_lock` 的部件加一个，每帧写成该点的世界坐标；部件登记为敌对时才
+  锁得上（锁定过滤 0x689E40），消失 / 毁坏时 `Unregister` 退出队伍即锁不上。DevShoot 也打这个点（AimPoint 取第一个锁定点）。
+- 子弹命中音：EDF6 InitParam +0x100 是 SePreset（0x7B3200；4.1 的 +0xB0），`FireHit` 照 PlayCue 填 cue 与 4.1 SEPRESET 的数：炮台 se[4]（Rapid
+  se[5]，只在开火态帧号 %16==0 的那发，0x26cc20），FinalCannon 歼灭弹 11、闪电 8（4.1 把 se[5] 再 se[2] 拷进歼灭弹块，第二份本是闪电块的；按
+  +6 的原意）。BigCannon01 的块没有命中音。
+- 材质动画：EDF6 自己的组件（0x38 字节；ctor 0x6DBE90，0x6DC7B0 绑到模型材质集 = EAO +0x720（模型 +0x5C0 + 0x160，UfoCarrier508 绑 +0x650+0x160、
+  0x309CC0 那类绑 +0x720），0x6DC050 加轨，0x6DC830 播放，0x6DC8B0 推进，0x29D120(+8) 释放）。4.1 三条 MTAB 与 EDF6 同格式（`MTAB` 0x200、同样的
+  16 字节头），装载模式 0 / 2 / 2 与 E508 相同；[0] 构造即循环播（模式 2），[1] 受击闪（0，HP>0 时），[2] 死亡（1，OnKilled）。实机日志每个部件
+  「3 material animations」，截图上面板的发光条纹变成循环的红 / 绿光。
+- 生成器：自写 4.1 组件（类型 0 只补死掉的槽，弱引用跟踪）。出生点与方向取 EDF6 的定位点代码（FindLocator 0x6BADD0 / LocatorMatrix 0x6BB5A0）算
+  `出現位置` / `排出位置` 节点的世界矩阵（= 4.1 0x3232d0），敌人在节点位置、随机偏航，`SetLevel(块 +0x18)`、`SetTeam(1, true)`（中立母舰放的
+  UFO 也要打玩家），`+0x1C` 置位时 0x548D50；然后照 4.1 SpawnerObject 0x3320a0 / EDF6 SpawnerObject 0x6E33C3 的方式（槽 10、9、11）发 0x20102，
+  数据 = 节点矩阵第 1 行（UfoSmall507 0x52EDE0 ×60 当初速，Deiroi 0x31ED40 / DragonSmall 0x335110 进下落态；EDF6 自己的生成器 0x6E2170 也发
+  节点第 1 行）。FinalGenerator 每生成一只播 se[7]（0x267084）。被打中时叫醒它跟踪的敌人（0x331d10 → EDF6 0x548D50：Generator HP>0 的每次与致死的
+  那一次，FinalGenerator 每次）。Generator 的「open 动画长度」取 150 帧（MAB 事件，M）。
+  **「传送出现」**：4.1 的 SpawnerObject（0x331e20 / 0x3320a0）只是倒数 1 帧后建对象、设等级 / 队伍 / active、发 0x20102 / 0x20103、记进槽、自删，
+  自己不画任何东西；EDF6 的 SpawnerObject（0x6E1080 → 0x6E3250）同样，传送特效来自持有者交给它的回调（+0x640 的 std::function），401 没有。所以
+  直接建对象就是 4.1 的样子（差 1 帧），不另加特效（H）。
+- 特效：燃烧中的面板每 8 帧 `SmallBurst`（EDF6 0x2E7D00 = 4.1 0x1b1910，两者常数全同：0.97、0.01、0.2、0.1、1.5、0.4、30、31，H），炮台死后
+  每 16 帧 Flame（0x2E7FF0 = 4.1 0x1b16b0，同样常数全同，H）；Explosion / Explosion_Big（PRIMITIVES 5）；WeakPanel 的 10 个 StencilLight
+  （EDF6 InitParam@StencilLight，vtable 0x1762108，+0x30 位置、+0x40/+0x50 颜色、+0x60 半径、+0x64 帧数，与 4.1 同布局；4.1 的 WeakPanel 直接填
+  (0.5,0.5,0.5,2.5)、i·300、180 不经 ×2.5 / ×5 的辅助函数，这里也直接填，0x84880 建）与烟（0x1b2d90 → ExplosionWind 0x2E4D90）。
+- 充能光：每种颜色一个 `ChargeEffect_StdParticle`（工厂 0x6D92D0，MovingFortress_Battery 0x4D3F22 同样调），+0xC = 0 显示 / 1 隐藏，每帧槽 1
+  （UpdateContext、炮口矩阵）与槽 0 把更新与渲染同步排进场景的工作表（管理器 +0x358）；状态进入时照 4.1 打开（BigCannon 充能 / 发射、FinalCannon
+  三态、FinalGenerator 召唤充能），离开即关。部件析构时效果进「坟场」，4 个船体帧后才释放 shared_ptr（排队的工作不会碰到已删的对象）。
 
 ### 2.5 联机
 四个类只在对象的模拟在本机跑时（`OnlineRunsHere`）工作：主机布局、开火、生成；客户端什么也不建。4.1 的同步（动作号、状态号）没有移植。
 
 ### 2.6 开发开关（发布版都是 0）
-`Edf41Mother401Dev` 位：1 攻击一直允许、2 攻击等待缩到 ≤2 s、4 面板立刻就位、8 / 16 开局 `Edf41Mother401DevKill` 秒后毁掉 Core / 一块 WeakPanel；
-`Edf41Mother401Place`：把船体放在玩家头顶这么多米。
+`Edf41Mother401Dev` 位：1 攻击一直允许、2 攻击等待缩到 ≤2 s、4 面板立刻就位、8 / 16 开局 `Edf41Mother401DevKill` 秒后毁掉 Core / 一块 WeakPanel、
+32 同时刻执行 `Edf41Mother401DevAction` 号动作、64 共用的 `Edf41DevShoot` 也打生成器放出的敌人（看补槽）、128 玩家装甲一直满（autopilot 不会躲）；
+`Edf41Mother401Place`：把船体放在玩家头顶这么多米。共用的 `Edf41DevShoot=n` / `Edf41DevShootDamage`：每个能挨打的部件每 n 帧挨一发玩家的
+LaserBullet02（锁定点一发、弱点骨骼一发），日志每 600 帧按类统计「taken / refused」。
 
 ## 3. 实机
 

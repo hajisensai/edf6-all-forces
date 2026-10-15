@@ -198,6 +198,7 @@ struct Part {
     int weakBody=-2;           // -2 unknown, -1 none (immune unless the class takes every hit)
     wchar_t weakName[32]={};   // the SGO's weakpoint (the ragdoll body is looked up until the ragdoll has its bodies)
     int weakTries=0;
+    int weakBone=-2;           // development (DevShoot): the weakpoint bone on the skeleton, -2 not looked up
     bool wholeHits=false;      // FinalCannon01 / FinalGenerator / the batteries: every hit counts (4.1 slot 10 0xb3630)
     struct Mount { float pos[3]; std::uint64_t battery; };
     std::vector<Mount> mounts;
@@ -207,6 +208,8 @@ struct Part {
     Bullet shot,shot2;
     float spread=0.0f,turn=0.0f,aim[3]={0,-1,0};
     Generator gen;
+    LocatorHandle spawnLoc{};    // the generator's spawn node (出現位置 / 排出位置) on the model
+    int spawnLocTries=0;
 
     // ---- batteries ----
     std::uint64_t panel=0;
@@ -546,9 +549,37 @@ void SetGenerator(Part& p,const GenCfg& g) noexcept {
     Log("EDF41M401 %s %p generator: %s %d x %ls every %d frames, wave delay %d, level %.2f%s",KindName(p.kind),p.obj,
         g.type==0 ? "waves of" : "once",g.count,g.path,g.interval,g.delay,g.level,g.flag ? ", activated" : "");
 }
+void Down(Part& p,float* out) noexcept;
+// A message the way EDF6's SpawnerObject hands one to the enemy it makes (0x6E33C3: slots 10, 9 (OnMessage), 11 in a row).
+void SendSpawnMessage(void* o,std::uint32_t msg,void* data) noexcept {
+    void* const* vt=Readable(o,8) ? *static_cast<void* const* const*>(o) : nullptr;
+    if(!vt || !Readable(vt+9,24))return;
+    void* pdata=data;
+    std::uint32_t m=msg;
+    reinterpret_cast<std::uint64_t(__fastcall*)(void*,std::uint32_t*,void**)>(vt[10])(o,&m,&pdata);
+    reinterpret_cast<std::uint64_t(__fastcall*)(void*,std::uint32_t,void*)>(vt[9])(o,m,pdata);
+    reinterpret_cast<std::uint64_t(__fastcall*)(void*,std::uint32_t,void*)>(vt[11])(o,m,pdata);
+}
 bool SpawnOne(Part& p,const GenCfg& g,WeakRef* slot) noexcept {
+    // 4.1 0x3313c0: the node's world matrix (0x3232d0 on 出現位置 / 排出位置: the locator x its bone), its position the spawn
+    // point; the enemy's matrix a fresh yaw there; SpawnerObject 0x3320a0 then sends the node's row 1 as message 0x20102
+    // (EDF6: UfoSmall507 0x52EDE0 takes it x 60 as its velocity, Deiroi 0x31ED40 / DragonSmall 0x335110 their drop state;
+    // EDF6's own generator 0x6E2170 sends its node's row 1 the same way). The node from EDF6's locator code (0x6BADD0 /
+    // 0x6BB5A0), else the build's point and the panel's down axis.
     float at[3];
-    Point(p.spawnAt,F(p.obj,kMatrixAt),at);
+    alignas(16) float eject[4]={0,-1,0,0};
+    float node[16];
+    if(!p.spawnLoc.entry && p.spawnLocTries<3) {
+        ++p.spawnLocTries;
+        FindLocator(static_cast<char*>(p.obj)+kEaoModel,p.kind==Kind::finalGenerator ? L"排出位置" : L"出現位置",&p.spawnLoc);
+    }
+    if(p.spawnLoc.entry && LocatorMatrix(p.spawnLoc,node)) {
+        std::memcpy(at,node+12,12);
+        std::memcpy(eject,node+4,16);
+    } else {
+        Point(p.spawnAt,F(p.obj,kMatrixAt),at);
+        Down(p,eject);
+    }
     float m[16];
     RotY(Random01(p.rng)*2.0f*kPi,m);
     m[12]=at[0]; m[13]=at[1]; m[14]=at[2];
@@ -561,6 +592,9 @@ bool SpawnOne(Part& p,const GenCfg& g,WeakRef* slot) noexcept {
     SetTeam(o,1,true);
     if(g.flag)Activate(o);
     if(slot)WeakSet(*slot,o);
+    SendSpawnMessage(o,0x20102,eject);
+    if(said.load()<=40)Log("EDF41M401 %s %p: enemy #%d gets 0x20102 (%.2f %.2f %.2f %.2f)%s",KindName(p.kind),p.obj,p.gen.made,eject[0],eject[1],eject[2],eject[3],
+                           p.spawnLoc.entry ? "" : " (no locator: the panel's down axis)");
     if(p.kind==Kind::finalGenerator)PlaySeAt(p,7,at);   // 0x267084: se[7] 召喚完了 is the component's per-spawn sound
     return true;
 }
@@ -1096,6 +1130,14 @@ void Forget(const void* self) noexcept {
     for(WeakRef& w:p.gen.slots)WeakReset(w);
     byId.erase(p.id);
     byObj.erase(it);
+    // the last of the classes' objects gone (the mission's end): nothing ticks the graveyard any more, so it is emptied here
+    // (the scene destroys objects after the frame's jobs ran). A ChargeEffect left alive keeps its sound handle registered in
+    // the sound system's static table (EDF+0x20B38A0), which then crashes in its exit-time destructor (EDF+0x7ADCFB reads the
+    // sound system 0x20B2948 after it is gone: a real run, 2026-10-15, m401f_M018_ds5).
+    if(byObj.empty()) {
+        for(DeadGlow& d:graveyard)GlowRelease(d.g);
+        graveyard.clear();
+    }
 }
 
 std::uint64_t __fastcall HullDtor(void* self,unsigned flags) {
@@ -1198,6 +1240,9 @@ void HullLogic(Part& h) noexcept {
     for(const Cell& c:h.cells)
         if(const Part* p=ById(c.panel)) { for(int k=0;k<3;++k)avg[k]+=F(p->obj,kPosAt)[k]; cnt+=1; }
     if(cnt>0) { for(float& v:avg)v/=cnt; MoveSound(h.ambient,avg); }
+    // development: the player kept alive (the autopilot stands under the ship and cannot dodge; a run that has to see the end)
+    if(DevBits()&128)
+        if(unsigned char* me=PlayerHuman(); me && Readable(me+kMaxDurabilityAt,8) && *F(me,kMaxDurabilityAt)>0.0f)*F(me,kDurabilityAt)=*F(me,kMaxDurabilityAt);
     // the dev switches at Edf41Mother401DevKill seconds
     if((DevBits()&32) && h.hullFrames==static_cast<std::uint32_t>(std::max(1.0f,Cfg().edf41Mother401DevKill*kFps))) {
         Log("EDF41M401 dev: ObjectAction %d",Cfg().edf41Mother401DevAction);
@@ -1427,7 +1472,13 @@ std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
                                                        p->weakName,b,p->weakTries,bodies);
                 }
             }
-            if(p->weakBody>=0 && !p->wholeHits) { Point(p->weakPt,F(self,kMatrixAt),weakAt); weakShot=true; }
+            if(p->weakBody>=0 && !p->wholeHits) {   // the weak body's bone where the CAS has it now (a Generator's core moves as it opens)
+                if(p->weakBone==-2)p->weakBone=BoneIndex(static_cast<char*>(self)+kEaoSkeleton,p->weakName);
+                float bm[16];
+                if(p->weakBone>=0 && BoneMatrix(static_cast<char*>(self)+kEaoSkeleton,p->weakBone,bm))std::memcpy(weakAt,bm+12,12);
+                else Point(p->weakPt,F(self,kMatrixAt),weakAt);
+                weakShot=true;
+            }
             canHurt=(p->wholeHits || p->weakBody>=0) && (!IsPanel(p->kind) || (p->triggered && p->delay<=0));
         }
     }
