@@ -7120,6 +7120,53 @@ def edf41_mother_plugin_contract() -> None:
 
 
 @test
+def edf41_mother301_finish_contract() -> None:
+    """The 301's 4.1 hit, death, states and glow (src/edf41mother.cpp, 2026-10-15) agree with EDF.dll and the data: every EDF.dll
+    function the finish calls is in kMotherPrints and the replaced slots (18 OnDamaged, 3 draw) are set only once they matched;
+    every 4.1 sound name the class plays or gives a bullet as its hit sound is in the hull SGO's edf41_se (else silence); every
+    CAS state the hull plays is in the hull's CAS; every model of the hull and its parts has the two material parameters the
+    glow binds (light0_color, scroll_light0); the shared Bullet carries its hit sound into InitParam +0x100 only when set; the
+    dev switch Edf41MotherForce takes bit 16 and ships 0."""
+    import cas_graft
+    import edf41_objects as eo
+    import mdb
+    import sgo
+    cpp, shared, header = src('src/edf41mother.cpp'), src('src/edf41classes.cpp'), src('src/edf41classes.h')
+    prints = cpp.split('kMotherPrints[]={', 1)[1].split('};', 1)[0]
+    for name in ('kBindCtor', 'kBindDtor', 'kBind', 'kBindSet', 'kBindApply', 'kSetState', 'kUnregister'):
+        assert re.search(rf'\{{{name},\{{0x', prints), f'{name} has no fingerprint in kMotherPrints'
+    for rva in ('0x4F9250', '0x4F9530', '0x5B6D10'):
+        assert '{' + rva + ',' in prints, f'replaced stock slot {rva} unchecked'
+    install = cpp.split('bool InstallEdf41Mother()', 1)[1]
+    gated = install.split('if(MotherPrims()) {', 1)[1].split('}', 1)[0]
+    for slot in ('SetSlot(hullClass,kSlotDamaged,', 'SetSlot(hullClass,kSlotDraw,', 'SetSlot(partClass,kSlotDraw,'):
+        assert slot in gated, slot
+    assert 'kSlotDraw=3,kSlotDamaged=18' in cpp
+    base = os.path.join(ROOT, 'edf41port', 'objects', 'OBJECT')
+    with open(os.path.join(base, 'UFOMOTHER301.SGO'), 'rb') as f:
+        hull = sgo.load(data=f.read())
+    table = {e[0] for e in hull['edf41_se']}
+    code = re.sub(r'//[^\n]*', '', cpp)
+    names = set(re.findall(r'L"(母船UFO[^"]+)"', code))   # every 4.1 preset name the class plays or hands a bullet
+    assert len(names) >= 30 and not (names - table), sorted(names - table)
+    with open(os.path.join(base, 'UFOMOTHER301.CAS'), 'rb') as f:
+        states = cas_graft.states(f.read())['main']
+    played = set(re.findall(r'HullState\(self,L"(\w+)"\)', code)) | set(re.findall(r'big \? L"(\w+)" : L"(\w+)"', code)[0])
+    assert played == {'open', 'show', 'hide', 'close'} and played <= states, (played, states)
+    models = [x for x in mdb.rab_read(eo.read('OBJECT/UFOMOTHER301.MRAB')).files if x.name.lower().endswith('.mdb')]
+    assert len(models) == 6
+    for x in models:
+        md = mdb.mdb_read(x.data)
+        params = {p.name for mt in md.materials for p in mt.params}
+        assert {'light0_color', 'scroll_light0'} <= params, (x.name, sorted(params))
+    assert 'const wchar_t* hitSe=nullptr;' in header and 'bool FillSePreset(void* preset' in header
+    assert 'if(b.hitSe && b.hitSeTable)FillSePreset(param+0x100,b.hitSeTable,b.hitSe);' in shared
+    plugin, ini = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini')
+    assert 'ReadInt(L"Edf41MotherForce",n.edf41MotherForce),0,31)' in plugin
+    assert re.search(r'^Edf41MotherForce=0$', ini, re.M) and '16 =' in ini.split('Edf41MotherForce=0', 1)[0].rsplit('Edf41MotherParts=31', 1)[1]
+
+
+@test
 def edf41_robo_registered() -> None:
     """4.1's UfoRobo (the ship that turns into the robot アルゴ) is the plugin's own class (src/edf41robo.cpp): its SGO keeps
     4.1's class name and keys, is registered with its closure, and is named by exactly the five missions it unlocks (story M007 /
