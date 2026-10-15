@@ -126,6 +126,26 @@ const call = (e, path, { user = 'alice', method = 'GET', data, headers = {} } = 
   body: data ? JSON.stringify(data) : undefined,
 }), e);
 
+test('worker: added account can log in by cookie and Basic, stays in its group and cannot administer', async () => {
+  const e = wenv();
+  e.ACCOUNT_CAROL = 'carol:pw:tester:c';
+  const form = new URLSearchParams({ user: 'carol', pass: 'pw' });
+  const login = await worker.fetch(new Request('https://edf6.test/login', { method: 'POST', body: form }), e);
+  assert.equal(login.status, 303);
+  const cookie = login.headers.get('set-cookie').split(';')[0];
+  const page = await worker.fetch(new Request('https://edf6.test/plan.html', { headers: { cookie } }), e);
+  assert.equal(page.status, 200);
+  const plan = await (await call(e, '/api/plan?group=a', { user: 'carol' })).json();
+  assert.equal(plan.group, 'c');
+  assert.deepEqual(plan.me, { user: 'carol', role: 'tester', group: 'c' });
+  assert.deepEqual(plan.groups, ['c']);
+  assert.equal((await call(e, '/api/case', { user: 'carol', method: 'POST', data: {} })).status, 403);
+  const original = await (await call(e, '/api/plan')).json();
+  assert.equal(original.group, 'a');
+  const devView = await (await call(e, '/api/plan', { user: 'dev' })).json();
+  assert.deepEqual(devView.groups, ['', 'a', 'b', 'c']);
+});
+
 test('worker: pages and replies carry the security headers', async () => {
   const e = wenv();
   for (const r of [await call(e, '/plan.html'), await call(e, '/api/plan'), await call(e, '/nope', { method: 'POST' })]) {
