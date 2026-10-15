@@ -12,9 +12,8 @@ _PICKUP = (
     Fit(0, 'body', (-0.32, 1.55, 0.0), 'pickup_cab'),
 )
 _KEI = (
-    # The stock cab is modelled inside (dashboard, wheel, seats): screens only (room 1.22, 0.42, 0.54, 0.45, 0.59,
-    # 0.25). The four others ride in the open: on the bed's sides (1, 2) and on the tailgate (3, 4).
-    Fit(0, 'body', (-0.4, 1.35, 1.05), 'kei_dash'),
+    # Replace the stock low-poly dashboard and wheel with a fitted pickup interior. The four others ride in the open.
+    Fit(0, 'body', (-0.4, 1.35, 1.05), 'kei_cab'),
     Fit(1, 'body', (-1.25, 1.55, 0.3), 'open_rider'),
     Fit(2, 'body', (1.25, 1.55, 0.3), 'open_rider'),
     Fit(3, 'body', (-0.4, 1.55, -2.25), 'open_rider'),
@@ -76,10 +75,9 @@ FITS: dict[str, tuple[Fit, ...]] = {
     'V507_RESCUETANK_HAPPY': _RESCUE,   # the SIAWASE paint (v507_rescuetank_happy): the same hull
     'V512_KEITRUCK': _KEI,
     'V512_KEITRUCK_BGP': _KEI,
-    # Trailer truck cab (513): modelled inside like the kei truck; screens only (room 1.97, 0.47, 0.45, 0.78, 0.79,
-    # 1.03).
+    # Trailer truck cab (513): a fitted cab-over interior replaces the stock flat wheel/dashboard.
     'V513_TRAILERTRUCK01CAB': (
-        Fit(0, 'body', (-0.75, 2.45, 2.1), 'trailer_dash'),
+        Fit(0, 'body', (-0.75, 2.45, 2.1), 'trailer_cab'),
     ),
     # Robo truck (607): the driver in the flat-fronted cab (room 1.97, 0.77, 1.12, 0.70, 0.94, 1.21): a cab-over
     # truck's cab (truck_cab).

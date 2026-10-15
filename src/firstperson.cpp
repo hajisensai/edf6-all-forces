@@ -133,14 +133,14 @@ const float kPivot[3]={-0.2f,-0.3f,0.4f};   // in the camera's frame: x to the l
 constexpr std::size_t kWeaponMount=0xE88;   // the record of the owner's bone the weapon hangs on (0x68AEE9)
 constexpr int kRight=0,kLeft=1;
 constexpr float kGadgetFar=10.0f,kGadgetHigh=3.7f;   // m from the feet: the stock eye of a gadget's view (VR mod: >10 m, >2 m over the head)
-constexpr float kOnWeapon=0.18f;   // m: a free hand's wrist this near its other hand's weapon's axis holds it
 // The arms (the four classes share the names, fp-render-re.md §8): the upper arm, the forearm and their twists, the
-// hand, its fingers, the weapon mounts. Not the shoulder (kata: its pad hangs in front of the view): the arm ends at
+// hand, its fingers, the weapon mounts and shoulder pad. The shoulder pad follows the upper arm; collapsing it
+// separately from its sleeve stretches the shared shoulder vertices. The arm ends at
 // the shoulder, which FitArm turns toward a place beside and below the eye (the third-person arm moved with its weapon
 // to the bottom of the view reached back up through the middle of it). Ending it at the elbow (the user, 2026-10-13, with a screenshot: "the arm
 // half shown, clearly hollow") left the forearm's open sleeve in the middle of the view: collapsing the rest onto the
 // eye hides stretched triangles, it does not close a mesh's open end, so the cut must be where the view is not.
-const wchar_t* const kArmBones[]={L"jowan",L"kawan",L"te_",L"fing",L"ring",L"little",L"index",L"middle",
+const wchar_t* const kArmBones[]={L"kata",L"jowan",L"kawan",L"te_",L"fing",L"ring",L"little",L"index",L"middle",
                                   L"thumb",L"arm"};
 
 using CamStepFn=void(__fastcall*)(void*,void*);
@@ -192,6 +192,8 @@ struct State {
     bool riding;                // in a vehicle: the eye at the seat's cockpit, the rider not drawn (Ride)
     RideView ride;
     CockpitScreens screens;     // ...and its screens round the eye (VehicleScreens), for the HUD
+    instruments::Readings instruments;
+    bool instrumentsReady;
 };
 // The weapon models taken out of their batch, with the batch to give back.
 struct Unbatched { const void* model; void* batch; };
@@ -474,29 +476,6 @@ int HandOf(const unsigned char* w) noexcept {
     return n>=2 && name[n-2]==L'_' && name[n-1]==L'l' ? kLeft : kRight;
 }
 
-// Whether the hand `hand` without a weapon of its own is on the other hand's weapon (`anchor`: its root; the Ranger's
-// left hand on the rifle's guard): its wrist (te_l / te_r) within kOnWeapon of the weapon's axis, along its first metre
-// and a half ahead of the grip. A free hand off it (the Wing Diver's) is not drawn.
-bool HandOnWeapon(const unsigned char* h,int hand,const M4& anchor) noexcept {
-    const unsigned char* wrist=BoneNamed(h+kBodyInst,hand==kLeft ? L"te_l" : L"te_r");
-    if(!wrist)return false;
-    const float* p=reinterpret_cast<const float*>(wrist+kBoneWorld+48);
-    M4 w;
-    if(!fpview::Orthonormal(anchor,&w))return false;
-    const float d[3]={p[0]-w.m[12],p[1]-w.m[13],p[2]-w.m[14]};
-    const float along=d[0]*w.m[8]+d[1]*w.m[9]+d[2]*w.m[10];
-    if(along<-0.1f || along>1.5f)return false;
-    const float off[3]={d[0]-w.m[8]*along,d[1]-w.m[9]*along,d[2]-w.m[10]*along};
-    const float dist=std::sqrt(off[0]*off[0]+off[1]*off[1]+off[2]*off[2]);
-    static ULONGLONG at=0;
-    if(Cfg().debug && GetTickCount64()-at>=5000) {
-        at=GetTickCount64();
-        Log("FP free %s hand: wrist %.2f m along the weapon, %.2f m off its axis -> %s",hand==kLeft ? "left" : "right",along,dist,
-            dist<kOnWeapon ? "on it (drawn)" : "off it (not drawn)");
-    }
-    return dist<kOnWeapon;
-}
-
 // Debug=1, once a weapon: its model's class (vtable, draw slot, hooked) and the hand it is taken to be in.
 void LogWeapon(const unsigned char* w,int hand) noexcept {
     static const void* logged[16]{};
@@ -681,17 +660,6 @@ void Fit(int hand,bool dual,float* grip) noexcept {
     grip[0]+=out*x;grip[1]+=y;grip[2]+=z;
 }
 
-// The bounds of the weapon in `hand` through `t` (rows: half axes, row 3 the centre). False: none, or not one.
-bool WeaponBox(int hand,const M4& t,M4* out) noexcept {
-    bool flip=false;
-    const unsigned char* w=HandWeapon(hand,&flip);
-    if(!w)return false;
-    M4 box=MatrixAt(w+kWeaponModel+kModelBounds);
-    box.m[3]=box.m[7]=box.m[11]=0.0f;box.m[15]=1.0f;
-    *out=fpview::Mul(box,t);
-    return fpview::Finite(*out);
-}
-
 // Each hand's T this frame (above: its own weapon's anchor, else the other hand's T, else the aim frame).
 void Views(const unsigned char* h,const unsigned char* cam) noexcept {
     const Config& c=Cfg();
@@ -720,8 +688,8 @@ void Views(const unsigned char* h,const unsigned char* cam) noexcept {
         if(st.viewOk[hand])continue;
         if(st.viewOk[other]) {
             st.view[hand]=st.view[other];st.viewOk[hand]=true;
-            st.shown[hand]=HandOnWeapon(h,hand,anchor[other]);
-            st.onOther[hand]=st.shown[hand] && WeaponBox(other,st.view[hand],&st.otherBox[hand]);
+            // Keep the native support-hand/reload animation; proximity is not a visibility switch.
+            st.onOther[hand]=true;
             st.axisOk[hand]=true;
             for(int i=0;i<3;++i)st.axis[hand][i]=st.axis[other][i];
             continue;
@@ -755,11 +723,15 @@ bool Ride(unsigned char* cam,unsigned char* h) noexcept {
     // the weapon lists, otherwise StillPlayers cannot return even a surviving weapon's batch.
     Gather(h);
     Rebatch(true);
-    if(!st.riding || st.ride.vehicle!=ride.vehicle || st.ride.seat!=ride.seat)
+    if(!st.riding || st.ride.vehicle!=ride.vehicle || st.ride.seat!=ride.seat) {
+        st.instrumentsReady=false;
         Log("FP in a vehicle: %s %p seat %d, eye at its cockpit (%.2f %.2f %.2f)",ride.name ? ride.name : "?",
             static_cast<void*>(ride.vehicle),ride.seat,eye[0],eye[1],eye[2]);
+    }
     st.riding=true;st.ride=ride;
-    std::memcpy(cam+kCamEyeRow,eye,12);
+    HookDrawOf(At<void**>(ride.vehicle+0xE40,0));
+    // The eye marker is also the seat's frame: cockpit, eye and horizon must roll/pitch together.
+    std::memcpy(cam+kCamMatrix,ride.frame,64);
     VehicleScreens(ride.vehicle,ride.seat,eye,&st.screens);
     if(st.nearSet){Put<float>(cam,kCamNear,st.savedNear);st.nearSet=false;}
     if(st.smoothSet){Put<float>(h,kLookSmooth,st.savedSmooth);st.smoothSet=false;}
@@ -865,10 +837,11 @@ DrawFn NextDraw(const void* model) noexcept {
 }
 
 // What a drawn model is to the first person: not the player's, their body, a weapon in a hand, one put away.
-enum class Part { none,body,inHand,stowed };
+enum class Part { none,body,inHand,stowed,instruments };
 Part PartOf(const void* model,int* hand) noexcept {
     *hand=kRight;
     if(!st.on)return Part::none;
+    if(st.riding && st.screens.physical && model==st.ride.vehicle+0xE40)return Part::instruments;
     if(model==st.body)return Part::body;
     if((*hand=HandOfModel(model))>=0)return Part::inHand;
     *hand=kRight;
@@ -898,7 +871,6 @@ float saved[kMostInsts][kMostBones*16];
 // little behind, out by half the soldier's own shoulder width (kata_l to kata_r). The way the elbow is rolled toward
 // (seen along the view): out, and more down.
 constexpr float kShoulderDown=-0.24f,kShoulderBack=-0.06f,kElbowOut=1.0f,kElbowDown=-1.5f;
-constexpr float kPalm=0.04f;   // m (before the shrink): a holding hand's wrist off the weapon's body
 struct ArmFit { bool ok; M4 upper,fore,hand; };   // after T: the upper arm's move, the forearm's, the hand's and fingers'
 
 int BoneIndex(const unsigned char* inst,const wchar_t* name) noexcept {
@@ -909,31 +881,6 @@ int BoneIndex(const unsigned char* inst,const wchar_t* name) noexcept {
         if(nm && std::wcscmp(nm,name)==0)return i;
     }
     return -1;
-}
-
-// The free hand `hand` held on the other hand's weapon (fp_view.h, the arms): its wrist `h0` and elbow `e0` after T,
-// the way the elbow is wanted `wantElbow`; `fit`'s hand and forearm moves. False: a degenerate box.
-bool HeldOnOther(int hand,const float* h0,const float* e0,const float* wantElbow,float scale,ArmFit* fit) noexcept {
-    const Config& c=Cfg();
-    const M4& box=st.otherBox[hand];
-    float axis[3]={box.m[8],box.m[9],box.m[10]},move[3];
-    if(!fpview::Unit(axis) || !fpview::SnapToBox(box,h0,kPalm*scale,move))return false;
-    const float* cam=reinterpret_cast<const float*>(st.cam+kCamMatrix);
-    const float down[3]={-cam[4],-cam[5],-cam[6]};
-    const M4 snap=fpview::Translate(move[0],move[1],move[2]);
-    float h1[3],e1[3],way[3];
-    fpview::Point(snap,h0,h1);fpview::Point(snap,e0,e1);
-    fpview::Sub(e1,box.m+12,way);
-    const float deg=3.14159265f/180.0f;
-    const float roll=fpview::ClampedRoll(box.m+12,axis,h1,down,fpview::RollAngle(way,wantElbow,axis),c.fpHoldArc*deg);
-    fit->hand=fpview::Mul(snap,fpview::TurnAbout(box.m+12,axis,roll));
-    float h2[3],e2[3];
-    fpview::Point(fit->hand,h0,h2);fpview::Point(fit->hand,e0,e2);
-    fpview::Sub(e2,h2,way);
-    const float most=c.fpWristMax*deg;
-    const float bend=fpview::Clamp(fpview::RollAngle(way,wantElbow,axis),-most,most);
-    fit->fore=fpview::Mul(fit->hand,fpview::TurnAbout(h2,axis,bend));
-    return true;
 }
 
 // One arm's moves (`hand` kRight / kLeft) from the instance's draw pose (`pose`, before T) and the hand's T.
@@ -947,35 +894,17 @@ ArmFit FitArm(const unsigned char* inst,const float* pose,const M4& t,int hand) 
     float s0[3],e0[3],h0[3];
     fpview::Point(t,pose+at[0]*16+12,s0);fpview::Point(t,pose+at[1]*16+12,e0);fpview::Point(t,pose+at[2]*16+12,h0);
     float d[3];
-    fpview::Sub(e0,s0,d);const float upper=fpview::Length(d);
     fpview::Sub(pose+at[3]*16+12,pose+otherKata*16+12,d);
-    const Config& c=Cfg();
-    const float half=0.5f*fpview::Length(d),scale=c.fpScale,out=hand==kRight ? 1.0f : -1.0f;
-    // The camera's rows: its first points to the screen's left, so right = -row 0.
+    const float half=0.5f*fpview::Length(d),scale=Cfg().fpScale,out=hand==kRight ? 1.0f : -1.0f;
     const float* cam=reinterpret_cast<const float*>(st.cam+kCamMatrix);
-    float toward[3],ahead[3],wantElbow[3];
+    float shoulder[3],pole[3];
     for(int i=0;i<3;++i) {
-        const float right=-cam[i],up=cam[4+i];
-        ahead[i]=cam[8+i];
-        toward[i]=cam[12+i]+scale*(out*half*right+kShoulderDown*up+kShoulderBack*ahead[i]);
-        wantElbow[i]=out*kElbowOut*right+kElbowDown*up;
+        const float right=-cam[i],up=cam[4+i],ahead=cam[8+i];
+        shoulder[i]=cam[12+i]+scale*(out*half*right+kShoulderDown*up+kShoulderBack*ahead);
+        pole[i]=out*kElbowOut*right+kElbowDown*up;
     }
-    if(!fpview::Unit(ahead))return fit;
-    float e1[3];
-    if(st.onOther[hand]) {
-        if(!HeldOnOther(hand,h0,e0,wantElbow,scale,&fit))return fit;
-    } else {
-        // The weapon points ahead (the view transform's work): roll the forearm with the hand about its axis (through its
-        // root; without a weapon, through the wrist), the elbow seen from that axis.
-        const float* pivot=st.axisOk[hand] ? st.axis[hand] : h0;
-        float elbowWay[3];
-        fpview::Sub(e0,pivot,elbowWay);
-        fit.fore=fit.hand=fpview::TurnAbout(pivot,ahead,fpview::RollAngle(elbowWay,wantElbow,ahead));
-    }
-    float shoulder[3];
-    fpview::Point(fit.fore,e0,e1);
-    fit.ok=fpview::ReachShoulder(e1,toward,upper,shoulder) && fpview::SegmentMap(s0,e0,shoulder,e1,&fit.upper) &&
-           fpview::Finite(fit.fore) && fpview::Finite(fit.hand);
+    fit.hand=fpview::Identity(); // The palm and fingers keep the animated contact; never snap to a bounds box.
+    fit.ok=fpview::ArmChain(s0,e0,h0,shoulder,pole,&fit.upper,&fit.fore);
     return fit;
 }
 
@@ -1004,7 +933,7 @@ void Pose(unsigned char* inst,const M4* t,bool body,const float* eye,float* back
         const int hand=left ? kLeft : kRight;
         M4 moved=fpview::Mul(MatrixAt(reinterpret_cast<const unsigned char*>(p)),t[hand]);
         if(body && fit[hand].ok && name)   // the arm posed for the first person: the upper arm, the forearm, the hand
-            moved=fpview::Mul(moved,std::wcsncmp(name,L"jowan",5)==0 ? fit[hand].upper
+            moved=fpview::Mul(moved,(std::wcsncmp(name,L"jowan",5)==0 || std::wcsncmp(name,L"kata",4)==0) ? fit[hand].upper
                                     : std::wcsncmp(name,L"kawan",5)==0 ? fit[hand].fore : fit[hand].hand);
         std::memcpy(p,moved.m,64);
     }
@@ -1016,8 +945,26 @@ void Unpose(unsigned char* inst,const float* backup) noexcept {
     if(pose && n>0 && n<=kMostBones)std::memcpy(pose,backup,static_cast<std::size_t>(n)*64);
 }
 
+void InstrumentPose(unsigned char* inst,float* backup) noexcept {
+    const auto n=At<std::int32_t>(inst,kInstCount);
+    auto pose=At<float*>(inst,kInstPose);
+    const auto bones=At<const unsigned char*>(inst,kInstBones);
+    if(!pose || !bones || n<=0 || n>kMostBones)return;
+    std::memcpy(backup,pose,static_cast<std::size_t>(n)*64);
+    for(int i=0;i<n;++i) {
+        const auto name=At<const wchar_t*>(bones+static_cast<std::size_t>(i)*kBoneStride,0);
+        if(!name || std::wcsncmp(name,L"vc_i_",5)!=0)continue;
+        int seat=-1,screen=-1,field=-1,place=0,segment=0;wchar_t mode=0;
+        const int fields=swscanf_s(name,L"vc_i_%d_%d_%lc_%d_%d_%d",&seat,&screen,&mode,1u,&field,&place,&segment);
+        if(fields<4 || seat!=st.ride.seat || (mode==L'd' && fields!=6))continue;
+        const M4 original=MatrixAt(reinterpret_cast<const unsigned char*>(pose+i*16));
+        const M4 moved=instruments::Pose(original,mode,field,place,segment,st.instruments,st.instrumentsReady);
+        std::memcpy(pose+i*16,moved.m,64);
+    }
+}
+
 void LogPass(Part part,int pass) noexcept {
-    if(!Cfg().debug || pass<0 || pass>5 || part==Part::stowed)return;
+    if(!Cfg().debug || pass<0 || pass>5 || part==Part::stowed || part==Part::instruments)return;
     ++passLog[part==Part::body ? 0 : 1][pass];
     const ULONGLONG now=GetTickCount64();
     if(now-passLogAt<5000)return;
@@ -1053,8 +1000,8 @@ void __fastcall DrawHook(void* model,void* ctx,int pass,void* view) {
     else if(!st.on && model==watched)LogPass(Part::inHand,pass);
     else if(st.on){__try { NearWeapon(model,pass); } __except(EXCEPTION_EXECUTE_HANDLER){}}
     if(part==Part::none || pass==3 || pass==4 || pass>5){next(model,ctx,pass,view);return;}
-    if(pass==0 || part==Part::stowed)return;   // the occluder depth (not where it is in this picture); put away: unseen
-    if(pass==1)Drew1(model);
+    if((pass==0 && part!=Part::instruments) || part==Part::stowed)return;
+    if(pass==1 && part!=Part::instruments)Drew1(model);
     unsigned char* insts[kMostInsts];
     int n=0;
     __try {
@@ -1062,7 +1009,10 @@ void __fastcall DrawHook(void* model,void* ctx,int pass,void* view) {
             const M4 t[2]={part==Part::body ? st.view[kRight] : st.view[hand],part==Part::body ? st.view[kLeft] : st.view[hand]};
             n=InstancesOf(static_cast<unsigned char*>(model),insts);
             const float* eye=reinterpret_cast<const float*>(st.cam+kCamEyeRow);   // the drawn view's eye
-            for(int i=0;i<n;++i)Pose(insts[i],t,part==Part::body,eye,saved[i]);
+            for(int i=0;i<n;++i) {
+                if(part==Part::instruments)InstrumentPose(insts[i],saved[i]);
+                else Pose(insts[i],t,part==Part::body,eye,saved[i]);
+            }
         }
     } __except(EXCEPTION_EXECUTE_HANDLER){for(int i=0;i<n;++i)Unpose(insts[i],saved[i]);n=0;}
     next(model,ctx,pass,view);
@@ -1082,6 +1032,9 @@ bool HookDrawOf(void** vt) noexcept {
 }  // namespace
 
 bool FirstPersonOn() noexcept { return st.on; }
+void FirstPersonInstrumentReadings(const instruments::Readings& readings) noexcept {
+    if(st.on && st.riding){st.instruments=readings;st.instrumentsReady=true;}
+}
 bool FirstPersonGunnerSight() noexcept {
     const Config& c=Cfg();
     return camOk && drawOk && c.enabled && c.firstPerson && c.fpVehicle && toggled;

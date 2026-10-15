@@ -142,7 +142,7 @@ struct Config {
     float sazabiCannonDamage=300.0f;   // a mega particle beam's round at full charge (90 rounds a beam, 5 beams)
     float sazabiFunnelDamage=500.0f;   // a funnel beam's round (6 rounds a shot)
     bool sazabiTestBoard=false;     // tests (testrange/run_test.py): the player put into the first empty Sazabi seen
-    char testBoardVehicle[32]{};    // tests (tests/autopilot): the player put once a mission into the first vehicle whose class name has this
+    char testBoardVehicle[32]{};    // tests: class substring, optionally @exactModelBone to distinguish models sharing 506
     int airdropTest=0;              // tests (tests/autopilot): 1-3 = a container airdrop of the tank / APC / truck asked
                                     // once a mission near the player, then the player put into what it brings
     bool npcCrewTest=false;         // tests (tests/autopilot): auto-crew also for empty vehicles no player has driven yet

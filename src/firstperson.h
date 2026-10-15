@@ -4,6 +4,7 @@
 // network carries stay the game's.
 #pragma once
 #include <cstdint>
+#include "cockpit_instruments.h"
 
 namespace crew {
 bool InstallFirstPerson() noexcept;   // at load, before InstallMap (the map's camera step chains outside this one)
@@ -20,7 +21,7 @@ bool FirstPersonGunnerSight() noexcept;
 // fp_vehicle.cpp (game thread): the eye of `human`'s seat in the vehicle they ride (world, into `eye`): the model's
 // `vc_eye_<seat>` marker, put there with the seat's cockpit. `out`: the vehicle, the seat, its class name, whether the
 // marker was found. False: on foot, the vehicle or seat cannot be read, or the seat has no cockpit (no marker).
-struct RideView { unsigned char* vehicle; int seat; const char* name; bool station; };
+struct RideView { unsigned char* vehicle; int seat; const char* name; bool station; float frame[16]; };
 bool VehicleEye(unsigned char* human,float* eye,RideView* out) noexcept;
 
 // A seat's cockpit screens (the model's vc_scr_<seat>_<kind>_<w>x<h> markers, pylib/cockpits.py Screen): where the HUD
@@ -30,7 +31,9 @@ bool VehicleEye(unsigned char* human,float* eye,RideView* out) noexcept;
 enum class ScreenKind : std::uint8_t { flight, weapons, status, hud, map, sensor };   // sensor: a remote station's monitor
 struct CockpitScreen { ScreenKind kind; float off[3],right[3],up[3],w,h; };
 constexpr int kMostScreens=8;
-struct CockpitScreens { int n; CockpitScreen s[kMostScreens]; };
+struct CockpitScreens { int n; CockpitScreen s[kMostScreens]; bool physical; };
+// Game thread, from HudPublish. Consumed only by the vehicle's model draw, never by physics / native bone updates.
+void FirstPersonInstrumentReadings(const instruments::Readings& readings) noexcept;
 // fp_vehicle.cpp (game thread): `vehicle`'s seat `seat` screens round the eye `eye`.
 int VehicleScreens(const unsigned char* vehicle,int seat,const float* eye,CockpitScreens* out) noexcept;
 // Game thread (HudPublish): this machine's player's cockpit screens as of the last camera step; false: no vehicle first

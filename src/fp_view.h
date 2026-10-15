@@ -152,19 +152,9 @@ inline void EyeWorld(const M4& body,const float* local,float* out) noexcept {
 }
 
 // --- The arms posed for the first person ---
-// The third-person arm, moved with its weapon to the bottom of the view, reaches back up into it (its shoulder far in
-// front of the eye). The moves that bring it out at the view's edge:
-//  - the hand on its own weapon (the trigger hand): the forearm, the hand and its fingers roll together about the axis
-//    of that weapon (TurnAbout, RollAngle) until the elbow is out and down: the hand keeps its hold and the wrist its
-//    stock angle;
-//  - the free hand on the other hand's weapon (the Ranger's on the rifle's guard, the Wing Diver's): rolled about the
-//    weapon's axis it slid round the gun (the user, 2026-10-13, with a screenshot: the Wing Diver's left hand "left
-//    below the gun, not on it"), so it is held instead: pulled in to the weapon's body when the animation left it
-//    off it (SnapToBox, never pushed out: a box counts a magazine and a sight), slid round the axis only within
-//    `arc` of straight below (ClampedRoll), and what the elbow still wants is taken by the forearm alone, turned about
-//    the wrist by at most `wristMax` (the forearm alone, unbounded, broke the wrist: the same day's screenshot;
-//    forearm and hand turned about the wrist took the Wing Diver's hand off the gun's side, measured);
-//  - the upper arm turns from the elbow toward a place beside and below the eye (ReachShoulder, SegmentMap).
+// ArmChain preserves the animated palm/finger pose and both limb lengths, solves one connected elbow, and places
+// the shoulder beside/below the eye. The older independent rolls and bounds-box snapping are retained below only
+// as arithmetic helpers for compatibility; firstperson.cpp does not apply them to the hands.
 
 inline void Sub(const float* a,const float* b,float* o) noexcept { for(int i=0;i<3;++i)o[i]=a[i]-b[i]; }
 inline float Dot3(const float* a,const float* b) noexcept { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
@@ -241,6 +231,34 @@ inline bool SegmentMap(const float* a0,const float* b0,const float* a1,const flo
 }
 
 inline float Clamp(float v,float lo,float hi) noexcept { return v<lo ? lo : (v>hi ? hi : v); }
+
+// A connected two-bone arm with its animated wrist held fixed on the gun. Move the shoulder only as far as the
+// two measured bone lengths permit, then solve the elbow on their intersection circle. The pole is projected
+// perpendicular to the reach, so no angle wrapping or independently rolled wrist can flip the support hand.
+inline bool ArmChain(const float* s0,const float* e0,const float* wrist,const float* shoulderWant,
+                     const float* pole,M4* upperMove,M4* foreMove) noexcept {
+    float v[3];Sub(e0,s0,v);const float a=Length(v);
+    Sub(wrist,e0,v);const float b=Length(v);
+    if(!(a>1e-5f) || !(b>1e-5f))return false;
+    float axis[3];Sub(shoulderWant,wrist,axis);
+    const float wanted=Length(axis);
+    if(!Unit(axis))return false;
+    const float reach=Clamp(wanted,std::fabs(a-b)+1e-5f,a+b-1e-5f);
+    float s1[3];for(int i=0;i<3;++i)s1[i]=wrist[i]+axis[i]*reach;
+    // Distance from the wrist along wrist->shoulder to the elbow circle's centre.
+    const float along=(b*b+reach*reach-a*a)/(2.0f*reach);
+    const float radius=std::sqrt(std::fmax(0.0f,b*b-along*along));
+    float bend[3];
+    const float axial=Dot3(pole,axis);
+    for(int i=0;i<3;++i)bend[i]=pole[i]-axis[i]*axial;
+    if(!Unit(bend)) { // A straight-on pole: use the animated elbow, never an arbitrary sign-changing cross product.
+        Sub(e0,wrist,bend);const float d=Dot3(bend,axis);
+        for(int i=0;i<3;++i)bend[i]-=axis[i]*d;
+        if(!Unit(bend))return false;
+    }
+    float e1[3];for(int i=0;i<3;++i)e1[i]=wrist[i]+axis[i]*along+bend[i]*radius;
+    return SegmentMap(s0,e0,s1,e1,upperMove) && SegmentMap(e0,wrist,e1,wrist,foreMove);
+}
 
 // The move that takes a hand whose wrist is at `wrist` onto the weapon whose bounds are `box` (rows: half axes right,
 // up, ahead; row 3 the centre, all through T): when the wrist lies further from the box's axis than the box's

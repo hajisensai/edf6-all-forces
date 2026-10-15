@@ -15,6 +15,7 @@
 //    turns it on its side (not down: the grip is below the view's edge); a switch dips out of view and comes back; a sprint lowers it; a turn of the view leaves it behind.
 // Exit code 1 when one fails. cmake --build build --target fp_view_check && build\fp_view_check.exe
 #include "../src/fp_view.h"
+#include "../src/cockpit_instruments.h"
 #include "../src/fp_motion.h"
 #include <cmath>
 #include <cstdio>
@@ -295,6 +296,30 @@ void Springs() {
 }  // namespace
 
 int main() {
+    // Across a full recoil/reload-sized wrist sweep, both ends of the solved elbow must agree and each measured
+    // arm length must stay unchanged. The hand itself never receives a corrective transform.
+    for(int i=0;i<120;++i) {
+        const float phase=i*.0523598776f;
+        const float shoulder[3]={.3f,-.25f,-.05f},elbow[3]={.4f,-.45f,.2f};
+        const float wrist[3]={.2f+.05f*std::sin(phase),-.2f,.5f};
+        const float want[3]={.35f,-.3f,-.1f},pole[3]={1,-1.5f,0};
+        M4 upper,fore;
+        const bool ok=ArmChain(shoulder,elbow,wrist,want,pole,&upper,&fore);
+        float a[3],b[3],h[3],s[3],d[3],before[3];
+        Point(upper,elbow,a);Point(fore,elbow,b);Point(fore,wrist,h);Point(upper,shoulder,s);
+        Sub(a,b,d);Sub(h,wrist,before);
+        Expect(ok && Length(d)<1e-5f && Length(before)<1e-5f,"arm chain has a shared elbow and an unchanged wrist");
+        Sub(a,s,d);Sub(elbow,shoulder,before);
+        Expect(Near(Length(d),Length(before)),"upper arm never stretches");
+        Sub(a,wrist,d);Sub(elbow,wrist,before);
+        Expect(Near(Length(d),Length(before)),"forearm never stretches");
+    }
+    using namespace crew::instruments;
+    Expect(!Segment(5,0,1) && Segment(5,0,2),"physical digit 5 has the correct segment pattern");
+    Expect(!Segment(5,1,6) && Segment(-1,1,6),"leading zero is blank; an unavailable value is a dash");
+    Readings reading{};reading.share[hp]=.25f;
+    M4 bar=crew::instruments::Pose(Identity(),L'b',hp,0,0,reading,true);
+    Expect(Near(bar.m[0],.25f) && Near(bar.m[5],1),"a physical bar scales only along its own horizontal axis");
     Identity_();
     Hold();
     Shrink();

@@ -14,6 +14,7 @@ DWORD TestGetCurrentProcessId() { return 42; }
 #undef GetWindowThreadProcessId
 #undef GetCurrentProcessId
 #include <cstdio>
+#include <initializer_list>
 
 namespace edf {
 bool ChainVtableSlot(void**,void*,void**) noexcept { return false; }
@@ -34,9 +35,12 @@ bool SightZoomMounted(const void*) noexcept { return false; }
 bool HumanOnFoot(const unsigned char*) noexcept { return onFoot; }
 bool MapHoldsKeys() noexcept { return mapOwnsKeys; }
 bool haveEye=true;
+unsigned char rideVehicle[0x1200]{};
+fpview::M4 rideFrame=fpview::Identity();
 bool VehicleEye(unsigned char*,float* eye,RideView* out) noexcept {
     if(!haveEye)return false;
-    eye[0]=0;eye[1]=2;eye[2]=0;*out=RideView{};return true;
+    *out=RideView{};out->vehicle=rideVehicle;
+    std::memcpy(out->frame,rideFrame.m,64);std::memcpy(eye,rideFrame.m+12,12);return true;
 }
 int VehicleScreens(const unsigned char*,int,const float*,CockpitScreens* out) noexcept { out->n=0;return 0; }
 }
@@ -66,6 +70,24 @@ int main() {
     check(Ride(cam,human),"a fitted vehicle accepts the ride");
     check(At<void*>(model,kBatch)==&batch,"boarding returns the surviving weapon's original batch");
     check(!unbatched[0].model && st.weaponCount==0 && st.inHandCount==0,"boarding retires the batch record and viewmodel lists");
+    for(float roll:{0.0f,1.5707963f,3.14159265f,-1.5707963f}) {
+        const float axis[3]={0,0,1};rideFrame=fpview::Rotation(axis,std::cos(roll),std::sin(roll));
+        rideFrame.m[12]=5;rideFrame.m[13]=2;rideFrame.m[14]=7;
+        check(Ride(cam,human) && std::memcmp(cam+kCamMatrix,rideFrame.m,64)==0,
+              "the production ride copies the complete seat frame, including bank/inversion and position");
+    }
+    // Production instrument pose on a synthetic skeleton, then the same restore used after native draw.
+    unsigned char inst[0x50]{},bones[2*kBoneStride]{};float pose[32]{},backup[32]{};
+    Put<void*>(inst,kInstBones,bones);Put<int>(inst,kInstCount,2);Put<float*>(inst,kInstPose,pose);
+    Put<const wchar_t*>(bones,0,L"vc_i_0_0_d_0_0_1");
+    Put<const wchar_t*>(bones+kBoneStride,0,L"vc_i_1_0_d_0_0_1");
+    const auto id=fpview::Identity();std::memcpy(pose,id.m,64);std::memcpy(pose+16,id.m,64);
+    const float originals[32]={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1,1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
+    st.ride.seat=0;st.instrumentsReady=true;st.instruments.value[0]=5;
+    InstrumentPose(inst,backup);
+    check(pose[0]==0 && pose[16]==1,"inactive digit segment collapses, another seat's instrument is unchanged");
+    Unpose(inst,backup);
+    check(std::memcmp(pose,originals,sizeof(pose))==0,"the native draw pose is restored byte for byte");
     reset();Put<std::uint64_t>(human,kWeaponCount,0);
     check(Ride(cam,human),"boarding after the weapon was removed");
     check(!At<void*>(model,kBatch) && !unbatched[0].model,"a removed weapon is never written and its stale record is dropped");

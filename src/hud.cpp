@@ -150,6 +150,7 @@ struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool
                   bool screens; CockpitScreens scr; };   // a vehicle's first person: its cockpit's screens (cockpit_screens.inc)
 constexpr unsigned kFresh=4;
 Snapshot snaps[3]{};
+void PublishInstruments(const Snapshot& snap) noexcept;
 std::atomic<unsigned> middle{1};
 unsigned back=0;    // game thread
 unsigned front=2;   // draw thread
@@ -3307,6 +3308,7 @@ void HudPublish() noexcept {
     s.armor=PlayerStockArmor(&s.armorRo);   // the stock armor gauge's numbers while that cover hides it (stockgauge.cpp)
     s.proteus=PlayerProteus(&s.proteusRo);   // the Proteus's stance, shield, field, launcher (proteus.cpp)
     s.screens=FirstPersonScreens(&s.scr);    // the cockpit's screens in a vehicle's first person (firstperson.cpp)
+    if(s.screens && s.scr.physical)PublishInstruments(s);
     if(Cfg().vehicleHud)
         for(const auto& w:work)if(w.ref && ms-w.seen<=kFreshMs)s.d[s.count++]=w.d;
     back=middle.exchange(back|kFresh,std::memory_order_acq_rel)&3u;
@@ -4778,7 +4780,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         const bool rotorHud=snap.cockpit && snap.jet.rotor && Cfg().heliFlightHud;   // a rotor craft: the helicopter HUD
         // A vehicle's first person: the read-outs are on its cockpit's screens (DrawCockpitScreens below); the HUD's own panels
         // (strips, annunciator, blocks, tapes) give way, its aim marks and head-up symbols stay on the view.
-        const bool screensOn=fresh && snap.screens,headUp=!screensOn || HudGlass(snap.scr);
+        const bool screensOn=fresh && snap.screens,headUp=!screensOn || (!snap.scr.physical && HudGlass(snap.scr));
         const ULONGLONG launchAt=snap.warned ? snap.warn.launchAt : 0;
         if(now-snap.tick<=kFreshMs && snap.cockpit) {
             if(snap.jet.aiming)AimMarks(drawer,ctx,viewProj,width,height,s,snap.jet);

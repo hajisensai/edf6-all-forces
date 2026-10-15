@@ -323,8 +323,8 @@ def _cab_kit(name: str, spec: CabSpec) -> KitFn:
 
 KITS: dict[str, KitFn] = {
     **{name: _cab_kit(name, spec) for name, spec in CABS.items()},
-    'kei_dash': functools.partial(stock_dash, status=(0.2, -0.1, 0.42)),
-    'trailer_dash': functools.partial(stock_dash, status=(0.3, -0.24, 0.62)),
+    'kei_cab': _cab_kit('kei_cab', CABS['pickup_cab']),
+    'trailer_cab': _cab_kit('trailer_cab', CABS['truck_cab']),
     'troop_bay': troop_bay,
     'troop_bay_l': functools.partial(troop_bay, aside=-0.33),   # a left-hand seat's: toward the middle
     'troop_bay_r': functools.partial(troop_bay, aside=0.33),

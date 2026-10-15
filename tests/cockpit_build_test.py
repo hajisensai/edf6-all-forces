@@ -135,6 +135,12 @@ def main() -> int:
     member = spec.stem.lower() + '.mdb'
     md = mdb_read(next(f for f in arc.files if f.name.lower() == member).data)
     expect(not om.texture_problems(arc, md, member), f'{spec.stem}: built, its textures where the game binds them')
+    ink = [m for m in md.materials if 'instrument_ink' in md.name_of(m.name)]
+    expect(bool(ink) and all(m.shader == 'snd_BRDF_Common_Light' for m in ink),
+           'physical instrument labels use the native emissive material, not the dark hull shader')
+    interior = [m for m in md.materials if 'edf6vc_cpit_' in md.name_of(m.name)]
+    expect(all(all(p.value[:3] == [1.0,1.0,1.0] for p in m.params if p.name == 'diffuse') for m in interior),
+           'cockpit albedos keep their source colour instead of the tank template diffuse multiplier')
     names = [md.name_of(b.name) or '' for b in md.bones]
     for fit in spec.cockpits:
         marker = cockpits.MARKER.format(fit.seat)
