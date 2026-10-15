@@ -342,3 +342,20 @@ the stock Update (0x1100B90 builds bones from it) — visual only, ragdoll/colli
 - EAO parts never lose HP until `+0x380 &= ~1` (ctor 0x5B6406), and never scale with level (slot 6 is a stub).
 - The cloned UfoCarrier508 hull only accepts damage on its core body while +0xD85 is set (slot 16 0x4F7190).
 - GDI sub-hit records (+0x78/+0x88, 0x30 bytes, body id at +0x20) are how every stock part tells which body was hit.
+
+## 11. Added for the 401's finishing pass (2026-10-15, src/edf41classes.h last block; H unless noted)
+- `FireHit(owner, matrix, Bullet, cue, SeParams)`: Fire with the bullet's hit sound. EDF6's InitParam +0x100 is a SePreset (0x7B3200;
+  weapons fill it from key 14 with 0x7B16F0; 4.1's +0xB0); filled here from a raw cue name as PlayCue does.
+- `MaterialAnims*`: EDF6's material-animation component (0x38 bytes; ctor 0x6DBE90, bind 0x6DC7B0 to the model's material set =
+  EventAnimationObject +0x720 (model +0x5C0 + 0x160; UfoCarrier508 binds +0x650 + 0x160), add 0x6DC050(blob, kind), play
+  0x6DC830(index, mode 0 once / 1 hold / 2 loop), advance 0x6DC8B0(frame info, 1.0), free 0x29D120(+8)). 4.1's SGO entries are bare
+  MTAB blobs (the same 0x200 format and 16-byte header as EDF6's [blob, kind] entries).
+- `StencilLight(pos, colour, radius, frames)`: InitParam@StencilLight (vtable 0x1762108; +0x30 pos, +0x40/+0x50 colour, +0x60 radius,
+  +0x64 frames, the same layout as 4.1's) made by 0x84880 with the numbers as given (EffectGenUtil 0x2EBC00 and 4.1's 0x1b5080 both scale
+  colour x2.5 and radius x5 first).
+- `SmallBurst(pos, dir, size)`: EffectGenUtil 0x2E7D00 = 4.1 0x1b1910 (every constant the same); FireBurst's Flame 0x2E7FF0 = 4.1 0x1b16b0.
+- Ragdoll body names: 0x6EA670 compares the SHKT proxy name `RagDollProxys.<name>`, not the bare name.
+- `Ragdoll::Disable` 0x6E97C0 (+0xA4 cleared, mode 0 -> 0x11B1710 removes the body from the world); `Enable` 0x6E9840; the relayed
+  0x6E40B0 sets every body to mode 4 under the world lock.
+- EDF6's SpawnerObject (vtable 0x17E7658, Update 0x6E1080 -> 0x6E3250) draws nothing of its own; generators hand it std::functions
+  (+0x640 effect, +0x680 the new enemy). It delivers its messages to the enemy as slots 10, 9 (OnMessage), 11.

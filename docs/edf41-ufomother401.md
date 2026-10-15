@@ -103,7 +103,7 @@ AdditionalParts 0x38B321 在对象虚函数里这样调，无世界锁）拿出�
   每 16 帧 Flame（0x2E7FF0 = 4.1 0x1b16b0，同样常数全同，H）；Explosion / Explosion_Big（PRIMITIVES 5）；WeakPanel 的 10 个 StencilLight
   （EDF6 InitParam@StencilLight，vtable 0x1762108，+0x30 位置、+0x40/+0x50 颜色、+0x60 半径、+0x64 帧数，与 4.1 同布局；4.1 的 WeakPanel 直接填
   (0.5,0.5,0.5,2.5)、i·300、180 不经 ×2.5 / ×5 的辅助函数，这里也直接填，0x84880 建）与烟（0x1b2d90 → ExplosionWind 0x2E4D90）。
-- 充能光：每种颜色一个 `ChargeEffect_StdParticle`（工厂 0x6D92D0，MovingFortress_Battery 0x4D3F22 同样调），+0xC = 0 显示 / 1 隐藏，每帧槽 1
+- 充能光（**默认关**，开发位 512 打开；实机会崩，见 4）：每种颜色一个 `ChargeEffect_StdParticle`（工厂 0x6D92D0，MovingFortress_Battery 0x4D3F22 同样调），+0xC = 0 显示 / 1 隐藏，每帧槽 1
   （UpdateContext、炮口矩阵）与槽 0 把更新与渲染同步排进场景的工作表（管理器 +0x358）；状态进入时照 4.1 打开（BigCannon 充能 / 发射、FinalCannon
   三态、FinalGenerator 召唤充能），离开即关。部件析构时效果进「坟场」，4 个船体帧后才释放 shared_ptr（排队的工作不会碰到已删的对象）。
 
@@ -112,7 +112,8 @@ AdditionalParts 0x38B321 在对象虚函数里这样调，无世界锁）拿出�
 
 ### 2.6 开发开关（发布版都是 0）
 `Edf41Mother401Dev` 位：1 攻击一直允许、2 攻击等待缩到 ≤2 s、4 面板立刻就位、8 / 16 开局 `Edf41Mother401DevKill` 秒后毁掉 Core / 一块 WeakPanel、
-32 同时刻执行 `Edf41Mother401DevAction` 号动作、64 共用的 `Edf41DevShoot` 也打生成器放出的敌人（看补槽）、128 玩家装甲一直满（autopilot 不会躲）；
+32 同时刻执行 `Edf41Mother401DevAction` 号动作、64 共用的 `Edf41DevShoot` 也打生成器放出的敌人（看补槽）、128 玩家装甲一直满（autopilot 不会躲）、
+256 DevShoot 等 `Edf41Mother401DevKill` 秒后才打（M809 的脚本从它的 OA(0) 起才盯弱点）、512 打开充能光、1024 / 2048 不放闪光 / 子弹命中音（排查）；
 `Edf41Mother401Place`：把船体放在玩家头顶这么多米。共用的 `Edf41DevShoot=n` / `Edf41DevShootDamage`：每个能挨打的部件每 n 帧挨一发玩家的
 LaserBullet02（锁定点一发、弱点骨骼一发），日志每 600 帧按类统计「taken / refused」。
 
@@ -121,13 +122,22 @@ LaserBullet02（锁定点一发、弱点骨骼一发），日志每 600 帧按�
 （见文末「实机记录」。）
 
 ## 4. 没做的 / 与 4.1 的差别
-- 材质动画（出现 / 受伤闪 / 死亡三段）、充能发光粒子（Particle3_k）、StencilLight、炮台火花的确切特效、子弹命中音（4.1 填 InitParam +0xB0 的 se）。
-- 受击让生成的敌人「发现玩家」（4.1 0x331d10）；EDF6 的 SpawnerObject 式传送出现特效（直接 CreateFromPath）。
-- 面板没有锁定点（EAO 不登记），锁定武器锁不上面板（4.1 能）。
-- 4.1 换布局时也对 keep 的面板调消失（SPEC 待办 3）：这里 keep 的保留不消失。
-- 船体原点有一个小碰撞体（2.1）。
-- 联机同步（2.5）。
-- 用户转来的线索（未核、未用）：MAB 事件回调 0x6B6E30 / 0x116BE30、范围伤害 0x542670、ragdoll 激活 0x6E40B0。
+- **充能光（Particle3_k）默认关**（开发位 512 才开）。做法见 2.2 / 2.4（EDF6 的 `gunbattery::ChargeEffect_StdParticle`，4.1 的粒子块数值经 EDF6
+  的键表放进去）。实机证据：开着它的三次运行（M018 ds5 / ds6、M019 ds1）在**退出游戏时**都崩在 EDF 的声音库缓存析构（EDF+0x7ADCFB 读已销毁的
+  声音系统 0x20B2948；静态表 EDF+0x20B38A0 退出时还剩 1 项），M809 ds2 在任务中崩在发射器更新工作里的 `bad_alloc`（EDF+0x30316D ← 0x302D10，
+  `reserve` 的个数离谱）；同一 M018 流程关掉它（ds7）干净结束。没查清的：4.1 粒子块与 EDF6 发射器参数的语义对应（EDF6 另有一个与 4.1
+  0x1c1920 默认值逐项相同的 `ParticleEmitterCore::InitParam` 构造，0x300D..；ChargeEffect 走的是键表 0x303710 的另一种布局）、ChargeEffect
+  的音效预设 / 句柄在退出时为何还挂着库。要做成：照 4.1 0x1c2d80 的用法直接嵌 EDF6 的发射器（0x301290 构造、0x302200 初始化、作业 0x302EE0），
+  参数用与 4.1 同布局的那种 InitParam。
+- 联机同步（2.5）：只在本机模拟的一端跑，客户端什么也不建。
+- Generator 的「open 动画长度」取 150 帧（M）。弱点 `core` 在 FlatPanel 外壳（刚体 0）里面：激光一类单点命中打在外壳上一律被拒（M019 / M018
+  实机 Generator 0 taken / 91–508 refused），只有爆炸类的子命中能落到 `core`——4.1 用同一 SHKT 与同一「离命中中心最近的子命中」规则，应同样
+  如此（M），所以「受击叫醒敌人」只在代码里看过，实机没打中过 Generator。
+- 用户转来的地址：0x6E40B0（ragdoll 激活）核过（锁世界、每个刚体模式 4、约束 0x6E4A70），旁边的 0x6E97C0（停用）用上了；MAB 事件回调
+  0x6B6E30 / 0x116BE30、范围伤害 0x542670 用不上（4.1 的 401 不用范围伤害；Generator 的开舱长度取 CAS 时钟）。第三方的 Earth Eater 实现
+  （ParameterHUD.dll，只做了 Panel / Cannon / GeneratorPanel 三个类）没有可借的东西。
+- 已解决、不再是差别：材质动画、StencilLight、炮台 / 面板的确切火花、子弹命中音、受击叫醒（代码）、锁定点、keep 面板（4.1 本就不让它们消失，
+  见 Layout 的注释：0x25f833..0x25f87b 先清旧表那一项的弱引用）、船体原点的碰撞体、「传送出现」（4.1 本就没有特效，2.4）。
 
 ## 实机记录
 
