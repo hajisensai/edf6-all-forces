@@ -83,6 +83,9 @@ ragdoll、耐久）为底，虚表克隆（45 槽）：0 析构、5 Update、9 O
   三处随机的攻击起点（BigCannon01 开盖、FinalCannon01 选炮、炮台开火）只在房主决定，经部件自己的 NetworkObject 发 `kPartEnter`，客人副本在待机
   状态等它。HP 只经 HP 差到达的副本补跑 `PartDamaged` 的击毁（`KillFromHp`）。4.1 自己的同步（动作号、状态号）不照搬。
 - `Edf41Net=0`：不登记、不发事件（每台机器仍都跑，不再有上面的崩溃）。
+- 单机实机（2026-10-15，分支 `feat/edf41-online`，`gametest/net4_M012`，默认设置）：没有崩溃转储，Mods / 存档逐字节还原；`action 3` 布局
+  `panel_layout_map_init` 19×19 → 276 块面板、4 个生成器宿主，276 块飞入；插件每帧 62 µs（与改动前同量级）。单机下 `Online()` 为假，登记、事件、
+  `NetDecides` 都不起作用——这次只证明去掉门后单机行为不变。联机两端没跑过。
 
 ### 2.6 开发开关（发布版都是 0）
 `Edf41Mother401Dev` 位：1 攻击一直允许、2 攻击等待缩到 ≤2 s、4 面板立刻就位、8 / 16 开局 `Edf41Mother401DevKill` 秒后毁掉 Core / 一块 WeakPanel；
