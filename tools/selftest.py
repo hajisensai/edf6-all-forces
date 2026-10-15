@@ -7126,7 +7126,7 @@ def edf41_mother301_finish_contract() -> None:
     every 4.1 sound name the class plays or gives a bullet as its hit sound is in the hull SGO's edf41_se (else silence); every
     CAS state the hull plays is in the hull's CAS; every model of the hull and its parts has the two material parameters the
     glow binds (light0_color, scroll_light0); the shared Bullet carries its hit sound into InitParam +0x100 only when set; the
-    dev switch Edf41MotherForce takes bit 16 and ships 0."""
+    dev switch Edf41MotherForce takes bits 16 and 32 and ships 0."""
     import cas_graft
     import edf41_objects as eo
     import mdb
@@ -7162,7 +7162,7 @@ def edf41_mother301_finish_contract() -> None:
     assert 'const wchar_t* hitSe=nullptr;' in header and 'bool FillSePreset(void* preset' in header
     assert 'if(b.hitSe && b.hitSeTable)FillSePreset(param+0x100,b.hitSeTable,b.hitSe);' in shared
     plugin, ini = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini')
-    assert 'ReadInt(L"Edf41MotherForce",n.edf41MotherForce),0,31)' in plugin
+    assert 'ReadInt(L"Edf41MotherForce",n.edf41MotherForce),0,63)' in plugin
     assert re.search(r'^Edf41MotherForce=0$', ini, re.M) and '16 =' in ini.split('Edf41MotherForce=0', 1)[0].rsplit('Edf41MotherParts=31', 1)[1]
 
 

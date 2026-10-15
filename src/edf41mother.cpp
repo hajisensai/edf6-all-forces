@@ -192,7 +192,7 @@ void BindGlow(Glow& g,void* object,std::size_t model,const char* what) noexcept 
     if(!g.said && (g.tries>600 || (BindCount(g.light)>0 && BindCount(g.scroll)>0))) {
         g.said=true;
         static std::atomic<int> said{0};
-        if(said.fetch_add(1)<8)Log("EDF41MOTHER %s %p glow: light0_color on %lld materials, scroll_light0 on %lld (after %d frames)",what,object,
+        if(said.fetch_add(1)<8 || std::strcmp(what,"hull")==0)Log("EDF41MOTHER %s %p glow: light0_color on %lld materials, scroll_light0 on %lld (after %d frames)",what,object,
                                    static_cast<long long>(BindCount(g.light)),static_cast<long long>(BindCount(g.scroll)),g.tries);
     }
 }
@@ -990,13 +990,19 @@ void PartFrame(void* obj,Part& p,Hull& h) noexcept {
 // 1: after 5 s every group enabled with attack on (the main cannon's 20 s charge, then its sweep); 2: after 60 s the main
 // cannon destroyed (its fall, then the weak point takes damage); 4: after 90 s the cannons destroyed; 8: after 90 s a quarter
 // of the panels destroyed; 16: after 5 s every group enabled without attack (with Edf41DevShoot: the damage path to the hull's
-// death without the player being killed first).
+// death without the player being killed first); 32: the hull's durability floor the scripts set held at 0.
 void Force(void* hullObj,Hull& h) noexcept {
     const int force=Cfg().edf41MotherForce;
     if(!force)return;
     if((force&1) && h.ticks==300) { for(int a:{3,5,8,10,13,15})ApplyAction(hullObj,h,a); Log("EDF41MOTHER dev force: every group enabled, attack on"); }
     // 16: after 5 s every group enabled, attack left off (targets for Edf41DevShoot that do not kill the autopilot's player)
     if((force&16) && !(force&1) && h.ticks==300) { for(int a:{3,8,13})ApplyAction(hullObj,h,a); Log("EDF41MOTHER dev force: every group enabled, no attack"); }
+    // 32: the scripts' durability floor (native 3020 writes +0x2F0, e.g. M130 100 %, M993 30 %) held at 0: the hull can be killed
+    if((force&32) && F(hullObj,0x2F0)>0.0f) {
+        static std::atomic<int> said{0};
+        if(said.fetch_add(1)<8)Log("EDF41MOTHER dev force: the durability floor %.0f set to 0",F(hullObj,0x2F0));
+        SetF(hullObj,0x2F0,0.0f);
+    }
     const auto kill=[&](int group,int every) {
         int n=0,killed=0;
         for(void* o:h.parts) { Part* p=PartOf(o); if(p && p->group==group && !p->dead && Live(o) && (n++%every)==0) { SetF(o,kDurabilityAt,0.0f); ++killed; } }
