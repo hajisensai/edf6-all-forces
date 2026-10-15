@@ -343,7 +343,11 @@ the stock Update (0x1100B90 builds bones from it) — visual only, ragdoll/colli
 - The cloned UfoCarrier508 hull only accepts damage on its core body while +0xD85 is set (slot 16 0x4F7190).
 - GDI sub-hit records (+0x78/+0x88, 0x30 bytes, body id at +0x20) are how every stock part tells which body was hit.
 
-## 11. Added for the 401's finishing pass (2026-10-15, src/edf41classes.h last block; H unless noted)
+## 12. Added for the 401's finishing pass (2026-10-15, src/edf41classes.h last block; H unless noted)
+(Numbered 12 to sit next to the 301 finish's section 11 on its branch. Its `Bullet::hitSe` / `FillSePreset` fill the same InitParam
++0x100 preset from an `edf41_se` name table; the 401 data carries raw cues per se_table entry (`edf41_401_se`), so `FireHit` takes a
+cue directly. Its material *parameter* binding (0x6DCBF0 ..) writes values by name; the 401's `material_animation` MTAB tracks go
+through EDF6's material *animation* component below, the one UfoCarrier508 uses for its own `material_animation`.)
 - `FireHit(owner, matrix, Bullet, cue, SeParams)`: Fire with the bullet's hit sound. EDF6's InitParam +0x100 is a SePreset (0x7B3200;
   weapons fill it from key 14 with 0x7B16F0; 4.1's +0xB0); filled here from a raw cue name as PlayCue does.
 - `MaterialAnims*`: EDF6's material-animation component (0x38 bytes; ctor 0x6DBE90, bind 0x6DC7B0 to the model's material set =
