@@ -7280,7 +7280,12 @@ def edf41_robo_finish() -> None:
     cpp, shared, header = src('src/edf41robo.cpp'), src('src/edf41classes.cpp'), src('src/edf41classes.h')
     assert 'p6::FindLocatorIn(Model(r.obj),1,L"ロックオン",&r.lockOn)' in cpp
     assert 'SetSlot(roboClass,kSlotOnDamaged,reinterpret_cast<void*>(&OnDamagedWrap));' in cpp and 'kSlotOnDamaged=18' in cpp
-    assert 'r.ragdoll=p6::RagdollOn(r.obj);' in cpp and 'p6::AreaDamage(r.obj,m+12,radius,damage,' in cpp
+    assert 'r.ragdoll=p6::RagdollOn(r.obj);' in cpp and 'p6::AreaDamage(r.obj,c,radius,damage,' in cpp
+    # the ragdoll goes back on the ragdoll layer first (EventAnimationObject's constructor put it on 0x11, which the ground ignores)
+    on = cpp.split('bool RagdollOn(void* object) noexcept {', 1)[1].split('return true;', 1)[0]
+    assert on.index('(kRagdollLayer)(rag,6)') < on.index('(kRagdollOn)(rag)'), on
+    # the stomp's circle: scale x the kind-0 locator's own radius (record +0x10), at the ground under it
+    assert 'std::memcpy(&size,rec+0x10,4);' in cpp and 'GroundHit(from,to,c,' in cpp
     code = re.sub(r'//[^\n]*', '', cpp)
     assert 'Blast(' not in code, 'the stomp still lets off the grenade stand-in'
     assert 'bool FireSe(void* owner,const float* matrix,const Bullet& b,const void* seTable,const wchar_t* hitSe) noexcept;' in header

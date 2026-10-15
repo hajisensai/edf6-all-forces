@@ -1562,6 +1562,9 @@ void Tick(Robo& r) noexcept {
             r.obj,r.ticks,kBodyNames[r.body],kAiNames[r.ai],r.form,r.pos[0],r.pos[1],r.pos[2],r.yaw,r.haveTarget ? "seen" : "none",
             r.haveTarget ? TargetDistance(r) : 0.0f,durability,r.gun[0].state,r.gun[1].state,r.gun[2].state,r.gun[3].state,
             r.gun[0].shots,r.gun[1].shots,r.gun[2].shots,r.gun[3].shots,r.events,r.hits,r.blasts);
+        const Muzzle* a[4]={&r.gun[kSmall].muzzle[0],&r.gun[kSmall].muzzle[1],&r.gun[kMiddle].muzzle[0],&r.gun[kMiddle].muzzle[1]};
+        Log("EDF41ROBO %p aim (pitch / yaw rad): knees %.2f %.2f / %.2f %.2f, shoulders %.2f %.2f / %.2f %.2f; lights %zu",r.obj,a[0]->pitch,a[0]->yaw,
+            a[1]->pitch,a[1]->yaw,a[2]->pitch,a[2]->yaw,a[3]->pitch,a[3]->yaw,p6::LightsCount(r.lights));
     }
 }
 
