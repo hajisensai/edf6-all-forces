@@ -1903,6 +1903,21 @@ void __fastcall OnDamagedWrap(void* self,void* gdi) {
     if(r.body<kS10)HitReaction(r,gdi,taken);
 }
 
+// Slot 16 (Accept(object, GDI*) -> bool, asked by ApplyDamage 0x547C30 before any HP change; EventAnimationObject's is
+// GameObjectBase's `mov al,1` 0x54AA40): 4.1's slot 10 (0x2759F0) answers false while transforming (S4). Refusing in OnMessage
+// alone missed hits (M416 2026-10-15 13:45: 26112 -> 12512 during the transform): bullets and area damage reach ApplyDamage
+// through other messages (0x543920 sends 0x10000000); every path asks slot 16 (only forced damage, GDI flag 0x40, passes).
+constexpr int kSlotAccept=16;
+using AcceptFn=bool(__fastcall*)(void*,void*);
+bool __fastcall AcceptWrap(void* self,void* gdi) {
+    {
+        std::lock_guard<std::mutex> hold(lock);
+        auto it=robos.find(self);
+        if(it!=robos.end() && it->second.body==kS4)return false;
+    }
+    return reinterpret_cast<AcceptFn>(roboClass.orig[kSlotAccept])(self,gdi);
+}
+
 void CreateRobo(void* info) noexcept {
     void* obj=CloneObject(roboClass,kEaoCtor,kEaoSize,info);
     if(!obj)return;
@@ -1929,6 +1944,7 @@ bool InstallEdf41Robo() noexcept {
     }
     SetSlot(roboClass,kSlotOnLevel,reinterpret_cast<void*>(&OnLevelWrap));
     SetSlot(roboClass,kSlotOnDamaged,reinterpret_cast<void*>(&OnDamagedWrap));
+    SetSlot(roboClass,kSlotAccept,reinterpret_cast<void*>(&AcceptWrap));
     // Slot 22 (CanChangeTeam, asked by SetTeam 0x54EE70): EventAnimationObject's 0x5B6BA0 allows team 6 only, so CreateEnemy's
     // SetTeam(1) left the robots on team 6 (M415 / M411 real runs 2026-10-15): GameObjectBase's (every team).
     AllowAnyTeam(roboClass);
