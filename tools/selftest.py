@@ -3093,6 +3093,30 @@ def ledger_refcounts() -> None:
 
 
 @test
+def ledger_committed_writer() -> None:
+    """A transaction's writer can register an unchanged legacy file without rewriting it or losing other owners;
+    a mismatching committed hash cannot claim a foreign edit."""
+    with tempfile.TemporaryDirectory(prefix='edf6vc-record-') as game:
+        rel, data = 'OBJECT/MODEL.MRAB', b'committed model'
+        path = _mods(game, rel)
+        modfiles.atomic_write(path, data)
+        led = ledger.Ledger(game)
+        led.need('edf41', rel)
+        before = os.stat(path).st_mtime_ns
+        led.record('calls', rel, modfiles.sha256(data))
+        assert set(led.owners(rel)) == {'calls', 'edf41'}
+        assert os.stat(path).st_mtime_ns == before
+        modfiles.atomic_write(path, b'foreign edit')
+        try:
+            led.record('optics', rel, modfiles.sha256(data))
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('a changed file was registered as the transaction writer\'s')
+        assert set(ledger.Ledger(game).owners(rel)) == {'calls', 'edf41'}
+
+
+@test
 def ini_merge_only_adds() -> None:
     shipped = src('EDF6VehicleCrew.ini')
     user = '; mine\r\n[VehicleCrew]\r\nEnabled=0\r\n; my note\r\nHeliHeight=40\r\nHeliStandoff=60\r\n\r\n[Other]\r\nX=1\r\n'
@@ -6915,6 +6939,8 @@ def ported_assets_of_another_mod_stay() -> None:
             if ours_written:
                 files.update({pw.sgo_file(port): b'ours', asset: b'our model'})
             cw.install(game, files)
+            if ours_written:
+                assert ledger.Ledger(game).owners(asset) == [cw.OWNER], 'the transaction did not register its model'
             assert modfiles.read(_mods(game, asset)) == (b'our model' if ours_written else b'another mod')
             cw.uninstall(game)
             assert (modfiles.read(_mods(game, asset)) == b'another mod') if not ours_written else \
@@ -6922,6 +6948,70 @@ def ported_assets_of_another_mod_stay() -> None:
             if not ours_written:
                 cw.repair(game)
                 assert modfiles.read(_mods(game, asset)) == b'another mod'
+
+
+@test
+def edf41_shared_weapon_asset_lifecycle() -> None:
+    """The real shared asset's path, through install -> legacy upgrade -> campaign plan -> either uninstall order.
+    A weapon-manifest hash is required even for byte-identical unowned files; edited files still block the object."""
+    import edf41_objects as eo
+    import itertools
+    import ported_weapons as pw
+    asset = next(iter(eo.registry()['shared']))
+    port = next(p for p in pw.PORTS if asset in p.assets)
+    obj, data = 'OBJECT/VEHICLE301_TANK_AI.SGO', b'shared model'
+    payloads = {obj: b'converted tank', asset: data}
+    reg = {'objects': [{'object': obj, 'files': list(payloads)}],
+           'files': {r: modfiles.sha256(d) for r, d in payloads.items()}, 'shared': {asset: 'unused'}}
+    ids = STOCK + sorted({*cw.templates(), *(p.template for p in pw.PORTS)} - set(STOCK)) + list(calls.IDS)
+    table = ids + [p.id if p is port else pw.retired_id(p.id) for p in pw.PORTS]
+    for legacy in (False, True):
+        for removal, original in itertools.product(('calls', 'repair', 'edf41'), (None, b'original mod model')):
+            with tempfile.TemporaryDirectory(prefix='edf6vc-shared-') as game, \
+                    patched(modfiles, game_running=lambda process=modfiles.PROCESS: False), \
+                    patched(cw, stock=lambda game_root, rel: b''), \
+                    patched(eo, registry=lambda: reg), patched(eo, read=payloads.__getitem__):
+                if original is not None:
+                    modfiles.atomic_write(_mods(game, asset), original)
+                files = _call_files(game, table)
+                def rows(key: str) -> bytes:
+                    return dsgo.compact(dsgo.Document(dsgo.Node([dsgo.Node([dsgo.Node(
+                        [i, f'app:/weapon/{i}.sgo', 0.0, 1.0, 0.0, 0.0, dsgo.Node([]), 1.0, 0.0]
+                        if key == 'table' else [f'name {i}', f'about {i}']) for i in table])], {0: key}), []))
+                files.update({cw.TABLE: rows('table'), **{r: rows('text_table') for r in cw.TEXTS},
+                              pw.sgo_file(port): b'weapon', asset: data})
+                cw.install(game, files)
+                if legacy:
+                    led = ledger.Ledger(game)
+                    del led.files[ledger.key(asset)]   # old releases wrote only the weapon manifest
+                    led._save()
+                assert not eo.unavailable(game), 'our unmodified weapon model blocks the campaign preflight'
+                # The same unowned bytes without the committed manifest cannot be adopted.
+                with patched(cw, load_manifest=lambda root: {'written': {}}):
+                    if legacy:
+                        assert eo.unavailable(game)
+                modfiles.atomic_write(_mods(game, asset), b'another mod changed it')
+                assert eo.unavailable(game), 'a foreign edit was treated as the bundled model'
+                modfiles.atomic_write(_mods(game, asset), data)
+                built, skipped = eo.build(game)
+                assert not skipped and set(built) == set(payloads)
+                eo.install(game, built)
+                assert set(ledger.Ledger(game).owners(asset)) == {cw.OWNER, eo.OWNER}
+                cw.install(game, files)   # a repeat upgrade keeps both the writer and the consumer
+                assert set(ledger.Ledger(game).owners(asset)) == {cw.OWNER, eo.OWNER}
+                if removal == 'edf41':
+                    eo.remove(game)
+                    assert modfiles.read(_mods(game, asset)) == data
+                    cw.uninstall(game)
+                else:
+                    (cw.repair if removal == 'repair' else cw.uninstall)(game)
+                    assert modfiles.read(_mods(game, asset)) == data
+                    assert ledger.Ledger(game).owners(asset) == [eo.OWNER]
+                    eo.remove(game)
+                if original is None:
+                    assert not os.path.exists(_mods(game, asset)), 'the last consumer left an unneeded model'
+                else:
+                    assert modfiles.read(_mods(game, asset)) == original, 'the pre-install model was not restored'
 
 
 @test

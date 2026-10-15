@@ -106,6 +106,26 @@ def our_sgos() -> list[str]:
     return [sgo_file(c) for c in CALLS] + [rel for p in pw.PORTS for rel in pw.files(p)]
 
 
+def owned_assets(game_root: str, manifest: dict | None = None) -> dict[str, str]:
+    """Ported models this writer's committed manifest proves are still its bytes (also before ledger registration).
+    Stock-named files without that proof, or edited since, are never adopted as ours."""
+    manifest = load_manifest(game_root) if manifest is None else manifest
+    written = {ledger.key(rel): sha for rel, sha in manifest['written'].items()}
+    return {rel: written[rel] for rel in {ledger.key(r) for p in pw.PORTS for r in p.assets}
+            if rel in written and modfiles.sha256_file(_mods(game_root, rel)) == written[rel]}
+
+
+def held_elsewhere(led: ledger.Ledger, game_root: str, manifest: dict, rel: str) -> bool:
+    """Whether removal must leave this file for another component; defer any original-file restoration with it."""
+    if not set(led.owners(rel)) - {OWNER, ledger.LEGACY}:
+        return False
+    backup = _mods(game_root, BACKUP, rel)
+    if rel in manifest['replaced'] and os.path.isfile(backup):
+        with open(backup, 'rb') as f:
+            led.defer_restore(rel, f.read())
+    return True
+
+
 # ---------------------------------------------------------------- reading the base
 
 
@@ -888,9 +908,12 @@ def install(game_root: str, files: dict[str, bytes] | None = None) -> dict[str, 
               f'that had it equipped or owned refers to row {was}')
     led = ledger.Ledger(game_root)
     before = set(led.owned_by(OWNER))
+    assets = owned_assets(game_root, manifest)
+    for rel, sha in assets.items():
+        led.record(OWNER, rel, sha)
     for rel in sorted(needs):
         led.need(OWNER, rel)
-    led.release(OWNER, sorted(before - {ledger.key(rel) for rel in needs}))
+    led.release(OWNER, sorted(before - {ledger.key(rel) for rel in needs} - assets.keys()))
     return dict(manifest['written'])
 
 
@@ -906,12 +929,15 @@ def uninstall(game_root: str, delete_rows: bool = False, unequipped: bool = Fals
         raise SystemExit(f'deleting the rows of {", ".join(deleted)}: unequip these weapons in every save first (a '
                          'save with one equipped crashes the game once its row is gone), then rerun with --unequipped')
     changes: dict[str, bytes | None] = {}
+    led = ledger.Ledger(game_root)
     for rel, data in shared.items():
         if rel in manifest['created'] and data == stock(game_root, rel):
             changes[rel] = None   # we made it and nobody else's rows are left in it
         elif data != base(game_root, rel):
             changes[rel] = data
     for rel in our_sgos():
+        if held_elsewhere(led, game_root, manifest, rel):
+            continue   # another installed component still needs this shared model
         path = _mods(game_root, rel)
         bak = _mods(game_root, BACKUP, rel)
         if rel in manifest['replaced'] and os.path.isfile(bak):
@@ -948,7 +974,10 @@ def repair(game_root: str) -> list[str]:
     if not os.path.isfile(_manifest_path(game_root)):
         raise SystemExit('EDF6VehicleCrew never installed its call weapons here: nothing to restore')
     changes: dict[str, bytes | None] = {}
+    led = ledger.Ledger(game_root)
     for rel in SHARED + our_sgos():
+        if rel not in SHARED and held_elsewhere(led, game_root, manifest, rel):
+            continue
         bak = _mods(game_root, BACKUP, rel)
         if rel in manifest['replaced'] and os.path.isfile(bak):
             with open(bak, 'rb') as f:

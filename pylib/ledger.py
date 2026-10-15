@@ -28,6 +28,7 @@ import os
 from modfiles import atomic_write, sha256, sha256_file
 
 MANIFEST = '.edf6vc_files.json'
+BACKUP = '.edf6vc_files_backup'
 OWNERS = ('jets', 'sub', 'testrange', 'testrange_sub', 'calls', 'katyusha', 'bigmap', 'artillery', 'chute', 'drill', 'stockstores', 'sidecar', 'emc', 'sazabi', 'proteus', 'optics', 'loadout', 'edf41', 'menu_preview', 'roomui', 'edf41maps', 'edf41sound', 'edf5dlc')
 LEGACY = 'legacy'   # a file from before the ledger that a tool needs: its writer is not recorded
 
@@ -51,6 +52,11 @@ def _merge_entry(base: dict | None, mine: dict | None, disk: dict | None) -> dic
     sha = (mine or {}).get('sha') if mine is not None and (mine or {}).get('sha') != (base or {}).get('sha') else \
         (disk or {}).get('sha', (mine or {}).get('sha'))
     entry = dict(disk or mine or {})
+    if (mine or {}).get('restore') != (base or {}).get('restore'):
+        if mine and 'restore' in mine:
+            entry['restore'] = mine['restore']
+        else:
+            entry.pop('restore', None)
     entry['owners'] = owners
     if sha is not None:
         entry['sha'] = sha
@@ -130,6 +136,30 @@ class Ledger:
         self._save()
         return path
 
+    def record(self, owner: str, rel: str, sha: str) -> None:
+        """Records a writer after its own transaction committed the file, without writing it a second time.
+        The caller's committed hash must still match; a legacy dependency becomes a known writer's file."""
+        assert owner in OWNERS, owner
+        if sha256_file(self.disk(rel)) != sha:
+            raise ValueError(f'{key(rel)}: not the committed file')
+        self._refresh()
+        entry = self.files.setdefault(key(rel), {'owners': []})
+        entry['owners'] = [o for o in entry['owners'] if o != LEGACY]
+        if owner not in entry['owners']:
+            entry['owners'].append(owner)
+        entry['sha'] = sha
+        self._save()
+
+    def defer_restore(self, rel: str, data: bytes) -> None:
+        """Keeps the pre-install bytes until the last consumer releases a shared file.
+        Its writer may remove its own transaction backups before the remaining consumers are uninstalled."""
+        self._refresh()
+        entry = self.files[key(rel)]
+        if 'restore' not in entry:
+            atomic_write(os.path.join(self.mods, BACKUP, *key(rel).split('/')), data)
+            entry['restore'] = sha256(data)
+            self._save()
+
     def put_new(self, owner: str, rel: str, data: bytes) -> str | None:
         """Writes `data` only when nothing is at `rel` yet: into a temporary file beside it, then renamed onto the free
         name (os.rename never replaces on Windows), so a running game that opens the name sees no file or the whole one,
@@ -197,10 +227,22 @@ class Ledger:
                     entry['owners'].remove(gone)
             if entry['owners']:
                 continue
+            original = None
+            backup = os.path.join(self.mods, BACKUP, *k.split('/'))
+            if entry.get('restore') and sha256_file(path) == entry.get('sha'):
+                with open(backup, 'rb') as f:
+                    original = f.read()
+                if sha256(original) != entry['restore']:
+                    raise ValueError(f'{k}: shared file backup changed; not restored')
             del self.files[k]
             if not os.path.isfile(path):
                 continue
             if sha256_file(path) != entry.get('sha'):
+                kept.append(path)
+                continue
+            if original is not None:
+                atomic_write(path, original)
+                os.remove(backup)
                 kept.append(path)
                 continue
             os.remove(path)
