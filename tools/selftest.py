@@ -7298,7 +7298,7 @@ def edf41_robo_finish() -> None:
     assert 'p6::LightsPlay(r.lights,1,1)' in cpp and 'p6::LightsEnd(it->second.lights)' in cpp
     prints = cpp.split('constexpr Print kPrints[]={', 1)[1].split('};', 1)[0]
     for rva in re.findall(r'\b(k[A-Z]\w+)=0x[0-9A-F]+', cpp.split('namespace p6 {', 1)[1].split('struct Print', 1)[0]):
-        if rva in ('kInitParamBase', 'kEffects', 'kManager', 'kChargeVtable'):   # data, not code
+        if rva in ('kInitParamBase', 'kEffects', 'kManager', 'kChargeVtable', 'kParticleParamVtable'):   # data, not code
             continue
         assert re.search(rf'\{{{rva},\{{0x', prints), f'{rva} has no fingerprint'
 

@@ -110,8 +110,9 @@ constexpr std::size_t kFindLocator=0x6BADD0,kRagdollOn=0x6E40B0,kPointImpulse=0x
     kAreaDamage=0x542670,kMetalHit=0x2E8F20,kChargeStep=0x307C40,kChargeCtor=0x306B60,
     kCasVar=0x1167170,kCasVarSet=0x116DF60,kDelete=0x118A1B0,kBodyById=0x6EA430,kChargeCreate=0x84A60,kCasSpeed=0x116DF20,
     kMatCtor=0x6DBE90,kMatTarget=0x6DC7B0,kMatLoad=0x6DC6B0,kMatPlay=0x6DC830,kMatStep=0x6DC8B0,kMatFree=0x29D120,
-    kRagdollLayer=0x6E9320;
-constexpr std::size_t kInitParamBase=0x1762068,kEffects=0x20B2980,kManager=0x20B2958,kChargeVtable=0x17A9338;
+    kRagdollLayer=0x6E9320,kParticleCreate=0x844C0,kParticleParamInit=0x300C80,kTexByName=0x2E8510,kTexAssign=0xF5E10,
+    kTexFree=0x1120820,kParticleParamFree=0x8FDF0;
+constexpr std::size_t kInitParamBase=0x1762068,kEffects=0x20B2980,kManager=0x20B2958,kChargeVtable=0x17A9338,kParticleParamVtable=0x17620E8;
 struct Print { std::size_t rva; unsigned char bytes[8]; };
 constexpr Print kPrints[]={
     {kFindLocator,{0x40,0x53,0x55,0x56,0x57,0x41,0x56,0x41}},{kRagdollOn,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},
@@ -126,6 +127,9 @@ constexpr Print kPrints[]={
     {kMatLoad,{0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74}},{kMatPlay,{0x4C,0x8B,0xC9,0x0F,0x57,0xC9,0x8B,0xCA}},
     {kMatStep,{0x48,0x8B,0xC4,0x48,0x89,0x68,0x18,0x48}},{kMatFree,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C}},
     {kRagdollLayer,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C}},
+    {kParticleCreate,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C}},{kParticleParamInit,{0x48,0x89,0x5C,0x24,0x10,0x57,0x48,0x83}},
+    {kTexByName,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},{kTexAssign,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C}},
+    {kTexFree,{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B}},{kParticleParamFree,{0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83}},
 };
 std::atomic<int> state{0};   // 0 unchecked, 1 good, 2 refused
 bool Ok() noexcept {
@@ -250,6 +254,67 @@ bool MakeCharge(const float* matrix,void* param,WeakRef& out) noexcept {
     out.control=weak[1];
     return out.object && out.control;
 }
+// 4.1's muzzle flash (EDF41 0x27C3F7..0x27C5A7): a ParticleObject made from an InitParam@ParticleObject at the muzzle. EDF6 has the
+// same class with the same parameter block (create 0x844C0(manager, out weak_ptr, matrix, param), ctor 0x301110, param vtable
+// 0x17620E8 over InitParamBase, 0x1D0 bytes, its emitter part constructed by 0x300C80(param + 0x30) = 4.1's 0x1C1920, destroyed by
+// 0x8FDF0): the fields 4.1 writes are the ones EDF6's EffectGenUtil::Explosion (0x2E5ED0, the only EDF6 maker of a ParticleObject
+// besides its factory) writes at the same offsets: +0x1A0 = 1, +0x1A4 = 0xFFFF, +0x1A8 / +0x1B0 / +0x1B8 = the addresses of +0x90
+// (the position), +0xA0 ((0, 0, 0, 1)) and +0x30 (0x20), +0x38 / +0x3C the life in frames, +0x50 0.98, +0xC8 0.1, +0xE8 0, +0xF4 /
+// +0xF8 the size, +0xFC -size / life, +0x110 the colour, +0x130 its rgb with alpha 0. The texture (ParticleAlpha_6.dds) is a
+// TextureRef (0x30 bytes) at +0x158 that 0x300C80 constructs (0x1120520): got by name from EffectGenUtil (0x2E8510, as
+// UfoRoboCanonChargeEffect's constructor does at 0x306D4B), assigned with 0xF5E10, the temporary freed with 0x1120820.
+bool MuzzleFlash(const float* pos,int life,float size,const float* colour) noexcept {
+    void* mgr=Global(kManager);
+    void* egu=Global(kEffects);
+    if(!Ok() || !mgr || !egu || life<=0 || !(size>0.0f))return false;
+    alignas(16) unsigned char param[0x1D0]={};
+    const void* base=image+kInitParamBase;
+    std::memcpy(param,&base,8);
+    At<void*(__fastcall*)(void*)>(kParticleParamInit)(param+0x30);
+    const void* vt=image+kParticleParamVtable;
+    std::memcpy(param,&vt,8);
+    const void* at90=param+0x90;
+    const void* atA0=param+0xA0;
+    const void* at30=param+0x30;
+    std::memcpy(param+0x1A8,&at90,8);
+    std::memcpy(param+0x1B0,&atA0,8);
+    std::memcpy(param+0x1B8,&at30,8);
+    const std::int32_t one=1,mask=0xFFFF,kind=0x20;
+    std::memcpy(param+0x1A0,&one,4);
+    std::memcpy(param+0x1A4,&mask,4);
+    param[0x1C0]=0;
+    std::memcpy(param+0x30,&kind,4);
+    const float p4[4]={pos[0],pos[1],pos[2],1.0f},w4[4]={0.0f,0.0f,0.0f,1.0f};
+    std::memcpy(param+0x90,p4,16);
+    std::memcpy(param+0xA0,w4,16);
+    std::memcpy(param+0x38,&life,4);
+    std::memcpy(param+0x3C,&life,4);
+    const float fade=0.98f,spread=0.1f,shrink=-size/static_cast<float>(life),zero=0.0f;
+    std::memcpy(param+0x50,&fade,4);
+    std::memcpy(param+0xC8,&spread,4);
+    std::memset(param+0xE8,0,8);
+    std::memcpy(param+0xF4,&size,4);
+    std::memcpy(param+0xF8,&size,4);
+    std::memcpy(param+0xFC,&shrink,4);
+    std::memcpy(param+0x110,colour,16);
+    std::memcpy(param+0x130,colour,12);
+    std::memcpy(param+0x13C,&zero,4);
+    alignas(16) unsigned char texture[0x40]={};
+    void* ref=At<void*(__fastcall*)(void*,void*,const wchar_t*)>(kTexByName)(egu,texture,L"ParticleAlpha_6.dds");
+    if(ref)At<void*(__fastcall*)(void*,void*)>(kTexAssign)(param+0x158,ref);
+    At<void(__fastcall*)(void*)>(kTexFree)(texture);
+    alignas(16) static const float identity[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+    alignas(16) void* weak[2]={nullptr,nullptr};
+    At<void*(__fastcall*)(void*,void*,const float*,void*)>(kParticleCreate)(mgr,weak,identity,param);
+    WeakRef w;
+    w.object=weak[0];
+    w.control=weak[1];
+    const bool made=w.object!=nullptr;
+    WeakReset(w);
+    At<void*(__fastcall*)(void*,unsigned)>(kParticleParamFree)(param,0);
+    return made;
+}
+
 void ChargeStep(void* effect,const float* matrix,void* dt) noexcept {
     if(!Ok() || !effect || !dt || !Readable(effect,8) || *static_cast<void* const*>(effect)!=image+kChargeVtable)return;
     alignas(16) float m[16];
@@ -389,6 +454,9 @@ struct Gun {
     const wchar_t* chargeSe=nullptr;
     const wchar_t* shotSe=nullptr;
     const wchar_t* hitSe=nullptr;   // the bullets' hit sound (4.1 0x275730 fills each group's InitParam +0xB0)
+    int flashLife=0;             // the muzzle flash: life in frames (4.1 group +0x3F0), pushed out along the muzzle by
+    float flashOffset=0.0f;      // +0x3F4 + the template's +0x38; its size is the charge effect's strength when the charge
+    float flashSize=0.0f;        // ended (4.1 0x27C04D: the first effect's +0x494 -> group +0xE8; EDF6 effect +0x4E4)
     std::uint32_t shots=0;
 };
 
@@ -600,27 +668,27 @@ void SetLevel(Robo& r) noexcept {
     const float smc[4]={1.0f*k,0.25f*k,0.5f*k,1.0f*k};
     std::memcpy(sm.bullet.color,smc,sizeof(smc));
     sm.aimLimit=0.5f; sm.spread=(std::max)(0.05f,0.25f/s); sm.interval=5; sm.duration=300; sm.charge=180;
-    sm.chargeSe=L"ロボ小ビームチャージ"; sm.shotSe=L"ロボ小ビーム発射"; sm.look=kChargeSmall; sm.hitSe=L"ロボビーム着弾小";
+    sm.chargeSe=L"ロボ小ビームチャージ"; sm.shotSe=L"ロボ小ビーム発射"; sm.look=kChargeSmall; sm.hitSe=L"ロボビーム着弾小"; sm.flashLife=10; sm.flashOffset=0.0f;
     Gun& md=r.gun[kMiddle];
     md.bullet.speed=2.0f; md.bullet.life=600; md.bullet.damage=(std::max)(1.0f,30.0f*s); md.bullet.explosion=9.0f+s; md.bullet.size=40.0f;
     const float mdc[4]={0.25f,0.5f,1.5f,1.0f};
     std::memcpy(md.bullet.color,mdc,sizeof(mdc));
     md.aimLimit=0.2f; md.spread=0.1f; md.interval=2; md.duration=1;
     md.charge=(std::max)(20,static_cast<int>(180.0f*(1.0f+0.1f*(s-1.0f))));
-    md.chargeSe=L"ロボ飛行形態中型キャノンチャージ"; md.shotSe=L"ロボ肩ビーム発射"; md.look=kChargeMiddle; md.hitSe=L"ロボビーム着弾中";
+    md.chargeSe=L"ロボ飛行形態中型キャノンチャージ"; md.shotSe=L"ロボ肩ビーム発射"; md.look=kChargeMiddle; md.hitSe=L"ロボビーム着弾中"; md.flashLife=35; md.flashOffset=0.0f;
     Gun& lg=r.gun[kLarge];
     lg.bullet.speed=10.0f; lg.bullet.life=600; lg.bullet.damage=(std::max)(1.0f,40.0f*s); lg.bullet.explosion=(std::min)(40.0f,36.0f+4.0f*s);
     lg.bullet.size=40.0f;
     const float lgc[4]={0.5f,0.5f,2.0f,1.0f};
     std::memcpy(lg.bullet.color,lgc,sizeof(lgc));
     lg.aimLimit=0.0f; lg.spread=0.1f; lg.interval=31; lg.duration=600; lg.charge=300;
-    lg.chargeSe=nullptr; lg.shotSe=L"ロボバスター砲発射"; lg.look=kChargeLarge; lg.hitSe=L"ロボビーム着弾大";
+    lg.chargeSe=nullptr; lg.shotSe=L"ロボバスター砲発射"; lg.look=kChargeLarge; lg.hitSe=L"ロボビーム着弾大"; lg.flashLife=60; lg.flashOffset=5.0f;
     Gun& gn=r.gun[kGenocide];
     gn.bullet.speed=0.1f; gn.bullet.life=6000; gn.bullet.damage=(std::max)(1.0f,80.0f*s); gn.bullet.explosion=100.0f; gn.bullet.size=120.0f;
     const float gnc[4]={5.0f,50.0f,20.0f,1.0f};
     std::memcpy(gn.bullet.color,gnc,sizeof(gnc));
     gn.aimLimit=0.0f; gn.spread=0.0f; gn.interval=30; gn.duration=1; gn.charge=346;
-    gn.chargeSe=nullptr; gn.shotSe=L"ロボバスター砲発射"; gn.look=kChargeGenocide; gn.hitSe=L"ロボビーム着弾大";
+    gn.chargeSe=nullptr; gn.shotSe=L"ロボバスター砲発射"; gn.look=kChargeGenocide; gn.hitSe=L"ロボビーム着弾大"; gn.flashLife=0; gn.flashOffset=0.0f;
     // the timers (4.1 0x2790F0: x / s truncated)
     auto per=[s](float x) { return static_cast<int>(x/s); };
     r.tSmall={RandInt(r,720),180,720,0.0f,500.0f};
@@ -698,6 +766,12 @@ void ChargeTick(Robo& r,Gun& g) noexcept {
 }
 
 void GunEnter(Robo& r,Gun& g,int state) noexcept {
+    if(g.state==kG1 && state==kG2) {   // the flash takes the charge's strength (4.1 0x27C043)
+        const Muzzle& z=g.muzzle[0];
+        const char* e=static_cast<const char*>(z.charge);
+        if(e && WeakAlive(z.chargeRef) && Readable(e+0x4E4,4))std::memcpy(&g.flashSize,e+0x4E4,4);
+        if(!std::isfinite(g.flashSize) || g.flashSize<0.0f)g.flashSize=0.0f;
+    }
     if(g.state==kG1 && state!=kG1)ChargeOff(g);
     g.state=state;
     g.frames=0;
@@ -766,11 +840,14 @@ void FireOne(Robo& r,Gun& g,int i,int group) noexcept {
     if(FireSe(r.obj,mm,g.bullet,r.obj,g.hitSe)) {
         ++g.shots;
         if(g.shots<=2 || g.shots%200==0)
-            Log("EDF41ROBO %p %s gun round #%u from %ls at %.0f %.0f %.0f: %ls speed %.2f life %d damage %.1f blast %.1f size %.1f",r.obj,
+            Log("EDF41ROBO %p %s gun round #%u from %ls at %.0f %.0f %.0f: %ls speed %.2f life %d damage %.1f blast %.1f size %.1f; flash %d frames size %.1f",r.obj,
                 kGunNames[group],g.shots,z.locator.c_str(),p[0],p[1],p[2],g.factory,g.bullet.speed,g.bullet.life,g.bullet.damage,
-                g.bullet.explosion,g.bullet.size);
+                g.bullet.explosion,g.bullet.size,g.flashLife,g.flashSize);
     }
-    PlaySe(r,g.shotSe,p);
+    // the flash, out along the muzzle's +Z by the group's offset + the template's +0x38 (4.1 0x27C313..0x27C3E5)
+    const float out=g.flashOffset+g.look.k[4];
+    const float at[3]={p[0]+m[8]*out,p[1]+m[9]*out,p[2]+m[10]*out};
+    p6::MuzzleFlash(at,g.flashLife,g.flashSize,g.look.colour);
 }
 
 void GunTick(Robo& r,Gun& g,int group) noexcept {
@@ -789,7 +866,13 @@ void GunTick(Robo& r,Gun& g,int group) noexcept {
     case kG2:
         if(g.counter--==0) {
             g.counter=g.interval;
-            for(int i=0;i<g.muzzles;++i)FireOne(r,g,i,group);
+            float c[3]={},m[16];
+            int n=0;
+            for(int i=0;i<g.muzzles;++i) {
+                FireOne(r,g,i,group);
+                if(g.muzzle[i].found && LocatorMatrix(g.muzzle[i].loc,m)) { c[0]+=m[12]; c[1]+=m[13]; c[2]+=m[14]; ++n; }
+            }
+            if(n) { c[0]/=n; c[1]/=n; c[2]/=n; PlaySe(r,g.shotSe,c); }   // once a round, at the muzzles' centre (4.1 0x27B500)
         }
         if(g.duration>=0 && g.frames>g.duration)GunEnter(r,g,kG0);
         break;
