@@ -342,3 +342,26 @@ the stock Update (0x1100B90 builds bones from it) — visual only, ragdoll/colli
 - EAO parts never lose HP until `+0x380 &= ~1` (ctor 0x5B6406), and never scale with level (slot 6 is a stub).
 - The cloned UfoCarrier508 hull only accepts damage on its core body while +0xD85 is set (slot 16 0x4F7190).
 - GDI sub-hit records (+0x78/+0x88, 0x30 bytes, body id at +0x20) are how every stock part tells which body was hit.
+
+## 11. Added by the UfoMother301 finish (2026-10-15; src/edf41mother.cpp, real runs in docs/edf41-ufomother301.md「补完」)
+
+- **Material parameters by name** (4.1 0x32FEF0 + per-frame writes; EDF6 the same machinery, H, real-run used by the 301):
+  binding object 0x60 bytes, ctor `0x6DCBF0` fp `33 C0 48 89 41 08 48 89`, dtor `0x3799B0` fp `40 53 48 83 EC 20 48 8B`;
+  `0x6DCC80(binding, model component + 0x160, const wchar_t* material or null = every material that has it, const wchar_t*
+  parameter)` fp `40 55 53 56 57 41 54 41`; `+8` {material, index} pairs (data / capacity / count +0x18), `+0x28` defaults (count
+  +0x38) copied from the first material, `+0x48` values; `0x6DD2F0(binding, const float v[4])` sets every value; `0x6DD420(binding)`
+  writes them into the materials (0x6DCB30, dirty flag) fp `48 89 5C 24 08 48 89 74`. UfoSmall507 binds in its ctor and applies in
+  **slot 3** (draw, 0x52EEC0) right before the model draw: do the same (EAO slot 3 0x5B6D10 = model draw; carrier 0x4F9530).
+  Model component + 0x160: EAO +0x720, UfoCarrier508 +0x7B0 (the carrier's own material animation 0x6DC7B0 uses it).
+- **UfoCarrier508 CAS**: players at +0x980 (array `*(+0x9E0)`, 0x160 each), main player index `[+0xB30]`; SetState
+  `0x116C2D0(+0x980, [+0xB30], name, 0)`.
+- **UfoCarrier508 slot 18** `0x4F9250` = OnDamaged(obj, GDI) (ApplyDamage calls it for a hit taken): alive, se_list[0] + material
+  blink (0x4F8AF0) + the ダメージエフェクト flames (+0x1590, 0x4F8B80); dead (+0x2E8) its death state machine on +0x15A0 (0x4F9800
+  explosion / hum stop / fall → 0x4F9A00 ground probe → 0x4F9C10 big explosion, area damage radius 60, se[2] [3], delete). The
+  other entry: slot 9 message **0x1000000F** (0x4F94C0: HP = min(0, max), 0x54DDB0 unregister, same death). Its fly hum
+  (se_fly_name, 0x4F7DE0) plays into the handle at **+0xE10**.
+- **Script native 3020** (`0x2288C0`): `+0x2F0` (minimum durability) = pct / 100 × max; ApplyDamage clamps HP to it. M130 gives the
+  301 100 %, M993 30 %: a mission's way of keeping a boss alive until a later phase.
+- **Ragdoll body names** of a 4.1 SHKT are the rigid bodies' full names (`RagDollProxys.weak`), not the bone names (0x6EA670).
+- **A bullet's hit sound**: InitParam +0x100 is a SePreset (0x1001D0 inits it with 0x7B3200; weapon key 14 fills it by SEPRESET
+  name, 0x6CEF81 → 0x7B16F0). `Bullet::hitSe` / `FillSePreset` fill it from an `edf41_se` table the way PlayCue fills its preset.
