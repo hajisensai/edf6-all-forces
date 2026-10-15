@@ -546,6 +546,8 @@ void LoadConfig() noexcept {
     n.edf41Mother401DevKill=ReadFloat(L"Edf41Mother401DevKill",n.edf41Mother401DevKill);
     n.edf41Mother401DevAction=static_cast<int>(FixInt("Edf41Mother401DevAction",ReadInt(L"Edf41Mother401DevAction",n.edf41Mother401DevAction),0,63));
     n.edf41Mother401Place=ReadFloat(L"Edf41Mother401Place",n.edf41Mother401Place);
+    n.edf41Net=ReadBool(L"Edf41Net",n.edf41Net);                     // the 4.1 classes online (edf41net.cpp)
+    n.edf41NetMirror=ReadBool(L"Edf41NetMirror",n.edf41NetMirror);
     n.edf5CampaignContent=FixInt("EDF5CampaignContent",ReadInt(L"EDF5CampaignContent",n.edf5CampaignContent),0,65535);
     n.testRangeContent=FixInt("TestRangeContent",ReadInt(L"TestRangeContent",n.testRangeContent),0,65535);
     n.edf41Content=FixInt("EDF41Content",ReadInt(L"EDF41Content",n.edf41Content),0,65535);

@@ -73,8 +73,16 @@ ragdoll、耐久）为底，虚表克隆（45 槽）：0 析构、5 Update、9 O
   敌人：M009 等中立母舰放的 UFO 要打玩家），`+0x1C` 置位时 0x548D50（脚本的 active）。Generator 的「open 动画长度」取 150 帧（MAB 事件，M）。
 - 特效：Flame / Blazing / Explosion / Explosion_Big（EffectGenUtil，PRIMITIVES 5），尺寸照 4.1 的数（外观对应 M）。
 
-### 2.5 联机
-四个类只在对象的模拟在本机跑时（`OnlineRunsHere`）工作：主机布局、开火、生成；客户端什么也不建。4.1 的同步（动作号、状态号）没有移植。
+### 2.5 联机（`edf41net`，2026-10-15；总述见 `docs/edf41-classes.md`「联机」）
+- **原来**：船体和部件只在 `OnlineRunsHere` 的机器上跑，客人上什么也不建；而客人上脚本的 ObjectAction 因此落到 EventAnimationObject 的
+  OnMessage（`0x5B6540`），船体 SGO 没有 `action` 键——UfoRobo 在 M411 上走同一函数时抛过异常（`EDF+0x5B6A01`）：**客人会在第一次
+  ObjectAction 时崩**（M，没在客人上跑过）。
+- **现在**：每台机器都跑船体和部件（脚本的 ObjectAction / GetPartsObject / 生成器到每台机器；布局以船体位置为种子，部件的种子来自船体的序列，
+  所以每台机器排出同样的面板、同样的顺序）。每个面板（按船体所有布局里的序号）、炮台（面板序号 + 挂点）、生成器放的敌人（面板序号 + 计数）
+  取得游戏自己的子对象身份（`0x781630`，MovingFortress 部件的做法）：耐久、受伤、击毁、掉落、目标（FinalCannon01 与炮台置 `+0x591`）走原版同步。
+  三处随机的攻击起点（BigCannon01 开盖、FinalCannon01 选炮、炮台开火）只在房主决定，经部件自己的 NetworkObject 发 `kPartEnter`，客人副本在待机
+  状态等它。HP 只经 HP 差到达的副本补跑 `PartDamaged` 的击毁（`KillFromHp`）。4.1 自己的同步（动作号、状态号）不照搬。
+- `Edf41Net=0`：不登记、不发事件（每台机器仍都跑，不再有上面的崩溃）。
 
 ### 2.6 开发开关（发布版都是 0）
 `Edf41Mother401Dev` 位：1 攻击一直允许、2 攻击等待缩到 ≤2 s、4 面板立刻就位、8 / 16 开局 `Edf41Mother401DevKill` 秒后毁掉 Core / 一块 WeakPanel；
@@ -90,7 +98,7 @@ ragdoll、耐久）为底，虚表克隆（45 槽）：0 析构、5 Update、9 O
 - 面板没有锁定点（EAO 不登记），锁定武器锁不上面板（4.1 能）。
 - 4.1 换布局时也对 keep 的面板调消失（SPEC 待办 3）：这里 keep 的保留不消失。
 - 船体原点有一个小碰撞体（2.1）。
-- 联机同步（2.5）。
+- 联机：做了（2.5），但没在两台机器上跑过（本机一个 Steam 账号、一台机器）；单机下的验证见 `docs/edf41-classes.md`「联机」D。
 - 用户转来的线索（未核、未用）：MAB 事件回调 0x6B6E30 / 0x116BE30、范围伤害 0x542670、ragdoll 激活 0x6E40B0。
 
 ## 实机记录

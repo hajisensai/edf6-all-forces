@@ -7252,6 +7252,55 @@ def edf41_robo_plugin_contract() -> None:
 
 
 @test
+def edf41_net_contract() -> None:
+    """The EDF4.1 classes online (src/edf41net.h, docs/edf41-classes.md 联机): the layer is built and switched by Edf41Net
+    (shipped 1; the development loopback Edf41NetMirror shipped 0); every EDF.dll function it calls is fingerprinted; its tag
+    is none the game, coop (13 / 14) or the plugin's vehicles (15) use; it asks online_authority, never the session functions
+    itself; each class attaches its objects, gives its parts and spawns the game's child identity, and its guest copies leave
+    the decisions to the host (UfoRobo: no AI, no gun timer; 401: no attack start; 301: no cannon charge). The 401 runs on
+    every machine (its ObjectAction reached EventAnimationObject's OnMessage on a guest, which throws without `action`)."""
+    net, head = src('src/edf41net.cpp'), src('src/edf41net.h')
+    cmake, plugin, crew, ini = src('CMakeLists.txt'), src('src/plugin.cpp'), src('src/crew.h'), src('EDF6VehicleCrew.ini')
+    assert 'target_sources(EDF6VehicleCrew PRIVATE src/edf41net.cpp)' in cmake and 'add_test(NAME edf41net COMMAND edf41net_test)' in cmake
+    assert 'bool edf41Net=true;' in crew and 'bool edf41NetMirror=false;' in crew
+    assert 'ReadBool(L"Edf41Net"' in plugin and 'ReadBool(L"Edf41NetMirror"' in plugin
+    assert re.search(r'^Edf41Net=1$', ini, re.M) and re.search(r'^Edf41NetMirror=0$', ini, re.M)
+    assert 'bool Enabled() noexcept { return Cfg().edf41Net && Install(); }' in net
+    assert 'bool Mirror() noexcept { return Cfg().edf41NetMirror && Enabled() && !Online(); }' in net, 'the loopback is offline only'
+    tag = int(re.search(r'constexpr std::int8_t kTag=(\d+);', head).group(1))
+    assert tag not in (0, 1, 2, 3, 4, 5, 13, 14, 15) and -14 <= tag <= 15
+    for other in ('drill_net.h', 'proteus_net.h', 'sazabi_net.h'):
+        assert f'kTag={tag};' not in src('src/' + other), other
+    rvas = {d.split('=')[0].strip() for line in re.findall(r'^constexpr unsigned (.*);$', net, re.M) for d in line.split(',')}
+    # vtables (read, not called: their slots are checked by the native test) and the stock receiver (only called on; EDF6Coop
+    # hooks its entry, which turned the layer off on the real game when it was fingerprinted)
+    rvas -= {'kEaoNet', 'kCarrierNet', 'kStockReceive'}
+    assert len(rvas) >= 12, rvas
+    assert '{kStockReceive,{' not in net
+    for name in rvas:
+        assert re.search(rf'\{{{name},\{{0x', net), f'{name} has no fingerprint'
+    code = re.sub(r'//[^\n]*', '', net)
+    assert not re.search(r'0x7748F0|0x784210|0x630F90|0x630DF0', code), 'session / host / operator asked outside online_authority'
+    assert 'OnlineRunsHere(object)' in code and 'InSession()' in code
+    # the classes
+    robo, m401, m301 = src('src/edf41robo.cpp'), src('src/edf41mother401.cpp'), src('src/edf41mother.cpp')
+    for cpp in (robo, m401, m301):
+        assert '#include "edf41net.h"' in cpp and 'edf41net::Attach(obj);' in cpp
+    assert 'if(r.body<kS10 && !NetFollows(r))AiTick(r);' in robo
+    assert '!NetFollows(r) && --g.autoCount<=0' in robo and 'NetBody(r);' in robo.split('void BodySet(', 1)[1].split('\n}\n', 1)[0]
+    assert 'NetMirrorMake(self);' in robo and 'CreateFromPath(m,L"app:/object/UfoRobo401.sgo")' in robo
+    assert 'OnlineRunsHere(self)' not in re.sub(r'//[^\n]*', '', m401), 'the 401 runs on every machine'
+    for case in ('case sBcIdle:', 'case sFcIdle:', 'case sGbIdle: {'):
+        assert 'NetDecides(' in m401.split(case, 1)[1].split('case ', 1)[0], case
+    assert 'NetPanel(h,*p);' in m401 and 'NetBattery(p,*b,i);' in m401 and 'NetSpawn(p,o);' in m401 and 'edf41net::Pump(self);' in m401
+    assert 'NetEntered(p,netFrom,state);' in m401 and 'NetPartIn(*p);' in m401
+    assert 'if(!NetDecides(obj))break;' in m301.split('case kCanWait:', 1)[1].split('case ', 1)[0]
+    assert 'NetPart(hullObj,part,group,h.parts.size()-1);' in m301 and 'NetSpawn(p,enemy);' in m301 and 'edf41net::Pump(self);' in m301
+    for cpp in (robo, m401, m301):   # windows.h macros: the 4.1 class files use (std::min) / (std::max)
+        assert 'far' not in re.findall(r'\b(?:float|int|bool|auto)\s+(\w+)', re.sub(r'//[^\n]*', '', cpp))
+
+
+@test
 def edf41_mother401_data() -> None:
     """The 401 mothership's shipped data is what src/edf41mother401.cpp reads (tools/make_edf41_objects.py mother401_fix): every
     variant (MOTHER401_ROOTS, MOTHER401_DLC_ROOTS) keeps 4.1's class and keys (action_list, panel_definition, the layout maps its
@@ -7351,7 +7400,8 @@ def edf41_mother401_plugin_contract() -> None:
     assert 'kMaxDurabilityAt=0x2F4' in src('src/edf41classes.h')
     code = re.sub(r'//[^\n]*', '', cpp)
     assert not re.search(r'0xD7480|0x53060|0x52DE0|0x52F30|0x551E0', code)   # the DSGO accessors fault on a plain SGO
-    assert 'OnlineRunsHere(self)' in cpp
+    # online every machine runs it (edf41net; a guest's ObjectAction must not reach EventAnimationObject's OnMessage): edf41_net_contract
+    assert 'OnlineRunsHere(self)' not in code and 'edf41net::Pump(self);' in cpp
 
 
 @test

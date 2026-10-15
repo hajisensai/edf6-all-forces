@@ -22,10 +22,13 @@
 // Sounds are 4.1's SEPRESET entries (the hull SGO's edf41_se, tools/make_edf41_objects.py se41_table) on the cues EDF6 ships in
 // tikyuu4_en_MotherShip.acb; effects EDF6's EffectGenUtil. 4.1's sound throttle: one sound of each of 6 kinds per 16 frames.
 // Not ported: the hull's glow and smoke emitters (4.1 drives material colours the converted model does not bind), the weak
-// point's open / hide animation cycle, 4.1's own death choreography (the carrier's stock death runs), online sync (the parts
-// run their machines on every peer; bullets are EDF6's own and sync as they do).
+// point's open / hide animation cycle, 4.1's own death choreography (the carrier's stock death runs).
+// Online (edf41net, the block "online" at the end): the parts and the hatches' enemies get the game's child identity under the
+// hull (durability, damage, kills and targets travel natively); every machine runs the parts' machines from the same script
+// actions, a cannon's random charge timer is the host's.
 #include "crew.h"
 #include "edf41classes.h"
+#include "edf41net.h"
 #include "memory.h"
 
 #include <algorithm>
@@ -159,6 +162,14 @@ std::unordered_map<void*,Part> parts;
 // Liveness by the objects' own weak references (edf41c::WeakRef): the game frees a deleted object without calling slot 0
 // (M123: the script deletes the mothership at the end of its route; its parts then read freed memory). Keyed by object.
 std::unordered_map<void*,WeakRef> refs;
+
+// ---- online (edf41net): declared here, defined in the block "online" at the end of this namespace ----
+bool NetDecides(void* part) noexcept;                       // false on a guest copy of a registered part: its fire timer is the host's
+void NetCannonFire(void* part,const Part& p) noexcept;      // the deciding copy: a cannon's charge started, with its next wait
+void NetPart(void* hull,void* part,int group,std::size_t order) noexcept;   // a part's child identity (its creation order)
+void NetSpawn(const Part& p,void* enemy) noexcept;          // a hatch's enemy
+void NetPartIn(void* part,Part& p) noexcept;                // a part's frame: the host's decisions
+void NetForget(void* part) noexcept;
 void Forget(void* o) noexcept { const auto it=refs.find(o); if(it!=refs.end()) { WeakReset(it->second); refs.erase(it); } }
 void Track(void* o) noexcept { Forget(o); WeakSet(refs[o],o); }
 bool Live(void* o) noexcept { const auto it=refs.find(o); return it!=refs.end() && WeakAlive(it->second); }
@@ -397,7 +408,8 @@ void CannonTick(void* obj,Part& p,Hull& h,float s) noexcept {
             if(p.attack && !p.statik) { p.roundStarted=true; Switch(p,kCanWait); }
             break;
         case kCanWait:
-            if(p.waitFrames<f) { Switch(p,kCanFire); p.waitFrames=1800+static_cast<int>(Random01(p.rng)*1800.0f); }
+            if(!NetDecides(obj))break;   // online: a guest copy charges when the host's does (edf41net)
+            if(p.waitFrames<f) { Switch(p,kCanFire); p.waitFrames=1800+static_cast<int>(Random01(p.rng)*1800.0f); NetCannonFire(obj,p); }
             break;
         case kCanFire:
             if(f==450 && Throttle(h,3))PlaySe(p.hull,L"母船UFO中型砲台チャージ",pos);
@@ -513,6 +525,7 @@ void SpawnOne(void* obj,Part& p) noexcept {
     SetLevel(enemy,level);
     SetTeam(enemy,PartTeam(p.hull),true);
     Activate(enemy);
+    NetSpawn(p,enemy);   // online: the game's child identity, bound to the same enemy on every machine (edf41net)
     static std::atomic<int> said{0};
     if(said.fetch_add(1)<12)Log("EDF41MOTHER hatch #%d: enemy #%d %ls at %.0f %.0f %.0f, raw level %.2f, team %d",p.index,p.made,p.current.path,
                                 m[12],m[13],m[14],level,PartTeam(p.hull));
@@ -674,6 +687,7 @@ bool MakePart(void* hullObj,Hull& h,const SgoNode* entry,int group,int index,int
     parts[part]=rec;   // a record left at this address by an object freed without its destructor is replaced
     Track(part);
     h.parts.push_back(part);
+    NetPart(hullObj,part,group,h.parts.size()-1);   // online: the game's child identity (edf41net; given once the hull has its own)
     return true;
 }
 int MakeGroup(void* hullObj,Hull& h,const wchar_t* key,int group,bool nested) noexcept {
@@ -877,6 +891,7 @@ std::uint64_t __fastcall HullUpdate(void* self,void* dt) {
         }
     }
     const std::uint64_t result=reinterpret_cast<UpdateFn>(hullClass.orig[kSlotUpdate])(self,dt);
+    edf41net::Pump(self);   // online: the parts (made in the factory, before the script gave the hull its identity) get theirs
     ++h.ticks;
     if(h.ticks==1) {
         h.rng=reinterpret_cast<std::uintptr_t>(self)*0x9E3779B97F4A7C15ull;
@@ -949,6 +964,7 @@ std::uint64_t __fastcall PartDtor(void* self,unsigned flags) {
             Hull* h=HullOf(p->hull);
             if(h)h->parts.erase(std::remove(h->parts.begin(),h->parts.end(),self),h->parts.end());
             parts.erase(self);
+            NetForget(self);   // online (edf41net)
         }
         Forget(self);
     }
@@ -987,6 +1003,7 @@ std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
     p=PartOf(self);
     h=p && Live(p->hull) ? HullOf(p->hull) : nullptr;
     if(p)TeamGuard(self,*p,"after the class's update");
+    if(p && h && !p->gone)NetPartIn(self,*p);   // online: the host's decisions (edf41net)
     if(p && h && !p->gone)PartFrame(self,*p,*h);
     if(p)TeamGuard(self,*p,"after PartFrame");
     if(p && h && !p->gone){ float aim[3]; if(Alive(self) && AimPoint(self,aim))DevShoot(self,aim); }   // development (ini Edf41DevShoot)
@@ -1024,7 +1041,10 @@ void Prune() noexcept {
         it=parts.erase(it);
     }
 }
-void CreatePart(void* info) noexcept { CloneObject(partClass,kEaoCtor,kEaoSize,info); }
+void CreatePart(void* info) noexcept {
+    void* obj=CloneObject(partClass,kEaoCtor,kEaoSize,info);
+    edf41net::Attach(obj);   // online: its NetworkObject takes the host's events (edf41net)
+}
 void CreateHull(void* info) noexcept {
     void* obj=CloneObject(hullClass,kCarrierCtor,kCarrierSize,info);
     if(!obj)return;
@@ -1037,6 +1057,70 @@ void CreateHull(void* info) noexcept {
     Track(obj);
     SpawnParts(obj,hulls[obj]);
 }
+
+// ---- online (src/edf41net.h; docs/edf41-ufomother301.md 3.5, docs/edf41-classes.md 联机) ---------------------------------------
+// Every machine runs the script, so every machine makes the hull (the script gives it the game's network identity, the host's),
+// and its factory makes the same parts in the same order. The hull's own pose travels as UfoCarrier508's (its NetworkObject
+// slots 7 / 8: the position every 60 frames, the hull's base moves it on every machine along the same route); its spin and the
+// parts' flags come from the script's actions, which reach every machine. Each part gets the game's child identity under the
+// hull by its creation order (0x781630 as MovingFortress's parts: queued in the factory, given at the hull's first update after
+// the script registered it), each hatch's enemy by the hatch and its count: their durability, the damage dealt to them (judged
+// by the shooter's machine, the HP change broadcast), their kills and the parts' targets (+0x591) travel natively; PartFrame
+// already sees a death from the HP. The one random timer whose rolls can drift between machines (a cannon's 1800..3599-frame
+// wait: its rng is shared with the beam's scatter, which rolls only when the cannon has a target) is the host's: kCannonFire on
+// the cannon's own NetworkObject, and a guest copy waits in kCanWait for it.
+enum : std::uint8_t { kCannonFire=17 };
+struct CannonFireMsg { std::int32_t waitFrames,reserved; };
+static_assert(sizeof(CannonFireMsg)==8,"fixed wire layout");
+struct PartNet { int pendingWait=-1,pendingAge=0; };
+std::unordered_map<void*,PartNet> partNets;   // under `lock`
+std::uint32_t netSent=0,netApplied=0;
+
+bool NetDecides(void* part) noexcept { return !edf41net::Online() || edf41net::Decides(part); }
+
+void NetCannonFire(void* part,const Part& p) noexcept {
+    if(!edf41net::Online() || !edf41net::Decides(part))return;
+    const CannonFireMsg m{p.waitFrames,0};
+    if(edf41net::Send(part,kCannonFire,&m,sizeof(m)) && ++netSent<=3)
+        Log("EDF41MOTHER cannon #%d %p online: its charge sent to the guests (%u so far)",p.index,part,netSent);
+}
+
+void NetPart(void* hull,void* part,int group,std::size_t order) noexcept {
+    if(!edf41net::Online() || order>=0x7FFF)return;
+    edf41net::Child(hull,part,edf41net::kChildPart,static_cast<std::uint16_t>(order),group==kCannon || group==kPanel);
+}
+
+void NetSpawn(const Part& p,void* enemy) noexcept {
+    if(!edf41net::Online() || !enemy || p.index<0 || p.index>=0x100)return;
+    edf41net::Child(p.hull,enemy,static_cast<std::uint16_t>(edf41net::kChildSpawn+p.index),static_cast<std::uint16_t>(p.made&0xFFFF),false);
+}
+
+void CannonApply(void* context,std::uint8_t kind,const unsigned char* data,std::size_t size) noexcept {
+    void* part=context;
+    if(kind!=kCannonFire || size!=sizeof(CannonFireMsg)) { Fail("a 301 part event of a kind or size this version does not send (refused)"); return; }
+    CannonFireMsg m;
+    std::memcpy(&m,data,sizeof(m));
+    if(m.waitFrames<0 || m.waitFrames>100000) { Fail("a 301 part event out of range (refused)"); return; }
+    PartNet& n=partNets[part];
+    n.pendingWait=m.waitFrames;
+    n.pendingAge=0;
+}
+
+void NetPartIn(void* part,Part& p) noexcept {
+    if(!edf41net::Online() || p.group!=kCannon || !edf41net::Guest(part))return;
+    edf41net::Drain(part,&CannonApply,part);
+    const auto it=partNets.find(part);
+    if(it==partNets.end() || it->second.pendingWait<0)return;
+    PartNet& n=it->second;
+    if(p.state==kCanWait && !p.dead) {
+        Switch(p,kCanFire);
+        p.waitFrames=n.pendingWait;
+        n.pendingWait=-1;
+        if(++netApplied<=3)Log("EDF41MOTHER cannon #%d %p guest copy: the host's charge applied (%u so far)",p.index,part,netApplied);
+    } else if(++n.pendingAge>600)n.pendingWait=-1;
+}
+
+void NetForget(void* part) noexcept { partNets.erase(part); }
 }  // namespace
 
 bool InstallEdf41Mother() noexcept {

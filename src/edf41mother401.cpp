@@ -23,13 +23,16 @@
 // points) come from 4.1's MAB locators, written into the part SGOs by the build (edf41_401_mounts / _muzzle / _spawn); the sounds
 // as cue names of EDF6's own TIKYUU4_EN_EARTHEATER.ACB from 4.1's SEPRESET (edf41_401_se).
 //
-// Online: the classes run where the object's simulation runs (OnlineRunsHere); elsewhere the hull lays out nothing. 4.1's own
-// network sync (action numbers, state indices) is not ported.
+// Online (edf41net, the block "online" at the end): every machine runs the hull and its parts (the script's actions reach each
+// machine's copy; the layout is seeded by the hull's position); the parts and the generators' enemies get the game's child
+// identity, so their durability, damage, kills and targets travel natively; the parts' random attack starts are the host's.
+// 4.1's own network sync (action numbers, state indices) is not ported as such.
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include "crew.h"
 #include "edf41classes.h"
+#include "edf41net.h"
 #include "memory.h"
 #include "online_authority.h"
 
@@ -232,6 +235,15 @@ Part* ById(std::uint64_t id) noexcept {
 
 int DevBits() noexcept { return Cfg().edf41Mother401Dev; }
 
+// ---- online (edf41net): declared here, defined in the block "online" at the end of this namespace ----
+bool NetDecides(const Part& p) noexcept;                  // false on a guest copy of a registered part: its attack starts come from the host
+void NetEntered(Part& p,int from,int state) noexcept;     // the deciding copy: an attack start (from an idle state) to the guests
+void NetPanel(Part& h,Part& p) noexcept;                  // a panel made by a layout: its child identity (serial per hull)
+void NetBattery(Part& panel,Part& b,int mount) noexcept;  // a battery on a panel's mount
+void NetSpawn(Part& p,void* enemy) noexcept;              // an enemy a generator made
+void NetPartIn(Part& p) noexcept;                         // a part's frame: the host's decisions; a kill seen from the HP alone
+void NetForget(const Part& p) noexcept;
+
 // ---- reading the object's own SGO --------------------------------------------------------------------------------------
 void ReadCues(Part& p) noexcept {
     const SgoNode* t=Key(p.obj,L"edf41_401_se");
@@ -342,6 +354,7 @@ void* MakePanel(Part& h,Cell& c,const wchar_t* path,bool keep) noexcept {
     c.group=p->group;
     if(p->kind==Kind::core)h.core=p->id;
     if(h.team>=0)SetTeam(o,h.team,true);
+    NetPanel(h,*p);   // online: the game's child identity (edf41net)
     return o;
 }
 
@@ -546,6 +559,7 @@ bool SpawnOne(Part& p,const GenCfg& g,WeakRef* slot) noexcept {
     SetTeam(o,1,true);
     if(g.flag)Activate(o);
     if(slot)WeakSet(*slot,o);
+    NetSpawn(p,o);   // online: the game's child identity, bound to the same enemy on every machine (edf41net)
     return true;
 }
 // Called while the panel lives and has arrived (Generator 0x268810 / FinalGenerator 0x2677d0).
@@ -668,6 +682,7 @@ void SetupBullets(Part& p) noexcept {
 
 // ---- state enter actions -------------------------------------------------------------------------------------------------
 void Enter(Part& p,int state) noexcept {
+    const int netFrom=p.state;   // online (edf41net): NetEntered below
     Exit(p);
     if(state==sCore1 || state==sCore2 || state==sCore4 || state==sFlyAway || state==sGbDestroyed || state==sBcCharge || state==sFcGenoCharge
        || state==sFcLightCharge || state==sGenOpen || state==sFgCharge) {
@@ -708,6 +723,7 @@ void Enter(Part& p,int state) noexcept {
         case sGbFall: p.detached=true; break;
         default: break;
     }
+    NetEntered(p,netFrom,state);   // online: an attack start goes to the guests (edf41net)
 }
 
 // ---- per-frame state logic of the panels ------------------------------------------------------------------------------------
@@ -766,6 +782,7 @@ bool TickPanel(Part& p) noexcept {
         }
         // BigCannon01
         case sBcIdle:
+            if(!NetDecides(p))break;   // online: a guest copy opens when the host's does (edf41net)
             if(p.attack && p.arrived && --p.countdown<=0) { p.countdown=p.minWait+Rand(p.rng,p.maxWait-p.minWait); Enter(p,sBcOpen); }
             break;
         case sBcOpen: if(CasDone(p) || f>600)Enter(p,sBcRelay); break;
@@ -779,6 +796,7 @@ bool TickPanel(Part& p) noexcept {
         case sBcClose: if(CasDone(p) || f>600)Enter(p,sBcIdle); break;
         // FinalCannon01
         case sFcIdle:
+            if(!NetDecides(p))break;   // online: the host's choice (edf41net)
             if(p.attack && p.arrived && --p.countdown<=0) {
                 p.countdown=p.minWait+Rand(p.rng,p.maxWait-p.minWait);
                 Enter(p,Rand(p.rng,3)==0 ? sFcGenoCharge : sFcLightCharge);
@@ -818,7 +836,7 @@ bool TickBattery(Part& b) noexcept {
     const int f=b.frames;
     switch(b.state) {
         case sGbIdle: {
-            if(!b.batteryAttack)break;
+            if(!b.batteryAttack || !NetDecides(b))break;   // online: a guest copy fires when the host's does (edf41net)
             float aim[3];
             void* who=Target(b.obj);
             if(!who || !AimPoint(who,aim) || Dist(aim,F(b.obj,kPosAt))>=b.range)break;
@@ -933,6 +951,7 @@ void MakeBatteries(Part& p) noexcept {
                 b->rng=p.rng^(0x9E37ull*static_cast<std::uint64_t>(i+1));
                 if(p.team>=0)SetTeam(o,p.team,true);
                 m.battery=b->id;
+                NetBattery(p,*b,i);   // online: the game's child identity (edf41net)
                 ++made;
             } else if(o) DeleteObject(o);
         }
@@ -958,6 +977,7 @@ void Forget(const void* self) noexcept {
     Part& p=*it->second;
     StopSound(p.loopA,0); StopSound(p.loopB,0); StopSound(p.ambient,0);
     for(WeakRef& w:p.gen.slots)WeakReset(w);
+    NetForget(p);   // online (edf41net)
     byId.erase(p.id);
     byObj.erase(it);
 }
@@ -1075,7 +1095,12 @@ std::uint64_t __fastcall HullUpdate(void* self,void* dt) {
     {
         std::lock_guard<std::recursive_mutex> hold(lock);
         Part* h=Find(self);
-        if(h && OnlineRunsHere(self)) {
+        // Online every machine runs the hull (edf41net): the script's ObjectAction / GetPartsObject / generators reach each
+        // machine's copy alike, and the layout is the same everywhere (the hull's seed is its position); the parts get the game's
+        // child identity. (It ran only where OnlineRunsHere: a guest's hull then handed ObjectAction to EventAnimationObject's
+        // OnMessage, which throws for an SGO without `action`, as UfoRobo's did on M411 — a guest crash.)
+        if(h) {
+            edf41net::Pump(self);   // the parts made before the hull had its identity get theirs
             if(!h->seen) { h->seen=true; HullFirst(*h); }
             h->lastTick=hullTick;
             HullLogic(*h);
@@ -1112,7 +1137,7 @@ std::uint64_t __fastcall HullMessage(void* self,std::uint32_t msg,void* data) {
     {
         std::lock_guard<std::recursive_mutex> hold(lock);
         Part* h=Find(self);
-        if(h && OnlineRunsHere(self)) {
+        if(h) {   // every machine (edf41net; see HullUpdate)
             if(!h->seen) { h->seen=true; HullFirst(*h); }
             if(msg==kMsgAction && data && Rd(data,4,"ObjectAction data")) {
                 const std::int32_t n=*static_cast<const std::int32_t*>(data);
@@ -1211,8 +1236,9 @@ std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
     {
         std::lock_guard<std::recursive_mutex> hold(lock);
         Part* p=Find(self);
-        if(p && OnlineRunsHere(self)) {
+        if(p) {   // every machine (edf41net; see HullUpdate)
             if(!p->seen) { p->seen=true; InitPart(*p); }
+            NetPartIn(*p);   // online: the host's attack starts, a kill seen from the HP alone
             if(!p->farDone && p->farTries<600) { ++p->farTries; p->farDone=FarRender(self); }
             if(IsBattery(p->kind)) {
                 Part* panel=ById(p->panel);
@@ -1327,7 +1353,131 @@ template<Kind K> void CreatePart(void* info) noexcept {
     void* obj=CloneObject(partClone,kEaoCtor,kEaoSize,info);
     if(!obj)return;
     Register(obj,K);
+    edf41net::Attach(obj);   // online: its NetworkObject takes the host's events (edf41net)
     if(++partsMade<=3)Log("EDF41M401 create %s %p",KindName(K),obj);
+}
+
+// ---- online (src/edf41net.h; docs/edf41-ufomother401.md 2.5, docs/edf41-classes.md 联机) ---------------------------------------
+// Every machine runs the hull and its parts: the script's ObjectAction / GetPartsObject / generators reach each machine's copy,
+// and the same actions lay out the same panels in the same order (the hull's seed is its position, each part's seed the hull's
+// sequence). Each part gets the game's child identity under the hull (0x781630, as MovingFortress's parts): a panel by its serial
+// in the hull's layouts, a battery by its panel's serial and its mount, a generator's enemy by its panel's serial and its count.
+// Then a part's durability, the damage dealt to it (judged by the shooter's machine, the HP change broadcast), its kill
+// (replayed, M) and its target (+0x591: message 1 from the host) travel as a stock enemy's do. The random attack starts
+// (BigCannon01 opens, FinalCannon01's choice, a battery's shot) are the host's: kPartEnter on the part's own NetworkObject, and a
+// guest copy waits in its idle state for it. A kill that reached a copy only as an HP change runs PartDamaged's kill here.
+enum : std::uint8_t { kPartEnter=16 };
+struct PartEnterMsg { std::int32_t from,state,countdown,reserved; };
+static_assert(sizeof(PartEnterMsg)==16,"fixed wire layout");
+struct PartNet { std::uint32_t serial=0; bool hasSerial=false,hadHp=false; int pendingState=-1,pendingCountdown=0,pendingAge=0; };
+std::unordered_map<std::uint64_t,PartNet> partNets;           // by Part id, under `lock`
+std::unordered_map<std::uint64_t,std::uint32_t> hullSerials;  // each hull's next panel serial (by its id)
+std::uint32_t netKills=0,netSent=0,netApplied=0;
+
+bool IsDecision(int from,int state) noexcept {
+    return (from==sBcIdle && state==sBcOpen) || (from==sFcIdle && (state==sFcGenoCharge || state==sFcLightCharge))
+        || (from==sGbIdle && (state==sGbCharge || state==sGbFire));
+}
+int IdleOf(int state) noexcept {
+    return state==sBcOpen ? sBcIdle : (state==sFcGenoCharge || state==sFcLightCharge) ? sFcIdle : (state==sGbCharge || state==sGbFire) ? sGbIdle : -1;
+}
+
+bool NetDecides(const Part& p) noexcept { return !edf41net::Online() || edf41net::Decides(p.obj); }
+
+void NetEntered(Part& p,int from,int state) noexcept {
+    if(!IsDecision(from,state) || !edf41net::Online() || !edf41net::Decides(p.obj))return;
+    const PartEnterMsg m{from,state,p.countdown,0};
+    if(edf41net::Send(p.obj,kPartEnter,&m,sizeof(m)) && ++netSent<=3)
+        Log("EDF41M401 %s %p online: attack start %d -> %d sent to the guests (%u so far)",KindName(p.kind),p.obj,from,state,netSent);
+}
+
+void NetPanel(Part& h,Part& p) noexcept {
+    if(!edf41net::Online())return;
+    PartNet& n=partNets[p.id];
+    n.serial=hullSerials[h.id]++;
+    n.hasSerial=true;
+    if(n.serial<0x7FFF)edf41net::Child(h.obj,p.obj,edf41net::kChildPart,static_cast<std::uint16_t>(n.serial),p.kind==Kind::finalCannon);
+}
+
+void NetBattery(Part& panel,Part& b,int mount) noexcept {
+    if(!edf41net::Online() || mount<0 || mount>=0x1000)return;
+    const auto it=partNets.find(panel.id);
+    Part* h=HullOf(panel);
+    if(it==partNets.end() || !it->second.hasSerial || !h)return;
+    edf41net::Child(h->obj,b.obj,static_cast<std::uint16_t>(edf41net::kChildBattery+mount),static_cast<std::uint16_t>(it->second.serial),true);
+}
+
+void NetSpawn(Part& p,void* enemy) noexcept {
+    if(!edf41net::Online() || !enemy)return;
+    const auto it=partNets.find(p.id);
+    Part* h=HullOf(p);
+    if(it==partNets.end() || !it->second.hasSerial || !h)return;
+    edf41net::Child(h->obj,enemy,static_cast<std::uint16_t>(edf41net::kChildSpawn401|(it->second.serial&0x7FFF)),
+                    static_cast<std::uint16_t>(p.gen.made&0xFFFF),false);
+}
+
+void PartApply(void* context,std::uint8_t kind,const unsigned char* data,std::size_t size) noexcept {
+    Part& p=*static_cast<Part*>(context);
+    if(kind!=kPartEnter || size!=sizeof(PartEnterMsg)) { Fail("a 401 part event of a kind or size this version does not send (refused)"); return; }
+    PartEnterMsg m;
+    std::memcpy(&m,data,sizeof(m));
+    if(!IsDecision(m.from,m.state) || m.countdown<-1 || m.countdown>100000) { Fail("a 401 part event out of range (refused)"); return; }
+    PartNet& n=partNets[p.id];
+    n.pendingState=m.state;
+    n.pendingCountdown=m.countdown;
+    n.pendingAge=0;
+}
+
+// PartDamaged's kill (slot 18), for a copy whose HP ran out through the game's HP change from another machine.
+void KillFromHp(Part& p) noexcept {
+    ++netKills;
+    Log("EDF41M401 %s %p destroyed on another machine (its HP came to 0 here through the game's sync): its kill runs here (%u)",KindName(p.kind),p.obj,netKills);
+    if(IsBattery(p.kind)) {
+        p.killed=true;
+        Unregister(p);
+        Enter(p,sGbDestroyed);
+        return;
+    }
+    Part* h=HullOf(p);
+    float q[3];
+    std::memcpy(q,F(p.obj,kPosAt),12);
+    if(p.kind==Kind::weak && h) {
+        const float down[3]={0,-1,0},up[3]={0,1,0};
+        q[1]-=20.0f;
+        Explosion(q,down,15.0f);
+        q[1]-=20.0f;
+        Blazing(q,up,1.0f);
+        p.killed=true;
+        AreaDestroy(*h,F(p.obj,kPosAt),200.0f);
+        p.killed=false;
+    }
+    if(p.kind==Kind::core) { const float up[3]={0,1,0}; BigExplosion(F(p.obj,kPosAt),up,2.5f,1.0f); }
+    Destroy(p,0);
+}
+
+void NetPartIn(Part& p) noexcept {
+    if(!edf41net::Online())return;
+    PartNet& n=partNets[p.id];
+    if(edf41net::Guest(p.obj)) {
+        edf41net::Drain(p.obj,&PartApply,&p);
+        if(n.pendingState>=0) {
+            if(p.state==IdleOf(n.pendingState)) {
+                p.countdown=n.pendingCountdown;
+                Enter(p,n.pendingState);
+                n.pendingState=-1;
+                if(++netApplied<=3)Log("EDF41M401 %s %p guest copy: the host's attack start %d applied (%u so far)",KindName(p.kind),p.obj,p.state,netApplied);
+            } else if(++n.pendingAge>600)n.pendingState=-1;
+        }
+    }
+    const bool canHurt=p.wholeHits || p.weakBody>=0;
+    const float hp=Hp(p.obj);
+    if(hp>0.0f)n.hadHp=true;   // a part that never had any (an SGO without durability) is left as offline
+    if(canHurt && n.hadHp && !p.killed && !p.vanishing && !p.noDamage && edf41net::Registered(p.obj) && hp<=0.0f)KillFromHp(p);
+}
+
+void NetForget(const Part& p) noexcept {
+    partNets.erase(p.id);
+    hullSerials.erase(p.id);
 }
 
 }  // namespace

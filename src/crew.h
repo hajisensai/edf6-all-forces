@@ -338,6 +338,9 @@ struct Config {
     float edf41Mother401Place=0.0f; // development only: the 401 hull held this many m above the player (0 = where the script put it)
     bool edf41Sound=true;           // EDF4.1's weapon sound effects and voices added to EDF6's banks (edf41sound.cpp), from the game's start
     bool edf41VoiceProbe=false;     // development only: log each voice key the game looks up in each bank and each caption it finds (edf41sound.cpp)
+    // ---- the EDF4.1 classes online (edf41net.cpp; docs/edf41-classes.md 联机) ----
+    bool edf41Net=true;             // the 4.1 classes' parts / spawns get the game's child identity, the host's decisions travel to the guests
+    bool edf41NetMirror=false;      // development only, offline: a second UfoRobo follows the first through the game's own stream code (a guest copy)
     bool terrainShare=true;         // every placement of one terrain piece drawn from one decode (fieldshare.cpp), from the game's start
     int edf5CampaignContent=0;       // the EDF5 mission packs' first content id (edf5campaign.cpp; 0 = none installed): owned like a DLC
     int testRangeContent=0;          // the test range mission pack's content id (offline and online modes; 0 = not installed): owned the same way

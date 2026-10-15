@@ -31,6 +31,7 @@
 // once and the object is left as EventAnimationObject made it.
 #include "crew.h"
 #include "edf41classes.h"
+#include "edf41net.h"
 #include "memory.h"
 
 #include <algorithm>
@@ -202,6 +203,16 @@ struct Robo {
 std::mutex lock;
 std::unordered_map<const void*,Robo> robos;
 std::atomic<int> created{0};
+
+// ---- online (edf41net): declared here, defined in the block "online" at the end of this namespace ----
+bool NetFollows(const Robo& r) noexcept;     // a guest copy (online: the host's object; or the development mirror): it shows, it does not decide
+void NetBody(Robo& r) noexcept;              // the deciding copy: a body state change, to the guests
+void NetGun(Robo& r,int group) noexcept;     // the deciding copy: a robot-form gun group started by its own timer
+void NetIn(Robo& r) noexcept;                // every copy, before its frame: the role, the events that came (guests)
+void NetPose(Robo& r) noexcept;              // a guest, after Move: its pose pulled to the host's
+void NetOut(Robo& r) noexcept;               // the deciding copy, after its frame: the periodic state
+void NetMirrorMake(void* self) noexcept;     // development (ini Edf41NetMirror): the mirror of `self`, made outside the lock
+void NetForget(const void* self) noexcept;   // its destructor: the record goes
 
 int RandInt(Robo& r,int n) noexcept { return n<=0 ? 0 : static_cast<int>(Random01(r.rng)*static_cast<float>(n))%n; }
 float Rand(Robo& r) noexcept { return Random01(r.rng); }
@@ -455,9 +466,10 @@ void GunTick(Robo& r,Gun& g,int group) noexcept {
     ++g.frames;
     switch(g.state) {
     case kG0:
-        if(g.autoFire && !(r.flags&1) && --g.autoCount<=0) {
+        if(g.autoFire && !(r.flags&1) && !NetFollows(r) && --g.autoCount<=0) {   // online: a guest copy's start comes from the host (NetGun)
             g.autoCount=g.autoMin+RandInt(r,g.autoMax-g.autoMin);
             GunEnter(r,g,kG1);
+            NetGun(r,group);
         }
         break;
     case kG1:
@@ -503,6 +515,7 @@ void BodySet(Robo& r,int s) noexcept {
     r.body=s;
     r.bodyFrames=0;
     BodyEnter(r,s);
+    NetBody(r);   // online: the deciding copy tells the guests (edf41net)
 }
 
 const Motion* MotionOf(const Robo& r,int state) noexcept {
@@ -1021,10 +1034,10 @@ void Place(Robo& r) noexcept {
 
 void Tick(Robo& r) noexcept {
     ++r.ticks;
-    if(!r.placed && r.ticks<=600)Place(r);   // the camera may not be a view yet on the first frames
+    if(!r.placed && r.ticks<=600 && !NetFollows(r))Place(r);   // the camera may not be a view yet on the first frames (a guest copy: the host's place)
     // dev: transform this long after the creation, as the script's ObjectAction 0 would
     const float after=Cfg().edf41RoboTransformAfter;
-    if(after>0.0f && !r.forcedTransform && r.form==0 && r.ticks>=static_cast<std::uint32_t>(after*60.0f)) {
+    if(after>0.0f && !r.forcedTransform && r.form==0 && r.ticks>=static_cast<std::uint32_t>(after*60.0f) && !NetFollows(r)) {
         r.forcedTransform=true;
         Log("EDF41ROBO %p transform forced (ini Edf41RoboTransformAfter=%.0f)",r.obj,after);
         if(Alive(r.obj))BodySet(r,kS4);
@@ -1043,13 +1056,15 @@ void Tick(Robo& r) noexcept {
             BodySet(r,kS10);
         }
     }
-    if(r.body<kS10)AiTick(r);
+    if(r.body<kS10 && !NetFollows(r))AiTick(r);   // online: a guest copy's decisions are the host's (NetIn)
     else { r.cmdX=r.cmdY=r.cmdZ=r.yawRate=0.0f; r.turn=0; }
     BodyTick(r);
     Move(r);
+    NetPose(r);   // online: a guest copy pulled to the host's pose
     for(int g=0;g<4;++g)GunTick(r,r.gun[g],g);
     WriteMatrix(r);
     MoveSound(r.drive,r.pos);
+    NetOut(r);    // online: the deciding copy's periodic state
     if(r.ticks%600==0) {
         float durability=0.0f;
         const char* o=static_cast<const char*>(r.obj);
@@ -1066,6 +1081,7 @@ std::uint64_t __fastcall DtorWrap(void* self,unsigned flags) {
         std::lock_guard<std::mutex> hold(lock);
         auto it=robos.find(self);
         if(it!=robos.end()) { StopSound(it->second.drive,1); robos.erase(it); }
+        NetForget(self);   // online (edf41net)
     }
     Log("EDF41ROBO destructor %p",self);
     return reinterpret_cast<DtorFn>(roboClass.orig[kSlotDtor])(self,flags);
@@ -1081,9 +1097,10 @@ std::uint64_t __fastcall UpdateWrap(void* self,void* dt) {
                 r.ready=true;
                 r.broken=!Setup(r);
             }
-            if(!r.broken)Tick(r);
+            if(!r.broken) { NetIn(r); Tick(r); }   // NetIn: online (edf41net)
         }
     }
+    NetMirrorMake(self);   // development (ini Edf41NetMirror): made outside the lock (the factory takes it)
     const std::uint64_t result=reinterpret_cast<UpdateFn>(roboClass.orig[kSlotUpdate])(self,dt);
     {
         std::lock_guard<std::mutex> hold(lock);
@@ -1164,8 +1181,237 @@ void CreateRobo(void* info) noexcept {
         r=Robo{};
         r.obj=obj;
     }
+    edf41net::Attach(obj);   // online: its NetworkObject takes the host's events (edf41net)
     Log("EDF41ROBO create #%d: UfoRobo %p built by EventAnimationObject's constructor, vtable -> clone",++created,obj);
 }
+
+// ---- online (src/edf41net.h; docs/edf41-uforobo.md 2.4, docs/edf41-classes.md 联机) -------------------------------------------
+// The robot is the script's own object (CreateEnemy: it has the game's network identity, the host's). Its copy on the host
+// decides as before and tells the guests:
+//  - kNetBody on each body state change (the state, the clip of a step / an attack, the backward chain, the dying frames, the
+//    form, approach, where a step starts): the ship's volleys, the transform, every step, turn and attack choice;
+//  - kNetGun when a robot-form gun group starts on its own timer (the one random start outside the body machine);
+//  - kNetState every kNetEvery frames: the pose, the velocity, the target point.
+// A guest copy runs no AI and no gun timer of its own: it enters the host's states (their clips, the clips' MAB events, the
+// sounds, the blasts and the guns' G1 -> G2 -> G0 run here, aimed at the host's target point) and its pose is pulled to the
+// host's. Its bullets and blasts are its own, as each machine's copy of a stock enemy fires its own: the hit on a player is
+// judged on that player's machine (SoldierBase slot 34 0x5A3600), so each lands once. Durability is the game's (damage judged
+// by the shooter's machine, the HP change broadcast): a guest sees the death from its own HP (Tick) or the host's kNetBody.
+enum NetKind : std::uint8_t { kNetBody=1, kNetGun=2, kNetState=3 };
+struct NetBodyMsg {
+    std::int32_t body,pending,chain,dieFrames,form,approach;
+    float stepPos[3],stepYaw,pos[3],yaw;
+};
+static_assert(sizeof(NetBodyMsg)==56,"fixed wire layout");
+struct NetGunMsg { std::int32_t group,state,autoCount,reserved; };
+static_assert(sizeof(NetGunMsg)==16,"fixed wire layout");
+struct NetStateMsg {
+    float pos[3],yaw,roll,vel[3],target[3];
+    std::int32_t haveTarget,body,form,flags;
+    std::uint32_t ticks;
+};
+static_assert(sizeof(NetStateMsg)==64,"fixed wire layout");
+constexpr std::uint32_t kNetEvery=15;   // frames between two state messages (4 a second, 88 bytes each with the header)
+
+struct RoboNet {
+    bool follows=false;          // this frame: a guest copy
+    bool mirror=false;           // the development mirror (ini Edf41NetMirror)
+    const void* of=nullptr;      // the mirror: the robot it follows
+    bool want=false,made=false;  // the original: its mirror asked for, made
+    bool dressed=false;
+    float offset[3]={};          // the mirror stands this far from what it follows
+    bool snap=false;
+    NetStateMsg last{};
+    std::uint32_t age=0;
+    std::uint32_t sent=0,applied=0,logged=0;
+};
+std::unordered_map<const void*,RoboNet> nets;   // under `lock`, as the robots
+
+bool NetFollows(const Robo& r) noexcept {
+    const auto it=nets.find(r.obj);
+    return it!=nets.end() && it->second.follows;
+}
+
+void NetBody(Robo& r) noexcept {
+    if(NetFollows(r))return;
+    NetBodyMsg m{};
+    m.body=r.body; m.pending=r.pendingState; m.chain=r.chain; m.dieFrames=r.dieFrames; m.form=r.form; m.approach=r.approach ? 1 : 0;
+    std::memcpy(m.stepPos,r.stepPos,12); m.stepYaw=r.stepYaw;
+    std::memcpy(m.pos,r.pos,12); m.yaw=r.yaw;
+    if(edf41net::Send(r.obj,kNetBody,&m,sizeof(m)))++nets[r.obj].sent;
+}
+
+void NetGun(Robo& r,int group) noexcept {
+    if(NetFollows(r) || group<0 || group>3)return;
+    const NetGunMsg m{group,r.gun[group].state,r.gun[group].autoCount,0};
+    if(edf41net::Send(r.obj,kNetGun,&m,sizeof(m)))++nets[r.obj].sent;
+}
+
+void NetOut(Robo& r) noexcept {
+    if(NetFollows(r) || r.ticks%kNetEvery!=0)return;
+    NetStateMsg m{};
+    std::memcpy(m.pos,r.pos,12); m.yaw=r.yaw; m.roll=r.roll; std::memcpy(m.vel,r.vel,12); std::memcpy(m.target,r.target,12);
+    m.haveTarget=r.haveTarget ? 1 : 0; m.body=r.body; m.form=r.form; m.flags=static_cast<std::int32_t>(r.flags); m.ticks=r.ticks;
+    if(edf41net::Send(r.obj,kNetState,&m,sizeof(m))) {
+        RoboNet& n=nets[r.obj];
+        if(++n.sent<=3 || n.sent%2000==0) {
+            const edf41net::Stats s=edf41net::Counters();
+            Log("EDF41ROBO %p online: %u events sent (layer: sent %u, looped %u, received %u, refused %u)",r.obj,n.sent,s.sent,s.looped,s.received,s.refused);
+        }
+    }
+}
+
+void ApplyBody(Robo& r,RoboNet& n,const NetBodyMsg& m) noexcept {
+    if(m.body<kS0 || m.body>kS11 || m.form<0 || m.form>1 || m.pending< -1 || m.pending>4096 || m.chain<0 || m.chain>1 || m.dieFrames<0
+       || m.dieFrames>100000 || !edf41net::Sane(m.stepPos,3) || !edf41net::Sane(&m.stepYaw,1) || !edf41net::Sane(m.pos,3) || !edf41net::Sane(&m.yaw,1)) {
+        Fail("a body event out of range (refused)");
+        return;
+    }
+    const bool turned=m.form==1 && r.form==0 && m.body!=kS4 && m.body!=kS5;   // S5's entry turns it itself
+    if(turned)ToRobot(r);
+    if(m.body>=kS10 && r.body<kS10) {   // the host's copy died first: the death Tick plays when the HP runs out
+        PlaySe(r,r.form ? L"ロボ死亡" : L"ロボ飛行形態死亡",r.pos);
+        const float back[3]={-std::sin(r.yaw),0.0f,-std::cos(r.yaw)},up[3]={0.0f,1.0f,0.0f};
+        if(r.form)Explosion(r.pos,up,2.0f*r.s);
+        else BigExplosion(r.pos,back,2.0f,0.75f);
+        StopSound(r.drive,60);
+    }
+    const bool same=r.body==m.body && ((m.body!=kS8 && m.body!=kS9) || r.pendingState==m.pending);
+    r.approach=m.approach!=0;
+    if(!same) {
+        r.pendingState=m.pending;
+        r.chain=m.chain;
+        BodySet(r,m.body);
+    }
+    if(turned && m.body==kS7)Play(r,r.stStand,L"stand");   // ObjectAction 1 on the host: robot at once, standing
+    if(m.body==kS8) {   // the step starts where the host's did (its root motion runs here from there)
+        for(int k=0;k<3;k+=2)r.stepPos[k]=r.pos[k]=m.stepPos[k]+n.offset[k];
+        r.stepYaw=r.yaw=m.stepYaw;
+    }
+    if(m.body>=kS10)r.dieFrames=m.dieFrames;
+    ++n.applied;
+    if(n.logged<60) {
+        ++n.logged;
+        Log("EDF41ROBO %p %s copy follows: body %s%s (clip state %d, form %d)",r.obj,n.mirror ? "mirror" : "guest",kBodyNames[m.body],
+            same ? " (already)" : "",m.pending,m.form);
+    }
+}
+
+void ApplyGun(Robo& r,const NetGunMsg& m) noexcept {
+    if(m.group<0 || m.group>3 || m.state!=kG1 || m.autoCount<0 || m.autoCount>100000) { Fail("a gun event out of range (refused)"); return; }
+    Gun& g=r.gun[m.group];
+    if(g.state==kG0)GunEnter(r,g,kG1);
+    g.autoCount=m.autoCount;
+}
+
+void ApplyState(Robo& r,RoboNet& n,const NetStateMsg& m) noexcept {
+    if(!edf41net::Sane(m.pos,3) || !edf41net::Sane(&m.yaw,1) || !edf41net::Sane(&m.roll,1) || !edf41net::Sane(m.vel,3,1.0e5f)
+       || !edf41net::Sane(m.target,3)) { Fail("a state event out of range (refused)"); return; }
+    n.last=m;
+    n.snap=true;
+    n.age=0;
+    r.haveTarget=m.haveTarget!=0;
+    for(int k=0;k<3;++k)r.target[k]=m.target[k]+n.offset[k];
+}
+
+void NetApply(void* context,std::uint8_t kind,const unsigned char* data,std::size_t size) noexcept {
+    Robo& r=*static_cast<Robo*>(context);
+    RoboNet& n=nets[r.obj];
+    if(kind==kNetBody && size==sizeof(NetBodyMsg)) { NetBodyMsg m; std::memcpy(&m,data,sizeof(m)); ApplyBody(r,n,m); }
+    else if(kind==kNetGun && size==sizeof(NetGunMsg)) { NetGunMsg m; std::memcpy(&m,data,sizeof(m)); ApplyGun(r,m); }
+    else if(kind==kNetState && size==sizeof(NetStateMsg)) { NetStateMsg m; std::memcpy(&m,data,sizeof(m)); ApplyState(r,n,m); }
+    else Fail("an event of a kind or size this version does not send (refused)");
+}
+
+// The mirror's line every 300 frames: what it shows against what it follows.
+void MirrorReport(Robo& r,RoboNet& n) noexcept {
+    const auto it=robos.find(n.of);
+    if(it==robos.end()) { Log("EDF41ROBO mirror %p frame %u: the robot it follows is gone; body %s",r.obj,r.ticks,kBodyNames[r.body]); return; }
+    const Robo& o=it->second;
+    float d[3];
+    for(int k=0;k<3;++k)d[k]=r.pos[k]-(o.pos[k]+n.offset[k]);
+    int sm=-1,so=-1;
+    float tm=0.0f,to=0.0f,lm=0.0f,lo=0.0f;
+    ClipNow(r.obj,&sm,&tm,&lm);
+    ClipNow(o.obj,&so,&to,&lo);
+    Log("EDF41ROBO mirror %p frame %u: body %s / followed %s, form %d / %d, clip state %d at %.0f / %d at %.0f, pose off by %.1f m and %.3f rad, guns %d%d%d%d / %d%d%d%d, %u events applied",
+        r.obj,r.ticks,kBodyNames[r.body],kBodyNames[o.body],r.form,o.form,sm,tm,so,to,Len3(d),WrapPi(r.yaw-o.yaw),r.gun[0].state,r.gun[1].state,
+        r.gun[2].state,r.gun[3].state,o.gun[0].state,o.gun[1].state,o.gun[2].state,o.gun[3].state,n.applied);
+}
+
+void NetIn(Robo& r) noexcept {
+    RoboNet& n=nets[r.obj];
+    n.follows=edf41net::Guest(r.obj);
+    if(n.mirror && !n.dressed) {   // the development mirror: on team 6 (its bullets and blasts hurt nobody), no target, no HP loss, not counted
+        n.dressed=true;
+        SetTeam(r.obj,6,true);
+        SetFlag(r.obj,kNotTarget|kNotCounted|kNoHpLoss,true);
+        Log("EDF41ROBO mirror %p follows %p: team 6, never a target, takes no damage, not counted (ini Edf41NetMirror)",r.obj,n.of);
+    }
+    if(!n.follows) {
+        if(!n.mirror && !n.made && r.ticks>=30 && edf41net::Mirror())n.want=true;
+        return;
+    }
+    r.cmdX=r.cmdY=r.cmdZ=r.yawRate=0.0f;
+    r.turn=0;
+    r.cmdTransform=r.cmdSmall=r.cmdMiddle=r.cmdBuster=false;
+    r.cmdAttack=-1;
+    ++n.age;
+    edf41net::Drain(r.obj,&NetApply,&r);
+    if(n.mirror && r.ticks%300==0)MirrorReport(r,n);
+}
+
+void NetPose(Robo& r) noexcept {
+    const auto it=nets.find(r.obj);
+    if(it==nets.end() || !it->second.follows || !it->second.snap || r.body>=kS10)return;   // a dying copy falls on its own
+    const RoboNet& n=it->second;
+    const NetStateMsg& s=n.last;
+    float want[3],d[3];
+    for(int k=0;k<3;++k)want[k]=s.pos[k]+n.offset[k]+(r.form==0 ? s.vel[k]*static_cast<float>(n.age)/60.0f : 0.0f);
+    for(int k=0;k<3;++k)d[k]=want[k]-r.pos[k];
+    const float dist=Len3(d);
+    if(r.form==0) {   // the ship: velocity the host's, position pulled 8 % a frame (at once from 300 m off)
+        const float k=dist>300.0f ? 1.0f : 0.08f;
+        for(int i=0;i<3;++i) { r.pos[i]+=d[i]*k; r.vel[i]=s.vel[i]; }
+        r.yaw=WrapPi(r.yaw+WrapPi(s.yaw-r.yaw)*0.08f);
+        r.roll+=(s.roll-r.roll)*0.08f;
+    } else if(r.body!=kS8 && r.body!=kS5 && r.landed) {   // the robot between steps: its feet slide slowly to the host's place
+        const float k=dist>100.0f ? 1.0f : 0.03f;
+        r.pos[0]+=d[0]*k;
+        r.pos[2]+=d[2]*k;
+        if(r.body!=kS9)r.yaw=WrapPi(r.yaw+WrapPi(s.yaw-r.yaw)*0.05f);
+    }
+}
+
+void NetMirrorMake(void* self) noexcept {
+    alignas(16) float m[16];
+    float offset[3];
+    {
+        std::lock_guard<std::mutex> hold(lock);
+        const auto it=nets.find(self);
+        const auto rt=robos.find(self);
+        if(it==nets.end() || !it->second.want || it->second.made || rt==robos.end())return;
+        it->second.want=false;
+        it->second.made=true;
+        const Robo& r=rt->second;
+        const float side=120.0f;   // to its right (the yaw frame's +X row: cos yaw, 0, -sin yaw)
+        offset[0]=std::cos(r.yaw)*side; offset[1]=0.0f; offset[2]=-std::sin(r.yaw)*side;
+        if(!Readable(static_cast<char*>(self)+kMatrixAt,64))return;
+        std::memcpy(m,static_cast<char*>(self)+kMatrixAt,sizeof(m));
+        for(int k=0;k<3;++k)m[12+k]+=offset[k];
+    }
+    void* o=CreateFromPath(m,L"app:/object/UfoRobo401.sgo");   // the factory runs here and takes `lock`
+    std::lock_guard<std::mutex> hold(lock);
+    if(!o || robos.find(o)==robos.end()) { Log("EDF41ROBO %p: the development mirror was not made (ini Edf41NetMirror)",self); return; }
+    RoboNet& mn=nets[o];
+    mn.mirror=true;
+    mn.of=self;
+    std::memcpy(mn.offset,offset,sizeof(offset));
+    Log("EDF41ROBO %p: development mirror %p made 120 m to its right; it follows through edf41net's loopback (ini Edf41NetMirror)",self,o);
+    edf41net::Loopback(self,o);
+}
+
+void NetForget(const void* self) noexcept { nets.erase(self); }
 }  // namespace
 
 bool InstallEdf41Robo() noexcept {

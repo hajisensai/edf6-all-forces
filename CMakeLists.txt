@@ -59,6 +59,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/edf41smalldragon.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/edf41insects.cpp)
 # Which machine runs the plugin's work on an object online (src/online_authority.h, docs/online-re.md section 3).
 target_sources(EDF6VehicleCrew PRIVATE src/online_authority.cpp)
+# The EDF4.1 classes online (src/edf41net.h, docs/edf41-classes.md 联机): child identities, the host's decisions as events.
+target_sources(EDF6VehicleCrew PRIVATE src/edf41net.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/drill_net.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/sazabi_net.cpp)
 # Every stock homing round (MissileBullet01/02, HomingLaserBullet01) steers by proportional navigation (src/pn.h).
@@ -919,6 +921,15 @@ target_compile_options(drill_hud_binding_test PRIVATE /W4 /WX /utf-8 /permissive
 add_dependencies(offline_checks drill_hud_binding_test)
 add_test(NAME drill_hud_binding COMMAND drill_hud_binding_test)
 add_test(NAME drill_model_rotation COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/drill_model_rotation_test.py")
+# The EDF4.1 classes' network layer (src/edf41net.h): the wire (always), the production code on the real EDF.dll (by hand:
+# edf41net_native_test <EDF.dll>, as drill_net_native_test).
+add_executable(edf41net_test tests/edf41net_test.cpp)
+target_compile_options(edf41net_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME edf41net COMMAND edf41net_test)
+add_executable(edf41net_native_test EXCLUDE_FROM_ALL tests/edf41net_native_test.cpp)
+target_link_libraries(edf41net_native_test PRIVATE edf6common user32)
+target_include_directories(edf41net_native_test PRIVATE src common)
+target_compile_options(edf41net_native_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_executable(drill_net_native_test EXCLUDE_FROM_ALL tests/drill_net_native_test.cpp)
 target_link_libraries(drill_net_native_test PRIVATE edf6common user32)
 target_include_directories(drill_net_native_test PRIVATE src common)
