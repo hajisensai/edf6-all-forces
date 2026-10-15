@@ -890,6 +890,7 @@ std::uint64_t __fastcall HullUpdate(void* self,void* dt) {
     }
     for(int& t:h.throttle)if(t>0)--t;
     if(HullAlive(self))Spin(self,h);
+    if(HullAlive(self)){ float aim[3]; if(Alive(self) && AimPoint(self,aim))DevShoot(self,aim); }   // development (ini Edf41DevShoot)
     HullHits(self,h);
     if(!h.dead && !HullAlive(self)) {
         h.dead=true;
@@ -988,6 +989,7 @@ std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
     if(p)TeamGuard(self,*p,"after the class's update");
     if(p && h && !p->gone)PartFrame(self,*p,*h);
     if(p)TeamGuard(self,*p,"after PartFrame");
+    if(p && h && !p->gone){ float aim[3]; if(Alive(self) && AimPoint(self,aim))DevShoot(self,aim); }   // development (ini Edf41DevShoot)
     return r;
 }
 

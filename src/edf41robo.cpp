@@ -1094,6 +1094,8 @@ std::uint64_t __fastcall UpdateWrap(void* self,void* dt) {
             WriteMatrix(r);
             float m[16];
             if(r.lockPoint && r.lockOn.entry && LocatorMatrix(r.lockOn,m))SetLockPoint(r.lockPoint,m+12);   // the class's update leaves the matrix alone; keep ours for the next frame's draw
+            float aim[3];
+            if(Alive(self) && AimPoint(self,aim))DevShoot(self,aim);   // development (ini Edf41DevShoot)
         }
     }
     return result;

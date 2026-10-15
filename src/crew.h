@@ -160,6 +160,7 @@ struct Config {
     int playerJetHailKey=0x48;      // ...and this key calls the nearest one down to them ('H'; 0: off)
     bool gunshipBoardGunner=false;  // the gunship's board button takes its gunner seat (off: its pilot seat; playerjet_crew.inc)
     int gunshipGunnerKey=0x56;      // ...the other seat while this key is held ('V'; 0: none)
+    int gunshipGatlingKey=0x02;     // at the gun, the gatling while this key is held (the right mouse button; pad RB; 0: none)
     bool jetSound=true;             // the jets' engine sound (jetsound.cpp)
     bool jetEntrySmoke=true;        // a called jet arriving trails smoke from its exhausts (booster.cpp JetSmoke)
     float jetSoundVolume=1.0f;      // ...its volume, times the game's own for that sound
@@ -326,6 +327,8 @@ struct Config {
     int edf41RoboGunEvery=0;        // development only: the ship's volleys in turn every n frames, the robot's knee / shoulder guns every n (0 = 4.1's timers)
     int edf41RoboAttack=-1;         // development only: the robot's attack every 10 s, always robo_attack_table entry n (-1 = 4.1's choice)
     float edf41RoboPlace=0.0f;      // development only: the robot put this many m in front of the camera when it appears (0 = where the script puts it)
+    int edf41DevShoot=0;            // development only: the edf41 classes' objects shot by the local player's bullets every n frames each (edf41classes DevShoot; 0 off)
+    float edf41DevShootDamage=200.0f;   // ...the damage of each
     float edf41RoboTransformAfter=0.0f;   // development only: transform this many s after it appears, as ObjectAction 0 (0 = when the script says)
     bool edf41Mother401=true;       // EDF4.1's UfoMother401 (the Earth Eater) and its eleven part classes (edf41mother401.cpp)
     int edf41Mother401Dev=0;        // development only (bits): 1 attack always allowed, 2 short attack waits, 4 panels in place at once,
@@ -1011,8 +1014,9 @@ bool PlayerGunnerOrder(const void* vehicle,GunnerOrder* out) noexcept;
 // guns there to switch between (a bit each, 1 << GunnerGun; the shells always). False with the player not at a gunship's gun.
 enum class GunnerGun : int { shells, cannon, gatling, count };
 // zoom: the sight's magnification (sightzoom.cpp; 1 none).
+// keys: the rider plays on the keyboard and mouse (the controls row names their keys).
 struct GunnerReadout { float sight[3]; bool ground,inReach,ready; float range,wait; float centre[3]; bool centred; GunnerGun gun; unsigned guns;
-                       float zoom; };
+                       float zoom; bool keys; };
 bool PlayerGunnerHud(GunnerReadout* out) noexcept;
 // The gunship gunner's seat camera (playerjet_crew.inc GunnerLook): from turretcam.cpp's native Type-1 seat camera hook,
 // the eye and look-at for the local player at the gun; false for any other seat (the stock camera stays).

@@ -71,20 +71,21 @@ _410_CABIN = (-0.15, 1.9, 0.3)
 
 FITS: dict[str, tuple[Fit, ...]] = {
     # The player's and the NPC interceptors and the enemy fighter (BOMBER501's mesh at 0.65): the front seat of the
-    # painted tandem canopy (room 0.77, 0.77, 0.35, 0.77, 3.15, 14.46): a modern fighter's cockpit (the J-10S's).
-    'EDF6VC_INTERCEPTOR': (Fit(0, 'bomber501', (0.0, 1.8, 6.8), 'jet_j10s'),),
+    # painted tandem canopy (room 0.77, 0.77, 0.35, 0.77, 3.15, 14.46). Every fighter sits in War Thunder's F-16A
+    # Block 15 cockpit (cockpit_kits_plugin jet_f16; the user, 2026-10-14: "座舱和模型干脆直接也搬战雷的吧").
+    'EDF6VC_INTERCEPTOR': (Fit(0, 'bomber501', (0.0, 1.8, 6.8), 'jet_f16'),),
     # The fighter and the strike jet (BOMBER501 at full size): the same seat scaled (room 1.19, 1.19, 0.54, 1.18,
-    # 4.84, 22.25): an F-16's (the F-16D Block 60's front cockpit).
+    # 4.84, 22.25).
     'EDF6VC_JET': (Fit(0, 'bomber501', (0.0, 2.77, 10.46), 'jet_f16'),),
     # The multirole (BOMBER401 at 0.5): the cockpit bump over the wing's leading edge (room 2.18, 2.18, 0.32, 1.32,
     # 1.94, 1.71; lower, the nose gear's struts stand over the panel). The bump is narrow: seen along the diagonals the
     # box round the eye is closed only 0.23 m either side and 0.18 m up, so it takes the narrow cockpit (scaled to it).
     # x 2 mm off the centre plane: a point exactly on it is seen through the seam of the hull's two halves.
-    'EDF6VC_MULTIROLE': (Fit(0, 'bomber401', (0.002, 2.0, 1.6), 'jet_j10s_narrow'),),
+    'EDF6VC_MULTIROLE': (Fit(0, 'bomber401', (0.002, 2.0, 1.6), 'jet_f16_narrow'),),
     # The Primer fighter: low in the body under its red canopy (room 2.06, 2.07, 0.43, 1.97, 3.76, 4.39; in the canopy
     # itself its floor is 0.04 m under the eye). Its canopy's frame is the model's own: seen from the seat it arches
     # overhead and its rim crosses the view a little over the horizon.
-    'EDF6VC_PRIMER_FIGHTER': (Fit(0, 'body', (0.0, 2.2, 0.4), 'jet_j10s'),),
+    'EDF6VC_PRIMER_FIGHTER': (Fit(0, 'body', (0.0, 2.2, 0.4), 'jet_f16'),),
     # The drones (blast / doll / airstrike): nobody aboard; the seat sees the nose camera's monitor.
     'EDF6VC_DRONE': (Fit(0, 'body', (0.0, 1.3, 2.4), 'remote_display'),),
     # The air carrier (V508 at 1.6): a flight deck in the nose, the pilot left (room 2.23, 2.24, 1.83, 2.81, 2.30,

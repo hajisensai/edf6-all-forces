@@ -1242,6 +1242,7 @@ std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
         for(int k=0;k<3;++k) { m[k]*=sx; m[4+k]*=sy; m[8+k]*=sx; }
         ModelMatrix(self,m);
     }
+    if(!del){ float aim[3]; if(Alive(self) && AimPoint(self,aim))DevShoot(self,aim); }   // development (ini Edf41DevShoot)
     const LARGE_INTEGER t2=Now();
     {
         std::lock_guard<std::recursive_mutex> hold(lock);

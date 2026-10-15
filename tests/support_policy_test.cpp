@@ -19,8 +19,9 @@ int main() {
         const auto policy=SupportMissionPolicy();
         check(policy.underground==(underground!=0),"native underground state read separately from mission restrictions");
         check(Allowed(policy,Capability::air)==(condition!=1 && !underground),"air requires mission permission and open environment");
-        check(Allowed(policy,Capability::militaryGround)==(condition!=1),"heavy external reinforcements honor NO_SUPPORT");
-        check(Allowed(policy,Capability::infantry) && Allowed(policy,Capability::civilianGround),"ordinary infantry and civilian truck use their own physical entry capability");
+        check(Allowed(policy,Capability::militaryGround)==(condition!=1 && !underground),"heavy external reinforcements honor NO_SUPPORT, none underground");
+        check(Allowed(policy,Capability::infantry),"ordinary infantry use their own physical entry capability");
+        check(Allowed(policy,Capability::civilianGround)==!underground,"the civilian truck comes under NO_SUPPORT, not underground");
     }
     Put<int>(image,0x20B3658,7);check(SupportMissionPolicy().environment==Environment::unknown,"unknown condition not treated as permission");
     Put<int>(image,0x20B3658,0);Put<int>(world,0xB00,7);

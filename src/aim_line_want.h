@@ -13,18 +13,19 @@ namespace crew::aimline {
 enum class Holder : std::uint8_t { empty, npc, player, other };   // other: another machine's player, or a rider not read
 enum class LineWant : std::uint8_t { keep, hide, show };
 
-// Hidden while an NPC holds the seat, or while it is empty in a vehicle an NPC drives (the 410's door guns, aimed by
-// the plugin with nobody in them), and while the player holds it in a vehicle whose HUD draws a sight of its own
-// (`ownSight`: PlayerJetOwnSight / PlayerHeliOwnSight / PlayerStockOwnSight). Given back for the player with no sight
-// of ours (the ini turned off: the next frame). Any other seat is left as it was: an empty one of a vehicle no NPC
-// drives (one the player got out of keeps its line hidden, nobody there to see it, until they or an NPC sit in it) and
-// a remote player's.
-constexpr LineWant Want(Holder holder,bool npcDriven,bool ownSight) noexcept {
+// Hidden while an NPC holds the seat, and while it is empty: nobody there needs the line, whoever drives the vehicle (the
+// 410's door guns aimed by the plugin, a requested aircraft delivered empty, a drone the plugin flies with no one seated,
+// a support aircraft whose crew is still walking aboard; the user, 2026-10-14: 「飞机在外面会有红色预瞄线」). Hidden too
+// while the player holds it in a vehicle whose HUD draws a sight of its own (`ownSight`: PlayerJetOwnSight /
+// PlayerHeliOwnSight / PlayerStockOwnSight), given back for the player with no sight of ours (the ini turned off: the next
+// frame; the count was kept when it was hidden, crew.cpp SetLine). A remote player's seat gets back what we hid while it
+// was empty and is not hidden: theirs to see (SetLine gives back only a line it hid).
+constexpr LineWant Want(Holder holder,bool ownSight) noexcept {
     switch(holder) {
-        case Holder::npc: return LineWant::hide;
-        case Holder::empty: return npcDriven ? LineWant::hide : LineWant::keep;
+        case Holder::npc:
+        case Holder::empty: return LineWant::hide;
         case Holder::player: return ownSight ? LineWant::hide : LineWant::show;
-        default: return LineWant::keep;
+        default: return LineWant::show;
     }
 }
 

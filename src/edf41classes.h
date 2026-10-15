@@ -103,6 +103,12 @@ bool Fire(void* owner,const float* matrix,const Bullet& b) noexcept;
 // ---- the player -------------------------------------------------------------------------------------------------
 // The position of the nearest live player human to `from` (offline: the local one); false when none is seen.
 bool NearestPlayer(const float* from,float* out) noexcept;
+// Development only (ini Edf41DevShoot = n frames, 0 off; Edf41DevShootDamage per bullet): the autopilot cannot fire, so each
+// class calls this every frame for each object a player would shoot at (`point`: where); every n-th call per object one
+// LaserBullet02 owned by the local player flies at it from 20 m short of it, so the hit goes the game's own way (the damage
+// message, the class's filter, its hit sound, the kill and drop credit to the player). `salt` staggers several points on
+// one object. No effect with the switch off.
+void DevShoot(const void* object,const float* point,unsigned salt=0) noexcept;
 
 // ---- EDF6 primitives (docs/edf41-classes.md section 2, read from EDF.dll; H unless noted) -----------------------------------
 // Object bases: EventAnimationObject model +0x5C0, skeleton +0x660, ragdoll +0xAA0; UfoCarrier508 model +0x650, skeleton +0x6F0,

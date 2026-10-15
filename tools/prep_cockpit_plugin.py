@@ -61,8 +61,18 @@ class Asset:
                                                             # pitch, highest pitch (degrees); what reaches into it
                                                             # (farther than 0.2 m) is left out
     what: str = ''
+    drop_blended: bool = False          # every blended material left out (a model whose glass is only told apart by
+                                        # its alpha mode: material names that are ids)
 
 
+# The War Thunder F-16A Block 15's cockpit (the game's own model, as shared on Sketchfab; 1:1, metres, nose +z, +x the
+# pilot's left; the user, 2026-10-14: "座舱和模型干脆直接也搬战雷的吧"): every opaque material round the pilot's eye
+# 0.75 m over the seat's cushion, just before the ejection seat's headbox (the plugin's fighters: the interceptor, the
+# fighter / strike jet, the multirole and the Primer fighter). Its glass (the canopy, the HUD's combiner: blended
+# materials, named by ids only) is left out: the plugin draws the HUD's symbols on the world (the 'hud' screen).
+WT_F16A = Asset('a6fa145facf045fca90ac499340db5b0', 'F-16A Block 15 Fighting Falcon (War Thunder)', (0.0, 0.95, 4.12),
+                '+z', '+y', 1.0, ((-0.62, -1.15, -0.42), (0.62, 0.55, 1.75)), drop_blended=True,
+                what="the cockpit round the pilot's seat only; the canopy's and the HUD's glass left out")
 # The F-16D Block 60's front seat (the model 1:1, its nose -z): its cockpit materials (cock*, ins*) round the pilot's
 # eye 0.13 m before the headrest, less the canopy's glass and the HUD's combiner glass (its symbols are drawn by the
 # plugin on the world, the 'hud' screen), and nothing of the rear seat's cockpit behind the front seat's bulkhead.
@@ -101,7 +111,10 @@ UH60_CABIN = Asset('12b4e525676a49678ac3006b360c8750', 'Sikorsky UH-60M Blackhaw
                    UH60_SCALE, ((-1.2, -1.3, -2.4), (1.6, 0.95, 3.4)), drop=('Plt', 'mat_6-', 'mat_7-'),
                    what="the troop cabin and the cockpit ahead of it; the crew figures and the windows' glass left out")
 
+# F16D and J10S no longer back a kit (the War Thunder F-16A took their seats); they stay while their parts are in the
+# model folder, so its credits still name them.
 ASSETS: dict[str, Asset] = {
+    'plugin_wt_f16a': WT_F16A,
     'plugin_f16d': F16D,
     'plugin_j10s': J10S,
     'plugin_c130_deck': C130_DECK,
@@ -182,6 +195,8 @@ def cut_out(a: Asset, path: str, scene: gltf.Scene) -> dict[str, np.ndarray]:
         keep &= np.isin(scene.material, [k for k, n in enumerate(names) if any(s.lower() in n for s in a.keep)])
     if a.drop:
         keep &= ~np.isin(scene.material, [k for k, n in enumerate(names) if any(s.lower() in n for s in a.drop)])
+    if a.drop_blended:
+        keep &= ~np.isin(scene.material, [k for k, mt in enumerate(scene.materials) if mt.alpha_mode == 'BLEND'])
     if a.drop_nodes:
         nodes = node_names(path)
         dropped = [k for k, n in enumerate(nodes) if any(s.lower() in n.lower() for s in a.drop_nodes)]

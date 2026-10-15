@@ -14,6 +14,7 @@
 #include <deque>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace crew::edf41c {
@@ -440,6 +441,46 @@ bool NearestPlayer(const float* from,float* out) noexcept {
     if(!h || !Rd(h+kPosAt,12,"player position"))return false;
     std::memcpy(out,h+kPosAt,12);
     return std::isfinite(out[0]+out[1]+out[2]);
+}
+
+void DevShoot(const void* object,const float* point,unsigned salt) noexcept {
+    const int every=Cfg().edf41DevShoot;
+    if(every<=0 || !object || !point || !std::isfinite(point[0]+point[1]+point[2]))return;
+    static std::mutex lock;
+    static std::unordered_map<std::uintptr_t,unsigned> calls;
+    {
+        std::lock_guard<std::mutex> hold(lock);
+        if(calls.size()>4096)calls.clear();
+        const unsigned n=calls[reinterpret_cast<std::uintptr_t>(object)^(static_cast<std::uintptr_t>(salt)<<48)]++;
+        if((n+salt*7)%static_cast<unsigned>(every)!=0)return;
+    }
+    void* shooter=PlayerHuman();
+    float eye[3];
+    if(!shooter || !NearestPlayer(point,eye))return;
+    eye[1]+=1.6f;
+    float dir[3]={point[0]-eye[0],point[1]-eye[1],point[2]-eye[2]};
+    const float len=std::sqrt(dir[0]*dir[0]+dir[1]*dir[1]+dir[2]*dir[2]);
+    if(len<1.0f)return;
+    for(float& d : dir)d/=len;
+    const float back=len<20.0f ? len : 20.0f;
+    const float from[3]={point[0]-dir[0]*back,point[1]-dir[1]*back,point[2]-dir[2]*back};
+    alignas(16) float m[16];
+    AimMatrix(from,dir,m);
+    Bullet b;
+    b.factory=L"LaserBullet02";
+    b.speed=10.0f;
+    b.life=6;
+    b.damage=Cfg().edf41DevShootDamage;
+    b.size=1.0f;
+    // LaserBullet02's constructor throws without its custom parameter (EDF+0x253F8B): [mode], 0 plain (docs/edf41-ufomother301.md
+    // 2.1; E510's mf_LaserCustomParameter). An SGO array node {0, 1 child, at +12} and its int node {1, -, value 0}.
+    alignas(4) static const std::int32_t plain[6]={0,1,12,1,0,0};
+    b.custom=reinterpret_cast<const SgoNode*>(plain);
+    const bool ok=Fire(shooter,m,b);
+    static std::atomic<unsigned> shots{0};
+    const unsigned k=++shots;
+    if(k<=5 || k%200==0)Log("EDF41DEV shot #%u at %p (%.0f %.0f %.0f) from %.0f m short, player %p, damage %.0f: %s",k,object,point[0],point[1],point[2],
+                            back,shooter,b.damage,ok ? "fired" : "not fired");
 }
 
 // ---- EDF6 primitives (re6/PRIMITIVES.md) --------------------------------------------------------------------------

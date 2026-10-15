@@ -121,7 +121,8 @@ int main() {
     Check(fixture::deletes==7,"wrong class rollback once");
     fixture::signatures=false;PreloadSupportVehicles();
     Check(!SupportVehicleReady(SupportVehicleKind::civilianTruck,manned),"profile mismatch clears old mission readiness");
-    Check(SupportVehicleEnvironmentAllowed(tank,SupportEnvironment::underground),"underground vehicle decision belongs to real route geometry");
+    Check(!SupportVehicleEnvironmentAllowed(tank,SupportEnvironment::underground),"no support hull underground (only soldiers and the drill request)");
+    Check(!SupportVehicleEnvironmentAllowed(SupportVehicleKind::civilianTruck,SupportEnvironment::underground),"nor the light truck");
     Check(!SupportVehicleEnvironmentAllowed(tank,SupportEnvironment::wasteland),"military tank excluded from wasteland catalog");
     Check(SupportVehicleEnvironmentAllowed(SupportVehicleKind::civilianTruck,SupportEnvironment::wasteland),"civilian truck valid in wasteland");
     Check(!SupportVehicleEnvironmentAllowed(tank,static_cast<SupportEnvironment>(255)),"unknown environment fails closed");

@@ -2135,7 +2135,9 @@ def aim_lines_hide_real_crews() -> None:
     crew, npcai = src('src/crew.cpp'), src('src/npcai.cpp')
     aim = crew.split('void AimLines(', 1)[1].split('\n}\n', 1)[0]
     holder = crew.split('aimline::Holder LineHolder(', 1)[1].split('\n}\n', 1)[0]
-    assert 'aimline::Want(LineHolder(seat),' in aim and 'npcDriven=NpcDriver(vehicle)' in aim, 'AimLines: holder by NpcInSeat'
+    assert 'aimline::Want(LineHolder(seat),ownSight)' in aim, 'AimLines: holder by NpcInSeat'
+    want = src('src/aim_line_want.h').split('constexpr LineWant Want(', 1)[1].split('\n}\n', 1)[0]
+    assert 'case Holder::empty: return LineWant::hide;' in want, 'an empty seat hides its line whoever drives (2026-10-14)'
     assert 'NpcInSeat(seat)' in holder and 'Rider::dummy' not in aim, 'LineHolder: an NPC is NpcInSeat, not the Dummy alone'
     driver = npcai.split('bool NpcDriver(', 1)[1].split('\n}\n', 1)[0]
     assert 'NpcInSeat(' in driver, 'NpcDriver is NpcInSeat of seat 0 (one test of "an NPC is there")'
@@ -9815,6 +9817,8 @@ def edf5_dlc_campaign_offers_the_four() -> None:
     """make_edf5_campaign.plan offers DM015 / DM018 / DM019 / DM020 (Mission Pack 1) when tools/edf5_dlc.py will write
     their maps and fortress, and skips one whose part it leaves out, saying why (as the EDF4.1 packs' Skip41)."""
     import edf5_dlc
+    if not _e5c_have_game():   # the plan reads the real game's Root.cpk: a developer's machine (CI has no game)
+        return
     reg = edf5_dlc.registry()
     maps = {f'{g}.MAC' for g, x in reg['groups'].items() if x['kind'] == 'map'}
     names = {tuple(rel.split('/', 1)) for x in reg['groups'].values() if x['kind'] == 'object' for rel in x['files']}

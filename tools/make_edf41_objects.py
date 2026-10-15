@@ -46,7 +46,7 @@ import shutil
 import struct
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -887,7 +887,7 @@ def ufo401_ace(members: dict) -> None:
     members['reaction_scale'] = k
 
 
-UFO401ACE_ALIAS = copy.replace(ALIASES['UFO401.SGO'], post=ufo401_ace)
+UFO401ACE_ALIAS = replace(ALIASES['UFO401.SGO'], post=ufo401_ace)
 ALIASES['EDF41MP02/UFO401ACE.SGO'] = UFO401ACE_ALIAS
 # The DLC's three small dragons (DragonSmall401_HS, Red / YerrowSmallDragon_HS: M805, M993): 4.1's own small dragons
 # (models SmallDragon401Green / RedSmallDragon / YerrowSmallDragon, their CAS, MAB and ragdolls, the random reactions,
