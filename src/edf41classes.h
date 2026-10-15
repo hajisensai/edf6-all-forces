@@ -224,4 +224,28 @@ bool WeakAlive(const WeakRef& w) noexcept;                     // use count > 0 
 // weak count taken for the receiver.
 bool WeakOut(const void* object,void* out) noexcept;
 
+// ---- bullet hit sounds, material animations (added for the 401, src/edf41mother401.cpp) -----------------------------------
+// Fire with the bullet's hit sound: EDF6's InitParam +0x100 is a SePreset (0x7B3200; EDF6 weapons fill it from their key 14
+// with 0x7B16F0, 4.1's InitParam +0xB0), filled here from a raw cue name with `hit`'s numbers as PlayCue does. No cue (null,
+// empty, not in a loaded bank): Fire without one.
+bool FireHit(void* owner,const float* matrix,const Bullet& b,const wchar_t* hitCue,const SeParams& hit) noexcept;
+// Material animations (an SGO's material_animation: MTAB blobs animating material parameters such as light0_color): EDF6's own
+// component (0x38 bytes; ctor 0x6DBE90, bound with 0x6DC7B0 to the model's material set = EventAnimationObject +0x720 (model
+// +0x5C0 + 0x160, as UfoCarrier508 binds +0x650 + 0x160 and the class at 0x309CC0 +0x720), tracks added by 0x6DC050(blob,
+// kind), played by 0x6DC830(index, mode: 0 once, 1 to the end and hold, 2 loop), advanced by 0x6DC8B0(frame info, 1.0),
+// freed by 0x29D120(+8)). An entry is EDF6's [blob, kind] or 4.1's bare blob (its kind from `kinds`).
+struct MaterialAnims { alignas(16) unsigned char comp[0x40]={}; int count=0; bool live=false; };
+int MaterialAnimsLoad(MaterialAnims& m,void* object,const SgoNode* list,const int* kinds,int kindCount) noexcept;   // tracks
+void MaterialAnimsPlay(MaterialAnims& m,int index,int mode) noexcept;
+void MaterialAnimsUpdate(MaterialAnims& m,void* frameInfo) noexcept;   // once per Update, with the Update's frame info
+void MaterialAnimsFree(MaterialAnims& m) noexcept;                     // before the object goes
+// A StencilLight scene object (the light flash of explosions): InitParam@StencilLight (vtable EDF+0x1762108; +0x30 position,
+// +0x40 / +0x50 colours, +0x60 radius, +0x64 frames) made by 0x84880 as EffectGenUtil 0x2EBC00 makes it, but with the numbers
+// as given (that helper scales the colour by 2.5 and the radius by 5, as 4.1's 0x1b5080 does; 4.1 code that fills the param
+// itself, like the 401 WeakPanel, passes raw numbers).
+void StencilLight(const float* pos,const float* colour,float radius,int frames) noexcept;
+// EffectGenUtil 0x2E7D00 (pos, dir, size): 4.1's 0x1b1910, the 火炎_01 small explosion the 401's burning panels throw (the two
+// share every constant: 0.97, 0.01, 0.2, 0.1, 1.5, 0.4, 30, 31; FireBurst's Flame 0x2E7FF0 is 4.1's 0x1b16b0 the same way).
+void SmallBurst(const float* pos,const float* dir,float size) noexcept;
+
 }  // namespace crew::edf41c

@@ -978,4 +978,151 @@ bool WeakOut(const void* object,void* out) noexcept {
     return true;   // the weak count WeakSet took goes with it
 }
 
+// ---- bullet hit sounds, material animations (the 401, src/edf41mother401.cpp) ------------------------------------------------
+namespace {
+constexpr std::size_t kMatCtor=0x6DBE90,kMatBind=0x6DC7B0,kMatAdd=0x6DC050,kMatPlay=0x6DC830,kMatUpdate=0x6DC8B0,kMatFree=0x29D120;
+constexpr std::size_t kEaoMaterials=0x720;   // the model's material set (model +0x5C0, +0x160)
+constexpr Print k401Prints[]={
+    {kMatCtor,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C}},{kMatBind,{0x48,0x89,0x11,0xC3,0xCC,0xCC,0xCC,0xCC}},
+    {kMatAdd,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C}},{kMatPlay,{0x4C,0x8B,0xC9,0x0F,0x57,0xC9,0x8B,0xCA}},
+    {kMatUpdate,{0x48,0x8B,0xC4,0x48,0x89,0x68,0x18,0x48}},{kMatFree,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C}},
+};
+std::atomic<int> m401PrimState{0};
+bool M401Prims() noexcept {
+    int s=m401PrimState.load();
+    if(s)return s==1;
+    for(const Print& p:k401Prints)
+        if(!Readable(image+p.rva,8) || std::memcmp(image+p.rva,p.bytes,8)!=0) {
+            Log("EDF41CLASS the code at EDF.dll+0x%zX is not what this was written for: material animations are off",p.rva);
+            m401PrimState=2;
+            return false;
+        }
+    m401PrimState=1;
+    return true;
+}
+}  // namespace
+
+bool FireHit(void* owner,const float* matrix,const Bullet& b,const wchar_t* hitCue,const SeParams& hit) noexcept {
+    void* system=Global(kSoundSystem);
+    struct { void* bank; std::int32_t cue; std::int32_t pad; } ref{nullptr,-1,0};
+    const bool sound=hitCue && *hitCue && Prims() && system
+                     && At<bool(__fastcall*)(void*,void*,int,const wchar_t*)>(kCueLookup)(system,&ref,0,hitCue) && ref.bank;
+    if(!sound)return Fire(owner,matrix,b);
+    // Fire's body with the preset filled before the spawn (the bullet copies the block from +0x30, the preset with it)
+    void* mgr=Manager();
+    void* factory=mgr ? reinterpret_cast<GetFactoryFn>(image+kFactoryByName)(mgr,b.factory) : nullptr;
+    if(!factory) { Fail("a bullet class EDF6 does not register"); return false; }
+    char* o=static_cast<char*>(owner);
+    if(!owner || !Rd(o+kTeamAt,4,"bullet owner team") || !Rd(o+kWeakSelfAt,16,"bullet owner weak pointer"))return false;
+    alignas(16) unsigned char param[kParamSize];
+    reinterpret_cast<ParamCtorFn>(image+kParamCtor)(param);
+    std::memcpy(param+0x94,&b.speed,4);
+    std::memcpy(param+0x98,&b.life,4);
+    std::memcpy(param+0x9C,&b.damage,4);
+    if(b.explosion>0.0f)std::memcpy(param+0xB0,&b.explosion,4);
+    if(b.gravity!=0.0f)std::memcpy(param+0xE0,&b.gravity,4);
+    if(b.radiusFactor>=0.0f)std::memcpy(param+0xC4,&b.radiusFactor,4);
+    if(b.speedFactor>=0.0f)std::memcpy(param+0xC8,&b.speedFactor,4);
+    std::memcpy(param+0xC0,&b.size,4);
+    std::memcpy(param+0xCC,&b.hitStop,4);
+    std::memcpy(param+0xD0,b.color,16);
+    param[0xB7]=1;
+    std::memcpy(param+0x90,o+kTeamAt,4);
+    reinterpret_cast<WeakAssignFn>(image+kWeakAssign)(param+0x38,o+kWeakSelfAt);
+    if(b.custom) {
+        const void* custom=b.custom;
+        const std::uint16_t tag=1;
+        std::memcpy(param+0xE8,&custom,8);
+        std::memcpy(param+0xF8,&tag,2);
+    }
+    unsigned char* preset=param+0x100;   // the constructor's 0x7B3200 defaults stay; the cue and PlayCue's numbers go in
+    for(std::size_t at=0x20;at<=0x60;at+=0x10)std::memcpy(preset+at,&ref,16);
+    std::memcpy(preset+0x74,&hit.volume,4);
+    std::memcpy(preset+0x70,&hit.pitch,4);
+    std::memcpy(preset+0x10,&hit.inner,4);
+    std::memcpy(preset+0x14,&hit.reference,4);
+    std::memcpy(preset+0x18,&hit.cull,4);
+    static std::atomic<std::uint32_t> seed{0x2545F491u};
+    const std::uint32_t s=(seed+=0x6D2B79F5u)>>16;
+    std::memcpy(param+0x1A0,&s,4);
+    alignas(16) float m[16];
+    std::memcpy(m,matrix,sizeof(m));
+    reinterpret_cast<SpawnFn>(image+kSpawn)(mgr,m,factory,param);
+    reinterpret_cast<ParamDtorFn>(image+kParamDtor)(param);
+    return true;
+}
+
+int MaterialAnimsLoad(MaterialAnims& m,void* object,const SgoNode* list,const int* kinds,int kindCount) noexcept {
+    const int n=Count(list);
+    if(m.live || n<=0 || !object || !M401Prims() || !Rd(static_cast<char*>(object)+kEaoMaterials,8,"model material set"))return 0;
+    void* comp=m.comp;
+    reinterpret_cast<void*(__fastcall*)(void*)>(image+kMatCtor)(comp);
+    reinterpret_cast<void(__fastcall*)(void*,void*)>(image+kMatBind)(comp,static_cast<char*>(object)+kEaoMaterials);
+    m.live=true;
+    for(int i=0;i<n && i<16;++i) {
+        const SgoNode* e=Child(list,i);
+        const SgoNode* blob=e;
+        std::int32_t kind=i<kindCount && kinds ? kinds[i] : 0;
+        if(e && e->type==0) { blob=Child(e,0); Int(Child(e,1),&kind); }   // EDF6's [blob, kind]
+        if(!blob || blob->type!=4 || blob->a<0x14 || !Rd(blob,12,"material animation"))break;
+        const char* data=reinterpret_cast<const char*>(blob)+blob->b;
+        if(!Rd(data,static_cast<std::size_t>(blob->a),"material animation blob") || std::memcmp(data+0x10,"MTAB",4)!=0)break;
+        reinterpret_cast<int(__fastcall*)(void*,const void*,int)>(image+kMatAdd)(comp,data,kind);
+        ++m.count;
+    }
+    return m.count;
+}
+void MaterialAnimsPlay(MaterialAnims& m,int index,int mode) noexcept {
+    if(m.live && index>=0 && index<m.count)reinterpret_cast<void(__fastcall*)(void*,unsigned,int)>(image+kMatPlay)(m.comp,static_cast<unsigned>(index),mode);
+}
+void MaterialAnimsUpdate(MaterialAnims& m,void* frameInfo) noexcept {
+    if(m.live && m.count>0 && frameInfo && Readable(frameInfo,8))
+        reinterpret_cast<void(__fastcall*)(void*,void*,float)>(image+kMatUpdate)(m.comp,frameInfo,1.0f);
+}
+void MaterialAnimsFree(MaterialAnims& m) noexcept {
+    if(!m.live)return;
+    m.live=false;
+    m.count=0;
+    reinterpret_cast<void(__fastcall*)(void*)>(image+kMatFree)(m.comp+8);
+}
+
+void SmallBurst(const float* pos,const float* dir,float size) noexcept {
+    static const unsigned char print[8]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x08,0x48};
+    void* egu=Global(kEffects);
+    if(!Prims() || !egu || !Readable(image+0x2E7D00,8) || std::memcmp(image+0x2E7D00,print,8)!=0)return;
+    alignas(16) float p[4]={pos[0],pos[1],pos[2],1.0f},d[4]={dir[0],dir[1],dir[2],1.0f};
+    At<void(__fastcall*)(void*,const float*,const float*,float)>(0x2E7D00)(egu,p,d,size);
+}
+
+void StencilLight(const float* pos,const float* colour,float radius,int frames) noexcept {
+    static const Print prints[]={{0x84880,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C}},{0x2EBC00,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x7C}}};
+    static std::atomic<int> state{0};
+    if(!state.load()) {
+        bool ok=true;
+        for(const Print& p:prints)ok=ok && Readable(image+p.rva,8) && std::memcmp(image+p.rva,p.bytes,8)==0;
+        // the helper 0x2EBC00 is checked as the witness of the InitParam vtable it loads (lea rax, [EDF+0x1762108] at 0x2EBC3D)
+        ok=ok && Readable(image+0x2EBC3D,7) && *reinterpret_cast<const std::int32_t*>(image+0x2EBC40)==static_cast<std::int32_t>(0x1762108-0x2EBC44);
+        state=ok ? 1 : 2;
+        if(!ok)Log("EDF41CLASS the StencilLight code is not what this was written for: no light flashes");
+    }
+    void* mgr=Manager();
+    if(state.load()!=1 || !mgr || !pos || !colour)return;
+    alignas(16) unsigned char param[0x70]={};
+    void* vt=image+0x1762108;
+    std::memcpy(param,&vt,8);
+    const float p[4]={pos[0],pos[1],pos[2],1.0f};
+    std::memcpy(param+0x30,p,16);
+    std::memcpy(param+0x40,colour,16);
+    std::memcpy(param+0x50,colour,16);
+    std::memcpy(param+0x60,&radius,4);
+    std::memcpy(param+0x64,&frames,4);
+    alignas(16) static const float identity[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+    alignas(16) unsigned char out[16]={};
+    reinterpret_cast<void(__fastcall*)(void*,void*,const float*,void*)>(image+0x84880)(mgr,out,identity,param);
+    WeakRef w;   // the creator hands back a weak pointer: let it go
+    std::memcpy(&w.object,out,8);
+    std::memcpy(&w.control,out+8,8);
+    WeakReset(w);
+}
+
 }  // namespace crew::edf41c

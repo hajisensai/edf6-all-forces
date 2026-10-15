@@ -332,7 +332,8 @@ struct Config {
     float edf41RoboTransformAfter=0.0f;   // development only: transform this many s after it appears, as ObjectAction 0 (0 = when the script says)
     bool edf41Mother401=true;       // EDF4.1's UfoMother401 (the Earth Eater) and its eleven part classes (edf41mother401.cpp)
     int edf41Mother401Dev=0;        // development only (bits): 1 attack always allowed, 2 short attack waits, 4 panels in place at once,
-                                    // 8 the Core destroyed / 16 a weak panel destroyed after edf41Mother401DevKill seconds
+                                    // 8 the Core destroyed / 16 a weak panel destroyed after edf41Mother401DevKill seconds, 32 the
+                                    // ObjectAction edf41Mother401DevAction then, 64 Edf41DevShoot shoots the generators' wave enemies too
     float edf41Mother401DevKill=60.0f;
     int edf41Mother401DevAction=0;  // development only (bit 32 of edf41Mother401Dev): the ObjectAction run at edf41Mother401DevKill seconds
     float edf41Mother401Place=0.0f; // development only: the 401 hull held this many m above the player (0 = where the script put it)

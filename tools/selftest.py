@@ -7316,6 +7316,19 @@ def edf41_mother401_data() -> None:
         if 'weakpoint' in top:
             assert len(top['edf41_401_weak']) == 3, rel
             assert m.ragdoll_body(eo.read(m.rel_of(top['ragdoll'][0])), top['weakpoint']), (rel, top['weakpoint'])
+        # the lock-on point (MAB list 1, ターゲット): every part that can be hurt has one, the Panel01 armour none (4.1's models)
+        if cls == 'UfoMother401_Panel01':
+            assert 'edf41_401_lock' not in top, rel
+        else:
+            assert len(top['edf41_401_lock']) == 3, rel
+        # the charge glows (MOTHER401_GLOWS): EDF6's ChargeEffect_StdParticle node per colour, 4.1's Particle3_k block
+        glows = top.get('edf41_401_charge')
+        assert (glows is not None) == (cls in m.MOTHER401_GLOWS), rel
+        for node, colour in zip(glows or [], m.MOTHER401_GLOWS.get(cls, ())):
+            assert node[1][0] == 'ChargeEffect_StdParticle' and node[1][1][0][-1] == [0, 'Particle3_k.dds'], rel
+            assert [round(float(c), 3) for c in node[1][1][0][13][1]] == list(colour), rel
+        if glows:
+            assert len(glows) == len(m.MOTHER401_GLOWS[cls]), rel
     assert len(classes) == 11, classes
 
 
@@ -7352,6 +7365,14 @@ def edf41_mother401_plugin_contract() -> None:
     code = re.sub(r'//[^\n]*', '', cpp)
     assert not re.search(r'0xD7480|0x53060|0x52DE0|0x52F30|0x551E0', code)   # the DSGO accessors fault on a plain SGO
     assert 'OnlineRunsHere(self)' in cpp
+    # the finishing pass (2026-10-15, docs/edf41-ufomother401.md): material animations, bullet hit sounds, lock-on points, the
+    # weak panel's light flashes, the charge glows and the hull's ragdoll out of the world; every new EDF.dll call fingerprinted
+    for rva in ('kMatCtor', 'kMatBind', 'kMatAdd', 'kMatPlay', 'kMatUpdate', 'kMatFree'):
+        assert re.search(rf'\{{{rva},\{{0x', shared), f'{rva} has no fingerprint'
+    for call in ('FireHit(', 'MaterialAnimsLoad(', 'MaterialAnimsFree(', 'AddLockPoint(', 'StencilLight(', 'SmallBurst(', 'Encount('):
+        assert call in cpp, call
+    assert 'kChargePrint' in cpp and 'kDisablePrint' in cpp and 'GraveyardTick();' in cpp
+    assert re.search(r'^Edf41DevShoot=0$', ini, re.M)
 
 
 @test
