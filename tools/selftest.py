@@ -7280,7 +7280,7 @@ def edf41_robo_finish() -> None:
     cpp, shared, header = src('src/edf41robo.cpp'), src('src/edf41classes.cpp'), src('src/edf41classes.h')
     assert 'p6::FindLocatorIn(Model(r.obj),1,L"ロックオン",&r.lockOn)' in cpp
     assert 'SetSlot(roboClass,kSlotOnDamaged,reinterpret_cast<void*>(&OnDamagedWrap));' in cpp and 'kSlotOnDamaged=18' in cpp
-    assert 'r.ragdoll=p6::RagdollOn(r.obj);' in cpp and 'p6::AreaDamage(r.obj,c,radius,damage,' in cpp
+    assert 'r.ragdoll=p6::RagdollOn(r.obj);' in cpp and 'p6::AreaDamage(r.obj,lifted,radius,damage,' in cpp
     # the ragdoll goes back on the ragdoll layer first (EventAnimationObject's constructor put it on 0x11, which the ground ignores)
     on = cpp.split('bool RagdollOn(void* object) noexcept {', 1)[1].split('return true;', 1)[0]
     assert on.index('(kRagdollLayer)(rag,6)') < on.index('(kRagdollOn)(rag)'), on

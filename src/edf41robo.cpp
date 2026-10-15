@@ -1268,12 +1268,18 @@ void RaiseEvent(Robo& r,const Event& e) noexcept {
             Smoke(c,e.b*size*0.7f);              // 4.1 0x1B7140, the dust: scale x size x 0.7
             // The damage: EDF6's own area damage (ApplyAreaDamage 0x542670, team = the robot's, the robot itself skipped): every
             // hostile object in the circle (players, EDF NPCs, their vehicles) takes it; nothing is drawn, as 4.1's 0x28B930.
-            sent=p6::AreaDamage(r.obj,c,radius,damage,2,&any);
+            // 2 m up: ApplyAreaDamage drops a target its occlusion ray (centre -> the target's nearest point, 0x542F47) finds
+            // blocked, and a ray from a point on the ground meets the ground (no hit at all on the 13:33 M411 run)
+            const float lifted[3]={c[0],c[1]+2.0f,c[2]};
+            sent=p6::AreaDamage(r.obj,lifted,radius,damage,2,&any);
         }
         if(any)++r.blasts;
         if(++r.hits<=24 || (any && r.blasts<=24)) {
-            if(ground)Log("EDF41ROBO %p hit %s at the ground %.0f %.0f %.0f radius %.1f damage %.1f: area damage %s%s",r.obj,U8(e.text).text,c[0],c[1],c[2],radius,damage,
-                          sent ? "sent" : "NOT sent",any ? ", something was hit" : "");
+            float pl[3]={};
+            const bool seen=NearestPlayer(c,pl);
+            const float dp[3]={pl[0]-c[0],pl[1]-c[1],pl[2]-c[2]},dt[3]={r.target[0]-c[0],r.target[1]-c[1],r.target[2]-c[2]};
+            if(ground)Log("EDF41ROBO %p hit %s at the ground %.0f %.0f %.0f radius %.1f damage %.1f: area damage %s%s (player %.0f m, target %.0f m away)",r.obj,U8(e.text).text,
+                          c[0],c[1],c[2],radius,damage,sent ? "sent" : "NOT sent",any ? ", something was hit" : "",seen ? Len3(dp) : -1.0f,r.haveTarget ? Len3(dt) : -1.0f);
             else Log("EDF41ROBO %p hit %s at %.0f %.0f %.0f: no ground within 50 m, nothing (as 4.1)",r.obj,U8(e.text).text,m[12],m[13],m[14]);
         }
         break;
