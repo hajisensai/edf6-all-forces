@@ -1588,6 +1588,7 @@ ROBO_LOCATORS = ('muzzle_small_l', 'muzzle_small_r', 'muzzle_middle_l', 'muzzle_
 ROBO_MOST_EVENTS = 24        # kMostEvents: per clip
 ROBO_SE_PREFIXES = ('ロボ',)   # 4.1's SEPRESET entries copied into edf41_se (se41_table): every name the robot plays
 ROBO_MOST_MOTION_KEYS = 512  # kMostMotionKeys
+ROBO_MATERIAL_PAIRS = ((0, 0), (1, 2))   # (4.1 blob, slot): the lights' loop and the death (EDF41.exe 0x273FB2 / 0x274046)
 
 
 
@@ -1649,7 +1650,7 @@ def robo_fix(games: Games, files: dict[str, bytes]) -> None:
     """UfoRobo401's files for the plugin's class (src/edf41robo.cpp):
     - CAS: main gets `default` (EventAnimationObject's constructor plays it; 4.1's class starts in ship) as an alias of
       ship; the root bone's tracks of the moving clips dropped (robo_motion);
-    - edf41_robo_events (robo_events), edf41_robo_motion (robo_motion); material_animation dropped (below);
+    - edf41_robo_events (robo_events), edf41_robo_motion (robo_motion); material_animation as [blob, slot] pairs (below);
     - edf41_se: [[4.1 SEPRESET name, cue, volume, pitch, inner, reference, cull], ...] for every name the object plays (se_table, ragdoll_contact,
       the MAB's se events, ROBO_CLASS_SE; se41_table's form, all of 4.1's ロボ* entries): EDF6's SEPRESET has none of 4.1's robot names (EDF6 ships the bank,
       TIKYUU4_EN_UFOROBO.ACB, with every en_Robo_* cue, but no preset naming them), so the plugin plays the cues by name
@@ -1660,10 +1661,11 @@ def robo_fix(games: Games, files: dict[str, bytes]) -> None:
     cas_rel = rel_of(am[1])
     mab = mab_block(am[2])
     cas = files[cas_rel]
-    # material_animation: 4.1's class drives it itself (EDF41.exe 0x2713F0 / 0x273FB2, the hull's lights) as a bare MTAB blob,
-    # the form EDF6's material code faults on (check_materials); EventAnimationObject's constructor does not read the key
-    # and the plugin does not drive the lights: dropped.
-    members.pop('material_animation', None)
+    # material_animation: 4.1's class drives its two lights itself (EDF41.exe 0x273FB2: blob 0 added with slot 0 and played
+    # looping from the start, blob 1 with slot 2 and played once at the death, 0x278DEB) from bare MTAB blobs, the form EDF6's
+    # material code faults on: [[blob, slot], ...] pairs here (material_pairs), which src/edf41robo.cpp hands to EDF6's own
+    # material animation player (0x6DBE90 / 0x6DC6B0, UfoCarrier508's); EventAnimationObject's constructor does not read the key.
+    members['material_animation'] = material_pairs(members['material_animation'], ROBO_MATERIAL_PAIRS)
     members['edf41_robo_events'] = robo_events(cas, mab)
     members['edf41_robo_motion'], moved = robo_motion(cas)
     cas = cas_pose.strip_bone(cas, moved, ROBO_ROOT_BONE)

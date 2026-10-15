@@ -7126,8 +7126,9 @@ def edf41_robo_registered() -> None:
     M411, DLC pack 1 M415 / M416, pack 2 M010; make_edf5_campaign.plan41 skips a mission whose object file is not registered).
     What robo_fix adds is there and agrees with the files: the CAS has `default` (EventAnimationObject's constructor plays it)
     and every state the plugin plays, the moving clips' root bone has no track left (the plugin moves the object), every
-    edf41_robo_events state is a CAS state, every se event and class sound is an edf41_se name with 4.1's cue, and there is
-    no material_animation (4.1's bare MTAB blob, which EDF6's material code faults on)."""
+    edf41_robo_events state is a CAS state, every se event and class sound is an edf41_se name with 4.1's cue, and
+    material_animation is 4.1's two light blobs as [MTAB blob, slot] pairs (ROBO_MATERIAL_PAIRS; 4.1's bare blobs make EDF6's
+    material code fault; src/edf41robo.cpp hands the pairs to EDF6's material animation player)."""
     import cas_graft
     import cas_pose
     import edf41_objects as eo
@@ -7154,7 +7155,11 @@ def edf41_robo_registered() -> None:
                             naming.append(f'{base.split("/")[0]}/{mid}')
     assert sorted(set(naming)) == ['missions/M007', 'missions/M411', 'mp01/M415', 'mp01/M416', 'mp02/M010'], naming
     top = sgo.load(data=eo.read(rel))
-    assert top['xgs_scene_object_class'] == 'UfoRobo' and 'material_animation' not in top
+    assert top['xgs_scene_object_class'] == 'UfoRobo'
+    ma = top['material_animation']
+    assert [e[1] for e in ma] == [slot for _i, slot in m.ROBO_MATERIAL_PAIRS] == [0, 2], ma
+    blobs = [bytes.fromhex(e[0][4:]) if isinstance(e[0], str) and e[0].startswith('raw:') else e[0] for e in ma]
+    assert all(isinstance(b, bytes) and b[16:20] == b'MTAB' for b in blobs), [type(e[0]) for e in ma]
     for key in ('robo_attack_table', 'robo_small_muzzle_setting', 'robo_middle_muzzle_setting', 'robo_large_muzzle_setting',
                 'small_bullet_class', 'cannon_bullet_class', 'genocide_bullet_class', 'se_table', 'game_sound'):
         assert key in top, key
@@ -7283,6 +7288,9 @@ def edf41_robo_finish() -> None:
     for name in re.findall(r'hitSe=L"([^"]+)"', cpp) + re.findall(r'chargeSe=L"([^"]+)"', cpp) + re.findall(r'shotSe=L"([^"]+)"', cpp):
         assert name in se, name
     assert len(re.findall(r'hitSe=L"', cpp)) == 4 and 'L"ik_control_info"' in cpp
+    # the lights: EDF6's material animation player on the model (+0x160), the loop at birth, the second entry at the death
+    assert 'p6::LightsStart(r.lights,r.obj,Key(o,L"material_animation"))' in cpp and 'p6::LightsPlay(r.lights,0,2)' in cpp
+    assert 'p6::LightsPlay(r.lights,1,1)' in cpp and 'p6::LightsEnd(it->second.lights)' in cpp
     prints = cpp.split('constexpr Print kPrints[]={', 1)[1].split('};', 1)[0]
     for rva in re.findall(r'\b(k[A-Z]\w+)=0x[0-9A-F]+', cpp.split('namespace p6 {', 1)[1].split('struct Print', 1)[0]):
         if rva in ('kInitParamBase', 'kEffects', 'kManager', 'kChargeVtable'):   # data, not code

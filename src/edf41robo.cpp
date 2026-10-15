@@ -70,6 +70,13 @@ void Fail(const char* what) noexcept {
 
 void* Model(void* object) noexcept { return static_cast<char*>(object)+kEaoModel; }
 
+// UTF-8 for the log (Log's %ls goes through the C locale and drops a line with Japanese in it: no 攻撃判定 line reached the log
+// of the M411 run 2026-10-15 12:46).
+struct U8 {
+    char text[128]={};
+    explicit U8(const std::wstring& w) noexcept { WideCharToMultiByte(CP_UTF8,0,w.c_str(),-1,text,sizeof(text),nullptr,nullptr); }
+};
+
 // ---- EDF6 functions this file calls itself (phase 3, 2026-10-15; static reading of EDF.dll, H unless noted) --------------
 // Each is fingerprinted (first 8 bytes) once; a mismatch turns the part that needs it off and is logged.
 //  - 0x6BADD0 FindLocator(model, out, list, name): `list` is the MAB locator list. ロックオン sits in list 1 (the lock-on list
@@ -101,7 +108,9 @@ void* Model(void* object) noexcept { return static_cast<char*>(object)+kEaoModel
 namespace p6 {
 constexpr std::size_t kFindLocator=0x6BADD0,kRagdollOn=0x6E40B0,kPointImpulse=0x11B0CB0,kLinearImpulse=0x11B0C80,kBodyPos=0x11B15B0,
     kAreaDamage=0x542670,kMetalHit=0x2E8F20,kChargeStep=0x307C40,kChargeCtor=0x306B60,
-    kCasVar=0x1167170,kCasVarSet=0x116DF60,kDelete=0x118A1B0,kBodyById=0x6EA430,kChargeCreate=0x84A60,kCasSpeed=0x116DF20;
+    kCasVar=0x1167170,kCasVarSet=0x116DF60,kDelete=0x118A1B0,kBodyById=0x6EA430,kChargeCreate=0x84A60,kCasSpeed=0x116DF20,
+    kMatCtor=0x6DBE90,kMatTarget=0x6DC7B0,kMatLoad=0x6DC6B0,kMatPlay=0x6DC830,kMatStep=0x6DC8B0,kMatFree=0x29D120,
+    kRagdollLayer=0x6E9320;
 constexpr std::size_t kInitParamBase=0x1762068,kEffects=0x20B2980,kManager=0x20B2958,kChargeVtable=0x17A9338;
 struct Print { std::size_t rva; unsigned char bytes[8]; };
 constexpr Print kPrints[]={
@@ -113,6 +122,10 @@ constexpr Print kPrints[]={
     {kCasVarSet,{0x41,0x0F,0x28,0x00,0x8B,0xC2,0x48,0x8D}},{kDelete,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},
     {kBodyById,{0x4C,0x8B,0x41,0x78,0x45,0x33,0xC9,0x48}},{kChargeCreate,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C}},
     {kCasSpeed,{0x8B,0xC2,0x48,0x69,0xD0,0x60,0x01,0x00}},
+    {kMatCtor,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C}},{kMatTarget,{0x48,0x89,0x11,0xC3,0xCC,0xCC,0xCC,0xCC}},
+    {kMatLoad,{0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74}},{kMatPlay,{0x4C,0x8B,0xC9,0x0F,0x57,0xC9,0x8B,0xCA}},
+    {kMatStep,{0x48,0x8B,0xC4,0x48,0x89,0x68,0x18,0x48}},{kMatFree,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C}},
+    {kRagdollLayer,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C}},
 };
 std::atomic<int> state{0};   // 0 unchecked, 1 good, 2 refused
 bool Ok() noexcept {
@@ -164,9 +177,15 @@ int BodyById(void* object,std::uint32_t id) noexcept {
     if(!Ok())return -1;
     return At<int(__fastcall*)(void*,std::uint32_t)>(kBodyById)(static_cast<char*>(object)+kEaoRagdoll,id);
 }
+// The ragdoll on, its bodies first put back on the ragdoll collision layer: LoadRagdoll gives every body layer 6 (0x106160 at
+// 0x6EB9A7), but EventAnimationObject's constructor then moves them all to layer 0x11 (0x6E9320(ragdoll, 0x11) at 0x5B6401: the
+// layer of things only bullets and rays meet), which the ground does not stop: the first real deaths (M007 / M411, 2026-10-15)
+// fell through the map. 4.1 does the same at its death (0x275B30: every body's filter to (system << 16) | 0x426, layer 6).
 bool RagdollOn(void* object) noexcept {
     if(!Ok() || !RagdollBodies(object).count)return false;
-    At<void(__fastcall*)(void*)>(kRagdollOn)(static_cast<char*>(object)+kEaoRagdoll);
+    char* rag=static_cast<char*>(object)+kEaoRagdoll;
+    At<void(__fastcall*)(void*,int)>(kRagdollLayer)(rag,6);
+    At<void(__fastcall*)(void*)>(kRagdollOn)(rag);
     return true;
 }
 void PointImpulse(void* handle,const float* impulse,const float* point) noexcept {
@@ -249,6 +268,34 @@ int CasVar(void* object,const wchar_t* name) noexcept {
     const std::size_t count=*reinterpret_cast<const std::size_t*>(cas+0x90);
     return i>=0 && static_cast<std::size_t>(i)<count ? i : -1;
 }
+// The material animation player (the lights), as UfoCarrier508 keeps one at +0x15C8 (and AlienTrailer at +0xAA0): 0x40 bytes,
+// constructed by 0x6DBE90; its target the model's +0x160 (AlienTrailer 0x30A10C: object +0x720 on the same model layout as
+// EventAnimationObject's); [[MTAB blob, slot], ...] loaded by 0x6DC6B0; entry i played with mode m by 0x6DC830 (the carrier plays
+// 0 with 2 at birth, 0x4F88B5); stepped by 0x6DC8B0(player, dt, 1.0) every frame (its Update's last call, 0x4F957C); its vector
+// (player +8) freed by 0x29D120 (the carrier's destructor, 0x4F8AAB).
+struct Lights { alignas(16) unsigned char player[0x40]; bool on=false; };
+bool LightsStart(Lights& l,void* object,const SgoNode* table) noexcept {
+    if(l.on || !Ok() || !table || Count(table)<1)return false;
+    std::memset(l.player,0,sizeof(l.player));
+    At<void(__fastcall*)(void*)>(kMatCtor)(l.player);
+    At<void(__fastcall*)(void*,void*)>(kMatTarget)(l.player,static_cast<char*>(object)+kEaoModel+0x160);
+    At<int(__fastcall*)(void*,const SgoNode*)>(kMatLoad)(l.player,table);
+    l.on=true;
+    return true;
+}
+std::size_t LightsCount(const Lights& l) noexcept { return l.on ? *reinterpret_cast<const std::size_t*>(l.player+0x20) : 0; }
+void LightsPlay(Lights& l,int index,int mode) noexcept {
+    if(index>=0 && static_cast<std::size_t>(index)<LightsCount(l))At<void(__fastcall*)(void*,int,int)>(kMatPlay)(l.player,index,mode);
+}
+void LightsStep(Lights& l,void* dt) noexcept {
+    if(l.on && dt)At<void(__fastcall*)(void*,void*,float)>(kMatStep)(l.player,dt,1.0f);
+}
+void LightsEnd(Lights& l) noexcept {
+    if(!l.on)return;
+    At<void(__fastcall*)(void*)>(kMatFree)(l.player+8);
+    l.on=false;
+}
+
 // A CAS player's playback rate (player +0x100: 0x116DFB0 advances the clock by dt x it): EDF6_Martian's death (slot 60,
 // 0x479677) sets 0 on its main player before its ragdoll goes (4.1 0x278EC0 puts the main player's weight to 0 likewise).
 void CasRate(void* object,float rate) noexcept {
@@ -420,6 +467,7 @@ struct Robo {
     bool haveLastMatrix=false;
     int lockBone=-1;             // hara1, when the ロックオン locator is missing
     void* dt=nullptr;            // this frame's Update(dt) argument (the charge effects' step takes it)
+    p6::Lights lights;           // the material animation (4.1's two light blobs: the loop, the death)
     // target
     bool haveTarget=false;
     float target[3]={};
@@ -853,15 +901,18 @@ void BodyEnter(Robo& r,int s) noexcept {
         r.stepMotion=nullptr;
         if(r.form==1 && !r.ragdoll)Play(r,r.stDead,L"dead");   // no ragdoll to hand it to: the clip instead
         if(r.ragdoll)p6::CasRate(r.obj,0.0f);   // the animation stops driving the bones
+        p6::LightsPlay(r.lights,1,1);   // 4.1 0x278DEB: the second light animation, once
         break;
     }
     case kS11: {   // 4.1 0x278FB0: Explosion_Big at the ragdoll's first body, along the object's up row, 1.0 / 2.0; se_table[2]
         r.flags=1;
-        float up[3]={0.0f,1.0f,0.0f};
+        float up[3]={0.0f,1.0f,0.0f},at[3]={r.pos[0],r.pos[1],r.pos[2]};
         const char* o=static_cast<const char*>(r.obj);
         if(Readable(o+0x70,12))std::memcpy(up,o+0x70,12);
-        BigExplosion(r.pos,up,1.0f,2.0f);
-        PlaySe(r,L"ロボ死亡",r.pos);
+        const p6::Bodies b=p6::RagdollBodies(r.obj);
+        if(r.ragdoll && b.count)p6::BodyPosition(p6::BodyHandle(b,0),at);
+        BigExplosion(at,up,1.0f,2.0f);
+        PlaySe(r,L"ロボ死亡",at);
         break;
     }
     default:
@@ -1116,12 +1167,7 @@ void Sample(const Motion& m,float t,float* out) noexcept {
 }
 
 void Move(Robo& r) noexcept {
-    if(r.body>=kS10 && r.ragdoll) {   // the ragdoll moves it: the object's matrix follows its first body (4.1 reads that one too)
-        float p[3];
-        const p6::Bodies b=p6::RagdollBodies(r.obj);
-        if(b.count && p6::BodyPosition(p6::BodyHandle(b,0),p))std::memcpy(r.pos,p,12);
-        return;
-    }
+    if(r.body>=kS10 && r.ragdoll)return;   // the ragdoll has the bones; the object stays where it died (as ShootingTarget's does)
     if(r.form==0) {
         if(r.body==kS10) {   // a dead ship drops (4.1: its ragdoll falls; the plugin has no ragdoll to hand it to)
             r.fall-=0.008f;
@@ -1198,20 +1244,38 @@ void RaiseEvent(Robo& r,const Event& e) noexcept {
         break;
     case kEvSeStop:
         break;   // 4.1 stops the channel's loop (ロボ３６０発射); the cues the plugin plays are one-shots
-    case kEvHit: {   // 4.1 0x277790: damage x s at the locator, radius scale x the locator's size
+    case kEvHit: {   // 4.1 0x277790: damage x s at the ground under the locator, radius scale x the locator's size
         LocatorHandle l{};
         float m[16];
         if(!FindLocator(Model(r.obj),e.text.c_str(),&l) || !LocatorMatrix(l,m)) { Fail("an attack range locator is missing"); break; }
-        const float size=(std::max)(Len3(m),1.0f);
+        // the locator's size: a kind-0 MAB record keeps its radius as a float at +0x10 (mab_legacy.Locator.b; 足歩行衝撃 20,
+        // 手攻撃範囲 50); 4.1's 0x277B48 multiplies by it (the M411 run of 13:03 had a 1 m circle from the matrix's row length)
+        float size=1.0f;
+        const char* rec=static_cast<const char*>(l.entry);
+        if(rec && Readable(rec+8,12) && *reinterpret_cast<const std::int32_t*>(rec+8)==0) {
+            std::memcpy(&size,rec+0x10,4);
+            if(!(size>0.0f && size<1000.0f))size=1.0f;
+        }
         const float radius=e.b*size,damage=e.a*r.s;
-        Quake(m+12,e.c,radius*10.0f);            // 4.1 0x5689F0 (message 0x80000018), quake default 0.2
-        Smoke(m+12,e.b*size*0.7f);               // 4.1 0x1B7140, the dust: scale x size x 0.7
-        // The damage: EDF6's own area damage (ApplyAreaDamage 0x542670, team = the robot's, the robot itself skipped): every
-        // hostile object in the circle (players, EDF NPCs, their vehicles) takes it; nothing is drawn, as 4.1's 0x28B930.
-        bool any=false;
-        const bool sent=p6::AreaDamage(r.obj,m+12,radius,damage,2,&any);
+        // 4.1 0x277A83: everything happens at the ground under the locator (a map ray from 50 m above it to 50 m below); no
+        // ground there, nothing at all (0x277A8C)
+        float c[3];
+        const float from[3]={m[12],m[13]+50.0f,m[14]},to[3]={m[12],m[13]-50.0f,m[14]};
+        const bool ground=GroundHit(from,to,c,static_cast<char*>(r.obj)+kEaoRagdoll);
+        bool any=false,sent=false;
+        if(ground) {
+            Quake(c,e.c,radius*10.0f);           // 4.1 0x5689F0 (message 0x80000018), quake default 0.2
+            Smoke(c,e.b*size*0.7f);              // 4.1 0x1B7140, the dust: scale x size x 0.7
+            // The damage: EDF6's own area damage (ApplyAreaDamage 0x542670, team = the robot's, the robot itself skipped): every
+            // hostile object in the circle (players, EDF NPCs, their vehicles) takes it; nothing is drawn, as 4.1's 0x28B930.
+            sent=p6::AreaDamage(r.obj,c,radius,damage,2,&any);
+        }
         if(any)++r.blasts;
-        if(++r.hits<=24 || (any && r.blasts<=24)) { Log("EDF41ROBO %p hit %ls at %.0f %.0f %.0f radius %.1f damage %.1f: area damage %s%s",r.obj,e.text.c_str(),m[12],m[13],m[14],radius,damage,sent ? "sent" : "NOT sent",any ? ", something was hit" : ""); }
+        if(++r.hits<=24 || (any && r.blasts<=24)) {
+            if(ground)Log("EDF41ROBO %p hit %s at the ground %.0f %.0f %.0f radius %.1f damage %.1f: area damage %s%s",r.obj,U8(e.text).text,c[0],c[1],c[2],radius,damage,
+                          sent ? "sent" : "NOT sent",any ? ", something was hit" : "");
+            else Log("EDF41ROBO %p hit %s at %.0f %.0f %.0f: no ground within 50 m, nothing (as 4.1)",r.obj,U8(e.text).text,m[12],m[13],m[14]);
+        }
         break;
     }
     case kEvBeamStart: {   // 4.1 0x277C10: the hand guns fire until 砲撃終了
@@ -1312,13 +1376,15 @@ bool Setup(Robo& r) noexcept {
     float durability=0.0f;
     if(Readable(o+kDurabilityAt,4))std::memcpy(&durability,o+kDurabilityAt,4);
     r.lastHp=durability;
+    // the lights (4.1 0x273FB2: entry 0 played looping from the start)
+    if(p6::LightsStart(r.lights,r.obj,Key(o,L"material_animation")))p6::LightsPlay(r.lights,0,2);
     std::int32_t team=0;
     if(Readable(o+kTeamAt,4))std::memcpy(&team,o+kTeamAt,4);
     Log("EDF41ROBO %p set up: pos %.0f %.0f %.0f yaw %.2f scale %.2f level %.2f (s %.2f) durability %.0f team %d lock point %p drive %d; %zu event clips, %zu motions, %zu sounds, %zu attacks; muzzles %d/%d/%d/%d feet %d/%d",
         r.obj,r.pos[0],r.pos[1],r.pos[2],r.yaw,r.scale,r.level,r.s,durability,team,r.lockPoint,r.driveOn ? 1 : 0,r.clipEvents.size(),r.motions.size(),static_cast<std::size_t>(Count(Key(r.obj,L"edf41_se"))),
         r.attacks.size(),sm.muzzles,md.muzzles,lg.muzzles,gn.muzzles,r.footL.entry ? 1 : 0,r.footR.entry ? 1 : 0);
-    Log("EDF41ROBO %p lock-on locator %s; aim bones %d %d / %d %d; IK toes %d %d, CAS variables %d %d",r.obj,r.lockOn.entry ? "ロックオン (list 1)" : "missing",
-        sm.muzzle[0].bone,sm.muzzle[1].bone,md.muzzle[0].bone,md.muzzle[1].bone,r.ikBone[0],r.ikBone[1],r.ikVar[0],r.ikVar[1]);
+    Log("EDF41ROBO %p lock-on locator %s; aim bones %d %d / %d %d; IK toes %d %d, CAS variables %d %d; light animations %zu",r.obj,r.lockOn.entry ? "ロックオン (list 1)" : "missing",
+        sm.muzzle[0].bone,sm.muzzle[1].bone,md.muzzle[0].bone,md.muzzle[1].bone,r.ikBone[0],r.ikBone[1],r.ikVar[0],r.ikVar[1],p6::LightsCount(r.lights));
     return true;
 }
 
@@ -1365,6 +1431,16 @@ void Die(Robo& r,const void* gdi) noexcept {
     Explosion(p,nrm,3.0f);
     r.ragdoll=p6::RagdollOn(r.obj);
     int pushed=0;
+    if(r.ragdoll) {   // which bodies went dynamic (record +0xA4: may go ragdoll; +0x9C the mode now, 4 = dynamic)
+        const p6::Bodies b=p6::RagdollBodies(r.obj);
+        int able=0,dynamic=0;
+        for(std::size_t i=0;i<b.count;++i) {
+            able+=b.data[i*0xC0+0xA4]!=0;
+            dynamic+=*reinterpret_cast<const std::int32_t*>(b.data+i*0xC0+0x9C)==4;
+        }
+        Log("EDF41ROBO %p ragdoll: %zu bodies, %d may go ragdoll, %d dynamic; body 0 mode %d",r.obj,b.count,able,dynamic,
+            b.count ? *reinterpret_cast<const std::int32_t*>(b.data+0x9C) : -1);
+    }
     if(r.ragdoll && gdi) {
         const float radius=GdiFloat(gdi,0x58);
         float centre[3]={GdiFloat(gdi,0x30),GdiFloat(gdi,0x34),GdiFloat(gdi,0x38)},imp[3]={GdiFloat(gdi,0x40),GdiFloat(gdi,0x44),GdiFloat(gdi,0x48)};
@@ -1606,6 +1682,7 @@ std::uint64_t __fastcall DtorWrap(void* self,unsigned flags) {
         if(it!=robos.end()) {
             StopSound(it->second.drive,1);
             for(Gun& g:it->second.gun)ChargeOff(g);
+            p6::LightsEnd(it->second.lights);
             robos.erase(it);
         }
     }
@@ -1646,6 +1723,7 @@ std::uint64_t __fastcall UpdateWrap(void* self,void* dt) {
             Robo& r=it->second;
             Events(r);
             AimBones(r);
+            p6::LightsStep(r.lights,dt);
             WriteMatrix(r);   // the class's update leaves the matrix alone; keep ours for the next frame's draw
             // the lock point on ロックオン (on hara1's origin when the model has no such locator)
             float m[16];
