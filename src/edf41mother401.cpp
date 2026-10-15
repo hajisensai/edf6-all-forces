@@ -655,7 +655,7 @@ void FireFrom(Part& p,const float* from,const float* dir,const Bullet& b,int hit
     float m[16];
     AimMatrix(from,dir,m);
     bool ok;
-    if(hitSe>=0 && hitSe<static_cast<int>(p.se.size()) && p.se[static_cast<std::size_t>(hitSe)].name[0]) {
+    if(hitSe>=0 && hitSe<static_cast<int>(p.se.size()) && p.se[static_cast<std::size_t>(hitSe)].name[0] && !(DevBits()&2048)) {   // dev 2048: none
         const Cue& c=p.se[static_cast<std::size_t>(hitSe)];
         SeParams sp; sp.volume=c.volume; sp.pitch=c.pitch; sp.inner=c.inner; sp.reference=c.reach;
         ok=FireHit(p.obj,m,b,c.name,sp);
@@ -991,7 +991,10 @@ void InitPart(Part& p) noexcept {
         default: break;
     }
     if(p.kind==Kind::finalGenerator && p.hasSpawn)std::memcpy(p.muzzle,p.spawnAt,12);   // its glow sits on 排出位置 (0x266f70)
-    GlowsMake(p);
+    // The charge glows stay off unless asked for (development bit 512): on the real game they crashed twice (a bad_alloc in the
+    // emitter's update job, EDF+0x30316D from 0x302D10, M809; the exit-time bank cache EDF+0x7ADCFB after every run they ran
+    // in, never without them: docs/edf41-ufomother401.md 4).
+    if(DevBits()&512)GlowsMake(p);
     if(IsBattery(p.kind)) {
         p.destroyedFor=120+Rand(p.rng,120);   // +0x438
         p.deleteAt=180+Rand(p.rng,120);       // +0x434
@@ -1452,6 +1455,7 @@ std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
     }
     float weakAt[3];
     bool weakShot=false,canHurt=false;
+    std::uint32_t hullFramesNow=0;
     {
         std::lock_guard<std::recursive_mutex> hold(lock);
         if(Part* p=Find(self); p && p->seen) {
@@ -1480,10 +1484,14 @@ std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
                 weakShot=true;
             }
             canHurt=(p->wholeHits || p->weakBody>=0) && (!IsPanel(p->kind) || (p->triggered && p->delay<=0));
+            const Part* owner=IsPanel(p->kind) ? p : ById(p->panel);
+            if(const Part* h=owner ? HullOf(*owner) : nullptr)hullFramesNow=h->hullFrames;
         }
     }
     // development (ini Edf41DevShoot): the lock-on point (the aim point), and for a weak-body part its weak body's bone too
-    if(!del && canHurt && Alive(self)) {   // (the Panel01 armour takes no hit at all)
+    // bit 256: not before Edf41Mother401DevKill seconds of the hull (M809's script watches its weak panels only from its OA(0) on)
+    const bool devLater=(DevBits()&256) && static_cast<float>(hullFramesNow)<Cfg().edf41Mother401DevKill*kFps;
+    if(!del && canHurt && !devLater && Alive(self)) {   // (the Panel01 armour takes no hit at all)
         float aim[3];
         if(AimPoint(self,aim))DevShoot(self,aim);
         if(weakShot)DevShoot(self,weakAt,1);
@@ -1560,7 +1568,7 @@ void __fastcall PartDamaged(void* self,void* gdi) {
         const float down[3]={0,-1,0};
         Explosion(q,down,15.0f);
         const float grey[4]={0.5f,0.5f,0.5f,2.5f};   // ten grey light flashes, +0x60 = i x 300, 180 frames (0x271642)
-        for(int i=0;i<10;++i)StencilLight(q,grey,static_cast<float>(i)*300.0f,180);
+        if(!(DevBits()&1024))for(int i=0;i<10;++i)StencilLight(q,grey,static_cast<float>(i)*300.0f,180);   // dev 1024: none
         q[1]-=20.0f;
         Smoke(q,1.0f);                                // 0x1b2d90: the upward smoke puff (煙_01)
         p->killed=true;   // its own destroy below, not the blast's
