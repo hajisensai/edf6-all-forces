@@ -258,7 +258,13 @@ void Springs() {
     Cue shot=Quiet();shot.shots=1;shot.recoil=1.0f;
     p=Advance(s,shot);
     Pose q=Advance(s,Quiet());
-    Expect(p.z<0 && p.pitch>0 && q.z<p.z,"a shot kicks back and up",p.z,p.pitch);
+    Expect(p.z<-.06f && p.pitch>.09f && q.z>p.z && q.pitch<p.pitch,
+           "a shot kicks immediately, then returns without waiting for the movement spring",p.z,p.pitch);
+    State automatic{};
+    for(int i=0;i<120;++i) {
+        const Pose burst=Advance(automatic,shot);
+        Expect(burst.z>=-kRecoilMostBack && burst.pitch<=kRecoilMostUp,"automatic recoil stays bounded",burst.z,burst.pitch);
+    }
     p=Run(s,Quiet(),90);
     Expect(std::fabs(p.z)<1e-3f && std::fabs(p.pitch)<1e-3f,"...and settles",p.z,p.pitch);
     Cue reload=Quiet();reload.reloading=true;

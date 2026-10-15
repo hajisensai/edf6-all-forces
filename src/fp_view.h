@@ -12,8 +12,8 @@
 //    (a reload's) on it kept.
 //  - Melee weapons and shields instead use NativeGripTransform: position the grip, preserving the authored rotation
 //    relative to the aim frame. Cancelling W's rotation every frame cancels their animated swing too.
-//  - The collapse: a matrix that sends every vertex it weighs to one point (rows 0..2 zero): the body's bones that are
-//    not the arms', so the body draws nothing but its arms (the triangles of the rest are degenerate, no pixel).
+//  - The collapse: a matrix that sends a rigid instrument glyph's vertices to one point (rows 0..2 zero). The
+//    first-person body no longer uses it: mixed skinning faces must be excluded by topology (fp_skin.h).
 //  - The eye (Call of Duty's: a view height over the body's own axis): on the yaw-only body frame's up axis, `ahead` in
 //    front of it, at the head bone's height eased (the user, 2026-10-14: the Fencer's view shook: its head's sway in the
 //    walk and the dash, followed by a quarter a frame, went into the camera).

@@ -18,7 +18,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/map.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/infantryscope.cpp)
 # First person on foot (src/firstperson.cpp: the camera at the head, the arms and weapon drawn as a viewmodel; the
 # arithmetic in src/fp_view.h, checked offline by tools/fp_view_check.cpp).
-target_sources(EDF6VehicleCrew PRIVATE src/firstperson.cpp src/fp_vehicle.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/firstperson.cpp src/fp_vehicle.cpp src/fp_skin_gpu.cpp)
 # The damage statistics (src/damagestats.cpp: the damage hook and the round tags; the page in src/hud_stats.inc).
 target_sources(EDF6VehicleCrew PRIVATE src/damagestats.cpp)
 # Fire that cannot hurt its target (src/wastedfire.cpp, src/wasted_fire.h): fed by the damage hook, asked by the AI.
@@ -1351,9 +1351,19 @@ add_test(NAME edf5_online_native COMMAND edf5_online_native_test "${EDF6_NATIVE_
 add_test(NAME edf5_online_foreign_build COMMAND edf5_online_native_test "${EDF6_NATIVE_DLL}" foreign)
 set_tests_properties(edf5_online_native edf5_online_foreign_build PROPERTIES SKIP_RETURN_CODE 77)
 add_executable(fp_ride_lifecycle_test EXCLUDE_FROM_ALL tests/fp_ride_lifecycle_test.cpp)
+target_sources(fp_ride_lifecycle_test PRIVATE src/fp_skin_gpu.cpp)
 target_include_directories(fp_ride_lifecycle_test PRIVATE src common)
 target_link_libraries(fp_ride_lifecycle_test PRIVATE user32)
 target_compile_options(fp_ride_lifecycle_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
 target_link_options(fp_ride_lifecycle_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks fp_ride_lifecycle_test)
 add_test(NAME fp_ride_lifecycle COMMAND fp_ride_lifecycle_test)
+add_executable(fp_skin_test EXCLUDE_FROM_ALL tests/fp_skin_test.cpp src/fp_skin_gpu.cpp)
+target_include_directories(fp_skin_test PRIVATE src common)
+target_link_libraries(fp_skin_test PRIVATE edf6common d3d11)
+target_compile_options(fp_skin_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks fp_skin_test)
+add_test(NAME fp_skin COMMAND fp_skin_test)
+set_tests_properties(fp_skin PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME fp_render_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/fp_render_native_audit.py" --dll "${EDF6_NATIVE_DLL}")
+set_tests_properties(fp_render_native PROPERTIES SKIP_RETURN_CODE 77)

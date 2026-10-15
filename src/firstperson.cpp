@@ -11,8 +11,9 @@
 //    builds the skinning palette from the draw pose array ([inst+0x30], one 4x4 a bone) inside the call. For the local
 //    player's body and weapons, in the colour passes (1 G-buffer, 2 translucent, 5 the far camera) that array is
 //    rewritten for the call and put back after: every pose P becomes P·T (fp_view.h: the viewmodel in front of the
-//    camera), and the body's bones that are not the arms' collapse onto their own joint, so only the arms draw. The
-//    shadow pass (3) draws them as they are (the body's shadow stays) and the occluder depth pass (0) skips them. The
+//    camera). The body colour draw submits only triangles weighted to one visible arm (fp_skin.h / fp_skin_gpu.cpp);
+//    torso and mixed shoulder triangles are excluded, not collapsed. The shadow pass (3) stays native and the
+//    occluder depth pass (0) skips the viewmodel. The
 //    bones' world matrices (+0xB0), which the muzzles, the shots and the network read, are never touched.
 //  - The muzzle flash (H, fp-render-re.md §5): a shot of the player's weapon (0x696FD0) hands its flash the muzzle's shot
 //    matrix through weapon+0x4C0 (the flash keeps that pointer and copies the matrix each of its 3 updates); the call to
@@ -53,10 +54,13 @@
 #include "firstperson.h"
 #include "fp_view.h"
 #include "fp_motion.h"
+#include "fp_skin_gpu.h"
 #include "map.h"
 #include "memory.h"
 #include "edf/host.h"
+#include <d3d11.h>
 #include <cmath>
+#include <algorithm>
 #include <cstring>
 #include <cwchar>
 
@@ -71,6 +75,11 @@ const unsigned char kCamStepCode[]={0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57,0x41
 // AnimationModel's draw (slot 1): draw(model, ctx, pass, view). Its LODs: the base one embedded at +0x160, the others
 // an array at [+0x250] (count +0x260, 0xF0 each); a LOD's skeleton instance at its +0x58.
 constexpr unsigned kModelVtable=0x17C4030,kModelDraw=0x6BF9F0;
+constexpr unsigned kMeshCall=0x1103FD1,kMeshDraw=0x10FF4E0;
+constexpr unsigned kMeshPrepare=0x10FFAC0,kMeshPass=0x1151330,kFlushDrawState=0x11597E0;
+constexpr unsigned kLaserDrawVtable=0x17E2480,kLaserDraw=0x6882A0;
+const unsigned char kMeshDrawCode[]={0x40,0x53,0x55,0x41,0x56,0x48,0x83,0xEC,0x40};
+const unsigned char kLaserDrawCode[]={0x4C,0x8B,0xDC,0x55,0x53,0x56,0x57};
 constexpr std::size_t kModelDrawSlot=1,kBaseLod=0x160,kLods=0x250,kLodCount=0x260,kLodStride=0xF0,kLodInst=0x58;
 const unsigned char kModelDrawCode[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x30,
                                       0x4C,0x8B,0x91,0x50,0x02,0x00,0x00,0x48,0x8D,0xB9,0x60,0x01,0x00,0x00};
@@ -140,7 +149,8 @@ constexpr float kGadgetFar=10.0f,kGadgetHigh=3.7f;   // m from the feet: the sto
 // the shoulder, which FitArm turns toward a place beside and below the eye (the third-person arm moved with its weapon
 // to the bottom of the view reached back up through the middle of it). Ending it at the elbow (the user, 2026-10-13, with a screenshot: "the arm
 // half shown, clearly hollow") left the forearm's open sleeve in the middle of the view: collapsing the rest onto the
-// eye hides stretched triangles, it does not close a mesh's open end, so the cut must be where the view is not.
+// eye did not reliably hide the mixed shoulder triangles. The colour draw now excludes those faces; the arm's
+// open end must still lie outside the view.
 const wchar_t* const kArmBones[]={L"kata",L"jowan",L"kawan",L"te_",L"fing",L"ring",L"little",L"index",L"middle",
                                   L"thumb",L"arm"};
 
@@ -182,10 +192,12 @@ struct State {
     std::int32_t shots[kMostSets],fire[kMostSets];
     int reloadLeft;
     fpmotion::State motion;
+    struct ShotEvent { const unsigned char* weapon; int count; float recoil; } shotEvent[2];
+    int sampledShots,notifiedShots;
     M4 moved[2];                // the motion as a matrix about each hand's grip (fp_view.h MotionMatrix)
     bool viewOk[2];             // each hand's T this frame (kRight, kLeft), built by the camera step
     M4 view[2];
-    bool shown[2];              // each arm drawn (a free hand off the weapon is not)
+    bool shown[2];              // visible arm ownership for the colour topology mask (neither while riding)
     bool axisOk[2];             // a point on the axis of the weapon each hand holds, after T (the weapon's root)
     float axis[2][3];
     bool onOther[2];            // a free hand drawn on the other hand's weapon, whose bounds after T are otherBox
@@ -366,7 +378,15 @@ float RecoilOf(const unsigned char* w) noexcept {
 // One hand's weapon this frame: its shots, a reload started.
 void Hand(const unsigned char* w,std::uint64_t k,std::int32_t shots,std::int32_t fire,fpmotion::Cue& c) noexcept {
     const std::int32_t d=shots-st.shots[k];
-    if(d>0 && d<10){c.shots+=d;c.recoil=std::fmax(c.recoil,RecoilOf(w));}
+    int fired=d>0 && d<10 ? d : 0;
+    st.sampledShots+=fired;
+    float recoil=RecoilOf(w);
+    const int hand=HandOfModel(w+kWeaponModel);
+    if(hand>=0) {
+        auto& event=st.shotEvent[hand];
+        if(event.weapon==w){st.notifiedShots+=event.count;fired=(std::max)(fired,event.count);recoil=std::fmax(recoil,event.recoil);event=State::ShotEvent{};}
+    }
+    if(fired){c.shots+=fired;c.recoil=std::fmax(c.recoil,recoil);}
     if(fire!=3 || st.fire[k]==3)return;
     const std::int32_t t=At<std::int32_t>(w,kReloadTime);
     st.reloadLeft=t>0 ? (t<kMostReloadFrames ? t : kMostReloadFrames) : 0;
@@ -375,6 +395,7 @@ void Hand(const unsigned char* w,std::uint64_t k,std::int32_t shots,std::int32_t
 
 // The hands' weapons this frame: shots, a reload started, a switch.
 void Weapons(const unsigned char* h,fpmotion::Cue& c) noexcept {
+    st.sampledShots=st.notifiedShots=0;
     auto n=At<std::uint64_t>(h,kSetCount);
     if(n>kMostSets)n=kMostSets;
     for(std::uint64_t k=0;k<n;++k) {
@@ -416,7 +437,10 @@ fpmotion::Cue Cues(const unsigned char* h) noexcept {
 
 // The motion this frame about each hand's pivot (right is -x in the camera's frame: x, yaw and roll mirrored).
 void Motion(const unsigned char* h,const float (*pivot)[3]) noexcept {
-    const fpmotion::Pose p=fpmotion::Advance(st.motion,Cues(h));
+    const auto cue=Cues(h);
+    const fpmotion::Pose p=fpmotion::Advance(st.motion,cue);
+    if(Cfg().debug && cue.shots)Log("FP recoil: shots %d (counter %d events %d), strength %.3f, back %.4f pitch %.4f",
+                                  cue.shots,st.sampledShots,st.notifiedShots,cue.recoil,p.z,p.pitch);
     for(int hand=kRight;hand<=kLeft;++hand)st.moved[hand]=fpview::MotionMatrix(-p.x,p.y,p.z,p.pitch,-p.yaw,-p.roll,pivot[hand]);
 }
 
@@ -565,6 +589,10 @@ void Flashes() noexcept {
 void Relocate(unsigned char* w) noexcept {
     const int hand=st.on ? HandOfModel(w+kWeaponModel) : -1;
     if(hand<0 || !st.viewOk[hand])return;
+    auto& event=st.shotEvent[hand];
+    if(event.weapon!=w)event=State::ShotEvent{w,0,0};
+    if(event.count<3)++event.count;
+    event.recoil=RecoilOf(w);
     const auto src=At<const float*>(w,kFlashMatrix);
     if(!src)return;
     Flash& f=flashes[flashNext];
@@ -617,6 +645,7 @@ void Probe(const bool* anchored,const M4* anchor) noexcept {
 // The camera, the player's state given back: the near clip, the look smoothing.
 void Leave() noexcept {
     if(st.on){PlaceAll(true);Rebatch(true);}
+    fpskin::Clear();
     if(st.cam && st.nearSet)Put<float>(st.cam,kCamNear,st.savedNear);
     if(st.human && st.smoothSet)Put<float>(st.human,kLookSmooth,st.savedSmooth);
     if(st.on)Log("FP view back to the stock camera");
@@ -733,8 +762,8 @@ void Watch(const unsigned char* h) noexcept {
 // machine's player (measured: PlayerHuman, fed by the board prompt's walk and stale after 2 s, dropped the view out
 // of first person mid-mission with no vehicle near).
 // In a vehicle (camera step, after the stock one): the eye at the seat's cockpit (fp_vehicle.cpp), the rider not drawn:
-// both hands' T the identity and neither arm shown, so every bone of the body collapses onto the eye in the colour
-// passes (they still count as drawn: its secondary physics keep running, fp-render-re.md §3) and its shadow stays.
+// both hands' T the identity and neither arm shown, so its colour index list is empty. The native model draw still
+// runs (its secondary physics keep running, fp-render-re.md §3), and its shadow stays.
 // The game puts the rider's own weapons away; the near clip and the look smoothing are the stock ones in a vehicle.
 // False: no eye (no cockpit in this seat: the stock camera then).
 bool Ride(unsigned char* cam,unsigned char* h) noexcept {
@@ -748,6 +777,8 @@ bool Ride(unsigned char* cam,unsigned char* h) noexcept {
     Rebatch(true);
     if(!st.riding || st.ride.vehicle!=ride.vehicle || st.ride.seat!=ride.seat) {
         st.instrumentsReady=false;
+        st.have=false;st.reloadLeft=0;st.motion=fpmotion::State{};
+        for(auto& event:st.shotEvent)event=State::ShotEvent{};
         Log("FP in a vehicle: %s %p seat %d, eye at its cockpit (%.2f %.2f %.2f)",ride.name ? ride.name : "?",
             static_cast<void*>(ride.vehicle),ride.seat,eye[0],eye[1],eye[2]);
     }
@@ -880,6 +911,7 @@ int InstancesOf(unsigned char* model,unsigned char** out) noexcept {
         for(int i=0;i<n;++i)if(out[i]==inst)return;
         out[n++]=inst;
     };
+    if(Readable(model+0xA0,kInstCount+4) && At<std::int32_t>(model+0xA0,kInstCount)>0)add(model+0xA0);
     add(At<unsigned char*>(model,kBaseLod+kLodInst));
     const auto lods=At<unsigned char*>(model,kLods);
     const auto count=At<std::uint64_t>(model,kLodCount);
@@ -931,12 +963,10 @@ ArmFit FitArm(const unsigned char* inst,const float* pose,const M4& t,int hand) 
     return fit;
 }
 
-// Every pose of `inst` through T; the body's bones that are not the arms' collapsed onto the eye. A vertex weighed by
-// an arm bone and one of those lies between its arm place and the eye, on the ray the arm place is seen along, so it
-// shows where the arm does (at another depth): no triangle is stretched across the view; one weighed by those alone is
-// a point at the eye, nothing.
-// `t` the two hands' T (a weapon: its hand's twice); the body's bones take the left one when their name ends in _l.
-void Pose(unsigned char* inst,const M4* t,bool body,const float* eye,float* backup) noexcept {
+// Arm/weapon poses through T, restored after the draw. Non-arm body bones stay native: fp_skin_gpu submits only
+// triangles owned by one visible arm, excluding mixed torso/shoulder and opposite-arm faces instead of stretching
+// their skinning weights. `t` is each hand's transform (a weapon uses its own hand's twice).
+void Pose(unsigned char* inst,const M4* t,bool body,const float*,float* backup) noexcept {
     const auto n=At<std::int32_t>(inst,kInstCount);
     auto pose=At<float*>(inst,kInstPose);
     const auto bones=At<const unsigned char*>(inst,kInstBones);
@@ -950,7 +980,8 @@ void Pose(unsigned char* inst,const M4* t,bool body,const float* eye,float* back
         const std::size_t len=name ? std::wcslen(name) : 0;
         const bool left=body && len>=2 && name[len-2]==L'_' && name[len-1]==L'l';
         if(body && (!ArmBone(name) || !st.shown[left ? kLeft : kRight])) {
-            std::memcpy(p,fpview::Collapse(eye).m,64);
+            // The colour draw uses an arm-only index buffer. Leave body bones intact instead of collapsing mixed
+            // shoulder triangles toward the camera (which made long sheets during the sprint).
             continue;
         }
         const int hand=left ? kLeft : kRight;
@@ -966,6 +997,30 @@ void Unpose(unsigned char* inst,const float* backup) noexcept {
     const auto n=At<std::int32_t>(inst,kInstCount);
     auto pose=At<float*>(inst,kInstPose);
     if(pose && n>0 && n<=kMostBones)std::memcpy(pose,backup,static_cast<std::size_t>(n)*64);
+}
+
+fpskin::Mask BodyMask(const void* palette) noexcept {
+    fpskin::Mask mask{};
+    if(!palette || !st.body)return mask;
+    unsigned char* insts[kMostInsts];
+    const int instances=InstancesOf(const_cast<unsigned char*>(static_cast<const unsigned char*>(st.body)),insts);
+    for(int k=0;k<instances;++k) {
+        const auto buffer=At<const unsigned char*>(insts[k],0x68);
+        if(!buffer || At<const void*>(buffer,0)!=palette)continue;
+        const auto bones=At<const unsigned char*>(insts[k],kInstBones);
+        const auto count=At<std::int32_t>(insts[k],kInstCount);
+        if(!bones || count<=0 || count>kMostBones)return mask;
+        mask.count=static_cast<unsigned>(count);
+        for(int i=0;i<count;++i) {
+            const auto name=At<const wchar_t*>(bones+static_cast<std::size_t>(i)*kBoneStride,0);
+            const auto len=name ? std::wcslen(name) : 0;
+            const bool left=len>=2 && name[len-2]==L'_' && name[len-1]==L'l';
+            mask.arm[i]=ArmBone(name) && st.shown[left ? kLeft : kRight];
+            mask.side[i]=left ? 2 : 1;
+        }
+        return mask;
+    }
+    return mask;
 }
 
 void InstrumentPose(unsigned char* inst,float* backup) noexcept {
@@ -1038,8 +1093,63 @@ void __fastcall DrawHook(void* model,void* ctx,int pass,void* view) {
             }
         }
     } __except(EXCEPTION_EXECUTE_HANDLER){for(int i=0;i<n;++i)Unpose(insts[i],saved[i]);n=0;}
+    if(part==Part::body)fpskin::Begin(fpskin::Mask{}); // the mesh draw selects its actual LOD palette
     next(model,ctx,pass,view);
+    if(part==Part::body)fpskin::End();
     __try { for(int i=0;i<n;++i)Unpose(insts[i],saved[i]); } __except(EXCEPTION_EXECUTE_HANDLER){}
+}
+
+using MeshFn=void(__fastcall*)(void*,void*,int,std::uint8_t,void*);
+void __fastcall MeshHook(void* mesh,void* ctx,int pass,std::uint8_t flag,void* cache) {
+    if(!fpskin::Active()){reinterpret_cast<MeshFn>(image+kMeshDraw)(mesh,ctx,pass,flag,cache);return;}
+    // Repeat the supported native helper's prepare/bind/flush sequence, replacing only its DrawIndexed submission.
+    // No COM vtable hooks: Steam's graphics wrapper may replace those while a frame is being built.
+    using PrepareFn=std::int64_t(__fastcall*)(void*,void*,int,int,std::uint8_t);
+    using PassFn=void(__fastcall*)(void*,void*,std::int64_t,std::uint64_t);
+    using FlushFn=void(__fastcall*)(void*,ID3D11DeviceContext*);
+    const auto technique=reinterpret_cast<PrepareFn>(image+kMeshPrepare)(mesh,ctx,pass,0,flag);
+    if(technique<0)return;
+    const auto descriptor=At<const unsigned char*>(mesh,0);
+    void* const material=At<void*>(mesh,8);
+    void* const holder=At<void*>(material,0);
+    const auto program=At<const unsigned char*>(holder,0);
+    const auto table=At<const unsigned char*>(program,0x58);
+    const auto passes=At<std::uint64_t>(table,static_cast<std::size_t>(technique)*0x20+0x18);
+    const auto count=At<unsigned>(descriptor,0x18);
+    auto context=At<ID3D11DeviceContext*>(ctx,8);
+    for(std::uint64_t i=0;i<passes;++i) {
+        reinterpret_cast<PassFn>(image+kMeshPass)(ctx,holder,technique,i);
+        if(At<unsigned>(ctx,0x78))reinterpret_cast<FlushFn>(image+kFlushDrawState)(static_cast<unsigned char*>(ctx)+0x20,context);
+        ID3D11Buffer* palette=nullptr;context->VSGetConstantBuffers(1,1,&palette);
+        fpskin::Mask mask{};
+        __try { mask=BodyMask(palette); } __except(EXCEPTION_EXECUTE_HANDLER){}
+        if(palette)palette->Release();
+        fpskin::Begin(mask);
+        fpskin::Submit(context,count,0,0);
+    }
+    if(cache) {
+        Put<void*>(cache,0,passes==1 ? material : nullptr);
+        Put<std::int64_t>(cache,8,passes==1 ? technique : -1);
+    }
+}
+
+void* nextLaserDraw=nullptr;
+void __fastcall LaserDrawHook(void* object,void* ctx,int pass,void* view) {
+    auto draw=static_cast<unsigned char*>(object);
+    float savedStart[4]{};bool moved=false;
+    __try {
+        // object is the attachment's umbra base (+0x10); attachment+8 owns the weapon. The render-only endpoints
+        // are object+0x120/+0x130. The world raycast's origin, direction and hit point remain untouched.
+        const auto weapon=At<const unsigned char*>(draw-0x10,8);
+        const int hand=st.on && !st.riding && weapon ? HandOfModel(weapon+kWeaponModel) : -1;
+        if(hand>=0 && st.viewOk[hand]) {
+            std::memcpy(savedStart,draw+0x120,16);
+            float from[3];fpview::Point(st.view[hand],savedStart,from);
+            std::memcpy(draw+0x120,from,12);moved=true;
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+    reinterpret_cast<DrawFn>(nextLaserDraw)(object,ctx,pass,view);
+    if(moved)std::memcpy(draw+0x120,savedStart,16);
 }
 
 bool HookDrawOf(void** vt) noexcept {
@@ -1083,6 +1193,11 @@ bool InstallFirstPerson() noexcept {
     nextCamStep=reinterpret_cast<CamStepFn>(next);
     drawOk=HookDrawOf(reinterpret_cast<void**>(image+kModelVtable));
     bool changed=false;
+    const bool skinOk=Matches(kMeshDraw,kMeshDrawCode,sizeof(kMeshDrawCode)) &&
+        RedirectCall(image+kMeshCall,image+kMeshDraw,reinterpret_cast<void*>(&MeshHook),changed);
+    drawOk=drawOk && skinOk;
+    const bool laserOk=Matches(kLaserDraw,kLaserDrawCode,sizeof(kLaserDrawCode)) &&
+        edf::ChainVtableSlot(reinterpret_cast<void**>(image+kLaserDrawVtable)+1,reinterpret_cast<void*>(&LaserDrawHook),&nextLaserDraw);
     const bool flashOk=RedirectCall(image+kFlashCall,image+kEffectCreate,reinterpret_cast<void*>(&FlashCreateHook),changed);
     placeOk=Matches(kUmbraPlace,kUmbraPlaceCode,sizeof(kUmbraPlaceCode));
     const bool lineOk=RedirectCall(image+kAimLineCall,image+kAimLineBuild,reinterpret_cast<void*>(&AimLineHook),changed);
@@ -1090,6 +1205,7 @@ bool InstallFirstPerson() noexcept {
     const bool passOk=placeOk && RedirectCall(image+kPassEndCall,image+kPassEnd,reinterpret_cast<void*>(&PassEndHook),changed);
     toggled=Cfg().firstPersonStart;
     Log("FP installed: camera=%d draw=%d flash=%d aim line=%d culling=%d pass=%d start=%d",camOk,drawOk,flashOk,lineOk,placeOk,passOk,toggled.load());
+    Log("FP skin=%d laser=%d",skinOk,laserOk);
     return drawOk;
 }
 }  // namespace crew

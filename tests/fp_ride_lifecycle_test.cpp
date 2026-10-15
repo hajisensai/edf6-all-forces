@@ -17,6 +17,12 @@ DWORD TestGetCurrentProcessId() { return 42; }
 #include <initializer_list>
 
 namespace edf {
+bool Readable(const void* p,std::size_t n,bool) noexcept {
+    MEMORY_BASIC_INFORMATION m{};
+    if(!p || !VirtualQuery(p,&m,sizeof(m)) || m.State!=MEM_COMMIT || (m.Protect&(PAGE_NOACCESS|PAGE_GUARD)))return false;
+    const auto begin=reinterpret_cast<std::uintptr_t>(p),end=reinterpret_cast<std::uintptr_t>(m.BaseAddress)+m.RegionSize;
+    return begin<=end && n<=end-begin;
+}
 bool ChainVtableSlot(void**,void*,void**) noexcept { return false; }
 bool Matches(const unsigned char*,std::size_t,const unsigned char*,std::size_t) noexcept { return false; }
 bool IsPlayer(const unsigned char*) noexcept { return false; }
@@ -43,6 +49,11 @@ bool VehicleEye(unsigned char*,float* eye,RideView* out) noexcept {
     std::memcpy(out->frame,rideFrame.m,64);std::memcpy(eye,rideFrame.m+12,12);return true;
 }
 int VehicleScreens(const unsigned char*,int,const float*,CockpitScreens* out) noexcept { out->n=0;return 0; }
+float laserStart[4]{},laserEnd[4]{};
+void __fastcall RecordLaser(void* object,void*,int,void*) {
+    const auto p=static_cast<const unsigned char*>(object);
+    std::memcpy(laserStart,p+0x120,16);std::memcpy(laserEnd,p+0x130,16);
+}
 }
 
 int main() {
@@ -80,7 +91,46 @@ int main() {
         Put<std::uint64_t>(human,kWeaponCount,1);haveEye=true;
     };
     reset();
+    unsigned char lodA[0x80]{},lodB[0x80]{},recordsA[3*kBoneStride]{},recordsB[3*kBoneStride]{},lods[kLodStride]{};
+    void* bufferA[1]{&batch};void* bufferB[1]{&replacement};
+    Put<void*>(model,kBaseLod+kLodInst,lodA);Put<void*>(model,kLods,lods);Put<std::uint64_t>(model,kLodCount,1);
+    Put<void*>(lods,kLodInst,lodB);Put<void*>(lodA,kInstBones,recordsA);Put<int>(lodA,kInstCount,3);Put<void*>(lodA,0x68,bufferA);
+    Put<void*>(lodB,kInstBones,recordsB);Put<int>(lodB,kInstCount,3);Put<void*>(lodB,0x68,bufferB);
+    Put<const wchar_t*>(recordsA,0,L"body");Put<const wchar_t*>(recordsA+kBoneStride,0,L"te_r");Put<const wchar_t*>(recordsA+2*kBoneStride,0,L"head");
+    Put<const wchar_t*>(recordsB,0,L"te_r");Put<const wchar_t*>(recordsB+kBoneStride,0,L"body");Put<const wchar_t*>(recordsB+2*kBoneStride,0,L"head");
+    st.body=model;st.shown[0]=st.shown[1]=true;
+    const auto baseMask=BodyMask(&batch),lodMask=BodyMask(&replacement);
+    check(baseMask.count==3 && !baseMask.arm[0] && baseMask.arm[1] && lodMask.arm[0] && !lodMask.arm[1],
+          "body filtering selects the bound GPU palette's LOD bone ordering, not the base skeleton's");
+    Put<void*>(model,kBaseLod+kLodInst,nullptr);Put<void*>(model,kLods,nullptr);Put<std::uint64_t>(model,kLodCount,0);
+    reset();
+    st.viewOk[0]=true;st.view[0]=fpview::Identity();
+    float flashMatrix[16]{};flashMatrix[0]=flashMatrix[5]=flashMatrix[10]=flashMatrix[15]=1;
+    Put<float>(weapon,kFireRecoil,.075f);st.shots[0]=0;
+    for(int i=0;i<2;++i){Put<const float*>(weapon,kFlashMatrix,flashMatrix);Relocate(weapon);}
+    fpmotion::Cue firing{};Hand(weapon,0,0,0,firing);
+    check(firing.shots==2 && firing.recoil>=.3f,"actual shot events drive recoil even when the sampled counter does not advance");
+    firing=fpmotion::Cue{};Hand(weapon,0,0,0,firing);
+    check(firing.shots==0,"shot events are consumed once");
+    for(int i=0;i<2;++i){Put<const float*>(weapon,kFlashMatrix,flashMatrix);Relocate(weapon);}
+    firing=fpmotion::Cue{};Hand(weapon,0,2,0,firing);
+    check(firing.shots==2,"counter and flash observations of the same shots are not double counted");
+    unsigned char laser[0x190]{};Put<void*>(laser,8,weapon);
+    const float from[4]={1,2,3,1},hit[4]={20,30,40,1};
+    std::memcpy(laser+0x130,from,16);std::memcpy(laser+0x140,hit,16);
+    unsigned char originalLaser[sizeof(laser)];std::memcpy(originalLaser,laser,sizeof(laser));
+    st.view[0]=fpview::Translate(3,4,5);nextLaserDraw=reinterpret_cast<void*>(&RecordLaser);
+    LaserDrawHook(laser+0x10,nullptr,2,nullptr);
+    check(laserStart[0]==4 && laserStart[1]==6 && laserStart[2]==8 && std::memcmp(laserEnd,hit,16)==0,
+          "the owning weapon's visible laser start follows its viewmodel while the hit endpoint stays in the world");
+    check(std::memcmp(laser,originalLaser,sizeof(laser))==0,"all laser attachment state is restored after native drawing");
+    Put<void*>(laser,8,human);LaserDrawHook(laser+0x10,nullptr,2,nullptr);
+    check(std::memcmp(laserStart,from,16)==0,"another owner's laser is not relocated even when nearby");
+    reset();
+    st.shotEvent[0]=State::ShotEvent{weapon,2,.5f};st.motion.recoilZ.at=-.07f;st.have=true;st.reloadLeft=30;
     check(Ride(cam,human),"a fitted vehicle accepts the ride");
+    check(st.shotEvent[0].count==0 && st.motion.recoilZ.at==0 && !st.have && !st.reloadLeft,
+          "boarding retires pending on-foot shots, recoil and reload state");
     check(At<void*>(model,kBatch)==&batch,"boarding returns the surviving weapon's original batch");
     check(!unbatched[0].model && st.weaponCount==0 && st.inHandCount==0,"boarding retires the batch record and viewmodel lists");
     for(float roll:{0.0f,1.5707963f,3.14159265f,-1.5707963f}) {
