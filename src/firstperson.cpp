@@ -55,6 +55,7 @@
 #include "fp_motion.h"
 #include "map.h"
 #include "memory.h"
+#include "edf/host.h"
 #include <cmath>
 #include <cstring>
 #include <cwchar>
@@ -636,6 +637,24 @@ const unsigned char* HandWeapon(int hand,bool* flip) noexcept {
     return nullptr;
 }
 
+bool NativeGrip(const unsigned char* weapon) noexcept {
+    if(!weapon || !image)return false;
+    // Read the class contract, not a per-weapon model/row exception. All pointers and descriptor RVAs must belong
+    // to the already verified native image. Unknown/custom classes keep the existing firearm placement.
+    const auto vt=At<const unsigned char*>(weapon,0);
+    const auto base=reinterpret_cast<std::uintptr_t>(image),end=base+edf::kImageSize;
+    const auto v=reinterpret_cast<std::uintptr_t>(vt);
+    if(v<base+8 || v>end-8)return false;
+    const auto locator=At<const unsigned char*>(vt-8,0);
+    const auto col=reinterpret_cast<std::uintptr_t>(locator);
+    if(col<base || col>end-0x10)return false;
+    const auto td=At<std::uint32_t>(locator,0xC);
+    if(td>=edf::kImageSize-0x50)return false;
+    const char* name=reinterpret_cast<const char*>(image+td+0x10);
+    return std::strcmp(name,".?AVWeapon_Swing@@")==0 || std::strcmp(name,".?AVWeapon_ImpactHammer@@")==0 ||
+           std::strcmp(name,".?AVWeapon_PileBanker@@")==0 || std::strcmp(name,".?AVWeapon_Shield@@")==0;
+}
+
 // A bulky or long weapon held further off (measured boxes, half sizes right x up x ahead: the Air Raider's limpet gun
 // 0.28 x 0.17 x 0.46 filled half the view at the rifle's grip; the Mag Blaster 0.03 x 0.12 x 0.50 did not), a shield
 // out to the side. `grip` in the camera's frame (x to the left); `dual`: both hands hold one (their grips are already
@@ -677,7 +696,11 @@ void Views(const unsigned char* h,const unsigned char* cam) noexcept {
     else st.moved[kRight]=st.moved[kLeft]=fpview::Identity();
     const M4 view=MatrixAt(cam+kCamMatrix);
     for(int hand=kRight;hand<=kLeft;++hand) {
-        st.viewOk[hand]=anchored[hand] && fpview::AnchoredTransform(anchor[hand],view,grip[hand],c.fpScale,&st.view[hand],st.moved[hand]);
+        bool flip=false;
+        const bool native=NativeGrip(HandWeapon(hand,&flip));
+        st.viewOk[hand]=anchored[hand] && (native
+            ? fpview::NativeGripTransform(anchor[hand],MatrixAt(h+kAim),view,grip[hand],c.fpScale,&st.view[hand],st.moved[hand])
+            : fpview::AnchoredTransform(anchor[hand],view,grip[hand],c.fpScale,&st.view[hand],st.moved[hand]));
         st.axisOk[hand]=st.viewOk[hand];
         if(st.axisOk[hand])fpview::Point(st.view[hand],anchor[hand].m+12,st.axis[hand]);
     }

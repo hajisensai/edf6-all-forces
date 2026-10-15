@@ -6,10 +6,12 @@
 //    stock third-person camera turns in), eye the camera's eye in R, C the camera's world matrix. Arms and weapon share
 //    T, so the hand stays on the grip; hold moves the pair in the aim frame; s shrinks it about the eye (the picture is
 //    the same at any s, only nearer: walls in front do not cut it).
-//  - The weapon-anchored transform (the classes with one weapon in hand): T = W⁻¹ · Tr(grip) · S(s) · C with W the held
+//  - The firearm-anchored transform: T = W⁻¹ · Tr(grip) · S(s) · C with W the held
 //    weapon's root (its grip, the hand's mount) made orthonormal: the weapon sits at `grip` in the camera's frame,
 //    pointing straight ahead, whatever the third-person pose holds it at; the arms follow it, the hands' own animation
 //    (a reload's) on it kept.
+//  - Melee weapons and shields instead use NativeGripTransform: position the grip, preserving the authored rotation
+//    relative to the aim frame. Cancelling W's rotation every frame cancels their animated swing too.
 //  - The collapse: a matrix that sends every vertex it weighs to one point (rows 0..2 zero): the body's bones that are
 //    not the arms', so the body draws nothing but its arms (the triangles of the rest are degenerate, no pixel).
 //  - The eye (Call of Duty's: a view height over the body's own axis): on the yaw-only body frame's up axis, `ahead` in
@@ -124,6 +126,20 @@ inline bool AnchoredTransform(const M4& weapon,const M4& camera,const float* gri
     M4 w,inv;
     if(!Orthonormal(weapon,&w) || !InverseAffine(w,&inv))return false;
     const M4 t=Mul(Mul(Mul(Mul(inv,Translate(grip[0],grip[1],grip[2])),motion),Scale(scale)),camera);
+    if(!Finite(t))return false;
+    *out=t;
+    return true;
+}
+
+// A melee weapon / shield has an authored holding angle and animated swing, not a gun bore to straighten. Anchor
+// the grip's position but keep the weapon's rotation relative to the soldier's aim frame. The same T goes through
+// its arm, palm and fingers, so the contact is retained while the blade swings.
+inline bool NativeGripTransform(const M4& weapon,const M4& aim,const M4& camera,const float* grip,float scale,M4* out,
+                                const M4& motion=Identity()) noexcept {
+    M4 inv;
+    if(!InverseAffine(aim,&inv))return false;
+    float local[3];Point(inv,weapon.m+12,local);
+    const M4 t=Mul(Mul(Mul(Mul(inv,Translate(grip[0]-local[0],grip[1]-local[1],grip[2]-local[2])),motion),Scale(scale)),camera);
     if(!Finite(t))return false;
     *out=t;
     return true;

@@ -55,6 +55,19 @@ int main() {
     int batch=1,replacement=2;
     int failed=0;
     const auto check=[&](bool ok,const char* what){std::printf("%s %s\n",ok ? "ok" : "FAIL",what);if(!ok)++failed;};
+    unsigned char nativeImage[1024]{};
+    image=nativeImage;
+    Put<void*>(weapon,0,nativeImage+64);Put<void*>(nativeImage,56,nativeImage+128);
+    Put<std::uint32_t>(nativeImage,128+0xC,256);
+    for(const char* type:{".?AVWeapon_Swing@@",".?AVWeapon_ImpactHammer@@",".?AVWeapon_PileBanker@@",".?AVWeapon_Shield@@"}) {
+        std::memcpy(nativeImage+272,type,std::strlen(type)+1);
+        check(NativeGrip(weapon),"native melee and shield families preserve the authored holding pose");
+    }
+    const char* gun=".?AVWeapon_BasicShoot@@";std::memcpy(nativeImage+272,gun,std::strlen(gun)+1);
+    check(!NativeGrip(weapon),"firearms retain their bore-aligned placement");
+    Put<std::uint32_t>(nativeImage,128+0xC,edf::kImageSize);
+    check(!NativeGrip(weapon),"a descriptor outside the native image is rejected");
+    image=nullptr;
     config.debug=false;
     Put<void*>(model,0,vt);
     Put<void*>(human,kWeapons,list);

@@ -26,7 +26,7 @@ from typing import Callable
 import graft_pure as g
 import obj_model as om
 import texfile
-from mdb import Mdb, Rab, cmpl_compress, mdb_read, mdb_write, rab_read, rab_write
+from mdb import Mdb, Mesh, Rab, cmpl_compress, mdb_read, mdb_write, rab_read, rab_write
 
 Vec3 = tuple[float, float, float]
 
@@ -183,13 +183,27 @@ def albedo_dds(spec: KitMaterial, root: str) -> bytes:
     return texture_dds(os.path.join(root, spec.albedo))
 
 
-def template(game) -> tuple[Mdb, object]:  # noqa: ANN001 - rootcpk.Game
+def template(game) -> tuple[Mdb, Mesh]:  # noqa: ANN001 - rootcpk.Game
     """The Blacker hull's model and its skinned mesh in the v505_tank material (the kits' layout and shader)."""
     host = mdb_read(next(f for f in rab_read(game.read('OBJECT', TEMPLATE_ARC)).files
                          if f.name.lower() == TEMPLATE_MDB).data)
     mesh = next(me for o in host.objects for me in o.meshes
                 if host.name_of(host.materials[me.material].name) == TEMPLATE_MATERIAL)
     return host, mesh
+
+
+def precise_template(mesh: Mesh) -> Mesh:
+    """Vertex layout for newly built cockpit meshes: float32 positions, retaining all other native elements.
+
+    The hull template uses half4 positions. At a cab's model-space offset its quantisation can exceed the 1-2 mm
+    gap between a glyph and its display, bending their triangles through each other. Widen the declaration before
+    packing new vertices; merely moving the screen cannot fix the glyphs fighting their own backing.
+    """
+    position = next(e for e in mesh.elems if e.name.lower()=='position')
+    if position.fmt!=7: return mesh
+    elems = [replace(e,fmt=1) if e is position else replace(e,offset=e.offset+8 if e.offset>position.offset else e.offset)
+             for e in mesh.elems]
+    return replace(mesh,vsize=mesh.vsize+8,elems=elems,vdata=b'',indices=b'')
 
 
 def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa: ANN001 - rootcpk.Game
@@ -219,6 +233,8 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
             if scr.kind in ('hud', 'sensor'):
                 continue
             parts, moving = cockpit_instruments.instrument(scr, index, numbers=fit.seat == 0)
+            # Replace the kit's old display quad, rather than adding a second coincident dark face.
+            kit.parts = [p for p in kit.parts if not (p.name==f'screen_{scr.kind}' and p.material=='screen')]
             kit.parts.extend(parts)
             kit.materials.update(cockpit_instruments.MATERIALS)
             for control in moving:
@@ -241,6 +257,7 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
     if len(md.bones) > 256:
         raise ValueError(f'cockpit needs {len(md.bones)} bones, beyond the MDB ubyte skin-index limit')
     tmpl_md, tmpl_mesh = template(game)
+    tmpl_mesh = precise_template(tmpl_mesh)
     by_material: dict[tuple[str, str], list[tuple[om.Part, list]]] = {}
     materials: dict[tuple[str, str], KitMaterial] = {}
     for fit in fits:

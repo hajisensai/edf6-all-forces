@@ -135,6 +135,9 @@ def main() -> int:
     member = spec.stem.lower() + '.mdb'
     md = mdb_read(next(f for f in arc.files if f.name.lower() == member).data)
     expect(not om.texture_problems(arc, md, member), f'{spec.stem}: built, its textures where the game binds them')
+    cockpit_meshes=[me for o in md.objects for me in o.meshes if md.name_of(md.materials[me.material].name).startswith('edf6vc_cpit_')]
+    expect(bool(cockpit_meshes) and all(next(e for e in me.elems if e.name.lower()=='position').fmt==1 for me in cockpit_meshes),
+           'built cockpit/display positions retain float32 precision, keeping glyphs off the backing')
     ink = [m for m in md.materials if 'instrument_ink' in md.name_of(m.name)]
     expect(bool(ink) and all(m.shader == 'snd_BRDF_Common_Light' for m in ink),
            'physical instrument labels use the native emissive material, not the dark hull shader')

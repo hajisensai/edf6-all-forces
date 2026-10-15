@@ -73,13 +73,13 @@ def instrument(s: Screen, index: int, numbers: bool = True) -> tuple[list[om.Par
         moving.append(Moving(p.name, control, c, f, up))
 
     def bar(field: int, y: float, title: str) -> None:
-        label(title, -.43, y+.1)
+        label(title, -.43, y+.12)
         parts.append(rect('track','instrument_dim',0,y,.86,.055))
         p=rect(f'bar_{field}', 'instrument_ink', 0,y,.86,.045,.002)
         live(p,f'b_{field}',point(-.43,y,.002))
 
     def digits(field: int, y: float, count: int, title: str) -> None:
-        label(title,-.43,y+.13)
+        label(title,-.43,y+.17)
         # Segment order: top, upper right, lower right, bottom, lower left, upper left, middle.
         segments=((0,.5,.65,.1),(.4,.25,.1,.4),(.4,-.25,.1,.4),(0,-.5,.65,.1),
                   (-.4,-.25,.1,.4),(-.4,.25,.1,.4),(0,0,.65,.1))
@@ -116,8 +116,8 @@ def instrument(s: Screen, index: int, numbers: bool = True) -> tuple[list[om.Par
         else: bar(HP,.25,'HP')
         bar(HULL,-.05,'HULL')
         bar(FUEL,-.32,'FUEL')
-        label('WARN',.22,-.31,.012)
-        live(rect('warn','instrument_needle',.35,-.4,.08,.045,.003),f'b_{WARN}',point(.31,-.4,.003))
+        label('WARN',.14,-.397,.012)
+        live(rect('warn','instrument_needle',.35,-.425,.08,.045,.003),f'b_{WARN}',point(.31,-.425,.003))
     elif s.kind == 'weapons':
         digits(AMMO,.22,5,'AMMO')
         digits(SLOT,-.2,1,'SLOT')

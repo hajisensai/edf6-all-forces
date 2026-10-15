@@ -19,6 +19,7 @@
 #include "../src/fp_motion.h"
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
 
 namespace {
 using namespace crew::fpview;
@@ -296,6 +297,21 @@ void Springs() {
 }  // namespace
 
 int main() {
+    // A melee blade's authored rotation and swing must survive, while its grip stays at the requested placement.
+    for(float swing:{-.8f,0.0f,.9f}) {
+        const float origin[3]={4,2,-7},eye[3]={0,1.7f,.1f},wrist[3]={.3f,1.2f,.5f},grip[3]={.3f,-.25f,.4f};
+        const M4 aim=Frame(-.2f,1.1f,origin),camera=CameraAt(aim,eye),local=Frame(.5f+swing,-.7f,wrist);
+        const M4 weapon=Mul(local,aim);
+        M4 transform,invCamera;
+        const bool ok=NativeGripTransform(weapon,aim,camera,grip,.5f,&transform) && InverseAffine(camera,&invCamera);
+        const M4 shown=Mul(Mul(weapon,transform),invCamera);
+        float error=0;
+        for(int row=0;row<3;++row)for(int col=0;col<3;++col)
+            error=std::fmax(error,std::fabs(shown.m[row*4+col]-local.m[row*4+col]*.5f));
+        Expect(ok && error<1e-5f,"a melee weapon keeps its native holding angle and animated swing",error);
+        Expect(Near(shown.m[12],grip[0]*.5f) && Near(shown.m[13],grip[1]*.5f) && Near(shown.m[14],grip[2]*.5f),
+               "...while the grip stays placed in the view");
+    }
     // Across a full recoil/reload-sized wrist sweep, both ends of the solved elbow must agree and each measured
     // arm length must stay unchanged. The hand itself never receives a corrective transform.
     for(int i=0;i<120;++i) {

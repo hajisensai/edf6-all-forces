@@ -170,6 +170,35 @@ def _laid_on(corners: np.ndarray, c: Vec3, w: float, h: float) -> Vec3:
     return (c[0] * k, c[1] * k, c[2] * k)
 
 
+def _panel_clearance(corners: np.ndarray, c: Vec3, w: float, h: float) -> float:
+    """Offset along the facing that clears the complete display rectangle after cab deformation.
+
+    Clip nearby cab triangles to the screen footprint and inspect every resulting vertex, including edge
+    intersections. Centre/corner rays miss a thin raised rim through the middle of a display. Objects more than
+    15% of the eye distance in front remain occluders (the same steering-wheel exclusion as _laid_on).
+    """
+    r,u,f = (np.array(v) for v in basis(_toward_eye(c)))
+    local = (corners-np.array(c)) @ np.stack((r,u,f)).T
+    lo,hi = np.array((-w/2,-h/2)),np.array((w/2,h/2))
+    overlap = ((local[:,:,:2].max(1)>=lo) & (local[:,:,:2].min(1)<=hi)).all(1)
+    # A separate object in front, such as the wheel, must not pull a monitor off its dashboard.
+    nearby = local[:,:,2].max(1)<.15*math.sqrt(sum(x*x for x in c))
+    front = -math.inf
+    for triangle in local[overlap & nearby]:
+        poly = list(triangle)
+        for axis,bound,sign in ((0,lo[0],1),(0,hi[0],-1),(1,lo[1],1),(1,hi[1],-1)):
+            if not poly: break
+            clipped = []
+            for i,cur in enumerate(poly):
+                prev = poly[i-1]
+                dc,dp = sign*(cur[axis]-bound),sign*(prev[axis]-bound)
+                if (dc>=0)!=(dp>=0): clipped.append(prev+(cur-prev)*(dp/(dp-dc)))
+                if dc>=0: clipped.append(cur)
+            poly = clipped
+        if poly: front=max(front,max(v[2] for v in poly))
+    return max(0.0,front+PROUD)
+
+
 def real_cab(cabin: Cabin, spec: CabSpec) -> Kit:
     """A real cab in the room round the eye: drawn in toward the eye where it reaches past the walls (squeeze: from
     the seat it looks as it was), its screens laid on the source's instruments (_laid_on) and drawn in with it."""
@@ -183,6 +212,7 @@ def real_cab(cabin: Cabin, spec: CabSpec) -> Kit:
     lo = (-room['right'], -room['down'], -room['back'])
     hi = (room['left'], room['up'], room['ahead'])
     cab, cab_mats = _cab_parts(spec.asset, lo, hi, spec.tuck, spec.knee)
+    cab_corners = np.concatenate([np.array([v.pos for v in p.verts])[p.tris] for p in cab])
     pos, _, _, tris, _, _, _ = _cab_mesh(spec.asset)
     full_corners = pos[tris]
     parts: list[om.Part] = []
@@ -196,7 +226,12 @@ def real_cab(cabin: Cabin, spec: CabSpec) -> Kit:
         drawn = np.linalg.norm(squeeze(pts, np.array(lo), np.array(hi), spec.tuck, spec.knee), axis=1)
         k = float(np.min(drawn / np.linalg.norm(pts, axis=1)))
         size = float(np.linalg.norm(full)) / math.sqrt(sum(x * x for x in c))
-        p, s = _screen(kind, tuple(map(float, full * k)), w * k * size, h * k * size, None)
+        centre = tuple(map(float, full*k))
+        width,height = w*k*size,h*k*size
+        lift = _panel_clearance(cab_corners,centre,width,height)
+        facing = _toward_eye(centre)
+        centre = tuple(centre[i]+lift*facing[i] for i in range(3))
+        p, s = _screen(kind, centre, width, height, None)
         parts += [p, _backing(f'bezel_{kind}', s, 0.008 * k, 0.003 * k)]
         screens.append(s)
     mats = _materials('screen', 'metal_dark')

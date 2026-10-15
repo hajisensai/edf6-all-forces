@@ -35,3 +35,45 @@ for kind in ('status','weapons','flight','map'):
     if kind=='map':
         assert sum(c.control.startswith('t_') for c in controls)==6
 print('physical instrument geometry and controls passed')
+
+# The display/text gap is sub-centimetre, even when the vehicle's model-space coordinates are large. Test the
+# actual vertex packer with a widened hull layout, including subsequent attribute offsets.
+import struct
+import cockpits
+from mdb import Mesh,VElem
+layout=Mesh(bytes((0,1,1,0)),0,0,16,[VElem(7,0,0,'position'),VElem(12,8,0,'texcoord')],0,b'',b'')
+wide=cockpits.precise_template(layout)
+assert wide.vsize==24 and wide.elems[0].fmt==1 and wide.elems[1].offset==16
+import obj_model as om
+vertex=om.Vertex((3.1234,2.0123,50.001),(0,0,-1),(.25,.75))
+row=om._row(wide.elems,vertex,((1,0,0),(0,1,0)),[(0,1.)])
+packed=om.pack_vertex(wide.elems,wide.vsize,row)
+pos=struct.unpack_from('<4f',packed,0)
+assert max(abs(a-b) for a,b in zip(pos[:3],vertex.pos))<2e-6
+assert struct.unpack_from('<2f',packed,16)==(.25,.75)
+
+# A raised cab rim in the middle of a display is missed by centre/corner rays. Complete triangle clipping must
+# clear it, and must exclude a separate wheel well in front of the dashboard.
+import numpy as np
+import cockpit_kits_ground as ground
+centre=(0.,0.,1.)
+ridge=np.array([[[.02,-.03,.994],[.04,-.03,.994],[.03,.03,.994]]])
+assert abs(ground._panel_clearance(ridge,centre,.2,.1)-(.006+ground.PROUD))<1e-8
+behind=ridge.copy();behind[:,:,2]=1.02
+assert ground._panel_clearance(behind,centre,.2,.1)==0
+wheel=ridge.copy();wheel[:,:,2]=.7
+assert ground._panel_clearance(wheel,centre,.2,.1)==0,'the steering wheel must remain an occluder'
+
+try:
+    cab=ground.real_cab(dict(left=1.97,right=.77,up=1.13,down=.68,ahead=.94,back=1.21),ground.CABS['truck_cab'])
+except (FileNotFoundError, cockpits.CockpitAssetsMissing):
+    print('cab assets unavailable; synthetic panel-clearance checks passed')
+else:
+    corners=np.concatenate([np.array([v.pos for v in p.verts])[p.tris] for p in cab.parts if p.name.startswith('cab')])
+    for screen in cab.screens:
+        r,u,_=map(np.array,basis(screen.facing));c=np.array(screen.centre)
+        for y in np.linspace(-.45,.45,21):
+            for x in np.linspace(-.45,.45,31):
+                point=c+r*x*screen.width+u*y*screen.height;distance=np.linalg.norm(point)
+                assert ground._first_hit(corners,point/distance,.001)>=distance-1e-4,(screen.kind,x,y)
+    print('real truck screens: 0/651 obscured sample points each')
