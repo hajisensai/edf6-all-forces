@@ -7252,6 +7252,45 @@ def edf41_robo_plugin_contract() -> None:
 
 
 @test
+def edf41_robo_finish() -> None:
+    """UfoRobo phase 3 (docs/edf41-uforobo.md 2.2): the lock point is found where the shipped MAB keeps it (ロックオン in locator
+    list 1, the lock-on list; the muzzles and the stomp points in list 0) and src/edf41robo.cpp asks that list; the death is
+    OnDamaged's (slot 18) with EDF6's ragdoll activation; the stomps are EDF6's ApplyAreaDamage (no grenade stand-in); the
+    bullets carry 4.1's hit sounds (FireSe, InitParam +0x100) whose presets edf41_se holds; the foot IK reads ik_control_info,
+    which the shipped SGO keeps; every EDF.dll function the file calls itself has a fingerprint."""
+    import edf41_objects as eo
+    import make_edf41_objects as m
+    import mab_legacy
+    import sgo
+    top = sgo.load(data=eo.read('OBJECT/' + m.ROBO_ROOT))
+    mab = top['animation_model'][2]
+    mab = bytes.fromhex(mab[4:]) if isinstance(mab, str) and mab.startswith('raw:') else mab
+    lists = {loc.name: i for i, loc in mab_legacy.mab_locators(mab)}
+    assert lists.get('ロックオン') == 1, lists.get('ロックオン')
+    for name in m.ROBO_LOCATORS:
+        assert lists.get(name) == (1 if name == 'ロックオン' else 0), name
+    ik = top['ik_control_info']
+    assert [e[0] for e in ik] == ['toe_l', 'toe_r'] and [e[1] for e in ik] == ['v_ik_target_l', 'v_ik_target_r'], ik
+    se = {e[0] for e in top['edf41_se']}
+    cpp, shared, header = src('src/edf41robo.cpp'), src('src/edf41classes.cpp'), src('src/edf41classes.h')
+    assert 'p6::FindLocatorIn(Model(r.obj),1,L"ロックオン",&r.lockOn)' in cpp
+    assert 'SetSlot(roboClass,kSlotOnDamaged,reinterpret_cast<void*>(&OnDamagedWrap));' in cpp and 'kSlotOnDamaged=18' in cpp
+    assert 'r.ragdoll=p6::RagdollOn(r.obj);' in cpp and 'p6::AreaDamage(r.obj,m+12,radius,damage,' in cpp
+    code = re.sub(r'//[^\n]*', '', cpp)
+    assert 'Blast(' not in code, 'the stomp still lets off the grenade stand-in'
+    assert 'bool FireSe(void* owner,const float* matrix,const Bullet& b,const void* seTable,const wchar_t* hitSe) noexcept;' in header
+    assert 'FillPreset(param+0x100,seTable,hitSe)' in shared and 'FireSe(r.obj,mm,g.bullet,r.obj,g.hitSe)' in cpp
+    for name in re.findall(r'hitSe=L"([^"]+)"', cpp) + re.findall(r'chargeSe=L"([^"]+)"', cpp) + re.findall(r'shotSe=L"([^"]+)"', cpp):
+        assert name in se, name
+    assert len(re.findall(r'hitSe=L"', cpp)) == 4 and 'L"ik_control_info"' in cpp
+    prints = cpp.split('constexpr Print kPrints[]={', 1)[1].split('};', 1)[0]
+    for rva in re.findall(r'\b(k[A-Z]\w+)=0x[0-9A-F]+', cpp.split('namespace p6 {', 1)[1].split('struct Print', 1)[0]):
+        if rva in ('kInitParamBase', 'kEffects', 'kManager', 'kChargeVtable'):   # data, not code
+            continue
+        assert re.search(rf'\{{{rva},\{{0x', prints), f'{rva} has no fingerprint'
+
+
+@test
 def edf41_mother401_data() -> None:
     """The 401 mothership's shipped data is what src/edf41mother401.cpp reads (tools/make_edf41_objects.py mother401_fix): every
     variant (MOTHER401_ROOTS, MOTHER401_DLC_ROOTS) keeps 4.1's class and keys (action_list, panel_definition, the layout maps its

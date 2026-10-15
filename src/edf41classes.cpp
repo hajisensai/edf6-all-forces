@@ -978,4 +978,73 @@ bool WeakOut(const void* object,void* out) noexcept {
     return true;   // the weak count WeakSet took goes with it
 }
 
+// ---- UfoRobo, phase 3: Fire with the hit sound (edf41classes.h FireSe) ---------------------------------------------------------
+namespace {
+// The SePreset `preset` (initialised) filled from 4.1's preset `name` in table's edf41_se: [name, cue, volume, pitch, three distances].
+bool FillPreset(unsigned char* preset,const void* table,const wchar_t* name) noexcept {
+    void* system=Global(kSoundSystem);
+    if(!Prims() || !system || !table || !name || !*name)return false;
+    const SgoNode* list=Key(table,L"edf41_se");
+    wchar_t text[96],cue[96];
+    for(int i=0;i<Count(list);++i) {
+        const SgoNode* e=Child(list,i);
+        if(Count(e)<7 || !Text(Child(e,0),text,96) || std::wcscmp(text,name)!=0)continue;
+        SeParams p;
+        if(!Text(Child(e,1),cue,96) || !Float(Child(e,2),&p.volume) || !Float(Child(e,3),&p.pitch) || !Float(Child(e,4),&p.inner)
+           || !Float(Child(e,5),&p.reference) || !Float(Child(e,6),&p.cull))return false;
+        struct { void* bank; std::int32_t cue; std::int32_t pad; } ref{nullptr,-1,0};
+        if(!At<bool(__fastcall*)(void*,void*,int,const wchar_t*)>(kCueLookup)(system,&ref,0,cue) || !ref.bank)return false;
+        for(std::size_t at=0x20;at<=0x60;at+=0x10)std::memcpy(preset+at,&ref,16);
+        std::memcpy(preset+0x74,&p.volume,4);
+        std::memcpy(preset+0x70,&p.pitch,4);
+        std::memcpy(preset+0x10,&p.inner,4);
+        std::memcpy(preset+0x14,&p.reference,4);
+        std::memcpy(preset+0x18,&p.cull,4);
+        return true;
+    }
+    return false;
+}
+}  // namespace
+
+bool FireSe(void* owner,const float* matrix,const Bullet& b,const void* seTable,const wchar_t* hitSe) noexcept {
+    void* mgr=Manager();
+    void* factory=mgr ? reinterpret_cast<GetFactoryFn>(image+kFactoryByName)(mgr,b.factory) : nullptr;
+    if(!factory) { Fail("a bullet class EDF6 does not register"); return false; }
+    char* o=static_cast<char*>(owner);
+    if(!owner || !Rd(o+kTeamAt,4,"bullet owner team") || !Rd(o+kWeakSelfAt,16,"bullet owner weak pointer"))return false;
+    alignas(16) unsigned char param[kParamSize];
+    reinterpret_cast<ParamCtorFn>(image+kParamCtor)(param);
+    std::memcpy(param+0x94,&b.speed,4);
+    std::memcpy(param+0x98,&b.life,4);
+    std::memcpy(param+0x9C,&b.damage,4);
+    if(b.explosion>0.0f)std::memcpy(param+0xB0,&b.explosion,4);
+    if(b.gravity!=0.0f)std::memcpy(param+0xE0,&b.gravity,4);
+    if(b.radiusFactor>=0.0f)std::memcpy(param+0xC4,&b.radiusFactor,4);
+    if(b.speedFactor>=0.0f)std::memcpy(param+0xC8,&b.speedFactor,4);
+    std::memcpy(param+0xC0,&b.size,4);
+    std::memcpy(param+0xCC,&b.hitStop,4);
+    std::memcpy(param+0xD0,b.color,16);
+    param[0xB7]=1;
+    std::memcpy(param+0x90,o+kTeamAt,4);
+    reinterpret_cast<WeakAssignFn>(image+kWeakAssign)(param+0x38,o+kWeakSelfAt);
+    if(b.custom) {
+        const void* custom=b.custom;
+        const std::uint16_t tag=1;
+        std::memcpy(param+0xE8,&custom,8);
+        std::memcpy(param+0xF8,&tag,2);
+    }
+    if(hitSe && !FillPreset(param+0x100,seTable,hitSe)) {
+        static std::atomic<int> said{0};
+        if(said.fetch_add(1)<8)Log("EDF41CLASS bullet hit sound %ls: no such 4.1 preset / cue",hitSe);
+    }
+    static std::atomic<std::uint32_t> seed{0x51ED270Bu};
+    const std::uint32_t s=(seed+=0x6D2B79F5u)>>16;
+    std::memcpy(param+0x1A0,&s,4);
+    alignas(16) float m[16];
+    std::memcpy(m,matrix,sizeof(m));
+    reinterpret_cast<SpawnFn>(image+kSpawn)(mgr,m,factory,param);
+    reinterpret_cast<ParamDtorFn>(image+kParamDtor)(param);
+    return true;
+}
+
 }  // namespace crew::edf41c

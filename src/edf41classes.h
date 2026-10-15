@@ -224,4 +224,10 @@ bool WeakAlive(const WeakRef& w) noexcept;                     // use count > 0 
 // weak count taken for the receiver.
 bool WeakOut(const void* object,void* out) noexcept;
 
+// ---- UfoRobo, phase 3 (src/edf41robo.cpp) ------------------------------------------------------------------------------------
+// Fire, the bullet's hit sound set: EDF6's bullet InitParam keeps one SePreset at +0x100 (its constructor 0x1001D0 initialises it
+// with 0x7B3200; 4.1's InitParam has it at +0xB0, and UfoRobo's 0x275730 fills it per gun with ロボビーム着弾小 / 中 / 大). `hitSe` is a
+// 4.1 SEPRESET name looked up in `seTable`'s edf41_se and filled by cue as PlayCue does; nothing found: Fire's silent preset.
+bool FireSe(void* owner,const float* matrix,const Bullet& b,const void* seTable,const wchar_t* hitSe) noexcept;
+
 }  // namespace crew::edf41c
