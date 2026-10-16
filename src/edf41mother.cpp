@@ -80,7 +80,23 @@ constexpr MPrint kMotherPrints[]={
     {0x4F9250,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74}},   // UfoCarrier508 slot 18, replaced
     {0x4F9530,{0xE9,0x6B,0xDF,0xFF,0xFF,0xCC,0xCC,0xCC}},   // its slot 3
     {0x5B6D10,{0x48,0x81,0xC1,0xC0,0x05,0x00,0x00,0xE9}},   // EventAnimationObject slot 3
+    // the particle emitter (vents, below)
+    {0x300C80,{0x48,0x89,0x5C,0x24,0x10,0x57,0x48,0x83}},{0x2E8510,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},
+    {0x1120820,{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B}},{0x301290,{0x48,0x89,0x4C,0x24,0x08,0x53,0x48,0x83}},
+    {0x302200,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},{0x302EE0,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C}},
+    {0x302D10,{0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83}},{0x12D85B0,{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B}},
 };
+// ---- EDF6's particle emitter (4.1's mp_HatchEmission emitters; EDF6's UfoMother511 builds the same for its port_effect_list,
+// 0x502360 / 0x5086F0 / 0x508370, H). The description block (0x300C80 ctor) has 4.1's layout (4.1 0x1C1920) from +0x00 to +0x11C:
+// +0x08 / +0x0C life frames, +0x18 seed, +0x20 drag, +0x50 enabled, +0x60 position, +0x70 direction, +0x80 frames between
+// emissions, +0x94..+0xC8 spread / speed / size, +0xE0 start colour, +0x100 end colour; the texture handle at +0x128 (EDF6;
+// 4.1 +0x120), filled by EffectGenUtil 0x2E8510(egu, handle, name) and released with 0x1120820. The emitter: new(0x300),
+// ctor 0x301290, 0x302200(emitter, &desc, &identity 0x1FFF3D0, 0) copies the description to emitter+0x70; each frame
+// 0x302EE0(emitter+0x70, dt) emits and moves the particles, the draw slot 0x302D10(emitter, &identity) submits them; vtable[0]
+// (emitter, 1) deletes it.
+constexpr std::size_t kDescCtor=0x300C80,kTexture=0x2E8510,kTextureFree=0x1120820,kEmitterCtor=0x301290,kEmitterInit=0x302200,
+    kEmitterStep=0x302EE0,kEmitterDraw=0x302D10,kGameNew=0x12D85B0,kIdentity=0x1FFF3D0,kEffectsAt=0x20B2980;
+constexpr std::size_t kEmitterDesc=0x70;   // emitter+0x70: its copy of the description
 std::atomic<int> motherPrims{0};
 bool MotherPrims() noexcept {
     const int s=motherPrims.load();
@@ -268,6 +284,8 @@ struct Part {
     Glow glow;                       // 4.1 PartsBase +0xA10 colour, +0xA20 target, +0xA30 rate, +0xA04 scroll
     bool hullDeathSeen=false;        // 4.1 +0x905: the hull's first frame at durability <= 0 (flash, then dark)
     int devBone=-2;                  // development (Edf41DevShoot): the bone the shots aim at
+    void* lock=nullptr;              // its lock point (4.1: the MAB lock target ターゲット, lockable while 0x250520 says so)
+    int lockBone=-2;
 };
 // The hull's main state machine (4.1 agent +0xB10, initial 0x252700; ticked only while it lives).
 enum { kHullClosed=1,kHullOpening,kHullOpen,kHullHidden,kHullClosing };
@@ -295,6 +313,11 @@ struct Hull {
     bool haveLast=false;
     SoundHandle fly,fall;            // 母船UFO飛行 (4.1 +0xC10), 母船UFO本体墜落 (+0xCA0)
     bool carrierHumSaid=false;
+    void* vent[16]={};               // EDF6 particle emitters for mp_HatchEmission (4.1 +0xB48, 0x300 each)
+    bool ventsMade=false;
+    // 4.1's movement while alive (0x2512C0): its own position, velocity, the last route point (+0x9D0), yaw (+0xA04)
+    bool moveInit=false,routeSeen=false;
+    float pos[3]={},point[3]={},yaw=0.0f;
 };
 std::recursive_mutex lock;
 int shotCount[5]={},removedCount[5]={};   // bullets fired and parts removed, for the periodic line
@@ -317,9 +340,65 @@ void DropPart(void* o) noexcept {
     StopSound(it->second.chargeLoop);
     parts.erase(it);
 }
+// The vents' emitters (4.1 0x252FD0): one per vent, 4.1's description (煙_01, 300-frame life, drag 0.99, one emission every 8
+// frames, sizes 16 -> 24, white (2,2,2) from alpha 0.35 to 0), straight along the direction the frame gives.
+// THE EMITTERS ARE OFF BY DEFAULT (ini Edf41MotherForce bit 2048 turns them on): making them at all (the description, the texture
+// handle, the 0x300 block through 0x301290 / 0x302200) ends the process in a crash at exit on this game, whatever is done with
+// them afterwards. Real runs 2026-10-16: with the emitters 7 of 7 runs ended in a dump, without them 0 of 16 (and 0 of 2 with
+// bits 128 / 384 right beside); made but never stepped or drawn (bit 512): dump; texture handle never released (bit 1024): dump;
+// emitters never deleted: dump. The dump: FAST_FAIL_FATAL_APP_EXIT raised in EDF6Coop's exception handler for an access
+// violation at EDF.dll+0x7ADCFB, the SoundSystem's destructor releasing a sound instance (0x7AABC0) against its already-null
+// global (0x20B2948); the cause of the tie to the emitters is not found. The 401's mothership agent sees the same dump
+// signature in other runs. The vents are EffectGenUtil puffs meanwhile.
+// The emitters are NOT deleted: the game destroys a mission's objects (this hull's destructor) at process exit too, after its
+// resource managers are gone, and an emitter's destructor releases its texture handle into them: the exit crash of the real runs
+// (2026-10-16: EDF.dll 0x7ADCEE, a list of the dead manager, FAST_FAIL_FATAL_APP_EXIT through EDF6Coop's handler; three of three
+// runs with the emitters, none of two without; the bisect switch Edf41MotherForce 128). 16 small blocks per hull stay behind.
+void FreeVents(Hull& h) noexcept {
+    for(void*& e:h.vent)e=nullptr;
+}
+void MakeVents(Hull& h) noexcept {
+    if(h.ventsMade || !MotherPrims() || !(Cfg().edf41MotherForce&2048))return;   // bit 2048: the emitters (off: they crash the exit)
+    h.ventsMade=true;
+    void* egu=Readable(image+kEffectsAt,8) ? *reinterpret_cast<void* const*>(image+kEffectsAt) : nullptr;
+    if(!egu) { h.ventsMade=false; return; }
+    int made=0;
+    for(int k=0;k<16;++k) {
+        alignas(16) unsigned char d[0x200]={};
+        reinterpret_cast<void*(__fastcall*)(void*)>(image+kDescCtor)(d);
+        const auto f=[&](std::size_t at,float v) { std::memcpy(d+at,&v,4); };
+        const auto n=[&](std::size_t at,std::int32_t v) { std::memcpy(d+at,&v,4); };
+        n(0x08,300); n(0x0C,300);
+        std::uint64_t seed=h.rng+static_cast<std::uint64_t>(k)*0x9E3779B97F4A7C15ull;
+        std::memcpy(d+0x18,&seed,8);
+        f(0x20,0.99f);
+        d[0x50]=0;                                   // off until the weak point opens
+        n(0x80,8);
+        n(0x94,0); n(0x98,0);
+        f(0xAC,0.0f); f(0xB0,0.1f); f(0xB8,0.5f); f(0xBC,2.5f); n(0xC0,5); f(0xC4,16.0f); f(0xC8,24.0f);
+        const float c0[4]={2.0f,2.0f,2.0f,0.35f},c1[4]={2.0f,2.0f,2.0f,0.0f};
+        std::memcpy(d+0xE0,c0,16);
+        std::memcpy(d+0x100,c1,16);
+        reinterpret_cast<void*(__fastcall*)(void*,void*,const wchar_t*)>(image+kTexture)(egu,d+0x128,L"煙_01.dds");
+        void* e=reinterpret_cast<void*(__fastcall*)(std::size_t)>(image+kGameNew)(0x300);
+        if(e) {
+            reinterpret_cast<void*(__fastcall*)(void*)>(image+kEmitterCtor)(e);
+            reinterpret_cast<void(__fastcall*)(void*,const void*,const void*,int)>(image+kEmitterInit)(e,d,image+kIdentity,0);
+            h.vent[k]=e;
+            ++made;
+        }
+        if(!(Cfg().edf41MotherForce&1024))reinterpret_cast<void(__fastcall*)(void*)>(image+kTextureFree)(d+0x128);   // bit 1024: bisecting
+    }
+    Log("EDF41MOTHER vents: %d particle emitters made (EDF6 0x301290, 4.1's 煙_01 description)",made);
+}
+void DrawVents(Hull& h) noexcept {
+    if(Cfg().edf41MotherForce&512)return;
+    for(void* e:h.vent)if(e)reinterpret_cast<void(__fastcall*)(void*,const void*)>(image+kEmitterDraw)(e,image+kIdentity);
+}
 void DropHull(void* o) noexcept {
     const auto it=hulls.find(o);
     if(it==hulls.end())return;
+    FreeVents(it->second);
     FreeGlow(it->second.glow);
     StopSound(it->second.fly);
     StopSound(it->second.fall);
@@ -929,6 +1008,65 @@ void Masking(void* obj,Part& p) noexcept {
     SetFlag(obj,kNotTarget|kNotCounted,!reg);
 }
 
+// ---- lock points (H): an object's lock points are the shared_ptrs in its list +0x360 (data +0x368, count +0x378); a point has its
+// position at +0x10, +0x29 the owner's registration copied each frame (0x6C7700) and +0x2A, without which the lock search skips
+// it (0x22DF43). UfoCarrier508's come from its MAB's lock-target list (list 1; 0x6C74E0 reads [model+0x280] list 1, 0x6C7700 places
+// them on their bones): the hull has exactly 4.1's one, ターゲット on `weak` (the two locators mother301_fix adds for the
+// carrier's constructor are list 0, locators, never lock points). EventAnimationObject makes none, so the parts get 4.1's from
+// their own MAB's list 1 by hand: the main cannon's on `waist` at (0, -343.15, 0), a cannon's on `cannon` at (0, -291.25, 0), a
+// panel's at its origin (the hatches and covers are never enabled in 4.1: never lockable, none made).
+void LockReport(void* obj,const char* what) noexcept {
+    const char* o=static_cast<const char*>(obj);
+    if(!Readable(o+0x360,0x20))return;
+    const char* data=*reinterpret_cast<char* const*>(o+0x368);
+    const std::size_t n=*reinterpret_cast<const std::size_t*>(o+0x378);
+    static std::atomic<int> said{0};
+    if(said.fetch_add(1)>=24)return;
+    Log("EDF41MOTHER %s %p lock points: %zu (team %d, registered %d)",what,obj,n,I(obj,kTeamAt),(I(obj,kFlags380)&0x40)!=0 ? 1 : 0);
+    for(std::size_t i=0;i<n && i<8 && data && Readable(data+i*16,16);++i) {
+        const char* lp=*reinterpret_cast<char* const*>(data+i*16);
+        if(!lp || !Readable(lp,0x30))continue;
+        Log("EDF41MOTHER   #%zu at %.0f %.0f %.0f, +0x29 %d, +0x2A %d",i,F(lp,0x10),F(lp,0x14),F(lp,0x18),lp[0x29],lp[0x2A]);
+    }
+}
+// The hull's own lock point(s) (the MAB's ターゲット on `weak`; the carrier made it): lockable only while a shot at the weak point
+// would be taken, i.e. the hull lives and the main cannon is gone (HullAccept refuses everything before) and a lock-on weapon
+// would otherwise lock what it can only bounce off.
+void HullLock(void* self,bool lockable) noexcept {
+    const char* o=static_cast<const char*>(self);
+    if(!Readable(o+0x360,0x20))return;
+    const char* data=*reinterpret_cast<char* const*>(o+0x368);
+    const std::size_t n=*reinterpret_cast<const std::size_t*>(o+0x378);
+    for(std::size_t i=0;i<n && i<8 && data && Readable(data+i*16,16);++i) {
+        char* lp=*reinterpret_cast<char* const*>(data+i*16);
+        if(lp && Readable(lp,0x30))lp[0x2A]=lockable ? 1 : 0;
+    }
+}
+void PartLock(void* obj,Part& p,bool lockable) noexcept {
+    if(p.group==kHatch || p.group==kCover || (Cfg().edf41MotherForce&256))return;   // bit 256: bisecting, no part lock points
+    if(!p.lock) {
+        if(p.lockBone==-3)return;
+        p.lock=AddLockPoint(obj);
+        if(!p.lock) { p.lockBone=-3; Fail("a part's lock point could not be made"); return; }
+    }
+    float at[3];
+    if(p.group==kPanel)PartPos(obj,at);
+    else {
+        void* skel=static_cast<char*>(obj)+kEaoSkeleton;
+        if(p.lockBone==-2)p.lockBone=BoneIndex(skel,p.group==kBigCannon ? L"waist" : L"cannon");
+        float b[16];
+        if(!BoneMatrix(skel,p.lockBone,b))Matrix(obj,b);
+        const float local[3]={0.0f,p.group==kBigCannon ? -343.15f : -291.25f,0.0f};
+        Point(b,local,at);
+    }
+    SetLockPoint(p.lock,at);
+    char* lp=static_cast<char*>(p.lock);
+    if(Readable(lp+0x28,4)) {
+        lp[0x29]=(I(obj,kFlags380)&0x40)!=0 ? 1 : 0;
+        lp[0x2A]=lockable ? 1 : 0;
+    }
+}
+
 void PartFrame(void* obj,Part& p,Hull& h) noexcept {
     if(!p.sized) {
         p.sized=true;
@@ -941,6 +1079,12 @@ void PartFrame(void* obj,Part& p,Hull& h) noexcept {
         }
     }
     Masking(obj,p);
+    {   // 4.1 0x250520: lockable = enabled, alive, not a static ring, not the neutral ship's main cannon, and the hull not neutral
+        const std::int32_t t=I(p.hull,kTeamAt);
+        PartLock(obj,p,p.registered && t!=-1 && t!=3);
+        if(p.frames==600 && (p.group==kBigCannon || (p.group==kCannon && p.index==0) || (p.group==kPanel && p.index==0)))
+            LockReport(obj,kGroupNames[p.group]);
+    }
     BindGlow(p.glow,obj,kEaoModel,kGroupNames[p.group]);
     // 4.1 0x25E840 +0x905: the hull's first frame at durability <= 0: every part flashes white and goes dark
     if(!p.hullDeathSeen && !HullAlive(p.hull)) { p.hullDeathSeen=true; SetGlow(p.glow,100.0f,100.0f,100.0f,1.0f); GlowTo(p.glow,0.0f,0.0f,0.0f,1.0f); p.glow.rate=0.02f; }
@@ -1025,16 +1169,84 @@ std::uint64_t __fastcall HullDtor(void* self,unsigned flags) {
     return reinterpret_cast<DtorFn>(hullClass.orig[kSlotDtor])(self,flags);
 }
 
-// The hull's spin (4.1: a10 += (a20 - a10) 0.01, the yaw a04 += a10 into the matrix): applied as a turn of this frame's rows.
-// 4.1 runs it whether the hull lives or not (its death sets the target to 0: the turn dies out).
+// ---- 4.1's movement (0x2512C0, H; 补完规格 6.1) -------------------------------------------------------------------------
+// UfoCarrier508 moves itself (0x4F74D0): its AI slot 7 (0x4F6D70) aims a velocity of the route speed at the route point and
+// turns toward it, then +0x5C0 eases to it, +0x90 += +0x5C0, and the rows are rebuilt each frame from the yaw +0x5F4 (target
+// +0x604). 4.1's hull never turns toward its way and creeps: velocity v += (t - v) 0.001 with t = (route point - position)
+// clipped to max(0, move speed x 0.5), v x 0.99 when there is no route point, and its yaw only by the spin
+// (a10 += (a20 - a10) 0.01, a04 += a10). The route itself stays EDF6's: the explorer (+0x4A8) still gives the point (+0x4C0,
+// valid while byte +0x4D0; 4.1 +0x270 / +0x280 / +0x290, the same layout one class up) and still counts a point reached when
+// the hull comes within its radius (+0x4BC), so Factor_AiMoveEnd 9300 (+0x4A8 == 0) fires as before; SetAiMoveSpeed's value
+// is +0x4B8 (4.1 +0x278). Ours is written over the carrier's before and after its update; its yaw fields are kept equal to ours.
+constexpr std::size_t kExplorer=0x4A8,kRoutePoint=0x4C0,kRoutePointSet=0x4D0,kMoveSpeed=0x4B8,
+    kCarrierVelocity=0x5C0,kCarrierYaw=0x5F4,kCarrierYawTarget=0x604;
+// Development (Edf41MotherForce bit 64): the carrier's own movement kept, to compare a mission's timing with 4.1's.
+bool CarrierMoves() noexcept { return (Cfg().edf41MotherForce&64)!=0; }
+// When the explorer lets go of the route (9300's condition), said with the frame, for the timing comparisons.
+void RouteLog(void* self,Hull& h) noexcept {
+    const char* o=static_cast<const char*>(self);
+    const bool has=Readable(o+kExplorer,8) && *reinterpret_cast<void* const*>(o+kExplorer);
+    if(has && !h.routeSeen) { h.routeSeen=true; Log("EDF41MOTHER hull %p frame %u: a route is set (%s movement)",self,h.ticks,CarrierMoves() ? "the carrier's" : "4.1's"); }
+    if(!has && h.routeSeen) {
+        h.routeSeen=false;
+        float pos[3];
+        PartPos(self,pos);
+        Log("EDF41MOTHER hull %p frame %u: route done (Factor_AiMoveEnd) at %.0f %.0f %.0f (%s movement)",self,h.ticks,pos[0],pos[1],pos[2],
+            CarrierMoves() ? "the carrier's" : "4.1's");
+    }
+}
+void HoldPose(void* self,Hull& h) noexcept {
+    if(!h.moveInit || Cfg().edf41MotherPlace>0.0f || (CarrierMoves() && h.death==kDeathNone))return;
+    char* o=static_cast<char*>(self);
+    std::memcpy(o+kPosAt,h.death!=kDeathNone ? h.deadPos : h.pos,12);
+    const float zero[3]={0.0f,0.0f,0.0f};
+    std::memcpy(o+kCarrierVelocity,zero,12);
+    std::memcpy(o+kCarrierYaw,&h.yaw,4);
+    std::memcpy(o+kCarrierYawTarget,&h.yaw,4);
+}
 void Spin(void* self,Hull& h) noexcept {
+    char* o=static_cast<char*>(self);
+    if(!h.moveInit) {
+        h.moveInit=true;
+        std::memcpy(h.pos,o+kPosAt,12);
+        std::memcpy(h.point,o+kPosAt,12);
+        std::memcpy(&h.yaw,o+kCarrierYaw,4);
+        if(!std::isfinite(h.yaw))h.yaw=std::atan2(-F(self,kMatrixAt+8),F(self,kMatrixAt));
+        Log("EDF41MOTHER hull %p: 4.1's movement from %.0f %.0f %.0f, yaw %.3f",self,h.pos[0],h.pos[1],h.pos[2],h.yaw);
+    }
+    RouteLog(self,h);
+    if(Cfg().edf41MotherPlace>0.0f || (CarrierMoves() && h.death==kDeathNone)) {   // development: placed by hand / compared
+        float before[3];
+        std::memcpy(before,h.pos,12);
+        std::memcpy(h.pos,o+kPosAt,12);
+        for(int k=0;k<3;++k)h.vel[k]=h.pos[k]-before[k];   // for its death
+        std::memcpy(&h.yaw,o+kCarrierYaw,4);
+        return;
+    }
     h.yawRate+=(h.yawTarget-h.yawRate)*0.01f;
-    if(std::fabs(h.yawRate)<1e-7f)return;
-    float m[16],r[16],out[16];
-    Matrix(self,m);
-    RotY(h.yawRate,r);
-    Multiply(m,r,out);
-    std::memcpy(static_cast<char*>(self)+kMatrixAt,out,48);
+    h.yaw+=h.yawRate;
+    if(h.death==kDeathNone) {
+        const bool route=Readable(o+kExplorer,8) && *reinterpret_cast<void* const*>(o+kExplorer) && o[kRoutePointSet];
+        if(route)std::memcpy(h.point,o+kRoutePoint,12);
+        else for(float& v:h.vel)v*=0.99f;
+        float t[3]={h.point[0]-h.pos[0],h.point[1]-h.pos[1],h.point[2]-h.pos[2]};
+        const float l=std::sqrt(t[0]*t[0]+t[1]*t[1]+t[2]*t[2]),cap=(std::max)(0.0f,F(self,kMoveSpeed)*0.5f);
+        if(l>cap && l>1e-6f)for(float& c:t)c*=cap/l;
+        for(int k=0;k<3;++k) { h.vel[k]+=(t[k]-h.vel[k])*0.001f; h.pos[k]+=h.vel[k]; }
+        std::memcpy(o+kPosAt,h.pos,12);
+        std::memcpy(o+kCarrierVelocity,h.vel,12);
+        if((h.ticks%600)==1) {
+            static std::atomic<int> said{0};
+            if(said.fetch_add(1)<60)Log("EDF41MOTHER hull %p frame %u move: pos %.0f %.0f %.0f, velocity %.3f %.3f %.3f, route %d point %.0f %.0f %.0f, speed %.2f, explorer %p",
+                self,h.ticks,h.pos[0],h.pos[1],h.pos[2],h.vel[0],h.vel[1],h.vel[2],route ? 1 : 0,h.point[0],h.point[1],h.point[2],F(self,kMoveSpeed),
+                Readable(o+kExplorer,8) ? *reinterpret_cast<void* const*>(o+kExplorer) : nullptr);
+        }
+    }
+    float r[16];
+    RotY(h.yaw,r);
+    std::memcpy(o+kMatrixAt,r,48);   // the rows; the position row is ours
+    std::memcpy(o+kCarrierYaw,&h.yaw,4);
+    std::memcpy(o+kCarrierYawTarget,&h.yaw,4);
 }
 
 bool WeakMatrix(void* self,Hull& h,float* out) noexcept {
@@ -1061,20 +1273,46 @@ void HullHits(void* self,Hull& h) noexcept {
     --h.hitFrames;
 }
 
-// The 16 exhaust vents (mp_HatchEmission [16, "weak", 85, 20]; 4.1 0x252FD0 places vent k at (85 sin a, 20, 85 cos a) in the weak
-// node's space, a = 2 pi (k + 0.5) / 16, blowing along the node's -Y; white smoke 煙_01, 300-frame particles; 0x253750 scales them
-// by 2 x durability / max). 4.1's own emitter is not ported: an ExplosionWind puff (煙_01) per vent every 8 frames instead (M).
-void Vents(void* self,Hull& h) noexcept {
-    if(!h.vents)return;
+// The 16 exhaust vents (mp_HatchEmission [16, "weak", 85, 20]; 4.1 0x2537F0 each frame: vent k at (85 sin a, 20, 85 cos a) in the
+// weak node's space, a = 2 pi (k + 0.5) / 16, blowing along the node's -Y; on while the weak point is open (0x252A30), its colour
+// 2 x durability / max and alpha 1 - 0.65 x durability / max (0x253750)). EDF6's own emitter does the particles (MakeVents).
+void Vents(void* self,Hull& h,void* dt) noexcept {
+    MakeVents(h);
+    if(Cfg().edf41MotherForce&512)return;   // bit 512: bisecting, made but never stepped
     float b[16];
+    if(!(Cfg().edf41MotherForce&2048)) {   // the shipped path: EffectGenUtil's ExplosionWind puffs (煙_01) at the same vent points
+        if(!h.vents || !HullAlive(self))return;
+        WeakMatrix(self,h,b);
+        for(int k=0;k<16;++k) {
+            if(((h.ticks+static_cast<std::uint32_t>(k))&7u)!=0)continue;
+            const float a=2.0f*kPi*(static_cast<float>(k)+0.5f)/16.0f;
+            const float local[3]={85.0f*std::sin(a),20.0f,85.0f*std::cos(a)};
+            float at[3];
+            Point(b,local,at);
+            const float mx=F(self,kMaxDurabilityAt);
+            Smoke(at,(std::max)(0.1f,mx>0.0f ? 2.0f*F(self,kDurabilityAt)/mx : 2.0f));
+        }
+        return;
+    }
     WeakMatrix(self,h,b);
+    const float max=F(self,kMaxDurabilityAt);
+    const float r=max>0.0f ? (std::max)(0.0f,F(self,kDurabilityAt))/max : 0.0f;
     for(int k=0;k<16;++k) {
-        if(((h.ticks+static_cast<std::uint32_t>(k))&7u)!=0)continue;
+        char* e=static_cast<char*>(h.vent[k]);
+        if(!e)continue;
+        char* d=e+kEmitterDesc;
         const float a=2.0f*kPi*(static_cast<float>(k)+0.5f)/16.0f;
         const float local[3]={85.0f*std::sin(a),20.0f,85.0f*std::cos(a)};
         float at[3];
         Point(b,local,at);
-        Smoke(at,(std::max)(0.1f,h.ventSize));
+        const float pos[4]={at[0],at[1],at[2],1.0f},dir[4]={-b[4],-b[5],-b[6],0.0f};
+        d[0x50]=h.vents && HullAlive(self) ? 1 : 0;
+        std::memcpy(d+0x60,pos,16);
+        std::memcpy(d+0x70,dir,16);
+        const float s=2.0f*r,al=1.0f-0.65f*r,c0[4]={s,s,s,al},c1[4]={s,s,s,0.0f};
+        std::memcpy(d+0xE0,c0,16);
+        std::memcpy(d+0x100,c1,16);
+        reinterpret_cast<void(__fastcall*)(void*,void*)>(image+kEmitterStep)(d,dt);
     }
 }
 
@@ -1246,7 +1484,7 @@ std::uint64_t __fastcall HullUpdate(void* self,void* dt) {
             std::memcpy(static_cast<char*>(self)+kPosAt,p,12);
         }
     }
-    if(h.death!=kDeathNone && h.death!=kDeathGone)std::memcpy(static_cast<char*>(self)+kPosAt,h.deadPos,12);   // dead: ours
+    if(h.death!=kDeathGone)HoldPose(self,h);   // ours, not the carrier's (4.1's movement)
     const std::uint64_t result=reinterpret_cast<UpdateFn>(hullClass.orig[kSlotUpdate])(self,dt);
     ++h.ticks;
     ++h.counter;
@@ -1271,12 +1509,18 @@ std::uint64_t __fastcall HullUpdate(void* self,void* dt) {
         if(h.fly.instance)MoveSound(h.fly,pos);
     }
     for(int& t:h.throttle)if(t>0)--t;
-    Spin(self,h);
+    if(h.death!=kDeathGone)Spin(self,h);
+    {
+        bool cannon=false;
+        for(void* o:h.parts) { Part* p=PartOf(o); if(p && p->group==kBigCannon && !p->gone && Live(o)) { cannon=true; break; } }
+        HullLock(self,HullAlive(self) && !cannon && I(self,kTeamAt)!=3);
+    }
+    if(h.ticks==1 || h.ticks==600 || h.ticks==2400)LockReport(self,"hull");
     BindGlow(h.glow,self,kCarrierModel,"hull");
     TickGlow(h.glow);
+    Vents(self,h,dt);
     if(HullAlive(self)) {
         HullMain(self,h);
-        Vents(self,h);
         // development (ini Edf41DevShoot): at the weak point (its node x mp_Weakpoint's (0, -40, 0), where 4.1's hit bursts go)
         float wm[16],aim[3];
         const float off[3]={0.0f,-40.0f,0.0f};
@@ -1285,11 +1529,6 @@ std::uint64_t __fastcall HullUpdate(void* self,void* dt) {
     HullHits(self,h);
     if(!h.dead && !HullAlive(self))StartDeath(self,h);
     if(h.death!=kDeathNone)DeathTick(self,h);
-    else {   // alive: the step it moves by, kept for its death
-        if(h.haveLast)for(int k=0;k<3;++k)h.vel[k]=pos[k]-h.lastPos[k];
-        std::memcpy(h.lastPos,pos,12);
-        h.haveLast=true;
-    }
     Force(self,h);
     if(h.ticks%1800==0) {
         int alive[5]={},dead[5]={};
@@ -1358,7 +1597,7 @@ void __fastcall HullDraw(void* self,void* a2) {
     {
         std::lock_guard<std::recursive_mutex> hold(lock);
         Hull* h=HullOf(self);
-        if(h)ApplyGlow(h->glow);
+        if(h) { ApplyGlow(h->glow); DrawVents(*h); }
     }
     reinterpret_cast<DrawFn>(hullClass.orig[kSlotDraw])(self,a2);
 }

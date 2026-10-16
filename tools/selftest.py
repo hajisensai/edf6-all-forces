@@ -7126,13 +7126,17 @@ def edf41_mother301_finish_contract() -> None:
     every 4.1 sound name the class plays or gives a bullet as its hit sound is in the hull SGO's edf41_se (else silence); every
     CAS state the hull plays is in the hull's CAS; every model of the hull and its parts has the two material parameters the
     glow binds (light0_color, scroll_light0); the shared Bullet carries its hit sound into InitParam +0x100 only when set; the
-    dev switch Edf41MotherForce takes bits 16 and 32 and ships 0."""
+    dev switch Edf41MotherForce takes bits 16, 32, 64, 128 and 256 (the bisect and compare switches) and ships 0."""
     import cas_graft
     import edf41_objects as eo
     import mdb
     import sgo
     cpp, shared, header = src('src/edf41mother.cpp'), src('src/edf41classes.cpp'), src('src/edf41classes.h')
     prints = cpp.split('kMotherPrints[]={', 1)[1].split('};', 1)[0]
+    for rva in ('0x300C80', '0x2E8510', '0x1120820', '0x301290', '0x302200', '0x302EE0', '0x302D10', '0x12D85B0'):
+        assert '{' + rva + ',' in prints, f'particle emitter call {rva} unchecked'
+    assert 'for(void*& e:h.vent)e=nullptr;' in cpp, 'the emitters must not be deleted at the hull end (exit crash, 2026-10-16)'
+    assert '!(Cfg().edf41MotherForce&2048)' in cpp, 'the emitters stay off by default (they crash the exit, 2026-10-16)'
     for name in ('kBindCtor', 'kBindDtor', 'kBind', 'kBindSet', 'kBindApply', 'kSetState', 'kUnregister'):
         assert re.search(rf'\{{{name},\{{0x', prints), f'{name} has no fingerprint in kMotherPrints'
     for rva in ('0x4F9250', '0x4F9530', '0x5B6D10'):
@@ -7162,7 +7166,7 @@ def edf41_mother301_finish_contract() -> None:
     assert 'const wchar_t* hitSe=nullptr;' in header and 'bool FillSePreset(void* preset' in header
     assert 'if(b.hitSe && b.hitSeTable)FillSePreset(param+0x100,b.hitSeTable,b.hitSe);' in shared
     plugin, ini = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini')
-    assert 'ReadInt(L"Edf41MotherForce",n.edf41MotherForce),0,63)' in plugin
+    assert 'ReadInt(L"Edf41MotherForce",n.edf41MotherForce),0,2047)' in plugin
     assert re.search(r'^Edf41MotherForce=0$', ini, re.M) and '16 =' in ini.split('Edf41MotherForce=0', 1)[0].rsplit('Edf41MotherParts=31', 1)[1]
 
 
