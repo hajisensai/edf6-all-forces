@@ -7014,6 +7014,177 @@ def edf41_shared_weapon_asset_lifecycle() -> None:
                     assert modfiles.read(_mods(game, asset)) == original, 'the pre-install model was not restored'
 
 
+@contextlib.contextmanager
+def _edf41_shared_game(original: bytes | None) -> Iterator[tuple[str, str, bytes, Callable[[], dict[str, bytes]]]]:
+    """A game dir with the real shared EDF4.1 model's path and a weapon table for its port: (game, asset, our bytes,
+    the call weapons' files). `original`: a pre-install file at the asset's path (another mod's)."""
+    import edf41_objects as eo
+    import ported_weapons as pw
+    asset = next(iter(eo.registry()['shared']))
+    port = next(p for p in pw.PORTS if asset in p.assets)
+    obj, data = 'OBJECT/VEHICLE301_TANK_AI.SGO', b'shared model'
+    payloads = {obj: b'converted tank', asset: data}
+    reg = {'objects': [{'object': obj, 'files': list(payloads)}],
+           'files': {r: modfiles.sha256(d) for r, d in payloads.items()}, 'shared': {asset: 'unused'}}
+    ids = STOCK + sorted({*cw.templates(), *(p.template for p in pw.PORTS)} - set(STOCK)) + list(calls.IDS)
+    table = ids + [p.id if p is port else pw.retired_id(p.id) for p in pw.PORTS]
+    with tempfile.TemporaryDirectory(prefix='edf6vc-shared-') as game, \
+            patched(modfiles, game_running=lambda process=modfiles.PROCESS: False), \
+            patched(cw, stock=lambda game_root, rel: b''), \
+            patched(eo, registry=lambda: reg), patched(eo, read=payloads.__getitem__):
+        if original is not None:
+            modfiles.atomic_write(_mods(game, asset), original)
+
+        def call_files() -> dict[str, bytes]:
+            files = _call_files(game, table)
+
+            def rows(key: str) -> bytes:
+                return dsgo.compact(dsgo.Document(dsgo.Node([dsgo.Node([dsgo.Node(
+                    [i, f'app:/weapon/{i}.sgo', 0.0, 1.0, 0.0, 0.0, dsgo.Node([]), 1.0, 0.0]
+                    if key == 'table' else [f'name {i}', f'about {i}']) for i in table])], {0: key}), []))
+            files.update({cw.TABLE: rows('table'), **{r: rows('text_table') for r in cw.TEXTS},
+                          pw.sgo_file(port): b'weapon', asset: data})
+            return files
+        yield game, asset, data, call_files
+
+
+def _edf41_install(game: str) -> None:
+    import edf41_objects as eo
+    built, skipped = eo.build(game)
+    assert not skipped, skipped
+    eo.install(game, built)
+
+
+def _edf41_shared_left_clean(game: str, asset: str, original: bytes | None) -> None:
+    """After every component is gone: the original back (or no file), nothing of ours left about the model, and a
+    next install's preflight takes the EDF4.1 object."""
+    import edf41_objects as eo
+    led = ledger.Ledger(game)
+    assert ledger.key(asset) not in led.files, f'the ledger still lists {asset}: {led.files.get(ledger.key(asset))}'
+    assert not os.path.exists(_mods(game, ledger.BACKUP)), 'the ledger left kept originals or empty directories'
+    if original is None:
+        assert not os.path.exists(_mods(game, asset)), 'an unowned model was left in Mods'
+        assert not eo.unavailable(game), eo.unavailable(game)
+    else:
+        assert modfiles.read(_mods(game, asset)) == original, 'the pre-install model was not restored'
+
+
+@test
+def edf41_shared_asset_reinstall_after_repair() -> None:
+    """Repair while the EDF4.1 objects outlive the call weapons, reinstall the weapons, then remove both in either
+    order (the installer's option 1 removes the weapons first): the weapons' second first-backup must not take the
+    model our tools wrote for a pre-install original, or the last release "restores" our bytes and leaves an unowned
+    file that blocks the EDF4.1 tank the next time. Both write orders: the weapons first, or the EDF4.1 objects."""
+    import edf41_objects as eo
+    import itertools
+    for edf41_first, original, weapons_go_first in itertools.product((False, True), (None, b'original mod model'),
+                                                                      (True, False)):
+        if edf41_first and original is not None:
+            continue   # the EDF4.1 install leaves out an object whose file another mod put there
+        with _edf41_shared_game(original) as (game, asset, data, call_files):
+            files = call_files()
+            if edf41_first:
+                _edf41_install(game)
+                cw.install(game, files)
+                assert asset not in cw.load_manifest(game)['replaced'], \
+                    "the EDF4.1 objects' model was backed up as a pre-install original"
+            else:
+                cw.install(game, files)
+                _edf41_install(game)
+            cw.repair(game)
+            assert modfiles.read(_mods(game, asset)) == data
+            assert ledger.Ledger(game).owners(asset) == [eo.OWNER]
+            cw.install(game, files)
+            assert asset not in cw.load_manifest(game)['replaced'], 'our own model was backed up as an original'
+            assert set(ledger.Ledger(game).owners(asset)) == {cw.OWNER, eo.OWNER}
+            assert not eo.unavailable(game)
+            if weapons_go_first:
+                cw.uninstall(game)
+                assert modfiles.read(_mods(game, asset)) == data, 'removed a model the EDF4.1 objects still use'
+                eo.remove(game)
+            else:
+                eo.remove(game)
+                assert modfiles.read(_mods(game, asset)) == data, 'removed a model the call weapons still use'
+                cw.uninstall(game)
+            _edf41_shared_left_clean(game, asset, original)
+
+
+@test
+def edf41_shared_asset_backed_up_by_older_install() -> None:
+    """A weapon manifest from an older install that backed up the EDF4.1 objects' model as its "original" (the
+    EDF4.1 objects wrote it first): removal in either order must not put those same bytes back as another mod's."""
+    import edf41_objects as eo
+    for weapons_go_first in (True, False):
+        with _edf41_shared_game(None) as (game, asset, data, call_files):
+            files = call_files()
+            _edf41_install(game)
+            cw.install(game, files)
+            manifest = cw.load_manifest(game)
+            manifest['created'].remove(asset)
+            manifest['replaced'].append(asset)
+            modfiles.atomic_write(_mods(game, f'{cw.BACKUP}/{asset}'), data)
+            modfiles.atomic_write(_mods(game, cw.MANIFEST), cw._manifest_bytes(manifest))
+            if weapons_go_first:
+                cw.uninstall(game)
+                assert not ledger.Ledger(game).restores(asset), 'our own bytes were kept as the original'
+                eo.remove(game)
+            else:
+                eo.remove(game)
+                cw.uninstall(game)
+            _edf41_shared_left_clean(game, asset, None)
+
+
+@test
+def ledger_deferred_restore_edges() -> None:
+    """The ledger's kept original: put back by the last release and cleaned up with its directories; a file changed
+    since keeps the change and drops the copy; a file gone drops it too; a missing or changed copy neither raises
+    half way (files released before it stay released, the ledger is saved) nor removes the installed file; bytes
+    equal to the registered ones are not kept as an original at all."""
+    rel, other, ours, original = 'OBJECT/SUB/MODEL.MRAB', 'OBJECT/OTHER.MRAB', b'our model', b'original'
+
+    def backup(game: str) -> str:
+        return _mods(game, f'{ledger.BACKUP}/{rel}')
+
+    for case in ('restored', 'changed', 'gone', 'backup missing', 'backup changed', 'same bytes'):
+        with tempfile.TemporaryDirectory(prefix='edf6vc-restore-') as game:
+            led = ledger.Ledger(game)
+            if case == 'same bytes':
+                led.put('calls', rel, ours)
+                led.defer_restore(rel, ours)
+                assert not led.restores(rel)
+                deleted, kept = led.release('calls')
+                assert deleted == [led.disk(rel)] and not kept
+                assert not os.path.exists(_mods(game, ledger.BACKUP))
+                continue
+            led.put('calls', other, b'other')
+            led.put('calls', rel, ours)
+            led.defer_restore(rel, original)
+            assert led.restores(rel) and modfiles.read(backup(game)) == original
+            if case == 'changed':
+                modfiles.atomic_write(led.disk(rel), b'edited by another mod')
+            elif case == 'gone':
+                os.remove(led.disk(rel))
+            elif case == 'backup missing':
+                os.remove(backup(game))
+            elif case == 'backup changed':
+                modfiles.atomic_write(backup(game), b'not what was kept')
+            deleted, kept = led.release('calls', [other, rel])
+            assert deleted == [led.disk(other)] and not os.path.exists(led.disk(other))
+            assert not ledger.Ledger(game).files, f'{case}: the release was not saved'
+            if case == 'restored':
+                assert kept == [led.disk(rel)] and modfiles.read(led.disk(rel)) == original
+            elif case == 'changed':
+                assert kept == [led.disk(rel)] and modfiles.read(led.disk(rel)) == b'edited by another mod'
+            elif case == 'gone':
+                assert not kept and not os.path.exists(led.disk(rel))
+            else:
+                assert kept == [led.disk(rel)] and modfiles.read(led.disk(rel)) == ours
+            if case == 'backup changed':
+                assert modfiles.read(backup(game)) == b'not what was kept', 'an unverified copy was thrown away'
+            else:
+                assert not os.path.exists(_mods(game, ledger.BACKUP)), f'{case}: the kept copy or its directories stay'
+
+
 @test
 def ported_assets_bundled() -> None:
     """The converted models the EDF5 weapons need ship with the tools (tools/ported_weapons.py bundled): every asset of

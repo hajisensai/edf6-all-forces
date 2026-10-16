@@ -116,9 +116,11 @@ def owned_assets(game_root: str, manifest: dict | None = None) -> dict[str, str]
 
 
 def held_elsewhere(led: ledger.Ledger, game_root: str, manifest: dict, rel: str) -> bool:
-    """Whether removal must leave this file for another component; defer any original-file restoration with it."""
+    """Whether removal must leave this file to the ledger: another component still needs it (any original-file
+    restoration is deferred with it), or the ledger keeps its pre-install original, which its last release puts back
+    (deleting it here would lose that original)."""
     if not set(led.owners(rel)) - {OWNER, ledger.LEGACY}:
-        return False
+        return led.restores(rel)
     backup = _mods(game_root, BACKUP, rel)
     if rel in manifest['replaced'] and os.path.isfile(backup):
         with open(backup, 'rb') as f:
@@ -837,12 +839,16 @@ def commit(game_root: str, changes: dict[str, bytes | None]) -> None:
 def _first_backup(game_root: str, manifest: dict, rels: list[str]) -> None:
     """Keeps, once, each file as it was before our first write to it (repair restores these). Only `manifest`
     in memory records it: the caller commits the manifest with the files, so a run that is rolled back leaves no
-    record (a stale copy here is overwritten by the next first backup)."""
+    record (a stale copy here is overwritten by the next first backup).
+    A weapon file another of our tools already wrote (the ledger's owner and bytes: the EDF4.1 objects' shared model,
+    or our own after a repair the other tool outlived) is not a pre-install original: it counts as created, and its
+    release is the ledger's (an original it keeps is put back there, once)."""
+    led = ledger.Ledger(game_root)
     for rel in rels:
         if rel in manifest['created'] or rel in manifest['replaced']:
             continue
         path = _mods(game_root, rel)
-        if os.path.isfile(path):
+        if os.path.isfile(path) and not (rel not in SHARED and led.ours(rel)):
             bak = _mods(game_root, BACKUP, rel)
             os.makedirs(os.path.dirname(bak), exist_ok=True)
             shutil.copy2(path, bak)
@@ -937,7 +943,12 @@ def uninstall(game_root: str, delete_rows: bool = False, unequipped: bool = Fals
             changes[rel] = data
     for rel in our_sgos():
         if held_elsewhere(led, game_root, manifest, rel):
-            continue   # another installed component still needs this shared model
+            # Another installed component still needs this shared model, or the ledger puts its original back: no
+            # longer ours to restore or delete, so a later install decides its first backup afresh (_first_backup).
+            for done in ('created', 'replaced'):
+                if rel in manifest[done]:
+                    manifest[done].remove(rel)
+            continue
         path = _mods(game_root, rel)
         bak = _mods(game_root, BACKUP, rel)
         if rel in manifest['replaced'] and os.path.isfile(bak):

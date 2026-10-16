@@ -10,6 +10,8 @@ Files from before the ledger: one that a tool needs gets the owner LEGACY beside
 releasing the need never deletes it); the tool that writes it takes it over when it writes it again (put) or
 releases it as its own (release with writer=True), and a file the ledger does not know at all belongs to the
 writer that releases it, as it did before the ledger.
+A shared file installed over another mod's may carry `restore`: the SHA-256 of that pre-install original, kept under
+Mods/.edf6vc_files_backup (defer_restore); the last release puts it back unless the file was changed since.
 
 Every write is atomic (pylib/modfiles.py atomic_write): a failed or interrupted write leaves the old file whole.
 
@@ -152,13 +154,44 @@ class Ledger:
 
     def defer_restore(self, rel: str, data: bytes) -> None:
         """Keeps the pre-install bytes until the last consumer releases a shared file.
-        Its writer may remove its own transaction backups before the remaining consumers are uninstalled."""
+        Its writer may remove its own transaction backups before the remaining consumers are uninstalled.
+        Bytes equal to what our tools registered for it are not a pre-install original (a writer that backed up a file
+        another of our tools had already written): nothing is kept, and the last release deletes the file."""
         self._refresh()
         entry = self.files[key(rel)]
-        if 'restore' not in entry:
-            atomic_write(os.path.join(self.mods, BACKUP, *key(rel).split('/')), data)
-            entry['restore'] = sha256(data)
-            self._save()
+        if 'restore' in entry or sha256(data) == entry.get('sha'):
+            return
+        atomic_write(self._backup(key(rel)), data)
+        entry['restore'] = sha256(data)
+        self._save()
+
+    def restores(self, rel: str) -> bool:
+        """The ledger keeps the file's pre-install original: its last release puts that back (writers leave the file
+        to it rather than deleting it themselves)."""
+        return 'restore' in self.files.get(key(rel), {})
+
+    def ours(self, rel: str) -> bool:
+        """The file on disk is what one of our tools registered for it (a known owner, not only LEGACY, and the
+        registered bytes): not a pre-install original to back up."""
+        entry = self.files.get(key(rel))
+        return bool(entry) and bool(set(entry.get('owners', [])) - {LEGACY}) and \
+            sha256_file(self.disk(rel)) == entry.get('sha')
+
+    def _backup(self, k: str) -> str:
+        return os.path.join(self.mods, BACKUP, *k.split('/'))
+
+    def _drop_backup(self, k: str) -> None:
+        """Removes a kept original and the directories left empty under BACKUP (BACKUP itself too)."""
+        path = self._backup(k)
+        if os.path.isfile(path):
+            os.remove(path)
+        root = os.path.join(self.mods, BACKUP)
+        d = os.path.dirname(path)
+        while os.path.isdir(d) and not os.listdir(d):
+            os.rmdir(d)
+            if os.path.normcase(d) == os.path.normcase(root):
+                break
+            d = os.path.dirname(d)
 
     def put_new(self, owner: str, rel: str, data: bytes) -> str | None:
         """Writes `data` only when nothing is at `rel` yet: into a temporary file beside it, then renamed onto the free
@@ -227,22 +260,33 @@ class Ledger:
                     entry['owners'].remove(gone)
             if entry['owners']:
                 continue
-            original = None
-            backup = os.path.join(self.mods, BACKUP, *k.split('/'))
-            if entry.get('restore') and sha256_file(path) == entry.get('sha'):
-                with open(backup, 'rb') as f:
-                    original = f.read()
-                if sha256(original) != entry['restore']:
-                    raise ValueError(f'{k}: shared file backup changed; not restored')
             del self.files[k]
+            restore = entry.get('restore')
             if not os.path.isfile(path):
+                if restore:
+                    self._drop_backup(k)   # removed by someone else since: nothing of ours left to put the original over
                 continue
             if sha256_file(path) != entry.get('sha'):
-                kept.append(path)
+                kept.append(path)   # someone else changed it since: theirs now, the original is not put over it
+                if restore:
+                    self._drop_backup(k)
                 continue
-            if original is not None:
+            if restore:
+                original = None
+                if os.path.isfile(self._backup(k)):
+                    with open(self._backup(k), 'rb') as f:
+                        original = f.read()
+                if original is None or sha256(original) != restore:
+                    # Checked before anything is written: the loop goes on and the ledger is saved; our file stays
+                    # rather than leaving neither it nor the original.
+                    print(f'WARNING: {k}: the kept original ({self._backup(k)}) is '
+                          f'{"missing" if original is None else "not what was kept"}; left the installed file as it is')
+                    kept.append(path)
+                    if original is None:
+                        self._drop_backup(k)   # its directories, left empty
+                    continue
                 atomic_write(path, original)
-                os.remove(backup)
+                self._drop_backup(k)
                 kept.append(path)
                 continue
             os.remove(path)
