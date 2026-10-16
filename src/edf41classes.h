@@ -229,5 +229,8 @@ bool WeakOut(const void* object,void* out) noexcept;
 // with 0x7B3200; 4.1's InitParam has it at +0xB0, and UfoRobo's 0x275730 fills it per gun with ロボビーム着弾小 / 中 / 大). `hitSe` is a
 // 4.1 SEPRESET name looked up in `seTable`'s edf41_se and filled by cue as PlayCue does; nothing found: Fire's silent preset.
 bool FireSe(void* owner,const float* matrix,const Bullet& b,const void* seTable,const wchar_t* hitSe) noexcept;
+// `preset` (0x80 bytes, anywhere) initialised as EDF6's SePreset constructor does (0x7B3200) and filled from 4.1's preset `name` in
+// `table`'s edf41_se (cue, volume, pitch, distances), as FireSe does for a bullet; false (the preset still initialised): no such name.
+bool FillSePreset(unsigned char* preset,const void* table,const wchar_t* name) noexcept;
 
 }  // namespace crew::edf41c

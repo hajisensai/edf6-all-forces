@@ -1006,6 +1006,12 @@ bool FillPreset(unsigned char* preset,const void* table,const wchar_t* name) noe
 }
 }  // namespace
 
+bool FillSePreset(unsigned char* preset,const void* table,const wchar_t* name) noexcept {
+    if(!Prims() || !preset)return false;
+    At<void*(__fastcall*)(void*)>(kPresetInit)(preset);
+    return FillPreset(preset,table,name);
+}
+
 bool FireSe(void* owner,const float* matrix,const Bullet& b,const void* seTable,const wchar_t* hitSe) noexcept {
     void* mgr=Manager();
     void* factory=mgr ? reinterpret_cast<GetFactoryFn>(image+kFactoryByName)(mgr,b.factory) : nullptr;

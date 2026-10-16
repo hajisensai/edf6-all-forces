@@ -111,7 +111,7 @@ constexpr std::size_t kFindLocator=0x6BADD0,kRagdollOn=0x6E40B0,kPointImpulse=0x
     kCasVar=0x1167170,kCasVarSet=0x116DF60,kDelete=0x118A1B0,kBodyById=0x6EA430,kChargeCreate=0x84A60,kCasSpeed=0x116DF20,
     kMatCtor=0x6DBE90,kMatTarget=0x6DC7B0,kMatLoad=0x6DC6B0,kMatPlay=0x6DC830,kMatStep=0x6DC8B0,kMatFree=0x29D120,
     kRagdollLayer=0x6E9320,kParticleCreate=0x844C0,kParticleParamInit=0x300C80,kTexByName=0x2E8510,kTexAssign=0xF5E10,
-    kTexFree=0x1120820,kParticleParamFree=0x8FDF0;
+    kTexFree=0x1120820,kParticleParamFree=0x8FDF0,kSetAngVel=0x11B1760,kContactSignal=0xDAB920,kContactAdd=0x6E3A60,kContactCb=0x6EC450;
 constexpr std::size_t kInitParamBase=0x1762068,kEffects=0x20B2980,kManager=0x20B2958,kChargeVtable=0x17A9338,kParticleParamVtable=0x17620E8;
 struct Print { std::size_t rva; unsigned char bytes[8]; };
 constexpr Print kPrints[]={
@@ -130,6 +130,8 @@ constexpr Print kPrints[]={
     {kParticleCreate,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C}},{kParticleParamInit,{0x48,0x89,0x5C,0x24,0x10,0x57,0x48,0x83}},
     {kTexByName,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},{kTexAssign,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C}},
     {kTexFree,{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B}},{kParticleParamFree,{0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83}},
+    {kSetAngVel,{0x48,0x8B,0x81,0x00,0x01,0x00,0x00,0x4C}},{kContactSignal,{0x48,0x8B,0x89,0x80,0x09,0x00,0x00,0x41}},
+    {kContactAdd,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},{kContactCb,{0x40,0x53,0x56,0x57,0x48,0x81,0xEC,0xD0}},
 };
 std::atomic<int> state{0};   // 0 unchecked, 1 good, 2 refused
 bool Ok() noexcept {
@@ -313,6 +315,68 @@ bool MuzzleFlash(const float* pos,int life,float size,const float* colour) noexc
     WeakReset(w);
     At<void*(__fastcall*)(void*,unsigned)>(kParticleParamFree)(param,0);
     return made;
+}
+
+// A body's angular velocity set (the world part's slot 0xB0, 0x11B1760(body, vec): the Havok order setLinear 0xA8 / setAngular 0xB0 /
+// applyLinear 0xC0 / applyAngular 0xC8 / applyAt 0xD0; 4.1's 0x275CEB is its angular-velocity call on the first body).
+void SetAngularVelocity(void* handle,const float* v) noexcept {
+    if(!Ok() || !handle)return;
+    alignas(16) const float w[4]={v[0],v[1],v[2],0.0f};
+    At<void(__fastcall*)(void*,const float*)>(kSetAngVel)(handle,w);
+}
+
+// 4.1's ragdoll_contact [sound, impulse, quake strength, quake radius, frames] (ragdoll 0x337F60) on EDF6's own contact component,
+// the one HumanBase builds (0x6EBBC0, at +0xF70): 0x90 bytes {+0 quake strength, +4 quake radius, +8 impulse threshold, +0x10 a
+// SePreset, +0x90 the cooldown in frames, +0x94 the frames to wait after a sound}; its callback 0x6EC450 (comp, signal, contact) is
+// registered on each body's contact signal (0x6E3A60(signal, comp, callback); signal = 0xDAB920(world, 2, body id)) after the body's
+// contact events are switched on (slot 0x158 of the world part, flag 0x80). The callback plays the preset at the contact point, shakes
+// the camera and sets the cooldown when the contact impulse reaches the threshold. The component is never freed (the registrations
+// live in the ragdoll, which dies with the object). The sound is the cue of the 4.1 preset (the SEPRESET name is not in EDF6's).
+struct Contact { unsigned char* comp=nullptr; bool on=false; };
+bool ContactOn(Contact& c,void* object,const SgoNode* node,const void* seTable) noexcept {
+    if(c.on || !Ok() || Count(node)<5)return false;
+    float strength,radius,threshold;
+    std::int32_t frames=0;
+    wchar_t name[96];
+    if(!Text(Child(node,0),name,96) || !Float(Child(node,1),&threshold) || !Float(Child(node,2),&strength) || !Float(Child(node,3),&radius)
+       || !Int(Child(node,4),&frames))return false;
+    const Bodies b=RagdollBodies(object);
+    if(!b.count)return false;
+    c.comp=new unsigned char[0x100]();
+    std::memcpy(c.comp,&strength,4);
+    std::memcpy(c.comp+4,&radius,4);
+    std::memcpy(c.comp+8,&threshold,4);
+    std::memcpy(c.comp+0x94,&frames,4);
+    const bool voiced=FillSePreset(c.comp+0x10,seTable,name);
+    int added=0;
+    for(std::size_t i=0;i<b.count;++i) {
+        char* h=static_cast<char*>(BodyHandle(b,i));
+        if(!h)continue;
+        char* part=*reinterpret_cast<char**>(h+0x100);
+        if(!part || !Readable(part+0x58,8))continue;
+        char* world=*reinterpret_cast<char**>(part+0x58);
+        if(!world || !Readable(world+0x18,0x28))continue;
+        void* const* vt=*reinterpret_cast<void* const* const*>(world+0x18);
+        if(!vt || !Readable(vt+0x2C,8))continue;
+        const std::uint32_t id=*reinterpret_cast<const std::uint32_t*>(h+0xF0);
+        reinterpret_cast<void(__fastcall*)(void*,std::uint32_t,std::uint32_t,std::uint64_t,std::int32_t)>(vt[0x158/8])(world+0x18,id,0x80,0,0);
+        void* signal=At<void*(__fastcall*)(void*,int,std::uint32_t)>(kContactSignal)(world,2,id);
+        if(!signal)continue;
+        At<void(__fastcall*)(void*,void*,void*)>(kContactAdd)(signal,c.comp,image+kContactCb);
+        ++added;
+    }
+    Log("EDF41ROBO %p ragdoll contact: sound %s, impulse %.0f, quake %.2f / %.0f, wait %d frames; callbacks on %d of %zu bodies",object,voiced ? "found" : "NOT found",
+        threshold,strength,radius,frames,added,b.count);
+    c.on=added>0;
+    return c.on;
+}
+// The cooldown the callback sets (frames), counted down by the plugin; returns the value before this frame's step.
+int ContactTick(Contact& c) noexcept {
+    if(!c.on || !c.comp)return 0;
+    std::int32_t cd;
+    std::memcpy(&cd,c.comp+0x90,4);
+    if(cd>0) { const std::int32_t next=cd-1; std::memcpy(c.comp+0x90,&next,4); }
+    return cd;
 }
 
 void ChargeStep(void* effect,const float* matrix,void* dt) noexcept {
@@ -528,6 +592,8 @@ struct Robo {
     bool dead=false,deleted=false;
     bool ragdoll=false;          // the ragdoll took over (4.1 S10)
     std::uint32_t hitsTaken=0;
+    p6::Contact contact;         // 4.1's ragdoll_contact (crash sound + quake), on from the death
+    int contactSeen=0;
     float lastHp=-1.0f;          // the durability after the last hit (the damage a hit did = the drop)
     // foot IK (ik_control_info: [[bone, CAS variable], ...], 4.1 0x278190)
     int ikBone[2]={-1,-1},ikVar[2]={-1,-1};
@@ -1060,6 +1126,11 @@ void BodyTick(Robo& r) noexcept {
         if(r.bodyFrames>2 && ClipEnded(r))BodySet(r,kS7);
         break;
     case kS10:
+        if(r.ragdoll && !r.contact.on && r.bodyFrames==2)p6::ContactOn(r.contact,r.obj,Key(r.obj,L"ragdoll_contact"),r.obj);
+        if(r.contact.on) {
+            const int cd=p6::ContactTick(r.contact);
+            if(cd>0 && r.contactSeen==0) { Log("EDF41ROBO %p ragdoll contact sound + quake fired at death frame %d (cooldown %d)",r.obj,r.bodyFrames,cd); r.contactSeen=1; }
+        }
         if(r.ragdoll && r.bodyFrames%120==1) {   // where the ragdoll is: its first body, the lowest, the ground below the first
             const p6::Bodies b=p6::RagdollBodies(r.obj);
             float p0[3]={},low[3]={0.0f,1e9f,0.0f},q[3],hit[3]={};
@@ -1520,6 +1591,16 @@ void Die(Robo& r,const void* gdi) noexcept {
     Explosion(p,nrm,3.0f);
     r.ragdoll=p6::RagdollOn(r.obj);
     int pushed=0;
+    if(r.ragdoll) {   // 4.1 0x275C3F..0x275CEB: the first body spun at up to 6 rad/s about a random axis
+        const float up[3]={0.0f,1.0f,0.0f};
+        float axis[3];
+        Scatter(r,up,kPi,axis);
+        const float speed=(Rand(r)*0.2f-0.1f)*60.0f;
+        const float w[3]={axis[0]*speed,axis[1]*speed,axis[2]*speed};
+        const p6::Bodies sb=p6::RagdollBodies(r.obj);
+        if(sb.count)p6::SetAngularVelocity(p6::BodyHandle(sb,0),w);
+        Log("EDF41ROBO %p death spin on body 0: %.2f %.2f %.2f rad/s",r.obj,w[0],w[1],w[2]);
+    }
     if(r.ragdoll) {   // which bodies went dynamic (record +0xA4: may go ragdoll; +0x9C the mode now, 4 = dynamic)
         const p6::Bodies b=p6::RagdollBodies(r.obj);
         int able=0,dynamic=0;

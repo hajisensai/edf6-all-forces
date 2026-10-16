@@ -116,6 +116,15 @@ TimeDateStamp 0x678CCB46）。可信度：**H** 反汇编读到，**M** 推出�
     给被打中的刚体加冲量（爆炸：背离爆心 max(r − 距离, 0.1) × 100；子弹：冲量 × 2 × 0.5，0x11B0CB0）；CAS 主播放器速率置 0
     （0x116DF20，EDF6_Martian 死亡 0x479677 同样做；4.1 0x278EC0 把主播放器权重置 0）；飞行形态「ロボ飛行形態死亡」+ Explosion_Big
     在对象处朝 −前方，机器人形态「ロボ死亡」+ Explosion_Big 在那个命中点（都是 0.75 / 2.0）；驱动音淡出；→ S10。
+  - **死亡旋转**（4.1 0x275C3F..0x275CEB）：第 0 个刚体的角速度 = 随机轴（锥角 π，即任意方向）× (rand × 0.2 − 0.1) × 60，即 ±6 rad/s 内；
+    EDF6 用世界部件的 `setAngularVelocity`（槽 0xB0，0x11B1760(刚体, 向量)；Havok 的顺序 setLinear 0xA8 / setAngular 0xB0 / applyLinear
+    0xC0 / applyAngular 0xC8 / applyAt 0xD0，ShootingTarget 用的 0xC0 / 0xD0 与此一致）。日志 `death spin on body 0`。
+  - **倒地撞击音 + 震屏**（`ragdoll_contact` = [ロボ大クラッシュ, 600000, 0.5, 10, 120]，4.1 ragdoll 0x337F60）：用 EDF6 自己的接触组件
+    （HumanBase 在 +0xF70 造的那个，0x6EBBC0）：0x90 字节 {+0 震屏强度、+4 半径、+8 冲量阈值、+0x10 一个 SePreset、+0x90 冷却帧、
+    +0x94 播放后等待帧}，回调 0x6EC450 登记在每个刚体的接触信号上（0x6E3A60(信号, 组件, 回调)，信号 = 0xDAB920(世界, 2, 刚体号)，登记前
+    用世界部件槽 0x158 打开该刚体的接触事件、标志 0x80）。回调在接触冲量 ≥ 阈值时在接触点播 SePreset、震屏（0x104C00）、把冷却置为
+    +0x94。ragdoll 激活后第 2 帧登记（45 个刚体）；组件是插件分配的、不释放（登记随 ragdoll 一起死）；SePreset 用 4.1 预设
+    `ロボ大クラッシュ` 的 cue（`edf41c::FillSePreset`，EDF6 的 SEPRESET 没有这个名字）；冷却由插件每帧减 1（EDF6 里是 ragdoll 的更新减）。
   - S10（8 + 7·rand 秒）：对象停在死的位置（骨骼归 ragdoll），灯光动画放第二段（4.1 0x278DEB）。S11：在 ragdoll 第 0 个刚体处
     Explosion_Big（沿对象上方向，1.0 / 2.0）+「ロボ死亡」，10 秒后删除。
   - 击杀计数、掉落、脚本的 9201 都是 ApplyDamage 的（它在调 OnDamaged 之前就把对象标成已毁）：DevShoot（玩家的子弹）打死 → 掉落物落地
@@ -169,19 +178,17 @@ LaserBullet02 打它的锁定点，走游戏自己的伤害路径）。
 | M010（rf7） | Place 300、DevShoot 30 / 500 | 三台按脚本 ObjectAction 2 → 0 变形、机器人化；脚步 / `fall_land` / 劈砍（`右手攻撃範囲` 1–3，半径 50、伤害 109）都「something was hit」；三台先后死亡、ragdoll、S11、删除；无崩溃。 |
 
 | M411（rf8） | Place 60、Attack 2（不开 DevShoot） | 踩踏 `attack_stomp_r` 选中 3 次，`攻撃判定` 半径 60、伤害 94、在地面点发出；玩家始终在 54–74 m 外（圆外），这一关里没打到人——打中的证据在 rf6 / rf7。 |
+| M411（rf10） | Place 120、DevShoot 20 / 800 | 机器人第 961 帧死亡：`death spin on body 0: -1.54 -3.82 -1.52 rad/s`；`ragdoll contact: sound found, impulse 600000, quake 0.50 / 10, wait 120 frames; callbacks on 45 of 45 bodies`；死亡后第 3 帧回调就触发（冷却被置 120）——即 EDF6 的接触回调确实在跑、放了音并震屏（它触发得很早：刚体激活时的初始接触 / 冲量就过了阈值，不一定是倒地那一下；阈值 600000 是 4.1 的数，EDF6 质量单位与 4.1 是否一致没法核）。ragdoll 之后照常留在地面上。 |
 | M416（rf9） | Place 300、DevShoot 30 / 400 | 槽 16 之后：ObjectAction 0 → S4 期间（14:30:19–14:30:36）**耐久一直 26112**，S5 开始后第一发才掉血（−400）；之后正常死亡、ragdoll、S11。 |
 
 **收尾（rfp_*，开发开关全 0、最终 DLL）**：M007、M411、M415、M416、M010 各跑一次，全部「mission started / game alive / 无崩溃转储 / Mods 与存档逐字节还原」；日志无 `check failed`、指纹拒绝、队伍未设；每关都造出了蓄力特效。（autopilot 不开火：这些跑里没有死亡，死亡由上面的 DevShoot 跑验证。）
 
 ## 4. 没做 / 不确定
-- **ragdoll 撞地音**（`ragdoll_contact` = [ロボ大クラッシュ, 600000, 0.5, 10, 120]，4.1 ragdoll 0x337F60）：EDF6 是一个接触监听成员做的
-  （HumanBase 在 +0xF70，0x6EBBC0 给每个刚体用 0x6E3A60 登记回调 0x6EC450），EAO 没有这个成员；插件自己往物理世界登记回调就得在对象删除
-  时注销，做错是崩溃，没做。
-- 4.1 死亡时给 ragdoll 第 0 个刚体一个随机角速度（0x275C3F..0x275CEB，±0.1·60 rad/s）没做（EDF6 设角速度的接口没找）；冲量按
-  ShootingTarget 的做法给被打中的刚体。4.1 两种形态激活的标志不同（飞行 4、机器人 0，0x335140 的逐刚体标志），EDF6 只有一个激活
-  （0x6E40B0，全部模式 4）。
+- 倒地撞击音的**触发时机**：用的是 EDF6 接触回调本身，实测在死后第 3 帧就触发（见 rf10），是否在 4.1 里同一时刻发声没法比较；阈值沿用 4.1 的
+  600000。旋转的方向 / 大小没法在画面上和 4.1 对照（只核了日志里的角速度）。
 - 受击火花用 EDF6 的 MetalHit、尺寸夹到 [1, 20]；飞行形态的击退推的是插件的速度，量按 4.1 的公式但刚体质量不在内（M）；震屏强度
   照 4.1 的数、半径 = 判定半径 × 10（4.1 消息 0x80000018 的参数含义没核，M）。
 - 4.1 `ObjectAction 0` 在已是机器人时也会重播变形（照抄）；脚本只在飞行形态时发。
 - 地面射线的两段式（脚上 2 m 优先）是 EDF6 侧的修正：4.1 的过滤器本来就打不到自己。
 - 联机没跑过（2.4）。
+- 全量 selftest：`py -3.12 -B tools/selftest.py` 229 / 229 通过（2026-10-16）。
