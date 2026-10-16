@@ -164,6 +164,23 @@ Deiroi401L/S 在 EDF6 的 `Deiroi` 类里走到的一条 stock 必崩路径，�
 （不敌对、炮台没有目标）；克隆表用共享的 `AllowAnyTeam`。DeleteObject 标记或游戏自己停止更新（死亡）的部件，记录要到析构才清，船体一度认为
 「还有面板」不自删；现在被删 / 300 帧没有 Update 的部件算没了。
 
-**没在实机上看到的**：玩家亲手打弱点 / 打炮台（autopilot 不开火：受伤过滤、受伤音、掉落只读过代码）；FinalCannon / FinalGenerator（M018 / M809
-的最终阶段要先打穿前面）；M809 的 DeleteObject + 重建（要打掉 5 块弱点）；周期生成器（SetEnemyGenerator）的补槽；动作 3（全部消失）与 4（自转）；
-音效是否真的响（日志里没有 `did not play`，但没有听）；M009 / M132 / M142 / M145 / M149 / M308 / M312 / M516 / M518 只有数据测试；联机。
+### 补完轮的实机记录（2026-10-16 / 15，`Edf41DevShoot=20`、`Edf41DevShootDamage=100`，输出目录在 `jobs/14618f05/tmp/gametest/`；全部没有崩溃转储，Mods / 存档逐字节还原，除非写明）
+
+| 任务（目录） | 开关 | 看到的 |
+|---|---|---|
+| M018 `m401f_M018_ds8` | DevShoot + Dev=128（玩家不死） | 玩家打弱点 / 炮台 / 核心：槽 16 过滤按类统计（日志每 600 帧「hits so far」）：WeakPanel 70 taken / 433 refused，Core 614 / 1，BigCannon01 110 / 1，炮台全是 taken，Generator 0 taken / 505 refused（见 4）；炮台、主炮、WeakPanel 死亡（含 200 m 连锁）、**阶段门走完**：OA(5) 换 map2 → OA(6) 换 final（38 块，307 块旧的消失，1 块 keep 保留）→ OA(1) 飞入 → 打穿 34 门 FinalCannon01（72 → 238 发命中后死）→ 4 个 FinalGenerator 死 → Core 死（614 发）→ Core 死亡编排 → 约 50 s 后面板删光、船体自删；截图 24：**MISSION CLEAR 结算，拾得 ARMOR / 武器掉落**（掉落、命中音走游戏自己的伤害管线） |
+| M018 `m401f_M018_ds7` | 同上 + Dev=575（无充能光） | 同一流程干净退出，无崩溃（对照：开充能光的 ds5 / ds6 / M019 ds1 退出时崩，见 4） |
+| M809 `m401f_M809_ds3` | DevShoot + Dev=384（256：30 s 后才打，让脚本的弱点监听先就位）、DevKill=30 | 5 块 WeakPanel 被玩家打死（每块 200 m 连锁 4–6 块）→ 脚本 OA(6) = **动作 3「全部消失」（329 块缩没）**→ DeleteObject 船体并同变量**重建**（新船体、`panel_layout_map_phase2`、3 个生成器按 `Ufo401ace` 一次 + `giantbee02Charge` / `silverspider` / `goldant` 周期波次）→ 再 3 块弱点 → OA(6) 全消失（338 块）→ 再建（`phase3`，39 块，4 个生成器宿主）→ 打穿 34 门 FinalCannon01 → 4 个 FinalGenerator → Core 死。**最终阶段由玩家子弹真打出来**（不再用开发开关毁） |
+| M019 `m401f_M019_ds2` | Dev=192（64：也打生成器放出的敌人） | 周期生成器放敌人，日志「enemy #n gets 0x20102 (0 −1 0 0)」；Generator 的核心刚体被外壳挡住，命中全拒（见 4），所以「受击叫醒」没在实机触发 |
+| 无开关各跑一遍：M009 M012 M018 M019 M142 M149 M201 M412 M518 M602、M809、MP503 | 全 0 | 能进任务、布局 / 生成器 / 动作正常，**无崩溃**；M009 `panel_layout_map_init_m009` 137 块、7 个生成器宿主；M142 205 块、M149 148 块 |
+| M132 M145 M308 M312 M516 无开关各跑一遍（`m401f_plain_*`） | 全 0 | 无崩溃；但 90 s 内船体没出现——脚本在事件（击杀、计时）后才 CreateNeutral，autopilot 不打，没触发（这五关仍只有数据测试） |
+| 目前的一次性问题 | | 链式连跑被系统内存吃紧杀掉过一次（不是游戏问题），已重跑缺的 M009 |
+
+本轮在实机上**新验证**的功能：锁定点与受击音（日志无「did not play」，未听）、材质动画（每部件日志「3 material animations」，截图红 / 绿循环光）、
+弱点刚体过滤（修好 `RagDollProxys.` 前缀后 taken / refused 如表）、StencilLight（M018 / M809 的 WeakPanel 死亡，无崩溃，外观未逐帧核）、
+周期生成器的补槽（只补死掉的，数据块「waves of 6 …」，每波 6 只日志 #1–#6 一帧一个）、动作 3（M809）、动作 4（M018 自转）、
+DeleteObject + 重建（M809）、最终阶段 FinalCannon / FinalGenerator（M018 / M809 玩家真打穿）、船体 ragdoll 移出物理世界（日志 600 帧时「0 of its 1
+ragdoll bodies are back in the world」）。
+
+**仍没在实机上看到的**：M132 / M145 / M308 / M312 / M516 的船体（脚本事件没触发）；Generator 被打中时叫醒敌人（命中全被外壳挡住）；音效实际听感；
+动作 3 / 4 之外的 7（M201 飞走）上一轮已见；联机。
