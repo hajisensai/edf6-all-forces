@@ -424,6 +424,7 @@ bool Fire(void* owner,const float* matrix,const Bullet& b) noexcept {
         std::memcpy(param+0xE8,&custom,8);
         std::memcpy(param+0xF8,&tag,2);
     }
+    if(b.hitSe && b.hitSeTable)FillSePreset(param+0x100,b.hitSeTable,b.hitSe);   // the hit sound (UfoMother301)
     static std::atomic<std::uint32_t> seed{0x9E3779B9u};
     const std::uint32_t s=(seed+=0x6D2B79F5u)>>16;
     std::memcpy(param+0x1A0,&s,4);
@@ -976,6 +977,42 @@ bool WeakOut(const void* object,void* out) noexcept {
     std::memcpy(out,&w.object,8);
     std::memcpy(static_cast<char*>(out)+8,&w.control,8);
     return true;   // the weak count WeakSet took goes with it
+}
+
+// ---- UfoMother301: a bullet's hit sound (Bullet::hitSe) -----------------------------------------------------------------------
+// The preset as PlayCue fills one: the cue ref (0x7AEAE0 over the loaded banks) in the five slots +0x20..+0x60, volume +0x74,
+// pitch +0x70, the three distances +0x10 / +0x14 / +0x18; the bullet keeps InitParam +0x100 and plays it on its hit (the
+// weapons' key 14 fills the same preset by SEPRESET name, 0x6CEF81 -> 0x7B16F0).
+bool FillSePreset(void* preset,const void* table,const wchar_t* name) noexcept {
+    void* system=Global(kSoundSystem);
+    if(!Prims() || !system || !preset || !table || !name)return false;
+    const SgoNode* list=Key(table,L"edf41_se");
+    const int n=Count(list);
+    wchar_t text[96],cue[96];
+    for(int i=0;i<n;++i) {
+        const SgoNode* e=Child(list,i);
+        if(Count(e)<7 || !Text(Child(e,0),text,96) || std::wcscmp(text,name)!=0)continue;
+        SeParams p;
+        if(!Text(Child(e,1),cue,96) || !Float(Child(e,2),&p.volume) || !Float(Child(e,3),&p.pitch) || !Float(Child(e,4),&p.inner)
+           || !Float(Child(e,5),&p.reference) || !Float(Child(e,6),&p.cull))return false;
+        struct { void* bank; std::int32_t cue; std::int32_t pad; } ref{nullptr,-1,0};
+        if(!At<bool(__fastcall*)(void*,void*,int,const wchar_t*)>(kCueLookup)(system,&ref,0,cue) || !ref.bank) {
+            static std::atomic<int> said{0};
+            if(said.fetch_add(1)<8)Log("EDF41CLASS hit sound %ls: no cue %ls in the loaded banks",name,cue);
+            return false;
+        }
+        unsigned char* p8=static_cast<unsigned char*>(preset);
+        for(std::size_t at=0x20;at<=0x60;at+=0x10)std::memcpy(p8+at,&ref,16);
+        std::memcpy(p8+0x74,&p.volume,4);
+        std::memcpy(p8+0x70,&p.pitch,4);
+        std::memcpy(p8+0x10,&p.inner,4);
+        std::memcpy(p8+0x14,&p.reference,4);
+        std::memcpy(p8+0x18,&p.cull,4);
+        return true;
+    }
+    static std::atomic<int> said{0};
+    if(said.fetch_add(1)<8)Log("EDF41CLASS no 4.1 sound preset %ls for a hit sound",name);
+    return false;
 }
 
 }  // namespace crew::edf41c

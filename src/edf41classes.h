@@ -95,6 +95,11 @@ struct Bullet {
     float radiusFactor=-1.0f;     // +0xC4 collision radius factor (4.1 +0x80); < 0: the default
     float speedFactor=-1.0f;      // +0xC8 (4.1 +0x84); < 0: the default
     const SgoNode* custom=nullptr;// +0xE8 (tag +0xF8 = 1); must outlive the bullet (Persist)
+    // (added for UfoMother301) the hit sound: InitParam +0x100 is a SePreset (the constructor 0x1001D0 inits it with 0x7B3200;
+    // a weapon's key 14 fills it by SEPRESET name, 0x6CEF81), played where the bullet hits. 4.1 fills its +0xB0 the same way.
+    // `hitSe` is a 4.1 preset name looked up in `hitSeTable`'s edf41_se (as PlaySe); null: none.
+    const void* hitSeTable=nullptr;
+    const wchar_t* hitSe=nullptr;
 };
 // One bullet along the matrix's +Z from its position, owned by `owner` (its team and weak pointer); false when the
 // factory is unknown.
@@ -160,6 +165,9 @@ bool PlayCue(const wchar_t* cue,const float* pos,SoundHandle* handle=nullptr,con
 // copies 4.1's entries into the object's SGO key edf41_se ([[name, cue, volume, pitch, a, b, c], ...]); `table` is the object
 // whose SGO holds it (a part plays from its hull's table).
 bool PlaySe(const void* table,const wchar_t* name,const float* pos,SoundHandle* handle=nullptr) noexcept;
+// (added for UfoMother301) A SePreset (0x80 bytes, already through 0x7B3200) filled with 4.1's preset `name` from `table`'s
+// edf41_se, the way PlayCue fills its own; false (preset untouched) when the name or its cue is missing.
+bool FillSePreset(void* preset,const void* table,const wchar_t* name) noexcept;
 void MoveSound(SoundHandle& handle,const float* pos) noexcept;
 void StopSound(SoundHandle& handle,int fadeFrames=4) noexcept;
 
