@@ -1139,6 +1139,9 @@ def check_package() -> int:
     assert make_optics.optics.MODELS
     import make_sedan
     import ledger
+    import cockpit_instruments
+    assert len(cockpit_instruments.LABELS['AMMO']) == 4
+    assert cockpit_instruments.GLYPHS['弹']
     assert make_sedan.FIT == cockpit_fits.FITS['EDF6VC_SEDAN']
     assert make_sedan.OWNER in ledger.OWNERS
     importlib.import_module('PIL.DdsImagePlugin')   # the city sedan's BC7 glass decoder

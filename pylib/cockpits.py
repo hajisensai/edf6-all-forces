@@ -221,6 +221,7 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
     root = asset_root()
     print('      座舱：提取车壳三角形……', flush=True)
     hull = hull_triangles(md)
+    thumbnail = cockpit_instruments.silhouette(hull, 'front' if any(f.kit.startswith('mech_') for f in fits) else 'top')
     kit_of: dict[int, Kit] = {}
     controls: dict[int, dict[str, str]] = {}
     for fit in fits:
@@ -232,7 +233,7 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
         for index, scr in enumerate(kit.screens):
             if scr.kind in ('hud', 'sensor'):
                 continue
-            parts, moving = cockpit_instruments.instrument(scr, index, numbers=fit.seat == 0)
+            parts, moving = cockpit_instruments.instrument(scr, index, numbers=fit.seat == 0, thumbnail=thumbnail)
             # Replace the kit's old display quad, rather than adding a second coincident dark face.
             kit.parts = [p for p in kit.parts if not (p.name==f'screen_{scr.kind}' and p.material=='screen')]
             kit.parts.extend(parts)
@@ -288,7 +289,11 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
         params = []
         for p in md.materials[mi].params:
             v = list(p.value)
-            if p.name in ('diffuse', 'light_color'): v[:3] = [1.0,1.0,1.0]
+            if p.name == 'diffuse': v[:3] = [1.0,1.0,1.0]
+            elif p.name == 'light_color':
+                # The native light shader adds this term independently of albedo.
+                # White here washes every health state out to the same bloom.
+                v[:3] = [(c/255.)**2.2 for c in spec.albedo] if isinstance(spec.albedo, tuple) else [1.,1.,1.]
             elif p.name == 'specular_color': v[:3] = [.04,.04,.04]
             elif p.name == 'metallic': v[0] = 0.0
             params.append(replace(p,value=v))

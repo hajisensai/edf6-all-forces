@@ -156,6 +156,24 @@ int main() {
     check(pose[0]==0 && pose[16]==1,"inactive digit segment collapses, another seat's instrument is unchanged");
     Unpose(inst,backup);
     check(std::memcmp(pose,originals,sizeof(pose))==0,"the native draw pose is restored byte for byte");
+    Put<const wchar_t*>(bones,0,L"vc_i_0_0_l_0_0");
+    Put<const wchar_t*>(bones+kBoneStride,0,L"vc_i_0_0_l_1_0");
+    st.instruments.language=1;InstrumentPose(inst,backup);
+    check(pose[0]==0 && pose[16]==1,"native draw path selects Chinese geometry and hides English geometry");
+    Unpose(inst,backup);
+    check(std::memcmp(pose,originals,sizeof(pose))==0,"language selection never persists in the native skeleton");
+    Put<const wchar_t*>(bones,0,L"vc_i_1_0_l_0_0");
+    Put<const wchar_t*>(bones+kBoneStride,0,L"vc_i_1_0_l_1_0");
+    InstrumentPose(inst,backup);
+    check(pose[0]==0 && pose[16]==1,"adjacent station captions also select exactly one language");
+    Unpose(inst,backup);
+    Put<const wchar_t*>(bones,0,L"vc_i_1_0_c_0_0");
+    Put<const wchar_t*>(bones+kBoneStride,0,L"vc_i_1_0_c_0_2");
+    InstrumentPose(inst,backup);
+    check(pose[0]==0 && pose[16]==0,"adjacent station does not mix overlapping damage colours without its readings");
+    Unpose(inst,backup);
+
+
     reset();Put<std::uint64_t>(human,kWeaponCount,0);
     check(Ride(cam,human),"boarding after the weapon was removed");
     check(!At<void*>(model,kBatch) && !unbatched[0].model,"a removed weapon is never written and its stale record is dropped");

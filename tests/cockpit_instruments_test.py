@@ -8,9 +8,21 @@ import cockpit_instruments as ci
 from cockpits import Screen
 from cockpit_shapes import basis
 
+# Longitudinal and wide hulls produce distinct, proportionate model-derived outlines.
+model=[[(0,0,-2),(1,0,2),(-1,0,2)],[(0,0,-2),(-.3,0,-1),(.3,0,-1)]]
+thumb=ci.silhouette(model)
+assert thumb[0] and abs(thumb[1]-.5)<1e-6
+assert ci.silhouette([])==((),1.)
+assert ci.silhouette(model,'front')==((),1.),'a flat top-view fixture is not an invented mech front'
+assert ci.silhouette([[(-1,0,0),(1,0,0),(0,4,0)]],'front')[1]==.5
+for language in range(4):
+    for variants in ci.LABELS.values():
+        assert all(ch in ci.GLYPHS and (ch==' ' or any(ci.GLYPHS[ch][1])) for ch in variants[language])
+assert len({ci.GLYPHS[ch] for ch in '耐久车体車體燃料弹药彈藥弾薬武器兵装警告速度高度航向方位'})>20
+
 for kind in ('status','weapons','flight','map'):
     s=Screen(kind,(.2,-.3,.7),(0,.18,-.984),.18,.12)
-    parts, controls=ci.instrument(s,0)
+    parts, controls=ci.instrument(s,0,thumbnail=thumb)
     assert controls and len({c.part for c in controls})==len(controls)
     assert len({c.control for c in controls})==len(controls)
     by_name={p.name:p for p in parts}
@@ -29,9 +41,14 @@ for kind in ('status','weapons','flight','map'):
     if kind=='flight':
         assert {f'n_{ci.SPEED}',f'n_{ci.ALT}'} <= {c.control for c in controls}
     if kind=='status':
-        assert sum(c.control.startswith('d_') for c in controls)==35
-        _,passenger=ci.instrument(s,0,numbers=False)
-        assert len(passenger)==4,'passenger status bars keep the full vehicle under the ubyte skin-index budget'
+        assert sum(c.control.startswith('p_') for c in controls)==21
+        assert not any(c.control.startswith('d_0_') for c in controls),'large raw HP digits replaced by percent'
+        assert {f'c_{ci.HP}_{i}' for i in range(3)} <= {c.control for c in controls}
+        assert any(p.name.endswith('vehicle_outline') for p in parts)
+        _,passenger=ci.instrument(s,0,numbers=False,thumbnail=thumb)
+        assert len(passenger)==9,'shared passenger state fits the ubyte skin-index budget'
+        assert not any(c.control.startswith(f'b_{ci.HULL}') for c in controls),'no redundant unknown hull bar'
+    assert {f'l_{i}_0' for i in range(4)} <= {c.control for c in controls}
     if kind=='map':
         assert sum(c.control.startswith('t_') for c in controls)==6
 print('physical instrument geometry and controls passed')

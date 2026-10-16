@@ -84,6 +84,7 @@ README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
   载具观察：按住鼠标中键／手柄 L3，再移动鼠标／右摇杆，只转视角，武器保持原操纵方向；松开回正。
   新增空袭兵呼叫「民用轿车」（无武器、单驾驶席），V 切第一人称；手柄 LT 加速、左摇杆转向、LB 倒车。
   本包补齐原版蓝色尼克斯等换色型号的座舱安装，以及加农炮型巴尔加的座舱。
+  座舱仪表随游戏语言／HudLanguage 切换；耐久改为载具轮廓缩略图、百分比与状态色。
 
   房间里每个人都要装同一个版本（同一个安装包），地图、关卡和载具才一致。
   测试场关卡不限制兵种和武器，各自选自己的。
@@ -199,7 +200,7 @@ def build_exe(name: str, generator: str | None = None) -> str:
                 'make_bigmap', 'bigmap', 'seams', 'fmb', 'fmb_build', 'hkcms', 'hkcms_build', 'hktag', 'sk_map', 'sk_terrain', 'gen', 'rmpa', 'jet_models', 'jet_gear', 'weapons',
                 'testhub', 'make_emc', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
                 'cas_pose', 'aircraft_collision', 'support_config', 'support_loadout', 'room_layout', 'menu_preview',
-                'make_sazabi', 'sazabi_model', 'sazabi_arms', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'legacy_assets', 'rabpool', 'mdb_legacy', 'cas_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics', 'texfile_accel', 'model_workers', 'mdb',
+                'make_sazabi', 'sazabi_model', 'sazabi_arms', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'legacy_assets', 'rabpool', 'mdb_legacy', 'cas_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics', 'cockpit_instruments', 'cockpit_label_glyphs', 'texfile_accel', 'model_workers', 'mdb',
                 'gamelease', 'build'):   # every module installer.py imports in a function (selftest release_imports); build is
         # autoturret/tools/build.py (--paths above comes before site-packages, where pip's own `build` may be)
         cmd += ['--hidden-import', mod]

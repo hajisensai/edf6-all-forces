@@ -315,3 +315,13 @@ hook 0x6BF9F0(model, ctx, pass, view):
 第一人称 `Ride` 在 `vc_eye_` 正交帧上叠局部偏航／俯仰，保留眼位与机体滚转；第三人称在原生最终帧上叠加，并记下 before/written，仅撤回自己仍然持有的写入，避免原生分支不写矩阵时每帧累积。瞄具 `Up` 在观察期间为 false，恢复时沿用原倍率；turretcam 在此期间交还操纵，不把观察射线变为炮塔目标。
 
 实机尼克斯从偏航 -0.008 到 -1.012 rad，武器轴一直为 `(1.222,0.050)`；Barga 605 对应轴为 `(0,0)`。原生民用车输入 `0x65A548` 从 seat+2E0 读油门、`0x65A551` 的按钮 0x10 为倒车，`0x65A56D` 起读 +2C0 横向转向；正常驾驶不是右摇杆。该路径保留于轿车，测试必须用 LT 与左摇杆横向。
+
+
+## 15. 实体仪表语言与整车状态图（2026-10-16）
+
+`Readings.language` 使用 `hudtext::Resolve(Cfg().hudLanguage,GameTextLanguage())`，顺序 en／zh-CN／zh-TW／ja。`l_language_gate` 选择语言网格，gate 0 无条件，其他值为 field+1 的可用性条件；`v_field` 隐藏不可用栏底；`p_field_place_segment` 从 share 生成 0–100 的百分比，保留 `d_` 对旧资源的原始读数语义；`c_field_level` 选择三种整体耐久颜色。当前席位数据不扩散成其他席位的数值。全部操作只发生在模型绘制姿态，随后还原。
+
+生成器在原模型三角形上做俯视／机甲正面投影，保留长宽比例，得到该模型自己的轮廓。语言字形按屏幕合并并共享控制骨骼；乘客不重复驾驶位的大数字和燃料栏，所有原有多席载具继续满足 ubyte 骨骼索引上限。`snd_BRDF_Common_Light` 的 light_color 是独立的发光项，固定色仪表必须设置相应线性 RGB，不能一律白色。
+
+
+数据语义：旧 `ScreenFeed.hp` 在 armor gauge 存在时是乘员护甲，`hull` 才是旧仪表的车辆项。新缩略图保留独立 `vehicleHp/vehicleHpMax`，来源为当前 StockHud／PlayerJet／Heli 的载具数据，在乘员护甲覆盖前保存。物理 HP／percent 控件使用该独立读数；仅有护甲快照时不推造车况。`hud_view --check-feed` 用不同乘员／车辆耐久及飞机快照跑实际 FeedOf 和 PublishInstruments，验证乘员受伤、车辆受伤和缺少载具来源的分支。

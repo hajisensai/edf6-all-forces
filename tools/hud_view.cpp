@@ -176,7 +176,8 @@ bool PlayerProteus(ProteusReadout* o) noexcept { if(hasProteus)*o=sceneProteus;r
 bool PlayerSazabiCue(SazabiCue* o) noexcept { if(hasSazabi)*o=sceneSazabi;return hasSazabi; }
 bool hasScreens=false;CockpitScreens sceneScreens{};   // a vehicle's first person: its cockpit's screens
 bool FirstPersonScreens(CockpitScreens* o) noexcept { if(hasScreens)*o=sceneScreens;return hasScreens; }
-void FirstPersonInstrumentReadings(const instruments::Readings&) noexcept {}
+instruments::Readings deliveredInstruments{};
+void FirstPersonInstrumentReadings(const instruments::Readings& r) noexcept { deliveredInstruments=r; }
 bool PlayerTurretCam(TurretCamReadout* value) noexcept { if(hasMouseIntent)*value=sceneMouseIntent;return hasMouseIntent; }
 bool SightZoomMounted(const void*) noexcept { return hasMountedOptic; }
 bool PlayerTurretBinding(edf::aimlink::ModeBindingV1* value) noexcept { if(hasModeBinding)*value=sceneModeBinding;return hasModeBinding; }
@@ -2340,7 +2341,31 @@ int Scenes(const std::wstring& dir) {
 }
 }  // namespace
 
+int PhysicalInstrumentFeedChecks() {
+    int failed=0;
+    const auto check=[&](bool ok,const char* text){if(!ok){++failed;std::printf("FAIL cockpit feed: %s\n",text);}};
+    Snapshot s{};s.stock=true;s.stockHud.hp=900;s.stockHud.hpMax=1000;
+    s.armor=true;s.armorRo.armor.hp=10;s.armorRo.armor.most=200;
+    s.armorRo.hasHull=true;s.armorRo.hull.hp=900;s.armorRo.hull.most=1000;
+    config.hudLanguage=2;PublishInstruments(s);
+    check(deliveredInstruments.value[instruments::hp]==900 && std::fabs(deliveredInstruments.share[instruments::hp]-.9f)<1e-6f,
+          "vehicle diagram uses vehicle durability, not rider armor");
+    check(deliveredInstruments.language==1,"physical language uses the same HUD resolver");
+    s.armorRo.armor.hp=1;PublishInstruments(s);
+    check(deliveredInstruments.value[instruments::hp]==900,"injuring the rider cannot change vehicle health");
+    s.stockHud.hp=100;s.armorRo.armor.hp=200;PublishInstruments(s);
+    check(std::fabs(deliveredInstruments.share[instruments::hp]-.1f)<1e-6f,"vehicle damage changes its own diagram even with healthy rider");
+    check(FeedOf(s).hp==200,"legacy armor readout retains its rider meaning");
+    s.stock=false;s.cockpit=true;s.jet.hp=2000;s.jet.hpMax=10000;PublishInstruments(s);
+    check(std::fabs(deliveredInstruments.share[instruments::hp]-.2f)<1e-6f,"aircraft health does not inherit stale rider/vehicle gauge values");
+    s.cockpit=false;PublishInstruments(s);
+    check(deliveredInstruments.value[instruments::hp]<0,"armor-only snapshot cannot invent vehicle durability");
+    config=Config{};
+    std::printf("cockpit feed: %d failures\n",failed);return failed;
+}
+
 int wmain(int argc,wchar_t** argv) {
+    if(argc==2 && !wcscmp(argv[1],L"--check-feed"))return PhysicalInstrumentFeedChecks();
     wchar_t temp[MAX_PATH]{};
     GetTempPathW(MAX_PATH,temp);
     std::wstring dir=std::wstring(temp)+L"edf6_hud_view";
@@ -2362,7 +2387,7 @@ int wmain(int argc,wchar_t** argv) {
     *reinterpret_cast<void**>(uiHolder+kUiScreenObj)=uiScreen;
     SetScreen(1920,1080);
     quadOk=textOk=uiOk=true;
-    int failed=0;
+    int failed=PhysicalInstrumentFeedChecks();
     for(int l=0;l<hudtext::kLangs;++l) {   // English first: the others are compared with it
         const hudtext::Lang lang=static_cast<hudtext::Lang>(l);
         if(only>1 && only!=l+1 && lang!=hudtext::Lang::en)continue;

@@ -17,6 +17,7 @@ alignas(16) const float kScreenDim[4]={0.4f,1.0f,0.6f,0.45f};
 // What every screen may show, gathered once a draw from the snapshot (whichever vehicle the player is in).
 struct ScreenFeed {
     float hp=-1.0f,hpMax=0.0f;
+    float vehicleHp=-1.0f,vehicleHpMax=0.0f; // current vehicle provider, separate from the rider armor gauge
     bool hull=false;float hullHp=0.0f,hullMax=0.0f;   // a vehicle whose hull is counted apart (stock_armor_hud.h)
     FuelReading fuel{};
     float speed=-1.0f,clear=-1.0f,climb=0.0f;         // m/s, m over the ground (<0 unknown), m/s
@@ -66,6 +67,7 @@ ScreenFeed FeedOf(const Snapshot& snap) noexcept {
             std::memcpy(f.pos,r.pos,12);
         }
     }
+    f.vehicleHp=f.hp;f.vehicleHpMax=f.hpMax;
     if(snap.armor) {
         f.hp=snap.armorRo.armor.hp;f.hpMax=snap.armorRo.armor.most;
         f.hull=snap.armorRo.hasHull;f.hullHp=snap.armorRo.hull.hp;f.hullMax=snap.armorRo.hull.most;
@@ -81,8 +83,9 @@ void PublishInstruments(const Snapshot& snap) noexcept {
     using namespace instruments;
     const ScreenFeed f=FeedOf(snap);
     Readings r{};
+    r.language=static_cast<int>(hudtext::Resolve(Cfg().hudLanguage,GameTextLanguage()));
     for(float& v:r.value)v=-1.0f;
-    r.value[hp]=f.hpMax>0 ? f.hp : -1.0f;r.share[hp]=f.hpMax>0 ? f.hp/f.hpMax : 0.0f;
+    r.value[hp]=f.vehicleHpMax>0 ? f.vehicleHp : -1.0f;r.share[hp]=f.vehicleHpMax>0 ? f.vehicleHp/f.vehicleHpMax : 0.0f;
     r.value[hull]=f.hull ? f.hullHp : -1.0f;r.share[hull]=f.hullMax>0 ? f.hullHp/f.hullMax : 0.0f;
     r.value[fuel]=f.fuel.ok ? f.fuel.share*100.0f : -1.0f;r.share[fuel]=f.fuel.ok ? f.fuel.share : 0.0f;
     r.value[speed]=f.speed>=0 ? f.speed*3.6f : -1.0f;r.value[altitude]=f.clear;r.value[heading]=f.heading;

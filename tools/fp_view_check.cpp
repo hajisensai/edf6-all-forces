@@ -357,6 +357,31 @@ int main() {
     Expect(!Segment(5,0,1) && Segment(5,0,2),"physical digit 5 has the correct segment pattern");
     Expect(!Segment(5,1,6) && Segment(-1,1,6),"leading zero is blank; an unavailable value is a dash");
     Readings reading{};reading.share[hp]=.25f;
+    for(int language=0;language<4;++language) {
+        reading.language=language;
+        int visible=0;
+        for(int variant=0;variant<4;++variant) {
+            const auto pose=crew::instruments::Pose(Identity(),L'l',variant,0,0,reading,true);
+            visible+=pose.m[0]!=0;
+            Expect((pose.m[0]!=0)==(variant==language),"physical label selects current HUD language");
+        }
+        Expect(visible==1,"exactly one language variant is visible");
+    }
+    reading.value[fuel]=-1;
+    Expect(crew::instruments::Pose(Identity(),L'l',reading.language,fuel+1,0,reading,true).m[0]==0,
+           "unavailable fuel also hides its translated caption");
+    reading.value[hp]=200;
+    for(float health:{1.f,.4f,.1f}) {
+        reading.share[hp]=health;int visible=0;
+        for(int colour=0;colour<3;++colour)visible+=crew::instruments::Pose(Identity(),L'c',hp,colour,0,reading,true).m[0]!=0;
+        Expect(visible==1,"exactly one whole-vehicle damage colour is visible");
+    }
+    reading.value[hp]=-1;
+    Expect(crew::instruments::Pose(Identity(),L'c',hp,2,0,reading,true).m[0]==0,"unknown health stays a neutral outline");
+    reading.value[hp]=300000;reading.share[hp]=.5f;
+    Expect(crew::instruments::Pose(Identity(),L'p',hp,1,0,reading,true).m[0]!=0,
+           "large native durability still displays a valid percent");
+    reading.share[hp]=.25f;
     M4 bar=crew::instruments::Pose(Identity(),L'b',hp,0,0,reading,true);
     Expect(Near(bar.m[0],.25f) && Near(bar.m[5],1),"a physical bar scales only along its own horizontal axis");
     Identity_();
