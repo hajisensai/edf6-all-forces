@@ -472,3 +472,33 @@ EDF.dll `0x678CCB46`，RVA。H = 指令里直接读到；M = 有代码证据的�
   验证：`HitAuthTests <EDF.dll>` 里用真 `0x6EA430` 和**原版 UfoCarrier508 的弱点过滤 `0x4F7190`**——带子命中 → 收，核心序号不对 → 拒，
   去掉子命中（旧版本的样子）→ 拒；Coop 全部 ctest 91/91（含 GameNet_*）。我们的类用的是同一个 `HitBody` 读法（最近子命中 → `0x6EA430`），
   合并后客人打 301 船体弱点 / 401 弱点面板与核心也能在拥有者上生效。没在两台机器上实测。
+## 12. Added for the 401's finishing pass (2026-10-15, src/edf41classes.h last block; H unless noted)
+(Numbered 12 to sit next to the 301 finish's section 11 on its branch. Its `Bullet::hitSe` / `FillSePreset` fill the same InitParam
++0x100 preset from an `edf41_se` name table; the 401 data carries raw cues per se_table entry (`edf41_401_se`), so `FireHit` takes a
+cue directly. Its material *parameter* binding (0x6DCBF0 ..) writes values by name; the 401's `material_animation` MTAB tracks go
+through EDF6's material *animation* component below, the one UfoCarrier508 uses for its own `material_animation`.)
+- `FireHit(owner, matrix, Bullet, cue, SeParams)`: Fire with the bullet's hit sound. EDF6's InitParam +0x100 is a SePreset (0x7B3200;
+  weapons fill it from key 14 with 0x7B16F0; 4.1's +0xB0); filled here from a raw cue name as PlayCue does.
+- `MaterialAnims*`: EDF6's material-animation component (0x38 bytes; ctor 0x6DBE90, bind 0x6DC7B0 to the model's material set =
+  EventAnimationObject +0x720 (model +0x5C0 + 0x160; UfoCarrier508 binds +0x650 + 0x160), add 0x6DC050(blob, kind), play
+  0x6DC830(index, mode 0 once / 1 hold / 2 loop), advance 0x6DC8B0(frame info, 1.0), free 0x29D120(+8)). 4.1's SGO entries are bare
+  MTAB blobs (the same 0x200 format and 16-byte header as EDF6's [blob, kind] entries).
+- `StencilLight(pos, colour, radius, frames)`: InitParam@StencilLight (vtable 0x1762108; +0x30 pos, +0x40/+0x50 colour, +0x60 radius,
+  +0x64 frames, the same layout as 4.1's) made by 0x84880 with the numbers as given (EffectGenUtil 0x2EBC00 and 4.1's 0x1b5080 both scale
+  colour x2.5 and radius x5 first).
+- `SmallBurst(pos, dir, size)`: EffectGenUtil 0x2E7D00 = 4.1 0x1b1910 (every constant the same); FireBurst's Flame 0x2E7FF0 = 4.1 0x1b16b0.
+- Ragdoll body names: 0x6EA670 compares the SHKT proxy name `RagDollProxys.<name>`, not the bare name.
+- `Ragdoll::Disable` 0x6E97C0 (+0xA4 cleared, mode 0 -> 0x11B1710 removes the body from the world); `Enable` 0x6E9840; the relayed
+  0x6E40B0 sets every body to mode 4 under the world lock.
+- EDF6's SpawnerObject (vtable 0x17E7658, Update 0x6E1080 -> 0x6E3250) draws nothing of its own; generators hand it std::functions
+  (+0x640 effect, +0x680 the new enemy). It delivers its messages to the enemy as slots 10, 9 (OnMessage), 11.
+- `AtGameShutdown(fn)` (edf41classes.h): up to 8 callbacks run right before the game's application destructor 0x7021F0 destroys its singletons
+  (redirects the call at 0x70293F, fingerprint checked). The plugin's own log is written by a thread that does not outlive this: write a
+  marker file (%TEMP%) for anything you need to see. The exit leak reporter 0x1750870 (atexit; logs `SoundBank::Release error ref count` per
+  bank with a non-zero count, then runs the sound bank cache destructor 0x7A9850) can be redirected at its log call 0x17508B5 -> 0x3E4A0.
+- Emitter effects (`ChargeEffect_StdParticle`, and the 301's vent emitters): queue the update job from Update, the render job (vt[0]) from the
+  sync-render phase (clone slot 3, EAO 0x5B6D10). Queued together from Update they run concurrently and the render job throws `bad_alloc`
+  (EDF+0x30316D). After each job set `[fx+8]=[fx+0xC]`, `[fx+0x10]=0` (MovingFortress_Battery 0x4D1B96 does).
+- Open, for the exit crash (EDF+0x7ADCFB in the cache destructor after the sound system 0x20B2948 is gone) seen with these emitters on M018 / M019: not
+  fixed by destroying them before the app destructor (M018 / M019 still crash, M809 / M132 / M516 do not); creating and destroying at once is clean.
+  The exit report always lists our EDF41_WEAPON_SE.ACB (ref count 1, same in plain runs). Keep the emitters off by default until this is solved.

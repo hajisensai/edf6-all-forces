@@ -33,6 +33,7 @@
 #include "crew.h"
 #include "edf41classes.h"
 #include "edf41net.h"
+#include "heli.h"
 #include "memory.h"
 #include "online_authority.h"
 
@@ -180,6 +181,7 @@ struct Part {
     int throttle=0;
     SoundHandle ambient;
     int team=-1;
+    bool ragdollOff=false;     // the hull's borrowed ragdoll taken out of the physics world (HullFirst)
     std::uint32_t hullFrames=0;
     double usOurs=0.0,usStock=0.0;
     std::uint32_t partFrames=0;
@@ -198,6 +200,9 @@ struct Part {
     float muzzle[3]={},spawnAt[3]={},weakPt[3]={};
     bool hasMuzzle=false,hasSpawn=false;
     int weakBody=-2;           // -2 unknown, -1 none (immune unless the class takes every hit)
+    wchar_t weakName[32]={};   // the SGO's weakpoint (the ragdoll body is looked up until the ragdoll has its bodies)
+    int weakTries=0;
+    int weakBone=-2;           // development (DevShoot): the weakpoint bone on the skeleton, -2 not looked up
     bool wholeHits=false;      // FinalCannon01 / FinalGenerator / the batteries: every hit counts (4.1 slot 10 0xb3630)
     struct Mount { float pos[3]; std::uint64_t battery; };
     std::vector<Mount> mounts;
@@ -207,6 +212,8 @@ struct Part {
     Bullet shot,shot2;
     float spread=0.0f,turn=0.0f,aim[3]={0,-1,0};
     Generator gen;
+    LocatorHandle spawnLoc{};    // the generator's spawn node (出現位置 / 排出位置) on the model
+    int spawnLocTries=0;
 
     // ---- batteries ----
     std::uint64_t panel=0;
@@ -214,9 +221,20 @@ struct Part {
     bool detached=false,batteryAttack=false;
     int destroyedFor=0,deleteAt=0;
     float range=0.0f,charge=0.0f;
+
+    // ---- every part ----
+    int hitSe=-1,hitSe2=-1;      // se_table entries the bullets of shot / shot2 carry as their hit sound (4.1 InitParam +0xB0)
+    float lockLocal[3]={};       // the lock-on point (MAB list 1 ターゲット) on the model
+    void* lockPoint=nullptr;     // the one the plugin adds (EventAnimationObject registers none)
+    MaterialAnims mat;           // material_animation: [0] idle (looped from the start), [1] hit flash, [2] death
+    bool encountDone=false;      // Generator: the spawned enemies were woken by the killing hit (4.1 +0xb30)
+    struct Glow { void* fx=nullptr; void* ctrl=nullptr; float* m=nullptr; };
+    Glow glows[3];               // the charge glows (edf41_401_charge, one per colour); glowOn: the one shown, -1 none
+    int glowCount=0,glowOn=-1;
 };
 
 std::recursive_mutex lock;
+int devTaken[12][3];   // development (Edf41DevShoot): per class, hits [0] taken, [1] refused by the weak-body filter, [2] seen
 std::unordered_map<const void*,std::unique_ptr<Part>> byObj;
 std::unordered_map<std::uint64_t,Part*> byId;
 std::uint64_t nextId=1;
@@ -393,7 +411,8 @@ void Layout(Part& h,const wchar_t* key,int action) noexcept {
         }
     }
     // step 4: every panel of the old table vanishes, staggered by its distance to the Core (or the hull) x 0.003 s; one kept in
-    // the new table is not touched (4.1 calls the vanish on it too, which the spec leaves open: kept panels stay here).
+    // the new table is not touched. 4.1 (H): 0x25f370 copies a kept entry into the new table and then empties the old entry's
+    // weak reference (0x25f833..0x25f87b), so the vanish loop over the old table (0x25f140) never reaches a kept panel.
     const Part* core=ById(h.core);
     const float* centre=core ? F(core->obj,kPosAt) : F(h.obj,kPosAt);
     int vanished=0;
@@ -544,9 +563,37 @@ void SetGenerator(Part& p,const GenCfg& g) noexcept {
     Log("EDF41M401 %s %p generator: %s %d x %ls every %d frames, wave delay %d, level %.2f%s",KindName(p.kind),p.obj,
         g.type==0 ? "waves of" : "once",g.count,g.path,g.interval,g.delay,g.level,g.flag ? ", activated" : "");
 }
+void Down(Part& p,float* out) noexcept;
+// A message the way EDF6's SpawnerObject hands one to the enemy it makes (0x6E33C3: slots 10, 9 (OnMessage), 11 in a row).
+void SendSpawnMessage(void* o,std::uint32_t msg,void* data) noexcept {
+    void* const* vt=Readable(o,8) ? *static_cast<void* const* const*>(o) : nullptr;
+    if(!vt || !Readable(vt+9,24))return;
+    void* pdata=data;
+    std::uint32_t m=msg;
+    reinterpret_cast<std::uint64_t(__fastcall*)(void*,std::uint32_t*,void**)>(vt[10])(o,&m,&pdata);
+    reinterpret_cast<std::uint64_t(__fastcall*)(void*,std::uint32_t,void*)>(vt[9])(o,m,pdata);
+    reinterpret_cast<std::uint64_t(__fastcall*)(void*,std::uint32_t,void*)>(vt[11])(o,m,pdata);
+}
 bool SpawnOne(Part& p,const GenCfg& g,WeakRef* slot) noexcept {
+    // 4.1 0x3313c0: the node's world matrix (0x3232d0 on 出現位置 / 排出位置: the locator x its bone), its position the spawn
+    // point; the enemy's matrix a fresh yaw there; SpawnerObject 0x3320a0 then sends the node's row 1 as message 0x20102
+    // (EDF6: UfoSmall507 0x52EDE0 takes it x 60 as its velocity, Deiroi 0x31ED40 / DragonSmall 0x335110 their drop state;
+    // EDF6's own generator 0x6E2170 sends its node's row 1 the same way). The node from EDF6's locator code (0x6BADD0 /
+    // 0x6BB5A0), else the build's point and the panel's down axis.
     float at[3];
-    Point(p.spawnAt,F(p.obj,kMatrixAt),at);
+    alignas(16) float eject[4]={0,-1,0,0};
+    float node[16];
+    if(!p.spawnLoc.entry && p.spawnLocTries<3) {
+        ++p.spawnLocTries;
+        FindLocator(static_cast<char*>(p.obj)+kEaoModel,p.kind==Kind::finalGenerator ? L"排出位置" : L"出現位置",&p.spawnLoc);
+    }
+    if(p.spawnLoc.entry && LocatorMatrix(p.spawnLoc,node)) {
+        std::memcpy(at,node+12,12);
+        std::memcpy(eject,node+4,16);
+    } else {
+        Point(p.spawnAt,F(p.obj,kMatrixAt),at);
+        Down(p,eject);
+    }
     float m[16];
     RotY(Random01(p.rng)*2.0f*kPi,m);
     m[12]=at[0]; m[13]=at[1]; m[14]=at[2];
@@ -560,12 +607,30 @@ bool SpawnOne(Part& p,const GenCfg& g,WeakRef* slot) noexcept {
     if(g.flag)Activate(o);
     if(slot)WeakSet(*slot,o);
     NetSpawn(p,o);   // online: the game's child identity, bound to the same enemy on every machine (edf41net)
+    SendSpawnMessage(o,0x20102,eject);
+    if(said.load()<=40)Log("EDF41M401 %s %p: enemy #%d gets 0x20102 (%.2f %.2f %.2f %.2f)%s",KindName(p.kind),p.obj,p.gen.made,eject[0],eject[1],eject[2],eject[3],
+                           p.spawnLoc.entry ? "" : " (no locator: the panel's down axis)");
+    if(p.kind==Kind::finalGenerator)PlaySeAt(p,7,at);   // 0x267084: se[7] 召喚完了 is the component's per-spawn sound
     return true;
+}
+// 0x331d10 "encount": every enemy the generator tracks (the wave slots; one-shot spawns are not tracked) that is not yet aware
+// becomes aware (4.1 +0x260 = 1 and its slot 15; EDF6's 0x548D50, what CreateEnemy's `active` does).
+void Encount(Part& p) noexcept {
+    int woken=0;
+    for(WeakRef& w:p.gen.slots)
+        if(WeakAlive(w) && Readable(static_cast<char*>(w.object)+0x4A0,1) && !static_cast<const char*>(w.object)[0x4A0]) { Activate(w.object); ++woken; }
+    int tracked=0;
+    for(const WeakRef& w:p.gen.slots)tracked+=WeakAlive(w) ? 1 : 0;
+    static std::atomic<int> said{0};
+    if((woken || said.load()<4) && said.fetch_add(1)<16)Log("EDF41M401 %s %p is hit: %d of its %d live enemies notice",KindName(p.kind),p.obj,woken,tracked);
 }
 // Called while the panel lives and has arrived (Generator 0x268810 / FinalGenerator 0x2677d0).
 void RunGenerator(Part& p) noexcept {
     Generator& g=p.gen;
     g.waveDone=false;
+    if(DevBits()&64)   // development: the wave's enemies are shot too (the refill of dead slots, Edf41DevShoot)
+        for(std::size_t i=0;i<g.slots.size();++i)
+            if(float aim[3]; WeakAlive(g.slots[i]) && AimPoint(g.slots[i].object,aim))DevShoot(g.slots[i].object,aim,static_cast<unsigned>(i)+2);
     if(!g.active || (g.cur.type==0 && g.persist.count==0))return;
     if(g.delay>0) { --g.delay; return; }
     if(g.interval>0) { --g.interval; return; }
@@ -600,10 +665,17 @@ bool CasDone(Part& p) noexcept {
 }
 
 // ---- shooting ------------------------------------------------------------------------------------------------------------
-void FireFrom(Part& p,const float* from,const float* dir,const Bullet& b) noexcept {
+// `hitSe`: the se_table entry the bullet plays where it hits (-1 none).
+void FireFrom(Part& p,const float* from,const float* dir,const Bullet& b,int hitSe=-1) noexcept {
     float m[16];
     AimMatrix(from,dir,m);
-    if(!Fire(p.obj,m,b)) { Fail("a 401 bullet was not made"); return; }
+    bool ok;
+    if(hitSe>=0 && hitSe<static_cast<int>(p.se.size()) && p.se[static_cast<std::size_t>(hitSe)].name[0] && !(DevBits()&2048)) {   // dev 2048: none
+        const Cue& c=p.se[static_cast<std::size_t>(hitSe)];
+        SeParams sp; sp.volume=c.volume; sp.pitch=c.pitch; sp.inner=c.inner; sp.reference=c.reach;
+        ok=FireHit(p.obj,m,b,c.name,sp);
+    } else ok=Fire(p.obj,m,b);
+    if(!ok) { Fail("a 401 bullet was not made"); return; }
     static std::atomic<int> said[12];
     if(said[static_cast<int>(p.kind)].fetch_add(1)<2)
         Log("EDF41M401 %s %p fires %ls from %.0f %.0f %.0f toward %.2f %.2f %.2f (damage %.2f, speed %.2f)",KindName(p.kind),p.obj,b.factory,
@@ -642,33 +714,36 @@ void SetupBullets(Part& p) noexcept {
             l.custom=PersistKey(p.obj,L"LightningBulletCustomParameter");
             p.spread=std::max(0.001f,0.1f-0.001f*s);
             p.minWait=400; p.maxWait=600; p.countdown=Rand(p.rng,600);
+            // hit sounds: 4.1 copies se[5] then se[2] into the genocide block (+0xd60, the second copy meant for the lightning
+            // block's +0xea0) with its 0..5 indexing (SPEC 1.6); the +6 intent: genocide 11, lightning 8
+            p.hitSe=11; p.hitSe2=8;
             break;
         }
         case Kind::smallLaser: {   // 0x26a560
             b.factory=L"LaserBullet02"; b.speed=30; b.life=60; b.damage=s*5; b.size=1; b.speedFactor=0.05f;
             const float c[4]={0.5f,1.5f,0.5f,1}; std::memcpy(b.color,c,16);
-            p.spread=std::max(0.05f,0.25f-0.02f*s); p.range=700; p.charge=1.5f; p.minWait=60; p.maxWait=120;
+            p.spread=std::max(0.05f,0.25f-0.02f*s); p.range=700; p.charge=1.5f; p.minWait=60; p.maxWait=120; p.hitSe=4;
             break;
         }
         case Kind::sniper: {       // 0x26afc0
             b.factory=L"BeamBullet01"; b.speed=std::min(20.0f,5+0.5f*s); b.life=180; b.damage=s*0.5f; b.size=std::max(2.0f,4-0.2f*s);
             b.speedFactor=0.05f;
             const float c[4]={0.5f,0.5f,1.2f,1}; std::memcpy(b.color,c,16);
-            p.spread=0.01f; p.range=500; p.charge=3.0f; p.minWait=300; p.maxWait=420;
+            p.spread=0.01f; p.range=500; p.charge=3.0f; p.minWait=300; p.maxWait=420; p.hitSe=4;
             break;
         }
         case Kind::plasma: {       // 0x26ba30
             b.factory=L"PlasmaBullet01"; b.speed=std::min(2.0f,0.5f+0.05f*s); b.life=600; b.damage=s*20; b.size=6;
             b.explosion=std::min(20.0f,10+0.05f*(s-10));
             const float c[4]={5,2.5f,5,1}; std::memcpy(b.color,c,16);
-            p.spread=0.1f; p.range=500; p.charge=3.0f; p.minWait=900; p.maxWait=1260;
+            p.spread=0.1f; p.range=500; p.charge=3.0f; p.minWait=900; p.maxWait=1260; p.hitSe=4;
             break;
         }
         case Kind::rapid: {        // 0x26c6a0
             b.factory=L"LaserBullet02"; b.speed=40; b.life=15; b.damage=s*0.25f; b.size=2+0.025f*(s-1); b.speedFactor=0.005f; b.hitStop=0.95f;
             const float c[4]={0.8f,0.2f,0.8f,1}; std::memcpy(b.color,c,16);
             p.spread=std::max(0.05f,0.18f-0.02f*s); p.turn=std::min(0.05f,0.0004f+0.000016f*(s-1));
-            p.range=500; p.charge=5.0f; p.minWait=5400; p.maxWait=7560;
+            p.range=500; p.charge=5.0f; p.minWait=5400; p.maxWait=7560; p.hitSe=5;   // on every 16th shot (TickBattery)
             break;
         }
         default: break;
@@ -691,6 +766,7 @@ void Enter(Part& p,int state) noexcept {
     }
     p.state=state;
     p.frames=0;
+    p.glowOn=-1;   // the charge glow shown in this state (4.1: emitter on in the state's enter, off in its exit)
     switch(state) {
         case sShrink: PlaySe(p,2); break;
         case sBurn: PlaySe(p,3); break;
@@ -702,14 +778,14 @@ void Enter(Part& p,int state) noexcept {
         case sBcOpen: PlayState(p.obj,L"open"); break;
         case sBcClose: case sGenClose: PlayState(p.obj,L"close"); break;
         case sGenOpen: PlayState(p.obj,L"open"); break;
-        case sBcCharge: PlaySe(p,6,&p.loopA); break;
-        case sBcFire: PlaySe(p,7,&p.loopB); break;
-        case sFcGenoCharge: PlaySe(p,9,&p.loopA); break;     // 4.1 plays se[3] here; its SGO's charge cue is [9] (SPEC 1.6)
+        case sBcCharge: PlaySe(p,6,&p.loopA); p.glowOn=0; break;
+        case sBcFire: PlaySe(p,7,&p.loopB); p.glowOn=0; break;
+        case sFcGenoCharge: PlaySe(p,9,&p.loopA); p.glowOn=0; break;     // 4.1 plays se[3] here; its SGO's charge cue is [9] (SPEC 1.6)
         case sFcGenoFire: PlaySe(p,10); break;
-        case sFcLightCharge: PlaySe(p,6,&p.loopA); break;
-        case sFcLightFire: PlaySe(p,7); break;
+        case sFcLightCharge: PlaySe(p,6,&p.loopA); p.glowOn=1; break;
+        case sFcLightFire: PlaySe(p,7); p.glowOn=2; break;
         case sGenSpawn: p.gen.triggered=true; break;           // 0x268a80 sends 0x20101 to itself
-        case sFgCharge: PlaySe(p,6,&p.loopA); break;
+        case sFgCharge: PlaySe(p,6,&p.loopA); p.glowOn=0; break;
         case sGbCharge: if(p.kind==Kind::rapid)PlaySe(p,3,&p.loopA); break;
         case sGbFire:
             if(p.kind==Kind::rapid) {
@@ -745,7 +821,7 @@ bool TickPanel(Part& p) noexcept {
             break;
         case sDestroyWait: if(--p.destroyIn<=0)Enter(p,sBurn); break;
         case sBurn:
-            if(f<180 && f%8==0) { float q[3]; RandomNear(p,80.0f,q); const float up[3]={0,1,0}; FireBurst(q,up,8.0f); }
+            if(f<180 && f%8==0) { float q[3]; RandomNear(p,80.0f,q); const float up[3]={0,1,0}; SmallBurst(q,up,8.0f); }   // 0x1b1910
             if(f>p.burnUntil)Enter(p,sFall);
             break;
         case sFall:
@@ -803,7 +879,7 @@ bool TickPanel(Part& p) noexcept {
             }
             break;
         case sFcGenoCharge: MoveSound(p.loopA,F(p.obj,kPosAt)); if(t>5.0f)Enter(p,sFcGenoFire); break;
-        case sFcGenoFire: { float from[3],dir[3]; MuzzleWorld(p,from); Down(p,dir); FireFrom(p,from,dir,p.shot); Enter(p,sFcIdle); break; }
+        case sFcGenoFire: { float from[3],dir[3]; MuzzleWorld(p,from); Down(p,dir); FireFrom(p,from,dir,p.shot,p.hitSe); Enter(p,sFcIdle); break; }
         case sFcLightCharge: MoveSound(p.loopA,F(p.obj,kPosAt)); if(t>5.0f)Enter(p,sFcLightFire); break;
         case sFcLightFire:
             if(f%16==0) {
@@ -811,7 +887,7 @@ bool TickPanel(Part& p) noexcept {
                 MuzzleWorld(p,from);
                 if(!AimAt(p,from,dir))Down(p,dir);
                 Cone(dir,p.spread,p.rng,out);
-                FireFrom(p,from,out,p.shot2);
+                FireFrom(p,from,out,p.shot2,p.hitSe2);
             }
             if(f/16==5)Enter(p,sFcIdle);
             break;
@@ -852,7 +928,7 @@ bool TickBattery(Part& b) noexcept {
                 if(!AimAt(b,from,dir))Down(b,dir);
                 float out[3];
                 Cone(dir,b.spread,b.rng,out);
-                FireFrom(b,from,out,b.shot);
+                FireFrom(b,from,out,b.shot,b.hitSe);
                 if(b.kind==Kind::smallLaser)PlaySe(b,3);
                 Enter(b,sGbIdle);
                 break;
@@ -869,12 +945,12 @@ bool TickBattery(Part& b) noexcept {
                     for(int k=0;k<3;++k)b.aim[k]=b.aim[k]*std::cos(step)+perp[k]*std::sin(step);
                 Norm(b.aim);
             }
-            if((f&1)==0)FireFrom(b,from,b.aim,b.shot);
+            if((f&1)==0)FireFrom(b,from,b.aim,b.shot,f%16==0 ? b.hitSe : -1);   // 0x26cc20: the hit sound on every 16th frame
             if(t>30.0f)Enter(b,sGbIdle);
             break;
         }
         case sGbDestroyed:
-            if(f<180 && f%16==0) { float q[3]; RandomNear(b,10.0f,q); const float up[3]={0,1,0}; FireBurst(q,up,4.0f); }
+            if(f<180 && f%16==0) { float q[3]; RandomNear(b,10.0f,q); const float up[3]={0,1,0}; FireBurst(q,up,4.0f); }   // 0x1b16b0
             if(f>b.destroyedFor)Enter(b,sGbFall);
             break;
         case sGbFall:
@@ -887,13 +963,14 @@ bool TickBattery(Part& b) noexcept {
 }
 
 // ---- first update of a part: its 4.1 fields from the SGO -----------------------------------------------------------------
+void GlowsMake(Part& p) noexcept;
 void InitPart(Part& p) noexcept {
     ReadCues(p);
     p.hasMuzzle=Vec3Key(p.obj,L"edf41_401_muzzle",p.muzzle);
     p.hasSpawn=Vec3Key(p.obj,L"edf41_401_spawn",p.spawnAt);
     Vec3Key(p.obj,L"edf41_401_weak",p.weakPt);
-    wchar_t weak[32];
-    p.weakBody=Text(Key(p.obj,L"weakpoint"),weak,32) ? RagdollBody(static_cast<char*>(p.obj)+kRagdollAt,weak) : -1;
+    p.weakBody=Text(Key(p.obj,L"weakpoint"),p.weakName,32) ? RagdollBody(static_cast<char*>(p.obj)+kRagdollAt,p.weakName) : -1;
+    if(p.weakBody<0 && p.weakName[0])p.weakBody=-2;   // the ragdoll's bodies may come later: PartUpdate asks again
     p.wholeHits=p.kind==Kind::finalCannon || p.kind==Kind::finalGenerator || IsBattery(p.kind);
     // HP: 4.1 0x26f9f0 / 0x269a80, durability x s (1) x the difficulty rows: EDF6's durability x difficulty x players (0xD7720);
     // EventAnimationObject never sizes itself by level (its slot 6 is a stub), so it is written here.
@@ -902,10 +979,27 @@ void InitPart(Part& p) noexcept {
     *F(p.obj,kMaxDurabilityAt)=hp;
     *F(p.obj,kDurabilityAt)=hp;
     std::uint32_t* flags=reinterpret_cast<std::uint32_t*>(F(p.obj,kFlags380));
-    const bool canHurt=p.wholeHits || p.weakBody>=0;
+    const bool canHurt=p.wholeHits || p.weakName[0];
     if(canHurt)*flags&=~kNoHpLoss;
     *flags|=kNotCounted;                       // the parts never hold up "every enemy dead"
     if(!canHurt)*flags|=kNotTarget;            // Panel01 armour: nothing aims at what takes no damage
+    // the lock-on point (MAB list 1 ターゲット, tools/make_edf41_objects.py MOTHER401_POINTS): EDF6's lock-point component
+    // (0x6C74E0) adds one per record of that list with AddLockTarget 0x547A50; EventAnimationObject has none, so it is added
+    // here and kept on the model each frame (PartUpdate). Lockable only while the part is registered hostile (lock filter
+    // 0x689E40), as it is from MakePanel / MakeBatteries until Unregister.
+    if(Vec3Key(p.obj,L"edf41_401_lock",p.lockLocal)) {
+        p.lockPoint=AddLockPoint(p.obj);
+        if(!p.lockPoint)Fail("a 401 part's lock-on point was not added");
+        else { float w[3]; Point(p.lockLocal,F(p.obj,kMatrixAt),w); SetLockPoint(p.lockPoint,w); }
+    }
+    // material_animation (4.1: every panel class but Panel01 reads its three entries with load modes 0 / 2 / 2 and starts [0]
+    // looped in its constructor: 0x32f9e0, play [e]=1, [e+4]=2); EDF6's component takes the same kinds and modes (E508 0 / 2 / 2)
+    static const int kKinds[3]={0,2,2};
+    if(MaterialAnimsLoad(p.mat,p.obj,Key(p.obj,L"material_animation"),kKinds,3)>0) {
+        MaterialAnimsPlay(p.mat,0,2);
+        static std::atomic<int> said{0};
+        if(said.fetch_add(1)<8)Log("EDF41M401 %s %p: %d material animations, [0] looped",KindName(p.kind),p.obj,p.mat.count);
+    }
     p.burnUntil=180+Rand(p.rng,240);              // +0x4c8
     p.fallAt=180+Rand(p.rng,120);                 // +0x4c4
     switch(p.kind) {
@@ -915,6 +1009,8 @@ void InitPart(Part& p) noexcept {
         case Kind::finalCannon: SetupBullets(p); Enter(p,sFcIdle); break;
         default: break;
     }
+    if(p.kind==Kind::finalGenerator && p.hasSpawn)std::memcpy(p.muzzle,p.spawnAt,12);   // its glow sits on 排出位置 (0x266f70)
+    if(DevBits()&4194304)GlowsMake(p);   // development: 4194304 charge glows ON (off by default: they make the game's exit crash on some missions, see docs)
     if(IsBattery(p.kind)) {
         p.destroyedFor=120+Rand(p.rng,120);   // +0x438
         p.deleteAt=180+Rand(p.rng,120);       // +0x434
@@ -970,16 +1066,240 @@ double Us(LARGE_INTEGER a,LARGE_INTEGER b) noexcept {
 double partUsOurs=0.0,partUsStock=0.0;
 std::uint32_t partCalls=0;
 
+// Development (Edf41Mother401Dev bit 65536): the game's static cache EDF+0x20B38A0 (std::map of 0xA0-byte nodes; the exit-time crash
+// EDF+0x7ADCFB walks it) logged: its size and each node's key and first words, to see what a run leaves in it.
+void LogCache(const char* tag) noexcept {
+    if(!(DevBits()&65536))return;
+    const char* m=reinterpret_cast<const char*>(image+0x20B38A0);
+    if(!Readable(m,16))return;
+    const char* head=*reinterpret_cast<const char* const*>(m);
+    const std::size_t size=*reinterpret_cast<const std::size_t*>(m+8);
+    Log("EDF41M401 cache %s: %zu nodes",tag,size);
+    if(!head || !Readable(head,0x20) || size>200)return;
+    int shown=0;
+    std::vector<const char*> todo;
+    const char* root=*reinterpret_cast<const char* const*>(head+8);   // head->parent is the root
+    todo.push_back(root);
+    while(!todo.empty() && shown<60) {
+        const char* n=todo.back(); todo.pop_back();
+        if(!n || n==head || !Readable(n,0xA0) || n[0x19])continue;
+        todo.push_back(*reinterpret_cast<const char* const*>(n));
+        todo.push_back(*reinterpret_cast<const char* const*>(n+0x10));
+        const std::size_t len=*reinterpret_cast<const std::size_t*>(n+0x30),cap=*reinterpret_cast<const std::size_t*>(n+0x38);
+        const wchar_t* key=cap>=8 ? *reinterpret_cast<const wchar_t* const*>(n+0x20) : reinterpret_cast<const wchar_t*>(n+0x20);
+        wchar_t text[80]={};
+        if(len<80 && Readable(key,(len+1)*2))std::wmemcpy(text,key,len);
+        Log("EDF41M401 cache %s: node %p key %ls | +40 %llx +48 %llx +50 %llx +58 %llx +98 %d",tag,n,text,
+            *reinterpret_cast<const unsigned long long*>(n+0x40),*reinterpret_cast<const unsigned long long*>(n+0x48),
+            *reinterpret_cast<const unsigned long long*>(n+0x50),*reinterpret_cast<const unsigned long long*>(n+0x58),
+            *reinterpret_cast<const std::int32_t*>(n+0x98));
+        ++shown;
+    }
+}
+
+// Development (bit 65536): the game's own exit-time report of banks that still have references (EDF+0x1750870 calls its log function
+// 0x3E4A0 with "audio::SoundBank::Release(error ref count : %d %ls)" for each; the bank cache's destructor then crashes on them).
+// Its call site is redirected here to put the line into the plugin's log as well.
+using VaLogFn=void(__cdecl*)(const wchar_t*,...);
+void __cdecl ExitLeakHook(const wchar_t* fmt,int count,const wchar_t* name) {
+    {   // the plugin's log is written by a thread that does not outlive the exit: a marker file
+        char path[MAX_PATH+40]={};
+        if(GetTempPathA(MAX_PATH,path)) {
+            lstrcatA(path,"edf41m401_shutdown.txt");
+            const HANDLE f=CreateFileA(path,FILE_APPEND_DATA,FILE_SHARE_READ,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+            if(f!=INVALID_HANDLE_VALUE) {
+                char line[400];
+                const int k=_snprintf_s(line,sizeof(line),_TRUNCATE,"EXIT REPORT: SoundBank::Release error ref count %d %ls\r\n",count,name ? name : L"?");
+                DWORD written=0;
+                if(k>0)WriteFile(f,line,static_cast<DWORD>(k),&written,nullptr);
+                CloseHandle(f);
+            }
+        }
+    }
+    reinterpret_cast<VaLogFn>(image+0x3E4A0)(fmt,count,name);
+}
+void InstallExitLeakHook() noexcept {
+    static const unsigned char print[8]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74};
+    if(!Readable(image+0x3E4A0,8))return;
+    bool changed=false;
+    const bool ok=RedirectCall(image+0x17508B5,image+0x3E4A0,reinterpret_cast<void*>(&ExitLeakHook),changed);
+    Log("EDF41M401 exit report hook %s",ok ? "in" : "failed");
+    (void)print;
+}
+
+// ---- charge glows: EDF6's gunbattery::ChargeEffect_StdParticle (tools/make_edf41_objects.py MOTHER401_GLOWS) --------------
+// Made by the factory 0x6D92D0(shared_ptr* out, SGO node [[], ['ChargeEffect_StdParticle', [keys, [se]]]], matrix*), the one
+// MovingFortress_Battery (0x4D3F22) uses. Its +0xC is the wanted state (0 shown, 1 hidden; slot 1 0x6D9910 turns the emitter's
+// +0xE0 on / off when it differs from +8); slot 1 (UpdateContext*, matrix) queues the emitter's update on the scene's job list
+// (manager +0x358) and slot 0 its render sync, both capturing the effect: a released effect is deleted a few hull frames
+// later (the graveyard), never while a job may still hold it.
+constexpr std::size_t kChargeFactory=0x6D92D0,kChargeStdVtable=0x17E7220;
+const unsigned char kChargePrint[8]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74};
+struct DeadGlow { Part::Glow g; int frames; };
+std::vector<DeadGlow> graveyard;
+void GlowRelease(Part::Glow& g) noexcept {   // the shared_ptr's use count, then its weak count (MSVC _Ref_count_base)
+    if(DevBits()&16384) { g=Part::Glow{}; return; }   // dev: never destroyed (bisecting the exit crash)
+    if(g.ctrl && Readable(g.ctrl,16)) {
+        auto* uses=reinterpret_cast<std::atomic<std::int32_t>*>(static_cast<char*>(g.ctrl)+8);
+        void* const* vt=*reinterpret_cast<void* const* const*>(g.ctrl);
+        if(uses->fetch_sub(1)==1) {
+            reinterpret_cast<void(__fastcall*)(void*)>(vt[0])(g.ctrl);
+            auto* weak=reinterpret_cast<std::atomic<std::int32_t>*>(static_cast<char*>(g.ctrl)+0xC);
+            if(weak->fetch_sub(1)==1)reinterpret_cast<void(__fastcall*)(void*)>(vt[1])(g.ctrl);
+        }
+    }
+    delete[] g.m;
+    g=Part::Glow{};
+}
+void GlowsMake(Part& p) noexcept {
+    const SgoNode* list=Key(p.obj,L"edf41_401_charge");
+    const int n=std::min(3,Count(list));
+    if(n<=0)return;
+    if(!Readable(image+kChargeFactory,8) || std::memcmp(image+kChargeFactory,kChargePrint,8)!=0) { Fail("the charge effect factory is not what this was written for"); return; }
+    for(int i=0;i<n;++i) {
+        Part::Glow& g=p.glows[i];
+        g.m=new float[16];
+        Point(p.muzzle,F(p.obj,kMatrixAt),g.m+12);
+        std::memcpy(g.m,F(p.obj,kMatrixAt),48);
+        g.m[15]=1.0f;
+        alignas(16) void* out[2]={};
+        reinterpret_cast<void*(__fastcall*)(void*,const SgoNode*,const float*)>(image+kChargeFactory)(out,Child(list,i),g.m);
+        g.fx=out[0]; g.ctrl=out[1];
+        if(!g.fx || !Readable(g.fx,0x3B0) || *static_cast<void* const*>(g.fx)!=image+kChargeStdVtable) {
+            Fail("a 401 charge glow was not a ChargeEffect_StdParticle");
+            GlowRelease(g);
+            return;
+        }
+        *reinterpret_cast<std::int32_t*>(static_cast<char*>(g.fx)+0xC)=1;   // hidden
+        p.glowCount=i+1;
+        if(DevBits()&131072) { GlowRelease(g); p.glowCount=0; return; }   // dev: created and destroyed at once (bisecting)
+        static std::atomic<int> dsaid{0};
+        if(dsaid.fetch_add(1)<3) {   // development evidence: what the effect's sound preset (+0x320) and handle (+0x3A0) hold
+            const char* f=static_cast<const char*>(g.fx);
+            Log("EDF41M401 glow %p: state +8=%d +0xC=%d, preset bank %p cue %d, handle %p %p, flag +0xE0=%d",g.fx,*reinterpret_cast<const std::int32_t*>(f+8),
+                *reinterpret_cast<const std::int32_t*>(f+0xC),*reinterpret_cast<void* const*>(f+0x320+0x20),*reinterpret_cast<const std::int32_t*>(f+0x320+0x28),
+                *reinterpret_cast<void* const*>(f+0x3A0),*reinterpret_cast<void* const*>(f+0x3A8),f[0xE0]);
+        }
+    }
+    static std::atomic<int> said{0};
+    if(said.fetch_add(1)<6)Log("EDF41M401 %s %p: %d charge glows (ChargeEffect_StdParticle)",KindName(p.kind),p.obj,p.glowCount);
+}
+// The sync-render phase (EventAnimationObject slot 3 0x5B6D10 = the model's 0x6C06A0; MovingFortress_Battery's 0x4D1900 is the same
+// slot): the glows' render job is queued here, never from Update. Queued next to the update job (what this did first) the two ran
+// concurrently on the job threads and the render side read the particle ring while the update side popped it: the count went
+// astray and the render's vector grew until it threw bad_alloc (EDF+0x30316D from 0x302D10, M809 / M018, 2026-10-16).
+void __fastcall PartSyncRender(void* self) {
+    reinterpret_cast<void(__fastcall*)(void*)>(partClone.orig[3])(self);
+    std::lock_guard<std::recursive_mutex> hold(lock);
+    Part* p=Find(self);
+    if(!p || !p->glowCount)return;
+    for(int i=0;i<p->glowCount;++i) {
+        void* fx=p->glows[i].fx;
+        if(!fx || (DevBits()&4096))continue;
+        void* const* vt=*static_cast<void* const* const*>(fx);
+        reinterpret_cast<void(__fastcall*)(void*)>(vt[0])(fx);
+    }
+}
+
+// Every frame of a part with glows: the wanted state and the muzzle matrix to each, its update and render sync queued.
+void GlowsUpdate(Part& p,void* ctx) noexcept {
+    for(int i=0;i<p.glowCount;++i) {
+        Part::Glow& g=p.glows[i];
+        if(!g.fx)continue;
+        std::memcpy(g.m,F(p.obj,kMatrixAt),48);
+        Point(p.muzzle,F(p.obj,kMatrixAt),g.m+12);
+        g.m[3]=g.m[7]=g.m[11]=0.0f; g.m[15]=1.0f;
+        *reinterpret_cast<std::int32_t*>(static_cast<char*>(g.fx)+0xC)=(i==p.glowOn && !(DevBits()&524288)) ? 0 : 1;   // dev 524288: never shown (bisecting)
+        void* const* vt=*static_cast<void* const* const*>(g.fx);
+        if(!(DevBits()&8192))reinterpret_cast<void(__fastcall*)(void*,void*,const float*)>(vt[1])(g.fx,ctx,g.m);   // dev 8192: no update job
+        // what the battery's Update does after it (MovingFortress_Battery 0x4D1B96): the effect's current state follows the wanted one
+        // and its +0x10 (a per-frame amount slot 1 reads) is cleared
+        {
+            char* f=static_cast<char*>(g.fx);
+            const std::int32_t want=*reinterpret_cast<std::int32_t*>(f+0xC);
+            if(*reinterpret_cast<std::int32_t*>(f+8)!=want) { *reinterpret_cast<std::uint64_t*>(f+0x10)=0; *reinterpret_cast<std::int32_t*>(f+8)=want; }
+        }
+        (void)vt;   // its render job (slot 0) goes from the object's sync-render slot (PartSyncRender), the phase the game runs it in
+    }
+}
+void GlowsBury(Part& p) noexcept {
+    // The part is being destroyed (MovingFortress_Battery's own destructor drops its effects in the same place): its glows go now.
+    // Burying them for a while (what this did first, and later at the game's shutdown) left them alive when the main loop ended,
+    // which crashed the exit; destroyed with their part the same runs end clean.
+    for(int i=0;i<p.glowCount;++i)
+        if(p.glows[i].fx) { *reinterpret_cast<std::int32_t*>(static_cast<char*>(p.glows[i].fx)+0xC)=1; GlowRelease(p.glows[i]); }
+    p.glowCount=0;
+}
+void GraveyardTick() noexcept {   // once per hull Update
+    for(std::size_t i=0;i<graveyard.size();)
+        if(--graveyard[i].frames<=0) { GlowRelease(graveyard[i].g); graveyard[i]=graveyard.back(); graveyard.pop_back(); }
+        else ++i;
+}
+
+// Development: what the sound system looks like when this DLL detaches (before EDF's own static destructors, which crash walking
+// the cache EDF+0x20B38A0 on a dead sound system EDF+0x20B2948: EDF+0x7ADCFB).
+struct ExitProbe {
+    ~ExitProbe() {
+        if(!(Cfg().edf41Mother401Dev&65536) || !image)return;
+        const char* g=Readable(image+0x20B2948,8) ? *reinterpret_cast<const char* const*>(image+0x20B2948) : nullptr;
+        Log("EDF41M401 exit probe: sound system %p, list head %p size %zu, %d glows alive in the graveyard",g,
+            g && Readable(g+0x40,16) ? *reinterpret_cast<const void* const*>(g+0x40) : nullptr,
+            g && Readable(g+0x40,16) ? *reinterpret_cast<const std::size_t*>(g+0x48) : static_cast<std::size_t>(0),static_cast<int>(graveyard.size()));
+        LogCache("at DLL detach");
+    }
+} exitProbe;
+
+// The game's own shutdown (EDF+0x7021F0, the application object's destructor, which destroys the singletons one after the other, the
+// sound system EDF+0x20B2948 among them): every charge glow still alive goes first. Real runs (2026-10-16, M018): one live
+// ChargeEffect at that point makes the sound bank cache's static destructor (EDF+0x7ADCFB) touch the dead sound system; created and
+// destroyed at once, or destroyed before the shutdown, the same runs exit clean.
+void ShutdownGlows() noexcept {
+    std::lock_guard<std::recursive_mutex> hold(lock);
+    int n=0;
+    for(auto& kv:byObj) {
+        Part& p=*kv.second;
+        for(int i=0;i<p.glowCount;++i)
+            if(p.glows[i].fx) { GlowRelease(p.glows[i]); ++n; }
+        p.glowCount=0;
+    }
+    for(DeadGlow& d:graveyard) { GlowRelease(d.g); ++n; }
+    graveyard.clear();
+    if(Cfg().edf41Mother401Dev&65536) {   // the plugin's log is written by a thread that does not outlive this: a marker file instead
+        char path[MAX_PATH+40]={};
+        if(GetTempPathA(MAX_PATH,path)) {
+            lstrcatA(path,"edf41m401_shutdown.txt");
+            const HANDLE f=CreateFileA(path,FILE_APPEND_DATA,FILE_SHARE_READ,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+            if(f!=INVALID_HANDLE_VALUE) {
+                char line[80];
+                const int k=_snprintf_s(line,sizeof(line),_TRUNCATE,"shutdown hook ran: %d glows destroyed\r\n",n);
+                DWORD written=0;
+                if(k>0)WriteFile(f,line,static_cast<DWORD>(k),&written,nullptr);
+                CloseHandle(f);
+            }
+        }
+    }
+    if(n)Log("EDF41M401 the game is shutting down: %d charge glows destroyed first",n);
+}
+
 void Forget(const void* self) noexcept {
     std::lock_guard<std::recursive_mutex> hold(lock);
     const auto it=byObj.find(self);
     if(it==byObj.end())return;
     Part& p=*it->second;
     StopSound(p.loopA,0); StopSound(p.loopB,0); StopSound(p.ambient,0);
+    MaterialAnimsFree(p.mat);   // before the model it is bound to goes
+    GlowsBury(p);
     for(WeakRef& w:p.gen.slots)WeakReset(w);
     NetForget(p);   // online (edf41net)
     byId.erase(p.id);
     byObj.erase(it);
+    // the last of the classes' objects gone (the mission's end): nothing ticks the graveyard any more, so it is emptied here
+    // (the scene destroys objects after the frame's jobs ran). A ChargeEffect left alive keeps its sound handle registered in
+    // the sound system's static table (EDF+0x20B38A0), which then crashes in its exit-time destructor (EDF+0x7ADCFB reads the
+    // sound system 0x20B2948 after it is gone: a real run, 2026-10-15, m401f_M018_ds5).
+    if(byObj.empty()) {
+        LogCache("when the last 401 object is gone");
+    }
 }
 
 std::uint64_t __fastcall HullDtor(void* self,unsigned flags) {
@@ -1006,6 +1326,16 @@ void HullFirst(Part& h) noexcept {
     h.team=Readable(F(h.obj,kTeamAt),4) ? *reinterpret_cast<const std::int32_t*>(F(h.obj,kTeamAt)) : -1;
     *reinterpret_cast<std::uint32_t*>(F(h.obj,kFlags380))|=kNotTarget;   // nothing aims at the invisible controller
     PlaySe(h,0,&h.ambient);
+    // the borrowed part model's ragdoll out of the physics world: 4.1's hull has no body at all. Ragdoll::Disable 0x6E97C0 (every
+    // body's +0xA4 cleared and its mode 0, 0x6ED480 -> 0x11B1710 removes it from the world; called from an object's virtual by
+    // EDF6_Jormungand_AdditionalParts 0x38B321, no world lock around it).
+    static const unsigned char kDisablePrint[8]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83};
+    char* ragdoll=static_cast<char*>(h.obj)+kRagdollAt;
+    if(Readable(image+0x6E97C0,8) && std::memcmp(image+0x6E97C0,kDisablePrint,8)==0 && Rd(ragdoll,0x90,"hull ragdoll")) {
+        reinterpret_cast<void(__fastcall*)(void*)>(image+0x6E97C0)(ragdoll);
+        h.ragdollOff=true;
+    } else Fail("the ragdoll switch is not what this was written for: the hull keeps a body at its origin");
+    LogCache("at the hull's first update");
     Log("EDF41M401 hull %p first update: at %.0f %.0f %.0f yaw %.1f deg, team %d, level %.2f, %d actions, ini Edf41Mother401Dev=%d",h.obj,
         m[12],m[13],m[14],h.yaw*57.29578f,h.team,*F(h.obj,kLevelAt),Count(Key(h.obj,L"action_list")),DevBits());
 }
@@ -1073,6 +1403,9 @@ void HullLogic(Part& h) noexcept {
     for(const Cell& c:h.cells)
         if(const Part* p=ById(c.panel)) { for(int k=0;k<3;++k)avg[k]+=F(p->obj,kPosAt)[k]; cnt+=1; }
     if(cnt>0) { for(float& v:avg)v/=cnt; MoveSound(h.ambient,avg); }
+    // development: the player kept alive (the autopilot stands under the ship and cannot dodge; a run that has to see the end)
+    if(DevBits()&128)
+        if(unsigned char* me=PlayerHuman(); me && Readable(me+kMaxDurabilityAt,8) && *F(me,kMaxDurabilityAt)>0.0f)*F(me,kDurabilityAt)=*F(me,kMaxDurabilityAt);
     // the dev switches at Edf41Mother401DevKill seconds
     if((DevBits()&32) && h.hullFrames==static_cast<std::uint32_t>(std::max(1.0f,Cfg().edf41Mother401DevKill*kFps))) {
         Log("EDF41M401 dev: ObjectAction %d",Cfg().edf41Mother401DevAction);
@@ -1114,6 +1447,24 @@ std::uint64_t __fastcall HullUpdate(void* self,void* dt) {
                 for(const Cell& c:h->cells)alive+=ById(c.panel)!=nullptr;
                 Log("EDF41M401 hull %p frame %u: %d of %zu cells hold a panel, %zu objects in all; plugin %.0f us/frame on the parts, their stock updates %.0f us/frame (%u calls)",
                     self,h->hullFrames,alive,h->cells.size(),byObj.size(),partUsOurs/600.0,partUsStock/600.0,partCalls);
+                if(h->hullFrames==600)LogCache("at hull frame 600");
+                if(h->hullFrames==3600)LogCache("at hull frame 3600");
+                if(h->hullFrames==600 && h->ragdollOff) {   // the hull's bodies stay out of the world (+0xA4 0, mode +0x9C 0)
+                    const char* r=static_cast<const char*>(self)+kRagdollAt;
+                    const char* bodies=*reinterpret_cast<char* const*>(r+0x78);
+                    const std::size_t n=*reinterpret_cast<const std::size_t*>(r+0x88);
+                    int in=0;
+                    for(std::size_t i=0;i<n && i<32 && bodies && Readable(bodies+i*0xC0,0xC0);++i)in+=bodies[i*0xC0+0xA4]!=0 || *reinterpret_cast<const std::int32_t*>(bodies+i*0xC0+0x9C)!=0;
+                    Log("EDF41M401 hull %p: %d of its %zu ragdoll bodies are back in the world",self,in,n);
+                }
+                if(Cfg().edf41DevShoot>0) {
+                    char text[640]; int at=0;
+                    for(int k=1;k<12;++k)
+                        if(devTaken[k][2] || devTaken[k][0] || devTaken[k][1])
+                            at+=std::snprintf(text+at,sizeof(text)-static_cast<std::size_t>(at),"%s %d taken / %d refused; ",KindName(static_cast<Kind>(k)),
+                                              devTaken[k][0],devTaken[k][1]);
+                    if(at)Log("EDF41M401 dev: hits so far: %s",text);
+                }
                 partUsOurs=partUsStock=0.0; partCalls=0;
             }
         }
@@ -1257,6 +1608,7 @@ std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
             }
             ++p->frames;
             p->lastTick=hullTick;
+            if(p->glowCount && !del)GlowsUpdate(*p,dt);
         }
     }
     const LARGE_INTEGER t1=Now();
@@ -1268,7 +1620,54 @@ std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
         for(int k=0;k<3;++k) { m[k]*=sx; m[4+k]*=sy; m[8+k]*=sx; }
         ModelMatrix(self,m);
     }
-    if(!del){ float aim[3]; if(Alive(self) && AimPoint(self,aim))DevShoot(self,aim); }   // development (ini Edf41DevShoot)
+    float weakAt[3];
+    bool weakShot=false,canHurt=false,devInside=false,weakGated=false;
+    std::uint32_t hullFramesNow=0;
+    {
+        std::lock_guard<std::recursive_mutex> hold(lock);
+        if(Part* p=Find(self); p && p->seen) {
+            MaterialAnimsUpdate(p->mat,dt);   // 4.1: in Update after PanelBase's (0x263100 ...), with its frame info
+            if(p->lockPoint) { float w[3]; Point(p->lockLocal,F(self,kMatrixAt),w); SetLockPoint(p->lockPoint,w); }
+            if(p->weakBody==-2 && p->weakTries<600) {   // the weak body by name, once the ragdoll has its bodies
+                ++p->weakTries;
+                // the body's name is its SHKT proxy's, RagDollProxys.<weakpoint> (4.1 0x3348f0 takes the bare name)
+                wchar_t proxy[64];
+                std::swprintf(proxy,64,L"RagDollProxys.%ls",p->weakName);
+                int b=RagdollBody(static_cast<char*>(self)+kRagdollAt,proxy);
+                if(b<0)b=RagdollBody(static_cast<char*>(self)+kRagdollAt,p->weakName);
+                const std::size_t bodies=Readable(static_cast<char*>(self)+kRagdollAt+0x88,8) ? *reinterpret_cast<const std::size_t*>(static_cast<char*>(self)+kRagdollAt+0x88) : 0;
+                if(b>=0 || p->weakTries==600) {
+                    p->weakBody=b>=0 ? b : -1;
+                    static std::atomic<int> said{0};
+                    if(said.fetch_add(1)<16 || b<0)Log("EDF41M401 %s %p: weak body %ls = %d after %d frames (the ragdoll has %zu bodies)",KindName(p->kind),self,
+                                                       p->weakName,b,p->weakTries,bodies);
+                }
+            }
+            if(p->weakBody>=0 && !p->wholeHits) {   // the weak body's bone where the CAS has it now (a Generator's core moves as it opens)
+                if(p->weakBone==-2)p->weakBone=BoneIndex(static_cast<char*>(self)+kEaoSkeleton,p->weakName);
+                float bm[16];
+                if(p->weakBone>=0 && BoneMatrix(static_cast<char*>(self)+kEaoSkeleton,p->weakBone,bm))std::memcpy(weakAt,bm+12,12);
+                else Point(p->weakPt,F(self,kMatrixAt),weakAt);
+                weakShot=true;
+            }
+            // a Generator's weak body (core) is its hatch: closed it is covered by the flat panel's shell (body 0, where every hit lands), so
+            // the dev shot waits until the hatch is open (4.1 plays the same: the hatch is the weak point of an open generator)
+            devInside=p->kind==Kind::generator;
+            if(p->kind==Kind::generator && !(p->state==sGenOpen || p->state==sGenSpawn || p->state==sGenWait))weakGated=true;
+            canHurt=(p->wholeHits || p->weakBody>=0) && (!IsPanel(p->kind) || (p->triggered && p->delay<=0));
+            const Part* owner=IsPanel(p->kind) ? p : ById(p->panel);
+            if(const Part* h=owner ? HullOf(*owner) : nullptr)hullFramesNow=h->hullFrames;
+        }
+    }
+    // development (ini Edf41DevShoot): the lock-on point (the aim point), and for a weak-body part its weak body's bone too
+    // bit 256: not before Edf41Mother401DevKill seconds of the hull (M809's script watches its weak panels only from its OA(0) on)
+    const bool devLater=(DevBits()&256) && static_cast<float>(hullFramesNow)<Cfg().edf41Mother401DevKill*kFps;
+    if(!del && canHurt && !devLater && Alive(self)) {   // (the Panel01 armour takes no hit at all)
+        float aim[3];
+        if(AimPoint(self,aim) && !weakGated)DevShoot(self,aim);
+        // a Generator's weak body (core) sits inside its flat panel's shell (body 0): the shot starts 1.5 m short of the bone
+        if(weakShot && !weakGated)DevShoot(self,weakAt,1,devInside ? 20.0f : 20.0f);
+    }
     const LARGE_INTEGER t2=Now();
     {
         std::lock_guard<std::recursive_mutex> hold(lock);
@@ -1287,9 +1686,21 @@ bool __fastcall PartAccept(void* self,void* gdi) {
     Part* p=Find(self);
     if(!p)return true;
     if(p->noDamage || p->vanishing || p->killed || p->state==sGbDestroyed || p->state==sGbFall)return false;
+    // a panel has no physics shell until its flight starts (4.1 slot 1 0x270110 builds it with 0x26fab0 when the delay runs
+    // out): nothing hits one still waiting 1000 above its cell
+    if(IsPanel(p->kind) && (!p->triggered || p->delay>0))return false;
+    if(Cfg().edf41DevShoot>0)++devTaken[static_cast<int>(p->kind)][p->wholeHits ? 0 : 2];
     if(p->wholeHits)return true;
     if(p->weakBody<0)return false;
-    return HitBody(static_cast<char*>(self)+kRagdollAt,gdi)==p->weakBody;
+    const int body=HitBody(static_cast<char*>(self)+kRagdollAt,gdi);
+    if(Cfg().edf41DevShoot>0) {   // development: which body the hits land on, per class (the filter's evidence)
+        ++devTaken[static_cast<int>(p->kind)][body==p->weakBody ? 0 : 1];
+        static std::atomic<int> said{0};
+        const int n=said.fetch_add(1);
+        if(n<24 || n%500==0)Log("EDF41M401 dev: a hit on %s %p lands on body %d (weak body %d): %s",KindName(p->kind),self,body,p->weakBody,
+                               body==p->weakBody ? "taken" : "refused");
+    }
+    return body==p->weakBody;
 }
 
 // slot 18 (after the HP change): the kill (4.1 slot 11 / 32) or the damage sound.
@@ -1298,23 +1709,40 @@ void __fastcall PartDamaged(void* self,void* gdi) {
     std::lock_guard<std::recursive_mutex> hold(lock);
     Part* p=Find(self);
     if(!p || p->killed || p->vanishing)return;
-    if(Hp(self)>0.0f) { PlaySe(*p,IsBattery(p->kind) ? 0 : 5); return; }
+    // spawned enemies notice the hit (0x331d10): Generator 0x268720 on a hit it survives and once on the killing one,
+    // FinalGenerator 0x2676e0 on every hit
+    if(p->kind==Kind::finalGenerator || (p->kind==Kind::generator && (Hp(self)>0.0f || !p->encountDone))) {
+        if(Hp(self)<=0.0f)p->encountDone=true;
+        Encount(*p);
+    }
+    if(Hp(self)>0.0f) {
+        PlaySe(*p,IsBattery(p->kind) ? 0 : 5);
+        MaterialAnimsPlay(p->mat,1,0);   // the hit flash, once (0x2639a0 ...: [e+4] = 0)
+        static std::atomic<int> said{0};
+        if(said.fetch_add(1)<12)Log("EDF41M401 %s %p takes a hit: %.0f of %.0f left",KindName(p->kind),self,Hp(self),*F(self,kMaxDurabilityAt));
+        return;
+    }
     if(IsBattery(p->kind)) {   // 0x269b40
         p->killed=true;
         Unregister(*p);
         Enter(*p,sGbDestroyed);
+        static std::atomic<int> said{0};
+        if(said.fetch_add(1)<12)Log("EDF41M401 %s %p destroyed by damage",KindName(p->kind),self);
         return;
     }
+    MaterialAnimsPlay(p->mat,2,1);   // OnKilled (slot 32): the death track, to its end and held ([e+4] = 1)
     Log("EDF41M401 %s %p destroyed by damage",KindName(p->kind),self);
     Part* h=HullOf(*p);
     if(p->kind==Kind::weak && h) {   // 0x2715a0
         float q[3];
         std::memcpy(q,F(self,kPosAt),12);
         q[1]-=20.0f;
-        const float down[3]={0,-1,0},up[3]={0,1,0};
+        const float down[3]={0,-1,0};
         Explosion(q,down,15.0f);
+        const float grey[4]={0.5f,0.5f,0.5f,2.5f};   // ten grey light flashes, +0x60 = i x 300, 180 frames (0x271642)
+        if(!(DevBits()&1024))for(int i=0;i<10;++i)StencilLight(q,grey,static_cast<float>(i)*300.0f,180);   // dev 1024: none
         q[1]-=20.0f;
-        Blazing(q,up,1.0f);
+        Smoke(q,1.0f);                                // 0x1b2d90: the upward smoke puff (煙_01)
         p->killed=true;   // its own destroy below, not the blast's
         AreaDestroy(*h,F(self,kPosAt),200.0f);
         p->killed=false;
@@ -1482,14 +1910,49 @@ void NetForget(const Part& p) noexcept {
 
 }  // namespace
 
+// Development bit 32768: Edf41DevShoot also shoots the mission's ordinary enemies (every live lockable hostile object that is not
+// one of ours), so the scripts' kill counts / waits advance and a mission that creates the ship late gets there. Once a frame.
+void Edf41Mother401DevTick() noexcept {
+    static ULONGLONG lastFrame=~0ull;   // called from the on-foot frame and the riding frame: once per game frame
+    if(GameFrame()==lastFrame)return;
+    lastFrame=GameFrame();
+    {   // the buried charge glows' clock: one tick per game frame, whether or not a hull exists (the render side may still hold a
+        // buried effect a frame or two after its last job, so it is freed 120 frames later)
+        std::lock_guard<std::recursive_mutex> hold(lock);
+        if(!graveyard.empty())GraveyardTick();
+    }
+    if(!(Cfg().edf41Mother401Dev&32768) || Cfg().edf41DevShoot<=0)return;
+    static unsigned frame=0;
+    // a slow kill (one enemy every 30 frames, the window rotating) so a script that waits for the enemy count to fall to a figure
+    // sees it fall; bit 262144 shoots them all at once, 48 a tick (a mission whose ship comes late is cleared before it comes)
+    const bool fast=(Cfg().edf41Mother401Dev&262144)!=0;
+    if(++frame%(fast ? 6u : 30u)!=0)return;
+    struct Ctx { int n; const void* list[256]; float aim[256][3]; } c{};
+    {
+        std::lock_guard<std::recursive_mutex> hold(lock);
+        VisitEnemiesOf(0,[](void* ctx,const void* object,const float* aim) {
+            Ctx* k=static_cast<Ctx*>(ctx);
+            if(k->n<256 && !Find(object)) { k->list[k->n]=object; std::memcpy(k->aim[k->n],aim,12); ++k->n; }
+        },&c);
+    }
+    // 48 a tick, the window rotating over the whole list (a fixed first 48 would be the same ones every time)
+    const int take=c.n<(fast ? 48 : 1) ? c.n : (fast ? 48 : 1),start=c.n ? static_cast<int>((frame/6u*37u)%static_cast<unsigned>(c.n)) : 0;
+    for(int k=0;k<take;++k) { const int at=(start+k)%c.n; DevShoot(c.list[at],c.aim[at],1000000u+static_cast<unsigned>(at)); }
+    static std::atomic<int> said{0};
+    if(c.n && said.fetch_add(1)<4)Log("EDF41M401 dev: shooting %d ordinary enemies",c.n);
+}
+
 bool InstallEdf41Mother401() noexcept {
     if(!Cfg().edf41Mother401) { Log("EDF41M401 off (ini Edf41Mother401=0)"); return false; }
+    if(Cfg().edf41Mother401Dev&65536)InstallExitLeakHook();
+    AtGameShutdown(&ShutdownGlows);
     if(!BuildClone(hullClone,&HullDtor,&HullUpdate,&HullMessage) || !BuildClone(partClone,&PartDtor,&PartUpdate,&PartMessage)) {
         Log("EDF41M401 the vtable clones could not be built: off");
         return false;
     }
     SetSlot(hullClone,kSlotAccept,reinterpret_cast<void*>(&HullAccept));
     SetSlot(partClone,kSlotAccept,reinterpret_cast<void*>(&PartAccept));
+    SetSlot(partClone,3,reinterpret_cast<void*>(&PartSyncRender));   // the glows' render job
     SetSlot(partClone,kSlotDamaged,reinterpret_cast<void*>(&PartDamaged));
     AllowAnyTeam(hullClone);   // EventAnimationObject's slot 22 allows only team 6: CreateEnemy's SetTeam(1) and the parts' would not take
     AllowAnyTeam(partClone);

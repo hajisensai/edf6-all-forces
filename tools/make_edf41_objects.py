@@ -1456,9 +1456,33 @@ MOTHER401_STILL_CAS = 'OBJECT/UFOMOTHER401_STILL.CAS'
 MOTHER401_STILL_APP = 'app:/Object/UfoMother401_Still.cas'
 # Points the plugin needs on a part's model, from 4.1's MAB locators (node bind matrix x the locator's position; the panels are
 # rigid, so the rest pose is the pose): the battery mounts (Panel01's 砲台, each one), the muzzle (発射口: BigCannon01,
-# FinalCannon01, the batteries), the spawn point of a generator (出現位置 / 排出位置), and the weak body's bone (weakpoint).
+# FinalCannon01, the batteries), the spawn point of a generator (出現位置 / 排出位置), the lock-on point (ターゲット: the MAB's
+# list 1, the list EDF6's lock-point component 0x6C74E0 hands to AddLockTarget 0x547A50; EventAnimationObject has no such
+# component, so the plugin adds the point itself), and the weak body's bone (weakpoint).
 MOTHER401_POINTS = (('edf41_401_mounts', ('砲台',), True), ('edf41_401_muzzle', ('発射口',), False),
-                    ('edf41_401_spawn', ('出現位置', '排出位置'), False))
+                    ('edf41_401_spawn', ('出現位置', '排出位置'), False), ('edf41_401_lock', ('ターゲット',), False))
+
+
+# The charge glows: 4.1 hangs a Particle3_k emitter (ParticleObject 0x1c2d80) on the muzzle of BigCannon01 (0x262684),
+# FinalCannon01 and FinalGenerator (jobs/14618f05/tmp/re401/notes_A 1.5, notes_B 1.3 / 3.1) and switches it on while charging /
+# firing, coloured per state. EDF6 has the same emitter behind gunbattery::ChargeEffect_StdParticle, whose SGO form E510's
+# batteries carry (charge_effect_std: [[], ['ChargeEffect_StdParticle', [[key, value, ...], [se]]]]; the keys are EDF6's
+# parser table 0x303710: 3 / 4 ints, 8 [0: the flag byte +0x50], 11 [1: +0xb8, 2: +0xbc], 12 [1: +0xc4, 2: +0xc8, 3: +0xcc],
+# 13 [1: colour +0xe0, 3: colour +0x100], 15 [0: texture]); 4.1's block writes the same offsets: ints 4 / 4 / 2, +0x50 = 1,
+# +0xb8 = 0, +0xc4 / +0xc8 / +0xcc = 80 / 100 / -25, colours +0xe0 and (0, 0, 0, 1) at +0x100. The colour of each glow the
+# class switches on (one ChargeEffect per colour); the se is EDF6's (empty: the plugin plays 4.1's charge sounds itself).
+MOTHER401_GLOWS = {
+    'UfoMother401_BigCannon01': ((1.0, 1.0, 3.0, 1.0),),                               # charge and fire
+    'UfoMother401_FinalCannon01': ((10.0, 1.0, 5.0, 1.0), (1.0, 1.0, 5.0, 1.0), (2.0, 2.0, 10.0, 1.0)),   # genocide charge,
+    'UfoMother401_FinalGenerator': ((1.0, 10.0, 5.0, 1.0),),                           # lightning charge, lightning fire; summon
+}
+
+
+def mother401_glow(colour: tuple) -> list:
+    """One EDF6 ChargeEffect_StdParticle node of 4.1's muzzle emitter in `colour` (MOTHER401_GLOWS)."""
+    keys = [2, 4, 3, 4, 4, 2, 8, [0, 1], 11, [1, 0.0, 2, 0.0], 12, [1, 80.0, 2, 100.0, 3, -25.0],
+            13, [1, [float(c) for c in colour], 3, [0.0, 0.0, 0.0, 1.0]], 15, [0, 'Particle3_k.dds']]
+    return [[], ['ChargeEffect_StdParticle', [keys, ['']]]]
 
 
 def mother401_point(md: 'mdb.Mdb', world: list, node: str, a: tuple) -> list[float]:
@@ -1485,6 +1509,9 @@ def mother401_part(files: dict[str, bytes], rel: str) -> None:
     if isinstance(weak, str):
         m = world[mdb.bone_named(md, weak)]
         members['edf41_401_weak'] = [round(m[12 + j], 4) for j in range(3)]
+    glows = MOTHER401_GLOWS.get(str(members.get('xgs_scene_object_class')))
+    if glows:
+        members['edf41_401_charge'] = [mother401_glow(c) for c in glows]
     files[rel] = sgo.write_depth_first(version, members)
 
 

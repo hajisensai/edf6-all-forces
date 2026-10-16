@@ -7164,7 +7164,7 @@ def edf41_mother301_finish_contract() -> None:
         params = {p.name for mt in md.materials for p in mt.params}
         assert {'light0_color', 'scroll_light0'} <= params, (x.name, sorted(params))
     assert 'const wchar_t* hitSe=nullptr;' in header and 'bool FillSePreset(unsigned char* preset' in header   # unified with UfoRobo's (one definition, initialises the preset itself)
-    assert 'if(b.hitSe && b.hitSeTable)FillSePreset(param+0x100,b.hitSeTable,b.hitSe);' in shared
+    assert 'FillSePreset(param+0x100,b.hitSeTable,b.hitSe)' in shared
     plugin, ini = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini')
     assert 'ReadInt(L"Edf41MotherForce",n.edf41MotherForce),0,2047)' in plugin
     assert re.search(r'^Edf41MotherForce=0$', ini, re.M) and '16 =' in ini.split('Edf41MotherForce=0', 1)[0].rsplit('Edf41MotherParts=31', 1)[1]
@@ -7393,7 +7393,7 @@ def edf41_robo_finish() -> None:
     code = re.sub(r'//[^\n]*', '', cpp)
     assert 'Blast(' not in code, 'the stomp still lets off the grenade stand-in'
     assert 'bool FireSe(void* owner,const float* matrix,const Bullet& b,const void* seTable,const wchar_t* hitSe) noexcept;' in header
-    assert 'FillPreset(param+0x100,seTable,hitSe)' in shared and 'FireSe(r.obj,mm,g.bullet,r.obj,g.hitSe)' in cpp
+    assert 'c.hitSe=hitSe;' in shared and 'FillRawCue(param+0x100,b.hitCue' in shared and 'FireSe(r.obj,mm,g.bullet,r.obj,g.hitSe)' in cpp
     for name in re.findall(r'hitSe=L"([^"]+)"', cpp) + re.findall(r'chargeSe=L"([^"]+)"', cpp) + re.findall(r'shotSe=L"([^"]+)"', cpp):
         assert name in se, name
     assert len(re.findall(r'hitSe=L"', cpp)) == 4 and 'L"ik_control_info"' in cpp
@@ -7472,6 +7472,19 @@ def edf41_mother401_data() -> None:
         if 'weakpoint' in top:
             assert len(top['edf41_401_weak']) == 3, rel
             assert m.ragdoll_body(eo.read(m.rel_of(top['ragdoll'][0])), top['weakpoint']), (rel, top['weakpoint'])
+        # the lock-on point (MAB list 1, ターゲット): every part that can be hurt has one, the Panel01 armour none (4.1's models)
+        if cls == 'UfoMother401_Panel01':
+            assert 'edf41_401_lock' not in top, rel
+        else:
+            assert len(top['edf41_401_lock']) == 3, rel
+        # the charge glows (MOTHER401_GLOWS): EDF6's ChargeEffect_StdParticle node per colour, 4.1's Particle3_k block
+        glows = top.get('edf41_401_charge')
+        assert (glows is not None) == (cls in m.MOTHER401_GLOWS), rel
+        for node, colour in zip(glows or [], m.MOTHER401_GLOWS.get(cls, ())):
+            assert node[1][0] == 'ChargeEffect_StdParticle' and node[1][1][0][-1] == [0, 'Particle3_k.dds'], rel
+            assert [round(float(c), 3) for c in node[1][1][0][13][1]] == list(colour), rel
+        if glows:
+            assert len(glows) == len(m.MOTHER401_GLOWS[cls]), rel
     assert len(classes) == 11, classes
 
 
@@ -7509,6 +7522,19 @@ def edf41_mother401_plugin_contract() -> None:
     assert not re.search(r'0xD7480|0x53060|0x52DE0|0x52F30|0x551E0', code)   # the DSGO accessors fault on a plain SGO
     # online every machine runs it (edf41net; a guest's ObjectAction must not reach EventAnimationObject's OnMessage): edf41_net_contract
     assert 'OnlineRunsHere(self)' not in code and 'edf41net::Pump(self);' in cpp
+    # the finishing pass (2026-10-15, docs/edf41-ufomother401.md): material animations, bullet hit sounds, lock-on points, the
+    # weak panel's light flashes, the charge glows and the hull's ragdoll out of the world; every new EDF.dll call fingerprinted
+    for rva in ('kMatCtor', 'kMatBind', 'kMatAdd', 'kMatPlay', 'kMatUpdate', 'kMatFree'):
+        assert re.search(rf'\{{{rva},\{{0x', shared), f'{rva} has no fingerprint'
+    for call in ('FireHit(', 'MaterialAnimsLoad(', 'MaterialAnimsFree(', 'AddLockPoint(', 'StencilLight(', 'SmallBurst(', 'Encount('):
+        assert call in cpp, call
+    assert 'kChargePrint' in cpp and 'kDisablePrint' in cpp and 'GraveyardTick();' in cpp
+    # the real-run pass (2026-10-16): the exit hook, the render job in the sync-render clone slot, the dev shooter at ordinary enemies;
+    # the charge glows stay off unless dev bit 4194304 (their exit crash is open, docs/edf41-ufomother401.md 4)
+    assert 'AtGameShutdown(&ShutdownGlows);' in cpp and 'PartSyncRender' in cpp and 'Edf41Mother401DevTick' in cpp
+    assert 'DevBits()&4194304)GlowsMake(p)' in cpp and 'AtGameShutdown(' in src('src/edf41classes.h')
+    assert 'Edf41Mother401DevTick();' in src('src/map.cpp') and 'Edf41Mother401DevTick();' in src('src/crew.cpp')
+    assert re.search(r'^Edf41DevShoot=0$', ini, re.M)
 
 
 @test
