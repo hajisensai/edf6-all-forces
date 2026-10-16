@@ -108,7 +108,8 @@ bool NearestPlayer(const float* from,float* out) noexcept;
 // LaserBullet02 owned by the local player flies at it from 20 m short of it, so the hit goes the game's own way (the damage
 // message, the class's filter, its hit sound, the kill and drop credit to the player). `salt` staggers several points on
 // one object. No effect with the switch off.
-void DevShoot(const void* object,const float* point,unsigned salt=0) noexcept;
+// `startBack`: how far short of the point the bullet starts (20 m; a small one starts it inside a shell that covers the point).
+void DevShoot(const void* object,const float* point,unsigned salt=0,float startBack=20.0f) noexcept;
 
 // ---- EDF6 primitives (docs/edf41-classes.md section 2, read from EDF.dll; H unless noted) -----------------------------------
 // Object bases: EventAnimationObject model +0x5C0, skeleton +0x660, ragdoll +0xAA0; UfoCarrier508 model +0x650, skeleton +0x6F0,
@@ -247,5 +248,12 @@ void StencilLight(const float* pos,const float* colour,float radius,int frames) 
 // EffectGenUtil 0x2E7D00 (pos, dir, size): 4.1's 0x1b1910, the 火炎_01 small explosion the 401's burning panels throw (the two
 // share every constant: 0.97, 0.01, 0.2, 0.1, 1.5, 0.4, 30, 31; FireBurst's Flame 0x2E7FF0 is 4.1's 0x1b16b0 the same way).
 void SmallBurst(const float* pos,const float* dir,float size) noexcept;
+
+// Run `fn` when the game starts to shut down: EDF+0x7021F0, the application object's destructor, is entered (its caller 0x70293F is
+// redirected; the singletons, the sound system EDF+0x20B2948 among them, are destroyed inside it). Anything that owns a particle /
+// effect object (a gunbattery::ChargeEffect, an emitter) must destroy it here: one still alive when the application destructor runs
+// makes EDF's static sound-bank cache destructor (EDF+0x7ADCFB) touch the destroyed sound system and crash the exit (real runs,
+// 2026-10-16: 8 of 8 with a live ChargeEffect, none with it created and destroyed at once or destroyed first). Up to 8 callbacks.
+void AtGameShutdown(void(*fn)() noexcept) noexcept;
 
 }  // namespace crew::edf41c

@@ -443,7 +443,7 @@ bool NearestPlayer(const float* from,float* out) noexcept {
     return std::isfinite(out[0]+out[1]+out[2]);
 }
 
-void DevShoot(const void* object,const float* point,unsigned salt) noexcept {
+void DevShoot(const void* object,const float* point,unsigned salt,float startBack) noexcept {
     const int every=Cfg().edf41DevShoot;
     if(every<=0 || !object || !point || !std::isfinite(point[0]+point[1]+point[2]))return;
     static std::mutex lock;
@@ -452,7 +452,7 @@ void DevShoot(const void* object,const float* point,unsigned salt) noexcept {
         std::lock_guard<std::mutex> hold(lock);
         if(calls.size()>4096)calls.clear();
         const unsigned n=calls[reinterpret_cast<std::uintptr_t>(object)^(static_cast<std::uintptr_t>(salt)<<48)]++;
-        if((n+salt*7)%static_cast<unsigned>(every)!=0)return;
+        if(salt<1000000u && (n+salt*7)%static_cast<unsigned>(every)!=0)return;   // salt >= 1000000: fire on every call (the caller paces)
     }
     void* shooter=PlayerHuman();
     float eye[3];
@@ -462,7 +462,7 @@ void DevShoot(const void* object,const float* point,unsigned salt) noexcept {
     const float len=std::sqrt(dir[0]*dir[0]+dir[1]*dir[1]+dir[2]*dir[2]);
     if(len<1.0f)return;
     for(float& d : dir)d/=len;
-    const float back=len<20.0f ? len : 20.0f;
+    const float back=len<startBack ? len : startBack;
     const float from[3]={point[0]-dir[0]*back,point[1]-dir[1]*back,point[2]-dir[2]*back};
     alignas(16) float m[16];
     AimMatrix(from,dir,m);
@@ -1123,6 +1123,35 @@ void StencilLight(const float* pos,const float* colour,float radius,int frames) 
     std::memcpy(&w.object,out,8);
     std::memcpy(&w.control,out+8,8);
     WeakReset(w);
+}
+
+// ---- shutdown callbacks (the 401's charge glows; the 301's emitters) ----------------------------------------------------------
+namespace {
+constexpr std::size_t kAppDtor=0x7021F0,kAppDtorCall=0x70293F;
+void(*shutdownFns[8])() noexcept={};
+int shutdownCount=0;
+void __fastcall ShutdownHook(void* self) {
+    for(int i=0;i<shutdownCount;++i)shutdownFns[i]();
+    reinterpret_cast<void(__fastcall*)(void*)>(image+kAppDtor)(self);
+}
+}  // namespace
+
+void AtGameShutdown(void(*fn)() noexcept) noexcept {
+    static std::mutex lock;
+    std::lock_guard<std::mutex> hold(lock);
+    if(!fn || shutdownCount>=8)return;
+    if(shutdownCount==0) {
+        static const unsigned char print[8]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74};
+        if(!Readable(image+kAppDtor,8) || std::memcmp(image+kAppDtor,print,8)!=0 || !Readable(image+kAppDtorCall,5) || image[kAppDtorCall]!=0xE8) {
+            Log("EDF41CLASS the application destructor is not what this was written for: no shutdown callbacks");
+            return;
+        }
+        bool changed=false;
+        if(!RedirectCall(image+kAppDtorCall,image+kAppDtor,reinterpret_cast<void*>(&ShutdownHook),changed)) { Log("EDF41CLASS the shutdown hook failed"); return; }
+    }
+    shutdownFns[shutdownCount++]=fn;
+    static std::atomic<int> said{0};
+    if(said.fetch_add(1)<3)Log("EDF41CLASS shutdown callback %d registered (the application destructor's call site is redirected)",shutdownCount);
 }
 
 }  // namespace crew::edf41c

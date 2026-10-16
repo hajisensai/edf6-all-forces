@@ -30,6 +30,7 @@
 #endif
 #include "crew.h"
 #include "edf41classes.h"
+#include "heli.h"
 #include "memory.h"
 #include "online_authority.h"
 
@@ -991,10 +992,7 @@ void InitPart(Part& p) noexcept {
         default: break;
     }
     if(p.kind==Kind::finalGenerator && p.hasSpawn)std::memcpy(p.muzzle,p.spawnAt,12);   // its glow sits on 排出位置 (0x266f70)
-    // The charge glows stay off unless asked for (development bit 512): on the real game they crashed twice (a bad_alloc in the
-    // emitter's update job, EDF+0x30316D from 0x302D10, M809; the exit-time bank cache EDF+0x7ADCFB after every run they ran
-    // in, never without them: docs/edf41-ufomother401.md 4).
-    if(DevBits()&512)GlowsMake(p);
+    if(DevBits()&4194304)GlowsMake(p);   // development: 4194304 charge glows ON (off by default: they make the game's exit crash on some missions, see docs)
     if(IsBattery(p.kind)) {
         p.destroyedFor=120+Rand(p.rng,120);   // +0x438
         p.deleteAt=180+Rand(p.rng,120);       // +0x434
@@ -1049,6 +1047,67 @@ double Us(LARGE_INTEGER a,LARGE_INTEGER b) noexcept {
 double partUsOurs=0.0,partUsStock=0.0;
 std::uint32_t partCalls=0;
 
+// Development (Edf41Mother401Dev bit 65536): the game's static cache EDF+0x20B38A0 (std::map of 0xA0-byte nodes; the exit-time crash
+// EDF+0x7ADCFB walks it) logged: its size and each node's key and first words, to see what a run leaves in it.
+void LogCache(const char* tag) noexcept {
+    if(!(DevBits()&65536))return;
+    const char* m=reinterpret_cast<const char*>(image+0x20B38A0);
+    if(!Readable(m,16))return;
+    const char* head=*reinterpret_cast<const char* const*>(m);
+    const std::size_t size=*reinterpret_cast<const std::size_t*>(m+8);
+    Log("EDF41M401 cache %s: %zu nodes",tag,size);
+    if(!head || !Readable(head,0x20) || size>200)return;
+    int shown=0;
+    std::vector<const char*> todo;
+    const char* root=*reinterpret_cast<const char* const*>(head+8);   // head->parent is the root
+    todo.push_back(root);
+    while(!todo.empty() && shown<60) {
+        const char* n=todo.back(); todo.pop_back();
+        if(!n || n==head || !Readable(n,0xA0) || n[0x19])continue;
+        todo.push_back(*reinterpret_cast<const char* const*>(n));
+        todo.push_back(*reinterpret_cast<const char* const*>(n+0x10));
+        const std::size_t len=*reinterpret_cast<const std::size_t*>(n+0x30),cap=*reinterpret_cast<const std::size_t*>(n+0x38);
+        const wchar_t* key=cap>=8 ? *reinterpret_cast<const wchar_t* const*>(n+0x20) : reinterpret_cast<const wchar_t*>(n+0x20);
+        wchar_t text[80]={};
+        if(len<80 && Readable(key,(len+1)*2))std::wmemcpy(text,key,len);
+        Log("EDF41M401 cache %s: node %p key %ls | +40 %llx +48 %llx +50 %llx +58 %llx +98 %d",tag,n,text,
+            *reinterpret_cast<const unsigned long long*>(n+0x40),*reinterpret_cast<const unsigned long long*>(n+0x48),
+            *reinterpret_cast<const unsigned long long*>(n+0x50),*reinterpret_cast<const unsigned long long*>(n+0x58),
+            *reinterpret_cast<const std::int32_t*>(n+0x98));
+        ++shown;
+    }
+}
+
+// Development (bit 65536): the game's own exit-time report of banks that still have references (EDF+0x1750870 calls its log function
+// 0x3E4A0 with "audio::SoundBank::Release(error ref count : %d %ls)" for each; the bank cache's destructor then crashes on them).
+// Its call site is redirected here to put the line into the plugin's log as well.
+using VaLogFn=void(__cdecl*)(const wchar_t*,...);
+void __cdecl ExitLeakHook(const wchar_t* fmt,int count,const wchar_t* name) {
+    {   // the plugin's log is written by a thread that does not outlive the exit: a marker file
+        char path[MAX_PATH+40]={};
+        if(GetTempPathA(MAX_PATH,path)) {
+            lstrcatA(path,"edf41m401_shutdown.txt");
+            const HANDLE f=CreateFileA(path,FILE_APPEND_DATA,FILE_SHARE_READ,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+            if(f!=INVALID_HANDLE_VALUE) {
+                char line[400];
+                const int k=_snprintf_s(line,sizeof(line),_TRUNCATE,"EXIT REPORT: SoundBank::Release error ref count %d %ls\r\n",count,name ? name : L"?");
+                DWORD written=0;
+                if(k>0)WriteFile(f,line,static_cast<DWORD>(k),&written,nullptr);
+                CloseHandle(f);
+            }
+        }
+    }
+    reinterpret_cast<VaLogFn>(image+0x3E4A0)(fmt,count,name);
+}
+void InstallExitLeakHook() noexcept {
+    static const unsigned char print[8]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74};
+    if(!Readable(image+0x3E4A0,8))return;
+    bool changed=false;
+    const bool ok=RedirectCall(image+0x17508B5,image+0x3E4A0,reinterpret_cast<void*>(&ExitLeakHook),changed);
+    Log("EDF41M401 exit report hook %s",ok ? "in" : "failed");
+    (void)print;
+}
+
 // ---- charge glows: EDF6's gunbattery::ChargeEffect_StdParticle (tools/make_edf41_objects.py MOTHER401_GLOWS) --------------
 // Made by the factory 0x6D92D0(shared_ptr* out, SGO node [[], ['ChargeEffect_StdParticle', [keys, [se]]]], matrix*), the one
 // MovingFortress_Battery (0x4D3F22) uses. Its +0xC is the wanted state (0 shown, 1 hidden; slot 1 0x6D9910 turns the emitter's
@@ -1060,6 +1119,7 @@ const unsigned char kChargePrint[8]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74};
 struct DeadGlow { Part::Glow g; int frames; };
 std::vector<DeadGlow> graveyard;
 void GlowRelease(Part::Glow& g) noexcept {   // the shared_ptr's use count, then its weak count (MSVC _Ref_count_base)
+    if(DevBits()&16384) { g=Part::Glow{}; return; }   // dev: never destroyed (bisecting the exit crash)
     if(g.ctrl && Readable(g.ctrl,16)) {
         auto* uses=reinterpret_cast<std::atomic<std::int32_t>*>(static_cast<char*>(g.ctrl)+8);
         void* const* vt=*reinterpret_cast<void* const* const*>(g.ctrl);
@@ -1093,10 +1153,35 @@ void GlowsMake(Part& p) noexcept {
         }
         *reinterpret_cast<std::int32_t*>(static_cast<char*>(g.fx)+0xC)=1;   // hidden
         p.glowCount=i+1;
+        if(DevBits()&131072) { GlowRelease(g); p.glowCount=0; return; }   // dev: created and destroyed at once (bisecting)
+        static std::atomic<int> dsaid{0};
+        if(dsaid.fetch_add(1)<3) {   // development evidence: what the effect's sound preset (+0x320) and handle (+0x3A0) hold
+            const char* f=static_cast<const char*>(g.fx);
+            Log("EDF41M401 glow %p: state +8=%d +0xC=%d, preset bank %p cue %d, handle %p %p, flag +0xE0=%d",g.fx,*reinterpret_cast<const std::int32_t*>(f+8),
+                *reinterpret_cast<const std::int32_t*>(f+0xC),*reinterpret_cast<void* const*>(f+0x320+0x20),*reinterpret_cast<const std::int32_t*>(f+0x320+0x28),
+                *reinterpret_cast<void* const*>(f+0x3A0),*reinterpret_cast<void* const*>(f+0x3A8),f[0xE0]);
+        }
     }
     static std::atomic<int> said{0};
     if(said.fetch_add(1)<6)Log("EDF41M401 %s %p: %d charge glows (ChargeEffect_StdParticle)",KindName(p.kind),p.obj,p.glowCount);
 }
+// The sync-render phase (EventAnimationObject slot 3 0x5B6D10 = the model's 0x6C06A0; MovingFortress_Battery's 0x4D1900 is the same
+// slot): the glows' render job is queued here, never from Update. Queued next to the update job (what this did first) the two ran
+// concurrently on the job threads and the render side read the particle ring while the update side popped it: the count went
+// astray and the render's vector grew until it threw bad_alloc (EDF+0x30316D from 0x302D10, M809 / M018, 2026-10-16).
+void __fastcall PartSyncRender(void* self) {
+    reinterpret_cast<void(__fastcall*)(void*)>(partClone.orig[3])(self);
+    std::lock_guard<std::recursive_mutex> hold(lock);
+    Part* p=Find(self);
+    if(!p || !p->glowCount)return;
+    for(int i=0;i<p->glowCount;++i) {
+        void* fx=p->glows[i].fx;
+        if(!fx || (DevBits()&4096))continue;
+        void* const* vt=*static_cast<void* const* const*>(fx);
+        reinterpret_cast<void(__fastcall*)(void*)>(vt[0])(fx);
+    }
+}
+
 // Every frame of a part with glows: the wanted state and the muzzle matrix to each, its update and render sync queued.
 void GlowsUpdate(Part& p,void* ctx) noexcept {
     for(int i=0;i<p.glowCount;++i) {
@@ -1105,21 +1190,76 @@ void GlowsUpdate(Part& p,void* ctx) noexcept {
         std::memcpy(g.m,F(p.obj,kMatrixAt),48);
         Point(p.muzzle,F(p.obj,kMatrixAt),g.m+12);
         g.m[3]=g.m[7]=g.m[11]=0.0f; g.m[15]=1.0f;
-        *reinterpret_cast<std::int32_t*>(static_cast<char*>(g.fx)+0xC)=i==p.glowOn ? 0 : 1;
+        *reinterpret_cast<std::int32_t*>(static_cast<char*>(g.fx)+0xC)=(i==p.glowOn && !(DevBits()&524288)) ? 0 : 1;   // dev 524288: never shown (bisecting)
         void* const* vt=*static_cast<void* const* const*>(g.fx);
-        reinterpret_cast<void(__fastcall*)(void*,void*,const float*)>(vt[1])(g.fx,ctx,g.m);
-        reinterpret_cast<void(__fastcall*)(void*)>(vt[0])(g.fx);
+        if(!(DevBits()&8192))reinterpret_cast<void(__fastcall*)(void*,void*,const float*)>(vt[1])(g.fx,ctx,g.m);   // dev 8192: no update job
+        // what the battery's Update does after it (MovingFortress_Battery 0x4D1B96): the effect's current state follows the wanted one
+        // and its +0x10 (a per-frame amount slot 1 reads) is cleared
+        {
+            char* f=static_cast<char*>(g.fx);
+            const std::int32_t want=*reinterpret_cast<std::int32_t*>(f+0xC);
+            if(*reinterpret_cast<std::int32_t*>(f+8)!=want) { *reinterpret_cast<std::uint64_t*>(f+0x10)=0; *reinterpret_cast<std::int32_t*>(f+8)=want; }
+        }
+        (void)vt;   // its render job (slot 0) goes from the object's sync-render slot (PartSyncRender), the phase the game runs it in
     }
 }
 void GlowsBury(Part& p) noexcept {
+    // The part is being destroyed (MovingFortress_Battery's own destructor drops its effects in the same place): its glows go now.
+    // Burying them for a while (what this did first, and later at the game's shutdown) left them alive when the main loop ended,
+    // which crashed the exit; destroyed with their part the same runs end clean.
     for(int i=0;i<p.glowCount;++i)
-        if(p.glows[i].fx) { *reinterpret_cast<std::int32_t*>(static_cast<char*>(p.glows[i].fx)+0xC)=1; graveyard.push_back({p.glows[i],4}); p.glows[i]=Part::Glow{}; }
+        if(p.glows[i].fx) { *reinterpret_cast<std::int32_t*>(static_cast<char*>(p.glows[i].fx)+0xC)=1; GlowRelease(p.glows[i]); }
     p.glowCount=0;
 }
 void GraveyardTick() noexcept {   // once per hull Update
     for(std::size_t i=0;i<graveyard.size();)
         if(--graveyard[i].frames<=0) { GlowRelease(graveyard[i].g); graveyard[i]=graveyard.back(); graveyard.pop_back(); }
         else ++i;
+}
+
+// Development: what the sound system looks like when this DLL detaches (before EDF's own static destructors, which crash walking
+// the cache EDF+0x20B38A0 on a dead sound system EDF+0x20B2948: EDF+0x7ADCFB).
+struct ExitProbe {
+    ~ExitProbe() {
+        if(!(Cfg().edf41Mother401Dev&65536) || !image)return;
+        const char* g=Readable(image+0x20B2948,8) ? *reinterpret_cast<const char* const*>(image+0x20B2948) : nullptr;
+        Log("EDF41M401 exit probe: sound system %p, list head %p size %zu, %d glows alive in the graveyard",g,
+            g && Readable(g+0x40,16) ? *reinterpret_cast<const void* const*>(g+0x40) : nullptr,
+            g && Readable(g+0x40,16) ? *reinterpret_cast<const std::size_t*>(g+0x48) : static_cast<std::size_t>(0),static_cast<int>(graveyard.size()));
+        LogCache("at DLL detach");
+    }
+} exitProbe;
+
+// The game's own shutdown (EDF+0x7021F0, the application object's destructor, which destroys the singletons one after the other, the
+// sound system EDF+0x20B2948 among them): every charge glow still alive goes first. Real runs (2026-10-16, M018): one live
+// ChargeEffect at that point makes the sound bank cache's static destructor (EDF+0x7ADCFB) touch the dead sound system; created and
+// destroyed at once, or destroyed before the shutdown, the same runs exit clean.
+void ShutdownGlows() noexcept {
+    std::lock_guard<std::recursive_mutex> hold(lock);
+    int n=0;
+    for(auto& kv:byObj) {
+        Part& p=*kv.second;
+        for(int i=0;i<p.glowCount;++i)
+            if(p.glows[i].fx) { GlowRelease(p.glows[i]); ++n; }
+        p.glowCount=0;
+    }
+    for(DeadGlow& d:graveyard) { GlowRelease(d.g); ++n; }
+    graveyard.clear();
+    if(Cfg().edf41Mother401Dev&65536) {   // the plugin's log is written by a thread that does not outlive this: a marker file instead
+        char path[MAX_PATH+40]={};
+        if(GetTempPathA(MAX_PATH,path)) {
+            lstrcatA(path,"edf41m401_shutdown.txt");
+            const HANDLE f=CreateFileA(path,FILE_APPEND_DATA,FILE_SHARE_READ,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+            if(f!=INVALID_HANDLE_VALUE) {
+                char line[80];
+                const int k=_snprintf_s(line,sizeof(line),_TRUNCATE,"shutdown hook ran: %d glows destroyed\r\n",n);
+                DWORD written=0;
+                if(k>0)WriteFile(f,line,static_cast<DWORD>(k),&written,nullptr);
+                CloseHandle(f);
+            }
+        }
+    }
+    if(n)Log("EDF41M401 the game is shutting down: %d charge glows destroyed first",n);
 }
 
 void Forget(const void* self) noexcept {
@@ -1138,8 +1278,7 @@ void Forget(const void* self) noexcept {
     // the sound system's static table (EDF+0x20B38A0), which then crashes in its exit-time destructor (EDF+0x7ADCFB reads the
     // sound system 0x20B2948 after it is gone: a real run, 2026-10-15, m401f_M018_ds5).
     if(byObj.empty()) {
-        for(DeadGlow& d:graveyard)GlowRelease(d.g);
-        graveyard.clear();
+        LogCache("when the last 401 object is gone");
     }
 }
 
@@ -1176,6 +1315,7 @@ void HullFirst(Part& h) noexcept {
         reinterpret_cast<void(__fastcall*)(void*)>(image+0x6E97C0)(ragdoll);
         h.ragdollOff=true;
     } else Fail("the ragdoll switch is not what this was written for: the hull keeps a body at its origin");
+    LogCache("at the hull's first update");
     Log("EDF41M401 hull %p first update: at %.0f %.0f %.0f yaw %.1f deg, team %d, level %.2f, %d actions, ini Edf41Mother401Dev=%d",h.obj,
         m[12],m[13],m[14],h.yaw*57.29578f,h.team,*F(h.obj,kLevelAt),Count(Key(h.obj,L"action_list")),DevBits());
 }
@@ -1268,7 +1408,6 @@ std::uint64_t __fastcall HullUpdate(void* self,void* dt) {
     {
         std::lock_guard<std::recursive_mutex> hold(lock);
         Part* h=Find(self);
-        GraveyardTick();
         if(h && OnlineRunsHere(self)) {
             if(!h->seen) { h->seen=true; HullFirst(*h); }
             h->lastTick=hullTick;
@@ -1283,6 +1422,8 @@ std::uint64_t __fastcall HullUpdate(void* self,void* dt) {
                 for(const Cell& c:h->cells)alive+=ById(c.panel)!=nullptr;
                 Log("EDF41M401 hull %p frame %u: %d of %zu cells hold a panel, %zu objects in all; plugin %.0f us/frame on the parts, their stock updates %.0f us/frame (%u calls)",
                     self,h->hullFrames,alive,h->cells.size(),byObj.size(),partUsOurs/600.0,partUsStock/600.0,partCalls);
+                if(h->hullFrames==600)LogCache("at hull frame 600");
+                if(h->hullFrames==3600)LogCache("at hull frame 3600");
                 if(h->hullFrames==600 && h->ragdollOff) {   // the hull's bodies stay out of the world (+0xA4 0, mode +0x9C 0)
                     const char* r=static_cast<const char*>(self)+kRagdollAt;
                     const char* bodies=*reinterpret_cast<char* const*>(r+0x78);
@@ -1454,7 +1595,7 @@ std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
         ModelMatrix(self,m);
     }
     float weakAt[3];
-    bool weakShot=false,canHurt=false;
+    bool weakShot=false,canHurt=false,devInside=false,weakGated=false;
     std::uint32_t hullFramesNow=0;
     {
         std::lock_guard<std::recursive_mutex> hold(lock);
@@ -1483,6 +1624,10 @@ std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
                 else Point(p->weakPt,F(self,kMatrixAt),weakAt);
                 weakShot=true;
             }
+            // a Generator's weak body (core) is its hatch: closed it is covered by the flat panel's shell (body 0, where every hit lands), so
+            // the dev shot waits until the hatch is open (4.1 plays the same: the hatch is the weak point of an open generator)
+            devInside=p->kind==Kind::generator;
+            if(p->kind==Kind::generator && !(p->state==sGenOpen || p->state==sGenSpawn || p->state==sGenWait))weakGated=true;
             canHurt=(p->wholeHits || p->weakBody>=0) && (!IsPanel(p->kind) || (p->triggered && p->delay<=0));
             const Part* owner=IsPanel(p->kind) ? p : ById(p->panel);
             if(const Part* h=owner ? HullOf(*owner) : nullptr)hullFramesNow=h->hullFrames;
@@ -1493,8 +1638,9 @@ std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
     const bool devLater=(DevBits()&256) && static_cast<float>(hullFramesNow)<Cfg().edf41Mother401DevKill*kFps;
     if(!del && canHurt && !devLater && Alive(self)) {   // (the Panel01 armour takes no hit at all)
         float aim[3];
-        if(AimPoint(self,aim))DevShoot(self,aim);
-        if(weakShot)DevShoot(self,weakAt,1);
+        if(AimPoint(self,aim) && !weakGated)DevShoot(self,aim);
+        // a Generator's weak body (core) sits inside its flat panel's shell (body 0): the shot starts 1.5 m short of the bone
+        if(weakShot && !weakGated)DevShoot(self,weakAt,1,devInside ? 20.0f : 20.0f);
     }
     const LARGE_INTEGER t2=Now();
     {
@@ -1614,14 +1760,49 @@ template<Kind K> void CreatePart(void* info) noexcept {
 
 }  // namespace
 
+// Development bit 32768: Edf41DevShoot also shoots the mission's ordinary enemies (every live lockable hostile object that is not
+// one of ours), so the scripts' kill counts / waits advance and a mission that creates the ship late gets there. Once a frame.
+void Edf41Mother401DevTick() noexcept {
+    static ULONGLONG lastFrame=~0ull;   // called from the on-foot frame and the riding frame: once per game frame
+    if(GameFrame()==lastFrame)return;
+    lastFrame=GameFrame();
+    {   // the buried charge glows' clock: one tick per game frame, whether or not a hull exists (the render side may still hold a
+        // buried effect a frame or two after its last job, so it is freed 120 frames later)
+        std::lock_guard<std::recursive_mutex> hold(lock);
+        if(!graveyard.empty())GraveyardTick();
+    }
+    if(!(Cfg().edf41Mother401Dev&32768) || Cfg().edf41DevShoot<=0)return;
+    static unsigned frame=0;
+    // a slow kill (one enemy every 30 frames, the window rotating) so a script that waits for the enemy count to fall to a figure
+    // sees it fall; bit 262144 shoots them all at once, 48 a tick (a mission whose ship comes late is cleared before it comes)
+    const bool fast=(Cfg().edf41Mother401Dev&262144)!=0;
+    if(++frame%(fast ? 6u : 30u)!=0)return;
+    struct Ctx { int n; const void* list[256]; float aim[256][3]; } c{};
+    {
+        std::lock_guard<std::recursive_mutex> hold(lock);
+        VisitEnemiesOf(0,[](void* ctx,const void* object,const float* aim) {
+            Ctx* k=static_cast<Ctx*>(ctx);
+            if(k->n<256 && !Find(object)) { k->list[k->n]=object; std::memcpy(k->aim[k->n],aim,12); ++k->n; }
+        },&c);
+    }
+    // 48 a tick, the window rotating over the whole list (a fixed first 48 would be the same ones every time)
+    const int take=c.n<(fast ? 48 : 1) ? c.n : (fast ? 48 : 1),start=c.n ? static_cast<int>((frame/6u*37u)%static_cast<unsigned>(c.n)) : 0;
+    for(int k=0;k<take;++k) { const int at=(start+k)%c.n; DevShoot(c.list[at],c.aim[at],1000000u+static_cast<unsigned>(at)); }
+    static std::atomic<int> said{0};
+    if(c.n && said.fetch_add(1)<4)Log("EDF41M401 dev: shooting %d ordinary enemies",c.n);
+}
+
 bool InstallEdf41Mother401() noexcept {
     if(!Cfg().edf41Mother401) { Log("EDF41M401 off (ini Edf41Mother401=0)"); return false; }
+    if(Cfg().edf41Mother401Dev&65536)InstallExitLeakHook();
+    AtGameShutdown(&ShutdownGlows);
     if(!BuildClone(hullClone,&HullDtor,&HullUpdate,&HullMessage) || !BuildClone(partClone,&PartDtor,&PartUpdate,&PartMessage)) {
         Log("EDF41M401 the vtable clones could not be built: off");
         return false;
     }
     SetSlot(hullClone,kSlotAccept,reinterpret_cast<void*>(&HullAccept));
     SetSlot(partClone,kSlotAccept,reinterpret_cast<void*>(&PartAccept));
+    SetSlot(partClone,3,reinterpret_cast<void*>(&PartSyncRender));   // the glows' render job
     SetSlot(partClone,kSlotDamaged,reinterpret_cast<void*>(&PartDamaged));
     AllowAnyTeam(hullClone);   // EventAnimationObject's slot 22 allows only team 6: CreateEnemy's SetTeam(1) and the parts' would not take
     AllowAnyTeam(partClone);

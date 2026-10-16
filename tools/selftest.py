@@ -7372,6 +7372,11 @@ def edf41_mother401_plugin_contract() -> None:
     for call in ('FireHit(', 'MaterialAnimsLoad(', 'MaterialAnimsFree(', 'AddLockPoint(', 'StencilLight(', 'SmallBurst(', 'Encount('):
         assert call in cpp, call
     assert 'kChargePrint' in cpp and 'kDisablePrint' in cpp and 'GraveyardTick();' in cpp
+    # the real-run pass (2026-10-16): the exit hook, the render job in the sync-render clone slot, the dev shooter at ordinary enemies;
+    # the charge glows stay off unless dev bit 4194304 (their exit crash is open, docs/edf41-ufomother401.md 4)
+    assert 'AtGameShutdown(&ShutdownGlows);' in cpp and 'PartSyncRender' in cpp and 'Edf41Mother401DevTick' in cpp
+    assert 'DevBits()&4194304)GlowsMake(p)' in cpp and 'AtGameShutdown(' in src('src/edf41classes.h')
+    assert 'Edf41Mother401DevTick();' in src('src/map.cpp') and 'Edf41Mother401DevTick();' in src('src/crew.cpp')
     assert re.search(r'^Edf41DevShoot=0$', ini, re.M)
 
 

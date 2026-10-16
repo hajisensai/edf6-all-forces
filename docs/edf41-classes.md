@@ -363,3 +363,13 @@ through EDF6's material *animation* component below, the one UfoCarrier508 uses 
   0x6E40B0 sets every body to mode 4 under the world lock.
 - EDF6's SpawnerObject (vtable 0x17E7658, Update 0x6E1080 -> 0x6E3250) draws nothing of its own; generators hand it std::functions
   (+0x640 effect, +0x680 the new enemy). It delivers its messages to the enemy as slots 10, 9 (OnMessage), 11.
+- `AtGameShutdown(fn)` (edf41classes.h): up to 8 callbacks run right before the game's application destructor 0x7021F0 destroys its singletons
+  (redirects the call at 0x70293F, fingerprint checked). The plugin's own log is written by a thread that does not outlive this: write a
+  marker file (%TEMP%) for anything you need to see. The exit leak reporter 0x1750870 (atexit; logs `SoundBank::Release error ref count` per
+  bank with a non-zero count, then runs the sound bank cache destructor 0x7A9850) can be redirected at its log call 0x17508B5 -> 0x3E4A0.
+- Emitter effects (`ChargeEffect_StdParticle`, and the 301's vent emitters): queue the update job from Update, the render job (vt[0]) from the
+  sync-render phase (clone slot 3, EAO 0x5B6D10). Queued together from Update they run concurrently and the render job throws `bad_alloc`
+  (EDF+0x30316D). After each job set `[fx+8]=[fx+0xC]`, `[fx+0x10]=0` (MovingFortress_Battery 0x4D1B96 does).
+- Open, for the exit crash (EDF+0x7ADCFB in the cache destructor after the sound system 0x20B2948 is gone) seen with these emitters on M018 / M019: not
+  fixed by destroying them before the app destructor (M018 / M019 still crash, M809 / M132 / M516 do not); creating and destroying at once is clean.
+  The exit report always lists our EDF41_WEAPON_SE.ACB (ref count 1, same in plain runs). Keep the emitters off by default until this is solved.
