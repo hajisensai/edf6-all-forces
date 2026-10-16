@@ -57,8 +57,17 @@ static_assert(Ours(7,3,6,7) && Ours(8,3,6,7) && Ours(9,3,6,7) && !Ours(10,3,6,7)
 
 // One hook per site, each asking what that site called before (so a chained plugin still sees every call).
 template<std::size_t I> bool __fastcall OwnedHook(std::uintptr_t mgr,int id) {
-    if(prior[I](mgr,id))return true;
-    return campaignReady && Ours(id,Cfg().edf5CampaignContent,Cfg().testRangeContent,Cfg().edf41Content);
+    const bool previous=prior[I](mgr,id);
+    const auto& cfg=Cfg();
+    const bool mod=campaignReady && Ours(id,cfg.edf5CampaignContent,cfg.testRangeContent,cfg.edf41Content);
+    const bool allowed=previous || mod;
+    // Only the lobby's join check: the pack-list sites also run while drawing the menu.
+    // Coop's inner hook logs its native answer before ours has added MOD ownership; that is not this final result.
+    if constexpr(I==2)Log("ROOM content check site=%#x id=%d prior=%d mod=%d allowed=%d hooks_ready=%d EDF5=%d..%d range=%d EDF41=%d..%d",
+        kSites[I],id,previous,mod,allowed,campaignReady,cfg.edf5CampaignContent,
+        cfg.edf5CampaignContent>0 ? cfg.edf5CampaignContent+kPacks-1 : 0,cfg.testRangeContent,
+        cfg.edf41Content,cfg.edf41Content>0 ? cfg.edf41Content+kPacks41-1 : 0);
+    return allowed;
 }
 template<std::size_t... I> constexpr auto Hooks(std::index_sequence<I...>) { return std::array<OwnedFn,sizeof...(I)>{&OwnedHook<I>...}; }
 constexpr auto kHooks=Hooks(std::make_index_sequence<std::size(kSites)>{});
