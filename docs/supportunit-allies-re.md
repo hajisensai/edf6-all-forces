@@ -36,6 +36,16 @@ supportunit_ctor: E9 custom_code / 90
 
 （`0x5E7AFA` / `0x5E892F` / `0x5E8A13` / `0x5E8C6C` 也访问 `+0xB68`，但它们属于 `Transporter_Container`（虚表 `0x17D7CB8` 第 5 槽），是同偏移的另一个类，与此无关。）
 
+## 标志从哪来：AmmoExplosion > 0 的武器都带
+
+- 子弹构造时，`0x2307F0(子对象+0x9A0, InitParam+0x30)` 逐字节拷贝参数：子对象 `+0xA27` / `+0xA28` = InitParam `+0xB7` / `+0xB8`。`+0xB7` 在 `src/edf41dragon.cpp` 里已经记为 "direct hits pass friends"，`+0xB8` 是同类的第二个标志。
+- 武器对象在 `+0x800` 存一份 InitParam 模板，开火时（共用开火入口 `0x696FD0`，`0x69713D`）拷到 `+0x9E0`。
+- 所有 `Weapon_*` 共用的初始化 `0x68A920`（被 `Factory@Weapon_BasicShoot / Gatling / HomingShoot / Throw / Swing / VehicleShoot / Sub / Drone_*` 等约 19 个工厂调用）从 SGO 读 `AmmoExplosion` 写入模板 `+0x8B0`（InitParam `+0xB0`）。`0x68DB03`：**`AmmoExplosion > 1.19e-7` → 模板 `+0x8B8`（InitParam `+0xB8`）= 1**。全 DLL 里武器侧只有这一处写这个字节；`+0x8B7` 武器侧没有任何写入。
+- 所以玩家、NPC、载具的武器，只要 `AmmoExplosion > 0`，射出的子弹直接命中友军时都会穿过去（爆炸溅射照常伤害友军，那是另一条路径）。支援装置的 `AmmoExplosion` 是列表，第一项是效果半径（4–200），所以也被算进去了。
+- 游戏原版 WEAPON 目录 1833 把武器按弹类统计（`AmmoExplosion > 0` 的把数）：SmokeCandleBullet01 177（空降兵载具呼叫烟雾）、RocketBullet01 42、SupportUnitBullet01 全部 33、MissileBullet01 27、SmokeCandleBullet02 22（空袭信标）、GrenadeBullet01 13、EfsBullet 9（坦克炮等）、MissileBullet02 7、SolidExpBullet01 7、BarugaCannonBullet 3、GrenadeBullet01_MapNoDamage / HomingLaserBullet01 / PulseBullet01 各 2、BombBullet01 1；另有 62 把空 AmmoClass 的呼叫类武器。SolidBullet01、LaserBullet01、SolidPelletBullet01、ClusterBullet01、BombBullet02、NapalmBullet01、SentryGunBullet01 等 `AmmoExplosion` 全为 0，不穿友军。
+- 例外：命中过滤里，被击中的友军 `+0x380` 带 `0x100000` 位时，子弹不会穿过（这个位的含义没有查）。
+- 敌人工厂（`Factory@GiantAnt` 等）里的 `mov byte [rax+0xB8],1` 写的是怪物 `+0x8B8` 指向的另一个对象，不是子弹 InitParam。敌人的子弹会不会穿过敌人，这里没有结论。
+
 ## 插件实现（src/supportunit.cpp）
 
 - 校验三处签名：`0x2AB6EB` 写的是 SupportUnitBullet01 的虚表、`0x2ABB0A` 处是这两句 mov、`0x232D02` 的过滤仍读 `+0xA28`。任一处不符就不装，写日志后保持原版。
