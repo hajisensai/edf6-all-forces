@@ -16,6 +16,7 @@
 //    barrel climbs.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "vehicle_look.h"
 #include "layout.h"
 #include "sightzoom.h"
 #include "optic_mount.h"
@@ -58,7 +59,7 @@ struct Cue { ObjRef vehicle,human; unsigned seat; float zoom; Capability sight; 
 Cue cue{};
 // The sight is up (its camera, its lay, its reticle): magnified, or at 1x in a vehicle's first person (War Thunder's
 // gunner sight: firstperson.h FirstPersonGunnerSight). Otherwise at 1x the turret camera has the view and the gun.
-bool Up(const Cue& c) noexcept { return c.zoom>1.0f || FirstPersonGunnerSight(); }
+bool Up(const Cue& c) noexcept { return !VehicleLookActive(c.vehicle.obj) && (c.zoom>1.0f || FirstPersonGunnerSight()); }
 // The lay (sightzoom.h LayStep): the superelevation the seat's gun carries over the line of sight now, as SightLayStep
 // last turned it (game thread, under cueLock; the camera reads it). Not engaged: the aim step never reached it (its hooks
 // are not in, stab.cpp RemapAimAxis cannot map the axis): the camera falls back to the set range's whole angle.

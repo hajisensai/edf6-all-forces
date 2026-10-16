@@ -79,6 +79,22 @@ class Transactions(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_consumer_names_are_independent_of_skin_names(self):
+        models = {'V612_NIX.SGO': 'V612_NIX_BLUE', 'V612_NIX_G_MISSION.SGO': 'V612_NIX_BLUE',
+                  'V504_BEGARUTA_WHITE.SGO': 'V504_BEGARUTA_GRAY'}
+        payloads = {name: sgo.write(1, {'animation_model': [[f'app:/object/{stem.lower()}.mrab',
+                     stem.lower()+'.mdb'], 'retained.cas', b'MAB'], 'custom_setting': 987}) for name,stem in models.items()}
+        class Source:
+            def __init__(self, root): self.root = root
+            def names(self, _folder): return list(payloads)
+            def read(self, _folder, name): return payloads[name]
+        with patch.object(make_optics.rootcpk, 'Game', Source), patch.object(optics, 'ready', return_value=True):
+            made = make_optics.build_stock_redirects(self.root)
+        self.assertEqual(set(made), {'OBJECT/'+n for n in models})
+        for name, stem in models.items():
+            self.assertEqual(optics.model_path(made['OBJECT/'+name]), f'app:/object/edf6vc_optic_{stem.lower()}.mrab')
+            self.assertEqual(sgo.read(made['OBJECT/'+name])[1]['custom_setting'], 987)
+
     def test_redirect_preserves_fields_and_rejects_custom_models(self):
         old = source_sgo()
         made, needs = optics.redirect(old)

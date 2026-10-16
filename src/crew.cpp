@@ -20,6 +20,7 @@
 // new vehicle), dropped at a new mission (ResetCrew) and reused only once its vehicle has not run its
 // per-frame input for kStaleMs (gone): a full table takes on no new vehicle rather than drop a live one.
 #include "crew.h"
+#include "vehicle_look.h"
 #include "aim_line_want.h"
 #include "boarding_entrance.h"
 #include "mission_crew.h"
@@ -539,9 +540,33 @@ float Distance2(const unsigned char* vehicle,const float* pos) noexcept {
 constexpr ULONGLONG kTestBoardMs=6000;
 bool testBoarded=false;
 ULONGLONG testBoardSeen=0;
+bool TestBoardMatches(const unsigned char* vehicle,int cls,const char* want) noexcept {
+    // Several unrelated models (stock heli, fighters, Sazabi) share 506_Helicopter. An optional @bone filter makes
+    // a background acceptance run select the intended model instead of whichever object updates first.
+    const char* separator=std::strchr(want,'@');
+    if(!separator)return std::strstr(kClasses[cls].name,want)!=nullptr;
+    char className[32]{};
+    const auto length=static_cast<std::size_t>(separator-want);
+    if(!length || length>=sizeof(className) || !separator[1])return false;
+    std::memcpy(className,want,length);
+    if(!std::strstr(kClasses[cls].name,className))return false;
+    const auto inst=vehicle+0xEE0;
+    if(!Readable(inst,0x24))return false;
+    const auto n=At<std::int32_t>(inst,0x20);
+    const auto bones=At<const unsigned char*>(inst,0x10);
+    if(n<=0 || n>256 || !Readable(bones,static_cast<std::size_t>(n)*0x110))return false;
+    wchar_t wanted[32]{};
+    std::size_t size=0;
+    for(const char* p=separator+1;*p && size<31;++p)wanted[size++]=static_cast<unsigned char>(*p);
+    for(int i=0;i<n;++i) {
+        const auto name=At<const wchar_t*>(bones+static_cast<std::size_t>(i)*0x110,0);
+        if(name && Readable(name,(size+1)*sizeof(wchar_t)) && std::wcscmp(name,wanted)==0)return true;
+    }
+    return false;
+}
 void TestBoard(unsigned char* vehicle,int cls) noexcept {
     const char* want=Cfg().testBoardVehicle;
-    if(!want[0] || testBoarded || !std::strstr(kClasses[cls].name,want))return;
+    if(!want[0] || testBoarded || !TestBoardMatches(vehicle,cls,want))return;
     const ULONGLONG ms=GameMs();
     if(!testBoardSeen)testBoardSeen=ms;
     unsigned char* const human=PlayerHuman();
@@ -793,6 +818,7 @@ void FrameTick() noexcept {
 
 template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,void* a3,void* a4) {
     LARGE_INTEGER t0,t1,t2;QueryPerformanceCounter(&t0);
+    VehicleLookInput observation(static_cast<unsigned char*>(vehicle));
     // The drill tank's trigger is its drill's: taken off the seat before the stock input reads it (drill.cpp).
     if(Cfg().enabled)Guarded(kStepDrill,&DrillInput,static_cast<unsigned char*>(vehicle));
     // The EMC's trigger is its charge's (emc.cpp): the same, the stock burst never starts.

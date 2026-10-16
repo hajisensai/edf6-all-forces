@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <cstdarg>
 namespace crew {
 int redirectCount=0,failAt=0;
 bool CampaignTestRedirect(unsigned char* at,void* expected,void* replacement,bool& changed) noexcept {
@@ -20,7 +21,10 @@ namespace crew {
 unsigned char* image=nullptr;
 Config config{};
 const Config& Cfg() noexcept { return config; }
-void Log(const char*,...) noexcept {}
+std::string lastLog;
+void Log(const char* format,...) noexcept {
+    char text[1024]{};va_list args;va_start(args,format);vsnprintf(text,sizeof(text),format,args);va_end(args);lastLog=text;
+}
 }
 namespace {
 int checks=0;
@@ -84,8 +88,12 @@ int main(int argc,char** argv) {
         const int before=otherCalls;
         Check(Patched(kSites[2])(f.Mgr(),3) && Patched(kSites[2])(f.Mgr(),1)==false,"the chained site owns the packs");
         Check(otherCalls==before+2,"the other plugin still sees every call of its site");
+        Check(lastLog.find("id=1 prior=0 mod=0 allowed=0")!=std::string::npos,"join log records the final refusal");
         Patched(kSites[0])(f.Mgr(),3);
         Check(otherCalls==before+2,"and only of its own site");
+        Patched(kSites[2])(f.Mgr(),5);
+        Check(lastLog.find("id=5 prior=0 mod=1 allowed=1")!=std::string::npos,"join log includes MOD override after the chained native refusal");
+        Check(lastLog.find("hooks_ready=1 EDF5=3..5")!=std::string::npos,"join log includes the actual installed pack ids");
         std::printf("edf5_campaign_native_test: %d checks passed (chained)\n",checks);
         return 0;
     }
@@ -122,8 +130,12 @@ int main(int argc,char** argv) {
         config.testRangeContent=0;
         Check(!Patched(kSites[0])(f.Mgr(),7) && Patched(kSites[0])(f.Mgr(),3),"no test range installed: nothing extra");
         Check(!native(f.Mgr(),3),"the native lookup itself unchanged");
+        Patched(kSites[2])(f.Mgr(),0);
+        Check(lastLog.find("id=0 prior=1 mod=0 allowed=1")!=std::string::npos,"native story admission logged without a MOD grant");
         config.edf5CampaignContent=0;
         Check(!Patched(kSites[0])(f.Mgr(),3) && Patched(kSites[0])(f.Mgr(),0),"no packs installed: native answer");
+        Check(!Patched(kSites[2])(f.Mgr(),5) && lastLog.find("id=5 prior=0 mod=0 allowed=0")!=std::string::npos,
+              "missing pack configuration is visible in the final join log");
         config.testRangeContent=4;
         Check(Patched(kSites[0])(f.Mgr(),4) && !Patched(kSites[0])(f.Mgr(),3),"the test range alone, without EDF5's packs");
         config.testRangeContent=0;

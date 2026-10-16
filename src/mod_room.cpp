@@ -78,7 +78,10 @@ bool RequireCoop(const char* action,void* client,Callback cb) {
     return false;
 }
 void CreateRoom(void* h,const void* o,void* client,Callback cb) {
-    if(!ready.load(std::memory_order_acquire))return Refuse(client,cb);
+    if(!ready.load(std::memory_order_acquire)) {
+        Log("ROOM create refused: reason=namespace-not-ready");
+        return Refuse(client,cb);
+    }
     if(!RequireCoop("create",client,cb))return;
     create(h,o,client,cb);
 }
@@ -108,7 +111,10 @@ int CopyAttribute(void* h,const IndexOptions* o,Attribute** out) {
     return result;
 }
 void JoinRoom(void* h,const JoinOptions* o,void* client,Callback cb) {
-    if(!ready.load(std::memory_order_acquire))return Refuse(client,cb);
+    if(!ready.load(std::memory_order_acquire)) {
+        Log("ROOM join refused: reason=namespace-not-ready");
+        return Refuse(client,cb);
+    }
     if(!RequireCoop("join",client,cb))return;
     // A later-loaded All Forces wrapper can see Coop's synthetic lobby handles.
     // Ask their owner first: passing such a pointer to the EOS SDK is invalid.
@@ -116,12 +122,25 @@ void JoinRoom(void* h,const JoinOptions* o,void* client,Callback cb) {
     using VirtualCheck=int(*)(void*);
     const auto check=coop ? reinterpret_cast<VirtualCheck>(GetProcAddress(coop,"EDF6Coop_AllForcesVirtualRoom")) : nullptr;
     const int virtualRoom=o && check ? check(o->details) : -1;
-    if(virtualRoom==1)return join(h,o,client,cb);
+    if(virtualRoom==1) {
+        Log("ROOM join allowed: route=coop-virtual");
+        return join(h,o,client,cb);
+    }
     Attribute* attr=nullptr;
     const KeyOptions key{1,"SEARCH_TYPE"};
-    const bool allowed=virtualRoom<0 && o && rawCopy(o->details,&key,&attr)==0 && attr && Type(attr->data) && AllForcesWireType(attr->data->value);
+    const int copied=virtualRoom<0 && o ? rawCopy(o->details,&key,&attr) : -1;
+    const bool typed=copied==0 && attr && Type(attr->data);
+    const std::int64_t wireType=typed ? attr->data->value : 0;
+    const bool allowed=typed && AllForcesWireType(wireType);
     if(attr)release(attr);
-    if(allowed)return join(h,o,client,cb);
+    if(allowed) {
+        Log("ROOM join allowed: route=eos SEARCH_TYPE=%#llx",static_cast<unsigned long long>(wireType));
+        return join(h,o,client,cb);
+    }
+    const char* reason=!o ? "missing-options" : virtualRoom==0 ? "coop-virtual-profile-rejected" :
+        copied!=0 ? "search-type-read-failed" : !typed ? "search-type-invalid" : "incompatible-search-type";
+    Log("ROOM join refused: reason=%s virtual=%d attribute_result=%d numeric=%d SEARCH_TYPE=%#llx",
+        reason,virtualRoom,copied,typed,static_cast<unsigned long long>(wireType));
     // EOS_InvalidParameters. No original JoinLobby call and therefore no
     // game session/resource loading, including direct invitations to vanilla.
     Refuse(client,cb);

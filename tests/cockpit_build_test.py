@@ -24,10 +24,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 sys.path.insert(0, os.path.join(HERE, '..', 'tools'))
 import cockpit_fits  # noqa: E402
+import cockpit_instruments  # noqa: E402
 import cockpit_kits  # noqa: E402
 import cockpit_kits_plugin  # noqa: E402
 import cockpit_room  # noqa: E402
 import cockpits  # noqa: E402
+import cockpit_shell  # noqa: E402
+import cockpit_retrofit  # noqa: E402
 import jet_models  # noqa: E402
 import make_jets  # noqa: E402
 import obj_model as om  # noqa: E402
@@ -95,6 +98,17 @@ def main() -> int:
         print('SKIP: Root.cpk and the cockpits\' assets (the model folder\'s cockpits/) are needed')
         return 77
     game = rootcpk.Game(root)
+    # Measure the original C-130 circular bores, not the asymmetric outer plates
+    # or an invented 2x2 grid. The native surface is a 16-sided ring at this depth.
+    import numpy as np
+    pos=cockpit_kits_plugin._cockpit(cockpit_kits_plugin.DECK.slug)[0]
+    for site in cockpit_retrofit.C130[0].dials[:2]:
+        distance=np.linalg.norm(pos[:,:2]-site.centre[:2],axis=1)
+        ring=np.unique(np.round(pos[(abs(pos[:,2]-.84747)<1e-5)&(distance>.053)&(distance<.056),:2],5),axis=0)
+        expect(len(ring)>=12 and np.allclose(ring.mean(0),site.centre[:2],atol=5e-5),
+               f'C-130 standby: live case centred on the original bore {site.centre}')
+        expect(len(ring)>0 and np.ptp(ring,axis=0).max()<site.diameter<.1236,
+               'C-130 standby: case covers its bore without exceeding the original bezel')
     for name, (model, _) in sorted(cockpit_kits_plugin.MODELS.items()):
         if model.sill is None:
             continue
@@ -110,9 +124,35 @@ def main() -> int:
         started = time.perf_counter()
         md = copies[stem] if stem in copies else model_of(game, stem)
         hull = cockpits.hull_triangles(md)
+        separated=cockpit_shell.separate(md,fits,hull)
+        expect(all(b.inv_bind==md.bones[b.parent].inv_bind for b in separated.bones[len(md.bones):]),
+               f'{stem}: shell children preserve the exact native inverse binds')
+        before=sum(len(me.indices) for o in md.objects for me in o.meshes)
+        after=sum(len(me.indices) for o in separated.objects for me in o.meshes)
+        expect(before==after,f'{stem}: all native triangles retained for outside views')
+        envelopes=cockpit_shell.regions(md,fits,hull)
+        expect(len(envelopes)==sum(f.kit in cockpit_shell.REPLACEMENTS for f in fits),
+               f'{stem}: every replacement station has a bounded native cabin region')
+        remaining=sum(int((cockpit_shell.triangle_masks(separated,o,me,envelopes)[0]!=0).sum())
+                      for o in separated.objects for me in o.meshes)
+        expect(remaining==0,f'{stem}: no unguarded native cabin triangles remain')
+        required_bones=len(separated.bones)+len(fits)
         for fit in fits:
             try:
                 kit = cockpits.fitted(hull, fit, cockpit_kits.KITS[fit.kit])
+                required_bones+=len(kit.screens)
+                shared=set()
+                for control in kit.controls:
+                    if control.control[0] in 'dDplcuv':shared.add(control.control)
+                    else:required_bones+=1
+                for index,screen in enumerate(kit.screens):
+                    if screen.kind not in ('hud','sensor'):
+                        _parts,controls=cockpit_instruments.instrument(screen,index,numbers=fit.seat==0,
+                                                                     thumbnail=(("111","111"),1.))
+                        for control in controls:
+                            if control.control[0] in 'dDplcuv':shared.add(control.control)
+                            else:required_bones+=1
+                required_bones+=len(shared)
                 kinds = {s.kind for s in kit.screens}
                 expect(kinds <= set(cockpits.SCREEN_KINDS),
                        f'{stem} seat {fit.seat} ({fit.kit} on {fit.bone}): laid out inside the hull, screens {sorted(kinds)}')
@@ -127,6 +167,7 @@ def main() -> int:
                     closed(f'{stem} seat {fit.seat} as {alt}', kit)
                 except Exception as e:  # noqa: BLE001
                     expect(False, f'{stem} seat {fit.seat} as {alt}: {e}')
+        expect(required_bones<=256,f'{stem}: all localized labels and vehicle thumbnails fit the skin palette ({required_bones}/256)')
         print(f'      {stem}: {time.perf_counter() - started:.1f} s', flush=True)
 
     spec = stock['VEHICLE403_TANK']
@@ -135,6 +176,20 @@ def main() -> int:
     member = spec.stem.lower() + '.mdb'
     md = mdb_read(next(f for f in arc.files if f.name.lower() == member).data)
     expect(not om.texture_problems(arc, md, member), f'{spec.stem}: built, its textures where the game binds them')
+    cockpit_meshes=[me for o in md.objects for me in o.meshes if md.name_of(md.materials[me.material].name).startswith('edf6vc_cpit_')]
+    expect(bool(cockpit_meshes) and all(next(e for e in me.elems if e.name.lower()=='position').fmt==1 for me in cockpit_meshes),
+           'built cockpit/display positions retain float32 precision, keeping glyphs off the backing')
+    ink = [m for m in md.materials if 'instrument_ink' in md.name_of(m.name)]
+    expect(bool(ink) and all(m.shader == 'snd_BRDF_Common_Light' for m in ink),
+           'physical instrument labels use the native emissive material, not the dark hull shader')
+    colours={name:next(p.value[:3] for p in next(m for m in md.materials if md.name_of(m.name).endswith('instrument_'+name)).params
+                       if p.name=='light_color') for name in ('green','amber','red')}
+    expect(colours['green'][1]>colours['green'][0] and colours['red'][0]>colours['red'][1]
+           and len({tuple(v) for v in colours.values()})==3,
+           'native emissive constants preserve distinct health colours instead of white bloom')
+    interior = [m for m in md.materials if 'edf6vc_cpit_' in md.name_of(m.name)]
+    expect(all(all(p.value[:3] == [1.0,1.0,1.0] for p in m.params if p.name == 'diffuse') for m in interior),
+           'cockpit albedos keep their source colour instead of the tank template diffuse multiplier')
     names = [md.name_of(b.name) or '' for b in md.bones]
     for fit in spec.cockpits:
         marker = cockpits.MARKER.format(fit.seat)

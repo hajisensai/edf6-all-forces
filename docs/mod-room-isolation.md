@@ -33,6 +33,14 @@ matrix, including already-decoded attributes and removal of All Forces.
 Breaking resource compatibility must allocate a new protocol prefix/profile;
 this value is a compatibility family, not an arbitrary plugin version string.
 
+Join diagnostics in `EDF6VehicleCrew.log` distinguish namespace readiness, Coop
+dependency errors, virtual-room admission, raw SEARCH_TYPE reads and EOS handoff.
+`ROOM content check` reports the final lobby ownership answer after chained
+plugins, alongside the installed pack ids; an inner plugin's native refusal may
+still be overridden by MOD ownership. See
+[2026-10-15 room-join feedback](feedback-2026-10-15-room-join.md) for the observed
+handshake failure and the limits of host-only logs.
+
 ## Required Coop bridge for online play
 
 The real-crew/support protocol now requires the matching EDF6Coop installation.

@@ -8,6 +8,7 @@
 #include <vector>
 
 namespace crew {
+bool VehicleLookActive(const void*) noexcept { return false; }
 unsigned char* image=nullptr;
 Config config{};
 unsigned char* currentHuman=nullptr;
