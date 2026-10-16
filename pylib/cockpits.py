@@ -52,6 +52,7 @@ class Fit:
     yaw: float = 0.0
     pitch: float = 0.0
     scale: float = 1.0
+    shell_ahead: float | None = None  # measured native cab nose beyond its first axial pane, metres from the eye
 
 
 @dataclass(frozen=True)
@@ -230,6 +231,7 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
         raise ValueError('two cockpits for one seat')
     import vehicle_optics   # the marker bone is the optics' kind (late: vehicle_optics imports this module)
     import cockpit_instruments
+    import cockpit_shell
     root = asset_root()
     print('      座舱：提取车壳三角形……', flush=True)
     hull = hull_triangles(md)
@@ -275,6 +277,7 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
         for index,control in enumerate(kit.controls,len(kit.screens)):
             bind(control,index)
         print(f'      席位 {fit.seat}：适配完成（{time.perf_counter()-started:.1f} 秒）', flush=True)
+    md = cockpit_shell.separate(md, fits, hull)
     md = clear_cab_interior(md, fits)
     for fit in fits:
         md = vehicle_optics.add_marker(md, fit.bone, MARKER.format(fit.seat), frame(fit))
@@ -337,43 +340,10 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
 
 
 def clear_cab_interior(md: Mdb, fits: tuple[Fit, ...]) -> Mdb:
-    """Replace only the two audited trucks' inward-facing dashboard surfaces; retain their exterior and glass.
-
-    Fit the new interior against the original hull first. Re-measuring after removing the old dashboard would let
-    the replacement reach through the windscreen. Other cab kits keep their original interior geometry.
-    """
-    from mdb import read_elem
+    """Tame the two old trucks' noisy glazing; shell visibility preserves their native geometry."""
     replacements = [f for f in fits if f.kit in ('kei_cab', 'trailer_cab')]
     if not replacements:
         return md
-    import struct
-    objects = []
-    for obj in md.objects:
-        meshes = []
-        for mesh in obj.meshes:
-            mat = md.materials[mesh.material]
-            if 'Alpha' in mat.shader:
-                meshes.append(mesh)
-                continue
-            # Stock trucks are rigidly attached to body at identity (guarded by the source model digest).
-            pos = read_elem(mesh, 'position', 0)
-            tri = struct.iter_unpack('<3H', mesh.indices)
-            keep = []
-            for t in tri:
-                a,b,c = [pos[i][:3] for i in t]
-                mid = tuple((a[k]+b[k]+c[k])/3 for k in range(3))
-                ab,ac = [tuple(v[k]-a[k] for k in range(3)) for v in (b,c)]
-                normal = (ab[1]*ac[2]-ab[2]*ac[1],ab[2]*ac[0]-ab[0]*ac[2],ab[0]*ac[1]-ab[1]*ac[0])
-                remove = False
-                for fit in replacements:
-                    ex,ey,ez = fit.eye
-                    ahead = .59 if fit.kit == 'kei_cab' else .79
-                    if (abs(mid[0]-ex)<2.0 and ey-1.1<mid[1]<ey+.05 and ez-.55<mid[2]<ez+ahead
-                            and sum(normal[k]*(fit.eye[k]-mid[k]) for k in range(3))>0):
-                        remove = True
-                if not remove: keep.append(t)
-            meshes.append(replace(mesh,indices=b''.join(struct.pack('<3H',*t) for t in keep)))
-        objects.append(replace(obj,meshes=meshes))
     materials = []
     for mat in md.materials:
         if 'Alpha' not in mat.shader:
@@ -388,7 +358,7 @@ def clear_cab_interior(md: Mdb, fits: tuple[Fit, ...]) -> Mdb:
             elif p.name == 'translucent_fall_off_offset': v[0] = .03
             params.append(replace(p,value=v))
         materials.append(replace(mat,params=params))
-    return replace(md,objects=objects,materials=materials,buffer_order=None)
+    return replace(md,materials=materials)
 
 
 def add_textures(rab: Rab, textures: dict[str, bytes]) -> None:

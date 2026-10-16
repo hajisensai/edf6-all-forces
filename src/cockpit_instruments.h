@@ -7,6 +7,14 @@ namespace instruments {
 enum Field { hp,hull,fuel,speed,altitude,heading,slot,ammo,warn,climb,pitch,power,count };
 struct Readings { float value[count]; float share[count]; bool contact[6]; float at[6][2]; int language=0; bool flight=false; };
 
+// Native cabin fragments retain their original animated parent outside the local
+// seat's first-person draw. This gate does not depend on live instrument readings.
+inline fpview::M4 ShellPose(const fpview::M4& original,unsigned mask,int seat) noexcept {
+    if(seat<0 || seat>=31 || !(mask&(1u<<seat)))return original;
+    const float origin[3]={0,0,0};
+    return fpview::Collapse(origin);
+}
+
 inline bool Available(const Readings& r,int field) noexcept {
     return field>=0 && field<count && std::isfinite(r.value[field]) &&
         ((field!=hp && field!=hull) || std::isfinite(r.share[field])) &&

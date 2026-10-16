@@ -22,7 +22,8 @@ _KEI = (
 _RESCUE = (
     # The driver up front behind the big windows (room 1.95, 1.95, 1.46, 2.55, 0.80, 3.05): a cab-over truck's cab,
     # its big windscreen under the hull's (truck_cab); the four in the stock-modelled ambulance bay (benches, monitor).
-    Fit(0, 'body', (0.0, 3.4, 2.2), 'truck_cab'),
+    # The first axial pane is only .80 m ahead; the sloping cab's reveals reach 2.7 m.
+    Fit(0, 'body', (0.0, 3.4, 2.2), 'truck_cab', shell_ahead=3.0),
     Fit(1, 'body', (0.48, 2.541, -3.5), 'troop_bay_l'),
     Fit(2, 'body', (-0.48, 2.541, -3.5), 'troop_bay_r'),
     Fit(3, 'body', (0.48, 2.541, -2.2), 'troop_bay'),

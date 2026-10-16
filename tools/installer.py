@@ -1141,6 +1141,8 @@ def check_package() -> int:
     import ledger
     import cockpit_instruments
     import cockpit_retrofit
+    import cockpit_shell
+    assert 'heli_gunship' in cockpit_shell.REPLACEMENTS and cockpit_shell.PREFIX == 'vc_shell_'
     assert len(cockpit_instruments.LABELS['AMMO']) == 4
     assert cockpit_instruments.GLYPHS['弹']
     assert len(cockpit_retrofit.HELI)==3 and len(cockpit_retrofit.GROUND)==4

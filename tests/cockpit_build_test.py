@@ -29,6 +29,7 @@ import cockpit_kits  # noqa: E402
 import cockpit_kits_plugin  # noqa: E402
 import cockpit_room  # noqa: E402
 import cockpits  # noqa: E402
+import cockpit_shell  # noqa: E402
 import jet_models  # noqa: E402
 import make_jets  # noqa: E402
 import obj_model as om  # noqa: E402
@@ -111,7 +112,19 @@ def main() -> int:
         started = time.perf_counter()
         md = copies[stem] if stem in copies else model_of(game, stem)
         hull = cockpits.hull_triangles(md)
-        required_bones=len(md.bones)+len(fits)
+        separated=cockpit_shell.separate(md,fits,hull)
+        expect(all(b.inv_bind==md.bones[b.parent].inv_bind for b in separated.bones[len(md.bones):]),
+               f'{stem}: shell children preserve the exact native inverse binds')
+        before=sum(len(me.indices) for o in md.objects for me in o.meshes)
+        after=sum(len(me.indices) for o in separated.objects for me in o.meshes)
+        expect(before==after,f'{stem}: all native triangles retained for outside views')
+        envelopes=cockpit_shell.regions(md,fits,hull)
+        expect(len(envelopes)==sum(f.kit in cockpit_shell.REPLACEMENTS for f in fits),
+               f'{stem}: every replacement station has a bounded native cabin region')
+        remaining=sum(int((cockpit_shell.triangle_masks(separated,o,me,envelopes)[0]!=0).sum())
+                      for o in separated.objects for me in o.meshes)
+        expect(remaining==0,f'{stem}: no unguarded native cabin triangles remain')
+        required_bones=len(separated.bones)+len(fits)
         for fit in fits:
             try:
                 kit = cockpits.fitted(hull, fit, cockpit_kits.KITS[fit.kit])

@@ -9,6 +9,7 @@ only --out.
                                           with it (looking straight down, the bone's +z is the top of the picture)
         [--up x,y,z | --bone-up]          the camera's up (world +y by default; --bone-up: the bone's +y row, so it rolls)
         [--fov 70] [--size 1280x720] [--near 0.02] [--cull | --mark-back] [--no-ground]
+        [--first-person-seat N]          apply the native-shell visibility of this seat (outside view: omit it)
         [--pose "bone=axis:deg,..."]      the main model's pose, as pylib/model_view.py --pose
         [--color @tex|flat|@mat|PREFIX,..] (default @tex: each pixel in its material's albedo texture)
         [--extra ARCHIVE2 MODEL2.mdb [--extra-offset x,y,z] [--extra-bone HOSTBONE]] ...
@@ -36,7 +37,7 @@ import math
 import os
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -158,6 +159,23 @@ def model_scene(scene: Scene, md: Mdb, colour: str, pose: dict, place: np.ndarra
         v = v[:, :3]
     scene.add(v, t, c, uv, tex, images)
     return len(t)
+
+
+def first_person_shell(md: Mdb, seat: int) -> Mdb:
+    """Preview the draw-local native shell gate without changing the cached model."""
+    from cockpit_shell import PREFIX
+    bones = []
+    for bone in md.bones:
+        name = md.name_of(bone.name)
+        if name.startswith(PREFIX):
+            mask = int(name[len(PREFIX):].split('_')[0])
+            if 0 <= seat < 31 and mask & (1 << seat):
+                local = [0.] * 15 + [1.]
+                bone = replace(bone, local=local)
+        bones.append(bone)
+    changed = replace(md, bones=bones)
+    mv.TEXTURES[id(changed)] = mv.TEXTURES.get(id(md), {})
+    return changed
 
 
 def ground_scene(scene: Scene, y: float = -0.005, half: float = 400.0) -> None:
@@ -402,12 +420,15 @@ def main(argv: list[str]) -> int:
     ap.add_argument('--cull', action='store_true')
     ap.add_argument('--no-ground', action='store_true')
     ap.add_argument('--mark-back', action='store_true', help='tint back faces magenta (without --cull)')
+    ap.add_argument('--first-person-seat', type=int)
     ap.add_argument('--extra', nargs=2, action='append', default=[], metavar=('ARCHIVE', 'MODEL'))
     ap.add_argument('--extra-offset', type=vec3, action='append', default=[])
     ap.add_argument('--extra-bone', action='append', default=[])
     ap.add_argument('--out')
     a = ap.parse_args(join_negative_vectors(argv))
     md = load(a.archive, a.model)
+    if a.first_person_seat is not None:
+        md = first_person_shell(md, a.first_person_seat)
     if a.list_bones:
         list_bones(md)
         return 0

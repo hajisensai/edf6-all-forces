@@ -909,7 +909,7 @@ enum class Part { none,body,inHand,stowed,instruments };
 Part PartOf(const void* model,int* hand) noexcept {
     *hand=kRight;
     if(!st.on)return Part::none;
-    if(st.riding && st.screens.physical && model==st.ride.vehicle+0xE40)return Part::instruments;
+    if(st.riding && model==st.ride.vehicle+0xE40)return Part::instruments;
     if(model==st.body)return Part::body;
     if((*hand=HandOfModel(model))>=0)return Part::inHand;
     *hand=kRight;
@@ -1045,6 +1045,15 @@ void InstrumentPose(unsigned char* inst,float* backup) noexcept {
     std::memcpy(backup,pose,static_cast<std::size_t>(n)*64);
     for(int i=0;i<n;++i) {
         const auto name=At<const wchar_t*>(bones+static_cast<std::size_t>(i)*kBoneStride,0);
+        if(name && std::wcsncmp(name,L"vc_shell_",9)==0) {
+            unsigned mask=0,parent=0;
+            if(swscanf_s(name,L"vc_shell_%u_%u",&mask,&parent)==2) {
+                const M4 original=MatrixAt(reinterpret_cast<const unsigned char*>(pose+i*16));
+                const M4 moved=instruments::ShellPose(original,mask,st.ride.seat);
+                std::memcpy(pose+i*16,moved.m,64);
+            }
+            continue;
+        }
         if(!name || std::wcsncmp(name,L"vc_i_",5)!=0)continue;
         int seat=-1,screen=-1,field=-1,place=0,segment=0;wchar_t mode=0;
         const int fields=swscanf_s(name,L"vc_i_%d_%d_%lc_%d_%d_%d",&seat,&screen,&mode,1u,&field,&place,&segment);
@@ -1105,7 +1114,7 @@ void __fastcall DrawHook(void* model,void* ctx,int pass,void* view) {
     unsigned char* insts[kMostInsts];
     int n=0;
     __try {
-        if(st.viewOk[kRight] && st.viewOk[kLeft]) {
+        if(part==Part::instruments || (st.viewOk[kRight] && st.viewOk[kLeft])) {
             const M4 t[2]={part==Part::body ? st.view[kRight] : st.view[hand],part==Part::body ? st.view[kLeft] : st.view[hand]};
             n=InstancesOf(static_cast<unsigned char*>(model),insts);
             const float* eye=reinterpret_cast<const float*>(st.cam+kCamEyeRow);   // the drawn view's eye

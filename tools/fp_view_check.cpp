@@ -19,6 +19,7 @@
 #include "../src/fp_motion.h"
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <initializer_list>
 
 namespace {
@@ -354,6 +355,14 @@ int main() {
         Expect(Near(Length(d),Length(before)),"forearm never stretches");
     }
     using namespace crew::instruments;
+    const M4 shell=Translate(1,2,3);
+    const M4 hiddenShell=ShellPose(shell,(1u<<0)|(1u<<12),0);
+    Expect(hiddenShell.m[0]==0 && hiddenShell.m[5]==0 && hiddenShell.m[10]==0 && hiddenShell.m[12]==0,
+           "the local cabin shell collapses to one point before any live readings");
+    Expect(ShellPose(shell,1u<<12,12).m[0]==0,"the last transport passenger uses its own visibility bit");
+    for(int seat:{-1,1,31,32})
+        Expect(std::memcmp(ShellPose(shell,1,seat).m,shell.m,64)==0,
+               "other seats and invalid shifts preserve the exact native shell pose");
     Expect(!Segment(5,0,1) && Segment(5,0,2),"physical digit 5 has the correct segment pattern");
     Expect(!Segment(5,1,6) && Segment(-1,1,6),"leading zero is blank; an unavailable value is a dash");
     Readings reading{};reading.share[hp]=.25f;
