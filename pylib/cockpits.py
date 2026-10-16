@@ -81,6 +81,16 @@ class Screen:
     up: Vec3 = (0.0, 1.0, 0.0)
 
 
+@dataclass(frozen=True)
+class InstrumentControl:
+    part: str
+    control: str
+    centre: Vec3
+    facing: Vec3
+    up: Vec3
+    extent: tuple[float,float] = (1.0,1.0)
+
+
 @dataclass
 class Kit:
     """A cockpit: parts in the eye's frame (obj_model Parts whose `material` names a key of `materials`). `outside`:
@@ -99,6 +109,8 @@ class Kit:
     sill: float | None = None
     windows: tuple[tuple[Vec3, Vec3, Vec3], ...] = ()
     conform: frozenset[str] = frozenset()
+    controls: tuple[InstrumentControl, ...] = ()  # physical instruments replacing source-model dial faces
+    ranges: tuple[tuple[int,int], ...] = ()
 
 
 KitFn = Callable[[dict[str, float]], Kit]   # the room round the eye (clearance) -> the kit laid out in it
@@ -230,29 +242,48 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
         kit_of[fit.seat] = fitted(hull, fit, kits[fit.kit])
         kit = kit_of[fit.seat]
         controls[fit.seat] = {}
+        shared = {}
+
+        def bind(control: InstrumentControl, index: int) -> None:
+            nonlocal md
+            # Visibility-only geometry can share a bone even at different positions.
+            # Needles and bars keep their own pivots; their transforms are not visibility-only.
+            reusable = control.control[0] in 'dDplcuv'
+            name = shared.get(control.control) if reusable else None
+            if name is None:
+                name = f'vc_i_{fit.seat}_{index}_{control.control}'
+                at = Screen('status', control.centre, control.facing, .01, .01, control.up)
+                transform = screen_frame(at, fit)
+                if control.control.startswith(('t_','T_')):
+                    transform[:3] = [v*control.extent[0]*fit.scale for v in transform[:3]]
+                    transform[4:7] = [v*control.extent[1]*fit.scale for v in transform[4:7]]
+                md = vehicle_optics.add_marker(md, fit.bone, name, transform)
+                if reusable: shared[control.control] = name
+            controls[fit.seat][control.part] = name
+
         for index, scr in enumerate(kit.screens):
             if scr.kind in ('hud', 'sensor'):
                 continue
-            parts, moving = cockpit_instruments.instrument(scr, index, numbers=fit.seat == 0, thumbnail=thumbnail)
+            parts, moving = cockpit_instruments.instrument(scr, index, numbers=fit.seat == 0, thumbnail=thumbnail,
+                                                           ranges=dict(kit.ranges))
             # Replace the kit's old display quad, rather than adding a second coincident dark face.
             kit.parts = [p for p in kit.parts if not (p.name==f'screen_{scr.kind}' and p.material=='screen')]
             kit.parts.extend(parts)
             kit.materials.update(cockpit_instruments.MATERIALS)
             for control in moving:
-                name = f'vc_i_{fit.seat}_{index}_{control.control}'
-                controls[fit.seat][control.part] = name
-                at = Screen('status', control.centre, control.facing, .01, .01, control.up)
-                transform = screen_frame(at, fit)
-                if control.control.startswith('t_'):
-                    transform[:3] = [v*scr.width for v in transform[:3]]
-                    transform[4:7] = [v*scr.height for v in transform[4:7]]
-                md = vehicle_optics.add_marker(md, fit.bone, name, transform)
+                bind(control,index)
+        for index,control in enumerate(kit.controls,len(kit.screens)):
+            bind(control,index)
         print(f'      席位 {fit.seat}：适配完成（{time.perf_counter()-started:.1f} 秒）', flush=True)
     md = clear_cab_interior(md, fits)
     for fit in fits:
         md = vehicle_optics.add_marker(md, fit.bone, MARKER.format(fit.seat), frame(fit))
-        for scr in kit_of[fit.seat].screens:
-            md = vehicle_optics.add_marker(md, fit.bone, screen_marker(fit.seat, scr), screen_frame(scr, fit))
+        seen=set()
+        for index,scr in enumerate(kit_of[fit.seat].screens):
+            marker=screen_marker(fit.seat,scr)
+            if marker in seen:marker+=f'_{index}'  # mirrored displays may have the same kind and size
+            seen.add(marker)
+            md = vehicle_optics.add_marker(md, fit.bone, marker, screen_frame(scr, fit))
     print('      座舱：生成骨骼与网格……', flush=True)
     md = preorder(md)
     if len(md.bones) > 256:

@@ -50,8 +50,18 @@ for kind in ('status','weapons','flight','map'):
         assert not any(c.control.startswith(f'b_{ci.HULL}') for c in controls),'no redundant unknown hull bar'
     assert {f'l_{i}_0' for i in range(4)} <= {c.control for c in controls}
     if kind=='map':
-        assert sum(c.control.startswith('t_') for c in controls)==6
+        assert sum(c.control.startswith('T_') for c in controls)==6
+        assert all(c.extent==(s.width,s.height) for c in controls if c.control.startswith('T_'))
 print('physical instrument geometry and controls passed')
+
+# Tall transport displays and five-digit altitude scales must remain inside their measured aperture.
+tall=Screen('flight',(0,0,0),(0,0,-1),.19,.26)
+parts,_=ci.instrument(tall,0,ranges={ci.SPEED:700,ci.ALT:10000})
+right,up,_=basis(tall.facing)
+for p in parts:
+    for v in p.verts:
+        assert abs(sum(v.pos[k]*right[k] for k in range(3)))<=tall.width*.501,(p.name,'tall width')
+        assert abs(sum(v.pos[k]*up[k] for k in range(3)))<=tall.height*.501,(p.name,'tall height')
 
 # The display/text gap is sub-centimetre, even when the vehicle's model-space coordinates are large. Test the
 # actual vertex packer with a widened hull layout, including subsequent attribute offsets.

@@ -236,7 +236,10 @@ def real_cab(cabin: Cabin, spec: CabSpec) -> Kit:
         screens.append(s)
     mats = _materials('screen', 'metal_dark')
     mats.update(cab_mats)
-    return Kit(parts + cab, mats, screens=tuple(screens))
+    kit=Kit(parts + cab, mats, screens=tuple(screens))
+    import cockpit_retrofit as retrofit
+    def mapped(p):return squeeze(np.asarray([p]),np.asarray(lo),np.asarray(hi),spec.tuck,spec.knee)[0]
+    return retrofit.apply(kit,retrofit.GROUND.get(spec.asset,()),mapped,ground=True,limits=(np.asarray(lo),np.asarray(hi)))
 
 
 CABS: dict[str, CabSpec] = {
@@ -255,11 +258,11 @@ CABS: dict[str, CabSpec] = {
     # A cab-over truck's (ARHAN P880, a MAZ; Mayess; mirrored, driven from the right): the big windscreen, the
     # cluster behind the wheel ('status'), the dashboard's display ('weapons').
     'truck_cab': CabSpec('sf-arhan-p880',
-                         (('status', (-0.15, -0.27, 0.63), 0.18, 0.08), ('weapons', (0.3, -0.233, 0.5), 0.16, 0.07))),
+                         (('status', (0.53, -0.233, 0.5), 0.12, 0.07), ('weapons', (0.3, -0.233, 0.5), 0.16, 0.07))),
     # A pickup's (Lightbody '85, DanielZhabotinsky; mirrored, driven from the right as the EDF's Japanese trucks
     # are): the gauges behind the wheel ('status'), the radio in the centre stack ('weapons').
     'pickup_cab': CabSpec('sf-lightbody-85',
-                          (('status', (0.018, -0.29, 0.85), 0.2, 0.08), ('weapons', (0.36, -0.37, 0.87), 0.16, 0.08))),
+                          (('status', (0.55, -0.37, 0.87), 0.12, 0.07), ('weapons', (0.36, -0.37, 0.87), 0.16, 0.08))),
 }
 
 

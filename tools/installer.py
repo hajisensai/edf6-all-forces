@@ -1140,8 +1140,12 @@ def check_package() -> int:
     import make_sedan
     import ledger
     import cockpit_instruments
+    import cockpit_retrofit
     assert len(cockpit_instruments.LABELS['AMMO']) == 4
     assert cockpit_instruments.GLYPHS['弹']
+    assert len(cockpit_retrofit.HELI)==3 and len(cockpit_retrofit.GROUND)==4
+    assert all(ch in cockpit_instruments.GLYPHS for key in ('VERT','PITCH','POWER')
+               for text in cockpit_instruments.LABELS[key] for ch in text)
     assert make_sedan.FIT == cockpit_fits.FITS['EDF6VC_SEDAN']
     assert make_sedan.OWNER in ledger.OWNERS
     importlib.import_module('PIL.DdsImagePlugin')   # the city sedan's BC7 glass decoder

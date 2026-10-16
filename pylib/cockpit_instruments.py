@@ -7,15 +7,14 @@ The small block font and scales are geometry, so their clarity does not depend o
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 
 from cockpit_shapes import basis, panel, merge
-from cockpits import KitMaterial, Screen
+from cockpits import KitMaterial, Screen, InstrumentControl as Moving
 from cockpit_label_glyphs import LABELS, GLYPHS
 import obj_model as om
 
 # Keep in step with src/cockpit_instruments.h. Negative readings mean unavailable, never zero.
-HP, HULL, FUEL, SPEED, ALT, HEADING, SLOT, AMMO, WARN = range(9)
+HP, HULL, FUEL, SPEED, ALT, HEADING, SLOT, AMMO, WARN, CLIMB, PITCH, POWER = range(12)
 FONT = {
     '%': ('101','001','010','100','101'),
     'H': ('101','101','111','101','101'), 'P': ('110','101','110','100','100'),
@@ -34,15 +33,6 @@ FONT = {
     '6': ('111','100','111','101','111'), '7': ('111','001','010','010','010'),
     '8': ('111','101','111','101','111'), '9': ('111','101','111','001','111'),
 }
-
-
-@dataclass(frozen=True)
-class Moving:
-    part: str
-    control: str  # d_field_place_segment, b_field, n_field (digit, bar, needle)
-    centre: tuple[float, float, float]
-    facing: tuple[float, float, float]
-    up: tuple[float, float, float]
 
 
 def silhouette(triangles, view: str = 'top') -> tuple[tuple[str, ...], float]:
@@ -66,7 +56,7 @@ def silhouette(triangles, view: str = 'top') -> tuple[tuple[str, ...], float]:
 
 
 def instrument(s: Screen, index: int, numbers: bool = True,
-               thumbnail: tuple[tuple[str, ...], float] = ((),1.)) -> tuple[list[om.Part], list[Moving]]:
+               thumbnail: tuple[tuple[str, ...], float] = ((),1.), ranges: dict[int,int] | None = None) -> tuple[list[om.Part], list[Moving]]:
     """A physical instrument at s, including an opaque backing in front of any old display face."""
     r, u, f = basis(s.facing, s.up)
     parts: list[om.Part] = []
@@ -81,13 +71,15 @@ def instrument(s: Screen, index: int, numbers: bool = True,
              depth: float = 0.001) -> om.Part:
         return panel(prefix+'_'+name, material, point(x,y,depth), w*s.width, h*s.height, f, u)
 
-    def label(text: str, x: float, y: float, size: float = 0.017, gate: int = 0) -> None:
+    def label(text: str, x: float, y: float, size: float = 0.017, gate: int = 0,
+              max_width: float | None = None) -> None:
         if text in LABELS:
             for language, translated in enumerate(LABELS[text]):
                 glyphs=[GLYPHS[ch] for ch in translated]
                 width=sum(w+2 for w,_rows in glyphs)-2
                 height=max(len(rows) for _w,rows in glyphs)
-                unit=min(max(5*size,.085)*s.height/height,(.46-x)*s.width/max(1,width))
+                available=.46-x if max_width is None else max_width
+                unit=min(max(5*size,.085)*s.height/height,available*s.width/max(1,width))
                 bits=[];cursor=0
                 for w,rows in glyphs:
                     for row,mask in enumerate(rows):
@@ -112,18 +104,18 @@ def instrument(s: Screen, index: int, numbers: bool = True,
         if bits:
             parts.append(merge(bits, name=prefix+'_label_'+text))
 
-    def live(p: om.Part, control: str, c: tuple[float, float, float], up=u) -> None:
+    def live(p: om.Part, control: str, c: tuple[float, float, float], up=u, extent=(1.0,1.0)) -> None:
         parts.append(p)
-        moving.append(Moving(p.name, control, c, f, up))
+        moving.append(Moving(p.name, control, c, f, up, extent))
 
     def bar(field: int, y: float, title: str) -> None:
         label(title, -.43, y+.12)
         parts.append(rect('track','instrument_dim',0,y,.86,.055))
         p=rect(f'bar_{field}', 'instrument_ink', 0,y,.86,.045,.002)
-        live(p,f'b_{field}',point(-.43,y,.002))
+        live(p,f'B_{field}',point(-.43,y,.002))
 
     def digits(field: int, y: float, count: int, title: str, x: float = .01,
-               width: float = .7, mode: str = 'd') -> None:
+               width: float = .7, mode: str = 'D') -> None:
         if title:label(title,-.43,y+.17)
         # Segment order: top, upper right, lower right, bottom, lower left, upper left, middle.
         segments=((0,.5,.65,.1),(.4,.25,.1,.4),(.4,-.25,.1,.4),(0,-.5,.65,.1),
@@ -170,6 +162,7 @@ def instrument(s: Screen, index: int, numbers: bool = True,
             live(p,f'c_{HP}_{level}',point(0,0,.003))
 
     def dial(field: int, x: float, y: float, title: str, maximum: int) -> None:
+        maximum=(ranges or {}).get(field,maximum)
         radius=min(s.width*.2,s.height*.25)
         # A gauge face, ticks and numbers are actual triangles, not a blurred patch of the source cockpit atlas.
         for tick in range(21):
@@ -177,17 +170,19 @@ def instrument(s: Screen, index: int, numbers: bool = True,
             cx=x+math.sin(a)*radius/s.width
             cy=y+math.cos(a)*radius/s.height
             parts.append(rect('tick','instrument_ink',cx,cy,.009,.018 if tick%5 else .035))
-        label(title,x-radius/s.width,y-radius/s.height-.055,.013)
+        label(title,x-radius/s.width,y-radius/s.height-.055,.013,max_width=radius*1.8/s.width)
         for tick in (0,10,20):
             a=math.radians(-135+270*tick/20)
             txt=str(round(maximum*tick/20))
-            label(txt,x+math.sin(a)*radius*.65/s.width-.025*len(txt),
-                  y+math.cos(a)*radius*.65/s.height,.011)
+            size=min(.011,.13*s.width/((len(txt)*4-1)*s.height))
+            text_width=(len(txt)*4-1)*size*s.height/s.width
+            label(txt,x+math.sin(a)*radius*.65/s.width-text_width/2,
+                  y+math.cos(a)*radius*.65/s.height+2*size,size)
         p=panel(prefix+f'_needle_{field}','instrument_needle',point(x,y,.003),radius*.055,radius*.85,f,u)
         # Centre of the rectangular needle lies halfway along it; the bone stays at the hub.
         p=om.Part(p.name,p.material,[om.Vertex(tuple(v.pos[k]+u[k]*radius*.425 for k in range(3)),v.normal,v.uv)
                                    for v in p.verts],p.tris)
-        live(p,f'n_{field}',point(x,y,.003))
+        live(p,f'n_{field}_{maximum}' if ranges else f'n_{field}',point(x,y,.003))
 
     parts.append(rect('face','instrument_black',0,0,1,1,0))
     if s.kind == 'status':
@@ -199,23 +194,24 @@ def instrument(s: Screen, index: int, numbers: bool = True,
             label('%',.395,.05)
             label('FUEL',-.43,-.24,gate=FUEL+1)
             live(rect('fuel_track','instrument_dim',0,-.37,.86,.055),f'v_{FUEL}',point(0,-.37))
-            live(rect('fuel','instrument_ink',0,-.37,.86,.045,.002),f'b_{FUEL}',point(-.43,-.37,.002))
+            live(rect('fuel','instrument_ink',0,-.37,.86,.045,.002),f'B_{FUEL}',point(-.43,-.37,.002))
         else:
-            live(rect('health','instrument_ink',0,-.33,.86,.045,.002),f'b_{HP}',point(-.43,-.33,.002))
-        live(rect('warn','instrument_needle',.35,-.425,.08,.045,.003),f'b_{WARN}',point(.31,-.425,.003))
+            live(rect('health','instrument_ink',0,-.33,.86,.045,.002),f'B_{HP}',point(-.43,-.33,.002))
+        live(rect('warn','instrument_needle',.35,-.425,.08,.045,.003),f'B_{WARN}',point(.31,-.425,.003))
     elif s.kind == 'weapons':
         digits(AMMO,.22,5,'AMMO')
         digits(SLOT,-.2,1,'SLOT')
     elif s.kind == 'flight':
         dial(SPEED,-.25,.16,'KMH',2000)
         dial(ALT,.25,.16,'ALT M',3000)
-        digits(HEADING,-.27,3,'HDG')
+        label('HDG',-.43,-.28,.013,max_width=.34)
+        digits(HEADING,-.32,3,'',.21,.46)
     else:
         # Contacts move in the physical monitor plane; a steering wheel or bezel can occlude them.
         dial(HEADING,0,.08,'HDG',360)
         for contact in range(6):
             live(rect(f'contact_{contact}','instrument_needle',0,.08,.025,.025,.004),
-                 f't_{contact}',point(0,.08,.004))
+                 f'T_{contact}',point(0,.08,.004),extent=(s.width,s.height))
     for (language,gate),bits in captions.items():
         live(merge(bits,name=prefix+f'_caption_{language}_{gate}'),f'l_{language}_{gate}',point(0,0))
     return parts,moving

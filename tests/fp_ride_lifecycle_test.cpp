@@ -172,6 +172,17 @@ int main() {
     InstrumentPose(inst,backup);
     check(pose[0]==0 && pose[16]==0,"adjacent station does not mix overlapping damage colours without its readings");
     Unpose(inst,backup);
+    Put<const wchar_t*>(bones,0,L"vc_i_1_0_D_7_0_0");
+    Put<const wchar_t*>(bones+kBoneStride,0,L"vc_i_1_0_D_7_0_6");
+    st.instruments.value[instruments::ammo]=99999;InstrumentPose(inst,backup);
+    check(pose[0]==0 && pose[16]==1,"new neighbouring digits show a dash, never a fully lit 88888");
+    Unpose(inst,backup);
+    Put<const wchar_t*>(bones,0,L"vc_i_1_0_B_2");
+    Put<const wchar_t*>(bones+kBoneStride,0,L"vc_i_1_0_T_0");
+    st.instruments.share[instruments::fuel]=1;st.instruments.contact[0]=true;InstrumentPose(inst,backup);
+    check(pose[0]==0 && pose[16]==0,"new neighbouring bars and contacts do not inherit this seat's readings");
+    Unpose(inst,backup);
+    check(std::memcmp(pose,originals,sizeof(pose))==0,"new widget dispatch restores every original pose byte");
 
 
     reset();Put<std::uint64_t>(human,kWeaponCount,0);

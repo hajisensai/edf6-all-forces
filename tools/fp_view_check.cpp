@@ -357,6 +357,29 @@ int main() {
     Expect(!Segment(5,0,1) && Segment(5,0,2),"physical digit 5 has the correct segment pattern");
     Expect(!Segment(5,1,6) && Segment(-1,1,6),"leading zero is blank; an unavailable value is a dash");
     Readings reading{};reading.share[hp]=.25f;
+      reading.flight=true;reading.value[climb]=-12.5f;
+      auto needle=crew::instruments::Pose(Identity(),L'a',climb,50,0,reading,true);
+      Expect(needle.m[0]!=0 && needle.m[5]!=0,"negative live climb is a valid signed needle reading");
+      reading.flight=false;
+      Expect(crew::instruments::Pose(Identity(),L'a',climb,50,0,reading,true).m[0]==0,
+             "ground vehicles do not invent flight-only readings");
+      Expect(crew::instruments::Pose(Identity(),L'u',climb,0,0,reading,true).m[0]!=0,
+             "unknown signed readings show the unavailable marker");
+      reading.value[speed]=80;
+      needle=crew::instruments::Pose(Identity(),L'r',speed,160,0,reading,true);
+      Expect(Near(needle.m[0],1) && Near(needle.m[5],1),"truck speed gauge has its own 160 km/h scale");
+      reading.value[speed]=-1;
+      Expect(crew::instruments::Pose(Identity(),L'r',speed,160,0,reading,true).m[0]==0,
+             "unavailable speed does not park a fake needle at zero");
+      reading.value[speed]=0;
+      Expect(crew::instruments::Pose(Identity(),L'u',speed,0,0,reading,true).m[0]==0,
+             "a measured zero speed is different from an unknown reading");
+      Expect(crew::instruments::Pose(Identity(),L'D',ammo,0,6,reading,false).m[0]!=0
+             && crew::instruments::Pose(Identity(),L'D',ammo,0,0,reading,false).m[0]==0,
+             "new numeric widgets show unknown dashes outside their owning seat");
+      Expect(crew::instruments::Pose(Identity(),L'B',fuel,0,0,reading,false).m[0]==0
+             && crew::instruments::Pose(Identity(),L'T',0,0,0,reading,false).m[0]==0,
+             "new bars and contacts cannot show invented neighbouring-seat values");
     for(int language=0;language<4;++language) {
         reading.language=language;
         int visible=0;

@@ -2358,8 +2358,21 @@ int PhysicalInstrumentFeedChecks() {
     check(FeedOf(s).hp==200,"legacy armor readout retains its rider meaning");
     s.stock=false;s.cockpit=true;s.jet.hp=2000;s.jet.hpMax=10000;PublishInstruments(s);
     check(std::fabs(deliveredInstruments.share[instruments::hp]-.2f)<1e-6f,"aircraft health does not inherit stale rider/vehicle gauge values");
+    s.jet.speed=100;s.jet.climb=-5;s.jet.throttle=.65f;
+    s.jet.sym.nose[1]=.5f;s.jet.sym.nose[2]=.8660254f;PublishInstruments(s);
+    check(deliveredInstruments.flight && deliveredInstruments.value[instruments::speed]==360
+          && deliveredInstruments.value[instruments::climb]==-5,"physical gauges receive speed and negative vertical speed");
+    check(std::fabs(deliveredInstruments.value[instruments::pitch]-30)<.001f
+          && std::fabs(deliveredInstruments.value[instruments::power]-65)<.001f,"physical gauges use degrees and actual throttle percent");
+    s.jet.rotor=true;s.jet.heli.power=.42f;PublishInstruments(s);
+    check(std::fabs(deliveredInstruments.value[instruments::power]-42)<.001f,"plugin rotor craft use measured rotor power");
     s.cockpit=false;PublishInstruments(s);
     check(deliveredInstruments.value[instruments::hp]<0,"armor-only snapshot cannot invent vehicle durability");
+    check(!deliveredInstruments.flight && deliveredInstruments.value[instruments::power]<0,
+          "leaving the aircraft invalidates flight-only readings and power");
+    s.heliFly=true;s.heliHud.f.climb=-2;s.heliHud.f.power=.35f;s.heliHud.sym.nose[2]=1;PublishInstruments(s);
+    check(deliveredInstruments.flight && deliveredInstruments.value[instruments::climb]==-2
+          && std::fabs(deliveredInstruments.value[instruments::power]-35)<.001f,"stock helicopters publish their own live climb and power");
     config=Config{};
     std::printf("cockpit feed: %d failures\n",failed);return failed;
 }

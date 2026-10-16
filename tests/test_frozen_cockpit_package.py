@@ -61,7 +61,12 @@ class FrozenCockpitPackageTests(unittest.TestCase):
             for name in ('cockpit_fits', 'cockpit_kits'):
                 for path in (ROOT / 'pylib').glob(name + '*.py'):
                     (root / 'pylib' / path.name).write_bytes(path.read_bytes())
+            retrofit=root/'pylib'/'cockpit_retrofit.py'
+            retrofit.write_bytes((ROOT/'pylib'/'cockpit_retrofit.py').read_bytes())
             before = buildcache.source_recipes(folder)
+            raw=retrofit.read_bytes();retrofit.write_bytes(raw+b'\n# changed instrument surfaces\n')
+            self.assertNotEqual(before['optics'],buildcache.source_recipes(folder)['optics'])
+            retrofit.write_bytes(raw)
             for kind in ('fits', 'kits'):
                 for family in ('ground', 'air', 'mech', 'plugin'):
                     path = root / 'pylib' / f'cockpit_{kind}_{family}.py'

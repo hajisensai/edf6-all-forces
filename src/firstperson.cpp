@@ -1048,11 +1048,14 @@ void InstrumentPose(unsigned char* inst,float* backup) noexcept {
         if(!name || std::wcsncmp(name,L"vc_i_",5)!=0)continue;
         int seat=-1,screen=-1,field=-1,place=0,segment=0;wchar_t mode=0;
         const int fields=swscanf_s(name,L"vc_i_%d_%d_%lc_%d_%d_%d",&seat,&screen,&mode,1u,&field,&place,&segment);
-        if(fields<4 || ((mode==L'd' || mode==L'p') && fields!=6))continue;
+        if(fields<4 || ((mode==L'd' || mode==L'D' || mode==L'p') && fields!=6))continue;
         const bool mine=seat==st.ride.seat;
+        const bool rangedNeedle=mode==L'n' && fields>=5;
+        const bool neutralWidget=mode==L'D' || mode==L'B' || mode==L'T';
         // Adjacent stations visible from this seat use the same language, while their
         // new health/percent widgets remain neutral without that seat's live data.
-        if(!mine && mode!=L'l' && mode!=L'c' && mode!=L'p' && mode!=L'v')continue;
+        if(!mine && mode!=L'l' && mode!=L'c' && mode!=L'p' && mode!=L'v' && mode!=L'u'
+            && mode!=L'r' && mode!=L'q' && mode!=L'a' && !rangedNeedle && !neutralWidget)continue;
         const bool ready=st.instrumentsReady && (mine || (mode==L'l' && place==0));
         const M4 original=MatrixAt(reinterpret_cast<const unsigned char*>(pose+i*16));
         const M4 moved=instruments::Pose(original,mode,field,place,segment,st.instruments,ready);

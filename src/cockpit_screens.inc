@@ -23,6 +23,7 @@ struct ScreenFeed {
     float speed=-1.0f,clear=-1.0f,climb=0.0f;         // m/s, m over the ground (<0 unknown), m/s
     bool flies=false;
     float heading=-1.0f,pitch=0.0f;                   // degrees (<0 unknown), radians up
+    float power=-1.0f;
     int cells=0,picked=-1;
     LoadCell cell[kStockArms>kMostStores ? kStockArms : kMostStores];
     unsigned warn=0;
@@ -42,6 +43,7 @@ ScreenFeed FeedOf(const Snapshot& snap) noexcept {
     if(snap.cockpit) {   // a plugin aircraft
         const PlayerJetReadout& j=snap.jet;
         f.hp=j.hp;f.hpMax=j.hpMax;f.fuel=j.fuel;f.speed=j.speed;f.clear=j.ground ? j.clear : -1.0f;f.climb=j.climb;f.flies=true;
+        f.power=j.rotor ? j.heli.power : j.throttle;
         NoseOf(j.sym.nose,f);
         f.cells=JetCells(j,f.cell);f.picked=j.store;
         std::memcpy(f.pos,j.sym.pos,12);
@@ -51,6 +53,7 @@ ScreenFeed FeedOf(const Snapshot& snap) noexcept {
         const HeliFlight& h=snap.heliHud.f;
         f.hp=h.hp;f.hpMax=h.hpMax;f.fuel=snap.heliHud.fuel;f.speed=h.speed;f.clear=h.ground ? h.clear : -1.0f;f.climb=h.climb;
         f.flies=true;
+        f.power=h.power;
         NoseOf(snap.heliHud.sym.nose,f);
         std::memcpy(f.pos,snap.heliHud.sym.pos,12);
     }
@@ -89,6 +92,8 @@ void PublishInstruments(const Snapshot& snap) noexcept {
     r.value[hull]=f.hull ? f.hullHp : -1.0f;r.share[hull]=f.hullMax>0 ? f.hullHp/f.hullMax : 0.0f;
     r.value[fuel]=f.fuel.ok ? f.fuel.share*100.0f : -1.0f;r.share[fuel]=f.fuel.ok ? f.fuel.share : 0.0f;
     r.value[speed]=f.speed>=0 ? f.speed*3.6f : -1.0f;r.value[altitude]=f.clear;r.value[heading]=f.heading;
+    r.flight=f.flies;r.value[climb]=f.climb;r.value[pitch]=f.pitch/kDeg;
+    r.value[power]=f.power>=0 ? f.power*100.0f : -1.0f;
     r.value[warn]=static_cast<float>(f.warn);r.share[warn]=f.warn ? 1.0f : 0.0f;
     const float hd=f.heading>=0 ? f.heading*kDeg : 0.0f;
     for(int i=0;i<f.threats && i<6;++i) {
