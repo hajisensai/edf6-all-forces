@@ -9,9 +9,9 @@ console and control arms below the sight line, plated walls round the rest.
 
 Real material, not boxes: the seat, console and control arms are Romain Revert's modelled cockpit "The cockpit"
 (poly.pizza, CC-BY 3.0: <model dir>/cockpits/parts/pp-scifi-cockpit-revert/) less its screen tower and roof bar (they
-stood in the line of sight); the instrument panel under the visor, the switch strips along the sill and over the
-visor and every screen's bezel are crops of public-domain photographs of real glass cockpits (a C-141C and a
-KC-135, US Air Force). Both are prepared by tools/prep_cockpit_mech.py; credits in cockpits/CREDITS_mech.txt.
+stood in the line of sight). The instrument housings, switches and display mounts are model geometry with a shared
+matte palette; photographs of unrelated cockpits no longer stand in for these surfaces. The seat is prepared by
+tools/prep_cockpit_mech.py; credits in cockpits/CREDITS_mech.txt.
 
 Mech torsos are tight (a Begaruta's chest closes round a box 1.3 m wide and 0.7 m high about the pilot's head) and
 uneven (a 49 m Balam's is huge): each mech has its own pod size (PODS, measured), pulled in further where the room
@@ -31,7 +31,7 @@ import numpy as np
 import cockpits
 import obj_model as om
 from cockpit_room import MARGIN, Cabin, _materials, _room
-from cockpit_shapes import box, frame, merge, panel
+from cockpit_shapes import basis, box, cylinder, frame, merge, panel
 from cockpits import Kit, KitMaterial, Screen
 
 SEAT_ASSET = 'parts/pp-scifi-cockpit-revert/the_cockpit.glb'
@@ -49,16 +49,14 @@ def _srgb(linear: tuple[float, float, float, float]) -> tuple[int, int, int]:
 
 
 def _military(rgb: tuple[int, int, int]) -> tuple[int, int, int]:
-    """The asset's toy colours in a military cockpit's (the user wants it real): a saturated green, blue, purple or cyan
-    becomes an olive-tinted gunmetal of the same lightness; reds and ambers stay (switch guards, warning lamps), greys
-    stay as they are."""
+    """One graphite palette for the console, retaining restrained red/amber switch guards."""
     import colorsys
     h, l, sat = colorsys.rgb_to_hls(*(c / 255.0 for c in rgb))
     accent = h < 0.06 or h > 0.94 or 0.07 < h < 0.15          # red, amber
-    if sat < 0.25 or accent:
-        return rgb
-    grey = 0.18 + 0.45 * l
-    r, g, b = colorsys.hls_to_rgb(0.17, grey, 0.08)
+    if sat >= .25 and accent:
+        return tuple(round(c*.7) for c in rgb)
+    grey = 0.12 + 0.30 * l
+    r, g, b = colorsys.hls_to_rgb(0.26, grey, 0.045)
     return (int(r * 255), int(g * 255), int(b * 255))
 
 
@@ -124,13 +122,47 @@ def _screen(kind: str, c: Vec3, w: float, h: float) -> tuple[om.Part, Screen]:
     return panel(f'scr_{kind}', 'screen', glass, w, h, f), Screen(kind, c, f, w, h)
 
 
-def _bezel(name: str, c: Vec3, w: float, h: float) -> om.Part:
-    """The screen's housing behind its glass: a real MFD's bezel (textures/mech_mfd.png, a KC-135's display, its
-    picture area 86 x 85 % of the crop, a little above the middle) sized so the glass covers that picture area."""
+CONSOLE_MATERIALS = {
+    'console_shell': KitMaterial((54,59,55)),
+    'console_trim': KitMaterial((85,91,82)),
+    'console_button': KitMaterial((34,40,37)),
+    'console_mark': KitMaterial((154,167,146)),
+}
+
+
+def _bezel(name: str, c: Vec3, w: float, h: float) -> list[om.Part]:
+    """A recessed display with a solid rim, rear case, fasteners and keys in its own plane."""
     f = _toward_eye(c)
-    bw, bh = w / 0.86, h / 0.85
-    back = (c[0] - 0.006 * f[0], c[1] - 0.006 * f[1] - 0.045 * bh, c[2] - 0.006 * f[2])
-    return panel(name, 'mech_mfd', back, bw, bh, f)
+    right,up,_=basis(f)
+    rim=.06*w
+    def at(x=0.,y=0.,z=0.):
+        return tuple(c[k]+right[k]*x+up[k]*y+f[k]*z for k in range(3))
+    parts=[frame(name,'console_shell',at(z=-.005),w+2*rim,h+2*rim,rim,f,.024),
+           frame(name+'_lip','console_trim',at(z=.006),w+.004,h+.004,.002,f,.002),
+           panel(name+'_back','console_shell',at(z=-.017),w,h,tuple(-v for v in f))]
+    for x in (-w/2-rim/2,w/2+rim/2):
+        for y in (-h/2-rim/2,h/2+rim/2):
+            parts.append(cylinder(name+'_screw','console_trim',at(x,y,.007),at(x,y,.009),rim*.15,8))
+    for i in range(5):
+        x=(i-2)*w*.16
+        parts.append(panel(name+'_key','console_button',at(x,-h/2-rim/2,.008),w*.085,rim*.48,f))
+    return parts
+
+
+def _switch_bank(name: str, c: Vec3, w: float, h: float, facing: Vec3, count: int) -> list[om.Part]:
+    """Small physical knobs and index marks on a matte inset, without photographic controls."""
+    right,up,f=basis(facing)
+    def at(x=0.,y=0.,z=0.):
+        return tuple(c[k]+right[k]*x+up[k]*y+f[k]*z for k in range(3))
+    parts=[panel(name,'console_shell',c,w,h,f),
+           frame(name+'_rim','console_trim',at(z=.001),w,h,min(w,h)*.035,f,.004)]
+    radius=min(w/count*.18,h*.18)
+    for i in range(count):
+        x=(i-(count-1)/2)*w/count*.84
+        parts.append(cylinder(name+'_knob','console_button',at(x,0,.002),at(x,0,.009),radius,10))
+        parts.append(panel(name+'_index','console_mark',at(x,0,.0095),radius*.22,radius*1.15,f))
+        parts.append(panel(name+'_tick','console_mark',at(x,h*.32,.002),radius*.25,h*.06,f))
+    return parts
 
 
 def _at(yaw: float, pitch: float, dist: float) -> Vec3:
@@ -156,19 +188,19 @@ def _pod(cabin: Cabin, kit: str, want: Cabin, middle: str, sides: tuple[str, str
     parts.append(box('shell', 'mech_plate', (mid, (U - D) / 2, (A - B) / 2), (L + R, U + D, A + B), inward=True,
                      tile=0.9, faces='xXyYZ'))
     # The front: the visor from 20 deg down (no lower than the console's top) to 5 cm under the roof, 5 cm in from
-    # each side; under it the instrument panel (a real glass cockpit's centre panel), over it a strip of switches.
+    # each side; solid instrument panels below and above it, with physical controls.
     vl, vr, vt = L - 0.05, R - 0.05, U - 0.05
     vb = min(D - 0.05, A * math.tan(math.radians(20)))
-    parts.append(panel('wall_front_low', 'mech_dash', (mid, (-D - vb) / 2, A), L + R, D - vb, (0, 0, -1)))
-    parts.append(panel('wall_front_top', 'mech_overhead', (mid, (U + vt) / 2, A), L + R, U - vt, (0, 0, -1)))
+    parts.append(panel('wall_front_low', 'console_shell', (mid, (-D - vb) / 2, A), L + R, D - vb, (0, 0, -1)))
+    parts += _switch_bank('wall_front_top',(mid,(U+vt)/2,A),L+R,U-vt,(0,0,-1),8)
     for name, x0, x1 in (('front_l', vl, L), ('front_r', -R, -vr)):
         parts.append(panel(f'wall_{name}', 'mech_plate', ((x0 + x1) / 2, (vt - vb) / 2, A), x1 - x0, vt + vb,
                            (0, 0, -1), uv=(0.0, 0.0, (x1 - x0) / 0.9, (vt + vb) / 0.9)))
     parts.append(frame('visor_frame', 'mech_frame', ((vl - vr) / 2, (vt - vb) / 2, A - 0.015), vl + vr + 0.04,
                        vt + vb + 0.04, 0.03, (0, 0, -1), 0.03))
-    # The sill: a strip of real switches along the visor's lower edge, leaning back toward the eye.
+    # The sill's physical controls lean back toward the eye.
     sill_d = min(0.12, A * 0.2)
-    parts.append(panel('sill', 'mech_sill', (mid, -vb - 0.01, A - sill_d / 2), L + R - 0.02, sill_d, (0, 0.8, -0.6)))
+    parts += _switch_bank('sill',(mid,-vb-.01,A-sill_d/2),L+R-.02,sill_d,(0,.8,-.6),10)
     # The pod's ribs on the side walls and the roof, behind the visor.
     for z in (A * 0.35, -B * 0.5):
         parts.append(box(f'rib{z:.2f}', 'metal_dark', (mid, U - 0.02, z), (L + R - 0.02, 0.04, 0.06)))
@@ -176,8 +208,8 @@ def _pod(cabin: Cabin, kit: str, want: Cabin, middle: str, sides: tuple[str, str
             parts.append(box(f'rib{n}{z:.2f}', 'metal_dark', (x, (U - D) / 2, z), (0.04, U + D - 0.02, 0.06)))
     # Switch panels on the side walls by the seat.
     for x, n, f in ((L - 0.005, 'l', (-1.0, 0.0, 0.0)), (-R + 0.005, 'r', (1.0, 0.0, 0.0))):
-        parts.append(panel(f'side_{n}', 'panel_switches', (x, -0.25 * k, 0.05), min(0.45, A + B - 0.1) * k,
-                           min(0.3, U + D - 0.1) * k, f))
+        parts += _switch_bank(f'side_{n}',(x,-.25*k,.05),min(.45,A+B-.1)*k,
+                              min(.3,U+D-.1)*k,f,4)
     # The seat, its consoles and control arms, cut to the walls.
     seat, seat_mats = _seat(SEAT_SCALE * k, (-R + MARGIN, -D + MARGIN, -B + MARGIN), (L - MARGIN, U - MARGIN, A - 0.08))
     parts += seat
@@ -191,15 +223,20 @@ def _pod(cabin: Cabin, kit: str, want: Cabin, middle: str, sides: tuple[str, str
         if abs(c[0]) + w / 2 / 0.86 > wall - 0.03:   # pulled toward the middle to clear the side wall
             c = (sign * (wall - 0.03 - w / 2 / 0.86), c[1], c[2])
         glass, scr = _screen(kind, c, w, h)
-        parts += [glass, _bezel(f'bezel_{kind}', c, w, h)]
+        parts += [glass]+_bezel(f'bezel_{kind}',c,w,h)
+        # The display is bolted to the sill rather than floating in front of it.
+        _,up,facing=basis(scr.facing)
+        foot=(c[0],-vb-.01,A-sill_d/2)
+        neck=tuple(c[i]-up[i]*(h/2+.06*w)-facing[i]*.014 for i in range(3))
+        parts.append(cylinder(f'mount_{kind}','console_shell',foot,neck,.009*k,10))
         screens.append(scr)
     cw, ch = 0.2 * k, 0.15 * k
     c = (-0.02 * k, -0.42 * k, 0.58 * k)   # the asset console's centre screen (asset (-0.1, -0.06, -0.015)), 1 cm proud
     glass, scr = _screen(middle, c, cw, ch)
-    parts += [glass, _bezel(f'bezel_{middle}', c, cw, ch)]
+    parts += [glass]+_bezel(f'bezel_{middle}',c,cw,ch)
     screens.append(scr)
-    mats = _materials('mech_plate', 'mech_frame', 'metal_dark', 'panel_switches', 'screen', 'mech_dash',
-                      'mech_overhead', 'mech_sill', 'mech_mfd')
+    mats = _materials('mech_plate','mech_frame','metal_dark','screen')
+    mats.update(CONSOLE_MATERIALS)
     mats.update(seat_mats)
     return Kit(_merged(parts), mats, screens=tuple(screens))
 
