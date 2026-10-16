@@ -15,9 +15,12 @@
 //    turns it on its side (not down: the grip is below the view's edge); a switch dips out of view and comes back; a sprint lowers it; a turn of the view leaves it behind.
 // Exit code 1 when one fails. cmake --build build --target fp_view_check && build\fp_view_check.exe
 #include "../src/fp_view.h"
+#include "../src/cockpit_instruments.h"
 #include "../src/fp_motion.h"
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <initializer_list>
 
 namespace {
 using namespace crew::fpview;
@@ -44,6 +47,31 @@ M4 CameraAt(const M4& aim,const float* eyeLocal) {
     M4 c=aim;
     Point(aim,eyeLocal,c.m+12);
     return c;
+}
+
+void AuthoredActions() {
+    const float origin[3]={10,2,-30},grip[3]={.2f,-.3f,.6f},rest[3]={.3f,1.1f,.5f};
+    const auto aim=Frame(.4f,1.3f,origin),camera=Frame(.4f,1.3f,origin);
+    bool follows=true,connected=true;
+    for(int frame=0;frame<120;++frame) {
+        const float phase=std::sin(frame*.08f);
+        // Native spear anticipation/thrust and shield translation, sampled before muzzle events.
+        const float action[3]={-.15f*phase,.12f*phase,.35f*phase};
+        M4 weapon=aim;float local[3];for(int i=0;i<3;++i)local[i]=rest[i]+action[i];
+        Point(aim,local,weapon.m+12);M4 transform,inverse;
+        follows &= NativeGripTransform(weapon,aim,camera,grip,.6f,&transform,Identity(),rest);
+        InverseAffine(camera,&inverse);float world[3],placed[3];Point(transform,weapon.m+12,world);Point(inverse,world,placed);
+        for(int i=0;i<3;++i)follows &= Near(placed[i],.6f*(grip[i]+action[i]));
+        const float shoulder[3]={-.3f,0,0},elbow[3]={-.2f,-.3f,.1f},wrist[3]={0,-.4f,.4f};
+        const float target[3]={-.1f+phase*.1f,-.3f,.5f},want[3]={-.3f,-.2f,0},pole[3]={-1,-1.5f,0};
+        M4 upper,fore;connected &= ArmChainTo(shoulder,elbow,wrist,target,want,pole,&upper,&fore);
+        float e1[3],e2[3],tip[3],s1[3];Point(upper,elbow,e1);Point(fore,elbow,e2);Point(fore,wrist,tip);Point(upper,shoulder,s1);
+        for(int i=0;i<3;++i)connected &= Near(e1[i],e2[i]) && Near(tip[i],target[i]);
+        float original[3],moved[3];Sub(elbow,shoulder,original);Sub(e1,s1,moved);connected &= Near(Length(original),Length(moved));
+        Sub(wrist,elbow,original);Sub(tip,e2,moved);connected &= Near(Length(original),Length(moved));
+    }
+    Expect(follows,"authored anticipation, thrust and guard translations survive viewmodel placement");
+    Expect(connected,"moving support wrist retains a connected elbow and both limb lengths throughout strafing");
 }
 
 void Identity_() {
@@ -256,7 +284,13 @@ void Springs() {
     Cue shot=Quiet();shot.shots=1;shot.recoil=1.0f;
     p=Advance(s,shot);
     Pose q=Advance(s,Quiet());
-    Expect(p.z<0 && p.pitch>0 && q.z<p.z,"a shot kicks back and up",p.z,p.pitch);
+    Expect(p.z<-.06f && p.pitch>.09f && q.z>p.z && q.pitch<p.pitch,
+           "a shot kicks immediately, then returns without waiting for the movement spring",p.z,p.pitch);
+    State automatic{};
+    for(int i=0;i<120;++i) {
+        const Pose burst=Advance(automatic,shot);
+        Expect(burst.z>=-kRecoilMostBack && burst.pitch<=kRecoilMostUp,"automatic recoil stays bounded",burst.z,burst.pitch);
+    }
     p=Run(s,Quiet(),90);
     Expect(std::fabs(p.z)<1e-3f && std::fabs(p.pitch)<1e-3f,"...and settles",p.z,p.pitch);
     Cue reload=Quiet();reload.reloading=true;
@@ -287,6 +321,18 @@ void Springs() {
     Cue look=Quiet();look.lookYaw=0.05f;
     p=Advance(s,look);
     Expect(p.yaw<0,"turning right leaves it behind (to the left)",p.yaw);
+    s=State{};look.lookYaw=2.0f;look.lookPitch=-2.0f;
+    float maximum=0;
+    for(int i=0;i<600;++i) {
+        if(i%15==0){look.lookYaw=-look.lookYaw;look.lookPitch=-look.lookPitch;}
+        p=Advance(s,look);maximum=std::fmax(maximum,std::fmax(std::fabs(p.yaw),std::fabs(p.pitch)));
+    }
+    Expect(maximum<0.02f,"rapid alternating turns stay below 1.15 degrees at default sway",maximum);
+    s=State{};look.sway=0;p=Run(s,look,60);
+    Expect(p.yaw==0 && p.pitch==0,"zero sway only disables turn motion",p.yaw,p.pitch);
+    look.shots=1;look.recoil=1;p=Advance(s,look);
+    Expect(p.pitch>.09f,"turn sway disabled still preserves recoil",p.pitch);
+
     s=State{};
     Cue air=Quiet();air.grounded=false;air.speed=0.3f;
     p=Run(s,air,30);
@@ -295,6 +341,107 @@ void Springs() {
 }  // namespace
 
 int main() {
+    Expect(Near(CenteredGrip(.17f,.07f),.10f) && Near(CenteredGrip(.34f,.07f),.27f),
+           "existing default grip values upgrade toward the centre",CenteredGrip(.17f,.07f));
+    Expect(CenteredGrip(.02f,.07f)==0 && Near(CenteredGrip(-.17f,.07f),-.10f),
+           "centering never crosses the midline and preserves handedness",CenteredGrip(-.17f,.07f));
+
+    // A melee blade's authored rotation and swing must survive, while its grip stays at the requested placement.
+    for(float swing:{-.8f,0.0f,.9f}) {
+        const float origin[3]={4,2,-7},eye[3]={0,1.7f,.1f},wrist[3]={.3f,1.2f,.5f},grip[3]={.3f,-.25f,.4f};
+        const M4 aim=Frame(-.2f,1.1f,origin),camera=CameraAt(aim,eye),local=Frame(.5f+swing,-.7f,wrist);
+        const M4 weapon=Mul(local,aim);
+        M4 transform,invCamera;
+        const bool ok=NativeGripTransform(weapon,aim,camera,grip,.5f,&transform) && InverseAffine(camera,&invCamera);
+        const M4 shown=Mul(Mul(weapon,transform),invCamera);
+        float error=0;
+        for(int row=0;row<3;++row)for(int col=0;col<3;++col)
+            error=std::fmax(error,std::fabs(shown.m[row*4+col]-local.m[row*4+col]*.5f));
+        Expect(ok && error<1e-5f,"a melee weapon keeps its native holding angle and animated swing",error);
+        Expect(Near(shown.m[12],grip[0]*.5f) && Near(shown.m[13],grip[1]*.5f) && Near(shown.m[14],grip[2]*.5f),
+               "...while the grip stays placed in the view");
+    }
+    // Across a full recoil/reload-sized wrist sweep, both ends of the solved elbow must agree and each measured
+    // arm length must stay unchanged. The hand itself never receives a corrective transform.
+    for(int i=0;i<120;++i) {
+        const float phase=i*.0523598776f;
+        const float shoulder[3]={.3f,-.25f,-.05f},elbow[3]={.4f,-.45f,.2f};
+        const float wrist[3]={.2f+.05f*std::sin(phase),-.2f,.5f};
+        const float want[3]={.35f,-.3f,-.1f},pole[3]={1,-1.5f,0};
+        M4 upper,fore;
+        const bool ok=ArmChain(shoulder,elbow,wrist,want,pole,&upper,&fore);
+        float a[3],b[3],h[3],s[3],d[3],before[3];
+        Point(upper,elbow,a);Point(fore,elbow,b);Point(fore,wrist,h);Point(upper,shoulder,s);
+        Sub(a,b,d);Sub(h,wrist,before);
+        Expect(ok && Length(d)<1e-5f && Length(before)<1e-5f,"arm chain has a shared elbow and an unchanged wrist");
+        Sub(a,s,d);Sub(elbow,shoulder,before);
+        Expect(Near(Length(d),Length(before)),"upper arm never stretches");
+        Sub(a,wrist,d);Sub(elbow,wrist,before);
+        Expect(Near(Length(d),Length(before)),"forearm never stretches");
+    }
+    using namespace crew::instruments;
+    const M4 shell=Translate(1,2,3);
+    const M4 hiddenShell=ShellPose(shell,(1u<<0)|(1u<<12),0);
+    Expect(hiddenShell.m[0]==0 && hiddenShell.m[5]==0 && hiddenShell.m[10]==0 && hiddenShell.m[12]==0,
+           "the local cabin shell collapses to one point before any live readings");
+    Expect(ShellPose(shell,1u<<12,12).m[0]==0,"the last transport passenger uses its own visibility bit");
+    for(int seat:{-1,1,31,32})
+        Expect(std::memcmp(ShellPose(shell,1,seat).m,shell.m,64)==0,
+               "other seats and invalid shifts preserve the exact native shell pose");
+    Expect(!Segment(5,0,1) && Segment(5,0,2),"physical digit 5 has the correct segment pattern");
+    Expect(!Segment(5,1,6) && Segment(-1,1,6),"leading zero is blank; an unavailable value is a dash");
+    Readings reading{};reading.share[hp]=.25f;
+      reading.flight=true;reading.value[climb]=-12.5f;
+      auto needle=crew::instruments::Pose(Identity(),L'a',climb,50,0,reading,true);
+      Expect(needle.m[0]!=0 && needle.m[5]!=0,"negative live climb is a valid signed needle reading");
+      reading.flight=false;
+      Expect(crew::instruments::Pose(Identity(),L'a',climb,50,0,reading,true).m[0]==0,
+             "ground vehicles do not invent flight-only readings");
+      Expect(crew::instruments::Pose(Identity(),L'u',climb,0,0,reading,true).m[0]!=0,
+             "unknown signed readings show the unavailable marker");
+      reading.value[speed]=80;
+      needle=crew::instruments::Pose(Identity(),L'r',speed,160,0,reading,true);
+      Expect(Near(needle.m[0],1) && Near(needle.m[5],1),"truck speed gauge has its own 160 km/h scale");
+      reading.value[speed]=-1;
+      Expect(crew::instruments::Pose(Identity(),L'r',speed,160,0,reading,true).m[0]==0,
+             "unavailable speed does not park a fake needle at zero");
+      reading.value[speed]=0;
+      Expect(crew::instruments::Pose(Identity(),L'u',speed,0,0,reading,true).m[0]==0,
+             "a measured zero speed is different from an unknown reading");
+      Expect(crew::instruments::Pose(Identity(),L'D',ammo,0,6,reading,false).m[0]!=0
+             && crew::instruments::Pose(Identity(),L'D',ammo,0,0,reading,false).m[0]==0,
+             "new numeric widgets show unknown dashes outside their owning seat");
+      Expect(crew::instruments::Pose(Identity(),L'B',fuel,0,0,reading,false).m[0]==0
+             && crew::instruments::Pose(Identity(),L'T',0,0,0,reading,false).m[0]==0,
+             "new bars and contacts cannot show invented neighbouring-seat values");
+    for(int language=0;language<4;++language) {
+        reading.language=language;
+        int visible=0;
+        for(int variant=0;variant<4;++variant) {
+            const auto pose=crew::instruments::Pose(Identity(),L'l',variant,0,0,reading,true);
+            visible+=pose.m[0]!=0;
+            Expect((pose.m[0]!=0)==(variant==language),"physical label selects current HUD language");
+        }
+        Expect(visible==1,"exactly one language variant is visible");
+    }
+    reading.value[fuel]=-1;
+    Expect(crew::instruments::Pose(Identity(),L'l',reading.language,fuel+1,0,reading,true).m[0]==0,
+           "unavailable fuel also hides its translated caption");
+    reading.value[hp]=200;
+    for(float health:{1.f,.4f,.1f}) {
+        reading.share[hp]=health;int visible=0;
+        for(int colour=0;colour<3;++colour)visible+=crew::instruments::Pose(Identity(),L'c',hp,colour,0,reading,true).m[0]!=0;
+        Expect(visible==1,"exactly one whole-vehicle damage colour is visible");
+    }
+    reading.value[hp]=-1;
+    Expect(crew::instruments::Pose(Identity(),L'c',hp,2,0,reading,true).m[0]==0,"unknown health stays a neutral outline");
+    reading.value[hp]=300000;reading.share[hp]=.5f;
+    Expect(crew::instruments::Pose(Identity(),L'p',hp,1,0,reading,true).m[0]!=0,
+           "large native durability still displays a valid percent");
+    reading.share[hp]=.25f;
+    M4 bar=crew::instruments::Pose(Identity(),L'b',hp,0,0,reading,true);
+    Expect(Near(bar.m[0],.25f) && Near(bar.m[5],1),"a physical bar scales only along its own horizontal axis");
+    AuthoredActions();
     Identity_();
     Hold();
     Shrink();

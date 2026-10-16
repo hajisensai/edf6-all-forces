@@ -26,12 +26,12 @@ from typing import Callable
 import graft_pure as g
 import obj_model as om
 import texfile
-from mdb import Mdb, Rab, cmpl_compress, mdb_read, mdb_write, rab_read, rab_write
+from mdb import Mdb, Mesh, Rab, cmpl_compress, mdb_read, mdb_write, rab_read, rab_write
 
 Vec3 = tuple[float, float, float]
 
 TEMPLATE_ARC, TEMPLATE_MDB, TEMPLATE_MATERIAL = 'V505_TANK.MRAB', 'v505_tank.mdb', 'v505_tank'
-FLAT_NORMAL, NEUTRAL_RMO = (128, 128, 255), (150, 110, 255)   # drill_model.py's: tangent-space up; roughness 0.6
+FLAT_NORMAL, NEUTRAL_RMO = (128, 128, 255), (190, 0, 255)   # matte nonmetal interior, no occlusion baked twice
 NORMAL_TEX, RMO_TEX = 'edf6vc_cpit_n.dds', 'edf6vc_cpit_rmo.dds'
 ASSET_DIR = 'cockpits'          # under a model root: textures/, parts/<asset>/, CREDITS.txt
 MARKER = 'vc_eye_{}'
@@ -52,12 +52,14 @@ class Fit:
     yaw: float = 0.0
     pitch: float = 0.0
     scale: float = 1.0
+    shell_ahead: float | None = None  # measured native cab nose beyond its first axial pane, metres from the eye
 
 
 @dataclass(frozen=True)
 class KitMaterial:
     """A kit material's albedo: an image under `cockpits/` (PNG / JPEG / DDS), or one colour."""
     albedo: str | tuple[int, int, int]
+    emissive: bool = False
 
 
 SCREEN_KINDS = ('flight', 'weapons', 'status', 'hud', 'map', 'sensor')
@@ -80,6 +82,16 @@ class Screen:
     up: Vec3 = (0.0, 1.0, 0.0)
 
 
+@dataclass(frozen=True)
+class InstrumentControl:
+    part: str
+    control: str
+    centre: Vec3
+    facing: Vec3
+    up: Vec3
+    extent: tuple[float,float] = (1.0,1.0)
+
+
 @dataclass
 class Kit:
     """A cockpit: parts in the eye's frame (obj_model Parts whose `material` names a key of `materials`). `outside`:
@@ -98,6 +110,8 @@ class Kit:
     sill: float | None = None
     windows: tuple[tuple[Vec3, Vec3, Vec3], ...] = ()
     conform: frozenset[str] = frozenset()
+    controls: tuple[InstrumentControl, ...] = ()  # physical instruments replacing source-model dial faces
+    ranges: tuple[tuple[int,int], ...] = ()
 
 
 KitFn = Callable[[dict[str, float]], Kit]   # the room round the eye (clearance) -> the kit laid out in it
@@ -182,13 +196,27 @@ def albedo_dds(spec: KitMaterial, root: str) -> bytes:
     return texture_dds(os.path.join(root, spec.albedo))
 
 
-def template(game) -> tuple[Mdb, object]:  # noqa: ANN001 - rootcpk.Game
+def template(game) -> tuple[Mdb, Mesh]:  # noqa: ANN001 - rootcpk.Game
     """The Blacker hull's model and its skinned mesh in the v505_tank material (the kits' layout and shader)."""
     host = mdb_read(next(f for f in rab_read(game.read('OBJECT', TEMPLATE_ARC)).files
                          if f.name.lower() == TEMPLATE_MDB).data)
     mesh = next(me for o in host.objects for me in o.meshes
                 if host.name_of(host.materials[me.material].name) == TEMPLATE_MATERIAL)
     return host, mesh
+
+
+def precise_template(mesh: Mesh) -> Mesh:
+    """Vertex layout for newly built cockpit meshes: float32 positions, retaining all other native elements.
+
+    The hull template uses half4 positions. At a cab's model-space offset its quantisation can exceed the 1-2 mm
+    gap between a glyph and its display, bending their triangles through each other. Widen the declaration before
+    packing new vertices; merely moving the screen cannot fix the glyphs fighting their own backing.
+    """
+    position = next(e for e in mesh.elems if e.name.lower()=='position')
+    if position.fmt!=7: return mesh
+    elems = [replace(e,fmt=1) if e is position else replace(e,offset=e.offset+8 if e.offset>position.offset else e.offset)
+             for e in mesh.elems]
+    return replace(mesh,vsize=mesh.vsize+8,elems=elems,vdata=b'',indices=b'')
 
 
 def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa: ANN001 - rootcpk.Game
@@ -202,22 +230,69 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
     if len({f.seat for f in fits}) != len(fits):
         raise ValueError('two cockpits for one seat')
     import vehicle_optics   # the marker bone is the optics' kind (late: vehicle_optics imports this module)
+    import cockpit_instruments
+    import cockpit_shell
     root = asset_root()
     print('      座舱：提取车壳三角形……', flush=True)
     hull = hull_triangles(md)
+    thumbnail = cockpit_instruments.silhouette(hull, 'front' if any(f.kit.startswith('mech_') for f in fits) else 'top')
     kit_of: dict[int, Kit] = {}
+    controls: dict[int, dict[str, str]] = {}
     for fit in fits:
         started = time.perf_counter()
         print(f'      席位 {fit.seat}（{fit.kit}）：开始适配座舱……', flush=True)
         kit_of[fit.seat] = fitted(hull, fit, kits[fit.kit])
+        kit = kit_of[fit.seat]
+        controls[fit.seat] = {}
+        shared = {}
+
+        def bind(control: InstrumentControl, index: int) -> None:
+            nonlocal md
+            # Visibility-only geometry can share a bone even at different positions.
+            # Needles and bars keep their own pivots; their transforms are not visibility-only.
+            reusable = control.control[0] in 'dDplcuv'
+            name = shared.get(control.control) if reusable else None
+            if name is None:
+                name = f'vc_i_{fit.seat}_{index}_{control.control}'
+                at = Screen('status', control.centre, control.facing, .01, .01, control.up)
+                transform = screen_frame(at, fit)
+                if control.control.startswith(('t_','T_')):
+                    transform[:3] = [v*control.extent[0]*fit.scale for v in transform[:3]]
+                    transform[4:7] = [v*control.extent[1]*fit.scale for v in transform[4:7]]
+                md = vehicle_optics.add_marker(md, fit.bone, name, transform)
+                if reusable: shared[control.control] = name
+            controls[fit.seat][control.part] = name
+
+        for index, scr in enumerate(kit.screens):
+            if scr.kind in ('hud', 'sensor'):
+                continue
+            parts, moving = cockpit_instruments.instrument(scr, index, numbers=fit.seat == 0, thumbnail=thumbnail,
+                                                           ranges=dict(kit.ranges))
+            # Replace the kit's old display quad, rather than adding a second coincident dark face.
+            kit.parts = [p for p in kit.parts if not (p.name==f'screen_{scr.kind}' and p.material=='screen')]
+            kit.parts.extend(parts)
+            kit.materials.update(cockpit_instruments.MATERIALS)
+            for control in moving:
+                bind(control,index)
+        for index,control in enumerate(kit.controls,len(kit.screens)):
+            bind(control,index)
         print(f'      席位 {fit.seat}：适配完成（{time.perf_counter()-started:.1f} 秒）', flush=True)
+    md = cockpit_shell.separate(md, fits, hull)
+    md = clear_cab_interior(md, fits)
     for fit in fits:
         md = vehicle_optics.add_marker(md, fit.bone, MARKER.format(fit.seat), frame(fit))
-        for scr in kit_of[fit.seat].screens:
-            md = vehicle_optics.add_marker(md, fit.bone, screen_marker(fit.seat, scr), screen_frame(scr, fit))
+        seen=set()
+        for index,scr in enumerate(kit_of[fit.seat].screens):
+            marker=screen_marker(fit.seat,scr)
+            if marker in seen:marker+=f'_{index}'  # mirrored displays may have the same kind and size
+            seen.add(marker)
+            md = vehicle_optics.add_marker(md, fit.bone, marker, screen_frame(scr, fit))
     print('      座舱：生成骨骼与网格……', flush=True)
     md = preorder(md)
+    if len(md.bones) > 256:
+        raise ValueError(f'cockpit needs {len(md.bones)} bones, beyond the MDB ubyte skin-index limit')
     tmpl_md, tmpl_mesh = template(game)
+    tmpl_mesh = precise_template(tmpl_mesh)
     by_material: dict[tuple[str, str], list[tuple[om.Part, list]]] = {}
     materials: dict[tuple[str, str], KitMaterial] = {}
     for fit in fits:
@@ -226,7 +301,8 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
             if part.material not in kit.materials:
                 raise ValueError(f'{fit.kit}: part {part.name} has no material {part.material}')
             placed = place(part, m, fit.scale)
-            by_material.setdefault((fit.kit, part.material), []).append((placed, om.rigid(placed, bone)))
+            part_bone = md.bone_index(controls[fit.seat][part.name]) if part.name in controls[fit.seat] else bone
+            by_material.setdefault((fit.kit, part.material), []).append((placed, om.rigid(placed, part_bone)))
             materials[(fit.kit, part.material)] = kit.materials[part.material]
     textures = {NORMAL_TEX: texfile.solid_dxt1(FLAT_NORMAL), RMO_TEX: texfile.solid_dxt1(NEUTRAL_RMO)}
     meshes = []
@@ -237,13 +313,52 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
             print(f'      贴图 {kit_name}/{key}：转换中……', flush=True)
             textures[tex] = albedo_dds(materials[(kit_name, key)], root)
             print(f'      贴图 {kit_name}/{key}：完成（{time.perf_counter()-started:.1f} 秒）', flush=True)
-        md, mi = om.add_material(md, tmpl_md, TEMPLATE_MATERIAL, f'edf6vc_cpit_{kit_name}_{key}',
-                                 {'albedo': tex, 'normal': NORMAL_TEX, 'param_r_m_occ_hr': RMO_TEX})
+        spec = materials[(kit_name, key)]
+        md, mi = om.add_material(md, tmpl_md, 'Light01' if spec.emissive else TEMPLATE_MATERIAL,
+                                 f'edf6vc_cpit_{kit_name}_{key}',
+                                 {'albedo': tex, 'normal': NORMAL_TEX,
+                                  'param_r_m_occ_light' if spec.emissive else 'param_r_m_occ_hr': RMO_TEX})
+        # Source albedos already contain their base colour. The tank template's 0.6 diffuse multiplier and metallic
+        # mask made imported cockpits muddy; the display's painted glyphs also need the stock light shader.
+        params = []
+        for p in md.materials[mi].params:
+            v = list(p.value)
+            if p.name == 'diffuse': v[:3] = [1.0,1.0,1.0]
+            elif p.name == 'light_color':
+                # The native light shader adds this term independently of albedo.
+                # White here washes every health state out to the same bloom.
+                v[:3] = [(c/255.)**2.2 for c in spec.albedo] if isinstance(spec.albedo, tuple) else [1.,1.,1.]
+            elif p.name == 'specular_color': v[:3] = [.04,.04,.04]
+            elif p.name == 'metallic': v[0] = 0.0
+            params.append(replace(p,value=v))
+        md.materials[mi] = replace(md.materials[mi],params=params)
         meshes += om.build_meshes(tmpl_mesh, pieces, mi)
     host = md.objects[0]
     meshes = [replace(me, mesh_index=len(host.meshes) + k) for k, me in enumerate(meshes)]
     md = replace(md, objects=[replace(host, meshes=host.meshes + meshes)] + list(md.objects[1:]), buffer_order=None)
     return g.recompute_bounds(md), textures
+
+
+def clear_cab_interior(md: Mdb, fits: tuple[Fit, ...]) -> Mdb:
+    """Tame the two old trucks' noisy glazing; shell visibility preserves their native geometry."""
+    replacements = [f for f in fits if f.kit in ('kei_cab', 'trailer_cab')]
+    if not replacements:
+        return md
+    materials = []
+    for mat in md.materials:
+        if 'Alpha' not in mat.shader:
+            materials.append(mat)
+            continue
+        params = []
+        for p in mat.params:
+            v = list(p.value)
+            if p.name == 'normal_amount': v[0] = 0.0  # no full-screen Window_Normal_Noise distortion
+            elif p.name == 'diffuse': v = [1.0,1.0,1.0,.08]
+            elif p.name == 'specular_color': v[:3] = [.08,.08,.08]
+            elif p.name == 'translucent_fall_off_offset': v[0] = .03
+            params.append(replace(p,value=v))
+        materials.append(replace(mat,params=params))
+    return replace(md,materials=materials)
 
 
 def add_textures(rab: Rab, textures: dict[str, bytes]) -> None:

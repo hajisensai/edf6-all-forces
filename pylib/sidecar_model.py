@@ -724,12 +724,12 @@ def check(arc: bytes, host_bones: list[str] | None = None, reach: float | None =
 class _Shkt:
     """The bike's ragdoll tagfile, the parts this edit reads and writes (offsets from pylib/hktag.py's type table)."""
 
-    def __init__(self, data: bytes) -> None:
+    def __init__(self, data: bytes, body_name: str = 'RagDollProxys.body') -> None:
         from hkcms import bodies
         from hktag import Tag
         self.buf = bytearray(data)
         self.tag = t = Tag(bytes(data))
-        self.body = bodies(t)['RagDollProxys.body']
+        self.body = bodies(t)[body_name]
         C = 'hknpCompoundShape'
         typ, self.at, _ = t.item(self.body)
         _req(typ == C, f'RagDollProxys.body is a {typ}')
@@ -775,8 +775,15 @@ class _Shkt:
     def box(self, k: int) -> tuple[list[float], list[float]]:
         """The instance's box as its tree leaf holds it: its hull's vertices' box grown by its convex radius."""
         r = self.hull(k)[0]
-        V = self.vertices(k)
-        return [min(v[c] for v in V) - r for c in range(3)], [max(v[c] for v in V) + r for c in range(3)]
+        from ragdoll_fit import rot
+        ia, _ = self.instance(k)
+        q = struct.unpack_from('<4f', self.buf, ia)
+        p = struct.unpack_from('<3f', self.buf, ia+16)
+        scale = struct.unpack_from('<3f', self.buf, ia+32)
+        V = [tuple(rot(q, tuple(v[c]*scale[c] for c in range(3)))[c]+p[c] for c in range(3))
+             for v in self.vertices(k)]
+        r *= max(abs(x) for x in scale)
+        return [min(v[c] for v in V)-r for c in range(3)], [max(v[c] for v in V)+r for c in range(3)]
 
     def leaves(self) -> dict[int, tuple[list[float], list[float]]]:
         """Every leaf lane of the simd tree: instance -> its box as stored."""

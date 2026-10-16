@@ -578,6 +578,7 @@ class GroundVehicle:
     weapons: tuple[str, ...]
     durability: float
     tool: str             # the tool that writes it (tools/<tool>.py)
+    setup: tuple[float, ...] | None = None  # native vehicle params when its request template is another vehicle class
 
 
 # A ground vehicle's own camera (game_object_camera_setting, docs/camera-re.md): [0] the point it looks at, [1] the
@@ -631,6 +632,8 @@ SAZABI_SEAT_CAMERA = ((-8.0, 28.0, -52.0), (0.0, 13.0, 10.0))
 # plugin aims them (LockonTargetType kMarkLofted); EDF6VehicleCrew shows its rider where they land.
 KATYUSHA_ROCKETS = 'EDF6VC_KATYUSHA_ROCKETS.SGO'
 GROUND_VEHICLES: dict[str, GroundVehicle] = {
+    'sedan': GroundVehicle('EDF6VC_SEDAN', 'V512_KEITRUCK', 'EWEAPON401',
+                           ('EWEAPON401',), (), 300., 'make_sedan', (.8, 30., .0075, .7, .075, .3, .6)),
     'katyusha': GroundVehicle('EDF6VC_KATYUSHA', 'VEHICLE402_ROCKET', 'EWEAPON401',
                               ('EWEAPON401', 'EWEAPON405', 'EWEAPON409', 'EWEAPON412', 'EWEAPON417'),
                               ('app:/weapon/' + KATYUSHA_ROCKETS.lower(),), 350.0, 'make_katyusha'),

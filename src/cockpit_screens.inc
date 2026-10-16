@@ -17,11 +17,13 @@ alignas(16) const float kScreenDim[4]={0.4f,1.0f,0.6f,0.45f};
 // What every screen may show, gathered once a draw from the snapshot (whichever vehicle the player is in).
 struct ScreenFeed {
     float hp=-1.0f,hpMax=0.0f;
+    float vehicleHp=-1.0f,vehicleHpMax=0.0f; // current vehicle provider, separate from the rider armor gauge
     bool hull=false;float hullHp=0.0f,hullMax=0.0f;   // a vehicle whose hull is counted apart (stock_armor_hud.h)
     FuelReading fuel{};
     float speed=-1.0f,clear=-1.0f,climb=0.0f;         // m/s, m over the ground (<0 unknown), m/s
     bool flies=false;
     float heading=-1.0f,pitch=0.0f;                   // degrees (<0 unknown), radians up
+    float power=-1.0f;
     int cells=0,picked=-1;
     LoadCell cell[kStockArms>kMostStores ? kStockArms : kMostStores];
     unsigned warn=0;
@@ -41,6 +43,7 @@ ScreenFeed FeedOf(const Snapshot& snap) noexcept {
     if(snap.cockpit) {   // a plugin aircraft
         const PlayerJetReadout& j=snap.jet;
         f.hp=j.hp;f.hpMax=j.hpMax;f.fuel=j.fuel;f.speed=j.speed;f.clear=j.ground ? j.clear : -1.0f;f.climb=j.climb;f.flies=true;
+        f.power=j.rotor ? j.heli.power : j.throttle;
         NoseOf(j.sym.nose,f);
         f.cells=JetCells(j,f.cell);f.picked=j.store;
         std::memcpy(f.pos,j.sym.pos,12);
@@ -50,6 +53,7 @@ ScreenFeed FeedOf(const Snapshot& snap) noexcept {
         const HeliFlight& h=snap.heliHud.f;
         f.hp=h.hp;f.hpMax=h.hpMax;f.fuel=snap.heliHud.fuel;f.speed=h.speed;f.clear=h.ground ? h.clear : -1.0f;f.climb=h.climb;
         f.flies=true;
+        f.power=h.power;
         NoseOf(snap.heliHud.sym.nose,f);
         std::memcpy(f.pos,snap.heliHud.sym.pos,12);
     }
@@ -66,6 +70,7 @@ ScreenFeed FeedOf(const Snapshot& snap) noexcept {
             std::memcpy(f.pos,r.pos,12);
         }
     }
+    f.vehicleHp=f.hp;f.vehicleHpMax=f.hpMax;
     if(snap.armor) {
         f.hp=snap.armorRo.armor.hp;f.hpMax=snap.armorRo.armor.most;
         f.hull=snap.armorRo.hasHull;f.hullHp=snap.armorRo.hull.hp;f.hullMax=snap.armorRo.hull.most;
@@ -73,6 +78,43 @@ ScreenFeed FeedOf(const Snapshot& snap) noexcept {
     if(snap.warned)f.warn=snap.warn.on;
     return f;
 }
+
+// Game thread, once the complete vehicle snapshot is gathered. The model draw consumes these readings; the HUD
+// renderer never reads native objects or paints over the physical instruments.
+namespace {
+void PublishInstruments(const Snapshot& snap) noexcept {
+    using namespace instruments;
+    const ScreenFeed f=FeedOf(snap);
+    Readings r{};
+    r.language=static_cast<int>(hudtext::Resolve(Cfg().hudLanguage,GameTextLanguage()));
+    for(float& v:r.value)v=-1.0f;
+    r.value[hp]=f.vehicleHpMax>0 ? f.vehicleHp : -1.0f;r.share[hp]=f.vehicleHpMax>0 ? f.vehicleHp/f.vehicleHpMax : 0.0f;
+    r.value[hull]=f.hull ? f.hullHp : -1.0f;r.share[hull]=f.hullMax>0 ? f.hullHp/f.hullMax : 0.0f;
+    r.value[fuel]=f.fuel.ok ? f.fuel.share*100.0f : -1.0f;r.share[fuel]=f.fuel.ok ? f.fuel.share : 0.0f;
+    r.value[speed]=f.speed>=0 ? f.speed*3.6f : -1.0f;r.value[altitude]=f.clear;r.value[heading]=f.heading;
+    r.flight=f.flies;r.value[climb]=f.climb;r.value[pitch]=f.pitch/kDeg;
+    r.value[power]=f.power>=0 ? f.power*100.0f : -1.0f;
+    r.value[warn]=static_cast<float>(f.warn);r.share[warn]=f.warn ? 1.0f : 0.0f;
+    const float hd=f.heading>=0 ? f.heading*kDeg : 0.0f;
+    for(int i=0;i<f.threats && i<6;++i) {
+        const float dx=f.threatAt[i][0]-f.pos[0],dz=f.threatAt[i][2]-f.pos[2];
+        const float distance=std::sqrt(dx*dx+dz*dz),bearing=std::atan2(-dx,dz)-hd;
+        const float range=vec::Clamp(distance/600.0f,0.0f,1.0f)*.35f;
+        r.contact[i]=true;r.at[i][0]=range*std::sin(bearing);r.at[i][1]=range*std::cos(bearing);
+    }
+    if(snap.cockpit) {
+        const auto& j=snap.jet;
+        if(j.store>=0 && j.store<j.stores && j.store<kMostStores) {
+            r.value[slot]=static_cast<float>(j.store+1);r.value[ammo]=static_cast<float>(j.storeRounds[j.store]);
+        } else if(j.guns>0)r.value[ammo]=static_cast<float>(j.gunRounds);
+    } else if(snap.stock && snap.stockHud.arms>0) {
+        const auto& a=snap.stockHud;
+        const int picked=a.selected>=0 && a.selected<a.arms ? a.selected : a.sight>=0 && a.sight<a.arms ? a.sight : 0;
+        if(picked<kStockArms){r.value[slot]=static_cast<float>(picked+1);r.value[ammo]=static_cast<float>(a.arm[picked].ammo);}
+    }
+    FirstPersonInstrumentReadings(r,PlayerHuman());
+}
+} // namespace
 
 // The canvas's lines [from, *at) onto the view: centre through the map, size by the stretch, as a scale of the HUD's `s`.
 void CanvasText(const canvas::Map& k,Line* lines,int from,int at,float s) noexcept {
@@ -252,6 +294,7 @@ void DrawCockpitScreens(void* drawer,void* ctx,Text* t,const float* vp,float wid
     const ScreenFeed feed=FeedOf(snap);
     const float ts=t ? t->s : s;
     for(int i=0;i<snap.scr.n;++i)if(snap.scr.s[i].kind==ScreenKind::sensor){RwsDisplay(drawer,ctx,t,width,height,s,feed,snap,lines,at);break;}
+    if(snap.scr.physical)return;
     for(int i=0;i<snap.scr.n;++i) {
         const CockpitScreen& c=snap.scr.s[i];
         if(c.kind==ScreenKind::hud || c.kind==ScreenKind::sensor)continue;   // the head-up glass / the station's monitor: on the view

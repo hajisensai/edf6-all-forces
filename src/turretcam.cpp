@@ -37,6 +37,7 @@
 // then holds the gun), for every seat it holds, the player's or not; a gun it holds is steered from where it holds it
 // (Steer: stab.cpp StabHeld). All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "vehicle_look.h"
 #include "heli.h"
 #include "layout.h"
 #include "memory.h"
@@ -767,6 +768,7 @@ void TurretCamFrame(unsigned char* v) noexcept {
     const Config& c=Cfg();
     const bool mine=shared.v==v;
     if(!lookOk)return;
+    if(VehicleLookActive(v)){if(mine)Drop("vehicle observation");return;}
     if(!c.enabled || SeatCount(v)==0){if(mine)Drop(c.enabled ? "no seat" : "plugin off");return;}
     unsigned char* seat=SeatAt(v,0);
     const bool driven=!v[kDead] && SeatRider(seat)==Rider::player && At<const void*>(seat,kSeatRider)==PlayerHuman() && Turret(v,seat);

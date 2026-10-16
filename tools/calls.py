@@ -171,6 +171,7 @@ CALLS: tuple[Call, ...] = (
     Call('EDF6VC_CALL_BOARDING_GUN_WING', 7302, 'boarding_gun', False, 0, 0, 0.26, 'gun', gun='pWeapon127'),
     Call('EDF6VC_CALL_BOARDING_GUN_RAIDER', 7303, 'boarding_gun', False, 0, 0, 0.26, 'gun', gun='eWeapon120'),
     Call('EDF6VC_CALL_BOARDING_GUN_FENCER', 7304, 'boarding_gun', False, 0, 0, 0.26, 'gun', gun='hCannon01'),
+    Call('EDF6VC_CALL_SEDAN', 0, 'sedan', False, 0, 1500, .1, 'vehicle', vehicle='EDF6VC_SEDAN', ground='sedan'),
 )
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 FLOWN: tuple[Call, ...] = tuple(c for c in CALLS if c.flown)   # the plugin's kCalls, in this order
@@ -193,6 +194,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'medic helis (2026-10-06)': IDS[:39],
     'Sazabi (2026-10-07)': IDS[:40],
     'all-class boarding rifles (2026-10-08)': IDS[:43],
+    'civilian sedan (2026-10-16)': IDS[:44],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -218,6 +220,12 @@ def slot_of(row_id: str) -> str | None:
 
 # Per kind: name and what it does, per language (KR reuses EN).
 KINDS: dict[str, dict[str, tuple[str, str]]] = {
+    'sedan': {
+        'SC': ('民用轿车', '请求一辆没有武器的民用轿车，单驾驶席。按通常的上车键驾驶，V 切换第一人称，按住鼠标中键或手柄 L3 转动视角自由观察。'),
+        'CN': ('民用轎車', '請求一輛沒有武器的民用轎車，單駕駛席。按通常的上車鍵駕駛，V 切換第一人稱，按住滑鼠中鍵或手柄 L3 轉動視角自由觀察。'),
+        'JA': ('民間セダン', '非武装のセダンを要請する。運転席は一つ。通常の搭乗キーで運転、V で一人称切替。マウス中ボタンまたは L3 を押しながら見回す。'),
+        'EN': ('Civilian Sedan', 'Requests an unarmed sedan with one driver seat. Board normally, press V for first person, hold middle mouse or L3 and look to observe.'),
+    },
     'fly_interceptor': {
         'SC': ('截击机（自驾）', '请求一架由你自己驾驶的截击机，空着送到信号弹处：机炮和 4 远距、2 中距、2 近距空空导'
                                  '弹，飞得最快最高。操作同玩家战斗机。'),
@@ -601,7 +609,7 @@ PLUGIN_NOTES: dict[str, str] = {
     'JA': 'EDF6VehicleCrew プラグイン、およびインストーラーが書き出す車両ファイルが必要。',
     'EN': 'Needs the EDF6VehicleCrew plugin and the vehicle files the installer writes.',
 }
-GROUND_NOTES_BY_KIND: dict[str, dict[str, str]] = {'sidecar': PLUGIN_NOTES}
+GROUND_NOTES_BY_KIND: dict[str, dict[str, str]] = {'sidecar': PLUGIN_NOTES, 'sedan': PLUGIN_NOTES}
 GROUND_NOTES: dict[str, str] = {
     'SC': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安装器写入的车辆文件。',
     'CN': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安裝器寫入的車輛檔案。',
