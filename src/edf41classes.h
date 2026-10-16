@@ -165,9 +165,7 @@ bool PlayCue(const wchar_t* cue,const float* pos,SoundHandle* handle=nullptr,con
 // copies 4.1's entries into the object's SGO key edf41_se ([[name, cue, volume, pitch, a, b, c], ...]); `table` is the object
 // whose SGO holds it (a part plays from its hull's table).
 bool PlaySe(const void* table,const wchar_t* name,const float* pos,SoundHandle* handle=nullptr) noexcept;
-// (added for UfoMother301) A SePreset (0x80 bytes, already through 0x7B3200) filled with 4.1's preset `name` from `table`'s
-// edf41_se, the way PlayCue fills its own; false (preset untouched) when the name or its cue is missing.
-bool FillSePreset(void* preset,const void* table,const wchar_t* name) noexcept;
+// (FillSePreset: below, shared by UfoMother301's Bullet::hitSe and UfoRobo's FireSe.)
 void MoveSound(SoundHandle& handle,const float* pos) noexcept;
 void StopSound(SoundHandle& handle,int fadeFrames=4) noexcept;
 
@@ -231,5 +229,14 @@ bool WeakAlive(const WeakRef& w) noexcept;                     // use count > 0 
 // The object's weak pointer written to `out` ({object, control}: what GetPartsObject's message 0x10000017 returns at +8), one
 // weak count taken for the receiver.
 bool WeakOut(const void* object,void* out) noexcept;
+
+// ---- UfoRobo, phase 3 (src/edf41robo.cpp) ------------------------------------------------------------------------------------
+// Fire, the bullet's hit sound set: EDF6's bullet InitParam keeps one SePreset at +0x100 (its constructor 0x1001D0 initialises it
+// with 0x7B3200; 4.1's InitParam has it at +0xB0, and UfoRobo's 0x275730 fills it per gun with ロボビーム着弾小 / 中 / 大). `hitSe` is a
+// 4.1 SEPRESET name looked up in `seTable`'s edf41_se and filled by cue as PlayCue does; nothing found: Fire's silent preset.
+bool FireSe(void* owner,const float* matrix,const Bullet& b,const void* seTable,const wchar_t* hitSe) noexcept;
+// (UfoMother301 and UfoRobo) `preset` (0x80 bytes, anywhere; a bullet's +0x100 too: initialising it again is harmless) initialised as EDF6's SePreset constructor does (0x7B3200) and filled from 4.1's preset `name` in
+// `table`'s edf41_se (cue, volume, pitch, distances), as FireSe does for a bullet; false (the preset still initialised): no such name.
+bool FillSePreset(unsigned char* preset,const void* table,const wchar_t* name) noexcept;
 
 }  // namespace crew::edf41c

@@ -7163,7 +7163,7 @@ def edf41_mother301_finish_contract() -> None:
         md = mdb.mdb_read(x.data)
         params = {p.name for mt in md.materials for p in mt.params}
         assert {'light0_color', 'scroll_light0'} <= params, (x.name, sorted(params))
-    assert 'const wchar_t* hitSe=nullptr;' in header and 'bool FillSePreset(void* preset' in header
+    assert 'const wchar_t* hitSe=nullptr;' in header and 'bool FillSePreset(unsigned char* preset' in header   # unified with UfoRobo's (one definition, initialises the preset itself)
     assert 'if(b.hitSe && b.hitSeTable)FillSePreset(param+0x100,b.hitSeTable,b.hitSe);' in shared
     plugin, ini = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini')
     assert 'ReadInt(L"Edf41MotherForce",n.edf41MotherForce),0,2047)' in plugin
@@ -7177,8 +7177,9 @@ def edf41_robo_registered() -> None:
     M411, DLC pack 1 M415 / M416, pack 2 M010; make_edf5_campaign.plan41 skips a mission whose object file is not registered).
     What robo_fix adds is there and agrees with the files: the CAS has `default` (EventAnimationObject's constructor plays it)
     and every state the plugin plays, the moving clips' root bone has no track left (the plugin moves the object), every
-    edf41_robo_events state is a CAS state, every se event and class sound is an edf41_se name with 4.1's cue, and there is
-    no material_animation (4.1's bare MTAB blob, which EDF6's material code faults on)."""
+    edf41_robo_events state is a CAS state, every se event and class sound is an edf41_se name with 4.1's cue, and
+    material_animation is 4.1's two light blobs as [MTAB blob, slot] pairs (ROBO_MATERIAL_PAIRS; 4.1's bare blobs make EDF6's
+    material code fault; src/edf41robo.cpp hands the pairs to EDF6's material animation player)."""
     import cas_graft
     import cas_pose
     import edf41_objects as eo
@@ -7205,7 +7206,11 @@ def edf41_robo_registered() -> None:
                             naming.append(f'{base.split("/")[0]}/{mid}')
     assert sorted(set(naming)) == ['missions/M007', 'missions/M411', 'mp01/M415', 'mp01/M416', 'mp02/M010'], naming
     top = sgo.load(data=eo.read(rel))
-    assert top['xgs_scene_object_class'] == 'UfoRobo' and 'material_animation' not in top
+    assert top['xgs_scene_object_class'] == 'UfoRobo'
+    ma = top['material_animation']
+    assert [e[1] for e in ma] == [slot for _i, slot in m.ROBO_MATERIAL_PAIRS] == [0, 2], ma
+    blobs = [bytes.fromhex(e[0][4:]) if isinstance(e[0], str) and e[0].startswith('raw:') else e[0] for e in ma]
+    assert all(isinstance(b, bytes) and b[16:20] == b'MTAB' for b in blobs), [type(e[0]) for e in ma]
     for key in ('robo_attack_table', 'robo_small_muzzle_setting', 'robo_middle_muzzle_setting', 'robo_large_muzzle_setting',
                 'small_bullet_class', 'cannon_bullet_class', 'genocide_bullet_class', 'se_table', 'game_sound'):
         assert key in top, key
@@ -7349,6 +7354,57 @@ def edf41_net_contract() -> None:
     assert 'NetPart(hullObj,part,group,h.parts.size()-1);' in m301 and 'NetSpawn(p,enemy);' in m301 and 'edf41net::Pump(self);' in m301
     for cpp in (robo, m401, m301):   # windows.h macros: the 4.1 class files use (std::min) / (std::max)
         assert 'far' not in re.findall(r'\b(?:float|int|bool|auto)\s+(\w+)', re.sub(r'//[^\n]*', '', cpp))
+
+
+@test
+def edf41_robo_finish() -> None:
+    """UfoRobo phase 3 (docs/edf41-uforobo.md 2.2): the lock point is found where the shipped MAB keeps it (ロックオン in locator
+    list 1, the lock-on list; the muzzles and the stomp points in list 0) and src/edf41robo.cpp asks that list; the death is
+    OnDamaged's (slot 18) with EDF6's ragdoll activation; the stomps are EDF6's ApplyAreaDamage (no grenade stand-in); the
+    bullets carry 4.1's hit sounds (FireSe, InitParam +0x100) whose presets edf41_se holds; the foot IK reads ik_control_info,
+    which the shipped SGO keeps; every EDF.dll function the file calls itself has a fingerprint."""
+    import edf41_objects as eo
+    import make_edf41_objects as m
+    import mab_legacy
+    import sgo
+    top = sgo.load(data=eo.read('OBJECT/' + m.ROBO_ROOT))
+    mab = top['animation_model'][2]
+    mab = bytes.fromhex(mab[4:]) if isinstance(mab, str) and mab.startswith('raw:') else mab
+    lists = {loc.name: i for i, loc in mab_legacy.mab_locators(mab)}
+    assert lists.get('ロックオン') == 1, lists.get('ロックオン')
+    for name in m.ROBO_LOCATORS:
+        assert lists.get(name) == (1 if name == 'ロックオン' else 0), name
+    ik = top['ik_control_info']
+    assert [e[0] for e in ik] == ['toe_l', 'toe_r'] and [e[1] for e in ik] == ['v_ik_target_l', 'v_ik_target_r'], ik
+    se = {e[0] for e in top['edf41_se']}
+    cpp, shared, header = src('src/edf41robo.cpp'), src('src/edf41classes.cpp'), src('src/edf41classes.h')
+    assert 'p6::FindLocatorIn(Model(r.obj),1,L"ロックオン",&r.lockOn)' in cpp
+    assert 'SetSlot(roboClass,kSlotOnDamaged,reinterpret_cast<void*>(&OnDamagedWrap));' in cpp and 'kSlotOnDamaged=18' in cpp
+    # the transform refuses damage in slot 16 (every damage path asks it; the OnMessage check alone let hits through on M416)
+    accept = cpp.split('bool __fastcall AcceptWrap(void* self,void* gdi) {', 1)[1].split('return reinterpret_cast', 1)[0]
+    assert 'kSlotAccept=16' in cpp and 'it->second.body==kS4)return false;' in accept
+    assert 'SetSlot(roboClass,kSlotAccept,reinterpret_cast<void*>(&AcceptWrap));' in cpp
+    assert 'r.ragdoll=p6::RagdollOn(r.obj);' in cpp and 'p6::AreaDamage(r.obj,lifted,radius,damage,' in cpp
+    # the ragdoll goes back on the ragdoll layer first (EventAnimationObject's constructor put it on 0x11, which the ground ignores)
+    on = cpp.split('bool RagdollOn(void* object) noexcept {', 1)[1].split('return true;', 1)[0]
+    assert on.index('(kRagdollLayer)(rag,6)') < on.index('(kRagdollOn)(rag)'), on
+    # the stomp's circle: scale x the kind-0 locator's own radius (record +0x10), at the ground under it
+    assert 'std::memcpy(&size,rec+0x10,4);' in cpp and 'GroundHit(from,to,c,' in cpp
+    code = re.sub(r'//[^\n]*', '', cpp)
+    assert 'Blast(' not in code, 'the stomp still lets off the grenade stand-in'
+    assert 'bool FireSe(void* owner,const float* matrix,const Bullet& b,const void* seTable,const wchar_t* hitSe) noexcept;' in header
+    assert 'FillPreset(param+0x100,seTable,hitSe)' in shared and 'FireSe(r.obj,mm,g.bullet,r.obj,g.hitSe)' in cpp
+    for name in re.findall(r'hitSe=L"([^"]+)"', cpp) + re.findall(r'chargeSe=L"([^"]+)"', cpp) + re.findall(r'shotSe=L"([^"]+)"', cpp):
+        assert name in se, name
+    assert len(re.findall(r'hitSe=L"', cpp)) == 4 and 'L"ik_control_info"' in cpp
+    # the lights: EDF6's material animation player on the model (+0x160), the loop at birth, the second entry at the death
+    assert 'p6::LightsStart(r.lights,r.obj,Key(o,L"material_animation"))' in cpp and 'p6::LightsPlay(r.lights,0,2)' in cpp
+    assert 'p6::LightsPlay(r.lights,1,1)' in cpp and 'p6::LightsEnd(it->second.lights)' in cpp
+    prints = cpp.split('constexpr Print kPrints[]={', 1)[1].split('};', 1)[0]
+    for rva in re.findall(r'\b(k[A-Z]\w+)=0x[0-9A-F]+', cpp.split('namespace p6 {', 1)[1].split('struct Print', 1)[0]):
+        if rva in ('kInitParamBase', 'kEffects', 'kManager', 'kChargeVtable', 'kParticleParamVtable'):   # data, not code
+            continue
+        assert re.search(rf'\{{{rva},\{{0x', prints), f'{rva} has no fingerprint'
 
 
 @test
