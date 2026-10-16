@@ -6,6 +6,7 @@
 // it the jets', the carrier's and the laser's preloads) does not hang on the loadout's own checks: the
 // loadout only wraps the call when it is on (LoadoutPreload). Layout: docs/loadout-re.md.
 #include "crew.h"
+#include "firstperson.h"
 #include "mission_watch.h"
 #include "transport.h"
 #include "airdrop.h"
@@ -63,6 +64,7 @@ void MissionStart() noexcept {
     LogMemory("mission start entered");
     WatchMissionPhase("resets");
     ResetPlayer();
+    ResetFirstPerson();
     ResetCrew();
     ResetHelis();
     ResetGround();

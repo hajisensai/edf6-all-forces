@@ -1,7 +1,8 @@
 // Production turret aim, muzzle transforms, round prediction and launcher frame on stand-in native memory.
 // No game process or installed assets. Link src/rounds.cpp, src/launcher.cpp, edf6common and user32.
 #include "../src/crew.h"
-namespace crew { bool TurretTestRound(const unsigned char*,RoundModel*) noexcept; }
+namespace crew {
+bool VehicleLookActive(const void*) noexcept { return false; } bool TurretTestRound(const unsigned char*,RoundModel*) noexcept; }
 #define ReadRound TurretTestRound
 #include "../src/turretcam.cpp"
 #undef ReadRound

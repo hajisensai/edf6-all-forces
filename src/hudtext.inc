@@ -779,3 +779,5 @@ HUDTEXT(roomHint,L"Arrows/D-pad: select, change   Enter/A: open   Esc/B: back   
         L"方向键/十字键 选择、修改   Enter/A 确认   Esc/B 返回   Ins/X 添加   Del/Y 删除   Home/Back 恢复原版   %ls 关闭",
         L"方向鍵/十字鍵 選擇、修改   Enter/A 確認   Esc/B 返回   Ins/X 新增   Del/Y 刪除   Home/Back 恢復原版   %ls 關閉",
         L"方向キー/十字キー 選択・変更   Enter/A 決定   Esc/B 戻る   Ins/X 追加   Del/Y 削除   Home/Back 標準に戻す   %ls 閉じる")
+
+HUDTEXT(vehicleLookHold,L"Hold [%ls] + look: free look",L"按住 [%ls] + 转动视角：自由观察",L"按住 [%ls] + 轉動視角：自由觀察",L"[%ls]を押しながら視点移動：見回す")

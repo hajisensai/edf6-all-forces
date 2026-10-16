@@ -175,7 +175,7 @@ Wing Diver 能量（PaleWing slot 5 `0x5808B0`，M）：当前 `+0x308`、上限
 
 | 需要 | 读法 | 置信 |
 |---|---|---|
-| 本帧开火 | 每发 `0x696FD0` 末尾 `w+0xBD4 = 1`、`w+0xBD8 = FireRecoil`（`0x6982A5`）；`0x6934F0` 下一次更新改回 0/2/3/4。**更稳：`w+0xBD0`（射击计数，本机开火路径以 `&+0xBD0` 传给 `0x696FD0`，计数模式同步也以它为准）帧间差** | H 写 / M 语义 |
+| 本帧开火 | 每发 `0x696FD0` 末尾 `w+0xBD4 = 1`、`w+0xBD8 = FireRecoil`（`0x6982A5`）；`0x6934F0` 下一次更新改回 0/2/3/4。之前建议用 `w+0xBD0` 帧间差，**已被 2026-10-16 实机推翻**：M1 连发时相机帧观测 `counter 0 events 1`。第一人称后座现从实际枪口创建事件取触发，计数轮询仅为补充，不能单独作为射击事件源。 | H 写 / 事件覆盖已实测 |
 | 开火钩子 | `0x696FD0(weapon, muzzleIdx, …)` 每发一次；远端重放也走它，用 `w+0x120`（拥有者）== 本机玩家过滤 | H |
 | 后坐 / 强度参数 | `FireRecoil +0x37C`、`FireInterval +0x36C`、`FireCount +0x368`、`FireBurstCount/Interval +0x370/+0x374`、`FireAccuracy +0x378`、`AmmoDamage +0x89C`、`AmmoExplosion +0x8B0`、`AmmoSpeed +0x894` | H（加载器 `0x68CDF2..0x68D7FF`） |
 | 弹匣 | 剩余 `w+0xBE8`、容量 `AmmoCount → +0x248` | H 字段 / M 语义 |

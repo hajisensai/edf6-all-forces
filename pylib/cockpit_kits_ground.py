@@ -170,6 +170,35 @@ def _laid_on(corners: np.ndarray, c: Vec3, w: float, h: float) -> Vec3:
     return (c[0] * k, c[1] * k, c[2] * k)
 
 
+def _panel_clearance(corners: np.ndarray, c: Vec3, w: float, h: float) -> float:
+    """Offset along the facing that clears the complete display rectangle after cab deformation.
+
+    Clip nearby cab triangles to the screen footprint and inspect every resulting vertex, including edge
+    intersections. Centre/corner rays miss a thin raised rim through the middle of a display. Objects more than
+    15% of the eye distance in front remain occluders (the same steering-wheel exclusion as _laid_on).
+    """
+    r,u,f = (np.array(v) for v in basis(_toward_eye(c)))
+    local = (corners-np.array(c)) @ np.stack((r,u,f)).T
+    lo,hi = np.array((-w/2,-h/2)),np.array((w/2,h/2))
+    overlap = ((local[:,:,:2].max(1)>=lo) & (local[:,:,:2].min(1)<=hi)).all(1)
+    # A separate object in front, such as the wheel, must not pull a monitor off its dashboard.
+    nearby = local[:,:,2].max(1)<.15*math.sqrt(sum(x*x for x in c))
+    front = -math.inf
+    for triangle in local[overlap & nearby]:
+        poly = list(triangle)
+        for axis,bound,sign in ((0,lo[0],1),(0,hi[0],-1),(1,lo[1],1),(1,hi[1],-1)):
+            if not poly: break
+            clipped = []
+            for i,cur in enumerate(poly):
+                prev = poly[i-1]
+                dc,dp = sign*(cur[axis]-bound),sign*(prev[axis]-bound)
+                if (dc>=0)!=(dp>=0): clipped.append(prev+(cur-prev)*(dp/(dp-dc)))
+                if dc>=0: clipped.append(cur)
+            poly = clipped
+        if poly: front=max(front,max(v[2] for v in poly))
+    return max(0.0,front+PROUD)
+
+
 def real_cab(cabin: Cabin, spec: CabSpec) -> Kit:
     """A real cab in the room round the eye: drawn in toward the eye where it reaches past the walls (squeeze: from
     the seat it looks as it was), its screens laid on the source's instruments (_laid_on) and drawn in with it."""
@@ -183,6 +212,7 @@ def real_cab(cabin: Cabin, spec: CabSpec) -> Kit:
     lo = (-room['right'], -room['down'], -room['back'])
     hi = (room['left'], room['up'], room['ahead'])
     cab, cab_mats = _cab_parts(spec.asset, lo, hi, spec.tuck, spec.knee)
+    cab_corners = np.concatenate([np.array([v.pos for v in p.verts])[p.tris] for p in cab])
     pos, _, _, tris, _, _, _ = _cab_mesh(spec.asset)
     full_corners = pos[tris]
     parts: list[om.Part] = []
@@ -196,12 +226,20 @@ def real_cab(cabin: Cabin, spec: CabSpec) -> Kit:
         drawn = np.linalg.norm(squeeze(pts, np.array(lo), np.array(hi), spec.tuck, spec.knee), axis=1)
         k = float(np.min(drawn / np.linalg.norm(pts, axis=1)))
         size = float(np.linalg.norm(full)) / math.sqrt(sum(x * x for x in c))
-        p, s = _screen(kind, tuple(map(float, full * k)), w * k * size, h * k * size, None)
+        centre = tuple(map(float, full*k))
+        width,height = w*k*size,h*k*size
+        lift = _panel_clearance(cab_corners,centre,width,height)
+        facing = _toward_eye(centre)
+        centre = tuple(centre[i]+lift*facing[i] for i in range(3))
+        p, s = _screen(kind, centre, width, height, None)
         parts += [p, _backing(f'bezel_{kind}', s, 0.008 * k, 0.003 * k)]
         screens.append(s)
     mats = _materials('screen', 'metal_dark')
     mats.update(cab_mats)
-    return Kit(parts + cab, mats, screens=tuple(screens))
+    kit=Kit(parts + cab, mats, screens=tuple(screens))
+    import cockpit_retrofit as retrofit
+    def mapped(p):return squeeze(np.asarray([p]),np.asarray(lo),np.asarray(hi),spec.tuck,spec.knee)[0]
+    return retrofit.apply(kit,retrofit.GROUND.get(spec.asset,()),mapped,ground=True,limits=(np.asarray(lo),np.asarray(hi)))
 
 
 CABS: dict[str, CabSpec] = {
@@ -220,11 +258,11 @@ CABS: dict[str, CabSpec] = {
     # A cab-over truck's (ARHAN P880, a MAZ; Mayess; mirrored, driven from the right): the big windscreen, the
     # cluster behind the wheel ('status'), the dashboard's display ('weapons').
     'truck_cab': CabSpec('sf-arhan-p880',
-                         (('status', (-0.15, -0.27, 0.63), 0.18, 0.08), ('weapons', (0.3, -0.233, 0.5), 0.16, 0.07))),
+                         (('status', (0.53, -0.233, 0.5), 0.12, 0.07), ('weapons', (0.3, -0.233, 0.5), 0.16, 0.07))),
     # A pickup's (Lightbody '85, DanielZhabotinsky; mirrored, driven from the right as the EDF's Japanese trucks
     # are): the gauges behind the wheel ('status'), the radio in the centre stack ('weapons').
     'pickup_cab': CabSpec('sf-lightbody-85',
-                          (('status', (0.018, -0.29, 0.85), 0.2, 0.08), ('weapons', (0.36, -0.37, 0.87), 0.16, 0.08))),
+                          (('status', (0.55, -0.37, 0.87), 0.12, 0.07), ('weapons', (0.36, -0.37, 0.87), 0.16, 0.08))),
 }
 
 
@@ -322,9 +360,10 @@ def _cab_kit(name: str, spec: CabSpec) -> KitFn:
 
 
 KITS: dict[str, KitFn] = {
+    'sedan_cab': lambda cabin: stock_dash(cabin, (0.22, -0.29, 0.43)),
     **{name: _cab_kit(name, spec) for name, spec in CABS.items()},
-    'kei_dash': functools.partial(stock_dash, status=(0.2, -0.1, 0.42)),
-    'trailer_dash': functools.partial(stock_dash, status=(0.3, -0.24, 0.62)),
+    'kei_cab': _cab_kit('kei_cab', CABS['pickup_cab']),
+    'trailer_cab': _cab_kit('trailer_cab', CABS['truck_cab']),
     'troop_bay': troop_bay,
     'troop_bay_l': functools.partial(troop_bay, aside=-0.33),   # a left-hand seat's: toward the middle
     'troop_bay_r': functools.partial(troop_bay, aside=0.33),

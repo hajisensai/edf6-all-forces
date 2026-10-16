@@ -20,10 +20,10 @@ from modfiles import atomic_write, sha256, sha256_file
 
 MANIFEST = '.edf6vc_builds.json'
 RECIPES = 'asset_recipes.json'
-GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'chute', 'drill', 'emc', 'sidecar', 'bigmap', 'sazabi', 'proteus', 'optics')
+GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'chute', 'drill', 'emc', 'sidecar', 'sedan', 'bigmap', 'sazabi', 'proteus', 'optics')
 MODEL_INPUTS = {'artillery': 'twin_tank', 'drill': 'drill_tank', 'sazabi': 'sazabi'}
 # The groups whose models carry first-person cockpits (pylib/cockpits.py): the cockpits' asset folder is an input.
-COCKPIT_GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'drill', 'sidecar', 'sazabi', 'optics')
+COCKPIT_GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'drill', 'sidecar', 'sedan', 'sazabi', 'optics')
 
 
 def source_recipes(root: str) -> dict[str, str]:
@@ -78,6 +78,10 @@ def inputs(game: str, group: str) -> dict[str, Any]:
     archive = Path(game) / ('Chunk02.cpk' if group == 'bigmap' else 'Root.cpk')
     st = archive.stat()
     result: dict[str, Any] = {'archive': [str(archive.resolve()), st.st_size, st.st_mtime_ns, st.st_ctime_ns]}
+    if group == 'sedan':
+        city = Path(game) / 'Chunk02.cpk'
+        stamp = city.stat()
+        result['city_archive'] = [str(city.resolve()), stamp.st_size, stamp.st_mtime_ns, stamp.st_ctime_ns]
     if group == 'optics':
         import vehicle_optics
         result['loose_models'] = {spec.stem: sha256_file(str(Path(game, 'Mods', 'OBJECT', spec.stem+'.MRAB')))

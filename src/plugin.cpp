@@ -247,6 +247,8 @@ void Validate(Config& n) noexcept {
     Fix("FirstPersonEyeUp",n.fpEyeUp,-0.5f,0.5f);
     Fix("FirstPersonEyeAhead",n.fpEyeAhead,-0.5f,0.5f);
     Fix("FirstPersonViewHeightEase",n.fpViewHeightEase,0.02f,1.0f);
+    Fix("FirstPersonCenter",n.fpCenter,0.0f,0.5f);
+    Fix("FirstPersonSway",n.fpSway,0.0f,1.0f);
     Fix("FirstPersonGripX",n.fpGripX,-1.0f,1.0f);
     Fix("FirstPersonGripY",n.fpGripY,-1.0f,1.0f);
     Fix("FirstPersonGripZ",n.fpGripZ,-1.0f,2.0f);
@@ -611,6 +613,8 @@ void LoadConfig() noexcept {
     n.fpEyeUp=ReadFloat(L"FirstPersonEyeUp",n.fpEyeUp);
     n.fpEyeAhead=ReadFloat(L"FirstPersonEyeAhead",n.fpEyeAhead);
     n.fpViewHeightEase=ReadFloat(L"FirstPersonViewHeightEase",n.fpViewHeightEase);
+    n.fpCenter=ReadFloat(L"FirstPersonCenter",n.fpCenter);
+    n.fpSway=ReadFloat(L"FirstPersonSway",n.fpSway);
     n.fpGripX=ReadFloat(L"FirstPersonGripX",n.fpGripX);
     n.fpGripY=ReadFloat(L"FirstPersonGripY",n.fpGripY);
     n.fpGripZ=ReadFloat(L"FirstPersonGripZ",n.fpGripZ);
