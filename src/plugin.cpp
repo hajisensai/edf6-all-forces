@@ -420,6 +420,7 @@ void LoadConfig() noexcept {
     n.vehicleWelding=ReadBool(L"VehicleWelding",n.vehicleWelding);
     n.giantContactCap=ReadBool(L"GiantContactCap",n.giantContactCap);
     n.splitMissileSurface=ReadBool(L"SplitMissileSurface",n.splitMissileSurface);
+    n.supportUnitOnAllies=ReadBool(L"SupportUnitOnAllies",n.supportUnitOnAllies);
     n.routeGuidePath=ReadBool(L"RouteGuidePath",n.routeGuidePath);
     n.stockMissilePN=ReadBool(L"StockMissilePN",n.stockMissilePN);
     n.stockMissileNav=ReadFloat(L"StockMissileNav",n.stockMissileNav);
@@ -818,8 +819,10 @@ void LoadConfig() noexcept {
     Log("CONFIG physics vehicleWelding=%d giantContactCap=%d splitMissileSurface=%d stockMissilePN=%d nav=%.1f playerLockByView=%d tempestTv=%d (mouse %.1f, boost x%.1f)",
         n.vehicleWelding,n.giantContactCap,n.splitMissileSurface,n.stockMissilePN,n.stockMissileNav,n.playerLockByView,
         n.tempestTv,n.tempestTvMouseSpeed,n.tempestTvBoost);
+    Log("CONFIG supportUnitOnAllies=%d",n.supportUnitOnAllies);
     Config* const fresh=new(std::nothrow) Config(n);
     if(fresh)published.store(fresh,std::memory_order_release);
+    SetSupportUnitOnAllies(n.supportUnitOnAllies);   // the code cave's byte (supportunit.cpp): live
     LoadSupportConfig(iniPath);   // support_config.h: callable units and their crews' weapons, validated
 }
 
@@ -1054,6 +1057,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallVehicleSound();  // the ground vehicles' engines, turrets, loaders and main guns (vehsound.cpp)
     InstallMissiles();
     InstallSplitMissiles(); // the stock split missiles' split distance to the target's surface
+    InstallSupportUnitOnAllies();   // support units stick to allies (ini SupportUnitOnAllies, live)
     InstallRouteGuide();    // the stock route guide strip along the navmesh route's corners
     InstallGuidance();      // the stock homing rounds by proportional navigation
     InstallStores();        // before any mission builds a jet: the 506 builds a weapon for every holder, the others their extras
