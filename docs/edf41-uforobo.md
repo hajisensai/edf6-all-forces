@@ -170,7 +170,8 @@ LaserBullet02 打它的锁定点，走游戏自己的伤害路径）。
 
 | M411（rf8） | Place 60、Attack 2（不开 DevShoot） | 踩踏 `attack_stomp_r` 选中 3 次，`攻撃判定` 半径 60、伤害 94、在地面点发出；玩家始终在 54–74 m 外（圆外），这一关里没打到人——打中的证据在 rf6 / rf7。 |
 | M416（rf9） | Place 300、DevShoot 30 / 400 | 槽 16 之后：ObjectAction 0 → S4 期间（14:30:19–14:30:36）**耐久一直 26112**，S5 开始后第一发才掉血（−400）；之后正常死亡、ragdoll、S11。 |
-__PENDING__
+
+**收尾（rfp_*，开发开关全 0、最终 DLL）**：M007、M411、M415、M416、M010 各跑一次，全部「mission started / game alive / 无崩溃转储 / Mods 与存档逐字节还原」；日志无 `check failed`、指纹拒绝、队伍未设；每关都造出了蓄力特效。（autopilot 不开火：这些跑里没有死亡，死亡由上面的 DevShoot 跑验证。）
 
 ## 4. 没做 / 不确定
 - **ragdoll 撞地音**（`ragdoll_contact` = [ロボ大クラッシュ, 600000, 0.5, 10, 120]，4.1 ragdoll 0x337F60）：EDF6 是一个接触监听成员做的
