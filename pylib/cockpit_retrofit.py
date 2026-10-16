@@ -16,6 +16,12 @@ import obj_model as om
 
 
 @dataclass(frozen=True)
+class DialAt:
+    centre: tuple[float,float,float]
+    diameter: float
+
+
+@dataclass(frozen=True)
 class Block:
     name: str
     centre: tuple[float,float,float]
@@ -25,6 +31,7 @@ class Block:
     columns: int = 1
     fields: tuple[int | None,...] = ()
     mode: str = 'dials'
+    dials: tuple[DialAt,...] = ()  # surveyed mounting centres/sizes, before the asset's fit transform
 
 
 MATERIALS = {
@@ -181,10 +188,10 @@ def _dial(name,centre,facing,up,diameter,field,ground,labels,ranges):
     title=TITLES.get(field,'-')
     if title in ci.LABELS:
         for language,text in enumerate(ci.LABELS[title]):
-            labels[language].append(_text(name+'_title',text,at(0,-radius*.46,.006),diameter*.64,
-                                          diameter*.105,'retrofit_scale',f,u))
+            labels[language].append(_text(name+'_title',text,at(0,-radius*.62,.006),diameter*.56,
+                                          diameter*.09,'retrofit_scale',f,u))
     else:
-        parts.append(_text(name+'_unit',title,at(0,-radius*.46,.006),diameter*.5,diameter*.105,'retrofit_scale',f,u))
+        parts.append(_text(name+'_unit',title,at(0,-radius*.62,.006),diameter*.5,diameter*.09,'retrofit_scale',f,u))
     dash=_text(name+'_unknown','-',at(0,0,.008),diameter*.18,diameter*.10,'retrofit_scale',f,u)
     controls=[]
     if field is not None:
@@ -258,21 +265,32 @@ def apply(kit: Kit, blocks: tuple[Block,...], transform=lambda p:np.asarray(p), 
             pp,cc=ci.instrument(s,1000+index,ranges=ranges)
             parts+=pp;controls+=cc;kit.materials.update(ci.MATERIALS)
         elif b.fields:
+            if b.dials and len(b.dials)!=len(b.fields):
+                raise ValueError(f'{b.name}: every field needs its own surveyed dial mount')
             rows=math.ceil(len(b.fields)/b.columns);cw,ch=width/b.columns,height/rows
             for i,field in enumerate(b.fields):
                 x=(i%b.columns-(b.columns-1)/2)*cw;y=((rows-1)/2-i//b.columns)*ch
                 diameter=min(cw,ch)*(.64 if ground else .83)
-                anchor=_surface(corners,at(x,y,0),f)
+                mount=np.asarray(at(x,y,0))
+                if b.dials:
+                    site=b.dials[i];original=np.asarray(site.centre)
+                    mount=np.asarray(mapped(original))
+                    diameter=np.linalg.norm(np.asarray(mapped(original+np.asarray(basis(b.facing)[0])*site.diameter))-mount)
+                anchor=_surface(corners,mount,f)
                 if anchor is None:continue
-                fitted=False
-                for _ in range(5):
-                    points=[at(x+math.cos(a)*diameter*.51,y+math.sin(a)*diameter*.51,0) for a in np.linspace(0,2*math.pi,12,endpoint=False)]
-                    if sum(_surface(corners,p,f) is not None for p in points)>=9:
-                        fitted=True;break
-                    diameter*=.85
+                # Surveyed mounts already fit their source apertures. A support
+                # probe through a hollow gauge must not shrink/move its new case.
+                fitted=bool(b.dials)
+                if not fitted:
+                    for _ in range(5):
+                        points=[mount+r*math.cos(a)*diameter*.51+u*math.sin(a)*diameter*.51
+                                for a in np.linspace(0,2*math.pi,12,endpoint=False)]
+                        if sum(_surface(corners,p,f) is not None for p in points)>=9:
+                            fitted=True;break
+                        diameter*=.85
                 if not fitted:continue
-                front=_front(corners,np.asarray(at(x,y,0)),axes,diameter*.51)
-                anchor=np.asarray(at(x,y,0))+f*(front+.002)
+                front=_front(corners,mount,axes,diameter*.51)
+                anchor=mount+f*(front+.002)
                 pp,cc=_dial(name+f'_{i}',tuple(anchor+f*.001),tuple(f),tuple(u),diameter,field,ground,labels,ranges)
                 parts+=pp;controls+=cc
         elif b.mode=='switches':
@@ -309,7 +327,12 @@ F16=(
     Block('centre_controls',(0,-.335,.80),(0,.18,-.984),.16,.20,mode='blank'),
 )
 C130=(
-    Block('standby',(-.24,-.46,.856),(0,0,-1),.26,.22,2,(ci.PITCH,ci.SPEED,ci.ALT,ci.CLIMB)),
+    # Original octagonal bezels: centres from their source vertices, outer width
+    # .1236 m. The lower pair mounts in the blank panel beneath, not between the
+    # original two holes. Preserve all four readings without an overlapping grid.
+    Block('standby',(-.23145,-.5132,.856),(0,0,-1),.265,.30,2,(ci.PITCH,ci.SPEED,ci.ALT,ci.CLIMB),
+          dials=(DialAt((-.16737,-.43739,.856),.118),DialAt((-.29443,-.43739,.856),.118),
+                 DialAt((-.16737,-.59299,.856),.118),DialAt((-.29443,-.59299,.856),.118))),
     Block('lower_standby',(-.51,-.80,.856),(0,0,-1),.32,.16,3,(ci.HEADING,ci.FUEL,ci.POWER)),
     Block('fmc_left',(-.19,-.255,.8203),(0,0,-1),.17,.13,mode='readout_status'),
     Block('fmc_middle',(-.37,-.255,.8203),(0,0,-1),.17,.13,mode='readout_weapons'),

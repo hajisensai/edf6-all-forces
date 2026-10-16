@@ -30,6 +30,7 @@ import cockpit_kits_plugin  # noqa: E402
 import cockpit_room  # noqa: E402
 import cockpits  # noqa: E402
 import cockpit_shell  # noqa: E402
+import cockpit_retrofit  # noqa: E402
 import jet_models  # noqa: E402
 import make_jets  # noqa: E402
 import obj_model as om  # noqa: E402
@@ -97,6 +98,17 @@ def main() -> int:
         print('SKIP: Root.cpk and the cockpits\' assets (the model folder\'s cockpits/) are needed')
         return 77
     game = rootcpk.Game(root)
+    # Measure the original C-130 circular bores, not the asymmetric outer plates
+    # or an invented 2x2 grid. The native surface is a 16-sided ring at this depth.
+    import numpy as np
+    pos=cockpit_kits_plugin._cockpit(cockpit_kits_plugin.DECK.slug)[0]
+    for site in cockpit_retrofit.C130[0].dials[:2]:
+        distance=np.linalg.norm(pos[:,:2]-site.centre[:2],axis=1)
+        ring=np.unique(np.round(pos[(abs(pos[:,2]-.84747)<1e-5)&(distance>.053)&(distance<.056),:2],5),axis=0)
+        expect(len(ring)>=12 and np.allclose(ring.mean(0),site.centre[:2],atol=5e-5),
+               f'C-130 standby: live case centred on the original bore {site.centre}')
+        expect(len(ring)>0 and np.ptp(ring,axis=0).max()<site.diameter<.1236,
+               'C-130 standby: case covers its bore without exceeding the original bezel')
     for name, (model, _) in sorted(cockpit_kits_plugin.MODELS.items()):
         if model.sill is None:
             continue

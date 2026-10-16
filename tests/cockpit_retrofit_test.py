@@ -56,3 +56,32 @@ rt.apply(small,(rt.Block('small_map',(0,0,0),(0,0,-1),.3,.1,mode='readout_map'),
 assert all(np.allclose(c.extent,(.3*.94,.1*.92)) for c in small.controls if c.control.startswith('T_')), \
     'added map widgets carry their own extents instead of borrowing the last main display'
 print('source cut-outs, UV preservation, foreground occlusion and live analogue controls passed')
+
+# Surveyed apertures are not a regular grid. Their centres and case diameters
+# must survive fitting, including the live needle pivots, without automatic shrink.
+sites=(rt.DialAt((-.27,.16,0),.20),rt.DialAt((.19,-.13,0),.16))
+block=rt.Block('surveyed',(0,0,0),(0,0,-1),1,1,2,(rt.ci.PITCH,rt.ci.SPEED),dials=sites)
+for scale in (1.,.43):
+    k=Kit([panel('source','original',(0,0,0),2*scale,2*scale,(0,0,-1))],{'original':KitMaterial((50,50,50))})
+    rt.apply(k,(block,),lambda p:np.asarray(p)*scale)
+    for i,site in enumerate(sites):
+        needle=next(c for c in k.controls if c.part==f'retrofit_surveyed_{i}_needle')
+        assert np.allclose(needle.centre[:2],np.asarray(site.centre[:2])*scale)
+        rim=next(p for p in k.parts if p.name==f'retrofit_surveyed_{i}_rim')
+        xyz=np.array([v.pos for v in rim.verts]);assert np.allclose(np.ptp(xyz,axis=0)[:2],site.diameter*scale)
+    bad=rt.Block('bad',(0,0,0),(0,0,-1),1,1,2,(rt.ci.SPEED,rt.ci.ALT),dials=sites[:1])
+    try:rt.apply(Kit([source],{'original':KitMaterial((50,50,50))}),(bad,))
+    except ValueError:pass
+    else:raise AssertionError('a missing surveyed mount must not silently fall back to the grid')
+print('surveyed dial mounts and fitted control pivots passed')
+
+# Captions sit below the lowest numeric scale and remain inside the face, in
+# every language. Enlarging cases to their bores must not enlarge a text overlap.
+for field in rt.TITLES:
+    labels={i:[] for i in range(4)}
+    parts,_=rt._dial('layout',(0,0,0),(0,0,-1),(0,1,0),.118,field,False,labels,{})
+    numbers=[v.pos[1] for p in parts if p.name.endswith('_number') for v in p.verts]
+    captions=[p for group in labels.values() for p in group]+[p for p in parts if p.name.endswith('_unit')]
+    for p in captions:
+        assert max(v.pos[1] for v in p.verts)<min(numbers),'caption overlaps the lower numeric scale'
+        assert max(np.linalg.norm(v.pos[:2]) for v in p.verts)<=.118*.5*.91+1e-9,'caption exceeds the dial face'
