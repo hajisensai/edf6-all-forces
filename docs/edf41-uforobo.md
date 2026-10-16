@@ -48,7 +48,7 @@ TimeDateStamp 0x678CCB46）。可信度：**H** 反汇编读到，**M** 推出�
 - `CLASS_NAMES['UfoRobo']`：插件播的状态与用的定位点必须在文件里。
 
 ### 2.2 插件（`src/edf41robo.cpp`）
-- 对象由 **EventAnimationObject** 的构造（0x5B5FB0，0xC90）造，克隆虚表（槽 0 / 5 / 9 自己的，**槽 6 OnLevel** 也换）。
+- 对象由 **EventAnimationObject** 的构造（0x5B5FB0，0xC90）造，克隆虚表（槽 1 删除析构 0x5B64F0 / 5 / 9 自己的，**槽 6 OnLevel** 也换；2026-10-17 前析构误挂在槽 0，从未执行）。死亡是终态（`src/edf41robo_body.h`）：死后只允许 S10 → S11，脚本的 ObjectAction 与联机主机的状态事件都不能再把它拉回活着的状态。
   - 构造后清 `+0x380 bit0`（EAO 构造置的「不掉血」，H）。
   - 槽 6：脚本 CreateEnemy 设等级（SetLevel 0x54E740）时调一次；EAO 原本 `return true` 不按等级缩放耐久，这里用 UfoCarrier508 的
     公式（0x4F6D00：`0xD7720(base × 等级/10)`，H）写最大 / 当前耐久，之后脚本的 3019 百分比照常生效（M416 的 80 %）。

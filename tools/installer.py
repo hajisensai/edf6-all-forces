@@ -87,6 +87,18 @@ NEW_DEFAULTS: dict[str, dict[str, tuple[str, str]]] = {
 }
 DEFAULTS_MARK = '; edf6vc-defaults-2026-10-07：安装器已把仍是旧默认值 0 的 HeliLandMs、RescueAutoBoard、SeatSwitchOnline、' \
                 'StockVehicleStores 改成开启（想关就改回，之后安装不会再改）'
+# Later steps, each with its own mark (an ini that took the 10-07 step still takes these, once). Edf41MotherParts shipped 15
+# (no 301 panels) from 2026-10-14 in the nightlies; the panels' release ships 31, and merge_ini keeps the player's old 15.
+NEW_DEFAULTS_1017: dict[str, dict[str, tuple[str, str]]] = {
+    SECTION: {'Edf41MotherParts': ('15', '31')},
+}
+DEFAULTS_MARK_1017 = '; edf6vc-defaults-2026-10-17：安装器已把仍是旧出厂值 15 的 Edf41MotherParts 改成 31' \
+                     '（4.1 母舰的板甲也建出来；想改就改，之后安装不会再改）'
+# Every step in order: (its mark, its flips). A step whose mark the ini has is done.
+DEFAULTS_STEPS: tuple[tuple[str, dict[str, dict[str, tuple[str, str]]]], ...] = (
+    (DEFAULTS_MARK, NEW_DEFAULTS),
+    (DEFAULTS_MARK_1017, NEW_DEFAULTS_1017),
+)
 
 
 def bundle_dir() -> str:
@@ -195,10 +207,20 @@ def merge_ini(user: str, shipped: str, section: str = SECTION) -> tuple[str, lis
 
 
 def apply_new_defaults(text: str, section: str = SECTION) -> tuple[str, list[str]]:
-    """`text` (an ini) with each NEW_DEFAULTS key of [section] that still holds its old default given the new one, and
-    DEFAULTS_MARK after the section's head; nothing when the mark is there already. Returns (text, keys changed)."""
-    flips = NEW_DEFAULTS.get(section, {})
-    if not flips or DEFAULTS_MARK.split('：', 1)[0] in text:
+    """`text` (an ini) through every DEFAULTS_STEPS step not taken yet: each key of [section] that still holds its old
+    default gets the new one, and the step's mark goes after the section's head; a step whose mark is there already is
+    skipped. Returns (text, keys changed)."""
+    changed: list[str] = []
+    for mark, defaults in DEFAULTS_STEPS:
+        text, flipped = _apply_defaults_step(text, section, mark, defaults)
+        changed += flipped
+    return text, changed
+
+
+def _apply_defaults_step(text: str, section: str, mark: str,
+                         defaults: dict[str, dict[str, tuple[str, str]]]) -> tuple[str, list[str]]:
+    flips = defaults.get(section, {})
+    if not flips or mark.split('：', 1)[0] in text:
         return text, []
     nl = '\r\n' if '\r\n' in text else '\n'
     lines = text.splitlines()
@@ -217,7 +239,7 @@ def apply_new_defaults(text: str, section: str = SECTION) -> tuple[str, list[str
     head = next((i for i, x in enumerate(lines) if (m := _SECTION.match(x)) and m.group(1).strip().lower() == section.lower()), None)
     if head is None:
         return text, []
-    lines.insert(head + 1, DEFAULTS_MARK)
+    lines.insert(head + 1, mark)
     return nl.join(lines) + nl, changed
 
 

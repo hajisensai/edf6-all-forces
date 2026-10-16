@@ -31,6 +31,7 @@
 // once and the object is left as EventAnimationObject made it.
 #include "crew.h"
 #include "edf41classes.h"
+#include "edf41robo_body.h"
 #include "edf41net.h"
 #include "memory.h"
 
@@ -73,9 +74,16 @@ void* Model(void* object) noexcept { return static_cast<char*>(object)+kEaoModel
 
 // UTF-8 for the log (Log's %ls goes through the C locale and drops a line with Japanese in it: no 攻撃判定 line reached the log
 // of the M411 run 2026-10-15 12:46).
+// A name that does not fit is cut (WideCharToMultiByte fails outright, writing no NUL, when the buffer is short: the length is
+// given and shortened until it fits, and the end is always written).
 struct U8 {
     char text[128]={};
-    explicit U8(const std::wstring& w) noexcept { WideCharToMultiByte(CP_UTF8,0,w.c_str(),-1,text,sizeof(text),nullptr,nullptr); }
+    explicit U8(const std::wstring& w) noexcept {
+        int len=static_cast<int>((std::min)(w.size(),sizeof(text)-1));   // a UTF-16 unit takes at least one byte
+        int n=0;
+        while(len>0 && (n=WideCharToMultiByte(CP_UTF8,0,w.data(),len,text,static_cast<int>(sizeof(text)-1),nullptr,nullptr))<=0)--len;
+        text[n>0 ? n : 0]='\0';
+    }
 };
 
 // ---- EDF6 functions this file calls itself (phase 3, 2026-10-15; static reading of EDF.dll, H unless noted) --------------
@@ -422,8 +430,10 @@ void LightsStep(Lights& l,void* dt) noexcept {
 }
 void LightsEnd(Lights& l) noexcept {
     if(!l.on)return;
-    At<void(__fastcall*)(void*)>(kMatFree)(l.player+8);
     l.on=false;
+    // 0x29D120 gives back the entries' references (shared counts into the game's material data): never once the application
+    // destructor has started (the shutdown callback ended them while the game was whole; this is a destructor after it).
+    if(!ShuttingDown())At<void(__fastcall*)(void*)>(kMatFree)(l.player+8);
 }
 
 // A CAS player's playback rate (player +0x100: 0x116DFB0 advances the clock by dt x it): EDF6_Martian's death (slot 60,
@@ -527,6 +537,7 @@ struct Gun {
 
 // ---- the body / AI states -----------------------------------------------------------------------------------------
 enum Body : int { kS0=0, kS1, kS2, kS3, kS4, kS5, kS6, kS7, kS8, kS9, kS10, kS11 };
+static_assert(kS10==edf41robo::kDying && kS11==edf41robo::kWreck,"the body machine's final states (edf41robo_body.h)");
 const char* const kBodyNames[12]={"S0 ship","S1 small volley","S2 middle volley","S3 buster","S4 transform","S5 fall",
                                   "S6 landing","S7 robot","S8 step","S9 attack","S10 dying","S11 wreck"};
 enum Ai : int { kA0=0, kA1, kA2, kA3, kA4, kA5 };
@@ -982,6 +993,13 @@ void ToRobot(Robo& r) noexcept;
 void BodyEnter(Robo& r,int s) noexcept;
 
 void BodySet(Robo& r,int s) noexcept {
+    // death is final (edf41robo_body.h): after Die only S10 -> S11, whoever asks (the script, the host's events, the machine)
+    if(!edf41robo::BodyStepAllowed(r.body,r.dead,s)) {
+        static std::atomic<int> said{0};
+        if(said.fetch_add(1)<16)Log("EDF41ROBO %p body %s -> %s refused: %s",r.obj,kBodyNames[r.body],s>=kS0 && s<=kS11 ? kBodyNames[s] : "?",
+                                    r.dead || r.body>=kS10 ? "it is dead" : "dying only through its death");
+        return;
+    }
     // exits
     if(r.body==kS9)GunEnter(r,r.gun[kLarge],kG0);
     if(r.logged<400) { ++r.logged; Log("EDF41ROBO %p body %s -> %s (form %d, ai %s)",r.obj,kBodyNames[r.body],kBodyNames[s],r.form,kAiNames[r.ai]); }
@@ -1427,7 +1445,7 @@ void RaiseEvent(Robo& r,const Event& e) noexcept {
         const float radius=e.b*size,damage=e.a*r.s;
         // 4.1 0x277A83: everything happens at the ground under the locator (a map ray from 50 m above it to 50 m below); no
         // ground there, nothing at all (0x277A8C)
-        float c[3];
+        float c[3]={};
         const float from[3]={m[12],m[13]+50.0f,m[14]},to[3]={m[12],m[13]-50.0f,m[14]};
         const bool ground=GroundHit(from,to,c,static_cast<char*>(r.obj)+kEaoRagdoll);
         bool any=false,sent=false;
@@ -1864,20 +1882,40 @@ void FootIk(Robo& r,const float* newMatrix) noexcept {
     }
 }
 
+// The record's game-side resources: the drive hum, the charge effects (scene objects: only marked deleted, the weak count given
+// back), the material animation. Used by the destructor (the object is still whole: the stock destructor runs after) and by
+// the shutdown callback (every robot left, while the sound system and the material data still exist).
+void Release(Robo& r) noexcept {
+    StopSound(r.drive,0);
+    r.driveOn=false;
+    for(Gun& g:r.gun)ChargeOff(g);
+    p6::LightsEnd(r.lights);
+}
+
+// Slot 1, the deleting destructor (0x5B64F0; the wrapper sat on slot 0 until 2026-10-17, which is no destructor, so this never
+// ran: the records stayed, keyed by freed addresses). The stock destructor runs after, on the whole object. From the application
+// destructor on (edf41c::ShuttingDown) StopSound and LightsEnd call nothing into the game: ShutdownRobos released those first.
 std::uint64_t __fastcall DtorWrap(void* self,unsigned flags) {
     {
         std::lock_guard<std::mutex> hold(lock);
         auto it=robos.find(self);
         if(it!=robos.end()) {
-            StopSound(it->second.drive,1);
-            for(Gun& g:it->second.gun)ChargeOff(g);
-            p6::LightsEnd(it->second.lights);
+            Release(it->second);
             robos.erase(it);
         }
         NetForget(self);   // online (edf41net)
     }
     Log("EDF41ROBO destructor %p",self);
     return reinterpret_cast<DtorFn>(roboClass.orig[kSlotDtor])(self,flags);
+}
+
+// The game's shutdown (edf41c::AtGameShutdown, before the application destructor deletes the sound system): every robot still
+// alive stops its sounds and ends its material animation now; its destructor, if it comes later, only drops the record.
+void ShutdownRobos() noexcept {
+    std::lock_guard<std::mutex> hold(lock);
+    int n=0;
+    for(auto& kv:robos) { Release(kv.second); ++n; }
+    if(n)Log("EDF41ROBO the game is shutting down: %d robots' sounds and lights released first",n);
 }
 
 std::uint64_t __fastcall UpdateWrap(void* self,void* dt) {
@@ -1944,16 +1982,18 @@ std::uint64_t __fastcall MessageWrap(void* self,std::uint32_t msg,void* data) {
             Log("EDF41ROBO %p ObjectAction %d (form %d, %s)",self,action,r.form,kBodyNames[r.body]);
             if(!r.ready) { r.ready=true; r.broken=!Setup(r); }
             if(!r.broken) {
+                // a dead robot takes no action (4.1's 0x2758B0 asks the same for 0; its death is final, edf41robo_body.h)
+                const bool living=Alive(self) && !r.dead && r.body<kS10;
                 if(action==0) {
-                    if(Alive(self))BodySet(r,kS4);
+                    if(living)BodySet(r,kS4);
                     return 1;
                 }
-                if(action==1) {
+                if(living && action==1) {
                     ToRobot(r);
                     BodySet(r,kS7);
                     Play(r,r.stStand,L"stand");
                     r.approach=true;
-                } else if(action==2)r.approach=true;
+                } else if(living && action==2)r.approach=true;
             }
             // Never handed on: EventAnimationObject's OnMessage (0x5B6540) answers 0x1000000D from its SGO's `action` table,
             // which this object has not, and throws (EDF+0x5B6A01, M411's ObjectAction 1 on the real game 2026-10-15). 4.1's
@@ -2115,6 +2155,14 @@ void ApplyBody(Robo& r,RoboNet& n,const NetBodyMsg& m) noexcept {
         Fail("a body event out of range (refused)");
         return;
     }
+    if(r.dead || r.body>=kS10) {
+        // This copy is dead already (its own OnDamaged or HP saw it first): its death is final (edf41robo_body.h). A living state
+        // from the host, sent before the host saw the death, is refused; the host's S10 only brings its dying time.
+        if(m.body==kS10 && r.body==kS10)r.dieFrames=m.dieFrames;
+        ++n.applied;
+        if(n.logged<60) { ++n.logged; Log("EDF41ROBO %p %s copy: the host's %s ignored, dead here (%s)",r.obj,n.mirror ? "mirror" : "guest",kBodyNames[m.body],kBodyNames[r.body]); }
+        return;
+    }
     const bool turned=m.form==1 && r.form==0 && m.body!=kS4 && m.body!=kS5;   // S5's entry turns it itself
     if(turned)ToRobot(r);
     if(m.body>=kS10) {
@@ -2123,7 +2171,7 @@ void ApplyBody(Robo& r,RoboNet& n,const NetBodyMsg& m) noexcept {
         // (0x6E40B0) and spun, the form's sound, the drive stopped. `r.dead` keeps it to once: a guest copy a local player killed
         // (its own OnDamaged) or whose HP came to 0 first has done it already, and the host's S10 then only brings the dying time.
         // S11 (the wreck's explosion, the deletion) comes by each copy's own dying clock, not by the host's message.
-        if(!r.dead)Die(r,nullptr);
+        Die(r,nullptr);   // alive here (the dead copy returned above)
         r.dieFrames=m.dieFrames;
         ++n.applied;
         if(n.logged<60) { ++n.logged; Log("EDF41ROBO %p %s copy follows: the host's %s (dying %d frames; dead here %s)",r.obj,n.mirror ? "mirror" : "guest",kBodyNames[m.body],m.dieFrames,r.dead ? "yes" : "no"); }
@@ -2151,6 +2199,7 @@ void ApplyBody(Robo& r,RoboNet& n,const NetBodyMsg& m) noexcept {
 
 void ApplyGun(Robo& r,const NetGunMsg& m) noexcept {
     if(m.group<0 || m.group>3 || m.state!=kG1 || m.autoCount<0 || m.autoCount>100000) { Fail("a gun event out of range (refused)"); return; }
+    if(r.dead || r.body>=kS10)return;   // a dead copy fires no more (S10 put every gun to G0)
     Gun& g=r.gun[m.group];
     if(g.state==kG0)GunEnter(r,g,kG1);
     g.autoCount=m.autoCount;
@@ -2281,6 +2330,7 @@ bool InstallEdf41Robo() noexcept {
     // Slot 22 (CanChangeTeam, asked by SetTeam 0x54EE70): EventAnimationObject's 0x5B6BA0 allows team 6 only, so CreateEnemy's
     // SetTeam(1) left the robots on team 6 (M415 / M411 real runs 2026-10-15): GameObjectBase's (every team).
     AllowAnyTeam(roboClass);
+    AtGameShutdown(&ShutdownRobos);   // the robots' sounds / lights released while the sound system still exists
     const bool ok=AddFactory(L"UfoRobo",&CreateRobo);
     Log("EDF41ROBO on: UfoRobo %s",ok ? "queued for the game's registration" : "NOT registered");
     return ok;

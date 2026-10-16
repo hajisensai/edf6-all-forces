@@ -5,9 +5,12 @@
 //    the game registers its own classes at start-up): an SGO whose xgs_scene_object_class is `name` is then made by `create`,
 //    which builds the object (on a stock class's constructor, CloneObject) and leaves it to the game as a stock creation does.
 //    Call it from an Install* function (before the game's start-up registration runs).
-//  - Cloned vtables. A stock class's vtable copied (its RTTI pointer too), slots 0 (deleting destructor), 5 (Update(dt)) and 9
+//  - Cloned vtables. A stock class's vtable copied (its RTTI pointer too), slots 1 (the deleting destructor), 5 (Update(dt)) and 9
 //    (OnMessage(msg, data)) replaced, every other slot a counting stub to the stock function as the file has it (not the live
-//    table, which other hooks may have patched).
+//    table, which other hooks may have patched). Slot 0 is no destructor: EventAnimationObject's 0x5B6BB0 and UfoCarrier508's
+//    0x54B010 use rdx as a pointer (0x5B6BB0 builds the string "EventAnimationObject" first; slot 0 is the snapshot slot by
+//    docs/swarm-team-re.md, inferred). The destructors are slot 1: 0x5B64F0 / 0x4F8A70 (rcx this, edx flags; the members, the
+//    base destructor, then `test bl,1` and operator delete of 0xC90 / 0x1630), checked by their bytes (kDtors).
 //  - SGO nodes of the object's own SGO (object+0xA0; EDF.dll 0x528A0), child objects made from an SGO path (0x11945E0), CAS
 //    states, matrices, and bullets (0x1194280 with an InitParam built by the game's own constructor 0x1001D0).
 // Every EDF.dll function used is checked against its first bytes before anything is hooked or called (Ready()).
@@ -25,7 +28,7 @@ bool AddFactory(const wchar_t* className,CreateFn create) noexcept;
 bool Ready() noexcept;     // the fingerprints matched and the registration hook is in
 
 // ---- cloned vtables ---------------------------------------------------------------------------------------------
-constexpr int kSlotDtor=0,kSlotUpdate=5,kSlotMessage=9;
+constexpr int kSlotDtor=1,kSlotUpdate=5,kSlotMessage=9;
 struct Clone {
     const char* tag;
     std::size_t vtable;            // the stock class's primary vtable (EDF.dll RVA)
@@ -35,7 +38,7 @@ struct Clone {
     void* block[65];               // [0] RTTI, then the slots: the objects' vptr is &block[1]
     std::atomic<std::uint32_t> calls[64];
 };
-using DtorFn=std::uint64_t(__fastcall*)(void*,unsigned);
+using DtorFn=std::uint64_t(__fastcall*)(void*,unsigned);   // the deleting destructor (this, flags: bit 0 = operator delete); returns this
 using UpdateFn=std::uint64_t(__fastcall*)(void*,void*);
 using MessageFn=std::uint64_t(__fastcall*)(void*,std::uint32_t,void*);
 bool BuildClone(Clone& c,DtorFn dtor,UpdateFn update,MessageFn message) noexcept;
@@ -274,5 +277,10 @@ void SmallBurst(const float* pos,const float* dir,float size) noexcept;
 // it deletes the sound system, and a reference still held afterwards crashes the exit in the bank cache's atexit destructor
 // (EDF+0x7ADCFB against the nulled sound system; docs/edf41-classes.md 12). Up to 8 callbacks.
 void AtGameShutdown(void(*fn)() noexcept) noexcept;
+// True once the shutdown callbacks above have run, right before the application destructor. The scene objects may be
+// destroyed after that, inside it, when the sound system (and the managers it deletes) is gone: a destructor wrapper then only
+// drops its own records. PlayCue / MoveSound / StopSound and MaterialAnimsFree do nothing from then on (the callbacks released
+// every live handle and player while the game was whole); a class's own game calls in its destructor check it too.
+bool ShuttingDown() noexcept;
 
 }  // namespace crew::edf41c

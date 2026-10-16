@@ -16,7 +16,7 @@
 // at their target once it is within range.
 //
 // EDF6: every class is an EventAnimationObject (ctor 0x5B5FB0, 0xC90 bytes: a model, the CAS player main, a ragdoll, durability)
-// under a cloned vtable (edf41classes.h): slot 0 the destructor, 5 Update, 9 OnMessage, 16 the damage filter (ApplyDamage 0x547C30
+// under a cloned vtable (edf41classes.h): slot 1 the deleting destructor (0x5B64F0), 5 Update, 9 OnMessage, 16 the damage filter (ApplyDamage 0x547C30
 // asks it before the HP changes), 18 OnDamaged (after). The plugin keeps each object's 4.1 fields in its own record (Part), keyed
 // by the object. The hull's model (a part's, tools/make_edf41_objects.py MOTHER401_HULL_DONORS) is drawn at a 1e-4 scale and takes
 // no damage: the hull stays an invisible controller as in 4.1. Positions on the parts' models (battery mounts, muzzles, spawn
@@ -1139,6 +1139,9 @@ struct DeadGlow { Part::Glow g; int frames; };
 std::vector<DeadGlow> graveyard;
 void GlowRelease(Part::Glow& g) noexcept {   // the shared_ptr's use count, then its weak count (MSVC _Ref_count_base)
     if(DevBits()&16384) { g=Part::Glow{}; return; }   // dev: never destroyed (bisecting the exit crash)
+    // The effect's destructor releases its sound handle (+0x3A0) into the sound system: ShutdownGlows destroyed every glow before
+    // the application destructor; one still here inside it (none is made after) is left to the process's end, never destroyed.
+    if(ShuttingDown()) { if(g.fx)Log("EDF41M401 a charge glow %p outlived the shutdown callback: left alone",g.fx); g=Part::Glow{}; return; }
     if(g.ctrl && Readable(g.ctrl,16)) {
         auto* uses=reinterpret_cast<std::atomic<std::int32_t>*>(static_cast<char*>(g.ctrl)+8);
         void* const* vt=*reinterpret_cast<void* const* const*>(g.ctrl);
@@ -1253,15 +1256,22 @@ struct ExitProbe {
 // sound system EDF+0x20B2948 among them): every charge glow still alive goes first. Real runs (2026-10-16, M018): one live
 // ChargeEffect at that point makes the sound bank cache's static destructor (EDF+0x7ADCFB) touch the dead sound system; created and
 // destroyed at once, or destroyed before the shutdown, the same runs exit clean.
+// The same callback stops every record's loops and frees its material animation while the sound system and the material data
+// exist: a 401 object destroyed later (inside the application destructor) only drops its record (Forget; StopSound and
+// MaterialAnimsFree are inert from then on, edf41c::ShuttingDown).
 void ShutdownGlows() noexcept {
     std::lock_guard<std::recursive_mutex> hold(lock);
-    int n=0;
+    int n=0,loops=0;
     for(auto& kv:byObj) {
         Part& p=*kv.second;
         for(int i=0;i<p.glowCount;++i)
             if(p.glows[i].fx) { GlowRelease(p.glows[i]); ++n; }
         p.glowCount=0;
+        loops+=(p.loopA.instance!=nullptr)+(p.loopB.instance!=nullptr)+(p.ambient.instance!=nullptr);
+        StopSound(p.loopA,0); StopSound(p.loopB,0); StopSound(p.ambient,0);
+        MaterialAnimsFree(p.mat);
     }
+    if(loops)Log("EDF41M401 the game is shutting down: %d loops stopped first",loops);
     for(DeadGlow& d:graveyard) { GlowRelease(d.g); ++n; }
     graveyard.clear();
     if(Cfg().edf41Mother401Dev&65536) {   // the plugin's log is written by a thread that does not outlive this: a marker file instead
@@ -1302,6 +1312,10 @@ void Forget(const void* self) noexcept {
     }
 }
 
+// Slot 1, the deleting destructor (EventAnimationObject 0x5B64F0; rcx this, edx flags): the record goes while the object is
+// whole, the stock destructor after. The wrapper sat on slot 0 until 2026-10-17 (no destructor): no record was ever dropped (a
+// 401 run's log had no `hull ... destroyed` and 934 records left at the exit). The parts of a destroyed hull find it gone by id
+// (HullOf) and delete themselves; a battery whose panel went does the same.
 std::uint64_t __fastcall HullDtor(void* self,unsigned flags) {
     Log("EDF41M401 hull %p destroyed",self);
     Forget(self);

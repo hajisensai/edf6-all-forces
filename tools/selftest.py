@@ -4360,6 +4360,112 @@ def new_defaults_on_once() -> None:
     assert body.index('install_autoturret(') < body.index('make_stock_stores.remove('), 'its requests rewritten before the vehicles go'
 
 
+@test
+def edf41_clone_destructor_slot() -> None:
+    """The 4.1 classes' destructor wrappers sit on the stock classes' deleting destructor (src/edf41classes.h): slot 1, not 0.
+    Slot 0 of EventAnimationObject (0x5B6BB0) and UfoCarrier508 (0x54B010) takes a pointer in rdx and is no destructor; the
+    wrappers sat there until 2026-10-17 and never ran (a 401 run's log had no `hull ... destroyed`, 934 records left at the
+    exit). The slot the wrappers take must be a function of the deleting destructor's shape (flags from edx kept in ebx, then
+    `test bl,1 / je / mov edx,<the class's size>` and operator delete 0x12D85EC), checked at load (kDtors, BuildClone refuses
+    anything else) and, with the game present, on EDF.dll's own vtables. A destructor from inside the application destructor
+    calls nothing into the game: each class's shutdown callback released its sounds / players / effects first."""
+    header, shared = src('src/edf41classes.h'), src('src/edf41classes.cpp')
+    assert 'constexpr int kSlotDtor=1,kSlotUpdate=5,kSlotMessage=9;' in header
+    dtors = {int(r, 16): (int(t, 16), int(z, 16)) for r, t, z in
+             re.findall(r'\{(0x[0-9A-F]+),(0x[0-9A-F]+),(0x[0-9A-F]+)\},\s*// (?:EventAnimationObject|UfoCarrier508)',
+                        shared.split('kDtors[]={', 1)[1].split('};', 1)[0])}
+    assert dtors == {0x5B64F0: (0x5B651F, 0xC90), 0x4F8A70: (0x4F8AC7, 0x1630)}, dtors
+    sizes = {int(v, 16) for m in re.findall(r'kEaoSize=(0x[0-9A-F]+)|kCarrierSize=(0x[0-9A-F]+)', header) for v in m if v}
+    assert sizes == {0xC90, 0x1630}, sizes
+
+    def slots(name: str) -> list[int]:
+        body = shared.split(f'const std::uint32_t {name}[', 1)[1].split('};', 1)[0].split('{', 1)[1]
+        return [int(x, 16) for x in re.findall(r'0x[0-9A-F]+', body)]
+    eao, carrier = slots('kEaoSlots'), slots('kCarrierSlots')
+    assert eao[1] == 0x5B64F0 and carrier[1] == 0x4F8A70 and eao[0] == 0x5B6BB0 and carrier[0] == 0x54B010
+    prints = shared.split('constexpr Print kPrints[]={', 1)[1].split('};', 1)[0]
+    for rva in dtors:
+        assert '{0x%X,{' % rva in prints, f'the destructor 0x{rva:X} has no fingerprint'
+    assert '{0x5B6BB0,{' not in prints, 'slot 0 is fingerprinted as if it were the destructor'
+    build = shared.split('bool BuildClone(Clone& c,DtorFn dtor,UpdateFn update,MessageFn message) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'DtorShaped(c.rvas[kSlotDtor])' in build and build.index('DtorShaped(') < build.index('c.block[1+kSlotDtor]=')
+    for rel in ('src/edf41mother.cpp', 'src/edf41mother401.cpp', 'src/edf41robo.cpp'):
+        code = re.sub(r'//[^\n]*', '', src(rel))
+        assert 'orig[kSlotDtor]' in code and 'orig[0]' not in code and 'block[1]' not in code, rel
+        assert re.search(r'AtGameShutdown\(&\w+\);', code), f'{rel}: no shutdown callback'
+    # the shutdown: the callbacks first (the game whole), the flag after; the sound / material calls inert from then on
+    hook = shared.split('void __fastcall ShutdownHook(void* self) {', 1)[1].split('\n}', 1)[0]
+    assert hook.index('shutdownFns[i]()') < hook.index('shuttingDown=true;') < hook.index('kAppDtor')
+    for fn in ('void StopSound(SoundHandle& handle,int fadeFrames) noexcept {', 'void MoveSound(SoundHandle& handle,const float* pos) noexcept {',
+               'bool PlayCue(const wchar_t* cue,const float* pos,SoundHandle* handle,const SeParams& params) noexcept {',
+               'void MaterialAnimsFree(MaterialAnims& m) noexcept {'):
+        assert 'ShuttingDown()' in shared.split(fn, 1)[1].split('\n}', 1)[0], fn
+    robo = src('src/edf41robo.cpp')
+    assert 'if(!ShuttingDown())At<void(__fastcall*)(void*)>(kMatFree)(l.player+8);' in robo
+    assert 'AtGameShutdown(&ShutdownRobos);' in robo and 'Release(kv.second)' in robo.split('void ShutdownRobos() noexcept {', 1)[1].split('\n}', 1)[0]
+    m401 = src('src/edf41mother401.cpp').split('void ShutdownGlows() noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'StopSound(p.loopA,0); StopSound(p.loopB,0); StopSound(p.ambient,0);' in m401 and 'MaterialAnimsFree(p.mat);' in m401
+    m301 = src('src/edf41mother.cpp').split('void ShutdownVents() noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'StopSound(kv.second.fly,0);' in m301 and 'StopSound(kv.second.chargeLoop,0);' in m301
+
+    import rootcpk
+    dll = os.path.join(rootcpk.DEFAULT_GAME, 'EDF.dll')
+    if not os.path.exists(dll):
+        return
+    import pefile
+    pe = pefile.PE(dll, fast_load=True)
+    img = pe.get_memory_mapped_image()
+    base = pe.OPTIONAL_HEADER.ImageBase
+
+    def slot(vtable: int, i: int) -> int:
+        return int.from_bytes(img[vtable + 8 * i:vtable + 8 * i + 8], 'little') - base
+    eao_vt = int(re.search(r'kEaoVtable=(0x[0-9A-F]+)', header).group(1), 16)
+    carrier_vt = int(re.search(r'kCarrierVtable=(0x[0-9A-F]+)', header).group(1), 16)
+    for vtable, table in ((eao_vt, eao), (carrier_vt, carrier)):
+        for i, rva in enumerate(table):
+            assert slot(vtable, i) == rva, (hex(vtable), i, hex(slot(vtable, i)), hex(rva))
+        rva = table[1]
+        tail, size = dtors[rva]
+        head = img[rva:rva + 0x20]
+        assert b'\x8b\xda' in head, f'0x{rva:X}: the flags (edx) are not kept in ebx'
+        assert img[tail:tail + 10] == b'\xf6\xc3\x01\x74' + bytes([img[tail + 4]]) + b'\xba' + size.to_bytes(4, 'little'), hex(tail)
+        call = tail + 5 + 5 + 3   # je, mov edx / mov rcx,rdi, then the call
+        assert img[call] == 0xE8 and call + 5 + int.from_bytes(img[call + 1:call + 5], 'little', signed=True) == 0x12D85EC, hex(call)
+        zero = table[0]
+        assert img[zero:zero + 0x40].find(b'\xf6\xc3\x01') < 0, f'slot 0 0x{zero:X} looks like a destructor'
+
+
+@test
+def edf41_mother_parts_default_migrates() -> None:
+    """Edf41MotherParts shipped 15 (no 301 panels) in the nightlies from 2026-10-14 and ships 31 now: merge_ini keeps a
+    player's value, so an ini still at the old 15 is moved to 31 once by the installer's second defaults step (its own mark:
+    an ini that took the 10-07 step takes it too), a value the player chose is kept, and a later install changes nothing."""
+    import installer
+    ini, crew = src('EDF6VehicleCrew.ini'), src('src/crew.h')
+    assert re.search(r'^Edf41MotherParts=31$', ini, re.M) and 'int edf41MotherParts=31;' in crew
+    assert installer.NEW_DEFAULTS_1017[installer.SECTION] == {'Edf41MotherParts': ('15', '31')}
+    assert [m for m, _ in installer.DEFAULTS_STEPS] == [installer.DEFAULTS_MARK, installer.DEFAULTS_MARK_1017]
+    assert installer.DEFAULTS_MARK.split('：', 1)[0] != installer.DEFAULTS_MARK_1017.split('：', 1)[0]
+    old = f'[VehicleCrew]\n{installer.DEFAULTS_MARK}\nEnabled=1\nHeliLandMs=0\nEdf41MotherParts=15\n'
+    text, flipped = installer.apply_new_defaults(old)
+    assert flipped == ['Edf41MotherParts'], flipped
+    assert 'Edf41MotherParts=31' in text and 'HeliLandMs=0' in text, 'the 10-07 step was taken already: the player\'s 0 stays'
+    assert installer.DEFAULTS_MARK_1017 in text and text.count(installer.DEFAULTS_MARK) == 1
+    again = text.replace('Edf41MotherParts=31', 'Edf41MotherParts=15')
+    assert installer.apply_new_defaults(again) == (again, []), 'a later install undid the player\'s own 15'
+    mine = '[VehicleCrew]\nEnabled=1\nEdf41MotherParts=7 ; mine\n'
+    text, flipped = installer.apply_new_defaults(mine)
+    assert 'Edf41MotherParts' not in flipped and 'Edf41MotherParts=7 ; mine' in text and installer.DEFAULTS_MARK_1017 in text
+    # an ini from before both steps takes both
+    both = '[VehicleCrew]\nEnabled=1\nRescueAutoBoard=0\nEdf41MotherParts=15\n'
+    text, flipped = installer.apply_new_defaults(both)
+    assert sorted(flipped) == ['Edf41MotherParts', 'RescueAutoBoard'], flipped
+    assert installer.DEFAULTS_MARK in text and installer.DEFAULTS_MARK_1017 in text
+    # the install path goes through it (merge_ini keeps the player's 15, the step moves it)
+    planned = installer.planned_ini(old, ini)
+    assert re.search(r'^Edf41MotherParts=31$', planned[0], re.M) and 'Edf41MotherParts' in planned[3]
+
+
 def make_stock_stores_wanted(text: str) -> bool:
     import make_stock_stores
     return make_stock_stores.wanted(text)
@@ -7170,8 +7276,13 @@ def edf41_mother301_finish_contract() -> None:
     assert 'const wchar_t* hitSe=nullptr;' in header and 'bool FillSePreset(unsigned char* preset' in header   # unified with UfoRobo's (one definition, initialises the preset itself)
     assert 'FillSePreset(param+0x100,b.hitSeTable,b.hitSe)' in shared
     plugin, ini = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini')
-    assert 'ReadInt(L"Edf41MotherForce",n.edf41MotherForce),0,2047)' in plugin
+    assert 'ReadInt(L"Edf41MotherForce",n.edf41MotherForce),0,4095)' in plugin
     assert re.search(r'^Edf41MotherForce=0$', ini, re.M) and '16 =' in ini.split('Edf41MotherForce=0', 1)[0].rsplit('Edf41MotherParts=31', 1)[1]
+    # the clamp keeps every bit the ini documents (2048 = the puffs: a cap of 2047 cut it, 2026-10-17 review)
+    doc = ini.split('Edf41MotherForce=0', 1)[0].rsplit('Edf41MotherParts=31', 1)[1]
+    top = max(int(b) for b in re.findall(r'(\d+) =', doc))
+    cap = int(re.search(r'ReadInt\(L"Edf41MotherForce",n\.edf41MotherForce\),0,(\d+)\)', plugin).group(1))
+    assert top == 2048 and cap == 2 * top - 1, (top, cap)
 
 
 @test
@@ -7403,7 +7514,8 @@ def edf41_robo_finish() -> None:
     assert len(re.findall(r'hitSe=L"', cpp)) == 4 and 'L"ik_control_info"' in cpp
     # the lights: EDF6's material animation player on the model (+0x160), the loop at birth, the second entry at the death
     assert 'p6::LightsStart(r.lights,r.obj,Key(o,L"material_animation"))' in cpp and 'p6::LightsPlay(r.lights,0,2)' in cpp
-    assert 'p6::LightsPlay(r.lights,1,1)' in cpp and 'p6::LightsEnd(it->second.lights)' in cpp
+    assert 'p6::LightsPlay(r.lights,1,1)' in cpp and 'p6::LightsEnd(r.lights);' in cpp.split('void Release(Robo& r) noexcept {', 1)[1].split('\n}', 1)[0]
+    assert 'Release(it->second);' in cpp.split('std::uint64_t __fastcall DtorWrap(', 1)[1].split('\n}', 1)[0]
     prints = cpp.split('constexpr Print kPrints[]={', 1)[1].split('};', 1)[0]
     for rva in re.findall(r'\b(k[A-Z]\w+)=0x[0-9A-F]+', cpp.split('namespace p6 {', 1)[1].split('struct Print', 1)[0]):
         if rva in ('kInitParamBase', 'kEffects', 'kManager', 'kChargeVtable', 'kParticleParamVtable'):   # data, not code

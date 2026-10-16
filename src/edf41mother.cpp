@@ -1,8 +1,8 @@
 // EDF4.1's UfoMother301 (the mothership) and its four part classes as the plugin's own scene object classes
 // (docs/edf41-ufomother301.md; the 4.1 behaviour read from EDF41.exe, the EDF6 calls from EDF.dll: src/edf41classes.h).
 //
-//  - The hull is built by UfoCarrier508's constructor under a cloned vtable (slot 0 dtor, 5 Update, 9 OnMessage, 16 the damage
-//    filter): the carrier's base keeps doing what 4.1's base did for the hull (route following, durability, the encounter),
+//  - The hull is built by UfoCarrier508's constructor under a cloned vtable (slot 1 the deleting destructor, 5 Update, 9 OnMessage,
+//    16 the damage filter): the carrier's base keeps doing what 4.1's base did for the hull (route following, durability, the encounter),
 //    the rest is 4.1's: the slow spin (0.0003 rad/frame, ObjectAction 0 / 1 / 2), damage only on the `weak` body and only once
 //    the main cannon is gone (4.1 slot 10 0x250FC0), a hit's 64 frames of small fire bursts round the weak point, the parts.
 //  - The parts (mp_HatchLow 4, mp_HatchMiddle 4 covers, mp_Cannon 10, mp_BigCannon 1, mp_Panel 4 rings of 22 / 40 / 40 / 23)
@@ -329,8 +329,12 @@ int shotCount[5]={},removedCount[5]={};   // bullets fired and parts removed, fo
 std::unordered_map<void*,Hull> hulls;
 std::unordered_map<void*,Part> parts;
 
-// Liveness by the objects' own weak references (edf41c::WeakRef): the game frees a deleted object without calling slot 0
-// (M123: the script deletes the mothership at the end of its route; its parts then read freed memory). Keyed by object.
+// Liveness by the objects' own weak references (edf41c::WeakRef), keyed by object. A deleted object (DeleteObject: bit 4 of +0x18)
+// stays allocated until the scene frees it, and only then does its destructor (slot 1, HullDtor / PartDtor) drop its record: in
+// between, and for the parts of a hull destroyed this frame, the weak reference is what says it is gone. Until 2026-10-17 the
+// destructor wrapper sat on slot 0, which is no destructor, so no record was ever dropped by it (M123: the script deleted the
+// mothership at the end of its route and its parts read freed memory; the weak references were the fix). The wrapper is on the
+// real destructor now; the weak references stay for the time between the deletion and the free, which no destructor sees.
 std::unordered_map<void*,WeakRef> refs;
 
 // ---- online (edf41net): declared here, defined in the block "online" at the end of this namespace ----
@@ -362,8 +366,10 @@ void DropPart(void* o) noexcept {
 // emitters wait kVentGraveFrames hull updates in the graveyard (a submitted draw is not reused by a frame in flight), then go
 // through their own deleting destructor (vt[0](e, 1) = 0x301460: texture handles 0x1120820, buffers, operator delete 0x300).
 // What is left at the game's shutdown is deleted right before the application destructor (edf41c::AtGameShutdown), while
-// the texture and effect managers still exist; a hull destroyed later than that (inside the application destructor) keeps its
-// emitters (FreeVents only parks them, nothing ticks the graveyard any more).
+// the texture and effect managers still exist, and every loop still playing (a hull's fly / fall, a cannon's charge) is stopped
+// there while the sound system exists; a hull or part destroyed later than that (inside the application destructor) only drops
+// its record: its emitters are gone already (FreeVents only parks them), and StopSound does nothing from then on
+// (edf41c::ShuttingDown).
 constexpr int kVentGraveFrames=8;
 struct DeadVents { void* e[16]; int frames; };
 std::vector<DeadVents> ventGraveyard;
@@ -439,6 +445,17 @@ void DropHull(void* o) noexcept {
 }
 void ShutdownVents() noexcept {
     std::lock_guard<std::recursive_mutex> hold(lock);
+    int loops=0;
+    for(auto& kv:hulls) {
+        loops+=(kv.second.fly.instance!=nullptr)+(kv.second.fall.instance!=nullptr);
+        StopSound(kv.second.fly,0);
+        StopSound(kv.second.fall,0);
+    }
+    for(auto& kv:parts) {
+        loops+=kv.second.chargeLoop.instance!=nullptr;
+        StopSound(kv.second.chargeLoop,0);
+    }
+    if(loops)Log("EDF41MOTHER the game is shutting down: %d loops stopped first",loops);
     int n=0;
     for(auto& kv:hulls)
         for(void*& e:kv.second.vent)
@@ -1206,11 +1223,21 @@ void Force(void* hullObj,Hull& h) noexcept {
 }
 
 // ---- the wrappers -------------------------------------------------------------------------------------------------
+// Slot 1, the deleting destructors (UfoCarrier508 0x4F8A70, EventAnimationObject 0x5B64F0; rcx this, edx flags): the record goes
+// while the object is still whole (the stock destructor runs after). A hull's parts outlive it by a frame: their Update finds the
+// hull gone (Live) and deletes them. Called when the script deletes an object mid-mission, when a mission ends or restarts (the
+// scene frees everything with the game whole) and, at the game's exit, possibly inside the application destructor: then
+// ShutdownVents has stopped the loops and deleted the emitters, and StopSound is inert (edf41c::ShuttingDown).
 std::uint64_t __fastcall HullDtor(void* self,unsigned flags) {
     {
         std::lock_guard<std::recursive_mutex> hold(lock);
         Hull* h=HullOf(self);
-        if(h)Log("EDF41MOTHER hull %p gone: its %zu parts go with it",self,h->parts.size());
+        if(h) {
+            Log("EDF41MOTHER hull %p gone: its %zu parts go with it",self,h->parts.size());
+            // its parts let go of the address (a hull made there next must not take them): their next Update deletes them
+            for(void* o:h->parts)
+                if(Part* p=PartOf(o))p->hull=nullptr;
+        }
         DropHull(self);
         Forget(self);
     }
@@ -1887,7 +1914,7 @@ bool InstallEdf41Mother() noexcept {
         SetSlot(partClass,kSlotDraw,reinterpret_cast<void*>(&PartDraw));
     }
     AllowAnyTeam(partClass);   // the parts take the hull's team (EventAnimationObject's slot 22 takes team 6 only)
-    AtGameShutdown(&ShutdownVents);   // the vents' emitters deleted while the effect / texture managers still exist
+    AtGameShutdown(&ShutdownVents);   // the vents' emitters deleted and the loops stopped while the managers / sound system still exist
     const bool ok=AddFactory(L"UfoMother301",&CreateHull) && AddFactory(L"UfoMother301_Hatch",&CreatePart)
         && AddFactory(L"UfoMother301_Panel",&CreatePart) && AddFactory(L"UfoMother301_Cannon",&CreatePart)
         && AddFactory(L"UfoMother301_BigCannon",&CreatePart);

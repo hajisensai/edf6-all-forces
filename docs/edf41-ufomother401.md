@@ -27,7 +27,7 @@
 
 ### 2.1 类与底类
 12 个类都由 `edf41c::AddFactory` 登记进游戏自己的工厂表，全部以 **EventAnimationObject**（ctor 0x5B5FB0，0xC90 字节：模型、CAS 播放器 main、
-ragdoll、耐久）为底，虚表克隆（45 槽）：0 析构、5 Update、9 OnMessage、**16 受伤过滤**（ApplyDamage 0x547C30 在改 HP 前问它）、**18 受伤后**。
+ragdoll、耐久）为底，虚表克隆（45 槽）：1 删除析构（0x5B64F0；2026-10-17 前误挂在槽 0，析构包装从未执行）、5 Update、9 OnMessage、**16 受伤过滤**（ApplyDamage 0x547C30 在改 HP 前问它）、**18 受伤后**。
 船体与部件各一张克隆表；4.1 的字段放在插件自己的记录里（按对象指针）。两张表的槽 22（「允许的队伍」，EAO 的 0x5B6BA0 只认 6）换成 `AllowAnyTeam`，
 否则 SetTeam 0x54EE70 什么也不改（实机：CreateEnemy 的船体停在 6）。
 

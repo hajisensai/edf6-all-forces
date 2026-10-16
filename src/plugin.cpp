@@ -540,7 +540,7 @@ void LoadConfig() noexcept {
     n.edf41RoboTransformAfter=ReadFloat(L"Edf41RoboTransformAfter",n.edf41RoboTransformAfter);
     n.edf41DevShoot=static_cast<int>(FixInt("Edf41DevShoot",ReadInt(L"Edf41DevShoot",n.edf41DevShoot),0,100000));
     n.edf41DevShootDamage=ReadFloat(L"Edf41DevShootDamage",n.edf41DevShootDamage);
-    n.edf41MotherForce=static_cast<int>(FixInt("Edf41MotherForce",ReadInt(L"Edf41MotherForce",n.edf41MotherForce),0,2047));
+    n.edf41MotherForce=static_cast<int>(FixInt("Edf41MotherForce",ReadInt(L"Edf41MotherForce",n.edf41MotherForce),0,4095));
     n.edf41MotherPlace=ReadFloat(L"Edf41MotherPlace",n.edf41MotherPlace);
     n.edf41MotherParts=static_cast<int>(FixInt("Edf41MotherParts",ReadInt(L"Edf41MotherParts",n.edf41MotherParts),0,31));
     n.edf41Mother401=ReadBool(L"Edf41Mother401",n.edf41Mother401);

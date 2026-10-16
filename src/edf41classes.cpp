@@ -42,7 +42,7 @@ constexpr Print kPrints[]={
     {kRegisterFactory,{0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x74}},
     {kNew,{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B}},
     {kCarrierCtor,{0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57}},
-    {0x4F8A70,{0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83}},   // UfoCarrier508 slot 0
+    {0x4F8A70,{0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83}},   // UfoCarrier508 slot 1, the deleting destructor (its shape: kDtors)
     {0x4F9540,{0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83}},   // slot 5
     {0x4F93E0,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74}},   // slot 9
     {kCreateFromPath,{0x40,0x55,0x53,0x56,0x57,0x41,0x54,0x41}},
@@ -50,10 +50,28 @@ constexpr Print kPrints[]={
     {kDeleteObject,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},
     {kSetCasState,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},
     {kEaoCtor,{0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57}},
-    {0x5B6BB0,{0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x74}},   // EventAnimationObject slot 0
+    {0x5B64F0,{0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83}},   // EventAnimationObject slot 1, the deleting destructor (kDtors)
     {0x5B6D20,{0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83}},   // slot 5
     {0x5B6540,{0x48,0x89,0x5C,0x24,0x20,0x55,0x56,0x57}},   // slot 9
 };
+
+// The deleting destructors a clone's slot kSlotDtor may wrap: at `tail`, `test bl,1 / je +0x0D / mov edx,size` (flags kept in
+// ebx from edx; bit 0 frees the object, operator delete 0x12D85EC with the class's size). A slot that is not one of these (the
+// slot 0 of both classes is not) is never wrapped as the destructor.
+struct DtorShape { std::uint32_t rva,tail,size; };
+constexpr DtorShape kDtors[]={
+    {0x5B64F0,0x5B651F,0xC90},    // EventAnimationObject: ragdoll +0xAA0, model +0x5C0, base 0x547470, delete 0xC90
+    {0x4F8A70,0x4F8AC7,0x1630},   // UfoCarrier508: members +0x1600 / +0x15D0, base 0x4F62F0, delete 0x1630
+};
+bool DtorShaped(std::uint32_t rva) noexcept {
+    for(const DtorShape& d:kDtors) {
+        if(d.rva!=rva)continue;
+        const unsigned char want[8]={0xF6,0xC3,0x01,0x74,0x0D,0xBA,static_cast<unsigned char>(d.size&0xFF),static_cast<unsigned char>((d.size>>8)&0xFF)};
+        return Readable(image+d.tail,8) && std::memcmp(image+d.tail,want,8)==0;
+    }
+    return false;
+}
+std::atomic<bool> shuttingDown{false};
 
 using NewFn=void*(__fastcall*)(std::size_t);
 using CtorFn=void*(__fastcall*)(void*,void*);
@@ -238,6 +256,11 @@ bool AddFactory(const wchar_t* className,CreateFn create) noexcept {
 // Counting stubs for the slots not replaced: mov rax,&count / lock inc [rax] / mov rax,orig / jmp rax.
 bool BuildClone(Clone& c,DtorFn dtor,UpdateFn update,MessageFn message) noexcept {
     if(!Fingerprints())return false;
+    if(dtor && (c.slots<=kSlotDtor || !DtorShaped(c.rvas[kSlotDtor]))) {
+        Log("EDF41CLASS the %s slot %d (EDF.dll+0x%X) is not a deleting destructor of the shape this was written for: no clone",c.tag,kSlotDtor,
+            c.slots>kSlotDtor ? c.rvas[kSlotDtor] : 0u);
+        return false;
+    }
     const void* const* vt=reinterpret_cast<const void* const*>(image+c.vtable);
     if(c.slots>64 || !Readable(vt-1,sizeof(void*)*static_cast<std::size_t>(c.slots+1))) { Log("EDF41CLASS the %s vtable is not readable",c.tag); return false; }
     c.block[0]=const_cast<void*>(vt[-1]);
@@ -632,7 +655,7 @@ int RagdollBody(void* ragdoll,const wchar_t* name) noexcept {
 
 bool PlayCue(const wchar_t* cue,const float* pos,SoundHandle* handle,const SeParams& params) noexcept {
     void* system=Global(kSoundSystem);
-    if(!Prims() || !system || !cue || !*cue)return false;
+    if(!Prims() || !system || !cue || !*cue || ShuttingDown())return false;
     alignas(16) unsigned char preset[0x80];
     At<void*(__fastcall*)(void*)>(kPresetInit)(preset);
     struct { void* bank; std::int32_t cue; std::int32_t pad; } ref{nullptr,-1,0};
@@ -668,12 +691,14 @@ bool PlaySe(const void* table,const wchar_t* name,const float* pos,SoundHandle* 
     return false;
 }
 void MoveSound(SoundHandle& handle,const float* pos) noexcept {
-    if(!Prims() || !handle.instance)return;
+    if(!Prims() || !handle.instance || ShuttingDown())return;
     alignas(16) float p[4]={pos[0],pos[1],pos[2],1.0f};
     At<void(__fastcall*)(SoundHandle*,const float*)>(kSoundMove)(&handle,p);
 }
 void StopSound(SoundHandle& handle,int fadeFrames) noexcept {
-    if(!Prims() || !handle.instance)return;
+    // 0x7A8CD0 reads the instance (sound system memory) and releases the handle: never once the application destructor has
+    // started (the sound system may be gone; the shutdown callbacks stopped every handle before)
+    if(!Prims() || !handle.instance || ShuttingDown())return;
     At<void(__fastcall*)(SoundHandle*,int)>(kSoundStop)(&handle,fadeFrames);
 }
 
@@ -1101,6 +1126,9 @@ void MaterialAnimsFree(MaterialAnims& m) noexcept {
     if(!m.live)return;
     m.live=false;
     m.count=0;
+    // 0x29D120 gives back the entries' references into the game's material data: not once the application destructor has
+    // started (the shutdown callback freed every live one while the game was whole; a later destructor leaves it)
+    if(ShuttingDown())return;
     reinterpret_cast<void(__fastcall*)(void*)>(image+kMatFree)(m.comp+8);
 }
 
@@ -1149,10 +1177,13 @@ constexpr std::size_t kAppDtor=0x7021F0,kAppDtorCall=0x70293F;
 void(*shutdownFns[8])() noexcept={};
 int shutdownCount=0;
 void __fastcall ShutdownHook(void* self) {
-    for(int i=0;i<shutdownCount;++i)shutdownFns[i]();
+    for(int i=0;i<shutdownCount;++i)shutdownFns[i]();   // the game is still whole: the callbacks release what needs it
+    shuttingDown=true;   // from here an object destroyed (inside the application destructor) calls nothing into its subsystems
     reinterpret_cast<void(__fastcall*)(void*)>(image+kAppDtor)(self);
 }
 }  // namespace
+
+bool ShuttingDown() noexcept { return shuttingDown.load(); }
 
 void AtGameShutdown(void(*fn)() noexcept) noexcept {
     static std::mutex lock;

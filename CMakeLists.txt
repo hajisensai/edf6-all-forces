@@ -929,6 +929,10 @@ add_test(NAME drill_model_rotation COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOUR
 add_executable(edf41net_test tests/edf41net_test.cpp)
 target_compile_options(edf41net_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME edf41net COMMAND edf41net_test)
+# UfoRobo's death is final (src/edf41robo_body.h: after Die only S10 -> S11).
+add_executable(edf41robo_body_test tests/edf41robo_body_test.cpp)
+target_compile_options(edf41robo_body_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME edf41robo_body COMMAND edf41robo_body_test)
 add_executable(edf41net_native_test EXCLUDE_FROM_ALL tests/edf41net_native_test.cpp)
 target_link_libraries(edf41net_native_test PRIVATE edf6common user32)
 target_include_directories(edf41net_native_test PRIVATE src common)
