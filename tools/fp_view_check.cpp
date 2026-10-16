@@ -49,6 +49,31 @@ M4 CameraAt(const M4& aim,const float* eyeLocal) {
     return c;
 }
 
+void AuthoredActions() {
+    const float origin[3]={10,2,-30},grip[3]={.2f,-.3f,.6f},rest[3]={.3f,1.1f,.5f};
+    const auto aim=Frame(.4f,1.3f,origin),camera=Frame(.4f,1.3f,origin);
+    bool follows=true,connected=true;
+    for(int frame=0;frame<120;++frame) {
+        const float phase=std::sin(frame*.08f);
+        // Native spear anticipation/thrust and shield translation, sampled before muzzle events.
+        const float action[3]={-.15f*phase,.12f*phase,.35f*phase};
+        M4 weapon=aim;float local[3];for(int i=0;i<3;++i)local[i]=rest[i]+action[i];
+        Point(aim,local,weapon.m+12);M4 transform,inverse;
+        follows &= NativeGripTransform(weapon,aim,camera,grip,.6f,&transform,Identity(),rest);
+        InverseAffine(camera,&inverse);float world[3],placed[3];Point(transform,weapon.m+12,world);Point(inverse,world,placed);
+        for(int i=0;i<3;++i)follows &= Near(placed[i],.6f*(grip[i]+action[i]));
+        const float shoulder[3]={-.3f,0,0},elbow[3]={-.2f,-.3f,.1f},wrist[3]={0,-.4f,.4f};
+        const float target[3]={-.1f+phase*.1f,-.3f,.5f},want[3]={-.3f,-.2f,0},pole[3]={-1,-1.5f,0};
+        M4 upper,fore;connected &= ArmChainTo(shoulder,elbow,wrist,target,want,pole,&upper,&fore);
+        float e1[3],e2[3],tip[3],s1[3];Point(upper,elbow,e1);Point(fore,elbow,e2);Point(fore,wrist,tip);Point(upper,shoulder,s1);
+        for(int i=0;i<3;++i)connected &= Near(e1[i],e2[i]) && Near(tip[i],target[i]);
+        float original[3],moved[3];Sub(elbow,shoulder,original);Sub(e1,s1,moved);connected &= Near(Length(original),Length(moved));
+        Sub(wrist,elbow,original);Sub(tip,e2,moved);connected &= Near(Length(original),Length(moved));
+    }
+    Expect(follows,"authored anticipation, thrust and guard translations survive viewmodel placement");
+    Expect(connected,"moving support wrist retains a connected elbow and both limb lengths throughout strafing");
+}
+
 void Identity_() {
     const float at[3]={10.0f,2.0f,-30.0f},eye[3]={0.0f,1.6f,0.1f},hold[3]={0.0f,0.0f,0.0f};
     const M4 aim=Frame(0.3f,1.1f,at);
@@ -416,6 +441,7 @@ int main() {
     reading.share[hp]=.25f;
     M4 bar=crew::instruments::Pose(Identity(),L'b',hp,0,0,reading,true);
     Expect(Near(bar.m[0],.25f) && Near(bar.m[5],1),"a physical bar scales only along its own horizontal axis");
+    AuthoredActions();
     Identity_();
     Hold();
     Shrink();

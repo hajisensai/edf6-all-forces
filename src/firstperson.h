@@ -7,6 +7,7 @@
 #include "cockpit_instruments.h"
 
 namespace crew {
+void ResetFirstPerson() noexcept;   // publish a new mission; camera/render thread retires old pointers
 bool InstallFirstPerson() noexcept;   // at load, before InstallMap (the map's camera step chains outside this one)
 bool FirstPersonOn() noexcept;        // game thread: the local player's camera is in first person this frame
 // Draw thread or game thread (map.cpp's camera step): the stock HUD is off on `camera` for a vehicle's first person
@@ -33,10 +34,10 @@ struct CockpitScreen { ScreenKind kind; float off[3],right[3],up[3],w,h; };
 constexpr int kMostScreens=8;
 struct CockpitScreens { int n; CockpitScreen s[kMostScreens]; bool physical; };
 // Game thread, from HudPublish. Consumed only by the vehicle's model draw, never by physics / native bone updates.
-void FirstPersonInstrumentReadings(const instruments::Readings& readings) noexcept;
+void FirstPersonInstrumentReadings(const instruments::Readings& readings,const unsigned char* human) noexcept;
 // fp_vehicle.cpp (game thread): `vehicle`'s seat `seat` screens round the eye `eye`.
 int VehicleScreens(const unsigned char* vehicle,int seat,const float* eye,CockpitScreens* out) noexcept;
 // Game thread (HudPublish): this machine's player's cockpit screens as of the last camera step; false: no vehicle first
 // person now (the HUD's own panels then).
-bool FirstPersonScreens(CockpitScreens* out) noexcept;
+bool FirstPersonScreens(CockpitScreens* out,const unsigned char* human) noexcept;
 }  // namespace crew

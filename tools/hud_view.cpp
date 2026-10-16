@@ -175,9 +175,10 @@ bool PlayerNixTorso(NixTorso* o) noexcept { if(hasNix)*o=sceneNix;return hasNix;
 bool PlayerProteus(ProteusReadout* o) noexcept { if(hasProteus)*o=sceneProteus;return hasProteus; }
 bool PlayerSazabiCue(SazabiCue* o) noexcept { if(hasSazabi)*o=sceneSazabi;return hasSazabi; }
 bool hasScreens=false;CockpitScreens sceneScreens{};   // a vehicle's first person: its cockpit's screens
-bool FirstPersonScreens(CockpitScreens* o) noexcept { if(hasScreens)*o=sceneScreens;return hasScreens; }
+unsigned char* PlayerHuman() noexcept { return nullptr; }
+bool FirstPersonScreens(CockpitScreens* o,const unsigned char*) noexcept { if(hasScreens)*o=sceneScreens;return hasScreens; }
 instruments::Readings deliveredInstruments{};
-void FirstPersonInstrumentReadings(const instruments::Readings& r) noexcept { deliveredInstruments=r; }
+void FirstPersonInstrumentReadings(const instruments::Readings& r,const unsigned char*) noexcept { deliveredInstruments=r; }
 bool PlayerTurretCam(TurretCamReadout* value) noexcept { if(hasMouseIntent)*value=sceneMouseIntent;return hasMouseIntent; }
 bool SightZoomMounted(const void*) noexcept { return hasMountedOptic; }
 bool PlayerTurretBinding(edf::aimlink::ModeBindingV1* value) noexcept { if(hasModeBinding)*value=sceneModeBinding;return hasModeBinding; }

@@ -25,7 +25,7 @@ bool Readable(const void* p,std::size_t n,bool) noexcept {
 }
 bool ChainVtableSlot(void**,void*,void**) noexcept { return false; }
 bool Matches(const unsigned char*,std::size_t,const unsigned char*,std::size_t) noexcept { return false; }
-bool IsPlayer(const unsigned char*) noexcept { return false; }
+bool IsPlayer(const unsigned char* h) noexcept { return h!=nullptr; }
 bool RedirectCall(unsigned char*,void*,void*,bool&) noexcept { return false; }
 }
 namespace crew {
@@ -54,6 +54,8 @@ bool VehicleEye(unsigned char*,float* eye,RideView* out) noexcept {
     std::memcpy(out->frame,rideFrame.m,64);std::memcpy(eye,rideFrame.m+12,12);return true;
 }
 int VehicleScreens(const unsigned char*,int,const float*,CockpitScreens* out) noexcept { out->n=0;return 0; }
+bool drawArmMask=false;
+void __fastcall RecordBodyDraw(void*,void*,int,void*) { drawArmMask=fpskin::Active(); }
 float laserStart[4]{},laserEnd[4]{};
 void __fastcall RecordLaser(void* object,void*,int,void*) {
     const auto p=static_cast<const unsigned char*>(object);
@@ -89,10 +91,10 @@ int main() {
     Put<void*>(human,kWeapons,list);
     Put<std::uint64_t>(human,kWeaponCount,1);
     const auto reset=[&](){
-        st=State{};st.on=true;st.human=human;st.cam=cam;
-        st.weapons[0]=model;st.weaponCount=1;st.inHand[0]=model;st.inHandCount=1;
-        for(auto& u:unbatched)u=Unbatched{};
-        unbatched[0]=Unbatched{model,&batch};Put<void*>(model,kBatch,nullptr);
+        Current()=State{};Current().on=true;Current().human=human;Current().cam=cam;
+        Current().weapons[0]=model;Current().weaponCount=1;Current().inHand[0]=model;Current().inHandCount=1;
+        for(auto& u:Current().unbatched)u=Unbatched{};
+        Current().unbatched[0]=Unbatched{model,&batch};Put<void*>(model,kBatch,nullptr);
         Put<std::uint64_t>(human,kWeaponCount,1);haveEye=true;
     };
     reset();
@@ -103,15 +105,15 @@ int main() {
     Put<void*>(lodB,kInstBones,recordsB);Put<int>(lodB,kInstCount,3);Put<void*>(lodB,0x68,bufferB);
     Put<const wchar_t*>(recordsA,0,L"body");Put<const wchar_t*>(recordsA+kBoneStride,0,L"te_r");Put<const wchar_t*>(recordsA+2*kBoneStride,0,L"head");
     Put<const wchar_t*>(recordsB,0,L"te_r");Put<const wchar_t*>(recordsB+kBoneStride,0,L"body");Put<const wchar_t*>(recordsB+2*kBoneStride,0,L"head");
-    st.body=model;st.shown[0]=st.shown[1]=true;
+    Current().body=model;Current().shown[0]=Current().shown[1]=true;
     const auto baseMask=BodyMask(&batch),lodMask=BodyMask(&replacement);
     check(baseMask.count==3 && !baseMask.arm[0] && baseMask.arm[1] && lodMask.arm[0] && !lodMask.arm[1],
           "body filtering selects the bound GPU palette's LOD bone ordering, not the base skeleton's");
     Put<void*>(model,kBaseLod+kLodInst,nullptr);Put<void*>(model,kLods,nullptr);Put<std::uint64_t>(model,kLodCount,0);
     reset();
-    st.viewOk[0]=true;st.view[0]=fpview::Identity();
+    Current().viewOk[0]=true;Current().view[0]=fpview::Identity();
     float flashMatrix[16]{};flashMatrix[0]=flashMatrix[5]=flashMatrix[10]=flashMatrix[15]=1;
-    Put<float>(weapon,kFireRecoil,.075f);st.shots[0]=0;
+    Put<float>(weapon,kFireRecoil,.075f);Current().shots[0]=0;
     for(int i=0;i<2;++i){Put<const float*>(weapon,kFlashMatrix,flashMatrix);Relocate(weapon);}
     fpmotion::Cue firing{};Hand(weapon,0,0,0,firing);
     check(firing.shots==2 && firing.recoil>=.3f,"actual shot events drive recoil even when the sampled counter does not advance");
@@ -124,7 +126,7 @@ int main() {
     const float from[4]={1,2,3,1},hit[4]={20,30,40,1};
     std::memcpy(laser+0x130,from,16);std::memcpy(laser+0x140,hit,16);
     unsigned char originalLaser[sizeof(laser)];std::memcpy(originalLaser,laser,sizeof(laser));
-    st.view[0]=fpview::Translate(3,4,5);nextLaserDraw=reinterpret_cast<void*>(&RecordLaser);
+    Current().view[0]=fpview::Translate(3,4,5);nextLaserDraw=reinterpret_cast<void*>(&RecordLaser);
     LaserDrawHook(laser+0x10,nullptr,2,nullptr);
     check(laserStart[0]==4 && laserStart[1]==6 && laserStart[2]==8 && std::memcmp(laserEnd,hit,16)==0,
           "the owning weapon's visible laser start follows its viewmodel while the hit endpoint stays in the world");
@@ -132,12 +134,12 @@ int main() {
     Put<void*>(laser,8,human);LaserDrawHook(laser+0x10,nullptr,2,nullptr);
     check(std::memcmp(laserStart,from,16)==0,"another owner's laser is not relocated even when nearby");
     reset();
-    st.shotEvent[0]=State::ShotEvent{weapon,2,.5f};st.motion.recoilZ.at=-.07f;st.have=true;st.reloadLeft=30;
+    Current().shotEvent[0]=State::ShotEvent{weapon,2,.5f};Current().motion.recoilZ.at=-.07f;Current().have=true;Current().reloadLeft=30;
     check(Ride(cam,human),"a fitted vehicle accepts the ride");
-    check(st.shotEvent[0].count==0 && st.motion.recoilZ.at==0 && !st.have && !st.reloadLeft,
+    check(Current().shotEvent[0].count==0 && Current().motion.recoilZ.at==0 && !Current().have && !Current().reloadLeft,
           "boarding retires pending on-foot shots, recoil and reload state");
     check(At<void*>(model,kBatch)==&batch,"boarding returns the surviving weapon's original batch");
-    check(!unbatched[0].model && st.weaponCount==0 && st.inHandCount==0,"boarding retires the batch record and viewmodel lists");
+    check(!Current().unbatched[0].model && Current().weaponCount==0 && Current().inHandCount==0,"boarding retires the batch record and viewmodel lists");
     for(float roll:{0.0f,1.5707963f,3.14159265f,-1.5707963f}) {
         const float axis[3]={0,0,1};rideFrame=fpview::Rotation(axis,std::cos(roll),std::sin(roll));
         rideFrame.m[12]=5;rideFrame.m[13]=2;rideFrame.m[14]=7;
@@ -151,14 +153,14 @@ int main() {
     Put<const wchar_t*>(bones+kBoneStride,0,L"vc_i_1_0_d_0_0_1");
     const auto id=fpview::Identity();std::memcpy(pose,id.m,64);std::memcpy(pose+16,id.m,64);
     const float originals[32]={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1,1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
-    st.ride.seat=0;st.instrumentsReady=true;st.instruments.value[0]=5;
+    Current().ride.seat=0;Current().instrumentsReady=true;Current().instruments.value[0]=5;
     InstrumentPose(inst,backup);
     check(pose[0]==0 && pose[16]==1,"inactive digit segment collapses, another seat's instrument is unchanged");
     Unpose(inst,backup);
     check(std::memcmp(pose,originals,sizeof(pose))==0,"the native draw pose is restored byte for byte");
     Put<const wchar_t*>(bones,0,L"vc_i_0_0_l_0_0");
     Put<const wchar_t*>(bones+kBoneStride,0,L"vc_i_0_0_l_1_0");
-    st.instruments.language=1;InstrumentPose(inst,backup);
+    Current().instruments.language=1;InstrumentPose(inst,backup);
     check(pose[0]==0 && pose[16]==1,"native draw path selects Chinese geometry and hides English geometry");
     Unpose(inst,backup);
     check(std::memcmp(pose,originals,sizeof(pose))==0,"language selection never persists in the native skeleton");
@@ -174,12 +176,12 @@ int main() {
     Unpose(inst,backup);
     Put<const wchar_t*>(bones,0,L"vc_i_1_0_D_7_0_0");
     Put<const wchar_t*>(bones+kBoneStride,0,L"vc_i_1_0_D_7_0_6");
-    st.instruments.value[instruments::ammo]=99999;InstrumentPose(inst,backup);
+    Current().instruments.value[instruments::ammo]=99999;InstrumentPose(inst,backup);
     check(pose[0]==0 && pose[16]==1,"new neighbouring digits show a dash, never a fully lit 88888");
     Unpose(inst,backup);
     Put<const wchar_t*>(bones,0,L"vc_i_1_0_B_2");
     Put<const wchar_t*>(bones+kBoneStride,0,L"vc_i_1_0_T_0");
-    st.instruments.share[instruments::fuel]=1;st.instruments.contact[0]=true;InstrumentPose(inst,backup);
+    Current().instruments.share[instruments::fuel]=1;Current().instruments.contact[0]=true;InstrumentPose(inst,backup);
     check(pose[0]==0 && pose[16]==0,"new neighbouring bars and contacts do not inherit this seat's readings");
     Unpose(inst,backup);
     check(std::memcmp(pose,originals,sizeof(pose))==0,"new widget dispatch restores every original pose byte");
@@ -187,14 +189,14 @@ int main() {
 
     reset();Put<std::uint64_t>(human,kWeaponCount,0);
     check(Ride(cam,human),"boarding after the weapon was removed");
-    check(!At<void*>(model,kBatch) && !unbatched[0].model,"a removed weapon is never written and its stale record is dropped");
+    check(!At<void*>(model,kBatch) && !Current().unbatched[0].model,"a removed weapon is never written and its stale record is dropped");
     reset();Put<void*>(model,kBatch,&replacement);
     check(Ride(cam,human) && At<void*>(model,kBatch)==&replacement,"boarding preserves a replacement batch owned by the game");
     reset();haveEye=false;
-    check(!Ride(cam,human) && !At<void*>(model,kBatch) && unbatched[0].model==model,"no cockpit leaves the on-foot state for Leave to restore");
-    st.on=true;st.riding=true;st.cam=cam;st.screens.n=0;
+    check(!Ride(cam,human) && !At<void*>(model,kBatch) && Current().unbatched[0].model==model,"no cockpit leaves the on-foot state for Leave to restore");
+    Current().on=true;Current().riding=true;Current().cam=cam;Current().screens.n=0;
     check(!FirstPersonHidesStockHud(cam),"an eye-only passenger seat keeps the stock HUD");
-    st.screens.n=1;
+    Current().screens.n=1;
     check(FirstPersonHidesStockHud(cam),"a seat with replacement screens hides the stock HUD");
     config.fpHideStockHud=false;
     check(!FirstPersonHidesStockHud(cam),"the hide stock HUD preference still controls fitted screens");
@@ -226,7 +228,7 @@ int main() {
     check(std::strcmp(NotWanted(cam,human),"hooks unavailable")==0,"a camera hook without a draw hook cannot activate first person");
     camOk=false;drawOk=true;
     check(std::strcmp(NotWanted(cam,human),"hooks unavailable")==0,"a draw hook without a camera hook cannot activate first person");
-    st=State{};camOk=drawOk=false;observeCamera=true;
+    Current()=State{};Current().cam=cam;camOk=drawOk=false;observeCamera=true;
     const auto nativeCamera=fpview::Identity();std::memcpy(cam+kCamMatrix,nativeCamera.m,64);
     nextCamStep=[](void*,void*){};
     CamStepHook(cam,nullptr);CamStepHook(cam,nullptr);
@@ -234,5 +236,66 @@ int main() {
           "a native camera branch that leaves its matrix untouched cannot accumulate observation rotations");
     observeCamera=false;CamStepHook(cam,nullptr);
     check(std::memcmp(cam+kCamMatrix,nativeCamera.m,64)==0,"observation restores the last native camera when released");
+    // Interleave the actual camera hook as the game does for local split-screen players.
+    for(auto& state:states)state=State{};
+    selected=&states[0];observeCamera=false;onFoot=true;camOk=drawOk=true;toggled=true;config.firstPerson=true;
+    unsigned char p1[0x2100]{},p2[0x2100]{},c1[0x400]{},c2[0x400]{},view1[0xA0]{},view2[0xA0]{};
+    image=nativeImage;
+    Put<const void*>(p1,0,image+kSoldierVts[0]);Put<const void*>(p2,0,image+kSoldierVts[0]);
+    Put<void*>(c1,kCamTarget,p1);Put<void*>(c2,kCamTarget,p2);
+    const auto aim1=fpview::Translate(10,0,30),aim2=fpview::Translate(-20,0,15);
+    std::memcpy(p1+kAim,aim1.m,64);std::memcpy(p2+kAim,aim2.m,64);
+    std::memcpy(p1+kBodyFrame,aim1.m,64);std::memcpy(p2+kBodyFrame,aim2.m,64);
+    std::memcpy(c1+kCamMatrix,aim1.m,64);std::memcpy(c2+kCamMatrix,aim2.m,64);
+    ++renderFrame;CamStepHook(c1,nullptr);CamStepHook(c2,nullptr);
+    auto a=CameraState(c1),b=CameraState(c2);
+    check(a && b && a!=b && a->on && b->on && a->human==p1 && b->human==p2,
+          "interleaved P1/P2 native camera steps keep independent active viewmodels");
+    const auto p1Motion=a->motion;a->reloadLeft=25;a->shotEvent[0].count=2;
+    ++renderFrame;CamStepHook(c2,nullptr);
+    check(a->reloadLeft==25 && a->shotEvent[0].count==2 && std::memcmp(&a->motion,&p1Motion,sizeof(p1Motion))==0,
+          "P2 updates cannot consume P1 recoil, reload or motion state");
+    auto camera1=MatrixAt(c1+kCamMatrix),camera2=MatrixAt(c2+kCamMatrix);M4 inverse1,inverse2;
+    fpview::NativeView(camera1,&inverse1);fpview::NativeView(camera2,&inverse2);
+    CaptureRenderCamera(c1,camera1.m);CaptureRenderCamera(c2,camera2.m);
+    std::memcpy(view1+0x20,inverse1.m,64);std::memcpy(view2+0x20,inverse2.m,64);
+    check(ViewState(view1)==a && ViewState(view2)==b,"render passes select their camera, independent of update order");
+    Put<float>(c1,kCamEyeRow,123.0f);++renderFrame;
+    check(ViewState(view1)==a,"render ownership uses the submitted camera even after the next camera step moves its eye");
+    {StateScope scope(a);int hand=0;
+        check(PartOf(p1+kBodyModel,&hand)==Part::body && PartOf(p2+kBodyModel,&hand)==Part::none,
+              "P2 remains a native world body when drawn in P1's viewport");
+        Drew1(p1+kBodyModel);
+    }
+    {StateScope scope(b);check(!Drew1Now(p1+kBodyModel),"opaque-pass completion records belong to the viewport");}
+    Put<void*>(p1+kBodyModel,0,vt);Put<void*>(p2+kBodyModel,0,vt);
+    hooked[0]=Hooked{vt,&RecordBodyDraw};hookedCount=1;
+    DrawHook(p1+kBodyModel,nullptr,1,view1);const bool ownMasked=drawArmMask;
+    DrawHook(p2+kBodyModel,nullptr,1,view1);const bool foreignNative=!drawArmMask;
+    DrawHook(p2+kBodyModel,nullptr,1,view2);const bool secondMasked=drawArmMask;
+    check(ownMasked && foreignNative && secondMasked && !fpskin::Active(),
+          "actual draw hook masks each viewport's own body, keeps the other player native, and restores mask state");
+    hookedCount=0;
+    p1[kRagdoll]=1;
+    check(NotWanted(c1,p1)==nullptr,"knockback retains the requested first-person camera");
+    p1[kRagdoll]=0;Put<float>(c1,kCamEyeRow+4,20);Put<std::uint32_t>(p1,kActLimit,kSprints[0]);
+    check(NotWanted(c1,p1)==nullptr,"Ranger sprint looking down cannot be mistaken for an Air Raider strike camera");
+    Put<const void*>(p1,0,image+kSoldierVts[3]);
+    check(GadgetView(c1,p1),"the actual Air Raider elevated strike view still yields to the native camera");
+    p1[kRagdoll]=1;check(!GadgetView(c1,p1),"Air Raider knockback is not treated as a strike camera");
+    {StateScope scope(a);Leave();}
+    check(b->on && b->human==p2,"leaving P1 first person does not retire P2 state");
+    check(!ViewState(view1) && ViewState(view2)==b,"a non-first-person split viewport cannot borrow the remaining player's arms");
+    b->riding=true;b->screens.n=1;
+    instruments::Readings reading{};reading.language=3;
+    FirstPersonInstrumentReadings(reading,p1);
+    check(!b->instrumentsReady,"P1 HUD readings cannot populate P2 instruments");
+    FirstPersonInstrumentReadings(reading,p2);CockpitScreens screens{};
+    check(b->instrumentsReady && b->instruments.language==3 && FirstPersonScreens(&screens,p2) && !FirstPersonScreens(&screens,p1),
+          "cockpit feed and physical screens follow their exact human owner");
+    check(!ArmBone(L"kata_l") && !ArmBone(L"arms_l") && ArmBone(L"jowan0_l") && ArmBone(L"kawan0_l"),
+          "body topology excludes torso-side clavicle and mount faces while retaining complete upper arms");
+    ResetFirstPerson();SyncSession();
+    check(!FirstPersonOn() && !CameraState(c1) && !CameraState(c2),"mission reset retires all local cameras without restoring freed native objects");
     return failed ? 1 : 0;
 }

@@ -112,7 +112,7 @@ void PublishInstruments(const Snapshot& snap) noexcept {
         const int picked=a.selected>=0 && a.selected<a.arms ? a.selected : a.sight>=0 && a.sight<a.arms ? a.sight : 0;
         if(picked<kStockArms){r.value[slot]=static_cast<float>(picked+1);r.value[ammo]=static_cast<float>(a.arm[picked].ammo);}
     }
-    FirstPersonInstrumentReadings(r);
+    FirstPersonInstrumentReadings(r,PlayerHuman());
 }
 } // namespace
 

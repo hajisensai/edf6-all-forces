@@ -137,17 +137,25 @@ inline bool AnchoredTransform(const M4& weapon,const M4& camera,const float* gri
 }
 
 // A melee weapon / shield has an authored holding angle and animated swing, not a gun bore to straighten. Anchor
-// the grip's position but keep the weapon's rotation relative to the soldier's aim frame. The same T goes through
+// the idle grip's position but keep authored translation from `rest` and rotation relative to the soldier's aim frame. The same T goes through
 // its arm, palm and fingers, so the contact is retained while the blade swings.
 inline bool NativeGripTransform(const M4& weapon,const M4& aim,const M4& camera,const float* grip,float scale,M4* out,
-                                const M4& motion=Identity()) noexcept {
+                                const M4& motion=Identity(),const float* rest=nullptr) noexcept {
     M4 inv;
     if(!InverseAffine(aim,&inv))return false;
     float local[3];Point(inv,weapon.m+12,local);
+    if(rest)std::memcpy(local,rest,12);
     const M4 t=Mul(Mul(Mul(Mul(inv,Translate(grip[0]-local[0],grip[1]-local[1],grip[2]-local[2])),motion),Scale(scale)),camera);
     if(!Finite(t))return false;
     *out=t;
     return true;
+}
+
+// EDF's render view flips X/Z after world-to-camera (native 0x678CCB46; measured main-view parameters).
+inline bool NativeView(const M4& camera,M4* out) noexcept {
+    M4 inverse;if(!InverseAffine(camera,&inverse))return false;
+    for(int row=0;row<4;++row){inverse.m[row*4]*=-1;inverse.m[row*4+2]*=-1;}
+    *out=inverse;return true;
 }
 
 // Every vertex weighed by it lands on `at`.
@@ -173,9 +181,8 @@ inline void EyeWorld(const M4& body,const float* local,float* out) noexcept {
 }
 
 // --- The arms posed for the first person ---
-// ArmChain preserves the animated palm/finger pose and both limb lengths, solves one connected elbow, and places
-// the shoulder beside/below the eye. The older independent rolls and bounds-box snapping are retained below only
-// as arithmetic helpers for compatibility; firstperson.cpp does not apply them to the hands.
+// ArmChainTo preserves limb lengths while solving one connected elbow for a specified wrist; ArmChain keeps the
+// animated wrist unchanged. A displaced support hand and its forearm always move together; reloads keep the native wrist.
 
 inline void Sub(const float* a,const float* b,float* o) noexcept { for(int i=0;i<3;++i)o[i]=a[i]-b[i]; }
 inline float Dot3(const float* a,const float* b) noexcept { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
@@ -256,10 +263,10 @@ inline float Clamp(float v,float lo,float hi) noexcept { return v<lo ? lo : (v>h
 // A connected two-bone arm with its animated wrist held fixed on the gun. Move the shoulder only as far as the
 // two measured bone lengths permit, then solve the elbow on their intersection circle. The pole is projected
 // perpendicular to the reach, so no angle wrapping or independently rolled wrist can flip the support hand.
-inline bool ArmChain(const float* s0,const float* e0,const float* wrist,const float* shoulderWant,
-                     const float* pole,M4* upperMove,M4* foreMove) noexcept {
+inline bool ArmChainTo(const float* s0,const float* e0,const float* w0,const float* wrist,const float* shoulderWant,
+                       const float* pole,M4* upperMove,M4* foreMove) noexcept {
     float v[3];Sub(e0,s0,v);const float a=Length(v);
-    Sub(wrist,e0,v);const float b=Length(v);
+    Sub(w0,e0,v);const float b=Length(v);
     if(!(a>1e-5f) || !(b>1e-5f))return false;
     float axis[3];Sub(shoulderWant,wrist,axis);
     const float wanted=Length(axis);
@@ -278,7 +285,12 @@ inline bool ArmChain(const float* s0,const float* e0,const float* wrist,const fl
         if(!Unit(bend))return false;
     }
     float e1[3];for(int i=0;i<3;++i)e1[i]=wrist[i]+axis[i]*along+bend[i]*radius;
-    return SegmentMap(s0,e0,s1,e1,upperMove) && SegmentMap(e0,wrist,e1,wrist,foreMove);
+    return SegmentMap(s0,e0,s1,e1,upperMove) && SegmentMap(e0,w0,e1,wrist,foreMove);
+}
+
+inline bool ArmChain(const float* s0,const float* e0,const float* wrist,const float* shoulderWant,
+                     const float* pole,M4* upperMove,M4* foreMove) noexcept {
+    return ArmChainTo(s0,e0,wrist,wrist,shoulderWant,pole,upperMove,foreMove);
 }
 
 // The move that takes a hand whose wrist is at `wrist` onto the weapon whose bounds are `box` (rows: half axes right,

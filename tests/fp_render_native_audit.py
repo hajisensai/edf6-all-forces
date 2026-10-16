@@ -22,6 +22,11 @@ for name,signature in (('kMeshDraw','kMeshDrawCode'),('kLaserDraw','kLaserDrawCo
     expected=bytes(int(x,16) for x in re.findall(r'0x([0-9A-Fa-f]+)',block))
     rva=value(name)
     assert binary[rva:rva+len(expected)]==expected,(name,hex(rva))
+# Main Umbra camera submission: rdx = camera+0x220, rcx = camera+0x70.
+site=value('kCameraSubmitCall')
+assert binary[site]==0xE8 and site+5+struct.unpack_from('<i',binary,site+1)[0]==value('kCameraSubmit')
+assert binary[site-11:site]==bytes.fromhex('498d9620020000498d4e70')
+print('native main-camera submission and camera ownership offsets passed')
 call=value('kMeshCall')
 assert binary[call]==0xE8 and call+5+struct.unpack_from('<i',binary,call+1)[0]==value('kMeshDraw')
 for site,target in ((0x10FF4F7,'kMeshPrepare'),(0x10FF59C,'kMeshPass'),(0x10FF5AF,'kFlushDrawState')):
