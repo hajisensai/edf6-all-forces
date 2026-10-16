@@ -8,7 +8,8 @@
 #include <cstdarg>
 namespace crew { unsigned char* image=nullptr; std::string lastLog; void Log(const char* format,...) noexcept {char text[1024]{};va_list args;va_start(args,format);vsnprintf(text,sizeof(text),format,args);va_end(args);lastLog=text;} }
 namespace {
-int failures=0,joins=0,releases=0,result=-999,dependencyMode=5,notices=0,worldQueries=0;
+int failures=0,joins=0,releases=0,result=-999,dependencyMode=5,notices=0,worldQueries=0,rawResult=0;
+bool rawAttribute=true;
 std::wstring notice;
 std::vector<crew::Data> writes;
 crew::Data value{1,"SEARCH_TYPE",0x93,1};
@@ -16,7 +17,7 @@ crew::Attribute attribute{1,&value,0};
 void Check(bool ok,const char* text){if(!ok){std::printf("FAIL %s\n",text);++failures;}}
 int RecordPut(void*,const crew::Options* options){writes.push_back(*options->data);return 0;}
 int RecordCopy(void*,const crew::IndexOptions*,crew::Attribute** out){*out=&attribute;return 0;}
-int RecordRaw(void*,const crew::KeyOptions*,crew::Attribute** out){*out=&attribute;return 0;}
+int RecordRaw(void*,const crew::KeyOptions*,crew::Attribute** out){*out=rawAttribute ? &attribute : nullptr;return rawResult;}
 void RecordRelease(crew::Attribute*){++releases;}
 void RecordJoined(void*,const crew::JoinOptions*,void*,crew::Callback){++joins;}
 void RecordCallback(const crew::Info* info){result=info->result;Check(info->client==reinterpret_cast<void*>(9),"refusal preserves client data");}
@@ -93,8 +94,10 @@ int main(int argc,char** argv){
         Check(value.value==type,"game reads original room kind");
         value.value=wire;int before=joins;enter(nullptr,&jo,reinterpret_cast<void*>(9),&RecordCallback);
         Check(joins==before+1,"same profile reaches native join");
+        Check(lastLog.find("join allowed: route=eos SEARCH_TYPE=")!=std::string::npos,"EOS handoff is visible");
         value.value=type;before=joins;result=-999;enter(nullptr,&jo,reinterpret_cast<void*>(9),&RecordCallback);
         Check(joins==before && result==10,"invited incompatible profile refused before native join");
+        Check(lastLog.find("reason=incompatible-search-type")!=std::string::npos,"profile refusal has a distinct reason");
         if(base){
             const auto accept=reinterpret_cast<Accept>(base+0x749AC0);
             Check(!accept(wire),"real vanilla invitation predicate refuses All Forces");
@@ -106,6 +109,14 @@ int main(int argc,char** argv){
     enter(nullptr,&jo,reinterpret_cast<void*>(9),&RecordCallback);
     Check(joins==before,"unknown future profile refused");
     Check(releases==17,"copied EOS attributes released on accept and refusal");
+    rawResult=4;const auto beforeReadFailure=joins;
+    enter(nullptr,&jo,reinterpret_cast<void*>(9),&RecordCallback);
+    Check(joins==beforeReadFailure && result==10 && lastLog.find("reason=search-type-read-failed")!=std::string::npos
+          && lastLog.find("attribute_result=4")!=std::string::npos,"SDK attribute error is separate from profile mismatch");
+    rawResult=0;rawAttribute=false;
+    enter(nullptr,&jo,reinterpret_cast<void*>(9),&RecordCallback);
+    Check(joins==beforeReadFailure && lastLog.find("reason=search-type-invalid")!=std::string::npos,"missing attribute diagnosed");
+    rawAttribute=true;
     Data other{1,"DIFFICULTY",2,1};const Options otherOptions{2,&other,0};writes.clear();publish(nullptr,&otherOptions);
     Check(writes.size()==1 && writes[0].value==2,"unrelated metadata untouched");
     // Both native entry points must reject missing/old/incomplete/uninitialized
@@ -137,6 +148,7 @@ int main(int argc,char** argv){
     result=-999;value.value=kAllForcesRoomPrefix+0x93;
     enter(nullptr,&jo,reinterpret_cast<void*>(9),&RecordCallback);
     Check(joins==deniedBefore && result==10,"failed namespace setup blocks invitations");
+    Check(lastLog.find("reason=namespace-not-ready")!=std::string::npos,"incomplete namespace setup has its own diagnostic");
     std::printf("mod room wrappers: %s; real EDF search/invite: %s\n",failures?"FAIL":"PASS",native?"executed":"not supplied");
     if(argc>1 && *argv[1] && !native)return 1;
     return failures?1:0;

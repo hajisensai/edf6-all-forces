@@ -126,12 +126,13 @@ def main() -> int:
         if md.bone_index(marker) < 0:
             raise SystemExit(f'{marker} missing from the built model')
         render(archive, model, os.path.join(args.out, f'{stem}_seat{fit.seat}.png'),
-               ['--bone', marker, '--eye-local', '0,0,0', '--cull', *common])
+               ['--bone', marker, '--eye-local', '0,0,0', '--first-person-seat', str(fit.seat), '--cull', *common])
         render(archive, model, os.path.join(args.out, f'{stem}_seat{fit.seat}_inside.png'),
-               ['--bone', marker, '--eye-local', '0,0,0', '--mark-back', *common])
+               ['--bone', marker, '--eye-local', '0,0,0', '--first-person-seat', str(fit.seat), '--mark-back', *common])
         for view, yaw, pitch in AROUND if args.around else ():
             render(archive, model, os.path.join(args.out, f'{stem}_seat{fit.seat}_{view}.png'),
-                   ['--bone', marker, '--eye-local', '0,0,0', f'--turn={yaw},{pitch}', '--cull', *common])
+                   ['--bone', marker, '--eye-local', '0,0,0', '--first-person-seat', str(fit.seat),
+                    f'--turn={yaw},{pitch}', '--cull', *common])
     if args.seat or args.no_outside:
         return 0
     size, look = (outside_size(md) if args.generator or args.stock_model else (12.0, 1.5))

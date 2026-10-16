@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <array>
 namespace crew {
+bool observing=false;
+bool VehicleLookActive(const void*) noexcept { return observing; }
 unsigned char* image=nullptr;
 namespace {
 Config config{};
@@ -41,7 +43,7 @@ float* __fastcall LookFixture(float* m,const float* d) {
     m[8]=d[0];m[9]=d[1];m[10]=d[2];return m;
 }
 void Setup() {
-    ResetSightZoom();applied=Applied{};config=Config{};installed=true;nextCamStep=&Original;opticLookTo=testedLookTo ? testedLookTo : &LookFixture;opticPresent=true;extraOptic=false;gunnerSight=false;
+    ResetSightZoom();applied=Applied{};config=Config{};observing=false;installed=true;nextCamStep=&Original;opticLookTo=testedLookTo ? testedLookTo : &LookFixture;opticPresent=true;extraOptic=false;gunnerSight=false;
     muzzleDirection[0]=muzzleDirection[1]=0;muzzleDirection[2]=1;
     mapKeys=false;mapView=false;highView=false;sazabiVehicle=false;paused=false;originalWrites=true;originalFov=sightzoom::kBaseFov;playerHuman=human;
     highActive=highReturning=heliVehicle=aircraft=gunship=fuel=lobbed=false;roundSpeed=roundFactor=0.0f;wheelNotches=0;knownRound=hud=true;roundKind=RoundKind::arc;roundStyle=WeaponStyle::projectile;pickedWeapon=nullptr;
@@ -243,6 +245,9 @@ int wmain(int argc,wchar_t** argv){
     Check(SightZoomNow(vehicle)==1 && SightZoomMounted(vehicle),"first person: the optic is up at 1x (the gunner's sight)");
     Fov();Check(At<float>(camera,kCamMatrix+48)==4 && At<float>(camera,kCamMatrix+52)==5 && At<float>(camera,kCamMatrix+56)==6 &&
                 Fov()==originalFov,"first person at 1x: the eye on the optic bone, the field of view unmagnified");
+    observing=true;
+    Check(!SightZoomMounted(vehicle) && Fov()==originalFov,"free look yields the mounted optic to the seat camera");
+    observing=false;Check(SightZoomMounted(vehicle),"releasing observation resumes the same mounted optic");
     gunnerSight=false;Check(!SightZoomMounted(vehicle),"first person off: 1x is the turret camera's again");
     Setup();opticPresent=false;gunnerSight=true;Button(0);
     Check(!SightZoomMounted(vehicle),"first person in a seat without an optic: no gunner's sight (the cockpit's eye)");

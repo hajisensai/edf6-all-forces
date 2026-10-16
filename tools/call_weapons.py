@@ -370,12 +370,15 @@ def vehicle_sgo(template: bytes, call: Call, tier: tuple[float, float], *, fallb
     # weapons] in the Freed bike's, the sidecar's).
     at = len(setup.items) - 1 if call.ground else 3
     weapons = setup.items[at].items
-    entry = weapons[0]
     jet_weapons = vehicle_weapons(call)
     swap = {stock_vehicle.lower(): _object_path(call), **_VEHICLE_SWAP}
     if call.ground:
         # The ground vehicle's weapons in its request's entries' places (the stock request's per-weapon parameters):
         # one entry a holder of its vehicle_weapon_setting, as the stock one.
+        ground = vc.GROUND_VEHICLES[call.ground]
+        if ground.setup is not None:
+            setup.items = [dsgo.Node([float(tier[0]), float(tier[1])]), dsgo.Node(list(ground.setup)), dsgo.Node([])]
+            weapons = []
         if len(weapons) != len(jet_weapons):
             raise ValueError(f'{template_of(call)}: {len(weapons)} weapons in its setup, {call.ground} has {len(jet_weapons)}')
         swap.update({str(w.items[0]).lower(): new for w, new in zip(weapons, jet_weapons)})
@@ -384,6 +387,7 @@ def vehicle_sgo(template: bytes, call: Call, tier: tuple[float, float], *, fallb
         # The jet's own weapons (its guns and stores, vcobjects.JETS) with the Eros's fuel tank where the jet SGO has
         # it (vcobjects.with_fuel): as many entries, in the same order, as its vehicle_weapon_setting holders
         # (src/stores.cpp builds one weapon a holder from this list).
+        entry = weapons[0]
         fuel = weapons[-1]
         if 'fuel' not in str(fuel.items[0]).lower():
             raise ValueError(f'{VEHICLE_TEMPLATE}: its weapon list does not end in the fuel tank')

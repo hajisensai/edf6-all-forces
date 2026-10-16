@@ -4,6 +4,8 @@
 #include <cstdlib>
 #include <initializer_list>
 namespace crew {
+VehicleLookInput::VehicleLookInput(unsigned char*) noexcept {}
+VehicleLookInput::~VehicleLookInput() noexcept {}
 void MissionCrewVehicleFrame(unsigned char*) noexcept {}
 void BoardingRequest(unsigned char*) noexcept {}   // TestBoardVehicle (off here)
 bool HumanOnFoot(const unsigned char*) noexcept { return true; }
@@ -143,6 +145,14 @@ int main(){
     using namespace crew;
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2200000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
     if(!image)return 2;
+    unsigned char modelBones[0x110]{};
+    Put<void*>(testVehicle+0xEE0,0x10,modelBones);Put<int>(testVehicle+0xEE0,0x20,1);
+    Put<const wchar_t*>(modelBones,0,L"bomber501");
+    int heliClass=0;while(std::strcmp(kClasses[heliClass].name,"506_Helicopter")!=0)++heliClass;
+    Check(TestBoardMatches(testVehicle,heliClass,"506_Helicopter@bomber501"),"background boarding can target a fighter's model bone");
+    Put<const wchar_t*>(modelBones,0,L"body");
+    Check(!TestBoardMatches(testVehicle,heliClass,"506_Helicopter@bomber501"),"another model sharing the helicopter class is excluded");
+    Check(TestBoardMatches(testVehicle,heliClass,"506_Helicopter"),"the existing class-only boarding filter stays compatible");
     Setup();Crew(testVehicle,0);Time(10000);Crew(testVehicle,0);
     Check(calls==0,"unused parked ground vehicle stays empty after crew delay");
     Occupy(1,testHuman);Time(11000);Crew(testVehicle,0);Occupy(1,nullptr);Time(20000);Crew(testVehicle,0);

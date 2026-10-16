@@ -457,6 +457,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     import make_optics
     import make_stock_stores
     import make_sidecar
+    import make_sedan
     import make_sub
     import rootcpk
     rootcpk.use(game)
@@ -493,6 +494,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
         turret = ({**turret[0], **handed}, turret[1])
         stock = files, skipped
     sidecar = build_asset(cache, make_sidecar, '边三轮摩托')
+    sedan = build_asset(cache, make_sedan, '民用轿车')
     sazabi = build_asset(cache, make_sazabi, '沙扎比（模型生成约 1.5 分钟）')
     proteus = build_asset(cache, make_proteus, '普罗透斯护盾（原版空袭兵电磁碉堡墙；同时撤销旧版生成的模型）')
     bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
@@ -516,6 +518,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
             (make_drill.install(game, drill) if drill is not None else []) + \
             (make_emc.install(game, emc) if emc is not None else []) + \
             (make_sidecar.install(game, sidecar) if sidecar is not None else []) + \
+            (make_sedan.install(game, sedan) if sedan is not None else []) + \
             (make_sazabi.install(game, sazabi) if sazabi is not None else []) + \
             (make_proteus.install(game, proteus) if proteus is not None else []):
         print('写入', path)
@@ -599,7 +602,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     else:
         make_bigmap.set_big_world(game, make_bigmap.world_half(1))
     for group, files in (('jets', jets), ('sub', sub), ('katyusha', katyusha), ('artillery', artillery),
-                         ('chute', chute), ('drill', drill), ('emc', emc), ('sidecar', sidecar), ('sazabi', sazabi), ('proteus', proteus), ('optics', optics)):
+                         ('chute', chute), ('drill', drill), ('emc', emc), ('sidecar', sidecar), ('sedan', sedan), ('sazabi', sazabi), ('proteus', proteus), ('optics', optics)):
         if files is not None:
             cache.record(group, files)
     if bigmap is not None:
@@ -684,6 +687,7 @@ def uninstall(game: str) -> None:
     import make_optics
     import make_stock_stores
     import make_sidecar
+    import make_sedan
     import make_sub
     import buildcache
     import rootcpk
@@ -709,7 +713,7 @@ def uninstall(game: str) -> None:
         remove_autoturret(game)
         import menu_preview
         import support_loadout
-        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_maps.remove, edf41_sounds.remove, edf5_dlc.remove,
+        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sedan.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_maps.remove, edf41_sounds.remove, edf5_dlc.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:
@@ -1133,6 +1137,20 @@ def check_package() -> int:
         assert all(cockpit_fits.DIGESTS[key] == value for key, value in fits.DIGESTS.items())
         assert all(cockpit_kits.KITS[key] is value for key, value in kits.KITS.items())
     assert make_optics.optics.MODELS
+    import make_sedan
+    import ledger
+    import cockpit_instruments
+    import cockpit_retrofit
+    import cockpit_shell
+    assert 'heli_gunship' in cockpit_shell.REPLACEMENTS and cockpit_shell.PREFIX == 'vc_shell_'
+    assert len(cockpit_instruments.LABELS['AMMO']) == 4
+    assert cockpit_instruments.GLYPHS['弹']
+    assert len(cockpit_retrofit.HELI)==3 and len(cockpit_retrofit.GROUND)==4
+    assert all(ch in cockpit_instruments.GLYPHS for key in ('VERT','PITCH','POWER')
+               for text in cockpit_instruments.LABELS[key] for ch in text)
+    assert make_sedan.FIT == cockpit_fits.FITS['EDF6VC_SEDAN']
+    assert make_sedan.OWNER in ledger.OWNERS
+    importlib.import_module('PIL.DdsImagePlugin')   # the city sedan's BC7 glass decoder
     import texfile
     import texfile_accel
     importlib.import_module('PIL.Image')
