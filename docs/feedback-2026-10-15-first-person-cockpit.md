@@ -127,3 +127,15 @@
 
 
 本轮验证：完整 CTest 266 项无失败（39 项可选条件跳过），安装链 selftest 226/226；最后的数据源修正由 `hud_view --check-feed` 直接执行生产 FeedOf／PublishInstruments 验证，并复测 hud_layout、cockpit_instruments、fp_view_check、fp_ride_lifecycle、sedan_build 5/5。onefile 安装器空目录检查通过，包括实体仪表和字形模块；更新包 `release/EDF6VehicleCrew-0.8.0-fp-localized-panels.zip` 的内嵌 DLL 与最后实测 DLL 哈希一致。包内 DLL SHA-256：`21bb1cb9d8d40ede89e831248405af4b60c1d1a9d8a72f4df30e96cff5aa758e`。未永久替换游戏文件。
+
+## 2026-10-16：缩略图与读数的视觉统一
+
+用户原话：「感觉这个图片和hud不在一个层级啊。好割裂」。前版实机屏幕中，车体为低亮度实心剪影，标题和七段数字发光偏白，百分号又单独悬在数值下方，造成不同显示元素拼接的感觉。
+
+- 将实际模型的投影精度提高至 96×144，改为低亮度内部加状态色轮廓，合并连续几何段。正常轮廓与标题／数值共用绿色发光强度，同时压低整套仪表的白色眩光；黄／红仍表示整车耐久等级。
+- 收紧图形与数字的占位，统一标题分隔线，百分号与数字底部对齐。没有新增控制骨骼，语言选择、乘客屏和未知读数语义保持原契约。
+- 后台巴尔加实机复核中文耐久页与英文武器页，截图在 `tmp/coherent-panels-runtime/`。本轮仅修改模型生成器；实际运行 DLL 与构建产物哈希相同，仍为 `21bb1cb9d8d40ede89e831248405af4b60c1d1a9d8a72f4df30e96cff5aa758e`。临时模型、配置、DLL 均逐字节恢复，前台／光标裁剪／边缘拉回计数为 0。
+
+此调整需重新生成座舱资源；已安装的旧模型不会随 DLL 自动改变。实机仅抽查上述座舱，不能代表全部载具与多人效果。
+
+本轮 `offline_checks` 构建和完整 CTest：266 项无失败，39 项可选条件跳过；安装链 selftest：226/226。实际 onefile 安装器在清除 `PYTHONPATH` 的空目录通过 `--check-package`、`--check-workers`。核对归档内 EXE 与已检查 EXE 相同，内嵌 DLL 与实测 DLL 一致，并从冻结安装器的模块实际执行新版 96×144 投影和统一绿色材质。完整更新包：`release/EDF6VehicleCrew-0.8.0-fp-coherent-panels.zip`（462674031 字节）。

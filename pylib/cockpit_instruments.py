@@ -57,11 +57,12 @@ def silhouette(triangles, view: str = 'top') -> tuple[tuple[str, ...], float]:
     lo, hi = tris.reshape(-1,3).min(0), tris.reshape(-1,3).max(0)
     span = hi-lo
     if span[0]<1e-5 or span[vertical]<1e-5:return (), 1.
-    image=Image.new('1',(48,72));draw=ImageDraw.Draw(image)
+    width,height=96,144
+    image=Image.new('1',(width,height));draw=ImageDraw.Draw(image)
     for tri in tris:
-        points=[((hi[0]-p[0])/span[0]*47,(hi[vertical]-p[vertical])/span[vertical]*71) for p in tri]
+        points=[((hi[0]-p[0])/span[0]*(width-1),(hi[vertical]-p[vertical])/span[vertical]*(height-1)) for p in tri]
         draw.polygon(points,fill=1)
-    return tuple(''.join('1' if image.getpixel((x,y)) else '0' for x in range(48)) for y in range(72)),float(span[0]/span[vertical])
+    return tuple(''.join('1' if image.getpixel((x,y)) else '0' for x in range(width)) for y in range(height)),float(span[0]/span[vertical])
 
 
 def instrument(s: Screen, index: int, numbers: bool = True,
@@ -139,28 +140,34 @@ def instrument(s: Screen, index: int, numbers: bool = True,
         # A neutral outline is still meaningful before a live reading is available.
         # Tests without a model deliberately get no invented vehicle shape.
         if not rows:return
-        h=min(.56*s.height,.58*s.width/max(aspect,.001));w=h*aspect
+        h=min(.44*s.height,.52*s.width/max(aspect,.001));w=h*aspect
         height,width=len(rows),len(rows[0])
         fill=[];edge=[]
         for iy,row in enumerate(rows):
-            ix=0
-            while ix<width:
-                if row[ix]!='1':ix+=1;continue
-                end=ix+1
-                while end<width and row[end]=='1':end+=1
-                fill.append(rect('vehicle','instrument_ink',-.14+((ix+end)/2/width-.5)*w/s.width,
-                                 .07+(.5-(iy+.5)/height)*h/s.height,(end-ix)/width*w/s.width,h/height/s.height,.002))
-                for x in range(ix,end):
-                    if any(not (0<=xx<width and 0<=yy<height) or rows[yy][xx]!='1'
-                           for xx,yy in ((x-1,iy),(x+1,iy),(x,iy-1),(x,iy+1))):
-                        edge.append(rect('outline','instrument_dim',-.14+((x+.5)/width-.5)*w/s.width,
-                                         .07+(.5-(iy+.5)/height)*h/s.height,w/width/s.width,h/height/s.height,.003))
-                ix=end
-        parts.append(merge(edge,name=prefix+'_vehicle_outline'))
-        shape=merge(fill,name=prefix+'_vehicle')
+            # Merge runs in both masks. Only the contour lights up with the reading;
+            # the quiet interior remains the same phosphor tint as the instrument face.
+            outline=''.join('1' if bit=='1' and any(
+                not (0<=xx<width and 0<=yy<height) or rows[yy][xx]!='1'
+                for xx,yy in ((x-1,iy),(x+1,iy),(x,iy-1),(x,iy+1))) else '0'
+                for x,bit in enumerate(row))
+            for mask,bits,material,depth in ((row,fill,'instrument_dim',.0015),
+                                              (outline,edge,'instrument_dim',.002)):
+                ix=0
+                while ix<width:
+                    if mask[ix]!='1':ix+=1;continue
+                    end=ix+1
+                    while end<width and mask[end]=='1':end+=1
+                    bits.append(rect('vehicle',material,-.17+((ix+end)/2/width-.5)*w/s.width,
+                                     .04+(.5-(iy+.5)/height)*h/s.height,
+                                     (end-ix)/width*w/s.width,h/height/s.height,depth))
+                    ix=end
+        parts.append(merge(fill,name=prefix+'_vehicle_fill'))
+        shape=merge(edge,name=prefix+'_vehicle_outline')
+        parts.append(shape)
         for level,material in enumerate(('instrument_green','instrument_amber','instrument_red')):
-            p=om.Part(shape.name+f'_{level}',material,list(shape.verts),list(shape.tris))
-            live(p,f'c_{HP}_{level}',point(0,0,.002))
+            verts=[om.Vertex(tuple(v.pos[k]+f[k]*.001 for k in range(3)),v.normal,v.uv) for v in shape.verts]
+            p=om.Part(shape.name+f'_{level}',material,verts,list(shape.tris))
+            live(p,f'c_{HP}_{level}',point(0,0,.003))
 
     def dial(field: int, x: float, y: float, title: str, maximum: int) -> None:
         radius=min(s.width*.2,s.height*.25)
@@ -185,10 +192,11 @@ def instrument(s: Screen, index: int, numbers: bool = True,
     parts.append(rect('face','instrument_black',0,0,1,1,0))
     if s.kind == 'status':
         label('STATUS',-.43,.43)
+        parts.append(rect('header_rule','instrument_dim',0,.30,.86,.004))
         vehicle()
         if numbers:
-            digits(HP,.03,3,'',.27,.30,'p')
-            label('%',.34,-.13)
+            digits(HP,.06,3,'',.23,.28,'p')
+            label('%',.395,.05)
             label('FUEL',-.43,-.24,gate=FUEL+1)
             live(rect('fuel_track','instrument_dim',0,-.37,.86,.055),f'v_{FUEL}',point(0,-.37))
             live(rect('fuel','instrument_ink',0,-.37,.86,.045,.002),f'b_{FUEL}',point(-.43,-.37,.002))
@@ -215,10 +223,10 @@ def instrument(s: Screen, index: int, numbers: bool = True,
 
 MATERIALS = {
     'instrument_black': KitMaterial((10,14,18)),
-    'instrument_ink': KitMaterial((170,235,197),emissive=True),
-    'instrument_dim': KitMaterial((30,55,44)),
+    'instrument_ink': KitMaterial((110,185,136),emissive=True),
+    'instrument_dim': KitMaterial((27,49,35),emissive=True),
     'instrument_needle': KitMaterial((245,162,55),emissive=True),
-    'instrument_green': KitMaterial((38,115,67),emissive=True),
-    'instrument_amber': KitMaterial((155,96,22),emissive=True),
-    'instrument_red': KitMaterial((155,32,24),emissive=True),
+    'instrument_green': KitMaterial((110,185,136),emissive=True),
+    'instrument_amber': KitMaterial((205,151,62),emissive=True),
+    'instrument_red': KitMaterial((205,77,61),emissive=True),
 }
