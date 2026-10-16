@@ -269,10 +269,10 @@ void SmallBurst(const float* pos,const float* dir,float size) noexcept;
 
 // Run `fn` when the game starts to shut down: EDF+0x7021F0, the application object's destructor, is entered (its caller 0x70293F is
 // redirected; the singletons, the sound system EDF+0x20B2948 among them, are destroyed inside it). Anything that owns a particle /
-// effect object (a gunbattery::ChargeEffect, an emitter) should destroy it here. Real runs (2026-10-16) did not settle whether that
-// is enough: one alive when the application destructor runs can make EDF's static sound-bank cache destructor (EDF+0x7ADCFB) touch
-// the destroyed sound system and crash the exit; destroying them here fixed some missions and not others (docs/edf41-ufomother401.md 4).
-// Up to 8 callbacks.
+// effect object (a gunbattery::ChargeEffect, an emitter) should destroy it here, and any counted reference into a game cache (a sound
+// bank: edf41sound's ReleaseWeaponBank) must be given back here: the stock owners all give theirs back inside that destructor, before
+// it deletes the sound system, and a reference still held afterwards crashes the exit in the bank cache's atexit destructor
+// (EDF+0x7ADCFB against the nulled sound system; docs/edf41-classes.md 12). Up to 8 callbacks.
 void AtGameShutdown(void(*fn)() noexcept) noexcept;
 
 }  // namespace crew::edf41c

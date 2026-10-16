@@ -88,6 +88,7 @@ constexpr MPrint kMotherPrints[]={
     {0x1120820,{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B}},{0x301290,{0x48,0x89,0x4C,0x24,0x08,0x53,0x48,0x83}},
     {0x302200,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},{0x302EE0,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C}},
     {0x302D10,{0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83}},{0x12D85B0,{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B}},
+    {0x301460,{0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83}},   // the emitter's deleting destructor (vtable 0x17A8F70 [0])
 };
 // ---- EDF6's particle emitter (4.1's mp_HatchEmission emitters; EDF6's UfoMother511 builds the same for its port_effect_list,
 // 0x502360 / 0x5086F0 / 0x508370, H). The description block (0x300C80 ctor) has 4.1's layout (4.1 0x1C1920) from +0x00 to +0x11C:
@@ -98,7 +99,8 @@ constexpr MPrint kMotherPrints[]={
 // 0x302EE0(emitter+0x70, dt) emits and moves the particles, the draw slot 0x302D10(emitter, &identity) submits them; vtable[0]
 // (emitter, 1) deletes it.
 constexpr std::size_t kDescCtor=0x300C80,kTexture=0x2E8510,kTextureFree=0x1120820,kEmitterCtor=0x301290,kEmitterInit=0x302200,
-    kEmitterStep=0x302EE0,kEmitterDraw=0x302D10,kGameNew=0x12D85B0,kIdentity=0x1FFF3D0,kEffectsAt=0x20B2980;
+    kEmitterStep=0x302EE0,kEmitterDraw=0x302D10,kGameNew=0x12D85B0,kIdentity=0x1FFF3D0,kEffectsAt=0x20B2980,
+    kEmitterVtable=0x17A8F70,kEmitterDelete=0x301460;
 constexpr std::size_t kEmitterDesc=0x70;   // emitter+0x70: its copy of the description
 std::atomic<int> motherPrims{0};
 bool MotherPrims() noexcept {
@@ -353,23 +355,43 @@ void DropPart(void* o) noexcept {
 }
 // The vents' emitters (4.1 0x252FD0): one per vent, 4.1's description (煙_01, 300-frame life, drag 0.99, one emission every 8
 // frames, sizes 16 -> 24, white (2,2,2) from alpha 0.35 to 0), straight along the direction the frame gives.
-// THE EMITTERS ARE OFF BY DEFAULT (ini Edf41MotherForce bit 2048 turns them on): making them at all (the description, the texture
-// handle, the 0x300 block through 0x301290 / 0x302200) ends the process in a crash at exit on this game, whatever is done with
-// them afterwards. Real runs 2026-10-16: with the emitters 7 of 7 runs ended in a dump, without them 0 of 16 (and 0 of 2 with
-// bits 128 / 384 right beside); made but never stepped or drawn (bit 512): dump; texture handle never released (bit 1024): dump;
-// emitters never deleted: dump. The dump: FAST_FAIL_FATAL_APP_EXIT raised in EDF6Coop's exception handler for an access
-// violation at EDF.dll+0x7ADCFB, the SoundSystem's destructor releasing a sound instance (0x7AABC0) against its already-null
-// global (0x20B2948); the cause of the tie to the emitters is not found. The 401's mothership agent sees the same dump
-// signature in other runs. The vents are EffectGenUtil puffs meanwhile.
-// The emitters are NOT deleted: the game destroys a mission's objects (this hull's destructor) at process exit too, after its
-// resource managers are gone, and an emitter's destructor releases its texture handle into them: the exit crash of the real runs
-// (2026-10-16: EDF.dll 0x7ADCEE, a list of the dead manager, FAST_FAIL_FATAL_APP_EXIT through EDF6Coop's handler; three of three
-// runs with the emitters, none of two without; the bisect switch Edf41MotherForce 128). 16 small blocks per hull stay behind.
-void FreeVents(Hull& h) noexcept {
-    for(void*& e:h.vent)e=nullptr;
+// The emitters are on by default (ini Edf41MotherForce bit 2048 = EffectGenUtil puffs instead). The exit crash first blamed on
+// them (EDF.dll+0x7ADCFB / 0x7ADCEE, 2026-10-16) was edf41sound's weapon bank reference outliving the sound system: fixed there
+// (ReleaseWeaponBank, docs/edf41-classes.md 12). The emitters only changed whether the exit got far enough to show it.
+// Freeing: an emitter is stepped (Vents, hull Update) and drawn (HullDraw) by this file only, under `lock`; a dropped hull's
+// emitters wait kVentGraveFrames hull updates in the graveyard (a submitted draw is not reused by a frame in flight), then go
+// through their own deleting destructor (vt[0](e, 1) = 0x301460: texture handles 0x1120820, buffers, operator delete 0x300).
+// What is left at the game's shutdown is deleted right before the application destructor (edf41c::AtGameShutdown), while
+// the texture and effect managers still exist; a hull destroyed later than that (inside the application destructor) keeps its
+// emitters (FreeVents only parks them, nothing ticks the graveyard any more).
+constexpr int kVentGraveFrames=8;
+struct DeadVents { void* e[16]; int frames; };
+std::vector<DeadVents> ventGraveyard;
+void DeleteEmitter(void* e) noexcept {
+    if(!e)return;
+    void** vt=*static_cast<void***>(e);
+    if(vt!=reinterpret_cast<void**>(image+kEmitterVtable) || vt[0]!=static_cast<void*>(image+kEmitterDelete))return;   // 0x301290 sets it
+    reinterpret_cast<void*(__fastcall*)(void*,int)>(image+kEmitterDelete)(e,1);
 }
+void FreeVents(Hull& h) noexcept {
+    DeadVents d{};
+    bool any=false;
+    for(int k=0;k<16;++k) { d.e[k]=h.vent[k]; any=any || h.vent[k]; h.vent[k]=nullptr; }
+    if(!any)return;
+    d.frames=kVentGraveFrames;
+    ventGraveyard.push_back(d);
+}
+void VentGraveyardTick() noexcept {   // once per hull Update, under `lock`
+    for(std::size_t i=0;i<ventGraveyard.size();) {
+        if(--ventGraveyard[i].frames>0) { ++i; continue; }
+        for(void* e:ventGraveyard[i].e)DeleteEmitter(e);
+        ventGraveyard[i]=ventGraveyard.back();
+        ventGraveyard.pop_back();
+    }
+}
+void ShutdownVents() noexcept;   // below the hull records (edf41c::AtGameShutdown)
 void MakeVents(Hull& h) noexcept {
-    if(h.ventsMade || !MotherPrims() || !(Cfg().edf41MotherForce&2048))return;   // bit 2048: the emitters (off: they crash the exit)
+    if(h.ventsMade || !MotherPrims() || (Cfg().edf41MotherForce&2048))return;   // bit 2048: EffectGenUtil puffs instead of the emitters
     h.ventsMade=true;
     void* egu=Readable(image+kEffectsAt,8) ? *reinterpret_cast<void* const*>(image+kEffectsAt) : nullptr;
     if(!egu) { h.ventsMade=false; return; }
@@ -414,6 +436,18 @@ void DropHull(void* o) noexcept {
     StopSound(it->second.fly);
     StopSound(it->second.fall);
     hulls.erase(it);
+}
+void ShutdownVents() noexcept {
+    std::lock_guard<std::recursive_mutex> hold(lock);
+    int n=0;
+    for(auto& kv:hulls)
+        for(void*& e:kv.second.vent)
+            if(e) { DeleteEmitter(e); e=nullptr; ++n; }
+    for(DeadVents& d:ventGraveyard)
+        for(void* e:d.e)
+            if(e) { DeleteEmitter(e); ++n; }
+    ventGraveyard.clear();
+    if(n)Log("EDF41MOTHER the game is shutting down: %d vent emitters deleted first",n);
 }
 bool Throttle(Hull& h,int slot) noexcept { const int old=h.throttle[slot]; h.throttle[slot]=16; return old==0; }
 // The hull's team as its parts take it (4.1 0x250520): -1 or 3 (neutral) -> 1, else the hull's.
@@ -1294,7 +1328,7 @@ void Vents(void* self,Hull& h,void* dt) noexcept {
     MakeVents(h);
     if(Cfg().edf41MotherForce&512)return;   // bit 512: bisecting, made but never stepped
     float b[16];
-    if(!(Cfg().edf41MotherForce&2048)) {   // the shipped path: EffectGenUtil's ExplosionWind puffs (煙_01) at the same vent points
+    if((Cfg().edf41MotherForce&2048) || !h.ventsMade) {   // bit 2048, or no emitters: EffectGenUtil's ExplosionWind puffs (煙_01) at the same vent points
         if(!h.vents || !HullAlive(self))return;
         WeakMatrix(self,h,b);
         for(int k=0;k<16;++k) {
@@ -1533,6 +1567,7 @@ std::uint64_t __fastcall HullUpdate(void* self,void* dt) {
     if(h.ticks==1 || h.ticks==600 || h.ticks==2400)LockReport(self,"hull");
     BindGlow(h.glow,self,kCarrierModel,"hull");
     TickGlow(h.glow);
+    VentGraveyardTick();
     Vents(self,h,dt);
     if(HullAlive(self)) {
         HullMain(self,h);
@@ -1852,6 +1887,7 @@ bool InstallEdf41Mother() noexcept {
         SetSlot(partClass,kSlotDraw,reinterpret_cast<void*>(&PartDraw));
     }
     AllowAnyTeam(partClass);   // the parts take the hull's team (EventAnimationObject's slot 22 takes team 6 only)
+    AtGameShutdown(&ShutdownVents);   // the vents' emitters deleted while the effect / texture managers still exist
     const bool ok=AddFactory(L"UfoMother301",&CreateHull) && AddFactory(L"UfoMother301_Hatch",&CreatePart)
         && AddFactory(L"UfoMother301_Panel",&CreatePart) && AddFactory(L"UfoMother301_Cannon",&CreatePart)
         && AddFactory(L"UfoMother301_BigCannon",&CreatePart);

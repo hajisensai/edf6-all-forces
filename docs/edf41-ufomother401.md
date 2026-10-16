@@ -103,7 +103,7 @@ AdditionalParts 0x38B321 在对象虚函数里这样调，无世界锁）拿出�
   每 16 帧 Flame（0x2E7FF0 = 4.1 0x1b16b0，同样常数全同，H）；Explosion / Explosion_Big（PRIMITIVES 5）；WeakPanel 的 10 个 StencilLight
   （EDF6 InitParam@StencilLight，vtable 0x1762108，+0x30 位置、+0x40/+0x50 颜色、+0x60 半径、+0x64 帧数，与 4.1 同布局；4.1 的 WeakPanel 直接填
   (0.5,0.5,0.5,2.5)、i·300、180 不经 ×2.5 / ×5 的辅助函数，这里也直接填，0x84880 建）与烟（0x1b2d90 → ExplosionWind 0x2E4D90）。
-- 充能光（**默认关**，开发位 4194304 打开；实机会在退出时崩，见 4）：每种颜色一个 `ChargeEffect_StdParticle`（工厂 0x6D92D0，MovingFortress_Battery 0x4D3F22 同样调），+0xC = 0 显示 / 1 隐藏，每帧槽 1
+- 充能光（**默认开**，开发位 4194304 关掉；曾经的退出崩是 edf41sound 的武器音效库引用，已修，见 4）：每种颜色一个 `ChargeEffect_StdParticle`（工厂 0x6D92D0，MovingFortress_Battery 0x4D3F22 同样调），+0xC = 0 显示 / 1 隐藏，每帧槽 1
   （UpdateContext、炮口矩阵）与槽 0 把更新与渲染同步排进场景的工作表（管理器 +0x358）；状态进入时照 4.1 打开（BigCannon 充能 / 发射、FinalCannon
   三态、FinalGenerator 召唤充能），离开即关。渲染作业（槽 0）排在同步渲染阶段（克隆槽 3，EAO 0x5B6D10），更新作业排在 Update（两个一起排在 Update 里会并发，发射器渲染作业 `bad_alloc`）；每帧作业后同步状态（[fx+8]=[fx+0xC]、[fx+0x10]=0，同 MovingFortress_Battery 0x4D1B96）。部件析构时立刻释放效果。
 
@@ -124,7 +124,7 @@ AdditionalParts 0x38B321 在对象虚函数里这样调，无世界锁）拿出�
 ### 2.6 开发开关（发布版都是 0）
 `Edf41Mother401Dev` 位：1 攻击一直允许、2 攻击等待缩到 ≤2 s、4 面板立刻就位、8 / 16 开局 `Edf41Mother401DevKill` 秒后毁掉 Core / 一块 WeakPanel、
 32 同时刻执行 `Edf41Mother401DevAction` 号动作、64 共用的 `Edf41DevShoot` 也打生成器放出的敌人（看补槽）、128 玩家装甲一直满（autopilot 不会躲）、
-256 DevShoot 等 `Edf41Mother401DevKill` 秒后才打（M809 的脚本从它的 OA(0) 起才盯弱点）、1024 / 2048 不放闪光 / 子弹命中音、4194304 打开充能光（排查；默认关）、32768 玩家 DevShoot 改打普通敌人（让船体在脚本事件关上出现；每 30 帧一只，262144 改快速）、65536 诊断（退出报告写 %TEMP%\edf41m401_shutdown.txt）、131072 充能光建了立刻删、524288 充能光永不显示（排查）；
+256 DevShoot 等 `Edf41Mother401DevKill` 秒后才打（M809 的脚本从它的 OA(0) 起才盯弱点）、1024 / 2048 不放闪光 / 子弹命中音、4194304 不放充能光、32768 玩家 DevShoot 改打普通敌人（让船体在脚本事件关上出现；每 30 帧一只，262144 改快速）、65536 诊断（退出报告写 %TEMP%\edf41m401_shutdown.txt）、131072 充能光建了立刻删、524288 充能光永不显示（排查）；
 `Edf41Mother401Place`：把船体放在玩家头顶这么多米。共用的 `Edf41DevShoot=n` / `Edf41DevShootDamage`：每个能挨打的部件每 n 帧挨一发玩家的
 LaserBullet02（锁定点一发、弱点骨骼一发），日志每 600 帧按类统计「taken / refused」。
 
@@ -133,14 +133,16 @@ LaserBullet02（锁定点一发、弱点骨骼一发），日志每 600 帧按�
 （见文末「实机记录」。）
 
 ## 4. 没做的 / 与 4.1 的差别
-- **充能光（Particle3_k）默认关**（开发位 4194304 才开）。做法见 2.2 / 2.4（EDF6 的 `gunbattery::ChargeEffect_StdParticle`，4.1 的粒子块数值经 EDF6
-  的键表放进去）。实机证据：开着它的三次运行（M018 ds5 / ds6、M019 ds1）在**退出游戏时**都崩在 EDF 的声音库缓存析构（EDF+0x7ADCFB 读已销毁的
-  声音系统 0x20B2948；静态表 EDF+0x20B38A0 退出时还剩 1 项），M809 ds2 在任务中崩在发射器更新工作里的 `bad_alloc`（EDF+0x30316D ← 0x302D10，
-  `reserve` 的个数离谱）；同一 M018 流程关掉它（ds7）干净结束。没查清的：4.1 粒子块与 EDF6 发射器参数的语义对应（EDF6 另有一个与 4.1
-  0x1c1920 默认值逐项相同的 `ParticleEmitterCore::InitParam` 构造，0x300D..；ChargeEffect 走的是键表 0x303710 的另一种布局）、ChargeEffect
-  的音效预设 / 句柄在退出时为何还挂着库。要做成：照 4.1 0x1c2d80 的用法直接嵌 EDF6 的发射器（0x301290 构造、0x302200 初始化、作业 0x302EE0），
-  参数用与 4.1 同布局的那种 InitParam。
-  补完轮的调查（2026-10-16）：任务中的 `bad_alloc` 已修（渲染作业改排同步渲染阶段，M809 `m401f_M809_g3` 干净）。**退出崩没修好**：崩点仍是 EDF+0x7ADCFB（声音库缓存静态析构 0x7A9850 经 atexit 0x1750870 触碰应用析构 0x7021F0 里已销毁的声音系统）。退出报告（`%TEMP%\edf41m401_shutdown.txt`，插件日志退出时已丢）总是只列 `APP:\SOUND\PC\EDF41_WEAPON_SE.ACB` 引用数 1（我们的 edf41sound 取的引用，没有释放，普通运行同样如此）。用 `AtGameShutdown`（edf41classes，重定向应用析构调用点 0x70293F）在应用析构前销毁全部充能光：M809 g4 干净，M018 g4 / M019 g3 g4 g5 / 关闭显示的 M019 h1 仍崩；M132 / M516 e4（7 个光）干净。所以「建了就崩」随任务而异，不是显示造成；创建后立刻销毁（E1）干净。未验证的猜想：声音库表里的引用数与创建的发射器声音预设有关。因此仍默认关。
+- **充能光（Particle3_k）默认开**（开发位 4194304 关）。做法见 2.2 / 2.4（EDF6 的 `gunbattery::ChargeEffect_StdParticle`，4.1 的粒子块数值经 EDF6
+  的键表放进去）。任务中的 `bad_alloc`（M809 ds2）已修：渲染作业改排同步渲染阶段（`m401f_M809_g3` 干净）。
+  **退出崩（EDF+0x7ADCFB）已查清并修好（2026-10-17，分支 fix/edf41-exit-crash，细节见 `docs/edf41-classes.md` 12「The exit crash」）**：
+  崩的是 edf41sound 为 4.1 武器音效载入的 `EDF41_WEAPON_SE.ACB` 在 EDF 静态音效库缓存（EDF+0x20B38A0）里的那份计数引用——原版的每个持有者都在
+  应用析构 0x7021F0 里、删声音系统（0x20B2948 置空）之前还掉引用，我们的引用「留到进程结束」，于是 atexit 0x1750870 的缓存析构拿已为空的声音系统
+  去注销这个库，0x7ADCFB 读 [0+0x40]。dump 的 rbx 就是日志里武器库节点 +0x48。充能光与它无关：没有充能光时退出常常在更早的一个 EDF 静态析构
+  （0x111822C 的对象释放 D3D11 对象）里被 d3d11/dxcore 以 NtTerminateProcess(-1, 0xC000004B) 安静结束，走不到缓存析构，看起来就「不崩」。
+  修法：`ReleaseWeaponBank` 在 `AtGameShutdown`（应用析构之前）用游戏自己的 BankRef 释放 0x7AAC80 还掉引用。诊断构建实测：留引用 + 充能光 → 缓存析构里
+  只剩我们 1 个节点 → dump；还引用 + 充能光 → 缓存析构 0 个节点、正常返回、无崩溃。修后默认构建：M018 / M019（充能光开）、M809（DevShoot 20、Dev 193）
+  都干净退出（无 dump、应用程序日志无 EDF6 故障事件），见实机记录。
 - 联机：做了（2.5：每台机器都跑，主机决定攻击开始，面板 / 炮台 / 生成的敌人有子身份，击杀回放），但没在两台机器上跑过（本机一个 Steam 账号、一台机器）；单机下的验证见 `docs/edf41-classes.md`「联机」D。
 - Generator 的「open 动画长度」取 150 帧（M）。弱点 `core` 在 FlatPanel 外壳（刚体 0）里面：激光一类单点命中打在外壳上一律被拒（M019 / M018
   实机 Generator 0 taken / 91–508 refused），只有爆炸类的子命中能落到 `core`——4.1 用同一 SHKT 与同一「离命中中心最近的子命中」规则，应同样
@@ -188,8 +190,11 @@ Deiroi401L/S 在 EDF6 的 `Deiroi` 类里走到的一条 stock 必崩路径，�
 | M145 `m401f_M145_e2`、M308 `m401f_M308_e2`、M132 `m401f_M132_e4`、M516 `m401f_M516_e4` | DevShoot + Dev=32896（32768：玩家子弹打普通敌人，让脚本事件触发；128 不死）、DevShootDamage=300 / 3000 | **船体出现**（M145 361 格、4 个生成器宿主；M308 290 格；M132 203 块；M516 193 块、3 个生成器宿主；队伍 3），布局 / 生成器正常，数分钟无崩溃转储，M132 的 7 个充能光（Dev 含 4194304 前的默认开版）退出干净 |
 | M018 `m401f_M018_k1` | DevShoot + Dev=193（1 攻击一直允许、64 也打生成器敌人、128 不死），默认无充能光 | 无崩溃转储、干净退出；开着的生成器被打中走到「叫醒」路径：日志「Generator … is hit: 0 of its 3 / 6 live enemies notice」——有活的受跟踪敌人，但 `+0x4A0` 已是 1（生成时就 Activate 过），所以没有要叫醒的；该路径（Encount → Activate 0x548D50）在实机上跑过，「真的叫醒一只沉睡敌人」仍没见到 |
 | M312 `m401f_M312_e4` | 同上 | 慢杀（每 30 帧一只）后任务仍先清关（结算截图），船体没出现；这一关仍只有数据测试 |
-| M018 / M019 / M809 充能光退出崩调查 `m401f_M018_g4`、`m401f_M019_g3/g4/g5/h1`、`m401f_M809_g3/g4` | 见 4 | 详见 4 的充能光条；默认关 |
+| M018 / M019 / M809 充能光退出崩调查 `m401f_M018_g4`、`m401f_M019_g3/g4/g5/h1`、`m401f_M809_g3/g4` | 见 4 | 根因是武器音效库引用（见 4），已修，充能光改默认开 |
 | M132 M145 M308 M312 M516 无开关各跑一遍（`m401f_plain_*`） | 全 0 | 无崩溃；但 90 s 内船体没出现——脚本在事件（击杀、计时）后才 CreateNeutral，autopilot 不打，没触发（这五关仍只有数据测试） |
+| 退出崩诊断（2026-10-17，诊断构建，`xc_d2c_M019_nofix` / `xc_d1b_M019_fix` / `xc_d3d` `xc_d3e_M019_plain`） | M019，DevShoot 20 / 100，Dev 4260033（充能光）± 留引用位 | 留引用 + 充能光：缓存析构到达、剩 1 个节点（武器库）→ dump 0x7ADCFB；还引用：0 个节点、干净；不放充能光：退出在 d3d11 的 NtTerminateProcess(-1, 0xC000004B) 安静结束，走不到缓存析构 |
+| M018 `xc_v1_M018`、M019 `xc_v2_M019`（修后默认构建 sha256 de715ecb…） | DevShoot 20 / 100、Dev=65729（193 + 65536 退出报告），充能光默认开 | 进任务、充能光建出（日志 `charge glows (ChargeEffect_StdParticle)`，退出时 115 / 11 个先销毁），**干净退出**：无 dump、应用程序日志无 EDF6 故障，退出报告不再列 EDF41_WEAPON_SE.ACB |
+| M809 `xc_v5_M809`（同一构建） | DevShoot 20、Dev=193 | 第一艘船体被打（WeakPanel 64 taken），终局船体出现，108 个充能光，**干净退出**（无 dump、无故障事件） |
 | 目前的一次性问题 | | 链式连跑被系统内存吃紧杀掉过一次（不是游戏问题），已重跑缺的 M009 |
 
 本轮在实机上**新验证**的功能：锁定点与受击音（日志无「did not play」，未听）、材质动画（每部件日志「3 material animations」，截图红 / 绿循环光）、

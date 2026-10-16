@@ -1010,7 +1010,7 @@ void InitPart(Part& p) noexcept {
         default: break;
     }
     if(p.kind==Kind::finalGenerator && p.hasSpawn)std::memcpy(p.muzzle,p.spawnAt,12);   // its glow sits on 排出位置 (0x266f70)
-    if(DevBits()&4194304)GlowsMake(p);   // development: 4194304 charge glows ON (off by default: they make the game's exit crash on some missions, see docs)
+    if(!(DevBits()&4194304))GlowsMake(p);   // development: 4194304 no charge glows (their exit crash was edf41sound's bank reference, fixed there)
     if(IsBattery(p.kind)) {
         p.destroyedFor=120+Rand(p.rng,120);   // +0x438
         p.deleteAt=180+Rand(p.rng,120);       // +0x434

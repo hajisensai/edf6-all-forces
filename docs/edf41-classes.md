@@ -494,11 +494,33 @@ through EDF6's material *animation* component below, the one UfoCarrier508 uses 
   (+0x640 effect, +0x680 the new enemy). It delivers its messages to the enemy as slots 10, 9 (OnMessage), 11.
 - `AtGameShutdown(fn)` (edf41classes.h): up to 8 callbacks run right before the game's application destructor 0x7021F0 destroys its singletons
   (redirects the call at 0x70293F, fingerprint checked). The plugin's own log is written by a thread that does not outlive this: write a
-  marker file (%TEMP%) for anything you need to see. The exit leak reporter 0x1750870 (atexit; logs `SoundBank::Release error ref count` per
+  marker file (%TEMP%) for anything you need to see. Give back counted references into game caches here (see the exit crash below). The exit leak reporter 0x1750870 (atexit; logs `SoundBank::Release error ref count` per
   bank with a non-zero count, then runs the sound bank cache destructor 0x7A9850) can be redirected at its log call 0x17508B5 -> 0x3E4A0.
 - Emitter effects (`ChargeEffect_StdParticle`, and the 301's vent emitters): queue the update job from Update, the render job (vt[0]) from the
   sync-render phase (clone slot 3, EAO 0x5B6D10). Queued together from Update they run concurrently and the render job throws `bad_alloc`
   (EDF+0x30316D). After each job set `[fx+8]=[fx+0xC]`, `[fx+0x10]=0` (MovingFortress_Battery 0x4D1B96 does).
-- Open, for the exit crash (EDF+0x7ADCFB in the cache destructor after the sound system 0x20B2948 is gone) seen with these emitters on M018 / M019: not
-  fixed by destroying them before the app destructor (M018 / M019 still crash, M809 / M132 / M516 do not); creating and destroying at once is clean.
-  The exit report always lists our EDF41_WEAPON_SE.ACB (ref count 1, same in plain runs). Keep the emitters off by default until this is solved.
+- **The exit crash (EDF+0x7ADCFB), solved 2026-10-17 (branch fix/edf41-exit-crash): it was edf41sound's weapon bank, not the emitters.**
+  - The static bank cache EDF+0x20B38A0 is a `std::map<wstring, entry>` of 0xA0-byte nodes: key at +0x20, the bank at +0x48 (its byte +8 =
+    "registered with the sound system", set by 0x7AA2BF), the reference count at +0x98. The cached loader 0x7AA440 hands out
+    `BankRef{node, cache}`; 0x7AAC80 gives one back (locks cache+0x28, counts down, erases the node at 0 through 0x7AB070 -> 0x7A99D0 ->
+    0x7AABC0, which unregisters the bank from `*(EDF+0x20B2948)` with 0x7ADCE0 / 0x7AF300).
+  - Every stock owner gives its references back inside the application destructor 0x7021F0, before that destructor deletes the sound system
+    (vtable call 0x70248C) and nulls 0x20B2948 (0x702493). Measured with an exit marker (diagnostic build, M019): 12–19 nodes, all count 1 and
+    registered, at its entry; 0 at the atexit. edf41sound kept its reference "for the process", so its node stayed: the atexit 0x1750870 reports
+    it (`SoundBank::Release error ref count 1 APP:\SOUND\PC\EDF41_WEAPON_SE.ACB`), then the cache destructor 0x7A9850 -> 0x7A9670 -> 0x7A99D0 ->
+    0x7AABC0 finds it still registered and calls 0x7ADCE0 with the null sound system: `mov rdi,[rcx+40h]`, rcx 0, at 0x7ADCFB; EDF6Coop's
+    vectored handler turns that into FAST_FAIL_FATAL_APP_EXIT. The dumps agree: rbx = node+0x48 and the logged weapon bank pointer is that node
+    (M019 h1: bank 0x294D598D460, dump rbx 0x294D598D4A8), rsi = EDF+0x20B38A0.
+  - Why it looked tied to the emitters: the process often never gets to that atexit. An earlier EDF.dll atexit destructor (the object at
+    0x111822C: 0x113CBE0 -> 0x175280 -> 0x175690 releases an array of D3D11 objects) can make d3d11 / dxcore end the process with
+    NtTerminateProcess(-1, 0xC000004B STATUS_THREAD_IS_TERMINATING) (stack captured by a diagnostic NtTerminateProcess hook on a plain M019);
+    that exit is silent and clean (no Application-log event 1000 either). With emitters alive the exit went on to the bank cache and crashed
+    (Application log: event 1000, EDF6Coop.dll +0x217EED, 0xC0000409). Which way an exit goes presumably depends on the D3D objects that static
+    still holds (inferred, not traced further), not on anything the emitters do with sound; the bank reference was the bug either way.
+  - Proof runs (diagnostic build, `jobs/14618f05/tmp/gametest/xc_d*`, markers in %TEMP%\edf41exit.txt): bank kept + glows (`xc_d2c`): the
+    cache destructor reached with 1 node (ours) -> dump at 0x7ADCFB; bank given back + glows (`xc_d1b`): reached with 0 nodes, returned, clean;
+    bank kept, no glows (`xc_d3d` / `xc_d3e`): ends in the d3d11 NtTerminateProcess before reaching it.
+  - Fix: `ReleaseWeaponBank` (edf41sound.cpp) gives the reference back with 0x7AAC80 (fingerprinted) from `AtGameShutdown`, before the sound
+    system goes. Rule for every class: a counted reference into a game cache must be given back there too.
+  - With that, the 401's charge glows and the 301's vent emitters are on by default (dev bits 4194304 / Edf41MotherForce 2048 turn them off);
+    the vent emitters are deleted again (graveyard, then their deleting destructor 0x301460; the rest at `AtGameShutdown`).

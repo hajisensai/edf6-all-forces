@@ -335,7 +335,7 @@ struct Config {
                                     // 8 the Core destroyed / 16 a weak panel destroyed after edf41Mother401DevKill seconds, 32 the
                                     // ObjectAction edf41Mother401DevAction then, 64 Edf41DevShoot shoots the generators' wave enemies too,
                                     // 128 the player's armor kept full, 256 the DevShoot only after edf41Mother401DevKill seconds
-                                    // 512 no charge glows, 1024 no light flashes, 2048 no bullet hit sounds
+                                    // 1024 no light flashes, 2048 no bullet hit sounds, 4194304 no charge glows
     float edf41Mother401DevKill=60.0f;
     int edf41Mother401DevAction=0;  // development only (bit 32 of edf41Mother401Dev): the ObjectAction run at edf41Mother401DevKill seconds
     float edf41Mother401Place=0.0f; // development only: the 401 hull held this many m above the player (0 = where the script put it)

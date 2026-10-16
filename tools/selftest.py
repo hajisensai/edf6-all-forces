@@ -7135,8 +7135,12 @@ def edf41_mother301_finish_contract() -> None:
     prints = cpp.split('kMotherPrints[]={', 1)[1].split('};', 1)[0]
     for rva in ('0x300C80', '0x2E8510', '0x1120820', '0x301290', '0x302200', '0x302EE0', '0x302D10', '0x12D85B0'):
         assert '{' + rva + ',' in prints, f'particle emitter call {rva} unchecked'
-    assert 'for(void*& e:h.vent)e=nullptr;' in cpp, 'the emitters must not be deleted at the hull end (exit crash, 2026-10-16)'
-    assert '!(Cfg().edf41MotherForce&2048)' in cpp, 'the emitters stay off by default (they crash the exit, 2026-10-16)'
+    # the emitters are on by default (bit 2048 = puffs instead); the exit crash once blamed on them was edf41sound's bank reference
+    # (fix/edf41-exit-crash, 2026-10-17): a dropped hull's emitters wait in the graveyard, then go through their own deleting
+    # destructor (vtable-checked, fingerprinted); what is left goes right before the application destructor
+    assert '(Cfg().edf41MotherForce&2048))return;' in cpp and '!(Cfg().edf41MotherForce&2048)' not in cpp
+    assert '{0x301460,' in prints and 'kEmitterVtable=0x17A8F70,kEmitterDelete=0x301460' in cpp
+    assert 'VentGraveyardTick();' in cpp and 'AtGameShutdown(&ShutdownVents);' in cpp
     for name in ('kBindCtor', 'kBindDtor', 'kBind', 'kBindSet', 'kBindApply', 'kSetState', 'kUnregister'):
         assert re.search(rf'\{{{name},\{{0x', prints), f'{name} has no fingerprint in kMotherPrints'
     for rva in ('0x4F9250', '0x4F9530', '0x5B6D10'):
@@ -7530,9 +7534,13 @@ def edf41_mother401_plugin_contract() -> None:
         assert call in cpp, call
     assert 'kChargePrint' in cpp and 'kDisablePrint' in cpp and 'GraveyardTick();' in cpp
     # the real-run pass (2026-10-16): the exit hook, the render job in the sync-render clone slot, the dev shooter at ordinary enemies;
-    # the charge glows stay off unless dev bit 4194304 (their exit crash is open, docs/edf41-ufomother401.md 4)
+    # the charge glows are on (dev bit 4194304 turns them off): their exit crash was edf41sound's weapon bank reference, which is now
+    # given back through the game's BankRef release (0x7AAC80, fingerprinted) right before the application destructor
     assert 'AtGameShutdown(&ShutdownGlows);' in cpp and 'PartSyncRender' in cpp and 'Edf41Mother401DevTick' in cpp
-    assert 'DevBits()&4194304)GlowsMake(p)' in cpp and 'AtGameShutdown(' in src('src/edf41classes.h')
+    assert '!(DevBits()&4194304))GlowsMake(p)' in cpp and 'AtGameShutdown(' in src('src/edf41classes.h')
+    sound = src('src/edf41sound.cpp')
+    assert 'kBankRelease=0x7AAC80' in sound and '{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0x51,0x08}' in sound
+    assert 'edf41c::AtGameShutdown(&ReleaseWeaponBank);' in sound and 'weaponBankPtr.store(nullptr);' in sound
     assert 'Edf41Mother401DevTick();' in src('src/map.cpp') and 'Edf41Mother401DevTick();' in src('src/crew.cpp')
     assert re.search(r'^Edf41DevShoot=0$', ini, re.M)
 
