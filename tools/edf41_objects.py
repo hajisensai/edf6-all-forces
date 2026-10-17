@@ -64,7 +64,12 @@ def _not_ours(led: ledger.Ledger, rel: str, sha: str) -> bool:
         return False
     owners = led.owners(rel)
     others = [o for o in owners if o != OWNER]
-    return not owners or (bool(others) and sha256_file(led.disk(rel)) != sha)
+    if not owners:
+        import call_weapons
+        # Older installers recorded ported models only in the weapon transaction's manifest, not the ledger.
+        # Planning must recognize them before the weapon install migrates their ownership later in this run.
+        return call_weapons.owned_assets(os.path.dirname(led.mods)).get(ledger.key(rel)) != sha
+    return bool(others) and sha256_file(led.disk(rel)) != sha
 
 
 def unavailable(root: str) -> list[tuple[str, str]]:
@@ -106,6 +111,10 @@ def install(root: str, files: dict[str, bytes]) -> list[str]:
     """Writes `files` as OWNER's, but a file it already holds with these bytes (a second install writes nothing it
     need not: tools/test_installer_incremental.py); what it wrote before and does not now is released."""
     led = ledger.Ledger(root)
+    import call_weapons
+    for rel, sha in call_weapons.owned_assets(root).items():
+        if rel in files:
+            led.record(call_weapons.OWNER, rel, sha)
     before = set(led.owned_by(OWNER))
     paths = []
     for rel, data in files.items():
