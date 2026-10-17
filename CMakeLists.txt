@@ -3,9 +3,12 @@ project(EDF6VehicleCrew VERSION 0.8.0 LANGUAGES CXX)
 set(EDF6_GAME_DIR "" CACHE PATH "Optional EDF6 game directory for read-only generated-asset checks")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/overlay.cpp src/hud.cpp src/launcher.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/legacymap.cpp src/edf41sound.cpp src/edf41ai.cpp src/edf41mother.cpp src/edf41fortress.cpp src/edf41dragon.cpp src/fieldshare.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/view.cpp src/mission.cpp src/mission_watch.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp src/edf5campaign.cpp src/edf5online.cpp src/turretaim.cpp src/rounds.cpp src/vhud.cpp src/stockgauge.cpp src/warn.cpp src/payload.cpp src/seatswitch.cpp src/sidecar.cpp src/turretcam.cpp src/vehsound.cpp src/sightzoom.cpp)
+add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/overlay.cpp src/hud.cpp src/launcher.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/legacymap.cpp src/edf41sound.cpp src/edf41ai.cpp src/edf41classes.cpp src/edf41mother.cpp src/edf41fortress.cpp src/edf41dragon.cpp src/fieldshare.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/view.cpp src/mission.cpp src/mission_watch.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp src/edf5campaign.cpp src/edf5online.cpp src/turretaim.cpp src/rounds.cpp src/vhud.cpp src/stockgauge.cpp src/warn.cpp src/payload.cpp src/seatswitch.cpp src/sidecar.cpp src/turretcam.cpp src/vehsound.cpp src/sightzoom.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/edf41robo.cpp)
 # The Nix's torso twist (its own line: the source list above is where every feature branch adds).
 target_sources(EDF6VehicleCrew PRIVATE src/nix.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/edf41mother401.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/edf41deiroi.cpp)
 # The ground vehicles' ram (its own line, as above).
 target_sources(EDF6VehicleCrew PRIVATE src/vehicleram.cpp)
 # The gun stabilizer (its own line, as the Nix's).
@@ -58,6 +61,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/edf41smalldragon.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/edf41insects.cpp)
 # Which machine runs the plugin's work on an object online (src/online_authority.h, docs/online-re.md section 3).
 target_sources(EDF6VehicleCrew PRIVATE src/online_authority.cpp)
+# The EDF4.1 classes online (src/edf41net.h, docs/edf41-classes.md 联机): child identities, the host's decisions as events.
+target_sources(EDF6VehicleCrew PRIVATE src/edf41net.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/drill_net.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/sazabi_net.cpp)
 # Every stock homing round (MissileBullet01/02, HomingLaserBullet01) steers by proportional navigation (src/pn.h).
@@ -921,6 +926,19 @@ target_compile_options(drill_hud_binding_test PRIVATE /W4 /WX /utf-8 /permissive
 add_dependencies(offline_checks drill_hud_binding_test)
 add_test(NAME drill_hud_binding COMMAND drill_hud_binding_test)
 add_test(NAME drill_model_rotation COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/drill_model_rotation_test.py")
+# The EDF4.1 classes' network layer (src/edf41net.h): the wire (always), the production code on the real EDF.dll (by hand:
+# edf41net_native_test <EDF.dll>, as drill_net_native_test).
+add_executable(edf41net_test tests/edf41net_test.cpp)
+target_compile_options(edf41net_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME edf41net COMMAND edf41net_test)
+# UfoRobo's death is final (src/edf41robo_body.h: after Die only S10 -> S11).
+add_executable(edf41robo_body_test tests/edf41robo_body_test.cpp)
+target_compile_options(edf41robo_body_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME edf41robo_body COMMAND edf41robo_body_test)
+add_executable(edf41net_native_test EXCLUDE_FROM_ALL tests/edf41net_native_test.cpp)
+target_link_libraries(edf41net_native_test PRIVATE edf6common user32)
+target_include_directories(edf41net_native_test PRIVATE src common)
+target_compile_options(edf41net_native_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_executable(drill_net_native_test EXCLUDE_FROM_ALL tests/drill_net_native_test.cpp)
 target_link_libraries(drill_net_native_test PRIVATE edf6common user32)
 target_include_directories(drill_net_native_test PRIVATE src common)

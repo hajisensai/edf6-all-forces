@@ -532,10 +532,25 @@ void LoadConfig() noexcept {
     n.edf41Sound=ReadBool(L"Edf41Sound",n.edf41Sound);
     n.edf41VoiceProbe=ReadBool(L"Edf41VoiceProbe",n.edf41VoiceProbe);
     n.edf41Ai=ReadBool(L"Edf41Ai",n.edf41Ai);
-    n.edf41MotherDev=ReadBool(L"Edf41MotherDev",n.edf41MotherDev);
+    n.edf41Mother=ReadBool(L"Edf41Mother",n.edf41Mother);
+    n.edf41Robo=ReadBool(L"Edf41Robo",n.edf41Robo);
+    n.edf41RoboLevel=ReadFloat(L"Edf41RoboLevel",n.edf41RoboLevel);
+    n.edf41RoboGunEvery=static_cast<int>(FixInt("Edf41RoboGunEvery",ReadInt(L"Edf41RoboGunEvery",n.edf41RoboGunEvery),0,100000));
+    n.edf41RoboAttack=static_cast<int>(FixInt("Edf41RoboAttack",ReadInt(L"Edf41RoboAttack",n.edf41RoboAttack),-1,15));
+    n.edf41RoboPlace=ReadFloat(L"Edf41RoboPlace",n.edf41RoboPlace);
+    n.edf41RoboTransformAfter=ReadFloat(L"Edf41RoboTransformAfter",n.edf41RoboTransformAfter);
+    n.edf41DevShoot=static_cast<int>(FixInt("Edf41DevShoot",ReadInt(L"Edf41DevShoot",n.edf41DevShoot),0,100000));
+    n.edf41DevShootDamage=ReadFloat(L"Edf41DevShootDamage",n.edf41DevShootDamage);
+    n.edf41MotherForce=static_cast<int>(FixInt("Edf41MotherForce",ReadInt(L"Edf41MotherForce",n.edf41MotherForce),0,4095));
     n.edf41MotherPlace=ReadFloat(L"Edf41MotherPlace",n.edf41MotherPlace);
-    n.edf41MotherBulletProbe=ReadBool(L"Edf41MotherBulletProbe",n.edf41MotherBulletProbe);
     n.edf41MotherParts=static_cast<int>(FixInt("Edf41MotherParts",ReadInt(L"Edf41MotherParts",n.edf41MotherParts),0,31));
+    n.edf41Mother401=ReadBool(L"Edf41Mother401",n.edf41Mother401);
+    n.edf41Mother401Dev=static_cast<int>(FixInt("Edf41Mother401Dev",ReadInt(L"Edf41Mother401Dev",n.edf41Mother401Dev),0,8388607));
+    n.edf41Mother401DevKill=ReadFloat(L"Edf41Mother401DevKill",n.edf41Mother401DevKill);
+    n.edf41Mother401DevAction=static_cast<int>(FixInt("Edf41Mother401DevAction",ReadInt(L"Edf41Mother401DevAction",n.edf41Mother401DevAction),0,63));
+    n.edf41Mother401Place=ReadFloat(L"Edf41Mother401Place",n.edf41Mother401Place);
+    n.edf41Net=ReadBool(L"Edf41Net",n.edf41Net);                     // the 4.1 classes online (edf41net.cpp)
+    n.edf41NetMirror=ReadBool(L"Edf41NetMirror",n.edf41NetMirror);
     n.edf5CampaignContent=FixInt("EDF5CampaignContent",ReadInt(L"EDF5CampaignContent",n.edf5CampaignContent),0,65535);
     n.testRangeContent=FixInt("TestRangeContent",ReadInt(L"TestRangeContent",n.testRangeContent),0,65535);
     n.edf41Content=FixInt("EDF41Content",ReadInt(L"EDF41Content",n.edf41Content),0,65535);
@@ -1077,7 +1092,10 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallEdf41SmallDragon();  // the DLC's EDF4.1 small dragons: the hit reaction on 4.1's ragdoll bodies (edf41smalldragon.cpp)
     InstallEdf41Natives();   // EDF4.1 script natives the BVM executor lacks: SetEncountReportRadius (edf41natives.cpp)
     InstallEdf41Sound();     // EDF4.1's weapon SE bank and voice banks (edf41sound.cpp)
-    InstallEdf41Mother();    // UfoMother301 prototype, development only (ini Edf41MotherDev=1; edf41mother.cpp)
+    InstallEdf41Mother();    // EDF4.1's UfoMother301 (ini Edf41Mother; edf41mother.cpp)
+    InstallEdf41Robo();      // EDF4.1's UfoRobo (ini Edf41Robo; edf41robo.cpp)
+    InstallEdf41Deiroi();    // a stock crash 4.1's M412 reaches (edf41deiroi.cpp)
+    InstallEdf41Mother401(); // EDF4.1's UfoMother401 (ini Edf41Mother401; edf41mother401.cpp)
     InstallTerrainShare();   // before any map loads: the pieces of one terrain decoded once
     InstallMission();       // the mission's start (Reset*, the preloads) and a trigger of the per-frame hooks
     InstallLoadout(iniPath);

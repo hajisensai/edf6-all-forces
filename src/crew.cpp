@@ -796,7 +796,7 @@ void PerfTick() noexcept {
     perf.at=t;perf.worst=perf.sum=0.0;perf.frames=perf.slow=0;
 }
 
-void DebugSpawnTick() noexcept { DebugSpawnFrame(PlayerHuman()); }
+void DebugSpawnTick() noexcept { DebugSpawnFrame(PlayerHuman()); Edf41Mother401DevTick(); }   // (the 401's dev enemy shooter: edf41mother401.cpp)
 
 void FrameTick() noexcept {
     if(tickFrame==GameFrame())return;

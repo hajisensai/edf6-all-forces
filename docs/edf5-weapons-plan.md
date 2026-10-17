@@ -114,7 +114,7 @@ EDF5 武器 SGO 是 v0x102、类型化数值；EDF6 是 DSGO（数值全为 doub
 |---|---|---|
 | 一：EDF6 还有原类 | 蚁巢 AntHill301（14）、迪洛伊 Deiroi401 系列 5 个（25）、外星运输车 AlienTrailer401 系列 5 个（17）、欧米伽队士兵 AiArmySoldier_OMG（+队长，各 5）、巴尔姆 Vehicle501_FortressRobo（+_AI，各 1） | 4.1 的文件原样搬过来，只做格式转换：**本节，已完成转换** |
 | 二：类没了、有可借的壳 | 赫克托 Hector 全系（几十关）、UFO301/401（33）、运输船 Carrier301/401（30）、4.1 坦克 Vehicle301_tank_ai（13）、四足要塞（4）、巨龙（2） | 借 EDF6 相近类（UfoSmall507、UfoCarrier508、EDF6_Berserker_Large …）+ 模型补骨骼 / CAS 补契约 / 插件补行为：待做 |
-| 三：没有可借的壳 | 母舰 UfoMother301、地球吞噬者 UfoMother401 系列、UfoRobo | 要重写原生逻辑，暂不做 |
+| 三：没有可借的壳 | 母舰 UfoMother301、地球吞噬者 UfoMother401 系列、UfoRobo | 插件原生类（`src/edf41classes` 的工厂 + 克隆虚表，`docs/edf41-classes.md`），2026-10-15 都已做：UfoMother301（`src/edf41mother.cpp`，`docs/edf41-ufomother301.md`，M016 M110 M123 M130 M210 M603 + 任务包１ M993）；UfoMother401 船体 + 11 个部件类（`src/edf41mother401.cpp`，`docs/edf41-ufomother401.md`，15 个故事变体 + 任务包２ M809 / MP503，17 关）；UfoRobo（`src/edf41robo.cpp`，`docs/edf41-uforobo.md`，M007 M411 + M415 M416 M010） |
 
 **第一层的转换**：每个对象沿 SGO 里的 `app:/` 路径（含它引用的子 SGO）收集 EDF6 没有的文件；EDF6 有同路径文件的用 EDF6 的（所有档案都算：Root.cpk、ChunkNN、DX11）；4.1 自己也没有的不需要（4.1 引用的 `*_LIGHT.MRAB` 在它的任何档案里都没有，游戏照样跑）；没有扩展名的是目录前缀。各类文件：
 

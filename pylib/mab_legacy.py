@@ -316,6 +316,48 @@ def mab_events(b: bytes) -> dict[str, list[tuple[str, float]]]:
     return out
 
 
+def mab_event_params(b: bytes) -> dict[str, list[tuple[str, float, dict]]]:
+    """mab_events with each key's parameters: {track: [(key string, f32 time, {name: value})]}. A key's +0xC is the
+    offset of a small SGO (from the key under flag 0x83, from the block's start otherwise; 0: none) holding the
+    event's arguments (UfoRobo401's 攻撃判定 {collision, damage, quake, scale}, se {name}, 砲撃開始 {charge_frame}).
+    Floats come back as Python floats."""
+    import sgo
+    lay = mab_layout(b)
+    rel = lay.flag == RELATIVE
+    ntracks, = struct.unpack_from('<H', b, 0x0E)
+    tracks, = struct.unpack_from('<I', b, 0x18)
+
+    def target(field_at: int, base: int) -> int:
+        return _i32(b, field_at) + (base if rel else 0)
+
+    def plain(v: object) -> object:
+        if isinstance(v, sgo.Float):
+            return v.value
+        if isinstance(v, list):
+            return [plain(x) for x in v]
+        if isinstance(v, dict):
+            return {k: plain(x) for k, x in v.items()}
+        return v
+
+    out: dict[str, list[tuple[str, float, dict]]] = {}
+    for i in range(ntracks):
+        t = tracks + TRACK * i
+        first, count = target(t, t), _i32(b, t + 0xC)
+        keys = []
+        for j in range(count):
+            k = first + KEY * j
+            at = _i32(b, k + 0xC)
+            params = {}
+            if at:
+                start = k + at if rel else at
+                if b[start:start + 4] != b'SGO\0':
+                    raise ValueError(f'MAB event key at {k:#x}: no SGO at {start:#x}')
+                params = plain(sgo.read(b[start:])[1])
+            keys.append((_text_at(b, target(k, k)), struct.unpack_from('<f', b, k + 4)[0], params))
+        out[_text_at(b, target(t + 8, t))] = keys
+    return out
+
+
 def mab_add_locators(b: bytes, new: list[Locator]) -> bytes:
     """The MAB block `b` (either flag) with the records `new` added at the end of list 0, the locator list.
 

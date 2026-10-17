@@ -115,6 +115,7 @@ bool GunshipCrewSeats(void const *) noexcept{unexpectedHook();return {};}
 unsigned int GunshipBoardSeat(void) noexcept{unexpectedHook();return {};}
 void BoardingTick(void) noexcept{unexpectedHook();return;}
 void DebugSpawnFrame(unsigned char *) noexcept{}
+void Edf41Mother401DevTick() noexcept{}   // crew.cpp's DebugSpawnTick calls it (edf41mother401.cpp, not linked here)
 void const * BoardingOnly(void) noexcept{unexpectedHook();return {};}
 void PlayerJetFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void LauncherFrame(unsigned char *) noexcept{unexpectedHook();return;}

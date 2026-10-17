@@ -53,6 +53,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import acb  # noqa: E402
 import cas_graft  # noqa: E402
+import cas_pose  # noqa: E402
 import dsgo  # noqa: E402
 import edf41dlc  # noqa: E402
 import legacy_assets  # noqa: E402
@@ -108,15 +109,12 @@ DLC_ROOTS: dict[str, int] = {
     'EDF41MP02/ANTHILL301LARGEMP02.SGO': 4, 'EDF41MP02/ANTHILL301UGMP02.SGO': 1, 'EDF41MP02/GIANTANT04.SGO': 5,
     'EDF41MP02/GIANTANT04SBMP02.SGO': 2, 'EDF41MP02/GIANTBEEQUEEN02.SGO': 3, 'EDF41MP02/NEPHILA02L.SGO': 1,
     'EDF41MP02/NEPHILA03L.SGO': 1, 'EDF41MP02/UFO401ACE.SGO': 5,
+    # 4.1's 401 mothership, the plugin's class (MOTHER401_DLC_ROOTS below)
+    'EDF41MP02/UFOMOTHER401_DLC_M809.SGO': 1, 'EDF41MP02/UFOMOTHER401_DLC_MP503.SGO': 1,
 }
 # DLC objects the missions spawn that are not ported, with why: their missions stay unplayable (the mission plan skips
 # a mission whose object is not registered), as the story's mothership missions do.
-DLC_EXCLUDED: dict[str, str] = {
-    'EDF41MP02/UFOMOTHER401_DLC_M809.SGO': "4.1's 401 mothership (class UfoMother401 and its panel / battery classes): "
-                                           "EDF6 registers no class for it yet (M809)",
-    'EDF41MP02/UFOMOTHER401_DLC_MP503.SGO': "4.1's 401 mothership (class UfoMother401): EDF6 registers no class for it "
-                                            "yet (MP503)",
-}
+DLC_EXCLUDED: dict[str, str] = {}
 
 
 @dataclass(frozen=True)
@@ -1030,6 +1028,10 @@ def check_materials(games: 'Games', files: dict[str, bytes], rel: str, need: dic
 
 SE_KEYS = ('se_list', 'se_table', 'ufo_se', 'se_preset_list')   # object keys holding SEPRESET names (docs/sound-re.md section 2)
 RESIDENT_BANKS = ('TIKYUUX_SE.ACB',)           # loaded for every mission (docs/sound-re.md section 1)
+# Classes the plugin implements whose se_table no EDF6 code reads (EDF6's SEPRESET has none of their names): the plugin plays
+# the cues 4.1's SEPRESET gives them by cue name, from a key the build adds and checks against the banks (mother401_cues).
+PLUGIN_SOUND_CLASSES = {'UfoMother401': "4.1's Earth Eater: se_table names 4.1 presets (EE...), EDF6's SEPRESET has none; "
+                                        "edf41_401_se carries their cues for src/edf41mother401.cpp"}
 
 
 def sound_cues(games: 'Games') -> tuple[dict[str, str], dict[str, set[str]]]:
@@ -1051,13 +1053,22 @@ def check_sounds(games: 'Games', data: bytes, rel: str) -> None:
     silent), or its cue is in no bank the object lists in game_sound nor in a resident one (the player the cue names is
     null: the M015 crash of UFOCARRIER, the sound system derefs it at EDF+0x240AD0 via 0x7B3310 / 0x6ABF50)."""
     members = dsgo.to_py(dsgo.parse(data).root) if data[:4] == b'DSGO' else sgo.load(data=data)
+    if str(members.get('xgs_scene_object_class')).split('_')[0] in PLUGIN_SOUND_CLASSES:
+        return
     names = [n for k in SE_KEYS for n in strings(members.get(k)) if n]
-    if not names:
+    own = {e[0]: e[1] for e in members.get('edf41_se', []) if isinstance(e, list) and len(e) >= 2}
+    if not names and not own:
         return
     seset, banks = sound_cues(games)
     loaded = set(RESIDENT_BANKS) | {s.rsplit('/', 1)[-1].upper() for s in strings(members.get('game_sound'))}
     cues = set().union(*(banks.get(b, set()) for b in loaded))
+    # edf41_se: 4.1 SEPRESET names a plugin class plays itself, by the cue's name (robo_fix): each cue must be in a bank
+    for n, cue in own.items():
+        if cue not in cues:
+            raise ValueError(f'{rel}: sound {n!r} (edf41_se) plays cue {cue}, which none of {sorted(loaded)} holds')
     for n in names:
+        if n in own:
+            continue
         if n not in seset:
             raise ValueError(f'{rel}: sound {n!r} is not in SEPRESET.SGO')
         if seset[n] not in cues:
@@ -1326,18 +1337,16 @@ def stand_in(games: Games, s: StandIn) -> tuple[bytes, list[str]]:
     return sgo.write_depth_first(version, members), need
 
 
-# ---- development only: UfoMother301 (docs/edf41-ufomother301.md, phase 1) -------------------------------------------------
-# The hull as the plugin's prototype class (src/edf41mother.cpp: UfoCarrier508's constructor, a cloned vtable) wants it. It
-# is built ONLY by `--mother-dev` and written to edf41port_dev/, never to edf41port/: the committed
-# registry, the installer bundle (tools/build_release.py names the edf41port files one by one) and the 6 missions stay as
-# they are (selftest edf41_motherships_not_faked, edf41_mother_dev_isolated).
-MOTHER_DEV_ROOT = 'UFOMOTHER301.SGO'
-MOTHER_DEV_OUT = os.path.join(HERE, '..', 'edf41port_dev')
+# ---- UfoMother301, EDF4.1's mothership (docs/edf41-ufomother301.md) ------------------------------------------------------
+# EDF6 has no class that does its job: the plugin registers UfoMother301 and its four part classes (src/edf41mother.cpp: the
+# hull on UfoCarrier508's constructor, the parts on EventAnimationObject's, each under a cloned vtable). The hull SGO keeps
+# 4.1's class name and its mp_* part lists; what the two EDF6 constructors read unchecked is added here (mother301_fix).
+MOTHER301_ROOT = 'UFOMOTHER301.SGO'
 # UfoCarrier508's constructor and its base read: CAS players in_ring / out_ring (grafted), the main player's states
 # open_state / close_state (the mothership's CAS names them show / hide ... open / close: aliased), the keys of E508_CARRIER
 # (setdefault), and the MAB locators 排出口 and ダメージエフェクト by name without asking whether they exist (EDF+0x4F60DD, 0x4F874D
 # -> 0x6BADD0): 4.1's hull has neither (only ターゲット), so the carrier's two are added on the hull's waist bone.
-MOTHER_DEV_ALIAS = Alias('UfoMother301', 'E508_CARRIER.SGO', ('in_ring', 'out_ring'),
+MOTHER301_ALIAS = Alias('UfoMother301', 'E508_CARRIER.SGO', ('in_ring', 'out_ring'),
                          state_aliases=(('main', 'close_state', 'close'), ('main', 'open_state', 'open')),
                          # se_list names E508's cues (the bank of UFOCARRIER301.ACB): its bank joins the mothership's own
                          # The hull is 757 m across and flies 600 m up: past 1000 m from the camera the near pass clips it
@@ -1348,24 +1357,39 @@ MOTHER_DEV_ALIAS = Alias('UfoMother301', 'E508_CARRIER.SGO', ('in_ring', 'out_ri
                                    ('UfoCarryer_EnableFarRender', 1), ('spawn_effect_setting', [0.0, 80.0, 80.0])),
                          inert_materials="the 4.1 mothership has no material animation (its lights are code-driven): E508's "
                                          "entries (Metal, Weakpoint) bind nothing on its model, the slots only have to exist (prototype)")
-MOTHER_DEV_LOCATORS = (
+MOTHER301_LOCATORS = (
     mab_legacy.Locator('排出口', 'waist', 2, (0.0, -40.0, 0.0, 1.0), (5.0, 5.0, 5.0, 1.0), (0.0, 0.0, 3.1415927, 1.0)),
     mab_legacy.Locator('ダメージエフェクト', 'waist', 4, (0.0, -40.0, 0.0, 1.0), 80.0, (0.0, -1.2, 0.0, 1.0)),
 )
 
 
-def mother_dev_fix(files: dict[str, bytes], far: bool = True) -> None:
-    """The prototype's hull SGO: the keys its parts need (mp_*, resource) taken out (no part class exists yet, and the
-    files they name are not shipped), the carrier's two MAB locators added, only the files the SGO still names kept."""
-    rel = 'OBJECT/' + MOTHER_DEV_ROOT
+def se41_table(games: 'Games', prefixes: tuple[str, ...]) -> list[list]:
+    """4.1's SEPRESET entries whose name starts with one of `prefixes`, as the plugin's SGO key edf41_se wants them:
+    [[name, cue, volume, pitch, a, b, c], ...] (src/edf41classes.h PlaySe: EDF6's SEPRESET has none of 4.1's names; the cues
+    are in the tikyuu4_* banks EDF6 ships)."""
+    data = games.read4('SOUND/SEPRESET.SGO')
+    try:
+        table = sgo.load(data=data)
+    except Exception:   # noqa: BLE001 - 4.1's classic SGO through the converter
+        table = sgo.load(data=legacy_sgo.convert(data))
+    out = []
+    for name, v in sorted(table.items()):
+        if name.startswith(prefixes) and isinstance(v, list) and len(v) >= 6 and isinstance(v[0], str):
+            out.append([name, v[0], *(float(x) for x in v[1:6])])
+    if not out:
+        raise ValueError(f'4.1 SEPRESET has no entry starting with {prefixes}')
+    return out
+
+
+def mother301_fix(games: 'Games', files: dict[str, bytes]) -> None:
+    """The hull SGO after the alias: the carrier's two MAB locators added, the model's size recorded for the plugin's log,
+    only the files the SGO names kept, the part classes' CAS and model fixes (mother_parts_fix)."""
+    rel = 'OBJECT/' + MOTHER301_ROOT
     version, members = sgo.read(files[rel])
     # mp_* (the parts: [sgo path, euler degrees, position]) and resource stay: the plugin makes the parts from them (phase 2 step 1)
     # and the six part SGOs, their models, CASs and ragdolls come over with the hull.
-    if not far:   # the comparison build: without the far-render keys (E508_CARRIER's own)
-        for k in ('UfoCarryer_EnableFarRender', 'spawn_effect_setting'):
-            members.pop(k, None)
     am = members['animation_model']
-    am[2] = mab_legacy.mab_add_locators(mab_block(am[2]), list(MOTHER_DEV_LOCATORS))
+    am[2] = mab_legacy.mab_add_locators(mab_block(am[2]), list(MOTHER301_LOCATORS))
     # What the plugin logs back at creation to show the game was given this model: [mdb name, half extents x y z, bones]
     # (src/edf41mother.cpp; read from the file, so a different model in the archive changes it).
     rab_rel = rel_of(am[0][0][0])
@@ -1373,6 +1397,7 @@ def mother_dev_fix(files: dict[str, bytes], far: bool = True) -> None:
     md = mdb.mdb_read(body.data)
     ext = [max(abs(x) for x in mdb.rigid_extent(md, ax)) for ax in range(3)]
     members['edf41_mother_model'] = [am[0][0][1], *ext, len(md.bones)]
+    members['edf41_se'] = se41_table(games, ('母船UFO',))   # the hull's table: its parts play from it too
     files[rel] = sgo.write_depth_first(version, members)
     prune(files, rel)
     mother_parts_fix(files)
@@ -1397,6 +1422,295 @@ def mother_parts_fix(files: dict[str, bytes]) -> None:
             am[1] = 'app:/object/UfoMother301_Hatch.cas'
             files[rel] = sgo.write_depth_first(version, members)
 
+
+
+# ---- UfoMother401, EDF4.1's Earth Eater (docs/edf41-ufomother401.md) -------------------------------------------------------
+# A hull with no model of its own that lays out up to 361 hexagonal panels (19 x 19, panel_layout_map*) by its action_list; the
+# panels (UfoMother401_Panel01 / _WeakPanel / _Core / _BigCannon01 / _Generator / _FinalCannon01 / _FinalGenerator) and the gun
+# batteries hung on Panel01's 砲台 locators (_GunBattery_SmallLaser / _Sniper / _PlasmaCannon / _RapidCannon) are real objects. The
+# plugin registers all twelve classes (src/edf41mother401.cpp), every one built on EventAnimationObject (a model, a CAS player
+# "main", a ragdoll, durability). Every variant SGO keeps 4.1's class and keys; what EventAnimationObject's constructor reads
+# unchecked and what the plugin reads from the model are added (mother401_fix). The variants by mission (4.1's BVM scripts,
+# jobs/14618f05/tmp/re401/notes_D_missions.md): the base file M018; 401M009 M009, M012 M012, M019 M019, M201 M201, M412 M412,
+# M550 M516, M551 M312, M552 M145, M553 M142, M554 M518, M555 M149, M556 M132, M557 M308, M602 M602; DLC pack 2's two M809, MP503.
+MOTHER401_ROOTS: dict[str, int] = {
+    'UFOMOTHER401.SGO': 1, 'UFOMOTHER401M009.SGO': 1, 'UFOMOTHER401M012.SGO': 1, 'UFOMOTHER401M019.SGO': 1,
+    'UFOMOTHER401M201.SGO': 1, 'UFOMOTHER401M412.SGO': 1, 'UFOMOTHER401M550.SGO': 1, 'UFOMOTHER401M551.SGO': 1,
+    'UFOMOTHER401M552.SGO': 1, 'UFOMOTHER401M553.SGO': 1, 'UFOMOTHER401M554.SGO': 1, 'UFOMOTHER401M555.SGO': 1,
+    'UFOMOTHER401M556.SGO': 1, 'UFOMOTHER401M557.SGO': 1, 'UFOMOTHER401M602.SGO': 1,
+}
+MOTHER401_DLC_ROOTS: dict[str, int] = {'EDF41MP02/UFOMOTHER401_DLC_M809.SGO': 1, 'EDF41MP02/UFOMOTHER401_DLC_MP503.SGO': 1}
+MOTHER401_HULL = 'UfoMother401'
+# The hull has no model, collision or durability of its own in 4.1; EventAnimationObject's constructor reads animation_model and
+# ragdoll unchecked (EDF+0x5B60C9 hands the model loader whatever the key gave, 0x5B61ED throws on a missing ragdoll). It gets the
+# model and ragdoll of a part of its own set, the smallest the variant has (the small laser battery, 10 x 30 m, else a panel);
+# the plugin builds the hull far under its spawn point and never moves that model or ragdoll again (its Update skips
+# EventAnimationObject's own, src/edf41mother401.cpp).
+MOTHER401_HULL_DONORS = ('UfoMother401_GunBattery_SmallLaser', 'UfoMother401_WeakPanel', 'UfoMother401_Panel01')
+# 4.1's panels and batteries mostly have no CAS (animation_model[1] is 0); EventAnimationObject's constructor asks the player main
+# for the state default. They get the flat panel's CAS with every clip emptied (cas_graft.hollow): the players and states exist,
+# nothing moves. The two CASs 4.1 has (cannon panel, flat panel: open / close / open_state / close_state) rest in close_state.
+MOTHER401_FLAT_CAS = 'OBJECT/MOTHERSHIP401_FLATPANEL.CAS'
+MOTHER401_CASES = (MOTHER401_FLAT_CAS, 'OBJECT/MOTHERSHIP401_CANNONPANEL.CAS')
+MOTHER401_STILL_CAS = 'OBJECT/UFOMOTHER401_STILL.CAS'
+MOTHER401_STILL_APP = 'app:/Object/UfoMother401_Still.cas'
+# Points the plugin needs on a part's model, from 4.1's MAB locators (node bind matrix x the locator's position; the panels are
+# rigid, so the rest pose is the pose): the battery mounts (Panel01's 砲台, each one), the muzzle (発射口: BigCannon01,
+# FinalCannon01, the batteries), the spawn point of a generator (出現位置 / 排出位置), the lock-on point (ターゲット: the MAB's
+# list 1, the list EDF6's lock-point component 0x6C74E0 hands to AddLockTarget 0x547A50; EventAnimationObject has no such
+# component, so the plugin adds the point itself), and the weak body's bone (weakpoint).
+MOTHER401_POINTS = (('edf41_401_mounts', ('砲台',), True), ('edf41_401_muzzle', ('発射口',), False),
+                    ('edf41_401_spawn', ('出現位置', '排出位置'), False), ('edf41_401_lock', ('ターゲット',), False))
+
+
+# The charge glows: 4.1 hangs a Particle3_k emitter (ParticleObject 0x1c2d80) on the muzzle of BigCannon01 (0x262684),
+# FinalCannon01 and FinalGenerator (jobs/14618f05/tmp/re401/notes_A 1.5, notes_B 1.3 / 3.1) and switches it on while charging /
+# firing, coloured per state. EDF6 has the same emitter behind gunbattery::ChargeEffect_StdParticle, whose SGO form E510's
+# batteries carry (charge_effect_std: [[], ['ChargeEffect_StdParticle', [[key, value, ...], [se]]]]; the keys are EDF6's
+# parser table 0x303710: 3 / 4 ints, 8 [0: the flag byte +0x50], 11 [1: +0xb8, 2: +0xbc], 12 [1: +0xc4, 2: +0xc8, 3: +0xcc],
+# 13 [1: colour +0xe0, 3: colour +0x100], 15 [0: texture]); 4.1's block writes the same offsets: ints 4 / 4 / 2, +0x50 = 1,
+# +0xb8 = 0, +0xc4 / +0xc8 / +0xcc = 80 / 100 / -25, colours +0xe0 and (0, 0, 0, 1) at +0x100. The colour of each glow the
+# class switches on (one ChargeEffect per colour); the se is EDF6's (empty: the plugin plays 4.1's charge sounds itself).
+MOTHER401_GLOWS = {
+    'UfoMother401_BigCannon01': ((1.0, 1.0, 3.0, 1.0),),                               # charge and fire
+    'UfoMother401_FinalCannon01': ((10.0, 1.0, 5.0, 1.0), (1.0, 1.0, 5.0, 1.0), (2.0, 2.0, 10.0, 1.0)),   # genocide charge,
+    'UfoMother401_FinalGenerator': ((1.0, 10.0, 5.0, 1.0),),                           # lightning charge, lightning fire; summon
+}
+
+
+def mother401_glow(colour: tuple) -> list:
+    """One EDF6 ChargeEffect_StdParticle node of 4.1's muzzle emitter in `colour` (MOTHER401_GLOWS)."""
+    keys = [2, 4, 3, 4, 4, 2, 8, [0, 1], 11, [1, 0.0, 2, 0.0], 12, [1, 80.0, 2, 100.0, 3, -25.0],
+            13, [1, [float(c) for c in colour], 3, [0.0, 0.0, 0.0, 1.0]], 15, [0, 'Particle3_k.dds']]
+    return [[], ['ChargeEffect_StdParticle', [keys, ['']]]]
+
+
+def mother401_point(md: 'mdb.Mdb', world: list, node: str, a: tuple) -> list[float]:
+    m = world[mdb.bone_named(md, node)]
+    return [round(a[0] * m[0 + j] + a[1] * m[4 + j] + a[2] * m[8 + j] + m[12 + j], 4) for j in range(3)]
+
+
+def mother401_part(files: dict[str, bytes], rel: str) -> None:
+    """One part SGO of the 401 set (class UfoMother401_*): the still CAS where 4.1 has none, the plugin's points added."""
+    version, members = sgo.read(files[rel])
+    am = members['animation_model']
+    if isinstance(am[1], int):
+        am[1] = MOTHER401_STILL_APP
+    entry = model_entries(am[0])[0]
+    by_name = {f.name.lower(): f for f in mdb.rab_read(files[rel_of(entry[0])]).files}
+    md = mdb.mdb_read(by_name[entry[1].lower()].data)
+    world = mdb.bind_world(md)
+    locs = [loc for _i, loc in mab_legacy.mab_locators(mab_block(am[2]))] if isinstance(am[2], bytes) else []
+    for key, names, many in MOTHER401_POINTS:
+        found = [mother401_point(md, world, loc.node, loc.a) for loc in locs if loc.name in names]
+        if found:
+            members[key] = found if many else found[0]
+    weak = members.get('weakpoint')
+    if isinstance(weak, str):
+        m = world[mdb.bone_named(md, weak)]
+        members['edf41_401_weak'] = [round(m[12 + j], 4) for j in range(3)]
+    glows = MOTHER401_GLOWS.get(str(members.get('xgs_scene_object_class')))
+    if glows:
+        members['edf41_401_charge'] = [mother401_glow(c) for c in glows]
+    files[rel] = sgo.write_depth_first(version, members)
+
+
+def mother401_cues(games: 'Games', files: dict[str, bytes], rel: str) -> None:
+    """edf41_401_se of a 401 SGO: per se_table entry, 4.1's preset for that name ([cue, volume, pitch, near, far, priority],
+    4.1's SOUND/SEPRESET.SGO) or 0 where se_table has 0. ValueError when a name is no 4.1 preset or its cue is in neither the
+    banks the SGO lists in game_sound nor a resident one."""
+    version, members = sgo.read(files[rel])
+    table = members.get('se_table')
+    if not isinstance(table, list):
+        return
+    if not hasattr(games, 'seset41'):
+        games.seset41 = sgo.load(data=games.read4('SOUND/SEPRESET.SGO'))
+    _seset, banks = sound_cues(games)
+    loaded = set(RESIDENT_BANKS) | {s.rsplit('/', 1)[-1].upper() for s in strings(members.get('game_sound'))}
+    cues = set().union(*(banks.get(b, set()) for b in loaded))
+    out: list = []
+    for name in table:
+        if not isinstance(name, str) or not name:
+            out.append(0)
+            continue
+        preset = games.seset41.get(name)
+        if not isinstance(preset, list) or not preset or preset[0] not in cues:
+            raise ValueError(f'{rel}: se_table {name!r} is {preset!r} in 4.1, no cue of {sorted(loaded)}')
+        out.append([preset[0], *[float(x) for x in preset[1:]]])
+    members['edf41_401_se'] = out
+    files[rel] = sgo.write_depth_first(version, members)
+
+
+def mother401_fix(games: 'Games', files: dict[str, bytes]) -> None:
+    """The converted files of one 401 variant: the hull SGO with a part's model and ragdoll (MOTHER401_HULL_DONORS), every
+    part SGO through mother401_part, every SGO's sounds as cues (mother401_cues), the CASs with a default state, the still CAS
+    added. Idempotent (a second variant gets the files the first fixed) and the same bytes for a shared file whichever variant
+    fixes it."""
+    if MOTHER401_FLAT_CAS not in files:
+        raise ValueError(f'{MOTHER401_FLAT_CAS} is not in the closure: no CAS to base the still one on')
+    for rel in MOTHER401_CASES:
+        if rel in files and 'default' not in cas_graft.states(files[rel]).get('main', set()):
+            files[rel] = cas_graft.alias_states(files[rel], {'main': [('default', 'close_state')]})
+    files[MOTHER401_STILL_CAS] = cas_graft.hollow(files[MOTHER401_FLAT_CAS])
+    hulls, parts = [], {}
+    for rel in sorted(r for r in files if r.endswith('.SGO')):
+        cls = str(sgo.load(data=files[rel]).get('xgs_scene_object_class'))
+        if cls == MOTHER401_HULL:
+            hulls.append(rel)
+        elif cls.startswith(MOTHER401_HULL + '_'):
+            mother401_part(files, rel)
+            parts.setdefault(cls, rel)
+        if cls.startswith(MOTHER401_HULL):
+            mother401_cues(games, files, rel)
+    if len(hulls) != 1:
+        raise ValueError(f'the closure holds {len(hulls)} UfoMother401 hulls: {hulls}')
+    donor = next((parts[c] for c in MOTHER401_HULL_DONORS if c in parts), None)
+    if donor is None:
+        raise ValueError(f'the closure holds none of {MOTHER401_HULL_DONORS}: no model for the hull')
+    part = sgo.read(files[donor])[1]
+    version, members = sgo.read(files[hulls[0]])
+    members['animation_model'] = copy.deepcopy(part['animation_model'])
+    members['ragdoll'] = copy.deepcopy(part['ragdoll'])
+    files[hulls[0]] = sgo.write_depth_first(version, members)
+    prune(files, hulls[0])
+
+
+# Native classes the plugin implements (src/edf41mother.cpp ...): their root's alias, then this fix of the converted files.
+ROOTS[MOTHER301_ROOT] = 6   # M016 M110 M123 M130 M210 M603 (DLC pack 1's M993 names the same story file)
+ALIASES[MOTHER301_ROOT] = MOTHER301_ALIAS
+NATIVE_FIXES: dict[str, Callable[['Games', dict[str, bytes]], None]] = {MOTHER301_ROOT: mother301_fix}
+# The 401 has no stock template (no alias): its fix runs on 4.1's converted files as they are.
+ROOTS.update(MOTHER401_ROOTS)
+NATIVE_FIXES.update({root: mother401_fix for root in (*MOTHER401_ROOTS, *MOTHER401_DLC_ROOTS)})
+
+
+# ---- UfoRobo, EDF4.1's transforming ship / walking robot (docs/edf41-uforobo.md) -----------------------------------------
+# EDF6 has no class that flies and walks as one object (the script keeps one handle across the transformation: M007 registers
+# its durability events on it after ObjectAction 0). The plugin registers UfoRobo itself (src/edf41robo.cpp: the object on
+# EventAnimationObject's constructor, which reads only animation_model and ragdoll, under a cloned vtable) and runs 4.1's state
+# machines. No alias: the SGO keeps 4.1's class name and every 4.1 key the plugin reads (robo_*_muzzle_setting,
+# robo_attack_table, se_table, the bullet classes and custom parameters, ik_control_info, game_object_durability). robo_fix adds
+# what EventAnimationObject and the plugin need (below).
+ROBO_ROOT = 'UFOROBO401.SGO'
+ROBO_ROOT_BONE = 'globalSRT'
+# The MAB events the plugin raises itself, as it plays the clips (EDF6's EventAnimationObject registers no handler for 4.1's
+# events): kind numbers of edf41_robo_events (src/edf41robo.cpp EventKind). 4.1 registers 攻撃判定 / 砲撃開始 / 砲撃終了 /
+# ジェノサイド砲発射 (EDF41.exe 0x2732B0 -> 0x277790 / 0x277C10 / 0x277D90 / 0x277DB0); se / se_stop are the engine's own.
+ROBO_EVENTS = {'se': 0, 'se_stop': 1, '攻撃判定': 2, '砲撃開始': 3, '砲撃終了': 4, 'ジェノサイド砲発射': 5}
+# SEPRESET names 4.1's class code plays by name (the guns' charge / shot / hit cues, the flying buster charge: EDF41.exe
+# 0x27B0A0 / 0x2744B0 / 0x278480), besides se_table, ragdoll_contact and the MAB's se events.
+ROBO_CLASS_SE = ('ロボ小ビームチャージ', 'ロボ小ビーム発射', 'ロボビーム着弾小', 'ロボ飛行形態中型キャノンチャージ', 'ロボ肩ビーム発射',
+                 'ロボビーム着弾中', 'ロボバスター砲発射', 'ロボビーム着弾大', 'ロボ飛行形態バスター砲チャージ')
+# Names the plugin looks up in the files and uses (check_class_names holds the object to them): the CAS states its state
+# machines play (and default, which EventAnimationObject's constructor plays), the muzzle / attack range / foot locators.
+ROBO_STATES = ('default', 'ship', 'transform', 'stand', 'fall', 'fall_land', 'walk_f_nl', 'walk_f_lr', 'walk_f_rl',
+               'walk_f_ln', 'walk_f_rn', 'walk_b_nl', 'walk_b_lr', 'walk_b_rl', 'walk_b_ln', 'walk_b_rn', 'side_step_l',
+               'side_step_r', 'turn_l45', 'turn_r45', 'turn_l90', 'turn_r90', 'turn_l180', 'turn_r180', 'attack_chop_l',
+               'attack_chop_r', 'attack_stomp_l', 'attack_stomp_r', 'attack_fire360', 'attack_fire_cross',
+               'attack_fire_genocide', 'attack_fire_straight', 'dead')
+ROBO_LOCATORS = ('muzzle_small_l', 'muzzle_small_r', 'muzzle_middle_l', 'muzzle_middle_r', 'muzzle_big_l', 'muzzle_big_r',
+                 '右手攻撃範囲', '右手攻撃範囲2', '右手攻撃範囲3', '左手攻撃範囲', '左手攻撃範囲2', '左手攻撃範囲3', '右足歩行衝撃',
+                 '左足歩行衝撃', 'ロックオン')
+# The plugin's own limits (src/edf41robo.cpp): longer tables are refused there, so they are refused here.
+ROBO_MOST_EVENTS = 24        # kMostEvents: per clip
+ROBO_SE_PREFIXES = ('ロボ',)   # 4.1's SEPRESET entries copied into edf41_se (se41_table): every name the robot plays
+ROBO_MOST_MOTION_KEYS = 512  # kMostMotionKeys
+ROBO_MATERIAL_PAIRS = ((0, 0), (1, 2))   # (4.1 blob, slot): the lights' loop and the death (EDF41.exe 0x273FB2 / 0x274046)
+
+
+
+def robo_events(cas: bytes, mab: bytes) -> list:
+    """edf41_robo_events: [[CAS state, clip number in the state, [[time, kind, text, a, b, c], ...]], ...] for every state of
+    the CAS's main player whose clips have MAB events: the clips a state plays (its play data command's tcontrol, in order;
+    attack_fire_genocide plays attack_fire_genocide_charge then attack_fire_genocide), each with its track's keys (ROBO_EVENTS
+    kinds; time in clip units, the CAS player's +0xE8). se: text the 4.1 SEPRESET name; 攻撃判定: text the locator, a damage
+    (default 10), b scale (1), c quake (0.2: EDF41.exe 0x277790); 砲撃開始 / ジェノサイド砲発射: a charge_frame."""
+    clips = cas_graft.state_clips(cas)['main']
+    tracks = mab_legacy.mab_event_params(mab)
+    out = []
+    for state, names in sorted(clips.items()):
+        for n, clip in enumerate(names):
+            keys = []
+            for key, time, p in tracks.get(clip, []):
+                if key not in ROBO_EVENTS:
+                    raise ValueError(f'MAB track {clip}: event {key} is not one the plugin raises')
+                kind = ROBO_EVENTS[key]
+                text = p.get('name', p.get('collision', ''))
+                a = float(p.get('damage', 10.0) if kind == 2 else p.get('charge_frame', 0) if kind in (3, 5) else
+                          p.get('channel', 0))
+                b = float(p.get('scale', 1.0))
+                c = float(p.get('quake', 0.2))
+                keys.append([float(time), kind, str(text), a, b, c])
+            if keys:
+                if len(keys) > ROBO_MOST_EVENTS:
+                    raise ValueError(f'MAB track {clip}: {len(keys)} events, the plugin takes {ROBO_MOST_EVENTS}')
+                out.append([state, n, keys])
+    return out
+
+
+def robo_motion(cas: bytes) -> tuple[list, set[str]]:
+    """(edf41_robo_motion, the clips it covers): [[CAS state, clip length, [x, z, yaw, ...] per key], ...] for the states whose
+    one clip moves the root bone (ROBO_ROOT_BONE: the walks, side steps and turns), relative to the clip's start (cas_pose
+    root_motion). 4.1 moves the object by the clip's root motion (EDF41.exe 0x276DFA reads the player's root motion; the
+    robot's horizontal speed is that motion x 60, turned by the yaw it had when the step began, 0x324); the plugin does the
+    same from these keys and the bone's own tracks are dropped (cas_pose.strip_bone) so the model does not move twice."""
+    pose = cas_pose.CasPose(cas)
+    by_name = {c.name: c for c in pose.clips}
+    out, moved = [], set()
+    for state, names in sorted(cas_graft.state_clips(cas)['main'].items()):
+        motions = [(n, cas_pose.root_motion(pose, by_name[n], ROBO_ROOT_BONE)) for n in names]
+        motions = [(n, m) for n, m in motions if m]
+        if not motions:
+            continue
+        if len(names) != 1:
+            raise ValueError(f'CAS state {state} moves the root over {len(names)} clips: the plugin follows one')
+        name, keys = motions[0]
+        if len(keys) > ROBO_MOST_MOTION_KEYS:
+            raise ValueError(f'clip {name}: {len(keys)} root motion keys, the plugin takes {ROBO_MOST_MOTION_KEYS}')
+        duration, _step, _frames = cas_pose.clip_info(pose, by_name[name])
+        out.append([state, float(duration), [round(v, 4) for k in keys for v in k]])
+        moved.add(name)
+    return out, moved
+
+
+def robo_fix(games: Games, files: dict[str, bytes]) -> None:
+    """UfoRobo401's files for the plugin's class (src/edf41robo.cpp):
+    - CAS: main gets `default` (EventAnimationObject's constructor plays it; 4.1's class starts in ship) as an alias of
+      ship; the root bone's tracks of the moving clips dropped (robo_motion);
+    - edf41_robo_events (robo_events), edf41_robo_motion (robo_motion); material_animation as [blob, slot] pairs (below);
+    - edf41_se: [[4.1 SEPRESET name, cue, volume, pitch, inner, reference, cull], ...] for every name the object plays (se_table, ragdoll_contact,
+      the MAB's se events, ROBO_CLASS_SE; se41_table's form, all of 4.1's ロボ* entries): EDF6's SEPRESET has none of 4.1's robot names (EDF6 ships the bank,
+      TIKYUU4_EN_UFOROBO.ACB, with every en_Robo_* cue, but no preset naming them), so the plugin plays the cues by name
+      with 4.1's volume and pitch; check_sounds holds each cue to the banks the object loads."""
+    rel = 'OBJECT/' + ROBO_ROOT
+    version, members = sgo.read(files[rel])
+    am = members['animation_model']
+    cas_rel = rel_of(am[1])
+    mab = mab_block(am[2])
+    cas = files[cas_rel]
+    # material_animation: 4.1's class drives its two lights itself (EDF41.exe 0x273FB2: blob 0 added with slot 0 and played
+    # looping from the start, blob 1 with slot 2 and played once at the death, 0x278DEB) from bare MTAB blobs, the form EDF6's
+    # material code faults on: [[blob, slot], ...] pairs here (material_pairs), which src/edf41robo.cpp hands to EDF6's own
+    # material animation player (0x6DBE90 / 0x6DC6B0, UfoCarrier508's); EventAnimationObject's constructor does not read the key.
+    members['material_animation'] = material_pairs(members['material_animation'], ROBO_MATERIAL_PAIRS)
+    members['edf41_robo_events'] = robo_events(cas, mab)
+    members['edf41_robo_motion'], moved = robo_motion(cas)
+    cas = cas_pose.strip_bone(cas, moved, ROBO_ROOT_BONE)
+    files[cas_rel] = cas_graft.alias_states(cas, {'main': [('default', 'ship')]})
+    table = se41_table(games, ROBO_SE_PREFIXES)
+    names = list(strings(members.get('se_table'))) + [members['ragdoll_contact'][0]] + list(ROBO_CLASS_SE)
+    names += [e[2] for _s, _n, keys in members['edf41_robo_events'] for e in keys if e[1] == ROBO_EVENTS['se']]
+    missing = sorted(set(names) - {e[0] for e in table})
+    if missing:
+        raise ValueError(f'{rel}: sounds {missing} are not in EDF4.1\'s SEPRESET.SGO')
+    # only what the robot plays: 4.1 also has ロボ３６０停止 (en_Robo_fire360_shotStop), which no MAB event or code plays and
+    # EDF6's bank lacks (check_sounds holds every edf41_se cue to the loaded banks)
+    members['edf41_se'] = [e for e in table if e[0] in set(names)]
+    files[rel] = sgo.write_depth_first(version, members)
+
+
+ROOTS[ROBO_ROOT] = 2   # M007 M411 (DLC pack 1's M415 / M416 and pack 2's M010 name the same story file)
+NATIVE_FIXES[ROBO_ROOT] = robo_fix   # no alias: build() runs it on the converted closure before the checks
 
 def alias(games: Games, root: str, files: dict[str, bytes], a: Alias) -> None:
     """In `files` (the converted closure of OBJECT/`root`): its SGO under class a.cls with a.template's keys it
@@ -1657,6 +1971,8 @@ class ClassNames:
 # The range's other strings are SGO keys, MAB event names and their parameters' keys, or another class's (ダメージ判定 at
 # 0x32DA55 is DeiroiFootParts_Toe's).
 CLASS_NAMES: dict[str, ClassNames] = {
+    # The plugin's own class (src/edf41robo.cpp): what it looks up by name (ROBO_STATES / ROBO_LOCATORS above).
+    'UfoRobo': ClassNames(states=ROBO_STATES, locators=ROBO_LOCATORS),
     'DragonSmall': ClassNames(
         states=('capture', 'damage_1', 'damage_2', 'damage_3', 'dead', 'down', 'fly', 'fly_attack', 'fly_begin',
                 'fly_damage_1', 'fly_damage_2', 'fly_damage_3', 'fly_damage_large', 'glide', 'glide_end', 'glide_fly',
@@ -2373,40 +2689,12 @@ def dlc_roots(games: Games) -> dict[str, int]:
     return dict(DLC_ROOTS)
 
 
-def mother_as_carrier(far: bool) -> tuple[dict, dict[str, bytes]]:
-    """The isolating experiment (`--mother-dev --mother-as-carrier`): UfoMother301 with EVERYTHING of the shipped 4.1 carrier
-    (model, CAS, ragdoll, material animation, keys: edf41port/objects/OBJECT/UFOCARRIER301.SGO) and only the class name changed.
-    Visible = the model data of the mothership is the problem; invisible = the object (the class, the cloned vtable, the route)
-    is. No file of its own: the carrier's are installed by every install."""
-    rel = 'OBJECT/' + MOTHER_DEV_ROOT
-    with open(os.path.join(FILES, 'OBJECT', 'UFOCARRIER301.SGO'), 'rb') as f:
-        version, members = sgo.read(f.read())
-    members['xgs_scene_object_class'] = 'UfoMother301'
-    if far:
-        members['UfoCarryer_EnableFarRender'] = 1
-        members['spawn_effect_setting'] = [0.0, 80.0, 80.0]
-    else:
-        members.pop('UfoCarryer_EnableFarRender', None)
-        members.pop('spawn_effect_setting', None)
-    files = {rel: sgo.write_depth_first(version, members)}
-    data = {'source': 'dev: the shipped UFOCARRIER301.SGO as UfoMother301 (tools/make_edf41_objects.py --mother-as-carrier)',
-            'objects': [{'object': rel, 'class': 'UfoMother301', 'missions': 6, 'files': [rel]}], 'skipped': [],
-            'files': {rel: hashlib.sha256(files[rel]).hexdigest()}, 'shared': {}}
-    return data, files
-
-
-def build(edf41: str, edf6: str, only: tuple[str, ...] = (), mother_dev: bool = False, mother_far: bool = True,
-          mother_carrier: bool = False) -> tuple[dict, dict[str, bytes]]:
-    """The whole conversion; `only` (SGO names like 'HECTOR301CC.SGO') limits it to those roots. `mother_dev`: the
-    development-only UfoMother301 prototype instead of the committed set (MOTHER_DEV_*: only that root)."""
-    if mother_dev and mother_carrier:
-        return mother_as_carrier(mother_far)
+def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict[str, bytes]]:
+    """The whole conversion; `only` (SGO names like 'HECTOR301CC.SGO') limits it to those roots."""
     games = Games(edf41, edf6)
-    roots = {MOTHER_DEV_ROOT: 6} if mother_dev else dict(ROOTS)
-    aliases = {MOTHER_DEV_ROOT: MOTHER_DEV_ALIAS} if mother_dev else ALIASES
     objects, skipped, files = [], [], {}
     shared: dict[str, str] = {}
-    for root, s in ({} if mother_dev else STAND_INS).items():
+    for root, s in STAND_INS.items():
         if only and root not in only:
             continue
         rel = 'OBJECT/' + root
@@ -2416,7 +2704,8 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = (), mother_dev: bool = 
             shared[r] = SHARED[r]
         objects.append({'object': rel, 'class': sgo.load(data=data).get('xgs_scene_object_class'),
                         'missions': ROOTS.get(root, 0), 'files': [rel] + need, 'stand_in': s.template})
-    if not mother_dev and (not only or set(only) & (set(DLC_ROOTS) | set(DLC_EXCLUDED))):
+    roots = dict(ROOTS)
+    if not only or set(only) & (set(DLC_ROOTS) | set(DLC_EXCLUDED)):
         roots.update(dlc_roots(games))
         skipped += [{'object': 'OBJECT/' + r, 'reason': why} for r, why in DLC_EXCLUDED.items()
                     if not only or r in only]
@@ -2436,19 +2725,23 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = (), mother_dev: bool = 
                 out[r] = files[r] if r in files else convert(games, r)
             except ValueError as e:
                 why.append(f'{r}: {e}')
-        if not why and root in aliases:
+        if not why and root in ALIASES:
             try:
-                alias(games, root, out, aliases[root])
-                if mother_dev:
-                    mother_dev_fix(out, mother_far)
+                alias(games, root, out, ALIASES[root])
+                if root in NATIVE_FIXES:
+                    NATIVE_FIXES[root](games, out)
             except ValueError as e:
-
-                why.append(f'alias {aliases[root].cls}: {e}')
+                why.append(f'alias {ALIASES[root].cls}: {e}')
+        if not why and root in NATIVE_FIXES and root not in ALIASES:   # a native class without an alias (UfoRobo, the 401)
+            try:
+                NATIVE_FIXES[root](games, out)
+            except ValueError as e:
+                why.append(f'native class: {e}')
         if not why and root in PATCHES:
             version, members = sgo.read(out[rel])
             PATCHES[root](members)
             out[rel] = sgo.write_depth_first(version, members)
-        if not why and root not in aliases:
+        if not why and root not in ALIASES:
             try:
                 check_materials(games, out, rel, {})
                 check_sounds(games, out[rel], rel)
@@ -2513,24 +2806,9 @@ def main() -> int:
     ap.add_argument('--out', help='write objects/ and objects.json under this folder instead of edf41port/')
     ap.add_argument('--only', action='append', default=[], metavar='SGO',
                     help='build only this root (HECTOR301CC.SGO; repeatable)')
-    ap.add_argument('--mother-as-carrier', action='store_true',
-                    help='with --mother-dev: UfoMother301 made of the shipped 4.1 carrier (model and all), only the class differs (isolates model data from object behaviour)')
-    ap.add_argument('--mother-no-far', action='store_true',
-                    help='with --mother-dev: leave the far-render keys out of the hull (the comparison build)')
-    ap.add_argument('--mother-dev', action='store_true',
-                    help='DEVELOPMENT ONLY: the UfoMother301 prototype, written to edf41port_dev/ '
-                         '(never to edf41port/, never part of a release)')
     a = ap.parse_args()
-    dev = a.mother_dev
-    if a.mother_no_far and not dev:
-        raise SystemExit('--mother-no-far goes with --mother-dev')
-    if a.mother_as_carrier and not dev:
-        raise SystemExit('--mother-as-carrier goes with --mother-dev')
-    if dev and (a.only or a.out):
-        raise SystemExit('--mother-dev takes no --only / --out: it writes edf41port_dev/ only')
-    data, files = build(a.edf41, a.edf6, tuple(r.upper() for r in a.only), mother_dev=dev, mother_far=not a.mother_no_far, mother_carrier=a.mother_as_carrier)
-    base = MOTHER_DEV_OUT if dev else a.out
-    out_json, out_files = (os.path.join(base, 'objects.json'), os.path.join(base, 'objects')) if base else (OUT, FILES)
+    data, files = build(a.edf41, a.edf6, tuple(r.upper() for r in a.only))
+    out_json, out_files = (os.path.join(a.out, 'objects.json'), os.path.join(a.out, 'objects')) if a.out else (OUT, FILES)
     shutil.rmtree(out_files, ignore_errors=True)
     for rel, b in rabpool.pack(files).items():   # archives as manifests over shared members (pylib/rabpool.py)
         path = os.path.join(out_files, *rel.split('/'))

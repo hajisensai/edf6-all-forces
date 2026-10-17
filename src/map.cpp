@@ -727,6 +727,7 @@ bool __fastcall MapHumanFrame(unsigned char* human) noexcept {
         const bool open=Frame(human);
         NpcMarkFrame(human,open && game.open);
         DebugSpawnFrame(human);   // the debug spawn tool (off by default: returns before reading a key)
+        Edf41Mother401DevTick();   // development only (Edf41Mother401Dev bit 32768); once a frame (the tick keeps its own frame check)
         InfantryScopeFrame(human);   // a scoped weapon open: the real optic's cue (infantryscope.cpp)
         return TvFrame(human,open && game.open,TvRead(human)) || open;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}

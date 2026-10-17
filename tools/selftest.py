@@ -4384,6 +4384,112 @@ def new_defaults_on_once() -> None:
     assert body.index('install_autoturret(') < body.index('make_stock_stores.remove('), 'its requests rewritten before the vehicles go'
 
 
+@test
+def edf41_clone_destructor_slot() -> None:
+    """The 4.1 classes' destructor wrappers sit on the stock classes' deleting destructor (src/edf41classes.h): slot 1, not 0.
+    Slot 0 of EventAnimationObject (0x5B6BB0) and UfoCarrier508 (0x54B010) takes a pointer in rdx and is no destructor; the
+    wrappers sat there until 2026-10-17 and never ran (a 401 run's log had no `hull ... destroyed`, 934 records left at the
+    exit). The slot the wrappers take must be a function of the deleting destructor's shape (flags from edx kept in ebx, then
+    `test bl,1 / je / mov edx,<the class's size>` and operator delete 0x12D85EC), checked at load (kDtors, BuildClone refuses
+    anything else) and, with the game present, on EDF.dll's own vtables. A destructor from inside the application destructor
+    calls nothing into the game: each class's shutdown callback released its sounds / players / effects first."""
+    header, shared = src('src/edf41classes.h'), src('src/edf41classes.cpp')
+    assert 'constexpr int kSlotDtor=1,kSlotUpdate=5,kSlotMessage=9;' in header
+    dtors = {int(r, 16): (int(t, 16), int(z, 16)) for r, t, z in
+             re.findall(r'\{(0x[0-9A-F]+),(0x[0-9A-F]+),(0x[0-9A-F]+)\},\s*// (?:EventAnimationObject|UfoCarrier508)',
+                        shared.split('kDtors[]={', 1)[1].split('};', 1)[0])}
+    assert dtors == {0x5B64F0: (0x5B651F, 0xC90), 0x4F8A70: (0x4F8AC7, 0x1630)}, dtors
+    sizes = {int(v, 16) for m in re.findall(r'kEaoSize=(0x[0-9A-F]+)|kCarrierSize=(0x[0-9A-F]+)', header) for v in m if v}
+    assert sizes == {0xC90, 0x1630}, sizes
+
+    def slots(name: str) -> list[int]:
+        body = shared.split(f'const std::uint32_t {name}[', 1)[1].split('};', 1)[0].split('{', 1)[1]
+        return [int(x, 16) for x in re.findall(r'0x[0-9A-F]+', body)]
+    eao, carrier = slots('kEaoSlots'), slots('kCarrierSlots')
+    assert eao[1] == 0x5B64F0 and carrier[1] == 0x4F8A70 and eao[0] == 0x5B6BB0 and carrier[0] == 0x54B010
+    prints = shared.split('constexpr Print kPrints[]={', 1)[1].split('};', 1)[0]
+    for rva in dtors:
+        assert '{0x%X,{' % rva in prints, f'the destructor 0x{rva:X} has no fingerprint'
+    assert '{0x5B6BB0,{' not in prints, 'slot 0 is fingerprinted as if it were the destructor'
+    build = shared.split('bool BuildClone(Clone& c,DtorFn dtor,UpdateFn update,MessageFn message) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'DtorShaped(c.rvas[kSlotDtor])' in build and build.index('DtorShaped(') < build.index('c.block[1+kSlotDtor]=')
+    for rel in ('src/edf41mother.cpp', 'src/edf41mother401.cpp', 'src/edf41robo.cpp'):
+        code = re.sub(r'//[^\n]*', '', src(rel))
+        assert 'orig[kSlotDtor]' in code and 'orig[0]' not in code and 'block[1]' not in code, rel
+        assert re.search(r'AtGameShutdown\(&\w+\);', code), f'{rel}: no shutdown callback'
+    # the shutdown: the callbacks first (the game whole), the flag after; the sound / material calls inert from then on
+    hook = shared.split('void __fastcall ShutdownHook(void* self) {', 1)[1].split('\n}', 1)[0]
+    assert hook.index('shutdownFns[i]()') < hook.index('shuttingDown=true;') < hook.index('kAppDtor')
+    for fn in ('void StopSound(SoundHandle& handle,int fadeFrames) noexcept {', 'void MoveSound(SoundHandle& handle,const float* pos) noexcept {',
+               'bool PlayCue(const wchar_t* cue,const float* pos,SoundHandle* handle,const SeParams& params) noexcept {',
+               'void MaterialAnimsFree(MaterialAnims& m) noexcept {'):
+        assert 'ShuttingDown()' in shared.split(fn, 1)[1].split('\n}', 1)[0], fn
+    robo = src('src/edf41robo.cpp')
+    assert 'if(!ShuttingDown())At<void(__fastcall*)(void*)>(kMatFree)(l.player+8);' in robo
+    assert 'AtGameShutdown(&ShutdownRobos);' in robo and 'Release(kv.second)' in robo.split('void ShutdownRobos() noexcept {', 1)[1].split('\n}', 1)[0]
+    m401 = src('src/edf41mother401.cpp').split('void ShutdownGlows() noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'StopSound(p.loopA,0); StopSound(p.loopB,0); StopSound(p.ambient,0);' in m401 and 'MaterialAnimsFree(p.mat);' in m401
+    m301 = src('src/edf41mother.cpp').split('void ShutdownVents() noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'StopSound(kv.second.fly,0);' in m301 and 'StopSound(kv.second.chargeLoop,0);' in m301
+
+    import rootcpk
+    dll = os.path.join(rootcpk.DEFAULT_GAME, 'EDF.dll')
+    if not os.path.exists(dll):
+        return
+    import pefile
+    pe = pefile.PE(dll, fast_load=True)
+    img = pe.get_memory_mapped_image()
+    base = pe.OPTIONAL_HEADER.ImageBase
+
+    def slot(vtable: int, i: int) -> int:
+        return int.from_bytes(img[vtable + 8 * i:vtable + 8 * i + 8], 'little') - base
+    eao_vt = int(re.search(r'kEaoVtable=(0x[0-9A-F]+)', header).group(1), 16)
+    carrier_vt = int(re.search(r'kCarrierVtable=(0x[0-9A-F]+)', header).group(1), 16)
+    for vtable, table in ((eao_vt, eao), (carrier_vt, carrier)):
+        for i, rva in enumerate(table):
+            assert slot(vtable, i) == rva, (hex(vtable), i, hex(slot(vtable, i)), hex(rva))
+        rva = table[1]
+        tail, size = dtors[rva]
+        head = img[rva:rva + 0x20]
+        assert b'\x8b\xda' in head, f'0x{rva:X}: the flags (edx) are not kept in ebx'
+        assert img[tail:tail + 10] == b'\xf6\xc3\x01\x74' + bytes([img[tail + 4]]) + b'\xba' + size.to_bytes(4, 'little'), hex(tail)
+        call = tail + 5 + 5 + 3   # je, mov edx / mov rcx,rdi, then the call
+        assert img[call] == 0xE8 and call + 5 + int.from_bytes(img[call + 1:call + 5], 'little', signed=True) == 0x12D85EC, hex(call)
+        zero = table[0]
+        assert img[zero:zero + 0x40].find(b'\xf6\xc3\x01') < 0, f'slot 0 0x{zero:X} looks like a destructor'
+
+
+@test
+def edf41_mother_parts_default_migrates() -> None:
+    """Edf41MotherParts shipped 15 (no 301 panels) in the nightlies from 2026-10-14 and ships 31 now: merge_ini keeps a
+    player's value, so an ini still at the old 15 is moved to 31 once by the installer's second defaults step (its own mark:
+    an ini that took the 10-07 step takes it too), a value the player chose is kept, and a later install changes nothing."""
+    import installer
+    ini, crew = src('EDF6VehicleCrew.ini'), src('src/crew.h')
+    assert re.search(r'^Edf41MotherParts=31$', ini, re.M) and 'int edf41MotherParts=31;' in crew
+    assert installer.NEW_DEFAULTS_1017[installer.SECTION] == {'Edf41MotherParts': ('15', '31')}
+    assert [m for m, _ in installer.DEFAULTS_STEPS] == [installer.DEFAULTS_MARK, installer.DEFAULTS_MARK_1017]
+    assert installer.DEFAULTS_MARK.split('：', 1)[0] != installer.DEFAULTS_MARK_1017.split('：', 1)[0]
+    old = f'[VehicleCrew]\n{installer.DEFAULTS_MARK}\nEnabled=1\nHeliLandMs=0\nEdf41MotherParts=15\n'
+    text, flipped = installer.apply_new_defaults(old)
+    assert flipped == ['Edf41MotherParts'], flipped
+    assert 'Edf41MotherParts=31' in text and 'HeliLandMs=0' in text, 'the 10-07 step was taken already: the player\'s 0 stays'
+    assert installer.DEFAULTS_MARK_1017 in text and text.count(installer.DEFAULTS_MARK) == 1
+    again = text.replace('Edf41MotherParts=31', 'Edf41MotherParts=15')
+    assert installer.apply_new_defaults(again) == (again, []), 'a later install undid the player\'s own 15'
+    mine = '[VehicleCrew]\nEnabled=1\nEdf41MotherParts=7 ; mine\n'
+    text, flipped = installer.apply_new_defaults(mine)
+    assert 'Edf41MotherParts' not in flipped and 'Edf41MotherParts=7 ; mine' in text and installer.DEFAULTS_MARK_1017 in text
+    # an ini from before both steps takes both
+    both = '[VehicleCrew]\nEnabled=1\nRescueAutoBoard=0\nEdf41MotherParts=15\n'
+    text, flipped = installer.apply_new_defaults(both)
+    assert sorted(flipped) == ['Edf41MotherParts', 'RescueAutoBoard'], flipped
+    assert installer.DEFAULTS_MARK in text and installer.DEFAULTS_MARK_1017 in text
+    # the install path goes through it (merge_ini keeps the player's 15, the step moves it)
+    planned = installer.planned_ini(old, ini)
+    assert re.search(r'^Edf41MotherParts=31$', planned[0], re.M) and 'Edf41MotherParts' in planned[3]
+
+
 def make_stock_stores_wanted(text: str) -> bool:
     import make_stock_stores
     return make_stock_stores.wanted(text)
@@ -7304,22 +7410,25 @@ def edf41_objects_shipped() -> None:
 
 @test
 def edf41_motherships_not_faked() -> None:
-    """docs/edf5-weapons-plan.md 8.1: EDF6 has no class that does UfoMother301 / UfoMother401's job (only the UfoMother511
-    family, a ring of units; 4.1's are part lists and a panel grid), so nothing of them is registered: no object of a
-    UfoMother class (an alias on 511 would be a look-alike), no 4.1 mothership SGO, and every mission script that names
-    one names a file the registry lacks, which is what keeps make_edf5_campaign.plan41 skipping it (a mission let through
-    would start without its ship). A native class landing makes this fail on purpose: delete it together with 8.1."""
+    """Both of 4.1's motherships are the plugin's own classes (UfoMother301: src/edf41mother.cpp; UfoMother401, the Earth
+    Eater, and its eleven part classes: src/edf41mother401.cpp), not stood in by an EDF6 class (EDF6's UfoMother511 family is a
+    ring of units, nothing like either): every mothership registered keeps 4.1's class name, the 401's parts keep theirs, and
+    every mission script that names a mothership names a registered file (make_edf5_campaign.plan41 lets them through)."""
     import edf41_objects as eo
     import make_edf5_campaign as mc
-    saved = os.environ.pop(eo.DEV_ENV, None)   # the development switch (edf41_mother_dev_isolated) is not this check's business
-    try:
-        reg = eo.registry()
-    finally:
-        if saved is not None:
-            os.environ[eo.DEV_ENV] = saved
+    import sgo
+    reg = eo.registry()
     assert reg['objects'], 'no object registered: this check is empty'
-    assert not [o['object'] for o in reg['objects'] if o['class'].startswith('UfoMother')], 'a mothership alias'
-    assert not [rel for rel in reg['files'] if rel.upper().startswith('OBJECT/UFOMOTHER')], 'a mothership file shipped'
+    mothers = {o['object']: o['class'] for o in reg['objects'] if o['class'].startswith('UfoMother')}
+    import make_edf41_objects as m
+    want = {'OBJECT/UFOMOTHER301.SGO': 'UfoMother301'}
+    want.update({'OBJECT/' + r: 'UfoMother401' for r in (*m.MOTHER401_ROOTS, *m.MOTHER401_DLC_ROOTS)})
+    assert mothers == want, sorted(set(mothers.items()) ^ set(want.items()))
+    parts = {sgo.load(data=eo.read(rel)).get('xgs_scene_object_class') for rel in reg['files']
+             if rel.endswith('.SGO') and 'UFOMOTHER401_' in rel} - {'UfoMother401'}   # the DLC hulls are UFOMOTHER401_DLC_*
+    assert parts == {'UfoMother401_' + c for c in ('Panel01', 'WeakPanel', 'Core', 'BigCannon01', 'Generator', 'FinalCannon01',
+                                                   'FinalGenerator', 'GunBattery_SmallLaser', 'GunBattery_Sniper',
+                                                   'GunBattery_PlasmaCannon', 'GunBattery_RapidCannon')}, parts
     named = {}
     root = os.path.join(ROOT, 'edf41port', 'missions')
     for mid in sorted(os.listdir(root)):
@@ -7330,115 +7439,483 @@ def edf41_motherships_not_faked() -> None:
     assert len(named) == 21, f'the missions naming a mothership changed: {sorted(named)}'
     for mid, refs in named.items():
         for ref in refs:
-            assert ('OBJECT/' + ref.rsplit('/', 1)[-1]).upper() not in reg['files'], (mid, ref)
-
-
-@test
-def edf41_mother_dev_isolated() -> None:
-    """The UfoMother301 prototype (docs/edf41-ufomother301.md phase 1) cannot reach a release: its data is built only by
-    `make_edf41_objects.py --mother-dev` into edf41port_dev/ (git-ignored; tools/build_release.py bundles the edf41port files
-    one by one and never names it); the committed registry and the generator's default roots have no mothership; the install
-    adds the dev objects only from the source tree with EDF41_MOTHER_DEV=1 and the folder present, never in the frozen
-    installer; the plugin's switch is off by default and the shipped ini says 0."""
-    import make_edf41_objects as m
-    import edf41_objects as eo
-    gitignore, release = src('.gitignore'), src('tools/build_release.py')
-    assert re.search(r'^edf41port_dev/$', gitignore, re.M), '.gitignore must list edf41port_dev/'
-    assert 'edf41port_dev' not in release, 'the release bundle must not name the development folder'
-    assert not re.search(r'"edf41port"\)\}\{seps\}', release), 'build_release must not bundle the whole edf41port folder'
-    assert not any('MOTHER' in r.upper() for r in m.ROOTS) and not any('MOTHER' in r.upper() for r in m.ALIASES)
-    assert os.path.basename(os.path.normpath(m.MOTHER_DEV_OUT)) == 'edf41port_dev' and m.MOTHER_DEV_ROOT == 'UFOMOTHER301.SGO'
-    assert not any('MOTHER' in rel.upper() for rel in json.load(open(os.path.join(ROOT, 'edf41port', 'objects.json'), encoding='utf-8'))['files'])
-    plugin, crew, ini = src('src/plugin.cpp'), src('src/crew.h'), src('EDF6VehicleCrew.ini')
-    assert 'bool edf41MotherDev=false;' in crew and 'ReadBool(L"Edf41MotherDev"' in plugin
-    assert re.search(r'^Edf41MotherDev=0$', ini, re.M), 'the shipped ini must say Edf41MotherDev=0'
-    saved = os.environ.pop(eo.DEV_ENV, None)
-    frozen = getattr(sys, 'frozen', None)
-    try:
-        assert not eo.dev_enabled(), 'no variable: no dev objects'
-        os.environ[eo.DEV_ENV] = '1'
-        sys.frozen = True   # type: ignore[attr-defined]
-        assert not eo.dev_enabled(), 'the frozen installer never adds dev objects'
-    finally:
-        if frozen is None:
-            del sys.frozen   # type: ignore[attr-defined]
-        else:
-            sys.frozen = frozen   # type: ignore[attr-defined]
-        os.environ.pop(eo.DEV_ENV, None)
-        if saved is not None:
-            os.environ[eo.DEV_ENV] = saved
+            rel = ('OBJECT/' + ref.rsplit('/', 1)[-1]).upper()
+            assert rel in reg['files'], (mid, ref)
+    for root in m.MOTHER401_DLC_ROOTS:
+        assert 'OBJECT/' + root in reg['files'], root
 
 
 @test
 def edf41_mother_plugin_contract() -> None:
     """src/edf41mother.cpp is built, installed and agrees with the data: the class name its factory answers with is the one the
-    generator's SGO carries, the dev switch gates the install, and every EDF.dll function it calls is checked against its
-    bytes (kPrints) before anything is hooked or called."""
+    generator's SGO carries (and the registry's), the ini switch Edf41Mother (on by default, shipped 1) gates the install, the
+    development folder and environment switch are gone, and every EDF.dll function it calls is checked against its bytes
+    (kPrints) before anything is hooked or called."""
+    import edf41_objects as eo
     import make_edf41_objects as m
     cpp, plugin, cmake = src('src/edf41mother.cpp'), src('src/plugin.cpp'), src('CMakeLists.txt')
     assert 'src/edf41mother.cpp' in cmake and 'InstallEdf41Mother();' in plugin
-    assert f'L"{m.MOTHER_DEV_ALIAS.cls}"' in cpp, 'the factory must answer with the class name the SGO carries'
-    assert 'if(!Cfg().edf41MotherDev)' in cpp.split('bool InstallEdf41Mother()', 1)[1].split('BuildClone', 1)[0]
-    for rva in ('kRegisterAllSite', 'kRegisterAll', 'kRegisterFactory', 'kNew', 'kCarrierCtor'):
-        assert re.search(rf'\{{{rva},\{{0x', cpp), f'{rva} has no fingerprint in kPrints'
-    assert cpp.count('Rd(') >= 8 and 'Readable(image+p.rva,8)' in cpp
+    assert f'L"{m.MOTHER301_ALIAS.cls}"' in cpp, 'the factory must answer with the class name the SGO carries'
+    assert m.ROOTS[m.MOTHER301_ROOT] and m.ALIASES[m.MOTHER301_ROOT] is m.MOTHER301_ALIAS
+    assert any(o['object'] == 'OBJECT/' + m.MOTHER301_ROOT and o['class'] == m.MOTHER301_ALIAS.cls
+               for o in eo.registry()['objects'])
+    assert 'if(!Cfg().edf41Mother)' in cpp.split('bool InstallEdf41Mother()', 1)[1].split('BuildClone', 1)[0]
+    crew, ini = src('src/crew.h'), src('EDF6VehicleCrew.ini')
+    assert 'bool edf41Mother=true;' in crew and 'ReadBool(L"Edf41Mother"' in plugin
+    assert re.search(r'^Edf41Mother=1$', ini, re.M) and re.search(r'^Edf41MotherParts=31$', ini, re.M)
+    assert not hasattr(eo, 'DEV_ENV') and not hasattr(m, 'MOTHER_DEV_OUT')
+    assert 'edf41port_dev' not in src('tools/build_release.py') + src('tools/installer.py')
+    shared = src('src/edf41classes.cpp')   # the factory registration and the clones (shared with the other 4.1 classes)
+    assert 'src/edf41classes.cpp' in cmake and '#include "edf41classes.h"' in cpp
+    for rva in ('kRegisterAllSite', 'kRegisterAll', 'kRegisterFactory', 'kNew', 'kCarrierCtor', 'kEaoCtor'):
+        assert re.search(rf'\{{{rva},\{{0x', shared), f'{rva} has no fingerprint in kPrints'
+    assert (cpp + shared).count('Rd(') >= 8 and 'Readable(image+p.rva,8)' in shared
+    # Real runs (2026-10-15): EventAnimationObject's slot 22 lets SetTeam set team 6 only, so the parts' clone must take
+    # GameObjectBase's (else no part is ever an enemy or gets a target); the hull's damage filter is 4.1's (slot 16)
+    assert 'AllowAnyTeam(partClass);' in cpp and 'SetSlot(c,22,image+kAnyTeam)' in shared
+    assert 'SetSlot(hullClass,kSlotAccept,' in cpp and 'kSlotAccept=16' in cpp
     # The DSGO accessors (0xD7480 ...) fault on a plain SGO such as this object's (EDF+0xD74D9, 2026-10-13): never called here.
-    code = re.sub(r'//[^\n]*', '', cpp)   # comments may name the accessors; the code must not call them
+    code = re.sub(r'//[^\n]*', '', cpp + shared)   # comments may name the accessors; the code must not call them
     assert not re.search(r'0xD7480|kChildByName|0x53060|0x52DE0|0x52F30|0x551E0', code)
-    assert m.MOTHER_DEV_ALIAS.template == 'E508_CARRIER.SGO' and 'UfoCarrier508' in cpp
+    assert m.MOTHER301_ALIAS.template == 'E508_CARRIER.SGO' and 'UfoCarrier508' in cpp
     # The clone is the stock class: built from the file's table, not the live one this plugin patches (carrierlaser.cpp
     # ShipAiHook takes slot 7 of the same vtable; the 2026-10-13 real run turned the prototype off on it).
-    stock = [int(x, 16) for x in re.search(r'kStockSlots\[kSlots\]=\{([^}]*)\}', cpp).group(1).replace('\n', ' ').split(',')]
+    stock = [int(x, 16) for x in re.search(r'kCarrierSlots\[49\]=\{([^}]*)\}', shared).group(1).replace('\n', ' ').split(',')]
     laser = src('src/carrierlaser.cpp')
     ai, slot = (int(re.search(rf'{k}=(\w+)', laser).group(1), 0) for k in ('kShipAi', 'kShipAiSlot'))
     assert len(stock) == 49 and stock[slot] == ai, (len(stock), slot)
-    assert 'GetModuleHandleExW' in cpp and 'is outside EDF.dll' not in cpp
 
 
 @test
-def edf41_mother_dev_registry_and_flag() -> None:
-    """With the switch on (variable, source tree, folder) edf41_objects.registry() holds the dev objects and read() takes
-    their bytes from the dev folder (what make_edf5_campaign.plan41 then lets M016 through on); set_dev_flag writes
-    Edf41MotherDev=1 / 0 into the game's ini and leaves every other line and a missing ini alone."""
-    import hashlib
+def edf41_mother301_finish_contract() -> None:
+    """The 301's 4.1 hit, death, states and glow (src/edf41mother.cpp, 2026-10-15) agree with EDF.dll and the data: every EDF.dll
+    function the finish calls is in kMotherPrints and the replaced slots (18 OnDamaged, 3 draw) are set only once they matched;
+    every 4.1 sound name the class plays or gives a bullet as its hit sound is in the hull SGO's edf41_se (else silence); every
+    CAS state the hull plays is in the hull's CAS; every model of the hull and its parts has the two material parameters the
+    glow binds (light0_color, scroll_light0); the shared Bullet carries its hit sound into InitParam +0x100 only when set; the
+    dev switch Edf41MotherForce takes bits 16, 32, 64, 128 and 256 (the bisect and compare switches) and ships 0."""
+    import cas_graft
     import edf41_objects as eo
-    payload = b'SGO dev object'
-    with tempfile.TemporaryDirectory() as tmp:
-        dev = os.path.join(tmp, 'dev')
-        os.makedirs(os.path.join(dev, 'objects', 'OBJECT'))
-        with open(os.path.join(dev, 'objects', 'OBJECT', 'UFOX.SGO'), 'wb') as f:
-            f.write(payload)
-        with open(os.path.join(dev, 'objects.json'), 'w', encoding='utf-8') as f:
-            json.dump({'objects': [{'object': 'OBJECT/UFOX.SGO', 'class': 'UfoMother301', 'missions': 1, 'files': ['OBJECT/UFOX.SGO']}],
-                       'files': {'OBJECT/UFOX.SGO': hashlib.sha256(payload).hexdigest()}, 'shared': {}, 'skipped': []}, f)
-        saved_dir, saved_env = eo.DEV_DIR, os.environ.get(eo.DEV_ENV)
-        try:
-            eo.DEV_DIR = dev
-            os.environ.pop(eo.DEV_ENV, None)
-            assert 'OBJECT/UFOX.SGO' not in eo.registry()['files']
-            os.environ[eo.DEV_ENV] = '1'
-            reg = eo.registry()
-            assert 'OBJECT/UFOX.SGO' in reg['files'] and reg['dev'] == ['OBJECT/UFOX.SGO'], reg.get('dev')
-            assert any(o['object'] == 'OBJECT/UFOX.SGO' for o in reg['objects'])
-            assert eo.read('OBJECT/UFOX.SGO') == payload
-            assert len(reg['objects']) == len(json.load(open(eo.REGISTRY, encoding='utf-8'))['objects']) + 1
-        finally:
-            eo.DEV_DIR = saved_dir
-            os.environ.pop(eo.DEV_ENV, None)
-            if saved_env is not None:
-                os.environ[eo.DEV_ENV] = saved_env
-        game = os.path.join(tmp, 'game')
-        assert eo.set_dev_flag(game, True) is None, 'no ini: nothing written'
-        path = os.path.join(game, eo.DEV_INI)
-        os.makedirs(os.path.dirname(path))
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write('[VehicleCrew]\nEdf41Ai=1\nEdf41MotherDev=0\n[Other]\nEdf41MotherDev=5\n')
-        assert eo.set_dev_flag(game, True) == path
-        text = open(path, encoding='utf-8').read()
-        assert 'Edf41MotherDev=1' in text and 'Edf41Ai=1' in text and '[Other]\nEdf41MotherDev=5' in text, text
-        assert eo.set_dev_flag(game, True) is None, 'already 1'
-        assert eo.set_dev_flag(game, False) == path and 'Edf41MotherDev=0' in open(path, encoding='utf-8').read()
-        assert eo.set_dev_flag(game, False) is None
+    import mdb
+    import sgo
+    cpp, shared, header = src('src/edf41mother.cpp'), src('src/edf41classes.cpp'), src('src/edf41classes.h')
+    prints = cpp.split('kMotherPrints[]={', 1)[1].split('};', 1)[0]
+    for rva in ('0x300C80', '0x2E8510', '0x1120820', '0x301290', '0x302200', '0x302EE0', '0x302D10', '0x12D85B0'):
+        assert '{' + rva + ',' in prints, f'particle emitter call {rva} unchecked'
+    # the emitters are on by default (bit 2048 = puffs instead); the exit crash once blamed on them was edf41sound's bank reference
+    # (fix/edf41-exit-crash, 2026-10-17): a dropped hull's emitters wait in the graveyard, then go through their own deleting
+    # destructor (vtable-checked, fingerprinted); what is left goes right before the application destructor
+    assert '(Cfg().edf41MotherForce&2048))return;' in cpp and '!(Cfg().edf41MotherForce&2048)' not in cpp
+    assert '{0x301460,' in prints and 'kEmitterVtable=0x17A8F70,kEmitterDelete=0x301460' in cpp
+    assert 'VentGraveyardTick();' in cpp and 'AtGameShutdown(&ShutdownVents);' in cpp
+    for name in ('kBindCtor', 'kBindDtor', 'kBind', 'kBindSet', 'kBindApply', 'kSetState', 'kUnregister'):
+        assert re.search(rf'\{{{name},\{{0x', prints), f'{name} has no fingerprint in kMotherPrints'
+    for rva in ('0x4F9250', '0x4F9530', '0x5B6D10'):
+        assert '{' + rva + ',' in prints, f'replaced stock slot {rva} unchecked'
+    install = cpp.split('bool InstallEdf41Mother()', 1)[1]
+    gated = install.split('if(MotherPrims()) {', 1)[1].split('}', 1)[0]
+    for slot in ('SetSlot(hullClass,kSlotDamaged,', 'SetSlot(hullClass,kSlotDraw,', 'SetSlot(partClass,kSlotDraw,'):
+        assert slot in gated, slot
+    assert 'kSlotDraw=3,kSlotDamaged=18' in cpp
+    base = os.path.join(ROOT, 'edf41port', 'objects', 'OBJECT')
+    with open(os.path.join(base, 'UFOMOTHER301.SGO'), 'rb') as f:
+        hull = sgo.load(data=f.read())
+    table = {e[0] for e in hull['edf41_se']}
+    code = re.sub(r'//[^\n]*', '', cpp)
+    names = set(re.findall(r'L"(母船UFO[^"]+)"', code))   # every 4.1 preset name the class plays or hands a bullet
+    assert len(names) >= 30 and not (names - table), sorted(names - table)
+    with open(os.path.join(base, 'UFOMOTHER301.CAS'), 'rb') as f:
+        states = cas_graft.states(f.read())['main']
+    played = set(re.findall(r'HullState\(self,L"(\w+)"\)', code)) | set(re.findall(r'big \? L"(\w+)" : L"(\w+)"', code)[0])
+    assert played == {'open', 'show', 'hide', 'close'} and played <= states, (played, states)
+    models = [x for x in mdb.rab_read(eo.read('OBJECT/UFOMOTHER301.MRAB')).files if x.name.lower().endswith('.mdb')]
+    assert len(models) == 6
+    for x in models:
+        md = mdb.mdb_read(x.data)
+        params = {p.name for mt in md.materials for p in mt.params}
+        assert {'light0_color', 'scroll_light0'} <= params, (x.name, sorted(params))
+    assert 'const wchar_t* hitSe=nullptr;' in header and 'bool FillSePreset(unsigned char* preset' in header   # unified with UfoRobo's (one definition, initialises the preset itself)
+    assert 'FillSePreset(param+0x100,b.hitSeTable,b.hitSe)' in shared
+    plugin, ini = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini')
+    assert 'ReadInt(L"Edf41MotherForce",n.edf41MotherForce),0,4095)' in plugin
+    assert re.search(r'^Edf41MotherForce=0$', ini, re.M) and '16 =' in ini.split('Edf41MotherForce=0', 1)[0].rsplit('Edf41MotherParts=31', 1)[1]
+    # the clamp keeps every bit the ini documents (2048 = the puffs: a cap of 2047 cut it, 2026-10-17 review)
+    doc = ini.split('Edf41MotherForce=0', 1)[0].rsplit('Edf41MotherParts=31', 1)[1]
+    top = max(int(b) for b in re.findall(r'(\d+) =', doc))
+    cap = int(re.search(r'ReadInt\(L"Edf41MotherForce",n\.edf41MotherForce\),0,(\d+)\)', plugin).group(1))
+    assert top == 2048 and cap == 2 * top - 1, (top, cap)
+
+
+@test
+def edf41_robo_registered() -> None:
+    """4.1's UfoRobo (the ship that turns into the robot アルゴ) is the plugin's own class (src/edf41robo.cpp): its SGO keeps
+    4.1's class name and keys, is registered with its closure, and is named by exactly the five missions it unlocks (story M007 /
+    M411, DLC pack 1 M415 / M416, pack 2 M010; make_edf5_campaign.plan41 skips a mission whose object file is not registered).
+    What robo_fix adds is there and agrees with the files: the CAS has `default` (EventAnimationObject's constructor plays it)
+    and every state the plugin plays, the moving clips' root bone has no track left (the plugin moves the object), every
+    edf41_robo_events state is a CAS state, every se event and class sound is an edf41_se name with 4.1's cue, and
+    material_animation is 4.1's two light blobs as [MTAB blob, slot] pairs (ROBO_MATERIAL_PAIRS; 4.1's bare blobs make EDF6's
+    material code fault; src/edf41robo.cpp hands the pairs to EDF6's material animation player)."""
+    import cas_graft
+    import cas_pose
+    import edf41_objects as eo
+    import make_edf41_objects as m
+    import make_edf5_campaign as mc
+    import mab_legacy
+    import sgo
+    reg = eo.registry()
+    rel = 'OBJECT/' + m.ROBO_ROOT
+    robo = [o for o in reg['objects'] if o['object'] == rel]
+    assert robo and robo[0]['class'] == 'UfoRobo' and m.ROOTS[m.ROBO_ROOT] == 2, robo
+    assert m.ROBO_ROOT not in m.ALIASES and m.NATIVE_FIXES[m.ROBO_ROOT] is m.robo_fix
+    assert sorted(robo[0]['files']) == sorted([rel, 'OBJECT/UFOROBO401.RAB', 'OBJECT/UFOROBO401.CAS',
+                                               'OBJECT/RAGDOLL_UFOROBO401_HAS_HKA.SHKT']), robo[0]['files']
+    naming = []
+    for base in ('missions', 'mp01/missions', 'mp02/missions'):
+        root = os.path.join(ROOT, 'edf41port', *base.split('/'))
+        for mid in sorted(os.listdir(root)):
+            for script in ('MISSION.BVM', 'BEFORE.BVM'):
+                path = os.path.join(root, mid, script)
+                if os.path.isfile(path):
+                    with open(path, 'rb') as f:
+                        if any(r.lower().endswith('uforobo401.sgo') for r in mc.asset_refs(f.read())):
+                            naming.append(f'{base.split("/")[0]}/{mid}')
+    assert sorted(set(naming)) == ['missions/M007', 'missions/M411', 'mp01/M415', 'mp01/M416', 'mp02/M010'], naming
+    top = sgo.load(data=eo.read(rel))
+    assert top['xgs_scene_object_class'] == 'UfoRobo'
+    ma = top['material_animation']
+    assert [e[1] for e in ma] == [slot for _i, slot in m.ROBO_MATERIAL_PAIRS] == [0, 2], ma
+    blobs = [bytes.fromhex(e[0][4:]) if isinstance(e[0], str) and e[0].startswith('raw:') else e[0] for e in ma]
+    assert all(isinstance(b, bytes) and b[16:20] == b'MTAB' for b in blobs), [type(e[0]) for e in ma]
+    for key in ('robo_attack_table', 'robo_small_muzzle_setting', 'robo_middle_muzzle_setting', 'robo_large_muzzle_setting',
+                'small_bullet_class', 'cannon_bullet_class', 'genocide_bullet_class', 'se_table', 'game_sound'):
+        assert key in top, key
+    assert len(top['robo_attack_table']) == 8 and top['game_object_durability'] == 12000.0
+    cas = eo.read('OBJECT/UFOROBO401.CAS')
+    states = cas_graft.states(cas)['main']
+    assert set(m.ROBO_STATES) <= states, sorted(set(m.ROBO_STATES) - states)
+    assert cas_graft.state_clips(cas)['main']['default'] == cas_graft.state_clips(cas)['main']['ship']
+    # root motion: one table per moving state, its clip's root bone without tracks
+    pose = cas_pose.CasPose(cas)
+    clips = cas_graft.state_clips(cas)['main']
+    motion = {s: (length, keys) for s, length, keys in top['edf41_robo_motion']}
+    assert set(motion) == {'walk_f_nl', 'walk_f_lr', 'walk_f_rl', 'walk_f_ln', 'walk_f_rn', 'walk_b_nl', 'walk_b_lr',
+                           'walk_b_rl', 'walk_b_ln', 'walk_b_rn', 'side_step_l', 'side_step_r', 'turn_l45', 'turn_r45',
+                           'turn_l90', 'turn_r90', 'turn_l180', 'turn_r180'}, sorted(motion)
+    by_name = {c.name: c for c in pose.clips}
+    for state, (length, keys) in motion.items():
+        clip = by_name[clips[state][0]]
+        assert all(t.translation == -1 and t.rotation == -1 for t in clip.tracks if t.name == m.ROBO_ROOT_BONE), state
+        assert len(keys) % 3 == 0 and len(keys) // 3 <= m.ROBO_MOST_MOTION_KEYS and length > 0, state
+        assert keys[:3] == [0.0, 0.0, 0.0], state
+    near = lambda a, b: abs(a - b) < 0.01
+    assert near(motion['walk_f_nl'][1][-2], 50.0) and near(motion['walk_b_lr'][1][-2], -100.0)
+    assert near(motion['side_step_l'][1][-3], 80.0) and near(motion['turn_l90'][1][-1], 1.5708)
+    assert near(motion['turn_r180'][1][-1], -3.1416)
+    # events: CAS states, known kinds, the MAB's own times
+    se = {e[0]: e for e in top['edf41_se']}
+    kinds = set(m.ROBO_EVENTS.values())
+    for state, clip, keys in top['edf41_robo_events']:
+        assert state in states and 0 <= clip < len(clips[state]) and len(keys) <= m.ROBO_MOST_EVENTS, state
+        for t, kind, text, a, b, c in keys:
+            assert kind in kinds, (state, kind)
+            if kind == m.ROBO_EVENTS['se']:
+                assert text in se, (state, text)
+    events = {(s, n): keys for s, n, keys in top['edf41_robo_events']}
+    hits = [k for k in events[('attack_stomp_r', 0)] if k[1] == m.ROBO_EVENTS['攻撃判定']]
+    assert hits and hits[0][2] == '右足歩行衝撃' and hits[0][3] == 40.0 and hits[0][4] == 3.0 and hits[0][5] == 2.0, hits
+    genocide = [k for k in events[('attack_fire_genocide', 0)] if k[1] == m.ROBO_EVENTS['ジェノサイド砲発射']]
+    assert genocide and genocide[0][3] == 346.0, genocide
+    mab = mab_legacy.mab_events(bytes.fromhex(top['animation_model'][2][4:]) if isinstance(top['animation_model'][2], str)
+                                else top['animation_model'][2])
+    assert ('砲撃開始', mab['attack_fire_cross'][2][1]) in mab['attack_fire_cross']
+    for name in list(top['se_table']) + list(m.ROBO_CLASS_SE) + [top['ragdoll_contact'][0]]:
+        assert name in se, name
+    assert se['ロボ駆動音'][1] == 'en_Robo_moveDriving' and se['ロボ飛行形態バスター砲チャージ'][3] == 1.5
+    assert all(len(e) == 7 and e[1].startswith(('en_Robo_', 'common_damages_')) for e in top['edf41_se'])
+    # CLASS_NAMES holds every shipped robot to the plugin's names
+    assert m.CLASS_NAMES['UfoRobo'].states == m.ROBO_STATES and m.CLASS_NAMES['UfoRobo'].locators == m.ROBO_LOCATORS
+
+
+@test
+def edf41_robo_plugin_contract() -> None:
+    """src/edf41robo.cpp is built, installed and agrees with the data: the factory answers with the SGO's class name, the
+    keys it reads are the ones robo_fix writes, its table limits are robo_fix's, the ini switch Edf41Robo (on, shipped 1)
+    gates it and its development switches ship off, it builds on EventAnimationObject's constructor with the HP block of
+    that class cleared and its durability sized by level (slot 6), the transform refuses damage, ObjectAction 0 / 1 / 2
+    follow 4.1, and every EDF.dll function the shared module calls for it is fingerprinted."""
+    import make_edf41_objects as m
+    cpp, plugin, cmake, crew = src('src/edf41robo.cpp'), src('src/plugin.cpp'), src('CMakeLists.txt'), src('src/crew.h')
+    shared, ini = src('src/edf41classes.cpp'), src('EDF6VehicleCrew.ini')
+    assert 'target_sources(EDF6VehicleCrew PRIVATE src/edf41robo.cpp)' in cmake and 'InstallEdf41Robo();' in plugin
+    assert 'bool InstallEdf41Robo() noexcept;' in crew and 'bool edf41Robo=true;' in crew and 'ReadBool(L"Edf41Robo"' in plugin
+    assert 'if(!Cfg().edf41Robo)' in cpp.split('bool InstallEdf41Robo()', 1)[1].split('BuildClone', 1)[0]
+    assert 'AddFactory(L"UfoRobo"' in cpp and 'CloneObject(roboClass,kEaoCtor,kEaoSize,info)' in cpp
+    assert re.search(r'^Edf41Robo=1$', ini, re.M)
+    for key, off in (('Edf41RoboLevel', '0'), ('Edf41RoboGunEvery', '0'), ('Edf41RoboAttack', '-1'), ('Edf41RoboPlace', '0'),
+                     ('Edf41RoboTransformAfter', '0')):
+        assert re.search(rf'^{key}={re.escape(off)}$', ini, re.M), key
+        assert f'L"{key}"' in plugin, key
+    for key in ('edf41_robo_events', 'edf41_robo_motion', 'robo_attack_table', 'robo_small_muzzle_setting',
+                'robo_middle_muzzle_setting', 'robo_large_muzzle_setting', 'small_bullet_custom_param',
+                'cannon_bullet_custom_param', 'genocide_bullet_custom_param'):
+        assert f'L"{key}"' in cpp, key
+    for name, value in (('kMostEvents', m.ROBO_MOST_EVENTS), ('kMostMotionKeys', m.ROBO_MOST_MOTION_KEYS)):
+        assert re.search(rf'constexpr int {name}={value};', cpp), name
+    for kind, value in m.ROBO_EVENTS.items():   # EventKind follows ROBO_EVENTS
+        assert re.search(rf'kEv\w+={value}', cpp), kind
+    assert 'SetFlag(obj,kNoHpLoss,false)' in cpp and 'SetSlot(roboClass,kSlotOnLevel' in cpp and 'SizeDurability(self)' in cpp
+    message = cpp.split('MessageWrap(void* self', 1)[1].split('\n}\n', 1)[0]
+    assert 'msg==kMsgDamage' in message and 'it->second.body==kS4)return 0;' in message
+    assert 'action==0' in message and 'action==1' in message and 'action==2' in message
+    # ObjectAction is never handed to EventAnimationObject's OnMessage (it throws without an `action` table: M411, 2026-10-15)
+    action = message.split('if(msg==kMsgAction', 1)[1].split('if(msg==kMsgDamage', 1)[0]
+    assert re.search(r'return 1;\s*\}\s*\}\s*$', action), action
+    assert 'AllowAnyTeam(roboClass);' in cpp
+    # the ground ray passes the robot's own ragdoll bodies (they lifted it on the M411 run)
+    assert 'GroundHit(knee,to,hit,ragdoll) || GroundHit(top,knee,hit,ragdoll)' in cpp
+    for name in m.ROBO_LOCATORS[:6] + ('左足歩行衝撃', '右足歩行衝撃', 'ロックオン'):
+        assert name in cpp or name.startswith('muzzle_'), name   # the muzzles come from the SGO's settings
+    for rva in ('kStateByName', 'kPlayStateIndex', 'kCastRay', 'kHitReset', 'kGroundAdd', 'kAddLockTarget', 'kWind', 'kQuake'):
+        assert re.search(rf'\{{{rva},\{{0x', shared), f'{rva} has no fingerprint'
+    code = re.sub(r'//[^\n]*', '', cpp)
+    assert not re.search(r'0xD7480|0x53060|0x52DE0|0x52F30', code), 'a DSGO accessor on a classic SGO'
+    assert 'std::min(' not in code and 'std::max(' not in code   # windows.h macros
+
+
+@test
+def edf41_net_contract() -> None:
+    """The EDF4.1 classes online (src/edf41net.h, docs/edf41-classes.md 联机): the layer is built and switched by Edf41Net
+    (shipped 1; the development loopback Edf41NetMirror shipped 0); every EDF.dll function it calls is fingerprinted; its tag
+    is none the game, coop (13 / 14) or the plugin's vehicles (15) use; it asks online_authority, never the session functions
+    itself; each class attaches its objects, gives its parts and spawns the game's child identity, and its guest copies leave
+    the decisions to the host (UfoRobo: no AI, no gun timer; 401: no attack start; 301: no cannon charge). The 401 runs on
+    every machine (its ObjectAction reached EventAnimationObject's OnMessage on a guest, which throws without `action`)."""
+    net, head = src('src/edf41net.cpp'), src('src/edf41net.h')
+    cmake, plugin, crew, ini = src('CMakeLists.txt'), src('src/plugin.cpp'), src('src/crew.h'), src('EDF6VehicleCrew.ini')
+    assert 'target_sources(EDF6VehicleCrew PRIVATE src/edf41net.cpp)' in cmake and 'add_test(NAME edf41net COMMAND edf41net_test)' in cmake
+    assert 'bool edf41Net=true;' in crew and 'bool edf41NetMirror=false;' in crew
+    assert 'ReadBool(L"Edf41Net"' in plugin and 'ReadBool(L"Edf41NetMirror"' in plugin
+    assert re.search(r'^Edf41Net=1$', ini, re.M) and re.search(r'^Edf41NetMirror=0$', ini, re.M)
+    assert 'bool Enabled() noexcept { return Cfg().edf41Net && Install(); }' in net
+    assert 'bool Mirror() noexcept { return Cfg().edf41NetMirror && Enabled() && !Online(); }' in net, 'the loopback is offline only'
+    tag = int(re.search(r'constexpr std::int8_t kTag=(\d+);', head).group(1))
+    assert tag not in (0, 1, 2, 3, 4, 5, 13, 14, 15) and -14 <= tag <= 15
+    for other in ('drill_net.h', 'proteus_net.h', 'sazabi_net.h'):
+        assert f'kTag={tag};' not in src('src/' + other), other
+    rvas = {d.split('=')[0].strip() for line in re.findall(r'^constexpr unsigned (.*);$', net, re.M) for d in line.split(',')}
+    # vtables (read, not called: their slots are checked by the native test) and the stock receiver (only called on; EDF6Coop
+    # hooks its entry, which turned the layer off on the real game when it was fingerprinted)
+    rvas -= {'kEaoNet', 'kCarrierNet', 'kStockReceive'}
+    assert len(rvas) >= 12, rvas
+    assert '{kStockReceive,{' not in net
+    for name in rvas:
+        assert re.search(rf'\{{{name},\{{0x', net), f'{name} has no fingerprint'
+    code = re.sub(r'//[^\n]*', '', net)
+    assert not re.search(r'0x7748F0|0x784210|0x630F90|0x630DF0', code), 'session / host / operator asked outside online_authority'
+    assert 'OnlineRunsHere(object)' in code and 'InSession()' in code
+    # the classes
+    robo, m401, m301 = src('src/edf41robo.cpp'), src('src/edf41mother401.cpp'), src('src/edf41mother.cpp')
+    for cpp in (robo, m401, m301):
+        assert '#include "edf41net.h"' in cpp and 'edf41net::Attach(obj);' in cpp
+    assert 'if(r.body<kS10 && !NetFollows(r))AiTick(r);' in robo
+    assert '!NetFollows(r) && --g.autoCount<=0' in robo and 'NetBody(r);' in robo.split('void BodySet(', 1)[1].split('\n}\n', 1)[0]
+    assert 'NetMirrorMake(self);' in robo and 'CreateFromPath(m,L"app:/object/UfoRobo401.sgo")' in robo
+    assert 'OnlineRunsHere(self)' not in re.sub(r'//[^\n]*', '', m401), 'the 401 runs on every machine'
+    for case in ('case sBcIdle:', 'case sFcIdle:', 'case sGbIdle: {'):
+        assert 'NetDecides(' in m401.split(case, 1)[1].split('case ', 1)[0], case
+    assert 'NetPanel(h,*p);' in m401 and 'NetBattery(p,*b,i);' in m401 and 'NetSpawn(p,o);' in m401 and 'edf41net::Pump(self);' in m401
+    assert 'NetEntered(p,netFrom,state);' in m401 and 'NetPartIn(*p);' in m401
+    assert 'if(!NetDecides(obj))break;' in m301.split('case kCanWait:', 1)[1].split('case ', 1)[0]
+    assert 'NetPart(hullObj,part,group,h.parts.size()-1);' in m301 and 'NetSpawn(p,enemy);' in m301 and 'edf41net::Pump(self);' in m301
+    for cpp in (robo, m401, m301):   # windows.h macros: the 4.1 class files use (std::min) / (std::max)
+        assert 'far' not in re.findall(r'\b(?:float|int|bool|auto)\s+(\w+)', re.sub(r'//[^\n]*', '', cpp))
+
+
+@test
+def edf41_robo_finish() -> None:
+    """UfoRobo phase 3 (docs/edf41-uforobo.md 2.2): the lock point is found where the shipped MAB keeps it (ロックオン in locator
+    list 1, the lock-on list; the muzzles and the stomp points in list 0) and src/edf41robo.cpp asks that list; the death is
+    OnDamaged's (slot 18) with EDF6's ragdoll activation; the stomps are EDF6's ApplyAreaDamage (no grenade stand-in); the
+    bullets carry 4.1's hit sounds (FireSe, InitParam +0x100) whose presets edf41_se holds; the foot IK reads ik_control_info,
+    which the shipped SGO keeps; every EDF.dll function the file calls itself has a fingerprint."""
+    import edf41_objects as eo
+    import make_edf41_objects as m
+    import mab_legacy
+    import sgo
+    top = sgo.load(data=eo.read('OBJECT/' + m.ROBO_ROOT))
+    mab = top['animation_model'][2]
+    mab = bytes.fromhex(mab[4:]) if isinstance(mab, str) and mab.startswith('raw:') else mab
+    lists = {loc.name: i for i, loc in mab_legacy.mab_locators(mab)}
+    assert lists.get('ロックオン') == 1, lists.get('ロックオン')
+    for name in m.ROBO_LOCATORS:
+        assert lists.get(name) == (1 if name == 'ロックオン' else 0), name
+    ik = top['ik_control_info']
+    assert [e[0] for e in ik] == ['toe_l', 'toe_r'] and [e[1] for e in ik] == ['v_ik_target_l', 'v_ik_target_r'], ik
+    se = {e[0] for e in top['edf41_se']}
+    cpp, shared, header = src('src/edf41robo.cpp'), src('src/edf41classes.cpp'), src('src/edf41classes.h')
+    assert 'p6::FindLocatorIn(Model(r.obj),1,L"ロックオン",&r.lockOn)' in cpp
+    assert 'SetSlot(roboClass,kSlotOnDamaged,reinterpret_cast<void*>(&OnDamagedWrap));' in cpp and 'kSlotOnDamaged=18' in cpp
+    # the transform refuses damage in slot 16 (every damage path asks it; the OnMessage check alone let hits through on M416)
+    accept = cpp.split('bool __fastcall AcceptWrap(void* self,void* gdi) {', 1)[1].split('return reinterpret_cast', 1)[0]
+    assert 'kSlotAccept=16' in cpp and 'it->second.body==kS4)return false;' in accept
+    assert 'SetSlot(roboClass,kSlotAccept,reinterpret_cast<void*>(&AcceptWrap));' in cpp
+    assert 'r.ragdoll=p6::RagdollOn(r.obj);' in cpp and 'p6::AreaDamage(r.obj,lifted,radius,damage,' in cpp
+    # the ragdoll goes back on the ragdoll layer first (EventAnimationObject's constructor put it on 0x11, which the ground ignores)
+    on = cpp.split('bool RagdollOn(void* object) noexcept {', 1)[1].split('return true;', 1)[0]
+    assert on.index('(kRagdollLayer)(rag,6)') < on.index('(kRagdollOn)(rag)'), on
+    # the stomp's circle: scale x the kind-0 locator's own radius (record +0x10), at the ground under it
+    assert 'std::memcpy(&size,rec+0x10,4);' in cpp and 'GroundHit(from,to,c,' in cpp
+    code = re.sub(r'//[^\n]*', '', cpp)
+    assert 'Blast(' not in code, 'the stomp still lets off the grenade stand-in'
+    assert 'bool FireSe(void* owner,const float* matrix,const Bullet& b,const void* seTable,const wchar_t* hitSe) noexcept;' in header
+    assert 'c.hitSe=hitSe;' in shared and 'FillRawCue(param+0x100,b.hitCue' in shared and 'FireSe(r.obj,mm,g.bullet,r.obj,g.hitSe)' in cpp
+    for name in re.findall(r'hitSe=L"([^"]+)"', cpp) + re.findall(r'chargeSe=L"([^"]+)"', cpp) + re.findall(r'shotSe=L"([^"]+)"', cpp):
+        assert name in se, name
+    assert len(re.findall(r'hitSe=L"', cpp)) == 4 and 'L"ik_control_info"' in cpp
+    # the lights: EDF6's material animation player on the model (+0x160), the loop at birth, the second entry at the death
+    assert 'p6::LightsStart(r.lights,r.obj,Key(o,L"material_animation"))' in cpp and 'p6::LightsPlay(r.lights,0,2)' in cpp
+    assert 'p6::LightsPlay(r.lights,1,1)' in cpp and 'p6::LightsEnd(r.lights);' in cpp.split('void Release(Robo& r) noexcept {', 1)[1].split('\n}', 1)[0]
+    assert 'Release(it->second);' in cpp.split('std::uint64_t __fastcall DtorWrap(', 1)[1].split('\n}', 1)[0]
+    prints = cpp.split('constexpr Print kPrints[]={', 1)[1].split('};', 1)[0]
+    for rva in re.findall(r'\b(k[A-Z]\w+)=0x[0-9A-F]+', cpp.split('namespace p6 {', 1)[1].split('struct Print', 1)[0]):
+        if rva in ('kInitParamBase', 'kEffects', 'kManager', 'kChargeVtable', 'kParticleParamVtable'):   # data, not code
+            continue
+        assert re.search(rf'\{{{rva},\{{0x', prints), f'{rva} has no fingerprint'
+
+
+@test
+def edf41_mother401_data() -> None:
+    """The 401 mothership's shipped data is what src/edf41mother401.cpp reads (tools/make_edf41_objects.py mother401_fix): every
+    variant (MOTHER401_ROOTS, MOTHER401_DLC_ROOTS) keeps 4.1's class and keys (action_list, panel_definition, the layout maps its
+    action_list names, 19 x 19) and has the model and ragdoll EventAnimationObject's constructor reads unchecked; every panel
+    definition names a shipped part SGO; every part SGO has a CAS whose main player has the state default (the constructor asks
+    for it), edf41_401_se parallel to se_table (cues of EDF6's own Earth Eater bank, 4.1's preset numbers), its muzzle / spawn
+    point / battery mounts where its class needs them, and a weakpoint body its ragdoll has."""
+    import cas_graft
+    import edf41_objects as eo
+    import make_edf41_objects as m
+    import sgo
+    reg = eo.registry()
+    files = set(reg['files'])
+    roots = ['OBJECT/' + r for r in (*m.MOTHER401_ROOTS, *m.MOTHER401_DLC_ROOTS)]
+    assert len(roots) == 17 and all(r in files for r in roots), [r for r in roots if r not in files]
+    parts: set[str] = set()
+    for rel in roots:
+        top = sgo.load(data=eo.read(rel))
+        assert top['xgs_scene_object_class'] == 'UfoMother401', rel
+        am, rd = top.get('animation_model'), top.get('ragdoll')
+        assert isinstance(am, list) and m.rel_of(am[0][0][0]) in files and m.rel_of(am[1]) in files, rel
+        assert isinstance(rd, list) and m.rel_of(rd[0]) in files, rel
+        defs = top['panel_definition']
+        for d in defs:
+            if isinstance(d[0], str):
+                assert m.rel_of(d[0]) in files, (rel, d[0])
+                parts.add(m.rel_of(d[0]))
+        maps = 0
+        for a in top['action_list']:
+            if a[0] == 0:
+                grid = top[a[1]]
+                assert len(grid) == 19 and all(len(row) == 19 for row in grid), (rel, a[1])
+                assert all(0 <= v < len(defs) for row in grid for v in row), (rel, a[1])
+                maps += 1
+            assert a[0] in range(8), (rel, a)
+        assert maps, rel
+        assert [x[0] for x in top['edf41_401_se']] == ['en_EE_ambient'], rel
+    for rel in list(parts):   # the batteries Panel01 hangs
+        for d in sgo.load(data=eo.read(rel)).get('parts_define', []):
+            if isinstance(d[0], str):
+                parts.add(m.rel_of(d[0]))
+    classes = set()
+    for rel in sorted(parts):
+        top = sgo.load(data=eo.read(rel))
+        cls = top['xgs_scene_object_class']
+        classes.add(cls)
+        am = top['animation_model']
+        cas = m.rel_of(am[1])
+        assert cas in files and 'default' in cas_graft.states(eo.read(cas)).get('main', set()), (rel, cas)
+        assert m.rel_of(top['ragdoll'][0]) in files, rel
+        se, table = top.get('edf41_401_se'), top.get('se_table')
+        assert isinstance(se, list) and len(se) == len(table), rel
+        for name, entry in zip(table, se):
+            assert (entry == 0) == (not isinstance(name, str)), (rel, name, entry)
+            assert entry == 0 or entry[0].startswith(('en_EE_', 'common_')), (rel, entry)
+        if cls in ('UfoMother401_BigCannon01', 'UfoMother401_FinalCannon01') or cls.startswith('UfoMother401_GunBattery_'):
+            assert len(top['edf41_401_muzzle']) == 3, rel
+        if cls in ('UfoMother401_Generator', 'UfoMother401_FinalGenerator'):
+            assert len(top['edf41_401_spawn']) == 3, rel
+        if 'parts_define' in top:
+            assert len(top['edf41_401_mounts']) >= 10, rel
+        if 'weakpoint' in top:
+            assert len(top['edf41_401_weak']) == 3, rel
+            assert m.ragdoll_body(eo.read(m.rel_of(top['ragdoll'][0])), top['weakpoint']), (rel, top['weakpoint'])
+        # the lock-on point (MAB list 1, ターゲット): every part that can be hurt has one, the Panel01 armour none (4.1's models)
+        if cls == 'UfoMother401_Panel01':
+            assert 'edf41_401_lock' not in top, rel
+        else:
+            assert len(top['edf41_401_lock']) == 3, rel
+        # the charge glows (MOTHER401_GLOWS): EDF6's ChargeEffect_StdParticle node per colour, 4.1's Particle3_k block
+        glows = top.get('edf41_401_charge')
+        assert (glows is not None) == (cls in m.MOTHER401_GLOWS), rel
+        for node, colour in zip(glows or [], m.MOTHER401_GLOWS.get(cls, ())):
+            assert node[1][0] == 'ChargeEffect_StdParticle' and node[1][1][0][-1] == [0, 'Particle3_k.dds'], rel
+            assert [round(float(c), 3) for c in node[1][1][0][13][1]] == list(colour), rel
+        if glows:
+            assert len(glows) == len(m.MOTHER401_GLOWS[cls]), rel
+    assert len(classes) == 11, classes
+
+
+@test
+def edf41_mother401_plugin_contract() -> None:
+    """src/edf41mother401.cpp is built and installed (its own CMake line, InstallEdf41Mother401 next to InstallEdf41Mother), gated
+    by the ini switch Edf41Mother401 (on, shipped 1; its development switches shipped 0), registers a factory for every class the
+    401 data carries, replaces the slots the shared clone machinery documents (16 the damage filter, 18 after the damage), and
+    every EDF.dll function the shared module calls for it has a fingerprint."""
+    import edf41_objects as eo
+    import sgo
+    cpp, plugin, cmake, crew, ini = (src(r) for r in ('src/edf41mother401.cpp', 'src/plugin.cpp', 'CMakeLists.txt', 'src/crew.h',
+                                                       'EDF6VehicleCrew.ini'))
+    assert 'target_sources(EDF6VehicleCrew PRIVATE src/edf41mother401.cpp)' in cmake
+    assert 'InstallEdf41Mother401();' in plugin and 'bool InstallEdf41Mother401() noexcept;' in crew
+    assert plugin.index('InstallEdf41Mother();') < plugin.index('InstallEdf41Mother401();')
+    assert 'bool edf41Mother401=true;' in crew and 'ReadBool(L"Edf41Mother401"' in plugin
+    assert re.search(r'^Edf41Mother401=1$', ini, re.M) and re.search(r'^Edf41Mother401Dev=0$', ini, re.M)
+    assert re.search(r'^Edf41Mother401Place=0$', ini, re.M)
+    assert 'if(!Cfg().edf41Mother401)' in cpp.split('bool InstallEdf41Mother401()', 1)[1].split('BuildClone', 1)[0]
+    classes = {sgo.load(data=eo.read(rel)).get('xgs_scene_object_class') for rel in eo.registry()['files']
+               if rel.endswith('.SGO') and 'UFOMOTHER401' in rel}
+    assert len(classes) == 12, classes
+    for cls in classes:
+        assert f'{{L"{cls}",' in cpp, f'no factory for {cls}'
+    assert 'SetSlot(partClone,kSlotAccept,' in cpp and 'SetSlot(partClone,kSlotDamaged,' in cpp and 'SetSlot(hullClone,kSlotAccept,' in cpp
+    # EventAnimationObject's slot 22 allows only team 6: without the replacement no SetTeam (CreateEnemy's, the parts') takes
+    assert 'AllowAnyTeam(hullClone);' in cpp and 'AllowAnyTeam(partClone);' in cpp
+    shared = src('src/edf41classes.cpp')
+    for rva in ('kSkeletonFromMatrix', 'kSetFarRender', 'kActivate', 'kSetTeam', 'kSetLevel', 'kGetTarget', 'kBodyById',
+                'kBodyByName', 'kCueLookup', 'kPresetPlay', 'kFlame', 'kExplosionBig', 'kDifficulty'):
+        assert re.search(rf'\{{{rva},\{{0x', shared), f'{rva} has no fingerprint'
+    assert 'kMaxDurabilityAt=0x2F4' in src('src/edf41classes.h')
+    code = re.sub(r'//[^\n]*', '', cpp)
+    assert not re.search(r'0xD7480|0x53060|0x52DE0|0x52F30|0x551E0', code)   # the DSGO accessors fault on a plain SGO
+    # online every machine runs it (edf41net; a guest's ObjectAction must not reach EventAnimationObject's OnMessage): edf41_net_contract
+    assert 'OnlineRunsHere(self)' not in code and 'edf41net::Pump(self);' in cpp
+    # the finishing pass (2026-10-15, docs/edf41-ufomother401.md): material animations, bullet hit sounds, lock-on points, the
+    # weak panel's light flashes, the charge glows and the hull's ragdoll out of the world; every new EDF.dll call fingerprinted
+    for rva in ('kMatCtor', 'kMatBind', 'kMatAdd', 'kMatPlay', 'kMatUpdate', 'kMatFree'):
+        assert re.search(rf'\{{{rva},\{{0x', shared), f'{rva} has no fingerprint'
+    for call in ('FireHit(', 'MaterialAnimsLoad(', 'MaterialAnimsFree(', 'AddLockPoint(', 'StencilLight(', 'SmallBurst(', 'Encount('):
+        assert call in cpp, call
+    assert 'kChargePrint' in cpp and 'kDisablePrint' in cpp and 'GraveyardTick();' in cpp
+    # the real-run pass (2026-10-16): the exit hook, the render job in the sync-render clone slot, the dev shooter at ordinary enemies;
+    # the charge glows are on (dev bit 4194304 turns them off): their exit crash was edf41sound's weapon bank reference, which is now
+    # given back through the game's BankRef release (0x7AAC80, fingerprinted) right before the application destructor
+    assert 'AtGameShutdown(&ShutdownGlows);' in cpp and 'PartSyncRender' in cpp and 'Edf41Mother401DevTick' in cpp
+    assert '!(DevBits()&4194304))GlowsMake(p)' in cpp and 'AtGameShutdown(' in src('src/edf41classes.h')
+    sound = src('src/edf41sound.cpp')
+    assert 'kBankRelease=0x7AAC80' in sound and '{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0x51,0x08}' in sound
+    assert 'edf41c::AtGameShutdown(&ReleaseWeaponBank);' in sound and 'weaponBankPtr.store(nullptr);' in sound
+    assert 'Edf41Mother401DevTick();' in src('src/map.cpp') and 'Edf41Mother401DevTick();' in src('src/crew.cpp')
+    assert re.search(r'^Edf41DevShoot=0$', ini, re.M)
 
 
 @test
@@ -7710,7 +8187,7 @@ def edf41_dlc_objects() -> None:
     """EDF4.1's DLC objects (make_edf41_objects.DLC_ROOTS: what the two mission packs' listed missions spawn, mp01:/ and
     mp02:/ in 4.1, under OBJECT/EDF41MP01/ and OBJECT/EDF41MP02/ here, pylib/edf41dlc.py): every root registered under its
     pack's folder and nothing else there, no shipped file naming a DLC mount (mp0N:/ would resolve to nothing in EDF6), no
-    UfoMother401 object (EDF6 has no class for 4.1's 401 mothership: M809 / MP503 stay unplayable, not faked), and every
+    pack object left out (DLC_EXCLUDED is empty: the 401 mothership of M809 / MP503 is the plugin's class), and every
     file a DLC object names is shipped by the registry or (games installed) EDF6's own, with the models it names inside
     the archive the game will load (DragonSmall401.mrab is EDF5's frog dragon in EDF6: the DLC's dragons ship 4.1's, moved
     into the pack's folder). With EDF4.1 installed, DLC_ROOTS is what the packs' mission scripts name."""
@@ -7728,7 +8205,8 @@ def edf41_dlc_objects() -> None:
         assert 'OBJECT/' + root in objects, f'DLC root {root} is not registered'
     pack_objects = {o for o in objects if m.pack_folder(o)}
     assert pack_objects == {'OBJECT/' + r for r in m.DLC_ROOTS}, sorted(pack_objects ^ {'OBJECT/' + r for r in m.DLC_ROOTS})
-    assert not any('UFOMOTHER401' in rel for rel in reg['files']), 'a 401 mothership file is registered'
+    assert not m.DLC_EXCLUDED, m.DLC_EXCLUDED
+    assert {'EDF41MP02/UFOMOTHER401_DLC_M809.SGO', 'EDF41MP02/UFOMOTHER401_DLC_MP503.SGO'} <= set(m.DLC_ROOTS)
     assert not set(m.DLC_EXCLUDED) & {o.split('/', 1)[1] for o in objects}
     mount = re.compile(rb'(?i)mp0\d:/|m\x00p\x000\x00\d\x00:\x00/\x00')
     for rel in reg['files']:
@@ -8379,7 +8857,8 @@ def edf41_story_pack_real() -> None:
     assert sum(r['map'].startswith('SK_') for r in rows41) >= 9
     assert any(r['path'] == 'M126' for r in rows41)
     skipped = {path: why for g, path, why in p['skipped'] if g == e5c.PACK41.group}
-    assert skipped and all('缺少' in why for why in skipped.values())
+    # 2026-10-15: the motherships (301, 401) and UfoRobo are the plugin's own classes: no story mission is left out any more
+    assert not skipped and len(rows41) == len(e5c.edf41_text()['missions']) == 89, skipped
     listed = dsgo.parse(files[e5c.PACK41.list]).root.get('table').items
     assert [r.items[2] for r in listed] == [f'EDF41/{r["path"]}' for r in rows41]
     for r in rows41:
