@@ -5797,6 +5797,56 @@ def edf5_campaign_plugin_sites() -> None:
 
 
 @test
+def ported_content_unlock_keys() -> None:
+    """PortedMissionsUnlocked / PortedWeaponsUnlocked (2026-10-17 user: 「给我4.1和5代的任务和装备全部解锁」): shipped 0 (a
+    shared package keeps everyone's progress), read by the plugin with false defaults, and added at 0 to an old ini by
+    merge_ini alone (no NEW_DEFAULTS migration). The weapon grant runs before the native DLC grant (its "equipped but not
+    owned" pass) and only for EDF6VC_E5_* / EDF6VC_E41_* rows, the prefixes of every registry; the mission unlock is the
+    mission select's one clear-check call, still a stock call to 0x8A4C00 in the supported EDF.dll."""
+    import ported_weapons as pw
+    shipped = src('EDF6VehicleCrew.ini')
+    for key in ('PortedMissionsUnlocked', 'PortedWeaponsUnlocked'):
+        assert re.search(rf'^{key}=0$', shipped, re.M), f'{key} must ship as 0'
+        assert key not in installer.NEW_DEFAULTS[installer.SECTION] and key not in installer.NEW_DEFAULTS_1017[installer.SECTION]
+        text, added, _ = installer.merge_ini('[VehicleCrew]\r\nEnabled=1\r\nEDF41Content=7\r\n', shipped)
+        assert key in added and f'\r\n{key}=0\r\n' in text, (key, added)
+        assert installer.merge_ini(text, shipped)[1] == [], 'merge is not idempotent'
+        mine = f'[VehicleCrew]\r\nEnabled=1\r\n{key}=1\r\n'
+        text, added, _ = installer.merge_ini(mine, shipped)
+        assert key not in added and f'\r\n{key}=1\r\n' in text and f'{key}=0' not in text, 'the player\'s 1 is kept'
+    crew = src('src/crew.h')
+    plugin = src('src/plugin.cpp')
+    assert 'bool portedMissionsUnlocked=false;' in crew and 'bool portedWeaponsUnlocked=false;' in crew
+    assert 'n.portedMissionsUnlocked=ReadBool(L"PortedMissionsUnlocked",n.portedMissionsUnlocked);' in plugin
+    assert 'n.portedWeaponsUnlocked=ReadBool(L"PortedWeaponsUnlocked",n.portedWeaponsUnlocked);' in plugin
+    assert 'InstallPortedMissions();' in plugin
+    header = src('src/unlock_ported.h')
+    prefixes = set(re.findall(r'L"(EDF6VC_E[0-9]+_)"', header))
+    assert prefixes == {g.prefix for g in pw.GAMES}, (prefixes, [g.prefix for g in pw.GAMES])
+    assert all(any(i.startswith(x) for x in prefixes) for i in pw.IDS) and len(pw.IDS) == 432, len(pw.IDS)
+    assert not any(pw.retired_id(i).startswith(tuple(prefixes)) for i in pw.IDS), 'a placeholder would be granted'
+    assert not any(c.startswith(tuple(prefixes)) for c in calls.IDS)
+    air = src('src/airstrike.cpp')
+    hook = air.split('void __fastcall UnlockDlcHook(unsigned char* gs) {', 1)[1].split('\n}\n', 1)[0]
+    assert hook.index('GrantCalls(gs,ported)') < hook.index('(image+kUnlockDlc)(gs)'), 'grant before the native step'
+    assert 'Cfg().portedWeaponsUnlocked' in hook
+    grant = air.split('Granted GrantCalls(unsigned char* gs,bool ported) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert '&=' not in grant and '~' not in grant, 'the grant never clears a bit'
+    camp = src('src/edf5campaign.cpp')
+    assert 'constexpr unsigned kListScan=0x8A21C3;' in camp and 'constexpr unsigned kCleared=0x8A4C00;' in camp
+    assert 'ported::StoryPack(content,cfg.edf5CampaignContent,cfg.edf41Content)' in camp, 'the six story packs only'
+    assert 'cfg.portedMissionsUnlocked' in camp
+    if not _e5c_have_game():
+        return
+    import pefile
+    import rootcpk
+    pe = pefile.PE(os.path.join(rootcpk.DEFAULT_GAME, 'EDF.dll'), fast_load=True)
+    img = pe.get_memory_mapped_image()
+    at = 0x8A21C3
+    assert img[at] == 0xE8 and at + 5 + int.from_bytes(img[at + 1:at + 5], 'little', signed=True) == 0x8A4C00
+
+
+@test
 def edf5_campaign_thumbnails() -> None:
     """Every EDF5 mission in the text has EDF5's own thumbnail in THUMBS (no game needed: the file is committed), each a
     440x220 DXT1 DDS like EDF6's; pick_thumbs gives a mission its own pack's one (EDF5's, or EDF4.1's for the 4.1 story:
