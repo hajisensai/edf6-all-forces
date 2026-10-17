@@ -7973,6 +7973,85 @@ def edf41_mother401_plugin_contract() -> None:
 
 
 @test
+def edf41_mother401_parts_take_the_hull_level() -> None:
+    """The Earth Eater's parts are as tough, and their guns as strong / accurate / fast, as the hull's level makes them
+    (docs/feedback-2026-10-17-eartheater.md): 4.1 gives every panel the hull's effective level (+0x490, which the hull's slot 3
+    copies from SetLevel's +0x25c) and Panel01 hands it to its batteries; HP = durability x level / 10 x the difficulty rows,
+    the bullet blocks use the same s. The port once took s = 1 on every difficulty (its notes read +0x490 as never written):
+    on Inferno a 16000 core had 16000 HP where 4.1 gives 260 000-450 000. The plugin records the hull's EDF6 level (+0x49C) on
+    each panel and battery and sizes both from it. With EDF4.1 installed the 4.1 path is checked byte for byte; with EDF6 too,
+    the claim the fix rests on: EDF6's story difficulty ranges put the Earth Eater missions' s within 10 % of 4.1's."""
+    cpp = re.sub(r'//[^\n]*', '', src('src/edf41mother401.cpp'))
+    assert 'float level=10.0f;' in cpp, 'Part has no level'
+    make_panel = cpp.split('void* MakePanel(Part& h,Cell& c,', 1)[1].split('\n}\n', 1)[0]
+    assert 'p->level=LevelS(h.obj)*10.0f;' in make_panel, 'a panel must take the hull\'s level (4.1 0x25fbb6)'
+    batteries = cpp.split('void MakeBatteries(Part& p) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'b->level=p.level;' in batteries, 'a battery must take its panel\'s level (4.1 0x26ebb0)'
+    init = cpp.split('void InitPart(Part& p) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'const float s=p.level/10.0f;' in init and 'Difficulty(base*s)' in init, 'HP must be durability x s x difficulty'
+    assert not re.search(r'Difficulty\(base\)', cpp), 'HP without the level is what the players saw as wrong'
+    bullets = cpp.split('void SetupBullets(Part& p) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'const float s=p.level/10.0f;' in bullets and 'const float s=1.0f;' not in cpp
+    assert 'kLevelAt=0x49C' in src('src/edf41classes.h')
+
+    import rootcpk
+    steam = os.path.dirname(rootcpk.DEFAULT_GAME)
+    exe = os.path.join(steam, 'Earth Defense Force 4.1', 'EDF41.exe')
+    if not os.path.exists(exe):
+        print('skip  edf41_mother401_parts_take_the_hull_level (4.1 code, rows): EDF4.1 not installed')
+        return
+    import pefile
+    pe = pefile.PE(exe, fast_load=True)
+    img = pe.get_memory_mapped_image()
+    base = pe.OPTIONAL_HEADER.ImageBase
+
+    def slot(vtable: int, i: int) -> int:
+        return int.from_bytes(img[vtable + 8 * i:vtable + 8 * i + 8], 'little') - base
+
+    def at(rva: int, hexbytes: str) -> None:
+        assert img[rva:rva + len(hexbytes) // 2].hex() == hexbytes, f'EDF41.exe 0x{rva:X}: not the code these notes read'
+    at(0x28EB44, 'c644244808' 'f30f11835c020000')        # SetLevel: +0x25c = the difficulty-scaled level, then flag 8 ...
+    at(0x56B973, 'f6c208740f' '488b01' 'ff5018')         # ... whose first setting calls slot 3
+    assert slot(0xA9A868, 3) == 0x261BF0                 # UfoMother401's slot 3:
+    at(0x261BF0, '8b815c020000' '898190040000' 'b001c3')  # +0x490 = +0x25c (the notes said +0x490 is never written)
+    at(0x25FBB6, 'f30f108e90040000' '498bcf' 'e82afe0000')  # the layout: panel 0x26f9f0(hull +0x490)
+    at(0x26FA0A, 'f30f5e057e6d8400')                     # level / 10.0 ...
+    at(0x26FA25, 'f30f598360010000')                     # ... x durability, then the rows, max and current, slot 29
+    at(0x26FA90, 'f30f118368010000' 'f30f11836c010000' '4883c4205b' '48ffa0e8000000')
+    assert slot(0xA9BDA0, 29) == 0x26EBB0                # Panel01's slot 29 hands the level to each battery ...
+    at(0x26EC19, '0f28ce' 'e85faeffff')                  # ... 0x269a80, the batteries' own: / 10, x durability, slot 28
+    at(0x269B20, 'f30f118368010000' 'f30f11836c010000' '4883c4205b' '48ffa0e0000000')
+    for vtable, setup in ((0xA9B8A8, 0x26A560), (0xA9BBF8, 0x26AFC0), (0xA9BA50, 0x26BA30), (0xA9B558, 0x26C6A0)):
+        assert slot(vtable, 28) == setup, hex(vtable)   # SmallLaser / Sniper / PlasmaCannon / RapidCannon bullet blocks
+
+    if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'EDF.dll')):
+        print('skip  edf41_mother401_parts_take_the_hull_level (rows against EDF6): EDF6 not installed')
+        return
+    import struct
+    import sgo
+    import make_edf41_objects as m
+
+    def story_rows(game: str) -> list[tuple[float, float]]:
+        cfg = sgo.read(rootcpk.Game(game).read('DEFAULTPACKAGE', 'CONFIG.SGO'))[1]['ModeList']
+        mode = next(e for e in cfg if e[0] == 'GameMode_Scenario')
+        rows = next(x for x in mode if isinstance(x, list) and x and isinstance(x[0], list) and isinstance(x[0][0], list))
+        f = lambda v: struct.unpack('<f', v.raw)[0] if isinstance(v, sgo.Float) else float(v)
+        return [(f(r[0][0]), f(r[0][1])) for r in rows]
+    g41 = os.path.dirname(exe)
+    r41, r6 = story_rows(g41), story_rows(rootcpk.DEFAULT_GAME)
+    order = [r[1] for r in sgo.plain(sgo.read(rootcpk.Game(g41).read('MISSION', 'MISSIONLIST.SGO'))[1])['table']]
+    with open(os.path.join(ROOT, 'edf41port', 'missions.json'), encoding='utf-8') as fh:
+        assert [x['id'] for x in json.load(fh)['missions']] == order, 'the 4.1 pack is not in 4.1\'s order: its progress differs'
+    eater = ('M009', 'M012', 'M018', 'M019', 'M132', 'M142', 'M145', 'M149', 'M201', 'M308', 'M312', 'M412', 'M516', 'M518', 'M602')
+    assert len(m.MOTHER401_ROOTS) == len(eater), 'the Earth Eater missions changed'
+    for mid in eater:
+        t = order.index(mid) / (len(order) - 1)
+        for (a41, b41), (a6, b6) in zip(r41, r6):
+            l41, l6 = a41 + (b41 - a41) * t, a6 + (b6 - a6) * t
+            assert abs(l6 / l41 - 1.0) <= 0.10, (mid, l41, l6)
+
+
+@test
 def edf41_anthill_voxel_body() -> None:
     """4.1's ant nest under EDF6's AntHill (2026-10-13, M115 on the real game): the class builds a voxel-destruction
     body from animation_model[3] and the first hit dereferences it unchecked (EDF+0x4EB8D7 loads this+0x848, 0x6CAF22
