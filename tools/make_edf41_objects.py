@@ -35,8 +35,12 @@ same way (their shadowed model and CAS move with them); every 4.1 script names t
 STOCK_OVERRIDES: objects EDF6's archives hold, left over from 4.1 (EDF6's own missions never spawn them), whose class
 EDF6 has since changed: the stock file lacks keys the class reads unchecked and crashes on spawn (Transporter401_
 Formation: se_preset_list, EDF+0x5E9A90, M-P003 2026-10-13). Such a root is built like any other (4.1's SGO under an
-EDF6 template of the class) and shipped under the same Mods path, so it replaces the stock file. build() checks every
-SGO the 4.1 missions spawn (spawned_objects) that EDF6's archives serve: stale_stock refuses one that is not replaced.
+EDF6 template of the class) and shipped under the same Mods path, so it replaces the stock file.
+
+STOCK_COMPLETIONS: stock SGOs in EDF6's own form that name a file only 4.1 ships (Monster501_King: its model archive,
+the null model at EDF+0x1100303, MP004 2026-10-17). The stock SGO stays; those files come over converted, registered
+under 'stock_completions'. build() checks every SGO the 4.1 missions spawn (spawned_objects) that EDF6's archives
+serve: stale_stock refuses one that is neither replaced nor completed.
 """
 from __future__ import annotations
 
@@ -96,6 +100,13 @@ STOCK_EXEMPT: dict[str, str] = {
 STOCK_OVERRIDES: dict[str, str] = {
     'TRANSPORTER401_FORMATION.SGO': "no se_preset_list: Transporter_Formation's constructor passes it unchecked to the "
                                     "sound system (EDF+0x5E9A90 -> 0x5E4760 -> 0x7B3310 -> 0x240AD3, a null fault)",
+}
+# Stock SGOs EDF6 has already brought into its own form (keys, MAB, CAS) that name a file only 4.1 ships: the stock
+# SGO stays, the files it lacks come over converted (completion). root -> what failed without them.
+STOCK_COMPLETIONS: dict[str, str] = {
+    'MONSTER501_KING.SGO': "names app:/object/Monster501_King.rab, which no EDF6 archive holds: Monster501's setup "
+                           "(EDF+0x6BB890) finds no model (0x6BC218), passes the null to the model instance "
+                           "(0x11002D0), which faults reading it (EDF+0x1100303; MP004, testhub #17, 2026-10-17)",
 }
 
 # The DLC objects EDF4.1's two mission packs spawn (pylib/edf41dlc.py: <EDF4.1>/DLC/<hash>/dlc.cpk, mounted mp01: /
@@ -1434,6 +1445,12 @@ class Games:
         """A file EDF4.1 has at Mods path `rel`: its own archives, a DLC pack's, or a shadowed story file moved."""
         return rel in self.in4 or rel in self.in4dlc or rel in self.moved
 
+    def lacks(self, rel: str) -> bool:
+        """A file `rel` (a Mods path an SGO names) the game cannot load that 4.1 has: a file (not a folder prefix),
+        not a sound bank (loose files: closure checks those), not in EDF6's archives. What closure ships."""
+        return (bool(os.path.splitext(rel)[1]) and not rel.endswith('.ACB') and rel not in self.have6
+                and self.has4(rel))
+
     def stock_by_class(self) -> dict[str, dict[str, dict]]:
         """EDF6's own top-level SGOs by xgs_scene_object_class: {class: {OBJECT/<name>: members}} (read once)."""
         if self._stock is None:
@@ -2526,17 +2543,23 @@ def spawned_objects(games: 'Games') -> set[str]:
 
 
 def stale_stock(stock: dict[str, dict[str, dict]], spawned: set[str], overridden: set[str],
-                proven: set[str]) -> list[str]:
+                proven: set[str], only41: Callable[[str], bool] = lambda rel: False) -> list[str]:
     """The stock EDF6 SGOs (`stock`: stock_by_class) among `spawned` that this port neither replaces (`overridden`) nor
-    can show to load, as 'rel: lacks [keys]' / 'rel: no sibling to test': the class reads its keys by name and several
-    dereference a miss unchecked, so a file lacking a key every OTHER stock SGO of its class has is a leftover its
-    class cannot load (Transporter401_Formation, no se_preset_list: EDF6's own missions never spawn it, its sibling
-    has the key). `proven` (SGOs EDF6's own missions spawn, directly or through the files they name) are loaded by
-    the game, so they pass: that is the only evidence for a class with a single member."""
+    can show to load, as 'rel: names [files]' / 'rel: lacks [keys]' / 'rel: no sibling to test': the class reads its
+    keys by name and several dereference a miss unchecked, so a file lacking a key every OTHER stock SGO of its class
+    has is a leftover its class cannot load (Transporter401_Formation, no se_preset_list: EDF6's own missions never
+    spawn it, its sibling has the key). So is one naming a file the game cannot load that 4.1 has (`only41`:
+    Games.lacks), whatever its keys: a model archive only 4.1 ships leaves the class a null model (Monster501_King,
+    keys as its sibling's: EDF+0x1100303). `proven` (SGOs EDF6's own missions spawn, directly or through the files
+    they name) are loaded by the game, so they pass: that is the only evidence for a class with a single member."""
     out: list[str] = []
     for cls, members in sorted(stock.items()):
         for rel, mine in sorted(members.items()):
             if rel not in spawned or rel in overridden or rel in proven:
+                continue
+            absent = sorted(r for r in {ref_rel(s) for s in strings(mine) if is_ref(s)} if only41(r))
+            if absent:
+                out.append(f'{rel}: class {cls} names {absent}, which only EDF4.1 has')
                 continue
             others = [set(m) for r, m in members.items() if r != rel]
             if not others:
@@ -3376,20 +3399,53 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
         objects.append({'object': rel, 'class': cls, 'missions': uses, 'files': list(out),
                         **({'class_keys_from': filled} if filled else {}),
                         **({'replaces_stock': STOCK_OVERRIDES[root]} if root in STOCK_OVERRIDES else {})})
-    if not only:   # every stock SGO the 4.1 missions spawn is one EDF6 loads, or replaced above
-        stale = stale_stock(games.stock_by_class(), spawned_objects(games), {o['object'] for o in objects},
-                            proven_stock(games))
+    completions = []
+    for root, why in STOCK_COMPLETIONS.items():
+        if only and root not in only:
+            continue
+        rel = 'OBJECT/' + root
+        out = complete_stock(games, rel)
+        clash = [r for r in out if r in files and files[r] != out[r]]
+        if clash:
+            raise ValueError(f'{rel}: files another object needs differently: {clash}')
+        files.update(out)
+        completions.append({'object': rel, 'class': sgo.load(data=games.read6(rel)).get('xgs_scene_object_class'),
+                            'files': list(out), 'completes_stock': why})
+    if not only:   # every stock SGO the 4.1 missions spawn is one EDF6 loads, or replaced / completed above
+        stale = stale_stock(games.stock_by_class(), spawned_objects(games),
+                            {o['object'] for o in objects + completions}, proven_stock(games), games.lacks)
         stale = [s for s in stale if s.split(':')[0] not in STOCK_EXEMPT]
         if stale:
-            raise ValueError('EDF6 archives serve SGOs the 4.1 missions spawn that its classes cannot load '
-                             '(add the root to ROOTS / ALIASES with STOCK_OVERRIDES):\n  ' + '\n  '.join(stale))
+            raise ValueError('EDF6 archives serve SGOs the 4.1 missions spawn that its classes cannot load (add the '
+                             'root to ROOTS / ALIASES with STOCK_OVERRIDES, or to STOCK_COMPLETIONS):\n  '
+                             + '\n  '.join(stale))
     hashes = {r: hashlib.sha256(b).hexdigest() for r, b in files.items()}
     for r, path in shared.items():
         with open(os.path.join(HERE, '..', *path.split('/')), 'rb') as f:
             hashes[r] = hashlib.sha256(f.read()).hexdigest()
-    data = {'source': 'EDF4.1 Root.cpk and its DLC packs; tools/make_edf41_objects.py', 'objects': objects, 'skipped': skipped,
-            'files': dict(sorted(hashes.items())), 'shared': shared}
+    data = {'source': 'EDF4.1 Root.cpk and its DLC packs; tools/make_edf41_objects.py', 'objects': objects,
+            'stock_completions': completions, 'skipped': skipped, 'files': dict(sorted(hashes.items())),
+            'shared': shared}
     return data, files
+
+
+def complete_stock(games: Games, rel: str) -> dict[str, bytes]:
+    """The files the stock SGO `rel` (STOCK_COMPLETIONS) names that only 4.1 has (Games.lacks), converted. ValueError
+    when it names none (nothing to complete), when one is an SGO (that would be an object of its own: a root), or when
+    a model archive it names lacks the MDB it names there (the class would get the null model all the same)."""
+    members = sgo.load(data=games.read6(rel))
+    need = sorted(r for r in {ref_rel(s) for s in strings(members) if is_ref(s)} if games.lacks(r))
+    if not need:
+        raise ValueError(f'{rel}: names no file only 4.1 has; STOCK_COMPLETIONS has nothing to complete')
+    if any(r.endswith('.SGO') for r in need):
+        raise ValueError(f'{rel}: names SGOs only 4.1 has ({need}): port it as a root (STOCK_OVERRIDES)')
+    out = {r: convert(games, r) for r in need}
+    for rab, name in [(e[0], e[1]) for e in model_entries((members.get('animation_model') or [None])[0])
+                      if len(e) > 1 and isinstance(e[0], str) and isinstance(e[1], str) and is_ref(e[0])]:
+        r = ref_rel(rab)
+        if r in out and not any(f.name.lower() == name.lower() for f in mdb.rab_read(out[r]).files):
+            raise ValueError(f'{rel}: {r} has no {name}, which its animation_model names')
+    return out
 
 
 def main() -> int:

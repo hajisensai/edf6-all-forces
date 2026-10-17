@@ -72,6 +72,12 @@ def _not_ours(led: ledger.Ledger, rel: str, sha: str) -> bool:
     return bool(others) and sha256_file(led.disk(rel)) != sha
 
 
+def entries(reg: dict) -> list[dict]:
+    """Every object the registry installs files for: the ported ones, then the stock SGOs whose missing files it ships
+    ('stock_completions': EDF6's Monster501_King without its model archive; the object path is EDF6's own file)."""
+    return reg['objects'] + reg.get('stock_completions', [])
+
+
 def unavailable(root: str) -> list[tuple[str, str]]:
     """The objects build leaves out, [(object, why)]: those one of whose files is in Mods and is not ours (another
     mod's: the ledger knows no owner of it, or another of our tools' with other bytes). The one place that decides it:
@@ -80,7 +86,7 @@ def unavailable(root: str) -> list[tuple[str, str]]:
     reg = registry()
     led = ledger.Ledger(root)
     out: list[tuple[str, str]] = []
-    for obj in reg['objects']:
+    for obj in entries(reg):
         foreign = [rel for rel in obj['files'] if _not_ours(led, rel, reg['files'][rel])]
         if foreign:
             out.append((obj['object'], f"another mod's file in Mods: {', '.join(foreign)}"))
@@ -95,7 +101,7 @@ def build(root: str) -> tuple[dict[str, bytes], list[tuple[str, str]]]:
     skipped = unavailable(root)
     left_out = {obj for obj, _ in skipped}
     files: dict[str, bytes] = {}
-    for obj in reg['objects']:
+    for obj in entries(reg):
         if obj['object'] in left_out:
             continue
         for rel in obj['files']:
