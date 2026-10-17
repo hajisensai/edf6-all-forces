@@ -10217,6 +10217,52 @@ def edf41_hector_alias() -> None:
     # the file is a DSGO the writer reproduces
     assert dsgo.write(dsgo.parse(files['OBJECT/HECTOR301CC.SGO'])) == files['OBJECT/HECTOR301CC.SGO']
     assert struct.unpack_from('<I', cas, 4)[0] == 0x204
+    # the head player the plugin opens and closes (src/hector_ai.h StepHead), and no weapon animation on 301's guns
+    assert {'open', 'close'} <= cas_graft.states(cas)['head'], cas_graft.states(cas)
+    assert top['edf41_hector_anim'] == [[0.0, [], [], [], []]] * 2, top['edf41_hector_anim']
+
+
+@test
+def edf41_hector_weapon_anim() -> None:
+    """tools/make_edf41_objects.py hector_anim on HECTOR401LS (launcher / shield) and HECTOR401GG (two gatlings), built from
+    the games: each 401 weapon's own CAS clips (4.1 plays them from the weapon's state machine; the class has nothing for
+    them) come in the SGO key edf41_hector_anim for the plugin, on the merged model's bones: the launcher's open / close
+    (its open clip ends on the model's bind pose, the rotation convention of src/hector_ai.h PoseMatrix, checked by the
+    generator and again here), the gatling's barrel roll (one turn a loop), nothing for the shield."""
+    import make_edf41_objects as m
+    import mdb
+    import rootcpk
+    import sgo
+    edf41 = _edf41_root()
+    if not _e5c_have_game() or not edf41:
+        print('skip  edf41_hector_weapon_anim: needs EDF6 and EDF4.1 installed')
+        return
+    data, files = m.build(edf41, rootcpk.DEFAULT_GAME, ('HECTOR401LS.SGO', 'HECTOR401GG.SGO'))
+    assert not data['skipped'], data['skipped']
+    ls = sgo.load(data=files['OBJECT/HECTOR401LS.SGO'])['edf41_hector_anim']
+    gg = sgo.load(data=files['OBJECT/HECTOR401GG.SGO'])['edf41_hector_anim']
+    kind, names, opened, closed, roll = ls[0]
+    assert kind == 1.0 and names == ['gun_arms_l_gun_bottom_l', 'gun_arms_l_gun_bottom_r', 'gun_arms_l_gun_top'], ls[0]
+    assert roll == [] and ls[1] == [0.0, [], [], [], []], ls[1]
+    for clip in (opened, closed):
+        frames, step = int(clip[0]), clip[1]
+        assert frames == 31 and step == 4.0 and len(clip) == 2 + frames * len(names) * 7, (frames, step, len(clip))
+    rab = mdb.rab_read(files['OBJECT/HECTOR401LS.MRAB'])
+    md = mdb.mdb_read(next(f for f in rab.files if f.name.lower() == 'hector401.mdb').data)
+    local = {md.name_of(b.name): b.local for b in md.bones}
+    last = opened[2 + 30 * len(names) * 7:]
+    for i, n in enumerate(names):
+        got = m.pose_matrix(last[i * 7:i * 7 + 7])
+        assert max(abs(a - b) for a, b in zip(got, local[n])) < 2e-3, (n, got, local[n])
+    # the close clip ends where the open one starts (closed)
+    first_open, last_close = opened[2:2 + len(names) * 7], closed[2 + 30 * len(names) * 7:]
+    assert max(abs(a - b) for a, b in zip(first_open, last_close)) < 1e-3
+    for arm, node in zip(gg, ('arms_l', 'arms_r')):
+        kind, names, opened, closed, roll = arm
+        assert kind == 2.0 and names == [f'gun_{node}_gun_rolling'] and opened == [] and closed == [], arm
+        frames, step = int(roll[0]), roll[1]
+        q0, q1 = roll[2 + 3:2 + 7], roll[2 + (frames - 1) * 7 + 3:2 + frames * 7]
+        assert frames == 8 and abs(abs(q0[3]) - 1.0) < 1e-3 and abs(abs(q1[3]) - 1.0) < 1e-3, (q0, q1)   # a whole turn
 
 
 @test

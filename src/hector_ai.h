@@ -26,6 +26,7 @@
 //    0x34F97D..0x34FB74, which only steers the shot, 0x6D2AAF): ArmAim does what 4.1's weapon did.
 #pragma once
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 
 namespace hector {
@@ -207,5 +208,130 @@ inline unsigned PickArms(const Config& c,Rng& rng,float dist) noexcept {
     if(left!=right)return left ? kArmLeft : kArmRight;
     if(rng.Below(2)==0 || c.sameWeapon)return kArmLeft|kArmRight;
     return rng.Below(2)==0 ? kArmLeft : kArmRight;
+}
+
+// ---- the weapons' own animations and the head (4.1's weapon state machines; EDF41.exe) -------------------------------
+// 401 cannon (0x227C1C .. 0x2280BA) and launcher (0x229B00 .. 0x229F9C): an attack plays the weapon CAS's `open` (the
+// barrel halves part, 60 / 120 frames), fires only when it is open, and plays `close` when the attack ends. 401 gatling
+// (0x228BF0): its barrels turn all the time, the CAS variable v_roll_speed (+0x6B4) set every frame to +0x6C0, 1 from the
+// start (0x2285C3) and 5 from its first attack on (0x228FAB, never set back). Their CAS clips come with the object's SGO
+// (tools/make_edf41_objects.py hector_anim: per frame, per bone, translation and rotation as the clip has them); the
+// plugin writes them as the bones' locals while the arm's battery attacks (EDF6's battery fires on its own clock: the
+// shot is not held until the barrel is open, as 4.1's is). The head (Hector 0x222D80 .. 0x223070, player `head`): closed for 300 +
+// rand(900) frames, `open`, open for 300 + rand(900) frames, `close`, again.
+enum class WeaponKind { None=0, OpenClose=1, Roll=2 };
+constexpr int kKeyFloats=7;                     // tx ty tz qx qy qz qw
+constexpr float kRollIdle=1.0f,kRollFiring=5.0f;
+constexpr int kHeadWaitBase=300,kHeadWaitRand=900;
+
+// One clip: `frames` keys `step` frames apart, each kKeyFloats per bone.
+struct Clip {
+    int frames=0;
+    float step=1.0f;
+    const float* keys=nullptr;  // frames * bones * kKeyFloats
+    float Length() const noexcept { return frames>1 ? step*static_cast<float>(frames-1) : 0.0f; }
+};
+
+// The pose of bone `b` (of `bones`) at `time` (clamped, or wrapped when `loop`): translation lerped, rotation nlerped
+// (the shorter way).
+inline void SamplePose(const Clip& c,int bones,int b,float time,bool loop,float* out) noexcept {
+    if(c.frames<=0 || !c.keys) { for(int i=0;i<kKeyFloats;++i)out[i]=i==6 ? 1.0f : 0.0f; return; }
+    const float len=c.Length();
+    if(loop && len>0.0f) { time=std::fmod(time,len); if(time<0.0f)time+=len; }
+    float f=c.step>0.0f ? time/c.step : 0.0f;
+    if(f<0.0f)f=0.0f;
+    int i=static_cast<int>(f);
+    if(i>=c.frames-1) { i=c.frames-1; f=static_cast<float>(i); }
+    const float u=f-static_cast<float>(i);
+    const int j=i+1<c.frames ? i+1 : i;
+    const float* a=c.keys+(static_cast<std::size_t>(i)*bones+b)*kKeyFloats;
+    const float* z=c.keys+(static_cast<std::size_t>(j)*bones+b)*kKeyFloats;
+    for(int k=0;k<3;++k)out[k]=a[k]+(z[k]-a[k])*u;
+    const float dot=a[3]*z[3]+a[4]*z[4]+a[5]*z[5]+a[6]*z[6];
+    const float s=dot<0.0f ? -1.0f : 1.0f;
+    float q[4],n=0.0f;
+    for(int k=0;k<4;++k) { q[k]=a[3+k]+(s*z[3+k]-a[3+k])*u; n+=q[k]*q[k]; }
+    n=n>1e-12f ? 1.0f/std::sqrt(n) : 0.0f;
+    for(int k=0;k<4;++k)out[3+k]=q[k]*n;
+}
+
+// A local matrix (row vectors, the game's layout) from translation + quaternion (x y z w): rows are the rotated axes.
+// Checked against the model: Hector401Launcher's gun_bottom_l bind rows (-0.5 -0.866 0)(0.866 -0.5 0) are its open
+// clip's (0 0 -0.866 0.5).
+inline void PoseMatrix(const float* p,float* m) noexcept {
+    const float x=p[3],y=p[4],z=p[5],w=p[6];
+    m[0]=1-2*(y*y+z*z); m[1]=2*(x*y+z*w);   m[2]=2*(x*z-y*w);   m[3]=0;
+    m[4]=2*(x*y-z*w);   m[5]=1-2*(x*x+z*z); m[6]=2*(y*z+x*w);   m[7]=0;
+    m[8]=2*(x*z+y*w);   m[9]=2*(y*z-x*w);   m[10]=1-2*(x*x+y*y); m[11]=0;
+    m[12]=p[0]; m[13]=p[1]; m[14]=p[2]; m[15]=1;
+}
+
+// The open / close cycle of one arm's weapon: which clip and when, frame by frame.
+struct OpenClose {
+    enum class Phase { Closed, Opening, Open, Closing } phase=Phase::Closed;
+    float t=0.0f;                // time in the clip being played
+};
+
+// One frame (`attacking`: the arm's battery attacks). Returns the clip to pose from (0 open, 1 close) and its time.
+inline int StepOpenClose(OpenClose& s,bool attacking,float openLen,float closeLen,float& time) noexcept {
+    using P=OpenClose::Phase;
+    if(attacking && (s.phase==P::Closed || s.phase==P::Closing)) {
+        // reverse a half-done close from the same opening (the two clips mirror each other)
+        const float done=s.phase==P::Closing && closeLen>0.0f ? 1.0f-s.t/closeLen : 0.0f;
+        s.phase=P::Opening; s.t=done*openLen;
+    } else if(!attacking && (s.phase==P::Open || s.phase==P::Opening)) {
+        const float done=s.phase==P::Opening && openLen>0.0f ? 1.0f-s.t/openLen : 0.0f;
+        s.phase=P::Closing; s.t=done*closeLen;
+    }
+    switch(s.phase) {
+    case P::Opening:
+        s.t+=1.0f;
+        if(s.t>=openLen) { s.phase=P::Open; s.t=openLen; }
+        time=s.t; return 0;
+    case P::Open: time=openLen; return 0;
+    case P::Closing:
+        s.t+=1.0f;
+        if(s.t>=closeLen) { s.phase=P::Closed; s.t=closeLen; }
+        time=s.t; return 1;
+    case P::Closed: default: time=closeLen; return 1;
+    }
+}
+
+// The gatling's barrels: the clip's clock advances at 1, at 5 once it has attacked (4.1 never sets it back).
+struct Barrels {
+    bool fired=false;
+    float t=0.0f;
+};
+inline float StepRoll(Barrels& r,bool attacking,float loopLen) noexcept {
+    if(attacking)r.fired=true;
+    r.t+=r.fired ? kRollFiring : kRollIdle;
+    if(loopLen>0.0f)r.t=std::fmod(r.t,loopLen);
+    return r.t;
+}
+
+// The head: wait, open, wait, close.
+struct Head {
+    enum class Phase { ClosedWait, Opening, OpenWait, Closing } phase=Phase::ClosedWait;
+    int wait=-1;                 // -1: not drawn yet
+};
+// One frame. `clipDone`: the head player's clip has reached its end. Returns the state to play now ("open" / "close") or
+// null.
+inline const wchar_t* StepHead(Head& h,Rng& rng,bool clipDone) noexcept {
+    using P=Head::Phase;
+    switch(h.phase) {
+    case P::ClosedWait:
+    case P::OpenWait:
+        if(h.wait<0)h.wait=kHeadWaitBase+rng.Below(kHeadWaitRand);
+        if(h.wait-->0)return nullptr;
+        h.wait=-1;
+        if(h.phase==P::ClosedWait) { h.phase=P::Opening; return L"open"; }
+        h.phase=P::Closing; return L"close";
+    case P::Opening:
+        if(clipDone)h.phase=P::OpenWait;
+        return nullptr;
+    case P::Closing: default:
+        if(clipDone)h.phase=P::ClosedWait;
+        return nullptr;
+    }
 }
 }  // namespace hector

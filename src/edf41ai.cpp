@@ -26,6 +26,10 @@
 //    bones, mdb.graft_rigid / graft_skinned put them there; the muzzle locators hang on the arm bone) are moved to match
 //    now, so this frame's guns, muzzles and draw see it whichever comes first, the CAS's next write or the next build.
 //    An arm aims while its gun battery attacks: the condition the class's own per-gun aim (0x34F900) runs under.
+//    Then the weapon's own animation (SGO edf41_hector_anim, hector::StepOpenClose / StepRoll): its bones' locals from the
+//    4.1 clip and the world of every bone below the arm rebuilt from its parent's. And the head player (`head` of Hector.CAS)
+//    opens and closes as 4.1's head does (hector::StepHead; 0x1166FB0 finds the player, 0x116C2D0 sets its state). The
+//    functions only this calls are checked by their first bytes (kAnimPrints): on another build it is all left off.
 //  - 0x34FEFE (the gun loop of StartAttack(1) = 0x34FE90) and 0x34E123 (0x34E0D0): the call of the per-gun attack start
 //    0x34E180(gun). An attack picks its arms once (PickArms) and the arms not picked are not started.
 // The gun object is {GunBattery*, ...} with its owner at +0x10; the owner's guns are the vector of 16-byte
@@ -36,6 +40,8 @@
 #include "hector_ai.h"
 #include "memory.h"
 
+#include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -56,6 +62,18 @@ constexpr std::size_t kChildByName=0xD7480;
 constexpr std::size_t kChildCount=0x53060;
 constexpr std::size_t kChildIndex=0x52DE0;
 constexpr std::size_t kNodeFloat=0x52F30;
+constexpr std::size_t kNodeText=0x551E0;       // const wchar_t* (handle*): a string node (0x53B832 reads InterpolateNode so)
+constexpr std::size_t kCasPlayerByName=0x1166FB0;  // int (CasPlayers*, const wchar_t*): -1 none (0x33D392 "additive_action")
+constexpr std::size_t kCasSetState=0x116C2D0;  // bool (CasPlayers*, int player, const wchar_t* state, int)
+// first bytes of the functions only the weapon / head animation calls: on any other build those stay off
+struct Print { std::size_t rva; unsigned char bytes[8]; };
+constexpr Print kAnimPrints[]={
+    {kNodeText,{0x48,0x83,0xEC,0x28,0x4C,0x8B,0xD1,0xE8}},
+    {kCasPlayerByName,{0x48,0x89,0x5C,0x24,0x08,0x48,0x83,0x79}},
+    {kCasSetState,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},
+    {kChildCount,{0x48,0x8B,0x11,0x44,0x8B,0x49,0x08,0x4C}},
+    {kChildIndex,{0x4C,0x8B,0x09,0x44,0x8B,0x51,0x08,0x44}},
+};
 
 constexpr std::size_t kTreeAt=0xA8;          // the object's SGO tree
 constexpr std::size_t kPosAt=0x90;           // vec4
@@ -69,6 +87,9 @@ constexpr std::size_t kBoneSize=0x110;       // bone records at [skeleton+0x10],
 constexpr std::size_t kBoneParentAt=0x10,kBoneLocalAt=0x70,kBoneWorldAt=0xB0;
 // the gun battery's attack state, as 0x34F913..0x34F94E reads it: GunControl {GunBattery*, ...}
 constexpr std::size_t kBatteryFlagsAt=0x2C0,kBatteryLeftAt=0x2E0,kBatteryCountAt=0x30;
+// the CAS players (0x53BB17: +0xBD0, main player [+0xFD0]); each player 0x160 bytes at [+0x60], count [+0x70] (0x1166FB0
+// reads them so); a player's clip clock +0xE8, length +0xF0 (edf41classes ClipNow, real-run with the dragon)
+constexpr std::size_t kCasAt=0xBD0,kCasPlayers=0x60,kCasPlayerCount=0x70,kCasPlayerSize=0x160,kClipTime=0xE8,kClipLength=0xF0;
 constexpr ULONGLONG kStaleMs=5000;           // an object not ticked for this long is a new one (or the game was paused)
 
 struct Handle {
@@ -106,7 +127,20 @@ struct Entry {
     float base[hector::kArms][16]{};
     float written[hector::kArms][16]{};
     bool haveWritten[hector::kArms]{};
+    // the weapons' own animations (SGO edf41_hector_anim) and the head
+    struct ArmAnim {
+        hector::WeaponKind kind=hector::WeaponKind::None;
+        std::vector<int> bone;           // skeleton index of each animated bone
+        std::vector<float> clip[3];      // open, close, roll: frames, step, keys
+        hector::OpenClose oc;
+        hector::Barrels roll;
+    } anim[hector::kArms];
+    bool animRead=false;
+    int headPlayer=-2;                   // -2: not looked up, -1: none
+    hector::Head head;
 };
+
+std::atomic<int> animState{0};          // 0 unchecked, 1 the functions are this build's, 2 they are not: no animation
 
 std::mutex tableLock;
 std::unordered_map<const void*,Entry> table;
@@ -126,6 +160,96 @@ bool Floats(const Handle& node,float* values,int want) noexcept {
         values[i]=reinterpret_cast<NodeFloatFn>(image+kNodeFloat)(&e);
     }
     return true;
+}
+
+bool AnimReady() noexcept {
+    const int s=animState.load();
+    if(s)return s==1;
+    for(const Print& p:kAnimPrints)
+        if(!Readable(image+p.rva,8) || std::memcmp(image+p.rva,p.bytes,8)!=0) {
+            Log("EDF41AI the code at EDF.dll+0x%zX is not what this was written for: Hector's weapon and head animations are off",p.rva);
+            animState=2;
+            return false;
+        }
+    animState=1;
+    return true;
+}
+
+Handle At(const Handle& node,int i) noexcept {
+    return Handle{node.tree,reinterpret_cast<ChildIndexFn>(image+kChildIndex)(&node,static_cast<std::uint32_t>(i)),0};
+}
+int CountOf(const Handle& node) noexcept { return reinterpret_cast<ChildCountFn>(image+kChildCount)(&node); }
+
+// The object's edf41_hector_anim (tools/make_edf41_objects.py hector_anim); an arm whose data does not fit stays None.
+void ReadAnim(void* self,Entry& e,void* skel) noexcept {
+    const Handle root{static_cast<char*>(self)+kTreeAt,0,0};
+    Handle key{};
+    if(!Child(root,L"edf41_hector_anim",key) || CountOf(key)!=hector::kArms)return;
+    for(int i=0;i<hector::kArms;++i) {
+        Entry::ArmAnim& a=e.anim[i];
+        const Handle arm=At(key,i);
+        if(CountOf(arm)!=5)continue;
+        const Handle kind=At(arm,0),names=At(arm,1);
+        const int k=static_cast<int>(reinterpret_cast<NodeFloatFn>(image+kNodeFloat)(&kind));
+        const int nb=CountOf(names);
+        if(k<1 || k>2 || nb<=0 || nb>16)continue;
+        a.bone.assign(static_cast<std::size_t>(nb),-1);
+        bool ok=true;
+        for(int b=0;b<nb;++b) {
+            const Handle n=At(names,b);
+            const wchar_t* text=reinterpret_cast<const wchar_t*(__fastcall*)(const Handle*)>(image+kNodeText)(&n);
+            a.bone[static_cast<std::size_t>(b)]=text ? edf41c::BoneIndex(skel,text) : -1;
+            ok=ok && a.bone[static_cast<std::size_t>(b)]>=0;
+        }
+        for(int c=0;c<3 && ok;++c) {
+            const Handle clip=At(arm,2+c);
+            const int n=CountOf(clip);
+            if(n<=0)continue;
+            a.clip[c].resize(static_cast<std::size_t>(n));
+            for(int j=0;j<n;++j) {
+                const Handle v=At(clip,j);
+                a.clip[c][static_cast<std::size_t>(j)]=reinterpret_cast<NodeFloatFn>(image+kNodeFloat)(&v);
+            }
+            const float frames=a.clip[c][0];
+            if(!(frames>=1.0f) || static_cast<std::size_t>(n)!=2+static_cast<std::size_t>(frames)*static_cast<std::size_t>(nb)*hector::kKeyFloats)
+                ok=false;
+        }
+        const bool need=k==1 ? !a.clip[0].empty() && !a.clip[1].empty() : !a.clip[2].empty();
+        if(!ok || !need) {
+            Log("EDF41AI hector %p arm %d: its weapon animation does not fit the model (%d bones), left still",self,i,nb);
+            a=Entry::ArmAnim{};
+            continue;
+        }
+        a.kind=static_cast<hector::WeaponKind>(k);
+        Log("EDF41AI hector %p arm %d weapon animation %s, %d bones",self,i,k==1 ? "open/close" : "roll",nb);
+    }
+}
+
+hector::Clip ClipOf(const std::vector<float>& v) noexcept {
+    hector::Clip c;
+    if(v.size()<2)return c;
+    c.frames=static_cast<int>(v[0]); c.step=v[1]; c.keys=v.data()+2;
+    return c;
+}
+
+// The head: 4.1's wait / open / wait / close on the CAS player `head` (Hector.CAS has it; the class never plays it).
+void StepHead(void* self,Entry& e) noexcept {
+    char* cas=static_cast<char*>(self)+kCasAt;
+    if(!Readable(cas,kCasPlayerCount+8))return;
+    const std::uint64_t players=*reinterpret_cast<const std::uint64_t*>(cas+kCasPlayerCount);
+    char* array=*reinterpret_cast<char**>(cas+kCasPlayers);
+    if(e.headPlayer==-2) {
+        e.headPlayer=reinterpret_cast<int(__fastcall*)(void*,const wchar_t*)>(image+kCasPlayerByName)(cas,L"head");
+        if(e.headPlayer>=0 && static_cast<std::uint64_t>(e.headPlayer)>=players)e.headPlayer=-1;
+        Log("EDF41AI hector %p head player %d",self,e.headPlayer);
+    }
+    if(e.headPlayer<0 || !array)return;
+    const char* p=array+static_cast<std::size_t>(e.headPlayer)*kCasPlayerSize;
+    if(!Readable(p,kCasPlayerSize))return;
+    const float time=*reinterpret_cast<const float*>(p+kClipTime),length=*reinterpret_cast<const float*>(p+kClipLength);
+    const bool done=std::isfinite(time) && std::isfinite(length) && time+1.0f>=length;
+    if(const wchar_t* state=hector::StepHead(e.head,e.rng,done))
+        reinterpret_cast<bool(__fastcall*)(void*,int,const wchar_t*,int)>(image+kCasSetState)(cas,e.headPlayer,state,0);
 }
 
 // The object's edf41_hector key. false: the object is not a 4.1 Hector (or its key is malformed).
@@ -240,6 +364,46 @@ bool Finite16(const float* m) noexcept {
     return true;
 }
 
+// The arm's weapon pose (its own CAS clips, hector::StepOpenClose / StepRoll): the animated bones' locals, then the world of
+// every bone below the arm from its parent's (the arm's world is already the aimed one). Bones come after their parents in
+// the model (mdb.insert_bone); one that does not keeps the moved world.
+void PoseWeapon(Entry& e,int i,char* recs,std::int64_t count,bool attacking) noexcept {
+    Entry::ArmAnim& a=e.anim[i];
+    if(a.kind==hector::WeaponKind::None)return;
+    const int nb=static_cast<int>(a.bone.size());
+    int which=2;
+    float time=0.0f;
+    if(a.kind==hector::WeaponKind::OpenClose)
+        which=hector::StepOpenClose(a.oc,attacking,ClipOf(a.clip[0]).Length(),ClipOf(a.clip[1]).Length(),time);
+    else
+        time=hector::StepRoll(a.roll,attacking,ClipOf(a.clip[2]).Length());
+    const hector::Clip clip=ClipOf(a.clip[which]);
+    std::vector<int> changed;
+    for(const int b:e.below[i]) {
+        char* rec=recs+static_cast<std::size_t>(b)*kBoneSize;
+        const std::int32_t parent=*reinterpret_cast<const std::int32_t*>(rec+kBoneParentAt);
+        if(parent<0 || parent>=count || parent>=b)continue;
+        int k=-1;
+        for(int j=0;j<nb;++j)
+            if(a.bone[static_cast<std::size_t>(j)]==b)k=j;
+        const bool underChanged=std::find(changed.begin(),changed.end(),parent)!=changed.end();
+        if(k<0 && !underChanged)continue;
+        float local[16],world[16];
+        if(k>=0) {
+            float pose[hector::kKeyFloats];
+            hector::SamplePose(clip,nb,k,time,which==2,pose);
+            hector::PoseMatrix(pose,local);
+        } else {
+            std::memcpy(local,rec+kBoneLocalAt,sizeof(local));
+        }
+        hector::Mul4(local,reinterpret_cast<const float*>(recs+static_cast<std::size_t>(parent)*kBoneSize+kBoneWorldAt),world);
+        if(!Finite16(local) || !Finite16(world))continue;
+        if(k>=0)std::memcpy(rec+kBoneLocalAt,local,sizeof(local));
+        std::memcpy(rec+kBoneWorldAt,world,sizeof(world));
+        changed.push_back(b);
+    }
+}
+
 // The arms' aim, after the base update (see the header). Call with tableLock held.
 void AimArms(void* self,Entry& e) noexcept {
     char* skel=static_cast<char*>(self)+kSkeletonAt;
@@ -262,6 +426,10 @@ void AimArms(void* self,Entry& e) noexcept {
             }
         }
         Log("EDF41AI hector %p arm bones %d (%zu below) / %d (%zu below)",self,e.arm[0],e.below[0].size(),e.arm[1],e.below[1].size());
+    }
+    if(!e.animRead) {
+        e.animRead=true;
+        if(AnimReady())ReadAnim(self,e,skel);
     }
     const bool dead=*reinterpret_cast<const std::uint8_t*>(static_cast<char*>(self)+kDestroyedAt)!=0;
     for(int i=0;i<hector::kArms;++i) {
@@ -306,6 +474,7 @@ void AimArms(void* self,Entry& e) noexcept {
             if(Finite16(moved))std::memcpy(w,moved,sizeof(moved));
         }
         std::memcpy(rec+kBoneWorldAt,world,sizeof(world));
+        PoseWeapon(e,i,recs,count,e.haveTarget && Attacking(self,i));
         std::memcpy(rec+kBoneLocalAt,local,sizeof(local));
         std::memcpy(e.written[i],local,sizeof(local));
         e.haveWritten[i]=true;
@@ -316,7 +485,10 @@ std::uint64_t __fastcall BaseUpdateHook(void* self,void* dt) {
     Tick(self);
     const std::uint64_t result=reinterpret_cast<BaseUpdateFn>(image+kBaseUpdate)(self,dt);
     std::lock_guard<std::mutex> hold(tableLock);
-    if(Entry* e=Find(self))AimArms(self,*e);
+    if(Entry* e=Find(self)) {
+        AimArms(self,*e);
+        if(AnimReady() && !*reinterpret_cast<const std::uint8_t*>(static_cast<char*>(self)+kDestroyedAt))StepHead(self,*e);
+    }
     return result;
 }
 
