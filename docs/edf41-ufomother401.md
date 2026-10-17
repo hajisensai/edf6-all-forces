@@ -21,7 +21,10 @@
   **Generator / FinalGenerator**：4.1 通用生成器组件（SetEnemyGenerator 周期波次、SetInstantEnemyGenerator 一次），Generator 开舱后才放（open 动画），
   FinalGenerator 充能发光。**FinalCannon01**：400–599 帧一轮，1/3 歼灭弹（RocketBullet01_LowLight 向下），2/3 五发瞄准的闪电（LightningBullet01）。
   **炮台**：SmallLaser 700 m / Sniper / Plasma / Rapid 500 m，目标进射程才倒数，Rapid 30 s 追踪扫射。
-- 难度：4.1 用船体 +0x490 = 10.0（从未改写）→ s = 1；单机难度表都是 1（SPEC2 1.3）。所以面板 HP = SGO 耐久，伤害是常数（SPEC 1.6 的表）。
+- 难度 / 等级（2026-10-17 更正，`docs/feedback-2026-10-17-eartheater.md`）：船体 +0x490 构造时是 10.0，但 SetLevel 0x28eab0 置 AI 位时调船体槽 3
+  0x261bf0 把有效等级 +0x25c 抄进 +0x490（H）；布局 0x25fbb6 用它调面板 0x26f9f0，Panel01 槽 29 0x26ebb0 再交给每个炮台（0x26ec1c）。
+  所以部件 `s = 船体有效等级 / 10`：HP = 耐久 × s × 难度行（单机 1），子弹的伤害 / 散布 / 速度按同一 s（SPEC 1.6 的式子）。
+  旧文「+0x490 从未改写 → s = 1」是错的，移植因此在所有难度都用了 1 级血量。
 
 ## 2. EDF6 实现
 
@@ -71,7 +74,7 @@ AdditionalParts 0x38B321 在对象虚函数里这样调，无世界锁）拿出�
 
 ### 2.4 面板 / 炮台
 - 建在格位（`CreateFromPath` 0x11945E0，矩阵 = 船体矩阵、平移 = 格位）；记录：目标 = 格位、当前 = 格位上方 1000、随机 60° 朝向、keep、攻击许可 =
-  船体的、队伍 = 船体的（`SetTeam(…, true)`）。第一次 Update：读 SGO 点与音、HP = `0xD7720(base)`（EDF6 的难度 / 联机耐久系数；EAO 不按等级自己算）、
+  船体的、队伍 = 船体的（`SetTeam(…, true)`）。第一次 Update：读 SGO 点与音、HP = `0xD7720(base × s)`（s = 船体 +0x49C / 10，建面板时记进记录、炮台随面板；EDF6 的难度 / 联机耐久系数；EAO 不按等级自己算）、
   能挨打的清 +0x380 bit0、全部置 0x2000（不算进「敌人数」），Panel01 置 0x80（不当目标）；远距绘制 0x11B3020（模型节点 +0x5C0；面板散在 3.3 km 宽的格上）。
 - 移动、状态机、开火、生成器照第 1 节一比一，帧计数按每次 Update 一帧（60 fps）。子弹按 SPEC2 第 7 节换算（速度 +0x94、寿命 +0x98、伤害 +0x9C、
   爆炸半径 +0xB0、大小 +0xC0、+0xC4、+0xC8、+0xCC、颜色 +0xD0、自定义 +0xE8）；方向：BigCannon / 歼灭弹沿面板 −Y，闪电 / 炮台瞄 GameObjectBase
