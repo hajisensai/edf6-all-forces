@@ -135,7 +135,10 @@ EDF.dll TimeDateStamp `0x678CCB46`，地址为 RVA。置信度：H = 反汇编 /
 - **版本不同**：没有这个值（旧版全军出击、没有成员属性的旧 EDF6Coop）或值不是本版格式 → 该成员在本机显示原版外观，日志写明原因，不会错乱或崩溃。另外 `support_protocol.h` 新增扩展位 `kExtOutfit41`（本版每个 hello 都声明），房间版本提示（`version_notice.h`）在有人缺它时写「本房间不可用：4.1外观（其他人看到原版外观）」。全军出击联机本来就要求匹配版本的 EDF6Coop（`mod_room.cpp RequireCoop`），本版再加一条：EDF6Coop 必须导出 `EDF6CoopGetMemberAttributeApi`，否则建房 / 进房被拒并弹窗说明「EDF6Coop 缺少成员属性接口…版本过旧」。EDF6Coop 不需要改（成员属性 v1 与 `EDF6Coop_ResolveMissionPlayerPuid` 已有）。
 - 时序：EDF6Coop 发布扩展值最多每 2 秒一次，其它成员每秒读一次；在 HQ / 房间里改了选择后 3 秒内就出击，别人可能还按旧值建你的模型（各端仍自洽、不崩，下一次任务就对）。
 
-## 7. 实机验证清单（未做）
+## 7. 实机验证清单
+
+已做（2026-10-18，后台 autopilot `drive.py run edf41:0 0 60`，DLL sha256 `0fa01f78…af85`，4.1 外观文件与 `Player1=1` 的状态文件 `--place`，测后逐字节还原）：日志 `OUTFIT41 battle=6/6 menu=3/3 stock items=5/5 popup=1`、`OUTFIT41 preload: player 1 class 0: EDF4.1 outfit (chosen 1, mission outfit or locked 1, EDF4.1 pack 1, files 1)`；4.1 本篇第 1 关里游骑兵是 4.1 外观（截图：头盔面罩、臂甲、腰包），跑动正常，60 秒无崩溃（PERF 60 fps）。该存档本身「配合任务或未解锁」也为真，所以 4.1 包默认规则在这次也成立，但没有单独验证 `Player1=0` 的情形。下面其余各项未做：
+
 
 1. 安装后 HQ 兵种界面 → 外观：出现第 6 项，文字随游戏语言（简中「绝望阴影再袭」…）；选中后 3D 预览立刻换成 4.1 外观；再开弹窗光标在这一项。换兵种后仍是 4.1 外观（按玩家）。
 2. 选任一原版项：预览回到原版，`EDF6VehicleCrew.outfit41.ini` 的 `Player1` 变 0；存档外观值不变（卸载插件后读档是原版外观）。
