@@ -95,11 +95,13 @@ Every named object carries an int "refs" list that is empty in every file of bot
   SGO becomes an empty property list; camera set `+20 -> +14`, `+28 -> +1C`.
 * Dropped: refs lists (always empty), section / set ids, the raw flag words, EDF5's per-route waypoint
   numbering.
-* `map.rmpa` only: 200 links in 3 EDF5 maps and 107 in 3 EDF4.1 maps, all in decorative routes
-  (`cable_elec_wire_*`, `grass_nw_GrassDens4`), are >= their route's waypoint count. They name a waypoint of
-  another route by a numbering the file does not record (checked against EDF6's re-export of the same maps:
-  neither base+link, absolute index nor id matches). They are dropped (listed in the tree's `dropped_links`);
-  every remaining link is a valid section-wide index.
+* `map.rmpa` only: the wire routes' links to another route hold the index of the target in the map's wire
+  point list (the mapb's 0x7C block), not a route index: every link >= the route's waypoint count (107 in 3 EDF4.1
+  maps) is such a point, paired by the block with the linking one, and so are links below the count that the block
+  does not pair as route indices while it pairs the wire point of that number (HILLYCITY 115, SINSUIKOUEN 97, EDF5's
+  NW_DANTI01 28; EDF6's re-export of NW_DANTI01 has those 28 + 28 as cross-route links). With the wires given
+  (`rmpa_from_legacy(old, map_legacy.cable_graph(mapb))`, tools/edf41_maps.py) they are resolved by position to the
+  waypoint there (`remapped_links`); without (mission RMPAs) links past the route's end are dropped (`dropped_links`).
 
 ## Results (the study, 2026-10-10)
 
@@ -137,6 +139,6 @@ Every named object carries an int "refs" list that is empty in every file of bot
   that builds routes/shapes from the swapped data was not traced.
 * Cameras: no EDF6 RMPA has one, so the EDF6 camera layout comes from EDF.dll's walker only (M014 and M192
   of EDF4.1 have cameras; their conversions pass the walker).
-* The dropped cross-route wire/grass links (map.rmpa only).
+* Whether EDF6 draws anything from the wire routes at all (its cable_init draws the mapb's 0x7C pairs).
 * EDF5's MACs also hold a `<map>.rmpa` member that EDF6's MACs no longer have; it converts like any RMPA but
   whether EDF6 reads it was not checked.
