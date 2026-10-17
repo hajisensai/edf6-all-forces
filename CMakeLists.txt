@@ -731,6 +731,8 @@ set_tests_properties(doll_follow_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=u
 # The plugin's launched drones fly with no one aboard; crewed aircraft never launched empty (src/jet_internal.h Unmanned).
 add_test(NAME unmanned_launch_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/unmanned_launch_guard.py")
 set_tests_properties(unmanned_launch_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+add_test(NAME npc_car_aim_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_car_aim_guard.py")
+set_tests_properties(npc_car_aim_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # Proportional navigation (src/pn.h) against the stock pure pursuit at the same turn limit.
 add_executable(pn_test tests/pn_test.cpp)
 target_compile_options(pn_test PRIVATE /W4 /WX /utf-8 /permissive-)
