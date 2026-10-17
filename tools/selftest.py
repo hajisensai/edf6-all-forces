@@ -10835,8 +10835,8 @@ def edf41_hector_alias() -> None:
         assert not m.missing_textures(rab, frag)
     # the class enables slots 0..3 by number (EDF+0x6dc830): as many entries as the template's four, not one per material
     # (two crashed the real game, M113 / M131); the model's materials are the two the glow blob names
-    # and a fifth, 301 cannon's charge light, which only the plugin plays (edf41_hector_light)
-    assert len(am.items[4].items) == 5 and len(model.materials) == 2
+    # and no fifth: 301 cannon's charge light (light0_color up to 10 / 10 / 100) turned M113 white (2026-10-17 real run)
+    assert len(am.items[4].items) == 4 and len(model.materials) == 2 and 'edf41_hector_light' not in top
     # each material its own name (EDF6 binds an MTAB entry to the first of a name: the guns' glow was never played),
     # every slot animates the body's and the guns', slot 3 (played once at death) is 4.1's 180-frame death block
     mats = [model.name_of(x.name) for x in model.materials]
@@ -10845,9 +10845,6 @@ def edf41_hector_alias() -> None:
         blob = slot.items[0].data
         assert [n for n, _c, _t in m.mtab_entries(blob)] == mats, (i, m.mtab_entries(blob))
         assert struct.unpack_from('<if', blob, 0) == ((0, 180.0) if i == m.BERSERKER_DEATH_SLOT else (1, 480.0)), i
-    light = am.items[4].items[m.HECTOR_CHARGE_LIGHT_SLOT].items[0].data
-    assert [n for n, _c, _t in m.mtab_entries(light)] == ['ufosurface.hector301cannon']
-    assert struct.unpack_from('<if', light, 0) == (0, 120.0) and top['edf41_hector_light'] == [4.0, 4.0]
     # 4.1's time to the first shot: the 301 cannon charges 180 frames (EDF41.exe 0x225A7A, 3 s)
     assert [c['gun_battery']['charge']['time'] for c in top['gun_control']] == [180.0, 180.0], top['gun_control']
     located = ml.mab_locators(am.items[2].data)
@@ -10895,7 +10892,7 @@ def edf41_hector_weapon_anim() -> None:
     top_gg = sgo.load(data=files['OBJECT/HECTOR401GG.SGO'])
     assert [c['gun_battery']['charge']['time'] for c in top_ls['gun_control']] == [120.0, 1.0]
     assert [c['gun_battery']['charge']['time'] for c in top_gg['gun_control']] == [1.0, 1.0]
-    assert top_ls['edf41_hector_light'] == [-1.0, -1.0] and len(top_ls['animation_model'][4]) == 4
+    assert 'edf41_hector_light' not in top_ls and len(top_ls['animation_model'][4]) == 4
     for clip in (opened, closed):
         frames, step = int(clip[0]), clip[1]
         assert frames == 31 and step == 4.0 and len(clip) == 2 + frames * len(names) * 7, (frames, step, len(clip))
