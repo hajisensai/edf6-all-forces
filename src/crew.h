@@ -84,6 +84,7 @@ struct Config {
     float tempestTvBoost=3.0f;     // ...fire boosts it to this many times its top speed (once, for good)// a stock lock-on weapon the player holds locks the target nearest the screen's centre first (lockon.cpp)
     bool routeGuidePath=true;  // the stock route guide strip along the navmesh route's corners, not through walls (route_guide.cpp)
     bool splitMissileSurface=true;// split missiles (Blood Storm) measure their split distance to the target's surface (splitmissile.cpp)
+    bool supportUnitOnAllies=true;// support units (life vendors, power posts...) stick to allies, not through them (supportunit.cpp)
     bool vehicleHud=true;      // HP / ammo / fuel over the nearest NPC-driven friendly vehicles, the carriers' panel (hud.cpp)
     int vehicleHudCount=6;     // ...over at most this many of them (nearest first)
     float vehicleHudRange=500.0f;// ...within this many metres of the player
@@ -514,6 +515,10 @@ bool InstallEdf41Natives() noexcept;
 bool InstallMissiles() noexcept;
 // The stock split missiles (MissileBullet02) split short of a big target's surface (splitmissile.cpp).
 bool InstallSplitMissiles() noexcept;
+// Support units (SupportUnitBullet01) stick to allies (supportunit.cpp): the ctor's pass-through-allies byte cleared
+// while the ini's SupportUnitOnAllies is on (set by every config load).
+bool InstallSupportUnitOnAllies() noexcept;
+void SetSupportUnitOnAllies(bool on) noexcept;
 // The stock route guide strip (RouteGuide) drawn along the navmesh route's corners (route_guide.cpp).
 bool InstallRouteGuide() noexcept;
 bool InstallGuidance() noexcept;   // guidance.cpp: the stock homing rounds' steering calls

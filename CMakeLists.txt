@@ -49,6 +49,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/impact.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/playarea.cpp)
 # The stock split missiles (MissileBullet02) split short of a big target's surface.
 target_sources(EDF6VehicleCrew PRIVATE src/splitmissile.cpp)
+# Support units (SupportUnitBullet01) stick to allies instead of passing through them.
+target_sources(EDF6VehicleCrew PRIVATE src/supportunit.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/route_guide.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/edf41natives.cpp)
 # The DLC's EDF4.1 small dragons: the hit reaction on 4.1's ragdoll bodies (src/edf41smalldragon.cpp).
@@ -987,6 +989,8 @@ add_test(NAME heli_yaw_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DI
 set_tests_properties(heli_yaw_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME katyusha_native_rack COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/katyusha_native_rack_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(katyusha_native_rack PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME supportunit_allies_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/supportunit_allies_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(supportunit_allies_native PROPERTIES SKIP_RETURN_CODE 77)
 
 add_executable(edf5_campaign_native_test EXCLUDE_FROM_ALL tests/edf5_campaign_native_test.cpp)
 target_include_directories(edf5_campaign_native_test PRIVATE src common)
