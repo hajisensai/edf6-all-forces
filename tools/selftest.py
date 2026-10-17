@@ -7722,6 +7722,10 @@ def edf41_robo_plugin_contract() -> None:
     action = message.split('if(msg==kMsgAction', 1)[1].split('if(msg==kMsgDamage', 1)[0]
     assert re.search(r'return 1;\s*\}\s*\}\s*$', action), action
     assert 'AllowAnyTeam(roboClass);' in cpp
+    # the robot's AI is 4.1's A3 / A4 / A5 (src/edf41robo_ai.h, tests/edf41robo_ai_test.cpp): A5 holds the AI through the
+    # attack (it only attacked and never walked, 2026-10-17)
+    assert 'edf41robo::RobotAiStep(' in cpp and 'edf41robo::ChooseInStand(' in cpp
+    assert 'add_test(NAME edf41robo_ai COMMAND edf41robo_ai_test)' in cmake
     # the ground ray passes the robot's own ragdoll bodies (they lifted it on the M411 run)
     assert 'GroundHit(knee,to,hit,ragdoll) || GroundHit(top,knee,hit,ragdoll)' in cpp
     for name in m.ROBO_LOCATORS[:6] + ('左足歩行衝撃', '右足歩行衝撃', 'ロックオン'):
