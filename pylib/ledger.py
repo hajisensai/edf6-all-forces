@@ -31,7 +31,7 @@ from modfiles import atomic_write, sha256, sha256_file
 
 MANIFEST = '.edf6vc_files.json'
 BACKUP = '.edf6vc_files_backup'
-OWNERS = ('jets', 'sub', 'testrange', 'testrange_sub', 'calls', 'katyusha', 'bigmap', 'artillery', 'chute', 'drill', 'stockstores', 'sidecar', 'sedan', 'emc', 'sazabi', 'proteus', 'optics', 'loadout', 'edf41', 'menu_preview', 'roomui', 'edf41maps', 'edf41sound', 'edf5dlc')
+OWNERS = ('jets', 'sub', 'testrange', 'testrange_sub', 'calls', 'katyusha', 'bigmap', 'artillery', 'chute', 'drill', 'stockstores', 'sidecar', 'sedan', 'emc', 'sazabi', 'proteus', 'optics', 'loadout', 'edf41', 'menu_preview', 'roomui', 'edf41maps', 'edf41sound', 'edf5dlc', 'edf41menubg')
 LEGACY = 'legacy'   # a file from before the ledger that a tool needs: its writer is not recorded
 
 
