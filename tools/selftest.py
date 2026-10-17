@@ -5843,6 +5843,36 @@ def edf5_campaign_two_machines() -> None:
 
 
 @test
+def edf5_campaign_legacy_rows() -> None:
+    """An install from before 2026-10-18 that left a mission out (its rows after it one higher up) and its saves: the
+    next install records that list as the pack's legacy layout and writes Legacy (each old row's row now) into
+    EDF6VehicleCrew.packs.ini, so the plugin moves such a save once (src/mission_packs.h MigrateModeSave); an install
+    over a list that is already the definition records nothing, and the record survives later installs."""
+    if not _e5c_have_game():
+        return
+    with _e5c_game() as (root, game):
+        real_plan = e5c.plan
+
+        def older(r: str, root41: object = None, skip41: object = ()) -> dict:   # the old planner: DM018 left out
+            p = real_plan(r, root41, skip41)   # type: ignore[arg-type]
+            return {**p, 'rows': [x for x in p['rows'] if x['key'] != 'EDF5_OLD_SCRIPT/DLC/DM018']}
+        with patched(e5c, plan=older):
+            e5c.install(root, e5c.build(root))
+        assert 'legacy' not in e5c.load_manifest(root), 'the first install has no older list'
+        files, _, p = e5c.build(root)
+        dlc1 = [r for r in p['rows'] if r['group'] == 'dlc1']
+        old = p['legacy']['EDF5DLC1']
+        assert set(p['legacy']) == {'EDF5DLC1'} and len(old) == len(dlc1) - 1, p['legacy'].keys()
+        at = [r['key'] for r in dlc1].index('EDF5_OLD_SCRIPT/DLC/DM018')
+        want = list(range(at)) + list(range(at + 1, len(dlc1)))
+        assert f'Legacy={len(old)}:' + ','.join(map(str, want)) in files[e5c.PACKS_FILE].decode(), 'the rows after DM018 one down'
+        e5c.install(root, (files, _, p))
+        assert e5c.load_manifest(root)['legacy'] == p['legacy']
+        again = e5c.build(root)   # the list is the definition now: the record is what keeps the older layout
+        assert again[2]['legacy'] == p['legacy'] and again[0][e5c.PACKS_FILE] == files[e5c.PACKS_FILE]
+
+
+@test
 def mission_pack_ids_agree() -> None:
     """The plugin's fixed ids and identity format (src/mission_packs.h) are the installer's (make_edf5_campaign
     CONTENT, PACKS_FILE): base, count, the three ini runs, the attribute's name, the 512-row cap; the plugin reads

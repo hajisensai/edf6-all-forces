@@ -145,8 +145,16 @@ void LoadMissionPacks(packs::Table& table) noexcept {
         GetPrivateProfileStringW(section,L"Missing",L"",value,static_cast<DWORD>(std::size(value)),path);
         narrow(value,mask,sizeof(mask));
         const int rows=static_cast<int>(GetPrivateProfileIntW(section,L"Rows",0,path));
-        if(packs::Make(id,tag,digest,rows,mask,table.packs[id-packs::kBase]))++found;
-        else Log("CONFIG EDF6VehicleCrew.packs.ini [Pack%d] malformed (Tag=%s Rows=%d): that pack is not owned",id,tag,rows);
+        static wchar_t legacyText[packs::kMaxRows*5+16];   // "<n>:" and up to 512 rows of "-1," / "511,"
+        static char legacy[sizeof(legacyText)/sizeof(wchar_t)];
+        GetPrivateProfileStringW(section,L"Legacy",L"",legacyText,static_cast<DWORD>(std::size(legacyText)),path);
+        narrow(legacyText,legacy,sizeof(legacy));
+        packs::Pack& pack=table.packs[id-packs::kBase];
+        if(packs::Make(id,tag,digest,rows,mask,pack) && packs::SetLegacy(pack,legacy))++found;
+        else {
+            pack=packs::Pack{};
+            Log("CONFIG EDF6VehicleCrew.packs.ini [Pack%d] malformed (Tag=%s Rows=%d): that pack is not owned",id,tag,rows);
+        }
     }
     static int logged=-1;
     if(found!=logged)Log("CONFIG mission packs: %d installed (EDF6VehicleCrew.packs.ini)",found);

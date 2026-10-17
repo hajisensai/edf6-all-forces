@@ -83,6 +83,8 @@ EDF41_THUMBS = os.path.join(EDF41, 'missions_thumbnails.rab')
 EDF41_FOLDER = 'EDF41'
 MANIFEST = '.edf5campaign.json'
 DISABLED = '.edf5campaign-disabled'
+# The packs' older save layouts (legacy_layouts), kept past an uninstall: the saves stay, and a later install moves them.
+LEGACY_FILE = '.edf5campaign-legacy.json'
 INI = os.path.join('Plugins', 'EDF6VehicleCrew.ini')
 INI_KEY = 'EDF5CampaignContent'
 RANGE_INI_KEY = 'TestRangeContent'
@@ -737,8 +739,44 @@ def build(root: str, campaign: bool = True, test_range: bool = True,
         for r in by_pack[p41.pack.group]:
             for name in r['files'] if available(r) else ():   # a placeholder's mission is not installed
                 out[f'MISSION/{p41.folder}/{r["path"]}/{name}'] = edf41_script(r['path'], name, p41.data)
-    out[PACKS_FILE] = packs_ini(packs, by_pack)
+    p['legacy'] = legacy_layouts(root, manifest, packs, by_pack)
+    out[PACKS_FILE] = packs_ini(packs, by_pack, p['legacy'])
     return out, Contents(ids.get(PACKS[0].tag, 0), ids.get(RANGE.tag, 0), edf41_content(ids)), p
+
+
+def installed_keys(root: str, rel: str, manifest: dict) -> list[str] | None:
+    """The mission keys, row by row, of the list file `rel` this tool wrote before (None: none of ours there)."""
+    data = modfiles.read(rel_path(root, rel))
+    if not ours(manifest.get('files', {}).get(rel), data):
+        return None
+    try:
+        return [str(r.items[2]) for r in dsgo.parse(data).root.get('table').items]
+    except (ValueError, KeyError, IndexError, TypeError, AssertionError, struct.error, AttributeError):
+        return None
+
+
+def legacy_layouts(root: str, manifest: dict, packs: tuple[Pack, ...], by_pack: dict[str, list[dict]]) -> dict:
+    """Each pack's rows as a save written before 2026-10-18 has them, where they differ from now (tag -> mission keys).
+    A mode's save (DEFP_<MST>) keys its clears by row (docs/mission-list-re.md §1: clear[class][row], the current row),
+    and the older installs left out a mission whose resources were missing, so its rows after that one sat one higher
+    up. The list this tool wrote last is that layout; once recorded it is kept (the manifest's 'legacy') for every
+    later install, so a save first loaded after several installs is still moved right. The plugin moves an unmarked
+    save to the new rows once (src/mission_packs.h MigrateModeSave) and marks it."""
+    kept = modfiles.load_json(os.path.join(root, 'Mods', LEGACY_FILE), {})
+    out = {tag: list(keys) for tag, keys in {**kept, **manifest.get('legacy', {})}.items()}
+    for pack in packs:
+        if pack.tag in out:
+            continue
+        keys = installed_keys(root, pack.list, manifest)
+        if keys is not None and keys != [r['key'] for r in by_pack[pack.group]]:
+            out[pack.tag] = keys
+    return out
+
+
+def legacy_map(old: list[str], rows: list[dict]) -> list[int]:
+    """Each old row's row now (-1: that mission is no longer in the pack)."""
+    now = {r['key']: i for i, r in enumerate(rows)}
+    return [now.get(k, -1) for k in old]
 
 
 def edf41_content(ids: dict[str, int]) -> int:
@@ -768,15 +806,21 @@ def missing_mask(rows: list[dict]) -> str:
     return ''.join(f'{d:x}' for d in digits)
 
 
-def packs_ini(packs: tuple[Pack, ...], by_pack: dict[str, list[dict]]) -> bytes:
-    """PACKS_FILE: a [Pack<content id>] section per installed pack (Tag, Digest, Rows, Missing), ASCII for
-    GetPrivateProfileString. The plugin owns exactly these ids, keeps the Missing rows locked, publishes the current
-    pack's line with a room and refuses a room whose pack differs (src/mod_room.cpp)."""
+def packs_ini(packs: tuple[Pack, ...], by_pack: dict[str, list[dict]], legacy: Mapping[str, list[str]] | None = None) -> bytes:
+    """PACKS_FILE: a [Pack<content id>] section per installed pack (Tag, Digest, Rows, Missing, and Legacy when its
+    saves may still have older rows: "<old row count>:<each old row's row now, -1 none>"), ASCII for
+    GetPrivateProfileString. The plugin owns exactly these ids, keeps the Missing rows locked, moves an older save's
+    rows (Legacy), publishes the current pack's line with a room and refuses a room whose pack differs
+    (src/mod_room.cpp)."""
     lines = ['; Written by tools/make_edf5_campaign.py with the mission packs: do not edit (run the installer again).', '']
     for pack in packs:
         rows = by_pack[pack.group]
         lines += [f'[Pack{CONTENT[pack.tag]}]', f'Tag={pack.tag}', f'Digest={pack_digest(pack, rows)}',
-                  f'Rows={len(rows)}', f'Missing={missing_mask(rows)}', '']
+                  f'Rows={len(rows)}', f'Missing={missing_mask(rows)}']
+        old = (legacy or {}).get(pack.tag)
+        if old:
+            lines.append(f'Legacy={len(old)}:' + ','.join(str(i) for i in legacy_map(old, rows)))
+        lines.append('')
     return '\r\n'.join(lines).encode('ascii')
 
 
@@ -854,8 +898,11 @@ def _put_back(root: str, rel: str, entry: dict) -> str | None:
     return path
 
 
-def manifest_record(content: Contents, files: dict[str, dict]) -> dict:
-    return {'version': 2, 'content': content.campaign, 'range': content.range, 'edf41': content.edf41, 'files': files}
+def manifest_record(content: Contents, files: dict[str, dict], legacy: Mapping[str, list[str]] | None = None) -> dict:
+    out = {'version': 2, 'content': content.campaign, 'range': content.range, 'edf41': content.edf41, 'files': files}
+    if legacy:
+        out['legacy'] = {tag: list(keys) for tag, keys in legacy.items()}   # legacy_layouts: kept for later installs
+    return out
 
 
 def install(root: str, built: tuple[dict[str, bytes], Contents, dict] | None = None) -> list[str]:
@@ -863,7 +910,8 @@ def install(root: str, built: tuple[dict[str, bytes], Contents, dict] | None = N
     and sets the plugin's content ids. A build without the campaign (disable()) takes its packs out: the mode and
     text tables are rebuilt from what they replaced, and the EDF5 packs' own files, no longer written, are retired."""
     modfiles.refuse_while_running()
-    files, content, _ = built or build(root)
+    files, content, planned = built or build(root)
+    legacy = {**load_manifest(root).get('legacy', {}), **planned.get('legacy', {})}
     mpath = os.path.join(root, 'Mods', MANIFEST)
     manifest = load_manifest(root)
     kept = manifest.get('files', {})
@@ -886,7 +934,7 @@ def install(root: str, built: tuple[dict[str, bytes], Contents, dict] | None = N
         os.remove(disabled)
     # The manifest first, accepting the old bytes and the new, and still holding what is to be put back: a run cut
     # short leaves every file recognised (and what it replaced on record); once all are written only the new are ours.
-    modfiles.save_json(mpath, manifest_record(content, {**retired, **entries}))
+    modfiles.save_json(mpath, manifest_record(content, {**retired, **entries}, legacy))
     paths = []
     for rel, data in files.items():
         path = rel_path(root, rel)
@@ -903,7 +951,7 @@ def install(root: str, built: tuple[dict[str, bytes], Contents, dict] | None = N
             paths.append(path)
     for entry in entries.values():
         entry.pop('also', None)
-    modfiles.save_json(mpath, manifest_record(content, {**left, **entries}))
+    modfiles.save_json(mpath, manifest_record(content, {**left, **entries}, legacy))
     ini = set_content(root, content)
     if ini:
         paths.append(ini)
@@ -940,6 +988,8 @@ def remove(root: str, *, remember_disabled: bool = False) -> tuple[list[str], li
         d = os.path.join(root, 'Mods', d)
         if os.path.isdir(d) and not os.listdir(d):
             os.rmdir(d)
+    if manifest.get('legacy'):   # the saves outlive the packs: a later install still moves their rows
+        modfiles.save_json(os.path.join(root, 'Mods', LEGACY_FILE), manifest['legacy'])
     if left:
         modfiles.save_json(mpath, {**manifest, 'files': left})
     elif os.path.isfile(mpath):

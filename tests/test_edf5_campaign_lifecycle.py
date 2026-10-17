@@ -665,6 +665,37 @@ class PacksFileTests(unittest.TestCase):
             self.assertEqual(read('Pack69', 'Missing'), '401')   # rows 2 and 8
             self.assertEqual((read('Pack68', 'Tag'), read('Pack68', 'Missing')), ('EDF6TR', '0'))
             self.assertEqual(read('Pack65', 'Tag'), '', 'a pack not installed has no section')
+            self.assertEqual(read('Pack69', 'Legacy'), '')
+
+    def test_legacy_rows_recorded_kept_and_written(self) -> None:
+        """A save's rows are the list's (docs/mission-list-re.md §1): an older install that left M003 out had M004 at
+        row 2. The list this tool wrote last is recorded as the pack's legacy layout when it differs (a list that is
+        already the definition records nothing), kept in the manifest by every later install and past an uninstall,
+        and written as Legacy (each old row's row now) for the plugin to move such a save once."""
+        rows = [{'key': f'EDF41/M00{i}'} for i in range(1, 6)]
+        rows[2]['missing'] = 'x'
+        old = ['EDF41/M001', 'EDF41/M002', 'EDF41/M004', 'EDF41/M005']
+        with tempfile.TemporaryDirectory(prefix='edf6-legacy-') as root:
+            os.makedirs(os.path.join(root, 'Mods'))
+            by_pack = {campaign.PACK41.group: rows}
+            with patch.object(campaign, 'installed_keys', return_value=old):
+                legacy = campaign.legacy_layouts(root, {}, (campaign.PACK41,), by_pack)
+            self.assertEqual(legacy, {'EDF41': old})
+            with patch.object(campaign, 'installed_keys', return_value=[r['key'] for r in rows]):
+                self.assertEqual(campaign.legacy_layouts(root, {}, (campaign.PACK41,), by_pack), {}, 'already the definition')
+                self.assertEqual(campaign.legacy_layouts(root, {'legacy': legacy}, (campaign.PACK41,), by_pack), legacy,
+                                 'a recorded layout is kept: a save may not have been loaded since')
+            self.assertEqual(campaign.legacy_map(old, rows), [0, 1, 3, 4])
+            text = campaign.packs_ini((campaign.PACK41,), by_pack, legacy).decode()
+            self.assertIn('\r\nLegacy=4:0,1,3,4\r\n', text)
+            # an uninstall keeps it for the next install (the saves stay)
+            files = {'X': {'sha': 'nothing', 'original': None}}
+            modfiles.save_json(os.path.join(root, 'Mods', campaign.MANIFEST), {'files': files, 'legacy': legacy})
+            with patch.object(modfiles, 'refuse_while_running', lambda: None):
+                campaign.remove(root)
+            self.assertFalse(campaign.installed(root))
+            with patch.object(campaign, 'installed_keys', return_value=None):
+                self.assertEqual(campaign.legacy_layouts(root, {}, (campaign.PACK41,), by_pack), legacy)
 
 
 if __name__ == '__main__':

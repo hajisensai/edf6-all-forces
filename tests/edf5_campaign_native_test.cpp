@@ -6,6 +6,7 @@
 // (EDF6VehicleCrew.packs.ini Missing) locked and never cleared, the key on or off.
 #include "../src/crew.h"
 #include "../src/memory.h"
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -292,6 +293,34 @@ int main(int argc,char** argv) {
         missionsReady=true;
         Check(Patched(kSites[0])(f.Mgr(),65),"...owned with it");
         missionsReady=false;
+        // A pack whose older saves have other rows (Legacy): owned only while the save-load hook moves them.
+        InstallPacks(true,false,false);
+        Check(packs::SetLegacy(config.missionPacks.packs[0],"4:0,1,3,4"),"Legacy on EDF5's story");
+        Check(!Patched(kSites[0])(f.Mgr(),65) && Patched(kSites[0])(f.Mgr(),66),"Legacy rows without the save hook: not owned");
+        SetMissionPackSaveHook(true);
+        Check(Patched(kSites[0])(f.Mgr(),65),"...owned with it");
+        // The hook's work on the game status of a loaded save (MigrateMissionPackSave): the current mode's content
+        // read as 0x8A20F3 reads it, its save at GS+0x57A4 moved once, other modes' saves untouched.
+        {
+            std::vector<unsigned char> gs(packs::kModeSave+packs::kModeSaveSize+0x100);
+            alignas(16) unsigned char modeNode[0x20]{},node[0x100]{};
+            void* modes[1]={modeNode};
+            Put<void*>(gs.data(),0x20,modes);Put<std::uint32_t>(gs.data(),0x30,1);Put<std::uint32_t>(gs.data(),0x38,0);
+            Put<void*>(modeNode,0x10,node);Put<std::int32_t>(node,8,0x10);Put<std::int32_t>(node,0x10+0x74,65);
+            unsigned char* const save=gs.data()+packs::kModeSave;
+            save[packs::kClear+2]=1;save[0]=2;   // old row 2 (now row 3) cleared, current
+            MigrateMissionPackSave(gs.data());
+            Check(save[packs::kClear+3]==1 && save[packs::kClear+2]==0 && save[0]==3 && lastLog.find("rows-moved")!=std::string::npos,
+                  "the loaded save of the pack moved and logged");
+            MigrateMissionPackSave(gs.data());
+            Check(save[packs::kClear+3]==1 && save[0]==3,"a second load moves nothing");
+            Put<std::int32_t>(node,0x10+0x74,0);
+            std::memset(save+packs::kMarker,0,4);
+            const std::vector<unsigned char> before(save,save+packs::kModeSaveSize);
+            MigrateMissionPackSave(gs.data());
+            Check(std::equal(before.begin(),before.end(),save),"EDF6's own story's save: untouched");
+        }
+        SetMissionPackSaveHook(false);
         InstallPacks(true,false,false);
         Patched(kSites[2])(f.Mgr(),0);
         Check(lastLog.find("id=0 prior=1 mod=0 allowed=1")!=std::string::npos,"native story admission logged without a MOD grant");

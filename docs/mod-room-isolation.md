@@ -144,3 +144,49 @@ one cleared); `tests/test_edf5_campaign_lifecycle.py`
 `edf5_campaign_two_machines` (the real game: a machine with another mod's modes and
 missing maps maps every online (id, row) to the same mission as a plain one).
 None of this ran in the game or between two machines.
+
+### Saves after the id and row change (2026-10-18, static)
+
+What the game keys by the content id, and what by the row (EDF.dll `0x678CCB46`):
+
+- **Content id: nothing persisted.** A mode's save is the file named by its ModeList
+  member 5 (`DEFP_<MST>`: `E5M0` / `E5D1` / `E5D2` / `TR00` / `E41M` / `E4P1` /
+  `E4P2`, unchanged); the save job reads and writes it at `GS+0x57A4`
+  (`0x7C0C72` → `0x7BC310`, `0x7C3542` → `0x7BD0A0`, length `0x16C4`). `MAIN.GST`
+  (`GS+0x6E68..0x14B50`: weapons by weapon-table row, armour, ...) and `COMMON.CFG`
+  (`GS+0x318..0x57A4`) hold no mode id. Every mode-node `+0x74` read (36, listed by
+  `tools/edfre.py`: `0xDCA47`, `0x708A02`, `0x70C32D`, `0x70CC47`, `0x74836E`,
+  `0x787922`, `0x78BC48`, `0x78F27C`, `0x8A2114`, `0x8BEB79`, `0x8BEF3D`, `0x8C3D7F`,
+  `0x8C4693/4CFF` (+ compares `0x8C46AC/4D1C`), `0x8C4CBC`, `0x8EBFC2`, `0x8ED9D9`,
+  `0x8F649D`, `0x8F651A`, `0x8FD942`, `0x8FE3AC`, `0x900697/6DB/7CC/906`,
+  `0x9017BF`, `0x904DE0`, `0x913BB2`, `0x9158A3`, `0x916577`, `0x91A64E/6CB`,
+  `0x91DC4E`, `0x925CB4`, `0x92671E`, `0x926A30`, and the compares `0xD841F`,
+  `0x789288`, `0x905F8B`) keeps it in a register, a stack local, a UI object or
+  `GS+0x14FD0` (runtime, past the saved blocks; read once, `0x747F2B`, as a
+  compare). None shifts it, tests a bit by it or indexes with it (the two candidate
+  hits are a vector size `sar` at `0x78F293` and a mode-pointer index at `0x8C4D10`);
+  `0x78F27C` hands it to the stream writer `0x12B5580`, which encodes any int.
+  Ownership is the `std::set<int>` at `mgr+0xE0` (`0xD92B0`), not a bitmask. The
+  weapon drop filter `0xD81E0` compares a weapon row's column 8 with the mode's id;
+  the ported weapons write 0 there (`tools/ported_weapons.py` `PACK`). The
+  achievements and clear ratio count content 0 only (`0xDC9E0`). So moving the
+  packs from 3..9 to 65..71 loses no progress and attaches none to another mode.
+- **Row: the save is keyed by it.** `clear[class][row]` (`0xDFA40` / `0xDFAB0`), the
+  byte per row at `+0x14A0`, and the current row at `+0`. An older install that
+  left a mission out had the rows after it one higher up; the placeholder rows put
+  them back where the definition has them. The installer therefore records the list
+  it wrote last, when that differs from the definition, as the pack's legacy layout
+  (manifest `legacy`, kept by later installs and past an uninstall in
+  `Mods/.edf5campaign-legacy.json`) and writes `Legacy=<old rows>:<each one's row
+  now>` into `EDF6VehicleCrew.packs.ini`. The plugin's save-load hook
+  (`airstrike.cpp` `UnlockDlcHook` on `0xDC550`, which `MAINSCRIPT.AS` runs right
+  after `SetMode` and `LoadSaveData_ModeSelect`) moves an unmarked save of the
+  current pack to the rows now and writes a marker (the definition digest's first
+  32 bits) in row bytes 508..511, which no pack of ours reaches; a marked save is
+  never moved again, and the next save the game writes carries both. A pack with
+  `Legacy` is owned only while that hook is in. Tested offline
+  (`mod_room_test` `SaveMigration`, `edf5_campaign_native_test` on a stand-in game
+  status, `tests/test_edf5_campaign_lifecycle.py`, selftest
+  `edf5_campaign_legacy_rows`); not in the game. Not covered: a save copied from
+  another machine whose older list differed from this one's (it is moved by this
+  machine's record).

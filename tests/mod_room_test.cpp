@@ -173,6 +173,50 @@ void PackIdentity(crew::Put publish,crew::Join enter){
     Check(packs::LockPlaceholders(rows.data(),rows.size(),held)==2 && rows[1].state==3 && rows[5].state==3 && rows[0].state==1
           && rows[2].state==4,"placeholders locked, the others as the select left them");
 }
+// An older save's rows moved to the rows now, once (mission_packs.h MigrateModeSave, the save as the game holds it at
+// GS+0x57A4: +0 current row, +8 clear[10][512], +0x14A0 a byte per row, the marker at row 508 of that block).
+void SaveMigration(){
+    using namespace crew::packs;
+    Pack p{};
+    Check(Make(69,"EDF41","bc133623395bd534",6,"00",p) && p.layout==0xbc133623u,"the layout is the digest's first 8 digits");
+    Check(SetLegacy(p,"4:0,2,3,5") && p.legacyRows==4 && p.legacy[1]==2,"Legacy parsed");
+    Pack bad=p;
+    Check(!SetLegacy(bad,"4:0,2,3") && !SetLegacy(bad,"3:0,2,6") && !SetLegacy(bad,"2:0,-2") && !SetLegacy(bad,"x") && bad.legacyRows==0
+          && SetLegacy(bad,"") && bad.legacyRows==0,"a count off, a row past the pack, a bad row: refused; empty: none");
+    std::vector<unsigned char> save(kModeSaveSize);
+    unsigned char* const s=save.data();
+    const auto clear=[&](int c,int r)->unsigned char&{return s[kClear+static_cast<std::size_t>(c)*512+static_cast<std::size_t>(r)];};
+    // the old save: rows 0..3 were M001, M002, M004, M006 (M003 and M005 left out); class 0 cleared all four, class 3
+    // row 1 on two difficulties; the per-row byte of old row 2; the current row old 3
+    for(int r=0;r<4;++r)clear(0,r)=1;
+    clear(3,1)=3;s[kRowBytes+2]=4;s[0]=3;
+    Check(MigrateModeSave(s,p)==Migration::kRemapped,"an unmarked save with a Legacy layout: moved");
+    Check(clear(0,0)==1 && clear(0,1)==0 && clear(0,2)==1 && clear(0,3)==1 && clear(0,4)==0 && clear(0,5)==1,"class 0's clears on their missions");
+    Check(clear(3,2)==3 && clear(3,1)==0,"class 3's clear moved with its mission");
+    Check(s[kRowBytes+3]==4 && s[kRowBytes+2]==0 && s[0]==5,"the per-row byte and the current row moved");
+    std::uint32_t marker=0;std::memcpy(&marker,s+kMarker,4);
+    Check(marker==p.layout,"marked");
+    const std::vector<unsigned char> once=save;
+    Check(MigrateModeSave(s,p)==Migration::kAlready && save==once,"a marked save is never moved again");
+    std::uint32_t other=0x1234;std::memcpy(s+kMarker,&other,4);
+    const std::vector<unsigned char> foreign=save;
+    Check(MigrateModeSave(s,p)==Migration::kForeign && save==foreign,"another layout's marker: left as it is");
+    std::vector<unsigned char> fresh(kModeSaveSize);
+    Pack plain{};
+    Check(Make(65,"EDF5","1a74064786830772",5,"00",plain),"a pack without Legacy");
+    fresh[kClear+1]=1;fresh[0]=1;
+    Check(MigrateModeSave(fresh.data(),plain)==Migration::kMarked && fresh[kClear+1]==1 && fresh[0]==1,"no Legacy: only the marker");
+    std::vector<unsigned char> dropped(kModeSaveSize);
+    Pack gone=p;
+    Check(SetLegacy(gone,"2:-1,1"),"a row no longer in the pack");
+    dropped[kClear]=1;dropped[kClear+1]=2;dropped[0]=0;
+    Check(MigrateModeSave(dropped.data(),gone)==Migration::kRemapped && dropped[kClear]==0 && dropped[kClear+1]==2 && dropped[0]==0,
+          "its clear dropped, the current row back to 0");
+    Pack big{};
+    char mask[129]{};for(int i=0;i<128;++i)mask[i]='0';
+    Check(Make(65,"EDF5","1a74064786830772",512,mask,big) && MigrateModeSave(fresh.data(),big)==Migration::kNone,
+          "a pack with more rows than the marker leaves room for: untouched");
+}
 int main(int argc,char** argv){
     using namespace crew;
     resolveCoop=&ResolveDependency;showDependencyProblem=&RecordNotice;showPackProblem=&RecordPackNotice;create=&RecordCreated;
@@ -279,6 +323,7 @@ int main(int argc,char** argv){
     Check(lastLog.find("reason=namespace-not-ready")!=std::string::npos,"incomplete namespace setup has its own diagnostic");
     Check(roomReleases>0,"every EOS join read the room's content id, and released it");
     PackIdentity(publish,enter);
+    SaveMigration();
     std::printf("mod room wrappers: %s; real EDF search/invite: %s\n",failures?"FAIL":"PASS",native?"executed":"not supplied");
     if(argc>1 && *argv[1] && !native)return 1;
     return failures?1:0;

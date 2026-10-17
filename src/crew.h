@@ -562,6 +562,8 @@ bool InstallJetSound() noexcept;
 bool InstallGlyphLock() noexcept;
 bool InstallEdf5Campaign() noexcept;
 bool InstallPortedMissions() noexcept;   // PortedMissionsUnlocked: the packs' mission select (edf5campaign.cpp)
+void SetMissionPackSaveHook(bool ready) noexcept;   // the save-load hook is in (airstrike.cpp): packs with Legacy rows owned
+void MigrateMissionPackSave(unsigned char* gs) noexcept;   // a pack's loaded save moved to the rows now, once (edf5campaign.cpp)
 // EDF5's compiled mission scripts online: the BVM executor's PreloadPlayerResource and CreatePlayer given their online
 // half (edf5online.cpp). Edf5BvmOnlinePlayers: the patched creation loop's count.
 bool InstallEdf5Online() noexcept;

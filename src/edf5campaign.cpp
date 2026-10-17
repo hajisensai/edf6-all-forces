@@ -51,6 +51,7 @@ constexpr unsigned kSites[]={
 };
 bool campaignReady=false;
 bool missionsReady=false;             // InstallPortedMissions: the mission select's hook (placeholder rows locked)
+bool saveHookReady=false;             // airstrike.cpp's save-load hook (0xDC550): an older save's rows moved (Legacy)
 OwnedFn prior[std::size(kSites)]{};   // what each site called before us: 0xD92B0, or another plugin's hook of it
 
 // The ini key naming `id`'s run (EDF5CampaignContent's three, TestRangeContent, EDF41Content's three): its fixed
@@ -71,10 +72,12 @@ const packs::Pack* Installed(const Config& cfg,int id) noexcept {
     return key==run && run ? cfg.missionPacks.Find(id) : nullptr;
 }
 // Owned by us: installed, and a pack with placeholder rows only while the mission select keeps them locked
-// (without that hook a placeholder cleared before its resources went missing would be selectable: a crash).
+// (without that hook a placeholder cleared before its resources went missing would be selectable: a crash), one whose
+// older saves have other rows (Legacy) only while the save-load hook moves them (else a save would be played, and
+// written back, with its clears on the wrong missions).
 bool Ours(const Config& cfg,int id) noexcept {
     const packs::Pack* pack=Installed(cfg,id);
-    return pack && (missionsReady || !pack->MissingCount());
+    return pack && (missionsReady || !pack->MissingCount()) && (saveHookReady || !pack->legacyRows);
 }
 
 void ShowPackDialog(const wchar_t* text) noexcept {
@@ -196,8 +199,7 @@ int lastLocked=-2,lastLockedContent=-2;
 const packs::Pack* scanPack=nullptr;
 
 // The current mode's content id (as 0x8A20F3 reads it), -1 when there is none to read.
-int CurrentContent(unsigned char*& gs) noexcept {
-    gs=Readable(image+kGameStatus,8) ? At<unsigned char*>(image,kGameStatus) : nullptr;
+int ContentOf(unsigned char* gs) noexcept {
     if(!gs || !Readable(gs,kModeCfg))return -1;
     const auto count=At<std::uint32_t>(gs,kModeCount);
     const auto now=At<std::uint32_t>(gs,kModeNow);
@@ -210,6 +212,10 @@ int CurrentContent(unsigned char*& gs) noexcept {
     const auto at=At<std::int32_t>(node,8);
     if(!Readable(node+at+kModeContent,4))return -1;
     return At<std::int32_t>(node+at,kModeContent);
+}
+int CurrentContent(unsigned char*& gs) noexcept {
+    gs=Readable(image+kGameStatus,8) ? At<unsigned char*>(image,kGameStatus) : nullptr;
+    return ContentOf(gs);
 }
 
 // The rows' vector: {begin, end, capacity} at the caller's rsp+0x48. PortedMissionsUnlocked opens a story pack's rows;
@@ -293,4 +299,20 @@ bool InstallPortedMissions() noexcept {
         Cfg().edf41Content,Cfg().edf41Content>0 ? Cfg().edf41Content+kPacks41-1 : 0);
     return missionsReady;
 }
+// After a mode's save was loaded (airstrike.cpp UnlockDlcHook: the script's SetMode, LoadSaveData_ModeSelect, then
+// UnlockDownloadContents, MAINSCRIPT.AS 842..852): one of our packs' save, at GS+0x57A4, moved to the rows now once
+// (mission_packs.h MigrateModeSave). Before the game writes it again, so the next save has the new rows and the marker.
+namespace { int lastMigration=-1,lastMigrationContent=-1; }
+void SetMissionPackSaveHook(bool ready) noexcept { saveHookReady=ready; }
+void MigrateMissionPackSave(unsigned char* gs) noexcept {
+    const int content=ContentOf(gs);
+    const packs::Pack* const pack=Installed(Cfg(),content);
+    if(!pack || !Readable(gs+packs::kModeSave,packs::kModeSaveSize,true))return;
+    const packs::Migration m=packs::MigrateModeSave(gs+packs::kModeSave,*pack);
+    if(m!=packs::Migration::kAlready && (static_cast<int>(m)!=lastMigration || content!=lastMigrationContent || m==packs::Migration::kRemapped))
+        Log("PACK save: content %d (%s) %s (layout %08x, legacy rows %d)",content,pack->tag,packs::MigrationName(m),
+            pack->layout,pack->legacyRows);
+    lastMigration=static_cast<int>(m);lastMigrationContent=content;
+}
+
 }  // namespace crew

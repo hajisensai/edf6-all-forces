@@ -36,6 +36,9 @@ struct Pack {
     char digest[17]{};         // 16 hex digits: the definition (tag, every row's mission, the shipped scripts' hashes)
     int rows=0;
     std::uint8_t missing[kMaxRows/8]{};   // the placeholder rows: bit (row % 8) of byte row / 8
+    std::uint32_t layout=0;    // the save marker of these rows (MigrateModeSave): the digest's first 8 hex digits, never 0
+    int legacyRows=0;          // Legacy: the rows a save from before 2026-10-18 may have (0: none to move)
+    std::int16_t legacy[kMaxRows]{};      // ...each one's row now (-1: no longer in the pack)
     bool Missing(int row) const noexcept { return row>=0 && row<rows && (missing[row/8]>>(row%8)&1); }
     int MissingCount() const noexcept { int n=0; for(int i=0;i<rows;++i)n+=Missing(i); return n; }
 };
@@ -84,11 +87,86 @@ inline bool Make(int id,const char* tag,const char* digest,int rows,const char* 
     Pack p{};
     if(!Reserved(id) || !Token(tag,sizeof(p.tag)) || !Token(digest,sizeof(p.digest)) || std::strlen(digest)!=16
        || !ParseMask(mask,rows,p.missing))return false;
-    p.id=id;p.rows=rows;
+    std::uint32_t layout=0;
+    for(int i=0;i<8;++i) {
+        const int d=HexDigit(digest[i]);
+        if(d<0)return false;
+        layout=layout<<4|static_cast<std::uint32_t>(d);
+    }
+    p.id=id;p.rows=rows;p.layout=layout ? layout : 1;
     std::memcpy(p.tag,tag,std::strlen(tag)+1);
     std::memcpy(p.digest,digest,17);
     out=p;
     return true;
+}
+// Legacy="<old row count>:<each old row's row now, -1 none>" (tools/make_edf5_campaign.py packs_ini). An empty value is
+// no legacy; anything malformed (a count off, a row past the pack) is false and leaves none.
+inline bool SetLegacy(Pack& p,const char* text) noexcept {
+    p.legacyRows=0;
+    if(!text || !*text)return true;
+    char* end=nullptr;
+    const long n=std::strtol(text,&end,10);
+    if(end==text || *end!=':' || n<1 || n>kMaxRows)return false;
+    std::int16_t map[kMaxRows]{};
+    const char* at=end+1;
+    for(long i=0;i<n;++i) {
+        const long v=std::strtol(at,&end,10);
+        if(end==at || v<-1 || v>=p.rows || (i+1<n ? *end!=',' : *end!=0))return false;
+        map[i]=static_cast<std::int16_t>(v);
+        at=end+1;
+    }
+    std::memcpy(p.legacy,map,sizeof(map));
+    p.legacyRows=static_cast<int>(n);
+    return true;
+}
+
+// A mode's save as the game holds it while that mode is set (GS+0x57A4, 0x16C4 bytes: the save job reads DEFP_<MST>
+// into it and writes it back from there, 0x7C0C72 / 0x7C3542 -> 0x7BC310 / 0x7BD0A0; docs/mission-list-re.md §0, §1):
+// +0 the current row, +8 clear[10 classes][512 rows] (a byte per row, bit per difficulty), +0x14A0 a byte per row.
+// Every one is indexed by the list's row. Rows 508..511 of the byte-per-row block hold this plugin's marker: the
+// layout its rows are in (no pack of ours has that many rows; nothing reads a row past the list's).
+constexpr std::size_t kModeSave=0x57A4,kModeSaveSize=0x16C4,kClear=8,kClearClasses=10,kRowBytes=0x14A0,kMarkerRow=508;
+constexpr std::size_t kMarker=kRowBytes+kMarkerRow;
+static_assert(kMarker+4<=kRowBytes+kMaxRows && kClear+kClearClasses*kMaxRows<=kRowBytes && kRowBytes+kMaxRows<=kModeSaveSize);
+enum class Migration { kNone,kAlready,kMarked,kRemapped,kForeign };
+inline const char* MigrationName(Migration m) noexcept {
+    switch(m) {
+    case Migration::kNone: return "none";
+    case Migration::kAlready: return "already";
+    case Migration::kMarked: return "marked";
+    case Migration::kRemapped: return "rows-moved";
+    case Migration::kForeign: return "other-layout";
+    }
+    return "?";
+}
+// Once per save: an unmarked one (written before 2026-10-18, or new) gets its rows moved from the pack's Legacy layout
+// (an older install left a mission out, so the rows after it sat higher up) to the rows now, then the marker; a marked
+// one is left alone (a load without a save in between moves nothing twice). A marker of another layout (another
+// definition) is not ours to read: left as it is. kNone: a pack this marker does not fit.
+inline Migration MigrateModeSave(unsigned char* save,const Pack& p) noexcept {
+    if(!save || p.rows<1 || p.rows>static_cast<int>(kMarkerRow))return Migration::kNone;
+    std::uint32_t marker=0;
+    std::memcpy(&marker,save+kMarker,4);
+    if(marker==p.layout)return Migration::kAlready;
+    if(marker)return Migration::kForeign;
+    Migration done=Migration::kMarked;
+    if(p.legacyRows>0) {
+        std::uint8_t clear[kClearClasses][kMaxRows]{},bytes[kMarkerRow]{};
+        for(std::size_t c=0;c<kClearClasses;++c)
+            for(int r=0;r<p.legacyRows;++r)
+                if(p.legacy[r]>=0)clear[c][p.legacy[r]]=save[kClear+c*kMaxRows+static_cast<std::size_t>(r)];
+        for(int r=0;r<p.legacyRows && r<static_cast<int>(kMarkerRow);++r)
+            if(p.legacy[r]>=0)bytes[p.legacy[r]]=save[kRowBytes+static_cast<std::size_t>(r)];
+        std::memcpy(save+kClear,clear,sizeof(clear));
+        std::memcpy(save+kRowBytes,bytes,sizeof(bytes));
+        std::uint32_t row=0;
+        std::memcpy(&row,save,4);
+        row=row<static_cast<std::uint32_t>(p.legacyRows) && p.legacy[row]>=0 ? static_cast<std::uint32_t>(p.legacy[row]) : 0;
+        std::memcpy(save,&row,4);
+        done=Migration::kRemapped;
+    }
+    std::memcpy(save+kMarker,&p.layout,4);
+    return done;
 }
 
 // The room's line: "1;<id>;<tag>;<digest>;<rows>;<missing mask>" (version 1). At most 192 bytes (EOS attribute
