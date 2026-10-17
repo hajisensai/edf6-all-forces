@@ -99,6 +99,14 @@ void MissionCrewVehicleFrame(unsigned char* v) noexcept {
     if(factory && OnlineMaySeatNpc(v))e->dispatched=factory(v,e->restored);
 }
 
+bool MissionAiVehicle(const unsigned char* v) noexcept {
+    if(!v || !Readable(v,kSelfCtrl+8))return false;
+    // A Dummy at the wheel is the stock RideAi's own rider (the plugin never makes one: npcai.cpp NpcInSeat).
+    if(SeatCount(v)>0 && SeatRider(SeatAt(const_cast<unsigned char*>(v),0))==Rider::dummy)return true;
+    for(const auto& e:entries)if(e.vehicle.Is(v))return e.requested;
+    return false;
+}
+
 unsigned char* MissionVehicleById(const unsigned char* id) noexcept {
     if(!id || !readId)return nullptr;
     for(const auto& e:entries) {

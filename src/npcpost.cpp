@@ -21,7 +21,8 @@
 //  - the Barga (501_FortressRobo): its AI (slot 7, 0x60A520) fills the vehicle's own block +0x1610 and slot 4 0x60AEC0
 //    copies that block when the vehicle is on the AI table, seat 0's sticks otherwise. Driven by the stock walk
 //    0x604400(vehicle, block, point, speed, radius) (its signs its own: turn +0x14 = +-1, forward +8 = speed), into the
-//    block and, mapped as the copy maps them, into seat 0 (forward = -LY, turn = -RX).
+//    block and, mapped as the copy maps them, into seat 0 (forward = -LY, turn = -RX). A mission's own AI Barga
+//    (mission_crew.h MissionAiVehicle) keeps no post until the player gives it one: its stock walk is the script's.
 // What the plugin wrote last is remembered: a stick still holding it is the plugin's, not the stock AI driving (a
 // frame without the AI pass clears nothing), and it is taken back when the drive ends.
 #include "crew.h"
@@ -29,6 +30,7 @@
 #include "layout.h"
 #include "online_authority.h"
 #include "memory.h"
+#include "mission_crew.h"
 #include "npc_logic.h"
 #include "npc_mark.h"
 #include <cmath>
@@ -304,6 +306,12 @@ void NpcPostInput(unsigned char* v) noexcept {
         p->cmd=Command{Order::guard,{request.at[0],request.at[1],request.at[2]}};
         request=PendingPost{};break;
     }
+    // A mission's own AI Barga (RideAi by its script or its transporter formation: mission_crew.h MissionAiVehicle) walks
+    // after its targets as the script means it to (EDF4.1 MP004 drops a dozen Balams to fight the Erginus herd). The
+    // leash below is for the player's side: kept here, it took a landed Balam's walk over once 40 m off the point where
+    // its crew first sat, and walked it back there with its back to the Erginus (the player 2026-10-17). It keeps a post
+    // only when the player gives it one on the map.
+    if(f==Family::barga && !p->commanded && !p->routeArrival && MissionAiVehicle(v)){p->active=false;TakeBack(v,f,*p);return;}
     if(!Cfg().tankReturnToPost && !p->commanded && !p->routeArrival){TakeBack(v,f,*p);return;}
     const bool reads=f!=Family::carBase || (At<std::uint32_t>(v,kDriveMode)&1);   // a CarBase's slot 55 reads the stick
     // The Barga's stock AI walks after its target (the tanks' and the mechs' only turn): an NPC-driven Barga fights where
