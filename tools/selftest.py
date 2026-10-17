@@ -8475,9 +8475,11 @@ def edf41_story_small_dragons() -> None:
     assert edf41dlc.rewrite(both) == f'app:/Object/{f}/YerrowSmallDragon.sgo;app:/Object/EDF41MP01/GiantAnt04.sgo'
     assert edf41dlc.rewrite(edf41dlc.rewrite(both)) == edf41dlc.rewrite(both)
     # the generator: one root and alias per shadowed object, in the story folder, under the class with 4.1's ragdoll bodies
-    assert set(m.STORY_ROOTS) == set(edf41dlc.STORY_SHADOWED), m.STORY_ROOTS
+    import edf41friends
+    dragons = [n for n in edf41dlc.STORY_SHADOWED if 'OBJECT/' + n not in edf41friends.LOOKS]   # the soldiers: friend_look
+    assert set(m.STORY_ROOTS) == set(dragons), m.STORY_ROOTS
     assert f not in {folder for _, folder in edf41dlc.PACKS.values()}
-    for name in edf41dlc.STORY_SHADOWED:
+    for name in dragons:
         root = f'{f}/{name}'
         a = m.ALIASES[root]
         assert m.ROOTS[root] == m.STORY_ROOTS[name] > 0 and a.cls == 'DragonSmall' and a.template == name, (root, a)
@@ -8499,7 +8501,7 @@ def edf41_story_small_dragons() -> None:
     assert bvm41.rewritten(mapped, edf41dlc.rewrite) == mapped
     names = pushed(mapped)
     assert not [s for s in names if stock.match(s)], names
-    assert {s.split('/')[-1].upper() for s in names if unmap.match(s)} == set(edf41dlc.STORY_SHADOWED), names
+    assert set(dragons) <= {s.split('/')[-1].upper() for s in names if unmap.match(s)} <= set(edf41dlc.STORY_SHADOWED), names
     restored = bvm41.rewritten(mapped, lambda s: unmap.sub(r'\1/', s))
     assert bvm41.rewritten(restored, edf41dlc.rewrite) == mapped and not [s for s in pushed(restored) if unmap.match(s)]
     # the registry and the committed scripts agree: a story dragon shipped in the folder is named there by every script
@@ -8519,7 +8521,7 @@ def edf41_story_small_dragons() -> None:
     games = m.Games(_edf41_root(), rootcpk.DEFAULT_GAME)
     frog = sgo.load(data=games.read6('OBJECT/DRAGONSMALL401.SGO'))   # why the folder: EDF6's own is EDF5's frog
     assert 'frogdragon' in m.model_entries(frog['animation_model'][0])[0][1].lower(), frog['animation_model'][0]
-    roots = tuple(f'{f}/{n}' for n in edf41dlc.STORY_SHADOWED)
+    roots = tuple(f'{f}/{n}' for n in dragons)
     data, files = m.build(_edf41_root(), rootcpk.DEFAULT_GAME, roots)
     assert not data['skipped'] and {o['object'] for o in data['objects']} == {'OBJECT/' + r for r in roots}, data['skipped']
     models = {'DRAGONSMALL401.SGO': 'SmallDragon401Green.mdb', 'REDSMALLDRAGON.SGO': 'RedSmallDragon.mdb',
@@ -8726,18 +8728,23 @@ def edf41_friends_spawn_as_named() -> None:
 
 @test
 def edf41_friends_rewrite() -> None:
-    """pylib/edf41friends.py rewrite (no game): a story path of LOOKS, in any case and inside a ';' list, becomes its
-    OBJECT/EDF41/ path with the script's case kept; anything else (another object, the new path itself, a DLC path)
-    is unchanged; look_rel agrees with it."""
+    """4.1's soldiers go through the one story rename pylib/edf41dlc.py keeps (STORY_SHADOWED, with the small dragons;
+    no game): a story path of LOOKS, in any case and inside a ';' list, becomes its OBJECT/EDF41/ path with the script's
+    case kept; anything else (another object, the new path itself) is unchanged; edf41friends.look_rel agrees with it
+    and the folder is the story folder."""
+    import edf41dlc
     import edf41friends as ef
-    assert ef.rewrite('app:/Object/AiArmySoldier_AF.sgo') == 'app:/Object/EDF41/AiArmySoldier_AF.sgo'
-    assert ef.rewrite('app:/object/aipalewing_lr_leader.SGO') == 'app:/object/EDF41/aipalewing_lr_leader.SGO'
-    assert ef.rewrite('app:/Object/GiantAnt01.sgo;app:/Object/AiHeavyArmor_SP.sgo') == \
+    rw = edf41dlc.rewrite
+    assert edf41dlc.STORY_FOLDER == ef.LOOK_FOLDER == 'EDF41'
+    assert {r.split('/', 1)[1] for r in ef.LOOKS} <= set(edf41dlc.STORY_SHADOWED)
+    assert rw('app:/Object/AiArmySoldier_AF.sgo') == 'app:/Object/EDF41/AiArmySoldier_AF.sgo'
+    assert rw('app:/object/aipalewing_lr_leader.SGO') == 'app:/object/EDF41/aipalewing_lr_leader.SGO'
+    assert rw('app:/Object/GiantAnt01.sgo;app:/Object/AiHeavyArmor_SP.sgo') == \
         'app:/Object/GiantAnt01.sgo;app:/Object/EDF41/AiHeavyArmor_SP.sgo'
     for same in ('app:/Object/EDF41/AiArmySoldier_AF.sgo', 'app:/Object/AiArmySoldier_OMG.sgo', '小隊01',
-                 'app:/Object/Vehicle403_Tank_AI.sgo', 'mp01:/Object/AiArmySoldier_AF.sgo'):
-        assert ef.rewrite(same) == same, same
-    assert all(ef.rel_of(ef.rewrite('app:/' + r.lower())) == ef.look_rel(r) for r in ef.LOOKS)
+                 'app:/Object/Vehicle403_Tank_AI.sgo'):
+        assert rw(same) == same, same
+    assert all(ef.rel_of(rw('app:/Object/' + r.split('/', 1)[1].lower())) == ef.look_rel(r) for r in ef.LOOKS)
     assert len(ef.LOOKS) == 26 and {ef.FRIENDS[ef.look_rel(r)].source for r in ef.LOOKS} == {'look'}
 
 

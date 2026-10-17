@@ -19,7 +19,7 @@ The SGO each call names is loaded from the path as it is: the EDF6 archives' fil
 the port's (edf41port/objects, tools/make_edf41_objects.py) otherwise ('ported', 'look'). EDF6 keeps EDF4.1's names for
 its own soldiers (AiArmySoldier_AF ... AiPaleWing_LR), which EDF6's own missions spawn: left as they were, a 4.1
 mission's rangers, fencers and wing divers were EDF6's (models, colours, AI weapons). 4.1's are ported to their own
-folder instead (LOOKS, LOOK_FOLDER) and the 4.1 scripts renamed to it (rewrite).
+folder instead (LOOKS, LOOK_FOLDER) and the 4.1 scripts renamed to it (pylib/edf41dlc.py rewrite).
 """
 from __future__ import annotations
 
@@ -47,9 +47,10 @@ class Friend:
 
 # 4.1's own rangers, fencers and wing divers (feedback 2026-10-17: the story's friends were EDF6's soldiers). EDF6
 # keeps these story paths for its own soldiers, which its own missions spawn, so 4.1's files cannot go there: they are
-# ported to OBJECT/EDF41/<name> (tools/make_edf41_objects.py FRIEND_LOOKS) and every 4.1 mission script (the story's
-# and the DLC packs', tools/make_edf41_missions.py) names that path instead (rewrite).
-LOOK_FOLDER = 'EDF41'
+# ported to OBJECT/EDF41/<name> (tools/make_edf41_objects.py FRIEND_LOOKS), the story folder pylib/edf41dlc.py keeps
+# for every story object EDF6 holds as another (STORY_SHADOWED: these and the small dragons), and every 4.1 mission
+# script (the story's and the DLC packs', tools/make_edf41_missions.py) names that path instead (edf41dlc.rewrite).
+LOOK_FOLDER = 'EDF41'   # = edf41dlc.STORY_FOLDER (which takes it from here: edf41dlc imports this module)
 
 
 def _soldiers(prefix: str, kinds: tuple[str, ...]) -> tuple[str, ...]:
@@ -67,19 +68,6 @@ LOOKS: dict[str, str] = {
 def look_rel(story: str) -> str:
     """OBJECT/AIARMYSOLDIER_AF.SGO -> OBJECT/EDF41/AIARMYSOLDIER_AF.SGO (the Mods path its 4.1 file ships at)."""
     return f'OBJECT/{LOOK_FOLDER}/{story.split("/", 1)[1]}'
-
-
-def rewrite(text: str) -> str:
-    """A script's string constant with every story path of LOOKS (a ';'-separated list too) as the path 4.1's soldier
-    ships at, the case of the rest kept: app:/Object/AiArmySoldier_AF.sgo -> app:/Object/EDF41/AiArmySoldier_AF.sgo.
-    Any other string unchanged."""
-    def one(p: str) -> str:
-        if ':/' not in p or rel_of(p) not in LOOKS:
-            return p
-        head, tail = p.split(':/', 1)
-        folder, name = tail.replace('\\', '/').split('/', 1)
-        return f'{head}:/{folder}/{LOOK_FOLDER}/{name}'
-    return ';'.join(one(p) for p in text.split(';'))
 
 
 # Every friendly SGO the 4.1 missions' creation calls name, as the scripts edf41port ships name them (2026-10-17:

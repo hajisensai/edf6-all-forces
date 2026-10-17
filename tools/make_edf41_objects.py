@@ -968,8 +968,10 @@ PATCHES.update(DLC_INSECT_PATCHES)
 # --- EDF4.1's own friendly soldiers (FRIEND_LOOKS; feedback 2026-10-17 「npc好像也没搬过来」, docs/feedback-2026-10-17-
 # edf41-npc.md). The 4.1 missions' rangers, fencers and wing divers name story paths (OBJECT/AIARMYSOLDIER_AF.SGO ...)
 # that EDF6 holds for its own soldiers and its own missions spawn: those stay EDF6's, and 4.1's file of each ships at
-# OBJECT/EDF41/<name> (pylib/edf41friends.py LOOKS, look_rel), which tools/make_edf41_missions.py renames the scripts
-# to. Each is EDF6's file of that name -- the class's behaviour as EDF6 tunes it: AI, camera, climbing, soldier_config
+# OBJECT/EDF41/<name> (pylib/edf41friends.py LOOKS, look_rel), the story folder of edf41dlc.STORY_SHADOWED as the small
+# dragons' (STORY_ROOTS): Games.moved reads it from the story path, and edf41dlc.rewrite renames every 4.1 script's
+# reference (tools/make_edf41_missions.py, story and packs). Built here, not through ROOTS / ALIASES: the template is
+# EDF6's own file of the same name, kept whole but for 4.1's look and unit (alias_dsgo is the Hectors' model merge). Each is EDF6's file of that name -- the class's behaviour as EDF6 tunes it: AI, camera, climbing, soldier_config
 # -- with 4.1's look and 4.1's own unit put in (FRIEND_KEYS: model, CAS, MAB, ragdoll, colours, lights, voice, its 4.1
 # weapons). The class's names are checked against 4.1's files (CLASS_NAMES, friend_names).
 
@@ -1110,13 +1112,15 @@ def friend_look(games: 'Games', root: str) -> dict[str, bytes]:
     and the files of its closure EDF6 lacks (model, CAS with FRIEND_CAS's grafts, ragdoll) at their story paths.
     ValueError when one cannot be built or a check refuses it."""
     src = 'OBJECT/' + root
-    dst = edf41friends.look_rel(src)
+    dst = edf41friends.look_rel(src)   # read from the story path through Games.moved (edf41dlc.STORY_SHADOWED)
     cls = edf41friends.LOOKS[src]
-    need, why = closure(games, src)
+    if games.moved.get(dst) != src:
+        raise ValueError(f'{dst}: not in edf41dlc.STORY_SHADOWED, so no 4.1 script names it')
+    need, why = closure(games, dst)
     if why:
         raise ValueError('; '.join(why))
     out = {r: convert(games, r) for r in need}
-    _version, mine = sgo.read(out.pop(src))
+    _version, mine = sgo.read(out.pop(dst))
     if mine.get('xgs_scene_object_class') != cls:
         raise ValueError(f'{src}: 4.1 class {mine.get("xgs_scene_object_class")}, not {cls}')
     soldier_talk(mine)
