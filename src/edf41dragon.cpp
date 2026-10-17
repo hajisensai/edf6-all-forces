@@ -64,6 +64,10 @@ constexpr std::size_t kGlideStateAt=0x1514;
 constexpr std::size_t kLevelAt=0x49C,kHpAt=0x2F8,kTeamAt=0x314,kWeakAt=0x28;
 constexpr std::size_t kGroundRadiusAt=0x1C70,kCooldownFactorAt=0x1CA0;
 constexpr std::size_t kPosAt=0x90;               // vec4 (edf41ai.cpp)
+// The class's target (0x30C0F0: locks the weak pointer at +0x518 / +0x520, reads it, releases: a raw pointer good for this
+// frame, or null) and where it is, as the class reads it before its ground-radius test (0x3318F5..0x331928): +0x90, or,
+// when +0x378 is set, [[+0x368]] + 0x10.
+constexpr std::size_t kTargetOf=0x30C0F0,kTargetBodyAt=0x378,kTargetBodyPosAt=0x368;
 constexpr std::uint32_t kTrackEvery=300,kTrackLines=120;   // the track log: every 5 s, the first 10 minutes
 // InitParam (0x1E0 bytes): speed +0x94, life +0x98 (int), damage +0x9C, direct hits pass friends +0xB7, size +0xC0,
 // hit stop +0xCC, colour +0xD0, custom variant +0xE8 (tag u16 at +0xF8, 1 = an SGO node), seed +0x1A0.
@@ -80,6 +84,7 @@ struct Handle {
     void* sgo;
 };
 using TickFn=std::uint64_t(__fastcall*)(void*,void*);
+using TargetOfFn=char*(__fastcall*)(void*);
 using CruiseFn=void(__fastcall*)(void*,void*,float);
 using FireballFn=void(__fastcall*)(void*);
 using KeyNodeFn=const Node*(__fastcall*)(void*,const wchar_t*);
@@ -303,8 +308,17 @@ std::uint64_t __fastcall TickHook(void* self,void* arg) {
     d->lastState=state;
     if(++d->ticks%kTrackEvery==0 && d->ticks/kTrackEvery<=kTrackLines) {   // where it flies (does it close on the fight?)
         const float* pos=reinterpret_cast<const float*>(me+kPosAt);
-        Log("EDF41DRAGON %p track: pos %.0f %.0f %.0f state %d time %.0f hp %.0f",self,pos[0],pos[1],pos[2],state,time,
-            *reinterpret_cast<float*>(me+kHpAt));
+        const char* target=reinterpret_cast<TargetOfFn>(image+kTargetOf)(me);
+        float range=-1.0f;   // -1: no target
+        if(target) {
+            const float* at=*reinterpret_cast<const void* const*>(target+kTargetBodyAt)
+                ? reinterpret_cast<const float*>(**reinterpret_cast<char* const* const*>(target+kTargetBodyPosAt)+0x10)
+                : reinterpret_cast<const float*>(target+kPosAt);
+            const float dx=at[0]-pos[0],dy=at[1]-pos[1],dz=at[2]-pos[2];
+            range=std::sqrt(dx*dx+dy*dy+dz*dz);
+        }
+        Log("EDF41DRAGON %p track: pos %.0f %.0f %.0f state %d time %.0f hp %.0f target %p range %.0f",self,pos[0],pos[1],
+            pos[2],state,time,*reinterpret_cast<float*>(me+kHpAt),static_cast<const void*>(target),range);
     }
     if(d->glidePass && state==d->glideAttack && time>=*reinterpret_cast<float*>(clip+kPlayerLength)) {
         d->glidePass=false;   // 4.1: the pass ends in the glide (0x1eef60)
