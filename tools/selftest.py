@@ -8937,6 +8937,104 @@ def edf41_friend_looks_shipped() -> None:
     assert m.rel_of(omg['animation_model'][1]) == 'OBJECT/ARMYSOLDIER.CAS'
 
 
+def _rotation_degrees(rot: list) -> float:
+    """How far the rotation part of the 4x4 `rot` turns, in degrees."""
+    import math
+    return math.degrees(math.acos(max(-1.0, min(1.0, (rot[0] + rot[5] + rot[10] - 1) / 2))))
+
+
+EDF41_SOLDIERS = ('OBJECT/AIARMYSOLDIER_OMG.SGO', 'OBJECT/AIARMYSOLDIER_OMG_LEADER.SGO')   # + LOOKS' (look_rel)
+
+
+@test
+def edf41_friend_grip_shipped() -> None:
+    """4.1's soldiers hold EDF6's weapons with their own skeleton (feedback 2026-10-18 「omega小队持枪姿势有问题」; no game:
+    the files are committed). Every LOOKS soldier and the Omega team: human_direction_adjust's mode twists its 4.1
+    model's spine about the up axis (make_edf41_objects.spine_mode: 4.1's hara bones point local Y up, mode 1; EDF6's 2
+    turns them about the side axis), and soldier_weapon_grab_adjust is the one value of its model (the left wrist's
+    frame change, weapon_grip_adjust): the rangers' a ~84-degree turn, not EDF6's zero, the Omega team's the same as
+    the 4.1 rangers' (one model; both from EDF6 rangers, whose adjust is zero)."""
+    import edf41_objects as eo
+    import edf41friends as ef
+    import make_edf41_objects as m
+    import sgo
+    by_model: dict[tuple, set] = {}
+    for rel in [ef.look_rel(r) for r in ef.LOOKS] + list(EDF41_SOLDIERS):
+        d = sgo.load(data=eo.read(rel))
+        md = m.model_mdb(lambda r: eo.read(m.rel_of(r)), d['animation_model'])
+        hda = d['human_direction_adjust']
+        assert hda[0] == m.spine_mode(md, hda[1]) == 1, (rel, hda)
+        grab = d['soldier_weapon_grab_adjust']
+        assert len(grab) == 2 and all(len(v) == 3 for v in grab), (rel, grab)
+        # one value per model and class (a class's EDF6 templates share a skeleton and an adjust)
+        model = m.rel_of(m.model_entries(d['animation_model'][0])[0][0])
+        by_model.setdefault((model, d['xgs_scene_object_class']), set()).add(repr(grab))
+    assert all(len(grabs) == 1 for grabs in by_model.values()), by_model
+    ranger = sgo.load(data=eo.read(ef.look_rel('OBJECT/AIARMYSOLDIER_AF.SGO')))['soldier_weapon_grab_adjust']
+    for rel in EDF41_SOLDIERS:
+        assert sgo.load(data=eo.read(rel))['soldier_weapon_grab_adjust'] == ranger, rel
+    assert 60 < _rotation_degrees(m.euler_matrix(ranger[1])) < 120, ranger
+
+
+@test
+def edf41_friend_grip_matches_weapons() -> None:
+    """The 4.1 soldiers' soldier_weapon_grab_adjust against the weapons (needs EDF4.1 and EDF6): make_edf41_objects
+    recomputes the shipped value from each soldier's model and its EDF6 template's; and for every ranger AI weapon both
+    games ship with an IK record (MAB list 1, record 0: what EDF+0x68C206 reads), EDF6's IK frame is 75+ degrees from
+    4.1's own -- the hand 4.1's skeleton got before -- and within 20 of it through the shipped adjust (grab · ik,
+    EDF+0x597F00), i.e. the left hand on each grip as 4.1 itself placed it."""
+    import math
+
+    import dsgo
+    import edf41_objects as eo
+    import edf41friends as ef
+    import mab_legacy
+    import make_edf41_objects as m
+    import mdb
+    import sgo
+    edf41, edf6 = os.path.join(m.STEAM, 'Earth Defense Force 4.1'), os.path.join(m.STEAM, 'EARTH DEFENSE FORCE 6')
+    if not all(os.path.isfile(os.path.join(r, 'Root.cpk')) for r in (edf41, edf6)):
+        print('skip  edf41_friend_grip_matches_weapons: needs EDF4.1 and EDF6 installed')
+        return
+    games = m.Games(edf41, edf6)
+    registry = eo.registry()
+    reg = {o['object']: o for o in registry['objects']}
+
+    def file(ref: object) -> bytes | None:
+        r = m.rel_of(str(ref))
+        return eo.read(r) if r in registry['files'] else games.read6(r) if r in games.have6 else None
+
+    for rel in [ef.look_rel(r) for r in ef.LOOKS] + list(EDF41_SOLDIERS):
+        o = reg[rel]
+        template = o.get('look_of') or o['class_keys_from']['template']
+        d = sgo.load(data=eo.read(rel))
+        grab, _mode = m.soldier_grip(file, d, sgo.load(data=games.read6(template)), rel)
+        assert grab == d['soldier_weapon_grab_adjust'], (rel, grab, d['soldier_weapon_grab_adjust'])
+
+    def ik(data: bytes) -> list | None:
+        if data[:4] == b'DSGO':
+            item = dsgo.parse(data).root.get('animation_model').items[2]
+            block = getattr(item, 'data', None)
+        else:
+            block = sgo.read(data)[1]['animation_model'][2]
+        if not isinstance(block, bytes):
+            return None
+        first = [loc for i, loc in mab_legacy.mab_locators(block) if i == 1][:1]
+        return m.euler_matrix([math.degrees(a) for a in first[0].c[:3]]) if first and first[0].c else None
+
+    grab = m.euler_matrix(sgo.load(data=eo.read(ef.look_rel('OBJECT/AIARMYSOLDIER_AF.SGO')))['soldier_weapon_grab_adjust'][1])
+    seen = 0
+    for w in sorted(r for r in games.have6 if r.startswith('WEAPON/AISOLDIER') and r.endswith('.SGO') and r in games.in4):
+        q6, q4 = ik(games.read6(w)), ik(games.read4(w))
+        if q6 is None or q4 is None:
+            continue
+        seen += 1
+        before = _rotation_degrees(mdb.mmul(q6, mdb.inverse_affine(q4)))
+        after = _rotation_degrees(mdb.mmul(mdb.mmul(grab, q6), mdb.inverse_affine(q4)))
+        assert before > 75 and after < 20, (w, before, after)
+    assert seen >= 8, seen
+
+
 @test
 def edf41_friends_load_in_edf6() -> None:
     """The friends' SGOs as the installed game loads them (needs EDF4.1, EDF5 and EDF6: _legacy_games): each 'stock' one is in EDF6's
