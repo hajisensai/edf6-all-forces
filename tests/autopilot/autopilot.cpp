@@ -33,6 +33,7 @@
 #include "edf/memory.h"
 #include "edf/patch.h"
 #include "airdrop_probe.h"
+#include "wdenergy_probe.h"
 
 namespace {
 HMODULE self=nullptr;
@@ -670,8 +671,11 @@ void RunCommand(const char* text) noexcept {
     else if(!std::strcmp(word,"mission"))AskMission(text);
     else if(!std::strcmp(word,"probe")) {
         char what[32]{};
-        if(sscanf_s(text,"%*s %31s",what,static_cast<unsigned>(sizeof(what)))==1 && !std::strcmp(what,"airdrop"))
+        const bool named=sscanf_s(text,"%*s %31s",what,static_cast<unsigned>(sizeof(what)))==1;
+        if(named && !std::strcmp(what,"airdrop"))
             Log("PROBE airdrop installed=%d",autopilot::InstallAirdropProbe(image,&Log,&HoldKey));
+        else if(named && !std::strcmp(what,"wdenergy"))
+            Log("PROBE wdenergy installed=%d",autopilot::InstallWdEnergyProbe(image,&Log));
         else Log("CMD probe: unknown probe %s",what);
     }
     else Log("CMD unknown: %s",word);
@@ -731,6 +735,7 @@ DWORD WINAPI Loop(void*) {
         if(!padIn)InstallPad();
         PluginInputTick();
         autopilot::AirdropProbeTick();
+        autopilot::WdEnergyProbeTick();
         Sleep(15);
     }
 }
