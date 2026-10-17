@@ -614,6 +614,21 @@ def mapo_from_legacy(o: bytes, n_records: int) -> bytes:
     return bytes(new)
 
 
+def cable_graph(mapb: bytes) -> tuple[list[tuple[float, float, float, int]], list[tuple[int, int]]]:
+    """The electric wires of a mapb (either layout: the 0x7C block's fields are the same): its points (x, y, z, wire
+    type = index into the block's .elec name list) and the u16 point pairs the game draws a wire between (EDF.dll's
+    map::sync::cable_init 0x122730..0x1227EB walks exactly these pairs). Point 0 is a dummy (EDF6 zero, EDF4.1
+    uninitialised memory) that no pair names. Empty without the block."""
+    bb = i32(mapb, 0x7C)
+    if not bb:
+        return [], []
+    po, pn = bb + i32(mapb, bb), i32(mapb, bb + 4)
+    qo, qn = bb + i32(mapb, bb + 8), i32(mapb, bb + 0xC)
+    pts = [struct.unpack_from('<3fi', mapb, po + 16 * k) for k in range(pn)]
+    pairs = [struct.unpack_from('<2H', mapb, qo + 4 * k) for k in range(qn)]
+    return pts, pairs
+
+
 # ----------------------------------------------------------------------------- MAC
 
 

@@ -56,8 +56,10 @@ triangles wound as the donor's, normals from the lattice's gradient), a post-ord
 each leaf is a 0x30 header (triangle count at 0x1C), one 0x3C mesh record, the indices, the splat grid (**one 0x50 record
 per 4 m cell: list index 0 + the four corners' 16 weight bytes, each corner summing to 255**), one 16 byte layer list and
 the vertices. A leaf lists its layers by weight, at most 5 (the most any stock leaf lists; the shader variants go to 7); its
-mesh record carries the layer count, `n * 0x101` and the number of distinct texture slices (read off every stock leaf: the
-shader permutation). The trailing tables: the layer table (one 0x50 record per layer: orientation of the colour / multiplier
+mesh record carries the layer count, `n * 0x101` and at +0x28 the index of its shader record in the file's shader
+table: the (n, 1, pass 0, flag 0) record, as every one of the 9753 stock meshes (until 2026-10-17 this was written as the
+number of texture slices, which pointed the leaves at flag 6 or other-count records: the black blocks of the feedback,
+docs/feedback-2026-10-17-edf41-maps.md). The trailing tables: the layer table (one 0x50 record per layer: orientation of the colour / multiplier
 tile, colour slice, multiplier slice (-1 none), normal slice 0, the stock 6.0 and 1.0 x 3; the orientations are rotation 90
 degrees about x with the tile size = 1 / scale), the shader table (stock pattern: per pass the counts at flag 6, the smallest
 again, the counts at 0), two constant tables from the donor. Compression is a greedy LZSS (the game's CMPL), not Okumura's
@@ -65,7 +67,7 @@ choice (0.04 s a leaf instead of 15 s per 1.26 MB). 10.5 MB, 20 s.
 
 **`MAP/<MAP>.MAC`**: the legacy conversion (map_legacy), its ground def made `<map>_fld2mgrid.fmep` (the name replaced in the
 string table and the def's SGO: the same length) with the stock cull distances (100 / 1000) and the record at the origin, the
-mapo entry of that record given the empty grass pair every stock `.fmep` entry has (`{0, 8}` at the end of the file), an
+mapo entry of that record given its plant heights (`{count, 8}` + count floats at the end of the file, pylib/fmex.py), an
 `externals.sgo` `{'resource': ['<map>_fld2mgrid.fmb']}` (written with `sgo.write_depth_first`, which reproduces all 50
 stock ones), the `.shfb`, `.cols.sgo` and `.norm.sgo` members dropped. map.rmpa as for the other maps (rmpa_legacy).
 
@@ -111,9 +113,11 @@ Everything below is in the selftests, on the real files.
 
 ## 6. Open
 
-* Vegetation: trees, bushes, grass and flowers of an SK map are drawn by 4.1's field object from its own tables (names in
-  the field's pool: `sk_tree10m01.trb`, `sk_bush02.trb`, `sk_fld_simpleobj01.mlb`, `sk_flower01.dds` ...), not placed by the
-  mapb. They are not converted: the ground is bare. (The `.trb` / `.mlb` members stay in the MAC unused.)
+* Vegetation: 4.1's field holds its plants in its own table (sk_terrain.vegetation); EDF6 grows plants over a `.fmep`
+  piece from the FMB's table 2 / 3 and the heights in the mapo (pylib/fmex.py, reverse engineered 2026-10-17). The grass
+  and flowers (kind 1 `.dds`) are converted as one group; the trees, bushes and small objects (kind 2 `.trb` / `.mlb`)
+  are not yet (the `.trb` / `.mlb` members stay in the MAC unused): the group format is the same, what is unproven is
+  4.1's `.trb` on EDF6's GrowObjects path.
 * Normal maps of the layers (`.norm.dds`), the layers' `m_correction`-like value (the stock 6.0 is used) and the ground's
   surface materials (4.1's per-vertex material to EDF6's collision palette: `hkcms_build.build_collision(values=)` takes
   them, the value meanings are not known) are not carried.

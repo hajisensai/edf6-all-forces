@@ -20,6 +20,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import bigmap  # noqa: E402
 import fmb_build  # noqa: E402
+import fmex  # noqa: E402
 import hkcms_build  # noqa: E402
 import mdb  # noqa: E402
 import sgo  # noqa: E402
@@ -121,19 +122,45 @@ def edit_mapb(mapb: bytes, shfb_name: str, piece: str) -> bytes:
     return bytes(b)
 
 
-def edit_mapo(mapo: bytes, record: int) -> bytes:
-    """The map's mapo with the ground record's entry as a stock .fmep piece's: its +0 (the grass pair) points at an empty
-    pair {count 0, offset 8}, as in every stock .fmep entry (IG_CAVE503: entry 0 +0 = 28, the pair right after the entry
-    array) - the loader reads it for a piece, and the 4.1 entry of a field has none. The pair goes at the end of the
-    file: nothing else moves, no offset between two blocks changes."""
+def edit_mapo(mapo: bytes, record: int, plant_heights: np.ndarray | None = None) -> bytes:
+    """The map's mapo with the ground record's entry as a stock .fmep piece's: its +0 points at the pair {count, 8}
+    followed by the count heights of the piece's plants (pylib/fmex.py: one f32 per occupied cell of the FMB's plant
+    groups; IG_HEIGEN507's ground: 159441), or the empty {0, 8} of a piece without plants (IG_CAVE503: entry 0 +0 = 28,
+    the pair right after the entry array) - the loader reads it for every piece, and the 4.1 entry of a field has none.
+    The pair goes at the end of the file: nothing else moves, no offset between two blocks changes."""
     mo = bigmap.MapO(mapo)
     at = (len(mapo) + 3) & ~3
-    out = bytearray(mapo) + bytes(at - len(mapo)) + struct.pack('<ii', 0, 8)
+    data = np.asarray(plant_heights if plant_heights is not None else [], dtype='<f4')
+    out = bytearray(mapo) + bytes(at - len(mapo)) + struct.pack('<ii', len(data), 8) + data.tobytes()
     ent = mo.ent_off + record * bigmap.ENT
     if struct.unpack_from('<i', out, ent)[0]:
         raise ValueError('the ground record has a grass pair already')
     struct.pack_into('<i', out, ent, at - ent)
     return bytes(out)
+
+
+GRASS_GROUP = '草・花'   # the stock grass group's name (IG_HEIGEN507 group 0)
+GRASS_COLOR = (0.0, 1.0, 0.502, 0.0)    # an editor colour, as the stock grass types carry one
+
+
+def grass_group(veg: sk_terrain.Vegetation, ox: float, oz: float) -> fmex.Group:
+    """The field's grass and flowers (vegetation types of kind 1) as one EDF6 plant group over the field: the same cells
+    (row = z, column = x from the field's origin; selftest edf41_sk_grass_real: the mean slope under the grass cells of
+    SK_VALLEY01 / SK_SANGAKU01 is 0.10 / 0.09 against 0.57 / 0.64 for all cells this way round, 0.55 / 0.45 transposed) and
+    jitters, a type per grass texture. The 4.1 size is a base and a random extra on it; EDF6 draws between a min and a
+    max, taken as base - extra .. base + extra (the second triple is 0 for the flowers, so they keep one size).
+    The models (trees, bushes, small objects: kind 2) are left out (docs/edf41-sk-terrain.md), and so is SK_CRATER01's
+    kind 1 entry naming a tree (sk_tree10m01.trb), which no cell uses."""
+    grass = [k for k, t in enumerate(veg.types) if t.kind == 1 and t.name.lower().endswith('.dds')]
+    kind = np.full(veg.kind.shape, 0xFF, dtype=np.uint8)
+    types = []
+    for new, k in enumerate(grass):
+        t = veg.types[k]
+        kind[veg.kind == k] = new
+        lo = tuple(max(0.0, a - b) for a, b in zip(t.size, t.extra))
+        hi = tuple(a + b for a, b in zip(t.size, t.extra))
+        types.append(fmex.PlantType(0, t.name.rsplit('.', 1)[0], t.name, GRASS_COLOR, lo, hi, t.params))
+    return fmex.Group(GRASS_GROUP, veg.cell, (ox, oz), types, kind, veg.jitter)
 
 
 def field_origin(mapb: bytes, shfb_name: str) -> tuple[float, float, float]:
@@ -176,13 +203,18 @@ def terrain(mac: bigmap.Marc, rab: bytes, e6: Reader, map_name: str) -> Terrain:
     weights = s.blend[::STEP, ::STEP]
     weights = weights / np.maximum(weights.sum(axis=2, keepdims=True), 1e-9)
     fmb_bytes = fmb_build.build(e6.read(DONOR_FMB), heights, weights, ox, oz, step, layers_of(s))
+    veg = sk_terrain.vegetation(members[shfb_name], s.extent[0])
+    grass = grass_group(veg, ox, oz)
+    fmb_bytes = fmex.with_plants(fmb_bytes, [grass], veg.jitters)
+    grass_heights = fmex.plant_heights(grass, veg.jitters, lambda x, z: fmex.heights_at(heights, ox, oz, step, x, z))
+    # the field's own table (the .shfb member, 4.1's vegetation with it) is dropped: EDF6 has no reader for it
     out = bigmap.Marc(mac.version, [(n, d) for n, d in mac.files
                                     if not n.lower().endswith(('.shfb', '.cols.sgo', '.norm.sgo'))])
     mapb = edit_mapb(members['map.mapb'], shfb_name, piece)
     out.put('map.mapb', mapb)
     mbx = bigmap.MapB(mapb)
     ground = [i for i in range(mbx.rec_n) if mbx.def_name(mbx.def_index(i)) == piece + '.fmep']
-    out.put('map.mapo', edit_mapo(members['map.mapo'], ground[0]))
+    out.put('map.mapo', edit_mapo(members['map.mapo'], ground[0], grass_heights))
     at = [n for n, _ in out.files].index('map.mapb')
     out.files.insert(at, ('externals.sgo', sgo.write_depth_first(SGO_VERSION, {'resource': [piece + '.fmb']})))
     cols_name = [f.name for f in mdb.rab_read(rab).files if f.name.lower().endswith('.cols.dds')]

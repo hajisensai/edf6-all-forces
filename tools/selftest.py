@@ -9053,9 +9053,9 @@ def fmb_build_real() -> None:
     the reference CMPL decoders agree, edits round trip); every leaf has what a stock regular grid leaf has (the same
     header and 0x3C mesh record fields in the same places, 441 vertices of unit normals, 800 triangles wound as the
     donor's, one 0x50 splat record per cell whose four corners each sum to 255 over the leaf's layer slots, the layer list
-    of 16 bytes), the trailing tables are the donor's two constant ones plus the layer table and shader table in the
-    stock layout (the 4-layer pieces' 21 shader records, the single layer ones' 9), and a leaf lists at most the layers a
-    stock leaf lists."""
+    of 16 bytes, its shader the pass-0 record of its layer count in the file's shader table), the trailing tables are
+    the donor's two constant ones plus the layer table and shader table in the stock layout (the 4-layer pieces' 21
+    shader records, the single layer ones' 9), and a leaf lists at most the layers a stock leaf lists."""
     import struct
     import fmb
     import fmb_build
@@ -9088,6 +9088,9 @@ def fmb_build_real() -> None:
         m = lf.meshes[0]
         n = struct.unpack_from('<I', lf.blob, m.base)[0]
         assert 1 <= n <= fmb_build.MAX_LAYERS and m.grid[:4] == (4.0, 4.0, 20, 20) and m.grid[6] == n * 0x101
+        # +0x28: the pass-0 draw record of an n-layer leaf in the file's own shader table (as every stock mesh)
+        t4 = struct.unpack_from('<I', out, 0x20)[0]
+        assert struct.unpack_from('<7I', out, t4 + 28 * m.grid[7]) == (n, 1, 0, 0, 0, 0, 0)
         assert m.weight_count == 400 and m.layermap_count == 1 and len(m.indices) == 2400
         assert (m.weight_off - m.base, m.layermap_off - m.base) == (0x3C + 4800, 0x3C + 4800 + 0x50 * 400)
         nrm = np.array([v[3:] for v in lf.verts])
@@ -9140,7 +9143,8 @@ def hkcms_build_real() -> None:
 def edf41_sk_maps_real() -> None:
     """tools/edf41_maps.py on SK_HEIGEN02 from the real games: the files files_of names; the MAC is a map bigmap verifies
     whose ground def is `sk_heigen02_fld2mgrid.fmep` placed at the origin with the stock .fmep cull distances, its
-    externals.sgo lists the FMB, the field's members are gone and map.rmpa is EDF6's; the FMB is a piece of 625 leaves
+    externals.sgo lists the FMB, the field's members are gone and map.rmpa is EDF6's, its mapo entry holds one height per
+    grass cell of the FMB's plant group (the field's three grass textures); the FMB is a piece of 625 leaves
     covering -1000..1000 whose heights are the field's; the MAD holds the ground body (named for the piece, a compound
     of 2500 tiles) and the objects' bodies, and every compound passes hkcms.bound_problems; the RAB has the colour array
     under the name EDF6's terrain looks up (<map>_color.dds) and the flat normal map; the weather pair and navmesh are the
@@ -9149,6 +9153,7 @@ def edf41_sk_maps_real() -> None:
     import bigmap
     import edf41_maps
     import fmb
+    import fmex
     import hkcms
     import hktag
     import map_legacy
@@ -9182,7 +9187,12 @@ def edf41_sk_maps_real() -> None:
     mo = bigmap.MapO(members['map.mapo'])
     ent = mo.ent_off + ground[0] * bigmap.ENT
     pair_at = ent + struct.unpack_from('<i', mo.raw, ent)[0]
-    assert pair_at > ent and struct.unpack_from('<2i', mo.raw, pair_at) == (0, 8)      # the empty grass pair of a stock .fmep entry
+    # the plants' heights: one per occupied cell of the FMB's grass group (pylib/fmex.py), the ground under it
+    count, rel = struct.unpack_from('<2i', mo.raw, pair_at)
+    assert pair_at > ent and rel == 8
+    grass = fmex.read_table2(files['MAP/SK_HEIGEN02_FLD2MGRID.FMB'])
+    assert len(grass) == 1 and count == int((grass[0].kind != 0xFF).sum()) > 100000
+    assert {t.file for t in grass[0].types} == {'sk_grassleaf01_1.dds', 'sk_grassleaf01_2.dds', 'sk_flower01.dds'}
     # the FMB
     f = fmb.parse(files['MAP/SK_HEIGEN02_FLD2MGRID.FMB'])
     assert len(f.leaves) == 625 and f.count == 1249
@@ -9210,6 +9220,323 @@ def edf41_sk_maps_real() -> None:
     assert color[:4] == b'DDS ' and struct.unpack_from('<I', color, 128 + 12)[0] == 8
     assert files['MAP/SK_HEIGEN02_CLOUDY.MAE'] == e6.read('IG_HEIGEN507_CLOUDY.MAE')
     assert files['MAP/SK_HEIGEN02.NAVMESH.HKT'] == e6.read('IG_HEIGEN507.NAVMESH.HKT')
+
+
+def _stand_in_fmb(stray: bytes = b'') -> bytes:
+    """An FMB's header and trailing tables without chunks: a 16-byte table 1, an empty table 2, 0x100 jitter records,
+    two shader records and `stray` bytes after them."""
+    import struct
+    t1 = 0x2C
+    t2 = t1 + 16
+    t3 = t2 + 8
+    t4 = t3 + 0x1000
+    head = struct.pack('<4sIII7I', b'FMB\0', 0x110, 0, 0x2C, t1, t2, t3, 0x100, t4, 2, 0)
+    jit = bytes((k * 37 + 11) & 0xFF for k in range(0x1000))
+    return head + bytes([0xAA]) * 16 + struct.pack('<Ii', 0, 8) + jit + bytes(range(56)) + stray
+
+
+@test
+def fmex_plants_offline() -> None:
+    """pylib/fmex.py without the game: with_plants writes the plant groups as table 2 (read_table2 reads back every
+    group, type, string, SGO and both grids; the jitter of an empty cell is 0), puts the new jitter table at table 3 and
+    the strings after table 4's records, keeps table 1 and table 4's records where and as they were and drops what the
+    old table 2 had after them; heights_at interpolates in pylib/fmb_build.py's two triangles of a quad (A B D / A D C)
+    and is exact on a plane; plant_heights lists the occupied cells row major at their jittered positions."""
+    import struct
+    import fmex
+    import numpy as np
+    import sgo
+    old = _stand_in_fmb(b'stray strings')
+    params = sgo.write(258, {'colors': [[255, 255, 255], [192, 192, 192]]})
+    g1 = fmex.Group('草・花', 1.0, (-2.0, -3.0), [
+        fmex.PlantType(0, 'sk_grassleaf01_1', 'sk_grassleaf01_1.dds', (0.0, 1.0, 0.5, 0.0), (2.8, 0.7, 2.8), (4.8, 1.3, 4.8), params),
+        fmex.PlantType(0, 'sk_flower01', 'sk_flower01.dds', (1.0, 0.0, 1.0, 0.0), (2.8, 0.7, 2.8), (2.8, 0.7, 2.8))],
+        np.array([[0, 255, 1, 0], [255, 255, 0, 1], [1, 0, 255, 255]], dtype=np.uint8),
+        np.array([[5, 9, 200, 7], [1, 2, 3, 4], [250, 0, 6, 8]], dtype=np.uint8))
+    g2 = fmex.Group('樹木', 2.0, (10.0, 20.0), [fmex.PlantType(1, 'tree', 'sk_tree10m01.tree', (0.0,) * 4, (1.0,) * 3, (1.0,) * 3)],
+                    np.array([[0, 255], [255, 0], [0, 0], [255, 255], [0, 255]], dtype=np.uint8),
+                    np.arange(10, dtype=np.uint8).reshape(5, 2))
+    jit = bytes((k * 7) & 0xFF for k in range(0x1000))
+    new = fmex.with_plants(old, [g1, g2], jit)
+    t1, t2, t3, n3, t4, n4 = struct.unpack_from('<6I', new, 0x10)
+    assert (t1, t2, n3, n4) == (0x2C, 0x2C + 16, 0x100, 2) and new[t1:t2] == bytes([0xAA]) * 16
+    assert new[t3:t4] == jit and new[t4:t4 + 56] == bytes(range(56)) and b's\0t\0r\0a\0y' not in new
+    back = fmex.read_table2(new)
+    assert [g.name for g in back] == ['草・花', '樹木']
+    for a, b in zip(back, [g1, g2]):
+        assert (a.cell, a.origin) == (b.cell, b.origin) and len(a.types) == len(b.types)
+        for ta, tb in zip(a.types, b.types):
+            assert (ta.kind, ta.name, ta.file, ta.color) == (tb.kind, tb.name, tb.file, tb.color)
+            assert np.allclose(ta.size_min, tb.size_min) and np.allclose(ta.size_max, tb.size_max)
+            assert (ta.params is None) == (tb.params is None) and (not ta.params or sgo.read(ta.params) == sgo.read(tb.params))
+        assert (a.kind == b.kind).all() and (a.jitter == np.where(b.kind == 0xFF, 0, b.jitter)).all()
+    assert fmex.with_plants(new, [g1, g2], jit) == new        # the stray strings of a table 2 being replaced are dropped
+    lat = np.array([[0.0, 0.0], [0.0, 1.0]])                   # A = B = C = 0, D = 1
+    h = fmex.heights_at(lat, 0.0, 0.0, 4.0, np.array([3.0, 1.0, 2.0]), np.array([1.0, 3.0, 2.0]))
+    assert np.allclose(h, [0.25, 0.25, 0.5])
+    zz, xx = np.mgrid[0:6, 0:7] * 4.0                           # lattice vertex (i, j) at x = -100 + 4 j, z = 50 + 4 i
+    plane = 2.0 * (xx - 100.0) + 3.0 * (zz + 50.0) + 1.0
+    x, z = np.array([-98.7, -82.1, -76.01]), np.array([51.0, 59.5, 69.8])
+    assert np.allclose(fmex.heights_at(plane, -100.0, 50.0, 4.0, x, z), 2.0 * x + 3.0 * z + 1.0)
+    got = fmex.plant_heights(g1, jit, lambda x, z: x * 1000.0 + z)
+    rows, cols = np.nonzero(g1.kind != 0xFF)
+    j = np.frombuffer(jit, dtype='<f4').reshape(256, 4)[g1.jitter[rows, cols]]
+    want = ((cols + j[:, 1]) * 1.0 - 2.0) * 1000.0 + ((rows + j[:, 2]) * 1.0 - 3.0)
+    assert len(got) == 7 and np.allclose(got, want.astype('<f4'))
+
+
+@test
+def rmpa_wire_links_offline() -> None:
+    """pylib/rmpa_legacy.py's wire links without the game: in a 4.1 map.rmpa a wire waypoint's link to another route
+    holds the index of the target in the mapb's wire point list; with the wires given (map_legacy.cable_graph) such a
+    link becomes the section index of the waypoint at that point, whether it is >= the route's count or below it (where
+    the old reading took it as a route index and joined unrelated waypoints), a route link the wires pair stays one, and
+    without the wires the old behaviour stays (links past the route's end dropped)."""
+    import struct
+    import rmpa_legacy
+
+    def wp(i: int, links: list[int], xyz: tuple[float, float, float]) -> dict:
+        return {'index': i, 'links': links, 'id': 100 + i, 'namelen': 0, 'name': '', 'sgo': None,
+                'pos': tuple(struct.pack('>f', v) for v in xyz) + (struct.pack('>f', 1.0),)}
+
+    a = [(0.0, 5.0, 0.0), (30.0, 5.0, 0.0), (60.0, 5.0, 0.0)]
+    b = [(0.0, 5.0, 40.0), (30.0, 5.0, 40.0)]
+    # the wire points in another order than the routes: [dummy, B0, B1, A0, A1, A2]; A0 hangs a wire to B1
+    pts = [(0.0, 0.0, 0.0, 0)] + [p + (1,) for p in b] + [p + (0,) for p in a]
+    pairs = [(3, 4), (4, 5), (1, 2), (3, 2)]
+    sec = {'namelen': 0, 'name': '', 'sets': [
+        {'namelen': 1, 'name': 'cable_elec_wire_default_01', 'items': [wp(0, [1, 2], a[0]), wp(1, [0, 2], a[1]), wp(2, [1], a[2])]},
+        {'namelen': 1, 'name': 'cable_elec_wire_twin_01', 'items': [wp(0, [1], b[0]), wp(1, [0, 3], b[1])]}]}
+    dropped: list = []
+    remapped: list = []
+    out = rmpa_legacy._routes6([sec], dropped, (pts, pairs), remapped)[0]
+    links = [w['links'] for w in out['wps']]
+    assert links == [[1, 4], [0, 2], [1], [4], [3, 0]], links      # A0 -> B1 (section index 4), B1 -> A0 (0)
+    assert dropped == [] and sorted(r[3] for r in remapped) == [0, 4]
+    dropped = []
+    old = rmpa_legacy._routes6([sec], dropped)[0]
+    assert [w['links'] for w in old['wps']] == [[1, 2], [0, 2], [1], [4], [3]] and dropped == [('cable_elec_wire_twin_01', 1, 3)]
+
+
+@test
+def fmb_plants_stock_real() -> None:
+    """The plant format pylib/fmex.py writes, on EDF6's own IG_HEIGEN507: read_table2 reads its 4 groups (grass and
+    flowers, trees, bushes, small objects: 2500 x 2500 cells of 1 m from (-1250, -1250)), the heights of the ground
+    record's mapo entry are one per occupied cell of all 4 groups (159441), each the ground under the cell's jittered
+    position (sampled: the FMB's own triangles, within 5 cm); and every leaf mesh of it and of IG_HAIKYOPLANE01 names
+    at +0x28 the pass-0 record of its layer count in the file's shader table (pylib/fmb_build.py shader_index)."""
+    import struct
+    import bigmap
+    import fmb
+    import fmex
+    import numpy as np
+    games = _legacy_games()
+    if games is None:
+        print('skip  fmb_plants_stock_real: no EDF4.1 / EDF5 / EDF6 here')
+        return
+    g6 = games[2]
+    for name in ('IG_HAIKYOPLANE01', 'IG_HEIGEN507'):
+        raw = _game_read(g6, f'MAP/{name}.FMB')
+        f = fmb.parse(raw)
+        t4, n4 = struct.unpack_from('<2I', raw, 0x20)
+        recs = [struct.unpack_from('<7I', raw, t4 + 28 * k) for k in range(n4)]
+        for lf in f.leaves.values():
+            for m in lf.meshes:
+                r = recs[m.grid[7]]
+                assert (r[0], r[2], r[3]) == (m.grid[6] >> 8, 0, 0), (name, m.grid, r)
+    groups = fmex.read_table2(raw)
+    assert len(groups) == 4 and all((g.cell, g.origin, g.kind.shape) == (1.0, (-1250.0, -1250.0), (2500, 2500)) for g in groups)
+    assert [len(g.types) for g in groups] == [5, 15, 4, 1] and {t.kind for t in groups[0].types} == {0}
+    assert all(t.kind == 1 for g in groups[1:] for t in g.types)
+    mac = dict(bigmap.Marc.parse(_game_read(g6, 'MAP/IG_HEIGEN507.MAC')).files)
+    mo = bigmap.MapO(mac['map.mapo'])
+    pair = mo.ent_off + struct.unpack_from('<i', mo.raw, mo.ent_off)[0]
+    count, rel = struct.unpack_from('<2i', mo.raw, pair)
+    assert count == sum(int((g.kind != 0xFF).sum()) for g in groups) == 159441 and rel == 8
+    heights = np.frombuffer(mo.raw, dtype='<f4', count=count, offset=pair + 8)
+    jit = raw[struct.unpack_from('<I', raw, 0x18)[0]:][:0x1000]
+    tris = np.array([[lf.verts[i][:3] for i in t] for lf in f.leaves.values() for t in lf.triangles()])
+    lo, hi = tris.min(1), tris.max(1)
+
+    def ground(x: np.ndarray, z: np.ndarray) -> np.ndarray:
+        out = []
+        for px, pz in zip(x, z):
+            for a, b, c in tris[(lo[:, 0] <= px) & (hi[:, 0] >= px) & (lo[:, 2] <= pz) & (hi[:, 2] >= pz)]:
+                d = (b[2] - c[2]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[2] - c[2])
+                l1 = ((b[2] - c[2]) * (px - c[0]) + (c[0] - b[0]) * (pz - c[2])) / d
+                l2 = ((c[2] - a[2]) * (px - c[0]) + (a[0] - c[0]) * (pz - c[2])) / d
+                if min(l1, l2, 1 - l1 - l2) >= -1e-6:
+                    out.append(l1 * a[1] + l2 * b[1] + (1 - l1 - l2) * c[1])
+                    break
+            else:
+                out.append(np.nan)
+        return np.array(out)
+
+    start = 0
+    for g in groups:
+        n = int((g.kind != 0xFF).sum())
+        pick = np.linspace(0, n - 1, 30).astype(int)
+        sample = fmex.Group(g.name, g.cell, g.origin, g.types, np.full(g.kind.shape, 0xFF, np.uint8), g.jitter)
+        rows, cols = np.nonzero(g.kind != 0xFF)
+        sample.kind[rows[pick], cols[pick]] = 0
+        assert np.allclose(fmex.plant_heights(sample, jit, ground), heights[start + pick], atol=0.05), g.name
+        start += n
+
+
+@test
+def edf41_sk_grass_real() -> None:
+    """The vegetation table of EDF4.1's seven SK fields (pylib/sk_terrain.py vegetation): a square grid over the 2000 m
+    field (2000 x 2000 cells of 1 m, or 1000 x 1000 of 2 m), every cell's type one of the table's or 0xFF, kinds 1
+    (grass / flower cards, a .dds the map's grass.merge.sgo names; one unused tree entry) and 2 (.trb / .mlb models),
+    256 jitter records; and
+    the grid's rows are z: on the steep ground of SK_VALLEY01 and SK_SANGAKU01 grass grows in cells of a third the
+    average slope this way round and not transposed. sk_map.grass_group keeps exactly the grass cells."""
+    import map_legacy
+    import numpy as np
+    import sgo
+    import sk_map
+    import sk_terrain
+    games = _legacy_games()
+    if games is None:
+        print('skip  edf41_sk_grass_real: no EDF4.1 / EDF5 / EDF6 here')
+        return
+    for name in ('SK_CRATER01', 'SK_HEIGEN02', 'SK_KAIGAN01', 'SK_SANGAKU01', 'SK_SANGAKU02', 'SK_STEPMOUNTAIN01',
+                 'SK_VALLEY01'):
+        members = dict(map_legacy.parse_marc_lenient(_game_read(games[0], f'MAP/{name}.MAC'))[1])
+        shfb = [d for n, d in members.items() if n.endswith('.shfb')][0]
+        s = sk_terrain.parse(shfb)
+        veg = sk_terrain.vegetation(shfb, s.extent[0])
+        side = veg.kind.shape[0]
+        assert veg.kind.shape == (side, side) and side * veg.cell == 2000.0 and side in (1000, 2000), name
+        assert len(veg.jitters) == 0x1000 and set(np.unique(veg.kind).tolist()) <= set(range(len(veg.types))) | {0xFF}
+        merge = {k.lower() for k in sgo.plain(sgo.read(members['grass.merge.sgo'])[1])}
+        for k, t in enumerate(veg.types):
+            assert t.kind in (1, 2), (name, t)
+            if t.kind == 1 and t.name.endswith('.dds'):
+                assert t.name[:-4].lower() in merge, (name, t.name, merge)
+            elif t.kind == 1:      # SK_CRATER01's sk_tree10m01.trb of kind 1: no cell uses it
+                assert not (veg.kind == k).any(), (name, t.name)
+            else:
+                assert t.name.endswith(('.trb', '.mlb')), (name, t.name)
+        g = sk_map.grass_group(veg, -1000.0, -1000.0)
+        grass = [k for k, t in enumerate(veg.types) if t.kind == 1 and t.name.endswith('.dds')]
+        assert int((g.kind != 0xFF).sum()) == int(np.isin(veg.kind, grass).sum()) > 0
+        if name in ('SK_VALLEY01', 'SK_SANGAKU01'):
+            step = (s.height - 1) / side
+            idx = np.minimum((np.arange(side) * step).astype(int), s.height - 1)
+            h = s.heights[np.ix_(idx, idx)].astype(np.float64)
+            gz, gx = np.gradient(h, veg.cell)
+            slope = np.hypot(gx, gz)
+            here = np.isin(veg.kind, grass)
+            assert slope[here].mean() < slope.mean() / 3 and slope[here.T].mean() > slope.mean() / 2, name
+
+
+@test
+def edf41_map_wires_real() -> None:
+    """The wires of EDF4.1's maps on the real files: every wire route link of NW_HILLYCITY_LIGHT / NW_KASENJIKI01 /
+    NW_SINSUIKOUEN that the old conversion dropped (41 / 22 / 44) or took for a route index while it named a wire point
+    is resolved through the mapb's wire points (156 / 22 / 140), each to a waypoint the wire block pairs with the linking
+    one; and with_wire_textures puts the textures of NW_UNDERGROUND01's wire types (wire_test, nw_wire_black) into its
+    MAC as the RAB's DDS bytes before map.mapo, and nothing into SK_HEIGEN02's (no wire pairs)."""
+    import bigmap
+    import edf41_maps
+    import map_legacy
+    import mdb
+    import rmpa_legacy
+    games = _legacy_games()
+    if games is None:
+        print('skip  edf41_map_wires_real: no EDF4.1 / EDF5 / EDF6 here')
+        return
+    g41 = games[0]
+    for name, fixed, left in (('NW_HILLYCITY_LIGHT', 156, 0), ('NW_KASENJIKI01', 22, 0), ('NW_SINSUIKOUEN', 140, 2)):
+        mac = bigmap.Marc.parse(map_legacy.mac_from_legacy(_game_read(g41, f'MAP/{name}.MAC')))
+        cables = map_legacy.cable_graph(mac.get('map.mapb'))
+        t5, _ = rmpa_legacy.decode5(mac.get('map.rmpa'))
+        assert len(rmpa_legacy.tree_from_legacy(t5)['dropped_links']) in (41, 22, 44)
+        tree = rmpa_legacy.tree_from_legacy(t5, cables)
+        assert len(tree['remapped_links']) == fixed and len(tree['dropped_links']) == left, (name, len(tree['remapped_links']), len(tree['dropped_links']))
+        pts, pairs = cables
+        at: dict = {}
+        for i, p in enumerate(pts):
+            at.setdefault(rmpa_legacy._pos_key(p[:3]), []).append(i)
+        edges = {frozenset(p) for p in pairs}
+        wps = tree['routes']['list'][0]['wps']
+        by_index = {w['index']: w for w in wps}
+        for route, index, link, target in tree['remapped_links']:
+            base = [r for r in tree['routes']['list'][0]['routes'] if r['name'] == route][0]['idx'][0]
+            a = at[rmpa_legacy._pos_key(rmpa_legacy._wp_xyz(by_index[base + index]))]
+            b = at[rmpa_legacy._pos_key(rmpa_legacy._wp_xyz(wps[target]))]
+            assert any(frozenset((x, y)) in edges for x in a for y in b), (name, route, index, link)
+        assert rmpa_legacy.is_edf6(rmpa_legacy.encode6(tree))
+    mac = bigmap.Marc.parse(map_legacy.mac_from_legacy(_game_read(g41, 'MAP/NW_UNDERGROUND01.MAC')))
+    rab = _game_read(g41, 'MAP/NW_UNDERGROUND01.RAB')
+    edf41_maps.with_wire_textures(mac, rab)
+    names = [n for n, _ in mac.files]
+    tex = {f.name: f.data for f in mdb.rab_read(rab).files}
+    assert names[-3:] == ['wire_test.dds', 'nw_wire_black.dds', 'map.mapo'], names[-4:]
+    assert mac.get('wire_test.dds') == tex['wire_test.dds'] and mac.get('nw_wire_black.dds')[:4] == b'DDS '
+    mac = bigmap.Marc.parse(map_legacy.mac_from_legacy(_game_read(g41, 'MAP/SK_HEIGEN02.MAC')))
+    before = list(mac.files)
+    edf41_maps.with_wire_textures(mac, _game_read(g41, 'MAP/SK_HEIGEN02.RAB'))
+    assert mac.files == before
+
+
+@test
+def edf41_maps_valley_files_real() -> None:
+    """tools/edf41_maps.py converts SK_VALLEY01 (grass on 2 m cells, wires on an SK map) into a temporary folder, and the
+    files read back from it: the MAC verifies and carries wire_test.dds; every leaf of the FMB draws with the pass-0
+    shader record of its layer count; the FMB's grass group covers the field from its origin and the mapo entry of the
+    ground has one height per grass cell, each the FMB's ground under the cell's jittered position."""
+    import struct
+    import tempfile
+    import bigmap
+    import edf41_maps
+    import fmb
+    import fmex
+    import numpy as np
+    import rootcpk
+    games = _legacy_games()
+    if games is None:
+        print('skip  edf41_maps_valley_files_real: no EDF4.1 / EDF5 / EDF6 here')
+        return
+    steam = os.path.dirname(rootcpk.DEFAULT_GAME)
+    e41 = edf41_maps.Archives(os.path.join(steam, 'Earth Defense Force 4.1'))
+    e6 = edf41_maps.Archives(rootcpk.DEFAULT_GAME)
+    with tempfile.TemporaryDirectory() as tmp:
+        for rel, data in edf41_maps.convert('SK_VALLEY01', e41, e6).items():
+            os.makedirs(os.path.join(tmp, os.path.dirname(rel)), exist_ok=True)
+            with open(os.path.join(tmp, rel), 'wb') as f:
+                f.write(data)
+
+        def disk(rel: str) -> bytes:
+            with open(os.path.join(tmp, rel), 'rb') as f:
+                return f.read()
+        mac_raw = disk('MAP/SK_VALLEY01.MAC')
+        raw = disk('MAP/SK_VALLEY01_FLD2MGRID.FMB')
+    assert not bigmap.verify(mac_raw)
+    mac = bigmap.Marc.parse(mac_raw)
+    assert mac.get('wire_test.dds')[:4] == b'DDS '
+    f = fmb.parse(raw)
+    t4, n4 = struct.unpack_from('<2I', raw, 0x20)
+    for lf in f.leaves.values():
+        m = lf.meshes[0]
+        assert struct.unpack_from('<7I', raw, t4 + 28 * m.grid[7]) == (m.grid[6] >> 8, 1, 0, 0, 0, 0, 0)
+    (grass,) = fmex.read_table2(raw)
+    assert (grass.cell, grass.origin, grass.kind.shape) == (2.0, (-1000.0, -1000.0), (1000, 1000))
+    mb, mo = bigmap.MapB(mac.get('map.mapb')), bigmap.MapO(mac.get('map.mapo'))
+    ground = [i for i in range(mb.rec_n) if mb.def_name(mb.def_index(i)) == 'sk_valley01_fld2mgrid.fmep'][0]
+    ent = mo.ent_off + ground * bigmap.ENT
+    pair = ent + struct.unpack_from('<i', mo.raw, ent)[0]
+    count, rel = struct.unpack_from('<2i', mo.raw, pair)
+    assert rel == 8 and count == int((grass.kind != 0xFF).sum()) > 10000
+    heights = np.frombuffer(mo.raw, dtype='<f4', count=count, offset=pair + 8)
+    pts = np.array(fmb.points(f))
+    lat = np.full((501, 501), np.nan)
+    lat[np.rint((pts[:, 2] + 1000) / 4).astype(int), np.rint((pts[:, 0] + 1000) / 4).astype(int)] = pts[:, 1]
+    assert not np.isnan(lat).any()
+    jit = raw[struct.unpack_from('<I', raw, 0x18)[0]:][:0x1000]
+    want = fmex.plant_heights(grass, jit, lambda x, z: fmex.heights_at(lat, -1000.0, -1000.0, 4.0, x, z))
+    assert np.abs(want - heights).max() < 1e-3
 
 
 @test
