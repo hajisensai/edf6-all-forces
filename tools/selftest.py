@@ -5556,6 +5556,7 @@ def edf5_campaign_build() -> None:
             like = next(s for s in stock if s[e5c.M_CONTENT] == pack.like and s[e5c.M_TYPE] == m[e5c.M_TYPE])
             assert m[7] == like[7] and m[11:] == like[11:], 'the difficulty ranges are not the matching stock mode\'s'
             assert m[e5c.M_FILES] == pack.paths(kind) and (m[e5c.M_NAME], m[e5c.M_DESC]) == pack.keys(kind)
+            assert m[e5c.M_BGM] == pack.bgm == e5c.BGM5, "the mode's HQ music is not EDF5's"
     for lang, rel in e5c.TEXTS.items():
         base = sgo.read(rootcpk.default().read('ETC', f'TEXTTABLE_STEAM.{lang}.TXT_SGO'))[1]
         text = sgo.read(files[rel])[1]
@@ -5576,6 +5577,7 @@ def edf5_campaign_build() -> None:
                 assert len(r.items) == 11 and r.names == {10: 'flags'} and r.items[0] == float(i), (pack.tag, i)
                 assert r.items[3].items == ([float(i + 1)] if i + 1 < len(rows) else []), (pack.tag, i)
                 assert r.items[1].startswith('app:/Mission/EDF5_OLD_SCRIPT/') and r.items[10] == 8.0
+                assert r.items[7] == 0.0 and r.items[8] == e5c.BGM5, (pack.tag, i, "not EDF5's HQ background / music")
                 rootcpk.default().read(r.items[1].split('app:/', 1)[1], 'MISSION.BVM')
             for rel in txt.values():
                 assert len(sgo.read(files[rel])[1]['table']) == len(rows), rel
@@ -5589,6 +5591,71 @@ def edf5_campaign_build() -> None:
     assert counts == {'main': 110, 'dlc1': 15, 'dlc2': 14}, counts
     # EDF5 Mission Pack 1's four (maps and fortress pre-generated: tools/edf5_dlc.py) are offered too
     assert not [x for x in p['skipped'] if x[0] in {pk.group for pk in e5c.PACKS}], p['skipped']
+
+
+@test
+def edf5_campaign_pack_music() -> None:
+    """Each pack's HQ / sortie screen music (the user, 2026-10-18: EDF5's packs EDF5's own, EDF4.1's EDF4.1's): every
+    row's list member 8 (what EDF.dll 0x8406E0 plays while the row is selected) and its modes' ModeList member 3 (the
+    fallback) are the pack's (Pack.bgm), the test range keeps RM015's row and the stock mode's music. The stand-in
+    rows and modes need no game (CI)."""
+    assert [p.bgm for p in e5c.PACKS] == [e5c.BGM5] * 3 == ['BGM_E5S02_EDFHonbu'] * 3
+    assert [p.pack.bgm for p in e5c.PACKS41] == ['BGM_E4S02_EDFHonbu', 'BGM_Sinkou_intermission',
+                                                 'BGM_Sinkou_taisenmenu']
+    assert e5c.RANGE.bgm is None
+    row = e5c.new_row(4, {'key': 'EDF41/M001', 'bgm': e5c.BGM41, 'progress': 0.5, 'flags': e5c.FLAGS})
+    assert row.items[7] == 0.0 and row.items[8] == e5c.BGM41 and row.names == {10: 'flags'}
+    template = [f'm{k}' for k in range(14)]
+    for pack in (*e5c.PACKS, *(p.pack for p in e5c.PACKS41)):
+        for kind in pack.kinds:
+            entry = e5c.mode_entry(template, pack, 9, kind)
+            assert entry[e5c.M_BGM] == pack.bgm and template[e5c.M_BGM] == 'm3', (pack.tag, kind)
+            assert [entry[k] for k in (2, 4, 7, 11, 12, 13)] == [template[k] for k in (2, 4, 7, 11, 12, 13)]
+    assert e5c.mode_entry(template, e5c.RANGE, 9)[e5c.M_BGM] == 'm3', "the range lost the stock mode's music"
+
+
+@test
+def edf5_campaign_pack_music_real() -> None:
+    """The packs' music against the games themselves (a developer's machine: each part skipped without its game):
+    EDF6's music bank holds every cue; EDF5's HQ music is its modes' ModeList member 3 (its lists have no music
+    member), as is EDF4.1's (config.sgo, and each DLC's package.sgo); and EDF6's own rows 13..36 (missions 14..37,
+    the user's example) play EDF5's."""
+    import gamedir
+    import rootcpk
+    import sgo
+    if not _e5c_have_game():
+        return
+    cues = set(re.findall(rb'BGM_[0-9A-Za-z_]+', open(os.path.join(rootcpk.DEFAULT_GAME, 'SOUND', 'PC',
+                                                                    'TIKYUUX_MUSIC.ACB'), 'rb').read()))
+    for bgm in (e5c.BGM5, *(p.pack.bgm for p in e5c.PACKS41)):
+        assert bgm.encode() in cues, f"{bgm} is not in EDF6's TIKYUUX_MUSIC.ACB"
+    table = dsgo.parse(rootcpk.default().read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO')).root.get('table').items
+    assert {r.items[8] for r in table[13:37]} == {e5c.BGM5} and {r.items[7] for r in table[13:37]} == {0.0}
+    root5 = gamedir.find_other(gamedir.EDF5, near=rootcpk.DEFAULT_GAME)
+    if root5:
+        game5 = rootcpk.Game(root5)
+        assert {str(m[3]) for m in sgo.read(game5.read('DEFAULTPACKAGE', 'CONFIG.SGO'))[1]['ModeList']} == {e5c.BGM5}
+        assert {len(r) for r in sgo.read(game5.read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO'))[1]['table']} == {4}
+    root41 = _edf41_root()
+    if root41:
+        import edf41dlc
+        modes41 = sgo.read(_cpk_file(os.path.join(root41, 'Root.cpk'), 'DEFAULTPACKAGE', 'CONFIG.SGO'))[1]['ModeList']
+        assert {str(m[3]) for m in modes41} == {e5c.BGM41}
+        want = {'mp01': e5c.BGM41_MP01, 'mp02': e5c.BGM41_MP02}
+        for mount, dlc in edf41dlc.find(root41).items():   # only the DLC this EDF4.1 has
+            assert {str(m[3]) for m in sgo.read(dlc.read('package.sgo'))[1]['ModeList']} == {want[mount]}, mount
+
+
+def _cpk_file(path: str, folder: str, name: str) -> bytes:
+    """A file of a CPK, CRILAYLA-decompressed when it is."""
+    import cpk
+    import crilayla
+    archive = cpk.Cpk(path)
+    e = archive.index[(folder, name)]
+    with open(path, 'rb') as h:
+        h.seek(archive.base + int(e['FileOffset']))
+        data = h.read(int(e['FileSize']))
+    return crilayla.decompress(data) if int(e['ExtractSize']) != int(e['FileSize']) else data
 
 
 @test
@@ -9673,8 +9740,10 @@ def edf41_story_pack_real() -> None:
     skipped = {path: why for g, path, why in p['skipped'] if g == e5c.PACK41.group}
     # 2026-10-15: the motherships (301, 401) and UfoRobo are the plugin's own classes: no story mission is left out any more
     assert not skipped and len(rows41) == len(e5c.edf41_text()['missions']) == 89, skipped
+    assert [m[e5c.M_BGM] for m in ours] == [e5c.BGM41] * 2, "the modes' HQ music is not EDF4.1's"
     listed = dsgo.parse(files[e5c.PACK41.list]).root.get('table').items
     assert [r.items[2] for r in listed] == [f'EDF41/{r["path"]}' for r in rows41]
+    assert {(r.items[7], r.items[8]) for r in listed} == {(0.0, e5c.BGM41)}, "not EDF4.1's HQ music"
     for r in rows41:
         for name in r['files']:
             assert files[f'MISSION/EDF41/{r["path"]}/{name}'] == e5c.edf41_script(r['path'], name)
