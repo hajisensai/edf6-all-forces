@@ -28,6 +28,10 @@ edf41dlc.py), under OBJECT/EDF41MP01/ and OBJECT/EDF41MP02/; the mounted paths t
 folders, and a story file EDF6 holds as another file (shadowed: DragonSmall401.mrab is EDF5's frog dragon in EDF6) moves
 into the pack's folder with them.
 
+STORY_ROOTS: the story's objects whose own path EDF6 holds as another object (pylib/edf41dlc.py STORY_SHADOWED: the
+small dragons, EDF5's frog dragons at 4.1's names in EDF6, which EDF6's own missions spawn), under OBJECT/EDF41/ the
+same way (their shadowed model and CAS move with them); every 4.1 script names them there (edf41dlc.rewrite).
+
 STOCK_OVERRIDES: objects EDF6's archives hold, left over from 4.1 (EDF6's own missions never spawn them), whose class
 EDF6 has since changed: the stock file lacks keys the class reads unchecked and crashes on spawn (Transporter401_
 Formation: se_preset_list, EDF+0x5E9A90, M-P003 2026-10-13). Such a root is built like any other (4.1's SGO under an
@@ -907,6 +911,20 @@ SMALL_DRAGON_LONGEST_BODY = 31     # src/edf41smalldragon.cpp kLongestName (char
 for _hs in ('DRAGONSMALL401_HS.SGO', 'REDSMALLDRAGON_HS.SGO', 'YERROWSMALLDRAGON_HS.SGO'):
     ALIASES['EDF41MP01/' + _hs] = Alias('DragonSmall', _hs, (),
                                         override=(('edf41_ragdoll_bodies', list(SMALL_DRAGON_BODIES)),))
+# The story's small dragons (DragonSmall401 green, RedSmallDragon, YerrowSmallDragon: M018, M162-M166, M207, M304, M417,
+# M517, M518, M601 and the packs' M418, M993, DM202, M999 ...), the same 4.1 objects as the DLC's three above but for their
+# own tuning: EDF6 holds each of their paths as EDF5's frog dragon (e518_frogDragon*, the same class and numbers, another
+# model, CAS and ragdoll), which EDF6's own missions spawn, so the 4.1 missions got EDF5's frog in 4.1's place (2026-10-17
+# 「这龙怎么还是蝌蚪的模样」). 4.1's go to OBJECT/EDF41/ (edf41dlc.STORY_SHADOWED; their model archive and CAS, which EDF6 also
+# holds as EDF5's, move with them: relocations) and every converted 4.1 script names them there (edf41dlc.rewrite); the
+# ragdoll bodies as the DLC's (their ragdolls are the same files). Templates: the EDF6 objects of the same name.
+STORY_ROOTS: dict[str, int] = {   # how many of 4.1's own story missions name each (its MISSION/<id>/*.BVM, 2026-10-17)
+    'DRAGONSMALL401.SGO': 14, 'REDSMALLDRAGON.SGO': 7, 'YERROWSMALLDRAGON.SGO': 3,
+}
+for _story, _uses in STORY_ROOTS.items():
+    ROOTS[f'{edf41dlc.STORY_FOLDER}/{_story}'] = _uses
+    ALIASES[f'{edf41dlc.STORY_FOLDER}/{_story}'] = Alias('DragonSmall', _story, (),
+                                                         override=(('edf41_ragdoll_bodies', list(SMALL_DRAGON_BODIES)),))
 
 
 
@@ -1107,6 +1125,15 @@ def pack_folder(rel: str) -> str:
     return parts[1] if len(parts) > 2 and parts[0] == 'OBJECT' and parts[1] in folders else ''
 
 
+def own_folder(rel: str) -> str:
+    """The folder under OBJECT/ an object at Mods path `rel` keeps its own files in: its DLC pack's (pack_folder), the
+    story folder for a STORY_ROOTS object (edf41dlc.STORY_FOLDER), '' for any other."""
+    parts = rel.split('/')
+    if len(parts) > 2 and parts[0] == 'OBJECT' and parts[1] == edf41dlc.STORY_FOLDER:
+        return edf41dlc.STORY_FOLDER
+    return pack_folder(rel)
+
+
 def archives(root: str) -> dict[str, rootcpk.Game]:
     """{Mods-style path: the archive of the game at `root` holding it}, the first archive's copy winning (Root.cpk)."""
     out: dict[str, rootcpk.Game] = {}
@@ -1133,6 +1160,8 @@ class Games:
         # Story files a pack's object needs in 4.1's form where EDF6 holds another file at that path (shadowed): Mods
         # path in the pack's folder -> the story path it is read from (closure fills it)
         self.moved: dict[str, str] = {}
+        for name in edf41dlc.STORY_SHADOWED:   # STORY_ROOTS: 4.1's story object, shipped in the story folder
+            self.moved[f'OBJECT/{edf41dlc.STORY_FOLDER}/{name}'] = f'OBJECT/{name}'
 
     def has4(self, rel: str) -> bool:
         """A file EDF4.1 has at Mods path `rel`: its own archives, a DLC pack's, or a shadowed story file moved."""
@@ -1235,15 +1264,16 @@ def shadowed(games: Games, members: dict) -> list[str]:
 
 
 def relocations(games: Games, rel: str, members: dict) -> dict[str, str]:
-    """{story path: the path in the pack's folder} for the shadowed files (shadowed()) of the SGO at `rel`, recorded in
-    games.moved (read from the story path, shipped at the new one). A pack's object only: a story object's shadowed
-    file has no folder of its own to go to (ValueError; none has one, 2026-10-14)."""
+    """{story path: the path in the object's own folder} for the shadowed files (shadowed()) of the SGO at `rel`,
+    recorded in games.moved (read from the story path, shipped at the new one). Only an object with a folder of its own
+    (own_folder: a pack's, or a STORY_ROOTS one): any other story object's shadowed file has nowhere to go (ValueError)."""
     files = shadowed(games, members)
     if not files:
         return {}
-    folder = pack_folder(rel)
+    folder = own_folder(rel)
     if not folder:
-        raise ValueError(f'{rel}: names {files}, which EDF6 holds as other files, and is no DLC object to move them for')
+        raise ValueError(f'{rel}: names {files}, which EDF6 holds as other files, and has no folder of its own to move '
+                         'them to (a DLC object, or one of edf41dlc.STORY_SHADOWED)')
     out = {}
     for old in files:
         new = f'OBJECT/{folder}/{old.split("/", 1)[1]}'
@@ -1256,11 +1286,12 @@ def relocations(games: Games, rel: str, members: dict) -> dict[str, str]:
 
 def retarget(rel: str, data: bytes, moved: dict[str, str]) -> bytes:
     """A converted SGO with every DLC-mounted path it names as its Mods path's app:/ name (edf41dlc.rewrite), and every
-    story path moved into its pack's folder (`moved`, Games.moved: new Mods path -> story path) as that path.
-    Unchanged bytes when it names neither (the story objects' files stay byte for byte)."""
+    story path moved into its own folder (own_folder: its pack's or the story folder; `moved`, Games.moved: new Mods
+    path -> story path) as that path. Unchanged bytes when it names neither (the other story objects' files stay byte
+    for byte)."""
     if data[:4] != b'SGO\0':
         return data
-    folder = pack_folder(rel)
+    folder = own_folder(rel)
     version, members = sgo.read(data)
     changed = [False]
 

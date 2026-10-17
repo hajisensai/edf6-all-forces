@@ -8,7 +8,8 @@ the story's missions recompiled for EDF5's (MISSION/EDF4.1/<id>/, the runtime ED
 MISSION/EDF5_OLD_SCRIPT), so those are the ones taken.
 
 Per mission, in 4.1's story order (MISSION/MISSIONLIST.SGO):
-  missions/<id>/MISSION.BVM, BEFORE.BVM   EDF5's, as they are
+  missions/<id>/MISSION.BVM, BEFORE.BVM   EDF5's, with the story objects EDF6 holds as other objects named where 4.1's
+                                          are installed (pylib/edf41dlc.py STORY_SHADOWED: app:/Object/EDF41/...)
   missions/<id>/MISSION.RMPA, BEFORE.RMPA  EDF5's, in EDF6's format (pylib/rmpa_legacy.py; the old one crashes EDF6's
                                           reader, EDF+0x6F3D25)
   missions.json: id, files, title / brief per EDF6 language from 4.1's MISSIONTEXT.SGO (rows [JA title, JA brief,
@@ -28,6 +29,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
+import bvm41  # noqa: E402
 import edf41dlc  # noqa: E402
 import edf41zh  # noqa: E402
 import mdb  # noqa: E402
@@ -92,6 +94,8 @@ def build(edf5: str, edf41: str, zh: str) -> tuple[dict, dict[str, bytes], bytes
             data = _read(g5, rel)
             if name.endswith('.RMPA'):
                 data = rmpa_legacy.rmpa_from_legacy(data)
+            else:   # the story objects EDF6 holds as other objects, at the path 4.1's are installed at (edf41dlc)
+                data = bvm41.rewritten(data, edf41dlc.rewrite)
             files[f'{mid}/{name}'] = data
             names.append(name)
         if 'MISSION.BVM' not in names:
@@ -116,7 +120,6 @@ def build_dlc(dlc: 'edf41dlc.Dlc', zh: str) -> tuple[dict, dict[str, bytes], byt
     (mp01:/Object/...) rewritten to where the object converter installs them (pylib/edf41dlc.py); RMPA as the story's.
     Text and pictures are the pack's own, laid out like the story's (rows [JA title, JA brief, EN title, EN brief, ...]),
     the Chinese the patch's <app id>/mission/MISSIONTEXT.SGO (`zh` its mods folder)."""
-    import bvm41
     rows = sgo.plain(sgo.read(dlc.read('MISSION/MISSIONLIST.SGO'))[1])['table']
     texts = sgo.plain(sgo.read(dlc.read('MISSION/MISSIONTEXT.SGO'))[1])['table']
     image = mdb.rab_read(dlc.read('MISSION/MISSIONIMAGE.RAB'))
