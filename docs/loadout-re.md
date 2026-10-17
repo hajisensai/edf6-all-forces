@@ -142,7 +142,7 @@ void __fastcall PreloadPlayerHook(int slot) { Apply(*(uint8_t**)(base + kGameSta
 
 - **离线建人路径不检查拥有**：`0x595C80`/`0x5A3F90`/`0x58F360` 里没有读 `flags bit0`。[确认（就这条路径而言）]
 - 未拥有的武器星级字节多半是 0（从没拾取过），所以按 0 星属性造出来 [推断]；要固定属性可同时写 `GS+0xEB54+id*12` 的 8 个字节（上限见 `unlock_weapon` 里 `min(arg,10)`）。这会进存档，记得还原。
-- UI 才是限制拥有的地方（列表只列已拥有）；联机还有额外限制：加入房间时 `0xD92B0` 内容拥有检查（`Lobby_WarnWeaponEquip`），以及按难度的护甲/武器等级上限（`UnlockArmorWeaponLimit` 解除，`GS+0x6E58`）。联机不在本次范围内。
+- UI 才是限制拥有的地方（列表只列已拥有）；联机还有额外限制：加入房间时 `0xD92B0` 内容拥有检查（`Lobby_WarnWeaponEquip`），以及按难度的护甲/武器等级上限。联机不在本次范围内。（更正，2026-10-17：上限值来自当前模式 ModeList 成员 7 的数据，`GS+0x6E58` 只是把房间的限制开关锁成开，不是上限本身；见 [weapon-level-cap-re.md](weapon-level-cap-re.md)。）
 - `SetUsedWeapon` 会给强制装备的武器置 bit1（“用过”），进存档；无害但会留痕。
 
 ### 3.4 载具 / 支援
@@ -325,7 +325,7 @@ bit2 不会一直挂着：脚本 `SetUsedWeapon()`（`0x70FAF0`，每次出击�
 12 行由 `tools/call_weapons.py` 从 `eWeapon051` 深拷贝，col8 = 0（与 1328 把本体武器相同）、acquire = 0，
 所以置拥有对这条检查**没有影响**，不会被判成 DLC 或报警。联机真正的风险与拥有位无关：
 房间里别人没装同样的 WeaponTable 行时，`MissionSync` 发过去的武器行号对他们无效（加行本身的问题）；
-按难度的武器等级上限（`UnlockArmorWeaponLimit`、`GS+0x6E58`）照常生效，等级高于上限的呼叫武器在低难度房间里仍不可选。
+按难度的武器等级上限照常生效，等级高于上限的呼叫武器在低难度房间里仍不可选（上限的来源见 [weapon-level-cap-re.md](weapon-level-cap-re.md)；测试场任务包的联机模式没有武器等级上限）。
 
 ### 8.6 推荐实现（伪代码）
 

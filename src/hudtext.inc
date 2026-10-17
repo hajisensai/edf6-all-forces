@@ -616,6 +616,34 @@ HUDTEXT(debugSpawnOnline,L"OFFLINE ONLY: %ls",L"联机中不能用调试召唤�
 HUDTEXT(debugSpawnNoPlace,L"NO PLACE FOR %ls",L"召唤失败：找不到放置点（%ls）",L"召喚失敗：找不到放置點（%ls）",L"召喚失敗：置き場所なし（%ls）")
 HUDTEXT(debugSpawnRequested,L"SUPPORT CALLED: %ls  %ls",L"已呼叫支援：%ls  %ls",L"已呼叫支援：%ls  %ls",L"支援要請：%ls  %ls")
 HUDTEXT(debugSpawnRefused,L"SUPPORT REFUSED: %ls  %ls",L"支援未受理：%ls  %ls",L"支援未受理：%ls  %ls",L"支援要請不可：%ls  %ls")
+HUDTEXT(debugSpawnOurs,L"OUR VEHICLES",L"插件载具",L"插件載具",L"プラグインのビークル")
+HUDTEXT(debugSpawnEnemies41,L"EDF4.1 ENEMIES",L"EDF4.1 敌人",L"EDF4.1 敵人",L"EDF4.1 の敵")
+
+// --- The test range's 「摆放」 panel on the M map (hud.cpp MapPlacePanel; range_place.h, mapcmd.cpp; ini RangePlace) ---
+HUDTEXT(placeTitle,L"PLACE",L"摆放",L"擺放",L"配置")
+HUDTEXT(placeTabTip,L"Place vehicles and enemies on the map (, . / keys, D-pad)",L"在地图上摆放载具和敌人（, . / 键，手柄十字键）",
+        L"在地圖上擺放載具和敵人（, . / 鍵，手把十字鍵）",L"マップにビークルと敵を配置（, . / キー、十字キー）")
+HUDTEXT(placeHintMouse,L"Click a row, then the map: one a click   Right click: stop",L"点一行，再点地图：每点一次放一个   右键：取消",
+        L"點一行，再點地圖：每點一次放一個   右鍵：取消",L"行をクリック、次にマップ：1 回で 1 体   右クリック：中止")
+HUDTEXT(placeHintKeys,L", . pick   / category   Enter: at the pointer   Backspace: close",L", . 选择   / 换分类   Enter：放在指针处   Backspace：收起",
+        L", . 選擇   / 換分類   Enter：放在指標處   Backspace：收起",L", . 選択   / 分類   Enter：ポインターの位置   Backspace：閉じる")
+HUDTEXT(placeHintAll,L"Not preloaded: RangePlaceAll=1 in the ini preloads them all",L"未预载的：ini 里 RangePlaceAll=1 才全部预载",
+        L"未預載的：ini 裡 RangePlaceAll=1 才全部預載",L"未プリロード：ini の RangePlaceAll=1 ですべてプリロード")
+HUDTEXT(placeHintPad,L"D-pad: pick / category   A: place at the centre   B: close",L"十字键：选择 / 换分类   A：放在屏幕中心   B：收起",
+        L"十字鍵：選擇 / 換分類   A：放在畫面中心   B：收起",L"十字キー：選択 / 分類   A：画面中央に配置   B：閉じる")
+HUDTEXT(placeOnline,L"Offline only: what the plugin makes would be on this machine alone",
+        L"联机时不能摆放：插件生成的物体只在本机，原版不会同步给其他玩家",L"連線時不能擺放：插件生成的物體只在本機，原版不會同步給其他玩家",
+        L"オンラインでは配置できません：プラグインが作る物体はこの PC だけのもので、他のプレイヤーには同期されません")
+HUDTEXT(placeMissing,L" (not installed)",L"（未安装）",L"（未安裝）",L"（未インストール）")
+HUDTEXT(placeNotPreloaded,L" (not preloaded)",L"（未预载）",L"（未預載）",L"（未プリロード）")
+HUDTEXT(placeBroken,L" (faulted: off)",L"（出错，已停用）",L"（出錯，已停用）",L"（エラー：停止中）")
+HUDTEXT(placeArmed,L"%ls: click the map (right click: stop)",L"摆放 %ls：在地图上点击放下（右键取消）",
+        L"擺放 %ls：在地圖上點擊放下（右鍵取消）",L"%ls：マップをクリックして配置（右クリックで中止）")
+HUDTEXT(placeStopped,L"Placing stopped",L"已取消摆放",L"已取消擺放",L"配置を中止しました")
+HUDTEXT(placeDone,L"Placed: %ls",L"已放下：%ls",L"已放下：%ls",L"配置しました：%ls")
+HUDTEXT(placeFailed,L"Not placed: %ls (see DEBUGSPAWN in the log)",L"摆放失败：%ls（原因见日志 DEBUGSPAWN）",
+        L"擺放失敗：%ls（原因見日誌 DEBUGSPAWN）",L"配置失敗：%ls（理由はログの DEBUGSPAWN）")
+HUDTEXT(placeNoGround,L"No ground under the pointer",L"指针下没有地面",L"指標下沒有地面",L"ポインターの下に地面がありません")
 
 // --- The damage statistics page (hud_stats.inc, over the map) ---
 HUDTEXT(statsTitle,L"DAMAGE STATS",L"伤害统计",L"傷害統計",L"ダメージ統計")

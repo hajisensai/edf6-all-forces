@@ -33,10 +33,16 @@ def main() -> int:
         failures.append('debug_spawn.cpp: the crewed aircraft do not go through SupportCallAt')
     if len(re.findall(r'\bJetLaunchDrone\s*\(', cpp)) != 1:
         failures.append('debug_spawn.cpp: exactly one JetLaunchDrone (the gun drone) expected')
-    spawn = cpp.split('void Spawn(int row,unsigned char* human)', 1)[-1]
-    if 'InSession()' not in spawn or spawn.index('InSession()') > min(
-            spawn.index(x) for x in ('SupportCallAt(', 'JetLaunchDrone(', 'SpawnEnemy(', 'SpawnVehicle(') if x in spawn):
-        failures.append('debug_spawn.cpp Spawn: the online refusal must come before every spawn path')
+    # MakeRow is the one way every spawn goes (the debug spawn tool's Spawn and the test range's place panel PlaceRow).
+    parts = cpp.split('int MakeRow(', 1)
+    spawn = parts[1].split('\n}\n', 1)[0] if len(parts) == 2 else ''
+    paths = [spawn.index(x) for x in ('SupportCallAt(', 'JetLaunchDrone(', 'SpawnEnemy(', 'SpawnVehicle(') if x in spawn]
+    if not spawn or len(paths) != 4 or 'InSession()' not in spawn or spawn.index('InSession()') > min(paths):
+        failures.append('debug_spawn.cpp MakeRow: the online refusal must come before every spawn path')
+    for caller in ('void Spawn(int row,unsigned char* human)', 'int PlaceRow('):
+        body = cpp.split(caller, 1)[-1].split('\n}\n', 1)[0] if caller in cpp else ''
+        if 'MakeRow(' not in body or any(x in body for x in ('SupportCallAt(', 'JetLaunchDrone(', 'SpawnEnemy(', 'SpawnVehicle(')):
+            failures.append(f'debug_spawn.cpp {caller.split("(")[0]}: it makes its row only through MakeRow')
     shipped = set(re.findall(r'L"EDF6VC_CALL_(\w+)"\}', calls))
     brings = {key: what for what, key in re.findall(r'Brings::(\w+),[^\n]*L"EDF6VC_CALL_(\w+)"\}', calls)}
     table = header.split('kSupportCalls[]={', 1)

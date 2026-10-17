@@ -653,6 +653,8 @@ void LoadConfig() noexcept {
     n.debugSpawnSpawnKey=ReadInt(L"DebugSpawnSpawnKey",static_cast<DWORD>(n.debugSpawnSpawnKey));
     n.debugSpawnRange=ReadFloat(L"DebugSpawnRange",n.debugSpawnRange);
     n.debugSpawnDistance=ReadFloat(L"DebugSpawnDistance",n.debugSpawnDistance);
+    n.rangePlace=ReadBool(L"RangePlace",n.rangePlace);
+    n.rangePlaceAll=ReadBool(L"RangePlaceAll",n.rangePlaceAll);
     n.roomLoadout=ReadBool(L"RoomLoadout",n.roomLoadout);
     n.roomPreSync=ReadBool(L"RoomPreSync",n.roomPreSync);
     n.roomLoadoutKey=ReadInt(L"RoomLoadoutKey",static_cast<DWORD>(n.roomLoadoutKey));
@@ -823,6 +825,7 @@ void LoadConfig() noexcept {
     Log("CONFIG debugSpawn=%d keys menu=0x%X prev=0x%X next=0x%X category=0x%X spawn=0x%X range=%.0f distance=%.0f",n.debugSpawn,
         n.debugSpawnKey,n.debugSpawnPrevKey,n.debugSpawnNextKey,n.debugSpawnCategoryKey,n.debugSpawnSpawnKey,n.debugSpawnRange,
         n.debugSpawnDistance);
+    Log("CONFIG rangePlace=%d all=%d",n.rangePlace,n.rangePlaceAll);
     Log("CONFIG roomLoadout=%d preSync=%d key=0x%X button=0x%X",n.roomLoadout,n.roomPreSync,n.roomLoadoutKey,n.roomLoadoutButton);
     Log("CONFIG allClassesRide=%d",n.allClassesRide);
     Log("CONFIG stockStores=%d seatSwitch=%d nextKey=0x%X numberKeys=%d button=0x%X pilot=%d online=%d list=%d",n.stockStores,n.seatSwitch,
