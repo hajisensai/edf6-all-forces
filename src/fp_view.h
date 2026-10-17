@@ -158,6 +158,68 @@ inline bool NativeView(const M4& camera,M4* out) noexcept {
     *out=inverse;return true;
 }
 
+// --- A weapon's size, in its own frame (docs/fp-render-re.md §17) ---
+// A skeleton instance keeps each bone's bounds in its bone record: a flag (+0x09), half sizes along the bone's own
+// axes (+0xF0, at least 0.001) and a centre in the bone's frame (+0x100). The model's Umbra box (instance +0x70 =
+// model+0x110) made of them by 0x11005E0 is, for a model of several meshes or a skinned one (every Ranger rifle and
+// shotgun), the WORLD-axis box round them: its "right" half size is the weapon's width facing one way and its length
+// facing 90 degrees off, and every frame of the walk's sway changes it. The size a hold is fitted to must be taken
+// along the weapon's own axes instead: the same bone boxes, measured in the weapon root's frame.
+struct BoneBox { M4 world; float half[3],centre[3]; };
+
+// The box round `boxes` along the axes of `root` (rows: half axes along root's right, up, ahead, scaled by root's own
+// axes; row 3 the centre in root's frame, w 1). False: no box, or root singular.
+inline bool FrameBounds(const M4& root,const BoneBox* boxes,int n,M4* out) noexcept {
+    M4 inv;
+    if(n<=0 || !InverseAffine(root,&inv))return false;
+    float lo[3]={1e30f,1e30f,1e30f},hi[3]={-1e30f,-1e30f,-1e30f};
+    for(int b=0;b<n;++b) {
+        const M4 local=Mul(boxes[b].world,inv);   // the bone in the root's frame
+        float c[3];Point(local,boxes[b].centre,c);
+        for(int j=0;j<3;++j) {
+            float e=0.0f;
+            for(int k=0;k<3;++k)e+=std::fabs(local.m[k*4+j])*std::fmax(boxes[b].half[k],0.001f);
+            lo[j]=std::fmin(lo[j],c[j]-e);hi[j]=std::fmax(hi[j],c[j]+e);
+        }
+    }
+    M4 r{};
+    for(int j=0;j<3;++j){r.m[j*4+j]=0.5f*(hi[j]-lo[j]);r.m[12+j]=0.5f*(hi[j]+lo[j]);}
+    r.m[15]=1.0f;
+    if(!Finite(r))return false;
+    *out=r;
+    return true;
+}
+
+// The game's own box of the same bones (0x11005E0's path for several meshes, H): along the world's axes. Kept for the
+// offline check that shows what it did to the hold.
+inline M4 WorldBounds(const BoneBox* boxes,int n) noexcept {
+    M4 r=Identity();
+    FrameBounds(Identity(),boxes,n,&r);
+    return r;
+}
+
+// The half sizes of a box (rows 0..2).
+inline void HalfSizes(const M4& box,float* half) noexcept {
+    for(int r=0;r<3;++r)half[r]=std::sqrt(box.m[r*4]*box.m[r*4]+box.m[r*4+1]*box.m[r*4+1]+box.m[r*4+2]*box.m[r*4+2]);
+}
+
+// A bulky or long weapon held further off, a shield out to the side (the hold's offset, camera frame, `out` the camera
+// x of "away from the middle"): from the weapon's half sizes along its own right, up, ahead. False: not a sane size
+// (nothing moved).
+inline bool FitGrip(const float* half,bool dual,bool flip,float out,float* grip) noexcept {
+    if(!std::isfinite(half[0]+half[1]+half[2]) || half[0]>3.0f || half[1]>3.0f || half[2]>3.0f)return false;
+    float x=0.0f,y=0.0f,z=0.0f;
+    if(!dual) {
+        const float girth=std::fmax(half[0],half[1]);
+        z=0.8f*std::fmax(0.0f,girth-0.12f)+0.3f*std::fmax(0.0f,half[2]-0.5f);
+        x=0.6f*std::fmax(0.0f,half[0]-0.08f);
+        y=-0.4f*std::fmax(0.0f,half[1]-0.12f);
+    }
+    if(flip){x+=0.22f;z+=0.15f;}
+    grip[0]+=out*x;grip[1]+=y;grip[2]+=z;
+    return true;
+}
+
 // Every vertex weighed by it lands on `at`.
 inline M4 Collapse(const float* at) noexcept {
     M4 r{};

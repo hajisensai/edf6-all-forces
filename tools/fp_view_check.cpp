@@ -11,6 +11,8 @@
 //    within its length), slid round its axis only within the arc of straight below (a place outside brought to the
 //    edge), and a roll about the axis keeps the hand's distance from it;
 //  - the motion matrix: none is the identity, the pivot stays where it is under any turn, a pitch up tips ahead up;
+//  - the hold is the weapon's own: facing any way, walking or jumping (the third-person sway in the hand), the weapon
+//    and the support hand held to it sit at the same place in the view (the size along the weapon's axes);
 //  - the procedural motion (src/fp_motion.h): nothing happening rests at 0; a shot kicks back and up and settles; a reload
 //    turns it on its side (not down: the grip is below the view's edge); a switch dips out of view and comes back; a sprint lowers it; a turn of the view leaves it behind.
 // Exit code 1 when one fails. cmake --build build --target fp_view_check && build\fp_view_check.exe
@@ -340,7 +342,114 @@ void Springs() {
 }
 }  // namespace
 
+// The hold is the weapon's, not the world's (docs/fp-render-re.md §17; the user, 2026-10-18: centred facing east or
+// west, off to the right with the arms showing facing north or south; a twitch walking and jumping). A rifle of two
+// bone boxes (body and magazine, the native records' half sizes and centres) held by a soldier facing `heading`, its
+// third-person animation turning it by `sway` (pitch, yaw) in the hand; the camera faces `heading` too. Returns the
+// weapon root's place in the camera's own frame after the first person's transform, the size taken along the weapon's
+// own axes (`own`) or, as before, from the game's world-axis box; `wrist` the support hand held to that box.
+struct ViewHold { float root[3],wrist[3]; };
+ViewHold HoldAt(float heading,float swayPitch,float swayYaw,bool own) {
+    const float feet[3]={37.0f,4.0f,-12.0f},eye[3]={0.0f,1.62f,0.10f},zero[3]={0,0,0};
+    const M4 body=Frame(0.0f,heading,feet),camera=CameraAt(body,eye);
+    const float hand[3]={0.18f,1.30f,0.30f};
+    const M4 inHand=Frame(swayPitch,swayYaw,hand);      // the weapon root in the body frame (the animation)
+    const M4 root=Mul(inHand,body);
+    BoneBox boxes[2];
+    const float bodyAt[3]={0.0f,0.03f,0.05f},magAt[3]={0.0f,-0.06f,0.12f};
+    boxes[0].world=Mul(Frame(0,0,bodyAt),root);
+    boxes[0].half[0]=0.035f;boxes[0].half[1]=0.09f;boxes[0].half[2]=0.42f;
+    boxes[0].centre[0]=0.0f;boxes[0].centre[1]=0.02f;boxes[0].centre[2]=0.22f;
+    boxes[1].world=Mul(Frame(0.2f,0,magAt),root);
+    boxes[1].half[0]=0.02f;boxes[1].half[1]=0.08f;boxes[1].half[2]=0.04f;
+    for(float& c:boxes[1].centre)c=0.0f;
+    M4 box=WorldBounds(boxes,2);                         // the game's model+0x110 (world axes)
+    if(own) {FrameBounds(root,boxes,2,&box);box=Mul(box,root);}   // along the weapon's own axes, placed by its root
+    float half[3];
+    if(own){M4 local;FrameBounds(root,boxes,2,&local);HalfSizes(local,half);}
+    else HalfSizes(box,half);
+    float grip[3]={-0.10f,-0.20f,0.40f};                 // right is -x in the camera's frame
+    FitGrip(half,false,false,-1.0f,grip);
+    M4 t,inv;
+    ViewHold out{};
+    if(!AnchoredTransform(root,camera,grip,0.5f,&t) || !InverseAffine(camera,&inv))return out;
+    float world[3];Point(t,root.m+12,world);Point(inv,world,out.root);
+    // The support wrist where the animation has it (on the guard, a little off it), held to the box through T.
+    const float guard[3]={0.07f,-0.05f,0.38f};
+    float wristWorld[3],moved[3],snap[3];
+    Point(root,guard,wristWorld);Point(t,wristWorld,moved);
+    if(SnapToBox(Mul(box,t),moved,0.035f*0.5f,snap))for(int i=0;i<3;++i)moved[i]+=snap[i];
+    Point(inv,moved,out.wrist);
+    (void)zero;
+    return out;
+}
+
+const float zeroPoint[3]={0,0,0};
+float Apart(const float* a,const float* b) { float d[3];Sub(a,b,d);return Length(d); }
+
+void OrientationAndSteadiness() {
+    // Facing: the same hold any way the player faces.
+    const ViewHold ref=HoldAt(0.0f,0.0f,0.0f,true),old0=HoldAt(0.0f,0.0f,0.0f,false);
+    float worstRoot=0,worstWrist=0,oldRoot=0,oldWrist=0;
+    for(int k=0;k<72;++k) {
+        const float heading=-3.14159265f+k*0.0872664626f;   // every 5 degrees
+        const ViewHold h=HoldAt(heading,0.0f,0.0f,true),o=HoldAt(heading,0.0f,0.0f,false);
+        worstRoot=std::fmax(worstRoot,Apart(h.root,ref.root));worstWrist=std::fmax(worstWrist,Apart(h.wrist,ref.wrist));
+        oldRoot=std::fmax(oldRoot,Apart(o.root,old0.root));oldWrist=std::fmax(oldWrist,Apart(o.wrist,old0.wrist));
+    }
+    Expect(worstRoot<1e-4f,"facing any way: the weapon sits at the same place in the view",worstRoot);
+    Expect(worstWrist<1e-4f,"...and the support hand is held to it at the same place",worstWrist);
+    Expect(oldRoot>0.02f,"(the world-axis box moved the weapon with the facing: the reported symptom, m)",oldRoot);
+    Expect(oldWrist>0.01f,"(...and the support hand with it, m)",oldWrist);
+    // Walking and jumping: the third-person animation turns the weapon in the hand every frame; the first person shows
+    // it straight ahead at its grip, so nothing of the sway may reach its place (the twitch).
+    float stepRoot=0,stepWrist=0,stepOld=0;
+    ViewHold last=HoldAt(0.7f,0,0,true),lastOld=HoldAt(0.7f,0,0,false);
+    for(int f=1;f<=240;++f) {
+        const float walk=std::sin(f*0.31f),jump=f>120 ? std::fmin(1.0f,(f-120)/20.0f) : 0.0f;
+        const float pitch=0.07f*walk+0.45f*jump,yaw=0.10f*std::sin(f*0.155f);
+        const ViewHold h=HoldAt(0.7f,pitch,yaw,true),o=HoldAt(0.7f,pitch,yaw,false);
+        stepRoot=std::fmax(stepRoot,Apart(h.root,last.root));stepOld=std::fmax(stepOld,Apart(o.root,lastOld.root));
+        last=h;lastOld=o;
+        (void)stepWrist;
+    }
+    Expect(stepRoot<1e-4f,"walking and jumping: the weapon does not move in the view frame to frame",stepRoot);
+    Expect(stepOld>0.002f,"(the world-axis box twitched it, m a frame)",stepOld);
+    // The draw runs on another thread, 0..3 update steps after the camera step (measured, §17): the soldier has walked
+    // on by then. T composed at the draw from the pose it draws (T = anchor_now^-1 * L * C, L = anchor * T_step * C^-1)
+    // keeps the weapon where the camera step put it in the view; the camera step's own T carries it off by the walk.
+    {
+        const float feet[3]={5,0,9},eye[3]={0,1.62f,0.1f},hand[3]={0.18f,1.3f,0.3f},grip[3]={-0.1f,-0.2f,0.4f};
+        const M4 body=Frame(0,0.8f,feet),camera=CameraAt(body,eye),root=Mul(Frame(0.05f,-0.04f,hand),body);
+        M4 t,inv,camInv;
+        AnchoredTransform(root,camera,grip,0.5f,&t);InverseAffine(camera,&camInv);
+        const M4 place=Mul(Mul(root,t),camInv);
+        float worstNew=0,worstOld=0;
+        for(int steps=0;steps<=3;++steps) {
+            const M4 now=Mul(root,Translate(0.12f*steps*std::sin(0.8f),0.03f*steps,0.12f*steps*std::cos(0.8f)));
+            InverseAffine(now,&inv);
+            const M4 drawT=Mul(Mul(inv,place),camera);
+            float a[3],b[3],at[3],w[3];
+            Point(Mul(now,drawT),zeroPoint,w);Point(camInv,w,a);
+            Point(Mul(now,t),zeroPoint,w);Point(camInv,w,b);
+            Point(place,zeroPoint,at);
+            worstNew=std::fmax(worstNew,Apart(a,at));worstOld=std::fmax(worstOld,Apart(b,at));
+        }
+        Expect(worstNew<1e-4f,"walked on 0..3 steps before the draw: the weapon stays at its place in the view",worstNew);
+        Expect(worstOld>0.1f,"(the camera step's T carried it off by the walk, m)",worstOld);
+    }
+    // The size itself: the same box along the weapon's axes whatever the world turn, and the game's own box along the
+    // world's axes reproduced (its several-meshes path: centre and half sizes of the bones' world boxes).
+    BoneBox one{};one.world=Frame(0.0f,1.5707963f,ref.root);one.half[0]=0.03f;one.half[1]=0.1f;one.half[2]=0.5f;
+    const M4 world=WorldBounds(&one,1);
+    M4 local;FrameBounds(one.world,&one,1,&local);
+    float wh[3],lh[3];HalfSizes(world,wh);HalfSizes(local,lh);
+    Expect(Near(wh[0],0.5f) && Near(wh[2],0.03f),"a weapon facing along the world's x: the game's box is its length wide",wh[0],wh[2]);
+    Expect(Near(lh[0],0.03f) && Near(lh[1],0.1f) && Near(lh[2],0.5f),"...its size along its own axes is its width wide",lh[0],lh[2]);
+}
+
 int main() {
+    OrientationAndSteadiness();
     Expect(Near(CenteredGrip(.17f,.07f),.10f) && Near(CenteredGrip(.34f,.07f),.27f),
            "existing default grip values upgrade toward the centre",CenteredGrip(.17f,.07f));
     Expect(CenteredGrip(.02f,.07f)==0 && Near(CenteredGrip(-.17f,.07f),-.10f),

@@ -297,5 +297,35 @@ int main() {
           "body topology excludes torso-side clavicle and mount faces while retaining complete upper arms");
     ResetFirstPerson();SyncSession();
     check(!FirstPersonOn() && !CameraState(c1) && !CameraState(c2),"mission reset retires all local cameras without restoring freed native objects");
+    {
+        // Production Fit on the native bone-record layout (docs/fp-render-re.md §17): the skeleton instance at
+        // model+0xA0, records with the box flag +0x09, half sizes +0xF0, centre +0x100, world +0xB0. A rifle facing
+        // four ways, its Umbra box (model+0x110) the game's world-axis one: the fitted grip is the same every way.
+        unsigned char gunRecords[2*kBoneStride]{};
+        auto gunModel=weapon+kWeaponModel;
+        Put<void*>(gunModel+0xA0,kInstBones,gunRecords);Put<int>(gunModel+0xA0,kInstCount,2);
+        float first[3]{};bool same=true,umbraMoved=false;float firstUmbra=0;
+        for(int k=0;k<4;++k) {
+            const float heading=k*1.5707963f,axis[3]={0,1,0};
+            fpview::M4 root=fpview::Rotation(axis,std::cos(heading),std::sin(heading));root.m[12]=10;root.m[13]=2;root.m[14]=-4;
+            std::memcpy(gunRecords+kBoneWorld,root.m,64);
+            const fpview::M4 bodyBone=fpview::Mul(fpview::Translate(0,.03f,.05f),root);
+            unsigned char* rec=gunRecords+kBoneStride;
+            std::memcpy(rec+kBoneWorld,bodyBone.m,64);rec[0x09]=1;
+            const float half[3]={.035f,.09f,.42f},centre[3]={0,.02f,.22f};
+            std::memcpy(rec+0xF0,half,12);std::memcpy(rec+0x100,centre,12);
+            fpview::BoneBox box{bodyBone,{half[0],half[1],half[2]},{centre[0],centre[1],centre[2]}};
+            const fpview::M4 umbra=fpview::WorldBounds(&box,1);
+            std::memcpy(gunModel+kModelBounds,umbra.m,64);
+            if(k==0)firstUmbra=umbra.m[0];else umbraMoved=umbraMoved || std::fabs(umbra.m[0]-firstUmbra)>.1f;
+            Current()=State{};Current().on=true;Current().human=human;Current().cam=cam;
+            Current().inHand[0]=gunModel;Current().handOf[0]=kRight;Current().inHandCount=1;
+            float grip[3]={-.1f,-.2f,.4f};Fit(kRight,false,grip);
+            if(k==0)std::memcpy(first,grip,12);
+            for(int i=0;i<3;++i)same=same && std::fabs(grip[i]-first[i])<1e-5f;
+        }
+        check(umbraMoved && same,"the hold is fitted to the weapon's own size (bone records), not the world-axis Umbra box: the same facing any way");
+        Put<void*>(gunModel+0xA0,kInstBones,nullptr);Put<int>(gunModel+0xA0,kInstCount,0);
+    }
     return failed ? 1 : 0;
 }

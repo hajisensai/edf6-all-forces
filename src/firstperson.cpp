@@ -7,7 +7,8 @@
 //    yaw-only body frame (+0x5E0), eased, so the animation's bob does not shake the view. The stock matrix is put back
 //    before the next step (its easing reads it), as map.cpp does. The map and the TV chain outside this hook: their
 //    views win while they are open and they ease from this one.
-//  - The draw (H, fp-render-re.md §1-2): AnimationModel's draw (vtable slot 1, 0x6BF9F0) runs on the game thread and
+//  - The draw (H, fp-render-re.md §1-2, §17): AnimationModel's draw (vtable slot 1, 0x6BF9F0) runs on a render thread
+//    (measured: not the camera step's, and up to three update steps after it: T is composed there, DrawTransforms) and
 //    builds the skinning palette from the draw pose array ([inst+0x30], one 4x4 a bone) inside the call. For the local
 //    player's body and weapons, in the colour passes (1 G-buffer, 2 translucent, 5 the far camera) that array is
 //    rewritten for the call and put back after: every pose P becomes P·T (fp_view.h: the viewmodel in front of the
@@ -165,6 +166,9 @@ int hookedCount=0;
 void __fastcall DrawHook(void* model,void* ctx,int pass,void* view);
 bool HookDrawOf(void** vt) noexcept;
 int HandOfModel(const void* model) noexcept;
+const unsigned char* HandWeapon(int hand,bool* flip) noexcept;
+bool HandBounds(int hand,const unsigned char* w,M4* out) noexcept;
+int BoneIndex(const unsigned char* inst,const wchar_t* name) noexcept;
 
 struct Unbatched { const void* model; void* batch; };
 struct alignas(16) Flash { float m[16]; const float* src; int age,hand; };
@@ -207,11 +211,33 @@ struct State {
     M4 moved[2];                // the motion as a matrix about each hand's grip (fp_view.h MotionMatrix)
     bool viewOk[2];             // each hand's T this frame (kRight, kLeft), built by the camera step
     M4 view[2];
+    float grip[2][3],hold[3];    // the hold the camera step chose for each hand (camera frame, x left), the aim frame's
+    // Each hand's anchor placed in the camera's own frame by the camera step: its weapon's root, and the body's bone
+    // that root hangs on (bodyMount). The draw composes its T from these, the poses it draws and its own camera
+    // (DrawTransforms): the draws run on another thread, up to three update steps after the camera step (§17).
+    M4 placeWeapon[2],placeBody[2];
+    bool placeWeaponOk[2],placeBodyOk[2];
+    wchar_t bodyMount[2][24];
     bool shown[2];              // visible arm ownership for the colour topology mask (neither while riding)
     bool axisOk[2];             // a point on the axis of the weapon each hand holds, after T (the weapon's root)
     float axis[2][3];
     bool onOther[2];            // a free hand drawn on the other hand's weapon, whose bounds after T are otherBox
     M4 otherBox[2];
+    // Each hand's weapon's size along its own axes (WeaponBounds), taken once a weapon: the hold it is fitted to is the
+    // weapon's, not the frame's (a reload's magazine bone does not move the gun).
+    // Debug=1: the steadiness probe (Probe).
+    bool probeHave[2],probeWristHave[2],builtReady;
+    float probeRoot[2][3],probeStep[2],probeWrist[2][3],probeWristStep[2],probeSubmitOff;
+    unsigned probeSubmits,probeSubmitsOff,probeFrames,probeAir;
+    float probeSpeed,probeMountGap[2],probeMountLeast[2];
+    bool probeMountHave[2];
+    float probeBend[2];
+    M4 built;                   // the camera matrix the viewmodel was built on this step
+    M4 probeAnchor[2];bool probeAnchored[2];float probeDrawRoot,probeDrawMount;unsigned probeDraws;
+    unsigned probeCamThread,probeDrawThread,probeCamSteps;
+    const unsigned char* boundsOf[2];
+    bool boundsOk[2];
+    M4 bounds[2];
     bool riding;                // in a vehicle: the eye at the seat's cockpit, the rider not drawn (Ride)
     RideView ride;
     CockpitScreens screens;     // ...and its screens round the eye (VehicleScreens), for the HUD
@@ -252,6 +278,11 @@ void CaptureRenderCamera(void* camera,const float* world) noexcept {
     if(!state)return;
     M4 frame;std::memcpy(frame.m,world,64);
     state->renderViewReady=fpview::NativeView(frame,&state->renderView);
+    if(Cfg().debug && state->on && state->builtReady && !state->riding) {
+        float off=0.0f;for(int i=0;i<16;++i)off+=std::fabs(frame.m[i]-state->built.m[i]);
+        ++state->probeSubmits;
+        if(off>1e-3f){++state->probeSubmitsOff;state->probeSubmitOff=std::fmax(state->probeSubmitOff,off);}
+    }
     ++viewRevision;
 }
 using CameraSubmitFn=void(__fastcall*)(void*,const float*);
@@ -521,6 +552,7 @@ fpmotion::Cue Cues(const unsigned char* h) noexcept {
 // The motion this frame about each hand's pivot (right is -x in the camera's frame: x, yaw and roll mirrored).
 void Motion(const unsigned char* h,const float (*pivot)[3]) noexcept {
     const auto cue=Cues(h);
+    if(Cfg().debug){Current().probeSpeed=std::fmax(Current().probeSpeed,cue.speed);Current().probeAir+=!cue.grounded;++Current().probeFrames;}
     const fpmotion::Pose p=fpmotion::Advance(Current().motion,cue);
     if(Cfg().debug && cue.shots)Log("FP recoil: shots %d (counter %d events %d), strength %.3f, back %.4f pitch %.4f",
                                   cue.shots,Current().sampledShots,Current().notifiedShots,cue.recoil,p.z,p.pitch);
@@ -729,18 +761,85 @@ void* __fastcall FlashCreateHook(void* factory,void* a,void* cls,void* param) {
 }
 
 // Debug=1: what the viewmodel is built from, every 5 s (every half second through a reload).
-void Probe(const bool* anchored,const M4* anchor) noexcept {
+void Probe(const bool* anchored,const M4* anchor,const M4& camera) noexcept {
+    if(!Cfg().debug)return;
+    // The steadiness (docs/fp-render-re.md §17): each hand's weapon root in the camera's own frame (x left, y up, z
+    // ahead) frame to frame, the most it moved in a frame over the window.
+    M4 inverse;
+    const bool invOk=fpview::InverseAffine(camera,&inverse);
+    float root[2][3]{};
+    for(int hand=kRight;hand<=kLeft;++hand) {
+        if(!invOk || !anchored[hand] || !Current().viewOk[hand]){Current().probeHave[hand]=false;continue;}
+        float world[3];fpview::Point(Current().view[hand],anchor[hand].m+12,world);fpview::Point(inverse,world,root[hand]);
+        if(Current().probeHave[hand]) {
+            float d[3];fpview::Sub(root[hand],Current().probeRoot[hand],d);
+            Current().probeStep[hand]=std::fmax(Current().probeStep[hand],fpview::Length(d));
+        }
+        std::memcpy(Current().probeRoot[hand],root[hand],12);Current().probeHave[hand]=true;
+        // The body's own mount bone (the weapon's root natively is that bone's matrix, fp-render-re.md §8) as drawn,
+        // against the weapon's root as drawn, in the root's frame: equal when both were updated in the same step.
+        bool flip=false;
+        const unsigned char* w=HandWeapon(hand,&flip);
+        const auto mount=w ? At<const unsigned char*>(w,kWeaponMount) : nullptr;
+        const auto name=mount ? At<const wchar_t*>(mount,0) : nullptr;
+        const auto inst=Current().body ? At<const unsigned char*>(Current().body,kBaseLod+kLodInst) : nullptr;
+        const auto pose=inst ? At<const float*>(inst,kInstPose) : nullptr;
+        const int at=name && inst && pose ? BoneIndex(inst,name) : -1;
+        M4 rootInv;
+        if(at>=0 && fpview::InverseAffine(anchor[hand],&rootInv)) {
+            float off[3];fpview::Point(rootInv,pose+at*16+12,off);
+            const float gap=fpview::Length(off);
+            Current().probeMountGap[hand]=std::fmax(Current().probeMountGap[hand],gap);
+            Current().probeMountLeast[hand]=Current().probeMountHave[hand] ? std::fmin(Current().probeMountLeast[hand],gap) : gap;
+            Current().probeMountHave[hand]=true;
+        }
+    }
     static ULONGLONG at=0;
     const ULONGLONG now=GetTickCount64();
-    if(!Cfg().debug || now-at<(Current().reloadLeft>0 ? 500u : 5000u))return;
+    if(now-at<(Current().reloadLeft>0 ? 500u : 5000u))return;
     at=now;
     const float* eye=reinterpret_cast<const float*>(Current().cam+kCamEyeRow);
+    const float* f=camera.m+8;
+    const float yaw=std::atan2(f[0],f[2])*57.29578f;
     for(int hand=kRight;hand<=kLeft;++hand) {
         const M4& a=anchor[hand];
-        Log("FP probe %s hand: anchored=%d view=%d | root (%.2f,%.2f,%.2f) from the eye | in hand %d, reload %d, act 0x%X",
+        Log("FP probe %s hand: anchored=%d view=%d | root (%.2f,%.2f,%.2f) from the eye | facing %.0f deg | root in the camera (%.3f,%.3f,%.3f), most moved in a frame %.4f | wrist in the camera (%.3f,%.3f,%.3f), most moved %.4f | in hand %d, reload %d, act 0x%X",
             hand==kRight ? "right" : "left",anchored[hand],Current().viewOk[hand],a.m[12]-eye[0],a.m[13]-eye[1],a.m[14]-eye[2],
+            yaw,root[hand][0],root[hand][1],root[hand][2],Current().probeStep[hand],
+            Current().probeWrist[hand][0],Current().probeWrist[hand][1],Current().probeWrist[hand][2],Current().probeWristStep[hand],
             Current().inHandCount,Current().reloadLeft,Current().act);
+        if(Current().probeMountHave[hand])
+            Log("FP probe %s mount: the body's mount bone from the weapon's root as drawn, %.4f..%.4f m (scaled by nothing: world)",
+                hand==kRight ? "right" : "left",Current().probeMountLeast[hand],Current().probeMountGap[hand]);
+        Current().probeMountHave[hand]=false;Current().probeMountGap[hand]=0.0f;
+        Log("FP probe %s arm: the forearm turned against the hand by %.1f deg at most",hand==kRight ? "right" : "left",Current().probeBend[hand]);
+        Current().probeBend[hand]=0.0f;
+        Current().probeStep[hand]=Current().probeWristStep[hand]=0.0f;
+        // What the hold was fitted to before (the Umbra box, world axes) against the weapon's own size, this frame.
+        bool flip=false;
+        const unsigned char* w=HandWeapon(hand,&flip);
+        M4 own;
+        if(w && HandBounds(hand,w,&own)) {
+            float worldHalf[3],ownHalf[3],before[3]{},after[3]{};
+            fpview::HalfSizes(MatrixAt(w+kWeaponModel+kModelBounds),worldHalf);fpview::HalfSizes(own,ownHalf);
+            fpview::FitGrip(worldHalf,false,flip,1.0f,before);fpview::FitGrip(ownHalf,false,flip,1.0f,after);
+            Log("FP probe %s weapon: Umbra box %.2f x %.2f x %.2f -> fit (%.3f,%.3f,%.3f); own size %.2f x %.2f x %.2f -> fit (%.3f,%.3f,%.3f)",
+                hand==kRight ? "right" : "left",worldHalf[0],worldHalf[1],worldHalf[2],before[0],before[1],before[2],
+                ownHalf[0],ownHalf[1],ownHalf[2],after[0],after[1],after[2]);
+        }
     }
+    Log("FP probe camera: submitted %u frames, %u of them not the matrix the viewmodel was built on (most off %.4f)",
+        Current().probeSubmits,Current().probeSubmitsOff,Current().probeSubmitOff);
+    Log("FP probe draws: %u weapon draws, the drawn root %.4f m at most from the camera step's; the body's mount bone %.4f m",
+        Current().probeDraws,Current().probeDrawRoot,Current().probeDrawMount);
+    Log("FP probe order: %u camera steps (thread %u), weapon draws on thread %u",
+        Current().probeCamSteps,Current().probeCamThread,Current().probeDrawThread);
+    Current().probeCamSteps=0;
+    Current().probeDraws=0;Current().probeDrawRoot=Current().probeDrawMount=0.0f;
+    Log("FP probe motion: %u frames, fastest %.3f m/frame, %u in the air, bob phase %.2f",Current().probeFrames,
+        Current().probeSpeed,Current().probeAir,Current().motion.phase);
+    Current().probeSubmits=Current().probeSubmitsOff=0;Current().probeSubmitOff=0.0f;
+    Current().probeFrames=Current().probeAir=0;Current().probeSpeed=0.0f;
 }
 
 // The camera, the player's state given back: the near clip, the look smoothing.
@@ -791,31 +890,131 @@ bool NativeGrip(const unsigned char* weapon) noexcept {
            std::strcmp(name,".?AVWeapon_PileBanker@@")==0 || std::strcmp(name,".?AVWeapon_Shield@@")==0;
 }
 
-// A bulky or long weapon held further off (measured boxes, half sizes right x up x ahead: the Air Raider's limpet gun
+// The weapon `w`'s size along its own axes (fp_view.h FrameBounds, docs/fp-render-re.md §17): its model's skeleton
+// instance (model+0xA0, the one whose +0x70 is the Umbra box model+0x110) keeps each bone's box in its bone record
+// (flag +0x09, half sizes +0xF0, centre +0x100, the world matrix +0xB0: the records 0x11005E0 reads); measured in
+// bone 0's frame (the weapon's root). False: no bone with a box.
+bool WeaponBounds(const unsigned char* w,M4* out) noexcept {
+    constexpr std::size_t kInst=0xA0,kBoxFlag=0x09,kBoxHalf=0xF0,kBoxCentre=0x100;
+    constexpr int kMostBoxes=64;
+    const unsigned char* inst=w+kWeaponModel+kInst;
+    const auto bones=At<const unsigned char*>(inst,kInstBones);
+    const auto n=At<std::int32_t>(inst,kInstCount);
+    if(!bones || n<=0 || n>kMostBones)return false;
+    fpview::BoneBox boxes[kMostBoxes];
+    int count=0;
+    for(std::int32_t i=0;i<n && count<kMostBoxes;++i) {
+        const unsigned char* rec=bones+static_cast<std::size_t>(i)*kBoneStride;
+        if(!rec[kBoxFlag])continue;
+        fpview::BoneBox& b=boxes[count++];
+        b.world=MatrixAt(rec+kBoneWorld);
+        std::memcpy(b.half,rec+kBoxHalf,12);std::memcpy(b.centre,rec+kBoxCentre,12);
+    }
+    return fpview::FrameBounds(MatrixAt(bones+kBoneWorld),boxes,count,out);
+}
+
+// The size of the weapon in `hand` (cached a weapon: WeaponBounds), false: none.
+bool HandBounds(int hand,const unsigned char* w,M4* out) noexcept {
+    if(!w)return false;
+    if(Current().boundsOf[hand]!=w) {
+        Current().boundsOf[hand]=w;
+        Current().boundsOk[hand]=WeaponBounds(w,&Current().bounds[hand]);
+        if(Cfg().debug) {
+            float half[3]{},native[3]{};
+            fpview::HalfSizes(Current().bounds[hand],half);
+            const M4 box=MatrixAt(w+kWeaponModel+kModelBounds);
+            fpview::HalfSizes(box,native);
+            Log("FP weapon %p size along its own axes %.2f x %.2f x %.2f (ok %d); its Umbra box %.2f x %.2f x %.2f, off-diagonal %.3f",
+                static_cast<const void*>(w),half[0],half[1],half[2],Current().boundsOk[hand],native[0],native[1],native[2],
+                std::fabs(box.m[1])+std::fabs(box.m[2])+std::fabs(box.m[4])+std::fabs(box.m[6])+std::fabs(box.m[8])+std::fabs(box.m[9]));
+        }
+    }
+    if(Current().boundsOk[hand])*out=Current().bounds[hand];
+    return Current().boundsOk[hand];
+}
+
+// A bulky or long weapon held further off (measured half sizes right x up x ahead: the Air Raider's limpet gun
 // 0.28 x 0.17 x 0.46 filled half the view at the rifle's grip; the Mag Blaster 0.03 x 0.12 x 0.50 did not), a shield
-// out to the side. `grip` in the camera's frame (x to the left); `dual`: both hands hold one (their grips are already
-// set for the Fencer's big weapons: only a shield is moved).
+// out to the side (fp_view.h FitGrip). The size is the weapon's along its own axes (WeaponBounds), never the Umbra box
+// model+0x110: that one is along the world's axes, so the hold moved with the way the player faced (the user,
+// 2026-10-18: centred facing east or west, off to the right with the arms showing facing north or south) and with the
+// walk's sway (the twitch). `grip` in the camera's frame (x to the left); `dual`: both hands hold one (their grips are
+// already set for the Fencer's big weapons: only a shield is moved).
 void Fit(int hand,bool dual,float* grip) noexcept {
     bool flip=false;
     const unsigned char* w=HandWeapon(hand,&flip);
-    if(!w)return;
-    const M4 box=MatrixAt(w+kWeaponModel+kModelBounds);
+    M4 box;
+    if(!HandBounds(hand,w,&box))return;
     float half[3];
-    for(int r=0;r<3;++r)half[r]=std::sqrt(box.m[r*4]*box.m[r*4]+box.m[r*4+1]*box.m[r*4+1]+box.m[r*4+2]*box.m[r*4+2]);
-    if(!std::isfinite(half[0]+half[1]+half[2]) || half[0]>3.0f || half[1]>3.0f || half[2]>3.0f)return;
-    const float out=hand==kRight ? -1.0f : 1.0f;   // away from the middle, in the camera's x
-    float x=0.0f,y=0.0f,z=0.0f;
-    if(!dual) {
-        const float girth=std::fmax(half[0],half[1]);
-        z=0.8f*std::fmax(0.0f,girth-0.12f)+0.3f*std::fmax(0.0f,half[2]-0.5f);
-        x=0.6f*std::fmax(0.0f,half[0]-0.08f);
-        y=-0.4f*std::fmax(0.0f,half[1]-0.12f);
-    }
-    if(flip){x+=0.22f;z+=0.15f;}
-    grip[0]+=out*x;grip[1]+=y;grip[2]+=z;
+    fpview::HalfSizes(box,half);
+    fpview::FitGrip(half,dual,flip,hand==kRight ? -1.0f : 1.0f,grip);   // away from the middle, in the camera's x
 }
 
-// Each hand's T this frame (above: its own weapon's anchor, else the other hand's T, else the aim frame).
+// Each hand's T from the poses as they are now (above: its own weapon's anchor, else the other hand's T, else the aim
+// frame), with the hold the camera step chose (Current().grip, .hold, .moved, .nativeRest).
+void BuildViews(const unsigned char* h,const unsigned char* cam,const M4* anchor,const bool* anchored) noexcept {
+    const Config& c=Cfg();
+    const M4 view=MatrixAt(cam+kCamMatrix);
+    for(int hand=kRight;hand<=kLeft;++hand) {
+        bool flip=false;
+        const auto weapon=HandWeapon(hand,&flip);
+        const bool native=Current().nativeWeapon[hand]!=nullptr && Current().nativeWeapon[hand]==weapon;
+        Current().viewOk[hand]=anchored[hand] && (native
+            ? fpview::NativeGripTransform(anchor[hand],MatrixAt(h+kAim),view,Current().grip[hand],c.fpScale,&Current().view[hand],Current().moved[hand],Current().nativeRest[hand])
+            : fpview::AnchoredTransform(anchor[hand],view,Current().grip[hand],c.fpScale,&Current().view[hand],Current().moved[hand]));
+        Current().axisOk[hand]=Current().viewOk[hand];
+        if(Current().axisOk[hand])fpview::Point(Current().view[hand],anchor[hand].m+12,Current().axis[hand]);
+    }
+    for(int hand=kRight;hand<=kLeft;++hand) {
+        const int other=1-hand;
+        Current().shown[hand]=true;
+        Current().onOther[hand]=false;
+        if(Current().viewOk[hand])continue;
+        if(Current().viewOk[other]) {
+            Current().view[hand]=Current().view[other];Current().viewOk[hand]=true;
+            // Keep the native support-hand/reload animation; proximity is not a visibility switch. The hand is held to
+            // the other weapon's box along its own axes, placed by its root as drawn (anchor) and moved through its T.
+            bool flip=false;
+            const auto weapon=HandWeapon(other,&flip);
+            M4 box;
+            Current().onOther[hand]=HandBounds(other,weapon,&box);
+            if(Current().onOther[hand])Current().otherBox[hand]=fpview::Mul(fpview::Mul(box,anchor[other]),Current().view[other]);
+            Current().axisOk[hand]=true;
+            for(int i=0;i<3;++i)Current().axis[hand][i]=Current().axis[other][i];
+            continue;
+        }
+        Current().viewOk[hand]=fpview::ViewTransform(MatrixAt(h+kAim),view,Current().hold,c.fpScale,&Current().view[hand],Current().moved[kRight]);
+    }
+    Current().built=view;Current().builtReady=true;
+    for(int hand=kRight;hand<=kLeft;++hand){Current().probeAnchor[hand]=anchor[hand];Current().probeAnchored[hand]=anchored[hand];}
+}
+
+// The camera step's placement of each hand's anchors in the camera's frame (L = anchor * T * C^-1): where the draw
+// must show them whatever the poses have become by then.
+void Placements(const M4* anchor,const bool* anchored,const M4& camera) noexcept {
+    M4 inv;
+    const bool invOk=fpview::InverseAffine(camera,&inv);
+    const auto inst=Current().body ? At<const unsigned char*>(Current().body,kBaseLod+kLodInst) : nullptr;
+    const auto pose=inst ? At<const float*>(inst,kInstPose) : nullptr;
+    for(int hand=kRight;hand<=kLeft;++hand) {
+        Current().placeWeaponOk[hand]=invOk && anchored[hand] && Current().viewOk[hand];
+        if(Current().placeWeaponOk[hand])Current().placeWeapon[hand]=fpview::Mul(fpview::Mul(anchor[hand],Current().view[hand]),inv);
+        // The body's anchor: the bone its hand's weapon hangs on (the other hand's for a free hand on it), else the
+        // hand's own mount bone. Natively the weapon's root is that bone's matrix (§8; measured equal at the step).
+        bool flip=false;
+        const unsigned char* w=anchored[hand] ? HandWeapon(hand,&flip) : Current().onOther[hand] ? HandWeapon(1-hand,&flip) : nullptr;
+        const auto mount=w ? At<const unsigned char*>(w,kWeaponMount) : nullptr;
+        const wchar_t* name=mount ? At<const wchar_t*>(mount,0) : nullptr;
+        if(!name)name=hand==kRight ? L"arms_r" : L"arms_l";
+        wcsncpy_s(Current().bodyMount[hand],name,_TRUNCATE);
+        const int at=pose ? BoneIndex(inst,Current().bodyMount[hand]) : -1;
+        Current().placeBodyOk[hand]=invOk && at>=0 && Current().viewOk[hand];
+        if(Current().placeBodyOk[hand])
+            Current().placeBody[hand]=fpview::Mul(fpview::Mul(MatrixAt(reinterpret_cast<const unsigned char*>(pose+at*16)),Current().view[hand]),inv);
+    }
+}
+
+// The camera step: which weapons, the hold (grip, fitted; the motion's springs a step), each hand's T.
 void Views(const unsigned char* h,const unsigned char* cam) noexcept {
     const Config& c=Cfg();
     M4 anchor[2]={fpview::Identity(),fpview::Identity()};
@@ -825,12 +1024,12 @@ void Views(const unsigned char* h,const unsigned char* cam) noexcept {
     const float gx=fpview::CenteredGrip(both ? c.fpDualGripX : c.fpGripX,c.fpCenter),gy=both ? c.fpDualGripY : c.fpGripY,gz=both ? c.fpDualGripZ : c.fpGripZ;
     float grip[2][3]={{-gx,gy,gz},{gx,gy,gz}};   // right is -x
     if(c.fpFit)for(int hand=kRight;hand<=kLeft;++hand)Fit(hand,both,grip[hand]);
-    const float hold[3]={-c.fpHoldX,c.fpHoldY,c.fpHoldZ};
+    std::memcpy(Current().grip,grip,sizeof(grip));
+    Current().hold[0]=-c.fpHoldX;Current().hold[1]=c.fpHoldY;Current().hold[2]=c.fpHoldZ;
     const float pivots[2][3]={{anchored[kRight] ? grip[kRight][0] : kPivot[0],anchored[kRight] ? gy : kPivot[1],anchored[kRight] ? gz : kPivot[2]},
                               {anchored[kLeft] ? grip[kLeft][0] : -kPivot[0],anchored[kLeft] ? gy : kPivot[1],anchored[kLeft] ? gz : kPivot[2]}};
     if(c.fpMotion)Motion(h,pivots);
     else Current().moved[kRight]=Current().moved[kLeft]=fpview::Identity();
-    const M4 view=MatrixAt(cam+kCamMatrix);
     for(int hand=kRight;hand<=kLeft;++hand) {
         bool flip=false;
         const auto weapon=HandWeapon(hand,&flip);
@@ -843,31 +1042,11 @@ void Views(const unsigned char* h,const unsigned char* cam) noexcept {
             }
         }
         if(!native)Current().nativeWeapon[hand]=nullptr;
-        Current().viewOk[hand]=anchored[hand] && (native
-            ? fpview::NativeGripTransform(anchor[hand],MatrixAt(h+kAim),view,grip[hand],c.fpScale,&Current().view[hand],Current().moved[hand],Current().nativeRest[hand])
-            : fpview::AnchoredTransform(anchor[hand],view,grip[hand],c.fpScale,&Current().view[hand],Current().moved[hand]));
-        Current().axisOk[hand]=Current().viewOk[hand];
-        if(Current().axisOk[hand])fpview::Point(Current().view[hand],anchor[hand].m+12,Current().axis[hand]);
     }
-    for(int hand=kRight;hand<=kLeft;++hand) {
-        const int other=1-hand;
-        Current().shown[hand]=true;
-        Current().onOther[hand]=false;
-        if(Current().viewOk[hand])continue;
-        if(Current().viewOk[other]) {
-            Current().view[hand]=Current().view[other];Current().viewOk[hand]=true;
-            // Keep the native support-hand/reload animation; proximity is not a visibility switch.
-            Current().onOther[hand]=true;
-            bool flip=false;
-            const auto weapon=HandWeapon(other,&flip);
-            if(weapon)Current().otherBox[hand]=fpview::Mul(MatrixAt(weapon+kWeaponModel+kModelBounds),Current().view[other]);
-            Current().axisOk[hand]=true;
-            for(int i=0;i<3;++i)Current().axis[hand][i]=Current().axis[other][i];
-            continue;
-        }
-        Current().viewOk[hand]=fpview::ViewTransform(MatrixAt(h+kAim),view,hold,c.fpScale,&Current().view[hand],Current().moved[kRight]);
-    }
-    Probe(anchored,anchor);
+    BuildViews(h,cam,anchor,anchored);
+    Placements(anchor,anchored,MatrixAt(cam+kCamMatrix));
+    if(c.debug){Current().probeCamThread=GetCurrentThreadId();++Current().probeCamSteps;}
+    Probe(anchored,anchor,MatrixAt(cam+kCamMatrix));
 }
 
 // Debug=1 with the view stock: the weapon in hand's draws counted as well (the same counters), to compare.
@@ -1093,7 +1272,7 @@ int BoneIndex(const unsigned char* inst,const wchar_t* name) noexcept {
 }
 
 // One arm's moves (`hand` kRight / kLeft) from the instance's draw pose (`pose`, before T) and the hand's T.
-ArmFit FitArm(const unsigned char* inst,const float* pose,const M4& t,int hand) noexcept {
+ArmFit FitArm(const unsigned char* inst,const float* pose,const M4& t,int hand,const M4& camera,const M4* otherBox) noexcept {
     ArmFit fit{};
     const wchar_t* const names[2][4]={{L"jowan0_r",L"kawan0_r",L"te_r",L"kata_r"},{L"jowan0_l",L"kawan0_l",L"te_l",L"kata_l"}};
     int at[4];
@@ -1105,35 +1284,65 @@ ArmFit FitArm(const unsigned char* inst,const float* pose,const M4& t,int hand) 
     float d[3];
     fpview::Sub(pose+at[3]*16+12,pose+otherKata*16+12,d);
     const float half=0.5f*fpview::Length(d),scale=Cfg().fpScale,out=hand==kRight ? 1.0f : -1.0f;
-    const float* cam=reinterpret_cast<const float*>(Current().cam+kCamMatrix);
+    const float* cam=camera.m;   // the camera this draw is made with
     float shoulder[3],pole[3];
     for(int i=0;i<3;++i) {
         const float right=-cam[i],up=cam[4+i],ahead=cam[8+i];
         shoulder[i]=cam[12+i]+scale*(out*half*right+kShoulderDown*up+kShoulderBack*ahead);
         pole[i]=out*kElbowOut*right+kElbowDown*up;
     }
+    // The elbow bends the way the animation bends it (docs/fp-render-re.md §17): toward the native elbow as seen from
+    // the wrist. A pole fixed in the camera (out and down) re-aimed the forearm while the hand kept its turn on the
+    // gun: measured 48-80 degrees of added wrist bend (the user's support hand at a right angle to the forearm).
+    if(Cfg().fpNativeElbow)for(int i=0;i<3;++i)pole[i]=e0[i]-h0[i];
     float wrist[3];std::memcpy(wrist,h0,12);
     if(Current().onOther[hand] && Current().reloadLeft==0) {
         float move[3];
-        if(fpview::SnapToBox(Current().otherBox[hand],h0,0.035f*scale,move))
+        if(otherBox && fpview::SnapToBox(otherBox[hand],h0,0.035f*scale,move))
             for(int i=0;i<3;++i)wrist[i]+=move[i];
     }
     fit.hand=fpview::Translate(wrist[0]-h0[0],wrist[1]-h0[1],wrist[2]-h0[2]);
+    if(Cfg().debug && Current().probeAnchored[hand] && inst==At<const unsigned char*>(Current().body,kBaseLod+kLodInst)) {
+        // The draw-time probe: the body's mount bone now against the weapon's root T was built from.
+        const int mount=BoneIndex(inst,hand==kRight ? L"arms_r" : L"arms_l");
+        if(mount>=0) {
+            float gap[3];fpview::Sub(pose+mount*16+12,Current().probeAnchor[hand].m+12,gap);
+            Current().probeDrawMount=std::fmax(Current().probeDrawMount,fpview::Length(gap));
+        }
+    }
+    if(Cfg().debug && Current().body && inst==At<const unsigned char*>(Current().body,kBaseLod+kLodInst)) {   // the steadiness probe: the wrist in the camera's frame (the base LOD's)
+        M4 inverse;float local[3];
+        if(fpview::InverseAffine(camera,&inverse)) {
+            fpview::Point(inverse,wrist,local);
+            if(Current().probeWristHave[hand]) {
+                float dd[3];fpview::Sub(local,Current().probeWrist[hand],dd);
+                Current().probeWristStep[hand]=std::fmax(Current().probeWristStep[hand],fpview::Length(dd));
+            }
+            std::memcpy(Current().probeWrist[hand],local,12);Current().probeWristHave[hand]=true;
+        }
+    }
     fit.ok=fpview::ArmChainTo(s0,e0,h0,wrist,shoulder,pole,&fit.upper,&fit.fore);
+    if(Cfg().debug && fit.ok && inst==At<const unsigned char*>(Current().body,kBaseLod+kLodInst)) {
+        // The probe: how far the forearm was turned against the hand (the hand keeps its own turn on the gun), deg.
+        float e1[3],before[3],after[3];
+        fpview::Point(fit.upper,e0,e1);fpview::Sub(h0,e0,before);fpview::Sub(wrist,e1,after);
+        if(fpview::Unit(before) && fpview::Unit(after))
+            Current().probeBend[hand]=std::fmax(Current().probeBend[hand],std::acos(fpview::Clamp(fpview::Dot3(before,after),-1.0f,1.0f))*57.29578f);
+    }
     return fit;
 }
 
 // Arm/weapon poses through T, restored after the draw. Non-arm body bones stay native: fp_skin_gpu submits only
 // triangles owned by one visible arm, excluding mixed torso/shoulder and opposite-arm faces instead of stretching
 // their skinning weights. `t` is each hand's transform (a weapon uses its own hand's twice).
-void Pose(unsigned char* inst,const M4* t,bool body,const float*,float* backup) noexcept {
+void Pose(unsigned char* inst,const M4* t,bool body,const M4& camera,const M4* otherBox,float* backup) noexcept {
     const auto n=At<std::int32_t>(inst,kInstCount);
     auto pose=At<float*>(inst,kInstPose);
     const auto bones=At<const unsigned char*>(inst,kInstBones);
     if(!pose || !bones || n<=0 || n>kMostBones)return;
     std::memcpy(backup,pose,static_cast<std::size_t>(n)*64);
     ArmFit fit[2]{};
-    if(body && Cfg().fpArmIk && !Current().riding)for(int hand=kRight;hand<=kLeft;++hand)fit[hand]=FitArm(inst,backup,t[hand],hand);
+    if(body && Cfg().fpArmIk && !Current().riding)for(int hand=kRight;hand<=kLeft;++hand)fit[hand]=FitArm(inst,backup,t[hand],hand,camera,otherBox);
     for(std::int32_t i=0;i<n;++i) {
         float* p=pose+i*16;
         const wchar_t* name=At<const wchar_t*>(bones+static_cast<std::size_t>(i)*kBoneStride,0);
@@ -1246,6 +1455,42 @@ void NearWeapon(const void* model,int pass) noexcept {
         static_cast<unsigned long long>(At<const unsigned char*>(model,0)-image),off);
 }
 
+// The camera a draw is made with: its native view (view+0x20: the camera's inverse, X and Z negated, §2026-10-17)
+// undone; without one (offline) the camera matrix.
+M4 DrawCamera(const void* view) noexcept {
+    if(view && Readable(view,0x60)) {
+        M4 native;std::memcpy(native.m,static_cast<const unsigned char*>(view)+0x20,64);
+        for(int row=0;row<4;++row){native.m[row*4]*=-1;native.m[row*4+2]*=-1;}
+        M4 camera;
+        if(fpview::InverseAffine(native,&camera))return camera;
+    }
+    return MatrixAt(Current().cam+kCamMatrix);
+}
+
+// The T of each hand for drawing the skeleton instance `inst` of a part (docs/fp-render-re.md §17): its anchor as this
+// draw's pose array has it (a weapon's root; the body's mount bone) put where the camera step placed it in the camera's
+// frame, seen from this draw's camera: T = anchor_now^-1 * L * C_draw. So the hold neither follows the update steps the
+// game took after the camera step (the walk's and the jump's twitch) nor a camera the draw does not use. False: no
+// placement (the camera step's T is used).
+bool DrawTransforms(const unsigned char* inst,Part part,int hand,const M4& camera,M4* t) noexcept {
+    const auto pose=At<const float*>(inst,kInstPose);
+    if(!pose)return false;
+    if(part==Part::inHand) {
+        M4 inv;
+        if(!Current().placeWeaponOk[hand] || !fpview::InverseAffine(MatrixAt(reinterpret_cast<const unsigned char*>(pose)),&inv))return false;
+        t[0]=t[1]=fpview::Mul(fpview::Mul(inv,Current().placeWeapon[hand]),camera);
+        return fpview::Finite(t[0]);
+    }
+    for(int k=kRight;k<=kLeft;++k) {
+        const int at=Current().placeBodyOk[k] ? BoneIndex(inst,Current().bodyMount[k]) : -1;
+        M4 inv;
+        if(at<0 || !fpview::InverseAffine(MatrixAt(reinterpret_cast<const unsigned char*>(pose+at*16)),&inv))return false;
+        t[k]=fpview::Mul(fpview::Mul(inv,Current().placeBody[k]),camera);
+        if(!fpview::Finite(t[k]))return false;
+    }
+    return true;
+}
+
 void DrawSelected(void* model,void* ctx,int pass,void* view) {
     const DrawFn next=NextDraw(model);
     Part part=Part::none;
@@ -1257,16 +1502,42 @@ void DrawSelected(void* model,void* ctx,int pass,void* view) {
     if(part==Part::none || pass==3 || pass==4 || pass>5){next(model,ctx,pass,view);return;}
     if((pass==0 && part!=Part::instruments) || part==Part::stowed)return;
     if(pass==1 && part!=Part::instruments)Drew1(model);
+    if(Cfg().debug && pass==1) {
+        // The draw-time probe: has the weapon's root moved since the camera step built T from it (the drawn weapon
+        // then moves in the view), and does the body's mount bone still meet it (else the hand leaves the grip)?
+        __try {
+            if(part==Part::inHand && Current().probeAnchored[hand]) {
+                M4 root;
+                if(RootPose(static_cast<const unsigned char*>(model),&root)) {
+                    float d[3];fpview::Sub(root.m+12,Current().probeAnchor[hand].m+12,d);
+                    Current().probeDrawRoot=std::fmax(Current().probeDrawRoot,fpview::Length(d));++Current().probeDraws;
+                    Current().probeDrawThread=GetCurrentThreadId();
+                }
+            }
+        } __except(EXCEPTION_EXECUTE_HANDLER){}
+    }
     unsigned char* insts[kMostInsts];
     int n=0;
     __try {
         if(part==Part::instruments || (Current().viewOk[kRight] && Current().viewOk[kLeft])) {
-            const M4 t[2]={part==Part::body ? Current().view[kRight] : Current().view[hand],part==Part::body ? Current().view[kLeft] : Current().view[hand]};
+            const M4 stepT[2]={part==Part::body ? Current().view[kRight] : Current().view[hand],part==Part::body ? Current().view[kLeft] : Current().view[hand]};
+            const M4 camera=part==Part::instruments ? M4{} : DrawCamera(view);
+            // A free hand's weapon box, placed as the draw shows that weapon (its box along its own axes, at the
+            // other hand's placement, from this draw's camera).
+            M4 otherBox[2]{};
+            for(int k=kRight;k<=kLeft;++k) {
+                M4 box;bool flip=false;
+                if(part==Part::body && Current().onOther[k] && Current().placeWeaponOk[1-k] && HandBounds(1-k,HandWeapon(1-k,&flip),&box))
+                    otherBox[k]=fpview::Mul(fpview::Mul(box,Current().placeWeapon[1-k]),camera);
+                else otherBox[k]=Current().otherBox[k];
+            }
             n=InstancesOf(static_cast<unsigned char*>(model),insts);
-            const float* eye=reinterpret_cast<const float*>(Current().cam+kCamEyeRow);   // the drawn view's eye
             for(int i=0;i<n;++i) {
-                if(part==Part::instruments)InstrumentPose(insts[i],saved[i]);
-                else Pose(insts[i],t,part==Part::body,eye,saved[i]);
+                if(part==Part::instruments){InstrumentPose(insts[i],saved[i]);continue;}
+                M4 t[2];
+                const bool drawn=!Current().riding && DrawTransforms(insts[i],part,hand,camera,t);
+                if(!drawn){t[0]=stepT[0];t[1]=stepT[1];}
+                Pose(insts[i],t,part==Part::body,camera,otherBox,saved[i]);
             }
         }
     } __except(EXCEPTION_EXECUTE_HANDLER){for(int i=0;i<n;++i)Unpose(insts[i],saved[i]);n=0;}
