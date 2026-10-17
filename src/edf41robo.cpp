@@ -31,6 +31,7 @@
 // once and the object is left as EventAnimationObject made it.
 #include "crew.h"
 #include "edf41classes.h"
+#include "edf41robo_ai.h"
 #include "edf41robo_body.h"
 #include "edf41net.h"
 #include "memory.h"
@@ -540,10 +541,16 @@ enum Body : int { kS0=0, kS1, kS2, kS3, kS4, kS5, kS6, kS7, kS8, kS9, kS10, kS11
 static_assert(kS10==edf41robo::kDying && kS11==edf41robo::kWreck,"the body machine's final states (edf41robo_body.h)");
 const char* const kBodyNames[12]={"S0 ship","S1 small volley","S2 middle volley","S3 buster","S4 transform","S5 fall",
                                   "S6 landing","S7 robot","S8 step","S9 attack","S10 dying","S11 wreck"};
-enum Ai : int { kA0=0, kA1, kA2, kA3, kA4, kA5 };
-const char* const kAiNames[6]={"A0 wait","A1 ship","A2 robot reroll","A3 robot","A4 wait idle","A5 attack choice"};
+using edf41robo::kA0;
+using edf41robo::kA1;
+using edf41robo::kA2;
+using edf41robo::kA3;
+using edf41robo::kA4;
+using edf41robo::kA5;
+static_assert(kS7==edf41robo::kStand && kS8==edf41robo::kStep && kS9==edf41robo::kAttack,"the robot's states (edf41robo_ai.h)");
+const char* const kAiNames[6]={"A0 wait","A1 ship","A2 robot reroll","A3 robot","A4 wait idle","A5 attack"};
 
-struct Timer { int count=0,min=0,max=0; float dmin=0.0f,dmax=0.0f; };   // 4.1 0x271AB0
+using edf41robo::Timer;   // 4.1 0x271AB0
 
 struct Robo {
     void* obj=nullptr;
@@ -577,14 +584,7 @@ struct Robo {
     int cmdAttack=-1;
     // AI parameters (+0x1478..)
     float aiSpeed=90.0f;
-    int phase1=0;                // +0x147C
-    float radius=0.0f;           // +0x1480
-    int sideFrames=0,sideInterval=0;   // +0x1484 / +0x1488
-    float sideAmount=0.0f;       // +0x148C
-    int phase2=0;                // +0x1490
-    float cruise[3]={0.0f,0.0f,90.0f};   // +0x14A0
-    int cruiseTurnFrames=0;      // +0x14B0
-    float cruiseTurnRate=0.0f;   // +0x14B4
+    edf41robo::Legs legs;        // +0x147C..+0x14B4 (edf41robo_ai.h)
     Timer tSmall,tMiddle,tBuster,tAttack;
     int attackPick=-1;
     // pose
@@ -640,6 +640,11 @@ void NetForget(const void* self) noexcept;   // its destructor: the record goes
 
 int RandInt(Robo& r,int n) noexcept { return n<=0 ? 0 : static_cast<int>(Random01(r.rng)*static_cast<float>(n))%n; }
 float Rand(Robo& r) noexcept { return Random01(r.rng); }
+struct RoboRng {   // the object's random numbers for edf41robo_ai.h
+    Robo& r;
+    int Int(int n) noexcept { return RandInt(r,n); }
+    float Unit() noexcept { return Rand(r); }
+};
 
 // ---- sounds ---------------------------------------------------------------------------------------------------------
 // 4.1's sound by its SEPRESET name, from the object's edf41_se (edf41classes.h PlaySe).
@@ -783,32 +788,23 @@ void SetLevel(Robo& r) noexcept {
     r.tSmall={RandInt(r,720),180,720,0.0f,500.0f};
     r.tMiddle={RandInt(r,per(480.0f)),per(300.0f),per(480.0f),150.0f,800.0f};
     r.tBuster={RandInt(r,per(3600.0f)),per(1800.0f),per(3600.0f),0.0f,1000.0f};
-    r.tAttack={RandInt(r,per(1800.0f)),per(600.0f),per(1800.0f),-1.0f,-1.0f};
+    r.tAttack={RandInt(r,per(1800.0f)),per(600.0f),per(1800.0f),0.0f,1000.0f};   // asked at distance 0: always counts
 }
 
-// 4.1 0x271AB0: counts down only while the distance is inside [dmin, dmax] (dmin < 0: always); true when it runs out (and
-// starts again at min + rand(max - min)).
+// 4.1 0x271AB0 (edf41robo_ai.h): counts down only while the distance is inside [dmin, dmax]; true when it runs out.
 bool TickTimer(Robo& r,Timer& t,float distance) noexcept {
-    if(t.dmin>=0.0f && (distance<t.dmin || distance>t.dmax))return false;
-    if(--t.count>0)return false;
-    t.count=t.min+RandInt(r,t.max-t.min);
-    return true;
+    RoboRng rng{r};
+    return edf41robo::TimerTick(t,distance,rng);
 }
 
-// ---- AI parameters (4.1 0x2797F0 / 0x279AC0) ---------------------------------------------------------------------
+// ---- AI parameters (4.1 0x2797F0 / 0x279AC0, edf41robo_ai.h) -----------------------------------------------------
 void RerollSide(Robo& r) noexcept {
-    r.sideFrames=Rand(r)<0.5f ? 600+RandInt(r,600) : 0;
-    r.sideAmount=(Rand(r)<0.5f ? 0.25f : -0.25f)*r.aiSpeed;
-    r.sideInterval=r.form==1 && r.approach ? 0 : RandInt(r,600);
+    RoboRng rng{r};
+    edf41robo::RerollSide(r.legs,r.form==1,r.approach,r.aiSpeed,rng);
 }
 void Reroll(Robo& r) noexcept {
-    r.phase1=1200+RandInt(r,600);
-    r.radius=r.form==1 && r.approach ? 50.0f+150.0f*Rand(r) : 300.0f+200.0f*Rand(r);
-    r.phase2=600+RandInt(r,300);
-    r.cruise[0]=0.0f; r.cruise[1]=0.0f; r.cruise[2]=r.aiSpeed;
-    if(r.form==1 && Rand(r)<(r.approach ? 0.5f : 1.0f/3.0f))r.cruise[2]=-r.aiSpeed;
-    r.cruiseTurnFrames=RandInt(r,300);
-    r.cruiseTurnRate=Rand(r)*0.015f-0.0075f;
+    RoboRng rng{r};
+    edf41robo::Reroll(r.legs,r.form==1,r.approach,r.aiSpeed,rng);
 }
 
 // ---- guns (4.1 0x27BD70 / 0x27BE60 / 0x27C0F0 / 0x27B610) ------------------------------------------------------------
@@ -1125,31 +1121,23 @@ void BodyTick(Robo& r) noexcept {
     case kS4: if(r.bodyFrames>2 && ClipEnded(r))BodySet(r,kS5); break;
     case kS5: if(r.landed)BodySet(r,kS6); break;
     case kS6: if(r.bodyFrames>2 && ClipEnded(r))BodySet(r,kS7); break;
-    case kS7: {   // 4.1 0x278810
-        // the move: 0 none (|x| and |z| under 0.5), 1 / 2 sideways (x >= 0 / x < 0), 3 / 4 forward / back (z >= 0 / z < 0)
-        const float ax=std::fabs(r.cmdX),az=std::fabs(r.cmdZ);
-        const int mv=(ax<0.5f && az<0.5f) ? 0 : ax>az ? (r.cmdX<0.0f ? 2 : 1) : (r.cmdZ<0.0f ? 4 : 3);
-        const int phase=FootPhase(r);
-        if(phase==1 || phase==2) {   // a foot ahead: carry on (lr / rl) or bring it back (ln / rn); +0x328 the backward chain
-            const int on=phase==1 ? 1 : 2,home=phase==1 ? 3 : 4;
-            if(mv==3 && r.chain==0)Step(r,r.stWalkF[on],0);
-            else if(mv==4 && r.chain==1)Step(r,r.stWalkB[on],1);
-            else if(r.chain==0)Step(r,r.stWalkF[home],0);
-            else Step(r,r.stWalkB[home],1);
-            break;
-        }
-        // feet together: the move's first step, then a turn replaces it, else an attack does (the same frame, in this order)
-        if(mv==3)Step(r,r.stWalkF[0],0);
-        else if(mv==4)Step(r,r.stWalkB[0],1);
-        else if(mv==1)Step(r,r.stSideL,0);
-        else if(mv==2)Step(r,r.stSideR,0);
-        if(r.turn) {
-            const int k=(std::min)(3,std::abs(r.turn))-1;
-            if(r.body==kS8)r.body=kS7;   // the step just chosen is replaced
-            Step(r,r.turn>0 ? r.stTurnL[k] : r.stTurnR[k],0);
-        } else if(r.cmdAttack>=0 && r.cmdAttack<static_cast<int>(r.attacks.size())) {
+    case kS7: {   // 4.1 0x278810 (edf41robo_ai.h ChooseInStand): a foot ahead -> carry on or bring it back; feet together ->
+                  // the move's first step, a turn replacing it, else an attack (+0x161C; the host's A5 starts its attack itself)
+        const bool attack=r.cmdAttack>=0 && r.cmdAttack<static_cast<int>(r.attacks.size());
+        const edf41robo::Choice c=edf41robo::ChooseInStand(edf41robo::MoveOf(r.cmdX,r.cmdZ),FootPhase(r),r.chain,r.turn,attack);
+        using edf41robo::Pick;
+        switch(c.pick) {
+        case Pick::kForward: Step(r,r.stWalkF[c.index],c.chain); break;
+        case Pick::kBack: Step(r,r.stWalkB[c.index],c.chain); break;
+        case Pick::kSideL: Step(r,r.stSideL,c.chain); break;
+        case Pick::kSideR: Step(r,r.stSideR,c.chain); break;
+        case Pick::kTurnL: Step(r,r.stTurnL[c.index],c.chain); break;
+        case Pick::kTurnR: Step(r,r.stTurnR[c.index],c.chain); break;
+        case Pick::kAttack:
             r.pendingState=r.attacks[static_cast<std::size_t>(r.cmdAttack)].stateIndex;
             BodySet(r,kS9);
+            break;
+        case Pick::kNone: break;
         }
         break;
     }
@@ -1226,8 +1214,8 @@ void MoveTo(Robo& r,const float* point,float up,float speed) noexcept {
 }
 
 void Side(Robo& r) noexcept {   // 4.1 0x279FA1 (literally: a reroll every frame while the interval counter is above 0)
-    if(r.sideFrames-->0)r.cmdX=r.sideAmount;
-    else if(r.sideInterval-->0)RerollSide(r);
+    if(r.legs.sideFrames-->0)r.cmdX=r.legs.sideAmount;
+    else if(r.legs.sideInterval-->0)RerollSide(r);
 }
 
 float TargetDistance(const Robo& r) noexcept {
@@ -1243,17 +1231,18 @@ void AiSet(Robo& r,int a) noexcept {
 }
 
 void ShipAi(Robo& r) noexcept {
-    if(r.phase1-->0) {
+    edf41robo::Legs& l=r.legs;
+    if(l.phase1-->0) {
         float p[3]={r.target[0],r.target[1],r.target[2]};
         float d[2]={r.pos[0]-r.target[0],r.pos[2]-r.target[2]};
         const float dl=std::sqrt(d[0]*d[0]+d[1]*d[1]);
-        const float rad=r.radius>0.0f ? r.radius : 0.0f;
+        const float rad=l.radius>0.0f ? l.radius : 0.0f;
         if(dl>1e-4f) { p[0]+=d[0]/dl*rad; p[2]+=d[1]/dl*rad; }
         TurnTo(r,r.target,0.01f);
         MoveTo(r,p,250.0f,r.aiSpeed);
-    } else if(r.phase2-->0) {
-        r.cmdX=r.cruise[0]; r.cmdY=r.cruise[1]; r.cmdZ=r.cruise[2];
-        if(r.cruiseTurnFrames-->0)r.yawRate=r.cruiseTurnRate;
+    } else if(l.phase2-->0) {
+        r.cmdX=l.cruise[0]; r.cmdY=l.cruise[1]; r.cmdZ=l.cruise[2];
+        if(l.cruiseTurnFrames-->0)r.yawRate=l.cruiseTurnRate;
     } else Reroll(r);
     Side(r);
     if(r.body!=kS0)return;
@@ -1271,20 +1260,35 @@ void ShipAi(Robo& r) noexcept {
     if(TickTimer(r,r.tBuster,dist))r.cmdBuster=true;
 }
 
+// The robot's A3..A5 (edf41robo_ai.h RobotAiStep, 4.1 0x27A180 / 0x27A630 / 0x27A770): the legs and the attack timer in A3;
+// A4 waits for S7; A5 starts the attack at once and holds the AI until the body is back in S7 (the attack timer does not
+// count during the attack: the plugin's A5 used to hand back to A3 the frame S9 began, and the robot only attacked).
+void ChooseAttack(Robo& r) noexcept;
 void RobotAi(Robo& r) noexcept {
+    const int forced=Cfg().edf41RoboAttack;
+    if(r.ai==kA3 && forced>=0 && r.tAttack.count>600)r.tAttack.count=600;   // dev: an attack every 10 s of A3
     const float h[2]={r.target[0]-r.pos[0],r.target[2]-r.pos[2]};
     const float hd=std::sqrt(h[0]*h[0]+h[1]*h[1]);
-    if(r.phase1-->0) {
-        TurnTo(r,r.target,0.0f);
-        if(r.approach)r.cmdZ=hd<r.radius ? -1.0f : 1.0f;
-    } else if(r.phase2-->0) {
-        r.cmdZ=r.cruise[2]>0.0f ? 1.0f : -1.0f;
-    } else Reroll(r);
-    Side(r);
-    if(r.cmdX!=0.0f)r.cmdX=r.cmdX>0.0f ? 1.0f : -1.0f;
-    const int forced=Cfg().edf41RoboAttack;
-    if(forced>=0 && r.tAttack.count>600)r.tAttack.count=600;   // dev: an attack every 10 s
-    if(TickTimer(r,r.tAttack,0.0f))AiSet(r,kA4);
+    const int before=r.ai;
+    edf41robo::Order o;
+    RoboRng rng{r};
+    const edf41robo::AiAsk ask=edf41robo::RobotAiStep(r.ai,r.legs,r.tAttack,r.approach,r.haveTarget,hd,r.body,r.aiSpeed,o,rng);
+    if(r.ai!=before) {   // AiSet's log and frame count, without its A2 reroll
+        const int now=r.ai;
+        r.ai=before;
+        AiSet(r,now);
+    }
+    r.cmdX=o.x; r.cmdZ=o.z;
+    if(o.face)TurnTo(r,r.target,0.0f);
+    if(ask!=edf41robo::AiAsk::kChooseAttack)return;
+    // A5's entry (4.1 0x27A80C..0x27AAE2): an entry whose windows hold the target, the body straight into its clip; none
+    // (or no target) -> back to A3 (4.1 hands its body machine A3's function there; not copied, see edf41robo_ai.h)
+    if(r.haveTarget)ChooseAttack(r);
+    else r.attackPick=-1;
+    if(r.attackPick>=0 && r.attacks[static_cast<std::size_t>(r.attackPick)].stateIndex>=0) {
+        r.pendingState=r.attacks[static_cast<std::size_t>(r.attackPick)].stateIndex;
+        BodySet(r,kS9);
+    } else AiSet(r,kA3);
 }
 
 // 4.1 0x27A770: the entries whose distance and angle windows hold the target, one of them at random.
@@ -1330,26 +1334,17 @@ void AiTick(Robo& r) noexcept {
         AiSet(r,kA3);
         break;
     case kA3:
-        if(r.haveTarget)RobotAi(r);
-        break;
     case kA4:
-        if(r.body==kS7) { ChooseAttack(r); AiSet(r,kA5); }
-        break;
     case kA5:
-        r.cmdAttack=r.attackPick;
-        if(r.body!=kS7 || r.attackPick<0)AiSet(r,kA3);
+        RobotAi(r);
         break;
     }
     if(r.flags&1) { r.cmdX=r.cmdY=r.cmdZ=r.yawRate=0.0f; r.turn=0; r.cmdAttack=-1; }
 }
 
 // ---- motion (4.1 slot 1, 0x2766A0) ------------------------------------------------------------------------------------
-void Sample(const Motion& m,float t,float* out) noexcept {
-    const std::size_t keys=m.keys.size()/3;
-    const float f=m.length>0.0f ? (std::max)(0.0f,(std::min)(1.0f,t/m.length))*static_cast<float>(keys-1) : 0.0f;
-    const std::size_t a=(std::min)(keys-1,static_cast<std::size_t>(f)),b=(std::min)(keys-1,a+1);
-    const float w=f-static_cast<float>(a);
-    for(int k=0;k<3;++k)out[k]=m.keys[a*3+k]*(1.0f-w)+m.keys[b*3+k]*w;
+void Sample(const Motion& m,float t,float* out) noexcept {   // edf41robo_ai.h
+    edf41robo::SampleMotion(m.keys.data(),static_cast<int>(m.keys.size()/3),m.length,t,out);
 }
 
 void Move(Robo& r) noexcept {
