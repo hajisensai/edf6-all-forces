@@ -8583,6 +8583,90 @@ def edf41_maps_cover_the_scripts() -> None:
     assert {n for n in used if n not in edf41_maps.MAPS} <= {'NW_TESTMAP'}, sorted(n for n in used if n not in edf41_maps.MAPS)
 
 
+def _edf41_friend_spawns() -> dict[tuple[str, str], list]:
+    """{(pack folder, mission id): its scripts' friendly creation calls (pylib/edf41friends.py)} over every committed 4.1
+    pack (the story and the two DLC packs)."""
+    import edf41friends as ef
+    import make_edf5_campaign as c
+    out: dict[tuple[str, str], list] = {}
+    for p41 in c.PACKS41:
+        for m in c.edf41_text(p41.data)['missions']:
+            out[(p41.folder, m['id'])] = [sp for s in ('MISSION.BVM', 'BEFORE.BVM') if s in m['files']
+                                          for sp in ef.spawns(c.edf41_script(m['id'], s, p41.data))]
+    return out
+
+
+@test
+def edf41_friends_spawn_as_named() -> None:
+    """EDF4.1's friendly NPCs (feedback 2026-10-17 「npc好像也没搬过来」, docs/feedback-2026-10-17-edf41-npc.md): every
+    CreateFriend / CreateFriendSquad / CreateFriendGroup / transporter call the committed 4.1 scripts make names an SGO
+    pylib/edf41friends.py FRIENDS accounts for (EDF6's own file at that path, or one tools/make_edf41_objects.py ships),
+    and a point the mission's RMPA holds (the executor creates nothing for a name it does not find, 0x21A3E1). The
+    story's counts are pinned: the scripts are EDF5's files as they are, so a regeneration that loses a friend fails here.
+    No game needed (the scripts, RMPA and objects.json are committed)."""
+    import collections
+    import edf41friends as ef
+    import make_edf5_campaign as c
+    import rmpa_legacy
+    spawns = _edf41_friend_spawns()
+    ported = set(json.load(open(os.path.join(c.EDF41, 'objects.json'), encoding='utf-8'))['files'])
+    missing_points = []
+    for (folder, mid), found in spawns.items():
+        assert not ef.unknown(found), (folder, mid, ef.unknown(found))
+        data = next(p.data for p in c.PACKS41 if p.folder == folder)
+        with open(os.path.join(data, 'missions', mid, 'MISSION.RMPA'), 'rb') as f:
+            points = {p[0] for p in _rmpa_points(rmpa_legacy.decode6(f.read())[0])}
+        missing_points += [(folder, mid, sp.point) for sp in found if sp.native in ef.AT_POINT and sp.point not in points]
+    assert not missing_points, missing_points[:10]
+    assert all(rel in ported for rel, fr in ef.FRIENDS.items() if fr.source == 'ported'), \
+        sorted(r for r, fr in ef.FRIENDS.items() if fr.source == 'ported' and r not in ported)
+    story = {mid: found for (folder, mid), found in spawns.items() if folder == c.EDF41_FOLDER}
+    calls = collections.Counter(sp.native for found in story.values() for sp in found)
+    assert dict(calls) == {1010: 145, 1011: 264, 1012: 26, 1022: 5, 1023: 15}, dict(calls)
+    assert sum(1 for found in story.values() if found) == 86, sum(1 for found in story.values() if found)
+    # every FRIENDS entry is named by the story (a stale table entry would vouch for nothing)
+    assert {s for found in story.values() for sp in found for s in sp.sgos} == set(ef.FRIENDS)
+
+
+@test
+def edf41_friends_load_in_edf6() -> None:
+    """The friends' SGOs as the installed game loads them (needs EDF4.1, EDF5 and EDF6: _legacy_games): each 'stock' one is in EDF6's
+    archives with its FRIENDS class and every file it names (recursively) there too; each 'ported' one is the port's
+    file of that class; and each story mission's 4.1 original names the same friends its shipped (EDF5) script creates."""
+    import edf41friends as ef
+    import make_edf41_objects as m
+    import make_edf5_campaign as c
+    import sgo
+    games = _legacy_games()
+    if games is None:
+        print('skip  edf41_friends_load_in_edf6: needs EDF4.1, EDF5 and EDF6 installed')
+        return
+    g41, _g5, g6 = games
+    for rel, fr in ef.FRIENDS.items():
+        if fr.source == 'stock':
+            members = sgo.load(data=_game_read(g6, rel))
+            seen = m.sgo_closure({rel}, lambda r: _game_read(g6, r) if r in g6 else None)
+            refs = set()
+            for r in seen:
+                if r in g6:
+                    refs |= {m.rel_of(s) for s in m.strings(sgo.load(data=_game_read(g6, r)))
+                             if s.lower().startswith('app:/')}
+            lacking = sorted(r for r in refs if os.path.splitext(r)[1] and not r.endswith('.ACB') and r not in g6)
+            assert not lacking, (rel, lacking)
+        else:
+            with open(os.path.join(c.EDF41, 'objects', *rel.split('/')), 'rb') as f:
+                members = sgo.load(data=f.read())
+        assert members.get('xgs_scene_object_class') == fr.cls, (rel, members.get('xgs_scene_object_class'), fr.cls)
+    shipped = {mid: {s for sp in found for s in sp.sgos}
+               for (folder, mid), found in _edf41_friend_spawns().items() if folder == c.EDF41_FOLDER}
+    for mid, names in shipped.items():
+        original = set()
+        for rel in g41:
+            if rel.startswith(f'MISSION/{mid}/') and rel.endswith('.BVM'):
+                original |= m.script_sgos(_game_read(g41, rel)) & set(ef.FRIENDS)
+        assert original == names, (mid, sorted(original ^ names))
+
+
 @test
 def edf41_maps_install() -> None:
     """tools/edf41_maps.py on a stand-in game (conversion stubbed): writes every file of every map as edf41maps', a

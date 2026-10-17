@@ -611,14 +611,24 @@ def _typed_result(x: Ins) -> str:
 _ACCEPTS = {'p': 's?', 'f': 'f?', 'i': 'i?', '?': 'sfi?'}
 
 
-def type_check(prog: Program, sigs: dict[tuple[int, int], tuple[str, int]] | None = None) -> list[str]:
-    """Each native call whose arguments, as the script pushes them, are not of the types EDF6's handler reads (SIG6):
-    a string literal where a number is read, a float where an int is, and so on. A value whose type the script does not
-    show (a variable, a native's result) fits anything."""
-    sigs = SIG6 if sigs is None else sigs
-    out = []
+@dataclass(frozen=True)
+class Arg:
+    """A value on the script's stack as the walk (_walk) sees it: its type (_typed_result's letters) and, for a string
+    literal pushed as it is (pushs), the string (None for anything else: a variable, a native's result)."""
+    t: str
+    s: str | None = None
+
+
+_UNKNOWN = Arg('?')
+
+
+def _walk(prog: Program, sigs: dict[tuple[int, int], tuple[str, int]],
+          visit: Callable[[Function, int, Ins, list[Arg] | None], None]) -> None:
+    """Every native call of every function on each path through it, with the values it is passed: `visit(function,
+    index, instruction, args)`, args the signature's (`sigs`) count of values off the stack, None when the native has
+    no signature or the stack holds fewer values than it reads (the walk then stops on that path)."""
     for f in prog.funcs:
-        stacks: dict[int, list[str]] = {f.entry: ['?'] * (1 + len(f.types))}
+        stacks: dict[int, list[Arg]] = {f.entry: [_UNKNOWN] * (1 + len(f.types))}
         work = [f.entry]
         while work:
             i = work.pop()
@@ -627,19 +637,16 @@ def type_check(prog: Program, sigs: dict[tuple[int, int], tuple[str, int]] | Non
             if x.op in OP_NATIVE:
                 sig = sigs.get((x.op, x.v))
                 if sig is None:
-                    out.append(f'{f.name} {i}: native {x.op - OP_NAT0}/{x.v} has no signature')
+                    visit(f, i, x, None)
                     continue
                 want, results = sig
                 got = st[len(st) - len(want):] if want else []
                 if len(got) < len(want):
-                    out.append(f'{f.name} {i}: native {x.op - OP_NAT0}/{x.v} with too few values on the stack')
+                    visit(f, i, x, None)
                     continue
-                for k, (w, g) in enumerate(zip(want, got)):
-                    if g not in _ACCEPTS[w]:
-                        out.append(f'{f.name} {i}: native {x.op - OP_NAT0}/{x.v} argument {k + 1} of {len(want)}: '
-                                   f'reads {w}, the script passes {g}')
+                visit(f, i, x, got)
                 del st[len(st) - len(want):]
-                st += ['?'] * results
+                st += [_UNKNOWN] * results
             elif x.op == OP_CALL:
                 del st[len(st) - len(prog.funcs[x.v].types):]
             elif x.op == 0x03:
@@ -659,14 +666,53 @@ def type_check(prog: Program, sigs: dict[tuple[int, int], tuple[str, int]] | Non
                 if pops:
                     del st[len(st) - pops:]
                 if e + pops > 0:
-                    st.append(_typed_result(x))
+                    st.append(Arg(_typed_result(x), x.v if x.op == OP_PUSHS and isinstance(x.v, str) else None))
             succ = [x.v] if x.op == OP_JMP else [x.v, i + 1] if x.op in JUMPS else [] if x.op in (OP_RET, OP_END) \
                 else [i + 1]
             for j in succ:
                 if 0 < j < len(f.code) and j not in stacks:
                     stacks[j] = st
                     work.append(j)
+
+
+def type_check(prog: Program, sigs: dict[tuple[int, int], tuple[str, int]] | None = None) -> list[str]:
+    """Each native call whose arguments, as the script pushes them, are not of the types EDF6's handler reads (SIG6):
+    a string literal where a number is read, a float where an int is, and so on. A value whose type the script does not
+    show (a variable, a native's result) fits anything."""
+    sigs = SIG6 if sigs is None else sigs
+    out: list[str] = []
+
+    def visit(f: Function, i: int, x: Ins, got: list[Arg] | None) -> None:
+        if got is None:
+            why = 'has no signature' if (x.op, x.v) not in sigs else 'with too few values on the stack'
+            out.append(f'{f.name} {i}: native {x.op - OP_NAT0}/{x.v} {why}')
+            return
+        want = sigs[(x.op, x.v)][0]
+        for k, (w, g) in enumerate(zip(want, got)):
+            if g.t not in _ACCEPTS[w]:
+                out.append(f'{f.name} {i}: native {x.op - OP_NAT0}/{x.v} argument {k + 1} of {len(want)}: '
+                           f'reads {w}, the script passes {g.t}')
+    _walk(prog, sigs, visit)
     return out
+
+
+def native_calls(prog: Program, wanted: set[tuple[int, int]],
+                 sigs: dict[tuple[int, int], tuple[str, int]] | None = None) -> list[tuple[str, int, Ins, list[Arg]]]:
+    """(function name, index, instruction, arguments) of every call of a native in `wanted` ((op, id) pairs), each once,
+    with the values the script passes it (Arg: a string literal's text when the script pushes one). A wanted native
+    without a signature in `sigs` (SIG6), or reached with too few values on the stack, raises ValueError: the caller
+    asked for arguments this walk cannot give."""
+    sigs = SIG6 if sigs is None else sigs
+    out: dict[tuple[str, int], tuple[str, int, Ins, list[Arg]]] = {}
+
+    def visit(f: Function, i: int, x: Ins, got: list[Arg] | None) -> None:
+        if (x.op, x.v) not in wanted:
+            return
+        if got is None:
+            raise ValueError(f'{f.name} {i}: native {x.op - OP_NAT0}/{x.v}: no arguments to read (signature / stack)')
+        out.setdefault((f.name, i), (f.name, i, x, list(got)))
+    _walk(prog, sigs, visit)
+    return [out[k] for k in sorted(out, key=lambda k: ([g.name for g in prog.funcs].index(k[0]), k[1]))]
 
 
 SERGENT = ('g_sergent', 'g_sergent_follower1', 'g_sergent_follower2', 'g_sergent_follower3')
