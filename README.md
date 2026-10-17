@@ -466,6 +466,13 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
 把「距离」换成到目标表面的距离交给原版判定（角度判定、按时间分裂的地狱风暴都不变）。普通大小的目标提前约一个目标半径分裂（几米，一两帧）。
 联机时分裂由每台机器各自计算，所有玩家设成一样最好。逆向依据见 `docs/split-missile-re.md`（只做了静态分析和离线模拟，未进游戏实测）。
 
+## 支援装置可以放在队友身上
+
+空降兵、铁骑兵的支援装置（回复装置、能量装置、防护装置等，弹类 `SupportUnitBullet01`）原版带「穿过友军」标志：扔向队友时直接穿过去，
+落在他脚下的地面上。开启 ini `SupportUnitOnAllies=1`（默认）后，装置命中队友（友方阵营的对象）就贴在他身上，和贴在地面上一样。
+做法来自 KittopiaCreator 的补丁 SupportUnitCanBePlacedOnAllies：在 `SupportUnitBullet01` 的构造函数里清掉这个标志（`src/supportunit.cpp`）。
+改 ini 马上对之后扔出的装置生效。联机时命中由每台机器各自计算，所有玩家设成一样最好。逆向依据见 `docs/supportunit-allies-re.md`（静态分析，未进游戏实测）。
+
 ## 原版问题修正：引导路线穿墙
 
 任务里从玩家脚下指向目的地、一串滚动箭头连成的那条引导线，原版会扎进墙里（EDF6 自己的任务和 EDF5 任务都有）。
