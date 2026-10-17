@@ -10,19 +10,27 @@ EDF6's Root.cpk holds EDF5's scripts (MISSION/EDF5_OLD_SCRIPT/<id>/MISSION.BVM),
 the voice banks TIKYUU5_VOICE.*.AWB. Script strings only add SetUndergroundSoundReverve compared with EDF5;
 that does not establish native bytecode compatibility or completion of every mission. Four DLC missions need what
 EDF6 lacks (two maps, the DLC fortress): tools/edf5_dlc.py installs it, pre-generated; one whose part it leaves out
-is excluded and says why.
+is a placeholder row (not playable, says why).
 
 The packs are modes of the game's mode table (docs/mission-list-re.md §7, static): the mission-pack dialog
 (RoomFilter_ContentsName, "任务包") lists every offline mode of DefaultPackage/config.sgo's ModeList, named by its
 first member's text key, and enables the ones whose content id the player owns. Each pack gets
-  - ModeList entries appended, an offline and an online one (one content id after the highest in the list, one save
-    file DEFP_<MST> for both, as the stock packs);
+  - ModeList entries appended, an offline and an online one (the pack's fixed content id, CONTENT; one save file
+    DEFP_<MST> for both, as the stock packs);
   - MISSION/MISSIONLIST_<PACK>.{OFFLINE,ONLINE}.LIST.SGO (DSGO), .TXT.<lang>.SGO (CN EN JA KR SC), .IMAGE.RAB: its own list,
-    rows 0.., every row's 11th member named "flags", successors chained, a stock thumbnail of a mission on the map;
+    one row per mission of its definition (missions.json), every row's 11th member named "flags", a stock thumbnail
+    of a mission on the map;
   - its name and description keys in ETC/TEXTTABLE_STEAM.<lang>.TXT_SGO (the dialog's and the mode screen's text).
 EDF5's own titles and briefings (edf5campaign/missions.json, tools/make_edf5_campaign_text.py).
 The content ids are not DLC the platform knows: the plugin owns them (src/edf5campaign.cpp, ini
 EDF5CampaignContent = the first of the three, set here). Without the plugin the packs are listed but greyed out.
+
+A room publishes only its content id (DLC) and the row (MISSION_NO), so both are the same on every machine
+(docs/mod-room-isolation.md, 2026-10-18): the ids are fixed (CONTENT, whatever other mods or packs are installed; a
+mod already using one refuses the install, said why), and a mission whose resources this machine lacks keeps its row
+as a placeholder (locked by the plugin, skipped by the successors), so a row is its mission's place in the pack's
+definition everywhere. The packs' identity (PACKS_FILE: each pack's definition digest and placeholder rows) is what
+the plugin publishes with a room and checks before joining one.
 Packs of their own leave EDF6's story as it is: its list, save (M00.MST), ending, clear ratio and achievements
 (those only count content 0). Their last mission plays no ending (the script has endings for contents 0..2 only).
 
@@ -43,6 +51,7 @@ from __future__ import annotations
 
 import base64
 import copy
+import hashlib
 import json
 import os
 import re
@@ -74,6 +83,8 @@ EDF41_THUMBS = os.path.join(EDF41, 'missions_thumbnails.rab')
 EDF41_FOLDER = 'EDF41'
 MANIFEST = '.edf5campaign.json'
 DISABLED = '.edf5campaign-disabled'
+# The packs' older save layouts (legacy_layouts), kept past an uninstall: the saves stay, and a later install moves them.
+LEGACY_FILE = '.edf5campaign-legacy.json'
 INI = os.path.join('Plugins', 'EDF6VehicleCrew.ini')
 INI_KEY = 'EDF5CampaignContent'
 RANGE_INI_KEY = 'TestRangeContent'
@@ -86,7 +97,14 @@ SCRIPTS = 'EDF5_OLD_SCRIPT'
 # (no branch bits 0x80 / 0x100, no 0x20).
 BGM = 'BGM_E6M29_MissionEDF5'
 FLAGS = 8.0
-FIRST_CONTENT = 3   # EDF.dll knows contents 0..2 (0xE3F80's names, MAINSCRIPT's endings)
+# The packs' content ids: fixed, CONTENT_BASE + the pack's place in SLOTS (docs/mission-list-re.md §7). EDF.dll knows
+# 0..2 (0xE3F80's names, MAINSCRIPT's endings); other mods append theirs after the highest (3, 4, ...), as this tool
+# did until 2026-10-18, when an id depended on the mods installed and two machines disagreed on a pack's id. The id is
+# an int everywhere it is read (the ModeList member at +0x74, the lobby's DLC attribute: movsxd), never indexed.
+CONTENT_BASE = 65
+# The installed packs' identity for the plugin (src/mission_packs.h): one [Pack<id>] section per pack, written by every
+# build, owned through the manifest like the rest.
+PACKS_FILE = 'Plugins/EDF6VehicleCrew.packs.ini'
 # ModeList entry members (docs/mission-list-re.md §7): 0 name key, 1 description key, 5 save file, 6 [list, text,
 # thumbnails], 8 online, 9 content id, 10 mode type (0 offline scenario, 1 online).
 M_NAME, M_DESC, M_MST, M_FILES, M_ONLINE, M_CONTENT, M_TYPE = 0, 1, 5, 6, 8, 9, 10
@@ -237,8 +255,10 @@ class Pack41(NamedTuple):
 
 PACKS41 = (Pack41(PACK41, EDF41, EDF41_FOLDER), Pack41(PACK41_MP01, os.path.join(EDF41, 'mp01'), 'EDF41MP01'),
            Pack41(PACK41_MP02, os.path.join(EDF41, 'mp02'), 'EDF41MP02'))
-SLOTS = (*PACKS, RANGE, *(p.pack for p in PACKS41))   # each pack's content id: the first free id + its index here
-FILES = (CONFIG, *TEXTS.values(), *(f for p in (*PACKS, RANGE) for f in p.files()))   # every build writes these
+SLOTS = (*PACKS, RANGE, *(p.pack for p in PACKS41))   # each pack's content id: CONTENT_BASE + its index here
+CONTENT = {p.tag: CONTENT_BASE + k for k, p in enumerate(SLOTS)}   # fixed: the same on every machine
+# every build writes these
+FILES = (CONFIG, *TEXTS.values(), *(f for p in (*PACKS, RANGE) for f in p.files()), PACKS_FILE)
 # The 2026-10-07 version's files (appended to EDF6's own offline list): put back, never written any more.
 LEGACY_LIST = 'MISSION/MISSIONLIST.OFFLINE.LIST.SGO'
 LEGACY = (LEGACY_LIST, 'MISSION/MISSIONLIST.OFFLINE.IMAGE.RAB',
@@ -368,14 +388,51 @@ def thumb_name(key: str) -> str:
     return key.replace('/', '_') + '.dds'
 
 
-def new_row(i: int, row: dict) -> dsgo.Node:
+def new_row(i: int, row: dict, successors: list[int]) -> dsgo.Node:
     key = row['key']
-    return dsgo.Node([float(i), f'app:/Mission/{key}', key, dsgo.Node([float(i + 1)]), float(i), 0.0, 0.0, 0.0,
-                      row['bgm'], float(row['progress']), float(row['flags'])], {10: 'flags'})
+    return dsgo.Node([float(i), f'app:/Mission/{key}', key, dsgo.Node([float(n) for n in successors]), float(i), 0.0,
+                      0.0, 0.0, row['bgm'], float(row['progress']), float(row['flags'])], {10: 'flags'})
+
+
+def available(row: dict) -> bool:
+    """A row whose mission this machine has (not a placeholder: plan's 'missing' says why it is not)."""
+    return not row.get('missing')
+
+
+def successors(rows: list[dict]) -> list[list[int]]:
+    """Each row's successor: the next row that is not a placeholder (none after the last one). A placeholder is never
+    any row's successor, so clearing its predecessor opens the mission after it; the plugin keeps it locked
+    (src/edf5campaign.cpp, docs/mission-list-re.md §7)."""
+    out: list[list[int]] = []
+    following: list[int] = []
+    for i in range(len(rows) - 1, -1, -1):
+        out.append(following)
+        if available(rows[i]):
+            following = [i]
+    return out[::-1]
+
+
+def placeholder(row: dict, why: str) -> dict:
+    """A mission this machine cannot install, kept at its row (a room's MISSION_NO is the row: every machine's rows
+    must be the definition's) with its title marked and the reason as its briefing."""
+    title = {lang: _MISSING[lang] + row['title'].get(lang, '') for lang in LANGS}
+    brief = {lang: f'{_MISSING_BRIEF[lang]}\n{why}' for lang in LANGS}
+    return {**row, 'missing': why, 'title': title, 'brief': brief}
+
+
+_MISSING = {'CN': '［未安裝］', 'EN': '[Not installed] ', 'JA': '［未インストール］', 'KR': '[미설치] ', 'SC': '［未安装］'}
+_MISSING_BRIEF = {'CN': '這一關需要的資源本機沒有，無法遊玩（補齊後重新執行安裝器）。',
+                  'EN': 'This mission needs resources this machine lacks and cannot be played (run the installer again '
+                        'once they are there).',
+                  'JA': 'このミッションに必要なリソースがこの PC にないため、プレイできません（揃えてからインストーラーを再実行）。',
+                  'KR': '이 미션에 필요한 리소스가 이 PC에 없어 플레이할 수 없습니다 (갖춘 뒤 설치 프로그램을 다시 실행).',
+                  'SC': '这一关需要的资源本机没有，无法游玩（补齐后重新运行安装器）。'}
 
 
 def plan(root: str, root41: str | None = None, skip41: Skip41 = frozenset()) -> dict:
-    """What would be installed (rows by pack, skipped missions), from the game and the text; nothing written."""
+    """What would be installed, from the game and the text; nothing written. 'rows': every mission of every pack's
+    definition, in order (a mission this machine cannot install is a placeholder: 'missing' says why); 'skipped': those
+    placeholders (group, path, why), and a 4.1 pack not built at all."""
     game = rootcpk.Game(root)
     text = json.load(open(TEXT, encoding='utf-8'))
     # EDF5 Mission Pack 1's maps and fortress EDF6 lacks, as far as tools/edf5_dlc.py will write them (else why not)
@@ -387,19 +444,22 @@ def plan(root: str, root41: str | None = None, skip41: Skip41 = frozenset()) -> 
     for pack in PACKS:
         for m in text[pack.group]:
             folder = f'MISSION/{SCRIPTS}/{m["path"]}'
+            row = {'group': pack.group, 'path': m['path'], 'key': f'{SCRIPTS}/{m["path"]}', 'bgm': BGM,
+                   'flags': FLAGS, 'progress': m['progress'], 'map': None,
+                   'title': {lang: m['title'][lang] for lang in LANGS},
+                   'brief': {lang: m['brief'][lang] for lang in LANGS}}
             try:
                 bvm = game.read(folder, 'MISSION.BVM')
             except KeyError:
-                skipped.append((pack.group, m['path'], 'MISSION.BVM 不在 Root.cpk'))
-                continue
-            gone = missing_assets(names, maps, bvm)
-            if gone:
-                skipped.append((pack.group, m['path'], '缺少 ' + ', '.join(sorted({_gone41(r, why5) for r in gone}))))
-                continue
-            rows.append({'group': pack.group, 'path': m['path'], 'key': f'{SCRIPTS}/{m["path"]}', 'bgm': BGM,
-                         'flags': FLAGS, 'progress': m['progress'], 'map': first_map(bvm),
-                         'title': {lang: m['title'][lang] for lang in LANGS},
-                         'brief': {lang: m['brief'][lang] for lang in LANGS}})
+                why = 'MISSION.BVM 不在 Root.cpk'
+            else:
+                gone = missing_assets(names, maps, bvm)
+                why = '缺少 ' + ', '.join(sorted({_gone41(r, why5) for r in gone})) if gone else ''
+                row['map'] = first_map(bvm)
+            if why:
+                skipped.append((pack.group, m['path'], why))
+                row = placeholder(row, why)
+            rows.append(row)
     rows41, skipped41 = plan41(root, maps, root41, skip41)
     return {'rows': rows + rows41, 'skipped': skipped + skipped41}
 
@@ -437,12 +497,13 @@ def unavailable41(root: str, root41: str | None) -> dict[str, str]:
 
 def plan41(root: str, maps: set[str], root41: str | None,
            skip41: Skip41 = frozenset()) -> tuple[list[dict], list[tuple[str, str, str]]]:
-    """EDF4.1's story rows: the missions whose map and files will all be there. Its maps come from the player's
+    """EDF4.1's packs' rows, every mission of each pack's missions.json in order: a mission whose map or files will
+    not all be there is a placeholder (plan's 'missing'), still at its row. Its maps come from the player's
     EDF4.1 (or EDF4.1 asset pack, pylib/edf41src.py) at `root41` (tools/edf41_maps.py MAPS, converted at install), its objects from edf41_objects; without
     EDF4.1 (None), none. `skip41` names what the install will NOT write after all (edf41_objects.unavailable /
     edf41_maps.unavailable, a map whose conversion failed): object rels like 'OBJECT/VEHICLE301_TANK_AI.SGO', map
     names like 'NW_KOUSOUBLD01' (a dict gives the reason of each). A mission naming any of them, in MISSION.BVM or
-    BEFORE.BVM, is skipped, and says so."""
+    BEFORE.BVM, is a placeholder, and says why."""
     import edf41_maps
     import edf41_objects
     if not root41:
@@ -464,13 +525,14 @@ def plan41(root: str, maps: set[str], root41: str | None,
             gone = missing_assets(names, maps41, bvm)
             if 'BEFORE.BVM' in m['files']:   # loads maps and objects too; not every mission has one
                 gone += missing_assets(names, maps41, edf41_script(m['id'], 'BEFORE.BVM', p41.data))
+            row = {'group': p41.pack.group, 'path': m['id'], 'key': f'{p41.folder}/{m["id"]}', 'bgm': BGM,
+                   'flags': FLAGS, 'progress': round(i / len(missions), 4), 'map': first_map(bvm),
+                   'title': m['title'], 'brief': m['brief'], 'files': m['files'], 'sha': m.get('sha', {})}
             if gone:
-                skipped.append((p41.pack.group, m['id'],
-                                '缺少 ' + ', '.join(sorted({_gone41(ref, why) for ref in gone}))))
-                continue
-            rows.append({'group': p41.pack.group, 'path': m['id'], 'key': f'{p41.folder}/{m["id"]}', 'bgm': BGM,
-                         'flags': FLAGS, 'progress': round(i / len(missions), 4), 'map': first_map(bvm),
-                         'title': m['title'], 'brief': m['brief'], 'files': m['files']})
+                reason = '缺少 ' + ', '.join(sorted({_gone41(ref, why) for ref in gone}))
+                skipped.append((p41.pack.group, m['id'], reason))
+                row = placeholder(row, reason)
+            rows.append(row)
     return rows, skipped
 
 
@@ -493,12 +555,11 @@ def parsed(rel: str, read: Callable[[], T]) -> T:
 
 
 def pack_list(game: rootcpk.Game, rows: list[dict], kind: str = OFFLINE) -> bytes:
-    """A pack's mission list: the stock list's document (of the same kind) with the pack's rows, chained 0 -> 1 -> ...
-    (the last row has none: a successor must be < the row count)."""
+    """A pack's mission list: the stock list's document (of the same kind) with the pack's rows, each chained to the
+    next that is not a placeholder (successors; the last has none: a successor must be < the row count)."""
     doc = dsgo.parse(game.read('MISSION', f'MISSIONLIST.{kind.upper()}.LIST.SGO'))
     table = doc.root.get('table').items
-    table[:] = [new_row(i, r) for i, r in enumerate(rows)]
-    table[-1].items[3].items.clear()
+    table[:] = [new_row(i, r, nxt) for i, (r, nxt) in enumerate(zip(rows, successors(rows)))]
     return dsgo.compact(doc)
 
 
@@ -596,9 +657,10 @@ def ours_in(table: list) -> list[str]:
 
 def pack_config(data: bytes, packs: tuple[Pack, ...] = PACKS) -> tuple[bytes, dict[str, int]]:
     """config.sgo with the packs' modes appended (the modes before them untouched) and each pack's content id (by
-    tag): after every id in the table, each pack at its fixed place in SLOTS whichever packs are given. A
-    room's mode is its content id: the test range's must not move to the EDF5 story's when a player opted out of the
-    campaign (the host on M01, the guest on the range)."""
+    tag): CONTENT, the same whichever packs are given and whatever else the table holds. A room's mode is its content
+    id: the test range's must not move to the EDF5 story's when a player opted out of the campaign (the host on M01,
+    the guest on the range), nor a pack's to another id on a machine with another mod's modes (2026-10-15: the guest
+    then did not own the host's pack). A mode already using one of the ids refuses the install, saying which."""
     ver, members = sgo.read(data)
     table = modes(members)
     ours_there = ours_in(table)
@@ -607,16 +669,20 @@ def pack_config(data: bytes, packs: tuple[Pack, ...] = PACKS) -> tuple[bytes, di
     msts = {str(e[M_MST]).upper() for e in table}
     if any(p.mst.upper() in msts for p in packs):
         raise Refused('CONFIG.SGO 里已有模式用了任务包的存档文件名：存档会混在一起，不添加。')
-    content = max([FIRST_CONTENT, *(int(e[M_CONTENT]) + 1 for e in table)])
+    reserved = set(CONTENT.values())
+    clash = sorted({(int(e[M_CONTENT]), str(e[M_NAME])) for e in table if int(e[M_CONTENT]) in reserved})
+    if clash:
+        raise Refused(f'CONFIG.SGO 里别的 MOD 的模式用了内容编号 {", ".join(f"{c}（{n}）" for c, n in clash)}，'
+                      f'而 {min(reserved)}..{max(reserved)} 是全军出击任务包的固定编号（联机房间按编号认任务包，每台机器必须一样）：'
+                      '不安装任务包。请先卸载那个 MOD，或请它的作者换一个编号。')
     stock = {kind: {int(e[M_CONTENT]): e for e in table if int(e[M_TYPE]) == int(e[M_ONLINE]) == int(kind == ONLINE)}
              for kind in (OFFLINE, ONLINE)}
     for kind in {k for p in packs for k in p.kinds}:
         if 0 not in stock[kind]:
             raise Refused(f'CONFIG.SGO 里没有{"在线" if kind == ONLINE else "离线"}剧情模式：不知道任务包按什么取难度参数。')
     ids = {}
-    slots = {p.tag: k for k, p in enumerate(SLOTS)}
     for pack in packs:
-        ids[pack.tag] = content + slots[pack.tag]
+        ids[pack.tag] = CONTENT[pack.tag]
         for kind in pack.kinds:
             table.append(mode_entry(stock[kind].get(pack.like, stock[kind][0]), pack, ids[pack.tag], kind))
     return sgo.write_depth_first(ver, members), ids
@@ -652,13 +718,13 @@ def build(root: str, campaign: bool = True, test_range: bool = True,
     game = rootcpk.Game(root)
     p = plan(root, root41, skip41) if campaign else {'rows': [], 'skipped': []}
     by_pack = {pack.group: [r for r in p['rows'] if r['group'] == pack.group] for pack in PACKS}
-    empty = [pack.tag for pack in PACKS if campaign and not by_pack[pack.group]]
+    empty = [pack.tag for pack in PACKS if campaign and not any(available(r) for r in by_pack[pack.group])]
     if empty:
         raise Refused(f'没有可安装的任务：{", ".join(empty)}（不写入空任务包）。')
     by_pack[RANGE.group] = [range_row(game)] if test_range else []
     for p41 in PACKS41:
         by_pack[p41.pack.group] = [r for r in p['rows'] if r['group'] == p41.pack.group]
-    with41 = [p41 for p41 in PACKS41 if campaign and by_pack[p41.pack.group]]
+    with41 = [p41 for p41 in PACKS41 if campaign and any(available(r) for r in by_pack[p41.pack.group])]
     packs = (*(PACKS if campaign else ()), *((RANGE,) if test_range else ()), *(p41.pack for p41 in with41))
     config, ids = parsed(CONFIG, lambda: pack_config(base_bytes(root, game, CONFIG, manifest), packs))
     out = {CONFIG: config}
@@ -671,19 +737,91 @@ def build(root: str, campaign: bool = True, test_range: bool = True,
         out.update(pack_files(game, pack, rows))
     for p41 in with41:
         for r in by_pack[p41.pack.group]:
-            for name in r['files']:
+            for name in r['files'] if available(r) else ():   # a placeholder's mission is not installed
                 out[f'MISSION/{p41.folder}/{r["path"]}/{name}'] = edf41_script(r['path'], name, p41.data)
+    p['legacy'] = legacy_layouts(root, manifest, packs, by_pack)
+    out[PACKS_FILE] = packs_ini(packs, by_pack, p['legacy'])
     return out, Contents(ids.get(PACKS[0].tag, 0), ids.get(RANGE.tag, 0), edf41_content(ids)), p
 
 
+def installed_keys(root: str, rel: str, manifest: dict) -> list[str] | None:
+    """The mission keys, row by row, of the list file `rel` this tool wrote before (None: none of ours there)."""
+    data = modfiles.read(rel_path(root, rel))
+    if not ours(manifest.get('files', {}).get(rel), data):
+        return None
+    try:
+        return [str(r.items[2]) for r in dsgo.parse(data).root.get('table').items]
+    except (ValueError, KeyError, IndexError, TypeError, AssertionError, struct.error, AttributeError):
+        return None
+
+
+def legacy_layouts(root: str, manifest: dict, packs: tuple[Pack, ...], by_pack: dict[str, list[dict]]) -> dict:
+    """Each pack's rows as a save written before 2026-10-18 has them, where they differ from now (tag -> mission keys).
+    A mode's save (DEFP_<MST>) keys its clears by row (docs/mission-list-re.md §1: clear[class][row], the current row),
+    and the older installs left out a mission whose resources were missing, so its rows after that one sat one higher
+    up. The list this tool wrote last is that layout; once recorded it is kept (the manifest's 'legacy') for every
+    later install, so a save first loaded after several installs is still moved right. The plugin moves an unmarked
+    save to the new rows once (src/mission_packs.h MigrateModeSave) and marks it."""
+    kept = modfiles.load_json(os.path.join(root, 'Mods', LEGACY_FILE), {})
+    out = {tag: list(keys) for tag, keys in {**kept, **manifest.get('legacy', {})}.items()}
+    for pack in packs:
+        if pack.tag in out:
+            continue
+        keys = installed_keys(root, pack.list, manifest)
+        if keys is not None and keys != [r['key'] for r in by_pack[pack.group]]:
+            out[pack.tag] = keys
+    return out
+
+
+def legacy_map(old: list[str], rows: list[dict]) -> list[int]:
+    """Each old row's row now (-1: that mission is no longer in the pack)."""
+    now = {r['key']: i for i, r in enumerate(rows)}
+    return [now.get(k, -1) for k in old]
+
+
 def edf41_content(ids: dict[str, int]) -> int:
-    """EDF41Content: the first of the 4.1 packs' run of content ids (the story's slot), when any 4.1 pack is in;
-    the plugin owns EDF41Content .. +len(PACKS41)-1. 0: none."""
-    slots = {p.tag: k for k, p in enumerate(SLOTS)}
-    for p41 in PACKS41:
-        if p41.pack.tag in ids:
-            return ids[p41.pack.tag] - slots[p41.pack.tag] + slots[PACK41.tag]
-    return 0
+    """EDF41Content: the 4.1 story's fixed id (the first of the 4.1 packs' run), when any 4.1 pack is in; the
+    plugin owns the ones of the run PACKS_FILE lists. 0: none."""
+    return CONTENT[PACK41.tag] if any(p41.pack.tag in ids for p41 in PACKS41) else 0
+
+
+def pack_digest(pack: Pack, rows: list[dict]) -> str:
+    """A pack's definition, as a room compares it (src/mission_packs.h): its tag and every row's mission key in order,
+    with the committed scripts' hashes where the pack ships its own (EDF4.1's). Placeholders count as their mission
+    (a row is the definition's on every machine); which rows this machine lacks is missing_mask's."""
+    h = hashlib.sha256(f'AF-PACK-1\n{pack.tag}\n{len(rows)}\n'.encode())
+    for r in rows:
+        h.update(f'{r["key"]}\n'.encode())
+        for name, sha in sorted(r.get('sha', {}).items()):
+            h.update(f' {name}={sha}\n'.encode())
+    return h.hexdigest()[:16]
+
+
+def missing_mask(rows: list[dict]) -> str:
+    """The placeholder rows as hex digits, four rows a digit (row i: bit i % 4 of digit i // 4)."""
+    digits = [0] * ((len(rows) + 3) // 4)
+    for i, r in enumerate(rows):
+        if not available(r):
+            digits[i // 4] |= 1 << (i % 4)
+    return ''.join(f'{d:x}' for d in digits)
+
+
+def packs_ini(packs: tuple[Pack, ...], by_pack: dict[str, list[dict]], legacy: Mapping[str, list[str]] | None = None) -> bytes:
+    """PACKS_FILE: a [Pack<content id>] section per installed pack (Tag, Digest, Rows, Missing, and Legacy when its
+    saves may still have older rows: "<old row count>:<each old row's row now, -1 none>"), ASCII for
+    GetPrivateProfileString. The plugin owns exactly these ids, keeps the Missing rows locked, moves an older save's
+    rows (Legacy), publishes the current pack's line with a room and refuses a room whose pack differs
+    (src/mod_room.cpp)."""
+    lines = ['; Written by tools/make_edf5_campaign.py with the mission packs: do not edit (run the installer again).', '']
+    for pack in packs:
+        rows = by_pack[pack.group]
+        lines += [f'[Pack{CONTENT[pack.tag]}]', f'Tag={pack.tag}', f'Digest={pack_digest(pack, rows)}',
+                  f'Rows={len(rows)}', f'Missing={missing_mask(rows)}']
+        old = (legacy or {}).get(pack.tag)
+        if old:
+            lines.append(f'Legacy={len(old)}:' + ','.join(str(i) for i in legacy_map(old, rows)))
+        lines.append('')
+    return '\r\n'.join(lines).encode('ascii')
 
 
 # ------------------------------------------------------------------------------------------- writing
@@ -760,8 +898,11 @@ def _put_back(root: str, rel: str, entry: dict) -> str | None:
     return path
 
 
-def manifest_record(content: Contents, files: dict[str, dict]) -> dict:
-    return {'version': 2, 'content': content.campaign, 'range': content.range, 'edf41': content.edf41, 'files': files}
+def manifest_record(content: Contents, files: dict[str, dict], legacy: Mapping[str, list[str]] | None = None) -> dict:
+    out = {'version': 2, 'content': content.campaign, 'range': content.range, 'edf41': content.edf41, 'files': files}
+    if legacy:
+        out['legacy'] = {tag: list(keys) for tag, keys in legacy.items()}   # legacy_layouts: kept for later installs
+    return out
 
 
 def install(root: str, built: tuple[dict[str, bytes], Contents, dict] | None = None) -> list[str]:
@@ -769,7 +910,8 @@ def install(root: str, built: tuple[dict[str, bytes], Contents, dict] | None = N
     and sets the plugin's content ids. A build without the campaign (disable()) takes its packs out: the mode and
     text tables are rebuilt from what they replaced, and the EDF5 packs' own files, no longer written, are retired."""
     modfiles.refuse_while_running()
-    files, content, _ = built or build(root)
+    files, content, planned = built or build(root)
+    legacy = {**load_manifest(root).get('legacy', {}), **planned.get('legacy', {})}
     mpath = os.path.join(root, 'Mods', MANIFEST)
     manifest = load_manifest(root)
     kept = manifest.get('files', {})
@@ -792,7 +934,7 @@ def install(root: str, built: tuple[dict[str, bytes], Contents, dict] | None = N
         os.remove(disabled)
     # The manifest first, accepting the old bytes and the new, and still holding what is to be put back: a run cut
     # short leaves every file recognised (and what it replaced on record); once all are written only the new are ours.
-    modfiles.save_json(mpath, manifest_record(content, {**retired, **entries}))
+    modfiles.save_json(mpath, manifest_record(content, {**retired, **entries}, legacy))
     paths = []
     for rel, data in files.items():
         path = rel_path(root, rel)
@@ -809,7 +951,7 @@ def install(root: str, built: tuple[dict[str, bytes], Contents, dict] | None = N
             paths.append(path)
     for entry in entries.values():
         entry.pop('also', None)
-    modfiles.save_json(mpath, manifest_record(content, {**left, **entries}))
+    modfiles.save_json(mpath, manifest_record(content, {**left, **entries}, legacy))
     ini = set_content(root, content)
     if ini:
         paths.append(ini)
@@ -846,6 +988,8 @@ def remove(root: str, *, remember_disabled: bool = False) -> tuple[list[str], li
         d = os.path.join(root, 'Mods', d)
         if os.path.isdir(d) and not os.listdir(d):
             os.rmdir(d)
+    if manifest.get('legacy'):   # the saves outlive the packs: a later install still moves their rows
+        modfiles.save_json(os.path.join(root, 'Mods', LEGACY_FILE), manifest['legacy'])
     if left:
         modfiles.save_json(mpath, {**manifest, 'files': left})
     elif os.path.isfile(mpath):
@@ -930,7 +1074,7 @@ def check(root: str) -> bool:
         return True
     # The installed packs' files must be as written; a record kept for a retired file another tool changed since
     # (a pack taken out, what it replaced kept to put back) is reported, not a fault.
-    current = {CONFIG, *TEXTS.values(), *(f for p in PACKS if enabled(root) for f in p.files()),
+    current = {CONFIG, PACKS_FILE, *TEXTS.values(), *(f for p in PACKS if enabled(root) for f in p.files()),
                *(RANGE.files() if range_installed(root) else ()),
                *(f for f in files if manifest.get('edf41') and managed(f) and f not in FILES)}
 
@@ -975,8 +1119,9 @@ def main(argv: list[str]) -> int:
         for r in p['rows']:
             print(r['group'], r['path'], r['map'], r['title']['SC'])
         for g, path, why in p['skipped']:
-            print('跳过', g, path, why)
-        print(len(p['rows']), '关')
+            print('占位', g, path, why)
+        held = sum(not available(r) for r in p['rows'])
+        print(len(p['rows']) - held, '关' + (f'（另 {held} 关缺资源，留作占位行）' if held else ''))
         return 0
     try:
         root41 = find_edf41(root)
@@ -997,15 +1142,18 @@ def summary(built: tuple[dict[str, bytes], Contents, dict]) -> str:
     out = f'测试场任务包（内容编号 {content.range}，离线和在线的「任务包」里选「{RANGE.name["SC"]}」）'
     if not content.campaign:
         return out
-    counts = '、'.join(f'{pack.name["SC"]} {sum(r["group"] == pack.group for r in built[2]["rows"])} 关' for pack in PACKS)
+    rows = built[2]['rows']
+
+    def count(group: str) -> str:
+        n = sum(r['group'] == group and available(r) for r in rows)
+        held = sum(r['group'] == group and not available(r) for r in rows)
+        return f'{n} 关' + (f'（另有 {held} 关缺资源，占位锁定）' if held else '')
+    counts = '、'.join(f'{pack.name["SC"]} {count(pack.group)}' for pack in PACKS)
     out41 = ''
     if content.edf41:
-        slots = {p.tag: k for k, p in enumerate(SLOTS)}
         for p41 in PACKS41:
-            n41 = sum(r['group'] == p41.pack.group for r in built[2]['rows'])
-            if n41:
-                cid = content.edf41 + slots[p41.pack.tag] - slots[PACK41.tag]
-                out41 += f'；{p41.pack.name["SC"]} {n41} 关（内容编号 {cid}）'
+            if any(r['group'] == p41.pack.group and available(r) for r in rows):
+                out41 += f'；{p41.pack.name["SC"]} {count(p41.pack.group)}（内容编号 {CONTENT[p41.pack.tag]}）'
     return (f'EDF5 任务包：{counts}（离线模式的「任务包」列表里选择；内容编号 {content.campaign}–'
             f'{content.campaign + len(PACKS) - 1}）{out41}；' + out)
 

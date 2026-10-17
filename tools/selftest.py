@@ -5491,9 +5491,9 @@ def installer_menu_8_opens_the_loadouts() -> None:
 
 
 def _e5c_stub() -> tuple[dict[str, bytes], object, dict]:
-    """make_edf5_campaign.build on a stand-in game (no Root.cpk to read): a file each, the EDF5 packs' content from 3,
-    the test range's after them."""
-    return {rel: f'stub {rel}'.encode() for rel in e5c.FILES}, e5c.Contents(3, 6), {'rows': [], 'skipped': []}
+    """make_edf5_campaign.build on a stand-in game (no Root.cpk to read): a file each, the packs' fixed ids (EDF5's
+    65..67, the test range's 68)."""
+    return {rel: f'stub {rel}'.encode() for rel in e5c.FILES}, e5c.Contents(65, 68), {'rows': [], 'skipped': []}
 
 
 def _e5c_have_game() -> bool:
@@ -5544,9 +5544,9 @@ def edf5_campaign_build() -> None:
     stock = sgo.plain(sgo.read(rootcpk.default().read('DEFAULTPACKAGE', 'CONFIG.SGO'))[1]['ModeList'])
     modes = sgo.plain(sgo.read(files[e5c.CONFIG])[1]['ModeList'])
     assert modes[:len(stock)] == stock and len(modes) == len(stock) + 3 * 2 + 2, 'the stock modes changed'
-    assert content == e5c.Contents(3, 6) and content.campaign == max(m[e5c.M_CONTENT] for m in stock) + 1
+    assert content == e5c.Contents(65, 68) and content.campaign == e5c.CONTENT['EDF5'], content   # fixed ids
     packs = modes[len(stock):len(stock) + 6]   # each pack's offline mode, then its online one (more than one player)
-    assert [m[e5c.M_CONTENT] for m in packs] == [3, 3, 4, 4, 5, 5]
+    assert [m[e5c.M_CONTENT] for m in packs] == [65, 65, 66, 66, 67, 67]
     assert [(m[e5c.M_ONLINE], m[e5c.M_TYPE]) for m in packs] == [(0, 0), (1, 1)] * 3, 'not an offline and an online mode'
     assert len({m[e5c.M_MST].upper() for m in modes}) == len(stock) // 2 + 3 + 1, 'a pack\'s two modes on two saves'
     assert len({(m[e5c.M_TYPE], m[e5c.M_CONTENT]) for m in modes}) == len(modes), 'GetModeNo(type, content) ambiguous'
@@ -5589,6 +5589,13 @@ def edf5_campaign_build() -> None:
     assert counts == {'main': 110, 'dlc1': 15, 'dlc2': 14}, counts
     # EDF5 Mission Pack 1's four (maps and fortress pre-generated: tools/edf5_dlc.py) are offered too
     assert not [x for x in p['skipped'] if x[0] in {pk.group for pk in e5c.PACKS}], p['skipped']
+    # the plugin's EDF6VehicleCrew.packs.ini: a section per pack written, by its fixed id, nothing missing here
+    packs_ini = files[e5c.PACKS_FILE].decode('ascii')
+    for pack in (*e5c.PACKS, e5c.RANGE):
+        rows = [r for r in p['rows'] if r['group'] == pack.group] or [None]
+        section = packs_ini.split(f'[Pack{e5c.CONTENT[pack.tag]}]\r\n', 1)[1].split('\r\n\r\n', 1)[0].split('\r\n')
+        assert section[0] == f'Tag={pack.tag}' and section[2] == f'Rows={len(rows)}', (pack.tag, section)
+        assert section[3] == 'Missing=' + '0' * ((len(rows) + 3) // 4), (pack.tag, section)
 
 
 @test
@@ -5611,10 +5618,10 @@ def edf5_campaign_install_remove() -> None:
         ini = os.path.join(root, 'Mods', e5c.INI)
         modfiles.atomic_write(ini, b'[VehicleCrew]\nEnabled=1\n')
         first = e5c.build(root)
-        assert first[1] == e5c.Contents(8, 11), 'the packs\' content ids collide with the other mod\'s'
+        assert first[1] == e5c.Contents(65, 68), 'the packs\' content ids moved for the other mod\'s (2026-10-15)'
         e5c.install(root, first)
-        assert 'EDF5CampaignContent=8' in open(ini, encoding='utf-8').read()
-        assert 'TestRangeContent=11' in open(ini, encoding='utf-8').read()
+        assert 'EDF5CampaignContent=65' in open(ini, encoding='utf-8').read()
+        assert 'TestRangeContent=68' in open(ini, encoding='utf-8').read()
         assert all('also' not in e for e in e5c.load_manifest(root)['files'].values()), 'the final manifest'
         assert e5c.check(root)
         again = e5c.build(root)
@@ -5640,7 +5647,7 @@ def edf5_campaign_install_remove() -> None:
         e5c.install(root, e5c.build(root))
         modfiles.atomic_write(e5c.rel_path(root, e5c.CONFIG), b'someone else')
         e5c.remove(root)
-        assert 'EDF5CampaignContent=8' in open(ini, encoding='utf-8').read(), 'content id zeroed under a kept table'
+        assert 'EDF5CampaignContent=65' in open(ini, encoding='utf-8').read(), 'content id zeroed under a kept table'
         assert all(os.path.isfile(e5c.rel_path(root, rel)) for rel in e5c.FILES)
 
 
@@ -5661,10 +5668,10 @@ def edf5_campaign_range_pack() -> None:
     stock = sgo.plain(sgo.read(game.read('DEFAULTPACKAGE', 'CONFIG.SGO'))[1]['ModeList'])
     rm015 = next(r for r in dsgo.parse(game.read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO')).root.get('table').items
                  if r.items[2] == 'EDF6/RM015')
-    for campaign, want in ((True, e5c.Contents(3, 6)), (False, e5c.Contents(0, 6))):
+    for campaign, want in ((True, e5c.Contents(65, 68)), (False, e5c.Contents(0, 68))):
         files, content, _ = e5c.build(rootcpk.DEFAULT_GAME, campaign=campaign)
         assert content == want, (campaign, content)
-        assert set(files) == {e5c.CONFIG, *e5c.TEXTS.values(),
+        assert set(files) == {e5c.CONFIG, e5c.PACKS_FILE, *e5c.TEXTS.values(),
                               *(f for pk in (*(e5c.PACKS if campaign else ()), e5c.RANGE) for f in pk.files())}
         modes = sgo.plain(sgo.read(files[e5c.CONFIG])[1]['ModeList'])
         assert modes[:len(stock)] == stock
@@ -5721,7 +5728,7 @@ def edf5_campaign_interrupted_reinstall() -> None:
             else:
                 raise AssertionError('the failing write did not fail')
         files, content, _ = e5c.build(root)   # neither refused nor added to the half-written table
-        assert content == e5c.Contents(3, 6) and files[e5c.CONFIG] == e5c.build(root)[0][e5c.CONFIG]
+        assert content == e5c.Contents(65, 68) and files[e5c.CONFIG] == e5c.build(root)[0][e5c.CONFIG]
         done, kept = e5c.remove(root)
         assert not kept, kept
         assert modfiles.read(e5c.rel_path(root, e5c.CONFIG)) == other, "the other mod's mode table lost"
@@ -5730,9 +5737,10 @@ def edf5_campaign_interrupted_reinstall() -> None:
 @test
 def edf5_campaign_refusals() -> None:
     """A mode table that is not SGO, one that already has EDF5 pack modes this tool did not leave, one whose save files
-    collide, and the older version's appended list changed by someone since all refuse (nothing written) instead of
-    stopping the installer; an empty pack is not installed."""
+    collide, one on a pack's fixed content id, and the older version's appended list changed by someone since all
+    refuse (nothing written) instead of stopping the installer; an empty pack is not installed."""
     import base64
+    import copy
     import sgo
     if not _e5c_have_game():
         return
@@ -5747,6 +5755,12 @@ def edf5_campaign_refusals() -> None:
         members['ModeList'][0][e5c.M_MST] = e5c.PACKS[1].mst
         modfiles.atomic_write(e5c.rel_path(root, e5c.CONFIG), sgo.write_depth_first(ver, members))
         _e5c_refuses(root, 'a save file a pack would share')
+        ver, members = sgo.read(game.read('DEFAULTPACKAGE', 'CONFIG.SGO'))   # another mod on a pack's fixed id
+        members['ModeList'].append(copy.deepcopy(members['ModeList'][2]))
+        members['ModeList'][-1][e5c.M_CONTENT] = e5c.CONTENT['EDF41MP01']
+        members['ModeList'][-1][e5c.M_MST] = 'MOD7.MST'
+        modfiles.atomic_write(e5c.rel_path(root, e5c.CONFIG), sgo.write_depth_first(ver, members))
+        _e5c_refuses(root, 'another mod\'s mode on a pack\'s fixed content id')
         os.remove(e5c.rel_path(root, e5c.CONFIG))
         list_rel = e5c.LEGACY_LIST
         modfiles.atomic_write(e5c.rel_path(root, list_rel), b'appended')
@@ -5761,6 +5775,117 @@ def edf5_campaign_refusals() -> None:
                                                   'rows': [x for x in real_plan(r, root41, skip41)['rows'] if x['group'] != 'dlc2']}):
             _e5c_refuses(root, 'an empty pack')
         assert not e5c.installed(root), 'a refusal wrote a manifest'
+
+
+@test
+def edf5_campaign_two_machines() -> None:
+    """A room publishes only its content id (DLC) and row (MISSION_NO) (docs/mod-room-isolation.md, feedback
+    2026-10-15 「别人加的时候说未持有此内容」): from the real game, machine A (no other mod, every resource) and
+    machine B (another mod's modes at 3 and 4, EDF5 Mission Pack 1's IG_DESERT508 not installed, a 4.1 map not
+    converted) give every (online mode's content id, list row) the same mission. Before 2026-10-18 B's ids followed
+    the other mod's (5.., the guest did not own the host's pack) and its lists lost the missing missions' rows (the
+    rows after them moved: the wrong mission, or a black screen). B's rows it lacks are placeholders, the same
+    definition digest, only its Missing mask differs."""
+    import copy
+    import dsgo
+    import edf5_dlc
+    import gamedir
+    import rootcpk
+    import sgo
+    if not _e5c_have_game():
+        return
+    root41 = gamedir.find_other(gamedir.EDF41, near=rootcpk.DEFAULT_GAME)
+    reg = edf5_dlc.registry()
+    maps = {f'{g}.MAC' for g, x in reg['groups'].items() if x['kind'] == 'map'}
+    names = {tuple(rel.split('/', 1)) for x in reg['groups'].values() if x['kind'] == 'object' for rel in x['files']}
+
+    def rooms(files: dict[str, bytes]) -> dict[tuple[int, int], str]:
+        out = {}
+        for m in sgo.plain(sgo.read(files[e5c.CONFIG])[1]['ModeList']):
+            rel = 'MISSION/' + m[e5c.M_FILES][0].split('app:/Mission/', 1)[-1].upper()
+            if m[e5c.M_TYPE] == 1 and rel in files:   # our online modes: the room's (DLC, MISSION_NO)
+                for i, r in enumerate(dsgo.parse(files[rel]).root.get('table').items):
+                    out[(int(m[e5c.M_CONTENT]), i)] = r.items[2]
+        return out
+    real41 = e5c.plan41   # the 4.1 rows read the real game's archives (a stand-in game has none)
+    with _e5c_game() as (root_a, game), patched(e5c, plan41=lambda _r, m, r41, skip=frozenset():
+                                                real41(rootcpk.DEFAULT_GAME, m, r41, skip)):
+        with patched(edf5_dlc, offered=lambda _root: (maps, names, {})):
+            a = e5c.build(root_a, root41=root41)
+    with _e5c_game() as (root_b, game), patched(e5c, plan41=lambda _r, m, r41, skip=frozenset():
+                                                real41(rootcpk.DEFAULT_GAME, m, r41, skip)):
+        ver, members = sgo.read(game.read('DEFAULTPACKAGE', 'CONFIG.SGO'))
+        for content, online in ((3, 0), (4, 1)):   # another mod's modes, as DEFP_MOD1.MST
+            members['ModeList'].append(copy.deepcopy(members['ModeList'][2 + online]))
+            members['ModeList'][-1][e5c.M_CONTENT] = content
+            members['ModeList'][-1][e5c.M_MST] = 'MOD1.MST'
+        modfiles.atomic_write(e5c.rel_path(root_b, e5c.CONFIG), sgo.write_depth_first(ver, members))
+        skip41 = {'NW_KOUSOUBLD01': '转换失败：测试'} if root41 else {}
+        with patched(edf5_dlc, offered=lambda _root: (maps - {'IG_DESERT508.MAC'}, names, {'IG_DESERT508': '测试'})):
+            b = e5c.build(root_b, root41=root41, skip41=skip41)
+    assert a[1] == b[1] == e5c.Contents(65, 68, 69 if root41 else 0), (a[1], b[1])
+    room_a, room_b = rooms(a[0]), rooms(b[0])
+    assert room_a == room_b and len(room_a) > 140, (len(room_a), sorted(set(room_a.items()) ^ set(room_b.items()))[:6])
+    held = {r['key'] for r in b[2]['rows'] if not e5c.available(r)}
+    assert {'EDF5_OLD_SCRIPT/DLC/DM018', 'EDF5_OLD_SCRIPT/DLC/DM020'} <= held, held
+    assert not [r for r in a[2]['rows'] if not e5c.available(r)], 'machine A lacks nothing'
+    ini_a, ini_b = a[0][e5c.PACKS_FILE].decode(), b[0][e5c.PACKS_FILE].decode()
+    digests = lambda text: re.findall(r'Digest=(\w+)', text)
+    assert digests(ini_a) == digests(ini_b) and ini_a != ini_b, 'same definitions, other placeholders'
+    # B's placeholders are never written as missions, and nothing opens them
+    for p41 in e5c.PACKS41:
+        for r in b[2]['rows']:
+            if r['group'] == p41.pack.group and not e5c.available(r):
+                assert not any(rel.startswith(f'MISSION/{p41.folder}/{r["path"]}/') for rel in b[0]), r['path']
+    dlc1 = dsgo.parse(b[0][e5c.PACKS[1].list]).root.get('table').items
+    held_rows = {i for i, r in enumerate(dlc1) if r.items[2] in held}
+    assert held_rows and not any(int(n) in held_rows for r in dlc1 for n in r.items[3].items), 'a placeholder is a successor'
+
+
+@test
+def edf5_campaign_legacy_rows() -> None:
+    """An install from before 2026-10-18 that left a mission out (its rows after it one higher up) and its saves: the
+    next install records that list as the pack's legacy layout and writes Legacy (each old row's row now) into
+    EDF6VehicleCrew.packs.ini, so the plugin moves such a save once (src/mission_packs.h MigrateModeSave); an install
+    over a list that is already the definition records nothing, and the record survives later installs."""
+    if not _e5c_have_game():
+        return
+    with _e5c_game() as (root, game):
+        real_plan = e5c.plan
+
+        def older(r: str, root41: object = None, skip41: object = ()) -> dict:   # the old planner: DM018 left out
+            p = real_plan(r, root41, skip41)   # type: ignore[arg-type]
+            return {**p, 'rows': [x for x in p['rows'] if x['key'] != 'EDF5_OLD_SCRIPT/DLC/DM018']}
+        with patched(e5c, plan=older):
+            e5c.install(root, e5c.build(root))
+        assert 'legacy' not in e5c.load_manifest(root), 'the first install has no older list'
+        files, _, p = e5c.build(root)
+        dlc1 = [r for r in p['rows'] if r['group'] == 'dlc1']
+        old = p['legacy']['EDF5DLC1']
+        assert set(p['legacy']) == {'EDF5DLC1'} and len(old) == len(dlc1) - 1, p['legacy'].keys()
+        at = [r['key'] for r in dlc1].index('EDF5_OLD_SCRIPT/DLC/DM018')
+        want = list(range(at)) + list(range(at + 1, len(dlc1)))
+        assert f'Legacy={len(old)}:' + ','.join(map(str, want)) in files[e5c.PACKS_FILE].decode(), 'the rows after DM018 one down'
+        e5c.install(root, (files, _, p))
+        assert e5c.load_manifest(root)['legacy'] == p['legacy']
+        again = e5c.build(root)   # the list is the definition now: the record is what keeps the older layout
+        assert again[2]['legacy'] == p['legacy'] and again[0][e5c.PACKS_FILE] == files[e5c.PACKS_FILE]
+
+
+@test
+def mission_pack_ids_agree() -> None:
+    """The plugin's fixed ids and identity format (src/mission_packs.h) are the installer's (make_edf5_campaign
+    CONTENT, PACKS_FILE): base, count, the three ini runs, the attribute's name, the 512-row cap; the plugin reads
+    the file beside its ini under the name the installer writes."""
+    header = src('src/mission_packs.h')
+    assert f'constexpr int kBase={e5c.CONTENT_BASE},kCount={len(e5c.SLOTS)};' in header
+    assert (f'constexpr int kEdf5={e5c.CONTENT["EDF5"]},kRange={e5c.CONTENT["EDF6TR"]},kEdf41={e5c.CONTENT["EDF41"]};'
+            in header)
+    assert 'constexpr int kMaxRows=512;' in header and 'constexpr char kAttribute[]="AF_PACK";' in header
+    assert e5c.PACKS_FILE == 'Plugins/EDF6VehicleCrew.packs.ini' and 'L".packs.ini"' in src('src/plugin.cpp')
+    text = e5c.packs_ini((e5c.RANGE,), {e5c.RANGE.group: [{'key': 'EDF6/X'}, {'key': 'EDF6/Y', 'missing': 'x'}]}).decode()
+    assert '[Pack68]\r\nTag=EDF6TR\r\nDigest=' in text and '\r\nRows=2\r\nMissing=2\r\n' in text, text
+    assert e5c.missing_mask([{}] * 4 + [{'missing': 'x'}]) == '01' and e5c.missing_mask([{'missing': 'x'}] * 4) == 'f'
 
 
 # Every call in EDF.dll to the owned-content lookup (0xD92B0) goes through the plugin (src/edf5campaign.cpp): one
@@ -11215,12 +11340,12 @@ def edf41_dlc_packs() -> None:
     tags = [p.tag for p in e5c.SLOTS]
     assert tags[-3:] == ['EDF41', 'EDF41MP01', 'EDF41MP02'], tags   # appended: no installed pack's content id moves
     assert [p.pack for p in e5c.PACKS41] == [e5c.PACK41, e5c.PACK41_MP01, e5c.PACK41_MP02]
-    assert e5c.edf41_content({'EDF41MP02': 12}) == 10 and e5c.edf41_content({'EDF41': 7}) == 7
+    assert e5c.edf41_content({'EDF41MP02': 71}) == 69 and e5c.edf41_content({'EDF41': 69}) == 69
     assert e5c.edf41_content({}) == 0
     assert e5c.managed('MISSION/EDF41MP01/M401/MISSION.BVM') and e5c.managed(e5c.PACK41_MP02.files()[0])
     plugin = src('src/edf5campaign.cpp')
-    assert 'constexpr int kPacks41=3;' in plugin and '(edf41>0 && id>=edf41 && id<edf41+kPacks41)' in plugin
-    assert 'Ours(9,3,6,7) && !Ours(10,3,6,7)' in plugin
+    assert 'constexpr int kPacks41=3;' in plugin and 'id>=packs::kEdf41 && id<packs::kEdf41+kPacks41' in plugin
+    assert 'RunOf(71)==69 && !RunOf(72)' in plugin
     auto = src('tests/autopilot/autopilot.cpp')
     assert '"edf41mp01:",10' in auto and 'first41+pack41' in auto
     release = src('tools/build_release.py')
@@ -11549,7 +11674,7 @@ def edf5_dlc_campaign_offers_the_four() -> None:
     with _e5c_game() as (root, _game):
         with patched(edf5_dlc, offered=lambda _root: (maps, names, {})):
             p = e5c.plan(root)
-        dlc1 = {r['path'] for r in p['rows'] if r['group'] == 'dlc1'}
+        dlc1 = {r['path'] for r in p['rows'] if r['group'] == 'dlc1' and e5c.available(r)}
         assert four <= dlc1, sorted(four - dlc1)
         assert not [s for s in p['skipped'] if s[0] == 'dlc1'], p['skipped']
         assert {m for x in reg['groups'].values() for m in x['missions']} == four, reg['groups']
@@ -11557,6 +11682,10 @@ def edf5_dlc_campaign_offers_the_four() -> None:
             p = e5c.plan(root)
         why = {s[1]: s[2] for s in p['skipped'] if s[0] == 'dlc1'}
         assert set(why) == {'DLC/DM018', 'DLC/DM020'} and all('未安装：测试' in w for w in why.values()), why
+        # ...as placeholder rows, at their place (a room's MISSION_NO is the row on every machine)
+        rows = [r for r in p['rows'] if r['group'] == 'dlc1']
+        assert [r['path'] for r in rows] == [m['path'] for m in json.load(open(e5c.TEXT, encoding='utf-8'))['dlc1']]
+        assert {r['path'] for r in rows if not e5c.available(r)} == set(why)
 
 
 @test
