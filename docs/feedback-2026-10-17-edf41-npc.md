@@ -38,7 +38,7 @@ SGO 按路径原样加载：EDF6 档案里有这个路径就用 EDF6 的文件�
 
 | 来源 | SGO（关数） | 游戏实际加载的 |
 |---|---|---|
-| EDF6 自己的同名文件（28 个） | AiArmySoldier_AF / FL / RL / SG / SN 及各自 _Leader（AF 57 关…FL 4 关）、AiHeavyArmor_SC / SMC / SP（含 _Leader）、AiPaleWing_IZN / LANCE / LR / MS / TB（含 _Leader）、Vehicle402_Rocket_AI、Vehicle403_Tank_AI、Vehicle404_BigTank_AI | EDF6 的游骑兵 / 重装 / 飞行兵（`p505_ranger` / `p507_fencer` / `p506_wingDiver` 模型、EDF6 配色、EDF6 的 AI 武器，例如重装兵是 `AiHeavyShield01Elite` + `AiHeavyDash01`），类与 4.1 相同；EDF6 自己的任务也生成这些文件（AiPaleWing_TB 除外，其键与同类一致） |
+| EDF6 自己的同名文件（29 个：26 名士兵 + 3 种 AI 载具） | AiArmySoldier_AF / FL / RL / SG / SN 及各自 _Leader（AF 57 关…FL 4 关）、AiHeavyArmor_SC / SMC / SP（含 _Leader）、AiPaleWing_IZN / LANCE / LR / MS / TB（含 _Leader）、Vehicle402_Rocket_AI、Vehicle403_Tank_AI、Vehicle404_BigTank_AI | EDF6 的游骑兵 / 重装 / 飞行兵（`p505_ranger` / `p507_fencer` / `p506_wingDiver` 模型、EDF6 配色、EDF6 的 AI 武器，例如重装兵是 `AiHeavyShield01Elite` + `AiHeavyDash01`），类与 4.1 相同；EDF6 自己的任务也生成这些文件（AiPaleWing_TB 除外，其键与同类一致） |
 | 移植（6 个） | AiArmySoldier_OMG（+_Leader，各 5 关）、Vehicle301_Tank_AI（13 关，EDF6 V505 AI 坦克 + 4.1 外观的替身）、Vehicle501_FortressRobo（+_AI）、Transporter401_Formation（覆盖 EDF6 残留的坏文件） | 4.1 的文件（`tools/make_edf41_objects.py`） |
 
 两个 DLC 任务包（`edf41port/mp01`、`mp02`）的友军也都落在这 34 个之内，同样全部可加载。
@@ -72,6 +72,48 @@ SGO 按路径原样加载：EDF6 档案里有这个路径就用 EDF6 的文件�
 
 没有改 `edf41port/` 下的数据，也没有需要再生成的数据（本次只加检查）。
 
+## 4b. 第二步：4.1 外观的友军移植（分支 feat/edf41-friends-look-1017）
+
+决定：按「友军不是 4.1 的样子」理解，把 4.1 自己的士兵搬过来。
+
+**移植了**：26 名士兵（游骑兵 AF / FL / RL / SG / SN、重装兵 SC / SMC / SP、飞行兵 IZN / LANCE / LR / MS / TB，各含 _Leader）。
+- 路径：`OBJECT/EDF41/<名字>`，和本篇小龙同一个故事目录、同一套机制（`pylib/edf41dlc.py STORY_SHADOWED` + `rewrite`，
+  `Games.moved` 从故事路径读 4.1 原文件）。EDF6 自己的同名文件不动，EDF6 本篇不受影响。
+- 本篇和两个 DLC 包的脚本都经 `edf41dlc.rewrite` 改指新路径（本篇用 `bvm41.rewritten`，DLC 用 `to_edf5(rewrite=)`），
+  预载（native 13）的同名字符串一起改，所以预载的就是要生成的。
+- SGO 的做法（`tools/make_edf41_objects.py friend_look`）：以 **EDF6 同名文件**为底（EDF6 调好的 AI、镜头、攀爬、
+  soldier_config），换上 4.1 的模型 / CAS / MAB（`animation_model` 前三项）、布娃娃、配色、灯、语音（talk 按 `soldier_talk` 调序）、
+  耐久，以及 4.1 这名士兵自己的武器和武器槽（`FRIEND_KEYS`）。保留模板 `animation_model` 后面的缩放和特效包（dict），
+  去掉飞行兵模板的裙摆链（列表，点名 EDF6 模型才有的 `ragdoll_skirt5B_*` 骨骼）。
+- 按 EDF.dll 读法改形（`FRIEND_OVERRIDE`）：
+  - `soldier_sub_weapon_slot` = 0：EDF6 的同名文件可能指第三把武器（AIHEAVYARMOR_SP_LEADER 是 `[[2,'weapon','te_l']]`），
+    4.1 的兵只带两把。
+  - `pale_wing_booster_cetner` = `booster_center`：这是骨骼名，`0x57D069` 按名查索引后 `0x1100280` 取记录**不判 -1**；
+    EDF6 的 `booster5B_center` 在 4.1 模型里没有，用它会越界读。
+  - `pale_wing_booster_core` = `['booster_core']`：类按列表读（`0x57D9A9` 取子项数，逐个 FindLocator），4.1 写的是单个字符串。
+  - `pale_wing_hair_setting` = `[]`：与所有 EDF6 飞行兵相同；EDF.dll 里没有这个键名的读取点，4.1 的头发物理不搬。
+- CAS（`FRIEND_CAS`，在 `convert` 里做，所以欧米伽队共用的 `ARMYSOLDIER.CAS` 一起得到）：EDF6 同类 CAS 的 player 4.1 全有
+  （不缺则构建通过，缺则拒绝）；把 4.1 士兵能走到、EDF6 有而 4.1 缺的状态按「同一动作」别名到 4.1 的状态
+  （`noWeapon_*` → 4.1 的徒手姿势 `assault_*` / `base_*` / `hand_*`，`knockout` → `down`，EDF6 摩托座位 → 4.1 摩托座位，游骑兵冲刺
+  `*_dash` → `*_run_f`）。不别名：冲刺收尾、闪避、剑 / 冲刺枪 / 左手投掷、NPC 聊天动作——一次性状态别名成循环会永远不结束
+  （`cas_graft.alias_states` 的说明），缺失时 play 返回 false、保持原状态。
+- **没有补的两个抓握变量** `v_vehicle_grip_l/r_ik_target`：EDF6 CAS 里它们挂在 tcontrol 上，`cas_graft` 不能安全嫁接（索引要重排）；
+  而类在 `0x56E49F` / `0x56E4B8` 查一次，写之前在 `0x57526C` / `0x575320` 判 -1，缺了就是不写；4.1 的 CAS 也没有读它们的 IK 链，
+  嫁接过来也没人读。所以不补，构建时检查「除这两个外 EDF6 有的变量 4.1 全有」。
+- 检查（构建拒绝即整次失败，因为脚本已经指向新路径）：类的全部共有键（`check_class_keys`）、`CLASS_NAMES` 的骨骼 / 状态、
+  `friend_names`：骨骼键在 4.1 模型里、武器槽的 CAS player 存在、MAB 定位器（喷射、拖带、灯）存在、武器 / 语音文件存在、
+  贴图在模型之前（`missing_textures`；`edf41_shipped_textures_load_before_models` 也覆盖）。
+
+**保留 EDF6 版**：3 种 AI 载具 `Vehicle402_Rocket_AI` / `Vehicle403_Tank_AI` / `Vehicle404_BigTank_AI`。4.1 的是
+`VehicleRocket` / `VehicleTank403` / `VehicleTank404` 类，EDF6 改成 `Vehicle40x_*` 类、键整个重写（`car_base_*` 物理等十几个
+键 4.1 没有），硬套会崩；而 EDF6 的这三个文件用的本来就是 4.1 的模型（`Vehicle403_tank.mrab` 等），外观已经是 4.1 的。
+
+再生成（合并后统一执行，顺序：先对象、再任务）：
+
+    python -B tools/make_edf41_objects.py
+    python -B tools/make_edf41_missions.py
+    python -B tools/make_edf41_missions.py --dlc
+
 ## 5. 未验证 / 需要实机确认
 
 - 玩家指的是哪种情况：请玩家说明是哪一关、是「一个友军都没有」还是「友军长得不是 4.1 的」。
@@ -79,3 +121,7 @@ SGO 按路径原样加载：EDF6 档案里有这个路径就用 EDF6 的文件�
   只做了推断（玩家生成用同一探测）；`docs/edf41-uforobo.md` 记录 M411（SK_KAIGAN01）实机里机器人被友军打掉血，是旁证。
 - 4.1 地图的寻路网格借用 EDF6 地图（`tools/edf41_maps.py` 已记为未解决）：友军能生成，但走位可能不对，可能被玩家理解为「没有 NPC」。
 - 欧米伽队（4.1 原文件）从未实机生成过。
+- 移植的 26 名士兵都没有实机生成过：要看的是不崩、模型和贴图正常（不黑）、走跑 / 开火 / 被击倒 / 起身动作正常、飞行兵能飞
+  （喷射骨骼换成 `booster_center`）、重装兵盾和喷射、上车（插件让 NPC 上载具）时姿势。4.1 的布娃娃 SHKT（Havok 2014）在 EDF6
+  士兵类上是否正常也只靠其它移植敌人类推。
+- 4.1 布娃娃块是经典 SGO 放进 DSGO（同 Hector 做法），EDF6 的士兵类是否照样读，未实机确认。

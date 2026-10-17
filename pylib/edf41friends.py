@@ -16,10 +16,10 @@ either (1011 at 0x21A41D, the members at 0x21BEB0). The same probe places the pl
 stands on answers it (inferred; not run).
 
 The SGO each call names is loaded from the path as it is: the EDF6 archives' file when EDF6 has one there ('stock'),
-the port's (edf41port/objects, tools/make_edf41_objects.py) otherwise ('ported'). EDF6 keeps EDF4.1's names for its own
-soldiers (AiArmySoldier_AF ... AiPaleWing_LR), so a 4.1 mission's rangers, fencers and wing divers are EDF6's: EDF6's
-models, colours and AI weapons under 4.1's names, the same class. EDF6's own missions spawn the same files, so a 4.1
-look cannot go under these paths without changing EDF6's own missions too.
+the port's (edf41port/objects, tools/make_edf41_objects.py) otherwise ('ported', 'look'). EDF6 keeps EDF4.1's names for
+its own soldiers (AiArmySoldier_AF ... AiPaleWing_LR), which EDF6's own missions spawn: left as they were, a 4.1
+mission's rangers, fencers and wing divers were EDF6's (models, colours, AI weapons). 4.1's are ported to their own
+folder instead (LOOKS, LOOK_FOLDER) and the 4.1 scripts renamed to it (pylib/edf41dlc.py rewrite).
 """
 from __future__ import annotations
 
@@ -40,23 +40,44 @@ GROUND_PROBE = frozenset({CREATE_SQUAD, CREATE_GROUP})
 
 @dataclass(frozen=True)
 class Friend:
-    source: str   # 'stock': EDF6's own file at this path; 'ported': edf41port/objects (tools/make_edf41_objects.py)
+    source: str   # 'stock': EDF6's own file at this path; 'ported': edf41port/objects (tools/make_edf41_objects.py);
+                  # 'look': 4.1's soldier of the story path LOOKS names, ported to LOOK_FOLDER (the scripts renamed)
     cls: str      # xgs_scene_object_class of the file the game loads
 
 
-def _soldiers(prefix: str, kinds: tuple[str, ...], cls: str) -> dict[str, Friend]:
-    return {f'OBJECT/{prefix}_{k}{lead}.SGO': Friend('stock', cls) for k in kinds for lead in ('', '_LEADER')}
+# 4.1's own rangers, fencers and wing divers (feedback 2026-10-17: the story's friends were EDF6's soldiers). EDF6
+# keeps these story paths for its own soldiers, which its own missions spawn, so 4.1's files cannot go there: they are
+# ported to OBJECT/EDF41/<name> (tools/make_edf41_objects.py FRIEND_LOOKS), the story folder pylib/edf41dlc.py keeps
+# for every story object EDF6 holds as another (STORY_SHADOWED: these and the small dragons), and every 4.1 mission
+# script (the story's and the DLC packs', tools/make_edf41_missions.py) names that path instead (edf41dlc.rewrite).
+LOOK_FOLDER = 'EDF41'   # = edf41dlc.STORY_FOLDER (which takes it from here: edf41dlc imports this module)
 
 
-# Every friendly SGO the 89 story missions' creation calls name (2026-10-17: 34 files, 86 missions). 'stock' ones are
-# EDF6's own (each also spawned by EDF6's own missions but AIPALEWING_TB, which has every key its stock siblings have:
-# make_edf41_objects stale_stock);
-# the ported ones are the 4.1 files EDF6 lacks, or holds stale (TRANSPORTER401_FORMATION, make_edf41_objects
-# STOCK_OVERRIDES), and the 4.1 tank (a stand-in: EDF6's V505 AI tank under 4.1's name and look).
+def _soldiers(prefix: str, kinds: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(f'OBJECT/{prefix}_{k}{lead}.SGO' for k in kinds for lead in ('', '_LEADER'))
+
+
+# story path -> its class (EDF6's own file at that path is of the same class)
+LOOKS: dict[str, str] = {
+    **{r: 'AssultSoldier' for r in _soldiers('AIARMYSOLDIER', ('AF', 'FL', 'RL', 'SG', 'SN'))},
+    **{r: 'HeavyArmor' for r in _soldiers('AIHEAVYARMOR', ('SC', 'SMC', 'SP'))},
+    **{r: 'PaleWing' for r in _soldiers('AIPALEWING', ('IZN', 'LANCE', 'LR', 'MS', 'TB'))},
+}
+
+
+def look_rel(story: str) -> str:
+    """OBJECT/AIARMYSOLDIER_AF.SGO -> OBJECT/EDF41/AIARMYSOLDIER_AF.SGO (the Mods path its 4.1 file ships at)."""
+    return f'OBJECT/{LOOK_FOLDER}/{story.split("/", 1)[1]}'
+
+
+# Every friendly SGO the 4.1 missions' creation calls name, as the scripts edf41port ships name them (2026-10-17:
+# 34 kinds, 86 of the story's 89 missions). 'look' ones are 4.1's soldiers ported under LOOK_FOLDER; 'stock' ones
+# EDF6's own (its AI vehicles: the same 4.1 models, Vehicle40x_*.mrab, under EDF6's vehicle classes, which rebuilt
+# 4.1's vehicle keys: 4.1's VehicleTank403 ... cannot go under them); the ported ones are the 4.1 files EDF6 lacks,
+# or holds stale (TRANSPORTER401_FORMATION, make_edf41_objects STOCK_OVERRIDES), and the 4.1 tank (a stand-in:
+# EDF6's V505 AI tank under 4.1's name and look).
 FRIENDS: dict[str, Friend] = {
-    **_soldiers('AIARMYSOLDIER', ('AF', 'FL', 'RL', 'SG', 'SN'), 'AssultSoldier'),
-    **_soldiers('AIHEAVYARMOR', ('SC', 'SMC', 'SP'), 'HeavyArmor'),
-    **_soldiers('AIPALEWING', ('IZN', 'LANCE', 'LR', 'MS', 'TB'), 'PaleWing'),
+    **{look_rel(r): Friend('look', cls) for r, cls in LOOKS.items()},
     'OBJECT/AIARMYSOLDIER_OMG.SGO': Friend('ported', 'AssultSoldier'),
     'OBJECT/AIARMYSOLDIER_OMG_LEADER.SGO': Friend('ported', 'AssultSoldier'),
     'OBJECT/VEHICLE301_TANK_AI.SGO': Friend('ported', 'Vehicle505_Tank'),

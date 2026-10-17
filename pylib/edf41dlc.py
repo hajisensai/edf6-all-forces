@@ -27,14 +27,18 @@ import re
 
 import cpk
 import crilayla
+import edf41friends
 
 # mount -> (Steam app id, the folder name its files get in Mods)
 PACKS: dict[str, tuple[int, str]] = {'mp01': (410780, 'EDF41MP01'), 'mp02': (411380, 'EDF41MP02')}
 MOUNT = re.compile(r'(?i)^(mp0\d):/(.*)$')
 # 4.1's story objects whose app:/ path EDF6 holds as another object (OBJECT/<name>, upper case), and the Mods folder
 # under OBJECT/ that 4.1's own go to (tools/make_edf41_objects.py ships them there; every 4.1 script names them there)
-STORY_FOLDER = 'EDF41'
-STORY_SHADOWED: tuple[str, ...] = ('DRAGONSMALL401.SGO', 'REDSMALLDRAGON.SGO', 'YERROWSMALLDRAGON.SGO')
+STORY_FOLDER = edf41friends.LOOK_FOLDER
+# the small dragons (EDF5's frog dragons at these paths in EDF6), and 4.1's rangers, fencers and wing divers (EDF6's own
+# soldiers at these paths: pylib/edf41friends.py LOOKS)
+STORY_SHADOWED: tuple[str, ...] = ('DRAGONSMALL401.SGO', 'REDSMALLDRAGON.SGO', 'YERROWSMALLDRAGON.SGO',
+                                   *(r.split('/', 1)[1] for r in edf41friends.LOOKS))
 _STORY = re.compile(r'(?i)^app:/(object)/([^/\\]+)$')
 
 

@@ -60,6 +60,7 @@ import cas_graft  # noqa: E402
 import cas_pose  # noqa: E402
 import dsgo  # noqa: E402
 import edf41dlc  # noqa: E402
+import edf41friends  # noqa: E402
 import legacy_assets  # noqa: E402
 import legacy_sgo  # noqa: E402
 import mab_legacy  # noqa: E402
@@ -982,6 +983,194 @@ PATCHES: dict[str, Callable[[dict], None]] = {
 PATCHES.update(DLC_INSECT_PATCHES)
 
 
+# --- EDF4.1's own friendly soldiers (FRIEND_LOOKS; feedback 2026-10-17 「npc好像也没搬过来」, docs/feedback-2026-10-17-
+# edf41-npc.md). The 4.1 missions' rangers, fencers and wing divers name story paths (OBJECT/AIARMYSOLDIER_AF.SGO ...)
+# that EDF6 holds for its own soldiers and its own missions spawn: those stay EDF6's, and 4.1's file of each ships at
+# OBJECT/EDF41/<name> (pylib/edf41friends.py LOOKS, look_rel), the story folder of edf41dlc.STORY_SHADOWED as the small
+# dragons' (STORY_ROOTS): Games.moved reads it from the story path, and edf41dlc.rewrite renames every 4.1 script's
+# reference (tools/make_edf41_missions.py, story and packs). Built here, not through ROOTS / ALIASES: the template is
+# EDF6's own file of the same name, kept whole but for 4.1's look and unit (alias_dsgo is the Hectors' model merge). Each is EDF6's file of that name -- the class's behaviour as EDF6 tunes it: AI, camera, climbing, soldier_config
+# -- with 4.1's look and 4.1's own unit put in (FRIEND_KEYS: model, CAS, MAB, ragdoll, colours, lights, voice, its 4.1
+# weapons). The class's names are checked against 4.1's files (CLASS_NAMES, friend_names).
+
+# Keys 4.1's file gives (when it has them): the look, the voice and the 4.1 unit's weapons and the slots they go in.
+# Not: game_object_camera_setting (4.1's one camera pair, EDF6 reads a list of four, EDF+0x54DDF0), soldier_config
+# (4.1's second number is 0 / 1, EDF6's 0.35 in every stock soldier: not known to mean the same), soldier_weapon_grab_
+# adjust, human_climb_settings, human_character_control_mass, the grip offsets (EDF6 only), appeal_animation (EDF6's
+# folder of emotes exists; 4.1's names OBJECT/ARMYSOLDIER/APPEAL/*.CANM, which EDF6 lacks).
+FRIEND_KEYS = ('ragdoll', 'ragdoll_contact', 'soldier_color', 'soldier_spotlight', 'game_object_talk_setting',
+               'human_voice', 'human_se_table', 'game_object_durability', 'soldier_load_weapon', 'soldier_weapon_slot',
+               'heavy_booster_setting', 'pale_wing_streamer_setting')
+# What the class reads in another shape than 4.1 wrote it, or by a name 4.1's model lacks (EDF.dll, static, 2026-10-17):
+#  - soldier_sub_weapon_slot: 0 (no sub weapon; 41 / 45, 12 / 24, 34 / 38 stock soldiers of the three classes): EDF6's
+#    own file may name a third weapon there (AIHEAVYARMOR_SP_LEADER: [[2, 'weapon', 'te_l']]), 4.1's units carry two;
+#  - pale_wing_booster_cetner: a bone, looked up at EDF+0x57D069 (0x11002A0) and its record taken with no -1 check
+#    (0x1100280 -> +0x1EF8): EDF6's booster5B_center is not in 4.1's model, 4.1's booster_center is;
+#  - pale_wing_booster_core: a list of MAB locators (child count at EDF+0x57D9A9, each through FindLocator 0x6BADD0),
+#    4.1 writes one string: the same name in a list;
+#  - pale_wing_hair_setting: [] as every stock wing diver (4.1's names its own physics key, which EDF6 has no reader of).
+FRIEND_OVERRIDE: dict[str, tuple[tuple[str, object], ...]] = {
+    'AssultSoldier': (('soldier_sub_weapon_slot', 0.0),),
+    'HeavyArmor': (('soldier_sub_weapon_slot', 0.0),),
+    'PaleWing': (('soldier_sub_weapon_slot', 0.0), ('pale_wing_booster_cetner', 'booster_center'),
+                 ('pale_wing_booster_core', ['booster_core']), ('pale_wing_hair_setting', [])),
+}
+# The keys naming a bone of the model (the class finds it by name; checked against 4.1's model: friend_names) and the
+# ones naming MAB locators.
+FRIEND_BONE_KEYS = ('human_move_node', 'human_wakeup_node', 'human_aim_target_adjust_node', 'pale_wing_booster_cetner')
+FRIEND_LOCATOR_KEYS = ('heavy_booster_setting', 'pale_wing_streamer_setting', 'pale_wing_booster_core')
+# The two CAS variables EDF6's soldiers have and 4.1's lack (the vehicle grips' IK targets): not grafted. The class
+# looks them up once (EDF+0x56E49F / 0x56E4B8 -> +0x1440 / +0x1444) and tests each index for -1 before it sets the
+# target (0x57526C / 0x575320), so a miss is no write at all. In EDF6's CAS each follows a tcontrol (cas_graft refuses
+# those: the index would need renumbering) and only EDF6's own IK chain reads it; 4.1's CAS has no such chain, so a
+# grafted one would be set and read by nothing. friend_cas checks the variables are still absent, not half-present.
+GRIP_VARIABLES = ('v_vehicle_grip_l_ik_target', 'v_vehicle_grip_r_ik_target')
+RANGER_STANCES = ('appeal', 'assault', 'shoulder', 'sniper', 'throw', 'waist')
+MOVES = ('cut_back_b', 'cut_back_f', 'cut_back_l', 'cut_back_r', 'jump_fall', 'jump_fall_b', 'jump_fall_f',
+         'jump_fall_l', 'jump_fall_r', 'jump_land', 'jump_land_b', 'jump_land_f', 'jump_land_l', 'jump_land_r',
+         'jump_start', 'jump_start_b', 'jump_start_f', 'jump_start_l', 'jump_start_r', 'jump_up', 'jump_up_b',
+         'jump_up_f', 'jump_up_l', 'jump_up_r', 'run_b', 'run_f', 'run_l', 'run_r', 'stand', 'turn_step_l',
+         'turn_step_r', 'wake_up_d', 'wake_up_u', 'walk_b', 'walk_f', 'walk_l', 'walk_r')
+
+
+def friend_states(unarmed: str, extra: tuple[str, ...] = (), ranger: bool = False) -> tuple[tuple[str, str, str], ...]:
+    """The states EDF6's soldiers have and 4.1's lack that a 4.1 soldier reaches, each as a copy of 4.1's state for the
+    same move (cas_graft.alias_states: one-shot for one-shot, loop for loop; a state the class waits to end is never
+    aliased to a loop): EDF6's unarmed set (noWeapon_*) as 4.1's `unarmed` stance's, knockout as down, EDF6's bike
+    seats as 4.1's bike seat, and the rangers' sprint (<stance>_dash, a run) as their run. Left out: EDF6's sprint ends,
+    dodges (common_elude_*), sword / dash-lance / left-hand-throw moves and NPC talk gestures, which 4.1's units have
+    no counterpart of (a missing state: the play call answers false and the soldier keeps its state, cas_graft)."""
+    main = [(f'noWeapon_{mv}', f'{unarmed}_{mv}') for mv in MOVES + extra]
+    main += [('knockout', 'down'), ('vehicle503_bike_driver', 'vehicle_bike_driver'),
+             ('vehicle613_bike_driver', 'vehicle_bike_driver')]
+    if ranger:
+        main += [(f'{st}_dash', f'{st}_run_f') for st in RANGER_STANCES] + [('noWeapon_dash', f'{unarmed}_run_f')]
+    return tuple(('main', new, old) for new, old in main)
+
+
+@dataclass(frozen=True)
+class FriendCas:
+    template: str                               # EDF6's CAS of the class (its players: none may be missing)
+    states: tuple[tuple[str, str, str], ...]    # (player, EDF6's state, 4.1's state): cas_graft.alias_states
+
+
+# 4.1's CAS of each class, as every object that names it ships it (the Omega team's soldiers share the rangers'): convert()
+FRIEND_CAS: dict[str, FriendCas] = {
+    'OBJECT/ARMYSOLDIER.CAS': FriendCas('OBJECT/EDF6ARMYSOLDIER.CAS', friend_states('assault', ranger=True)),
+    'OBJECT/HEAVYARMOR.CAS': FriendCas('OBJECT/EDF6HEAVYARMOR.CAS', friend_states('base')),
+    'OBJECT/PALEWING.CAS': FriendCas('OBJECT/EDF6_WINGDIVER.CAS', friend_states('hand', ('fly',))),
+}
+
+
+def friend_cas(games: 'Games', rel: str, cas: bytes) -> bytes:
+    """4.1's CAS `rel` (converted) with FRIEND_CAS's states aliased. ValueError when EDF6's CAS of the class has a
+    player 4.1's lacks (the class resolves players unchecked: cas_graft), or a variable 4.1's lacks other than
+    GRIP_VARIABLES."""
+    spec = FRIEND_CAS[rel]
+    template = games.read6(spec.template)
+    players = sorted(set(cas_graft.states(template)) - set(cas_graft.states(cas)))
+    variables = sorted(set(cas_graft.variable_names(template)) - set(cas_graft.variable_names(cas)) - set(GRIP_VARIABLES))
+    if players or variables:
+        raise ValueError(f'{rel}: lacks players {players} / variables {variables} of {spec.template}')
+    aliases: dict[str, list[tuple[str, str]]] = {}
+    for player, new, old in spec.states:
+        aliases.setdefault(player, []).append((new, old))
+    return cas_graft.alias_states(cas, aliases)
+
+
+def friend_roots(games: 'Games') -> dict[str, int]:
+    """{story root (AIARMYSOLDIER_AF.SGO): how many of 4.1's missions (every MISSION/<id>/ of its Root.cpk, as ROOTS
+    counts) name it} for every LOOKS soldier."""
+    count = {r.split('/', 1)[1]: 0 for r in edf41friends.LOOKS}
+    ids = {k.split('/')[1] for k in games.in4 if k.startswith('MISSION/') and k.endswith('.BVM') and k.count('/') == 2}
+    for mid in sorted(ids):
+        named = set()
+        for k in (k for k in games.in4 if k.startswith(f'MISSION/{mid}/') and k.endswith('.BVM')):
+            named |= script_sgos(games.read4(k))
+        for r in named & set(edf41friends.LOOKS):
+            count[r.split('/', 1)[1]] += 1
+    return count
+
+
+def friend_names(games: 'Games', files: dict[str, bytes], rel: str, members: dict, mab: bytes) -> None:
+    """ValueError when a name the class looks up is not in 4.1's files: FRIEND_BONE_KEYS in the model, the weapon slots'
+    CAS players (soldier_weapon_slot [indices, player, ...]: weapon / weapon_r / weapon_l), FRIEND_LOCATOR_KEYS and the
+    spotlights in the MAB (`mab`, animation_model[2]), a weapon or talk file in neither EDF6 nor `files`, a texture the
+    model would not bind (missing_textures), or the model / CAS / ragdoll not shipped."""
+    am = members['animation_model']
+
+    def file(ref: str) -> bytes | None:
+        r = rel_of(ref)
+        return files[r] if r in files else games.read6(r) if r in games.have6 else None
+
+    bones = model_bones(file, am)
+    locators = {loc.name for _l, loc in mab_legacy.mab_locators(mab)}
+    cas = file(am[1])
+    players = set(cas_graft.states(cas)) if cas else set()
+    missing = [f'bone {members[k]!r} ({k})' for k in FRIEND_BONE_KEYS if k in members and members[k] not in bones]
+    missing += [f'CAS player {s[1]!r} (soldier_weapon_slot)' for s in members.get('soldier_weapon_slot', [])
+                if s[1] not in players]
+    for k in FRIEND_LOCATOR_KEYS:
+        v = members.get(k)
+        missing += [f'locator {n!r} ({k})' for n in (v if isinstance(v, list) else [v] if v else []) if n not in locators]
+    missing += [f'locator {s[0]!r} (soldier_spotlight)' for s in members.get('soldier_spotlight', []) if s[0] not in locators]
+    refs = [w for w in members.get('soldier_load_weapon', [])] + [members['game_object_talk_setting'][0], am[1],
+                                                                  members['ragdoll'][0], model_entries(am[0])[0][0]]
+    missing += [f'file {r}' for r in refs if file(r) is None]
+    entry = model_entries(am[0])[0]
+    rab = file(entry[0])
+    if rab is not None and missing_textures(rab, entry[1]):
+        missing.append(f'textures {missing_textures(rab, entry[1])} of {entry[1]} (after the model or absent)')
+    if missing:
+        raise ValueError(f'{rel}: class {members["xgs_scene_object_class"]} looks up {missing}, which its files lack')
+
+
+def friend_look(games: 'Games', root: str) -> dict[str, bytes]:
+    """The files of 4.1's soldier `root` (AIARMYSOLDIER_AF.SGO) as it ships: its SGO at look_rel (FRIEND_LOOKS, above)
+    and the files of its closure EDF6 lacks (model, CAS with FRIEND_CAS's grafts, ragdoll) at their story paths.
+    ValueError when one cannot be built or a check refuses it."""
+    src = 'OBJECT/' + root
+    dst = edf41friends.look_rel(src)   # read from the story path through Games.moved (edf41dlc.STORY_SHADOWED)
+    cls = edf41friends.LOOKS[src]
+    if games.moved.get(dst) != src:
+        raise ValueError(f'{dst}: not in edf41dlc.STORY_SHADOWED, so no 4.1 script names it')
+    need, why = closure(games, dst)
+    if why:
+        raise ValueError('; '.join(why))
+    out = {r: convert(games, r) for r in need}
+    _version, mine = sgo.read(out.pop(dst))
+    if mine.get('xgs_scene_object_class') != cls:
+        raise ValueError(f'{src}: 4.1 class {mine.get("xgs_scene_object_class")}, not {cls}')
+    soldier_talk(mine)
+    t_data = games.read6(src)
+    if t_data[:4] != b'DSGO':
+        raise ValueError(f'{src}: EDF6\'s file is not a DSGO')
+    doc = dsgo.parse(t_data)
+    root_node = doc.root
+    if root_node.get('xgs_scene_object_class') != cls:
+        raise ValueError(f'{src}: EDF6 class {root_node.get("xgs_scene_object_class")}, not {cls}')
+    for k in FRIEND_KEYS:
+        if k in mine:
+            root_node.set(k, dsgo_value(mine[k]))
+    for k, v in FRIEND_OVERRIDE[cls]:
+        root_node.set(k, dsgo_value(v))
+    # animation_model: 4.1's model (its first entry: the _light one names an archive 4.1 itself lacks), CAS and MAB, then
+    # the template's entries past them that name nothing of EDF6's model (its scale; its effect archive, a dict); a
+    # list there names EDF6's model's bones (the wing divers' skirt chain, ragdoll_skirt5B_*), which 4.1's lacks.
+    am, t_am = mine['animation_model'], root_node.get('animation_model')
+    entry = model_entries(am[0])[0]
+    tail = [v for v in t_am.items[3:] if not (isinstance(v, dsgo.Node) and not v.names)]
+    mab = mab_block(am[2])
+    root_node.set('animation_model', dsgo.Node([dsgo_value(entry), am[1], dsgo_value(mab), *tail]))
+    out[dst] = dsgo.compact(dsgo.Document(root_node, doc.pool))
+    members = sgo.load(data=out[dst])
+    friend_names(games, out, dst, members, mab)
+    check_class_keys(games.stock_by_class(), dst, out[dst])
+    check_class_names(games, out, dst)
+    check_sounds(games, out[dst], dst)
+    return out
+
+
 def mtab_materials(blob: bytes) -> list[str]:
     """The material names an MTAB blob animates (EDF+0x1104350: int32 count at +0xc, entries of 12 bytes at +0x18's
     offset, each with a relative offset to the material's name, UTF-16, at +4)."""
@@ -1341,6 +1530,8 @@ def convert(games: Games, rel: str) -> bytes:
     ext = os.path.splitext(rel)[1]
     if ext == '.SGO':
         return retarget(rel, legacy_sgo.convert(data), games.moved)
+    if ext == '.CAS' and rel in FRIEND_CAS:   # every object naming it ships the same bytes (build's clash check)
+        return friend_cas(games, rel, legacy_assets.convert(rel, data))
     if ext in ('.RAB', '.MRAB', '.CAS'):
         return legacy_assets.convert(rel, data)
     if ext == '.SHKT':
@@ -2021,6 +2212,11 @@ class ClassNames:
 # The range's other strings are SGO keys, MAB event names and their parameters' keys, or another class's (ダメージ判定 at
 # 0x32DA55 is DeiroiFootParts_Toe's).
 CLASS_NAMES: dict[str, ClassNames] = {
+    # 4.1's soldiers under EDF6's soldier classes (FRIEND_LOOKS, and the Omega team's ROOTS): the nodes the classes
+    # find by name in the model and the aliased states their CAS gets (FRIEND_CAS)
+    **{cls: ClassNames(states=('knockout', 'down', 'noWeapon_stand', 'vehicle503_bike_driver'),
+                       bone_keys=('human_move_node', 'human_wakeup_node', 'human_aim_target_adjust_node') + extra)
+       for cls, extra in (('AssultSoldier', ()), ('HeavyArmor', ()), ('PaleWing', ('pale_wing_booster_cetner',)))},
     # The plugin's own class (src/edf41robo.cpp): what it looks up by name (ROBO_STATES / ROBO_LOCATORS above).
     'UfoRobo': ClassNames(states=ROBO_STATES, locators=ROBO_LOCATORS),
     'DragonSmall': ClassNames(
@@ -2911,6 +3107,24 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
             shared[r] = SHARED[r]
         objects.append({'object': rel, 'class': sgo.load(data=data).get('xgs_scene_object_class'),
                         'missions': ROOTS.get(root, 0), 'files': [rel] + need, 'stand_in': s.template})
+    friends = {r.split('/', 1)[1] for r in edf41friends.LOOKS}
+    if not only or set(only) & friends:
+        # every one or none: the missions' scripts name these paths (tools/make_edf41_missions.py), so a soldier that
+        # cannot be built stops the build instead of leaving those missions a friend short
+        for root, uses in friend_roots(games).items():
+            if only and root not in only:
+                continue
+            try:
+                out = friend_look(games, root)
+            except ValueError as e:
+                raise ValueError(f'4.1 friend {root}: {e}') from e
+            clash = [r for r in out if r in files and files[r] != out[r]]
+            if clash:
+                raise ValueError(f'4.1 friend {root}: files another object needs differently: {clash}')
+            files.update(out)
+            rel = edf41friends.look_rel('OBJECT/' + root)
+            objects.append({'object': rel, 'class': edf41friends.LOOKS['OBJECT/' + root], 'missions': uses,
+                            'files': [rel] + [r for r in out if r != rel], 'look_of': 'OBJECT/' + root})
     roots = dict(ROOTS)
     if not only or set(only) & (set(DLC_ROOTS) | set(DLC_EXCLUDED)):
         roots.update(dlc_roots(games))
