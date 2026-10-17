@@ -9144,7 +9144,8 @@ def edf41_sk_maps_real() -> None:
     """tools/edf41_maps.py on SK_HEIGEN02 from the real games: the files files_of names; the MAC is a map bigmap verifies
     whose ground def is `sk_heigen02_fld2mgrid.fmep` placed at the origin with the stock .fmep cull distances, its
     externals.sgo lists the FMB, the field's members are gone and map.rmpa is EDF6's, its mapo entry holds one height per
-    grass cell of the FMB's plant group (the field's three grass textures); the FMB is a piece of 625 leaves
+    plant cell of the FMB's plant groups (the field's three grass textures, then its trees, bushes and small
+    objects as the stock groups, each model one of the MAC's, its .trb in EDF6's form); the FMB is a piece of 625 leaves
     covering -1000..1000 whose heights are the field's; the MAD holds the ground body (named for the piece, a compound
     of 2500 tiles) and the objects' bodies, and every compound passes hkcms.bound_problems; the RAB has the colour array
     under the name EDF6's terrain looks up (<map>_color.dds) and the flat normal map; the weather pair and navmesh are the
@@ -9190,9 +9191,15 @@ def edf41_sk_maps_real() -> None:
     # the plants' heights: one per occupied cell of the FMB's grass group (pylib/fmex.py), the ground under it
     count, rel = struct.unpack_from('<2i', mo.raw, pair_at)
     assert pair_at > ent and rel == 8
-    grass = fmex.read_table2(files['MAP/SK_HEIGEN02_FLD2MGRID.FMB'])
-    assert len(grass) == 1 and count == int((grass[0].kind != 0xFF).sum()) > 100000
-    assert {t.file for t in grass[0].types} == {'sk_grassleaf01_1.dds', 'sk_grassleaf01_2.dds', 'sk_flower01.dds'}
+    plants = fmex.read_table2(files['MAP/SK_HEIGEN02_FLD2MGRID.FMB'])
+    assert [g.name for g in plants] == ['草・花', '樹木', '低木', '小物ランダム']
+    assert count == sum(int((g.kind != 0xFF).sum()) for g in plants) and int((plants[0].kind != 0xFF).sum()) > 100000
+    assert {t.file for t in plants[0].types} == {'sk_grassleaf01_1.dds', 'sk_grassleaf01_2.dds', 'sk_flower01.dds'}
+    for g in plants[1:]:      # the models: kind 1, <model>.tree / .mls for the MAC's <model>.trb / .mlb (in EDF6's form)
+        for t in g.types:
+            stem, ext = t.file.rsplit('.', 1)
+            assert t.kind == 1 and ext in ('tree', 'mls') and stem + {'tree': '.trb', 'mls': '.mlb'}[ext] in members
+    assert all(len(sgo.plain(sgo.read(d)[1])['rules'][0]) == 8 for n, d in members.items() if n.endswith('.trb'))
     # the FMB
     f = fmb.parse(files['MAP/SK_HEIGEN02_FLD2MGRID.FMB'])
     assert len(f.leaves) == 625 and f.count == 1249
@@ -9486,7 +9493,7 @@ def edf41_maps_valley_files_real() -> None:
     """tools/edf41_maps.py converts SK_VALLEY01 (grass on 2 m cells, wires on an SK map) into a temporary folder, and the
     files read back from it: the MAC verifies and carries wire_test.dds; every leaf of the FMB draws with the pass-0
     shader record of its layer count; the FMB's grass group covers the field from its origin and the mapo entry of the
-    ground has one height per grass cell, each the FMB's ground under the cell's jittered position."""
+    ground has one height per plant cell of all its groups, each the FMB's ground under the cell's jittered position."""
     import struct
     import tempfile
     import bigmap
@@ -9521,22 +9528,53 @@ def edf41_maps_valley_files_real() -> None:
     for lf in f.leaves.values():
         m = lf.meshes[0]
         assert struct.unpack_from('<7I', raw, t4 + 28 * m.grid[7]) == (m.grid[6] >> 8, 1, 0, 0, 0, 0, 0)
-    (grass,) = fmex.read_table2(raw)
-    assert (grass.cell, grass.origin, grass.kind.shape) == (2.0, (-1000.0, -1000.0), (1000, 1000))
+    plants = fmex.read_table2(raw)
+    assert all((g.cell, g.origin, g.kind.shape) == (2.0, (-1000.0, -1000.0), (1000, 1000)) for g in plants)
+    grass = fmex.Group('', 2.0, (-1000.0, -1000.0), [], np.full((1000, 1000), 0xFF, np.uint8), plants[0].jitter)
     mb, mo = bigmap.MapB(mac.get('map.mapb')), bigmap.MapO(mac.get('map.mapo'))
     ground = [i for i in range(mb.rec_n) if mb.def_name(mb.def_index(i)) == 'sk_valley01_fld2mgrid.fmep'][0]
     ent = mo.ent_off + ground * bigmap.ENT
     pair = ent + struct.unpack_from('<i', mo.raw, ent)[0]
     count, rel = struct.unpack_from('<2i', mo.raw, pair)
-    assert rel == 8 and count == int((grass.kind != 0xFF).sum()) > 10000
+    assert rel == 8 and count == sum(int((g.kind != 0xFF).sum()) for g in plants) > 10000
     heights = np.frombuffer(mo.raw, dtype='<f4', count=count, offset=pair + 8)
     pts = np.array(fmb.points(f))
     lat = np.full((501, 501), np.nan)
     lat[np.rint((pts[:, 2] + 1000) / 4).astype(int), np.rint((pts[:, 0] + 1000) / 4).astype(int)] = pts[:, 1]
     assert not np.isnan(lat).any()
     jit = raw[struct.unpack_from('<I', raw, 0x18)[0]:][:0x1000]
-    want = fmex.plant_heights(grass, jit, lambda x, z: fmex.heights_at(lat, -1000.0, -1000.0, 4.0, x, z))
+    want = np.concatenate([fmex.plant_heights(g, jit, lambda x, z: fmex.heights_at(lat, -1000.0, -1000.0, 4.0, x, z))
+                           for g in plants])
     assert np.abs(want - heights).max() < 1e-3
+
+
+@test
+def edf41_trees_real() -> None:
+    """Trees on the real files: map_legacy.trb_from_legacy turns 4.1's sk_tree10m01.trb / sk_tree3m01.trb into EDF6's files
+    of the same names byte for byte (the first rule's appended 0), leaves an EDF6 .trb as it is; and EDF6's stock plant
+    groups name their models <model>.tree / <model>.mls for the MAC's <model>.trb / <model>.mlb (IG_HEIGEN507,
+    IG_KAIGAN502: every model type), the form sk_map.model_groups writes."""
+    import bigmap
+    import fmex
+    import map_legacy
+    games = _legacy_games()
+    if games is None:
+        print('skip  edf41_trees_real: no EDF4.1 / EDF5 / EDF6 here')
+        return
+    g41, _g5, g6 = games
+    trb41 = dict(map_legacy.parse_marc_lenient(_game_read(g41, 'MAP/NW_KASENJIKI01.MAC'))[1])
+    for name, host in (('sk_tree10m01.trb', 'IG_2000MCITY'), ('sk_tree3m01.trb', 'NW_KITAGUNICITY')):
+        six = bigmap.Marc.parse(_game_read(g6, f'MAP/{host}.MAC')).get(name)
+        src = trb41[name] if name in trb41 else dict(map_legacy.parse_marc_lenient(_game_read(g41, 'MAP/SK_HEIGEN02.MAC'))[1])[name]
+        assert src != six and map_legacy.trb_from_legacy(src) == six, name
+        assert map_legacy.trb_from_legacy(six) == six
+    for name in ('IG_HEIGEN507', 'IG_KAIGAN502'):
+        members = {n.lower() for n, _ in bigmap.Marc.parse(_game_read(g6, f'MAP/{name}.MAC')).files}
+        models = [t for g in fmex.read_table2(_game_read(g6, f'MAP/{name}.FMB')) for t in g.types if t.kind == 1]
+        assert len(models) > 15
+        for t in models:
+            stem, ext = t.file.rsplit('.', 1)
+            assert stem.lower() + {'tree': '.trb', 'mls': '.mlb'}[ext] in members, (name, t.file)
 
 
 @test

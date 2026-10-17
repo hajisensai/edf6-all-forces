@@ -149,8 +149,8 @@ def grass_group(veg: sk_terrain.Vegetation, ox: float, oz: float) -> fmex.Group:
     SK_VALLEY01 / SK_SANGAKU01 is 0.10 / 0.09 against 0.57 / 0.64 for all cells this way round, 0.55 / 0.45 transposed) and
     jitters, a type per grass texture. The 4.1 size is a base and a random extra on it; EDF6 draws between a min and a
     max, taken as base - extra .. base + extra (the second triple is 0 for the flowers, so they keep one size).
-    The models (trees, bushes, small objects: kind 2) are left out (docs/edf41-sk-terrain.md), and so is SK_CRATER01's
-    kind 1 entry naming a tree (sk_tree10m01.trb), which no cell uses."""
+    The models (trees, bushes, small objects: kind 2) are model_groups', and SK_CRATER01's kind 1 entry naming a tree
+    (sk_tree10m01.trb), which no cell uses, is left out."""
     grass = [k for k, t in enumerate(veg.types) if t.kind == 1 and t.name.lower().endswith('.dds')]
     kind = np.full(veg.kind.shape, 0xFF, dtype=np.uint8)
     types = []
@@ -161,6 +161,44 @@ def grass_group(veg: sk_terrain.Vegetation, ox: float, oz: float) -> fmex.Group:
         hi = tuple(a + b for a, b in zip(t.size, t.extra))
         types.append(fmex.PlantType(0, t.name.rsplit('.', 1)[0], t.name, GRASS_COLOR, lo, hi, t.params))
     return fmex.Group(GRASS_GROUP, veg.cell, (ox, oz), types, kind, veg.jitter)
+
+
+# the stock model groups (IG_HEIGEN507 / IG_KAIGAN502 groups 1..3), each type kind 1 named <model>.tree (the MAC's
+# <model>.trb) or <model>.mls (the MAC's <model>.mlb), size (1, 1, 1) as 4.1 gives (GrowObjects 0x140230 draws the
+# model at the cell's jittered position turned by the jitter's angle, the type's size unread)
+TREE_GROUP, BUSH_GROUP, SMALL_GROUP = '樹木', '低木', '小物ランダム'
+MODEL_FILE = {'.trb': '.tree', '.mlb': '.mls'}
+
+
+def model_groups(veg: sk_terrain.Vegetation, ox: float, oz: float, members: set[str]) -> list[fmex.Group]:
+    """The field's models (vegetation kind 2: `.trb` trees and bushes, `.mlb` small objects) as EDF6 plant groups, laid
+    out as the stock ones: trees, bushes (a `bush` model), small objects; a group without cells is left out. Every model
+    must be a member of the MAC (`members`, lower case: 4.1's maps carry them; their .trb in EDF6's form,
+    map_legacy.trb_from_legacy)."""
+    split: dict[str, list[int]] = {TREE_GROUP: [], BUSH_GROUP: [], SMALL_GROUP: []}
+    for k, t in enumerate(veg.types):
+        if t.kind != 2:
+            continue
+        name = t.name.lower()
+        ext = name[name.rfind('.'):]
+        if ext not in MODEL_FILE:
+            raise ValueError(f'vegetation model {t.name}: not a .trb / .mlb')
+        if name not in members:
+            raise ValueError(f'vegetation model {t.name} is not in the MAC')
+        split[SMALL_GROUP if ext == '.mlb' else BUSH_GROUP if 'bush' in name else TREE_GROUP].append(k)
+    out = []
+    for gname, ks in split.items():
+        kind = np.full(veg.kind.shape, 0xFF, dtype=np.uint8)
+        types = []
+        for new, k in enumerate(ks):
+            t = veg.types[k]
+            kind[veg.kind == k] = new
+            stem, ext = t.name.rsplit('.', 1)
+            types.append(fmex.PlantType(1, stem, stem + MODEL_FILE['.' + ext.lower()], GRASS_COLOR, t.size, t.size,
+                                        t.params))
+        if (kind != 0xFF).any():
+            out.append(fmex.Group(gname, veg.cell, (ox, oz), types, kind, veg.jitter))
+    return out
 
 
 def field_origin(mapb: bytes, shfb_name: str) -> tuple[float, float, float]:
@@ -204,9 +242,11 @@ def terrain(mac: bigmap.Marc, rab: bytes, e6: Reader, map_name: str) -> Terrain:
     weights = weights / np.maximum(weights.sum(axis=2, keepdims=True), 1e-9)
     fmb_bytes = fmb_build.build(e6.read(DONOR_FMB), heights, weights, ox, oz, step, layers_of(s))
     veg = sk_terrain.vegetation(members[shfb_name], s.extent[0])
-    grass = grass_group(veg, ox, oz)
-    fmb_bytes = fmex.with_plants(fmb_bytes, [grass], veg.jitters)
-    grass_heights = fmex.plant_heights(grass, veg.jitters, lambda x, z: fmex.heights_at(heights, ox, oz, step, x, z))
+    plants = [grass_group(veg, ox, oz)] + model_groups(veg, ox, oz, {n.lower() for n, _ in mac.files})
+    fmb_bytes = fmex.with_plants(fmb_bytes, plants, veg.jitters)
+    grass_heights = np.concatenate([fmex.plant_heights(g, veg.jitters,
+                                                       lambda x, z: fmex.heights_at(heights, ox, oz, step, x, z))
+                                    for g in plants])
     # the field's own table (the .shfb member, 4.1's vegetation with it) is dropped: EDF6 has no reader for it
     out = bigmap.Marc(mac.version, [(n, d) for n, d in mac.files
                                     if not n.lower().endswith(('.shfb', '.cols.sgo', '.norm.sgo'))])

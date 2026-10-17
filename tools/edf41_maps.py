@@ -4,8 +4,9 @@ needs EDF4.1 installed (pylib/gamedir.py EDF41); without it nothing is written a
 
 Per map (MAPS):
   <MAP>.MAC   pylib/map_legacy.py (MAPB / MAPO in EDF6's layout), its .rmpa members by pylib/rmpa_legacy.py (the
-              wire routes' links to other routes through the mapb's wire points), and the textures its wires draw
-              with as members, where EDF6 keeps them (with_wire_textures)
+              wire routes' links to other routes through the mapb's wire points), its .trb trees in EDF6's form
+              (map_legacy.trb_from_legacy), and the textures its wires draw with as members, where EDF6 keeps them
+              (with_wire_textures)
   <MAP>.MAD   4.1's collision.hkt (Havok 2014) repacked; the plugin migrates it at load (src/legacymap.cpp)
   <MAP>.RAB   pylib/legacy_assets.py, map parts
 
@@ -13,7 +14,8 @@ The SK_* maps (their ground is a heightfield, .shfb, that EDF6 has no loader for
 (pylib/sk_map.py, docs/edf41-sk-terrain.md): the ground becomes an EDF6 terrain piece
   <PIECE>.FMB the field as a mesh (pylib/fmb_build.py: 4 m lattice, 20 x 20 cell leaves, the field's layers as EDF6
               terrain layers, normals from the heights), placed by the MAC as `<piece>.fmep` like EDF6's own pieces;
-              the field's grass and flowers as the piece's plants (pylib/fmex.py; their heights in the MAC's mapo)
+              the field's grass, flowers, trees, bushes and small objects as the piece's plants (pylib/fmex.py; their
+              heights in the MAC's mapo)
   <MAP>.MAD   the ground's collision (the same lattice as 10 x 10 cell tiles) and the map's object bodies rebuilt from the
               RAB's models, written as EDF6's own Havok 2020 file (pylib/hkcms_build.py): nothing of the 4.1 collision
               stays, EDF6 loads it like any of its maps
@@ -54,8 +56,9 @@ import sk_map  # noqa: E402
 from modfiles import load_json, sha256, sha256_file  # noqa: E402
 
 OWNER = 'edf41maps'   # pylib/ledger.py OWNERS
-VERSION = 2           # raise when a converter's output changes: installed maps are converted again
+VERSION = 3           # raise when a converter's output changes: installed maps are converted again
 # 2: wire textures in the MAC, cross-route wire links kept, SK grass, SK leaf shader records (docs/feedback-2026-10-17-edf41-maps.md)
+# 3: .trb in EDF6's form, SK trees / bushes / small objects as plant groups
 STAMP = '.edf41maps.json'   # Mods/: {map: {'version': VERSION, 'source': {4.1 file: [size, CRC]}}}
 ARCHIVES = ('Root.cpk', 'Chunk01.cpk', 'Chunk02.cpk', 'DX11.cpk')
 NAVMESH = ('NAVMESH.HKT', 'NAVMESH.NVMD', 'NAVMESH_H.HKT', 'NAVMESH_H.NVMD')
@@ -123,8 +126,8 @@ def with_wire_textures(mac: bigmap.Marc, rab: bytes) -> None:
     it. 4.1's maps have it only in the RAB (NW_UNDERGROUND01's elec_wire_ugc draws with nw_wire_black). EDF.dll's
     cable_init (0x15B3F0) drops a wire type whose texture its lookup (0x18DD30) does not find (0x15B865); that lookup
     goes through the same container (the MAC object + 0x60) as grass_init's grass.merge.dds, which EDF6 keeps only in
-    the RAB, so whether the RAB copy alone would already be found is not settled: this follows EDF6's layout, and the
-    feedback of 2026-10-17 (docs/feedback-2026-10-17-edf41-maps.md) lists what in-game evidence would settle it."""
+    the RAB (as the terrain's <map>_color.dds and 233 of EDF6's own tree textures), so the RAB copy is found as well:
+    this only follows EDF6's layout, it is not why wires would be missing (docs/feedback-2026-10-17-edf41-maps.md 3b)."""
     if not map_legacy.cable_graph(mac.get('map.mapb'))[1]:
         return
     want: list[str] = []
@@ -151,7 +154,8 @@ def convert(name: str, e41: Archives, e6: Archives) -> dict[str, bytes]:
     donor, weathers = MAPS[name]
     mac = bigmap.Marc.parse(map_legacy.mac_from_legacy(e41.read(f'{name}.MAC')))
     cables = map_legacy.cable_graph(mac.get('map.mapb'))
-    mac.files = [(n, rmpa_legacy.rmpa_from_legacy(d, cables) if n.lower().endswith('.rmpa') else d)
+    mac.files = [(n, rmpa_legacy.rmpa_from_legacy(d, cables) if n.lower().endswith('.rmpa')
+                  else map_legacy.trb_from_legacy(d) if n.lower().endswith('.trb') else d)
                  for n, d in mac.files]
     rab = legacy_assets.convert(f'MAP/{name}.RAB', e41.read(f'{name}.RAB'), map_part=True)
     with_wire_textures(mac, rab)
