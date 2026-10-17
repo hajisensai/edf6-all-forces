@@ -6386,6 +6386,40 @@ def edf41_weapon_conversion() -> None:
     assert dsgo.to_py(energy) == [25.0, 25.0], 'EDF6 holds EnergyChargeRequire as [curve, value]'
 
 
+# EDF.dll's weapon update draws a charge's energy from its owner (vtable slot 31, call 0x693E34) unless
+# EnergyChargeRequire[1] (+0x234, read at 0x68CAAA) is below this (comiss 0x693E1B); the amount is element 0 (+0x22C,
+# 0x68CA3D: a curve at the star, a plain number as it is). docs/stock-payload-re.md section 3.
+WD_ENERGY_GATE = 0.0011
+
+
+@test
+def edf41_wing_diver_energy() -> None:
+    """edf41port/weapons.json against EDF.dll's energy draw (2026-10-18 feedback: a 4.1 Wing Diver weapon's charge
+    takes no flight energy): every Wing Diver weapon (100-107) holds EnergyChargeRequire as [need, gate], need its 4.1
+    number; one whose 4.1 text names an energy cost (消費エネルギー X％) needs X and draws (gate at or above
+    WD_ENERGY_GATE), one 4.1 gives the no-draw mark 0.001 (its own generator: 0％ / －－－ or no cost line) stays below
+    it. Needs no game."""
+    import re
+    with open(os.path.join(ROOT, 'edf41port', 'weapons.json'), encoding='utf-8') as f:
+        weapons = [w for w in json.load(f)['weapons'] if 100 <= w['category'] <= 107]
+    assert weapons, 'no Wing Diver weapon in edf41port/weapons.json'
+    drawing = 0
+    for w in weapons:
+        energy = dsgo.to_py(dsgo.load(w['weapon']).get('EnergyChargeRequire'))
+        assert isinstance(energy, list) and len(energy) == 2 and energy[0] == energy[1], (w['id'], energy)
+        need = energy[0]
+        ja = w['text']['JA']
+        cost = dict((s[0], s[1]) for s in ja[2]).get('消費エネルギー') if len(ja) > 2 else None
+        number = re.match(r'[\d.]+', cost) if cost else None
+        if number and float(number.group()) > 0:
+            assert abs(need - float(number.group())) <= 1e-4 * max(1.0, need), (w['id'], cost, need)
+            assert need >= WD_ENERGY_GATE, (w['id'], need)
+            drawing += 1
+        else:
+            assert abs(need - 0.001) < 1e-6, f'{w["id"]}: no energy cost in its text ({cost!r}) but {need}'
+    assert drawing >= 100, drawing
+
+
 @test
 def edf41_stat_lines() -> None:
     """tools/make_edf41_weapons.py: a 4.1 stat line through EDF6's forms (its numbers put into each language's format),
