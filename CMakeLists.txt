@@ -87,6 +87,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/support_variants.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/debug_spawn.cpp)
 # The in-game loadout menu's saving: the ini writer, the background variant generator (src/loadout_store.h).
 target_sources(EDF6VehicleCrew PRIVATE src/loadout_store.cpp src/loadout_file.cpp src/room_preview.cpp src/room_sync.cpp src/room_ui.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/outfit41.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
@@ -562,6 +563,11 @@ add_test(NAME room_menu COMMAND room_menu_test)
 add_executable(room_preview_test tests/room_preview_test.cpp)
 target_compile_options(room_preview_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME room_preview COMMAND room_preview_test)
+# The EDF4.1 outfit's pure logic (src/outfit41_logic.h: its files, the stored choice, the popup's layout).
+add_executable(outfit41_test tests/outfit41_test.cpp)
+target_include_directories(outfit41_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(outfit41_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME outfit41 COMMAND outfit41_test)
 # The room / HQ loadout screen's pure side: element names, keyboard / pad mapping, the input gate, row looks, texts,
 # catalog units, preview and save pairing (src/room_ui_logic.h; src/room_ui.cpp draws with it).
 add_executable(room_ui_test tests/room_ui_test.cpp)
@@ -675,6 +681,10 @@ set_tests_properties(menu_preview PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The preview's signatures, vtable slots and tables against the game's EDF.dll / Root.cpk (read only; skipped without).
 add_test(NAME room_preview_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_preview_native_audit.py")
 set_tests_properties(room_preview_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The EDF4.1 outfit's signatures, call sites and vtables against the game's EDF.dll, its files against the shipped
+# registry and the plugin's paths (read only; the EDF.dll / Root.cpk parts skipped without the game).
+add_test(NAME outfit41_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/outfit41_native_audit.py")
+set_tests_properties(outfit41_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The slim generator install copies for the menu and the room pre-sync (tools/loadout_generator.py, build_release.py).
 add_test(NAME slim_generator COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/slim_generator_test.py")
 set_tests_properties(slim_generator PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
@@ -804,7 +814,7 @@ target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
 target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks map_command_runtime_check)
 add_dependencies(offline_checks support_dispatch_test)
-add_dependencies(offline_checks support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test room_ui_test loadout_writer_test room_coop_capability_test room_sync_test)
+add_dependencies(offline_checks support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test outfit41_test room_ui_test loadout_writer_test room_coop_capability_test room_sync_test)
 add_dependencies(offline_checks support_infantry_route_test)
 add_dependencies(offline_checks support_vehicle_route_test)
 add_dependencies(offline_checks support_policy_test)
