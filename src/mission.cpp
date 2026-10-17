@@ -13,6 +13,7 @@
 #include "gear.h"
 #include "memory.h"
 #include "playarea.h"
+#include "outfit41.h"
 #include "room_ui.h"
 #include "sazabi_sound.h"
 #include "support_spawn.h"
@@ -44,7 +45,7 @@ std::uintptr_t __fastcall PreloadHook(std::uintptr_t a,std::uintptr_t b,std::uin
 
 std::uintptr_t __fastcall SessionPreloadHook(std::uintptr_t a,std::uintptr_t b,std::uintptr_t c,std::uintptr_t d) {
     WatchMissionPhase("the game's session player preload");
-    const auto result=sessionOrig(a,b,c,d);
+    const auto result=Outfit41SessionPreload(sessionOrig,a,b,c,d);   // marks this machine's member (outfit41.cpp)
     MissionStart();
     return result;
 }
