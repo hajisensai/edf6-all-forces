@@ -59,6 +59,10 @@ bool NpcDriver(const unsigned char* v) noexcept {
 
 void Log(const char*,...) noexcept {}
 bool InSession() noexcept { return mapOnline; }
+// The test range's place panel (debug_spawn.cpp): not this mission's.
+bool RangePlaceOn() noexcept { return false; }
+debugspawn::RowState SpawnRowState(int) noexcept { return debugspawn::RowState::unavailable; }
+int PlaceRow(int,const float*,wchar_t*,std::size_t) noexcept { return kDebugSpawnFailed; }
 bool NpcMarked() noexcept { return false; }
 int CycleGuardFormation(const void*) noexcept {return -2;}
 int CycleMarchFormation() noexcept {return 0;}

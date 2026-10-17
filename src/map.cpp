@@ -611,8 +611,10 @@ Keys ReadToggles(bool front,const XINPUT_STATE* pad) noexcept {
     if(pad) {
         const WORD b=pad->Gamepad.wButtons;
         k.padMap=c.mapButton>0 && (b&static_cast<WORD>(c.mapButton))==static_cast<WORD>(c.mapButton);
-        k.padClose=(b&XINPUT_GAMEPAD_B)!=0;
-        k.padCentre=(b&XINPUT_GAMEPAD_A)!=0;
+        // The test range's 「摆放」 panel open (mapcmd.cpp): its A places, its B shuts it; the map's own wait.
+        const bool place=MapPlaceHoldsPad();
+        k.padClose=(b&XINPUT_GAMEPAD_B)!=0 && !place;
+        k.padCentre=(b&XINPUT_GAMEPAD_A)!=0 && !place;
     }
     return k;
 }

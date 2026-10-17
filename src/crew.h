@@ -270,6 +270,11 @@ struct Config {
     int debugSpawnSpawnKey=0x78;    // ...spawn the row picked (F9)
     float debugSpawnRange=500.0f;   // ...the crosshair's ground point counts within this, m
     float debugSpawnDistance=30.0f; // ...else (sky, too far, at the player's feet) this far ahead of the player, m
+    // The M map's 「摆放」 panel in the test range's mission (range_place.h; the debug spawn tool's catalog and making,
+    // whatever DebugSpawn says): on by default; offline only. RangePlaceAll: every row preloaded, the heavy EDF4.1 ones
+    // too (Entry::preload false: another 17 MB model each); off: those listed as not preloaded.
+    bool rangePlace=true;
+    bool rangePlaceAll=false;
     bool roomLoadout=true;          // the room / HQ support loadout menu (room_ui.cpp; 0 at load: nothing installed, both
                                     // screens untouched; turned 0 later: both screens passed through, nothing read or drawn)
     bool roomPreSync=true;          // ...and the room pre-sync with it (room_sync.h: generate what the host lists; 0: none)
