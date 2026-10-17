@@ -277,6 +277,8 @@ struct Config {
     int roomLoadoutButton=0xC0;     // ...and pad combination (XInput button bits, all held: 0xC0 L3 + R3; 0 none)
     bool stockStores=true;          // the stock vehicles' requests carry the stores they should (the installer,
                                     // tools/make_stock_stores.py) and the switch goes round them (payload.cpp)
+    bool allClassesRide=true;       // every class may take every seat a class may take (allclass.cpp: each seat's class
+                                    // mask widened as the vehicle is made, a bench pose for a rider whose CAS lacks the seat's)
     bool seatSwitch=true;           // the player moves to another seat of the vehicle they are in (seatswitch.cpp)
     int seatNextKey=0x46;           // ...the next free seat ('F'; a Windows virtual-key code, 0: none)
     bool seatNumberKeys=true;       // ...the number keys 1-9 pick that seat (an NPC in it changes places with the player)
@@ -539,6 +541,8 @@ bool InstallEdf41Robo() noexcept;      // edf41robo.cpp: EDF4.1's UfoRobo (ini E
 bool InstallEdf41Mother401() noexcept;   // edf41mother401.cpp
 // edf41deiroi.cpp: a falling Deiroi's landing ray, cast by EDF6 against a null Havok world (crash in EDF4.1's M412), goes through the map ray.
 bool InstallEdf41Deiroi() noexcept;
+// allclass.cpp: every class in every seat (ini AllClassesRide): the seat build's class mask widened, the ride pose's fallback.
+bool InstallAllClassesRide() noexcept;
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
 bool InstallMissiles() noexcept;
 // The stock split missiles (MissileBullet02) split short of a big target's surface (splitmissile.cpp).
