@@ -8600,10 +8600,11 @@ def _edf41_friend_spawns() -> dict[tuple[str, str], list]:
 def edf41_friends_spawn_as_named() -> None:
     """EDF4.1's friendly NPCs (feedback 2026-10-17 「npc好像也没搬过来」, docs/feedback-2026-10-17-edf41-npc.md): every
     CreateFriend / CreateFriendSquad / CreateFriendGroup / transporter call the committed 4.1 scripts make names an SGO
-    pylib/edf41friends.py FRIENDS accounts for (EDF6's own file at that path, or one tools/make_edf41_objects.py ships),
-    and a point the mission's RMPA holds (the executor creates nothing for a name it does not find, 0x21A3E1). The
-    story's counts are pinned: the scripts are EDF5's files as they are, so a regeneration that loses a friend fails here.
-    No game needed (the scripts, RMPA and objects.json are committed)."""
+    pylib/edf41friends.py FRIENDS accounts for (EDF6's own file at that path, or one tools/make_edf41_objects.py ships:
+    4.1's soldiers at OBJECT/EDF41/, never the story path EDF6 holds for its own), and a point the mission's RMPA holds
+    (the executor creates nothing for a name it does not find, 0x21A3E1). The story's counts are pinned (the scripts are
+    EDF5's, only 4.1's soldiers renamed), so a regeneration that loses a friend fails here. No game needed (the scripts,
+    RMPA and objects.json are committed)."""
     import collections
     import edf41friends as ef
     import make_edf5_campaign as c
@@ -8618,8 +8619,13 @@ def edf41_friends_spawn_as_named() -> None:
             points = {p[0] for p in _rmpa_points(rmpa_legacy.decode6(f.read())[0])}
         missing_points += [(folder, mid, sp.point) for sp in found if sp.native in ef.AT_POINT and sp.point not in points]
     assert not missing_points, missing_points[:10]
-    assert all(rel in ported for rel, fr in ef.FRIENDS.items() if fr.source == 'ported'), \
-        sorted(r for r, fr in ef.FRIENDS.items() if fr.source == 'ported' and r not in ported)
+    assert all(rel in ported for rel, fr in ef.FRIENDS.items() if fr.source in ('ported', 'look')), \
+        sorted(r for r, fr in ef.FRIENDS.items() if fr.source in ('ported', 'look') and r not in ported)
+    # 4.1's soldiers are renamed everywhere (tools/make_edf41_missions.py): no pack's script names a story path of one,
+    # which is EDF6's own soldier (left as it was, the friend the player meets is EDF6's)
+    stale = sorted({(folder, mid, s) for (folder, mid), found in spawns.items() for sp in found for s in sp.sgos
+                    if s in ef.LOOKS})
+    assert not stale, stale[:10]
     story = {mid: found for (folder, mid), found in spawns.items() if folder == c.EDF41_FOLDER}
     calls = collections.Counter(sp.native for found in story.values() for sp in found)
     assert dict(calls) == {1010: 145, 1011: 264, 1012: 26, 1022: 5, 1023: 15}, dict(calls)
@@ -8629,10 +8635,71 @@ def edf41_friends_spawn_as_named() -> None:
 
 
 @test
+def edf41_friends_rewrite() -> None:
+    """pylib/edf41friends.py rewrite (no game): a story path of LOOKS, in any case and inside a ';' list, becomes its
+    OBJECT/EDF41/ path with the script's case kept; anything else (another object, the new path itself, a DLC path)
+    is unchanged; look_rel agrees with it."""
+    import edf41friends as ef
+    assert ef.rewrite('app:/Object/AiArmySoldier_AF.sgo') == 'app:/Object/EDF41/AiArmySoldier_AF.sgo'
+    assert ef.rewrite('app:/object/aipalewing_lr_leader.SGO') == 'app:/object/EDF41/aipalewing_lr_leader.SGO'
+    assert ef.rewrite('app:/Object/GiantAnt01.sgo;app:/Object/AiHeavyArmor_SP.sgo') == \
+        'app:/Object/GiantAnt01.sgo;app:/Object/EDF41/AiHeavyArmor_SP.sgo'
+    for same in ('app:/Object/EDF41/AiArmySoldier_AF.sgo', 'app:/Object/AiArmySoldier_OMG.sgo', '小隊01',
+                 'app:/Object/Vehicle403_Tank_AI.sgo', 'mp01:/Object/AiArmySoldier_AF.sgo'):
+        assert ef.rewrite(same) == same, same
+    assert all(ef.rel_of(ef.rewrite('app:/' + r.lower())) == ef.look_rel(r) for r in ef.LOOKS)
+    assert len(ef.LOOKS) == 26 and {ef.FRIENDS[ef.look_rel(r)].source for r in ef.LOOKS} == {'look'}
+
+
+@test
+def edf41_friend_looks_shipped() -> None:
+    """4.1's soldiers as tools/make_edf41_objects.py ships them (FRIEND_LOOKS; no game: the registry and its files are
+    committed): each LOOKS soldier is an object at OBJECT/EDF41/<name> of its class, look_of its story path, whose
+    model, CAS and ragdoll are files of the registry; EDF6's own soldier at the story path is never shipped over; the
+    SGO carries 4.1's model / CAS / weapons and the shapes the class reads (FRIEND_OVERRIDE); each 4.1 CAS has every
+    player EDF6's CAS of the class has and the states aliased for the class (FRIEND_CAS, CLASS_NAMES), as the Omega
+    team's soldiers too (they share the rangers' CAS); the bones the class finds by name are in the model."""
+    import cas_graft
+    import edf41_objects as eo
+    import edf41friends as ef
+    import make_edf41_objects as m
+    import sgo
+    reg = eo.registry()
+    files = set(reg['files'])
+    by_object = {o['object']: o for o in reg['objects']}
+    for story, cls in ef.LOOKS.items():
+        rel = ef.look_rel(story)
+        assert story not in files, f'{story} is EDF6\'s own soldier: never shipped over'
+        o = by_object.get(rel)
+        assert o and o['class'] == cls and o.get('look_of') == story and o['missions'] > 0, (rel, o)
+        assert set(o['files']) <= files and o['files'][0] == rel, o['files']
+        d = sgo.load(data=eo.read(rel))
+        assert d['xgs_scene_object_class'] == cls
+        am = d['animation_model']
+        model, cas = m.rel_of(am[0][0]), m.rel_of(am[1])
+        assert {model, cas, m.rel_of(d['ragdoll'][0])} <= set(o['files']), (rel, model, cas)
+        assert model.startswith('OBJECT/') and 'EDF6' not in model and 'P50' not in model, model
+        assert all(w.lower().startswith('app:/weapon/') for w in d['soldier_load_weapon'])
+        assert d['soldier_sub_weapon_slot'] == 0.0
+        for k, v in m.FRIEND_OVERRIDE[cls]:
+            assert d[k] == v, (rel, k, d[k])
+        bones = m.model_bones(lambda r: eo.read(m.rel_of(r)), am)
+        assert all(d[k] in bones for k in m.FRIEND_BONE_KEYS if k in d), (rel, [d[k] for k in m.FRIEND_BONE_KEYS if k in d])
+    for cas_rel, spec in m.FRIEND_CAS.items():
+        states = cas_graft.states(eo.read(cas_rel))
+        for player, new, _old in spec.states:
+            assert new in states[player], (cas_rel, player, new)
+        assert {'knockout', 'noWeapon_stand', 'noWeapon_walk_f'} <= states['main'], cas_rel
+    omg = sgo.load(data=eo.read('OBJECT/AIARMYSOLDIER_OMG.SGO'))
+    assert m.rel_of(omg['animation_model'][1]) == 'OBJECT/ARMYSOLDIER.CAS'
+
+
+@test
 def edf41_friends_load_in_edf6() -> None:
     """The friends' SGOs as the installed game loads them (needs EDF4.1, EDF5 and EDF6: _legacy_games): each 'stock' one is in EDF6's
     archives with its FRIENDS class and every file it names (recursively) there too; each 'ported' one is the port's
     file of that class; and each story mission's 4.1 original names the same friends its shipped (EDF5) script creates."""
+    import edf41_objects as eo
     import edf41friends as ef
     import make_edf41_objects as m
     import make_edf5_campaign as c
@@ -8654,17 +8721,22 @@ def edf41_friends_load_in_edf6() -> None:
             lacking = sorted(r for r in refs if os.path.splitext(r)[1] and not r.endswith('.ACB') and r not in g6)
             assert not lacking, (rel, lacking)
         else:
-            with open(os.path.join(c.EDF41, 'objects', *rel.split('/')), 'rb') as f:
-                members = sgo.load(data=f.read())
+            members = sgo.load(data=eo.read(rel))
+            if fr.source == 'look':   # EDF6's own soldier at the story path stays as it is, of the same class
+                story = next(r for r in ef.LOOKS if ef.look_rel(r) == rel)
+                assert sgo.load(data=_game_read(g6, story)).get('xgs_scene_object_class') == fr.cls, story
         assert members.get('xgs_scene_object_class') == fr.cls, (rel, members.get('xgs_scene_object_class'), fr.cls)
+    # each story mission's 4.1 original names the same friends its shipped script creates, 4.1's soldiers renamed
     shipped = {mid: {s for sp in found for s in sp.sgos}
                for (folder, mid), found in _edf41_friend_spawns().items() if folder == c.EDF41_FOLDER}
+    original_names = set(ef.FRIENDS) | set(ef.LOOKS)
     for mid, names in shipped.items():
         original = set()
         for rel in g41:
             if rel.startswith(f'MISSION/{mid}/') and rel.endswith('.BVM'):
-                original |= m.script_sgos(_game_read(g41, rel)) & set(ef.FRIENDS)
-        assert original == names, (mid, sorted(original ^ names))
+                original |= m.script_sgos(_game_read(g41, rel)) & original_names
+        renamed = {ef.look_rel(r) if r in ef.LOOKS else r for r in original}
+        assert renamed == names, (mid, sorted(renamed ^ names))
 
 
 @test

@@ -8,7 +8,10 @@ the story's missions recompiled for EDF5's (MISSION/EDF4.1/<id>/, the runtime ED
 MISSION/EDF5_OLD_SCRIPT), so those are the ones taken.
 
 Per mission, in 4.1's story order (MISSION/MISSIONLIST.SGO):
-  missions/<id>/MISSION.BVM, BEFORE.BVM   EDF5's, as they are
+  missions/<id>/MISSION.BVM, BEFORE.BVM   EDF5's, made from 4.1's own by pylib/bvm41.py to_edf5 (which gives EDF5's file
+                                          byte for byte: checked for every script) with 4.1's friendly soldiers renamed
+                                          to where their 4.1 files ship (pylib/edf41friends.py rewrite; EDF6 keeps the
+                                          story paths for its own soldiers)
   missions/<id>/MISSION.RMPA, BEFORE.RMPA  EDF5's, in EDF6's format (pylib/rmpa_legacy.py; the old one crashes EDF6's
                                           reader, EDF+0x6F3D25)
   missions.json: id, files, title / brief per EDF6 language from 4.1's MISSIONTEXT.SGO (rows [JA title, JA brief,
@@ -29,6 +32,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import edf41dlc  # noqa: E402
+import edf41friends  # noqa: E402
 import edf41zh  # noqa: E402
 import mdb  # noqa: E402
 import rmpa_legacy  # noqa: E402
@@ -71,6 +75,19 @@ def source_zh(note: str) -> str:
     return f'SC: {edf41zh.PATCH} {note}; {cn}; KR English.'
 
 
+def story_script(g41: dict, rel: str, edf5: bytes) -> bytes:
+    """A story script as shipped: 4.1's own (`rel` in 4.1's archives) through bvm41.to_edf5 with 4.1's soldiers renamed
+    (edf41friends.rewrite). SystemExit when 4.1 has no such file or to_edf5 of it is not EDF5's `edf5` byte for byte
+    (the rename would then be applied to something other than the script EDF5 ships)."""
+    import bvm41
+    if rel.upper() not in g41:
+        raise SystemExit(f'EDF4.1 has no {rel}: its friends cannot be renamed')
+    own = _read(g41, rel)
+    if bvm41.to_edf5(own) != edf5:
+        raise SystemExit(f'{rel}: bvm41.to_edf5 of 4.1\'s file is not EDF5\'s')
+    return bvm41.to_edf5(own, rewrite=edf41friends.rewrite)
+
+
 def build(edf5: str, edf41: str, zh: str) -> tuple[dict, dict[str, bytes], bytes]:
     """(missions.json, {rel under missions/: bytes}, thumbnails.rab); `zh` the Chinese patch's mods folder."""
     g5, g41 = archives(edf5), archives(edf41)
@@ -92,6 +109,8 @@ def build(edf5: str, edf41: str, zh: str) -> tuple[dict, dict[str, bytes], bytes
             data = _read(g5, rel)
             if name.endswith('.RMPA'):
                 data = rmpa_legacy.rmpa_from_legacy(data)
+            else:
+                data = story_script(g41, f'MISSION/{mid}/{name}', data)
             files[f'{mid}/{name}'] = data
             names.append(name)
         if 'MISSION.BVM' not in names:
@@ -102,7 +121,8 @@ def build(edf5: str, edf41: str, zh: str) -> tuple[dict, dict[str, bytes], bytes
         thumbs.append(mdb.RabFile(f'{mid}.dds', 0, 0, mdb.cmpl_compress(thumbnail(pictures[f'{mid}.DDS'.upper()].data))))
     rab = mdb.rab_read(_read(g41, 'MISSION/MISSIONIMAGE.RAB'))
     rab.files = thumbs
-    data = {'source': 'scripts: EDF5 MISSION/EDF4.1 (RMPA in EDF6 format); text, pictures: EDF4.1 MISSION/MISSION*. '
+    data = {'source': 'scripts: EDF5 MISSION/EDF4.1 (= pylib/bvm41.py to_edf5 of 4.1\'s, 4.1\'s soldiers renamed to '
+                      'OBJECT/EDF41/: pylib/edf41friends.py; RMPA in EDF6 format); text, pictures: EDF4.1 MISSION/MISSION*. '
                       + source_zh(note),
             'missions': missions}
     return data, files, mdb.rab_write(rab)
@@ -140,7 +160,7 @@ def build_dlc(dlc: 'edf41dlc.Dlc', zh: str) -> tuple[dict, dict[str, bytes], byt
                 if name.endswith('.RMPA'):
                     data = rmpa_legacy.rmpa_from_legacy(data)
                 else:
-                    data = bvm41.to_edf5(data, rewrite=edf41dlc.rewrite)
+                    data = bvm41.to_edf5(data, rewrite=lambda s: edf41friends.rewrite(edf41dlc.rewrite(s)))
                 mine[f'{mid}/{name}'] = data
                 names.append(name)
         except bvm41.UnsupportedNative as e:   # not shipped; missions.json says why (the planner reports it)
