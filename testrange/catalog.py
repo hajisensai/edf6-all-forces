@@ -143,6 +143,8 @@ EDF41_CLASSES: dict[str, tuple[str, str, float, bool]] = {
 EDF41_LEFT_OUT_CLASSES: dict[str, str] = {
     'AssultSoldier': 'a friendly 4.1 soldier: the plugin makes soldiers only as its support soldiers (support_soldier.cpp), '
                      'a script soldier needs its squad set-up',
+    'HeavyArmor': 'a friendly 4.1 Fencer soldier: as AssultSoldier',
+    'PaleWing': 'a friendly 4.1 Wing Diver soldier: as AssultSoldier',
     'SpiderNet': 'a web fitted to the 4.1 map it was made for (_FIT): no object to stand on open ground',
 }
 # A 4.1 mission's own copy of an object (same model, the mission's tweaks): its base object is the row.
