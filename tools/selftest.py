@@ -8553,7 +8553,7 @@ def edf41_maps_install() -> None:
         return {rel: rel.encode() for rel in edf41_maps.files_of(name)}
 
     with tempfile.TemporaryDirectory() as game, \
-            patched(edf41_maps, convert=convert, Archives=lambda _root: Fake()):
+            patched(edf41_maps, convert=convert, Archives=lambda _root: Fake(), workers=lambda: 1):
         os.makedirs(os.path.join(game, 'Mods'))
         written, skipped = edf41_maps.install(game, None)
         assert not written and [n for n, _ in skipped] == list(edf41_maps.MAPS) and not converted
@@ -9353,7 +9353,8 @@ def edf41_asset_pack() -> None:
 
         real_archives = edf41_maps.Archives
         e6 = FakeCpk(r6)   # the stand-in EDF6 has no archives: convert is stubbed, the donor's files are not read
-        with patched(edf41_maps, convert=convert, Archives=lambda root: e6 if root == r6 else real_archives(root)):
+        with patched(edf41_maps, convert=convert, Archives=lambda root: e6 if root == r6 else real_archives(root),
+                     workers=lambda: 1):   # a stubbed convert runs here only
             written, skipped = edf41_maps.install(r6, pack)
             assert not skipped and converted == list(edf41_maps.MAPS), skipped
             converted.clear()

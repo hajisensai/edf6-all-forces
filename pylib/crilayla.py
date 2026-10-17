@@ -3,6 +3,9 @@
 Layout: 'CRILAYLA', u32 uncompressed size, u32 compressed size; the compressed bit stream follows
 and is read backwards from its end, and the first 0x100 bytes of the output are stored verbatim
 after it.
+
+decompress runs natively (native/crilayla.cpp, pylib/edf6native.py) when the DLL is there; decompress_py is the
+reference, and runs for whatever the native one hands back (a cut or corrupt entry: its bytes or its error).
 """
 import struct
 
@@ -10,6 +13,22 @@ _LENGTH_BITS = (2, 3, 5, 8)
 
 
 def decompress(data: bytes) -> bytes:
+    """decompress_py's bytes (and its errors), natively when native/crilayla.cpp's DLL is there."""
+    if data[:8] == b'CRILAYLA' and len(data) >= 0x10:
+        import edf6native
+        lib = edf6native.lib()
+        if lib is not None:
+            import ctypes
+            size = struct.unpack_from('<I', data, 8)[0]
+            data = bytes(data)
+            if size <= 64 * len(data) + 0x10000:   # a corrupt size: the reference's behaviour, not a 4 GiB buffer
+                out = ctypes.create_string_buffer(0x100 + size)
+                if lib.edf6_crilayla_decompress(data, len(data), out, size):
+                    return out.raw
+    return decompress_py(data)
+
+
+def decompress_py(data: bytes) -> bytes:
     if data[:8] != b'CRILAYLA':
         raise ValueError('not CRILAYLA data')
     size, compressed = struct.unpack_from('<II', data, 8)

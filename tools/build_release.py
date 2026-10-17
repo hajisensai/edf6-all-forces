@@ -144,7 +144,8 @@ def check_bundled() -> None:
 
 
 # native/cmpl.cpp built by build.cmd: mdb.cmpl_compress's encoder, 70 times the pure Python one (which spent most of an
-# install's model generation: 35 of a 40-second cockpit model, measured 2026-10-14). Both exes load it from _MEIPASS.
+# install's model generation: 35 of a 40-second cockpit model, measured 2026-10-14), and the other native helpers of
+# pylib/edf6native.py (CRILAYLA, the SK maps' LZSS and collision trees). Both exes load it from _MEIPASS.
 CMPL_DLL = os.path.join(ROOT, 'build', 'pylib', 'edf6cmpl.dll')
 
 
@@ -202,7 +203,7 @@ def build_exe(name: str, generator: str | None = None) -> str:
                 'make_bigmap', 'bigmap', 'seams', 'fmb', 'fmb_build', 'hkcms', 'hkcms_build', 'hktag', 'sk_map', 'sk_terrain', 'gen', 'rmpa', 'jet_models', 'jet_gear', 'weapons',
                 'testhub', 'make_emc', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
                 'cas_pose', 'aircraft_collision', 'support_config', 'support_loadout', 'room_layout', 'menu_preview',
-                'make_sazabi', 'sazabi_model', 'sazabi_arms', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'legacy_assets', 'rabpool', 'mdb_legacy', 'cas_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics', 'cockpit_instruments', 'cockpit_label_glyphs', 'cockpit_retrofit', 'cockpit_shell', 'texfile_accel', 'model_workers', 'mdb',
+                'make_sazabi', 'sazabi_model', 'sazabi_arms', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'legacy_assets', 'rabpool', 'mdb_legacy', 'cas_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics', 'cockpit_instruments', 'cockpit_label_glyphs', 'cockpit_retrofit', 'cockpit_shell', 'texfile_accel', 'model_workers', 'mdb', 'edf6native', 'crilayla',
                 'gamelease', 'build'):   # every module installer.py imports in a function (selftest release_imports); build is
         # autoturret/tools/build.py (--paths above comes before site-packages, where pip's own `build` may be)
         cmd += ['--hidden-import', mod]

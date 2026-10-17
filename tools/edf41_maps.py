@@ -32,11 +32,12 @@ map is left out and said so. A map installed by this VERSION from the same EDF4.
 """
 from __future__ import annotations
 
+import functools
 import json
 import os
 import struct
 import sys
-from typing import Callable
+from typing import Callable, Iterator
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
@@ -208,11 +209,47 @@ def unavailable(root: str, root41: str | None) -> list[tuple[str, str]]:
     return out
 
 
+CONVERT_ERRORS = (ValueError, KeyError, IndexError, AssertionError, NotImplementedError, struct.error)
+# A conversion process's budget (model_workers.workers_for): the largest map (NW_KASENJIKI01) peaks near 1.1 GB in its
+# process, and its ~420 MB of files are held once more here while they are written.
+WORKER_MEMORY = 2 * 1024**3
+MAX_WORKERS = 4
+
+
+@functools.lru_cache(maxsize=4)
+def _archives(root: str) -> Archives:
+    """One Archives per game per process: a conversion process converts several maps."""
+    return Archives(root)
+
+
+def convert_job(name: str, root41: str, root: str) -> tuple[bool, dict[str, bytes] | str]:
+    """convert(name) in a conversion process (pylib/model_workers.py): (True, files), or (False, why) for the errors
+    install reports as a skipped map; any other error is raised in the installer as it would be there."""
+    try:
+        return True, convert(name, _archives(root41), _archives(root))
+    except CONVERT_ERRORS as e:
+        return False, f'转换失败：{type(e).__name__}: {e}'
+
+
+def workers() -> int:
+    """How many maps convert at once: half the CPUs, at most MAX_WORKERS, WORKER_MEMORY of free memory each (one on a
+    machine with little free; EDF6VC_MAP_WORKERS overrides)."""
+    import model_workers
+    forced = os.environ.get('EDF6VC_MAP_WORKERS', '')
+    if forced.isdigit() and int(forced) > 0:
+        return int(forced)
+    return model_workers.workers_for(os.cpu_count() or 1, model_workers.available_memory(), MAX_WORKERS, WORKER_MEMORY)
+
+
 def install(root: str, root41: str | None, say: Callable[[str], None] = print) -> tuple[list[str], list[tuple[str, str]]]:
-    """Every map of MAPS converted and written as OWNER's; (paths written, [(map, why not)])."""
+    """Every map of MAPS converted and written as OWNER's; (paths written, [(map, why not)]). With more than one map to
+    convert and workers() > 1 they convert in processes of their own, several at once (convert_job; nothing patched
+    into this module reaches them); each is written, in MAPS order, as soon as it and the maps before it are
+    converted: the files, the ledger, the stamp and the messages are those of converting them here one by one."""
     if not root41:
         return [], unavailable(root, root41)
-    e41, e6 = Archives(root41), Archives(root)
+    import model_workers
+    e41 = Archives(root41)
     led = ledger.Ledger(root)
     stamp_path = os.path.join(root, 'Mods', STAMP)
     stamp = load_json(stamp_path, {})
@@ -220,28 +257,49 @@ def install(root: str, root41: str | None, say: Callable[[str], None] = print) -
     skipped = unavailable(root, root41)
     left_out = {name for name, _ in skipped}
     wanted: set[str] = set()
+    plan: list[tuple[str, dict[str, list[int]] | None, str]] = []   # (map, its source, why it is not converted)
     for name in MAPS:
         if name in left_out:
             continue
         try:
             source = _source(name, e41)
         except (ValueError, KeyError) as e:
-            skipped.append((name, f'源地图不可用：{type(e).__name__}: {e}'))
+            plan.append((name, None, f'源地图不可用：{type(e).__name__}: {e}'))
+            continue
+        plan.append((name, source, ''))
+    todo = [name for name, source, _ in plan if source is not None and not _current(led, stamp, name, source)]
+    count = workers() if len(todo) > 1 else 1
+    if count > 1:
+        jobs = [(convert_job, (name, root41, root), f'地图 {name}') for name in todo]
+        results = model_workers.ordered_jobs(jobs, count)
+    else:   # here, one by one (what the processes do, without starting one)
+        e6 = Archives(root)
+
+        def here() -> Iterator[tuple[bool, dict[str, bytes] | str]]:
+            for name in todo:
+                try:
+                    yield True, convert(name, e41, e6)
+                except CONVERT_ERRORS as e:
+                    yield False, f'转换失败：{type(e).__name__}: {e}'
+        results = here()
+    for name, source, why in plan:
+        if source is None:
+            skipped.append((name, why))
             continue
         wanted.update(ledger.key(rel) for rel in files_of(name))
-        if _current(led, stamp, name, source):
+        if name not in todo:
             continue
         say(f'  转换 4.1 地图 {name}（借用 EDF6 {MAPS[name][0]} 的天气与寻路网格）……')
-        try:
-            files = convert(name, e41, e6)
-        except (ValueError, KeyError, IndexError, AssertionError, NotImplementedError, struct.error) as e:
-            skipped.append((name, f'转换失败：{type(e).__name__}: {e}'))
+        ok, files = next(results)
+        if not ok:
+            skipped.append((name, files))
             wanted.difference_update(ledger.key(rel) for rel in files_of(name))
             continue
         for rel, data in files.items():
             if ledger.key(rel) in set(led.owned_by(OWNER)) and sha256_file(led.disk(rel)) == sha256(data):
                 continue
             written.append(led.put(OWNER, rel, data))
+        del files
         stamp[name] = {'version': VERSION, 'source': source}
         with open(stamp_path, 'w', encoding='utf-8') as f:
             json.dump(stamp, f, indent=1)

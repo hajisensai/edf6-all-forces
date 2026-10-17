@@ -574,8 +574,8 @@ def install(game: str, campaign_requested: bool = False) -> None:
         print('  跳过', group, why)
     for path in edf5_dlc.install(game, files5):
         print('写入', path)
-    print(f'转换 EDF4.1 的任务地图（4.1 本篇任务包要用；从{edf41src.describe(root41)}转换，城市地图每张约 3–8 分钟，'
-          '山地 / 平原（SK_*）地图每张约 1–2 分钟，已转换且未变的跳过）……' if root41
+    print(f'转换 EDF4.1 的任务地图（4.1 本篇任务包要用；从{edf41src.describe(root41)}转换，16 张地图按空闲内存'
+          '分几个进程同时转换，共约 0.5–2 分钟，已转换且未变的跳过）……' if root41
           else f'{edf41src.describe(root41)}：跳过 4.1 地图（4.1 本篇任务包需要它）。')
     written41, skipped_maps = edf41_maps.install(game, root41)
     for name, why in skipped_maps:
