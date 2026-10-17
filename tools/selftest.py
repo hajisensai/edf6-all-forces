@@ -10601,15 +10601,21 @@ def edf41_hector_alias() -> None:
         assert not m.missing_textures(rab, frag)
     # the class enables slots 0..3 by number (EDF+0x6dc830): as many entries as the template's four, not one per material
     # (two crashed the real game, M113 / M131); the model's materials are the two the glow blob names
-    assert len(am.items[4].items) == 4 and len(model.materials) == 2
+    # and a fifth, 301 cannon's charge light, which only the plugin plays (edf41_hector_light)
+    assert len(am.items[4].items) == 5 and len(model.materials) == 2
     # each material its own name (EDF6 binds an MTAB entry to the first of a name: the guns' glow was never played),
     # every slot animates the body's and the guns', slot 3 (played once at death) is 4.1's 180-frame death block
     mats = [model.name_of(x.name) for x in model.materials]
     assert mats == ['ufosurface', 'ufosurface.hector301cannon'], mats
-    for i, slot in enumerate(am.items[4].items):
+    for i, slot in enumerate(am.items[4].items[:4]):
         blob = slot.items[0].data
         assert [n for n, _c, _t in m.mtab_entries(blob)] == mats, (i, m.mtab_entries(blob))
         assert struct.unpack_from('<if', blob, 0) == ((0, 180.0) if i == m.BERSERKER_DEATH_SLOT else (1, 480.0)), i
+    light = am.items[4].items[m.HECTOR_CHARGE_LIGHT_SLOT].items[0].data
+    assert [n for n, _c, _t in m.mtab_entries(light)] == ['ufosurface.hector301cannon']
+    assert struct.unpack_from('<if', light, 0) == (0, 120.0) and top['edf41_hector_light'] == [4.0, 4.0]
+    # 4.1's time to the first shot: the 301 cannon charges 180 frames (EDF41.exe 0x225A7A, 3 s)
+    assert [c['gun_battery']['charge']['time'] for c in top['gun_control']] == [180.0, 180.0], top['gun_control']
     located = ml.mab_locators(am.items[2].data)
     names = {l.name: l for _i, l in located}
     assert {'目の基準位置', '砲台１', '砲台２'} <= set(names) and all(l.node in bones for _i, l in located)
@@ -10650,6 +10656,12 @@ def edf41_hector_weapon_anim() -> None:
     kind, names, opened, closed, roll = ls[0]
     assert kind == 1.0 and names == ['gun_arms_l_gun_bottom_l', 'gun_arms_l_gun_bottom_r', 'gun_arms_l_gun_top'], ls[0]
     assert roll == [] and ls[1] == [0.0, [], [], [], []], ls[1]
+    # the first shot when 4.1's would come: the launcher once open (120 frames), the shield and gatlings at once; no light
+    top_ls = sgo.load(data=files['OBJECT/HECTOR401LS.SGO'])
+    top_gg = sgo.load(data=files['OBJECT/HECTOR401GG.SGO'])
+    assert [c['gun_battery']['charge']['time'] for c in top_ls['gun_control']] == [120.0, 1.0]
+    assert [c['gun_battery']['charge']['time'] for c in top_gg['gun_control']] == [1.0, 1.0]
+    assert top_ls['edf41_hector_light'] == [-1.0, -1.0] and len(top_ls['animation_model'][4]) == 4
     for clip in (opened, closed):
         frames, step = int(clip[0]), clip[1]
         assert frames == 31 and step == 4.0 and len(clip) == 2 + frames * len(names) * 7, (frames, step, len(clip))

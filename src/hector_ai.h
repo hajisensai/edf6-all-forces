@@ -216,8 +216,8 @@ inline unsigned PickArms(const Config& c,Rng& rng,float dist) noexcept {
 // (0x228BF0): its barrels turn all the time, the CAS variable v_roll_speed (+0x6B4) set every frame to +0x6C0, 1 from the
 // start (0x2285C3) and 5 from its first attack on (0x228FAB, never set back). Their CAS clips come with the object's SGO
 // (tools/make_edf41_objects.py hector_anim: per frame, per bone, translation and rotation as the clip has them); the
-// plugin writes them as the bones' locals while the arm's battery attacks (EDF6's battery fires on its own clock: the
-// shot is not held until the barrel is open, as 4.1's is). The head (Hector 0x222D80 .. 0x223070, player `head`): closed for 300 +
+// plugin writes them as the bones' locals while the arm's battery attacks; the battery's charge time is 4.1's time to
+// the first shot (tools/make_edf41_objects.py HECTOR_CHARGE: open, then the cannon's charge), so it fires once open. The head (Hector 0x222D80 .. 0x223070, player `head`): closed for 300 +
 // rand(900) frames, `open`, open for 300 + rand(900) frames, `close`, again.
 enum class WeaponKind { None=0, OpenClose=1, Roll=2 };
 constexpr int kKeyFloats=7;                     // tx ty tz qx qy qz qw
