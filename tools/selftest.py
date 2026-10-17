@@ -9825,6 +9825,27 @@ def edf41_alias_dsgo_helpers() -> None:
 
 
 @test
+def edf41_shipped_textures_load_before_models() -> None:
+    """Every model in every EDF4.1 archive the tools ship has each texture it names before it in the archive (the
+    engine binds a texture only if it loaded before the model: mdb.insert_member). The Hectors' once had their guns'
+    and shield's textures after the body that carries those meshes: black guns, no shield (docs/feedback-2026-10-17-
+    edf41-map-hector.md H2 / H5)."""
+    import edf41_objects as eo
+    import make_edf41_objects as m
+    import mdb
+    checked = 0
+    for rel in sorted(eo.registry()['files']):
+        if not rel.upper().endswith('RAB'):
+            continue
+        data = eo.read(rel)
+        for f in mdb.rab_read(data).files:
+            if f.name.lower().endswith('.mdb'):
+                assert not m.missing_textures(data, f.name), (rel, f.name, m.missing_textures(data, f.name))
+                checked += 1
+    assert checked >= 21, checked
+
+
+@test
 def edf41_hector_alias() -> None:
     """HECTOR301CC under EDF6_Berserker_Large, built from the games (tools/make_edf41_objects.py build, only that
     root): not skipped; and every name the class looks up that is unchecked in EDF.dll (jobs/4bf89026/tmp/hector41
@@ -9893,10 +9914,10 @@ def edf41_hector_alias() -> None:
     assert [f.name for f in archive.files if f.name.lower().endswith('.mdb') and f.folder == 1 and 'fragment' not in f.name.lower()] == ['Hector301.mdb']
     bones = {model.name_of(b.name) for b in model.bones}
     assert {'waist', 'arms_l', 'arms_r', 'Hector301', 'gun_arms_l', 'gun_arms_r'} <= bones
-    assert not m.missing_textures(rab, model), m.missing_textures(rab, model)
+    assert not m.missing_textures(rab, 'Hector301.mdb'), m.missing_textures(rab, 'Hector301.mdb')
     for frag in am.items[3].items[3].items[6].items:
         assert frag.lower() in member, frag
-        assert not m.missing_textures(rab, mdb.mdb_read(member[frag.lower()].data))
+        assert not m.missing_textures(rab, frag)
     # the class enables slots 0..3 by number (EDF+0x6dc830): as many entries as the template's four, not one per material
     # (two crashed the real game, M113 / M131); the model's materials are the two the glow blob names
     assert len(am.items[4].items) == 4 and len(model.materials) == 2

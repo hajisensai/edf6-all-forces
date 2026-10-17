@@ -2379,7 +2379,11 @@ def merged_model(games: 'Games', a: Alias, files: dict[str, bytes], rab_rel: str
     raw = mdb.mdb_write(body)
     body_file.stored = mdb.cmpl_compress(raw) if body_file.stored[:4] == b'CMPL' else raw
     rab.files = [f for f in rab.files if not f.name.lower().endswith('.mdb') or f is body_file]
-    donor = mdb.rab_read(games.read6(template_rab))
+    # 4.1's archive interleaves each model with its own textures (body textures, body model, then each gun's textures
+    # and model); with the guns' models gone the body model sits before the guns' and the shield's textures, which the
+    # engine then never binds (black guns, an invisible shield: mdb.insert_member). Back into folder order, stably.
+    rab.files.sort(key=lambda f: f.folder)
+    donor =mdb.rab_read(games.read6(template_rab))
     have = {f.name.lower() for f in rab.files}
     members = {f.name.lower(): f for f in donor.files}
     for name in fragments:
@@ -2396,14 +2400,15 @@ def merged_model(games: 'Games', a: Alias, files: dict[str, bytes], rab_rel: str
     return mdb.rab_write(rab), body, barrel, corner
 
 
-def missing_textures(rab_bytes: bytes, md: mdb.Mdb) -> list[str]:
-    """The textures of `md` that its archive holds under no name the loader would bind (a texture member must be
-    there by its filename or as stem.lod.ext, in the TEXTURE folder, before the model: mdb.insert_member's docstring;
-    the HD members are optional)."""
+def missing_textures(rab_bytes: bytes, model: str) -> list[str]:
+    """The textures of the archive's model member `model` that the loader would not bind: a texture member must be
+    there by its filename or as stem.lod.ext, in the TEXTURE folder, **before the model** (mdb.insert_member's
+    docstring; one after it renders black); the HD members are optional."""
     rab = mdb.rab_read(rab_bytes)
-    names = {f.name.lower() for f in rab.files if f.folder == 0}
+    at = next(i for i, f in enumerate(rab.files) if f.name.lower() == model.lower())
+    names = {f.name.lower() for f in rab.files[:at] if f.folder == 0}
     out = []
-    for t in md.textures:
+    for t in mdb.mdb_read(rab.files[at].data).textures:
         stem, ext = os.path.splitext(t.filename.lower())
         if stem + ext not in names and stem + '.lod' + ext not in names:
             out.append(t.filename)
@@ -2442,6 +2447,9 @@ def alias_dsgo(games: 'Games', root: str, files: dict[str, bytes], a: Alias, t_d
     fragments = list(node_path(t_am, '3/3/6').items)
     rab_rel = 'OBJECT/' + root.rsplit('.', 1)[0] + '.MRAB'
     rab_bytes, body, barrel, (lo, hi) = merged_model(games, a, files, rel_of(mrab), mdb_name, template_rab, fragments)
+    for model in (mdb_name, *fragments):
+        if missing_textures(rab_bytes, model):
+            raise ValueError(f'{rab_rel}: {model} would render black: {missing_textures(rab_bytes, model)}')
     files[rab_rel] = rab_bytes
 
     locators = []
