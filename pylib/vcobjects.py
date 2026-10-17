@@ -556,7 +556,11 @@ _STOCK_OF = {'app:/weapon/' + d.lower(): 'app:/weapon/' + st.lower()
 # The 506's sound table rows of its rotor (start-up and the main loop): a jet has no rotor to hear. A name SEPRESET.SGO
 # does not hold makes the game's preset empty (0x7B16F0 returns false, its cue none) and playing it does nothing
 # (0x7B4510); the plugin plays the engine instead (src/jetsound.cpp).
-PLAYER_SEAT_POSE, PLAYER_SEAT_CLASSES = '505_TANK_DRIVER', 15   # jet_sgo: the seat of an aircraft the player boards
+# jet_sgo: the seat of an aircraft the player boards. vehicle_riding_position[i][3] is not a pose: it is the seat's
+# name key in the text table (0x7A3500; 505_TANK_DRIVER and 506_HELI_DRIVER both read "Pilot Seat"); the rider's pose
+# is the seat locator's own MAB parameters (Animation / DispCharacter, 0x62B62D), the 506's: rider hidden
+# (docs/all-classes-ride-re.md). Every class also takes every stock seat at run time (src/allclass.cpp).
+PLAYER_SEAT_POSE, PLAYER_SEAT_CLASSES = '505_TANK_DRIVER', 15
 # The marks of the plugin's aircraft the player boards (src/playerjet_kinds.h kBoardable, its bodies' marks in
 # src/jet_internal.h kBodies; tools/selftest.py boardable_seats_take_every_class holds them together): every SGO of one
 # takes every class into its seat, the NPC body's too (the user, 2026-10-07: the carrier an NPC called took Rangers and Air
@@ -1244,8 +1248,8 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     m['mission_setup'] = setup
     if jet.player or jet.mark in BOARDABLE_MARKS:
         # Every class flies it (the user, 2026-10-05: Wing Divers and Fencers too): the seat's class mask (R 1, WD 2,
-        # F 4, AR 8; the 506's 9) to 15, and a driver's pose every class has (the stock gives 15 only to seats like
-        # the tanks' drivers; 506_HELI_DRIVER only ever comes with 9). An NPC body's pilot is the stock RideAi's dummy
+        # F 4, AR 8; the 506's 9) to 15, and the seat's name key 505_TANK_DRIVER (the same "Pilot Seat" text as
+        # 506_HELI_DRIVER: [3] names the seat, it is no pose; PLAYER_SEAT_POSE). An NPC body's pilot is the stock RideAi's dummy
         # rider (online_authority.cpp SeatNpcRider), the same one a requested twin gets in this seat when the player
         # leaves it in the air (playerjet_board.inc). No soldier comes in by the mask: crew.cpp Crew seats that dummy
         # too, npcai.cpp BoardSquad fills seats from 1 on.

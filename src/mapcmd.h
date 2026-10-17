@@ -7,6 +7,7 @@
 #pragma once
 #include <Windows.h>
 #include "mapcmd_logic.h"
+#include "range_place.h"
 #include "support_call.h"
 #include "transport.h"
 
@@ -175,6 +176,19 @@ struct MapCommandReadout {
     // The transports' pairs (transport.cpp TransportLinks): a squad on foot and its vehicle, a thin line between them.
     int links=0;
     TransportLink link[kMapTransportLinks]{};
+    // The test range's 「摆放」 panel (range_place.h; debug_spawn.cpp RangePlaceOn): there at all, a session on (it only
+    // says why it refuses), shut or open, the category shown, the row picked in it (its place), the row armed (kEntries
+    // index, -1 none), each row's state now (debugspawn::RowState).
+    bool placeOn=false,placeOnline=false,placeOpen=false;
+    int placeCategory=0,placePick=0,placeArmed=-1;
+    debugspawn::RowState placeState[debugspawn::kEntryCount]{};
 };
 bool PlayerMapCommands(MapCommandReadout* out) noexcept;
+// hud.cpp: the 「摆放」 panel's click targets as drawn (`codes`: map_buttons.h-style codes, kPlace* below), for the clicks.
+constexpr int kPlaceTab=0x1000,kPlaceToggle=0x2000,kPlacePageUp=0x2001,kPlacePageDown=0x2002;   // a row's code: its kEntries index
+constexpr int kMapPlaceItems=rangeplace::kWindow+debugspawn::kCategoryCount+3;
+void MapCommandPlaceButtons(const float* rects,const int* codes,int n) noexcept;
+// map.cpp ReadToggles: the 「摆放」 panel takes the pad's A and B (placing, shutting it) while it is open, and until both
+// are let go after it shut: the map's own A (centre on the player) and B (close the map) wait. Any thread.
+bool MapPlaceHoldsPad() noexcept;
 }  // namespace crew
