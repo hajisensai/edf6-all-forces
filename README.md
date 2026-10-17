@@ -1087,7 +1087,7 @@ NPC 驾驶时的单次音效照常能听到，HUD 只在你自己驾驶时显示
 - **存档不变**：存档里的外观编号仍是原版的 -1..3，4.1 外观的颜色用那个原版外观的颜色槽（HQ 改色照样有效）。卸载插件后读档就是那个原版外观，不会越界。
 - **不需要装 EDF4.1**：模型是开发时从 4.1 转换好的（`tools/make_edf41_outfits.py`，一套通用重定向管线 `pylib/outfit41.py`：4.1 网格摆到 EDF6 绑定姿势、改挂到 EDF6 骨架，用 EDF6 的动作、布娃娃和挂点），安装器默认写入 `OBJECT/EDF41_P_*.SGO / .MRAB`、`MENUOBJECT/EDF41_P_*.SGO`（归属账本管理，卸载一并删除）。某兵种文件不全时，这个兵种不提供这一项、也不换模型。
 - **与 4.1 原作的差别**：装甲片、裙甲、背包雷达、飞翼推进器只刚性跟随身体不会单独摆动；没有口型；外侧三根手指一起动；转头的枢轴比 4.1 高约 2 cm。详见 `docs/edf41-outfits.md` §5。
-- **未实机验证**（离线渲染 + 静态逆向）：清单见 `docs/edf41-outfits.md` §7。日志 `OUTFIT41 battle=6/6 menu=2/2 stock items=5/5 popup=1 …` 表示钩子全部装上；EDF.dll 不符时 `OUTFIT41 REFUSED`，什么都不改。
+- **未实机验证**（离线渲染 + 静态逆向）：清单见 `docs/edf41-outfits.md` §7。日志 `OUTFIT41 battle=6/6 menu=3/3 stock items=5/5 popup=1 …` 表示钩子全部装上；EDF.dll 不符时 `OUTFIT41 REFUSED`，什么都不改。
 
 ## EDF5 战役
 

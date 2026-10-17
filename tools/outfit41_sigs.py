@@ -25,8 +25,11 @@ SIGNATURES: tuple[tuple[int, int, str], ...] = (
     (0x59DD0F, 0x1D, 'session preload (0x59DC90): the member record\'s class and outfit, the path from 0xE34E0'),
     (0x591227, 0x12, 'online creation: 0x5A3F90(desc from 0x595960, ...)'),
     (0x59120E, 0x10, 'online creation: 0x595960(desc, &member, ...) right before it, in the same 0x591130'),
-    (0x5959DD, 0x0C, "online desc: the member's mission index +0x48 picks its record (below 4)"),
-    (0x59DCD9, 0x1A, "session preload: the member's mission index +0x48 picks its record"),
+    # Only the read of +0x48 (4 bytes): EDF6Coop's [Mission] Extend rewrites the `cmp 4; jcc` right after both
+    # (0x5959E1, 0x59DCEA: jumps of its own, multislot/src/patches.cpp) and loads before us.
+    (0x5959DD, 0x04, "online desc: the member's mission index +0x48 picks its record"),
+    (0x59DCD9, 0x04, "session preload: the member's mission index +0x48 picks its record"),
+    (0x9393B0, 0x28, "3D view constructor: OnMessage(this, 3, {this +0x2AC player, ...}) called directly, not by the vtable"),
     (0x8A9B15, 0x14, 'soldier screen: the outfit change unlocked flag GS +0x300 copied to screen +0x7A4'),
     (0x8AB585, 0x1E, 'outfit popup: built only while screen +0x7A4 is set'),
     (0x70D912, 0x28, "mission result: GS +0x300 set once the current list's last row is cleared (0xDF990)"),
@@ -64,7 +67,7 @@ VIEW_VTABLE, VIEW_SLOT_MESSAGE, VIEW_ONMESSAGE = 0x180FA60, 3, 0x93B320
 # rel32 calls the hooks redirect: (call site, the callee it must hold)
 CALLS: tuple[tuple[int, int], ...] = (
     (0x591234, 0x5A3F90), (0x59145B, 0x5A3F90), (0x5A3FFC, 0x0E34E0), (0x59DD27, 0x0E34E0), (0x59DE91, 0x0D8730),
-    (0x591219, 0x595960), (0x93B426, 0x0E3420), (0x93BD03, 0x0E3420), (0x8ABC10, 0x119C600),
+    (0x591219, 0x595960), (0x9393D3, 0x93B320), (0x93B426, 0x0E3420), (0x93BD03, 0x0E3420), (0x8ABC10, 0x119C600),
 )
 
 

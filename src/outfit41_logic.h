@@ -109,7 +109,7 @@ inline constexpr std::size_t kDescPlayer=0x0,kDescClass=0x8,kDescOutfit=0xC;
 // EDF6Coop_ResolveMissionPlayerPuid maps the same number to the member's EOS id).
 inline constexpr std::size_t kMemberFlags=0x10,kMemberIndex=0x48;
 constexpr bool RemoteMember(std::uint32_t flags) noexcept { return ((flags>>1)&1u)!=0; }
-inline constexpr int kMissionPlayers=64;   // Epic's lobby limit: no mission index of a member reaches it
+inline constexpr int kMissionPlayers=1024;   // the game takes 0..3; EDF6Coop's [Mission] Extend widens it to 1024 (multislot patches.h)
 constexpr bool ValidIndex(int i) noexcept { return i>=0 && i<kMissionPlayers; }
 
 // --- The HQ outfit popup (built in 0x8AB310, shown by 0x119C600(system, out, type, request)): its request object

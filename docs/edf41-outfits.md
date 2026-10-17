@@ -63,8 +63,9 @@ EDF.dll TimeDateStamp `0x678CCB46`，地址为 RVA。置信度：H = 反汇编 /
 - **预载决定，建人照抄**：离线预载 `0x59DE91`（每个本机槽位 0 / 1）与联机会话预载 `0x59DD27`（每个会话成员）按 §1.1 决定，结果记在「本机槽位」/「任务内编号」表里（-1 或已按 4.1 预载的兵种）；建人 `0x5A3FFC` 只在表里记的正是这个兵种时返回新路径。预载与建人永远一致，资源一定已预载（只换建人不换预载可能建人失败，M）。
 - 离线建人 `0x59145B` 改调：读 `desc+0`（本机槽位 0 / 1）。联机建人：`0x591219` 改调记下成员 `+0x48`，`0x591234` 改调把它交给路径钩子。
 - 联机预载：`0x1B8E98 / 0x225FAC → 0x59DC90` 已被 `src/mission.cpp` 改调，由其 `SessionPreloadHook` 把调用交给 `Outfit41SessionPreload`：读成员 `+0x48` 与远端位（`+0x10` 位 1）。本机成员按本机 1P 判断；远端成员按它在房间里发布的值（§6）。
-- 菜单：链接视图 OnMessage（槽 3）记下视图玩家 `+0x2AC`，改调 `0x93B426 / 0x93BD03`：该玩家 §1.1 成立 → 新菜单 SGO。选关界面切换任务时对「配合任务」的玩家发 msg 3（`0x8A6246..0x8A6272`），所以在 4.1 任务包选关、HQ 预览也是 4.1 外观。房间支援兵预览（`room_preview.cpp`）在工作线程里事后改写 Desc 路径，不受影响。
-- 签名：`tools/outfit41_sigs.py` 的 34 段字节（含每个改调点前后的指令、成员编号字段、解锁标志的读写、新存档默认值、远端位函数、弹出菜单构造与 lambda），版本不符整个功能 `OUTFIT41 REFUSED`、不打任何补丁。`RedirectCall` 另外核对每个调用点仍指向原被调者（别的钩子先占了就不改，日志说明）。
+- 菜单：链接视图 OnMessage（槽 3）记下视图玩家 `+0x2AC`；视图构造 `0x938760` 的第一次建模在 `0x9393D3` 直接 `call 0x93B320`（不经 vtable），这一处也改调到同样的包装；改调 `0x93B426 / 0x93BD03`：该玩家 §1.1 成立 → 新菜单 SGO。选关界面切换任务时对「配合任务」的玩家发 msg 3（`0x8A6246..0x8A6272`），所以在 4.1 任务包选关、HQ 预览也是 4.1 外观。房间支援兵预览（`room_preview.cpp`）在工作线程里事后改写 Desc 路径，不受影响。
+- 与 EDF6Coop 共存：Coop 的 `[Mission] Extend`（默认开）把 `0x5959E1`、`0x59DCEA` 的 `cmp 4; jcc` 改成跳到它自己的代码，且先于本插件加载，所以这两处签名只取 `+0x48` 的读取（4 字节）；10-18 第一次实机正是因为签名覆盖了这两处而 `OUTFIT41 REFUSED: code at EDF+0x5959DD`。
+- 签名：`tools/outfit41_sigs.py` 的 35 段字节（含每个改调点前后的指令、成员编号字段、解锁标志的读写、新存档默认值、远端位函数、弹出菜单构造与 lambda），版本不符整个功能 `OUTFIT41 REFUSED`、不打任何补丁。`RedirectCall` 另外核对每个调用点仍指向原被调者（别的钩子先占了就不改，日志说明）。
 
 ## 3. HQ 外观弹出菜单（逆向）
 
@@ -131,7 +132,7 @@ EDF.dll TimeDateStamp `0x678CCB46`，地址为 RVA。置信度：H = 反汇编 /
 - 发给游戏网络的始终是存档里的原版外观值（记录 `+4`），任何一端都不会越界。
 - 4.1 外观经 EDF6Coop 成员属性同步（`src/coop_member_attribute_api.h`，v1）：每个本版成员在房间里发布 `EDF6X_OUTFIT41 = "1;<选了><配合任务或未解锁>"`（各 `0`/`1`），值变化时发布：1P 在弹窗里选择后立即发布；另外每 0.5 秒最多一次，从房间界面的帧（`room_ui.cpp` 的 HUiRoom / HQ OnUpdate 包装，不受房间菜单开关影响）与 HQ / 房间 3D 视图的消息（`RoomLoadout=0` 时 room_ui 什么都不装，这条路仍在）检查一次，读档、通关解锁后进 HQ 就会更新。EDF6Coop 保留已接受的值，之后进入的房间都会发布。同一时机也读一次这个键，让 EDF6Coop 从此开始关注它（Coop 从第一次读起才收这个键的值）。
 - 接收方在会话预载 `0x59DD27` 遇到远端成员：成员 `+0x48` → `EDF6Coop_ResolveMissionPlayerPuid` → EOS id → 成员属性快照里找这名成员的值 → `Wears(选了, 配合任务或未解锁, 本机的 4.1 任务包判断)`；建人照抄预载的决定（§2）。只传标志不传路径：接收方自己检查 Mods 里有没有这个兵种的文件，没有就原版。
-- **版本不同**：没有这个值（旧版全军出击、没有成员属性的旧 EDF6Coop）或值不是本版格式 → 该成员在本机显示原版外观，日志写明原因，不会错乱或崩溃。另外 `support_protocol.h` 新增扩展位 `kExtOutfit41`（本版每个 hello 都声明），房间版本提示（`version_notice.h`）在有人缺它时写「本房间不可用：4.1外观（其他人看到原版外观）」。全军出击联机本来就要求匹配版本的 EDF6Coop（`mod_room.cpp RequireCoop`），EDF6Coop 不需要改（成员属性 v1 与 `EDF6Coop_ResolveMissionPlayerPuid` 已有）。
+- **版本不同**：没有这个值（旧版全军出击、没有成员属性的旧 EDF6Coop）或值不是本版格式 → 该成员在本机显示原版外观，日志写明原因，不会错乱或崩溃。另外 `support_protocol.h` 新增扩展位 `kExtOutfit41`（本版每个 hello 都声明），房间版本提示（`version_notice.h`）在有人缺它时写「本房间不可用：4.1外观（其他人看到原版外观）」。全军出击联机本来就要求匹配版本的 EDF6Coop（`mod_room.cpp RequireCoop`），本版再加一条：EDF6Coop 必须导出 `EDF6CoopGetMemberAttributeApi`，否则建房 / 进房被拒并弹窗说明「EDF6Coop 缺少成员属性接口…版本过旧」。EDF6Coop 不需要改（成员属性 v1 与 `EDF6Coop_ResolveMissionPlayerPuid` 已有）。
 - 时序：EDF6Coop 发布扩展值最多每 2 秒一次，其它成员每秒读一次；在 HQ / 房间里改了选择后 3 秒内就出击，别人可能还按旧值建你的模型（各端仍自洽、不崩，下一次任务就对）。
 
 ## 7. 实机验证清单（未做）
@@ -141,6 +142,6 @@ EDF.dll TimeDateStamp `0x678CCB46`，地址为 RVA。置信度：H = 反汇编 /
 3. 四个兵种各进一次离线任务：玩家是 4.1 外观、动作正常（站立、跑、跳、射击、换弹、投掷、飞翼飞行、剑兵冲刺、空降兵背包）、布娃娃倒地、LOD 远近切换（尤其空降兵 Engineer 类）、改色有效。
 4. 4.1 任务包：外观选「配合任务」时 HQ 预览与任务里都是 4.1 外观；选 EDF6 士兵时是 EDF6 士兵；EDF6 本篇里「配合任务」照原版。
 5. 分屏双人：2P 的弹窗也有这一项，2P 选了只 2P 穿。
-6. 日志：`OUTFIT41 battle=6/6 menu=2/2 stock items=5/5 popup=1 files … chosen=…`，任务开始时每名玩家一行 `OUTFIT41 preload: …` / `OUTFIT41 online preload: mission player N …`；建人后无崩溃；删文件后自动回到原版（文件缺失时不提供选项）。
+6. 日志：`OUTFIT41 battle=6/6 menu=3/3 stock items=5/5 popup=1 files … chosen=…`，任务开始时每名玩家一行 `OUTFIT41 preload: …` / `OUTFIT41 online preload: mission player N …`；建人后无崩溃；删文件后自动回到原版（文件缺失时不提供选项）。
 7. 联机（两台，都装本版）：A 选 4.1，B 看到 A 是 4.1 外观；4.1 任务包里两人都「配合任务」时互相都是 4.1。B 装旧版：B 看到 A 是原版、A 看到 B 是原版，A 的日志写 `tells the room nothing of the EDF4.1 outfit`，房间出现版本提示。
 8. 与 EDF6Coop 同装：`OUTFIT41` 的调用点没有被其它钩子占用（日志无 `not redirected`）。

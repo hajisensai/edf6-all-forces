@@ -45,7 +45,8 @@ constexpr std::size_t kCreate=0x5A3F90,kCreateOnline=0x591234,kCreateOffline=0x5
 constexpr std::size_t kMemberDesc=0x595960,kMemberDescCall=0x591219;
 constexpr std::size_t kCreatePathCall=0x5A3FFC,kSessionPathCall=0x59DD27,kOwnPathCall=0x59DE91;
 constexpr std::size_t kMenuPathCalls[]={0x93B426,0x93BD03};
-constexpr std::size_t kViewVtable=0x180FA60;
+constexpr std::size_t kViewVtable=0x180FA60,kOnMessage=0x93B320;
+constexpr std::size_t kViewBuiltCall=0x9393D3;   // the view's constructor 0x938760: OnMessage(this, 3, ...) called directly
 constexpr std::size_t kShowDialog=0x119C600,kOutfitDialogCall=0x8ABC10;
 constexpr std::size_t kReserve=0xB91D0,kItemCopy=0x89950,kAssign=0x3D450,kClosePopup=0x7E2EB0,kRebuildView=0x8BDE80;
 // The five stock items' std::function vtables, in the popup's order (outfit -1, 2, 3, 1, 0); the first is the one ours
@@ -251,7 +252,9 @@ const wchar_t* __fastcall BattlePathHook(void* tables,int cls,int outfit) {
 const wchar_t* __fastcall OwnPathHook(void* gs,int who,int cls) {
     if(ValidLocal(who) && ValidClass(cls)) {
         const wchar_t* ours=Decided(cls,LocalWears(who,cls),preloadedLocal[who]);
-        Log("OUTFIT41 preload: player %d class %d: %s",who+1,cls,ours ? "EDF4.1 outfit" : "stock outfit");
+        const Wire w=LocalWire(who);
+        Log("OUTFIT41 preload: player %d class %d: %s (chosen %d, mission outfit or locked %d, EDF4.1 pack %d, files %d)",who+1,
+            cls,ours ? "EDF4.1 outfit" : "stock outfit",w.chosen,w.missionDefault,InPack41(),Installed(cls));
         if(ours)return ours;
     }
     return reinterpret_cast<PathFn>(image+kOwnPath)(gs,who,cls);
@@ -294,6 +297,16 @@ std::uintptr_t __fastcall MessageHook(unsigned char* view,std::uintptr_t id,std:
     const auto result=nextMessage(view,id,payload);
     viewPlayer=was;
     Tick();
+    return result;
+}
+// The constructor's own first build calls OnMessage directly (0x9393D3), past the vtable: the same, to the stock function.
+std::uintptr_t __fastcall BuiltMessageHook(unsigned char* view,std::uintptr_t id,std::uintptr_t payload) {
+    const int was=viewPlayer;
+    int who=-1;
+    __try { who=At<std::int32_t>(view,kViewPlayer); } __except(EXCEPTION_EXECUTE_HANDLER){who=-1;}
+    viewPlayer=who;
+    const auto result=reinterpret_cast<MessageFn>(image+kOnMessage)(view,id,payload);
+    viewPlayer=was;
     return result;
 }
 const wchar_t* __fastcall MenuPathHook(void* tables,int cls,int outfit) {
@@ -453,6 +466,7 @@ bool InstallOutfit41() noexcept {
         auto slot=reinterpret_cast<void**>(image+kViewVtable)+kViewSlotMessage;
         if(edf::ChainVtableSlot(slot,reinterpret_cast<void*>(&MessageHook),&next)) {
             nextMessage=reinterpret_cast<MessageFn>(next);
+            menu+=Redirect(kViewBuiltCall,kOnMessage,reinterpret_cast<void*>(&BuiltMessageHook));
             for(std::size_t site:kMenuPathCalls)menu+=Redirect(site,kMenuPath,reinterpret_cast<void*>(&MenuPathHook));
         } else Log("OUTFIT41 the 3D view's OnMessage could not be chained: the menu keeps the stock model");
     }
@@ -466,9 +480,9 @@ bool InstallOutfit41() noexcept {
     const int popup=items==static_cast<int>(kStockItems) ?
         Redirect(kOutfitDialogCall,kShowDialog,reinterpret_cast<void*>(&ShowDialogHook)) : 0;
     Log("OUTFIT41 battle=%d/%d menu=%d/%zu stock items=%d/%zu popup=%d files ranger=%d wingdiver=%d airraider=%d fencer=%d "
-        "chosen=%d%d EDF41Content=%d (%ls)",battle,kBattleSites,menu,std::size(kMenuPathCalls),items,kStockItems,popup,
+        "chosen=%d%d EDF41Content=%d (%ls)",battle,kBattleSites,menu,std::size(kMenuPathCalls)+1,items,kStockItems,popup,
         available[0].load(),available[1].load(),available[2].load(),available[3].load(),state.on[0],state.on[1],
         Cfg().edf41Content,statePath);
-    return battle==kBattleSites && menu==static_cast<int>(std::size(kMenuPathCalls)) && popup==1;
+    return battle==kBattleSites && menu==static_cast<int>(std::size(kMenuPathCalls))+1 && popup==1;
 }
 }  // namespace crew
