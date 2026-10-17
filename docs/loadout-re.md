@@ -381,6 +381,11 @@ void __fastcall UnlockDlcHook(unsigned char* gs) {
   拥有位反而让它跳过替换——卸载流程必须先确认没装备（`uninstall --unequipped`）。以后别的 mod 若在同一行号追加新行，会继承这些记录的拥有位。
 - 成就计数 `WeaponCount`/`WeaponGetRatio` 会把这 12 把算进去（8.2）。
 
+### 8.6.1 移植武器全给（ini `PortedWeaponsUnlocked`，2026-10-17）
+
+同一个钩子（`src/airstrike.cpp` `UnlockDlcHook`，`0xDC550` 的两个入口）里，ini 开着时把名字以 `EDF6VC_E5_` / `EDF6VC_E41_` 开头的行（`tools/ported_weapons.py` 的 4 个登记表，装全 432 行；占位行是 `EDF6VC_RETIRED_*`，不算）按 8.2 的 DLC 授予方式置拥有：首次 `flags |= 4`、星级 0，之后只 `flags |= 1`。只置位不清位，EDF6 原有的行不碰。
+武器记录在 main 块（`MAIN.GST`），所有模式共用，所以拥有位是全局的：在 EDF6 本篇的装备界面也能选这些武器；关掉 ini 不收回（收回会让存档里装备着它们的兵种在主菜单闪退）。读档时生效（主菜单进入模式），不是热改即时生效。
+
 ### 8.7 本节地址表
 
 | RVA | 是什么 |

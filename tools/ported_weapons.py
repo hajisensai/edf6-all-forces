@@ -15,8 +15,9 @@ its game, converted by pylib/legacy_assets.py: a model only EDF5 has). Its SGO c
           (tools/call_weapons.py plan_rows: every install of a release has the same rows, with or without it): a
           placeholder, its template's stock weapon named as waiting for the game (pending_*), until an install finds
           it; a row an earlier install built is kept as it is (its SGO is in Mods already).
-A weapon is obtained as any other: it drops in missions by its level (acquire 0). The plugin grants only the call
-weapons (calls.ID_PREFIX), never these.
+A weapon is obtained as any other: it drops in missions by its level (acquire 0). The plugin grants the call weapons
+(calls.ID_PREFIX) always, these only when the player's ini asks (PortedWeaponsUnlocked=1, shipped 0: every row under a
+GAMES prefix owned at the save load, src/airstrike.cpp UnlockDlcHook; a placeholder's EDF6VC_RETIRED_* id never is).
 """
 from __future__ import annotations
 

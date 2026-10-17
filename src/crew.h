@@ -351,6 +351,9 @@ struct Config {
     int edf5CampaignContent=0;       // the EDF5 mission packs' first content id (edf5campaign.cpp; 0 = none installed): owned like a DLC
     int testRangeContent=0;          // the test range mission pack's content id (offline and online modes; 0 = not installed): owned the same way
     int edf41Content=0;              // the first of the EDF4.1 packs' content ids (the story; its Mission Pack 1 and 2 are +1, +2; offline and online modes; 0 = not installed): owned the same way
+    // The ported content unlocked (unlock_ported.h; both off by default: a shared package keeps everyone's progress):
+    bool portedMissionsUnlocked=false;  // every mission of the EDF5 / EDF4.1 packs selectable (edf5campaign.cpp InstallPortedMissions), live
+    bool portedWeaponsUnlocked=false;   // every ported weapon owned at the next save load (airstrike.cpp UnlockDlcHook); never taken back
     float bigWorld=0.0f;            // the physics world +-this many m instead of +-3000 (bigworld.cpp), from the game's start;
                                     // 0: stock. At 10000 parked vehicles fell through the ground (2026-10-04): an experiment
     // The flyers' soft edge (airbound.h): the band inside the play edge where the NPC jets and helis turn back.
@@ -552,6 +555,7 @@ bool InstallJetSound() noexcept;
 // The game's glyph cache under one lock (glyphs.cpp): its threads lost glyphs and showed one character as another.
 bool InstallGlyphLock() noexcept;
 bool InstallEdf5Campaign() noexcept;
+bool InstallPortedMissions() noexcept;   // PortedMissionsUnlocked: the packs' mission select (edf5campaign.cpp)
 // EDF5's compiled mission scripts online: the BVM executor's PreloadPlayerResource and CreatePlayer given their online
 // half (edf5online.cpp). Edf5BvmOnlinePlayers: the patched creation loop's count.
 bool InstallEdf5Online() noexcept;

@@ -38,6 +38,7 @@
 #include "jet_internal.h"   // FaultLog
 #include "memory.h"
 #include "online_authority.h"
+#include "unlock_ported.h"
 #include <atomic>
 #include <cmath>
 #include <cwchar>
@@ -433,7 +434,6 @@ using UnlockFn=void(__fastcall*)(unsigned char*);
 using RowCountFn=std::uint32_t(__fastcall*)(void*);
 using GetRowFn=void*(__fastcall*)(void*,void*,std::uint32_t);
 
-// Every EDF6VC_CALL_* row owned (see the file comment); how many were not yet.
 // Whether a weapon table row's name is one of ours (kCallRows): exactly, so a retired row (EDF6VC_RETIRED_*,
 // an uninstall's placeholder) or another mod's row is never made owned.
 bool IsCallRow(const wchar_t* name) noexcept {
@@ -444,33 +444,39 @@ bool IsCallRow(const wchar_t* name) noexcept {
     return false;
 }
 
-int GrantCalls(unsigned char* gs) noexcept {
-    if(!gs || !Readable(gs+kFlags,kMaxRecords*kRecord,true) || !Readable(gs+kCfg+kTableRef,8))return -1;
+// Every EDF6VC_CALL_* row owned (see the file comment), and with PortedWeaponsUnlocked every ported weapon's row
+// (unlock_ported.h PortedWeapon: EDF6VC_E5_*, EDF6VC_E41_*) as well; how many of each were not yet (-1: no table).
+// Only ever sets bits: switching the key off takes nothing back (a weapon a save has equipped must stay owned, and
+// the weapons are in MAIN.GST, which every mode shares); EDF6's own rows are never touched.
+struct Granted { int calls=-1,ported=0; };
+Granted GrantCalls(unsigned char* gs,bool ported) noexcept {
+    Granted out;
+    if(!gs || !Readable(gs+kFlags,kMaxRecords*kRecord,true) || !Readable(gs+kCfg+kTableRef,8))return out;
     void* const table=gs+kCfg;
-    if(!At<void*>(table,kTableRef))return -1;             // no weapon table yet
+    if(!At<void*>(table,kTableRef))return out;             // no weapon table yet
     std::uint32_t n=reinterpret_cast<RowCountFn>(image+kRowCount)(table);
     if(n>kMaxRecords)n=kMaxRecords;
     alignas(8) unsigned char row[0x100];
-    int granted=0;
+    out.calls=0;
     for(std::uint32_t id=0;id<n;++id) {
         reinterpret_cast<GetRowFn>(image+kGetRow)(table,row,id);
         const auto name=At<const wchar_t*>(row,0);
-        if(!name || !IsCallRow(name))continue;
-        auto& flags=*reinterpret_cast<std::uint32_t*>(gs+kFlags+id*kRecord);
-        if(!(flags&1)) {
-            flags|=4;
-            std::memset(gs+kStars+id*kRecord,0,8);
-            ++granted;
+        if(!name)continue;
+        if(IsCallRow(name)) {
+            if(ported::Own(gs+kFlags+id*kRecord))++out.calls;
+        } else if(ported && Readable(name,ported::kLongestPrefix*sizeof(wchar_t)) && ported::PortedWeapon(name)) {
+            if(ported::Own(gs+kFlags+id*kRecord))++out.ported;
         }
-        flags|=1;
     }
-    return granted;
+    return out;
 }
 
 void __fastcall UnlockDlcHook(unsigned char* gs) {
     __try {
-        const int granted=GrantCalls(gs);
-        if(granted>0)Log("CALLS %d call weapons owned now",granted);
+        const bool ported=Cfg().portedWeaponsUnlocked;
+        const Granted granted=GrantCalls(gs,ported);
+        if(granted.calls>0)Log("CALLS %d call weapons owned now",granted.calls);
+        if(ported)Log("PORTED weapons unlocked: %d owned now%s",granted.ported,granted.calls<0 ? " (no weapon table yet)" : "");
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("CALLS granting failed");}
     reinterpret_cast<UnlockFn>(image+kUnlockDlc)(gs);
 }

@@ -17,6 +17,7 @@
 #include "crew.h"
 #include "memory.h"
 #include "edf/host.h"
+#include "unlock_ported.h"
 #include <cstdint>
 #include <cstring>
 #include <array>
@@ -114,5 +115,109 @@ bool InstallEdf5Campaign() noexcept {
         Cfg().edf5CampaignContent+kPacks-1,Cfg().testRangeContent,Cfg().edf41Content,
         Cfg().edf41Content>0 ? Cfg().edf41Content+kPacks41-1 : 0);
     return campaignReady;
+}
+namespace {
+// ---- PortedMissionsUnlocked: the mission select of the ported packs (see the file comment) ----
+constexpr unsigned kGameStatus=0x20B2890;   // GameDataMgr* (the GS): modes at +0x20 (count u32 +0x30), current +0x38
+constexpr unsigned kListScan=0x8A21C3;      // the mission select's first clear check: call 0x8A4C00(row 0)
+constexpr unsigned kCleared=0x8A4C00;       // bool (row): any class cleared it on any difficulty (the mode's save)
+constexpr unsigned kField5=0xE0CA0;         // int (cfg = GS+0x130, row): the list's field 5 (1: a branch row)
+// 0x8A20F3: the function's own read of the current mode's content id (mov rdx,[GS]; ... mov r12d,[rcx+rax+0x74]).
+const unsigned char kContentSig[]={0x48,0x8B,0x15,0x96,0x07,0x81,0x01,0x8B,0x42,0x48,0x89,0x44,0x24,0x68,0x8B,0x4A,0x38,
+    0x48,0x8B,0x42,0x20,0x48,0x8B,0x0C,0xC8,0x48,0x8B,0x41,0x10,0x48,0x63,0x48,0x08,0x44,0x8B,0x64,0x01,0x74};
+// 0x8A2160: the rows ([rsp+0x48], 0x14 bytes each): row 0 open, the rest numbered and hidden.
+const unsigned char kRowsSig[]={0x48,0x8B,0x44,0x24,0x48,0xC7,0x40,0x08,0x01,0x00,0x00,0x00,0xBA,0x01,0x00,0x00,0x00,0x3B,
+    0xDA,0x76,0x2C,0xB9,0x14,0x00,0x00,0x00,0x66,0x0F,0x1F,0x44,0x00,0x00,0x48,0x8B,0x44,0x24,0x48,0x89,0x14,0x01,0x48,
+    0x8B,0x44,0x24,0x48,0xC7,0x44,0x01,0x08,0x04,0x00,0x00,0x00,0xFF,0xC2,0x48,0x8D,0x49,0x14,0x3B,0xD3,0x72,0xE1,0xEB,0x08};
+// 0x8A21A9..0x8A21C3: the scan's start, row 0 (r14d) into ecx; no push between the prologue and the call.
+const unsigned char kScanSig[]={0x4D,0x8B,0xE8,0x45,0x8B,0xF8,0xBF,0xFF,0xFF,0xFF,0xFF,0x89,0x7C,0x24,0x60,0x45,0x8B,0xF0,
+    0x0F,0x1F,0x44,0x00,0x00,0x41,0x8B,0xCE};
+constexpr unsigned kRowsAt=0x8A2160,kContentAt=0x8A20F3,kScanAt=0x8A21A9;
+constexpr std::size_t kModes=0x20,kModeCount=0x30,kModeNow=0x38,kModeNode=0x10,kModeContent=0x74,kModeCfg=0x130;
+using ClearedFn=bool(__fastcall*)(unsigned);
+using Field5Fn=int(__fastcall*)(void*,unsigned);
+ClearedFn priorCleared=nullptr;   // 0x8A4C00, or another plugin's redirect of this call
+Field5Fn field5=nullptr;
+bool missionsReady=false;
+int lastOpened=-2,lastContent=-2;   // the last opening logged (one line per change, not per opening)
+
+// The current mode's content id (as 0x8A20F3 reads it), -1 when there is none to read.
+int CurrentContent(unsigned char*& gs) noexcept {
+    gs=Readable(image+kGameStatus,8) ? At<unsigned char*>(image,kGameStatus) : nullptr;
+    if(!gs || !Readable(gs,kModeCfg))return -1;
+    const auto count=At<std::uint32_t>(gs,kModeCount);
+    const auto now=At<std::uint32_t>(gs,kModeNow);
+    unsigned char* const* modes=At<unsigned char* const*>(gs,kModes);
+    if(now>=count || !modes || !Readable(modes+now,8))return -1;
+    unsigned char* const mode=modes[now];
+    if(!mode || !Readable(mode+kModeNode,8))return -1;
+    unsigned char* const node=At<unsigned char*>(mode,kModeNode);
+    if(!node || !Readable(node+8,4))return -1;
+    const auto at=At<std::int32_t>(node,8);
+    if(!Readable(node+at+kModeContent,4))return -1;
+    return At<std::int32_t>(node+at,kModeContent);
+}
+
+// The rows' vector: {begin, end, capacity} at the caller's rsp+0x48.
+void OpenRows(unsigned char* vec) noexcept {
+    const auto& cfg=Cfg();
+    if(!cfg.portedMissionsUnlocked || !vec || !Readable(vec,0x18))return;
+    unsigned char* gs=nullptr;
+    const int content=CurrentContent(gs);
+    if(!ported::StoryPack(content,cfg.edf5CampaignContent,cfg.edf41Content))return;
+    auto* const begin=At<ported::ListRow*>(vec,0);
+    auto* const end=At<ported::ListRow*>(vec,8);
+    int opened=-1;
+    if(begin && end>begin) {
+        const auto bytes=static_cast<std::size_t>(reinterpret_cast<unsigned char*>(end)-reinterpret_cast<unsigned char*>(begin));
+        if(bytes%sizeof(ported::ListRow)==0 && Readable(begin,bytes,true))
+            opened=ported::OpenAll(begin,bytes/sizeof(ported::ListRow),[gs](unsigned row){ return field5(gs+kModeCfg,row); });
+    }
+    if(opened!=lastOpened || content!=lastContent) {
+        if(opened>=0)Log("PORTED missions unlocked: content %d, %d rows opened",content,opened);
+        else Log("PORTED missions: content %d, the rows are not the stock list's: left stock",content);
+    }
+    lastOpened=opened;lastContent=content;
+}
+
+bool __fastcall ClearedHook(unsigned row,unsigned char* vec) {
+    if(row==0) {
+        __try { OpenRows(vec); } __except(EXCEPTION_EXECUTE_HANDLER){ Log("PORTED missions: opening the rows failed (stock)"); }
+    }
+    return priorCleared(row);
+}
+}  // namespace
+
+// The mission select's first clear check through a stub: lea rdx,[rsp+0x50] (the caller's rsp+0x48, past the return
+// address); mov rax,ClearedHook; jmp rax. Installed whatever the key (read at each opening); not at all when a piece
+// of the code is not the one read.
+bool InstallPortedMissions() noexcept {
+    static bool tried=false;
+    if(tried)return missionsReady;
+    tried=true;
+    if(!Matches(kScanAt,kScanSig,sizeof(kScanSig)) || !Matches(kRowsAt,kRowsSig,sizeof(kRowsSig))
+       || !Matches(kContentAt,kContentSig,sizeof(kContentSig))) {
+        Log("HOOK ported missions=0 (the mission select is not the one read)");
+        return false;
+    }
+    unsigned char* const target=CallTarget(kListScan);
+    if(!target || !(target==image+kCleared || target<image || target>=image+edf::kImageSize)) {
+        Log("HOOK ported missions=0 (EDF+%#x is no call to EDF+%#x)",kListScan,kCleared);
+        return false;
+    }
+    if(target!=image+kCleared)Log("PORTED mission select call %#x already redirected (another plugin): chained",kListScan);
+    priorCleared=reinterpret_cast<ClearedFn>(target);
+    field5=reinterpret_cast<Field5Fn>(image+kField5);
+    unsigned char stub[]={0x48,0x8D,0x54,0x24,0x50,0x48,0xB8,0,0,0,0,0,0,0,0,0xFF,0xE0};
+    void* const hook=reinterpret_cast<void*>(&ClearedHook);
+    std::memcpy(stub+7,&hook,sizeof(hook));
+    void* const code=AllocateNearCode(image+kListScan,stub,sizeof(stub));
+    bool changed=false;
+    missionsReady=code && RedirectCall(image+kListScan,target,code,changed);
+    Log("HOOK ported missions=%d%s (PortedMissionsUnlocked=%d, packs EDF5 %d..%d, EDF4.1 %d..%d)",missionsReady,
+        missionsReady ? "" : changed ? " half patched" : " not patched",Cfg().portedMissionsUnlocked,
+        Cfg().edf5CampaignContent,Cfg().edf5CampaignContent>0 ? Cfg().edf5CampaignContent+kPacks-1 : 0,
+        Cfg().edf41Content,Cfg().edf41Content>0 ? Cfg().edf41Content+kPacks41-1 : 0);
+    return missionsReady;
 }
 }  // namespace crew
