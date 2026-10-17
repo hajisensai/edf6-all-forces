@@ -279,11 +279,13 @@ mapcam::Bounds ViewBounds(const float* me) noexcept {
     const float out=a.ground ? area::kVoidMargin : 0.0f;
     return mapcam::Around(mapcam::Bounds{{a.lo[0]-out,a.lo[1]-out},{a.hi[0]+out,a.hi[1]+out}},me);
 }
-// The top of everything under (x, z) (the camera stays over it, a cave's roof too), else `fallback`.
+// The top of the fixed world under (x, z) (the camera stays over it: a ridge, a building's roof, a bridge, a cave's roof
+// too), else `fallback`. Not the moving bodies on the map layers (heli.h MapFixedRay; the user, 2026-10-17: "有天空的
+// 那种平台怪的时候，按m视角只能在平台上面，下不去"): an Earth Eater's parts over the field held the eye 40 m over them.
 float TopAt(float x,float z,float fallback) noexcept {
     const float top[3]={x,fallback+4000.0f,z},bottom[3]={x,fallback-4000.0f,z};
     float hit[3];
-    return MapRay(top,bottom,hit)>=0.0f && std::isfinite(hit[1]) ? hit[1] : fallback;
+    return MapFixedRay(top,bottom,hit)>=0.0f && std::isfinite(hit[1]) ? hit[1] : fallback;
 }
 
 // --- The marks ---

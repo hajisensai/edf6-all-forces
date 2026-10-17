@@ -87,4 +87,41 @@ template<class Ray>
 bool Near(const float* top,const float* bottom,float y,Normals k,Ray ray,float* h) noexcept {
     return Near(top,bottom,y,k,ray,[](const float*){ return true; },h);
 }
+
+// The fixed world along a map ray (docs/feedback-2026-10-17-mapview-sky-platform.md). The map ray (layer 22) meets the
+// map layers 15..20 and 26, and those hold more than the map: EventAnimationObject's ctor 0x5B5FB0 (0x5B6401) puts its
+// ragdoll bodies on layer 17, MovingFortress 0x4CBAC0 too (its +0x1A8C mode 0), so the Earth Eater's parts
+// (edf41mother401.cpp), the UfoRobo and the like are hit in the sky, the ground collector's flags & 2 keeping them
+// (edf41classes.cpp GroundHit). What tells them from the map is the body's motion: the hit body (collector +0x78) in
+// hknpWorld's body array (vtable slot 16 0xDAB170: *(world+0x18) + (id & 0xFFFFFF) * 0xB0; +0x50 its id, +0x54 its
+// flags, a live body has flags & 3: slot 13 0xDAC200) is static with flags & 1, keyframed or dynamic otherwise (the
+// game's motion type 0x11B1960: flags & 1 -> 0, & 4 -> 1, else 2). Terrain, buildings, bridges and cave rock are static;
+// a ragdoll moved by its object never is (0x6ED480's modes 2..4 set the motion type 1 / 2).
+enum class Body : std::uint8_t { unknown, fixed, moving };
+inline Body BodyOf(std::uint32_t flags) noexcept {
+    if((flags&3u)==0u)return Body::unknown;   // not a live body
+    return (flags&1u)!=0u ? Body::fixed : Body::moving;
+}
+// The first hit along a->b that is not on a moving body (`ray(from, to, hit, body)`: metres to the nearest hit or < 0,
+// `body` its id; `kind(body)`: what that body is, unknown taken as fixed, the ray's old answer): metres from a (`hit`
+// the point), or -1. Each moving body is passed kStep beyond its hit, at most `most` hits looked at.
+template<class Ray,class Kind>
+float Fixed(const float* a,const float* b,Ray ray,Kind kind,float* hit,int most=kMaxHitsDown) noexcept {
+    const float d[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};
+    const float len=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+    if(!(len>1e-3f) || !std::isfinite(len))return -1.0f;
+    const float dir[3]={d[0]/len,d[1]/len,d[2]/len};
+    float from[3]={a[0],a[1],a[2]},gone=0.0f;
+    for(int i=0;i<most;++i) {
+        float p[3];std::uint32_t body=0;
+        const float m=ray(from,b,p,&body);
+        if(!(m>=0.0f) || !std::isfinite(m))return -1.0f;
+        gone+=m;
+        if(kind(body)!=Body::moving){hit[0]=p[0];hit[1]=p[1];hit[2]=p[2];return gone;}
+        gone+=kStep;
+        if(gone>=len)return -1.0f;
+        for(int j=0;j<3;++j)from[j]=p[j]+dir[j]*kStep;
+    }
+    return -1.0f;
+}
 }  // namespace mapfloor

@@ -350,6 +350,72 @@ int main() {
         Check(!mapfloor::Near(top,bottom,0.0f,Normals::own,empty,&h),"ground: none (off the world)");
     }
 
+    // --- The map view's eye over the fixed world only (map_floor.h Fixed / BodyOf; the user, 2026-10-17: with a sky
+    // platform up, the M view stayed over it and could not go below). Horizontal faces, each on a body of its own.
+    {
+        using mapfloor::Body;
+        Check(mapfloor::BodyOf(0x1u)==Body::fixed,"body flags: static");
+        Check(mapfloor::BodyOf(0x9u)==Body::fixed,"body flags: static, active bit too");
+        Check(mapfloor::BodyOf(0x2u)==Body::moving && mapfloor::BodyOf(0x6u)==Body::moving && mapfloor::BodyOf(0xAu)==Body::moving,
+              "body flags: dynamic / keyframed / active dynamic");
+        Check(mapfloor::BodyOf(0x0u)==Body::unknown && mapfloor::BodyOf(0x8u)==Body::unknown,"body flags: no live body");
+        struct Slab { float y; std::uint32_t body; };
+        struct World {
+            const Slab* slab; int n;
+            float operator()(const float* a,const float* b,float* hit,std::uint32_t* body) const {
+                float best=2.0f;int k=-1;
+                for(int i=0;i<n;++i) {
+                    const float dy=b[1]-a[1];
+                    if(std::fabs(dy)<1e-6f)continue;
+                    const float t=(slab[i].y-a[1])/dy;
+                    if(t>=0.0f && t<=1.0f && t<best){best=t;k=i;}
+                }
+                if(k<0)return -1.0f;
+                float len=0.0f;
+                for(int i=0;i<3;++i){hit[i]=a[i]+(b[i]-a[i])*best;len+=(b[i]-a[i])*(b[i]-a[i]);}
+                *body=slab[k].body;
+                return best*std::sqrt(len);
+            }
+        };
+        // Bodies 0 terrain, 1 a building's roof, 2 / 3 a sky platform's top and underside (an Earth Eater's part), 4 one
+        // of unknown kind.
+        const Body kinds[]={Body::fixed,Body::fixed,Body::moving,Body::moving,Body::unknown};
+        auto kind=[&](std::uint32_t b){ return b<5u ? kinds[b] : Body::unknown; };
+        const float top[3]={0.0f,4200.0f,0.0f},bottom[3]={0.0f,-3800.0f,0.0f};
+        float hit[3];
+        const Slab sky[]={{420.0f,2u},{380.0f,3u},{0.0f,0u}};
+        const World platform{sky,3};
+        float m=mapfloor::Fixed(top,bottom,platform,kind,hit);
+        Check(m>0.0f && Near(hit[1],0.0f,0.01f),"eye floor: through a sky platform's top and underside to the terrain",hit[1]);
+        Check(Near(m,4200.0f,0.5f),"eye floor: metres from the top of the ray",m);
+        // The eye kept kEyeClear (map.cpp: 40 m) over it: a view 250 m up under a platform at 380..420 m stays at 250.
+        const float clear=40.0f,eye=250.0f;
+        Check(eye>=hit[1]+clear,"eye under the platform is not lifted over it",eye,hit[1]+clear);
+        // What stays: a building's roof (fixed) holds the eye over it, so does a fixed slab over a cave (its rock).
+        const Slab roofed[]={{420.0f,2u},{380.0f,3u},{60.0f,1u},{0.0f,0u}};
+        const World town{roofed,4};
+        m=mapfloor::Fixed(top,bottom,town,kind,hit);
+        Check(m>0.0f && Near(hit[1],60.0f,0.01f),"eye floor: a building's roof under the platform still counts",hit[1]);
+        const Slab rock[]={{300.0f,0u},{12.0f,0u},{0.0f,0u}};
+        const World cave{rock,3};
+        m=mapfloor::Fixed(top,bottom,cave,kind,hit);
+        Check(m>0.0f && Near(hit[1],300.0f,0.01f),"eye floor: a cave's rock top, as before",hit[1]);
+        // A body of unknown kind (no body table: the old answer) stops the ray as before.
+        const Slab odd[]={{420.0f,4u},{0.0f,0u}};
+        const World unknown{odd,2};
+        m=mapfloor::Fixed(top,bottom,unknown,kind,hit);
+        Check(m>0.0f && Near(hit[1],420.0f,0.01f),"eye floor: an unknown body stops it, the old first hit",hit[1]);
+        // Only moving bodies under it: nothing found (map.cpp TopAt falls back to the focus's level).
+        const Slab only[]={{420.0f,2u},{380.0f,3u}};
+        const World air{only,2};
+        Check(mapfloor::Fixed(top,bottom,air,kind,hit)<0.0f,"eye floor: none when only moving bodies are on the ray");
+        // A stack of moving bodies longer than the hits looked at: none (not the last moving one).
+        Slab many[mapfloor::kMaxHitsDown+1];
+        for(int i=0;i<=mapfloor::kMaxHitsDown;++i)many[i]=Slab{1000.0f-10.0f*static_cast<float>(i),2u};
+        const World pile{many,mapfloor::kMaxHitsDown+1};
+        Check(mapfloor::Fixed(top,bottom,pile,kind,hit)<0.0f,"eye floor: gives up past kMaxHitsDown moving hits");
+    }
+
     // --- The RTS orders (the user, 2026-10-09): move and attack-move take the pointer's point as guard does; the right
     // button's order; what a move does over the soldiers' own fight (Pursuit) and that it ends as a guard of its point.
     {
