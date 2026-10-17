@@ -115,9 +115,9 @@ Everything below is in the selftests, on the real files.
 
 * Vegetation: 4.1's field holds its plants in its own table (sk_terrain.vegetation); EDF6 grows plants over a `.fmep`
   piece from the FMB's table 2 / 3 and the heights in the mapo (pylib/fmex.py, reverse engineered 2026-10-17). The grass
-  and flowers (kind 1 `.dds`) are converted as one group; the trees, bushes and small objects (kind 2 `.trb` / `.mlb`)
-  are not yet (the `.trb` / `.mlb` members stay in the MAC unused): the group format is the same, what is unproven is
-  4.1's `.trb` on EDF6's GrowObjects path.
+  and flowers (kind 1 `.dds`) become one group, the trees, bushes and small objects (kind 2) three more as the stock
+  pieces have them (`<model>.tree` / `<model>.mls` for the MAC's `.trb` / `.mlb`); 4.1's `.trb` gets EDF6's extra 0 in
+  its first rule (map_legacy.trb_from_legacy). Not run in game.
 * Normal maps of the layers (`.norm.dds`), the layers' `m_correction`-like value (the stock 6.0 is used) and the ground's
   surface materials (4.1's per-vertex material to EDF6's collision palette: `hkcms_build.build_collision(values=)` takes
   them, the value meanings are not known) are not carried.
