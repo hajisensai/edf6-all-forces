@@ -10156,13 +10156,14 @@ def edf41_rest_behaviour_real() -> None:
         t = load(name)['game_object_talk_setting']
         assert t[1] == talk and t[2] > 1 and t[3] in (0, 1) and t[2] == {0: 6, 1: 4}[talk], t
     # Berserker's base class enables material slots 0..3 by number (EDF+0x6dc830 via 0x348d1d, 0x33ef81, 0x34b2de, 0x37acde):
-    # every Hector variant carries the template's four (M113: 2 entries, a null player; M131: the memory past them)
+    # every Hector variant carries the template's four (M113: 2 entries, a null player; M131: the memory past them); a 301
+    # with a cannon has a fifth, slot 4, the cannon's charge light the plugin plays (edf41_hector_light)
     import dsgo
-    for name in ('HECTOR301CC', 'HECTOR301GL', 'HECTOR401LS'):
+    for name, slots in (('HECTOR301CC', 5), ('HECTOR301GL', 4), ('HECTOR401LS', 4)):
         with open(os.path.join(base, name + '.SGO'), 'rb') as f:
             model = dsgo.parse(f.read()).root.get('animation_model')
         entries = model.get('material_animation').items
-        assert len(entries) == 4 and [e.items[1] for e in entries] == [0.0, 0.0, 2.0, 2.0], name
+        assert [e.items[1] for e in entries] == [0.0, 0.0, 2.0, 2.0, 2.0][:slots], name
         assert all(isinstance(e.items[0], dsgo.Blob) for e in entries)
     assert load('UFOCARRIER401')['game_sound'] == ['app:/sound/adx/tikyuu4_en_UFOcarrier401.acb',
                                                    'app:/sound/adx/tikyuu4_en_UFOcarrier301.acb']
@@ -10799,7 +10800,7 @@ def edf41_hector_guns() -> None:
         assert len(entries) == 2, name
         assert top.get('xgs_scene_object_class') == 'EDF6_Berserker_Large'
         assert top.get('WalkingEnemyBase').get('MoveSpeed').items == [6.0, 0.1], name
-        assert top.get('WalkingEnemyBase').get('TurnSpeed').items == [0.03, 0.03], name
+        assert top.get('WalkingEnemyBase').get('TurnSpeed').items == [0.3, 0.1], name   # 4.1's 0.03 rad/frame
         ai = top.get('AiSettings')
         assert ai.get('attack').get('range') == 0.0, name          # 4.1 has no melee
         assert ai.get('gun_attack').get('range') == max(reach[(gen, left)], reach[(gen, right)]), name
@@ -10814,7 +10815,10 @@ def edf41_hector_guns() -> None:
             w = m.HECTOR_WEAPONS[(gen, letter)]
             battery = entry.get('gun_battery')
             bullet, fire = battery.get('bullet'), battery.get('fire')
-            assert battery.get('charge').get('time') == 1.0, name
+            # 4.1's charge (EDF41.exe 0x225A7A / 0x227E2E): the 301 cannon 3 s, the 401 cannon open 60 + 5 s, the 401
+            # launcher open 120; the rest fire at once
+            want = {'Hector301_Cannon': 180.0, 'Hector401_Cannon': 360.0, 'Hector401_Launcher': 120.0}.get(w.cls, 1.0)
+            assert battery.get('charge').get('time') == want, (name, w.cls)
             if w.bullet == 'none':                                   # a shield: nothing hurts
                 assert bullet.get('factory') == 'SolidBullet02' and coef(bullet.get('damage')) == 0.0, name
                 continue
