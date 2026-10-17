@@ -5,6 +5,7 @@
     parse(data) -> Program, build(prog) -> bytes   the container; parse + build reproduces every 4.1 and EDF5 BVM byte
                                                for byte (270 base-game files, 55 DLC files)
     convert(prog, rewrite=None, notes=None) -> Program   the 4.1 -> EDF5 step on the parsed form
+    rewritten(data, rewrite) -> bytes          a BVM as it is with its string constants mapped (the same bytes if none is)
 
 Format (all little-endian; offsets are file offsets)
   0x00 'BVM '   0x04 0x50 (header size)   0x08 0, 0   0x10 0x01150138   0x14 2
@@ -958,3 +959,19 @@ def to_edf5(bvm41: bytes, rewrite: Callable[[str], str] | None = None) -> bytes:
     EDF6 has; the string pool and every offset into it are rebuilt. Raises UnsupportedNative for a script calling a
     native EDF5 / EDF6 has no counterpart for (TABLE1)."""
     return build(convert(parse(bvm41), rewrite))
+
+
+def rewritten(data: bytes, rewrite: Callable[[str], str]) -> bytes:
+    """A BVM (4.1's or EDF5's form, as it is: no conversion) with every string constant it pushes mapped by rewrite; the
+    string pool and every offset into it are rebuilt. The same bytes when rewrite changes none (parse + build gives
+    every 4.1 and EDF5 script back byte for byte). For EDF5's recompiles of the story (tools/make_edf41_missions.py),
+    whose story objects EDF6 holds as other objects (pylib/edf41dlc.py STORY_SHADOWED)."""
+    prog = parse(data)
+    changed = False
+    for code in [prog.init] + [f.code for f in prog.funcs]:
+        for x in code:
+            if x.op == OP_PUSHS:
+                new = rewrite(x.v)
+                if new != x.v:
+                    x.v, changed = new, True
+    return build(prog) if changed else data

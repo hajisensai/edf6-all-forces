@@ -8446,6 +8446,96 @@ def edf41_class_names() -> None:
     refused({rel: sgo.write_depth_first(version, members), cas: bare}, rel, 'state wakeup')
 
 
+@test
+def edf41_story_small_dragons() -> None:
+    """2026-10-17「这龙怎么还是蝌蚪的模样」: 4.1's story small dragons (app:/Object/DragonSmall401.sgo, RedSmallDragon.sgo,
+    YerrowSmallDragon.sgo) are paths EDF6 holds as EDF5's frog dragons (e518_frogDragon*), which EDF6's own missions spawn,
+    so the 4.1 missions showed the frog. 4.1's own go to OBJECT/EDF41/ (pylib/edf41dlc.py STORY_SHADOWED / story_path,
+    make_edf41_objects STORY_ROOTS: aliased like the DLC's _HS dragons, their shadowed model and CAS moved along) and every
+    converted 4.1 script names them there (edf41dlc.rewrite through bvm41.rewritten for EDF5's story recompiles, through
+    to_edf5 for the packs). Checked: the mapping (only those three SGOs, any case, ';' lists, idempotent, mounted paths as
+    before); the generator's roots and aliases; a story script rewritten names none at the stock path and gives the same
+    bytes back once put back; the registry and the committed scripts agree (a registry shipping OBJECT/EDF41/<x> has no
+    script naming the stock <x>); with the games installed, the three built from 4.1's archives carry 4.1's models and
+    ragdolls from files of their own, none at a path EDF6's archives hold."""
+    import glob
+    import bvm41
+    import edf41_objects as eo
+    import edf41dlc
+    import make_edf41_objects as m
+    import sgo
+    f = edf41dlc.STORY_FOLDER
+    assert edf41dlc.story_path('app:/Object/DragonSmall401.sgo') == f'app:/Object/{f}/DragonSmall401.sgo'
+    assert edf41dlc.story_path('app:/object/redsmalldragon.sgo') == f'app:/object/{f}/redsmalldragon.sgo'
+    for other in ('app:/Object/DragonBig401.sgo', 'app:/Object/DragonSmall401_HS.sgo', 'app:/Object/DragonSmall401.mrab',
+                  f'app:/Object/{f}/DragonSmall401.sgo', 'app:/Object/EDF41MP01/DragonSmall401_HS.sgo', 'DragonSmall401'):
+        assert edf41dlc.story_path(other) is None, other
+        assert edf41dlc.rewrite(other) == other, other
+    both = 'app:/Object/YerrowSmallDragon.sgo;mp01:/Object/GiantAnt04.sgo'
+    assert edf41dlc.rewrite(both) == f'app:/Object/{f}/YerrowSmallDragon.sgo;app:/Object/EDF41MP01/GiantAnt04.sgo'
+    assert edf41dlc.rewrite(edf41dlc.rewrite(both)) == edf41dlc.rewrite(both)
+    # the generator: one root and alias per shadowed object, in the story folder, under the class with 4.1's ragdoll bodies
+    assert set(m.STORY_ROOTS) == set(edf41dlc.STORY_SHADOWED), m.STORY_ROOTS
+    assert f not in {folder for _, folder in edf41dlc.PACKS.values()}
+    for name in edf41dlc.STORY_SHADOWED:
+        root = f'{f}/{name}'
+        a = m.ALIASES[root]
+        assert m.ROOTS[root] == m.STORY_ROOTS[name] > 0 and a.cls == 'DragonSmall' and a.template == name, (root, a)
+        assert dict(a.override)['edf41_ragdoll_bodies'] == list(m.SMALL_DRAGON_BODIES), a.override
+        assert m.own_folder('OBJECT/' + root) == f and m.pack_folder('OBJECT/' + root) == '', root
+    assert m.own_folder('OBJECT/EDF41MP01/X.SGO') == 'EDF41MP01' and m.own_folder('OBJECT/X.SGO') == ''
+    # a story script (EDF5's recompile, M165: all three) with its strings mapped; the bytes come back with them put back
+    stock = re.compile(r'(?i)^app:/object/(' + '|'.join(re.escape(n) for n in edf41dlc.STORY_SHADOWED) + r')$')
+    unmap = re.compile(r'(?i)^(app:/object)/' + f + r'/')
+
+    def pushed(data: bytes) -> list[str]:
+        prog = bvm41.parse(data)
+        return [x.v for code in [prog.init] + [g.code for g in prog.funcs] for x in code if x.op == bvm41.OP_PUSHS]
+
+    with open(os.path.join(ROOT, 'edf41port', 'missions', 'M165', 'MISSION.BVM'), 'rb') as fh:
+        script = fh.read()
+    assert bvm41.rewritten(script, lambda s: s) == script
+    mapped = bvm41.rewritten(script, edf41dlc.rewrite)
+    assert bvm41.rewritten(mapped, edf41dlc.rewrite) == mapped
+    names = pushed(mapped)
+    assert not [s for s in names if stock.match(s)], names
+    assert {s.split('/')[-1].upper() for s in names if unmap.match(s)} == set(edf41dlc.STORY_SHADOWED), names
+    restored = bvm41.rewritten(mapped, lambda s: unmap.sub(r'\1/', s))
+    assert bvm41.rewritten(restored, edf41dlc.rewrite) == mapped and not [s for s in pushed(restored) if unmap.match(s)]
+    # the registry and the committed scripts agree: a story dragon shipped in the folder is named there by every script
+    shipped = {o['object'] for o in eo.registry()['objects']}
+    moved = {name for name in edf41dlc.STORY_SHADOWED if f'OBJECT/{f}/{name}' in shipped}
+    assert moved in (set(), set(edf41dlc.STORY_SHADOWED)), moved
+    if moved:
+        for path in glob.glob(os.path.join(ROOT, 'edf41port', '**', '*.BVM'), recursive=True):
+            with open(path, 'rb') as fh:
+                left = [s for s in pushed(fh.read()) if stock.match(s)]
+            assert not left, f'{path} names {left}: regenerate tools/make_edf41_missions.py (story and --dlc)'
+    if not _e5c_have_game() or not _edf41_root():
+        print('skip  edf41_story_small_dragons (real archives): needs EDF6 and EDF4.1 installed')
+        return
+    import rootcpk
+    import mdb
+    games = m.Games(_edf41_root(), rootcpk.DEFAULT_GAME)
+    frog = sgo.load(data=games.read6('OBJECT/DRAGONSMALL401.SGO'))   # why the folder: EDF6's own is EDF5's frog
+    assert 'frogdragon' in m.model_entries(frog['animation_model'][0])[0][1].lower(), frog['animation_model'][0]
+    roots = tuple(f'{f}/{n}' for n in edf41dlc.STORY_SHADOWED)
+    data, files = m.build(_edf41_root(), rootcpk.DEFAULT_GAME, roots)
+    assert not data['skipped'] and {o['object'] for o in data['objects']} == {'OBJECT/' + r for r in roots}, data['skipped']
+    models = {'DRAGONSMALL401.SGO': 'SmallDragon401Green.mdb', 'REDSMALLDRAGON.SGO': 'RedSmallDragon.mdb',
+              'YERROWSMALLDRAGON.SGO': 'YerrowSmallDragon.mdb'}
+    for o in data['objects']:
+        rel = o['object']
+        assert not [r for r in o['files'] if r in games.have6], (rel, o['files'])   # nothing EDF6 would load instead
+        top = sgo.load(data=files[rel])
+        model = m.model_entries(top['animation_model'][0])[0]
+        assert m.rel_of(model[0]).startswith(f'OBJECT/{f}/') and model[1] == models[rel.split('/')[-1]], model
+        assert model[1].lower() in {x.name.lower() for x in mdb.rab_read(files[m.rel_of(model[0])]).files}, model
+        assert m.rel_of(top['animation_model'][1]).startswith(f'OBJECT/{f}/'), top['animation_model'][1]
+        assert 'frogdragon' not in top['ragdoll'][0].lower() and m.rel_of(top['ragdoll'][0]) in files, top['ragdoll']
+        assert top['edf41_ragdoll_bodies'] == list(m.SMALL_DRAGON_BODIES), top.get('edf41_ragdoll_bodies')
+
+
 # EDF4.1's mission maps (plan P6): the maps EDF4.1's 98 missions load (pylib/map_legacy.py converts their MAC).
 EDF41_MISSION_MAPS = ('IG_CAVE01', 'IG_HORNETCAVE01', 'IG_WRECKTOWN01', 'NW_HILLYCITY_LIGHT', 'NW_KASENJIKI01',
                       'NW_KOUSOUBLD01', 'NW_SINSUIKOUEN', 'NW_SOUKOGAI01', 'NW_UNDERGROUND01', 'SK_CRATER01',
