@@ -200,6 +200,7 @@ class HectorWeapon:
     spread: float = 0.0       # radians, the entry's fire.accuracy
     count: float = 1.0        # bullets per attack (fire.count)
     interval: float = 1.0     # frames between them (fire.interval)
+    charge: float = 1.0       # frames from the attack's start to the first shot (gun_battery.charge.time; HECTOR_CHARGE)
 
 
 # The stock EDF6 bullet each factory is copied from: (OBJECT/<file>, path of the bullet node). They are the bullets of
@@ -232,6 +233,17 @@ HECTOR_WEAPONS: dict[tuple[str, str], HectorWeapon] = {
                                10.0, 300.0, None, (30.0, 30.0), 0.0, 6.0, 30.0),
     ('401', 'S'): HectorWeapon('Hector401_Shield', 'HECTOR401_SHIELD.SGO', 'Hector401shield.mdb', 'none'),
 }
+
+# 4.1's time from an attack's start to its first shot, per weapon class (EDF41.exe; the weapon's state machine on +0x690
+# waits on its clock *(+0x6A0), in seconds: dt, the walk's x 60 at 0x221B30). 301 cannon: its charge state 0x2259A0 waits
+# 3.0 s (0x225A7A) = 180 frames, playing its 120-frame charge light meanwhile; 401 cannon: `open` (60 frames, 0x227C1C waits
+# for the clip's end, 0x227D75) and then its charge state 0x227DD0 waits 5.0 s (0x227E2E) = 360 frames; 401 launcher: `open`
+# (120 frames, 0x229B00) and it fires. The gatlings and 301's launcher fire at once (their first state is the firing one,
+# 0x2265A0 / 0x228F70 / 0x2270E0: those waits, 10 / 10 / 4 s, are how long they fire). EDF6's battery charges for
+# charge.time frames (+0x140 -> +0x2E8, counted down to the first shot, 0x6D5474..0x6D556A) and plays the class's charge
+# effect and sound meanwhile.
+HECTOR_CHARGE: dict[str, float] = {'Hector301_Cannon': 180.0, 'Hector401_Cannon': 360.0, 'Hector401_Launcher': 120.0}
+HECTOR_CHARGE_LIGHT_SLOT = 4      # animation_model[4]'s fifth entry: 301 cannon's charge light, the plugin plays it
 
 # The Hector variants 4.1's missions name (root SGO -> (generation, left arm, right arm, missions)). The letters are
 # what the SGO's hector_weapon holds (arms_l then arms_r), not the file name: HECTOR401SG holds the gatling on the
@@ -2735,12 +2747,18 @@ def alias_dsgo(games: 'Games', root: str, files: dict[str, bytes], a: Alias, t_d
     # (4) hands it the memory past its end: a null player (M113) or whatever text follows (M131, "NT02"). 4.1's glow
     # (the body's and every gun's: hector_materials) serves every slot but the death one, which gets 4.1's death block;
     # each keeps the template's mode.
+    light = None
     if a.guns:
-        glow, death = hector_materials(files, rab_rel, mdb_name, mine, a.guns)
+        glow, death, light = hector_materials(files, rab_rel, mdb_name, mine, a.guns)
     else:
         glow = death = mine['material_animation'][0]
-    model.items[4] = dsgo.Node([dsgo.Node([dsgo.Blob(death if i == BERSERKER_DEATH_SLOT else glow, 2), c.items[1]])
-                                for i, c in enumerate(t_am.get('material_animation').items)])
+    slots = [dsgo.Node([dsgo.Blob(death if i == BERSERKER_DEATH_SLOT else glow, 2), c.items[1]])
+             for i, c in enumerate(t_am.get('material_animation').items)]
+    if light is not None:     # a fifth player (0x6DC6B0 makes one per entry), only the plugin starts it; the mode word as
+        if len(slots) != HECTOR_CHARGE_LIGHT_SLOT:     # the template's one-shot entries (2, 3) have it
+            raise ValueError(f'{rel}: the template has {len(slots)} material animations, the charge light expects 4')
+        slots.append(dsgo.Node([dsgo.Blob(light, 2), t_am.get('material_animation').items[2].items[1]]))
+    model.items[4] = dsgo.Node(slots)
     out.set('animation_model', model)
 
     if a.guns:
@@ -2753,6 +2771,9 @@ def alias_dsgo(games: 'Games', root: str, files: dict[str, bytes], a: Alias, t_d
         if all(g.fire for g in a.guns):
             hector_fire(games, files, mine, out, a)
             out.set(HECTOR_ANIM_KEY, dsgo_value(hector_anim(files, a, mdb_bones(files[rab_rel], mdb_name))))
+            # each arm's charge light: the material animation slot the plugin plays while its battery charges, -1 none
+            out.set(HECTOR_LIGHT_KEY, dsgo_value([float(HECTOR_CHARGE_LIGHT_SLOT if light is not None
+                                                        and g.fire.cls == 'Hector301_Cannon' else -1) for g in a.guns]))
 
     cas = rel_of(am[1])
     template_cas = rel_of(t_am.items[1])
@@ -2817,7 +2838,8 @@ def hector_bullet(games: 'Games', w: HectorWeapon, damage: float, custom: list[f
 
 def hector_fire(games: 'Games', files: dict[str, bytes], mine: dict, out: dsgo.Node, a: Alias) -> None:
     """gun_control's entries made to fire what 4.1's arms hold, and the AI's gun range their longest: each entry
-    gets the bullet of its HectorWeapon, fire.count / interval / accuracy, and a one-frame charge (4.1 has none).
+    gets the bullet of its HectorWeapon, fire.count / interval / accuracy, and 4.1's time to the first shot as its
+    charge (HECTOR_CHARGE; one frame for the weapons that fire at once).
     The weapon SGOs (in `files`: the closure holds them until prune) are checked against the table and give
     hector_weapon_range and bullet_custom_param. Damage: 4.1's coefficient times (this object's HP / 4.1's HP)
     -- the same HP, durability is a key both have and 4.1's wins -- so the ratio of a hit to the HP is 4.1's;
@@ -2842,7 +2864,7 @@ def hector_fire(games: 'Games', files: dict[str, bytes], mine: dict, out: dsgo.N
             coef = w.damage if w.damage is not None else custom[1]
         battery = entry.get('gun_battery')
         battery.set('bullet', hector_bullet(games, w, coef * hp_ratio, custom, hit_se))
-        set_path(battery, 'charge/time', 1.0)
+        set_path(battery, 'charge/time', HECTOR_CHARGE.get(w.cls, 1.0))
         fire = battery.get('fire')
         fire.set('count', w.count)
         fire.set('interval', w.interval)
@@ -2937,8 +2959,10 @@ def hector_blocks(blocks: list, loop: bytes | None, death: bytes | None, what: s
 
 
 def hector_materials(files: dict[str, bytes], rab_rel: str, mdb_name: str, mine: dict, guns: tuple['Gun', ...]
-                     ) -> tuple[bytes, bytes]:
-    """(the glow blob, the death blob) of a Hector variant, each animating the body's materials and every gun's.
+                     ) -> tuple[bytes, bytes, bytes | None]:
+    """(the glow blob, the death blob, the charge light or None) of a Hector variant, each animating the body's materials
+    and every gun's; the charge light is 301 cannon's third block (120 frames, EDF41.exe 0x2259A0 plays it in mode 1 when
+    the charge starts and stops it when the charge state is left, 0x225AAB) on that cannon's materials.
 
     The guns' meshes are part of the body model (merged_model) with materials of their own that carry 4.1's names
     (ufosurface: the body's name too; the 401 shield's glass ufoglass). EDF6 binds an MTAB entry to the first material
@@ -2951,6 +2975,7 @@ def hector_materials(files: dict[str, bytes], rab_rel: str, mdb_name: str, mine:
     loop, death = hector_blocks(mine['material_animation'], None, None, rab_rel)
     glow_parts: list[tuple[bytes, dict[str, str]]] = [(loop, {})]
     death_parts: list[tuple[bytes, dict[str, str]]] = [(death, {})]
+    light_parts: list[tuple[bytes, dict[str, str]]] = []
     done: dict[str, str] = {}
     for gun in guns:
         if gun.fire is None or gun.fire.sgo in done:
@@ -2971,6 +2996,11 @@ def hector_materials(files: dict[str, bytes], rab_rel: str, mdb_name: str, mine:
         if not blocks:
             continue      # 301's gatling: 4.1 animates nothing on it
         glow, end = hector_blocks(blocks, loop, death, gun.fire.sgo)
+        if gun.fire.cls == 'Hector301_Cannon':
+            rest = [b for b in blocks if b is not glow and b is not end]
+            if len(rest) != 1 or rest[0][:4] != b'\0\0\0\0':
+                raise ValueError(f'{gun.fire.sgo}: {len(rest)} blocks besides glow and death, not its one charge light')
+            light_parts.append((rest[0], rename))
         for parts, blob in ((glow_parts, glow), (death_parts, end)):
             if blob is None:
                 continue
@@ -2982,12 +3012,13 @@ def hector_materials(files: dict[str, bytes], rab_rel: str, mdb_name: str, mine:
     member.stored = mdb.cmpl_compress(raw) if member.stored[:4] == b'CMPL' else raw
     files[rab_rel] = mdb.rab_write(rab)
     blobs = mtab_merge(glow_parts), mtab_merge(death_parts)
+    light = mtab_merge(light_parts) if light_parts else None
     names = [md.name_of(x.name) for x in md.materials]
-    for blob in blobs:
+    for blob in blobs + ((light,) if light else ()):
         for n, _c, _t in mtab_entries(blob):
             if names.count(n) != 1:
                 raise ValueError(f'{rab_rel}: the material animation names {n!r}, the model has it {names.count(n)} times')
-    return blobs
+    return blobs[0], blobs[1], light
 
 
 # The 4.1 weapons' own CAS animations, for the plugin to play on the merged bones (src/hector_ai.h, "the weapons' own
@@ -2995,6 +3026,7 @@ def hector_materials(files: dict[str, bytes], rab_rel: str, mdb_name: str, mine:
 # launcher), 2 roll (401 gatling); a clip [frames, step, then per frame per bone tx ty tz qx qy qz qw] ([] when the kind has
 # none). The bones are the merged model's (mdb.graft_skinned: gun_<arm>_<weapon bone>), every weapon bone a clip moves.
 HECTOR_ANIM_KEY = 'edf41_hector_anim'
+HECTOR_LIGHT_KEY = 'edf41_hector_light'
 HECTOR_ANIM_CLIPS = {1: ('open', 'close', None), 2: (None, None, 'fire')}
 
 

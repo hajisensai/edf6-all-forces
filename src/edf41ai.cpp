@@ -65,6 +65,9 @@ constexpr std::size_t kNodeFloat=0x52F30;
 constexpr std::size_t kNodeText=0x551E0;       // const wchar_t* (handle*): a string node (0x53B832 reads InterpolateNode so)
 constexpr std::size_t kCasPlayerByName=0x1166FB0;  // int (CasPlayers*, const wchar_t*): -1 none (0x33D392 "additive_action")
 constexpr std::size_t kCasSetState=0x116C2D0;  // bool (CasPlayers*, int player, const wchar_t* state, int)
+// material animation slots of the model component (+0x8A0): play 0x6C0200(model, slot, mode) -> 0x6DC830 (player [+0x10]
+// [slot].second: active byte, mode +4, clock reset), stop 0x6C04F0(model, slot) (active byte 0); players [+0x2A8], count +0x20
+constexpr std::size_t kMatPlay=0x6C0200,kMatStop=0x6C04F0,kModelAt=0x8A0,kMatPlayersAt=0x2A8,kMatCountAt=0x20;
 // first bytes of the functions only the weapon / head animation calls: on any other build those stay off
 struct Print { std::size_t rva; unsigned char bytes[8]; };
 constexpr Print kAnimPrints[]={
@@ -73,6 +76,8 @@ constexpr Print kAnimPrints[]={
     {kCasSetState,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},
     {kChildCount,{0x48,0x8B,0x11,0x44,0x8B,0x49,0x08,0x4C}},
     {kChildIndex,{0x4C,0x8B,0x09,0x44,0x8B,0x51,0x08,0x44}},
+    {kMatPlay,{0x48,0x8B,0x89,0xA8,0x02,0x00,0x00,0x48}},
+    {kMatStop,{0x48,0x8B,0x81,0xA8,0x02,0x00,0x00,0x48}},
 };
 
 constexpr std::size_t kTreeAt=0xA8;          // the object's SGO tree
@@ -87,6 +92,7 @@ constexpr std::size_t kBoneSize=0x110;       // bone records at [skeleton+0x10],
 constexpr std::size_t kBoneParentAt=0x10,kBoneLocalAt=0x70,kBoneWorldAt=0xB0;
 // the gun battery's attack state, as 0x34F913..0x34F94E reads it: GunControl {GunBattery*, ...}
 constexpr std::size_t kBatteryFlagsAt=0x2C0,kBatteryLeftAt=0x2E0,kBatteryCountAt=0x30;
+constexpr std::size_t kBatteryChargeAt=0x2E8;  // frames of charge left (0x6D547A sets it from charge.time, 0x6D556A counts down)
 // the CAS players (0x53BB17: +0xBD0, main player [+0xFD0]); each player 0x160 bytes at [+0x60], count [+0x70] (0x1166FB0
 // reads them so); a player's clip clock +0xE8, length +0xF0 (edf41classes ClipNow, real-run with the dragon)
 constexpr std::size_t kCasAt=0xBD0,kCasPlayers=0x60,kCasPlayerCount=0x70,kCasPlayerSize=0x160,kClipTime=0xE8,kClipLength=0xF0;
@@ -134,6 +140,8 @@ struct Entry {
         std::vector<float> clip[3];      // open, close, roll: frames, step, keys
         hector::OpenClose oc;
         hector::Barrels roll;
+        int lightSlot=-1;                // the charge light's material animation slot (edf41_hector_light), -1 none
+        bool lit=false;
     } anim[hector::kArms];
     bool animRead=false;
     int headPlayer=-2;                   // -2: not looked up, -1: none
@@ -184,6 +192,16 @@ int CountOf(const Handle& node) noexcept { return reinterpret_cast<ChildCountFn>
 void ReadAnim(void* self,Entry& e,void* skel) noexcept {
     const Handle root{static_cast<char*>(self)+kTreeAt,0,0};
     Handle key{};
+    if(Child(root,L"edf41_hector_light",key) && CountOf(key)==hector::kArms) {
+        char* players=*reinterpret_cast<char**>(static_cast<char*>(self)+kModelAt+kMatPlayersAt);
+        const std::uint32_t slots=players && Readable(players+kMatCountAt,4) ? *reinterpret_cast<const std::uint32_t*>(players+kMatCountAt) : 0u;
+        for(int i=0;i<hector::kArms;++i) {
+            const Handle v=At(key,i);
+            const int slot=static_cast<int>(reinterpret_cast<NodeFloatFn>(image+kNodeFloat)(&v));
+            e.anim[i].lightSlot=slot>=0 && static_cast<std::uint32_t>(slot)<slots ? slot : -1;
+            if(slot>=0)Log("EDF41AI hector %p arm %d charge light slot %d of %u",self,i,slot,slots);
+        }
+    }
     if(!Child(root,L"edf41_hector_anim",key) || CountOf(key)!=hector::kArms)return;
     for(int i=0;i<hector::kArms;++i) {
         Entry::ArmAnim& a=e.anim[i];
@@ -367,6 +385,30 @@ bool Finite16(const float* m) noexcept {
 // The arm's weapon pose (its own CAS clips, hector::StepOpenClose / StepRoll): the animated bones' locals, then the world of
 // every bone below the arm from its parent's (the arm's world is already the aimed one). Bones come after their parents in
 // the model (mdb.insert_bone); one that does not keeps the moved world.
+// 301 cannon's charge light: on while the arm's battery charges, off when it fires or the attack goes (4.1 0x2259A0 mode 1,
+// stopped on leaving the charge state 0x225AAB).
+void ChargeLight(void* self,Entry& e,int i) noexcept {
+    Entry::ArmAnim& a=e.anim[i];
+    if(a.lightSlot<0)return;
+    bool charging=false;
+    const char* base=static_cast<const char*>(self);
+    void* const* guns=*reinterpret_cast<void* const* const*>(base+kGunsAt);
+    if(guns && *reinterpret_cast<const std::uint64_t*>(base+kGunCountAt)==hector::kArms && Readable(guns,sizeof(void*)*2*hector::kArms)) {
+        const char* control=static_cast<const char*>(guns[2*i]);
+        const char* battery=control && Readable(control,sizeof(void*)) ? *reinterpret_cast<const char* const*>(control) : nullptr;
+        if(battery && Readable(battery,kBatteryChargeAt+4))
+            charging=*reinterpret_cast<const std::int32_t*>(battery+kBatteryChargeAt)>0;
+    }
+    char* model=static_cast<char*>(self)+kModelAt;
+    if(charging && !a.lit) {
+        reinterpret_cast<void(__fastcall*)(void*,std::uint32_t,std::int32_t)>(image+kMatPlay)(model,static_cast<std::uint32_t>(a.lightSlot),1);
+        a.lit=true;
+    } else if(!charging && a.lit) {
+        reinterpret_cast<void(__fastcall*)(void*,std::uint32_t)>(image+kMatStop)(model,static_cast<std::uint32_t>(a.lightSlot));
+        a.lit=false;
+    }
+}
+
 void PoseWeapon(Entry& e,int i,char* recs,std::int64_t count,bool attacking) noexcept {
     Entry::ArmAnim& a=e.anim[i];
     if(a.kind==hector::WeaponKind::None)return;
@@ -487,7 +529,10 @@ std::uint64_t __fastcall BaseUpdateHook(void* self,void* dt) {
     std::lock_guard<std::mutex> hold(tableLock);
     if(Entry* e=Find(self)) {
         AimArms(self,*e);
-        if(AnimReady() && !*reinterpret_cast<const std::uint8_t*>(static_cast<char*>(self)+kDestroyedAt))StepHead(self,*e);
+        if(AnimReady() && !*reinterpret_cast<const std::uint8_t*>(static_cast<char*>(self)+kDestroyedAt)) {
+            StepHead(self,*e);
+            for(int i=0;i<hector::kArms;++i)ChargeLight(self,*e,i);
+        }
     }
     return result;
 }
