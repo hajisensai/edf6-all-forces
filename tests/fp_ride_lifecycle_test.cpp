@@ -15,6 +15,8 @@ DWORD TestGetCurrentProcessId() { return 42; }
 #undef GetCurrentProcessId
 #include <cstdio>
 #include <initializer_list>
+#include <atomic>
+#include <thread>
 
 namespace edf {
 bool Readable(const void* p,std::size_t n,bool) noexcept {
@@ -106,7 +108,9 @@ int main() {
     Put<const wchar_t*>(recordsA,0,L"body");Put<const wchar_t*>(recordsA+kBoneStride,0,L"te_r");Put<const wchar_t*>(recordsA+2*kBoneStride,0,L"head");
     Put<const wchar_t*>(recordsB,0,L"te_r");Put<const wchar_t*>(recordsB+kBoneStride,0,L"body");Put<const wchar_t*>(recordsB+2*kBoneStride,0,L"head");
     Current().body=model;Current().shown[0]=Current().shown[1]=true;
+    Publish();DrawSnap maskSnap{};TakeSnapshot(&maskSnap);drawSnap=&maskSnap;   // the draw path reads its own copy
     const auto baseMask=BodyMask(&batch),lodMask=BodyMask(&replacement);
+    drawSnap=nullptr;
     check(baseMask.count==3 && !baseMask.arm[0] && baseMask.arm[1] && lodMask.arm[0] && !lodMask.arm[1],
           "body filtering selects the bound GPU palette's LOD bone ordering, not the base skeleton's");
     Put<void*>(model,kBaseLod+kLodInst,nullptr);Put<void*>(model,kLods,nullptr);Put<std::uint64_t>(model,kLodCount,0);
@@ -127,7 +131,7 @@ int main() {
     std::memcpy(laser+0x130,from,16);std::memcpy(laser+0x140,hit,16);
     unsigned char originalLaser[sizeof(laser)];std::memcpy(originalLaser,laser,sizeof(laser));
     Current().view[0]=fpview::Translate(3,4,5);nextLaserDraw=reinterpret_cast<void*>(&RecordLaser);
-    LaserDrawHook(laser+0x10,nullptr,2,nullptr);
+    Publish();LaserDrawHook(laser+0x10,nullptr,2,nullptr);
     check(laserStart[0]==4 && laserStart[1]==6 && laserStart[2]==8 && std::memcmp(laserEnd,hit,16)==0,
           "the owning weapon's visible laser start follows its viewmodel while the hit endpoint stays in the world");
     check(std::memcmp(laser,originalLaser,sizeof(laser))==0,"all laser attachment state is restored after native drawing");
@@ -262,7 +266,7 @@ int main() {
     check(ViewState(view1)==a && ViewState(view2)==b,"render passes select their camera, independent of update order");
     Put<float>(c1,kCamEyeRow,123.0f);++renderFrame;
     check(ViewState(view1)==a,"render ownership uses the submitted camera even after the next camera step moves its eye");
-    {StateScope scope(a);int hand=0;
+    {StateScope scope(a);int hand=0;DrawSnap snapA{};TakeSnapshot(&snapA);SnapScope taken(&snapA);
         check(PartOf(p1+kBodyModel,&hand)==Part::body && PartOf(p2+kBodyModel,&hand)==Part::none,
               "P2 remains a native world body when drawn in P1's viewport");
         Drew1(p1+kBodyModel);
@@ -297,5 +301,69 @@ int main() {
           "body topology excludes torso-side clavicle and mount faces while retaining complete upper arms");
     ResetFirstPerson();SyncSession();
     check(!FirstPersonOn() && !CameraState(c1) && !CameraState(c2),"mission reset retires all local cameras without restoring freed native objects");
+    {
+        // Production Fit on the native bone-record layout (docs/fp-render-re.md §17): the skeleton instance at
+        // model+0xA0, records with the box flag +0x09, half sizes +0xF0, centre +0x100, world +0xB0. A rifle facing
+        // four ways, its Umbra box (model+0x110) the game's world-axis one: the fitted grip is the same every way.
+        unsigned char gunRecords[2*kBoneStride]{};
+        auto gunModel=weapon+kWeaponModel;
+        Put<void*>(gunModel+0xA0,kInstBones,gunRecords);Put<int>(gunModel+0xA0,kInstCount,2);
+        float first[3]{};bool same=true,umbraMoved=false;float firstUmbra=0;
+        for(int k=0;k<4;++k) {
+            const float heading=k*1.5707963f,axis[3]={0,1,0};
+            fpview::M4 root=fpview::Rotation(axis,std::cos(heading),std::sin(heading));root.m[12]=10;root.m[13]=2;root.m[14]=-4;
+            std::memcpy(gunRecords+kBoneWorld,root.m,64);
+            const fpview::M4 bodyBone=fpview::Mul(fpview::Translate(0,.03f,.05f),root);
+            unsigned char* rec=gunRecords+kBoneStride;
+            std::memcpy(rec+kBoneWorld,bodyBone.m,64);rec[0x09]=1;
+            const float half[3]={.035f,.09f,.42f},centre[3]={0,.02f,.22f};
+            std::memcpy(rec+0xF0,half,12);std::memcpy(rec+0x100,centre,12);
+            fpview::BoneBox box{bodyBone,{half[0],half[1],half[2]},{centre[0],centre[1],centre[2]}};
+            const fpview::M4 umbra=fpview::WorldBounds(&box,1);
+            std::memcpy(gunModel+kModelBounds,umbra.m,64);
+            if(k==0)firstUmbra=umbra.m[0];else umbraMoved=umbraMoved || std::fabs(umbra.m[0]-firstUmbra)>.1f;
+            Current()=State{};Current().on=true;Current().human=human;Current().cam=cam;
+            Current().inHand[0]=gunModel;Current().handOf[0]=kRight;Current().inHandCount=1;
+            float grip[3]={-.1f,-.2f,.4f};Fit(kRight,false,grip);
+            if(k==0)std::memcpy(first,grip,12);
+            for(int i=0;i<3;++i)same=same && std::fabs(grip[i]-first[i])<1e-5f;
+        }
+        check(umbraMoved && same,"the hold is fitted to the weapon's own size (bone records), not the world-axis Umbra box: the same facing any way");
+        Put<void*>(gunModel+0xA0,kInstBones,nullptr);Put<int>(gunModel+0xA0,kInstCount,0);
+    }
+    {
+        // Threads (docs/fp-render-re.md §17.5): the draws run on a render thread while the camera step runs. A
+        // selection made on one thread is not the other's, and a draw's copy is never half of one step and half of
+        // the next (a writer publishing two different states as fast as it can, each with matching markers).
+        for(auto& state:states)state=State{};
+        selected=&states[0];
+        State* mine=&states[0];State* other=&states[1];
+        std::atomic<bool> stop{false};
+        std::thread writer([&]{
+            StateScope scope(mine);
+            for(int k=0;!stop.load();++k) {
+                const float v=static_cast<float>(k&1 ? 1 : 2);
+                Current().on=true;Current().inHandCount=1;Current().handOf[0]=k&1;
+                for(int h=0;h<2;++h){Current().view[h]=fpview::Translate(v,v,v);Current().placeWeapon[h]=fpview::Translate(v,v,v);}
+                Publish();
+            }
+        });
+        bool consistent=true,ownSelection=true;
+        for(int i=0;i<20000;++i) {
+            StateScope scope(mine);
+            DrawSnap snap{};
+            if(!TakeSnapshot(&snap))continue;
+            const float v=snap.view[0].m[12];
+            consistent=consistent && snap.view[1].m[12]==v && snap.placeWeapon[0].m[12]==v && snap.placeWeapon[1].m[12]==v &&
+                       snap.handOf[0]==(v==1.0f ? 1 : 0);
+            {StateScope inner(other);ownSelection=ownSelection && &Current()==other;}
+            ownSelection=ownSelection && &Current()==mine;
+        }
+        stop=true;writer.join();
+        check(consistent,"a draw's copy of the camera step's state is whole, never torn by a concurrent publish");
+        check(ownSelection,"each thread keeps its own state selection (the camera step cannot switch a draw's camera)");
+        for(auto& state:states)state=State{};
+        selected=&states[0];
+    }
     return failed ? 1 : 0;
 }

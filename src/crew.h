@@ -250,6 +250,7 @@ struct Config {
     bool fpArmIk=true;              // ...the arms posed for the first person: shoulders beside and below the eye
     float fpHoldArc=60.0f;          // ...a free hand on the other hand's weapon slides round it this far from below, deg
     float fpWristMax=30.0f;         // ...and its forearm turns about the wrist at most this much, deg
+    bool fpNativeElbow=true;        // ...the elbow bends toward where the animation has it (0: out and down, the old pole)
     bool fpFit=true;                // ...a bulky or long weapon held further off, a shield out to the side
     bool fpCulling=true;            // ...the arms and weapon handed to Umbra around the eye (never culled)
     bool fpMotion=true;             // ...the arms and weapon sway, bob, kick, dip at a reload, a switch, a sprint, a roll

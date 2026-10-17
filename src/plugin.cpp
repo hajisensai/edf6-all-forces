@@ -635,6 +635,7 @@ void LoadConfig() noexcept {
     n.fpMotion=ReadBool(L"FirstPersonMotion",n.fpMotion);
     n.fpCulling=ReadBool(L"FirstPersonCulling",n.fpCulling);
     n.fpFit=ReadBool(L"FirstPersonFit",n.fpFit);
+    n.fpNativeElbow=ReadBool(L"FirstPersonNativeElbow",n.fpNativeElbow);
     n.fpArmIk=ReadBool(L"FirstPersonArmIk",n.fpArmIk);
     n.fpHoldArc=ReadFloat(L"FirstPersonHoldArc",n.fpHoldArc);
     n.fpWristMax=ReadFloat(L"FirstPersonWristMax",n.fpWristMax);
