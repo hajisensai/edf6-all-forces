@@ -8703,6 +8703,136 @@ def edf41_objects_install() -> None:
 
 
 @test
+def edf41_outfits_shipped() -> None:
+    """edf41port/outfits (tools/make_edf41_outfits.py, docs/edf41-outfits.md): the Ranger and Air Raider outfits ship (the
+    Wing Diver and Fencer too, while the pipeline takes them); every class's files are shipped as registered and nothing
+    else is; new names only (OBJECT/EDF41_P_*, MENUOBJECT/EDF41_P_*: no stock file replaced); each archive's models are
+    EDF6's (0x20) and sound (pylib/outfit41.py check_archive: re-serialise, textures before the model, inverse binds,
+    weights summing to 1, indices inside the skeleton) on at most outfit41.MAX_BONES bones; each battle SGO is the
+    class's (CONFIG.SGO SoldierInit order) and names its archive, body and LODs, each menu SGO its archive and body; the
+    report says every shared joint ended within 7 cm of EDF6's."""
+    import hashlib
+    import edf41_outfits as eo
+    import mdb
+    import outfit41
+    import rabpool
+    import sgo
+    reg = eo.registry()
+    classes = {c['class']: c for c in reg['classes']}
+    assert {'ranger', 'airraider'} <= set(classes), f'Ranger and Air Raider outfits missing: {sorted(classes)}'
+    listed = {rel for c in reg['classes'] for rel in c['files']}
+    assert listed == set(reg['files']), 'the registry lists files no class needs, or the reverse'
+    shipped = {os.path.relpath(os.path.join(d, f), eo.FILES).replace(os.sep, '/') for d, _, fs in os.walk(eo.FILES) for f in fs}
+    own = {s for rel in listed for s in rabpool.stored(rel)}
+    for s in sorted(own):
+        if s.endswith(rabpool.MANIFEST):
+            with open(os.path.join(eo.FILES, *s.split('/')), encoding='utf-8') as f:
+                own |= {f'{rabpool.MEMBERS}/{row[-1]}' for row in json.load(f)['files']}
+    assert shipped == own, f'shipped but unlisted: {sorted(shipped - own)[:5]}; listed, not shipped: {sorted(own - shipped)[:5]}'
+    soldier = {0: 'AssultSoldier', 1: 'PaleWing', 2: 'Engineer', 3: 'HeavyArmor'}
+    for key, c in classes.items():
+        spec = outfit41.SPECS[key]
+        assert c['soldier_class'] == spec.soldier_class and c['battle'] == f'OBJECT/{spec.out}.SGO' and \
+            c['menu'] == f'MENUOBJECT/{spec.out}.SGO', key
+        assert all(r.split('/', 1)[1].startswith('EDF41_P_') for r in c['files']), f'{key}: a file under a stock name'
+        data = {rel: eo.read(rel) for rel in c['files']}
+        for rel, b in data.items():
+            assert hashlib.sha256(b).hexdigest() == reg['files'][rel], rel
+        arch = f'OBJECT/{spec.out}.MRAB'
+        models = [f for f in mdb.rab_read(data[arch]).files if f.name.lower().endswith('.mdb')]
+        assert len(models) == 3, f'{key}: body and two LODs'
+        faults = outfit41.check_archive(data[arch], [f.name for f in models])
+        assert not faults, (key, faults[:5])
+        for f in models:
+            md = mdb.mdb_read(f.data)
+            assert md.version == 0x20 and len(md.bones) <= outfit41.MAX_BONES, (key, f.name, len(md.bones))
+        battle = sgo.load(data=data[c['battle']])
+        assert battle['xgs_scene_object_class'] == soldier[spec.soldier_class], (key, battle['xgs_scene_object_class'])
+        archive, body, lods = outfit41.model_entry(battle['animation_model'][0])
+        assert outfit41.rel_of(archive) == arch and [body] + [n for n, _ in lods] == [f.name for f in models], key
+        menu = sgo.load(data=data[c['menu']])
+        assert outfit41.rel_of(menu['animation_model'][0][0]) == arch and menu['animation_model'][0][1] == body, key
+        assert c['report']['joint_error_max'] < 0.07, (key, c['report']['joint_error_worst'])
+
+
+@test
+def edf41_outfits_pipeline_math() -> None:
+    """pylib/outfit41.py's turns (no game): align turns a set of offsets onto their rotated copies exactly (Kabsch), a
+    line of offsets (the forearm) by the shortest turn of their direction, shortest_turn handles the opposite direction,
+    and the pairing rules every class shares map 4.1's otherFinger* to middle* and kubi to head."""
+    import math
+    import numpy as np
+    import outfit41
+    a = math.radians(25.0)
+    q = np.array([[math.cos(a), math.sin(a), 0.0], [-math.sin(a), math.cos(a), 0.0], [0.0, 0.0, 1.0]])
+    us = [np.array(v) for v in ((0.1, 0.0, 0.02), (0.0, 0.08, -0.03), (0.05, 0.05, 0.05))]
+    got = outfit41.align(us, [u @ q for u in us])
+    assert np.allclose(got, q, atol=1e-9) and abs(outfit41.turn_angle(got) - 25.0) < 1e-6
+    line = [np.array((0.1, 0.0, 0.0)), np.array((0.2, 0.0, 0.0))]
+    got = outfit41.align(line, [u @ q for u in line])
+    assert np.allclose(np.array((1.0, 0.0, 0.0)) @ got, np.array((1.0, 0.0, 0.0)) @ q, atol=1e-9)
+    flip = outfit41.shortest_turn(np.array((0.0, 1.0, 0.0)), np.array((0.0, -1.0, 0.0)))
+    assert np.allclose(np.array((0.0, 1.0, 0.0)) @ flip, (0.0, -1.0, 0.0), atol=1e-9) and np.allclose(flip @ flip.T, np.eye(3))
+    rules = dict(outfit41.COMMON)
+    assert re.sub(r'otherFinger(\d)_([lr])', rules[r'otherFinger(\d)_([lr])'], 'otherFinger2_l') == 'middle2_l'
+    assert rules['kubi'] == 'head'
+
+
+@test
+def edf41_outfits_reproducible() -> None:
+    """With EDF4.1 and EDF6 on this machine: tools/make_edf41_outfits.py builds today exactly the files shipped (the
+    pipeline is deterministic and the committed files are current). Skipped without either game (CI)."""
+    import gamedir
+    import edf41_outfits as eo
+    import make_edf41_outfits as m
+    import rootcpk
+    edf41 = gamedir.find_other(gamedir.EDF41)
+    if not edf41 or not os.path.isfile(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        print('      (skipped: no EDF4.1 or EDF6 here)')
+        return
+    reg = eo.registry()
+    data, _files = m.build(edf41, rootcpk.DEFAULT_GAME)
+    assert data['files'] == reg['files'], 'rerun tools/make_edf41_outfits.py: the shipped outfits are not what it builds'
+    assert [c['class'] for c in data['classes']] == [c['class'] for c in reg['classes']]
+
+
+@test
+def edf41_outfits_install() -> None:
+    """tools/edf41_outfits.py on a stand-in game: every class's files written as the ledger owner edf41outfit, a second
+    install writes nothing, remove deletes them; a file another mod put at one of a class's names is never written over,
+    that class is left out (said why), the others installed. The installer writes them after the 4.1 objects and its
+    uninstall removes them; the release bundles the registry and the files; the plugin installs the hooks and the online
+    preload hands its member to them."""
+    import edf41_outfits as eo
+    assert eo.OWNER in ledger.OWNERS
+    reg = eo.registry()
+    with tempfile.TemporaryDirectory(prefix='edf6vc-e41f-') as game:
+        os.makedirs(os.path.join(game, 'Mods'))
+        files, skipped = eo.build(game)
+        assert not skipped and set(files) == set(reg['files'])
+        eo.install(game, files)
+        led = ledger.Ledger(game)
+        assert {ledger.key(r) for r in files} == set(led.owned_by(eo.OWNER))
+        assert eo.install(game, files) == [], 'a second install rewrote files it already holds'
+        _deleted, kept = eo.remove(game)
+        assert not kept and not any(os.path.exists(led.disk(r)) for r in files), 'remove left files'
+        theirs = reg['classes'][0]['files'][0]
+        modfiles.atomic_write(os.path.join(game, 'Mods', *theirs.split('/')), b'another mod')
+        files, skipped = eo.build(game)
+        assert [cls for cls, _why in skipped] == [reg['classes'][0]['class']] and theirs not in files, skipped
+        assert set(files) == {r for c in reg['classes'][1:] for r in c['files']}
+        eo.install(game, files)
+        with open(os.path.join(game, 'Mods', *theirs.split('/')), 'rb') as f:
+            assert f.read() == b'another mod', "another mod's file was written over"
+    inst, rel = src('tools/installer.py'), src('tools/build_release.py')
+    assert inst.index('edf41_objects.install(game, objects41)') < inst.index('edf41_outfits.install(game, outfits41)')
+    assert 'edf41_outfits.remove' in inst.split('def uninstall(game: str)', 1)[1]
+    assert '"edf41port", "outfits")}{seps}edf41port/outfits' in rel and '"edf41port", "outfits.json")}{seps}edf41port' in rel
+    plugin, mission = src('src/plugin.cpp'), src('src/mission.cpp')
+    assert 'InstallOutfit41()' in plugin and 'Outfit41SessionPreload(sessionOrig,' in mission
+
+
+@test
 def edf41_dlc_objects() -> None:
     """EDF4.1's DLC objects (make_edf41_objects.DLC_ROOTS: what the two mission packs' listed missions spawn, mp01:/ and
     mp02:/ in 4.1, under OBJECT/EDF41MP01/ and OBJECT/EDF41MP02/ here, pylib/edf41dlc.py): every root registered under its

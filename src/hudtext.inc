@@ -578,6 +578,11 @@ HUDTEXT(versionFeatLoadout,L"support loadout settings (defaults used)",L"支援�
 HUDTEXT(versionFeatTransport,L"transports",L"运输与空降",L"運輸與空降",L"輸送・空挺")
 HUDTEXT(versionFeatCompose,L"choosing who goes aboard",L"自选载员",L"自選載員",L"搭乗兵の選択")
 HUDTEXT(versionFeatVariants,L"coloured / armed support variants",L"支援外观与挂载",L"支援外觀與掛載",L"支援の外見・兵装")
+HUDTEXT(versionFeatOutfit41,L"the EDF4.1 outfit (others see the stock one)",L"4.1外观（其他人看到原版外观）",L"4.1外觀（其他人看到原版外觀）",L"4.1の外見（他の人には標準の外見）")
+// The HQ outfit popup's fifth outfit (outfit41.cpp): EDF4.1's subtitle. English and Japanese as the game is titled in both
+// (「地球防衛軍4.1 THE SHADOW OF NEW DESPAIR」: the Japanese title keeps the English subtitle); Chinese as the user names it
+// (2026-10-18: 「绝望阴影再袭」, the name Chinese media give the game; no Chinese edition was released), Traditional alike.
+HUDTEXT(outfit41Item,L"The Shadow of New Despair",L"绝望阴影再袭",L"絕望陰影再襲",L"THE SHADOW OF NEW DESPAIR")
 HUDTEXT(versionFeatCommand,L"map order sync",L"地图指挥（M 地图对 NPC 下令）同步",L"地圖指揮（M 地圖對 NPC 下令）同步",L"マップ指揮（NPC への命令）の同期")
 HUDTEXT(versionFeatSome,L"some newer features",L"部分新功能",L"部分新功能",L"一部の新機能")
 HUDTEXT(versionListSep,L", ",L"、",L"、",L"、")

@@ -472,6 +472,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     import make_chute
     import make_jets
     import edf41_objects
+    import edf41_outfits
     import edf41_maps
     import edf41_menu_bg
     import edf41_sounds
@@ -567,6 +568,13 @@ def install(game: str, campaign_requested: bool = False) -> None:
     for obj, why in skipped41:
         print('  跳过', obj, why)
     edf41_objects.install(game, objects41)
+    outfits41, skipped_outfits = edf41_outfits.build(game)
+    print('写入 EDF4.1 外观（游骑兵、空降兵、飞翼、剑兵各一套，作为新增外观；预先转换好，不需要装 4.1；'
+          '不替换任何原版文件，在战前外观菜单里选「EDF4.1」才使用）……')
+    for cls, why in skipped_outfits:
+        print('  跳过', cls, why)
+    for path in edf41_outfits.install(game, outfits41):
+        print('写入', path)
     # EDF5 Mission Pack 1's two maps and DLC fortress (pre-generated, the members EDF6 ships read from it): what the
     # campaign plan offered DM015 / DM018 / DM019 / DM020 on (make_edf5_campaign.plan asks edf5_dlc.offered)
     files5, skipped5 = edf5_dlc.build(game)
@@ -707,6 +715,7 @@ def uninstall(game: str) -> None:
     import make_chute
     import make_jets
     import edf41_objects
+    import edf41_outfits
     import edf41_maps
     import edf41_menu_bg
     import edf41_sounds
@@ -743,7 +752,7 @@ def uninstall(game: str) -> None:
         remove_autoturret(game)
         import menu_preview
         import support_loadout
-        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sedan.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_maps.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
+        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sedan.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:

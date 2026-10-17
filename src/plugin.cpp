@@ -17,6 +17,7 @@
 #include "crew.h"
 #include "firstperson.h"
 #include "mod_room.h"
+#include "outfit41.h"
 #include "room_ui.h"
 #include "support_soldier.h"
 #include "airdrop.h"
@@ -1072,6 +1073,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallRounds();        // the stock vehicles' and helis' impact points: the rounds as the game flies them
     InstallStockGauges();   // the stock weapon gauge where our HUD lists the weapons, the fuel tanks it showed
     InstallRoomUi();        // the support loadout menu in the online room and the offline HQ (chains both OnUpdates)
+    Log("OUTFIT41 installed=%d",InstallOutfit41());   // the EDF4.1 outfit: the HQ popup's sixth item, the model paths
     InstallGlyphLock();     // the game's own text, wrong or missing characters (glyphs.cpp)
     InstallEdf5Campaign();  // the EDF5 campaign's mission packs owned (edf5campaign.cpp)
     InstallPortedMissions(); // ...and with PortedMissionsUnlocked every mission of the ported packs open (edf5campaign.cpp)

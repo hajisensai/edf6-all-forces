@@ -41,6 +41,8 @@ FARPROC ResolveDependency(const char* name) noexcept {
     if(!std::strcmp(name,"EDF6CoopGetExtensionApi"))return reinterpret_cast<FARPROC>(&BridgeApi);
     if(!std::strcmp(name,"EDF6Coop_MissionAdmissionReady"))return reinterpret_cast<FARPROC>(&Admission);
     if(!std::strcmp(name,"EDF6Coop_ResolveMissionPlayerPuid"))return dependencyMode==2 ? nullptr : reinterpret_cast<FARPROC>(&Identity);
+    // Only looked up (never called) by the room check: any non-null address stands for the export.
+    if(!std::strcmp(name,"EDF6CoopGetMemberAttributeApi"))return dependencyMode==6 ? nullptr : reinterpret_cast<FARPROC>(&Admission);
     return nullptr;
 }
 void RecordNotice(const wchar_t* text) noexcept {++notices;notice=text;}
@@ -122,7 +124,7 @@ int main(int argc,char** argv){
     // Both native entry points must reject missing/old/incomplete/uninitialized
     // Coop while a matching bridge is usable in the menu (world still absent).
     const auto make=base ? reinterpret_cast<crew::Create>(*Slot("EOS_Lobby_CreateLobby")) : &CreateRoom;
-    for(int mode=0;mode<5;++mode){
+    for(int mode:{0,1,2,3,4,6}){   // 6: an EDF6Coop without the member attributes (the EDF4.1 outfits' sync)
         dependencyMode=mode;Check(!EDF6AF_RoomIsolationReady(),"Coop virtual admission sees failed online prerequisites");
         const auto oldJoins=joins,oldNotices=notices;result=-999;
         make(nullptr,nullptr,reinterpret_cast<void*>(9),&RecordCallback);

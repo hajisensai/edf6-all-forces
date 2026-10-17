@@ -193,6 +193,11 @@ bool __fastcall ClearedHook(unsigned row,unsigned char* vec) {
 // The mission select's first clear check through a stub: lea rdx,[rsp+0x50] (the caller's rsp+0x48, past the return
 // address); mov rax,ClearedHook; jmp rax. Installed whatever the key (read at each opening); not at all when a piece
 // of the code is not the one read.
+int GameContentId() noexcept {
+    unsigned char* gs=nullptr;
+    return CurrentContent(gs);
+}
+
 bool InstallPortedMissions() noexcept {
     static bool tried=false;
     if(tried)return missionsReady;

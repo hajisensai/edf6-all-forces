@@ -57,6 +57,10 @@ const wchar_t* CoopDependencyProblem() noexcept {
     const auto admission=reinterpret_cast<AdmissionReady>(resolveCoop("EDF6Coop_MissionAdmissionReady"));
     if(!admission || !resolveCoop("EDF6Coop_ResolveMissionPlayerPuid"))
         return L"EDF6Coop 缺少本版全军出击所需的任务准入与玩家身份接口。";
+    // The members' EDF4.1 outfits (outfit41.cpp) and the room pre-sync travel on its member attributes: without them the
+    // others would be shown in their stock outfits with no word said, so the room is refused with this reason instead.
+    if(!resolveCoop("EDF6CoopGetMemberAttributeApi"))
+        return L"EDF6Coop 缺少成员属性接口（各玩家的 4.1 外观等联机同步需要），版本过旧。";
     if(admission()!=1)return L"EDF6Coop 的任务准入保护尚未就绪，已阻止进入联机。";
     return nullptr;
 }
