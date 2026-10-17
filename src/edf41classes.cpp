@@ -502,6 +502,10 @@ void DevShoot(const void* object,const float* point,unsigned salt,float startBac
     b.life=6;
     b.damage=Cfg().edf41DevShootDamage;
     b.size=1.0f;
+    // ini Edf41DevShootBlast > 0: an explosion of that radius. The bullet core then sets 0x10 (explosion radius > 1e-6, 0x2320E3) and
+    // a hit goes through the area damage only (0x232616 -> ApplyAreaDamage 0x542670; the direct-hit queue is cleared, 0x23268E), the
+    // path every rocket and missile takes: what a part takes from them, seen in its class's own taken / refused counts.
+    if(std::isfinite(Cfg().edf41DevShootBlast) && Cfg().edf41DevShootBlast>0.0f)b.explosion=Cfg().edf41DevShootBlast;
     // LaserBullet02's constructor throws without its custom parameter (EDF+0x253F8B): [mode], 0 plain (docs/edf41-ufomother301.md
     // 2.1; E510's mf_LaserCustomParameter). An SGO array node {0, 1 child, at +12} and its int node {1, -, value 0}.
     alignas(4) static const std::int32_t plain[6]={0,1,12,1,0,0};
