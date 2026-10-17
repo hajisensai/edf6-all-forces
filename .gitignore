@@ -17,3 +17,6 @@ models/
 
 # Development-only data (tools/make_edf41_objects.py --mother-dev): never committed, never in a release
 edf41port_dev/
+
+# EDF4.1 asset packs (tools/export_edf41_assets.py; pylib/edf41src.py looks for edf41/ next to the installer): never committed
+/edf41/

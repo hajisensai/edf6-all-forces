@@ -89,7 +89,21 @@ def _lzss_items(data: bytes, tries: int = 24) -> list[fmb.Item]:
 
 def cmpl_fast(data: bytes) -> bytes:
     """A CMPL stream (the game's LZSS, docs/fmb-format.md) of `data`: greedy matches, not Okumura's choice; it
-    decodes to exactly `data` with the game's decoder (fmb.cmpl_decode, mdb.cmpl_decompress: checked by selftest)."""
+    decodes to exactly `data` with the game's decoder (fmb.cmpl_decode, mdb.cmpl_decompress: checked by selftest).
+    cmpl_fast_py's bytes, natively when native/lzss_greedy.cpp's DLL is there (pylib/edf6native.py)."""
+    import edf6native
+    lib = edf6native.lib()
+    if lib is None:
+        return cmpl_fast_py(data)
+    import ctypes
+    data = bytes(data)
+    out = ctypes.create_string_buffer(lib.edf6_lzss_greedy_bound(len(data)))
+    size = lib.edf6_lzss_greedy(data, len(data), 24, out)   # 24: _lzss_items' tries
+    return out.raw[:size]
+
+
+def cmpl_fast_py(data: bytes) -> bytes:
+    """cmpl_fast's reference."""
     return b'CMPL' + struct.pack('>I', len(data)) + fmb._emit(data, _lzss_items(data))
 
 

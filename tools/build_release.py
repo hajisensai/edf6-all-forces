@@ -72,6 +72,8 @@ README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
   首次使用支持增量更新的安装器仍需生成一次，之后更新可复用。每一步会显示生成或复用及耗时。
   自行榴弹炮的外形来自压缩包里的 models 文件夹（双管坦克模型），请和 exe 放在一起解压；
   没有这个文件夹时自行榴弹炮用 Kepler 原版外形。
+  EDF4.1 的任务地图和 4.1 的音效 / 语音 / 字幕在安装时从已安装的 EDF4.1 转换；没装 EDF4.1 时改用和 exe
+  放在一起的 edf41 文件夹（EDF4.1 素材包，约 3.5 GB，分享包附带）；两样都没有就跳过这部分并说明。
   安装器还会写入：
     - 大地图：测试场那张平原拼成 3 x 3 块（无缝），只影响测试场那一关；
     - 测试场关卡：没有敌人，只有靶子（地面和空中各一半，打掉了会重新出现）；地上停着本插件新加 / 改造的
@@ -142,7 +144,8 @@ def check_bundled() -> None:
 
 
 # native/cmpl.cpp built by build.cmd: mdb.cmpl_compress's encoder, 70 times the pure Python one (which spent most of an
-# install's model generation: 35 of a 40-second cockpit model, measured 2026-10-14). Both exes load it from _MEIPASS.
+# install's model generation: 35 of a 40-second cockpit model, measured 2026-10-14), and the other native helpers of
+# pylib/edf6native.py (CRILAYLA, the SK maps' LZSS and collision trees). Both exes load it from _MEIPASS.
 CMPL_DLL = os.path.join(ROOT, 'build', 'pylib', 'edf6cmpl.dll')
 
 
@@ -200,7 +203,7 @@ def build_exe(name: str, generator: str | None = None) -> str:
                 'make_bigmap', 'bigmap', 'seams', 'fmb', 'fmb_build', 'hkcms', 'hkcms_build', 'hktag', 'sk_map', 'sk_terrain', 'gen', 'rmpa', 'jet_models', 'jet_gear', 'weapons',
                 'testhub', 'make_emc', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
                 'cas_pose', 'aircraft_collision', 'support_config', 'support_loadout', 'room_layout', 'menu_preview',
-                'make_sazabi', 'sazabi_model', 'sazabi_arms', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'legacy_assets', 'rabpool', 'mdb_legacy', 'cas_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics', 'cockpit_instruments', 'cockpit_label_glyphs', 'cockpit_retrofit', 'cockpit_shell', 'texfile_accel', 'model_workers', 'mdb',
+                'make_sazabi', 'sazabi_model', 'sazabi_arms', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'legacy_assets', 'rabpool', 'mdb_legacy', 'cas_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics', 'cockpit_instruments', 'cockpit_label_glyphs', 'cockpit_retrofit', 'cockpit_shell', 'texfile_accel', 'model_workers', 'mdb', 'edf6native', 'crilayla',
                 'gamelease', 'build'):   # every module installer.py imports in a function (selftest release_imports); build is
         # autoturret/tools/build.py (--paths above comes before site-packages, where pip's own `build` may be)
         cmd += ['--hidden-import', mod]

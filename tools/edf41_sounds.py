@@ -1,7 +1,8 @@
 """EDF4.1's weapon sounds and voices on EDF6: converted at install time from the player's own EDF4.1 into Mods, so 4.1's
 weapons and mission scripts find their sounds and their radio lines under 4.1's own names. 4.1's audio (2.3 MB of weapon
-waves, 1.6 GB of voice) cannot ship with the tools: this part needs EDF4.1 installed; without it nothing is written and
-the reason is said.
+waves, 1.6 GB of voice) cannot ship with the tools: this part needs EDF4.1 installed, or an EDF4.1 asset pack (pylib/edf41src.py: these
+same files in the same folders, with a manifest; tools/export_edf41_assets.py makes it); without either nothing is
+written and the reason is said.
 
 Four groups (GROUPS), each written whole or not at all:
   weapon     SOUND/PC/EDF41_WEAPON_SE.ACB  4.1's SOUND/PC/TIKYUUX_SE.ACB (a CRI ACB 1.23 with its waves embedded; EDF6's
@@ -45,6 +46,7 @@ sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import awe  # noqa: E402
 import cpk  # noqa: E402
 import dsgo  # noqa: E402
+import edf41src  # noqa: E402
 import ledger  # noqa: E402
 import rootcpk  # noqa: E402
 from modfiles import load_json, sha256, sha256_file  # noqa: E402
@@ -93,6 +95,13 @@ def sound_path(root: str, name: str) -> str:
 
 def plugin_path(root41: str, name: str) -> str:
     return os.path.join(root41, *PLUGINS, name)
+
+
+def sources41() -> list[str]:
+    """Every EDF4.1 file any group is converted from, as a path under the EDF4.1 folder (what an EDF4.1 asset pack
+    holds: tools/export_edf41_assets.py); the subtitle files are optional."""
+    return ([f'SOUND/PC/{SE_BANK}'] + [f'SOUND/PC/{n}' for lang in VOICES for n in VOICES[lang]]
+            + ['/'.join((*PLUGINS, n)) for n in sorted(set(CAPTIONS.values()))])
 
 
 def sources_of(group: str, root6: str, root41: str) -> list[str]:
@@ -281,19 +290,54 @@ def build(root6: str, root41: str) -> dict[str, Blob]:
     return out
 
 
-def fingerprint(paths: list[str]) -> dict[str, list[int]]:
-    """Each source's size and modification time: a changed file, without reading it (the AWBs are 800 MB)."""
+def rel41(path: str, root41: str) -> str | None:
+    """A source's path under the EDF4.1 folder (an asset pack's rel), None for one of EDF6's. EDF6 may be on another
+    drive than the pack (a share package unpacked to C:, Steam on D:): a path on another drive is not under it, and
+    os.path.relpath refuses that pair outright (ValueError), so the drives are compared first."""
+    if os.path.splitdrive(os.path.abspath(path))[0].lower() != os.path.splitdrive(os.path.abspath(root41))[0].lower():
+        return None
+    rel = os.path.relpath(path, root41)
+    return None if rel.startswith('..') or os.path.isabs(rel) else rel.replace(os.sep, '/')
+
+
+def fingerprint(paths: list[str], root41: str | None = None) -> dict[str, list[int]]:
+    """Each source's size and modification time: a changed file, without reading it (the AWBs are 800 MB). An asset
+    pack's file (pylib/edf41src.py): the size and time the manifest records of it in EDF4.1, when it is still of the
+    size the manifest says (else its own: not current, and converting it verifies it)."""
     out = {}
+    pack = edf41src.pack(root41) if edf41src.is_pack(root41) else None
     for p in paths:
         st = os.stat(p)
-        out[os.path.basename(p)] = [st.st_size, st.st_mtime_ns]
+        rel = rel41(p, root41) if pack is not None else None
+        if rel is not None and edf41src.key(rel) in pack.files and not pack.problem(rel):
+            out[os.path.basename(p)] = pack.source(rel)
+        else:
+            out[os.path.basename(p)] = [st.st_size, st.st_mtime_ns]
     return out
 
 
 def missing(group: str, root6: str, root41: str) -> list[str]:
-    """The sources of `group` that must exist and do not (the subtitle files are optional: the cue names stand in)."""
-    need = [p for p in sources_of(group, root6, root41) if os.path.dirname(p) != os.path.join(root41, *PLUGINS)]
-    return [os.path.basename(p) for p in need if not os.path.isfile(p)]
+    """The sources of `group` that must exist and do not (the subtitle files are optional: the cue names stand in);
+    from an asset pack, also what of it the manifest does not record so (edf41src.problems: missing, another size, not
+    listed; an optional file the manifest lists must be there too: a pack is used whole)."""
+    plugins = os.path.join(root41, *PLUGINS)
+    need = [p for p in sources_of(group, root6, root41) if os.path.dirname(p) != plugins]
+    out = [os.path.basename(p) for p in need if not os.path.isfile(p)]
+    if edf41src.is_pack(root41):
+        mine = [p for p in sources_of(group, root6, root41) if rel41(p, root41) is not None]
+        out += edf41src.problems(root41, [rel41(p, root41) for p in mine if os.path.dirname(p) != plugins])
+        out += edf41src.problems(root41, [rel41(p, root41) for p in mine if os.path.dirname(p) == plugins],
+                                 optional=True)
+    return list(dict.fromkeys(out))
+
+
+def corrupt(group: str, root6: str, root41: str) -> list[str]:
+    """An asset pack's sources of `group` whose SHA-256 is not the manifest's (read whole: only before converting)."""
+    if not edf41src.is_pack(root41):
+        return []
+    p41 = edf41src.pack(root41)
+    rels = [rel41(p, root41) for p in sources_of(group, root6, root41) if rel41(p, root41) is not None]
+    return [why for rel in rels if edf41src.key(rel) in p41.files for why in [p41.verify(rel)] if why]
 
 
 def _foreign(led: ledger.Ledger, rel: str) -> bool:
@@ -316,7 +360,7 @@ def _current(led: ledger.Ledger, stamp: dict, group: str, source: dict[str, list
 def install(root6: str, root41: str | None, say: Callable[[str], None] = print) -> tuple[list[str], list[tuple[str, str]]]:
     """Every group written as OWNER's; (paths written, [(group, why not)])."""
     if not root41:
-        return [], [(g, '没有找到 EDF4.1（需要安装 EDF4.1 才能转换它的音效和语音）') for g in GROUPS]
+        return [], [(g, '没有找到 EDF4.1 也没有 EDF4.1 素材包（需要其中之一才能转换它的音效和语音）') for g in GROUPS]
     led = ledger.Ledger(root6)
     stamp_path = os.path.join(root6, 'Mods', STAMP)
     stamp = load_json(stamp_path, {})
@@ -332,9 +376,14 @@ def install(root6: str, root41: str | None, say: Callable[[str], None] = print) 
         if foreign:
             skipped.append((group, f"Mods 里已有别的 MOD 的文件：{', '.join(foreign)}"))
             continue
-        source = fingerprint([p for p in sources_of(group, root6, root41) if os.path.isfile(p)])
+        source = fingerprint([p for p in sources_of(group, root6, root41) if os.path.isfile(p)], root41)
         wanted.update(ledger.key(rel) for rel in rels)
         if _current(led, stamp, group, source):
+            continue
+        bad = corrupt(group, root6, root41)
+        if bad:   # an asset pack's file changed since it was made: the group is not converted from it
+            skipped.append((group, '；'.join(bad)))
+            wanted.difference_update(ledger.key(rel) for rel in rels)
             continue
         say(f'  转换 4.1 的{group}……')
         try:
