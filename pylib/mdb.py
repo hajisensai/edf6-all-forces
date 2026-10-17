@@ -215,29 +215,11 @@ def cmpl_compress_py(data: bytes) -> bytes:
     return bytes(out)
 
 
-_NATIVE: object = None   # ctypes.CDLL once loaded, False when there is none
-
-
 def _native() -> object:
-    """native/cmpl.cpp's DLL (the same encoder in C++: the pure Python one spends minutes of every install), or None.
-    Found beside the frozen installer's modules (build_release bundles it) or in a dev checkout's build/pylib."""
-    global _NATIVE
-    if _NATIVE is None:
-        import ctypes
-        base = getattr(sys, '_MEIPASS', None)
-        path = os.path.join(base, 'edf6cmpl.dll') if base else os.path.join(HERE, '..', 'build', 'pylib', 'edf6cmpl.dll')
-        if not (os.name == 'nt' and os.path.isfile(path)):
-            _NATIVE = False
-        else:   # a DLL there that does not load raises, every time: never half native, half Python
-            lib = ctypes.CDLL(os.path.abspath(path))
-            lib.edf6_cmpl_bound.restype = ctypes.c_size_t
-            lib.edf6_cmpl_bound.argtypes = (ctypes.c_size_t,)
-            lib.edf6_cmpl_compress.restype = ctypes.c_size_t
-            lib.edf6_cmpl_compress.argtypes = (ctypes.c_char_p, ctypes.c_size_t, ctypes.c_void_p)
-            lib.edf6_cmpl_decompress.restype = ctypes.c_size_t
-            lib.edf6_cmpl_decompress.argtypes = (ctypes.c_char_p, ctypes.c_size_t, ctypes.c_void_p, ctypes.c_size_t)
-            _NATIVE = lib
-    return _NATIVE or None
+    """native/cmpl.cpp's DLL (the same encoder in C++: the pure Python one spends minutes of every install), or None:
+    pylib/edf6native.py loads it (beside the frozen installer's modules, or a dev checkout's build/pylib)."""
+    import edf6native
+    return edf6native.lib()
 
 
 def native_cmpl() -> bool:

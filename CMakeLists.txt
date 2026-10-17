@@ -98,9 +98,11 @@ target_link_options(EDF6VehicleCrew PRIVATE /DYNAMICBASE /NXCOMPAT /PDBALTPATH:E
 set_target_properties(EDF6VehicleCrew PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/Mods/Plugins")
 configure_file(EDF6VehicleCrew.ini "${CMAKE_BINARY_DIR}/Mods/Plugins/EDF6VehicleCrew.ini" COPYONLY)
 
-# The installer's CMPL codec (native/cmpl.cpp): pylib/mdb.py loads it with ctypes, tools/build_release.py bundles it.
+# The installer's native helpers (native/*.cpp: the CMPL codec, CRILAYLA, the SK maps' greedy LZSS and collision trees):
+# pylib/edf6native.py loads them with ctypes, tools/build_release.py bundles the DLL. Each is a port of a Python
+# reference that stays the fallback (tests/test_native_*.py: the same bytes).
 # MODULE, not SHARED: nothing links it, and SHARED libraries are the game's plugins (selftest pack_ships_every_plugin).
-add_library(edf6cmpl MODULE native/cmpl.cpp)
+add_library(edf6cmpl MODULE native/cmpl.cpp native/crilayla.cpp native/lzss_greedy.cpp native/aabb_tree.cpp)
 target_compile_options(edf6cmpl PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(edf6cmpl PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/pylib")
 
@@ -675,7 +677,10 @@ set_tests_properties(frozen_cockpit_package PROPERTIES ENVIRONMENT PYTHONIOENCOD
 add_test(NAME texture_acceleration COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_texture_acceleration.py")
 add_test(NAME model_workers COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_model_workers.py")
 add_test(NAME native_cmpl COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_native_cmpl.py")
-set_tests_properties(texture_acceleration model_workers PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+add_test(NAME native_helpers COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_native_helpers.py")
+# tools/edf41_maps.py converting maps in processes of their own writes what one by one writes (skipped without the games)
+add_test(NAME edf41_maps_parallel COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_edf41_maps_parallel.py")
+set_tests_properties(texture_acceleration model_workers edf41_maps_parallel PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME optics_model_reference COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_optics_model_reference.py")
 set_tests_properties(optics_model_reference PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The room / HQ menu's layout patch (tools/room_layout.py): stock members unchanged, the names src/room_ui_logic.h uses.

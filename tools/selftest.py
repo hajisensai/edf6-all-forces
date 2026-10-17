@@ -8603,7 +8603,7 @@ def edf41_maps_install() -> None:
         return {rel: rel.encode() for rel in edf41_maps.files_of(name)}
 
     with tempfile.TemporaryDirectory() as game, \
-            patched(edf41_maps, convert=convert, Archives=lambda _root: Fake()):
+            patched(edf41_maps, convert=convert, Archives=lambda _root: Fake(), workers=lambda: 1):
         os.makedirs(os.path.join(game, 'Mods'))
         written, skipped = edf41_maps.install(game, None)
         assert not written and [n for n, _ in skipped] == list(edf41_maps.MAPS) and not converted
@@ -9248,7 +9248,7 @@ def edf41_sounds_install() -> None:
 
     with tempfile.TemporaryDirectory() as game, \
             patched(s, make=make, missing=lambda g, *_: ['X.AWB'] if g == 'voice.EN' else [], sources_of=lambda *_: [],
-                    fingerprint=lambda _p: {'f': [1, 2]}):
+                    fingerprint=lambda _p, _r41=None: {'f': [1, 2]}):
         os.makedirs(os.path.join(game, 'Mods'))
         written, skipped = s.install(game, None)
         assert not written and [g for g, _ in skipped] == list(s.GROUPS) and not os.listdir(os.path.join(game, 'Mods'))
@@ -9280,6 +9280,201 @@ def edf41_sounds_install() -> None:
             assert f.read() == b'another mod'
         s.remove(game)
         assert os.path.exists(other) and not os.path.exists(os.path.join(game, 'Mods', 'MISSION', 'EDF6_VOICETABLE.SC.SGO'))
+
+
+@test
+def edf41_asset_pack() -> None:
+    """pylib/edf41src.py + tools/export_edf41_assets.py on a stand-in EDF4.1 and EDF6 (map archives and conversions
+    stubbed): the export holds exactly what the converters read, with a manifest; from the pack the map archive reads
+    the same bytes and both the maps and the sounds fingerprint as from EDF4.1 (a change of source converts nothing
+    again); find prefers $EDF41_DIR, then $EDF41_ASSETS, the player's EDF4.1, the pack beside the installer; a file
+    missing or of another size leaves its map / group out before converting (unavailable, the campaign plan's skip41;
+    missing), one changed in place is refused when converting it (no half group); installer check (menu 5) reports the
+    pack's faults; removal needs no source; a second export rewrites nothing and drops files the manifest leaves out."""
+    import contextlib
+    import io
+    import tempfile
+    from unittest import mock
+    import edf41_maps
+    import edf41_sounds as s
+    import edf41src
+    import export_edf41_assets as exp
+
+    class FakeCpk:   # 4.1's map archives: each MAP file's bytes are made of its name
+        def __init__(self, _root: str) -> None:
+            pass
+
+        def read(self, name: str) -> bytes:
+            return f'map:{name.upper()}'.encode() * 3
+
+        def fingerprint(self, name: str) -> list[int]:
+            return [len(self.read(name)), 7]
+
+    def put(path: str, data: bytes) -> None:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'wb') as f:
+            f.write(data)
+
+    def get(path: str) -> bytes:
+        with open(path, 'rb') as f:
+            return f.read()
+
+    def flip(path: str) -> None:   # one byte changed, the size kept
+        data = bytearray(get(path))
+        data[0] ^= 1
+        put(path, bytes(data))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        r41, r6, pack = (os.path.join(tmp, n) for n in ('edf41', 'edf6', 'pack'))
+        put(os.path.join(r41, 'EDF41.exe'), b'')
+        put(os.path.join(r41, 'Root.cpk'), b'')
+        for rel in s.sources41():
+            if not rel.endswith(('subtitles_zh.txt', 'subtitles_en.txt')):   # the subtitle text is optional
+                put(os.path.join(r41, *rel.split('/')), f'4.1 {rel}'.encode())
+        for rel in ('Root.cpk', f'SOUND/PC/{s.SE_BANK}'):
+            put(os.path.join(r6, *rel.split('/')), b'6')
+        os.makedirs(os.path.join(r6, 'Mods'))
+        # what the converters read is what the pack holds
+        assert [r for n in edf41_maps.MAPS for r in edf41_maps.sources(n)] == \
+            [f'MAP/{f}' for n in edf41_maps.MAPS for f in edf41_maps._source(n, FakeCpk(''))]
+        for g in s.GROUPS:
+            assert {s.rel41(p, r41) for p in s.sources_of(g, r6, r41)} - {None} <= set(s.sources41()), g
+        with patched(exp.edf41_maps, Archives=FakeCpk):
+            exp.export(r41, pack, say=lambda _line: None)
+        listed = edf41src.pack(pack).names
+        assert len(listed) == 3 * len(edf41_maps.MAPS) + len(s.sources41()) - 2, len(listed)
+        assert edf41src.check(pack, full=True) == [] and os.path.isfile(os.path.join(pack, exp.README))
+        # the same reads and fingerprints from the pack as from EDF4.1
+        a = edf41_maps.Archives(pack)
+        assert a.read('IG_CAVE01.MAC') == FakeCpk('').read('IG_CAVE01.MAC')
+        assert edf41_maps._source('SK_CRATER01', a) == edf41_maps._source('SK_CRATER01', FakeCpk(''))
+        for g in s.GROUPS:
+            def fp(root: str, g: str = g) -> dict:
+                return s.fingerprint([p for p in s.sources_of(g, r6, root) if os.path.isfile(p)], root)
+            assert fp(pack) == fp(r41), g
+            assert s.missing(g, r6, pack) == [] and s.corrupt(g, r6, pack) == [], g
+        # where it is found
+        env = {k: v for k, v in os.environ.items() if k not in ('EDF41_DIR', edf41src.ENV)}
+        with mock.patch.dict(os.environ, env, clear=True), \
+                patched(edf41src, beside_installer=lambda: pack), \
+                patched(edf41src.gamedir, find_other=lambda *a, **k: None):
+            assert edf41src.find(r6) == pack and e5c.find_edf41(r6) == pack and installer.find_edf41(r6) == pack
+            assert '素材包' in edf41src.describe(pack) and edf41src.describe(None).startswith('没有找到')
+            with patched(edf41src.gamedir, find_other=lambda *a, **k: r41):
+                assert edf41src.find(r6) == r41   # the player's EDF4.1 before the pack beside the installer
+                with mock.patch.dict(os.environ, {edf41src.ENV: pack}):
+                    assert edf41src.find(r6) == pack
+                    with mock.patch.dict(os.environ, {'EDF41_DIR': r41}):
+                        assert edf41src.find(r6) == r41
+            with patched(edf41src, beside_installer=lambda: os.path.join(tmp, 'none')):
+                assert edf41src.find(r6) is None
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                assert installer.check_edf41_source(r6)
+            assert '清单里的文件齐全' in out.getvalue(), out.getvalue()
+        # the frozen installer: the pack next to its exe, else next to the installer whose menu 3 downloaded it
+        # (unpacked into <that installer's folder>/<build>/: tools/testhub.py download_latest); none: the exe's own
+        shell = os.path.join(tmp, 'share')
+        os.makedirs(os.path.join(shell, 'build-2'))
+        with mock.patch.object(sys, 'frozen', True, create=True):
+            with mock.patch.object(sys, 'executable', os.path.join(shell, 'build-2', 'x.exe')):
+                assert edf41src.beside_installer() == os.path.join(shell, 'build-2', edf41src.FOLDER)
+                os.rename(pack, os.path.join(shell, edf41src.FOLDER))
+                try:
+                    assert edf41src.beside_installer() == os.path.join(shell, edf41src.FOLDER)
+                    with mock.patch.object(sys, 'executable', os.path.join(shell, 'x.exe')):
+                        assert edf41src.beside_installer() == os.path.join(shell, edf41src.FOLDER)
+                finally:
+                    os.rename(os.path.join(shell, edf41src.FOLDER), pack)
+        # EDF6 on another drive than the pack (a share package unpacked to C:, Steam on D:): EDF6's files are not
+        # the pack's, and os.path.relpath of such a pair raises; it must not stop the install (2026-10-17 review)
+        if os.name == 'nt':
+            other = 'Q:' if os.path.splitdrive(os.path.abspath(pack))[0].upper() != 'Q:' else 'R:'
+            assert s.rel41(other + r'\EDF6\SOUND\PC\TIKYUUX_SE.ACB', pack) is None
+            assert s.rel41(os.path.join(pack, 'SOUND', 'PC', s.SE_BANK), pack) == f'SOUND/PC/{s.SE_BANK}'
+            for g in s.GROUPS:
+                assert not [w for w in s.missing(g, other + r'\EDF6', pack) if '素材包' in w], g   # only EDF6's own
+        # maps from the pack: written; current again from EDF4.1's same files; removed without a source
+        converted: list[str] = []
+
+        def convert(name: str, e41: object, _e6: object) -> dict[str, bytes]:
+            converted.append(name)
+            data = b''.join(e41.read(r.split('/', 1)[1]) for r in edf41_maps.sources(name))
+            return {rel: data for rel in edf41_maps.files_of(name)}
+
+        real_archives = edf41_maps.Archives
+        e6 = FakeCpk(r6)   # the stand-in EDF6 has no archives: convert is stubbed, the donor's files are not read
+        with patched(edf41_maps, convert=convert, Archives=lambda root: e6 if root == r6 else real_archives(root),
+                     workers=lambda: 1):   # a stubbed convert runs here only
+            written, skipped = edf41_maps.install(r6, pack)
+            assert not skipped and converted == list(edf41_maps.MAPS), skipped
+            converted.clear()
+            with patched(edf41_maps, Archives=lambda root: FakeCpk(root) if root in (r41, r6) else real_archives(root)):
+                assert edf41_maps.install(r6, r41) == ([], []) and not converted, converted
+            assert edf41_maps.install(r6, pack) == ([], []) and not converted
+            # a file missing: its map is left out before converting, and the campaign plan is told (skip41)
+            gone = os.path.join(pack, 'MAP', 'SK_VALLEY01.RAB')
+            keep = get(gone)
+            os.remove(gone)
+            why = dict(edf41_maps.unavailable(r6, pack))
+            assert list(why) == ['SK_VALLEY01'] and '素材包缺少' in why['SK_VALLEY01'], why
+            written, skipped = edf41_maps.install(r6, pack)
+            assert [n for n, _ in skipped] == ['SK_VALLEY01'] and 'SK_VALLEY01' not in converted
+            assert not os.path.exists(os.path.join(r6, 'Mods', 'MAP', 'SK_VALLEY01.MAC'))   # no half map left
+            with contextlib.redirect_stdout(io.StringIO()) as out, patched(installer, find_edf41=lambda _g: pack):
+                assert not installer.check_edf41_source(r6)
+            assert 'SK_VALLEY01.RAB' in out.getvalue(), out.getvalue()
+            put(gone, keep)
+            # a file changed in place (same size): refused when it is read to convert, nothing of that map written
+            city = os.path.join(pack, 'MAP', 'NW_SOUKOGAI01.MAD')
+            flip(city)
+            stamp = os.path.join(r6, 'Mods', edf41_maps.STAMP)
+            with open(stamp, encoding='utf-8') as f:
+                st = json.load(f)
+            del st['NW_SOUKOGAI01']
+            with open(stamp, 'w', encoding='utf-8') as f:
+                json.dump(st, f)
+            converted.clear()
+            written, skipped = edf41_maps.install(r6, pack)
+            assert [n for n, _ in skipped] == ['NW_SOUKOGAI01'] and '被改过' in skipped[0][1], skipped
+            assert not os.path.exists(os.path.join(r6, 'Mods', 'MAP', 'NW_SOUKOGAI01.MAC'))
+            assert edf41src.check(pack) == [] and edf41src.check(pack, full=True), 'the size alone does not see it'
+            flip(city)
+            edf41_maps.remove(r6)
+            assert not ledger.Ledger(r6).owned_by(edf41_maps.OWNER)
+        # sounds from the pack (conversion stubbed): written; current from EDF4.1's same files; changed / missing
+        made: list[str] = []
+
+        def make(group: str, _r6: str, _r41: str) -> dict[str, bytes]:
+            made.append(group)
+            return {rel: group.encode() for rel in s.GROUPS[group]}
+
+        with patched(s, make=make):
+            written, skipped = s.install(r6, pack)
+            assert not skipped and made == list(s.GROUPS), (skipped, made)
+            made.clear()
+            assert s.install(r6, r41) == ([], []) and not made, made
+            assert s.install(r6, pack) == ([], []) and not made
+            awb = os.path.join(pack, 'SOUND', 'PC', s.VOICES['EN'][0])
+            flip(awb)
+            os.remove(os.path.join(r6, 'Mods', s.STAMP))   # not current: converted again, from the changed file
+            written, skipped = s.install(r6, pack)
+            assert [g for g, _ in skipped] == ['voice.EN'] and '被改过' in skipped[0][1] and 'voice.EN' not in made, skipped
+            assert not any(os.path.exists(os.path.join(r6, 'Mods', *r.split('/'))) for r in s.GROUPS['voice.EN'])
+            flip(awb)
+            os.remove(os.path.join(pack, 'mods', 'Plugins', 'subtitles.txt'))   # listed: a pack is used whole
+            written, skipped = s.install(r6, pack)
+            assert [g for g, _ in skipped] == ['table'] and '素材包缺少' in skipped[0][1], skipped
+            s.remove(r6)
+            assert not ledger.Ledger(r6).owned_by(s.OWNER)
+        # a second export: puts back what was removed, rewrites nothing else, drops an unlisted file
+        put(os.path.join(pack, 'MAP', 'EXTRA.MAC'), b'x')
+        lines: list[str] = []
+        with patched(exp.edf41_maps, Archives=FakeCpk):
+            exp.export(r41, pack, say=lines.append)
+        assert [x for x in lines if x.startswith('  导出')] == ['  导出 mods/Plugins/subtitles.txt'], lines
+        assert not os.path.exists(os.path.join(pack, 'MAP', 'EXTRA.MAC')) and edf41src.check(pack, full=True) == []
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert exp.main(['--check', pack, '--full']) == 0
 
 
 def _sound_games() -> tuple[str, str] | None:

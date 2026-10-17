@@ -259,7 +259,23 @@ def make_mesh(verts: np.ndarray, prims: np.ndarray, values: np.ndarray | None = 
 
 
 def _section_tree(boxes: np.ndarray, domain: np.ndarray) -> bytes:
-    """The Aabb4BytesCodec tree (depth first, hkcms.py's rules) over the primitives' boxes."""
+    """The Aabb4BytesCodec tree (depth first, hkcms.py's rules) over the primitives' boxes: _section_tree_py's bytes,
+    natively when native/aabb_tree.cpp's DLL is there (pylib/edf6native.py)."""
+    import edf6native
+    lib = edf6native.lib()
+    if lib is not None and len(boxes):
+        import ctypes
+        b = np.ascontiguousarray(boxes, dtype=np.float64)
+        d = np.ascontiguousarray(domain, dtype=np.float64)
+        if b.shape[1:] == (2, 3) and d.shape == (2, 3):
+            out = ctypes.create_string_buffer(4 * (2 * len(b) - 1))
+            if lib.edf6_section_tree(b.ctypes.data, len(b), d.ctypes.data, out):
+                return out.raw
+    return _section_tree_py(boxes, domain)
+
+
+def _section_tree_py(boxes: np.ndarray, domain: np.ndarray) -> bytes:
+    """_section_tree's reference."""
     out = bytearray()
     centres = (boxes[:, 0] + boxes[:, 1]) * 0.5
 
@@ -284,6 +300,21 @@ def _section_tree(boxes: np.ndarray, domain: np.ndarray) -> bytes:
 
 
 def simd_tree(boxes: np.ndarray, data: list[int]) -> bytes:
+    """simd_tree_py's bytes, natively when native/aabb_tree.cpp's DLL is there (pylib/edf6native.py)."""
+    import edf6native
+    lib = edf6native.lib()
+    if lib is not None and len(boxes) and len(data) == len(boxes) and all(0 <= v <= 0xFFFFFFFF for v in data):
+        import ctypes
+        b = np.ascontiguousarray(boxes, dtype=np.float64)
+        if b.shape[1:] == (2, 3):
+            d = np.ascontiguousarray(data, dtype=np.uint32)
+            out = ctypes.create_string_buffer(128 * lib.edf6_simd_tree_nodes(len(b)))
+            if lib.edf6_simd_tree(b.ctypes.data, len(b), d.ctypes.data, out):
+                return out.raw
+    return simd_tree_py(boxes, data)
+
+
+def simd_tree_py(boxes: np.ndarray, data: list[int]) -> bytes:
     """An hkcdSimdTree's nodes (128 bytes each) over `boxes` (n, 2, 3): node 0 an empty sentinel, node 1 the root (always
     an inner node), leaf nodes of four boxes (the last may hold fewer) whose lane data is `data[i]`, inner nodes of
     four child nodes (lane data = their node index); empty lanes +-huge (leaf data -1, inner data 0), lanes rounded

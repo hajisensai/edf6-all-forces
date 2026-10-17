@@ -405,9 +405,10 @@ def plan(root: str, root41: str | None = None, skip41: Skip41 = frozenset()) -> 
 
 
 def find_edf41(root: str) -> str | None:
-    """The player's EDF4.1 (pylib/gamedir.py), for the entry points that stand for the player's machine."""
-    import gamedir
-    return gamedir.find_other(gamedir.EDF41, near=root)
+    """The player's EDF4.1, else an EDF4.1 asset pack (pylib/edf41src.py find), for the entry points that stand for
+    the player's machine."""
+    import edf41src
+    return edf41src.find(near=root)
 
 
 def edf41_text(data: str = EDF41) -> dict:
@@ -437,7 +438,7 @@ def unavailable41(root: str, root41: str | None) -> dict[str, str]:
 def plan41(root: str, maps: set[str], root41: str | None,
            skip41: Skip41 = frozenset()) -> tuple[list[dict], list[tuple[str, str, str]]]:
     """EDF4.1's story rows: the missions whose map and files will all be there. Its maps come from the player's
-    EDF4.1 at `root41` (tools/edf41_maps.py MAPS, converted at install), its objects from edf41_objects; without
+    EDF4.1 (or EDF4.1 asset pack, pylib/edf41src.py) at `root41` (tools/edf41_maps.py MAPS, converted at install), its objects from edf41_objects; without
     EDF4.1 (None), none. `skip41` names what the install will NOT write after all (edf41_objects.unavailable /
     edf41_maps.unavailable, a map whose conversion failed): object rels like 'OBJECT/VEHICLE301_TANK_AI.SGO', map
     names like 'NW_KOUSOUBLD01' (a dict gives the reason of each). A mission naming any of them, in MISSION.BVM or
@@ -445,7 +446,7 @@ def plan41(root: str, maps: set[str], root41: str | None,
     import edf41_maps
     import edf41_objects
     if not root41:
-        return [], [(PACK41.group, '*', '没有找到 EDF4.1（4.1 本篇的地图要从已安装的 EDF4.1 转换）')]
+        return [], [(PACK41.group, '*', '没有找到 EDF4.1 也没有 EDF4.1 素材包（4.1 的地图要从其中之一转换）')]
     why = {k.upper(): (skip41[k] if isinstance(skip41, Mapping) else '') for k in skip41}
     names = {(d.upper(), n.upper()) for name in ('Root.cpk', 'Chunk01.cpk', 'Chunk02.cpk')
              if os.path.isfile(os.path.join(root, name)) for d, n in cpk.Cpk(os.path.join(root, name)).index}
