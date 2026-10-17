@@ -185,6 +185,67 @@ int main() {
         InFrame(aimed,tgt,l);
         Check(std::fabs(l[0])<1e-3f && std::fabs(l[1])<1e-3f && std::fabs(l[2]-40.0f)<1e-3f,"InFrame: a point on +Z is (0, 0, d)",l[0],l[2]);
     }
+    // --- the weapons' own animations and the head
+    {
+        // a clip of two bones, 3 keys 10 frames apart: bone 0 slides along y, bone 1 turns 180 degrees about z
+        const float s=std::sqrt(0.5f);
+        const float keys[]={0,0,0, 0,0,0,1,   0,0,0, 0,0,0,1,
+                            0,1,0, 0,0,0,1,   0,0,0, 0,0,s,s,
+                            0,2,0, 0,0,0,1,   0,0,0, 0,0,1,0};
+        Clip c; c.frames=3; c.step=10.0f; c.keys=keys;
+        Check(c.Length()==20.0f,"length = (frames - 1) x step",c.Length());
+        float p[kKeyFloats];
+        SamplePose(c,2,0,5.0f,false,p);
+        Check(std::fabs(p[1]-0.5f)<1e-6f,"translation lerped between keys",p[1]);
+        SamplePose(c,2,0,99.0f,false,p);
+        Check(p[1]==2.0f,"past the end: the last key",p[1]);
+        SamplePose(c,2,0,25.0f,true,p);
+        Check(std::fabs(p[1]-0.5f)<1e-5f,"looping wraps",p[1]);
+        SamplePose(c,2,1,5.0f,false,p);
+        const float n=std::sqrt(p[3]*p[3]+p[4]*p[4]+p[5]*p[5]+p[6]*p[6]);
+        Check(std::fabs(n-1.0f)<1e-5f && p[5]>0.0f && p[5]<s,"rotation nlerped, unit length",p[5],n);
+        // the launcher's gun_bottom_l: the open clip's (0 0 -0.866 0.5) is the model's bind rows
+        const float q[kKeyFloats]={1.798f,-1.038f,5.049f, 0.0f,0.0f,-0.8660254f,0.5f};
+        float m[16];
+        PoseMatrix(q,m);
+        const float want[16]={-0.5f,-0.8660254f,0,0, 0.8660254f,-0.5f,0,0, 0,0,1,0, 1.798f,-1.038f,5.049f,1};
+        float err=0.0f;
+        for(int i=0;i<16;++i)err=std::fmax(err,std::fabs(m[i]-want[i]));
+        Check(err<1e-5f,"PoseMatrix: rows are the rotated axes (the model's convention)",err);
+        // open / close
+        OpenClose oc;
+        float t=-1.0f;
+        Check(StepOpenClose(oc,false,60.0f,60.0f,t)==1 && t==60.0f,"idle: the close clip's end (closed)",t);
+        int clip=StepOpenClose(oc,true,60.0f,60.0f,t);
+        Check(clip==0 && t==1.0f && oc.phase==OpenClose::Phase::Opening,"an attack opens from the start",t);
+        for(int i=0;i<100;++i)clip=StepOpenClose(oc,true,60.0f,60.0f,t);
+        Check(clip==0 && t==60.0f && oc.phase==OpenClose::Phase::Open,"held open while attacking");
+        clip=StepOpenClose(oc,false,60.0f,60.0f,t);
+        Check(clip==1 && t==1.0f && oc.phase==OpenClose::Phase::Closing,"the attack's end closes");
+        for(int i=0;i<19;++i)StepOpenClose(oc,false,60.0f,60.0f,t);
+        clip=StepOpenClose(oc,true,60.0f,60.0f,t);
+        Check(clip==0 && std::fabs(t-41.0f)<1e-4f,"a close a third done opens again from two thirds",t);
+        // the gatling
+        Barrels r;
+        Check(StepRoll(r,false,60.0f)==kRollIdle,"turning at 1 before any attack");
+        StepRoll(r,true,60.0f);
+        const float before=r.t;
+        Check(StepRoll(r,false,60.0f)==std::fmod(before+kRollFiring,60.0f) && r.fired,"at 5 from the first attack on, for good");
+        // the head
+        Head h;
+        Rng hr; hr.Seed(7);
+        int frames=0;
+        const wchar_t* st=nullptr;
+        while(!(st=StepHead(h,hr,false)) && frames<5000)++frames;
+        Check(st && st[0]==L'o' && st[1]==L'p' && frames>=kHeadWaitBase && frames<kHeadWaitBase+kHeadWaitRand,"closed 300..1200 frames, then open",frames);
+        Check(!StepHead(h,hr,false) && h.phase==Head::Phase::Opening,"opening until the clip ends");
+        Check(!StepHead(h,hr,true) && h.phase==Head::Phase::OpenWait,"then waits open");
+        frames=0;
+        while(!(st=StepHead(h,hr,false)) && frames<5000)++frames;
+        Check(st && st[0]==L'c' && frames>=kHeadWaitBase,"then close",frames);
+        StepHead(h,hr,true);
+        Check(h.phase==Head::Phase::ClosedWait,"and round again");
+    }
     std::printf("hector_ai_check: %d cases, %d failures\n",cases,failures);
     return failures ? 1 : 0;
 }

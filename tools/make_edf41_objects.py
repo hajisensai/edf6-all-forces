@@ -2752,6 +2752,7 @@ def alias_dsgo(games: 'Games', root: str, files: dict[str, bytes], a: Alias, t_d
         out.set('gun_control', dsgo.Node(entries))
         if all(g.fire for g in a.guns):
             hector_fire(games, files, mine, out, a)
+            out.set(HECTOR_ANIM_KEY, dsgo_value(hector_anim(files, a, mdb_bones(files[rab_rel], mdb_name))))
 
     cas = rel_of(am[1])
     template_cas = rel_of(t_am.items[1])
@@ -2987,6 +2988,96 @@ def hector_materials(files: dict[str, bytes], rab_rel: str, mdb_name: str, mine:
             if names.count(n) != 1:
                 raise ValueError(f'{rab_rel}: the material animation names {n!r}, the model has it {names.count(n)} times')
     return blobs
+
+
+# The 4.1 weapons' own CAS animations, for the plugin to play on the merged bones (src/hector_ai.h, "the weapons' own
+# animations"): [arms_l, arms_r], each [kind, [bone], open, close, roll] with kind 0 none, 1 open / close (401 cannon,
+# launcher), 2 roll (401 gatling); a clip [frames, step, then per frame per bone tx ty tz qx qy qz qw] ([] when the kind has
+# none). The bones are the merged model's (mdb.graft_skinned: gun_<arm>_<weapon bone>), every weapon bone a clip moves.
+HECTOR_ANIM_KEY = 'edf41_hector_anim'
+HECTOR_ANIM_CLIPS = {1: ('open', 'close', None), 2: (None, None, 'fire')}
+
+
+def mdb_bones(rab_bytes: bytes, mdb_name: str) -> dict[str, list[float]]:
+    """{bone name: its local matrix} of model `mdb_name` in a model archive."""
+    rab = mdb.rab_read(rab_bytes)
+    md = mdb.mdb_read(next(f for f in rab.files if f.name.lower() == mdb_name.lower()).data)
+    return {md.name_of(b.name): list(b.local) for b in md.bones}
+
+
+def pose_matrix(p: list[float]) -> list[float]:
+    """src/hector_ai.h PoseMatrix: translation + quaternion (x y z w) as the game's row-vector local matrix."""
+    x, y, z, w = p[3:7]
+    return [1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w), 0.0,
+            2 * (x * y - z * w), 1 - 2 * (x * x + z * z), 2 * (y * z + x * w), 0.0,
+            2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y), 0.0,
+            p[0], p[1], p[2], 1.0]
+
+
+def weapon_cas(data: bytes) -> bytes:
+    return data if data[:8] == b'CAS\0\x04\x02\0\0' else cas_graft.cl.cas_from_legacy(data)
+
+
+def hector_anim(files: dict[str, bytes], a: Alias, bones: dict[str, list[float]]) -> list:
+    """HECTOR_ANIM_KEY's value for a Hector variant: each arm's weapon CAS (its SGO's animation_model[1], in `files` until
+    prune) sampled frame by frame. ValueError when a clip the weapon's class plays is missing or moves a bone the merged
+    model has not, or when a moved bone's clip pose and the model disagree where 4.1's data says they agree (the launcher's
+    model is posed open: its open clip ends on the model's locals, which checks the rotation convention)."""
+    arms: list = []
+    for gun in a.guns:
+        kind = {'Hector401_Cannon': 1, 'Hector401_Launcher': 1, 'Hector401_Gatling': 2}.get(gun.fire.cls, 0)
+        if not kind:
+            arms.append([0.0, [], [], [], []])
+            continue
+        am = sgo.read(files['OBJECT/' + gun.fire.sgo])[1]['animation_model']
+        cas_rel = rel_of(am[1])
+        pose = cas_pose.CasPose(weapon_cas(files[cas_rel]))
+        clips = {c.name: c for c in pose.clips}
+        want = [n for n in HECTOR_ANIM_CLIPS[kind] if n]
+        missing = [n for n in want if n not in clips]
+        if missing:
+            raise ValueError(f'{cas_rel}: no clip {missing}')
+        moved: list[str] = []
+        for n in want:
+            for t in clips[n].tracks:
+                if t.name.startswith('gun_') and t.name != 'gun_arms' and t.name not in moved:
+                    moved.append(t.name)
+        merged = [f'gun_{gun.node}_{n}' for n in moved]
+        absent = [n for n in merged if n not in bones]
+        if absent:
+            raise ValueError(f'{cas_rel}: the merged model has no bone {absent}')
+        out: list = [float(kind), merged]
+        for name in HECTOR_ANIM_CLIPS[kind]:
+            if not name:
+                out.append([])
+                continue
+            clip = clips[name]
+            _duration, step, frames = cas_pose.clip_info(pose, clip)
+            tracks = {t.name: t for t in clip.tracks}
+            values: list[float] = [float(frames), float(step)]
+            for f in range(frames):
+                for n, full in zip(moved, merged):
+                    t = tracks.get(n)
+                    local = bones[full]
+                    tr = list(pose.translation(t.translation, f)) if t and t.translation >= 0 else local[12:15]
+                    ro = list(cas_rotation(pose, t.rotation, f)) if t and t.rotation >= 0 else [0.0, 0.0, 0.0, 1.0]
+                    values += [float(v) for v in tr + ro]
+            out.append(values)
+        if gun.fire.cls == 'Hector401_Launcher':      # the model is the open pose
+            last = out[2][2 + (int(out[2][0]) - 1) * len(merged) * 7:]
+            for i, full in enumerate(merged):
+                m = pose_matrix(last[i * 7:i * 7 + 7])
+                if max(abs(p - q) for p, q in zip(m, bones[full])) > 2e-3:
+                    raise ValueError(f'{cas_rel}: {full} open pose {m} is not the model\'s {bones[full]}')
+        arms.append(out)
+    return arms
+
+
+def cas_rotation(pose: 'cas_pose.CasPose', channel: int, frame: int) -> tuple[float, float, float, float]:
+    """cas_pose.rotation, normalised (the stored keys are f32 xyzw)."""
+    q = cas_pose.rotation(pose, channel, frame)
+    n = sum(v * v for v in q) ** 0.5 or 1.0
+    return tuple(v / n for v in q)
 
 
 def mab_block(block: object) -> bytes:
