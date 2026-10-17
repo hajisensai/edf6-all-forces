@@ -54,6 +54,8 @@ int main() {
     for(int id=0;id<12;++id)Expect(StoryPack(id,3,7)==((id>=3 && id<=5) || (id>=7 && id<=9)),"the six story packs, nothing else");
     Expect(!StoryPack(3,0,0) && !StoryPack(7,0,0),"nothing installed: no pack");
     Expect(StoryPack(7,0,7) && !StoryPack(3,0,7),"EDF4.1 alone");
+    for(int id=0;id<12;++id)Expect(Edf41Pack(id,7)==(id>=7 && id<=9),"the 4.1 HQ background: the three 4.1 packs only");
+    Expect(!Edf41Pack(7,0) && !Edf41Pack(0,0),"no 4.1 packs installed: never");
 
     const auto none=[](unsigned){ return false; };
     const auto noBranch=[](unsigned){ return 0; };

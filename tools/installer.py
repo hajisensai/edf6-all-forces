@@ -473,6 +473,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     import make_jets
     import edf41_objects
     import edf41_maps
+    import edf41_menu_bg
     import edf41_sounds
     import edf5_dlc
     import make_katyusha
@@ -593,6 +594,13 @@ def install(game: str, campaign_requested: bool = False) -> None:
         print('写入', path)
     for group, why in skipped_sound:
         print('  跳过', group, why)
+    print(f'转换 EDF4.1 的本部（出击界面）背景（只在 4.1 的三个任务包显示；从{edf41src.describe(root41)}转换）……' if root41
+          else f'{edf41src.describe(root41)}：跳过 4.1 的本部背景。')
+    written_bg, skipped_bg = edf41_menu_bg.install(game, root41)
+    for path in written_bg:
+        print('写入', path)
+    for why in skipped_bg:
+        print('  跳过 4.1 本部背景', why)
     install_autoturret(game, *turret)
     # Mutable stock SGOs are read after every primary writer, outside the expensive model cache.
     # AutoTurret's SGOs were redirected before its own manifest write; never layer another hash over them.
@@ -700,6 +708,7 @@ def uninstall(game: str) -> None:
     import make_jets
     import edf41_objects
     import edf41_maps
+    import edf41_menu_bg
     import edf41_sounds
     import edf5_dlc
     import make_katyusha
@@ -734,7 +743,7 @@ def uninstall(game: str) -> None:
         remove_autoturret(game)
         import menu_preview
         import support_loadout
-        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sedan.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_maps.remove, edf41_sounds.remove, edf5_dlc.remove,
+        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sedan.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_maps.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:

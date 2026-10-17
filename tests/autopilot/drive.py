@@ -28,6 +28,8 @@ background"). For measurements, e.g. the big map's memory against the stock test
                            installed one, or an SGO the build needs); the original bytes are kept and put back
                            byte for byte afterwards (repeatable)
           --ini KEY=VALUE  KEY set in EDF6VehicleCrew.ini [VehicleCrew] for the run, the ini put back afterwards
+          --hq             the mission's pack and row made current, then the HQ (sortie) menu itself instead of the
+                           mission: SECONDS there (its pictures with --shots), quit the same way
         Every run also watches the desktop (DesktopWatch): the foreground window's process, the cursor clip and the
         cursor every 20 ms, and once in the mission the real cursor moved 40 px to see that nothing pulls it back;
         the counts are printed at the end (all must be 0).
@@ -620,7 +622,8 @@ def commit_of(row: str) -> float:
 
 def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None, *,
         extra: tuple[str, ...] = (), loadout: str | None = None, shots: str | None = None,
-        keys: tuple[tuple[str, float, int], ...] = (), place: tuple[str, ...] = (), ini: tuple[str, ...] = ()) -> int:
+        keys: tuple[tuple[str, float, int], ...] = (), place: tuple[str, ...] = (), ini: tuple[str, ...] = (),
+        hq: bool = False) -> int:
     install(game)
     placed: tuple[str, bytes] | None = None
     placements: list[Placement] = []
@@ -634,12 +637,12 @@ def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None
                 placements.append(Placement(game, dest, f.read()))
         if ini:
             placements.append(Placement(game, 'Plugins/EDF6VehicleCrew.ini', ini_with(game, ini)))
-        command(game, '\n'.join([f'mission {mission} {difficulty}', *extra]))
+        command(game, '\n'.join([f'mission {mission} {difficulty}' + (' hq' if hq else ''), *extra]))
         launch()
-        if not wait_for(game, 'PlayMission_Offline', 240):
-            print('the mission never started (see the log)')
+        if not wait_for(game, 'SCRIPT HQMain stays' if hq else 'PlayMission_Offline', 240):
+            print('the HQ menu never came (see the log)' if hq else 'the mission never started (see the log)')
             return 1
-        print('mission started; staying', seconds, 's')
+        print('the HQ menu shown' if hq else 'mission started', '; staying', seconds, 's')
         start = time.time()
         end = start + seconds
         next_shot = start + 15
@@ -734,9 +737,13 @@ def run_options(argv: list[str]) -> tuple[list[str], dict]:
     keys: list[tuple[str, float, int]] = []
     place: list[str] = []
     ini: list[str] = []
-    options: dict = {'extra': (), 'loadout': None, 'shots': None, 'keys': (), 'place': (), 'ini': ()}
+    options: dict = {'extra': (), 'loadout': None, 'shots': None, 'keys': (), 'place': (), 'ini': (), 'hq': False}
     i = 0
     while i < len(argv):
+        if argv[i] == '--hq':
+            options['hq'] = True
+            i += 1
+            continue
         if argv[i] in ('--cmd', '--loadout', '--shots', '--key', '--place', '--ini'):
             if i + 1 >= len(argv):
                 raise SystemExit(argv[i] + ' needs a value')

@@ -9,7 +9,8 @@
 //  - every second, and when the keys change, a row in <dll>.log: the game's committed memory (and its peak), its RAM,
 //    and the machine's free RAM and commit, so a mission's load shows as a curve;
 //  - commands in <dll>.cmd (one at a time, cleared once run): "mem", "quit" (the game's own ExitApp way), and, written
-//    before the launch, "mission <row|RM015|M001|range> [difficulty 0-4]": straight into that offline mission, no menu
+//    before the launch, "mission <row|RM015|M001|range> [difficulty 0-4] [hq]": straight into that offline mission, no menu
+//    (with "hq": that pack's mode and row made current and the HQ menu shown instead, for its pictures)
 //    ("range": the test range's own mission pack, row 0 of the offline mode whose content id is the TestRangeContent
 //    the installer wrote into the EDF6VehicleCrew.ini next to this DLL; RM015 is the stock mission again). The
 //    menus are MAINSCRIPT.AS's routines, each run by name through createCoRoutine(const string &in) (0x12946F0, registered at
@@ -55,6 +56,7 @@ const unsigned char kCoRoutineSig[]={0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57,0x4
 using CoRoutineFn=void*(__fastcall*)(void*,const std::wstring*);
 CoRoutineFn realCoRoutine=nullptr;
 volatile LONG missionRow=-1,missionDifficulty=1;
+volatile LONG stayInHq=0;   // "mission ... hq": the pack's mode and row made current, then the HQ menu itself (its pictures)
 volatile LONG rangeContent=-1;   // "mission range": the test range's content id read from the ini (-1: not asked)
 
 // The game's mode list: count at GS+0x30, mode pointers at GS+0x20 (0x8C4CE3 walks them). A mode's ModeList item
@@ -580,6 +582,12 @@ void* __fastcall CoRoutine(void* out,const std::wstring* decl) {
                 Log("SCRIPT HQMain: the pack's mode not entered, the menu as is");
                 return realCoRoutine(out,decl);
             }
+            if(gs && InterlockedExchange(&stayInHq,0)) {
+                *reinterpret_cast<int*>(gs+kMissionRow)=row;
+                *reinterpret_cast<int*>(gs+kDifficulty)=missionDifficulty;
+                Log("SCRIPT HQMain stays: row %ld, the HQ menu shown",row);
+                return realCoRoutine(out,decl);
+            }
             if(gs) {
                 *reinterpret_cast<int*>(gs+kMissionRow)=row;
                 *reinterpret_cast<int*>(gs+kDifficulty)=missionDifficulty;
@@ -639,8 +647,10 @@ LONG ReadPackContent(const wchar_t* key) noexcept {
 // row 0; "edf41:ROW" row ROW of the EDF4.1 story pack (EDF41Content), "edf41mp01:ROW" / "edf41mp02:ROW" of its
 // Mission Pack 1 / 2 (EDF41Content + 1 / + 2: the plugin's run of the three 4.1 packs).
 void AskMission(const char* text) noexcept {
-    char name[32]{};int difficulty=1;
-    if(sscanf_s(text,"%*s %31s %d",name,static_cast<unsigned>(sizeof(name)),&difficulty)<1)return;
+    char name[32]{},mode[8]{};int difficulty=1;
+    if(sscanf_s(text,"%*s %31s %d %7s",name,static_cast<unsigned>(sizeof(name)),&difficulty,mode,
+                static_cast<unsigned>(sizeof(mode)))<1)return;
+    stayInHq=!_stricmp(mode,"hq") ? 1 : 0;
     const bool range=!_stricmp(name,"range");
     // which of the 4.1 packs: -1 none, 0 the story, 1 / 2 its mission packs
     const int pack41=!_strnicmp(name,"edf41:",6) ? 0 : !_strnicmp(name,"edf41mp01:",10) ? 1

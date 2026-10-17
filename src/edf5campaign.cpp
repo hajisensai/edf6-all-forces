@@ -21,7 +21,9 @@
 #include <cstdint>
 #include <cstring>
 #include <array>
+#include <intrin.h>
 #include <iterator>
+#include <string>
 #include <utility>
 
 namespace crew {
@@ -219,5 +221,97 @@ bool InstallPortedMissions() noexcept {
         Cfg().edf5CampaignContent,Cfg().edf5CampaignContent>0 ? Cfg().edf5CampaignContent+kPacks-1 : 0,
         Cfg().edf41Content,Cfg().edf41Content>0 ? Cfg().edf41Content+kPacks41-1 : 0);
     return missionsReady;
+}
+namespace {
+// ---- EDF4.1's HQ background (tools/edf41_menu_bg.py, docs/mission-list-re.md 字段 7) ----
+// lyt_bg.sgo's HUiBG (constructor 0x8BE0E0) keeps its four layouts BG_BASE .. BG_BASE_D as weak_ptrs at +0x770 and
+// shows the list's member 7-th (0x8BE6E0, from the UI message 0x14 through 0x8BE6B0) by each one's +0x1F8. The
+// installer adds a fifth layout, BG_BASE_EDF41 (4.1's Menu_BG01 reprojected), first in the tree: after the stock
+// choice, an EDF4.1 pack's mode shows it and hides the four; any other mode hides it (and the stock four cover it
+// anyway). Found by name through the layout's own child lookup (0x839FD0, as the constructor finds the four), each
+// time the theme is set; not there (not installed): nothing changes. Purely local UI: nothing goes over the network,
+// host and guest each pick it from their own current mode (the room's).
+constexpr unsigned kBgThemeCall=0x8BE6B6;   // in 0x8BE6B0: call 0x8BE6E0 (rcx = the HUiBG, edx = the theme)
+constexpr unsigned kBgTheme=0x8BE6E0;
+constexpr unsigned kChildByName=0x839FD0;   // (layout, shared_ptr* out, const std::wstring* name) -> out
+constexpr std::size_t kBgLayouts=0x770,kShown=0x1F8;
+const unsigned char kBgThemeCallerSig[]={0x48,0x83,0xEC,0x28,0x8B,0x12,0xE8,0x25,0x00,0x00,0x00,0x32,0xC0,0x48,0x83,0xC4,
+    0x28,0xC3};
+const unsigned char kBgThemeSig[]={0x85,0xD2,0x0F,0x88,0xDE,0x00,0x00,0x00,0x41,0x56,0x48,0x83,0xEC,0x20,0x48,0x89,0x6C,
+    0x24,0x38,0x48,0x8B,0xA9,0x78,0x07,0x00,0x00};
+const unsigned char kChildByNameSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x40,0x48,
+    0x8B,0xDA,0x48,0x8B,0xF1,0x48,0x8D,0x54,0x24,0x20,0xE8};
+using BgThemeFn=void(__fastcall*)(unsigned char*,int);
+struct SharedRef { unsigned char* ptr; unsigned char* ctrl; };   // MSVC shared_ptr / weak_ptr: object, control block
+using ChildByNameFn=SharedRef*(__fastcall*)(unsigned char*,SharedRef*,const std::wstring*);
+BgThemeFn priorBgTheme=nullptr;
+ChildByNameFn childByName=nullptr;
+bool menuBgReady=false;
+int lastBgState=-1;   // the last switch logged: 1 shown, 0 hidden, 2 not installed
+
+// MSVC _Ref_count_base: uses at +8, weaks at +0xC; slot 0 destroys the object, slot 1 the block.
+void Release(SharedRef& r) noexcept {
+    if(!r.ctrl)return;
+    auto* const uses=reinterpret_cast<volatile long*>(r.ctrl+8);
+    auto* const weaks=reinterpret_cast<volatile long*>(r.ctrl+0xC);
+    using Fn=void(__fastcall*)(unsigned char*);
+    Fn* const vtable=*reinterpret_cast<Fn**>(r.ctrl);
+    if(_InterlockedDecrement(uses)==0) {
+        vtable[0](r.ctrl);
+        if(_InterlockedDecrement(weaks)==0)vtable[1](r.ctrl);
+    }
+    r={};
+}
+
+void ApplyEdf41Bg(unsigned char* bg) noexcept {
+    static const std::wstring name=L"BG_BASE_EDF41";   // tools/edf41_menu_bg.py LAYOUT
+    SharedRef child{};
+    childByName(bg,&child,&name);
+    if(!child.ptr || !Readable(child.ptr+kShown,1)){Release(child);if(lastBgState!=2)Log("EDF41 HQ background: not installed (no %ls)",name.c_str());lastBgState=2;return;}
+    unsigned char* gs=nullptr;
+    const bool edf41=ported::Edf41Pack(CurrentContent(gs),Cfg().edf41Content);
+    child.ptr[kShown]=edf41 ? 1 : 0;
+    if(edf41) {   // the four stock layouts hidden (the alive ones: a weak_ptr's uses count > 0)
+        auto* const begin=At<SharedRef*>(bg,kBgLayouts);
+        auto* const end=At<SharedRef*>(bg,kBgLayouts+8);
+        for(SharedRef* w=begin;w && w<end && Readable(w,sizeof(SharedRef));++w)
+            if(w->ptr && w->ctrl && *reinterpret_cast<volatile long*>(w->ctrl+8)>0)w->ptr[kShown]=0;
+    }
+    Release(child);
+    if(lastBgState!=static_cast<int>(edf41)) {
+        Log("EDF41 HQ background %s (content %d, EDF41 %d..%d)",edf41 ? "shown" : "hidden",CurrentContent(gs),
+            Cfg().edf41Content,Cfg().edf41Content>0 ? Cfg().edf41Content+kPacks41-1 : 0);
+        lastBgState=static_cast<int>(edf41);
+    }
+}
+
+void __fastcall BgThemeHook(unsigned char* bg,int theme) {
+    priorBgTheme(bg,theme);
+    __try { ApplyEdf41Bg(bg); } __except(EXCEPTION_EXECUTE_HANDLER){ Log("EDF41 HQ background: the switch failed (stock)"); }
+}
+}  // namespace
+
+// The HUiBG theme call redirected (BgThemeHook): with no fifth layout installed it does exactly the stock call.
+bool InstallEdf41MenuBg() noexcept {
+    static bool tried=false;
+    if(tried)return menuBgReady;
+    tried=true;
+    if(!Matches(kBgThemeCall-6,kBgThemeCallerSig,sizeof(kBgThemeCallerSig)) || !Matches(kBgTheme,kBgThemeSig,sizeof(kBgThemeSig))
+       || !Matches(kChildByName,kChildByNameSig,sizeof(kChildByNameSig))) {
+        Log("HOOK edf41 HQ background=0 (the background code is not the one read)");
+        return false;
+    }
+    unsigned char* const target=CallTarget(kBgThemeCall);
+    if(!target || !(target==image+kBgTheme || target<image || target>=image+edf::kImageSize)) {
+        Log("HOOK edf41 HQ background=0 (EDF+%#x is no call to EDF+%#x)",kBgThemeCall,kBgTheme);
+        return false;
+    }
+    if(target!=image+kBgTheme)Log("EDF41 HQ background call %#x already redirected (another plugin): chained",kBgThemeCall);
+    priorBgTheme=reinterpret_cast<BgThemeFn>(target);
+    childByName=reinterpret_cast<ChildByNameFn>(image+kChildByName);
+    bool changed=false;
+    menuBgReady=RedirectCall(image+kBgThemeCall,target,reinterpret_cast<void*>(&BgThemeHook),changed);
+    Log("HOOK edf41 HQ background=%d%s",menuBgReady,menuBgReady ? "" : changed ? " half patched" : " not patched");
+    return menuBgReady;
 }
 }  // namespace crew
