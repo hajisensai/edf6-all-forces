@@ -747,6 +747,54 @@ DRAGON_ALIAS = Alias(
 ALIASES['DRAGONBIG401.SGO'] = DRAGON_ALIAS
 ROOTS['DRAGONBIG401.SGO'] = 1
 
+# The giant's ragdoll mass. After a hit knocks it down, DragonSmall lets the dragon up once the ragdoll's sum of mass x
+# (|v| + |w|) over its bodies is under 2000 (EDF.dll 0x339729..0x33977F, the sum 0x6EB150; else only at the 60 s cap):
+# an absolute number the class's own ragdolls are made for (EDF6's three DragonSmall ragdolls, e518_frogDragon*: 1060,
+# 2120, 3180 kg). 4.1's DragonBig ragdoll (hk_2014 tagfile, pylib/hk2014.py) weighs 361,005 kg (56 bodies, 5 to 10,000
+# kg each), 114 times the heaviest, so the jitter a ragdoll keeps at rest in EDF6 (M166 2026-10-17: a sum of 5,000 to
+# 18,000 for 60 s, about 0.03 m/s a body) never comes under 2000 and the dragon lies 60 s at every knock-down. 4.1's own
+# DragonBig tests the same 2000 (EDF41.exe 0x1EF685..0x1EF6A9) where its bodies go to sleep. The port makes the ragdoll
+# as heavy as the class's heaviest stock one: every mass and inertia, and every joint's friction torque, x the same
+# factor (hk2014.scaled_masses: under gravity, contacts and joints it moves as before), and the class's hit impulse on
+# the ragdoll (dragon_RagdollReactionScale, an impulse: EDF.dll 0x334C07 / 0x334CF0) x the factor too, so a hit moves it
+# as much as before. The threshold and the cap stay the class's.
+DRAGON_RAGDOLL_CLASS = 'DragonSmall'
+
+
+def class_ragdoll_mass(games: 'Games', cls: str) -> float:
+    """The total mass of the heaviest ragdoll EDF6's own objects of class `cls` use (their SHKT tagfiles)."""
+    import shkt_check
+    heaviest = 0.0
+    for members in games.stock_by_class().get(cls, {}).values():
+        rag = members.get('ragdoll')
+        ref = rag[0] if isinstance(rag, list) and rag and isinstance(rag[0], str) else None
+        if not ref or rel_of(ref) not in games.have6:
+            continue
+        data = games.read6(rel_of(ref))
+        if data[:8] == shkt_check.PACKFILE_MAGIC:
+            continue
+        for system in shkt_check.Shkt(data).systems:
+            heaviest = max(heaviest, sum(b.mass for b in system.bodies if b.motion_type != shkt_check.STATIC))
+    if not heaviest > 0:
+        raise ValueError(f'no stock {cls} ragdoll to take the mass scale from')
+    return heaviest
+
+
+def dragon_ragdoll_fix(games: 'Games', files: dict[str, bytes]) -> None:
+    """DragonBig401's ragdoll as heavy as the class's heaviest stock one, its hit impulse scaled with it (see above)."""
+    import hk2014
+    rel = 'OBJECT/DRAGONBIG401.SGO'
+    version, members = sgo.read(files[rel])
+    shkt = rel_of(members['ragdoll'][0])
+    have = hk2014.total_mass(files[shkt])
+    limit = class_ragdoll_mass(games, DRAGON_RAGDOLL_CLASS)
+    if have <= limit:
+        return
+    factor = limit / have
+    files[shkt] = hk2014.scaled_masses(files[shkt], factor)
+    members['dragon_RagdollReactionScale'] = num(members['dragon_RagdollReactionScale']) * factor
+    files[rel] = sgo.write_depth_first(version, members)
+
 # The DLC roots whose 4.1 class needs an alias: the same classes as the story's objects, so the same alias. The
 # underground nests (AntHill: the voxel block, as ANTHILL301; their model is the pack's own AnthillUG.rab), and the
 # ace UFO401 (4.1's Ufo10 like UFO401, the same model ufo401.mrab with the same bones inserted; its own durability 300 and
@@ -1834,6 +1882,7 @@ NATIVE_FIXES: dict[str, Callable[['Games', dict[str, bytes]], None]] = {MOTHER30
 # The 401 has no stock template (no alias): its fix runs on 4.1's converted files as they are.
 ROOTS.update(MOTHER401_ROOTS)
 NATIVE_FIXES.update({root: mother401_fix for root in (*MOTHER401_ROOTS, *MOTHER401_DLC_ROOTS)})
+NATIVE_FIXES['DRAGONBIG401.SGO'] = dragon_ragdoll_fix   # after its alias (the giant dragon above)
 
 
 # ---- UfoRobo, EDF4.1's transforming ship / walking robot (docs/edf41-uforobo.md) -----------------------------------------
