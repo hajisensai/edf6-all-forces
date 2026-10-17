@@ -55,6 +55,7 @@ for _p in (HERE, os.path.join(HERE, '..', 'pylib'), os.path.join(HERE, '..', 'te
            os.path.join(HERE, '..', 'autoturret', 'tools')):
     sys.path.insert(0, os.path.normpath(_p))
 
+import edf41src  # noqa: E402
 import gamedir  # noqa: E402
 import modfiles  # noqa: E402
 
@@ -429,8 +430,9 @@ def build_asset(cache: Any, module: ModuleType, label: str, builder: Any = None)
 
 
 def find_edf41(game: str) -> str | None:
-    """The player's EDF4.1, looked up once per install (its maps and the EDF4.1 story pack need it)."""
-    return gamedir.find_other(gamedir.EDF41, near=game)
+    """Where EDF4.1 is read from, looked up once per install (its maps, sounds and the EDF4.1 story pack need it): the
+    player's EDF4.1, else the EDF4.1 asset pack next to the installer (pylib/edf41src.py find)."""
+    return edf41src.find(near=game)
 
 
 def build_packs(game: str, campaign: bool, root41: str | None = None,
@@ -572,9 +574,9 @@ def install(game: str, campaign_requested: bool = False) -> None:
         print('  跳过', group, why)
     for path in edf5_dlc.install(game, files5):
         print('写入', path)
-    print('转换 EDF4.1 的任务地图（4.1 本篇任务包要用；从已安装的 EDF4.1 转换，城市地图每张约 3–8 分钟，'
+    print(f'转换 EDF4.1 的任务地图（4.1 本篇任务包要用；从{edf41src.describe(root41)}转换，城市地图每张约 3–8 分钟，'
           '山地 / 平原（SK_*）地图每张约 1–2 分钟，已转换且未变的跳过）……' if root41
-          else '没有找到 EDF4.1：跳过 4.1 地图（4.1 本篇任务包需要它）。')
+          else f'{edf41src.describe(root41)}：跳过 4.1 地图（4.1 本篇任务包需要它）。')
     written41, skipped_maps = edf41_maps.install(game, root41)
     for name, why in skipped_maps:
         print('  跳过', name, why)
@@ -584,8 +586,8 @@ def install(game: str, campaign_requested: bool = False) -> None:
     if campaign is not None and root41 and left_out41.keys() != skip41.keys():
         print('  4.1 的地图或敌人没有装全，重新生成 4.1 本篇任务包（不含用到它们的任务）……')
         campaign = build_packs(game, want_campaign, root41, left_out41)
-    print('转换 EDF4.1 的武器音效、语音和字幕（4.1 的武器与任务无线电要用；从已安装的 EDF4.1 转换，语音约 1.6 GB，'
-          '已转换且未变的跳过）……' if root41 else '没有找到 EDF4.1：跳过 4.1 的音效和语音。')
+    print(f'转换 EDF4.1 的武器音效、语音和字幕（4.1 的武器与任务无线电要用；从{edf41src.describe(root41)}转换，'
+          '语音约 1.6 GB，已转换且未变的跳过）……' if root41 else f'{edf41src.describe(root41)}：跳过 4.1 的音效和语音。')
     written_sound, skipped_sound = edf41_sounds.install(game, root41)
     for path in written_sound:
         print('写入', path)
@@ -840,8 +842,27 @@ def check(game: str) -> bool:
     import make_edf5_campaign
     print()
     ok &= make_edf5_campaign.check(game)
+    ok &= check_edf41_source(game)
     print('\n检查结果：' + ('全部是本安装包的，完整。' if ok else '有缺失或不一致（见上），退出游戏后运行安装器选 1 即可修复。'))
     return ok
+
+
+def check_edf41_source(game: str) -> bool:
+    """Where an install would read EDF4.1 from (find_edf41) and, for an asset pack, whether it is whole by the manifest
+    (sizes; the contents are hashed when a part is converted from it). False only for a pack with a fault: its maps and
+    sounds would be left out."""
+    root41 = find_edf41(game)
+    print()
+    print(f'EDF4.1 来源：{edf41src.describe(root41)}')
+    if not edf41src.is_pack(root41):
+        return True
+    faults = edf41src.check(root41)
+    print(f'  素材包：{len(faults)} 个问题' if faults else '  素材包：清单里的文件齐全，大小一致')
+    for why in faults[:20]:
+        print('   ', why)
+    if len(faults) > 20:
+        print(f'    ……另有 {len(faults) - 20} 个')
+    return not faults
 
 
 def build_name() -> str:

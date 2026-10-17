@@ -1,6 +1,7 @@
 """EDF4.1's mission maps on EDF6 (plan P6): converted at install time from the player's own EDF4.1 into Mods/MAP under
 4.1's names, so 4.1's mission scripts load them as they are. 1.4 GB of map art cannot ship with the tools: this part
-needs EDF4.1 installed (pylib/gamedir.py EDF41); without it nothing is written and the reason is said.
+needs EDF4.1 installed (pylib/gamedir.py EDF41) or an EDF4.1 asset pack (pylib/edf41src.py: the MAP files below,
+unpacked, made by tools/export_edf41_assets.py); without either nothing is written and the reason is said.
 
 Per map (MAPS):
   <MAP>.MAC   pylib/map_legacy.py (MAPB / MAPO in EDF6's layout), its .rmpa members by pylib/rmpa_legacy.py
@@ -40,6 +41,7 @@ from typing import Callable
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import bigmap  # noqa: E402
+import edf41src  # noqa: E402
 import ledger  # noqa: E402
 import legacy_assets  # noqa: E402
 import map_legacy  # noqa: E402
@@ -80,10 +82,19 @@ SK_MAPS = frozenset(n for n in MAPS if n.startswith('SK_'))
 
 
 class Archives:
-    """Every MAP file of a game's archives, read on demand."""
+    """Every MAP file of a game's archives, read on demand. For an EDF4.1 asset pack (pylib/edf41src.py), its MAP files
+    as the manifest records them, fingerprinted by what the manifest says EDF4.1's archive records: the same stamp."""
 
     def __init__(self, root: str) -> None:
         self.at: dict[str, rootcpk.Game] = {}
+        self.pack: edf41src.Pack | None = None
+        self.why = ''
+        if edf41src.is_pack(root):
+            try:
+                self.pack = edf41src.pack(root)
+            except ValueError as e:
+                self.why = str(e)
+            return
         for name in ARCHIVES:
             if os.path.isfile(os.path.join(root, name)):
                 game = rootcpk.Game(root, name)
@@ -92,10 +103,23 @@ class Archives:
                         self.at.setdefault(file.upper(), game)
 
     def read(self, name: str) -> bytes:
+        if self.pack is not None or self.why:
+            return self._pack().read(f'MAP/{name}')
         return self.at[name.upper()].read('MAP', name.upper())
 
+    def _pack(self) -> edf41src.Pack:
+        if self.pack is None:
+            raise ValueError(self.why)
+        return self.pack
+
     def fingerprint(self, name: str) -> list[int]:
-        """The archive's record of the file (size unpacked, CRC): a changed EDF4.1 file, without reading it."""
+        """The archive's record of the file (size unpacked, CRC): a changed EDF4.1 file, without reading it. A pack's:
+        the manifest's record of it, the file there of the size it says (else ValueError)."""
+        if self.pack is not None or self.why:
+            why = edf41src.problems(self._pack().root, [f'MAP/{name}'])
+            if why:
+                raise ValueError(why[0])
+            return self._pack().source(f'MAP/{name}')
         entry = self.at[name.upper()].cpk.index[('MAP', name.upper())]
         return [entry['ExtractSize'], entry['CRC']]
 
@@ -136,7 +160,7 @@ def convert(name: str, e41: Archives, e6: Archives) -> dict[str, bytes]:
 
 
 def _source(name: str, e41: Archives) -> dict[str, list[int]]:
-    return {f: e41.fingerprint(f) for f in (f'{name}.MAC', f'{name}.MAD', f'{name}.RAB')}
+    return {rel.split('/', 1)[1]: e41.fingerprint(rel.split('/', 1)[1]) for rel in sources(name)}
 
 
 def _foreign(led: ledger.Ledger, rel: str) -> bool:
@@ -156,13 +180,19 @@ def _current(led: ledger.Ledger, stamp: dict, name: str, source: dict[str, list[
     return all(ledger.key(rel) in mine and os.path.exists(led.disk(rel)) for rel in files_of(name))
 
 
-NO_EDF41 = '没有找到 EDF4.1（需要安装 EDF4.1 才能转换它的地图）'
+NO_EDF41 = '没有找到 EDF4.1 也没有 EDF4.1 素材包（需要其中之一才能转换它的地图）'
+
+
+def sources(name: str) -> list[str]:
+    """The EDF4.1 files map `name` is converted from (an asset pack's paths: tools/export_edf41_assets.py)."""
+    return [f'MAP/{name}.{ext}' for ext in ('MAC', 'MAD', 'RAB')]
 
 
 def unavailable(root: str, root41: str | None) -> list[tuple[str, str]]:
     """The maps install leaves out before converting anything, [(map, why)]: all of them without EDF4.1, else those
-    with a file in Mods that is not ours. Conversion itself can still fail (install's skipped list). The one place
-    that decides it: install skips exactly these, and the campaign plan offers only missions whose maps are not here."""
+    with a file in Mods that is not ours, and from an asset pack those whose files it lacks (or has of another size).
+    Conversion itself can still fail (install's skipped list). The one place that decides it: install skips exactly
+    these, and the campaign plan offers only missions whose maps are not here."""
     if not root41:
         return [(name, NO_EDF41) for name in MAPS]
     led = ledger.Ledger(root)
@@ -171,6 +201,10 @@ def unavailable(root: str, root41: str | None) -> list[tuple[str, str]]:
         foreign = [rel for rel in files_of(name) if _foreign(led, rel)]
         if foreign:
             out.append((name, f"Mods 里已有别的 MOD 的文件：{', '.join(foreign)}"))
+            continue
+        bad = edf41src.problems(root41, sources(name))
+        if bad:
+            out.append((name, '；'.join(bad)))
     return out
 
 
