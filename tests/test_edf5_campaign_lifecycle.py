@@ -43,11 +43,11 @@ class CampaignLifecycleTests(unittest.TestCase):
 
     def built(self, with_campaign: bool = True, test_range: bool = True, files: dict[str, bytes] | None = None) -> tuple:
         """make_edf5_campaign.build's result for these packs over stand-in files (no Root.cpk here): the tables, each
-        chosen pack's files, the ids the real build gives (EDF5's 3..5, the range's 6 with or without them)."""
+        chosen pack's files, the ids the real build gives (EDF5's 65..67, the range's 68 with or without them)."""
         files = self.files if files is None else files
         packs = (*(campaign.PACKS if with_campaign else ()), *((campaign.RANGE,) if test_range else ()))
-        rels = {campaign.CONFIG, *campaign.TEXTS.values(), *(f for pack in packs for f in pack.files())}
-        ids = campaign.Contents(3 if with_campaign else 0, 6 if test_range else 0)
+        rels = {campaign.CONFIG, campaign.PACKS_FILE, *campaign.TEXTS.values(), *(f for pack in packs for f in pack.files())}
+        ids = campaign.Contents(65 if with_campaign else 0, 68 if test_range else 0)
         # In build()'s order: the mode table first.
         return {rel: files[rel] for rel in campaign.FILES if rel in rels}, ids, {'rows': [], 'skipped': []}
 
@@ -218,7 +218,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         self.assertFalse(campaign.enabled(self.root))
         self.assertTrue(campaign.range_installed(self.root))
         self.assertIn('EDF5CampaignContent=0', self.ini.read_text())
-        self.assertIn('TestRangeContent=6', self.ini.read_text())   # the range keeps its id without the campaign
+        self.assertIn('TestRangeContent=68', self.ini.read_text())   # the range keeps its id without the campaign
         with self.pack() as build:
             installer.install(self.root)
             build.assert_called_once_with(self.root, campaign=False, root41=None, skip41={})
@@ -259,8 +259,8 @@ class CampaignLifecycleTests(unittest.TestCase):
         self.assertEqual(campaign.load_manifest(self.root), manifest)
         for rel, data in before.items():
             self.assertEqual(modfiles.read(campaign.rel_path(self.root, rel)), data)
-        self.assertIn('EDF5CampaignContent=3', self.ini.read_text())
-        self.assertIn('TestRangeContent=6', self.ini.read_text())
+        self.assertIn('EDF5CampaignContent=65', self.ini.read_text())
+        self.assertIn('TestRangeContent=68', self.ini.read_text())
 
     def test_pack_uninstall_stops_before_any_other_removal(self) -> None:
         import rootcpk
@@ -316,23 +316,23 @@ class CampaignLifecycleTests(unittest.TestCase):
 
     def test_case_whitespace_and_other_section_match_win32(self) -> None:
         self.ini.write_text('[vehiclecrew]\n edf5campaigncontent = 0\n[Other]\nEDF5CampaignContent=99\n', encoding='utf-8')
-        campaign.set_content(self.root, campaign.Contents(3, 6))
-        self.assert_actual_content(3, 6)
+        campaign.set_content(self.root, campaign.Contents(65, 68))
+        self.assert_actual_content(65, 68)
         self.assertIn('[Other]\nEDF5CampaignContent=99', self.ini.read_text())
         self.assertTrue(campaign.check(self.root))
 
     def test_missing_key_inserted_in_vehiclecrew_section(self) -> None:
         self.ini.write_text('[VehicleCrew]\nEnabled=1\n[Other]\nEnabled=1\n', encoding='utf-8')
-        campaign.set_content(self.root, campaign.Contents(3, 6))
-        self.assert_actual_content(3, 6)
-        self.assertLess(self.ini.read_text().index('EDF5CampaignContent=3'), self.ini.read_text().index('[Other]'))
-        self.assertLess(self.ini.read_text().index('TestRangeContent=6'), self.ini.read_text().index('[Other]'))
+        campaign.set_content(self.root, campaign.Contents(65, 68))
+        self.assert_actual_content(65, 68)
+        self.assertLess(self.ini.read_text().index('EDF5CampaignContent=65'), self.ini.read_text().index('[Other]'))
+        self.assertLess(self.ini.read_text().index('TestRangeContent=68'), self.ini.read_text().index('[Other]'))
 
     def test_missing_section_added(self) -> None:
         self.ini.write_text('[Other]\nEDF5CampaignContent=99\n', encoding='utf-8')
         self.assertFalse(campaign.check(self.root))
-        campaign.set_content(self.root, campaign.Contents(3, 6))
-        self.assert_actual_content(3, 6)
+        campaign.set_content(self.root, campaign.Contents(65, 68))
+        self.assert_actual_content(65, 68)
         self.assertTrue(campaign.check(self.root))
 
     def test_normal_remove_resets_actual_key_and_releases_files(self) -> None:
@@ -373,9 +373,9 @@ class CampaignLifecycleTests(unittest.TestCase):
                     self.assertEqual(modfiles.read(campaign.rel_path(self.root, rel)), originals.get(rel))
                 manifest = campaign.load_manifest(self.root)
                 self.assertEqual(sorted(manifest['files']), sorted(campaign.FILES))
-                self.assertEqual((manifest['version'], manifest['content']), (2, 3))
+                self.assertEqual((manifest['version'], manifest['content']), (2, 65))
                 text = self.ini.read_text()
-                self.assertIn('EDF5CampaignContent=3', text)
+                self.assertIn('EDF5CampaignContent=65', text)
                 self.assertIn('EDF5CampaignRows=0', text, 'the old row cap left in force')
                 self.assertTrue(campaign.check(self.root))
 
@@ -423,19 +423,34 @@ class CampaignLifecycleTests(unittest.TestCase):
 
     def test_content_ids_do_not_depend_on_the_packs_installed(self) -> None:
         """A room's mode is its content id: the range's is the same whether or not the player has the EDF5 campaign
-        (a guest who opted out joins the host's range, not the story's M01), and the campaign's stay 3..5."""
-        def stock(content: int, online: int) -> list:
-            return ['STORY', 'DESC', 0, 0, 0, f'M{content}{online}.MST', ['app:/mission/missionlist.sgo'], 0, online,
-                    content, online]
-        config = sgo.write_depth_first(0, {'ModeList': [stock(c, o) for c in (0, 1, 2) for o in (0, 1)]})
+        (a guest who opted out joins the host's range, not the story's M01), and the campaign's stay 65..67."""
+        config = sgo.write_depth_first(0, {'ModeList': [stock_mode(c, o) for c in (0, 1, 2) for o in (0, 1)]})
         _, full = campaign.pack_config(config, (*campaign.PACKS, campaign.RANGE))
         _, alone = campaign.pack_config(config, (campaign.RANGE,))
         _, story = campaign.pack_config(config, campaign.PACKS)
-        self.assertEqual([full[p.tag] for p in campaign.PACKS], [3, 4, 5])
+        self.assertEqual([full[p.tag] for p in campaign.PACKS], [65, 66, 67])
         self.assertEqual(alone, {campaign.RANGE.tag: full[campaign.RANGE.tag]})
         self.assertEqual(story, {p.tag: full[p.tag] for p in campaign.PACKS})
         table = campaign.modes(sgo.read(campaign.pack_config(config, (campaign.RANGE,))[0])[1])
         self.assertEqual({int(e[campaign.M_CONTENT]) for e in table[6:]}, {full[campaign.RANGE.tag]})
+
+    def test_content_ids_do_not_depend_on_other_mods(self) -> None:
+        """2026-10-15 (docs/feedback-2026-10-15-room-join.md): the ids were the table's highest + 1, so a machine with
+        another mod's modes (3, 7: DEFP_MOD1.MST) gave every pack other ids than one without, and the guest did not
+        own the host's pack (「未持有此内容」). They are fixed now; a mod already on one of them refuses, saying which."""
+        plain = sgo.write_depth_first(0, {'ModeList': [stock_mode(c, o) for c in (0, 1, 2) for o in (0, 1)]})
+        modded = sgo.write_depth_first(0, {'ModeList': [stock_mode(c, o) for c in (0, 1, 2) for o in (0, 1)]
+                                           + [stock_mode(3, 0, 'MOD1.MST'), stock_mode(7, 1, 'MOD3.MST')]})
+        every = campaign.SLOTS
+        self.assertEqual(campaign.pack_config(plain, every)[1], campaign.pack_config(modded, every)[1])
+        self.assertEqual(campaign.pack_config(modded, every)[1], campaign.CONTENT)
+        self.assertEqual(sorted(campaign.CONTENT.values()), list(range(65, 72)))
+        clash = sgo.write_depth_first(0, {'ModeList': [stock_mode(c, o) for c in (0, 1, 2) for o in (0, 1)]
+                                          + [stock_mode(69, 0, 'MOD9.MST')]})
+        with self.assertRaises(campaign.Refused) as refused:
+            campaign.pack_config(clash, (campaign.RANGE,))   # the whole reserved run, not only the packs installed
+        self.assertIn('69（STORY）', str(refused.exception))
+        self.assertIn('65..71', str(refused.exception))
 
     def test_range_pack_and_mission_go_together(self) -> None:
         """testrange/gen.py: the pack is registered with the mission and taken out before it (a pack naming a missing
@@ -468,6 +483,12 @@ class CampaignLifecycleTests(unittest.TestCase):
         gen.uninstall(self.root, unregister=False)
         self.assertFalse(any(gen.ours(self.root, m) for m in gen.LEGACY_SLOTS))
         self.assertTrue(os.path.isfile(other))
+
+
+def stock_mode(content: int, online: int, mst: str = '') -> list:
+    """A ModeList entry like the stock ones (members as docs/mission-list-re.md §7 lists them)."""
+    return ['STORY', 'DESC', 0, 0, 0, mst or f'M{content}{online}.MST', ['app:/mission/missionlist.sgo'], 0, online,
+            content, online]
 
 
 TANK = 'OBJECT/VEHICLE301_TANK_AI.SGO'   # the object the real game faulted on (M515, M190), 2026-10-13
@@ -514,11 +535,43 @@ class Edf41SkipTests(unittest.TestCase):
             self.addCleanup(started.stop)
 
     def planned(self, skip41: object = frozenset()) -> tuple[list[str], dict[str, str]]:
+        """The missions this machine can play (the rest are placeholder rows), and why each other one is not."""
         rows, skipped = campaign.plan41(self.root, set(), 'edf41', skip41)   # type: ignore[arg-type]
-        return [r['path'] for r in rows], {path: why for _g, path, why in skipped}
+        self.assertEqual([r['path'] for r in rows], list(MISSIONS41), 'a row left out: the rows after it moved')
+        self.assertEqual({r['path'] for r in rows if not campaign.available(r)}, {path for _g, path, _w in skipped})
+        return [r['path'] for r in rows if campaign.available(r)], {path: why for _g, path, why in skipped}
 
     def test_everything_installed_offers_every_mission(self) -> None:
         self.assertEqual(self.planned()[0], list(MISSIONS41))
+
+    def test_two_machines_agree_on_every_room_row(self) -> None:
+        """A room publishes only (DLC, MISSION_NO): two machines must map each to the same mission. Machine A has
+        every 4.1 map and no other mod; machine B has another mod's modes and failed to convert NW_KOUSOUBLD01 (M003).
+        Before 2026-10-18 B's ids were others (the table's highest + 1) and its M004 sat at A's M003's row: the guest
+        entered another mission than the host (or none). Now both map every (id, row) alike, B's M003 a placeholder
+        row; the definition digest is the same, only B's Missing mask differs."""
+        def machine(config_modes: list, skip41: object) -> tuple[dict[tuple[int, int], str], list[dict]]:
+            config = sgo.write_depth_first(0, {'ModeList': config_modes})
+            _, ids = campaign.pack_config(config, campaign.SLOTS)
+            rows, _ = campaign.plan41(self.root, set(), 'edf41', skip41)   # type: ignore[arg-type]
+            group = {p41.pack.group: p41.pack.tag for p41 in campaign.PACKS41}
+            by_pack: dict[str, list[dict]] = {}
+            for r in rows:
+                by_pack.setdefault(group[r['group']], []).append(r)
+            return {(ids[tag], i): r['key'] for tag, pack_rows in by_pack.items()
+                    for i, r in enumerate(pack_rows)}, rows
+        stock = [stock_mode(c, o) for c in (0, 1, 2) for o in (0, 1)]
+        a, rows_a = machine(stock, frozenset())
+        b, rows_b = machine(stock + [stock_mode(3, 0, 'MOD1.MST'), stock_mode(4, 1, 'MOD1.MST')],
+                            {'NW_KOUSOUBLD01': '转换失败：x'})
+        self.assertEqual(a, b)
+        self.assertEqual(a[(campaign.CONTENT['EDF41'], 3)], 'EDF41/M004')
+        held = [r['path'] for r in rows_b if not campaign.available(r)]
+        self.assertEqual(held, ['M003'])
+        self.assertEqual(campaign.pack_digest(campaign.PACK41, rows_a), campaign.pack_digest(campaign.PACK41, rows_b))
+        self.assertEqual((campaign.missing_mask(rows_a), campaign.missing_mask(rows_b)), ('00', '40'))
+        # the list's successors skip the placeholder: clearing M002 opens M004, nothing ever opens M003
+        self.assertEqual(campaign.successors(rows_b), [[1], [3], [3], [4], []])
 
     def test_object_left_out_removes_its_missions_only(self) -> None:
         paths, skipped = self.planned({TANK: "another mod's file in Mods: OBJECT/V505_TANKEDF4.MRAB"})
@@ -580,6 +633,38 @@ class Edf41SkipTests(unittest.TestCase):
         self.assertIn('NW_KOUSOUBLD01', calls[1])
         self.assertEqual(len(installed), 1)
         self.assertEqual([r['path'] for r in installed[0][2]['rows']], ['M001', 'M002', 'M004', 'M005'])
+
+
+class PacksFileTests(unittest.TestCase):
+    def test_plugin_reads_what_the_installer_writes(self) -> None:
+        """EDF6VehicleCrew.packs.ini as the plugin reads it (src/plugin.cpp LoadMissionPacks: the Win32 profile API on
+        [Pack<id>] Tag, Digest, Rows, Missing): every pack's section, the values as written."""
+        rows = [{'key': f'EDF41/M{i:03}'} for i in range(9)]
+        rows[2]['missing'] = rows[8]['missing'] = 'x'
+        data = campaign.packs_ini((campaign.PACK41, campaign.RANGE),
+                                  {campaign.PACK41.group: rows, campaign.RANGE.group: [{'key': 'EDF6/R'}]})
+        with tempfile.TemporaryDirectory(prefix='edf6-packs-ini-') as d:
+            path = os.path.join(d, 'EDF6VehicleCrew.packs.ini')
+            with open(path, 'wb') as f:
+                f.write(data)
+            text = ctypes.windll.kernel32.GetPrivateProfileStringW
+            text.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint,
+                             ctypes.c_wchar_p]
+            number = ctypes.windll.kernel32.GetPrivateProfileIntW
+            number.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_int, ctypes.c_wchar_p]
+            number.restype = ctypes.c_uint
+
+            def read(section: str, key: str) -> str:
+                out = ctypes.create_unicode_buffer(256)
+                text(section, key, '', out, 256, path)
+                return out.value
+            self.assertEqual(read('Pack69', 'Tag'), 'EDF41')
+            self.assertEqual(read('Pack69', 'Digest'), campaign.pack_digest(campaign.PACK41, rows))
+            self.assertEqual(len(read('Pack69', 'Digest')), 16)
+            self.assertEqual(number('Pack69', 'Rows', 0, path), 9)
+            self.assertEqual(read('Pack69', 'Missing'), '401')   # rows 2 and 8
+            self.assertEqual((read('Pack68', 'Tag'), read('Pack68', 'Missing')), ('EDF6TR', '0'))
+            self.assertEqual(read('Pack65', 'Tag'), '', 'a pack not installed has no section')
 
 
 if __name__ == '__main__':

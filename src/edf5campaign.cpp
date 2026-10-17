@@ -12,6 +12,11 @@
 // online mode sharing one content id, TestRangeContent (0: not installed), owned through the same hook. So is EDF4.1's
 // story (plan P6), slotted after the range so no installed pack's id moves, and its two DLC mission packs right after
 // it: EDF41Content .. +2 (0: not installed).
+// Since 2026-10-18 the ids are fixed (mission_packs.h: 65..71, whatever else the machine has installed: a room's DLC
+// is the id) and the plugin owns exactly the packs EDF6VehicleCrew.packs.ini lists in a run the ini names. A pack with
+// placeholder rows (a mission whose resources this machine lacks, kept so every row is the definition's) is owned only
+// while the mission select's hook (InstallPortedMissions) can keep those rows locked. A guest refused at the lobby's
+// join (0x8EC659) for one of our ids is told which pack this machine lacks.
 // Another plugin may have redirected a site first (EDF6Coop logs the lobby join's 0x8EC659 and loads before us, by
 // name): its call is chained, ours asking it instead of 0xD92B0. A site redirected inside EDF.dll is another build.
 #include "crew.h"
@@ -21,6 +26,7 @@
 #include <cstdint>
 #include <cstring>
 #include <array>
+#include <cwchar>
 #include <iterator>
 #include <utility>
 
@@ -44,30 +50,69 @@ constexpr unsigned kSites[]={
     0x91A655,   // (0x91A600)
 };
 bool campaignReady=false;
+bool missionsReady=false;             // InstallPortedMissions: the mission select's hook (placeholder rows locked)
 OwnedFn prior[std::size(kSites)]{};   // what each site called before us: 0xD92B0, or another plugin's hook of it
 
-// first: the EDF5 packs' first id, range: the test range's id, edf41: the first of EDF4.1's packs' ids (its story's;
-// its two DLC packs follow) (each 0 when not installed).
-constexpr bool Ours(int id,int first,int range,int edf41=0) noexcept {
-    return (first>0 && id>=first && id<first+kPacks) || (range>0 && id==range) || (edf41>0 && id>=edf41 && id<edf41+kPacks41);
+// The ini key naming `id`'s run (EDF5CampaignContent's three, TestRangeContent, EDF41Content's three): its fixed
+// first id, 0 for an id that is none of ours.
+constexpr int RunOf(int id) noexcept {
+    return id>=packs::kEdf5 && id<packs::kEdf5+kPacks ? packs::kEdf5 : id==packs::kRange ? packs::kRange
+         : id>=packs::kEdf41 && id<packs::kEdf41+kPacks41 ? packs::kEdf41 : 0;
 }
-static_assert(Ours(3,3,0) && Ours(5,3,0) && !Ours(6,3,0) && !Ours(2,3,0) && !Ours(0,0,0) && !Ours(3,0,0));
-static_assert(Ours(7,3,7) && !Ours(6,3,7) && Ours(4,0,4) && !Ours(0,0,0) && !Ours(5,0,4));
-static_assert(Ours(7,3,6,7) && Ours(8,3,6,7) && Ours(9,3,6,7) && !Ours(10,3,6,7) && Ours(7,0,0,7) && !Ours(0,3,6,0)
-              && !Ours(7,3,6,0));
+static_assert(RunOf(65)==65 && RunOf(67)==65 && RunOf(68)==68 && RunOf(69)==69 && RunOf(71)==69 && !RunOf(72)
+              && !RunOf(64) && !RunOf(3) && !RunOf(0) && packs::kEdf5+kPacks==packs::kRange && packs::kRange+1==packs::kEdf41
+              && packs::kEdf41+kPacks41==packs::kBase+packs::kCount);
+// `id`'s installed pack: listed in EDF6VehicleCrew.packs.ini, its run's ini key set (an older installer's id is 0
+// there: plugin.cpp PackContent). nullptr: not ours, or not installed.
+const packs::Pack* Installed(const Config& cfg,int id) noexcept {
+    const int run=RunOf(id);
+    const int key=run==packs::kEdf5 ? cfg.edf5CampaignContent : run==packs::kRange ? cfg.testRangeContent
+                : run==packs::kEdf41 ? cfg.edf41Content : 0;
+    return key==run && run ? cfg.missionPacks.Find(id) : nullptr;
+}
+// Owned by us: installed, and a pack with placeholder rows only while the mission select keeps them locked
+// (without that hook a placeholder cleared before its resources went missing would be selectable: a crash).
+bool Ours(const Config& cfg,int id) noexcept {
+    const packs::Pack* pack=Installed(cfg,id);
+    return pack && (missionsReady || !pack->MissingCount());
+}
+
+void ShowPackDialog(const wchar_t* text) noexcept {
+    MessageBoxW(GetActiveWindow(),text,L"全军出击：无法加入联机房间",MB_OK|MB_ICONWARNING);
+}
+using ShowPackProblem=void(*)(const wchar_t*) noexcept;
+ShowPackProblem showPackProblem=&ShowPackDialog;
+// The lobby's join refused one of our ids: say which pack, and why this machine does not have it.
+void ExplainRefusedPack(const Config& cfg,int id) noexcept {
+    wchar_t text[512]{};
+    const packs::Pack* pack=Installed(cfg,id);
+    if(pack)std::swprintf(text,std::size(text),L"房间的任务包是「%ls」。本机装了它，但它有 %d 关缺资源，而锁住这些关的选关钩子没有装上"
+        L"（日志 HOOK ported missions=0），所以不能使用这个任务包。\n\n请把日志发给作者。",packs::Name(id),pack->MissingCount());
+    else packs::Explain(id,packs::Admission{packs::Verdict::kNotInstalled},nullptr,text,std::size(text));
+    Log("ROOM join refused: reason=%s content=%d (the room's mission pack is not usable here)",
+        pack ? "pack-placeholders-unguarded" : packs::Reason(packs::Verdict::kNotInstalled),id);
+    showPackProblem(text);
+}
 
 // One hook per site, each asking what that site called before (so a chained plugin still sees every call).
 template<std::size_t I> bool __fastcall OwnedHook(std::uintptr_t mgr,int id) {
     const bool previous=prior[I](mgr,id);
     const auto& cfg=Cfg();
-    const bool mod=campaignReady && Ours(id,cfg.edf5CampaignContent,cfg.testRangeContent,cfg.edf41Content);
+    const bool mod=campaignReady && Ours(cfg,id);
     const bool allowed=previous || mod;
     // Only the lobby's join check: the pack-list sites also run while drawing the menu.
     // Coop's inner hook logs its native answer before ours has added MOD ownership; that is not this final result.
-    if constexpr(I==2)Log("ROOM content check site=%#x id=%d prior=%d mod=%d allowed=%d hooks_ready=%d EDF5=%d..%d range=%d EDF41=%d..%d",
-        kSites[I],id,previous,mod,allowed,campaignReady,cfg.edf5CampaignContent,
-        cfg.edf5CampaignContent>0 ? cfg.edf5CampaignContent+kPacks-1 : 0,cfg.testRangeContent,
-        cfg.edf41Content,cfg.edf41Content>0 ? cfg.edf41Content+kPacks41-1 : 0);
+    if constexpr(I==2) {
+        char owned[64]{};
+        std::size_t n=0;
+        for(int p=packs::kBase;p<packs::kBase+packs::kCount && n+4<sizeof(owned);++p)
+            if(Ours(cfg,p))n+=static_cast<std::size_t>(std::snprintf(owned+n,sizeof(owned)-n,"%s%d",n ? "," : "",p));
+        Log("ROOM content check site=%#x id=%d prior=%d mod=%d allowed=%d hooks_ready=%d EDF5=%d..%d range=%d EDF41=%d..%d packs=%s",
+            kSites[I],id,previous,mod,allowed,campaignReady,cfg.edf5CampaignContent,
+            cfg.edf5CampaignContent>0 ? cfg.edf5CampaignContent+kPacks-1 : 0,cfg.testRangeContent,
+            cfg.edf41Content,cfg.edf41Content>0 ? cfg.edf41Content+kPacks41-1 : 0,n ? owned : "none");
+        if(!allowed && campaignReady && packs::Reserved(id))ExplainRefusedPack(cfg,id);
+    }
     return allowed;
 }
 template<std::size_t... I> constexpr auto Hooks(std::index_sequence<I...>) { return std::array<OwnedFn,sizeof...(I)>{&OwnedHook<I>...}; }
@@ -86,6 +131,12 @@ bool Chainable(const unsigned char* target) noexcept {
     return target && (target==image+kOwned || target<image || target>=image+edf::kImageSize);
 }
 }  // namespace
+
+// The installed pack of a room's content id, for the room's identity (mod_room.cpp): nullptr when it is not ours or
+// not installed here.
+const packs::Pack* InstalledMissionPack(std::int64_t id) noexcept {
+    return packs::Reserved(id) ? Installed(Cfg(),static_cast<int>(id)) : nullptr;
+}
 
 // All or nothing: a pack enabled in the dialog but refused where another call asks is worse than stock.
 bool InstallEdf5Campaign() noexcept {
@@ -138,8 +189,11 @@ using ClearedFn=bool(__fastcall*)(unsigned);
 using Field5Fn=int(__fastcall*)(void*,unsigned);
 ClearedFn priorCleared=nullptr;   // 0x8A4C00, or another plugin's redirect of this call
 Field5Fn field5=nullptr;
-bool missionsReady=false;
 int lastOpened=-2,lastContent=-2;   // the last opening logged (one line per change, not per opening)
+int lastLocked=-2,lastLockedContent=-2;
+// The pack of the scan under way whose placeholder rows were locked at its row 0 (nullptr: none): its rows never
+// count as cleared (ClearedHook). Points into a published Config, never freed (plugin.cpp).
+const packs::Pack* scanPack=nullptr;
 
 // The current mode's content id (as 0x8A20F3 reads it), -1 when there is none to read.
 int CurrentContent(unsigned char*& gs) noexcept {
@@ -158,33 +212,52 @@ int CurrentContent(unsigned char*& gs) noexcept {
     return At<std::int32_t>(node+at,kModeContent);
 }
 
-// The rows' vector: {begin, end, capacity} at the caller's rsp+0x48.
+// The rows' vector: {begin, end, capacity} at the caller's rsp+0x48. PortedMissionsUnlocked opens a story pack's rows;
+// in any of our packs the placeholder rows are then locked (shown, not selectable).
 void OpenRows(unsigned char* vec) noexcept {
+    scanPack=nullptr;
     const auto& cfg=Cfg();
-    if(!cfg.portedMissionsUnlocked || !vec || !Readable(vec,0x18))return;
+    if(!vec || !Readable(vec,0x18))return;
     unsigned char* gs=nullptr;
     const int content=CurrentContent(gs);
-    if(!ported::StoryPack(content,cfg.edf5CampaignContent,cfg.edf41Content))return;
+    const packs::Pack* const pack=Installed(cfg,content);
+    const bool unlock=cfg.portedMissionsUnlocked && ported::StoryPack(content,cfg.edf5CampaignContent,cfg.edf41Content);
+    const bool lock=pack && pack->MissingCount()>0;
+    if(!unlock && !lock)return;
     auto* const begin=At<ported::ListRow*>(vec,0);
     auto* const end=At<ported::ListRow*>(vec,8);
-    int opened=-1;
+    std::size_t n=0;
     if(begin && end>begin) {
         const auto bytes=static_cast<std::size_t>(reinterpret_cast<unsigned char*>(end)-reinterpret_cast<unsigned char*>(begin));
-        if(bytes%sizeof(ported::ListRow)==0 && Readable(begin,bytes,true))
-            opened=ported::OpenAll(begin,bytes/sizeof(ported::ListRow),[gs](unsigned row){ return field5(gs+kModeCfg,row); });
+        if(bytes%sizeof(ported::ListRow)==0 && Readable(begin,bytes,true))n=bytes/sizeof(ported::ListRow);
     }
-    if(opened!=lastOpened || content!=lastContent) {
-        if(opened>=0)Log("PORTED missions unlocked: content %d, %d rows opened",content,opened);
-        else Log("PORTED missions: content %d, the rows are not the stock list's: left stock",content);
+    if(unlock) {
+        const int opened=n ? ported::OpenAll(begin,n,[gs](unsigned row){ return field5(gs+kModeCfg,row); }) : -1;
+        if(opened!=lastOpened || content!=lastContent) {
+            if(opened>=0)Log("PORTED missions unlocked: content %d, %d rows opened",content,opened);
+            else Log("PORTED missions: content %d, the rows are not the stock list's: left stock",content);
+        }
+        lastOpened=opened;lastContent=content;
     }
-    lastOpened=opened;lastContent=content;
+    if(lock) {
+        // After the opening: a placeholder row is never selectable, PortedMissionsUnlocked or not.
+        const int locked=n ? packs::LockPlaceholders(begin,n,*pack) : -1;
+        if(locked>=0)scanPack=pack;
+        if(locked!=lastLocked || content!=lastLockedContent)
+            Log("PACK placeholders: content %d (%s), %d of %d rows locked (the list has %zu)",content,pack->tag,locked,
+                pack->MissingCount(),n);
+        lastLocked=locked;lastLockedContent=content;
+    }
 }
 
 bool __fastcall ClearedHook(unsigned row,unsigned char* vec) {
     if(row==0) {
-        __try { OpenRows(vec); } __except(EXCEPTION_EXECUTE_HANDLER){ Log("PORTED missions: opening the rows failed (stock)"); }
+        __try { OpenRows(vec); } __except(EXCEPTION_EXECUTE_HANDLER){ scanPack=nullptr;Log("PORTED missions: opening the rows failed (stock)"); }
     }
-    return priorCleared(row);
+    const bool cleared=priorCleared(row);
+    // A placeholder never counts as cleared: one cleared before this machine lost its resources would be shown
+    // cleared (0, selectable) and load a mission that is not there. Its successors are the row after it already.
+    return cleared && !(scanPack && scanPack->Missing(static_cast<int>(row)));
 }
 }  // namespace
 

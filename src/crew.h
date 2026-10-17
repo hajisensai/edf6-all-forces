@@ -12,6 +12,7 @@
 #include "sightzoom.h"
 #include "stores.h"
 #include "edf/seat.h"
+#include "mission_packs.h"
 
 namespace crew {
 extern unsigned char* image;
@@ -349,9 +350,13 @@ struct Config {
     bool edf41Net=true;             // the 4.1 classes' parts / spawns get the game's child identity, the host's decisions travel to the guests
     bool edf41NetMirror=false;      // development only, offline: a second UfoRobo follows the first through the game's own stream code (a guest copy)
     bool terrainShare=true;         // every placement of one terrain piece drawn from one decode (fieldshare.cpp), from the game's start
-    int edf5CampaignContent=0;       // the EDF5 mission packs' first content id (edf5campaign.cpp; 0 = none installed): owned like a DLC
-    int testRangeContent=0;          // the test range mission pack's content id (offline and online modes; 0 = not installed): owned the same way
-    int edf41Content=0;              // the first of the EDF4.1 packs' content ids (the story; its Mission Pack 1 and 2 are +1, +2; offline and online modes; 0 = not installed): owned the same way
+    // The mission packs' content ids are fixed (mission_packs.h kEdf5 / kRange / kEdf41, tools/make_edf5_campaign.py
+    // CONTENT); the ini says which are installed. Any other value is an older installer's (an id that depended on the
+    // mods installed, 2026-10-15): logged and taken as 0 until the installer runs again (plugin.cpp LoadConfig).
+    int edf5CampaignContent=0;       // the EDF5 mission packs' first content id, 65 (edf5campaign.cpp; 0 = none installed): owned like a DLC
+    int testRangeContent=0;          // the test range mission pack's content id, 68 (offline and online modes; 0 = not installed): owned the same way
+    int edf41Content=0;              // the first of the EDF4.1 packs' content ids, 69 (the story; its Mission Pack 1 and 2 are +1, +2; offline and online modes; 0 = not installed): owned the same way
+    packs::Table missionPacks;       // EDF6VehicleCrew.packs.ini: each installed pack's identity and placeholder rows (mission_packs.h)
     // The ported content unlocked (unlock_ported.h; both off by default: a shared package keeps everyone's progress):
     bool portedMissionsUnlocked=false;  // every mission of the EDF5 / EDF4.1 packs selectable (edf5campaign.cpp InstallPortedMissions), live
     bool portedWeaponsUnlocked=false;   // every ported weapon owned at the next save load (airstrike.cpp UnlockDlcHook); never taken back

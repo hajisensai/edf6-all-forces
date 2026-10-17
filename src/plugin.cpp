@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
+#include <iterator>
 #include <new>
 #pragma warning(push)
 #pragma warning(disable:4201)
@@ -107,6 +108,49 @@ int ReadInt(const wchar_t* key,DWORD fallback) noexcept {
 void Fix(const char* key,float& v,float lo,float hi) noexcept {
     const float c=v<lo ? lo : v>hi ? hi : v;
     if(c!=v){Log("CONFIG %s=%g out of range [%g, %g]: %g used",key,v,lo,hi,c);v=c;}
+}
+// A mission pack run's ini id (EDF5CampaignContent, TestRangeContent, EDF41Content): 0 or the run's fixed id
+// (mission_packs.h). An older installer's id (one that depended on the mods installed: 3..9 for most) is logged and
+// taken as 0: its CONFIG.SGO has the packs at other ids, which the next install moves to the fixed ones.
+int PackContent(const char* key,int v,int fixed) noexcept {
+    if(v==0 || v==fixed)return v;
+    Log("CONFIG %s=%d is an older installer's mission pack id (now fixed %d): its packs are not owned until the "
+        "installer runs again",key,v,fixed);
+    return 0;
+}
+// EDF6VehicleCrew.packs.ini beside the ini (tools/make_edf5_campaign.py PACKS_FILE): [Pack<id>] Tag, Digest, Rows,
+// Missing for each installed pack. A section that does not parse is left out (its pack not owned) and logged.
+void LoadMissionPacks(packs::Table& table) noexcept {
+    table=packs::Table{};
+    wchar_t path[MAX_PATH]{};
+    wcscpy_s(path,iniPath);
+    wchar_t* dot=wcsrchr(path,L'.');
+    if(!dot || wcscpy_s(dot,MAX_PATH-(dot-path),L".packs.ini"))return;
+    // ASCII values (the installer writes nothing else): read wide, so a game path in any code page works.
+    const auto narrow=[](const wchar_t* w,char* out,std::size_t size){
+        std::size_t i=0;
+        for(;w[i] && i+1<size;++i)out[i]=w[i]<0x80 ? static_cast<char>(w[i]) : '?';
+        out[i]=0;
+    };
+    int found=0;
+    for(int id=packs::kBase;id<packs::kBase+packs::kCount;++id) {
+        wchar_t section[16]{},value[packs::kMaxRows/4+2]{};
+        char tag[32]{},digest[32]{},mask[packs::kMaxRows/4+2]{};
+        swprintf_s(section,L"Pack%d",id);
+        GetPrivateProfileStringW(section,L"Tag",L"",value,static_cast<DWORD>(std::size(value)),path);
+        narrow(value,tag,sizeof(tag));
+        if(!tag[0])continue;
+        GetPrivateProfileStringW(section,L"Digest",L"",value,static_cast<DWORD>(std::size(value)),path);
+        narrow(value,digest,sizeof(digest));
+        GetPrivateProfileStringW(section,L"Missing",L"",value,static_cast<DWORD>(std::size(value)),path);
+        narrow(value,mask,sizeof(mask));
+        const int rows=static_cast<int>(GetPrivateProfileIntW(section,L"Rows",0,path));
+        if(packs::Make(id,tag,digest,rows,mask,table.packs[id-packs::kBase]))++found;
+        else Log("CONFIG EDF6VehicleCrew.packs.ini [Pack%d] malformed (Tag=%s Rows=%d): that pack is not owned",id,tag,rows);
+    }
+    static int logged=-1;
+    if(found!=logged)Log("CONFIG mission packs: %d installed (EDF6VehicleCrew.packs.ini)",found);
+    logged=found;
 }
 DWORD FixInt(const char* key,int v,int lo,int hi) noexcept {
     const int c=v<lo ? lo : v>hi ? hi : v;
@@ -552,9 +596,10 @@ void LoadConfig() noexcept {
     n.edf41Mother401Place=ReadFloat(L"Edf41Mother401Place",n.edf41Mother401Place);
     n.edf41Net=ReadBool(L"Edf41Net",n.edf41Net);                     // the 4.1 classes online (edf41net.cpp)
     n.edf41NetMirror=ReadBool(L"Edf41NetMirror",n.edf41NetMirror);
-    n.edf5CampaignContent=FixInt("EDF5CampaignContent",ReadInt(L"EDF5CampaignContent",n.edf5CampaignContent),0,65535);
-    n.testRangeContent=FixInt("TestRangeContent",ReadInt(L"TestRangeContent",n.testRangeContent),0,65535);
-    n.edf41Content=FixInt("EDF41Content",ReadInt(L"EDF41Content",n.edf41Content),0,65535);
+    n.edf5CampaignContent=PackContent("EDF5CampaignContent",ReadInt(L"EDF5CampaignContent",n.edf5CampaignContent),packs::kEdf5);
+    n.testRangeContent=PackContent("TestRangeContent",ReadInt(L"TestRangeContent",n.testRangeContent),packs::kRange);
+    n.edf41Content=PackContent("EDF41Content",ReadInt(L"EDF41Content",n.edf41Content),packs::kEdf41);
+    LoadMissionPacks(n.missionPacks);
     n.portedMissionsUnlocked=ReadBool(L"PortedMissionsUnlocked",n.portedMissionsUnlocked);
     n.portedWeaponsUnlocked=ReadBool(L"PortedWeaponsUnlocked",n.portedWeaponsUnlocked);
     n.airSoftEdge=ReadFloat(L"AirSoftEdge",n.airSoftEdge);
