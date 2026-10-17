@@ -243,7 +243,7 @@ HECTOR_WEAPONS: dict[tuple[str, str], HectorWeapon] = {
 # charge.time frames (+0x140 -> +0x2E8, counted down to the first shot, 0x6D5474..0x6D556A) and plays the class's charge
 # effect and sound meanwhile.
 HECTOR_CHARGE: dict[str, float] = {'Hector301_Cannon': 180.0, 'Hector401_Cannon': 360.0, 'Hector401_Launcher': 120.0}
-HECTOR_CHARGE_LIGHT_SLOT = 4      # animation_model[4]'s fifth entry: 301 cannon's charge light, the plugin plays it
+HECTOR_CHARGE_LIGHT_SLOT = 4      # where 301 cannon's charge light would go (not shipped: alias_dsgo, the M113 glare)
 
 # The Hector variants 4.1's missions name (root SGO -> (generation, left arm, right arm, missions)). The letters are
 # what the SGO's hector_weapon holds (arms_l then arms_r), not the file name: HECTOR401SG holds the gatling on the
@@ -2754,10 +2754,13 @@ def alias_dsgo(games: 'Games', root: str, files: dict[str, bytes], a: Alias, t_d
         glow = death = mine['material_animation'][0]
     slots = [dsgo.Node([dsgo.Blob(death if i == BERSERKER_DEATH_SLOT else glow, 2), c.items[1]])
              for i, c in enumerate(t_am.get('material_animation').items)]
-    if light is not None:     # a fifth player (0x6DC6B0 makes one per entry), only the plugin starts it; the mode word as
-        if len(slots) != HECTOR_CHARGE_LIGHT_SLOT:     # the template's one-shot entries (2, 3) have it
-            raise ValueError(f'{rel}: the template has {len(slots)} material animations, the charge light expects 4')
-        slots.append(dsgo.Node([dsgo.Blob(light, 2), t_am.get('material_animation').items[2].items[1]]))
+    # 301 cannon's charge light (`light`) is not shipped. As a fifth entry played by the plugin (2026-10-17, 30c7b29c) it
+    # turned M113 purple-white from the first charges on and the whole screen white by 165 s (real run; the same mission
+    # with the earlier SGOs is normal): its light0_color goes to (10, 10, 100) in 120 frames (4.1 block 1; the glow block
+    # stays at 2 / 0.5 / 0.2), which 4.1 plays with the player word 1 (EDF41.exe 0x225603 -> 0x32FA93 +8) where every
+    # EDF6 entry has 0 or 2, and EDF6's meaning of that word is not known. Until it is, the charge shows only the class's
+    # own charge effect at the muzzle.
+    del light
     model.items[4] = dsgo.Node(slots)
     out.set('animation_model', model)
 
@@ -2771,9 +2774,6 @@ def alias_dsgo(games: 'Games', root: str, files: dict[str, bytes], a: Alias, t_d
         if all(g.fire for g in a.guns):
             hector_fire(games, files, mine, out, a)
             out.set(HECTOR_ANIM_KEY, dsgo_value(hector_anim(files, a, mdb_bones(files[rab_rel], mdb_name))))
-            # each arm's charge light: the material animation slot the plugin plays while its battery charges, -1 none
-            out.set(HECTOR_LIGHT_KEY, dsgo_value([float(HECTOR_CHARGE_LIGHT_SLOT if light is not None
-                                                        and g.fire.cls == 'Hector301_Cannon' else -1) for g in a.guns]))
 
     cas = rel_of(am[1])
     template_cas = rel_of(t_am.items[1])
