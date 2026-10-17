@@ -24,6 +24,7 @@
 // {type (0 array, 1 int, 2 float), count, value or offset of the first child from the node} or null.
 // EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "edf41dragon_wake.h"
 #include "memory.h"
 
 #include <cmath>
@@ -69,6 +70,12 @@ constexpr std::size_t kPosAt=0x90;               // vec4 (edf41ai.cpp)
 // when +0x378 is set, [[+0x368]] + 0x10.
 constexpr std::size_t kTargetOf=0x30C0F0,kTargetBodyAt=0x378,kTargetBodyPosAt=0x368;
 constexpr std::uint32_t kTrackEvery=300,kTrackLines=120;   // the track log: every 5 s, the first 10 minutes
+// The knock-down state (edf41dragon_wake.h): the CAS states it plays (fly_damage_large, then down), the state machine's
+// clock (a pointer at +0x1CD8 to seconds in the state, read so by 0x339729), the ragdoll (+0xB10) and its rest sum
+// (0x6EB150: sum of mass x (|v| + |w|) over its bodies).
+constexpr std::size_t kKnockStateAt=0x1540,kDownStateAt=0x1548,kStateClockAt=0x1CD8,kRagdollAt=0xB10;
+constexpr std::size_t kRestSum=0x6EB150;
+constexpr std::uint32_t kKnockEvery=60,kKnockLines=240;   // the knock-down log: every 1 s while down, 240 lines a dragon
 // InitParam (0x1E0 bytes): speed +0x94, life +0x98 (int), damage +0x9C, direct hits pass friends +0xB7, size +0xC0,
 // hit stop +0xCC, colour +0xD0, custom variant +0xE8 (tag u16 at +0xF8, 1 = an SGO node), seed +0x1A0.
 constexpr std::size_t kParamSize=0x1E0;
@@ -85,6 +92,7 @@ struct Handle {
 };
 using TickFn=std::uint64_t(__fastcall*)(void*,void*);
 using TargetOfFn=char*(__fastcall*)(void*);
+using RestSumFn=float(__fastcall*)(void*);
 using CruiseFn=void(__fastcall*)(void*,void*,float);
 using FireballFn=void(__fastcall*)(void*);
 using KeyNodeFn=const Node*(__fastcall*)(void*,const wchar_t*);
@@ -117,6 +125,7 @@ struct Dragon {
     int lastState=-2;
     int logged=0;
     unsigned probe=0;
+    std::uint32_t knockTicks=0,knockLogged=0;
     std::uint32_t ticks=0;
 };
 
@@ -306,6 +315,17 @@ std::uint64_t __fastcall TickHook(void* self,void* arg) {
         Log("EDF41DRAGON %p state %d -> %d (length %.1f)",self,d->lastState,state,*reinterpret_cast<float*>(clip+kPlayerLength));
     }
     d->lastState=state;
+    const bool knocked=state>=0 && (state==*reinterpret_cast<int*>(me+kKnockStateAt) || state==*reinterpret_cast<int*>(me+kDownStateAt));
+    if(!knocked)d->knockTicks=0;
+    else if(d->knockTicks++%kKnockEvery==0 && d->knockLogged<kKnockLines) {   // why it stays down (edf41dragon_wake.h)
+        ++d->knockLogged;
+        const float* clock=*reinterpret_cast<const float* const*>(me+kStateClockAt);
+        const float settle=reinterpret_cast<RestSumFn>(image+kRestSum)(me+kRagdollAt);
+        const float seconds=clock ? *clock : -1.0f;
+        Log("EDF41DRAGON %p knocked down: state %d clock %.1f s rest sum %.0f (under %.0f gets up) -> %s; 4.1 would %s",self,
+            state,seconds,settle,edf41dragon::kSettled,edf41dragon::WakeName(edf41dragon::WakeReason(seconds,settle)),
+            edf41dragon::Wakes41(seconds,settle) ? "get up" : "stay down");
+    }
     if(++d->ticks%kTrackEvery==0 && d->ticks/kTrackEvery<=kTrackLines) {   // where it flies (does it close on the fight?)
         const float* pos=reinterpret_cast<const float*>(me+kPosAt);
         const char* target=reinterpret_cast<TargetOfFn>(image+kTargetOf)(me);
