@@ -291,7 +291,11 @@ def build(root6: str, root41: str) -> dict[str, Blob]:
 
 
 def rel41(path: str, root41: str) -> str | None:
-    """A source's path under the EDF4.1 folder (an asset pack's rel), None for one of EDF6's."""
+    """A source's path under the EDF4.1 folder (an asset pack's rel), None for one of EDF6's. EDF6 may be on another
+    drive than the pack (a share package unpacked to C:, Steam on D:): a path on another drive is not under it, and
+    os.path.relpath refuses that pair outright (ValueError), so the drives are compared first."""
+    if os.path.splitdrive(os.path.abspath(path))[0].lower() != os.path.splitdrive(os.path.abspath(root41))[0].lower():
+        return None
     rel = os.path.relpath(path, root41)
     return None if rel.startswith('..') or os.path.isabs(rel) else rel.replace(os.sep, '/')
 

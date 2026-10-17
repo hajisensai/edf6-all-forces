@@ -9321,6 +9321,28 @@ def edf41_asset_pack() -> None:
             with contextlib.redirect_stdout(io.StringIO()) as out:
                 assert installer.check_edf41_source(r6)
             assert '清单里的文件齐全' in out.getvalue(), out.getvalue()
+        # the frozen installer: the pack next to its exe, else next to the installer whose menu 3 downloaded it
+        # (unpacked into <that installer's folder>/<build>/: tools/testhub.py download_latest); none: the exe's own
+        shell = os.path.join(tmp, 'share')
+        os.makedirs(os.path.join(shell, 'build-2'))
+        with mock.patch.object(sys, 'frozen', True, create=True):
+            with mock.patch.object(sys, 'executable', os.path.join(shell, 'build-2', 'x.exe')):
+                assert edf41src.beside_installer() == os.path.join(shell, 'build-2', edf41src.FOLDER)
+                os.rename(pack, os.path.join(shell, edf41src.FOLDER))
+                try:
+                    assert edf41src.beside_installer() == os.path.join(shell, edf41src.FOLDER)
+                    with mock.patch.object(sys, 'executable', os.path.join(shell, 'x.exe')):
+                        assert edf41src.beside_installer() == os.path.join(shell, edf41src.FOLDER)
+                finally:
+                    os.rename(os.path.join(shell, edf41src.FOLDER), pack)
+        # EDF6 on another drive than the pack (a share package unpacked to C:, Steam on D:): EDF6's files are not
+        # the pack's, and os.path.relpath of such a pair raises; it must not stop the install (2026-10-17 review)
+        if os.name == 'nt':
+            other = 'Q:' if os.path.splitdrive(os.path.abspath(pack))[0].upper() != 'Q:' else 'R:'
+            assert s.rel41(other + r'\EDF6\SOUND\PC\TIKYUUX_SE.ACB', pack) is None
+            assert s.rel41(os.path.join(pack, 'SOUND', 'PC', s.SE_BANK), pack) == f'SOUND/PC/{s.SE_BANK}'
+            for g in s.GROUPS:
+                assert not [w for w in s.missing(g, other + r'\EDF6', pack) if '素材包' in w], g   # only EDF6's own
         # maps from the pack: written; current again from EDF4.1's same files; removed without a source
         converted: list[str] = []
 

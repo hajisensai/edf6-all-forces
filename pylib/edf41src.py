@@ -47,10 +47,17 @@ def is_pack(path: str | None) -> bool:
 
 def beside_installer() -> str:
     """`edf41` next to the installer: the frozen exe's folder in a release, the repository root otherwise (as
-    pylib/obj_model.py model_roots does for models/)."""
-    here = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else \
+    pylib/obj_model.py model_roots does for models/). A frozen installer that menu 3 downloaded is unpacked into a
+    folder of its own under the old installer's (tools/testhub.py download_latest: <old exe's folder>/<build>/) and the
+    release zip carries no pack, so the pack beside the installer it was downloaded by, one folder up, is it too: else
+    the update would find no source and take EDF4.1's story missions out of the campaign."""
+    frozen = getattr(sys, 'frozen', False)
+    here = os.path.dirname(os.path.abspath(sys.executable)) if frozen else \
         os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
-    return os.path.normpath(os.path.join(here, FOLDER))
+    near = [os.path.normpath(os.path.join(here, FOLDER))]
+    if frozen:
+        near.append(os.path.normpath(os.path.join(here, '..', FOLDER)))
+    return next((p for p in near if is_pack(p)), near[0])
 
 
 def _is_edf41(path: str | None) -> bool:
