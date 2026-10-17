@@ -355,6 +355,82 @@ inline bool ArmChain(const float* s0,const float* e0,const float* wrist,const fl
     return ArmChainTo(s0,e0,wrist,wrist,shoulderWant,pole,upperMove,foreMove);
 }
 
+// --- The free (support) hand's arm (docs/fp-render-re.md §17.4) ---
+// The view's frustum: the camera's axes in the world (right on screen, up, ahead), its eye, the projection's x and y
+// scales (1/tan of the half angles) and its near clip.
+struct Frustum { float right[3],up[3],ahead[3],eye[3],xs,ys,nearClip; };
+
+// Whether a ball of radius `r` at `p` reaches into the view (a side plane's signed distance under r, ahead of the near
+// clip).
+inline bool Seen(const Frustum& f,const float* p,float r) noexcept {
+    float d[3];Sub(p,f.eye,d);
+    const float x=Dot3(d,f.right),y=Dot3(d,f.up),z=Dot3(d,f.ahead);
+    if(z+r<f.nearClip)return false;
+    const float kx=std::sqrt(f.xs*f.xs+1.0f),ky=std::sqrt(f.ys*f.ys+1.0f);
+    if((x*f.xs-z)/kx>r || (-x*f.xs-z)/kx>r)return false;
+    if((y*f.ys-z)/ky>r || (-y*f.ys-z)/ky>r)return false;
+    return true;
+}
+
+// The support hand's arm: the hand moved to `wrist` (its own turn on the gun kept) takes its forearm with it, turned
+// about the wrist toward the shoulder by at most `wristMost` (the wrist bends at most that much more than the
+// animation bends it); the upper arm turns about the elbow toward the shoulder
+// `shoulderWant` (the soldier's own, seen from the eye), both bones their measured length. Its open shoulder end must
+// stay out of the view (a ball of `sleeve` radius): when the shoulder's way would show it, the upper arm takes the
+// hidden way nearest it (a sleeve coming in from the edge, never a cut sleeve on screen). The upper arm's move and the
+// forearm's (a translation: the hand's) out. False: degenerate bones, or the elbow so deep in the view that no way
+// hides the end (the caller then uses the two-bone chain).
+inline bool SupportArm(const float* s0,const float* e0,const float* h0,const float* wrist,const float* shoulderWant,
+                       const Frustum& view,float sleeve,float wristMost,M4* upperMove,M4* foreMove) noexcept {
+    float v[3];Sub(e0,s0,v);
+    const float a=Length(v);
+    if(!(a>1e-5f))return false;
+    // The forearm: the animation's, turned about the wrist toward the shoulder by at most `wristMost` (rad), so the arm
+    // reaches back toward its body as far as a wrist bends without folding.
+    float f[3],g[3];Sub(e0,h0,f);
+    const float b=Length(f);
+    if(!Unit(f))return false;
+    Sub(shoulderWant,wrist,g);
+    float e1[3];
+    if(Unit(g) && wristMost>0.0f) {
+        float k[3];Cross3(f,g,k);
+        const float between=std::atan2(Length(k),Dot3(f,g));
+        if(Unit(k)) {
+            const float turn=std::fmin(between,wristMost);
+            const M4 r=Rotation(k,std::cos(turn),std::sin(turn));
+            float t[3];Point(r,f,t);std::memcpy(f,t,12);
+        }
+    }
+    for(int i=0;i<3;++i)e1[i]=wrist[i]+f[i]*b;
+    float u[3];Sub(shoulderWant,e1,u);
+    if(!Unit(u))return false;
+    // The shoulder's own way when its end is hidden; else the hidden way nearest it (5-degree steps over the sphere
+    // of ways, the nearest first).
+    float s1[3];
+    for(int i=0;i<3;++i)s1[i]=e1[i]+u[i]*a;
+    bool found=!Seen(view,s1,sleeve);
+    if(!found) {
+        float best=-2.0f,bestWay[3]={0,0,0};
+        for(int el=-17;el<=17;++el) {
+            const float phi=el*0.0872664626f,cp=std::cos(phi),sp=std::sin(phi);
+            const int around=static_cast<int>(72.0f*cp)+1;
+            for(int az=0;az<around;++az) {
+                const float th=az*6.2831853f/around;
+                float w[3];
+                for(int i=0;i<3;++i)w[i]=view.up[i]*sp+cp*(view.right[i]*std::cos(th)+view.ahead[i]*std::sin(th));
+                const float closeness=Dot3(w,u);
+                if(closeness<=best)continue;
+                float p[3];for(int i=0;i<3;++i)p[i]=e1[i]+w[i]*a;
+                if(Seen(view,p,sleeve))continue;
+                best=closeness;std::memcpy(bestWay,w,12);
+            }
+        }
+        if(best>-2.0f){for(int i=0;i<3;++i)s1[i]=e1[i]+bestWay[i]*a;found=true;}
+    }
+    if(!found)return false;
+    return SegmentMap(e0,h0,e1,wrist,foreMove) && SegmentMap(s0,e0,s1,e1,upperMove);
+}
+
 // The move that takes a hand whose wrist is at `wrist` onto the weapon whose bounds are `box` (rows: half axes right,
 // up, ahead; row 3 the centre, all through T): when the wrist lies further from the box's axis than the box's
 // elliptic section there plus `palm`, it is pulled in square to the axis to that distance (and along it into the

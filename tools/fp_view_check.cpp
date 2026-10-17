@@ -448,8 +448,51 @@ void OrientationAndSteadiness() {
     Expect(Near(lh[0],0.03f) && Near(lh[1],0.1f) && Near(lh[2],0.5f),"...its size along its own axes is its width wide",lh[0],lh[2]);
 }
 
+// The support hand's arm (§17.4): the forearm goes with the hand (its angle to the palm the animation's, < 20 degrees
+// of change: exactly none), both bones keep their length (no squeezed arm), the elbow is shared, and the open shoulder
+// end stays out of the view (no cut sleeve on screen) whichever way the animation had the forearm.
+void SupportArms() {
+    Frustum view{};
+    const float right[3]={1,0,0},up[3]={0,1,0},ahead[3]={0,0,1};
+    for(int i=0;i<3;++i){view.right[i]=right[i];view.up[i]=up[i];view.ahead[i]=ahead[i];view.eye[i]=0;}
+    view.xs=1.0f;view.ys=1.7f;view.nearClip=0.03f;
+    const float sleeve=0.035f,shoulder[3]={-0.1f,-0.103f,-0.085f};   // the Ranger's left shoulder, shrunk by 0.5
+    bool bend=true,lengths=true,elbow=true,hidden=true,reached=true,solved=true;
+    float worstBend=0;
+    for(int k=0;k<48;++k) {
+        // The animation's arm after T: a wrist on the guard, its forearm coming from below and behind (a support
+        // hand under the gun), turned round 30..150 degrees about the view's axis.
+        const float phase=0.5236f+k*0.0436f,tilt=0.4f+0.6f*std::fabs(std::sin(k*0.7f));
+        const float h0[3]={0.01f+0.03f*std::sin(k*1.3f),-0.11f,0.30f+0.08f*std::cos(k*0.9f)};
+        const float fdir[3]={-std::cos(phase)*0.5f,-std::fabs(std::sin(phase))*0.8f,-tilt*0.5f};
+        float f[3]={fdir[0],fdir[1],fdir[2]};Unit(f);
+        float e0[3],s0[3];for(int i=0;i<3;++i)e0[i]=h0[i]+f[i]*0.115f;
+        const float udir[3]={-0.4f,-0.5f,-0.6f};float u[3]={udir[0],udir[1],udir[2]};Unit(u);
+        for(int i=0;i<3;++i)s0[i]=e0[i]+u[i]*0.1035f;
+        const float wrist[3]={h0[0]+0.01f,h0[1]+0.02f,h0[2]-0.01f};   // held to the gun's box
+        M4 upper,fore;
+        if(!SupportArm(s0,e0,h0,wrist,shoulder,view,sleeve,0.30f,&upper,&fore)){solved=false;continue;}
+        float s1[3],e1[3],e2[3],w1[3],a[3],b[3];
+        Point(upper,s0,s1);Point(upper,e0,e1);Point(fore,e0,e2);Point(fore,h0,w1);
+        elbow=elbow && Apart(e1,e2)<1e-5f;reached=reached && Apart(w1,wrist)<1e-5f;
+        lengths=lengths && Near(Apart(s1,e1),0.1035f) && Near(Apart(e2,w1),0.115f);
+        Sub(h0,e0,a);Sub(w1,e2,b);Unit(a);Unit(b);
+        const float angle=std::acos(crew::fpview::Clamp(Dot3(a,b),-1.0f,1.0f))*57.29578f;   // the forearm turned against the palm
+        worstBend=std::fmax(worstBend,angle);bend=bend && angle<20.0f;
+        hidden=hidden && !Seen(view,s1,sleeve);
+    }
+    Expect(solved,"a support arm is found for every animated forearm");
+    Expect(bend,"the support hand's forearm keeps its angle to the palm (change < 20 degrees)",worstBend);
+    Expect(lengths,"upper arm and forearm keep their measured length (never squeezed)");
+    Expect(elbow && reached,"one shared elbow, the wrist on its place on the gun");
+    Expect(hidden,"the upper arm's open shoulder end is out of the view (no cut sleeve on screen)");
+    const float inView[3]={0,0,0.5f},below[3]={0,-0.6f,0.3f},behind[3]={0,-0.02f,-0.1f};
+    Expect(Seen(view,inView,0.01f) && !Seen(view,below,0.01f) && !Seen(view,behind,0.01f),"the frustum test: ahead seen, below and behind not");
+}
+
 int main() {
     OrientationAndSteadiness();
+    SupportArms();
     Expect(Near(CenteredGrip(.17f,.07f),.10f) && Near(CenteredGrip(.34f,.07f),.27f),
            "existing default grip values upgrade toward the centre",CenteredGrip(.17f,.07f));
     Expect(CenteredGrip(.02f,.07f)==0 && Near(CenteredGrip(-.17f,.07f),-.10f),
