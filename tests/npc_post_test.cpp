@@ -8,6 +8,8 @@
 namespace crew {
 bool NpcDriver(const unsigned char* v) noexcept { return v && SeatCount(v)>0 && SeatRider(SeatAt(const_cast<unsigned char*>(v),0))==Rider::dummy; }
 bool JetFliesItself(const void*) noexcept { return false; }   // no plugin jet in this world (command_unit.cpp)
+bool missionAi=false;   // mission_crew.cpp's answer: the stock RideAi was called on the vehicle
+bool MissionAiVehicle(const unsigned char*) noexcept { return missionAi; }
 
 unsigned char* image=nullptr;
 Config config{};
@@ -211,6 +213,38 @@ int main() {
     Check(!TankCommand(v,focus,focused),"friendly or absent target cannot be focused");
     Check(TankCommand(v,Command{}),"release clears focus");
     Check(At<int>(otherCtrl,12)==2,"clearing map focus releases its reference while native AI retains its own");
+    // EDF4.1 MP004 (2026-10-17, docs/feedback-2026-10-17-balam-npc.md): a mission's AI Balam (Vehicle501_FortressRobo,
+    // RideAi'd by its transporter formation) walks after the Erginus far past NpcLeash from where its crew first sat.
+    // The stock walk 0x604400 is never reached: the fixture image is not executable, so reaching it would fault here.
+    {
+        config=Config{};sessionOn=false;host=true;focusEnemy=nullptr;ResetNpcPosts();
+        std::memcpy(image+kBargaWalk,kBargaWalkSig,sizeof(kBargaWalkSig));
+        alignas(16) static unsigned char b[0x2700]{},bseat[kSeatStride]{},brider[0x400]{},bctrl[0x20]{};
+        Put<void*>(b,0,image+kVtBarga);Put<void*>(b,kSelfCtrl,bctrl);
+        Put<void*>(b,kSeats,bseat);Put<std::uint64_t>(b,kSeatCount,1);
+        Put<void*>(bseat,kSeatRider,brider);Put<void*>(bseat,kSeatRiderCtrl,bctrl);Put<int>(bctrl,8,1);
+        Put<void*>(brider,0,image+edf::kDummyRiderVtable);
+        Put<float>(b,kMatrix,1);Put<float>(b,kMatrix+40,1);
+        missionAi=true;
+        ++now;NpcPostInput(b);
+        Check(posts[0].ref.Is(b),"the mission Balam is seen (listed on the map, commandable)");
+        // Landed and walking at the Erginus 200 m on: the stock AI's walk (turn, forward) is in its block.
+        Put<float>(b,kPosition+8,200);
+        Put<float>(b,kBargaBlock+kBargaTurn,0.25f);Put<float>(b,kBargaBlock+kBargaForward,1.0f);
+        ++now;NpcPostInput(b);
+        Check(At<float>(b,kBargaBlock+kBargaTurn)==0.25f && At<float>(b,kBargaBlock+kBargaForward)==1.0f && !posts[0].active,
+              "a mission's AI Balam past the leash keeps its stock walk at the enemy (not walked back to its post)");
+        Check(At<float>(bseat,kSeatThrottle)==0 && At<float>(bseat,kSeatRightX)==0,"nor is its seat 0 stick written");
+        // Idle (no stock walk, no target) far from where it was first seen: still not walked back.
+        Put<float>(b,kBargaBlock+kBargaTurn,0);Put<float>(b,kBargaBlock+kBargaForward,0);
+        ++now;NpcPostInput(b);
+        Check(At<float>(b,kBargaBlock+kBargaTurn)==0 && At<float>(b,kBargaBlock+kBargaForward)==0 && !posts[0].active,
+              "an idle mission Balam is not walked back to where its crew first sat either");
+        CommandUnit u[1]{};
+        Check(TankCommandUnits(u,1)==1 && std::strcmp(u[0].name,"MECH")==0,"it stays on the map");
+        Check(TankCommand(b,guard) && posts[0].commanded,"a map guard order gives it a post (then the leash is the player's)");
+        missionAi=false;ResetNpcPosts();
+    }
     VirtualFree(image,0,MEM_RELEASE);
     std::printf("npc_post_test: %d checks passed\n",checks);
 }

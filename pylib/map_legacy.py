@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 import bigmap
+import sgo
 
 # ----------------------------------------------------------------------------- small helpers
 
@@ -612,6 +613,36 @@ def mapo_from_legacy(o: bytes, n_records: int) -> bytes:
         e = named_at + k * MAPO_NAMED
         struct.pack_into('<iii', new, e, new_pool + pool_rel[names[k]] - e, new_pool - e, 0)
     return bytes(new)
+
+
+def cable_graph(mapb: bytes) -> tuple[list[tuple[float, float, float, int]], list[tuple[int, int]]]:
+    """The electric wires of a mapb (either layout: the 0x7C block's fields are the same): its points (x, y, z, wire
+    type = index into the block's .elec name list) and the u16 point pairs the game draws a wire between (EDF.dll's
+    map::sync::cable_init 0x122730..0x1227EB walks exactly these pairs). Point 0 is a dummy (EDF6 zero, EDF4.1
+    uninitialised memory) that no pair names. Empty without the block."""
+    bb = i32(mapb, 0x7C)
+    if not bb:
+        return [], []
+    po, pn = bb + i32(mapb, bb), i32(mapb, bb + 4)
+    qo, qn = bb + i32(mapb, bb + 8), i32(mapb, bb + 0xC)
+    pts = [struct.unpack_from('<3fi', mapb, po + 16 * k) for k in range(pn)]
+    pairs = [struct.unpack_from('<2H', mapb, qo + 4 * k) for k in range(qn)]
+    return pts, pairs
+
+
+def trb_from_legacy(data: bytes) -> bytes:
+    """A tree member (.trb, an SGO) of an EDF4.1 / EDF5 MAC in EDF6's form: EDF6's first rule has one more value at its
+    end, an int, 0 in 79 of EDF6's 83 distinct .trb (7 values in all 20 of 4.1's and 49 of EDF5's, 8 in all of EDF6's).
+    4.1's sk_tree10m01.trb and sk_tree3m01.trb with that 0 appended, written depth first (sgo.write_depth_first), are
+    EDF6's files of the same names byte for byte (selftest edf41_trees_real). An EDF6 .trb is returned unchanged."""
+    version, members = sgo.read(data)
+    rules = members.get('rules')
+    if not isinstance(rules, list) or not rules or not isinstance(rules[0], list) or len(rules[0]) not in (7, 8):
+        raise ValueError('not a tree (.trb) SGO of 7 or 8 values in its first rule')
+    if len(rules[0]) == 8:
+        return data
+    rules[0].append(0)
+    return sgo.write_depth_first(version, members)
 
 
 # ----------------------------------------------------------------------------- MAC

@@ -35,7 +35,9 @@
 // hull (durability, damage, kills and targets travel natively); every machine runs the parts' machines from the same script
 // actions, a cannon's random charge timer is the host's.
 #include "crew.h"
+#include "edf41_hitlayer.h"
 #include "edf41classes.h"
+#include "edf41mother_pose.h"
 #include "edf41net.h"
 #include "memory.h"
 
@@ -117,6 +119,136 @@ bool MotherPrims() noexcept {
 }
 using DrawFn=void(__fastcall*)(void*,void*);
 using DamagedFn=void(__fastcall*)(void*,void*);
+
+// ---- the rest poses (src/edf41mother_pose.h; docs/feedback-2026-10-17-edf41-mother.md) ----------------------------------------
+// The game's own setters of a CAS player (cas, player index, value; H): speed +0x100 (0x116DF20, as EDF6_Martian's death 0x479677
+// stops its main player) and time +0xE8 (0x116DF40). SetState (0x116BFC0) resets the time, never the speed. Players: an array of
+// 0x160 at *(cas + 0x60), the clip length at +0xF0. The main player: EventAnimationObject cas +0x8F0, index [+0xC80];
+// UfoCarrier508 cas +0x980, index [+0xB30].
+constexpr std::size_t kCasSetSpeed=0x116DF20,kCasSetTime=0x116DF40,kEaoCas=0x8F0,kEaoMainPlayer=0xC80;
+constexpr MPrint kPosePrints[]={
+    {kCasSetSpeed,{0x8B,0xC2,0x48,0x69,0xD0,0x60,0x01,0x00}},{kCasSetSpeed+0xD,{0xF3,0x0F,0x11,0x94,0x02,0x00,0x01,0x00}},
+    {kCasSetTime,{0x8B,0xC2,0x48,0x69,0xD0,0x60,0x01,0x00}},{kCasSetTime+0xD,{0xF3,0x0F,0x11,0x94,0x02,0xE8,0x00,0x00}},
+};
+std::atomic<int> posePrims{0};
+bool PosePrims() noexcept {
+    const int s=posePrims.load();
+    if(s)return s==1;
+    for(const MPrint& p:kPosePrints)
+        if(!Readable(image+p.rva,8) || std::memcmp(image+p.rva,p.bytes,8)!=0) {
+            Log("EDF41MOTHER the code at EDF.dll+0x%zX is not what this was written for: the rest poses are off (the hull opens, the cannons unfold at spawn)",p.rva);
+            posePrims=2;
+            return false;
+        }
+    posePrims=1;
+    return true;
+}
+// The main player's clip length (frames) and index; false when the object has no readable player.
+bool MainClip(void* obj,std::size_t casAt,std::size_t indexAt,int* index,float* length) noexcept {
+    const char* o=static_cast<const char*>(obj);
+    if(!Readable(o+casAt+0x60,8) || !Readable(o+indexAt,4))return false;
+    const char* players=*reinterpret_cast<const char* const*>(o+casAt+0x60);
+    const int i=*reinterpret_cast<const std::int32_t*>(o+indexAt);
+    if(!players || i<0 || i>64 || !Readable(players+static_cast<std::size_t>(i)*0x160+0xE8,0x10))return false;
+    *index=i;
+    std::memcpy(length,players+static_cast<std::size_t>(i)*0x160+0xF0,4);
+    return std::isfinite(*length);
+}
+// 4.1's rest pose on the clip the EDF6 constructor started (edf41pose::RestHold).
+bool HoldRest(void* obj,edf41pose::Group g,std::size_t casAt,std::size_t indexAt,const char* what) noexcept {
+    const edf41pose::Hold hold=edf41pose::RestHold(g);
+    int index=-1;
+    float length=0.0f;
+    if(hold==edf41pose::Hold::kNone || !PosePrims() || !MainClip(obj,casAt,indexAt,&index,&length))return false;
+    char* cas=static_cast<char*>(obj)+casAt;
+    using SetFn=void(__fastcall*)(void*,int,float);
+    reinterpret_cast<SetFn>(image+kCasSetTime)(cas,index,edf41pose::HoldTime(hold,length));
+    if(hold==edf41pose::Hold::kFirstKeyStill)reinterpret_cast<SetFn>(image+kCasSetSpeed)(cas,index,edf41pose::HoldSpeed(hold,1.0f));
+    static std::atomic<int> said{0};
+    if(said.fetch_add(1)<6)Log("EDF41MOTHER %s %p: 4.1's rest pose held (%s of its %.0f-frame clip)",what,obj,
+        hold==edf41pose::Hold::kLastKey ? "the end" : "the start, stopped",length);
+    return true;
+}
+// ---- the parts' hit layer (src/edf41_hitlayer.h; H unless noted) ------------------------------------------------------------
+// A body's collision filter info: 0x11B1240(body handle) (handle = ragdoll body +0x50; the world's body +0x8C); a ragdoll's bodies
+// to a layer, keeping their groups: 0x6E9320(ragdoll, layer) (0x106170 recomposes, 0x11B1840 sets); the area damage's query filter:
+// 0x106070 = `xor edx,edx; xor r9d,r9d; xor r8d,r8d; lea ecx,[rdx+13]; jmp 0xD929F0` (the layer is the byte at +0xA). The filter
+// itself (hkpGroupFilterBase<Config<5,5,5,16>>, vtable 0x17E0788; its constructor 0xA3E710 fills the 32-word lookup table at +0x58
+// with ones, the game's own copy comes from data, 0x67DE40) is found from the physics world ([0x20B2958] + 0x68, the object
+// GroundHit and the gravity read use) by its vtable, read only.
+constexpr std::size_t kBodyFilterInfo=0x11B1240,kRagdollSetLayer=0x6E9320,kAreaQueryFilter=0x106070,kSceneAt=0x20B2958,
+    kScenePhysics=0x68,kGroupFilterVtable=0x17E0788,kGroupFilterTable=0x58,kGroupFilterCtor=0xA3E710;
+constexpr MPrint kLayerPrints[]={
+    {kBodyFilterInfo,{0x48,0x83,0xEC,0x28,0x48,0x8B,0x81,0x00}},{kRagdollSetLayer,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C}},
+    {kAreaQueryFilter,{0x33,0xD2,0x45,0x33,0xC9,0x45,0x33,0xC0}},
+    {kGroupFilterCtor+0x24,{0x48,0x8D,0x4B,0x58,0x48,0x8D,0x05,0x71}},   // lea rcx,[rbx+0x58]: the table
+};
+std::atomic<int> layerPrims{0};
+bool LayerPrims() noexcept {
+    const int s=layerPrims.load();
+    if(s)return s==1;
+    bool ok=true;
+    for(const MPrint& p:kLayerPrints)ok=ok && Readable(image+p.rva,8) && std::memcmp(image+p.rva,p.bytes,8)==0;
+    // the query filter's tail: lea ecx,[rdx+imm8]; jmp
+    ok=ok && Readable(image+kAreaQueryFilter+8,4) && image[kAreaQueryFilter+8]==0x8D && image[kAreaQueryFilter+9]==0x4A && image[kAreaQueryFilter+0xB]==0xE9;
+    if(!ok)Log("EDF41MOTHER the collision layer code is not what this was written for: the parts keep EventAnimationObject's layer (rockets do not reach them)");
+    layerPrims=ok ? 1 : 2;
+    return ok;
+}
+int AreaQueryLayer() noexcept { return static_cast<int>(image[kAreaQueryFilter+0xA]); }
+// The layer of a ragdoll's first body (-1: none).
+int RagdollLayer(void* ragdoll,std::size_t* count=nullptr) noexcept {
+    const char* r=static_cast<const char*>(ragdoll);
+    if(!Readable(r+0x78,0x18))return -1;
+    const char* data=*reinterpret_cast<const char* const*>(r+0x78);
+    const std::size_t n=*reinterpret_cast<const std::size_t*>(r+0x88);
+    if(count)*count=n;
+    if(!data || !n || n>4096 || !Readable(data+0x50,8))return -1;
+    void* handle=*reinterpret_cast<void* const*>(data+0x50);
+    if(!handle || !Readable(static_cast<char*>(handle)+0xF0,0x18))return -1;
+    return edf41layer::LayerOf(reinterpret_cast<std::uint32_t(__fastcall*)(void*)>(image+kBodyFilterInfo)(handle));
+}
+// The game's group filter table, found from the physics world (two pointer levels, or embedded), cached per physics world.
+const std::uint32_t* GroupFilterTable() noexcept {
+    static const char* seenPhysics=nullptr;
+    static const std::uint32_t* table=nullptr;
+    const char* scene=Readable(image+kSceneAt,8) ? *reinterpret_cast<const char* const*>(image+kSceneAt) : nullptr;
+    const char* physics=scene && Readable(scene+kScenePhysics,8) ? *reinterpret_cast<const char* const*>(scene+kScenePhysics) : nullptr;
+    if(!physics)return nullptr;
+    if(physics==seenPhysics)return table;
+    seenPhysics=physics;
+    table=nullptr;
+    const void* vt=image+kGroupFilterVtable;
+    const auto filterAt=[&](const char* q) -> const std::uint32_t* {
+        if(!q || !Readable(q,kGroupFilterTable+edf41layer::kLayers*4))return nullptr;
+        return *reinterpret_cast<const void* const*>(q)==vt ? reinterpret_cast<const std::uint32_t*>(q+kGroupFilterTable) : nullptr;
+    };
+    for(std::size_t i=0;i<0x400 && !table && Readable(physics+i,8);i+=8) {
+        const char* q=*reinterpret_cast<const char* const*>(physics+i);
+        if((table=filterAt(physics+i))!=nullptr || (table=filterAt(q))!=nullptr)break;
+        if(!q || (reinterpret_cast<std::uintptr_t>(q)&7) || !Readable(q,0x800))continue;
+        for(std::size_t j=0;j<0x800 && !table;j+=8) {
+            const char* r=*reinterpret_cast<const char* const*>(q+j);
+            if(!(reinterpret_cast<std::uintptr_t>(r)&7))table=filterAt(r);
+        }
+    }
+    Log("EDF41MOTHER collision filter (vtable EDF+0x%zX) %s%s",kGroupFilterVtable,table ? "found, lookup table at " : "not found from the physics world",
+        table ? "" : " (the parts go to the hull's layer)");
+    if(table)Log("EDF41MOTHER   table %p: word 13 %08X, word 7 %08X, word 0x11 %08X",static_cast<const void*>(table),table[13],table[7],table[0x11]);
+    return table;
+}
+// A cannon's appear (4.1 0x259D20): from its start at speed 1, whatever the hold left (SetState keeps the clock of the state
+// already playing, and the hold stopped it).
+void PlayAppear(void* obj) noexcept {
+    PlayState(obj,L"appear");
+    int index=-1;
+    float length=0.0f;
+    if(!PosePrims() || !MainClip(obj,kEaoCas,kEaoMainPlayer,&index,&length))return;
+    char* cas=static_cast<char*>(obj)+kEaoCas;
+    using SetFn=void(__fastcall*)(void*,int,float);
+    reinterpret_cast<SetFn>(image+kCasSetTime)(cas,index,edf41pose::kAppearTime);
+    reinterpret_cast<SetFn>(image+kCasSetSpeed)(cas,index,edf41pose::kAppearSpeed);
+}
 
 Clone hullClass{"UfoCarrier508",kCarrierVtable,kSlots,kCarrierSlots,{},{},{}};
 Clone partClass{"EventAnimationObject",kEaoVtable,kPartSlots,kEaoSlots,{},{},{}};
@@ -291,6 +423,7 @@ struct Part {
     int devBone=-2;                  // development (Edf41DevShoot): the bone the shots aim at
     void* lock=nullptr;              // its lock point (4.1: the MAB lock target ターゲット, lockable while 0x250520 says so)
     int lockBone=-2;
+    bool restHeld=false;             // 4.1's rest pose put on the constructor's clip (edf41pose; once, on the first frame)
 };
 // The hull's main state machine (4.1 agent +0xB10, initial 0x252700; ticked only while it lives).
 enum { kHullClosed=1,kHullOpening,kHullOpen,kHullHidden,kHullClosing };
@@ -323,6 +456,7 @@ struct Hull {
     // 4.1's movement while alive (0x2512C0): its own position, velocity, the last route point (+0x9D0), yaw (+0xA04)
     bool moveInit=false,routeSeen=false;
     float pos[3]={},point[3]={},yaw=0.0f;
+    bool restHeld=false;             // closed as 4.1's, not the carrier's close_state (= the mothership's close clip) from open
 };
 std::recursive_mutex lock;
 int shotCount[5]={},removedCount[5]={};   // bullets fired and parts removed, for the periodic line
@@ -701,7 +835,7 @@ void CannonTick(void* obj,Part& p,Hull& h,float s) noexcept {
     PartPos(obj,pos);
     switch(p.state) {
         case kCanDormant:
-            if(p.enabled) { Switch(p,kCanAppear); PlayState(obj,L"appear"); PlaySe(p.hull,L"母船UFO中型砲台出現",pos); }
+            if(p.enabled) { Switch(p,kCanAppear); PlayAppear(obj); PlaySe(p.hull,L"母船UFO中型砲台出現",pos); }
             break;
         case kCanAppear:
             if(f>1 && AnimDone(obj)) {
@@ -1132,16 +1266,37 @@ void PartLock(void* obj,Part& p,bool lockable) noexcept {
     }
 }
 
+// A part's hit bodies onto the layer the area damage's query meets (edf41layer::HitLayer), once, on its first frame.
+void PartHitLayer(void* obj,Part& p) noexcept {
+    if(!(p.group==kCannon || p.group==kBigCannon || p.group==kPanel) || !LayerPrims())return;
+    void* ragdoll=static_cast<char*>(obj)+kEaoRagdoll;
+    std::size_t n=0;
+    const int part=RagdollLayer(ragdoll,&n),hull=RagdollLayer(static_cast<char*>(p.hull)+kCarrierRagdoll);
+    const int query=AreaQueryLayer();
+    const std::uint32_t* table=GroupFilterTable();
+    const int to=edf41layer::HitLayer(part,hull,query,table);
+    if(to!=part && to>=0)reinterpret_cast<void(__fastcall*)(void*,int)>(image+kRagdollSetLayer)(ragdoll,to);
+    static std::atomic<int> said[5]{};
+    if(said[p.group].fetch_add(1)<1)
+        Log("EDF41MOTHER %s %p hit layer: %zu bodies on layer 0x%X, the hull's 0x%X, the area query's 0x%X (met: part %d, hull %d%s) -> 0x%X (now 0x%X)",
+            kGroupNames[p.group],obj,n,part,hull,query,table ? (edf41layer::Sees(table,query,part) ? 1 : 0) : -1,
+            table ? (edf41layer::Sees(table,query,hull) ? 1 : 0) : -1,table ? "" : ", no table",to,RagdollLayer(ragdoll));
+}
 void PartFrame(void* obj,Part& p,Hull& h) noexcept {
     if(!p.sized) {
         p.sized=true;
         SetLevel(obj,F(p.hull,kRawLevelAt));
         SizeDurability(obj);
+        PartHitLayer(obj,p);   // rockets and missiles reach it (EventAnimationObject's layer 0x11 is not met by the area damage)
         if(p.group==kPanel) {
             std::int32_t t=0;
             p.type=Int(Key(obj,L"mp_type"),&t) ? t : 0;
             p.explodeDelay=3.0f+Random01(p.rng)*4.0f;
         }
+    }
+    if(p.group==kCannon && edf41pose::HoldNow(edf41pose::Group::kCannon,p.restHeld,p.state==kCanDormant)) {
+        p.restHeld=true;   // folded as 4.1's dormant cannon (no clip), not EventAnimationObject's default (= appear) unfolding it
+        HoldRest(obj,edf41pose::Group::kCannon,kEaoCas,kEaoMainPlayer,"cannon");
     }
     Masking(obj,p);
     {   // 4.1 0x250520: lockable = enabled, alive, not a static ring, not the neutral ship's main cannon, and the hull not neutral
@@ -1574,6 +1729,12 @@ std::uint64_t __fastcall HullUpdate(void* self,void* dt) {
         for(const auto& job:h.pending)AssignWave(h,job.first,job.second);
         h.pending.clear();
     }
+    // Closed as 4.1's hull rests (no clip), not on the carrier constructor's close_state (the mothership's close clip, from the
+    // opened pose): before HullMain, which opens it this same frame when a creation-frame ObjectAction 3 enabled the main cannon.
+    if(edf41pose::HoldNow(edf41pose::Group::kHull,h.restHeld,h.mainState==kHullClosed)) {
+        h.restHeld=true;
+        HoldRest(self,edf41pose::Group::kHull,kCarrierCas,kCarrierMainPlayer,"hull");
+    }
     // 4.1's fly sound (the ctor plays 母船UFO飛行 into +0xC10) in place of the carrier's se_fly_name hum (0x4F7DE0 -> +0xE10)
     if(h.death<kDeathFall) {
         SoundHandle* hum=reinterpret_cast<SoundHandle*>(static_cast<char*>(self)+kCarrierFly);
@@ -1777,10 +1938,15 @@ std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
     return r;
 }
 
+// The damage message as GameObjectBase's slot 9 (0x54A530) takes it: `add edx, 0xF0000000; cmp edx, 0xF` dispatches 0x10000000..
+// 0x1000000F and case 0 (0x10000000) is ApplyDamage (0x54A586 -> 0x547C30); the damage queue 0x543920 sends exactly that, for a
+// direct hit and for each object of an area damage alike (docs/damage-stats-re.md, docs/edf41-uforobo.md). edf41classes.h's
+// kMsgDamage (0xF0000000) never reaches this case, so until 2026-10-17 no part of the mothership ever played its hit sound here.
+constexpr std::uint32_t kMsgHit=0x10000000u;
 std::uint64_t __fastcall PartMessage(void* self,std::uint32_t msg,void* data) {
     const float before=F(self,kDurabilityAt);
     const std::uint64_t r=reinterpret_cast<MessageFn>(partClass.orig[kSlotMessage])(self,msg,data);
-    if(msg!=kMsgDamage || !data)return r;
+    if(msg!=kMsgHit || !data)return r;
     std::lock_guard<std::recursive_mutex> hold(lock);
     Part* p=PartOf(self);
     const float after=F(self,kDurabilityAt);

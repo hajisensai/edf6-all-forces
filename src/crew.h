@@ -332,6 +332,7 @@ struct Config {
     float edf41RoboPlace=0.0f;      // development only: the robot put this many m in front of the camera when it appears (0 = where the script puts it)
     int edf41DevShoot=0;            // development only: the edf41 classes' objects shot by the local player's bullets every n frames each (edf41classes DevShoot; 0 off)
     float edf41DevShootDamage=200.0f;   // ...the damage of each
+    float edf41DevShootBlast=0.0f;      // ...> 0: each an explosion of this radius (the area-damage path rockets and missiles take only), 0 a plain hit
     float edf41RoboTransformAfter=0.0f;   // development only: transform this many s after it appears, as ObjectAction 0 (0 = when the script says)
     bool edf41Mother401=true;       // EDF4.1's UfoMother401 (the Earth Eater) and its eleven part classes (edf41mother401.cpp)
     int edf41Mother401Dev=0;        // development only (bits): 1 attack always allowed, 2 short attack waits, 4 panels in place at once,

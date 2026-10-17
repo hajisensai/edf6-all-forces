@@ -7722,6 +7722,10 @@ def edf41_robo_plugin_contract() -> None:
     action = message.split('if(msg==kMsgAction', 1)[1].split('if(msg==kMsgDamage', 1)[0]
     assert re.search(r'return 1;\s*\}\s*\}\s*$', action), action
     assert 'AllowAnyTeam(roboClass);' in cpp
+    # the robot's AI is 4.1's A3 / A4 / A5 (src/edf41robo_ai.h, tests/edf41robo_ai_test.cpp): A5 holds the AI through the
+    # attack (it only attacked and never walked, 2026-10-17)
+    assert 'edf41robo::RobotAiStep(' in cpp and 'edf41robo::ChooseInStand(' in cpp
+    assert 'add_test(NAME edf41robo_ai COMMAND edf41robo_ai_test)' in cmake
     # the ground ray passes the robot's own ragdoll bodies (they lifted it on the M411 run)
     assert 'GroundHit(knee,to,hit,ragdoll) || GroundHit(top,knee,hit,ragdoll)' in cpp
     for name in m.ROBO_LOCATORS[:6] + ('左足歩行衝撃', '右足歩行衝撃', 'ロックオン'):
@@ -7966,6 +7970,85 @@ def edf41_mother401_plugin_contract() -> None:
     assert 'edf41c::AtGameShutdown(&ReleaseWeaponBank);' in sound and 'weaponBankPtr.store(nullptr);' in sound
     assert 'Edf41Mother401DevTick();' in src('src/map.cpp') and 'Edf41Mother401DevTick();' in src('src/crew.cpp')
     assert re.search(r'^Edf41DevShoot=0$', ini, re.M)
+
+
+@test
+def edf41_mother401_parts_take_the_hull_level() -> None:
+    """The Earth Eater's parts are as tough, and their guns as strong / accurate / fast, as the hull's level makes them
+    (docs/feedback-2026-10-17-eartheater.md): 4.1 gives every panel the hull's effective level (+0x490, which the hull's slot 3
+    copies from SetLevel's +0x25c) and Panel01 hands it to its batteries; HP = durability x level / 10 x the difficulty rows,
+    the bullet blocks use the same s. The port once took s = 1 on every difficulty (its notes read +0x490 as never written):
+    on Inferno a 16000 core had 16000 HP where 4.1 gives 260 000-450 000. The plugin records the hull's EDF6 level (+0x49C) on
+    each panel and battery and sizes both from it. With EDF4.1 installed the 4.1 path is checked byte for byte; with EDF6 too,
+    the claim the fix rests on: EDF6's story difficulty ranges put the Earth Eater missions' s within 10 % of 4.1's."""
+    cpp = re.sub(r'//[^\n]*', '', src('src/edf41mother401.cpp'))
+    assert 'float level=10.0f;' in cpp, 'Part has no level'
+    make_panel = cpp.split('void* MakePanel(Part& h,Cell& c,', 1)[1].split('\n}\n', 1)[0]
+    assert 'p->level=LevelS(h.obj)*10.0f;' in make_panel, 'a panel must take the hull\'s level (4.1 0x25fbb6)'
+    batteries = cpp.split('void MakeBatteries(Part& p) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'b->level=p.level;' in batteries, 'a battery must take its panel\'s level (4.1 0x26ebb0)'
+    init = cpp.split('void InitPart(Part& p) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'const float s=p.level/10.0f;' in init and 'Difficulty(base*s)' in init, 'HP must be durability x s x difficulty'
+    assert not re.search(r'Difficulty\(base\)', cpp), 'HP without the level is what the players saw as wrong'
+    bullets = cpp.split('void SetupBullets(Part& p) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'const float s=p.level/10.0f;' in bullets and 'const float s=1.0f;' not in cpp
+    assert 'kLevelAt=0x49C' in src('src/edf41classes.h')
+
+    import rootcpk
+    steam = os.path.dirname(rootcpk.DEFAULT_GAME)
+    exe = os.path.join(steam, 'Earth Defense Force 4.1', 'EDF41.exe')
+    if not os.path.exists(exe):
+        print('skip  edf41_mother401_parts_take_the_hull_level (4.1 code, rows): EDF4.1 not installed')
+        return
+    import pefile
+    pe = pefile.PE(exe, fast_load=True)
+    img = pe.get_memory_mapped_image()
+    base = pe.OPTIONAL_HEADER.ImageBase
+
+    def slot(vtable: int, i: int) -> int:
+        return int.from_bytes(img[vtable + 8 * i:vtable + 8 * i + 8], 'little') - base
+
+    def at(rva: int, hexbytes: str) -> None:
+        assert img[rva:rva + len(hexbytes) // 2].hex() == hexbytes, f'EDF41.exe 0x{rva:X}: not the code these notes read'
+    at(0x28EB44, 'c644244808' 'f30f11835c020000')        # SetLevel: +0x25c = the difficulty-scaled level, then flag 8 ...
+    at(0x56B973, 'f6c208740f' '488b01' 'ff5018')         # ... whose first setting calls slot 3
+    assert slot(0xA9A868, 3) == 0x261BF0                 # UfoMother401's slot 3:
+    at(0x261BF0, '8b815c020000' '898190040000' 'b001c3')  # +0x490 = +0x25c (the notes said +0x490 is never written)
+    at(0x25FBB6, 'f30f108e90040000' '498bcf' 'e82afe0000')  # the layout: panel 0x26f9f0(hull +0x490)
+    at(0x26FA0A, 'f30f5e057e6d8400')                     # level / 10.0 ...
+    at(0x26FA25, 'f30f598360010000')                     # ... x durability, then the rows, max and current, slot 29
+    at(0x26FA90, 'f30f118368010000' 'f30f11836c010000' '4883c4205b' '48ffa0e8000000')
+    assert slot(0xA9BDA0, 29) == 0x26EBB0                # Panel01's slot 29 hands the level to each battery ...
+    at(0x26EC19, '0f28ce' 'e85faeffff')                  # ... 0x269a80, the batteries' own: / 10, x durability, slot 28
+    at(0x269B20, 'f30f118368010000' 'f30f11836c010000' '4883c4205b' '48ffa0e0000000')
+    for vtable, setup in ((0xA9B8A8, 0x26A560), (0xA9BBF8, 0x26AFC0), (0xA9BA50, 0x26BA30), (0xA9B558, 0x26C6A0)):
+        assert slot(vtable, 28) == setup, hex(vtable)   # SmallLaser / Sniper / PlasmaCannon / RapidCannon bullet blocks
+
+    if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'EDF.dll')):
+        print('skip  edf41_mother401_parts_take_the_hull_level (rows against EDF6): EDF6 not installed')
+        return
+    import struct
+    import sgo
+    import make_edf41_objects as m
+
+    def story_rows(game: str) -> list[tuple[float, float]]:
+        cfg = sgo.read(rootcpk.Game(game).read('DEFAULTPACKAGE', 'CONFIG.SGO'))[1]['ModeList']
+        mode = next(e for e in cfg if e[0] == 'GameMode_Scenario')
+        rows = next(x for x in mode if isinstance(x, list) and x and isinstance(x[0], list) and isinstance(x[0][0], list))
+        f = lambda v: struct.unpack('<f', v.raw)[0] if isinstance(v, sgo.Float) else float(v)
+        return [(f(r[0][0]), f(r[0][1])) for r in rows]
+    g41 = os.path.dirname(exe)
+    r41, r6 = story_rows(g41), story_rows(rootcpk.DEFAULT_GAME)
+    order = [r[1] for r in sgo.plain(sgo.read(rootcpk.Game(g41).read('MISSION', 'MISSIONLIST.SGO'))[1])['table']]
+    with open(os.path.join(ROOT, 'edf41port', 'missions.json'), encoding='utf-8') as fh:
+        assert [x['id'] for x in json.load(fh)['missions']] == order, 'the 4.1 pack is not in 4.1\'s order: its progress differs'
+    eater = ('M009', 'M012', 'M018', 'M019', 'M132', 'M142', 'M145', 'M149', 'M201', 'M308', 'M312', 'M412', 'M516', 'M518', 'M602')
+    assert len(m.MOTHER401_ROOTS) == len(eater), 'the Earth Eater missions changed'
+    for mid in eater:
+        t = order.index(mid) / (len(order) - 1)
+        for (a41, b41), (a6, b6) in zip(r41, r6):
+            l41, l6 = a41 + (b41 - a41) * t, a6 + (b6 - a6) * t
+            assert abs(l6 / l41 - 1.0) <= 0.10, (mid, l41, l6)
 
 
 @test
@@ -8446,6 +8529,161 @@ def edf41_class_names() -> None:
     refused({rel: sgo.write_depth_first(version, members), cas: bare}, rel, 'state wakeup')
 
 
+@test
+def edf41_story_small_dragons() -> None:
+    """2026-10-17「这龙怎么还是蝌蚪的模样」: 4.1's story small dragons (app:/Object/DragonSmall401.sgo, RedSmallDragon.sgo,
+    YerrowSmallDragon.sgo) are paths EDF6 holds as EDF5's frog dragons (e518_frogDragon*), which EDF6's own missions spawn,
+    so the 4.1 missions showed the frog. 4.1's own go to OBJECT/EDF41/ (pylib/edf41dlc.py STORY_SHADOWED / story_path,
+    make_edf41_objects STORY_ROOTS: aliased like the DLC's _HS dragons, their shadowed model and CAS moved along) and every
+    converted 4.1 script names them there (edf41dlc.rewrite through bvm41.rewritten for EDF5's story recompiles, through
+    to_edf5 for the packs). Checked: the mapping (only those three SGOs, any case, ';' lists, idempotent, mounted paths as
+    before); the generator's roots and aliases; a story script rewritten names none at the stock path and gives the same
+    bytes back once put back; the registry and the committed scripts agree (a registry shipping OBJECT/EDF41/<x> has no
+    script naming the stock <x>); with the games installed, the three built from 4.1's archives carry 4.1's models and
+    ragdolls from files of their own, none at a path EDF6's archives hold."""
+    import glob
+    import bvm41
+    import edf41_objects as eo
+    import edf41dlc
+    import make_edf41_objects as m
+    import sgo
+    f = edf41dlc.STORY_FOLDER
+    assert edf41dlc.story_path('app:/Object/DragonSmall401.sgo') == f'app:/Object/{f}/DragonSmall401.sgo'
+    assert edf41dlc.story_path('app:/object/redsmalldragon.sgo') == f'app:/object/{f}/redsmalldragon.sgo'
+    for other in ('app:/Object/DragonBig401.sgo', 'app:/Object/DragonSmall401_HS.sgo', 'app:/Object/DragonSmall401.mrab',
+                  f'app:/Object/{f}/DragonSmall401.sgo', 'app:/Object/EDF41MP01/DragonSmall401_HS.sgo', 'DragonSmall401'):
+        assert edf41dlc.story_path(other) is None, other
+        assert edf41dlc.rewrite(other) == other, other
+    both = 'app:/Object/YerrowSmallDragon.sgo;mp01:/Object/GiantAnt04.sgo'
+    assert edf41dlc.rewrite(both) == f'app:/Object/{f}/YerrowSmallDragon.sgo;app:/Object/EDF41MP01/GiantAnt04.sgo'
+    assert edf41dlc.rewrite(edf41dlc.rewrite(both)) == edf41dlc.rewrite(both)
+    # the generator: one root and alias per shadowed object, in the story folder, under the class with 4.1's ragdoll bodies
+    import edf41friends
+    dragons = [n for n in edf41dlc.STORY_SHADOWED if 'OBJECT/' + n not in edf41friends.LOOKS]   # the soldiers: friend_look
+    assert set(m.STORY_ROOTS) == set(dragons), m.STORY_ROOTS
+    assert f not in {folder for _, folder in edf41dlc.PACKS.values()}
+    for name in dragons:
+        root = f'{f}/{name}'
+        a = m.ALIASES[root]
+        assert m.ROOTS[root] == m.STORY_ROOTS[name] > 0 and a.cls == 'DragonSmall' and a.template == name, (root, a)
+        assert dict(a.override)['edf41_ragdoll_bodies'] == list(m.SMALL_DRAGON_BODIES), a.override
+        assert m.own_folder('OBJECT/' + root) == f and m.pack_folder('OBJECT/' + root) == '', root
+    assert m.own_folder('OBJECT/EDF41MP01/X.SGO') == 'EDF41MP01' and m.own_folder('OBJECT/X.SGO') == ''
+    # a story script (EDF5's recompile, M165: all three) with its strings mapped; the bytes come back with them put back
+    stock = re.compile(r'(?i)^app:/object/(' + '|'.join(re.escape(n) for n in edf41dlc.STORY_SHADOWED) + r')$')
+    unmap = re.compile(r'(?i)^(app:/object)/' + f + r'/')
+
+    def pushed(data: bytes) -> list[str]:
+        prog = bvm41.parse(data)
+        return [x.v for code in [prog.init] + [g.code for g in prog.funcs] for x in code if x.op == bvm41.OP_PUSHS]
+
+    with open(os.path.join(ROOT, 'edf41port', 'missions', 'M165', 'MISSION.BVM'), 'rb') as fh:
+        script = fh.read()
+    assert bvm41.rewritten(script, lambda s: s) == script
+    mapped = bvm41.rewritten(script, edf41dlc.rewrite)
+    assert bvm41.rewritten(mapped, edf41dlc.rewrite) == mapped
+    names = pushed(mapped)
+    assert not [s for s in names if stock.match(s)], names
+    assert set(dragons) <= {s.split('/')[-1].upper() for s in names if unmap.match(s)} <= set(edf41dlc.STORY_SHADOWED), names
+    restored = bvm41.rewritten(mapped, lambda s: unmap.sub(r'\1/', s))
+    assert bvm41.rewritten(restored, edf41dlc.rewrite) == mapped and not [s for s in pushed(restored) if unmap.match(s)]
+    # the registry and the committed scripts agree: a story dragon shipped in the folder is named there by every script
+    shipped = {o['object'] for o in eo.registry()['objects']}
+    moved = {name for name in edf41dlc.STORY_SHADOWED if f'OBJECT/{f}/{name}' in shipped}
+    assert moved in (set(), set(edf41dlc.STORY_SHADOWED)), moved
+    if moved:
+        for path in glob.glob(os.path.join(ROOT, 'edf41port', '**', '*.BVM'), recursive=True):
+            with open(path, 'rb') as fh:
+                left = [s for s in pushed(fh.read()) if stock.match(s)]
+            assert not left, f'{path} names {left}: regenerate tools/make_edf41_missions.py (story and --dlc)'
+    if not _e5c_have_game() or not _edf41_root():
+        print('skip  edf41_story_small_dragons (real archives): needs EDF6 and EDF4.1 installed')
+        return
+    import rootcpk
+    import mdb
+    games = m.Games(_edf41_root(), rootcpk.DEFAULT_GAME)
+    frog = sgo.load(data=games.read6('OBJECT/DRAGONSMALL401.SGO'))   # why the folder: EDF6's own is EDF5's frog
+    assert 'frogdragon' in m.model_entries(frog['animation_model'][0])[0][1].lower(), frog['animation_model'][0]
+    roots = tuple(f'{f}/{n}' for n in dragons)
+    data, files = m.build(_edf41_root(), rootcpk.DEFAULT_GAME, roots)
+    assert not data['skipped'] and {o['object'] for o in data['objects']} == {'OBJECT/' + r for r in roots}, data['skipped']
+    models = {'DRAGONSMALL401.SGO': 'SmallDragon401Green.mdb', 'REDSMALLDRAGON.SGO': 'RedSmallDragon.mdb',
+              'YERROWSMALLDRAGON.SGO': 'YerrowSmallDragon.mdb'}
+    for o in data['objects']:
+        rel = o['object']
+        assert not [r for r in o['files'] if r in games.have6], (rel, o['files'])   # nothing EDF6 would load instead
+        top = sgo.load(data=files[rel])
+        model = m.model_entries(top['animation_model'][0])[0]
+        assert m.rel_of(model[0]).startswith(f'OBJECT/{f}/') and model[1] == models[rel.split('/')[-1]], model
+        assert model[1].lower() in {x.name.lower() for x in mdb.rab_read(files[m.rel_of(model[0])]).files}, model
+        assert m.rel_of(top['animation_model'][1]).startswith(f'OBJECT/{f}/'), top['animation_model'][1]
+        assert 'frogdragon' not in top['ragdoll'][0].lower() and m.rel_of(top['ragdoll'][0]) in files, top['ragdoll']
+        assert top['edf41_ragdoll_bodies'] == list(m.SMALL_DRAGON_BODIES), top.get('edf41_ragdoll_bodies')
+
+
+@test
+def edf41_big_dragon_ragdoll_mass() -> None:
+    """M166 2026-10-17 (「大龙好像没ai」): DragonSmall keeps a knocked-down dragon down until its ragdoll's sum of mass x
+    (|v| + |w|) is under 2000 (else 60 s); 4.1's DragonBig ragdoll weighs 361,005 kg, 114 times the class's heaviest stock
+    ragdoll, so its resting jitter (a sum of 5,000..18,000) never passed. pylib/hk2014.py reads 4.1's hk_2014 tagfiles
+    (every one the port ships, to the end tag) and scales a ragdoll's masses, inertias and joint friction torques by one
+    factor in place (the same size, nothing else changed); make_edf41_objects.dragon_ragdoll_fix makes the giant's
+    ragdoll as heavy as the class's heaviest stock one and scales its hit impulse (dragon_RagdollReactionScale) with it.
+    The registry keeps the impulse per kilogram of 4.1's (2.5 / 361,005) whichever mass it ships; with the games, the
+    built ragdoll weighs what EDF6's heaviest DragonSmall ragdoll does."""
+    import hk2014
+    import edf41_objects as eo
+    import make_edf41_objects as m
+    import sgo
+    reg = eo.registry()
+    tagfiles = [r for r in reg['files'] if r.endswith('.SHKT') and eo.read(r)[:8] == hk2014.MAGIC]
+    assert len(tagfiles) >= 20, tagfiles
+    for rel in tagfiles:   # every 4.1 ragdoll reads to its end tag
+        hk2014.read(eo.read(rel))
+    for rel in ('OBJECT/RAGDOLL_SMALLDRAGON401_HAS_HKA.SHKT', 'OBJECT/RAGDOLL_REDSMALLDRAGON.SHKT'):
+        assert abs(hk2014.total_mass(eo.read(rel)) - 1500.0) < 0.5, rel   # 4.1's small dragons: 36 bodies, 1,500 kg
+    big = 'OBJECT/RAGDOLL_BIGDRAGON401BLUE_HAS_HKA.SHKT'
+    data = eo.read(big)
+    before = hk2014.rigid_bodies(hk2014.read(data))
+    half = hk2014.scaled_masses(data, 0.5)
+    after = hk2014.rigid_bodies(hk2014.read(half))
+    assert len(half) == len(data) and len(after) == len(before) == 56
+    for a, b in zip(before, after):
+        assert a.name == b.name and abs(b.mass - a.mass * 0.5) <= 1e-3 * a.mass, (a, b)
+        assert all(abs(y - x * 2.0) <= 1e-5 * x for x, y in zip(a.inertia_inv, b.inertia_inv)), (a, b)
+        assert (a.linear_damping, a.angular_damping, a.deactivation_class) == (b.linear_damping, b.angular_damping,
+                                                                                b.deactivation_class)
+
+    def frictions(blob: bytes) -> list[float]:
+        return [v['maxFrictionTorque'] for o in hk2014.read(blob).objects for v in (o.get('atoms') or {}).values()
+                if isinstance(v, dict) and 'maxFrictionTorque' in v]
+    assert frictions(data) and all(abs(y - x * 0.5) <= 1e-3 * x for x, y in zip(frictions(data), frictions(half)))
+    changed = sum(x != y for x, y in zip(data, half))
+    assert 0 < changed <= 4 * (4 * len(before) + len(frictions(data))), changed   # only those floats' bytes
+    for bad in (0.0, -1.0):
+        try:
+            hk2014.scaled_masses(data, bad)
+        except ValueError:
+            continue
+        raise AssertionError(f'factor {bad} accepted')
+    top = sgo.load(data=eo.read('OBJECT/DRAGONBIG401.SGO'))
+    per_kg = m.num(top['dragon_RagdollReactionScale']) / hk2014.total_mass(data)
+    assert abs(per_kg - 2.5 / 361005.0) <= 1e-3 * per_kg, per_kg
+    assert m.NATIVE_FIXES['DRAGONBIG401.SGO'] is m.dragon_ragdoll_fix
+    if not _e5c_have_game() or not _edf41_root():
+        print('skip  edf41_big_dragon_ragdoll_mass (real archives): needs EDF6 and EDF4.1 installed')
+        return
+    import rootcpk
+    games = m.Games(_edf41_root(), rootcpk.DEFAULT_GAME)
+    limit = m.class_ragdoll_mass(games, 'DragonSmall')
+    assert abs(limit - 3180.0) < 0.5, limit       # e518_frogDragon_large
+    built, files = m.build(_edf41_root(), rootcpk.DEFAULT_GAME, ('DRAGONBIG401.SGO',))
+    assert not built['skipped'], built['skipped']
+    assert abs(hk2014.total_mass(files[big]) - limit) < 0.5
+    top = sgo.load(data=files['OBJECT/DRAGONBIG401.SGO'])
+    assert abs(m.num(top['dragon_RagdollReactionScale']) - 2.5 * limit / 361005.0) < 1e-4, top['dragon_RagdollReactionScale']
+
+
 # EDF4.1's mission maps (plan P6): the maps EDF4.1's 98 missions load (pylib/map_legacy.py converts their MAC).
 EDF41_MISSION_MAPS = ('IG_CAVE01', 'IG_HORNETCAVE01', 'IG_WRECKTOWN01', 'NW_HILLYCITY_LIGHT', 'NW_KASENJIKI01',
                       'NW_KOUSOUBLD01', 'NW_SINSUIKOUEN', 'NW_SOUKOGAI01', 'NW_UNDERGROUND01', 'SK_CRATER01',
@@ -8583,6 +8821,167 @@ def edf41_maps_cover_the_scripts() -> None:
     assert {n for n in used if n not in edf41_maps.MAPS} <= {'NW_TESTMAP'}, sorted(n for n in used if n not in edf41_maps.MAPS)
 
 
+def _edf41_friend_spawns() -> dict[tuple[str, str], list]:
+    """{(pack folder, mission id): its scripts' friendly creation calls (pylib/edf41friends.py)} over every committed 4.1
+    pack (the story and the two DLC packs)."""
+    import edf41friends as ef
+    import make_edf5_campaign as c
+    out: dict[tuple[str, str], list] = {}
+    for p41 in c.PACKS41:
+        for m in c.edf41_text(p41.data)['missions']:
+            out[(p41.folder, m['id'])] = [sp for s in ('MISSION.BVM', 'BEFORE.BVM') if s in m['files']
+                                          for sp in ef.spawns(c.edf41_script(m['id'], s, p41.data))]
+    return out
+
+
+@test
+def edf41_friends_spawn_as_named() -> None:
+    """EDF4.1's friendly NPCs (feedback 2026-10-17 「npc好像也没搬过来」, docs/feedback-2026-10-17-edf41-npc.md): every
+    CreateFriend / CreateFriendSquad / CreateFriendGroup / transporter call the committed 4.1 scripts make names an SGO
+    pylib/edf41friends.py FRIENDS accounts for (EDF6's own file at that path, or one tools/make_edf41_objects.py ships:
+    4.1's soldiers at OBJECT/EDF41/, never the story path EDF6 holds for its own), and a point the mission's RMPA holds
+    (the executor creates nothing for a name it does not find, 0x21A3E1). The story's counts are pinned (the scripts are
+    EDF5's, only 4.1's soldiers renamed), so a regeneration that loses a friend fails here. No game needed (the scripts,
+    RMPA and objects.json are committed)."""
+    import collections
+    import edf41friends as ef
+    import make_edf5_campaign as c
+    import rmpa_legacy
+    spawns = _edf41_friend_spawns()
+    ported = set(json.load(open(os.path.join(c.EDF41, 'objects.json'), encoding='utf-8'))['files'])
+    missing_points = []
+    for (folder, mid), found in spawns.items():
+        assert not ef.unknown(found), (folder, mid, ef.unknown(found))
+        data = next(p.data for p in c.PACKS41 if p.folder == folder)
+        with open(os.path.join(data, 'missions', mid, 'MISSION.RMPA'), 'rb') as f:
+            points = {p[0] for p in _rmpa_points(rmpa_legacy.decode6(f.read())[0])}
+        missing_points += [(folder, mid, sp.point) for sp in found if sp.native in ef.AT_POINT and sp.point not in points]
+    assert not missing_points, missing_points[:10]
+    assert all(rel in ported for rel, fr in ef.FRIENDS.items() if fr.source in ('ported', 'look')), \
+        sorted(r for r, fr in ef.FRIENDS.items() if fr.source in ('ported', 'look') and r not in ported)
+    # 4.1's soldiers are renamed everywhere (tools/make_edf41_missions.py): no pack's script names a story path of one,
+    # which is EDF6's own soldier (left as it was, the friend the player meets is EDF6's)
+    stale = sorted({(folder, mid, s) for (folder, mid), found in spawns.items() for sp in found for s in sp.sgos
+                    if s in ef.LOOKS})
+    assert not stale, stale[:10]
+    story = {mid: found for (folder, mid), found in spawns.items() if folder == c.EDF41_FOLDER}
+    calls = collections.Counter(sp.native for found in story.values() for sp in found)
+    assert dict(calls) == {1010: 145, 1011: 264, 1012: 26, 1022: 5, 1023: 15}, dict(calls)
+    assert sum(1 for found in story.values() if found) == 86, sum(1 for found in story.values() if found)
+    # every FRIENDS entry is named by the story (a stale table entry would vouch for nothing)
+    assert {s for found in story.values() for sp in found for s in sp.sgos} == set(ef.FRIENDS)
+
+
+@test
+def edf41_friends_rewrite() -> None:
+    """4.1's soldiers go through the one story rename pylib/edf41dlc.py keeps (STORY_SHADOWED, with the small dragons;
+    no game): a story path of LOOKS, in any case and inside a ';' list, becomes its OBJECT/EDF41/ path with the script's
+    case kept; anything else (another object, the new path itself) is unchanged; edf41friends.look_rel agrees with it
+    and the folder is the story folder."""
+    import edf41dlc
+    import edf41friends as ef
+    rw = edf41dlc.rewrite
+    assert edf41dlc.STORY_FOLDER == ef.LOOK_FOLDER == 'EDF41'
+    assert {r.split('/', 1)[1] for r in ef.LOOKS} <= set(edf41dlc.STORY_SHADOWED)
+    assert rw('app:/Object/AiArmySoldier_AF.sgo') == 'app:/Object/EDF41/AiArmySoldier_AF.sgo'
+    assert rw('app:/object/aipalewing_lr_leader.SGO') == 'app:/object/EDF41/aipalewing_lr_leader.SGO'
+    assert rw('app:/Object/GiantAnt01.sgo;app:/Object/AiHeavyArmor_SP.sgo') == \
+        'app:/Object/GiantAnt01.sgo;app:/Object/EDF41/AiHeavyArmor_SP.sgo'
+    for same in ('app:/Object/EDF41/AiArmySoldier_AF.sgo', 'app:/Object/AiArmySoldier_OMG.sgo', '小隊01',
+                 'app:/Object/Vehicle403_Tank_AI.sgo'):
+        assert rw(same) == same, same
+    assert all(ef.rel_of(rw('app:/Object/' + r.split('/', 1)[1].lower())) == ef.look_rel(r) for r in ef.LOOKS)
+    assert len(ef.LOOKS) == 26 and {ef.FRIENDS[ef.look_rel(r)].source for r in ef.LOOKS} == {'look'}
+
+
+@test
+def edf41_friend_looks_shipped() -> None:
+    """4.1's soldiers as tools/make_edf41_objects.py ships them (FRIEND_LOOKS; no game: the registry and its files are
+    committed): each LOOKS soldier is an object at OBJECT/EDF41/<name> of its class, look_of its story path, whose
+    model, CAS and ragdoll are files of the registry; EDF6's own soldier at the story path is never shipped over; the
+    SGO carries 4.1's model / CAS / weapons and the shapes the class reads (FRIEND_OVERRIDE); each 4.1 CAS has every
+    player EDF6's CAS of the class has and the states aliased for the class (FRIEND_CAS, CLASS_NAMES), as the Omega
+    team's soldiers too (they share the rangers' CAS); the bones the class finds by name are in the model."""
+    import cas_graft
+    import edf41_objects as eo
+    import edf41friends as ef
+    import make_edf41_objects as m
+    import sgo
+    reg = eo.registry()
+    files = set(reg['files'])
+    by_object = {o['object']: o for o in reg['objects']}
+    for story, cls in ef.LOOKS.items():
+        rel = ef.look_rel(story)
+        assert story not in files, f'{story} is EDF6\'s own soldier: never shipped over'
+        o = by_object.get(rel)
+        assert o and o['class'] == cls and o.get('look_of') == story and o['missions'] > 0, (rel, o)
+        assert set(o['files']) <= files and o['files'][0] == rel, o['files']
+        d = sgo.load(data=eo.read(rel))
+        assert d['xgs_scene_object_class'] == cls
+        am = d['animation_model']
+        model, cas = m.rel_of(am[0][0]), m.rel_of(am[1])
+        assert {model, cas, m.rel_of(d['ragdoll'][0])} <= set(o['files']), (rel, model, cas)
+        assert model.startswith('OBJECT/') and 'EDF6' not in model and 'P50' not in model, model
+        assert all(w.lower().startswith('app:/weapon/') for w in d['soldier_load_weapon'])
+        assert d['soldier_sub_weapon_slot'] == 0.0
+        for k, v in m.FRIEND_OVERRIDE[cls]:
+            assert d[k] == v, (rel, k, d[k])
+        bones = m.model_bones(lambda r: eo.read(m.rel_of(r)), am)
+        assert all(d[k] in bones for k in m.FRIEND_BONE_KEYS if k in d), (rel, [d[k] for k in m.FRIEND_BONE_KEYS if k in d])
+    for cas_rel, spec in m.FRIEND_CAS.items():
+        states = cas_graft.states(eo.read(cas_rel))
+        for player, new, _old in spec.states:
+            assert new in states[player], (cas_rel, player, new)
+        assert {'knockout', 'noWeapon_stand', 'noWeapon_walk_f'} <= states['main'], cas_rel
+    omg = sgo.load(data=eo.read('OBJECT/AIARMYSOLDIER_OMG.SGO'))
+    assert m.rel_of(omg['animation_model'][1]) == 'OBJECT/ARMYSOLDIER.CAS'
+
+
+@test
+def edf41_friends_load_in_edf6() -> None:
+    """The friends' SGOs as the installed game loads them (needs EDF4.1, EDF5 and EDF6: _legacy_games): each 'stock' one is in EDF6's
+    archives with its FRIENDS class and every file it names (recursively) there too; each 'ported' one is the port's
+    file of that class; and each story mission's 4.1 original names the same friends its shipped (EDF5) script creates."""
+    import edf41_objects as eo
+    import edf41friends as ef
+    import make_edf41_objects as m
+    import make_edf5_campaign as c
+    import sgo
+    games = _legacy_games()
+    if games is None:
+        print('skip  edf41_friends_load_in_edf6: needs EDF4.1, EDF5 and EDF6 installed')
+        return
+    g41, _g5, g6 = games
+    for rel, fr in ef.FRIENDS.items():
+        if fr.source == 'stock':
+            members = sgo.load(data=_game_read(g6, rel))
+            seen = m.sgo_closure({rel}, lambda r: _game_read(g6, r) if r in g6 else None)
+            refs = set()
+            for r in seen:
+                if r in g6:
+                    refs |= {m.rel_of(s) for s in m.strings(sgo.load(data=_game_read(g6, r)))
+                             if s.lower().startswith('app:/')}
+            lacking = sorted(r for r in refs if os.path.splitext(r)[1] and not r.endswith('.ACB') and r not in g6)
+            assert not lacking, (rel, lacking)
+        else:
+            members = sgo.load(data=eo.read(rel))
+            if fr.source == 'look':   # EDF6's own soldier at the story path stays as it is, of the same class
+                story = next(r for r in ef.LOOKS if ef.look_rel(r) == rel)
+                assert sgo.load(data=_game_read(g6, story)).get('xgs_scene_object_class') == fr.cls, story
+        assert members.get('xgs_scene_object_class') == fr.cls, (rel, members.get('xgs_scene_object_class'), fr.cls)
+    # each story mission's 4.1 original names the same friends its shipped script creates, 4.1's soldiers renamed
+    shipped = {mid: {s for sp in found for s in sp.sgos}
+               for (folder, mid), found in _edf41_friend_spawns().items() if folder == c.EDF41_FOLDER}
+    original_names = set(ef.FRIENDS) | set(ef.LOOKS)
+    for mid, names in shipped.items():
+        original = set()
+        for rel in g41:
+            if rel.startswith(f'MISSION/{mid}/') and rel.endswith('.BVM'):
+                original |= m.script_sgos(_game_read(g41, rel)) & original_names
+        renamed = {ef.look_rel(r) if r in ef.LOOKS else r for r in original}
+        assert renamed == names, (mid, sorted(renamed ^ names))
+
+
 @test
 def edf41_maps_install() -> None:
     """tools/edf41_maps.py on a stand-in game (conversion stubbed): writes every file of every map as edf41maps', a
@@ -8717,9 +9116,9 @@ def fmb_build_real() -> None:
     the reference CMPL decoders agree, edits round trip); every leaf has what a stock regular grid leaf has (the same
     header and 0x3C mesh record fields in the same places, 441 vertices of unit normals, 800 triangles wound as the
     donor's, one 0x50 splat record per cell whose four corners each sum to 255 over the leaf's layer slots, the layer list
-    of 16 bytes), the trailing tables are the donor's two constant ones plus the layer table and shader table in the
-    stock layout (the 4-layer pieces' 21 shader records, the single layer ones' 9), and a leaf lists at most the layers a
-    stock leaf lists."""
+    of 16 bytes, its shader the pass-0 record of its layer count in the file's shader table), the trailing tables are
+    the donor's two constant ones plus the layer table and shader table in the stock layout (the 4-layer pieces' 21
+    shader records, the single layer ones' 9), and a leaf lists at most the layers a stock leaf lists."""
     import struct
     import fmb
     import fmb_build
@@ -8752,6 +9151,9 @@ def fmb_build_real() -> None:
         m = lf.meshes[0]
         n = struct.unpack_from('<I', lf.blob, m.base)[0]
         assert 1 <= n <= fmb_build.MAX_LAYERS and m.grid[:4] == (4.0, 4.0, 20, 20) and m.grid[6] == n * 0x101
+        # +0x28: the pass-0 draw record of an n-layer leaf in the file's own shader table (as every stock mesh)
+        t4 = struct.unpack_from('<I', out, 0x20)[0]
+        assert struct.unpack_from('<7I', out, t4 + 28 * m.grid[7]) == (n, 1, 0, 0, 0, 0, 0)
         assert m.weight_count == 400 and m.layermap_count == 1 and len(m.indices) == 2400
         assert (m.weight_off - m.base, m.layermap_off - m.base) == (0x3C + 4800, 0x3C + 4800 + 0x50 * 400)
         nrm = np.array([v[3:] for v in lf.verts])
@@ -8804,7 +9206,9 @@ def hkcms_build_real() -> None:
 def edf41_sk_maps_real() -> None:
     """tools/edf41_maps.py on SK_HEIGEN02 from the real games: the files files_of names; the MAC is a map bigmap verifies
     whose ground def is `sk_heigen02_fld2mgrid.fmep` placed at the origin with the stock .fmep cull distances, its
-    externals.sgo lists the FMB, the field's members are gone and map.rmpa is EDF6's; the FMB is a piece of 625 leaves
+    externals.sgo lists the FMB, the field's members are gone and map.rmpa is EDF6's, its mapo entry holds one height per
+    plant cell of the FMB's plant groups (the field's three grass textures, then its trees, bushes and small
+    objects as the stock groups, each model one of the MAC's, its .trb in EDF6's form); the FMB is a piece of 625 leaves
     covering -1000..1000 whose heights are the field's; the MAD holds the ground body (named for the piece, a compound
     of 2500 tiles) and the objects' bodies, and every compound passes hkcms.bound_problems; the RAB has the colour array
     under the name EDF6's terrain looks up (<map>_color.dds) and the flat normal map; the weather pair and navmesh are the
@@ -8813,6 +9217,7 @@ def edf41_sk_maps_real() -> None:
     import bigmap
     import edf41_maps
     import fmb
+    import fmex
     import hkcms
     import hktag
     import map_legacy
@@ -8846,7 +9251,18 @@ def edf41_sk_maps_real() -> None:
     mo = bigmap.MapO(members['map.mapo'])
     ent = mo.ent_off + ground[0] * bigmap.ENT
     pair_at = ent + struct.unpack_from('<i', mo.raw, ent)[0]
-    assert pair_at > ent and struct.unpack_from('<2i', mo.raw, pair_at) == (0, 8)      # the empty grass pair of a stock .fmep entry
+    # the plants' heights: one per occupied cell of the FMB's grass group (pylib/fmex.py), the ground under it
+    count, rel = struct.unpack_from('<2i', mo.raw, pair_at)
+    assert pair_at > ent and rel == 8
+    plants = fmex.read_table2(files['MAP/SK_HEIGEN02_FLD2MGRID.FMB'])
+    assert [g.name for g in plants] == ['草・花', '樹木', '低木', '小物ランダム']
+    assert count == sum(int((g.kind != 0xFF).sum()) for g in plants) and int((plants[0].kind != 0xFF).sum()) > 100000
+    assert {t.file for t in plants[0].types} == {'sk_grassleaf01_1.dds', 'sk_grassleaf01_2.dds', 'sk_flower01.dds'}
+    for g in plants[1:]:      # the models: kind 1, <model>.tree / .mls for the MAC's <model>.trb / .mlb (in EDF6's form)
+        for t in g.types:
+            stem, ext = t.file.rsplit('.', 1)
+            assert t.kind == 1 and ext in ('tree', 'mls') and stem + {'tree': '.trb', 'mls': '.mlb'}[ext] in members
+    assert all(len(sgo.plain(sgo.read(d)[1])['rules'][0]) == 8 for n, d in members.items() if n.endswith('.trb'))
     # the FMB
     f = fmb.parse(files['MAP/SK_HEIGEN02_FLD2MGRID.FMB'])
     assert len(f.leaves) == 625 and f.count == 1249
@@ -8874,6 +9290,354 @@ def edf41_sk_maps_real() -> None:
     assert color[:4] == b'DDS ' and struct.unpack_from('<I', color, 128 + 12)[0] == 8
     assert files['MAP/SK_HEIGEN02_CLOUDY.MAE'] == e6.read('IG_HEIGEN507_CLOUDY.MAE')
     assert files['MAP/SK_HEIGEN02.NAVMESH.HKT'] == e6.read('IG_HEIGEN507.NAVMESH.HKT')
+
+
+def _stand_in_fmb(stray: bytes = b'') -> bytes:
+    """An FMB's header and trailing tables without chunks: a 16-byte table 1, an empty table 2, 0x100 jitter records,
+    two shader records and `stray` bytes after them."""
+    import struct
+    t1 = 0x2C
+    t2 = t1 + 16
+    t3 = t2 + 8
+    t4 = t3 + 0x1000
+    head = struct.pack('<4sIII7I', b'FMB\0', 0x110, 0, 0x2C, t1, t2, t3, 0x100, t4, 2, 0)
+    jit = bytes((k * 37 + 11) & 0xFF for k in range(0x1000))
+    return head + bytes([0xAA]) * 16 + struct.pack('<Ii', 0, 8) + jit + bytes(range(56)) + stray
+
+
+@test
+def fmex_plants_offline() -> None:
+    """pylib/fmex.py without the game: with_plants writes the plant groups as table 2 (read_table2 reads back every
+    group, type, string, SGO and both grids; the jitter of an empty cell is 0), puts the new jitter table at table 3 and
+    the strings after table 4's records, keeps table 1 and table 4's records where and as they were and drops what the
+    old table 2 had after them; heights_at interpolates in pylib/fmb_build.py's two triangles of a quad (A B D / A D C)
+    and is exact on a plane; plant_heights lists the occupied cells row major at their jittered positions."""
+    import struct
+    import fmex
+    import numpy as np
+    import sgo
+    old = _stand_in_fmb(b'stray strings')
+    params = sgo.write(258, {'colors': [[255, 255, 255], [192, 192, 192]]})
+    g1 = fmex.Group('草・花', 1.0, (-2.0, -3.0), [
+        fmex.PlantType(0, 'sk_grassleaf01_1', 'sk_grassleaf01_1.dds', (0.0, 1.0, 0.5, 0.0), (2.8, 0.7, 2.8), (4.8, 1.3, 4.8), params),
+        fmex.PlantType(0, 'sk_flower01', 'sk_flower01.dds', (1.0, 0.0, 1.0, 0.0), (2.8, 0.7, 2.8), (2.8, 0.7, 2.8))],
+        np.array([[0, 255, 1, 0], [255, 255, 0, 1], [1, 0, 255, 255]], dtype=np.uint8),
+        np.array([[5, 9, 200, 7], [1, 2, 3, 4], [250, 0, 6, 8]], dtype=np.uint8))
+    g2 = fmex.Group('樹木', 2.0, (10.0, 20.0), [fmex.PlantType(1, 'tree', 'sk_tree10m01.tree', (0.0,) * 4, (1.0,) * 3, (1.0,) * 3)],
+                    np.array([[0, 255], [255, 0], [0, 0], [255, 255], [0, 255]], dtype=np.uint8),
+                    np.arange(10, dtype=np.uint8).reshape(5, 2))
+    jit = bytes((k * 7) & 0xFF for k in range(0x1000))
+    new = fmex.with_plants(old, [g1, g2], jit)
+    t1, t2, t3, n3, t4, n4 = struct.unpack_from('<6I', new, 0x10)
+    assert (t1, t2, n3, n4) == (0x2C, 0x2C + 16, 0x100, 2) and new[t1:t2] == bytes([0xAA]) * 16
+    assert new[t3:t4] == jit and new[t4:t4 + 56] == bytes(range(56)) and b's\0t\0r\0a\0y' not in new
+    back = fmex.read_table2(new)
+    assert [g.name for g in back] == ['草・花', '樹木']
+    for a, b in zip(back, [g1, g2]):
+        assert (a.cell, a.origin) == (b.cell, b.origin) and len(a.types) == len(b.types)
+        for ta, tb in zip(a.types, b.types):
+            assert (ta.kind, ta.name, ta.file, ta.color) == (tb.kind, tb.name, tb.file, tb.color)
+            assert np.allclose(ta.size_min, tb.size_min) and np.allclose(ta.size_max, tb.size_max)
+            assert (ta.params is None) == (tb.params is None) and (not ta.params or sgo.read(ta.params) == sgo.read(tb.params))
+        assert (a.kind == b.kind).all() and (a.jitter == np.where(b.kind == 0xFF, 0, b.jitter)).all()
+    assert fmex.with_plants(new, [g1, g2], jit) == new        # the stray strings of a table 2 being replaced are dropped
+    lat = np.array([[0.0, 0.0], [0.0, 1.0]])                   # A = B = C = 0, D = 1
+    h = fmex.heights_at(lat, 0.0, 0.0, 4.0, np.array([3.0, 1.0, 2.0]), np.array([1.0, 3.0, 2.0]))
+    assert np.allclose(h, [0.25, 0.25, 0.5])
+    zz, xx = np.mgrid[0:6, 0:7] * 4.0                           # lattice vertex (i, j) at x = -100 + 4 j, z = 50 + 4 i
+    plane = 2.0 * (xx - 100.0) + 3.0 * (zz + 50.0) + 1.0
+    x, z = np.array([-98.7, -82.1, -76.01]), np.array([51.0, 59.5, 69.8])
+    assert np.allclose(fmex.heights_at(plane, -100.0, 50.0, 4.0, x, z), 2.0 * x + 3.0 * z + 1.0)
+    got = fmex.plant_heights(g1, jit, lambda x, z: x * 1000.0 + z)
+    rows, cols = np.nonzero(g1.kind != 0xFF)
+    j = np.frombuffer(jit, dtype='<f4').reshape(256, 4)[g1.jitter[rows, cols]]
+    want = ((cols + j[:, 1]) * 1.0 - 2.0) * 1000.0 + ((rows + j[:, 2]) * 1.0 - 3.0)
+    assert len(got) == 7 and np.allclose(got, want.astype('<f4'))
+
+
+@test
+def rmpa_wire_links_offline() -> None:
+    """pylib/rmpa_legacy.py's wire links without the game: in a 4.1 map.rmpa a wire waypoint's link to another route
+    holds the index of the target in the mapb's wire point list; with the wires given (map_legacy.cable_graph) such a
+    link becomes the section index of the waypoint at that point, whether it is >= the route's count or below it (where
+    the old reading took it as a route index and joined unrelated waypoints), a route link the wires pair stays one, and
+    without the wires the old behaviour stays (links past the route's end dropped)."""
+    import struct
+    import rmpa_legacy
+
+    def wp(i: int, links: list[int], xyz: tuple[float, float, float]) -> dict:
+        return {'index': i, 'links': links, 'id': 100 + i, 'namelen': 0, 'name': '', 'sgo': None,
+                'pos': tuple(struct.pack('>f', v) for v in xyz) + (struct.pack('>f', 1.0),)}
+
+    a = [(0.0, 5.0, 0.0), (30.0, 5.0, 0.0), (60.0, 5.0, 0.0)]
+    b = [(0.0, 5.0, 40.0), (30.0, 5.0, 40.0)]
+    # the wire points in another order than the routes: [dummy, B0, B1, A0, A1, A2]; A0 hangs a wire to B1
+    pts = [(0.0, 0.0, 0.0, 0)] + [p + (1,) for p in b] + [p + (0,) for p in a]
+    pairs = [(3, 4), (4, 5), (1, 2), (3, 2)]
+    sec = {'namelen': 0, 'name': '', 'sets': [
+        {'namelen': 1, 'name': 'cable_elec_wire_default_01', 'items': [wp(0, [1, 2], a[0]), wp(1, [0, 2], a[1]), wp(2, [1], a[2])]},
+        {'namelen': 1, 'name': 'cable_elec_wire_twin_01', 'items': [wp(0, [1], b[0]), wp(1, [0, 3], b[1])]}]}
+    dropped: list = []
+    remapped: list = []
+    out = rmpa_legacy._routes6([sec], dropped, (pts, pairs), remapped)[0]
+    links = [w['links'] for w in out['wps']]
+    assert links == [[1, 4], [0, 2], [1], [4], [3, 0]], links      # A0 -> B1 (section index 4), B1 -> A0 (0)
+    assert dropped == [] and sorted(r[3] for r in remapped) == [0, 4]
+    dropped = []
+    old = rmpa_legacy._routes6([sec], dropped)[0]
+    assert [w['links'] for w in old['wps']] == [[1, 2], [0, 2], [1], [4], [3]] and dropped == [('cable_elec_wire_twin_01', 1, 3)]
+
+
+@test
+def fmb_plants_stock_real() -> None:
+    """The plant format pylib/fmex.py writes, on EDF6's own IG_HEIGEN507: read_table2 reads its 4 groups (grass and
+    flowers, trees, bushes, small objects: 2500 x 2500 cells of 1 m from (-1250, -1250)), the heights of the ground
+    record's mapo entry are one per occupied cell of all 4 groups (159441), each the ground under the cell's jittered
+    position (sampled: the FMB's own triangles, within 5 cm); and every leaf mesh of it and of IG_HAIKYOPLANE01 names
+    at +0x28 the pass-0 record of its layer count in the file's shader table (pylib/fmb_build.py shader_index)."""
+    import struct
+    import bigmap
+    import fmb
+    import fmex
+    import numpy as np
+    games = _legacy_games()
+    if games is None:
+        print('skip  fmb_plants_stock_real: no EDF4.1 / EDF5 / EDF6 here')
+        return
+    g6 = games[2]
+    for name in ('IG_HAIKYOPLANE01', 'IG_HEIGEN507'):
+        raw = _game_read(g6, f'MAP/{name}.FMB')
+        f = fmb.parse(raw)
+        t4, n4 = struct.unpack_from('<2I', raw, 0x20)
+        recs = [struct.unpack_from('<7I', raw, t4 + 28 * k) for k in range(n4)]
+        for lf in f.leaves.values():
+            for m in lf.meshes:
+                r = recs[m.grid[7]]
+                assert (r[0], r[2], r[3]) == (m.grid[6] >> 8, 0, 0), (name, m.grid, r)
+    groups = fmex.read_table2(raw)
+    assert len(groups) == 4 and all((g.cell, g.origin, g.kind.shape) == (1.0, (-1250.0, -1250.0), (2500, 2500)) for g in groups)
+    assert [len(g.types) for g in groups] == [5, 15, 4, 1] and {t.kind for t in groups[0].types} == {0}
+    assert all(t.kind == 1 for g in groups[1:] for t in g.types)
+    mac = dict(bigmap.Marc.parse(_game_read(g6, 'MAP/IG_HEIGEN507.MAC')).files)
+    mo = bigmap.MapO(mac['map.mapo'])
+    pair = mo.ent_off + struct.unpack_from('<i', mo.raw, mo.ent_off)[0]
+    count, rel = struct.unpack_from('<2i', mo.raw, pair)
+    assert count == sum(int((g.kind != 0xFF).sum()) for g in groups) == 159441 and rel == 8
+    heights = np.frombuffer(mo.raw, dtype='<f4', count=count, offset=pair + 8)
+    jit = raw[struct.unpack_from('<I', raw, 0x18)[0]:][:0x1000]
+    tris = np.array([[lf.verts[i][:3] for i in t] for lf in f.leaves.values() for t in lf.triangles()])
+    lo, hi = tris.min(1), tris.max(1)
+
+    def ground(x: np.ndarray, z: np.ndarray) -> np.ndarray:
+        out = []
+        for px, pz in zip(x, z):
+            for a, b, c in tris[(lo[:, 0] <= px) & (hi[:, 0] >= px) & (lo[:, 2] <= pz) & (hi[:, 2] >= pz)]:
+                d = (b[2] - c[2]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[2] - c[2])
+                l1 = ((b[2] - c[2]) * (px - c[0]) + (c[0] - b[0]) * (pz - c[2])) / d
+                l2 = ((c[2] - a[2]) * (px - c[0]) + (a[0] - c[0]) * (pz - c[2])) / d
+                if min(l1, l2, 1 - l1 - l2) >= -1e-6:
+                    out.append(l1 * a[1] + l2 * b[1] + (1 - l1 - l2) * c[1])
+                    break
+            else:
+                out.append(np.nan)
+        return np.array(out)
+
+    start = 0
+    for g in groups:
+        n = int((g.kind != 0xFF).sum())
+        pick = np.linspace(0, n - 1, 30).astype(int)
+        sample = fmex.Group(g.name, g.cell, g.origin, g.types, np.full(g.kind.shape, 0xFF, np.uint8), g.jitter)
+        rows, cols = np.nonzero(g.kind != 0xFF)
+        sample.kind[rows[pick], cols[pick]] = 0
+        assert np.allclose(fmex.plant_heights(sample, jit, ground), heights[start + pick], atol=0.05), g.name
+        start += n
+
+
+@test
+def edf41_sk_grass_real() -> None:
+    """The vegetation table of EDF4.1's seven SK fields (pylib/sk_terrain.py vegetation): a square grid over the 2000 m
+    field (2000 x 2000 cells of 1 m, or 1000 x 1000 of 2 m), every cell's type one of the table's or 0xFF, kinds 1
+    (grass / flower cards, a .dds the map's grass.merge.sgo names; one unused tree entry) and 2 (.trb / .mlb models),
+    256 jitter records; and
+    the grid's rows are z: on the steep ground of SK_VALLEY01 and SK_SANGAKU01 grass grows in cells of a third the
+    average slope this way round and not transposed. sk_map.grass_group keeps exactly the grass cells."""
+    import map_legacy
+    import numpy as np
+    import sgo
+    import sk_map
+    import sk_terrain
+    games = _legacy_games()
+    if games is None:
+        print('skip  edf41_sk_grass_real: no EDF4.1 / EDF5 / EDF6 here')
+        return
+    for name in ('SK_CRATER01', 'SK_HEIGEN02', 'SK_KAIGAN01', 'SK_SANGAKU01', 'SK_SANGAKU02', 'SK_STEPMOUNTAIN01',
+                 'SK_VALLEY01'):
+        members = dict(map_legacy.parse_marc_lenient(_game_read(games[0], f'MAP/{name}.MAC'))[1])
+        shfb = [d for n, d in members.items() if n.endswith('.shfb')][0]
+        s = sk_terrain.parse(shfb)
+        veg = sk_terrain.vegetation(shfb, s.extent[0])
+        side = veg.kind.shape[0]
+        assert veg.kind.shape == (side, side) and side * veg.cell == 2000.0 and side in (1000, 2000), name
+        assert len(veg.jitters) == 0x1000 and set(np.unique(veg.kind).tolist()) <= set(range(len(veg.types))) | {0xFF}
+        merge = {k.lower() for k in sgo.plain(sgo.read(members['grass.merge.sgo'])[1])}
+        for k, t in enumerate(veg.types):
+            assert t.kind in (1, 2), (name, t)
+            if t.kind == 1 and t.name.endswith('.dds'):
+                assert t.name[:-4].lower() in merge, (name, t.name, merge)
+            elif t.kind == 1:      # SK_CRATER01's sk_tree10m01.trb of kind 1: no cell uses it
+                assert not (veg.kind == k).any(), (name, t.name)
+            else:
+                assert t.name.endswith(('.trb', '.mlb')), (name, t.name)
+        g = sk_map.grass_group(veg, -1000.0, -1000.0)
+        grass = [k for k, t in enumerate(veg.types) if t.kind == 1 and t.name.endswith('.dds')]
+        assert int((g.kind != 0xFF).sum()) == int(np.isin(veg.kind, grass).sum()) > 0
+        if name in ('SK_VALLEY01', 'SK_SANGAKU01'):
+            step = (s.height - 1) / side
+            idx = np.minimum((np.arange(side) * step).astype(int), s.height - 1)
+            h = s.heights[np.ix_(idx, idx)].astype(np.float64)
+            gz, gx = np.gradient(h, veg.cell)
+            slope = np.hypot(gx, gz)
+            here = np.isin(veg.kind, grass)
+            assert slope[here].mean() < slope.mean() / 3 and slope[here.T].mean() > slope.mean() / 2, name
+
+
+@test
+def edf41_map_wires_real() -> None:
+    """The wires of EDF4.1's maps on the real files: every wire route link of NW_HILLYCITY_LIGHT / NW_KASENJIKI01 /
+    NW_SINSUIKOUEN that the old conversion dropped (41 / 22 / 44) or took for a route index while it named a wire point
+    is resolved through the mapb's wire points (156 / 22 / 140), each to a waypoint the wire block pairs with the linking
+    one; and with_wire_textures puts the textures of NW_UNDERGROUND01's wire types (wire_test, nw_wire_black) into its
+    MAC as the RAB's DDS bytes before map.mapo, and nothing into SK_HEIGEN02's (no wire pairs)."""
+    import bigmap
+    import edf41_maps
+    import map_legacy
+    import mdb
+    import rmpa_legacy
+    games = _legacy_games()
+    if games is None:
+        print('skip  edf41_map_wires_real: no EDF4.1 / EDF5 / EDF6 here')
+        return
+    g41 = games[0]
+    for name, fixed, left in (('NW_HILLYCITY_LIGHT', 156, 0), ('NW_KASENJIKI01', 22, 0), ('NW_SINSUIKOUEN', 140, 2)):
+        mac = bigmap.Marc.parse(map_legacy.mac_from_legacy(_game_read(g41, f'MAP/{name}.MAC')))
+        cables = map_legacy.cable_graph(mac.get('map.mapb'))
+        t5, _ = rmpa_legacy.decode5(mac.get('map.rmpa'))
+        assert len(rmpa_legacy.tree_from_legacy(t5)['dropped_links']) in (41, 22, 44)
+        tree = rmpa_legacy.tree_from_legacy(t5, cables)
+        assert len(tree['remapped_links']) == fixed and len(tree['dropped_links']) == left, (name, len(tree['remapped_links']), len(tree['dropped_links']))
+        pts, pairs = cables
+        at: dict = {}
+        for i, p in enumerate(pts):
+            at.setdefault(rmpa_legacy._pos_key(p[:3]), []).append(i)
+        edges = {frozenset(p) for p in pairs}
+        wps = tree['routes']['list'][0]['wps']
+        by_index = {w['index']: w for w in wps}
+        for route, index, link, target in tree['remapped_links']:
+            base = [r for r in tree['routes']['list'][0]['routes'] if r['name'] == route][0]['idx'][0]
+            a = at[rmpa_legacy._pos_key(rmpa_legacy._wp_xyz(by_index[base + index]))]
+            b = at[rmpa_legacy._pos_key(rmpa_legacy._wp_xyz(wps[target]))]
+            assert any(frozenset((x, y)) in edges for x in a for y in b), (name, route, index, link)
+        assert rmpa_legacy.is_edf6(rmpa_legacy.encode6(tree))
+    mac = bigmap.Marc.parse(map_legacy.mac_from_legacy(_game_read(g41, 'MAP/NW_UNDERGROUND01.MAC')))
+    rab = _game_read(g41, 'MAP/NW_UNDERGROUND01.RAB')
+    edf41_maps.with_wire_textures(mac, rab)
+    names = [n for n, _ in mac.files]
+    tex = {f.name: f.data for f in mdb.rab_read(rab).files}
+    assert names[-3:] == ['wire_test.dds', 'nw_wire_black.dds', 'map.mapo'], names[-4:]
+    assert mac.get('wire_test.dds') == tex['wire_test.dds'] and mac.get('nw_wire_black.dds')[:4] == b'DDS '
+    mac = bigmap.Marc.parse(map_legacy.mac_from_legacy(_game_read(g41, 'MAP/SK_HEIGEN02.MAC')))
+    before = list(mac.files)
+    edf41_maps.with_wire_textures(mac, _game_read(g41, 'MAP/SK_HEIGEN02.RAB'))
+    assert mac.files == before
+
+
+@test
+def edf41_maps_valley_files_real() -> None:
+    """tools/edf41_maps.py converts SK_VALLEY01 (grass on 2 m cells, wires on an SK map) into a temporary folder, and the
+    files read back from it: the MAC verifies and carries wire_test.dds; every leaf of the FMB draws with the pass-0
+    shader record of its layer count; the FMB's grass group covers the field from its origin and the mapo entry of the
+    ground has one height per plant cell of all its groups, each the FMB's ground under the cell's jittered position."""
+    import struct
+    import tempfile
+    import bigmap
+    import edf41_maps
+    import fmb
+    import fmex
+    import numpy as np
+    import rootcpk
+    games = _legacy_games()
+    if games is None:
+        print('skip  edf41_maps_valley_files_real: no EDF4.1 / EDF5 / EDF6 here')
+        return
+    steam = os.path.dirname(rootcpk.DEFAULT_GAME)
+    e41 = edf41_maps.Archives(os.path.join(steam, 'Earth Defense Force 4.1'))
+    e6 = edf41_maps.Archives(rootcpk.DEFAULT_GAME)
+    with tempfile.TemporaryDirectory() as tmp:
+        for rel, data in edf41_maps.convert('SK_VALLEY01', e41, e6).items():
+            os.makedirs(os.path.join(tmp, os.path.dirname(rel)), exist_ok=True)
+            with open(os.path.join(tmp, rel), 'wb') as f:
+                f.write(data)
+
+        def disk(rel: str) -> bytes:
+            with open(os.path.join(tmp, rel), 'rb') as f:
+                return f.read()
+        mac_raw = disk('MAP/SK_VALLEY01.MAC')
+        raw = disk('MAP/SK_VALLEY01_FLD2MGRID.FMB')
+    assert not bigmap.verify(mac_raw)
+    mac = bigmap.Marc.parse(mac_raw)
+    assert mac.get('wire_test.dds')[:4] == b'DDS '
+    f = fmb.parse(raw)
+    t4, n4 = struct.unpack_from('<2I', raw, 0x20)
+    for lf in f.leaves.values():
+        m = lf.meshes[0]
+        assert struct.unpack_from('<7I', raw, t4 + 28 * m.grid[7]) == (m.grid[6] >> 8, 1, 0, 0, 0, 0, 0)
+    plants = fmex.read_table2(raw)
+    assert all((g.cell, g.origin, g.kind.shape) == (2.0, (-1000.0, -1000.0), (1000, 1000)) for g in plants)
+    grass = fmex.Group('', 2.0, (-1000.0, -1000.0), [], np.full((1000, 1000), 0xFF, np.uint8), plants[0].jitter)
+    mb, mo = bigmap.MapB(mac.get('map.mapb')), bigmap.MapO(mac.get('map.mapo'))
+    ground = [i for i in range(mb.rec_n) if mb.def_name(mb.def_index(i)) == 'sk_valley01_fld2mgrid.fmep'][0]
+    ent = mo.ent_off + ground * bigmap.ENT
+    pair = ent + struct.unpack_from('<i', mo.raw, ent)[0]
+    count, rel = struct.unpack_from('<2i', mo.raw, pair)
+    assert rel == 8 and count == sum(int((g.kind != 0xFF).sum()) for g in plants) > 10000
+    heights = np.frombuffer(mo.raw, dtype='<f4', count=count, offset=pair + 8)
+    pts = np.array(fmb.points(f))
+    lat = np.full((501, 501), np.nan)
+    lat[np.rint((pts[:, 2] + 1000) / 4).astype(int), np.rint((pts[:, 0] + 1000) / 4).astype(int)] = pts[:, 1]
+    assert not np.isnan(lat).any()
+    jit = raw[struct.unpack_from('<I', raw, 0x18)[0]:][:0x1000]
+    want = np.concatenate([fmex.plant_heights(g, jit, lambda x, z: fmex.heights_at(lat, -1000.0, -1000.0, 4.0, x, z))
+                           for g in plants])
+    assert np.abs(want - heights).max() < 1e-3
+
+
+@test
+def edf41_trees_real() -> None:
+    """Trees on the real files: map_legacy.trb_from_legacy turns 4.1's sk_tree10m01.trb / sk_tree3m01.trb into EDF6's files
+    of the same names byte for byte (the first rule's appended 0), leaves an EDF6 .trb as it is; and EDF6's stock plant
+    groups name their models <model>.tree / <model>.mls for the MAC's <model>.trb / <model>.mlb (IG_HEIGEN507,
+    IG_KAIGAN502: every model type), the form sk_map.model_groups writes."""
+    import bigmap
+    import fmex
+    import map_legacy
+    games = _legacy_games()
+    if games is None:
+        print('skip  edf41_trees_real: no EDF4.1 / EDF5 / EDF6 here')
+        return
+    g41, _g5, g6 = games
+    trb41 = dict(map_legacy.parse_marc_lenient(_game_read(g41, 'MAP/NW_KASENJIKI01.MAC'))[1])
+    for name, host in (('sk_tree10m01.trb', 'IG_2000MCITY'), ('sk_tree3m01.trb', 'NW_KITAGUNICITY')):
+        six = bigmap.Marc.parse(_game_read(g6, f'MAP/{host}.MAC')).get(name)
+        src = trb41[name] if name in trb41 else dict(map_legacy.parse_marc_lenient(_game_read(g41, 'MAP/SK_HEIGEN02.MAC'))[1])[name]
+        assert src != six and map_legacy.trb_from_legacy(src) == six, name
+        assert map_legacy.trb_from_legacy(six) == six
+    for name in ('IG_HEIGEN507', 'IG_KAIGAN502'):
+        members = {n.lower() for n, _ in bigmap.Marc.parse(_game_read(g6, f'MAP/{name}.MAC')).files}
+        models = [t for g in fmex.read_table2(_game_read(g6, f'MAP/{name}.FMB')) for t in g.types if t.kind == 1]
+        assert len(models) > 15
+        for t in models:
+            stem, ext = t.file.rsplit('.', 1)
+            assert stem.lower() + {'tree': '.trb', 'mls': '.mlb'}[ext] in members, (name, t.file)
 
 
 @test
@@ -9650,13 +10414,14 @@ def edf41_rest_behaviour_real() -> None:
         t = load(name)['game_object_talk_setting']
         assert t[1] == talk and t[2] > 1 and t[3] in (0, 1) and t[2] == {0: 6, 1: 4}[talk], t
     # Berserker's base class enables material slots 0..3 by number (EDF+0x6dc830 via 0x348d1d, 0x33ef81, 0x34b2de, 0x37acde):
-    # every Hector variant carries the template's four (M113: 2 entries, a null player; M131: the memory past them)
+    # every Hector variant carries the template's four (M113: 2 entries, a null player; M131: the memory past them), and
+    # no more: a fifth, the 301 cannon's charge light, washed the whole screen out (2026-10-17 M113, X1)
     import dsgo
     for name in ('HECTOR301CC', 'HECTOR301GL', 'HECTOR401LS'):
         with open(os.path.join(base, name + '.SGO'), 'rb') as f:
             model = dsgo.parse(f.read()).root.get('animation_model')
         entries = model.get('material_animation').items
-        assert len(entries) == 4 and [e.items[1] for e in entries] == [0.0, 0.0, 2.0, 2.0], name
+        assert [e.items[1] for e in entries] == [0.0, 0.0, 2.0, 2.0], name
         assert all(isinstance(e.items[0], dsgo.Blob) for e in entries)
     assert load('UFOCARRIER401')['game_sound'] == ['app:/sound/adx/tikyuu4_en_UFOcarrier401.acb',
                                                    'app:/sound/adx/tikyuu4_en_UFOcarrier301.acb']
@@ -10020,6 +10785,27 @@ def edf41_alias_dsgo_helpers() -> None:
 
 
 @test
+def edf41_shipped_textures_load_before_models() -> None:
+    """Every model in every EDF4.1 archive the tools ship has each texture it names before it in the archive (the
+    engine binds a texture only if it loaded before the model: mdb.insert_member). The Hectors' once had their guns'
+    and shield's textures after the body that carries those meshes: black guns, no shield (docs/feedback-2026-10-17-
+    edf41-map-hector.md H2 / H5)."""
+    import edf41_objects as eo
+    import make_edf41_objects as m
+    import mdb
+    checked = 0
+    for rel in sorted(eo.registry()['files']):
+        if not rel.upper().endswith('RAB'):
+            continue
+        data = eo.read(rel)
+        for f in mdb.rab_read(data).files:
+            if f.name.lower().endswith('.mdb'):
+                assert not m.missing_textures(data, f.name), (rel, f.name, m.missing_textures(data, f.name))
+                checked += 1
+    assert checked >= 21, checked
+
+
+@test
 def edf41_hector_alias() -> None:
     """HECTOR301CC under EDF6_Berserker_Large, built from the games (tools/make_edf41_objects.py build, only that
     root): not skipped; and every name the class looks up that is unchecked in EDF.dll (jobs/4bf89026/tmp/hector41
@@ -10027,7 +10813,8 @@ def edf41_hector_alias() -> None:
     the getters' tunings, the states the class asks for in a fight, the damage reaction's states, the locators
     (eye, one muzzle per gun_control entry) on bones the model has, the bone and ragdoll-body names the SGO gives,
     the damage map's debris models and every texture the model binds. The weak point is gone and the damage reaction
-    is the capped one (one entry, min 0.05, ExplosionDownBorder 10)."""
+    is the capped one (one entry, min 0.05); nothing knocks it down and it does not climb (both move the object and
+    play states Hector has none of); it walks and turns at 4.1's rates."""
     import struct
     import cas_graft
     import cas_legacy as cl
@@ -10076,7 +10863,24 @@ def edf41_hector_alias() -> None:
     assert len(reaction) == 1 and reaction[0]['user_param'][0] == 'damage'
     assert set(reaction[0]['user_param'][1]) <= set(players['damage'])
     adjust = top['BerserkerSettings']['DamageReactionAdjust']
-    assert adjust['min'] == 0.05 and adjust['scale'] == 10.0 and top['BerserkerSettings']['ExplosionDownBorder'] == 10.0
+    assert adjust['min'] == 0.05 and adjust['scale'] == 10.0
+    # nothing knocks it down: the class's get-up puts the object at its ragdoll's waist and plays wakeup_f / _b, which
+    # Hector has none of (the 2026-10-17 report: it vanished off the map)
+    assert top['BerserkerSettings']['ExplosionDownBorder'] >= 1e30 and not {'wakeup_f', 'wakeup_b'} & set(players['main'])
+    # no climb: the template's climb moves the object onto the obstacle and plays climb_over_*, which Hector has none of
+    assert 'ClimbOver' not in top['WalkingEnemyBase'], top['WalkingEnemyBase']
+    climbing = dsgo.parse(files['OBJECT/HECTOR301CC.SGO']).root
+    m.set_path(climbing, 'WalkingEnemyBase/ClimbOver', m.dsgo_value({'animations': [[20.0, 'climb_over_small']]}))
+    try:
+        m.check_states(climbing, cas, 'HECTOR301CC with the template climb')
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('check_states passed a climb state Hector has not')
+    # 4.1's walk (6 units/s, eased 10 %) and turn (0.03 rad/frame at most, the yaw eased 10 %): EDF6's turn is
+    # TurnSpeed[0] x clamp(angle, +-0.1) a frame, so 0.3; the speed itself comes from src/hector_ai.h Steer
+    assert top['WalkingEnemyBase']['MoveSpeed'] == [6.0, 0.1], top['WalkingEnemyBase']['MoveSpeed']
+    assert top['WalkingEnemyBase']['TurnSpeed'] == [0.3, 0.1], top['WalkingEnemyBase']['TurnSpeed']
     assert top['WalkingEnemyBase']['RandomAnimationTrack'] == [], 'its variables are not in the CAS'
     # the model, the MAB, the ragdoll
     rab = files['OBJECT/HECTOR301CC.MRAB']
@@ -10088,13 +10892,24 @@ def edf41_hector_alias() -> None:
     assert [f.name for f in archive.files if f.name.lower().endswith('.mdb') and f.folder == 1 and 'fragment' not in f.name.lower()] == ['Hector301.mdb']
     bones = {model.name_of(b.name) for b in model.bones}
     assert {'waist', 'arms_l', 'arms_r', 'Hector301', 'gun_arms_l', 'gun_arms_r'} <= bones
-    assert not m.missing_textures(rab, model), m.missing_textures(rab, model)
+    assert not m.missing_textures(rab, 'Hector301.mdb'), m.missing_textures(rab, 'Hector301.mdb')
     for frag in am.items[3].items[3].items[6].items:
         assert frag.lower() in member, frag
-        assert not m.missing_textures(rab, mdb.mdb_read(member[frag.lower()].data))
+        assert not m.missing_textures(rab, frag)
     # the class enables slots 0..3 by number (EDF+0x6dc830): as many entries as the template's four, not one per material
     # (two crashed the real game, M113 / M131); the model's materials are the two the glow blob names
-    assert len(am.items[4].items) == 4 and len(model.materials) == 2
+    # and no fifth: 301 cannon's charge light (light0_color up to 10 / 10 / 100) turned M113 white (2026-10-17 real run)
+    assert len(am.items[4].items) == 4 and len(model.materials) == 2 and 'edf41_hector_light' not in top
+    # each material its own name (EDF6 binds an MTAB entry to the first of a name: the guns' glow was never played),
+    # every slot animates the body's and the guns', slot 3 (played once at death) is 4.1's 180-frame death block
+    mats = [model.name_of(x.name) for x in model.materials]
+    assert mats == ['ufosurface', 'ufosurface.hector301cannon'], mats
+    for i, slot in enumerate(am.items[4].items[:4]):
+        blob = slot.items[0].data
+        assert [n for n, _c, _t in m.mtab_entries(blob)] == mats, (i, m.mtab_entries(blob))
+        assert struct.unpack_from('<if', blob, 0) == ((0, 180.0) if i == m.BERSERKER_DEATH_SLOT else (1, 480.0)), i
+    # 4.1's time to the first shot: the 301 cannon charges 180 frames (EDF41.exe 0x225A7A, 3 s)
+    assert [c['gun_battery']['charge']['time'] for c in top['gun_control']] == [180.0, 180.0], top['gun_control']
     located = ml.mab_locators(am.items[2].data)
     names = {l.name: l for _i, l in located}
     assert {'目の基準位置', '砲台１', '砲台２'} <= set(names) and all(l.node in bones for _i, l in located)
@@ -10108,6 +10923,102 @@ def edf41_hector_alias() -> None:
     # the file is a DSGO the writer reproduces
     assert dsgo.write(dsgo.parse(files['OBJECT/HECTOR301CC.SGO'])) == files['OBJECT/HECTOR301CC.SGO']
     assert struct.unpack_from('<I', cas, 4)[0] == 0x204
+    # the head player the plugin opens and closes (src/hector_ai.h StepHead), and no weapon animation on 301's guns
+    assert {'open', 'close'} <= cas_graft.states(cas)['head'], cas_graft.states(cas)
+    assert top['edf41_hector_anim'] == [[0.0, [], [], [], []]] * 2, top['edf41_hector_anim']
+
+
+@test
+def edf41_hector_weapon_anim() -> None:
+    """tools/make_edf41_objects.py hector_anim on HECTOR401LS (launcher / shield) and HECTOR401GG (two gatlings), built from
+    the games: each 401 weapon's own CAS clips (4.1 plays them from the weapon's state machine; the class has nothing for
+    them) come in the SGO key edf41_hector_anim for the plugin, on the merged model's bones: the launcher's open / close
+    (its open clip ends on the model's bind pose, the rotation convention of src/hector_ai.h PoseMatrix, checked by the
+    generator and again here), the gatling's barrel roll (one turn a loop), nothing for the shield."""
+    import make_edf41_objects as m
+    import mdb
+    import rootcpk
+    import sgo
+    edf41 = _edf41_root()
+    if not _e5c_have_game() or not edf41:
+        print('skip  edf41_hector_weapon_anim: needs EDF6 and EDF4.1 installed')
+        return
+    data, files = m.build(edf41, rootcpk.DEFAULT_GAME, ('HECTOR401LS.SGO', 'HECTOR401GG.SGO'))
+    assert not data['skipped'], data['skipped']
+    ls = sgo.load(data=files['OBJECT/HECTOR401LS.SGO'])['edf41_hector_anim']
+    gg = sgo.load(data=files['OBJECT/HECTOR401GG.SGO'])['edf41_hector_anim']
+    kind, names, opened, closed, roll = ls[0]
+    assert kind == 1.0 and names == ['gun_arms_l_gun_bottom_l', 'gun_arms_l_gun_bottom_r', 'gun_arms_l_gun_top'], ls[0]
+    assert roll == [] and ls[1] == [0.0, [], [], [], []], ls[1]
+    # the first shot when 4.1's would come: the launcher once open (120 frames), the shield and gatlings at once; no light
+    top_ls = sgo.load(data=files['OBJECT/HECTOR401LS.SGO'])
+    top_gg = sgo.load(data=files['OBJECT/HECTOR401GG.SGO'])
+    assert [c['gun_battery']['charge']['time'] for c in top_ls['gun_control']] == [120.0, 1.0]
+    assert [c['gun_battery']['charge']['time'] for c in top_gg['gun_control']] == [1.0, 1.0]
+    assert 'edf41_hector_light' not in top_ls and len(top_ls['animation_model'][4]) == 4
+    for clip in (opened, closed):
+        frames, step = int(clip[0]), clip[1]
+        assert frames == 31 and step == 4.0 and len(clip) == 2 + frames * len(names) * 7, (frames, step, len(clip))
+    rab = mdb.rab_read(files['OBJECT/HECTOR401LS.MRAB'])
+    md = mdb.mdb_read(next(f for f in rab.files if f.name.lower() == 'hector401.mdb').data)
+    local = {md.name_of(b.name): b.local for b in md.bones}
+    last = opened[2 + 30 * len(names) * 7:]
+    for i, n in enumerate(names):
+        got = m.pose_matrix(last[i * 7:i * 7 + 7])
+        assert max(abs(a - b) for a, b in zip(got, local[n])) < 2e-3, (n, got, local[n])
+    # the close clip ends where the open one starts (closed)
+    first_open, last_close = opened[2:2 + len(names) * 7], closed[2 + 30 * len(names) * 7:]
+    assert max(abs(a - b) for a, b in zip(first_open, last_close)) < 1e-3
+    for arm, node in zip(gg, ('arms_l', 'arms_r')):
+        kind, names, opened, closed, roll = arm
+        assert kind == 2.0 and names == [f'gun_{node}_gun_rolling'] and opened == [] and closed == [], arm
+        frames, step = int(roll[0]), roll[1]
+        q0, q1 = roll[2 + 3:2 + 7], roll[2 + (frames - 1) * 7 + 3:2 + frames * 7]
+        assert frames == 8 and abs(abs(q0[3]) - 1.0) < 1e-3 and abs(abs(q1[3]) - 1.0) < 1e-3, (q0, q1)   # a whole turn
+
+
+@test
+def edf41_hector_material_merge() -> None:
+    """tools/make_edf41_objects.py mtab_merge on hand-made MTAB blobs: the merged blob names every part's materials (a
+    part's map renames them), its header sums the channels on the shared timeline, and every material's track, channel
+    and keys resolve to the same bytes as in its source (all offsets below the table are self-relative). Blobs on
+    different timelines are refused. Why: EDF6 binds an entry to the first material of its name (EDF+0x110D570), so the
+    Hector's guns (materials named like the body's) were only lit once they had names and entries of their own."""
+    import struct
+    import make_edf41_objects as m
+
+    def blob(loop: int, length: float, material: str, key: float) -> bytes:
+        b = struct.pack('<ifii', loop, length, 1, 1) + b'MTAB' + struct.pack('<ii', 0x200, 0x1c)
+        b += struct.pack('<iii', 1, 0x5c - 0x1c, 0x28 - 0x1c)            # 0x1c entry: 1 track, its name, its tracks
+        b += struct.pack('<iii', 1, 0x4c - 0x28, 0x34 - 0x28)            # 0x28 track: 1 channel, its name, its channels
+        b += struct.pack('<iiiii', 1, 1, 16, 0, 0x48 - 0x34)             # 0x34 channel: its keys
+        b += struct.pack('<f', key)                                       # 0x48 keys
+        b += b'light0_color\0\0\0\0'                                      # 0x4c track name
+        return b + material.encode('utf-16-le') + bytes(2)                # 0x5c material name
+
+    def resolve(b: bytes, tracks: int) -> tuple[bytes, float]:
+        count, name, chans = struct.unpack_from('<iii', b, tracks)
+        key_at = tracks + chans + struct.unpack_from('<i', b, tracks + chans + 16)[0]
+        return b[tracks + name:b.index(b'\0', tracks + name)], struct.unpack_from('<f', b, key_at)[0]
+
+    body, gun = blob(1, 480.0, 'ufosurface', 0.25), blob(1, 480.0, 'ufosurface', 0.75)
+    assert [(n, c) for n, c, _t in m.mtab_entries(body)] == [('ufosurface', 1)]
+    merged = m.mtab_merge([(body, {}), (gun, {'ufosurface': 'ufosurface.hector401cannon'})])
+    assert merged[:8] == body[:8] and struct.unpack_from('<ii', merged, 8) == (2, 2) and merged[16:20] == b'MTAB'
+    entries = m.mtab_entries(merged)
+    assert [n for n, _c, _t in entries] == ['ufosurface', 'ufosurface.hector401cannon'], entries
+    assert [resolve(merged, t) for _n, _c, t in entries] == [(b'light0_color', 0.25), (b'light0_color', 0.75)]
+    assert all(t % 4 == 0 for _n, _c, t in entries) and len(merged) % 4 == 0
+    for other in (blob(0, 480.0, 'ufosurface', 0.0), blob(1, 180.0, 'ufosurface', 0.0)):
+        try:
+            m.mtab_merge([(body, {}), (other, {})])
+        except ValueError:
+            continue
+        raise AssertionError('blobs on different timelines were merged')
+    assert m.BERSERKER_DEATH_SLOT == 3
+    import inspect
+    src_alias = inspect.getsource(m.alias_dsgo)
+    assert 'hector_materials(' in src_alias and 'BERSERKER_DEATH_SLOT' in src_alias
 
 
 @test
@@ -10144,7 +11055,7 @@ def edf41_hector_guns() -> None:
         assert len(entries) == 2, name
         assert top.get('xgs_scene_object_class') == 'EDF6_Berserker_Large'
         assert top.get('WalkingEnemyBase').get('MoveSpeed').items == [6.0, 0.1], name
-        assert top.get('WalkingEnemyBase').get('TurnSpeed').items == [0.03, 0.03], name
+        assert top.get('WalkingEnemyBase').get('TurnSpeed').items == [0.3, 0.1], name   # 4.1's 0.03 rad/frame
         ai = top.get('AiSettings')
         assert ai.get('attack').get('range') == 0.0, name          # 4.1 has no melee
         assert ai.get('gun_attack').get('range') == max(reach[(gen, left)], reach[(gen, right)]), name
@@ -10159,7 +11070,10 @@ def edf41_hector_guns() -> None:
             w = m.HECTOR_WEAPONS[(gen, letter)]
             battery = entry.get('gun_battery')
             bullet, fire = battery.get('bullet'), battery.get('fire')
-            assert battery.get('charge').get('time') == 1.0, name
+            # 4.1's charge (EDF41.exe 0x225A7A / 0x227E2E): the 301 cannon 3 s, the 401 cannon open 60 + 5 s, the 401
+            # launcher open 120; the rest fire at once
+            want = {'Hector301_Cannon': 180.0, 'Hector401_Cannon': 360.0, 'Hector401_Launcher': 120.0}.get(w.cls, 1.0)
+            assert battery.get('charge').get('time') == want, (name, w.cls)
             if w.bullet == 'none':                                   # a shield: nothing hurts
                 assert bullet.get('factory') == 'SolidBullet02' and coef(bullet.get('damage')) == 0.0, name
                 continue

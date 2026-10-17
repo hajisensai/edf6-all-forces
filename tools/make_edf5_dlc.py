@@ -114,7 +114,8 @@ def convert_map(name: str, e5: Archives, e6: Archives) -> tuple[dict[str, bytes]
     donor, weathers = DONORS[name]
     notes: list[str] = []
     mac = bigmap.Marc.parse(map_legacy.mac_from_legacy(e5.read(f'MAP/{name}.MAC')))
-    mac.files = [(n, rmpa_legacy.rmpa_from_legacy(d) if n.lower().endswith('.rmpa') else d) for n, d in mac.files]
+    cables = map_legacy.cable_graph(mac.get('map.mapb'))    # the wire routes' cross links (rmpa_legacy._routes6)
+    mac.files = [(n, rmpa_legacy.rmpa_from_legacy(d, cables) if n.lower().endswith('.rmpa') else d) for n, d in mac.files]
     made = {f'MAP/{name}.MAC': mac.build()}
     problems = bigmap.verify(made[f'MAP/{name}.MAC'])
     if problems:

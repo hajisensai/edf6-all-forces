@@ -308,9 +308,10 @@ struct alignas(16) RayHits { unsigned char raw[0xA0]; };
 // `filter`: the ray's collision filter (its layer; kMapLayer the game's map ray).
 constexpr std::uint32_t kMapLayer=0x16;
 constexpr std::uint32_t kObjectLayer=0x0B;   // the bullets' object layer (ObjectRay)
-// `normal`: the hit's normal (collector +0x40; whose side it faces: map_floor.h Learn).
+// `normal`: the hit's normal (collector +0x40; whose side it faces: map_floor.h Learn). `body`: the hit body's id
+// (collector +0x78, docs/raycast-re.md §2.2).
 float CastRay(const float* a,const float* b,float* hit=nullptr,bool any=false,std::uint32_t* flags=nullptr,
-              std::uint32_t filter=kMapLayer,float* normal=nullptr) noexcept {
+              std::uint32_t filter=kMapLayer,float* normal=nullptr,std::uint32_t* body=nullptr) noexcept {
     if(!rayOk)return -1.0f;
     const auto g=At<unsigned char*>(image,kHavokGlobal);
     if(!Readable(g,0x70) || !At<const void*>(g,0x68))return -1.0f;
@@ -325,8 +326,39 @@ float CastRay(const float* a,const float* b,float* hit=nullptr,bool any=false,st
     if(hit)std::memcpy(hit,col.raw+0x30,12);
     if(flags)std::memcpy(flags,col.raw+0x9C,4);
     if(normal)std::memcpy(normal,col.raw+0x40,12);
+    if(body)std::memcpy(body,col.raw+0x78,4);
     const float d[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};
     return f*std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+}
+
+// What a hit body is (map_floor.h Body): its flags read from hknpWorld's body array. The world is *(g+0x68)+0x20
+// (docs/raycast-re.md §1), checked by its vtable (hknpWorld 0x18BC9C0) whose slot 16 must still be the body getter
+// 0xDAB170 (kBodySignatures); the body must be live (flags & 3) and carry the id asked for (slot 13 0xDAC200's test).
+// Anything else is unknown (map_floor.h Fixed takes it as the map, the old answer).
+constexpr std::size_t kWorldVtbl=0x18BC9C0,kWorldGetBody=0xDAB170,kBodyMotionType=0x11B19AD;
+constexpr std::size_t kWorldBodies=0x18,kWorldBodyCount=0x20,kBodySize=0xB0,kBodyId=0x50,kBodyFlags=0x54;
+const Signature kBodySignatures[]={
+    // mov eax,edx; and eax,0xFFFFFF; imul rax,rax,0xB0; add rax,[rcx+0x18] (ret)
+    {kWorldGetBody,{0x8B,0xC2,0x25,0xFF,0xFF,0xFF,0x00,0x48,0x69,0xC0,0xB0,0x00,0x00,0x00,0x48,0x03},16},
+    {kWorldGetBody+16,{0x41,0x18,0xC3},3},
+    // 0x11B1960 (a body's motion type): mov ecx,[rax+0x54]; test cl,1; je +4; xor eax,eax (static: 0)
+    {kBodyMotionType,{0x8B,0x48,0x54,0xF6,0xC1,0x01,0x74,0x04,0x33,0xC0},10},
+};
+bool bodyOk=false;
+mapfloor::Body BodyKind(std::uint32_t id) noexcept {
+    if(!bodyOk)return mapfloor::Body::unknown;
+    const auto g=At<unsigned char*>(image,kHavokGlobal);
+    if(!Readable(g,0x70))return mapfloor::Body::unknown;
+    const auto holder=At<unsigned char*>(g,0x68);
+    if(!holder || !Readable(holder+0x20,kWorldBodyCount+4))return mapfloor::Body::unknown;
+    const unsigned char* world=holder+0x20;
+    if(At<const unsigned char*>(world,0)!=image+kWorldVtbl)return mapfloor::Body::unknown;
+    const std::uint32_t index=id&0xFFFFFFu;
+    const auto bodies=At<const unsigned char*>(world,kWorldBodies);
+    if(index==0xFFFFFFu || index>=At<std::uint32_t>(world,kWorldBodyCount) || !bodies)return mapfloor::Body::unknown;
+    const unsigned char* b=bodies+static_cast<std::size_t>(index)*kBodySize;
+    if(!Readable(b+kBodyId,8) || (At<std::uint32_t>(b,kBodyId)&0xFFFFFFu)!=index)return mapfloor::Body::unknown;
+    return mapfloor::BodyOf(At<std::uint32_t>(b,kBodyFlags));
 }
 
 // Water (docs/water-re.md): not map geometry (a layer-22 ray over the sea finds the seabed) but trigger
@@ -3643,6 +3675,17 @@ bool InstallDoorGuns() noexcept {
 }
 
 float MapRay(const float* a,const float* b,float* hit) noexcept { return CastRay(a,b,hit); }
+float MapFixedRay(const float* a,const float* b,float* hit) noexcept {
+    return mapfloor::Fixed(a,b,
+        [](const float* from,const float* to,float* p,std::uint32_t* body){ return CastRay(from,to,p,false,nullptr,kMapLayer,nullptr,body); },
+        [](std::uint32_t body){
+            const mapfloor::Body kind=BodyKind(body);
+            // The first few bodies passed in a run, for a report (game thread only: the map's frame).
+            static int said=0;
+            if(kind==mapfloor::Body::moving && said<8){++said;Log("MAP fixed ray: passed moving body %06X",body&0xFFFFFFu);}
+            return kind;
+        },hit);
+}
 // The nearest object body along a->b: layer 11, the one the bullets' object query filters with (docs/bullet-pass-re.md
 // §2 step 1b), with the plain nearest-hit collector (kHitVtbl: every hit, not the ground filter's). Metres to it, -1 with
 // none; `hit` the point, `body` its id (collector +0x78, 24 bits; docs/raycast-re.md §2.2).
@@ -3773,6 +3816,10 @@ bool CheckHeliProfile() noexcept {
               At<const unsigned char*>(image,kGroundVtbl+0x20)==image+kGroundAdd;
         for(const auto& s:kRaySignatures)rayOk=rayOk && Matches(s.rva,s.bytes,s.size);
         Log("HELI ray=%d (obstacle avoidance %s)",rayOk,rayOk ? "on" : "off: unexpected EDF.dll code");
+        bodyOk=rayOk && Readable(image+kWorldVtbl,0x88) && At<const unsigned char*>(image,kWorldVtbl+16*8)==image+kWorldGetBody;
+        for(const auto& s:kBodySignatures)bodyOk=bodyOk && Matches(s.rva,s.bytes,s.size);
+        Log("MAP ray bodies=%d%s",bodyOk,bodyOk ? " (the map view's eye passes moving bodies)" :
+            " (unexpected EDF.dll code: the map view's eye stays over every map-layer hit)");
         visitOk=Matches(kVisitFriends,kVisitFriendsSig,sizeof(kVisitFriendsSig));
         Log("HELI friends walk=%d%s",visitOk,visitOk ? "" : " (unexpected EDF.dll code: medic helis aim at nobody)");
         waterOk=true;

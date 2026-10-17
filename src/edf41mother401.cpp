@@ -188,6 +188,10 @@ struct Part {
 
     // ---- panels ----
     std::uint64_t hull=0;
+    // 4.1's level of a part (10 = level 1; s = level / 10 sizes its durability and its bullets): the hull's effective level when
+    // the layout makes the panel (4.1 0x25fbb6 passes the hull's +0x490, which the hull's slot 3 0x261bf0 copies from SetLevel's
+    // +0x25c, to the panel's 0x26f9f0), and the panel's for its batteries (Panel01's slot 29 0x26ebb0 hands it to each, 0x26ec1c)
+    float level=10.0f;
     float cur[3]={0,1000,0},dst[3]={},vel[3]={},wvel[3]={};
     float yaw60=0.0f;
     int mode=0,delay=0;
@@ -360,6 +364,7 @@ void* MakePanel(Part& h,Cell& c,const wchar_t* path,bool keep) noexcept {
         return nullptr;
     }
     p->hull=h.id;
+    p->level=LevelS(h.obj)*10.0f;   // the hull's +0x49C: EDF6's SetLevel (CreateEnemy / CreateNeutral) on the script's level
     std::memcpy(p->dst,c.local,12);
     p->cur[0]=c.local[0]; p->cur[1]=1000.0f; p->cur[2]=c.local[2];
     p->keep=keep;
@@ -691,10 +696,10 @@ bool AimAt(Part& p,const float* from,float* dir) noexcept {
     return Norm(dir);
 }
 
-// The bullet blocks of each class (4.1 slot 29 / 28 at s = 1: the hull's +0x490 is 10.0 and never written, SPEC 1.6; the
-// difficulty rows are 1 offline, SPEC2 1.3). EDF6 InitParam offsets: SPEC2 7.
+// The bullet blocks of each class (4.1 slot 29 / 28, called with the part's level: s = level / 10, Part::level; the difficulty
+// rows of damage are 1 offline, SPEC2 1.3). EDF6 InitParam offsets: SPEC2 7.
 void SetupBullets(Part& p) noexcept {
-    const float s=1.0f;
+    const float s=p.level/10.0f;
     Bullet& b=p.shot;
     b.hitStop=0.5f;
     switch(p.kind) {
@@ -972,12 +977,19 @@ void InitPart(Part& p) noexcept {
     p.weakBody=Text(Key(p.obj,L"weakpoint"),p.weakName,32) ? RagdollBody(static_cast<char*>(p.obj)+kRagdollAt,p.weakName) : -1;
     if(p.weakBody<0 && p.weakName[0])p.weakBody=-2;   // the ragdoll's bodies may come later: PartUpdate asks again
     p.wholeHits=p.kind==Kind::finalCannon || p.kind==Kind::finalGenerator || IsBattery(p.kind);
-    // HP: 4.1 0x26f9f0 / 0x269a80, durability x s (1) x the difficulty rows: EDF6's durability x difficulty x players (0xD7720);
-    // EventAnimationObject never sizes itself by level (its slot 6 is a stub), so it is written here.
+    // HP: 4.1 0x26f9f0 / 0x269a80, durability x s x the difficulty rows (s = the part's level / 10, Part::level): EDF6's durability
+    // x s x difficulty x players (0xD7720, the carrier's 0x4F6D00 shape). EventAnimationObject never sizes itself by level (its slot
+    // 6 is a stub), so it is written here.
     const float base=Readable(F(p.obj,kBaseDurabilityAt),4) ? *F(p.obj,kBaseDurabilityAt) : 1000.0f;
-    const float hp=Difficulty(base);
+    const float s=p.level/10.0f;
+    const float hp=Difficulty(base*s);
     *F(p.obj,kMaxDurabilityAt)=hp;
     *F(p.obj,kDurabilityAt)=hp;
+    {
+        static std::atomic<int> said[12];
+        if(said[static_cast<int>(p.kind)].fetch_add(1)<1)
+            Log("EDF41M401 %s %p: level %.2f (s %.3f), durability %.0f -> %.0f",KindName(p.kind),p.obj,p.level,s,base,hp);
+    }
     std::uint32_t* flags=reinterpret_cast<std::uint32_t*>(F(p.obj,kFlags380));
     const bool canHurt=p.wholeHits || p.weakName[0];
     if(canHurt)*flags&=~kNoHpLoss;
@@ -1043,7 +1055,7 @@ void MakeBatteries(Part& p) noexcept {
             void* o=CreateFromPath(mm,path);
             Part* b=o ? Find(o) : nullptr;
             if(b && IsBattery(b->kind)) {
-                b->panel=p.id; b->mountIndex=i; b->team=p.team;
+                b->panel=p.id; b->mountIndex=i; b->team=p.team; b->level=p.level;
                 b->rng=p.rng^(0x9E37ull*static_cast<std::uint64_t>(i+1));
                 if(p.team>=0)SetTeam(o,p.team,true);
                 m.battery=b->id;

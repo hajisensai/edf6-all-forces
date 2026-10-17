@@ -28,6 +28,10 @@ edf41dlc.py), under OBJECT/EDF41MP01/ and OBJECT/EDF41MP02/; the mounted paths t
 folders, and a story file EDF6 holds as another file (shadowed: DragonSmall401.mrab is EDF5's frog dragon in EDF6) moves
 into the pack's folder with them.
 
+STORY_ROOTS: the story's objects whose own path EDF6 holds as another object (pylib/edf41dlc.py STORY_SHADOWED: the
+small dragons, EDF5's frog dragons at 4.1's names in EDF6, which EDF6's own missions spawn), under OBJECT/EDF41/ the
+same way (their shadowed model and CAS move with them); every 4.1 script names them there (edf41dlc.rewrite).
+
 STOCK_OVERRIDES: objects EDF6's archives hold, left over from 4.1 (EDF6's own missions never spawn them), whose class
 EDF6 has since changed: the stock file lacks keys the class reads unchecked and crashes on spawn (Transporter401_
 Formation: se_preset_list, EDF+0x5E9A90, M-P003 2026-10-13). Such a root is built like any other (4.1's SGO under an
@@ -56,6 +60,7 @@ import cas_graft  # noqa: E402
 import cas_pose  # noqa: E402
 import dsgo  # noqa: E402
 import edf41dlc  # noqa: E402
+import edf41friends  # noqa: E402
 import legacy_assets  # noqa: E402
 import legacy_sgo  # noqa: E402
 import mab_legacy  # noqa: E402
@@ -195,6 +200,7 @@ class HectorWeapon:
     spread: float = 0.0       # radians, the entry's fire.accuracy
     count: float = 1.0        # bullets per attack (fire.count)
     interval: float = 1.0     # frames between them (fire.interval)
+    charge: float = 1.0       # frames from the attack's start to the first shot (gun_battery.charge.time; HECTOR_CHARGE)
 
 
 # The stock EDF6 bullet each factory is copied from: (OBJECT/<file>, path of the bullet node). They are the bullets of
@@ -228,6 +234,17 @@ HECTOR_WEAPONS: dict[tuple[str, str], HectorWeapon] = {
     ('401', 'S'): HectorWeapon('Hector401_Shield', 'HECTOR401_SHIELD.SGO', 'Hector401shield.mdb', 'none'),
 }
 
+# 4.1's time from an attack's start to its first shot, per weapon class (EDF41.exe; the weapon's state machine on +0x690
+# waits on its clock *(+0x6A0), in seconds: dt, the walk's x 60 at 0x221B30). 301 cannon: its charge state 0x2259A0 waits
+# 3.0 s (0x225A7A) = 180 frames, playing its 120-frame charge light meanwhile; 401 cannon: `open` (60 frames, 0x227C1C waits
+# for the clip's end, 0x227D75) and then its charge state 0x227DD0 waits 5.0 s (0x227E2E) = 360 frames; 401 launcher: `open`
+# (120 frames, 0x229B00) and it fires. The gatlings and 301's launcher fire at once (their first state is the firing one,
+# 0x2265A0 / 0x228F70 / 0x2270E0: those waits, 10 / 10 / 4 s, are how long they fire). EDF6's battery charges for
+# charge.time frames (+0x140 -> +0x2E8, counted down to the first shot, 0x6D5474..0x6D556A) and plays the class's charge
+# effect and sound meanwhile.
+HECTOR_CHARGE: dict[str, float] = {'Hector301_Cannon': 180.0, 'Hector401_Cannon': 360.0, 'Hector401_Launcher': 120.0}
+HECTOR_CHARGE_LIGHT_SLOT = 4      # where 301 cannon's charge light would go (not shipped: alias_dsgo, the M113 glare)
+
 # The Hector variants 4.1's missions name (root SGO -> (generation, left arm, right arm, missions)). The letters are
 # what the SGO's hector_weapon holds (arms_l then arms_r), not the file name: HECTOR401SG holds the gatling on the
 # left and the shield on the right. alias_dsgo checks the table against the file.
@@ -256,16 +273,29 @@ HECTOR_COMMON: tuple[tuple[str, object], ...] = (
     ('resource', []),
     ('WalkingEnemyBase/RandomAnimationTrack', []),
     ('WalkingEnemyBase/InterpolateNode', 'waist'),
-    # 4.1: 6 units/s (velocity 1 x the 0.1 smoothing x 60), turn 0.03 rad/frame with 10% smoothing
+    # 4.1 (EDF41.exe 0x2216F0): the local velocity eases 10 % a frame to 0.1 x the walk command (1.0), x 60 a second:
+    # 6 units/s. EDF6 (0x53D7CC, 0x53DBB5): velocity = walk vector (MoveTo's speed long; src/hector_ai.h Steer gives
+    # 4.1's) x MoveSpeed[0] units/s, eased MoveSpeed[1] a frame.
     ('WalkingEnemyBase/MoveSpeed', [6.0, 0.1]),
-    ('WalkingEnemyBase/TurnSpeed', [0.03, 0.03]),
+    # 4.1 turns its wanted yaw by 0.03 x clamp(10 x the angle to go, -0.85, 1) a frame and the yaw follows it 10 % a frame
+    # (0x223874..0x2238A6, 0x221862..0x22198B). EDF6 turns it by TurnSpeed[0] x clamp(angle, -0.1, 0.1) (FaceTarget
+    # 0x33E840 with the 0.1 both walking states pass, 0x53D5BD) and eases the yaw TurnSpeed[1] a frame (0x53D63D):
+    # 0.3 gives 4.1's 0.03 rad/frame. [0.03, 0.03] (until 2026-10-17) turned 10x slower, so the Hector walked sideways
+    # and backward (walk_l / _r / _b follow the walk vector against the facing) towards a target it could not face.
+    ('WalkingEnemyBase/TurnSpeed', [0.3, 0.1]),
     ('BerserkerSettings/WakeupNode', ['waist', [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]]),
     ('BerserkerSettings/DownRagdollBodies',
      ['RagDollProxys.waist', 'RagDollProxys.chest', 'RagDollProxys.head_1', 'RagDollProxys.head_2',
       'RagDollProxys.thigh_l', 'RagDollProxys.thigh_r', 'RagDollProxys.shin_l1', 'RagDollProxys.shin_r1']),
     ('BerserkerSettings/NoSeparationBodies', ['RagDollProxys.head_2', 'RagDollProxys.head_3']),
     ('BerserkerSettings/DamageReactionAdjust/min', 0.05),
-    ('BerserkerSettings/ExplosionDownBorder', 10.0),
+    # no explosion knocks it down: 4.1's Hector has no down / get-up (its CAS states, EDF41.exe 0x21E9A4: sleep, wakeup,
+    # stand, walk_*, turn_*, head, open). The class knocks down on an explosion whose damage / the SGO durability (not
+    # level-scaled, +0x182C = +0x2EC) passes this (0x33F068..0x33F0EE), lets the DownRagdollBodies fall, and at the get-up
+    # (0x345CA0) puts the object where the WakeupNode bone (waist) lies (0x345E41..0x345E56: +0x90 and the character
+    # controller) and plays wakeup_f / wakeup_b, which Hector has none of. 10 (until 2026-10-17) was reached by a high
+    # level's explosion (10 x 1200): the Hector fell, and got up wherever its ragdoll's waist had been thrown.
+    ('BerserkerSettings/ExplosionDownBorder', 1.0e30),
     ('BasicAnimationCharacterSettings/DamageReaction',
      [{'border': 0.0, 'user_param': ['damage', ['damageA', 'damageB', 'damageC']]}]),
     # 4.1 has no melee (no grapple / stomp / melee string in EDF41.exe)
@@ -299,6 +329,10 @@ def hector_alias(generation: str, left: str, right: str) -> 'Alias':
         cas_donors=(('OBJECT/E602_BERSERKER.CAS', ('additive_action',), ('v_move_velocity',)),),
         state_aliases=(('main', 'walk_battle_f', 'walk_f'), ('main', 'walk_battle_b', 'walk_b'),
                        ('main', 'walk_battle_l', 'walk_l'), ('main', 'walk_battle_r', 'walk_r')),
+        # no climbing: 4.1's Hector climbs nothing and its CAS has no climb_over_small / _large; the template's climb
+        # moves the object onto the obstacle first (check_states / CLIMB_KEY). Without the key the class's probe stops
+        # at once (EDF+0x540C82 and 0x53CC00 test the node and leave).
+        drop=('WalkingEnemyBase/ClimbOver',),
         guns=guns, eye=(f'Hector{generation}', (0.0, 29.0, 0.0)), prune=True)
 
 
@@ -457,8 +491,9 @@ ALIASES: dict[str, Alias] = {
     #   backwards. The class blends one additive reaction clip by clamp(damage / HP x scale, min, 1): DamageReaction
     #   keeps only its first entry (damageA..C; the second, at 0.3 of the HP, plays damage_large, which Hector has no
     #   clip for), DamageReactionAdjust.min 0.05 (the template's 0.01 lets a bullet's nick blend at 1%), and
-    #   ExplosionDownBorder 10: an explosion of more than 10x the HP is the only one that knocks it down (the class
-    #   would play wakeup_f / wakeup_b, which Hector has no state for). The clips are the grafted ones: they move nothing.
+    #   ExplosionDownBorder 1e30: nothing knocks it down (the get-up moves it to its ragdoll's waist and plays wakeup_f /
+    #   wakeup_b, which Hector has no state for; HECTOR_COMMON). The clips are the grafted ones: they move nothing.
+    #   WalkingEnemyBase.ClimbOver dropped: Hector has no climb (hector_alias).
     #   AiSettings.attack.range 0: the melee attacks play states Hector has no animation for.
     #   WalkingEnemyBase.RandomAnimationTrack empty: it names CAS variables (vt_walk_battle_f ...) and sets each to a
     #   tcontrol's index unchecked (0x116DE30 writes at -1 of a missing variable); Hector's CAS has neither, and an
@@ -712,6 +747,54 @@ DRAGON_ALIAS = Alias(
 ALIASES['DRAGONBIG401.SGO'] = DRAGON_ALIAS
 ROOTS['DRAGONBIG401.SGO'] = 1
 
+# The giant's ragdoll mass. After a hit knocks it down, DragonSmall lets the dragon up once the ragdoll's sum of mass x
+# (|v| + |w|) over its bodies is under 2000 (EDF.dll 0x339729..0x33977F, the sum 0x6EB150; else only at the 60 s cap):
+# an absolute number the class's own ragdolls are made for (EDF6's three DragonSmall ragdolls, e518_frogDragon*: 1060,
+# 2120, 3180 kg). 4.1's DragonBig ragdoll (hk_2014 tagfile, pylib/hk2014.py) weighs 361,005 kg (56 bodies, 5 to 10,000
+# kg each), 114 times the heaviest, so the jitter a ragdoll keeps at rest in EDF6 (M166 2026-10-17: a sum of 5,000 to
+# 18,000 for 60 s, about 0.03 m/s a body) never comes under 2000 and the dragon lies 60 s at every knock-down. 4.1's own
+# DragonBig tests the same 2000 (EDF41.exe 0x1EF685..0x1EF6A9) where its bodies go to sleep. The port makes the ragdoll
+# as heavy as the class's heaviest stock one: every mass and inertia, and every joint's friction torque, x the same
+# factor (hk2014.scaled_masses: under gravity, contacts and joints it moves as before), and the class's hit impulse on
+# the ragdoll (dragon_RagdollReactionScale, an impulse: EDF.dll 0x334C07 / 0x334CF0) x the factor too, so a hit moves it
+# as much as before. The threshold and the cap stay the class's.
+DRAGON_RAGDOLL_CLASS = 'DragonSmall'
+
+
+def class_ragdoll_mass(games: 'Games', cls: str) -> float:
+    """The total mass of the heaviest ragdoll EDF6's own objects of class `cls` use (their SHKT tagfiles)."""
+    import shkt_check
+    heaviest = 0.0
+    for members in games.stock_by_class().get(cls, {}).values():
+        rag = members.get('ragdoll')
+        ref = rag[0] if isinstance(rag, list) and rag and isinstance(rag[0], str) else None
+        if not ref or rel_of(ref) not in games.have6:
+            continue
+        data = games.read6(rel_of(ref))
+        if data[:8] == shkt_check.PACKFILE_MAGIC:
+            continue
+        for system in shkt_check.Shkt(data).systems:
+            heaviest = max(heaviest, sum(b.mass for b in system.bodies if b.motion_type != shkt_check.STATIC))
+    if not heaviest > 0:
+        raise ValueError(f'no stock {cls} ragdoll to take the mass scale from')
+    return heaviest
+
+
+def dragon_ragdoll_fix(games: 'Games', files: dict[str, bytes]) -> None:
+    """DragonBig401's ragdoll as heavy as the class's heaviest stock one, its hit impulse scaled with it (see above)."""
+    import hk2014
+    rel = 'OBJECT/DRAGONBIG401.SGO'
+    version, members = sgo.read(files[rel])
+    shkt = rel_of(members['ragdoll'][0])
+    have = hk2014.total_mass(files[shkt])
+    limit = class_ragdoll_mass(games, DRAGON_RAGDOLL_CLASS)
+    if have <= limit:
+        return
+    factor = limit / have
+    files[shkt] = hk2014.scaled_masses(files[shkt], factor)
+    members['dragon_RagdollReactionScale'] = num(members['dragon_RagdollReactionScale']) * factor
+    files[rel] = sgo.write_depth_first(version, members)
+
 # The DLC roots whose 4.1 class needs an alias: the same classes as the story's objects, so the same alias. The
 # underground nests (AntHill: the voxel block, as ANTHILL301; their model is the pack's own AnthillUG.rab), and the
 # ace UFO401 (4.1's Ufo10 like UFO401, the same model ufo401.mrab with the same bones inserted; its own durability 300 and
@@ -907,6 +990,20 @@ SMALL_DRAGON_LONGEST_BODY = 31     # src/edf41smalldragon.cpp kLongestName (char
 for _hs in ('DRAGONSMALL401_HS.SGO', 'REDSMALLDRAGON_HS.SGO', 'YERROWSMALLDRAGON_HS.SGO'):
     ALIASES['EDF41MP01/' + _hs] = Alias('DragonSmall', _hs, (),
                                         override=(('edf41_ragdoll_bodies', list(SMALL_DRAGON_BODIES)),))
+# The story's small dragons (DragonSmall401 green, RedSmallDragon, YerrowSmallDragon: M018, M162-M166, M207, M304, M417,
+# M517, M518, M601 and the packs' M418, M993, DM202, M999 ...), the same 4.1 objects as the DLC's three above but for their
+# own tuning: EDF6 holds each of their paths as EDF5's frog dragon (e518_frogDragon*, the same class and numbers, another
+# model, CAS and ragdoll), which EDF6's own missions spawn, so the 4.1 missions got EDF5's frog in 4.1's place (2026-10-17
+# 「这龙怎么还是蝌蚪的模样」). 4.1's go to OBJECT/EDF41/ (edf41dlc.STORY_SHADOWED; their model archive and CAS, which EDF6 also
+# holds as EDF5's, move with them: relocations) and every converted 4.1 script names them there (edf41dlc.rewrite); the
+# ragdoll bodies as the DLC's (their ragdolls are the same files). Templates: the EDF6 objects of the same name.
+STORY_ROOTS: dict[str, int] = {   # how many of 4.1's own story missions name each (its MISSION/<id>/*.BVM, 2026-10-17)
+    'DRAGONSMALL401.SGO': 14, 'REDSMALLDRAGON.SGO': 7, 'YERROWSMALLDRAGON.SGO': 3,
+}
+for _story, _uses in STORY_ROOTS.items():
+    ROOTS[f'{edf41dlc.STORY_FOLDER}/{_story}'] = _uses
+    ALIASES[f'{edf41dlc.STORY_FOLDER}/{_story}'] = Alias('DragonSmall', _story, (),
+                                                         override=(('edf41_ragdoll_bodies', list(SMALL_DRAGON_BODIES)),))
 
 
 
@@ -944,6 +1041,194 @@ PATCHES: dict[str, Callable[[dict], None]] = {
     'VEHICLE501_FORTRESSROBO.SGO': set_keys(V501_FIX), 'VEHICLE501_FORTRESSROBO_AI.SGO': set_keys(V501_FIX),
 }
 PATCHES.update(DLC_INSECT_PATCHES)
+
+
+# --- EDF4.1's own friendly soldiers (FRIEND_LOOKS; feedback 2026-10-17 「npc好像也没搬过来」, docs/feedback-2026-10-17-
+# edf41-npc.md). The 4.1 missions' rangers, fencers and wing divers name story paths (OBJECT/AIARMYSOLDIER_AF.SGO ...)
+# that EDF6 holds for its own soldiers and its own missions spawn: those stay EDF6's, and 4.1's file of each ships at
+# OBJECT/EDF41/<name> (pylib/edf41friends.py LOOKS, look_rel), the story folder of edf41dlc.STORY_SHADOWED as the small
+# dragons' (STORY_ROOTS): Games.moved reads it from the story path, and edf41dlc.rewrite renames every 4.1 script's
+# reference (tools/make_edf41_missions.py, story and packs). Built here, not through ROOTS / ALIASES: the template is
+# EDF6's own file of the same name, kept whole but for 4.1's look and unit (alias_dsgo is the Hectors' model merge). Each is EDF6's file of that name -- the class's behaviour as EDF6 tunes it: AI, camera, climbing, soldier_config
+# -- with 4.1's look and 4.1's own unit put in (FRIEND_KEYS: model, CAS, MAB, ragdoll, colours, lights, voice, its 4.1
+# weapons). The class's names are checked against 4.1's files (CLASS_NAMES, friend_names).
+
+# Keys 4.1's file gives (when it has them): the look, the voice and the 4.1 unit's weapons and the slots they go in.
+# Not: game_object_camera_setting (4.1's one camera pair, EDF6 reads a list of four, EDF+0x54DDF0), soldier_config
+# (4.1's second number is 0 / 1, EDF6's 0.35 in every stock soldier: not known to mean the same), soldier_weapon_grab_
+# adjust, human_climb_settings, human_character_control_mass, the grip offsets (EDF6 only), appeal_animation (EDF6's
+# folder of emotes exists; 4.1's names OBJECT/ARMYSOLDIER/APPEAL/*.CANM, which EDF6 lacks).
+FRIEND_KEYS = ('ragdoll', 'ragdoll_contact', 'soldier_color', 'soldier_spotlight', 'game_object_talk_setting',
+               'human_voice', 'human_se_table', 'game_object_durability', 'soldier_load_weapon', 'soldier_weapon_slot',
+               'heavy_booster_setting', 'pale_wing_streamer_setting')
+# What the class reads in another shape than 4.1 wrote it, or by a name 4.1's model lacks (EDF.dll, static, 2026-10-17):
+#  - soldier_sub_weapon_slot: 0 (no sub weapon; 41 / 45, 12 / 24, 34 / 38 stock soldiers of the three classes): EDF6's
+#    own file may name a third weapon there (AIHEAVYARMOR_SP_LEADER: [[2, 'weapon', 'te_l']]), 4.1's units carry two;
+#  - pale_wing_booster_cetner: a bone, looked up at EDF+0x57D069 (0x11002A0) and its record taken with no -1 check
+#    (0x1100280 -> +0x1EF8): EDF6's booster5B_center is not in 4.1's model, 4.1's booster_center is;
+#  - pale_wing_booster_core: a list of MAB locators (child count at EDF+0x57D9A9, each through FindLocator 0x6BADD0),
+#    4.1 writes one string: the same name in a list;
+#  - pale_wing_hair_setting: [] as every stock wing diver (4.1's names its own physics key, which EDF6 has no reader of).
+FRIEND_OVERRIDE: dict[str, tuple[tuple[str, object], ...]] = {
+    'AssultSoldier': (('soldier_sub_weapon_slot', 0.0),),
+    'HeavyArmor': (('soldier_sub_weapon_slot', 0.0),),
+    'PaleWing': (('soldier_sub_weapon_slot', 0.0), ('pale_wing_booster_cetner', 'booster_center'),
+                 ('pale_wing_booster_core', ['booster_core']), ('pale_wing_hair_setting', [])),
+}
+# The keys naming a bone of the model (the class finds it by name; checked against 4.1's model: friend_names) and the
+# ones naming MAB locators.
+FRIEND_BONE_KEYS = ('human_move_node', 'human_wakeup_node', 'human_aim_target_adjust_node', 'pale_wing_booster_cetner')
+FRIEND_LOCATOR_KEYS = ('heavy_booster_setting', 'pale_wing_streamer_setting', 'pale_wing_booster_core')
+# The two CAS variables EDF6's soldiers have and 4.1's lack (the vehicle grips' IK targets): not grafted. The class
+# looks them up once (EDF+0x56E49F / 0x56E4B8 -> +0x1440 / +0x1444) and tests each index for -1 before it sets the
+# target (0x57526C / 0x575320), so a miss is no write at all. In EDF6's CAS each follows a tcontrol (cas_graft refuses
+# those: the index would need renumbering) and only EDF6's own IK chain reads it; 4.1's CAS has no such chain, so a
+# grafted one would be set and read by nothing. friend_cas checks the variables are still absent, not half-present.
+GRIP_VARIABLES = ('v_vehicle_grip_l_ik_target', 'v_vehicle_grip_r_ik_target')
+RANGER_STANCES = ('appeal', 'assault', 'shoulder', 'sniper', 'throw', 'waist')
+MOVES = ('cut_back_b', 'cut_back_f', 'cut_back_l', 'cut_back_r', 'jump_fall', 'jump_fall_b', 'jump_fall_f',
+         'jump_fall_l', 'jump_fall_r', 'jump_land', 'jump_land_b', 'jump_land_f', 'jump_land_l', 'jump_land_r',
+         'jump_start', 'jump_start_b', 'jump_start_f', 'jump_start_l', 'jump_start_r', 'jump_up', 'jump_up_b',
+         'jump_up_f', 'jump_up_l', 'jump_up_r', 'run_b', 'run_f', 'run_l', 'run_r', 'stand', 'turn_step_l',
+         'turn_step_r', 'wake_up_d', 'wake_up_u', 'walk_b', 'walk_f', 'walk_l', 'walk_r')
+
+
+def friend_states(unarmed: str, extra: tuple[str, ...] = (), ranger: bool = False) -> tuple[tuple[str, str, str], ...]:
+    """The states EDF6's soldiers have and 4.1's lack that a 4.1 soldier reaches, each as a copy of 4.1's state for the
+    same move (cas_graft.alias_states: one-shot for one-shot, loop for loop; a state the class waits to end is never
+    aliased to a loop): EDF6's unarmed set (noWeapon_*) as 4.1's `unarmed` stance's, knockout as down, EDF6's bike
+    seats as 4.1's bike seat, and the rangers' sprint (<stance>_dash, a run) as their run. Left out: EDF6's sprint ends,
+    dodges (common_elude_*), sword / dash-lance / left-hand-throw moves and NPC talk gestures, which 4.1's units have
+    no counterpart of (a missing state: the play call answers false and the soldier keeps its state, cas_graft)."""
+    main = [(f'noWeapon_{mv}', f'{unarmed}_{mv}') for mv in MOVES + extra]
+    main += [('knockout', 'down'), ('vehicle503_bike_driver', 'vehicle_bike_driver'),
+             ('vehicle613_bike_driver', 'vehicle_bike_driver')]
+    if ranger:
+        main += [(f'{st}_dash', f'{st}_run_f') for st in RANGER_STANCES] + [('noWeapon_dash', f'{unarmed}_run_f')]
+    return tuple(('main', new, old) for new, old in main)
+
+
+@dataclass(frozen=True)
+class FriendCas:
+    template: str                               # EDF6's CAS of the class (its players: none may be missing)
+    states: tuple[tuple[str, str, str], ...]    # (player, EDF6's state, 4.1's state): cas_graft.alias_states
+
+
+# 4.1's CAS of each class, as every object that names it ships it (the Omega team's soldiers share the rangers'): convert()
+FRIEND_CAS: dict[str, FriendCas] = {
+    'OBJECT/ARMYSOLDIER.CAS': FriendCas('OBJECT/EDF6ARMYSOLDIER.CAS', friend_states('assault', ranger=True)),
+    'OBJECT/HEAVYARMOR.CAS': FriendCas('OBJECT/EDF6HEAVYARMOR.CAS', friend_states('base')),
+    'OBJECT/PALEWING.CAS': FriendCas('OBJECT/EDF6_WINGDIVER.CAS', friend_states('hand', ('fly',))),
+}
+
+
+def friend_cas(games: 'Games', rel: str, cas: bytes) -> bytes:
+    """4.1's CAS `rel` (converted) with FRIEND_CAS's states aliased. ValueError when EDF6's CAS of the class has a
+    player 4.1's lacks (the class resolves players unchecked: cas_graft), or a variable 4.1's lacks other than
+    GRIP_VARIABLES."""
+    spec = FRIEND_CAS[rel]
+    template = games.read6(spec.template)
+    players = sorted(set(cas_graft.states(template)) - set(cas_graft.states(cas)))
+    variables = sorted(set(cas_graft.variable_names(template)) - set(cas_graft.variable_names(cas)) - set(GRIP_VARIABLES))
+    if players or variables:
+        raise ValueError(f'{rel}: lacks players {players} / variables {variables} of {spec.template}')
+    aliases: dict[str, list[tuple[str, str]]] = {}
+    for player, new, old in spec.states:
+        aliases.setdefault(player, []).append((new, old))
+    return cas_graft.alias_states(cas, aliases)
+
+
+def friend_roots(games: 'Games') -> dict[str, int]:
+    """{story root (AIARMYSOLDIER_AF.SGO): how many of 4.1's missions (every MISSION/<id>/ of its Root.cpk, as ROOTS
+    counts) name it} for every LOOKS soldier."""
+    count = {r.split('/', 1)[1]: 0 for r in edf41friends.LOOKS}
+    ids = {k.split('/')[1] for k in games.in4 if k.startswith('MISSION/') and k.endswith('.BVM') and k.count('/') == 2}
+    for mid in sorted(ids):
+        named = set()
+        for k in (k for k in games.in4 if k.startswith(f'MISSION/{mid}/') and k.endswith('.BVM')):
+            named |= script_sgos(games.read4(k))
+        for r in named & set(edf41friends.LOOKS):
+            count[r.split('/', 1)[1]] += 1
+    return count
+
+
+def friend_names(games: 'Games', files: dict[str, bytes], rel: str, members: dict, mab: bytes) -> None:
+    """ValueError when a name the class looks up is not in 4.1's files: FRIEND_BONE_KEYS in the model, the weapon slots'
+    CAS players (soldier_weapon_slot [indices, player, ...]: weapon / weapon_r / weapon_l), FRIEND_LOCATOR_KEYS and the
+    spotlights in the MAB (`mab`, animation_model[2]), a weapon or talk file in neither EDF6 nor `files`, a texture the
+    model would not bind (missing_textures), or the model / CAS / ragdoll not shipped."""
+    am = members['animation_model']
+
+    def file(ref: str) -> bytes | None:
+        r = rel_of(ref)
+        return files[r] if r in files else games.read6(r) if r in games.have6 else None
+
+    bones = model_bones(file, am)
+    locators = {loc.name for _l, loc in mab_legacy.mab_locators(mab)}
+    cas = file(am[1])
+    players = set(cas_graft.states(cas)) if cas else set()
+    missing = [f'bone {members[k]!r} ({k})' for k in FRIEND_BONE_KEYS if k in members and members[k] not in bones]
+    missing += [f'CAS player {s[1]!r} (soldier_weapon_slot)' for s in members.get('soldier_weapon_slot', [])
+                if s[1] not in players]
+    for k in FRIEND_LOCATOR_KEYS:
+        v = members.get(k)
+        missing += [f'locator {n!r} ({k})' for n in (v if isinstance(v, list) else [v] if v else []) if n not in locators]
+    missing += [f'locator {s[0]!r} (soldier_spotlight)' for s in members.get('soldier_spotlight', []) if s[0] not in locators]
+    refs = [w for w in members.get('soldier_load_weapon', [])] + [members['game_object_talk_setting'][0], am[1],
+                                                                  members['ragdoll'][0], model_entries(am[0])[0][0]]
+    missing += [f'file {r}' for r in refs if file(r) is None]
+    entry = model_entries(am[0])[0]
+    rab = file(entry[0])
+    if rab is not None and missing_textures(rab, entry[1]):
+        missing.append(f'textures {missing_textures(rab, entry[1])} of {entry[1]} (after the model or absent)')
+    if missing:
+        raise ValueError(f'{rel}: class {members["xgs_scene_object_class"]} looks up {missing}, which its files lack')
+
+
+def friend_look(games: 'Games', root: str) -> dict[str, bytes]:
+    """The files of 4.1's soldier `root` (AIARMYSOLDIER_AF.SGO) as it ships: its SGO at look_rel (FRIEND_LOOKS, above)
+    and the files of its closure EDF6 lacks (model, CAS with FRIEND_CAS's grafts, ragdoll) at their story paths.
+    ValueError when one cannot be built or a check refuses it."""
+    src = 'OBJECT/' + root
+    dst = edf41friends.look_rel(src)   # read from the story path through Games.moved (edf41dlc.STORY_SHADOWED)
+    cls = edf41friends.LOOKS[src]
+    if games.moved.get(dst) != src:
+        raise ValueError(f'{dst}: not in edf41dlc.STORY_SHADOWED, so no 4.1 script names it')
+    need, why = closure(games, dst)
+    if why:
+        raise ValueError('; '.join(why))
+    out = {r: convert(games, r) for r in need}
+    _version, mine = sgo.read(out.pop(dst))
+    if mine.get('xgs_scene_object_class') != cls:
+        raise ValueError(f'{src}: 4.1 class {mine.get("xgs_scene_object_class")}, not {cls}')
+    soldier_talk(mine)
+    t_data = games.read6(src)
+    if t_data[:4] != b'DSGO':
+        raise ValueError(f'{src}: EDF6\'s file is not a DSGO')
+    doc = dsgo.parse(t_data)
+    root_node = doc.root
+    if root_node.get('xgs_scene_object_class') != cls:
+        raise ValueError(f'{src}: EDF6 class {root_node.get("xgs_scene_object_class")}, not {cls}')
+    for k in FRIEND_KEYS:
+        if k in mine:
+            root_node.set(k, dsgo_value(mine[k]))
+    for k, v in FRIEND_OVERRIDE[cls]:
+        root_node.set(k, dsgo_value(v))
+    # animation_model: 4.1's model (its first entry: the _light one names an archive 4.1 itself lacks), CAS and MAB, then
+    # the template's entries past them that name nothing of EDF6's model (its scale; its effect archive, a dict); a
+    # list there names EDF6's model's bones (the wing divers' skirt chain, ragdoll_skirt5B_*), which 4.1's lacks.
+    am, t_am = mine['animation_model'], root_node.get('animation_model')
+    entry = model_entries(am[0])[0]
+    tail = [v for v in t_am.items[3:] if not (isinstance(v, dsgo.Node) and not v.names)]
+    mab = mab_block(am[2])
+    root_node.set('animation_model', dsgo.Node([dsgo_value(entry), am[1], dsgo_value(mab), *tail]))
+    out[dst] = dsgo.compact(dsgo.Document(root_node, doc.pool))
+    members = sgo.load(data=out[dst])
+    friend_names(games, out, dst, members, mab)
+    check_class_keys(games.stock_by_class(), dst, out[dst])
+    check_class_names(games, out, dst)
+    check_sounds(games, out[dst], dst)
+    return out
 
 
 def mtab_materials(blob: bytes) -> list[str]:
@@ -1107,6 +1392,15 @@ def pack_folder(rel: str) -> str:
     return parts[1] if len(parts) > 2 and parts[0] == 'OBJECT' and parts[1] in folders else ''
 
 
+def own_folder(rel: str) -> str:
+    """The folder under OBJECT/ an object at Mods path `rel` keeps its own files in: its DLC pack's (pack_folder), the
+    story folder for a STORY_ROOTS object (edf41dlc.STORY_FOLDER), '' for any other."""
+    parts = rel.split('/')
+    if len(parts) > 2 and parts[0] == 'OBJECT' and parts[1] == edf41dlc.STORY_FOLDER:
+        return edf41dlc.STORY_FOLDER
+    return pack_folder(rel)
+
+
 def archives(root: str) -> dict[str, rootcpk.Game]:
     """{Mods-style path: the archive of the game at `root` holding it}, the first archive's copy winning (Root.cpk)."""
     out: dict[str, rootcpk.Game] = {}
@@ -1133,6 +1427,8 @@ class Games:
         # Story files a pack's object needs in 4.1's form where EDF6 holds another file at that path (shadowed): Mods
         # path in the pack's folder -> the story path it is read from (closure fills it)
         self.moved: dict[str, str] = {}
+        for name in edf41dlc.STORY_SHADOWED:   # STORY_ROOTS: 4.1's story object, shipped in the story folder
+            self.moved[f'OBJECT/{edf41dlc.STORY_FOLDER}/{name}'] = f'OBJECT/{name}'
 
     def has4(self, rel: str) -> bool:
         """A file EDF4.1 has at Mods path `rel`: its own archives, a DLC pack's, or a shadowed story file moved."""
@@ -1235,15 +1531,16 @@ def shadowed(games: Games, members: dict) -> list[str]:
 
 
 def relocations(games: Games, rel: str, members: dict) -> dict[str, str]:
-    """{story path: the path in the pack's folder} for the shadowed files (shadowed()) of the SGO at `rel`, recorded in
-    games.moved (read from the story path, shipped at the new one). A pack's object only: a story object's shadowed
-    file has no folder of its own to go to (ValueError; none has one, 2026-10-14)."""
+    """{story path: the path in the object's own folder} for the shadowed files (shadowed()) of the SGO at `rel`,
+    recorded in games.moved (read from the story path, shipped at the new one). Only an object with a folder of its own
+    (own_folder: a pack's, or a STORY_ROOTS one): any other story object's shadowed file has nowhere to go (ValueError)."""
     files = shadowed(games, members)
     if not files:
         return {}
-    folder = pack_folder(rel)
+    folder = own_folder(rel)
     if not folder:
-        raise ValueError(f'{rel}: names {files}, which EDF6 holds as other files, and is no DLC object to move them for')
+        raise ValueError(f'{rel}: names {files}, which EDF6 holds as other files, and has no folder of its own to move '
+                         'them to (a DLC object, or one of edf41dlc.STORY_SHADOWED)')
     out = {}
     for old in files:
         new = f'OBJECT/{folder}/{old.split("/", 1)[1]}'
@@ -1256,11 +1553,12 @@ def relocations(games: Games, rel: str, members: dict) -> dict[str, str]:
 
 def retarget(rel: str, data: bytes, moved: dict[str, str]) -> bytes:
     """A converted SGO with every DLC-mounted path it names as its Mods path's app:/ name (edf41dlc.rewrite), and every
-    story path moved into its pack's folder (`moved`, Games.moved: new Mods path -> story path) as that path.
-    Unchanged bytes when it names neither (the story objects' files stay byte for byte)."""
+    story path moved into its own folder (own_folder: its pack's or the story folder; `moved`, Games.moved: new Mods
+    path -> story path) as that path. Unchanged bytes when it names neither (the other story objects' files stay byte
+    for byte)."""
     if data[:4] != b'SGO\0':
         return data
-    folder = pack_folder(rel)
+    folder = own_folder(rel)
     version, members = sgo.read(data)
     changed = [False]
 
@@ -1292,6 +1590,8 @@ def convert(games: Games, rel: str) -> bytes:
     ext = os.path.splitext(rel)[1]
     if ext == '.SGO':
         return retarget(rel, legacy_sgo.convert(data), games.moved)
+    if ext == '.CAS' and rel in FRIEND_CAS:   # every object naming it ships the same bytes (build's clash check)
+        return friend_cas(games, rel, legacy_assets.convert(rel, data))
     if ext in ('.RAB', '.MRAB', '.CAS'):
         return legacy_assets.convert(rel, data)
     if ext == '.SHKT':
@@ -1582,6 +1882,7 @@ NATIVE_FIXES: dict[str, Callable[['Games', dict[str, bytes]], None]] = {MOTHER30
 # The 401 has no stock template (no alias): its fix runs on 4.1's converted files as they are.
 ROOTS.update(MOTHER401_ROOTS)
 NATIVE_FIXES.update({root: mother401_fix for root in (*MOTHER401_ROOTS, *MOTHER401_DLC_ROOTS)})
+NATIVE_FIXES['DRAGONBIG401.SGO'] = dragon_ragdoll_fix   # after its alias (the giant dragon above)
 
 
 # ---- UfoRobo, EDF4.1's transforming ship / walking robot (docs/edf41-uforobo.md) -----------------------------------------
@@ -1935,6 +2236,7 @@ def set_path(node: dsgo.Node, path: str, value: dsgo.Value) -> None:
 # a name the CAS lacks resolves to -1 and the play faults (BerserkerSettings.EncountAnimations: 0x33D4AD stores it at
 # +0x18D4, 0x33F861 plays it on first sight with no name to fall back on; the 2026-10-13 M153 crash).
 STATE_KEYS = ('BerserkerSettings/EncountAnimations',)
+CLIMB_KEY = 'WalkingEnemyBase/ClimbOver/animations'
 
 
 @dataclass(frozen=True)
@@ -1971,6 +2273,11 @@ class ClassNames:
 # The range's other strings are SGO keys, MAB event names and their parameters' keys, or another class's (ダメージ判定 at
 # 0x32DA55 is DeiroiFootParts_Toe's).
 CLASS_NAMES: dict[str, ClassNames] = {
+    # 4.1's soldiers under EDF6's soldier classes (FRIEND_LOOKS, and the Omega team's ROOTS): the nodes the classes
+    # find by name in the model and the aliased states their CAS gets (FRIEND_CAS)
+    **{cls: ClassNames(states=('knockout', 'down', 'noWeapon_stand', 'vehicle503_bike_driver'),
+                       bone_keys=('human_move_node', 'human_wakeup_node', 'human_aim_target_adjust_node') + extra)
+       for cls, extra in (('AssultSoldier', ()), ('HeavyArmor', ()), ('PaleWing', ('pale_wing_booster_cetner',)))},
     # The plugin's own class (src/edf41robo.cpp): what it looks up by name (ROBO_STATES / ROBO_LOCATORS above).
     'UfoRobo': ClassNames(states=ROBO_STATES, locators=ROBO_LOCATORS),
     'DragonSmall': ClassNames(
@@ -2065,6 +2372,18 @@ def check_states(out: dsgo.Node, cas: bytes | None, rel: str) -> None:
         missing = [n for n in values if isinstance(n, str) and n not in have]
         if missing:
             raise ValueError(f'{rel}: {key} names states its CAS has not: {missing}')
+    # WalkingEnemyBase.ClimbOver.animations: [[height, state], ...]. The climb (EDF+0x540C00, entered at 0x541701) first
+    # puts the object on the obstacle's top (0x53F764 -> 0x6DB060 moves the character controller there) and then plays
+    # the state; without it the object has been moved and nothing animates the climb.
+    try:
+        climbs = node_path(out, CLIMB_KEY)
+    except KeyError:
+        return
+    if isinstance(climbs, dsgo.Node):
+        missing = [c.items[1] for c in climbs.items if isinstance(c, dsgo.Node) and len(c.items) > 1
+                   and isinstance(c.items[1], str) and c.items[1] not in have]
+        if missing:
+            raise ValueError(f'{rel}: {CLIMB_KEY} names states its CAS has not: {missing} (drop WalkingEnemyBase/ClimbOver)')
 
 
 # Classes whose body is a voxel-destruction object (VoxelBody, this+0x5C0 of an AntHill): animation_model[3] builds it
@@ -2379,7 +2698,11 @@ def merged_model(games: 'Games', a: Alias, files: dict[str, bytes], rab_rel: str
     raw = mdb.mdb_write(body)
     body_file.stored = mdb.cmpl_compress(raw) if body_file.stored[:4] == b'CMPL' else raw
     rab.files = [f for f in rab.files if not f.name.lower().endswith('.mdb') or f is body_file]
-    donor = mdb.rab_read(games.read6(template_rab))
+    # 4.1's archive interleaves each model with its own textures (body textures, body model, then each gun's textures
+    # and model); with the guns' models gone the body model sits before the guns' and the shield's textures, which the
+    # engine then never binds (black guns, an invisible shield: mdb.insert_member). Back into folder order, stably.
+    rab.files.sort(key=lambda f: f.folder)
+    donor =mdb.rab_read(games.read6(template_rab))
     have = {f.name.lower() for f in rab.files}
     members = {f.name.lower(): f for f in donor.files}
     for name in fragments:
@@ -2396,14 +2719,15 @@ def merged_model(games: 'Games', a: Alias, files: dict[str, bytes], rab_rel: str
     return mdb.rab_write(rab), body, barrel, corner
 
 
-def missing_textures(rab_bytes: bytes, md: mdb.Mdb) -> list[str]:
-    """The textures of `md` that its archive holds under no name the loader would bind (a texture member must be
-    there by its filename or as stem.lod.ext, in the TEXTURE folder, before the model: mdb.insert_member's docstring;
-    the HD members are optional)."""
+def missing_textures(rab_bytes: bytes, model: str) -> list[str]:
+    """The textures of the archive's model member `model` that the loader would not bind: a texture member must be
+    there by its filename or as stem.lod.ext, in the TEXTURE folder, **before the model** (mdb.insert_member's
+    docstring; one after it renders black); the HD members are optional."""
     rab = mdb.rab_read(rab_bytes)
-    names = {f.name.lower() for f in rab.files if f.folder == 0}
+    at = next(i for i, f in enumerate(rab.files) if f.name.lower() == model.lower())
+    names = {f.name.lower() for f in rab.files[:at] if f.folder == 0}
     out = []
-    for t in md.textures:
+    for t in mdb.mdb_read(rab.files[at].data).textures:
         stem, ext = os.path.splitext(t.filename.lower())
         if stem + ext not in names and stem + '.lod' + ext not in names:
             out.append(t.filename)
@@ -2430,8 +2754,11 @@ def alias_dsgo(games: 'Games', root: str, files: dict[str, bytes], a: Alias, t_d
     for k, v in mine.items():
         if k in keys:
             out.set(k, dsgo_value(v))
-    for k in a.drop:
-        remove_key(out, k)
+    for k in a.drop:     # a top-level key, or a path ('A/B': B taken out of A)
+        head, _, last = k.rpartition('/')
+        parent = node_path(out, head) if head else out
+        if isinstance(parent, dsgo.Node):
+            remove_key(parent, last)
     out.set('xgs_scene_object_class', a.cls)
     for path, value in a.override:
         set_path(out, path, dsgo_value(value))
@@ -2442,6 +2769,9 @@ def alias_dsgo(games: 'Games', root: str, files: dict[str, bytes], a: Alias, t_d
     fragments = list(node_path(t_am, '3/3/6').items)
     rab_rel = 'OBJECT/' + root.rsplit('.', 1)[0] + '.MRAB'
     rab_bytes, body, barrel, (lo, hi) = merged_model(games, a, files, rel_of(mrab), mdb_name, template_rab, fragments)
+    for model in (mdb_name, *fragments):
+        if missing_textures(rab_bytes, model):
+            raise ValueError(f'{rab_rel}: {model} would render black: {missing_textures(rab_bytes, model)}')
     files[rab_rel] = rab_bytes
 
     locators = []
@@ -2461,12 +2791,26 @@ def alias_dsgo(games: 'Games', root: str, files: dict[str, bytes], a: Alias, t_d
     grid.items[0] = dsgo.Node([24.0, 48.0, 12.0])
     grid.items[1] = dsgo.Node([lo[0] - 0.25, lo[1] - 1.0, lo[2] - 0.25])
     grid.items[2] = dsgo.Node([hi[0] + 0.25, hi[1] + 0.25, hi[2] + 0.25])
-    blob = mine['material_animation'][0]
     # Berserker's base class enables material animation slots by number, unchecked (EDF+0x6dc830): 0 and 2 at spawn and on
-    # a hit (0x348d1d, 0x33ef81 -> 0x6c0200), 1 and 3 elsewhere (0x34b2de, 0x37acde). A list shorter than the template's
-    # (4) hands it the memory past its end: a null player (M113) or whatever text follows (M131, "NT02"). 4.1 has one
-    # animation, its glow: it serves every slot, with the template's mode for each.
-    model.items[4] = dsgo.Node([dsgo.Node([dsgo.Blob(blob, 2), c.items[1]]) for c in t_am.get('material_animation').items])
+    # a hit (0x348d1d, 0x33ef81 -> 0x6c0200), 1 and 3 elsewhere (BERSERKER_DEATH_SLOT). A list shorter than the template's
+    # (4) hands it the memory past its end: a null player (M113) or whatever text follows (M131, "NT02"). 4.1's glow
+    # (the body's and every gun's: hector_materials) serves every slot but the death one, which gets 4.1's death block;
+    # each keeps the template's mode.
+    light = None
+    if a.guns:
+        glow, death, light = hector_materials(files, rab_rel, mdb_name, mine, a.guns)
+    else:
+        glow = death = mine['material_animation'][0]
+    slots = [dsgo.Node([dsgo.Blob(death if i == BERSERKER_DEATH_SLOT else glow, 2), c.items[1]])
+             for i, c in enumerate(t_am.get('material_animation').items)]
+    # 301 cannon's charge light (`light`) is not shipped. As a fifth entry played by the plugin (2026-10-17, 30c7b29c) it
+    # turned M113 purple-white from the first charges on and the whole screen white by 165 s (real run; the same mission
+    # with the earlier SGOs is normal): its light0_color goes to (10, 10, 100) in 120 frames (4.1 block 1; the glow block
+    # stays at 2 / 0.5 / 0.2), which 4.1 plays with the player word 1 (EDF41.exe 0x225603 -> 0x32FA93 +8) where every
+    # EDF6 entry has 0 or 2, and EDF6's meaning of that word is not known. Until it is, the charge shows only the class's
+    # own charge effect at the muzzle.
+    del light
+    model.items[4] = dsgo.Node(slots)
     out.set('animation_model', model)
 
     if a.guns:
@@ -2478,6 +2822,7 @@ def alias_dsgo(games: 'Games', root: str, files: dict[str, bytes], a: Alias, t_d
         out.set('gun_control', dsgo.Node(entries))
         if all(g.fire for g in a.guns):
             hector_fire(games, files, mine, out, a)
+            out.set(HECTOR_ANIM_KEY, dsgo_value(hector_anim(files, a, mdb_bones(files[rab_rel], mdb_name))))
 
     cas = rel_of(am[1])
     template_cas = rel_of(t_am.items[1])
@@ -2542,7 +2887,8 @@ def hector_bullet(games: 'Games', w: HectorWeapon, damage: float, custom: list[f
 
 def hector_fire(games: 'Games', files: dict[str, bytes], mine: dict, out: dsgo.Node, a: Alias) -> None:
     """gun_control's entries made to fire what 4.1's arms hold, and the AI's gun range their longest: each entry
-    gets the bullet of its HectorWeapon, fire.count / interval / accuracy, and a one-frame charge (4.1 has none).
+    gets the bullet of its HectorWeapon, fire.count / interval / accuracy, and 4.1's time to the first shot as its
+    charge (HECTOR_CHARGE; one frame for the weapons that fire at once).
     The weapon SGOs (in `files`: the closure holds them until prune) are checked against the table and give
     hector_weapon_range and bullet_custom_param. Damage: 4.1's coefficient times (this object's HP / 4.1's HP)
     -- the same HP, durability is a key both have and 4.1's wins -- so the ratio of a hit to the HP is 4.1's;
@@ -2567,7 +2913,7 @@ def hector_fire(games: 'Games', files: dict[str, bytes], mine: dict, out: dsgo.N
             coef = w.damage if w.damage is not None else custom[1]
         battery = entry.get('gun_battery')
         battery.set('bullet', hector_bullet(games, w, coef * hp_ratio, custom, hit_se))
-        set_path(battery, 'charge/time', 1.0)
+        set_path(battery, 'charge/time', HECTOR_CHARGE.get(w.cls, 1.0))
         fire = battery.get('fire')
         fire.set('count', w.count)
         fire.set('interval', w.interval)
@@ -2584,6 +2930,235 @@ def hector_fire(games: 'Games', files: dict[str, bytes], mine: dict, out: dsgo.N
         raise ValueError(f'hector_ai_setting has {len(ai)} numbers, not 7')
     out.set('edf41_hector', dsgo_value({'ranges': ranges, 'same_weapon': float(a.guns[0].fire.cls == a.guns[1].fire.cls),
                                         'ai': ai}))
+
+
+# EDF6_Berserker_Large's material_animation slots (BerserkerBase, EDF.dll, enabled through 0x6DC830 / 0x6C0200(model,
+# slot, mode)): 0 at spawn (0x348D1D, mode 2), 1 in 0's place (vtable slot 26 0x343C70: 0x6C04F0 stops 0, then 1 in mode
+# 2) and in the death state (0x34B2DE, mode 1), 2 on every hit (0x33EF81), 3 once at death (vtable slot 48 0x33F4A0, after
+# the explosion 0x2E5ED0: 0x33F76F, mode 1). The template's blobs agree: 0 and 1 its looping glow, 2 a 20-frame flash,
+# 3 a 60-frame fade over every material. 4.1's Hector has two blocks: the looping glow (EDF41.exe 0x21F062, played in mode
+# 2 from the start) and a 180-frame one played once when it dies (0x222A72, after its weapons' death calls); its weapons
+# the same two (each weapon object plays its own: 0x2255D4 .. 0x22A289).
+BERSERKER_DEATH_SLOT = 3
+
+
+def mtab_entries(blob: bytes) -> list[tuple[str, int, int]]:
+    """(material, track count, its tracks' offset from the blob's start) of each material an MTAB blob animates
+    (EDF+0x1104350: the table at the offset at +0x18, 12-byte entries {track count, name, tracks}, both offsets relative
+    to the entry; a track's {channels, name, channel table} and a channel's key offset are relative to themselves too,
+    so a blob's body moves as one piece)."""
+    n, base = struct.unpack_from('<i', blob, 0xc)[0], struct.unpack_from('<i', blob, 0x18)[0]
+    out = []
+    for i in range(n):
+        at = base + 12 * i
+        count, name, tracks = struct.unpack_from('<iii', blob, at)
+        p = q = at + name
+        while blob[q:q + 2] != bytes(2):
+            q += 2
+        out.append((blob[p:q].decode('utf-16-le'), count, at + tracks))
+    return out
+
+
+def mtab_merge(parts: list[tuple[bytes, dict[str, str]]]) -> bytes:
+    """One MTAB blob animating every material of `parts` ((blob, {its material name: the name here}); a name not in the
+    map stays). The blobs must share their timeline (+0 loop flag, +4 length in frames). Header: +8 the channel count
+    (the sum), +0xC the material count, 'MTAB', 0x200, +0x18 the table's offset (0x1C). Each blob is copied whole behind
+    the table (0x40-aligned: its own header and table are dead bytes there, its tracks and keys keep their relative
+    offsets) and the table's entries point into the copies; a renamed material's name is appended at the end."""
+    head = parts[0][0][:8]
+    for blob, _names in parts:
+        if blob[:8] != head or blob[16:24] != parts[0][0][16:24] or blob[16:20] != b'MTAB':
+            raise ValueError(f'MTAB blobs on different timelines or forms: {blob[:24].hex()} / {parts[0][0][:24].hex()}')
+    entries = [(e, i) for i, (blob, _n) in enumerate(parts) for e in mtab_entries(blob)]
+    channels = sum(struct.unpack_from('<i', blob, 8)[0] for blob, _n in parts)
+    out = bytearray(head + struct.pack('<ii', channels, len(entries)) + parts[0][0][16:24] + struct.pack('<i', 0x1c))
+    out += bytes(12 * len(entries))
+    at = []
+    for blob, _names in parts:
+        out += bytes(-len(out) % 0x40)
+        at.append(len(out))
+        out += blob
+    strings: dict[str, int] = {}
+    for k, ((name, count, tracks), i) in enumerate(entries):
+        entry = 0x1c + 12 * k
+        new = parts[i][1].get(name, name)
+        if new not in strings:
+            out += bytes(-len(out) % 4)
+            strings[new] = len(out)
+            out += new.encode('utf-16-le') + bytes(2)
+        struct.pack_into('<iii', out, entry, count, strings[new] - entry, at[i] + tracks - entry)
+    out += bytes(-len(out) % 4)
+    return bytes(out)
+
+
+def hector_blocks(blocks: list, loop: bytes | None, death: bytes | None, what: str) -> tuple[bytes, bytes | None]:
+    """(the looping glow, the death block or None) of a 4.1 Hector part's material_animation. The body's: block 0 loops,
+    block 1 is played once (`loop` and `death` None). A weapon's: the block on the body's glow's timeline, and the one
+    that is not looped and as long as the body's death block (301's cannon has a third, its own 120 frames, that 4.1
+    plays while it fires: no Berserker slot does that)."""
+    if loop is None:
+        if len(blocks) != 2 or blocks[0][:4] != b'\1\0\0\0' or blocks[1][:4] != b'\0\0\0\0':
+            raise ValueError(f'{what}: material_animation is not [looped glow, death] ({len(blocks)} blocks)')
+        return blocks[0], blocks[1]
+    glow = [b for b in blocks if b[:8] == loop[:8]]
+    end = [b for b in blocks if death is not None and b[:8] == death[:8]]
+    if len(glow) != 1 or len(end) > 1:
+        raise ValueError(f'{what}: {len(glow)} glow / {len(end)} death blocks among {len(blocks)}')
+    return glow[0], (end[0] if end else None)
+
+
+def hector_materials(files: dict[str, bytes], rab_rel: str, mdb_name: str, mine: dict, guns: tuple['Gun', ...]
+                     ) -> tuple[bytes, bytes, bytes | None]:
+    """(the glow blob, the death blob, the charge light or None) of a Hector variant, each animating the body's materials
+    and every gun's; the charge light is 301 cannon's third block (120 frames, EDF41.exe 0x2259A0 plays it in mode 1 when
+    the charge starts and stops it when the charge state is left, 0x225AAB) on that cannon's materials.
+
+    The guns' meshes are part of the body model (merged_model) with materials of their own that carry 4.1's names
+    (ufosurface: the body's name too; the 401 shield's glass ufoglass). EDF6 binds an MTAB entry to the first material
+    of that name (EDF+0x110D570, a linear scan returning the first match), so the body's blob lit the body only: the
+    guns' glow and the shield glass's animation were never played. Here each gun's materials get a name of their own
+    (`<name>.<weapon model>`, files[rab_rel] rewritten) and the gun's own 4.1 blocks are merged in under those names."""
+    rab = mdb.rab_read(files[rab_rel])
+    member = next(f for f in rab.files if f.name.lower() == mdb_name.lower())
+    md = mdb.mdb_read(member.data)
+    loop, death = hector_blocks(mine['material_animation'], None, None, rab_rel)
+    glow_parts: list[tuple[bytes, dict[str, str]]] = [(loop, {})]
+    death_parts: list[tuple[bytes, dict[str, str]]] = [(death, {})]
+    light_parts: list[tuple[bytes, dict[str, str]]] = []
+    done: dict[str, str] = {}
+    for gun in guns:
+        if gun.fire is None or gun.fire.sgo in done:
+            continue      # the same weapon on both arms: one set of materials (_adopt_objects shares them)
+        stem = gun.mdb.rsplit('.', 1)[0].lower()
+        done[gun.fire.sgo] = stem
+        prefix = 'gun_' + gun.node
+        mats = sorted({me.material for ob in md.objects
+                       if (lambda n: n == prefix or n.startswith(prefix + '_'))(md.name_of(md.bones[ob.bone].name))
+                       for me in ob.meshes})
+        rename: dict[str, str] = {}
+        for i in mats:
+            old = md.name_of(md.materials[i].name)
+            rename[old] = f'{old}.{stem}'
+            md.materials[i].name = len(md.names)
+            md.names.append(rename[old])
+        blocks = sgo.read(files['OBJECT/' + gun.fire.sgo])[1].get('material_animation', [])
+        if not blocks:
+            continue      # 301's gatling: 4.1 animates nothing on it
+        glow, end = hector_blocks(blocks, loop, death, gun.fire.sgo)
+        if gun.fire.cls == 'Hector301_Cannon':
+            rest = [b for b in blocks if b is not glow and b is not end]
+            if len(rest) != 1 or rest[0][:4] != b'\0\0\0\0':
+                raise ValueError(f'{gun.fire.sgo}: {len(rest)} blocks besides glow and death, not its one charge light')
+            light_parts.append((rest[0], rename))
+        for parts, blob in ((glow_parts, glow), (death_parts, end)):
+            if blob is None:
+                continue
+            stray = [n for n, _c, _t in mtab_entries(blob) if n not in rename]
+            if stray:
+                raise ValueError(f'{gun.fire.sgo}: its blocks animate {stray}, its meshes use {sorted(rename)}')
+            parts.append((blob, rename))
+    raw = mdb.mdb_write(md)
+    member.stored = mdb.cmpl_compress(raw) if member.stored[:4] == b'CMPL' else raw
+    files[rab_rel] = mdb.rab_write(rab)
+    blobs = mtab_merge(glow_parts), mtab_merge(death_parts)
+    light = mtab_merge(light_parts) if light_parts else None
+    names = [md.name_of(x.name) for x in md.materials]
+    for blob in blobs + ((light,) if light else ()):
+        for n, _c, _t in mtab_entries(blob):
+            if names.count(n) != 1:
+                raise ValueError(f'{rab_rel}: the material animation names {n!r}, the model has it {names.count(n)} times')
+    return blobs[0], blobs[1], light
+
+
+# The 4.1 weapons' own CAS animations, for the plugin to play on the merged bones (src/hector_ai.h, "the weapons' own
+# animations"): [arms_l, arms_r], each [kind, [bone], open, close, roll] with kind 0 none, 1 open / close (401 cannon,
+# launcher), 2 roll (401 gatling); a clip [frames, step, then per frame per bone tx ty tz qx qy qz qw] ([] when the kind has
+# none). The bones are the merged model's (mdb.graft_skinned: gun_<arm>_<weapon bone>), every weapon bone a clip moves.
+HECTOR_ANIM_KEY = 'edf41_hector_anim'
+HECTOR_LIGHT_KEY = 'edf41_hector_light'
+HECTOR_ANIM_CLIPS = {1: ('open', 'close', None), 2: (None, None, 'fire')}
+
+
+def mdb_bones(rab_bytes: bytes, mdb_name: str) -> dict[str, list[float]]:
+    """{bone name: its local matrix} of model `mdb_name` in a model archive."""
+    rab = mdb.rab_read(rab_bytes)
+    md = mdb.mdb_read(next(f for f in rab.files if f.name.lower() == mdb_name.lower()).data)
+    return {md.name_of(b.name): list(b.local) for b in md.bones}
+
+
+def pose_matrix(p: list[float]) -> list[float]:
+    """src/hector_ai.h PoseMatrix: translation + quaternion (x y z w) as the game's row-vector local matrix."""
+    x, y, z, w = p[3:7]
+    return [1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w), 0.0,
+            2 * (x * y - z * w), 1 - 2 * (x * x + z * z), 2 * (y * z + x * w), 0.0,
+            2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y), 0.0,
+            p[0], p[1], p[2], 1.0]
+
+
+def weapon_cas(data: bytes) -> bytes:
+    return data if data[:8] == b'CAS\0\x04\x02\0\0' else cas_graft.cl.cas_from_legacy(data)
+
+
+def hector_anim(files: dict[str, bytes], a: Alias, bones: dict[str, list[float]]) -> list:
+    """HECTOR_ANIM_KEY's value for a Hector variant: each arm's weapon CAS (its SGO's animation_model[1], in `files` until
+    prune) sampled frame by frame. ValueError when a clip the weapon's class plays is missing or moves a bone the merged
+    model has not, or when a moved bone's clip pose and the model disagree where 4.1's data says they agree (the launcher's
+    model is posed open: its open clip ends on the model's locals, which checks the rotation convention)."""
+    arms: list = []
+    for gun in a.guns:
+        kind = {'Hector401_Cannon': 1, 'Hector401_Launcher': 1, 'Hector401_Gatling': 2}.get(gun.fire.cls, 0)
+        if not kind:
+            arms.append([0.0, [], [], [], []])
+            continue
+        am = sgo.read(files['OBJECT/' + gun.fire.sgo])[1]['animation_model']
+        cas_rel = rel_of(am[1])
+        pose = cas_pose.CasPose(weapon_cas(files[cas_rel]))
+        clips = {c.name: c for c in pose.clips}
+        want = [n for n in HECTOR_ANIM_CLIPS[kind] if n]
+        missing = [n for n in want if n not in clips]
+        if missing:
+            raise ValueError(f'{cas_rel}: no clip {missing}')
+        moved: list[str] = []
+        for n in want:
+            for t in clips[n].tracks:
+                if t.name.startswith('gun_') and t.name != 'gun_arms' and t.name not in moved:
+                    moved.append(t.name)
+        merged = [f'gun_{gun.node}_{n}' for n in moved]
+        absent = [n for n in merged if n not in bones]
+        if absent:
+            raise ValueError(f'{cas_rel}: the merged model has no bone {absent}')
+        out: list = [float(kind), merged]
+        for name in HECTOR_ANIM_CLIPS[kind]:
+            if not name:
+                out.append([])
+                continue
+            clip = clips[name]
+            _duration, step, frames = cas_pose.clip_info(pose, clip)
+            tracks = {t.name: t for t in clip.tracks}
+            values: list[float] = [float(frames), float(step)]
+            for f in range(frames):
+                for n, full in zip(moved, merged):
+                    t = tracks.get(n)
+                    local = bones[full]
+                    tr = list(pose.translation(t.translation, f)) if t and t.translation >= 0 else local[12:15]
+                    ro = list(cas_rotation(pose, t.rotation, f)) if t and t.rotation >= 0 else [0.0, 0.0, 0.0, 1.0]
+                    values += [float(v) for v in tr + ro]
+            out.append(values)
+        if gun.fire.cls == 'Hector401_Launcher':      # the model is the open pose
+            last = out[2][2 + (int(out[2][0]) - 1) * len(merged) * 7:]
+            for i, full in enumerate(merged):
+                m = pose_matrix(last[i * 7:i * 7 + 7])
+                if max(abs(p - q) for p, q in zip(m, bones[full])) > 2e-3:
+                    raise ValueError(f'{cas_rel}: {full} open pose {m} is not the model\'s {bones[full]}')
+        arms.append(out)
+    return arms
+
+
+def cas_rotation(pose: 'cas_pose.CasPose', channel: int, frame: int) -> tuple[float, float, float, float]:
+    """cas_pose.rotation, normalised (the stored keys are f32 xyzw)."""
+    q = cas_pose.rotation(pose, channel, frame)
+    n = sum(v * v for v in q) ** 0.5 or 1.0
+    return tuple(v / n for v in q)
 
 
 def mab_block(block: object) -> bytes:
@@ -2704,6 +3279,24 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
             shared[r] = SHARED[r]
         objects.append({'object': rel, 'class': sgo.load(data=data).get('xgs_scene_object_class'),
                         'missions': ROOTS.get(root, 0), 'files': [rel] + need, 'stand_in': s.template})
+    friends = {r.split('/', 1)[1] for r in edf41friends.LOOKS}
+    if not only or set(only) & friends:
+        # every one or none: the missions' scripts name these paths (tools/make_edf41_missions.py), so a soldier that
+        # cannot be built stops the build instead of leaving those missions a friend short
+        for root, uses in friend_roots(games).items():
+            if only and root not in only:
+                continue
+            try:
+                out = friend_look(games, root)
+            except ValueError as e:
+                raise ValueError(f'4.1 friend {root}: {e}') from e
+            clash = [r for r in out if r in files and files[r] != out[r]]
+            if clash:
+                raise ValueError(f'4.1 friend {root}: files another object needs differently: {clash}')
+            files.update(out)
+            rel = edf41friends.look_rel('OBJECT/' + root)
+            objects.append({'object': rel, 'class': edf41friends.LOOKS['OBJECT/' + root], 'missions': uses,
+                            'files': [rel] + [r for r in out if r != rel], 'look_of': 'OBJECT/' + root})
     roots = dict(ROOTS)
     if not only or set(only) & (set(DLC_ROOTS) | set(DLC_EXCLUDED)):
         roots.update(dlc_roots(games))

@@ -34,6 +34,9 @@ bool CheckHeliProfile() noexcept;
 bool InstallDoorGuns() noexcept;   // after CheckHeliProfile: the 410's door guns (their weapon-user hook)
 // Shared with jet.cpp: map ray (metres a->b to terrain/buildings, -1 with none; `hit` gets the point).
 float MapRay(const float* a,const float* b,float* hit) noexcept;
+// map.cpp's eye: the same ray past the hits on moving bodies (map_floor.h Fixed: the scene objects' ragdolls on the map
+// layers, an Earth Eater's parts over the field), so only the fixed world (terrain, buildings, cave rock) is found.
+float MapFixedRay(const float* a,const float* b,float* hit) noexcept;
 // The map's ground in caves and indoors (map_floor.h): the first floor along a->b (a cave roof seen from above skipped;
 // metres, -1 with none), and of the floors over / under (x, z) the height nearest `y` (`standable`: only those with
 // room to stand over them). LearnMapNormals(a point the player stands on) settles which side a hit's normal faces (map.cpp

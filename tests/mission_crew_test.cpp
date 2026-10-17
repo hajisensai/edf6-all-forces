@@ -46,7 +46,9 @@ int main() {
  // Merely observing an empty vehicle (ordinary player call or no-AI map placement) is not AI intent.
  requests=0;preparations=0;ConfigureMissionCrew(&Factory,&Id);MissionCrewVehicleFrame(vehicle);
  Check(requests==0 && preparations==0,"no-AI map placement or player call stays empty without native RideAi");
+ Check(!MissionAiVehicle(vehicle),"a vehicle merely seen is not a mission AI unit (npcpost keeps the player's leash on it)");
  nativeReady=false;call(vehicle,true);MissionCrewVehicleFrame(vehicle);
+ Check(MissionAiVehicle(vehicle),"RideAi makes it the mission's AI unit, before and after its crew arrives");
  Check(entries[0].requested && requests==0 && preparations==0,"one-shot native AI intent survives adapter not ready");
  nativeReady=true;MissionCrewVehicleFrame(vehicle);
  Check(requests==1 && preparations==1,"native AI vehicle gets crew once readiness completes without another script call");
@@ -63,6 +65,7 @@ int main() {
  Check(requests==0,"route data alone does not invent a rider for an empty map vehicle");
  Put<void*>(legacyDummy,0,image+edf::kDummyRiderVtable);
  Put<void*>(legacySeat,kSeatRider,legacyDummy);Put<void*>(legacySeat,kSeatRiderCtrl,ctrl);
+ Check(MissionAiVehicle(vehicle),"a Dummy at the wheel is the stock RideAi's rider: a mission AI unit");
  MissionCrewVehicleFrame(vehicle);
  Check(requests==1 && preparations==1,"EDF5 BVM or snapshot Dummy is native AI intent even without slot50 interception");
  MissionCrewVehicleFrame(vehicle);

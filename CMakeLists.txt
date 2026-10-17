@@ -944,6 +944,22 @@ add_test(NAME edf41net COMMAND edf41net_test)
 add_executable(edf41robo_body_test tests/edf41robo_body_test.cpp)
 target_compile_options(edf41robo_body_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME edf41robo_body COMMAND edf41robo_body_test)
+# UfoRobo's robot AI as 4.1's (src/edf41robo_ai.h): A5 holds the AI through the attack, the robot walks between attacks.
+add_executable(edf41robo_ai_test tests/edf41robo_ai_test.cpp)
+target_compile_options(edf41robo_ai_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME edf41robo_ai COMMAND edf41robo_ai_test)
+# EDF6 DragonSmall's get-up rule in its knock-down state (src/edf41dragon_wake.h), logged for 4.1's giant dragon.
+add_executable(edf41dragon_wake_test tests/edf41dragon_wake_test.cpp)
+target_compile_options(edf41dragon_wake_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME edf41dragon_wake COMMAND edf41dragon_wake_test)
+# UfoMother301's rest poses (src/edf41mother_pose.h: the hull closed, the cannons folded until the script enables them).
+add_executable(edf41mother_pose_test tests/edf41mother_pose_test.cpp)
+target_compile_options(edf41mother_pose_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME edf41mother_pose COMMAND edf41mother_pose_test)
+# A ported part's hit bodies on a layer the area damage's query meets (src/edf41_hitlayer.h: rockets / missiles reach the parts).
+add_executable(edf41_hitlayer_test tests/edf41_hitlayer_test.cpp)
+target_compile_options(edf41_hitlayer_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME edf41_hitlayer COMMAND edf41_hitlayer_test)
 add_executable(edf41net_native_test EXCLUDE_FROM_ALL tests/edf41net_native_test.cpp)
 target_link_libraries(edf41net_native_test PRIVATE edf6common user32)
 target_include_directories(edf41net_native_test PRIVATE src common)
