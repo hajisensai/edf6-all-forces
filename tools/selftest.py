@@ -7435,7 +7435,7 @@ def edf41_objects_shipped() -> None:
     import sgo
     reg = eo.registry()
     assert reg['objects'], 'no object registered: this check is empty'
-    listed = {rel for o in reg['objects'] for rel in o['files']}
+    listed = {rel for o in eo.entries(reg) for rel in o['files']}
     assert listed == set(reg['files']), 'the registry lists files no object needs, or the reverse'
     root = os.path.join(ROOT, 'edf41port', 'objects')
     shipped = {os.path.relpath(os.path.join(d, f), root).replace(os.sep, '/') for d, _, fs in os.walk(root) for f in fs}
@@ -8192,6 +8192,15 @@ def edf41_stale_stock() -> None:
     assert out[1].startswith('OBJECT/S.SGO') and 'no other stock SGO' in out[1], out
     assert m.stale_stock(stock, everything, {'OBJECT/B.SGO'}, {'OBJECT/S.SGO'}) == [], 'replaced / proven passes'
     assert m.stale_stock(stock, {'OBJECT/A.SGO'}, set(), set()) == [], 'only what the 4.1 missions spawn is tested'
+    # keys as its sibling's, but naming a file only 4.1 has (Monster501_King's model archive: EDF+0x1100303, MP004
+    # 2026-10-17): refused unless replaced
+    king = {**full, 'animation_model': [['app:/object/A_King.rab', 'A_King.mdb'], 'app:/object/A.cas']}
+    named = {'Box': {'OBJECT/A.SGO': full, 'OBJECT/K.SGO': king}}
+    only41 = {'OBJECT/A_KING.RAB'}.__contains__
+    out = m.stale_stock(named, {'OBJECT/K.SGO'}, set(), set(), only41)
+    assert len(out) == 1 and out[0].startswith('OBJECT/K.SGO') and "['OBJECT/A_KING.RAB']" in out[0], out
+    assert m.stale_stock(named, {'OBJECT/K.SGO'}, set(), set()) == [], 'without lacks only the keys are tested'
+    assert m.stale_stock(named, {'OBJECT/K.SGO'}, {'OBJECT/K.SGO'}, set(), only41) == [], 'replaced passes'
 
     # animation_model without a MAB block where every sibling has one (Transporter401_Formation: boosts looked its
     # locators up through the null MAB, EDF+0x6BAE06, MP003 2026-10-13) is refused unless MAB_LESS says why it works
@@ -8237,6 +8246,15 @@ def edf41_stale_stock() -> None:
     formation = sgo.load(data=eo.read('OBJECT/TRANSPORTER401_FORMATION.SGO'))
     assert formation['boosts'] == [] and not m.has_mab(formation), 'MAB_LESS is only sound with no booster locators'
     assert 'OBJECT/TRANSPORTER401.CAS' in done['OBJECT/TRANSPORTER401_FORMATION.SGO']['files']
+    # the completed stock SGO: its own file stays EDF6's, only the model archive it names is shipped
+    completed = {o['object']: o for o in reg['stock_completions']}
+    for root, why in m.STOCK_COMPLETIONS.items():
+        o = completed.get('OBJECT/' + root)
+        assert o is not None and o['completes_stock'] == why and o['object'] not in o['files'], root
+    assert completed['OBJECT/MONSTER501_KING.SGO']['files'] == ['OBJECT/MONSTER501_KING.RAB']
+    import mdb
+    king = mdb.rab_read(eo.read('OBJECT/MONSTER501_KING.RAB'))
+    assert any(f.name == 'Monster501_King.mdb' for f in king.files), [f.name for f in king.files]
     if not _e5c_have_game() or not _edf41_root():
         print('skip  edf41_stale_stock (real archives): needs EDF6 and EDF4.1 installed')
         return
@@ -8245,9 +8263,16 @@ def edf41_stale_stock() -> None:
     spawned = m.spawned_objects(games)
     assert len(spawned) > 100, len(spawned)     # the scan found the missions' objects, not nothing
     assert 'OBJECT/TRANSPORTER401_FORMATION.SGO' in spawned
-    left = [s for s in m.stale_stock(games.stock_by_class(), spawned, set(done), m.proven_stock(games))
+    left = [s for s in m.stale_stock(games.stock_by_class(), spawned, set(done) | set(completed), m.proven_stock(games),
+                                     games.lacks)
             if s.split(':')[0] not in m.STOCK_EXEMPT]
     assert not left, left
+    # the King's model is the skeleton EDF6's stock King CAS animates: every bone it names but the rig nodes, the
+    # same two its sibling's model leaves to the CAS (Monster501_Rig / Scene_Root)
+    import cas_pose
+    bones = set(m.mdb_bones(eo.read('OBJECT/MONSTER501_KING.RAB'), 'Monster501_King.mdb'))
+    named = set(cas_pose.CasPose(games.read6('OBJECT/MONSTER501_KING.CAS')).names)
+    assert named - bones == {'Monster501_King_Rig', 'Scene_Root'}, sorted(named - bones)
     real = games.stock_by_class()
     for o in reg['objects']:   # every shipped SGO has the MAB block its class's stock SGOs have, or MAB_LESS says why not
         if o['object'].endswith('.SGO'):
@@ -8265,8 +8290,9 @@ def edf41_stale_stock() -> None:
             if cas_graft._name(cas, at) == 'main']
     assert main and {'hover_start', 'hover_end', 'fly'} <= set(main[0]), main
     # and without the replacement the formation is what this test exists to catch
-    bad = m.stale_stock(games.stock_by_class(), spawned, set(), m.proven_stock(games))
+    bad = m.stale_stock(games.stock_by_class(), spawned, set(), m.proven_stock(games), games.lacks)
     assert any(s.startswith('OBJECT/TRANSPORTER401_FORMATION.SGO') and 'se_preset_list' in s for s in bad), bad
+    assert any(s.startswith('OBJECT/MONSTER501_KING.SGO') and 'OBJECT/MONSTER501_KING.RAB' in s for s in bad), bad
 
 
 @test

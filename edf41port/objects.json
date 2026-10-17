@@ -1556,6 +1556,16 @@
    ]
   }
  ],
+ "stock_completions": [
+  {
+   "object": "OBJECT/MONSTER501_KING.SGO",
+   "class": "Monster501",
+   "files": [
+    "OBJECT/MONSTER501_KING.RAB"
+   ],
+   "completes_stock": "names app:/object/Monster501_King.rab, which no EDF6 archive holds: Monster501's setup (EDF+0x6BB890) finds no model (0x6BC218), passes the null to the model instance (0x11002D0), which faults reading it (EDF+0x1100303; MP004, testhub #17, 2026-10-17)"
+  }
+ ],
  "skipped": [],
  "files": {
   "OBJECT/AIARMYSOLDIER_OMG.SGO": "ce445017450c6a9fd33a8d6a9511deb9b3d7bd596cafa70faaa090ab56947f5d",
@@ -1731,6 +1741,7 @@
   "OBJECT/HECTOR401SG.SGO": "d5b5376f8a1172d0610fe37bdee11b73fc0441c50469172a525bf5e3a809e9da",
   "OBJECT/HECTOR401SS.MRAB": "b5b86f1752a94094e4088c80613fc699443238febad8846743488533513f744a",
   "OBJECT/HECTOR401SS.SGO": "a88b8f259d3b51b470479f6321f92f553587a39c0ed30db75a082aa9385af8c3",
+  "OBJECT/MONSTER501_KING.RAB": "2af8276d3fb0a2d73667f074aeddab1b58761c8100ea16e96f834079f76b3e1d",
   "OBJECT/MOTHERSHIP301BODY.SHKT": "8d43a9a6eaf11034cc851cb143d2fdc08a20603552ef371ab065be56134b4a5e",
   "OBJECT/MOTHERSHIP301CANNON.SHKT": "c4ff2457e3f1a49304d91280846c6078ce9077f83c6ef9d10ea12c56728dd235",
   "OBJECT/MOTHERSHIP301COVER.SHKT": "d68c3bdd289dc066667cdbd16dce11e65463ce18400286c7a66c4d2cacd6ec6f",
