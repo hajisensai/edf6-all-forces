@@ -260,16 +260,29 @@ HECTOR_COMMON: tuple[tuple[str, object], ...] = (
     ('resource', []),
     ('WalkingEnemyBase/RandomAnimationTrack', []),
     ('WalkingEnemyBase/InterpolateNode', 'waist'),
-    # 4.1: 6 units/s (velocity 1 x the 0.1 smoothing x 60), turn 0.03 rad/frame with 10% smoothing
+    # 4.1 (EDF41.exe 0x2216F0): the local velocity eases 10 % a frame to 0.1 x the walk command (1.0), x 60 a second:
+    # 6 units/s. EDF6 (0x53D7CC, 0x53DBB5): velocity = walk vector (MoveTo's speed long; src/hector_ai.h Steer gives
+    # 4.1's) x MoveSpeed[0] units/s, eased MoveSpeed[1] a frame.
     ('WalkingEnemyBase/MoveSpeed', [6.0, 0.1]),
-    ('WalkingEnemyBase/TurnSpeed', [0.03, 0.03]),
+    # 4.1 turns its wanted yaw by 0.03 x clamp(10 x the angle to go, -0.85, 1) a frame and the yaw follows it 10 % a frame
+    # (0x223874..0x2238A6, 0x221862..0x22198B). EDF6 turns it by TurnSpeed[0] x clamp(angle, -0.1, 0.1) (FaceTarget
+    # 0x33E840 with the 0.1 both walking states pass, 0x53D5BD) and eases the yaw TurnSpeed[1] a frame (0x53D63D):
+    # 0.3 gives 4.1's 0.03 rad/frame. [0.03, 0.03] (until 2026-10-17) turned 10x slower, so the Hector walked sideways
+    # and backward (walk_l / _r / _b follow the walk vector against the facing) towards a target it could not face.
+    ('WalkingEnemyBase/TurnSpeed', [0.3, 0.1]),
     ('BerserkerSettings/WakeupNode', ['waist', [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]]),
     ('BerserkerSettings/DownRagdollBodies',
      ['RagDollProxys.waist', 'RagDollProxys.chest', 'RagDollProxys.head_1', 'RagDollProxys.head_2',
       'RagDollProxys.thigh_l', 'RagDollProxys.thigh_r', 'RagDollProxys.shin_l1', 'RagDollProxys.shin_r1']),
     ('BerserkerSettings/NoSeparationBodies', ['RagDollProxys.head_2', 'RagDollProxys.head_3']),
     ('BerserkerSettings/DamageReactionAdjust/min', 0.05),
-    ('BerserkerSettings/ExplosionDownBorder', 10.0),
+    # no explosion knocks it down: 4.1's Hector has no down / get-up (its CAS states, EDF41.exe 0x21E9A4: sleep, wakeup,
+    # stand, walk_*, turn_*, head, open). The class knocks down on an explosion whose damage / the SGO durability (not
+    # level-scaled, +0x182C = +0x2EC) passes this (0x33F068..0x33F0EE), lets the DownRagdollBodies fall, and at the get-up
+    # (0x345CA0) puts the object where the WakeupNode bone (waist) lies (0x345E41..0x345E56: +0x90 and the character
+    # controller) and plays wakeup_f / wakeup_b, which Hector has none of. 10 (until 2026-10-17) was reached by a high
+    # level's explosion (10 x 1200): the Hector fell, and got up wherever its ragdoll's waist had been thrown.
+    ('BerserkerSettings/ExplosionDownBorder', 1.0e30),
     ('BasicAnimationCharacterSettings/DamageReaction',
      [{'border': 0.0, 'user_param': ['damage', ['damageA', 'damageB', 'damageC']]}]),
     # 4.1 has no melee (no grapple / stomp / melee string in EDF41.exe)
@@ -303,6 +316,10 @@ def hector_alias(generation: str, left: str, right: str) -> 'Alias':
         cas_donors=(('OBJECT/E602_BERSERKER.CAS', ('additive_action',), ('v_move_velocity',)),),
         state_aliases=(('main', 'walk_battle_f', 'walk_f'), ('main', 'walk_battle_b', 'walk_b'),
                        ('main', 'walk_battle_l', 'walk_l'), ('main', 'walk_battle_r', 'walk_r')),
+        # no climbing: 4.1's Hector climbs nothing and its CAS has no climb_over_small / _large; the template's climb
+        # moves the object onto the obstacle first (check_states / CLIMB_KEY). Without the key the class's probe stops
+        # at once (EDF+0x540C82 and 0x53CC00 test the node and leave).
+        drop=('WalkingEnemyBase/ClimbOver',),
         guns=guns, eye=(f'Hector{generation}', (0.0, 29.0, 0.0)), prune=True)
 
 
@@ -461,8 +478,9 @@ ALIASES: dict[str, Alias] = {
     #   backwards. The class blends one additive reaction clip by clamp(damage / HP x scale, min, 1): DamageReaction
     #   keeps only its first entry (damageA..C; the second, at 0.3 of the HP, plays damage_large, which Hector has no
     #   clip for), DamageReactionAdjust.min 0.05 (the template's 0.01 lets a bullet's nick blend at 1%), and
-    #   ExplosionDownBorder 10: an explosion of more than 10x the HP is the only one that knocks it down (the class
-    #   would play wakeup_f / wakeup_b, which Hector has no state for). The clips are the grafted ones: they move nothing.
+    #   ExplosionDownBorder 1e30: nothing knocks it down (the get-up moves it to its ragdoll's waist and plays wakeup_f /
+    #   wakeup_b, which Hector has no state for; HECTOR_COMMON). The clips are the grafted ones: they move nothing.
+    #   WalkingEnemyBase.ClimbOver dropped: Hector has no climb (hector_alias).
     #   AiSettings.attack.range 0: the melee attacks play states Hector has no animation for.
     #   WalkingEnemyBase.RandomAnimationTrack empty: it names CAS variables (vt_walk_battle_f ...) and sets each to a
     #   tcontrol's index unchecked (0x116DE30 writes at -1 of a missing variable); Hector's CAS has neither, and an
@@ -1966,6 +1984,7 @@ def set_path(node: dsgo.Node, path: str, value: dsgo.Value) -> None:
 # a name the CAS lacks resolves to -1 and the play faults (BerserkerSettings.EncountAnimations: 0x33D4AD stores it at
 # +0x18D4, 0x33F861 plays it on first sight with no name to fall back on; the 2026-10-13 M153 crash).
 STATE_KEYS = ('BerserkerSettings/EncountAnimations',)
+CLIMB_KEY = 'WalkingEnemyBase/ClimbOver/animations'
 
 
 @dataclass(frozen=True)
@@ -2096,6 +2115,18 @@ def check_states(out: dsgo.Node, cas: bytes | None, rel: str) -> None:
         missing = [n for n in values if isinstance(n, str) and n not in have]
         if missing:
             raise ValueError(f'{rel}: {key} names states its CAS has not: {missing}')
+    # WalkingEnemyBase.ClimbOver.animations: [[height, state], ...]. The climb (EDF+0x540C00, entered at 0x541701) first
+    # puts the object on the obstacle's top (0x53F764 -> 0x6DB060 moves the character controller there) and then plays
+    # the state; without it the object has been moved and nothing animates the climb.
+    try:
+        climbs = node_path(out, CLIMB_KEY)
+    except KeyError:
+        return
+    if isinstance(climbs, dsgo.Node):
+        missing = [c.items[1] for c in climbs.items if isinstance(c, dsgo.Node) and len(c.items) > 1
+                   and isinstance(c.items[1], str) and c.items[1] not in have]
+        if missing:
+            raise ValueError(f'{rel}: {CLIMB_KEY} names states its CAS has not: {missing} (drop WalkingEnemyBase/ClimbOver)')
 
 
 # Classes whose body is a voxel-destruction object (VoxelBody, this+0x5C0 of an AntHill): animation_model[3] builds it
@@ -2466,8 +2497,11 @@ def alias_dsgo(games: 'Games', root: str, files: dict[str, bytes], a: Alias, t_d
     for k, v in mine.items():
         if k in keys:
             out.set(k, dsgo_value(v))
-    for k in a.drop:
-        remove_key(out, k)
+    for k in a.drop:     # a top-level key, or a path ('A/B': B taken out of A)
+        head, _, last = k.rpartition('/')
+        parent = node_path(out, head) if head else out
+        if isinstance(parent, dsgo.Node):
+            remove_key(parent, last)
     out.set('xgs_scene_object_class', a.cls)
     for path, value in a.override:
         set_path(out, path, dsgo_value(value))
@@ -2500,12 +2534,17 @@ def alias_dsgo(games: 'Games', root: str, files: dict[str, bytes], a: Alias, t_d
     grid.items[0] = dsgo.Node([24.0, 48.0, 12.0])
     grid.items[1] = dsgo.Node([lo[0] - 0.25, lo[1] - 1.0, lo[2] - 0.25])
     grid.items[2] = dsgo.Node([hi[0] + 0.25, hi[1] + 0.25, hi[2] + 0.25])
-    blob = mine['material_animation'][0]
     # Berserker's base class enables material animation slots by number, unchecked (EDF+0x6dc830): 0 and 2 at spawn and on
-    # a hit (0x348d1d, 0x33ef81 -> 0x6c0200), 1 and 3 elsewhere (0x34b2de, 0x37acde). A list shorter than the template's
-    # (4) hands it the memory past its end: a null player (M113) or whatever text follows (M131, "NT02"). 4.1 has one
-    # animation, its glow: it serves every slot, with the template's mode for each.
-    model.items[4] = dsgo.Node([dsgo.Node([dsgo.Blob(blob, 2), c.items[1]]) for c in t_am.get('material_animation').items])
+    # a hit (0x348d1d, 0x33ef81 -> 0x6c0200), 1 and 3 elsewhere (BERSERKER_DEATH_SLOT). A list shorter than the template's
+    # (4) hands it the memory past its end: a null player (M113) or whatever text follows (M131, "NT02"). 4.1's glow
+    # (the body's and every gun's: hector_materials) serves every slot but the death one, which gets 4.1's death block;
+    # each keeps the template's mode.
+    if a.guns:
+        glow, death = hector_materials(files, rab_rel, mdb_name, mine, a.guns)
+    else:
+        glow = death = mine['material_animation'][0]
+    model.items[4] = dsgo.Node([dsgo.Node([dsgo.Blob(death if i == BERSERKER_DEATH_SLOT else glow, 2), c.items[1]])
+                                for i, c in enumerate(t_am.get('material_animation').items)])
     out.set('animation_model', model)
 
     if a.guns:
@@ -2623,6 +2662,135 @@ def hector_fire(games: 'Games', files: dict[str, bytes], mine: dict, out: dsgo.N
         raise ValueError(f'hector_ai_setting has {len(ai)} numbers, not 7')
     out.set('edf41_hector', dsgo_value({'ranges': ranges, 'same_weapon': float(a.guns[0].fire.cls == a.guns[1].fire.cls),
                                         'ai': ai}))
+
+
+# EDF6_Berserker_Large's material_animation slots (BerserkerBase, EDF.dll, enabled through 0x6DC830 / 0x6C0200(model,
+# slot, mode)): 0 at spawn (0x348D1D, mode 2), 1 in 0's place (vtable slot 26 0x343C70: 0x6C04F0 stops 0, then 1 in mode
+# 2) and in the death state (0x34B2DE, mode 1), 2 on every hit (0x33EF81), 3 once at death (vtable slot 48 0x33F4A0, after
+# the explosion 0x2E5ED0: 0x33F76F, mode 1). The template's blobs agree: 0 and 1 its looping glow, 2 a 20-frame flash,
+# 3 a 60-frame fade over every material. 4.1's Hector has two blocks: the looping glow (EDF41.exe 0x21F062, played in mode
+# 2 from the start) and a 180-frame one played once when it dies (0x222A72, after its weapons' death calls); its weapons
+# the same two (each weapon object plays its own: 0x2255D4 .. 0x22A289).
+BERSERKER_DEATH_SLOT = 3
+
+
+def mtab_entries(blob: bytes) -> list[tuple[str, int, int]]:
+    """(material, track count, its tracks' offset from the blob's start) of each material an MTAB blob animates
+    (EDF+0x1104350: the table at the offset at +0x18, 12-byte entries {track count, name, tracks}, both offsets relative
+    to the entry; a track's {channels, name, channel table} and a channel's key offset are relative to themselves too,
+    so a blob's body moves as one piece)."""
+    n, base = struct.unpack_from('<i', blob, 0xc)[0], struct.unpack_from('<i', blob, 0x18)[0]
+    out = []
+    for i in range(n):
+        at = base + 12 * i
+        count, name, tracks = struct.unpack_from('<iii', blob, at)
+        p = q = at + name
+        while blob[q:q + 2] != bytes(2):
+            q += 2
+        out.append((blob[p:q].decode('utf-16-le'), count, at + tracks))
+    return out
+
+
+def mtab_merge(parts: list[tuple[bytes, dict[str, str]]]) -> bytes:
+    """One MTAB blob animating every material of `parts` ((blob, {its material name: the name here}); a name not in the
+    map stays). The blobs must share their timeline (+0 loop flag, +4 length in frames). Header: +8 the channel count
+    (the sum), +0xC the material count, 'MTAB', 0x200, +0x18 the table's offset (0x1C). Each blob is copied whole behind
+    the table (0x40-aligned: its own header and table are dead bytes there, its tracks and keys keep their relative
+    offsets) and the table's entries point into the copies; a renamed material's name is appended at the end."""
+    head = parts[0][0][:8]
+    for blob, _names in parts:
+        if blob[:8] != head or blob[16:24] != parts[0][0][16:24] or blob[16:20] != b'MTAB':
+            raise ValueError(f'MTAB blobs on different timelines or forms: {blob[:24].hex()} / {parts[0][0][:24].hex()}')
+    entries = [(e, i) for i, (blob, _n) in enumerate(parts) for e in mtab_entries(blob)]
+    channels = sum(struct.unpack_from('<i', blob, 8)[0] for blob, _n in parts)
+    out = bytearray(head + struct.pack('<ii', channels, len(entries)) + parts[0][0][16:24] + struct.pack('<i', 0x1c))
+    out += bytes(12 * len(entries))
+    at = []
+    for blob, _names in parts:
+        out += bytes(-len(out) % 0x40)
+        at.append(len(out))
+        out += blob
+    strings: dict[str, int] = {}
+    for k, ((name, count, tracks), i) in enumerate(entries):
+        entry = 0x1c + 12 * k
+        new = parts[i][1].get(name, name)
+        if new not in strings:
+            out += bytes(-len(out) % 4)
+            strings[new] = len(out)
+            out += new.encode('utf-16-le') + bytes(2)
+        struct.pack_into('<iii', out, entry, count, strings[new] - entry, at[i] + tracks - entry)
+    out += bytes(-len(out) % 4)
+    return bytes(out)
+
+
+def hector_blocks(blocks: list, loop: bytes | None, death: bytes | None, what: str) -> tuple[bytes, bytes | None]:
+    """(the looping glow, the death block or None) of a 4.1 Hector part's material_animation. The body's: block 0 loops,
+    block 1 is played once (`loop` and `death` None). A weapon's: the block on the body's glow's timeline, and the one
+    that is not looped and as long as the body's death block (301's cannon has a third, its own 120 frames, that 4.1
+    plays while it fires: no Berserker slot does that)."""
+    if loop is None:
+        if len(blocks) != 2 or blocks[0][:4] != b'\1\0\0\0' or blocks[1][:4] != b'\0\0\0\0':
+            raise ValueError(f'{what}: material_animation is not [looped glow, death] ({len(blocks)} blocks)')
+        return blocks[0], blocks[1]
+    glow = [b for b in blocks if b[:8] == loop[:8]]
+    end = [b for b in blocks if death is not None and b[:8] == death[:8]]
+    if len(glow) != 1 or len(end) > 1:
+        raise ValueError(f'{what}: {len(glow)} glow / {len(end)} death blocks among {len(blocks)}')
+    return glow[0], (end[0] if end else None)
+
+
+def hector_materials(files: dict[str, bytes], rab_rel: str, mdb_name: str, mine: dict, guns: tuple['Gun', ...]
+                     ) -> tuple[bytes, bytes]:
+    """(the glow blob, the death blob) of a Hector variant, each animating the body's materials and every gun's.
+
+    The guns' meshes are part of the body model (merged_model) with materials of their own that carry 4.1's names
+    (ufosurface: the body's name too; the 401 shield's glass ufoglass). EDF6 binds an MTAB entry to the first material
+    of that name (EDF+0x110D570, a linear scan returning the first match), so the body's blob lit the body only: the
+    guns' glow and the shield glass's animation were never played. Here each gun's materials get a name of their own
+    (`<name>.<weapon model>`, files[rab_rel] rewritten) and the gun's own 4.1 blocks are merged in under those names."""
+    rab = mdb.rab_read(files[rab_rel])
+    member = next(f for f in rab.files if f.name.lower() == mdb_name.lower())
+    md = mdb.mdb_read(member.data)
+    loop, death = hector_blocks(mine['material_animation'], None, None, rab_rel)
+    glow_parts: list[tuple[bytes, dict[str, str]]] = [(loop, {})]
+    death_parts: list[tuple[bytes, dict[str, str]]] = [(death, {})]
+    done: dict[str, str] = {}
+    for gun in guns:
+        if gun.fire is None or gun.fire.sgo in done:
+            continue      # the same weapon on both arms: one set of materials (_adopt_objects shares them)
+        stem = gun.mdb.rsplit('.', 1)[0].lower()
+        done[gun.fire.sgo] = stem
+        prefix = 'gun_' + gun.node
+        mats = sorted({me.material for ob in md.objects
+                       if (lambda n: n == prefix or n.startswith(prefix + '_'))(md.name_of(md.bones[ob.bone].name))
+                       for me in ob.meshes})
+        rename: dict[str, str] = {}
+        for i in mats:
+            old = md.name_of(md.materials[i].name)
+            rename[old] = f'{old}.{stem}'
+            md.materials[i].name = len(md.names)
+            md.names.append(rename[old])
+        blocks = sgo.read(files['OBJECT/' + gun.fire.sgo])[1].get('material_animation', [])
+        if not blocks:
+            continue      # 301's gatling: 4.1 animates nothing on it
+        glow, end = hector_blocks(blocks, loop, death, gun.fire.sgo)
+        for parts, blob in ((glow_parts, glow), (death_parts, end)):
+            if blob is None:
+                continue
+            stray = [n for n, _c, _t in mtab_entries(blob) if n not in rename]
+            if stray:
+                raise ValueError(f'{gun.fire.sgo}: its blocks animate {stray}, its meshes use {sorted(rename)}')
+            parts.append((blob, rename))
+    raw = mdb.mdb_write(md)
+    member.stored = mdb.cmpl_compress(raw) if member.stored[:4] == b'CMPL' else raw
+    files[rab_rel] = mdb.rab_write(rab)
+    blobs = mtab_merge(glow_parts), mtab_merge(death_parts)
+    names = [md.name_of(x.name) for x in md.materials]
+    for blob in blobs:
+        for n, _c, _t in mtab_entries(blob):
+            if names.count(n) != 1:
+                raise ValueError(f'{rab_rel}: the material animation names {n!r}, the model has it {names.count(n)} times')
+    return blobs
 
 
 def mab_block(block: object) -> bytes:

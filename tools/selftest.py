@@ -10110,7 +10110,8 @@ def edf41_hector_alias() -> None:
     the getters' tunings, the states the class asks for in a fight, the damage reaction's states, the locators
     (eye, one muzzle per gun_control entry) on bones the model has, the bone and ragdoll-body names the SGO gives,
     the damage map's debris models and every texture the model binds. The weak point is gone and the damage reaction
-    is the capped one (one entry, min 0.05, ExplosionDownBorder 10)."""
+    is the capped one (one entry, min 0.05); nothing knocks it down and it does not climb (both move the object and
+    play states Hector has none of); it walks and turns at 4.1's rates."""
     import struct
     import cas_graft
     import cas_legacy as cl
@@ -10159,7 +10160,24 @@ def edf41_hector_alias() -> None:
     assert len(reaction) == 1 and reaction[0]['user_param'][0] == 'damage'
     assert set(reaction[0]['user_param'][1]) <= set(players['damage'])
     adjust = top['BerserkerSettings']['DamageReactionAdjust']
-    assert adjust['min'] == 0.05 and adjust['scale'] == 10.0 and top['BerserkerSettings']['ExplosionDownBorder'] == 10.0
+    assert adjust['min'] == 0.05 and adjust['scale'] == 10.0
+    # nothing knocks it down: the class's get-up puts the object at its ragdoll's waist and plays wakeup_f / _b, which
+    # Hector has none of (the 2026-10-17 report: it vanished off the map)
+    assert top['BerserkerSettings']['ExplosionDownBorder'] >= 1e30 and not {'wakeup_f', 'wakeup_b'} & set(players['main'])
+    # no climb: the template's climb moves the object onto the obstacle and plays climb_over_*, which Hector has none of
+    assert 'ClimbOver' not in top['WalkingEnemyBase'], top['WalkingEnemyBase']
+    climbing = dsgo.parse(files['OBJECT/HECTOR301CC.SGO']).root
+    m.set_path(climbing, 'WalkingEnemyBase/ClimbOver', m.dsgo_value({'animations': [[20.0, 'climb_over_small']]}))
+    try:
+        m.check_states(climbing, cas, 'HECTOR301CC with the template climb')
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('check_states passed a climb state Hector has not')
+    # 4.1's walk (6 units/s, eased 10 %) and turn (0.03 rad/frame at most, the yaw eased 10 %): EDF6's turn is
+    # TurnSpeed[0] x clamp(angle, +-0.1) a frame, so 0.3; the speed itself comes from src/hector_ai.h Steer
+    assert top['WalkingEnemyBase']['MoveSpeed'] == [6.0, 0.1], top['WalkingEnemyBase']['MoveSpeed']
+    assert top['WalkingEnemyBase']['TurnSpeed'] == [0.3, 0.1], top['WalkingEnemyBase']['TurnSpeed']
     assert top['WalkingEnemyBase']['RandomAnimationTrack'] == [], 'its variables are not in the CAS'
     # the model, the MAB, the ragdoll
     rab = files['OBJECT/HECTOR301CC.MRAB']
@@ -10178,6 +10196,14 @@ def edf41_hector_alias() -> None:
     # the class enables slots 0..3 by number (EDF+0x6dc830): as many entries as the template's four, not one per material
     # (two crashed the real game, M113 / M131); the model's materials are the two the glow blob names
     assert len(am.items[4].items) == 4 and len(model.materials) == 2
+    # each material its own name (EDF6 binds an MTAB entry to the first of a name: the guns' glow was never played),
+    # every slot animates the body's and the guns', slot 3 (played once at death) is 4.1's 180-frame death block
+    mats = [model.name_of(x.name) for x in model.materials]
+    assert mats == ['ufosurface', 'ufosurface.hector301cannon'], mats
+    for i, slot in enumerate(am.items[4].items):
+        blob = slot.items[0].data
+        assert [n for n, _c, _t in m.mtab_entries(blob)] == mats, (i, m.mtab_entries(blob))
+        assert struct.unpack_from('<if', blob, 0) == ((0, 180.0) if i == m.BERSERKER_DEATH_SLOT else (1, 480.0)), i
     located = ml.mab_locators(am.items[2].data)
     names = {l.name: l for _i, l in located}
     assert {'目の基準位置', '砲台１', '砲台２'} <= set(names) and all(l.node in bones for _i, l in located)
@@ -10191,6 +10217,50 @@ def edf41_hector_alias() -> None:
     # the file is a DSGO the writer reproduces
     assert dsgo.write(dsgo.parse(files['OBJECT/HECTOR301CC.SGO'])) == files['OBJECT/HECTOR301CC.SGO']
     assert struct.unpack_from('<I', cas, 4)[0] == 0x204
+
+
+@test
+def edf41_hector_material_merge() -> None:
+    """tools/make_edf41_objects.py mtab_merge on hand-made MTAB blobs: the merged blob names every part's materials (a
+    part's map renames them), its header sums the channels on the shared timeline, and every material's track, channel
+    and keys resolve to the same bytes as in its source (all offsets below the table are self-relative). Blobs on
+    different timelines are refused. Why: EDF6 binds an entry to the first material of its name (EDF+0x110D570), so the
+    Hector's guns (materials named like the body's) were only lit once they had names and entries of their own."""
+    import struct
+    import make_edf41_objects as m
+
+    def blob(loop: int, length: float, material: str, key: float) -> bytes:
+        b = struct.pack('<ifii', loop, length, 1, 1) + b'MTAB' + struct.pack('<ii', 0x200, 0x1c)
+        b += struct.pack('<iii', 1, 0x5c - 0x1c, 0x28 - 0x1c)            # 0x1c entry: 1 track, its name, its tracks
+        b += struct.pack('<iii', 1, 0x4c - 0x28, 0x34 - 0x28)            # 0x28 track: 1 channel, its name, its channels
+        b += struct.pack('<iiiii', 1, 1, 16, 0, 0x48 - 0x34)             # 0x34 channel: its keys
+        b += struct.pack('<f', key)                                       # 0x48 keys
+        b += b'light0_color\0\0\0\0'                                      # 0x4c track name
+        return b + material.encode('utf-16-le') + bytes(2)                # 0x5c material name
+
+    def resolve(b: bytes, tracks: int) -> tuple[bytes, float]:
+        count, name, chans = struct.unpack_from('<iii', b, tracks)
+        key_at = tracks + chans + struct.unpack_from('<i', b, tracks + chans + 16)[0]
+        return b[tracks + name:b.index(b'\0', tracks + name)], struct.unpack_from('<f', b, key_at)[0]
+
+    body, gun = blob(1, 480.0, 'ufosurface', 0.25), blob(1, 480.0, 'ufosurface', 0.75)
+    assert [(n, c) for n, c, _t in m.mtab_entries(body)] == [('ufosurface', 1)]
+    merged = m.mtab_merge([(body, {}), (gun, {'ufosurface': 'ufosurface.hector401cannon'})])
+    assert merged[:8] == body[:8] and struct.unpack_from('<ii', merged, 8) == (2, 2) and merged[16:20] == b'MTAB'
+    entries = m.mtab_entries(merged)
+    assert [n for n, _c, _t in entries] == ['ufosurface', 'ufosurface.hector401cannon'], entries
+    assert [resolve(merged, t) for _n, _c, t in entries] == [(b'light0_color', 0.25), (b'light0_color', 0.75)]
+    assert all(t % 4 == 0 for _n, _c, t in entries) and len(merged) % 4 == 0
+    for other in (blob(0, 480.0, 'ufosurface', 0.0), blob(1, 180.0, 'ufosurface', 0.0)):
+        try:
+            m.mtab_merge([(body, {}), (other, {})])
+        except ValueError:
+            continue
+        raise AssertionError('blobs on different timelines were merged')
+    assert m.BERSERKER_DEATH_SLOT == 3
+    import inspect
+    src_alias = inspect.getsource(m.alias_dsgo)
+    assert 'hector_materials(' in src_alias and 'BERSERKER_DEATH_SLOT' in src_alias
 
 
 @test
