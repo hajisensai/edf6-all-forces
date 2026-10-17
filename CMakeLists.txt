@@ -9,6 +9,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/edf41robo.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/nix.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/edf41mother401.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/edf41deiroi.cpp)
+# Every class in every seat (ini AllClassesRide; its own line, as above).
+target_sources(EDF6VehicleCrew PRIVATE src/allclass.cpp)
 # The ground vehicles' ram (its own line, as above).
 target_sources(EDF6VehicleCrew PRIVATE src/vehicleram.cpp)
 # The gun stabilizer (its own line, as the Nix's).
@@ -1174,6 +1176,20 @@ target_include_directories(mission_crew_support_test PRIVATE src common)
 target_compile_options(mission_crew_support_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks mission_crew_support_test)
 add_test(NAME mission_crew_support COMMAND mission_crew_support_test)
+# Every class in every seat (src/allclass.cpp, ini AllClassesRide; docs/all-classes-ride-re.md): the real hooks on a
+# private image, the source guard, the native facts on EDF.dll and the Root.cpk census behind them.
+add_executable(allclass_test EXCLUDE_FROM_ALL tests/allclass_test.cpp)
+target_link_libraries(allclass_test PRIVATE edf6common)
+target_include_directories(allclass_test PRIVATE src common)
+target_compile_options(allclass_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks allclass_test)
+add_test(NAME allclass COMMAND allclass_test)
+add_test(NAME allclass_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/allclass_guard.py")
+set_tests_properties(allclass_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+add_test(NAME allclass_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/allclass_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(allclass_native PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME allclass_census COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/allclass_census_check.py" "${EDF6_GAME_DIR}")
+set_tests_properties(allclass_census PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 
 add_test(NAME mission_crew_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/mission_crew_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(mission_crew_native PROPERTIES SKIP_RETURN_CODE 77)
