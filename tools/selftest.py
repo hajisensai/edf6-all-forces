@@ -8621,6 +8621,69 @@ def edf41_story_small_dragons() -> None:
         assert top['edf41_ragdoll_bodies'] == list(m.SMALL_DRAGON_BODIES), top.get('edf41_ragdoll_bodies')
 
 
+@test
+def edf41_big_dragon_ragdoll_mass() -> None:
+    """M166 2026-10-17 (「大龙好像没ai」): DragonSmall keeps a knocked-down dragon down until its ragdoll's sum of mass x
+    (|v| + |w|) is under 2000 (else 60 s); 4.1's DragonBig ragdoll weighs 361,005 kg, 114 times the class's heaviest stock
+    ragdoll, so its resting jitter (a sum of 5,000..18,000) never passed. pylib/hk2014.py reads 4.1's hk_2014 tagfiles
+    (every one the port ships, to the end tag) and scales a ragdoll's masses, inertias and joint friction torques by one
+    factor in place (the same size, nothing else changed); make_edf41_objects.dragon_ragdoll_fix makes the giant's
+    ragdoll as heavy as the class's heaviest stock one and scales its hit impulse (dragon_RagdollReactionScale) with it.
+    The registry keeps the impulse per kilogram of 4.1's (2.5 / 361,005) whichever mass it ships; with the games, the
+    built ragdoll weighs what EDF6's heaviest DragonSmall ragdoll does."""
+    import hk2014
+    import edf41_objects as eo
+    import make_edf41_objects as m
+    import sgo
+    reg = eo.registry()
+    tagfiles = [r for r in reg['files'] if r.endswith('.SHKT') and eo.read(r)[:8] == hk2014.MAGIC]
+    assert len(tagfiles) >= 20, tagfiles
+    for rel in tagfiles:   # every 4.1 ragdoll reads to its end tag
+        hk2014.read(eo.read(rel))
+    for rel in ('OBJECT/RAGDOLL_SMALLDRAGON401_HAS_HKA.SHKT', 'OBJECT/RAGDOLL_REDSMALLDRAGON.SHKT'):
+        assert abs(hk2014.total_mass(eo.read(rel)) - 1500.0) < 0.5, rel   # 4.1's small dragons: 36 bodies, 1,500 kg
+    big = 'OBJECT/RAGDOLL_BIGDRAGON401BLUE_HAS_HKA.SHKT'
+    data = eo.read(big)
+    before = hk2014.rigid_bodies(hk2014.read(data))
+    half = hk2014.scaled_masses(data, 0.5)
+    after = hk2014.rigid_bodies(hk2014.read(half))
+    assert len(half) == len(data) and len(after) == len(before) == 56
+    for a, b in zip(before, after):
+        assert a.name == b.name and abs(b.mass - a.mass * 0.5) <= 1e-3 * a.mass, (a, b)
+        assert all(abs(y - x * 2.0) <= 1e-5 * x for x, y in zip(a.inertia_inv, b.inertia_inv)), (a, b)
+        assert (a.linear_damping, a.angular_damping, a.deactivation_class) == (b.linear_damping, b.angular_damping,
+                                                                                b.deactivation_class)
+
+    def frictions(blob: bytes) -> list[float]:
+        return [v['maxFrictionTorque'] for o in hk2014.read(blob).objects for v in (o.get('atoms') or {}).values()
+                if isinstance(v, dict) and 'maxFrictionTorque' in v]
+    assert frictions(data) and all(abs(y - x * 0.5) <= 1e-3 * x for x, y in zip(frictions(data), frictions(half)))
+    changed = sum(x != y for x, y in zip(data, half))
+    assert 0 < changed <= 4 * (4 * len(before) + len(frictions(data))), changed   # only those floats' bytes
+    for bad in (0.0, -1.0):
+        try:
+            hk2014.scaled_masses(data, bad)
+        except ValueError:
+            continue
+        raise AssertionError(f'factor {bad} accepted')
+    top = sgo.load(data=eo.read('OBJECT/DRAGONBIG401.SGO'))
+    per_kg = m.num(top['dragon_RagdollReactionScale']) / hk2014.total_mass(data)
+    assert abs(per_kg - 2.5 / 361005.0) <= 1e-3 * per_kg, per_kg
+    assert m.NATIVE_FIXES['DRAGONBIG401.SGO'] is m.dragon_ragdoll_fix
+    if not _e5c_have_game() or not _edf41_root():
+        print('skip  edf41_big_dragon_ragdoll_mass (real archives): needs EDF6 and EDF4.1 installed')
+        return
+    import rootcpk
+    games = m.Games(_edf41_root(), rootcpk.DEFAULT_GAME)
+    limit = m.class_ragdoll_mass(games, 'DragonSmall')
+    assert abs(limit - 3180.0) < 0.5, limit       # e518_frogDragon_large
+    built, files = m.build(_edf41_root(), rootcpk.DEFAULT_GAME, ('DRAGONBIG401.SGO',))
+    assert not built['skipped'], built['skipped']
+    assert abs(hk2014.total_mass(files[big]) - limit) < 0.5
+    top = sgo.load(data=files['OBJECT/DRAGONBIG401.SGO'])
+    assert abs(m.num(top['dragon_RagdollReactionScale']) - 2.5 * limit / 361005.0) < 1e-4, top['dragon_RagdollReactionScale']
+
+
 # EDF4.1's mission maps (plan P6): the maps EDF4.1's 98 missions load (pylib/map_legacy.py converts their MAC).
 EDF41_MISSION_MAPS = ('IG_CAVE01', 'IG_HORNETCAVE01', 'IG_WRECKTOWN01', 'NW_HILLYCITY_LIGHT', 'NW_KASENJIKI01',
                       'NW_KOUSOUBLD01', 'NW_SINSUIKOUEN', 'NW_SOUKOGAI01', 'NW_UNDERGROUND01', 'SK_CRATER01',
