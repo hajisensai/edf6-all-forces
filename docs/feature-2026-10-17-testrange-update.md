@@ -30,6 +30,9 @@
 ## B. M 地图「摆放」面板（只在测试场）
 
 - 判定：任务开始时（`mission.cpp MissionStart` → `PreloadDebugSpawn`）读当前模式的内容号（`edf5campaign.cpp TestRangeMode`，与游戏脚本 `GetContentID` 同一读法，见 `docs/weapon-level-cap-re.md` §3）是否等于 ini 的 `TestRangeContent`。是测试场时 `RangePlace=1`（默认）就开，**不受 `DebugSpawn` 影响**；其它任务没有这个面板。
+- 预载的代价（2026-10-18 实机）：整份清单常驻后，带 HD 贴图的模型档案超过了游戏 CRI File System 的 loader 池（原版 130），
+  第 95 个档案打不开，原版贴图加载不判空，进测试场必崩（`EDF+0x1134CCB`）。插件加载时把 `num_loaders` 提到 512
+  （`src/fsbudget.cpp`，逆向与实测见 [cri-fs-loaders-re.md](cri-fs-loaders-re.md)）。
 - 预载：测试场里预载清单中文件在的每一行（物体行）；`Entry::preload=false` 的行（另外带一个约 17 MB 模型的 4.1 变体，主要是赫克托的 19 种武器组合）只有 `RangePlaceAll=1` 才预载，否则显示「（未预载）」。默认预载 4.1 每类一种以及与它共用模型的变体。联机时不预载。调试召唤（DebugSpawn=1）在其它任务里仍只预载原版行，不为 4.1 / 测试场的行付出内存。
 - 生成：与调试召唤是同一条路（`debug_spawn.cpp MakeRow`）：载具 = `CreateObject` + `mission_setup` + 己方阵营、空车；敌人 = 脚本 `CreateEnemy` 的步骤；飞机 = 地图空中支援呼叫；士兵 = 支援士兵。位置是地图上点到的地面点（`mapcmd.cpp TargetPoint`：指针下的地图射线，手柄时是屏幕中心），加上该行的离地高度（飞行敌人、母船在自己的高度出现：母舰 900 米、4.1 母船 / 地球吞噬者 300 米、运输船 / UFO 机器人 150 米）。载具朝背离玩家的方向，敌人朝向玩家。
 - 操作（`src/range_place.h`，参照支援栏）：

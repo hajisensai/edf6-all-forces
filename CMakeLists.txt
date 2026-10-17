@@ -11,6 +11,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/edf41mother401.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/edf41deiroi.cpp)
 # Every class in every seat (ini AllClassesRide; its own line, as above).
 target_sources(EDF6VehicleCrew PRIVATE src/allclass.cpp)
+# CRI File System's loader pool sized for the plugin's content (its own line, as above).
+target_sources(EDF6VehicleCrew PRIVATE src/fsbudget.cpp)
 # The ground vehicles' ram (its own line, as above).
 target_sources(EDF6VehicleCrew PRIVATE src/vehicleram.cpp)
 # The gun stabilizer (its own line, as the Nix's).
@@ -1218,6 +1220,10 @@ add_test(NAME allclass_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR
 set_tests_properties(allclass_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME allclass_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/allclass_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(allclass_native PROPERTIES SKIP_RETURN_CODE 77)
+# CRI File System's loader pool (src/fsbudget.cpp; docs/cri-fs-loaders-re.md): the init sites, the config field and the
+# crash a run-out pool led to, on a real EDF.dll.
+add_test(NAME fsbudget_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/fsbudget_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(fsbudget_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME allclass_census COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/allclass_census_check.py" "${EDF6_GAME_DIR}")
 set_tests_properties(allclass_census PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 
