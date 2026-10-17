@@ -554,6 +554,8 @@ void LoadConfig() noexcept {
     n.edf5CampaignContent=FixInt("EDF5CampaignContent",ReadInt(L"EDF5CampaignContent",n.edf5CampaignContent),0,65535);
     n.testRangeContent=FixInt("TestRangeContent",ReadInt(L"TestRangeContent",n.testRangeContent),0,65535);
     n.edf41Content=FixInt("EDF41Content",ReadInt(L"EDF41Content",n.edf41Content),0,65535);
+    n.portedMissionsUnlocked=ReadBool(L"PortedMissionsUnlocked",n.portedMissionsUnlocked);
+    n.portedWeaponsUnlocked=ReadBool(L"PortedWeaponsUnlocked",n.portedWeaponsUnlocked);
     n.airSoftEdge=ReadFloat(L"AirSoftEdge",n.airSoftEdge);
     n.airSoftTurns=ReadFloat(L"AirSoftTurns",n.airSoftTurns);
     n.airSoftCeil=ReadFloat(L"AirSoftCeil",n.airSoftCeil);
@@ -1071,6 +1073,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallRoomUi();        // the support loadout menu in the online room and the offline HQ (chains both OnUpdates)
     InstallGlyphLock();     // the game's own text, wrong or missing characters (glyphs.cpp)
     InstallEdf5Campaign();  // the EDF5 campaign's mission packs owned (edf5campaign.cpp)
+    InstallPortedMissions(); // ...and with PortedMissionsUnlocked every mission of the ported packs open (edf5campaign.cpp)
     InstallEdf5Online();    // ...and their missions online: the BVM player natives' online half (edf5online.cpp)
     InstallJetSound();
     InstallVehicleSound();  // the ground vehicles' engines, turrets, loaders and main guns (vehsound.cpp)

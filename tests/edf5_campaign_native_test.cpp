@@ -1,5 +1,8 @@
 // The mission packs' ownership hook on a private EDF.dll mapping: the native owned-content lookup (0xD92B0) run
 // on a fixture of the owned set, and every patched call site. Never starts the game.
+// Mode "unlock": PortedMissionsUnlocked's hook (InstallPortedMissions): its signatures match this EDF.dll, its call
+// site is redirected through the stub, and a stand-in caller with the mission select's frame (the rows' vector at
+// [rsp+0x48]) gets every row opened only in a ported story pack with the key on.
 #include "../src/crew.h"
 #include "../src/memory.h"
 #include <cstdio>
@@ -7,6 +10,7 @@
 #include <cstring>
 #include <string>
 #include <cstdarg>
+#include <vector>
 namespace crew {
 int redirectCount=0,failAt=0;
 bool CampaignTestRedirect(unsigned char* at,void* expected,void* replacement,bool& changed) noexcept {
@@ -63,6 +67,97 @@ void PointAt(unsigned site,const unsigned char* target) {
     std::memcpy(at+1,&rel,4);
     VirtualProtect(at,5,old,&old);
 }
+
+// ---- mode "unlock" ----
+// The prior of the mission select's clear check (a redirect made before ours): records the row, answers "not cleared".
+int clearedCalls=0;
+unsigned clearedRow=~0u;
+bool __fastcall FakeCleared(unsigned row) { ++clearedCalls;clearedRow=row;return false; }
+int __fastcall FakeField5(void*,unsigned row) { return row==3 ? 1 : 0; }
+// A stand-in for the mission select at its call: rcx = {begin, end, capacity} copied to [rsp+0x48], rdx = the call's
+// target, r8d = the row in ecx. sub rsp,0x68; ...; mov ecx,r8d; call rdx; add rsp,0x68; ret
+using CallerFn=bool(__fastcall*)(void* vec,void* target,unsigned row);
+CallerFn MakeCaller() {
+    static const unsigned char code[]={0x48,0x83,0xEC,0x68, 0x48,0x8B,0x01, 0x48,0x89,0x44,0x24,0x48, 0x48,0x8B,0x41,0x08,
+        0x48,0x89,0x44,0x24,0x50, 0x48,0x8B,0x41,0x10, 0x48,0x89,0x44,0x24,0x58, 0x44,0x89,0xC1, 0xFF,0xD2,
+        0x48,0x83,0xC4,0x68, 0xC3};
+    void* const at=VirtualAlloc(nullptr,0x1000,MEM_COMMIT|MEM_RESERVE,PAGE_EXECUTE_READWRITE);
+    if(at)std::memcpy(at,code,sizeof(code));
+    return reinterpret_cast<CallerFn>(at);
+}
+// The game status the hook reads the current mode from: modes at +0x20, count +0x30, current +0x38; a mode's node at
+// +0x10, the node's values at node + [node+8], the content id at +0x74.
+struct ModeFixture {
+    alignas(16) unsigned char gs[0x200]{},mode[0x20]{},node[0x100]{};
+    void* modes[1]{};
+    explicit ModeFixture(int content) {
+        using crew::Put;
+        modes[0]=mode;
+        Put<void*>(gs,0x20,modes);Put<std::uint32_t>(gs,0x30,1);Put<std::uint32_t>(gs,0x38,0);
+        Put<void*>(mode,0x10,node);Put<std::int32_t>(node,8,0x10);Put<std::int32_t>(node,0x10+0x74,content);
+    }
+};
+std::vector<crew::ported::ListRow> FreshRows(std::size_t n) {
+    std::vector<crew::ported::ListRow> rows(n);
+    for(std::size_t i=0;i<n;++i){rows[i]=crew::ported::ListRow{};rows[i].row=static_cast<std::int32_t>(i);rows[i].state=4;}
+    rows[0].state=1;
+    return rows;
+}
+// The rows after one call of the site's target through the stand-in caller (row 0 unless given).
+std::vector<int> Run(CallerFn caller,std::vector<crew::ported::ListRow> rows,unsigned row=0) {
+    void* vec[3]={rows.data(),rows.data()+rows.size(),rows.data()+rows.size()};
+    const auto target=crew::CallTarget(crew::kListScan);
+    clearedRow=~0u;
+    Check(!caller(vec,target,row),"the prior's answer comes back");
+    Check(clearedRow==row,"the prior asked about the same row");
+    std::vector<int> states;
+    for(const auto& r:rows)states.push_back(r.state);
+    return states;
+}
+int UnlockMode() {
+    using namespace crew;
+    unsigned char* const gsSlot=image+kGameStatus;
+    DWORD old=0;
+    Check(VirtualProtect(gsSlot,8,PAGE_READWRITE,&old)!=0,"the GS pointer writable in the private mapping");
+    Check(CallTarget(kListScan)==image+kCleared,"0x8A21C3 is a call of 0x8A4C00");
+    bool changed=false;
+    Check(edf::RedirectCall(image+kListScan,image+kCleared,reinterpret_cast<void*>(&FakeCleared),changed),"stand-in prior");
+    Check(InstallPortedMissions() && missionsReady,"the mission select's signatures match and its call is redirected");
+    Check(InstallPortedMissions(),"re-entry is idempotent");
+    Check(CallTarget(kListScan)!=reinterpret_cast<unsigned char*>(&FakeCleared),"the site goes through our stub now");
+    Check(lastLog.find("chained")!=std::string::npos || lastLog.find("HOOK ported missions=1")!=std::string::npos,"installed");
+    field5=&FakeField5;
+    const CallerFn caller=MakeCaller();
+    Check(caller!=nullptr,"stand-in caller");
+    const std::vector<int> stock={1,4,4,4,4};
+    config.edf5CampaignContent=3;config.testRangeContent=6;config.edf41Content=7;
+    ModeFixture e5(4),e41(9),edf6(0),range(6),dlc(1);
+    Put<void*>(image,kGameStatus,e5.gs);
+    config.portedMissionsUnlocked=false;
+    Check(Run(caller,FreshRows(5))==stock,"key off: the stock rows");
+    config.portedMissionsUnlocked=true;
+    Check(Run(caller,FreshRows(5))==std::vector<int>({1,1,1,2,1}),"EDF5 DLC1: every row open, the branch row 2");
+    Check(lastLog.find("content 4, 4 rows opened")!=std::string::npos,"logged once");
+    Check(Run(caller,FreshRows(5),1)==stock,"only at the scan's first row");
+    Put<void*>(image,kGameStatus,e41.gs);
+    Check(Run(caller,FreshRows(3))==std::vector<int>({1,1,1}),"EDF4.1 Mission Pack 2 opened");
+    for(ModeFixture* other:{&edf6,&range,&dlc}) {
+        Put<void*>(image,kGameStatus,other->gs);
+        Check(Run(caller,FreshRows(5))==stock,"EDF6's story, the test range, EDF6's DLC: stock");
+    }
+    Put<void*>(image,kGameStatus,e5.gs);
+    auto odd=FreshRows(4);
+    odd[2].state=1;
+    Check(Run(caller,odd)==std::vector<int>({1,4,1,4}),"a list not as the first loop leaves it: untouched");
+    Check(lastLog.find("left stock")!=std::string::npos,"...and logged");
+    config.edf5CampaignContent=0;
+    Check(Run(caller,FreshRows(5))==stock,"EDF5 not installed: its old id is nobody's pack");
+    Put<void*>(image,kGameStatus,nullptr);
+    config.edf5CampaignContent=3;
+    Check(Run(caller,FreshRows(5))==stock,"no game status: stock");
+    std::printf("edf5_campaign_native_test: %d checks passed (ported missions unlock)\n",checks);
+    return 0;
+}
 }
 int main(int argc,char** argv) {
     using namespace crew;
@@ -97,6 +192,7 @@ int main(int argc,char** argv) {
         std::printf("edf5_campaign_native_test: %d checks passed (chained)\n",checks);
         return 0;
     }
+    if(mode=="unlock")return UnlockMode();
     if(mode=="foreign") {   // a site calling something else inside EDF.dll: another build, nothing installed
         PointAt(kSites[2],image+kOwned+0x10);
         Check(!InstallEdf5Campaign() && !campaignReady,"a different call inside EDF.dll is refused");
