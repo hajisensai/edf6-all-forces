@@ -24,14 +24,19 @@ SIGNATURES: tuple[tuple[int, int, str], ...] = (
     (0x59DE73, 0x23, 'own preload (0x59DE50): player in ecx, class GS +0x6E90, the path from 0xD8730'),
     (0x59DD0F, 0x1D, 'session preload (0x59DC90): the member record\'s class and outfit, the path from 0xE34E0'),
     (0x591227, 0x12, 'online creation: 0x5A3F90(desc from 0x595960, ...)'),
+    (0x59120E, 0x10, 'online creation: 0x595960(desc, &member, ...) right before it, in the same 0x591130'),
+    (0x5959DD, 0x0C, "online desc: the member's mission index +0x48 picks its record (below 4)"),
+    (0x59DCD9, 0x1A, "session preload: the member's mission index +0x48 picks its record"),
+    (0x8A9B15, 0x14, 'soldier screen: the outfit change unlocked flag GS +0x300 copied to screen +0x7A4'),
+    (0x8AB585, 0x1E, 'outfit popup: built only while screen +0x7A4 is set'),
+    (0x70D912, 0x28, "mission result: GS +0x300 set once the current list's last row is cleared (0xDF990)"),
+    (0x0DEDD5, 0x0B, "new save: the outfit +0x6E94 is -1 (the mission's)"),
     (0x59144D, 0x13, 'offline creation: 0x5A3F90(desc from 0x595C80, ...)'),
     (0x595AE2, 0x0F, 'online desc +0: -1 for a remote member (0x12AC420), else 0'),
     (0x595CBD, 0x06, 'offline desc +0: the local slot'),
     (0x12AC420, 0x08, 'the member\'s remote bit: +0x10 bit 1'),
     (0x5A3FE3, 0x1E, 'creation: class desc +8, outfit desc +0xC into 0xE34E0'),
     (0x5A4087, 0x2E, 'creation: desc +0 == -1 marks the object remote (+0x128 bit 0)'),
-    (0x93B11D, 0x18, 'view: msg-3 menu path from 0xE3420'),
-    (0x93B23E, 0x13, 'view: outfit change menu path from 0xE3420'),
     (0x93B412, 0x19, 'view: msg-3 Desc menu path from 0xE3420'),
     (0x93BCEE, 0x1A, 'view: msg-6 menu path from 0xE3420'),
     (0x8AB642, 0x07, 'popup item 0: the mission-default lambda (vtable 0x1805CF0)'),
@@ -53,10 +58,13 @@ ITEM_VTABLES: tuple[tuple[int, int, int], ...] = (
     (0x1805CF0, 0x8AD560, -1), (0x1805D28, 0x8AD5C0, 2), (0x1805D60, 0x8AD620, 3), (0x1805D98, 0x8AD680, 1),
     (0x1805DD0, 0x8AD6E0, 0),
 )
+# The HQ / room 3D view (UiHQ_3DModelView): its vtable and OnMessage, the slot the menu path hook chains (its player at
+# +0x2AC while it asks 0xE3420 at 0x93B426 / 0x93BD03, both inside OnMessage).
+VIEW_VTABLE, VIEW_SLOT_MESSAGE, VIEW_ONMESSAGE = 0x180FA60, 3, 0x93B320
 # rel32 calls the hooks redirect: (call site, the callee it must hold)
 CALLS: tuple[tuple[int, int], ...] = (
     (0x591234, 0x5A3F90), (0x59145B, 0x5A3F90), (0x5A3FFC, 0x0E34E0), (0x59DD27, 0x0E34E0), (0x59DE91, 0x0D8730),
-    (0x93B130, 0x0E3420), (0x93B24C, 0x0E3420), (0x93B426, 0x0E3420), (0x93BD03, 0x0E3420), (0x8ABC10, 0x119C600),
+    (0x591219, 0x595960), (0x93B426, 0x0E3420), (0x93BD03, 0x0E3420), (0x8ABC10, 0x119C600),
 )
 
 

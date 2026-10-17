@@ -36,8 +36,13 @@ static_assert(kCapabilities<kMaxUnits,"hello.index carries the capability bits")
 // every peer announced it: one rescue in flight per requester, beside the map's one, never under the map's 2 s rate,
 // each requester's rescues kRescueCooldownMs apart (SetRescueCooldown). Without it a rescue waits its turn as before.
 // Announced as kExtSeaRescue is (the hello's index has no bit left: #100's kCapTransports 4 / kCapLoadout 8).
-constexpr std::uint32_t kExtVariants=1u,kExtSeaRescue=2u,kExtRescueChannel=4u,kExtensions=kExtVariants|kExtSeaRescue|kExtRescueChannel;
-constexpr std::uint32_t kExtBuilt=kExtSeaRescue|kExtRescueChannel;   // what every hello of this build announces (Tick)
+// kExtOutfit41 (2026-10-18, the user: the EDF4.1 outfit, 「所有东西联机应该都能正常使用」「不同版本可以直接说版本不同」): it tells
+// the room its EDF4.1 outfit (outfit41.cpp, EDF6Coop member attribute EDF6X_OUTFIT41) and dresses the others by theirs.
+// A member without it sees everyone's stock outfit and is seen in its own: the version notice names the feature. Carried
+// by no message of this protocol: announced so the room's builds compare (version_notice.h).
+constexpr std::uint32_t kExtVariants=1u,kExtSeaRescue=2u,kExtRescueChannel=4u,kExtOutfit41=8u,
+    kExtensions=kExtVariants|kExtSeaRescue|kExtRescueChannel|kExtOutfit41;
+constexpr std::uint32_t kExtBuilt=kExtSeaRescue|kExtRescueChannel|kExtOutfit41;   // what every hello of this build announces (Tick)
 constexpr std::uint64_t kRescueCooldownMs=30000;   // the default; the host's ini SeaRescueCooldownSec sets it
 // What a build has, both words in one (the version notice compares and names these, support_net.cpp VersionTick): the
 // capability bits low (below kMaxUnits, 4 bits), the extension bits above them.

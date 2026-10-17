@@ -18,6 +18,7 @@
 // Nothing is patched unless every address checks out (REFUSED in the log: both screens as they are). The slots are read
 // and chained, never assumed stock: EDF6Coop chains the room's too.
 #include "room_ui.h"
+#include "outfit41.h"
 #include "crew.h"
 #include "hud.h"
 #include "loadout_store.h"
@@ -545,6 +546,7 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
         st.held=rm::Keys{};
     }
     Follow(self,screen.room);
+    Outfit41RoomTick();   // the EDF4.1 outfit told to the room whatever the menu's switches (outfit41.cpp)
     const bool on=Cfg().enabled && Cfg().roomLoadout;
     const SwitchPlan sw=PlanSwitches(st.switches,on,Cfg().roomPreSync,screen.room);
     if(sw.leave) {   // a switch turned off: withdrawn, and the next mission does not take the host's list either
