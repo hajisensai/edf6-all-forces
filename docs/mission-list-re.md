@@ -177,6 +177,11 @@ ApplyResult 的通关部分在 `0x70D879`：
 - UI 基类构造（`0x83E8A8`）：≥ 3 时取 1，存 `+0x764`，即各 UI 皮肤的 `.B` / `.C` 配色变体。
 - `0x93F750`（HUiHQ3DModel，士兵 3D 模型）：**不检查边界**，按它索引 `MenuModelSetting.sgo` 的 `menu_model_light_setting`（4 项）。所以字段 7 只能是 0..3，追加第五种背景不能靠加大这个值。
 
+**EDF4.1 包的本部背景（2026-10-18 评估，未做）。** 4.1 的本部（`MAINSCRIPT.AS` `MainMenu`）背景是 `g_bg.Play("app:/Menu/Menu_BG01.sgo")`：一个带 CAS 动画和材质动画的模型（`Menu_BG01.rab` 23 个物体，着色器 `snd_UI_Simple` / `snd_UI_Simple_UVAnim`，EDF6 的 `BG*.mdb` 用的也是这两个；`pylib/legacy_assets.convert` 能转 RAB 与 CAS，MTAB 版本 0x200 两边相同）。做不成纯数据的原因：
+1. 字段 7 只能取 0..3（`0x93F750` 不检查边界），第五种背景只能是 `lyt_bg.sgo` 里新增的子布局，再由插件在 4.1 包时切换（HUiBG 只认四个硬编码名字）。切换点可以是 `0x840A30` 里发参数 0x14 的那次调用（`0x840A6A`），按 `CurrentContent`（`src/edf5campaign.cpp`）判断。
+2. 两边的相机不同。EDF6 / EDF5 的背景层都在 z = 0..1.6，每层都正好 19.2 × 10.8（1920 × 1080 / 100），与深度无关；4.1 的层在 z = −8.8..−31，宽度随深度线性增大（z = −13 宽 28.3，z = −31 宽 58.0），对应一台在 z ≈ +4.1、水平视角约 79° 的透视相机。原样放进 EDF6 的背景对象，画面会大约放大三倍且层次错位（EDF6 背景相机是正交还是远距透视未逆向，属推测；不论哪种都对不上）。要用就得按 4.1 相机逐层（`WorldMap` / `WorldMapFrame` 是倾斜的平面，要逐顶点）重投影，并同步缩放 CAS 里的骨骼平移，再实机逐帧比对。
+可选做法：(a) 完整移植：重投影模型 + `lyt_bg.sgo` 加子布局 + 插件按包切换；(b) 静态版：离线把 4.1 各层按透视合成一张 1920 × 1080 贴图，做成 EDF6 式的单平面背景（无动画），切换机制同 (a)；(c) 不做，4.1 包沿用字段 7 = 0（EDF5 本部背景）。
+
 **字段 8：本部 / 出击界面 BGM（2026-10-18 复核）。** 唯一读取者 `0x8406E0`：取当前行字段 8；为空时取当前模式 ModeList 第 3 项（`[0x20B2890]+0x148` 节点的第 3 个元素）；也不是字符串时用 `BGM_E4S02_EDFHonbu`。调用点：选关光标停留（`0x8A5AA7` / `0x8A5C1D`）、本部入口取当前任务（`0x904F1E`）、在线房间（`0x9062C4`）、结算回本部（`0x70DCEA`）。MAINSCRIPT 的 `HQMain` / `Room` 用 `PlaySelectedMissionBGM_Start()`。原版：行 13..36（6 代第 14～37 关）= `BGM_E5S02_EDFHonbu`，行 46..73 = `BGM_E6M29_MissionEDF5`。EDF5 与 EDF4.1 的列表没有这一项，它们的 `HQMain` 播 `GetMainMenuBgm()` = 当前模式 ModeList 第 3 项：EDF5 本篇 / 任务包 1 / 2 全是 `BGM_E5S02_EDFHonbu`；EDF4.1 本篇 `BGM_E4S02_EDFHonbu`（`EDF41.exe` `0x3475F0`，缺省也是它），任务包 1 `BGM_Sinkou_intermission`、任务包 2 `BGM_Sinkou_taisenmenu`（各自 `package.sgo`）。这些 cue 全在 EDF6 的 `SOUND/PC/TIKYUUX_MUSIC.ACB` 里。`tools/make_edf5_campaign.py` 按包取（`Pack.bgm`）。
 
 **flags 各位。**

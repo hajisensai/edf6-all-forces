@@ -5617,7 +5617,7 @@ def edf5_campaign_pack_music() -> None:
 @test
 def edf5_campaign_pack_music_real() -> None:
     """The packs' music against the games themselves (a developer's machine: each part skipped without its game):
-    EDF6's music bank holds every cue; EDF5's HQ music is its modes' ModeList member 3 (its lists have no music
+    EDF6's music bank holds every cue with its sound (TIKYUUX_MUSIC.AWB); EDF5's HQ music is its modes' ModeList member 3 (its lists have no music
     member), as is EDF4.1's (config.sgo, and each DLC's package.sgo); and EDF6's own rows 13..36 (missions 14..37,
     the user's example) play EDF5's."""
     import gamedir
@@ -5625,10 +5625,12 @@ def edf5_campaign_pack_music_real() -> None:
     import sgo
     if not _e5c_have_game():
         return
-    cues = set(re.findall(rb'BGM_[0-9A-Za-z_]+', open(os.path.join(rootcpk.DEFAULT_GAME, 'SOUND', 'PC',
-                                                                    'TIKYUUX_MUSIC.ACB'), 'rb').read()))
+    bank = os.path.join(rootcpk.DEFAULT_GAME, 'SOUND', 'PC', 'TIKYUUX_MUSIC')
+    with open(bank + '.AWB', 'rb') as f:
+        waves = _afs2_sizes(f.read(0x10000))
     for bgm in (e5c.BGM5, *(p.pack.bgm for p in e5c.PACKS41)):
-        assert bgm.encode() in cues, f"{bgm} is not in EDF6's TIKYUUX_MUSIC.ACB"
+        ids = _music_cue_waves(bank + '.ACB', bgm)   # a cue a bank only names, its sound stripped, plays nothing
+        assert ids and all(waves.get(i, 0) > 1 << 20 for i in ids), (bgm, ids, "no sound in EDF6's music bank")
     table = dsgo.parse(rootcpk.default().read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO')).root.get('table').items
     assert {r.items[8] for r in table[13:37]} == {e5c.BGM5} and {r.items[7] for r in table[13:37]} == {0.0}
     root5 = gamedir.find_other(gamedir.EDF5, near=rootcpk.DEFAULT_GAME)
@@ -5644,6 +5646,53 @@ def edf5_campaign_pack_music_real() -> None:
         want = {'mp01': e5c.BGM41_MP01, 'mp02': e5c.BGM41_MP02}
         for mount, dlc in edf41dlc.find(root41).items():   # only the DLC this EDF4.1 has
             assert {str(m[3]) for m in sgo.read(dlc.read('package.sgo'))[1]['ModeList']} == {want[mount]}, mount
+
+
+def _music_cue_waves(acb_path: str, cue: str) -> list[int]:
+    """The stream wave ids an ACB's cue plays: cue -> sequence -> its tracks' events' synth references (command
+    0x7D0) -> waveforms (reference type 1). [] for a cue the bank does not name."""
+    import struct
+    import acb
+    import cpk
+
+    def table(b: bytes) -> list[dict]:
+        b = b if b[:4] == b'@UTF' else cpk._unmask(b)
+        body = b[8:8 + struct.unpack_from('>I', b, 4)[0]]
+        at = struct.unpack_from('>I', body, 8)[0]
+        return [{k: body[at + v[0]:at + v[0] + v[1]] if isinstance(v, tuple) else v for k, v in r.items()}
+                for r in cpk.parse_utf(b)[3]()]
+    with open(acb_path, 'rb') as f:
+        head, _ = acb._row(f.read())
+    t = {k: table(head[k]) for k in ('CueNameTable', 'CueTable', 'SequenceTable', 'TrackTable', 'TrackEventTable',
+                                     'SynthTable', 'WaveformTable')}
+    index = {r['CueName']: r['CueIndex'] for r in t['CueNameTable']}
+    if cue not in index:
+        return []
+    entry = t['CueTable'][index[cue]]
+    assert entry['ReferenceType'] == 3, (cue, entry['ReferenceType'])   # a sequence, as every music cue
+    seq = t['SequenceTable'][entry['ReferenceIndex']]
+    out = []
+    for k in range(seq['NumTracks']):
+        event = t['TrackEventTable'][t['TrackTable'][struct.unpack_from('>H', seq['TrackIndex'], 2 * k)[0]]['EventIndex']]
+        cmd, p = event['Command'], 0
+        while p + 3 <= len(cmd):
+            code, size = struct.unpack_from('>HB', cmd, p)
+            if code == 0x7D0:
+                refs = t['SynthTable'][struct.unpack_from('>H', cmd, p + 5)[0]]['ReferenceItems']
+                out += [t['WaveformTable'][i]['StreamAwbId'] for kind, i in struct.iter_unpack('>HH', refs) if kind == 1]
+            p += 3 + size
+    return out
+
+
+def _afs2_sizes(head: bytes) -> dict[int, int]:
+    """An AWB's wave id -> its size, from the file's header (pylib/awe.afs2_waves without the data)."""
+    import struct
+    assert head[:4] == b'AFS2'
+    off_size, id_size = head[5], head[6]
+    count = struct.unpack_from('<I', head, 8)[0]
+    ids = struct.unpack_from(f'<{count}{"H" if id_size == 2 else "I"}', head, 16)
+    offs = struct.unpack_from(f'<{count + 1}{"I" if off_size == 4 else "Q"}', head, 16 + count * id_size)
+    return {w: offs[i + 1] - offs[i] for i, w in enumerate(ids)}
 
 
 def _cpk_file(path: str, folder: str, name: str) -> bytes:
