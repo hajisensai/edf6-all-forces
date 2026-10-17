@@ -10414,14 +10414,14 @@ def edf41_rest_behaviour_real() -> None:
         t = load(name)['game_object_talk_setting']
         assert t[1] == talk and t[2] > 1 and t[3] in (0, 1) and t[2] == {0: 6, 1: 4}[talk], t
     # Berserker's base class enables material slots 0..3 by number (EDF+0x6dc830 via 0x348d1d, 0x33ef81, 0x34b2de, 0x37acde):
-    # every Hector variant carries the template's four (M113: 2 entries, a null player; M131: the memory past them); a 301
-    # with a cannon has a fifth, slot 4, the cannon's charge light the plugin plays (edf41_hector_light)
+    # every Hector variant carries the template's four (M113: 2 entries, a null player; M131: the memory past them), and
+    # no more: a fifth, the 301 cannon's charge light, washed the whole screen out (2026-10-17 M113, X1)
     import dsgo
-    for name, slots in (('HECTOR301CC', 5), ('HECTOR301GL', 4), ('HECTOR401LS', 4)):
+    for name in ('HECTOR301CC', 'HECTOR301GL', 'HECTOR401LS'):
         with open(os.path.join(base, name + '.SGO'), 'rb') as f:
             model = dsgo.parse(f.read()).root.get('animation_model')
         entries = model.get('material_animation').items
-        assert [e.items[1] for e in entries] == [0.0, 0.0, 2.0, 2.0, 2.0][:slots], name
+        assert [e.items[1] for e in entries] == [0.0, 0.0, 2.0, 2.0], name
         assert all(isinstance(e.items[0], dsgo.Blob) for e in entries)
     assert load('UFOCARRIER401')['game_sound'] == ['app:/sound/adx/tikyuu4_en_UFOcarrier401.acb',
                                                    'app:/sound/adx/tikyuu4_en_UFOcarrier301.acb']
