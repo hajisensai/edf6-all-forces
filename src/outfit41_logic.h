@@ -3,6 +3,7 @@
 // default), what a member tells the room about it, and the layout of the HQ outfit popup it adds an item to. No game
 // memory, no Windows: tests/outfit41_test.cpp runs it offline.
 #pragma once
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cwchar>
@@ -112,6 +113,34 @@ inline constexpr std::size_t kMemberFlags=0x10,kMemberIndex=0x48;
 constexpr bool RemoteMember(std::uint32_t flags) noexcept { return ((flags>>1)&1u)!=0; }
 inline constexpr int kMissionPlayers=1024;   // the game takes 0..3; EDF6Coop's [Mission] Extend widens it to 1024 (multislot patches.h)
 constexpr bool ValidIndex(int i) noexcept { return i>=0 && i<kMissionPlayers; }
+
+// --- What the preloads took (outfit41.cpp): per local slot (offline) and per mission index (online), -1 or the class
+// whose EDF4.1 outfit was preloaded; a creation takes the outfit only for that class (its resource must be preloaded).
+// This mission's only: a creation of a slot or index this mission's preloads never reached (a member joining mid-mission,
+// an index EDF6Coop's Extend adds) gets the stock outfit, never the last mission's decision for that number. The record
+// is cleared at the first preload after the last mission ended (MissionOver: a player was created, or an out-of-mission
+// screen ran), not at MissionStart (mission.cpp), which runs after each player's preload and would drop the ones before.
+// The preloads and the creations may run on different threads: each entry is an atomic.
+struct PreloadRecord {
+    std::atomic<int> local[kLocalPlayers];
+    std::atomic<int> online[kMissionPlayers];
+    std::atomic<bool> over{true};   // the next preload starts a new mission's record
+    PreloadRecord() noexcept { Clear(); }
+    void Clear() noexcept {
+        for(auto& v:local)v.store(-1,std::memory_order_relaxed);
+        for(auto& v:online)v.store(-1,std::memory_order_relaxed);
+    }
+    void MissionOver() noexcept { over.store(true,std::memory_order_release); }
+    void BeginPreload() noexcept { if(over.exchange(false,std::memory_order_acq_rel))Clear(); }
+    std::atomic<int>* Local(int p) noexcept { return ValidLocal(p) ? &local[p] : nullptr; }
+    std::atomic<int>* Online(int i) noexcept { return ValidIndex(i) ? &online[i] : nullptr; }
+    bool LocalTook(int p,int cls) const noexcept { return ValidLocal(p) && ValidClass(cls) && local[p].load()==cls; }
+    bool OnlineTook(int i,int cls) const noexcept { return ValidIndex(i) && ValidClass(cls) && online[i].load()==cls; }
+};
+
+// The plugin's live switch (Enabled=0, crew.h): no item in the popup, the choice left as stored, every model the stock
+// one, and the room told the stock flags, as every other module passes through while it is off.
+constexpr Wire Effective(bool enabled,const Wire& w) noexcept { return enabled ? w : Wire{}; }
 
 // --- The HQ outfit popup (built in 0x8AB310, shown by 0x119C600(system, out, type, request)): its request object
 // holds a vector of 0x90-byte items {wstring text, std::function<void(ctx*)> picked, ...}; five stock items (the

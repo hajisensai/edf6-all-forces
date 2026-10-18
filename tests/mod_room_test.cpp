@@ -304,6 +304,8 @@ int main(int argc,char** argv){
         value.value=kAllForcesRoomPrefix+0x93;result=-999;
         enter(nullptr,&jo,reinterpret_cast<void*>(9),&RecordCallback);
         Check(joins==oldJoins && result==10 && notices==oldNotices+2,"dependency failure refuses join with visible explanation");
+        if(mode==6)Check(notice.find(L"成员属性接口")!=std::wstring::npos && notice.find(L"版本过旧")!=std::wstring::npos,
+                         "an EDF6Coop without member attributes is named to the player as too old, not only in the log");
         Check(crew::lastLog.find("matching EDF6Coop required")!=std::string::npos,"dependency failure logged explicitly");
     }
     dependencyMode=0;Check(!EDF6AF_RoomIsolationReady(),"AF loaded before Coop refuses until dependency appears");

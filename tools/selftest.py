@@ -9024,6 +9024,19 @@ def edf41_outfits_shipped() -> None:
 
 
 @test
+def edf41_outfit_item_label() -> None:
+    """The installer names the outfit popup's item by the text the plugin shows (src/hudtext.inc outfit41Item, its
+    Simplified Chinese column), taken from tools/edf41_outfits.py ITEM_ZH, never a text of its own (it once said
+    「EDF4.1」 while the item reads 「绝望阴影再袭」)."""
+    import edf41_outfits as eo
+    line = src('src/hudtext.inc').split('HUDTEXT(outfit41Item,', 1)[1].split('\n', 1)[0]
+    texts = re.findall(r'L"((?:[^"\\]|\\.)*)"', line)
+    assert len(texts) == 4 and texts[1] == eo.ITEM_ZH, (texts, eo.ITEM_ZH)
+    installer = src('tools/installer.py')
+    assert '{edf41_outfits.ITEM_ZH}' in installer and '选「EDF4.1」' not in installer, 'the installer names the item itself'
+
+
+@test
 def edf41_outfits_pipeline_math() -> None:
     """pylib/outfit41.py's turns (no game): align turns a set of offsets onto their rotated copies exactly (Kabsch), a
     line of offsets (the forearm) by the shortest turn of their direction, shortest_turn handles the opposite direction,

@@ -406,3 +406,18 @@ hook 0x6BF9F0(model, ctx, pass, view):
   （序号奇数 = 正在写，`Publish`），每次绘制/补交/激光取一份完整快照（`TakeSnapshot`，读前后序号相同才用，否则重读，忙时用上一份完整的），
   绘制路径只读这份快照（`PartOf`、`BodyMask`、`DrawTransforms`、`Pose`、`FitArm`、激光、补交）。
   `fp_ride_lifecycle_test` 加了并发发布/读取与线程各自选择的检查。
+- 审查补修（同日）：上面的快照之外绘制路径还读写着 `State`：
+  - 渲染相机：`CaptureRenderCamera`（相机提交 `0x118E10A`）在游戏线程写 `renderView`，渲染线程的 `ViewState`→`MatchView` 直接读它，且只和**最新**一次提交比。
+    绘制比游戏线程晚 0–3 步（§17.2），快速转身时这次绘制的 `view+0x20` 是旧帧、`renderView` 已是新帧，L1 误差超过 0.1 → 认不出主人 →
+    这次绘制整次走原版（身体 / 枪一闪）。改为每台相机把最近 8 次提交（`kViewHistory`，提交时不在第一人称的记为无效）按同一序号锁发布
+    （`ViewHistory`、`SeqPublish` / `SeqTake`，与快照共用），绘制拿这次绘制的矩阵在历史里找**同一帧**，阈值不变；离开第一人称（`Leave`）、
+    任务重置（`SyncSession`）与相机步进出错时清空历史。`ViewState` 的缓存改为渲染线程自己的（`thread_local`），以各相机历史的序号判有效，
+    不再读游戏线程的 `renderFrame` / `viewRevision`。
+  - 仪表：`InstrumentPose` 读的座位、`instrumentsReady`、读数进快照（`rideSeat` / `instrumentsReady` / `instruments`）；
+    `FirstPersonInstrumentReadings`（游戏线程，HUD 的载具快照）写完立即重新发布。
+  - 绘制写的东西：不透明 pass 的已画记录（`Drew1` / `Drew1Now`）与绘制一侧的 `Debug=1` 探针（手腕、前臂转角、托枪手计数、绘制根偏差、线程号）
+    原在 `State` 里，游戏线程 `SyncSession` / `Leave` / 出错时整份 `State{}` 重置会抹掉渲染线程正写的值。移到渲染线程自有的 `DrawOwn`
+    （按相机一份，新任务时自己清空）；已画记录改按这个视图自己的 pass 结束计数，不再用游戏线程的 `renderFrame`。绘制一侧探针由渲染线程每 5 秒自己写日志
+    （`FP probe <hand> draw` / `FP probe draws`）。离线绘制回退的相机改用快照里构建视图模型时的相机矩阵。
+  - `fp_ride_lifecycle_test`：晚 1–3 次提交的绘制仍认出自己的相机、未提交过的视图不借用、历史有界；并发用例覆盖新快照字段与视图历史不撕裂；
+    游戏线程整份重置 `State` 不抹已画记录、新任务清空。把 `kViewHistory` 改成 1 的变异会被「晚三次提交」一项抓到。**未实机**。

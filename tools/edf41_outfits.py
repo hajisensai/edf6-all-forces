@@ -26,6 +26,9 @@ import rabpool  # noqa: E402
 from modfiles import sha256, sha256_file  # noqa: E402
 
 OWNER = 'edf41outfit'   # pylib/ledger.py OWNERS
+# The outfit popup's item that turns these outfits on, as the player reads it (src/hudtext.inc outfit41Item, its
+# Simplified Chinese): what the installer names. tools/selftest.py edf41_outfit_item_label holds the two to one text.
+ITEM_ZH = '绝望阴影再袭'
 DATA = sys._MEIPASS if getattr(sys, 'frozen', False) else os.path.join(HERE, '..')  # type: ignore[attr-defined]
 REGISTRY = os.path.join(DATA, 'edf41port', 'outfits.json')
 FILES = os.path.join(DATA, 'edf41port', 'outfits')

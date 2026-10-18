@@ -173,11 +173,11 @@ int BoneIndex(const unsigned char* inst,const wchar_t* name) noexcept;
 struct Unbatched { const void* model; void* batch; };
 struct alignas(16) Flash { float m[16]; const float* src; int age,hand; };
 struct LookApplied { void* cam=nullptr;float before[16]{},written[16]{}; };
-// --- What the camera step leaves for the draws (game thread only: the draw and the camera step both run on it) ---
+// --- What the camera step leaves for the draws (State: game thread only; the draws read only DrawSnap) ---
 // What the draws read of a camera's state (docs/fp-render-re.md §17.5): the draws run on a render thread while the
 // game thread's camera step rewrites State, so the step publishes this as a whole (Publish, a sequence count: odd
 // while it is written) and each draw takes its own consistent copy (TakeSnapshot) instead of reading State fields
-// as they change under it.
+// as they change under it. What a draw itself writes is DrawOwn's, never State's.
 struct DrawSnap {
     bool on,riding;
     const void* body;
@@ -192,13 +192,18 @@ struct DrawSnap {
     wchar_t bodyMount[2][24];
     float shoulder[2][3];       // each arm's shoulder in the camera's own frame (x left, y up, z ahead), shrunk by s
     int reloadLeft;
+    bool hasCam;                // a camera is bound to this state (the single-view route without native parameters)
+    M4 camera;                  // the camera matrix the step left (a draw without its own native view)
+    int rideSeat;               // riding: the seat, its instruments' readings (FirstPersonInstrumentReadings)
+    bool instrumentsReady;
+    instruments::Readings instruments;
+    M4 probeAnchor[2];bool probeAnchored[2];   // Debug=1: each hand's anchor as the camera step read it
 };
 
 struct State {
     Unbatched unbatched[kMostUnbatched]{};
     Flash flashes[kFlashSlots]{};
     int flashNext=0;
-    Drawn1 drawn1[kMostSets+1]{};
     LookApplied lookApplied{};
     const unsigned char* nativeWeapon[2]{};
     float nativeRest[2][3]{};
@@ -211,8 +216,7 @@ struct State {
     const void* inHand[kMostSets];   // the weapons in hand (each set's current one): their models
     int handOf[kMostSets];           // ...and the hand each is in (kRight, kLeft)
     int inHandCount;
-    M4 renderView{};bool renderViewReady=false;
-    float stock[16];            // the stock matrix this frame (put back before the next step)
+    float stock[16];           // the stock matrix this frame (put back before the next step)
     float eyeLocal[3];          // the eased eye in the body frame
     bool fresh;                 // the eye taken as it is next frame
     float savedNear,savedSmooth;
@@ -246,17 +250,15 @@ struct State {
     M4 otherBox[2];
     // Each hand's weapon's size along its own axes (WeaponBounds), taken once a weapon: the hold it is fitted to is the
     // weapon's, not the frame's (a reload's magazine bone does not move the gun).
-    // Debug=1: the steadiness probe (Probe).
-    bool probeHave[2],probeWristHave[2],builtReady;
-    float probeRoot[2][3],probeStep[2],probeWrist[2][3],probeWristStep[2],probeSubmitOff;
+    // Debug=1: the steadiness probe (Probe), the camera step's half (the draws' half is DrawOwn's).
+    bool probeHave[2],builtReady;
+    float probeRoot[2][3],probeStep[2],probeSubmitOff;
     unsigned probeSubmits,probeSubmitsOff,probeFrames,probeAir;
     float probeSpeed,probeMountGap[2],probeMountLeast[2];
     bool probeMountHave[2];
-    float probeBend[2];
-    unsigned probeSupport[2],probeSupportFallback[2];
     M4 built;                   // the camera matrix the viewmodel was built on this step
-    M4 probeAnchor[2];bool probeAnchored[2];float probeDrawRoot,probeDrawMount;unsigned probeDraws;
-    unsigned probeCamThread,probeDrawThread,probeCamSteps;
+    M4 probeAnchor[2];bool probeAnchored[2];
+    unsigned probeCamThread,probeCamSteps;
     const unsigned char* boundsOf[2];
     bool boundsOk[2];
     M4 bounds[2];
@@ -266,12 +268,40 @@ struct State {
     instruments::Readings instruments;
     bool instrumentsReady;
 };
-// Each local camera owns its pose, motion, batches and effects. Never evict another local player's view.
+/// Each local camera owns its pose, motion, batches and effects. Never evict another local player's view.
 constexpr int kLocalViews=4;
 State states[kLocalViews]{};
-// The draws' copies, beside the states (a State is reset by assigning it whole: never under a reader's feet).
-struct Published { DrawSnap snap; volatile LONG seq; DrawSnap last; bool lastOk; };   // last: the render thread's own
+// What the camera step and the camera submit leave for the draws (docs/fp-render-re.md §17.5), each published whole
+// under a sequence count (odd while it is written: SeqPublish) and read as a whole copy (SeqTake). The draws run on a
+// render thread, up to three update steps behind the game thread, so nothing on their path reads a State field.
+// The camera's submitted views (CaptureRenderCamera), the last kViewHistory of them: a draw is made with the view of the
+// update it renders, which may be a few submits older than the newest (§17.2: 0-3 steps), and matching only the newest
+// left a lagging draw of a turning camera unowned (L1 error past 0.1: the stock body and gun for that draw).
+constexpr int kViewHistory=8;
+struct ViewHistory { M4 view[kViewHistory]; bool ok[kViewHistory]; int next; };   // ok: submitted in first person
+// The draws' copies, beside the states (a State is reset by assigning it whole: never under a reader's feet). last /
+// lastViews: the render thread's own (the last whole copy, while a writer keeps the count odd).
+struct Published { DrawSnap snap; volatile LONG seq; DrawSnap last; bool lastOk;
+                   ViewHistory views; volatile LONG viewSeq; ViewHistory lastViews; bool lastViewsOk; };
 Published published[kLocalViews]{};
+template<class T,class Write> void SeqPublish(volatile LONG* seq,T* value,Write write) noexcept {
+    InterlockedIncrement(seq);   // odd: being written (a full barrier)
+    write(*value);
+    InterlockedIncrement(seq);   // even: whole
+}
+// A copy torn by a writer meanwhile is taken again; while a writer keeps it busy the last whole copy stands. False: none.
+template<class T> bool SeqTake(volatile LONG* seq,const T* value,T* out,T* last,bool* lastOk) noexcept {
+    for(int tries=0;tries<64;++tries) {
+        const LONG before=InterlockedCompareExchange(seq,0,0);
+        if(before&1){YieldProcessor();continue;}
+        std::memcpy(out,value,sizeof(*out));
+        MemoryBarrier();
+        if(InterlockedCompareExchange(seq,0,0)==before){*last=*out;*lastOk=true;return true;}
+    }
+    if(!*lastOk)return false;
+    *out=*last;
+    return true;
+}
 thread_local const DrawSnap* drawSnap=nullptr;   // the draw in progress's copy (render thread)
 const DrawSnap& Snap() noexcept { static const DrawSnap none{};return drawSnap ? *drawSnap : none; }
 struct SnapScope {
@@ -284,11 +314,19 @@ int SnapHand(const DrawSnap& d,const void* model) noexcept {
     return -1;
 }
 void Publish() noexcept;
-bool TakeSnapshot(DrawSnap* out) noexcept;
+bool TakeSnapshotOf(int index,DrawSnap* out) noexcept {
+    Published& p=published[index];
+    return SeqTake(&p.seq,&p.snap,out,&p.last,&p.lastOk);
+}
+bool TakeViews(int index,ViewHistory* out) noexcept {
+    Published& p=published[index];
+    return SeqTake(&p.viewSeq,&p.views,out,&p.lastViews,&p.lastViewsOk);
+}
 // Each thread its own selection: the camera step (game thread) and the draws (render thread) select states at once.
 thread_local State* selected=&states[0];
-ULONGLONG viewRevision=0;
 State& Current() noexcept { return *selected; }
+// This draw's copy of the selected state's published one (render thread). False: none yet.
+bool TakeSnapshot(DrawSnap* out) noexcept { return TakeSnapshotOf(static_cast<int>(selected-states),out); }
 struct StateScope {
     State* before;
     explicit StateScope(State* next) noexcept : before(selected) { selected=next; }
@@ -303,26 +341,55 @@ State* AcquireCamera(void* camera) noexcept {
     for(auto& state:states)if(!state.cam){state.cam=static_cast<unsigned char*>(camera);return &state;}
     return nullptr;
 }
+// A state's submitted views retired (game thread): it left first person, or the mission's cameras are gone.
+void ClearViews(int index) noexcept {
+    Published& p=published[index];
+    SeqPublish(&p.viewSeq,&p.views,[](ViewHistory& v){v=ViewHistory{};});
+}
 // Mission reset is published from preload; only the game/render thread drops its camera objects and GPU cache.
 std::atomic<unsigned> session{0};
 unsigned appliedSession=0;
 void SyncSession() noexcept {
     const unsigned next=session.load(std::memory_order_acquire);
     if(next==appliedSession)return;
-    for(auto& state:states){state=State{};selected=&state;Publish();}
+    for(auto& state:states){state=State{};selected=&state;Publish();ClearViews(static_cast<int>(&state-states));}
     selected=&states[0];fpskin::Clear();appliedSession=next;
+}
+// --- What the draws keep for themselves (render thread only: the game thread never writes or resets it) ---
+// The opaque pass's record and the draws' half of the Debug=1 probe. A State is reset whole by the game thread
+// (SyncSession, Leave, a caught fault) while a draw may be writing: what a draw writes lives here instead, per state.
+struct DrawOwn {
+    bool live;unsigned session;
+    Drawn1 drawn1[kMostSets+1];   // the viewmodel's models drawn in the opaque pass since its last end
+    ULONGLONG pass1;              // that pass's count (PassEndSelected ends it)
+    bool wristHave[2];
+    float wrist[2][3],wristStep[2],bend[2],drawRoot,drawMount;
+    unsigned support[2],supportFallback[2],draws,drawThread;
+    ULONGLONG loggedAt;
+};
+DrawOwn drawOwn[kLocalViews]{};
+DrawOwn& Own() noexcept {
+    DrawOwn& o=drawOwn[selected-states];
+    const unsigned now=session.load(std::memory_order_acquire);
+    if(!o.live || o.session!=now){o=DrawOwn{};o.live=true;o.session=now;o.pass1=1;}   // a new mission: nothing carried
+    return o;
 }
 void CaptureRenderCamera(void* camera,const float* world) noexcept {
     State* state=CameraState(camera);
     if(!state)return;
     M4 frame;std::memcpy(frame.m,world,64);
-    state->renderViewReady=fpview::NativeView(frame,&state->renderView);
+    M4 native;
+    const bool ok=fpview::NativeView(frame,&native) && state->on;
+    Published& p=published[state-states];
+    SeqPublish(&p.viewSeq,&p.views,[&](ViewHistory& v){
+        const int at=v.next>=0 && v.next<kViewHistory ? v.next : 0;
+        v.view[at]=native;v.ok[at]=ok;v.next=(at+1)%kViewHistory;
+    });
     if(Cfg().debug && state->on && state->builtReady && !state->riding) {
         float off=0.0f;for(int i=0;i<16;++i)off+=std::fabs(frame.m[i]-state->built.m[i]);
         ++state->probeSubmits;
         if(off>1e-3f){++state->probeSubmitsOff;state->probeSubmitOff=std::fmax(state->probeSubmitOff,off);}
     }
-    ++viewRevision;
 }
 using CameraSubmitFn=void(__fastcall*)(void*,const float*);
 void __fastcall CameraSubmitHook(void* wrapper,const float* world) {
@@ -333,39 +400,55 @@ void __fastcall CameraSubmitHook(void* wrapper,const float* world) {
 // Native main-view matrix = inverse(camera + 0x220) with its X/Z columns negated (the render convention).
 // +0x60 is the projection, not a second camera. Cache by matrix value as the same parameter block is reused for
 // shadow cascades and both local viewports; its pointer and the last camera update cannot identify its owner.
-State* MatchView(const M4& native) noexcept {
+// A draw's view is matched against each camera's recent submits (ViewHistory), the frame that draw renders among them,
+// at the same tolerance. `live`: some camera has a first-person view among its submits.
+State* MatchView(const M4& native,bool* live=nullptr) noexcept {
     State* match=nullptr;
-    for(auto& state:states) {
-        if(!state.on || !state.cam)continue;
-        if(!state.renderViewReady)continue;
-        const M4& expected=state.renderView;
-        float error=0;for(int i=0;i<16;++i)error+=std::fabs(native.m[i]-expected.m[i]);
-        if(!std::isfinite(error) || error>=0.1f)continue;
-        if(match)return nullptr; // Identical camera frames are ambiguous; never borrow another player's model.
-        match=&state;
+    bool ambiguous=false;
+    if(live)*live=false;
+    for(int k=0;k<kLocalViews;++k) {
+        ViewHistory v;
+        if(!TakeViews(k,&v))continue;
+        bool mine=false;
+        for(int i=0;i<kViewHistory;++i) {
+            if(!v.ok[i])continue;
+            if(live)*live=true;
+            float error=0;for(int j=0;j<16;++j)error+=std::fabs(native.m[j]-v.view[i].m[j]);
+            if(std::isfinite(error) && error<0.1f){mine=true;break;}
+        }
+        if(!mine)continue;
+        if(match)ambiguous=true; // Identical camera frames are ambiguous; never borrow another player's model.
+        match=&states[k];
     }
-    return match;
+    return ambiguous ? nullptr : match;
 }
 State* ViewState(const void* view) noexcept {
     if(!view || !Readable(view,0x60)) {
         // Test/legacy single-view submissions without native parameters remain unambiguous only with one camera.
         State* only=nullptr;int cameras=0;
-        for(auto& state:states)if(state.cam){++cameras;if(state.on)only=&state;}
+        for(int k=0;k<kLocalViews;++k) {
+            DrawSnap s;
+            if(!TakeSnapshotOf(k,&s) || !s.hasCam)continue;
+            ++cameras;if(s.on)only=&states[k];
+        }
         return cameras==1 ? only : nullptr;
     }
     M4 native;std::memcpy(native.m,static_cast<const unsigned char*>(view)+0x20,64);
-    static M4 cached{};
-    static ULONGLONG frame=~ULONGLONG(0);
-    static unsigned generation=~0u;
-    static ULONGLONG revision=~ULONGLONG(0);
-    static State* owner=nullptr;
-    // Camera callbacks and HUD publication also run in a frame; the validity bits prevent reusing a retired view.
-    if(frame==renderFrame && generation==appliedSession && revision==viewRevision && std::memcmp(cached.m,native.m,64)==0)return owner;
-    cached=native;frame=renderFrame;generation=appliedSession;revision=viewRevision;owner=MatchView(native);
+    // The draws' own cache (render thread): the owner holds while no camera submitted, or retired, a view since.
+    thread_local M4 cached{};
+    thread_local LONG cachedSeq[kLocalViews]{};
+    thread_local bool cachedOk=false;
+    thread_local State* owner=nullptr;
+    LONG seq[kLocalViews];bool settled=true;
+    for(int k=0;k<kLocalViews;++k){seq[k]=InterlockedCompareExchange(&published[k].viewSeq,0,0);settled=settled && !(seq[k]&1);}
+    if(cachedOk && settled && std::memcmp(cachedSeq,seq,sizeof(seq))==0 && std::memcmp(cached.m,native.m,64)==0)return owner;
+    bool live=false;
+    owner=MatchView(native,&live);cached=native;std::memcpy(cachedSeq,seq,sizeof(seq));cachedOk=settled;
     if(Cfg().debug && At<int>(view,4)==0) {
-        static ULONGLONG logged=0;static unsigned matched=0,unmatched=0;
-        if(owner)++matched;else if(FirstPersonOn())++unmatched;
-        if(renderFrame-logged>=300){Log("FP view routing: matched %u, unmatched %u main-view matrices",matched,unmatched);matched=unmatched=0;logged=renderFrame;}
+        thread_local ULONGLONG logged=0;thread_local unsigned matched=0,unmatched=0;
+        if(owner)++matched;else if(live)++unmatched;
+        const ULONGLONG now=GetTickCount64();
+        if(now-logged>=5000){Log("FP view routing: matched %u, unmatched %u main-view matrices",matched,unmatched);matched=unmatched=0;logged=now;}
     }
     return owner;
 }
@@ -842,19 +925,15 @@ void Probe(const bool* anchored,const M4* anchor,const M4& camera) noexcept {
     const float yaw=std::atan2(f[0],f[2])*57.29578f;
     for(int hand=kRight;hand<=kLeft;++hand) {
         const M4& a=anchor[hand];
-        Log("FP probe %s hand: anchored=%d view=%d | root (%.2f,%.2f,%.2f) from the eye | facing %.0f deg | root in the camera (%.3f,%.3f,%.3f), most moved in a frame %.4f | wrist in the camera (%.3f,%.3f,%.3f), most moved %.4f | in hand %d, reload %d, act 0x%X",
+        Log("FP probe %s hand: anchored=%d view=%d | root (%.2f,%.2f,%.2f) from the eye | facing %.0f deg | root in the camera (%.3f,%.3f,%.3f), most moved in a frame %.4f | in hand %d, reload %d, act 0x%X",
             hand==kRight ? "right" : "left",anchored[hand],Current().viewOk[hand],a.m[12]-eye[0],a.m[13]-eye[1],a.m[14]-eye[2],
             yaw,root[hand][0],root[hand][1],root[hand][2],Current().probeStep[hand],
-            Current().probeWrist[hand][0],Current().probeWrist[hand][1],Current().probeWrist[hand][2],Current().probeWristStep[hand],
             Current().inHandCount,Current().reloadLeft,Current().act);
         if(Current().probeMountHave[hand])
             Log("FP probe %s mount: the body's mount bone from the weapon's root as drawn, %.4f..%.4f m (scaled by nothing: world)",
                 hand==kRight ? "right" : "left",Current().probeMountLeast[hand],Current().probeMountGap[hand]);
         Current().probeMountHave[hand]=false;Current().probeMountGap[hand]=0.0f;
-        Log("FP probe %s arm: the forearm turned against the hand by %.1f deg at most; support arm %u draws, chain fallback %u",
-            hand==kRight ? "right" : "left",Current().probeBend[hand],Current().probeSupport[hand],Current().probeSupportFallback[hand]);
-        Current().probeBend[hand]=0.0f;Current().probeSupport[hand]=Current().probeSupportFallback[hand]=0;
-        Current().probeStep[hand]=Current().probeWristStep[hand]=0.0f;
+        Current().probeStep[hand]=0.0f;
         // What the hold was fitted to before (the Umbra box, world axes) against the weapon's own size, this frame.
         bool flip=false;
         const unsigned char* w=HandWeapon(hand,&flip);
@@ -870,12 +949,8 @@ void Probe(const bool* anchored,const M4* anchor,const M4& camera) noexcept {
     }
     Log("FP probe camera: submitted %u frames, %u of them not the matrix the viewmodel was built on (most off %.4f)",
         Current().probeSubmits,Current().probeSubmitsOff,Current().probeSubmitOff);
-    Log("FP probe draws: %u weapon draws, the drawn root %.4f m at most from the camera step's; the body's mount bone %.4f m",
-        Current().probeDraws,Current().probeDrawRoot,Current().probeDrawMount);
-    Log("FP probe order: %u camera steps (thread %u), weapon draws on thread %u",
-        Current().probeCamSteps,Current().probeCamThread,Current().probeDrawThread);
+    Log("FP probe order: %u camera steps (thread %u)",Current().probeCamSteps,Current().probeCamThread);
     Current().probeCamSteps=0;
-    Current().probeDraws=0;Current().probeDrawRoot=Current().probeDrawMount=0.0f;
     Log("FP probe motion: %u frames, fastest %.3f m/frame, %u in the air, bob phase %.2f",Current().probeFrames,
         Current().probeSpeed,Current().probeAir,Current().motion.phase);
     Current().probeSubmits=Current().probeSubmitsOff=0;Current().probeSubmitOff=0.0f;
@@ -884,17 +959,17 @@ void Probe(const bool* anchored,const M4* anchor,const M4& camera) noexcept {
 
 // The camera, the player's state given back: the near clip, the look smoothing.
 void Leave() noexcept {
-    ++viewRevision;
     if(Current().on){PlaceAll(true);Rebatch(true);}
     if(Current().cam && Current().nearSet)Put<float>(Current().cam,kCamNear,Current().savedNear);
     if(Current().human && Current().smoothSet)Put<float>(Current().human,kLookSmooth,Current().savedSmooth);
     if(Current().on)Log("FP view back to the stock camera");
     // Keep the camera binding even when first person is off: its independent free-look restore still runs.
+    // Its submitted views go with it: a draw still to come of a first-person frame is drawn stock, never routed to a
+    // state with no viewmodel published (nor to another player's).
     auto cam=Current().cam;const auto look=Current().lookApplied;
-    const auto renderView=Current().renderView;const bool renderReady=Current().renderViewReady;
     Flash flashes[kFlashSlots];std::memcpy(flashes,Current().flashes,sizeof(flashes));const int flashNext=Current().flashNext;
     Current()=State{};Current().cam=cam;Current().lookApplied=look;
-    Current().renderView=renderView;Current().renderViewReady=renderReady;
+    ClearViews(static_cast<int>(selected-states));
     std::memcpy(Current().flashes,flashes,sizeof(flashes));Current().flashNext=flashNext;
 }
 
@@ -1099,10 +1174,10 @@ void Views(const unsigned char* h,const unsigned char* cam) noexcept {
 }
 
 // Debug=1 with the view stock: the weapon in hand's draws counted as well (the same counters), to compare.
-const void* watched=nullptr;
+std::atomic<const void*> watched{nullptr};   // read by the draws (render thread)
 void Watch(const unsigned char* h) noexcept {
     const unsigned char* w=Cfg().debug && h ? SetWeapon(h,0) : nullptr;
-    watched=w ? w+kWeaponModel : nullptr;
+    watched.store(w ? w+kWeaponModel : nullptr,std::memory_order_relaxed);
 }
 
 // The soldier this camera follows (+0x360, the SoldierBase cast of its target: null for a vehicle) when it is this
@@ -1150,13 +1225,12 @@ unsigned char* CameraPlayer(const unsigned char* cam) noexcept {
 }
 
 void Camera(unsigned char* cam) noexcept {
-    ++viewRevision;
     const Config& c=Cfg();
     unsigned char* const h=CameraPlayer(cam);
     static ULONGLONG toggleFrame=~ULONGLONG(0);
     if(toggleFrame!=renderFrame){toggleFrame=renderFrame;Toggle(h);}
     if(!Wanted(cam,h)){if(Current().on && Current().cam==cam)Leave();if(!Current().on)Watch(h);return;}
-    watched=nullptr;
+    watched.store(nullptr,std::memory_order_relaxed);
     if(!Current().on || Current().cam!=cam || Current().human!=h) {
         Leave();
         Current().on=true;Current().cam=cam;Current().human=h;Current().fresh=true;Current().moved[kRight]=Current().moved[kLeft]=fpview::Identity();
@@ -1196,18 +1270,21 @@ void __fastcall RenderHook(void* system,std::uint8_t a,std::uint8_t b) {
     reinterpret_cast<RenderFn>(image+kRender)(system,a,b);
 }
 
-// A model of the viewmodel drawn in the opaque pass this render.
+// A model of the viewmodel drawn in the selected view's opaque pass in progress (render thread: counted by that pass's
+// own ends, not by the game thread's renders, which run up to three steps ahead of the draws).
 void Drew1(const void* model) noexcept {
+    DrawOwn& o=Own();
     Drawn1* free=nullptr;
-    for(Drawn1& d:Current().drawn1) {
-        if(d.model==model){d.frame=renderFrame;return;}
-        if(!free && d.frame!=renderFrame)free=&d;
+    for(Drawn1& d:o.drawn1) {
+        if(d.model==model){d.frame=o.pass1;return;}
+        if(!free && d.frame!=o.pass1)free=&d;
     }
-    if(free)*free=Drawn1{model,renderFrame};
+    if(free)*free=Drawn1{model,o.pass1};
 }
 
 bool Drew1Now(const void* model) noexcept {
-    for(const Drawn1& d:Current().drawn1)if(d.model==model && d.frame==renderFrame)return true;
+    const DrawOwn& o=Own();
+    for(const Drawn1& d:o.drawn1)if(d.model==model && d.frame==o.pass1)return true;
     return false;
 }
 
@@ -1224,6 +1301,7 @@ void PassEndSelected(void* system,int pass) {
                 if(models[i] && At<const void*>(models[i],kUmbraObject) && !Drew1Now(models[i]))
                     reinterpret_cast<SubmitFn>(image+kSubmit)(system,const_cast<void*>(models[i]),1);
         }
+        if(pass==1)++Own().pass1;   // the pass ends: the next starts with none drawn
     } __except(EXCEPTION_EXECUTE_HANDLER){}
     reinterpret_cast<PassEndFn>(image+kPassEnd)(system,pass);
 }
@@ -1240,37 +1318,23 @@ void __fastcall PassEndHook(void* system,int pass) {
 // The camera step's state as the draws are to read it (game thread).
 void Publish() noexcept {
     Published& p=published[selected-states];
-    State& c=Current();
-    InterlockedIncrement(&p.seq);   // odd: being written (a full barrier)
-    DrawSnap& d=p.snap;
-    d.on=c.on;d.riding=c.riding;d.body=c.body;d.rideModel=c.riding && c.ride.vehicle ? c.ride.vehicle+0xE40 : nullptr;
-    std::memcpy(d.weapons,c.weapons,sizeof(d.weapons));d.weaponCount=c.weaponCount;
-    std::memcpy(d.inHand,c.inHand,sizeof(d.inHand));std::memcpy(d.handOf,c.handOf,sizeof(d.handOf));d.inHandCount=c.inHandCount;
-    for(int k=0;k<2;++k) {
-        d.viewOk[k]=c.viewOk[k];d.shown[k]=c.shown[k];d.onOther[k]=c.onOther[k];
-        d.placeWeaponOk[k]=c.placeWeaponOk[k];d.placeBodyOk[k]=c.placeBodyOk[k];d.shoulderOk[k]=c.shoulderOk[k];
-        d.view[k]=c.view[k];d.otherBox[k]=c.otherBox[k];d.placeWeapon[k]=c.placeWeapon[k];d.placeBody[k]=c.placeBody[k];
-        d.boundsOk[k]=c.boundsOk[k];d.bounds[k]=c.bounds[k];
-        std::memcpy(d.bodyMount[k],c.bodyMount[k],sizeof(d.bodyMount[k]));std::memcpy(d.shoulder[k],c.shoulder[k],12);
-    }
-    d.reloadLeft=c.reloadLeft;
-    InterlockedIncrement(&p.seq);   // even: whole
-}
-
-// This draw's copy of the selected state's published one (render thread). A copy torn by a step publishing meanwhile
-// is taken again; while a step keeps it busy the last whole copy stands. False: none yet.
-bool TakeSnapshot(DrawSnap* out) noexcept {
-    Published& p=published[selected-states];
-    for(int tries=0;tries<64;++tries) {
-        const LONG before=InterlockedCompareExchange(&p.seq,0,0);
-        if(before&1){YieldProcessor();continue;}
-        std::memcpy(out,&p.snap,sizeof(*out));
-        MemoryBarrier();
-        if(InterlockedCompareExchange(&p.seq,0,0)==before){p.last=*out;p.lastOk=true;return true;}
-    }
-    if(!p.lastOk)return false;
-    *out=p.last;
-    return true;
+    const State& c=Current();
+    SeqPublish(&p.seq,&p.snap,[&](DrawSnap& d){
+        d.on=c.on;d.riding=c.riding;d.body=c.body;d.rideModel=c.riding && c.ride.vehicle ? c.ride.vehicle+0xE40 : nullptr;
+        std::memcpy(d.weapons,c.weapons,sizeof(d.weapons));d.weaponCount=c.weaponCount;
+        std::memcpy(d.inHand,c.inHand,sizeof(d.inHand));std::memcpy(d.handOf,c.handOf,sizeof(d.handOf));d.inHandCount=c.inHandCount;
+        for(int k=0;k<2;++k) {
+            d.viewOk[k]=c.viewOk[k];d.shown[k]=c.shown[k];d.onOther[k]=c.onOther[k];
+            d.placeWeaponOk[k]=c.placeWeaponOk[k];d.placeBodyOk[k]=c.placeBodyOk[k];d.shoulderOk[k]=c.shoulderOk[k];
+            d.view[k]=c.view[k];d.otherBox[k]=c.otherBox[k];d.placeWeapon[k]=c.placeWeapon[k];d.placeBody[k]=c.placeBody[k];
+            d.boundsOk[k]=c.boundsOk[k];d.bounds[k]=c.bounds[k];
+            std::memcpy(d.bodyMount[k],c.bodyMount[k],sizeof(d.bodyMount[k]));std::memcpy(d.shoulder[k],c.shoulder[k],12);
+        }
+        d.reloadLeft=c.reloadLeft;
+        d.hasCam=c.cam!=nullptr;d.camera=c.builtReady ? c.built : fpview::Identity();
+        d.rideSeat=c.ride.seat;d.instrumentsReady=c.instrumentsReady;d.instruments=c.instruments;
+        for(int k=0;k<2;++k){d.probeAnchor[k]=c.probeAnchor[k];d.probeAnchored[k]=c.probeAnchored[k];}
+    });
 }
 
 void CameraAfterNative(unsigned char* cam) noexcept {
@@ -1283,7 +1347,7 @@ void CameraAfterNative(unsigned char* cam) noexcept {
             }
         }
     }
-    __except(EXCEPTION_EXECUTE_HANDLER){Current()=State{};}
+    __except(EXCEPTION_EXECUTE_HANDLER){Current()=State{};ClearViews(static_cast<int>(selected-states));}
     Publish();
 }
 
@@ -1397,23 +1461,25 @@ ArmFit FitArm(const unsigned char* inst,const float* pose,const M4& t,int hand,c
             for(int i=0;i<3;++i)wrist[i]+=move[i];
     }
     fit.hand=fpview::Translate(wrist[0]-h0[0],wrist[1]-h0[1],wrist[2]-h0[2]);
-    if(Cfg().debug && Current().probeAnchored[hand] && inst==At<const unsigned char*>(Current().body,kBaseLod+kLodInst)) {
+    const bool baseLod=Cfg().debug && snap.body && inst==At<const unsigned char*>(snap.body,kBaseLod+kLodInst);
+    if(baseLod && snap.probeAnchored[hand]) {
         // The draw-time probe: the body's mount bone now against the weapon's root T was built from.
         const int mount=BoneIndex(inst,hand==kRight ? L"arms_r" : L"arms_l");
         if(mount>=0) {
-            float gap[3];fpview::Sub(pose+mount*16+12,Current().probeAnchor[hand].m+12,gap);
-            Current().probeDrawMount=std::fmax(Current().probeDrawMount,fpview::Length(gap));
+            float gap[3];fpview::Sub(pose+mount*16+12,snap.probeAnchor[hand].m+12,gap);
+            Own().drawMount=std::fmax(Own().drawMount,fpview::Length(gap));
         }
     }
-    if(Cfg().debug && Current().body && inst==At<const unsigned char*>(Current().body,kBaseLod+kLodInst)) {   // the steadiness probe: the wrist in the camera's frame (the base LOD's)
+    if(baseLod) {   // the steadiness probe: the wrist in the camera's frame (the base LOD's)
+        DrawOwn& o=Own();
         M4 inverse;float local[3];
         if(fpview::InverseAffine(camera,&inverse)) {
             fpview::Point(inverse,wrist,local);
-            if(Current().probeWristHave[hand]) {
-                float dd[3];fpview::Sub(local,Current().probeWrist[hand],dd);
-                Current().probeWristStep[hand]=std::fmax(Current().probeWristStep[hand],fpview::Length(dd));
+            if(o.wristHave[hand]) {
+                float dd[3];fpview::Sub(local,o.wrist[hand],dd);
+                o.wristStep[hand]=std::fmax(o.wristStep[hand],fpview::Length(dd));
             }
-            std::memcpy(Current().probeWrist[hand],local,12);Current().probeWristHave[hand]=true;
+            std::memcpy(o.wrist[hand],local,12);o.wristHave[hand]=true;
         }
     }
     // The support hand (on the other hand's weapon): its forearm goes with the hand unturned, the upper arm toward the
@@ -1423,15 +1489,15 @@ ArmFit FitArm(const unsigned char* inst,const float* pose,const M4& t,int hand,c
     if(snap.onOther[hand] && snap.shoulderOk[hand] && Cfg().fpNativeElbow) {
         float want[3];fpview::Point(camera,snap.shoulder[hand],want);
         fit.ok=fpview::SupportArm(s0,e0,h0,wrist,want,frustum,kSleeve*scale,kSupportWristMost,&fit.upper,&fit.fore);
-        if(Cfg().debug){if(fit.ok)++Current().probeSupport[hand];else ++Current().probeSupportFallback[hand];}
+        if(Cfg().debug){if(fit.ok)++Own().support[hand];else ++Own().supportFallback[hand];}
     }
     if(!fit.ok)fit.ok=fpview::ArmChainTo(s0,e0,h0,wrist,shoulder,pole,&fit.upper,&fit.fore);
-    if(Cfg().debug && fit.ok && inst==At<const unsigned char*>(Current().body,kBaseLod+kLodInst)) {
+    if(baseLod && fit.ok) {
         // The probe: how far the forearm was turned against the hand (the hand keeps its own turn on the gun), deg.
         float e1[3],before[3],after[3];
         fpview::Point(fit.upper,e0,e1);fpview::Sub(h0,e0,before);fpview::Sub(wrist,e1,after);
         if(fpview::Unit(before) && fpview::Unit(after))
-            Current().probeBend[hand]=std::fmax(Current().probeBend[hand],std::acos(fpview::Clamp(fpview::Dot3(before,after),-1.0f,1.0f))*57.29578f);
+            Own().bend[hand]=std::fmax(Own().bend[hand],std::acos(fpview::Clamp(fpview::Dot3(before,after),-1.0f,1.0f))*57.29578f);
     }
     return fit;
 }
@@ -1499,6 +1565,7 @@ fpskin::Mask BodyMask(const void* palette) noexcept {
 }
 
 void InstrumentPose(unsigned char* inst,float* backup) noexcept {
+    const DrawSnap& d=Snap();
     const auto n=At<std::int32_t>(inst,kInstCount);
     auto pose=At<float*>(inst,kInstPose);
     const auto bones=At<const unsigned char*>(inst,kInstBones);
@@ -1510,7 +1577,7 @@ void InstrumentPose(unsigned char* inst,float* backup) noexcept {
             unsigned mask=0,parent=0;
             if(swscanf_s(name,L"vc_shell_%u_%u",&mask,&parent)==2) {
                 const M4 original=MatrixAt(reinterpret_cast<const unsigned char*>(pose+i*16));
-                const M4 moved=instruments::ShellPose(original,mask,Current().ride.seat);
+                const M4 moved=instruments::ShellPose(original,mask,d.rideSeat);
                 std::memcpy(pose+i*16,moved.m,64);
             }
             continue;
@@ -1519,16 +1586,16 @@ void InstrumentPose(unsigned char* inst,float* backup) noexcept {
         int seat=-1,screen=-1,field=-1,place=0,segment=0;wchar_t mode=0;
         const int fields=swscanf_s(name,L"vc_i_%d_%d_%lc_%d_%d_%d",&seat,&screen,&mode,1u,&field,&place,&segment);
         if(fields<4 || ((mode==L'd' || mode==L'D' || mode==L'p') && fields!=6))continue;
-        const bool mine=seat==Current().ride.seat;
+        const bool mine=seat==d.rideSeat;
         const bool rangedNeedle=mode==L'n' && fields>=5;
         const bool neutralWidget=mode==L'D' || mode==L'B' || mode==L'T';
         // Adjacent stations visible from this seat use the same language, while their
         // new health/percent widgets remain neutral without that seat's live data.
         if(!mine && mode!=L'l' && mode!=L'c' && mode!=L'p' && mode!=L'v' && mode!=L'u'
             && mode!=L'r' && mode!=L'q' && mode!=L'a' && !rangedNeedle && !neutralWidget)continue;
-        const bool ready=Current().instrumentsReady && (mine || (mode==L'l' && place==0));
+        const bool ready=d.instrumentsReady && (mine || (mode==L'l' && place==0));
         const M4 original=MatrixAt(reinterpret_cast<const unsigned char*>(pose+i*16));
-        const M4 moved=instruments::Pose(original,mode,field,place,segment,Current().instruments,ready);
+        const M4 moved=instruments::Pose(original,mode,field,place,segment,d.instruments,ready);
         std::memcpy(pose+i*16,moved.m,64);
     }
 }
@@ -1540,7 +1607,7 @@ void LogPass(Part part,int pass) noexcept {
     if(now-passLogAt<5000)return;
     if(passLogAt)Log("FP draws in 5 s by pass 0/1/2/3/5: body %d/%d/%d/%d/%d, weapons in hand %d/%d/%d/%d/%d (weapons %d)",
                      passLog[0][0],passLog[0][1],passLog[0][2],passLog[0][3],passLog[0][5],
-                     passLog[1][0],passLog[1][1],passLog[1][2],passLog[1][3],passLog[1][5],Current().weaponCount);
+                     passLog[1][0],passLog[1][1],passLog[1][2],passLog[1][3],passLog[1][5],Snap().weaponCount);
     std::memset(passLog,0,sizeof(passLog));passLogAt=now;
 }
 
@@ -1548,21 +1615,22 @@ void LogPass(Part part,int pass) noexcept {
 void NearWeapon(const void* model,int pass) noexcept {
     static const void* logged[8]{};
     static int next=0;
-    if(!Cfg().debug || pass!=1 || !Current().inHandCount)return;
+    const DrawSnap& snap=Snap();
+    if(!Cfg().debug || pass!=1 || snap.inHandCount<=0 || !snap.inHand[0])return;
     M4 root,gun;
-    if(!RootPose(static_cast<const unsigned char*>(model),&root) || !RootPose(static_cast<const unsigned char*>(Current().inHand[0]),&gun))return;
+    if(!RootPose(static_cast<const unsigned char*>(model),&root) || !RootPose(static_cast<const unsigned char*>(snap.inHand[0]),&gun))return;
     const float d[3]={root.m[12]-gun.m[12],root.m[13]-gun.m[13],root.m[14]-gun.m[14]};
     if(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>0.3f*0.3f)return;
     for(const void* l:logged)if(l==model)return;
     logged[next]=model;next=(next+1)%8;
-    const auto weapon=static_cast<const unsigned char*>(Current().inHand[0])-kWeaponModel;
+    const auto weapon=static_cast<const unsigned char*>(snap.inHand[0])-kWeaponModel;
     const long long off=static_cast<const unsigned char*>(model)-weapon;
     Log("FP a model %p drawn at the weapon %p's place: vtable +0x%llX, weapon%+lld",model,static_cast<const void*>(weapon),
         static_cast<unsigned long long>(At<const unsigned char*>(model,0)-image),off);
 }
 
 // The camera a draw is made with: its native view (view+0x20: the camera's inverse, X and Z negated, §2026-10-17)
-// undone; without one (offline) the camera matrix.
+// undone; without one (offline) the camera matrix the published viewmodel was built on.
 M4 DrawCamera(const void* view) noexcept {
     if(view && Readable(view,0x60)) {
         M4 native;std::memcpy(native.m,static_cast<const unsigned char*>(view)+0x20,64);
@@ -1570,7 +1638,7 @@ M4 DrawCamera(const void* view) noexcept {
         M4 camera;
         if(fpview::InverseAffine(native,&camera))return camera;
     }
-    return MatrixAt(Current().cam+kCamMatrix);
+    return Snap().camera;
 }
 
 // The view a draw is made with as a frustum: its camera's axes (the first row points to the screen's left), the
@@ -1613,14 +1681,34 @@ bool DrawTransforms(const unsigned char* inst,Part part,int hand,const M4& camer
     return true;
 }
 
+// Debug=1: the draws' half of the probe (DrawOwn), logged by the render thread itself every 5 s (half a second through
+// a reload), as Probe logs the camera step's.
+void DrawProbe() noexcept {
+    DrawOwn& o=Own();
+    const ULONGLONG now=GetTickCount64();
+    if(!o.loggedAt){o.loggedAt=now;return;}
+    if(now-o.loggedAt<(Snap().reloadLeft>0 ? 500u : 5000u))return;
+    o.loggedAt=now;
+    for(int hand=kRight;hand<=kLeft;++hand) {
+        Log("FP probe %s draw: wrist in the camera (%.3f,%.3f,%.3f), most moved %.4f | the forearm turned against the hand by %.1f deg at most; support arm %u draws, chain fallback %u",
+            hand==kRight ? "right" : "left",o.wrist[hand][0],o.wrist[hand][1],o.wrist[hand][2],o.wristStep[hand],
+            o.bend[hand],o.support[hand],o.supportFallback[hand]);
+        o.wristStep[hand]=o.bend[hand]=0.0f;o.support[hand]=o.supportFallback[hand]=0;
+    }
+    Log("FP probe draws: %u weapon draws (thread %u), the drawn root %.4f m at most from the camera step's; the body's mount bone %.4f m",
+        o.draws,o.drawThread,o.drawRoot,o.drawMount);
+    o.draws=0;o.drawRoot=o.drawMount=0.0f;
+}
+
 void DrawSelected(void* model,void* ctx,int pass,void* view) {
     const DrawFn next=NextDraw(model);
     Part part=Part::none;
     int hand=kRight;
     __try { part=PartOf(model,&hand); } __except(EXCEPTION_EXECUTE_HANDLER){part=Part::none;}
+    const bool on=Snap().on;
     if(part!=Part::none)LogPass(part,pass);
-    else if(!Current().on && model==watched)LogPass(Part::inHand,pass);
-    else if(Current().on){__try { NearWeapon(model,pass); } __except(EXCEPTION_EXECUTE_HANDLER){}}
+    else if(!on && model==watched.load(std::memory_order_relaxed))LogPass(Part::inHand,pass);
+    else if(on){__try { NearWeapon(model,pass); } __except(EXCEPTION_EXECUTE_HANDLER){}}
     if(part==Part::none || pass==3 || pass==4 || pass>5){next(model,ctx,pass,view);return;}
     if((pass==0 && part!=Part::instruments) || part==Part::stowed)return;
     if(pass==1 && part!=Part::instruments)Drew1(model);
@@ -1628,14 +1716,16 @@ void DrawSelected(void* model,void* ctx,int pass,void* view) {
         // The draw-time probe: has the weapon's root moved since the camera step built T from it (the drawn weapon
         // then moves in the view), and does the body's mount bone still meet it (else the hand leaves the grip)?
         __try {
-            if(part==Part::inHand && Current().probeAnchored[hand]) {
+            if(part==Part::inHand && Snap().probeAnchored[hand]) {
                 M4 root;
                 if(RootPose(static_cast<const unsigned char*>(model),&root)) {
-                    float d[3];fpview::Sub(root.m+12,Current().probeAnchor[hand].m+12,d);
-                    Current().probeDrawRoot=std::fmax(Current().probeDrawRoot,fpview::Length(d));++Current().probeDraws;
-                    Current().probeDrawThread=GetCurrentThreadId();
+                    DrawOwn& o=Own();
+                    float d[3];fpview::Sub(root.m+12,Snap().probeAnchor[hand].m+12,d);
+                    o.drawRoot=std::fmax(o.drawRoot,fpview::Length(d));++o.draws;
+                    o.drawThread=GetCurrentThreadId();
                 }
             }
+            DrawProbe();
         } __except(EXCEPTION_EXECUTE_HANDLER){}
     }
     unsigned char* insts[kMostInsts];
@@ -1760,7 +1850,11 @@ void ResetFirstPerson() noexcept { session.fetch_add(1,std::memory_order_release
 
 bool FirstPersonOn() noexcept { for(const auto& state:states)if(state.on)return true;return false; }
 void FirstPersonInstrumentReadings(const instruments::Readings& readings,const unsigned char* human) noexcept {
-    for(auto& state:states)if(state.on && state.riding && state.human==human){state.instruments=readings;state.instrumentsReady=true;}
+    // Game thread (the HUD's vehicle snapshot): published at once, as the draws read only what is published.
+    for(auto& state:states)if(state.on && state.riding && state.human==human) {
+        state.instruments=readings;state.instrumentsReady=true;
+        StateScope scope(&state);Publish();
+    }
 }
 bool FirstPersonGunnerSight() noexcept {
     const Config& c=Cfg();

@@ -79,6 +79,30 @@ int main() {
     Expect(kMemberIndex==0x48 && kMemberFlags==0x10 && ValidIndex(0) && ValidIndex(3) && !ValidIndex(-1) && !ValidIndex(kMissionPlayers),
            "the member's mission index");
 
+    // What the preloads took: this mission's only (PreloadRecord).
+    {
+        static PreloadRecord r;   // 1026 atomics: not on the stack
+        Expect(!r.OnlineTook(0,0) && !r.LocalTook(0,0),"nothing preloaded at first");
+        r.BeginPreload();r.Online(0)->store(1);
+        r.BeginPreload();r.Online(5)->store(2);   // the same mission's next member: the first one kept
+        r.BeginPreload();r.Local(1)->store(3);
+        Expect(r.OnlineTook(0,1) && r.OnlineTook(5,2) && r.LocalTook(1,3) && !r.OnlineTook(0,2),"one mission's preloads all kept");
+        r.MissionOver();   // its players created
+        Expect(r.OnlineTook(0,1),"a creation after the preloads still reads them (the record clears only at the next preload)");
+        r.BeginPreload();r.Online(0)->store(-1);
+        Expect(!r.OnlineTook(5,2) && !r.LocalTook(1,3),"the next mission's first preload drops the last mission's record whole");
+        Expect(!r.OnlineTook(0,1),"an index preloaded again decides anew");
+        Expect(!r.Online(-1) && !r.Online(kMissionPlayers) && !r.Local(2) && r.Online(kMissionPlayers-1),
+               "the extended indices are recorded, out-of-range ones are not");
+        r.Online(kMissionPlayers-1)->store(0);r.MissionOver();r.BeginPreload();
+        Expect(!r.OnlineTook(kMissionPlayers-1,0),"an extended index not preloaded this mission is the stock outfit");
+    }
+    // Enabled=0: every flag off (the stock outfit, the stock flags told to the room).
+    Expect(Effective(true,Wire{true,true}).chosen && Effective(true,Wire{true,true}).missionDefault,"Enabled=1: the flags as they are");
+    Expect(!Effective(false,Wire{true,true}).chosen && !Effective(false,Wire{true,true}).missionDefault &&
+           !Wears(Effective(false,Wire{true,true}).chosen,Effective(false,Wire{true,true}).missionDefault,true),
+           "Enabled=0: worn nowhere, even chosen in an EDF4.1 pack");
+
     Expect(kItemEdf41==static_cast<std::int32_t>(kStockItems),"our item follows the five stock ones");
     Expect(Grown(0)==2 && Grown(5)==12,"reserve(capacity * 2 + 2)");
     Expect(Cursor(true,3)==kItemEdf41 && Cursor(false,3)==3,"the cursor");

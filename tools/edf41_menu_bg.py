@@ -29,8 +29,8 @@ over what is the materials' priority byte (+2: 4.1's layers at one depth, z = -1
 Files (UI/, under Mods): EDF41_MENU_BG01.RAB / .CAS / .SGO (the model, its clip, 4.1's material animation),
 EDF41_MENU_BG01_SKIN.SGO (a Skin_Model on it, as UI/BG_B_SKIN.SGO is on BG_B), LYT_BG.SGO: EDF6's own with one
 layout more, LAYOUT (= that skin, first in the tree so the stock four draw over it), and the three resource groups
-that preload the backgrounds (GROUPS) with our four files added. The plugin
-(src/edf41menubg.cpp) shows LAYOUT and hides the four while an EDF4.1 pack is the current mode, and hides it
+that preload the backgrounds (GROUPS) with our four files added. The plugin (src/edf5campaign.cpp
+InstallEdf41MenuBg) shows LAYOUT and hides the four while an EDF4.1 pack is the current mode, and hides it
 otherwise; without the plugin the stock four cover it. One of these stock files in Mods that the ledger does not
 record as ours (another mod's) is never written over: then nothing is installed and that is said.
 
