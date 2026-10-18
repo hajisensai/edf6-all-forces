@@ -12,14 +12,19 @@
 // Hooks (EDF.dll, TimeDateStamp 0x678CCB46; each is a call site, RedirectCall verifies the callee it replaces):
 //  - 0x34F2A0, the call of the base update 0x343DE0 in the Large's update (vtable 0x17ADA78 slot 5 = 0x34F280): the
 //    per-frame tick of the back-off cycle, before the game's own update so this frame's walk sees it.
-//  - 0x34D8D8 and 0x34DA65, the calls of the walk 0x33E3B0 (MoveTo(this, &goal, a, b, speed, c): writes the walk vector
-//    at +0x1290 as normalize(goal - position) * speed * clamp((dist - a) / (b / a), .., 1), nothing when dist <= a, no
-//    division for a zero vector, 0x33E563 / 0x33E5DB) in the two walking states 0x34D890 (follow: a = b = 0, speed
-//    0.9..1.2 x linear_speed) and 0x34D9C0 (chase: a 1, b 20, speed 0.125); both then face the target with 0x33E840.
-//    A Hector's speed is always 4.1's (hector::Steer: 1, 0.85 backing off, 0 standing; the class multiplies the walk
-//    vector by MoveSpeed[0] = 6 units/s, 0x53D7CC). Inside `near` the goal becomes the target itself (a = b = 0: 4.1
-//    walks straight at full speed); in a back-off the goal is the point opposite the target, so the Hector walks
-//    backward facing the player (the walk animation follows the walk vector against the facing).
+//  - 0x34D8D8, 0x34D955 and 0x34DA65, the calls of the walk 0x33E3B0 (MoveTo(this, &goal, a, b, speed, c): writes the
+//    walk vector at +0x1290 as normalize(goal - position) * speed * clamp((dist - a) / (b / a), .., 1), nothing when
+//    dist <= a, no division for a zero vector, 0x33E563 / 0x33E5DB) in the three walking states 0x34D890 (follow, the
+//    fight: goal 0x3408D0 = a slot beside the target plus its lead, a = b = 0, speed 0.9..1.2 x linear_speed),
+//    0x34D910 (to the point +0x4C0) and 0x34D9C0 (chase: a 1, b 20, speed 0.125), and 0x34D8FD, 0x34D96A and
+//    0x34DA7A, their calls of FaceTarget 0x33E840 (the follow state faces the target, the others their goal).
+//    A Hector with a target walks as 4.1's does at any distance (hector::Steer; EDF41.exe 0x2234B6..0x2238BF): it faces
+//    the target (FaceHook) and its walk is along its own facing (the goal is its position +-100 along its matrix's z
+//    row): forward at 1, backward at 0.85 in a back-off, 0 inside the stop radius (the class multiplies the walk vector
+//    by MoveSpeed[0] = 6 units/s, 0x53D7CC), a = b = 0 (4.1 walks at full speed to the end). The class's own follow
+//    state instead faced the target and walked to the slot beside it: the legs walked forward while the body slid
+//    sideways (2026-10-18 M113: 43 % of the walking frames over 11 degrees off its facing) and one Hector walked on the
+//    spot against a wall for 140 s. No target: the class's own walk.
 //  - After the base update (the skeleton is built from the bones' locals at its start, 0x317B88 -> 0x1100B90, which
 //    writes only the world matrices, bone record +0xB0), the arms aim as 4.1's weapons did (hector::ArmAim): the arm
 //    bone's local (+0x70) becomes Rx(pitch) Ry(yaw) x the animation's, and its world and every bone below it (the guns'
@@ -32,6 +37,15 @@
 //    functions only this calls are checked by their first bytes (kAnimPrints): on another build it is all left off.
 //  - 0x34FEFE (the gun loop of StartAttack(1) = 0x34FE90) and 0x34E123 (0x34E0D0): the call of the per-gun attack start
 //    0x34E180(gun). An attack picks its arms once (PickArms) and the arms not picked are not started.
+//  - The legs' animation (hector::PickGait / GaitRate, 4.1's 0x2220E0 / 0x2224E0): WalkingEnemyBase's walk state
+//    (0x540710) and stand state (0x5405B0) set the main CAS player's state with 0x116BFC0(cas, player, state, flags)
+//    at 0x540697 / 0x5406C1 / 0x5406DF / 0x540821 and its rate with 0x116DF20(cas, player, rate) at 0x5406F5 /
+//    0x54083E; cas = object + 0xBD0. For a Hector the state is 4.1's for the yaw step (+0x1320), the eased velocity
+//    (+0x1430, units/s, read in the body's frame: matrix rows +0x60 x, +0x80 z) and the walk vector (+0x1290 x MoveSpeed
+//    +0xF94), out of the class's own state table (+0x1000 stand, +0x1004 turn_l, +0x1008 turn_r, +0x101C.. walk f b l r,
+//    which the battle swaps for walk_battle_*, 0x53F230), and the rate 4.1's (v_walk_animation_speed: +0xFD4 x 60,
+//    v_turn_animation_speed: +0xFD8, 0x53CFB1 / 0x53CFD1). Without it a Hector turning on the spot plays `stand`
+//    (the stand state turns only past the clamp the walking states give FaceTarget) and slides round on its feet.
 // The gun object is {GunBattery*, ...} with its owner at +0x10; the owner's guns are the vector of 16-byte
 // {gun*, control} at +0x1AA8 (count +0x1AB8), in gun_control's order. The target is 0x30C0F0(owner) (null: none), its
 // position the vec4 at +0x90 (the vec4 at *(*(+0x368)) + 0x10 when +0x378 is set), the owner's at +0x90.
@@ -54,7 +68,9 @@ namespace {
 constexpr std::size_t kBaseUpdate=0x343DE0;
 constexpr std::size_t kBaseUpdateSite=0x34F2A0;
 constexpr std::size_t kMoveTo=0x33E3B0;
-constexpr std::size_t kMoveToSites[]={0x34D8D8,0x34DA65};
+constexpr std::size_t kMoveToSites[]={0x34D8D8,0x34D955,0x34DA65};
+constexpr std::size_t kFaceTarget=0x33E840;   // FaceTarget(this, &point, limit): +0x12A0 / +0x12A4 (0x33E99B)
+constexpr std::size_t kFaceSites[]={0x34D8FD,0x34D96A,0x34DA7A};
 constexpr std::size_t kGunStart=0x34E180;
 constexpr std::size_t kGunStartSites[]={0x34FEFE,0x34E123};
 constexpr std::size_t kGetTarget=0x30C0F0;
@@ -65,6 +81,14 @@ constexpr std::size_t kNodeFloat=0x52F30;
 constexpr std::size_t kNodeText=0x551E0;       // const wchar_t* (handle*): a string node (0x53B832 reads InterpolateNode so)
 constexpr std::size_t kCasPlayerByName=0x1166FB0;  // int (CasPlayers*, const wchar_t*): -1 none (0x33D392 "additive_action")
 constexpr std::size_t kCasSetState=0x116C2D0;  // bool (CasPlayers*, int player, const wchar_t* state, int)
+constexpr std::size_t kCasPlayState=0x116BFC0;  // bool (CasPlayers*, int player, int state, flags): by state index
+constexpr std::size_t kCasSetRate=0x116DF20;    // void (CasPlayers*, int player, float rate): player +0x100
+constexpr std::size_t kGaitStateSites[]={0x540697,0x5406C1,0x5406DF,0x540821};
+constexpr std::size_t kGaitRateSites[]={0x5406F5,0x54083E};
+// WalkingEnemyBase's fields the gait reads (0x53D560 and the constructor 0x53CD00..0x53CFD1)
+constexpr std::size_t kAxisXAt=0x60,kAxisZAt=0x80,kYawStepAt=0x1320,kEasedVelocityAt=0x1430,kWalkVectorAt=0x1290,
+                      kMoveSpeedAt=0xF94,kWalkAnimAt=0xFD4,kTurnAnimAt=0xFD8;
+constexpr std::size_t kGaitStateAt[]={0x1000,0x101C,0x1020,0x1024,0x1028,0x1004,0x1008};  // hector::Gait order
 // material animation slots of the model component (+0x8A0): play 0x6C0200(model, slot, mode) -> 0x6DC830 (player [+0x10]
 // [slot].second: active byte, mode +4, clock reset), stop 0x6C04F0(model, slot) (active byte 0); players [+0x2A8], count +0x20
 constexpr std::size_t kMatPlay=0x6C0200,kMatStop=0x6C04F0,kModelAt=0x8A0,kMatPlayersAt=0x2A8,kMatCountAt=0x20;
@@ -110,7 +134,10 @@ using NodeFloatFn=float(__fastcall*)(const Handle*);
 using GetTargetFn=void*(__fastcall*)(void* self);
 using BaseUpdateFn=std::uint64_t(__fastcall*)(void* self,void* dt);
 using MoveToFn=bool(__fastcall*)(void* self,const float* goal,float a,float b,float speed,float c);
+using FaceFn=void(__fastcall*)(void* self,const float* point,float limit);
 using GunStartFn=void(__fastcall*)(void* gun);
+using CasPlayStateFn=bool(__fastcall*)(void* cas,int player,int state,int flags);
+using CasSetRateFn=void(__fastcall*)(void* cas,int player,float rate);
 
 struct Entry {
     ObjRef ref;
@@ -546,19 +573,76 @@ bool __fastcall MoveToHook(void* self,const float* goal,float a,float b,float sp
             const hector::Walk walk=hector::Steer(e->cycle,e->cfg,e->dist,e->haveTarget);
             speed=walk.speed;
             if(walk.takeover) {
-                const float* me=reinterpret_cast<const float*>(static_cast<char*>(self)+kPosAt);
-                if(walk.retreat) {              // the point opposite the target: backward, still facing it
-                    aim[0]=2.0f*me[0]-e->target[0]; aim[1]=me[1]; aim[2]=2.0f*me[2]-e->target[2];
-                } else {                        // straight at the target
-                    aim[0]=e->target[0]; aim[1]=e->target[1]; aim[2]=e->target[2];
+                // along the body's own facing (its matrix's z row, flattened), forward or backward: 4.1's walk command
+                // is the local z alone (0x2238A6..0x2238BF); FaceHook turns the body to the target meanwhile
+                const char* me=static_cast<char*>(self);
+                const float* p=reinterpret_cast<const float*>(me+kPosAt);
+                const float* z=reinterpret_cast<const float*>(me+kAxisZAt);
+                const float n=std::sqrt(z[0]*z[0]+z[2]*z[2]);
+                const float k=(walk.retreat ? -100.0f : 100.0f)/(n>1e-6f ? n : 1.0f);
+                if(n>1e-6f) {
+                    aim[0]=p[0]+z[0]*k; aim[1]=p[1]; aim[2]=p[2]+z[2]*k; aim[3]=goal[3];
+                    goal=aim;
+                    a=0.0f; b=0.0f;             // 4.1 walks at full speed to the end (no slow-down ramp)
                 }
-                aim[3]=goal[3];
-                goal=aim;
-                a=0.0f; b=0.0f;                 // 4.1 walks at full speed to the end (no slow-down ramp)
             }
         }
     }
     return reinterpret_cast<MoveToFn>(image+kMoveTo)(self,goal,a,b,speed,c);
+}
+
+// The walking states' FaceTarget: a Hector with a target turns to the target (4.1's heading, 0x2234B6), whichever point
+// the state gives (the follow state's slot beside it, the chase state's route point).
+void __fastcall FaceHook(void* self,const float* point,float limit) {
+    float aim[4];
+    {
+        std::lock_guard<std::mutex> hold(tableLock);
+        const Entry* e=Find(self);
+        if(e && e->haveTarget) {
+            aim[0]=e->target[0]; aim[1]=e->target[1]; aim[2]=e->target[2]; aim[3]=point[3];
+            point=aim;
+        }
+    }
+    reinterpret_cast<FaceFn>(image+kFaceTarget)(self,point,limit);
+}
+
+// 4.1's gait for the Hector at `self` now: its state index in the class's table (-1: the CAS has none) and its rate.
+int GaitState(const char* self,float& rate) noexcept {
+    const auto f=[self](std::size_t at) noexcept { return reinterpret_cast<const float*>(self+at); };
+    const float* v=f(kEasedVelocityAt);
+    const auto along=[v](const float* axis) noexcept {
+        const float n=std::sqrt(axis[0]*axis[0]+axis[1]*axis[1]+axis[2]*axis[2]);
+        return n>1e-6f ? (v[0]*axis[0]+v[1]*axis[1]+v[2]*axis[2])/n/60.0f : 0.0f;   // per frame, as 4.1 keeps it
+    };
+    const float vx=along(f(kAxisXAt)),vz=along(f(kAxisZAt));
+    const float* w=f(kWalkVectorAt);
+    const float command=std::sqrt(w[0]*w[0]+w[1]*w[1]+w[2]*w[2])**f(kMoveSpeedAt)/60.0f;
+    const float yawStep=*f(kYawStepAt);
+    if(!std::isfinite(vx) || !std::isfinite(vz) || !std::isfinite(command) || !std::isfinite(yawStep))return -1;
+    const hector::Gait g=hector::PickGait(yawStep,vx,vz,command*command);
+    rate=hector::GaitRate(g,yawStep,vx,vz,*f(kWalkAnimAt)*60.0f,*f(kTurnAnimAt));
+    return *reinterpret_cast<const int*>(self+kGaitStateAt[static_cast<int>(g)]);
+}
+
+bool __fastcall GaitStateHook(void* cas,int which,int state,int flags) {
+    const char* self=static_cast<char*>(cas)-kCasAt;
+    {
+        std::lock_guard<std::mutex> hold(tableLock);
+        float rate=0.0f;
+        int mine=-1;
+        if(Find(self) && (mine=GaitState(self,rate))>=0)state=mine;
+    }
+    return reinterpret_cast<CasPlayStateFn>(image+kCasPlayState)(cas,which,state,flags);
+}
+
+void __fastcall GaitRateHook(void* cas,int which,float rate) {
+    const char* self=static_cast<char*>(cas)-kCasAt;
+    {
+        std::lock_guard<std::mutex> hold(tableLock);
+        float mine=0.0f;
+        if(Find(self) && GaitState(self,mine)>=0)rate=mine;
+    }
+    reinterpret_cast<CasSetRateFn>(image+kCasSetRate)(cas,which,rate);
 }
 
 void __fastcall GunStartHook(void* gun) {
@@ -598,9 +682,18 @@ bool InstallEdf41Ai() noexcept {
     int walks=0,guns=0;
     for(const std::size_t site:kMoveToSites)
         walks+=RedirectCall(image+site,image+kMoveTo,reinterpret_cast<void*>(&MoveToHook),changed) ? 1 : 0;
+    int faces=0;
+    for(const std::size_t site:kFaceSites)
+        faces+=RedirectCall(image+site,image+kFaceTarget,reinterpret_cast<void*>(&FaceHook),changed) ? 1 : 0;
     for(const std::size_t site:kGunStartSites)
         guns+=RedirectCall(image+site,image+kGunStart,reinterpret_cast<void*>(&GunStartHook),changed) ? 1 : 0;
-    Log("EDF41AI hooked: update=%d walk=%d/2 gun start=%d/2",ok ? 1 : 0,walks,guns);
-    return ok && walks==2 && guns==2;
+    int gaits=0,rates=0;
+    for(const std::size_t site:kGaitStateSites)
+        gaits+=RedirectCall(image+site,image+kCasPlayState,reinterpret_cast<void*>(&GaitStateHook),changed) ? 1 : 0;
+    for(const std::size_t site:kGaitRateSites)
+        rates+=RedirectCall(image+site,image+kCasSetRate,reinterpret_cast<void*>(&GaitRateHook),changed) ? 1 : 0;
+    Log("EDF41AI hooked: update=%d walk=%d/3 face=%d/3 gun start=%d/2 gait state=%d/4 rate=%d/2",ok ? 1 : 0,walks,faces,guns,
+        gaits,rates);
+    return ok && walks==3 && faces==3 && guns==2 && gaits==4 && rates==2;
 }
 }  // namespace crew

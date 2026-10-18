@@ -20,6 +20,8 @@ background"). For measurements, e.g. the big map's memory against the stock test
                            (the stock air delivery probe: tests/autopilot/airdrop_probe.cpp)
                            or --cmd "probe wdenergy" (the Wing Diver's energy and her weapons' charge every 250 ms:
                            tests/autopilot/wdenergy_probe.cpp)
+                           or --cmd "probe hector" (each EDF4.1 Hector's position, facing, walk vector, velocity
+                           and main CAS state from its own frame: tests/autopilot/hector_probe.cpp)
           --loadout FILE   the run's forced loadout: FILE copied as <plugins>/EDF6TestRange.loadout.ini (read by the
                            installed EDF6VehicleCrew at the player's creation; the file must not exist already, and
                            is removed again afterwards), e.g. tests/autopilot/loadouts/airraider_grape.ini
