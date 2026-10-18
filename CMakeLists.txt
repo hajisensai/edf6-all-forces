@@ -1086,6 +1086,12 @@ add_test(NAME route_guide_partial_install COMMAND route_guide_native_test "${EDF
 set_tests_properties(route_guide_native route_guide_foreign_site route_guide_partial_install PROPERTIES SKIP_RETURN_CODE 77)
 set_tests_properties(edf5_campaign_native edf5_campaign_partial_install edf5_campaign_chained edf5_campaign_foreign_site ported_missions_unlock_native
                      PROPERTIES SKIP_RETURN_CODE 77)
+# The mission packs' save marker through EDF.dll's own reset / load-apply / checksum / seen writers (private mapping).
+add_executable(mission_pack_save_native_test EXCLUDE_FROM_ALL tests/mission_pack_save_native_test.cpp)
+target_compile_options(mission_pack_save_native_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks mission_pack_save_native_test)
+add_test(NAME mission_pack_save_native COMMAND mission_pack_save_native_test "${EDF6_NATIVE_DLL}")
+set_tests_properties(mission_pack_save_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME edf5_campaign_lifecycle COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_edf5_campaign_lifecycle.py")
 
 add_executable(npc_gunners_online_test EXCLUDE_FROM_ALL tests/npc_gunners_online_test.cpp src/ground_navigation.cpp)

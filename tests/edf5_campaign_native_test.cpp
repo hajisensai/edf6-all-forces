@@ -37,13 +37,14 @@ void InstallPacks(bool edf5,bool range,bool edf41,int rows=5,const char* mask="0
     const char* tags[packs::kCount]={"EDF5","EDF5DLC1","EDF5DLC2","EDF6TR","EDF41","EDF41MP01","EDF41MP02"};
     for(int id=packs::kBase;id<packs::kBase+packs::kCount;++id) {
         const bool on=id<packs::kRange ? edf5 : id==packs::kRange ? range : edf41;
-        if(on && !packs::Make(id,tags[id-packs::kBase],"0123456789abcdef",rows,mask,config.missionPacks.packs[id-packs::kBase]))
+        packs::Pack& pack=config.missionPacks.packs[id-packs::kBase];
+        if(on && !(packs::Make(id,tags[id-packs::kBase],"0123456789abcdef",rows,mask,pack) && packs::SetLayout(pack,"0000abcd",0)))
             std::exit(2);
     }
 }
 int packNotices=0;
 std::wstring packNotice;
-void RecordPackNotice(const wchar_t* text) noexcept { ++packNotices;packNotice=text; }
+void RecordPackNotice(const wchar_t*,const wchar_t* text) noexcept { ++packNotices;packNotice=text; }
 std::string lastLog,logs;
 void Log(const char* format,...) noexcept {
     char text[1024]{};va_list args;va_start(args,format);vsnprintf(text,sizeof(text),format,args);va_end(args);lastLog=text;
@@ -223,7 +224,8 @@ int main(int argc,char** argv) {
     const auto native=reinterpret_cast<OwnedFn>(image+kOwned);
     Check(native(f.Mgr(),0) && !native(f.Mgr(),1) && !native(f.Mgr(),65),"native lookup: the story owned, nothing else");
     InstallPacks(true,false,false);
-    showPackProblem=&RecordPackNotice;
+    notice::show=&RecordPackNotice;
+    SetMissionPackSaveHook(true);   // airstrike.cpp's save-load hook (marks each pack's saves): in, as in the game
     const std::string mode=argc>2 ? argv[2] : "";
     if(mode=="chain") {   // a site another plugin redirected first: chained, both answer
         bool changed=false;
@@ -293,12 +295,20 @@ int main(int argc,char** argv) {
         missionsReady=true;
         Check(Patched(kSites[0])(f.Mgr(),65),"...owned with it");
         missionsReady=false;
-        // A pack whose older saves have other rows (Legacy): owned only while the save-load hook moves them.
+        // Every pack: owned only while the save-load hook marks its saves (an unmarked save played with the rows now
+        // could no longer be told from an older install's).
         InstallPacks(true,false,false);
-        Check(packs::SetLegacy(config.missionPacks.packs[0],"4:0,1,3,4"),"Legacy on EDF5's story");
-        Check(!Patched(kSites[0])(f.Mgr(),65) && Patched(kSites[0])(f.Mgr(),66),"Legacy rows without the save hook: not owned");
+        Check(packs::AddFrom(config.missionPacks.packs[0],0,"4:0,1,3,4"),"Legacy on EDF5's story");
+        SetMissionPackSaveHook(false);
+        Check(!Patched(kSites[0])(f.Mgr(),65) && !Patched(kSites[0])(f.Mgr(),66) && Patched(kSites[0])(f.Mgr(),0),
+              "without the save hook: no pack owned (with or without Legacy), the story still");
+        {
+            const int notes=packNotices;
+            Check(!Patched(kSites[2])(f.Mgr(),66) && packNotices==notes+1 && packNotice.find(L"读档钩子没有装上")!=std::wstring::npos
+                  && lastLog.find("reason=pack-save-hook-missing content=66")!=std::string::npos,"...and a guest is told why");
+        }
         SetMissionPackSaveHook(true);
-        Check(Patched(kSites[0])(f.Mgr(),65),"...owned with it");
+        Check(Patched(kSites[0])(f.Mgr(),65) && Patched(kSites[0])(f.Mgr(),66),"...owned with it");
         // The hook's work on the game status of a loaded save (MigrateMissionPackSave): the current mode's content
         // read as 0x8A20F3 reads it, its save at GS+0x57A4 moved once, other modes' saves untouched.
         {
@@ -314,13 +324,29 @@ int main(int argc,char** argv) {
                   "the loaded save of the pack moved and logged");
             MigrateMissionPackSave(gs.data());
             Check(save[packs::kClear+3]==1 && save[0]==3,"a second load moves nothing");
+            // a save of a pack without a record whose layout cannot be told: left as it is, the player told once
+            Put<std::int32_t>(node,0x10+0x74,66);
+            std::memset(save,0,packs::kModeSaveSize);
+            save[packs::kClear+1]=1;
+            const std::vector<unsigned char> unknown(save,save+packs::kModeSaveSize);
+            const int notes=packNotices;
+            MigrateMissionPackSave(gs.data());
+            Check(std::equal(unknown.begin(),unknown.end(),save) && lastLog.find("layout-unknown")!=std::string::npos
+                  && packNotices==notes+1 && packNotice.find(L"EDF5 任务包１")!=std::wstring::npos
+                  && packNotice.find(L"无法确定")!=std::wstring::npos,"an undetermined save: untouched, unmarked, the player told");
+            MigrateMissionPackSave(gs.data());
+            Check(std::equal(unknown.begin(),unknown.end(),save) && packNotices==notes+1,"...once a session");
+            const std::uint32_t other=0x5555;
+            std::memcpy(save+packs::kMarker,&other,4);
+            MigrateMissionPackSave(gs.data());
+            Check(packNotices==notes+2 && packNotice.find(L"另一版本")!=std::wstring::npos && lastLog.find("other-layout")!=std::string::npos,
+                  "another version's marker: untouched, the player told");
             Put<std::int32_t>(node,0x10+0x74,0);
             std::memset(save+packs::kMarker,0,4);
             const std::vector<unsigned char> before(save,save+packs::kModeSaveSize);
             MigrateMissionPackSave(gs.data());
             Check(std::equal(before.begin(),before.end(),save),"EDF6's own story's save: untouched");
         }
-        SetMissionPackSaveHook(false);
         InstallPacks(true,false,false);
         Patched(kSites[2])(f.Mgr(),0);
         Check(lastLog.find("id=0 prior=1 mod=0 allowed=1")!=std::string::npos,"native story admission logged without a MOD grant");

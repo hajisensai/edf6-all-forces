@@ -641,8 +641,9 @@ class PacksFileTests(unittest.TestCase):
         [Pack<id>] Tag, Digest, Rows, Missing): every pack's section, the values as written."""
         rows = [{'key': f'EDF41/M{i:03}'} for i in range(9)]
         rows[2]['missing'] = rows[8]['missing'] = 'x'
-        data = campaign.packs_ini((campaign.PACK41, campaign.RANGE),
-                                  {campaign.PACK41.group: rows, campaign.RANGE.group: [{'key': 'EDF6/R'}]})
+        with patch.object(campaign, 'released_layouts', return_value=[]):   # these stand-in rows: no release had them
+            data = campaign.packs_ini((campaign.PACK41, campaign.RANGE),
+                                      {campaign.PACK41.group: rows, campaign.RANGE.group: [{'key': 'EDF6/R'}]})
         with tempfile.TemporaryDirectory(prefix='edf6-packs-ini-') as d:
             path = os.path.join(d, 'EDF6VehicleCrew.packs.ini')
             with open(path, 'wb') as f:
@@ -666,6 +667,74 @@ class PacksFileTests(unittest.TestCase):
             self.assertEqual((read('Pack68', 'Tag'), read('Pack68', 'Missing')), ('EDF6TR', '0'))
             self.assertEqual(read('Pack65', 'Tag'), '', 'a pack not installed has no section')
             self.assertEqual(read('Pack69', 'Legacy'), '')
+            self.assertEqual(read('Pack69', 'Layout'), campaign.layout_id('EDF41', [r['key'] for r in rows]))
+            self.assertEqual(len(read('Pack69', 'Layout')), 8)
+            self.assertEqual(number('Pack69', 'StableRows', 99, path), 0, 'rows not known stable: none')
+            self.assertEqual(number('Pack68', 'StableRows', 99, path), 0)
+            self.assertEqual(read('Pack69', 'Older'), '', 'no older release layout of these rows')
+
+    def test_layout_is_the_rows_order_only(self) -> None:
+        """The save marker (src/mission_packs.h Pack::layout) is the rows' mission keys in order: a change of a shipped
+        script changes the room's definition digest but keeps every save's layout; another order or another pack is
+        another layout."""
+        a = [{'key': f'EDF41/M{i:03}', 'sha': {'MISSION.BVM': '1'}} for i in range(5)]
+        b = [{**r, 'sha': {'MISSION.BVM': '2'}} for r in a]
+        keys = [r['key'] for r in a]
+        self.assertNotEqual(campaign.pack_digest(campaign.PACK41, a), campaign.pack_digest(campaign.PACK41, b))
+        self.assertEqual(campaign.layout_id('EDF41', keys), campaign.layout_id('EDF41', [r['key'] for r in b]))
+        self.assertNotEqual(campaign.layout_id('EDF41', keys), campaign.layout_id('EDF41', keys[::-1]))
+        self.assertNotEqual(campaign.layout_id('EDF41', keys), campaign.layout_id('EDF41MP01', keys))
+        self.assertRegex(campaign.layout_id('EDF41', keys), r'^[0-9a-f]{8}$')
+
+    def test_every_definition_is_a_released_layout(self) -> None:
+        """edf5campaign/pack_layouts.json has every pack's layout now as its last (a change of a pack's rows appends
+        the new layout, so the saves of the one before get a map to it), every layout of a pack once, and the plugin
+        takes as many older layouts as the installer writes (kMaxFrom)."""
+        import json
+        with open(campaign.LAYOUTS, encoding='utf-8') as f:
+            registry = json.load(f)
+        for pack in campaign.SLOTS:
+            layouts = registry.get(pack.tag)
+            self.assertTrue(layouts, pack.tag)
+            self.assertEqual(layouts[-1], campaign.definition_keys(pack), f'{pack.tag}: its layout now is not the last released')
+            ids = [campaign.layout_id(pack.tag, k) for k in layouts]
+            self.assertEqual(len(set(ids)), len(ids), f'{pack.tag}: a layout twice')
+        header = open(os.path.join(os.path.dirname(campaign.TEXT), '..', 'src', 'mission_packs.h'), encoding='utf-8').read()
+        self.assertIn(f'constexpr int kMaxFrom={campaign.MAX_FROM};', header)
+
+    def test_stable_rows(self) -> None:
+        """StableRows: the leading rows of the first released layout that every install had (row 'stable'), up to the
+        first that is not or that is no longer at its row."""
+        rows = [{'key': f'K{i}', 'stable': True} for i in range(6)]
+        rows[3]['stable'] = False
+        with patch.object(campaign, 'released_layouts', return_value=[[r['key'] for r in rows]]):
+            self.assertEqual(campaign.stable_rows(campaign.PACK41, rows), 3)
+        with patch.object(campaign, 'released_layouts', return_value=[['K0', 'K2', 'K1', 'K3']]):
+            self.assertEqual(campaign.stable_rows(campaign.PACK41, rows), 1, 'the first layout had K2 at row 1')
+        with patch.object(campaign, 'released_layouts', return_value=[]):
+            self.assertEqual(campaign.stable_rows(campaign.PACK41, rows), 3, 'no release yet: its own rows')
+
+    def test_older_layouts_written_with_their_maps(self) -> None:
+        """A save marked by any older release moves straight to the rows now: every released layout but the one now
+        gets Older=<marker>,... and From<marker>=<rows>:<map>, the most recent MAX_FROM (one fewer with Legacy), as
+        the plugin reads them (src/plugin.cpp LoadMissionPacks)."""
+        rows = [{'key': f'EDF41/M{i}'} for i in range(5)]
+        now = [r['key'] for r in rows]
+        v1 = ['EDF41/M0', 'EDF41/M1', 'EDF41/M3', 'EDF41/M4']            # M2 added in the second release
+        v2 = ['EDF41/M0', 'EDF41/M2', 'EDF41/M1', 'EDF41/M3', 'EDF41/M4']   # M1 and M2 swapped in the third
+        with patch.object(campaign, 'released_layouts', return_value=[v1, v2, now]):
+            text = campaign.packs_ini((campaign.PACK41,), {campaign.PACK41.group: rows}).decode()
+            m1, m2 = campaign.layout_id('EDF41', v1), campaign.layout_id('EDF41', v2)
+            self.assertIn(f'\r\nOlder={m1},{m2}\r\n', text)
+            self.assertIn(f'\r\nFrom{m1}=4:0,1,3,4\r\n', text)
+            self.assertIn(f'\r\nFrom{m2}=5:0,2,1,3,4\r\n', text)
+            self.assertIn(f'\r\nLayout={campaign.layout_id("EDF41", now)}\r\n', text)
+            many = [['EDF41/M0', f'X{j}'] for j in range(6)] + [now]
+            with patch.object(campaign, 'released_layouts', return_value=many):
+                plain = campaign.older_layouts(campaign.PACK41, rows, False)
+                self.assertEqual(len(plain), campaign.MAX_FROM)
+                self.assertEqual([k for _, k in plain], many[-1 - campaign.MAX_FROM:-1], 'the most recent ones')
+                self.assertEqual(len(campaign.older_layouts(campaign.PACK41, rows, True)), campaign.MAX_FROM - 1)
 
     def test_legacy_rows_recorded_kept_and_written(self) -> None:
         """A save's rows are the list's (docs/mission-list-re.md §1): an older install that left M003 out had M004 at

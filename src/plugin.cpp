@@ -32,6 +32,7 @@
 #include "subcarrier.h"
 #include "edf/host.h"
 #include "version.h"
+#include "pack_notice.h"
 
 namespace crew {
 unsigned char* image=nullptr;
@@ -112,15 +113,24 @@ void Fix(const char* key,float& v,float lo,float hi) noexcept {
 }
 // A mission pack run's ini id (EDF5CampaignContent, TestRangeContent, EDF41Content): 0 or the run's fixed id
 // (mission_packs.h). An older installer's id (one that depended on the mods installed: 3..9 for most) is logged and
-// taken as 0: its CONFIG.SGO has the packs at other ids, which the next install moves to the fixed ones.
+// taken as 0, and the player told once a session. Its packs cannot be owned under the new ids: that installer's
+// CONFIG.SGO has them at the old ids (a room would publish an id no newer machine has), its lists left out a missing
+// mission's row (a row would name another mission than on a newer machine), and it wrote no EDF6VehicleCrew.packs.ini
+// (no identity to publish or check, no save layout). Only the installer can write those; the next install does.
 int PackContent(const char* key,int v,int fixed) noexcept {
     if(v==0 || v==fixed)return v;
     Log("CONFIG %s=%d is an older installer's mission pack id (now fixed %d): its packs are not owned until the "
         "installer runs again",key,v,fixed);
+    wchar_t text[400]{};
+    swprintf_s(text,L"EDF6VehicleCrew.ini 里的 %hs=%d 是旧版安装器写的任务包编号（现在固定为 %d）。\n\n"
+        L"新版全军出击的任务包需要新版安装器重新生成（编号、关卡列表和任务包身份都变了），在重新运行安装器之前，"
+        L"EDF5 / 测试场 / EDF4.1 任务包会显示为「尚未购买」。\n\n请退出游戏，运行新版全军出击安装器选「安装」。",key,v,fixed);
+    notice::Post("ini-old-pack-ids",L"全军出击：请重新运行安装器",text,notice::kOnce);
     return 0;
 }
 // EDF6VehicleCrew.packs.ini beside the ini (tools/make_edf5_campaign.py PACKS_FILE): [Pack<id>] Tag, Digest, Rows,
-// Missing for each installed pack. A section that does not parse is left out (its pack not owned) and logged.
+// Missing, Layout, StableRows, and the older save layouts' maps (Legacy, Older + From<layout>) for each installed pack.
+// A section that does not parse is left out (its pack not owned) and logged.
 void LoadMissionPacks(packs::Table& table) noexcept {
     table=packs::Table{};
     wchar_t path[MAX_PATH]{};
@@ -133,10 +143,12 @@ void LoadMissionPacks(packs::Table& table) noexcept {
         for(;w[i] && i+1<size;++i)out[i]=w[i]<0x80 ? static_cast<char>(w[i]) : '?';
         out[i]=0;
     };
+    static wchar_t longText[packs::kMaxRows*5+16];   // "<n>:" and up to 512 rows of "-1," / "511,"
+    static char longValue[sizeof(longText)/sizeof(wchar_t)];
     int found=0;
     for(int id=packs::kBase;id<packs::kBase+packs::kCount;++id) {
         wchar_t section[16]{},value[packs::kMaxRows/4+2]{};
-        char tag[32]{},digest[32]{},mask[packs::kMaxRows/4+2]{};
+        char tag[32]{},digest[32]{},mask[packs::kMaxRows/4+2]{},layout[32]{},older[packs::kMaxFrom*9+8]{};
         swprintf_s(section,L"Pack%d",id);
         GetPrivateProfileStringW(section,L"Tag",L"",value,static_cast<DWORD>(std::size(value)),path);
         narrow(value,tag,sizeof(tag));
@@ -145,16 +157,37 @@ void LoadMissionPacks(packs::Table& table) noexcept {
         narrow(value,digest,sizeof(digest));
         GetPrivateProfileStringW(section,L"Missing",L"",value,static_cast<DWORD>(std::size(value)),path);
         narrow(value,mask,sizeof(mask));
+        GetPrivateProfileStringW(section,L"Layout",L"",value,static_cast<DWORD>(std::size(value)),path);
+        narrow(value,layout,sizeof(layout));
+        GetPrivateProfileStringW(section,L"Older",L"",value,static_cast<DWORD>(std::size(value)),path);
+        narrow(value,older,sizeof(older));
         const int rows=static_cast<int>(GetPrivateProfileIntW(section,L"Rows",0,path));
-        static wchar_t legacyText[packs::kMaxRows*5+16];   // "<n>:" and up to 512 rows of "-1," / "511,"
-        static char legacy[sizeof(legacyText)/sizeof(wchar_t)];
-        GetPrivateProfileStringW(section,L"Legacy",L"",legacyText,static_cast<DWORD>(std::size(legacyText)),path);
-        narrow(legacyText,legacy,sizeof(legacy));
+        const int stable=static_cast<int>(GetPrivateProfileIntW(section,L"StableRows",static_cast<UINT>(-1),path));
         packs::Pack& pack=table.packs[id-packs::kBase];
-        if(packs::Make(id,tag,digest,rows,mask,pack) && packs::SetLegacy(pack,legacy))++found;
+        bool ok=packs::Make(id,tag,digest,rows,mask,pack) && packs::SetLayout(pack,layout,stable);
+        GetPrivateProfileStringW(section,L"Legacy",L"",longText,static_cast<DWORD>(std::size(longText)),path);
+        narrow(longText,longValue,sizeof(longValue));
+        ok=ok && packs::AddFrom(pack,0,longValue);
+        // Older=<layout>,<layout>,...: each one's map in From<layout>
+        for(char* at=older;ok && *at;) {
+            char* comma=std::strchr(at,',');
+            if(comma)*comma=0;
+            std::uint32_t from=0;
+            wchar_t key[16]{};
+            ok=packs::ParseLayout(at,from);
+            if(ok) {
+                swprintf_s(key,L"From%hs",at);
+                GetPrivateProfileStringW(section,key,L"",longText,static_cast<DWORD>(std::size(longText)),path);
+                narrow(longText,longValue,sizeof(longValue));
+                ok=longValue[0] && packs::AddFrom(pack,from,longValue);
+            }
+            at=comma ? comma+1 : at+std::strlen(at);
+        }
+        if(ok)++found;
         else {
             pack=packs::Pack{};
-            Log("CONFIG EDF6VehicleCrew.packs.ini [Pack%d] malformed (Tag=%s Rows=%d): that pack is not owned",id,tag,rows);
+            Log("CONFIG EDF6VehicleCrew.packs.ini [Pack%d] malformed (Tag=%s Rows=%d Layout=%s Older=%s): that pack is not owned",
+                id,tag,rows,layout,older);
         }
     }
     static int logged=-1;

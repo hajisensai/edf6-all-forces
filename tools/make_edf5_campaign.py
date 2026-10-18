@@ -85,6 +85,13 @@ MANIFEST = '.edf5campaign.json'
 DISABLED = '.edf5campaign-disabled'
 # The packs' older save layouts (legacy_layouts), kept past an uninstall: the saves stay, and a later install moves them.
 LEGACY_FILE = '.edf5campaign-legacy.json'
+# Every save layout a release of the packs had (committed, edf5campaign/pack_layouts.json): per pack tag, each
+# layout's mission keys in row order, oldest first. The first is 2026-10-18's, the layout every unmarked save is
+# measured against (stable_rows); every older one gets a map to the rows now (packs_ini Older / From<layout>), so a
+# save marked by any release moves straight to the rows now. A change of a pack's rows appends its new layout here
+# (tests/test_edf5_campaign_lifecycle.py checks that the definition's layout is the last one).
+LAYOUTS = os.path.join(os.path.dirname(TEXT), 'pack_layouts.json')
+MAX_FROM = 4   # src/mission_packs.h kMaxFrom: the older layouts (Legacy included) a pack's ini section may name
 INI = os.path.join('Plugins', 'EDF6VehicleCrew.ini')
 INI_KEY = 'EDF5CampaignContent'
 RANGE_INI_KEY = 'TestRangeContent'
@@ -465,6 +472,10 @@ def plan(root: str, root41: str | None = None, skip41: Skip41 = frozenset()) -> 
     maps5, names5, why5 = edf5_dlc.offered(root)
     maps = map_names(root, game) | maps5
     names = root_names(game) | names5
+    # What every EDF6 install has, for stable_rows: the game's own packages (Root.cpk, Chunk01/02.cpk: the base
+    # install's), nothing tools/edf5_dlc.py adds
+    base_maps = map_names(root, game)
+    base_names = root_names(game)
     rows, skipped = [], []
     for pack in PACKS:
         for m in text[pack.group]:
@@ -481,6 +492,8 @@ def plan(root: str, root41: str | None = None, skip41: Skip41 = frozenset()) -> 
                 gone = missing_assets(names, maps, bvm)
                 why = '缺少 ' + ', '.join(sorted({_gone41(r, why5) for r in gone})) if gone else ''
                 row['map'] = first_map(bvm)
+                # every install has had it: its script and all it loads are in the game's own packages
+                row['stable'] = not missing_assets(base_names, base_maps, bvm)
             if why:
                 skipped.append((pack.group, m['path'], why))
                 row = placeholder(row, why)
@@ -644,7 +657,8 @@ def range_row(game: rootcpk.Game) -> dict:
     like = next((r for r in table if r.items[2] == RANGE_LIKE), None)
     if like is None:
         raise Refused(f'原版离线任务列表里没有 {RANGE_LIKE}：不知道测试场这一关按什么取参数。')
-    return {**RANGE_ROW, 'bgm': like.items[8], 'progress': like.items[9], 'flags': like.items[10]}
+    # stable: every install since the range had a pack (2026-10-09) has had this one row
+    return {**RANGE_ROW, 'bgm': like.items[8], 'progress': like.items[9], 'flags': like.items[10], 'stable': True}
 
 
 def pack_files(game: rootcpk.Game, pack: Pack, rows: list[dict]) -> dict[str, bytes]:
@@ -815,6 +829,58 @@ def legacy_map(old: list[str], rows: list[dict]) -> list[int]:
     return [now.get(k, -1) for k in old]
 
 
+def layout_id(tag: str, keys: list[str]) -> str:
+    """A save layout's marker (src/mission_packs.h Pack::layout): its pack and its rows' mission keys in order, nothing
+    else (a script's change keeps it; the definition digest, which hashes the scripts, is the room's business). 8 hex
+    digits, never 0."""
+    h = hashlib.sha256(f'AF-LAYOUT-1\n{tag}\n{len(keys)}\n'.encode())
+    for k in keys:
+        h.update(f'{k}\n'.encode())
+    v = h.hexdigest()[:8]
+    return v if int(v, 16) else '00000001'
+
+
+def definition_keys(pack: Pack) -> list[str]:
+    """`pack`'s rows' mission keys from its committed definition alone (no game: every machine's rows, placeholders
+    included, are these)."""
+    if pack is RANGE:
+        return [RANGE_ROW['key']]
+    for p41 in PACKS41:
+        if p41.pack is pack:
+            return [f'{p41.folder}/{m["id"]}' for m in edf41_text(p41.data)['missions']]
+    with open(TEXT, encoding='utf-8') as f:
+        return [f'{SCRIPTS}/{m["path"]}' for m in json.load(f)[pack.group]]
+
+
+def released_layouts(tag: str) -> list[list[str]]:
+    """LAYOUTS' layouts of the pack `tag`, oldest first (none: a pack no release had)."""
+    return [list(keys) for keys in modfiles.load_json(LAYOUTS, {}).get(tag, [])]
+
+
+def stable_rows(pack: Pack, rows: list[dict]) -> int:
+    """How many leading rows every older layout had where they are now (src/mission_packs.h Pack::stableRows): rows
+    of the first released layout (the one of the saves from before the markers), each of them and all before it
+    installed by every install (row 'stable': all its script loads is in Root.cpk). An unmarked save using only these
+    rows needs no moving; one past them is moved only by this machine's record of its older list (Legacy)."""
+    first = (released_layouts(pack.tag) or [[r['key'] for r in rows]])[0]
+    n = 0
+    while n < len(rows) and n < len(first) and rows[n]['key'] == first[n] and rows[n].get('stable'):
+        n += 1
+    return n
+
+
+def older_layouts(pack: Pack, rows: list[dict], legacy: bool) -> list[tuple[str, list[str]]]:
+    """The released layouts of `pack` other than the rows now, as (marker, keys), the most recent MAX_FROM of them
+    (one fewer when the pack has a Legacy map, which takes a slot of its own)."""
+    now = layout_id(pack.tag, [r['key'] for r in rows])
+    out: list[tuple[str, list[str]]] = []
+    for keys in released_layouts(pack.tag):
+        marker = layout_id(pack.tag, keys)
+        if marker != now and all(marker != m for m, _ in out):
+            out.append((marker, keys))
+    return out[-(MAX_FROM - (1 if legacy else 0)):] if out else []
+
+
 def edf41_content(ids: dict[str, int]) -> int:
     """EDF41Content: the 4.1 story's fixed id (the first of the 4.1 packs' run), when any 4.1 pack is in; the
     plugin owns the ones of the run PACKS_FILE lists. 0: none."""
@@ -843,19 +909,30 @@ def missing_mask(rows: list[dict]) -> str:
 
 
 def packs_ini(packs: tuple[Pack, ...], by_pack: dict[str, list[dict]], legacy: Mapping[str, list[str]] | None = None) -> bytes:
-    """PACKS_FILE: a [Pack<content id>] section per installed pack (Tag, Digest, Rows, Missing, and Legacy when its
-    saves may still have older rows: "<old row count>:<each old row's row now, -1 none>"), ASCII for
-    GetPrivateProfileString. The plugin owns exactly these ids, keeps the Missing rows locked, moves an older save's
-    rows (Legacy), publishes the current pack's line with a room and refuses a room whose pack differs
-    (src/mod_room.cpp)."""
+    """PACKS_FILE: a [Pack<content id>] section per installed pack, ASCII for GetPrivateProfileString:
+      Tag, Digest, Rows, Missing   the pack's identity and placeholder rows (a room's AF_PACK);
+      Layout, StableRows           its saves' marker (layout_id) and the leading rows no older layout had elsewhere
+                                   (stable_rows);
+      Legacy                       when this machine's last list from before the markers differs from the rows now: the
+                                   unmarked saves' "<old row count>:<each old row's row now, -1 none>";
+      Older, From<marker>          the released layouts other than now (older_layouts), each one's map in that form.
+    The plugin owns exactly these ids, keeps the Missing rows locked, marks and moves a save by its own marker and
+    content (src/mission_packs.h MigrateModeSave), publishes the current pack's line with a room and refuses a room
+    whose pack differs (src/mod_room.cpp)."""
     lines = ['; Written by tools/make_edf5_campaign.py with the mission packs: do not edit (run the installer again).', '']
     for pack in packs:
         rows = by_pack[pack.group]
+        keys = [r['key'] for r in rows]
         lines += [f'[Pack{CONTENT[pack.tag]}]', f'Tag={pack.tag}', f'Digest={pack_digest(pack, rows)}',
-                  f'Rows={len(rows)}', f'Missing={missing_mask(rows)}']
+                  f'Rows={len(rows)}', f'Missing={missing_mask(rows)}', f'Layout={layout_id(pack.tag, keys)}',
+                  f'StableRows={stable_rows(pack, rows)}']
         old = (legacy or {}).get(pack.tag)
-        if old:
+        if old and old != keys:
             lines.append(f'Legacy={len(old)}:' + ','.join(str(i) for i in legacy_map(old, rows)))
+        older = older_layouts(pack, rows, bool(old and old != keys))
+        if older:
+            lines.append('Older=' + ','.join(m for m, _ in older))
+            lines += [f'From{m}={len(k)}:' + ','.join(str(i) for i in legacy_map(k, rows)) for m, k in older]
         lines.append('')
     return '\r\n'.join(lines).encode('ascii')
 

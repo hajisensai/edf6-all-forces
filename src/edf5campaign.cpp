@@ -24,6 +24,7 @@
 #include "edf/host.h"
 #include "debug_spawn.h"
 #include "unlock_ported.h"
+#include "pack_notice.h"
 #include <cstdint>
 #include <cstring>
 #include <array>
@@ -54,7 +55,7 @@ constexpr unsigned kSites[]={
 };
 bool campaignReady=false;
 bool missionsReady=false;             // InstallPortedMissions: the mission select's hook (placeholder rows locked)
-bool saveHookReady=false;             // airstrike.cpp's save-load hook (0xDC550): an older save's rows moved (Legacy)
+bool saveHookReady=false;             // airstrike.cpp's save-load hook (0xDC550): each pack's save marked / moved
 OwnedFn prior[std::size(kSites)]{};   // what each site called before us: 0xD92B0, or another plugin's hook of it
 
 // The ini key naming `id`'s run (EDF5CampaignContent's three, TestRangeContent, EDF41Content's three): its fixed
@@ -74,30 +75,35 @@ const packs::Pack* Installed(const Config& cfg,int id) noexcept {
                 : run==packs::kEdf41 ? cfg.edf41Content : 0;
     return key==run && run ? cfg.missionPacks.Find(id) : nullptr;
 }
-// Owned by us: installed, and a pack with placeholder rows only while the mission select keeps them locked
-// (without that hook a placeholder cleared before its resources went missing would be selectable: a crash), one whose
-// older saves have other rows (Legacy) only while the save-load hook moves them (else a save would be played, and
-// written back, with its clears on the wrong missions).
+// Owned by us: installed, a pack with placeholder rows only while the mission select keeps them locked (without
+// that hook a placeholder cleared before its resources went missing would be selectable: a crash), and only while
+// the save-load hook marks its saves with their layout (MigrateMissionPackSave). An unmarked save played and written
+// back with the rows now could no longer be told from one with an older install's rows: the next load with the hook
+// in would move rows that are already right.
 bool Ours(const Config& cfg,int id) noexcept {
     const packs::Pack* pack=Installed(cfg,id);
-    return pack && (missionsReady || !pack->MissingCount()) && (saveHookReady || !pack->legacyRows);
+    return pack && (missionsReady || !pack->MissingCount()) && saveHookReady;
 }
 
-void ShowPackDialog(const wchar_t* text) noexcept {
-    MessageBoxW(GetActiveWindow(),text,L"全军出击：无法加入联机房间",MB_OK|MB_ICONWARNING);
-}
-using ShowPackProblem=void(*)(const wchar_t*) noexcept;
-ShowPackProblem showPackProblem=&ShowPackDialog;
-// The lobby's join refused one of our ids: say which pack, and why this machine does not have it.
+// The lobby's join (0x8EC659 in 0x8EC270, the room list's "join") refused one of our ids: say which pack, and why
+// this machine does not have it. The game itself says nothing there for a content id past 2: its only message on
+// that branch (Lobby_WarnWeaponEquip, 0x8EC6BB..0x8EC7B0, then the join anyway through 0x8E7060) needs the content's
+// name from 0xE3F80, which has none past 2 (0xE3FA4), so the join just does not happen: this dialog is the only one.
 void ExplainRefusedPack(const Config& cfg,int id) noexcept {
     wchar_t text[512]{};
     const packs::Pack* pack=Installed(cfg,id);
-    if(pack)std::swprintf(text,std::size(text),L"房间的任务包是「%ls」。本机装了它，但它有 %d 关缺资源，而锁住这些关的选关钩子没有装上"
+    const bool select=missionsReady || !pack || !pack->MissingCount();
+    if(pack && !select)std::swprintf(text,std::size(text),L"房间的任务包是「%ls」。本机装了它，但它有 %d 关缺资源，而锁住这些关的选关钩子没有装上"
         L"（日志 HOOK ported missions=0），所以不能使用这个任务包。\n\n请把日志发给作者。",packs::Name(id),pack->MissingCount());
+    else if(pack)std::swprintf(text,std::size(text),L"房间的任务包是「%ls」。本机装了它，但给任务包存档换算关号的读档钩子没有装上"
+        L"（日志 CALLS ownership），所以不能使用这个任务包。\n\n请把日志发给作者。",packs::Name(id));
     else packs::Explain(id,packs::Admission{packs::Verdict::kNotInstalled},nullptr,text,std::size(text));
-    Log("ROOM join refused: reason=%s content=%d (the room's mission pack is not usable here)",
-        pack ? "pack-placeholders-unguarded" : packs::Reason(packs::Verdict::kNotInstalled),id);
-    showPackProblem(text);
+    const char* const reason=!pack ? packs::Reason(packs::Verdict::kNotInstalled) : !select ? "pack-placeholders-unguarded"
+                           : "pack-save-hook-missing";
+    Log("ROOM join refused: reason=%s content=%d (the room's mission pack is not usable here)",reason,id);
+    char key[64]{};
+    std::snprintf(key,sizeof(key),"room-pack;%d;%s",id,reason);
+    notice::Post(key,L"全军出击：无法加入联机房间",text,0);
 }
 
 // One hook per site, each asking what that site called before (so a chained plugin still sees every call).
@@ -319,20 +325,40 @@ bool InstallPortedMissions() noexcept {
         Cfg().edf41Content,Cfg().edf41Content>0 ? Cfg().edf41Content+kPacks41-1 : 0);
     return missionsReady;
 }
-// After a mode's save was loaded (airstrike.cpp UnlockDlcHook: the script's SetMode, LoadSaveData_ModeSelect, then
-// UnlockDownloadContents, MAINSCRIPT.AS 842..852): one of our packs' save, at GS+0x57A4, moved to the rows now once
-// (mission_packs.h MigrateModeSave). Before the game writes it again, so the next save has the new rows and the marker.
+// After a mode's save was loaded (airstrike.cpp ScriptUnlockDlcHook, the 0x70FF87 entry only: the script's SetMode,
+// LoadSaveData_ModeSelect, then UnlockDownloadContents, MAINSCRIPT.AS 842..852): one of our packs' save, at
+// GS+0x57A4, marked with its layout and moved to the rows now once (mission_packs.h MigrateModeSave). Before the game
+// writes it again, so the next save has the new rows and the marker. A save whose layout cannot be told is left as it
+// is and the player told, once a session per pack.
 namespace { int lastMigration=-1,lastMigrationContent=-1; }
 void SetMissionPackSaveHook(bool ready) noexcept { saveHookReady=ready; }
 void MigrateMissionPackSave(unsigned char* gs) noexcept {
     const int content=ContentOf(gs);
     const packs::Pack* const pack=Installed(Cfg(),content);
     if(!pack || !Readable(gs+packs::kModeSave,packs::kModeSaveSize,true))return;
-    const packs::Migration m=packs::MigrateModeSave(gs+packs::kModeSave,*pack);
+    unsigned char* const save=gs+packs::kModeSave;
+    std::uint32_t marker=0;
+    std::memcpy(&marker,save+packs::kMarker,4);
+    const int high=packs::HighestUsedRow(save);
+    const packs::Migration m=packs::MigrateModeSave(save,*pack);
     if(m!=packs::Migration::kAlready && (static_cast<int>(m)!=lastMigration || content!=lastMigrationContent || m==packs::Migration::kRemapped))
-        Log("PACK save: content %d (%s) %s (layout %08x, legacy rows %d)",content,pack->tag,packs::MigrationName(m),
-            pack->layout,pack->legacyRows);
+        Log("PACK save: content %d (%s) %s (marker %08x -> layout %08x, highest row %d, stable rows %d, older layouts %d)",
+            content,pack->tag,packs::MigrationName(m),marker,pack->layout,high,pack->stableRows,pack->fromCount);
     lastMigration=static_cast<int>(m);lastMigrationContent=content;
+    if(m!=packs::Migration::kForeign && m!=packs::Migration::kUndetermined)return;
+    wchar_t text[640]{};
+    if(m==packs::Migration::kUndetermined)
+        std::swprintf(text,std::size(text),L"「%ls」的存档是 2026-10-18 以前的全军出击写的。那时缺资源的关会从列表里删掉，后面的关整体前移；"
+            L"这份存档用到了第 %d 关以后，而本机没有当时安装的任务列表记录（或记录与存档对不上），无法确定它当时缺了哪几关。\n\n"
+            L"存档没有被改动，也没有打上新布局的标记：第 %d 关以后的通关记录可能错位。如果当时安装器没有跳过这个任务包的任何关，记录是对的。",
+            packs::Name(content),pack->stableRows+1,pack->stableRows+1);
+    else
+        std::swprintf(text,std::size(text),L"「%ls」的存档是另一版本的全军出击写的（关卡布局 %08x，本版是 %08x），本版不知道怎样换算它的关号。\n\n"
+            L"存档没有被改动：通关记录可能与关卡对不上。请换回写这份存档的版本，或更新到最新版本的全军出击。",
+            packs::Name(content),marker,pack->layout);
+    char key[48]{};
+    std::snprintf(key,sizeof(key),"pack-save;%d;%s",content,packs::MigrationName(m));
+    notice::Post(key,L"全军出击：任务包存档",text,notice::kOnce);
 }
 
 namespace {

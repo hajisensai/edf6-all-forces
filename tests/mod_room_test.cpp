@@ -14,7 +14,7 @@ const packs::Pack* InstalledMissionPack(std::int64_t id) noexcept { return local
 namespace {
 int failures=0,joins=0,releases=0,result=-999,dependencyMode=5,notices=0,worldQueries=0,rawResult=0,roomReleases=0,packNotices=0;
 bool rawAttribute=true;
-std::wstring notice,packNotice;
+std::wstring depNotice,packNotice;
 std::vector<crew::Data> writes;
 std::vector<std::string> texts;   // the string attributes published, copied while the call lasts (EOS copies them)
 crew::Data value{1,"SEARCH_TYPE",0x93,1};
@@ -67,8 +67,11 @@ FARPROC ResolveDependency(const char* name) noexcept {
     if(!std::strcmp(name,"EDF6CoopGetMemberAttributeApi"))return dependencyMode==6 ? nullptr : reinterpret_cast<FARPROC>(&Admission);
     return nullptr;
 }
-void RecordNotice(const wchar_t* text) noexcept {++notices;notice=text;}
-void RecordPackNotice(const wchar_t* text) noexcept {++packNotices;packNotice=text;}
+void RecordNotice(const wchar_t* text) noexcept {++notices;depNotice=text;}
+std::wstring packNoticeTitle;
+void RecordPackNotice(const wchar_t* title,const wchar_t* text) noexcept {++packNotices;packNoticeTitle=title;packNotice=text;}
+std::uint64_t fakeNow=1000;
+std::uint64_t FakeNow() noexcept {return fakeNow;}
 void RoomContent(std::int64_t dlc){room["DLC"]=crew::Data{1,"DLC",{dlc},1};}
 void RoomPack(const char* line){
     if(!line){room.erase("AF_PACK");return;}
@@ -150,10 +153,31 @@ void PackIdentity(crew::Put publish,crew::Join enter){
     Join("a content id of another type: refused the same way",false,1);
     Check(lastLog.find("reason=content-read-failed")!=std::string::npos,"...with the same reason");
     RoomContent(0);
-    // EDF6Coop's remembered rooms: the export answers the same
-    Check(EDF6AF_RoomPackCompatible(69,line)==1 && EDF6AF_RoomPackCompatible(0,nullptr)==1,"export: same pack / stock");
-    Check(EDF6AF_RoomPackCompatible(69,nullptr)==0 && EDF6AF_RoomPackCompatible(69,"1;69;EDF41;0000000000000000;9;000")==0
-          && EDF6AF_RoomPackCompatible(71,nullptr)==0,"export: missing, different, not installed");
+    // EDF6Coop's remembered rooms: the export answers the same, and a refusal shows the EOS route's dialog (on the
+    // dialog thread in the game; the recorder here), not again for an unchanged refusal within a minute (Coop asks
+    // at every room search), again after that and for another refusal
+    fakeNow+=61000;   // past the minute of the same refusals the EOS joins above showed (one message, either route)
+    int notes=packNotices;
+    Check(EDF6AF_RoomPackCompatible(69,line)==1 && EDF6AF_RoomPackCompatible(0,nullptr)==1 && packNotices==notes,
+          "export: same pack / stock, no dialog");
+    Check(EDF6AF_RoomPackCompatible(69,nullptr)==0 && packNotices==notes+1 && packNotice.find(L"没有发布任务包身份")!=std::wstring::npos
+          && packNoticeTitle==L"全军出击：无法加入联机房间","export refusal: the same dialog as the EOS route");
+    Check(lastLog.find("ROOM pack check (EDF6Coop): refused reason=pack-identity-missing content=69")!=std::string::npos,"...logged");
+    Check(EDF6AF_RoomPackCompatible(69,nullptr)==0 && packNotices==notes+1,"the same refusal again at once: no second dialog");
+    Check(lastLog.find("already shown")!=std::string::npos,"...said in the log");
+    fakeNow+=59000;
+    Check(EDF6AF_RoomPackCompatible(69,nullptr)==0 && packNotices==notes+1,"...nor within the minute");
+    fakeNow+=2000;
+    Check(EDF6AF_RoomPackCompatible(69,nullptr)==0 && packNotices==notes+2,"after it: shown again");
+    Check(EDF6AF_RoomPackCompatible(69,"1;69;EDF41;0000000000000000;9;000")==0 && packNotices==notes+3
+          && packNotice.find(L"版本不同")!=std::wstring::npos,"another refusal: its own dialog");
+    Check(EDF6AF_RoomPackCompatible(71,nullptr)==0 && packNotices==notes+4 && packNotice.find(L"本机没有安装")!=std::wstring::npos,
+          "not installed: its own dialog");
+    // the EOS route's refusals are the player's own tries: each shown (the last one closed), whatever the minute
+    RoomContent(69);RoomPack(nullptr);
+    Join("an older host, twice in a row",false,1);
+    Join("...each try its dialog",false,1);
+    RoomContent(0);
     // the wire's mask round trip and bounds
     packs::Pack big{};
     char mask[129]{};
@@ -175,53 +199,110 @@ void PackIdentity(crew::Put publish,crew::Join enter){
     Check(packs::LockPlaceholders(rows.data(),rows.size(),held)==2 && rows[1].state==3 && rows[5].state==3 && rows[0].state==1
           && rows[2].state==4,"placeholders locked, the others as the select left them");
 }
-// An older save's rows moved to the rows now, once (mission_packs.h MigrateModeSave, the save as the game holds it at
-// GS+0x57A4: +0 current row, +8 clear[10][512], +0x14A0 a byte per row, the marker at row 508 of that block).
+// A save marked with its layout and moved to the rows now, once, decided by the save itself (mission_packs.h
+// MigrateModeSave, the save as the game holds it at GS+0x57A4: +0 current row, +8 clear[10][512], +0x14A0 a byte per
+// row, the marker at row 508 of that block).
 void SaveMigration(){
     using namespace crew::packs;
     Pack p{};
-    Check(Make(69,"EDF41","bc133623395bd534",6,"00",p) && p.layout==0xbc133623u,"the layout is the digest's first 8 digits");
-    Check(SetLegacy(p,"4:0,2,3,5") && p.legacyRows==4 && p.legacy[1]==2,"Legacy parsed");
+    Check(Make(69,"EDF41","bc133623395bd534",6,"00",p) && p.layout==0,"a pack's identity carries no save layout");
+    Check(SetLayout(p,"3e12cdf5",1) && p.layout==0x3e12cdf5u && p.stableRows==1,"Layout and StableRows");
+    Check(AddFrom(p,0,"4:0,2,3,5") && p.fromCount==1 && p.From(0) && p.From(0)->rows==4 && p.From(0)->row[1]==2,"Legacy parsed");
     Pack bad=p;
-    Check(!SetLegacy(bad,"4:0,2,3") && !SetLegacy(bad,"3:0,2,6") && !SetLegacy(bad,"2:0,-2") && !SetLegacy(bad,"x") && bad.legacyRows==0
-          && SetLegacy(bad,"") && bad.legacyRows==0,"a count off, a row past the pack, a bad row: refused; empty: none");
+    Check(!AddFrom(bad,0,"4:0,2,3,5") && !AddFrom(bad,0x11,"4:0,2,3") && !AddFrom(bad,0x11,"3:0,2,6")
+          && !AddFrom(bad,0x11,"2:0,-2") && !AddFrom(bad,0x11,"x") && !AddFrom(bad,p.layout,"1:0") && bad.fromCount==1
+          && AddFrom(bad,0x11,"") && bad.fromCount==1,
+          "a layout twice, a count off, a row past the pack, a bad row, the pack's own layout: refused; empty: none");
+    Check(AddFrom(bad,0x11,"1:0") && AddFrom(bad,0x12,"1:0") && AddFrom(bad,0x13,"1:0") && !AddFrom(bad,0x14,"1:0")
+          && bad.fromCount==kMaxFrom,"at most kMaxFrom layouts");
+    Check(!SetLayout(bad,"00000000",0) && !SetLayout(bad,"3e12cdf",0) && !SetLayout(bad,"3e12cdfg",0)
+          && !SetLayout(bad,"3e12cdf5",7) && !SetLayout(bad,"3e12cdf5",-1) && !SetLayout(bad,"00000011",0)
+          && bad.layout==0x3e12cdf5u,"a zero, short, non-hex layout, stable rows past the pack, an older one's id: refused");
     std::vector<unsigned char> save(kModeSaveSize);
     unsigned char* const s=save.data();
-    const auto clear=[&](int c,int r)->unsigned char&{return s[kClear+static_cast<std::size_t>(c)*512+static_cast<std::size_t>(r)];};
+    const auto clear=[](std::vector<unsigned char>& v,int c,int r)->unsigned char&{
+        return v[kClear+static_cast<std::size_t>(c)*512+static_cast<std::size_t>(r)];};
+    const auto marker=[](const std::vector<unsigned char>& v){std::uint32_t m=0;std::memcpy(&m,v.data()+kMarker,4);return m;};
     // the old save: rows 0..3 were M001, M002, M004, M006 (M003 and M005 left out); class 0 cleared all four, class 3
     // row 1 on two difficulties; the per-row byte of old row 2; the current row old 3
-    for(int r=0;r<4;++r)clear(0,r)=1;
-    clear(3,1)=3;s[kRowBytes+2]=4;s[0]=3;
-    Check(MigrateModeSave(s,p)==Migration::kRemapped,"an unmarked save with a Legacy layout: moved");
-    Check(clear(0,0)==1 && clear(0,1)==0 && clear(0,2)==1 && clear(0,3)==1 && clear(0,4)==0 && clear(0,5)==1,"class 0's clears on their missions");
-    Check(clear(3,2)==3 && clear(3,1)==0,"class 3's clear moved with its mission");
+    for(int r=0;r<4;++r)clear(save,0,r)=1;
+    clear(save,3,1)=3;s[kRowBytes+2]=4;s[0]=3;
+    Check(HighestUsedRow(s)==3,"the highest row with anything: 3");
+    Check(MigrateModeSave(s,p)==Migration::kRemapped,"unmarked, past the stable rows, fitting this machine's record: moved");
+    Check(clear(save,0,0)==1 && clear(save,0,1)==0 && clear(save,0,2)==1 && clear(save,0,3)==1 && clear(save,0,4)==0
+          && clear(save,0,5)==1,"class 0's clears on their missions");
+    Check(clear(save,3,2)==3 && clear(save,3,1)==0,"class 3's clear moved with its mission");
     Check(s[kRowBytes+3]==4 && s[kRowBytes+2]==0 && s[0]==5,"the per-row byte and the current row moved");
-    std::uint32_t marker=0;std::memcpy(&marker,s+kMarker,4);
-    Check(marker==p.layout,"marked");
+    Check(marker(save)==p.layout,"marked with the layout");
     const std::vector<unsigned char> once=save;
     Check(MigrateModeSave(s,p)==Migration::kAlready && save==once,"a marked save is never moved again");
-    std::uint32_t other=0x1234;std::memcpy(s+kMarker,&other,4);
-    const std::vector<unsigned char> foreign=save;
-    Check(MigrateModeSave(s,p)==Migration::kForeign && save==foreign,"another layout's marker: left as it is");
-    std::vector<unsigned char> fresh(kModeSaveSize);
+    // an unmarked save the record does not fit (a row past its four): which rows it had cannot be told
+    std::vector<unsigned char> past(kModeSaveSize);
+    clear(past,0,0)=1;clear(past,0,4)=1;
+    const std::vector<unsigned char> pastBefore=past;
+    Check(MigrateModeSave(past.data(),p)==Migration::kUndetermined && past==pastBefore && marker(past)==0,
+          "unmarked, past the record's rows: left exactly as it is, unmarked");
+    // no record at all (an older install uninstalled before this one): only a save within the stable rows is marked
     Pack plain{};
-    Check(Make(65,"EDF5","1a74064786830772",5,"00",plain),"a pack without Legacy");
-    fresh[kClear+1]=1;fresh[0]=1;
-    Check(MigrateModeSave(fresh.data(),plain)==Migration::kMarked && fresh[kClear+1]==1 && fresh[0]==1,"no Legacy: only the marker");
+    Check(Make(65,"EDF5","1a74064786830772",5,"00",plain) && SetLayout(plain,"a1c87b26",2),"a pack without Legacy");
+    std::vector<unsigned char> fresh(kModeSaveSize);
+    Check(MigrateModeSave(fresh.data(),plain)==Migration::kMarked && marker(fresh)==0xa1c87b26u,"a new save: marked");
+    std::vector<unsigned char> early(kModeSaveSize);
+    clear(early,0,0)=1;clear(early,2,1)=1;early[0]=1;early[kRowBytes+1]=2;
+    std::vector<unsigned char> earlyBefore=early;
+    Check(MigrateModeSave(early.data(),plain)==Migration::kMarked && clear(early,0,0)==1 && clear(early,2,1)==1 && early[0]==1
+          && early[kRowBytes+1]==2,"progress within the stable rows: marked, nothing moved");
+    std::memcpy(early.data()+kMarker,earlyBefore.data()+kMarker,4);
+    Check(early==earlyBefore,"...nothing but the marker written");
+    std::vector<unsigned char> late(kModeSaveSize);
+    clear(late,0,0)=1;clear(late,0,1)=1;clear(late,0,2)=1;
+    const std::vector<unsigned char> lateBefore=late;
+    Check(MigrateModeSave(late.data(),plain)==Migration::kUndetermined && late==lateBefore,
+          "progress past the stable rows without a record: left as it is, unmarked (no guess made permanent)");
+    std::vector<unsigned char> current(kModeSaveSize);
+    current[0]=3;
+    Check(MigrateModeSave(current.data(),plain)==Migration::kUndetermined,"the current row counts as progress too");
+    // marked by an older release's layout: moved straight to the rows now by that layout's own map, whichever it is
+    Pack chain{};
+    Check(Make(66,"EDF5DLC1","557e4c47c116ff41",6,"00",chain) && SetLayout(chain,"0000c3c3",0)
+          && AddFrom(chain,0xa1a1a1a1u,"4:0,1,3,5") && AddFrom(chain,0xb2b2b2b2u,"5:0,2,1,3,5"),"two older released layouts");
+    std::vector<unsigned char> v1(kModeSaveSize),v2(kModeSaveSize);
+    const std::uint32_t l1=0xa1a1a1a1u,l2=0xb2b2b2b2u;
+    std::memcpy(v1.data()+kMarker,&l1,4);std::memcpy(v2.data()+kMarker,&l2,4);
+    clear(v1,0,2)=1;clear(v1,0,3)=2;v1[0]=3;
+    clear(v2,0,1)=1;clear(v2,0,2)=4;v2[0]=2;
+    Check(MigrateModeSave(v1.data(),chain)==Migration::kRemapped && clear(v1,0,3)==1 && clear(v1,0,5)==2 && clear(v1,0,2)==0
+          && v1[0]==5 && marker(v1)==0xc3c3u,"the first layout's save: by its map, marked now");
+    Check(MigrateModeSave(v2.data(),chain)==Migration::kRemapped && clear(v2,0,2)==1 && clear(v2,0,1)==4 && v2[0]==1
+          && marker(v2)==0xc3c3u,"the second layout's save: by its own map");
+    Check(MigrateModeSave(v1.data(),chain)==Migration::kAlready,"...and never again");
+    std::vector<unsigned char> overfull(kModeSaveSize);
+    std::memcpy(overfull.data()+kMarker,&l1,4);
+    clear(overfull,0,4)=1;   // a row the first layout did not have
+    const std::vector<unsigned char> overBefore=overfull;
+    Check(MigrateModeSave(overfull.data(),chain)==Migration::kForeign && overfull==overBefore,"a save past its layout's rows: untouched");
+    std::vector<unsigned char> foreign=once;
+    const std::uint32_t other=0x1234;std::memcpy(foreign.data()+kMarker,&other,4);
+    const std::vector<unsigned char> foreignBefore=foreign;
+    Check(MigrateModeSave(foreign.data(),p)==Migration::kForeign && foreign==foreignBefore,"a layout without a map: left as it is");
     std::vector<unsigned char> dropped(kModeSaveSize);
     Pack gone=p;
-    Check(SetLegacy(gone,"2:-1,1"),"a row no longer in the pack");
+    gone.fromCount=0;
+    Check(AddFrom(gone,0,"2:-1,1"),"a row no longer in the pack");
+    gone.stableRows=0;
     dropped[kClear]=1;dropped[kClear+1]=2;dropped[0]=0;
     Check(MigrateModeSave(dropped.data(),gone)==Migration::kRemapped && dropped[kClear]==0 && dropped[kClear+1]==2 && dropped[0]==0,
           "its clear dropped, the current row back to 0");
     Pack big{};
     char mask[129]{};for(int i=0;i<128;++i)mask[i]='0';
-    Check(Make(65,"EDF5","1a74064786830772",512,mask,big) && MigrateModeSave(fresh.data(),big)==Migration::kNone,
+    Check(Make(65,"EDF5","1a74064786830772",512,mask,big) && SetLayout(big,"0000abcd",0) && MigrateModeSave(fresh.data(),big)==Migration::kNone,
           "a pack with more rows than the marker leaves room for: untouched");
+    Pack none{};
+    Check(Make(65,"EDF5","1a74064786830772",5,"00",none) && MigrateModeSave(fresh.data(),none)==Migration::kNone,"no layout: untouched");
 }
 int main(int argc,char** argv){
     using namespace crew;
-    resolveCoop=&ResolveDependency;showDependencyProblem=&RecordNotice;showPackProblem=&RecordPackNotice;create=&RecordCreated;
+    resolveCoop=&ResolveDependency;showDependencyProblem=&RecordNotice;crew::notice::show=&RecordPackNotice;crew::notice::nowMs=&FakeNow;create=&RecordCreated;
     RoomContent(0);   // every room the game publishes has its content id: EDF6's story here
     add=&RecordPut;filter=&RecordPut;copy=&RecordCopy;rawCopy=&RecordRaw;release=&RecordRelease;join=&RecordJoined;
     const JoinOptions jo{4,reinterpret_cast<void*>(1),nullptr};
@@ -300,7 +381,7 @@ int main(int argc,char** argv){
         dependencyMode=mode;Check(!EDF6AF_RoomIsolationReady(),"Coop virtual admission sees failed online prerequisites");
         const auto oldJoins=joins,oldNotices=notices;result=-999;
         make(nullptr,nullptr,reinterpret_cast<void*>(9),&RecordCallback);
-        Check(joins==oldJoins && result==10 && notices==oldNotices+1 && !notice.empty(),"dependency failure refuses create with visible explanation");
+        Check(joins==oldJoins && result==10 && notices==oldNotices+1 && !depNotice.empty(),"dependency failure refuses create with visible explanation");
         value.value=kAllForcesRoomPrefix+0x93;result=-999;
         enter(nullptr,&jo,reinterpret_cast<void*>(9),&RecordCallback);
         Check(joins==oldJoins && result==10 && notices==oldNotices+2,"dependency failure refuses join with visible explanation");

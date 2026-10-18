@@ -6422,9 +6422,13 @@ def ported_content_unlock_keys() -> None:
     assert not any(pw.retired_id(i).startswith(tuple(prefixes)) for i in pw.IDS), 'a placeholder would be granted'
     assert not any(c.startswith(tuple(prefixes)) for c in calls.IDS)
     air = src('src/airstrike.cpp')
-    hook = air.split('void __fastcall UnlockDlcHook(unsigned char* gs) {', 1)[1].split('\n}\n', 1)[0]
-    assert hook.index('GrantCalls(gs,ported)') < hook.index('(image+kUnlockDlc)(gs)'), 'grant before the native step'
-    assert 'Cfg().portedWeaponsUnlocked' in hook
+    give = air.split('void Grant(unsigned char* gs) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'GrantCalls(gs,ported)' in give and 'Cfg().portedWeaponsUnlocked' in give
+    for name in ('UnlockDlcHook', 'ScriptUnlockDlcHook'):   # both entries of 0xDC550: the grant before the native step
+        hook = air.split(f'void __fastcall {name}(unsigned char* gs) {{', 1)[1].split('\n}\n', 1)[0]
+        assert hook.index('Grant(gs);') < hook.index('(image+kUnlockDlc)(gs)'), f'{name}: grant before the native step'
+        # the mission pack's save only at the script's entry (after SetMode and the load): the reset's has the old mode
+        assert ('MigrateMissionPackSave(gs)' in hook) == (name == 'ScriptUnlockDlcHook'), name
     grant = air.split('Granted GrantCalls(unsigned char* gs,bool ported) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert '&=' not in grant and '~' not in grant, 'the grant never clears a bit'
     camp = src('src/edf5campaign.cpp')
