@@ -79,7 +79,7 @@ constexpr ULONGLONG kStatusMs=4000;
 bool profileChecked=false,profile=false;
 void* missionMgr=nullptr;          // the object manager this mission's preload was for
 bool preloaded[kEntryCount]{};     // its SGO queued for this mission
-bool missing[kEntryCount]{};       // a Mods row whose SGO is not in Mods (not installed): never preloaded nor made
+bool missing[kEntryCount]{};       // a Mods row with a file not in Mods (not installed): never preloaded nor made
 bool broken[kEntryCount]{};        // the game faulted making it: off until the game restarts (as support_spawn.cpp)
 // This mission is the test range pack's (edf5campaign.cpp TestRangeMode at its start): the M map's 「摆放」 is on
 // (ini RangePlace), whatever DebugSpawn says.
@@ -136,15 +136,13 @@ RowState StateOf(int row) noexcept {
 }
 bool RowReady(int row) noexcept { return StateOf(row)==RowState::ready; }
 
-// A Mods row's SGO there: Mods\OBJECT\ and its app:/object/ path's rest (a 4.1 DLC object's folder kept).
-bool ModRowThere(const Entry& e) noexcept {
-    constexpr wchar_t kPrefix[]=L"app:/object/";
-    constexpr std::size_t kPrefixLength=sizeof(kPrefix)/sizeof(kPrefix[0])-1;
-    if(!e.sgo || _wcsnicmp(e.sgo,kPrefix,kPrefixLength)!=0)return false;
-    wchar_t file[MAX_PATH];
-    if(wcscpy_s(file,e.sgo+kPrefixLength)!=0)return false;
-    for(wchar_t* p=file;*p;++p)if(*p==L'/')*p=L'\\';
-    return jet::ModFileThere(file);
+// A Mods row's files all there (Mods\OBJECT\): the list testrange/catalog.py files_of gives, the one catalog.available
+// checks for the range's own tools (src/spawn_catalog.inc). The first one that is not, or nullptr: every one is.
+const wchar_t* ModRowLacks(const Entry& e) noexcept {
+    if(!e.files || !e.files[0])return L"?";   // a Mods row always lists its files (debug_spawn.h FilesAgree)
+    for(const wchar_t* f=e.files;*f;f+=std::wcslen(f)+1)
+        if(!jet::ModFileThere(f))return f;
+    return nullptr;
 }
 
 void Publish() noexcept {
@@ -301,7 +299,7 @@ int MakeRow(int row,const float* at,const float* heading,const float* look,wchar
     case How::vehicle:
     case How::enemy:
         if(!profile)why="EDF.dll profile mismatch (see DEBUGSPAWN profile)";
-        else if(missing[row])why="its SGO is not in Mods (not installed: run the installer / install the test range)";
+        else if(missing[row])why="a file of it is not in Mods (not installed: run the installer / install the test range)";
         else if(broken[row])why="it faulted before: off until the game restarts";
         else if(!preloaded[row])why="not preloaded this mission (turned on mid-mission, or a heavy row with RangePlaceAll=0)";
         else made=e.how==How::enemy ? SpawnEnemy(row,m,&why) : SpawnVehicle(row,m,&why);
@@ -378,7 +376,12 @@ void PreloadDebugSpawn() noexcept {
     if(!c.enabled || (!c.debugSpawn && !range))return;   // off: nothing preloaded, nothing touched
     if(!profileChecked){profileChecked=true;profile=CheckProfile();}
     if(!profile)return;
-    for(int i=0;i<kEntryCount;++i)missing[i]=kEntries[i].mod && !ModRowThere(kEntries[i]);
+    int lacking=0;
+    for(int i=0;i<kEntryCount;++i) {
+        const wchar_t* const lacks=kEntries[i].mod ? ModRowLacks(kEntries[i]) : nullptr;
+        missing[i]=lacks!=nullptr;
+        if(lacks && ++lacking<=8)Log("DEBUGSPAWN %s: not installed (Mods\\OBJECT\\%ls missing)",kEntries[i].id,lacks);
+    }
     int vehicles=0,enemies=0,absent=0;
     __try {
         void* const mgr=At<void*>(image,kPreloadMgr);

@@ -47,6 +47,18 @@ void Catalog() {
         // there; only those may be left out of the preload by default (a heavy model of their own).
         if(e.category==Category::ours || e.category==Category::enemy41)Expect(e.mod,"a Mods row checks its file");
         if(!e.sgo)Expect(!e.mod && e.preload,"a plugin row has no file");
+        // A Mods row's files (catalog.files_of) are names under Mods\OBJECT\ and hold its own SGO's.
+        if(e.files) {
+            bool own=false;
+            int n=0;
+            wchar_t sgo[260]{};   // its app:/object/ path's rest, a folder's slash a backslash (as the list names it)
+            for(int k=0;e.sgo && e.sgo[12+k] && k<259;++k)sgo[k]=e.sgo[12+k]==L'/' ? L'\\' : e.sgo[12+k];
+            for(const wchar_t* f=e.files;*f;f+=std::wcslen(f)+1,++n) {
+                Expect(std::wcschr(f,L'/')==nullptr && _wcsnicmp(f,L"OBJECT\\",7)!=0,"a Mods file is named under Mods\\OBJECT\\");
+                own=own || _wcsicmp(f,sgo)==0;
+            }
+            Expect(n>0 && own,"a Mods row lists its own SGO among its files");
+        }
         if(!e.preload)Expect(e.category==Category::enemy41,"only EDF4.1's heavy rows wait for RangePlaceAll");
         if(e.category==Category::ours)Expect(std::wcsncmp(e.sgo,L"app:/object/EDF6TR_",19)==0 || std::wcsncmp(e.sgo,L"app:/object/EDF6VC_",19)==0,
                                             "our vehicles are the range's (EDF6TR_) or the installer's (EDF6VC_)");

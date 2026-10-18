@@ -824,8 +824,17 @@ def edf41_content(ids: dict[str, int]) -> int:
 def pack_digest(pack: Pack, rows: list[dict]) -> str:
     """A pack's definition, as a room compares it (src/mission_packs.h): its tag and every row's mission key in order,
     with the committed scripts' hashes where the pack ships its own (EDF4.1's). Placeholders count as their mission
-    (a row is the definition's on every machine); which rows this machine lacks is missing_mask's."""
+    (a row is the definition's on every machine); which rows this machine lacks is missing_mask's.
+
+    So is what the pack's modes change from the stock mode they copy where each machine reads its own copy: the online
+    weapon level cap (mode_entry, weapon_cap=False: the test range). EDF.dll computes the cap from the local
+    config.sgo's ModeList (docs/weapon-level-cap-re.md), so a guest whose install predates the change keeps the stock
+    cap in the host's room; with it in the definition that guest is refused (pack-definition-differs) and told to
+    reinstall. A pack that keeps the stock cap adds nothing: its digest (and so its saves' layout marker,
+    src/mission_packs.h MigrateModeSave) is what it was."""
     h = hashlib.sha256(f'AF-PACK-1\n{pack.tag}\n{len(rows)}\n'.encode())
+    if not pack.weapon_cap and ONLINE in pack.kinds:
+        h.update(b'online-weapon-cap none\n')
     for r in rows:
         h.update(f'{r["key"]}\n'.encode())
         for name, sha in sorted(r.get('sha', {}).items()):

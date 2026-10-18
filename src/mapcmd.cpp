@@ -233,7 +233,9 @@ bool GroundAlong(const float* eye,const float* dir,float level,float* point) noe
     if(MapFloorRay(eye,end,hit)>=0.0f && std::isfinite(hit[0]+hit[1]+hit[2])){std::memcpy(point,hit,12);return true;}
     return mapcmd::RayLevel(eye,dir,level,point);
 }
-Keys ReadKeys(const MapCmdInput& in) noexcept {
+// `placeKeys`: the 「摆放」 panel can be used this frame (the test range, offline): only then are its keys read, so on any other map
+// , . / Enter Backspace stay the game's and never count as the keyboard taking over from the pad.
+Keys ReadKeys(const MapCmdInput& in,bool placeKeys) noexcept {
     Keys k{};
     if(in.front) {
         k.tab=Down(VK_TAB);k.shift=Down(VK_SHIFT);k.ctrl=Down(VK_CONTROL);
@@ -244,8 +246,10 @@ Keys ReadKeys(const MapCmdInput& in) noexcept {
         k.mark=Cfg().npcMarkKey>0 && Down(Cfg().npcMarkKey);
         for(int d=0;d<9;++d)k.digit[d]=Down('1'+d);
         k.supportPrev=Down(VK_OEM_4);k.supportNext=Down(VK_OEM_6);k.supportCall=Down('C');
-        k.placePrev=Down(VK_OEM_COMMA);k.placeNext=Down(VK_OEM_PERIOD);k.placeCategory=Down(VK_OEM_2);
-        k.placeEnter=Down(VK_RETURN);k.placeClose=Down(VK_BACK);
+        if(placeKeys) {
+            k.placePrev=Down(VK_OEM_COMMA);k.placeNext=Down(VK_OEM_PERIOD);k.placeCategory=Down(VK_OEM_2);
+            k.placeEnter=Down(VK_RETURN);k.placeClose=Down(VK_BACK);
+        }
     }
     if(in.pad) {
         const WORD b=in.buttons;
@@ -848,7 +852,10 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     g.requester=in.requester.obj ? in.requester : ObjRef::Of(PlayerHuman());
     CommandNetworkReply(g);
     const ULONGLONG now=GetTickCount64();
-    Keys k=ReadKeys(in);
+    // The 「摆放」 panel works (its keys, its pad) only where it can place: the test range, offline. Online it is shown
+    // (SpawnRowState says why nothing can be placed), its rows not driven.
+    const bool placeKeys=RangePlaceOn() && !InSession();
+    Keys k=ReadKeys(in,placeKeys);
     // The damage statistics' page shown: only the pointer's buttons (its clicks); no order key reaches the units under it.
     if(DamageStatsShown()){const Keys all=k;k=Keys{};k.left=all.left;k.right=all.right;k.shift=all.shift;}
     View v{};
@@ -873,7 +880,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         (k.placeEnter && !g.was.placeEnter);
     const bool padPress=(k.padNext && !g.was.padNext) || (k.padGuard && !g.was.padGuard) ||
         (k.padFollow && !g.was.padFollow) || (k.padRelease && !g.was.padRelease) ||
-        (g.placeOn && ((k.padUp && !g.was.padUp) || (k.padDown && !g.was.padDown) || (k.padLeft && !g.was.padLeft) ||
+        (placeKeys && ((k.padUp && !g.was.padUp) || (k.padDown && !g.was.padDown) || (k.padLeft && !g.was.padLeft) ||
                        (k.padRight && !g.was.padRight) || (g.place.open && k.padA && !g.was.padA)));
     in.usingPad=mapcmd::UsingPad(in.usingPad,mouseOrKey,padPress);
     const void* ids[kCmdUnits];
@@ -948,13 +955,14 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     int placeAt=-1;
     g.placeOn=RangePlaceOn();
     if(g.placeOn) {
-        rangeplace::Press& pk=g.placePress;
-        pk.prev=(k.placePrev && !g.was.placePrev) || (k.padUp && !g.was.padUp);
-        pk.next=(k.placeNext && !g.was.placeNext) || (k.padDown && !g.was.padDown);
-        pk.catPrev=k.padLeft && !g.was.padLeft;
-        pk.catNext=(k.placeCategory && !g.was.placeCategory) || (k.padRight && !g.was.padRight);
-        pk.close=(k.placeClose && !g.was.placeClose) || (k.padB && !g.was.padB);
-        pk.place=(k.placeEnter && !g.was.placeEnter) || (k.padA && !g.was.padA);
+        rangeplace::Press& pk=g.placePress;   // the clicks (UiClick) as they are; the keys and the pad only when it works
+        const bool pad=placeKeys;
+        pk.prev=(k.placePrev && !g.was.placePrev) || (pad && k.padUp && !g.was.padUp);
+        pk.next=(k.placeNext && !g.was.placeNext) || (pad && k.padDown && !g.was.padDown);
+        pk.catPrev=pad && k.padLeft && !g.was.padLeft;
+        pk.catNext=(k.placeCategory && !g.was.placeCategory) || (pad && k.padRight && !g.was.padRight);
+        pk.close=(k.placeClose && !g.was.placeClose) || (pad && k.padB && !g.was.padB);
+        pk.place=(k.placeEnter && !g.was.placeEnter) || (pad && k.padA && !g.was.padA);
         const rangeplace::Result r=rangeplace::Step(g.place,pk);
         using hudtext::Tx;
         if(r.act==rangeplace::Act::armed) {
@@ -965,7 +973,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         else if(r.act==rangeplace::Act::opened)Log("MAPCMD place panel open (category %d)",g.place.category);
         if(g.armedClick && g.place.armed>=0 && !g.armedOrder && g.armedSupport<0)placeAt=g.place.armed;
     } else g.place=rangeplace::Panel{};
-    placeHoldsPad.store(g.placeOn && (g.place.open || (placeHoldsPad.load() && (k.padA || k.padB))));
+    placeHoldsPad.store(placeKeys && g.placeOn && (g.place.open || (placeHoldsPad.load() && (k.padA || k.padB))));
     // The right button let go on the map (RTS): a move to the ground there, or focus fire on the enemy under it.
     const mapcmd::RightClick right=mapcmd::RightClickOrder(g.rightClick && !g.rightOnUi ? g.sel.n : 0,npcmark::Alive(g.hover),true);
     p.move=p.move || (right.issue && right.order==Order::move);
