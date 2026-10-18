@@ -27,6 +27,7 @@
 #include "ground_navigation.h"
 #include "pickup.h"
 #include "npc_logic.h"
+#include "ifc_model.h"
 #include "npc_mark.h"
 #include "online_authority.h"
 #include "real_driver_native.h"
@@ -1348,9 +1349,38 @@ const unsigned char kBargaKindContext[]={0x33,0xD2,0x48,0x8B,0xCB};   // xor edx
 using SixFn=bool(__fastcall*)(void*);
 using ControlKindFn=int(__fastcall*)(const void*,std::uint64_t);
 enum class AiPass : std::uint8_t { none, car, mech, barga };
-constexpr int kBargaTried=16;
-ObjRef bargaTried[kBargaTried]{};int bargaTriedNext=0;
 bool bargaKindOk=false;
+
+// The vehicles whose own slot 6 the plugin ran for an NPC driver (the Barga's below, the trucks' in CarAimReady), each
+// with what came of it: run at most once per vehicle, and a failure stays a failure. A slot 6 can register the AI action
+// (+0x1648 / +0x2508) and then throw (the trucks: 0x6731C0 first, then the aim table; the throws at 0x6267B5 ...), so the
+// action alone never says it was built: this record is read before it. Kept per object, never overwritten while the
+// object lives (as many vehicles as a mission has): an entry pins its object's weak-pointer control block (npc_mark.h
+// Assign), so neither that block's address nor, with it, the {object, block} pair can come back for another object while
+// the entry is held; an entry whose object is gone (no strong use left) is dropped and its pin released.
+struct SixRun { ObjRef ref; bool built=false; };
+std::vector<SixRun> sixRuns;
+bool ObjectGone(const ObjRef& r) noexcept {
+    return !r.ctrl || !Readable(r.ctrl,edf::kCtrlUses+4) || At<std::int32_t>(r.ctrl,edf::kCtrlUses)<=0;
+}
+const SixRun* SixRunOf(const unsigned char* v) noexcept {
+    const void* const ctrl=At<const void*>(v,kSelfCtrl);
+    for(const auto& r:sixRuns)if(r.ref.obj==v && r.ref.ctrl==ctrl)return &r;
+    return nullptr;
+}
+// False (nothing recorded: the slot 6 is then not run) for an object with no control block to pin.
+bool CanRecordSixRun(const unsigned char* v) noexcept { return At<const void*>(v,kSelfCtrl)!=nullptr; }
+void RecordSixRun(const unsigned char* v,bool built) noexcept {
+    for(std::size_t i=0;i<sixRuns.size();) {
+        if(!ObjectGone(sixRuns[i].ref)){++i;continue;}
+        npcmark::Assign(sixRuns[i].ref,ObjRef{});
+        sixRuns[i]=sixRuns.back();sixRuns.pop_back();
+    }
+    SixRun r;
+    npcmark::Assign(r.ref,ObjRef::Of(v));
+    r.built=built;
+    sixRuns.push_back(r);
+}
 
 AiPass AiPassOf(const void* fn) noexcept {
     static int car=0,mech=0,barga=0;
@@ -1384,15 +1414,17 @@ void InstallBargaControlKind() noexcept {
     Log("NPCAI Barga NPC driver input=%d (slot 4 reads its AI block)",bargaKindOk);
 }
 
-// The Barga's state machine, built once by its own slot 6 (a vehicle it failed for is not tried again).
+bool RunBargaSix(unsigned char* v,void* const* vt) noexcept {
+    __try { return reinterpret_cast<SixFn>(vt[kSlotSix])(v) && At<const void*>(v,kBargaAction); }
+    __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+// The Barga's state machine, built once by its own slot 6 (a vehicle it failed for is not tried again: SixRun).
 bool BargaReady(unsigned char* v,void* const* vt) noexcept {
-    if(At<const void*>(v,kBargaAction))return true;
-    for(const auto& r:bargaTried)if(r.Is(v))return false;
-    bargaTried[bargaTriedNext]=ObjRef::Of(v);bargaTriedNext=(bargaTriedNext+1)%kBargaTried;
-    if(!Readable(vt,(kSlotSix+1)*8) || vt[kSlotSix]!=image+kBargaSix)return false;
-    bool built=false;
-    __try { built=reinterpret_cast<SixFn>(vt[kSlotSix])(v) && At<const void*>(v,kBargaAction); }
-    __except(EXCEPTION_EXECUTE_HANDLER){built=false;}
+    if(const SixRun* r=SixRunOf(v))return r->built;   // before the action: a failed slot 6 may have left one
+    if(At<const void*>(v,kBargaAction))return true;   // its stock slot 6 ran (it was on the AI list)
+    if(!CanRecordSixRun(v) || !Readable(vt,(kSlotSix+1)*8) || vt[kSlotSix]!=image+kBargaSix)return false;
+    const bool built=RunBargaSix(v,vt);
+    RecordSixRun(v,built);
     Log("NPCAI Barga v=%p: its AI %s for the NPC driver",v,built ? "built (slot 6)" : "could not be built: left driving only");
     return built;
 }
@@ -1403,34 +1435,81 @@ bool BargaReady(unsigned char* v,void* const* vt) noexcept {
 // their own slot 70 (0x6256E0 / 0x622530), which the AI action 0x661440 aims through, reads it unchecked once it has a
 // target (0x625A17: the null table, faulting every frame: a player's 60X a soldier then drove, testhub #16, 2026-10-17).
 // So their slot 6 is run once before the pass, as the stock does when such a vehicle joins the AI list; only when the SGO
-// has the key, since a missing one throws (0x626FA6) after the action is registered (stock V607_ROBOTRUCK.SGO lacks it):
-// such a vehicle is driven, not fired. A class with another slot 6 of its own is not known to be safe: driven only.
-constexpr unsigned kCarSix=0x6731C0,kTruckSix=0x6266B0,kRoboTruckSix=0x6234E0,kSgoKeyNode=0x528A0;
-constexpr std::size_t kObjectSgo=0xA0;   // the SGO the classes read their keys from (0x528A0: 0x61D98D, 0x64D002 ...)
+// has the key, since a missing one is no table to build. The action is registered before the key is read, so a slot 6
+// that then throws (its variant checks 0x6267B5 / 0x626931 / 0x62697E ... -> 0x12DA768; the 607's the same) leaves the
+// action and a half-built table: the vehicle is recorded as failed (SixRun, read before the action) and driven, not fired.
+// A class with another slot 6 of its own is not known to be safe: driven only.
+// The key is looked up as the slot 6 looks it up (0x62670D / 0x62353D: lea r8,[r13+0x100]; r9 = the key; call 0x66F040):
+// the object's SGO root, an sgs::ut variant at +0x100 (its alternative at +0x110), through the variant's find visitor
+// (table 0x179EBA8, request {name, index}: 0x66F05C..0x66F09D, the one ifc_model.h uses). Alternative 0 is a pointer to
+// an SGO handle (0x238F90: 0x52790 on it), 1 finds nothing (0x238DF0), 2 a node reference (0x239060: 0x55A30); a
+// valueless root makes 0x66F040 throw (0x283F90 -> 0x283FE2). Not 0x528A0 on +0xA0: that is the alternative 0 lookup on
+// one fixed handle, which says nothing of a root of the other alternatives.
+constexpr unsigned kCarSix=0x6731C0,kTruckSix=0x6266B0,kRoboTruckSix=0x6234E0,kSgoFind=0x66F040,kSgoFindDispatch=0x66F05C;
+constexpr std::size_t kObjectSgoRoot=0x100;   // the object's SGO root (a variant; its alternative at +0x110)
+constexpr std::size_t kSixKeySite=0x5D,kSixKeyCall=0x7D;   // in both trucks' slot 6: the key's lookup, its call 0x66F040
 const unsigned char kOwnSixSig[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x10,0x48,0x89,0x70,0x18,0x48,0x89,0x78,0x20,0x55};
-const unsigned char kSgoKeyNodeSig[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B};
-using SgoKeyNodeFn=const void*(__fastcall*)(const void*,const wchar_t*);
-constexpr int kCarTried=16;
-ObjRef carTried[kCarTried]{};int carTriedNext=0;
+const unsigned char kSixKeySiteSig[]={0x4D,0x8D,0x85,0x00,0x01,0x00,0x00,               // lea r8,[r13+0x100]
+                                      0xC7,0x44,0x24,0x20,0xFF,0xFF,0xFF,0xFF,0x4C,0x8D,0x0D}; // mov [rsp+20],-1; lea r9,[key]
+const unsigned char kSgoFindDispatchSig[]={
+    0x49,0x8B,0xF8,0x48,0x8B,0xDA,0x48,0x89,0x54,0x24,0x28,0x41,0x0F,0xB7,0x40,0x10,   // rdi = root; ax = its alternative
+    0xBE,0xFF,0xFF,0x00,0x00,0x4C,0x8D,0x35,0x88,0x0F,0x99,0xFF,0x66,0x3B,0xC6,0x75,   // r14 = the image; valueless?
+    0x08,0x41,0xB8,0xFF,0xFF,0xFF,0xFF,0xEB,0x1D,0x4C,0x89,0x4C,0x24,0x28,0x4D,0x8B,   // request.name = the key
+    0x84,0xC6,0xA8,0xEB,0x79,0x01,0x48,0x8D,0x54,0x24,0x28,0x48,0x8B,0xCF,0x41,0xFF,   // the find visitor of 0x179EBA8
+    0xD0,0x44,0x8B,0x44};                                                              // ... index = request +8
+constexpr unsigned kSgoFindVisitors[ifcmodel::kVariantAlternatives]={0x238F90,0x238DF0,0x239060};
+
+// Whether the truck slot 6 at `six` reads its key through 0x66F040 on +0x100, and that lookup is the one CarAimKey makes.
+bool TruckKeyLookupKnown(const unsigned char* six) noexcept {
+    const std::size_t at=static_cast<std::size_t>(six-image);
+    if(!Matches(at,kOwnSixSig,sizeof(kOwnSixSig)) || !Matches(at+kSixKeySite,kSixKeySiteSig,sizeof(kSixKeySiteSig)) ||
+       !Matches(kSgoFindDispatch,kSgoFindDispatchSig,sizeof(kSgoFindDispatchSig)) || !Readable(six+kSixKeyCall,5) || six[kSixKeyCall]!=0xE8)
+        return false;
+    std::int32_t rel;std::memcpy(&rel,six+kSixKeyCall+1,4);
+    if(six+kSixKeyCall+5+rel!=image+kSgoFind)return false;
+    for(unsigned i=0;i<ifcmodel::kVariantAlternatives;++i)
+        if(reinterpret_cast<const void*>(ifcmodel::Visitor(image,ifcmodel::kVariantFind,static_cast<std::uint16_t>(i)))!=image+kSgoFindVisitors[i])
+            return false;
+    return true;
+}
+enum class AimKey { found, missing, noRoot };
+AimKey CarAimKey(const unsigned char* v,const wchar_t* key) noexcept {
+    const unsigned char* const root=v+kObjectSgoRoot;
+    const std::uint16_t alternative=ifcmodel::AlternativeOf(root);
+    if(alternative>=ifcmodel::kVariantAlternatives)return AimKey::noRoot;   // valueless (0xFFFF): 0x66F040 throws
+    ifcmodel::Find find{key,-1};
+    __try { ifcmodel::Visitor(image,ifcmodel::kVariantFind,alternative)(root,&find); }
+    __except(EXCEPTION_EXECUTE_HANDLER){return AimKey::noRoot;}
+    return find.index>=0 ? AimKey::found : AimKey::missing;
+}
+// False when the slot 6 threw; `returned` its own answer (false: 0x6731C0 failed, 0x6266FF / 0x62352F, nothing built).
+bool RunCarSix(unsigned char* v,void* const* vt,bool& returned) noexcept {
+    __try { returned=reinterpret_cast<SixFn>(vt[kSlotSix])(v); return true; }
+    __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
 
 bool CarAimReady(unsigned char* v,void* const* vt) noexcept {
     if(!Readable(vt,(kSlotSix+1)*8) || vt[kSlotSix]==image+kCarSix)return true;   // CarBase's own: nothing of its own
-    if(At<const void*>(v,kCarAction))return true;                                 // its slot 6 has run
-    for(const auto& r:carTried)if(r.Is(v))return false;
-    carTried[carTriedNext]=ObjRef::Of(v);carTriedNext=(carTriedNext+1)%kCarTried;
+    if(const SixRun* r=SixRunOf(v))return r->built;   // before the action: a slot 6 that threw left one
+    if(At<const void*>(v,kCarAction))return true;     // its stock slot 6 ran (it was on the AI list)
+    if(!CanRecordSixRun(v))return false;
     const wchar_t* key=vt[kSlotSix]==image+kTruckSix ? L"v60X_aim_info" : vt[kSlotSix]==image+kRoboTruckSix ? L"v607_aim_info" : nullptr;
     bool built=false;const char* why="its slot 6 is not one the plugin knows";
-    if(key && Matches(static_cast<std::size_t>(static_cast<const unsigned char*>(vt[kSlotSix])-image),kOwnSixSig,sizeof(kOwnSixSig)) &&
-       Matches(kSgoKeyNode,kSgoKeyNodeSig,sizeof(kSgoKeyNodeSig))) {
-        why="its SGO has no aim table";
-        __try {
-            if(reinterpret_cast<SgoKeyNodeFn>(image+kSgoKeyNode)(v+kObjectSgo,key)) {
-                reinterpret_cast<SixFn>(vt[kSlotSix])(v);
-                built=At<const void*>(v,kCarAction)!=nullptr;
-                why="its slot 6 registered no action";
+    if(key && TruckKeyLookupKnown(static_cast<const unsigned char*>(vt[kSlotSix]))) {
+        switch(CarAimKey(v,key)) {
+            case AimKey::noRoot: why="its SGO root is not one its slot 6 can read"; break;
+            case AimKey::missing: why="its SGO has no aim table"; break;
+            case AimKey::found: {
+                bool returned=false;
+                if(!RunCarSix(v,vt,returned))why="its slot 6 threw (its action may be registered, its aim table not whole)";
+                else if(!returned)why="its slot 6 answered false";
+                else if(!At<const void*>(v,kCarAction))why="its slot 6 registered no action";
+                else built=true;
+                break;
             }
-        } __except(EXCEPTION_EXECUTE_HANDLER){built=false;why="its slot 6 faulted";}
+        }
     }
+    RecordSixRun(v,built);
     if(built)Log("NPCAI car v=%p: its AI and turret aim built (slot 6) for the NPC driver",v);
     else Log("NPCAI car v=%p: %s: left driving only",v,why);
     return built;

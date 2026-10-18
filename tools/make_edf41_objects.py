@@ -39,7 +39,10 @@ EDF6 template of the class) and shipped under the same Mods path, so it replaces
 
 STOCK_COMPLETIONS: stock SGOs in EDF6's own form that name a file only 4.1 ships (Monster501_King: its model archive,
 the null model at EDF+0x1100303, MP004 2026-10-17). The stock SGO stays; those files come over converted, registered
-under 'stock_completions'. build() checks every SGO the 4.1 missions spawn (spawned_objects) that EDF6's archives
+under 'stock_completions'. A member of such an archive that a model archive of the class's own stock SGOs holds byte
+for byte (the King's five Monster501 textures, in EDF6's OBJECT/MONSTER501.MRAB) is not shipped: the entry's
+'members_from' and the manifest row say where in the player's EDF6 the install reads it (stock_member_sources,
+tools/edf41_objects.py). build() checks every SGO the 4.1 missions spawn (spawned_objects) that EDF6's archives
 serve: stale_stock refuses one that is neither replaced nor completed.
 """
 from __future__ import annotations
@@ -3538,8 +3541,9 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
         if clash:
             raise ValueError(f'{rel}: files another object needs differently: {clash}')
         files.update(out)
+        sources = stock_member_sources(games, rel, out)
         completions.append({'object': rel, 'class': sgo.load(data=games.read6(rel)).get('xgs_scene_object_class'),
-                            'files': list(out), 'completes_stock': why})
+                            'files': list(out), 'completes_stock': why, **({'members_from': sources} if sources else {})})
     if not only:   # every stock SGO the 4.1 missions spawn is one EDF6 loads, or replaced / completed above
         stale = stale_stock(games.stock_by_class(), spawned_objects(games),
                             {o['object'] for o in objects + completions}, proven_stock(games), games.lacks)
@@ -3577,6 +3581,29 @@ def complete_stock(games: Games, rel: str) -> dict[str, bytes]:
     return out
 
 
+def stock_member_sources(games: Games, rel: str, out: dict[str, bytes]) -> dict[str, dict[str, list]]:
+    """{archive of `out`: {sha256: [EDF6 archive, RAB path, member index, member name]}}: the members of the archives a
+    completion ships (`out`, for the stock SGO `rel`) whose stored bytes a model archive of EDF6's own SGOs of its class
+    holds (the King: Monster501's MONSTER501.MRAB). The install reads those from the player's game instead (rabpool
+    manifest rows with a source; tools/edf41_objects.py checks each by its SHA-256)."""
+    cls = sgo.load(data=games.read6(rel)).get('xgs_scene_object_class')
+    donors = sorted({ref_rel(e[0]) for members in games.stock_by_class().get(str(cls), {}).values()
+                     for e in model_entries((members.get('animation_model') or [None])[0])
+                     if e and isinstance(e[0], str) and is_ref(e[0])} & games.have6)
+    found: dict[str, list] = {}
+    for donor in (d for d in donors if rabpool.is_archive(d)):
+        archive = os.path.basename(games.in6[donor].cpk.path)
+        for i, f in enumerate(mdb.rab_read(games.read6(donor)).files):
+            found.setdefault(hashlib.sha256(f.stored).hexdigest(), [archive, donor, i, f.name])
+    sources: dict[str, dict[str, list]] = {}
+    for r, data in out.items():
+        if rabpool.is_archive(r):
+            mine = {s: found[s] for s in (hashlib.sha256(f.stored).hexdigest() for f in mdb.rab_read(data).files) if s in found}
+            if mine:
+                sources[r] = dict(sorted(mine.items()))
+    return sources
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--edf41', default=os.path.join(STEAM, 'Earth Defense Force 4.1'))
@@ -3588,7 +3615,8 @@ def main() -> int:
     data, files = build(a.edf41, a.edf6, tuple(r.upper() for r in a.only))
     out_json, out_files = (os.path.join(a.out, 'objects.json'), os.path.join(a.out, 'objects')) if a.out else (OUT, FILES)
     shutil.rmtree(out_files, ignore_errors=True)
-    for rel, b in rabpool.pack(files).items():   # archives as manifests over shared members (pylib/rabpool.py)
+    sources = {r: s for c in data['stock_completions'] for r, s in c.get('members_from', {}).items()}
+    for rel, b in rabpool.pack(files, sources).items():   # archives as manifests over shared members (pylib/rabpool.py)
         path = os.path.join(out_files, *rel.split('/'))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'wb') as f:

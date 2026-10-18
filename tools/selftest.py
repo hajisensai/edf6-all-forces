@@ -5611,6 +5611,16 @@ def _e5c_have_game() -> bool:
     return os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk'))
 
 
+def _edf41_object(rel: str) -> bytes | None:
+    """tools/edf41_objects.read of a shipped file; an archive some members of which are read from the player's EDF6
+    (an entry's members_from: the King) from the real game, None without one (CI)."""
+    import edf41_objects as eo
+    import rootcpk
+    if not any(rel in eo.stock_members(o) for o in eo.entries(eo.registry())):
+        return eo.read(rel)
+    return eo.read(rel, eo.game_source(rootcpk.DEFAULT_GAME)) if _e5c_have_game() else None
+
+
 def _e5c_real() -> tuple[object, set[str]]:
     import rootcpk
     game = rootcpk.Game(rootcpk.DEFAULT_GAME)
@@ -8062,11 +8072,14 @@ def cas_graft_players() -> None:
 def edf41_objects_shipped() -> None:
     """edf41port: every object's files are shipped (edf41port/objects, the registry's SHA-256), every shipped file is
     some object's (a dropped object leaves none behind), each SGO's MAB blocks are EDF6's (0x83, pylib/legacy_sgo.py)
-    and each model archive's MDBs EDF6's (0x20, pylib/legacy_assets.py)."""
+    and each model archive's MDBs EDF6's (0x20, pylib/legacy_assets.py). A member read from the player's EDF6 (an
+    entry's members_from: the King's Monster501 textures) is not shipped, its manifest row names that very source,
+    and the archive is put together (from the real game; skipped without one, CI) only from there."""
     import hashlib
     import edf41_objects as eo
     import legacy_sgo
     import mdb
+    import rootcpk
     import sgo
     reg = eo.registry()
     assert reg['objects'], 'no object registered: this check is empty'
@@ -8076,14 +8089,27 @@ def edf41_objects_shipped() -> None:
     shipped = {os.path.relpath(os.path.join(d, f), root).replace(os.sep, '/') for d, _, fs in os.walk(root) for f in fs}
     import rabpool
     own = {s for rel in listed - set(reg.get('shared', {})) for s in rabpool.stored(rel)}
-    for s in sorted(own):   # every member an archive's manifest names, and no member none does
+    from_game = {rel: srcs for o in eo.entries(reg) for rel, srcs in eo.stock_members(o).items()}
+    for s in sorted(own):   # every member an archive's manifest names but those read from EDF6, and no member none does
         if s.endswith(rabpool.MANIFEST):
             with open(os.path.join(root, *s.split('/')), encoding='utf-8') as f:
-                own |= {f'{rabpool.MEMBERS}/{row[-1]}' for row in json.load(f)['files']}
+                rows = json.load(f)['files']
+            own |= {f'{rabpool.MEMBERS}/{row[5]}' for row in rows if len(row) == 6}
+            rel = s[:-len(rabpool.MANIFEST)]
+            assert {row[5]: row[6] for row in rows if len(row) > 6} == from_game.get(rel, {}),                 f'{rel}: the manifest and the registry name other members read from EDF6'
     assert shipped == own, f'shipped but unlisted: {sorted(shipped - own)[:5]}; listed, not shipped: {sorted(own - shipped)[:5]}'
     assert all(os.path.isfile(eo.bundled(r)) for r in reg.get('shared', {})), 'a shared file is not shipped where named'
+    king = from_game.get('OBJECT/MONSTER501_KING.RAB', {})
+    assert sorted(src[3] for src in king.values()) == [
+        'Monster501_light0_scroll.dds', 'Monster501_nor_body.dds', 'Monster501_nor_wing.dds',
+        'Monster501_param_rslh_body.dds', 'Monster501_param_rslh_wing.dds'] and         {tuple(src[:2]) for src in king.values()} == {('Root.cpk', 'OBJECT/MONSTER501.MRAB')}, king
+    source = eo.game_source(rootcpk.DEFAULT_GAME) if _e5c_have_game() else None
+    if source is None:
+        print(f'      (skipped: {sorted(from_game)} take members from EDF6, which is not here)')
     for rel in listed:
-        data = eo.read(rel)
+        if rel in from_game and source is None:
+            continue
+        data = eo.read(rel, source) if rel in from_game else eo.read(rel)
         assert hashlib.sha256(data).hexdigest() == reg['files'][rel], rel
         if rel.endswith('.SGO'):
             assert not legacy_sgo.mab_blocks(data), f'{rel}: a MAB block still in 4.1\'s form'
@@ -8888,12 +8914,23 @@ def edf41_stale_stock() -> None:
         assert o is not None and o['completes_stock'] == why and o['object'] not in o['files'], root
     assert completed['OBJECT/MONSTER501_KING.SGO']['files'] == ['OBJECT/MONSTER501_KING.RAB']
     import mdb
-    king = mdb.rab_read(eo.read('OBJECT/MONSTER501_KING.RAB'))
-    assert any(f.name == 'Monster501_King.mdb' for f in king.files), [f.name for f in king.files]
-    if not _e5c_have_game() or not _edf41_root():
-        print('skip  edf41_stale_stock (real archives): needs EDF6 and EDF4.1 installed')
+    import rabpool
+    try:   # five of its textures are EDF6's own (members_from): it is never put together without the game
+        eo.read('OBJECT/MONSTER501_KING.RAB')
+    except rabpool.Unsourced:
+        pass
+    else:
+        raise AssertionError("the King's model archive was put together without the player's EDF6")
+    if not _e5c_have_game():
+        print('skip  edf41_stale_stock (the King model, real archives): needs EDF6 installed')
         return
     import rootcpk
+    king_rab = eo.read('OBJECT/MONSTER501_KING.RAB', eo.game_source(rootcpk.DEFAULT_GAME))
+    king = mdb.rab_read(king_rab)
+    assert any(f.name == 'Monster501_King.mdb' for f in king.files), [f.name for f in king.files]
+    if not _edf41_root():
+        print('skip  edf41_stale_stock (real archives): needs EDF6 and EDF4.1 installed')
+        return
     games = m.Games(_edf41_root(), rootcpk.DEFAULT_GAME)
     spawned = m.spawned_objects(games)
     assert len(spawned) > 100, len(spawned)     # the scan found the missions' objects, not nothing
@@ -8905,7 +8942,7 @@ def edf41_stale_stock() -> None:
     # the King's model is the skeleton EDF6's stock King CAS animates: every bone it names but the rig nodes, the
     # same two its sibling's model leaves to the CAS (Monster501_Rig / Scene_Root)
     import cas_pose
-    bones = set(m.mdb_bones(eo.read('OBJECT/MONSTER501_KING.RAB'), 'Monster501_King.mdb'))
+    bones = set(m.mdb_bones(king_rab, 'Monster501_King.mdb'))
     named = set(cas_pose.CasPose(games.read6('OBJECT/MONSTER501_KING.CAS')).names)
     assert named - bones == {'Monster501_King_Rig', 'Scene_Root'}, sorted(named - bones)
     real = games.stock_by_class()
@@ -8934,14 +8971,20 @@ def edf41_stale_stock() -> None:
 def edf41_objects_install() -> None:
     """tools/edf41_objects.py on a stand-in game: install writes every object's files as the ledger owner edf41 and
     remove deletes them; a file of the same name another mod put in Mods is never written over, every object needing
-    it is left out (said why), the others installed."""
+    it is left out (said why), the others installed. An object whose model archive takes members from the player's
+    EDF6 (members_from: the King) is left out on a game without them (the stand-in has no Root.cpk), said why, and
+    on one whose archive holds other bytes there."""
     import edf41_objects as eo
     import ledger
     reg = eo.registry()
+    from_game = {o['object'] for o in eo.entries(reg) if eo.stock_members(o)}
+    assert from_game == {'OBJECT/MONSTER501_KING.SGO'}, from_game
+    theirs_only = {rel for o in eo.entries(reg) if o['object'] in from_game for rel in o['files']}
     with tempfile.TemporaryDirectory(prefix='edf6vc-e41o-') as game:
         os.makedirs(os.path.join(game, 'Mods'))
         files, skipped = eo.build(game)
-        assert not skipped and set(files) == set(reg['files'])
+        assert {obj for obj, _why in skipped} == from_game and all('Root.cpk' in why for _o, why in skipped), skipped
+        assert set(files) == set(reg['files']) - theirs_only, sorted(set(reg['files']) ^ set(files))[:5]
         eo.install(game, files)
         led = ledger.Ledger(game)
         assert {ledger.key(r) for r in files} == set(led.owned_by(eo.OWNER))
@@ -8954,7 +8997,7 @@ def edf41_objects_install() -> None:
         modfiles.atomic_write(os.path.join(game, 'Mods', *theirs.split('/')), b'another mod')
         files, skipped = eo.build(game)
         users = {o['object'] for o in reg['objects'] if theirs in o['files']}
-        assert {obj for obj, _why in skipped} == users and theirs not in files, skipped
+        assert {obj for obj, _why in skipped} == users | from_game and theirs not in files, skipped
         eo.install(game, files)
         with open(os.path.join(game, 'Mods', *theirs.split('/')), 'rb') as f:
             assert f.read() == b'another mod', "another mod's file was written over"
@@ -8967,13 +9010,41 @@ def edf41_objects_install() -> None:
             with open(eo.bundled(shared), 'rb') as f:
                 ledger.Ledger(game).put('calls', shared, f.read())
             files, skipped = eo.build(game)
-            assert not skipped and shared in files, skipped
+            assert {obj for obj, _why in skipped} == from_game and shared in files, skipped
             eo.install(game, files)
             assert set(ledger.Ledger(game).owners(shared)) == {'calls', eo.OWNER}
             ledger.Ledger(game).put('calls', shared, b'calls changed it')
             files, skipped = eo.build(game)
             users = {o['object'] for o in reg['objects'] if shared in o['files']}
-            assert {obj for obj, _why in skipped} == users and shared not in files, skipped
+            assert {obj for obj, _why in skipped} == users | from_game and shared not in files, skipped
+    # the EDF6 source itself: there as generated -> no problem; an archive missing, or the member's bytes other -> why
+    king = next(o for o in eo.entries(reg) if o['object'] in from_game)
+    sourced = {sha: src for srcs in eo.stock_members(king).values() for sha, src in srcs.items()}
+
+    class FakeEdf6:
+        def __init__(self, members: dict | None) -> None:
+            self.members = members
+
+        def missing(self, archive: str, path: str) -> str | None:
+            return None if self.members is not None else f'没有 {archive}'
+
+        def read(self, archive: str, path: str) -> bytes:
+            import mdb
+            assert self.members is not None
+            return mdb.rab_write(mdb.Rab(1, ['TEXTURE', 'MODEL', 'HD-TEXTURE'], self.members[path]))
+
+    import mdb as _mdb
+    stock = eo._Stock('unused')
+    stock._e6 = FakeEdf6(None)
+    assert stock.problems(sourced) == ['没有 Root.cpk'], stock.problems(sourced)
+    wrong = {src[1]: [_mdb.RabFile(f'm{i}', 2, 0, b'x') for i in range(max(s[2] for s in sourced.values()) + 1)]
+             for src in sourced.values()}
+    for src in sourced.values():
+        wrong[src[1]][src[2]] = _mdb.RabFile(src[3], 2, 0, b'not the generated bytes')
+    stock = eo._Stock('unused')
+    stock._e6 = FakeEdf6(wrong)
+    gone = stock.problems(sourced)
+    assert len(gone) == len(sourced) and all('不是生成时的那份' in w for w in gone), gone
 
 
 @test
@@ -9147,7 +9218,8 @@ def edf41_dlc_objects() -> None:
     assert not set(m.DLC_EXCLUDED) & {o.split('/', 1)[1] for o in objects}
     mount = re.compile(rb'(?i)mp0\d:/|m\x00p\x000\x00\d\x00:\x00/\x00')
     for rel in reg['files']:
-        assert not mount.search(eo.read(rel)), f'{rel} names a DLC mount'
+        data = _edf41_object(rel)
+        assert data is None or not mount.search(data), f'{rel} names a DLC mount'
     # the references of each DLC object
     games = m.Games(_edf41_root(), rootcpk.DEFAULT_GAME) if _e5c_have_game() and _edf41_root() else None
     for root in m.DLC_ROOTS:
@@ -11714,7 +11786,9 @@ def edf41_shipped_textures_load_before_models() -> None:
     for rel in sorted(eo.registry()['files']):
         if not rel.upper().endswith('RAB'):
             continue
-        data = eo.read(rel)
+        data = _edf41_object(rel)
+        if data is None:   # put together from the player's EDF6 (the King), not here
+            continue
         for f in mdb.rab_read(data).files:
             if f.name.lower().endswith('.mdb'):
                 assert not m.missing_textures(data, f.name), (rel, f.name, m.missing_textures(data, f.name))
@@ -12075,7 +12149,9 @@ def edf41_ufo301_behaviour() -> None:
 @test
 def rabpool_round_trip() -> None:
     """pylib/rabpool.py: two archives sharing a member ship it once and both come back byte for byte; a file that
-    is not an archive passes as it is; an archive mdb.rab_write would lay out otherwise is refused."""
+    is not an archive passes as it is; an archive mdb.rab_write would lay out otherwise is refused; a member read from
+    the player's EDF6 is not stored, and comes back from there only with its own bytes."""
+    import hashlib
     import mdb
     import rabpool
     shared = mdb.RabFile('tex.dds', 0, 0, b'T' * 64)
@@ -12095,6 +12171,29 @@ def rabpool_round_trip() -> None:
         pass
     else:
         raise AssertionError('an archive rab_write does not rebuild was packed')
+    # a member the player's EDF6 ships (the King's Monster501 textures): not stored, its row names the source, and
+    # unpack reads it there, checked by its SHA-256; without a source it refuses (Unsourced), never rebuilds without it
+    tex_sha = hashlib.sha256(shared.stored).hexdigest()
+    src = ['Root.cpk', 'OBJECT/STOCK.MRAB', 0, 'tex.dds']
+    packed = rabpool.pack({'OBJECT/A.MRAB': a}, {'OBJECT/A.MRAB': {tex_sha: src}})
+    assert f'{rabpool.MEMBERS}/{tex_sha}' not in packed and len([k for k in packed if k.startswith(rabpool.MEMBERS)]) == 1
+    rows = json.loads(packed['OBJECT/A.MRAB.members.json'])['files']
+    assert rows[0][5:] == [tex_sha, src] and len(rows[1]) == 6, rows
+    assert rabpool.sources('OBJECT/A.MRAB', packed.__getitem__) == [src]
+    assert rabpool.unpack('OBJECT/A.MRAB', packed.__getitem__, lambda s: shared.stored if s == src else b'') == a
+    for source in (None, lambda s: b'other bytes'):
+        try:
+            rabpool.unpack('OBJECT/A.MRAB', packed.__getitem__, source)
+        except (rabpool.Unsourced if source is None else ValueError):
+            pass
+        else:
+            raise AssertionError(f'an archive with a sourced member came back with source {source}')
+    try:
+        rabpool.pack({'OBJECT/A.MRAB': a}, {'OBJECT/A.MRAB': {'0' * 64: src}})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('a source for a member the archive lacks was accepted')
 
 
 @test

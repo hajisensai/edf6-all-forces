@@ -1563,7 +1563,41 @@
    "files": [
     "OBJECT/MONSTER501_KING.RAB"
    ],
-   "completes_stock": "names app:/object/Monster501_King.rab, which no EDF6 archive holds: Monster501's setup (EDF+0x6BB890) finds no model (0x6BC218), passes the null to the model instance (0x11002D0), which faults reading it (EDF+0x1100303; MP004, testhub #17, 2026-10-17)"
+   "completes_stock": "names app:/object/Monster501_King.rab, which no EDF6 archive holds: Monster501's setup (EDF+0x6BB890) finds no model (0x6BC218), passes the null to the model instance (0x11002D0), which faults reading it (EDF+0x1100303; MP004, testhub #17, 2026-10-17)",
+   "members_from": {
+    "OBJECT/MONSTER501_KING.RAB": {
+     "14e9c9b5a8b2c4017001bccaa7dadba158141c2917b9b2d9003bf3f55ea636c7": [
+      "Root.cpk",
+      "OBJECT/MONSTER501.MRAB",
+      33,
+      "Monster501_light0_scroll.dds"
+     ],
+     "21f352207b36091f22b31f0e7fb84dbfe35ec597353a4024a3a2bc23fc69a239": [
+      "Root.cpk",
+      "OBJECT/MONSTER501.MRAB",
+      35,
+      "Monster501_nor_wing.dds"
+     ],
+     "66d071ca067dc0a97c205031b4bacd50ad3a9dd407bebfad6a436bf89d1bc175": [
+      "Root.cpk",
+      "OBJECT/MONSTER501.MRAB",
+      39,
+      "Monster501_param_rslh_wing.dds"
+     ],
+     "8b33b58905e7726bc3451855f629b48f9445da6e061878b13fa84c2f7c3afa26": [
+      "Root.cpk",
+      "OBJECT/MONSTER501.MRAB",
+      38,
+      "Monster501_param_rslh_body.dds"
+     ],
+     "d162f53df0b16dc97b4e1e4369e136e524c1e287b80815bf7a168b4a8b9a1154": [
+      "Root.cpk",
+      "OBJECT/MONSTER501.MRAB",
+      34,
+      "Monster501_nor_body.dds"
+     ]
+    }
+   }
   }
  ],
  "skipped": [],
