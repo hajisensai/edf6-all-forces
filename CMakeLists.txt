@@ -460,6 +460,11 @@ set_target_properties(transport_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMA
 add_executable(crawl_check EXCLUDE_FROM_ALL tools/crawl_check.cpp)
 target_compile_options(crawl_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(crawl_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# EDF4.1's ObjectAction on its fortress (src/edf41fortress_action.h), offline (tools/edf41_fortress_check.cpp): 4.1's seven
+# actions run as 4.1 runs them, none through MovingFortress's own table (M117 crash, docs/feedback-2026-10-18-edf41-m16-crash.md).
+add_executable(edf41_fortress_check EXCLUDE_FROM_ALL tools/edf41_fortress_check.cpp)
+target_compile_options(edf41_fortress_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(edf41_fortress_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # EDF4.1 Hector's arm gate and back-off cycle (src/hector_ai.h), offline (tools/hector_ai_check.cpp). Not part of the plugin build:
 # cmake --build build --target hector_ai_check && build\hector_ai_check.exe
 add_executable(hector_ai_check EXCLUDE_FROM_ALL tools/hector_ai_check.cpp)
@@ -783,7 +788,7 @@ set_target_properties(fp_view_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
-    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check hit_predict_check own_round_check exhaust_nozzles_check damage_stats_check fp_view_check cockpit_canvas_check unlock_ported_check)
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check hit_predict_check own_round_check exhaust_nozzles_check damage_stats_check fp_view_check cockpit_canvas_check unlock_ported_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 add_dependencies(offline_checks transport_runtime_test)
 add_dependencies(offline_checks stab_native_readback_test)

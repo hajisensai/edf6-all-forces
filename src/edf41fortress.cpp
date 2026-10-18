@@ -18,14 +18,22 @@
 //    takes the step's sideways input from [+0x1970] (0x4C3244: 0 / 1 left, 3 / 4 right, anything else straight), which only
 //    its network sync writes (0x4C41D2 / 0x4C9D72): offline it never changes. When the main player starts a new clip the
 //    next step is drawn as 4.1 draws it and written there (2 straight, 0 left, 3 right).
+//  - The script's ObjectAction (0x1000000D) means what it means to 4.1 (src/edf41fortress_action.h): 0..5 switch one part
+//    group on / off through the class's own 0x4CA7E0, 6 destroys it through the class's own death (0x4CB6D0: HP 0, the
+//    dead flags, the destroy state; what ApplyDamage + slot 18 0x4C60E0 do when the HP runs out). None of it reaches the
+//    class's table, whose 1 spawns rubble at a locator 4.1's model has not: M117 sends ObjectAction(1) about two minutes
+//    after the Ufo301 wave the fortress drops is cleared, and EDF.dll crashed at 0x4C3A30 every time
+//    (docs/feedback-2026-10-18-edf41-m16-crash.md).
 //
 // The key is read the way the class reads its own (classic SGO): 0x528A0(&object+0xA0, name) gives the node or null.
 // Hooks: MovingFortress's vtable 0x17C6900, slot 4 (update 0x4C67E0) and slot 9 (messages 0x4C6240), EDF.dll
 // TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "edf41fortress_action.h"
 #include "memory.h"
 
 #include <cstdint>
+#include <cstring>
 #include <mutex>
 #include <unordered_map>
 
@@ -40,6 +48,9 @@ constexpr std::size_t kKeyNode=0x528A0;     // (sgo handle*, key) -> node* or nu
 constexpr std::size_t kSgoAt=0xA0;
 constexpr std::size_t kTargetModeAt=0x1A88;
 constexpr std::size_t kModeAt=0x1A8C;
+constexpr std::uint32_t kMsgAction=0x1000000D;  // ObjectAction (native 3200); data: the int action
+constexpr std::size_t kPartsSwitch=0x4CA7E0;     // (this, group mask, on): every part whose mask matches (the class's 3 / 4)
+constexpr std::size_t kDie=0x4CB6D0;             // (this): once (guard [+0xE69]) HP 0, [+0x2E8] dead, destroy state 0x4CAE70
 constexpr std::uint32_t kMsgDrop=0x20100;
 constexpr std::uint32_t kMsgGenerator=0x20103;
 constexpr std::size_t kDropIndexAt=0x48;
@@ -54,6 +65,8 @@ constexpr int kStraight=2,kLeft=0,kRight=3;
 using UpdateFn=std::uint64_t(__fastcall*)(void* self,void* dt);
 using MessageFn=bool(__fastcall*)(void* self,std::uint32_t msg,void* data);
 using KeyNodeFn=void*(__fastcall*)(void* sgo,const wchar_t* key);
+using PartsSwitchFn=void(__fastcall*)(void* self,unsigned mask,int on);
+using DieFn=void(__fastcall*)(void* self);
 
 UpdateFn nextUpdate=nullptr;
 MessageFn nextMessage=nullptr;
@@ -120,7 +133,20 @@ std::uint64_t __fastcall UpdateHook(void* self,void* dt) {
     return nextUpdate(self,dt);
 }
 
+// 4.1's ObjectAction on a 4.1 fortress (edf41fortress_action.h); 4.1 answers every action as handled (slot 6 returns 1).
+bool Edf41Action(void* self,int action) noexcept {
+    const fortress41::Action a=fortress41::FromEdf41(action);
+    Log("EDF41FORTRESS %p ObjectAction %d (%s)",self,action,fortress41::Name(action));
+    switch(a.kind) {
+        case fortress41::Kind::Parts: reinterpret_cast<PartsSwitchFn>(image+kPartsSwitch)(self,a.groupMask,a.on ? 1 : 0); break;
+        case fortress41::Kind::Destroy: reinterpret_cast<DieFn>(image+kDie)(self); break;
+        case fortress41::Kind::Nothing: break;
+    }
+    return true;
+}
+
 bool __fastcall MessageHook(void* self,std::uint32_t msg,void* data) {
+    if(msg==kMsgAction && data && Marked(self))return Edf41Action(self,*static_cast<const int*>(data));
     int* index=nullptr;
     if(data && (msg==kMsgDrop || msg==kMsgGenerator) && Marked(self))
         index=reinterpret_cast<int*>(static_cast<char*>(data)+(msg==kMsgDrop ? kDropIndexAt : 0));
@@ -144,6 +170,14 @@ bool InstallEdf41Fortress() noexcept {
     void* const message=vtable[kSlotMessage];
     if(update!=image+kUpdate || message!=image+kMessage) {
         Log("EDF41FORTRESS MovingFortress vtable is not EDF.dll's (update %p, messages %p): not hooked",update,message);
+        return false;
+    }
+    // The two class functions 4.1's actions run on (edf41fortress_action.h): their first bytes in EDF.dll 0x678CCB46.
+    static constexpr unsigned char kPartsSwitchHead[8]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C};
+    static constexpr unsigned char kDieHead[8]={0x40,0x53,0x48,0x83,0xEC,0x30,0x80,0xB9};
+    if(!Readable(image+kPartsSwitch,8) || std::memcmp(image+kPartsSwitch,kPartsSwitchHead,8)!=0 ||
+       !Readable(image+kDie,8) || std::memcmp(image+kDie,kDieHead,8)!=0) {
+        Log("EDF41FORTRESS the class's parts switch / death are not EDF.dll's: not hooked");
         return false;
     }
     nextUpdate=reinterpret_cast<UpdateFn>(update);

@@ -4655,6 +4655,74 @@ def edf41_clone_destructor_slot() -> None:
 
 
 @test
+def edf41_fortress_object_actions() -> None:
+    """4.1's fortress (Alien4LegTank301 on EDF6's MovingFortress) runs the script's ObjectAction (native 3200, message
+    0x1000000D) as 4.1 does (src/edf41fortress_action.h): 0..5 one part group on / off, 6 destroyed. EDF6's class numbers
+    the same message otherwise, and its 1 spawns rubble at a locator 4.1's model has not: M117 (要塞破壊作戦) sends
+    ObjectAction(fortress, 1) about two minutes after the dropped Ufo301 wave is cleared and EDF.dll crashed at 0x4C3A30
+    every time (2026-10-18, docs/feedback-2026-10-18-edf41-m16-crash.md). So: every ObjectAction a shipped 4.1 mission
+    sends a fortress is a constant 4.1 knows; the hook runs it before anything else and never hands 0x1000000D to the class;
+    with the game present the class functions it calls are EDF.dll's, and the class's own action 1 is the rubble spawn whose
+    locator lookup is unchecked (the reason none may reach it)."""
+    import glob
+
+    import bvm41
+    hook = src('src/edf41fortress.cpp')
+    head = src('src/edf41fortress_action.h')
+    assert 'constexpr int kActions=7;' in head
+    body = hook.split('bool __fastcall MessageHook(void* self,std::uint32_t msg,void* data) {', 1)[1].split('\n}\n', 1)[0]
+    first = body.index('if(msg==kMsgAction && data && Marked(self))return Edf41Action(self,')
+    assert first < body.index('nextMessage('), 'ObjectAction on a 4.1 fortress is answered before the class sees it'
+    act = hook.split('bool Edf41Action(void* self,int action) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'nextMessage' not in act and 'return true;' in act, 'no 4.1 action falls through to the class table'
+    assert 'constexpr std::uint32_t kMsgAction=0x1000000D;' in hook
+    assert 'edf41_fortress_check' in src('CMakeLists.txt').split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0]
+    assert "('edf41_fortress', 1)" in src('tools/make_edf41_objects.py'), 'the mark the hook keys on'
+
+    seen: dict[str, list[int]] = {}
+    for path in sorted(glob.glob(os.path.join(ROOT, 'edf41port', '**', 'MISSION.BVM'), recursive=True)):
+        with open(path, 'rb') as f:
+            prog = bvm41.parse(f.read())
+        codes = [prog.init] + [g.code for g in prog.funcs]
+        # a fortress global: push <address>; pushs <name>; pushs <...Alien4LegTank301.sgo>; ... create; storeind
+        forts = set()
+        for code in codes:
+            for i, x in enumerate(code):
+                if x.op == bvm41.OP_PUSHS and isinstance(x.v, str) and x.v.lower().endswith('/alien4legtank301.sgo') \
+                        and i >= 2 and code[i - 1].op == bvm41.OP_PUSHS and code[i - 2].op == bvm41.OP_PUSH \
+                        and any(y.op == bvm41.OP_STOREIND for y in code[i + 1:i + 5]):
+                    forts.add(code[i - 2].v)
+        for code in codes:
+            for i, x in enumerate(code):
+                if x.op != bvm41.OP_NAT0 or x.v != 3200 or i < 2:
+                    continue
+                h, a = code[i - 2], code[i - 1]
+                if h.op != bvm41.OP_PUSHG or h.v not in forts:
+                    continue
+                assert a.op in (bvm41.OP_PUSH, bvm41.OP_PUSH1), f'{path}: ObjectAction on the fortress with no constant'
+                n = 1 if a.op == bvm41.OP_PUSH1 else a.v
+                assert 0 <= n < 7, f'{path}: ObjectAction {n} on the fortress is not in 4.1\'s table'
+                seen.setdefault(os.path.relpath(path, ROOT).replace(os.sep, '/'), []).append(n)
+    assert sorted(seen.get('edf41port/missions/M117/MISSION.BVM', [])) == [0, 1, 2, 3, 4, 5, 6], seen
+    assert 1 in seen['edf41port/missions/M117/MISSION.BVM'], 'the action that crashed EDF6\'s own table'
+    assert 6 in seen.get('edf41port/mp01/missions/M416/MISSION.BVM', []), seen
+
+    import rootcpk
+    dll = os.path.join(rootcpk.DEFAULT_GAME, 'EDF.dll')
+    if not os.path.exists(dll):
+        return
+    import edfre
+    for name in ('kPartsSwitchHead', 'kDieHead'):
+        want = bytes(int(b, 16) for b in re.findall(r'0x[0-9A-F]+', re.search(name + r'\[8\]=\{(.*?)\};', hook).group(1)))
+        rva = int(re.search(('kPartsSwitch' if name == 'kPartsSwitchHead' else 'kDie') + r'=(0x[0-9A-F]+);', hook).group(1), 16)
+        assert edfre.img[rva:rva + 8] == want, (name, hex(rva))
+    # the class's table (0x4C6240): action 1 calls the rubble spawn 0x4C37E0, which derefs the locator it looks up unchecked
+    assert edfre.img[0x4C6334] == 0xE8 and 0x4C6339 + int.from_bytes(edfre.img[0x4C6335:0x4C6339], 'little', signed=True) == 0x4C37E0
+    assert edfre.img[0x4C3A27] == 0xE8 and 0x4C3A2C + int.from_bytes(edfre.img[0x4C3A28:0x4C3A2C], 'little', signed=True) == 0x6BADD0
+    assert edfre.img[0x4C3A2C:0x4C3A34] == bytes.fromhex('488b45f04863480c'), 'mov rax,[rbp-10h]; movsxd rcx,[rax+0Ch]'
+
+
+@test
 def edf41_mother_parts_default_migrates() -> None:
     """Edf41MotherParts shipped 15 (no 301 panels) in the nightlies from 2026-10-14 and ships 31 now: merge_ini keeps a
     player's value, so an ini still at the old 15 is moved to 31 once by the installer's second defaults step (its own mark:
