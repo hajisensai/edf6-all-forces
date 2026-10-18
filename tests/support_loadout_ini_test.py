@@ -82,7 +82,7 @@ check(sl.SEATS['TRANSPORT_CREWED'] == int(rows_seats['V507_RESCUETANK_AI']) - 1 
 
 # The same values, the same verdict (tests/support_loadout_test.cpp has the C++ side of each).
 p = sl.parse_preset('rifle@1E3A8A*2, rocket ，sniper@x:ffffff', 4)
-check(p == [('rifle', (0x1E3A8A, -1))] * 2 + [('rocket', (-1, -1)), ('sniper', (-1, 0xFFFFFF))], 'a preset parses as in the plugin')
+check(p == [('rifle', (0x1E3A8A, -1), '')] * 2 + [('rocket', (-1, -1), ''), ('sniper', (-1, 0xFFFFFF), '')], 'a preset parses as in the plugin')
 for bad, seats in (('rifle*5', 4), ('rifle@12345', 12), ('rifle@GGGGGG', 12), ('rifle@123456:', 12), ('rifle*0', 12),
                    ('bogus', 12), ('rifle*13', 12), ('@123456', 12)):
     check(refused(sl.parse_preset, bad, seats), f'preset {bad!r} refused as in the plugin')
@@ -104,10 +104,37 @@ check(sl.look_file('rifle', True, (0x1E3A8A, -1)) == 'EDF6VC_NPC_RIFLE_L_1E3A8A_
 check(sl.variant_hash('EDF6VC_NPC_RIFLE_L_1E3A8A_X.SGO') == 0x69A64712A798737F and '0x69A64712A798737Full' in
       read('tests/support_loadout_test.cpp'), 'the filter\'s hash is the plugin\'s')
 check(sl.decode_name('edf6vc_lo_tank_4000000000000c81.sgo') == ('lo', tank) and
-      sl.decode_name('EDF6VC_NPC_LANCE_L_1E3A8A_X.SGO') == ('npc', 'lance', True, (0x1E3A8A, -1)), 'names decode back')
+      sl.decode_name('EDF6VC_NPC_LANCE_L_1E3A8A_X.SGO') == ('npc', 'lance', True, (0x1E3A8A, -1), ''), 'names decode back')
 for bad in ('EDF6VC_NPC_RIFLE_X_X.SGO', 'EDF6VC_LO_TANK_C000000000000C81.SGO', 'EDF6VC_LO_TANK_4000000000000C8F.SGO',
-            'EDF6VC_LO_HELI_4000000000000000.SGO', 'EDF6VC_NPC_GATLING_FFFFFF_X.SGO', 'readme.txt'):
+            'EDF6VC_LO_HELI_4000000000000000.SGO', 'EDF6VC_NPC_GATLING_FFFFFF_X.SGO', 'readme.txt',
+            'EDF6VC_NPC_CANNON_X_X_AHANDGRENADE01.SGO', 'EDF6VC_NPC_LANCE_X_X_AHANDGRENADE01.SGO',
+            'EDF6VC_NPC_RIFLE_X_X_AWEAPON261.SGO', 'EDF6VC_NPC_RIFLE_X_X_.SGO'):
     check(sl.decode_name(bad) is None, f'{bad} makes no file')
+
+# Backpack weapons (src/npc_pack_table.h; docs/npc-backpack-re.md): the same table, grammar, names and verdicts.
+pack_table = read('src/npc_pack_table.h')
+rows = re.findall(r'\{(\d+),L"(\w+)",(\d),PackUse::(\w+),(\d+),([\d.]+)f,([\d.]+)f,L"([^"]+)"\}', pack_table)
+check([(int(c), n, int(k), u, int(cat), float(lift), float(area), label) for c, n, k, u, cat, lift, area, label in rows] ==
+      list(sl.PACKS) and len(sl.PACKS) == 74, 'the backpack weapons equal the plugin\'s table')
+check('#include "npc_pack_table.h"' in header and 'look.pack=pack->code;' in header, 'the plugin\'s preset reads the same table')
+pp = sl.parse_preset('rifle+ahandgrenade01*2, lance@1E3A8A+pWeapon216 ,cannon', 4)
+check(pp == [('rifle', (-1, -1), 'aHandGrenade01')] * 2 + [('lance', (0x1E3A8A, -1), 'pWeapon216'), ('cannon', (-1, -1), '')],
+      'a preset with backpack weapons parses as in the plugin (tools/npc_backpack_check.cpp Grammar)')
+check(sl.format_preset(pp) == 'rifle+aHandGrenade01*2,lance@1E3A8A+pWeapon216,cannon', 'its shortest spelling')
+for bad in ('cannon+aHandGrenade01', 'rifle+pWeapon216', 'lance+aHandGrenade01', 'rifle+bogus', 'rifle+', 'rifle+aWeapon261',
+            'rifle@GGGGGG+aHandGrenade01'):
+    check(refused(sl.parse_preset, bad, 4), f'preset {bad!r} refused as in the plugin')
+check(all(f"L\"{bad}\"" in read('tools/npc_backpack_check.cpp') for bad in ('cannon+aHandGrenade01', 'rifle+aWeapon261')),
+      'the C++ check refuses the same values')
+check(sl.look_file('rifle', True, (-1, -1), 'aHandGrenade01') == 'EDF6VC_NPC_RIFLE_L_X_X_AHANDGRENADE01.SGO' and
+      'L"EDF6VC_NPC_RIFLE_L_X_X_AHANDGRENADE01.SGO"' in read('tools/npc_backpack_check.cpp'), 'a pack\'s file name as the plugin\'s')
+check(sl.decode_name('edf6vc_npc_thunderbow_l_1e3a8a_x_pweapon216.sgo') == ('npc', 'thunderbow', True, (0x1E3A8A, -1), 'pWeapon216'),
+      'a pack\'s name decodes back')
+check(sl.wanted_files('[VehicleCrew]\r\nSupportPreset_SQUAD=rifle+aHandGrenade01*4,lance+pWeapon216\r\n') ==
+      ['EDF6VC_NPC_RIFLE_L_X_X_AHANDGRENADE01.SGO', 'EDF6VC_NPC_RIFLE_X_X_AHANDGRENADE01.SGO', 'EDF6VC_NPC_LANCE_L_X_X_PWEAPON216.SGO'],
+      'a pack alone wants its file (a leader every four)')
+check('NpcBackpack=1' in read('EDF6VehicleCrew.ini') and '+背包武器' in read('EDF6VehicleCrew.ini'),
+      'the shipped ini documents the backpack weapons')
 
 # The editor: menu 7 -> l. Soldiers, then a vehicle's pylons (载具 → 挂点 → 武器); only values the plugin accepts.
 ini = '[VehicleCrew]\r\nEnabled=1\r\n'
@@ -212,7 +239,7 @@ check(sl.decode_name(bad_name) and sl.decode_name(good_name), 'two decodable sol
 real_soldier_file = sl.soldier_file
 
 
-def fake_soldier_file(game, kind, leader, look):
+def fake_soldier_file(game, kind, leader, look, carried=''):
     if look == sl.decode_name(bad_name)[3]:
         raise ValueError('its template is not installed here')
     return b'made'
@@ -253,6 +280,34 @@ if game is not None:
         made = sgo.load(data=files['OBJECT/' + sl.look_file('lance', leader, (0x1E3A8A, -1))])
         stock = sgo.load(data=game.read('OBJECT', 'N606_AIPALEWING_LANCE' + ('_LEADER' if leader else '') + '.SGO'))
         check({k for k in stock if made[k] != stock[k]} == {'soldier_color'}, 'a coloured soldier: only soldier_color differs')
+    # A soldier with a backpack weapon: its template carries it as the player templates do theirs, nothing else changes.
+    weapon_table = sgo.load(data=game.read('WEAPON', 'WEAPONTABLE.SGO'))['table']
+    by_name = {row[0].upper(): row for row in weapon_table}
+    for code, name, cls, use, category, lift, area, label in sl.PACKS:
+        row = by_name.get(name.upper())
+        check(row is not None and row[1] == sl.pack_path(name) and int(row[2]) == category and int(row[3]) == 1,
+              f'{name}: a base game WEAPONTABLE row of category {category} at {sl.pack_path(name)}')
+        weapon = sgo.load(data=game.read('WEAPON', name.upper() + '.SGO'))
+        vector = weapon.get('FireVector') or []
+        check(weapon['xgs_scene_object_class'] == 'Weapon_Sub' and
+              abs((vector[1] / vector[2] if len(vector) == 3 else 0.0) - lift) < 1e-6, f'{name}: a Weapon_Sub, its lift its FireVector\'s')
+        check((weapon['AmmoClass'] == 'NapalmBullet01') == (area > 0.0), f'{name}: an area only for a burning / gas round')
+    player = sgo.load(data=game.read('OBJECT', 'P605_RANGER.SGO'))
+    check(player['soldier_sub_weapon_slot'] == [[2.0, 'weapon', 0.0], [3.0, 'weapon', 0.0]], 'the player Ranger\'s backpack slots')
+    for kind, leader, carried in (('rifle', True, 'aHandGrenade01'), ('lance', False, 'pWeapon216'), ('izuna', True, 'pHandGrenade01')):
+        template = {n: t for n, _, t in sl.KINDS}[kind] + ('_LEADER' if leader else '')
+        stock = sgo.load(data=game.read('OBJECT', template + '.SGO'))
+        made = sgo.load(data=sl.soldier_file(game, kind, leader, (-1, -1), carried))
+        check({k for k in stock if made[k] != stock[k]} == {'soldier_load_weapon', 'soldier_weapon_slot', 'soldier_sub_weapon_slot'},
+              f'{template} with {carried}: only its weapons, weapon sets and sub weapon slot differ')
+        own = len(stock['soldier_load_weapon'])
+        check(made['soldier_load_weapon'] == stock['soldier_load_weapon'] + [sl.pack_path(carried)] and
+              made['soldier_sub_weapon_slot'] == [[float(own), 'weapon', 0.0]] and
+              all(all(i < own for i in entry[0]) for entry in made['soldier_weapon_slot']),
+              f'{template}: {carried} loaded after its own, in a sub slot, in no weapon set')
+        both = sgo.load(data=sl.soldier_file(game, kind, leader, (0x1E3A8A, -1), carried))
+        check({k for k in stock if both[k] != stock[k]} ==
+              {'soldier_color', 'soldier_load_weapon', 'soldier_weapon_slot', 'soldier_sub_weapon_slot'}, f'{template}: colours and a pack')
     crew_made = sl.build(None, '[VehicleCrew]\r\nSupportCrewColour=1E3A8A:FFFFFF\r\n', game)
     for name in ('EDF6VC_NPC_RIFLE_1E3A8A_FFFFFF.SGO',):
         made = sgo.load(data=crew_made['OBJECT/' + name])

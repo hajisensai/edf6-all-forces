@@ -15,6 +15,20 @@ DWORD Process(HWND,LPDWORD pid) noexcept { *pid=GetCurrentProcessId();return 1; 
 
 namespace crew {
 bool InstallRealDriverNative(NpcSeatInputOwnedFn) noexcept { return true; }
+// npc_backpack.cpp stand-ins: one sub slot (packSlot) when packReady; its uses and reloads recorded, the use going on
+// (packBusy) as the case sets.
+bool packReady=false,packBusy=false;int packSlots=0,packUses=0,packUseSlot=-1,packReloads=0;
+NpcPackSlot packSlot{};
+bool InstallNpcBackpack() noexcept { return packReady; }
+bool NpcBackpackReady() noexcept { return packReady; }
+int NpcPackSlots(const unsigned char*,NpcPackSlot* out,int most) noexcept {
+    if(!packReady || !packSlots || most<1)return 0;
+    out[0]=packSlot;return 1;
+}
+bool NpcPackIndex(const unsigned char*,int index) noexcept { return packReady && packSlots && index==packSlot.index; }
+bool NpcPackBusy(const unsigned char*) noexcept { return packBusy; }
+bool NpcPackUse(unsigned char*,int slot) noexcept { ++packUses;packUseSlot=slot;return true; }
+bool NpcPackReload(unsigned char*) noexcept { ++packReloads;return true; }
 bool RealDriverNativeReady() noexcept { return true; }
 bool PrepareNpcVehicle(unsigned char*,bool) noexcept { return true; }
 int announcedBoards=0;
@@ -926,6 +940,69 @@ int main() {
         Expect(NearestMark(from)==&world.enemy[1],"a teammate's enemy not in this frame's list: not taken");
         teamMarkCount=0;ResetNpcAi();
         Put<void*>(other,kSelfCtrl,nullptr);
+    }
+    // The backpack (docs/npc-backpack-re.md; the user, 2026-10-18: 「让npc可以使用背包位武器如突击的手雷，飞翼的短剑等」):
+    // production ArmsOf leaves the sub slot's weapon out of the arms it picks, fires and fights at; production Drive throws
+    // it at a group in its reach once its look is on the arc, through NpcPackUse, then holds the look, the main trigger and
+    // the picks while the throw goes on; it rests between throws; never at a lone small one, never with a friend where it
+    // lands, never with NpcBackpack=0; empty, its reload is asked for once.
+    {
+        Reset();Put<void*>(human,kLeader,nullptr);playerObj=other;config.enabled=true;config.customNpcAi=true;
+        Put<unsigned char>(other,kHumanPlayer,1);Put<void*>(other,kHumanPad,other);Put<int>(other,kTeam,0);
+        auto* squad=SeeSquad(human,human,0,npc::Control::free,now);config.npcEvade=false;config.npcBackpack=true;
+        Put<unsigned>(human,kControlMask,kMaskMove|kMaskLook|kMaskTrigger);
+        static unsigned char grenade[0xC00]{},rifle[0xC00]{};
+        Put<float>(grenade,kArmReach,360.0f);Put<float>(grenade,kArmBlast,5.0f);Put<float>(grenade,kWeaponSpeed,0.6f);
+        Put<float>(grenade,kWeaponGravity,1.0f);Put<std::int32_t>(grenade,kWeaponAmmo,3);
+        Put<float>(rifle,kArmReach,150.0f);Put<float>(rifle,kArmDamage,10.0f);Put<std::int32_t>(rifle,kWeaponAmmo,30);
+        unsigned char* list[2]={rifle,grenade};
+        Put<unsigned char**>(human,kWeapons,list);Put<std::uint64_t>(human,kWeaponCount,2);
+        packReady=true;packSlots=1;packSlot=NpcPackSlot{grenade,PackOf(1),0,1};packUses=packReloads=0;packBusy=false;
+        Arms packArms=ArmsOf(human);
+        Expect(packArms.n==2 && packArms.arm[0].ready && !packArms.arm[1].ready && packArms.arm[1].reach==0.0f && LongestReach(packArms)==150.0f &&
+               LargestBlast(packArms)==0.0f,"the backpack's grenade is out of the arms it picks, fires and fights at (production ArmsOf)");
+        packArms.held[0]=0;
+        auto* soldier=Entry(human,now);soldier->control=npc::Control::free;
+        static unsigned char foe[3][0x300]{},foeCtrl[3][0x10]{};
+        for(int i=0;i<3;++i){Put<void*>(foe[i],kSelfCtrl,foeCtrl[i]);Put<long>(foeCtrl[i],8,1);Put<long>(foeCtrl[i],12,1);}
+        world.enemies=3;world.enemy[0]=Enemy{foe[0],{-2,0,24},1};world.enemy[1]=Enemy{foe[1],{0,0,25},1};world.enemy[2]=Enemy{foe[2],{2,0,26},1};
+        const float eyePoint[3]={0,1.5f,0};
+        // The look the throw takes at the nearest (-2, 0, 24): the low arc at 36 m/s under 14.7 m/s^2, less the MG11's lift.
+        const float to[3]={-2,0,24};float pitch=0.0f,flight=0.0f,dir[3];
+        npcpack::LobPitch(npc::Horiz(eyePoint,to),to[1]-eyePoint[1],36.0f,14.7f,&pitch,&flight);
+        npcpack::ThrowLook(eyePoint,to,pitch,0.125f,dir);
+        const auto onIt=[&]{
+            Put<float>(human,kViewPitch,-std::atan2(dir[1],std::sqrt(dir[0]*dir[0]+dir[2]*dir[2])));Put<float>(human,kViewYaw,std::atan2(dir[0],dir[2]));
+        };
+        const auto drive=[&]{now+=16;++frame;world.frame=frame;return Drive(*soldier,human,kSoldiers[0],packArms,nullptr,eyePoint,Pos(human),squad,now);};
+        drive();
+        float expect[2]{};npc::AimDelta(0.0f,0.0f,dir,1.0f,kLookMost,expect);
+        Expect(packUses==0 && At<unsigned char>(human,kTrigger)==0 && std::fabs(At<float>(human,kLookPitch)-expect[0])<1e-5f,
+               "a group at 24 m: the look turned onto the throw's arc first (its lift taken off), the main trigger off meanwhile");
+        onIt();drive();
+        Expect(packUses==1 && packUseSlot==0 && soldier->packHoldUntil>frame,"its look on the arc: the throw (NpcPackUse, slot 0)");
+        packBusy=true;Put<unsigned char>(human,kTrigger,1);Put<unsigned char>(human,kPickWeapon+1,1);drive();
+        Expect(packUses==1 && At<unsigned char>(human,kTrigger)==0 && At<unsigned char>(human,kPickWeapon+1)==0,
+               "the throw going on: no other, the main trigger and the picks off");
+        packBusy=false;frame=soldier->packHoldUntil;onIt();drive();
+        Expect(packUses==1,"done, but within kThrowGapMs of the last: it rests");
+        now+=npcpack::kThrowGapMs;onIt();drive();
+        Expect(packUses==2,"rested: the next throw");
+        now+=npcpack::kThrowGapMs;frame+=npcpack::kHoldFrames;world.enemies=1;onIt();drive();
+        Expect(packUses==2,"one small enemy: no grenade for it");
+        world.enemy[0].points=3;onIt();drive();
+        Expect(packUses==3,"one large one: the grenade");
+        now+=npcpack::kThrowGapMs;frame+=npcpack::kHoldFrames;world.enemies=3;world.enemy[0].points=1;
+        world.friends=1;world.frObject[0]=other;world.fr[0]=npc::Friend{{-1,0,21},0.8f};onIt();drive();
+        Expect(packUses==3,"a friend where it lands: held");
+        world.friends=0;config.npcBackpack=false;onIt();drive();
+        Expect(packUses==3,"NpcBackpack=0: carried, never used");
+        config.npcBackpack=true;Put<std::int32_t>(grenade,kWeaponAmmo,0);onIt();drive();drive();
+        Expect(packUses==3 && packReloads==1,"empty: no throw, its reload asked for once");
+        Put<std::int32_t>(grenade,kWeaponAmmo,3);onIt();drive();
+        Expect(packUses==4,"loaded again: thrown");
+        packReady=false;packSlots=0;Put<unsigned char**>(human,kWeapons,nullptr);Put<std::uint64_t>(human,kWeaponCount,0);
+        world.enemies=0;ResetNpcAi();
     }
     VirtualFree(image,0,MEM_RELEASE);return failures ? 1 : 0;
 }

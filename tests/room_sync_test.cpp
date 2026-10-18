@@ -282,6 +282,36 @@ void NamesAndTokens() {
         else std::printf("  accepted bad token %s\n",s);
     }
     Expect(refused==static_cast<int>(std::size(badTokens)),"every malformed token is refused");
+
+    // Backpack weapons (npc_pack_table.h; docs/npc-backpack-re.md): a soldier's pack in its name and its token.
+    int packs=0,fits=0;
+    for(int k=0;k<kSupportWeaponCount;++k)for(const auto& p:kPackWeapons)for(int leader=0;leader<2;++leader) {
+        SupportLook look;look.pack=p.code;if(leader)look.primary=0x1E3A8A;
+        VariantRef r;r.sub=static_cast<std::uint8_t>(k);r.leader=leader!=0;r.bits=LookVariant(look);
+        wchar_t file[96];VariantRef back;VariantRef fromToken;
+        const bool fit=PackFits(p.code,SupportSoldierClass(static_cast<SupportWeapon>(k)));
+        fits+=fit;
+        const bool named=VariantFileOf(r,file,96)>0;
+        if(fit==(named && ParseVariantFile(file,&back) && back==r && TokenOf(r,t,sizeof(t)) && ParseToken(t,std::strlen(t),&fromToken) &&
+                 fromToken==r))++packs;
+        else std::printf("  pack round trip wrong: kind %d pack %d\n",k,p.code);
+    }
+    Expect(packs==kSupportWeaponCount*kPackWeaponCount*2 && fits==(5*45+5*29)*2,
+           "a pack its class carries round-trips name and token; one it cannot carry names no file");
+    SupportLook grenade;grenade.pack=1;
+    VariantRef g;g.sub=static_cast<std::uint8_t>(SupportWeapon::rifle);g.bits=LookVariant(grenade);
+    TokenOf(g,t,sizeof(t));
+    Expect(!std::strcmp(t,"aXX+01") && Name(g)==L"EDF6VC_NPC_RIFLE_X_X_AHANDGRENADE01.SGO","doc example: a rifle with an MG11");
+    const wchar_t* badPackNames[]={L"EDF6VC_NPC_RIFLE_X_X_AWEAPON261.SGO",L"EDF6VC_NPC_RIFLE_X_X_PWEAPON216.SGO",
+        L"EDF6VC_NPC_CANNON_X_X_AHANDGRENADE01.SGO",L"EDF6VC_NPC_RIFLE_X_X_.SGO",L"EDF6VC_NPC_RIFLE_X_X_ahandgrenade01.SGO",
+        L"EDF6VC_NPC_RIFLE_X_X_AHANDGRENADE01_AHANDGRENADE01.SGO"};
+    refused=0;
+    for(const wchar_t* n:badPackNames)if(!ParseVariantFile(n,nullptr))++refused;
+    Expect(refused==static_cast<int>(std::size(badPackNames)),"a pack its kind cannot carry, a left-out one, a malformed one: refused");
+    const char* badPackTokens[]={"aXX+00","aXX+4B","aXX+3B","aXX+1","aXX+011","aXX-01","KXX+01","aXX+0g"};
+    refused=0;
+    for(const char* s:badPackTokens)if(!ParseToken(s,std::strlen(s),nullptr))++refused;
+    Expect(refused==static_cast<int>(std::size(badPackTokens)),"a token with no / an unknown / a misfit pack: refused");
 }
 
 VariantSet BigSet(int soldiers) {

@@ -177,6 +177,8 @@ void NoteMissingVariant(const wchar_t* file,const char*) noexcept {missingNoted.
 void SupportVariantHello(std::uint32_t* ext,unsigned char*) noexcept {if(ext)*ext=support_net::kExtVariants;}
 bool peersApplyVariants=true,peersHaveFiles=true;
 bool SupportPeersApplyVariants() noexcept {return peersApplyVariants;}
+bool peersApplyBackpacks=true;
+bool SupportPeersApplyBackpacks() noexcept {return peersApplyBackpacks;}
 bool SupportPeersHaveVariantFile(std::uint64_t) noexcept {return peersHaveFiles;}
 bool DeleteSupportVehicle(unsigned char*) noexcept {++deleted;return true;}
 support_net::Hooks configuredHooks{};int netConfigured=0,gatesInstalled=0;

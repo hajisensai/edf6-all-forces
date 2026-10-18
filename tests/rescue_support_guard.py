@@ -112,7 +112,7 @@ def main() -> int:
     hello = body(code_only(read(root, 'src/support_protocol.cpp')), 'void Session::Tick(')
     checks += 1
     if not before(hello, 'backend_.hooks.variants(', 'm.unit.resourceId|=kExtBuilt;') or \
-            not re.search(r'kExtBuilt=kExtSeaRescue\|kExtRescueChannel(\|kExtOutfit41)?(\|kExtBvmPlayers)?;', protocol):
+            not re.search(r'kExtBuilt=kExtSeaRescue\|kExtRescueChannel(\|kExtOutfit41)?(\|kExtBvmPlayers)?(\|kExtBackpack)?;', protocol):
         fail('src/support_protocol.cpp Tick: the hello does not announce the rescue\'s bits (kExtBuilt) after the variants '
              'hook wrote its word')
     net = code_only(read(root, 'src/support_net.cpp'))

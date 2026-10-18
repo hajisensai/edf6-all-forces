@@ -348,10 +348,17 @@ std::uint64_t DecideVariant(std::uint32_t catalog,const wchar_t* file,std::uint6
     }
     return wanted|kVariantApplied;
 }
-// Soldier `i` of a composed load: its preset colours (PresetLookFor) as a variant of `resource`'s template.
+// Soldier `i` of a composed load: its preset colours and backpack weapon (PresetLookFor) as a variant of `resource`'s
+// template. A peer that does not read backpacks (support_protocol.h kExtBackpack) would refuse the whole plan for its
+// bits: the soldier then comes with its colours alone, said once a request.
 std::uint64_t SoldierVariant(std::uint32_t catalog,const SupportLoadout& load,int i,std::uint32_t resource) noexcept {
     if(catalog>=static_cast<unsigned>(kSupportConfigUnits))return 0;
-    const auto look=PresetLookFor(SupportCfg().preset[catalog],load,i);
+    auto look=PresetLookFor(SupportCfg().preset[catalog],load,i);
+    if(look.pack && !SupportPeersApplyBackpacks()) {
+        Log("SUPPORT plan catalog=%u: soldier %d without its backpack weapon: a peer runs an older All Forces (no backpacks)",catalog,i);
+        NoteVariant(L"房间里有旧版全军出击：支援士兵本次不带背包武器（全员更新后生效）%ls",L"");
+        look.pack=0;
+    }
     if(!look.On())return 0;
     wchar_t file[96];
     if(!SupportLookFile(SupportSoldierWeapon(resource),IsSupportLeaderResource(resource),look,file,_countof(file)))return 0;

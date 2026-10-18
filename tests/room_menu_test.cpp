@@ -82,6 +82,10 @@ void GrammarExamples() {
     PresetRoundTrip(L"rifle@1E3A8A*2, rocket ，sniper@x:ffffff",4,L"rifle@1E3A8A*2,rocket,sniper@X:FFFFFF");
     PresetRoundTrip(L"rifle,rifle,rifle@X:X",12,L"rifle*3");
     PresetRoundTrip(L"",12,L"");
+    // A backpack weapon (npc_pack_table.h): the table's spelling, after the colours.
+    PresetRoundTrip(L"rifle+ahandgrenade01*2,lance@1E3A8A+pweapon216",12,L"rifle+aHandGrenade01*2,lance@1E3A8A+pWeapon216");
+    PresetRoundTrip(L"rifle@X:X+aHandGrenade01,rifle+aHandGrenade01",12,L"rifle+aHandGrenade01*2");
+    PresetRoundTrip(L"thunderbow@FFFFFF:FFFFFF+pHandGrenade01*12",12,L"thunderbow@FFFFFF:FFFFFF+pHandGrenade01*12");
     VehicleRoundTrip(L"AP,AP:30",VehicleBody::tank,L"AP,AP:30");
     VehicleRoundTrip(L"HE,AP:25",VehicleBody::tank,L"HE,AP:25");
     VehicleRoundTrip(L"HE,AP:25,GLM:4",VehicleBody::tank,L"HE,AP:25,GLM:4");
@@ -193,6 +197,46 @@ void Navigation() {
     Tap(m,&Keys::toggle);Load(m,kDefaultUnits,kDefaultUnitCount,Read,&ini);
     Tap(m,&Keys::up);
     Expect(Tap(m,&Keys::confirm)==Act::closed && !m.open,"save with nothing changed closes");
+}
+
+// The 4th field of a Ranger's or a Wing Diver's row: its backpack weapon (none -> its class's in table order -> none); a
+// kind of another class clears it; a Fencer's row keeps its three fields.
+void Backpacks() {
+    Ini ini;Menu m;
+    Tap(m,&Keys::toggle);Load(m,kDefaultUnits,kDefaultUnitCount,Read,&ini);
+    Tap(m,&Keys::confirm);Tap(m,&Keys::confirm);   // into SQUAD, a stock rifle added
+    Expect(FieldCount(m.unit[0],0)==4,"a rifle's row: kind, colour 1, colour 2, backpack");
+    Tap(m,&Keys::confirm);Tap(m,&Keys::up);
+    Expect(m.fieldAt==kPackField,"up from the kind wraps to the backpack");
+    Tap(m,&Keys::right);
+    Expect(m.unit[0].squad.look[0].pack==1,"right from none: the MG11");
+    TapN(m,&Keys::left,2);
+    Expect(m.unit[0].squad.look[0].pack==45,"left past none: the Ranger's last (A72 Binary Round)");
+    View v=Snapshot(m);
+    Expect(v.rows.count==1 && v.rows.row[0].pack==45 && v.rows.row[0].editing && v.rows.row[0].field==kPackField,"the snapshot's pack");
+    Tap(m,&Keys::down);
+    Expect(m.fieldAt==0,"down from the backpack wraps to the kind");
+    TapN(m,&Keys::right,5);
+    Expect(m.unit[0].squad.kind[0]==SupportWeapon::wingLance && m.unit[0].squad.look[0].pack==0,"a Wing Diver: the Ranger's pack cleared");
+    TapN(m,&Keys::left,1);TapN(m,&Keys::up,1);Tap(m,&Keys::right);
+    Expect(m.unit[0].squad.kind[0]==SupportWeapon::sniper && m.unit[0].squad.look[0].pack==1,"back to a Ranger: a pack again");
+    TapN(m,&Keys::down,1);TapN(m,&Keys::right,5);
+    Expect(m.unit[0].squad.kind[0]==SupportWeapon::wingThunderBow && m.unit[0].squad.look[0].pack==0,"a Wing Diver: cleared");
+    Tap(m,&Keys::up);Tap(m,&Keys::right);
+    Expect(m.unit[0].squad.look[0].pack==46,"a Wing Diver's first: Blink Ball α");
+    Tap(m,&Keys::down);Tap(m,&Keys::left);
+    Expect(m.unit[0].squad.kind[0]==SupportWeapon::wingIzuna && m.unit[0].squad.look[0].pack==46,"another Wing Diver kind keeps hers");
+    Tap(m,&Keys::right);Tap(m,&Keys::right);
+    Expect(m.unit[0].squad.kind[0]==SupportWeapon::fencerCannon && m.unit[0].squad.look[0].pack==0 && FieldCount(m.unit[0],0)==3,
+           "a Fencer: no backpack, three fields");
+    Tap(m,&Keys::up);
+    Expect(m.fieldAt==2,"a Fencer's up from the kind wraps to colour 2");
+    Tap(m,&Keys::down);TapN(m,&Keys::left,3);Tap(m,&Keys::up);Tap(m,&Keys::right);
+    Expect(m.unit[0].squad.kind[0]==SupportWeapon::wingMonster && m.unit[0].squad.look[0].pack==46,"a Wing Diver again, her first");
+    Tap(m,&Keys::cancel);Tap(m,&Keys::cancel);Tap(m,&Keys::up);
+    Expect(Tap(m,&Keys::confirm)==Act::save,"save");
+    SaveSet s;
+    Expect(CollectSave(m,&s) && SaysValue(s,L"SupportPreset_SQUAD",L"monster+pHandGrenade01"),"the pack written as the plugin reads it");
 }
 
 void SquadLimits() {
@@ -494,6 +538,7 @@ int main() {
     PressAndShut();
     LoadsTheIni();
     Navigation();
+    Backpacks();
     SquadLimits();
     VehicleLimits();
     ResetAndCancel();

@@ -804,6 +804,7 @@ void LoadConfig() noexcept {
     n.npcLaneLength=ReadFloat(L"NpcLaneLength",n.npcLaneLength);
     n.npcFlankDeg=ReadFloat(L"NpcFlankDeg",n.npcFlankDeg);
     n.npcWeaponSwitch=ReadBool(L"NpcWeaponSwitch",n.npcWeaponSwitch);
+    n.npcBackpack=ReadBool(L"NpcBackpack",n.npcBackpack);
     n.npcEngageShare=ReadFloat(L"NpcEngageShare",n.npcEngageShare);
     n.npcEvade=ReadBool(L"NpcEvade",n.npcEvade);
     n.npcDangerRange=ReadFloat(L"NpcDangerRange",n.npcDangerRange);
@@ -881,6 +882,7 @@ void LoadConfig() noexcept {
         n.customNpcAi,n.npcFireLane,n.npcLaneWidth,n.npcLaneLength,n.npcFlankDeg,n.npcWeaponSwitch,n.npcEngageShare,n.npcEvade,
         n.npcDangerRange,n.npcGrabRange,n.npcCrowd,n.npcRollSec,n.npcRetreatHp,n.npcLeash);
     Log("CONFIG npcSquadSuccession=%d min=%d max=%d joinRange=%.0f",n.npcSquadSuccession,n.npcSquadMin,n.npcSquadMax,n.npcSquadJoinRange);
+    Log("CONFIG npcBackpack=%d",n.npcBackpack);
     Log("CONFIG npc markKey=0x%X markCone=%.0f boarding=%d gunners=%d",n.npcMarkKey,n.npcMarkCone,n.npcBoarding,n.npcGunners);
     Log("CONFIG qmark pointSec=%.0f volume=%.2f vanillaSpot=%d",n.qmarkPointSec,n.qmarkVolume,n.vanillaSpot);
     Log("CONFIG npc formation=%d key=0x%X spacing=%.1f guard=%d",n.npcFormation,n.npcFormationKey,n.npcFormationSpacing,n.npcGuardFormation);
